@@ -29,6 +29,10 @@ class MqttIngestTransport:
         port: int = 0,
         username: str = "",
         password: str = "",
+        tlsCa: str = "",
+        tlsCert: str = "",
+        tlsKey: str = "",
+        tlsInsecure: bool = False,
         jobTopic: str = JOB_TOPIC,
         resultTopic: str = RESULT_TOPIC,
     ) -> None:
@@ -37,6 +41,14 @@ class MqttIngestTransport:
         self._port = int(port or os.environ.get("NEUROVA_MQTT_PORT") or 1883)
         self._username = username or os.environ.get("NEUROVA_MQTT_USERNAME") or ""
         self._password = password or os.environ.get("NEUROVA_MQTT_PASSWORD") or ""
+        self._tlsCa = tlsCa or os.environ.get("NEUROVA_MQTT_TLS_CA") or ""
+        self._tlsCert = tlsCert or os.environ.get("NEUROVA_MQTT_TLS_CERT") or ""
+        self._tlsKey = tlsKey or os.environ.get("NEUROVA_MQTT_TLS_KEY") or ""
+        self._tlsInsecure = bool(
+            tlsInsecure
+            or str(os.environ.get("NEUROVA_MQTT_TLS_INSECURE") or "").lower()
+            in ("1", "true", "on", "yes")
+        )
         self._jobTopic = jobTopic
         self._resultTopic = resultTopic
         self._handler: Optional[Callable[[Dict[str, Any]], None]] = None
@@ -48,6 +60,7 @@ class MqttIngestTransport:
                 self._client.on_message = self._onMessage
             except Exception:  # noqa: BLE001
                 pass
+            self._applySecurity(self._client)
             return self._client
         try:
             import paho.mqtt.client as mqtt
@@ -56,12 +69,23 @@ class MqttIngestTransport:
         client = mqtt.Client()
         client.on_connect = self._onConnect
         client.on_message = self._onMessage
-        if self._username:
-            client.username_pw_set(self._username, self._password or None)
+        self._applySecurity(client)
         client.connect(self._host, self._port, keepalive=30)
         client.loop_start()
         self._connected = True
         return client
+
+    def _applySecurity(self, client: Any) -> None:
+        if self._username:
+            client.username_pw_set(self._username, self._password or None)
+        if self._tlsCa or self._tlsCert or self._tlsKey:
+            client.tls_set(
+                ca_certs=self._tlsCa or None,
+                certfile=self._tlsCert or None,
+                keyfile=self._tlsKey or None,
+            )
+            if self._tlsInsecure:
+                client.tls_insecure_set(True)
 
     def _onConnect(self, client, userdata, flags, rc, *args):
         client.subscribe(self._jobTopic, qos=QOS)

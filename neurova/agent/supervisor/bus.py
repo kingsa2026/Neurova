@@ -140,6 +140,10 @@ class MqttWorkerBus:
         port: int = 1883,
         username: str = "",
         password: str = "",
+        tlsCa: str = "",
+        tlsCert: str = "",
+        tlsKey: str = "",
+        tlsInsecure: bool = False,
         qos: int = 1,
         taskTopic: str = TASK_TOPIC,
         resultPattern: str = RESULT_TOPIC_PATTERN,
@@ -149,6 +153,10 @@ class MqttWorkerBus:
         self._port = int(port)
         self._username = username
         self._password = password
+        self._tlsCa = tlsCa
+        self._tlsCert = tlsCert
+        self._tlsKey = tlsKey
+        self._tlsInsecure = bool(tlsInsecure)
         self._qos = int(qos)
         self._taskTopic = taskTopic
         self._resultPattern = resultPattern
@@ -164,6 +172,7 @@ class MqttWorkerBus:
                 self._client.on_message = self._onMessage
             except Exception:  # noqa: BLE001 - 假客户端可能不允许赋值
                 pass
+            self._applySecurity(self._client)
             return self._client
         try:
             import paho.mqtt.client as mqtt
@@ -174,12 +183,23 @@ class MqttWorkerBus:
         client = mqtt.Client()
         client.on_connect = self._onConnect
         client.on_message = self._onMessage
-        if self._username:
-            client.username_pw_set(self._username, self._password or None)
+        self._applySecurity(client)
         client.connect(self._host, self._port, keepalive=30)
         client.loop_start()
         self._connected = True
         return client
+
+    def _applySecurity(self, client: Any) -> None:
+        if self._username:
+            client.username_pw_set(self._username, self._password or None)
+        if self._tlsCa or self._tlsCert or self._tlsKey:
+            client.tls_set(
+                ca_certs=self._tlsCa or None,
+                certfile=self._tlsCert or None,
+                keyfile=self._tlsKey or None,
+            )
+            if self._tlsInsecure:
+                client.tls_insecure_set(True)
 
     def _onConnect(self, client, userdata, flags, rc, *args):
         client.subscribe(self._resultPattern, qos=self._qos)
@@ -279,6 +299,12 @@ def buildWorkerBus(runtime: Any = None, mode: Optional[str] = None) -> Any:
             port=int(os.environ.get("NEUROVA_MQTT_PORT") or 1883),
             username=os.environ.get("NEUROVA_MQTT_USERNAME") or "",
             password=os.environ.get("NEUROVA_MQTT_PASSWORD") or "",
+            tlsCa=os.environ.get("NEUROVA_MQTT_TLS_CA") or "",
+            tlsCert=os.environ.get("NEUROVA_MQTT_TLS_CERT") or "",
+            tlsKey=os.environ.get("NEUROVA_MQTT_TLS_KEY") or "",
+            tlsInsecure=str(
+                os.environ.get("NEUROVA_MQTT_TLS_INSECURE") or ""
+            ).lower() in ("1", "true", "on", "yes"),
             qos=int(os.environ.get("NEUROVA_MQTT_QOS") or 1),
             taskTopic=os.environ.get("NEUROVA_MQTT_TASK_TOPIC") or TASK_TOPIC,
             resultPattern=os.environ.get("NEUROVA_MQTT_RESULT_TOPIC") or RESULT_TOPIC_PATTERN,

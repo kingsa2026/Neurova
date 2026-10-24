@@ -27,10 +27,16 @@ if str(PROJECT_ROOT) not in sys.path:
 # （tests/performance/test_perf_gate_under_node.sh / test_perf_gate_contract.py 同款）
 ledger = importlib.import_module("scripts.ci.audit_ledger_commit_guard")
 
+#: 本档两枚 git 落点（rev-parse / commit-tree）的预算唯一出处，毫秒级。取**低于全局 30s**
+#: 的这一形，且此前两处根本没有 `timeout=`——无界等待配 thread 法全局墙时，先到点的那一层
+#: 报的是"整场跑测没了"（§6-402 批 K 口径）。
+GIT_WALL_S = 20
+
 
 def _git(*args: str) -> str:
     return subprocess.run(["git", *args], capture_output=True, text=True,
-                          encoding="utf-8", errors="replace").stdout
+                          encoding="utf-8", errors="replace",
+                          timeout=GIT_WALL_S).stdout
 
 
 @pytest.fixture
@@ -45,7 +51,8 @@ def danglingCommit() -> str:
     tree = _git("rev-parse", "HEAD^{tree}").strip()
     out = subprocess.run(
         ["git", "commit-tree", tree, "-p", head, "-m", "ledger-guard-dangling-probe"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace")
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=GIT_WALL_S)
     assert out.returncode == 0, out.stderr
     token = out.stdout.strip()[:8]
     assert ledger.isCommit(token), "探针造的对象不是 commit，判据前提不成立"
@@ -78,6 +85,19 @@ def test_replacementIsOfferedOnlyWhenSafe(tmp_path, danglingCommit):
     )
 
 
+#: 本轮扫描的父墙（唯一出处）。**实测单格 48.64s**：`ledger.main([])` 逐号起一次
+#: `git merge-base`，台账里的 commit 引用有多少个就起多少次——这是一次**合法超墙**，
+#: 而全局 30s 先到时 Windows 侧 thread 法直接终止进程，报的是"整场跑测没了"。
+#:
+#: 常驻闸 `test_nestedPytestBudgetWallsAreOrdered.py` 看不见这一处：它的边界写明「只在
+#: 同文件闭包内认落点」，而真正阻塞的那次 subprocess 在 `scripts/ci/audit_ledger_commit_guard.py`
+#: 里（批 P-2 的归账面）。故这里按 §6-402 同一口径把父墙显式声明上，并留这句实话：
+#: 判据扫全仓的固有成本应当被**降**而不是被放宽——把逐号 git 收成一次
+#: `rev-list --all` 建集合再内存判可达，是另批的一票（登记在 §6-414「仍开」）。
+LEDGER_SCAN_WALL_S = 180
+
+
+@pytest.mark.timeout(LEDGER_SCAN_WALL_S)
 def test_auditLedger_hasNoUnreachableReference():
     """常驻判定：`audit-reports/` 全部 commit 引用必须可达 HEAD。"""
     rc = ledger.main([])

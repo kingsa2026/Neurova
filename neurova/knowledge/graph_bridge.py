@@ -192,6 +192,7 @@ def admitExtractedFacts(
             receipt = gate.admit(AdmissionRequest(
                 agentId=agentId,
                 tenantId=tenantId,
+                category=str(item.get("category") or ""),
                 subjectLabel=subjectLabel,
                 predicateTermId=predicateTermId,
                 objectTerm=objectTerm,

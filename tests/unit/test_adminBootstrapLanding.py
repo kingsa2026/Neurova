@@ -21,6 +21,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "create_admin_user.py"
 STRONG_PASSWORD = "Adm1n-Str0ng#2026"
 
+#: 本档两枚子进程落点的预算唯一出处（§6-402 批 K 口径）。跑的是 `create_admin_user.py`
+#: 与一条 `python -c` 探径，实测 546ms / 449ms——取**低于全局 30s** 的 20s：先到点的应当是
+#: 子进程那条诚实的 TimeoutExpired，而不是 thread 法的全局墙（那会把整场跑测一起打死）。
+#: 此前两枚根本没有 `timeout=`，等待是无界的。
+PROBE_WALL_S = 20
+
 
 def _run(root: Path, cwd: Path, envExtra: dict) -> subprocess.CompletedProcess:
     """cwd 与数据根**故意不同**：这样"CWD 相对落点"与"锚点落点"一眼可分。
@@ -39,6 +45,7 @@ def _run(root: Path, cwd: Path, envExtra: dict) -> subprocess.CompletedProcess:
         env=env,
         cwd=str(cwd),
         stdin=subprocess.DEVNULL,
+        timeout=PROBE_WALL_S,
     )
 
 
@@ -137,6 +144,7 @@ def testServerResolvesTheSamePath(tmp_path):
         text=True,
         env=env,
         cwd=str(REPO_ROOT),
+        timeout=PROBE_WALL_S,
     )
     assert probe.returncode == 0, probe.stderr
     assert Path(probe.stdout.strip()).resolve() == (tmp_path / "users.db").resolve(), (

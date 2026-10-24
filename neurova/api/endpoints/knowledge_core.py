@@ -113,6 +113,7 @@ class BaselineCreateRequest(BaseModel):
     reason: str = ""
     time_from: Optional[str] = None
     time_to: Optional[str] = None
+    category: str = ""
 
 
 class KnowledgeExpiryRequest(BaseModel):
@@ -189,6 +190,14 @@ async def search_knowledge(
         agent_id=agent_id,
         limit=body.limit,
         tags=body.tags,
+        source=body.source,
+        author=body.author,
+        source_type=body.source_type,
+        ocr_used=body.ocr_used,
+        page_min=body.page_min,
+        updated_after=body.updated_after,
+        geo_radius=body.geo_radius,
+        geo_bbox=body.geo_bbox,
     )
     return [item_response(i) for i in results]
 
@@ -274,6 +283,7 @@ async def create_knowledge(
         tenant_id=str(current_user.get("tenant_id") or "default"),
         valid_until=body.valid_until,
         lifecycle_status=body.lifecycle_status,
+        dedupe=True,
     )
     return item_response(item)
 
@@ -439,19 +449,28 @@ async def get_document_detail(
 async def get_fact_history(
     request: Request,
     fact_id: str = Path(..., description="事实 ID"),
-    limit: int = Query(200, ge=1, le=1000),
+    limit: int = Query(0, ge=0, le=100000,
+                       description="0=全量；>0 为显式分页"),
+    offset: int = Query(0, ge=0, description="显式分页起始位置"),
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
-    """事实版本历史（管理员）：只追加的 create/supersede/retract/expire/revive/rollback。"""
+    """事实版本历史（管理员）：**默认全量**，只追加 create/supersede/retract/expire/revive/rollback。"""
     if str(current_user.get("role") or "") != "admin":
         raise HTTPException(status_code=403, detail="事实版本历史仅管理员可查看")
 
     store = _factStoreForTenant(fact_id, current_user)
     try:
-        versions = store.history(fact_id, limit=limit)
+        versions = store.history(
+            fact_id, limit=(limit or None), offset=offset
+        )
+        total = store.historyCount(fact_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-    return {"code": 0, "message": "ok", "data": {"fact_id": fact_id, "versions": versions}}
+    return {
+        "code": 0, "message": "ok",
+        "data": {"fact_id": fact_id, "total": total,
+                 "returned": len(versions), "versions": versions},
+    }
 
 
 @router.post("/facts/{fact_id}/rollback")
@@ -531,6 +550,7 @@ async def create_fact_baseline(
             tenantId=str(current_user.get("tenant_id") or "default"),
             timeFrom=body.time_from,
             timeTo=body.time_to,
+            category=body.category,
         )
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=400, detail="基线参数非法: %s" % exc)
@@ -695,6 +715,55 @@ async def get_retrieval_metrics_snapshot(
     except Exception as exc:  # noqa: BLE001 — 指标读取失败不阻断端点，但必须点名缺哪项
         data["missing_reason"] = "pending_conflicts unavailable: %s" % exc
     return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/geo")
+async def list_knowledge_geo(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+    agent_id: Optional[str] = Query(default=None, description="来源 agent 过滤"),
+    scope: str = Query(default="all", description="范围：all/public/private/shared"),
+    lat: Optional[float] = Query(default=None, ge=-90, le=90),
+    lon: Optional[float] = Query(default=None, ge=-180, le=180),
+    radius_km: Optional[float] = Query(default=None, gt=0),
+    min_lat: Optional[float] = Query(default=None, ge=-90, le=90),
+    min_lon: Optional[float] = Query(default=None, ge=-180, le=180),
+    max_lat: Optional[float] = Query(default=None, ge=-90, le=90),
+    max_lon: Optional[float] = Query(default=None, ge=-180, le=180),
+    limit: int = Query(default=500, ge=1, le=2000),
+):
+    """可见 geo 条目清单（MapLibre 空间视图数据面，升级计划 A6 前置）。
+
+    复用 visible_items 的可见性边界与 A6 空间过滤；无坐标条目天然不出现。
+    radius 与 bbox 同时给时取交集（两道过滤都过才算命中）。
+    """
+    repo = get_repository()
+    geoRadius = (
+        {"lat": lat, "lon": lon, "radius_km": radius_km}
+        if lat is not None and lon is not None and radius_km is not None else None)
+    geoBbox = (
+        {"min_lat": min_lat, "min_lon": min_lon, "max_lat": max_lat, "max_lon": max_lon}
+        if None not in (min_lat, min_lon, max_lat, max_lon) else None)
+    items = repo.visible_items(
+        current_user, scope=scope, agent_id=agent_id,
+        geo_radius=geoRadius, geo_bbox=geoBbox,
+    )[:limit]
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "items": [
+                {
+                    "knowledge_id": it.get("knowledge_id"),
+                    "title": it.get("title"),
+                    "category": it.get("category"),
+                    "geo": it.get("geo"),
+                    "updated_at": it.get("updated_at"),
+                }
+                for it in items if it.get("geo")
+            ],
+        },
+    }
 
 
 @router.post("/audit/reindex")

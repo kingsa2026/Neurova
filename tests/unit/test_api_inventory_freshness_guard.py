@@ -29,7 +29,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+#: 真应用装配探针的子进程预算唯一出处（§6-402 批 K 口径：父墙由它 ＋余量导出）。
+#: 本机实测整档 37.5s，其中这一枚探针占大头（`create_app()` 全子系统装配）。旧的 900s
+#: 是把安全感写进代码——而 900s 子墙配缺省 30s 父墙时，先到点的是父墙：Windows 侧 thread
+#: 法直接终止进程，报的是"整场跑测没了"。180s ≈ 实测的四倍余量（冷盘 import 也算进去），
+#: 用例父墙 240s。
+APP_PROBE_WALL_S = 180
 
 INVENTORY = PROJECT_ROOT / "docs" / "09-dev-progress" / "api_inventory.md"
 LEDGER = PROJECT_ROOT / "docs" / "06-bugfix" / "历史悬空引用登记台账_2026-09-21.md"
@@ -82,7 +91,7 @@ def _runtimeRoutePaths() -> frozenset:
     于是挂载表里那条真前缀反而被判成"表在报一个不存在的挂载点"。
     """
     proc = subprocess.run([sys.executable, "-c", _APP_PROBE], cwd=str(PROJECT_ROOT),
-                          capture_output=True, text=True, timeout=900)
+                          capture_output=True, text=True, timeout=APP_PROBE_WALL_S)
     assert proc.returncode == 0, f"应用创建失败：{proc.stderr[-800:]}"
     paths = json.loads(proc.stdout.strip().splitlines()[-1])
     return frozenset(path.rstrip("/") or "/" for path in paths)
@@ -153,7 +162,13 @@ class TestRouteFactsMatchTheRuntime:
     两套各写一半，正是「零路由挂载 / 前缀重复 / 挂载层错位」三类矛盾的土壤。
     收口后静态重建已删除（教义第 6 条：不新造平行体系），故这里不来比对
     「静态 vs 运行时」，而是**禁止第二套静态重建复活**，并用运行时读数自证判据。
+
+    父墙按 §6-402 批 K 口径由 `_runtimeRoutePaths()` 那枚子进程预算导出（＋60s 余量）：
+    本类三格真起一次 `create_app()` 装配探针，37.5s 的合法成本配 30s 全局墙时，
+    先到点的是全局那道——Windows 侧 thread 法直接终止进程，报的是"整场跑测没了"。
     """
+
+    pytestmark = pytest.mark.timeout(APP_PROBE_WALL_S + 60)
 
     def test_no_second_static_route_reconstruction(self):
         """不得再出现「静态重建路由表」的第二套实现。"""

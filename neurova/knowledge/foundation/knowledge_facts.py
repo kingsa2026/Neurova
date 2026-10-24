@@ -307,6 +307,70 @@ CREATE INDEX IF NOT EXISTS idx_subject_tenant
     ON knowledge_subjects(tenant_id, agent_id, status);
 """
 
+# v24：事实带条目分类，供业务基线按 category 冻结；未知分类留空，不猜。
+_SCHEMA_V24 = """
+ALTER TABLE knowledge_facts ADD COLUMN category TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_fact_category
+    ON knowledge_facts(tenant_id, category, status);
+"""
+
+# v25：本体按租户分区（已拍板：本体归属按租户隔离）。SQLite 改不了主键，
+# 两表整体重建：存量行全部归 default 租户，各租户此后各自登记各自的
+# 术语/规则——同 term_id/rule_id 跨租户不再冲突，读面也不再互见。
+_SCHEMA_V25 = """
+CREATE TABLE ontology_terms_t25 (
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    term_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    parent_term_id TEXT,
+    domain_terms TEXT NOT NULL DEFAULT '[]',
+    range_terms TEXT NOT NULL DEFAULT '[]',
+    range_kinds TEXT NOT NULL DEFAULT '[]',
+    cardinality INTEGER,
+    disjoint_with TEXT NOT NULL DEFAULT '[]',
+    required_props TEXT NOT NULL DEFAULT '[]',
+    version TEXT NOT NULL DEFAULT 'v1',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, term_id)
+);
+INSERT INTO ontology_terms_t25 (tenant_id, term_id, kind, label, parent_term_id,
+    domain_terms, range_terms, range_kinds, cardinality, disjoint_with,
+    required_props, version, created_at, updated_at)
+SELECT 'default', term_id, kind, label, parent_term_id, domain_terms,
+    range_terms, COALESCE(range_kinds, '[]'), cardinality, disjoint_with,
+    required_props, version, created_at, updated_at FROM ontology_terms;
+DROP TABLE ontology_terms;
+ALTER TABLE ontology_terms_t25 RENAME TO ontology_terms;
+CREATE INDEX IF NOT EXISTS idx_ontology_parent ON ontology_terms(tenant_id, parent_term_id);
+CREATE INDEX IF NOT EXISTS idx_ontology_kind ON ontology_terms(tenant_id, kind);
+
+CREATE TABLE ontology_rules_t25 (
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    rule_id TEXT NOT NULL,
+    head_predicate TEXT NOT NULL,
+    head_subject_var TEXT NOT NULL,
+    body_json TEXT NOT NULL DEFAULT '[]',
+    negated_predicates TEXT NOT NULL DEFAULT '[]',
+    stratification_level INTEGER NOT NULL DEFAULT 0,
+    enabled BOOLEAN NOT NULL DEFAULT 1,
+    version TEXT NOT NULL DEFAULT 'v1',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, rule_id)
+);
+INSERT INTO ontology_rules_t25 (tenant_id, rule_id, head_predicate, head_subject_var,
+    body_json, negated_predicates, stratification_level, enabled, version,
+    created_at, updated_at)
+SELECT 'default', rule_id, head_predicate, head_subject_var, body_json,
+    negated_predicates, stratification_level, enabled, version, created_at,
+    updated_at FROM ontology_rules;
+DROP TABLE ontology_rules;
+ALTER TABLE ontology_rules_t25 RENAME TO ontology_rules;
+CREATE INDEX IF NOT EXISTS idx_rule_head ON ontology_rules(tenant_id, head_predicate, enabled);
+"""
+
 
 MANUAL_RESOLUTIONS: tuple = ("keep_both", "supersede_old", "dismiss")
 
@@ -542,6 +606,7 @@ class KnowledgeFactStore:
         validFrom: Optional[str] = None,
         validUntil: Optional[str] = None,
         tenantId: str = "default",
+        category: str = "",
     ) -> str:
         """同 (主体, 谓词, 客体, 限定) 或同 content_key 重放返回同一 fact_id。
 
@@ -581,6 +646,12 @@ class KnowledgeFactStore:
                         " WHERE fact_id = ?",
                         (contentKey, row["fact_id"]),
                     )
+                if str(category or "").strip():
+                    self._conn.execute(
+                        "UPDATE knowledge_facts SET category = ?"
+                        " WHERE fact_id = ? AND (category IS NULL OR category = '')",
+                        (str(category).strip(), row["fact_id"]),
+                    )
                 self.fillValidityWindow(row["fact_id"], windowFrom, windowUntil)
                 return row["fact_id"]
             factId = "fact_%s" % uuid.uuid4().hex[:12]
@@ -589,13 +660,13 @@ class KnowledgeFactStore:
                     "INSERT INTO knowledge_facts (fact_id, agent_id, tenant_id, subject_key,"
                     " predicate_term_id, object_term, relation_kind, content, content_key,"
                     " qualifier_hash, qualifier_json, confidence, source_turn_id, recorded_at,"
-                    " record_kind, valid_from, valid_until)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " record_kind, valid_from, valid_until, category)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (factId, agentId, tenant, subjectKey, predicateTermId, objectTerm, relationKind,
                      content, contentKey, qualifierHash,
                      json.dumps(qualifier, ensure_ascii=False), confidence, sourceTurnId,
                      _instant(recordedAt) if recordedAt else _now(), recordKind,
-                     windowFrom, windowUntil),
+                     windowFrom, windowUntil, str(category or "").strip()),
                 )
             except sqlite3.IntegrityError:
                 # 唯一索引挡住竞态双写：改读先到的那一行，而不是让写入方看到崩
@@ -1651,15 +1722,23 @@ class KnowledgeFactStore:
         )
         return versionNo
 
-    def history(self, factId: str, limit: int = 200) -> List[Dict[str, Any]]:
-        """事实版本历史，最新在前。事实不存在时抛 LookupError（空历史不等于没事实）。"""
+    def history(
+        self, factId: str, limit: Optional[int] = None, offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """事实版本历史，最新在前。
+
+        **默认返回全量**：历史是溯源事实源，不靠默认分页截断。调用方要分页时
+        显式给 limit/offset；事实不存在时抛 LookupError（空历史不等于没事实）。
+        """
+        params: List[Any] = [factId]
+        sql = ("SELECT * FROM knowledge_fact_versions WHERE fact_id = ?"
+               " ORDER BY version_no DESC")
+        if limit is not None and int(limit) > 0:
+            sql += " LIMIT ? OFFSET ?"
+            params.extend([int(limit), max(0, int(offset))])
         with self._lock:
             self._requireFact(factId)
-            rows = self._conn.execute(
-                "SELECT * FROM knowledge_fact_versions WHERE fact_id = ?"
-                " ORDER BY version_no DESC LIMIT ?",
-                (factId, max(1, int(limit))),
-            ).fetchall()
+            rows = self._conn.execute(sql, tuple(params)).fetchall()
         out = []
         for row in rows:
             entry = dict(row)
@@ -1670,6 +1749,14 @@ class KnowledgeFactStore:
                 entry["snapshot"] = {}
             out.append(entry)
         return out
+
+    def historyCount(self, factId: str) -> int:
+        with self._lock:
+            self._requireFact(factId)
+            return int(self._conn.execute(
+                "SELECT COUNT(*) FROM knowledge_fact_versions WHERE fact_id = ?",
+                (factId,),
+            ).fetchone()[0])
 
     def rollback(
         self, factId: str, versionNo: int, *, operator: str, reason: str
@@ -1723,6 +1810,7 @@ class KnowledgeFactStore:
         tenantId: str = "default",
         timeFrom: Optional[str] = None,
         timeTo: Optional[str] = None,
+        category: str = "",
     ) -> Dict[str, Any]:
         scope = str(scope or "global").strip() or "global"
         tenant = str(tenantId or "default")
@@ -1741,6 +1829,9 @@ class KnowledgeFactStore:
                 if timeTo:
                     sql += " AND recorded_at <= ?"
                     params.append(_instant(timeTo))
+                if str(category or "").strip():
+                    sql += " AND category = ?"
+                    params.append(str(category).strip())
                 factIds = [r["fact_id"] for r in self._conn.execute(sql, tuple(params)).fetchall()]
             ids = sorted({str(fid) for fid in factIds if fid})
             if ids:
