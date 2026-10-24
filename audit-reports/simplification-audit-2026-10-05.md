@@ -10372,3 +10372,16 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **⚠ 本批落账期间发生的事（形态 366 复现）**：并会话把 `main` 推平，`origin/main..HEAD` 现算 **0**——含 §6-408 记的那笔未推池名错在内，`962e9087` 也已在 `origin/main`。⇒ ①那条常驻红随窗口清空自动转绿（`test_commitLocClaimMatchesOwnNumstat` 本批复跑 176 passed 全绿）；②**已入库提交的正文从此不可改写**，池名那条只能留在 §6-408 的留案里；③"先不推"这个决定被并发带走，不是我执行的推送。
     - **仍开**：M2 的 `PromptInjectionDetector`／`OutputFilter` 两张表未并（不属该票）；批 P-5（三处在役脱敏小抄接线）／P-1／P-2／M3 按裁定排队。
     - **下一枚空号现查**：文档面最大＝**§6-411**，`git grep -c "§6-412" HEAD -- audit-reports docs scripts` 命中 0 ⇒ 本批取 **§6-412**。
+
+413. **批 P-5 第一格：两处在役脱敏点改接单源引擎——出口词汇按调用方给、规则子集在单源里声明（✅ `79ab3be2`＋待落入册；子集真条目现算 704）** ✅🟢 —— 用户裁「保 token，子集在单源里声明」
+
+    - **✅ 裁定落地形态**：`sanitizeSensitive(text, rules=None, token="***")` ＋ `SensitiveRule.maskText(text, token)` —— token **只换出口词汇、不换形状**（三形仍是键值式／keepEdges／整段替换那三种，各一份实现）；`keepEdges` 明确**不吃 token**：它靠"留首末几位＋中间补星"保长度，换成文字就废了，这一条写在 docstring 里而不是留给注释里的心照不宣。
+    - **✅ 为什么不统一成 `***`（这是展示层选择，不是行为依赖）**：`[REDACTED]` 同时被**存量文本**与两条现有格子钉着（`test_summarizing_compressor.py:89`、`test_evolution_gates_wave_c.py:83`）；换词汇会让新旧摘要／进化证据文本混排。并且现查确认**没有任何逻辑把 token 当哨兵**（`evolution_inputs_guard.contains_secret` 走的是键值/值形状正则，与字符串无关）⇒ 才敢把"要不要统一"当纯词汇问题交出来裁。
+    - **✅ 投影声明在单源里，调用方不许自带小抄**：`SUMMARY_RULES`（密钥形状＋凭据键值，**不含**手机号/邮箱/身份证那类 PII）与 `ERROR_TEXT_RULES`（只有值形状）。`_pick()` 引用到不存在的规则名直接 `KeyError` —— 投影写错宁可炸，不要悄悄少脱敏。反向也要钉：**运维文案与摘要里的手机号/IP 不得被脱**（旧门不脱，新门也不得脱）——整表糊上去会把可诊断性一起脱掉，这正是"按类别投影"而不是"一把全接"的理由。
+    - **✅ 两处接线**：`summarizing_compressor.py`（自带 5 条正则＋自写 `sub` 循环，+14/−17）、`error_mapping.py`（`_KEY_PATTERN` 退役，+11/−4）。
+    - **✅ 行为变宽是本格的实收益（旧门 vs 新门逐条实测，非推断）**：`登录用的 Bearer abcdef123456 已过期` 旧门**原样放过**、新门 `登录用的 [REDACTED] 已过期`；`轮换密钥 nvk_zzzzzzzzzzzz 完成` 旧门放过、新门脱掉；`口令：MyRealPass1 已泄露` 旧门放过（只认英文键名）、新门脱掉。另外 `bearer_literal` 的值类从 `[A-Za-z0-9._-]{8,}` 对齐到 `\S+`（收窄会漏 `Bearer ab$`）。⇒ 摘要出口此前漏脱"独立凭据形状＋中文键名"这两形。
+    - **✅ 判据不许谎称"完全等值"**：新档 `tests/unit/security/test_liveRedactionDoorsUseTheSharedEngine.py` 两格（一扇门一格）把**旧门的正则原样抄进测试**当期望值，只对"旧门本就正确"的形状逐字比；旧门漏脱的形状另记在注释里（含"旧错误门根本没有 `ghp_`"这条），不假装相等；再加一条结构断言"投影名与 PII 名互斥"当试纸。逐文件两次同读数 2 passed；我自己复跑 新档＋摘要器＋错误映射 **28 passed**（不采信子代理报告，独立跑过一遍并 `git diff` 复核改动面）。
+    - **⚠ 第三处刻意不接（量过才这么定）**：`skills/evolution_inputs_guard.py` 的差异在**形状**不在 token —— 它的键表更宽（多 `authorization|cookie|credential|secret`）、值要求 ≥6 且要**保留引号**、`sk-` 还要第二个词汇 `[REDACTED_KEY]`、并有"Bearer/sk 先行否则 KV 把 Bearer 本体当值吃掉"的顺序理由。当成"换个字符串"硬接是错的；正解是先在单源里加一条带引号保留的 KV 规则（含值长度下限），再谈接线。登记在本格仍开里。
+    - **✅ 回归与归因**：`tests/unit/security` 1187 passed／2 条既有红（mappingproxy 那条、与命中并会话未跟踪 `neurova/knowledge/document_pipeline.py` 的后缀表单源守卫），`tests/unit/llm` 内覆盖本批改动的 `test_error_mapping.py` 等 51 条全过，该目录另 5 条红经单跑／缩小组复算为跨文件污染或并会话在途件（`test_provider_tool_path` 的 token 公式）⇒ 不记本批账。加行的同时跑治理闸：五档合跑 **176 passed** 全绿。工具纪律照查：新测试文件被 Write 写成纯 LF，转回 CRLF 后才提交（形态 410 那一形本批第三次差点复发，靠 `git diff --numstat` ＋ lone-CR 计数拦住）。
+    - **仍开**：①第三处 `evolution_inputs_guard` 接线（先补带引号保留的 KV 规则）；②`contains_secret` 的门禁语义与共享表的关系（它今天自带一套键名，与单源不同步 ⇒ 下一个候选）；③P-1／P-2／M3／P-3 按裁定排队。
+    - **下一枚空号现查**：`git grep -c "§6-413" HEAD -- audit-reports docs scripts` 命中 **0**，文档面最大＝**§6-412** ⇒ 本批取 **§6-413**。
