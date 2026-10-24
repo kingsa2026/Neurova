@@ -219,8 +219,13 @@ def artifactKey(channel: str, artifactId: str) -> str:
 
 
 def anchorPath() -> Path:
-    """锚文件路径（唯一一处）。测试一律 monkeypatch 本函数到临时目录，不碰真实主目录。"""
-    return Path.home().joinpath(".neurova", ANCHOR_FILE_NAME)
+    """锚文件路径（唯一一处）。测试一律 monkeypatch 本函数到临时目录，不碰真实主目录。
+
+    落点刻意在**数据根之外**：锚的作用是认出"账本被回滚 / 构件被改完再重钉"，
+    跟着数据库一起被回滚就失去意义（§6-388 票一甲①）。家目录取自
+    `Path.home()` 这一个口，不按进程 CWD 拼——换个启动目录不该换个锚。
+    """
+    return Path.home() / ".neurova" / ANCHOR_FILE_NAME
 
 
 def readAnchors() -> Dict[str, str]:

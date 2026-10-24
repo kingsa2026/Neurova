@@ -37,6 +37,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import tempfile
 
 from tests import ast_scan
 
@@ -95,8 +96,17 @@ def test_isolatedDataRootAloneMovesAgentWorkspaceOutOfRepo():
         "⇒ 70 档起真 app 的 manual 探针会往仓内 agent_workspaces/ 写记忆/附件——"
         "该由单点保证的第二根没人保证（D8）。"
     )
-    assert ws.resolve().is_relative_to(pathlib.Path(os.environ.get("TEMP", "")).resolve()) or "Temp" in str(ws), (
-        f"工作区根没有落在临时目录：{ws}"
+    # 「临时目录」按**平台**取：POSIX 上是 `tempfile.gettempdir()`（`/tmp`），
+    # Windows 上才是 `TEMP`。此前只认 `TEMP` 且退化成字面量 `"Temp" in str(ws)`，
+    # 于是 Linux/CI 上 `tempfile.mkdtemp()` 造出的 `/tmp/...` 一律判红——
+    # 它红的原因是判据只认一个平台的环境变量，与「单点有没有把根搬出去」无关。
+    tempRoots = {pathlib.Path(tempfile.gettempdir()).resolve()}
+    for name in ("TEMP", "TMPDIR"):
+        value = (os.environ.get(name) or "").strip()
+        if value:
+            tempRoots.add(pathlib.Path(value).resolve())
+    assert any(ws.resolve().is_relative_to(root) for root in tempRoots), (
+        f"工作区根没有落在临时目录：{ws}（临时目录口径：{sorted(map(str, tempRoots))}）"
     )
 
 

@@ -59,12 +59,26 @@ class TestDefaultPathIsNotCwdRelative:
 
 class TestFenceCoversMemorySurfaces:
     def test_productionMemoryDirIsTheRepoWorkspacesRoot(self):
-        """生产目录是磁盘上那个事实，不随进程配置（`NEUROVA_AGENT_WORKSPACES_DIR`）漂移。"""
+        """生产目录是磁盘上那个事实，不随进程配置（`NEUROVA_AGENT_WORKSPACES_DIR`）漂移。
+
+        目录名**不在这里写死**：它的事实源是 `productionMemoryDir()` 自己（v2 统一布局是
+        `data/`；`agent_workspaces/` 是 v1 旧根，仍由 `_productionMemoryDirs()` 一并认）。
+        此前这里写死 `"agent_workspaces"`，于 4bf9b733（私有数据落点统一到 `data/<id>/`）
+        之后就成了"判据比事实慢一拍"的常驻红——红的原因不是围栏坏了，而是判据抄了一份
+        目录名。本格改成判**事实**：生产根下那本主库必须被判在保护区内，且注入
+        `NEUROVA_AGENT_WORKSPACES_DIR` 之后仍指同一处。
+        """
+        from neurova.core.data_root import repoRoot
         from neurova.knowledge.foundation.storage_fence import productionMemoryDir
 
-        assert productionMemoryDir().name == "agent_workspaces"
+        assert productionMemoryDir() == repoRoot() / "data", (
+            "生产数据根不是仓内 `data/`——布局单源被改了，围栏的保护区随之失效"
+        )
         assert underProductionMemory(productionMemoryDir() / "default" / "memory"
                                      / "neurova_memories_persist.db")
+        # v1 旧根同样必须落在保护区里（迁移窗口期内那本库还在被读）。
+        assert underProductionMemory(repoRoot() / "agent_workspaces" / "default"
+                                     / "memory" / "neurova_memories_persist.db")
 
     def test_isolatedDirectoryIsNotProduction(self, monkeypatch, tmp_path):
         monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path / "ws"))
