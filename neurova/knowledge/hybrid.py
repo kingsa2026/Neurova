@@ -161,6 +161,8 @@ def hybrid_search_knowledge(
     graphRanks: Optional[List[Tuple[str, float]]] = None,
     graphSupport: Optional[Dict[str, List[Dict[str, Any]]]] = None,
     graphWeight: Optional[float] = None,
+    geo_radius: Optional[Dict[str, Any]] = None,
+    geo_bbox: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """四路 RRF 知识混合检索（可选图谱条目影子路由）。
 
@@ -198,6 +200,7 @@ def hybrid_search_knowledge(
         for it in repo.visible_items(
             user, scope=scope, category=category, agent_id=agent_id,
             tags=tags, source=source, updated_after=updated_after,
+            geo_radius=geo_radius, geo_bbox=geo_bbox,
         ):
             kid = str(it.get("knowledge_id", ""))
             if not kid or not isinstance(it, dict):
@@ -229,6 +232,7 @@ def hybrid_search_knowledge(
         user=user, query=query, scope=scope, agent_id=agent_id,
         limit=lexical_limit, category=category, tags=tags,
         source=source, updated_after=updated_after,
+        geo_radius=geo_radius, geo_bbox=geo_bbox,
     )
     if lexical_all is None:
         lexical_all = []
