@@ -121,6 +121,19 @@ CLOCK_LEDGER: Dict[str, tuple] = {
         "本守卫自身：它按语法树**检出**墙钟上界并比对台账，脚本里出现的 perf_counter "
         "字样是被检对象（用于构造检出器反向控制的样例），不参与任何计时读数。",
     ),
+    "tests/unit/tts/test_unitTierNeverPaysForRealWeights.py": (
+        ("wallClock",),
+        "本文件**不读任何时钟**：`monotonic` 字样只出现在两处——被测接缝的关键字参数名 "
+        "`now_monotonic=`（`release_idle_engines(now_monotonic=afterTtl(mgr))`），"
+        "以及这条结论要复述的 docstring 文本。真正的取数在同域唯一那一处 "
+        "`tests/unit/tts/_fakeEngines.afterTtl()`（`time.monotonic() + release_ttl_sec + 1`）："
+        "它是**入参构造**，不是耗时读数——量的是「已过 TTL 的那个时刻」，真值精确、与负载无关；"
+        "此前本档自己写了一份同样的构造（§6-405 前），两份口径改一处另一份静默失效，"
+        "现收口到那一处并由 `test_tts_lazy_release.py` 共用。"
+        "之所以仍按 wallClock 记：扫描只认符号名（本台账口径按扫描结果登记）。"
+        "§6-407：该档按 dcce8f74 进受保护子集时本台账漏登一条，CI 红在 "
+        "test_no_unledgered_process_clock。",
+    ),
     "tests/unit/skills/test_marketFetchBudgetIsSingleSource.py": (
         ("wallClock",),
         "本文件**不读真实墙钟**——`monotonic` 字样只出现在两处：本格自造的虚拟钟 "
@@ -198,6 +211,24 @@ class TestProcessClockCalibersAreLedgered:
         hits = _scan()
         stale = [key for key in CLOCK_LEDGER if key not in hits]
         assert stale == [], f"台账登记了不再计时的文件：{stale}"
+
+    def test_unledgeredHitIsCaughtAndLedgeredHitIsNot(self):
+        """反空转：同一次检出，缺登记必判红、登记后必判绿——两向都要。
+
+        §6-407 的形态：`tests/unit/tts/test_unitTierNeverPaysForRealWeights.py` 被
+        `dcce8f74` 登记进受保护子集，本台账没跟 ⇒ CI 红在 `test_no_unledgered_process_clock`。
+        若本格只验"那一格已在册"，把结论塞进台账就能糊过去；故两向都当场算一遍。
+        """
+        target = "tests/unit/tts/test_unitTierNeverPaysForRealWeights.py"
+        assert target in protectedFiles(), (
+            f"{target} 已不在受保护子集里——该改这条反向控制的对象，不是删掉它")
+        hits = _scan()
+        assert target in hits, (
+            f"{target} 的时钟口径没被检出——登记后必然与实测不一致，本格也就成了纸面形状")
+        assert sorted(set(hits) - set(CLOCK_LEDGER)) == [], (
+            "前置不成立：本仓当前仍有缺登记的计时口径，这条反向控制的读数说明不了问题")
+        assert sorted(set(hits) - (set(CLOCK_LEDGER) - {target})) == [target], (
+            "把那一格的结论摘掉后，缺登记名单没有恰好点名它——本守卫对「新成员漏登」零命中")
 
 
 class TestCaliberShiftIsCaught:
