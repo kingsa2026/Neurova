@@ -77,6 +77,34 @@ def dbPathForNewStore() -> str:
     return str(os.environ.get("NEUROVA_MOBILE_DEVICES_DB") or defaultDbPath())
 
 
+def refuseSharedRootInTests(dbPath: str) -> None:
+    """跑测期间不许把在册库落在**会话级数据根**——那是所有用例共用的一份库。
+
+    为什么钉在构造处而不是夹具里：夹具的隔离靠"谁先拆"，实测读数是一条用例在自己的
+    call 阶段拿到 `NEUROVA_MOBILE_DEVICES_DB=<unset>`、库回退到 `neurovaDataRoot-*`，
+    于是前一档写的 `pair-c` 出现在后一档的设备列表里（表现成"设备数 2 ≠ 1"，
+    而肇事者与受害者不是同一条用例，根因隔了好几拍）。落在构造处 ⇒ 红在**肇事那一拍**、
+    带路径与用例名，谁都不用再猜。
+
+    只认 env 这一条唯一解析入口，不设例外名单：真要在共享根上开库的（生产启动）
+    本来就不在 pytest 里，`PYTEST_CURRENT_TEST` 不在时这条判定整体不成立。
+    """
+    currentTest = os.environ.get("PYTEST_CURRENT_TEST")
+    if not currentTest:
+        return
+    root = Path(str(get_data_root())).resolve()
+    resolved = Path(str(dbPath)).resolve()
+    if root != resolved.parent and root not in resolved.parents:
+        return
+    raise AssertionError(
+        "本条用例让在册设备库落在会话级共享数据根：" + str(resolved)
+        + " | 用例：" + currentTest.split("::")[0]
+        + " | 隔离只有一条通道：monkeypatch.setenv('NEUROVA_MOBILE_DEVICES_DB', "
+          "str(tmp_path / 'mobile_devices.db')) 并 mp.resetDeviceRegistry()"
+        + "（判定钉在构造处，红应落在肇事那一拍，而不是三拍之后的受害者读数）"
+    )
+
+
 def _hashSecret(deviceSecret: str) -> str:
     """设备长期密钥的落库形态：只存 SHA-256 摘要。
 
@@ -91,6 +119,7 @@ class MobileDeviceStore:
 
     def __init__(self, dbPath: Any = None) -> None:
         self.dbPath = str(dbPath or dbPathForNewStore())
+        refuseSharedRootInTests(self.dbPath)
         Path(self.dbPath).parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(self.dbPath, check_same_thread=False)

@@ -283,6 +283,8 @@ async def create_knowledge(
         tenant_id=str(current_user.get("tenant_id") or "default"),
         valid_until=body.valid_until,
         lifecycle_status=body.lifecycle_status,
+        author=body.author,
+        geo=body.geo,
         dedupe=True,
     )
     return item_response(item)
