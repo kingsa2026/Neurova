@@ -45,10 +45,10 @@ SCAN_ROOTS = ("neurova", "tests")
 pytestmark = [pytest.mark.timeout(60)]
 
 
-def _singleArgCallsIn(tree) -> list:
+def _singleArgCallsIn(source: str) -> list:
     """返回"只给了 ctx、没给 scopeCtx"的 `_retrieve_memories(...)` 调用行号。"""
     bad = []
-    for node in ast.walk(tree):
+    for node in ast.walk(ast.parse(source)):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
             continue
         if node.func.attr != "_retrieve_memories":
@@ -98,12 +98,12 @@ def test_扫描器真会咬():
         "        ctx, turnScopeContext(ctx.metadata, ctx.session_id)\n"
         "    )\n"
     )
-    assert _singleArgCallsIn(ast.parse(stale)) == [2], "反向控制失效：单参调用没被点名＝本守卫恒绿"
-    assert _singleArgCallsIn(ast.parse(fixed)) == [], "正确形被误报"
-    assert _singleArgCallsIn(ast.parse("def _retrieve_memories(self, ctx, scopeCtx):\n    ...\n")) == [], (
+    assert _singleArgCallsIn(stale) == [2], "反向控制失效：单参调用没被点名＝本守卫恒绿"
+    assert _singleArgCallsIn(fixed) == [], "正确形被误报"
+    assert _singleArgCallsIn("def _retrieve_memories(self, ctx, scopeCtx):\n    ...\n") == [], (
         "方法定义被当成调用误报——守卫会咬住生产代码，口径不对"
     )
     # 合成样本自己得能过 ast.parse：带缩进的 def 顶格写会 IndentationError，
     # 于是反向控制格自身先炸（本档落笔时踩过两次，都在这一格）。
     with pytest.raises(SyntaxError):
-        _singleArgCallsIn(ast.parse("    def _retrieve_memories(self):\n        ...\n"))
+        _singleArgCallsIn("    def _retrieve_memories(self):\n        ...\n")
