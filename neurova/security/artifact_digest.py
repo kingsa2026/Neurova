@@ -229,7 +229,16 @@ def artifactKey(channel: str, artifactId: str) -> str:
 
 
 def anchorPath() -> Path:
-    """锚文件路径（唯一一处）。测试一律 monkeypatch 本函数到临时目录，不碰真实数据根。"""
+    """锚文件路径（唯一一处）。测试一律 monkeypatch 本函数到临时目录，不碰真实数据根。
+
+    落点是**数据根之内**的 `<数据根>/anchors/<ANCHOR_FILE_NAME>`：`core/data_root.py` 是
+    全仓落点的唯一装配点（AGENTS.md §3），锚没有理由做例外——回滚一个目录不会动它里面的
+    文件，锚跟着整库快照一起回滚，敏感性一点没丢；而主目录落点会让锚换台机器就失联。
+
+    旧地址（主目录点目录）的存量经 `adoptHomeLanding()` 搬进来：那是主目录族的**唯一收养端**
+    （带 `homeAdoptionAllowed()` 那道权利闸，只有"本进程代表操作者本人"才动主目录）；
+    搬不动就由它 warning 点名旧物仍在哪儿，而不是悄悄重钉一份 TOFU。
+    """
     target = get_data_root().joinpath("anchors", ANCHOR_FILE_NAME)
     adoptHomeLanding(target, "anchors", ANCHOR_FILE_NAME)
     return target

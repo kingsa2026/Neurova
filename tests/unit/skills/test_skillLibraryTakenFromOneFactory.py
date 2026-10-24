@@ -85,13 +85,13 @@ class TestWriteThenReadSeeOneLedger:
         return client
 
     def test_install_then_agentFaceListsIt(self, app_client):
-        """走真安装链，但**不用** studio 那只包——原因由下面那格钉着，别当成本批的对象。
+        """走真安装链，且直接装 studio 那只**真资产包**——形参最长的包能落地，链路才算真通。
 
-        本格要判的是"写完读得到"，链路与代码路径两只内置包一字不差；studio 在跑测环境里
-        连"装到最终位置"都放不下（终点投影超 Windows 预算），那是 §6-276 登记的落点问题，
-        与本批的内存态合流无关。
+        本格此前绕开 studio，理由是它在跑测环境里"装不到最终位置"。那个理由已经不成立：
+        下面那格按真装之后的盘上路径实测，最长落点仍在 Windows 预算内。判据按落点形状改判，
+        不把"当时装不下"留成默认路径。
         """
-        skill_id = "builtin--multi-search-engine"
+        skill_id = "builtin--adaptive-presentation-studio"
         installed = app_client.post(f"/api/v1/skill-pool/{skill_id}/install",
                                     params={"agent_id": "default"})
         assert installed.status_code == 200, (
@@ -103,32 +103,33 @@ class TestWriteThenReadSeeOneLedger:
             f"安装回执说成功，但同进程的面板数据源读到 {len(rows)} 条 {ids[:5]}——"
             "写侧与读侧各持一份内存账，这正是本批要合掉的")
 
-    def test_longLibraryRootStillRefusesTheStudioPackage(self):
-        """长根下 studio 包必须被点名拒（原因面＝路径过长），且**不靠 OS 开关**。
+    def test_studioPackageLandsUnderTheBudgetThroughTheRealInstallChain(self, app_client):
+        """主格装真资产包的前置必须**实测自证**，不许从别处推。
 
-        这一格原先判的是"跑测库根本身就越过 Windows 260 预算"——那读数随跑测机的临时目录
-        前缀长度漂移（实测 macOS/Linux 上只剩 247），它量的是**夹具落点**，不是被测的契约。
-        契约本身是跨平台的、且已被 `market_sources` 在解包**之前**判：给定一个越过预算的
-        落点根，这个包必须被拒，且原因点名 `路径过长` 而不是折成一句 refused。
-        （该判定由 `tests/unit/skills/test_zipRefusalNamesItsCause.py` 的主格钉住来源，
-        这里判它在**真资产包**上的读数。）
+        上一版这里是反向断言（"装不下"），它按设计在落点变短时转红——本轮正是那一格红了：
+        conftest 把库根切到 `tmp_path` 后理论投影 246 < 260。但"理论投影"不是可观测事实
+        （库根里落的是 `builtin--<包名>`，不是 `manifest.name`；装的成功与否另有一串变量），
+        改判为**真装完之后按盘上实际路径量**：同一用例里装、读面看得见、最长路径还在预算内。
         """
-        import zipfile
+        from neurova.skills.library_service import agentLibrary
+        from neurova.skills.market_sources import WINDOWS_MAX_PATH   # 预算单源＝解包闸用的那个数
 
-        from neurova.skills import market_sources as ms
+        skill_id = "builtin--adaptive-presentation-studio"
+        installed = app_client.post(f"/api/v1/skill-pool/{skill_id}/install",
+                                    params={"agent_id": "default"})
+        assert installed.status_code == 200, (
+            f"安装本身没成：HTTP {installed.status_code} {str(installed.text)[:220]}")
+        ids = [r.get("skill_id") for r in
+               app_client.get("/api/v1/skill-pool/agent/default/skills").json()]
+        assert skill_id in ids, f"装完读面看不见：{ids[:5]}——内存态还是两份"
 
-        bundle = REPO / "neurova" / "skills" / "market_bundles" / "adaptive-presentation-studio.zip"
-        with zipfile.ZipFile(bundle) as zf:
-            longestMember = max(zf.namelist(), key=len)
-        # 落点根造到"最长成员投影恰好超预算"：根长由预算常量现算，不引任何按平台变的假设。
-        dest = Path("/tmp") / ("libroot_" + "x" * 40) / ("y" * 40) / "skills" / (
-            "z" * max(1, ms.WINDOWS_MAX_PATH - len(longestMember) - 100))
-
-        reason = ms.extractRemoteSkillZipRefusal("builtin--adaptive-presentation-studio",
-                                                bundle.read_bytes(), dest)
-        assert "路径过长" in reason, (
-            f"长根（{len(str(dest))} 字符）下这个包没被点名拒：{reason[:160]!r}\n"
-            f"成员最长 {len(longestMember)}，预算 {ms.WINDOWS_MAX_PATH}")
+        root = Path(str(agentLibrary("default").skills_dir))
+        landed = [p for p in root.rglob("*") if p.is_file()]
+        assert landed, f"落点 {root} 一个文件都没有——真装链没写盘"
+        longest = max(landed, key=lambda p: len(str(p)))
+        assert len(str(longest)) <= WINDOWS_MAX_PATH, (
+            f"最长落点 {len(str(longest))} 字符越过 Windows {WINDOWS_MAX_PATH} 预算："
+            f"{str(longest)[len(str(root)):]}")
 
     def test_factoryHandsOutOneInstancePerLibraryDir(self):
         """工厂语义：**同一库目录必须只对应一个实例**，且落点与解析单点一致。

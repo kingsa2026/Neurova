@@ -31,6 +31,8 @@ if str(REPO) not in sys.path:
 
 from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 isolatedDataRoot()
 
 from neurova.context.token_estimator import estimate_tokens as estimate_text_tokens  # noqa: E402

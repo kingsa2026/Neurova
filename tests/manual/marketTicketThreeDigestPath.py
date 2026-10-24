@@ -36,6 +36,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 WORK_ROOT = isolatedDataRoot(prefix="neurovaTicket3")
 
