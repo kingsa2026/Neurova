@@ -97,6 +97,18 @@ class TestSubgraphClipping:
         assert data["truncated"] is True
         assert data["stats"]["node_count"] == 4
 
+    def testHopsBeyondDiameterYieldsReachableClip(self, client):
+        """hops 超过图直径：结果=可达集按 limit 截断，truncated 如实，不炸。
+        同时咬合 BFS 提前终止——收录满 limit 后不再继续扩展层。"""
+        http, ids = client
+        resp = http.get(PREFIX + "/agent/subgraph",
+                        params={"focus": ids["B"], "hops": 12, "limit": 3})
+
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
+        assert len(data["nodes"]) == 3
+        assert data["truncated"] is True
+
     def testFocusAlwaysIncluded(self, client):
         http, ids = client
         resp = http.get(PREFIX + "/agent/subgraph",
