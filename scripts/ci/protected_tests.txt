@@ -3850,3 +3850,16 @@ tests/unit/security/test_liveRedactionDoorsUseTheSharedEngine.py
 # 读数一致（context 2 条属并会话在途 orchestrator、llm 5 条跨文件污染、memory/cognitive 4 条
 # 数据根与 bus 旧账、security/skills 2 条治理闸既有红），本批不新增红。
 tests/unit/security/test_redactionDoorsShareOneLeakClosure.py
+# 静态门禁的"未定义名称"判据只许报**真·未定义**，不许把注解专用名算成缺陷。
+# 形态：CI static-gate 腿报 6 处 F821，5 处是注解里的名字（实体在函数体内懒加载，
+# 模块级导入会拉 `neurova.agent` 包 __init__ → `tool_executor` 的循环，AGENTS.md §3）。
+# 判据曾埋在 subprocess 输出里数字符串，于是"判的是语义还是行格式"没人能反证；
+# 现在收成可调用口 `scripts.ci_static_gate.undefinedNamesIn`，本档按三层钉它：
+# 注解专用名不报、真拼错名照旧报（拼错的注解名与幻影变量各一格）、门禁入口仍走这唯一判据口。
+tests/unit/ci/test_staticGateUsesParserNotTypecheck.py
+# 裁决**按哪些路径值裁的**必须随裁决结果回到调用方。改前 `verdict.to_dict()` 的键里
+# 一格路径都没有，"被拦的是哪条路径"在结果面就丢了；`tool_executor` 的文件保护支路
+# 因此读一个从未绑定的 `file_path` 打日志——静态门禁报 F821，运行时被外层吞成 warning，
+# 文件类工具每到这一行就静默丢掉"拦了哪条路径"。本档钉三层：结果面带出路径值且
+# `to_dict()` 一并带出、与取数口 `extract_adjudicable_params` 同源、消费侧真日志点到路径。
+tests/unit/security/test_governancePathValuesReachCallers.py
