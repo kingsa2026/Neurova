@@ -1190,10 +1190,6 @@ export default {
     rollbackDone: 'Zurückgesetzt, {left} Archiv(e) verbleiben',
     rollbackError: 'Zurücksetzen fehlgeschlagen',
     archiveLoadError: 'Archive konnten nicht geladen werden',
-    adopt: 'Übernehmen',
-    adoptTarget: 'Zielskill',
-    adoptSuccess: 'Ausstehender Vorschlag erstellt',
-    adoptError: 'Übernahme fehlgeschlagen',
   },
   skill: {
     title: 'Fähigkeitenverwaltung',

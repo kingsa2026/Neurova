@@ -1190,10 +1190,6 @@ export default {
     rollbackDone: 'ロールバック完了、残りアーカイブ {left} 件',
     rollbackError: 'ロールバックに失敗しました',
     archiveLoadError: 'アーカイブの読み込みに失敗しました',
-    adopt: '採用',
-    adoptTarget: '対象スキル',
-    adoptSuccess: '承認待ち提案を作成しました',
-    adoptError: '採用に失敗しました',
   },
   skill: {
     title: 'スキル管理',

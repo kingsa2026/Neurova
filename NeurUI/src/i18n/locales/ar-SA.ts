@@ -1190,10 +1190,6 @@ export default {
     rollbackDone: 'تم الاسترجاع، بقي {left} من الأرشيف',
     rollbackError: 'فشل الاسترجاع',
     archiveLoadError: 'فشل تحميل الأرشيف',
-    adopt: 'تبني',
-    adoptTarget: 'المهارة الهدف',
-    adoptSuccess: 'تم إنشاء اقتراح معلق',
-    adoptError: 'فشل التبني',
   },
   skill: {
     title: 'إدارة المهارات',
