@@ -44,8 +44,7 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 def main() -> int:
     print(f"数据根（注入隔离）: {WORK_ROOT}")
     mobile_ep._pairing_codes.clear()
-    mobile_ep._paired_devices.clear()
-    mobile_ep._user_devices.clear()
+    mobile_ep.resetDeviceRegistry()   # 在册库落在上面的隔离数据根下（§4.8 持久权威）
 
     app = create_app()
     app.dependency_overrides[mobile_ep._get_current_user_id] = lambda: OWNER
@@ -79,23 +78,41 @@ def main() -> int:
                   f"{conf.status_code} {conf.text[:120]}")
             if conf.status_code != 200:
                 return 1
-            wsUrl = conf.json()["ws_url"]
+            body = conf.json()
+            wsUrl, ticket = body["ws_url"], body["connect_ticket"]
             advertised = urlsplit(wsUrl).path
 
             check("[4] 发给设备的回连路径 == 活 app 路由表里那条 WS（不是手抄的前缀）",
                   advertised == wsPath, f"发出 {advertised} / 路由表 {wsPath}")
 
+            # S1b 之后回连地址**不带任何凭证**（§4.2：这条 URL 会进中继的访问日志）。
+            # 这一格把"URL 干净"读出来，而不是只在单测里断字符串形状。
+            check("[4b] 回连地址里不含凭证（query 必须空）",
+                  not urlsplit(wsUrl).query, f"query={urlsplit(wsUrl).query!r} url={wsUrl}")
+
             connected = None
             try:
-                with client.websocket_connect(f"{advertised}{_queryOf(wsUrl)}"):
+                with client.websocket_connect(advertised,
+                                              headers={"Authorization": f"Bearer {ticket}"}):
                     connected = "accepted"
             except Exception as e:  # noqa: BLE001
                 connected = f"{type(e).__name__} code={getattr(e, 'code', None)}"
-            check("[5] 照发出去的那条地址真能连上", connected == "accepted", str(connected))
+            check("[5] 照发出去的那条地址＋header 里的凭证真能连上",
+                  connected == "accepted", str(connected))
+
+            noCred = None
+            try:
+                with client.websocket_connect(advertised):
+                    noCred = "accepted"
+            except Exception as e:  # noqa: BLE001
+                noCred = f"{type(e).__name__} code={getattr(e, 'code', None)}"
+            check("[5b] 反向校准：不带凭证连同一条地址必须被拒",
+                  noCred != "accepted", str(noCred))
 
             legacy = None
             try:
-                with client.websocket_connect(f"/mobile/ws{_queryOf(wsUrl)}"):
+                with client.websocket_connect("/mobile/ws",
+                                              headers={"Authorization": f"Bearer {ticket}"}):
                     legacy = "accepted"
             except Exception as e:  # noqa: BLE001
                 legacy = f"{type(e).__name__} code={getattr(e, 'code', None)}"
@@ -104,17 +121,11 @@ def main() -> int:
     finally:
         app.dependency_overrides.clear()
         mobile_ep._pairing_codes.clear()
-        mobile_ep._paired_devices.clear()
-        mobile_ep._user_devices.clear()
+        mobile_ep.resetDeviceRegistry()
 
     print("\nLIVE-VERIFY PASSED / 工单 2026-10-13 批 26（配对回连地址向路由表要）"
           if not failures else f"\nLIVE-VERIFY FAILED：{failures}")
     return 0 if not failures else 1
-
-
-def _queryOf(url: str) -> str:
-    q = urlsplit(url).query
-    return f"?{q}" if q else ""
 
 
 if __name__ == "__main__":

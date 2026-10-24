@@ -63,11 +63,11 @@ const ARTIFACT_TAG = '构件缺失·不可用'
 const REASON = '落盘无可执行构件（既无 SKILL.md 指令体，也无入口脚本）'
 
 const SHELL = {
-  skill_id: 'sk_shell', name: 'shell_only_entry', description: '只有记账件',
+  id: 'sk_shell', skill_id: 'sk_shell', name: 'shell_only_entry', description: '只有记账件',
   enabled: true, available: false, unavailable_reason: REASON,
 }
 const HEALTHY = {
-  skill_id: 'sk_ok', name: 'doc_shape_entry', description: '有指令体',
+  id: 'sk_ok', skill_id: 'sk_ok', name: 'doc_shape_entry', description: '有指令体',
   enabled: true, available: true, unavailable_reason: '',
 }
 
