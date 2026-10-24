@@ -163,15 +163,12 @@ def _measure(manager: MemoryManager, pickQuery) -> dict:
 
 @pytest.fixture
 def recallCorpus(tmp_path):
-    from neurova.embedding import get_embedding_engine
+    from tests.conftest import requireVectorPath
 
-    engine = get_embedding_engine()
-    assert engine is not None, (
-        "本地 ONNX 嵌入档不可用：本判据测的是生产同款稠密+词法双路检索，"
-        "缺 models/embedding/bge-small-zh-v1.5/model.onnx 时读数无意义。"
-        "该前提与 test_onnx_lazy_init_deadlock.py 直接构造 ONNXEmbeddingEngine 一致，"
-        "不以 skip 蒙过（skip 会让判据退化成第二条 longmeval_simple.py）。"
-    )
+    # 前提是「生产同款稠密检索真的在跑」：引擎对象非 None 不等于 encode 给出非零向量，
+    # 薄环境（无 numpy/onnxruntime/tokenizer）里每次都是 512 维零向量，余弦恒 0——
+    # 那正是本判据此前把"缺依赖"量成"MRR 掉档"的原因。判据单一源在 conftest。
+    requireVectorPath()
 
     manager = MemoryManager(
         db_path=os.path.join(str(tmp_path), "mem.db"),

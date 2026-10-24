@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from neurova.cognitive_layers.memory_layer import muscle_memory
 from neurova.cognitive_layers.memory_layer.muscle_memory import MuscleMemory
 
 DIRTY_L2 = [{
@@ -115,3 +116,53 @@ class TestDirtyArchiveIsReversible:
         assert json.loads(archived.read_text(encoding="utf-8")) == DIRTY_L2, (
             "归档内容与原文件不一致，回退后丢数据"
         )
+
+
+class TestDegradedEmbeddingFallback:
+    """嵌入引擎在位但给零向量时，指纹口径必须退回词法面（不许被零余弦压到断层下）。
+
+    薄环境里 `encode()` 是 `[0.0] * 512` 的兜底，而 `_semantic_enabled()` 只看开关、
+    不看向量是否为零——于是 `match_by_query` 走进"有向量就按余弦"那一支，两条零向量
+    的余弦是 0，落在 0.75 门限之下且不命中 MD5 等值分支，**一个 token 都不给分**。
+    换实体近似句的置信度实测只有 0.5875（词法面本来能到 0.55+0.2625+0.1=0.9125）。
+    """
+
+    @pytest.fixture
+    def zeroVectorEngine(self, monkeypatch):
+        """把引擎换成"在位但只吐零向量"的替身——服务形替身，钉的仍是 `_compute_confidence`。"""
+        first = True
+
+        def _encode(_text):
+            nonlocal first
+            if first:
+                first = False
+                return [0.0] * 8
+            return [0.0] * 8
+
+        class _ZeroEngine:
+            @staticmethod
+            def encode(text):
+                return _encode(text)
+
+        monkeypatch.setenv("NEUROVA_MUSCLE_SEMANTIC", "1")
+        monkeypatch.setattr(muscle_memory, "_get_engine", lambda: _ZeroEngine())
+
+    def test_zero_vector_engine_falls_back_to_lexical(self, zeroVectorEngine):
+        memory = MuscleMemory()
+        memory.record_usage(
+            tool_name="weather", query="许昌今天天气怎么样",
+            parameters={"location": "许昌"}, success=True,
+        )
+        matches = memory.match_by_query("许昌明天天气怎么样")
+        assert matches, "退化嵌入下近似问法一条都没命中：零余弦把词法分吃掉了"
+        _, confidence = matches[0]
+        assert confidence >= 0.85, f"退化嵌入下置信度只有 {confidence}，词法分量没被用上"
+
+    def test_zero_vector_engine_still_rejects_unrelated_query(self, zeroVectorEngine):
+        """反向锁：退回词法面也必须挡住无关问法（不是把门开到什么都命中）。"""
+        memory = MuscleMemory()
+        memory.record_usage(
+            tool_name="weather", query="许昌今天天气怎么样",
+            parameters={"location": "许昌"}, success=True,
+        )
+        assert memory.match_by_query("帮我写一段 Python 排序代码") == []

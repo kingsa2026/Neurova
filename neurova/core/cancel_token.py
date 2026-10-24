@@ -45,6 +45,7 @@ logger = get_logger(__name__)
 __all__ = [
     "CancelToken",
     "setTurnCancelToken",
+    "clearTurnCancelToken",
     "getTurnCancelToken",
     "resetTurnCancelToken",
     "registerKillAction",
@@ -137,6 +138,18 @@ def getTurnCancelToken() -> Optional[CancelToken]:
     """当前轮的工具取消令牌；未绑定返回 None（调用方按无令牌处置）。"""
     token = _turn_token_var.get()
     return token if isinstance(token, CancelToken) else None
+
+
+def clearTurnCancelToken() -> None:
+    """轮末**解绑**本轮令牌：此后本上下文再无轮次令牌。
+
+    只换不复是不够的：`resetTurnCancelToken()` 在轮首换新，但轮末没人清，于是
+    一只**已置位**的令牌会一直挂在线程的 ContextVar 上。后面所有"无轮次上下文"
+    的调用方（`getTurnCancelToken()` 取到的还是它）就会把刚起的进程交给它——
+    `onCancel` 立即兑现，进程按上一轮的取消理由被杀（`exit_code -9`）。
+    受保护子集整场跑时恒现、单跑不现，正是这个形态。
+    """
+    _turn_token_var.set(None)
 
 
 def resetTurnCancelToken() -> CancelToken:
