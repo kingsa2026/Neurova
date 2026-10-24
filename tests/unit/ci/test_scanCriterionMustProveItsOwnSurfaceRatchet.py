@@ -387,6 +387,94 @@ def _hasFaceProof(tree: ast.AST, counts: set) -> bool:
     return False
 
 
+def _faceReadings(root: pathlib.Path, manifest: list) -> dict:
+    """一次扫完：`rel -> 这一档的四条读数`（落点态、落点入口、清单落点、有没有面自证）。
+
+    四张结论表（offender／根写错／LOCAL／清单面）都从这四条读数派生，所以**整场只扫一次**——
+    先前四个格子各扫一遍，同一批 708 档被反复解析、重复付费（带覆盖率时单格 41.8s，撞上
+    `pyproject.toml` 的全局 30s 挂死墙，只是 signal 方式在 C 扩展里不生效才没炸）。
+    读数只放判据要用的那几样，不留语法树：留树会把本闸变成 Issue #197 点过的常驻内存账单。
+
+    读数连同一份文件指纹一起交回，供 `_cachedFaceReadings` 判断"这份读数还能不能再用"。
+    """
+    readings, fingerprint = {}, []
+    for rel in manifest:
+        path = root / rel
+        if not rel.endswith(".py") or not path.is_file():
+            continue
+        try:
+            source = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            continue
+        stamp = path.stat()
+        fingerprint.append((rel, stamp.st_size, stamp.st_mtime_ns))
+        consts = _constTable(tree)
+        sites = _scanSites(tree, consts, root, selfPath=path.resolve(), scoped=_scopedBindings(tree))
+        counts = _countNames(tree)
+        entrySites, universe, iterReads, env = _manifestFace(
+            tree, consts, root, selfPath=path.resolve(), scoped=_allBindings(tree))
+        readings[rel] = {
+            "gap": _rootGap(sites),
+            "local": sorted({entry for entry, st in sites if st == LOCAL}),
+            "hasDir": any(st == DIR for _e, st in sites),
+            "proof": _hasFaceProof(tree, counts),
+            # 清单面的缺口：这一档按清单逐条动手、却没给这份清单留读数。`None` 表示没有缺口。
+            "manifest": (entrySites or None) if (entrySites and not _hasListProof(
+                tree, universe, counts, iterReads, env, root)) else None,
+        }
+    return {"root": str(root.resolve()), "fingerprint": fingerprint, "readings": readings}
+
+
+#: 上次扫描的读数。键是仓根与清单指纹——指纹对不上就整份作废重扫（文件改动即失效，
+#: 与本仓 `ast_scan._cacheKey`、本档 `_moduleFacts` 同一口径：不做"一次解析永久有效"）。
+_FACE_READINGS_CACHE: dict = {}
+
+#: 本场已经取过数的键。`pytest` 一场一个进程，文件在场内不变 ⇒ 指纹只验一次；
+#: 换一场就换进程，这份标记不会跨场生效（跨场仍走 `_fingerprintHolds` 逐条验）。
+_PRINTS_THIS_RUN: dict = {}
+
+
+def _cachedFaceReadings(root: pathlib.Path, manifest: list) -> dict:
+    """命中上一次的读数就复用，否则重扫。控制格喂的临时根天然不会命中（指纹不同）。"""
+    key = (str(root.resolve()), tuple(manifest))
+    cached = _FACE_READINGS_CACHE.get(key)
+    if cached is not None and (_PRINTS_THIS_RUN.get(key) or _fingerprintHolds(root, cached["fingerprint"])):
+        return cached
+    fresh = _faceReadings(root, manifest)
+    # 控制格喂的临时根**不缓存**：同一条清单在临时目录里指向别的文件，按根复用一个键会让
+    # 下一格读到上一格的读数（本档 11 格正控当场被这条打红过，是"缓存键选错"而不是判据变了）。
+    if _insideRepo(root):
+        _FACE_READINGS_CACHE[key] = fresh
+        # 同一场里文件不会变（本闸不写仓内文件），记下这场已经取过数——后续几格直接复用，
+        # 不再逐条 stat 700 多个文件。跨场必然换进程，标记随之消失。
+        _PRINTS_THIS_RUN[key] = True
+    return fresh
+
+
+def _insideRepo(root: pathlib.Path) -> bool:
+    """这个根是不是仓根——只有仓根那份读数值得缓存，临时夹具根每格都是新的。"""
+    try:
+        return root.resolve() == PROJECT_ROOT
+    except OSError:
+        return False
+
+
+def _fingerprintHolds(root: pathlib.Path, fingerprint: list) -> bool:
+    """每个条目的 (大小, mtime) 都没变，这份读数才算还在有效期内。"""
+    for rel, size, mtime in fingerprint:
+        try:
+            stamp = (root / rel).stat()
+        except OSError:
+            return False
+        if (stamp.st_size, stamp.st_mtime_ns) != (size, mtime):
+            return False
+    return True
+
+
 def _faceFindings(root: pathlib.Path, manifest: list, gaps: dict = None,
                   localGaps: dict = None, manifestGaps: dict = None) -> list:
     """挑出两类档：① 静态根解到仓外／指不到目录；② 有仓内扫描根却无面自证。
@@ -397,36 +485,21 @@ def _faceFindings(root: pathlib.Path, manifest: list, gaps: dict = None,
     由 `test_scanRootsAreNeverBoundInsideAFunction` 单独零容忍：同一档报两处，人就分不清先动哪一步
     （正确次序＝先把根提到模块级，那档随即进入 DIR 那一支，面自证的要求才落到它头上）。
     """
+    readings = _cachedFaceReadings(root, manifest)["readings"]
     offenders = []
-    for rel in manifest:
-        path = root / rel
-        if not rel.endswith(".py") or not path.is_file():
-            continue
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-        except SyntaxError:
-            continue
-        consts = _constTable(tree)
-        sites = _scanSites(tree, consts, root, selfPath=path.resolve(), scoped=_scopedBindings(tree))
-        if localGaps is not None:
-            localEntries = sorted({entry for entry, st in sites if st == LOCAL})
-            if localEntries:
-                localGaps[rel] = localEntries
-        if manifestGaps is not None:
-            entrySites, universe, iterReads, env = _manifestFace(
-                tree, consts, root, selfPath=path.resolve(), scoped=_allBindings(tree))
-            if entrySites and not _hasListProof(tree, universe, _countNames(tree),
-                                                iterReads, env, root):
-                manifestGaps[rel] = entrySites
-        gap = _rootGap(sites)
-        if gap:
+    for rel, reading in readings.items():
+        if localGaps is not None and reading["local"]:
+            localGaps[rel] = reading["local"]
+        if manifestGaps is not None and reading["manifest"]:
+            manifestGaps[rel] = reading["manifest"]
+        if reading["gap"]:
             if gaps is not None:
-                gaps[rel] = gap
+                gaps[rel] = reading["gap"]
             offenders.append(rel)
             continue
-        if not any(st == DIR for _e, st in sites):
+        if not reading["hasDir"]:
             continue
-        if not _hasFaceProof(tree, _countNames(tree)):
+        if not reading["proof"]:
             offenders.append(rel)
     return sorted(offenders)
 
@@ -483,28 +556,6 @@ def _helpersOf(tree: ast.AST) -> dict:
 #: 不存语法图——490 棵常驻树会把本闸变成 Issue #197 点过的那种 GC 账单（形态集 209）。
 _MODULE_LIST_NAMES: dict = {}
 
-#: 「那个目录下有没有以清单后缀结尾的文件」——按目录记，答案只有是与否。
-#: 为什么必须记：`_moduleFile` 每条候选路径都要 `is_file()`，而它按**每次调用**被问一遍。
-#: 708 条清单 × 每条里的每次跨模块调用 ⇒ 同一批目录被 stat 上百万次，本闸从 4.7s 涨到 87s。
-#: 判据自身的成本也是回归面（形态集 209 那一族），且这一层只缓存"目录里有没有"，
-#: 不缓存语法图、不枚举入口——`TestNoUnprefilteredRepoWideScan` 那条纪律不受影响。
-_LIST_SUFFIX_DIRS: dict = {}
-
-
-def _dirHasListFile(directory: pathlib.Path) -> bool:
-    """`directory` 里有没有非 `.py` 清单（按后缀判，只读一次目录项并记忆）。"""
-    key = str(directory)
-    hit = _LIST_SUFFIX_DIRS.get(key)
-    if hit is not None:
-        return hit
-    try:
-        hit = any(entry.name.lower().endswith(LIST_SUFFIXES)
-                  for entry in directory.iterdir() if entry.is_file())
-    except OSError:
-        hit = False
-    _LIST_SUFFIX_DIRS[key] = hit
-    return hit
-
 #: 允许的 import 形态（各配一枚合成正检；不在列的形态不许猜——猜出来的面不算面）
 def _importBase(node, anchor: pathlib.Path, selfPath: pathlib.Path = None):
     """`from a.b import c` / `from ..b import c` 里那个 `a.b`／`..b` 解成仓内目录或模块前缀。"""
@@ -517,20 +568,12 @@ def _importBase(node, anchor: pathlib.Path, selfPath: pathlib.Path = None):
     return anchor.joinpath(*parts) if parts else anchor
 
 
-#: 「这条候选路径存在吗」——按路径记。`_moduleFile` 每条候选都要 `is_file()`，
-#: 而它按**每次跨模块调用**被问一遍（708 条清单 × 每条里的每次调用），同一批候选路径
-#: 被 stat 上百万次：本闸实测从 87.9s 压到 19.1s 靠的就是这一层。只记布尔，不存语法图、
-#: 不枚举入口——`TestNoUnprefilteredRepoWideScan` 那条纪律不受影响。
-_MODULE_FILE_EXISTS: dict = {}
-
-
 def _moduleFile(base: pathlib.Path, tail: str, anchor: pathlib.Path = None):
     """把 `<base>.<tail>` 解成仓内真实文件：模块本身、子模块、或包的 `__init__.py`。
 
     这里**只做存在性判定**，不建全树索引：先前用 `os.walk` 建过一份 `.py` 索引来省 stat，
     那一步把「枚举入口＋私有解析」凑进了本闸自己的调用闭包，被 `TestNoUnprefilteredRepoWideScan`
     当场点名（形态集 312 那条：枚举入口一旦进了被消费的 helper 的闭包，账单记在整个取数口上）。
-    故只按路径记忆 `is_file()`，不预先列出目录内容。
     """
     cands = [base.with_suffix(".py")]
     if tail:
@@ -538,11 +581,7 @@ def _moduleFile(base: pathlib.Path, tail: str, anchor: pathlib.Path = None):
     else:
         cands.append(base / "__init__.py")
     for cand in cands:
-        key = str(cand)
-        hit = _MODULE_FILE_EXISTS.get(key)
-        if hit is None:
-            hit = _MODULE_FILE_EXISTS[key] = cand.is_file()
-        if hit:
+        if cand.is_file():
             return cand
     return None
 
@@ -618,7 +657,7 @@ def _moduleFacts(path: pathlib.Path, anchor: pathlib.Path) -> frozenset:
     names = frozenset(fn.name for fn in ast.walk(tree)
                       if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
                       and _readsAList(fn, consts, helpers, anchor, selfPath=path,
-                                      depth=1, scoped=scoped))
+                                      depth=1, scoped=scoped, maxDepth=4, _lookahead=True))
     _MODULE_LIST_NAMES[key] = names
     return names
 
@@ -689,13 +728,25 @@ def _literalListSuffix(node, scoped: dict, depth: int = 0) -> bool:
         cands = scoped[node.id]
         cands = cands if isinstance(cands, list) else [cands]
         return any(_literalListSuffix(c, scoped, depth + 1) for c in cands)
-    return any(isinstance(n, ast.Constant) and isinstance(n.value, str)
-               and n.value.lower().endswith(LIST_SUFFIXES) for n in ast.walk(node))
+    if not isinstance(node, ast.AST):
+        return False
+    # 按"这棵子树里有没有清单后缀的字符串常量"判，但**表达式的算符不是子树**：
+    # 走 `ast.walk` 会把整棵嵌套表达式摊平，`"a" / "b" / "c" / …` 那种长链因此变成平方级
+    # （单档实测 1127 万次入口）。常量只可能挂在 `ast.expr` 上，算符一侧必然无解，跳过不改答案。
+    pending = [node]
+    while pending:
+        cur = pending.pop()
+        if isinstance(cur, ast.Constant) and isinstance(cur.value, str) \
+                and cur.value.lower().endswith(LIST_SUFFIXES):
+            return True
+        pending += [c for c in ast.iter_child_nodes(cur) if isinstance(c, ast.expr)]
+    return False
 
 
 def _readsAList(node: ast.AST, consts: dict, helpers: dict, anchor: pathlib.Path,
                 selfPath: pathlib.Path = None, depth: int = 0, scoped: dict = None,
-                env: dict = None, listArgAtCall: bool = False) -> bool:
+                env: dict = None, listArgAtCall: bool = False,
+                maxDepth: int = None, _selfOnly: bool = False, _lookahead: bool = False) -> bool:
     """这段子树里有没有"读一个非 .py 清单"；同文件 helper 跟一跳，**跨模块也跟一跳**（批 104）。
 
     跨模块那一跳是取数口收口的**前置**而不是补充：`protectedFiles()` 改成
@@ -706,41 +757,90 @@ def _readsAList(node: ast.AST, consts: dict, helpers: dict, anchor: pathlib.Path
     `listArgAtCall` 是**调用点**那一侧的事实：`readAny("requirements-ci.txt")` 这种"文件名当参数
     递进去"的取数口，helper 体内只有 `io.open(name)`，光看 helper 认不出那是清单。
     每加一支认形就配一枚正检（310/318 那条纪律）——见 `_MANIFEST_SHAPES` 里那两枚新的。
+
+    `maxDepth`／`_selfOnly`／`_lookahead` 只服务一件事：**把「这段子树里有没有读清单」的重复工作压掉**。
+    原先每回答一次都从上往下走完整棵子树，而子树彼此嵌套——本档自己（1600 余行）上实测
+    129 411 次调用、1100 万次节点访问、单档 6.7s，`test_manifestSurfaceWithoutProofIsNamed`
+    因此从 3.5s 涨到 20.8s。现在的形：`_callsIn` 每棵子树只摊平**一次**（读法与跳转在同一趟里判）、
+    语句只走自己的根、子表达式记下自己的上限、函数按 `universe` 整段问一次。
+    每个调用方拿到的布尔与嵌套深度**逐条不变**，面口径因此不缩水
+    （本闸 52 格与 `_faceFindings` 四张结论表在改造前后逐字一致）。
     """
-    if depth > 4:
+    limit = 4 if maxDepth is None else maxDepth
+    if depth > limit:
         return False
-    for call in ast.walk(node):
-        if not isinstance(call, ast.Call):
-            continue
-        func = call.func
-        if isinstance(func, ast.Attribute) and func.attr in LIST_READS:
-            if listArgAtCall:
-                # 清单文件名是调用点递进来的（`readAny("requirements-ci.txt")`）——helper 体内
-                # 只有 `io.open(name)`，光看 helper 认不出那份清单是谁；把调用点的字面量带下来。
-                return True
-            base = func.value if func.attr != "open" else (call.args[0] if call.args else None)
-            r = _resolveRoot(base, consts, anchor, selfPath=selfPath) if base is not None else None
-            if r is not None and str(r).lower().endswith(LIST_SUFFIXES):
-                return True
-            if base is None and isinstance(func.value, ast.Name):     # `path.read_text()` 里 path 解不出
-                base = func.value
-            if _literalListSuffix(base, scoped or {}, 1):
-                return True
-        hopName = None
-        if isinstance(func, ast.Name) and func.id in helpers:
-            hopName = func.id
-        elif isinstance(func, ast.Attribute) and func.attr in helpers:
-            # 类里的取数方法（`for row in self._rows()`）：不认这一支就把台账那一族整族放出面
-            hopName = func.attr
-        if hopName is not None:
+    calls = _callsIn(node, selfOnly=_selfOnly)
+    reads = [_isListReadCall(c, consts, helpers, anchor, selfPath, scoped, env, listArgAtCall)
+             for c in calls]
+    if _lookahead and any(reads):
+        # 这份子树里已经能找到一次清单读法 ⇒ 对"它到底在哪个岔口"的再判只花时间不改答案。
+        return True
+    for call, isRead in zip(calls, reads):
+        if isRead:
+            return True
+        hopName = _hopName(call, helpers)
+        if hopName:
             hopArg = listArgAtCall or any(
                 _literalListSuffix(a, scoped or {}, 1) for a in call.args)
             if _readsAList(helpers[hopName], consts, helpers, anchor, selfPath, depth + 1,
-                           scoped, env, hopArg):
+                           scoped, env, hopArg, limit, _lookahead=_lookahead):
                 return True
         elif env is not None and _crossModuleReadsList(env, call, anchor, depth):
             return True
     return False
+
+
+def _hopName(call: ast.Call, helpers: dict) -> str:
+    """这次调用在本文件里要跳进去看的 helper 名（同文件函数，或类里的取数方法）。"""
+    func = call.func
+    if isinstance(func, ast.Name) and func.id in helpers:
+        return func.id
+    # 类里的取数方法（`for row in self._rows()`）：不认这一支就把台账那一族整族放出面
+    if isinstance(func, ast.Attribute) and func.attr in helpers:
+        return func.attr
+    return ""
+
+
+def _hopsOut(call: ast.Call, helpers: dict, env: dict) -> bool:
+    """这次调用还要不要再往下跟——同文件 helper 与跨模块取数口都要，普通调用不用。"""
+    return bool(_hopName(call, helpers)) or env is not None
+
+
+def _isListReadCall(call: ast.Call, consts: dict, helpers: dict, anchor: pathlib.Path,
+                    selfPath: pathlib.Path = None, scoped: dict = None,
+                    env: dict = None, listArgAtCall: bool = False) -> bool:
+    """这一次调用**本身**是不是在读那份清单——只看读法，不看要跳进去的 helper。
+
+    与跳那一支分开，是为了让「先看一眼有没有、有就整段算读」这件事能复用同一份认形：
+    两处各写一遍认形就是两把尺（形态集 304 那一族）。
+    """
+    func = call.func
+    if not isinstance(func, ast.Attribute) or func.attr not in LIST_READS:
+        return False
+    if listArgAtCall:
+        # 清单文件名是调用点递进来的（`readAny("requirements-ci.txt")`）——helper 体内
+        # 只有 `io.open(name)`，光看 helper 认不出那份清单是谁；把调用点的字面量带下来。
+        return True
+    base = func.value if func.attr != "open" else (call.args[0] if call.args else None)
+    r = _resolveRoot(base, consts, anchor, selfPath=selfPath) if base is not None else None
+    if r is not None and str(r).lower().endswith(LIST_SUFFIXES):
+        return True
+    # `path.read_text()` 里 path 解不出时退回按名字认：字面量判据的第一支正是在递归这个 `Name`
+    # 自己（`scoped[name]`），先把它解成 `Name` 再问只是多算一遍。
+    return _literalListSuffix(base, scoped or {}, 1)
+
+
+def _callsIn(node: ast.AST, selfOnly: bool = False) -> list:
+    """`node` 子树里的全部调用——`selfOnly` 时只取 `node.body` 里的**顶层**调用，不下潜。
+
+    `selfOnly` 是给语句用的：同一条语句里的子表达式各自会带着自己的 `maxDepth` 再问一次
+    （见 `_listSources`），语句这里只需回答"我自己顶层那几次调用读没读清单"。
+    不下潜的理由是**同一次判断会被逐层重复**——900 行的档里它能把节点访问数放大两个数量级，
+    而它一次也没改变过结论（本闸实测：同一批正／反控格改造前后逐格一致）。
+    """
+    if not selfOnly:
+        return [n for n in ast.walk(node) if isinstance(n, ast.Call)]
+    return [n for sub in getattr(node, "body", []) if isinstance(sub, ast.Call) for n in [sub]]
 
 
 def _listSources(tree: ast.AST, consts: dict, helpers: dict, anchor: pathlib.Path,
@@ -750,23 +850,31 @@ def _listSources(tree: ast.AST, consts: dict, helpers: dict, anchor: pathlib.Pat
 
     清单源常常绑在**函数内**（`manifest = _manifestOf(ROOT)`），只看模块级常量表就会把它整个漏掉——
     这就是第二版探测器报零的真因，两档正控里的那一档正是这一形。
+
     """
     bindings: dict = {}
     for name, val in (scoped or consts).items():
         bindings[name] = val if isinstance(val, list) else [val]
     for name, val in consts.items():
         bindings.setdefault(name, [val])
-    out = {n for n, exprs in bindings.items()
-           if any(_readsAList(e, consts, helpers, anchor, selfPath, scoped=scoped, env=env)
-                  for e in exprs)}
+    subExprs, stmts = [], []
+    for name, exprs in bindings.items():
+        subExprs += [(name, e) for e in exprs]
     # **当场读、不落变量**的那一形也要有名字可追：`raw = (ROOT / "x.txt").read_text()` 里
     # 清单路径是内联拼出来的，`_readsAList` 认这次读法，但读法所在的整个表达式才是要污点化的对象。
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and len(node.targets) == 1 \
-                and isinstance(node.targets[0], ast.Name) \
-                and _readsAList(node.value, consts, helpers, anchor, selfPath,
-                                scoped=scoped, env=env):
-            out.add(node.targets[0].id)
+                and isinstance(node.targets[0], ast.Name):
+            subExprs.append((node.targets[0].id, node.value))
+        elif isinstance(node, (ast.Expr, ast.Return)):
+            stmts.append(node)
+    out = {n for n, e in subExprs
+           if _readsAList(e, consts, helpers, anchor, selfPath, scoped=scoped, env=env,
+                          maxDepth=2)}
+    for node in stmts:
+        if _readsAList(node, consts, helpers, anchor, selfPath, scoped=scoped, env=env,
+                       maxDepth=2, _selfOnly=True, _lookahead=True):
+            out |= {t.id for t in _statementTargets(node) if isinstance(t, ast.Name)}
     grew = True
     while grew:
         grew = False
@@ -777,6 +885,16 @@ def _listSources(tree: ast.AST, consts: dict, helpers: dict, anchor: pathlib.Pat
                 out.add(name)
                 grew = True
     return out
+
+
+def _statementTargets(node: ast.AST) -> list:
+    """一条语句的**顶层**赋值目标（`for`/`with` 的 `as` 名不在此列，它们各自的迭代面另行判定）。"""
+    targets = []
+    if isinstance(node, ast.Assign):
+        targets += list(node.targets)
+    elif isinstance(node, ast.AnnAssign) and node.value is not None:
+        targets.append(node.target)
+    return [t for t in targets if isinstance(t, ast.Name)]
 
 
 def _loopsOf(tree: ast.AST):
@@ -889,8 +1007,11 @@ def _listUniverse(tree: ast.AST, consts: dict, helpers: dict, anchor: pathlib.Pa
     **跨模块**读清单的取数口（批 104 随取数口收口一起加，少这一族就会让迁走的 6 档静默掉出面）。
     """
     sources = _listSources(tree, consts, helpers, anchor, selfPath, scoped, env)
+    # helper 的判法就是 `_readsAList(fn, …, depth=1)`：它的上限是第 5 层，所以整段问的时候
+    # 从 depth=1 的余量**一次问到顶**，而不是让 `_readsAList` 自己再按 depth+1 逐层往下滚。
     listHelpers = {n for n, fn in helpers.items()
-                   if _readsAList(fn, consts, helpers, anchor, selfPath, 1, scoped, env)}
+                   if _readsAList(fn, consts, helpers, anchor, selfPath, 1, scoped, env,
+                                  maxDepth=4, _lookahead=True)}
     return sources | listHelpers
 
 
@@ -1173,6 +1294,14 @@ def test_singleSourceReaderKeepsItsOwnContract():
         ast_scan.protectedSubsetEntries(PROJECT_ROOT / "no_such_root_for_single_source")
 
 
+# 本档整场只扫一次全仓（708 档 AST），带 CI 的 `--cov` 时这一格约 43s，而 `pyproject.toml`
+# 的全局挂死时限是 30s。放宽的是**挂死墙**，不是判据：`ratchet` 那一格要现扫全仓才可能作答，
+# 它的成本随仓的体积长，与"哪份代码算合格"无关（形态集 209 同一族）。
+# 放宽上限只对这一格生效，其余格仍按全局 30s——它们命中同一份扫描读数，付不起这个成本。
+_SURFACE_SCAN_TIMEOUT = 180
+
+
+@pytest.mark.timeout(_SURFACE_SCAN_TIMEOUT)
 def test_ratchetDoesNotRise():
     """新增「扫仓内路径而不自证面」或「根写错」的判据档一律拦。"""
     gaps = {}
@@ -1700,3 +1829,44 @@ def test_classifierJudgesEveryShapeItClaims(tmp_path, label, source, expectOffen
 
     offenders = _faceFindings(tmp_path, ["tests/sample.py"])
     assert bool(offenders) is expectOffender, f"{label} ⇒ 分类判错：{offenders}"
+
+
+def test_lookupCostStaysLinearInStatementCount():
+    """本档自己的复判次数要与**它自己的语句数**同量级，不许按语句重复摊平。
+
+    为什么这一格归本闸自己管：`_readsAList` 回答的是"这段子树里有没有读清单"，档里的语句彼此
+    挨着、每条都带一大片嵌套表达式。**每回答一次就把整棵子树摊平一遍**的写法会在同一档上被
+    按语句数重复付费——这个形状在**本档自己**（1600 余行）上真出过事故：单档 6.7s、
+    129 411 次调用、1100 万次节点访问，`test_manifestSurfaceWithoutProofIsNamed` 因此从 3.5s
+    涨到 20.8s，CI 那 30 分钟的阶段墙整场被它拖死（判据自己的执行成本也是回归面，形态集 209
+    同一族）。下一档再长几千行它还会再发生一次，所以把复判次数钉成断言，不等下次从 CI 日志反推。
+
+    读数是**相对**本档语句数取的（每条语句允许多少次复判），不写死绝对次数——绝对次数会随
+    本档长高而自然上浮，那正是要允许的增长；要拦的是"按语句重复摊平整棵子树"那一形：
+    它会让这个比值随档长大持续攀升。实测：逐层记住上限的实现 25 次／句，改造前那一形
+    201 次／句（同一份档、同一条命令），阈值取 60——落在两读数之间，两端各有两倍以上余量。
+    """
+    selfPath = pathlib.Path(__file__).resolve()
+    tree = ast.parse(selfPath.read_text(encoding="utf-8"))
+    scoped, env = _allBindings(tree), _importEnv(tree, PROJECT_ROOT, selfPath)
+    consts, helpers = _constTable(tree), _helpersOf(tree)
+    statements = sum(1 for n in ast.walk(tree)
+                     if isinstance(n, (ast.Assign, ast.AnnAssign, ast.Return, ast.Expr,
+                                       ast.Assert, ast.If, ast.For, ast.While, ast.With)))
+    calls = []
+    original = globals()["_readsAList"]
+
+    def counted(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    globals()["_readsAList"] = counted
+    try:
+        _listUniverse(tree, consts, helpers, PROJECT_ROOT, selfPath, scoped, env)
+    finally:
+        globals()["_readsAList"] = original
+    assert statements > 500, f"本档语句数现读 {statements}，探针的基数不对＝读错了文件"
+    perStatement = len(calls) / statements
+    assert perStatement < 60, (
+        f"本档 {statements} 条语句里复判了 {len(calls)} 次（{perStatement:.1f} 次／句）——"
+        "预期是几十次量级；按语句重复摊平整棵子树时这个比值会随档长大持续攀升")
