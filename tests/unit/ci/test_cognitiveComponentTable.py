@@ -34,6 +34,36 @@ def _loadGenerator():
     return module
 
 
+#: 生成器算一次组件表要遍历整个认知层（本机 3–9s，CI 上更慢），而本档九格问的都是**同一张表**。
+#: 逐格重算等于把同一趟扫描付九遍：CI 实测本档 126s，是受保护子集里最贵的一档。
+#: 这里按「生成器文件 + 认知层各模块的大小与 mtime」缓存一次结果，文件一改即失效——
+#: 与本仓 `ast_scan._cacheKey` 同一口径，不做"一次解析永久有效"。
+_ROWS_CACHE: dict = {}
+
+
+def _layerStamp() -> tuple:
+    """认知层里每个 .py 的 (相对路径, 大小, mtime)——表的内容只由这些文件决定。"""
+    layer = REPO_ROOT / "neurova" / "cognitive_layers"
+    stamp = []
+    for path in sorted(layer.rglob("*.py")):
+        info = path.stat()
+        stamp.append((str(path.relative_to(REPO_ROOT)), info.st_size, info.st_mtime_ns))
+    return tuple(stamp)
+
+
+def _componentRows(gen):
+    """整档共享的一份组件表读数（生成器模块与认知层都没变就复用）。"""
+    key = (_scriptStamp(), _layerStamp())
+    if key not in _ROWS_CACHE:
+        _ROWS_CACHE[key] = gen.componentRows()
+    return _ROWS_CACHE[key]
+
+
+def _scriptStamp() -> tuple:
+    info = SCRIPT.stat()
+    return (info.st_size, info.st_mtime_ns)
+
+
 class TestGeneratorAndDocExist:
     def test_scriptExistsAndIsTracked(self):
         assert SCRIPT.is_file(), f"生成器不在场：{SCRIPT}"
@@ -60,21 +90,21 @@ class TestMachineBlocksMatchGenerator:
     def test_summaryBlockMatches(self):
         gen = _loadGenerator()
         actual = gen.extractBlock(DOC.read_text(encoding="utf-8"), gen.SUMMARY_BEGIN, gen.SUMMARY_END)
-        expected = gen.renderSummary(gen.componentRows())
+        expected = gen.renderSummary(_componentRows(gen))
         assert actual.strip() == expected.strip(), (
             "组件表摘要与生成器不一致——跑 `python scripts/ci/cognitive_component_table.py --write`")
 
     def test_tableBlockMatches(self):
         gen = _loadGenerator()
         actual = gen.extractBlock(DOC.read_text(encoding="utf-8"), gen.TABLE_BEGIN, gen.TABLE_END)
-        expected = gen.renderTable(gen.componentRows())
+        expected = gen.renderTable(_componentRows(gen))
         assert actual.strip() == expected.strip(), (
             "组件表与生成器不一致——跑 `python scripts/ci/cognitive_component_table.py --write`")
 
 
 class TestTableIsNotVacuous:
     def test_rowsCoverTheWholeLayer(self):
-        rows = _loadGenerator().componentRows()
+        rows = _componentRows(_loadGenerator())
         # §6-380 退役 agent_self/memory_stream 后现值 90；下限随批次更新，不许无声塌缩。
         assert len(rows) >= 90, f"组件表只 {len(rows)} 行？认知层的模块远不止这些"
         sublayers = {r["sublayer"] for r in rows}
@@ -82,7 +112,7 @@ class TestTableIsNotVacuous:
 
     def test_statusesPartitionTheRows(self):
         gen = _loadGenerator()
-        rows = gen.componentRows()
+        rows = _componentRows(gen)
         counts = {}
         for row in rows:
             counts[row["status"]] = counts.get(row["status"], 0) + 1
@@ -92,7 +122,7 @@ class TestTableIsNotVacuous:
         assert len(counts) >= 3, f"只剩 {len(counts)} 种状态，表的区分度已塌：{counts}"
 
     def test_everyRowPathExists(self):
-        rows = _loadGenerator().componentRows()
+        rows = _componentRows(_loadGenerator())
         missing = [r["path"] for r in rows if not (REPO_ROOT / r["path"]).is_file()]
         assert not missing, f"表里有不存在/未跟踪的路径：{missing[:6]}"
 
@@ -124,7 +154,7 @@ class TestAggregateAgreesWithTheSinglePoint:
 class TestComparisonItselfHasTeeth:
     def test_tamperedBlockIsDetected(self):
         gen = _loadGenerator()
-        good = gen.renderTable(gen.componentRows())
+        good = gen.renderTable(_componentRows(gen))
         tampered = good.replace("在役", "在役 ", 1) if "在役" in good else good + " "
         assert tampered != good
         assert gen.extractBlock(tampered, gen.TABLE_BEGIN, gen.TABLE_END) != gen.renderTable(
