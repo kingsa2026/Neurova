@@ -794,6 +794,7 @@ export default {
 
 
   knowledge: {
+    workbenchShowIsolated: 'إظهار المعزولة',
     workbenchFilterTypes: 'تصفية حسب النوع',
     workbenchFullGraph: 'الرسم الكامل',
     duplicateMerged: 'المحتوى موجود مسبقًا: تم دمج هذا المصدر في سلسلة أصل الإدخال الموجود',

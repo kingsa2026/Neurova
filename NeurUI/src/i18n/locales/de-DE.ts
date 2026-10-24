@@ -794,6 +794,7 @@ export default {
 
 
   knowledge: {
+    workbenchShowIsolated: 'Isolierte anzeigen',
     workbenchFilterTypes: 'Nach Typ filtern',
     workbenchFullGraph: 'Gesamtgraph',
     duplicateMerged: 'Inhalt existiert bereits: Quelle wurde in die Herkunftskette des bestehenden Eintrags eingefügt',
