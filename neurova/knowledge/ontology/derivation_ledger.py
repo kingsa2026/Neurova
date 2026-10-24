@@ -161,6 +161,17 @@ class DerivationLedger:
         return sum(self._retractDerived(r["derived_fact_id"], "规则 %s 改版为 %s" % (ruleId, keepVersion))
                    for r in rows)
 
+    def retractAllFromRule(self, ruleId: str, reason: str = "") -> int:
+        """规则退场：它推过的结论全撤，不分版本——删除比改版更彻底，
+        保留任何一批"规则已不存在"的结论，都是拿着死规则对外检索。"""
+        with self._store._lock:
+            rows = self._store._conn.execute(
+                "SELECT DISTINCT derived_fact_id FROM knowledge_derivation_edges"
+                " WHERE rule_id = ? ORDER BY derived_fact_id", (ruleId,)).fetchall()
+        return sum(self._retractDerived(r["derived_fact_id"],
+                                        reason or "规则 %s 已删除" % ruleId)
+                   for r in rows)
+
     def _retractDerived(self, factId: str, reason: str) -> int:
         """先退它自己的下游，再退它自己——深层先走，浅层才不会引用一条已经没了的前提。"""
         downstream = 0

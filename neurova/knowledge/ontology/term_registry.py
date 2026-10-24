@@ -214,6 +214,45 @@ class OntologyTermRegistry:
                    self._store._conn.execute(sql + " ORDER BY term_id", params).fetchall()]
         return [self.term(i) for i in ids if self.term(i)]
 
+    def dropTerm(self, termId: str) -> None:
+        """删除术语。子术语判据在这里守最后一道：悬空 parent 边比缺一个类型更糟；
+        事实/主体类型/规则引用由写入口按 impactOf 面先行裁定。"""
+        termId = str(termId or "").strip()
+        with self._store._lock, self._store._conn:
+            child = self._store._conn.execute(
+                "SELECT term_id FROM ontology_terms WHERE parent_term_id = ?",
+                (termId,)).fetchone()
+            if child:
+                raise ValueError(
+                    "术语 %s 仍有子术语 %s——先处理子术语" % (termId, child["term_id"]))
+            cur = self._store._conn.execute(
+                "DELETE FROM ontology_terms WHERE term_id = ?", (termId,))
+            if cur.rowcount == 0:
+                raise LookupError("术语未登记: %s" % termId)
+
+    def impactOf(self, termId: str) -> Dict[str, Any]:
+        """术语在本域的引用面：谓词事实、主体类型断言、子术语。
+
+        规则引用归 `ForwardChainingEngine.ruleReferences`——各自的表各自报数，
+        不在这里替规则表抄一遍清单。
+        """
+        with self._store._lock:
+            factCount = self._store._conn.execute(
+                "SELECT COUNT(*) AS n FROM knowledge_facts"
+                " WHERE predicate_term_id = ? AND status = 'active'", (termId,)).fetchone()["n"]
+            typedSubjects = self._store._conn.execute(
+                "SELECT COUNT(*) AS n FROM knowledge_subjects WHERE type_term_id = ?",
+                (termId,)).fetchone()["n"]
+            children = [r["term_id"] for r in self._store._conn.execute(
+                "SELECT term_id FROM ontology_terms WHERE parent_term_id = ? ORDER BY term_id",
+                (termId,)).fetchall()]
+        return {
+            "term_id": termId,
+            "fact_count": int(factCount),
+            "typed_subject_count": int(typedSubjects),
+            "child_terms": children,
+        }
+
     def isSubtypeOf(self, termId: str, ancestorId: str, _seen: Optional[set] = None) -> bool:
         seen = _seen or set()
         if termId in seen:
