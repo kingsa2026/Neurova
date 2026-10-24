@@ -48,9 +48,12 @@
             >
               {{ t('knowledge.workbenchFocusNode') }}
             </GlassButton>
+            <a-checkbox v-model:checked="showIsolated" class="isolated-toggle">
+              {{ t('knowledge.workbenchShowIsolated') }}
+            </a-checkbox>
             <span class="canvas-count">{{ filteredNodes.length }}/{{ studio?.nodes?.length ?? 0 }}</span>
           </div>
-          <div class="canvas-wrap">
+          <div ref="canvasWrapRef" class="canvas-wrap">
             <GraphExplorer3D
               v-if="viewMode === '3d'"
               class="explorer3d-embed"
@@ -61,12 +64,14 @@
             />
             <VueFlow
               v-else-if="filteredNodes.length"
+              :key="`${dataVersion}-${viewMode}`"
               :nodes="flowNodes"
               :edges="flowEdges"
               :fit-view-on-init="true"
-              :min-zoom="0.2"
+              :min-zoom="0.35"
               :max-zoom="2"
               class="workbench-flow"
+              @pane-ready="onPaneReady"
               @node-click="onFlowNodeClick"
             >
               <Background />
@@ -258,7 +263,7 @@ import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { useAuthStore } from '@/stores/auth'
 import { request } from '@/api'
-import { layeredLayout } from '@/pages/graph-workbench/layout'
+import { radialLayout } from '@/pages/graph-workbench/radial'
 
 // 3D/地图都是重依赖（WebGL/three、maplibre），defineAsyncComponent 懒加载：
 // 不切到对应视图就不下载，2D 主路径的包体不受影响。
@@ -295,6 +300,7 @@ interface StudioData {
 }
 
 const loading = ref(false)
+const canvasWrapRef = ref<HTMLElement | null>(null)
 const studio = ref<StudioData | null>(null)
 const activeTab = ref<'ontology' | 'instance' | 'spatial'>('ontology')
 const viewMode = ref<'2d' | '3d'>('2d')
@@ -320,7 +326,19 @@ const instanceForm = reactive({
 
 const flowNodes = computed(() => {
   const nodes = filteredNodes.value
-  const positions = layeredLayout(nodes)
+  // 放射布局：以选中节点为根（聚焦后以其为圆心重铺），无选中取度数枢纽——
+  // 子树扇区不相交，树边互不交叉。
+  const positions = radialLayout(
+    nodes, (studio.value?.edges ?? []) as never, selectedNodeId.value || undefined)
+  // 自算包围盒（视口居中的唯一依据，不依赖 vue-flow 的节点测量）。
+  if (positions.size) {
+    const xs = Array.from(positions.values()).map((p) => p.x)
+    const ys = Array.from(positions.values()).map((p) => p.y)
+    layoutBounds = {
+      minX: Math.min(...xs), maxX: Math.max(...xs),
+      minY: Math.min(...ys), maxY: Math.max(...ys),
+    }
+  }
   return nodes.map((n) => ({
     id: n.id,
     label: n.label,
@@ -330,6 +348,36 @@ const flowNodes = computed(() => {
     class: n.id === selectedNodeId.value ? 'wb-node-selected' : '',
   }))
 })
+
+// fit-view-on-init 的实测缺陷：其包围盒测量与 zoom 夹取组合会把视口平移到
+// 节点区之外（『看起来空』的真身——节点全渲染着，只是屏外）。命令式
+// useVueFlow / pane-ready 同步 fitView 还会静默中止整组件渲染。最终方案
+// 完全自持：布局坐标是自己算的（radialLayout 输出），包围盒不依赖 vue-flow
+// 测量——pane-ready 后按自算包围盒直接 setViewport 居中，zoom 夹 [0.35,1.2]。
+const dataVersion = ref(0)
+const flowInstance = ref<any>(null)
+let layoutBounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 }
+const onPaneReady = (instance: any) => {
+  flowInstance.value = instance
+  setTimeout(() => {
+    try {
+      const el = canvasWrapRef.value
+      if (!el || !el.clientWidth) return
+      const bw = layoutBounds.maxX - layoutBounds.minX + 160
+      const bh = layoutBounds.maxY - layoutBounds.minY + 160
+      const zoom = Math.max(0.35, Math.min(1.2, Math.min(el.clientWidth / bw, el.clientHeight / bh)))
+      const cx = (layoutBounds.minX + layoutBounds.maxX) / 2
+      const cy = (layoutBounds.minY + layoutBounds.maxY) / 2
+      flowInstance.value?.setViewport({
+        x: el.clientWidth / 2 - cx * zoom,
+        y: el.clientHeight / 2 - cy * zoom,
+        zoom,
+      })
+    } catch {
+      // 视口计算失败保留默认，不中止渲染
+    }
+  }, 80)
+}
 const flowEdges = computed(() =>
   (studio.value?.edges ?? []).map((e, index) => ({
     id: `e-${index}`,
@@ -342,12 +390,27 @@ const flowEdges = computed(() =>
 const relationTerms = computed(() =>
   (studio.value?.schema?.terms ?? []).filter((term) => term.kind === 'relation'))
 const schemaRules = computed(() => studio.value?.schema?.rules ?? [])
+const showIsolated = ref(false)
+// 无边节点在关系图里没有布局意义：几十个孤立点会把放射图撑爆、fit 后
+// 全部不可读（『看起来空』的最终根因之一）。默认隐藏，开关显式打开才显示。
+const connectedIds = computed(() => {
+  const ids = new Set<string>()
+  for (const e of studio.value?.edges ?? []) {
+    if (e.source === e.target) continue
+    ids.add(e.source)
+    ids.add(e.target)
+  }
+  return ids
+})
 const filteredNodes = computed(() => {
   const needle = nodeFilter.value.trim().toLowerCase()
-  const nodes = studio.value?.nodes ?? []
-  if (!needle) return nodes
-  return nodes.filter((n) =>
-    n.label.toLowerCase().includes(needle) || n.id.toLowerCase().includes(needle))
+  const all = studio.value?.nodes ?? []
+  const searched = needle
+    ? all.filter((n) =>
+        n.label.toLowerCase().includes(needle) || n.id.toLowerCase().includes(needle))
+    : all
+  if (showIsolated.value || needle) return searched
+  return searched.filter((n) => connectedIds.value.has(n.id))
 })
 const focusFirstMatch = () => {
   const hit = filteredNodes.value[0]
@@ -370,6 +433,7 @@ const fetchStudio = async () => {
   try {
     const res: any = await request.get(`/knowledge-graph/${agentId.value}/studio`)
     studio.value = res?.data ?? res
+    dataVersion.value++
   } catch (e: any) {
     message.error(e?.message || t('common.error'))
   } finally {
