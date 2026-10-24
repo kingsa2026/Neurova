@@ -14,6 +14,9 @@
       <a-tag v-if="truncated" color="orange">{{ t('knowledge.workbenchTruncatedHint', { total: totalNodes }) }}</a-tag>
     </div>
     <div ref="containerRef" class="explorer3d-canvas"></div>
+    <div v-if="empty3d && !loading" class="explorer3d-empty">
+      <a-empty :description="t('common.noData')" />
+    </div>
   </div>
 </template>
 
@@ -43,6 +46,7 @@ const containerRef = ref<HTMLElement | null>(null)
 const loading = ref(false)
 const focusInput = ref('')
 const hops = ref(2)
+const empty3d = ref(false)
 const truncated = ref(false)
 const totalNodes = ref(0)
 
@@ -81,20 +85,34 @@ const render = async (data: { nodes?: any[]; edges?: any[] }) => {
   const links = (data?.edges ?? []).map((e: any) => ({
     source: e.source, target: e.target, relation: e.relation,
   }))
+  empty3d.value = nodes.length === 0
   if (!graph) {
     const mod = await import('3d-force-graph')
+    // v1.80 起是类构造 new ForceGraph3D(element)：旧版 Kapsule 双调用
+    // ForceGraph3D()(el) 会把 class 当普通函数调，TypeError 后静默空白。
     const ForceGraph3D = (mod as any).default ?? mod
     if (!containerRef.value || disposed) return
-    graph = ForceGraph3D()(containerRef.value)
-      .backgroundColor('rgba(0,0,0,0)')
-      .nodeLabel((node: any) => String(node?.name ?? node?.id ?? ''))
-      .nodeColor((node: any) =>
-        node?.id === currentNodeId.value ? '#f59e0b' : '#6366f1')
-      .onNodeClick((node: any) => {
-        currentNodeId.value = String(node?.id ?? '')
-        emit('select', currentNodeId.value, String(node?.name ?? ''))
-        if (graph) graph.nodeColor(graph.nodeColor())
-      })
+    try {
+      graph = new ForceGraph3D(containerRef.value)
+        .backgroundColor('rgba(0,0,0,0)')
+        .nodeLabel((node: any) => String(node?.name ?? node?.id ?? ''))
+        .nodeColor((node: any) =>
+          node?.id === currentNodeId.value ? '#f59e0b' : '#6366f1')
+        .onNodeClick((node: any) => {
+          currentNodeId.value = String(node?.id ?? '')
+          emit('select', currentNodeId.value, String(node?.name ?? ''))
+          if (graph) graph.nodeColor(graph.nodeColor())
+        })
+      if (containerRef.value.clientWidth) {
+        graph.width(containerRef.value.clientWidth)
+        graph.height(containerRef.value.clientHeight)
+      }
+    } catch (e: any) {
+      // 渲染器初始化失败（WebGL 缺席/依赖形状变化）落可见提示，不静默空白。
+      message.error(e?.message || t('common.error'))
+      empty3d.value = true
+      return
+    }
   }
   graph.graphData({ nodes, links })
 }
@@ -138,6 +156,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .explorer3d-wrap {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--nr-space-sm);
@@ -164,11 +183,20 @@ onBeforeUnmount(() => {
 }
 
 .explorer3d-canvas {
-  flex: 1;
+  position: relative;
   min-height: 420px;
   border: 1px solid var(--nr-glass-border);
   border-radius: var(--nr-radius-md, 12px);
   background: var(--nr-bg-inset);
   overflow: hidden;
+}
+
+.explorer3d-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
 }
 </style>
