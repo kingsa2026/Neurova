@@ -36,6 +36,9 @@ import subprocess
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+#: `git ls-files` 的预算唯一出处（毫秒级；取低于全局 30s 这一形，见 §6-402 批 K 口径）。
+GIT_WALL_S = 20
 from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 
 #: 本批（Issue #197）交付或修订的判据文件。逐条列明它守什么，避免变成无注释的
@@ -93,7 +96,7 @@ def test_registered_batch_judgements_are_tracked_by_git():
     files = sorted(BATCH_JUDGEMENTS)
     result = subprocess.run(
         ["git", "ls-files", *files],
-        cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=60,
+        cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=GIT_WALL_S,
     )
     tracked = {line.strip() for line in result.stdout.splitlines() if line.strip()}
     assert tracked == set(files), (

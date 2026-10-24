@@ -58,6 +58,11 @@ import pytest
 yaml = pytest.importorskip("yaml")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+#: 子进程预算唯一出处；跑的是 `scripts/ci/npc_role_admission.py`（实测毫秒级）。取低于
+#: 全局 30s 的值——子进程先到点报诚实的 TimeoutExpired，全局那道 thread 法的墙不该先赢
+#: （§6-402 批 K 口径）。
+PROBE_WALL_S = 20
 CNB = PROJECT_ROOT / ".cnb.yml"
 SETTINGS = PROJECT_ROOT / ".cnb" / "settings.yml"
 
@@ -323,7 +328,8 @@ class TestRosterKeepsTheBareDSCoderRole:
         env["CNB_NPC_NAME"] = self.BARE_ROLE
         proc = subprocess.run(
             [sys.executable, str(script)],
-            capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env, timeout=60,
+            capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env,
+            timeout=PROBE_WALL_S,
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr
 
@@ -367,7 +373,8 @@ class TestRosterRestoresTheMaxAliasRole:
         env["CNB_NPC_NAME"] = self.RESTORED_ROLE
         proc = subprocess.run(
             [sys.executable, str(script)],
-            capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env, timeout=60,
+            capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env,
+            timeout=PROBE_WALL_S,
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr
 
