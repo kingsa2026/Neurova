@@ -495,7 +495,26 @@ class MemoryRetrievalChain:
                 retrieval_time=time.monotonic() - start_time,
             )
 
-        # 选择质量最高的结果
+        # 可选链级 RRF：图谱/记忆/知识并列时不再只选一个最高 quality。
+        from neurova.agent.retrieval_fusion import fuseRetrievalResults, fusionEnabled
+
+        if fusionEnabled() and len(valid_results) > 1:
+            fused, fusionMeta = fuseRetrievalResults(
+                valid_results, limit=context.limit
+            )
+            if fused:
+                best = max(valid_results, key=lambda r: r.quality)
+                return RetrievalResult(
+                    memories=fused,
+                    source="rrf_fusion",
+                    quality=best.quality,
+                    quality_level=best.quality_level,
+                    retrieval_time=time.monotonic() - start_time,
+                    metadata={"retrieval_fusion": fusionMeta,
+                              "retriever_type": "rrf_fusion"},
+                )
+
+        # 选择质量最高的结果（legacy 默认）
         best_result = max(valid_results, key=lambda r: r.quality)
         best_result.retrieval_time = time.monotonic() - start_time
 

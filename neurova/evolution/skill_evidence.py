@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 from neurova.core.data_root import dataPath, get_data_root
-from neurova.skills.evolution_inputs_guard import bound_text, redact_secrets
+from neurova.skills.evolution_inputs_guard import bound_text, redact_structure
 
 FULL_FIELD_CAP = 50_000
 MAX_EVIDENCE_FILES = 100
@@ -53,31 +53,34 @@ def scanForGraderVerdicts(value: Any) -> list[str]:
     return [marker for marker in GRADER_VERDICT_MARKERS if marker in text]
 
 
+def _evidenceText(value: Any) -> str:
+    """**先脱敏结构、再序列化**（§6-415：顺序反过来就是漏点）。
+
+    今天这两条写入口是 `json.dumps` 之后再对整串文本跑正则，嵌套字符串里的引号一旦
+    被转义成 `\\"`，值档只能吃到第一个空白，后半截原样进证据（活体读数见台账本格）。
+    结构在变成文本之前干净，文本就没有"再猜一次引号在哪闭合"这件事。
+    `scanForGraderVerdicts` 不走这里：它是**读侧**标记扫描，替它脱敏等于改判定口径。
+    """
+    cleaned = redact_structure(value)
+    if isinstance(cleaned, str):
+        return cleaned
+    try:
+        return json.dumps(cleaned, ensure_ascii=False, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        return repr(cleaned)
+
+
 def summarizeSkillIO(value: Any, *, max_chars: int = 2000) -> str:
     """把一次技能执行的输入/产物压成有界、脱敏的证据摘要。"""
     if value is None:
         return ""
-    if isinstance(value, str):
-        text = value
-    else:
-        try:
-            text = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
-        except (TypeError, ValueError):
-            text = repr(value)
-    return bound_text(redact_secrets(text), max_chars=max_chars)
+    return bound_text(_evidenceText(value), max_chars=max_chars)
 
 
 def _full(value: Any) -> str:
     if value is None:
         return ""
-    if isinstance(value, str):
-        text = value
-    else:
-        try:
-            text = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
-        except (TypeError, ValueError):
-            text = repr(value)
-    return bound_text(redact_secrets(text), max_chars=FULL_FIELD_CAP)
+    return bound_text(_evidenceText(value), max_chars=FULL_FIELD_CAP)
 
 
 def _safe(value: Any) -> str:
@@ -101,11 +104,11 @@ def _sanitizeTrace(trace: list) -> list[dict]:
             "tool": str(item.get("tool") or ""),
             "layer": str(item.get("layer") or ""),
             "params": bound_text(
-                redact_secrets(str(item.get("params") or "")), max_chars=500
+                str(redact_structure(item.get("params") or "")), max_chars=500
             ),
             "success": item.get("success"),
             "error": bound_text(
-                redact_secrets(str(item.get("error") or "")), max_chars=300
+                str(redact_structure(item.get("error") or "")), max_chars=300
             ),
             "duration_ms": item.get("duration_ms", 0),
         }

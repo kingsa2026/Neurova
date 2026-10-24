@@ -23,6 +23,18 @@ from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
+from neurova.security.sensitive_info import (
+    SENSITIVE_RULES,
+    SensitivityLevel,
+    SensitiveRule,
+    sanitizeSensitive,
+)
+
+
+def _sharedRules():
+    """默认敏感输出形状的唯一出处（供上面的 dataclass 默认值取用）。"""
+    return SENSITIVE_RULES
+
 #: 速率限制的渠道维度。internal 沿用既有额度档；externalAgent 是外部 Agent 接入
 #: （API Key / 握手 / 消息投递）专用档——其批量同步量级远高于人用交互，不能同人用额度。
 CHANNEL_INTERNAL = "internal"
@@ -58,15 +70,12 @@ class GlobalRuleSet:
             "C:\\Users",
         ]
     )
+    #: 默认形状派生自 `security/sensitive_info.SENSITIVE_RULES`（唯一出处，§6-411 批 O-5）。
+    #: 收口前这里是**裸词**（`api[_-]?key`／`password`／`token`……）——`sub("[REDACTED]")`
+    #: 打码的是关键词本身：含 "token" 的正常说明文字被打码，而 `password=真值` 里的真值
+    #: 一个字符没少。规则必须**含值**，值形状与键值式都由单源表给。
     sensitive_output_patterns: List[str] = field(
-        default_factory=lambda: [
-            r"api[_-]?key",
-            r"password",
-            r"secret",
-            r"token",
-            r"Bearer\s+\S+",
-            r"sk-\w+",
-        ]
+        default_factory=lambda: [rule.pattern.pattern for rule in _sharedRules()]
     )
     llm_trust_domains: List[str] = field(
         default_factory=lambda: [
@@ -143,8 +152,12 @@ class AgentFirewall:
         self._rateQuotaTtlSeconds = 60.0
         self._rateQuotaCache: Dict[str, Tuple[Optional[int], float]] = {}
 
-        # 编译敏感输出正则
-        self._sensitive_patterns = [re.compile(p, re.IGNORECASE) for p in self._global_rules.sensitive_output_patterns]
+        # 敏感输出规则**不在构造期编译**：改前这里是"先编译（:147）再 `_load()`（:150）"，
+        # 于是配置文件里的 `sensitive_output_patterns` 永远进不了已编译的那份——只写不读。
+        # 现在调用时现取（同 `core/base_module.py:47` 对总线写的那条口径：构造期冻结的东西，
+        # 挡不住后来改配置），缓存只在名单真变了的时候失效。
+        self._sensitiveRulesCache: Optional[Tuple[str, ...]] = None
+        self._sensitiveRules: Optional[List] = None
 
         # 加载配置
         self._load()
@@ -415,10 +428,28 @@ class AgentFirewall:
         Returns:
             脱敏后的文本
         """
-        result = text
-        for pattern in self._sensitive_patterns:
-            result = pattern.sub("[REDACTED]", result)
-        return result
+        # 打码引擎只有一份：本函数以前自己写一遍 `sub("[REDACTED]")` 的循环，
+        # 现在把当前生效的规则表交给单源引擎（形状由规则自己带，不再由出口各定一种）。
+        return sanitizeSensitive(text, rules=self._effectiveSensitiveRules())
+
+    def _effectiveSensitiveRules(self) -> List:
+        """当前配置里的敏感输出形状 → 共享规则对象（名单没变就复用缓存）。"""
+        current = tuple(self._global_rules.sensitive_output_patterns)
+        if self._sensitiveRulesCache == current and self._sensitiveRules is not None:
+            return self._sensitiveRules
+        shared = {rule.pattern.pattern: rule for rule in SENSITIVE_RULES}
+        rules = []
+        for raw in current:
+            rule = shared.get(raw)
+            if rule is None:  # 配置里自定义的形状：整段打码，键名不强留
+                rule = SensitiveRule(
+                    name="configured", pattern=re.compile(raw, re.IGNORECASE),
+                    severity=SensitivityLevel.HIGH, description="配置指定的敏感输出形状",
+                )
+            rules.append(rule)
+        self._sensitiveRulesCache = current
+        self._sensitiveRules = rules
+        return rules
 
     def check_file_access(self, filepath: str, user_id: str = "") -> Tuple[bool, str]:
         """

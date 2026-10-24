@@ -163,7 +163,7 @@ class TestPhantomKnobSweep:
         corpus = len(ast_scan.filesUnder(PROD_ROOT, ".py"))
         # 面自证：语料量级先立住，下面两条"命中涨满语料"才有对象可比。根被改窄时 corpus 会
         # 跟着变小，两条旧断言反而更容易通过——那正是"零缺陷"的假绿。
-        assert corpus > 300, (
+        assert corpus >= 800, (
             f"语料现读 {corpus} 个 .py（根＝{PROD_ROOT}）——量级不对＝根指错，缓存判据失去对象")
         cache = ast_scan._cachedCode
         if not hasattr(cache, "cache_info"):

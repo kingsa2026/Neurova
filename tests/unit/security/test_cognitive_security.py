@@ -289,3 +289,25 @@ class TestCognitiveSecuritySystem:
         system = CognitiveSecuritySystem()
         result = system.monitor_execution("ls -la", "file1.txt\nfile2.txt")
         assert result.is_safe is True
+
+    def test_checkMemorySafetyDelegatesToGuard(self, monkeypatch):
+        """门面转发格：`system.check_memory_safety` 必须原样交给自己持有的 guard。
+
+        这是从退役的想象档（`tests/auth/test_security_cognitive_security.py`，§6-404 批 M）里
+        取来的**唯一真缺口**：真实档在 guard 那一层有 `TestMemorySecurityGuard::test_check_memory_safety`，
+        却没有一格说明门面的 `check_memory_safety:649` 走的是谁——把它的函数体换成
+        `return self.check_input_safety(...)` 甚至 `return None`，全仓不会有判据变红。
+        用记录型替身钉两件事：转交给 guard，且入参原样传下去（门面不得另算一套）。
+        """
+        seen = {}
+
+        class _RecordingGuard:
+            def check_memory_safety(self, memory_content):
+                seen["content"] = memory_content
+                return "guardSentinel"
+
+        system = CognitiveSecuritySystem()
+        monkeypatch.setattr(system, "_memory_guard", _RecordingGuard())
+
+        assert system.check_memory_safety("password=123456") == "guardSentinel"
+        assert seen["content"] == "password=123456"

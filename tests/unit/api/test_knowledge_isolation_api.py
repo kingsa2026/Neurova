@@ -298,3 +298,57 @@ class TestImportAttribution:
         holder["user"] = dict(BOB)
         titles = [i["title"] for i in (client.get(PREFIX)).json()["data"]["items"]]
         assert items[0]["title"] not in titles
+
+
+def test_document_detail_is_tenant_scoped(api):
+    client, holder, _app = api
+    from neurova.knowledge.repository import get_knowledge_repository
+
+    repo = get_knowledge_repository()
+    item = repo.create_knowledge(
+        "agent", "扫描文档", "正文", owner_user_id="u1", tenant_id="t1",
+        visibility="public", document_id="doc-t1", source_type="pdf",
+        page_count=2, ocr_used=True, ocr_engine="rapidocr",
+        ocr_confidence_avg=0.9,
+        chunks=[{"index": 0, "page": 1, "heading_path": ["第一章"],
+                 "char_start": 0, "char_end": 2, "content": "正"}],
+    )
+    holder["user"] = {"user_id": "u1", "role": "user", "tenant_id": "t1"}
+
+    resp = client.get(PREFIX + "/documents/doc-t1")
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["knowledge_id"] == item["knowledge_id"]
+    assert data["ocr_used"] is True and data["page_count"] == 2
+    assert data["pages"][0]["page"] == 1
+    assert data["pages"][0]["chunks"][0]["heading_path"] == ["第一章"]
+
+    holder["user"] = {"user_id": "u2", "role": "admin", "tenant_id": "t2"}
+    assert client.get(PREFIX + "/documents/doc-t1").status_code == 404
+
+
+def test_conflict_detail_endpoint_is_tenant_scoped(api, monkeypatch):
+    client, holder, _app = api
+    monkeypatch.setattr(
+        "neurova.knowledge.foundation.get_knowledge_fact_store",
+        lambda: type("S", (), {"conflict": lambda self, cid, tenantId=None: None})(),
+    )
+    from neurova.knowledge.repository import get_knowledge_repository
+
+    repo = get_knowledge_repository()
+    repo.create_knowledge("agent", "同标题", "旧", tenant_id="t1",
+                          visibility="public")
+    repo.create_knowledge("agent", "同标题", "新", tenant_id="t1",
+                          visibility="public")
+    conflictId = next(iter(repo._conflicts))
+    holder["user"] = {"user_id": "a1", "role": "admin", "tenant_id": "t1"}
+
+    resp = client.get(PREFIX + "/conflicts/%s" % conflictId)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["axis"] == "entry"
+    assert resp.json()["data"]["decision"] in ("similar", "conflict", "manual", "different")
+
+    holder["user"] = {"user_id": "a2", "role": "admin", "tenant_id": "t2"}
+    assert client.get(PREFIX + "/conflicts/%s" % conflictId).status_code == 404
