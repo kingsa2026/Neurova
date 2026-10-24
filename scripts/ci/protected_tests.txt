@@ -3809,3 +3809,21 @@ tests/unit/security/test_sensitiveInfoRulesAreSingleSourced.py
 # 活体（真授权文件＋真全局总线，无 mock）：`_event_bus=None` 下发布使计数 0→1 且订阅侧收到；
 # 空授权表下仍先抛 `permission_not_granted` 且计数不动。
 tests/unit/plugins/test_pluginEventSurfaceResolvesTheBus.py
+# §6-413（批 P-5 第一格）：两处在役脱敏点改接单源引擎——出口词汇按调用方给、规则子集在单源声明。
+# 用户裁「保 token，子集在单源里声明」。`summarizing_compressor`（自带 5 条正则＋自己写 sub 循环）
+# 与 `error_mapping._KEY_PATTERN` 同批退役，都改成 `sanitizeSensitive(text, <投影>, "[REDACTED]")`。
+# 为什么不统一成 `***`：`[REDACTED]` 是这三条链**存量文本**与两条现有格子
+# （`test_summarizing_compressor.py:89`、`test_evolution_gates_wave_c.py:83`）共同钉住的字符串，
+# 换词汇会让新旧摘要/证据文本混排；现查也确认**没有逻辑把 token 当哨兵**（`contains_secret` 走正则），
+# 所以这是展示层选择，不是行为依赖。`keepEdges` 那一档明确不吃 token（靠补星保长度）。
+# 投影（`SUMMARY_RULES`／`ERROR_TEXT_RULES`）声明在单源里，`_pick()` 引用到不存在的规则名直接
+# KeyError——投影写错宁可炸，不要悄悄少脱敏。摘要侧只投密钥类，**不投手机号/IP**：
+# 整表糊上去会把可诊断性一起脱掉，这正是"按类别投影"而不是"一把全接"的理由。
+# 行为变宽是本格实收益（旧门 vs 新门逐条实测）：`Bearer abcdef123456`、`nvk_zzz…`、
+# `口令：MyRealPass1` 三形旧摘要门**原样放过**，现在都 `[REDACTED]`；`bearer_literal` 的值类
+# 也从字符类对齐到 `\S+`（收窄会漏 `Bearer ab$`）。
+# 判据不谎称"完全等值"：把两扇旧门的正则原样抄进测试当期望，只对"旧门本就正确"的形状逐字比，
+# 旧门漏脱的形状另记（注释写明旧错误门不含 `ghp_`），再加结构断言"投影名与 PII 名互斥"当试纸。
+# 逐文件单跑两次同读数 2 passed；我自己复跑 新档＋摘要器＋错误映射 28 passed（3 条既有红见
+# §6-412 的归因：并会话未跟踪的 `document_pipeline.py` 后缀表、mappingproxy、llm 跨文件污染）。
+tests/unit/security/test_liveRedactionDoorsUseTheSharedEngine.py
