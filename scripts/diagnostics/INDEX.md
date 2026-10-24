@@ -30,6 +30,8 @@
 
 | `tool_parallelism_readout.py` | 工具并行收益取数（M3 前置）：批次形态分布 + 工具耗时分布 + **逐工具「值不值得为它成组等待」**（判据落 **P50 桶界夹逼**三态：整段过门槛=值得/整段不过=不值得/**跨门槛=边界**且不硬挑一侧；冷路径按保守下界**另档**呈现、不进常态判据）；**两个占比口径并列**（§10.1 原文口径「多工具轮/全部轮」与参考口径「成组批/多调用轮」），否证结论落原文口径；`no_data` 显式标注**不构成否证**，且**按成因分型**（`absent_in_this_scrape` 本份抓取里没有该族仪表⇒先核对抓取、确为完整抓取时才落到部署 / `zero_samples` 仪表在位⇒可达且已就位、该等真实轮次 / `schema_drift` 抓取里有本词表不认识的形态标签⇒分母残缺、该修词表；两段各自按本段仪表的表判，互不借用）；形态词表派生自写入侧单一事实源（`core/tool_capability.ToolBatchShape`），漂移样本点名且不再静默丢弃；可用 `--metrics-file` 离线复算（输入不可用退出码 2 并点名，不抛解释器栈） | `python scripts/diagnostics/tool_parallelism_readout.py [--json] [--metrics-file FILE]` | 只读（不连后端；`--metrics-file` 时不读进程注册表） |
 
+| `artifactDigestStockInventory.py` | 存量构件摘要清单（只读）：技能/插件逐条四态（`pinned-ok` / `pinned-mismatch` / `unpinned` / `missing-dir`），根外锚逐键三态（`match` / `anchor-missing` / `anchor-mismatch`）；不写一个字节、不补钉 | `PYTHONPATH=$(git rev-parse --show-toplevel) python scripts/diagnostics/artifactDigestStockInventory.py [--json]` | 只读（读数据根与 `~/.neurova/artifact_anchors.json`；连数据根都读不出时退出码 2） |
+
 ## 二、检查脚本（checks）
 
 | 脚本 | 用途 | 运行方式 |
