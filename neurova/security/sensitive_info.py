@@ -32,6 +32,9 @@ __all__ = [
     "SENSITIVE_RULES",
     "Detection",
     "detectSensitive",
+    "containsSensitive",
+    "isCredentialKey",
+    "MIN_SECRET_VALUE_LEN",
     "sanitizeSensitive",
     "maskPreservingFormat",
     "ruleByName",
@@ -80,6 +83,10 @@ class SensitiveRule:
     #: 字面替换串。给了它就整段替换成这个串——**配置里写 replacement 的人必须看得见效果**，
     #: 静默忽略就是一个新的"只写不读"（同一批在 firewall 那边修的正是这类）。
     literalReplacement: Optional[str] = None
+    #: 键名档的正则**原文**（只有键值式规则带）。结构侧问"这个键是不是凭据"就按它判——
+    #: 派生自同一张表，不在调用方再抄一份键名表（§6-415 批 P-5：证据写入口拿的是 dict，
+    #: 内容形状的正则看不见"键在结构里、值在另一个字符串里"这一形）。
+    keyPattern: Optional[str] = None
 
     def maskText(self, text: str, token: str = "***") -> str:
         if not self.enabled:
@@ -117,22 +124,30 @@ class SensitiveRule:
         return self.pattern.sub(token, text)
 
 
-def _kv(name: str, key: str, severity: SensitivityLevel, description: str,
-        valueClass: str = r"\S+") -> SensitiveRule:
-    """键名＋**赋值符**＋值 一形（`=`／`:`／全角冒号，两侧可有空白）。
+def _kv(name: str, key: str, severity: SensitivityLevel,
+        description: str) -> SensitiveRule:
+    r"""键名＋**赋值符**＋值 一形（`=`／`:`／全角冒号，两侧可有空白，键名右引号可选）。
 
     为什么赋值符是必需的：原记忆侧那份允许"空白也算分隔符"，于是
     "这里有一个 token 字段说明文档"这类正常散文会被当成令牌打码——把正常文本打花不是
     更安全，是制造噪声并让人开始忽略脱敏结果。原 cognitive 那份要求 `[=:]`，与现有
     格子（`test_should_remember_only_triggers_on_key_value_form`）同源，取它。
+
+    键名右侧那个可选引号（`["']?`）是给 **JSON 形**留的：`{"api_key": "x"}` 里键名与
+    冒号之间隔着一个闭引号，不接受它则整条 JSON 配置**一个字都不脱**（§6-415 实测）。
+    值档三条分支按"先引号、后贪婪"排：引号段可以含空格（`password="Alpha7 Bravo9"` 在
+    在役护栏上今天只脱到空格前，`Bravo9` 原样进证据），贪婪段 `\S+` 保持"一路吃到空白"，
+    所以带逗号／分号的值不会被切成残渣留在原文里。两条分支都不设长度下限——下限属于
+    **判定**（`MIN_SECRET_VALUE_LEN`），写进正则就会把脱敏面一起收窄。
     """
     return SensitiveRule(
         name=name,
-        pattern=re.compile(r"(?P<key>%s)(?P<sep>[ 	]*[=:：][ 	]*)(?P<value>%s)"
-                           % (key, valueClass), re.IGNORECASE),
+        pattern=re.compile(r"(?P<key>%s)(?P<sep>[\"']?[ 	]*[=:：][ 	]*)(?P<value>"
+                           r"\"[^\"]*\"|\'[^\']*\'|\S+)" % key, re.IGNORECASE),
         severity=severity,
         description=description,
         maskStrategy=_MASK_KEY_VALUE,
+        keyPattern=key,
     )
 
 
@@ -144,25 +159,33 @@ def _shape(name: str, pattern: str, severity: SensitivityLevel, description: str
     )
 
 
-#: 合并表。分级取三份里**较高**的一档（隐私保守方向；往下调等于把既有保护改弱）。
+#: 合并表。**表序＝打码序**，其中一条次序是硬约束：`bearer_literal` 必须排在键值档**之前**。
+#: 理由是键值档的值类一路吃到空白，`token: Bearer abcdef123456` 若先走键值档，被吃掉的"值"
+#: 只是 `Bearer` 这个词，真令牌 `abcdef123456` 原样留在原文里，而 `bearer_literal` 事后
+#: 再也看不到那个前缀——这条漏形在在役的摘要出口上实测存在（§6-415 本格第一段读数），
+#: 而它正是进化护栏那张表注释里写明的"Bearer 先行"理由；合表时把顺序丢了，漏点就回来了。
+#: 分级取三份里**较高**的一档（隐私保守方向；往下调等于把既有保护改弱）。
 SENSITIVE_RULES: Tuple[SensitiveRule, ...] = (
-    _kv("password", r"(?:password|passwd|pwd|密码|口令)", SensitivityLevel.CRITICAL, "密码字段"),
-    _kv("api_key", r"(?:api[_\s-]?key|apikey|secret[_\s-]?key|access[_\s-]?key)",
-        SensitivityLevel.CRITICAL, "API 密钥"),
-    _kv("token", r"(?:token|access[_\s-]?token|refresh[_\s-]?token|bearer)",
-        SensitivityLevel.HIGH, "令牌"),
-    _shape("secret_literal", r"sk-[A-Za-z0-9_\-]{8,}", SensitivityLevel.CRITICAL,
-           "OpenAI 式密钥字面量"),
+    # 值形状先行（Bearer 必须早于键值，理由见上）；`github_token`／`neurova_key_literal`
+    # 两条来自在役的另两处脱敏点（`context/summarizing_compressor.py` 与
+    # `llm/providers/error_mapping.py` 的自带表），收进表里就是为了让那两处不必再留小抄。
     _shape("bearer_literal", r"Bearer\s+\S+", SensitivityLevel.HIGH,
            "Bearer 凭据字面量"),   # 值类与在役侧（error_mapping / evolution guard）对齐：
                                    # 收窄成字符类会漏掉 `Bearer ab$` 这种值——脱敏面宁可宽
-    # 下面两条来自**在役**的另两处脱敏点（`context/summarizing_compressor.py:_REDACT_PATTERNS`
-    # 与 `llm/providers/error_mapping.py:_KEY_PATTERN`）。把它们收进表里，是为了让那两处
-    # 日后改接单源时不必再自带一张小抄——本批先合表，接线那一拍见工单。
+    _shape("secret_literal", r"sk-[A-Za-z0-9_\-]{8,}", SensitivityLevel.CRITICAL,
+           "OpenAI 式密钥字面量"),
     _shape("github_token", r"ghp_[A-Za-z0-9]{20,}", SensitivityLevel.CRITICAL,
            "GitHub personal access token"),
     _shape("neurova_key_literal", r"nvk_[A-Za-z0-9_\-]{8,}", SensitivityLevel.CRITICAL,
            "Neurova 式密钥字面量"),
+    # 键值档：键表并进化护栏那张表之长（`authorization`/`cookie`/`credential` 与裸 `secret`
+    # 此前只在那一侧有，摘要出口整条放过——§6-415 实测三形均"一个字都不脱"）
+    _kv("password", r"(?:password|passwd|pwd|密码|口令)", SensitivityLevel.CRITICAL, "密码字段"),
+    _kv("api_key", r"(?:api[_\s-]?key|apikey|secret[_\s-]?key|access[_\s-]?key|secret)",
+        SensitivityLevel.CRITICAL, "API 密钥"),
+    _kv("token", r"(?:token|access[_\s-]?token|refresh[_\s-]?token|bearer|authorization"
+                 r"|credential|cookie)",
+        SensitivityLevel.HIGH, "令牌／会话凭据"),
     SensitiveRule(
         name="phone", pattern=re.compile(r"1[3-9]\d{9}"), severity=SensitivityLevel.HIGH,
         description="中国大陆手机号", maskStrategy=_MASK_KEEP_EDGES,
@@ -196,6 +219,7 @@ SENSITIVE_RULES: Tuple[SensitiveRule, ...] = (
 #: 具名投影：在役出口各取一类，**名单在这里声明**，不在调用方另存小抄（§6-413 批 P-5）。
 #: 为什么允许投影而不算第二份表：规则本体（正则／分级／形状）只有一份，投影只挑"这条链上
 #: 该看的类别"；新增一条规则只改 `SENSITIVE_RULES`，投影按名字引用。
+#: 投影**沿用表序**（`_pick` 按表过滤），所以"Bearer 先于键值"这条次序约束自动带进每一扇 door。
 _SECRET_SHAPES = ("secret_literal", "neurova_key_literal", "github_token", "bearer_literal")
 _CREDENTIAL_KV = ("password", "api_key", "token")
 
@@ -207,8 +231,12 @@ def _pick(names: Tuple[str, ...]) -> Tuple[SensitiveRule, ...]:
     return tuple(r for r in SENSITIVE_RULES if r.name in names)
 
 
-#: 摘要出口：密钥形状＋凭据键值（今天 `_REDACT_PATTERNS` 覆盖的面，且不含手机号那类 PII）
-SUMMARY_RULES = _pick(_SECRET_SHAPES[:2] + _SECRET_SHAPES[3:] + _CREDENTIAL_KV + ("github_token",))
+#: 凭据类投影：密钥形状＋凭据键值，**不含 PII**。
+#: 两个消费者共用这一个对象——摘要出口（`context/summarizing_compressor.py`）与
+#: 进化输入护栏（`skills/evolution_inputs_guard.py`，§6-415 接上）。名字里的"SUMMARY"
+#: 是第一条链留下的，不再另起一名造第二个投影对象；要加第三条链就照这个名单加，
+#: 不要在调用方 `list(SUMMARY_RULES) + [...]`（那才是第二份表）。
+SUMMARY_RULES = _pick(_SECRET_SHAPES + _CREDENTIAL_KV)
 #: 错误文案：只有值形状（文案里出现手机号是正常的运维信息，不是凭据）
 ERROR_TEXT_RULES = _pick(_SECRET_SHAPES)
 
@@ -240,19 +268,79 @@ def severityOf(name: str) -> SensitivityLevel:
     return rule.severity
 
 
-def detectSensitive(text: str, rules: Optional[Iterable[SensitiveRule]] = None) -> List[Detection]:
+#: **判定**侧的值长下限（唯一一处）。它只管"这条算不算凭据"，不管"这段要不要打码"：
+#: 脱敏（`sanitizeSensitive`）不设下限，宁可多打；而 `skill_install_gate.py:211` 是
+#: 命中即 fail-closed 拦下整个技能安装的门禁，`token=a` 一旦算命中，正常技能就被误杀。
+#: 进化护栏那张表原先把 `{6,}` 写死在正则里（同时管住脱敏与判定两件事），合表时把下限
+#: 摘出来具名放在这里——下限留在正则里，脱敏面就跟着窄了一截。
+MIN_SECRET_VALUE_LEN = 6
+
+
+def _valueSpan(rule: SensitiveRule, match: "re.Match") -> str:
+    """一次命中里"值"那一段：键值式取 `value` 组并剥掉两侧引号，值形状取整段。"""
+    if "value" in rule.pattern.groupindex:
+        raw = match.group("value") or ""
+        if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ("\"", "'"):
+            return raw[1:-1]
+        return raw
+    return match.group(0)
+
+
+def detectSensitive(text: str, rules: Optional[Iterable[SensitiveRule]] = None,
+                    minValueLen: int = 0) -> List[Detection]:
     """按表识别内容级敏感信息。`rules` 给的是"默认表＋调用方追加的自定义规则"这一形
-    （记忆侧 `import_patterns()` 那个扩展点走这里，不在别处再写一遍循环）。"""
+    （记忆侧 `import_patterns()` 那个扩展点走这里，不在别处再写一遍循环）。
+
+    `minValueLen` 默认 0＝识别与脱敏一样"宁多勿漏"；fail-closed 门禁走
+    `containsSensitive()`，它把默认值换成 `MIN_SECRET_VALUE_LEN`。
+    """
     if not text:
         return []
     out: List[Detection] = []
     for rule in (rules if rules is not None else SENSITIVE_RULES):
         for match in rule.findMatches(text):  # findMatches 内部已跳过停用规则
+            if len(_valueSpan(rule, match)) < minValueLen:
+                continue
             evidence = match.group(0)
             masked = rule.maskText(evidence)
             out.append(Detection(rule=rule, evidence=masked,
                                  start=match.start(), end=match.end()))
     return out
+
+
+def containsSensitive(text: str, rules: Optional[Iterable[SensitiveRule]] = None,
+                      minValueLen: int = MIN_SECRET_VALUE_LEN) -> bool:
+    """文本里是否**还有**未脱敏的凭据形状（fail-closed 门禁的唯一判据口）。
+
+    与脱敏走同一张表、同一批规则对象，只是不进打码循环——所以"该拦的"与"该脱的"
+    不可能给出两个答案，两边的差别只有那一条具名下限。
+    """
+    return bool(detectSensitive(text, rules, minValueLen))
+
+
+#: 键名档的正则（**从表里派生**，不是另抄一份）：只有带 `keyPattern` 的规则参与。
+def _keyShapePatterns(rules: Iterable[SensitiveRule]) -> List[Pattern]:
+    return [re.compile(r"(?:%s)\Z" % rule.keyPattern, re.IGNORECASE)
+            for rule in rules if rule.keyPattern]
+
+
+_KEY_SHAPE_PATTERNS: Tuple[Pattern, ...] = tuple(_keyShapePatterns(SENSITIVE_RULES))
+
+
+def isCredentialKey(name: Any, rules: Optional[Iterable[SensitiveRule]] = None) -> bool:
+    r"""一个**结构里的键名**是不是凭据键（`{"api_key": …}` 那一形）。
+
+    为什么需要它：内容形状的正则要吃"键名＋赋值符＋值"连成一串的文本，而证据／工具载荷
+    常常已经是 dict——键与值分家，`redact_secrets(str(value))` 对着 `"MyRealSecret123"`
+    这种**孤立值**一个字都不会脱（§6-415 活体读数）。
+    用整名匹配（`\Z`）不用 `search`：`token_count`、`password_hash_policy` 这类计数字段
+    不该被顺手糊掉——把正常字段打花会让读证据的人开始忽略脱敏（与 `_kv` 拒绝"空白算分隔符"
+    同一个理由）。
+    """
+    if not isinstance(name, str) or not name.strip():
+        return False
+    patterns = _KEY_SHAPE_PATTERNS if rules is None else _keyShapePatterns(list(rules))
+    return any(pattern.match(name.strip()) for pattern in patterns)
 
 
 def sanitizeSensitive(text: str, rules: Optional[Iterable[SensitiveRule]] = None,
