@@ -56,13 +56,20 @@ class TestTheAnchorIsASeparateLanding:
         assert artifact_digest.ANCHOR_CHANNELS == ("skill", "plugin"), (
             "加第三个通道要同时改两条账本的钉/验点与台账，不能只加一个字符串")
 
-    def testAnchorPathSitsOutsideTheDataRoot(self):
+    def testAnchorPathSitsInsideTheDataRoot(self):
+        """锚必须由数据根推导——这是本仓落点的唯一装配点（`AGENTS.md §3`）。
+
+        反向钉住旧写法：`Path.home()/.neurova/...` 曾在 §6-388 立锚时被当成"对整库回滚
+        敏感"的必要代价，其实回滚一个目录不会动它里面的文件，而主目录落点让锚换台机器
+        就失联（`tests/unit/core/test_runtime_landing_root.py` 那族判据正因此报红）。
+        """
         landing = _PRODUCTION_ANCHOR_PATH()
         dataRoot = Path(data_root.get_data_root()).resolve()
 
-        assert ".neurova" in landing.parts, landing
-        assert dataRoot not in landing.resolve().parents, (
-            "锚落进了数据根：那样整库回滚会把构件、账本、锚一起回滚，等于没有锚")
+        assert ".neurova" not in landing.parts, landing
+        assert dataRoot in landing.resolve().parents, (
+            "锚没落在数据根下：落点必须经 `core/data_root.py` 推导，"
+            "否则换台机器/换个账户就读不到自己钉过的清单")
 
 
 class TestRoundTripAndFailureShapes:
