@@ -217,21 +217,13 @@ import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 
-interface MarketSkill {
-  id: string
-  name: string
-  description: string
-  rating?: number
+/** 行契约单点声明在 API 边界（skill-pool.Skill，含 skill_id→id 归一与 downloads 透传）；
+ *  页内只叠加展示用字段。 */
+interface MarketSkill extends Omit<skillPoolApi.Skill, 'usage'> {
   install_count?: number
-  category?: string
   icon?: string
   featured?: boolean
-  installed?: boolean
   _installing?: boolean
-  /** P0-4 声明式权限：null=未声明；dict=声明生效（运行时 fail-closed） */
-  permissions?: Record<string, unknown> | null
-  /** P2-15 沙箱声明位 */
-  sandbox_required?: boolean | null
 }
 
 interface Category {
@@ -351,13 +343,11 @@ async function fetchCategories() {
 async function fetchSkills() {
   loading.value = true
   try {
-    const res = await skillPoolApi.getPublicSkills()
-    const data: any = (res as any)?.data ?? res
-    // 市场域返回 skill_id/downloads; 归一化为页内 Skill 形状(id/install_count)
-    skills.value = (Array.isArray(data) ? data : data?.items ?? []).map((s: any) => ({
+    // 主键归一在 API 边界一处完成；市场域的 downloads 落成页内 install_count
+    const rows = await skillPoolApi.getPublicSkills()
+    skills.value = rows.map((s) => ({
       ...s,
-      id: s.id ?? s.skill_id,
-      install_count: s.install_count ?? s.downloads ?? 0,
+      install_count: s.downloads ?? 0,
       _installing: false,
     }))
     // Refresh category counts based on the freshly loaded list.
