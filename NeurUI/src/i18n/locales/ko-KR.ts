@@ -794,6 +794,7 @@ export default {
 
 
   knowledge: {
+    workbenchFilterTypes: '유형 필터',
     workbenchFullGraph: '전체 그래프로',
     duplicateMerged: '내용이 이미 존재합니다: 일치 항목에 이번 소스를 병합했습니다',
     filterApply: '적용',
