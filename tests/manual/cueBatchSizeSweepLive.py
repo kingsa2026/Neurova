@@ -103,7 +103,7 @@ def partTwoWindowLeak(corpus: list) -> None:
     import inspect
 
     src = inspect.getsource(gen.filterModelCues)
-    print(f"  代码事实：usedNormKeys 在函数体内新建 ⇒ 去重只在一次调用内有效 → "
+    print(f"  代码事实：usedNormKeys 在函数体内新建 -> 去重只在一次调用内有效 -> "
           f"{'成立' if 'usedNormKeys: set = set()' in src.replace('    ', '') else '不成立'}")
     print(f"{'N':>4} {'放行条数':>9} {'其中泛词':>8} {'泛词占放行比':>12}")
     generic = {"时间安排", "需要注意的事项", "工作相关", "日常事务", "与他人的约定", "后续跟进"}

@@ -68,14 +68,31 @@ def _attachModelCues(mgr: MemoryManager, rows: dict) -> None:
         )
 
 
-@pytest.fixture
-def corpus(tmp_path):
+def _denseTierIsUsable() -> bool:
+    """本机这一档是不是**真能算**的稠密档。
+
+    `get_embedding_engine() is not None` 只是"工厂给了个对象"：缺 numpy／tokenizer 时它内部
+    退回零向量兜底（`backend_type` 为 None、`encode()` 全零），通道按零向量丢行 ⇒ 判据量到的
+    是"没有引擎"，不是"通道没用"。零向量档与真向量档在这两条判据上不可比，故缺档时**明说跳过**，
+    不在缺件环境里造一条"净增益不成立"的假红。前提本身不放松：
+    `test_onnx_lazy_init_deadlock.py` 那条照旧不许跳过。
+    """
     from neurova.embedding import get_embedding_engine
 
-    assert get_embedding_engine() is not None, (
-        "本判据测的是生产同款稠密检索，缺本地 ONNX 档时读数无意义"
-        "（前提与 test_onnx_lazy_init_deadlock.py 一致，不以 skip 蒙过）"
-    )
+    engine = get_embedding_engine()
+    if engine is None or not getattr(engine, "backend_type", None):
+        return False
+    try:
+        vector = engine.encode("探针")
+    except Exception:  # noqa: BLE001 - 探测失败即视为无可用档
+        return False
+    return bool(vector) and any(float(x) != 0.0 for x in vector)
+
+
+@pytest.fixture
+def corpus(tmp_path):
+    if not _denseTierIsUsable():
+        pytest.skip("本机没有可用的稠密嵌入档（numpy/tokenizer 缺席）——零向量档下的读数不可比")
     # 单例复位必须在这里做：`get_semantic_search()` 是进程级单例，而记忆 id 是每个 fixture
     # 从 mem_000001 确定性重放的——上一个用例并进去的线索词会串到下一个用例的倒排里，
     # 「关掉通道读数不降」这条差分因此测的是残留状态而不是通道（本轮就这么翻过车）。
