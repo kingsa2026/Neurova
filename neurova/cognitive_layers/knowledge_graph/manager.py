@@ -1186,7 +1186,7 @@ def reset_knowledge_graph_manager():
 # per-agent 图谱隔离（2026-09-05：图谱此前为全局单例，跨 agent 泄漏）
 # ============================================================
 
-_AGENT_MANAGERS: Dict[str, "KnowledgeGraphManager"] = {}
+_AGENT_MANAGERS: Dict[tuple, "KnowledgeGraphManager"] = {}
 _agent_manager_lock = threading.Lock()
 _AGENT_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 _LEGACY_LAYOUT_FILES = ("nodes.json", "edges.json", "merges.json")
@@ -1219,6 +1219,7 @@ def _migrate_legacy_graph_layout(legacy_dir: str, target_dir: Path) -> bool:
 def get_agent_knowledge_graph_manager(
     agent_id: str,
     legacy_dir: Optional[str] = None,
+    tenant_id: str = "default",
 ) -> KnowledgeGraphManager:
     """获取 agent 专属知识图谱管理器（per-agent 单例，目录隔离）。
 
@@ -1232,13 +1233,19 @@ def get_agent_knowledge_graph_manager(
     """
     if not agent_id or not _AGENT_ID_RE.fullmatch(agent_id):
         raise ValueError(f"illegal agent_id for knowledge graph: {agent_id!r}")
+    tenant = str(tenant_id or "default")
+    if not _AGENT_ID_RE.fullmatch(tenant):
+        raise ValueError(f"illegal tenant_id for knowledge graph: {tenant!r}")
 
+    cache_key = (agent_id, tenant)
     with _agent_manager_lock:
-        manager = _AGENT_MANAGERS.get(agent_id)
+        manager = _AGENT_MANAGERS.get(cache_key)
         if manager is not None:
             return manager
 
         storage_dir = _agent_graph_dir(agent_id)
+        if tenant != "default":
+            storage_dir = storage_dir / "tenants" / tenant
 
         # 旧全局布局只有 default 的历史数据，一次性认领迁移
         if agent_id == "default":
@@ -1249,7 +1256,10 @@ def get_agent_knowledge_graph_manager(
                 _migrate_legacy_graph_layout(legacy, storage_dir)
 
         manager = KnowledgeGraphManager(storage_dir=str(storage_dir))
-        _AGENT_MANAGERS[agent_id] = manager
+        # 供写入侧核对：注入的 manager 必须与条目的租户一致，防止把租户内容
+        # 铺进另一租户/共享图。
+        manager.tenant_id = tenant
+        _AGENT_MANAGERS[cache_key] = manager
         return manager
 
 

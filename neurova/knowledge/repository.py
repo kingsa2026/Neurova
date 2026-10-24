@@ -628,6 +628,8 @@ class KnowledgeRepository:
             item["owner_user_id"] = "default"
         if not isinstance(item.get("shared_with"), list):
             item["shared_with"] = []
+        if not isinstance(item.get("tenant_id"), str) or not item.get("tenant_id"):
+            item["tenant_id"] = "default"
         if not isinstance(item.get("graph_node_ids"), list):
             item["graph_node_ids"] = []
         if not isinstance(item.get("valid_until"), str):
@@ -647,6 +649,17 @@ class KnowledgeRepository:
             item["injected_count"] = 0
         if item.get("last_injected_at") is None:
             item["last_injected_at"] = None
+        # 文档标准化元数据（旧条目保持空值；不靠猜测补页码/OCR）
+        for key in ("source_type", "source_path", "ingest_time", "author",
+                    "ocr_engine", "document_id"):
+            if not isinstance(item.get(key), str):
+                item[key] = ""
+        if item.get("page_count") is None:
+            item["page_count"] = None
+        if item.get("ocr_confidence_avg") is None:
+            item["ocr_confidence_avg"] = None
+        if not isinstance(item.get("ocr_used"), bool):
+            item["ocr_used"] = False
         return item
 
     def _assertNotWritingProductionUnderPytest(self) -> None:
@@ -731,6 +744,16 @@ class KnowledgeRepository:
         detect_conflict: bool = True,
         valid_until: Optional[str] = None,
         lifecycle_status: str = ACTIVE,
+        source_type: str = "",
+        source_path: str = "",
+        ingest_time: str = "",
+        author: str = "",
+        page_count: Optional[int] = None,
+        ocr_used: bool = False,
+        ocr_engine: str = "",
+        ocr_confidence_avg: Optional[float] = None,
+        document_id: str = "",
+        tenant_id: str = "default",
     ) -> Dict[str, Any]:
         status = normalizeLifecycleStatus(lifecycle_status)
         now = datetime.datetime.now(datetime.timezone.utc).timestamp()
@@ -746,6 +769,7 @@ class KnowledgeRepository:
             "updated_at": now,
             "visibility": visibility if visibility in (VISIBILITY_PUBLIC, VISIBILITY_PRIVATE) else VISIBILITY_PRIVATE,
             "owner_user_id": str(owner_user_id or "default"),
+            "tenant_id": str(tenant_id or "default"),
             "shared_with": [],
             "graph_node_ids": [],
             "submission": None,
@@ -757,6 +781,15 @@ class KnowledgeRepository:
             "adoption_updated_at": None,
             "injected_count": 0,
             "last_injected_at": None,
+            "source_type": source_type,
+            "source_path": source_path,
+            "ingest_time": ingest_time,
+            "author": author,
+            "page_count": page_count,
+            "ocr_used": bool(ocr_used),
+            "ocr_engine": ocr_engine,
+            "ocr_confidence_avg": ocr_confidence_avg,
+            "document_id": document_id,
             # P0-2 分块（[{content, index, char_start, char_end}]）；None=整篇模式
             "chunks": chunks,
             # P1#6 父子分块：chunks 存子块（进索引），parents 存父块（LLM 上下文）；
@@ -806,10 +839,17 @@ class KnowledgeRepository:
         return str((user or {}).get("user_id") or "")
 
     @staticmethod
+    def _tenant(user: Optional[Dict[str, Any]]) -> str:
+        return str((user or {}).get("tenant_id") or "default")
+
+    @staticmethod
     def _is_admin(user: Optional[Dict[str, Any]]) -> bool:
         return str((user or {}).get("role") or "") == "admin"
 
     def can_view(self, user: Optional[Dict[str, Any]], item: Dict[str, Any]) -> bool:
+        # 租户先于角色：管理员只在自己租户内全可见，不是跨租户穿透。
+        if str(item.get("tenant_id") or "default") != self._tenant(user):
+            return False
         if self._is_admin(user):
             return True
         if item.get("visibility") == VISIBILITY_PUBLIC:
@@ -849,6 +889,8 @@ class KnowledgeRepository:
         for aid, items in snapshot:
             for item in items:
                 if agent_id and aid != agent_id:
+                    continue
+                if str(item.get("tenant_id") or "default") != self._tenant(user):
                     continue
                 if not isRetrievable(item):
                     continue
@@ -1011,6 +1053,10 @@ class KnowledgeRepository:
         with self._lock:
             snapshot = [dict(i) for items in self._items.values() for i in items]
         return [i for i in snapshot if (i.get("submission") or {}).get("status") == _SUBMISSION_PENDING]
+
+    def listAgents(self) -> List[str]:
+        with self._lock:
+            return sorted(self._items)
 
     def list_knowledge(
         self,
@@ -1252,7 +1298,70 @@ class KnowledgeRepository:
                     return True
         return False
 
+    def replaceDocumentParsing(
+        self, agent_id: str, knowledge_id: str, parsed: Any, *,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """用新解析结果替换文档条目正文/块/文档元数据；旧值进 revision 账。
+
+        只做"文档再解析"这一种受控写：不改 title/visibility/owner/tenant，
+        也不做正文重切（新块必须保留页码/标题映射，重切会丢）。
+        """
+        with self._lock:
+            for item in self._items.get(agent_id, []):
+                if item.get("knowledge_id") != knowledge_id:
+                    continue
+                old = {
+                    key: item.get(key)
+                    for key in ("content", "chunks", "parents", "source_type",
+                                "source_path", "ingest_time", "author",
+                                "page_count", "ocr_used", "ocr_engine",
+                                "ocr_confidence_avg", "document_id")
+                }
+                changed = [key for key, value in old.items() if item.get(key) != value]
+                item.setdefault("revisions", []).append({
+                    "old": old,
+                    "changed_fields": changed,
+                    "updated_at": datetime.datetime.now(
+                        datetime.timezone.utc
+                    ).isoformat(),
+                    "reason": "document_reparse",
+                })
+                item["content"] = str(parsed.content)
+                item["chunks"] = list(parsed.chunks)
+                item["parents"] = list(parsed.parents)
+                meta = metadata if metadata is not None else parsed.metadata
+                item["source_type"] = str(meta.get("source_type") or item.get("source_type") or "")
+                item["source_path"] = str(item.get("source_path") or parsed.source_path or "")
+                item["ingest_time"] = str(parsed.ingest_time or item.get("ingest_time") or "")
+                item["author"] = str(meta.get("author") or "")
+                item["page_count"] = meta.get("page_count")
+                item["ocr_used"] = bool(meta.get("ocr_used"))
+                item["ocr_engine"] = str(meta.get("ocr_engine") or "")
+                item["ocr_confidence_avg"] = meta.get("ocr_confidence_avg")
+                item["document_id"] = str(item.get("document_id") or parsed.doc_id or "")
+                item["updated_at"] = datetime.datetime.now(
+                    datetime.timezone.utc
+                ).timestamp()
+                self._syncEntryGovernance()
+                self._save()
+                self._record_index_op("reindex", knowledge_id)
+                return True
+        return False
+
     # ── entry 级反馈（文档条目无 fact lineage 时的采纳/注入账）──────
+
+    def findBySource(
+        self, agent_id: str, source: str, tenant_id: str = "default"
+    ) -> Optional[Dict[str, Any]]:
+        """按 source 找条目（入站幂等：同一消息不重复建知识；租户内幂等）。"""
+        with self._lock:
+            for item in self._items.get(agent_id, []):
+                if str(item.get("tenant_id") or "default") != str(tenant_id or "default"):
+                    continue
+                if str(item.get("source") or "") == str(source or ""):
+                    return dict(item)
+        return None
 
     def recordEntryAdoption(
         self, agent_id: str, knowledge_id: str, outcome: str
@@ -1536,7 +1645,8 @@ class KnowledgeRepository:
             return [dict(rec, knowledge_id=kid) for kid, rec in self._tombstones.items()]
 
     def expireDueEntries(self, now: Optional[datetime.datetime] = None,
-                         apply: bool = False) -> Dict[str, Any]:
+                         apply: bool = False,
+                         tenantId: Optional[str] = None) -> Dict[str, Any]:
         """到期条目自动归档：dry-run 只报数；apply 把 active→archived。
 
         不删除、不改正文；归档后仍可 PUT 回 active（保留 valid_until）。
@@ -1546,6 +1656,10 @@ class KnowledgeRepository:
         with self._lock:
             for agent_id, items in self._items.items():
                 for item in items:
+                    if tenantId is not None and str(
+                        item.get("tenant_id") or "default"
+                    ) != str(tenantId or "default"):
+                        continue
                     try:
                         status = normalizeLifecycleStatus(item.get("lifecycle_status"))
                     except ValueError:
@@ -1564,7 +1678,10 @@ class KnowledgeRepository:
                 self._save()
         return {"due": len(due), "archived": len(due) if apply else 0, "applied": bool(apply)}
 
-    def lifecycleReport(self, now: Optional[datetime.datetime] = None) -> Dict[str, Any]:
+    def lifecycleReport(
+        self, now: Optional[datetime.datetime] = None,
+        tenantId: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """生命周期只读报告：active/archived/expired 计数 + 不可检索条目清单。"""
         counts = {ACTIVE: 0, ARCHIVED: 0, "expired": 0}
         rows: List[Dict[str, Any]] = []
@@ -1575,6 +1692,10 @@ class KnowledgeRepository:
             ]
         for agent_id, items in snapshot:
             for item in items:
+                if tenantId is not None and str(
+                    item.get("tenant_id") or "default"
+                ) != str(tenantId or "default"):
+                    continue
                 try:
                     status = normalizeLifecycleStatus(item.get("lifecycle_status"))
                 except ValueError:
@@ -1715,6 +1836,10 @@ class KnowledgeRepository:
             old_id = old.get("knowledge_id")
             if not old_id or old_id == new_id:
                 continue
+            if str(old.get("tenant_id") or "default") != str(
+                new_item.get("tenant_id") or "default"
+            ):
+                continue
             old_title = _norm_title(old.get("title", ""))
             if not old_title:
                 continue
@@ -1731,7 +1856,20 @@ class KnowledgeRepository:
         if best is None:
             return
         old_item, title_sim = best
+        from neurova.knowledge.conflict_features import (
+            buildConflictFeatures,
+            classifyConflict,
+        )
+
+        features = buildConflictFeatures(
+            str(old_item.get("content", "")), str(new_item.get("content", "")),
+            subjectSimilarity=title_sim,
+        )
+        decision, featureReason = classifyConflict(features)
         self._conflicts[str(uuid.uuid4())] = {
+            "features": features,
+            "decision": decision,
+            "feature_reason": featureReason,
             "old_id": old_item.get("knowledge_id"),
             "new_id": new_id,
             "knowledge_id": old_item.get("knowledge_id"),
@@ -1740,6 +1878,7 @@ class KnowledgeRepository:
             "reason": "same_title: 新条目与旧条目标题一致，疑似同一事实的新说法",
             "detected_at": datetime.datetime.now(datetime.timezone.utc).timestamp(),
             "status": "pending",
+            "tenant_id": str(new_item.get("tenant_id") or "default"),
             "resolution": None,
             "resolved_by": None,
             "resolved_at": None,
@@ -1750,17 +1889,110 @@ class KnowledgeRepository:
             "status": "pending",
             "against": new_id,
         }
+        # 冲突通知走声明过的主题；订阅者可接 Supervisor/控制台。
+        # 通知失败只降级观测，不回滚已成立的冲突账。
+        try:
+            from neurova.knowledge.ingest_bus import (
+                KB_CONFLICT_NOTIFY_TOPIC,
+                get_ingest_bus,
+            )
 
-    def list_conflicts(self, status: str = "pending") -> List[Dict[str, Any]]:
-        """冲突清单（默认待审 pending；status='resolved' 查裁决历史）。"""
+            get_ingest_bus().publish(KB_CONFLICT_NOTIFY_TOPIC, {
+                "agent_id": agent_id,
+                "tenant_id": str(new_item.get("tenant_id") or "default"),
+                "old_id": old_item.get("knowledge_id"),
+                "new_id": new_id,
+                "decision": decision,
+                "feature_reason": featureReason,
+            })
+        except Exception as exc:  # noqa: BLE001 - 通知失败不影响冲突账
+            logger.debug("冲突通知发布失败: %s", exc)
+
+    def list_conflicts(
+        self, status: str = "pending", tenantId: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """冲突清单（默认待审 pending；status='resolved' 查裁决历史）；可按租户过滤。"""
         with self._lock:
             recs = [
                 dict(rec, conflict_id=cid)
                 for cid, rec in self._conflicts.items()
                 if rec.get("status") == status
+                and (
+                    tenantId is None
+                    or str(rec.get("tenant_id") or "default") == str(tenantId or "default")
+                )
             ]
         recs.sort(key=lambda r: r.get("detected_at", 0), reverse=True)
         return recs
+
+    def findByDocumentId(
+        self, user: Optional[Dict[str, Any]], documentId: str
+    ) -> Optional[Dict[str, Any]]:
+        """按 document_id（或 knowledge_id）在可见集内找文档条目。"""
+        wanted = str(documentId or "").strip()
+        if not wanted:
+            return None
+        for item in self.visible_items(user):
+            if wanted in (
+                str(item.get("document_id") or ""),
+                str(item.get("knowledge_id") or ""),
+            ):
+                return dict(item)
+        return None
+
+    def documentStats(self, tenantId: str = "default") -> Dict[str, Any]:
+        """文档级观测：条目数、OCR 覆盖率、页数/块数与置信度均值。"""
+        tenant = str(tenantId or "default")
+        with self._lock:
+            snapshot = [
+                dict(item)
+                for items in self._items.values() for item in items
+                if str(item.get("tenant_id") or "default") == tenant
+            ]
+        documents = [item for item in snapshot if item.get("document_id")]
+        ocr = [item for item in documents if item.get("ocr_used")]
+        pages = sum(int(item.get("page_count") or 0) for item in documents)
+        chunks = sum(len(item.get("chunks") or []) for item in documents)
+        scores = [
+            float(item.get("ocr_confidence_avg"))
+            for item in ocr
+            if item.get("ocr_confidence_avg") is not None
+        ]
+        total = len(documents)
+        return {
+            "document_count": total,
+            "ocr_document_count": len(ocr),
+            "ocr_coverage": round(len(ocr) / total, 4) if total else None,
+            "page_count": pages,
+            "chunk_count": chunks,
+            "ocr_confidence_avg": round(sum(scores) / len(scores), 4) if scores else None,
+            "missing_reason": (
+                "" if total else "当前租户还没有带 document_id 的文档条目，覆盖率无分母"
+            ),
+        }
+
+    def getConflict(
+        self, conflictId: str, tenantId: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            rec = self._conflicts.get(str(conflictId or ""))
+            if rec is None:
+                return None
+            if tenantId is not None and str(
+                rec.get("tenant_id") or "default"
+            ) != str(tenantId or "default"):
+                return None
+            return dict(rec, conflict_id=conflictId)
+
+    def conflictRecords(self, tenantId: Optional[str] = None) -> List[Dict[str, Any]]:
+        """全部冲突账（含已裁决），供度量按 decision/状态统计；可按租户过滤。"""
+        with self._lock:
+            return [
+                dict(rec, conflict_id=cid)
+                for cid, rec in self._conflicts.items()
+                if tenantId is None
+                or str(rec.get("tenant_id") or "default") == str(tenantId or "default")
+            ]
 
     def has_conflict(self, conflict_id: str) -> bool:
         """这条 id 是不是条目侧账本的——队列端点要靠它分派，不能猜 id 长相。"""

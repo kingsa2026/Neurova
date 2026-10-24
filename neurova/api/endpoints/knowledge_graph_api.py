@@ -10,11 +10,12 @@ is_demo:false + 引导提示（hint），图谱 manager 是唯一数据源。
 （"知识条目→图谱节点"的写入链路见 neurova/knowledge/graph_bridge.py，批次 3）
 """
 
+from neurova.api.auth import get_current_user_or_default
 from neurova.core.logger import get_logger
 import typing
 from typing import Dict
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -24,7 +25,11 @@ def _get_request_id(request) -> str:
     return getattr(request.state, "request_id", "unknown")
 
 
-def _get_kg_manager(agent_id: str = "default"):
+def _tenant_of(user) -> str:
+    return str((user or {}).get("tenant_id") or "default")
+
+
+def _get_kg_manager(agent_id: str = "default", tenant_id: str = "default"):
     """解析 Agent 对应的专属知识图谱管理器（per-agent 隔离）。
 
     优先取运行时 Agent 挂载的实例，否则用 per-agent 注册表
@@ -33,23 +38,24 @@ def _get_kg_manager(agent_id: str = "default"):
     更早曾从不存在的 neurova.api.app_state 导入 get_app_state，
     ImportError 被吞 → agent 级 manager 恒解析不到。）
     """
-    try:
-        from neurova.api.endpoints import get_app_state
+    if str(tenant_id or "default") == "default":
+        try:
+            from neurova.api.endpoints import get_app_state
 
-        state = get_app_state() or {}
-        agent = (state.get("agents") or {}).get(agent_id)
-        manager = getattr(agent, "knowledge_graph_manager", None)
-        if manager is not None:
-            return manager
-    except Exception:  # noqa: BLE001
-        pass
+            state = get_app_state() or {}
+            agent = (state.get("agents") or {}).get(agent_id)
+            manager = getattr(agent, "knowledge_graph_manager", None)
+            if manager is not None:
+                return manager
+        except Exception:  # noqa: BLE001
+            pass
 
     from neurova.cognitive_layers.knowledge_graph.manager import (
         get_agent_knowledge_graph_manager,
     )
 
     try:
-        return get_agent_knowledge_graph_manager(agent_id)
+        return get_agent_knowledge_graph_manager(agent_id, tenant_id=tenant_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -90,11 +96,14 @@ def _graph_payload(manager, limit: int) -> dict:
 
 
 @router.get("/{agent_id}/knowledge-graph")
-async def get_knowledge_graph(agent_id: str, request: Request, limit: int = Query(100, ge=1, le=500)):
+async def get_knowledge_graph(
+    agent_id: str, request: Request, limit: int = Query(100, ge=1, le=500),
+    current_user: Dict = Depends(get_current_user_or_default),
+):
     """获取 Agent 的知识图谱数据（真实 KnowledgeGraphManager 唯一数据源；空图返回空数组+引导）"""
     _get_request_id(request)
     try:
-        manager = _get_kg_manager(agent_id)
+        manager = _get_kg_manager(agent_id, _tenant_of(current_user))
         data = _graph_payload(manager, limit) if manager else {}
     except Exception as e:  # noqa: BLE001
         logger.warning("读取知识图谱失败，返回空图谱: %s", e)
@@ -119,12 +128,14 @@ async def get_knowledge_graph(agent_id: str, request: Request, limit: int = Quer
 
 @router.get("/{agent_id}/knowledge-graph/search")
 async def search_graph_nodes(
-    agent_id: str, request: Request, q: str = Query(..., min_length=1), limit: int = Query(20, ge=1, le=100)
+    agent_id: str, request: Request, q: str = Query(..., min_length=1),
+    limit: int = Query(20, ge=1, le=100),
+    current_user: Dict = Depends(get_current_user_or_default),
 ):
     """搜索知识图谱中的节点（走真实 search_nodes 索引）"""
     _get_request_id(request)
     try:
-        manager = _get_kg_manager(agent_id)
+        manager = _get_kg_manager(agent_id, _tenant_of(current_user))
         found = manager.search_nodes(q, limit=limit) if manager else []
         matches = [_node_to_dict(n) for n in found]
     except Exception as e:  # noqa: BLE001
@@ -135,11 +146,14 @@ async def search_graph_nodes(
 
 
 @router.get("/{agent_id}/knowledge-graph/nodes/{node_id}")
-async def get_graph_node_detail(agent_id: str, request: Request, node_id: str):
+async def get_graph_node_detail(
+    agent_id: str, request: Request, node_id: str,
+    current_user: Dict = Depends(get_current_user_or_default),
+):
     """获取指定节点的详细信息及关联节点"""
     _get_request_id(request)
     try:
-        manager = _get_kg_manager(agent_id)
+        manager = _get_kg_manager(agent_id, _tenant_of(current_user))
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -184,8 +198,8 @@ class ResolutionDecisionRequest(BaseModel):
     decision: str = Field(..., description="merged=同一实体（执行合并） / kept=不同实体")
 
 
-def _get_resolver(agent_id: str) -> EntityResolver:
-    return EntityResolver(_get_kg_manager(agent_id))
+def _get_resolver(agent_id: str, tenant_id: str = "default") -> EntityResolver:
+    return EntityResolver(_get_kg_manager(agent_id, tenant_id))
 
 
 def _admin_or_403(current_user) -> None:
@@ -202,7 +216,7 @@ async def list_resolution_reviews(
 ):
     """实体消解人工队列（灰区对：高置信已自动处置，低置信转人工）"""
     _admin_or_403(current_user)
-    resolver = _get_resolver(agent_id)
+    resolver = _get_resolver(agent_id, _tenant_of(current_user))
     return {"code": 0, "data": {"reviews": resolver.list_human_reviews(status=status)}}
 
 
@@ -215,7 +229,7 @@ async def resolve_resolution_review(
 ):
     """人工裁决灰区对：merged 执行合并（可 undo_merge 回滚），kept 关闭不再提议"""
     _admin_or_403(current_user)
-    resolver = _get_resolver(agent_id)
+    resolver = _get_resolver(agent_id, _tenant_of(current_user))
     try:
         ok = resolver.resolve_human(review_id, body.decision, decided_by=str(current_user.get("user_id", "")))
     except ValueError as e:
@@ -235,7 +249,7 @@ async def run_resolution(
 ):
     """运行一轮消解：灰区召回 + 攒批裁决（未配 LLM 时灰区对全部转人工）"""
     _admin_or_403(current_user)
-    resolver = _get_resolver(agent_id)
+    resolver = _get_resolver(agent_id, _tenant_of(current_user))
 
     # LLM 调用器可选：失败/未配置时裁决全部转人工（消解绝不阻断）
     llm_call = None
@@ -285,7 +299,7 @@ async def backfill_graph_from_knowledge(
         }
 
     repo = get_knowledge_repository()
-    graph = _get_kg_manager(agent_id)
+    graph = _get_kg_manager(agent_id, _tenant_of(current_user))
     # 补建同样要落权威：只补 JSON 投影等于把"两面分裂"复制到存量条目上。
     # 待办判据问的也是**权威**，不是投影：抽取收口之前抽过的条目 `graph_node_ids`
     # 早有值（旧实现只落投影也照样回写），而权威侧一条都没有。按投影筛，最需要
@@ -340,8 +354,11 @@ async def graph_authority_drift(
     from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
     from neurova.knowledge.graph_bridge import projectionDrift
 
-    graph = _get_kg_manager(agent_id)
-    drift = projectionDrift(agent_id, graph, get_knowledge_fact_store())
+    tenant = _tenant_of(current_user)
+    graph = _get_kg_manager(agent_id, tenant)
+    drift = projectionDrift(
+        agent_id, graph, get_knowledge_fact_store(), tenantId=tenant
+    )
     return {"code": 0, "message": "success", "data": drift}
 
 
@@ -359,8 +376,11 @@ async def rebuild_graph_projection(
     from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
     from neurova.knowledge.graph_bridge import rebuildProjectionFromAuthority
 
-    graph = _get_kg_manager(agent_id)
-    outcome = rebuildProjectionFromAuthority(agent_id, graph, get_knowledge_fact_store())
+    tenant = _tenant_of(current_user)
+    graph = _get_kg_manager(agent_id, tenant)
+    outcome = rebuildProjectionFromAuthority(
+        agent_id, graph, get_knowledge_fact_store(), tenantId=tenant
+    )
     if not outcome.get("persist", {}).get("ok", True):
         # 落盘失败不再被吞成 code:0——内存按权威重铺了、磁盘没落地，
         # 这时候报成功等于让下一次启动读到一份没人知道的旧图（§6-106）。

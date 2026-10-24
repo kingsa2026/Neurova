@@ -26,11 +26,14 @@ def test_moduleIsGone():
 def test_noImporterRemains():
     from tests import ast_scan
 
-    # 面读数：先证这次真扫到了仓内源码（根被改窄时"零命中"与"零扫过"同形）。
+    # 面自证（形态 404）：这条判据的"零 importer"要与"没扫到"可区分——枚举面先量一次。
+    # 现算全仓 5660 个 .py；根少指一层会掉到 tests 2483／neurova 1024，都低于这条线。
     pairs = list(ast_scan.nodeScan(REPO_ROOT, ".py"))
     scanned = len(pairs)
-    assert scanned > 500, f"扫描面现读 {scanned}"
-    assert not ast_scan.importersOfModule(REPO_ROOT, MODULE)
+    assert scanned >= 3000, (
+        "枚举面现读 %d 个 .py——REPO_ROOT 指错时『零 importer』与『没扫到』长得一样" % scanned)
+    importers = ast_scan.importersOfModule(REPO_ROOT, MODULE)
+    assert not importers, f"已退役模块仍被导入：{importers}"
 
 
 def test_facadeNoLongerExports():

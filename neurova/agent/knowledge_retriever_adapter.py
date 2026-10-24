@@ -125,9 +125,12 @@ class KnowledgeRetrieverAdapter:
             user: Optional[Dict[str, Any]] = None
             if getattr(context, "user_id", None):
                 user = {"user_id": str(context.user_id)}
-                role = (getattr(context, "metadata", None) or {}).get("role")
-                if role:
-                    user["role"] = str(role)
+                metadataRole = (getattr(context, "metadata", None) or {}).get("role")
+                if metadataRole:
+                    user["role"] = str(metadataRole)
+                user["tenant_id"] = str(
+                    (getattr(context, "metadata", None) or {}).get("tenant_id") or "default"
+                )
 
             metadata = getattr(context, "metadata", None) or {}
             agent_id = metadata.get("agent_id")

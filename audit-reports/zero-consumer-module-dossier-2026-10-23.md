@@ -78,6 +78,24 @@
   要么按 `806c7047` 的旧通道重建 ws_url 来源——**且必须先撤掉 `test_computer_use_browser_integration.py:124`
   那条反挂接守卫**，否则接线即红。两条路都不是改测试。
 
+#### M1 已裁记录（2026-10-24，§6-410 批 O-4）
+
+用户裁：**接线对话框应答**。走的是上面第一条路（挂进真后端的事件流＋留档可读），落地见 §6-410。
+
+- 已接：`PlaywrightBackend` 在 `initialize()` 建 context 处注册 `dialog` 监听（context 级，覆盖全部 tab），
+  `BrowserManager` 把自己那份 handler 交下去（`be._dialog_handler is mgr._dialog_handler` 有判据钉），
+  并新增具名读口 `BrowserManager.dialogLog()` ⇒ 写→读成环。
+- **本档案当时那句"必须先撤掉反挂接守卫"是不准确的，在此更正**：`test_computer_use_browser_integration.py:124`
+  钉的是 `not hasattr(BrowserManager, "_supervisor")`——对象是 `BrowserSupervisor`（需要 CDP ws_url 的那个死类），
+  与 `DialogHandler`／`_dialog_handler` 不是同一个东西。按"挂进真后端事件流"这条路接线**碰不到那条裁决**，
+  复跑该档 579 passed 仍绿即为证。⇒ 反挂接守卫原样保留。
+- **仍未接的是另一半**：`BrowserSupervisor` 握着的「任意 CDP JSON-RPC 方法调用」本批没动也不该顺手动——
+  那要先重建 `ws_url` 来源（`806c7047` 的旧通道已被 `b1dfb744` 随 `CamofoxAdapter` 摘除）。
+  所以 M1 从"两项唯一实装都悬空"变成"**对话框应答已落地；CDP 直连这一项仍无人裁**"。
+- 另记一条本批核实到的事实，供日后判 CDP 那半时用：仓内第二处用 playwright 的是
+  `web_reach/browser_read.py:120`，它自己 `browser.new_page()`、**不经过** `BrowserManager`，
+  靠 Playwright 无监听时的默认行为（`alert` dismiss／`confirm`·`prompt` 取消）读完不挂住。
+
 ### M2 `security/cognitive_security.py`（整文件 663 行）
 
 - **原功能**：一套输入／输出／记忆三面的分级安全判定——`PromptInjectionDetector:109`（英文／中文
@@ -117,6 +135,26 @@
   `memory_layer/security.py`、`core/firewall.py:147` 的 `_sensitive_patterns` 三份**未逐项比对过**，
   谁覆盖谁、有无互相冲突的脱敏格式，须由裁定者拍板后再动。
 
+#### M2 已裁记录（2026-10-24，§6-411 批 O-5）
+
+用户裁：**先收口单源，暂不进回合链**。落地＝§6-411（`1e3eedf3`），本档案据此更正两处读数：
+
+- **"内容级 PII 识别＋脱敏无现役替代"这句仍然成立，但形状变了**：本档案当时数到 4 份表；
+  第 5 条扫荡复算实为 **7 份**——除本档案列的三份外，还有三处**在役**的自有小抄
+  （`context/summarizing_compressor.py:31`、`llm/providers/error_mapping.py:173`、
+  `skills/evolution_inputs_guard.py:22-27`），以及唯一在役且功能不同的 `security/privacy_gate.py:18`
+  （按**键名**递归脱敏，不并）。⇒ 单源表已把七份里的**全部形状**收进去（`ghp_`／`nvk_` 由此进来），
+  接线进度是"4 份已改接、3 处在役的未改接"（后者另立批 P-5：要先裁出口 token 是否统一）。
+- **本模块的接缝错位已消失**：`SensitiveInfoDetector` 不再自带 `SENSITIVE_PATTERNS`，
+  也不再自写 sanitize（那条 `split("=")[0]+"=***"` 会让冒号形 `password: abc` 输出
+  `password: abc=***`——值一个没少还缀垃圾，本档案的"验证实质"栏当时没验到这一层）。
+  `custom_patterns=` 这个从无人传过的构造形参随批撤广告。
+- **仍未裁的部分**：`PromptInjectionDetector`（提示注入）与 `OutputFilter`（不当内容/危险命令）
+  两张表不属本票、留在原文件；`CognitiveSecuritySystem:563` 依旧零生产引用。
+  所以 M2 的"整文件删不删"仍是开着的票，只是它现在**不再握着敏感信息识别这项唯一实装**——
+  那项能力已经搬到 `security/sensitive_info.py` 并被三处消费者共用。
+
+
 ### M3 `core/state_manager.py`（整文件 395 行）
 
 - **原功能**：点号分隔嵌套键的状态容器（`get:74`/`set:88`/`delete:106`）＋键监听器
@@ -148,6 +186,26 @@
   若裁定保留，正确动作是：先给"预期消费方"定契约（`base_plugin` 那两个不存在的方法要么改名要么删接缝），
   再决定事件语义（改名 `_emit_state_event` 还是真发事件），最后才谈接线——顺序反了就是拿测试补想象。
 
+#### M3 已裁记录（2026-10-24，§6-409 批 O-3）
+
+用户裁：**先修错位接缝，再定去留**。接缝那一半已落地，**模块去留仍待裁**，本档案继续留着：
+
+- 已修（`da32c4d7`）：按上面那句"要么改名要么删接缝"选了**删接缝**——`BasePlugin.get_state/set_state`、
+  `state_manager` 属性对、`_state_manager` 字段整体退役，插件族改挂仓内既有的那份键值状态袋实装
+  （新建 `core/base_module.StateValuesStore`，把原来散在三处的同功能实装收成一处；
+  现查这一对方法全仓零调用方、`tests/unit/test_base_plugin.py` 也从未测过它们 ⇒ 删它不带走任何覆盖）。
+  同根一起清的还有 `base_module.py:53-55` 那三个**全仓零读者**的字段
+  （`_state_manager`/`_log_manager`/`_error_handler`）与 `idle_tracker` 构造函数上三个收下即丢的注入位。
+  **没有**给 `StateManager` 补出那两个方法——那正是"拿测试补想象"的反面教材。
+- 裁后读数（这是留给"定去留"那一拍的关键变化）：`StateManager` 的生产消费者**仍是 0**
+  （`get_state_manager()` 只在 `state_manager.py:387` 自己出现、`StateManager(` 只被自己的工厂调用），
+  原先那三处"看起来要用它"的接缝（`base_module.py:53`／`base_plugin.py:109/164`／`idle_tracker` 形参）
+  本批全部消失 ⇒ **删它不再有任何名义上的消费方需要一并处置**，"接线不是低成本选项"这句
+  在接缝退役后已无对象可接。名实不符那条（`_emit_state_event:220` 不发事件）原样留着，
+  哨兵格 `test_setDoesNotPublishOnEventBus` 仍在。
+- 档案内的行号已随批次漂移（`idle_tracker.py:90`→`:116`、`agent_core.py:679`→`:663`、
+  `base_plugin.py:109/164/300/311` 随本批消失）；复核请按**符号**定位，勿按本档案的行号。
+
 ## 3. 附带两件（都不是票，是记录）
 
 1. **幻影模块 `ProjectManager`**：`neurova.projects` 包不存在、`class ProjectManager` 全仓零命中，
@@ -166,4 +224,11 @@
 `tests/integration/test_event_workflow.py` 重写为总线契约＋状态监听器真实接缝（6 passed）；
 拆掉另外 4 档的"整档静默 skip"形状（57 passed，零 skip）；新增常驻守卫
 `tests/unit/ci/test_imaginedApiSuitesRetired.py`（含静默 skip 判据）。
-**未做**：M1/M2/M3 的任何生产改动、任何接线、任何删除——那三张票等人拍。
+**未做**（写档案那一拍的状态，2026-10-23）：M1/M2/M3 的任何生产改动、任何接线、任何删除——那三张票等人拍。
+
+**三票其后的下落**（2026-10-24 现查，逐票按上面的"已裁记录"同一口径补记）：
+用户已对三票都拍了方向，落地进度不同——**M1** 裁"接线对话框应答"，**已落地**（§6-410 批 O-4），
+本档案那句"必须先撤反挂接守卫"随批更正；剩下的只有 CDP 直连那半（见上"已裁记录"）；
+**M3** 裁"先修错位接缝，再定去留"，接缝已随 §6-409（批 O-3，`da32c4d7`）收口，模块去留仍待裁；
+**M2** 裁"先收口单源，暂不进回合链"，**规则面已落地**（§6-411 批 O-5，`1e3eedf3`）——七份表（本档案当时数到四份，扫荡后复算为七份）里的形状全并进 `security/sensitive_info.py`，四份改接、三处在役的待接（批 P-5）；详见上「M2 已裁记录」。三票都**没有**做删除动作。
+

@@ -154,7 +154,6 @@ from neurova.api.endpoints.knowledge_ingestion import (  # noqa: E402,F401
     _build_item_dict,
     _default_llm_call,
     _fetch_url,
-    _guess_type,
     _import_file_data,
     _resolve_runtime_agents,
     _title_from_filename,

@@ -12,6 +12,9 @@ from neurova.core import vector_math
 from neurova.core.content_identity import normalized_key
 from neurova.core.logger import get_logger
 from neurova.core.sleep_settings_store import SleepSettingsStore
+# 键值状态袋的唯一实装在 core/base_module（它只依赖 stdlib，不会成环）——本类不与
+# BaseModule 共享构造链，只共用那一份读写实现（§6-409 批 O-3 收口三处实装）。
+from neurova.core.base_module import StateValuesStore
 import json
 import threading
 import time
@@ -147,7 +150,7 @@ class MergeResult:
     combined_categories: List[str]
 
 
-class SleepConsolidation:
+class SleepConsolidation(StateValuesStore):
     """睡眠整合引擎
 
     模拟睡眠期间的记忆整合过程：
@@ -191,7 +194,7 @@ class SleepConsolidation:
         self.merge_threshold = similarity_threshold  # RSI 可优化参数别名
         self.memory_manager = memory_manager
         self.storage = storage
-        self._state: Dict[str, Any] = {}
+        self._state_values: Dict[str, Any] = {}
         self._settings_lock = threading.RLock()
         # 设置持久化: 由 SleepSettingsStore 承担（agent_id 白名单净化 +
         # 固定目录, 文件 IO 不在本模块）—— 此前设置仅存内存, agent 重启即丢
@@ -268,14 +271,6 @@ class SleepConsolidation:
         logger.debug(
             f"SleepConsolidation 初始化: " f"similarity={similarity_threshold}, " f"archive={archive_threshold}"
         )
-
-    def set_state_value(self, key: str, value: Any) -> None:
-        """设置状态值（供 IdleTimeTracker 调用）"""
-        self._state[key] = value
-
-    def get_state_value(self, key: str, default: Any = None) -> Any:
-        """获取状态值"""
-        return self._state.get(key, default)
 
     def _mergeAdmission(self, left: "MemoryRecord", right: "MemoryRecord") -> Optional[float]:
         """两条记忆是否"同一件事的又一次记录"——是则返回用于排序的余弦，否则返回 None。

@@ -140,15 +140,27 @@ class TestTheDeadFacadesStayDead:
 class TestNobodyCallsTheAsyncRouterSynchronously:
     def testNoSyncRouteCallsRemainInTestsOrScripts(self):
         offenders = []
+        candidates = 0
+        # 枚举面：不带预筛地量一次根（走同一个共享入口，避免"我只数了预筛后的"那种自证）。
+        enumerated = len(_pySourcesUnderTheScanFace(hints=()))
+        # 候选面：预筛词 `.route(` 是本判据谓词的**充分条件**（没有这个字面串就不可能
+        # 有同步 `route` 调用），口径仍是全量清单。
         for ref in _pySourcesUnderTheScanFace(hints=(".route(",)):
-            if ref.path.name == Path(__file__).name:
-                continue
+            candidates += 1
+            path = ref.path
+            source = ref.code
             try:
-                lines = _syncRouteCallsIn(ref.code)
+                lines = _syncRouteCallsIn(source)
             except SyntaxError:
                 continue
             if lines:
-                offenders.append("%s:%s" % (ref.path.relative_to(REPO_ROOT), lines))
+                offenders.append("%s:%s" % (path.relative_to(REPO_ROOT), lines))
+        # 面自证拆两条（形态 404）：枚举面证"根指得到"，候选面证"预筛没把命中滤空"。
+        # 现算 tests 2483 ＋ scripts 76 ＝ 2559 个 .py；根少指一层（只剩 scripts）就掉到 76。
+        assert enumerated >= 2000, (
+            "枚举面现读 %d 个 .py（tests＋scripts 应在千级）——根指错时零 offender 不作数" % enumerated)
+        assert candidates >= 3, (
+            "候选面（含 `.route(` 的档）现读 %d 个——预筛词写坏会把一切滤成零命中" % candidates)
         assert offenders == [], (
             "还有同步调用 `router.route(...)` 的落点——`route()` 早就是 async，"
             "这形会把协程当成结果用（旧档 14 红的根因）：%s" % offenders[:5])

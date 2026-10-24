@@ -62,6 +62,59 @@ class FactAdoptionRequest(BaseModel):
     outcome: Literal["success", "failure", "unevidenced"]
 
 
+class FactRollbackRequest(BaseModel):
+    """回滚事实到指定版本；操作人与依据由服务端身份与请求体共同留痕。"""
+
+    version_no: int = Field(..., ge=1)
+    reason: str = Field(..., min_length=1)
+
+
+def _factStoreForTenant(fact_id: str, current_user: Dict[str, Any]):
+    """事实治理面的统一隔离门：跨租户按不存在处理（不泄露存在性）。"""
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+
+    store = get_knowledge_fact_store()
+    fact = store.fact(fact_id)
+    tenant = str(current_user.get("tenant_id") or "default")
+    if fact is None or str(fact.get("tenant_id") or "default") != tenant:
+        raise HTTPException(status_code=404, detail="事实不存在: %s" % fact_id)
+    return store
+
+
+class ConflictEvalCase(BaseModel):
+    case_id: str = ""
+    left: str
+    right: str
+    expected: Literal["similar", "conflict", "different", "manual"]
+    vector_similarity: Optional[float] = None
+    subject_similarity: Optional[float] = None
+
+
+class ConflictEvalRequest(BaseModel):
+    cases: List[ConflictEvalCase] = Field(..., max_length=200)
+
+
+class EvaluationCompareRequest(BaseModel):
+    run_a: str = Field(..., min_length=1)
+    run_b: str = Field(..., min_length=1)
+    min_cases: int = Field(30, ge=1, le=100000)
+
+
+class ConflictLabelsRequest(BaseModel):
+    labels: Dict[str, Literal["similar", "conflict", "different", "manual"]]
+
+
+class BaselineCreateRequest(BaseModel):
+    """冻结业务基线：只存事实 id 引用，不复制正文。"""
+
+    scope: str = "global"
+    scope_key: str = ""
+    fact_ids: Optional[List[str]] = None
+    reason: str = ""
+    time_from: Optional[str] = None
+    time_to: Optional[str] = None
+
+
 class KnowledgeExpiryRequest(BaseModel):
     """到期条目归档开关；默认 dry-run，不让审计动作顺手改数据。"""
 
@@ -218,6 +271,7 @@ async def create_knowledge(
         confidence=body.confidence,
         visibility=visibility,
         owner_user_id=str(current_user.get("user_id", "")),
+        tenant_id=str(current_user.get("tenant_id") or "default"),
         valid_until=body.valid_until,
         lifecycle_status=body.lifecycle_status,
     )
@@ -303,10 +357,9 @@ async def record_fact_adoption(
     if str(current_user.get("role") or "") != "admin":
         raise HTTPException(status_code=403, detail="采纳结果写回是治理动作，仅管理员可执行")
 
-    from neurova.knowledge.foundation import get_knowledge_fact_store
-
+    store = _factStoreForTenant(fact_id, current_user)
     try:
-        get_knowledge_fact_store().recordAdoption(fact_id, body.outcome)
+        store.recordAdoption(fact_id, body.outcome)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
@@ -316,6 +369,291 @@ async def record_fact_adoption(
         "message": "ok",
         "data": {"fact_id": fact_id, "outcome": body.outcome},
     }
+
+
+@router.get("/conflicts/{conflict_id}")
+async def get_conflict_detail(
+    request: Request,
+    conflict_id: str = Path(..., description="冲突 ID"),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """冲突详情（管理员）：条目轴与事实轴统一入口，带特征证据/裁决依据。"""
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="冲突详情仅管理员可查看")
+
+    tenant = str(current_user.get("tenant_id") or "default")
+    entry = get_repository().getConflict(conflict_id, tenantId=tenant)
+    if entry is not None:
+        return {"code": 0, "message": "ok", "data": {"axis": "entry", **entry}}
+
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+
+    fact = get_knowledge_fact_store().conflict(conflict_id, tenantId=tenant)
+    if fact is not None:
+        return {"code": 0, "message": "ok", "data": {"axis": "fact", **fact}}
+    raise HTTPException(status_code=404, detail="冲突不存在: %s" % conflict_id)
+
+
+@router.get("/documents/{document_id}")
+async def get_document_detail(
+    request: Request,
+    document_id: str = Path(..., description="文档 ID（document_id 或 knowledge_id）"),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """文档级详情：元数据 + 按页分组的块映射（可见性/租户门与条目一致）。"""
+    item = get_repository().findByDocumentId(current_user, document_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="文档不存在: %s" % document_id)
+    pages: Dict[int, List[Dict[str, Any]]] = {}
+    for chunk in item.get("chunks") or []:
+        page = int(chunk.get("page") or 1)
+        pages.setdefault(page, []).append({
+            "index": chunk.get("index"),
+            "heading_path": list(chunk.get("heading_path") or []),
+            "char_start": chunk.get("char_start"),
+            "char_end": chunk.get("char_end"),
+        })
+    return {
+        "code": 0,
+        "message": "ok",
+        "data": {
+            "document_id": item.get("document_id"),
+            "knowledge_id": item.get("knowledge_id"),
+            "title": item.get("title"),
+            "source_type": item.get("source_type"),
+            "source_path": item.get("source_path"),
+            "page_count": item.get("page_count"),
+            "ocr_used": bool(item.get("ocr_used")),
+            "ocr_engine": item.get("ocr_engine"),
+            "ocr_confidence_avg": item.get("ocr_confidence_avg"),
+            "author": item.get("author"),
+            "ingest_time": item.get("ingest_time"),
+            "pages": [
+                {"page": page, "chunks": pages[page]} for page in sorted(pages)
+            ],
+        },
+    }
+
+
+@router.get("/facts/{fact_id}/history")
+async def get_fact_history(
+    request: Request,
+    fact_id: str = Path(..., description="事实 ID"),
+    limit: int = Query(200, ge=1, le=1000),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """事实版本历史（管理员）：只追加的 create/supersede/retract/expire/revive/rollback。"""
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="事实版本历史仅管理员可查看")
+
+    store = _factStoreForTenant(fact_id, current_user)
+    try:
+        versions = store.history(fact_id, limit=limit)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"code": 0, "message": "ok", "data": {"fact_id": fact_id, "versions": versions}}
+
+
+@router.post("/facts/{fact_id}/rollback")
+async def rollback_fact(
+    request: Request,
+    fact_id: str = Path(..., description="事实 ID"),
+    body: FactRollbackRequest = ...,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """回滚事实到指定版本（管理员，理由必填），并追加一行 rollback 历史。"""
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="事实回滚是治理动作，仅管理员可执行")
+
+    store = _factStoreForTenant(fact_id, current_user)
+    operator = str(current_user.get("user_id") or "unknown")
+    try:
+        restored = store.rollback(
+            fact_id, body.version_no, operator=operator, reason=body.reason
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {
+        "code": 0,
+        "message": "ok",
+        "data": {
+            "fact_id": fact_id,
+            "version_no": body.version_no,
+            "operator": operator,
+            "reason": body.reason,
+            "fact": restored,
+        },
+    }
+
+
+@router.get("/facts/baselines")
+async def list_fact_baselines(
+    request: Request,
+    scope: Optional[str] = Query(None),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """业务基线列表（管理员）：只含引用，不复制正文。"""
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="业务基线仅管理员可查看")
+
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+
+    return {
+        "code": 0,
+        "message": "ok",
+        "data": {"baselines": get_knowledge_fact_store().listBaselines(
+            scope=scope, tenantId=str(current_user.get("tenant_id") or "default")
+        )},
+    }
+
+
+@router.post("/facts/baselines")
+async def create_fact_baseline(
+    request: Request,
+    body: BaselineCreateRequest = ...,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """冻结业务基线（管理员）：scope=agent/global，fact_ids 缺省取当前 active 事实。"""
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="业务基线是治理动作，仅管理员可执行")
+
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+
+    try:
+        created = get_knowledge_fact_store().createBaseline(
+            scope=body.scope,
+            scopeKey=body.scope_key,
+            factIds=body.fact_ids,
+            createdBy=str(current_user.get("user_id") or "unknown"),
+            reason=body.reason,
+            tenantId=str(current_user.get("tenant_id") or "default"),
+            timeFrom=body.time_from,
+            timeTo=body.time_to,
+        )
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail="基线参数非法: %s" % exc)
+    return {"code": 0, "message": "ok", "data": created}
+
+
+@router.get("/audit/ingest")
+async def get_ingest_audit(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """知识入站审计（管理员）：本进程处理计数 + 主题订阅者数。
+
+    只报本进程真实处理过的结果；没有持久队列积压读数时不伪造 backlog。
+    """
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="入站审计是运维读数，仅管理员可查看")
+
+    from neurova.knowledge.ingest_bridge import get_ingest_bridge
+
+    stats = get_ingest_bridge().stats()
+    stats["documents"] = get_repository().documentStats(
+        str(current_user.get("tenant_id") or "default")
+    )
+    return {"code": 0, "message": "ok", "data": stats}
+
+
+@router.post("/audit/ingest/resume")
+async def resume_ingest_jobs(
+    request: Request,
+    limit: int = Query(50, ge=1, le=500),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """补跑待处理入站作业（管理员）：进程重启后显式恢复，返回逐条结果。"""
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="入站恢复是运维动作，仅管理员可执行")
+
+    from neurova.knowledge.ingest_bridge import get_ingest_bridge
+
+    results = await get_ingest_bridge().drainPending(limit=limit)
+    return {
+        "code": 0,
+        "message": "ok",
+        "data": {"processed": len(results), "results": results,
+                 "stats": get_ingest_bridge().stats()},
+    }
+
+
+@router.post("/audit/conflict-metrics")
+async def post_conflict_metrics(
+    request: Request,
+    body: ConflictLabelsRequest = ...,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """带人工标签的冲突账度量（管理员）：误合并率只在有标签时计算。"""
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="冲突度量是治理读数，仅管理员可执行")
+
+    from neurova.knowledge.evaluation.conflict_metrics import conflictMetrics
+
+    records = get_repository().conflictRecords(
+        tenantId=str(current_user.get("tenant_id") or "default")
+    )
+    return {
+        "code": 0, "message": "ok",
+        "data": conflictMetrics(records, body.labels),
+    }
+
+
+@router.post("/audit/evaluation/compare")
+async def compare_evaluation_runs(
+    request: Request,
+    body: EvaluationCompareRequest = ...,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """离线变体 A/B 对照（管理员）：样本不足先报不足，不按均值判胜负。"""
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="评测对照是治理读数，仅管理员可执行")
+
+    from neurova.knowledge.evaluation.retrieval_benchmark import get_retrieval_benchmark
+
+    bench = get_retrieval_benchmark()
+    runA = bench.runById(body.run_a)
+    runB = bench.runById(body.run_b)
+    if runA is None or runB is None:
+        raise HTTPException(status_code=404, detail="评测 run 不存在")
+    return {
+        "code": 0, "message": "ok",
+        "data": bench.compareVariants(runA, runB, minCases=body.min_cases),
+    }
+
+
+@router.post("/audit/conflict-eval")
+async def evaluate_conflict_cases(
+    request: Request,
+    body: ConflictEvalRequest = ...,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """带人工真值的四象限评估（管理员）：准确率、误合并率、漏判计数。"""
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="冲突评估是治理读数，仅管理员可执行")
+
+    from neurova.knowledge.evaluation.conflict_eval import evaluateConflictCases
+
+    report = evaluateConflictCases([case.model_dump() for case in body.cases])
+    return {"code": 0, "message": "ok", "data": report}
+
+
+@router.get("/audit/conflict-metrics")
+async def get_conflict_metrics(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """冲突账度量（管理员）：检出分布 + 有标签时的误合并率；无标签如实 unevidenced。"""
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="冲突度量是整库读数，仅管理员可查看")
+
+    from neurova.knowledge.evaluation.conflict_metrics import conflictMetrics
+
+    records = get_repository().conflictRecords(
+        tenantId=str(current_user.get("tenant_id") or "default")
+    )
+    return {"code": 0, "message": "ok", "data": conflictMetrics(records)}
 
 
 @router.get("/audit/retrieval-metrics")
@@ -347,7 +685,11 @@ async def get_retrieval_metrics_snapshot(
 
         store = get_knowledge_fact_store()
         data["pending_conflicts"] = (
-            len(repo.list_conflicts("pending")) + len(store.conflicts("pending"))
+            len(repo.list_conflicts(
+                "pending", tenantId=str(current_user.get("tenant_id") or "default")
+            )) + len(store.conflicts(
+                "pending", tenantId=str(current_user.get("tenant_id") or "default")
+            ))
         )
         data["knowledge_token_usage"] = store.tokenUsageMetrics()
     except Exception as exc:  # noqa: BLE001 — 指标读取失败不阻断端点，但必须点名缺哪项
@@ -400,14 +742,17 @@ async def run_knowledge_expiry(
     body: KnowledgeExpiryRequest = KnowledgeExpiryRequest(),
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
-    """到期条目自动归档（管理员）。默认 dry-run；apply=True 才把 active→archived。
+    """到期条目自动归档（管理员，当前租户内）。默认 dry-run；apply=True 才把 active→archived。
 
     不删除正文；归档后仍可 PUT 恢复 active。启动路径也调用同一方法（apply=True）。
     """
     if str(current_user.get("role") or "") != "admin":
         raise HTTPException(status_code=403, detail="到期归档是整库动作，仅管理员可执行")
     return {"code": 0, "message": "ok",
-            "data": get_repository().expireDueEntries(apply=body.apply)}
+            "data": get_repository().expireDueEntries(
+                apply=body.apply,
+                tenantId=str(current_user.get("tenant_id") or "default"),
+            )}
 
 
 @router.get("/audit/lifecycle")
@@ -421,7 +766,9 @@ async def get_lifecycle_audit(
     """
     if str(current_user.get("role") or "") != "admin":
         raise HTTPException(status_code=403, detail="生命周期审计是整库只读报告，仅管理员可查看")
-    return {"code": 0, "message": "ok", "data": get_repository().lifecycleReport()}
+    return {"code": 0, "message": "ok", "data": get_repository().lifecycleReport(
+        tenantId=str(current_user.get("tenant_id") or "default")
+    )}
 
 
 @router.get("/audit/entry-feedback")
@@ -478,7 +825,9 @@ async def run_foundation_expiry(
 
     from neurova.knowledge.foundation import get_knowledge_fact_store
 
-    expired = int(get_knowledge_fact_store().expireDueFacts())
+    expired = int(get_knowledge_fact_store().expireDueFacts(
+        tenantId=str(current_user.get("tenant_id") or "default")
+    ))
     return {
         "code": 0,
         "message": "Expired facts advanced: %d" % expired,
@@ -498,10 +847,10 @@ async def get_fact_lineage(
     `missing` 是显式的缺维清单：没有断言、断言没挂活动、活动没记介质各占一条。
     回一条空链会被读成"溯过源、没来源"，那是假的确定性。
     """
-    from neurova.knowledge.foundation import get_knowledge_fact_store
     from neurova.knowledge.foundation.lineage_view import FactLineageView
 
-    view = FactLineageView(get_knowledge_fact_store()).trace(fact_id)
+    store = _factStoreForTenant(fact_id, current_user)
+    view = FactLineageView(store).trace(fact_id)
     if view is None:
         raise HTTPException(status_code=404, detail="事实不存在: %s" % fact_id)
     return view
@@ -514,12 +863,12 @@ async def get_fact_turtle(
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
     """血缘的 RDF/Turtle 导出（自拼文本，零新增依赖）。"""
-    from neurova.knowledge.foundation import get_knowledge_fact_store
     from neurova.knowledge.ontology.turtle import serializeFact
 
     try:
         return PlainTextResponse(
-            serializeFact(get_knowledge_fact_store(), fact_id), media_type="text/turtle")
+            serializeFact(_factStoreForTenant(fact_id, current_user), fact_id),
+            media_type="text/turtle")
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 

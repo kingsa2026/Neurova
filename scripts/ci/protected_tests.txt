@@ -3705,3 +3705,89 @@ tests/unit/ci/test_imaginedApiSuitesRetired.py
 # 活体侧走真 `create_app()` + 真 `/api/v1/chat/stream`（按生产分支条件摘掉 `agent.loop`），
 # 反证＝把进料那一行退回旧形态，退化臂当场读回 300 片全消费＋正文空。逐文件单跑 6 passed。
 tests/unit/agent/test_legacyStreamCutsDegenerateThinking.py
+# §6-407（批 O-2）：空闲监控线程的 start/stop 成对——生产关闭口停线程、测试侧按格统一回收。
+# 判据钉的是**那条线程对象**不再存活 ＋ 状态机到 STOPPED，不是全局线程计数（后者会被别档残留
+# 污染，红绿都不说明问题）；回收口自己也有格（起点 0 → 起两条 → 报 2 → 两条真死 → 再报 0），
+# 否则 conftest 里那句每格后的 `stopAllIdleMonitors()` 可以是个空函数而全仓不红。
+# 活体读数：起 20 个 Agent 的睡眠链 ⇒ 监控线程 20 条；逐个 `shutdown_agent` ⇒ 残留 0 条；
+# 随后回收口返回 0 ⇒ 收干净的是生产那对手。A/B（把三档换回提交前逐字节还原）在
+# `tests/unit/memory`＋`tests/unit/core` 全量上：无修复态 14 failed／3233 passed ↔
+# 有修复态 12 failed／3235 passed，总数同为 3247、差集恰是本批那两格，无新增红；
+# 两态耗时 254.74s ↔ 258.94s ⇒ 按格回收的成本在噪声内。逐文件单跑两次同读数 7 passed（6.31s／8.24s）。
+tests/unit/memory/test_sleep_loop_wiring.py
+# §6-408 其一（批 O-2b）：体检探针的子进程预算收成单源常量，用例父墙由它导出。
+# 2026-10-24 整场 `pytest tests/unit` 在 33% 处消失，MainThread 停在 `check_dependencies` 的
+# `subprocess.run → communicate`——子墙 120s、全局墙 30s，Windows 侧 thread 法超时即终止整个进程。
+# 常驻判据咬形状不咬秒数：常量定义行在场＋`inspect.getsource(check_dependencies)` 引用它且不得
+# 再出现 `timeout=<数字>`＋本档父墙由该常量导出且严格大于它。变异探针（改回 `timeout=120`）
+# ⇒ 仅该格红、其余 11 格绿（红的确实是形状而不是行为）；恢复后 12 passed（12.03s／10.77s 两次）。
+tests/unit/computer_use/test_environment_setup.py
+# §6-408 其二（批 O-2c）：审批节点不在测试里空等满窗口——同一根"合法超墙即整场打死"的第三条链。
+# 单格隔离计时 1 passed in 63.45s（`exec_approval` 会等满 `config["timeout"]`，而处理器是在它
+# 返回之后才被调的 ⇒ 60 就是 60 秒空等）；整档 7 passed in 130.03s。两处孤儿 60 收到本仓同族档
+# 既有口径 1s。新常驻判据三格：凡提到 `exec_approval` 的被收集测试里 `"timeout"` 字典项不得超 10s
+# ＋三面分开自证（枚举面 ≥1000／预筛候选面 ≥5（现数 7 档）／扫到的等待预算数 ≥12（现数 23 处））
+# ＋合成样本双向对照（60 要被抓、1 不得被抓、值挂模块常量上也要算得出来）。
+# 面为什么拆三条：合成一条就分辨不出失败形态——枚举面掉穿＝扫描根指错，候选面为空＝预筛写窄，
+# 只有站点数为零而前两面正常才是真绿。治理闸 `test_ratchetDoesNotRise` 当场把我第一版判成
+# offender：`assert len(sites) >= _SITE_FLOOR` 右边是个名字而非常数，闸只认"与常数比"那一形
+# ⇒ 形态 405 的现形复算：加行的同时跑闸，闸说的是加行者的问题，不是闸的问题。
+# 变异探针（`_APPROVAL_WAIT_S` 改 90）⇒ 仅主判据红，且整档计时同步涨到 190.50s（同一次探针
+# 既读出"形状被抓住"也读出"这确实是墙外成本"）；恢复后 10 passed（13.30s／12.51s 两次）。
+tests/unit/neurflow/test_approval_reply_mechanism.py
+# §6-409（批 O-3）：对象内键值状态袋收口成**一处**实装，三族共用；`BasePlugin` 那份错位接缝退役。
+# 收口前三份并存：`BaseModule`（在役，IdleTimeTracker 写 6 键＋一格读回）、`SleepConsolidation`
+# （同功能第二拷贝，读的是自己那个 `_state` dict）、`BasePlugin.get_state/set_state`（坏的：
+# 转发到 `StateManager` 从未存在的 `get_state(plugin_id,…)`，且 `_state_manager` 从不被注入、
+# 这一对方法全仓零调用方）。判据不数定义行就完事——它比**函数本体的同一性**
+# （`getattr(cls, name) is StateValuesStore.set_state_value`），各抄一份"长得像"的会当场红。
+# 反面控制两条：状态机那一对同名不同职的 `BaseModule.get_state()/set_state(ModuleState)` 必须
+# 仍在且仍不收 key（否则本批就成了顺手抹掉一半契约）；`BaseModule` 的具名注入位不得被一起削掉。
+# 红→绿读数：实现前 5 failed／4 passed（红在行为与形状断言上——`AttributeError` 级别的
+# "插件族没有这两条方法"、定义面报出的两处并存、广告了转不出去的构造参），实现后 9 passed
+# （3.22s／3.27s 两次同读数）。活体（真 tracker＋真 consolidation＋真 BasePlugin 实例，
+# 隔离数据根，脚本即用即删）：启动后 `running=True`／`initialized=True`／`started=True`，
+# 停止后 `running=False`／`stopped=True`，插件写读与默认值通路，`_state_manager` 已从实例字段消失。
+# A/B 归零验证：`tests/unit/core`＋`plugins`＋`memory`＋`test_base_plugin` 共 3373 passed／
+# 12 failed，12 条与批 O-2 那场的同 12 条逐名相同（并会话在途改动所致，见 §6-405/§6-406）；
+# 另把本批 4 个生产档临时换回 HEAD 态复跑 `tests/unit/ci` 那三档红（13 条）⇒ 与本批无关，预存性成立。
+tests/unit/core/test_perObjectStateValueStoreHasOneImplementation.py
+# §6-410（批 O-4）：JS 对话框应答链接通——`DialogHandler` 从"被实例化后全仓零读者"变成有事件源也有读口。
+# 两头原本都是断的：`BrowserManager.__init__:1596` 建 handler 而无人读；`neurova/computer_use/` 里
+# 零处 `.on(` ⇒ 页面弹 alert/confirm 时 Playwright 按默认行为处理，`handle_dialog` 一次也不会被叫到。
+# 接线只落在唯一拿得到该事件的后端（`PlaywrightBackend.initialize()` 建 context 那处，context 级一处
+# 覆盖全部 tab）；`ScraplingBackend`（fetcher）与 camofox／remote（REST／action RPC 面）没有这个事件源，
+# 判据里专门一格钉住"别给它们顺手加监听"。`web_reach/browser_read.py` 也核实过：它没用 DialogHandler、
+# 靠默认 dismiss，接上去改的是**读取语义**（confirm 从此被 accept）⇒ 本批不动，理由写在判据头部。
+# 九格含三条变异探针实证：①不给后端交 manager 那份 handler ⇒ 仅两格闭环格红（防"接了第二个空口袋"）；
+# ②注册口空转不 `target.on` ⇒ 四格红；③应答只留档不 `accept()` ⇒ 仅那一格红。
+# 另两格是控制：拿**已安装的** `playwright.async_api.Dialog` 比对我们会调的四个成员（不想象 API）；
+# 读口必须给快照不是内部列表（防外部伪造应答记录）。
+# 活体：本机没下载 Chromium（`ms-playwright/chromium-1243` 不存在）⇒ 真页面弹不出来，改由
+# playwright 自己用的事件派发器 `pyee.asyncio.AsyncIOEventEmitter` 驱动真生产代码：注册到 1 条监听、
+# 两个对话框都 `accept`、`dialogLog()` 读出 2 条（type/message/accepted/timestamp 齐）、clear 后归零。
+# 逐文件单跑两次同读数 9 passed（3.39s／3.36s）；`tests/unit/computer_use`＋两份浏览器集成档＋
+# 想象 API 守卫合跑 579 passed／2 skipped，无回归（§6-404 那条"不许挂 `_supervisor`"的反挂接裁决
+# 与本题不是同一对象，原样保留且仍绿）。
+tests/unit/computer_use/test_dialogResponseIsWired.py
+# §6-411（批 O-5）：内容级敏感信息的规则表与脱敏引擎各只留一份（用户裁"先收口单源，暂不进回合链"）。
+# 比之前仓内有**七份**：cognitive 的 8 条键值表（sanitize 用 `split("=")[0]+"=***"` ⇒ 冒号形
+# `password: abc` 输出 `password: abc=***`，值一个没少还缀垃圾）、memory 的 8 条（中文键名＋校验型
+# 身份证＋带分隔卡号是它的长处，但 `bank_card`/`credit_card` 是同一条正则登记两次，且 `replacement`
+# 死模板表达不出"留首3末4"）、firewall 的 6 条**裸词**（打码的是关键词本身）＋它在 `:147` 先编译、
+# `:150` 才 `_load()` ⇒ 配置改规则永不生效；另三处**在役**的自有小抄（summarizing_compressor／
+# error_mapping／evolution_inputs_guard）本批先合表不接线 ⇒ 另立一票。
+# 合并尺度取三份里**较高**的一档（身份证 HIGH→CRITICAL、手机号 MEDIUM→HIGH、邮箱 LOW→MEDIUM），
+# 后果明写：`MemorySecurityGuard.should_remember("…手机号…")` 从此 False；这三条链今天零生产消费者。
+# 顺带修掉一个真错读数：`get_sensitivity_level` 原来是 `max(levels, key=lambda x: x.value)`——
+# 按**字符串**比大小，"medium" 赢过 "critical"，"最高敏感度"是错的；序现在由共享尺度一处给。
+# 判据核心是"同表同引擎"：同一串文本从 detector／MemorySecurity／firewall 三扇 door 读回必须
+# **逐字相等**（有人另起一张表或再写一遍循环就红），另含裸词反例、配置生效正检（这条今天该红）、
+# 枚举别名、重复正则、面自证与合成样本对照。13 passed（3.23s／4.02s 两次同读数）。
+# 活体（隔离数据根、生产函数无替身）：12 条规则 × 9 组文本，四扇 door 输出与单源引擎逐字一致，
+# `password: hunter2`→`password: ***`、`API_KEY=sk_test_1234567890`→`API_KEY=***`、
+# 手机号→`138****5678`、正常中文原样返回 ⇒ LIVE_PASS。
+# 回归：`tests/unit/security`＋`test_firewall`＋记忆安全两档合跑 **1209 passed／3 skipped**；
+# 其中 2 条红（`document_pipeline.py` 长出第二张后缀表、install-gate 那条）经 `git status` 现查
+# 是**并会话未跟踪的在途文件**所致，与本批无关，不记成回归。
+tests/unit/security/test_sensitiveInfoRulesAreSingleSourced.py

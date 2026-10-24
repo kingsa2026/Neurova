@@ -368,6 +368,7 @@ def _scanSites(tree: ast.AST, consts: dict, anchor: pathlib.Path,
     只差一个接收者，把前者当全仓扫描会把读数放大一个量级（本档取数路自己踩过的第一版错）。
     """
     out = []
+    guarded = _existenceGuardedReceivers(tree)
     for call in ast.walk(tree):
         if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Attribute):
             continue
@@ -378,11 +379,31 @@ def _scanSites(tree: ast.AST, consts: dict, anchor: pathlib.Path,
             expr = call.args[0] if call.args else None
             out.append((attr, _rootStatus(expr, consts, anchor, selfPath, scoped)))
         elif attr in FILE_ENUM_ATTRS and top not in NON_PATH_RECEIVERS:
+            if recv in guarded:
+                # 「先验目录在，再迭代空不空」那一形是**清理落点**，不是判据的扫描面：
+                # 它指不到目录恰恰说明没东西要清，零命中是预期结果而不是假绿。
+                # 只豁免"同一个接收者被同一个 if 条件用 is_dir()/exists() 守住"这一形——
+                # 换个名字的守卫不认（见控制表里那条反例），否则豁免会漏成万能后门。
+                continue
             out.append((attr, _rootStatus(call.func.value, consts, anchor, selfPath, scoped)))
         elif attr == "walk" and top == "os":
             expr = call.args[0] if call.args else None
             out.append(("os.walk", _rootStatus(expr, consts, anchor, selfPath, scoped)))
     return out
+
+
+def _existenceGuardedReceivers(tree: ast.AST) -> set:
+    """被同一条件里的 `X.is_dir()`／`X.exists()` 守住的接收者表达式集合。"""
+    guarded = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        for sub in ast.walk(node.test):
+            if (isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute)
+                    and sub.func.attr in ("is_dir", "exists") and sub.args == []
+                    and isinstance(sub.func.value, ast.expr)):
+                guarded.add(ast.unparse(sub.func.value))
+    return guarded
 
 
 def _rootGap(sites: list) -> str:
@@ -1599,6 +1620,30 @@ _NO_PROOF_TAIL = "    hits = [p for p, _n in ast_scan.nodeScan(_Target, '.py')]\
      "_Repo = pathlib.Path(__file__).resolve().parents[3]\n_Target = _Repo / 'no_such_dir'\n\n\n"
      "def test_shape():\n" + _NO_PROOF_TAIL,
      "静态根指不到真实目录——与『目录被改名/删掉』同形，零命中是假的，必须点名", True, MISSING),
+    ("tests/unit/ci/sample.py",
+     "from tests import ast_scan\nimport pathlib\n"
+     "_Repo = pathlib.Path(__file__).resolve().parents[3]\n_Anchor = _Repo / 'no_such_dir'\n\n\n"
+     "def test_shape():\n"
+     "    if _Anchor.is_dir() and not any(_Anchor.iterdir()):\n"
+     "        _Anchor.rmdir()\n"
+     "    hits = [p for p, _n in ast_scan.nodeScan(_Repo / 'neurova', '.py')]\n"
+     "    scanned = len(hits)\n"
+     "    assert scanned > 500\n"
+     "    assert hits == []\n",
+     "清理落点：同一个接收者先被 is_dir() 守住再迭代——指不到目录是**预期**（没东西要清），"
+     "不是扫描根写错（§6-405 批 N 的豁免；判据的扫描面走 nodeScan 那一支，照样要自证）",
+     False, ""),
+    ("tests/unit/ci/sample.py",
+     "from tests import ast_scan\nimport pathlib\n"
+     "_Repo = pathlib.Path(__file__).resolve().parents[3]\n_Other = _Repo / 'neurova'\n"
+     "_Target = _Repo / 'no_such_dir'\n\n\n"
+     "def test_shape():\n"
+     "    hits = []\n"
+     "    if _Other.is_dir():\n"
+     "        hits = list(_Target.rglob('*.py'))\n"
+     "    assert hits == []\n",
+     "守的是**另一个名字** ⇒ 豁免不认：否则任何迭代都能被无关的 is_dir() 后门放行",
+     True, MISSING),
     ("tests/unit/ci/sample.py",
      "from tests import ast_scan\nimport pathlib\n"
      "_Repo = pathlib.Path(__file__).resolve().parents[3]\n_Target = _Repo / 'one.py'\n\n\n"
