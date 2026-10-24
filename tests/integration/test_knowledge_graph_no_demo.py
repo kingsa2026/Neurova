@@ -12,9 +12,34 @@ from neurova.api.endpoints import knowledge_graph_api as kga
 
 
 class StubManager:
+    """`KnowledgeGraphManager` 的手写替身，只补端点真正读的读面。
+
+    `get_stats` 是端点报"真总量"的唯一出处，替身不带上它就不是同一份契约——
+    宁可这里手写补齐，也不用 MagicMock 兜（自动造出来的属性会让统计口径与
+    节点数各说各话，正是要防的那类假绿）。
+    """
+
     def __init__(self, nodes=None, edges=None):
         self._nodes = nodes or {}
         self._edges = edges or {}
+
+    def get_stats(self):
+        from collections import Counter
+
+        from neurova.cognitive_layers.knowledge_graph.manager import GraphStats
+
+        def enumValue(item, attr):
+            raw = getattr(item, attr, "")
+            return str(getattr(raw, "value", raw))
+
+        return GraphStats(
+            node_count=len(self._nodes),
+            edge_count=len(self._edges),
+            node_type_counts=dict(
+                Counter(enumValue(n, "node_type") for n in self._nodes.values())),
+            relation_type_counts=dict(
+                Counter(enumValue(e, "relation_type") for e in self._edges.values())),
+        )
 
 
 def _make_client(monkeypatch, manager):
