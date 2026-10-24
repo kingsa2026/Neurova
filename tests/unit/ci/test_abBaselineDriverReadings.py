@@ -183,8 +183,12 @@ class TestEndToEndOnSyntheticRepos:
             "from app.logic import answer\n\n"
             "def test_answer():\n"
             f"    assert answer() == {expected}\n", encoding="utf-8")
+        # `-c commit.gpgsign=false` 与身份参数同位：跑测机上 `commit.gpgsign=true` 是全局配置，
+        # 不钉掉它，这里合成仓的提交会因"没有可用私钥"失败（exit 128），而红报的是
+        # `_makeRepo` 里的 subprocess.CalledProcessError——像 loader 坏了，实际只是签名。
         for args in (["init", "-q"], ["add", "."],
-                     ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "base"]):
+                     ["-c", "user.email=t@t", "-c", "user.name=t",
+                      "-c", "commit.gpgsign=false", "commit", "-q", "-m", "base"]):
             subprocess.run(["git"] + args, cwd=str(repo), capture_output=True, text=True,
                            encoding="utf-8", errors="replace", check=True,
                            timeout=_GIT_WALL_S)
