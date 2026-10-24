@@ -27,6 +27,18 @@ export interface KnowledgeNode {
   // P0-2 分块：块数 + 检索命中的块级溯源
   chunk_count?: number
   chunk_hits?: KnowledgeChunkHit[]
+  // A1 去重来源链 + A6 坐标 + 去重命中标记
+  sources?: KnowledgeSourceEvidence[]
+  geo?: { lat: number; lon: number } | null
+  duplicate?: boolean
+}
+
+/** 来源证据（A1：同文多来源并入既有条目时的溯源清单） */
+export interface KnowledgeSourceEvidence {
+  source?: string
+  source_type?: string
+  source_path?: string
+  ingest_time?: string
 }
 
 /** 检索命中的块级明细（chunk_index 定位 + 块正文 + 相关度得分） */
@@ -46,6 +58,8 @@ export interface KnowledgeCreatePayload {
   tags?: string[]
   source?: string
   metadata?: Record<string, unknown>
+  author?: string
+  geo?: { lat: number; lon: number }
 }
 
 // ---------------------------------------------------------------------------
@@ -83,8 +97,20 @@ export function deleteKnowledgeNode(id: string, params?: { agent_id?: string }) 
   return api.delete<ApiResponse<null>>(`${BASE}/${id}`, { params })
 }
 
+/** A3/A6 元数据过滤（后端 visible/search 已支持，判权在服务端） */
+export interface KnowledgeSearchFilters {
+  author?: string
+  source_type?: string
+  ocr_used?: boolean
+  page_min?: number
+  source?: string
+  updated_after?: number
+  geo_radius?: { lat: number; lon: number; radius_km: number }
+  geo_bbox?: { min_lat: number; min_lon: number; max_lat: number; max_lon: number }
+}
+
 /** Search knowledge nodes with semantic similarity. */
-export function searchKnowledge(query: string, params?: { agent_id?: string; limit?: number; category?: string; page?: number; page_size?: number; scope?: KnowledgeScope }) {
+export function searchKnowledge(query: string, params?: { agent_id?: string; limit?: number; category?: string; page?: number; page_size?: number; scope?: KnowledgeScope } & KnowledgeSearchFilters) {
   return api.post<ApiResponse<KnowledgeNode[]>>(`${BASE}/search`, { query, ...params })
 }
 

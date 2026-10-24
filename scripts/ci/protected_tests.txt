@@ -3864,3 +3864,24 @@ tests/unit/security/test_sandboxFileBlockNamesThePath.py
 # 名字打日志——静态门禁报未定义名，运行时被外层吞成 warning，「拦了哪条路径」整个消失。
 # 本档钉三层：结果面带出路径值且 `to_dict()` 一并带出、与取数口同源、消费侧真日志点到路径。
 tests/unit/security/test_governancePathValuesReachCallers.py
+# §6-416（批 P-5 第三格）：内容级**第八张表**并进单源，挖掘门改接并退役自带表与同名实装。
+# 票面来自 §6-415 仍开①——§6-411 那次"七份收成一份"没数到 `evolution/eval/miner.py:SECRET_PATTERNS`，
+# 而它在役（`service.py:503-506` → `messages_from_sessions` → `sanitize_messages` → 命中即整条
+# 剔除，评测集随后喂进化分析）。先比后合的结论分四档：**六形单源一条都没有**（`ghu_`／`xoxb-`／
+# `xapp-`／`ntn_`／`AKIA{16}`／PEM 私钥头，实测原样进证据 ⇒ 并进表，表 12→18、凭据投影 7→13）；
+# **四条是冗余窄档不并**（`sk-ant-api`／`sk-or-v1`／`ghp_`／`Bearer \S{20,}` 实测由泛化档覆盖，
+# 再抄一遍＝同一件事第二把尺度，故反向钉一格）；**三条键值式单源本就更强**（值长下限统一走
+# §6-415 具名的 `MIN_SECRET_VALUE_LEN`）；**七个凭据环境变量名不是脱敏形状**——提到变量名不等于
+# 泄露凭据，打进打码投影会把运维散文糊平，故收成筛除词汇一处具名（`CREDENTIAL_ENV_NAMES`＋
+# `mentionsCredentialEnvVar`，大小写口径沿用原表 IGNORECASE）。第二段实装名 `contains_secret`
+# 一并去掉（改名 `_containsCredential`），仓内该功能只剩一处实装被消费才算闭环。
+# 判据 7 格全经**在役入口**问（真 `sanitize_messages`／`_redact`／`redact_secrets`），新符号走
+# hasattr／AST ⇒ 生产回退态收集得起；夹具 `_BENIGN_TASK` 刻意长过 `MIN_TEXT_LEN`，免得把"长度闸
+# 剔除"冒充成"密钥闸剔除"。红→绿 5 failed／2 passed → 7 passed；红自证两生产文件回退 HEAD 复跑
+# ＝5 failed／2 passed 与首轮逐条同号。变异探针三发各只红该红（剔除口恒 False／摘 AWS 形状且
+# 连投影名一起摘——只摘形状时 `_pick` 当场 KeyError，"投影写错宁可炸"被顺手自证／泛化档收到
+# 40 位⇒仅冗余窄档那格红）。活体十形经真链全剔除且两扇脱敏门全 `[REDACTED]`，而"请先设置
+# GITHUB_TOKEN 与 DATABASE_URL"这句挖掘门剔除、脱敏门逐字不动（＝筛除词汇与打码形状必须分开）。
+# 回归 7653 passed，十四条既有红逐条同选型两态对跑读数一致（含只在本场现形的 test_ttl_expiration
+# ERROR＝跨档串扰），本批不新增红。逐文件单跑两次同读数 7 passed。
+tests/unit/evolution/test_minerSecretDropPolicySharesOneTable.py

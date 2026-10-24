@@ -44,7 +44,7 @@ jieba>=0.42.1
 python-docx>=1.1.0
 openpyxl>=3.1.2
 python-pptx>=1.0.0
-pypdf>=4.0.0
+pypdf>=6.21.2
 # 文档标准化：扫描 PDF/图片 OCR 与按页渲染（RapidOCR 为首选，惰性加载）
 rapidocr-onnxruntime>=1.3.0
 PyMuPDF>=1.23.0
