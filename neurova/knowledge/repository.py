@@ -211,6 +211,29 @@ def _sourceEvidence(item: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _geoOf(geo: Any) -> Optional[Dict[str, float]]:
+    """geo 入库形状：只收可解析的 lat/lon；坏形状归 None，不猜坐标。"""
+    if not isinstance(geo, dict):
+        return None
+    try:
+        lat, lon = float(geo.get("lat")), float(geo.get("lon"))
+    except (TypeError, ValueError):
+        return None
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        return None
+    return {"lat": lat, "lon": lon}
+
+
+def _haversineKm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    import math
+
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * 6371.0088 * math.asin(math.sqrt(a))
+
+
 class KnowledgeRepository:
     """按 agent_id 分组的条目仓库：权威默认在底座库叙述表，显式关闸才回 knowledge.json。
 
@@ -686,6 +709,8 @@ class KnowledgeRepository:
             item["ocr_confidence_avg"] = None
         if not isinstance(item.get("ocr_used"), bool):
             item["ocr_used"] = False
+        if not isinstance(item.get("geo"), dict) or _geoOf(item.get("geo")) is None:
+            item["geo"] = None
         return item
 
     def _assertNotWritingProductionUnderPytest(self) -> None:
@@ -781,6 +806,7 @@ class KnowledgeRepository:
         document_id: str = "",
         tenant_id: str = "default",
         dedupe: bool = False,
+        geo: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         status = normalizeLifecycleStatus(lifecycle_status)
         now = datetime.datetime.now(datetime.timezone.utc).timestamp()
@@ -839,6 +865,7 @@ class KnowledgeRepository:
             "author": author,
             "page_count": page_count,
             "ocr_used": bool(ocr_used),
+            "geo": _geoOf(geo),
             "ocr_engine": ocr_engine,
             "ocr_confidence_avg": ocr_confidence_avg,
             "document_id": document_id,
@@ -929,6 +956,8 @@ class KnowledgeRepository:
         source_type: Optional[str] = None,
         ocr_used: Optional[bool] = None,
         page_min: Optional[int] = None,
+        geo_radius: Optional[Dict[str, Any]] = None,
+        geo_bbox: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """按当前用户可见性返回条目视图（scope: all/public/private/shared）。
 
@@ -978,6 +1007,22 @@ class KnowledgeRepository:
                     continue
                 if page_min is not None and int(item.get("page_count") or 0) < int(page_min):
                     continue
+                # GIS 过滤（A6）：无坐标条目在任何 geo 过滤下不参与；
+                # 过滤被请求而参数残缺时按不匹配处理——空间过滤宁可漏给，不可误扩大结果集。
+                geoPoint = item.get("geo") or {}
+                if geo_radius is not None:
+                    radiusKm = geo_radius.get("radius_km")
+                    if (not geoPoint or radiusKm is None
+                            or _haversineKm(
+                                float(geo_radius["lat"]), float(geo_radius["lon"]),
+                                float(geoPoint["lat"]), float(geoPoint["lon"])) > float(radiusKm)):
+                        continue
+                if geo_bbox is not None:
+                    if not geoPoint:
+                        continue
+                    if not (float(geo_bbox["min_lat"]) <= float(geoPoint["lat"]) <= float(geo_bbox["max_lat"])
+                            and float(geo_bbox["min_lon"]) <= float(geoPoint["lon"]) <= float(geo_bbox["max_lon"])):
+                        continue
                 if updated_after is not None:
                     try:
                         if float(item.get("updated_at") or 0) < float(updated_after):
@@ -1176,6 +1221,8 @@ class KnowledgeRepository:
         source_type: Optional[str] = None,
         ocr_used: Optional[bool] = None,
         page_min: Optional[int] = None,
+        geo_radius: Optional[Dict[str, Any]] = None,
+        geo_bbox: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """在当前用户可见视图内检索知识。
 
@@ -1189,7 +1236,7 @@ class KnowledgeRepository:
             user, scope=scope, category=category, agent_id=agent_id, tags=tags,
             source=source, updated_after=updated_after,
             author=author, source_type=source_type, ocr_used=ocr_used,
-            page_min=page_min,
+            page_min=page_min, geo_radius=geo_radius, geo_bbox=geo_bbox,
         )
         if not visible:
             return []
