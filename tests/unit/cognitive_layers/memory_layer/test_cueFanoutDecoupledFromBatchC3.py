@@ -89,12 +89,31 @@ class TestFilterIsIndependentOfBatchSize:
         )
 
 
+def _denseTierIsUsable() -> bool:
+    """本机这一档是不是**真能算**的稠密档。
+
+    `get_embedding_engine() is not None` 是谎话：工厂总会返回一个对象，缺 numpy／tokenizer 时
+    它内部退回零向量兜底（`backend_type` 为 None、`encode()` 全零），通道按零向量丢行 ⇒
+    门限那两格测到的是"没引擎"，不是"门没挡住"。判据先判档，缺档时明说跳过。
+    """
+    from neurova.embedding import get_embedding_engine
+
+    engine = get_embedding_engine()
+    if engine is None or not getattr(engine, "backend_type", None):
+        return False
+    try:
+        vector = engine.encode("探针")
+    except Exception:  # noqa: BLE001 - 探测失败即视为无可用档
+        return False
+    return bool(vector) and any(float(x) != 0.0 for x in vector)
+
+
 @pytest.fixture
 def fanoutManager(tmp_path):
-    from neurova.embedding import get_embedding_engine
     from neurova.cognitive_layers.memory_layer.semantic_search import reset_semantic_search
 
-    assert get_embedding_engine() is not None, "本判据需要本地 ONNX 档（缺档时通道不点火，测不到门）"
+    if not _denseTierIsUsable():
+        pytest.skip("本机没有可用的嵌入档（numpy/tokenizer 缺席）——通道建不出索引，门限测不到")
     reset_semantic_search()
     mgr = MemoryManager(
         db_path=os.path.join(str(tmp_path), "mem.db"), agent_id="cue_fanout_c3", enable_buffer=False

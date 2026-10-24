@@ -113,7 +113,17 @@ class CueVectorChannel:
         return self._maxEntries
 
     def _build(self) -> None:
-        import numpy as np
+        try:
+            import numpy as np
+        except ImportError:
+            # numpy 是**可选**依赖（`requirements-ci.txt` 刻意排除，与 `neurova/embedding` 同一处置）：
+            # 缺席时这一档不建索引、读数落 `skippedNoEngine`，而不是抛 ModuleNotFoundError
+            # 让调用方的 fail-soft 把它吞成一句"零读数"。通道只做加分，缺席＝没有线索时的可达性。
+            self._built = True
+            self._vectors = None
+            self._memoryIds = []
+            self._stats["skippedNoEngine"] += 1
+            return
 
         rows = self._cueRowsGetter(self._maxEntries)
         # 扇出门：同一条线索挂住的记忆数超过一次检索能区分的上限 ⇒ 整条不参与通道。
@@ -176,7 +186,11 @@ class CueVectorChannel:
             self._stats["skippedNoEngine"] += 1
             return []
 
-        import numpy as np
+        try:
+            import numpy as np
+        except ImportError:  # 与 `_build` 同一条判据：没有 numpy 就没有这一档
+            self._stats["skippedNoEngine"] += 1
+            return []
 
         with self._lock:
             if not self._built:
