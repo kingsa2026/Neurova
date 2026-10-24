@@ -30,20 +30,12 @@ def test_modulesAreGone():
 def test_noImporterRemains():
     from tests import ast_scan
 
-    # 面自证：下面每个"零导入"都建立在"真的扫过子树"之上。根指错或扫面被改窄时，
-    # 零 offender 与干净同形（面自证棘轮点名的正是这一形）。取跟踪清单而不是遍历，
-    # 与 `importersOfModule` 同一取法、且不受未跟踪件影响。
-    scanned = ast_scan.trackedPyPaths()
-    assert len(scanned) > 500, (
-        f"扫描面现读 {len(scanned)} 个 .py——根指错时『零导入』不代表干净"
-    )
+    # 面自证（形态 404）：这条判据的"零 importer"要与"没扫到"可区分——枚举面先量一次。
+    # 现算全仓 5660 个 .py；根少指一层会掉到 tests 2483／neurova 1024，都低于这条线。
+    enumerated = len(ast_scan.filesUnder(REPO_ROOT, ".py"))
+    assert enumerated >= 3000, (
+        "枚举面现读 %d 个 .py——REPO_ROOT 指错时『零 importer』与『没扫到』长得一样" % enumerated)
     offenders = {}
-    # 面自证：语料按根量一次，根被改窄时下面会读成「零导入」而不是红
-    # （该形态由 `tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py` 点名）。
-    corpus = len(ast_scan.filesUnder(REPO_ROOT, ".py"))
-    assert corpus > 500, (
-        f"语料现读 {corpus} 个文件（根＝{REPO_ROOT}）——面量级不对＝根指错，"
-        "「零导入」不来自代码")
     for name in RETIRED:
         hits = ast_scan.importersOfModule(
             REPO_ROOT, f"neurova.cognitive_layers.memory_layer.{name}")

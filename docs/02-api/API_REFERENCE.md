@@ -333,7 +333,7 @@
 > 守卫 `tests/unit/api/test_authSurfaceFreshness.py` 逐字比对，漂移即红。
 > 口径：只认**路由依赖图**里的身份/角色门；在 handler 体内自验 token 的那一类**未覆盖**，要确认它只能真打请求。404/405 不算门。
 
-**汇总**：路由 958 条（含方法展开）——需认证 **851**、公开 **107**。
+**汇总**：路由 960 条（含方法展开）——需认证 **856**、公开 **104**。
 
 | 模块前缀 | 路由 | 需认证 | 公开 |
 |----------|------|--------|------|
@@ -341,7 +341,7 @@
 | `agent-enhancement` | 4 | 4 | 0 |
 | `agents` | 15 | 12 | 3 |
 | `analytics` | 4 | 4 | 0 |
-| `api` | 32 | 15 | 17 |
+| `api` | 33 | 16 | 17 |
 | `artifacts` | 2 | 2 | 0 |
 | `audio` | 7 | 2 | 5 |
 | `audit` | 4 | 4 | 0 |
@@ -358,7 +358,7 @@
 | `computer` | 25 | 25 | 0 |
 | `computers` | 11 | 8 | 3 |
 | `console` | 26 | 26 | 0 |
-| `context` | 9 | 3 | 6 |
+| `context` | 10 | 4 | 6 |
 | `cost-rollup` | 8 | 0 | 8 |
 | `enhanced-memory-search` | 11 | 6 | 5 |
 | `enhanced-users` | 8 | 8 | 0 |
@@ -374,7 +374,7 @@
 | `home` | 2 | 2 | 0 |
 | `image` | 5 | 5 | 0 |
 | `knowledge` | 2 | 2 | 0 |
-| `knowledge-graph` | 9 | 6 | 3 |
+| `knowledge-graph` | 9 | 9 | 0 |
 | `knowledge-integration` | 10 | 10 | 0 |
 | `language` | 6 | 6 | 0 |
 | `logs` | 4 | 4 | 0 |
@@ -506,9 +506,6 @@
 - `POST /api/v1/health/checks/{name}/run`
 - `POST /api/v1/health/recover`
 - `GET /api/v1/health/report`
-- `GET /api/v1/knowledge-graph/{agent_id}/knowledge-graph`
-- `GET /api/v1/knowledge-graph/{agent_id}/knowledge-graph/nodes/{node_id}`
-- `GET /api/v1/knowledge-graph/{agent_id}/knowledge-graph/search`
 - `POST /api/v1/mobile/pairing/confirm`
 - `GET /api/v1/models/active`
 - `GET /api/v1/neurflow/agents`

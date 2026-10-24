@@ -11,6 +11,7 @@ RRF 之后应用轻量采纳先验（success 升、failure 降、unevidenced 中
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from typing import Any, Dict, List, Optional
 
@@ -31,7 +32,8 @@ class KnowledgeRetrieverAdapter:
     即优先保证记忆与 MoE 路由，知识库作为补充知识源。
     """
 
-    def __init__(self, repo, user: Optional[Dict[str, Any]] = None, factSurface=None):
+    def __init__(self, repo, user: Optional[Dict[str, Any]] = None, factSurface=None,
+                 graphWalker=None):
         """
         参数:
             repo: 知识库 Repository 实例（需有 search_visible_items 方法）
@@ -41,8 +43,61 @@ class KnowledgeRetrieverAdapter:
         self._repo = repo
         self._user = user
         self._factSurface = factSurface
+        self._graphWalker = graphWalker
         self._name = "KnowledgeRetriever"
         self._priority = 25  # 中等偏下优先级（记忆 >> 知识）
+
+    def _graphRoute(self, context, agentId: Optional[str], limit: int):
+        """图谱条目影子路由：fact→entry 映射；默认权重 0，不改变排序。"""
+        mode = str(os.environ.get("NEUROVA_KB_GRAPH_ROUTE") or "shadow").lower()
+        if mode in ("off", "0", "false", "no"):
+            return [], {}, 0.0
+        try:
+            walker = self._graphWalker
+            if walker is None:
+                from neurova.knowledge.foundation.graph_walk import GraphFactWalker
+                from neurova.knowledge.foundation.knowledge_facts import (
+                    get_knowledge_fact_store,
+                )
+
+                walker = GraphFactWalker(
+                    get_knowledge_fact_store(), agentId=agentId
+                )
+            tenantId = str(
+                (getattr(context, "metadata", None) or {}).get("tenant_id")
+                or "default"
+            )
+            hops = walker.walkFromQuery(
+                context.query, limit=max(limit * 2, 10), tenantId=tenantId
+            )
+            ranks = []
+            support = {}
+            for hop in hops or []:
+                entryId = str(hop.get("entry_id") or "")
+                if not entryId:
+                    continue
+                if entryId not in ranks:
+                    ranks.append(entryId)
+                support.setdefault(entryId, []).append({
+                    "fact_id": hop.get("id"),
+                    "hops": hop.get("hop"),
+                    "path": hop.get("path"),
+                })
+            graphWeight = 0.0
+            if mode in ("on", "1", "true", "yes"):
+                try:
+                    graphWeight = float(
+                        os.environ.get("NEUROVA_KB_GRAPH_ROUTE_WEIGHT", "0.10")
+                    )
+                except ValueError:
+                    graphWeight = 0.10
+            return [
+                (entryId, 1.0 / (index + 1))
+                for index, entryId in enumerate(ranks)
+            ], support, graphWeight
+        except Exception as exc:  # noqa: BLE001 - 图谱影子失败不阻断知识主路
+            logger.debug("知识图谱影子路由跳过: %s", exc)
+            return [], {}, 0.0
 
     def _surface(self):
         """返回已启用的读面，关闸即 None（判一次，之后所有分支不再各自猜开关状态）。"""
@@ -125,9 +180,12 @@ class KnowledgeRetrieverAdapter:
             user: Optional[Dict[str, Any]] = None
             if getattr(context, "user_id", None):
                 user = {"user_id": str(context.user_id)}
-                role = (getattr(context, "metadata", None) or {}).get("role")
-                if role:
-                    user["role"] = str(role)
+                metadataRole = (getattr(context, "metadata", None) or {}).get("role")
+                if metadataRole:
+                    user["role"] = str(metadataRole)
+                user["tenant_id"] = str(
+                    (getattr(context, "metadata", None) or {}).get("tenant_id") or "default"
+                )
 
             metadata = getattr(context, "metadata", None) or {}
             agent_id = metadata.get("agent_id")
@@ -157,6 +215,9 @@ class KnowledgeRetrieverAdapter:
             candidateLimit = min(requested * ADOPTION_CANDIDATE_FACTOR, ADOPTION_CANDIDATE_MAX)
             if candidateLimit < requested:
                 candidateLimit = requested
+            graphRanks, graphSupport, graphWeight = self._graphRoute(
+                context, agent_id, requested
+            )
             knowledge_items = _kb_hybrid.hybrid_search_knowledge(
                 self._repo,
                 user=user,
@@ -164,6 +225,9 @@ class KnowledgeRetrieverAdapter:
                 limit=candidateLimit,
                 scope="all",
                 agent_id=agent_id,
+                graphRanks=graphRanks or None,
+                graphSupport=graphSupport or None,
+                graphWeight=graphWeight,
                 **filters,
             )
 

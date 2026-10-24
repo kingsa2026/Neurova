@@ -16,7 +16,7 @@ MAX_EXTRACT_CHARS（抽取文本上限）。
 
 import io
 import os
-from typing import Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 MAX_EXTRACT_CHARS = 200_000  # 20 万字符上限（真正的上下文闸门）
 
@@ -45,49 +45,112 @@ def _decode_text(data: bytes, filename: str) -> Optional[str]:
     return text[:MAX_EXTRACT_CHARS] if text else None
 
 
-def _extract_docx(data: bytes) -> str:
-    import docx  # lazy import：依赖缺失不阻断其他类型
+def extract_docx_blocks(data: bytes) -> List[Dict[str, Any]]:
+    """docx → 有序块（段落/表格/标题）；供结构化导入保留标题层级。"""
+    import docx
 
     doc = docx.Document(io.BytesIO(data))
-    parts = [p.text for p in doc.paragraphs if p.text.strip()]
+    blocks: List[Dict[str, Any]] = []
+    for paragraph in doc.paragraphs:
+        text = paragraph.text.strip()
+        if not text:
+            continue
+        style = str(getattr(paragraph.style, "name", "") or "")
+        is_heading = style.lower().startswith("heading") or style.startswith("标题")
+        level = 1
+        if is_heading:
+            digits = "".join(ch for ch in style if ch.isdigit())
+            level = int(digits) if digits else 1
+        blocks.append({
+            "kind": "heading" if is_heading else "paragraph",
+            "text": text,
+            "level": level,
+        })
     for table in doc.tables:
         for row in table.rows:
             cells = [c.text.strip() for c in row.cells]
             if any(cells):
-                parts.append(" | ".join(cells))
+                blocks.append({"kind": "table", "text": " | ".join(cells), "level": 0})
+    return blocks
+
+
+def _extract_docx(data: bytes) -> str:
+    parts = [b["text"] for b in extract_docx_blocks(data)]
     return "\n".join(parts)[:MAX_EXTRACT_CHARS]
 
 
-def _extract_xlsx(data: bytes) -> str:
+def extract_xlsx_sheets(data: bytes) -> List[Dict[str, Any]]:
+    """xlsx → 每个 sheet 的文本（保留 sheet 名供页码/标题映射）。"""
     import openpyxl
 
     wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
-    parts = []
-    for ws in wb.worksheets:
-        parts.append(f"[工作表: {ws.title}]")
-        for row in ws.iter_rows(values_only=True):
-            cells = [str(c) if c is not None else "" for c in row]
+    sheets: List[Dict[str, Any]] = []
+    try:
+        for ws in wb.worksheets:
+            parts = []
+            for row in ws.iter_rows(values_only=True):
+                cells = [str(c) if c is not None else "" for c in row]
+                if any(cells):
+                    parts.append(" | ".join(cells))
+                if sum(len(p) for p in parts) > MAX_EXTRACT_CHARS:
+                    break
+            sheets.append({"title": ws.title, "text": "\n".join(parts)})
+    finally:
+        wb.close()
+    return sheets
+
+
+def extract_xls_sheets(data: bytes) -> Optional[List[Dict[str, Any]]]:
+    """旧版 .xls 直读（升级计划 A7）：xlrd 可选依赖，缺席返回 None。
+
+    输出形状与 `extract_xlsx_sheets` 完全同形（同一份"表格→文本"口径），
+    调用方据此决定走直读还是回落 LibreOffice——不新增第二套表格文本形状。
+    xlrd 2.x 只认 BIFF（.xls），不下载、不转换。
+    """
+    try:
+        import xlrd
+    except Exception:  # noqa: BLE001 - 可选依赖缺席不是错误，回落是正常路径
+        return None
+    book = xlrd.open_workbook(file_contents=data)
+    sheets: List[Dict[str, Any]] = []
+    for index in range(book.nsheets):
+        ws = book.sheet_by_index(index)
+        parts: List[str] = []
+        for row in range(ws.nrows):
+            cells = [
+                str(ws.cell_value(row, col)) if ws.cell_value(row, col) is not None else ""
+                for col in range(ws.ncols)
+            ]
             if any(cells):
                 parts.append(" | ".join(cells))
             if sum(len(p) for p in parts) > MAX_EXTRACT_CHARS:
                 break
-    wb.close()
+        sheets.append({"title": ws.name, "text": "\n".join(parts)})
+    return sheets
+
+
+def _extract_xlsx(data: bytes) -> str:
+    parts = []
+    for sheet in extract_xlsx_sheets(data):
+        parts.append(f"[工作表: {sheet['title']}]")
+        if sheet["text"]:
+            parts.append(sheet["text"])
     return "\n".join(parts)[:MAX_EXTRACT_CHARS]
 
 
-def _extract_pptx(data: bytes) -> str:
+def extract_pptx_slides(data: bytes) -> List[str]:
+    """pptx → 每页文本（含页码标记与备注）。"""
     from pptx import Presentation
 
     prs = Presentation(io.BytesIO(data))
-    parts = []
+    pages: List[str] = []
     for idx, slide in enumerate(prs.slides, start=1):
-        parts.append(f"[幻灯片 {idx}]")
+        parts = []
         for shape in slide.shapes:
             if shape.has_text_frame:
                 text = shape.text_frame.text.strip()
                 if text:
                     parts.append(text)
-        # 备注也可以抽取
         try:
             if slide.has_notes_slide:
                 notes = slide.notes_slide.notes_text_frame.text.strip()
@@ -95,22 +158,36 @@ def _extract_pptx(data: bytes) -> str:
                     parts.append(f"[备注] {notes}")
         except Exception:
             pass
+        pages.append("\n".join(parts))
+    return pages
+
+
+def _extract_pptx(data: bytes) -> str:
+    parts = []
+    for idx, text in enumerate(extract_pptx_slides(data), start=1):
+        parts.append(f"[幻灯片 {idx}]")
+        if text:
+            parts.append(text)
     return "\n".join(parts)[:MAX_EXTRACT_CHARS]
 
 
-def _extract_pdf(data: bytes) -> str:
+def extract_pdf_pages(data: bytes, max_pages: int = 100) -> List[str]:
+    """pdf → 按页文字层（不渲染、不 OCR；OCR 由 document_pipeline 兜底）。"""
     from pypdf import PdfReader
 
     reader = PdfReader(io.BytesIO(data))
-    parts = []
-    for page in reader.pages[:100]:  # 最多 100 页，防超大 PDF
+    pages: List[str] = []
+    for page in reader.pages[:max_pages]:
         try:
             page_text = page.extract_text() or ""
         except Exception:
             page_text = ""
-        if page_text.strip():
-            parts.append(page_text)
-    return "\n".join(parts)[:MAX_EXTRACT_CHARS]
+        pages.append(page_text)
+    return pages
+
+
+def _extract_pdf(data: bytes) -> str:
+    return "\n".join(extract_pdf_pages(data))[:MAX_EXTRACT_CHARS]
 
 
 #: 各分类下"真能把这类附件读出内容"的注册原语名（单源建议表）。

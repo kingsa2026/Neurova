@@ -186,6 +186,10 @@
 
 `specs/2026-10-23-knowledge-governance-remaining-design.md`（知识治理四项缺口：人工接管／一般拒答／token 归因／大语料索引；设计、拍板与实施终态，含飞书服务台/微信客服/MQTT producer 与 ANN 1M 实测）
 
+`specs/2026-10-23-knowledge-system-upgrade-design.md`（知识库系统升级：对照目标架构的差距矩阵、文档标准化/OCR、企微入站、冲突矩阵/精排/版本、存储与多 Agent 分期、验收与待拍板项）
+
+`specs/2026-10-24-multiformat-kb-upgrade-plan.md`（多格式文档知识库升级计划：差距矩阵、去重/OCR provider/元数据过滤、图谱并入混合检索两阶段融合，以及 2D/3D 图谱建模工作台取代只读图谱页的分阶段设计）
+
 ## 3. 已识别的重复/待合并项（下一步清理）
 
 | 重复簇 | 建议 | 动作 |

@@ -12,12 +12,21 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 START_PY = REPO_ROOT / "start.py"
 
 # 将项目根加入 sys.path 以便 import start
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+#: 子进程预算唯一出处（§6-402 批 K 口径：父墙由子墙 ＋余量导出，不许两处各写一个数）。
+#: `--check` 实测 41.95s——这是一次**合法超墙**：全局 30s 先到时 Windows 侧走 thread 法，
+#: 报出来的不是这一格红，而是整场跑测没了（同形态见 §6-408 的 130.03s 那处）。故子墙留
+#: 60s、用例父墙 120s。`--help` 瞬时返回，取**低于全局 30s** 的 20s，不陪前者抬。
+CHECK_WALL_S = 60
+HELP_WALL_S = 20
 
 
 class TestStartArgParsing(unittest.TestCase):
@@ -28,20 +37,23 @@ class TestStartArgParsing(unittest.TestCase):
             [sys.executable, str(START_PY), "--skip-install", "--check", *extra],
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=CHECK_WALL_S,
         )
         return proc.returncode
 
+    @pytest.mark.timeout(CHECK_WALL_S + 60)
     def test_yes_flag_accepted(self):
         self.assertEqual(self._run_check("--yes"), 0)
 
+    @pytest.mark.timeout(CHECK_WALL_S + 60)
     def test_y_short_alias_accepted(self):
         self.assertEqual(self._run_check("-y"), 0)
 
+    @pytest.mark.timeout(HELP_WALL_S + 30)
     def test_force_restart_flag_exists_in_help(self):
         proc = subprocess.run(
             [sys.executable, str(START_PY), "--help"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=HELP_WALL_S,
         )
         self.assertIn("--force-restart", proc.stdout)
 

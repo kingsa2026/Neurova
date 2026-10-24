@@ -41,11 +41,39 @@ def buildRunner(config: dict, providerResolver=None):
 
     method = (config.get("method") or "weight").strip().lower()
     weights = config.get("weights") or None
+    providerKind = str(config.get("rerank_provider_kind") or "http").strip().lower()
     if method not in ("weight", "model"):
         raise ValueError(f"未知 rerank method: {method!r}（有效值: weight / model）")
+    if providerKind not in ("http", "local_bge", "local", "llm"):
+        raise ValueError(
+            f"未知 rerank provider 类型: {providerKind!r}（有效值: http / local_bge / llm）"
+        )
 
     if method == "model":
         from neurova.llm import rerank_client as rc
+
+        if providerKind in ("local_bge", "local"):
+            from .local_rerank_provider import buildLocalBgeProvider
+
+            try:
+                provider = buildLocalBgeProvider(
+                    modelPath=str(config.get("rerank_model_path") or ""),
+                    modelName=str(config.get("rerank_model_name") or ""),
+                )
+            except rc.RerankConfigError as e:
+                return WeightRerankRunner(weights), "weight", {
+                    "requested": "model", "provider_kind": "local_bge", "reason": e.reason}
+            return ModelRerankRunner(provider, fallback_weights=weights), "model", None
+
+        if providerKind == "llm":
+            from .llm_rerank_provider import buildLlmRerankProvider
+
+            try:
+                provider = buildLlmRerankProvider(config.get("llm_call"))
+            except rc.RerankConfigError as e:
+                return WeightRerankRunner(weights), "weight", {
+                    "requested": "model", "provider_kind": "llm", "reason": e.reason}
+            return ModelRerankRunner(provider, fallback_weights=weights), "model", None
 
         provider_name = str(config.get("rerank_provider") or "").strip()
         if providerResolver is None:

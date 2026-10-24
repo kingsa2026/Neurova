@@ -222,6 +222,9 @@ def test_backfill_extracts_only_pending_entries(registry, monkeypatch, tmp_path)
     fake_repo = FakeRepo()
 
     fake_graph = MagicMock()
+    # 图谱管理器属租户是抽取咽喉的写入判据（graph_bridge 拒绝跨租户落投影）；
+    # 不设这个字段，替身读到的是 MagicMock 自动造的哨兵，抽取会被判成跨租户而整片拒掉。
+    fake_graph.tenant_id = "default"
     fake_graph.search_nodes.return_value = []
     fake_graph.add_node.side_effect = [
         SimpleNamespace(node_id="n1"),
