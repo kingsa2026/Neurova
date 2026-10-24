@@ -24,16 +24,21 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-#: 探针刻意落点的路径锚，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
-#: 常量只写到**真实存在**的那一级（`<repo>/data`），末级目录拼在调用处（`_sessionsDir()`）：
-#: 棘轮按「接收者的落点态」取数，接收者若是个可能不存在的路径就落 missing 被读成「根写错」，
-#: 与「这个目录今天本来就不该在仓库里」两件事混成一句。
-SESSIONS_PARENT = REPO_ROOT / "data"
+#: 探针刻意落点的路径锚，必须写在模块级：绑在函数里的名字面自证棘轮认不出，整档会静默掉出它的面。
+#: 锚只写到**今天真实存在**的仓根，下面两级（`data` / `data/sessions`）由取值函数拼：棘轮按
+#: 「接收者的落点态」取数，接收者若是今天还不存在的路径就落 missing，被读成「根写错」——
+#: 与「这个目录本来就不该在仓库里」混成一句。
+SESSIONS_ANCHOR = REPO_ROOT
+
+
+def _sessionsParent() -> Path:
+    """探针回收的上限（`<repo>/data`）——只回收本探针建出来的那一层。"""
+    return SESSIONS_ANCHOR / "data"
 
 
 def _sessionsDir() -> Path:
     """仓库真实会话库（`<repo>/data/sessions`）——探针刻意要落的那一处。"""
-    return SESSIONS_PARENT / "sessions"
+    return _sessionsParent() / "sessions"
 
 
 def _cleanupProbeRealLanding():
@@ -45,11 +50,12 @@ def _cleanupProbeRealLanding():
     路径不进参数、不走函数内名字：本档的落点直接由模块级常量给，面自证棘轮才认得它。
     """
     sessionsDir = _sessionsDir()
+    sessionsParent = _sessionsParent()
     try:
         if sessionsDir.is_dir() and not any(sessionsDir.iterdir()):
             sessionsDir.rmdir()
-        if SESSIONS_PARENT.is_dir() and not any(SESSIONS_PARENT.iterdir()):
-            SESSIONS_PARENT.rmdir()
+        if sessionsParent.is_dir() and not any(sessionsParent.iterdir()):
+            sessionsParent.rmdir()
     except OSError:
         pass
 
