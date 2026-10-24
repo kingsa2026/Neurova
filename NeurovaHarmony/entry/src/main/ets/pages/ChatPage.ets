@@ -135,10 +135,20 @@ export struct ChatPage {
    * 配置：从 ConfigManager 读取 ws_base_url，携带 AuthStore 中的 access_token
    */
   private async connectWs(): Promise<void> {
-    const wsUrl = this.config.get<string>('ws_base_url', 'ws://192.168.10.132:9527/v1/mobile/ws');
-    const token = this.authStore.accessToken;
+    // 地址与凭证都来自**配对那一次**（AuthStore 里存着 resolve 回来的 wsUrl 与
+    // 一次性接入凭证）。原先这里是 `config.get('ws_base_url', 'ws://192.168.10.132:9527/...')`
+    // ——一台开发机的局域网 IP 写死在源码里，换网络即全体失联，打包后也改不动；
+    // 而且带的凭证是登录用的 accessToken，不是配对下发的 ticket：后端只会按 ticket 认设备，
+    // 于是这条面从来连不上，而失败被一句"WS 连接失败"抹平（§6-126 那一族）。
+    const wsUrl = this.authStore.wsUrl;
+    const ticket = this.authStore.wsToken;
+    if (!wsUrl || !ticket) {
+      this.logger.warn(TAG, '未配对或凭证已失效，不发起连接');
+      this.msg.warning('还没有可连的服务器：请先扫码配对');
+      return;
+    }
     try {
-      await this.ws.connect(wsUrl, token);
+      await this.ws.connect(wsUrl, ticket);
       this.logger.info(TAG, 'WS 连接成功');
     } catch (e) {
       this.logger.error(TAG, 'WS 连接失败', e as Error);
