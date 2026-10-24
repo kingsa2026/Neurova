@@ -604,9 +604,11 @@ class OcrEngine(Protocol):
 - 冲突详情端点、基线时间窗已补；基线 category 维度因事实行没有 category 列未做；
 - 旧数据批量回填已提供 dry-run/apply 脚本（`--source-root` 解析相对 source_path），
   但未在生产语料上执行；
-- MQTT 入站端到端未接真实 broker；paho 未装时生产者/订阅端显式报依赖缺失；
-- `compareVariants` 已接 API，但尚未作为 CI 回归门；
-- 向量路 hnswlib 已实测（100 万 p95 0.67 ms / 1.6 GB）；多进程并发与重建时间未测；
+- MQTT 入站已用本地 amqtt broker 验证生产→订阅→队列→落知识；TLS/鉴权与
+  真实生产 broker 未验证；paho 未装时生产者/订阅端显式报依赖缺失；
+- `gateNoRegression` 已提供并为 CI 回归门（单测覆盖）；真实黄金集门禁需接评测账本；
+- 向量路 hnswlib 已实测（100 万 p95 0.67 ms / 1.6 GB）；FTS 4 进程并发已实测
+  （100 万 p95 398.87 ms / 9.97 qps）；重建时间未单列；
   外部存储迁移未实施（10M FTS p95 已越线，需单独立项）；
 - MQTT 传输保持可选（按拍板）：未装 `paho-mqtt` 时 `dependency_missing` 显式报错，
   进程内 ACP 路径不受影响；`NEUROVA_AGENT_BUS=mqtt` 时读 `NEUROVA_MQTT_*` 配置；
