@@ -41,6 +41,11 @@ import pytest
 from neurova.llm.capability_detector import infer_capabilities
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+#: `git ls-tree` 的预算唯一出处（毫秒级；此前无 `timeout=`＝无界等待）。取低于全局 30s 的
+#: 20s——先到点的应当是子进程那条诚实的 TimeoutExpired，而不是 thread 法的全局墙
+#: （§6-402 批 K 口径）。
+GIT_WALL_S = 20
 NEUROVA = PROJECT_ROOT / "neurova"
 
 RETIRED_PACKAGE = "neurova/cognitive_layers/model_adapter"
@@ -95,6 +100,7 @@ def _trackedFilesUnder(prefix: str) -> list:
     proc = subprocess.run(
         ["git", "ls-tree", "-r", "--name-only", "HEAD", "--", prefix],
         cwd=PROJECT_ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=GIT_WALL_S,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     return [line for line in proc.stdout.splitlines() if line.strip()]
