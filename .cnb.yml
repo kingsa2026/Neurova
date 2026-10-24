@@ -55,7 +55,7 @@
 #     平台最小调度间隔 5 分钟，周级用第 5 段（星期）表达；本文件的周级巡检
 #     流水线（deploy-config 的时间维度兜底）同样不计入 `main.push` 的条数。
 #   - 单条流水线内的 stages 串行；任一 stage 失败即中止该流水线。
-#   - runner.cpus: N 对应内存 N×2GiB（本文件最大 4 → 8GiB）。
+#   - runner.cpus: N 对应内存 N×2GiB（本文件最大 8 → 16GiB）。
 #   - docker.volumes 为构建节点级缓存（copy-on-write 默认），跨节点不共享；
 #     同一流水线内不得声明存在包含关系的卷路径。
 #   - YAML 锚点仅在同文件内可用（跨文件 include 不支持锚点），
@@ -143,9 +143,19 @@ main:
     # 版本不在此处写死第二份：事实源是 Dockerfile 的 FROM，判据见
     # tests/unit/ci/test_unit_tests_single_leg.py（改镜像而这里不响即红）。
     - name: unit-tests
+      # 4 核 = 8GiB 内存，而这一腿要把整个受保护子集（7784 项）装进内存里跑完：
+      # 连续两轮都死在 84% 处且**恰好卡在同一格**——
+      #   cnb-hl1-1k5lp6pae#003  duration 17m48s → `Killed` / code 137
+      #   cnb-a20-1k5lpircs#003 duration 24m13s → `Killed` / code 137
+      # 两轮都是 `tests/unit/skills/test_marketInstalledStateIsReadBack.py` 之后、
+      # 下一格被逐行印出的**同时**被掐，pytest 一行 summary 都没来得及打。
+      # 这不是"分钟数不够"（墙钟已于 733eba82 抬到 80m），是内存到顶：高水位随
+      # 那份装进内存里的测试集合一起长。8 核 = 16GiB 留一倍余量给同一批用例的内存峰值，
+      # 判据一个字不动：清单、--cov-fail-under=60、每一格断言全部逐字未改。
+      # 不写死"内存是多少"：事实源是平台口径 cpus × 2GiB（见文件头）。
       runner:
         tags: cnb:arch:amd64
-        cpus: 4
+        cpus: 8
       docker:
         image: python:3.12
         volumes:

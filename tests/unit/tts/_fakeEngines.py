@@ -85,3 +85,14 @@ def afterTtl(mgr) -> float:
     import time
 
     return time.monotonic() + mgr._config.release_ttl_sec + 1
+
+def fakeLightFactory(**_engineOptions):
+    """顶替 `neurova.tts.manager` 模块级 `EdgeTTS` 的构造接缝（重引擎那侧的同形）。
+
+    为什么轻引擎也要桩：`_engines` 里那只假实例只挡得住「命中缓存」，而 TTL 释放
+    **正是**把它从缓存里丢掉、改走 `_initialize_engine("edge-tts")` 去构造一个新的
+    `EdgeTTS`。真类 `initialize()` 里 `import edge_tts`，而精简锁按设计不含它 ⇒ 释放
+    当场返回 False，本组判据在 CI 上红、在装过 edge-tts 的开发机上绿。判据不该由
+    「这台机器装了什么」决定读数（同一口径见重引擎那侧 `fakeHeavyFactory`）。
+    """
+    return _FakeLightEngine()
