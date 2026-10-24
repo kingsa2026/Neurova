@@ -189,12 +189,10 @@ class TestEndToEndOnSyntheticRepos:
             "from app.logic import answer\n\n"
             "def test_answer():\n"
             f"    assert answer() == {expected}\n", encoding="utf-8")
-        # `-c commit.gpgsign=false`：合成仓只用来看驱动器的读数，签名与否与判据无关；
-        # 而宿主一旦配了 `commit.gpgsign=true`（本机与不少开发机都是），这条 commit 会因
-        # 拿不到签名器而以 128 退出——判据红在"合成仓建不起来"上，读起来却像驱动器坏了。
+        # 宿主签名配置的隔离由 `_gitEnvironment()` 一处给（`GIT_CONFIG_*` 传下去），
+        # 这里不再写第二份 `-c commit.gpgsign=false`：两处各写一遍时，改一处另一处静默失效。
         for args in (["init", "-q"], ["add", "."],
-                     ["-c", "commit.gpgsign=false",
-                      "-c", "user.email=t@t", "-c", "user.name=t",
+                     ["-c", "user.email=t@t", "-c", "user.name=t",
                       "commit", "-q", "-m", "base"]):
             subprocess.run(["git"] + args, cwd=str(repo), capture_output=True, text=True,
                            encoding="utf-8", errors="replace", check=True,
