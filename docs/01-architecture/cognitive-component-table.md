@@ -22,14 +22,14 @@
 ## 摘要
 
 <!-- COGNITIVE:SUMMARY:BEGIN -->
-共 **93** 个模块 / **43241** 行。按状态：**在役 52** · **仅层内 34** · **仅测试 2** · **零读者 5**。
+共 **93** 个模块 / **43230** 行。按状态：**在役 52** · **仅层内 34** · **仅测试 2** · **零读者 5**。
 
 | 子层 | 模块数 | 行数 |
 |---|---|---|
 | `emotion_context_layer` | 4 | 2300 |
 | `growth_layer` | 1 | 813 |
 | `knowledge_graph` | 1 | 1259 |
-| `memory_layer` | 82 | 36597 |
+| `memory_layer` | 82 | 36586 |
 | `meta_cognition_layer` | 5 | 2272 |
 <!-- COGNITIVE:SUMMARY:END -->
 
@@ -64,7 +64,7 @@
 |---|---|---|---|---|---|
 | `neurova/cognitive_layers/memory_layer/absence_reasoner.py` | 145 | 1 | 1 | 5 | 在役 |
 | `neurova/cognitive_layers/memory_layer/association_cue_generation.py` | 245 | 0 | 1 | 2 | 仅层内 |
-| `neurova/cognitive_layers/memory_layer/association_cue_index.py` | 237 | 0 | 1 | 1 | 仅层内 |
+| `neurova/cognitive_layers/memory_layer/association_cue_index.py` | 226 | 0 | 1 | 1 | 仅层内 |
 | `neurova/cognitive_layers/memory_layer/association_cues.py` | 369 | 0 | 2 | 2 | 仅层内 |
 | `neurova/cognitive_layers/memory_layer/attachment_manager.py` | 978 | 1 | 0 | 1 | 在役 |
 | `neurova/cognitive_layers/memory_layer/auto_classifier.py` | 596 | 0 | 2 | 1 | 仅层内 |
