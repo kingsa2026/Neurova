@@ -48,6 +48,9 @@
             >
               {{ t('knowledge.workbenchFocusNode') }}
             </GlassButton>
+            <a-checkbox v-model:checked="fullGraph" class="isolated-toggle">
+              {{ t('knowledge.workbenchFullGraph') }}
+            </a-checkbox>
             <a-checkbox v-model:checked="showIsolated" class="isolated-toggle">
               {{ t('knowledge.workbenchShowIsolated') }}
             </a-checkbox>
@@ -67,11 +70,11 @@
               :key="`${dataVersion}-${viewMode}`"
               :nodes="flowNodes"
               :edges="flowEdges"
-              :fit-view-on-init="true"
+              :fit-view-on-init="false"
+              :default-viewport="initialViewport"
               :min-zoom="0.35"
               :max-zoom="2"
               class="workbench-flow"
-              @pane-ready="onPaneReady"
               @node-click="onFlowNodeClick"
             >
               <Background />
@@ -354,33 +357,23 @@ const flowNodes = computed(() => {
 })
 
 // fit-view-on-init 的实测缺陷：其包围盒测量与 zoom 夹取组合会把视口平移到
-// 节点区之外（『看起来空』的真身——节点全渲染着，只是屏外）。命令式
-// useVueFlow / pane-ready 同步 fitView 还会静默中止整组件渲染。最终方案
-// 完全自持：布局坐标是自己算的（radialLayout 输出），包围盒不依赖 vue-flow
-// 测量——pane-ready 后按自算包围盒直接 setViewport 居中，zoom 夹 [0.35,1.2]。
+// 节点区之外（『看起来空』的真身——节点全渲染着，只是屏外）；命令式视口
+// （useVueFlow / pane-ready 回调 / setViewport）要么静默中止渲染要么不生效。
+// 最终方案纯声明式：布局包围盒自算，数据到位后算出 initialViewport，
+// 数据版本号作 :key 重挂载画布时经 defaultViewport 应用——无实例 API。
 const dataVersion = ref(0)
-const flowInstance = ref<any>(null)
+const initialViewport = ref({ x: 0, y: 0, zoom: 0.5 })
 let layoutBounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 }
-const onPaneReady = (instance: any) => {
-  flowInstance.value = instance
-  setTimeout(() => {
-    try {
-      const el = canvasWrapRef.value
-      if (!el || !el.clientWidth) return
-      const bw = layoutBounds.maxX - layoutBounds.minX + 160
-      const bh = layoutBounds.maxY - layoutBounds.minY + 160
-      const zoom = Math.max(0.35, Math.min(1.2, Math.min(el.clientWidth / bw, el.clientHeight / bh)))
-      const cx = (layoutBounds.minX + layoutBounds.maxX) / 2
-      const cy = (layoutBounds.minY + layoutBounds.maxY) / 2
-      flowInstance.value?.setViewport({
-        x: el.clientWidth / 2 - cx * zoom,
-        y: el.clientHeight / 2 - cy * zoom,
-        zoom,
-      })
-    } catch {
-      // 视口计算失败保留默认，不中止渲染
-    }
-  }, 80)
+const computeInitialViewport = () => {
+  const el = canvasWrapRef.value
+  const vw = el && el.clientWidth ? el.clientWidth : 572
+  const vh = el && el.clientHeight ? el.clientHeight : 560
+  const bw = layoutBounds.maxX - layoutBounds.minX + 160
+  const bh = layoutBounds.maxY - layoutBounds.minY + 160
+  const zoom = Math.max(0.35, Math.min(1.2, Math.min(vw / bw, vh / bh)))
+  const cx = (layoutBounds.minX + layoutBounds.maxX) / 2
+  const cy = (layoutBounds.minY + layoutBounds.maxY) / 2
+  initialViewport.value = { x: vw / 2 - cx * zoom, y: vh / 2 - cy * zoom, zoom }
 }
 const flowEdges = computed(() =>
   (studio.value?.edges ?? []).map((e, index) => ({
@@ -397,6 +390,46 @@ const relationTerms = computed(() =>
   (studio.value?.schema?.terms ?? []).filter((term) => term.kind === 'relation'))
 const schemaRules = computed(() => studio.value?.schema?.rules ?? [])
 const showIsolated = ref(false)
+// 分级呈现：全图 145 节点 fit 到一屏时布局间距被缩到 42px，卡片压盖不可避
+// 免（布局坐标级无重叠，视觉级叠）。默认只渲染枢纽 2 跳邻域（节点少、zoom
+// 高、零压盖），『显示全图』显式切换后由用户缩放探索。
+const fullGraph = ref(false)
+const depthFromHub = computed(() => {
+  const depth = new Map<string, number>()
+  const adjacency = new Map<string, string[]>()
+  for (const e of studio.value?.edges ?? []) {
+    if (e.source === e.target) continue
+    if (!adjacency.has(e.source)) adjacency.set(e.source, [])
+    if (!adjacency.has(e.target)) adjacency.set(e.target, [])
+    adjacency.get(e.source)!.push(e.target)
+    adjacency.get(e.target)!.push(e.source)
+  }
+  const roots: string[] = []
+  let best = -1
+  for (const [id, neighbours] of adjacency) {
+    if (neighbours.length > best) {
+      best = neighbours.length
+      roots.length = 0
+      roots.push(id)
+    } else if (neighbours.length === best) {
+      roots.push(id)
+    }
+  }
+  for (const r of roots) {
+    if (depth.has(r)) continue
+    depth.set(r, 0)
+    const queue = [r]
+    while (queue.length) {
+      const u = queue.shift()!
+      for (const v of adjacency.get(u) ?? []) {
+        if (depth.has(v)) continue
+        depth.set(v, depth.get(u)! + 1)
+        queue.push(v)
+      }
+    }
+  }
+  return depth
+})
 // 无边节点在关系图里没有布局意义：几十个孤立点会把放射图撑爆、fit 后
 // 全部不可读（『看起来空』的最终根因之一）。默认隐藏，开关显式打开才显示。
 const connectedIds = computed(() => {
@@ -415,8 +448,12 @@ const filteredNodes = computed(() => {
     ? all.filter((n) =>
         n.label.toLowerCase().includes(needle) || n.id.toLowerCase().includes(needle))
     : all
-  if (showIsolated.value || needle) return searched
-  return searched.filter((n) => connectedIds.value.has(n.id))
+  if (needle) return searched
+  const byRelation = showIsolated.value
+    ? searched
+    : searched.filter((n) => connectedIds.value.has(n.id))
+  if (fullGraph.value) return byRelation
+  return byRelation.filter((n) => (depthFromHub.value.get(n.id) ?? 99) <= 2)
 })
 const focusFirstMatch = () => {
   const hit = filteredNodes.value[0]
@@ -439,6 +476,9 @@ const fetchStudio = async () => {
   try {
     const res: any = await request.get(`/knowledge-graph/${agentId.value}/studio`)
     studio.value = res?.data ?? res
+    // 强制求值 flowNodes：layoutBounds 在 computed 内更新，随后算初始视口。
+    void flowNodes.value
+    computeInitialViewport()
     dataVersion.value++
   } catch (e: any) {
     message.error(e?.message || t('common.error'))
@@ -707,6 +747,17 @@ onMounted(() => {
 
 .workbench-flow :deep(.wb-node-selected) {
   box-shadow: 0 0 0 3px var(--nr-primary);
+}
+
+/* 节点卡片收窄到 96px：与布局 MIN_ARC=120 匹配（96+间距），
+   密集层的弧长才有足够余量；label 超宽省略。 */
+.workbench-flow :deep(.vue-flow__node-default) {
+  width: 96px;
+  font-size: 11px;
+  padding: 6px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 连接线双层：底层半透明实线表连接存在，流光层短划线循环流动
