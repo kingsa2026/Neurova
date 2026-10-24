@@ -794,6 +794,7 @@ export default {
 
 
   knowledge: {
+    workbenchFilterTypes: '種別で絞り込み',
     workbenchFullGraph: '全グラフへ戻る',
     duplicateMerged: '内容が既存です：一致したエントリに今回のソースを統合しました',
     filterApply: '適用',
