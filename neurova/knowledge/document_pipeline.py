@@ -30,10 +30,12 @@ from neurova.attachment_parser import (
     extract_docx_blocks,
     extract_pdf_pages,
     extract_pptx_slides,
+    extract_xls_sheets,
     extract_xlsx_sheets,
     extract_attachment_text,
 )
 from neurova.core.logger import get_logger
+from neurova.knowledge import parser_shadow
 from neurova.knowledge.ocr_engines import selectOcrEngine
 from neurova.knowledge.splitter import build_entry_chunks
 
@@ -349,9 +351,14 @@ def parse_document(
     headingSpans: List[Tuple[int, int, str]] = []
     engine = ocr_engine
     ocrMeta: Dict[str, Any] = {}
+    # 影子对比要打回**原始**输入：旧格式转换会重绑 data，先留底。
+    rawInput = data
+    originalExt = ext
 
     try:
-        if ext in LEGACY_EXTENSIONS:
+        # .xls 直读（A7）：xlrd 可用就走直读（产出与 xlsx 同形），缺席回落 LibreOffice。
+        xlsSheets = extract_xls_sheets(data) if ext == ".xls" else None
+        if xlsSheets is None and ext in LEGACY_EXTENSIONS:
             # source_type 保留原始旧格式，解析按转换后的新格式走。
             data, ext = _convertLegacyOffice(data, ext)
         if ext == ".pdf":
@@ -405,6 +412,16 @@ def parse_document(
             pageHeading = {
                 index: [str(sheet.get("title") or "")]
                 for index, sheet in enumerate(sheets, start=1)
+            }
+        elif xlsSheets is not None:
+            # .xls 直读：与 xlsx 分支同形消费（同一份"表格→文本"口径）。
+            pagesRaw = [
+                ("[工作表: %s]\n%s" % (sheet.get("title") or "", sheet.get("text") or "")).strip()
+                for sheet in xlsSheets
+            ]
+            pageHeading = {
+                index: [str(sheet.get("title") or "")]
+                for index, sheet in enumerate(xlsSheets, start=1)
             }
         elif ext == ".pptx":
             slides = extract_pptx_slides(data)
@@ -465,6 +482,14 @@ def parse_document(
         "source_filename": filename,
         "warnings": list(warnings),
     }
+    # Kreuzberg 影子对比（A7）：只挂读数，不改主路任何产出；影子失败不波及解析。
+    if parser_shadow.shadowEnabled():
+        try:
+            metadata["parser_shadow"] = parser_shadow.kreuzbergShadowCompare(
+                rawInput, filename, originalExt,
+                str(metadata["title"]), content)
+        except Exception as exc:  # noqa: BLE001 - 影子只读数，不挡主路
+            logger.debug("Kreuzberg 影子对比跳过: %s", exc)
     return ParsedDocument(
         doc_id=str(uuid.uuid4()),
         source_type=sourceType,
