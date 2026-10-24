@@ -28,6 +28,17 @@ from neurova.knowledge.foundation.digest_chain import ActivityDigestChain
 from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
 from neurova.knowledge.foundation.temporal_facts import TemporalFactReader
 
+#: 本档逐格的墙钟预算（秒）。`pyproject.toml` 的 30s 是**整场会话**的挂死保护，不是判值口径：
+#: 受保护子集 700 余档串行跑在同一台 runner 上，本档每一格都要起一个 `KnowledgeFactStore`
+#: （首个 store 触发 23 步 schema 迁移）并建一次全装配的门（`productionAdmissionGate` 装
+#: resolver／冲突裁决／血缘／规则引擎并种内置规则）。本机单跑 8–10s 的同一批格子，在 CI 上
+#: 撞到过 30s——PR #369 构建 `cnb-rdh-1k5makko3#003` 红在对账回放那一格，而它单跑 1.4s。
+#: 放宽的只是「多久算挂死」这个等待窗口，判据一个字没动：11 格断言逐字未改，
+#: 逐文件单跑现读 11 passed（8.67s／8.98s 两次同读数）。
+GRADE_WALL_S = 120
+
+pytestmark = pytest.mark.timeout(GRADE_WALL_S)
+
 
 @pytest.fixture
 def store(tmp_path):
