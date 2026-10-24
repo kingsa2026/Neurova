@@ -2,9 +2,14 @@
 #
 # 说明：
 #   - 本文件是 requirements.txt 的"轻量核心子集"，供 GitHub Actions 使用。
-#   - 刻意排除体积大 / 需本地模型 / 需显示器的重依赖（numpy、onnxruntime、
-#     sentence-transformers、transformers、tokenizers、soundfile、huggingface_hub、
-#     sentencepiece、edge-tts、pillow、pyautogui、playwright）。
+#   - 刻意排除体积大 / 需本地模型 / 需显示器的重依赖（sentence-transformers、
+#     transformers、torch、soundfile、huggingface_hub、sentencepiece、edge-tts、
+#     pyautogui、playwright）。
+#     例外：numpy / onnxruntime / tokenizers 三个**必须装**——受保护子集里有
+#     多条语义检索判据（联想召回基线、线索向量通道、长时记忆基线、写侧补嵌入）
+#     只有真引擎在场才有读数，引擎缺席时它们不是"跳过"而是"红"；把判据改成 skip
+#     等于把这道门关掉（教义第 2 条）。模型权重随仓入库（models/embedding/
+#     bge-small-zh-v1.5），故缺的从来只是这三个 Python 包。
 #   - 上述被排除依赖在代码中均为"惰性/try 降级"导入，缺席时模块仍可加载；
 #     它们在 scripts/ci_static_gate.py 的 KNOWN_OPTIONAL_DEPS 中登记，
 #     导入巡检会记为 OPTIONAL-SKIP（优雅降级），不算失败。
@@ -113,3 +118,12 @@ Pillow>=13.0.0
 # 它此前只在 requirements-full.lock 里作为 typer 的传递依赖出现，CI 薄环境没有 ——
 # 与 reportlab / pypdf 同一根因（"只在生产清单声明、不在 CI 清单声明"），故同处补齐。
 rich>=13.0
+
+# 本地嵌入引擎（ONNX）——受保护子集里四条语义检索判据（联想召回基线 / 线索向量通道 /
+# 长时记忆基线 / 写侧补嵌入）走的是生产同款 `get_embedding_engine()` 单例，不是替身。
+# 缺包时它们报的是 ModuleNotFoundError: numpy（收集期就崩），表现为"整档红"而不是
+# "没测"——判据自己也明确写着"不以 skip 蒙过"。故三个包按生产清单同一口径补齐，
+# 版本下界与 requirements.txt 逐字同值（第二份下界就是第二个事实源）。
+numpy>=1.24.0
+onnxruntime>=1.16.0
+tokenizers>=0.13.0
