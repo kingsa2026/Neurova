@@ -491,6 +491,11 @@ def _subgraphPayload(manager, focus: str, hops: int, types: set, limit: int) -> 
     droppedByLimit = False
     frontier = [focus]
     for _ in range(max(int(hops), 0)):
+        if len(kept) >= limit:
+            # 收录满 limit 后继续扩展层没有任何产出（kept 不可能再收），
+            # 大 hops 参数在大图上会退化为全图遍历——提前停。
+            droppedByLimit = True
+            break
         nextFrontier = []
         for nodeId in frontier:
             for neighbour in adjacency.get(nodeId, ()):
@@ -521,7 +526,7 @@ async def get_knowledge_graph_subgraph(
     request: Request,
     current_user: Dict = Depends(get_current_user_or_service),
     focus: str = Query("", description="中心节点 id；空=按 limit 取全图子集（3D 首屏）"),
-    hops: int = Query(2, ge=0, le=6),
+    hops: int = Query(2, ge=0, le=12),
     limit: int = Query(200, ge=1, le=2000),
     types: str = Query("", description="逗号分隔的节点类型过滤，空=不过滤"),
 ):
