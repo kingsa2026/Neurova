@@ -196,3 +196,77 @@ class TestDocumentStats:
         assert stats["ocr_coverage"] == 0.5
         assert stats["page_count"] == 4
         assert stats["ocr_confidence_avg"] == 0.8
+
+
+class TestGraphReadIsolation:
+    def test_temporalAndGraphWalkersStayInTenant(self, tmp_path):
+        from neurova.knowledge.foundation.graph_walk import GraphFactWalker
+        from neurova.knowledge.foundation.temporal_facts import TemporalFactReader
+
+        store = KnowledgeFactStore(str(tmp_path / "facts.db"))
+        for tenant, label, obj in (("t1", "甲方", "乙方"), ("t2", "丙方", "丁方")):
+            subject = store.upsertSubject("agent", label, tenantId=tenant)
+            store.upsertFact("agent", subject, "part_of", obj,
+                             "%s → %s" % (label, obj), tenantId=tenant)
+            second = store.upsertSubject("agent", obj, tenantId=tenant)
+            store.upsertFact("agent", second, "part_of", obj + "2",
+                             "%s → %s2" % (obj, obj), tenantId=tenant)
+
+        reader = TemporalFactReader(store, agentId="agent")
+        graph = GraphFactWalker(store, agentId="agent")
+
+        t1Facts = reader.forQuery("甲方", tenantId="t1")
+        t2Facts = reader.forQuery("甲方", tenantId="t2")
+        t1Hops = graph.walkFromQuery("甲方", tenantId="t1")
+        t2Hops = graph.walkFromQuery("甲方", tenantId="t2")
+
+        assert t1Facts and not t2Facts
+        assert t1Hops and not t2Hops
+        assert all(f["tenant_id"] == "t1" for f in t1Facts)
+        store.close()
+
+
+class TestContentDedup:
+    def testSameTenantSameContentReturnsExistingAndKeepsSourceEvidence(self, repo):
+        first = repo.create_knowledge(
+            "agent", "文档", "正文  相同", tenant_id="t1", source="upload:a",
+            source_type="md", dedupe=True,
+        )
+        second = repo.create_knowledge(
+            "agent", "文档副本", "正文 相同", tenant_id="t1", source="upload:b",
+            source_type="md", dedupe=True,
+        )
+
+        assert second["knowledge_id"] == first["knowledge_id"]
+        assert second.get("duplicate") is True
+        stored = repo.get_item("agent", first["knowledge_id"])
+        assert [s["source"] for s in stored["sources"]] == ["upload:a", "upload:b"]
+        assert stored["title"] == "文档"
+
+    def testSameContentDifferentTenantIsNotDeduped(self, repo):
+        first = repo.create_knowledge("agent", "文档", "正文", tenant_id="t1", dedupe=True)
+        second = repo.create_knowledge("agent", "文档", "正文", tenant_id="t2", dedupe=True)
+
+        assert second["knowledge_id"] != first["knowledge_id"]
+
+
+class TestMetadataFilters:
+    def testAuthorSourceTypeOcrAndPageFilters(self, repo):
+        repo.create_knowledge(
+            "agent", "扫描预算", "共同关键词", tenant_id="t1", visibility="public",
+            author="张三", source_type="pdf", ocr_used=True, page_count=5,
+        )
+        repo.create_knowledge(
+            "agent", "文本预算", "共同关键词", tenant_id="t1", visibility="public",
+            author="李四", source_type="md", ocr_used=False, page_count=1,
+        )
+        user = {"user_id": "u", "tenant_id": "t1", "role": "user"}
+
+        def titles(**kwargs):
+            hits = repo.search_visible_items(user, "共同关键词", limit=10, **kwargs)
+            return {hit["title"] for hit in hits}
+
+        assert titles(author="张三") == {"扫描预算"}
+        assert titles(source_type="md") == {"文本预算"}
+        assert titles(ocr_used=True) == {"扫描预算"}
+        assert titles(page_min=2) == {"扫描预算"}

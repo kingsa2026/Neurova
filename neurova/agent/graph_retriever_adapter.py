@@ -34,7 +34,13 @@ class GraphRetrieverAdapter:
         from neurova.agent.memory_retrieval_chain import RetrievalQuality, RetrievalResult
 
         start = time.monotonic()
-        hops = self._walker.walkFromQuery(context.query, limit=context.limit)
+        tenantId = str(
+            (getattr(context, "metadata", None) or {}).get("tenant_id")
+            or "default"
+        )
+        hops = self._walker.walkFromQuery(
+            context.query, limit=context.limit, tenantId=tenantId
+        )
         elapsed = time.monotonic() - start
         if not hops:
             return RetrievalResult(
