@@ -589,18 +589,24 @@ class TestRemeNotes:
 
 
 class TestIdentityFiles:
-    def test_soul_lands_in_memory_dir(self, kai_src):
+    def test_soul_lands_whereTheLoaderActuallyReadsIt(self, kai_src):
+        """身份文件落在 `Agent._load_identity` 的**真实加载位**（agent 根），不是旧的 `memory/`。
+
+        v2 布局把身份文件从 `memory/` 提到 `<agent_root>/`（`agent_core._load_identity` 现读那里），
+        导入器若不跟着走，就是"导入成功、运行时读不到"——所以这格按加载器的读法判，
+        而不是按旧落点判存在性。
+        """
         from scripts.import_kai_to_neurova import import_identity
 
         kai, nv = kai_src
-        workspace = nv / "agent_workspaces" / "kai"
-        stats = import_identity(kai, workspace)
-        soul = workspace / "memory" / "soul.md"
-        assert soul.exists()
+        agent_root = nv / "data" / "kai"
+        stats = import_identity(kai, agent_root)
+        soul = agent_root / "soul.md"
+        assert soul.exists(), f"身份文件没落在加载位：{sorted(p.name for p in agent_root.iterdir())}"
         assert "凯的灵魂" in soul.read_text(encoding="utf-8")
-        # PROFILE → personality.md（_load_identity 第二加载位）
-        assert "凯的档案" in (workspace / "memory" / "personality.md").read_text(encoding="utf-8")
-        # PROFILE/MEMORY 在 workspace 根留档
-        assert (workspace / "PROFILE.md").exists()
-        assert (workspace / "MEMORY.md").exists()
+        # PROFILE → personality.md（_load_identity 第二加载位，同根）
+        assert "凯的档案" in (agent_root / "personality.md").read_text(encoding="utf-8")
+        # PROFILE/MEMORY 工作区留档
+        assert (agent_root / "workspaces" / "PROFILE.md").exists()
+        assert (agent_root / "workspaces" / "MEMORY.md").exists()
         assert stats["files"] >= 4

@@ -324,29 +324,34 @@ def _describeExtractionFailure(exc: Exception, payload: bytes, dest: Path) -> st
     if isinstance(exc, OSError):
         projected = _longestProjectedPath(payload, dest)
         if projected is not None and projected[1] >= WINDOWS_MAX_PATH:
-            member, total = projected
-            return (
-                f"路径过长：最长成员 {member!r}（{len(member)} 字符）落在 {len(str(dest))} 字符的"
-                f"落点根下合计 {total} 字符，超过 Windows 上限 {WINDOWS_MAX_PATH}"
-                f"——这是落点问题，不是包的问题：换短根或开启长路径")
+            return _pathTooLongReason(projected[0], dest, projected[1])
     return f"{type(exc).__name__}: {exc}"
+
+
+def _pathTooLongReason(member: str, dest: Path, total: int) -> str:
+    """「路径过长」那一族的原因文案（唯一一处；解包前的闸与解包失败后的描述共用）。"""
+    return (
+        f"路径过长：最长成员 {member!r}（{len(member)} 字符）落在 {len(str(dest))} 字符的"
+        f"落点根下合计 {total} 字符，超过 Windows 上限 {WINDOWS_MAX_PATH}"
+        f"——这是落点问题，不是包的问题：换短根或开启长路径")
 
 
 def _projectedPathVerdict(payload: bytes, dest: Path) -> str:
     """落点根太长的**判定**：先于解包算，不靠"解包失败了"这一征兆。
 
     为什么要在解包前判：同一份包在长根下的结局**取决于跑在哪个内核上**——
-    Linux 的 NAME_MAX 是单个成员的字符数（与整条路径长度无关），整条路径 240/255 的上界
-    也只对路径分量生效，于是 `根(135) + 成员(125) = 261` 在 Windows 上是硬失败、在 Linux 上
+    Linux 的 NAME_MAX 是单个成员的字符数（与整条路径长度无关），整条路径的上界也
+    只对路径分量生效，于是 `根(135) + 成员(125) = 261` 在 Windows 上是硬失败、在 Linux 上
     照装不误；解包成功 ⇒ `except OSError` 那一支根本不会跑，原因面读到的是空串。
+    而 `extractall` 非事务，撞到中途才发现会留下半棵树。
 
     这就是"判据依赖某台机器的 OS 开关"的第二副面孔：**失败征兆不可跨平台移植，判定条件可以**。
-    `_longestProjectedPath` 本来就算得出这个数（此前只用来把原因说准），现在它也是判定的依据。
+    `_longestProjectedPath` 本来就算得出这个数，现在它也是判定的依据。
     """
-    projected = _longestProjectedPath(payload, dest)
-    if projected is None or projected[1] < WINDOWS_MAX_PATH:
+    longest = _longestProjectedPath(payload, dest)
+    if longest is None or longest[1] < WINDOWS_MAX_PATH:
         return ""
-    return _describeExtractionFailure(OSError(0, "projected path too long"), payload, dest)
+    return _pathTooLongReason(longest[0], dest, longest[1])
 
 
 def extractRemoteSkillZipRefusal(skill_id: str, payload: bytes, dest: Path) -> str:

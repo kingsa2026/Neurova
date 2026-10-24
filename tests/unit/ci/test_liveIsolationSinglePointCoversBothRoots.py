@@ -102,12 +102,13 @@ def test_isolatedDataRootAloneMovesAgentWorkspaceOutOfRepo():
         "⇒ 70 档起真 app 的 manual 探针会往仓内 agent_workspaces/ 写记忆/附件——"
         "该由单点保证的第二根没人保证（D8）。"
     )
-    # 临时目录取 `tempfile.gettempdir()`——那是 `mkdtemp` 的**同一份**事实源，跨平台一致
-    # （Linux 是 `/tmp`，Windows 是 `%TEMP%`）。此前只认 `TEMP` 环境变量或路径里带 "Temp"：
-    # 在 Linux 上 `TEMP` 未设 ⇒ `Path("")` 解析成 CWD，于是 `/tmp/...` 这条读数被判成
-    # "没落在临时目录"——红的是判据的取法，不是它守的契约。
-    tempRoot = pathlib.Path(tempfile.gettempdir()).resolve()
-    assert ws.resolve().is_relative_to(tempRoot), f"工作区根没有落在临时目录：{ws}"
+    # 「临时目录」这一族的判据只能用标准库口径：POSIX 上没有 `TEMP`（那是 Windows 的变量），
+    # 早先按 `os.environ.get("TEMP", "")` 取根，在 Linux 上退化成 `Path("")`＝进程 CWD，
+    # 于是 `/tmp/...` 也判"没落在临时目录"。`tempfile.gettempdir()` 是跨平台单一口径，
+    # 同时它正是 `isolatedAgentWorkspaces` 与 conftest 用来建隔离根的那一个。
+    assert ws.resolve().is_relative_to(pathlib.Path(tempfile.gettempdir()).resolve()), (
+        f"工作区根没有落在临时目录：{ws}（临时目录={tempfile.gettempdir()}）"
+    )
 
 
 def test_positiveControlWithoutSinglePointLandsInsideRepo():
