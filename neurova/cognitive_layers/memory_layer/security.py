@@ -450,8 +450,6 @@ class MemorySecurity:
                 return maskPreservingFormat(content, rules=self._patterns)
             return sanitizeSensitive(content, rules=self._patterns)
 
-        return result
-
     def forget_memory(self, memory_id: str, permanent: bool = False) -> Dict[str, Any]:
         """
         被遗忘权处理
