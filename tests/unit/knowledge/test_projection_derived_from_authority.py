@@ -167,7 +167,7 @@ class TestEndpointsAreWired:
         from neurova.api import auth
         from neurova.api.endpoints import knowledge_graph_api as kg
 
-        monkeypatch.setattr(kg, "_get_kg_manager", lambda _agent: graph)
+        monkeypatch.setattr(kg, "_get_kg_manager", lambda _agent, tenant_id="default": graph)
         monkeypatch.setattr(
             "neurova.knowledge.foundation.knowledge_facts.get_knowledge_fact_store",
             lambda *_a, **_k: store,

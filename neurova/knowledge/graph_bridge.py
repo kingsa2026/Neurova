@@ -185,11 +185,13 @@ def admitExtractedFacts(
 
     gate = productionAdmissionGate(factStore, toolVersion="graph-bridge")
     agentId = str(item.get("agent_id", "") or "default")
+    tenantId = str(item.get("tenant_id") or "default")
     def _admitOne(subjectLabel: str, predicateTermId: str, objectTerm: str) -> Optional[str]:
         statement = _statementOf(subjectLabel, predicateTermId, objectTerm)
         try:
             receipt = gate.admit(AdmissionRequest(
                 agentId=agentId,
+                tenantId=tenantId,
                 subjectLabel=subjectLabel,
                 predicateTermId=predicateTermId,
                 objectTerm=objectTerm,
@@ -225,7 +227,7 @@ def admitExtractedFacts(
             factIds.append(factId)
             # 主类型列在主体建出来之后才挂得上（此前主体还不存在）；
             # 挂着它又是定义域校验唯一读处，所以顺序不能反。
-            _assignSubjectType(termRegistry, label, decided, agentId)
+            _assignSubjectType(termRegistry, label, decided, agentId, tenantId)
 
     for rel in data.get("relations") or []:
         if not isinstance(rel, dict):
@@ -245,7 +247,10 @@ def admitExtractedFacts(
     return factIds
 
 
-def _assignSubjectType(termRegistry: Any, label: str, decided: str, agentId: str) -> None:
+def _assignSubjectType(
+    termRegistry: Any, label: str, decided: str, agentId: str,
+    tenantId: str = "default",
+) -> None:
     """把实体类型挂到主体的**主类型列**上。
 
     两处落点各司其职，都是既有机制、不是新造的：
@@ -261,7 +266,9 @@ def _assignSubjectType(termRegistry: Any, label: str, decided: str, agentId: str
     if termRegistry is None or not decided or decided == "custom":
         return
     try:
-        subjectKey = termRegistry._store.resolveSubjectKey(agentId, label)
+        subjectKey = termRegistry._store.resolveSubjectKey(
+            agentId, label, str(tenantId or "default")
+        )
         if subjectKey:
             termRegistry.assignSubjectType(subjectKey, decided)
         else:
@@ -331,6 +338,7 @@ def extract_knowledge_to_graph(
     content = str(item.get("content", ""))
     if not (title or content):
         return []
+    tenantId = str(item.get("tenant_id") or "default")
 
     try:
         raw = llm_call(extractionPrompt(termRegistry, title=title, content=content))
@@ -342,12 +350,13 @@ def extract_knowledge_to_graph(
         logger.warning("graph_bridge: LLM 输出无法解析为 JSON，跳过")
         return []
 
+    domain = agentId or _domainOf(item, repo)
     if graph_manager is None:
         from neurova.cognitive_layers.knowledge_graph.manager import (
-            get_knowledge_graph_manager,
+            get_agent_knowledge_graph_manager,
         )
 
-        graph_manager = get_knowledge_graph_manager()
+        graph_manager = get_agent_knowledge_graph_manager(domain, tenant_id=tenantId)
 
     # ── 落点一：底座事实层（被读的那张图）────────────────────────
     # 顺序刻意如此：抽出来的说法先入权威，JSON 属性图只是它的投影。
@@ -360,7 +369,6 @@ def extract_knowledge_to_graph(
         # 不 try：拿不到权威就不该假装抽成功。测试会话里这会被 storage_fence 当场
         # 拦下（正是"忘了注入隔离库"该有的响亮形态），生产里由调用点逐条隔离。
         authority = get_knowledge_fact_store()
-    domain = agentId or _domainOf(item, repo)
     if termRegistry is None:
         # 类型判据的唯一权威是本体注册表。拿不到它就没有"这个类型合法吗"，
         # 落库那条路会退成整片 custom——退成默认值等于把判据换成猜测，所以这里
@@ -371,6 +379,15 @@ def extract_knowledge_to_graph(
     admitted = admitExtractedFacts(
         data, {**item, "agent_id": domain}, authority, termRegistry)
 
+    managerTenant = str(getattr(graph_manager, "tenant_id", "default"))
+    if managerTenant != tenantId:
+        logger.warning(
+            "graph_bridge: 条目 %s 属租户 %s，但注入的图管理器属租户 %s——"
+            "拒绝把内容铺进错租户的图（事实仍已入底座）",
+            str(item.get("knowledge_id", "")), tenantId, managerTenant,
+        )
+        return []
+
     # 投影只铺**权威真接纳**的那些。底座对关系有两道门（`custom` 不收、逐字可核与
     # 定义域校验会拒），投影这一侧此前一道都没有：模型说 `X telepathizes Y`，
     # 权威没收，图上却长出一条 `relation="custom"` 的边——§6-106 那 52 条孤儿边
@@ -379,7 +396,11 @@ def extract_knowledge_to_graph(
     # **边**的据只有一份：权威里真收下的那条关系。节点不设这道门——一个实体只要
     # 的 `is_a` 落了库，它就是权威里的主体，"暂时没连上边"不是无据（`_authorityRelations`
     # 有意排除 `is_a`，因为类型在投影里对应节点类型而不是一条边）。
-    backedKeys = {_relKey(r) for r in _authorityRelations(authority, domain, termRegistry)}
+    backedKeys = {
+        _relKey(r) for r in _authorityRelations(
+            authority, domain, termRegistry, tenantId
+        )
+    }
 
     from neurova.knowledge.identity.subject_resolver import SubjectResolver
 
@@ -473,10 +494,15 @@ def extractionPending(item: Dict[str, Any], store: Any, agentId: str) -> bool:
     判据落在权威：底座里这个域有指向本条目的抽取事实，才算抽过。投影是派生品，
     拿它当依据就是让派生品决定谁该被补——那正是两面分裂能活下来的原因。
     """
-    return not _authorityFactsForEntry(store, agentId, str(item.get("knowledge_id", "") or ""))
+    return not _authorityFactsForEntry(
+        store, agentId, str(item.get("knowledge_id", "") or ""),
+        str(item.get("tenant_id") or "default"),
+    )
 
 
-def _authorityFactsForEntry(store: Any, agentId: str, knowledgeId: str) -> List[Any]:
+def _authorityFactsForEntry(
+    store: Any, agentId: str, knowledgeId: str, tenantId: str = "default"
+) -> List[Any]:
     """本条条目在权威侧留下的抽取事实（按断言的 medium_ref 认，与协商口径同源）。
 
     条目 id 的落点有两处（`source_turn_id` 前缀与断言 `medium_ref`），两处任一命中都算：
@@ -486,7 +512,7 @@ def _authorityFactsForEntry(store: Any, agentId: str, knowledgeId: str) -> List[
         return []
     wanted = {knowledgeId, "entry:%s" % knowledgeId, "legacy:%s" % knowledgeId}
     hits: List[Any] = []
-    for fact in store.searchableFacts(agentId=agentId):
+    for fact in store.searchableFacts(agentId=agentId, tenantId=tenantId):
         if str(fact.get("source_turn_id") or "") in wanted:
             hits.append(fact)
             continue
@@ -513,7 +539,9 @@ def _relationTermIds(store: Any, termRegistry: Any) -> set:
     return {t.value for t in RelationType if t.value != "custom"}
 
 
-def _authorityRelations(store: Any, agentId: str, termRegistry: Any) -> List[Dict[str, str]]:
+def _authorityRelations(
+    store: Any, agentId: str, termRegistry: Any, tenantId: str = "default"
+) -> List[Dict[str, str]]:
     """权威侧的关系清单：底座三元组里"两端都有主体"的那些。
 
     `is_a` 不在此列：它是实体类型落到事实层的形状，投影里对应的是**节点类型**
@@ -523,9 +551,11 @@ def _authorityRelations(store: Any, agentId: str, termRegistry: Any) -> List[Dic
     declared = _relationTermIds(store, termRegistry)
     declared.discard(IS_A_PREDICATE)
 
-    byLabel = {s["canonical_label"] for s in store.listSubjects(agentId)}
+    byLabel = {
+        s["canonical_label"] for s in store.listSubjects(agentId, tenantId=tenantId)
+    }
     out: List[Dict[str, str]] = []
-    for fact in store.searchableFacts(agentId=agentId):
+    for fact in store.searchableFacts(agentId=agentId, tenantId=tenantId):
         predicate = str(fact.get("predicate_term_id") or "")
         if predicate == IS_A_PREDICATE or predicate not in declared:
             continue
@@ -561,7 +591,7 @@ def _relKey(rel: Dict[str, str]) -> str:
 
 
 def projectionDrift(agentId: str, graph: Any, store: Any,
-                    termRegistry: Any = None) -> Dict[str, Any]:
+                    termRegistry: Any = None, tenantId: str = "default") -> Dict[str, Any]:
     """权威与投影的差集：关系两向（缺的/孤儿）+ **节点维度的无据残留**。
 
     只报不计分、不自动修：分叉是**运维读数**，修由 `rebuildProjectionFromAuthority`
@@ -573,7 +603,7 @@ def projectionDrift(agentId: str, graph: Any, store: Any,
     却同城，读的人必然把 145 当成 178——所以这里把三个数分开摆明。
     判"无据"的口径与 rebuild 的删除口径对齐：标签不在权威关系两端、且没有任何邻居。
     """
-    authority = _authorityRelations(store, agentId, termRegistry)
+    authority = _authorityRelations(store, agentId, termRegistry, tenantId)
     projection = _projectionRelations(graph)
 
     held = {_relKey(r) for r in projection}
@@ -582,7 +612,9 @@ def projectionDrift(agentId: str, graph: Any, store: Any,
     # 点据 = 权威里有这个主体（`is_a` 落了库就算）。上一版这里拿"是否参与关系"当点据，
     # 于是把 33 个**有据但未连边**的实体报成了"无据残留"——那是我的口径错，
     # 不是数据脏。孤立与无据是两件事，各占一格，谁也不冒充谁。
-    knownSubjects = {s["canonical_label"] for s in store.listSubjects(agentId)}
+    knownSubjects = {
+        s["canonical_label"] for s in store.listSubjects(agentId, tenantId=tenantId)
+    }
     unbacked = [
         {"label": node.label,
          "has_body": bool((node.properties or {}).get("description"))}
@@ -592,6 +624,7 @@ def projectionDrift(agentId: str, graph: Any, store: Any,
                 if not graph.get_neighbors(node.node_id)]
     return {
         "agent_id": agentId,
+        "tenant_id": tenantId,
         "authority_relations": len(authority),
         "projection_relations": len(projection),
         "missing_relations": [r for r in authority if _relKey(r) not in held],
@@ -623,20 +656,35 @@ def driftFindingsForAllAgents(store: Any) -> List[Dict[str, Any]]:
         graph_dir = get_agent_workspace_dir(agent_id) / "knowledge_graph"
         if not graph_dir.is_dir():
             continue
-        try:
-            graph = get_agent_knowledge_graph_manager(agent_id)
-            drift = projectionDrift(agent_id, graph, store)
-        except Exception as e:  # noqa: BLE001 - 一个 agent 读不动不许带停启动
-            logger.warning("投影一致性读数跳过 agent %s: %s", agent_id, e)
-            continue
-        if (drift["missing_relations"] or drift["orphan_relations"]
-                or drift["unbacked_nodes"]):
-            findings.append(drift)
+        tenant_ids = ["default"]
+        tenants_dir = graph_dir / "tenants"
+        if tenants_dir.is_dir():
+            tenant_ids += [
+                child.name for child in tenants_dir.iterdir()
+                if child.is_dir()
+            ]
+        for tenant_id in tenant_ids:
+            try:
+                graph = get_agent_knowledge_graph_manager(
+                    agent_id, tenant_id=tenant_id
+                )
+                drift = projectionDrift(
+                    agent_id, graph, store, tenantId=tenant_id
+                )
+            except Exception as e:  # noqa: BLE001 - 一个 agent 读不动不许带停启动
+                logger.warning(
+                    "投影一致性读数跳过 %s/%s: %s", agent_id, tenant_id, e
+                )
+                continue
+            if (drift["missing_relations"] or drift["orphan_relations"]
+                    or drift["unbacked_nodes"]):
+                findings.append(drift)
     return findings
 
 
 def rebuildProjectionFromAuthority(agentId: str, graph: Any, store: Any,
-                                   termRegistry: Any = None) -> Dict[str, Any]:
+                                   termRegistry: Any = None,
+                                   tenantId: str = "default") -> Dict[str, Any]:
     """按权威重建本域的投影：节点取自主体（类型取自主类型列），边取自三元组。
 
     重建是**幂等**的：先摘掉本域旧的边与孤立节点，再按权威铺一遍，跑几次结论一样。
@@ -646,7 +694,7 @@ def rebuildProjectionFromAuthority(agentId: str, graph: Any, store: Any,
     from neurova.cognitive_layers.knowledge_graph.manager import NodeType as _NodeType
     from neurova.knowledge.identity.subject_resolver import SubjectResolver
 
-    authority = _authorityRelations(store, agentId, termRegistry)
+    authority = _authorityRelations(store, agentId, termRegistry, tenantId)
     known = {_relKey(r) for r in authority}
     wanted = {r["source"] for r in authority} | {r["target"] for r in authority}
 
@@ -666,7 +714,9 @@ def rebuildProjectionFromAuthority(agentId: str, graph: Any, store: Any,
             prunedEdges += 1
     # 节点只摘"权威里没有这个主体"的那些；孤立的但有据（有类型没边）留下——
     # 顺手清空一片合法图形不叫"按权威换新"，叫过修
-    knownSubjects = {s["canonical_label"] for s in store.listSubjects(agentId)}
+    knownSubjects = {
+        s["canonical_label"] for s in store.listSubjects(agentId, tenantId=tenantId)
+    }
     prunedNodes = 0
     for node in list(graph._nodes.values()):
         if node.label in knownSubjects:
