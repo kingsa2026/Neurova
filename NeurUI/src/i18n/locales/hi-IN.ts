@@ -1190,10 +1190,6 @@ export default {
     rollbackDone: 'रोलबैक हो गया, {left} संग्रह शेष',
     rollbackError: 'रोलबैक विफल',
     archiveLoadError: 'संग्रह लोड नहीं हो सका',
-    adopt: 'अपनाएं',
-    adoptTarget: 'लक्ष्य स्किल',
-    adoptSuccess: 'लंबित प्रस्ताव बनाया गया',
-    adoptError: 'अपनाने में विफल',
   },
   skill: {
     title: 'कौशल प्रबंधन',

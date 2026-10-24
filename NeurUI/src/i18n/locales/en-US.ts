@@ -1191,10 +1191,6 @@ export default {
     rollbackDone: 'Rolled back, {left} archive(s) left',
     rollbackError: 'Rollback failed',
     archiveLoadError: 'Failed to load archives',
-    adopt: 'Adopt',
-    adoptTarget: 'Target skill',
-    adoptSuccess: 'Pending proposal created',
-    adoptError: 'Adoption failed',
   },
   skill: {
     title: 'Skill Management',

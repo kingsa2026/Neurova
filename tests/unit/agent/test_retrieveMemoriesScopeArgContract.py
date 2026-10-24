@@ -38,8 +38,6 @@ from pathlib import Path
 
 import pytest
 
-from tests import ast_scan
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -71,10 +69,14 @@ def _singleArgCallsIn(tree) -> list:
 
 def test_全仓不得再有单参调用形态():
     offenders = []
-    # 取数走共享解析预算（Issue #148）：一次性全仓扫描走 `transientNodes`，
+    # 取数走共享解析预算（Issue #148）：一次性全仓扫描走 `sourceRefsUnder(hints=…)`，
     # 不留常驻语法树、不与代码总量和机器速度捆绑。
+    # 候选面要**自己数**：收口成预筛后，`offenders` 为空既可能是"都改好了"，
+    # 也可能是预筛/根写坏把命中滤空——两者必须在下面那句 assert 之前分开。
+    scanned = 0
     for root in SCAN_ROOTS:
         for ref in ast_scan.sourceRefsUnder(REPO_ROOT / root, hints=("_retrieve_memories",)):
+            scanned += 1
             lines = _singleArgCallsIn(ast_scan.transientTree(ref.path))
             if lines:
                 offenders.append(

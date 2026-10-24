@@ -39,8 +39,6 @@ from pathlib import Path
 
 import pytest
 
-from tests import ast_scan
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -52,6 +50,9 @@ ROUTE_TABLE = REPO_ROOT / "tests" / "route_table.py"
 SCAN_DIRS = ("unit", "integration", "api", "test_api", "media", "cognitive_layers", "core")
 #: 取装配后 app 路由表的合法出口——只此一家
 SINGLE_SOURCE_IMPORT = "tests.route_table"
+#: 文本预筛：谓词是 `X.app.routes` 这一形，连 `routes` 四个字母都没出现的档
+#: 不可能命中（`sourceRefsUnder` 的键仍是全量清单，预筛只减解析量）。
+SCAN_HINTS = ("routes",)
 
 pytestmark = pytest.mark.timeout(120)
 
@@ -70,14 +71,17 @@ def _readsMountedAppRoutes(tree: ast.AST) -> list:
 
 def test_取数口径只有一份():
     offenders = []
-    # 取数走共享解析预算（Issue #148）：一次性全仓扫描走 `transientNodes`，
-    # 不留常驻语法树、不与代码总量和机器速度捆绑。
+    # 取数走共享解析预算（Issue #148）：先按 `routes` 文本预筛，再解析。
+    # 候选面（`scanned`）数的是**预筛后**的档：判据要能在"预筛被改坏"时先炸，
+    # 而不是在空集上假绿。
+    scanned = 0
     for d in SCAN_DIRS:
         root = REPO_ROOT / "tests" / d
         if not root.is_dir():
             continue
-        # 枚举与解析都归 `tests/ast_scan`（本档不自付全仓 `rglob` + `ast.parse`）
-        for path in ast_scan.filesUnder(root):
+        # 枚举、预筛与解析都归 `tests/ast_scan`（本档不自付全仓 `rglob` + `ast.parse`）
+        for ref in ast_scan.sourceRefsUnder(root, hints=SCAN_HINTS):
+            path = ref.path
             if path == ROUTE_TABLE:
                 continue
             scanned += 1

@@ -1190,10 +1190,6 @@ export default {
     rollbackDone: 'Restauré, {left} archive(s) restante(s)',
     rollbackError: 'Échec de la restauration',
     archiveLoadError: 'Échec du chargement des archives',
-    adopt: 'Adopter',
-    adoptTarget: 'Compétence cible',
-    adoptSuccess: 'Proposition en attente créée',
-    adoptError: 'Échec de l adoption',
   },
   skill: {
     title: 'Gestion des compétences',
