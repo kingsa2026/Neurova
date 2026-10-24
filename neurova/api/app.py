@@ -66,6 +66,9 @@ class AppState:
         # 知识索引周期维护任务：与 MCP 同一条纪律——启停成对，不然关停时
         # 只留下一个没人等待的常驻 task。
         self.kb_index_task = None
+        # 入站持久队列常驻消费者：与 kb_index_task 同一启停纪律。
+        self.kb_ingest_task = None
+        self.kb_ingest_mqtt_task = None
         self.start_time: float = time.time()
         self.config: Dict[str, Any] = {}
         self._lock = threading.RLock()
@@ -971,6 +974,34 @@ async def _on_startup(app_state: AppState) -> None:
         except Exception as _kbIndexErr:  # noqa: BLE001
             logger.warning("知识索引周期维护启动失败（忽略）: %s", _kbIndexErr)
 
+    # 知识入站队列常驻消费者（默认 5s；NEUROVA_KB_INGEST_WORKER=off 停用）。
+    if (os.environ.get("NEUROVA_KB_INGEST_WORKER") or "on").strip().lower() != "off":
+        try:
+            from neurova.knowledge.ingest_bridge import runIngestWorker
+
+            app_state.kb_ingest_task = asyncio.create_task(runIngestWorker())
+            app_state.kb_ingest_task.add_done_callback(
+                lambda t: t.exception() if not t.cancelled() else None
+            )
+            logger.info("知识入站队列消费者已启动")
+        except Exception as _kbIngestErr:  # noqa: BLE001
+            logger.warning("知识入站队列消费者启动失败（忽略）: %s", _kbIngestErr)
+
+    # 入站 MQTT 订阅端（仅 NEUROVA_KB_INGEST_TRANSPORT=mqtt 时启用）。
+    try:
+        from neurova.knowledge.ingest_mqtt import ingestTransportMode
+
+        if ingestTransportMode() == "mqtt":
+            from neurova.knowledge.ingest_bridge import runIngestMqttConsumer
+
+            app_state.kb_ingest_mqtt_task = asyncio.create_task(runIngestMqttConsumer())
+            app_state.kb_ingest_mqtt_task.add_done_callback(
+                lambda t: t.exception() if not t.cancelled() else None
+            )
+            logger.info("知识入站 MQTT 订阅端已启动")
+    except Exception as _kbMqttErr:  # noqa: BLE001
+        logger.warning("知识入站 MQTT 订阅端启动失败（忽略）: %s", _kbMqttErr)
+
     # 飞书远程 KB 定时同步循环（P1#11③；NEUROVA_KB_SYNC=off 停用）。fail-open；
     # 仅对 settings.sync_interval_minutes>0 的 active 飞书配置触发，未配置=空转
     if (os.environ.get("NEUROVA_KB_SYNC") or "on").strip().lower() != "off":
@@ -1367,6 +1398,34 @@ async def _on_shutdown(app_state: AppState) -> None:
         except Exception as e:  # noqa: BLE001 - 任务内部已 fail-soft，此处只收结果
             logger.debug("知识索引周期维护任务收尾异常: %s", e)
     app_state.kb_index_task = None
+
+    kbIngestTask = app_state.kb_ingest_task
+    if kbIngestTask is not None and not kbIngestTask.done():
+        kbIngestTask.cancel()
+        try:
+            await asyncio.wait_for(kbIngestTask, timeout=AGENT_SHUTDOWN_TIMEOUT)
+        except asyncio.CancelledError:
+            logger.info("知识入站队列消费者已取消（进入关停）")
+        except asyncio.TimeoutError:
+            logger.warning(
+                "知识入站队列消费者取消超时（%.1fs），跳过", AGENT_SHUTDOWN_TIMEOUT
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("知识入站队列消费者收尾异常: %s", e)
+    app_state.kb_ingest_task = None
+
+    kbIngestMqttTask = app_state.kb_ingest_mqtt_task
+    if kbIngestMqttTask is not None and not kbIngestMqttTask.done():
+        kbIngestMqttTask.cancel()
+        try:
+            await asyncio.wait_for(kbIngestMqttTask, timeout=AGENT_SHUTDOWN_TIMEOUT)
+        except asyncio.CancelledError:
+            logger.info("知识入站 MQTT 订阅端已取消（进入关停）")
+        except asyncio.TimeoutError:
+            logger.warning("知识入站 MQTT 订阅端取消超时，跳过")
+        except Exception as e:  # noqa: BLE001
+            logger.debug("知识入站 MQTT 订阅端收尾异常: %s", e)
+    app_state.kb_ingest_mqtt_task = None
 
     # 关停 MCP 会话（stdio 子进程 + AsyncExitStack）。此前生产侧**零调用方**：
     # 会话只能靠 anyio 在 portal 退出时取消，而 stdio reader 阻塞在子进程管道上、

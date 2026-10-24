@@ -4,14 +4,9 @@ PasswordHasher 单元测试
 
 import unittest
 
-try:
-    from neurova.auth.password_hasher import PasswordHasher
-    HAS_PASSWORD_HASHER = True
-except ImportError:
-    HAS_PASSWORD_HASHER = False
+from neurova.auth.password_hasher import PasswordHasher
 
 
-@unittest.skipIf(not HAS_PASSWORD_HASHER, "PasswordHasher not available")
 class TestPasswordHasher(unittest.TestCase):
     """PasswordHasher 测试类 — 所有方法为 @staticmethod"""
 

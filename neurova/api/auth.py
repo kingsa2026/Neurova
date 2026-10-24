@@ -547,6 +547,7 @@ async def get_current_user_or_service(
             "username": "service",
             "role": "admin",
             "neuser_id": "system",
+            "tenant_id": "default",
             "auth_source": "service_token",
         }
     return await get_current_user(credentials)
@@ -590,6 +591,7 @@ async def get_current_user_or_api_key(
             "neuser_id": apiKey.user_id,
             "agent_id": apiKey.agent_id,
             "key_id": apiKey.key_id,
+            "tenant_id": str(getattr(apiKey, "tenant_id", "") or "default"),
             "auth_source": "api_key",
         }
 
@@ -614,7 +616,8 @@ async def get_optional_userWithQueryToken(
     return _identityFromCredentialsOrNone(credentials)
 
 
-_DEFAULT_USER = {"user_id": "default", "username": "default", "role": "user", "neuser_id": "default"}
+_DEFAULT_USER = {"user_id": "default", "username": "default", "role": "user",
+                 "neuser_id": "default", "tenant_id": "default"}
 
 
 def _user_identity(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -625,11 +628,15 @@ def _user_identity(payload: Dict[str, Any]) -> Dict[str, Any]:
     回退 sub (即账号 id), 与新签发的 Token 语义一致。
     """
     sub = payload.get("sub", "unknown")
+    tenant = payload.get("tenant_id") or payload.get("tenant") or "default"
     return {
         "user_id": sub,
         "username": payload.get("username", "unknown"),
         "role": payload.get("role", "user"),
         "neuser_id": payload.get("neuser_id") or sub,
+        # 租户是数据分区键，不是另一条身份通道：随同一份身份字典下发，
+        # 缺省落 default（匿名读与存量令牌语义不变）。
+        "tenant_id": str(tenant or "default"),
     }
 
 

@@ -47,6 +47,10 @@ class MainPathRerankConfig:
     weights: Optional[Dict[str, float]] = None
     rerankProvider: str = ""
     poolFactor: int = 3
+    # 影子通道：只记录两套排序的差异，不改变最终 top-k；默认关。
+    shadow: bool = False
+    shadowMethod: str = "model"
+    shadowProviderKind: str = "http"
 
     @classmethod
     def fromEnv(cls) -> "MainPathRerankConfig":
@@ -57,7 +61,17 @@ class MainPathRerankConfig:
             poolFactor = max(int(os.environ.get("NEUROVA_KB_MAIN_RERANK_POOL") or 3), 1)
         except ValueError:
             poolFactor = 3
-        return cls(enabled=enabled, method=method or "weight", poolFactor=poolFactor)
+        shadow = (os.environ.get("NEUROVA_KB_MAIN_RERANK_SHADOW") or "").strip().lower() in (
+            "1", "true", "on", "yes")
+        shadowMethod = (
+            os.environ.get("NEUROVA_KB_MAIN_RERANK_SHADOW_METHOD") or "model"
+        ).strip().lower()
+        shadowKind = (
+            os.environ.get("NEUROVA_KB_MAIN_RERANK_SHADOW_PROVIDER_KIND") or "http"
+        ).strip().lower()
+        return cls(enabled=enabled, method=method or "weight", poolFactor=poolFactor,
+                   shadow=shadow, shadowMethod=shadowMethod or "model",
+                   shadowProviderKind=shadowKind or "http")
 
 
 def _insideEventLoop() -> bool:
@@ -71,7 +85,8 @@ def _insideEventLoop() -> bool:
 def refineMainPathResults(query: str, pool: List[Dict[str, Any]], *, limit: int,
                           config: Optional[MainPathRerankConfig] = None,
                           runner: Any = None,
-                          providerResolver: Any = None
+                          providerResolver: Any = None,
+                          shadowRunner: Any = None
                           ) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """精排候选池并截断到 limit。返回 `(结果, 降级说明)`；关闸即原样透传。"""
     cfg = config or MainPathRerankConfig.fromEnv()
@@ -120,4 +135,58 @@ def refineMainPathResults(query: str, pool: List[Dict[str, Any]], *, limit: int,
         # runner 交回的 index 覆盖不全 ⇒ 有候选被静默丢弃；这比排序变化严重，必须留痕
         note = note or {"requested": method, "reason": "runner_returned_%d_of_%d"
                         % (len(out), len(candidates))}
+    if cfg.shadow:
+        shadow = _shadowCompare(
+            query, docs, out, limit=limit, cfg=cfg,
+            shadowRunner=shadowRunner, providerResolver=providerResolver,
+        )
+        note = dict(note or {})
+        note["shadow"] = shadow
     return out[: max(int(limit), 1)], note
+
+
+def _shadowCompare(query: str, docs: List[Dict[str, Any]], primary: List[Dict[str, Any]],
+                   *, limit: int, cfg: MainPathRerankConfig,
+                   shadowRunner: Any = None, providerResolver: Any = None
+                   ) -> Dict[str, Any]:
+    """影子通道：同一候选池换一种排序，只报差异，**不参与最终输出**。"""
+    label = cfg.shadowMethod
+    try:
+        runner = shadowRunner
+        if runner is None:
+            runner, label, built = buildRunner(
+                {"method": cfg.shadowMethod, "weights": cfg.weights,
+                 "rerank_provider": cfg.rerankProvider,
+                 "rerank_provider_kind": cfg.shadowProviderKind},
+                providerResolver=providerResolver)
+            if built:
+                return {"applied": False, "requested": cfg.shadowMethod,
+                        "reason": built.get("reason"), "note": built.get("requested")}
+        scored = runner.rerank(query, docs)
+    except Exception as exc:  # noqa: BLE001 - 影子失败不得影响主路
+        return {"applied": False, "requested": cfg.shadowMethod,
+                "reason": "shadow_error:%s" % exc}
+
+    shadowOrder = [int(row.get("index", -1)) for row in scored]
+    shadowIds = [str(docs[i].get("id") or "") for i in shadowOrder
+                 if 0 <= i < len(docs)][: max(int(limit), 1)]
+    primaryIds = [str(row.get("knowledge_id") or "") for row in primary[: max(int(limit), 1)]]
+    common = set(primaryIds) & set(shadowIds)
+    topK = max(int(limit), 1)
+    overlap = len(common) / topK if topK else 0.0
+    shifts = []
+    for position, docId in enumerate(primaryIds):
+        if docId in shadowIds:
+            shifts.append(abs(position - shadowIds.index(docId)))
+    result = {
+        "applied": True,
+        "method": label,
+        "rank_overlap": round(overlap, 6),
+        "mean_abs_rank_shift": round(sum(shifts) / len(shifts), 6) if shifts else None,
+        "top_k": topK,
+    }
+    lastError = getattr(runner, "last_error", None)
+    if lastError:
+        # provider 失败后 runner 内部已退化为加权；不把退化结果标成模型排序
+        result["degraded"] = lastError
+    return result

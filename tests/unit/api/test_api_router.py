@@ -8,14 +8,9 @@ APIRouter 单元测试 - 基于 neurova.core.api_router 当前实现
 
 import unittest
 
-try:
-    from neurova.core.api_router import APIRouter, APIEndpoint
-    HAS_API_ROUTER = True
-except ImportError:
-    HAS_API_ROUTER = False
+from neurova.core.api_router import APIRouter, APIEndpoint
 
 
-@unittest.skipIf(not HAS_API_ROUTER, "APIRouter not available")
 class TestAPIRouter(unittest.TestCase):
     """APIRouter 测试类（对齐当前实现 API）"""
 

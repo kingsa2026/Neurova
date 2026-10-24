@@ -355,7 +355,15 @@ async def hybrid_search(
             rerank_note = None
             if body.rerank and results:
                 try:
-                    cfg = body.rerank
+                    cfg = dict(body.rerank)
+                    if str(cfg.get("rerank_provider_kind") or "").lower() == "llm" and not callable(
+                        cfg.get("llm_call")
+                    ):
+                        from neurova.api.endpoints.knowledge_ingestion import _default_llm_call
+
+                        cfg["llm_call"] = _default_llm_call(
+                            request, prefer_agent_id=str(getattr(body, "agent_id", "") or "")
+                        )
                     runner, rerank_label, rerank_note = _build_rerank_runner(cfg)
                     candidates = [
                         {
