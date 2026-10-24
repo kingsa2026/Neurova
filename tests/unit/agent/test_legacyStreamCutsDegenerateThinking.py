@@ -112,7 +112,12 @@ class TestDegenerateThinkingIsCut:
         assert any((d or "").strip() for d in contents), emitted
 
     def testGuardIsTheSameSingleSourceAsTheMainLoop(self):
-        """判据不许在第二条路上另拼一份：阈值与连发判定都归 `ReasoningStreamGuard`。"""
+        """判据不许在第二条路上另拼一份：阈值与连发判定都归 `ReasoningStreamGuard`。
+
+        守卫的实现住在 `agent/legacy_stream_turn.py`（`chat_pipeline.py` 是每轮对话必经的
+        热路径，perf-gate 的 `hot-path-file-size` 要求新逻辑抽出去），所以判据跟着钉到那个
+        模块：钉的是**同一个对象**，不是"哪个文件里出现了这个名字"——它换了住处没换身份。
+        """
         import neurova.agent.legacy_stream_turn as legacyTurn
 
         assert getattr(legacyTurn, "ReasoningStreamGuard", None) is ReasoningStreamGuard, (

@@ -60,6 +60,7 @@ def main():
         import uvicorn
 
         from neurova.api.app import create_app
+        from neurova.core import config
 
         # 端口预检必须在**任何重型装配之前**：uvicorn 的次序是 lifespan.startup()
         # 先跑完、再 loop.create_server()，所以端口被占的失败会落在全量装配（实测
@@ -143,6 +144,7 @@ def main():
             host=host,
             port=port,
             log_level=_LOG_LEVEL_NAME.lower(),
+            **config.proxyUvicornArgs(),
         )
 
     except KeyboardInterrupt:
