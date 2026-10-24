@@ -462,7 +462,7 @@ def _subgraphPayload(manager, focus: str, hops: int, types: set, limit: int) -> 
     两跳外的同型节点永远到不了。裁剪边界上的边一律不外带。
     """
     nodes = getattr(manager, "_nodes", {}) or {}
-    if focus not in nodes:
+    if focus and focus not in nodes:
         raise LookupError("节点不存在: %s" % focus)
 
     adjacency: dict = {}
@@ -471,6 +471,15 @@ def _subgraphPayload(manager, focus: str, hops: int, types: set, limit: int) -> 
         edges.append(edge)
         adjacency.setdefault(edge.source_id, []).append(edge.target_id)
         adjacency.setdefault(edge.target_id, []).append(edge.source_id)
+
+    if not focus:
+        # 无焦点模式（3D 首屏）：按 limit 取全图子集，truncated 如实报。
+        keptAll = set(list(nodes.keys())[:limit])
+        outNodes = [_node_to_dict(nodes[i]) for i in keptAll if i in nodes]
+        outEdges = [_edge_to_dict(e) for e in edges
+                    if e.source_id in keptAll and e.target_id in keptAll]
+        return {"nodes": outNodes, "edges": outEdges,
+                "dropped_by_limit": len(nodes) > limit}
 
     def _kindOf(nodeId: str) -> str:
         node = nodes.get(nodeId)
@@ -511,7 +520,7 @@ async def get_knowledge_graph_subgraph(
     agent_id: str,
     request: Request,
     current_user: Dict = Depends(get_current_user_or_service),
-    focus: str = Query(..., description="中心节点 id"),
+    focus: str = Query("", description="中心节点 id；空=按 limit 取全图子集（3D 首屏）"),
     hops: int = Query(2, ge=0, le=6),
     limit: int = Query(200, ge=1, le=2000),
     types: str = Query("", description="逗号分隔的节点类型过滤，空=不过滤"),

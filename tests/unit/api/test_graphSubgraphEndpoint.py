@@ -44,11 +44,16 @@ def client(tmp_path, monkeypatch):
 
 
 class TestSubgraphClipping:
-    def testFocusRequired(self, client):
-        http, _ = client
-        resp = http.get(PREFIX + "/agent/subgraph")
 
-        assert resp.status_code == 422, resp.text
+    def testNoFocusReturnsClippedWhole(self, client):
+        """首屏无焦点：不 422，按 limit 裁剪全图（同一端点两种模式）。"""
+        http, _ids = client
+        resp = http.get(PREFIX + "/agent/subgraph", params={"limit": 3})
+
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
+        assert len(data["nodes"]) == 3
+        assert data["truncated"] is True
 
     def testUnknownFocusIs404(self, client):
         http, _ = client
