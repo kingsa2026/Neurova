@@ -239,6 +239,8 @@ class TestAuditBatchFloors:
       opentelemetry-api 1.44.0 → GHSA-xcq7-p3pf-p88h（tracestate 无界解析），1.45.1 起清零
       pillow 12.3.0 → 39 条（含 libtiff 编码器内存泄露 GHSA-xvh5-g6gv-559v），13.0.0 起清零
       pypdf 6.19.0 → 8 条（GHSA-39mj-jf6j-2qj3 等），6.21.1 起清零，落 6.21.2
+      filelock 4.0.0 → 3 条（GHSA-v4x8-3wr5-3wq8 等 Windows 软锁/副作用文件），4.2.1 起清零，落 4.2.4
+      setuptools 84.0.0 → GHSA-xmj3-9gf7-h52w（namespace_packages.txt 路径逃逸），84.1.0 起清零，落 84.2.1
     """
 
     _FLOORS = {
@@ -247,6 +249,8 @@ class TestAuditBatchFloors:
         "opentelemetry-api": "1.45.1",
         "pillow": "13.0.0",
         "pypdf": "6.21.1",
+        "filelock": "4.2.1",
+        "setuptools": "84.1.0",
     }
 
     @staticmethod
