@@ -4,7 +4,7 @@
   "private": true,
   "description": "运行时经 npx 拉取的 Node 包——仅用于解析依赖树并纳入 OSV 审计（不被 npm 安装执行）",
   "license": "Apache-2.0",
-  "overridesNote": "overrides 只作用于本清单的解析结果（审计面）。swagger-jsdoc 6.3.0 这类子依赖若用精确版本声明（如 yaml: \"2.0.0-1\"），锁文件里的传递依赖会一直停在该版本，重跑 npm install 也不会抬升——此时只能由 overrides 顶替。不属降级：顶替方向是抬到修复版，且实际运行的那份包由 neurova/tool_layers/npx_runtime_registry.py 的 PINNED 钉住。 MCP TS server SDK 2.0.0（server-filesystem 的传递依赖）与 ip-address 10.7.2 停在告警区间内（GHSA-46jr-4wx8-v453 / GHSA-jm63-cq47-j5jp / GHSA-rvq5-wwqv-78pq / GHSA-rxp7-6hxx-x8q5），修复版分别自 2.3.0 / 10.7.4 起；因父包用精确版本声明，只能由 overrides 顶替到修复版。",
+  "overridesNote": "overrides 只作用于本清单的解析结果（审计面）。子依赖若用精确版本声明（如 yaml: \"2.0.0-1\"），锁文件里的传递依赖会一直停在该版本，重跑 npm install 也不会抬升——此时只能由 overrides 顶替。不属降级：顶替方向是抬到修复版，且实际运行的那份包由 neurova/tool_layers/npx_runtime_registry.py 的 PINNED 钉住。 MCP TS server SDK 2.0.0（server-filesystem 的传递依赖）与 ip-address 10.7.2 停在告警区间内（GHSA-46jr-4wx8-v453 / GHSA-jm63-cq47-j5jp / GHSA-rvq5-wwqv-78pq / GHSA-rxp7-6hxx-x8q5），修复版分别自 2.3.0 / 10.7.4 起；因父包用精确版本声明，只能由 overrides 顶替到修复版。 2026-10 第二批（hono 抬高后重扫发现）：zod 4.6.5→4.6.7、undici 7.29.1→7.30.1、fast-uri 3.1.8→3.1.9、body-parser 2.3.0→2.4.0 四条在父包声明区间内本就可达，锁只是惯性停在旧值；@azure/msal-node 的修复线 7.1.0 高出父包 @azure/identity 4.13.3 声明的 ^6.0.0，而 identity 全 4.x 线（含最新 4.14.0）均声明 ^6.0.0、msal 6.x 线只有 6.0.0/6.0.1 两版且都带公告，故经 overrides 抬到同属 7 线的 7.1.1；identity 只从中取 ManagedIdentityApplication 与三个类型，已实跑构造 ManagedIdentityCredential 自证接口面未断。",
   "dependencies": {
     "@askjo/camofox-browser": "1.16.0",
     "@bytebase/dbhub": "1.2.5",
@@ -17,6 +17,11 @@
     },
     "@modelcontextprotocol/sdk": "^1.31.0",
     "@modelcontextprotocol/server": "^2.3.1",
-    "ip-address": "^10.7.4"
+    "ip-address": "^10.7.4",
+    "zod": "^4.6.7",
+    "undici": "^7.30.1",
+    "fast-uri": "^3.1.9",
+    "body-parser": "^2.4.0",
+    "@azure/msal-node": "^7.1.1"
   }
 }
