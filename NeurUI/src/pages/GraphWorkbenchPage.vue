@@ -77,6 +77,9 @@
               <Background />
               <MiniMap pannable zoomable />
               <Controls />
+              <template #edge-flow="edgeProps">
+                <FlowEdge v-bind="edgeProps" :label="String(edgeProps.label ?? '')" />
+              </template>
             </VueFlow>
             <div v-else-if="!loading" class="canvas-empty">
               <a-empty :description="t('common.noData')" />
@@ -264,6 +267,7 @@ import { useAgentPage } from '@/composables/useAgentPage'
 import { useAuthStore } from '@/stores/auth'
 import { request } from '@/api'
 import { radialLayout } from '@/pages/graph-workbench/radial'
+import FlowEdge from '@/pages/graph-workbench/FlowEdge.vue'
 
 // 3D/地图都是重依赖（WebGL/three、maplibre），defineAsyncComponent 懒加载：
 // 不切到对应视图就不下载，2D 主路径的包体不受影响。
@@ -384,9 +388,9 @@ const flowEdges = computed(() =>
     source: e.source,
     target: e.target,
     label: e.relation,
-    // 流光动效：animated 开启 VueFlow 的流动虚线，视觉层由样式定制
-    // （底层半透明实线 + 上层亮色短划线循环流动，见 .workbench-flow 样式）。
-    animated: true,
+    // 流光动效：自定义 flow 边（双层 path——底层实线 + 上层循环流光），
+    // 默认边只有一条 path，animated 虚线会整体覆盖底色做不出双层。
+    type: 'flow',
   })))
 
 const relationTerms = computed(() =>
@@ -705,13 +709,14 @@ onMounted(() => {
   box-shadow: 0 0 0 3px var(--nr-primary);
 }
 
-/* 连接线：底层半透明实线表存在，流光层循环流动——科技感不抢节点主体。 */
-.workbench-flow :deep(.vue-flow__edge .vue-flow__edge-path) {
-  stroke: rgba(129, 140, 248, 0.35);
+/* 连接线双层：底层半透明实线表连接存在，流光层短划线循环流动
+   （FlowEdge.vue 两条 path 叠加，默认边单条 path 做不出双层）。 */
+.workbench-flow :deep(.vue-flow__edge .flow-base) {
+  stroke: rgba(129, 140, 248, 0.4);
   stroke-width: 1.5;
 }
 
-.workbench-flow :deep(.vue-flow__edge.animated .vue-flow__edge-path) {
+.workbench-flow :deep(.vue-flow__edge .flow-stream) {
   stroke: #a5b4fc;
   stroke-width: 2;
   stroke-linecap: round;
@@ -729,7 +734,7 @@ onMounted(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .workbench-flow :deep(.vue-flow__edge.animated .vue-flow__edge-path) {
+  .workbench-flow :deep(.vue-flow__edge .flow-stream) {
     animation: none;
     stroke: rgba(165, 180, 252, 0.6);
   }
