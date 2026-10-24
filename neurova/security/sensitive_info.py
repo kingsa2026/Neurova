@@ -38,6 +38,8 @@ __all__ = [
     "severityOf",
     "severityRank",
     "highestSeverity",
+    "SUMMARY_RULES",
+    "ERROR_TEXT_RULES",
 ]
 
 
@@ -79,23 +81,30 @@ class SensitiveRule:
     #: 静默忽略就是一个新的"只写不读"（同一批在 firewall 那边修的正是这类）。
     literalReplacement: Optional[str] = None
 
-    def maskText(self, text: str) -> str:
+    def maskText(self, text: str, token: str = "***") -> str:
         if not self.enabled:
             return text
-        return self._maskText(text)
+        return self._maskText(text, token)
 
     def findMatches(self, text: str) -> List[re.Match]:
         if not self.enabled:
             return []
         return list(self.pattern.finditer(text))
 
-    def _maskText(self, text: str) -> str:
-        """按本规则的形状打码一段文本（打码实现只在这里一份）。"""
+    def _maskText(self, text: str, token: str = "***") -> str:
+        """按本规则的形状打码一段文本（打码实现只在这里一份）。
+
+        `token` 是**出口词汇**，不是第二种形状：键值式仍保键名、值形状仍整段替换。
+        三处在役侧（摘要／错误文案／进化证据）今天各用 `[REDACTED]` 家族，且已有格子钉着
+        （`test_summarizing_compressor.py:89`、`test_evolution_gates_wave_c.py:83`），
+        而存量证据文本里也是那串——统一成 `***` 会让新旧文本混排，故按调用方给词汇。
+        `keepEdges` 那一档不吃 token：它靠"留首末几位＋中间补星"保长度，换成文字就废了。
+        """
         if self.literalReplacement is not None:
-            return self.pattern.sub(self.literalReplacement, text)
+            return self.pattern.sub(self.literalReplacement.replace("***", token), text)
         if self.maskStrategy == _MASK_KEY_VALUE:
             def _sub(match: re.Match) -> str:
-                return "%s%s***" % (match.group(self.keyGroup), match.group("sep"))
+                return "%s%s%s" % (match.group(self.keyGroup), match.group("sep"), token)
             return self.pattern.sub(_sub, text)
         if self.maskStrategy == _MASK_KEEP_EDGES:
             def _edge(match: re.Match) -> str:
@@ -105,7 +114,7 @@ class SensitiveRule:
                 middle = "*" * max(1, len(value) - len(head) - len(tail))
                 return head + middle + tail
             return self.pattern.sub(_edge, text)
-        return self.pattern.sub("***", text)
+        return self.pattern.sub(token, text)
 
 
 def _kv(name: str, key: str, severity: SensitivityLevel, description: str,
@@ -144,8 +153,9 @@ SENSITIVE_RULES: Tuple[SensitiveRule, ...] = (
         SensitivityLevel.HIGH, "令牌"),
     _shape("secret_literal", r"sk-[A-Za-z0-9_\-]{8,}", SensitivityLevel.CRITICAL,
            "OpenAI 式密钥字面量"),
-    _shape("bearer_literal", r"Bearer\s+[A-Za-z0-9._\-]{8,}", SensitivityLevel.HIGH,
-           "Bearer 凭据字面量"),
+    _shape("bearer_literal", r"Bearer\s+\S+", SensitivityLevel.HIGH,
+           "Bearer 凭据字面量"),   # 值类与在役侧（error_mapping / evolution guard）对齐：
+                                   # 收窄成字符类会漏掉 `Bearer ab$` 这种值——脱敏面宁可宽
     # 下面两条来自**在役**的另两处脱敏点（`context/summarizing_compressor.py:_REDACT_PATTERNS`
     # 与 `llm/providers/error_mapping.py:_KEY_PATTERN`）。把它们收进表里，是为了让那两处
     # 日后改接单源时不必再自带一张小抄——本批先合表，接线那一拍见工单。
@@ -182,6 +192,25 @@ SENSITIVE_RULES: Tuple[SensitiveRule, ...] = (
         maskStrategy=_MASK_WHOLE, matchesValueShapeOnly=True,
     ),
 )
+
+#: 具名投影：在役出口各取一类，**名单在这里声明**，不在调用方另存小抄（§6-413 批 P-5）。
+#: 为什么允许投影而不算第二份表：规则本体（正则／分级／形状）只有一份，投影只挑"这条链上
+#: 该看的类别"；新增一条规则只改 `SENSITIVE_RULES`，投影按名字引用。
+_SECRET_SHAPES = ("secret_literal", "neurova_key_literal", "github_token", "bearer_literal")
+_CREDENTIAL_KV = ("password", "api_key", "token")
+
+
+def _pick(names: Tuple[str, ...]) -> Tuple[SensitiveRule, ...]:
+    missing = [n for n in names if n not in {r.name for r in SENSITIVE_RULES}]
+    if missing:  # 投影引用了不存在的规则＝悄悄漏脱敏，响亮失败
+        raise KeyError("单源规则表里缺这些名字，投影不成立：%s" % missing)
+    return tuple(r for r in SENSITIVE_RULES if r.name in names)
+
+
+#: 摘要出口：密钥形状＋凭据键值（今天 `_REDACT_PATTERNS` 覆盖的面，且不含手机号那类 PII）
+SUMMARY_RULES = _pick(_SECRET_SHAPES[:2] + _SECRET_SHAPES[3:] + _CREDENTIAL_KV + ("github_token",))
+#: 错误文案：只有值形状（文案里出现手机号是正常的运维信息，不是凭据）
+ERROR_TEXT_RULES = _pick(_SECRET_SHAPES)
 
 _BY_NAME = {rule.name: rule for rule in SENSITIVE_RULES}
 
@@ -226,13 +255,14 @@ def detectSensitive(text: str, rules: Optional[Iterable[SensitiveRule]] = None) 
     return out
 
 
-def sanitizeSensitive(text: str, rules: Optional[Iterable[SensitiveRule]] = None) -> str:
-    """逐规则打码（脱敏引擎唯一一份）。"""
+def sanitizeSensitive(text: str, rules: Optional[Iterable[SensitiveRule]] = None,
+                      token: str = "***") -> str:
+    """逐规则打码（脱敏引擎唯一一份）。`token` 只换出口词汇，不换形状。"""
     if not text:
         return text
     out = text
     for rule in (rules if rules is not None else SENSITIVE_RULES):
-        out = rule.maskText(out)
+        out = rule.maskText(out, token)
     return out
 
 
