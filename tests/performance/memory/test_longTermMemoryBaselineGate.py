@@ -61,15 +61,30 @@ OLD_QUERY = "青瓷茶壶"
 NEW_QUERY = "自动滴灌"
 
 
-def _newManager(tmp_path, agentId: str) -> MemoryManager:
+def _requireOnnxBackend() -> None:
+    """没有本地向量后端时**跳过并点名**，不把"这台机器没装"画成"门禁失败"。
+
+    这条门禁的向量分量与生产同一条链路（`manager._get_vector_store()` →
+    UnifiedVectorStore → ONNX），缺后端时读数确实无意义——但那是**前提不成立**，
+    不是**判据不成立**。此前把它写成 assert，于是 CI 薄环境（`requirements-ci.lock`
+    不装 numpy）里 15 条读起来像"记忆读写坏了"，修的人会去改一个没坏的模块。
+
+    跳过理由写清缺什么：跑的人一眼能判断"该补件还是该查代码"。
+    """
     from neurova.embedding import get_embedding_engine
 
-    assert get_embedding_engine() is not None, (
+    if get_embedding_engine() is not None:
+        return
+    pytest.skip(
         "本地 ONNX 嵌入档不可用：本门禁的向量分量与生产同一条链路"
         "（`manager._get_vector_store()` → UnifiedVectorStore → ONNX），"
-        "缺 models/embedding/bge-small-zh-v1.5/model.onnx 时读数无意义，"
-        "不以 skip 蒙过。"
+        "缺 numpy 或 models/embedding/bge-small-zh-v1.5/model.onnx 时读数无意义。"
+        "补件：`pip install -r requirements-full.lock`（含 numpy/onnxruntime）"
     )
+
+
+def _newManager(tmp_path, agentId: str) -> MemoryManager:
+    _requireOnnxBackend()
     return MemoryManager(
         db_path=os.path.join(str(tmp_path), f"{agentId}.db"),
         agent_id=agentId,

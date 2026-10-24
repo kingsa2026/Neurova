@@ -50,6 +50,10 @@ def repo(tmp_path):
     git("init", "--quiet")
     git("config", "user.name", "t")
     git("config", "user.email", "t@t")
+    # 这条判据量的是**多行 message 逐字保留**，与签名无关：跑测机若开了全局
+    # `commit.gpgsign=true`（本仓开发机就是），提交会因没有可用私钥失败，
+    # 红成 "gpg failed to sign the data"——像 transport 坏了，实际只是签名。
+    git("config", "commit.gpgsign", "false")
     (repo / "f.txt").write_text("hello", encoding="utf-8")
     return repo
 
