@@ -72,8 +72,9 @@ def test_取数口径只有一份():
         root = REPO_ROOT / "tests" / d
         if not root.is_dir():
             continue
-        # 枚举走共享预算；`.routes` 的字面串是判据谓词的必要条件，作预筛充分。
-        for ref in ast_scan.sourceRefsUnder(root, ".py", hints=(".routes",)):
+        # 枚举走共享预算；`routes` 字面串是判据谓词的必要条件，作预筛充分
+        # （写窄成 `.routes` 会漏掉 `app . routes` 这类跨行/带空格的写法）。
+        for ref in ast_scan.sourceRefsUnder(root, ".py", hints=("routes",)):
             path = ref.path
             if path == ROUTE_TABLE:
                 continue
