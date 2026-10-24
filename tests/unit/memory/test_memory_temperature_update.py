@@ -110,13 +110,18 @@ class TestTemperatureEngineBasics:
 class TestMemoryManagerDecayCycle:
     """MemoryManager.run_decay_cycle 测试"""
 
-    def _make_manager(self, agent_id="test_agent"):
-        """创建隔离的 MemoryManager"""
+    def _make_manager(self, tmp_path, agent_id="test_agent"):
+        """创建隔离的 MemoryManager（落点走 `tmp_path`）。
+
+        `db_path=":memory:"` 会被 `manager._init_storage` 取 `dirname` 当侧面库根，
+        退化成**进程 CWD** 并在仓根建出 `memory_storage/`（全量顺序里由
+        `_guardRepoRootAgainstPollution` 点名；单跑恒绿）。
+        """
         import uuid
         unique_id = f"{agent_id}_{uuid.uuid4().hex[:8]}"
-        return MemoryManager(db_path=f":memory:", agent_id=unique_id)
+        return MemoryManager(db_path=str(tmp_path / f"{unique_id}.db"), agent_id=unique_id)
 
-    def test_run_decay_cycle_reduces_temperature(self):
+    def test_run_decay_cycle_reduces_temperature(self, tmp_path):
         """run_decay_cycle 应衰减符合条件的记忆温度（贝叶斯曲线）
 
         Bug 2 修复后契约：
@@ -125,7 +130,7 @@ class TestMemoryManagerDecayCycle:
           - 零温记忆跳过
           - 其他记忆应用贝叶斯曲线衰减
         """
-        manager = self._make_manager()
+        manager = self._make_manager(tmp_path)
 
         # mem1: 高温（>=80）→ 不衰减
         mem1_id = manager.remember(content="Test memory 1", temperature=100.0)
@@ -157,15 +162,15 @@ class TestMemoryManagerDecayCycle:
         # mem3: 零温不变
         assert mem3.temperature == 0.0
 
-    def test_run_decay_cycle_empty_manager(self):
+    def test_run_decay_cycle_empty_manager(self, tmp_path):
         """空管理器应正常运行"""
-        manager = self._make_manager("test_empty")
+        manager = self._make_manager(tmp_path, "test_empty")
         count = manager.run_decay_cycle()
         assert count == 0
 
-    def test_update_memory_temperature_touch(self):
+    def test_update_memory_temperature_touch(self, tmp_path):
         """update_memory_temperature 应提升温度（touch）"""
-        manager = self._make_manager()
+        manager = self._make_manager(tmp_path)
         mem_id = manager.remember(content="Test memory", temperature=50.0)
 
         result = manager.update_memory_temperature(mem_id, interaction_type="recall")
@@ -173,9 +178,9 @@ class TestMemoryManagerDecayCycle:
         # touch 方法增加 10 温度
         assert manager._memories[mem_id].temperature == 60.0
 
-    def test_update_memory_temperature_nonexistent(self):
+    def test_update_memory_temperature_nonexistent(self, tmp_path):
         """更新不存在的记忆应返回 False"""
-        manager = self._make_manager()
+        manager = self._make_manager(tmp_path)
         result = manager.update_memory_temperature("nonexistent_id")
         assert result is False
 
