@@ -221,12 +221,14 @@ def artifactKey(channel: str, artifactId: str) -> str:
 def anchorPath() -> Path:
     """锚文件路径（唯一一处）。测试一律 monkeypatch 本函数到临时目录，不碰真实主目录。
 
-    `~/.neurova/` 这个拼法只在 `core/data_root.legacyHomeLanding` 里有一份：本模块是它的
-    消费方，不是第二个事实源（家目录落点面守卫逐文件计数，各拼一遍即红）。
+    `~/.neurova/` 的拼法不在这里再写一遍：`core/data_root` 是主目录落点的唯一出处，
+    本模块向它要**现成路径**（`homeAnchorPath`：只算落点、不参与收养）。
+    `test_homeAdoptionRefusedUnderForeignDataRoot` 把"谁调**收养端**那个取法"钉成只有
+    `core/data_root.py` 一处——那一处代表"各算一遍就是各判一次要不要搬"。
     """
-    from neurova.core.data_root import legacyHomeLanding
+    from neurova.core.data_root import homeAnchorPath
 
-    return legacyHomeLanding(ANCHOR_FILE_NAME)
+    return homeAnchorPath(ANCHOR_FILE_NAME)
 
 
 def readAnchors() -> Dict[str, str]:

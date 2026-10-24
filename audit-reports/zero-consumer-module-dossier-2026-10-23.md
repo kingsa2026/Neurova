@@ -5,6 +5,7 @@
 > 并写明"删即永久失去什么"。
 > 置信度：**✅＝主会话独立复算**（本文里每条 file:line 与每条 git 实证都是本会话现跑的命令输出）；
 > 子代理的同名结论只作线索，凡未复算的一律不写进判定。
+> 续读提示：文中 `docs/plans/…` 一类旧路径写的是**当时的**栈快照，现行位置见 `docs/INDEX.md`。
 
 ## 0. 这批为什么会撞到它们
 
@@ -163,7 +164,7 @@
   状态机标签 `StateStatus:28`；单例工厂 `get_state_manager:387`/`reset_state_manager:392`。
 - **关键入口**：`StateManager:57`、`get_state_manager():387`。
 - **来历**：✅ `git log -S "from neurova.core.state_manager import" --all -- neurova` 为空，
-  命中文件只有 `docs/04-plans/2026-05-08-phase5-awakening-foundation.md`、
+  命中文件只有 `docs/plans/2026-05-08-phase5-awakening-foundation.md`、
   `docs/plugin-architecture-design.md` 与四个测试文件 ⇒ **引入即孤岛，不是被摘链**。
 - **接缝是"存在但恒不赋值"，且契约错位**：`core/base_module.py:53` 与
   `plugins/base_plugin.py:109` 都只把 `_state_manager` 初始化成 `None`；
