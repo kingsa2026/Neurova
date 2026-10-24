@@ -1,10 +1,16 @@
 """Short queries must not incur max_length ONNX work on dynamic models."""
 from types import SimpleNamespace
 
-import numpy as np
 import pytest
 
-from neurova.embedding.onnx_embedding import ONNXEmbeddingEngine
+# 模块级导入 numpy / ONNX 引擎会**炸在收集期**：薄环境（`requirements-ci.lock`）不装 numpy，
+# 于是 `pytest tests/` 直接 Interrupted、一条用例都不跑（`test_whole_repo_collection_errors`
+# 红在那里，读起来像"全仓收集坏了"）。判件放在模块层：整档测的就是 numpy + ONNX 那条路，
+# 缺件时跳过并点名，收集期不许炸。
+np = pytest.importorskip("numpy", reason="本档测的是 ONNX 动态轴补齐，需 numpy；薄环境不装")
+pytest.importorskip("onnxruntime", reason="本档测的是 ONNX 动态轴补齐，需 onnxruntime；薄环境不装")
+
+from neurova.embedding.onnx_embedding import ONNXEmbeddingEngine  # noqa: E402
 
 
 class Tokenizer:

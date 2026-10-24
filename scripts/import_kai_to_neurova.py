@@ -14,8 +14,8 @@
                                     user 轮、tool_result 折叠不丢 assistant 文本）
 
 身份：
-  SOUL.md → agent_workspaces/kai/memory/soul.md（Agent._load_identity 真实加载位）
-  PROFILE.md → memory/personality.md + workspace 根留档
+  SOUL.md → data/kai/soul.md（Agent._load_identity 真实加载位）
+  PROFILE.md → data/kai/personality.md + workspaces/ 留档
   MEMORY.md → workspace 根留档
 
 幂等：记忆按 (agent_id, content, created_at) 去重；会话按消息
@@ -548,8 +548,12 @@ def import_chats(kai_root: Path, sessions_dir: Path, agent_id: str = "kai") -> D
 
 
 def import_identity(kai_root: Path, agent_root: Path) -> Dict[str, int]:
-    """SOUL.md → <agent_root>/soul.md；PROFILE.md → personality.md + workspace 留档；
-    MEMORY.md → workspace 留档。全部覆盖式同步（源即真相）。"""
+    """SOUL.md → `<agent_root>/soul.md`；PROFILE.md → `<agent_root>/personality.md` + 工作区留档；
+    MEMORY.md → 工作区留档。全部覆盖式同步（源即真相）。
+
+    落点是 `Agent._load_identity` 的**真实加载位**（v2 布局起身份文件在 agent 根，
+    不再藏在 `memory/` 或工作区里）：写到别处等于导入成功、运行时读不到。
+    """
     kai_root = Path(kai_root)
     agent_root = Path(agent_root)
     workspace = agent_root / "workspaces"

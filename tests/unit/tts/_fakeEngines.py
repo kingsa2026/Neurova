@@ -68,4 +68,3 @@ def fakeHeavyFactory(**_weightDirs):
     构造时用，两条各有各的形状，不为了桩而把假引擎的签名放宽。
     """
     return _FakeHeavyEngine()
-

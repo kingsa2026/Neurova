@@ -15,6 +15,7 @@
 | `_agent_probe.py` | 拉起后端(9527)并探测 agents 路由 | `python scripts/diagnostics/_agent_probe.py` | 启动临时 uvicorn 线程 |
 | `_trace_stack.py` | 最小 Agent 初始化 + 一次 chat，用于堆栈定位 | `python scripts/diagnostics/_trace_stack.py` | 创建 `./_smoke_workspace` |
 | `_run_backend.py` | 仅启动本地后端(9527)，供手工调试单独拉起服务 | `python scripts/diagnostics/_run_backend.py` | 占用 9527 端口 |
+| `artifactDigestStockInventory.py` | 存量构件摘要清单（只读）：已装技能／插件谁没钉、钉了不符、锚缺，四态逐条列出；不写一个字节 | `PYTHONPATH=$(git rev-parse --show-toplevel) python scripts/diagnostics/artifactDigestStockInventory.py [--json]` | 只读数据根与 `~/.neurova/artifact_anchors.json` |
 | `_tool_experience_loop_probe.py` | 工具↔经验↔再调用环路只读取证：一轮之后输出三读数 + 票据 `lookup`/`ticket_reason` 的 JSON（不触网，库落临时目录） | `python scripts/diagnostics/_tool_experience_loop_probe.py [--json] [--workspace DIR]` | 在临时目录建 EKB 库与 agent 工作区 |
 
 ### 数据迁移 / 复算（one-off + 可重复读数）
@@ -38,6 +39,7 @@
 |------|------|----------|
 | `check_databases.py` | 列出主要 SQLite 库（`neurova_memory.db`/`neurflow.db`/`data/neurova_memory.db`）及表名 | 项目根运行 |
 | `check_users_db.py` | 检查 `data/users.db` 表结构、用户列表与 admin 记录 | 项目根运行 |
+| `artifactDigestStockInventory.py` | 存量构件摘要清单（§6-383「存量未钉」待办的可复跑读数）：技能与插件各自给 `pinned-ok` / `pinned-mismatch` / `unpinned` / `missing-dir` 四态，根外锚给 `match` / `anchor-missing` / `anchor-mismatch`；退出码 0＝清单已产出（含空清单）、2＝连数据根都读不出 | `python scripts/diagnostics/artifactDigestStockInventory.py [--json]` | 只读（不写一个字节；不连后端） |
 | `_tmp_check_tracked.py` | 检查 `tests/unit/core` 下测试文件的 git 跟踪状态 | 项目根运行 |
 | `analyze_issues.py` | 解析 `audit-reports/pylint-report-v4.json`，抽样打印 broad-exception-caught / wrong-import-position / undefined-variable | 项目根运行（需该报告存在） |
 

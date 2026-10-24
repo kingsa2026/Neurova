@@ -54,15 +54,16 @@ class TestBug1MemCoreUpdateTemperature:
         # 不应调用 temperature_engine.update_temperature（不存在的方法）
         mock_agent.temperature_engine.update_temperature.assert_not_called()
 
-    def test_mem_core_update_memory_temperature_actually_updates_temp(self):
+    def test_mem_core_update_memory_temperature_actually_updates_temp(self, tmp_path):
         """集成测试：MemCore.update_memory_temperature 应实际更新记忆温度
 
         验证修复后温度真的被更新（而非被 try/except 静默吞没）。
         """
         from neurova.mem_core import MemCore
 
-        # 用真实 MemoryManager（:memory: SQLite）
-        manager = MemoryManager(db_path=":memory:", agent_id="test_bug1")
+        # 用真实 MemoryManager（落点走 tmp_path：`:memory:` 会被 `_init_storage` 取 dirname
+        # 当侧面库根，退化成进程 CWD 并在仓根建出 `memory_storage/`）
+        manager = MemoryManager(db_path=str(tmp_path / "bug1.db"), agent_id="test_bug1")
         mem_id = manager.remember(content="Bug 1 集成测试", temperature=50.0)
 
         # 构造一个 mock agent，持有真实 manager
@@ -99,21 +100,21 @@ class TestBug1MemCoreUpdateTemperature:
 class TestBug2RunDecayCycleUsesTemperatureEngine:
     """Bug 2: run_decay_cycle 应调用 TemperatureEngine.on_decay，应用贝叶斯曲线"""
 
-    def _make_manager(self, agent_id="test_bug2"):
-        """创建隔离的 MemoryManager"""
+    def _make_manager(self, tmp_path, agent_id="test_bug2"):
+        """创建隔离的 MemoryManager（落点走 `tmp_path`，见本文件顶部的同一处说明）"""
         import uuid
 
         unique_id = f"{agent_id}_{uuid.uuid4().hex[:8]}"
-        return MemoryManager(db_path=":memory:", agent_id=unique_id)
+        return MemoryManager(db_path=str(tmp_path / f"{unique_id}.db"), agent_id=unique_id)
 
-    def test_run_decay_cycle_uses_temperature_engine_on_decay(self):
+    def test_run_decay_cycle_uses_temperature_engine_on_decay(self, tmp_path):
         """run_decay_cycle 应调用 TemperatureEngine.on_decay
 
         根因：当前实现直接调 Memory.decay()（简单线性 temp -= rate*hours），
         完全绕过 TemperatureEngine.on_decay 的贝叶斯曲线。
         修复：通过 TemperatureEngine.on_decay 计算新温度。
         """
-        manager = self._make_manager()
+        manager = self._make_manager(tmp_path)
         mem_id = manager.remember(content="Bug 2 测试", temperature=50.0)
 
         # 修改 last_accessed_at 为 7 天前（触发衰减）
@@ -140,12 +141,12 @@ class TestBug2RunDecayCycleUsesTemperatureEngine:
         # 修复后：on_decay 应被调用至少一次
         assert call_count["count"] > 0, "run_decay_cycle 未调用 TemperatureEngine.on_decay"
 
-    def test_run_decay_cycle_skips_crystallized_memories(self):
+    def test_run_decay_cycle_skips_crystallized_memories(self, tmp_path):
         """固化记忆（lifecycle_stage=CRYSTALLIZED）不应衰减
 
         贝叶斯特性：is_crystallized=True 时 on_decay 返回 new_temp=current_temp。
         """
-        manager = self._make_manager()
+        manager = self._make_manager(tmp_path)
         mem_id = manager.remember(content="固化记忆", temperature=50.0)
 
         mem = manager._memories[mem_id]
@@ -158,12 +159,12 @@ class TestBug2RunDecayCycleUsesTemperatureEngine:
         # 固化记忆温度不变
         assert mem.temperature == original_temp, f"固化记忆被衰减: {original_temp} → {mem.temperature}"
 
-    def test_run_decay_cycle_skips_high_temperature(self):
+    def test_run_decay_cycle_skips_high_temperature(self, tmp_path):
         """高温记忆（>=80）不应衰减（视为固化）
 
         贝叶斯特性：current_temp >= 80.0 时 on_decay 返回 new_temp=current_temp。
         """
-        manager = self._make_manager()
+        manager = self._make_manager(tmp_path)
         mem_id = manager.remember(content="高温记忆", temperature=85.0)
 
         mem = manager._memories[mem_id]
@@ -175,12 +176,12 @@ class TestBug2RunDecayCycleUsesTemperatureEngine:
         # 高温记忆温度不变
         assert mem.temperature == original_temp, f"高温记忆被衰减: {original_temp} → {mem.temperature}"
 
-    def test_run_decay_cycle_skips_recently_accessed(self):
+    def test_run_decay_cycle_skips_recently_accessed(self, tmp_path):
         """今天访问过的记忆（days_idle < 1）不应衰减
 
         贝叶斯特性：days_idle < 1.0 时 on_decay 返回 new_temp=current_temp。
         """
-        manager = self._make_manager()
+        manager = self._make_manager(tmp_path)
         mem_id = manager.remember(content="刚访问的记忆", temperature=50.0)
 
         mem = manager._memories[mem_id]
@@ -192,7 +193,7 @@ class TestBug2RunDecayCycleUsesTemperatureEngine:
         # 今天访问的记忆温度不变
         assert mem.temperature == original_temp, f"刚访问的记忆被衰减: {original_temp} → {mem.temperature}"
 
-    def test_run_decay_cycle_applies_bayesian_curve_not_linear(self):
+    def test_run_decay_cycle_applies_bayesian_curve_not_linear(self, tmp_path):
         """贝叶斯衰减应与简单线性衰减不同
 
         简单线性：temp -= rate*hours（等量衰减）
@@ -202,7 +203,7 @@ class TestBug2RunDecayCycleUsesTemperatureEngine:
         - 简单线性（rate=1, hours=1）：50 - 1 = 49
         - 贝叶斯：curve_factor(7d)=1.0, decay_rate 受多因子影响，new_temp = 50 * (1 - decay_rate)
         """
-        manager = self._make_manager()
+        manager = self._make_manager(tmp_path)
         mem_id = manager.remember(content="贝叶斯曲线测试", temperature=50.0, importance=50.0)
 
         mem = manager._memories[mem_id]
@@ -220,9 +221,9 @@ class TestBug2RunDecayCycleUsesTemperatureEngine:
             f"run_decay_cycle 仍使用简单线性衰减 (50-1=49)，未应用贝叶斯曲线。实际: {mem.temperature}"
         )
 
-    def test_run_decay_cycle_updates_lifecycle_stage(self):
+    def test_run_decay_cycle_updates_lifecycle_stage(self, tmp_path):
         """衰减后应更新 lifecycle_stage（基于贝叶斯曲线返回值）"""
-        manager = self._make_manager()
+        manager = self._make_manager(tmp_path)
         mem_id = manager.remember(content="阶段更新测试", temperature=30.0)
 
         mem = manager._memories[mem_id]
@@ -236,14 +237,14 @@ class TestBug2RunDecayCycleUsesTemperatureEngine:
             f"衰减后阶段未更新: stage={mem.lifecycle_stage}, temp={mem.temperature}"
         )
 
-    def test_run_decay_cycle_thread_safe(self):
+    def test_run_decay_cycle_thread_safe(self, tmp_path):
         """run_decay_cycle 应在锁保护下执行（线程安全）
 
         Bug 5 关联：原实现遍历 _memories 时无锁，并发调用可能 RuntimeError。
         """
         import threading
 
-        manager = self._make_manager()
+        manager = self._make_manager(tmp_path)
         # 添加多条记忆
         for i in range(20):
             mem_id = manager.remember(content=f"并发测试 {i}", temperature=50.0)
