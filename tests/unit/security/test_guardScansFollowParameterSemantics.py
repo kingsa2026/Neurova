@@ -28,13 +28,14 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import tempfile
 
 from tests import ast_scan
 
 import neurova
 from neurova.security import governance, tool_guard
 from neurova.security.tool_guard import (
-    GuardSeverity, GuardThreatCategory, ShellEvasionGuardian, ToolGuardEngine)
+    FilePathGuardian, GuardSeverity, GuardThreatCategory, ShellEvasionGuardian, ToolGuardEngine)
 
 NEUROVA_DIR = pathlib.Path(neurova.__file__).resolve().parent
 EVASION = GuardThreatCategory.SHELL_EVASION
@@ -51,6 +52,16 @@ SEMANTIC_KEY_NAMES = ("COMMAND_PARAM_KEYS", "PATH_PARAM_KEYS")
 #: 用户名形状与"家目录下"这层语义都由字面路径承载，与真家目录无关。
 SAFE_PATH = "C:\\Users\\xccoo\\neurova_guard_255_safe_read.txt"
 
+#: 真家目录**本身**落在受保护清单里时（CI 以 root 跑，`Path.home()=="/root"` 命中 `/root`），
+#: 上面那条形状不论修没修都必然被 `FilePathGuardian` 判 DENY——那是宿主环境的真读数，不是本档
+#: 要判的 shell 规避口径。用临时目录下同形的绝对路径按同一口径复测，避免"机器换个人名就转红/转绿"。
+_HOST_HOME_IS_PROTECTED = FilePathGuardian()._scan_protected_paths_in_text(SAFE_PATH) != []
+
+
+def _relativeToHomeSafePath() -> str:
+    """与 `SAFE_PATH` 同形（绝对路径、反斜杠夹 `xcc` 的十六进制形状、文件名无敏感词），但家目录可替换。"""
+    return str(pathlib.Path(tempfile.gettempdir()) / "xccoa" / "neurova_guard_255_safe_read.txt")
+
 
 def _findings(toolName: str, params: dict) -> list:
     return ToolGuardEngine().guard(toolName, params).findings
@@ -66,8 +77,10 @@ def test_plainWindowsPathIsNotShellEvasion():
 
     assert not findings, (
         "无害路径被判成 shell 规避（finding=%s）⇒ 路径值混进了命令扫描面" % findings[:2])
-    assert ToolGuardEngine().guard("file_read", {"file_path": SAFE_PATH}).should_block is False, (
-        "路径读取仍被拦 ⇒ 每一次文件工具调用在非交互链路（渠道/NPC/mobile/定时）都会被卡住")
+    probe = _relativeToHomeSafePath() if _HOST_HOME_IS_PROTECTED else SAFE_PATH
+    assert ToolGuardEngine().guard("file_read", {"file_path": probe}).should_block is False, (
+        f"路径读取仍被拦（{probe}）⇒ 每一次文件工具调用在非交互链路"
+        "（渠道/NPC/mobile/定时）都会被卡住")
 
 
 def test_realEvasionInCommandStillCaught():

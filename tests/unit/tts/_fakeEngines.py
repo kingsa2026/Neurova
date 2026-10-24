@@ -68,18 +68,3 @@ def fakeHeavyFactory(**_weightDirs):
     构造时用，两条各有各的形状，不为了桩而把假引擎的签名放宽。
     """
     return _FakeHeavyEngine()
-
-
-
-def _farFutureMonotonic() -> float:
-    """「TTL 必然已过」的时间点：**相对本机单调钟**取，不写字面量。
-
-    `release_idle_engines(now_monotonic=…)` 的语义是"进程单调钟读到的那一刻"，
-    与 `time.monotonic()` 共用同一条基线。写死 `1_000_000` 当"远超 TTL"是一种
-    **机器相关的假设**：开机超过约 11.6 天的机器上它就落在过去（实测某跑测节点读到
-    1198855s），于是 `now - last_used` 是负数、TTL 判定不成立、释放不发生——
-    同一份代码按节点开机时长判红判绿。取当前钟 +1 小时，判定的是契约本身。
-    """
-    import time
-
-    return time.monotonic() + 3600.0
