@@ -222,3 +222,61 @@ describe('skill-pool API — 废弃端点守护', () => {
     })
   })
 })
+
+// ===========================================================================
+// 技能行主键归一（2026-10-24）
+// 后端四个技能读面的行主键都叫 skill_id（marketplace.MarketplaceSkill /
+// skill_pool_api.SkillInfo），前端消费方统一读 id。旧形态是各页自己重命名，
+// AgentSkillPage 的市场导入漏了这一笔 ⇒ 装出来的 URL 是
+// /marketplace/skills/undefined/install（真机 404）；同一形状还潜伏在
+// AgentSchedulerPage 的技能下拉（取到 undefined，存下的调度任务指向不存在的技能）。
+// 归一因此上收到 API 边界一处完成，本组判据钉的是「边界出口带 id」。
+// ===========================================================================
+describe('skill-pool API — skill_id→id 归一在边界一处完成', () => {
+  it('市场读面 with_total 信封 {items:[{skill_id}]} 出口带 id，且原 skill_id 字段保留', async () => {
+    mockGet.mockResolvedValueOnce({
+      items: [{ skill_id: 'web-search', name: 'Web Search', description: '搜索' }],
+      total: 1,
+    } as any)
+    const rows = await skillPool.getPublicSkills()
+    expect(rows).toHaveLength(1)
+    expect(rows[0].id).toBe('web-search')
+    expect(rows[0].skill_id).toBe('web-search')
+  })
+
+  it('市场读面裸数组旧契约同样出口带 id', async () => {
+    mockGet.mockResolvedValueOnce([{ skill_id: 'xfyun--ocr', name: 'OCR', description: '' }] as any)
+    const rows = await skillPool.getPublicSkills()
+    expect(rows[0].id).toBe('xfyun--ocr')
+  })
+
+  it('市场读面带 {code,data} 信封时先解信封再归一（拦截器之外的第二形态）', async () => {
+    mockGet.mockResolvedValueOnce({ code: 0, data: [{ skill_id: 'a', name: 'A', description: '' }] } as any)
+    const rows = await skillPool.getPublicSkills()
+    expect(rows.map((s) => s.id)).toEqual(['a'])
+  })
+
+  it('公共库读面出口带 id', async () => {
+    mockGet.mockResolvedValueOnce([{ skill_id: 'p1', name: '公共技能', description: '' }] as any)
+    const rows = await skillPool.listPublicLibrarySkills()
+    expect(rows[0].id).toBe('p1')
+  })
+
+  it('用户私库读面出口带 id', async () => {
+    mockGet.mockResolvedValueOnce([{ skill_id: 'm1', name: '我的技能', description: '' }] as any)
+    const rows = await skillPool.listMySkills()
+    expect(rows[0].id).toBe('m1')
+  })
+
+  it('agent 技能读面出口带 id（SkillInfo 契约主键是 skill_id）', async () => {
+    mockGet.mockResolvedValueOnce([{ skill_id: 'sk_a', name: 'synth_alpha', description: '' }] as any)
+    const rows = await skillPool.getAgentSkills('agent-1')
+    expect(rows[0].id).toBe('sk_a')
+  })
+
+  it('行本身已带 id 时不被 skill_id 缺省覆盖（后端不改契约的前提下两种都收）', async () => {
+    mockGet.mockResolvedValueOnce([{ id: 'kept', name: 'X', description: '' }] as any)
+    const rows = await skillPool.getAgentSkills('agent-1')
+    expect(rows[0].id).toBe('kept')
+  })
+})

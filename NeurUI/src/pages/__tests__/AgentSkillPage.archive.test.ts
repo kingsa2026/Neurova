@@ -61,6 +61,7 @@ vi.mock('ant-design-vue', () => ({
 import AgentSkillPage from '../AgentSkillPage.vue'
 
 const SKILL = {
+  id: 'sk_a',
   skill_id: 'sk_a',
   name: 'synth_alpha',
   description: '自动技能',
