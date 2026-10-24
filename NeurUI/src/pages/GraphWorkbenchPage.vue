@@ -258,7 +258,7 @@ import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { useAuthStore } from '@/stores/auth'
 import { request } from '@/api'
-import { layeredLayout } from '@/pages/graph-workbench/layout'
+import { radialLayout } from '@/pages/graph-workbench/radial'
 
 // 3D/地图都是重依赖（WebGL/three、maplibre），defineAsyncComponent 懒加载：
 // 不切到对应视图就不下载，2D 主路径的包体不受影响。
@@ -320,7 +320,10 @@ const instanceForm = reactive({
 
 const flowNodes = computed(() => {
   const nodes = filteredNodes.value
-  const positions = layeredLayout(nodes)
+  // 放射布局：以选中节点为根（聚焦后以其为圆心重铺），无选中取度数枢纽——
+  // 子树扇区不相交，树边互不交叉。
+  const positions = radialLayout(
+    nodes, (studio.value?.edges ?? []) as never, selectedNodeId.value || undefined)
   return nodes.map((n) => ({
     id: n.id,
     label: n.label,
