@@ -24,9 +24,10 @@ export interface LayoutPoint {
   y: number
 }
 
-/** 总半径归一：最大深度映射到固定半径，整图占地恒定 ~2800px——
- * fit 后 zoom 不随图深塌到不可辨认（曾实测节点缩到 30x8 『看起来空』）。 */
-export const DEFAULT_TOTAL_RADIUS = 1400
+/** 总半径归一：最大深度映射到固定半径。取值以『不叠即可』为准（用户口径）——
+ * 紧凑优先，容量项（MIN_ARC 圆周容量）兜底保证不叠；占地 ~1000px，
+ * fit 后 zoom 更高、节点更大更可读。 */
+export const DEFAULT_TOTAL_RADIUS = 500
 /** 同层相邻节点的最小弧长（px）：卡片宽 96 + 间距，低于它就视觉重叠。 */
 export const DEFAULT_MIN_ARC = 120
 /** 每层子环数：同层节点分内/外两个子环交错排布，圆周容量翻倍、占地减半。 */
