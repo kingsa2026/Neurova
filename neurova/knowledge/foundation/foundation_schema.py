@@ -26,6 +26,11 @@ from .knowledge_facts import (
     _SCHEMA_V16,
     _SCHEMA_V17,
     _SCHEMA_V18,
+    _SCHEMA_V19,
+    _SCHEMA_V20,
+    _SCHEMA_V21,
+    _SCHEMA_V22,
+    _SCHEMA_V23,
 )
 from .digest_chain import _SCHEMA_V11
 from ..ontology.derivation_ledger import _SCHEMA_V10
@@ -59,6 +64,16 @@ _STEPS: List[tuple] = [
     (17, _SCHEMA_V17),
     # v18：entry 级 token 账（文档条目与 fact 分表；轮总量加 entry_attributed_tokens）
     (18, _SCHEMA_V18),
+    # v19：事实变更历史（create/supersede/retract/expire/revive/rollback）与业务基线
+    (19, _SCHEMA_V19),
+    # v20：租户分区（事实/活动列 + 唯一索引带 tenant）
+    (20, _SCHEMA_V20),
+    # v21：事实冲突账按租户分区
+    (21, _SCHEMA_V21),
+    # v22：业务基线按租户分区
+    (22, _SCHEMA_V22),
+    # v23：主体消解字典按租户分区
+    (23, _SCHEMA_V23),
 ]
 
 _registered = False

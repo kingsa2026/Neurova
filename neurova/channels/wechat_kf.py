@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from xml.etree import ElementTree as ET
 
 from neurova.channels.base import ChannelEventType, ChannelMessage
+from neurova.channels.voice_ingress import AUDIO_BYTES_KEY
 from neurova.channels.wechat_kf_crypto import decryptKfPayload, verifyKfSignature
 from neurova.core.logger import get_logger
 
@@ -86,6 +87,27 @@ class WeChatKfEventsMixin:
             self._kf_cursors[openKfId] = nextCursor
         return data
 
+    def download_kf_media(self, media_id: str) -> Optional[bytes]:
+        """微信客服素材下载；失败返回 None（由入站桥报 media_unavailable）。"""
+        if not media_id or not self._ensure_wecom_token():
+            return None
+        try:
+            import requests
+
+            response = requests.get(
+                f"{self.WECOM_API_BASE}/cgi-bin/media/get",
+                params={"access_token": self.access_token, "media_id": media_id},
+                timeout=10,
+            )
+            if response.status_code != 200 or not response.content:
+                return None
+            if "application/json" in (response.headers.get("content-type") or ""):
+                return None
+            return response.content
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("微信客服素材下载失败 media_id=%s: %s", media_id, exc)
+            return None
+
     def _kfPayloadToEvents(
         self, payload: Dict[str, Any], openKfId: str
     ) -> List[Tuple[ChannelEventType, ChannelMessage]]:
@@ -143,7 +165,8 @@ class WeChatKfEventsMixin:
                         changeType, "end", chatId, oldServicer, openKfId, agentId,
                     ))
                 continue
-            if str(item.get("msgtype") or "") == "text" and external:
+            msgType = str(item.get("msgtype") or "")
+            if msgType == "text" and external:
                 content = str((item.get("text") or {}).get("content") or "")
                 if content:
                     events.append((ChannelEventType.MESSAGE_RECEIVED, self._make_message(
@@ -154,6 +177,28 @@ class WeChatKfEventsMixin:
                         raw_event=item,
                         metadata={"open_kfid": openKfId, "agent_id": agentId},
                     )))
+            elif msgType in ("image", "file", "voice") and external:
+                payload = item.get(msgType) or {}
+                mediaId = str(payload.get("media_id") or "")
+                filename = str(payload.get("filename") or "")
+                data = self.download_kf_media(mediaId) if mediaId else None
+                metadata = {
+                    "open_kfid": openKfId,
+                    "agent_id": agentId,
+                    "media_id": mediaId,
+                    "file_name": filename,
+                }
+                if data:
+                    metadata["media_bytes"] = data
+                    if msgType == "voice":
+                        metadata[AUDIO_BYTES_KEY] = data
+                events.append((ChannelEventType.MESSAGE_RECEIVED, self._make_message(
+                    message_id=msgId or f"kf_{int(time.time())}",
+                    sender_id=external, sender_name=external,
+                    content=filename or ("[%s]" % msgType),
+                    chat_id=external, chat_type="p2p",
+                    message_type=msgType, raw_event=item, metadata=metadata,
+                )))
         return events
 
     def _kfTakeoverMessage(
