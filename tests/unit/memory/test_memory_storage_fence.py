@@ -59,10 +59,18 @@ class TestDefaultPathIsNotCwdRelative:
 
 class TestFenceCoversMemorySurfaces:
     def test_productionMemoryDirIsTheRepoWorkspacesRoot(self):
-        """生产目录是磁盘上那个事实，不随进程配置（`NEUROVA_AGENT_WORKSPACES_DIR`）漂移。"""
+        """生产目录是磁盘上那个事实，不随进程配置（`NEUROVA_AGENT_WORKSPACES_DIR`）漂移。
+
+        现布局（`data/<agent_id>/`）由 `core/agent_workspaces` 收口：该根**生产上**就是
+        仓库自带的数据根，测试期可注入。所以这格换两种问法，都不读注入值当定义：
+        ① 落点名必须是数据根（不是仓库根，也不是旧扁平 `agent_workspaces/`）；
+        ② 未注入时围栏认得 `data/<id>/memory/` 里的主库。
+        """
+        from neurova.core.data_root import repoRoot
         from neurova.knowledge.foundation.storage_fence import productionMemoryDir
 
-        assert productionMemoryDir().name == "agent_workspaces"
+        assert productionMemoryDir() == repoRoot() / "data", (
+            f"生产记忆目录现读 {productionMemoryDir()}——v2 布局把它收进了仓库数据根")
         assert underProductionMemory(productionMemoryDir() / "default" / "memory"
                                      / "neurova_memories_persist.db")
 

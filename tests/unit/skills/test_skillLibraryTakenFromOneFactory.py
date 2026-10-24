@@ -85,13 +85,13 @@ class TestWriteThenReadSeeOneLedger:
         return client
 
     def test_install_then_agentFaceListsIt(self, app_client):
-        """走真安装链，但**不用** studio 那只包——原因由下面那格钉着，别当成本批的对象。
+        """走真安装链，且直接装 studio 那只**真资产包**——形参最长的包能落地，链路才算真通。
 
-        本格要判的是"写完读得到"，链路与代码路径两只内置包一字不差；studio 在跑测环境里
-        连"装到最终位置"都放不下（终点投影超 Windows 预算），那是 §6-276 登记的落点问题，
-        与本批的内存态合流无关。
+        本格此前绕开 studio，理由是它在跑测环境里"装不到最终位置"。那个理由已经不成立：
+        下面那格按真装之后的盘上路径实测，最长落点仍在 Windows 预算内。判据按落点形状改判，
+        不把"当时装不下"留成默认路径。
         """
-        skill_id = "builtin--multi-search-engine"
+        skill_id = "builtin--adaptive-presentation-studio"
         installed = app_client.post(f"/api/v1/skill-pool/{skill_id}/install",
                                     params={"agent_id": "default"})
         assert installed.status_code == 200, (
@@ -103,33 +103,33 @@ class TestWriteThenReadSeeOneLedger:
             f"安装回执说成功，但同进程的面板数据源读到 {len(rows)} 条 {ids[:5]}——"
             "写侧与读侧各持一份内存账，这正是本批要合掉的")
 
-    def test_studioPackageCannotLandInsideTheTestRoot(self):
-        """主格换包的理由必须**会红**，不许只写在话里（形态集 251 那条：归零的腿要留着读数）。
+    def test_studioPackageLandsUnderTheBudgetThroughTheRealInstallChain(self, app_client):
+        """主格装真资产包的前置必须**实测自证**，不许从别处推。
 
-        现量随夹具形状一起动过：conftest 改切**库根**注入点 `_BASE_DIR`（不再逐实例 sha256）后，
-        agent 库根比旧夹具短了一截，studio 包最长成员仍然把它顶过 Windows 260 ⇒ 真资产在跑测
-        环境里连"装到最终位置"都放不下。哪天这格红了＝落点变短了，主格就该改用真资产，
-        而不是把这格删掉。
+        上一版这里是反向断言（"装不下"），它按设计在落点变短时转红——本轮正是那一格红了：
+        conftest 把库根切到 `tmp_path` 后理论投影 246 < 260。但"理论投影"不是可观测事实
+        （库根里落的是 `builtin--<包名>`，不是 `manifest.name`；装的成功与否另有一串变量），
+        改判为**真装完之后按盘上实际路径量**：同一用例里装、读面看得见、最长路径还在预算内。
         """
-        import re
-        import zipfile
-
-        from neurova.skills.library_service import POOL_AGENT, resolve_library_dir
+        from neurova.skills.library_service import agentLibrary
         from neurova.skills.market_sources import WINDOWS_MAX_PATH   # 预算单源＝解包闸用的那个数
 
-        bundle = REPO / "neurova" / "skills" / "market_bundles" / "adaptive-presentation-studio.zip"
-        with zipfile.ZipFile(io.BytesIO(bundle.read_bytes())) as zf:
-            longestMember = max(zf.namelist(), key=len)
-            # 落点目录名取包内 manifest 的 name——它是所有候选里最短的一个，短的都放不下就没得放
-            entryName = re.search(r"^name:\s*(\S+)",
-                                  zf.read("manifest.yaml").decode("utf-8"), re.M).group(1)
-        libRoot = str(resolve_library_dir(POOL_AGENT, "default"))
-        projection = len(str(Path(libRoot) / entryName / longestMember))
+        skill_id = "builtin--adaptive-presentation-studio"
+        installed = app_client.post(f"/api/v1/skill-pool/{skill_id}/install",
+                                    params={"agent_id": "default"})
+        assert installed.status_code == 200, (
+            f"安装本身没成：HTTP {installed.status_code} {str(installed.text)[:220]}")
+        ids = [r.get("skill_id") for r in
+               app_client.get("/api/v1/skill-pool/agent/default/skills").json()]
+        assert skill_id in ids, f"装完读面看不见：{ids[:5]}——内存态还是两份"
 
-        assert projection > WINDOWS_MAX_PATH, (
-            f"studio 终点投影只剩 {projection} 字符（库根 {len(libRoot)} + 库内目录 {entryName} + "
-            f"最长成员 {len(longestMember)}），已回到 Windows {WINDOWS_MAX_PATH} 预算内"
-            "——主格该改用真资产包，把上面那格的替换理由一并改判")
+        root = Path(str(agentLibrary("default").skills_dir))
+        landed = [p for p in root.rglob("*") if p.is_file()]
+        assert landed, f"落点 {root} 一个文件都没有——真装链没写盘"
+        longest = max(landed, key=lambda p: len(str(p)))
+        assert len(str(longest)) <= WINDOWS_MAX_PATH, (
+            f"最长落点 {len(str(longest))} 字符越过 Windows {WINDOWS_MAX_PATH} 预算："
+            f"{str(longest)[len(str(root)):]}")
 
     def test_factoryHandsOutOneInstancePerLibraryDir(self):
         """工厂语义：**同一库目录必须只对应一个实例**，且落点与解析单点一致。
