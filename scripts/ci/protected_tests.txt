@@ -3827,3 +3827,26 @@ tests/unit/plugins/test_pluginEventSurfaceResolvesTheBus.py
 # 逐文件单跑两次同读数 2 passed；我自己复跑 新档＋摘要器＋错误映射 28 passed（3 条既有红见
 # §6-412 的归因：并会话未跟踪的 `document_pipeline.py` 后缀表、mappingproxy、llm 跨文件污染）。
 tests/unit/security/test_liveRedactionDoorsUseTheSharedEngine.py
+# §6-415（批 P-5 第二格）：第三处在役脱敏点改接单源；形状差异是**两边各缺一半**，
+# 不是"护栏宽、单源窄"一句话——单源缺 `authorization|cookie|credential|裸 secret` 四键、
+# 缺 JSON 形（sep 不收键名右侧闭引号）、且表序把键值档排在 `bearer_literal` 之前，
+# 于是 `token: Bearer abcdef123456` 在摘要出口漏真令牌；护栏缺"引号值含空格"与全角冒号。
+# 顺序理由（Bearer 先行）原本写在护栏注释里，§6-411 合表时只并了规则没并次序——这条
+# 现在钉在 `SENSITIVE_RULES` 表上方，`_pick` 按表过滤故每扇 door 自动继承。
+# 值长下限从正则里摘出来具名成 `MIN_SECRET_VALUE_LEN`（下限留在正则＝脱敏面跟着收窄），
+# 判定走新口 `containsSensitive()`；键名档派生自同表（`keyPattern` 原文＋整名匹配），
+# 因此结构侧能问"`{"api_key": …}` 这个键是不是凭据"——孤立值字符串是内容正则看不见的一形，
+# 由活体自证第一轮抓出（残留 `Bravo9`／`MyRealSecret123`），修法在生产侧调顺序
+# （先脱结构再序列化），不在下游正则里猜转义引号。
+# 判据 14 格＝行为六格（三形摘要门＋两形护栏门＋序列化那一形）＋反向控制五格
+# （今天已脱对的形状不得被改坏／PII 不得被拉进这两扇门／正常文本逐字不动／短值不得
+# 触发 fail-closed／真凭据照样触发）＋形状面三格（同表同引擎逐字相等、护栏无自编译规则
+# 走 AST 而非子串——docstring 里的路标句不该算命中、以及只调单源各一次）。
+# 红→绿 6 failed／5 passed → 14 passed（4.02s／3.82s 两次同读数）；红自证把三个生产文件
+# 连同本档回退到 HEAD 复跑＝8 failed／6 passed 且八条全是断言失败（判据用 hasattr／AST 面，
+# 不 import 本批新符号，回退态才收集得起）。变异探针四发各自只红该红那一格。
+# 活体（真 `summarizeSkillIO`＋真 `evaluate_submission_gate`，无 mock）七片段残留＝无、
+# 带密钥提交 blocked=True、正常提交不沾。回归 6642 passed，13 条既有红逐条同选型 A/B 两态
+# 读数一致（context 2 条属并会话在途 orchestrator、llm 5 条跨文件污染、memory/cognitive 4 条
+# 数据根与 bus 旧账、security/skills 2 条治理闸既有红），本批不新增红。
+tests/unit/security/test_redactionDoorsShareOneLeakClosure.py
