@@ -167,6 +167,13 @@ def _run(manager, client, N):
 
 
 def main() -> int:
+    # 读数里有 ① ② 与箭头这类非 GBK 字符：控制台/重定向一律按 UTF-8 写，
+    # 免得 print 自己抛 UnicodeEncodeError、退出码 1 被读成"有一条腿 FAIL"。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:  # noqa: BLE001 —— 老环境不支持就算了，读数不该被它打断
+            pass
     corpus = buildCorpus()
     partOneCost(corpus)
     partTwoWindowLeak(corpus)
