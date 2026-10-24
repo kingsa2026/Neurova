@@ -21,14 +21,17 @@ from neurova.api.endpoints.mobile_pairing import ConfirmPairingRequest
 
 @pytest.fixture(autouse=True)
 def clean_state(monkeypatch):
-    """每个测试隔离模块级内存状态"""
+    """每个测试隔离模块级内存状态。
+
+    在册设备**不在这里**了（§4.8：它是 `mobile_device_store` 的持久权威），
+    库路径由 `tests/unit/api/conftest.py` 单点重定向到本用例的 tmp 目录。
+    """
     monkeypatch.setattr(mp, "_pairing_codes", {})
-    monkeypatch.setattr(mp, "_paired_devices", {})
-    monkeypatch.setattr(mp, "_user_devices", {})
     monkeypatch.setattr(mp, "_ws_connections", {})
     monkeypatch.setattr(mp, "_cancelled_sessions", {})
     monkeypatch.setattr(mp, "_confirm_attempts", {})
     monkeypatch.setattr(mp.MobileConnectionManager, "_instance", None)
+    mp.resetDeviceRegistry()
     yield
 
 
