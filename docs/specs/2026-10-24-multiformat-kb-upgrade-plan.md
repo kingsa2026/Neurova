@@ -354,18 +354,30 @@ A0（租户隔离）→ A1（去重）→ A3（过滤）→ A4（图谱影子）
   分层/影响面/撤回只在同租户内计算；种子谓词与种子规则在咽喉写入首跳按租户
   幂等补种；schema/CRUD/impact/studio 按操作者租户过滤，`tenant_scoped` 翻真。
 - **S0–S3 前端工作台**：`GraphWorkbenchPage`（Vue Flow 2D 画布 + 本体面板
-  CRUD/影响面提示 + 实例编辑表单）；旧 `KnowledgeGraphPage` 保留并加入口；
-  i18n 11 语言同步；vue-tsc/vitest/locale 守卫全绿。3D 探索器（S4）与旧页
-  退役（S5）待后续批次。
+  CRUD/影响面提示 + 实例编辑表单）；i18n 11 语言同步；vue-tsc/vitest/locale
+  守卫全绿。
+- **S4 3D 探索器**：`GraphExplorer3D`（3d-force-graph/three 双重懒加载）；
+  服务端 `GET /knowledge-graph/{agent}/subgraph` 按 focus/hops/类型/上限
+  BFS 裁剪（类型过滤只作用结果集，截断如实报）；2D/3D 选中同步
+  （2D 点选换焦点 → 3D 重拉邻域，3D 点选 → 2D 高亮）。
+- **MapLibre 空间视图**：后端 `GET /knowledge/geo`（可见 geo 条目清单，
+  radius/bbox 交集过滤、不越租户）；前端 `GeoMapPanel`（maplibre-gl，
+  本地空白底图不依赖外部瓦片，WebGL 缺席降级提示）。
+- **Kreuzberg 切主路**：`NEUROVA_KB_PARSER=kreuzberg` 一键切换——内容层归
+  kreuzberg 统一抽取，本管线保留清洗/分块/标题编排；图片仍走引擎层 OCR
+  编排；失败/空结果诚实报错不回落（无双主路）；`metadata.pipeline` 按实际
+  分支标注；缺省 legacy（灰度由部署配置执行），影子模式保留供切换期对比。
+- **S5 旧页退役**：旧 `KnowledgeGraphPage` 及其 chartOptions/normalize 及两份
+  测试删除；旧 URL 原路径换工作台（书签/菜单可达，回退一个版本即恢复旧页）；
+  agent 切换联动测试换指工作台（onAgentChange 重拉 studio）。i18n 键逐键
+  核查均多页共用，无孤儿。
 
-尚未落地（依赖后续批次）：
+尚未落地（环境解封条件）：
 
-- **S4 3D 探索器**：需引入 `3d-force-graph`/Three 懒加载依赖（bundle 与 WebGL
-  兼容评估后另批），服务端子图裁剪/LOD 未做。
-- **S5 旧页退役**：旧 `KnowledgeGraphPage` 仍在（S0 语义保留可回退），功能对齐
-  验证后另批替换路由并退役旧图配置。
-- **MapLibre 空间视图**：A6 后端过滤已具备，前端地图视图未落。
-- **Kreuzberg 切换**：影子对比读数已可采（`parser_shadow`），切换主路待影子
-  数据积累后另批执行。
-- **A8 规模与交付**：10M 迁移/分片、Docker 远程构建、生产 MQTT TLS 按已登记
-  解封条件执行（独立项目）。
+- **10M 存储迁移/分片**：FTS 10M p95 2.9s 的 migrate_or_shard 判定需要
+  10M 级真实语料与目标存储环境方可实施与验证；本机无该语料。
+- **Docker 远程构建**：本机无 docker daemon，CNB 触发缺 `repo-cnb-trigger:rw`
+  权限——远程构建验证待环境权限开通。
+- **生产 MQTT TLS**：代码链已完整（`NEUROVA_MQTT_TLS_CA/CERT/KEY/INSECURE`
+  → `buildWorkerBus` → `client.tls_set`），生产启用属部署配置动作（设 env +
+  证书下发），非代码缺口。
