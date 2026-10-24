@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Iterable, List, Optional, Pattern, Tuple
+from typing import Any, Iterable, List, Optional, Pattern, Tuple
 
 __all__ = [
     "SensitivityLevel",
