@@ -33,6 +33,7 @@ from neurova.agent.retriever_adapters import (
 )
 from neurova.agent.knowledge_retriever_adapter import KnowledgeRetrieverAdapter
 from neurova.agent.gates import terminationNotice
+from neurova.agent import legacy_call
 from neurova.agent.tkg_retriever_adapter import TKGRetrieverAdapter
 from neurova.agent.tool_execution_manager import ExecutionStatus, TimeoutStrategy, ToolExecutionManager
 from neurova.agent.actionability import evaluate_actionability, get_actionability_config
@@ -2940,24 +2941,8 @@ class ChatPipeline:
             return await self._call_legacy_normal(ctx)
 
     async def _call_legacy_normal(self, ctx: ChatContext) -> str:
-        """非流式 fallback"""
-        response = await self.llm_client.chat(ctx.context)
-        if isinstance(response, dict):
-            if response.get("success"):
-                raw = response.get("response", "")
-                if hasattr(raw, "content"):
-                    reply = raw.content
-                elif isinstance(raw, dict):
-                    reply = raw.get("content", raw.get("text", str(raw)))
-                else:
-                    reply = str(raw)
-            else:
-                reply = f"[LLM Error] {response.get('error', 'Unknown error')}"
-        elif hasattr(response, "content"):
-            reply = response.content
-        else:
-            reply = str(response)
-        return reply
+        """非流式 fallback（实现见 `agent/legacy_call.py`，此处只留接口）。"""
+        return await legacy_call.callLegacyNormal(self, ctx)
 
     async def _call_legacy_stream(self, ctx: ChatContext) -> str:
         """流式 fallback
@@ -2978,56 +2963,13 @@ class ChatPipeline:
 
     @staticmethod
     def _raise_for_llm_error_dict(chunk: Dict) -> Exception:
-        """错误 dict → 分类异常（供应商错误守卫据此不再 fallback 重撞坏模型）。
-
-error_type 五类标准键（multi_model_client 流内
-        编码生产端）优先；消息兜底兼容无类型历史 dict。
-        """
-        from neurova.llm_client import (
-            LLMAuthError,
-            LLMBadRequestError,
-            LLMConnectionError,
-            LLMError,
-            LLMRateLimitError,
-            LLMServiceUnavailableError,
-        )
-
-        raw = str(chunk.get("error") or "")
-        message = f"LLM 流式调用失败: {chunk.get('error')}"
-        error_type = str(chunk.get("error_type") or "")
-        typed = {
-            "rate_limited": LLMRateLimitError,
-            "service_unavailable": LLMServiceUnavailableError,
-            "connection_failed": LLMConnectionError,
-            "auth_failed": LLMAuthError,
-            "bad_request": LLMBadRequestError,
-        }
-        cls = typed.get(error_type)
-        if cls is not None:
-            return cls(message)
-        low = raw.lower()
-        if "404" in low or "not found" in low or "not_found" in low:
-            return LLMBadRequestError(message)
-        if "429" in low or "rate limit" in low or "too many requests" in low or "限流" in raw:
-            return LLMRateLimitError(message)
-        if "401" in low or "403" in low or "unauthorized" in low or "forbidden" in low:
-            return LLMAuthError(message)
-        if "connect" in low or "timeout" in low or "connection" in low:
-            return LLMConnectionError(message)
-        return LLMError(message)
+        """错误 dict → 分类异常（实现见 `agent/legacy_call.py`）。"""
+        return legacy_call.raiseForLlmErrorDict(chunk)
 
     @staticmethod
     def _is_api_config_error(exc: Exception) -> bool:
-        """判断是否为 API 配置类错误（不应 fallback）"""
-        try:
-            from openai import AuthenticationError, BadRequestError
-
-            if isinstance(exc, (BadRequestError, AuthenticationError)):
-                return True
-        except ImportError:
-            pass
-        status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
-        return status in (400, 401, 403)
+        """API 配置类错误不 fallback（实现见 `agent/legacy_call.py`）。"""
+        return legacy_call.isApiConfigError(exc)
 
     # ══════════════════════════════════════════════════════════════
     # Step 4: 后处理
