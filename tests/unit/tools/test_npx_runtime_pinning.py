@@ -183,6 +183,44 @@ class TestNoKnownVulnerableRuntimePackages:
             "GHSA-rxp7-6hxx-x8q5",
             "Address6 区号标识符二次复杂度匹配（DoS）",
         ),
+        # 2026-10 第二批（PR #364 的 dependency-audit 红灯）：hono 抬高后重新实扫，
+        # 同一棵审计树里还有五条可修公告，逐条按根因抬到修复版，不留静音。
+        "hono": (
+            "4.13.11",
+            ("node_modules/@hono/node-server", "node_modules/@modelcontextprotocol/sdk"),
+            "GHSA-5r4p-p66f-jhc7",
+            "serveStatic 与核心路由的双层解码差异（身份校验看到 A、文件落在 B）",
+        ),
+        "zod": (
+            "4.6.6",
+            ("node_modules/@modelcontextprotocol/sdk", "node_modules/@upstash/context7-mcp"),
+            "GHSA-mrhx-c7xc-m3w5",
+            "校验超大受限集合时内存耗尽",
+        ),
+        "undici": (
+            "7.30.1",
+            ("node_modules/@upstash/context7-mcp",),
+            "GHSA-xjj6-f33q-929c / GHSA-f72v-6w45-q472 / GHSA-4qv8-2p9j-2685",
+            "过量 content-encoding 的未捕获错误（DoS）", 
+        ),
+        "fast-uri": (
+            "3.1.9",
+            ("node_modules/ajv",),
+            "GHSA-333x-w4r6-6crp / GHSA-w74x-v6f9-j3xg / GHSA-wjr9-j795-jxcr / GHSA-xhq7-xmqj-769h",
+            "主机名规范化可被绕过（四条）",
+        ),
+        "body-parser": (
+            "1.20.9",
+            ("node_modules/express",),
+            "GHSA-27r3-jxmh-p828",
+            "压缩正文尾部残留字节导致 DoS（两条线：1.x 自 1.20.9、2.x 自 2.4.0）",
+        ),
+        "@azure/msal-node": (
+            "7.1.0",
+            ("node_modules/@azure/identity",),
+            "GHSA-xcx6-jx8p-x3h5",
+            "授权码流把参数泄露给攻击者可控端点",
+        ),
     }
 
     def _compare_tuple(self, version: str) -> tuple:
