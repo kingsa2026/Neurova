@@ -1643,17 +1643,27 @@ class ToolExecutor:
                             )
                 return sandbox_result
             # 文件类操作暂无文件系统沙箱后端：降级为阻止并说明原因
-            logger.warning("文件操作命中沙箱策略但无文件沙箱后端，已阻止: %s", file_path)
-            return {
-                "success": False,
-                "error": "该文件位置受保护，已阻止访问: " + "; ".join(verdict.reasons),
-                "governance": verdict.to_dict(),
-            }
+            return self._fileGuardDenial(verdict)
 
         if verdict.decision == GovernanceDecision.ASK:
             return await self._awaitApprovalVerdict(tool_name, params, verdict)
 
         return None  # ALLOW 放行
+
+    def _fileGuardDenial(self, verdict) -> Dict:
+        """文件类操作命中沙箱策略、且本平台无文件沙箱后端时的终态回执。
+
+        被拦的**是哪条路径**从裁决结果的 `path_values` 取，不从 `reasons` 的散文里抠，
+        也不拿本函数作用域里根本没有的名字——这一行此前读的是幻影变量 `file_path`，
+        静态门禁报 F821、运行时被外层吞成 warning，于是"拦了哪条路径"在日志面上整个消失。
+        """
+        blocked = "、".join("%s=%s" % (name, value) for name, value in verdict.path_values)
+        logger.warning("文件操作命中沙箱策略但无文件沙箱后端，已阻止: %s", blocked or "（无路径参数）")
+        return {
+            "success": False,
+            "error": "该文件位置受保护，已阻止访问: " + "; ".join(verdict.reasons),
+            "governance": verdict.to_dict(),
+        }
 
     async def _awaitApprovalVerdict(self, tool_name: str, params: Dict, verdict) -> Optional[Dict]:
         """ASK 的裁决通路：有界阻塞等人工裁决，醒来后由**本调用**在完整管线里执行。

@@ -148,7 +148,7 @@ def _app_with_storage(storage, user_id="ua", role="user"):
     app.dependency_overrides[get_current_user_or_default] = lambda: user
     orig = neurflow_api._get_storage
     neurflow_api._get_storage = lambda: storage
-    TestClient.app = app  # noqa: 仅记录
+    TestClient.app = app
     return app, orig
 
 

@@ -456,8 +456,12 @@ async def _handle_dingtalk_webhook(adapter, body: bytes, query_params, headers) 
     return {"errcode": 0}
 
 
-async def _emitChannelMessage(adapter, event_type, channel_msg: ChannelMessage) -> None:
-    """EventDoor 形状守卫的显式入口：只接 `ChannelMessage`，不接任意对象。"""
+async def _emitChannelMessage(adapter, event_type, channel_msg) -> None:
+    """EventDoor 形状守卫的显式入口：只接 `ChannelMessage`，不接任意对象。
+
+    注解不写 `ChannelMessage`：那个类只在投递点上才需要，模块级导入会把它拴进端点导入链；
+    形状由入口构造函数与 `adapter._emit_event` 的守卫各挡一次，不靠注解。
+    """
     await adapter._emit_event(event_type, channel_msg)
 
 
