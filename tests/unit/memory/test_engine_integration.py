@@ -28,11 +28,17 @@ def settings(tmp_path):
     MemorySettingsConfig.reset_instance()
 
 
-def _make_manager(agent_id="engine_it"):
+def _make_manager(tmpPath, agent_id="engine_it"):
+    """建一份真 `MemoryManager`，落点由调用方给（`tmp_path`）。
+
+    `db_path=":memory:"` 时 `manager._init_storage` 把 `os.path.dirname(db_path) or "."`
+    当侧面库根，于是在**进程 CWD**（仓根）建出 `memory_storage/`——全量顺序里由
+    `_guardRepoRootAgainstPollution` 点名本条用例（单跑恒绿，所以一直没被看见）。
+    """
     unique = f"{agent_id}_{uuid.uuid4().hex[:8]}"
     from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 
-    return MemoryManager(db_path=":memory:", agent_id=unique)
+    return MemoryManager(db_path=str(tmpPath / f"{unique}.db"), agent_id=unique)
 
 
 # ============================================================
@@ -88,10 +94,10 @@ class TestManagerCompression:
         high = mgr.remember("核心 重要记忆 不应被压缩", temperature=80.0, importance=90.0)
         return low, high
 
-    def test_dry_run_does_not_mutate(self, settings):
+    def test_dry_run_does_not_mutate(self, settings, tmp_path):
         """dry_run（默认）只返回计划，不改任何数据"""
         settings.update({"compression.importance_threshold": 0.05})
-        mgr = _make_manager()
+        mgr = _make_manager(tmp_path)
         low, high = self._seed(mgr)
         before = {mid: mgr._memories[mid].lifecycle_stage for mid in low + [high]}
 
@@ -101,7 +107,7 @@ class TestManagerCompression:
         assert after == before, "dry_run 不得修改数据"
         assert report["dry_run"] is True
 
-    def test_execute_merges_low_value_group(self, settings):
+    def test_execute_merges_low_value_group(self, settings, tmp_path):
         """执行模式：低重要性相似组被合并——keep 保留新内容，成员软删"""
         settings.update(
             {
@@ -109,7 +115,7 @@ class TestManagerCompression:
                 "compression.similarity_threshold": 0.3,
             }
         )
-        mgr = _make_manager()
+        mgr = _make_manager(tmp_path)
         low, high = self._seed(mgr)
 
         report = mgr.compress_low_value_memories(dry_run=False)
@@ -127,10 +133,10 @@ class TestManagerCompression:
         )
         assert changed, f"应发生合并: {report}"
 
-    def test_respects_importance_threshold(self, settings):
+    def test_respects_importance_threshold(self, settings, tmp_path):
         """阈值过滤：importance 高于阈值的记忆不进入候选"""
         settings.update({"compression.importance_threshold": 0.01})
-        mgr = _make_manager()
+        mgr = _make_manager(tmp_path)
         low, high = self._seed(mgr)
 
         report = mgr.compress_low_value_memories(dry_run=False)
@@ -187,12 +193,12 @@ class TestMoEL0CacheLimit:
         AttributeError，导致 MoE 检索在每次真实对话中异常、
         永远降级到 FallbackRetriever。
         """
+        np = pytest.importorskip(
+            "numpy", reason="本格要拿真 numpy 数组对键；薄环境（requirements-ci.lock）不装 numpy")
         retriever = self._make_retriever()
 
         key_list = retriever._l0_cache_key([0.1, 0.2, 0.3])
         assert isinstance(key_list, str) and key_list
-
-        import numpy as np
 
         key_np = retriever._l0_cache_key(np.array([0.1, 0.2, 0.3]))
         assert key_np == key_list, "list 与 numpy 数组应生成相同缓存键"
@@ -204,10 +210,10 @@ class TestMoEL0CacheLimit:
 
 
 class TestTraverseRelations:
-    def test_traverse_filters_by_min_strength(self, settings):
+    def test_traverse_filters_by_min_strength(self, settings, tmp_path):
         """graph.min_strength 过滤弱关系"""
         settings.update({"graph.min_strength": 0.5})
-        mgr = _make_manager()
+        mgr = _make_manager(tmp_path)
         a = mgr.remember("中心记忆")
         b = mgr.remember("强关联记忆")
         c = mgr.remember("弱关联记忆")
@@ -220,9 +226,9 @@ class TestTraverseRelations:
         assert b in visited_ids, "强关联应被访问"
         assert c not in visited_ids, "弱关联应被 min_strength 过滤"
 
-    def test_default_min_strength_unchanged(self, settings):
+    def test_default_min_strength_unchanged(self, settings, tmp_path):
         """默认 0.15 与 GraphTraversal 历史默认一致"""
-        mgr = _make_manager()
+        mgr = _make_manager(tmp_path)
         a = mgr.remember("中心")
         b = mgr.remember("邻居")
         mgr.add_relation(source_id=a, target_id=b, strength=0.2)
@@ -284,6 +290,8 @@ class TestIncrementalIndex:
 
     def test_numpy_search_top1(self):
         """numpy 路径的 top-1 与暴力扫描一致"""
+        pytest.importorskip(
+            "numpy", reason="本格测的正是 numpy 矩阵那条路；薄环境（requirements-ci.lock）不装 numpy")
         vs = _mock_encode_store()
         rows = [
             {"id": f"m{i}", "content": "内容变体 " + "0" * i}

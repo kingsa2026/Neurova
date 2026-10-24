@@ -7,6 +7,8 @@ ExecutionLayers 集成测试
 3. RuntimeManager 生命周期管理
 """
 
+import sys
+
 import pytest
 import asyncio
 import time
@@ -49,7 +51,7 @@ class TestLocalExecutor:
 
         try:
             result = await executor.exec(
-                command="python",
+                command=sys.executable,   # 不写字面量 "python"：Debian 系跑测机只有 python3
                 args=["-c", "print('hello')"],
             )
             assert result.success is True
@@ -68,7 +70,7 @@ class TestLocalExecutor:
 
         try:
             result = await executor.exec(
-                command="python",
+                command=sys.executable,
                 args=["-c", "import json; print(json.dumps({'a': 1, 'b': 2}))"],
             )
             assert result.success is True
@@ -87,7 +89,7 @@ class TestLocalExecutor:
 
         try:
             result = await executor.exec(
-                command="python",
+                command=sys.executable,
                 args=["-c", "import nonexistent_module_xyz"],
             )
             assert result.success is False
@@ -105,7 +107,7 @@ class TestLocalExecutor:
 
         try:
             result = await executor.exec(
-                command="python",
+                command=sys.executable,
                 args=["-c", "import os; print(os.environ.get('TEST_VAR', ''))"],
                 env={"TEST_VAR": "hello_env"},
             )
