@@ -130,11 +130,11 @@ class TestRangeKindExpansion:
         assert "vehicle" in isA["range_terms_effective"]
 
 
-class TestOntologyIsStillGlobal:
+class TestOntologyIsTenantScoped:
     def testTenantScopedIsReportedHonestly(self, api):
-        """租户级本体是已拍板但未落地的迁移（待 v25）；读面必须如实标出，
-        不能让前端把"全局类型表"当成"已按租户隔离"。"""
-        assert _schemaData(api)["tenant_scoped"] is False
+        """v25 起本体按租户分区（已拍板已落地）；读面必须如实标出，
+        schema 与写面都按操作者租户过滤。"""
+        assert _schemaData(api)["tenant_scoped"] is True
 
 
 class TestNoWriteSurfaceInS1:

@@ -46,8 +46,8 @@ def api(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "neurova.knowledge.foundation.get_knowledge_fact_store", lambda: store)
     registry = OntologyTermRegistry(store)
-    registry.register("document", "concept", label="文档")
-    registry.register("report", "concept", label="报告", parentTermId="document")
+    registry.register("document", "concept", label="文档", tenantId="t1")
+    registry.register("report", "concept", label="报告", parentTermId="document", tenantId="t1")
     engine = ForwardChainingEngine(store)
 
     app = FastAPI()
@@ -159,9 +159,9 @@ class TestTermCrud:
         assert impact["child_terms"] == ["report"]
 
     def testDeleteTermReferencedByFactsReturnsImpact(self, api):
-        subjectKey = api.store.upsertSubject("agent", "Alpha")
+        subjectKey = api.store.upsertSubject("agent", "Alpha", tenantId="t1")
         api.store.upsertFact("agent", subjectKey, "document", "一份文档",
-                             "正文", contentKey="ck:1")
+                             "正文", contentKey="ck:1", tenantId="t1")
         resp = api.client.delete(PREFIX + "/ontology/terms/document")
 
         assert resp.status_code == 409, resp.text
@@ -169,8 +169,8 @@ class TestTermCrud:
         assert impact["fact_count"] == 1
 
     def testDeleteTermReferencedBySubjectTypeReturnsImpact(self, api):
-        subjectKey = api.store.upsertSubject("agent", "Alpha")
-        api.registry.assignSubjectType(subjectKey, "document")
+        subjectKey = api.store.upsertSubject("agent", "Alpha", tenantId="t1")
+        api.registry.assignSubjectType(subjectKey, "document", tenantId="t1")
         resp = api.client.delete(PREFIX + "/ontology/terms/document")
 
         assert resp.status_code == 409, resp.text
@@ -241,13 +241,13 @@ class TestRuleCrud:
 
 class TestImpactSurface:
     def testImpactCountsEveryReferenceKind(self, api):
-        subjectKey = api.store.upsertSubject("agent", "Alpha")
+        subjectKey = api.store.upsertSubject("agent", "Alpha", tenantId="t1")
         api.store.upsertFact("agent", subjectKey, "document", "客体",
-                             "正文", contentKey="ck:1")
-        api.registry.assignSubjectType(subjectKey, "document")
+                             "正文", contentKey="ck:1", tenantId="t1")
+        api.registry.assignSubjectType(subjectKey, "document", tenantId="t1")
         api.engine.registerRule(
             "r-doc", "document",
-            [{"atom": "type_of", "subject": "X", "object": "Y"}])
+            [{"atom": "type_of", "subject": "X", "object": "Y"}], tenantId="t1")
 
         resp = api.client.get(PREFIX + "/ontology/impact", params={"term": "document"})
 

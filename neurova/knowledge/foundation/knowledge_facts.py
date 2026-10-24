@@ -314,6 +314,63 @@ CREATE INDEX IF NOT EXISTS idx_fact_category
     ON knowledge_facts(tenant_id, category, status);
 """
 
+# v25：本体按租户分区（已拍板：本体归属按租户隔离）。SQLite 改不了主键，
+# 两表整体重建：存量行全部归 default 租户，各租户此后各自登记各自的
+# 术语/规则——同 term_id/rule_id 跨租户不再冲突，读面也不再互见。
+_SCHEMA_V25 = """
+CREATE TABLE ontology_terms_t25 (
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    term_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    parent_term_id TEXT,
+    domain_terms TEXT NOT NULL DEFAULT '[]',
+    range_terms TEXT NOT NULL DEFAULT '[]',
+    range_kinds TEXT NOT NULL DEFAULT '[]',
+    cardinality INTEGER,
+    disjoint_with TEXT NOT NULL DEFAULT '[]',
+    required_props TEXT NOT NULL DEFAULT '[]',
+    version TEXT NOT NULL DEFAULT 'v1',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, term_id)
+);
+INSERT INTO ontology_terms_t25 (tenant_id, term_id, kind, label, parent_term_id,
+    domain_terms, range_terms, range_kinds, cardinality, disjoint_with,
+    required_props, version, created_at, updated_at)
+SELECT 'default', term_id, kind, label, parent_term_id, domain_terms,
+    range_terms, COALESCE(range_kinds, '[]'), cardinality, disjoint_with,
+    required_props, version, created_at, updated_at FROM ontology_terms;
+DROP TABLE ontology_terms;
+ALTER TABLE ontology_terms_t25 RENAME TO ontology_terms;
+CREATE INDEX IF NOT EXISTS idx_ontology_parent ON ontology_terms(tenant_id, parent_term_id);
+CREATE INDEX IF NOT EXISTS idx_ontology_kind ON ontology_terms(tenant_id, kind);
+
+CREATE TABLE ontology_rules_t25 (
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    rule_id TEXT NOT NULL,
+    head_predicate TEXT NOT NULL,
+    head_subject_var TEXT NOT NULL,
+    body_json TEXT NOT NULL DEFAULT '[]',
+    negated_predicates TEXT NOT NULL DEFAULT '[]',
+    stratification_level INTEGER NOT NULL DEFAULT 0,
+    enabled BOOLEAN NOT NULL DEFAULT 1,
+    version TEXT NOT NULL DEFAULT 'v1',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (tenant_id, rule_id)
+);
+INSERT INTO ontology_rules_t25 (tenant_id, rule_id, head_predicate, head_subject_var,
+    body_json, negated_predicates, stratification_level, enabled, version,
+    created_at, updated_at)
+SELECT 'default', rule_id, head_predicate, head_subject_var, body_json,
+    negated_predicates, stratification_level, enabled, version, created_at,
+    updated_at FROM ontology_rules;
+DROP TABLE ontology_rules;
+ALTER TABLE ontology_rules_t25 RENAME TO ontology_rules;
+CREATE INDEX IF NOT EXISTS idx_rule_head ON ontology_rules(tenant_id, head_predicate, enabled);
+"""
+
 
 MANUAL_RESOLUTIONS: tuple = ("keep_both", "supersede_old", "dismiss")
 
