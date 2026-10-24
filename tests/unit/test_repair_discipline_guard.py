@@ -48,6 +48,11 @@ import pytest
 yaml = pytest.importorskip("yaml")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+#: `git check-ignore` 的预算唯一出处（毫秒级；此前无 `timeout=`＝无界等待）。取低于全局
+#: 30s 的 20s，让子进程先到点报诚实的 TimeoutExpired——全局那道墙是 thread 法，它先到就是
+#: 整场跑测没了（§6-402 批 K 口径）。
+GIT_WALL_S = 20
 AGENTS = PROJECT_ROOT / "AGENTS.md"
 SETTINGS = PROJECT_ROOT / ".cnb" / "settings.yml"
 CONTRIBUTING = PROJECT_ROOT / "CONTRIBUTING.md"
@@ -221,6 +226,7 @@ class TestAgentsDocIsAuthoritative:
         proc = subprocess.run(
             ["git", "check-ignore", "-q", "AGENTS.md"],
             cwd=str(PROJECT_ROOT), capture_output=True,
+            timeout=GIT_WALL_S,
         )
         assert proc.returncode != 0, (
             "AGENTS.md 仍被 .gitignore 忽略（/*.md 白名单缺 !AGENTS.md）——"
