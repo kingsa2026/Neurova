@@ -67,6 +67,11 @@ import pytest
 yaml = pytest.importorskip("yaml")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+#: 子进程预算唯一出处；跑的是 `scripts/ci/npc_runtime_budget.py --predicate`（实测毫秒级）。
+#: 取低于全局 30s 的值，让子进程先到点报诚实的 TimeoutExpired，而不是整场跑测被 thread 法
+#: 打死（§6-402 批 K 口径）。
+PROBE_WALL_S = 20
 CNB = PROJECT_ROOT / ".cnb.yml"
 SETTINGS = PROJECT_ROOT / ".cnb" / "settings.yml"
 ADMISSION = PROJECT_ROOT / "scripts" / "ci" / "npc_role_admission.py"
@@ -355,7 +360,8 @@ class TestRelayJudgmentAlsoAsksAboutTheQuotaWall:
             )
             proc = subprocess.run(
                 [sys.executable, str(script), "--predicate"],
-                capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env, timeout=60,
+                capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env,
+                timeout=PROBE_WALL_S,
             )
             assert proc.returncode == 0, proc.stderr
             return proc.stdout.strip()
@@ -376,7 +382,8 @@ class TestRelayJudgmentAlsoAsksAboutTheQuotaWall:
                if k not in ("CNB_PIPELINE_MAX_RUN_TIME", "CNB_BUILD_START_TIME")}
         proc = subprocess.run(
             [sys.executable, str(script), "--predicate"],
-            capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env, timeout=60,
+            capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env,
+            timeout=PROBE_WALL_S,
         )
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.strip() == "false", (
