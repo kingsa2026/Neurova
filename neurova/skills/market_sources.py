@@ -314,6 +314,23 @@ def _longestProjectedPath(payload: bytes, dest: Path):
     return longest, len(base) + 1 + len(longest)
 
 
+def refusalForPathBudget(payload: bytes, dest: Path) -> str:
+    """落点根 ＋ 最长成员超 Windows 预算时的拒绝原因；没超返回空串。
+
+    **落点过长是这条安装路的准入条件**，不是解包失败的附注：同一只包在 Linux 上
+    能装成、在 Windows 上装一半，正是"判定缺在 Linux 环节"的典型形态。
+    读不出成员清单时（坏包）不在这里判——那种失败归 `BadZipFile` 那一族，别混。
+    """
+    projected = _longestProjectedPath(payload, dest)
+    if projected is None or projected[1] < WINDOWS_MAX_PATH:
+        return ""
+    member, total = projected
+    return (
+        f"路径过长：最长成员 {member!r}（{len(member)} 字符）落在 {len(str(dest))} 字符的"
+        f"落点根下合计 {total} 字符，超过 Windows 上限 {WINDOWS_MAX_PATH}"
+        f"——这是落点问题，不是包的问题：换短根或开启长路径")
+
+
 def _describeExtractionFailure(exc: Exception, payload: bytes, dest: Path) -> str:
     """把一次解包失败写成能据以行动的一句话。
 
@@ -322,13 +339,10 @@ def _describeExtractionFailure(exc: Exception, payload: bytes, dest: Path) -> st
     就会去改一个没坏的包（§6-259 那条 "zip refused" 的真实成因正是第三种，被折了 17 天）。
     """
     if isinstance(exc, OSError):
-        projected = _longestProjectedPath(payload, dest)
-        if projected is not None and projected[1] >= WINDOWS_MAX_PATH:
-            member, total = projected
-            return (
-                f"路径过长：最长成员 {member!r}（{len(member)} 字符）落在 {len(str(dest))} 字符的"
-                f"落点根下合计 {total} 字符，超过 Windows 上限 {WINDOWS_MAX_PATH}"
-                f"——这是落点问题，不是包的问题：换短根或开启长路径")
+        # 文案与判定都取 `refusalForPathBudget`（准入那一步用的同一份），不在这里写第二遍
+        tooLong = refusalForPathBudget(payload, dest)
+        if tooLong:
+            return tooLong
     return f"{type(exc).__name__}: {exc}"
 
 
@@ -341,6 +355,14 @@ def extractRemoteSkillZipRefusal(skill_id: str, payload: bytes, dest: Path) -> s
     `extractall` 非事务，可能留下部分文件，调用方 uninstall 可清理。
     """
     try:
+        # 长根必须**拒**，不能等解包在 Windows 上撞 ENAMETOOLONG 再补一句说明：
+        # 那种写法在 Linux/macOS 上永远绿（那边单段/总长都宽松），同一只包在部署机上
+        # 装一半失败——判据 `test_longRootFailureNamesPathTooLong` 要的正是"这里就拒"。
+        # 判定口径与 `agent_migration` 同一条（部署形态一处一套，见 `WINDOWS_MAX_PATH`）。
+        tooLong = refusalForPathBudget(payload, dest)
+        if tooLong:
+            logger.warning("skill %s zip refused: %s", skill_id, tooLong)
+            return tooLong
         safe_archive.safe_extract_zip(
             payload, dest,
             maxPayloadBytes=MAX_SKILL_ZIP_BYTES,

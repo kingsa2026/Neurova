@@ -33,12 +33,11 @@ import tempfile
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-# stdout 编码由本档自己钉死：`print` 抛 UnicodeEncodeError 会把退出码变成 1，
-# 而 `tests/manual/*` 的全部证据就是「退出码 + 那几行 PASS/FAIL 读数」——
-# 等于让打印来决定判定（判据见 tests/unit/ci/test_manualScriptStdoutEncoding.py）。
+# 读数里带 `⇒`（cp936 编不出）：不钉 stdout 编码时 `print` 抛 UnicodeEncodeError，
+# 退出码变 1，看着像"有一条腿 FAIL"——实际只是终端编码不认这个字形。
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
 
@@ -234,7 +233,7 @@ def main():
                 json.dumps(manifestData, ensure_ascii=False, indent=2), encoding="utf-8")
             fresh = _SkillService(agent_id="default", skills_dir=str(service.skills_dir))
             repinned = asyncio.run(fresh.call_skill(skillId, "main", task="probe"))
-            check("17 改构件＋重钉账本（同权限者能做）-> 锚不符，账本腿仍拒",
+            check("17 改构件＋重钉账本（同权限者能做）⇒ 锚不符，账本腿仍拒",
                   artifact_digest.REASON_MISMATCH in json.dumps(
                       repinned, ensure_ascii=False, default=str),
                   str(repinned)[:150])

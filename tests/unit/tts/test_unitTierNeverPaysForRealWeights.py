@@ -14,6 +14,8 @@ HTTPS 把权重拉下来（`~/.cache/modelscope/.lock` 与落地的两份 `.data
 （不许把预热整条改成 no-op 来糊第一格）。
 """
 
+import time
+
 import pytest
 
 from neurova.tts.moss_nano import MOSSNanTTS
@@ -21,10 +23,18 @@ from tests.unit.tts._fakeEngines import _FakeHeavyEngine
 
 
 async def _driveReleaseThenPreheat(heavy_manager):
-    """走一遍「服务 → TTL 释放 → 轻引擎顶班 → 后台预热重建链顶」，等预热落定。"""
+    """走一遍「服务 → TTL 释放 → 轻引擎顶班 → 后台预热重建链顶」，等预热落定。
+
+    「现在几点」必须相对**本进程真实的单调时钟**给：`release_idle_engines` 拿它跟
+    `_last_used_monotonic`（`time.monotonic()` 写入）相减判 TTL。写死一个
+    `1_000_000` 只在开机不足 11.6 天的机器上「像未来」；Linux CI 的单调时钟从
+    开机算起，一旦超过那个数，`now - last` 就是负数，释放条件永不成立——
+    而本档报的是「前置不成立：释放没换班到轻引擎」，读的人会去查 TTS 释放逻辑。
+    """
     mgr, heavy, light = heavy_manager
     await mgr.synthesize("第一句")
-    await mgr.release_idle_engines(now_monotonic=1_000_000)
+    await mgr.release_idle_engines(
+        now_monotonic=time.monotonic() + mgr._config.release_ttl_sec + 1)
     assert mgr._engine_name == "edge-tts", "前置不成立：释放没换班到轻引擎"
 
     await mgr.synthesize("第二句")  # 轻引擎立即服务，同时触发后台预热

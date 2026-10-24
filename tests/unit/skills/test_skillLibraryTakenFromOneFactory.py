@@ -85,13 +85,16 @@ class TestWriteThenReadSeeOneLedger:
         return client
 
     def test_install_then_agentFaceListsIt(self, app_client):
-        """走真安装链，但**不用** studio 那只包——原因由下面那格钉着，别当成本批的对象。
+        """走真安装链——用 **studio** 那只包（本批原先回避它，理由已经失效）。
 
-        本格要判的是"写完读得到"，链路与代码路径两只内置包一字不差；studio 在跑测环境里
-        连"装到最终位置"都放不下（终点投影超 Windows 预算），那是 §6-276 登记的落点问题，
-        与本批的内存态合流无关。
+        原先回避 studio 的原因是"跑测环境里连装到最终位置都放不下"（终点投影超 Windows 260，
+        §6-276 登记的落点问题），当时另用 `builtin--multi-search-engine` 代替。v2 统一布局把
+        agent 技能库收到 `data/<id>/skills`（比旧 `agent_workspaces/<id>/skills` 短一截）之后，
+        投影落到 247 字符、回到预算内——`test_studioPackageProjectionFitsTheWindowsBudget`
+        那格钉着这个读数。回避的理由没了，主格就该用真资产：本批要判的是"写完读得到"，
+        而 studio 是仓内成员最长、包内目录最深的那一只，拿它判才是真判。
         """
-        skill_id = "builtin--multi-search-engine"
+        skill_id = "builtin--adaptive-presentation-studio"
         installed = app_client.post(f"/api/v1/skill-pool/{skill_id}/install",
                                     params={"agent_id": "default"})
         assert installed.status_code == 200, (
@@ -103,13 +106,13 @@ class TestWriteThenReadSeeOneLedger:
             f"安装回执说成功，但同进程的面板数据源读到 {len(rows)} 条 {ids[:5]}——"
             "写侧与读侧各持一份内存账，这正是本批要合掉的")
 
-    def test_studioPackageCannotLandInsideTheTestRoot(self):
-        """主格换包的理由必须**会红**，不许只写在话里（形态集 251 那条：归零的腿要留着读数）。
+    def test_studioPackageProjectionFitsTheWindowsBudget(self):
+        """主格为什么敢用 studio：终点投影必须**真的**落在 Windows 预算内（读数钉在这里）。
 
-        现量随夹具形状一起动过：conftest 改切**库根**注入点 `_BASE_DIR`（不再逐实例 sha256）后，
-        agent 库根比旧夹具短了一截，studio 包最长成员仍然把它顶过 Windows 260 ⇒ 真资产在跑测
-        环境里连"装到最终位置"都放不下。哪天这格红了＝落点变短了，主格就该改用真资产，
-        而不是把这格删掉。
+        这条判据的语义随落点一起翻过面：落点还叫 `agent_workspaces/<id>/skills` 时它断的是
+        "装不下"（`projection > 260`），用途是给主格换包一个会红的理由；v2 收成
+        `data/<id>/skills` 之后投影回到预算内，它断的就必须反过来是"装得下"——
+        否则主格用真资产时会失败，而失败信息会指向安装链路，与真正的原因（路径预算）无关。
         """
         import re
         import zipfile
@@ -126,10 +129,10 @@ class TestWriteThenReadSeeOneLedger:
         libRoot = str(resolve_library_dir(POOL_AGENT, "default"))
         projection = len(str(Path(libRoot) / entryName / longestMember))
 
-        assert projection > WINDOWS_MAX_PATH, (
-            f"studio 终点投影只剩 {projection} 字符（库根 {len(libRoot)} + 库内目录 {entryName} + "
-            f"最长成员 {len(longestMember)}），已回到 Windows {WINDOWS_MAX_PATH} 预算内"
-            "——主格该改用真资产包，把上面那格的替换理由一并改判")
+        assert projection < WINDOWS_MAX_PATH, (
+            f"studio 终点投影现读 {projection} 字符（库根 {len(libRoot)} + 库内目录 {entryName} + "
+            f"最长成员 {len(longestMember)}），已越过 Windows {WINDOWS_MAX_PATH} 预算"
+            "——主格用真资产会失败，且失败信息会指向安装链路而不是这处路径预算")
 
     def test_factoryHandsOutOneInstancePerLibraryDir(self):
         """工厂语义：**同一库目录必须只对应一个实例**，且落点与解析单点一致。
