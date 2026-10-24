@@ -794,6 +794,16 @@ export default {
 
 
   knowledge: {
+    workbenchApplyFilter: 'Filtern',
+    workbenchFocus: 'Fokusknoten-ID',
+    workbenchHops: 'Hops',
+    workbenchLat: 'Breite',
+    workbenchLon: 'Länge',
+    workbenchNoGeoItems: 'Keine geotaggen Einträge im sichtbaren Bereich',
+    workbenchRadius: 'Radius km',
+    workbenchSpatial: 'Räumlich',
+    workbenchView2d: '2D-Ansicht',
+    workbenchView3d: '3D-Ansicht',
     workbenchTitle: 'Graph-Arbeitsbereich',
     workbenchTenantScoped: 'Tenant-Ontologie',
     workbenchTruncatedHint: 'Teilgraph gekappt; Gesamtsumme {total} Knoten',

@@ -794,6 +794,16 @@ export default {
 
 
   knowledge: {
+    workbenchApplyFilter: '絞り込み',
+    workbenchFocus: '焦点ノード ID',
+    workbenchHops: 'ホップ数',
+    workbenchLat: '緯度',
+    workbenchLon: '経度',
+    workbenchNoGeoItems: '表示範囲に座標付きエントリがありません',
+    workbenchRadius: '半径 km',
+    workbenchSpatial: '空間',
+    workbenchView2d: '2D 表示',
+    workbenchView3d: '3D 表示',
     workbenchTitle: 'グラフワークベンチ',
     workbenchTenantScoped: 'テナント本体',
     workbenchTruncatedHint: '部分グラフは上限で切断、実数は {total} ノード',

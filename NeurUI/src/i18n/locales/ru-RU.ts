@@ -794,6 +794,16 @@ export default {
 
 
   knowledge: {
+    workbenchApplyFilter: 'Фильтр',
+    workbenchFocus: 'ID фокусного узла',
+    workbenchHops: 'Шаги',
+    workbenchLat: 'Широта',
+    workbenchLon: 'Долгота',
+    workbenchNoGeoItems: 'В видимой области нет записей с координатами',
+    workbenchRadius: 'Радиус км',
+    workbenchSpatial: 'Пространство',
+    workbenchView2d: '2D-вид',
+    workbenchView3d: '3D-вид',
     workbenchTitle: 'Графовая мастерская',
     workbenchTenantScoped: 'онтология тенанта',
     workbenchTruncatedHint: 'Подграф усечён; всего {total} узлов',
