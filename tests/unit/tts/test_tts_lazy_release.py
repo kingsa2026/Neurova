@@ -18,13 +18,11 @@
 
 import asyncio
 import contextlib
-from typing import AsyncIterator
-from unittest.mock import AsyncMock
 
 import pytest
 
 from neurova.tts.manager import TTSConfig, TTSManager
-from tests.unit.tts._fakeEngines import _FakeHeavyEngine
+from tests.unit.tts._fakeEngines import _FakeHeavyEngine, _farFutureMonotonic
 
 
 def test_default_config_has_lazy_release_off():
@@ -56,7 +54,7 @@ async def test_ttl_release_switches_to_light_engine(heavy_manager):
     await mgr.synthesize("第一句")  # heavy 就绪
     assert mgr._engine_name == "moss-nano"
 
-    await mgr.release_idle_engines(now_monotonic=1_000_000)  # 远超 TTL
+    await mgr.release_idle_engines(_farFutureMonotonic())  # 远超 TTL
     assert heavy.released is True
     assert "moss-nano" not in mgr._engines  # 缓存一并丢弃（重载才重建）
     assert mgr._engine_name == "edge-tts"
@@ -72,7 +70,7 @@ async def test_ttl_release_skipped_while_inflight(heavy_manager):
     mgr, heavy, _ = heavy_manager
     await mgr.synthesize("第一句")
     mgr._active_requests = 1
-    await mgr.release_idle_engines(now_monotonic=1_000_000)
+    await mgr.release_idle_engines(_farFutureMonotonic())
     assert heavy.released is False
     assert mgr._engine_name == "moss-nano"
     mgr._active_requests = 0
@@ -92,7 +90,7 @@ async def test_release_updates_media_type(heavy_manager):
     mgr, _, _ = heavy_manager
     await mgr.synthesize("第一句")
     assert mgr.get_audio_media_type() == "audio/wav"
-    await mgr.release_idle_engines(now_monotonic=1_000_000)
+    await mgr.release_idle_engines(_farFutureMonotonic())
     assert mgr.get_audio_media_type() == "audio/mpeg"
 
 
@@ -135,7 +133,7 @@ async def test_non_lazy_manager_never_releases():
     mgr = TTSManager(config=cfg)
     await mgr.initialize()
     engine = mgr._engine
-    await mgr.release_idle_engines(now_monotonic=1_000_000)
+    await mgr.release_idle_engines(_farFutureMonotonic())
     assert mgr._engine is engine
 
 
@@ -167,7 +165,7 @@ async def test_ttl_release_skipped_for_light_engines(heavy_manager):
     mgr._initialized = True
     mgr._last_used_monotonic = 0.0
 
-    released = await mgr.release_idle_engines(now_monotonic=1_000_000)
+    released = await mgr.release_idle_engines(_farFutureMonotonic())
     assert released is False
     assert mgr._engine_name == "edge-tts"
 
@@ -191,7 +189,7 @@ async def test_pinned_engine_never_released():
     mgr._initialized = True
     mgr._last_used_monotonic = 0.0
 
-    released = await mgr.release_idle_engines(now_monotonic=1_000_000)
+    released = await mgr.release_idle_engines(_farFutureMonotonic())
     assert released is False
     assert heavy.released is False
     assert mgr._engine_name == "moss-nano"
@@ -202,7 +200,7 @@ async def test_preheat_rebuilds_chain_top_after_release(heavy_manager, monkeypat
     """方案 C 闭环：释放换班后 _ensure_preheat 后台重建链顶并换回。"""
     mgr, heavy, light = heavy_manager
     await mgr.synthesize("第一句")
-    await mgr.release_idle_engines(now_monotonic=1_000_000)
+    await mgr.release_idle_engines(_farFutureMonotonic())
     assert mgr._engine_name == "edge-tts"
     assert heavy.released is True
 

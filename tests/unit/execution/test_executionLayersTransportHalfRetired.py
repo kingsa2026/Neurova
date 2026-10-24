@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import sys
 
 from tests import ast_scan
 
@@ -105,7 +106,11 @@ def test_runtimeHalfStillProducesAWorkingLocalRuntime():
     assert RuntimeFactory.list_supported_types() == [RuntimeType.LOCAL, RuntimeType.DOCKER]
     assert get_runtime_manager() is get_runtime_manager(), "单例语义被动过"
     assert isinstance(get_runtime_manager(), RuntimeManager)
-    result = asyncio.run(runtime.exec(command="python", args=["-c", "print(1)"], timeout=30))
+    # 解释器取"跑测自己那一只"（`sys.executable`），不按 PATH 上的名字猜：容器镜像里
+    # 常常只有 `python3`（CI 的 python:3.12 就是），`python` 这个名字缺席时这条
+    # 交付锁会红在"镜像没软链"上，而不是红在被它守的契约上。
+    result = asyncio.run(
+        runtime.exec(command=sys.executable, args=["-c", "print(1)"], timeout=30))
     assert result.success and "1" in (result.stdout or ""), f"本地运行时执行不回来：{result}"
 
 

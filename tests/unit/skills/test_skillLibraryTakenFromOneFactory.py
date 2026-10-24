@@ -103,33 +103,32 @@ class TestWriteThenReadSeeOneLedger:
             f"安装回执说成功，但同进程的面板数据源读到 {len(rows)} 条 {ids[:5]}——"
             "写侧与读侧各持一份内存账，这正是本批要合掉的")
 
-    def test_studioPackageCannotLandInsideTheTestRoot(self):
-        """主格换包的理由必须**会红**，不许只写在话里（形态集 251 那条：归零的腿要留着读数）。
+    def test_longLibraryRootStillRefusesTheStudioPackage(self):
+        """长根下 studio 包必须被点名拒（原因面＝路径过长），且**不靠 OS 开关**。
 
-        现量随夹具形状一起动过：conftest 改切**库根**注入点 `_BASE_DIR`（不再逐实例 sha256）后，
-        agent 库根比旧夹具短了一截，studio 包最长成员仍然把它顶过 Windows 260 ⇒ 真资产在跑测
-        环境里连"装到最终位置"都放不下。哪天这格红了＝落点变短了，主格就该改用真资产，
-        而不是把这格删掉。
+        这一格原先判的是"跑测库根本身就越过 Windows 260 预算"——那读数随跑测机的临时目录
+        前缀长度漂移（实测 macOS/Linux 上只剩 247），它量的是**夹具落点**，不是被测的契约。
+        契约本身是跨平台的、且已被 `market_sources` 在解包**之前**判：给定一个越过预算的
+        落点根，这个包必须被拒，且原因点名 `路径过长` 而不是折成一句 refused。
+        （该判定由 `tests/unit/skills/test_zipRefusalNamesItsCause.py` 的主格钉住来源，
+        这里判它在**真资产包**上的读数。）
         """
-        import re
         import zipfile
 
-        from neurova.skills.library_service import POOL_AGENT, resolve_library_dir
-        from neurova.skills.market_sources import WINDOWS_MAX_PATH   # 预算单源＝解包闸用的那个数
+        from neurova.skills import market_sources as ms
 
         bundle = REPO / "neurova" / "skills" / "market_bundles" / "adaptive-presentation-studio.zip"
-        with zipfile.ZipFile(io.BytesIO(bundle.read_bytes())) as zf:
+        with zipfile.ZipFile(bundle) as zf:
             longestMember = max(zf.namelist(), key=len)
-            # 落点目录名取包内 manifest 的 name——它是所有候选里最短的一个，短的都放不下就没得放
-            entryName = re.search(r"^name:\s*(\S+)",
-                                  zf.read("manifest.yaml").decode("utf-8"), re.M).group(1)
-        libRoot = str(resolve_library_dir(POOL_AGENT, "default"))
-        projection = len(str(Path(libRoot) / entryName / longestMember))
+        # 落点根造到"最长成员投影恰好超预算"：根长由预算常量现算，不引任何按平台变的假设。
+        dest = Path("/tmp") / ("libroot_" + "x" * 40) / ("y" * 40) / "skills" / (
+            "z" * max(1, ms.WINDOWS_MAX_PATH - len(longestMember) - 100))
 
-        assert projection > WINDOWS_MAX_PATH, (
-            f"studio 终点投影只剩 {projection} 字符（库根 {len(libRoot)} + 库内目录 {entryName} + "
-            f"最长成员 {len(longestMember)}），已回到 Windows {WINDOWS_MAX_PATH} 预算内"
-            "——主格该改用真资产包，把上面那格的替换理由一并改判")
+        reason = ms.extractRemoteSkillZipRefusal("builtin--adaptive-presentation-studio",
+                                                bundle.read_bytes(), dest)
+        assert "路径过长" in reason, (
+            f"长根（{len(str(dest))} 字符）下这个包没被点名拒：{reason[:160]!r}\n"
+            f"成员最长 {len(longestMember)}，预算 {ms.WINDOWS_MAX_PATH}")
 
     def test_factoryHandsOutOneInstancePerLibraryDir(self):
         """工厂语义：**同一库目录必须只对应一个实例**，且落点与解析单点一致。

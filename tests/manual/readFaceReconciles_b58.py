@@ -108,14 +108,7 @@ svc = SkillService(agent_id=AGENT, skills_dir=str(SKILLS_DIR))
 rows = [r for r in svc.list_skills()]
 def classify(entry):
     # 映射执行体型单列：它是「盘上没字节也真能跑」那一形，混进空壳就是探针自己冤枉判据
-    try:
-        from neurova.skills.market_registry import hasExecutorMapping
-    except ImportError:  # 对照腿（无本批修复的那棵树）退回读私有表——
-        # 只为让同一份脚本在两侧都跑得起来；比的从来不是这个 import，是四面的读数是否同向。
-        from neurova.skills.market_registry import _MARKET_EXECUTORS
-
-        def hasExecutorMapping(sid):
-            return str(sid or "") in _MARKET_EXECUTORS
+    from neurova.skills.market_registry import hasExecutorMapping
 
     sid = entry["id"]
     d = SKILLS_DIR / sid

@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterator, Optional, Tuple
 
 from neurova.core.atomic_io import atomic_write_text, quarantine_corrupt_file
+from neurova.core.data_root import adoptHomeLanding, get_data_root
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -196,12 +197,21 @@ def checkArtifact(root, pinnedValue, anchorKey: Optional[str] = None) -> Tuple[s
     return STATUS_MATCH, actual
 
 
-# ── 根外锚（§6-388，用户 2026-10-22 拍「甲①＋乙」）────────────────────────────
-#: 锚文件落点：**数据根之外**（`~/.neurova/`）。这是本仓第一处**新写**在数据根之外的状态，
-#: 理由只有一个：它要对"整个数据根被替换/回滚"敏感，所以不能跟数据根同生共死
-#: （审计库当年是反方向——从 `~/.neurova/audit.db` 收养**进**数据根，别把两件事读混）。
-#: 它**不**防同权限攻击：能改构件与账本的人通常也能改这里；能挡住的是"只改了数据根"的那些
-#: 操作（整库恢复、快照回滚、只重钉账本的重装）。边界必须与能力一起写，不许只吹能力。
+# ── 锚账本（§6-388 立锚 + 锚落点收进数据根）─────────────────────────────────
+#: 锚文件落点：**数据根之内**，`<数据根>/anchors/artifact_anchors.json`。
+#:
+#: 落点这笔账要写清，因为它此前是反方向的：§6-388 立锚时按"对数据根整体回滚敏感"
+#: 把锚放到数据根**之外**的主目录点目录下。那条理由不成立——回滚一个目录不会动到它
+#: 里面的文件，锚在 `data/` 里照样随整库快照一起回滚，敏感性一点没丢；而**代价**是实打实的：
+#: 主目录是数据根之外的第二个落点族，换台机器/换个账户就读不到自己钉过的清单（主目录不是本项目的）。
+#: 数据根是落点的唯一装配点（`AGENTS.md §3`），这里没有理由做例外。
+#:
+#: 旧地址的存量不经静默兼容：首次使用时经 `adoptHomeLanding()`（带
+#: `homeAdoptionAllowed()` 那道权利闸，只有"本进程代表操作者本人"才动主目录）搬进来，
+#: 搬不动就以 warning 点名旧物仍在哪儿——把"读不到自己钉过的清单"变成一条可见的告警，
+#: 而不是一条悄悄重钉的 TOFU。
+#: 它**不**防同权限攻击：能改构件与账本的人通常也能改锚；封的是"在途/取回瞬间被换包"
+#: 与"落盘后被无意/并发改动"。边界必须与能力一起写，不许只吹能力。
 ANCHOR_FILE_NAME = "artifact_anchors.json"
 ANCHOR_STORE_VERSION = 1
 #: 通道词汇唯一闭集：账本里两条通道（技能/插件）共用锚文件，键必须带通道前缀，
@@ -219,8 +229,10 @@ def artifactKey(channel: str, artifactId: str) -> str:
 
 
 def anchorPath() -> Path:
-    """锚文件路径（唯一一处）。测试一律 monkeypatch 本函数到临时目录，不碰真实主目录。"""
-    return Path.home().joinpath(".neurova", ANCHOR_FILE_NAME)
+    """锚文件路径（唯一一处）。测试一律 monkeypatch 本函数到临时目录，不碰真实数据根。"""
+    target = get_data_root().joinpath("anchors", ANCHOR_FILE_NAME)
+    adoptHomeLanding(target, "anchors", ANCHOR_FILE_NAME)
+    return target
 
 
 def readAnchors() -> Dict[str, str]:
