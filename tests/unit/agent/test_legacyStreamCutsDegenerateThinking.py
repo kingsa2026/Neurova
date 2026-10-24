@@ -113,9 +113,9 @@ class TestDegenerateThinkingIsCut:
 
     def testGuardIsTheSameSingleSourceAsTheMainLoop(self):
         """判据不许在第二条路上另拼一份：阈值与连发判定都归 `ReasoningStreamGuard`。"""
-        import neurova.agent.chat_pipeline as cp
+        import neurova.agent.legacy_stream_turn as legacyTurn
 
-        assert getattr(cp, "ReasoningStreamGuard", None) is ReasoningStreamGuard, (
+        assert getattr(legacyTurn, "ReasoningStreamGuard", None) is ReasoningStreamGuard, (
             "legacy 路没有引用那份共享守卫（或另造了一份）＝同一件事两个事实源"
         )
 
