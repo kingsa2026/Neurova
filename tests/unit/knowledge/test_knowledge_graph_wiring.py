@@ -22,7 +22,7 @@ def client_factory():
         import neurova.api.endpoints.knowledge_graph_api as kg_mod
 
         mp = pytest.MonkeyPatch()
-        mp.setattr(kg_mod, "_get_kg_manager", lambda agent_id="default": manager)
+        mp.setattr(kg_mod, "_get_kg_manager", lambda agent_id="default", tenant_id="default": manager)
         client = TestClient(app)
         client._mp = mp  # type: ignore[attr-defined]
         made.append(mp)

@@ -1787,6 +1787,7 @@ class ChatPipeline:
                 "trace_id": ctx.trace_id,
                 # 角色透传：知识库检索的 admin 全可见依赖 role（隔离语义与 API 层一致）
                 "role": (ctx.metadata or {}).get("role", "user"),
+                "tenant_id": str((ctx.metadata or {}).get("tenant_id") or "default"),
             },
         )
 

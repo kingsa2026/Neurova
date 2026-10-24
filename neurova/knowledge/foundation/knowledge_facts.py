@@ -239,6 +239,74 @@ CREATE INDEX IF NOT EXISTS idx_entry_usage_phase ON knowledge_entry_usage(phase,
 ALTER TABLE knowledge_turn_usage ADD COLUMN entry_attributed_tokens INTEGER NOT NULL DEFAULT 0;
 """
 
+# v19：事实变更历史与业务基线。历史只追加不覆盖，回滚也记一行；
+# 基线只存事实 id 引用，不复制正文（正文仍以 knowledge_facts 为唯一权威）。
+_SCHEMA_V19 = """
+CREATE TABLE IF NOT EXISTS knowledge_fact_versions (
+    version_id TEXT PRIMARY KEY,
+    fact_id TEXT NOT NULL,
+    version_no INTEGER NOT NULL,
+    change_type TEXT NOT NULL,
+    snapshot_json TEXT NOT NULL DEFAULT '{}',
+    operator TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    recorded_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_version_no
+    ON knowledge_fact_versions(fact_id, version_no);
+CREATE INDEX IF NOT EXISTS idx_fact_version_fact
+    ON knowledge_fact_versions(fact_id, version_no);
+CREATE TABLE IF NOT EXISTS knowledge_baselines (
+    baseline_id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL DEFAULT 'global',
+    scope_key TEXT NOT NULL DEFAULT '',
+    snapshot_json TEXT NOT NULL DEFAULT '{}',
+    created_by TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_baseline_scope ON knowledge_baselines(scope, scope_key);
+"""
+
+# v20：租户分区。先做读隔离与写入归属；唯一索引也带 tenant，否则两个租户的
+# 同一三元组会在同一 agent 下互相顶掉。活动（事件）同列，读侧按租户过滤。
+_SCHEMA_V20 = """
+ALTER TABLE knowledge_facts ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+DROP INDEX IF EXISTS ux_fact_triple;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_triple_tenant
+    ON knowledge_facts(agent_id, tenant_id, subject_key, predicate_term_id, object_term, qualifier_hash);
+DROP INDEX IF EXISTS ux_fact_agent_content;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_agent_content_tenant
+    ON knowledge_facts(agent_id, tenant_id, content_key) WHERE content_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_fact_tenant ON knowledge_facts(tenant_id, agent_id, status);
+ALTER TABLE knowledge_activities ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+"""
+
+# v21：事实冲突账也按租户分区；检测候选与队列读取都带 tenant。
+_SCHEMA_V21 = """
+ALTER TABLE knowledge_conflicts ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+CREATE INDEX IF NOT EXISTS idx_conflict_tenant
+    ON knowledge_conflicts(tenant_id, status, detected_at);
+"""
+
+# v22：业务基线也按租户分区；基线只含引用，但引用本身也不得跨租户可读。
+_SCHEMA_V22 = """
+ALTER TABLE knowledge_baselines ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+CREATE INDEX IF NOT EXISTS idx_baseline_tenant
+    ON knowledge_baselines(tenant_id, scope, created_at);
+"""
+
+# v23：主体消解字典也按租户分区。主体表只有标签/别名，不含正文，但同名主体
+# 跨租户共享会让图谱投影与消解候选串租户；唯一索引一并带上 tenant。
+_SCHEMA_V23 = """
+ALTER TABLE knowledge_subjects ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+DROP INDEX IF EXISTS ux_subject_label;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_subject_label_tenant
+    ON knowledge_subjects(agent_id, tenant_id, normalized_label);
+CREATE INDEX IF NOT EXISTS idx_subject_tenant
+    ON knowledge_subjects(tenant_id, agent_id, status);
+"""
+
 
 MANUAL_RESOLUTIONS: tuple = ("keep_both", "supersede_old", "dismiss")
 
@@ -316,16 +384,17 @@ class KnowledgeFactStore:
 
     def upsertSubject(
         self, agentId: str, label: str, aliases: Optional[List[str]] = None,
-        typeTermId: Optional[str] = None,
+        typeTermId: Optional[str] = None, tenantId: str = "default",
     ) -> str:
         normalized = normalizeLabel(label)
         if not normalized:
             raise ValueError("subject_label 不能为空")
+        tenant = str(tenantId or "default")
         with self._lock, self._conn:
             row = self._conn.execute(
                 "SELECT subject_key, aliases_json FROM knowledge_subjects"
-                " WHERE agent_id = ? AND normalized_label = ?",
-                (agentId, normalized),
+                " WHERE agent_id = ? AND tenant_id = ? AND normalized_label = ?",
+                (agentId, tenant, normalized),
             ).fetchone()
             stamp = _now()
             if row:
@@ -338,13 +407,13 @@ class KnowledgeFactStore:
                 )
                 return key
             key = "subj_" + hashlib.sha256(
-                ("%s|%s" % (agentId, normalized)).encode("utf-8")
+                ("%s|%s|%s" % (agentId, tenant, normalized)).encode("utf-8")
             ).hexdigest()[:16]
             self._conn.execute(
-                "INSERT INTO knowledge_subjects (subject_key, agent_id, canonical_label,"
-                " normalized_label, type_term_id, aliases_json, first_seen_at, updated_at)"
-                " VALUES (?,?,?,?,?,?,?,?)",
-                (key, agentId, label.strip(), normalized, typeTermId,
+                "INSERT INTO knowledge_subjects (subject_key, agent_id, tenant_id,"
+                " canonical_label, normalized_label, type_term_id, aliases_json,"
+                " first_seen_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                (key, agentId, tenant, label.strip(), normalized, typeTermId,
                  json.dumps(aliases or [], ensure_ascii=False), stamp, stamp),
             )
             return key
@@ -357,18 +426,22 @@ class KnowledgeFactStore:
                 merged.append(alias)
         return merged
 
-    def resolveSubjectKey(self, agentId: str, labelOrAlias: str) -> Optional[str]:
+    def resolveSubjectKey(
+        self, agentId: str, labelOrAlias: str, tenantId: str = "default"
+    ) -> Optional[str]:
         normalized = normalizeLabel(labelOrAlias)
+        tenant = str(tenantId or "default")
         with self._lock:
             row = self._conn.execute(
                 "SELECT subject_key FROM knowledge_subjects"
-                " WHERE agent_id = ? AND normalized_label = ?",
-                (agentId, normalized),
+                " WHERE agent_id = ? AND tenant_id = ? AND normalized_label = ?",
+                (agentId, tenant, normalized),
             ).fetchone()
             if row is None:
                 for cand in self._conn.execute(
-                    "SELECT subject_key, aliases_json FROM knowledge_subjects WHERE agent_id = ?",
-                    (agentId,),
+                    "SELECT subject_key, aliases_json FROM knowledge_subjects"
+                    " WHERE agent_id = ? AND tenant_id = ?",
+                    (agentId, tenant),
                 ).fetchall():
                     if normalized in [normalizeLabel(a) for a in json.loads(cand["aliases_json"])]:
                         row = cand
@@ -393,10 +466,18 @@ class KnowledgeFactStore:
         if oldKey == newKey:
             raise ValueError("不能把主体并入自身")
         with self._lock, self._conn:
-            if self._conn.execute(
-                "SELECT 1 FROM knowledge_subjects WHERE subject_key = ?", (newKey,)
-            ).fetchone() is None:
+            oldRow = self._conn.execute(
+                "SELECT tenant_id FROM knowledge_subjects WHERE subject_key = ?", (oldKey,)
+            ).fetchone()
+            if oldRow is None:
+                raise LookupError("源主体不存在: %s" % oldKey)
+            newRow = self._conn.execute(
+                "SELECT tenant_id FROM knowledge_subjects WHERE subject_key = ?", (newKey,)
+            ).fetchone()
+            if newRow is None:
                 raise LookupError("目标主体不存在: %s" % newKey)
+            if str(oldRow["tenant_id"] or "default") != str(newRow["tenant_id"] or "default"):
+                raise ValueError("不能跨租户合并主体")
             self._conn.execute(
                 "UPDATE knowledge_subjects SET merged_into = ?, status = 'merged', updated_at = ?"
                 " WHERE subject_key = ?",
@@ -419,13 +500,18 @@ class KnowledgeFactStore:
         d["aliases"] = json.loads(d.pop("aliases_json", "[]") or "[]")
         return d
 
-    def listSubjects(self, agentId: str, includeMerged: bool = False) -> List[Dict[str, Any]]:
-        """某 agent 下的主体清单——消解段要拿全量做候选，不能只看精确名。"""
-        sql = "SELECT * FROM knowledge_subjects WHERE agent_id = ?"
+    def listSubjects(
+        self, agentId: str, includeMerged: bool = False, tenantId: str = "default"
+    ) -> List[Dict[str, Any]]:
+        """某 agent/租户下的主体清单——消解段要拿全量做候选，不能只看精确名。"""
+        sql = "SELECT * FROM knowledge_subjects WHERE agent_id = ? AND tenant_id = ?"
+        params: List[Any] = [agentId, str(tenantId or "default")]
         if not includeMerged:
             sql += " AND status != 'merged'"
         with self._lock:
-            rows = self._conn.execute(sql + " ORDER BY canonical_label, subject_key", (agentId,)).fetchall()
+            rows = self._conn.execute(
+                sql + " ORDER BY canonical_label, subject_key", tuple(params)
+            ).fetchall()
         out = []
         for row in rows:
             d = dict(row)
@@ -455,6 +541,7 @@ class KnowledgeFactStore:
         recordKind: str = "triple",
         validFrom: Optional[str] = None,
         validUntil: Optional[str] = None,
+        tenantId: str = "default",
     ) -> str:
         """同 (主体, 谓词, 客体, 限定) 或同 content_key 重放返回同一 fact_id。
 
@@ -468,8 +555,9 @@ class KnowledgeFactStore:
         """
         windowFrom = _instant(validFrom)
         windowUntil = _instant(validUntil)
+        tenant = str(tenantId or "default")
         if contentKey:
-            existing = self.findFactByContentKey(agentId, contentKey)
+            existing = self.findFactByContentKey(agentId, contentKey, tenant)
             if existing:
                 self.fillValidityWindow(existing["fact_id"], windowFrom, windowUntil)
                 return existing["fact_id"]
@@ -479,9 +567,10 @@ class KnowledgeFactStore:
         ).hexdigest()[:12] if qualifier else ""
         with self._lock, self._conn:
             row = self._conn.execute(
-                "SELECT fact_id FROM knowledge_facts WHERE agent_id = ? AND subject_key = ?"
-                " AND predicate_term_id = ? AND object_term = ? AND qualifier_hash = ?",
-                (agentId, subjectKey, predicateTermId, objectTerm, qualifierHash),
+                "SELECT fact_id FROM knowledge_facts WHERE agent_id = ? AND tenant_id = ?"
+                " AND subject_key = ? AND predicate_term_id = ? AND object_term = ?"
+                " AND qualifier_hash = ?",
+                (agentId, tenant, subjectKey, predicateTermId, objectTerm, qualifierHash),
             ).fetchone()
             if row:
                 if contentKey:
@@ -497,13 +586,15 @@ class KnowledgeFactStore:
             factId = "fact_%s" % uuid.uuid4().hex[:12]
             try:
                 self._conn.execute(
-                    "INSERT INTO knowledge_facts (fact_id, agent_id, subject_key, predicate_term_id,"
-                    " object_term, relation_kind, content, content_key, qualifier_hash, qualifier_json,"
-                    " confidence, source_turn_id, recorded_at, record_kind, valid_from, valid_until)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (factId, agentId, subjectKey, predicateTermId, objectTerm, relationKind, content,
-                     contentKey, qualifierHash, json.dumps(qualifier, ensure_ascii=False), confidence,
-                     sourceTurnId, _instant(recordedAt) if recordedAt else _now(), recordKind,
+                    "INSERT INTO knowledge_facts (fact_id, agent_id, tenant_id, subject_key,"
+                    " predicate_term_id, object_term, relation_kind, content, content_key,"
+                    " qualifier_hash, qualifier_json, confidence, source_turn_id, recorded_at,"
+                    " record_kind, valid_from, valid_until)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (factId, agentId, tenant, subjectKey, predicateTermId, objectTerm, relationKind,
+                     content, contentKey, qualifierHash,
+                     json.dumps(qualifier, ensure_ascii=False), confidence, sourceTurnId,
+                     _instant(recordedAt) if recordedAt else _now(), recordKind,
                      windowFrom, windowUntil),
                 )
             except sqlite3.IntegrityError:
@@ -511,12 +602,14 @@ class KnowledgeFactStore:
                 if not contentKey:
                     raise
                 winner = self._conn.execute(
-                    "SELECT fact_id FROM knowledge_facts WHERE agent_id = ? AND content_key = ?",
-                    (agentId, contentKey),
+                    "SELECT fact_id FROM knowledge_facts WHERE agent_id = ? AND tenant_id = ?"
+                    " AND content_key = ?",
+                    (agentId, tenant, contentKey),
                 ).fetchone()
                 if winner is None:
                     raise
                 return winner["fact_id"]
+            self._recordVersionLocked(factId, "create", operator=sourceTurnId)
             return factId
 
     def fact(self, factId: str) -> Optional[Dict[str, Any]]:
@@ -1086,7 +1179,8 @@ class KnowledgeFactStore:
         }
 
     def searchableFacts(
-        self, agentId: Optional[str] = None, includeNarratives: bool = False
+        self, agentId: Optional[str] = None, includeNarratives: bool = False,
+        tenantId: str = "default",
     ) -> List[Dict[str, Any]]:
         """读面候选：仅 active 且未过期的事实，带主体规范名。
 
@@ -1101,7 +1195,8 @@ class KnowledgeFactStore:
                " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
                " WHERE f.status = 'active' AND s.status != 'merged'"
                " AND (f.valid_until IS NULL OR f.valid_until > ?)")
-        params: List[Any] = [_now()]
+        params: List[Any] = [_now(), str(tenantId or "default")]
+        sql += " AND f.tenant_id = ?"
         if not includeNarratives:
             sql += " AND f.record_kind != 'narrative'"
         if agentId:
@@ -1116,7 +1211,9 @@ class KnowledgeFactStore:
         with self._lock:
             return int(self._conn.execute("SELECT COUNT(*) FROM knowledge_facts").fetchone()[0])
 
-    def findFactByContentKey(self, agentId: str, contentKey: str) -> Optional[Dict[str, Any]]:
+    def findFactByContentKey(
+        self, agentId: str, contentKey: str, tenantId: str = "default"
+    ) -> Optional[Dict[str, Any]]:
         """按内容键找该行（含已被取代的）。
 
         刻意不过滤 status：一旦只看 active，"折叠"就变成裁决顺序的函数——回放里某行被
@@ -1124,8 +1221,9 @@ class KnowledgeFactStore:
         """
         with self._lock:
             row = self._conn.execute(
-                "SELECT * FROM knowledge_facts WHERE agent_id = ? AND content_key = ? LIMIT 1",
-                (agentId, contentKey),
+                "SELECT * FROM knowledge_facts WHERE agent_id = ? AND tenant_id = ?"
+                " AND content_key = ? LIMIT 1",
+                (agentId, str(tenantId or "default"), contentKey),
             ).fetchone()
         return self._hydrate(row) if row else None
 
@@ -1188,15 +1286,16 @@ class KnowledgeFactStore:
 
     def insertActivity(
         self, kind: str, inputs: Optional[Dict[str, Any]] = None,
-        basis: str = "", toolVersion: str = "",
+        basis: str = "", toolVersion: str = "", tenantId: str = "default",
     ) -> str:
         activityId = "act_%s" % uuid.uuid4().hex[:12]
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO knowledge_activities (activity_id, activity_kind, started_at,"
-                " inputs_json, basis, tool_version) VALUES (?,?,?,?,?,?)",
+                " inputs_json, basis, tool_version, tenant_id) VALUES (?,?,?,?,?,?,?)",
                 (activityId, kind, _now(),
-                 json.dumps(inputs or {}, ensure_ascii=False, sort_keys=True), basis, toolVersion),
+                 json.dumps(inputs or {}, ensure_ascii=False, sort_keys=True), basis, toolVersion,
+                 str(tenantId or "default")),
             )
         return activityId
 
@@ -1345,7 +1444,7 @@ class KnowledgeFactStore:
     def insertConflict(
         self, kind: str, subjectKey: str, predicateTermId: str, memberFactIds: List[str],
         severity: float, recommendedPolicy: str, policyBasis: str, status: str = "pending",
-        winnerFactId: Optional[str] = None,
+        winnerFactId: Optional[str] = None, tenantId: str = "default",
     ) -> Optional[str]:
         """写一条冲突账；同组成员重复检测不再另开。
 
@@ -1361,21 +1460,43 @@ class KnowledgeFactStore:
             cur = self._conn.execute(
                 "INSERT OR IGNORE INTO knowledge_conflicts (conflict_id, kind, subject_key,"
                 " predicate_term_id, member_fact_ids_json, member_signature, severity,"
-                " recommended_policy, policy_basis, status, detected_at, winner_fact_id)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                " recommended_policy, policy_basis, status, detected_at, winner_fact_id,"
+                " tenant_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (conflictId, kind, subjectKey, predicateTermId,
                  json.dumps(members, ensure_ascii=False), "|".join(members), float(severity),
-                 recommendedPolicy, policyBasis, status, _now(), winnerFactId),
+                 recommendedPolicy, policyBasis, status, _now(), winnerFactId,
+                 str(tenantId or "default")),
             )
         return conflictId if cur.rowcount else None
 
-    def conflicts(self, status: str = "pending") -> List[Dict[str, Any]]:
+    def conflict(
+        self, conflictId: str, tenantId: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT * FROM knowledge_conflicts WHERE status = ?"
-                " ORDER BY severity DESC, detected_at DESC",
-                (status,),
-            ).fetchall()
+            row = self._conn.execute(
+                "SELECT * FROM knowledge_conflicts WHERE conflict_id = ?",
+                (str(conflictId or ""),),
+            ).fetchone()
+        if row is None:
+            return None
+        rec = self._hydrateConflict(row)
+        if tenantId is not None and str(rec.get("tenant_id") or "default") != str(
+            tenantId or "default"
+        ):
+            return None
+        return rec
+
+    def conflicts(
+        self, status: str = "pending", tenantId: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        sql = "SELECT * FROM knowledge_conflicts WHERE status = ?"
+        params: List[Any] = [status]
+        if tenantId is not None:
+            sql += " AND tenant_id = ?"
+            params.append(str(tenantId or "default"))
+        sql += " ORDER BY severity DESC, detected_at DESC"
+        with self._lock:
+            rows = self._conn.execute(sql, tuple(params)).fetchall()
         return [self._hydrateConflict(r) for r in rows]
 
     def pendingConflictCount(self) -> int:
@@ -1456,7 +1577,9 @@ class KnowledgeFactStore:
         d["member_fact_ids"] = json.loads(d.pop("member_fact_ids_json", "[]") or "[]")
         return d
 
-    def candidateFactsForConflict(self, subjectLabel: str, predicateTermId: str) -> List[Dict[str, Any]]:
+    def candidateFactsForConflict(
+        self, subjectLabel: str, predicateTermId: str, tenantId: str = "default"
+    ) -> List[Dict[str, Any]]:
         """按归一化标签跨 agent 取候选。
 
         旧实现只在同 agent 桶内比对（`repository.py:1119`），跨库分歧因此永远不成账。
@@ -1467,9 +1590,10 @@ class KnowledgeFactStore:
                 " s.normalized_label FROM knowledge_facts f"
                 " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
                 " WHERE s.normalized_label = ? AND f.predicate_term_id = ?"
+                " AND f.tenant_id = ?"
                 " AND s.merged_into IS NULL AND f.status != 'retracted'"
                 " ORDER BY f.recorded_at, f.fact_id",
-                (normalizeLabel(subjectLabel), predicateTermId),
+                (normalizeLabel(subjectLabel), predicateTermId, str(tenantId or "default")),
             ).fetchall()
         return [self._hydrate(r) for r in rows]
 
@@ -1492,6 +1616,201 @@ class KnowledgeFactStore:
             raise LookupError("事实不存在: %s" % factId)
         return self._hydrate(row)
 
+    # ── 版本历史与回滚（v19）─────────────────────────────────────
+    # 历史只追加：每次写路径变化落一行快照，回滚本身也落一行。
+    # 回读只认 knowledge_facts（正文唯一权威），历史表不参与检索。
+
+    _VERSION_RESTORE_FIELDS = (
+        "subject_key", "predicate_term_id", "object_term", "relation_kind", "content",
+        "content_key", "qualifier_hash", "qualifier_json", "confidence", "evidence_state",
+        "status", "supersedes_fact_id", "contradicted_by_json", "valid_from", "valid_until",
+        "retracted_at", "assertions_json", "assertion_count", "record_kind",
+    )
+
+    def _recordVersionLocked(
+        self, factId: str, changeType: str, *, operator: str = "", reason: str = ""
+    ) -> int:
+        """调用方必须已持有 `self._lock` 与事务（`with self._conn`）。"""
+        snapshot = self._conn.execute(
+            "SELECT * FROM knowledge_facts WHERE fact_id = ?", (factId,)
+        ).fetchone()
+        if snapshot is None:
+            raise LookupError("事实不存在: %s" % factId)
+        row = self._conn.execute(
+            "SELECT COALESCE(MAX(version_no), 0) FROM knowledge_fact_versions WHERE fact_id = ?",
+            (factId,),
+        ).fetchone()
+        versionNo = int(row[0] or 0) + 1
+        self._conn.execute(
+            "INSERT INTO knowledge_fact_versions (version_id, fact_id, version_no,"
+            " change_type, snapshot_json, operator, reason, recorded_at)"
+            " VALUES (?,?,?,?,?,?,?,?)",
+            ("fv_%s" % uuid.uuid4().hex[:12], factId, versionNo, changeType,
+             json.dumps(dict(snapshot), ensure_ascii=False, sort_keys=True),
+             operator or "", reason or "", _now()),
+        )
+        return versionNo
+
+    def history(self, factId: str, limit: int = 200) -> List[Dict[str, Any]]:
+        """事实版本历史，最新在前。事实不存在时抛 LookupError（空历史不等于没事实）。"""
+        with self._lock:
+            self._requireFact(factId)
+            rows = self._conn.execute(
+                "SELECT * FROM knowledge_fact_versions WHERE fact_id = ?"
+                " ORDER BY version_no DESC LIMIT ?",
+                (factId, max(1, int(limit))),
+            ).fetchall()
+        out = []
+        for row in rows:
+            entry = dict(row)
+            try:
+                entry["snapshot"] = json.loads(entry.pop("snapshot_json") or "{}")
+            except (ValueError, TypeError):
+                # 快照坏掉不伪装成空：原样保留字符串，让读方看得见
+                entry["snapshot"] = {}
+            out.append(entry)
+        return out
+
+    def rollback(
+        self, factId: str, versionNo: int, *, operator: str, reason: str
+    ) -> Dict[str, Any]:
+        """把事实恢复到指定版本，并追加一行 rollback 历史。理由与操作人必填。
+
+        语义边界（本轮拍板：只恢复目标事实）：不回滚推导账本，也不会自动复活
+        已被 `_retireDerived` 撤下的派生事实。派生结论要恢复须重跑推导规则，
+        避免"回滚一条前提却悄悄唤醒一串结论"的隐式级联。
+        """
+        if not str(operator or "").strip() or not str(reason or "").strip():
+            raise ValueError("回滚必须记录操作人与依据")
+        with self._lock, self._conn:
+            self._requireFact(factId)
+            row = self._conn.execute(
+                "SELECT snapshot_json FROM knowledge_fact_versions"
+                " WHERE fact_id = ? AND version_no = ?",
+                (factId, int(versionNo)),
+            ).fetchone()
+            if row is None:
+                raise LookupError("版本不存在: %s@%s" % (factId, versionNo))
+            try:
+                snapshot = json.loads(row["snapshot_json"] or "{}")
+            except (ValueError, TypeError) as exc:
+                raise ValueError("版本快照不可解析: %s@%s" % (factId, versionNo)) from exc
+            fields = [name for name in self._VERSION_RESTORE_FIELDS if name in snapshot]
+            if not fields:
+                raise ValueError("版本快照没有可恢复字段: %s@%s" % (factId, versionNo))
+            self._conn.execute(
+                "UPDATE knowledge_facts SET %s WHERE fact_id = ?"
+                % ", ".join("%s = ?" % name for name in fields),
+                tuple(snapshot[name] for name in fields) + (factId,),
+            )
+            self._recordVersionLocked(
+                factId, "rollback", operator=operator, reason=reason
+            )
+            restored = self._requireFact(factId)
+        logger.info("事实回滚 %s → v%s（%s: %s）", factId, versionNo, operator, reason)
+        return restored
+
+    # ── 业务基线：只冻结引用，不复制正文 ──────────────────────────
+
+    def createBaseline(
+        self,
+        *,
+        scope: str = "global",
+        scopeKey: str = "",
+        factIds: Optional[List[str]] = None,
+        createdBy: str = "",
+        reason: str = "",
+        tenantId: str = "default",
+        timeFrom: Optional[str] = None,
+        timeTo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        scope = str(scope or "global").strip() or "global"
+        tenant = str(tenantId or "default")
+        with self._lock, self._conn:
+            if factIds is None:
+                sql = "SELECT fact_id FROM knowledge_facts WHERE status = 'active'"
+                params: List[Any] = []
+                if scopeKey:
+                    sql += " AND agent_id = ?"
+                    params.append(scopeKey)
+                sql += " AND tenant_id = ?"
+                params.append(tenant)
+                if timeFrom:
+                    sql += " AND recorded_at >= ?"
+                    params.append(_instant(timeFrom))
+                if timeTo:
+                    sql += " AND recorded_at <= ?"
+                    params.append(_instant(timeTo))
+                factIds = [r["fact_id"] for r in self._conn.execute(sql, tuple(params)).fetchall()]
+            ids = sorted({str(fid) for fid in factIds if fid})
+            if ids:
+                placeholders = ",".join("?" * len(ids))
+                foreign = self._conn.execute(
+                    "SELECT COUNT(*) FROM knowledge_facts WHERE fact_id IN (%s)"
+                    " AND tenant_id != ?" % placeholders,
+                    tuple(ids) + (tenant,),
+                ).fetchone()[0]
+                if foreign:
+                    raise ValueError("基线包含其他租户的事实引用，拒绝冻结")
+            baselineId = "kb_%s" % uuid.uuid4().hex[:12]
+            snapshot = {
+                "fact_ids": ids, "count": len(ids),
+                "time_from": _instant(timeFrom), "time_to": _instant(timeTo),
+            }
+            self._conn.execute(
+                "INSERT INTO knowledge_baselines (baseline_id, scope, scope_key,"
+                " snapshot_json, created_by, reason, created_at, tenant_id)"
+                " VALUES (?,?,?,?,?,?,?,?)",
+                (baselineId, scope, str(scopeKey or ""),
+                 json.dumps(snapshot, ensure_ascii=False, sort_keys=True),
+                 str(createdBy or ""), str(reason or ""), _now(), tenant),
+            )
+        return {
+            "baseline_id": baselineId,
+            "scope": scope,
+            "scope_key": str(scopeKey or ""),
+            "fact_count": len(ids),
+            "created_by": str(createdBy or ""),
+            "reason": str(reason or ""),
+        }
+
+    def listBaselines(
+        self, scope: Optional[str] = None, tenantId: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        clauses: List[str] = []
+        params: List[Any] = []
+        if scope:
+            clauses.append("scope = ?")
+            params.append(str(scope))
+        if tenantId is not None:
+            clauses.append("tenant_id = ?")
+            params.append(str(tenantId or "default"))
+        sql = "SELECT * FROM knowledge_baselines"
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY created_at DESC"
+        with self._lock:
+            rows = self._conn.execute(sql, tuple(params)).fetchall()
+        out = []
+        for row in rows:
+            entry = dict(row)
+            snapshot = json.loads(entry.pop("snapshot_json") or "{}")
+            entry["fact_count"] = snapshot.get("count", 0)
+            entry["fact_ids"] = snapshot.get("fact_ids", [])
+            out.append(entry)
+        return out
+
+    def baseline(self, baselineId: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM knowledge_baselines WHERE baseline_id = ?", (baselineId,)
+            ).fetchone()
+        if row is None:
+            return None
+        entry = dict(row)
+        entry["snapshot"] = json.loads(entry.pop("snapshot_json") or "{}")
+        return entry
+
     def supersede(self, newFactId: str, oldFactId: str, reason: str = "") -> None:
         """新说法接管：旧事实出检索候选，但仍留在账上可溯源。"""
         if newFactId == oldFactId:
@@ -1512,6 +1831,8 @@ class KnowledgeFactStore:
                 "UPDATE knowledge_facts SET status = 'superseded' WHERE fact_id = ?",
                 (oldFactId,),
             )
+            self._recordVersionLocked(newFactId, "supersede", reason=reason)
+            self._recordVersionLocked(oldFactId, "supersede", reason=reason)
         logger.info("事实取代 %s ← %s（%s）", newFactId, oldFactId, reason)
         self._retireDerived(oldFactId, reason or "推导前提已被取代")
 
@@ -1550,18 +1871,29 @@ class KnowledgeFactStore:
                 (stored, factId),
             )
 
-    def expireDueFacts(self, now: Optional[str] = None) -> int:
+    def expireDueFacts(
+        self, now: Optional[str] = None, tenantId: Optional[str] = None
+    ) -> int:
         instant = _instant(now) if now is not None else _now()
+        tenantSql = ""
+        params: List[Any] = [instant]
+        if tenantId is not None:
+            tenantSql = " AND tenant_id = ?"
+            params.append(str(tenantId or "default"))
         with self._lock, self._conn:
             due = [r["fact_id"] for r in self._conn.execute(
                 "SELECT fact_id FROM knowledge_facts"
-                " WHERE status = 'active' AND valid_until IS NOT NULL AND valid_until < ?",
-                (instant,)).fetchall()]
+                " WHERE status = 'active' AND valid_until IS NOT NULL AND valid_until < ?"
+                + tenantSql,
+                tuple(params)).fetchall()]
             cur = self._conn.execute(
                 "UPDATE knowledge_facts SET status = 'expired'"
-                " WHERE status = 'active' AND valid_until IS NOT NULL AND valid_until < ?",
-                (instant,),
+                " WHERE status = 'active' AND valid_until IS NOT NULL AND valid_until < ?"
+                + tenantSql,
+                tuple(params),
             )
+            for factId in due:
+                self._recordVersionLocked(factId, "expire", reason="valid_until 到期")
         for factId in due:
             self._retireDerived(factId, "推导前提已到期")
         return int(cur.rowcount)
@@ -1575,6 +1907,7 @@ class KnowledgeFactStore:
                 " WHERE fact_id = ?",
                 (_now(), factId),
             )
+            self._recordVersionLocked(factId, "retract", reason=reason)
         logger.info("事实撤回 %s（%s）", factId, reason)
         self._retireDerived(factId, reason or "推导前提已撤回")
 
@@ -1592,6 +1925,7 @@ class KnowledgeFactStore:
             self._conn.execute(
                 "UPDATE knowledge_facts SET status = 'active', retracted_at = NULL"
                 " WHERE fact_id = ?", (factId,))
+            self._recordVersionLocked(factId, "revive", reason=reason)
         logger.info("事实复活 %s（%s）", factId, reason)
         return True
 

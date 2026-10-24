@@ -70,11 +70,12 @@ class FactSurface:
     def enabled(self) -> bool:
         return self._cfg.enabled
 
-    def search(self, query: str, limit: int = 10, agentId: Optional[str] = None) -> List[Dict[str, Any]]:
+    def search(self, query: str, limit: int = 10, agentId: Optional[str] = None,
+               tenantId: str = "default") -> List[Dict[str, Any]]:
         """关闸即返回空池——开关只在这里判一次，不交给调用方各自自觉。"""
         if not self._cfg.enabled:
             return []
-        corpus = self._store.searchableFacts(agentId=agentId)
+        corpus = self._store.searchableFacts(agentId=agentId, tenantId=tenantId)
         if not corpus:
             return []
         items = [factToItem(f, f["canonical_label"]) for f in corpus]

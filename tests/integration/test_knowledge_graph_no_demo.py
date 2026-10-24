@@ -20,7 +20,7 @@ class StubManager:
 def _make_client(monkeypatch, manager):
     app = FastAPI()
     app.include_router(kga.router, prefix="/v1")
-    monkeypatch.setattr(kga, "_get_kg_manager", lambda agent_id="default": manager)
+    monkeypatch.setattr(kga, "_get_kg_manager", lambda agent_id="default", tenant_id="default": manager)
     return TestClient(app)
 
 
