@@ -23,7 +23,17 @@ ADMIN = {"user_id": "u1", "username": "admin", "role": "admin", "neuser_id": "u1
 
 SKILL_ID = "s1"
 BASELINE = "基线技能正文。" * 10
-CANDIDATE = "基线技能正文。改进版。" * 10
+#: 候选＝基线**整段照抄后再追加一句**，不是把原句按比例替换。
+#: 为什么这一点要紧：约束闸的语义相似度有两条后端（就绪的 embedding 余弦 / 词面 Jaccard 兜底），
+#: 同一对文本在两条后端上读数不同。旧写法 `"基线技能正文。改进版。" * 10` 把原句替换掉一半，
+#: Jaccard 只有 0.714 < 0.75 阈值 ⇒ 薄环境（无稠密档）里候选被闸拒、`iterations_run=0`、
+#: 因此**不出提案**，而这条用例要验的是"提案详情里带臂来源"，失败信息却指向"没出提案"。
+#: 追加式改写在两条后端上都稳过（Jaccard 0.833），判据才真的只测臂来源那一件事。
+#: 候选里的改进标记。判分桩（`offline` 夹具）与候选正文都用**这一个**名字：
+#: 两处各写一个词时，改了一处另一处就静默失效（实测 `改进版` 与 `改进` 不互通，
+#: 候选因此被判成与基线同分 ⇒ `no_improvement` ⇒ 不出提案）。
+CANDIDATE_MARK = "改进"
+CANDIDATE = ("基线技能正文。" * 10) + CANDIDATE_MARK + "。"
 
 
 class _AgentStub:
@@ -63,7 +73,7 @@ def offline(monkeypatch):
     async def fakeScore(self, **kw):
         from neurova.evolution.eval.fitness import FitnessScore
 
-        value = 0.9 if "改进版" in kw.get("skill_text", "") else 0.2
+        value = 0.9 if CANDIDATE_MARK in kw.get("skill_text", "") else 0.2
         return FitnessScore(correctness=value, procedure_following=value,
                             conciseness=value, feedback="")
 
@@ -72,7 +82,7 @@ def offline(monkeypatch):
 
     async def fakeMutate(self, *, artifact_text, artifact_type, failures, **kw):
         """离线变异：候选正文必须与基线不同，否则进化轮整个 no-op（走不到候选评测）。"""
-        return artifact_text + "改进版。"
+        return artifact_text + CANDIDATE_MARK + "。"
 
     monkeypatch.setattr(fitness.LLMJudge, "score", fakeScore, raising=False)
     monkeypatch.setattr(service.SimulatedAgent, "run", fakeSimRun, raising=False)
@@ -290,7 +300,7 @@ class TestArmKindReachesTheApproverFace:
                              {"skill_id": SKILL_ID, "iterations": 1, "real_trajectory": True})
         assert posted.status_code == 200, posted.text
         proposalId = (posted.json()["data"].get("proposal") or {}).get("proposal_id")
-        assert proposalId, "这条链没出提案，详情面无可验"
+        assert proposalId, f"这条链没出提案，详情面无可验；响应={posted.text[:800]}"
 
         r = client.get(f"{BASE}/skills/a1/proposals/{proposalId}")
         assert r.status_code == 200, r.text

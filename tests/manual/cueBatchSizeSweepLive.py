@@ -29,9 +29,8 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-# stdout 编码由本档自己钉死：`print` 抛 UnicodeEncodeError 会把退出码变成 1，
-# 而 `tests/manual/*` 的全部证据就是「退出码 + 那几行 PASS/FAIL 读数」——
-# 等于让打印来决定判定（判据见 tests/unit/ci/test_manualScriptStdoutEncoding.py）。
+# 读数里带 `⇒`（cp936 编不出）：不钉 stdout 编码时 `print` 会抛 UnicodeEncodeError，
+# 退出码变 1，看着像"有一条腿 FAIL"——而实际只是终端编码不认这个字形。
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
@@ -108,7 +107,7 @@ def partTwoWindowLeak(corpus: list) -> None:
     import inspect
 
     src = inspect.getsource(gen.filterModelCues)
-    print(f"  代码事实：usedNormKeys 在函数体内新建 -> 去重只在一次调用内有效 -> "
+    print(f"  代码事实：usedNormKeys 在函数体内新建 ⇒ 去重只在一次调用内有效 → "
           f"{'成立' if 'usedNormKeys: set = set()' in src.replace('    ', '') else '不成立'}")
     print(f"{'N':>4} {'放行条数':>9} {'其中泛词':>8} {'泛词占放行比':>12}")
     generic = {"时间安排", "需要注意的事项", "工作相关", "日常事务", "与他人的约定", "后续跟进"}
