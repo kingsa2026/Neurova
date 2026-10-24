@@ -208,6 +208,16 @@ def legacyHomeLanding(*parts: str) -> Path:
     return Path.home().joinpath(".neurova", *parts)
 
 
+def homeAnchorPath(*parts: str) -> Path:
+    """主目录落点的**现行地址**（`~/.neurova/<parts>` 的绝对路径），供不参与收养的消费方取用。
+
+    与 `legacyHomeLanding()` 同一口径、同一拼法：那一处是收养端（"旧物在哪、要不要搬"），
+    本函数是**只算落点**的读法（锚文件这类"对数据根被替换敏感"的状态）。消费方各拼一遍
+    `Path.home()/".neurova"` 就是第二份事实源（家目录落点面守卫逐文件计数即红）。
+    """
+    return legacyHomeLanding(*parts)
+
+
 def adoptLandingFrom(target: Path, legacy: Path) -> bool:
     """收养的**唯一实现**：把 `legacy` 处的东西搬到 `target`（空缺时才动）。
 

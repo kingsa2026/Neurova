@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import sys
 
 from tests import ast_scan
 
@@ -105,7 +106,10 @@ def test_runtimeHalfStillProducesAWorkingLocalRuntime():
     assert RuntimeFactory.list_supported_types() == [RuntimeType.LOCAL, RuntimeType.DOCKER]
     assert get_runtime_manager() is get_runtime_manager(), "单例语义被动过"
     assert isinstance(get_runtime_manager(), RuntimeManager)
-    result = asyncio.run(runtime.exec(command="python", args=["-c", "print(1)"], timeout=30))
+    # 解释器必须取**当前这个**（`sys.executable`），不能写字面 `python`：精瘦容器里
+    # 解出来的 Python 没有 `python` 这个名字（只有 `python3`／`python3.12`），本格就会红在
+    # "容器里没这个命令"上，而不是在"本地运行时还能不能执行"上。
+    result = asyncio.run(runtime.exec(command=sys.executable, args=["-c", "print(1)"], timeout=30))
     assert result.success and "1" in (result.stdout or ""), f"本地运行时执行不回来：{result}"
 
 
