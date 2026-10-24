@@ -162,13 +162,10 @@ class TestTheGateIsOnTheRegistryLeg:
 
 
 class TestProductionBuildersCarryThePin:
-    def _builderCalls(self, tree):
-        """挑出对 `_build_executable_skill(` 的调用点，返回是否带了 pinnedDigest。
-
-        收的是**已解析的树**：枚举与解析归 `tests/ast_scan`，本档不自付 `ast.parse`。
-        """
+    def _builderCalls(self, source):
+        """挑出对 `_build_executable_skill(` 的调用点，返回是否带了 pinnedDigest。"""
         found = []
-        for node in ast.walk(tree):
+        for node in ast.walk(ast.parse(source)):
             if not isinstance(node, ast.Call):
                 continue
             fn = node.func
@@ -204,8 +201,8 @@ class TestProductionBuildersCarryThePin:
         good = "x = _build_executable_skill('a', 'b', c, pinnedDigest=p)"
         bad = "x = _build_executable_skill('a', 'b', c)"
 
-        assert self._builderCalls(ast.parse(good)) == [True]
-        assert self._builderCalls(ast.parse(bad)) == [False]
+        assert self._builderCalls(good) == [True]
+        assert self._builderCalls(bad) == [False]
 
 
 class TestThePinCanBePersistedAtTheService:
