@@ -49,6 +49,12 @@ import pytest
 yaml = pytest.importorskip("yaml")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+#: 本档子进程预算的唯一出处（§6-402 批 K 口径：子墙一处定义，父墙由它 ＋余量导出）。
+#: 五枚落点跑的都是 `scripts/ci/*.py` 门禁脚本与 node 桥，实测最重一格 0.45s（脚本空载
+#: 114ms）。取 **低于全局 30s** 的 20s：子进程先到点报的是诚实的 TimeoutExpired，
+#: 而不是全局那道 thread 法的墙把整场跑测打死，也不用为它给整档抬父墙。
+PROBE_WALL_S = 20
 CNB = PROJECT_ROOT / ".cnb.yml"
 SETTINGS = PROJECT_ROOT / ".cnb" / "settings.yml"
 from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
@@ -270,7 +276,8 @@ class TestBudgetScriptIsExecutedByTheBuild:
         env["PYTHONIOENCODING"] = "utf-8"
         proc = subprocess.run(
             [sys.executable, str(BUDGET_SCRIPT)],
-            capture_output=True, text=True, encoding="utf-8", cwd=str(PROJECT_ROOT), env=env, timeout=60,
+            capture_output=True, text=True, encoding="utf-8", cwd=str(PROJECT_ROOT),
+            env=env, timeout=PROBE_WALL_S,
         )
         assert proc.returncode == 0, (
             f"量尺在缺变量时未能以 0 退出（它是决策输入，不是判据）:\n"
@@ -314,7 +321,8 @@ class TestPredicateExitServesTheRelay:
         env.update(env_extra)
         proc = subprocess.run(
             [sys.executable, str(BUDGET_SCRIPT), "--predicate"],
-            capture_output=True, text=True, encoding="utf-8", cwd=str(PROJECT_ROOT), env=env, timeout=60,
+            capture_output=True, text=True, encoding="utf-8", cwd=str(PROJECT_ROOT),
+            env=env, timeout=PROBE_WALL_S,
         )
         assert proc.returncode == 0, proc.stderr
         return proc.stdout.strip()
@@ -364,7 +372,8 @@ class TestVerdictsAreFalsifiable:
         env.update(env_extra)
         proc = subprocess.run(
             [sys.executable, str(BUDGET_SCRIPT), "--json"],
-            capture_output=True, text=True, encoding="utf-8", cwd=str(PROJECT_ROOT), env=env, timeout=60,
+            capture_output=True, text=True, encoding="utf-8", cwd=str(PROJECT_ROOT),
+            env=env, timeout=PROBE_WALL_S,
         )
         assert proc.returncode == 0, proc.stderr
         return json.loads(proc.stdout)
@@ -409,7 +418,8 @@ class TestVerdictsAreFalsifiable:
         env.setdefault("CNB_BUILD_WORKSPACE", str(PROJECT_ROOT))
         proc = subprocess.run(
             ["sh", str(bridge), "scripts/ci/npc_runtime_budget.py", "--json"],
-            capture_output=True, text=True, encoding="utf-8", cwd=str(PROJECT_ROOT), env=env, timeout=60,
+            capture_output=True, text=True, encoding="utf-8", cwd=str(PROJECT_ROOT),
+            env=env, timeout=PROBE_WALL_S,
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr
         reading = json.loads(proc.stdout)
@@ -548,7 +558,7 @@ class TestRoleAdmissionIsPinnedBeforeTheAgent:
         if argv is None:
             argv = [sys.executable, str(ADMISSION_SCRIPT)]
         return subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
-                              cwd=str(PROJECT_ROOT), env=env, timeout=60)
+                              cwd=str(PROJECT_ROOT), env=env, timeout=PROBE_WALL_S)
 
     def test_in_and_out_of_roster_are_both_falsifiable(self, roles):
         in_roster = self._runAdmission({"CNB_NPC_NAME": roles[0]["name"]})

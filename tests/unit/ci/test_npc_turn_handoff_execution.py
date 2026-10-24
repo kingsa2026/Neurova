@@ -49,6 +49,11 @@ import pytest
 yaml = pytest.importorskip("yaml")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+#: 子进程预算唯一出处：跑的是 `scripts/ci/npc_turn_handoff_gate.py --json`（实测毫秒级）。
+#: 取低于全局 30s 的值——先到点的应当是子进程那条诚实的 TimeoutExpired，不是把整场跑测
+#: 一起打死的 thread 法全局墙（§6-402 批 K 口径）。
+PROBE_WALL_S = 20
 CNB = PROJECT_ROOT / ".cnb.yml"
 SETTINGS = PROJECT_ROOT / ".cnb" / "settings.yml"
 from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
@@ -212,7 +217,7 @@ class TestGateScriptIsExecutedByTheBuild:
             [sys.executable, str(GATE_SCRIPT), "--json"],
             capture_output=True, text=True, cwd=str(PROJECT_ROOT),
             env={"PATH": "/usr/bin:/bin", "CNB_BUILD_WORKSPACE": str(PROJECT_ROOT)},
-            timeout=60,
+            timeout=PROBE_WALL_S,
         )
         assert r.returncode == 0, (
             f"门禁在 CNB_BUILD_WORKSPACE 可写时仍判红: rc={r.returncode}\n"
