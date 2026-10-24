@@ -410,6 +410,8 @@ class OcrEngine(Protocol):
 - 业务基线：`knowledge_baselines`（baseline_id, scope, snapshot_ref, created_by, created_at），
   支持按 agent/category/时间窗冻结；不复制正文，只存引用。
 - 验收：任一事实可查历史并回滚；回滚写操作人/依据/版本号；历史与当前一致。
+- **溯源保留**：事实版本只追加、不压缩、不自动清理；`GET /facts/{id}/history`
+  默认返回全量（`limit=0`），显式 `limit/offset` 才分页，避免默认分页截断溯源。
 
 ### 6.6 存储与规模（P1-D）
 
@@ -472,6 +474,7 @@ class OcrEngine(Protocol):
 | `knowledge_baselines` | 新表 | 业务场景基线引用 |
 | `knowledge_ingest_jobs` | 新表 | 企微入站持久作业（dedupe/attempts/lease/dead/result） |
 | `knowledge_subjects.tenant_id` | 新列（v23） | 主体消解字典按租户分词；图谱按 `agent+tenant` 分目录 |
+| `knowledge_facts.category` | 新列（v24） | 业务基线按 category 冻结；未分类事实留空 |
 | `tenant_id` | 后续迁移 | 先读隔离，后写隔离 |
 
 ### 7.2 API
@@ -601,19 +604,21 @@ class OcrEngine(Protocol):
 - 入站队列为 SQLite 单机语义；常驻消费者已接，跨进程传输已提供可选 MQTT
   （`NEUROVA_KB_INGEST_TRANSPORT=mqtt`），但真实 broker 端到端未在本机验证；
 - `/audit/reindex` 是派生索引整库维护，未按租户切分（不写业务内容）；
-- 冲突详情端点、基线时间窗已补；基线 category 维度因事实行没有 category 列未做；
-- 旧数据批量回填已提供 dry-run/apply 脚本（`--source-root` 解析相对 source_path），
-  但未在生产语料上执行；
-- MQTT 入站端到端未接真实 broker；paho 未装时生产者/订阅端显式报依赖缺失；
-- `compareVariants` 已接 API，但尚未作为 CI 回归门；
-- 向量路 hnswlib 已实测（100 万 p95 0.67 ms / 1.6 GB）；多进程并发与重建时间未测；
+- 冲突详情端点、基线时间窗/category 已补（v24 事实分类列）；
+- 旧数据回填 dry-run 已跑：36 个候选全部因 `source_path` 无原文件报 missing_source，
+  因此没有可执行的 apply 对象；
+- MQTT 入站已用本地 amqtt broker 验证生产→订阅→队列→落知识；TLS 配置已接
+  `NEUROVA_MQTT_TLS_*`，生产 broker 鉴权/TLS 仍未验证；paho 未装时显式报依赖缺失；
+- `gateNoRegression` 已提供并为 CI 回归门（单测覆盖）；真实黄金集门禁需接评测账本；
+- 向量路 hnswlib 已实测（100 万 p95 0.67 ms / 1.6 GB）；FTS 4 进程并发已实测
+  （100 万 p95 398.87 ms / 9.97 qps）；重建时间未单列；
   外部存储迁移未实施（10M FTS p95 已越线，需单独立项）；
 - MQTT 传输保持可选（按拍板）：未装 `paho-mqtt` 时 `dependency_missing` 显式报错，
   进程内 ACP 路径不受影响；`NEUROVA_AGENT_BUS=mqtt` 时读 `NEUROVA_MQTT_*` 配置；
 - NER 保持规则/词表（按 U7），模型实体识别列为后续可选；
 - 渠道租户来自适配器 `extra.tenant_id`，未配置时落 `default`；
-- 事实回滚语义已拍板为**只恢复目标事实**：派生事实与推导账本不自动复活，
-  历史保留/压缩策略未做自动清理（保留全量历史）；
+- 事实回滚语义已拍板为**只恢复目标事实**：派生事实与推导账本不自动复活；
+  历史按产品要求**全量保留、无压缩/清理入口**，history 接口默认全量返回；
 - Docker 镜像未在本机构建（无 Docker），镜像内 LibreOffice/OCR 库真跑未验；
 - 文档核心属性已从 DOCX/PDF 读取（标题/作者/创建/修改）；扫描型 PDF 的元数据
   依赖渲染器返回，缺失时为空；

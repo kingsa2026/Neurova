@@ -21,12 +21,22 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 PACKAGE_DIR = Path(__file__).resolve().parents[4] / 'neurova' / 'cognitive_layers' / 'memory_layer'
+
+#: 子进程预算唯一出处（§6-402 批 K 口径）。正常路径实测 223ms（本包不得把 torch 拉进
+#: `sys.modules`，这正是判据要钉的事）；留 120s 而不是 20s 是给**失败那一路**买的位置：
+#: 一旦 `__init__` 恢复急切 import，探针会真把 torch 装进内存，冷加载是几十秒量级——
+#: 墙若只够绿灯路径，回归到来时得到的是一条超时而不是一条断言。父墙由它 ＋60s 导出。
+TORCH_PROBE_WALL_S = 120
+pytestmark = pytest.mark.timeout(TORCH_PROBE_WALL_S + 60)
 
 
 def _run(code: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, '-c', code], capture_output=True, text=True, timeout=300
+        [sys.executable, '-c', code], capture_output=True, text=True,
+        timeout=TORCH_PROBE_WALL_S
     )
 
 

@@ -22,7 +22,9 @@ import difflib
 import hashlib
 import json
 import os
+import re
 import threading
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -190,6 +192,46 @@ class ChunkRevisionConflict(Exception):
     """P1#8 chunk 编辑乐观锁：expected_revision 与块当前 revision 不符。
 
     时不静默覆盖，调用方须重读最新块后重试。"""
+
+
+def _contentFingerprint(tenantId: str, content: str) -> str:
+    """精确去重键：租户 + 规范化正文；空白差异不算不同文档。"""
+    normalized = unicodedata.normalize("NFKC", str(content or ""))
+    normalized = re.sub(r"\s+", " ", normalized).strip().casefold()
+    seed = "%s|%s" % (str(tenantId or "default"), normalized)
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()
+
+
+def _sourceEvidence(item: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "source": str(item.get("source") or ""),
+        "source_type": str(item.get("source_type") or ""),
+        "source_path": str(item.get("source_path") or ""),
+        "ingest_time": str(item.get("ingest_time") or ""),
+    }
+
+
+def _geoOf(geo: Any) -> Optional[Dict[str, float]]:
+    """geo 入库形状：只收可解析的 lat/lon；坏形状归 None，不猜坐标。"""
+    if not isinstance(geo, dict):
+        return None
+    try:
+        lat, lon = float(geo.get("lat")), float(geo.get("lon"))
+    except (TypeError, ValueError):
+        return None
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        return None
+    return {"lat": lat, "lon": lon}
+
+
+def _haversineKm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    import math
+
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * 6371.0088 * math.asin(math.sqrt(a))
 
 
 class KnowledgeRepository:
@@ -630,6 +672,13 @@ class KnowledgeRepository:
             item["shared_with"] = []
         if not isinstance(item.get("tenant_id"), str) or not item.get("tenant_id"):
             item["tenant_id"] = "default"
+        if not isinstance(item.get("content_fingerprint"), str) or not item.get("content_fingerprint"):
+            item["content_fingerprint"] = _contentFingerprint(
+                item["tenant_id"], str(item.get("content") or "")
+            )
+        if not isinstance(item.get("sources"), list):
+            evidence = _sourceEvidence(item)
+            item["sources"] = [evidence] if evidence.get("source") else []
         if not isinstance(item.get("graph_node_ids"), list):
             item["graph_node_ids"] = []
         if not isinstance(item.get("valid_until"), str):
@@ -660,6 +709,8 @@ class KnowledgeRepository:
             item["ocr_confidence_avg"] = None
         if not isinstance(item.get("ocr_used"), bool):
             item["ocr_used"] = False
+        if not isinstance(item.get("geo"), dict) or _geoOf(item.get("geo")) is None:
+            item["geo"] = None
         return item
 
     def _assertNotWritingProductionUnderPytest(self) -> None:
@@ -754,9 +805,31 @@ class KnowledgeRepository:
         ocr_confidence_avg: Optional[float] = None,
         document_id: str = "",
         tenant_id: str = "default",
+        dedupe: bool = False,
+        geo: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         status = normalizeLifecycleStatus(lifecycle_status)
         now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        tenant = str(tenant_id or "default")
+        fingerprint = _contentFingerprint(tenant, content)
+        if dedupe:
+            with self._lock:
+                for existing in self._items.get(agent_id, []):
+                    if (
+                        str(existing.get("tenant_id") or "default") == tenant
+                        and str(existing.get("content_fingerprint") or "") == fingerprint
+                    ):
+                        evidence = _sourceEvidence({
+                            "source": source, "source_type": source_type,
+                            "source_path": source_path, "ingest_time": ingest_time,
+                        })
+                        sources = existing.setdefault("sources", [])
+                        if evidence.get("source") and evidence not in sources:
+                            sources.append(evidence)
+                            self._save()
+                        duplicate = dict(existing)
+                        duplicate["duplicate"] = True
+                        return duplicate
         item: Dict[str, Any] = {
             "knowledge_id": knowledge_id or str(uuid.uuid4()),
             "title": title,
@@ -769,7 +842,12 @@ class KnowledgeRepository:
             "updated_at": now,
             "visibility": visibility if visibility in (VISIBILITY_PUBLIC, VISIBILITY_PRIVATE) else VISIBILITY_PRIVATE,
             "owner_user_id": str(owner_user_id or "default"),
-            "tenant_id": str(tenant_id or "default"),
+            "tenant_id": tenant,
+            "content_fingerprint": fingerprint,
+            "sources": [_sourceEvidence({
+                "source": source, "source_type": source_type,
+                "source_path": source_path, "ingest_time": ingest_time,
+            })] if source else [],
             "shared_with": [],
             "graph_node_ids": [],
             "submission": None,
@@ -787,6 +865,7 @@ class KnowledgeRepository:
             "author": author,
             "page_count": page_count,
             "ocr_used": bool(ocr_used),
+            "geo": _geoOf(geo),
             "ocr_engine": ocr_engine,
             "ocr_confidence_avg": ocr_confidence_avg,
             "document_id": document_id,
@@ -873,6 +952,12 @@ class KnowledgeRepository:
         tags: Optional[List[str]] = None,
         source: Optional[str] = None,
         updated_after: Optional[float] = None,
+        author: Optional[str] = None,
+        source_type: Optional[str] = None,
+        ocr_used: Optional[bool] = None,
+        page_min: Optional[int] = None,
+        geo_radius: Optional[Dict[str, Any]] = None,
+        geo_bbox: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """按当前用户可见性返回条目视图（scope: all/public/private/shared）。
 
@@ -914,6 +999,30 @@ class KnowledgeRepository:
                     continue
                 if source and str(item.get("source") or "") != str(source):
                     continue
+                if author and str(item.get("author") or "") != str(author):
+                    continue
+                if source_type and str(item.get("source_type") or "") != str(source_type):
+                    continue
+                if ocr_used is not None and bool(item.get("ocr_used")) is not bool(ocr_used):
+                    continue
+                if page_min is not None and int(item.get("page_count") or 0) < int(page_min):
+                    continue
+                # GIS 过滤（A6）：无坐标条目在任何 geo 过滤下不参与；
+                # 过滤被请求而参数残缺时按不匹配处理——空间过滤宁可漏给，不可误扩大结果集。
+                geoPoint = item.get("geo") or {}
+                if geo_radius is not None:
+                    radiusKm = geo_radius.get("radius_km")
+                    if (not geoPoint or radiusKm is None
+                            or _haversineKm(
+                                float(geo_radius["lat"]), float(geo_radius["lon"]),
+                                float(geoPoint["lat"]), float(geoPoint["lon"])) > float(radiusKm)):
+                        continue
+                if geo_bbox is not None:
+                    if not geoPoint:
+                        continue
+                    if not (float(geo_bbox["min_lat"]) <= float(geoPoint["lat"]) <= float(geo_bbox["max_lat"])
+                            and float(geo_bbox["min_lon"]) <= float(geoPoint["lon"]) <= float(geo_bbox["max_lon"])):
+                        continue
                 if updated_after is not None:
                     try:
                         if float(item.get("updated_at") or 0) < float(updated_after):
@@ -1108,6 +1217,12 @@ class KnowledgeRepository:
         tags: Optional[List[str]] = None,
         source: Optional[str] = None,
         updated_after: Optional[float] = None,
+        author: Optional[str] = None,
+        source_type: Optional[str] = None,
+        ocr_used: Optional[bool] = None,
+        page_min: Optional[int] = None,
+        geo_radius: Optional[Dict[str, Any]] = None,
+        geo_bbox: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """在当前用户可见视图内检索知识。
 
@@ -1120,6 +1235,8 @@ class KnowledgeRepository:
         visible = self.visible_items(
             user, scope=scope, category=category, agent_id=agent_id, tags=tags,
             source=source, updated_after=updated_after,
+            author=author, source_type=source_type, ocr_used=ocr_used,
+            page_min=page_min, geo_radius=geo_radius, geo_bbox=geo_bbox,
         )
         if not visible:
             return []

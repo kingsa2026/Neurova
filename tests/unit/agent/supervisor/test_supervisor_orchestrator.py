@@ -345,3 +345,26 @@ class TestDurableIdempotency:
         ledger.close()
 
         assert replay["tasks"][0]["replayed"] is False
+
+
+def testMqttBusTlsConfigReachesClient():
+    class _TlsClient:
+        def __init__(self):
+            self.tls = None
+            self.insecure = False
+
+        def tls_set(self, ca_certs=None, certfile=None, keyfile=None):
+            self.tls = (ca_certs, certfile, keyfile)
+
+        def tls_insecure_set(self, value):
+            self.insecure = bool(value)
+
+    client = _TlsClient()
+    bus = MqttWorkerBus(
+        client=client, tlsCa="ca.pem", tlsCert="cert.pem",
+        tlsKey="key.pem", tlsInsecure=True,
+    )
+    bus._ensureClient()
+
+    assert client.tls == ("ca.pem", "cert.pem", "key.pem")
+    assert client.insecure is True

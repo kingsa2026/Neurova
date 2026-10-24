@@ -36,10 +36,18 @@ HEX_ONLY = re.compile(r"^[0-9a-f]{8,40}$")
 _numstatCache: dict = {}
 _objectTypeCache: dict = {}
 
+#: 本脚本每次 git 调用的预算唯一出处。**逐号**起 `merge-base` 是全档成本的来源
+#: （台账有多少个号就起多少次），单次毫秒级；没有 `timeout=` 时一次卡住的 git
+#: 会把调用方整场挂住——而调用方是跑测进程，Windows 侧 pytest-timeout 走 thread 法，
+#: 超时即终止整个进程（§6-402 批 K 记的那三度死法）。30s 是单次调用的上界，
+#: 整轮扫描的墙由调用方自己按实测声明（见 `tests/unit/test_audit_ledger_commit_guard.py`）。
+GIT_WALL_S = 30
+
 
 def _git(*args: str) -> str:
     return subprocess.run(["git", *args], capture_output=True, text=True,
-                          encoding="utf-8", errors="replace").stdout
+                          encoding="utf-8", errors="replace",
+                          timeout=GIT_WALL_S).stdout
 
 
 def isCommit(token: str) -> bool:
@@ -50,7 +58,7 @@ def isCommit(token: str) -> bool:
 
 def isReachable(token: str) -> bool:
     return subprocess.run(["git", "merge-base", "--is-ancestor", token, "HEAD"],
-                          capture_output=True).returncode == 0
+                          capture_output=True, timeout=GIT_WALL_S).returncode == 0
 
 
 def numstatDigest(token: str) -> str:

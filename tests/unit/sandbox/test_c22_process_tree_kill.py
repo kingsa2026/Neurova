@@ -15,6 +15,12 @@ from neurova.sandbox.exec_sandbox import ExecSandbox
 
 WINDOWS = sys.platform == "win32"
 
+#: 系统查询件（`taskkill`／`tasklist`／`pgrep`）的预算唯一出处（§6-402 批 K 口径）。
+#: 三枚落点此前都没有 `timeout=`＝无界等待：`tasklist` 在进程表拥挤时可慢，但真挂住时
+#: 全局 30s 那道墙先到，Windows 侧 thread 法终止的是**整个跑测进程**——报出来是
+#: "整场跑测没了"，而不是这条本该红在这里的断言。20s 留足系统件的正常返回窗口。
+SYSTEM_TOOL_WALL_S = 20
+
 
 def test_normal_command_still_returns_contract():
     sandbox = ExecSandbox()
@@ -28,7 +34,8 @@ def test_normal_command_still_returns_contract():
 @pytest.mark.skipif(not WINDOWS, reason="Windows 平台进程树用例")
 def test_windows_timeout_kills_grandchild():
     # 预清理：确保起点无 ping 残留
-    subprocess.run(["taskkill", "/F", "/IM", "ping.exe"], capture_output=True)
+    subprocess.run(["taskkill", "/F", "/IM", "ping.exe"], capture_output=True,
+                   timeout=SYSTEM_TOOL_WALL_S)
 
     sandbox = ExecSandbox()
     # cmd /c 包一层 → ping.exe 是 Popen(cmd) 的孙进程；
@@ -44,6 +51,7 @@ def test_windows_timeout_kills_grandchild():
     listing = subprocess.run(
         ["tasklist", "/FI", "IMAGENAME eq ping.exe"],
         capture_output=True,
+        timeout=SYSTEM_TOOL_WALL_S,
     ).stdout.decode("gbk", errors="replace").lower()
     assert "ping.exe" not in listing
 
@@ -60,6 +68,7 @@ def test_posix_timeout_kills_grandchild():
 
     time.sleep(0.5)
     probe = subprocess.run(
-        ["pgrep", "-f", "sleep 30"], capture_output=True, text=True
+        ["pgrep", "-f", "sleep 30"], capture_output=True, text=True,
+        timeout=SYSTEM_TOOL_WALL_S,
     )
     assert probe.stdout.strip() == ""

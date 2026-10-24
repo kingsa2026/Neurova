@@ -92,6 +92,8 @@ class AdmissionRequest:
     relationKind: str = "literal"
     # 租户分区键：缺省 default（存量调用方语义不变；新调用方按请求身份传入）
     tenantId: str = "default"
+    # 条目分类：业务基线按 category 冻结时使用；未知/非条目事实留空
+    category: str = ""
     qualifier: Dict[str, Any] = field(default_factory=dict)
     sourceTurnId: str = ""
     aliases: List[str] = field(default_factory=list)
@@ -284,6 +286,17 @@ class KnowledgeAdmissionGate:
         已经齐全（见 `SEGMENT_STATUS`），四个生产调用点一律不带它。"""
         self._validate(request)
 
+        # 本体按租户分区（v25）：非 default 租户的种子谓词/种子规则在写入首跳
+        # 幂等补齐——装配点只知道 default，别的租户不能等到查询时空表才被发现。
+        tenant = str(getattr(request, "tenantId", "") or "default")
+        if tenant != "default":
+            ontology = self._collaborators.get("ontology_adjudication")
+            if ontology is not None:
+                ontology.ensureTenantSeeds(tenant)
+            reasoning = self._collaborators.get("forward_chaining")
+            if reasoning is not None:
+                reasoning.ensureRuleSeeds(tenant)
+
         pending = self.pendingSegments()
         planned = self.plannedSegments()
         delegated = self.delegatedSegments()
@@ -364,6 +377,7 @@ class KnowledgeAdmissionGate:
             validFrom=request.validFrom,
             validUntil=request.validUntil,
             tenantId=request.tenantId,
+            category=request.category,
             # confidence 留 None：G11 规定它只能由断言聚合得出，咽喉不代填
         )
         activityId = ""

@@ -100,6 +100,35 @@ def extract_xlsx_sheets(data: bytes) -> List[Dict[str, Any]]:
     return sheets
 
 
+def extract_xls_sheets(data: bytes) -> Optional[List[Dict[str, Any]]]:
+    """旧版 .xls 直读（升级计划 A7）：xlrd 可选依赖，缺席返回 None。
+
+    输出形状与 `extract_xlsx_sheets` 完全同形（同一份"表格→文本"口径），
+    调用方据此决定走直读还是回落 LibreOffice——不新增第二套表格文本形状。
+    xlrd 2.x 只认 BIFF（.xls），不下载、不转换。
+    """
+    try:
+        import xlrd
+    except Exception:  # noqa: BLE001 - 可选依赖缺席不是错误，回落是正常路径
+        return None
+    book = xlrd.open_workbook(file_contents=data)
+    sheets: List[Dict[str, Any]] = []
+    for index in range(book.nsheets):
+        ws = book.sheet_by_index(index)
+        parts: List[str] = []
+        for row in range(ws.nrows):
+            cells = [
+                str(ws.cell_value(row, col)) if ws.cell_value(row, col) is not None else ""
+                for col in range(ws.ncols)
+            ]
+            if any(cells):
+                parts.append(" | ".join(cells))
+            if sum(len(p) for p in parts) > MAX_EXTRACT_CHARS:
+                break
+        sheets.append({"title": ws.name, "text": "\n".join(parts)})
+    return sheets
+
+
 def _extract_xlsx(data: bytes) -> str:
     parts = []
     for sheet in extract_xlsx_sheets(data):

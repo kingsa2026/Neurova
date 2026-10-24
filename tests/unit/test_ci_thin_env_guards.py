@@ -30,6 +30,11 @@ from pathlib import Path
 from tests import ast_scan
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+#: 薄环境探针（`python -c` 起一条真 import 再降级）的预算唯一出处。此前无 `timeout=`＝
+#: 无界等待；取低于全局 30s 的 20s，让先到点的是子进程那条诚实的 TimeoutExpired 而不是
+#: thread 法的全局墙（§6-402 批 K 口径）。
+PROBE_WALL_S = 20
 #: 两条腿的扫描根单点（必须是模块级：函数内的局部名会被面自证棘轮解成动态值，那档就静默掉出它的面）。
 NEUROVA = PROJECT_ROOT / "neurova"
 TESTS = PROJECT_ROOT / "tests"
@@ -318,6 +323,7 @@ class TestWebReachImportsWithoutItsOptionalDeps:
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             cwd=str(PROJECT_ROOT),
             env=dict(os.environ, PYTHONIOENCODING="utf-8"),
+            timeout=PROBE_WALL_S,
         )
         assert proc.returncode == 0 and "OK" in proc.stdout, (
             "playwright 缺席时 `neurova.web_reach` 无法导入——可选依赖又在模块顶层裸 import 了。\n"
