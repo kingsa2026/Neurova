@@ -221,12 +221,12 @@ def artifactKey(channel: str, artifactId: str) -> str:
 def anchorPath() -> Path:
     """锚文件路径（唯一一处）。测试一律 monkeypatch 本函数到临时目录，不碰真实主目录。
 
-    `~/.neurova/` 这个拼法只在 `core/data_root.legacyHomeLanding` 里有一份：本模块是它的
+    `~/.neurova/` 这个拼法只在 `core/data_root.anchorLanding` 里有一份：本模块是它的
     消费方，不是第二个事实源（家目录落点面守卫逐文件计数，各拼一遍即红）。
     """
-    from neurova.core.data_root import legacyHomeLanding
+    from neurova.core.data_root import anchorLanding
 
-    return legacyHomeLanding(ANCHOR_FILE_NAME)
+    return anchorLanding(ANCHOR_FILE_NAME)
 
 
 def readAnchors() -> Dict[str, str]:
