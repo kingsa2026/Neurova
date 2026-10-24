@@ -257,6 +257,7 @@ import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { useAuthStore } from '@/stores/auth'
 import { request } from '@/api'
+import { layeredLayout } from '@/pages/graph-workbench/layout'
 
 // 3D/地图都是重依赖（WebGL/three、maplibre），defineAsyncComponent 懒加载：
 // 不切到对应视图就不下载，2D 主路径的包体不受影响。
@@ -316,15 +317,18 @@ const instanceForm = reactive({
   entry_id: '', evidence_text: '', basis: '',
 })
 
-const flowNodes = computed(() =>
-  filteredNodes.value.map((n) => ({
+const flowNodes = computed(() => {
+  const nodes = filteredNodes.value
+  const positions = layeredLayout(nodes)
+  return nodes.map((n) => ({
     id: n.id,
     label: n.label,
-    position: { x: 0, y: 0 },
+    position: positions.get(n.id) ?? { x: 0, y: 0 },
     data: { label: n.label, type: n.type },
     type: 'default',
     class: n.id === selectedNodeId.value ? 'wb-node-selected' : '',
-  })))
+  }))
+})
 const flowEdges = computed(() =>
   (studio.value?.edges ?? []).map((e, index) => ({
     id: `e-${index}`,
