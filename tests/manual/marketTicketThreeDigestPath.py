@@ -229,7 +229,7 @@ def main():
                 json.dumps(manifestData, ensure_ascii=False, indent=2), encoding="utf-8")
             fresh = _SkillService(agent_id="default", skills_dir=str(service.skills_dir))
             repinned = asyncio.run(fresh.call_skill(skillId, "main", task="probe"))
-            check("17 改构件＋重钉账本（同权限者能做）⇒ 锚不符，账本腿仍拒",
+            check("17 改构件＋重钉账本（同权限者能做）-> 锚不符，账本腿仍拒",
                   artifact_digest.REASON_MISMATCH in json.dumps(
                       repinned, ensure_ascii=False, default=str),
                   str(repinned)[:150])

@@ -72,6 +72,20 @@ class FakeCueClient:
         )
 
 
+def _denseTierIsUsable() -> bool:
+    """本机这一档是不是**真能算**的稠密档（零向量兜底档下通道一个候选也建不出来）。"""
+    from neurova.embedding import get_embedding_engine
+
+    engine = get_embedding_engine()
+    if engine is None or not getattr(engine, "backend_type", None):
+        return False
+    try:
+        vector = engine.encode("探针")
+    except Exception:  # noqa: BLE001 - 探测失败即视为无可用档
+        return False
+    return bool(vector) and any(float(x) != 0.0 for x in vector)
+
+
 @pytest.fixture
 def manager(tmp_path):
     from neurova.cognitive_layers.memory_layer.semantic_search import reset_semantic_search
@@ -125,6 +139,8 @@ class TestGenerationIsBatchedAndSweeping:
 class TestGeneratedCuesAreUsable:
     def test_生成的线索能被向量通道召回(self, manager):
         """端到端：生成 → 入库 → 通道点火 → 无词面重合的提问能捞出对应记忆。"""
+        if not _denseTierIsUsable():
+            pytest.skip("本机没有可用的稠密嵌入档（numpy/tokenizer 缺席）——通道建不出索引")
         target = ROWS[0]
         query = "团队聚餐选餐厅时要注意什么"
         # 查询与目标零中文字面重合（前提自证，否则用例白给）
