@@ -25,7 +25,8 @@ class KnowledgeLineageLedger:
     # ── 活动 ──────────────────────────────────────────────────
 
     def openActivity(
-        self, kind: str, inputs: Optional[Dict[str, Any]] = None, basis: str = ""
+        self, kind: str, inputs: Optional[Dict[str, Any]] = None, basis: str = "",
+        tenantId: str = "default",
     ) -> str:
         if kind not in ACTIVITY_KINDS:
             raise ValueError(
@@ -33,6 +34,7 @@ class KnowledgeLineageLedger:
             )
         return self._store.insertActivity(
             kind, inputs=inputs, basis=basis, toolVersion=self._toolVersion,
+            tenantId=tenantId,
         )
 
     def closeActivity(self, activityId: str, outputs: Optional[Dict[str, Any]] = None) -> None:

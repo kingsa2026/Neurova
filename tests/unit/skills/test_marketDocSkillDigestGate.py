@@ -28,6 +28,7 @@ from tests import ast_scan
 from neurova.security import artifact_digest
 from neurova.skills import market_registry
 from neurova.skills.market_registry import _build_executable_skill
+from tests import ast_scan
 from neurova.skills.skill_service import SkillService
 
 SKILL_MD = """---
@@ -181,15 +182,16 @@ class TestProductionBuildersCarryThePin:
         package = Path(market_registry.__file__).resolve().parents[1]
         offenders = []
         checked = 0
-        for path in ast_scan.filesUnder(package):
-            source = path.read_text(encoding="utf-8", errors="ignore")
-            if "_build_executable_skill" not in source:
-                continue
-            try:
-                tree = ast_scan.transientTree(path)
-            except SyntaxError:
-                continue
-            flags = self._builderCalls(tree)
+        # 枚举面与候选面分开量（形态 404）；枚举与读盘一律走 `tests/ast_scan` 的共享入口，
+        # 预筛词 `_build_executable_skill` 是本判据谓词的充分条件。
+        enumerated = len(ast_scan.sourceRefsUnder(package, ".py"))
+        assert enumerated >= 900, (
+            "枚举面现读 %d 个 .py（neurova/ 现算 1024）——package 指错时『都传了 pin』是假绿" % enumerated)
+        for ref in ast_scan.sourceRefsUnder(
+                package, ".py", hints=("_build_executable_skill",)):
+            path = ref.path
+            source = ref.code
+            flags = self._builderCalls(source)
             checked += len(flags)
             if any(flag is False for flag in flags):
                 offenders.append(str(path.relative_to(package)))

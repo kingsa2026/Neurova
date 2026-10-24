@@ -3,7 +3,7 @@
  *
  * 根因同 AgentPersonalityPage.agentSwitch.test.ts：页面用 useAgentPage() 取
  * agent 级数据，但未接 onAgentChange，切换 agent 后不重拉/链接不更新。
- * 覆盖：KnowledgeGraphPage / SleepStatusPage / SleepSettingsPage（数据重拉）、
+ * 覆盖：GraphWorkbenchPage / SleepStatusPage / SleepSettingsPage（数据重拉）、
  *       ContextChannelPage（页签链接随 agent 更新）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -73,7 +73,7 @@ vi.mock('ant-design-vue', async () => {
   return { ...actual, message: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }
 })
 
-import KnowledgeGraphPage from '@/pages/KnowledgeGraphPage.vue'
+import GraphWorkbenchPage from '@/pages/GraphWorkbenchPage.vue'
 import SleepStatusPage from '@/pages/SleepStatusPage.vue'
 import SleepSettingsPage from '@/pages/SleepSettingsPage.vue'
 import ContextChannelPage from '@/pages/ContextChannelPage.vue'
@@ -154,13 +154,13 @@ describe('Agent 切换联动总闸（同根因页面族）', () => {
     vi.mocked(sleepApi.getSleepSettings).mockResolvedValue({ data: {} } as any)
   })
 
-  it('KnowledgeGraphPage：注册 onAgentChange 且切换后按新 agent 重拉图谱', async () => {
-    mountPage(KnowledgeGraphPage)
+  it('GraphWorkbenchPage：注册 onAgentChange 且切换后按新 agent 重拉工作台', async () => {
+    mountPage(GraphWorkbenchPage)
     await flushPromises()
-    expect(registeredOnAgentChange, '图谱页未接 onAgentChange，切换 agent 不刷新').toBeTypeOf('function')
+    expect(registeredOnAgentChange, '工作台未接 onAgentChange，切换 agent 不刷新').toBeTypeOf('function')
     vi.mocked(request.get).mockClear()
     await switchToAgentB()
-    expect(request.get).toHaveBeenCalledWith('/knowledge-graph/agent-B/knowledge-graph')
+    expect(request.get).toHaveBeenCalledWith('/knowledge-graph/agent-B/studio')
   })
 
   it('SleepStatusPage：切换 agent 后睡眠状态/梦境/洞察/冲突按新 agent 重拉', async () => {

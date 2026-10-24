@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from typing import Awaitable, Callable, List, Optional
 
 from neurova.context.pool_models import ContextInput
@@ -25,16 +24,16 @@ from neurova.context.pool_models import ContextInput
 # 这里只保留摘要侧特有的语义：生成 → 脱敏 → 校验 → 单次 repair → fail-closed。
 from neurova.knowledge.verifiability import extract_identifiers, find_violations
 
+# 摘要出口脱敏改接内容级敏感信息单源（§6-413 批 P-5）：规则子集（`SUMMARY_RULES`）
+# 与打码引擎（`sanitizeSensitive`）都只有一份，本模块不再自带 `_REDACT_PATTERNS`。
+from neurova.security.sensitive_info import SUMMARY_RULES, sanitizeSensitive
+
 logger = logging.getLogger(__name__)
 
-# 脱敏模式（摘要出口）：常见密钥形态
-_REDACT_PATTERNS = (
-    re.compile(r"(sk-[A-Za-z0-9_\-]{8,})"),
-    re.compile(r"(ghp_[A-Za-z0-9]{20,})"),
-    re.compile(r"(?i)(api[_-]?key\s*[=:]\s*)\S+"),
-    re.compile(r"(?i)(token\s*[=:]\s*)\S+"),
-    re.compile(r"(?i)(password\s*[=:]\s*)\S+"),
-)
+# 出口词汇保持 `[REDACTED]` 不换：存量摘要文本、`test_summarizing_compressor.py:89`
+# 与 `test_evolution_gates_wave_c.py:83` 都按 `[REDACTED]` 写——统一成 `***` 会让新旧
+# 文本混排（引擎的 token 参数只换词汇、不换形状）。
+_REDACT_TOKEN = "[REDACTED]"
 
 _DEFAULT_PROMPT_TEMPLATE = """你是对话摘要器。请把以下被折叠的早期对话轮次，合并进已有摘要，\
 输出一段连续的中文摘要（不要罗列、不要解释）。必须保留：\
@@ -68,14 +67,12 @@ _REPAIR_PROMPT_TEMPLATE = """你上一版摘要包含以下**在原始对话中�
 [输出修正后的摘要]"""
 
 def _redact(text: str) -> str:
-    """摘要出口脱敏：带捕获组的模式保留键名只脱敏值，其余整段替换。"""
-    result = text or ""
-    for pattern in _REDACT_PATTERNS:
-        if pattern.groups:
-            result = pattern.sub(r"\1[REDACTED]", result)
-        else:
-            result = pattern.sub("[REDACTED]", result)
-    return result
+    """摘要出口脱敏：只投密钥形状＋凭据键值（`SUMMARY_RULES`），不投手机号那类 PII。
+
+    引擎与规则子集都在单源（`neurova/security/sensitive_info.py`）——键值式保键名只脱值、
+    值形状整段替换，都在引擎里各一份；这里只给出口词汇。
+    """
+    return sanitizeSensitive(text or "", SUMMARY_RULES, _REDACT_TOKEN)
 
 
 class SummarizingCompressor:

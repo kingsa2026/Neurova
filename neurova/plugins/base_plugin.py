@@ -10,6 +10,7 @@ import logging
 import typing
 from abc import ABC, abstractmethod
 
+from neurova.core.base_module import StateValuesStore
 from neurova.core.logger import LogLevel
 from neurova.plugins import plugin_permissions
 from neurova.plugins.plugin_manifest import (
@@ -77,10 +78,12 @@ class APIEndpoint:
         return f"APIEndpoint({self.method} {self.path})"
 
 
-class BasePlugin(ABC):
+class BasePlugin(StateValuesStore, ABC):
     """
     所有后端插件的基础抽象类
 
+    与 `BaseModule` 同族但**不共享构造链**（一个是进程内模块、一个是第三方装载物）；
+    共用的是同一份键值状态袋实装 `StateValuesStore`（`set_state_value`/`get_state_value`）。
     扩展了 BaseModule，增加了:
     - API 端点注册能力
     - 前后端资源声明
@@ -106,7 +109,9 @@ class BasePlugin(ABC):
         self._running = False
         self._logger = logging.getLogger(f"plugin.{manifest.plugin_id}")
         self._event_bus = None
-        self._state_manager = None
+        # 键值状态袋的字段名与 `BaseModule` 同一口径（唯一实装在
+        # `core/base_module.StateValuesStore`）；这里只建容器，不再另写一份读写。
+        self._state_values: typing.Dict[str, typing.Any] = {}
 
     @property
     def plugin_id(self) -> str:
@@ -145,23 +150,26 @@ class BasePlugin(ABC):
 
     @property
     def event_bus(self):
-        """事件总线"""
+        """显式注入的总线（覆盖通道）；没注入时由 `_resolveEventBus()` 现取全局单例。"""
         return self._event_bus
 
     @event_bus.setter
     def event_bus(self, value):
-        """设置事件总线"""
+        """覆盖通道：特殊装配与测试用。生产侧**不要求**有人来设它——不设也走得通。"""
         self._event_bus = value
 
-    @property
-    def state_manager(self):
-        """状态管理器"""
-        return self._state_manager
+    def _resolveEventBus(self):
+        """总线落点的唯一形状：注入优先，未注入**调用时现取**全局单例。
 
-    @state_manager.setter
-    def state_manager(self, value):
-        """设置状态管理器"""
-        self._state_manager = value
+        与 `core/base_module.py:_resolveEventBus` 是同一个委托（单源在
+        `core/event_bus.resolveEventBus`），不各写一份。改前这里是
+        `if self._event_bus:`，而生产侧从没有人给它赋值（`plugin_manager.py` 里连
+        `event_bus` 这个词都不出现，全仓赋值点只有三处测试）⇒ **已通过权限确认的插件**
+        调 `publish_event()`，效果只是打一条 warning，然后什么都没发生（§6-412 批 P-4）。
+        """
+        from neurova.core.event_bus import resolveEventBus
+
+        return resolveEventBus(self._event_bus)
 
     async def initialize(self) -> None:
         """初始化插件"""
@@ -230,24 +238,17 @@ class BasePlugin(ABC):
         调用方拿到 None 继续跑（§6-126 那一族：把不同故障折成同一个结论）。
         """
         self._requirePermission(PluginFrameworkSurface.READ_EVENTS)
-        if self._event_bus:
-            self._event_bus.subscribe(event_name, handler)
-        else:
-            self._logger.warning("事件总线未设置，无法订阅事件: %s", event_name)
+        self._resolveEventBus().subscribe(event_name, handler)
 
     def unsubscribe(self, event_name: str, handler: typing.Callable) -> None:
         """取消订阅事件（同 `read:events`——退订也是对他方事件面的操作）。"""
         self._requirePermission(PluginFrameworkSurface.READ_EVENTS)
-        if self._event_bus:
-            self._event_bus.unsubscribe(event_name, handler)
+        self._resolveEventBus().unsubscribe(event_name, handler)
 
     def publish_event(self, event_name: str, data: typing.Any = None) -> None:
         """发布事件（须 `emit:events` 已被逐项确认）。"""
         self._requirePermission(PluginFrameworkSurface.EMIT_EVENTS)
-        if self._event_bus:
-            self._event_bus.publish(event_name, data)
-        else:
-            self._logger.warning("事件总线未设置，无法发布事件: %s", event_name)
+        self._resolveEventBus().publish(event_name, data)
 
     def _requirePermission(self, permission: PluginFrameworkSurface) -> None:
         """框架中介点的判定单点：未确认即抛 `PluginError("permission_not_granted")`。
@@ -285,30 +286,6 @@ class BasePlugin(ABC):
     def log_error(self, message: str, **kwargs) -> None:
         """记录错误日志"""
         self.log(LogLevel.ERROR, message, **kwargs)
-
-    def get_state(self, key: str, default: typing.Any = None) -> typing.Any:
-        """获取状态
-
-        Args:
-            key: 状态键
-            default: 默认值
-
-        Returns:
-            状态值
-        """
-        if self._state_manager:
-            return self._state_manager.get_state(self.plugin_id, key, default)
-        return default
-
-    def set_state(self, key: str, value: typing.Any) -> None:
-        """设置状态
-
-        Args:
-            key: 状态键
-            value: 状态值
-        """
-        if self._state_manager:
-            self._state_manager.set_state(self.plugin_id, key, value)
 
     def _register_api_endpoint(self, endpoint: APIEndpoint) -> None:
         """注册 API 端点 (由子类实现)

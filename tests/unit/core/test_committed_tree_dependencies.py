@@ -20,9 +20,15 @@ from typing import Dict, List, Optional, Set
 _REPO = Path(__file__).resolve().parents[3]
 _LANES = ("neurova/knowledge/",)
 
+#: `_git()` 的预算唯一出处（§6-402 批 K 口径）。跑的是 `ls-tree` / `ls-files`，毫秒级；
+#: 此前没有 `timeout=`＝无界等待，而缺省 30s 的全局墙在 Windows 侧走 thread 法，
+#: 先到点就是整场跑测没了。取**低于全局墙**的 20s，整档不必另抬父墙。
+GIT_WALL_S = 20
+
 
 def _git(*args: str) -> bytes:
-    return subprocess.run(["git", *args], cwd=_REPO, capture_output=True).stdout
+    return subprocess.run(["git", *args], cwd=_REPO, capture_output=True,
+                          timeout=GIT_WALL_S).stdout
 
 
 def _trackedAtHead() -> Set[str]:

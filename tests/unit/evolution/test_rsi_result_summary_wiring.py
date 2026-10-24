@@ -51,6 +51,11 @@ from neurova.post_chat_pipeline import PostChatPipeline
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
+#: 干净子进程 import 探针的预算唯一出处（实测该 import 271ms）。取**低于全局 30s** 的 20s：
+#: 原写 180s 时先到点的是缺省 30s 的全局父墙，而 Windows 侧 thread 法超时即终止整个进程——
+#: 报的是"整场跑测没了"，不是这条诚实的 TimeoutExpired（§6-402 批 K 口径）。
+PROBE_WALL_S = 20
+
 # RSIOrchestrator.run_iteration 的真实返回形态（原样取自 orchestrator.py 尾部）
 REAL_ITERATION_RESULT = {
     "feedback_signals": {"signals": []},
@@ -157,7 +162,7 @@ class TestPackageExports:
             "print('ok')"
         )
         proc = subprocess.run([sys.executable, "-c", code], capture_output=True,
-                              text=True, cwd=str(PROJECT_ROOT), timeout=180)
+                              text=True, cwd=str(PROJECT_ROOT), timeout=PROBE_WALL_S)
         assert proc.returncode == 0, proc.stderr[-800:]
 
 

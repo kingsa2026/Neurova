@@ -50,6 +50,11 @@ REPO = pathlib.Path(__file__).resolve().parents[3]
 NEUROVA = REPO / "neurova"
 TWILIO_CONFIG_KEYS = ("voice_enabled", "twilio_account_sid", "twilio_auth_token", "twilio_from_number")
 
+#: 子进程 `find_spec('twilio')` 探针的预算唯一出处。它只问"这个包在不在"，毫秒级；
+#: 取**低于全局 30s** 的 20s——原写 60s 时，先到点的是缺省 30s 的全局父墙，而 Windows 侧
+#: thread 法超时即终止整个进程（§6-402 批 K 口径）。
+SPEC_PROBE_WALL_S = 20
+
 from neurova.channels.base import ChannelConfig  # noqa: E402
 
 from tests import ast_scan  # noqa: E402
@@ -217,7 +222,7 @@ class TestOutboundStaysHonestlyUnwired:
         result = subprocess.run(
             [sys.executable, "-c", "import importlib.util,sys;"
              "sys.exit(0 if importlib.util.find_spec('twilio') else 1)"],
-            capture_output=True, timeout=60)
+            capture_output=True, timeout=SPEC_PROBE_WALL_S)
         twilioInstalled = result.returncode == 0
 
         import asyncio

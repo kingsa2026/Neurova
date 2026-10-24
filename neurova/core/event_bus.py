@@ -354,6 +354,21 @@ _global_event_bus: Optional[EventBus] = None
 _bus_lock = threading.Lock()
 
 
+def resolveEventBus(override=None) -> EventBus:
+    """总线解析的**唯一形状**：显式注入优先，未注入则**每次调用现取**全局唯一入口。
+
+    为什么不冻结在构造期（`base_module.py:115` 与 `plugins/base_plugin.py:220` 两处踩的都是这条）：
+    一绑死，任何"重置全局单例"的动作（测试隔离、重启装配）都会让已建对象永远对着一条
+    已退役的总线发事件——写了没人读、读了恒为空，两头断点还都不报错。
+    为什么也不许各写一份 `if self._event_bus:`：注入位在生产侧常常**根本没有生产者**
+    （§6-412 现查：`plugin_manager.py` 里连 `event_bus` 这个词都不出现），那条 `if`
+    于是恒假，调用只剩一条 warning，看起来走了正常分支。
+    """
+    if override is not None:
+        return override
+    return get_event_bus()
+
+
 def get_event_bus() -> EventBus:
     """
     获取全局事件总线实例

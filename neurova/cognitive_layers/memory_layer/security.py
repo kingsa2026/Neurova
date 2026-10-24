@@ -72,13 +72,19 @@ def _load_or_create_encryption_key() -> str:
 # ────── Enums ──────
 
 
-class SensitivityLevel(Enum):
-    """敏感度级别"""
-
-    LOW = "low"  # 低敏感（一般信息）
-    MEDIUM = "medium"  # 中敏感（个人偏好）
-    HIGH = "high"  # 高敏感（个人信息）
-    CRITICAL = "critical"  # 关键敏感（财务/健康数据）
+#: 敏感度尺度与规则形状都在 `neurova/security/sensitive_info.py`（§6-411 批 O-5 收口）。
+#: 这里留**别名**而不是第二份定义：本模块历史上自带 `SensitivityLevel` 与 `SensitivePattern`，
+#: 与 cognitive 那边的 `SafetyLevel`＋自己那张 8 条表、firewall 那边那张 6 条表，
+#: 同一件事在仓内有四份口径——同一条规则可以有两个分级、脱敏有四套循环。
+from neurova.security.sensitive_info import (  # noqa: E402  (别名再导出，保持既有 import 面)
+    SENSITIVE_RULES,
+    SensitiveRule as SensitivePattern,
+    SensitivityLevel,
+    detectSensitive,
+    highestSeverity,
+    maskPreservingFormat,
+    sanitizeSensitive,
+)
 
 
 class EncryptionMethod(Enum):
@@ -105,16 +111,13 @@ class AuditAction(Enum):
 # ────── Data Models ──────
 
 
-@dataclass
-class SensitivePattern:
-    """敏感信息模式"""
+# 敏感信息规则的形状就是共享那一份 `SensitiveRule`（本文件顶部以 `SensitivePattern` 之名再导出）。
+# 这里原先另有一个同名 `@dataclass`——它把上面那个 import 盖掉了（守卫
+# `test_packageInitBindsNoUnusedGenericNames` 抓的正是这一形：import 从未生效），
+# 于是 `import_patterns()` 造出来的是**另一种**形状：字段叫 `sensitivity`、没有 `maskText()`，
+# 交给共享引擎用就会 `AttributeError`。收口不留第二种形状。
 
-    name: str
-    pattern: Pattern
-    sensitivity: SensitivityLevel
-    description: str = ""
-    replacement: str = "***"
-    enabled: bool = True
+
 
 
 @dataclass
@@ -157,72 +160,6 @@ class SecurityAuditResult:
 
 # ────── 内置敏感模式 ──────
 
-_BUILTIN_PATTERNS: List[SensitivePattern] = [
-    # 中国手机号
-    SensitivePattern(
-        name="chinese_mobile",
-        pattern=re.compile(r"1[3-9]\d{9}"),
-        sensitivity=SensitivityLevel.HIGH,
-        description="中国手机号码",
-        replacement="1**********",
-    ),
-    # 身份证号
-    SensitivePattern(
-        name="chinese_id",
-        pattern=re.compile(r"[1-9]\d{5}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx]"),
-        sensitivity=SensitivityLevel.CRITICAL,
-        description="中国身份证号码",
-        replacement="***",
-    ),
-    # 邮箱
-    SensitivePattern(
-        name="email",
-        pattern=re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"),
-        sensitivity=SensitivityLevel.MEDIUM,
-        description="电子邮箱地址",
-        replacement="***@***.***",
-    ),
-    # 银行卡号
-    SensitivePattern(
-        name="bank_card",
-        pattern=re.compile(r"(?:\d{4}[- ]?){3}\d{4}"),
-        sensitivity=SensitivityLevel.CRITICAL,
-        description="银行卡号",
-        replacement="****-****-****-****",
-    ),
-    # 密码模式
-    SensitivePattern(
-        name="password_pattern",
-        pattern=re.compile(r"(?:password|passwd|pwd|密码|口令)[\s:=]+\S+", re.IGNORECASE),
-        sensitivity=SensitivityLevel.CRITICAL,
-        description="密码字段",
-        replacement="password=***",
-    ),
-    # API密钥
-    SensitivePattern(
-        name="api_key",
-        pattern=re.compile(r"(?:api[_-]?key|token|secret)[\s:=]+[a-zA-Z0-9_\-]{20,}", re.IGNORECASE),
-        sensitivity=SensitivityLevel.CRITICAL,
-        description="API密钥/令牌",
-        replacement="api_key=***",
-    ),
-    # IP地址
-    SensitivePattern(
-        name="ip_address",
-        pattern=re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
-        sensitivity=SensitivityLevel.LOW,
-        description="IP地址",
-        replacement="*.*.*.*",
-    ),
-    # 信用卡号
-    SensitivePattern(
-        name="credit_card",
-        pattern=re.compile(r"\b(?:\d{4}[- ]?){3}\d{4}\b"),
-        sensitivity=SensitivityLevel.CRITICAL,
-        description="信用卡号码",
-        replacement="****-****-****-****",
-    ),
-]
 
 
 # ────── 加密工具 ──────
@@ -286,7 +223,10 @@ class MemorySecurity:
         memory_manager: Optional[Any] = None,
     ):
         self._config = config or SecurityConfig()
-        self._patterns: List[SensitivePattern] = list(_BUILTIN_PATTERNS)
+        # 内置规则就是共享表本身（§6-411 批 O-5）——这里不再留 `_BUILTIN_PATTERNS`
+        # 这个名字：收口前它是本模块自带的一张 8 条小抄（`bank_card` 与 `credit_card`
+        # 还是同一条正则登记两次），留名就等于留第二张表的入口。
+        self._patterns: List[SensitivePattern] = list(SENSITIVE_RULES)
         self._access_logs: List[AccessLog] = []
         self._lock = threading.RLock()
         # BUG AUDIT M-02: 被遗忘权需要真实的删除后端。此前 forget_memory()
@@ -296,15 +236,17 @@ class MemorySecurity:
         # 初始化加密器
         self._cipher = self._init_cipher()
 
+        # 名称→正则的缓存（按名字增删模式时用）。这 4 行必须留在 `__init__`：批 O-5 删本地
+        # 数据类时曾把它们错接进 `set_memory_manager()`，于是没设记忆管理器的实例调
+        # `import_patterns()` 直接 AttributeError（现场复算抓到，随本批归位）。
+        self._compiled_patterns: Dict[str, Pattern] = {}
+        for pattern in self._patterns:
+            self._compiled_patterns[pattern.name] = pattern.pattern
+
     def set_memory_manager(self, memory_manager: Any) -> None:
         """延迟注入记忆管理器（被遗忘权的真实删除后端）"""
         with self._lock:
             self._memory_manager = memory_manager
-
-        # 编译模式缓存
-        self._compiled_patterns: Dict[str, Pattern] = {}
-        for pattern in self._patterns:
-            self._compiled_patterns[pattern.name] = pattern.pattern
 
     def _init_cipher(self):
         """初始化加密器"""
@@ -385,37 +327,31 @@ class MemorySecurity:
         if not content:
             return []
 
-        results = []
-
         with self._lock:
-            for pattern in self._patterns:
-                if not pattern.enabled:
-                    continue
+            hits = detectSensitive(content, rules=self._patterns)
 
-                matches = pattern.pattern.findall(content)
-                if matches:
-                    results.append(
-                        {
-                            "pattern_name": pattern.name,
-                            "description": pattern.description,
-                            "sensitivity": pattern.sensitivity.value,
-                            "count": len(matches),
-                            "samples": matches[:3],  # 最多显示3个样本
-                        }
-                    )
-
-        return results
+        grouped: Dict[str, Dict[str, Any]] = {}
+        for hit in hits:
+            entry = grouped.setdefault(hit.rule.name, {
+                "pattern_name": hit.rule.name,
+                "description": hit.rule.description,
+                "sensitivity": hit.rule.severity.value,
+                "count": 0,
+                "samples": [],
+            })
+            entry["count"] += 1
+            if len(entry["samples"]) < 3:
+                # 样本给的是**打码后**的形状：检测面把原文抄进报告，等于换一个出口再泄露一次
+                entry["samples"].append(hit.evidence)
+        return list(grouped.values())
 
     def get_sensitivity_level(self, content: str) -> SensitivityLevel:
         """获取内容的敏感度级别"""
-        detections = self.detect_sensitive_info(content)
-
-        if not detections:
-            return SensitivityLevel.LOW
-
-        # 返回最高敏感度
-        levels = [SensitivityLevel(d["sensitivity"]) for d in detections]
-        return max(levels, key=lambda x: x.value)
+        with self._lock:
+            top = highestSeverity(detectSensitive(content, rules=self._patterns))
+        # 没命中才落 LOW；序由共享尺度给（本函数原先是 `max(levels, key=lambda x: x.value)`——
+        # 按字符串比大小，"medium" 会赢过 "critical"，"最高敏感度"其实是个错读数）
+        return top or SensitivityLevel.LOW
 
     def encrypt_sensitive_content(self, content: str, method: Optional[EncryptionMethod] = None) -> Tuple[str, str]:
         """
@@ -491,17 +427,8 @@ class MemorySecurity:
 
     def _mask_content(self, content: str) -> str:
         """掩码处理内容"""
-        result = content
-
         with self._lock:
-            for pattern in self._patterns:
-                if not pattern.enabled:
-                    continue
-
-                # 替换匹配的内容
-                result = pattern.pattern.sub(pattern.replacement, result)
-
-        return result
+            return sanitizeSensitive(content, rules=self._patterns)
 
     def anonymize_content(self, content: str, preserve_format: bool = True) -> str:
         """
@@ -517,27 +444,11 @@ class MemorySecurity:
         if not content:
             return ""
 
-        result = content
-
         with self._lock:
-            for pattern in self._patterns:
-                if not pattern.enabled:
-                    continue
-
-                if preserve_format:
-                    # 保留格式的匿名化
-                    def replace_preserve(match):
-                        original = match.group(0)
-                        if len(original) <= 4:
-                            return "*" * len(original)
-                        else:
-                            # 保留首尾字符
-                            return original[0] + "*" * (len(original) - 2) + original[-1]
-
-                    result = pattern.pattern.sub(replace_preserve, result)
-                else:
-                    # 简单替换
-                    result = pattern.pattern.sub(pattern.replacement, result)
+            if preserve_format:
+                # 保留长度的匿名化那一档语义也收进同一个引擎（形状不同，实现不再分家）
+                return maskPreservingFormat(content, rules=self._patterns)
+            return sanitizeSensitive(content, rules=self._patterns)
 
         return result
 
@@ -740,7 +651,7 @@ class MemorySecurity:
             # 按敏感度统计模式
             sensitivity_stats = {}
             for pattern in self._patterns:
-                level = pattern.sensitivity.value
+                level = pattern.severity.value
                 sensitivity_stats[level] = sensitivity_stats.get(level, 0) + 1
 
             return {
@@ -756,10 +667,15 @@ class MemorySecurity:
                 {
                     "name": p.name,
                     "pattern": p.pattern.pattern,
-                    "sensitivity": p.sensitivity.value,
+                    "sensitivity": p.severity.value,        # 外部配置键名不变（既有契约）
                     "description": p.description,
-                    "replacement": p.replacement,
                     "enabled": p.enabled,
+                    # 自定义 replacement 与内置的打码形状都无损带出去：
+                    # 只发 `replacement` 会把内置规则的"留首3末4"这种形状降级成整段替换。
+                    "replacement": p.literalReplacement,
+                    "maskStrategy": p.maskStrategy,
+                    "keepLeading": p.keepLeading,
+                    "keepTrailing": p.keepTrailing,
                 }
                 for p in self._patterns
             ]
@@ -769,12 +685,18 @@ class MemorySecurity:
         with self._lock:
             for config in patterns_config:
                 try:
+                    # 形状只有一份：这里造的必须是共享 `SensitiveRule`（`SensitivePattern`
+                    # 现在是它的别名）。`replacement` 给了就走字面替换，没给就用
+                    # `maskStrategy` 那三种形状之一——两边都不许被静默忽略。
                     pattern = SensitivePattern(
                         name=config["name"],
                         pattern=re.compile(config["pattern"]),
-                        sensitivity=SensitivityLevel(config["sensitivity"]),
+                        severity=SensitivityLevel(config["sensitivity"]),
                         description=config.get("description", ""),
-                        replacement=config.get("replacement", "***"),
+                        maskStrategy=config.get("maskStrategy", "whole"),
+                        keepLeading=int(config.get("keepLeading") or 0),
+                        keepTrailing=int(config.get("keepTrailing") or 0),
+                        literalReplacement=config.get("replacement"),
                         enabled=config.get("enabled", True),
                     )
                     self._patterns.append(pattern)

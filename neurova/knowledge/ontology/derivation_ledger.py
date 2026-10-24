@@ -151,14 +151,36 @@ class DerivationLedger:
         finally:
             self._cascade.busy = False
 
-    def retractRuleVersion(self, ruleId: str, keepVersion: str) -> int:
-        """规则改版：旧版本推出的结论全部撤回，新版本自己重推（不留"两版并存"）。"""
+    def retractRuleVersion(self, ruleId: str, keepVersion: str,
+                           tenantId: str = "default") -> int:
+        """规则改版：旧版本推出的结论全部撤回，新版本自己重推（不留"两版并存"）。
+        同 rule_id 跨租户（v25）互不波及。"""
         with self._store._lock:
             rows = self._store._conn.execute(
-                "SELECT DISTINCT derived_fact_id FROM knowledge_derivation_edges"
-                " WHERE rule_id = ? AND rule_version <> ? ORDER BY derived_fact_id",
-                (ruleId, keepVersion)).fetchall()
+                "SELECT DISTINCT e.derived_fact_id AS derived_fact_id"
+                " FROM knowledge_derivation_edges e"
+                " JOIN knowledge_facts f ON f.fact_id = e.derived_fact_id"
+                " WHERE e.rule_id = ? AND e.rule_version <> ? AND f.tenant_id = ?"
+                " ORDER BY e.derived_fact_id",
+                (ruleId, keepVersion, str(tenantId or "default"))).fetchall()
         return sum(self._retractDerived(r["derived_fact_id"], "规则 %s 改版为 %s" % (ruleId, keepVersion))
+                   for r in rows)
+
+    def retractAllFromRule(self, ruleId: str, reason: str = "",
+                           tenantId: str = "default") -> int:
+        """规则退场：它推过的结论全撤，不分版本——删除比改版更彻底，
+        保留任何一批"规则已不存在"的结论，都是拿着死规则对外检索。
+        同 rule_id 跨租户（v25）互不波及：撤回只对本租户的派生事实。"""
+        with self._store._lock:
+            rows = self._store._conn.execute(
+                "SELECT DISTINCT e.derived_fact_id AS derived_fact_id"
+                " FROM knowledge_derivation_edges e"
+                " JOIN knowledge_facts f ON f.fact_id = e.derived_fact_id"
+                " WHERE e.rule_id = ? AND f.tenant_id = ?"
+                " ORDER BY e.derived_fact_id",
+                (ruleId, str(tenantId or "default"))).fetchall()
+        return sum(self._retractDerived(r["derived_fact_id"],
+                                        reason or "规则 %s 已删除" % ruleId)
                    for r in rows)
 
     def _retractDerived(self, factId: str, reason: str) -> int:

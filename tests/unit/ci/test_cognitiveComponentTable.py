@@ -20,6 +20,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 SCRIPT = REPO_ROOT / "scripts" / "ci" / "cognitive_component_table.py"
+
+#: `git ls-files` 的预算唯一出处（毫秒级；取**低于全局 30s** 的这一形，让子进程先到点报
+#: 诚实的 TimeoutExpired，而不是全局那道 thread 法的墙把整场跑测打死——§6-402 批 K 口径）。
+GIT_WALL_S = 20
 DOC = REPO_ROOT / "docs" / "01-architecture" / "cognitive-component-table.md"
 
 
@@ -46,7 +50,8 @@ def _gitLsFiles(path: str):
     import subprocess
     return subprocess.run(
         ["git", "ls-files", "--", path], cwd=str(REPO_ROOT), capture_output=True,
-        text=True, encoding="utf-8", errors="replace").stdout.strip()
+        text=True, encoding="utf-8", errors="replace",
+        timeout=GIT_WALL_S).stdout.strip()
 
 
 class TestMachineBlocksMatchGenerator:

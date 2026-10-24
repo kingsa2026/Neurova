@@ -48,6 +48,11 @@ from pathlib import Path
 import pytest
 
 _REPO = Path(__file__).resolve().parents[3]
+
+#: `git ls-files` 的预算唯一出处（毫秒级；此前无 `timeout=`＝无界等待）。取低于全局 30s 的
+#: 20s——先到点的应当是子进程那条诚实的 TimeoutExpired，而不是 thread 法的全局墙
+#: 把整场跑测一起打死（§6-402 批 K 口径）。
+GIT_WALL_S = 20
 _LIB_RS = _REPO / "NeurUI" / "src-tauri" / "src" / "lib.rs"
 _MANIFEST = _REPO / "models" / "MANIFEST.json"
 _BOOT_PAGE = _REPO / "NeurUI" / "src-tauri" / "src" / "boot_page.html"
@@ -79,6 +84,7 @@ class TestManifestIsCommitted:
         r = subprocess.run(
             ["git", "ls-files", "--error-unmatch", "models/MANIFEST.json"],
             cwd=_REPO, capture_output=True,
+            timeout=GIT_WALL_S,
         )
         assert r.returncode == 0, (
             "models/MANIFEST.json 未入库，但 lib.rs 读它是硬失败 → "
