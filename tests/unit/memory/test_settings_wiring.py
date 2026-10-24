@@ -35,13 +35,15 @@ def settings(tmp_path):
     MemorySettingsConfig.reset_instance()
 
 
-def _make_manager(agent_id="wiring_test"):
+def _make_manager(tmpPath, agent_id="wiring_test"):
+    """落点由 `tmp_path` 给：`:memory:` 会被 `_init_storage` 取 dirname 当侧面库根，
+    退化成进程 CWD 并在仓根建出 `memory_storage/`（`_guardRepoRootAgainstPollution` 点名）。"""
     unique_id = f"{agent_id}_{uuid.uuid4().hex[:8]}"
-    return MemoryManager(db_path=":memory:", agent_id=unique_id)
+    return MemoryManager(db_path=str(tmpPath / f"{unique_id}.db"), agent_id=unique_id)
 
 
 class TestRememberUsesSettings:
-    def test_new_memory_temperature_and_importance(self, settings):
+    def test_new_memory_temperature_and_importance(self, settings, tmp_path):
         """不显式传温度/重要性时，新记忆使用配置值"""
         settings.update(
             {
@@ -49,25 +51,25 @@ class TestRememberUsesSettings:
                 "manager.new_memory_importance": 7.5,
             }
         )
-        mgr = _make_manager()
+        mgr = _make_manager(tmp_path)
         mid = mgr.remember("配置化默认值测试")
         mem = mgr._memories[mid]
         assert mem.temperature == 42.0
         assert mem.importance == 7.5
 
-    def test_explicit_args_override_settings(self, settings):
+    def test_explicit_args_override_settings(self, settings, tmp_path):
         """调用方显式传参时优先于配置"""
         settings.update({"manager.new_memory_temperature": 42.0})
-        mgr = _make_manager()
+        mgr = _make_manager(tmp_path)
         mid = mgr.remember("显式参数优先", temperature=10.0, importance=1.0)
         mem = mgr._memories[mid]
         assert mem.temperature == 10.0
         assert mem.importance == 1.0
 
-    def test_default_config_keeps_legacy_behavior(self, settings):
+    def test_default_config_keeps_legacy_behavior(self, settings, tmp_path):
         """未修改配置时保持 schema 默认行为：温度 65（2026-09-08 温度死锁修复，
         原 100 ≥ 高温不衰减阈值 80 使新记忆永不衰减）、重要性 50"""
-        mgr = _make_manager()
+        mgr = _make_manager(tmp_path)
         mid = mgr.remember("默认行为不变")
         mem = mgr._memories[mid]
         assert mem.temperature == 65.0
@@ -79,30 +81,30 @@ class TestHotMemoriesThreshold:
         for t in (90.0, 70.0, 50.0):
             mgr.remember(f"m{t}", temperature=t)
 
-    def test_get_hot_memories_uses_settings_threshold(self, settings):
+    def test_get_hot_memories_uses_settings_threshold(self, settings, tmp_path):
         """阈值来自配置：60 时 90/70 命中，50 被过滤。
 
         注意 recall 会 touch() 命中记忆（+10 封顶 100）：90→100、70→80。
         若 50 未被过滤，其 touch 后 60.0 会出现在结果里。
         """
         settings.update({"manager.hot_memories_threshold": 60.0})
-        mgr = _make_manager()
+        mgr = _make_manager(tmp_path)
         self._seed(mgr)
         temps = sorted(
             (m["temperature"] for m in mgr.get_hot_memories()), reverse=True
         )
         assert temps == [100.0, 80.0]
 
-    def test_explicit_threshold_overrides_settings(self, settings):
+    def test_explicit_threshold_overrides_settings(self, settings, tmp_path):
         """显式传 min_temperature 时优先于配置"""
         settings.update({"manager.hot_memories_threshold": 60.0})
-        mgr = _make_manager()
+        mgr = _make_manager(tmp_path)
         self._seed(mgr)
         assert mgr.get_hot_memories(min_temperature=100.0) == []
 
-    def test_default_threshold_keeps_legacy_behavior(self, settings):
+    def test_default_threshold_keeps_legacy_behavior(self, settings, tmp_path):
         """未修改配置时保持 80 阈值：仅 90 命中（touch 后 100）"""
-        mgr = _make_manager()
+        mgr = _make_manager(tmp_path)
         self._seed(mgr)
         temps = sorted(
             (m["temperature"] for m in mgr.get_hot_memories()), reverse=True
@@ -111,7 +113,7 @@ class TestHotMemoriesThreshold:
 
 
 class TestDecayRate:
-    def test_run_decay_cycle_uses_settings_decay_rate(self, settings):
+    def test_run_decay_cycle_uses_settings_decay_rate(self, settings, tmp_path):
         """同样一条 7 天未访问的中温记忆：decay_rate 越大衰减越多。
 
         温度须 <80：on_decay 对高温记忆(>=80)有硬编码固化保护。
@@ -119,7 +121,7 @@ class TestDecayRate:
         temps = {}
         for rate in (0.1, 0.5):
             settings.update({"temperature.decay_rate": rate})
-            mgr = _make_manager()
+            mgr = _make_manager(tmp_path)
             mid = mgr.remember("衰减速率测试", temperature=50.0, importance=1.0)
             mem = mgr._memories[mid]
             mem.last_accessed_at = datetime.now(timezone.utc) - timedelta(days=7)
@@ -189,10 +191,10 @@ class TestTemperatureRuntimeParams:
         m.touch()
         assert m.temperature == 60.0
 
-    def test_on_decay_respects_min_temperature(self, settings):
+    def test_on_decay_respects_min_temperature(self, settings, tmp_path):
         """衰减不会被压到 temperature.min 之下（默认 0 与历史一致）"""
         settings.update({"temperature.min": 30.0})
-        mgr = _make_manager()
+        mgr = _make_manager(tmp_path)
         mid = mgr.remember("min floor 测试", temperature=40.0, importance=1.0)
         mem = mgr._memories[mid]
         mem.last_accessed_at = datetime.now(timezone.utc) - timedelta(days=30)

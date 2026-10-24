@@ -1300,6 +1300,12 @@ tests/unit/agent/test_anthropic_loop_batch_handoff.py
 #   判据：令牌协议 / 处置声明与分派（真进程真断言，不用 MagicMock 冒充 Popen）/
 #   取消的裁决身份（不进 MIN(success) 粘性）/ 终态回到反馈环 / 杀灭单源。
 tests/unit/tools/test_tool_cancellation.py
+# 轮级取消令牌的跨用例隔离（`cnb-h41-1k5nnd37s#003` / `cnb-7o4-1k5nkg9f3#003` 两次
+#   7823 条里唯一一条红的根因）：上一条用例在协程里置位的令牌漏过用例边界，下一条起
+#   进程的用例被当场 SIGKILL，报出来是 exit_code=-9 的"本地运行时执行不回来"。
+#   判据两条：置位令牌真能杀掉进程（前提自证，不用 MagicMock 冒充）+ 上一格的置位
+#   到不了本格（关掉 conftest 夹具尾部那句即红）。
+tests/unit/core/test_turnCancelTokenLeaksAcrossCases.py
 
 # 跨轴一致性批（PR #287 尾巴）：名单成员资格收口到声明面的两份判据。
 #   · test_reproducible_flag.py：写作用域声明 ⇒ 不可重现（单向蕴含），含
@@ -1499,6 +1505,12 @@ tests/unit/deploy/test_image_runtime_selfproof.py
 #   `namespace: group` + tags。守卫逐条钉住「别把容器节点那套抄过来」，
 #   并要求 Windows 宿主自证（cmd /c ver）与构建工具链逐件点名。
 tests/unit/ci/test_win_installer_pipeline.py
+# PR #364 现场：`unit-tests` 的 Prepare 段在 116.7s 被杀（其余八条 17～64s），
+#   报的是「任务超过最大执行时间：1m0s」——两条 stage 一条都没跑。真因不在 stage 脚本，
+#   在 runner 声明处：`dependency-audit` 的 Prepare 要装 pip-audit、再落一个上百 MB 的
+#   冻结漏洞库，却与其余流水线同规格（cpus 2）。判据按**阶段结构 + 缓存卷**认这条不变量，
+#   不按流水线名认（名字是标签，改名不该让判据失效）。
+tests/unit/ci/test_runnerAllocatedWallClockIsNotADeadline.py
 # Issue #332（实测断裂）：自定义界面壳的欢迎页把版本写死成字面量 `v1.0.0`，
 #   而产品版本事实源（tauri.conf.json / package.json）已跑到 `1.0.0-beta5` ——
 #   装出来的包**显示了一个错版本号**，用户无法据此判断装的是哪一版。
@@ -3470,7 +3482,7 @@ tests/unit/workflow/test_mcp_server_face.py
 # Authorization，§3 身份单通道）；一条按 AST 认"判定确实委托 `agent_access`、本模块没自己读
 # owner_user_id"的形状格——按词扫会被 docstring 里的同名说明骗到（形态集 241/268 那一族）。
 # 本档不枚举目录：形状格只解析自己受治的那一个模块（不触发解析预算门禁）。
-tests/unit/api/test_mcpFaceCallerTier.py
+tests/unit/api/test_mcpFaceCallerTierIsScopedByOwner.py
 # 宽域 A/B 驱动的读数契约（§6-359）：汇总行两种形态都要读得到、抽取条数必须与汇总报数对账、
 # 没产出汇总行即 AB_FAIL、仅本树红那格在基线树跑不出亦 AB_FAIL、非本仓形态显式 AB_SKIP。
 # 四格合成仓走真 git worktree＋真 pytest 子进程（AB_PASS/AB_REGRESSION/AB_FAIL/AB_SKIP 各一枚），
