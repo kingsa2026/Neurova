@@ -31,6 +31,10 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+#: `git check-ignore` 的预算唯一出处（毫秒级；此前无 `timeout=`＝无界等待）。取低于全局 30s
+#: 的 20s，让先到点的是子进程那条诚实的 TimeoutExpired（§6-402 批 K 口径）。
+GIT_WALL_S = 20
 #: 扫描根单点（必须是模块级：函数内的局部名会被面自证棘轮解成动态值，那档就静默掉出它的面）。
 NEUROVA = PROJECT_ROOT / "neurova"
 
@@ -106,6 +110,7 @@ class TestManifestMatchesLockfiles:
         r = subprocess.run(
             ["git", "check-ignore", "-q", "tools/npx-runtime/package-lock.json"],
             cwd=str(PROJECT_ROOT),
+            timeout=GIT_WALL_S,
         )
         assert r.returncode != 0, (
             "tools/npx-runtime/package-lock.json 被 .gitignore 忽略——"

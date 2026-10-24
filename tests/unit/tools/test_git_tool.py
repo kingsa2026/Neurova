@@ -19,6 +19,11 @@ import pytest
 
 needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git 不在 PATH")
 
+#: 临时仓里 git 调用的预算唯一出处。原写 30s **恰等于**全局墙——两处同时到点就是掷骰子，
+#: 输的一方是整场跑测（Windows 侧 thread 法超时即终止进程，§6-402 批 K 口径）。
+#: 收到低于全局墙的 20s：这些是 `init`/`add`/`commit`，毫秒级。
+GIT_WALL_S = 20
+
 
 @pytest.fixture(autouse=True)
 def _hermetic_git_env(monkeypatch):
@@ -70,7 +75,7 @@ def _init_repo(tmp_path):
     def _git(*args):
         return subprocess.run(
             ["git", *args],
-            cwd=str(tmp_path), capture_output=True, text=True, timeout=30,
+            cwd=str(tmp_path), capture_output=True, text=True, timeout=GIT_WALL_S,
             env=_no_ambient_config_env(),
         )
 

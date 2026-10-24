@@ -31,7 +31,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import tests.ast_scan as ast_scan
+from tests import ast_scan
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 OLD_CHAIN = REPO_ROOT / "tests" / "integration" / "test_full_chain.py"
@@ -128,15 +128,19 @@ class TestTheDeadFacadesStayDead:
 class TestNobodyCallsTheAsyncRouterSynchronously:
     def testNoSyncRouteCallsRemainInTestsOrScripts(self):
         offenders = []
-        # 枚举与解析都走共享预算（tests/ast_scan.py）：私有 rglob + ast.parse 会把
-        # 「代码总量」编码成墙钟上界（Issue #148 的根因形态）。
-        for root in (REPO_ROOT / "tests", REPO_ROOT / "scripts"):
-            for path in ast_scan.filesUnder(root):
-                if "__pycache__" in path.parts:
-                    continue
-                source = ast_scan.sourceCode(path)
-                if ".route(" not in source:
-                    continue
+        # 枚举与解析都走共享预算入口（tests/ast_scan.py）：私有 rglob + ast.parse 会把
+        # 「代码总量」编码成墙钟上界（Issue #148 的根因形态）。产物目录由 filesUnder
+        # 自身剪掉，这里不再重复过滤。
+        candidates = 0
+        roots = (REPO_ROOT / "tests", REPO_ROOT / "scripts")
+        # 枚举面：不带预筛地量一次根（走同一个共享入口，避免"我只数了预筛后的"那种自证）。
+        enumerated = sum(len(ast_scan.sourceRefsUnder(root, ".py")) for root in roots)
+        for root in roots:
+            # 候选面：预筛词 `.route(` 是本判据谓词的**充分条件**（没有这个字面串就不可能
+            # 有同步 `route` 调用），口径仍是全量清单。
+            for ref in ast_scan.sourceRefsUnder(root, ".py", hints=(".route(",)):
+                candidates += 1
+                path = ref.path
                 try:
                     # 解析走共享预算的一次性入口（不留常驻语法树；本判据只扫一次）。
                     lines = _syncRouteCallsIn(ast_scan.transientTree(path))
@@ -144,6 +148,12 @@ class TestNobodyCallsTheAsyncRouterSynchronously:
                     continue
                 if lines:
                     offenders.append("%s:%s" % (path.relative_to(REPO_ROOT), lines))
+        # 面自证拆两条（形态 404）：枚举面证"根指得到"，候选面证"预筛没把命中滤空"。
+        # 现算 tests 2483 ＋ scripts 76 ＝ 2559 个 .py；根少指一层（只剩 scripts）就掉到 76。
+        assert enumerated >= 2000, (
+            "枚举面现读 %d 个 .py（tests＋scripts 应在千级）——根指错时零 offender 不作数" % enumerated)
+        assert candidates >= 3, (
+            "候选面（含 `.route(` 的档）现读 %d 个——预筛词写坏会把一切滤成零命中" % candidates)
         assert offenders == [], (
             "还有同步调用 `router.route(...)` 的落点——`route()` 早就是 async，"
             "这形会把协程当成结果用（旧档 14 红的根因）：%s" % offenders[:5])

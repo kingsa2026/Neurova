@@ -167,6 +167,8 @@ class TestPhantomKnobSweep:
           （自己 `read_text` 的话，缓存计数一动不动，只看第一条就漏放行）。
         """
         corpus = len(ast_scan.filesUnder(PROD_ROOT, ".py"))
+        assert corpus >= 800, (
+            "生产语料现读 %d 个 .py——PROD_ROOT 指错时『没多读盘』会假绿（面自证）" % corpus)
         cache = ast_scan._cachedCode
         if not hasattr(cache, "cache_info"):
             pytest.fail("ast_scan._cachedCode 不再是带 cache_info 的缓存入口——"

@@ -25,6 +25,14 @@ from .knowledge_facts import (
     _SCHEMA_V15,
     _SCHEMA_V16,
     _SCHEMA_V17,
+    _SCHEMA_V18,
+    _SCHEMA_V19,
+    _SCHEMA_V20,
+    _SCHEMA_V21,
+    _SCHEMA_V22,
+    _SCHEMA_V23,
+    _SCHEMA_V24,
+    _SCHEMA_V25,
 )
 from .digest_chain import _SCHEMA_V11
 from ..ontology.derivation_ledger import _SCHEMA_V10
@@ -56,6 +64,22 @@ _STEPS: List[tuple] = [
     (16, _SCHEMA_V16),
     # v17：检索侧未归因 token（文档命中不能摊到 fact，但成本总数不丢）
     (17, _SCHEMA_V17),
+    # v18：entry 级 token 账（文档条目与 fact 分表；轮总量加 entry_attributed_tokens）
+    (18, _SCHEMA_V18),
+    # v19：事实变更历史（create/supersede/retract/expire/revive/rollback）与业务基线
+    (19, _SCHEMA_V19),
+    # v20：租户分区（事实/活动列 + 唯一索引带 tenant）
+    (20, _SCHEMA_V20),
+    # v21：事实冲突账按租户分区
+    (21, _SCHEMA_V21),
+    # v22：业务基线按租户分区
+    (22, _SCHEMA_V22),
+    # v23：主体消解字典按租户分区
+    (23, _SCHEMA_V23),
+    # v24：事实带条目分类（基线 category 维度）
+    (24, _SCHEMA_V24),
+    # v25：本体按租户分区（已拍板），两表重建为 (tenant_id, id) 复合主键
+    (25, _SCHEMA_V25),
 ]
 
 _registered = False

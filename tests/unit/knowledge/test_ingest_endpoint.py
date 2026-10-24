@@ -86,7 +86,9 @@ def test_import_sync_default_unchanged(env, monkeypatch):
     # 拆分后真身在 knowledge_ingestion（2026-09-16 模块化），patch 聚合器无效
     monkeypatch.setattr(
         kn_ingestion, "_import_file_data",
-        lambda data, fn, ag, user: ([{"knowledge_id": "k1", "content": "x"}], "ok"),
+        lambda data, fn, ag, user, ocr_mode="auto", engine_mode="structured": (
+            [{"knowledge_id": "k1", "content": "x"}], "ok"
+        ),
     )
     r = client.post("/api/v1/knowledge/import?agent_id=ag", files={"file": ("a.txt", b"x", "text/plain")})
     assert r.status_code == 200

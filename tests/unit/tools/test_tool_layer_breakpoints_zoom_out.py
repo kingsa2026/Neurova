@@ -31,6 +31,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from tests.repo_paths import REPO_ROOT, repo_str
 
+#: 那枚「起子进程扫生产树」探针的预算唯一出处（§6-402 批 K 口径）。原写 30s **恰等于**
+#: 全局墙——两处同时到点就是掷骰子，而 Windows 侧 thread 法超时终止的是整个跑测进程。
+#: 扫 `neurova/` 一遍实测量级在秒内，取低于全局墙的 20s，整档因此不必抬父墙。
+SCAN_WALL_S = 20
+
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -418,7 +423,7 @@ if violations:
     print(','.join(violations))
 """],
                 capture_output=True, text=True, cwd=str(REPO_ROOT),
-                timeout=30
+                timeout=SCAN_WALL_S
             )
             violations = result.stdout.strip()
             assert not violations, (

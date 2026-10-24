@@ -81,11 +81,14 @@ async def list_conflicts(
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="仅管理员可查看冲突队列")
     repo = get_repository()
+    tenant = str(current_user.get("tenant_id") or "default")
     rows: List[Dict[str, Any]] = []
     if axis in ("all", "entry"):
-        rows = [dict(rec, axis="entry") for rec in repo.list_conflicts(status=status)]
+        rows = [dict(rec, axis="entry")
+                for rec in repo.list_conflicts(status=status, tenantId=tenant)]
     if axis in ("all", "fact"):
-        rows += [_factConflictResponse(rec) for rec in _factStore().conflicts(status=status)]
+        rows += [_factConflictResponse(rec)
+                 for rec in _factStore().conflicts(status=status, tenantId=tenant)]
     return rows
 
 
