@@ -190,6 +190,12 @@ async def search_knowledge(
         agent_id=agent_id,
         limit=body.limit,
         tags=body.tags,
+        source=body.source,
+        author=body.author,
+        source_type=body.source_type,
+        ocr_used=body.ocr_used,
+        page_min=body.page_min,
+        updated_after=body.updated_after,
     )
     return [item_response(i) for i in results]
 
@@ -275,6 +281,7 @@ async def create_knowledge(
         tenant_id=str(current_user.get("tenant_id") or "default"),
         valid_until=body.valid_until,
         lifecycle_status=body.lifecycle_status,
+        dedupe=True,
     )
     return item_response(item)
 

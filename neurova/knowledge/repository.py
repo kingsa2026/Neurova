@@ -22,7 +22,9 @@ import difflib
 import hashlib
 import json
 import os
+import re
 import threading
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -190,6 +192,23 @@ class ChunkRevisionConflict(Exception):
     """P1#8 chunk 编辑乐观锁：expected_revision 与块当前 revision 不符。
 
     时不静默覆盖，调用方须重读最新块后重试。"""
+
+
+def _contentFingerprint(tenantId: str, content: str) -> str:
+    """精确去重键：租户 + 规范化正文；空白差异不算不同文档。"""
+    normalized = unicodedata.normalize("NFKC", str(content or ""))
+    normalized = re.sub(r"\s+", " ", normalized).strip().casefold()
+    seed = "%s|%s" % (str(tenantId or "default"), normalized)
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()
+
+
+def _sourceEvidence(item: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "source": str(item.get("source") or ""),
+        "source_type": str(item.get("source_type") or ""),
+        "source_path": str(item.get("source_path") or ""),
+        "ingest_time": str(item.get("ingest_time") or ""),
+    }
 
 
 class KnowledgeRepository:
@@ -630,6 +649,13 @@ class KnowledgeRepository:
             item["shared_with"] = []
         if not isinstance(item.get("tenant_id"), str) or not item.get("tenant_id"):
             item["tenant_id"] = "default"
+        if not isinstance(item.get("content_fingerprint"), str) or not item.get("content_fingerprint"):
+            item["content_fingerprint"] = _contentFingerprint(
+                item["tenant_id"], str(item.get("content") or "")
+            )
+        if not isinstance(item.get("sources"), list):
+            evidence = _sourceEvidence(item)
+            item["sources"] = [evidence] if evidence.get("source") else []
         if not isinstance(item.get("graph_node_ids"), list):
             item["graph_node_ids"] = []
         if not isinstance(item.get("valid_until"), str):
@@ -754,9 +780,30 @@ class KnowledgeRepository:
         ocr_confidence_avg: Optional[float] = None,
         document_id: str = "",
         tenant_id: str = "default",
+        dedupe: bool = False,
     ) -> Dict[str, Any]:
         status = normalizeLifecycleStatus(lifecycle_status)
         now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        tenant = str(tenant_id or "default")
+        fingerprint = _contentFingerprint(tenant, content)
+        if dedupe:
+            with self._lock:
+                for existing in self._items.get(agent_id, []):
+                    if (
+                        str(existing.get("tenant_id") or "default") == tenant
+                        and str(existing.get("content_fingerprint") or "") == fingerprint
+                    ):
+                        evidence = _sourceEvidence({
+                            "source": source, "source_type": source_type,
+                            "source_path": source_path, "ingest_time": ingest_time,
+                        })
+                        sources = existing.setdefault("sources", [])
+                        if evidence.get("source") and evidence not in sources:
+                            sources.append(evidence)
+                            self._save()
+                        duplicate = dict(existing)
+                        duplicate["duplicate"] = True
+                        return duplicate
         item: Dict[str, Any] = {
             "knowledge_id": knowledge_id or str(uuid.uuid4()),
             "title": title,
@@ -769,7 +816,12 @@ class KnowledgeRepository:
             "updated_at": now,
             "visibility": visibility if visibility in (VISIBILITY_PUBLIC, VISIBILITY_PRIVATE) else VISIBILITY_PRIVATE,
             "owner_user_id": str(owner_user_id or "default"),
-            "tenant_id": str(tenant_id or "default"),
+            "tenant_id": tenant,
+            "content_fingerprint": fingerprint,
+            "sources": [_sourceEvidence({
+                "source": source, "source_type": source_type,
+                "source_path": source_path, "ingest_time": ingest_time,
+            })] if source else [],
             "shared_with": [],
             "graph_node_ids": [],
             "submission": None,
@@ -873,6 +925,10 @@ class KnowledgeRepository:
         tags: Optional[List[str]] = None,
         source: Optional[str] = None,
         updated_after: Optional[float] = None,
+        author: Optional[str] = None,
+        source_type: Optional[str] = None,
+        ocr_used: Optional[bool] = None,
+        page_min: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """按当前用户可见性返回条目视图（scope: all/public/private/shared）。
 
@@ -913,6 +969,14 @@ class KnowledgeRepository:
                 if tags and not all(tag in (item.get("tags") or []) for tag in tags):
                     continue
                 if source and str(item.get("source") or "") != str(source):
+                    continue
+                if author and str(item.get("author") or "") != str(author):
+                    continue
+                if source_type and str(item.get("source_type") or "") != str(source_type):
+                    continue
+                if ocr_used is not None and bool(item.get("ocr_used")) is not bool(ocr_used):
+                    continue
+                if page_min is not None and int(item.get("page_count") or 0) < int(page_min):
                     continue
                 if updated_after is not None:
                     try:
@@ -1108,6 +1172,10 @@ class KnowledgeRepository:
         tags: Optional[List[str]] = None,
         source: Optional[str] = None,
         updated_after: Optional[float] = None,
+        author: Optional[str] = None,
+        source_type: Optional[str] = None,
+        ocr_used: Optional[bool] = None,
+        page_min: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """在当前用户可见视图内检索知识。
 
@@ -1120,6 +1188,8 @@ class KnowledgeRepository:
         visible = self.visible_items(
             user, scope=scope, category=category, agent_id=agent_id, tags=tags,
             source=source, updated_after=updated_after,
+            author=author, source_type=source_type, ocr_used=ocr_used,
+            page_min=page_min,
         )
         if not visible:
             return []

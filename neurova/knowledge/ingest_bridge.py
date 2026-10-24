@@ -240,6 +240,7 @@ class KnowledgeIngestBridge:
                 ocr_engine=str(parsed.metadata.get("ocr_engine") or ""),
                 ocr_confidence_avg=parsed.metadata.get("ocr_confidence_avg"),
                 document_id=parsed.doc_id,
+                dedupe=True,
             )
             return {"status": "accepted", "knowledge_id": item.get("knowledge_id")}
         except DocumentParseError as exc:
