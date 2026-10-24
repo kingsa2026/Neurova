@@ -1,5 +1,5 @@
 import api from '@/api'
-import type { ApiResponse, LimitOffsetParams, PaginatedData } from '@/types/response'
+import type { ApiResponse, LimitOffsetParams } from '@/types/response'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -7,6 +7,8 @@ import type { ApiResponse, LimitOffsetParams, PaginatedData } from '@/types/resp
 
 export interface Skill {
   id: string
+  /** 后端行主键原文（MarketplaceSkill / SkillInfo 都用这个词）；id 由它归一而来 */
+  skill_id?: string
   name: string
   description: string
   version: string
@@ -19,8 +21,17 @@ export interface Skill {
   available?: boolean
   unavailable_reason?: string
   config?: Record<string, unknown>
+  /** 后端行自带的用量读数（SkillInfo.usage）；生命周期档案的更细读数由页面另行合并 */
+  usage?: Record<string, unknown>
   created_at?: string
   updated_at?: string
+  // 市场域专有读数（MarketplaceSkill 契约）：库面/agent 面不带，按可选消费
+  downloads?: number
+  rating?: number
+  /** P0-4 声明式权限：null/缺位=未声明；dict=声明生效（运行时 fail-closed） */
+  permissions?: Record<string, unknown> | null
+  /** P2-15 沙箱声明位 */
+  sandbox_required?: boolean | null
 }
 
 export interface SkillCreatePayload {
@@ -47,6 +58,30 @@ export interface SkillUpdatePayload {
 
 const BASE = '/skill-pool'
 
+/** 三层库行（后端 skill_pool_api.SkillInfo 契约）：id 自 skill_id 归一而来。 */
+export interface LibrarySkillRow extends LibrarySkill {
+  id: string
+}
+
+/**
+ * 技能行主键归一的唯一落点：后端四个技能读面（/marketplace/skills、
+ * /skill-pool/public、/skill-pool/me/skills、/skill-pool/agent/{id}/skills）
+ * 的行主键都叫 skill_id，前端消费方统一读 id。页面不得再各自重命名——
+ * 重复到第四处时，漏掉的那一页会把 undefined 拼进安装 URL（2026-10-24 真机 404）。
+ * 守卫：src/api/modules/__tests__/skillRowIdSingleSource.test.ts。
+ */
+function withUnifiedRowId<T extends object>(row: T): T & { id: string } {
+  const raw = row as Record<string, unknown>
+  return { ...row, id: String(raw.skill_id ?? raw.id ?? '') }
+}
+
+/** 出口形态有三种：裸数组 / {items,total} 分页信封 / {code,data} 响应信封。 */
+function toSkillRows<T extends object>(res: unknown): Array<T & { id: string }> {
+  const body: any = (res as any)?.data ?? res
+  const rows: T[] = Array.isArray(body) ? body : body?.items ?? []
+  return rows.map(withUnifiedRowId)
+}
+
 /** List public skills available in the marketplace.
  *
  * 2026-09-03: 原调 /skill-pool/public(僵尸空 dict, 无人填充)。
@@ -54,15 +89,17 @@ const BASE = '/skill-pool'
  */
 export function getPublicSkills(
   params?: LimitOffsetParams & { category?: string; search?: string },
-) {
-  return api.get<ApiResponse<PaginatedData<Skill>>>('/marketplace/skills', {
-    params: {
-      ...params,
-      limit: params?.limit ?? 100,
-      offset: params?.offset ?? 0,
-      with_total: true,
-    },
-  })
+): Promise<Skill[]> {
+  return api
+    .get<unknown>('/marketplace/skills', {
+      params: {
+        ...params,
+        limit: params?.limit ?? 100,
+        offset: params?.offset ?? 0,
+        with_total: true,
+      },
+    })
+    .then((res) => toSkillRows<Omit<Skill, 'id'>>(res))
 }
 
 // ---------------------------------------------------------------------------
@@ -72,11 +109,11 @@ export function getPublicSkills(
 // SkillPoolPage，已整体迁移至下列 me/public 库函数，旧函数删除。
 // ---------------------------------------------------------------------------
 
-/** 库条目（后端 SkillInfo 契约：主键字段是 skill_id，非 id）。 */
+/** 库条目（后端 SkillInfo 契约：主键字段是 skill_id，非 id；SkillInfo.description 有默认值恒在）。 */
 export interface LibrarySkill {
   skill_id: string
   name: string
-  description?: string
+  description: string
   category?: string
   version?: string
   scope?: string
@@ -87,13 +124,15 @@ export interface LibrarySkill {
 }
 
 /** 公共技能库（pool=public，审批物化/管理员登记的条目，所有用户可见可读）。 */
-export function listPublicLibrarySkills() {
-  return api.get<ApiResponse<LibrarySkill[]>>(`${BASE}/public`)
+export function listPublicLibrarySkills(): Promise<LibrarySkillRow[]> {
+  return api.get<unknown>(`${BASE}/public`)
+    .then((res) => toSkillRows<LibrarySkill>(res))
 }
 
 /** 我的用户私库（pool=user，ukey=u:{user_id}；接收 agent 推送与公共升级）。 */
-export function listMySkills() {
-  return api.get<ApiResponse<LibrarySkill[]>>(`${BASE}/me/skills`)
+export function listMySkills(): Promise<LibrarySkillRow[]> {
+  return api.get<unknown>(`${BASE}/me/skills`)
+    .then((res) => toSkillRows<LibrarySkill>(res))
 }
 
 /** 用户私库创建技能。 */
@@ -117,9 +156,11 @@ export function installPublicToMine(skillId: string) {
 }
 
 /** Install a marketplace skill (canonical /marketplace/skills/{id}/install；
- *  原 /skill-pool/{id}/install 路由不存在恒 404，ADR 0013 写侧迁移漏项）。 */
+ *  原 /skill-pool/{id}/install 路由不存在恒 404，ADR 0013 写侧迁移漏项）。
+ *  回体带的是 wire 原词 skill_id，不是归一后的 id——别在此处读 .id。 */
 export function installSkill(skillId: string, agentId: string) {
-  return api.post<ApiResponse<Skill>>(`/marketplace/skills/${skillId}/install`, { agent_id: agentId })
+  return api.post<ApiResponse<{ skill_id: string; already_installed?: boolean }>>(
+    `/marketplace/skills/${skillId}/install`, { agent_id: agentId })
 }
 
 // ---------------------------------------------------------------------------
@@ -212,8 +253,9 @@ export function uninstallSkill(skillId: string, agentId: string) {
 }
 
 /** List all skills installed on an agent. */
-export function getAgentSkills(agentId: string) {
-  return api.get<ApiResponse<Skill[]>>(`${BASE}/agent/${agentId}/skills`)
+export function getAgentSkills(agentId: string): Promise<Skill[]> {
+  return api.get<unknown>(`${BASE}/agent/${agentId}/skills`)
+    .then((res) => toSkillRows<Omit<Skill, 'id'>>(res))
 }
 
 /** 已采纳 harness 的跨域/域内检索（只读；复用既有技能库）。 */
