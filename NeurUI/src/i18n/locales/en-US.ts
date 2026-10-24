@@ -794,6 +794,7 @@ export default {
     manual: 'Needs a human',
   },
   knowledge: {
+    workbenchFilterTypes: 'Filter types',
     workbenchFullGraph: 'Full graph',
     duplicateMerged: 'Content already exists: matched an existing entry, this source was merged into its provenance chain',
     filterApply: 'Apply',

@@ -794,6 +794,7 @@ export default {
 
 
   knowledge: {
+    workbenchFilterTypes: 'Filtrar por tipo',
     workbenchFullGraph: 'Grafo completo',
     duplicateMerged: 'El contenido ya existe: esta fuente se fusionó en la cadena de procedencia de la entrada existente',
     filterApply: 'Aplicar',

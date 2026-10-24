@@ -21,6 +21,16 @@
       >
         {{ t('knowledge.workbenchFullGraph') }}
       </GlassButton>
+      <a-select
+        v-model:value="visibleTypes"
+        mode="multiple"
+        size="sm"
+        allow-clear
+        class="types-select"
+        :max-tag-count="2"
+        :placeholder="t('knowledge.workbenchFilterTypes')"
+        :options="typeOptions"
+      />
       <a-tag v-if="truncated" color="orange">{{ t('knowledge.workbenchTruncatedHint', { total: totalNodes }) }}</a-tag>
     </div>
     <div ref="containerRef" class="explorer3d-canvas"></div>
@@ -37,7 +47,7 @@
  * 子图由服务端裁剪（focus/hops/limit），客户端不养一张大图；
  * 节点点击 emit('select')，与 2D 画布选中同步。
  */
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -60,11 +70,36 @@ const hops = ref(2)
 const empty3d = ref(false)
 const truncated = ref(false)
 const totalNodes = ref(0)
+// 类型过滤器（渲染降噪）：只影响显示集，不改服务端数据；空=全部显示。
+const visibleTypes = ref<string[]>([])
+let rawNodes: Array<{ id: string; name: string; type: string }> = []
+let rawLinks: Array<{ source: string; target: string; relation: string }> = []
 
 let graph: any = null
 let disposed = false
 
 const currentNodeId = ref('')
+
+const typeOptions = computed(() => {
+  const kinds = new Set(rawNodes.map((n) => n.type).filter(Boolean))
+  return Array.from(kinds).sort().map((k) => ({ value: k, label: k }))
+})
+
+// 渲染集按类型过滤：边只保留两端都可见的——带半截边就是"看不见的节点还在拉线"。
+const applyRender = () => {
+  const nodes = visibleTypes.value.length
+    ? rawNodes.filter((n) => visibleTypes.value.includes(n.type))
+    : rawNodes
+  const ids = new Set(nodes.map((n) => n.id))
+  const links = visibleTypes.value.length
+    ? rawLinks.filter((l) => ids.has(l.source) && ids.has(l.target))
+    : rawLinks
+  void render({ nodes, links })
+}
+
+watch(visibleTypes, () => {
+  applyRender()
+})
 
 const refetch = async () => {
   if (!containerRef.value) return
@@ -79,7 +114,13 @@ const refetch = async () => {
     const data = res?.data ?? res
     truncated.value = Boolean(data?.truncated)
     totalNodes.value = Number(data?.total_nodes ?? 0)
-    render(data)
+    rawNodes = (data?.nodes ?? []).map((n: any) => ({
+      id: n.id, name: n.label, type: n.type,
+    }))
+    rawLinks = (data?.edges ?? []).map((e: any) => ({
+      source: e.source, target: e.target, relation: e.relation,
+    }))
+    applyRender()
     if (!currentNodeId.value) currentNodeId.value = ''
   } catch (e: any) {
     message.error(e?.response?.data?.detail || e?.message || t('common.error'))
@@ -88,14 +129,10 @@ const refetch = async () => {
   }
 }
 
-const render = async (data: { nodes?: any[]; edges?: any[] }) => {
+const render = async (data: { nodes: Array<{ id: string; name: string; type: string }>; links: Array<{ source: string; target: string; relation: string }> }) => {
   if (!containerRef.value || disposed) return
-  const nodes = (data?.nodes ?? []).map((n: any) => ({
-    id: n.id, name: n.label, type: n.type,
-  }))
-  const links = (data?.edges ?? []).map((e: any) => ({
-    source: e.source, target: e.target, relation: e.relation,
-  }))
+  const nodes = data.nodes
+  const links = data.links
   empty3d.value = nodes.length === 0
   if (!graph) {
     const mod = await import('3d-force-graph')
