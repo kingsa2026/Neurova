@@ -56,7 +56,7 @@
 
 | 模块 | 行数 | 层外读者 | 层内读者 | 测试读者 | 状态 |
 |---|---|---|---|---|---|
-| `neurova/cognitive_layers/knowledge_graph/manager.py` | 1269 | 5 | 1 | 17 | 在役 |
+| `neurova/cognitive_layers/knowledge_graph/manager.py` | 1269 | 5 | 1 | 21 | 在役 |
 
 ### `memory_layer`
 
