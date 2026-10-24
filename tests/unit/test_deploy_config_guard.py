@@ -43,6 +43,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
 GATE = PROJECT_ROOT / "scripts" / "ci" / "deploy_config_consistency_check.py"
 CHECK_CMD = "scripts/ci/deploy_config_consistency_check.py"
+
+#: 门禁子进程预算的唯一出处（§6-402 批 K 口径：父墙由子墙 ＋余量导出，两处不许各写一个数）。
+#: 本机实测最重一格 4.25s（含把输入清单复制到临时仓的那次全量扫描），旧值 120/180 是把
+#: 安全感写进代码；而 180s 子墙配 `TestNegativeControls` 那格 **相等** 的 180s 父墙，
+#: 到点就是掷骰子——输的一方是整场跑测（Windows 侧 thread 法超时即终止进程）。
+#: 60s 留十四倍余量，父墙 120s。
+GATE_WALL_S = 60
 CNB = PROJECT_ROOT / ".cnb.yml"
 GHW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
 
@@ -117,12 +124,14 @@ class TestGateScriptExists:
     def test_script_present(self):
         assert GATE.exists(), "部署配置一致性门禁脚本丢失——跨文件漂移将无人拦"
 
+    @pytest.mark.timeout(GATE_WALL_S + 60)
     def test_gate_passes_now(self):
         """当前仓库应全绿（红即代表配置漂移已存在，须先修配置再谈门禁）。"""
         proc = subprocess.run(
             [sys.executable, str(GATE), "--json"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            cwd=str(PROJECT_ROOT), env=dict(os.environ, PYTHONIOENCODING="utf-8"), timeout=120,
+            cwd=str(PROJECT_ROOT), env=dict(os.environ, PYTHONIOENCODING="utf-8"),
+            timeout=GATE_WALL_S,
         )
         payload = json.loads(proc.stdout or "{}")
         assert proc.returncode == 0, (
@@ -279,6 +288,7 @@ class TestCopyDiscipline:
         assert len(paths) < 4000, (
             f"复制清单膨胀到 {len(paths)} 项，负向控制会重新退化成整树复制")
 
+    @pytest.mark.timeout(GATE_WALL_S + 60)
     def test_gate_passes_on_unmutated_minimal_copy(self, tmp_path):
         """完整性锁：清单少登记一个输入，门禁在这份副本上就会报错。
 
@@ -291,7 +301,8 @@ class TestCopyDiscipline:
         proc = subprocess.run(
             [sys.executable, str(root / CHECK_CMD), "--json"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            cwd=str(root), env=dict(os.environ, PYTHONIOENCODING="utf-8"), timeout=180,
+            cwd=str(root), env=dict(os.environ, PYTHONIOENCODING="utf-8"),
+            timeout=GATE_WALL_S,
         )
         payload = json.loads(proc.stdout or "{}")
         assert proc.returncode == 0 and payload.get("ok") is True, (
@@ -308,7 +319,7 @@ class TestNegativeControls:
     用例级超时——复制范围收小后剩下的就是这份固有成本，不是回归。
     """
 
-    pytestmark = pytest.mark.timeout(180)
+    pytestmark = pytest.mark.timeout(GATE_WALL_S + 60)
 
     def _run_on_copy(self, tmp_path: Path, mutate) -> dict:
         root = tmp_path / "repo"
@@ -317,7 +328,8 @@ class TestNegativeControls:
         proc = subprocess.run(
             [sys.executable, str(root / CHECK_CMD), "--json"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            cwd=str(root), env=dict(os.environ, PYTHONIOENCODING="utf-8"), timeout=180,
+            cwd=str(root), env=dict(os.environ, PYTHONIOENCODING="utf-8"),
+            timeout=GATE_WALL_S,
         )
         return json.loads(proc.stdout or "{}")
 

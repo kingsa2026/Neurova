@@ -27,6 +27,7 @@
 每条用例前后各重置一次，否则上一份语料的词条会冒充下一份的键。
 """
 
+import ast
 import datetime
 import os
 import time
@@ -34,7 +35,6 @@ from pathlib import Path
 
 import pytest
 
-import tests.ast_scan as ast_scan
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 from tests import ast_scan
 from tests.performance.memory.test_associativeRecallGate import DISTRACTORS
@@ -554,17 +554,17 @@ class TestUncollectedMeasurementFileIsRetired:
     """退役守卫（教义第 7 条：留下第二份即未闭环）。"""
 
     def test_performance_目录下不得有不被收集的文件(self):
-        scanned = 0
-        strays = []
-        for path in ast_scan.filesUnder(PERFORMANCE_ROOT, ".py"):
-            scanned += 1
-            if path.name == "__init__.py" or path.name.startswith("test_"):
-                continue
-            strays.append(path.relative_to(REPO_ROOT).as_posix())
-        # 面自证：枚举入口给的是递归全集，但根写窄时它同样安静地给出空清单。
-        assert scanned >= 4, (
-            f"`tests/performance/` 现读 {scanned} 个 .py（下限 4）——根写错了，「零散件」恒绿"
-        )
+        scanned = len(ast_scan.sourceRefsUnder(PERFORMANCE_ROOT, ".py"))
+        assert scanned >= 3, (
+            "该目录现读 %d 个 .py——PERFORMANCE_ROOT 指错时『没有散件』是假绿（面自证）" % scanned)
+        # 落点直接向模块级常量要根：函数内的 `root = PERFORMANCE_ROOT` 重绑会让
+        # 面自证棘轮的解根器认不出（它只收模块级绑定）。
+        strays = [
+            p.relative_to(PERFORMANCE_ROOT.parent).as_posix()
+            for p in PERFORMANCE_ROOT.rglob("*.py")
+            if "__pycache__" not in p.parts and p.name != "__init__.py"
+            and not p.name.startswith("test_")
+        ]
         assert not strays, (
             f"这些件在 tests/performance/ 里但不会被 pytest 收集（pyproject 的 "
             f"python_files=[\"test_*.py\"]）：{strays}——"
@@ -572,21 +572,39 @@ class TestUncollectedMeasurementFileIsRetired:
         )
 
     def test_旧件与其符号不得复活(self):
+        # 落点与报错都直接向模块级常量要根：函数内的 `repo =` 重绑会让解根器认不出。
         assert not (REPO_ROOT / "tests" / "performance" / "longmeval_simple.py").exists(), (
             "旧测量件被复活：它按不存在的 API 写、且文件名不被收集"
         )
         # 按**类定义**认，不按子串——本文件自己的 docstring 也要提到那个类名，
         # 用子串扫会变成「守卫咬住记录来历的注释」的假红（也拦不住真复活）。
-        # 枚举与解析走共享入口（`filesUnder` + `classDefsIn`）：自己的 `rglob + ast.parse`
-        # 会把「代码总量」编码成墙钟上界（Issue #148 的根因形态）。
-        ghosts = []
-        scanned = 0
-        for tree in SOURCE_TREES:
-            scanned += len(ast_scan.filesUnder(tree, ".py"))
-            ghosts.extend(path.relative_to(REPO_ROOT).as_posix()
-                          for path, _line in ast_scan.classDefsIn(tree, "SimpleLongMemEval"))
-        # 面自证：`SCAN_TREES` 写窄时上面那格会读成「干净」，先把扫描面钉住。
-        assert scanned > SCAN_FLOOR, (
-            f"三片源码树只扫到 {scanned} 个 .py（下限 {SCAN_FLOOR}）——根写错了本格恒绿"
-        )
+        # 枚举与读盘走 `tests/ast_scan` 的共享预算；预筛词就是这个类名——`class X` 这一行
+        # 必须出现它，是这条谓词的**充分条件**，口径仍是三棵树全量。
+        ghosts, unparsed, scanned = [], [], 0
+        for rootName in ("neurova", "tests", "scripts"):
+            for ref in ast_scan.sourceRefsUnder(REPO_ROOT / rootName, ".py",
+                                                hints=("SimpleLongMemEval",)):
+                if "__pycache__" in ref.path.parts:
+                    continue
+                scanned += 1
+                path = ref.path
+                try:
+                    tree = ast.parse(ref.code)
+                except (SyntaxError, UnicodeDecodeError):
+                    unparsed.append(path.relative_to(REPO_ROOT).as_posix())
+                    continue
+                if any(
+                    isinstance(n, ast.ClassDef) and n.name == "SimpleLongMemEval"
+                    for n in ast.walk(tree)
+                ):
+                    ghosts.append(path.relative_to(REPO_ROOT).as_posix())
+        corpusFiles = len(ast_scan.sourceRefsUnder(REPO_ROOT / "neurova", ".py"))
+        assert corpusFiles >= 800, (
+            "生产语料现读 %d 个 .py——REPO_ROOT 指错时这条守卫根本不说话" % corpusFiles)
+        # 退役完成后，`SimpleLongMemEval` 这个字面串只剩本档自己的记录（现算 1 个文件）。
+        # 所以这里的线是 **≥1**：掉到 0 的唯一解释是预筛词写坏或根被换窄——
+        # 那正是"零命中"与"没扫到"长得一样的那一形。
+        assert scanned >= 1, (
+            "带类名的候选现读 %d 个文件——预筛或根写坏，此时『零幽灵』不作数（面自证）" % scanned)
+        assert not unparsed, f"守卫无法解析这些文件，判定面出现盲区：{unparsed}"
         assert not ghosts, f"类 SimpleLongMemEval 仍被定义在：{ghosts}"

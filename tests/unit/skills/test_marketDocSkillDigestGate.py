@@ -28,6 +28,7 @@ from tests import ast_scan
 from neurova.security import artifact_digest
 from neurova.skills import market_registry
 from neurova.skills.market_registry import _build_executable_skill
+from tests import ast_scan
 from neurova.skills.skill_service import SkillService
 
 SKILL_MD = """---
@@ -161,12 +162,9 @@ class TestTheGateIsOnTheRegistryLeg:
 
 
 class TestProductionBuildersCarryThePin:
-    def _builderCalls(self, tree):
-        """挑出对 `_build_executable_skill(` 的调用点，返回是否带了 pinnedDigest。
-
-        吃语法树而不是源码：解析一律经共享预算入口（`ast_scan.transientTree`），
-        判据自己不再解析——反向控制格传 `ast.parse(样本)` 同样可证伪。
-        """
+    def _builderCalls(self, source: str):
+        """挑出对 `_build_executable_skill(` 的调用点，返回是否带了 pinnedDigest。"""
+        tree = ast.parse(source)
         found = []
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -182,13 +180,16 @@ class TestProductionBuildersCarryThePin:
         package = Path(market_registry.__file__).resolve().parents[1]
         offenders = []
         checked = 0
-        # 枚举走共享预算入口（判据与文件总量脱钩，见 tests/ast_scan.py）
-        for path in ast_scan.filesUnder(package):
-            source = ast_scan.sourceCode(path)
-            if "_build_executable_skill" not in source:
-                continue
-            # 解析走共享预算的一次性入口（不留常驻语法树；本判据只扫一次）。
-            flags = self._builderCalls(ast_scan.transientTree(path))
+        # 枚举面与候选面分开量（形态 404）；枚举与读盘一律走 `tests/ast_scan` 的共享入口，
+        # 预筛词 `_build_executable_skill` 是本判据谓词的充分条件。
+        enumerated = len(ast_scan.sourceRefsUnder(package, ".py"))
+        assert enumerated >= 900, (
+            "枚举面现读 %d 个 .py（neurova/ 现算 1024）——package 指错时『都传了 pin』是假绿" % enumerated)
+        for ref in ast_scan.sourceRefsUnder(
+                package, ".py", hints=("_build_executable_skill",)):
+            path = ref.path
+            source = ref.code
+            flags = self._builderCalls(source)
             checked += len(flags)
             if any(flag is False for flag in flags):
                 offenders.append(str(path.relative_to(package)))
@@ -201,8 +202,8 @@ class TestProductionBuildersCarryThePin:
         good = "x = _build_executable_skill('a', 'b', c, pinnedDigest=p)"
         bad = "x = _build_executable_skill('a', 'b', c)"
 
-        assert self._builderCalls(ast.parse(good)) == [True]
-        assert self._builderCalls(ast.parse(bad)) == [False]
+        assert self._builderCalls(good) == [True]
+        assert self._builderCalls(bad) == [False]
 
 
 class TestThePinCanBePersistedAtTheService:

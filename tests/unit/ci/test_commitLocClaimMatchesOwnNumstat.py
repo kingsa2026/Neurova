@@ -46,6 +46,11 @@ _POOL_ALIASES = {
 #: `本格/本笔` 声明的是这一笔的**全部**文件合计
 _TOTAL_MARKERS = ("本格", "本笔", "全笔")
 
+#: 本档三枚 subprocess 落点（rev-parse / rev-list / commit-tree）都是仓库内 git 查询，
+#: 毫秒级；20s 是给满载机器留的余量。取**低于全局 30s** 的这一形，是为了不去给整档抬父墙——
+#: 子进程先到点时报的是诚实的 TimeoutExpired，而不是"整场跑测没了"（§6-402 批 K 口径）。
+_GIT_WALL_S = 20
+
 #: 长名排在前面，免得备选被短名截走（`测试/基建池` 必须先于 `基建池` 试）
 CLAIM_RE = re.compile(
     r"(?P<label>" + "|".join(sorted({*_POOL_ALIASES, *_TOTAL_MARKERS}, key=len, reverse=True)) + r")"
@@ -56,13 +61,15 @@ CLAIM_RE = re.compile(
 
 def _git(*args: str) -> str:
     return subprocess.run(["git", *args], cwd=str(REPO), capture_output=True,
-                          text=True, encoding="utf-8", errors="replace").stdout
+                          text=True, encoding="utf-8", errors="replace",
+                          timeout=_GIT_WALL_S).stdout
 
 
 def _unpushedRange() -> list:
     """`origin/main..HEAD`；解析不到远端基准则按取数失败处理，不许静默返回空集。"""
     probe = subprocess.run(["git", "rev-parse", "--verify", "origin/main"], cwd=str(REPO),
-                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+                           capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=_GIT_WALL_S)
     if probe.returncode != 0:
         pytest.fail("origin/main 解析不到——区间取不到基线就等于「无声明」，本格不许据此判绿")
     return [c for c in _git("rev-list", "origin/main..HEAD").split() if c.strip()]
@@ -236,7 +243,7 @@ def _commitTree(tree: str, message: str) -> str:
     """只造对象、不动任何分支/工作树的临时提交（新判据自证用，先例见 `a31851e2`）。"""
     proc = subprocess.run(["git", "commit-tree", tree, "-p", _git("rev-parse", "HEAD").strip()],
                           cwd=str(REPO), input=message, capture_output=True, text=True,
-                          encoding="utf-8", env=_commitEnv())
+                          encoding="utf-8", env=_commitEnv(), timeout=_GIT_WALL_S)
     assert proc.returncode == 0, proc.stderr[-300:]
     return proc.stdout.strip()
 

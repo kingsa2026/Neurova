@@ -20,6 +20,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "scripts" / "diagnostics" / "_tool_experience_loop_probe.py"
 #: 取证锚点，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
@@ -30,7 +32,15 @@ REPO_PROBE_AGENT_ROOTS = (
 )
 
 
-def runProbeScript(*args: str, timeout: int = 300):
+#: 子进程跑取证脚本的预算唯一出处（§6-402 批 K 口径：父墙由它 ＋余量导出）。
+#: 实测最重一格 8.83s（真起 `sys.executable` 跑整支脚本、开真库），故留 60s 而非原来的
+#: 300s；父墙 120s——300s 子墙配缺省 30s 父墙时，先到点的是父墙，Windows 侧 thread 法
+#: 直接终止整个进程（那三次"整场没了"见 §6-402／§6-408）。
+PROBE_SCRIPT_WALL_S = 60
+pytestmark = pytest.mark.timeout(PROBE_SCRIPT_WALL_S + 60)
+
+
+def runProbeScript(*args: str, timeout: int = PROBE_SCRIPT_WALL_S):
     """起真脚本收文本读数的唯一出口——**两头都钉**，与调用方怎么起的无关。
 
     只钉父端（`encoding="utf-8"`）是 §6-64 说的半修：子进程仍按本机码页写；只钉子端则父进程

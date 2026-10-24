@@ -61,7 +61,14 @@ except Exception:  # noqa: BLE001 - 读侧入口不可导入时由用例自己�
 #: **静默变成 None**，报出来是一句与缺陷无关的 `TypeError: argument of type 'NoneType' is not iterable`。
 #: 只钉父端是"半修"（子端仍按码页吐字节，非 ASCII 被换成 U+FFFD，代码看着像已修），所以**两头一起钉**。
 #: 站点从 9 处收成这一处，是为了下一次改口径只改得到一处（教义第 6 条）。
-def _runPython(argv: list, *, cwd=None, timeout: int = 300):
+#: 子进程取数预算的唯一出处（§6-402 批 K 口径）。实测本档最重一格 0.56s——原写的 300s
+#: 是给"别被墙掐了"买的安全感，而 300s 子墙配缺省 30s 父墙时先到点的是父墙：Windows 侧
+#: thread 法直接终止整个进程，报的是"整场跑测没了"而不是这条诚实的 TimeoutExpired。
+#: 取**低于全局墙**的 20s（36 倍余量），整档因此不必另抬父墙。
+PROBE_WALL_S = 20
+
+
+def _runPython(argv: list, *, cwd=None, timeout: int = PROBE_WALL_S):
     return subprocess.run(
         [sys.executable, *argv], cwd=cwd or PROJECT_ROOT,
         capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -69,7 +76,7 @@ def _runPython(argv: list, *, cwd=None, timeout: int = 300):
     )
 
 
-def _readout(*args, timeout: int = 300):
+def _readout(*args, timeout: int = PROBE_WALL_S):
     """跑一次取数脚本（真子进程，与决策者手里的用法逐字相同）。"""
     return _runPython([str(READOUT_SCRIPT), *args], timeout=timeout)
 

@@ -62,6 +62,26 @@ class TeamOrchestrateRequest(BaseModel):
     step_timeout: float = 30.0
 
 
+class SupervisorTaskSpec(BaseModel):
+    """Supervisor 子任务：task_id 为幂等键，不传则服务端生成。"""
+
+    task_id: str = ""
+    role: str = "retrieve"
+    worker_id: str = ""
+    payload: Dict[str, Any] = {}
+    deadline: float = 30.0
+    max_retries: int = 1
+
+
+class SupervisorDispatchRequest(BaseModel):
+    """Supervisor 扇出请求：workers 与任务一一对应（不足时轮转）。"""
+
+    tasks: List[SupervisorTaskSpec]
+    workers: Optional[List[str]] = None
+    aggregate: bool = True
+    trace_id: str = ""
+
+
 @router.get("/agents")
 async def list_acp_agents():
     """列出已注册到 ACP 的 Agent"""
@@ -212,3 +232,57 @@ def _wrap_handler(agent: Any):
     from neurova.agent.protocols.agent_adapter import make_agent_handler
 
     return make_agent_handler(agent)
+
+
+@router.post("/supervisor/dispatch")
+async def supervisor_dispatch(request: SupervisorDispatchRequest):
+    """Supervisor 扇出到已注册 Worker，失败隔离 + 重试 + RRF 聚合。
+
+    Worker 需先通过 /agents/register 注册；请求里给了 workers 时会先补注册
+    运行时 Agent。任务相互独立，单个失败只落该任务的 error。
+    """
+    if not request.tasks:
+        raise HTTPException(status_code=400, detail="tasks 不能为空")
+
+    import uuid
+
+    from neurova.agent.protocols.acp_runtime import get_acp_runtime
+    from neurova.agent.supervisor import (
+        InProcessWorkerBus,
+        SupervisorOrchestrator,
+        SupervisorTask,
+        buildWorkerBus,
+        get_supervisor_ledger,
+    )
+
+    runtime = get_acp_runtime()
+    bus = buildWorkerBus(runtime=runtime)
+    if request.workers and isinstance(bus, InProcessWorkerBus):
+        from neurova.agent.protocols.agent_adapter import register_runtime_agents
+
+        try:
+            register_runtime_agents(request.workers)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail=f"Worker 注册失败: {str(e)}")
+
+    tasks = [
+        SupervisorTask(
+            task_id=t.task_id or "task-%s" % uuid.uuid4().hex[:12],
+            role=t.role,
+            payload=dict(t.payload or {}),
+            worker_id=t.worker_id,
+            deadline=float(t.deadline),
+            max_retries=int(t.max_retries),
+        )
+        for t in request.tasks
+    ]
+    orchestrator = SupervisorOrchestrator(
+        bus, ledger=get_supervisor_ledger()
+    )
+    report = await orchestrator.dispatch(
+        tasks,
+        workers=request.workers or [],
+        aggregate=request.aggregate,
+        traceId=request.trace_id,
+    )
+    return {"code": 0, "message": "success", "data": report}

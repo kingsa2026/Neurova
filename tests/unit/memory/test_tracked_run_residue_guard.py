@@ -21,6 +21,11 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RUNTIME_ROOTS = ("sessions", "trajectories")
 
+#: `git ls-files` 的预算唯一出处（毫秒级；此前无 `timeout=`＝无界等待）。取低于全局 30s 的
+#: 20s：先到点的应当是子进程那条诚实的 TimeoutExpired，而不是 thread 法的全局墙——后者
+#: 终止的是整个跑测进程（§6-402 批 K 口径）。
+GIT_WALL_S = 20
+
 pytestmark = pytest.mark.skipif(
     not (PROJECT_ROOT / ".git").exists() or shutil.which("git") is None,
     reason="需要 git 工作树与可执行的 git 才能查跟踪状态")
@@ -29,7 +34,8 @@ pytestmark = pytest.mark.skipif(
 def _trackedUnder(root: str) -> list:
     result = subprocess.run(
         ["git", "ls-files", "--", root], cwd=str(PROJECT_ROOT),
-        capture_output=True, text=True, encoding="utf-8", errors="replace")
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=GIT_WALL_S)
     if result.returncode != 0:
         pytest.skip("git 不可用：%s" % result.stderr.strip())
     return [line for line in result.stdout.splitlines() if line.strip()]

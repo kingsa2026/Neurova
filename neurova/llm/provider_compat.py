@@ -199,16 +199,54 @@ def resolve_compat(
     return compat.merged(compat_dict)
 
 
-def thinkingKnobReachesGateway(client: Any, request_params: Optional[dict] = None) -> bool:
-    """问一问：对**这个客户端**，"关思考/降档"发得出去吗（三处恢复路径共用）。
+def resolveCallCompatCandidates(
+    routing: Any,
+    model: Optional[str] = None,
+    provider_id: Optional[str] = None,
+) -> list:
+    """向路由层要"本轮请求会打到的 provider 声明链"；答不出就交回空表。
 
-    拿不到 compat（替身/未装配）时按"发得出"处理——没有声明就没有资格判它到不了，
-    判错一次就白丢一次真正能自救的重试。
+    路由层才是知道本轮归属的那一层：它按与 `_get_client_for_request` 同源的口径挑出
+    provider 行，逐行走发送侧同一个 `resolve_compat()`（教义第 6 条——声明的解析
+    只许一处）。没有这个方法（替身/未装配）或它抛错 ⇒ 空表，由调用方按"到得了"处理：
+    判据只能掐掉**确证**的空转，不能掐掉一次本可以自救的重试。
     """
+    resolve = getattr(routing, "requestCompatCandidates", None)
+    if not callable(resolve):
+        return []
+    try:
+        return list(resolve(model=model, provider_id=provider_id) or [])
+    except Exception as e:  # noqa: BLE001 - 答不出就交回调用方 fail-open
+        logger.warning("not_supported: 路由 compat 候选取数失败（%s）——按旋钮到得了处理", e)
+        return []
+
+
+def thinkingKnobReachesGateway(client: Any, request_params: Optional[dict] = None) -> bool:
+    """问一问：对**这一轮真正会打到的网关**，"关思考/降档"发得出去吗（两处恢复路径共用）。
+
+    取数按"谁能答"排序，不是按对象层级硬编码：
+
+    1. 客户端能给出本轮的 provider 声明链（路由门面 `AgentLLMClient` 走这条路）⇒
+       **任一候选能降即视为发得出去**。门面自己那份 `config.compat` 是构造时留下的
+       dataclass 默认值（`agent_core.py:315` 从不传 compat），拿它答必然答成"收不到"——
+       amd 恰好同结果所以长期看不出来，对声明了 `enable_thinking` 的网关却是反向误判
+       （2026-10-23 复核抓到，形态 403）。
+    2. 客户端自己就带着解析好的 compat（发送侧内层 `LLMClient`、以及既有替身）⇒ 读它。
+    3. 两条都答不出（没有路由面、路由面挑不出本轮归属）⇒ fail-open 按"发得出去"处理：
+       没有确证就没有资格掐掉一次真能自救的重试。
+    """
+    params = request_params or {}
+    resolve = getattr(client, "requestCompatCandidates", None)
+    if callable(resolve):
+        candidates = resolve(model=params.get("model"), provider_id=params.get("provider_id"))
+        if not candidates:
+            return True
+        return any(compat.thinkingReducible(params) for compat in candidates)
+
     compat = getattr(getattr(client, "config", None), "compat", None)
     if compat is None:
         return True
-    return bool(compat.thinkingReducible(request_params))
+    return bool(compat.thinkingReducible(params))
 
 
 # ── 声明面校验单源 ────────────────────────────────────────────────────────

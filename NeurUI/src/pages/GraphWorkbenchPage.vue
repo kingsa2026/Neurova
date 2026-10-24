@@ -1,0 +1,503 @@
+<template>
+  <div class="graph-workbench-page">
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">{{ t('knowledge.workbenchTitle') }}</h2>
+        <p class="page-subtitle">
+          {{ currentAgent?.name || '' }}
+          <a-tag v-if="studio?.tenant_scoped" color="blue" class="tenant-tag">
+            {{ t('knowledge.workbenchTenantScoped') }}
+          </a-tag>
+        </p>
+      </div>
+      <div class="header-actions">
+        <a-radio-group v-model:value="viewMode" size="sm" button-style="solid">
+          <a-radio-button value="2d">{{ t('knowledge.workbenchView2d') }}</a-radio-button>
+          <a-radio-button value="3d">{{ t('knowledge.workbenchView3d') }}</a-radio-button>
+        </a-radio-group>
+        <GlassButton variant="secondary" :loading="loading" @click="fetchStudio">
+          {{ t('common.refresh') }}
+        </GlassButton>
+      </div>
+    </div>
+
+    <a-alert
+      v-if="studio?.truncated"
+      type="warning"
+      show-icon
+      class="truncated-hint"
+      :message="t('knowledge.workbenchTruncatedHint', { total: studio?.total_nodes ?? 0 })"
+    />
+
+    <div class="workbench-layout">
+      <GlassCard class="canvas-card">
+        <a-spin :spinning="loading">
+          <div class="canvas-wrap">
+            <GraphExplorer3D
+              v-if="viewMode === '3d'"
+              class="explorer3d-embed"
+              :agent-id="agentId"
+              :focus-id="selectedNodeId || undefined"
+              @select="onNodeSelected"
+            />
+            <VueFlow
+              v-else-if="studio?.nodes?.length"
+              :nodes="flowNodes"
+              :edges="flowEdges"
+              :fit-view-on-init="true"
+              :min-zoom="0.2"
+              :max-zoom="2"
+              class="workbench-flow"
+              @node-click="onFlowNodeClick"
+            >
+              <Background />
+              <MiniMap pannable zoomable />
+              <Controls />
+            </VueFlow>
+            <div v-else-if="!loading" class="canvas-empty">
+              <a-empty :description="t('common.noData')" />
+            </div>
+          </div>
+        </a-spin>
+      </GlassCard>
+
+      <GlassCard class="panel-card">
+        <a-tabs v-model:active-key="activeTab">
+          <a-tab-pane key="ontology" :tab="t('knowledge.workbenchOntology')">
+            <div class="panel-toolbar">
+              <a-input-search
+                v-model:value="termFilter"
+                :placeholder="t('knowledge.workbenchFilterTerms')"
+                allow-clear
+                size="sm"
+                style="max-width: 200px"
+              />
+              <GlassButton
+                v-if="isAdmin"
+                size="sm"
+                @click="termFormVisible = !termFormVisible"
+              >
+                {{ t('knowledge.workbenchNewTerm') }}
+              </GlassButton>
+            </div>
+
+            <div v-if="isAdmin && termFormVisible" class="term-form">
+              <a-input v-model:value="termForm.term_id" size="sm"
+                       :placeholder="t('knowledge.workbenchTermId')" />
+              <a-select v-model:value="termForm.kind" size="sm"
+                        :placeholder="t('knowledge.workbenchTermKind')">
+                <a-select-option value="concept">concept</a-select-option>
+                <a-select-option value="relation">relation</a-select-option>
+                <a-select-option value="property">property</a-select-option>
+              </a-select>
+              <a-input v-model:value="termForm.label" size="sm"
+                       :placeholder="t('knowledge.workbenchTermLabel')" />
+              <a-input v-model:value="termForm.basis" size="sm"
+                       :placeholder="t('knowledge.workbenchBasis')" />
+              <GlassButton size="sm" :loading="termSaving" @click="createTerm">
+                {{ t('common.confirm') }}
+              </GlassButton>
+            </div>
+
+            <div class="term-list">
+              <div v-for="term in filteredTerms" :key="term.term_id" class="term-row">
+                <a-tag :color="kindColor(term.kind)" class="kind-tag">{{ term.kind }}</a-tag>
+                <span class="term-id" :title="term.label">{{ term.term_id }}</span>
+                <span class="term-version">v·{{ term.version }}</span>
+                <a-popconfirm
+                  v-if="isAdmin"
+                  :title="t('knowledge.workbenchConfirmDeleteTerm')"
+                  @confirm="deleteTerm(term)"
+                >
+                  <a-button type="text" size="sm" danger>✕</a-button>
+                </a-popconfirm>
+              </div>
+              <a-empty v-if="!filteredTerms.length && !loading"
+                       :description="t('knowledge.workbenchEmptyTerms')" />
+            </div>
+
+            <div class="schema-footer">
+              {{ t('knowledge.workbenchSchemaVersion', { version: studio?.schema?.schema_version ?? '-' }) }}
+            </div>
+          </a-tab-pane>
+
+          <a-tab-pane key="instance" :tab="t('knowledge.workbenchInstanceEdit')">
+            <div v-if="!isAdmin" class="admin-only-hint">
+              {{ t('knowledge.workbenchAdminOnly') }}
+            </div>
+            <div v-else class="instance-form">
+              <a-input v-model:value="instanceForm.subject_label" size="sm"
+                       :placeholder="t('knowledge.workbenchSubject')" />
+              <a-select v-model:value="instanceForm.predicate_term_id" size="sm"
+                        :placeholder="t('knowledge.workbenchPredicate')">
+                <a-select-option v-for="rel in relationTerms" :key="rel.term_id"
+                                 :value="rel.term_id">
+                  {{ rel.term_id }}
+                </a-select-option>
+              </a-select>
+              <a-input v-model:value="instanceForm.object_term" size="sm"
+                       :placeholder="t('knowledge.workbenchObject')" />
+              <a-input v-model:value="instanceForm.entry_id" size="sm"
+                       :placeholder="t('knowledge.workbenchEntryId')" />
+              <a-textarea v-model:value="instanceForm.evidence_text" :rows="3" size="sm"
+                         :placeholder="t('knowledge.workbenchEvidence')" />
+              <a-input v-model:value="instanceForm.basis" size="sm"
+                       :placeholder="t('knowledge.workbenchBasis')" />
+              <GlassButton block :loading="edgeSaving" @click="createInstance">
+                {{ t('knowledge.workbenchCreateEdge') }}
+              </GlassButton>
+              <p class="evidence-hint">{{ t('knowledge.workbenchEvidenceHint') }}</p>
+            </div>
+          </a-tab-pane>
+
+          <a-tab-pane key="spatial" :tab="t('knowledge.workbenchSpatial')">
+            <!-- antdv tabs 会挂载全部页签内容；地图/3D 只在首次激活时挂载，
+                 jsdom/无 WebGL 环境不因未打开的页签崩 -->
+            <GeoMapPanel v-if="activeTab === 'spatial'" />
+          </a-tab-pane>
+        </a-tabs>
+      </GlassCard>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, defineAsyncComponent, onMounted, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { message } from 'ant-design-vue'
+import { VueFlow } from '@vue-flow/core'
+import { Background } from '@vue-flow/background'
+import { MiniMap } from '@vue-flow/minimap'
+import { Controls } from '@vue-flow/controls'
+import GlassCard from '@/components/GlassCard.vue'
+import GlassButton from '@/components/GlassButton.vue'
+import { useAgentPage } from '@/composables/useAgentPage'
+import { useAuthStore } from '@/stores/auth'
+import { request } from '@/api'
+
+// 3D/地图都是重依赖（WebGL/three、maplibre），defineAsyncComponent 懒加载：
+// 不切到对应视图就不下载，2D 主路径的包体不受影响。
+const GraphExplorer3D = defineAsyncComponent(
+  () => import('@/pages/graph-workbench/GraphExplorer3D.vue'))
+const GeoMapPanel = defineAsyncComponent(
+  () => import('@/pages/graph-workbench/GeoMapPanel.vue'))
+
+const { t } = useI18n()
+// onAgentChange：agent 切换后重拉工作台数据（与旧图谱页同款联动，切换族测试钉着）。
+const { agentId, currentAgent } = useAgentPage({
+  onAgentChange: () => fetchStudio(),
+})
+const authStore = useAuthStore()
+
+interface StudioNode { id: string; label: string; type: string }
+interface StudioEdge { source: string; target: string; relation: string }
+interface OntologyTerm { term_id: string; kind: string; label: string; version: string }
+interface StudioData {
+  nodes?: StudioNode[]
+  edges?: StudioEdge[]
+  total_nodes?: number
+  truncated?: boolean
+  tenant_scoped?: boolean
+  schema?: { terms?: OntologyTerm[]; schema_version?: number }
+}
+
+const loading = ref(false)
+const studio = ref<StudioData | null>(null)
+const activeTab = ref<'ontology' | 'instance' | 'spatial'>('ontology')
+const viewMode = ref<'2d' | '3d'>('2d')
+const selectedNodeId = ref('')
+const termFilter = ref('')
+const termFormVisible = ref(false)
+const termSaving = ref(false)
+const edgeSaving = ref(false)
+
+const isAdmin = computed(() => authStore.currentUser?.role === 'admin')
+
+const termForm = reactive({ term_id: '', kind: 'concept', label: '', basis: '' })
+const instanceForm = reactive({
+  subject_label: '', predicate_term_id: '', object_term: '',
+  entry_id: '', evidence_text: '', basis: '',
+})
+
+const flowNodes = computed(() =>
+  (studio.value?.nodes ?? []).map((n) => ({
+    id: n.id,
+    label: n.label,
+    position: { x: 0, y: 0 },
+    data: { label: n.label, type: n.type },
+    type: 'default',
+    class: n.id === selectedNodeId.value ? 'wb-node-selected' : '',
+  })))
+const flowEdges = computed(() =>
+  (studio.value?.edges ?? []).map((e, index) => ({
+    id: `e-${index}`,
+    source: e.source,
+    target: e.target,
+    label: e.relation,
+    animated: false,
+  })))
+
+const relationTerms = computed(() =>
+  (studio.value?.schema?.terms ?? []).filter((term) => term.kind === 'relation'))
+const filteredTerms = computed(() => {
+  const needle = termFilter.value.trim().toLowerCase()
+  const terms = studio.value?.schema?.terms ?? []
+  if (!needle) return terms
+  return terms.filter((term) =>
+    term.term_id.toLowerCase().includes(needle)
+    || (term.label || '').toLowerCase().includes(needle))
+})
+
+const kindColor = (kind: string) =>
+  kind === 'concept' ? 'blue' : kind === 'relation' ? 'purple' : 'green'
+
+const fetchStudio = async () => {
+  loading.value = true
+  try {
+    const res: any = await request.get(`/knowledge-graph/${agentId.value}/studio`)
+    studio.value = res?.data ?? res
+  } catch (e: any) {
+    message.error(e?.message || t('common.error'))
+  } finally {
+    loading.value = false
+  }
+}
+
+const createTerm = async () => {
+  if (!termForm.term_id.trim()) {
+    message.warning(t('knowledge.workbenchTermIdRequired'))
+    return
+  }
+  termSaving.value = true
+  try {
+    await request.post('/knowledge/ontology/terms', { ...termForm })
+    message.success(t('knowledge.workbenchTermCreated'))
+    termForm.term_id = ''
+    termForm.label = ''
+    termForm.basis = ''
+    termFormVisible.value = false
+    await fetchStudio()
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
+  } finally {
+    termSaving.value = false
+  }
+}
+
+const deleteTerm = async (term: OntologyTerm) => {
+  try {
+    await request.delete(
+      `/knowledge/ontology/terms/${encodeURIComponent(term.term_id)}`,
+      { params: { basis: t('knowledge.workbenchDeleteBasis') } })
+    message.success(t('knowledge.workbenchTermDeleted'))
+    await fetchStudio()
+  } catch (e: any) {
+    const detail = e?.response?.data?.detail
+    message.warning(
+      typeof detail === 'object' && detail?.impact
+        ? `${t('knowledge.workbenchTermInUse')} (${detail.impact.fact_count}/${detail.impact.typed_subject_count}/${detail.impact.child_terms?.length ?? 0})`
+        : detail || e?.message || t('common.error'))
+  }
+}
+
+const createInstance = async () => {
+  if (!instanceForm.subject_label.trim() || !instanceForm.object_term.trim()
+    || !instanceForm.predicate_term_id || !instanceForm.evidence_text.trim()) {
+    message.warning(t('knowledge.workbenchEvidenceRequired'))
+    return
+  }
+  edgeSaving.value = true
+  try {
+    const res: any = await request.post('/knowledge/graph/instances', {
+      agent_id: agentId.value,
+      ...instanceForm,
+    })
+    message.success(t('knowledge.workbenchEdgeCreated', {
+      fact: res?.data?.fact_id ?? res?.data?.data?.fact_id ?? '',
+    }))
+    instanceForm.subject_label = ''
+    instanceForm.object_term = ''
+    instanceForm.entry_id = ''
+    instanceForm.evidence_text = ''
+    instanceForm.basis = ''
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
+  } finally {
+    edgeSaving.value = false
+  }
+}
+
+const onFlowNodeClick = (mouseEvent: { node: { id: string } }) => {
+  selectedNodeId.value = mouseEvent.node.id
+}
+
+const onNodeSelected = (nodeId: string) => {
+  selectedNodeId.value = nodeId
+}
+
+onMounted(() => {
+  fetchStudio()
+})
+</script>
+
+<style scoped>
+.graph-workbench-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nr-space-md);
+  height: 100%;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.page-title {
+  margin: 0;
+  font-size: 20px;
+  color: var(--nr-text-primary, inherit);
+}
+
+.page-subtitle {
+  margin: 0;
+  color: var(--nr-text-secondary, inherit);
+  opacity: 0.72;
+}
+
+.truncated-hint {
+  flex: none;
+}
+
+.workbench-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: var(--nr-space-md);
+  flex: 1;
+  min-height: 0;
+}
+
+.canvas-card,
+.panel-card {
+  min-height: 420px;
+  overflow: auto;
+}
+
+.canvas-wrap {
+  height: 560px;
+}
+
+.canvas-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.workbench-flow :deep(.wb-node-selected) {
+  box-shadow: 0 0 0 3px var(--nr-primary);
+}
+
+.explorer3d-embed {
+  height: 100%;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--nr-space-sm);
+}
+
+.workbench-flow {
+  width: 100%;
+  height: 100%;
+  background: var(--nr-bg-inset);
+  border-radius: var(--nr-radius-md, 12px);
+}
+
+.panel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--nr-space-sm);
+  margin-bottom: var(--nr-space-sm);
+}
+
+.term-form,
+.instance-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nr-space-sm);
+  padding: var(--nr-space-sm);
+  margin-bottom: var(--nr-space-sm);
+  border: 1px solid var(--nr-glass-border);
+  border-radius: var(--nr-radius-md, 12px);
+  background: var(--nr-glass-bg);
+}
+
+.term-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 380px;
+  overflow: auto;
+}
+
+.term-row {
+  display: flex;
+  align-items: center;
+  gap: var(--nr-space-sm);
+  padding: 4px 6px;
+  border-radius: 8px;
+}
+
+.term-row:hover {
+  background: var(--nr-glass-bg-hover);
+}
+
+.kind-tag {
+  flex: none;
+  min-width: 64px;
+  text-align: center;
+}
+
+.term-id {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: monospace;
+}
+
+.term-version {
+  flex: none;
+  opacity: 0.6;
+  font-size: 12px;
+}
+
+.schema-footer {
+  margin-top: var(--nr-space-sm);
+  opacity: 0.6;
+  font-size: 12px;
+  text-align: right;
+}
+
+.evidence-hint {
+  margin: 0;
+  opacity: 0.6;
+  font-size: 12px;
+}
+
+.admin-only-hint {
+  opacity: 0.7;
+  text-align: center;
+  padding: var(--nr-space-xl) 0;
+}
+
+@media (max-width: 960px) {
+  .workbench-layout {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
