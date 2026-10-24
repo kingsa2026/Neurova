@@ -30,13 +30,19 @@ MEMORY_PREFIX = "/api/v1/memory"
 
 
 @pytest.fixture()
-def unreadyClient():
-    """真 app、但不跑 lifespan ⇒ 没有默认 Agent，正是 6001 的产生态。"""
+def unreadyClient(monkeypatch):
+    """真 app、但不跑 lifespan ⇒ 没有默认 Agent，正是 6001 的产生态。
+
+    进程里**上一个**起了 lifespan 的 app 会把 `_app_state` 留在模块全局上（`create_app()`
+    本身不写、`lifespan` 才写）。同场跑测时它还在，本档拿到的就不是"未就绪"，三条行为钉
+    会读成 200 空成功——红在夹具没断干净，不是产品把故障画成了成功。故这里显式清空。
+    """
     from fastapi.testclient import TestClient
 
-    from neurova.api.app import create_app
+    from neurova.api import app as app_module
 
-    return TestClient(create_app())
+    monkeypatch.setattr(app_module, "_app_state", None, raising=False)
+    return TestClient(app_module.create_app())
 
 
 def testEveryDeclaredErrorCodeTakesAPosition():

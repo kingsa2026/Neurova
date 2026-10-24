@@ -167,7 +167,76 @@ class TestNoKnownVulnerableRuntimePackages:
     # 包名 → (修复下界, 允许的引入链, CVE, 说明)
     _KNOWN_FLOORS = {
         "yaml": ("2.8.3", ("node_modules/swagger-jsdoc",), "CVE-2026-33532", "CVE-2026-33532"),
+        # 2026-10 公告批：MCP TS server SDK 2.0.0（`@modelcontextprotocol/server-filesystem`
+        # 的传递依赖）落在三条公告的区间内，修复版自 2.3.0 起；`ip-address` 10.7.2 的
+        # Address6 区号二次复杂度 DoS（GHSA-rxp7-6hxx-x8q5）修复版自 10.7.4 起。
+        # 两者父包都用精确版本声明，故由 tools/npx-runtime/package.json 的 overrides 抬升。
+        "@modelcontextprotocol/server": (
+            "2.3.0",
+            ("node_modules/@modelcontextprotocol/server-filesystem",),
+            "GHSA-46jr-4wx8-v453 / GHSA-jm63-cq47-j5jp / GHSA-rvq5-wwqv-78pq",
+            "MCP TS server SDK 三条（内存耗尽 / 传输实例串味 / bearer 令牌跨服务接受）",
+        ),
+        "ip-address": (
+            "10.7.4",
+            ("node_modules/@modelcontextprotocol/sdk",),
+            "GHSA-rxp7-6hxx-x8q5",
+            "Address6 区号标识符二次复杂度匹配（DoS）",
+        ),
+        # 2026-10 第二批（PR #364 的 dependency-audit 红灯）：hono 抬高后重新实扫，
+        # 同一棵审计树里还有五条可修公告，逐条按根因抬到修复版，不留静音。
+        "hono": (
+            "4.13.11",
+            ("node_modules/@hono/node-server", "node_modules/@modelcontextprotocol/sdk"),
+            "GHSA-5r4p-p66f-jhc7",
+            "serveStatic 与核心路由的双层解码差异（身份校验看到 A、文件落在 B）",
+        ),
+        "zod": (
+            "4.6.6",
+            ("node_modules/@modelcontextprotocol/sdk", "node_modules/@upstash/context7-mcp"),
+            "GHSA-mrhx-c7xc-m3w5",
+            "校验超大受限集合时内存耗尽",
+        ),
+        "undici": (
+            "7.30.1",
+            ("node_modules/@upstash/context7-mcp",),
+            "GHSA-xjj6-f33q-929c / GHSA-f72v-6w45-q472 / GHSA-4qv8-2p9j-2685",
+            "过量 content-encoding 的未捕获错误（DoS）", 
+        ),
+        "fast-uri": (
+            "3.1.9",
+            ("node_modules/ajv",),
+            "GHSA-333x-w4r6-6crp / GHSA-w74x-v6f9-j3xg / GHSA-wjr9-j795-jxcr / GHSA-xhq7-xmqj-769h",
+            "主机名规范化可被绕过（四条）",
+        ),
+        "body-parser": (
+            "1.20.9",
+            ("node_modules/express",),
+            "GHSA-27r3-jxmh-p828",
+            "压缩正文尾部残留字节导致 DoS（两条线：1.x 自 1.20.9、2.x 自 2.4.0）",
+        ),
+        "@azure/msal-node": (
+            "7.1.0",
+            ("node_modules/@azure/identity",),
+            "GHSA-xcx6-jx8p-x3h5",
+            "授权码流把参数泄露给攻击者可控端点",
+        ),
     }
+
+    def _compare_tuple(self, version: str) -> tuple:
+        """版本比较元组：按 `-` 切预发布尾，再按 `.` 切点分；非数字段逐位按字符串比。
+
+        为什么不用 `_release_tuple`：`ip-address` 这类包会把 `beta` 之类的非数字段放进
+        版本串，逐个 `int()` 会直接抛 ValueError。这里把所有段归一成可比的
+        `(0, 整数)` / `(1, 字符串)` 对，数字段恒排在非数字段之前（预发布低于正式版）。
+        """
+        pairs = []
+        for part in version.replace("-", ".").split("."):
+            pairs.append((0, int(part), "") if part.isdigit() else (1, 0, part))
+        return tuple(pairs)
+
+    def _floor_is_met(self, version: str, floor: str) -> bool:
+        return self._compare_tuple(version) >= self._compare_tuple(floor)
 
     def _release_tuple(self, version: str) -> tuple:
         """把版本串归一成可比元组：`2.0.0-1` 是"2.0.0 之后的第一个预发布"。"""
@@ -185,7 +254,7 @@ class TestNoKnownVulnerableRuntimePackages:
                 # 承载者被整体摘除（依赖被上游换掉）也是合格形态，不报红。
                 continue
             version = entry.get("version")
-            if self._release_tuple(version) < self._release_tuple(floor):
+            if not self._floor_is_met(version, floor):
                 problems.append(
                     f"{name}@{version} 低于 {cve} 的修复下界 {floor}——{note}。\n"
                     f"    引入链: {' → '.join(chains)}\n"

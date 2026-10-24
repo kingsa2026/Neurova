@@ -343,12 +343,34 @@ def _describeExtractionFailure(exc: Exception, payload: bytes, dest: Path) -> st
     if isinstance(exc, (OSError, safe_archive.UnsafeArchiveError)):
         projected = _longestProjectedPath(payload, dest)
         if projected is not None and projected[1] >= WINDOWS_MAX_PATH:
-            member, total = projected
-            return (
-                f"路径过长：最长成员 {member!r}（{len(member)} 字符）落在 {len(str(dest))} 字符的"
-                f"落点根下合计 {total} 字符，超过 Windows 上限 {WINDOWS_MAX_PATH}"
-                f"——这是落点问题，不是包的问题：换短根或开启长路径")
+            return _pathTooLongReason(projected[0], dest, projected[1])
     return f"{type(exc).__name__}: {exc}"
+
+
+def _pathTooLongReason(member: str, dest: Path, total: int) -> str:
+    """「路径过长」那一族的原因文案（唯一一处；解包前的闸与解包失败后的描述共用）。"""
+    return (
+        f"路径过长：最长成员 {member!r}（{len(member)} 字符）落在 {len(str(dest))} 字符的"
+        f"落点根下合计 {total} 字符，超过 Windows 上限 {WINDOWS_MAX_PATH}"
+        f"——这是落点问题，不是包的问题：换短根或开启长路径")
+
+
+def _projectedPathVerdict(payload: bytes, dest: Path) -> str:
+    """落点根太长的**判定**：先于解包算，不靠"解包失败了"这一征兆。
+
+    为什么要在解包前判：同一份包在长根下的结局**取决于跑在哪个内核上**——
+    Linux 的 NAME_MAX 是单个成员的字符数（与整条路径长度无关），整条路径的上界也
+    只对路径分量生效，于是 `根(135) + 成员(125) = 261` 在 Windows 上是硬失败、在 Linux 上
+    照装不误；解包成功 ⇒ `except OSError` 那一支根本不会跑，原因面读到的是空串。
+    而 `extractall` 非事务，撞到中途才发现会留下半棵树。
+
+    这就是"判据依赖某台机器的 OS 开关"的第二副面孔：**失败征兆不可跨平台移植，判定条件可以**。
+    `_longestProjectedPath` 本来就算得出这个数，现在它也是判定的依据。
+    """
+    longest = _longestProjectedPath(payload, dest)
+    if longest is None or longest[1] < WINDOWS_MAX_PATH:
+        return ""
+    return _pathTooLongReason(longest[0], dest, longest[1])
 
 
 def extractRemoteSkillZipRefusal(skill_id: str, payload: bytes, dest: Path) -> str:
@@ -358,7 +380,14 @@ def extractRemoteSkillZipRefusal(skill_id: str, payload: bytes, dest: Path) -> s
     越出目标目录的判定与解包机制在 `neurova/security/safe_archive.py`——本函数此前自己
     写过一份（§6-172 批 32 收敛），两份并存时咽喉那 6 个调用点修了这里也不会跟着修。
     `extractall` 非事务，可能留下部分文件，调用方 uninstall 可清理。
+
+    落点预算在**解包之前**判（`_projectedPathVerdict`）：跨平台的拒因不该由"这台机器的
+    文件系统有没有拦下它"决定。
     """
+    tooLong = _projectedPathVerdict(payload, dest)
+    if tooLong:
+        logger.warning("skill %s zip refused: %s", skill_id, tooLong)
+        return tooLong
     try:
         _refuseOverlongLanding(payload, dest)
         safe_archive.safe_extract_zip(

@@ -99,23 +99,17 @@ def seed():
 try:
     SKILLS_DIR, LEDGER = seed()
 except Exception as exc:  # noqa: BLE001
-    # `as` 的绑定名出块即解绑（PEP 3110），进 lambda 懒求值就是 NameError——先取值再进
-    seedFailure = repr(exc)
-    read("[0] 复制真账本到隔离根", lambda: (False, seedFailure))
+    readFailure = repr(exc)  # PEP 3110：`exc` 出了 except 块就不再绑定，先取值再交给懒求值的 lambda
+    read("[0] 复制真账本到隔离根", lambda: (False, readFailure))
     sys.exit(1)
 
 svc = SkillService(agent_id=AGENT, skills_dir=str(SKILLS_DIR))
 rows = [r for r in svc.list_skills()]
 def classify(entry):
-    # 映射执行体型单列：它是「盘上没字节也真能跑」那一形，混进空壳就是探针自己冤枉判据
-    try:
-        from neurova.skills.market_registry import hasExecutorMapping
-    except ImportError:  # 对照腿（无本批修复的那棵树）退回读私有表——
-        # 只为让同一份脚本在两侧都跑得起来；比的从来不是这个 import，是四面的读数是否同向。
-        from neurova.skills.market_registry import _MARKET_EXECUTORS
-
-        def hasExecutorMapping(sid):
-            return str(sid or "") in _MARKET_EXECUTORS
+    # 映射执行体型单列：它是「盘上没字节也真能跑」那一形，混进空壳就是探针自己冤枉判据。
+    # 这里**直连**取数，不留 try + 同名 def 桩：桩一旦触发，探针问的就不是产品那一句，
+    # 而对照腿要比的读数反而被自己的兜底改掉了（§6-228 零容忍那一条）。
+    from neurova.skills.market_registry import hasExecutorMapping
 
     sid = entry["id"]
     d = SKILLS_DIR / sid

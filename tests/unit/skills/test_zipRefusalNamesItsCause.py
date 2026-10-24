@@ -18,6 +18,7 @@ r"""解包失败必须点名原因（§6-276 立项落地：zip 成员名撞 Win
 from __future__ import annotations
 
 import io
+import os
 import zipfile
 from pathlib import Path
 
@@ -25,9 +26,11 @@ import pytest
 
 from neurova.security import safe_archive
 from neurova.skills import market_sources
-from neurova.skills.market_importer import MarketImporter, read_builtin_bundle
+from neurova.skills.market_importer import BUILTIN_BUNDLE_DIR, MarketImporter, read_builtin_bundle
 
 BUNDLE = "adaptive-presentation-studio.zip"
+#: 深根相对预算下界的余量（见 `deepRoot`）：把"平台临时目录前缀有多长"从这里彻底移出去。
+_DEEP_ROOT_MARGIN = 20
 REFUSAL_API = "extractRemoteSkillZipRefusal"
 
 
@@ -48,10 +51,33 @@ def buildZip(members: dict) -> bytes:
 
 
 def deepRoot(tmp: Path, skill_id: str) -> Path:
-    """复刻 pytest 那种"用例名即目录名"的深根：实测这条链合计 273 字符。"""
-    base = (tmp / "pytest-of-operator" / "pytest-9999"
-            / "test_import_builtin_offline[presentation-studio]0" / "skills" / skill_id)
-    return base
+    """造一个**真的**越过 Windows 260 预算的落点根，根长由预算常量现算。
+
+    原先写死 `pytest-of-operator/pytest-9999/test_import_builtin_offline[...]0/skills/<id>`，
+    读数是"合计 273 字符"——那读数依赖 `tmp` 的前缀长度：Linux 的 `pytest-of-root/pytest-71`
+    比 Windows 的 `pytest-of-<用户>/pytest-N` 短一截，实测只剩 259 ⇒ 包**装成了**、
+    三格红在"前置没造出来"上，而不是红在原因面上。落点长短不该由跑测机的家目录长度决定，
+    所以这里按目标预算倒推补足：让最长成员投影恰好落在 `WINDOWS_MAX_PATH - 1`（`>=` 才拒）。
+    """
+    # 三级叶子：用例名 + 技能 id + 包内那一级目录（安装落点是 <skills>/<id>/）。
+    # 少了最后一级，"最长成员投影"就短一截——第一版按"根 + 成员"算，于是只补到 259 就停手。
+    leaf = (tmp / "pytest-of-operator" / "pytest-9999"
+            / "test_import_builtin_offline[presentation-studio]0" / "skills" / "l" / skill_id)
+    bundlePath = BUILTIN_BUNDLE_DIR / BUNDLE
+    with zipfile.ZipFile(bundlePath) as zf:
+        longest = max(zf.namelist(), key=len)
+    # 预留余量：目标预算 = 上限 − 1 − 余量，于是投影稳稳落在拒的那一侧，
+    # 平台临时目录前缀长短不再决定这一格红不红。
+    shortfall = (market_sources.WINDOWS_MAX_PATH - 1 - _DEEP_ROOT_MARGIN) \
+        - (len(str(leaf)) + 1 + len(longest))
+    if shortfall > 0:
+        # 补足段插在**用例目录之前**，让它真的落在路径里（尾部追加会被 `/` 解析成
+        # 一个不存在的中间目录，长度白算）。用 `os.path.normpath` 而不是 `resolve()`：
+        # 后者会把 `/tmp` 这类符号链接展开，长度又是另一份读数。
+        rest = leaf.relative_to(tmp)
+        first, remainder = rest.parts[0], rest.parts[1:]
+        leaf = Path(os.path.normpath(str(tmp / first))) / ("p" * shortfall) / Path(*remainder)
+    return leaf
 
 
 @pytest.fixture()
