@@ -57,6 +57,7 @@
               :agent-id="agentId"
               :focus-id="selectedNodeId || undefined"
               @select="onNodeSelected"
+              @clear="selectedNodeId = ''"
             />
             <VueFlow
               v-else-if="filteredNodes.length"

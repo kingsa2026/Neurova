@@ -794,6 +794,7 @@ export default {
 
 
   knowledge: {
+    workbenchFullGraph: 'الرسم الكامل',
     duplicateMerged: 'المحتوى موجود مسبقًا: تم دمج هذا المصدر في سلسلة أصل الإدخال الموجود',
     filterApply: 'تطبيق',
     filterAuthor: 'المؤلف',

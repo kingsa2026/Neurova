@@ -11,6 +11,14 @@
       <GlassButton size="sm" :loading="loading" @click="refetch">
         {{ t('common.refresh') }}
       </GlassButton>
+      <GlassButton
+        v-if="currentNodeId || props.focusId || focusInput.trim()"
+        size="sm"
+        variant="secondary"
+        @click="resetToFull"
+      >
+        {{ t('knowledge.workbenchFullGraph') }}
+      </GlassButton>
       <a-tag v-if="truncated" color="orange">{{ t('knowledge.workbenchTruncatedHint', { total: totalNodes }) }}</a-tag>
     </div>
     <div ref="containerRef" class="explorer3d-canvas"></div>
@@ -39,6 +47,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   (e: 'select', nodeId: string, label: string): void
+  (e: 'clear'): void
 }>()
 
 const { t } = useI18n()
@@ -103,6 +112,8 @@ const render = async (data: { nodes?: any[]; edges?: any[] }) => {
           emit('select', currentNodeId.value, String(node?.name ?? ''))
           if (graph) graph.nodeColor(graph.nodeColor())
         })
+        // 点空白处回全图：聚焦视图的退出路径不能只靠找工具条按钮。
+        .onBackgroundClick(() => resetToFull())
       if (containerRef.value.clientWidth) {
         graph.width(containerRef.value.clientWidth)
         graph.height(containerRef.value.clientHeight)
@@ -128,6 +139,15 @@ watch(() => props.focusId, (next) => {
 watch(hops, () => {
   void refetch()
 })
+
+const resetToFull = () => {
+  // 焦点三处状态一起清：内部焦点、手动输入、父组件选中态——
+  // 漏任何一处，下一次 refetch 都会带着旧 focus 又回到邻域视图。
+  currentNodeId.value = ''
+  focusInput.value = ''
+  emit('clear')
+  void refetch()
+}
 
 const handleResize = () => {
   if (graph && containerRef.value) {
