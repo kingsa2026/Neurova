@@ -794,6 +794,7 @@ export default {
 
 
   knowledge: {
+    workbenchShowIsolated: 'अलग-थलग दिखाएँ',
     workbenchFilterTypes: 'प्रकार फ़िल्टर',
     workbenchFullGraph: 'पूर्ण ग्राफ़',
     duplicateMerged: 'सामग्री पहले से मौजूद है: यह स्रोत मौजूदा प्रविष्टि की स्रोत श्रृंखला में जोड़ा गया',
