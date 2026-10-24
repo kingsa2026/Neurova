@@ -324,12 +324,16 @@ def _describeExtractionFailure(exc: Exception, payload: bytes, dest: Path) -> st
     if isinstance(exc, OSError):
         projected = _longestProjectedPath(payload, dest)
         if projected is not None and projected[1] >= WINDOWS_MAX_PATH:
-            member, total = projected
-            return (
-                f"路径过长：最长成员 {member!r}（{len(member)} 字符）落在 {len(str(dest))} 字符的"
-                f"落点根下合计 {total} 字符，超过 Windows 上限 {WINDOWS_MAX_PATH}"
-                f"——这是落点问题，不是包的问题：换短根或开启长路径")
+            return _pathTooLongReason(projected[0], dest, projected[1])
     return f"{type(exc).__name__}: {exc}"
+
+
+def _pathTooLongReason(member: str, dest: Path, total: int) -> str:
+    """「路径过长」那一族的原因文案（唯一一处；解包前的闸与解包失败后的描述共用）。"""
+    return (
+        f"路径过长：最长成员 {member!r}（{len(member)} 字符）落在 {len(str(dest))} 字符的"
+        f"落点根下合计 {total} 字符，超过 Windows 上限 {WINDOWS_MAX_PATH}"
+        f"——这是落点问题，不是包的问题：换短根或开启长路径")
 
 
 def extractRemoteSkillZipRefusal(skill_id: str, payload: bytes, dest: Path) -> str:
@@ -341,6 +345,12 @@ def extractRemoteSkillZipRefusal(skill_id: str, payload: bytes, dest: Path) -> s
     `extractall` 非事务，可能留下部分文件，调用方 uninstall 可清理。
     """
     try:
+        # 预算在这里判、在解包**之前**判：判定是这条路的策略（与上面两条上限同一层），
+        # 不能等磁盘把 ENAMETOOLONG 撞出来——那宿主机若开着长路径就一句错也不报，
+        # 装成与否随机器变；而 `extractall` 又非事务，撞到中途才发现会留下半棵树。
+        longest = _longestProjectedPath(payload, dest)
+        if longest is not None and longest[1] >= WINDOWS_MAX_PATH:
+            return _pathTooLongReason(longest[0], dest, longest[1])
         safe_archive.safe_extract_zip(
             payload, dest,
             maxPayloadBytes=MAX_SKILL_ZIP_BYTES,
