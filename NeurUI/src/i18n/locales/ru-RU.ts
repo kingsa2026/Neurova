@@ -794,6 +794,7 @@ export default {
 
 
   knowledge: {
+    workbenchFullGraph: 'Весь граф',
     duplicateMerged: 'Содержимое уже существует: источник добавлен в цепочку происхождения существующей записи',
     filterApply: 'Применить',
     filterAuthor: 'Автор',
