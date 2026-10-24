@@ -440,19 +440,28 @@ async def get_document_detail(
 async def get_fact_history(
     request: Request,
     fact_id: str = Path(..., description="事实 ID"),
-    limit: int = Query(200, ge=1, le=1000),
+    limit: int = Query(0, ge=0, le=100000,
+                       description="0=全量；>0 为显式分页"),
+    offset: int = Query(0, ge=0, description="显式分页起始位置"),
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
-    """事实版本历史（管理员）：只追加的 create/supersede/retract/expire/revive/rollback。"""
+    """事实版本历史（管理员）：**默认全量**，只追加 create/supersede/retract/expire/revive/rollback。"""
     if str(current_user.get("role") or "") != "admin":
         raise HTTPException(status_code=403, detail="事实版本历史仅管理员可查看")
 
     store = _factStoreForTenant(fact_id, current_user)
     try:
-        versions = store.history(fact_id, limit=limit)
+        versions = store.history(
+            fact_id, limit=(limit or None), offset=offset
+        )
+        total = store.historyCount(fact_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-    return {"code": 0, "message": "ok", "data": {"fact_id": fact_id, "versions": versions}}
+    return {
+        "code": 0, "message": "ok",
+        "data": {"fact_id": fact_id, "total": total,
+                 "returned": len(versions), "versions": versions},
+    }
 
 
 @router.post("/facts/{fact_id}/rollback")
