@@ -1200,10 +1200,6 @@ export default {
     rollbackDone: '已回滚，剩余归档 {left} 份',
     rollbackError: '回滚失败',
     archiveLoadError: '归档加载失败',
-    adopt: '采纳',
-    adoptTarget: '目标技能',
-    adoptSuccess: '已生成待审提案',
-    adoptError: '采纳失败',
   },
   skill: {
     title: '技能管理',

@@ -1190,10 +1190,6 @@ export default {
     rollbackDone: 'Откат выполнен, осталось архивов: {left}',
     rollbackError: 'Откат не удался',
     archiveLoadError: 'Не удалось загрузить архивы',
-    adopt: 'Принять',
-    adoptTarget: 'Целевой навык',
-    adoptSuccess: 'Создано предложение на утверждение',
-    adoptError: 'Не удалось принять',
   },
   skill: {
     title: 'Управление навыками',

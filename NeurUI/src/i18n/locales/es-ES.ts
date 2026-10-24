@@ -1190,10 +1190,6 @@ export default {
     rollbackDone: 'Revertido, quedan {left} archivo(s)',
     rollbackError: 'Error al revertir',
     archiveLoadError: 'Error al cargar los archivos',
-    adopt: 'Adoptar',
-    adoptTarget: 'Habilidad objetivo',
-    adoptSuccess: 'Propuesta pendiente creada',
-    adoptError: 'Error de adopción',
   },
   skill: {
     title: 'Gestión de habilidades',

@@ -1190,10 +1190,6 @@ export default {
     rollbackDone: 'Ripristinato, {left} archivio/i rimasti',
     rollbackError: 'Ripristino non riuscito',
     archiveLoadError: 'Caricamento degli archivi non riuscito',
-    adopt: 'Adotta',
-    adoptTarget: 'Abilità di destinazione',
-    adoptSuccess: 'Proposta in attesa creata',
-    adoptError: 'Adozione non riuscita',
   },
   skill: {
     title: 'Gestione competenze',

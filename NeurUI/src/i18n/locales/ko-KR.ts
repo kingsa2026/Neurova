@@ -1190,10 +1190,6 @@ export default {
     rollbackDone: '롤백 완료, 남은 아카이브 {left}건',
     rollbackError: '롤백 실패',
     archiveLoadError: '아카이브를 불러오지 못했습니다',
-    adopt: '채택',
-    adoptTarget: '대상 스킬',
-    adoptSuccess: '대기 중인 제안을 생성했습니다',
-    adoptError: '채택 실패',
   },
   skill: {
     title: '스킬 관리',
