@@ -102,9 +102,10 @@ const routes: RouteRecordRaw[] = [
         props: true,
       },
       {
+        // S5 旧页退役：URL 不变（书签/菜单可回退语义），页面换成工作台。
         path: 'agent/:agentId/knowledge-graph',
         name: 'AgentKnowledgeGraph',
-        component: () => import('@/pages/KnowledgeGraphPage.vue'),
+        component: () => import('@/pages/GraphWorkbenchPage.vue'),
         props: true,
       },
       {
