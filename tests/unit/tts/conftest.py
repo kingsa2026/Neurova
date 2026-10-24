@@ -17,13 +17,21 @@ import pytest
 
 from neurova.tts import manager as tts_manager_mod
 from neurova.tts.manager import TTSConfig, TTSManager
-from tests.unit.tts._fakeEngines import _FakeHeavyEngine, _FakeLightEngine, fakeHeavyFactory
+from tests.unit.tts._fakeEngines import (
+    _FakeHeavyEngine,
+    _FakeLightEngine,
+    fakeHeavyFactory,
+    fakeLightFactory,
+)
 
 
 @pytest.fixture()
 def heavy_manager(monkeypatch):
     """预注入假引擎的 manager：缓存与**构造**两条支路都留在假引擎里。"""
     monkeypatch.setattr(tts_manager_mod, "MOSSNanTTS", fakeHeavyFactory)
+    # 轻引擎同样桩在**构造**接缝上：TTL 释放把 edge-tts 从 `_engines` 丢掉后走的是构造
+    # 支路，真类 `initialize()` 的 `import edge_tts` 在精简锁（按设计不含它）下必失败。
+    monkeypatch.setattr(tts_manager_mod, "EdgeTTS", fakeLightFactory)
     cfg = TTSConfig(
         engine="auto",
         fallback_chain=["moss-nano", "edge-tts", "mock"],

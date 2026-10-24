@@ -31,12 +31,34 @@ MEMORY_PREFIX = "/api/v1/memory"
 
 @pytest.fixture()
 def unreadyClient():
-    """真 app、但不跑 lifespan ⇒ 没有默认 Agent，正是 6001 的产生态。"""
+    """真 app、且**本轮装配里确实一个 Agent 也没有**——6001 的产生态。
+
+    这里不许只写「不跑 lifespan」：`create_app()` 是进程级单例（`_app_instance`
+    命中即复用），受保护子集里先跑过带 lifespan 的档之后，复用的那份 `AppState`
+    装着已启动的 `default` Agent，本档于是读到 200——**前置悄悄不成立，红的却是
+    生产断言**（2026-10-24 整份受保护子集实测：本档单独跑 4 passed，整份跑 2 failed，
+    且 `get_memory_manager` 在 200 那条路上正常返回了一个 MemoryManager）。
+
+    故把产生态显式摆出来：复用实例时先摘掉 Agent 注册，用例结束原样放回
+    （同一字典对象，不换壳——`endpoints` 侧的 `_app_state["agents"]` 指的就是它）。
+    这一处也顺带解释了 CI 上「实得 200」的另一半成因：端点请求期读的是运行时注册表
+    里那份 **`agents` 引用**，不是 `AppState.agents`；只摘 `AppState` 一侧看不见效果。
+    """
     from fastapi.testclient import TestClient
 
+    from neurova.api import endpoints as endpointsModule
     from neurova.api.app import create_app
 
-    return TestClient(create_app())
+    app = create_app()
+
+    agents = endpointsModule.get_app_state().get("agents")
+    saved = dict(agents)
+    agents.clear()
+    try:
+        yield TestClient(app)
+    finally:
+        agents.clear()
+        agents.update(saved)
 
 
 def testEveryDeclaredErrorCodeTakesAPosition():
