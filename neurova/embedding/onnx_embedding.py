@@ -8,20 +8,45 @@ ONNX Embedding Engine - ONNX Runtime 向量嵌入引擎
 - 支持批量编码和单条编码
 """
 
+from __future__ import annotations
+
 from neurova.core.logger import get_logger
 import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List
 
-import numpy as np
-
 logger = get_logger(__name__)
 
+#: numpy 在 `requirements-ci.txt` 里是**登记过的可选依赖**（该清单头部的契约：被排除的重依赖
+#: 「在代码中均为惰性/try 降级导入，缺席时模块仍可加载」）。此处此前是模块级 `import numpy as np`，
+#: 于是「薄环境里导入本模块」直接抛 ModuleNotFoundError——`neurova/embedding/__init__.py` 是唯一
+#: 顶层导入点，连带 `get_embedding_engine` 都拿不到，受保护子集里 18 格整片红（`cnb-ggt-1k5ne7emk`）。
+#: 改成模块级懒取：类型注解走 `from __future__ import annotations` 天然是字符串，运行期用到时
+#: `_numpy()` 现取；缺席就在**调用点**抛带因的 ImportError（不是把错吞掉，`get_embedding_engine`
+#: 那一侧仍按既有契约返回 None 并写 warning）。
+np: Any = None
 
-def _normalize(vec: np.ndarray) -> np.ndarray:
+
+def _numpy():
+    """取 numpy；缺席时抛出点名原因的 ImportError（而不是让模块导入期就崩）。"""
+    global np
+    if np is None:
+        try:
+            import numpy as _np
+        except ImportError as e:      # 薄环境：点名是谁缺的，别让调用方只看到 No module
+            raise ImportError(
+                "ONNX 嵌入引擎需要 numpy（requirements.txt 的 Utilities 段声明，"
+                "requirements-ci.txt 刻意不含）。当前环境未安装：%s" % e
+            ) from e
+        np = _np
+    return np
+
+
+def _normalize(vec: "np.ndarray") -> "np.ndarray":
     """L2 归一化"""
-    norm = np.linalg.norm(vec)
+    numpy = _numpy()
+    norm = numpy.linalg.norm(vec)
     if norm > 0:
         return vec / norm
     return vec
@@ -384,9 +409,10 @@ class ONNXEmbeddingEngine:
             for attention_mask in attention_mask_list:
                 attention_mask.extend([0] * (batch_longest - len(attention_mask)))
 
-            # 转为 numpy
-            input_ids = np.array(input_ids_list, dtype=np.int64)
-            attention_mask = np.array(attention_mask_list, dtype=np.int64)
+            # 转为 numpy（惰性取：薄环境里这一支根本走不到，本模块仍可导入）
+            numpy = _numpy()
+            input_ids = numpy.array(input_ids_list, dtype=numpy.int64)
+            attention_mask = numpy.array(attention_mask_list, dtype=numpy.int64)
 
             # ONNX 推理
             ort_inputs = {
@@ -395,7 +421,7 @@ class ONNXEmbeddingEngine:
             }
 
             # 尝试添加 token_type_ids
-            token_type_ids = np.zeros_like(input_ids, dtype=np.int64)
+            token_type_ids = numpy.zeros_like(input_ids, dtype=numpy.int64)
             input_names = [inp.name for inp in model_inputs]
             if "token_type_ids" in input_names:
                 ort_inputs["token_type_ids"] = token_type_ids
@@ -409,7 +435,7 @@ class ONNXEmbeddingEngine:
                 embeddings = embeddings[:, 0, :]
 
             # L2 归一化
-            embeddings = np.array([_normalize(vec) for vec in embeddings])
+            embeddings = numpy.array([_normalize(vec) for vec in embeddings])
 
             # 转为 Python list
             vectors = embeddings.tolist()
