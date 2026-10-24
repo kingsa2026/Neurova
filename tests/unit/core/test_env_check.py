@@ -50,14 +50,30 @@ class TestDetectTorchDllProblem:
 
 
 class TestVcRedistDetection:
+    """注册表那三步都在 **Windows 机**上才有意义。
+
+    非 Windows 上 `is_vc_redist_installed()` 按设计**恒 True**（"不处理"），于是只桩
+    `_read_vc_runtime_version` 的"缺失⇒False""旧版⇒False"两格在 Linux 跑测机上一律红——
+    它们量到的是"这台机器不是 Windows"，不是"判定写错了"。所以只在 Windows 上跑，
+    跳过时把理由写清；下面那条非 Windows 恒真的格反过来钉住另一支，两支都有人在管。
+    """
+
+    _WINDOWS_ONLY = pytest.mark.skipif(
+        not sys.platform.startswith("win"),
+        reason="这一族判的是注册表读取；非 Windows 上 is_vc_redist_installed() 按设计恒 True",
+    )
+
+    @_WINDOWS_ONLY
     def test_registry_installed_true(self, monkeypatch):
         monkeypatch.setattr(env_check, "_read_vc_runtime_version", lambda: "14.38.33130.00")
         assert env_check.is_vc_redist_installed() is True
 
+    @_WINDOWS_ONLY
     def test_registry_missing_false(self, monkeypatch):
         monkeypatch.setattr(env_check, "_read_vc_runtime_version", lambda: None)
         assert env_check.is_vc_redist_installed() is False
 
+    @_WINDOWS_ONLY
     def test_old_version_below_2022_false(self, monkeypatch):
         monkeypatch.setattr(env_check, "_read_vc_runtime_version", lambda: "14.16.27012.06")
         assert env_check.is_vc_redist_installed() is False
@@ -189,6 +205,10 @@ class TestPreflightOrchestration:
         env_check.ensure_vc_redist.assert_not_called()
 
     def test_dll_problem_and_missing_runtime_installs(self, monkeypatch):
+        # 编排入口第一句就是"非 Windows 直接 return"（那一步设计如此：VC++ 运行库是
+        # Windows 概念）。不钉这一格的平台，整段编排在 Linux 跑测机上根本走不到桩上——
+        # 读起来像"编排断了"，其实是"这条腿只在 Windows 存在"。
+        monkeypatch.setattr(env_check, "_IS_WINDOWS", True)
         problem = env_check.TorchDllProblem(winerror=1114, dll="c10.dll")
         # H1 编排：torch_imports_ok 首调=门（DLL 坏 → False），装完复验 → True
         monkeypatch.setattr(env_check, "torch_imports_ok", mock.Mock(side_effect=[False, True]))
@@ -200,6 +220,7 @@ class TestPreflightOrchestration:
         assert env_check.torch_imports_ok.call_count == 2
 
     def test_install_fail_does_not_raise(self, monkeypatch):
+        monkeypatch.setattr(env_check, "_IS_WINDOWS", True)
         problem = env_check.TorchDllProblem(winerror=1114, dll="c10.dll")
         monkeypatch.setattr(env_check, "detect_torch_dll_problem", lambda: problem)
         failed = env_check.EnsureResult(installed=False, reason="exit=5100")

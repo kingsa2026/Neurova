@@ -125,6 +125,15 @@ class TestGenerationIsBatchedAndSweeping:
 class TestGeneratedCuesAreUsable:
     def test_生成的线索能被向量通道召回(self, manager):
         """端到端：生成 → 入库 → 通道点火 → 无词面重合的提问能捞出对应记忆。"""
+        from neurova.embedding import get_embedding_engine
+
+        if get_embedding_engine() is None:
+            # 这一格测的是通道**点火之后**的召回，缺稠密后端时通道根本不点火——
+            # 前提不成立，不是判据不成立。其余格（批量、上限、复述过滤）与后端无关，照常跑。
+            pytest.skip(
+                "本格需要本地 ONNX 档（缺档时通道不点火）："
+                "补件 `pip install -r requirements-full.lock`（含 numpy/onnxruntime）"
+            )
         target = ROWS[0]
         query = "团队聚餐选餐厅时要注意什么"
         # 查询与目标零中文字面重合（前提自证，否则用例白给）

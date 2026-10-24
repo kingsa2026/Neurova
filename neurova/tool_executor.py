@@ -35,6 +35,8 @@ import sqlite3
 import threading
 from collections import OrderedDict
 import time
+
+import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from neurova.core.data_root import dataPath
@@ -5700,7 +5702,12 @@ class ToolExecutor:
             try:
                 # 构建执行命令
                 if language == "python":
-                    command = "python"
+                    # 用**本进程那个解释器**，不写字面量 "python"：后者只在 Windows/部分
+                    # 发行版上有那个名字；Debian 系的跑测机只有 `python3`，于是同一段
+                    # `run_code` 在 CI 上恒 `exit_code=-9`、`error` 里写着 "No such file or
+                    # directory: 'python'"——读起来像"沙箱坏了"，其实是"这台机器没有那个别名"。
+                    # sys.executable 还有个额外好处：执行环境与本进程的依赖/虚拟环境一致。
+                    command = sys.executable
                     args = ["-c", code]
                 elif language in ("shell", "bash", "sh"):
                     command = "sh"
