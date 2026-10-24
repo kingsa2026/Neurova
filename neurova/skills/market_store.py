@@ -3,7 +3,7 @@
 
 市场清单单一数据源: 管理端(上架/更新/下架)与 MarketImporter.search_skills
 读取同源。数据落盘 data/marketplace/catalog.json (JSON 数组)。
-首次访问无文件时用默认种子(web-search / code-analysis)初始化。
+首次访问无文件时用默认种子(web-search) + 内置技能包表补齐初始化。
 
 契约见 tests/unit/skills/test_market_store.py。
 """
@@ -34,19 +34,6 @@ _DEFAULT_CATALOG: List[Dict[str, Any]] = [
         "tags": ["search", "web", "information"],
         "rating": 4.5,
         "downloads": 1000,
-        "updated_at": 0,
-    },
-    {
-        "skill_id": "code-analysis",
-        "name": "Code Analysis",
-        "version": "2.0.1",
-        "description": "分析和审查代码质量",
-        "author": "Neurova Team",
-        "download_url": "https://api.neurova.dev/skills/code-analysis/download",
-        "category": "development",
-        "tags": ["code", "analysis", "review"],
-        "rating": 4.8,
-        "downloads": 500,
         "updated_at": 0,
     },
 ]
@@ -85,16 +72,54 @@ _BUILTIN_CATALOG: List[Dict[str, Any]] = [
         "source": "builtin",
         "bundle_zip": "adaptive-presentation-studio.zip",
     },
+    {
+        # 本仓自撰的指令体（不是外部授权包）。它曾与 web-search 并列在 `_DEFAULT_CATALOG`，
+        # 带的是自造市场地址 `api.neurova.dev`——该域名不在已注册远端源白名单里，于是
+        # `import_skill` 跳过下载、照样 COMPLETED，落盘只有 skill.json：装"成功"了，目录里
+        # 什么都没有。指令体的字节只能随包分发；来源标签留空（读作 local），不重分类市场页
+        # 的本地页签。
+        "skill_id": "code-analysis",
+        "name": "Code Analysis",
+        "version": "2.0.1",
+        "description": "分析和审查代码质量",
+        "author": "Neurova Team",
+        "category": "development",
+        "tags": ["code", "analysis", "review"],
+        "rating": 4.8,
+        "downloads": 500,
+        "updated_at": 0,
+        "bundle_zip": "code-analysis.zip",
+    },
 ]
 
 
+# 构件指针字段：内置表是这些字段的唯一事实源，存量 catalog 行按它回写。
+_BUNDLE_POINTER_FIELDS = ("bundle_zip",)
+
+
 def _ensure_builtin_entries(items: List[Dict[str, Any]]) -> bool:
-    """向 items 原地补缺内置条目: 只补 catalog 中缺失的 skill_id,
-    不覆盖既有条目（admin 对已上架条目的改动保留）。返回是否有补入。"""
+    """原地把 catalog 对齐内置表：缺条目补齐，构件指针回写，其余不动。返回是否有变化。
+
+    admin 改过的文案（name/description/version/tags）不回写——那是他的话语权重。
+    但 `bundle_zip` 不是话语，是"这件能力的字节从哪里取"，只能以代码那一份为事实源：
+    把"只补缺不覆盖"沿用到它头上，存量部署就会永远持有一行装不出字节的空壳（本机
+    catalog 里的 code-analysis 正是这种形态）。
+    """
     known = {i.get("skill_id") for i in items}
     added = [dict(e) for e in _BUILTIN_CATALOG if e["skill_id"] not in known]
     items.extend(added)
-    return bool(added)
+    changed = bool(added)
+
+    rows = {i.get("skill_id"): i for i in items}
+    for decl in _BUILTIN_CATALOG:
+        row = rows.get(decl["skill_id"])
+        if row is None:
+            continue
+        for pointer in _BUNDLE_POINTER_FIELDS:
+            if pointer in decl and row.get(pointer) != decl[pointer]:
+                row[pointer] = decl[pointer]
+                changed = True
+    return changed
 
 
 class MarketStore:
