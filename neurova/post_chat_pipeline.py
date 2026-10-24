@@ -1132,6 +1132,12 @@ class PostChatPipeline:
             _citations = (metadata or {}).get("knowledge_citation_ids")
             if _citations:
                 assistant_meta["knowledge_citation_ids"] = list(_citations)
+            _entryIds = (metadata or {}).get("knowledge_entry_ids")
+            if _entryIds:
+                assistant_meta["knowledge_entry_ids"] = list(_entryIds)
+            _entryCitations = (metadata or {}).get("knowledge_entry_citation_ids")
+            if _entryCitations:
+                assistant_meta["knowledge_entry_citation_ids"] = list(_entryCitations)
             turn_id = str(
                 (metadata or {}).get("trace_id")
                 or (metadata or {}).get("turn_id")
@@ -1233,25 +1239,36 @@ class PostChatPipeline:
     def _recordKnowledgeTokenUsage(
         metadata: Dict[str, Any], session_id: str, turn_id: str = ""
     ) -> int:
-        """把本轮 token 按服务端知识 lineage 摊到 fact，差额记未归因。
+        """把本轮 token 摊到 fact 与文档 entry，差额记未归因。
 
         turn_id 是轮级幂等键：同一会话第二轮不会被 source_turn_id 的旧幂等跳过。
-        生成侧要有 lineage 才有分摊对象；检索侧文档命中没有 fact，差额统一进
-        `retrieval_unattributed_tokens`（成本总数不丢，也不摊到某条事实头上）。
-        失败只降级观测，不阻断会话保存。
+        fact 与 entry 共用一次生成分摊（subject 取两者并集），写账时分表；
+        检索侧同理，最后只剩真正无法映射的 token 进未归因桶。
         """
-        lineage = list((metadata or {}).get("knowledge_lineage_ids") or [])
+        lineage = list(dict.fromkeys(
+            str(x) for x in ((metadata or {}).get("knowledge_lineage_ids") or []) if x
+        ))
+        entryIds = list(dict.fromkeys(
+            str(x) for x in ((metadata or {}).get("knowledge_entry_ids") or []) if x
+        ))
         retrieval_tokens = (metadata or {}).get("knowledge_retrieval_tokens") or {}
+        entry_retrieval_tokens = (
+            (metadata or {}).get("knowledge_entry_retrieval_tokens") or {}
+        )
         retrieval_total = int(
             (metadata or {}).get("knowledge_retrieval_tokens_total") or 0
         )
         if not retrieval_total:
-            retrieval_total = sum(int(value or 0) for value in retrieval_tokens.values())
-        if not lineage and retrieval_total <= 0:
+            retrieval_total = (
+                sum(int(value or 0) for value in retrieval_tokens.values())
+                + sum(int(value or 0) for value in entry_retrieval_tokens.values())
+            )
+        if not lineage and not entryIds and retrieval_total <= 0:
             return 0
         try:
             from neurova.core.usage_accounting import get_usage_accounting
             from neurova.knowledge.foundation import get_knowledge_fact_store
+            from neurova.knowledge.usage_attribution import allocateGenerationTokens
 
             store = get_knowledge_fact_store()
             written = 0
@@ -1266,16 +1283,33 @@ class PostChatPipeline:
             retrieval_model = str(
                 (metadata or {}).get("knowledge_retrieval_tokens_model") or model
             )
-            if lineage and (prompt > 0 or completion > 0):
-                from neurova.knowledge.usage_attribution import allocateGenerationTokens
-
+            subjects = list(dict.fromkeys(lineage + entryIds))
+            if subjects and (prompt > 0 or completion > 0):
+                citationIds = list(dict.fromkeys(
+                    list((metadata or {}).get("knowledge_citation_ids") or [])
+                    + list((metadata or {}).get("knowledge_entry_citation_ids") or [])
+                ))
+                weights = {
+                    **dict((metadata or {}).get("knowledge_lineage_scores") or {}),
+                    **dict((metadata or {}).get("knowledge_entry_scores") or {}),
+                }
                 allocations, _unattributed, attribution = allocateGenerationTokens(
-                    lineage, prompt, completion,
-                    citationIds=(metadata or {}).get("knowledge_citation_ids"),
-                    weights=(metadata or {}).get("knowledge_lineage_scores"),
+                    subjects, prompt, completion,
+                    citationIds=citationIds,
+                    weights=weights,
                 )
+                factAlloc = {fid: allocations[fid] for fid in lineage if fid in allocations}
+                entryAlloc = {eid: allocations[eid] for eid in entryIds if eid in allocations}
+                entryAttributed = sum(p + c for p, c in entryAlloc.values())
                 written += store.recordTokenUsageAllocations(
-                    turn_id, allocations,
+                    turn_id, factAlloc,
+                    promptTokens=prompt, completionTokens=completion,
+                    sourceTurnId=session_id, model=model, estimated=estimated,
+                    attribution=attribution,
+                    additionalAttributed=entryAttributed,
+                )
+                written += store.recordEntryTokenUsageAllocations(
+                    turn_id, entryAlloc,
                     promptTokens=prompt, completionTokens=completion,
                     sourceTurnId=session_id, model=model, estimated=estimated,
                     attribution=attribution,
@@ -1286,6 +1320,20 @@ class PostChatPipeline:
                     count = int(tokens or 0)
                     wrote = store.recordTokenUsage(
                         [str(fact_id)], count, 0,
+                        sourceTurnId=session_id, turnId=turn_id,
+                        phase="retrieval", model=retrieval_model,
+                        estimated=retrieval_estimated,
+                    )
+                    written += wrote
+                    if wrote:
+                        attributed_retrieval += count
+                except Exception:  # noqa: BLE001 - 单条检索归因失败不阻断其它
+                    continue
+            for entry_id, tokens in entry_retrieval_tokens.items():
+                try:
+                    count = int(tokens or 0)
+                    wrote = store.recordEntryTokenUsage(
+                        [str(entry_id)], count, 0,
                         sourceTurnId=session_id, turnId=turn_id,
                         phase="retrieval", model=retrieval_model,
                         estimated=retrieval_estimated,

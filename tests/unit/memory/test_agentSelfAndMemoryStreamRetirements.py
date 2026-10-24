@@ -32,8 +32,9 @@ def test_noImporterRemains():
 
     # 面自证：`importersOfModule` 的扫描面就是仓内源码树，先立住语料量级。
     # 根被改窄时它一律回空表，「退役后无人导入」这句就变成"没人看"而不是"没人导入"。
-    scanned = len(ast_scan.filesUnder(REPO_ROOT, ".py"))
-    assert scanned > 500, f"扫描面现读 {scanned} 个 .py（根＝{REPO_ROOT}）——量级不对＝根指错"
+    # 下限取实测全仓 3657 个 .py 的一半——根少指一层掉到 tests 2521／neurova 1043 任一侧都够不着。
+    enumerated = len(ast_scan.filesUnder(REPO_ROOT, ".py"))
+    assert enumerated >= 1800, f"扫描面现读 {enumerated} 个 .py（根＝{REPO_ROOT}）——量级不对＝根指错"
 
     offenders = {}
     for name in RETIRED:

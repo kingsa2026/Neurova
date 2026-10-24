@@ -44,6 +44,11 @@ import pytest
 #: `parents[2]` 的错抓成"三个根各 0 个文件"）——那条覆盖性断言就是为这种
 #: "扫了个空却报绿"的形态准备的，不是装饰。
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+
+#: 两枚探针（`python -c` 回显中文）的预算唯一出处。空载实测 <1s，120s 是把安全感写进代码；
+#: 而 120s 子墙配全局 30s 父墙时先到点的是父墙＝整场跑测没了（§6-402 批 K 口径）。
+#: 取低于全局墙的 20s：诚实的 TimeoutExpired 照报，整档也不必为此抬父墙。
+PROBE_WALL_S = 20
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -633,7 +638,8 @@ def test_bothEndsPinnedRoundTripsNonAsciiWhileHalfPinDoesNot():
     envPinned = dict(os.environ)
     envPinned["PYTHONIOENCODING"] = "utf-8"
     pinned = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                            encoding="utf-8", errors="replace", env=envPinned, timeout=120)
+                            encoding="utf-8", errors="replace", env=envPinned,
+                            timeout=PROBE_WALL_S)
     assert pinned.returncode == 0, pinned.stderr[-400:]
     assert pinned.stdout == marker, f"两头钉后仍读坏：{pinned.stdout!r}"
 
@@ -643,7 +649,7 @@ def test_bothEndsPinnedRoundTripsNonAsciiWhileHalfPinDoesNot():
     if os.environ.get("PYTHONIOENCODING"):
         pytest.skip("父进程环境已带 PYTHONIOENCODING，半修那一发不再代表真实形态")
     half = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=120)
+                          encoding="utf-8", errors="replace", timeout=PROBE_WALL_S)
     assert half.stdout != marker, (
         "半修那发竟读对了（本机首选编码 %s）——探测口径变了，重定这一半而不是留着当恒真"
         % locale.getpreferredencoding(False))

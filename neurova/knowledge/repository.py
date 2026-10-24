@@ -19,16 +19,22 @@ tags/source/confidence/created_at/updated_at），重启保留。
 import contextlib
 import datetime
 import difflib
+import hashlib
 import json
 import os
+import re
 import threading
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
 from neurova.knowledge.foundation.entry_ledger import EntryLedger
-from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
+from neurova.knowledge.foundation.knowledge_facts import (
+    ADOPTION_OUTCOMES,
+    KnowledgeFactStore,
+)
 from neurova.knowledge.foundation.narratives import FOUNDATION_DB_NAME, NarrativeStore
 from neurova.knowledge.foundation.storage_fence import (
     PRODUCTION_STORAGE_DIR,
@@ -186,6 +192,46 @@ class ChunkRevisionConflict(Exception):
     """P1#8 chunk 编辑乐观锁：expected_revision 与块当前 revision 不符。
 
     时不静默覆盖，调用方须重读最新块后重试。"""
+
+
+def _contentFingerprint(tenantId: str, content: str) -> str:
+    """精确去重键：租户 + 规范化正文；空白差异不算不同文档。"""
+    normalized = unicodedata.normalize("NFKC", str(content or ""))
+    normalized = re.sub(r"\s+", " ", normalized).strip().casefold()
+    seed = "%s|%s" % (str(tenantId or "default"), normalized)
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()
+
+
+def _sourceEvidence(item: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "source": str(item.get("source") or ""),
+        "source_type": str(item.get("source_type") or ""),
+        "source_path": str(item.get("source_path") or ""),
+        "ingest_time": str(item.get("ingest_time") or ""),
+    }
+
+
+def _geoOf(geo: Any) -> Optional[Dict[str, float]]:
+    """geo 入库形状：只收可解析的 lat/lon；坏形状归 None，不猜坐标。"""
+    if not isinstance(geo, dict):
+        return None
+    try:
+        lat, lon = float(geo.get("lat")), float(geo.get("lon"))
+    except (TypeError, ValueError):
+        return None
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        return None
+    return {"lat": lat, "lon": lon}
+
+
+def _haversineKm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    import math
+
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * 6371.0088 * math.asin(math.sqrt(a))
 
 
 class KnowledgeRepository:
@@ -608,12 +654,31 @@ class KnowledgeRepository:
     @staticmethod
     def _migrate_entry(item: Dict[str, Any]) -> Dict[str, Any]:
         """存量条目补齐隔离字段：private + 虚拟 default 属主（保守策略）。"""
+        if not str(item.get("knowledge_id") or "").strip():
+            # 缺 id 的旧条目永远进不了反馈/token/引用账：用内容指纹补一个
+            # 稳定 id（不随机，重启后仍是同一条），后续 _save 自然固化。
+            seed = "%s\n%s\n%s" % (
+                item.get("title", ""), item.get("content", ""),
+                item.get("created_at", ""),
+            )
+            item["knowledge_id"] = "legacy-" + hashlib.sha256(
+                seed.encode("utf-8")
+            ).hexdigest()[:32]
         if not isinstance(item.get("visibility"), str):
             item["visibility"] = VISIBILITY_PRIVATE
         if not isinstance(item.get("owner_user_id"), str):
             item["owner_user_id"] = "default"
         if not isinstance(item.get("shared_with"), list):
             item["shared_with"] = []
+        if not isinstance(item.get("tenant_id"), str) or not item.get("tenant_id"):
+            item["tenant_id"] = "default"
+        if not isinstance(item.get("content_fingerprint"), str) or not item.get("content_fingerprint"):
+            item["content_fingerprint"] = _contentFingerprint(
+                item["tenant_id"], str(item.get("content") or "")
+            )
+        if not isinstance(item.get("sources"), list):
+            evidence = _sourceEvidence(item)
+            item["sources"] = [evidence] if evidence.get("source") else []
         if not isinstance(item.get("graph_node_ids"), list):
             item["graph_node_ids"] = []
         if not isinstance(item.get("valid_until"), str):
@@ -624,6 +689,28 @@ class KnowledgeRepository:
             item["lifecycle_reason"] = ""
         if item.get("lifecycle_changed_at") is None:
             item["lifecycle_changed_at"] = None
+        # 文档条目的采纳/注入回写（无 fact lineage 时的 entry 级反馈账）
+        if item.get("adoption_outcome") not in ADOPTION_OUTCOMES:
+            item["adoption_outcome"] = None
+        if item.get("adoption_updated_at") is None:
+            item["adoption_updated_at"] = None
+        if not isinstance(item.get("injected_count"), int):
+            item["injected_count"] = 0
+        if item.get("last_injected_at") is None:
+            item["last_injected_at"] = None
+        # 文档标准化元数据（旧条目保持空值；不靠猜测补页码/OCR）
+        for key in ("source_type", "source_path", "ingest_time", "author",
+                    "ocr_engine", "document_id"):
+            if not isinstance(item.get(key), str):
+                item[key] = ""
+        if item.get("page_count") is None:
+            item["page_count"] = None
+        if item.get("ocr_confidence_avg") is None:
+            item["ocr_confidence_avg"] = None
+        if not isinstance(item.get("ocr_used"), bool):
+            item["ocr_used"] = False
+        if not isinstance(item.get("geo"), dict) or _geoOf(item.get("geo")) is None:
+            item["geo"] = None
         return item
 
     def _assertNotWritingProductionUnderPytest(self) -> None:
@@ -708,9 +795,41 @@ class KnowledgeRepository:
         detect_conflict: bool = True,
         valid_until: Optional[str] = None,
         lifecycle_status: str = ACTIVE,
+        source_type: str = "",
+        source_path: str = "",
+        ingest_time: str = "",
+        author: str = "",
+        page_count: Optional[int] = None,
+        ocr_used: bool = False,
+        ocr_engine: str = "",
+        ocr_confidence_avg: Optional[float] = None,
+        document_id: str = "",
+        tenant_id: str = "default",
+        dedupe: bool = False,
+        geo: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         status = normalizeLifecycleStatus(lifecycle_status)
         now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        tenant = str(tenant_id or "default")
+        fingerprint = _contentFingerprint(tenant, content)
+        if dedupe:
+            with self._lock:
+                for existing in self._items.get(agent_id, []):
+                    if (
+                        str(existing.get("tenant_id") or "default") == tenant
+                        and str(existing.get("content_fingerprint") or "") == fingerprint
+                    ):
+                        evidence = _sourceEvidence({
+                            "source": source, "source_type": source_type,
+                            "source_path": source_path, "ingest_time": ingest_time,
+                        })
+                        sources = existing.setdefault("sources", [])
+                        if evidence.get("source") and evidence not in sources:
+                            sources.append(evidence)
+                            self._save()
+                        duplicate = dict(existing)
+                        duplicate["duplicate"] = True
+                        return duplicate
         item: Dict[str, Any] = {
             "knowledge_id": knowledge_id or str(uuid.uuid4()),
             "title": title,
@@ -723,6 +842,12 @@ class KnowledgeRepository:
             "updated_at": now,
             "visibility": visibility if visibility in (VISIBILITY_PUBLIC, VISIBILITY_PRIVATE) else VISIBILITY_PRIVATE,
             "owner_user_id": str(owner_user_id or "default"),
+            "tenant_id": tenant,
+            "content_fingerprint": fingerprint,
+            "sources": [_sourceEvidence({
+                "source": source, "source_type": source_type,
+                "source_path": source_path, "ingest_time": ingest_time,
+            })] if source else [],
             "shared_with": [],
             "graph_node_ids": [],
             "submission": None,
@@ -730,6 +855,20 @@ class KnowledgeRepository:
             "lifecycle_status": status,
             "lifecycle_reason": "",
             "lifecycle_changed_at": None,
+            "adoption_outcome": None,
+            "adoption_updated_at": None,
+            "injected_count": 0,
+            "last_injected_at": None,
+            "source_type": source_type,
+            "source_path": source_path,
+            "ingest_time": ingest_time,
+            "author": author,
+            "page_count": page_count,
+            "ocr_used": bool(ocr_used),
+            "geo": _geoOf(geo),
+            "ocr_engine": ocr_engine,
+            "ocr_confidence_avg": ocr_confidence_avg,
+            "document_id": document_id,
             # P0-2 分块（[{content, index, char_start, char_end}]）；None=整篇模式
             "chunks": chunks,
             # P1#6 父子分块：chunks 存子块（进索引），parents 存父块（LLM 上下文）；
@@ -779,10 +918,17 @@ class KnowledgeRepository:
         return str((user or {}).get("user_id") or "")
 
     @staticmethod
+    def _tenant(user: Optional[Dict[str, Any]]) -> str:
+        return str((user or {}).get("tenant_id") or "default")
+
+    @staticmethod
     def _is_admin(user: Optional[Dict[str, Any]]) -> bool:
         return str((user or {}).get("role") or "") == "admin"
 
     def can_view(self, user: Optional[Dict[str, Any]], item: Dict[str, Any]) -> bool:
+        # 租户先于角色：管理员只在自己租户内全可见，不是跨租户穿透。
+        if str(item.get("tenant_id") or "default") != self._tenant(user):
+            return False
         if self._is_admin(user):
             return True
         if item.get("visibility") == VISIBILITY_PUBLIC:
@@ -806,6 +952,12 @@ class KnowledgeRepository:
         tags: Optional[List[str]] = None,
         source: Optional[str] = None,
         updated_after: Optional[float] = None,
+        author: Optional[str] = None,
+        source_type: Optional[str] = None,
+        ocr_used: Optional[bool] = None,
+        page_min: Optional[int] = None,
+        geo_radius: Optional[Dict[str, Any]] = None,
+        geo_bbox: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """按当前用户可见性返回条目视图（scope: all/public/private/shared）。
 
@@ -822,6 +974,8 @@ class KnowledgeRepository:
         for aid, items in snapshot:
             for item in items:
                 if agent_id and aid != agent_id:
+                    continue
+                if str(item.get("tenant_id") or "default") != self._tenant(user):
                     continue
                 if not isRetrievable(item):
                     continue
@@ -845,6 +999,30 @@ class KnowledgeRepository:
                     continue
                 if source and str(item.get("source") or "") != str(source):
                     continue
+                if author and str(item.get("author") or "") != str(author):
+                    continue
+                if source_type and str(item.get("source_type") or "") != str(source_type):
+                    continue
+                if ocr_used is not None and bool(item.get("ocr_used")) is not bool(ocr_used):
+                    continue
+                if page_min is not None and int(item.get("page_count") or 0) < int(page_min):
+                    continue
+                # GIS 过滤（A6）：无坐标条目在任何 geo 过滤下不参与；
+                # 过滤被请求而参数残缺时按不匹配处理——空间过滤宁可漏给，不可误扩大结果集。
+                geoPoint = item.get("geo") or {}
+                if geo_radius is not None:
+                    radiusKm = geo_radius.get("radius_km")
+                    if (not geoPoint or radiusKm is None
+                            or _haversineKm(
+                                float(geo_radius["lat"]), float(geo_radius["lon"]),
+                                float(geoPoint["lat"]), float(geoPoint["lon"])) > float(radiusKm)):
+                        continue
+                if geo_bbox is not None:
+                    if not geoPoint:
+                        continue
+                    if not (float(geo_bbox["min_lat"]) <= float(geoPoint["lat"]) <= float(geo_bbox["max_lat"])
+                            and float(geo_bbox["min_lon"]) <= float(geoPoint["lon"]) <= float(geo_bbox["max_lon"])):
+                        continue
                 if updated_after is not None:
                     try:
                         if float(item.get("updated_at") or 0) < float(updated_after):
@@ -985,6 +1163,10 @@ class KnowledgeRepository:
             snapshot = [dict(i) for items in self._items.values() for i in items]
         return [i for i in snapshot if (i.get("submission") or {}).get("status") == _SUBMISSION_PENDING]
 
+    def listAgents(self) -> List[str]:
+        with self._lock:
+            return sorted(self._items)
+
     def list_knowledge(
         self,
         agent_id: str,
@@ -1035,6 +1217,12 @@ class KnowledgeRepository:
         tags: Optional[List[str]] = None,
         source: Optional[str] = None,
         updated_after: Optional[float] = None,
+        author: Optional[str] = None,
+        source_type: Optional[str] = None,
+        ocr_used: Optional[bool] = None,
+        page_min: Optional[int] = None,
+        geo_radius: Optional[Dict[str, Any]] = None,
+        geo_bbox: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """在当前用户可见视图内检索知识。
 
@@ -1047,6 +1235,8 @@ class KnowledgeRepository:
         visible = self.visible_items(
             user, scope=scope, category=category, agent_id=agent_id, tags=tags,
             source=source, updated_after=updated_after,
+            author=author, source_type=source_type, ocr_used=ocr_used,
+            page_min=page_min, geo_radius=geo_radius, geo_bbox=geo_bbox,
         )
         if not visible:
             return []
@@ -1224,6 +1414,147 @@ class KnowledgeRepository:
                         self._record_index_op("reindex", knowledge_id)
                     return True
         return False
+
+    def replaceDocumentParsing(
+        self, agent_id: str, knowledge_id: str, parsed: Any, *,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """用新解析结果替换文档条目正文/块/文档元数据；旧值进 revision 账。
+
+        只做"文档再解析"这一种受控写：不改 title/visibility/owner/tenant，
+        也不做正文重切（新块必须保留页码/标题映射，重切会丢）。
+        """
+        with self._lock:
+            for item in self._items.get(agent_id, []):
+                if item.get("knowledge_id") != knowledge_id:
+                    continue
+                old = {
+                    key: item.get(key)
+                    for key in ("content", "chunks", "parents", "source_type",
+                                "source_path", "ingest_time", "author",
+                                "page_count", "ocr_used", "ocr_engine",
+                                "ocr_confidence_avg", "document_id")
+                }
+                changed = [key for key, value in old.items() if item.get(key) != value]
+                item.setdefault("revisions", []).append({
+                    "old": old,
+                    "changed_fields": changed,
+                    "updated_at": datetime.datetime.now(
+                        datetime.timezone.utc
+                    ).isoformat(),
+                    "reason": "document_reparse",
+                })
+                item["content"] = str(parsed.content)
+                item["chunks"] = list(parsed.chunks)
+                item["parents"] = list(parsed.parents)
+                meta = metadata if metadata is not None else parsed.metadata
+                item["source_type"] = str(meta.get("source_type") or item.get("source_type") or "")
+                item["source_path"] = str(item.get("source_path") or parsed.source_path or "")
+                item["ingest_time"] = str(parsed.ingest_time or item.get("ingest_time") or "")
+                item["author"] = str(meta.get("author") or "")
+                item["page_count"] = meta.get("page_count")
+                item["ocr_used"] = bool(meta.get("ocr_used"))
+                item["ocr_engine"] = str(meta.get("ocr_engine") or "")
+                item["ocr_confidence_avg"] = meta.get("ocr_confidence_avg")
+                item["document_id"] = str(item.get("document_id") or parsed.doc_id or "")
+                item["updated_at"] = datetime.datetime.now(
+                    datetime.timezone.utc
+                ).timestamp()
+                self._syncEntryGovernance()
+                self._save()
+                self._record_index_op("reindex", knowledge_id)
+                return True
+        return False
+
+    # ── entry 级反馈（文档条目无 fact lineage 时的采纳/注入账）──────
+
+    def findBySource(
+        self, agent_id: str, source: str, tenant_id: str = "default"
+    ) -> Optional[Dict[str, Any]]:
+        """按 source 找条目（入站幂等：同一消息不重复建知识；租户内幂等）。"""
+        with self._lock:
+            for item in self._items.get(agent_id, []):
+                if str(item.get("tenant_id") or "default") != str(tenant_id or "default"):
+                    continue
+                if str(item.get("source") or "") == str(source or ""):
+                    return dict(item)
+        return None
+
+    def recordEntryAdoption(
+        self, agent_id: str, knowledge_id: str, outcome: str
+    ) -> bool:
+        """写文档条目的采纳三态；只改反馈字段，不碰 updated_at/正文。"""
+        if outcome not in ADOPTION_OUTCOMES:
+            raise ValueError("未知 adoption_outcome: %r" % (outcome,))
+        stamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with self._lock:
+            for item in self._items.get(agent_id, []):
+                if item.get("knowledge_id") == knowledge_id:
+                    item["adoption_outcome"] = outcome
+                    item["adoption_updated_at"] = stamp
+                    self._save()
+                    return True
+        return False
+
+    def recordEntryInjections(
+        self, agent_id: str, knowledge_ids: List[str]
+    ) -> int:
+        """对最终注入的文档条目累计 injected_count；不改 updated_at。"""
+        wanted = {str(kid) for kid in (knowledge_ids or []) if kid}
+        if not wanted:
+            return 0
+        stamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        written = 0
+        with self._lock:
+            for item in self._items.get(agent_id, []):
+                if item.get("knowledge_id") in wanted:
+                    item["injected_count"] = int(item.get("injected_count") or 0) + 1
+                    item["last_injected_at"] = stamp
+                    written += 1
+            if written:
+                self._save()
+        return written
+
+    def entryFeedbackMap(self, knowledge_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """按 id 取条目反馈；跨 agent 查找（knowledge_id 全局唯一）。"""
+        wanted = {str(kid) for kid in (knowledge_ids or []) if kid}
+        if not wanted:
+            return {}
+        result: Dict[str, Dict[str, Any]] = {}
+        with self._lock:
+            for items in self._items.values():
+                for item in items:
+                    kid = str(item.get("knowledge_id") or "")
+                    if kid in wanted:
+                        result[kid] = {
+                            "adoption_outcome": item.get("adoption_outcome"),
+                            "adoption_updated_at": item.get("adoption_updated_at"),
+                            "injected_count": int(item.get("injected_count") or 0),
+                            "last_injected_at": item.get("last_injected_at"),
+                        }
+        return result
+
+    def entryFeedbackMetrics(self) -> Dict[str, Any]:
+        """条目反馈读数：三态分布 + 注入覆盖率；静默缺失按未回写计。"""
+        with self._lock:
+            items = [item for group in self._items.values() for item in group]
+        counts = {"success": 0, "failure": 0, "unevidenced": 0, "never_written": 0}
+        injected = 0
+        for item in items:
+            outcome = item.get("adoption_outcome")
+            if outcome in counts:
+                counts[outcome] += 1
+            else:
+                counts["never_written"] += 1
+            if int(item.get("injected_count") or 0) > 0:
+                injected += 1
+        total = len(items)
+        return {
+            "total": total,
+            "outcomes": counts,
+            "injected_entries": injected,
+            "injection_coverage": round(injected / total, 6) if total else None,
+        }
 
     def delete_knowledge(
         self, agent_id: str, knowledge_id: str, deleted_by: str = ""
@@ -1431,7 +1762,8 @@ class KnowledgeRepository:
             return [dict(rec, knowledge_id=kid) for kid, rec in self._tombstones.items()]
 
     def expireDueEntries(self, now: Optional[datetime.datetime] = None,
-                         apply: bool = False) -> Dict[str, Any]:
+                         apply: bool = False,
+                         tenantId: Optional[str] = None) -> Dict[str, Any]:
         """到期条目自动归档：dry-run 只报数；apply 把 active→archived。
 
         不删除、不改正文；归档后仍可 PUT 回 active（保留 valid_until）。
@@ -1441,6 +1773,10 @@ class KnowledgeRepository:
         with self._lock:
             for agent_id, items in self._items.items():
                 for item in items:
+                    if tenantId is not None and str(
+                        item.get("tenant_id") or "default"
+                    ) != str(tenantId or "default"):
+                        continue
                     try:
                         status = normalizeLifecycleStatus(item.get("lifecycle_status"))
                     except ValueError:
@@ -1459,7 +1795,10 @@ class KnowledgeRepository:
                 self._save()
         return {"due": len(due), "archived": len(due) if apply else 0, "applied": bool(apply)}
 
-    def lifecycleReport(self, now: Optional[datetime.datetime] = None) -> Dict[str, Any]:
+    def lifecycleReport(
+        self, now: Optional[datetime.datetime] = None,
+        tenantId: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """生命周期只读报告：active/archived/expired 计数 + 不可检索条目清单。"""
         counts = {ACTIVE: 0, ARCHIVED: 0, "expired": 0}
         rows: List[Dict[str, Any]] = []
@@ -1470,6 +1809,10 @@ class KnowledgeRepository:
             ]
         for agent_id, items in snapshot:
             for item in items:
+                if tenantId is not None and str(
+                    item.get("tenant_id") or "default"
+                ) != str(tenantId or "default"):
+                    continue
                 try:
                     status = normalizeLifecycleStatus(item.get("lifecycle_status"))
                 except ValueError:
@@ -1610,6 +1953,10 @@ class KnowledgeRepository:
             old_id = old.get("knowledge_id")
             if not old_id or old_id == new_id:
                 continue
+            if str(old.get("tenant_id") or "default") != str(
+                new_item.get("tenant_id") or "default"
+            ):
+                continue
             old_title = _norm_title(old.get("title", ""))
             if not old_title:
                 continue
@@ -1626,7 +1973,20 @@ class KnowledgeRepository:
         if best is None:
             return
         old_item, title_sim = best
+        from neurova.knowledge.conflict_features import (
+            buildConflictFeatures,
+            classifyConflict,
+        )
+
+        features = buildConflictFeatures(
+            str(old_item.get("content", "")), str(new_item.get("content", "")),
+            subjectSimilarity=title_sim,
+        )
+        decision, featureReason = classifyConflict(features)
         self._conflicts[str(uuid.uuid4())] = {
+            "features": features,
+            "decision": decision,
+            "feature_reason": featureReason,
             "old_id": old_item.get("knowledge_id"),
             "new_id": new_id,
             "knowledge_id": old_item.get("knowledge_id"),
@@ -1635,6 +1995,7 @@ class KnowledgeRepository:
             "reason": "same_title: 新条目与旧条目标题一致，疑似同一事实的新说法",
             "detected_at": datetime.datetime.now(datetime.timezone.utc).timestamp(),
             "status": "pending",
+            "tenant_id": str(new_item.get("tenant_id") or "default"),
             "resolution": None,
             "resolved_by": None,
             "resolved_at": None,
@@ -1645,17 +2006,110 @@ class KnowledgeRepository:
             "status": "pending",
             "against": new_id,
         }
+        # 冲突通知走声明过的主题；订阅者可接 Supervisor/控制台。
+        # 通知失败只降级观测，不回滚已成立的冲突账。
+        try:
+            from neurova.knowledge.ingest_bus import (
+                KB_CONFLICT_NOTIFY_TOPIC,
+                get_ingest_bus,
+            )
 
-    def list_conflicts(self, status: str = "pending") -> List[Dict[str, Any]]:
-        """冲突清单（默认待审 pending；status='resolved' 查裁决历史）。"""
+            get_ingest_bus().publish(KB_CONFLICT_NOTIFY_TOPIC, {
+                "agent_id": agent_id,
+                "tenant_id": str(new_item.get("tenant_id") or "default"),
+                "old_id": old_item.get("knowledge_id"),
+                "new_id": new_id,
+                "decision": decision,
+                "feature_reason": featureReason,
+            })
+        except Exception as exc:  # noqa: BLE001 - 通知失败不影响冲突账
+            logger.debug("冲突通知发布失败: %s", exc)
+
+    def list_conflicts(
+        self, status: str = "pending", tenantId: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """冲突清单（默认待审 pending；status='resolved' 查裁决历史）；可按租户过滤。"""
         with self._lock:
             recs = [
                 dict(rec, conflict_id=cid)
                 for cid, rec in self._conflicts.items()
                 if rec.get("status") == status
+                and (
+                    tenantId is None
+                    or str(rec.get("tenant_id") or "default") == str(tenantId or "default")
+                )
             ]
         recs.sort(key=lambda r: r.get("detected_at", 0), reverse=True)
         return recs
+
+    def findByDocumentId(
+        self, user: Optional[Dict[str, Any]], documentId: str
+    ) -> Optional[Dict[str, Any]]:
+        """按 document_id（或 knowledge_id）在可见集内找文档条目。"""
+        wanted = str(documentId or "").strip()
+        if not wanted:
+            return None
+        for item in self.visible_items(user):
+            if wanted in (
+                str(item.get("document_id") or ""),
+                str(item.get("knowledge_id") or ""),
+            ):
+                return dict(item)
+        return None
+
+    def documentStats(self, tenantId: str = "default") -> Dict[str, Any]:
+        """文档级观测：条目数、OCR 覆盖率、页数/块数与置信度均值。"""
+        tenant = str(tenantId or "default")
+        with self._lock:
+            snapshot = [
+                dict(item)
+                for items in self._items.values() for item in items
+                if str(item.get("tenant_id") or "default") == tenant
+            ]
+        documents = [item for item in snapshot if item.get("document_id")]
+        ocr = [item for item in documents if item.get("ocr_used")]
+        pages = sum(int(item.get("page_count") or 0) for item in documents)
+        chunks = sum(len(item.get("chunks") or []) for item in documents)
+        scores = [
+            float(item.get("ocr_confidence_avg"))
+            for item in ocr
+            if item.get("ocr_confidence_avg") is not None
+        ]
+        total = len(documents)
+        return {
+            "document_count": total,
+            "ocr_document_count": len(ocr),
+            "ocr_coverage": round(len(ocr) / total, 4) if total else None,
+            "page_count": pages,
+            "chunk_count": chunks,
+            "ocr_confidence_avg": round(sum(scores) / len(scores), 4) if scores else None,
+            "missing_reason": (
+                "" if total else "当前租户还没有带 document_id 的文档条目，覆盖率无分母"
+            ),
+        }
+
+    def getConflict(
+        self, conflictId: str, tenantId: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            rec = self._conflicts.get(str(conflictId or ""))
+            if rec is None:
+                return None
+            if tenantId is not None and str(
+                rec.get("tenant_id") or "default"
+            ) != str(tenantId or "default"):
+                return None
+            return dict(rec, conflict_id=conflictId)
+
+    def conflictRecords(self, tenantId: Optional[str] = None) -> List[Dict[str, Any]]:
+        """全部冲突账（含已裁决），供度量按 decision/状态统计；可按租户过滤。"""
+        with self._lock:
+            return [
+                dict(rec, conflict_id=cid)
+                for cid, rec in self._conflicts.items()
+                if tenantId is None
+                or str(rec.get("tenant_id") or "default") == str(tenantId or "default")
+            ]
 
     def has_conflict(self, conflict_id: str) -> bool:
         """这条 id 是不是条目侧账本的——队列端点要靠它分派，不能猜 id 长相。"""

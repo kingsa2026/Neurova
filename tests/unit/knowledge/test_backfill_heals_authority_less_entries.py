@@ -77,7 +77,7 @@ class TestBackfillEndpointPicksThemUp:
         # 旧存量形状：投影有、权威无
         repo.update_knowledge("a1", item["knowledge_id"], {"graph_node_ids": ["n1", "n2"]})
 
-        monkeypatch.setattr(kg, "_get_kg_manager", lambda _agent: graph)
+        monkeypatch.setattr(kg, "_get_kg_manager", lambda _agent, tenant_id="default": graph)
         monkeypatch.setattr(
             "neurova.knowledge.repository.get_knowledge_repository", lambda: repo)
         monkeypatch.setattr(

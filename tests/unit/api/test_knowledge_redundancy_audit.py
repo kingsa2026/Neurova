@@ -35,6 +35,24 @@ def _create(client, title, content):
     return resp.json()
 
 
+def test_entry_feedback_audit_admin_only(api):
+    client, holder, repo = api
+    item = _create(client, "entry-feedback", "body")
+    kid = item.get("knowledge_id") or item.get("data", {}).get("knowledge_id")
+    assert kid
+    assert repo.recordEntryAdoption("default", kid, "success") is True
+
+    holder["user"] = dict(ADMIN)
+    resp = client.get(PREFIX + "/audit/entry-feedback")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["outcomes"]["success"] == 1
+    assert data["total"] == 1
+
+    holder["user"] = dict(ALICE)
+    assert client.get(PREFIX + "/audit/entry-feedback").status_code == 403
+
+
 def test_admin_reads_redundancy_report(api):
     client, holder, _repo = api
     _create(client, "dup-a", "same body")

@@ -37,6 +37,8 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCAN_ROOTS = ("neurova", "tests")
 
@@ -58,15 +60,26 @@ def _singleArgCallsIn(source: str) -> list:
 
 def test_全仓不得再有单参调用形态():
     offenders = []
-    for root in SCAN_ROOTS:
-        for path in (REPO_ROOT / root).rglob("*.py"):
-            if "__pycache__" in path.parts:
-                continue
-            lines = _singleArgCallsIn(path.read_text(encoding="utf-8"))
+    scanned = 0
+    for rootName in SCAN_ROOTS:
+        # 枚举走共享预算（`tests/ast_scan.sourceRefsUnder`）：本判据的谓词是「文本里出现
+        # `_retrieve_memories` 才可能有单参调用」，hints 是这条谓词的充分条件，口径不变。
+        for ref in ast_scan.sourceRefsUnder(REPO_ROOT / rootName, ".py",
+                                            hints=("_retrieve_memories",)):
+            scanned += 1
+            path = ref.path
+            lines = _singleArgCallsIn(ref.code)
             if lines:
                 offenders.append(
                     f"{path.relative_to(REPO_ROOT).as_posix()}:{lines}"
                 )
+    corpusFiles = len(ast_scan.sourceRefsUnder(REPO_ROOT / "neurova", ".py"))
+    assert corpusFiles >= 800, (
+        "生产语料现读 %d 个 .py——REPO_ROOT 指错时这条判据根本不说话" % corpusFiles)
+    # 候选面按**预筛后**读数定线：现算 13 个文件里含 `_retrieve_memories` 字样。
+    # 掉到 0 ＝ 预筛词或根写坏（命中被滤空），而不是"调用方都改好了"。
+    assert scanned >= 5, (
+        "候选面现读 %d 个文件——预筛把命中滤空或根被改窄，此时『零 offender』不作数（面自证）" % scanned)
     assert not offenders, (
         "这些调用还按 `_retrieve_memories(ctx)` 的旧形状写，运行即 TypeError："
         + "; ".join(offenders)

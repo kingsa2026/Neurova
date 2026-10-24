@@ -40,6 +40,19 @@ def test_attachGovernance_lineage_without_enrichment(store):
     assert "evidence_state" not in hits[0]
 
 
+def test_attachGovernance_adoption_survives_enrich_false(store):
+    """采纳三态是反馈事实，不随 FactSurface 关闸一起消失。"""
+    fid = _fact(store, "kid-adopt")
+    store.recordAdoption(fid, "failure")
+
+    hits, _lineage = attachGovernance(
+        store, [{"knowledge_id": "kid-adopt"}], enrich=False
+    )
+
+    assert hits[0]["adoption_outcome"] == "failure"
+    assert "evidence_state" not in hits[0]
+
+
 def test_adapter_normalize_item_carries_lineage_and_fact_id():
     item = KnowledgeRetrieverAdapter._normalize_item({
         "knowledge_id": "kid-1", "lineage_id": "fact-1",
@@ -151,6 +164,66 @@ def test_record_token_usage_even_split_and_idempotent(store):
 
     assert store.recordTokenUsage([f1, f2], 10, 5, sourceTurnId="turn-1") == 0
     assert store.tokenUsageMetrics()["events"] == 2
+
+
+def test_post_chat_records_entry_token_usage(store, monkeypatch):
+    """文档条目的生成/检索 token 进 entry 表，不再落未归因桶。"""
+    import asyncio
+    from types import SimpleNamespace
+
+    from neurova.post_chat_pipeline import PostChatPipeline
+
+    monkeypatch.setattr(
+        "neurova.knowledge.foundation.get_knowledge_fact_store", lambda: store
+    )
+    monkeypatch.setattr(
+        "neurova.core.usage_accounting.get_usage_accounting",
+        lambda: SimpleNamespace(last_call=lambda: {
+            "prompt_tokens": 10, "completion_tokens": 5, "model": "stub",
+        }),
+    )
+    agent = MagicMock()
+    agent._save_to_session = MagicMock(return_value="sess-1")
+    agent._collect_tool_messages = MagicMock(return_value=[])
+    pipeline = PostChatPipeline(agent)
+
+    asyncio.run(pipeline._step_save_session(
+        user_input="q", reply="a", session_id="sess-1", save_memory=True,
+        metadata={
+            "knowledge_entry_ids": ["entry-1"],
+            "knowledge_entry_scores": {"entry-1": 1.0},
+            "knowledge_entry_retrieval_tokens": {"entry-1": 5},
+            "knowledge_retrieval_tokens_total": 5,
+            "knowledge_retrieval_tokens_model": "retrieval-model",
+        },
+    ))
+
+    metrics = store.tokenUsageMetrics()
+    entry = metrics["entry_usage"]
+    assert entry["total_tokens"] == 20
+    assert {row["phase"]: row["total_tokens"] for row in entry["by_phase"]} == {
+        "generation": 15, "retrieval": 5,
+    }
+    assert metrics["turn_totals"]["entry_attributed_tokens"] == 15
+    assert metrics["turn_totals"]["retrieval_unattributed_tokens"] == 0
+
+
+def test_document_citation_is_recorded_as_entry_id():
+    from neurova.memory.citation import CitationRegistry
+
+    registry = CitationRegistry()
+    registry.register({"knowledge_id": "kid-doc"})
+    ctx = SimpleNamespace(
+        citation_registry=registry,
+        reply='答案 <memory_citation ref="k1"/>',
+        metadata={},
+        relevant_memories=[{"knowledge_id": "kid-doc"}],
+    )
+
+    ChatPipeline._recordKnowledgeCitations(ctx)
+
+    assert ctx.metadata["knowledge_entry_citation_ids"] == ["kid-doc"]
+    assert "knowledge_citation_ids" not in ctx.metadata
 
 
 def test_post_chat_records_retrieval_phase_and_citation_attribution(store, monkeypatch):
