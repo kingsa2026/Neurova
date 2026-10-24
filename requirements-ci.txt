@@ -102,3 +102,31 @@ pypdf>=4.0.0
 # 它此前只在 requirements-full.lock 里作为 typer 的传递依赖出现，CI 薄环境没有 ——
 # 与 reportlab / pypdf 同一根因（"只在生产清单声明、不在 CI 清单声明"），故同处补齐。
 rich>=13.0
+
+# 嵌入档的加载面（§6-406 其三，本轮补回）——
+# `neurova/embedding/onnx_embedding.py:270` 惰性 `import Tokenizer`，
+# `:17` 惰性 `import numpy`，`_try_load_onnx()` 惰性 `import onnxruntime`：
+# `models/embedding/bge-small-zh-v1.5/model.onnx` 随代码走，但这三根轮子此前只在
+# requirements.txt 与全量锁里声明，CI 精简锁没有它们。于是 `initialize_sync()`
+# 走到「Tokenizer 加载失败」就 return False，引擎**静默退成零向量兜底**——
+# 读数是「联想 MRR 0.303 对基线 0.35、索引里没有新向量、换实体近似句置信度 0.5875」，
+# 看起来像检索退化，真相是档没装（§6-406）。
+#
+# 为什么长期是假绿：那几条判据的前置写的是 `assert get_embedding_engine() is not None`，
+# 而 ONNXEmbeddingEngine 是懒加载壳——档没装也照样返回对象，该断言恒真。
+#
+# 只补 tokenizers 不够（实测）：`_try_load_onnx()` 撞 onnxruntime 缺席即 return False，
+# `_try_load_sentence_transformers()` 再撞 absence，最后以「初始化失败」收场——
+# 字表读得进，一个向量都算不出。能算出真向量的最小集是这三根：
+#   tokenizers   字表侧（`tokenizer.json`），纯 Rust、四平台有 wheel；
+#   onnxruntime  推理侧（`model.onnx`），CPU 版不拉 torch、不拉 GPU 运行时；
+#   numpy        两侧共用的张量类型（`onnx_embedding.py` 的运行期契约）。
+# 不装 sentence-transformers / transformers / torch：那是第二条后端，会拉 670MB+ 的
+# torch，正是本文件刻意排除的重依赖——CI 要的只是「档能算出非零向量」这条前提。
+# 三者都在上表"刻意排除"名单里，故这段注释同时是对那份名单的一次有意收窄：
+# 收窄的理由是"有判据要求真实档"，不再是"缺了能优雅降级"。
+# 它们刻意**不**登记进 ci_static_gate.KNOWN_OPTIONAL_DEPS（那份表只收缺了能降级的项），
+# 缺席即由 tests/unit/test_ci_thin_env_guards.py 的嵌入档判据报红。
+numpy>=1.24.0,<2.5
+tokenizers>=0.15.0
+onnxruntime>=1.16.0
