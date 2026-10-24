@@ -6,7 +6,9 @@
                class="focus-input" />
       <span class="hop-label">{{ t('knowledge.workbenchHops') }}</span>
       <a-select v-model:value="hops" size="sm" class="hops-select">
-        <a-select-option v-for="h in [1, 2, 3, 4]" :key="h" :value="h">{{ h }}</a-select-option>
+        <!-- 与后端 subgraph 的 le=6 对齐：跳数是探索半径旋钮，被 limit 截断
+             时有 truncated 提示兜底，前端不该替用户封顶。 -->
+        <a-select-option v-for="h in [1, 2, 3, 4, 5, 6]" :key="h" :value="h">{{ h }}</a-select-option>
       </a-select>
       <GlassButton size="sm" :loading="loading" @click="refetch">
         {{ t('common.refresh') }}
