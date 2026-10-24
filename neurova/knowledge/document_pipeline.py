@@ -4,8 +4,8 @@
 `attachment_parser.extract_attachment_text`（不强制 OCR，行为不变）。
 
 设计边界：
-- RapidOCR 是首选 OCR（可选依赖，惰性加载）；不可用时如实返回
-  `ocr_unavailable`，不生成空知识；
+- OCR 引擎按 `NEUROVA_KB_OCR_ENGINE` 选择（rapidocr|paddle|tesseract|auto，
+  契约在 `ocr_engines` 单源）；不可用时如实返回 `ocr_unavailable`，不生成空知识；
 - LibreOffice 只用于旧版 .doc/.ppt/.xls 转换；不可用时返回
   `legacy_office_unavailable`，不伪造文本；
 - 页码/标题是结构信息，不凭正文猜测；无法确定时保留空值。
@@ -30,10 +30,13 @@ from neurova.attachment_parser import (
     extract_docx_blocks,
     extract_pdf_pages,
     extract_pptx_slides,
+    extract_xls_sheets,
     extract_xlsx_sheets,
     extract_attachment_text,
 )
 from neurova.core.logger import get_logger
+from neurova.knowledge import parser_shadow
+from neurova.knowledge.ocr_engines import selectOcrEngine
 from neurova.knowledge.splitter import build_entry_chunks
 
 logger = get_logger(__name__)
@@ -134,64 +137,8 @@ def _documentMetadata(data: bytes, ext: str) -> Dict[str, str]:
 
 
 # ── OCR ──────────────────────────────────────────────────────
-
-
-class RapidOcrEngine:
-    """RapidOCR 的惰性封装；未安装时 available()=False，不抛到调用方。"""
-
-    name = "rapidocr"
-    _engine: Any = None
-
-    def available(self) -> bool:
-        return self._load() is not None
-
-    def _load(self) -> Any:
-        if self._engine is not None:
-            return self._engine
-        try:
-            from rapidocr_onnxruntime import RapidOCR  # type: ignore
-
-            self._engine = RapidOCR()
-            return self._engine
-        except Exception:  # noqa: BLE001 - 新包名/旧包名都试
-            try:
-                from rapidocr import RapidOCR  # type: ignore
-
-                self._engine = RapidOCR()
-                return self._engine
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("RapidOCR 不可用: %s", exc)
-                return None
-
-    def recognize(self, image: bytes) -> Tuple[str, float, str]:
-        engine = self._load()
-        if engine is None:
-            raise DocumentParseError("ocr_unavailable", "RapidOCR 未安装或不可用")
-        try:
-            import numpy as np
-            from PIL import Image
-
-            array = np.array(Image.open(io.BytesIO(image)).convert("RGB"))
-            result, _elapse = engine(array)
-        except DocumentParseError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            raise DocumentParseError("ocr_failed", str(exc)) from exc
-        lines: List[str] = []
-        scores: List[float] = []
-        for item in result or []:
-            try:
-                _box, text, score = item[0], item[1], item[2]
-            except (IndexError, TypeError):
-                continue
-            if text:
-                lines.append(str(text))
-                try:
-                    scores.append(float(score))
-                except (TypeError, ValueError):
-                    pass
-        confidence = sum(scores) / len(scores) if scores else 0.0
-        return "\n".join(lines), round(confidence, 4), self.name
+# 引擎契约与选择器在 `ocr_engines` 单源（升级计划 A2）：RapidOCR/PaddleOCR/
+# Tesseract 同一契约，NEUROVA_KB_OCR_ENGINE 选择，缺省 rapidocr 行为不变。
 
 
 def _render_pdf_page(data: bytes, page_index: int) -> bytes:
@@ -407,15 +354,28 @@ def parse_document(
     headingSpans: List[Tuple[int, int, str]] = []
     engine = ocr_engine
     ocrMeta: Dict[str, Any] = {}
+    # 影子对比要打回**原始**输入：旧格式转换会重绑 data，先留底。
+    rawInput = data
+    originalExt = ext
+    # 主路标注按实际分支：图片等格式在 kreuzberg 模式下仍走本管线编排。
+    pipelineName = "structured"
 
     try:
-        if ext in LEGACY_EXTENSIONS:
+        # .xls 直读（A7）：xlrd 可用就走直读（产出与 xlsx 同形），缺席回落 LibreOffice。
+        xlsSheets = extract_xls_sheets(data) if ext == ".xls" else None
+        if xlsSheets is None and ext in LEGACY_EXTENSIONS:
             # source_type 保留原始旧格式，解析按转换后的新格式走。
             data, ext = _convertLegacyOffice(data, ext)
-        if ext == ".pdf":
+        if parser_shadow.kreuzbergMainEnabled(ext):
+            # Kreuzberg 统一抽取（拍板迁移）：内容层归 kreuzberg，本管线保留
+            # 清洗/分块/标题编排；OCR 仍走引擎层（图片分支不经过这里），
+            # 抽取失败诚实报错，不静默回落双主路。
+            pagesRaw = [parser_shadow.kreuzbergExtract(rawInput, originalExt)]
+            pipelineName = "kreuzberg"
+        elif ext == ".pdf":
             pagesRaw = extract_pdf_pages(data)
             if engine is None:
-                engine = RapidOcrEngine()
+                engine = selectOcrEngine()
             # 逐页：有文字层用文字层；空页/on 模式渲染 OCR
             prepared: List[str] = []
             for index in range(len(pagesRaw)):
@@ -464,6 +424,16 @@ def parse_document(
                 index: [str(sheet.get("title") or "")]
                 for index, sheet in enumerate(sheets, start=1)
             }
+        elif xlsSheets is not None:
+            # .xls 直读：与 xlsx 分支同形消费（同一份"表格→文本"口径）。
+            pagesRaw = [
+                ("[工作表: %s]\n%s" % (sheet.get("title") or "", sheet.get("text") or "")).strip()
+                for sheet in xlsSheets
+            ]
+            pageHeading = {
+                index: [str(sheet.get("title") or "")]
+                for index, sheet in enumerate(xlsSheets, start=1)
+            }
         elif ext == ".pptx":
             slides = extract_pptx_slides(data)
             pagesRaw = [
@@ -474,9 +444,10 @@ def parse_document(
         elif ext in _IMAGE_EXTENSIONS:
             if mode == "off":
                 raise DocumentParseError("ocr_disabled_for_image")
-            engine = engine or RapidOcrEngine()
+            engine = engine or selectOcrEngine()
             if not engine.available():
-                raise DocumentParseError("ocr_unavailable", "RapidOCR 未安装或不可用")
+                raise DocumentParseError(
+                    "ocr_unavailable", "%s 未安装或不可用" % engine.name)
             text, confidence, name = engine.recognize(data)
             pagesRaw = [text]
             ocrMeta = {
@@ -512,7 +483,7 @@ def parse_document(
         "author": core.get("author", ""),
         "created_at": core.get("created_at", ""),
         "modified_at": core.get("modified_at", ""),
-        "pipeline": "structured",
+        "pipeline": pipelineName,
         "ocr_used": bool(ocrMeta.get("ocr_used")),
         "ocr_engine": str(ocrMeta.get("ocr_engine") or ""),
         "ocr_confidence_avg": (
@@ -522,6 +493,14 @@ def parse_document(
         "source_filename": filename,
         "warnings": list(warnings),
     }
+    # Kreuzberg 影子对比（A7）：只挂读数，不改主路任何产出；影子失败不波及解析。
+    if parser_shadow.shadowEnabled():
+        try:
+            metadata["parser_shadow"] = parser_shadow.kreuzbergShadowCompare(
+                rawInput, filename, originalExt,
+                str(metadata["title"]), content)
+        except Exception as exc:  # noqa: BLE001 - 影子只读数，不挡主路
+            logger.debug("Kreuzberg 影子对比跳过: %s", exc)
     return ParsedDocument(
         doc_id=str(uuid.uuid4()),
         source_type=sourceType,

@@ -48,6 +48,12 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 GATE = PROJECT_ROOT / "scripts" / "ci" / "perf_gate.py"
 
+#: 门禁子进程预算的唯一出处（§6-402 批 K 口径：父墙由它 ＋余量导出，两处不许各写一个数）。
+#: 实测最重一格 6.51s（真跑一遍 `perf_gate.py --json`，含读基线与逐步指标核对）。
+#: 原写 300s 而父墙缺省 30s——先到点的是父墙，Windows 侧 thread 法超时即终止整个进程，
+#: 报出来的是"整场跑测没了"。60s 留九倍余量（满载跑测与冷盘都盖得住），父墙 120s。
+GATE_WALL_S = 60
+
 #: 子进程那一趟 pytest 的等待上界（整文件 26 条判据，实测容器内 ~16s，这里留一个量级余量）。
 #: **父墙必须由它导出且严格高于它**：本仓 `pyproject.toml` 只声明 `timeout = 30`，
 #: Windows 侧 pytest-timeout 自动走 thread 法，超时不是「这一格红」而是**终止整个进程**——
@@ -152,6 +158,7 @@ class TestGateScriptExists:
     def test_script_present(self):
         assert GATE.exists(), "性能门禁脚本丢失——性能回归将无人拦"
 
+    @pytest.mark.timeout(GATE_WALL_S + 60)
     def test_script_runs_and_passes(self):
         proc = subprocess.run(
             [sys.executable, str(GATE), "--json"],
@@ -159,7 +166,7 @@ class TestGateScriptExists:
             text=True, encoding="utf-8", errors="replace",
             cwd=str(PROJECT_ROOT),
             env=dict(os.environ, PYTHONIOENCODING="utf-8"),
-            timeout=300,
+            timeout=GATE_WALL_S,
         )
         assert proc.returncode == 0, (
             f"性能门禁当前不通过（CI 会红）：\n{proc.stdout[-2000:]}\n{proc.stderr[-1000:]}"

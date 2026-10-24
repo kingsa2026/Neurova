@@ -31,6 +31,8 @@ from .knowledge_facts import (
     _SCHEMA_V21,
     _SCHEMA_V22,
     _SCHEMA_V23,
+    _SCHEMA_V24,
+    _SCHEMA_V25,
 )
 from .digest_chain import _SCHEMA_V11
 from ..ontology.derivation_ledger import _SCHEMA_V10
@@ -74,6 +76,10 @@ _STEPS: List[tuple] = [
     (22, _SCHEMA_V22),
     # v23：主体消解字典按租户分区
     (23, _SCHEMA_V23),
+    # v24：事实带条目分类（基线 category 维度）
+    (24, _SCHEMA_V24),
+    # v25：本体按租户分区（已拍板），两表重建为 (tenant_id, id) 复合主键
+    (25, _SCHEMA_V25),
 ]
 
 _registered = False

@@ -280,3 +280,29 @@ class TestMqttIngestTransport:
         assert jobId
         assert queue.stats()["pending"] == 1
         queue.close()
+
+
+def testMqttIngestTlsConfigReachesClient():
+    from neurova.knowledge.ingest_mqtt import MqttIngestTransport
+
+    class _TlsClient(_FakeMqttClient):
+        def __init__(self):
+            super().__init__()
+            self.tls = None
+            self.insecure = False
+
+        def tls_set(self, ca_certs=None, certfile=None, keyfile=None):
+            self.tls = (ca_certs, certfile, keyfile)
+
+        def tls_insecure_set(self, value):
+            self.insecure = bool(value)
+
+    client = _TlsClient()
+    transport = MqttIngestTransport(
+        client=client, tlsCa="ca.pem", tlsCert="cert.pem",
+        tlsKey="key.pem", tlsInsecure=True,
+    )
+    transport._ensureClient()
+
+    assert client.tls == ("ca.pem", "cert.pem", "key.pem")
+    assert client.insecure is True

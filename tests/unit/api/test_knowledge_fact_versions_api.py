@@ -129,3 +129,18 @@ def test_baselineListDoesNotCrossTenant(api):
 
     assert listed.status_code == 200
     assert listed.json()["data"]["baselines"] == []
+
+
+def testHistoryDefaultsToAllAndSupportsExplicitPaging(api):
+    client, _holder, _store, fact_id = api
+
+    full = client.get(PREFIX + "/facts/%s/history" % fact_id)
+    assert full.status_code == 200
+    assert full.json()["data"]["total"] == 2
+    assert full.json()["data"]["returned"] == 2
+
+    paged = client.get(PREFIX + "/facts/%s/history?limit=1&offset=1" % fact_id)
+    assert paged.status_code == 200
+    data = paged.json()["data"]
+    assert data["total"] == 2 and data["returned"] == 1
+    assert data["versions"][0]["change_type"] == "create"
