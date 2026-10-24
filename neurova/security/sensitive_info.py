@@ -34,6 +34,8 @@ __all__ = [
     "detectSensitive",
     "containsSensitive",
     "isCredentialKey",
+    "CREDENTIAL_ENV_NAMES",
+    "mentionsCredentialEnvVar",
     "MIN_SECRET_VALUE_LEN",
     "sanitizeSensitive",
     "maskPreservingFormat",
@@ -178,6 +180,24 @@ SENSITIVE_RULES: Tuple[SensitiveRule, ...] = (
            "GitHub personal access token"),
     _shape("neurova_key_literal", r"nvk_[A-Za-z0-9_\-]{8,}", SensitivityLevel.CRITICAL,
            "Neurova 式密钥字面量"),
+    # 以下六条来自第八张表（`evolution/eval/miner.py:SECRET_PATTERNS`，§6-416 批 P-5 第三格
+    # 按教义第 7 条取长补短并进来）。同一张表里的 `sk-ant-api…`／`sk-or-v1-…`／`ghp_…`／
+    # `Bearer \S{20,}` **没有**并进来：实测由上面三条泛化档覆盖（判据
+    # `test_minerSecretDropPolicySharesOneTable.py::testGenericShapesStillCoverTheRedundantNarrowOnes`
+    # 钉住这条覆盖关系）——把窄档再抄一遍就是给同一件事写第二把尺度。
+    _shape("github_user_token", r"ghu_[A-Za-z0-9]{20,}", SensitivityLevel.CRITICAL,
+           "GitHub user token"),
+    _shape("slack_bot_token", r"xoxb-[A-Za-z0-9\-]{10,}", SensitivityLevel.CRITICAL,
+           "Slack bot token"),
+    _shape("slack_app_token", r"xapp-[A-Za-z0-9\-]{10,}", SensitivityLevel.CRITICAL,
+           "Slack app token"),
+    _shape("notion_token", r"ntn_[A-Za-z0-9]{10,}", SensitivityLevel.CRITICAL,
+           "Notion integration token"),
+    _shape("aws_access_key_id", r"AKIA[0-9A-Z]{16}", SensitivityLevel.CRITICAL,
+           "AWS access key id"),
+    _shape("private_key_pem", r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?"
+                              r"PRIVATE KEY-----", SensitivityLevel.CRITICAL,
+           "PEM 私钥头"),
     # 键值档：键表并进化护栏那张表之长（`authorization`/`cookie`/`credential` 与裸 `secret`
     # 此前只在那一侧有，摘要出口整条放过——§6-415 实测三形均"一个字都不脱"）
     _kv("password", r"(?:password|passwd|pwd|密码|口令)", SensitivityLevel.CRITICAL, "密码字段"),
@@ -220,8 +240,31 @@ SENSITIVE_RULES: Tuple[SensitiveRule, ...] = (
 #: 为什么允许投影而不算第二份表：规则本体（正则／分级／形状）只有一份，投影只挑"这条链上
 #: 该看的类别"；新增一条规则只改 `SENSITIVE_RULES`，投影按名字引用。
 #: 投影**沿用表序**（`_pick` 按表过滤），所以"Bearer 先于键值"这条次序约束自动带进每一扇 door。
-_SECRET_SHAPES = ("secret_literal", "neurova_key_literal", "github_token", "bearer_literal")
+_SECRET_SHAPES = ("secret_literal", "neurova_key_literal", "github_token", "bearer_literal",
+                  "github_user_token", "slack_bot_token", "slack_app_token", "notion_token",
+                  "aws_access_key_id", "private_key_pem")
 _CREDENTIAL_KV = ("password", "api_key", "token")
+
+#: **剔除**用的词汇表（唯一一处，§6-416 从 `miner.py` 那张表里摘出来）。
+#: 它是"文本里**提到**这些凭据环境变量名 ⇒ 整条消息不得进评测集"的筛除策略，
+#: 与"这段值要脱敏"是两件事：提到 `GITHUB_TOKEN` 不等于泄露凭据，所以这些名字
+#: **不进任何打码投影**——否则运维散文会被糊成 `[REDACTED]`，代价是没人再读脱敏结果。
+#: 大小写不敏感沿用第八张表原本的 `re.IGNORECASE` 口径（改成敏感就是悄悄收窄剔除面）。
+CREDENTIAL_ENV_NAMES: Tuple[str, ...] = (
+    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "SLACK_BOT_TOKEN",
+    "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "DATABASE_URL",
+)
+
+_CREDENTIAL_ENV_PATTERN = re.compile(
+    r"\b(?:%s)\b" % "|".join(CREDENTIAL_ENV_NAMES), re.IGNORECASE
+)
+
+
+def mentionsCredentialEnvVar(text: str) -> bool:
+    """是否提到凭据环境变量名（fail-closed **筛除**用，不参与打码）。"""
+    if not text:
+        return False
+    return bool(_CREDENTIAL_ENV_PATTERN.search(text))
 
 
 def _pick(names: Tuple[str, ...]) -> Tuple[SensitiveRule, ...]:

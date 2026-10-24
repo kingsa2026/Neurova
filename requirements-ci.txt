@@ -96,7 +96,9 @@ prometheus_client>=0.20
 # 两者都只在 requirements.txt / requirements-full.lock 声明、CI 薄环境没有 ——
 # 同一根因（"只在生产清单声明、不在 CI 清单声明"），故同处补齐。
 reportlab>=4.0
-pypdf>=4.0.0
+# 下界 6.21.2：6.19.0 在 2026-10 公告批里有 11 条，修复版散落 6.21.1/6.21.2，
+# 取能覆盖全部的 6.21.2；与 requirements.txt 同一口径。
+pypdf>=6.21.2
 # Pillow 此前只以 reportlab 的传递依赖身份进入本锁（`# via reportlab`），下界因此在
 # 传递解析里漂到 12.3.0——而 12.x 线全版（含 12.3.0）都在 2026-10 那批公告里（39 条，
 # libtiff 编码器内存泄露 GHSA-xvh5-g6gv-559v 等），修复版只出现在 13.0.0。

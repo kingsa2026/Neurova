@@ -13,6 +13,25 @@
             @search="handleSearch"
           />
           <a-checkbox v-model:checked="semanticSearch">{{ t('knowledge.semanticSearch') }}</a-checkbox>
+          <a-popover v-model:open="filterOpen" trigger="click" placement="bottomLeft">
+            <template #content>
+              <div class="kb-filter-form">
+                <a-input v-model:value="metaFilters.author" size="small" :placeholder="t('knowledge.filterAuthor')" />
+                <a-input v-model:value="metaFilters.source_type" size="small" :placeholder="t('knowledge.filterSourceType')" />
+                <a-select v-model:value="metaFilters.ocr_used" size="small" allow-clear :placeholder="t('knowledge.filterOcrUsed')"
+                          :options="[{ value: true, label: t('knowledge.filterOcrYes') }, { value: false, label: t('knowledge.filterOcrNo') }]" />
+                <a-input-number v-model:value="metaFilters.page_min" size="small" :min="0" :placeholder="t('knowledge.filterPageMin')" style="width: 100%" />
+                <a-input v-model:value="metaFilters.source" size="small" :placeholder="t('knowledge.filterSource')" />
+                <div class="kb-filter-actions">
+                  <GlassButton size="sm" @click="clearMetaFilters">{{ t('knowledge.filterClear') }}</GlassButton>
+                  <GlassButton size="sm" variant="primary" @click="applyMetaFilters">{{ t('knowledge.filterApply') }}</GlassButton>
+                </div>
+              </div>
+            </template>
+            <a-badge :count="activeFilterCount" size="small">
+              <GlassButton variant="secondary" size="sm">{{ t('knowledge.filterMore') }}</GlassButton>
+            </a-badge>
+          </a-popover>
           <a-radio-group v-model:value="activeScope" button-style="solid" size="small" @change="onScopeChange">
             <a-radio-button value="all">{{ t('knowledge.scopeAll') }}</a-radio-button>
             <a-radio-button value="public">{{ t('knowledge.scopePublic') }}</a-radio-button>
@@ -62,6 +81,23 @@
         row-key="id"
         @change="onTableChange"
       >
+        <template #expandedRowRender="{ record }">
+          <div class="kb-meta-detail">
+            <div v-if="record.geo" class="kb-meta-line">
+              <span class="kb-meta-name">{{ t('knowledge.itemGeo') }}</span>
+              <span>{{ record.geo.lat }}, {{ record.geo.lon }}</span>
+            </div>
+            <div class="kb-meta-line">
+              <span class="kb-meta-name">{{ t('knowledge.sourcesTitle') }}</span>
+              <template v-if="(record.sources || []).length">
+                <a-tag v-for="(src, i) in record.sources" :key="i" class="kb-src-tag">
+                  {{ src.source || src.source_type || src.source_path || '-' }}<template v-if="src.ingest_time"> · {{ src.ingest_time }}</template>
+                </a-tag>
+              </template>
+              <span v-else class="kb-src-empty">{{ t('knowledge.sourcesEmpty') }}</span>
+            </div>
+          </div>
+        </template>
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'title'">
             <span class="kb-title-cell">{{ record.title }}</span>
@@ -357,6 +393,15 @@
             :placeholder="t('knowledge.tagsPlaceholder')"
           />
         </a-form-item>
+        <a-form-item :label="t('knowledge.itemAuthor')">
+          <a-input v-model:value="form.author" :placeholder="t('knowledge.itemAuthor')" />
+        </a-form-item>
+        <a-form-item :label="t('knowledge.itemGeo')">
+          <div class="kb-geo-row">
+            <a-input-number v-model:value="form.geoLat" size="small" :min="-90" :max="90" :placeholder="t('knowledge.geoLat')" />
+            <a-input-number v-model:value="form.geoLon" size="small" :min="-180" :max="180" :placeholder="t('knowledge.geoLon')" />
+          </div>
+        </a-form-item>
       </a-form>
     </a-modal>
 
@@ -649,6 +694,7 @@ import {
   getKnowledgeNodes,
   searchKnowledge,
   createKnowledgeNode,
+  type KnowledgeCreatePayload,
   updateKnowledgeNode,
   deleteKnowledgeNode,
   hybridKnowledgeSearch,
@@ -779,7 +825,24 @@ const categoryOptions = ref<{ label: string; value: string }[]>([])
 const modalVisible = ref(false)
 const saving = ref(false)
 const editingItem = ref<KnowledgeItem | null>(null)
-const form = ref({ title: '', category: '', content: '', tags: [] as string[] })
+const form = ref({ title: '', category: '', content: '', tags: [] as string[], author: '', geoLat: undefined as number | undefined, geoLon: undefined as number | undefined })
+
+// A3 元数据过滤（后端 visible/search 已支持；这里只做入口与透传，判权在服务端）。
+const filterOpen = ref(false)
+const metaFilters = ref<{ author: string; source_type: string; ocr_used?: boolean; page_min?: number; source: string }>({ author: '', source_type: '', ocr_used: undefined, page_min: undefined, source: '' })
+const activeFilterCount = computed(() =>
+  [metaFilters.value.author, metaFilters.value.source_type, metaFilters.value.source]
+    .filter((v) => String(v || '').trim()).length
+  + (metaFilters.value.ocr_used !== undefined ? 1 : 0)
+  + (metaFilters.value.page_min !== undefined && metaFilters.value.page_min !== null ? 1 : 0))
+const applyMetaFilters = () => {
+  filterOpen.value = false
+  void fetchKnowledge()
+}
+const clearMetaFilters = () => {
+  metaFilters.value = { author: '', source_type: '', ocr_used: undefined, page_min: undefined, source: '' }
+  void fetchKnowledge()
+}
 
 // Import
 const importVisible = ref(false)
@@ -1130,10 +1193,18 @@ async function fetchKnowledge() {
     // 关键词搜索走 POST /knowledge/search（后端带 chunk_hits 块级溯源）；
     // GET /knowledge 列表端点不支持 q（传了也被忽略，属断链）
     if (searchQuery.value.trim()) {
+      const f = metaFilters.value
+      const searchFilters: Record<string, any> = {}
+      if (f.author.trim()) searchFilters.author = f.author.trim()
+      if (f.source_type.trim()) searchFilters.source_type = f.source_type.trim()
+      if (f.ocr_used !== undefined && f.ocr_used !== null) searchFilters.ocr_used = f.ocr_used
+      if (f.page_min !== undefined && f.page_min !== null) searchFilters.page_min = f.page_min
+      if (f.source.trim()) searchFilters.source = f.source.trim()
       const res: any = await searchKnowledge(searchQuery.value.trim(), {
         agent_id: agentId.value,
         scope: activeScope.value,
         limit: pageSize.value,
+        ...searchFilters,
       })
       const data = res?.data ?? res
       const rawItems: KnowledgeNode[] = Array.isArray(data) ? data : data?.items ?? []
@@ -1196,7 +1267,7 @@ async function semanticSearchFn() {
 
 function openCreateModal() {
   editingItem.value = null
-  form.value = { title: '', category: '', content: '', tags: [] }
+  form.value = { title: '', category: '', content: '', tags: [], author: '', geoLat: undefined, geoLon: undefined }
   modalVisible.value = true
 }
 
@@ -1433,6 +1504,9 @@ function editItem(item: KnowledgeItem) {
     category: item.category,
     content: item.content,
     tags: item.tags ?? [],
+    author: (item as any).author ?? '',
+    geoLat: (item as any).geo?.lat,
+    geoLon: (item as any).geo?.lon,
   }
   modalVisible.value = true
 }
@@ -1444,8 +1518,22 @@ async function saveItem() {
       await updateKnowledgeNode(editingItem.value.id, form.value, { agent_id: agentId.value })
       message.success(t('knowledge.updateSuccess'))
     } else {
-      await createKnowledgeNode({ ...form.value, agent_id: agentId.value })
-      message.success(t('knowledge.createSuccess'))
+      const raw: Record<string, any> = { ...form.value, agent_id: agentId.value }
+      const geo = (raw.geoLat !== undefined && raw.geoLon !== undefined
+        && raw.geoLat !== null && raw.geoLon !== null)
+        ? { lat: raw.geoLat, lon: raw.geoLon } : undefined
+      delete raw.geoLat
+      delete raw.geoLon
+      const payload = Object.assign({} as KnowledgeCreatePayload, raw)
+      if (geo) payload.geo = geo
+      const res: any = await createKnowledgeNode(payload)
+      const created = res?.data ?? res
+      if (created?.duplicate) {
+        // A1：同文命中既有条目，来源已并入 sources[]——如实告知，不冒充新建成功。
+        message.info(t('knowledge.duplicateMerged'))
+      } else {
+        message.success(t('knowledge.createSuccess'))
+      }
     }
     modalVisible.value = false
     fetchKnowledge()
@@ -1855,5 +1943,56 @@ watch(agentId, () => {
 .rev-old {
   color: var(--nr-text-secondary);
   word-break: break-all;
+}
+
+/* A3 过滤 popover：纵向小表单 */
+.kb-filter-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nr-space-sm, 8px);
+  min-width: 220px;
+}
+
+.kb-filter-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--nr-space-sm, 8px);
+}
+
+/* A6 创建表单坐标行 */
+.kb-geo-row {
+  display: flex;
+  gap: var(--nr-space-sm, 8px);
+}
+
+/* A1 展开行：来源链与坐标 */
+.kb-meta-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kb-meta-line {
+  display: flex;
+  align-items: center;
+  gap: var(--nr-space-sm, 8px);
+  flex-wrap: wrap;
+}
+
+.kb-meta-name {
+  min-width: 72px;
+  font-weight: 600;
+  color: var(--nr-text-primary);
+}
+
+.kb-src-tag {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kb-src-empty {
+  color: var(--nr-text-secondary);
+  font-size: 12px;
 }
 </style>
