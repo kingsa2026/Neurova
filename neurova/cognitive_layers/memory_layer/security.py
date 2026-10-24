@@ -111,16 +111,13 @@ class AuditAction(Enum):
 # ────── Data Models ──────
 
 
-@dataclass
-class SensitivePattern:
-    """敏感信息模式"""
+# 敏感信息规则的形状就是共享那一份 `SensitiveRule`（本文件顶部以 `SensitivePattern` 之名再导出）。
+# 这里原先另有一个同名 `@dataclass`——它把上面那个 import 盖掉了（守卫
+# `test_packageInitBindsNoUnusedGenericNames` 抓的正是这一形：import 从未生效），
+# 于是 `import_patterns()` 造出来的是**另一种**形状：字段叫 `sensitivity`、没有 `maskText()`，
+# 交给共享引擎用就会 `AttributeError`。收口不留第二种形状。
 
-    name: str
-    pattern: Pattern
-    sensitivity: SensitivityLevel
-    description: str = ""
-    replacement: str = "***"
-    enabled: bool = True
+
 
 
 @dataclass
@@ -239,15 +236,17 @@ class MemorySecurity:
         # 初始化加密器
         self._cipher = self._init_cipher()
 
+        # 名称→正则的缓存（按名字增删模式时用）。这 4 行必须留在 `__init__`：批 O-5 删本地
+        # 数据类时曾把它们错接进 `set_memory_manager()`，于是没设记忆管理器的实例调
+        # `import_patterns()` 直接 AttributeError（现场复算抓到，随本批归位）。
+        self._compiled_patterns: Dict[str, Pattern] = {}
+        for pattern in self._patterns:
+            self._compiled_patterns[pattern.name] = pattern.pattern
+
     def set_memory_manager(self, memory_manager: Any) -> None:
         """延迟注入记忆管理器（被遗忘权的真实删除后端）"""
         with self._lock:
             self._memory_manager = memory_manager
-
-        # 编译模式缓存
-        self._compiled_patterns: Dict[str, Pattern] = {}
-        for pattern in self._patterns:
-            self._compiled_patterns[pattern.name] = pattern.pattern
 
     def _init_cipher(self):
         """初始化加密器"""
@@ -652,7 +651,7 @@ class MemorySecurity:
             # 按敏感度统计模式
             sensitivity_stats = {}
             for pattern in self._patterns:
-                level = pattern.sensitivity.value
+                level = pattern.severity.value
                 sensitivity_stats[level] = sensitivity_stats.get(level, 0) + 1
 
             return {
@@ -668,10 +667,15 @@ class MemorySecurity:
                 {
                     "name": p.name,
                     "pattern": p.pattern.pattern,
-                    "sensitivity": p.sensitivity.value,
+                    "sensitivity": p.severity.value,        # 外部配置键名不变（既有契约）
                     "description": p.description,
-                    "replacement": p.replacement,
                     "enabled": p.enabled,
+                    # 自定义 replacement 与内置的打码形状都无损带出去：
+                    # 只发 `replacement` 会把内置规则的"留首3末4"这种形状降级成整段替换。
+                    "replacement": p.literalReplacement,
+                    "maskStrategy": p.maskStrategy,
+                    "keepLeading": p.keepLeading,
+                    "keepTrailing": p.keepTrailing,
                 }
                 for p in self._patterns
             ]
@@ -681,12 +685,18 @@ class MemorySecurity:
         with self._lock:
             for config in patterns_config:
                 try:
+                    # 形状只有一份：这里造的必须是共享 `SensitiveRule`（`SensitivePattern`
+                    # 现在是它的别名）。`replacement` 给了就走字面替换，没给就用
+                    # `maskStrategy` 那三种形状之一——两边都不许被静默忽略。
                     pattern = SensitivePattern(
                         name=config["name"],
                         pattern=re.compile(config["pattern"]),
-                        sensitivity=SensitivityLevel(config["sensitivity"]),
+                        severity=SensitivityLevel(config["sensitivity"]),
                         description=config.get("description", ""),
-                        replacement=config.get("replacement", "***"),
+                        maskStrategy=config.get("maskStrategy", "whole"),
+                        keepLeading=int(config.get("keepLeading") or 0),
+                        keepTrailing=int(config.get("keepTrailing") or 0),
+                        literalReplacement=config.get("replacement"),
                         enabled=config.get("enabled", True),
                     )
                     self._patterns.append(pattern)

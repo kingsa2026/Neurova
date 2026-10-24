@@ -150,13 +150,26 @@ class BasePlugin(StateValuesStore, ABC):
 
     @property
     def event_bus(self):
-        """事件总线"""
+        """显式注入的总线（覆盖通道）；没注入时由 `_resolveEventBus()` 现取全局单例。"""
         return self._event_bus
 
     @event_bus.setter
     def event_bus(self, value):
-        """设置事件总线"""
+        """覆盖通道：特殊装配与测试用。生产侧**不要求**有人来设它——不设也走得通。"""
         self._event_bus = value
+
+    def _resolveEventBus(self):
+        """总线落点的唯一形状：注入优先，未注入**调用时现取**全局单例。
+
+        与 `core/base_module.py:_resolveEventBus` 是同一个委托（单源在
+        `core/event_bus.resolveEventBus`），不各写一份。改前这里是
+        `if self._event_bus:`，而生产侧从没有人给它赋值（`plugin_manager.py` 里连
+        `event_bus` 这个词都不出现，全仓赋值点只有三处测试）⇒ **已通过权限确认的插件**
+        调 `publish_event()`，效果只是打一条 warning，然后什么都没发生（§6-412 批 P-4）。
+        """
+        from neurova.core.event_bus import resolveEventBus
+
+        return resolveEventBus(self._event_bus)
 
     async def initialize(self) -> None:
         """初始化插件"""
@@ -225,24 +238,17 @@ class BasePlugin(StateValuesStore, ABC):
         调用方拿到 None 继续跑（§6-126 那一族：把不同故障折成同一个结论）。
         """
         self._requirePermission(PluginFrameworkSurface.READ_EVENTS)
-        if self._event_bus:
-            self._event_bus.subscribe(event_name, handler)
-        else:
-            self._logger.warning("事件总线未设置，无法订阅事件: %s", event_name)
+        self._resolveEventBus().subscribe(event_name, handler)
 
     def unsubscribe(self, event_name: str, handler: typing.Callable) -> None:
         """取消订阅事件（同 `read:events`——退订也是对他方事件面的操作）。"""
         self._requirePermission(PluginFrameworkSurface.READ_EVENTS)
-        if self._event_bus:
-            self._event_bus.unsubscribe(event_name, handler)
+        self._resolveEventBus().unsubscribe(event_name, handler)
 
     def publish_event(self, event_name: str, data: typing.Any = None) -> None:
         """发布事件（须 `emit:events` 已被逐项确认）。"""
         self._requirePermission(PluginFrameworkSurface.EMIT_EVENTS)
-        if self._event_bus:
-            self._event_bus.publish(event_name, data)
-        else:
-            self._logger.warning("事件总线未设置，无法发布事件: %s", event_name)
+        self._resolveEventBus().publish(event_name, data)
 
     def _requirePermission(self, permission: PluginFrameworkSurface) -> None:
         """框架中介点的判定单点：未确认即抛 `PluginError("permission_not_granted")`。

@@ -133,21 +133,16 @@ class BaseModule(StateValuesStore, ABC):
         self._logger.error(message)
 
     def _resolveEventBus(self):
-        """广播落点：注入优先，未注入回落到 `core/event_bus` 的唯一全局入口。
+        """广播落点：委托 `core/event_bus.resolveEventBus`（唯一形状，见那里的注释）。
 
         原形态是 `event_bus=None` + `if self._event_bus:`，而全仓**没有任何一处**传非
         None（`idle_tracker.py:91`、`provider_manager.py:509` 都只是形参转发），于是
-        `initialize/start/stop`(:144-177) 的每一次状态变更与 `idle_tracker.py:602` 的
-        `phase.changed` 都只写在日志里，总线上一片空白——而
-        `api/endpoints/logs.py:72` 读的恰是这条总线，写了没人读、读了恒为空，两头断点。
-        每次调用现取（不冻结在构造期）与 `_settings_path()` 同一口径：绑死会让
-        "重置全局单例"之后的模块对着一条已退役的总线发事件。
+        `initialize/start/stop` 的每一次状态变更与 `idle_tracker.py` 的 `phase.changed`
+        都只写在日志里，总线上一片空白——而 `api/endpoints/logs.py` 读的恰是这条总线。
         """
-        if self._event_bus is not None:
-            return self._event_bus
-        from neurova.core.event_bus import get_event_bus
+        from neurova.core.event_bus import resolveEventBus
 
-        return get_event_bus()
+        return resolveEventBus(self._event_bus)
 
     def subscribe_event(self, event_name: str, handler) -> None:
         """订阅事件——基类唯一的订阅入口。
