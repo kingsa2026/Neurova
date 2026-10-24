@@ -136,6 +136,10 @@ class AgentLLMClient:
             # 向后兼容：没有传入 llm_config 时使用默认值
             from neurova.llm_client import LLMConfig
             self.config = LLMConfig(model=model)
+        # 门面不持提供方事实：声明按 provider 存、按本轮请求解析（`requestCompatCandidates`）。
+        # 留着 dataclass 默认值，"没人声明"就跟"这台网关声明为否"长得一模一样（§6-403 抓的
+        # 就是这个形状）。清空后新读法只能拿到 None，而 None 在判据两侧都是"没资格判死"那一支。
+        self.config.compat = None
 
     def _get_client(self):
         from neurova.llm.multi_model_client import get_multi_model_client
@@ -164,25 +168,12 @@ class AgentLLMClient:
         return (self.model if self.model != "auto" else None), self.provider_id or None
 
     def requestCompatCandidates(self, model=None, provider_id=None) -> list:
-        """本轮请求会打到的 provider 声明链——门面自己不持声明，只把"本轮是谁"传下去。
+        """本轮请求会打到的 provider 声明链——门面不持声明，只把"本轮是谁"传下去。"""
+        from neurova.llm.provider_compat import resolveCallCompatCandidates
 
-        `self.config.compat` 是 `AgentConfig` 造 `LLMConfig` 时留下的 dataclass 默认值
-        （构造点从不传 compat），拿它答"这台网关收不收关思考的键"必然答错（§6-397 批 H
-        的 E 笔复核）。缺省归属按 `_resolve_call_model` 的优先级解析（显式 > 视觉轮覆盖 >
-        实例冻结），与真正发请求时用的是同一份口径。
-        取不到路由面或路由面报错 ⇒ 返回空表，由调用方按"到得了"处理：判据只能掐掉
-        确证的空转，不能掐掉一次本可以自救的重试。
-        """
         if model is None and provider_id is None:
             model, provider_id = self._resolve_call_model({})
-        resolve = getattr(self._get_client(), "requestCompatCandidates", None)
-        if not callable(resolve):
-            return []
-        try:
-            return list(resolve(model=model, provider_id=provider_id) or [])
-        except Exception as e:  # noqa: BLE001 - 答不出就交回调用方 fail-open
-            logger.warning("not_supported: 路由 compat 候选取数失败（%s）——按旋钮到得了处理", e)
-            return []
+        return resolveCallCompatCandidates(self._get_client(), model, provider_id)
 
     async def chat(self, messages, **kwargs):
         call_model, call_provider = self._resolve_call_model(kwargs)

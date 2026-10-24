@@ -28,7 +28,9 @@ def test_capability_defaults_to_unsupported():
     """默认能力位 False：没有原生事件的渠道标 unsupported，不伪造事件。"""
     adapter = _ProbeAdapter(ChannelConfig(channel_type="probe"))
     assert adapter.humanTakeoverEvents is False
-    assert asyncio.run(adapter.health_check())["human_takeover_events"] is False
+    health = asyncio.run(adapter.health_check())
+    assert health["human_takeover_events"] is False
+    assert health["human_takeover_reason"] == "unsupported:no_native_event"
 
     manager = ChannelManager.get_instance()
     manager.register_adapter(adapter)

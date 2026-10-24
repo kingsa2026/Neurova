@@ -43,6 +43,11 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+#: 本档 `_git()` 的预算唯一出处（§6-402 批 K 口径）。落点跑的是 `git ls-files` /
+#: `git check-ignore`，毫秒级；取**低于全局 30s** 的 20s——此前完全没有 `timeout=`，
+#: 等待是无界的，先到点的只会是全局那道 thread 法的墙（报"整场没了"而不是红）。
+GIT_WALL_S = 20
+
 # 开发机仓库根路径特征：盘符 + 仓库目录名（Neurova / 项目）。
 # 只匹配"指向本项目"的形态，不误伤 C:\Windows 这类真实平台常量。
 _DEV_PATH = re.compile(r"[A-Za-z]:[\\/][\\/]?\s*(?:项目|neurova\b)", re.IGNORECASE)
@@ -794,6 +799,7 @@ class TestProtectedSubsetEntriesAreTracked:
             text=True,
             encoding="utf-8",
             errors="replace",
+            timeout=GIT_WALL_S,
         )
 
     def test_git_available_for_tracking_checks(self):

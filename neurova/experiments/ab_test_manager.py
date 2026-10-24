@@ -5,6 +5,7 @@ A/B 测试框架，用于评估 coordination rules 的效果
 """
 
 import asyncio
+import math
 import random
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
@@ -304,38 +305,116 @@ class ABTestManager:
         # Compute statistics
         stats = result.compute_statistics()
 
-        # Calculate statistical significance (simplified)
-        significance = self._calculate_significance(stats)
+        # Calculate statistical significance (Welch t-test, sample-size honest)
+        config = self._experiments.get(experiment_name)
+        significance = self._calculate_significance(
+            stats,
+            samples=result.samples,
+            metrics=list(config.metrics) if config else None,
+            minSampleSize=int(config.min_sample_size) if config else 100,
+        )
 
         return {
             **result.to_dict(),
             "statistical_significance": significance,
         }
 
-    def _calculate_significance(self, stats: Dict[str, Any]) -> Dict[str, Any]:
-        """Calculate statistical significance between groups"""
-        # Simplified: just compare means
-        # In production, use proper statistical tests (t-test, chi-square)
+    def _calculate_significance(
+        self,
+        stats: Dict[str, Any],
+        samples: Optional[List[Dict[str, Any]]] = None,
+        metrics: Optional[List[str]] = None,
+        minSampleSize: int = 100,
+    ) -> Dict[str, Any]:
+        """两组均值差 Welch t 检验；样本不足先报不足，不拿恒真式冒充显著。
 
+        原实现 `ratio = max(a,b)/max(a,b)` 恒等于 1，`significant` 永远为真——
+        这正是"看起来有检验、实际什么都没检"的形状。现在：
+        - 任一组样本数 < min_sample_size → `insufficient_sample`；
+        - 对配置里第一个两组都有的指标算 Welch t 与双侧 p；
+        - 方差都为 0 时按均值是否相等给 p=0/1，避免 0/0。
+        """
         if len(stats) < 2:
             return {"significant": False, "reason": "insufficient_groups"}
-
         groups = list(stats.keys())
-        group1 = groups[0]
-        group2 = groups[1]
+        group1, group2 = groups[0], groups[1]
+        count1 = int(stats[group1]["sample_count"])
+        count2 = int(stats[group2]["sample_count"])
+        if count1 < minSampleSize or count2 < minSampleSize:
+            return {
+                "significant": False,
+                "reason": "insufficient_sample",
+                "min_sample_size": int(minSampleSize),
+                "group1_count": count1,
+                "group2_count": count2,
+            }
+        if not samples:
+            return {
+                "significant": False,
+                "reason": "no_raw_samples",
+                "group1_count": count1,
+                "group2_count": count2,
+            }
 
-        # Compare sample counts
-        count1 = stats[group1]["sample_count"]
-        count2 = stats[group2]["sample_count"]
-
-        ratio = max(count1, count2) / max(count1, count2)
-
+        common = [
+            name for name in (metrics or [])
+            if name in stats[group1]["average_metrics"]
+            and name in stats[group2]["average_metrics"]
+        ]
+        if not common:
+            common = sorted(
+                set(stats[group1]["average_metrics"])
+                & set(stats[group2]["average_metrics"])
+            )
+        for metric in common:
+            values1 = self._metricValues(samples, group1, metric)
+            values2 = self._metricValues(samples, group2, metric)
+            if len(values1) < 2 or len(values2) < 2:
+                continue
+            mean1 = sum(values1) / len(values1)
+            mean2 = sum(values2) / len(values2)
+            var1 = self._variance(values1, mean1)
+            var2 = self._variance(values2, mean2)
+            standardError = math.sqrt(var1 / len(values1) + var2 / len(values2))
+            if standardError == 0.0:
+                pValue = 0.0 if abs(mean1 - mean2) > 1e-12 else 1.0
+            else:
+                tStatistic = (mean1 - mean2) / standardError
+                pValue = math.erfc(abs(tStatistic) / math.sqrt(2))
+            return {
+                "significant": bool(pValue < 0.05),
+                "reason": "welch_t_test",
+                "metric": metric,
+                "group1_mean": round(mean1, 6),
+                "group2_mean": round(mean2, 6),
+                "delta": round(mean1 - mean2, 6),
+                "p_value": round(pValue, 6),
+                "group1_count": count1,
+                "group2_count": count2,
+            }
         return {
-            "significant": ratio > 0.8,  # Simplified
-            "reason": "sample_balance_check",
+            "significant": False,
+            "reason": "no_comparable_metric",
             "group1_count": count1,
             "group2_count": count2,
         }
+
+    @staticmethod
+    def _metricValues(samples: List[Dict[str, Any]], group: str, metric: str) -> List[float]:
+        values: List[float] = []
+        for sample in samples:
+            if sample.get("group") != group:
+                continue
+            value = (sample.get("metrics") or {}).get(metric)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                values.append(float(value))
+        return values
+
+    @staticmethod
+    def _variance(values: List[float], mean: float) -> float:
+        if len(values) < 2:
+            return 0.0
+        return sum((value - mean) ** 2 for value in values) / (len(values) - 1)
 
     def list_experiments(self) -> List[Dict[str, Any]]:
         """List all experiments"""

@@ -1,0 +1,11 @@
+{
+  "schema": "neurova.knowledge.evaluation.conflict_cases/v1",
+  "cases": [
+    {"case_id": "c1", "left": "Alpha budget 100", "right": "Alpha budget 120", "vector_similarity": 0.9, "expected": "conflict"},
+    {"case_id": "c2", "left": "Alpha budget 100", "right": "Alpha budget 100", "vector_similarity": 0.95, "expected": "similar"},
+    {"case_id": "c3", "left": "Alpha budget 100", "right": "Beta server port 9527", "vector_similarity": 0.9, "expected": "different"},
+    {"case_id": "c4", "left": "Alpha budget 100", "right": "Alpha spending plan", "vector_similarity": 0.9, "subject_similarity": 0.95, "expected": "manual"},
+    {"case_id": "c5", "left": "Alpha integrates Beta", "right": "Alpha integrates Gamma", "vector_similarity": 0.9, "subject_similarity": 0.95, "expected": "similar"},
+    {"case_id": "c6", "left": "Alpha budget 100", "right": "Beta budget 200", "vector_similarity": 0.9, "expected": "different"}
+  ]
+}

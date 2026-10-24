@@ -55,6 +55,7 @@ class MQTTAdapter(ChannelAdapter):
 
     # MQTT 是用户可控的通用传输：接管事件是协议约定，不是平台特性探测。
     humanTakeoverEvents = True
+    humanTakeoverReason = ""
 
     #: 入站 JSON 的 event_type / event 取值 → 渠道事件（只认显式名字）
     _TAKEOVER_EVENTS = {

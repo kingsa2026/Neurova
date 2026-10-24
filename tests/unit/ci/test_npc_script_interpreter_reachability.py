@@ -55,6 +55,14 @@ from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法�
 #: 门禁脚本（解释器可达性的被依赖方）
 GATE_SCRIPT = PROJECT_ROOT / "scripts" / "ci" / "npc_turn_handoff_gate.py"
 
+#: 子进程预算的唯一出处（§6-402 批 K 口径：父墙由子墙 ＋余量 导出，两处不许各写一个数）。
+#: `PROBE_WALL_S` 覆盖「跑一条门禁脚本」（python/node 两条分支实测秒级），刻意取**低于全局
+#: 30s** 的一形——先到点的是子进程那条诚实的 TimeoutExpired，而不是 thread 法的全局墙把
+#: 整场跑测打死；`BOOTSTRAP_WALL_S` 留给「把 `.cnb.yml` 里排在门禁之前的物化步骤搬到工作区
+#: 上真跑一遍」那一族（含 npx，冷盘该等多久还等多久），故那两格按 ＋60s 声明父墙。
+PROBE_WALL_S = 20
+BOOTSTRAP_WALL_S = 180
+
 #: 探测段的锚点（`.cnb.yml` 的 YAML 锚点名）与探测结果变量名
 INTERPRETER_ANCHOR = "&npc-script-interpreter"
 INTERPRETER_VAR = "NPX"
@@ -249,12 +257,12 @@ class TestGateScriptRunsOnBothInterpreters:
                 python_run = subprocess.run(
                     [sys.executable, str(GATE_SCRIPT), *flag],
                     capture_output=True, text=True, encoding="utf-8", cwd=str(tmp_path),
-                    env={**base_env, **workspace_env}, timeout=60,
+                    env={**base_env, **workspace_env}, timeout=PROBE_WALL_S,
                 )
                 node_run = subprocess.run(
                     [node, str(node_script), *flag],
                     capture_output=True, text=True, encoding="utf-8", cwd=str(tmp_path),
-                    env={**base_env, **workspace_env}, timeout=60,
+                    env={**base_env, **workspace_env}, timeout=PROBE_WALL_S,
                 )
                 assert python_run.returncode == node_run.returncode, (
                     f"两个分支的退出码不一致（flag={flag} env={workspace_env}）:\n"
@@ -294,7 +302,7 @@ class TestGateScriptRunsOnBothInterpreters:
         _seedWorkspaceSettings(workspace)
         proc = subprocess.run(
             [sys.executable, str(PROJECT_ROOT / script)],
-            capture_output=True, cwd=str(tmp_path), timeout=120,
+            capture_output=True, cwd=str(tmp_path), timeout=PROBE_WALL_S,
             env={**os.environ, "CNB": "1", "CI": "true",
                  "CNB_NPC_NAME": SEEDED_ROLE_NAME,
                  "CNB_BUILD_WORKSPACE": str(workspace)},
@@ -324,7 +332,7 @@ class TestGateScriptRunsOnBothInterpreters:
         result = subprocess.run(
             [node, str(node_script), "--json"],
             capture_output=True, text=True, encoding="utf-8", cwd=str(tmp_path),
-            env={"PATH": "/usr/bin:/bin"}, timeout=60,
+            env={"PATH": "/usr/bin:/bin"}, timeout=PROBE_WALL_S,
         )
         assert result.returncode == 1, (
             f"缺 CNB_BUILD_WORKSPACE 时 node 分支没判红: rc={result.returncode}\n{result.stdout}"
@@ -453,12 +461,12 @@ class TestNodeDispatchReallyWorks:
                 python_run = subprocess.run(
                     [sys.executable, str(GATE_SCRIPT), *flag],
                     capture_output=True, text=True, encoding="utf-8", cwd=str(PROJECT_ROOT),
-                    env={**base_env, **workspace_env}, timeout=60,
+                    env={**base_env, **workspace_env}, timeout=PROBE_WALL_S,
                 )
                 node_run = subprocess.run(
                     [shell, "-c", f"{node_command} {' '.join(flag)}"],
                     capture_output=True, text=True, encoding="utf-8", cwd=str(PROJECT_ROOT),
-                    env={**base_env, **workspace_env}, timeout=60,
+                    env={**base_env, **workspace_env}, timeout=PROBE_WALL_S,
                 )
                 assert node_run.returncode == python_run.returncode, (
                     f"配置里登记的 node 命令与 python 分支退出码不一致"
@@ -484,7 +492,7 @@ class TestNodeDispatchReallyWorks:
         result = subprocess.run(
             [node, str(GATE_SCRIPT), "--json"],
             capture_output=True, text=True, encoding="utf-8", cwd=str(PROJECT_ROOT),
-            env={"PATH": "/usr/bin:/bin", "CNB_BUILD_WORKSPACE": "/tmp"}, timeout=60,
+            env={"PATH": "/usr/bin:/bin", "CNB_BUILD_WORKSPACE": "/tmp"}, timeout=PROBE_WALL_S,
         )
         assert result.returncode != 0, (
             "node 居然能直接跑 .py 了 —— 请复核探测段的 node 桥是否还需要"
@@ -633,7 +641,7 @@ class TestGateScriptsAreReachableFromTheRealWorkspace:
         env.update(env_extra or {})
         return subprocess.run(
             [self._shell(), "-c", command], cwd=str(workspace), env=env,
-            capture_output=True, text=True, encoding="utf-8", timeout=180,
+            capture_output=True, text=True, encoding="utf-8", timeout=BOOTSTRAP_WALL_S,
         )
 
     @classmethod
@@ -694,6 +702,7 @@ class TestGateScriptsAreReachableFromTheRealWorkspace:
             )
         return runs
 
+    @pytest.mark.timeout(BOOTSTRAP_WALL_S + 60)
     def test_no_gate_call_form_dies_on_a_missing_file(self, tmp_path):
         """配置里登记的每一条命令，都不得**因为文件不存在**而失败。
 
@@ -742,6 +751,7 @@ class TestGateScriptsAreReachableFromTheRealWorkspace:
             "后续 Stage（含 npc-go）全部 skipped —— 构建失败与任务内容无关。"
         )
 
+    @pytest.mark.timeout(BOOTSTRAP_WALL_S + 60)
     def test_gate_readings_survive_in_the_foreign_workspace(self, tmp_path):
         """三条门禁在「别人的仓库」里仍要给出**成立**的读数，不是只求退出码非 127。
 

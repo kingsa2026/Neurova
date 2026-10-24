@@ -20,6 +20,11 @@ TRACKING = REPO_ROOT / "scripts" / "guard-llm-tracked.cjs"
 NODE = shutil.which("node")
 pytestmark = pytest.mark.skipif(NODE is None, reason="node runtime not available")
 
+#: node 闸脚本子进程的预算唯一出处（§6-402 批 K 口径）。实测最重一格 0.53s（含 node 启动
+#: 与整仓扫一遍）；此前没有 `timeout=`＝无界等待，而缺省 30s 的全局墙在 Windows 侧走 thread
+#: 法——它先到就是整场跑测没了。取低于全局墙的 20s，整档不必另抬父墙。
+GUARD_WALL_S = 20
+
 
 def _run(script: Path, target: Path):
     """运行 guard 脚本，返回 (exit_code, stdout+stderr)。"""
@@ -29,6 +34,7 @@ def _run(script: Path, target: Path):
         text=True,
         encoding="utf-8",
         errors="replace",
+        timeout=GUARD_WALL_S,
     )
     return proc.returncode, (proc.stdout + proc.stderr)
 

@@ -9,7 +9,7 @@ B04 的形状是"图有 26% 覆盖率但答题时完全不被利用"。这里**�
 
 - **只走三元组**。叙述行的客体是内容键，当成边就会凭空造出一条没连过的链。
 - **一跳不在此列**。一跳是时效读面（012）的活；两条分支都给就是同一说法占两个槽。
-- **不跨 agent 域**。身份是 (agent, label) 维内唯一（`ux_subject_label`），
+- **不跨 agent 域**。身份是 (agent, tenant, label) 维内唯一（`ux_subject_label_tenant`），
   跨域拼接等于把两个 agent 的说法连成一条链。
 - **环靠"路径不重复经过同一主体"终止**，深度另有硬上限。SQLite 的递归 CTE 用
   `UNION ALL`，不去重——放任就是组合爆炸。
@@ -68,22 +68,28 @@ class GraphFactWalker:
 
     def walkFromQuery(self, query: str, maxHops: Optional[int] = None,
                       limit: Optional[int] = None,
-                      now: Optional[datetime.datetime] = None) -> List[Dict[str, Any]]:
+                      now: Optional[datetime.datetime] = None,
+                      tenantId: Optional[str] = None) -> List[Dict[str, Any]]:
         """返回 hop ≥ 2 的终点事实，按跳数由近及远、同跳内按置信与新近。"""
         hops = min(max(int(maxHops if maxHops is not None else self._config.maxHops), 2),
                    _MAX_HOPS_CEILING)
         cap = max(int(limit if limit is not None else self._config.limit), 1)
-        anchors = subjectsMentionedIn(self._store, query or "", self._agentId)
+        anchors = subjectsMentionedIn(
+            self._store, query or "", self._agentId, tenantId
+        )
         if not anchors:
             return []
         moment = (now or datetime.datetime.now(datetime.timezone.utc)).astimezone(
             datetime.timezone.utc)
-        return [self._asHopDict(row) for row in self._walk(anchors, hops, cap, moment)]
+        return [
+            self._asHopDict(row)
+            for row in self._walk(anchors, hops, cap, moment, tenantId)
+        ]
 
     # ── 内部 ──────────────────────────────────────────────────
 
     def _walk(self, anchors: List[str], maxHops: int, limit: int,
-              now: datetime.datetime) -> List[Any]:
+              now: datetime.datetime, tenantId: Optional[str] = None) -> List[Any]:
         placeholders = ",".join("?" * len(anchors))
         stamp = now.isoformat()
         anchorClauses = ["f.status = 'active'", "f.record_kind = 'triple'",
@@ -93,11 +99,16 @@ class GraphFactWalker:
         if self._agentId:
             anchorClauses.append("f.agent_id = ?")
             anchorValues.append(self._agentId)
+        if tenantId is not None:
+            anchorClauses.append("f.tenant_id = ?")
+            anchorValues.append(str(tenantId or "default"))
         # 递归段不再按 agent 过滤事实本身：域已经由 s2.agent_id = w.agent_id 与
         # f2.agent_id = s2.agent_id 两道锁住；多写一遍只会让"谁约束谁"看不清。
         headClause = ("f2.status = 'active' AND f2.record_kind = 'triple'"
                       " AND (f2.valid_until IS NULL OR f2.valid_until = ''"
                       " OR f2.valid_until > ?) AND f2.agent_id = s2.agent_id")
+        if tenantId is not None:
+            headClause += " AND f2.tenant_id = ?"
         #  visited 只记**经过的主体**（不含当前客体）：把客体也记进去，下一跳的起点
         #  永远被判成"重复经过"，整条链一步都走不动（本票第一版就是这么红的）。
         #  路径分隔符一律 ASCII：这条串会进日志与提示词，而 Windows 控制台默认码页
@@ -131,7 +142,10 @@ class GraphFactWalker:
             " ORDER BY hop, (confidence IS NULL), confidence DESC, recorded_at DESC, fact_id"
             " LIMIT ?"
         ) % (" AND ".join(anchorClauses), placeholders, headClause)
-        params = anchorValues + anchors + [maxHops, stamp, limit]
+        params = anchorValues + anchors + [maxHops, stamp]
+        if tenantId is not None:
+            params.append(str(tenantId or "default"))
+        params.append(limit)
         with self._store._lock:
             return self._store._conn.execute(sql, params).fetchall()
 
@@ -149,4 +163,10 @@ class GraphFactWalker:
             "path": fact["path"],
             "visited": fact["visited"],
             "source": str(assertions[-1].get("medium_ref", "") or "") if assertions else "",
+            "entry_id": (
+                str(assertions[-1].get("medium_ref", "") or "").partition("entry:")[2]
+                if assertions and "entry:" in str(assertions[-1].get("medium_ref", ""))
+                else ""
+            ),
+            "tenant_id": str(fact.get("tenant_id") or "default"),
         }

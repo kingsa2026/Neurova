@@ -63,6 +63,11 @@ import pytest
 yaml = pytest.importorskip("yaml")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+#: 门禁在子进程里真跑一遍的预算唯一出处（python 与 node 两条分支实测都在秒级）。
+#: 取低于全局 30s 的这一形：先到点的是子进程那条诚实的 TimeoutExpired，而不是 thread 法
+#: 的全局墙把整场跑测打死（§6-402 批 K 口径）。
+GATE_WALL_S = 20
 CNB = PROJECT_ROOT / ".cnb.yml"
 SETTINGS = PROJECT_ROOT / ".cnb" / "settings.yml"
 from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
@@ -590,7 +595,8 @@ def _run_gate_capture_stdout(gate, argv=None, workspace=None):
         if argv is None:
             pytest.skip("本环境既无 python 也无 node，门禁判据无法执行")
         del label
-    proc = subprocess.run(argv, capture_output=True, env=env, cwd=str(PROJECT_ROOT))
+    proc = subprocess.run(argv, capture_output=True, env=env, cwd=str(PROJECT_ROOT),
+                          timeout=GATE_WALL_S)
     assert proc.returncode == 0, (
         f"门禁 {' '.join(argv)} 未以 0 退出：\n"
         + proc.stdout.decode("utf-8", "replace")

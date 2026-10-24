@@ -122,7 +122,7 @@ class ChannelManager:
         if not hasattr(self, "_agent_adapters"):
             self._agent_adapters: Dict[tuple, ChannelAdapter] = {}
         adapter.agent_id = agent_id
-        adapter.set_event_callback(self._make_event_callback(agent_id))
+        adapter.set_event_callback(self._make_event_callback(agent_id, adapter))
         self._agent_adapters[(agent_id, channel_type)] = adapter
         if agent_id == "default":
             if channel_type in self._adapters:
@@ -130,13 +130,25 @@ class ChannelManager:
             self._adapters[channel_type] = adapter
         logger.info("Registered adapter: %s (agent=%s)", channel_type, agent_id)
 
-    def _make_event_callback(self, agent_id: str):
-        """装配期闭包：事件进入统一处理链前注入来源 agent。"""
+    def _make_event_callback(self, agent_id: str, adapter: Optional[ChannelAdapter] = None):
+        """装配期闭包：事件进入统一处理链前注入来源 agent 与知识入站开关。"""
         async def _callback(event_type: ChannelEventType, message: ChannelMessage):
             # metadata 随 ingress 队列 JSON 内嵌持久化（channel_ingress_queue:56），
             # agent 上下文可跨重启排水存活；已有值不覆盖（同一消息不串台）
             if "agent_id" not in message.metadata:
                 message.metadata["agent_id"] = agent_id
+            if adapter is not None and event_type == ChannelEventType.MESSAGE_RECEIVED:
+                try:
+                    from neurova.knowledge.ingest_bridge import ingestEnabled
+
+                    if ingestEnabled(adapter):
+                        message.metadata["ingest_to_kb"] = True
+                        extra = getattr(getattr(adapter, "config", None), "extra", None) or {}
+                        tenant = str(extra.get("tenant_id") or "")
+                        if tenant:
+                            message.metadata["tenant_id"] = tenant
+                except Exception as exc:  # noqa: BLE001 - 入站开关失败不影响聊天
+                    logger.debug("知识入站开关读取失败: %s", exc)
             return await self._on_channel_event(event_type, message)
         return _callback
 
@@ -234,6 +246,9 @@ class ChannelManager:
                 "human_takeover_events": bool(
                     getattr(adapter, "humanTakeoverEvents", False)
                 ),
+                "human_takeover_reason": str(
+                    getattr(adapter, "humanTakeoverReason", "") or ""
+                ),
             }
         # 兼容：仅存在于 _adapters 而无复合键的实例（理论不发生，兜底）
         for channel_type, adapter in self._adapters.items():
@@ -245,6 +260,9 @@ class ChannelManager:
                     "enabled": adapter.config.enabled,
                     "human_takeover_events": bool(
                         getattr(adapter, "humanTakeoverEvents", False)
+                    ),
+                    "human_takeover_reason": str(
+                        getattr(adapter, "humanTakeoverReason", "") or ""
                     ),
                 }
         return result
@@ -431,6 +449,23 @@ class ChannelManager:
             except Exception as exc:  # noqa: BLE001 - 质量账失败不影响渠道主链
                 logger.warning("渠道人工接管事件记录失败: %s", exc)
             return
+
+        if event_type == ChannelEventType.MESSAGE_RECEIVED and message.metadata.get("ingest_to_kb"):
+            try:
+                from neurova.knowledge.ingest_bridge import get_ingest_bridge
+
+                task = asyncio.create_task(
+                    get_ingest_bridge().ingestChannelMessage(
+                        message, str(message.metadata.get("agent_id") or "default")
+                    )
+                )
+                pending = getattr(self, "_knowledge_ingest_tasks", None)
+                if pending is None:
+                    pending = self._knowledge_ingest_tasks = set()
+                pending.add(task)
+                task.add_done_callback(pending.discard)
+            except Exception as exc:  # noqa: BLE001 - 入站失败不改聊天主链
+                logger.warning("知识入站任务启动失败: %s", exc)
 
         # 广播到 SessionSyncManager
         await self._sync_to_session_sync(event_type, message)
