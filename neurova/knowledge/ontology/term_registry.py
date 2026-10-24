@@ -8,6 +8,11 @@ G08 的形状：`NodeType` / `RelationType` 两个 Enum 长在代码里，加一
 一条刻意的保守：**未登记的术语不算违规，只算"这一维没依据"**。拿"没登记"当"不合法"，
 等于让注册表的覆盖率决定写入是否可用——那是把治理做成随机拒绝。未登记面由
 `unregisteredFindings()` 如实报出，供巡检与 018 的枚举收编用。
+
+自 v25 起本体按租户分区（已拍板：本体归属按租户隔离）：主键是 (tenant_id, term_id)，
+同 term_id 跨租户不冲突、读面互不见。全部方法带 `tenantId` 且缺省 `default`——
+存量调用方语义不变；非 default 租户的种子术语由咽喉写入首跳补种
+（`seedBuiltinTerms(registry, tenantId)` 幂等），构造期只种 default。
 """
 
 from __future__ import annotations
@@ -97,13 +102,16 @@ class OntologyTermRegistry:
                  cardinality: Optional[int] = None,
                  disjointWith: Optional[List[str]] = None,
                  requiredProps: Optional[List[str]] = None,
-                 version: str = "v1") -> Dict[str, Any]:
+                 version: str = "v1",
+                 tenantId: str = "default") -> Dict[str, Any]:
         """登记/更新一个术语。非法结构在**写入处**就拒，不留到查询时才炸。
 
         `rangeKinds` 按类别声明值域（如 `["concept"]` = 客体必须是已登记的概念术语）；
         `rangeTerms` 逐个点名。两者并存时取并集——它们说的是同一件事的两种粒度。
+        父类必须在**同一租户**内登记：类型系统不跨租户引用。
         """
         termId = str(termId or "").strip()
+        tenant = str(tenantId or "default")
         if not termId:
             raise ValueError("term_id 不能为空")
         if kind not in _TERM_KINDS:
@@ -118,17 +126,19 @@ class OntologyTermRegistry:
             raise ValueError("cardinality 至少为 1（不限请传 None），收到 %r" % cardinality)
         if parentTermId and kind != "concept":
             raise ValueError("只有 concept 能有父类，%s 是 %s" % (termId, kind))
-        if parentTermId and not self.term(parentTermId):
+        if parentTermId and not self.term(parentTermId, tenantId=tenant):
             raise ValueError("父类未登记: %s（先登记父类，别留悬空边）" % parentTermId)
         stamp = _now()
         with self._store._lock, self._store._conn:
             existing = self._store._conn.execute(
-                "SELECT created_at FROM ontology_terms WHERE term_id = ?", (termId,)).fetchone()
+                "SELECT created_at FROM ontology_terms WHERE tenant_id = ? AND term_id = ?",
+                (tenant, termId)).fetchone()
             self._store._conn.execute(
-                "INSERT OR REPLACE INTO ontology_terms (term_id, kind, label, parent_term_id,"
-                " domain_terms, range_terms, range_kinds, cardinality, disjoint_with, required_props,"
-                " version, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (termId, kind, label or termId, parentTermId,
+                "INSERT OR REPLACE INTO ontology_terms (tenant_id, term_id, kind, label,"
+                " parent_term_id, domain_terms, range_terms, range_kinds, cardinality,"
+                " disjoint_with, required_props, version, created_at, updated_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (tenant, termId, kind, label or termId, parentTermId,
                  json.dumps(list(domain or []), ensure_ascii=False),
                  json.dumps(list(rangeTerms or []), ensure_ascii=False),
                  json.dumps(sorted({str(k) for k in (rangeKinds or [])}), ensure_ascii=False),
@@ -137,9 +147,9 @@ class OntologyTermRegistry:
                  json.dumps(list(requiredProps or []), ensure_ascii=False),
                  version, existing["created_at"] if existing else stamp, stamp),
             )
-        return self.term(termId) or {}
+        return self.term(termId, tenantId=tenant) or {}
 
-    def registerMany(self, terms: List[Dict[str, Any]]) -> int:
+    def registerMany(self, terms: List[Dict[str, Any]], tenantId: str = "default") -> int:
         """批量登记（018 收编枚举值、以及"加类型不改 .py"的入口都是这里）。"""
         for spec in terms:
             self.register(
@@ -149,10 +159,11 @@ class OntologyTermRegistry:
                 rangeKinds=spec.get("rangeKinds"),
                 cardinality=spec.get("cardinality"), disjointWith=spec.get("disjointWith"),
                 requiredProps=spec.get("requiredProps"), version=spec.get("version", "v1"),
+                tenantId=tenantId,
             )
         return len(terms)
 
-    def seedMissing(self, terms: List[Dict[str, Any]]) -> int:
+    def seedMissing(self, terms: List[Dict[str, Any]], tenantId: str = "default") -> int:
         """**只补缺**的批量写入：已存在的术语一行都不动，返回真正补上的条数。
 
         与 `register`/`registerMany` 的分工必须分清：那两个是"更新"动词（写入方
@@ -164,7 +175,7 @@ class OntologyTermRegistry:
         added = 0
         for spec in terms:
             termId = str(spec.get("termId") or spec.get("term_id") or "").strip()
-            if not termId or self.term(termId) is not None:
+            if not termId or self.term(termId, tenantId=tenantId) is not None:
                 continue
             self.register(
                 termId, spec["kind"],
@@ -173,13 +184,15 @@ class OntologyTermRegistry:
                 rangeKinds=spec.get("rangeKinds"),
                 cardinality=spec.get("cardinality"), disjointWith=spec.get("disjointWith"),
                 requiredProps=spec.get("requiredProps"), version=spec.get("version", "v1"),
+                tenantId=tenantId,
             )
             added += 1
         return added
 
-    def assignSubjectType(self, subjectKey: str, termId: str) -> None:
+    def assignSubjectType(self, subjectKey: str, termId: str,
+                          tenantId: str = "default") -> None:
         """给主体挂类型。类型没登记就拒——挂一个不存在的类型比不挂更糟。"""
-        if not self.term(termId):
+        if not self.term(termId, tenantId=tenantId):
             raise ValueError("类型未登记: %s" % termId)
         with self._store._lock, self._store._conn:
             cur = self._store._conn.execute(
@@ -190,12 +203,13 @@ class OntologyTermRegistry:
 
     # ── 读 ────────────────────────────────────────────────────
 
-    def term(self, termId: Optional[str]) -> Optional[Dict[str, Any]]:
+    def term(self, termId: Optional[str], tenantId: str = "default") -> Optional[Dict[str, Any]]:
         if not termId:
             return None
         with self._store._lock:
             row = self._store._conn.execute(
-                "SELECT * FROM ontology_terms WHERE term_id = ?", (termId,)).fetchone()
+                "SELECT * FROM ontology_terms WHERE tenant_id = ? AND term_id = ?",
+                (str(tenantId or "default"), str(termId))).fetchone()
         if row is None:
             return None
         d = dict(row)
@@ -203,49 +217,56 @@ class OntologyTermRegistry:
             d[key] = json.loads(d[key] or "[]")
         return d
 
-    def terms(self, kind: Optional[str] = None) -> List[Dict[str, Any]]:
-        sql = "SELECT term_id FROM ontology_terms"
-        params: List[Any] = []
+    def terms(self, kind: Optional[str] = None, tenantId: str = "default") -> List[Dict[str, Any]]:
+        sql = "SELECT term_id FROM ontology_terms WHERE tenant_id = ?"
+        params: List[Any] = [str(tenantId or "default")]
         if kind:
-            sql += " WHERE kind = ?"
+            sql += " AND kind = ?"
             params.append(kind)
         with self._store._lock:
             ids = [r["term_id"] for r in
                    self._store._conn.execute(sql + " ORDER BY term_id", params).fetchall()]
-        return [self.term(i) for i in ids if self.term(i)]
+        return [self.term(i, tenantId=tenantId) for i in ids
+                if self.term(i, tenantId=tenantId)]
 
-    def dropTerm(self, termId: str) -> None:
+    def dropTerm(self, termId: str, tenantId: str = "default") -> None:
         """删除术语。子术语判据在这里守最后一道：悬空 parent 边比缺一个类型更糟；
         事实/主体类型/规则引用由写入口按 impactOf 面先行裁定。"""
         termId = str(termId or "").strip()
+        tenant = str(tenantId or "default")
         with self._store._lock, self._store._conn:
             child = self._store._conn.execute(
-                "SELECT term_id FROM ontology_terms WHERE parent_term_id = ?",
-                (termId,)).fetchone()
+                "SELECT term_id FROM ontology_terms WHERE tenant_id = ? AND parent_term_id = ?",
+                (tenant, termId)).fetchone()
             if child:
                 raise ValueError(
                     "术语 %s 仍有子术语 %s——先处理子术语" % (termId, child["term_id"]))
             cur = self._store._conn.execute(
-                "DELETE FROM ontology_terms WHERE term_id = ?", (termId,))
+                "DELETE FROM ontology_terms WHERE tenant_id = ? AND term_id = ?",
+                (tenant, termId))
             if cur.rowcount == 0:
                 raise LookupError("术语未登记: %s" % termId)
 
-    def impactOf(self, termId: str) -> Dict[str, Any]:
+    def impactOf(self, termId: str, tenantId: str = "default") -> Dict[str, Any]:
         """术语在本域的引用面：谓词事实、主体类型断言、子术语。
 
         规则引用归 `ForwardChainingEngine.ruleReferences`——各自的表各自报数，
         不在这里替规则表抄一遍清单。
         """
+        tenant = str(tenantId or "default")
         with self._store._lock:
             factCount = self._store._conn.execute(
                 "SELECT COUNT(*) AS n FROM knowledge_facts"
-                " WHERE predicate_term_id = ? AND status = 'active'", (termId,)).fetchone()["n"]
+                " WHERE tenant_id = ? AND predicate_term_id = ? AND status = 'active'",
+                (tenant, termId)).fetchone()["n"]
             typedSubjects = self._store._conn.execute(
-                "SELECT COUNT(*) AS n FROM knowledge_subjects WHERE type_term_id = ?",
-                (termId,)).fetchone()["n"]
+                "SELECT COUNT(*) AS n FROM knowledge_subjects"
+                " WHERE tenant_id = ? AND type_term_id = ?",
+                (tenant, termId)).fetchone()["n"]
             children = [r["term_id"] for r in self._store._conn.execute(
-                "SELECT term_id FROM ontology_terms WHERE parent_term_id = ? ORDER BY term_id",
-                (termId,)).fetchall()]
+                "SELECT term_id FROM ontology_terms"
+                " WHERE tenant_id = ? AND parent_term_id = ? ORDER BY term_id",
+                (tenant, termId)).fetchall()]
         return {
             "term_id": termId,
             "fact_count": int(factCount),
@@ -253,48 +274,51 @@ class OntologyTermRegistry:
             "child_terms": children,
         }
 
-    def isSubtypeOf(self, termId: str, ancestorId: str, _seen: Optional[set] = None) -> bool:
+    def isSubtypeOf(self, termId: str, ancestorId: str, tenantId: str = "default",
+                    _seen: Optional[set] = None) -> bool:
         seen = _seen or set()
         if termId in seen:
             return False          # 环不追（结构上 register 已挡自父，跨三条以上才可能绕回来）
         seen.add(termId)
-        current = self.term(termId)
+        current = self.term(termId, tenantId=tenantId)
         while current and current.get("parent_term_id"):
             parent = current["parent_term_id"]
             if parent == ancestorId:
                 return True
-            current = self.term(parent)
+            current = self.term(parent, tenantId=tenantId)
         return False
 
-    def matchesDomain(self, termId: str, domainTerms: List[str]) -> bool:
-        return any(termId == d or self.isSubtypeOf(termId, d) for d in domainTerms)
+    def matchesDomain(self, termId: str, domainTerms: List[str],
+                      tenantId: str = "default") -> bool:
+        return any(termId == d or self.isSubtypeOf(termId, d, tenantId=tenantId)
+                   for d in domainTerms)
 
-    def maxCardinality(self, termId: str) -> Optional[int]:
-        term = self.term(termId)
+    def maxCardinality(self, termId: str, tenantId: str = "default") -> Optional[int]:
+        term = self.term(termId, tenantId=tenantId)
         return term.get("cardinality") if term else None
 
-    def domainOf(self, termId: str) -> List[str]:
-        term = self.term(termId) or {}
+    def domainOf(self, termId: str, tenantId: str = "default") -> List[str]:
+        term = self.term(termId, tenantId=tenantId) or {}
         return list(term.get("domain_terms") or [])
 
-    def rangeOf(self, termId: str) -> List[str]:
+    def rangeOf(self, termId: str, tenantId: str = "default") -> List[str]:
         """谓词的值域：点名的那几个 + 按类别展开出来的那一批。
 
         `is_a` 只声明 `rangeKinds: ["concept"]`，于是加一种概念类型不需要动 `is_a` 一行；
         展开在读取时做，表里那一行保持声明形状。
         """
-        term = self.term(termId) or {}
+        term = self.term(termId, tenantId=tenantId) or {}
         declared = list(term.get("range_terms") or [])
         for kind in term.get("range_kinds") or []:
-            declared.extend(t["term_id"] for t in self.terms(kind))
+            declared.extend(t["term_id"] for t in self.terms(kind, tenantId=tenantId))
         return sorted(set(declared))
 
-    def disjointWith(self, termId: str) -> List[str]:
-        term = self.term(termId) or {}
+    def disjointWith(self, termId: str, tenantId: str = "default") -> List[str]:
+        term = self.term(termId, tenantId=tenantId) or {}
         return list(term.get("disjoint_with") or [])
 
-    def requiredProps(self, termId: str) -> List[str]:
-        term = self.term(termId) or {}
+    def requiredProps(self, termId: str, tenantId: str = "default") -> List[str]:
+        term = self.term(termId, tenantId=tenantId) or {}
         return list(term.get("required_props") or [])
 
     def assertedTypesOf(self, agentId: str, subjectKey: str) -> List[str]:
@@ -330,6 +354,21 @@ class OntologyTermRegistry:
                 (agentId, subjectKey, predicateTermId)).fetchall()
         return [self._store._hydrate(r) for r in rows]
 
+    def ensureSeedPredicates(self, tenantId: str = "default") -> int:
+        """咽喉固定谓词的按租户轻量补种（写入首跳）：只看两条种子，不动枚举收编值。"""
+        added = 0
+        for spec in _SEED_TERMS:
+            termId = str(spec["termId"])
+            if self.term(termId, tenantId=tenantId) is not None:
+                continue
+            self.register(
+                termId, spec["kind"], label=spec.get("label", ""),
+                rangeKinds=spec.get("rangeKinds"),
+                cardinality=spec.get("cardinality"),
+                tenantId=tenantId)
+            added += 1
+        return added
+
     def subjectKeysOfType(self, agentId: str, termIds: List[str]) -> List[str]:
         if not termIds:
             return []
@@ -359,7 +398,7 @@ def legacyGraphTerms() -> List[Dict[str, Any]]:
             + [{"termId": v, "kind": "relation", "label": v} for v in _values(RelationType)])
 
 
-def seedBuiltinTerms(registry: "OntologyTermRegistry") -> int:
+def seedBuiltinTerms(registry: "OntologyTermRegistry", tenantId: str = "default") -> int:
     """补齐咽喉固定的谓词与图谱遗留类型；**已登记的行一律不动**。
 
     走 `seedMissing` 而不是 `registerMany`：播种的语义是"缺什么补什么"，
@@ -370,7 +409,10 @@ def seedBuiltinTerms(registry: "OntologyTermRegistry") -> int:
     否则"谁定这一行"就取决于拼接顺序——`is_a` 两边都有，枚举那份是裸值、种子那份
     带值域声明，拼接顺序一变，值域声明就被裸值顶掉（只补缺的语义是"先登记的为准"，
     而清单内部谁先谁后不该是语义）。去掉重复后两份清单互补，谁先写结论都一样。
+
+    自 v25 起按租户播种：非 default 租户的种子由咽喉写入首跳按本租户幂等补齐。
     """
     declared = {str(spec["termId"]) for spec in _SEED_TERMS}
     return registry.seedMissing(
-        [t for t in legacyGraphTerms() if str(t["termId"]) not in declared] + _SEED_TERMS)
+        [t for t in legacyGraphTerms() if str(t["termId"]) not in declared] + _SEED_TERMS,
+        tenantId=tenantId)

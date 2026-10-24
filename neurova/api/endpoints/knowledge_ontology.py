@@ -29,6 +29,11 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
+def _tenantOf(current_user: Dict[str, Any]) -> str:
+    """操作者租户：本体读/写面的分区键（缺省 default）。"""
+    return str(current_user.get("tenant_id") or "default")
+
+
 def _schemaVersion() -> int:
     """schema 版本的唯一出处是版本域注册表，不在这里写死数字。"""
     from neurova.core.db_migration import latest_version
@@ -37,22 +42,27 @@ def _schemaVersion() -> int:
     return latest_version(NARRATIVE_DOMAIN)
 
 
-def ontologySchemaData() -> Dict[str, Any]:
-    """本体类型系统的读面数据（schema 端点与图谱 studio 共用的单一出处）。"""
+def ontologySchemaData(tenantId: str = "default") -> Dict[str, Any]:
+    """本体类型系统的读面数据（schema 端点与图谱 studio 共用的单一出处）。
+
+    自 v25 起本体按租户分区：读面只报本租户的类型表；`tenant_scoped` 如实翻真。
+    """
     from neurova.knowledge.foundation import get_knowledge_fact_store
     from neurova.knowledge.ontology.rule_engine import ForwardChainingEngine
     from neurova.knowledge.ontology.term_registry import OntologyTermRegistry
 
     store = get_knowledge_fact_store()
+    tenant = str(tenantId or "default")
     registry = OntologyTermRegistry(store)
     engine = ForwardChainingEngine(store)
     return {
-        "terms": _termsView(registry),
-        "rules": engine.rules(),
+        "terms": [
+            {**t, "range_terms_effective": registry.rangeOf(t["term_id"], tenantId=tenant)}
+            for t in registry.terms(tenantId=tenant)
+        ],
+        "rules": engine.rules(tenantId=tenant),
         "schema_version": _schemaVersion(),
-        # 租户级本体是已拍板、尚未落地的迁移（term_id 目前全表唯一，加一列
-        # tenant 并不能让两个租户各用同一个 id）。如实报出，不由前端过滤冒充隔离。
-        "tenant_scoped": False,
+        "tenant_scoped": True,
     }
 
 
@@ -77,7 +87,7 @@ async def get_ontology_schema(
     return {
         "code": 0,
         "message": "success",
-        "data": ontologySchemaData(),
+        "data": ontologySchemaData(_tenantOf(current_user)),
     }
 
 
@@ -142,19 +152,21 @@ def _landActivity(store: Any, kind: str, actor: Dict[str, Any], action: str,
     )
 
 
-def _registerTerm(registry: Any, termId: str, body: TermWriteRequest) -> Dict[str, Any]:
+def _registerTerm(registry: Any, termId: str, body: TermWriteRequest,
+                  tenantId: str) -> Dict[str, Any]:
     return registry.register(
         termId, body.kind, label=body.label, parentTermId=body.parent_term_id,
         domain=body.domain, rangeTerms=body.range_terms, rangeKinds=body.range_kinds,
         cardinality=body.cardinality, disjointWith=body.disjoint_with,
-        requiredProps=body.required_props, version=body.version or "v1")
+        requiredProps=body.required_props, version=body.version or "v1",
+        tenantId=tenantId)
 
 
 def _updateTermPayload(registry: Any, termId: str,
-                       body: TermWriteRequest) -> Dict[str, Any]:
+                       body: TermWriteRequest, tenantId: str) -> Dict[str, Any]:
     """PUT 是部分更新：未提供的字段保留现值，只把显式声明交回注册表。
     全量替换会把只改一个 label 的请求顺手清掉父子/值域声明。"""
-    existing = registry.term(termId) or {}
+    existing = registry.term(termId, tenantId=tenantId) or {}
     return {
         "label": body.label or existing.get("label") or "",
         "parentTermId": (body.parent_term_id if body.parent_term_id is not None
@@ -174,9 +186,10 @@ def _updateTermPayload(registry: Any, termId: str,
     }
 
 
-def _fullImpact(registry: Any, engine: Any, termId: str) -> Dict[str, Any]:
-    impact = registry.impactOf(termId)
-    impact["referencing_rules"] = engine.ruleReferences(termId)
+def _fullImpact(registry: Any, engine: Any, termId: str,
+                tenantId: str) -> Dict[str, Any]:
+    impact = registry.impactOf(termId, tenantId=tenantId)
+    impact["referencing_rules"] = engine.ruleReferences(termId, tenantId=tenantId)
     return impact
 
 
@@ -194,13 +207,14 @@ async def create_ontology_term(
     """登记术语（S2 写面）。已存在即 409——更新走 PUT，POST 不做静默改写。"""
     _requireAdmin(current_user)
     store, registry, engine = _ontologyParts()
+    tenant = _tenantOf(current_user)
     termId = str(body.term_id or "").strip()
     if not termId:
         raise HTTPException(status_code=400, detail="term_id 不能为空")
-    if registry.term(termId):
+    if registry.term(termId, tenantId=tenant):
         raise HTTPException(status_code=409, detail="术语已存在: %s（更新走 PUT）" % termId)
     try:
-        term = _registerTerm(registry, termId, body)
+        term = _registerTerm(registry, termId, body, tenant)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     activityId = _landActivity(store, "ontology_term_write", current_user,
@@ -217,12 +231,13 @@ async def update_ontology_term(
     """更新术语（S2 写面）。不存在即 404——新建走 POST，PUT 不做静默新建。"""
     _requireAdmin(current_user)
     store, registry, _engine = _ontologyParts()
+    tenant = _tenantOf(current_user)
     termId = str(term_id or "").strip()
-    if not registry.term(termId):
+    if not registry.term(termId, tenantId=tenant):
         raise HTTPException(status_code=404, detail="术语未登记: %s" % termId)
     try:
-        payload = _updateTermPayload(registry, termId, body)
-        term = registry.register(termId, body.kind, **payload)
+        payload = _updateTermPayload(registry, termId, body, tenant)
+        term = registry.register(termId, body.kind, tenantId=tenant, **payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     activityId = _landActivity(store, "ontology_term_write", current_user,
@@ -241,16 +256,17 @@ async def delete_ontology_term(
     不提供强行删除——先清引用再删，悬空引用不可逆。"""
     _requireAdmin(current_user)
     store, registry, engine = _ontologyParts()
+    tenant = _tenantOf(current_user)
     termId = str(term_id or "").strip()
-    if not registry.term(termId):
+    if not registry.term(termId, tenantId=tenant):
         raise HTTPException(status_code=404, detail="术语未登记: %s" % termId)
-    impact = _fullImpact(registry, engine, termId)
+    impact = _fullImpact(registry, engine, termId, tenant)
     if _impactBlocksDelete(impact):
         raise HTTPException(
             status_code=409,
             detail={"message": "术语被引用，先清引用再删", "impact": impact})
     try:
-        registry.dropTerm(termId)
+        registry.dropTerm(termId, tenantId=tenant)
     except (LookupError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     activityId = _landActivity(store, "ontology_term_write", current_user,
@@ -267,17 +283,18 @@ async def create_ontology_rule(
     """登记规则（S2 写面）。形状/变元/分层由引擎在写入处判，坏规则进不了表。"""
     _requireAdmin(current_user)
     store, _registry, engine = _ontologyParts()
+    tenant = _tenantOf(current_user)
     ruleId = str(body.rule_id or "").strip()
     if not ruleId:
         raise HTTPException(status_code=400, detail="rule_id 不能为空")
-    if engine.rule(ruleId):
+    if engine.rule(ruleId, tenantId=tenant):
         raise HTTPException(status_code=409, detail="规则已存在: %s（更新走 PUT）" % ruleId)
     try:
         rule = engine.registerRule(
             ruleId, body.head_predicate, body.body or [],
             headSubjectVar=body.head_subject_var or "X",
             enabled=True if body.enabled is None else body.enabled,
-            version=body.version or "v1")
+            version=body.version or "v1", tenantId=tenant)
     except (ValueError,) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     activityId = _landActivity(store, "ontology_rule_write", current_user,
@@ -294,9 +311,10 @@ async def update_ontology_rule(
     """更新规则（S2 写面）。改版即旧版结论由引擎自动撤回重推。"""
     _requireAdmin(current_user)
     store, _registry, engine = _ontologyParts()
-    if not engine.rule(str(rule_id or "").strip()):
+    tenant = _tenantOf(current_user)
+    if not engine.rule(str(rule_id or "").strip(), tenantId=tenant):
         raise HTTPException(status_code=404, detail="规则未登记: %s" % rule_id)
-    existing = engine.rule(str(rule_id).strip()) or {}
+    existing = engine.rule(str(rule_id).strip(), tenantId=tenant) or {}
     try:
         rule = engine.registerRule(
             str(rule_id).strip(), body.head_predicate,
@@ -305,7 +323,8 @@ async def update_ontology_rule(
                             or existing.get("head_subject_var") or "X"),
             enabled=(body.enabled if body.enabled is not None
                      else bool(existing.get("enabled", True))),
-            version=body.version or existing.get("version") or "v1")
+            version=body.version or existing.get("version") or "v1",
+            tenantId=tenant)
     except (ValueError,) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     activityId = _landActivity(store, "ontology_rule_write", current_user,
@@ -324,7 +343,8 @@ async def delete_ontology_rule(
     _requireAdmin(current_user)
     store, _registry, engine = _ontologyParts()
     try:
-        engine.dropRule(str(rule_id or "").strip(), basis)
+        engine.dropRule(str(rule_id or "").strip(), basis,
+                        tenantId=_tenantOf(current_user))
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     activityId = _landActivity(store, "ontology_rule_write", current_user,
@@ -346,11 +366,12 @@ async def get_ontology_impact(
     from neurova.knowledge.ontology.term_registry import OntologyTermRegistry
 
     store = get_knowledge_fact_store()
+    tenant = _tenantOf(current_user)
     registry = OntologyTermRegistry(store)
     termId = str(term or "").strip()
-    if not registry.term(termId):
+    if not registry.term(termId, tenantId=tenant):
         raise HTTPException(status_code=404, detail="术语未登记: %s" % termId)
-    impact = _fullImpact(registry, ForwardChainingEngine(store), termId)
+    impact = _fullImpact(registry, ForwardChainingEngine(store), termId, tenant)
     return {"code": 0, "message": "success", "data": impact}
 
 
@@ -401,7 +422,8 @@ async def create_graph_instance(
     # 那是抽取宽容；人工治理面没有这个宽容——类型系统外的边进底座就是
     # 读不出来源的无义事实，先登记谓词再建边。
     store = get_knowledge_fact_store()
-    if not OntologyTermRegistry(store).term(predicate):
+    instanceTenant = str(current_user.get("tenant_id") or "default")
+    if not OntologyTermRegistry(store).term(predicate, tenantId=instanceTenant):
         raise HTTPException(
             status_code=400,
             detail="谓词未登记: %s（先在 /ontology/terms 登记关系类型再建边）" % predicate)
@@ -426,7 +448,7 @@ async def create_graph_instance(
     try:
         receipt = gate.admit(AdmissionRequest(
             agentId=agentId,
-            tenantId=str(current_user.get("tenant_id") or "default"),
+            tenantId=instanceTenant,
             subjectLabel=subject,
             predicateTermId=predicate,
             objectTerm=objTerm,

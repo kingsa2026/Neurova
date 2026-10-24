@@ -22,6 +22,10 @@ class OntologyValidationReport:
     def __init__(self, registry: Any) -> None:
         self._registry = registry
 
+    def ensureTenantSeeds(self, tenantId: str) -> None:
+        """非 default 租户的种子谓词在写入首跳补齐（闸的调用点，不暴露注册表内部）。"""
+        self._registry.ensureSeedPredicates(tenantId)
+
     def violations(self, request: Any, subjectKey: str) -> List[Dict[str, Any]]:
         """只回 violation 那条子集——`unregistered` 是"这一维免检"，不是不合法。"""
         return [f for f in self.findings(request, subjectKey) if f["kind"] == "violation"]
@@ -30,12 +34,14 @@ class OntologyValidationReport:
         registry = self._registry
         predicate = getattr(request, "predicateTermId", "") or ""
         agentId = getattr(request, "agentId", "") or ""
+        # 本体按租户分区（v25）：五条校验只看本租户的类型表。
+        tenantId = str(getattr(request, "tenantId", "") or "default")
         subjectKey = subjectKey or ""
         if not predicate:
             return []
         qualifier = getattr(request, "qualifier", None) or {}
         out: List[Dict[str, Any]] = []
-        term = registry.term(predicate)
+        term = registry.term(predicate, tenantId=tenantId)
 
         if term is None:
             out.append(self._finding("unregistered", "term",
@@ -48,23 +54,23 @@ class OntologyValidationReport:
             out.append(self._finding("unregistered", "domain",
                                      "主体 %s 未挂类型，定义域无法校验" % subjectKey, predicate))
         else:
-            domain = registry.domainOf(predicate)
-            if domain and not registry.matchesDomain(subjectType, domain):
+            domain = registry.domainOf(predicate, tenantId=tenantId)
+            if domain and not registry.matchesDomain(subjectType, domain, tenantId=tenantId):
                 out.append(self._finding(
                     "violation", "domain",
                     "主体类型 %s 不在 %s 的定义域 %s 内" % (subjectType, predicate, domain),
                     predicate, subjectKey=subjectKey))
 
-        rangeTerms = registry.rangeOf(predicate) if term else []
+        rangeTerms = registry.rangeOf(predicate, tenantId=tenantId) if term else []
         objectTerm = str(getattr(request, "objectTerm", "") or "")
         if rangeTerms:
-            objectType = registry.term(objectTerm)
+            objectType = registry.term(objectTerm, tenantId=tenantId)
             if objectType is None:
                 out.append(self._finding(
                     "unregistered", "range",
                     "客体 %r 不是已登记术语，值域 %s 无法核对" % (objectTerm, rangeTerms),
                     predicate, subjectKey=subjectKey))
-            elif not registry.matchesDomain(objectTerm, rangeTerms):
+            elif not registry.matchesDomain(objectTerm, rangeTerms, tenantId=tenantId):
                 out.append(self._finding(
                     "violation", "range",
                     "客体 %s 不在 %s 的值域 %s 内" % (objectTerm, predicate, rangeTerms),
@@ -74,7 +80,7 @@ class OntologyValidationReport:
         # 改库（register 已挡新登记），链成环同理——不追就会被 isSubtypeOf 无限绕。
         for declared in registry.assertedTypesOf(agentId, subjectKey):
             chain: List[str] = []
-            cursor = registry.term(declared)
+            cursor = registry.term(declared, tenantId=tenantId)
             while cursor and cursor.get("parent_term_id"):
                 parent = cursor["parent_term_id"]
                 if parent in chain:
@@ -84,7 +90,7 @@ class OntologyValidationReport:
                         subjectKey=subjectKey))
                     break
                 chain.append(parent)
-                cursor = registry.term(parent)
+                cursor = registry.term(parent, tenantId=tenantId)
                 if cursor is None:
                     out.append(self._finding(
                         "violation", "parentConsistency",
@@ -97,20 +103,20 @@ class OntologyValidationReport:
         declaredTypes = registry.assertedTypesOf(agentId, subjectKey)
         for index, left in enumerate(declaredTypes):
             for right in declaredTypes[index + 1:]:
-                if right in registry.disjointWith(left):
+                if right in registry.disjointWith(left, tenantId=tenantId):
                     out.append(self._finding(
                         "violation", "disjoint",
                         "主体同时被断言为不相交类型 %s 与 %s" % (left, right), predicate,
                         subjectKey=subjectKey))
 
-        required = [p for p in (registry.requiredProps(predicate) if term else [])
+        required = [p for p in (registry.requiredProps(predicate, tenantId=tenantId) if term else [])
                     if not str(qualifier.get(p, "") or "").strip()]
         if required:
             out.append(self._finding(
                 "violation", "requiredProps",
                 "%s 缺必填属性 %s" % (predicate, required), predicate, subjectKey=subjectKey))
 
-        limit = registry.maxCardinality(predicate) if term else None
+        limit = registry.maxCardinality(predicate, tenantId=tenantId) if term else None
         if limit == 1 and subjectKey:
             rivals = [f for f in registry.activeFactsForPredicate(agentId, subjectKey, predicate)
                       if str(f.get("object_term")) != objectTerm]

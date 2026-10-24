@@ -449,7 +449,7 @@ async def get_knowledge_graph_studio(
             "total_edges": int(stats["edge_count"]),
             "truncated": truncated,
             "stats": stats,
-            "schema": ontologySchemaData(),
+            "schema": ontologySchemaData(_tenant_of(current_user)),
             "is_demo": False,
         },
     }

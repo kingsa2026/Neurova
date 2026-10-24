@@ -71,21 +71,23 @@ _SEED_RULES: List[Dict[str, Any]] = [
 ]
 
 
-def seedBuiltinRules(engine: "ForwardChainingEngine") -> int:
+def seedBuiltinRules(engine: "ForwardChainingEngine", tenantId: str = "default") -> int:
     """把种子规则登记进引擎。幂等：同 id 同版本已在表里就跳过，不重写。
 
-    只在**生产装配点**被调用（`admission.productionAdmissionGate`）。裸造引擎仍是空规则表——
+    只在**生产装配点**被调用（`admission.productionAdmissionGate`，default 租户）
+    与咽喉写入首跳（非 default 租户按本租户补种）。裸造引擎仍是空规则表——
     "种子只有一个 owner"这条判据由测试钉着，两处各落一次就成了两套规则事实源。
     """
     planted = 0
     for spec in _SEED_RULES:
-        existing = engine.rule(spec["ruleId"])
+        existing = engine.rule(spec["ruleId"], tenantId=tenantId)
         if existing and existing.get("version") == spec.get("version", "v1"):
             continue
         engine.registerRule(
             spec["ruleId"], spec["headPredicate"], spec["body"],
             headSubjectVar=spec.get("headSubjectVar", "X"),
             version=spec.get("version", "v1"),
+            tenantId=tenantId,
         )
         planted += 1
     return planted
@@ -121,13 +123,16 @@ class ForwardChainingEngine:
 
     def registerRule(self, ruleId: str, headPredicate: str, body: List[Dict[str, Any]], *,
                     headSubjectVar: str = "X", enabled: bool = True,
-                    version: str = "v1") -> Dict[str, Any]:
+                    version: str = "v1",
+                    tenantId: str = "default") -> Dict[str, Any]:
         """登记一条规则。形状、变量、层序在这里一次判完——坏规则进不了表。
 
         body 元素：`{"atom": predicate, "subject": var, "object": var}` 或
-        `{"not": predicate, "subject": var, "object": var}`。
+        `{"not": predicate, "subject": var, "object": var}`。规则归属租户，
+        分层/引用/撤回都只在同租户内计算。
         """
         ruleId = str(ruleId or "").strip()
+        tenant = str(tenantId or "default")
         if not ruleId or not headPredicate:
             raise RuleError("rule_id 与 head 谓词都不能为空")
         atoms = self._parseBody(ruleId, body)
@@ -151,33 +156,37 @@ class ForwardChainingEngine:
 
         stratum, cycles = self._stratify(ruleId, headPredicate,
                                         [a["predicate"] for a in negated],
-                                        [a["predicate"] for a in positive])
+                                        [a["predicate"] for a in positive],
+                                        tenantId=tenant)
         stamp = _now()
         with self._store._lock, self._store._conn:
             existing = self._store._conn.execute(
-                "SELECT created_at, version FROM ontology_rules WHERE rule_id = ?",
-                (ruleId,)).fetchone()
+                "SELECT created_at, version FROM ontology_rules"
+                " WHERE tenant_id = ? AND rule_id = ?", (tenant, ruleId)).fetchone()
             self._store._conn.execute(
-                "INSERT OR REPLACE INTO ontology_rules (rule_id, head_predicate, head_subject_var,"
-                " body_json, negated_predicates, stratification_level, enabled, version,"
-                " created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (ruleId, headPredicate, headSubjectVar, json.dumps(body, ensure_ascii=False),
+                "INSERT OR REPLACE INTO ontology_rules (tenant_id, rule_id, head_predicate,"
+                " head_subject_var, body_json, negated_predicates, stratification_level,"
+                " enabled, version, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (tenant, ruleId, headPredicate, headSubjectVar, json.dumps(body, ensure_ascii=False),
                  json.dumps(sorted({a["predicate"] for a in negated}), ensure_ascii=False),
                  stratum, 1 if enabled else 0, version,
                  existing["created_at"] if existing else stamp, stamp),
             )
             if cycles:
-                self._dropRule(ruleId)
+                self._dropRule(ruleId, tenantId=tenant)
         if cycles:
             raise RuleError("规则 %s 经由否定形成循环，分层无解：%s" % (ruleId, " → ".join(cycles)))
         if existing and existing["version"] != version:
             # 改版即旧版结论作废：留着就是两版规则各推一套、同时对外检索。
-            self._store._derivationLedger.retractRuleVersion(ruleId, keepVersion=version)
-        return self.rule(ruleId) or {}
+            self._store._derivationLedger.retractRuleVersion(
+                ruleId, keepVersion=version, tenantId=tenant)
+        return self.rule(ruleId, tenantId=tenant) or {}
 
-    def _dropRule(self, ruleId: str) -> None:
+    def _dropRule(self, ruleId: str, tenantId: str = "default") -> None:
         with self._store._lock, self._store._conn:
-            self._store._conn.execute("DELETE FROM ontology_rules WHERE rule_id = ?", (ruleId,))
+            self._store._conn.execute(
+                "DELETE FROM ontology_rules WHERE tenant_id = ? AND rule_id = ?",
+                (str(tenantId or "default"), ruleId))
 
     @staticmethod
     def _parseBody(ruleId: str, body: List[Dict[str, Any]]) -> List[Dict[str, str]]:
@@ -197,9 +206,9 @@ class ForwardChainingEngine:
         return atoms
 
     def _stratify(self, ruleId: str, headPredicate: str, negated: List[str],
-                  positive: List[str]) -> Tuple[int, List[str]]:
+                  positive: List[str], tenantId: str = "default") -> Tuple[int, List[str]]:
         """层号 = 依赖链上最长的正边；否定边要求被否定谓词在**更浅**的层。"""
-        rules = self.rules(includeDisabled=False)
+        rules = self.rules(includeDisabled=False, tenantId=tenantId)
         producers: Dict[str, List[str]] = {}
         for rule in rules:
             producers.setdefault(rule["head_predicate"], []).append(rule["rule_id"])
@@ -250,26 +259,39 @@ class ForwardChainingEngine:
             resolve(predicate)
         return levels
 
-    def rule(self, ruleId: str) -> Optional[Dict[str, Any]]:
+    def rule(self, ruleId: str, tenantId: str = "default") -> Optional[Dict[str, Any]]:
         with self._store._lock:
             row = self._store._conn.execute(
-                "SELECT * FROM ontology_rules WHERE rule_id = ?", (ruleId,)).fetchone()
+                "SELECT * FROM ontology_rules WHERE tenant_id = ? AND rule_id = ?",
+                (str(tenantId or "default"), ruleId)).fetchone()
         return self._hydrate(row) if row else None
 
-    def rules(self, includeDisabled: bool = True) -> List[Dict[str, Any]]:
-        sql = "SELECT * FROM ontology_rules"
+    def rules(self, includeDisabled: bool = True,
+              tenantId: str = "default") -> List[Dict[str, Any]]:
+        sql = "SELECT * FROM ontology_rules WHERE tenant_id = ?"
+        params: List[Any] = [str(tenantId or "default")]
         if not includeDisabled:
-            sql += " WHERE enabled = 1"
+            sql += " AND enabled = 1"
         sql += " ORDER BY stratification_level, rule_id"
         with self._store._lock:
-            rows = self._store._conn.execute(sql).fetchall()
+            rows = self._store._conn.execute(sql, params).fetchall()
         return [self._hydrate(r) for r in rows]
 
-    def ruleReferences(self, predicate: str) -> List[str]:
+    def ensureRuleSeeds(self, tenantId: str = "default") -> int:
+        """非 default 租户的种子在写入首跳幂等补齐：一次计数查询挡住逐条重复判。"""
+        with self._store._lock:
+            n = self._store._conn.execute(
+                "SELECT COUNT(*) AS n FROM ontology_rules WHERE tenant_id = ?",
+                (str(tenantId or "default"),)).fetchone()["n"]
+        if int(n) > 0:
+            return 0
+        return seedBuiltinRules(self, tenantId=tenantId)
+
+    def ruleReferences(self, predicate: str, tenantId: str = "default") -> List[str]:
         """谓词被哪些规则引用（head 或正文原子）——影响分析的规则维度。"""
         predicate = str(predicate or "")
         out = []
-        for rule in self.rules(includeDisabled=True):
+        for rule in self.rules(includeDisabled=True, tenantId=tenantId):
             if rule["head_predicate"] == predicate:
                 out.append(rule["rule_id"])
                 continue
@@ -279,17 +301,19 @@ class ForwardChainingEngine:
                     break
         return sorted(out)
 
-    def dropRule(self, ruleId: str, reason: str = "") -> None:
+    def dropRule(self, ruleId: str, reason: str = "", tenantId: str = "default") -> None:
         """删除规则并撤回它推过的全部结论——规则没了，它的推导不能还在对外检索。"""
         ruleId = str(ruleId or "").strip()
+        tenant = str(tenantId or "default")
         with self._store._lock:
             row = self._store._conn.execute(
-                "SELECT rule_id FROM ontology_rules WHERE rule_id = ?", (ruleId,)).fetchone()
+                "SELECT rule_id FROM ontology_rules WHERE tenant_id = ? AND rule_id = ?",
+                (tenant, ruleId)).fetchone()
         if row is None:
             raise LookupError("规则未登记: %s" % ruleId)
         self._store._derivationLedger.retractAllFromRule(
-            ruleId, reason or "规则 %s 已删除" % ruleId)
-        self._dropRule(ruleId)
+            ruleId, reason or "规则 %s 已删除" % ruleId, tenantId=tenant)
+        self._dropRule(ruleId, tenantId=tenant)
 
     @staticmethod
     def _hydrate(row) -> Dict[str, Any]:
@@ -308,38 +332,43 @@ class ForwardChainingEngine:
 
     # ── 求值 ──────────────────────────────────────────────────
 
-    def fireAll(self, agentId: Optional[str] = None, maxIterations: int = 10) -> Dict[str, Any]:
+    def fireAll(self, agentId: Optional[str] = None, maxIterations: int = 10,
+                tenantId: str = "default") -> Dict[str, Any]:
         """按层号升序反复求值到不动点。返回每轮新增，0 新增即停。"""
+        tenant = str(tenantId or "default")
         rounds: List[int] = []
         derived: List[str] = []
         for _ in range(max(int(maxIterations), 1)):
-            produced = self._oneRound(agentId)
+            produced = self._oneRound(agentId, tenantId=tenant)
             rounds.append(len(produced))
             if not produced:
                 break
             derived.extend(produced)
         return {"derived": derived, "rounds": rounds,
-                "iterations": len(rounds), "rules": [r["rule_id"] for r in self.rules()]}
+                "iterations": len(rounds),
+                "rules": [r["rule_id"] for r in self.rules(tenantId=tenant)]}
 
-    def fireFor(self, agentId: str, predicate: str) -> List[str]:
+    def fireFor(self, agentId: str, predicate: str,
+                tenantId: str = "default") -> List[str]:
         """新事实落下后只点燃用得到它的规则——每写一条就全量重放到不动点，
         成本随事实数线性放大，那条路在对话链上不可接受。"""
         produced: List[str] = []
-        for rule in sorted(self.rules(includeDisabled=False),
+        for rule in sorted(self.rules(includeDisabled=False, tenantId=tenantId),
                            key=lambda r: (r["stratification_level"], r["rule_id"])):
             if predicate not in rule["depends_on"]:
                 continue
-            produced.extend(self._fireRule(rule, agentId))
+            produced.extend(self._fireRule(rule, agentId, tenantId=tenantId))
         return produced
 
-    def _oneRound(self, agentId: Optional[str]) -> List[str]:
+    def _oneRound(self, agentId: Optional[str], tenantId: str = "default") -> List[str]:
         produced: List[str] = []
-        for rule in sorted(self.rules(includeDisabled=False),
+        for rule in sorted(self.rules(includeDisabled=False, tenantId=tenantId),
                            key=lambda r: (r["stratification_level"], r["rule_id"])):
-            produced.extend(self._fireRule(rule, agentId))
+            produced.extend(self._fireRule(rule, agentId, tenantId=tenantId))
         return produced
 
-    def _fireRule(self, rule: Dict[str, Any], agentId: Optional[str]) -> List[str]:
+    def _fireRule(self, rule: Dict[str, Any], agentId: Optional[str],
+                  tenantId: str = "default") -> List[str]:
         atoms = [a for a in rule["body"]]
         positive = [a for a in atoms if a["kind"] == "atom"]
         negated = [a for a in atoms if a["kind"] == "not"]
@@ -381,7 +410,8 @@ class ForwardChainingEngine:
             if self._negatedHolds(agentId, negated, subjectKey, objectTerm):
                 continue
             factId = self._admitDerivedFact(rule, agentId, label, head, objectTerm,
-                                            subjectKey, _premiseIds(row["pairs"]))
+                                            subjectKey, _premiseIds(row["pairs"]),
+                                            tenantId=tenantId)
             if factId:
                 written.append(factId)
         return written
@@ -403,7 +433,8 @@ class ForwardChainingEngine:
 
     def _admitDerivedFact(self, rule: Dict[str, Any], agentId: Optional[str], label: str,
                           predicate: str, objectTerm: str, subjectKey: str,
-                          premiseIds: List[str]) -> Optional[str]:
+                          premiseIds: List[str],
+                          tenantId: str = "default") -> Optional[str]:
         gate = self._gateFactory(self._store) if self._gateFactory else None
         if gate is None:
             raise RuleError("推理未接咽喉写入口——推导事实不许绕过 admit 直插 SQL")
@@ -412,7 +443,9 @@ class ForwardChainingEngine:
         content = "%s %s %s（由规则 %s 推出）" % (label, predicate, objectTerm, rule["rule_id"])
         try:
             receipt = gate.admit(AdmissionRequest(
-                agentId=agentId or "default", subjectLabel=label, predicateTermId=predicate,
+                agentId=agentId or "default",
+                tenantId=str(tenantId or rule.get("tenant_id") or "default"),
+                subjectLabel=label, predicateTermId=predicate,
                 objectTerm=objectTerm, content=content,
                 qualifier={"derived_by": rule["rule_id"],
                            "stratum": rule["stratification_level"]},
