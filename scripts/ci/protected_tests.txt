@@ -1300,6 +1300,12 @@ tests/unit/agent/test_anthropic_loop_batch_handoff.py
 #   判据：令牌协议 / 处置声明与分派（真进程真断言，不用 MagicMock 冒充 Popen）/
 #   取消的裁决身份（不进 MIN(success) 粘性）/ 终态回到反馈环 / 杀灭单源。
 tests/unit/tools/test_tool_cancellation.py
+# 轮级取消令牌的跨用例隔离（`cnb-h41-1k5nnd37s#003` / `cnb-7o4-1k5nkg9f3#003` 两次
+#   7823 条里唯一一条红的根因）：上一条用例在协程里置位的令牌漏过用例边界，下一条起
+#   进程的用例被当场 SIGKILL，报出来是 exit_code=-9 的"本地运行时执行不回来"。
+#   判据两条：置位令牌真能杀掉进程（前提自证，不用 MagicMock 冒充）+ 上一格的置位
+#   到不了本格（关掉 conftest 夹具尾部那句即红）。
+tests/unit/core/test_turnCancelTokenLeaksAcrossCases.py
 
 # 跨轴一致性批（PR #287 尾巴）：名单成员资格收口到声明面的两份判据。
 #   · test_reproducible_flag.py：写作用域声明 ⇒ 不可重现（单向蕴含），含

@@ -164,22 +164,38 @@ def _isolate_execution_engine_singleton():
 
 @pytest.fixture(autouse=True)
 def _reset_turn_cancel_token():
-    """每个用例换一只**未置位**的取消令牌（轮级 ContextVar 的跑测隔离）。
+    """每个用例前后都换一只**未置位**的取消令牌（轮级 ContextVar 的跑测隔离）。
 
     令牌按轮持有（`core/turn_context.reset_turn_tool_messages` 轮首换新对象），
     而 pytest 进程里没有"轮到点了"这件事：任何一档在进程内调过 `token.cancel()`
-    （取消语义的用例都是这么演的），令牌就留在 ContextVar 上。下一条**真的去起进程**
+    （取消语义的用例都是这么演的），置位就留在 ContextVar 上。下一条**真的去起进程**
     的用例于是撞上 `CancelToken.onCancel` 的"已置位则立即兑现"分支——本轮第一个
     子进程当场被 SIGKILL，报出来是 `ExecutionResult(success=False, exit_code=-9)`
     或一个空 build，读的人只会去查那个工具，查不到"是上一条用例的取消漏过来了"。
 
     这里只做一件事：置 None（＝本轮没有令牌），不是替用例造一个"看起来正常"的令牌——
     没有令牌正是生产上非轮内执行的常态，`registerKillAction` 对它返回 False。
+
+    **两头都置**：置位发生在协程里（`tool_coordinator` 的取消路径就是这么演的），
+    而协程跑在**任务自己的 context 副本**上——`asyncio.run` 收尾时那份副本整体丢弃，
+    可 `ContextVar.set` 只改当前 context：同一条用例里后面读到的仍是置位令牌。
+    实测（同一用例内，worker 置位后当场真起一条 `exec`）：
+
+        exec under cancelled token -> False -9
+
+    于是夹具只在前置置 None 并不够：收尾读到的已是置位令牌。入口与出口各置 None
+    才算把这条通道关掉——判据一条不动，修的只是「上一格的置位漏到下一格」。
     """
     from neurova.core import cancel_token
 
     cancel_token.setTurnCancelToken(None)
     yield
+    # 出口也置 None。入口那一句只保证"每格从干净的 None 开始"——它管不到
+    # 协程里置位的那一次：`ContextVar.set` 只改当前 context，`asyncio.run` 收尾
+    # 丢的是任务副本，主 context 上留着的仍是那条置位令牌，于是收尾读到的已是它，
+    # 下一格起进程的用例当场拿到 exit_code=-9（判据见
+    # tests/unit/core/test_turnCancelTokenLeaksAcrossCases.py）。
+    cancel_token.setTurnCancelToken(None)
 
 
 @pytest.fixture(autouse=True)
