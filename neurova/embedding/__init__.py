@@ -8,7 +8,26 @@ import threading
 from neurova.core.logger import get_logger
 _logger = get_logger(__name__)
 
-from neurova.embedding.onnx_embedding import EmbeddingResult, ONNXEmbeddingEngine
+
+def __getattr__(name):
+    """包的公开类按需取：`numpy` / `onnxruntime` 是**登记过的可选依赖**，不在精简 CI 清单里。
+
+    这里是唯一的顶层导入点：导入本包就等于要 numpy（`onnx_embedding` 模块级 `import numpy as np`），
+    于是「装不上重依赖的环境」里连 `get_embedding_engine` 都拿不到——CI 的受保护子集里
+    7 格 + 11 格因此整片 `ModuleNotFoundError`（构建 `cnb-ggt-1k5ne7emk`）。
+    `requirements-ci.txt` 头部的契约写得很清楚：被排除的重依赖「在代码中均为惰性/try 降级导入，
+    缺席时模块仍可加载」——这一处此前违反了它。改成 PEP 562 惰性取，契约兑现，
+    工厂入口在薄环境里照常可导入、照常返回 None（`get_embedding_engine` 里本来就有这一支）。
+    """
+    if name in ("ONNXEmbeddingEngine", "EmbeddingResult"):
+        from neurova.embedding.onnx_embedding import (
+            EmbeddingResult as _EmbeddingResult,
+            ONNXEmbeddingEngine as _ONNXEmbeddingEngine,
+        )
+        return {"ONNXEmbeddingEngine": _ONNXEmbeddingEngine,
+                "EmbeddingResult": _EmbeddingResult}[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = ["ONNXEmbeddingEngine", "EmbeddingResult", "get_embedding_engine", "_reset_embedding_engine", "reset_embedding_engine"]
 
@@ -31,8 +50,10 @@ def get_embedding_engine():
     with _embedding_lock:
         if _embedding_engine is not None:
             return _embedding_engine
-        if ONNXEmbeddingEngine is None:
-            _logger.warning("ONNXEmbeddingEngine 不可用，embedding 工厂返回 None")
+        try:
+            from neurova.embedding.onnx_embedding import ONNXEmbeddingEngine
+        except ImportError as e:      # 重依赖缺席（精简 CI / 裸装）：工厂返回 None，不抛
+            _logger.warning("ONNXEmbeddingEngine 不可用（%s），embedding 工厂返回 None", e)
             return None
         try:
             _embedding_engine = ONNXEmbeddingEngine()

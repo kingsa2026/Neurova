@@ -42,9 +42,15 @@ EVASION = GuardThreatCategory.SHELL_EVASION
 PATH_SURFACE = GuardThreatCategory.PATH_TRAVERSAL
 SEMANTIC_KEY_NAMES = ("COMMAND_PARAM_KEYS", "PATH_PARAM_KEYS")
 
-#: 真实家目录下的无害文件名。本仓这条缺陷的触发条件正是**本机用户名形状**（`\` + `xcc` + 十六进制），
-#: 换成 `/tmp/x.txt` 就永远测不到——第一版踩过，红形是"修好了"的假绿。
-SAFE_PATH = str(pathlib.Path.home() / "neurova_guard_255_safe_read.txt")
+#: 「家目录下的路径」的**逐字形状**：本仓这条缺陷的触发条件是**本机用户名形状**
+#: （`\` + `xcc` + 十六进制），换成 `/tmp/x.txt` 就永远测不到——第一版踩过，
+#: 红形是"修好了"的假绿。
+#:
+#: 但它不能拿**跑测机器的真家目录**来拼：以 root 跑测时家目录就是 `/root`，而
+#: `/root` 在 `FilePathGuardian._protected_paths` 里（`protected_path` HIGH）⇒
+#: 这条"无害路径"在任何以 root 跑测的机器上恒定判红，判据量到的其实是"跑测账户是谁"。
+#: 用户名形状与"家目录下"这层语义都由字面路径承载，与真家目录无关。
+SAFE_PATH = "C:\\Users\\xccoo\\neurova_guard_255_safe_read.txt"
 
 #: 真家目录**本身**落在受保护清单里时（CI 以 root 跑，`Path.home()=="/root"` 命中 `/root`），
 #: 上面那条形状不论修没修都必然被 `FilePathGuardian` 判 DENY——那是宿主环境的真读数，不是本档
