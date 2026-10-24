@@ -80,6 +80,12 @@ class KnowledgeSearchRequest(BaseModel):
     query: str = Field(..., description="搜索查询")
     category: Optional[str] = None
     tags: List[str] = []
+    source: Optional[str] = None
+    author: Optional[str] = None
+    source_type: Optional[str] = None
+    ocr_used: Optional[bool] = None
+    page_min: Optional[int] = Field(default=None, ge=0)
+    updated_after: Optional[float] = None
     limit: int = Field(default=10, ge=1, le=100)
 
 

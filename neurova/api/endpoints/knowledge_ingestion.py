@@ -243,6 +243,7 @@ def _import_file_data(
         ocr_engine=str(parsed.metadata.get("ocr_engine") or ""),
         ocr_confidence_avg=parsed.metadata.get("ocr_confidence_avg"),
         document_id=parsed.doc_id,
+        dedupe=True,
     )
     return [_build_item_dict(item)], parsed.source_type
 
