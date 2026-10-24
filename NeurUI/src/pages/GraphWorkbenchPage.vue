@@ -10,9 +10,15 @@
           </a-tag>
         </p>
       </div>
-      <GlassButton variant="secondary" :loading="loading" @click="fetchStudio">
-        {{ t('common.refresh') }}
-      </GlassButton>
+      <div class="header-actions">
+        <a-radio-group v-model:value="viewMode" size="sm" button-style="solid">
+          <a-radio-button value="2d">{{ t('knowledge.workbenchView2d') }}</a-radio-button>
+          <a-radio-button value="3d">{{ t('knowledge.workbenchView3d') }}</a-radio-button>
+        </a-radio-group>
+        <GlassButton variant="secondary" :loading="loading" @click="fetchStudio">
+          {{ t('common.refresh') }}
+        </GlassButton>
+      </div>
     </div>
 
     <a-alert
@@ -27,14 +33,22 @@
       <GlassCard class="canvas-card">
         <a-spin :spinning="loading">
           <div class="canvas-wrap">
+            <GraphExplorer3D
+              v-if="viewMode === '3d'"
+              class="explorer3d-embed"
+              :agent-id="agentId"
+              :focus-id="selectedNodeId || undefined"
+              @select="onNodeSelected"
+            />
             <VueFlow
-              v-if="studio?.nodes?.length"
+              v-else-if="studio?.nodes?.length"
               :nodes="flowNodes"
               :edges="flowEdges"
               :fit-view-on-init="true"
               :min-zoom="0.2"
               :max-zoom="2"
               class="workbench-flow"
+              @node-click="onFlowNodeClick"
             >
               <Background />
               <MiniMap pannable zoomable />
@@ -135,6 +149,12 @@
               <p class="evidence-hint">{{ t('knowledge.workbenchEvidenceHint') }}</p>
             </div>
           </a-tab-pane>
+
+          <a-tab-pane key="spatial" :tab="t('knowledge.workbenchSpatial')">
+            <!-- antdv tabs 会挂载全部页签内容；地图/3D 只在首次激活时挂载，
+                 jsdom/无 WebGL 环境不因未打开的页签崩 -->
+            <GeoMapPanel v-if="activeTab === 'spatial'" />
+          </a-tab-pane>
         </a-tabs>
       </GlassCard>
     </div>
@@ -142,7 +162,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import { VueFlow } from '@vue-flow/core'
@@ -155,8 +175,18 @@ import { useAgentPage } from '@/composables/useAgentPage'
 import { useAuthStore } from '@/stores/auth'
 import { request } from '@/api'
 
+// 3D/地图都是重依赖（WebGL/three、maplibre），defineAsyncComponent 懒加载：
+// 不切到对应视图就不下载，2D 主路径的包体不受影响。
+const GraphExplorer3D = defineAsyncComponent(
+  () => import('@/pages/graph-workbench/GraphExplorer3D.vue'))
+const GeoMapPanel = defineAsyncComponent(
+  () => import('@/pages/graph-workbench/GeoMapPanel.vue'))
+
 const { t } = useI18n()
-const { agentId, currentAgent } = useAgentPage()
+// onAgentChange：agent 切换后重拉工作台数据（与旧图谱页同款联动，切换族测试钉着）。
+const { agentId, currentAgent } = useAgentPage({
+  onAgentChange: () => fetchStudio(),
+})
 const authStore = useAuthStore()
 
 interface StudioNode { id: string; label: string; type: string }
@@ -173,7 +203,9 @@ interface StudioData {
 
 const loading = ref(false)
 const studio = ref<StudioData | null>(null)
-const activeTab = ref<'ontology' | 'instance'>('ontology')
+const activeTab = ref<'ontology' | 'instance' | 'spatial'>('ontology')
+const viewMode = ref<'2d' | '3d'>('2d')
+const selectedNodeId = ref('')
 const termFilter = ref('')
 const termFormVisible = ref(false)
 const termSaving = ref(false)
@@ -194,6 +226,7 @@ const flowNodes = computed(() =>
     position: { x: 0, y: 0 },
     data: { label: n.label, type: n.type },
     type: 'default',
+    class: n.id === selectedNodeId.value ? 'wb-node-selected' : '',
   })))
 const flowEdges = computed(() =>
   (studio.value?.edges ?? []).map((e, index) => ({
@@ -294,6 +327,14 @@ const createInstance = async () => {
   }
 }
 
+const onFlowNodeClick = (mouseEvent: { node: { id: string } }) => {
+  selectedNodeId.value = mouseEvent.node.id
+}
+
+const onNodeSelected = (nodeId: string) => {
+  selectedNodeId.value = nodeId
+}
+
 onMounted(() => {
   fetchStudio()
 })
@@ -352,6 +393,20 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   height: 100%;
+}
+
+.workbench-flow :deep(.wb-node-selected) {
+  box-shadow: 0 0 0 3px var(--nr-primary);
+}
+
+.explorer3d-embed {
+  height: 100%;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--nr-space-sm);
 }
 
 .workbench-flow {

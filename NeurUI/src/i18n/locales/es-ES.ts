@@ -794,6 +794,16 @@ export default {
 
 
   knowledge: {
+    workbenchApplyFilter: 'Filtrar',
+    workbenchFocus: 'ID del nodo focal',
+    workbenchHops: 'Saltos',
+    workbenchLat: 'Latitud',
+    workbenchLon: 'Longitud',
+    workbenchNoGeoItems: 'No hay entradas con coordenadas en el alcance visible',
+    workbenchRadius: 'Radio km',
+    workbenchSpatial: 'Espacial',
+    workbenchView2d: 'Vista 2D',
+    workbenchView3d: 'Vista 3D',
     workbenchTitle: 'Banco de trabajo de grafos',
     workbenchTenantScoped: 'ontología de tenant',
     workbenchTruncatedHint: 'Subgrafo truncado; total real {total} nodos',
