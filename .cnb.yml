@@ -265,9 +265,14 @@ main:
 
     # ── 7. 依赖审计（阻塞，对齐 GitHub 已转阻塞的 dependency-audit）────────
     - name: dependency-audit
+      # cpus 4 而不是 2：这条流水线的 Prepare 里要 `docker pull` 镜像、拷两份缓存卷，
+      # 装完 pip-audit 之后还要把一个上百 MB 的冻结漏洞库落到 `/root/.cache/osv-scalibr`。
+      # 与其余八条同规格（cpus 2）时，Prepare 的固定成本压在平台 1m 期限的边沿上，
+      # 一旦越线报出来的就是「任务超过最大执行时间」——与「这次提交是否合格」无关。
+      # 判据见 tests/unit/ci/test_runnerAllocatedWallClockIsNotADeadline.py。
       runner:
         tags: cnb:arch:amd64
-        cpus: 2
+        cpus: 4
       docker:
         image: python:3.12
         volumes:

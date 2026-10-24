@@ -36,6 +36,11 @@ def _semantic_enabled() -> bool:
     return os.environ.get("NEUROVA_MUSCLE_SEMANTIC", "1") != "0"
 
 
+#: 余弦的"确知反向"下界。写死 `sim < 0.0` 是不够的：零余弦在浮点乘法里可能是
+#: `-0.0`，而 `-0.0 < 0.0` 为假——正交读数会被读成"反向"以外的分支，判据自己没法自证。
+ZERO_COSINE_EPSILON = 1e-9
+
+
 def _get_engine():
     try:
         from neurova.embedding import get_embedding_engine
@@ -350,6 +355,7 @@ class MuscleMemory:
 
         向量分量（T4）：条目存有语义向量时用余弦分档（0.75→0.95 线性到 0~0.3）；
         任一侧缺失/开关关闭 → 逐位回落原 MD5 等值分支。
+        余弦**偏低**要分两种：反向（< 0）不给向量分；正交/零向量按骨架覆盖度给。
         """
         # 空指纹不产生虚假匹配
         if not fingerprint and not item.query_fingerprint:
@@ -384,16 +390,32 @@ class MuscleMemory:
         # 在它下面永远拿不到分——这正是"断层"的第二半。字符覆盖度衡量问法骨架
         # 是否一致，与上面按 token（含 2-gram）的多集包含度互补而不重复。
         item_emb = item.metadata.get("query_embedding") if _semantic_enabled() else None
-        if query_emb and item_emb:
-            sim = vector_math.cosineSimilarity(query_emb, item_emb)
-            if sim > 0.75:
-                score += 0.3 * min(1.0, (sim - 0.75) / 0.2)
-            else:
-                score += 0.3 if (vector_fp and item.vector_fingerprint == vector_fp) else 0.0
-        elif vector_fp and item.vector_fingerprint == vector_fp:
-            score += 0.3
-        else:
+        sim = vector_math._rawCosine(query_emb, item_emb) if (query_emb and item_emb) else None
+        if sim is None:
+            # 没有可比的余弦（开关关 / 旧条目无向量 / 两侧任一是零向量）⇒ 这一档
+            # **没量到**，不是"量出来很低"。此前一律按后者处理，于是"引擎在跑但
+            # 模型权重缺席"造出的零向量引擎（每维都零）会把近似问法压到 0.5875。
             score += 0.3 * _lexical_coverage(item.query_fingerprint, fingerprint)
+        elif sim > 0.75:
+            score += 0.3 * min(1.0, (sim - 0.75) / 0.2)
+        else:
+            # 确知余弦偏低：**反向 / 正交 / 零向量是三个读数**，处置各不相同。
+            # 反向是"更不像"，不给分；正交是"没读到相似"，回到骨架覆盖度；
+            # 零（含零向量引擎那种每一对都读 0.0 的态）是"这一档没量到"，同样
+            # 回到骨架覆盖度——一刀切按 0 罚会把近似问法压到 0.5875（CI 实测读数）。
+            if sim < -ZERO_COSINE_EPSILON:
+                # 确知反向：向量档读到了"更不像"，不给向量分
+                score += 0.0
+            elif sim > ZERO_COSINE_EPSILON:
+                # 确知正交：向量档没给出任何"相似"的证据，按骨架覆盖度给
+                score += 0.3 * _lexical_coverage(item.query_fingerprint, fingerprint)
+            elif vector_fp and item.vector_fingerprint == vector_fp:
+                # 零余弦 + MD5 等值：逐字相同的强证据
+                score += 0.3
+            else:
+                # 零余弦 + MD5 不等：零向量引擎（模型权重缺席）每一对都读成 0.0，
+                # 这一档没量到东西——按骨架覆盖度给，不拿"算出来是 0"全罚。
+                score += 0.3 * _lexical_coverage(item.query_fingerprint, fingerprint)
 
         # 成功率加成
         total_uses = item.success_count + item.failure_count
