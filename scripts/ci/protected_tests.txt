@@ -3850,9 +3850,17 @@ tests/unit/security/test_liveRedactionDoorsUseTheSharedEngine.py
 # 读数一致（context 2 条属并会话在途 orchestrator、llm 5 条跨文件污染、memory/cognitive 4 条
 # 数据根与 bus 旧账、security/skills 2 条治理闸既有红），本批不新增红。
 tests/unit/security/test_redactionDoorsShareOneLeakClosure.py
-# §6-404（CI 修复 · 静态门禁）：未定义名闸门改问「本文件有没有 import 过这个名字」，注解专用
-# 形状（TYPE_CHECKING / 局部导入 / PEP 563 前向引用）不再判红，真拼错的形参照旧红；另一档钉
-# tool_executor 沙箱阻断日志真的点名被拦的路径键值（改前是幻影变量，运行期 NameError）。
-# 入册前逐文件单跑全绿（7 passed / 4 passed）。
+# 静态门禁的「未定义名称」判据只许报**真·未定义**，不许把注解专用名算成缺陷。
+# 形态：CI static-gate 腿报 6 处 F821，5 处是注解里的名字（实体在函数体内懒加载，
+# 模块级导入会拉 `neurova.agent` 包 __init__ → `tool_executor` 的循环，AGENTS.md §3）。
+# 判据过去埋在 subprocess 输出里数字符串，没人能反证它判的是语义还是行格式；
+# 现收成可调用口 `scripts.ci_static_gate.collectUndefinedNames`，判形两问都要过：
+# 名字只出现在注解位置、且本文件以某种方式导入过它。真拼错的形参照旧红，
+# `test_sandboxFileBlockNamesThePath.py` 那侧的幻影变量同样照旧红。
 tests/unit/ci/test_staticGateUsesParserNotTypecheck.py
 tests/unit/security/test_sandboxFileBlockNamesThePath.py
+# 裁决**按哪些路径值裁的**必须随裁决结果回到调用方：`verdict.to_dict()` 过去一格路径都没有，
+# 拒绝语只能报半句散文；`tool_executor` 的文件保护支路因此去读一个作用域里从未绑定的
+# 名字打日志——静态门禁报未定义名，运行时被外层吞成 warning，「拦了哪条路径」整个消失。
+# 本档钉三层：结果面带出路径值且 `to_dict()` 一并带出、与取数口同源、消费侧真日志点到路径。
+tests/unit/security/test_governancePathValuesReachCallers.py
