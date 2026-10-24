@@ -29,17 +29,14 @@ from neurova.api.endpoints import mobile_pairing as mp
 
 
 @pytest.fixture(autouse=True)
-def _clean_state(tmp_path, monkeypatch):
+def _clean_state(_isolateMobileDeviceRegistry):
     """每用例回到"进程刚起来"：内存表清空，在册单例释放并把库指向 tmp。"""
-    monkeypatch.setattr(mp, "deviceStorePath", lambda: str(tmp_path / "devices.db"))
-    stores = (mp._pairing_codes, mp._confirm_attempts, mp._ws_connections)
-    mp.resetDeviceRegistry()
-    for s in stores:
-        s.clear()
+    # 库路径与限流桶由 `tests/unit/api/conftest.py` 单点隔离。这里原来自己
+    # `setattr(mp, "deviceStorePath", ...)` 指到本档 tmp——teardown 恢复函数后，
+    # 后一档拿到的解析结果退回数据根，正是那格混档红的通道。自己只清本档要的配对码表。
+    mp._pairing_codes.clear()
     yield
-    for s in stores:
-        s.clear()
-    mp.resetDeviceRegistry()
+    mp._pairing_codes.clear()
 
 
 def _request() -> SimpleNamespace:
