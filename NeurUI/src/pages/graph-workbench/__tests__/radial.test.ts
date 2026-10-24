@@ -2,7 +2,7 @@
 // 放射布局判据：树边（父→子径向线段）零交叉、全节点有位、无同位、确定性。
 import { describe, expect, it } from 'vitest'
 
-import { radialLayout, DEFAULT_RING_GAP } from '@/pages/graph-workbench/radial'
+import { radialLayout, DEFAULT_TOTAL_RADIUS } from '@/pages/graph-workbench/radial'
 
 interface Seg { x1: number; y1: number; x2: number; y2: number }
 
@@ -68,13 +68,13 @@ describe('radialLayout（工作台 2D 放射布局）', () => {
     }
   })
 
-  it('根在圆心，层深与环半径一致', () => {
+  it('根在圆心，半径按层深比例归一到总半径', () => {
     const pos = radialLayout(STAR.nodes, STAR.edges, 'h')
     const h = pos.get('h')!
     expect(Math.hypot(h.x, h.y)).toBeLessThan(1e-9)
-    // 一层节点半径 = ringGap，二层 = 2*ringGap（角度不同但半径确定）。
-    expect(Math.hypot(pos.get('a')!.x, pos.get('a')!.y)).toBeCloseTo(DEFAULT_RING_GAP, 6)
-    expect(Math.hypot(pos.get('a1')!.x, pos.get('a1')!.y)).toBeCloseTo(DEFAULT_RING_GAP * 2, 6)
+    // 星形最大深度 2：一层半径 = 总半径/2，二层 = 总半径（角度不同半径确定）。
+    expect(Math.hypot(pos.get('a')!.x, pos.get('a')!.y)).toBeCloseTo(DEFAULT_TOTAL_RADIUS / 2, 6)
+    expect(Math.hypot(pos.get('a1')!.x, pos.get('a1')!.y)).toBeCloseTo(DEFAULT_TOTAL_RADIUS, 6)
   })
 
   it('全节点有位且无同位重叠', () => {
@@ -114,6 +114,21 @@ describe('radialLayout（工作台 2D 放射布局）', () => {
     // 第二分量的根半径已错开，不与主分量根同点。
     const h = pos.get('h')!, u = pos.get('u')!
     expect(Math.hypot(u.x - h.x, u.y - h.y)).toBeGreaterThan(1)
+  })
+
+  it('多分量包围盒有界（分量根半径封顶回归判据）', () => {
+    // 1 个主分量 + 60 个孤立分量：根半径曾随序号线性爆涨到 38710px。
+    const nodes = [
+      { id: 'h', label: 'hub', type: 't' },
+      { id: 'a', label: 'A', type: 't' },
+      ...Array.from({ length: 60 }, (_, i) => ({ id: `iso${i}`, label: `I${i}`, type: 't' })),
+    ]
+    const edges = [{ source: 'h', target: 'a' }]
+    const pos = radialLayout(nodes, edges, 'h')
+    for (const p of pos.values()) {
+      expect(Math.abs(p.x)).toBeLessThan(DEFAULT_TOTAL_RADIUS * 3)
+      expect(Math.abs(p.y)).toBeLessThan(DEFAULT_TOTAL_RADIUS * 3)
+    }
   })
 
   it('确定性：同一份输入两次布局逐点相等', () => {

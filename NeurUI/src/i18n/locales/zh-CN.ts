@@ -803,6 +803,7 @@ export default {
     manual: '转人工',
   },
   knowledge: {
+    workbenchShowIsolated: '显示无关节点',
     workbenchFilterTypes: '只看类型',
     workbenchFullGraph: '回到全图',
     duplicateMerged: '内容已存在：命中既有条目，本次来源已并入其来源链',
