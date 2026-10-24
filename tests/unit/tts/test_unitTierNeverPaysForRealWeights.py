@@ -14,12 +14,10 @@ HTTPS 把权重拉下来（`~/.cache/modelscope/.lock` 与落地的两份 `.data
 （不许把预热整条改成 no-op 来糊第一格）。
 """
 
-import time
-
 import pytest
 
 from neurova.tts.moss_nano import MOSSNanTTS
-from tests.unit.tts._fakeEngines import _FakeHeavyEngine
+from tests.unit.tts._fakeEngines import _FakeHeavyEngine, afterTtl
 
 
 async def _driveReleaseThenPreheat(heavy_manager):
@@ -33,8 +31,7 @@ async def _driveReleaseThenPreheat(heavy_manager):
     """
     mgr, heavy, light = heavy_manager
     await mgr.synthesize("第一句")
-    await mgr.release_idle_engines(
-        now_monotonic=time.monotonic() + mgr._config.release_ttl_sec + 1)
+    await mgr.release_idle_engines(now_monotonic=afterTtl(mgr))
     assert mgr._engine_name == "edge-tts", "前置不成立：释放没换班到轻引擎"
 
     await mgr.synthesize("第二句")  # 轻引擎立即服务，同时触发后台预热
