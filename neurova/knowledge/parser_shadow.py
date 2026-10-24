@@ -20,6 +20,8 @@ logger = get_logger(__name__)
 
 PARSER_MODE_ENV = "NEUROVA_KB_PARSER"
 SHADOW_MODE = "kreuzberg_shadow"
+MAIN_MODE = "kreuzberg"
+LEGACY_MODE = "legacy"
 
 _MIME_BY_EXT = {
     ".pdf": "application/pdf",
@@ -42,8 +44,41 @@ _MIME_BY_EXT = {
 }
 
 
+def parserMode() -> str:
+    """解析主路模式：legacy（缺省，历史行为）| kreuzberg（拍板迁移的统一抽取）
+    | kreuzberg_shadow（legacy 主路 + 影子读数）。切换是环境配置动作，
+    机制在此单源，调用方不各自读环境变量。"""
+    return str(os.environ.get(PARSER_MODE_ENV) or LEGACY_MODE).strip().lower()
+
+
 def shadowEnabled() -> bool:
-    return str(os.environ.get(PARSER_MODE_ENV) or "").strip().lower() == SHADOW_MODE
+    return parserMode() == SHADOW_MODE
+
+
+def kreuzbergMainEnabled(ext: str) -> bool:
+    """Kreuzberg 主路是否接管该格式：接管文本/表格/演示等文档格式。
+    图片不走 kreuzberg——OCR 是引擎层（ocr_engines）的责任，与解析框架分层。"""
+    if parserMode() != MAIN_MODE:
+        return False
+    return str(ext or "").lower() not in _IMAGE_EXTS
+
+
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
+
+
+def kreuzbergExtract(data: bytes, ext: str) -> str:
+    """Kreuzberg 统一抽取：失败诚实抛错（带可读原因），不静默回落 legacy。"""
+    extractor = _loadExtractor()
+    mime = _MIME_BY_EXT.get(str(ext or "").lower())
+    if mime is None:
+        raise ValueError(
+            "Kreuzberg 主路不认格式 %r（可用：%s；其余格式请切回 legacy 模式）"
+            % (ext, ", ".join(sorted(k for k in _MIME_BY_EXT))))
+    result = extractor(data, mime)
+    content = str(getattr(result, "content", "") or "")
+    if not content.strip():
+        raise ValueError("Kreuzberg 抽取结果为空（%s）——扫描件请用 legacy 模式的 OCR 编排" % ext)
+    return content
 
 
 def _loadExtractor():

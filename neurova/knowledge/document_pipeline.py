@@ -354,6 +354,8 @@ def parse_document(
     # 影子对比要打回**原始**输入：旧格式转换会重绑 data，先留底。
     rawInput = data
     originalExt = ext
+    # 主路标注按实际分支：图片等格式在 kreuzberg 模式下仍走本管线编排。
+    pipelineName = "structured"
 
     try:
         # .xls 直读（A7）：xlrd 可用就走直读（产出与 xlsx 同形），缺席回落 LibreOffice。
@@ -361,7 +363,13 @@ def parse_document(
         if xlsSheets is None and ext in LEGACY_EXTENSIONS:
             # source_type 保留原始旧格式，解析按转换后的新格式走。
             data, ext = _convertLegacyOffice(data, ext)
-        if ext == ".pdf":
+        if parser_shadow.kreuzbergMainEnabled(ext):
+            # Kreuzberg 统一抽取（拍板迁移）：内容层归 kreuzberg，本管线保留
+            # 清洗/分块/标题编排；OCR 仍走引擎层（图片分支不经过这里），
+            # 抽取失败诚实报错，不静默回落双主路。
+            pagesRaw = [parser_shadow.kreuzbergExtract(rawInput, originalExt)]
+            pipelineName = "kreuzberg"
+        elif ext == ".pdf":
             pagesRaw = extract_pdf_pages(data)
             if engine is None:
                 engine = selectOcrEngine()
@@ -472,7 +480,7 @@ def parse_document(
         "author": core.get("author", ""),
         "created_at": core.get("created_at", ""),
         "modified_at": core.get("modified_at", ""),
-        "pipeline": "structured",
+        "pipeline": pipelineName,
         "ocr_used": bool(ocrMeta.get("ocr_used")),
         "ocr_engine": str(ocrMeta.get("ocr_engine") or ""),
         "ocr_confidence_avg": (
