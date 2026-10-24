@@ -265,6 +265,32 @@ class ForwardChainingEngine:
             rows = self._store._conn.execute(sql).fetchall()
         return [self._hydrate(r) for r in rows]
 
+    def ruleReferences(self, predicate: str) -> List[str]:
+        """谓词被哪些规则引用（head 或正文原子）——影响分析的规则维度。"""
+        predicate = str(predicate or "")
+        out = []
+        for rule in self.rules(includeDisabled=True):
+            if rule["head_predicate"] == predicate:
+                out.append(rule["rule_id"])
+                continue
+            for atom in rule.get("body") or []:
+                if atom.get("predicate") == predicate:
+                    out.append(rule["rule_id"])
+                    break
+        return sorted(out)
+
+    def dropRule(self, ruleId: str, reason: str = "") -> None:
+        """删除规则并撤回它推过的全部结论——规则没了，它的推导不能还在对外检索。"""
+        ruleId = str(ruleId or "").strip()
+        with self._store._lock:
+            row = self._store._conn.execute(
+                "SELECT rule_id FROM ontology_rules WHERE rule_id = ?", (ruleId,)).fetchone()
+        if row is None:
+            raise LookupError("规则未登记: %s" % ruleId)
+        self._store._derivationLedger.retractAllFromRule(
+            ruleId, reason or "规则 %s 已删除" % ruleId)
+        self._dropRule(ruleId)
+
     @staticmethod
     def _hydrate(row) -> Dict[str, Any]:
         d = dict(row)

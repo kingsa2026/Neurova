@@ -330,14 +330,22 @@ A0（租户隔离）→ A1（去重）→ A3（过滤）→ A4（图谱影子）
   默认权重 0，结果附 `graph_support`；adapter 从 fact 的 `entry_id` 映射条目。
 - **A5 链级 RRF 基础**：`fuseRetrievalResults` + `NEUROVA_RETRIEVAL_FUSION=rrf`
   可选启用；默认 legacy 行为不变。
+- **S0 前提读面**：图谱端点统计单源 `manager.get_stats()`，报真总量与 `truncated`。
+- **S1 本体读面**：`GET /knowledge/ontology/schema`（术语 + 规则 + 版本 + 值域展开）。
+- **S2 本体写面**：`/knowledge/ontology/terms|rules` CRUD（管理员、非法结构 400、
+  重复 409、PUT 部分更新保留未声明字段）；`GET /knowledge/ontology/impact` 删除前
+  影响面（事实/主体类型/子术语/引用规则四路读数，被引用即 409 不许强删）；写变更落
+  activity 留痕（操作人/动作/依据）；删规则由派生账撤回其全部推导结论
+  （`retractAllFromRule`）。
 
 尚未落地（依赖后续迁移/前端批次）：
 
 - **按租户本体**：`ontology_terms/rules` 目前以全局 `term_id` 为主键，直接加 tenant
   列无法允许两个租户使用同一 term_id；需要 v25 改主键/引入 tenant 复合键或租户
   独立 schema，属于数据迁移，不能在本批偷偷改。
-- **2D/3D 工作台**：现有页面仍为只读 ECharts；Vue Flow 2D、3D WebGL、批量编辑、
-  MapLibre 空间视图均待 S0–S5。
+- **2D/3D 工作台**：后端读/写面已具备（S1 schema / S2 CRUD+影响面 / 图谱真总量）；
+  前端仍是只读 ECharts——Vue Flow 2D 画布、3D WebGL、S3 实例编辑（经 admission +
+  projection rebuild）、MapLibre 空间视图均待 S0–S5 前端批次。
 - **Kreuzberg 迁移**：已安装并验证可抽取 docx/pdf（页标记可用），但尚未替换
   `document_pipeline` 主路；需先做影子对比（页码/标题/OCR/召回）再切。
 - **GIS**：geo 字段、空间过滤、MapLibre 视图未落代码。
