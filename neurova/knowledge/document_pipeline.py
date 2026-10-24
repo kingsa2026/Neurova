@@ -367,8 +367,11 @@ def _chunkDocument(
 
 
 def _fileTypeFor(ext: str) -> str:
-    if ext in (".txt", ".md", ".markdown", ".rst", ".json", ".yaml", ".yml",
-               ".toml", ".log"):
+    # 后缀表从 `security.skill_scanner` 那一份取（教义第 6 条）：它同时被「内容不是可执行
+    # 字节」那条判定使用，同一份事实在两处各写一份就必然一边收一边漏。
+    from neurova.security.skill_scanner import TEXT_DOCUMENT_SUFFIXES
+
+    if ext in TEXT_DOCUMENT_SUFFIXES:
         return "text"
     return "document"
 

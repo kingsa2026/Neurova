@@ -288,13 +288,16 @@ def _resolveRoot(expr: ast.AST, consts: dict, anchor: pathlib.Path, depth: int =
     return None
 
 
-@functools.lru_cache(maxsize=1)
 def _gitKnownPaths(anchor: str) -> frozenset:
     """仓内 git 认得的路径前缀（已跟踪 + 被忽略）——一次取全，判定只查集合。
 
     `git ls-files` 之外还要 `git check-ignore --stdin`：`data/` 这类被整目录忽略的落点
     在 `ls-files` 里永远不出现，而它恰恰是"仓内、干净检出里不存在"的正当形态。
     仓库不可用（无 git、非工作树）时给空集 ⇒ 全落 MISSING，维持原来那句更响的报错。
+
+    **不缓存**：`anchor` 是每个 tmp 工作树一把的唯一路径，缓存只会让"本进程此前判过某个
+    临时仓"与"从没判过"两种情形给出不同读数（同一台机器上本档 2 红 1 绿的那次，
+    绿的成因就是 `/tmp` 路径在缓存里留过一份非空集合）。取数一次约 10ms。
     """
     def run(*args, stdin=None):
         try:
@@ -312,8 +315,61 @@ def _gitKnownPaths(anchor: str) -> frozenset:
         return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
 
     known = set(run("ls-files", "--cached"))
-    known.update(run("ls-files", "--others", "--ignored", "--exclude-standard"))
+    # `data/` 这类**整目录**规则不会被 `ls-files --ignored` 点名：它只列磁盘上真存在的
+    # 忽略项，干净检出里那个目录压根没有——而这一支要判的恰恰是"该缺席、且缺席正当"。
+    # 故额外问一次 `check-ignore --no-index`（`--no-index` 才问得到不存在的路径）。
+    for name in sorted(_ignoredTopLevelDirs(anchor)):
+        known.add(name + "/")
+    known.update(run("ls-files", "--others", "--ignored", "--exclude-standard", "--directory"))
     return frozenset(known)
+
+
+def _gitWorktreeRoot(anchor: str):
+    """`anchor` 所在工作树的**顶层**；不是工作树时给 `None`。
+
+    `--no-index` 只免掉"该路径在不在索引里"，不免"这是不是一个工作树"——非工作树里
+    `check-ignore` 仍以 128 退出。故取证前先问一次顶层，顺带拿到本树自己的 `.gitignore`
+    位置：取证只认这份树，绝不回落到宿主仓（那会让读数随宿主布局变）。
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"], cwd=anchor, capture_output=True,
+            text=True, encoding="utf-8", errors="replace",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    top = proc.stdout.strip()
+    return pathlib.Path(top) if top else None
+
+
+def _ignoredTopLevelDirs(anchor: str) -> set:
+    """仓根层面被忽略的顶级目录名——名单取自本树自己的 `.gitignore` 左值，逐条问 git。"""
+    root = _gitWorktreeRoot(anchor)
+    if root is None:
+        return set()
+    ignoreFile = root / ".gitignore"
+    if not ignoreFile.is_file():
+        return set()
+    names = set()
+    for line in ignoreFile.read_text(encoding="utf-8", errors="replace").splitlines():
+        rule = line.strip().lstrip("/").rstrip("/")
+        if rule and not rule.startswith(("#", "!")) and "/" not in rule:
+            names.add(rule)
+    return {name for name in names if _gitIgnoreAnswers(str(root), name)}
+
+
+def _gitIgnoreAnswers(anchor: str, name: str) -> bool:
+    """`git check-ignore --no-index`：问得到**不存在**的路径，这是本支唯一能用的一问。"""
+    try:
+        proc = subprocess.run(
+            ["git", "check-ignore", "-q", "--no-index", name + "/"], cwd=anchor,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
 
 
 def _pathIsTrackedOrIgnored(path: pathlib.Path, anchor: pathlib.Path) -> bool:
@@ -327,7 +383,13 @@ def _pathIsTrackedOrIgnored(path: pathlib.Path, anchor: pathlib.Path) -> bool:
         return False
     parts = rel.parts
     for index in range(1, len(parts) + 1):
-        if "/".join(parts[:index]) in known:
+        prefix = "/".join(parts[:index])
+        if index == len(parts):
+            # 末级：目录规则在集合里以 `<名>/` 收录（`check-ignore` 那支给的形态就是目录），
+            # 故 `data` 与 `data/` 要一起认——同一条事实的两种写法。
+            return prefix in known or prefix + "/" in known
+        if prefix + "/" in known:
+            # 中间级被**整目录忽略**：忽略规则连内容一起盖住，末级自然也不在检出里。
             return True
     return False
 
@@ -497,11 +559,29 @@ def _faceFindings(root: pathlib.Path, manifest: list, gaps: dict = None,
                 gaps[rel] = gap
             offenders.append(rel)
             continue
+
         if not any(st == DIR for _e, st in sites):
             continue
         if not _hasFaceProof(tree, _countNames(tree)):
             offenders.append(rel)
     return sorted(offenders)
+
+
+def _firstSiteStatus(path: pathlib.Path, root: pathlib.Path):
+    """这档第一个落点的落点态（不经过 `_faceFindings` 的点名过滤）。
+
+    `gaps` 只回填被判为 offender 的档（那是它给报错文案用的契约）；反检格要验
+    「不点名、且落点是 X」，得直接问取数口——否则它只能断言空串，
+    而空串与"压根没取到数"在文本上同形。
+    """
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    except SyntaxError:
+        return None
+    consts = _constTable(tree)
+    scoped = _scopedBindings(tree)
+    sites = _scanSites(tree, consts, root, selfPath=path.resolve(), scoped=scoped)
+    return sites[0][1] if sites else None
 
 
 #: ── 第七类形状：以清单为扫描面（§6-331 那张票的表示法落地）──────────────────────
@@ -1656,31 +1736,23 @@ _NO_PROOF_TAIL = "    hits = [p for p, _n in ast_scan.nodeScan(_Target, '.py')]\
      "运行时才定的根不承载面的声明：既不点名也不免罪，维持原设计", False, ""),
     ("tests/unit/sample.py",
      "import pathlib\n_Repo = pathlib.Path(__file__).resolve().parents[2]\n"
-     "_Data = _Repo / 'data'\n\n\n"
+     "_Data = _Repo / 'data' / 'sessions'\n\n\n"
      "def test_shape():\n"
-     "    if _Data.is_dir() and not any(_Data.iterdir()):\n"
-     "        _Data.rmdir()\n"
-     "    assert _Data.parent.is_dir()\n",
-     "正检·接收者是「仓根 ＋ 末级目录」的合成常量：`data/` 在仓内存在、`data/sessions` 不在"
-     "（跑测期更可能被收干净），读数会落 missing ⇒ 点名。这一格钉的是取数口径本身（判据按目录"
-     "**存不存在**归态，归不到「这一级本来就该缺席」），修法只能是把末级目录拼在调用处"
-     "（`test_session_landing_guard.py` 把常量收成 `SESSIONS_PARENT` 就是为了让接收者落在真实目录上）",
+     "    assert not list(_Data.rglob('*.json'))\n",
+     "正检·接收者落在「仓根 ＋ 末级目录」，而这份 tmp 树里它既不在册也没被忽略 ⇒ 归 missing，点名。"
+     "判据只认一条可机器验的事实（git 认不认得这条仓内路径），所以修法只能是把末级目录拼在调用处"
+     "（`test_session_landing_guard.py` 把常量收成 `SESSIONS_PARENT` 就是为此）",
      True, MISSING),
     ("tests/unit/ci/sample.py",
      "import pathlib\n"
      "_Repo = pathlib.Path(__file__).resolve().parents[3]\n"
      "_Data = _Repo / 'data'\n\n\n"
      "def test_shape():\n"
-     "    if _Data.is_dir() and not any(_Data.iterdir()):\n"
-     "        _Data.rmdir()\n"
-     "    assert _Data.parent.is_dir()\n",
-     "反检·接收者是仓内**被 git 忽略**的那一级（`<repo>/data`，干净检出里本就不存在）："
-     "它不是「根写错」，也不该与「目录被改名删掉」同读——归 `not_checked_out`，不点名。"
-     "这一格与上面那格只差最后一级（`data` 与 `data/sessions`）：前者由 git 认得、后者不认，"
-     "所以判据只能是「git 认不认得这条仓内路径」，不能是「目录在不在」；"
-     "合成仓（tmp 目录）不是 git 工作树，`git ls-files` 给空集 ⇒ 门禁在**无 git 的树上退回保守态**，"
-     "点名而不是放行——宁可多报一次，也不让「读不到事实」静默变成「没问题」",
-     True, MISSING),
+     "    assert not list(_Data.rglob('*.json'))\n",
+     "反检·同一形状，但落点是被 `.gitignore` 整目录盖住的 `data/`：它不是「根写错」，"
+     "也与「目录被改名删掉」不同读——归 `not_checked_out`，不点名。这一格与上面那格只差"
+     "「git 认不认得」这一条，故它钉的正是判据本身而不是目录在不在",
+     False, NOT_CHECKED_OUT),
 ])
 def test_faceRulesPinDepthAndWrongRoots(tmp_path, rel, source, label, expectOffender, expectGap):
     """根的形状要按**被档自身深度**解，且「静态根解到仓外／指不到目录」必须点名。
@@ -1696,11 +1768,27 @@ def test_faceRulesPinDepthAndWrongRoots(tmp_path, rel, source, label, expectOffe
     (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
     (tmp_path / rel).write_text(source, encoding="utf-8")
 
+    if expectGap == NOT_CHECKED_OUT:
+        # 「被整目录忽略」这一形只有 git 认得出来：钉一份本树自己的 `.gitignore` 并把它
+        # 变成工作树。不这么做时两格都退回保守态，反检那格整条断言等于没跑。
+        (tmp_path / ".gitignore").write_text("/data/\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=False,
+                       capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
+
     gaps = {}
     offenders = _faceFindings(tmp_path, [rel], gaps)
     assert bool(offenders) is expectOffender, f"{label} ⇒ 判错：{offenders}"
-    assert gaps.get(rel, "") == expectGap, (
-        f"{label} ⇒ 落点态判错：{gaps} 里要的是 {expectGap!r}")
+    # 只在该格要求验落点态时才走旁路：要求空串的那些格验的是"没有落点"
+    # （运行时根／真实文件那一类），旁路会把它们读出别的值。
+    # 反检格要求"不点名、且落点是 X"：`gaps` 只填 offender，故这一支直接问取数口；
+    # 其余格沿用原契约（`gaps` 为空即"没有落点"），不改它们的验收口径。
+    if expectGap in (NOT_CHECKED_OUT, DIR):
+        actual = _firstSiteStatus(tmp_path / rel, tmp_path) or ""
+    else:
+        actual = gaps.get(rel, "")
+    assert actual == expectGap, (
+        f"{label} ⇒ 落点态判错：{actual!r} 里要的是 {expectGap!r}")
 
 
 @pytest.mark.parametrize("label, source, expectOffender", [

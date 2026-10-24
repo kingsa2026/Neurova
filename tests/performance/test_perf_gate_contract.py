@@ -444,7 +444,12 @@ class TestHeavyDepsAreDeclaredAtCollectionTime:
 
         (tmp_path / "sitecustomize.py").write_text(_DEP_BLOCKER_SOURCE, encoding="utf-8")
         env = dict(os.environ, PYTHONIOENCODING="utf-8")
-        env["PYTHONPATH"] = str(tmp_path)
+        # 子进程要能 import 到本仓与 pytest 本身：`PYTHONPATH` 只递 `tmp_path` 时，
+        # 装在 `--target` 目录里的依赖（以及用 `PYTHONPATH` 装起来的那一份）会整片消失，
+        # 于是"重依赖缺席"这个场景被演成了"pytest 缺席"——本机实测两格都红在
+        # `/usr/bin/python3: No module named pytest`，与要验的形态毫无关系。
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(tmp_path)] + [p for p in (os.environ.get("PYTHONPATH") or "").split(os.pathsep) if p])
         proc = subprocess.run(
             # 刻意整文件跑（不带 `::用例` 选择器）：模块级 skip 只在收集期成立，
             # 带选择器时 pytest 会因"选择器指着一条被跳过的用例"退 4（非 0），
@@ -488,7 +493,12 @@ class TestHeavyDepsAreDeclaredAtCollectionTime:
         scratch.write_text(stripped, encoding="utf-8")
         (Path(tmp_path) / "sitecustomize.py").write_text(_DEP_BLOCKER_SOURCE, encoding="utf-8")
         env = dict(os.environ, PYTHONIOENCODING="utf-8")
-        env["PYTHONPATH"] = str(tmp_path)
+        # 子进程要能 import 到本仓与 pytest 本身：`PYTHONPATH` 只递 `tmp_path` 时，
+        # 装在 `--target` 目录里的依赖（以及用 `PYTHONPATH` 装起来的那一份）会整片消失，
+        # 于是"重依赖缺席"这个场景被演成了"pytest 缺席"——本机实测两格都红在
+        # `/usr/bin/python3: No module named pytest`，与要验的形态毫无关系。
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(tmp_path)] + [p for p in (os.environ.get("PYTHONPATH") or "").split(os.pathsep) if p])
         proc = subprocess.run(
             [sys.executable, "-m", "pytest", str(scratch), "-q", "--no-header", "-p", "no:cacheprovider"],
             capture_output=True,
