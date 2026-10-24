@@ -62,14 +62,11 @@ NEW_QUERY = "自动滴灌"
 
 
 def _newManager(tmp_path, agentId: str) -> MemoryManager:
-    from neurova.embedding import get_embedding_engine
+    from tests.conftest import requireVectorPath
 
-    assert get_embedding_engine() is not None, (
-        "本地 ONNX 嵌入档不可用：本门禁的向量分量与生产同一条链路"
-        "（`manager._get_vector_store()` → UnifiedVectorStore → ONNX），"
-        "缺 models/embedding/bge-small-zh-v1.5/model.onnx 时读数无意义，"
-        "不以 skip 蒙过。"
-    )
+    # 向量分量与生产同一条链路（`manager._get_vector_store()` → UnifiedVectorStore → ONNX）。
+    # "引擎非 None"不足以证明这条链在跑：薄环境里 encode 恒返回零向量。判据单一源在 conftest。
+    requireVectorPath()
     return MemoryManager(
         db_path=os.path.join(str(tmp_path), f"{agentId}.db"),
         agent_id=agentId,
