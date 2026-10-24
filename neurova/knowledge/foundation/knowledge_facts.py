@@ -307,6 +307,13 @@ CREATE INDEX IF NOT EXISTS idx_subject_tenant
     ON knowledge_subjects(tenant_id, agent_id, status);
 """
 
+# v24：事实带条目分类，供业务基线按 category 冻结；未知分类留空，不猜。
+_SCHEMA_V24 = """
+ALTER TABLE knowledge_facts ADD COLUMN category TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_fact_category
+    ON knowledge_facts(tenant_id, category, status);
+"""
+
 
 MANUAL_RESOLUTIONS: tuple = ("keep_both", "supersede_old", "dismiss")
 
@@ -542,6 +549,7 @@ class KnowledgeFactStore:
         validFrom: Optional[str] = None,
         validUntil: Optional[str] = None,
         tenantId: str = "default",
+        category: str = "",
     ) -> str:
         """同 (主体, 谓词, 客体, 限定) 或同 content_key 重放返回同一 fact_id。
 
@@ -581,6 +589,12 @@ class KnowledgeFactStore:
                         " WHERE fact_id = ?",
                         (contentKey, row["fact_id"]),
                     )
+                if str(category or "").strip():
+                    self._conn.execute(
+                        "UPDATE knowledge_facts SET category = ?"
+                        " WHERE fact_id = ? AND (category IS NULL OR category = '')",
+                        (str(category).strip(), row["fact_id"]),
+                    )
                 self.fillValidityWindow(row["fact_id"], windowFrom, windowUntil)
                 return row["fact_id"]
             factId = "fact_%s" % uuid.uuid4().hex[:12]
@@ -589,13 +603,13 @@ class KnowledgeFactStore:
                     "INSERT INTO knowledge_facts (fact_id, agent_id, tenant_id, subject_key,"
                     " predicate_term_id, object_term, relation_kind, content, content_key,"
                     " qualifier_hash, qualifier_json, confidence, source_turn_id, recorded_at,"
-                    " record_kind, valid_from, valid_until)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " record_kind, valid_from, valid_until, category)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (factId, agentId, tenant, subjectKey, predicateTermId, objectTerm, relationKind,
                      content, contentKey, qualifierHash,
                      json.dumps(qualifier, ensure_ascii=False), confidence, sourceTurnId,
                      _instant(recordedAt) if recordedAt else _now(), recordKind,
-                     windowFrom, windowUntil),
+                     windowFrom, windowUntil, str(category or "").strip()),
                 )
             except sqlite3.IntegrityError:
                 # 唯一索引挡住竞态双写：改读先到的那一行，而不是让写入方看到崩
@@ -1723,6 +1737,7 @@ class KnowledgeFactStore:
         tenantId: str = "default",
         timeFrom: Optional[str] = None,
         timeTo: Optional[str] = None,
+        category: str = "",
     ) -> Dict[str, Any]:
         scope = str(scope or "global").strip() or "global"
         tenant = str(tenantId or "default")
@@ -1741,6 +1756,9 @@ class KnowledgeFactStore:
                 if timeTo:
                     sql += " AND recorded_at <= ?"
                     params.append(_instant(timeTo))
+                if str(category or "").strip():
+                    sql += " AND category = ?"
+                    params.append(str(category).strip())
                 factIds = [r["fact_id"] for r in self._conn.execute(sql, tuple(params)).fetchall()]
             ids = sorted({str(fid) for fid in factIds if fid})
             if ids:

@@ -203,3 +203,23 @@ class TestBaselineTimeWindow:
         ids = store.baseline(created["baseline_id"])["snapshot"]["fact_ids"]
         assert ids == [newer]
         assert older not in ids
+
+
+class TestBaselineCategory:
+    def testCategoryFilterSelectsOnlyMatchingFacts(self, store):
+        budget = store.upsertFact(
+            "agent-a", "A", "pred.x", "1", "budget", contentKey="ck:b",
+            category="budget",
+        )
+        policy = store.upsertFact(
+            "agent-a", "A", "pred.x", "2", "policy", contentKey="ck:p",
+            category="policy",
+        )
+
+        created = store.createBaseline(
+            tenantId="default", createdBy="admin", category="budget",
+        )
+
+        ids = store.baseline(created["baseline_id"])["snapshot"]["fact_ids"]
+        assert ids == [budget]
+        assert policy not in ids
