@@ -121,7 +121,9 @@ jobs:
 
       - name: Run protected subset with coverage gate (fail_under=60)
         run: |
-          TESTS=$(grep -v '^#' scripts/ci/protected_tests.txt | tr '\n' ' ')
+          # 清单的读法必须与 `tests/ast_scan.protectedSubsetEntries()` 同口径：行内 `#` 之后
+          # 是注释、不是路径（见 .cnb.yml 同段的读数与事故形态）。
+          TESTS=$(sed -e 's/#.*//' scripts/ci/protected_tests.txt | tr '\n' ' ')
           python -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS
 
   e2e:

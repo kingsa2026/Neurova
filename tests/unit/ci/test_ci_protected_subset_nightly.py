@@ -107,6 +107,38 @@ def test_readerKeepsTheListVerbatim():
         "同一文件被登记两次：夜间会重复跑它，而重复登记本身就是漂移的信号")
 
 
+def test_bothCiSidesReadTheListTheSameWayAsTheSingleReader():
+    """两侧 CI 取 TESTS 的那条 shell 必须与**唯一读法**同口径，且不许回退成 `grep -v '^#'`。
+
+    根因（PR #369 构建 `cnb-49m-1k5lgoro6`）：清单里有一批**行内注释**条目——
+    路径在前、说明在后（`tests/unit/foo.py  # 为什么收它`）。两侧 CI 原写
+    `grep -v '^#'`（只丢整行注释、不剥行内注释），于是这批行按**整行**塞给 pytest，
+    收集期报 `ERROR: file or directory not found`、整腿退出 4。
+    这与「某条判据真红了」在日志里长得一样，而真相是命令读错了自己的清单；
+    现读数：唯一读法 696 条，`grep -v '^#'` 838 条（多出的 142 条就是那批注释尾巴）。
+
+    为什么两条 CI 都要钉：`tests/unit/test_ci_parity_guard.py` 只比「核心命令逐字一致」，
+    两侧一起写错时它一个字都不会说——那正是本次事故的形态。
+    """
+    readerCount = len(ast_scan.protectedSubsetEntries())
+    assert readerCount > 500, f"唯一读法现读 {readerCount} 条，量级不对＝没读到／路径写错"
+    for configPath in (CNB, REPO_ROOT / ".github" / "workflows" / "ci.yml"):
+        text = configPath.read_text(encoding="utf-8")
+        lines = [
+            line.strip() for line in text.splitlines()
+            if "TESTS=" in line and "protected_tests.txt" in line
+        ]
+        assert len(lines) == 1, (
+            f"{configPath.name} 里取 TESTS 的那一行应恰好一处，现读 {len(lines)} 处：{lines}")
+        line = lines[0]
+        assert "grep -v '^#'" not in line, (
+            f"{configPath.name} 退回 `grep -v '^#'` 读清单——行内注释条目会被当路径塞给 pytest，"
+            "整腿以 `file or directory not found` 退出 4（PR #369 事故原形）")
+        assert "sed -e 's/#.*//'" in line, (
+            f"{configPath.name} 取 TESTS 的写法不再剥行内注释：{line!r}。"
+            "清单读法必须与 tests/ast_scan.protectedSubsetEntries() 同口径")
+
+
 def test_rawReaderIsNotTheNormalizedOne(tmp_path):
     """两条读法必须**不同源**，否则上面那格是自证。
 
