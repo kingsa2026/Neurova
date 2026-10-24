@@ -507,6 +507,26 @@ def get_bool(key: str, default: bool = False) -> bool:
     return val.lower() in ("true", "1", "yes", "on")
 
 
+def proxyUvicornArgs() -> Dict[str, object]:
+    """经反代/中继运行时 uvicorn 需要的参数（**唯一出处**，两个真启动点都从这里取）。
+
+    为什么必须有 `proxy_headers`：服务端不直接暴露公网时，入站请求的 scheme 是 http、
+    `request.client.host` 是代理地址。于是 ① 配对回连地址会出 `ws://` 而不是 `wss://`
+    （手机在网外连不上），② `confirm` 的每 IP 限流对**全体手机**合并成一个桶——
+    既拦不住枚举（10^6 个 6 位码共享同一个计数），又会因互相挤兑把第 6 台设备挡在门外。
+
+    为什么默认只信 `127.0.0.1`：`forwarded_allow_ips` 是"谁能替我改写来源"的名单。
+    放开成 `*` 等于任何人都能塞一个 `X-Forwarded-For` 伪造自己的来源 IP，
+    那比没有闸更糟——闸看起来在，实际可以被绕过。经中继时把中继网段配进来即可。
+    """
+    return {
+        "proxy_headers": True,
+        "forwarded_allow_ips": ",".join(
+            get_list("NEUROVA_FORWARDED_ALLOW_IPS", default=["127.0.0.1"])
+        ),
+    }
+
+
 def get_list(
     key: str,
     default: Optional[List[str]] = None,
