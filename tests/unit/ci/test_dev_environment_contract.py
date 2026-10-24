@@ -49,6 +49,11 @@ CNB = PROJECT_ROOT / ".cnb.yml"
 GHW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
 PROD_DOCKERFILE = PROJECT_ROOT / "Dockerfile"
 SCRIPTS_CONFIG = PROJECT_ROOT / "scripts" / "config.py"
+
+#: `git check-ignore` 的预算唯一出处（毫秒级；取低于全局 30s 的这一形——先到点的应当是
+#: 子进程那条诚实的 TimeoutExpired，而不是把整场跑测一起打死的 thread 法全局墙，
+#: §6-402 批 K 口径）。
+GIT_WALL_S = 20
 COMPOSE = PROJECT_ROOT / "docker-compose.yml"
 REQUIREMENTS_CI_LOCK = PROJECT_ROOT / "requirements-ci.lock"
 REQUIREMENTS_FULL_LOCK = PROJECT_ROOT / "requirements-full.lock"
@@ -235,6 +240,7 @@ def _isTracked(relative: str) -> bool:
         ["git", "check-ignore", "--no-index", "-q", relative],
         cwd=PROJECT_ROOT,
         capture_output=True,
+        timeout=GIT_WALL_S,
     )
     return result.returncode != 0
 

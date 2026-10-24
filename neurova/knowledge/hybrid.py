@@ -32,7 +32,10 @@ from neurova.knowledge.splitter import build_index_content
 logger = get_logger(__name__)
 
 # 四路缺省权重：词法两路（tfidf 字粒度分片 + bm25 词粒度）为主，# 语义 vector 次之，fts 覆盖式评分提供第三视角
-DEFAULT_ROUTE_WEIGHTS = {"tfidf": 0.30, "bm25": 0.30, "vector": 0.25, "fts": 0.15}
+DEFAULT_ROUTE_WEIGHTS = {
+    "tfidf": 0.30, "bm25": 0.30, "vector": 0.25, "fts": 0.15, "graph": 0.0,
+}
+GRAPH_ROUTE_WEIGHT_ENV = "NEUROVA_KB_GRAPH_ROUTE_WEIGHT"
 RRF_K = 60
 # 大语料时辅助词法路的候选上限：主索引仍是全量；BM25/FTS 只在主索引
 # 返回的候选上重排，避免 100k 语料每轮全量 tokenize。小语料不受影响。
@@ -155,8 +158,13 @@ def hybrid_search_knowledge(
     tags: Optional[List[str]] = None,
     source: Optional[str] = None,
     updated_after: Optional[float] = None,
+    graphRanks: Optional[List[Tuple[str, float]]] = None,
+    graphSupport: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+    graphWeight: Optional[float] = None,
+    geo_radius: Optional[Dict[str, Any]] = None,
+    geo_bbox: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
-    """四路 RRF 知识混合检索。
+    """四路 RRF 知识混合检索（可选图谱条目影子路由）。
 
     返回可见条目 dict 副本 + score（RRF 融合分）+ rrf_score 别名 +
     confidence_breakdown（{tfidf,bm25,fts,vector,rrf} 各路原始分/融合分），
@@ -171,7 +179,19 @@ def hybrid_search_knowledge(
     if not query or not str(query).strip():
         return []
 
-    route_scores: Dict[str, Dict[str, float]] = {"tfidf": {}, "bm25": {}, "fts": {}, "vector": {}}
+    route_scores: Dict[str, Dict[str, float]] = {
+        "tfidf": {}, "bm25": {}, "fts": {}, "vector": {}, "graph": {},
+    }
+    if graphWeight is None:
+        try:
+            graphWeight = float(os.environ.get(GRAPH_ROUTE_WEIGHT_ENV, "0") or 0.0)
+        except (TypeError, ValueError):
+            graphWeight = 0.0
+    if graphRanks:
+        route_scores["graph"] = {
+            str(entryId): float(score or 0.0)
+            for entryId, score in graphRanks if entryId
+        }
 
     # ── 可见语料（辅助路；构建失败该路置空，不影响主路）─────────────
     visible_map: Dict[str, Dict[str, Any]] = {}
@@ -180,6 +200,7 @@ def hybrid_search_knowledge(
         for it in repo.visible_items(
             user, scope=scope, category=category, agent_id=agent_id,
             tags=tags, source=source, updated_after=updated_after,
+            geo_radius=geo_radius, geo_bbox=geo_bbox,
         ):
             kid = str(it.get("knowledge_id", ""))
             if not kid or not isinstance(it, dict):
@@ -211,6 +232,7 @@ def hybrid_search_knowledge(
         user=user, query=query, scope=scope, agent_id=agent_id,
         limit=lexical_limit, category=category, tags=tags,
         source=source, updated_after=updated_after,
+        geo_radius=geo_radius, geo_bbox=geo_bbox,
     )
     if lexical_all is None:
         lexical_all = []
@@ -294,7 +316,15 @@ def hybrid_search_knowledge(
         name: sorted(m.items(), key=lambda kv: kv[1], reverse=True)
         for name, m in route_scores.items()
     }
-    fused = rrf_fusion(routes, weights or DEFAULT_ROUTE_WEIGHTS, k=k)
+    effectiveWeights = dict(weights or DEFAULT_ROUTE_WEIGHTS)
+    if graphWeight and graphWeight > 0:
+        effectiveWeights["graph"] = float(graphWeight)
+    else:
+        effectiveWeights.pop("graph", None)
+    routes["graph"] = [
+        (entryId, score) for entryId, score in (graphRanks or [])
+    ]
+    fused = rrf_fusion(routes, effectiveWeights, k=k)
 
     # ── 末端精排（工单 014，灭 B05；关闸即取 RRF 前 limit 名，行为与接入前逐字一致）──
     from neurova.knowledge.rerank.main_path import (
@@ -320,8 +350,11 @@ def hybrid_search_knowledge(
             "bm25": round(route_scores["bm25"].get(kid, 0.0), 4),
             "fts": round(route_scores["fts"].get(kid, 0.0), 4),
             "vector": round(route_scores["vector"].get(kid, 0.0), 4),
+            "graph": round(route_scores.get("graph", {}).get(kid, 0.0), 4),
             "rrf": round(rrf, 6),
         }
+        if graphSupport and kid in graphSupport:
+            merged["graph_support"] = list(graphSupport[kid])
         out.append(merged)
     out, rerankNote = refineMainPathResults(query, out, limit=limit, config=rerankConfig)
     if rerankNote:

@@ -40,6 +40,13 @@ if str(PROJECT_ROOT) not in sys.path:
 
 POSIX = sys.platform != "win32"
 
+#: 本档两格的父墙声明（§6-402 批 K 口径的退化形）。它们的子墙是 `proc.wait(timeout=…)`
+#: 与 `asyncio.to_thread(proc.wait, timeout=…)`，数值取生产侧单源常量 `KILL_GRACE_S`——
+#: 常驻闸 `test_nestedPytestBudgetWallsAreOrdered.py` 读不出那个数（把常量搬进本档就是
+#: 新造第二份尺度，不为此动生产侧单源），于是按「子墙不可读 ⇒ 本格必须显式声明父墙」
+#: 处置。60s 覆盖一次 OS 收尸与两格里的 `asyncio.sleep(30)` 被 0.2s 提前取消的正常余量。
+REAP_PARENT_WALL_S = 60
+
 
 def _spawnSleep(seconds: float = 30.0) -> subprocess.Popen:
     """起一个真实长睡进程。POSIX 下自成一团——进程组杀灭的前提，也是安全前提：
@@ -107,6 +114,7 @@ class TestCancelTokenProtocol:
 
         assert CancelToken().cancelled() is False
 
+    @pytest.mark.timeout(REAP_PARENT_WALL_S)
     @pytest.mark.asyncio
     async def testCancelRunsRegisteredKillAction(self):
         """置位⇒回调执行，且**进程真的没了**（不看调用次数）。
@@ -281,6 +289,7 @@ class TestTimeoutDispositionDeclaration:
 
 
 class TestTimeoutDispositionDispatch:
+    @pytest.mark.timeout(REAP_PARENT_WALL_S)
     @pytest.mark.asyncio
     async def testKillDispositionReapsProcessWithinGrace(self):
         """KILL：超时后进程真的没了，且返回 cancelled 形态（不留僵尸、不谎报）。"""

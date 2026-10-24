@@ -748,6 +748,7 @@ async def post_console_chat(
 
             metadata = {
                 "user_id": user_id,
+                "tenant_id": str((current_user or {}).get("tenant_id") or "default"),
                 "thinking_effort": (body.thinking_effort or "").lower(),
                 "thinking_enabled": getattr(body, "thinking_enabled", None),
                 "thinking_budget": getattr(body, "thinking_budget", None),

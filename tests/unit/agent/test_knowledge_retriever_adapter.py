@@ -235,7 +235,7 @@ class TestKnowledgeRetrieverAdapter:
         ctx = RetrievalContext(query="知识", limit=5, user_id="2")
         await adapter.retrieve(ctx)
         call_user = repo.search_visible_items.call_args.kwargs["user"]
-        assert call_user == {"user_id": "2"}
+        assert call_user == {"user_id": "2", "tenant_id": "default"}
 
     @pytest.mark.asyncio
     async def test_admin_sees_all_via_visible_filter(self):

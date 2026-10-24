@@ -94,7 +94,7 @@ class TestMultiHopWalk:
         assert GraphFactWalker(store).walkFromQuery("甲部", maxHops=3) == []
 
     def test_walkDoesNotBridgeAgentDomains(self, store):
-        """身份是 agent 域内的（`ux_subject_label` 就按 (agent, label) 建唯一索引），
+        """身份是 agent 域内的（`ux_subject_label_tenant` 按 (agent, tenant, label) 建唯一索引），
         走图跨域等于把两个 agent 的说法拼成一条链。"""
         _admit(store, "甲部", "relates_to", "乙部", agentId="default")
         _admit(store, "乙部", "relates_to", "丙部", agentId="kai")

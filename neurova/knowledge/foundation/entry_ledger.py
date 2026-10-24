@@ -66,6 +66,7 @@ class EntryLedger:
                 receipt = self._gate.admit(
                     AdmissionRequest(
                         agentId=agentId, subjectLabel=_subjectLabel(item, kid),
+                        category=str(item.get("category") or ""),
                         recordKind="narrative", objectTerm=kid,
                         content=str(item.get("content") or ""),
                         assertions=[_assertionFor(agentId, item,

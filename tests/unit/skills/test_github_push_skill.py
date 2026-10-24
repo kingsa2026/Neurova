@@ -13,6 +13,11 @@ import os
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+#: 临时仓里 `git init/config` 的预算唯一出处（毫秒级；此前无 `timeout=`＝无界等待）。
+#: 取低于全局 30s 的 20s——先到点的应当是子进程那条诚实的 TimeoutExpired，而不是 thread 法
+#: 的全局墙把整场跑测带走（§6-402 批 K 口径）。
+GIT_WALL_S = 20
+
 # 添加项目根目录到路径
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -68,7 +73,8 @@ class TestGitHubPushSkill:
                      ["git", "config", "user.email", "b39-scratch@example.invalid"],
                      ["git", "config", "user.name", "B39 Scratch"]):
             subprocess.run(args, cwd=str(self.test_dir), check=True,
-                           capture_output=True, encoding="utf-8", errors="replace")
+                           capture_output=True, encoding="utf-8", errors="replace",
+                           timeout=GIT_WALL_S)
 
         # 测试状态获取
         self.skill.repo_path = self.test_dir

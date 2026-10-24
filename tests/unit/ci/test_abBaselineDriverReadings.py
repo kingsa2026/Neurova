@@ -29,6 +29,14 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "scripts" / "ci" / "ab_baseline.py"
 
+#: 本档子进程预算的唯一出处（§6-402 批 K 同一口径：子墙一处定义，父墙由它 ＋余量导出）。
+#: `git` 那几枚读的是索引/工作树，毫秒级；A/B 驱动那几枚真起**嵌套 pytest**（一次调用两趟，
+#: 实测最重的一格 5.59s），60s 已是十倍余量——全局 30s 那道墙比子墙先到，报出来的就是
+#: "整场跑测没了"而不是这条诚实的 TimeoutExpired。
+_GIT_WALL_S = 30
+_DRIVER_WALL_S = 60
+pytestmark = pytest.mark.timeout(_DRIVER_WALL_S + 60)
+
 
 def _loadDriver():
     spec = importlib.util.spec_from_file_location("abBaselineDriver", SCRIPT)
@@ -65,7 +73,7 @@ class TestTheScriptIsTheMissingPiece:
         tracked = subprocess.run(
             ["git", "ls-files", "--", "scripts/ci/ab_baseline.py"],
             cwd=str(REPO_ROOT), capture_output=True, text=True,
-            encoding="utf-8", errors="replace").stdout.strip()
+            encoding="utf-8", errors="replace", timeout=_GIT_WALL_S).stdout.strip()
         assert tracked, "脚本在磁盘上但没进跟踪：CI 与别人的工作树里它不存在"
 
 
@@ -182,7 +190,8 @@ class TestEndToEndOnSyntheticRepos:
                      ["-c", "commit.gpgsign=false",
                       "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "base"]):
             subprocess.run(["git"] + args, cwd=str(repo), capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", check=True)
+                           encoding="utf-8", errors="replace", check=True,
+                           timeout=_GIT_WALL_S)
         return repo
 
     def _run(self, repo: Path, tmp_path: Path, extra=()):
@@ -192,7 +201,7 @@ class TestEndToEndOnSyntheticRepos:
              "--root", str(repo), "--tmp", str(tmp_path / "abtmp"), *extra,
              "--", "tests"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=_DRIVER_WALL_S)
         return proc
 
     def test_noDifferenceYieldsPass(self, tmp_path):
@@ -235,7 +244,7 @@ class TestEndToEndOnSyntheticRepos:
             [sys.executable, str(SCRIPT), "-k", "HEAD", "--root", str(repo),
              "--tmp", str(tmp_path / "abtmp"), "--", "tests"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=_DRIVER_WALL_S)
         assert "AB_SKIP" in proc.stdout, proc.stdout + proc.stderr
 
     def testCp936StdoutDoesNotEatTheVerdict(self, tmp_path):
@@ -246,7 +255,8 @@ class TestEndToEndOnSyntheticRepos:
         proc = subprocess.run(
             [sys.executable, str(SCRIPT), "-k", "HEAD", "-n", "1",
              "--root", str(repo), "--tmp", str(tmp_path / "abtmp"), "--", "tests"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=env,
+            timeout=_DRIVER_WALL_S)
         assert "AB_PASS" in proc.stdout, proc.stdout + proc.stderr
         assert proc.returncode == 0
 
@@ -270,7 +280,7 @@ class TestDriverIsNotVacuous:
             [sys.executable, str(SCRIPT), "-k", "HEAD", "-n", "1", "--json",
              "--root", str(repo), "--tmp", str(tmp_path / "abtmp"), "--", "tests"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=_DRIVER_WALL_S)
         payload = [json.loads(ln) for ln in proc.stdout.splitlines() if ln.startswith("{")]
         assert payload, "带 `--json` 却没给出机器可读读数"
         assert {"marker", "baseline", "tree"} <= set(payload[0])

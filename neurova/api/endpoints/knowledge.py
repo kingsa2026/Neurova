@@ -61,6 +61,7 @@ from neurova.core.logger import get_logger
 from neurova.api.endpoints.knowledge_core import router as _core_router
 from neurova.api.endpoints.knowledge_core import detail_router as _core_detail_router
 from neurova.api.endpoints.knowledge_ingestion import router as _ingestion_router
+from neurova.api.endpoints.knowledge_ontology import router as _ontology_router
 from neurova.api.endpoints.knowledge_remote import router as _remote_router
 from neurova.api.endpoints.knowledge_sharing import router as _sharing_router
 
@@ -99,6 +100,9 @@ router.include_router(_core_router)
 router.include_router(_sharing_router)
 router.include_router(_remote_router)
 router.include_router(_ingestion_router)
+# 本体类型系统（`/ontology*`）：知识域自己的读面，与被后面 detail_router 的
+# 单段参数 `/{knowledge_id}` 遮蔽无关——它是两段字面路径，仍先于 detail include。
+router.include_router(_ontology_router)
 
 # 精准回复命中表（`/annotations*`）：此前挂在 `/v1/console` 下，而它的唯一消费者
 # 是知识域的 `KnowledgePage` → `AnnotationDrawer`，前端按 `/v1/knowledge/annotations`
@@ -154,7 +158,6 @@ from neurova.api.endpoints.knowledge_ingestion import (  # noqa: E402,F401
     _build_item_dict,
     _default_llm_call,
     _fetch_url,
-    _guess_type,
     _import_file_data,
     _resolve_runtime_agents,
     _title_from_filename,

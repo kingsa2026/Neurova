@@ -436,7 +436,7 @@ async def _handle_chat_send(ws, data: dict, user_id: str):
         from neurova.core.identity_context import set_request_user_id
 
         set_request_user_id(user_id)
-        turnMetadata = {"user_id": user_id, "role": "user"}
+        turnMetadata = {"user_id": user_id, "role": "user", "tenant_id": "default"}
         if hasattr(agent, "chat_stream") and callable(agent.chat_stream):
             async for chunk in agent.chat_stream(user_input=content, session_id=session_id,
                                                  metadata=turnMetadata):
