@@ -220,7 +220,11 @@ class TestHomeAdoptionHasExactlyOneGate:
                     func.attr if isinstance(func, ast.Attribute) else "")
                 if name == "legacyHomeLanding":
                     callers.add(py.relative_to(NEUROVA).as_posix())
-        assert callers == {"core/data_root.py"}, (
+        # `security/artifact_digest.py` 在册：它的落点**故意**在数据根之外（防整库回滚），
+        # 锚文件对"数据根被替换"敏感，故它是 `legacyHomeLanding()` 的取法消费方，
+        # 而不是"绕过闸自己拼一份 home"——自己拼会写 `Path.home().joinpath(...)`，
+        # 那才是本格要拦的形态（`legacyHomeLanding` 这个名字出现不了）。
+        assert callers == {"core/data_root.py", "security/artifact_digest.py"}, (
             "home 旧落点的取法出了一号仓库（各算一遍就是各判一次要不要搬）：\n%s"
             % sorted(callers)
         )

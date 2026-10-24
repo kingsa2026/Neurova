@@ -6,7 +6,7 @@
 JSON-RPC 分派链（四方法 if/elif、自造信封、`include_router` 登记）随本批退役——
 同一功能在仓内只留一处实现（教义第 7 条）。
 
-保留的对外承诺（§6-302，由 `tests/unit/api/testMcpFaceRidesSdkTransport.py` 逐条钉住）：
+保留的对外承诺（§6-302，由 `tests/unit/api/test_mcpFaceRidesSdkTransport.py` 逐条钉住）：
 协议版本协商回声/反提案、`ping` 必答、坏 Accept → 406、通知 → 202、未知方法 → -32601。
 两条**改过**的语义按 §6-340 裁定执行：`initialize` 的 params 三件齐（缺则 -32602），
 非信封体走 HTTP 400 但 JSON-RPC 码收成正码 -32600。
