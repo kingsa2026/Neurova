@@ -3017,6 +3017,7 @@ export default {
     unaddressed: 'No action',
   },
   marketplace: {
+    downloadUrlPh: 'ZIP download link; without a source this entry cannot be installed',
     title: 'Marketplace',
     browse: 'Browse',
     installed: 'Installed',
