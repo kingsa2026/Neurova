@@ -55,7 +55,7 @@
 #     平台最小调度间隔 5 分钟，周级用第 5 段（星期）表达；本文件的周级巡检
 #     流水线（deploy-config 的时间维度兜底）同样不计入 `main.push` 的条数。
 #   - 单条流水线内的 stages 串行；任一 stage 失败即中止该流水线。
-#   - runner.cpus: N 对应内存 N×2GiB（本文件最大 4 → 8GiB）。
+#   - runner.cpus: N 对应内存 N×2GiB（本文件最大 8 → 16GiB）。
 #   - docker.volumes 为构建节点级缓存（copy-on-write 默认），跨节点不共享；
 #     同一流水线内不得声明存在包含关系的卷路径。
 #   - YAML 锚点仅在同文件内可用（跨文件 include 不支持锚点），
@@ -145,7 +145,12 @@ main:
     - name: unit-tests
       runner:
         tags: cnb:arch:amd64
-        cpus: 4
+        # 受保护子集 716 档，容器必须真装得下它。此前 cpus: 4（8GiB）在 82% 处被
+        # SIGKILL（构建 `cnb-rja-1k5pv9gbl#003`，`code: 137`，22m13s）——日志里一条
+        # 失败墙都没有，不是"有测试红了"，是宿主内存超限。
+        # 抬到 8（16GiB）：判据见 tests/unit/ci/test_unit_tests_runner_has_headroom.py，
+        # 它按"子集真条目数 × 单档足迹 + 底噪 × 余量"算需求，改子集或改 cpus 都会当场作答。
+        cpus: 8
       docker:
         image: python:3.12
         volumes:
@@ -164,17 +169,44 @@ main:
         # 失败墙都没有——那不是"有测试红了"，是整段跑到点被掐断。
         # 抬到 90m：整场是串行一条腿，余量按实测最慢批次的 1.6 倍留，且必须宽于
         # 子集里最高的单档父墙（`pytest.mark.timeout(120)`）足以让诚实超时先说话。
+        # 输出**不许**重定向进文件，也**不许**让它块缓冲。2026-10-25 构建
+        # `cnb-sl8-1k5pih0k6` 曾把 stdout 全量吞进 `/tmp/pytest_protected.log`，
+        # 换来两个后果：日志里只剩命令回显，一条进度都没有；真出事（进程被掐）时
+        # `tail` 根本执行不到，整场读数归零。
+        # 改成 `tee` 之后按退出码判定：日志照存（排障要全文），stdout 照出（进度与
+        # 失败摘要都在）。`PIPESTATUS[0]` 取 pytest 自己的退出码——写成 `$?` 会拿到
+        # `tee` 的，门禁从此恒绿。
+        # `-u` 与 `2>&1` 是同一条要求的两半：只要 stdout 落在管道里，Python 就按
+        # 4KiB/8KiB **块**缓冲写，几十秒才攒满一块——平台「长时间无输出」判据会把
+        # 仍在正常推进的跑测掐掉（构建 `cnb-ast-1k5pqhnfi#003` 读 23m 后被中断且
+        # 从不进入那一段）。`-u` 关掉解释器缓冲、`2>&1` 把 stderr 并进同一道管道。
         - name: protected subset with coverage gate (fail_under=60)
           script: |
             TESTS=$(grep -v '^#' scripts/ci/protected_tests.txt | tr '\n' ' ')
-            python -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS
+            set -o pipefail
+            python -u -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS \
+              2>&1 | tee /tmp/pytest_protected.log
+            RC=${PIPESTATUS[0]}
+            echo "── pytest 退出码: $RC（日志全文 /tmp/pytest_protected.log）"
+            exit $RC
           timeout: 90m
 
     # ── 5. E2E：后端启动冒烟 ─────────────────────────────────────────────
+    # `services` 必须显式为空：不声明时平台给**每条流水线**自动起
+    # `git-clone-yyds` 与 `network-bus` 两个服务，而它们与"后端能不能启动"
+    # 毫无关系 —— 这两个服务的 `docker run` 会算进平台 `Prepare` 的 **60s**
+    # 上限里，撞上就是
+    # `Pipeline prepare error: 任务超过最大执行时间而被强制关闭：1m0s`，
+    # 本流水线自己一个 stage 都跑不到（构建 `cnb-13d-1k5pskuuj#004`：
+    # 两个服务分别吃掉 54.9s 与 1m2s）。同一批其它流水线吃 0.7–13s ——
+    # 故这不是配置里的判据，是共享负载下的运气。
+    # 显式空列表后同一条流水线仍是 2 个 stage，判据一字不变；
+    # 判据见 tests/unit/ci/test_pipelinePrepareStartsNoUnusedServices.py。
     - name: e2e-backend-boot
       runner:
         tags: cnb:arch:amd64
         cpus: 2
+      services: []
       docker:
         image: python:3.12
         volumes:
