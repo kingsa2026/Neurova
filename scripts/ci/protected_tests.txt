@@ -105,6 +105,10 @@ tests/unit/api/test_channelIdentityBindingEndpoints.py
 # 的 test_evalOutboundGateCoversTheLiveSingleton（按行为打：换类后真调一次必须被拦）。
 # 入册前逐文件单跑全绿（43 passed）。
 tests/unit/evolution/eval/test_service_closed_loop.py
+# 进化闸的语义相似度面**不许**在判据路径上装载/下载嵌入模型（PR #367 的 CI 整条
+# unit-tests 被掐断的根因：`get_embedding_engine()` 会懒建引擎并出网拉权重）。
+# 另反向钉住"语义面必须还在"——摘掉那一跳就换成恒真回退，也能绿得很干净。
+tests/unit/evolution/eval/test_semanticGateLoadsNoModel.py
 tests/unit/api/test_text_evolution_api.py
 # Issue #55 P1：共享线程池复用（禁止热路径每次新建池）
 tests/unit/core/test_shared_thread_pool_reuse.py
