@@ -106,13 +106,13 @@ except Exception as failure:  # noqa: BLE001
 
 svc = SkillService(agent_id=AGENT, skills_dir=str(SKILLS_DIR))
 rows = [r for r in svc.list_skills()]
-def classify(entry):
-    # 映射执行体型单列：它是「盘上没字节也真能跑」那一形，混进空壳就是探针自己冤枉判据
-    # 不在函数里写同名 def 兜底：那是「用桩冒充真身」的形态（`test_noFirstPartyImportPlaceholder`
-    # 按类判红），也把「对照腿跑不跑得起来」这件事伪装成了读数。对照腿本就该单独检出，
-    # 缺这条 import 就让脚本响亮失败，别拿一份倒退的实现顶上。
-    from neurova.skills.market_registry import hasExecutorMapping
+# 映射执行体型单列：它是「盘上没字节也真能跑」那一形，混进空壳就是探针自己冤枉判据。
+# 直连公共读面，不留同名桩：留一枚 `except ImportError` 里定义的 `hasExecutorMapping`，
+# 一旦真触发就把「在册判定」静默换成本档自己拼的字符串比较，读的人还以为在读同一个事实源。
+from neurova.skills.market_registry import hasExecutorMapping
 
+
+def classify(entry):
     sid = entry["id"]
     d = SKILLS_DIR / sid
     hasBytes = (d / "SKILL.md").exists() or bool(list(d.glob("*.py")))

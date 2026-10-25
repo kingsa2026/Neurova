@@ -384,13 +384,18 @@ export class WebSocketAdapter {
   // 工具方法
   // ===========================================================================
 
-  /** 构造完整 URL：将 token 作为 query 参数附加 */
+  /** 构造完整 URL：**凭证不进 URL**。
+
+   * 接入凭证是一次性的，挂在 query 上会随每一次中转（含中继）落进访问日志；
+   * 它只经 `Authorization` 头送出（见 connect() 里的 header）。
+   * 这里保留方法本身：URL 归一（去尾斜杠）仍然要用。
+   */
   private buildUrl(url: string, token?: string): string {
-    if (!token) {
-      return url;
+    if (token) {
+      // 刻意不把 token 拼进 URL；留着这条签名是为了不改调用面，行为改在此处
+      this.logger.debug(TAG, '凭证经 header 送出，不写入 URL');
     }
-    const sep: string = url.includes('?') ? '&' : '?';
-    return `${url}${sep}token=${encodeURIComponent(token)}`;
+    return url;
   }
 
   /** 清理底层 WebSocket：解除事件回调并置空引用 */

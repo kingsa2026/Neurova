@@ -22,8 +22,10 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib
 import io
+import re
 import subprocess
 import sys
 from contextlib import redirect_stderr, redirect_stdout
@@ -111,6 +113,70 @@ def check_syntax() -> bool:
     return False
 
 
+_UNDEFINED_RE = re.compile(r"^.+?:\d+:\d+: undefined name '([^']+)'")
+
+
+def _annotationOnlyNames(path: Path) -> set:
+    """本文件里只出现在**注解位置**、且实体在文件内某处（含函数体）被导入过的名字。
+
+    判形两问，两问都过才豁免：
+
+    1. 这个名字只出现在注解位置（形参注解、返回注解、注解表达式）——落进函数体就算缺陷面；
+    2. 文件里确实有 `import 名字` / `from … import … as 名字` 把它绑过——**不是**凭"注解位置"
+       一律免检。于是拼错的注解名（`ChannleMessage`）照旧红，而
+       「模块级导入会拉循环、实体就近导入、注解留名」这条正解不再被误报（AGENTS.md §3）。
+
+    只按 AST 判，不在报告文本上做字符串补丁：门禁要判的是语义，不是 pyflakes 的行格式。
+    """
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return set()
+
+    imported: set = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                imported.add(alias.asname or alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                imported.add(alias.asname or alias.name)
+
+    annotated: set = set()
+    for node in ast.walk(tree):
+        for annotation in (
+            getattr(node, "annotation", None),
+            getattr(node, "returns", None),
+        ):
+            if annotation is not None:
+                annotated.update(
+                    sub.id for sub in ast.walk(annotation) if isinstance(sub, ast.Name)
+                )
+    return imported & annotated
+
+
+def undefinedNamesIn(path: str) -> list:
+    """判一个文件里真正的"未定义名称"，返回 pyflakes 那几行（已剔掉注解专用名）。
+
+    这是检查 2 的**唯一判据口**：`check_pyflakes` 只是把它挂到全仓、把结果打印出来。
+    独立成函数是为了让它可被调用、可被反证（`tests/unit/ci/test_staticGateUsesParserNotTypecheck.py`）。
+    """
+    filePath = Path(path)
+    done = subprocess.run(
+        [sys.executable, "-m", "pyflakes", str(filePath)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        env=_utf8ChildEnv(),
+    )
+    reported = [
+        line for line in (done.stdout or "").splitlines() if "undefined name" in line
+    ]
+    if not reported:
+        return []
+    exemption = _annotationOnlyNames(filePath)
+    return [line for line in reported
+            if (_UNDEFINED_RE.match(line) is None or _UNDEFINED_RE.match(line).group(1) not in exemption)]
+
+
 def check_pyflakes() -> bool:
     """检查 2：未定义名称（pyflakes 'undefined name'）。返回 True 表示通过。"""
     _hr("✅ 检查 2/3：未定义名称检查（pyflakes）")
@@ -120,15 +186,10 @@ def check_pyflakes() -> bool:
         print("❌ 未安装 pyflakes，请先执行：pip install pyflakes")
         return False
 
-    target = str(PROJECT_ROOT / "neurova")
-    cmd = [sys.executable, "-m", "pyflakes", target]
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                   env=_utf8ChildEnv())
-    undefined = [
-        line
-        for line in (result.stdout or "").splitlines()
-        if "undefined name" in line
-    ]
+    target = PROJECT_ROOT / "neurova"
+    undefined: list = []
+    for pyFile in sorted(target.rglob("*.py")):
+        undefined.extend(undefinedNamesIn(str(pyFile)))
     if not undefined:
         print("通过：neurova/ 无 'undefined name'")
         return True
