@@ -79,19 +79,6 @@ def observe(name: str, detail: str) -> None:
     print(f"[OBSERVE] {name} — {detail}")
 
 
-def runProbe(root: Path) -> dict:
-    p = subprocess.run([sys.executable, "-c", IMPLICIT_READING, str(root)], capture_output=True,
-                       text=True, encoding="utf-8", errors="replace", cwd=str(root),
-                       env=dict(os.environ, PYTHONIOENCODING="utf-8"))
-    out = (p.stdout or "").splitlines()
-    pkgs = next((l.split()[1] for l in out if l.startswith("PKGS ")), "?")
-    implicit = next((l[len("IMPLICIT "):] for l in out if l.startswith("IMPLICIT ")), "")
-    return {"pkgs": pkgs, "implicit": {} if not implicit else
-            {kv.split("=")[0]: set(kv.split("=")[1].split("|"))
-             for kv in implicit.split(",") if "=" in kv},
-            "stderr": (p.stderr or "")[-200:]}
-
-
 def main() -> int:
     import os
     import types

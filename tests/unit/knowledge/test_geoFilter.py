@@ -96,6 +96,40 @@ class TestGeoFilters:
         assert _titles(hits) == {"租户一上海"}
 
 
+class TestCreateApiCarriesAuthorGeoAndDuplicate:
+    def testCreateApiPassesAuthorAndGeo(self, tmp_path, monkeypatch):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from neurova.api import auth as knowledge_auth
+        from neurova.api.endpoints import knowledge as knowledge_module
+
+        repo = KnowledgeRepository(str(tmp_path / "kb"))
+        monkeypatch.setattr(
+            "neurova.api.endpoints.knowledge_core.get_repository", lambda: repo)
+        app = FastAPI()
+        app.include_router(knowledge_module.router, prefix="/v1/knowledge")
+        app.dependency_overrides[
+            knowledge_auth.get_current_user_or_service] = lambda: dict(T1_USER)
+        client = TestClient(app)
+
+        first = client.post("/v1/knowledge", json={
+            "title": "上海笔记", "content": "外滩记录", "source": "manual",
+            "author": "张三", "geo": {"lat": 31.23, "lon": 121.47},
+        })
+        assert first.status_code == 200, first.text
+        body = first.json()
+        assert body["geo"] == {"lat": 31.23, "lon": 121.47}
+        assert body["sources"]
+
+        second = client.post("/v1/knowledge", json={
+            "title": "上海笔记", "content": "外滩记录",
+            "author": "张三", "geo": {"lat": 31.23, "lon": 121.47},
+        })
+        assert second.status_code == 200, second.text
+        assert second.json()["duplicate"] is True
+
+
 class TestSearchEndpointPassesGeo:
     def testSearchEndpointCarriesGeoFilters(self, tmp_path, monkeypatch):
         from fastapi import FastAPI

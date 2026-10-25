@@ -67,18 +67,18 @@ def test_取数口径只有一份():
     # 私有 rglob + ast.parse 会把「代码总量」编码成墙钟上界
     # （tests/unit/test_ci_ast_scan_budget_guard.py 的根因，Issue #148）。
     offenders = []
-    scanned = 0
+    scannedRoots = []
     for d in SCAN_DIRS:
         root = REPO_ROOT / "tests" / d
         if not root.is_dir():
             continue
+        scannedRoots.append(root)
         # 枚举走共享预算；`routes` 字面串是判据谓词的必要条件，作预筛充分
         # （写窄成 `.routes` 会漏掉 `app . routes` 这类跨行/带空格的写法）。
         for ref in ast_scan.sourceRefsUnder(root, ".py", hints=("routes",)):
             path = ref.path
             if path == ROUTE_TABLE:
                 continue
-            scanned += 1
             source = ref.code
             if SINGLE_SOURCE_IMPORT in source:
                 continue          # 已在用单源的档，不重复数
@@ -88,8 +88,12 @@ def test_取数口径只有一份():
     corpusFiles = len(ast_scan.sourceRefsUnder(REPO_ROOT / "tests", ".py"))
     assert corpusFiles >= 1000, (
         "测试语料现读 %d 个 .py——REPO_ROOT 指错时本闸的『零命中』与『没扫到』长得一样" % corpusFiles)
-    # 候选面读数＝预筛后含 `routes` 字样的档（现算 71）。比全量小两个数量级是预筛的本意，
-    # 但它掉到 0 只会有一种解释：预筛词或 SCAN_DIRS 被改坏，而不是"没人再读 app.routes"。
+    # 候选面读数＝**同一批扫描根、同一个预筛词**下被枚举的档数，从共享入口再数一遍
+    # （现跑本机 87 档）。不在循环里累加，免得那个只增不读的计数器被写坏后判据当场变哑。
+    scanned = sum(len(ast_scan.sourceRefsUnder(root, ".py", hints=("routes",)))
+                  for root in scannedRoots)
+    # 比全量小一个数量级是预筛的本意，但它掉到 0 只会有一种解释：预筛词或 SCAN_DIRS
+    # 被改坏，而不是"没人再读 app.routes"。
     assert scanned >= 40, (
         "候选面现读 %d 个文件——SCAN_DIRS 被改窄或预筛写坏，此时『只有一份口径』是假绿（面自证）" % scanned)
     assert not offenders, (
@@ -105,8 +109,6 @@ def test_朴素口径确实看不见挂载面():
     这一格同时是本禁令的**过期探针**——哪天 FastAPI 改回就地摊平子路由，
     两口径会等量，本格即红，提示第 1 格可以撤。
     """
-    from fastapi import FastAPI
-
     from neurova.api.app import create_app
     from tests.route_table import registeredPaths
 
