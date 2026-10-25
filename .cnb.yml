@@ -194,10 +194,16 @@ main:
           # 这里改成 `tee` 之后按退出码判定：日志照存（排障要全文），stdout 照出（进度与
           # 失败摘要都在），两者都不牺牲。`PIPESTATUS[0]` 取 pytest 自己的退出码——
           # 写成 `$?` 会拿到 `tee` 的，门禁从此恒绿。
+          #
+          # `tee` 的输入必须走 stderr（`2>&1` 只挪 fd，不改行缓冲）：只要 stdout 落在管道里，
+          # Python 就按 4KiB/8KiB 块缓冲写，构建输出是几十秒才攒满一块——平台「长时间无输出」
+          # 判据会把仍在正常推进的受保护子集掐掉（构建 `cnb-ast-1k5pqhnfi#003`，读 23m 后被
+          # 中断且从不进入那一段）。`-u` 关掉解释器缓冲、`2>&1` 把 stderr 并进管道，两个一起
+          # 才是「每行都立刻可见」。
           script: |
             TESTS=$(grep -v '^#' scripts/ci/protected_tests.txt | tr '\n' ' ')
             set -o pipefail
-            python -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS \
+            python -u -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS \
               2>&1 | tee /tmp/pytest_protected.log
             RC=${PIPESTATUS[0]}
             echo "── pytest 退出码: $RC（日志全文 /tmp/pytest_protected.log）"
