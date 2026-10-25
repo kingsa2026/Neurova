@@ -22,14 +22,14 @@
 ## 摘要
 
 <!-- COGNITIVE:SUMMARY:BEGIN -->
-共 **93** 个模块 / **43227** 行。按状态：**在役 52** · **仅层内 34** · **仅测试 2** · **零读者 5**。
+共 **93** 个模块 / **43153** 行。按状态：**在役 52** · **仅层内 34** · **仅测试 2** · **零读者 5**。
 
 | 子层 | 模块数 | 行数 |
 |---|---|---|
 | `emotion_context_layer` | 4 | 2300 |
 | `growth_layer` | 1 | 813 |
-| `knowledge_graph` | 1 | 1259 |
-| `memory_layer` | 82 | 36583 |
+| `knowledge_graph` | 1 | 1269 |
+| `memory_layer` | 82 | 36499 |
 | `meta_cognition_layer` | 5 | 2272 |
 <!-- COGNITIVE:SUMMARY:END -->
 
@@ -56,7 +56,7 @@
 
 | 模块 | 行数 | 层外读者 | 层内读者 | 测试读者 | 状态 |
 |---|---|---|---|---|---|
-| `neurova/cognitive_layers/knowledge_graph/manager.py` | 1259 | 5 | 1 | 16 | 在役 |
+| `neurova/cognitive_layers/knowledge_graph/manager.py` | 1269 | 5 | 1 | 21 | 在役 |
 
 ### `memory_layer`
 
@@ -127,12 +127,12 @@
 | `neurova/cognitive_layers/memory_layer/proactive_question.py` | 940 | 0 | 0 | 0 | 零读者 |
 | `neurova/cognitive_layers/memory_layer/reasoning_trace_manager.py` | 208 | 1 | 1 | 5 | 在役 |
 | `neurova/cognitive_layers/memory_layer/relation_mixin.py` | 400 | 0 | 0 | 0 | 零读者 |
-| `neurova/cognitive_layers/memory_layer/security.py` | 809 | 1 | 0 | 2 | 在役 |
+| `neurova/cognitive_layers/memory_layer/security.py` | 730 | 1 | 0 | 3 | 在役 |
 | `neurova/cognitive_layers/memory_layer/semantic_emotion.py` | 121 | 1 | 0 | 2 | 在役 |
 | `neurova/cognitive_layers/memory_layer/semantic_search.py` | 328 | 1 | 3 | 16 | 在役 |
 | `neurova/cognitive_layers/memory_layer/settings_config.py` | 347 | 4 | 3 | 8 | 在役 |
 | `neurova/cognitive_layers/memory_layer/share_group.py` | 314 | 1 | 1 | 2 | 在役 |
-| `neurova/cognitive_layers/memory_layer/sleep.py` | 1137 | 6 | 0 | 38 | 在役 |
+| `neurova/cognitive_layers/memory_layer/sleep.py` | 1132 | 6 | 0 | 39 | 在役 |
 | `neurova/cognitive_layers/memory_layer/sleep_writeback.py` | 121 | 2 | 1 | 10 | 在役 |
 | `neurova/cognitive_layers/memory_layer/storage.py` | 728 | 1 | 1 | 14 | 在役 |
 | `neurova/cognitive_layers/memory_layer/temperature.py` | 564 | 3 | 4 | 12 | 在役 |
