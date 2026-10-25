@@ -47,28 +47,10 @@ class TestAgentMailbox:
         assert mailbox.push("s1", "c") is False
 
 
-class TestSpawnMailboxPush:
-    @pytest.mark.asyncio
-    async def test_spawn_result_pushed_to_mailbox(self, mailbox, monkeypatch):
-        """spawn_subagent 完成结果投递父会话邮箱（嵌套模式）。"""
-        from unittest.mock import MagicMock
-
-        from neurova import tool_executor as te
-
-        class _FakeSwarm:
-            async def spawn(self, **kwargs):
-                return {"success": True, "agent_id": "sub-1", "reply": "任务完成"}
-
-        monkeypatch.setattr(
-            "neurova.agent.swarm.get_swarm_manager", lambda: _FakeSwarm()
-        )
-        agent = MagicMock()
-        agent.current_session_id = "s-parent"
-        executor = te.ToolExecutor(agent)
-        await executor._execute_spawn_subagent({"task": "写个总结"})
-
-        msgs = mailbox.drain("s-parent")
-        assert msgs and "sub-1" in msgs[0] and "任务完成" in msgs[0]
+# ⚠ 原 `TestSpawnMailboxPush` 已删除：它用 FakeSwarm 返回自造的 {"reply": ...}，
+# 而真 `spawn()` 的信封里报告键名是 report——替身与读侧代码一起错向同一个不存在的键，
+# 两边自洽便恒绿，把「邮箱正文恒为空壳」这个缺陷一路掩盖。回灌行为改由
+# test_subagentCompletionReachesMailboxWithReportBody.py 以真 SwarmManager 跨边界判定。
 
 
 if __name__ == "__main__":
