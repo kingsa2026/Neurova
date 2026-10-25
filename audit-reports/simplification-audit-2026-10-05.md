@@ -10595,3 +10595,26 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **守卫两份，各咬一头**（`tests/unit/ci/test_pipelinePrepareStartsNoUnusedServices.py`）：① stage 脚本不得出现 `sh` 不认的语法（`${PIPESTATUS` / `set -o pipefail` / `[[ ` / `<<<`）；② 受保护子集不得用回数组取码、必须从标记文件读回。反向控制把标记读回改回 `${PIPESTATUS[0]}` ⇒ 两条断言当场红，恢复后 5 passed；连带 parity / 单腿 / runner 余量 / 流水线条数 **52 passed, 1 skipped**。
     - **同一档的第三处顺带登记**：本文件同批的 `TestPrepareMustNotPayForUnusedServices` 咬的是另一半——`e2e-backend-boot` 不声明 `services` 时平台自动起的 `git-clone-yyds` 与 `network-bus` 算进 `Prepare` 的 **60s** 上限（`cnb-13d-1k5pskuuj-004`：54.9s + 1m2s ⇒ `任务超过最大执行时间而被强制关闭：1m0s`，两个 stage 全部 skipped）。显式 `services: []` 后同构建 `Prepare` 从 181s 落到 6s。两条都落在「准备与收尾不属于判据，却能把门禁判红」这同一个形状上。
     - **口径与空号**：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 本笔落笔时最大＝**423** ⇒ 取 **§6-424**（419–423 已被并发会话占号，按「后来者让号」），下批从 **425** 起。
+
+427. **签名密钥的模块级改指缺复原——潜伏面（今天不在子集里，明天进子集就红）** ✅🟢 —— §6-425 是"这条腿怎么红"，本格是"还会怎么红一次"。
+
+    - **实测（同一树、同一本机依赖集）**：
+
+      ```
+      $ pytest test_roleGateIdentitySourceIsStrict.py memory_route_shadowing.py \
+               loginRouteContract.py test_sleep_phase_cycle.py test_api_auth.py
+      6 failed —— 全是 jwt.exceptions.InvalidSignatureError
+      ```
+
+      前四档按清单顺序排在前，`test_api_auth.py` 排在最后；后者**模块级**写
+      `auth.JWT_SECRET_KEY = TEST_SECRET` 且**从不复原**，于是同一条腿后面每一档
+      用生产口签的 token 都验不过。反过来排（把 `test_api_auth.py` 提前）全绿。
+    - **为什么 CI 今天不红**：`test_api_auth.py` **不在** `scripts/ci/protected_tests.txt` 里
+      （全仓 grep 现查 0 条）。这条泄漏是**潜伏**的：谁把它登记进子集、或谁再写一档
+      "模块级改指不复原"，那 6 条立刻在 CI 上现形。
+    - **判据**（`tests/unit/api/test_jwtSigningKeyLeakIsGuarded.py`，5 格）：受保护子集里的档
+      不得在模块体给 `auth.JWT_SECRET_KEY` 赋值而不带复原（复原的任何一种写法都算）；
+      另附反空转三形（只改不复原 ⇒ 红／改＋复原 ⇒ 放行／用例内临时改 ⇒ 放行）。
+    - **红→绿**：往 `test_roleGateIdentitySourceIsStrict.py` 的模块级加一行
+      `auth_mod.JWT_SECRET_KEY = "LEAKED_…"` ⇒ 该格当场红并点名它；删掉即 5 passed。
+    - **口径与空号**：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 现算最大均＝**426** ⇒ 取 **§6-427**（并发会话已取 421–426），下批从 **428** 起。
