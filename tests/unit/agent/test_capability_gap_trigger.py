@@ -314,6 +314,9 @@ class TestCatalogMissSignalWiring:
 
         没有这一向，"零命中记缺口"与"任何检索都记缺口"两种实现读数相同。
         这一向自带一份真有内容的目录（同样走生产入口压缩），不借用上一格留下的状态。
+        **查询与条目逐字同形**：检索是「BM25 + 嵌入余弦」的混合，精简锁里嵌入引擎走零向量
+        兜底时只剩词面那一路（`_tokenize` 把 CJK 整段当一个 token，`天气` 与 `查询天气`
+        对不上）；逐字相同才能在两种装置下都真命中，判据才不会随装没装 tokenizer 变读数。
         """
         from neurova.agent.capability_gap import clearCapabilityGap, detectCapabilityGap
         from neurova.context import tool_search
@@ -330,7 +333,7 @@ class TestCatalogMissSignalWiring:
         ]
         assert tool_search.apply_tool_search_compaction(entries, [], min_catalog=0) is not None
         clearCapabilityGap("s3")
-        result = tool_search.handle_control_tool("tool_search", {"query": "天气"})
+        result = tool_search.handle_control_tool("tool_search", {"query": "查询天气"})
         verdict = detectCapabilityGap()
         assert result["results"], "前提不成立：检索没有命中任何条目"
         assert GAP_CATALOG_MISS not in verdict.kinds, f"命中了却仍记缺口：{verdict.details}"
