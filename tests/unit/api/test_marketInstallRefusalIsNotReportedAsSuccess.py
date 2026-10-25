@@ -94,6 +94,31 @@ class TestRefusalIsNotReportedAsSuccess:
         assert "安全扫描" in r.text or "artifact" in r.text, (
             "拒绝必须点名拒因，不能只给一个状态码")
 
+    def test_noArtifactSourceReturns4xxAndNamesReason(self, app):
+        """姊妹分支：三条取件腿（内置包／已注册远端源／代码侧映射）全不成立的条目。
+
+        与上面两格同一根因——咽喉没取到字节却报成功；差别在拒因类别：安全门拒的是**内容**，
+        这一支拒的是**没有内容可取**，所以走 400（条目缺陷）而不是 500（服务端故障）。
+        """
+        c, skillsDir, importer, agentSkills = app
+        from neurova.skills.market_store import get_market_store
+
+        get_market_store().create({
+            "skill_id": "ghost-src", "name": "Ghost Src", "version": "1.0.0",
+            "description": "d",
+            "download_url": "https://market.invalid-placeholder.example/g.zip",
+        })
+
+        r = c.post(f"{BASE}/skills/ghost-src/install", json={})
+
+        assert r.status_code == 400, (
+            f"零字节来源的安装回了 {r.status_code}：{r.text[:180]}——"
+            "回 200 就是用户看到『已安装』、技能页里却只有一具空壳；"
+            "回 500 又会让人去查一个没坏的服务端")
+        assert "无可取件地址" in r.text, r.text[:200]
+        assert not (agentSkills / "ghost-src").exists()
+        assert not (skillsDir / "ghost-src" / "skill.json").exists(), "拒装后不该留下空壳账本"
+
     def test_cleanPackageStillReturnsSuccessWithCopyInAgentDir(self, app, tmp_path):
         """正向配对格：收紧不能把正常市场安装一起焊死。"""
         c, skillsDir, importer, agentSkills = app

@@ -7,7 +7,7 @@ pydantic>=2.5.0
 # HTTP & WebSocket
 httpx>=0.25.0
 websockets>=12.0
-aiohttp>=3.9.0
+aiohttp>=3.14.5
 curl_cffi>=0.7.0  # 静态抓取共享层（neurova.http_fetch）浏览器 TLS 指纹，过反爬 403
 
 # Database
@@ -42,7 +42,7 @@ jieba>=0.42.1
 python-docx>=1.1.0
 openpyxl>=3.1.2
 python-pptx>=1.0.0
-pypdf>=4.0.0
+pypdf>=6.21.2
 # 文档标准化：扫描 PDF/图片 OCR 与按页渲染（RapidOCR 为首选，惰性加载）
 rapidocr-onnxruntime>=1.3.0
 PyMuPDF>=1.23.0
@@ -109,7 +109,7 @@ mcp>=2.0.0
 # 真实 import（Pillow 截图与图片解析、cryptography 密钥存储、jsonschema 工具层、
 # playwright/curl_cffi 抓取、pyautogui/paramiko/prometheus-client）；测试框架不在
 # 这里声明——pytest 三件由 requirements-ci.txt 单源持有，重复声明会被装进用户机器。
-Pillow>=11.0
+Pillow>=13.0.0
 prometheus-client
 pyautogui>=0.9.54
 playwright>=1.40.0

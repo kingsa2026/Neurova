@@ -238,6 +238,9 @@
         <a-form-item :label="t('marketplace.author')">
           <a-input v-model:value="publishForm.author" />
         </a-form-item>
+        <a-form-item :label="t('market.submitUrl')">
+          <a-input v-model:value="publishForm.download_url" :placeholder="t('market.submitUrlPh')" />
+        </a-form-item>
         <a-form-item :label="t('common.description')">
           <a-textarea v-model:value="publishForm.description" :rows="3" />
         </a-form-item>
@@ -256,6 +259,11 @@ import { message } from 'ant-design-vue'
 import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
+
+/** 失败出口的唯一取法：后端点名的拒因优先。折成一句泛化文案，管理员就看不出自己少填了哪个字段。 */
+function errText(err: any, fallback: string): string {
+  return err?.response?.data?.detail || err?.response?.data?.error || err?.message || fallback
+}
 const authStore = useAuthStore()
 /** 市场上架/编辑/下架仅管理员 */
 const isAdmin = computed(() => authStore.user?.role === 'admin')
@@ -328,8 +336,8 @@ async function fetchBrowse() {
       items.value = data?.items ?? []
       browseTotal.value = data?.total ?? 0
     }
-  } catch {
-    message.error(t('common.error'))
+  } catch (err: any) {
+    message.error(errText(err, t('common.error')))
   } finally {
     loading.value = false
   }
@@ -350,8 +358,8 @@ async function fetchSource(source: string) {
       sourceItems.value = data?.items ?? []
       sourceTotal.value = data?.total ?? 0
     }
-  } catch {
-    message.error(t('common.error'))
+  } catch (err: any) {
+    message.error(errText(err, t('common.error')))
   } finally {
     loading.value = false
   }
@@ -367,8 +375,8 @@ async function syncSources() {
     const totals = data?.totals ?? {}
     message.success(`+${totals.created ?? 0} / ~${totals.updated ?? 0} / -${totals.removed ?? 0}`)
     await fetchMarketplace()
-  } catch {
-    message.error(t('common.error'))
+  } catch (err: any) {
+    message.error(errText(err, t('common.error')))
   } finally {
     syncing.value = false
   }
@@ -411,8 +419,8 @@ async function savePublish() {
     message.success(t('common.success'))
     showPublish.value = false
     await fetchMarketplace()
-  } catch {
-    message.error(t('common.error'))
+  } catch (err: any) {
+    message.error(errText(err, t('common.error')))
   } finally {
     publishing.value = false
   }
@@ -424,8 +432,8 @@ async function removeMarketSkill(item: any) {
     message.success(t('common.success'))
     // 刷新当前页（total 变化）
     await fetchBrowse()
-  } catch {
-    message.error(t('common.error'))
+  } catch (err: any) {
+    message.error(errText(err, t('common.error')))
   }
 }
 
@@ -436,8 +444,8 @@ async function updateItem(item: any) {
     await request.post(`/marketplace/skills/${item.skill_id}/install`, { force: true })
     message.success(t('common.success'))
     await fetchMarketplace()
-  } catch {
-    message.error(t('common.error'))
+  } catch (err: any) {
+    message.error(errText(err, t('common.error')))
   } finally {
     updatingId.value = null
   }
@@ -470,8 +478,8 @@ const fetchMarketplace = async () => {
     latestVersions.value = Object.fromEntries(
       (Array.isArray(market) ? market : []).map((s: any) => [s.skill_id, s.version]),
     )
-  } catch {
-    message.error(t('common.error'))
+  } catch (err: any) {
+    message.error(errText(err, t('common.error')))
   } finally {
     loading.value = false
   }
@@ -483,8 +491,8 @@ const installItem = async (item: any) => {
     await request.post(`/marketplace/skills/${item.skill_id}/install`)
     message.success(t('common.success'))
     item.installed = true
-  } catch {
-    message.error(t('common.error'))
+  } catch (err: any) {
+    message.error(errText(err, t('common.error')))
   } finally {
     installingId.value = null
   }
@@ -495,8 +503,8 @@ const uninstallItem = async (id: string) => {
     await request.delete(`/marketplace/skills/${id}/install`)
     message.success(t('common.success'))
     installedItems.value = installedItems.value.filter(i => i.skill_id !== id)
-  } catch {
-    message.error(t('common.error'))
+  } catch (err: any) {
+    message.error(errText(err, t('common.error')))
   }
 }
 

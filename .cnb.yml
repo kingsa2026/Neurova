@@ -157,11 +157,18 @@ main:
             python -m pip install uv
             uv pip install --system -r requirements-ci.lock
           timeout: 30m
+        # 墙钟按实测定，不按"看起来够"。30m 是照 --no-cov 那套读数定的，而这一步带
+        # `--cov` 跑：插桩只惩罚纯 CPU 的解析/遍历，受保护子集里恰好有一批"扫全仓 AST"
+        # 的判据档，同一格实测 ×2.2～×3.7（`--durations` 逐条对照见台账 §6-4xx）。
+        # 2026-10-24 构建 `cnb-mn9-1k5n4fcl5` 在 85% 撞 30m 被平台强杀，日志里一条
+        # 失败墙都没有——那不是"有测试红了"，是整段跑到点被掐断。
+        # 抬到 90m：整场是串行一条腿，余量按实测最慢批次的 1.6 倍留，且必须宽于
+        # 子集里最高的单档父墙（`pytest.mark.timeout(120)`）足以让诚实超时先说话。
         - name: protected subset with coverage gate (fail_under=60)
           script: |
             TESTS=$(grep -v '^#' scripts/ci/protected_tests.txt | tr '\n' ' ')
             python -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS
-          timeout: 30m
+          timeout: 90m
 
     # ── 5. E2E：后端启动冒烟 ─────────────────────────────────────────────
     - name: e2e-backend-boot

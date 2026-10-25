@@ -38,8 +38,7 @@ PREFIX = "/api/v1/mobile"
 @pytest.fixture()
 def app_and_client():
     MP._pairing_codes.clear()
-    MP._paired_devices.clear()
-    MP._user_devices.clear()
+    MP.resetDeviceRegistry()   # 在册设备是持久权威；库由 conftest 指向本用例的 tmp
     app = FastAPI()
     app.include_router(MP.router, prefix=PREFIX)
     app.dependency_overrides[MP._get_current_user_id] = lambda: "kai"
@@ -47,27 +46,32 @@ def app_and_client():
         yield app, c
     app.dependency_overrides.clear()
     MP._pairing_codes.clear()
-    MP._paired_devices.clear()
-    MP._user_devices.clear()
+    MP.resetDeviceRegistry()
 
 
-def _confirmedDevice(c) -> str:
-    """走真 HTTP 面把配对做完，返回发给设备的那条回连地址。"""
+def _confirmedDevice(c) -> tuple:
+    """走真 HTTP 面把配对做完，回 `(发给设备的回连地址, 一次性接入凭证)`。
+
+    S1b 起凭证不在 URL 里（§4.2：这条地址会进中继的访问日志），它随 header 走。
+    本档审的是**地址可达**，那一半判据不变；凭证通道由 `test_mobilePairingStateClosure.py` 钉。
+    """
     gen = c.post(f"{PREFIX}/pairing/generate",
                  json={"device_name": "probe", "device_type": "mobile"}).json()
     code = gen["code"]
     conf = c.post(f"{PREFIX}/pairing/confirm",
                   json={"code": code, "device_name": "probe", "device_id": "dev-1"})
     assert conf.status_code == 200, conf.text
-    return conf.json()["ws_url"]
+    body = conf.json()
+    return body["ws_url"], body["connect_ticket"]
 
 
-def _connectOutcome(c, url):
+def _connectOutcome(c, url, ticket: str = ""):
     """行为读数：接受=None，路由不认识=WebSocketDisconnect(code=1000，无 reason)。"""
     parts = urlsplit(url)
     target = parts.path + (f"?{parts.query}" if parts.query else "")
+    headers = {"Authorization": f"Bearer {ticket}"} if ticket else {}
     try:
-        with c.websocket_connect(target):
+        with c.websocket_connect(target, headers=headers):
             return None
     except Exception as e:  # noqa: BLE001 - 这里要的就是异常形态
         return getattr(e, "code", "no-code")
@@ -76,17 +80,18 @@ def _connectOutcome(c, url):
 class TestAdvertisedAddressIsReachable:
     def test_the_ws_url_we_hand_out_connects(self, app_and_client):
         _app, c = app_and_client
-        url = _confirmedDevice(c)
-        outcome = _connectOutcome(c, url)
+        url, ticket = _confirmedDevice(c)
+        outcome = _connectOutcome(c, url, ticket)
         assert outcome is None, (
             f"发出去的回连地址连不上（关闭码 {outcome}）：{url}——手机照着它只能失败一次")
 
     def test_calibration_a_wrong_path_is_not_connectable(self, app_and_client):
         """这一格保证上一条不是"怎么连都不抛"：把前缀摘掉必须被拒。"""
         _app, c = app_and_client
-        url = _confirmedDevice(c)
+        url, ticket = _confirmedDevice(c)
         wrong = url.replace(PREFIX, "", 1)
-        assert _connectOutcome(c, wrong) is not None, (
+        # 带着**有效凭证**去连错路径：被拒必须是因为路径不存在，不是因为没带凭证
+        assert _connectOutcome(c, wrong, ticket) is not None, (
             f"错路径 `{urlsplit(wrong).path}` 也连上了——第 1 格是恒真的空守卫")
 
 
@@ -99,7 +104,7 @@ class TestAddressComesFromTheRouteTable:
             wsPath = app.router.url_path_for("mobile_websocket")
         except Exception as e:  # noqa: BLE001
             raise AssertionError(f"挂载后的路由表里没有名为 mobile_websocket 的 WS：{e}") from e
-        advertised = urlsplit(_confirmedDevice(c)).path
+        advertised = urlsplit(_confirmedDevice(c)[0]).path
         assert advertised == wsPath, (
             f"发出去的路径 {advertised} ≠ 路由表里的 {wsPath}——前缀是抄的，不是问的")
 

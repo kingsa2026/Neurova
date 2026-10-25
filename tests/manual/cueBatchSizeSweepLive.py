@@ -38,11 +38,6 @@ from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
 
 isolatedDataRoot()
 
-# 读数里可能有本机编码编不出的字符（⇒ 之类）：控制台/重定向一律按 UTF-8 写，
-# 免得 `print` 自己抛 UnicodeEncodeError、把退出码变成 1（活体档的证据就是退出码 + 读数行）。
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-
 from neurova.context.token_estimator import estimate_tokens as estimate_text_tokens  # noqa: E402
 from neurova.cognitive_layers.memory_layer import association_cue_generation as gen  # noqa: E402
 
