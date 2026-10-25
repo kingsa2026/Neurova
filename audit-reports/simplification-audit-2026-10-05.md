@@ -10536,3 +10536,30 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开（不冒充完成）**：① CI 是**先红后绿**的最后一道实证，本批只做到"本地活体 + 突变探针"，真绿要看下一次构建；② 本批的仓外实跑环境是 Python 3.11 + 手工最小依赖集，缺的包会让个别档 SKIP（如 `test_ci_npc_config_guard` 因缺 `yaml` 收集到 0 条并 skipped）——这类 SKIP 在 CI 里不存在，故"本地全绿"不能直接外推成"CI 全绿"；③ `_SEMANTIC_BACKEND` 与新增的 `_SEMANTIC_ENGINE_TOUCHED` 两个模块级读数的读者仍只有判据档，若将来要给面板读，需收成一处读数面（现按"判据自用"保留，不新造端点）。
     - **口径与空号**：LOC 一律 `git diff --numstat` 现取；在册条数目取 `tests.ast_scan.protectedSubsetEntries()` 的 reader 读数（本批新档入册后 717）。本格取号一律现算：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 本笔落笔时最大＝**422** ⇒ 取 **§6-423**（419–422 已被并发会话占号，按「后来者让号」），下批从 **424** 起。
  (fix(evolution): 进化闸不再为算一次相似度装载嵌入模型（PR #367 的 CI 整条 unit-tests 被掐断的根因）)
+
+424. **门禁在断言之外自己变红——`sh` 不认 `${PIPESTATUS[0]}`，跑完全绿也判红（✅ 本批；`aa955f42`）** ✅🟢 —— 与 §6-422（内存形状、《判据把整棵树举在内存里》）、§6-423（进化闸装载模型）合成同一条腿的三次归因：那两笔管"跑到结束"，本格管"跑完了怎么判"。
+
+    - **现象**：`cnb-8qu-1k5q3m315#003`（受保护子集）尾部
+
+      ```
+      Required test coverage of 60% reached. Total coverage: 88.10%
+      === 7954 passed, 26 skipped, 3 xfailed, 5492 warnings in 2073.78s (0:34:33) ====
+      sh: 5: Bad substitution
+      Finished, code: 2, duration: 34m 45s
+      ```
+
+      **一条失败都没有**（exit 1 才是断言红），stage 却以 **exit 2** 收场。它藏在几十行 coverage 表格下面，最容易被读成"还有测试红"。
+    - **根因**：`e8329a64` 为修「日志被块缓冲吞掉」改成 `... | tee` 后按 `${PIPESTATUS[0]}` 取 pytest 退出码——而 stage 脚本由 **`sh`（dash）** 解释，那是 bash 专有数组展开。本机同形复现（`sh: Bad substitution`，行号亦对得上；`bash` 下正常）。前几轮没撞见，是因为它们都在到达这一行**之前**就死了（137 OOM / 断言红）：**红盖着红**。
+    - **修在产生侧（教义第 1 条）**：判据不许依赖某一家的 shell。把 pytest 的码**就地**写进标记文件，再从文件读回：
+
+      ```sh
+      { python -u -m pytest ... 2>&1; echo $? > "$MARK"; } | tee /tmp/pytest_protected.log
+      RC=$(cat "$MARK" 2>/dev/null || echo 1)
+      exit "$RC"
+      ```
+
+      取到的仍是 pytest 自己的码（`$?` 紧跟在 pytest 之后，`tee` 只转发）；标记缺失按 1 收，pytest 没跑起来也不许静默绿。
+    - **四形态实测（`sh`）**：真红 7→7、全绿 0→0、命令不存在 127→127、标记未落→1。
+    - **守卫两份，各咬一头**（`tests/unit/ci/test_pipelinePrepareStartsNoUnusedServices.py`）：① stage 脚本不得出现 `sh` 不认的语法（`${PIPESTATUS` / `set -o pipefail` / `[[ ` / `<<<`）；② 受保护子集不得用回数组取码、必须从标记文件读回。反向控制把标记读回改回 `${PIPESTATUS[0]}` ⇒ 两条断言当场红，恢复后 5 passed；连带 parity / 单腿 / runner 余量 / 流水线条数 **52 passed, 1 skipped**。
+    - **同一档的第三处顺带登记**：本文件同批的 `TestPrepareMustNotPayForUnusedServices` 咬的是另一半——`e2e-backend-boot` 不声明 `services` 时平台自动起的 `git-clone-yyds` 与 `network-bus` 算进 `Prepare` 的 **60s** 上限（`cnb-13d-1k5pskuuj-004`：54.9s + 1m2s ⇒ `任务超过最大执行时间而被强制关闭：1m0s`，两个 stage 全部 skipped）。显式 `services: []` 后同构建 `Prepare` 从 181s 落到 6s。两条都落在「准备与收尾不属于判据，却能把门禁判红」这同一个形状上。
+    - **口径与空号**：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 本笔落笔时最大＝**423** ⇒ 取 **§6-424**（419–423 已被并发会话占号，按「后来者让号」），下批从 **425** 起。
