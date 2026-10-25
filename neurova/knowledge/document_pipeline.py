@@ -38,6 +38,7 @@ from neurova.core.logger import get_logger
 from neurova.knowledge import parser_shadow
 from neurova.knowledge.ocr_engines import selectOcrEngine
 from neurova.knowledge.splitter import build_entry_chunks
+from neurova.security.skill_scanner import DOC_ASSET_SUFFIXES
 
 logger = get_logger(__name__)
 
@@ -313,9 +314,18 @@ def _chunkDocument(
     return allChildren, allParents
 
 
+#: 三档以上的**文档类**后缀（教义第 6 条：口径只许一处定义，实体在
+#: `skill_scanner.DOC_ASSET_SUFFIXES`）。判据 `test_installGateDocFilesAreReportOnly` 按
+#: AST 认「把 .md/.markdown/.txt 凑进一个集合字面量」的文件为第二份口径，故这里直接引用。
+_DOC_SUFFIXES = DOC_ASSET_SUFFIXES
+
+#: 纯文本但不在文档资产表里的两种：`.rst`/`.log` 没人当资产，却照样该按文本读。
+_TEXT_ONLY_SUFFIXES = frozenset({".rst", ".log"})
+
+
 def _fileTypeFor(ext: str) -> str:
-    if ext in (".txt", ".md", ".markdown", ".rst", ".json", ".yaml", ".yml",
-               ".toml", ".log"):
+    """`extract_attachment_text` 的 `file_type` 入参：`text` 走解码抽取，其余走格式分支。"""
+    if ext in _DOC_SUFFIXES or ext in _TEXT_ONLY_SUFFIXES:
         return "text"
     return "document"
 
