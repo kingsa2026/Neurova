@@ -33,6 +33,7 @@ from .knowledge_facts import (
     _SCHEMA_V23,
     _SCHEMA_V24,
     _SCHEMA_V25,
+    _SCHEMA_V26,
 )
 from .digest_chain import _SCHEMA_V11
 from ..ontology.derivation_ledger import _SCHEMA_V10
@@ -80,6 +81,8 @@ _STEPS: List[tuple] = [
     (24, _SCHEMA_V24),
     # v25：本体按租户分区（已拍板），两表重建为 (tenant_id, id) 复合主键
     (25, _SCHEMA_V25),
+    # v26：MCP 信息源配置表（B 方案）
+    (26, _SCHEMA_V26),
 ]
 
 _registered = False
