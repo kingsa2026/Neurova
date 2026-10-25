@@ -1,0 +1,1320 @@
+# 受保护子集 · 分片 3 / 3
+# 分片不是新清单：条目与顺序逐行取自索引 protected_tests.txt（CI 分片跑，并集必须相等，
+# 判据见 tests/unit/ci/test_protected_subset_shards.py）。为什么分片：单一进程跑整份清单的
+# 峰值 RSS 实测 2.74~2.78 GiB 且仍在爬升，而这条腿 4 核 = 8 GiB 上限，构建
+# cnb-v9p-1k5pkvplt 的 code 137 就是被整段掐断。改清单请改索引后按同一片数重切。
+tests/unit/auth/test_password_hasher.py
+tests/unit/tools/test_mcp_config.py
+tests/unit/tools/test_mcp_config_security.py
+tests/unit/tools/test_mcp_client.py
+tests/unit/tools/test_mcp_router_integration.py
+tests/unit/tools/test_mcp_user_isolation.py
+tests/unit/tools/test_p0_5_dead_paths.py
+# Issue #46 RSI 闭环收口：P0 优秀门控/零增益放行 + P1 统一指纹/合并接线
+tests/unit/evolution/test_skill_gate_and_unified_identity_p0p1.py
+# Issue #46 收口 P1/P2：结构身份聚类 + 合并审批面归属校验 + 死代码真删
+tests/unit/evolution/test_skill_consolidation_structural_and_deadcode_p1p2.py
+# Issue #55 P1：共享线程池复用（禁止热路径每次新建池）
+tests/unit/core/test_shared_thread_pool_reuse.py
+# Issue #55 P1：缓存收敛（删死代码 performance.py + 能力缓存单一事实源）
+tests/unit/core/test_dead_cache_module_removed.py
+# Issue #55 后续：RSI 结果真接线（ctx.result['rsi'] 摘要 + 推送字段名对齐真实输出）
+tests/unit/evolution/test_rsi_result_summary_wiring.py
+
+# Issue #57 P0-1/P0-2 观测底座收口：/metrics 单一事实源 + 连接池/线程池 gauge
+tests/unit/core/test_metrics_pool_observability_p0.py
+
+# Issue #57 P0-3/P1-4/P1-6/P2-7 收口 + ADR 0014「池只管短连接」
+tests/unit/core/test_index_observability_p0_3.py
+tests/unit/core/test_connection_pool_scope_adr0014.py
+# Issue #62 工具层守卫真接线：这五个文件此前未进子集，且把开发机绝对路径
+# 写死进 open()/cwd= → Linux/CI 上 FileNotFoundError（守卫静默不跑）。
+# 修法：路径统一走 tests/repo_paths.py；同时搬进子集，让"绿"等于"真跑过"。
+# 常驻不变量见 tests/unit/test_dev_path_and_runtime_dep_guards.py。
+tests/unit/tools/test_tool_layer_breakpoints_zoom_out.py
+# Issue #65 上下文池读路径/回收契约/单例重置：分区索引等价性 + Unicode 快路径
+# 安全网 + 常驻上限无损回收 + ExecutionEngine 三层重置 + 压测守卫补强
+tests/unit/context/test_context_pool_query_index.py
+tests/unit/context/test_context_pool_retention_contract.py
+
+# 反思反哺闭环审计 2026-09-19：链B 教训注入的生产构造点接线 + 调控门纳入治理配置
+# （原有用例在测试内手工传 metacog_agent_id / 手工设 env，绿灯覆盖了契约却漏掉布线）
+tests/unit/context/test_metacog_production_wiring.py
+tests/unit/context/test_metacog_lessons_injection.py
+tests/unit/cognitive/test_regulation_gate.py
+tests/unit/memory/test_cse_retrieve_touch.py
+tests/unit/context/test_experience_injection_priority.py
+# 013 遗传臂真实成功率 / 014 NL 合成置信闸咬合
+tests/unit/evolution/test_genetic_seed_evidence.py
+tests/unit/evolution/test_nl_confidence_gate.py
+tests/unit/memory/test_crystallization_gate_governance.py
+tests/unit/evolution/test_skill_auto_retire_governance.py
+# 015 封装去重键收敛（命中判定与建键共用同一身份；批准态不得被下一轮观察撤销；skill_ 拼接单点）
+tests/unit/evolution/test_skill_encapsulation_identity.py
+# 016 改进生效与跨重启（溢出不静默、写了没人读的键删净、改进史与批准态跨重启存活、归因按真实 agent）
+tests/unit/evolution/test_improvement_effective_and_durable.py
+
+# 原生工具翻页契约：file_search/file_list 的截断可续拉（offset/next_offset）
+# —— 不挂 Desktop Commander，把它唯一强于原生的"分页深搜"补进原生工具面
+tests/unit/tools/test_builtin_tools_expansion.py
+
+# 文档导出子系统（write_pdf）工单 001-007：中间树/两路解析/PDF 出口/工具契约/产物 kind 跨端一致
+tests/unit/document/test_document_sources.py
+tests/unit/document/test_document_pdf.py
+tests/unit/tools/test_write_pdf.py
+
+# Issue #75 可观测/可信链路闭环批次：段可见性（装配齐全即无缺段，尚未建成的段另立名册）
+# + 真管线活动归属（来路由调用方自陈，不再 92/92 全是咽喉的 admit）
+tests/unit/knowledge/test_segment_visibility_honesty.py
+# Issue #75：断言校验闭环（unverified → verified/failed 回写 + 三态读数进巡检）
+tests/unit/knowledge/test_assertion_verification_loop.py
+# Issue #75：闭环长在唯一咽喉上（六条真实写入链各自写完即裁决回写，回执带本笔读数；
+# 推导的来路自陈 derive 而不是落进兜底「直写」）
+tests/unit/knowledge/test_write_boundary_closes_verification.py
+# Issue #75：有效期窗口真落库且真咬合（validFrom/validUntil 断点）
+tests/unit/knowledge/test_validity_window_segment.py
+# Issue #75：底座两条读面的 agent 域装配（跨 agent 锚点读口）
+tests/unit/knowledge/test_read_surface_agent_scope.py
+# Issue #75：记忆库写入围栏 + 默认路径不再随 CWD 散落（仓库根 71,831 行的来路）
+tests/unit/memory/test_memory_storage_fence.py
+# 租约过期收敛的运行期驱动（2026-10-08 长任务闭环审计 D 批）：heartbeat/lease 写了必须
+#   有人读——lifespan 起停成对、间隔由租约派生、只咬过期 running，新鲜租约与 parked 不得误杀
+tests/unit/core/test_agentRunStaleReconcileWiring.py
+# Issue #80 续：ToolOrchestrator 接线（工具面 orchestrate_tools + 幻影工具名收口
+#   + 步进成败单源 + 依赖分层/并发上限 + 自嵌套拒绝）
+tests/unit/tools/test_tool_orchestrator_wiring.py
+tests/unit/context/test_experience_prompt_face_three_state.py
+
+# Issue #72 写面与读面收口：抽取产物落被读的底座（不再只有 JSON 投影）+ 本体硬拒真咬合
+tests/unit/knowledge/test_extraction_lands_in_read_graph.py
+# Issue #72：记忆侧声明的取代真的生效（旧证据让位），找不到目标如实申报
+tests/unit/memory_ingest/test_imported_supersede_replaces_old.py
+tests/unit/memory_ingest/test_import_memory_owner.py
+# 上下文三链路修复批（Issue #90）B1 尺子：token 估算单一事实源 + 判据侧不得低估
+#   （P0-1 根因：BALANCED 对英文/JSON/无空格长串低估 20 倍量级 → 折叠永不触发）
+tests/unit/context/test_token_estimator_calibration.py
+tests/unit/context/test_token_estimation_inconsistency.py
+# 上下文三链路修复批（Issue #90）B2 隔离写入口：归档即带作用域（群聊不泄入单聊）
+#   + 折叠摘要缓存按真作用域分槽（P1-1 跨会话串台）+ D2 缓存槽上限收口
+tests/unit/context/test_pool_scope_wiring.py
+# 上下文三链路修复批（Issue #90）B3 装配收口：视图截断只产副本（归档实体永不
+#   就地改写/hash 不失配）+ 摘要沿用旧摘要不算"本轮成功"（不谎报覆盖）
+tests/unit/context/test_draw_never_mutates_archive.py
+tests/unit/context/test_summary_failure_not_reported_success.py
+# 上下文三链路修复批（Issue #90）T-03b：每轮会话身份接到装配入口
+#   （P2 两个单聊会话共用折叠摘要槽 / 池归属与台账 session 列为 None / 预算读数取别会话快照）
+tests/unit/context/test_turn_session_identity.py
+
+# Issue #80 第三轮补做（9 条尾巴）：逐文件单跑全绿后登记
+tests/unit/tools/test_tool_router_success_verdict.py
+tests/unit/core/test_chain_integrity_observability.py
+
+# Issue #75 残余项 A：历史污染清空（正证据判据 + 先归档再删 + 幂等 + 工作区目标拒删）
+tests/unit/memory/test_memory_pollution_purge.py
+# Issue #75 残余项 B：默认落点收成单一事实源（数据根），CWD 不再决定库在哪
+tests/unit/core/test_data_root_single_source.py
+# Issue #75 残余项：CWD 相对与第二份数据根的落点必须为零（含 scripts/）
+tests/unit/core/test_data_root_no_cwd_landing.py
+# Issue #75 残余项 C：入索引段报出**归属**（delegated + owner），不再挂在"还没做"
+tests/unit/knowledge/test_index_segment_ownership.py
+# Issue #75 残余项 D：存量断言归正入口（补链位后必须转 verified；无依据的行保持 unverified）
+tests/unit/knowledge/test_assertion_regrade_entry.py
+# Issue #75 残余项 E：仓库里不许再有被跟踪的运行期残留（sessions/ / trajectories/）
+tests/unit/memory/test_tracked_run_residue_guard.py
+
+# Issue #81 F-04/F-18：导入会话属主（归属落盘后只读）+ 两条导入路同一幂等域
+#   + 导入咽喉（唯一写入口）的既有回归（逐文件单跑确定全绿，已核）
+tests/unit/memory_ingest/test_import_interop.py
+tests/unit/memory_ingest/test_import_sessions.py
+tests/unit/memory_ingest/test_cli.py
+tests/unit/memory_ingest/test_intake.py
+
+# Issue #72 第二轮：投影与权威的双向差集可读、可修、只动本域（含端点接线）
+tests/unit/knowledge/test_projection_derived_from_authority.py
+# Issue #72 第二轮：存量补抽的待办判据问权威（投影有 id 不算抽过）
+tests/unit/knowledge/test_backfill_heals_authority_less_entries.py
+
+# 上下文持久层批（Issue #90）B4 工单 001：归档跨重启为真（A1）
+#   （根因 P1-3：写穿点挂在生产不可达的驱逐路径上 → 台账恒空）
+tests/unit/context/test_context_persistence_restart.py
+
+# 上下文持久层批（Issue #90）B4 工单 002：context_ledger 版本域 + v1 迁移（A6）
+#   （根因：库只有 CREATE TABLE IF NOT EXISTS、无 user_version，schema 无纪律；
+#     U1 甲案的读侧兜底：列优先 + 旧行解析 metadata，两路同源 memory_scope）
+tests/unit/context/test_context_ledger_migration.py
+
+# 上下文持久层批（Issue #90）B4 工单 003：写侧批量提交（A2）
+#   （根因：record() 每行一次 connect+commit+close，24 条/轮实测 214–318 ms；
+#     批内一次事务 0.78–0.91 ms/轮；事务边界 = 一次归档调用，失败整批回滚）
+tests/unit/context/test_ledger_write_batching.py
+# 上下文持久层批（Issue #90）B4 工单 002：context_ledger 版本域 + v1 迁移（A6）
+#   （根因：库只有 CREATE TABLE IF NOT EXISTS、无 user_version，schema 无纪律；
+#     U1 甲案的读侧兜底：列优先 + 旧行解析 metadata，两路同源 memory_scope）
+
+# 上下文持久层批（Issue #90）B4 工单 003：写侧批量提交（A2）
+#   （根因：record() 每行一次 connect+commit+close，24 条/轮实测 214–318 ms；
+#     批内一次事务 0.78–0.91 ms/轮；事务边界 = 一次归档调用，失败整批回滚）
+
+# 上下文持久层批（Issue #90）B4 工单 005：启动加载与热集回载（A9）
+#   （根因：池构造完全不读台账，/metrics 看不到持久规模，D10 的策略"没人实现"；
+#     启动只登记一次 COUNT(*)（常数次查询、零预载），rehydrate 显式按需，
+#     draw/query 零查库由断言锁住，登记值随写入/GC 增量同步并进 gauge）
+tests/unit/context/test_pool_startup_load.py
+
+# 上下文持久层批（Issue #90）B4 工单 007：GC 与 FTS 对齐（A5）
+#   （根因：_LEDGER_GC_EVERY 只被 _archive_evicted 递增，而它在生产构造面
+#     resident_limit=None / ttl_seconds=0 下永不执行 → 保留策略一次也不触发、
+#     库单调增长；改后触发点落在归档提交，FTS 对齐改分批删除）
+tests/unit/context/test_ledger_gc_retention.py
+
+# 上下文持久层批（Issue #90）B4 工单 008：召回作用域闸口（A8）
+#   （根因：持久层这条读路径把可见性交给 session 精确等值——单聊池恒空、
+#     无会话池全放行；改后过 memory_scope.filter_by_scope，与视图路径同源，
+#     闸口落在两条源合并之后）
+tests/unit/context/test_ledger_recall_scope_gate.py
+
+# 上下文持久层批（Issue #90）B4 工单 004：读侧预筛与转义（A3/A4）
+#   （根因：LIKE 兜底直拼用户输入 `f"%{query}%"`——`%`/`_` 是通配符，把用户输入
+#    变成通配模式；且长度 <3 的查询强上 MATCH 得假阴性（漏召回）。
+#    转义/短语包裹/长度分流收口到 neurova/core/sql_like.py 一处，候选集两步法有界）
+tests/unit/context/test_ledger_read_prefilter.py
+
+# 上下文持久层批（Issue #90）B4 工单 006：v2 迁移 FTS 重建为 trigram（A7/A6）
+#   （根因：unicode61 对中文等于无索引，实测中文短语命中 0；只改 tokenize 参数
+#     不改已有索引 → 必须重建。影子表 + 分批短事务，禁一次性长事务/delete-all）
+tests/unit/context/test_context_ledger_fts_migration.py
+# 上下文三链路批（Issue #90）B3 剩余 P2-8 / D4 甲案：pool 分支瞬态注入收回信封。
+#   （根因：记忆/经验/结晶/待探索问题/池召回/工具记忆/情感七类动态检索文本以
+#     `role="system"` 直注——既不受任何 token 预算管辖（窗口预算只覆盖对话消息），
+#     又落在免疫句覆盖范围之外（system 角色权重最高且无语义隔离声明）。
+#     改为全部收进末条 user 信封并接入 compress_envelope；抽屉与信封共用同一份额度，
+#     避免"召回取回来了、信封又把它丢掉"的静默消失。）
+tests/unit/context/test_pool_branch_envelope_transient.py
+
+# Issue #75 收口：运行期落点必须经数据根/仓库根推导，不得按进程 CWD 拼。
+#   根因：`core/data_root.py` 只收了 `data/` 那一族；`storage/`（file_utils、
+#   files_api）、`trajectories/`、`.jwt_secret`、`sessions/`、`config/media`、
+#   `logs/executions`、`neurflow.db`、`tool_execution.jsonl`、模型目录等仍是裸
+#   相对字面量，实测在任意 CWD 下就地造出文件（比 `data/` 那族更坏——它们连
+#   仓库根都不锚）。本批按其"是运行期产物还是随代码走的资产"分流：前者走
+#   `get_data_root()`，后者走 `repoRoot()`/`repoAsset()`；旧落点在数据根空缺时
+#   由 `adoptLegacyLanding()` 收养一次，既有部署不失联。
+#   守卫锁三条：静态零 CWD 相对落点 + 活体真构造点 CWD 零新增 + 收养语义。
+tests/unit/core/test_runtime_landing_root.py
+
+# 上下文三链路批（Issue #90）B5 规模：单趟打分 / 候选集上界 / 召回地板自适应 /
+#   折叠计量单源（PR #138）。本批的登记此前**漏了**——文件在仓、单跑全绿、
+#   CI 全绿，而受保护子集对它们命中 0，等于三条判据从未在 CI 上跑过。
+#   登记纪律由 tests/unit/context/test_b5_scale_batch_registration.py 反锁
+#   （Issue #109 是反向形态：清单指向不存在的文件；两者都是"绿 ≠ 跑过"）。
+#   （根因 P1-4：draw 对同一 need 与同一归档文本反复语义编码——1000 条常驻时
+#    单轮 encode 6988 次，need 占 1000 次；且候选集无上界，成本随池规模线性。
+#     改后：ScoringContext 单趟编码 + 零编码词法粗筛收敛候选，encode 1001 次）
+tests/unit/context/test_drawer_scale_scoring.py
+#   （根因 D3：召回额度地板是与模型窗口无关的常数 1000——8k 上过宽、128k 上过窄；
+#    且"剩余额度"公式在 build_context 里写了两遍，各减各的项。
+#     改后：地板随窗口预算单调不减 + 绝对下限，公式单源 `_retrievalBudget`）
+tests/unit/context/test_recall_budget_floor.py
+#   （根因（台账 §2 补充发现）：compact_window 单次调用内对同一批文本重复计量
+#    约 2.4× —— split_window_by_budget 每轮重算整窗又逐条单算，递进折叠循环
+#    每轮再各来一遍；尺子换 o200k 后单次折叠约 20ms→75ms，长会话成倍放大。
+#     改后：WindowTokenMeter 单源记忆体，整窗量由逐条求和得出）
+tests/unit/context/test_window_token_metering.py
+#   上述登记纪律的守卫本身：新判据文件必须真进清单（漏登记即红）。
+tests/unit/context/test_b5_scale_batch_registration.py
+
+# 上下文三链路批（Issue #90）B6-1：上下文域死线三态台账与判据同源守卫。
+#   （根因：审计 §10 对 B6 要求「每个孤儿需单独论证可达性」，而本仓实测已有
+#    两面反例说明「按 grep 名字计数」不可用——池方法 dedup 零调用，但池实际走
+#    context/dedup.py 的**另一接收者**的同名方法（按名字判会误删真实现）；
+#    clear 是通用名（全仓 300+ 命中，完全不具判别力）。
+#    故判据拆成两轴：判据类由 scripts/ci/context_deadline_ledger.py 的
+#    classify() 机器算（absent / no_consumer / self_loop / consumed 四值），
+#    台账照抄且不一致即报红；处置是人对该条的决定（有限枚举）。
+#    反向控制：draw / archiveBatch 已知生产可达，必须报 consumed 且永远
+#    「待处置」——它们被误报或赋处置即说明判据整体失效。）
+tests/unit/context/test_context_deadline_ledger.py
+
+# 上下文三链路批（Issue #90）B6-3 / B6-4 / B6-5：断链判据。
+#   （根因：端点与工作流节点挂在**从不存在的对象/符号**上——`/context/build`
+#    每请求新建池（写入即丢）；neurflow 的 `get_context_pool` 符号不存在且被
+#    `except ImportError` 吞成 DEBUG；视图重建只留 role+content，工具寻址字段
+#    被剥后 `_tool_placeholder` 的硬地址指针与 `repair_tool_turns` 的配对判据
+#    同时失效。三条判据都钉「真值可从生产对象取回」，不是钉实现形状。
+#    B6-2 的 `/token-budget` 判据已随该面下架退役，见下一条。）
+tests/unit/context/test_pool_identity_resolution.py
+tests/unit/neurflow/test_context_node_pool_resolution.py
+tests/unit/context/test_view_tool_addressing.py
+
+# Issue #90 B6-10（批次 E）：门面层退场裁定。
+#   （根因：`context/context_facade.py` 是编排器的**第二份装配路径**——零非测试
+#    消费者，工厂 `get_context_facade()` 零消费，且它 `await` 一个**同步**方法
+#    （`orchestrator.build_system_prompt` 是 `def`）→ 实测 `object str can't be
+#    used in 'await' expression` 被 `except` 吞成恒空串返回，无人察觉。
+#    裁定「删门面、保工具方法」：那是**两级**却**结局不同**——门面自诞生即坏，
+#    工具方法跑得通并有 8 个测试文件锁着它的契约腿。台账 `build_system_prompt`
+#    行判据类如实由 self_loop 转 no_consumer（门面是它唯一的 call 点），
+#    处置保持「待处置」——不给零消费编造可达性。）
+tests/unit/context/test_context_facade_retirement.py
+
+# Issue #90 探针 P10：摘要器降级的**显式位**必须在生产观测面上可读。
+#   （先核 B6-8 的读数面：`get_context_health()["summarizer"]` 已有
+#    `enabled/attempts/last_error`，不需新造第二份读数。缺的是它在 `/metrics`
+#    上丢了——导出器把布尔与字符串合成一条过滤条件，副作用是**所有降级位**在
+#    生产读数上消失：健康 agent 与装配失败的 agent 长得一样（都只有 attempts=1），
+#    P2-5 的"能力被关掉与这轮本来不需要长得一样"换了一层皮。
+#    根因处收窄条件（只排除非数值），不给 summarizer 单开 gauge。）
+tests/unit/context/test_summarizer_degradation_bit_observable.py
+
+# Issue #90 B6-10（批次 F）：池注册表的 session 分区读路径退场。
+#   （根因：注册表的多池机制（`get_or_create` 按 (user,agent,session) 造池 +
+#    `query_agent` 跨 session 分区调取）是**被 T-02 取代的第二套隔离机制**——
+#    真设计是单池 + `chat_scope` 作用域标签。实测生产只登记一个池（键 session 段
+#    恒空），`query_agent` 按 '' 枚举、又用池每轮刷新的 session_id 取数 → 无因果，
+#    池里有内容也一条取不回来，且**返回空列表而不是报错**。
+#    `adopt` / `get_pool`（B6-3/B6-4 已接线）保留为单池读侧入口。
+#    两条裸名撞名（get_or_create / list_sessions）的终局走拥有者级断言。）
+tests/unit/context/test_pool_registry_session_partition_retirement.py
+
+# 上下文三链路批（Issue #90）B6-6 / B6-7 / B6-8 / B6-9：四类同形态断链。
+#   （B6-6 根因：`UnifiedVectorStore` **没有批量入口** —— `semantic_drawer` 的
+#    `hasattr(store, "encode_batch")` 恒假，"批量打分"在 store 层从未接上；
+#    且 tfidf 一律不进内容寻址缓存，同批文本跨轮各重编码 301 次。
+#    改后：批量入口是唯一实现（`encode` 由它派生，不是第二份），tfidf 稳定形态
+#    进缓存，缓存文件按指纹分命名空间共存。
+#    B6-7 根因：读侧 freshness 打分读 `updated_at`（零写入方的第二份时刻定义，
+#    召回归档时它是"本次构造时刻"）→ 越老的归档越"新鲜"。
+#    改后：归档时刻（`created_at`）是读侧排序与打分的唯一时间事实源，第二份删净。
+#    B6-8 根因：台账/摘要器装配失败只留一行 warning，能力永久关闭、读数面上看不见。
+#    改后：`get_context_health()` 给出 attempts/enabled/last_error，且每轮重试恢复。
+#    B6-9 根因：抽屉额度被编排器每轮就地改写构造期字段（同一字段两种含义）。
+#    改后：每轮额度经入参透传，`max_tokens` 恒为构造期默认；硬顶口径单源。）
+tests/unit/context/test_vector_batch_encoding.py
+tests/unit/context/test_archive_moment_scoring.py
+tests/unit/context/test_context_degradation_recovery.py
+tests/unit/context/test_view_budget_single_form.py
+
+# 上下文三链路批（Issue #90）B6-10：死线处置的终局判据。
+#   （根因：B6-1 立了「判据类（机器算）」与「处置（人填）」两条轴，但只钉住了
+#    第一轴——台账写「已删除」而符号还在代码里，没有任何守卫察觉，处置于是退化
+#    成第二份自述。本守卫把处置轴也钉成机器可验：「已删除 / 收口第二份」⇒ 实测
+#    判据类必须为 absent；「已接线」⇒ consumed。另有反向控制（仍在仓的符号被标成
+#    已删除即红）与已退场类的活跃层文档悬空引用归零判定。）
+tests/unit/context/test_context_deadline_disposal.py
+
+# 上下文三链路批（Issue #90）B6-10 批次 B：折叠零丢失判据必须真的被校验。
+#   （根因：审计 §5 点名 `_last_archived_window_hashes` 是"折叠前必须已归档"这条
+#    零丢失判据的**唯一物证**却无人校验。实测它不只是没人读——**判据本身错域**：
+#    归档侧 `role=tool` 走 TOOL_CALL 源，折叠侧与防召回集合一律按 CONVERSATION
+#    取指纹，于是工具结果这一支必然报假缺失（所以它一直没被读），而防召回对工具
+#    归档恒不命中、折叠白做。
+#    改后：指纹域收口 `_windowChunkIdentity` 单源；判据消费面落
+#    `neurova/context/fold_integrity.py`（折叠发生即对账两条互不替代的事实：
+#    时序 = 指纹在归档集合内、落地 = 指纹在池内），读数并进
+#    `get_context_health()["fold_integrity"]`；缺条点名，不静默。）
+tests/unit/context/test_fold_archive_integrity.py
+
+# 上下文域（Issue #90）B6-10 批次 C：压缩面与去重面各自只允许一份实现。
+#   根因：审计 §5 登记的 `ContextCompressor` / `SmartContextCompressor` /
+#   池的 `compress_context` / 池的 `dedup` 四条死线此前全为「待处置」——
+#   压缩面有两份平行实现（`context/compressor.py` 与 `context_compressor.py`），
+#   而后者的真实签名与唯一调用形状双不符（TypeError 被 except 吞掉）即
+#   "装配即弃"，压缩在生产从未生效；池上的 `compress_context` / `dedup`
+#   两个出口零消费，且 `dedup` 是「同名撞另一个接收者」的典型
+#   （池的真实去重走 `self._deduplicator` = `context/dedup.py`）。
+#   改后：两个模块整模块退役（压缩真通路 = orchestrator 的信封+历史确定性
+#   淘汰，判据在 test_envelope.py）；池上两个出口删净，去重真面 =
+#   `add_context` 的 `_by_hash` 去重。契约搬到真面、断言未删——
+#   本批另有两条裸名撞名符号（`compress_context` / `dedup`），裸名判据
+#   （`scripts/ci/context_deadline_ledger.py`）读的是残留站点，给不出终局，
+#   故本守卫补**拥有者级**判据：直接对 `ContextPool` 断言那两个出口不存在。
+tests/unit/context/test_context_compression_single_face.py
+
+# 上下文域（Issue #90）B6-10 批次 D：TTL 回收的真调用点 + 会话身份单一写入方。
+#   根因（两条同族：定义了、生产到不了）：
+#   ① `ContextPool.cleanup_expired` 零生产调用点 —— 读面（draw / query /
+#      get_contexts）只做惰性过滤，过期条目永远占着常驻列表、
+#      `archived_by_reason["ttl"]` 恒 0，"TTL 生效"在内存规模上是空账；
+#   ② `ContextOrchestrator.set_session_id` 零生产调用点 —— 会话身份有
+#      两个写入方（构造期入参 + build_context 每轮刷新），第二写入方
+#      就是第二份事实源。
+#   改后：① 回收挂在**写入咽喉** `add_context`（所有写入方含旁路自动继承，
+#      不在读面加判空），代价由 `_ttl_floor` 的 O(1) 前置判定兜住，
+#      生产档 `ttl_seconds=0` 首行即返回；回收不等于丢失（仍可 recall_evicted）。
+#      ② setter 删净，身份的可变写入点收口为 build_context 每轮刷新一处。
+#   契约搬到真面、断言未删（逐条见提交说明与台账脚本/ci/contextDeadlines.txt）。
+tests/unit/context/test_ttl_reclaim_and_session_identity.py
+
+# 上下文域（Issue #90 工单）T-03b：每轮会话身份接入装配入口（先红后绿）。
+#   根因不是"漏传一个参数"，是装配入口**造了第二条身份通道却全空**：
+#   构造期不传 session_id、`build_context` 无该形参、`chat_room_id` 只在协作轮
+#   非空 → 折叠摘要缓存键恒退化为 `direct`，两个普通单聊会话共用一条摘要
+#   （探针 P2 形状一：单聊两会话串台=True，两个房间串台=False）。
+#   而本轮的会话身份一直存在：ChatPipeline 每轮把它写进 `core.turn_context`，
+#   读法就是 `agent.current_session_id`（后链的幂等键与落盘 session 已在用）。
+#   改后：① 身份回落链收口 `_resolveTurnSessionId()` 单源（房间 → 构造期显式
+#   覆盖 → 每轮身份单源），**不给** build_context 加 session_id 形参（那会与
+#   单源并存成两份定义，教义第 6 条）；② 第二命中点同批——`pool.session_id`
+#   随同一份判据，条目 metadata / query 的本会话优先 / 持久台账 session 列三处
+#   同时恢复；③ 落到 direct 必须可见（get_context_health()["turn_identity"] 有
+#   计数与 last_key，首次 warning 点名）；④ 放大视角：`get_token_budget()` 的
+#   会话快照也改读同一份回落链（原先读构造期初值，生产恒 None → 串会话读数）。
+# ⚠ 本清单口径"逐文件单跑确定全绿"在这一条上**当前不成立**（HEAD 实测 1 failed / 7 passed，
+#   干净数据根单跑同样红）：红的 `test_two_direct_sessions_do_not_share_fold_summary` 断言
+#   "单聊 B 不得见 A 的内容"，而 `orchestrator.py:1487-1489` 把"单聊仍跨普通会话召回"写成
+#   设计——判据与口径互相矛盾，已按 §6-40（台账）登记待裁。在它裁定前，A/B 请把这一条
+#   当**基线既有失败**看待，不要记成后批的回归。
+tests/unit/context/test_turn_identity_wiring.py
+
+# Issue #81 复核：设计 §6 三条硬规则点名的**包层守卫**漏登记（14 文件 / 197 用例）。
+#   根因不是"少写一行"：受保护子集的语义是"这些回归有人守"，但清单只靠人记得补——
+#   文件在仓、逐文件单跑全绿、CI 全绿，而子集对它们命中 0，判据从未在 CI 上跑过。
+#   同批 4 个运行时锁文件（test_cli / test_intake / test_import_interop /
+#   test_import_sessions）登记了，故是漏做而非有意排除（对照 Issue #109 的反向形态：
+#   清单指向不存在的文件 → pytest 退 4）。逐文件单跑确认全绿后登记（275 passed）。
+#   登记纪律由 tests/unit/memory_ingest/test_protected_registration.py 反锁：
+#   本目录下每个测试文件都必须进清单，新加文件自动落在同一约束下。
+#   ① 整包校验器：取值域只在 validate 判一次，越界整包拒绝（§6 硬规则 1）
+tests/unit/memory_ingest/test_bundle_validate.py
+#   ② 写入器：时间戳定不出即申报+跳过，绝不造 now（§6 硬规则 2 的唯一守卫处）
+tests/unit/memory_ingest/test_bundle_writer.py
+#   ③ 媒体引用强制 media/<digest>.<ext>，撤销只看结构化登记（§6 硬规则 3）
+tests/unit/memory_ingest/test_bundle_media.py
+#   ④ 回合消息构造与记录形状（§3 契约的消费面）
+tests/unit/memory_ingest/test_bundle_turns.py
+tests/unit/memory_ingest/test_bundle_records.py
+#   ⑤ 来源识别：未识别不是失败，必须回结构摘要（§5）
+tests/unit/memory_ingest/test_probe.py
+#   ⑥ 记忆导入咽喉（与 test_intake 同一写入口的记忆面）
+tests/unit/memory_ingest/test_import_memories.py
+#   ⑦ 七族转换器：每族合成 fixture 正例 + "像但不是"负例（§7.2 常驻判据）
+tests/unit/memory_ingest/test_converter_blocks.py
+tests/unit/memory_ingest/test_converter_chat_jsonl.py
+tests/unit/memory_ingest/test_converter_codex.py
+tests/unit/memory_ingest/test_converter_hermes.py
+tests/unit/memory_ingest/test_converter_openclaw.py
+tests/unit/memory_ingest/test_converter_opencode.py
+tests/unit/memory_ingest/test_converter_qwenpaw.py
+#   上述登记纪律的守卫本身：本目录新判据文件漏登记即红。
+tests/unit/memory_ingest/test_protected_registration.py
+
+# Issue #81 复核批：pytest 收集卫生守卫（此前从未登记 —— 它红着也没人知道）。
+#   判据按**活配置**（pytestconfig.getini）判定"名字像用例却收不到"，
+#   不抄一份模式（抄一份就是第二份事实源：配置改了守卫判的还是旧口径，
+#   本文件旧版正是这么坏的 —— 把 test[A-Z]* 当成"收不到驼峰"，误报 15 例）。
+#   三条：活配置口径逐条点名 / 守卫自身用例名不依赖驼峰模式 /
+#   匹配语义由真收集反证（探针带本仓 -c pyproject.toml）。
+tests/unit/core/test_pytest_collection_hygiene.py
+
+# 上下文三链路批（Issue #90）T-10c 前置裁定：microcompact 的触发轴与保留窗与窗口
+#   折叠各自声明（裁掉共线），并整合「未触发折叠但工具输出已撑满窗口」那一段。
+#   （根因：触发曾看整窗 token、保留曾看条数"最近 3 条"，而 3 恰是折叠留下的
+#    工具行数 —— 真序列先折叠后 microcompact，两处稳态互相抵消，占位指针恒不触发。
+#    现两根轴都按工具结果载荷 token 声明：触发=`min(8000, 窗口实占半数)` 再抬到
+#    收益门槛，保留=载荷的一半（至少 1 条）。触发事实记进
+#    `get_context_health()["microcompact"]`，供下游按读数判断而非解析日志。）
+tests/unit/context/test_microcompact_threshold_decoupling.py
+
+# 上下文三链路批（Issue #90）T-10c 收口：工具轮载荷必须进窗口预算判据。
+#   （根因：窗口计量只读 `content` 字符串，而 T-10b 之后 `assistant.tool_calls`
+#    会进视图真发给模型，`arguments` 原文串常是调用参数本体 —— 却不在任何窗口
+#    判据里。同一批消息因此有两个计量结果：判据读到 85 token、展示侧读到 10321
+#    （270× 低估），折叠/清占位/召回额度全按假读数判，工单 §11.4 第 2 条
+#    「含工具轮的窗口 ≤ 预算」在这形状上恒真。
+#    现收口为单源派生 `window_compactor.messagePayloadTokens()`：文本内容 /
+#    多模态分段 / `tool_calls` 原文串，判据侧与展示侧共用。）
+tests/unit/context/test_tool_payload_budget_accounting.py
+
+# 上下文三链路批（Issue #90）T-10d：工具轮视图的可观测计数 + 配对不匹配告警 +
+#   灰度期 provider 400 归零判据 + 回退开关等式（工单 §11.5 / §11.7 第 3 条）。
+#   （根因：这三件事此前**完全不可见**——视图内 `assistant.tool_calls` 数 / `tool`
+#    行数 / 旧数据降级次数没有任何读数，`declared_ids` 与实际 `tool_call_id`
+#    不匹配只能靠日志猜，而"灰度期 provider 400 必须归零"这条唯一硬失败信号连
+#    计数都没有，判据因此无从成立。
+#    另附 §21.4.1 的断点接线：`get_context_health()` 在生产代码里零读者，
+#    本批接到既有观测面 `/metrics`（不新开端点）。
+#    回退开关 `NEUROVA_TOOL_TURN_VIEW=0` 关闭时的视图形状等式写成测试而非注释。）
+tests/unit/context/test_tool_turn_observability_t10d.py
+
+# Issue #189 启动器一致性批：
+#   ① 端口判据收口到 neurova/core/port_guard.py（唯一实现），start_server.py 的
+#      预检必须在 create_app 之前 —— 判据是 AST 行号（结构性），不用墙钟上界；
+#   ② 声明进检索链的适配器必须真满足 Retriever 协议（缺 get_quality_score 会让
+#      add_retriever 拒收、被 except 降级成 warning，人工标注检索源静默缺席）；
+#   ③ NL 合成工具名必须携带身份（名字侧根因，消除 ai_tool/general_tool 同名覆盖）；
+#   ④ EQP 探针发查询前按库的 schema 过闸（不适用≠没走索引，两类读数分开）。
+tests/unit/core/test_port_guard_preflight.py
+tests/unit/evolution/test_synth_tool_name_carries_identity.py
+tests/unit/core/test_index_probe_schema_applicability.py
+tests/unit/evolution/test_synthesis_alphabet_registered.py
+
+# T-05 只读数据集查询原语（Issue #197）：句柄域 / 只读连接 / SQL 白名单 / 有界
+#   四道防线与真读链路（真 .db 字节经真 get_attachment_bytes）。
+tests/unit/tools/test_query_database.py
+
+# T-04 同契约（Issue #197）：`general` 分类无已注册候选 ⇒ 空序列，
+#   不再落兜底幻名 general_tool（该名全仓注册处为 0）。
+tests/unit/evolution/test_nl_synthesizer.py
+
+# T-06 强化口径（Issue #197）：纯检索基因型不得被遗传反哺顶到权重上限；
+#   内置元工具不得零信息增量重复发布到市场。
+#   本条曾登记过、又被同批后一票（df0f1f15 编辑本文件时）静默删掉——
+#   删一行就让整票判据从 CI 上消失，「登记被删」这一向由
+#   tests/unit/ci/test_issue197_judgement_registration.py 常驻反锁。
+tests/unit/evolution/test_reward_does_not_gamble_on_retrieval.py
+
+# T-11a 折叠分代（Issue #90 工单 §12.4）：新折叠产出新节点，旧摘要降一层保留。
+#   （根因：摘要在改前是一个字符串，每轮折叠原地覆盖——多节点/梯度在数据上
+#    不可能存在。代际栈不设上限（工单 §12.1，负责人 2026-09-25 裁定撤销原上限 5），
+#    一档都不丢：栈深 == 代数，读数里无 truncated 字段（无上限即不可能截断）。）
+tests/unit/context/test_fold_generation_t11a.py
+# T-11b 层节点索引（Issue #90 工单 §12.4）：折叠产出的池内 SUMMARY 节点带
+#   covers（turn 区间 + hash 列表）与层序，档号由读面派生；covers 解析率 0、
+#   覆盖闭合、跨重启读得回；层节点由确定性索引寻址、不参加概率性相关性召回
+#   （§12.5 第 3 条：下钻靠相关性门槛碰运气属假实现）——后者是 A/B 咬出来的
+#   真实回归（两个单聊会话作用域都是 direct，层节点混进召回面即跨会话泄漏）。
+tests/unit/context/test_fold_layer_index_t11b.py
+# T-11d 确定性下钻（Issue #90 工单 §12.4）：摘要行内联 covers_ref、池 drilldown
+#   按引用取回被覆盖原文。根因不是"少一个工具"而是三处断点：①摘要行无引用，
+#   模型只能退回相关性门槛碰运气（§12.5 第 3 条）；②covers 写了没人读；
+#   ③covers 存的是**池内容指纹**（带来源域），台账去重用的是**纯内容指纹**
+#   （content_digest）——两个域不相等，按 covers hash 查台账必然落空，故加
+#   台账 v3 迁移落 `pool_hash` 列作寻址键（不回填就等于只对新数据成立）。
+tests/unit/context/test_fold_span_drilldown_t11d.py
+# T-11e 折叠 rollup 后台化（Issue #90 工单 §12.4/§12.7 判据 6）：关键路径每轮
+#   至多 1 次摘要 LLM 调用。根因：压缩器的「失败丢最旧一条重试（上限 3）」与
+#   「递进扩折叠重摘要」整段跑在热路径上，摘要器恒失败时单轮实测发起 4 次调用；
+#   失败批次改交 `ContextRollupWorker` 后台补做 —— worker **持有并 await** 自己的
+#   任务（工单 §12.5 第 4 条把 `ensure_future` 发后不管列为假实现），失败不推进
+#   覆盖账（与 T-05 同族），读数落 `get_context_health()["fold_rollup"]`。
+#   回退开关 NEUROVA_CONTEXT_ROLLUP=0 时行为等价于本票之前。
+tests/unit/context/test_fold_rollup_t11e.py
+# 上下文三链路批（Issue #90）T-11c：分辨率装配器（视图按距离 1:4:16 几何退避装多档概览）。
+#   改前视图只装配代际栈顶一代（实测池内 6 档 / 视图 1 行），§12.1 C2 梯度不成立。
+#   本票让视图从池层索引按档号装多档（近细远粗、位置由远及近），档间预算比由
+#   `context/fold_resolution.py` 单点定义；读数落 `get_context_health()["fold_resolution"]`
+#   （生产读者 = /metrics），截断与未装档数均可见。
+#   回退开关 NEUROVA_CONTEXT_FOLD_RESOLUTION=0 时视图等价于本票之前。
+#   同批在根因处修了索引读面按全局层序派生档号导致跨会话串档（见本文件用例
+#   TestIndexIsSessionScoped）—— 层序是会话内事实，档号只在本会话内派生。
+tests/unit/context/test_fold_resolution_t11c.py
+# 上下文三链路批（Issue #90）T-11c 判据 4：顶概览**每轮常驻**且触达会话起点。
+#   §12.7 判据 4 的通过线（"连续 30 轮每轮都含 L3 且其 covers 触达会话起点；
+#   出现『只剩尾部原文、无任何概览』的轮次即红"）此前**只写在工单里**，
+#   既无判据也无探针读数（台账 §27.5 第 3 条如实登记"未单独钉住"）。
+#   本文件把它落成常驻门禁：判定取三个实测事实（本轮是否折叠 / 视图有无概览行 /
+#   该行对应档的 covers 左端是否等于本会话覆盖起点），并带两条反向控制
+#   （档不覆盖起点必须判违规、别的会话的档不得充当本会话概览）——
+#   没有反向控制它就是恒真断言（教义第 3 条明禁）。
+tests/unit/context/test_fold_top_overview_resident_t11c.py
+# 上下文三链路批（Issue #90）判据 7：前缀命中率以 provider `cached_tokens` 计。
+#   工单 §12.7 判据 7 与裁决 D3 都写明"不用估算口径自证"。实测两处断点，都是契约面：
+#   ① 形状分裂 —— 生产唯一能拿到的真值是 usage_accounting.last_call() 的归一形
+#      （cache_read_tokens），而 composition 只认原始形（prompt_tokens_details.
+#      cached_tokens）→ 真值在手却读不出来；② 生产从不喂 —— measure_composition
+#      的 provider_usage 形参零生产实参，面板命中率永远是 prefix_estimate。
+#   判据带反向控制（原始形不得回退、无真值不得伪装成 provider）。
+tests/unit/context/test_provider_cache_truth_wiring_90.py
+# 上下文三链路批（Issue #90）B6-11（决策 D5）：反思效力记账改「进视图才记账」+ 降档兜底。
+#   根因不是"少传一个参数"：`mark_injected_logs` 记在**选中**那一刻，而条目能不能到
+#   模型面前要过池的相关性门槛（反思归档优先级 60）与信封压缩两层。实测真
+#   `build_context` 无关输入：status=applied、痕迹有 id，视图里一行 [反思] 都没有
+#   —— 效力裁决的输入（assistant metadata.injected_reflections → /chat/feedback）
+#   建立在幻影注入上（审计 §2.1 P2-9 / §10 D5）。
+#   改后：记账统一落在**装配出口**（三条分支共用 `_finishContext`），判据是视图
+#   注入面里有没有这条的文本（`context/reflection_view.enteredViewIds` + 客观解析
+#   `parse_envelope`）——"被 draw 取出"不算，因为之后还有一步 `compress_envelope`
+#   确定性淘汰。降档兜底走**既有** `register_negative_feedback`（只降不删，跌破阈值
+#   转 rejected 即脱离恒定注入、池内原文仍在），连续 `VIEW_MISS_LIMIT` 轮未进视图触发。
+#   读数落 `get_context_health()["reflection_injection"]`（selected/entered_view/
+#   missed/demoted，生产读者 = /metrics），"选中了但没到模型面前"必须可见。
+tests/unit/context/test_reflection_view_accounting_b6_11.py
+# Issue #90 B4/004 同契约命中点（教义第 5 条）：neurflow 搜索与 CSE 检索的
+#   LIKE 兜底同样直拼用户输入（`%` 把整表拉回），转义与候选集上限单源。
+tests/unit/neurflow/test_storage.py
+tests/unit/cognitive/test_cognitive_storage_engine.py
+tests/unit/tools/test_npx_runtime_pinning.py
+
+# Issue #68 收口：代码执行沙箱后端（前端 SandboxPage 的承载面补齐）。
+#   （根因：同一件事「沙箱」被定义了两份——前端页面是代码执行沙箱
+#    （image/command/language），后端实现是思维沙箱（topic/step/commit）。
+#    `/sandbox/{id}/execute` 从未注册过路由（必 404）、`/start` 要
+#    agent_id/topic（前端载荷必 422）、`/commit` 强制结论 body（必 422）。
+#    现收口为一套值域：代码执行 = 真 session（容器后端，enforced 自报），
+#    思维沙箱 = 保留 id `null` 的限定能力面。
+#    关联：tests/unit/frontContractBaseline.txt 该条已由「待接线」改判「已修」，
+#    docs/09-dev-progress/api_inventory.md 第四节差集归零。）
+tests/unit/sandbox/test_code_execution_sandbox_contract.py
+# Issue #90 T-09 残余（清场批）：上下文「来源 → 优先级」阶梯收口为单一事实源
+#   （端点曾写 priority=10 且注释称「高优先级」、语音模块给 EMOTION 写 60 而编排器写 50）
+#   判据：缺省由来源派生 / 端点写入与阶梯同源 / 生产侧不再自写整数字面量优先级。
+tests/unit/context/test_source_priority_single_source.py
+
+# Issue #90 收尾批：各批「是否已交付」的文档陈述必须与机器事实咬合。
+#   （根因：B6 各批的交付状态被手抄在十余处，之间无任何判据，同一时刻给出
+#    互相矛盾的结论——台账 §31 已写「B6-10 至此无剩余项」，而同文件更早的
+#    §2/§14/§17.3/§18/§22.5… 与 B6 工单索引仍写「仍未开工 / 剩余两组待实施」。
+#    判定只读两处机器事实：该批判据在受保护子集里、该批退役产物已从仓库消失；
+#    连带把 T-07/T-08 两行「读回待验 / 未落地」的 09-23 旧快照口径改判为收口记录。）
+tests/unit/context/test_batch_status_docs_coupling.py
+
+# Issue #306 NPC 会话空转（构建被创建但跑的不是本仓声明的 Job）：
+#   · 本仓 NPC Job 缺 `docker.image` 时，平台按 key 覆盖合并系统默认配置与本仓配置，
+#     平台那一份 runtime 顶上 —— 实际运行环境不再由本仓 `.cnb.yml` 决定，
+#     而平台侧与日志里都看不出这件事（实测读数见
+#     docs/05-reports/npc系统事件通道_2026-09-28.md）；
+#   · 判据按「每个 @npc 事件下的每个 Job」遍历（共用 Job 体 + 接力载体一次扫清），
+#     并带反向控制（把镜像换成别的值必须被抓到）；
+#   · 同一根因的另一半是入口：@ 平台内置系统 NPC 时本仓配置不参与，
+#     该结论与 npc续跑角色连续性_2026-09-26.md §1.2 一致。
+
+# Issue #271 M4 片：MCP 注册点的并行能力声明通道（能力无法由提供方声明 = 封闭性缺陷）。
+#   根因：上一片把并行资格换成"读工具自己的声明"，但只落了内置工具一条注册路径；
+#   MCP 工具的 schema 由第三方 server 提供、本仓改不了，且 `mcp_config` 的未知键
+#   显式拒绝把任何声明位当场拒掉 ⇒ `resolveToolCapability("mcp.srv.tool")` 恒 None，
+#   多路 MCP 检索必然整轮串行。
+#   修法三处根因：声明解析收口到 `core/tool_capability.parseToolCapability`（唯一一处，
+#   内置侧改为委托它）；声明位落本仓侧 server 配置 `tool_capabilities`（配置入口
+#   + 归一化副本 + 写面 API 三处闭合）；解析通道接 `mcp.{server}.{tool}`（裸名不借声明）。
+#   判据：写入 → 持久化 → 解析 → 分组调度端到端；未声明/形态非法/共享作用域一律串行。
+tests/unit/tools/test_mcp_capability_declaration.py
+
+# Issue #286（M3 判据登记收口）：工具批次并行的四份判据此前文件在仓、单跑全绿，
+#   而受保护子集里一条都没有 ⇒ CI 从未跑过它们（同批同根因的
+#   test_mcp_capability_declaration.py 登记了，这四份漏了）。形态与本仓既有守卫
+#   tests/unit/context/test_b5_scale_batch_registration.py 记录的「绿得毫无意义」同型。
+#   · test_tool_batch_parallelism.py：资格推导为三态合取 + 分组调度保序 +
+#     71/71 全量声明覆盖 + 可并行工具不得同步阻塞事件循环 + 本批登记自证；
+#   · test_tool_parallelism_readout.py：§10.1 取数的三态可分（worthwhile / sparse /
+#     no_data×3 成因）、口径不折叠、依据行与活行为咬合；
+#   · test_handle_tool_calls_parallel.py：真 handle_tool_calls 链路的成组/串行与回装保序；
+#   · test_anthropic_loop_batch_handoff.py：Anthropic 路径的整批交基类与残留盲区。
+tests/unit/tools/test_tool_batch_parallelism.py
+tests/unit/tools/test_tool_parallelism_readout.py
+# Issue #288 G4 工具取消与超时处置：取消承诺此前只在未进线程池的工具上成立。
+#   根因三条：① 超时一律"转后台"——对进程型工具（run_code/git/exec_command/
+#   computer_shell）意味着子进程继续跑，而界面与模型都以为它停了；② `Task.cancel()`
+#   对已进入 `to_thread` 的调用只丢结果、不停执行（实测：取消后 worker 仍在推进），
+#   故取消必须协作式下沉进 worker；③ 进程组杀灭原语存在，但主工具路不吃它，
+#   且 `ShellSessionManager.kill_all` 生产侧零调用（会话进程随应用退出而泄漏）。
+#   判据：令牌协议 / 处置声明与分派（真进程真断言，不用 MagicMock 冒充 Popen）/
+#   取消的裁决身份（不进 MIN(success) 粘性）/ 终态回到反馈环 / 杀灭单源。
+tests/unit/tools/test_tool_cancellation.py
+
+# 跨轴一致性批（PR #287 尾巴）：名单成员资格收口到声明面的两份判据。
+#   · test_reproducible_flag.py：写作用域声明 ⇒ 不可重现（单向蕴含），含
+#     write_pdf 命中点与「只读也可不可重放」的反向控制；
+#   · test_command_segment_approval.py：壳方言成员资格读声明（exec_command /
+#     computer_ssh_exec 真 shell 却不在分段面上），含幻名删净与外部别名台账。
+tests/unit/tools/test_reproducible_flag.py
+#   同根因的第二批命中点（教义第 5 条）：种子记忆库 `yi_ling_memory.db` 的八个
+#   脚本同样在换锚时丢了存量（旧锚点 `neurova/memory/data/`，换锚后无人读也不被清，
+#   重跑即新建空库 → "种子记忆不可见"）。判据：落点单点（八脚本不得各写一份旧锚点）、
+#   存量收养、不覆盖、无旧物时不得凭空造文件。
+tests/unit/memory_ingest/test_seed_db_landing_relocation.py
+#   同一处的补充判据（Issue #290 未闭环项④）：种子库是**一对文件** —— 主库旁边
+#   还有同目录的持久库，而真行写进的是后者。只搬主库等于搬个空壳（新锚点有文件、
+#   读到 0 行，"旧物已搬走"的断言却全绿）。判据：整对搬且经真 MemoryManager 能读到
+#   旧记忆（用户可见的结果，不是文件数）、不覆盖且两侧都在点名、无旧物不凭空造物、
+#   配对推导与写入端逐字一致（单一事实源）。
+tests/unit/memory_ingest/test_seed_db_landing_companion.py
+
+# Issue #289 · 002（压缩经济性判据与不动作原因枚举）：折叠是**有损动作**，
+#   而有损动作此前不可归因 —— `compression_ratio` 只写不读（全仓零回读方），
+#   `envelope.py` 的"装不下弃整个信封"是净损失路径却不出任何读数。
+#   判据："没测到"与"不划算"是两个不同值（未测量不得演成失败）+ 撞窗口硬顶时
+#   安全线让位且经济性不得削弱它 + 判据链路只允许一把尺子/一处代价定义
+#   （静态守卫）+ 默认关 ⇒ 现网行为零变更 + 两条接入点共用同一份判据。
+#   反向控制：开关开时同一输入必须真的挡下折叠（不是恒放行的死闸）。
+tests/unit/context/test_compression_economics.py
+# Issue #289 · 003/004（RSI 回执负债口径与反向闸 / 参数身份守卫与参数活性读数）：
+#   003：回执行补 cost/repayment 两列（代价口径引用 002 的输出字段，不另立定义）、
+#     存量行「字段缺失 ≠ 值为 0」两态分辨、欠账未清则拒下一次寻优、丢行走安全侧
+#     （账记不下就不敢动）、回滚处置债务不得制造无主欠账、原因值映射回 002 命名体系；
+#   004：参数表身份 = **物理落点唯一**（别名 property 穿透到真实属性）、
+#     经济性参数入表前置条件（无 003 记账则不入表）、宿主缺席沿用 _is_placeholder 口径、
+#     参数活性三态（moving / sparse / never_proposed / no_data）不折叠、
+#     纪元归零不得连带清掉 003 的欠账、入表参数在治理面可见。
+tests/unit/evolution/test_rsi_debt_ledger.py
+tests/unit/evolution/test_rsi_parameter_identity_and_epoch.py
+tests/unit/core/test_subprocess_encoding_discipline.py
+tests/unit/core/test_proc_text.py
+tests/unit/sandbox/test_exec_output_decoding.py
+tests/unit/sandbox/test_backend_interface_contract.py
+tests/unit/tools/test_openai_format_source_immutability.py
+tests/unit/tools/test_browser_result_normalization_keeps_named_cause.py
+# §34：工具耗时的量具必须是单调钟（execution_time 的 0.0 是"量不出来"不是"快"）。逐文件单跑 3 passed
+tests/unit/tools/test_tool_elapsed_clock_is_monotonic.py
+# 落盘锚点契约：skills_dir 非绝对（MagicMock 的 __fspath__ / 相对串）必须显式拒绝，
+# 且拒绝前不得在进程 CWD 建塔写盘（仓库根曾出现 MagicMock/…/.lifecycle_state.json）。
+# 逐文件单跑 7 passed
+tests/unit/evolution/test_skills_dir_absolute_anchor.py
+# RSI 回执落盘失败必须真回滚：幻影 self._logger 把回滚那行 setattr 短路成死码，调用方收到
+# False 而系统留着新值。判据含全仓 AST 扫（现值 151 处取用，仅本类两处幻影；修后应为 0）。
+# 逐文件单跑 3 passed（约 5s，含全仓 ast 解析）
+tests/unit/evolution/test_rsi_receipt_rollback.py
+# 记忆层加密的降级门必须 fail-fast（§6-34）：cryptography 缺失时原实现只 warning 就换成
+# 重复密钥流 XOR，且 encrypt/decrypt 把失败改写成空串——写侧落一条"加密成功的空记忆"，
+# 读侧让记忆看起来"没内容"。取证：三版 git grep 证这条链从未被调用方走过（零调用点由本文件
+# 第 5 条判据钉成会红的账）。逐文件单跑 5 passed
+tests/unit/memory/test_memoryCipherFailFast.py
+# P1-6：记忆段的 token↔字符换算只剩一份口径。原状是同一个类里两套话——预算**记账**
+# 用 `_count_tokens`（其 docstring 明写"统一入口，禁止就地近似"），预算**裁剪**却按
+# `TokenBudget.chinese_ratio=1.5` 固定系数裁字符，另有第三个系数 `chars_per_token=1.5`
+# 的零调用方 `_truncate_text`。同一入口过 orchestrator:1759 的活体实测：4000 tok 预算下
+# 中文只填 58%（2341 tok）、英文只填 10%（403 tok），且两者裁出的字符数一模一样（2677）。
+# 判据取行为（占用率 ≥85% 且不越界）+ AST 防回流（系数属性与退役实现不得复活）。
+# 逐文件单跑 4 passed
+tests/unit/context/test_memoryFoldBudgetParity.py
+# P2-7：懒建单例的判空必须是双检锁。实测原状有 **74 处模块全局** `if _x is None: _x = X()`
+# 与 **5 处 `cls._instance` 同形完全不带锁**——并发首访各建一份，后写的把先建的覆盖掉，
+# 先建那份连同已注册的回调/已开的连接被静默丢弃（单线程测试永远看不见这一类）。
+# 唯一实现落在 `core/lazy_singleton.lazySingleton`：缓存名写错会在**装饰期** ValueError
+# （写错＝永不命中＝每次重建，正是本批要消灭的故障，不能留到运行时静默退化）——这条
+# 在收口过程中真的当场逮住一处（`capability_graph` 的名单只在函数里 `global`，模块字典
+# 里根本没有那个名字）。判据三层：① 并发探针（barrier 强制构造重叠，修前 8 次构造、
+# 修后 1 次）；② 全仓 AST 扫"裸判空即建"归零；③ DCL 用非可重入 `Lock` 的 165 处按
+# **只降不升棘轮**钉住（那格属 §6-19 后续批次，本批不放宽也不冒充已清）。
+# 逐文件单跑 6 passed
+tests/unit/core/test_lazySingletonDcl.py
+# P2-8 第二批：`parked` 是**非终态**，它的全部意义就是"活过进程、等人点续跑"。
+# 三条最容易回流的形态各钉一格：① `reconcile_at_startup` 顺手把它收敛掉（重启即
+# 变成 failed，人工再没东西可点）；② park 时不松开 owner/租约（`claim_next` 的
+# `NOT EXISTS(status='running')` 会把整个会话永久挡住，连续跑都发不出去）；
+# ③ `stats()` 把未知状态折进 terminal（"等人"被读成"已结束"）。另钉续跑必须复用
+# 原行（seq 不变才还在队头，`intake` 第二条就是同一回合两个身份）、载荷换手即清空、
+# 存量 v1 库经生产装配点原地补列。
+# 逐文件单跑 9 passed
+tests/unit/core/test_agentRunStoreParkedStatus.py
+# A 轮（§6-12 缺陷①）：BaseModule 的广播承诺必须真兑现。三条形态各钉一格——
+# 未注入时回落唯一全局入口（原形态 `_event_bus=None` + `if self._event_bus:` 恒假，
+# 全仓无一处传非 None，生命周期事件一次都没发出，而 /api/v1/logs 读的就是这条总线）、
+# 注入时不得同时污染全局（两份事实源）、载荷必带 module_id（无主事件无法归因）。
+# 反向守卫判 AST 调用形态（`self._event_bus.emit(`），不钉词——本仓 EventBus 只有 publish。
+# 逐文件单跑 4 passed
+tests/unit/core/test_eventBusWiringFromBaseModule.py
+# A 轮（§6-12 缺陷② + §6-5 家族的类级命中点）：`async def` 的生命周期钩子被同步
+# `initialize()` 调用即协程丢弃，injector 三条 context.* 订阅恒为 0。判据五条：钩子跑完
+# 订阅真在总线上、initialize→start→stop 全链不空转、全仓反向守卫"async 声明 + 体内零
+# await"归因到 file:line（判形态不钉名，防同类回流）、订阅入口只在基类一份、
+# injector 不得再自带第二份 BaseModule（含其吞异常的私有 handlers）。
+# 逐文件单跑 6 passed
+tests/unit/context/test_injectorLifecycleHooksNeverRan.py
+# A 轮（§6-12 总线合一）：同一功能在仓内只剩一份实现被消费。四条形态各钉一格——
+# 全仓 `class EventBus` 定义归一（原状两份平行实现，且 `memory_layer/manager.py:185`
+# 是每个 manager 自建**私有总线**、其出口 :832 零调用方，所以 MEMORY_* 不是"发了没人订"，
+# 是发在一条别人拿不到的总线上；`get_stats()` :2115-2116 读的两个数也因此恒等于私有实例）、
+# 记忆写入必须抵达共享总线、统计读数与共享总线同源、反向守卫按 AST 钉死
+# "manager 不得再自建总线实例"。另钉 §6-49：async 订阅者在无异步队列时不得静默丢弃
+# （要么执行、要么计为丢弃，两侧都不发生即丢数据）。逐文件单跑 5 passed
+tests/unit/cognitive_layers/test_memoryBusSingleSource.py
+# A 轮收口格：记忆写入要能在**现役 HTTP 读面**上看到——`/api/v1/logs` 读的就是共享总线的
+# 事件日志（前端 `NeurUI/src/api/modules/system-logs.ts` 在用），只证"发出去了"不算闭环。
+# 如实记：本批一度想把事件接到"清注入器上下文缓存"，实测 `cache_entry`/`get_cached_entry`
+# **全仓零调用方**（那张 LRU 既不写也不读），接上去绿灯会亮、闭环并不存在，故撤回该形态，
+# 该格改登记为产品裁决项（台账 §6-51）。逐文件单跑 2 passed
+tests/unit/cognitive_layers/test_memoryEventsReachLogsEndpoint.py
+# C3：`/api/v1/sync` 会话面的身份与归属。六格里三条原本**连身份依赖都没有**
+# （`DELETE /sessions/{id}`、`GET /sessions`、`GET /connections`），而
+# `NEUROVA_GLOBAL_AUTH` 未设时全局兜底为 MODE_OFF，所以那是真匿名可达——匿名能结束
+# 任意会话、能按 `?user_id=` 拉任意用户的整张会话表。归属比对接的是 `console.py`
+# 那份唯一实现（本文件不许内联比较式，也不许换个变量名绕过守卫；`/connections`
+# 走 `manager.list_sessions(user_id=...)` 那道已有过滤）。两条反证不可省：属主四条
+# 必须照常 200（收紧不许把正主挡在门外）；`/connections` 那条必须**先往生产表挂一条
+# 真连接**——`_ws_connections` 为空时"没泄露"是恒真的假绿。逐文件单跑 15 passed
+tests/unit/sync/test_sessionSyncRestOwnershipGate.py
+# §8 前置 3 呈现账单源（对照报告 docs/08-research/designer_rsi_paper_vs_neurova_rsi_comparison_2026-10-08.md）
+# 前者钉"呈现→派发→执行→完成"四级同账且轮级去重、cold 臂不计数、视图分支按库路由；
+# 后者钉呈现只剩一处定义（退役 times_presented）且生产写入点数死为 1——双源复发即红。
+# 逐文件单跑：19 passed / 4 passed（落库后复取）。
+tests/unit/evolution/test_funnelPresentationAccounting.py
+tests/unit/evolution/test_singlePresentationAccountGuard.py
+# 反思五算子的词表只许有一份定义：跨文件等值、单点变更当场两侧同生效（注入新算子名）、
+# 第二份字面集合禁回流、名字必须有实装（防空名单）、未知算子照旧拒。
+tests/unit/evolution/test_attributionOperatorVocabularyIsSingleSourced.py
+
+# H2-6 · L 条 子任务进 run 台账与状态面出口（§6-85）：这一档锁的是「写下去真有人读、
+# 且读得到活过重启的那一份」。判据打在行为上——派生一条子任务后台账**确有该行**且
+# `subagent_id`/`parent_session_id` 两个键成对；超时与取消在台账里分别是
+# failed/subagent_timeout 与 cancelled/subagent_cancelled；换新 store 实例（等价进程重启）
+# 仍读得到（内存 `_runs` 给不了的那一半，也是"刷新一下就没了"的成因）；HTTP 出口
+# `?scope=subagents` 带出并投出前端要用的键，关闸诚实 503、陌生账号 403；
+# `swarm.py` 不得出现本地 INSERT/UPDATE agent_runs（AST + 反向对照，防"扫空即全绿"）；
+# STARTED 事件必须带 status。逐文件单跑两次各 11 passed
+tests/unit/core/test_subagentRunsInLedger.py
+
+# 协程内裸调阻塞子进程·同根余格（`46c0f99e`，§6-99）：两枚行为判据 + 一枚形态棘轮
+# 行为面（形态守卫看不见的正是这一类）：
+# ① `neurflow/drama_nodes.py` 的 compose 节点——concat 收进同步段后经 `to_thread` 跑，
+#    判据取"协程心跳推进数"，并先断言子进程替身被调用（走降级支路时心跳读数不作数）；
+# ② `core/ffmpeg.py` 的 `ensure_ffmpeg()`——`_verify_binary` 那发 `-version`（实测 42–45ms）
+#    在 lifespan 启动阶段同步跑会占死循环，此时服务已在接受请求。
+# 形态面（只降不升棘轮，逐文件冻结基线 4 文件 / 8 处）：
+# ③ 反向对照三格——协程内那发必须抓、同步函数里那发不得误伤、协程内嵌套 def 里那发也要抓；
+#    外加扫描根覆盖性一格，防"扫了个空却报绿"。基线里那 8 处只冻结不认领（判定欠）。
+# 逐文件单跑两次同读数 2 / 2 / 4 passed（`46c0f99e` 落库之后复取）
+tests/unit/neurflow/test_dramaComposeOffloadsTheLoop.py
+tests/unit/core/test_ffmpegBootstrapOffloadsTheLoop.py
+
+# 批次 K2（§6-101）：条目擦除必须逐面取不回正文——?purge=true 曾只删条目行，
+# 权威事实/断言正文/活动信封/向量分片/投影 description 五处副本仍在，且端点不读
+# 返回值就报"已删除"。判据两类：副本取不回（行为），以及断言链与 statement_hash
+# 原样保留 + 巡检仍绿（拦"顺手硬删断言行"那种改法）。
+tests/unit/knowledge/test_entry_erasure_faces.py
+
+# 批次 K1（§6-103）：到期这条生命周期迁移必须有真触发点。`expireDueFacts()` 自工单 008
+# 起就是"状态是唯一权威"的执行体，却全仓零调用点——级联不可达而日志零异常，直接检索面
+# 又被读侧时钟闸兜得看不出问题，所以只有"派生结论是否退场"这一格会红。判据含一台
+# 反空转装置（断言启动路径确实调到收敛），防止只加端点不改启动也能把上面那格演绿。
+tests/unit/knowledge/test_expiryHasRealTrigger.py
+
+# 批次 K3（§6-105）：检索质量自此有一层地板。台架此前"有表有端点、从未跑过"，
+# 于是改检索权重/hop 上限/读面开关都不会有任何东西变红。硬判据落在逐案 newly_unhit
+# 而非平均 recall——jieba 缺失会静默回退 n-gram、嵌入模型可用性随机器而变，
+# 平均值是环境函数，"原本命中的现在一条不剩"才是管路断了。
+# 另钉三件：三口径标注都得产例（真库那次是 29/1/0，只剩标题直取一条腿）、
+# 反证三格（整路哑掉必红 / 基线自比必拒 / 无基线必回 unevidenced 而非 pass）、
+# 跑门不许碰生产知识库目录。
+tests/unit/knowledge/test_retrievalGateFloor.py
+
+# 第二座上下文缓存退役防再生（`54cc8ba2`，§6-107）：§9 序 4 复算改判的常驻面
+# 改判理由（原登 §6-104"需人裁：唯一实装"，复算后不成立）：现役已有同职实装——
+# `context_pool.py:1469-1485`（键 `isolation_key:model`，`_cache_version` 失效）＋
+# `orchestrator.py:903-937` 折叠摘要缓存槽；跨重启持久化归 `eviction_ledger_db.py`
+# （SQLite WAL+FTS5、`context_ledger` v1/v2/v3）。且这座**默认参数下构造即 TypeError**
+# （`context_cache.py:138` 少传必填 `data_dir`，而 `:139` 只捕 ImportError）。
+# 判据按**被导入的名字**判而不是按文件位置判（防换目录复活）；反向对照钉住现役池缓存
+# 与 §6-51 那座注入器 `_cache` 仍在——本批删的是第二座，不许顺手把唯一实装带走。
+# 逐文件单跑两次同读数 5 passed（`54cc8ba2` 落库之后复取）
+tests/unit/context/test_secondCacheFaceRetired.py
+
+# 语音引擎桥退役防再生（`29aa879a`，§6-108）：§9 序 4 复算改判的第二格
+# 这座桥不参与渠道语音链路（入站真 ASR 在 `channels/voice_precheck.py:43-84`，
+# 出站走 TwiML；它生产侧 import 实测为 0），其分派职责现役由 `voice_engine.py:71
+# process()` 内部完成；给它作证的格是"名字可导入/工厂能 new"式恒真断言。
+# 本批的难点不在删桥，而在**混合测试文件按格摘、不按文件删**：`voice_memory_bridge`
+# 是活的（`agent_core.py:706-717` 构造、`agent_shutdown.py:87-90` 收尾），
+# 所以判据里有两档反向对照——活面必须仍在位（渠道适配器 + 引擎分派 + 记忆桥装配），
+# 以及五个活覆盖类（TestVoiceMemoryBridge*/TestAgentShutdown/TestVoiceAdapterRegistration/
+# TestVoicePerformanceMonitoring/TestVoiceAdapterLifecycleCompleteness）不许被顺手带走。
+# 逐文件单跑两次同读数 5 passed（`29aa879a` 落库之后复取）
+tests/unit/voice/test_voiceEngineBridgeRetired.py
+
+# 批次 风险1-3（§6-109）：投影面的三处"读数说假话"。① `_save` 曾把落盘失败吞成
+# code:0 success（真库 rebuild 期间实测 3 次 WinError 5 而无人知道）——现由 persist()
+# 回执 + 端点 500 收口；② `projectionDrift` 只比关系，看不见带条目正文摘要的无据
+# 孤立节点（真库现存 33 个），现补四个节点维度计数；③ 启动一次性巡检"只报不修"。
+# 两格是反空转装置：启动格必须真读到 WARN / 真读到"无分叉"，因为整段巡检被 fail-open
+# 吞掉时表现就是"什么都没报"，只断"没有 WARN"会空转绿。
+tests/unit/knowledge/test_projectionHonesty.py
+
+# A9 memory_layer 换代残留退役四件 + 两件未裁留下（`494f7fa6`，§6-113）
+# 复算改了两处旧述：A9 点名六件实为 1850 行（非 ≈2460）；六件的**生产与测试消费者都是 0**，
+# 删下来带不走任何覆盖。本批删 `search_mixin`(346，六个检索入口全硬返 `[]`)、
+# `dream_mixin`(257，现役在 `sleep.py:205` + REST `api/endpoints/sleep.py`)、
+# `explainability_storage_mixin`(294，现役走 `manager.py:4006 → modules/explainability_module.py`)、
+# `modules/storage_module`(206，"未注入即 warning + 返 None"的静默失败门面)。
+# 两件按需人裁**留在案上**，并被一格**反向存在断言**钉住：`relation_mixin`(400) 的
+# graph_density/most_connected 与 `forgetting_recovery_storage_mixin`(347) 的 30 天清理 +
+# recovery_rate 统计全仓唯一，台账写的"已有替代"一处语义不等价（relation_module 只到
+# depth-1 且按复合键去重）、一处指错文件（forgetting_recovery_module 是间隔复习）——
+# **替代存在 ≠ 替代等价**，未裁不许顺手删，要删先改这条判据（改判据必改台账，即留痕）。
+# 逐文件单跑两次同读数 6 passed（`494f7fa6` 落库之后复取）
+tests/unit/cognitive_layers/test_memoryLayerGenerationResidue.py
+
+# 序 5 批 D：shared_core 桩编排器退役 + 门面名实分离改正（`e78bf45b`，§6-115）
+# 三套 plan_orchestrator 的生产 import 复算全是 0——现役规划面根本不在它们身上（agent 走
+# `planning/planning_tool.py`，HTTP 走 `plan_mode` → `/api/v1/plans`）。本批只摘唯一的纯桩：
+# 四个 handler 回名字字典、一次调用都不发。另两套各有"全仓唯一"格子（`core` 的 RetryPolicy +
+# adjust_plan、`execution_engine` 的步骤状态机与真重试），属需人裁，被一格**反向存在断言**
+# 钉住在位。第二格专管门面：`shared_core/__init__.py` 曾把 SharedPlanOrchestrator 列为在役
+# "小脑"而正文只剩一句空注释——"文档声称有、代码没有"比空文件更坏，按 docstring 找的人会
+# 以为这套能力在线。判据里含一格 404 校准与一格 sys.modules 装载断言，防"仪器坏了"式假绿。
+# 逐文件单跑两次同读数 6 passed（`e78bf45b` 落库之后复取）
+tests/unit/shared_core/test_sharedCoreOrchestratorRetired.py
+
+# 投影必须是权威的派生物，不是模型输出的副本（`e073e76c`，§6-114）
+# 抽取侧的建边循环此前完全不看权威：未登记的谓词类型在图上落成 relation="custom" 的边，
+# 与真事实同形、而检索链永远读不到它——§6-106 在真库量到的 orphan_relations 52 就是这么来的。
+# 四格各守一跳：无据边不进图、有据边必须进图、有据节点不许被"过修"顺手摘掉、
+# rebuild 按权威摘净存量并报 pruned_edges/pruned_nodes（不报数的清理等于"看起来什么都没发生"）。
+# 判"点据"的口径写在判据里（点看权威主体，不看是否参与关系）——这一改是对 §6-106 那句
+# "33 个无据节点"的自我更正；口径若再动会同时打红 test_graph_types_as_data 四格，
+# 那五格是既有判据把过修拦住的实证，别当回归改回去。
+# 逐文件单跑两次同读数 4 passed（4.83s/5.21s，`e073e76c` 落库之后复取）
+tests/unit/knowledge/test_projectionFollowsAuthority.py
+
+# 运行时会话注册表的隔离：进过 app lifespan 的用例不许把 agents 留在进程全局里（`8dd01728`，§6-118）
+# `api/app.py` startup 经 set_app_state 写 `neurova.api.endpoints._app_state`，关停不回收。
+# 生产无所谓，测试会话里它就是跨用例的隐形分支：下游自建 FastAPI app 的用例在
+# `knowledge_ingestion._resolve_runtime_agents` 处读到上一个用例的运行时 agent，
+# 实测咬红三格（导入路由改去取 get_knowledge_repository 撞存储围栏⇒500；检索改走真 agent
+# 的空数据面⇒results 为空）。修复放目录级 conftest 的快照/复原，不在受害者侧加判空。
+# 两格按源码顺序跑：第一格证"漏的来源真实存在"（否则第二格只是没人写过所以没人还），
+# 第二格证夹具真的还了——把 conftest.py 挪出目录即翻红。
+# 逐文件单跑两次同读数 2 passed（8.66s/9.19s，`8dd01728` 落库之后复取）
+tests/unit/knowledge/test_appStateIsolation.py
+
+# singleton 收敛网：条目在位性 + DCL 结构 + 并发首访单次构造（`89575a9d`，§6-116）
+# 这份档此前**不在子集里**，正是它能红 18 天没人管的直接原因：一条指向 2026-09-21 已退役
+# 文件（`memory_layer/memory_field.py`，`0c333a76`）的手抄条目让 `FileNotFoundError` 挂在
+# 参数化格上恒红，同档其余 9 格真 DCL 检查被这层"已知红"噪声一起淹掉。根因不是漏删一行
+# 清单，而是**判据从不检查自己的前提**——清单是手抄快照，实现退役时条目不会自动跟；同坑
+# 两个月内踩两次（另一条 2026-10-07 的 `secret_store_clean` 补记就在文件里）。现新增两格：
+# 每条必须指向在位文件与在位模块级工厂，另加一格反向对照（探测器对"文件缺失""符号缺失"
+# 两种形态都必须报警，对真正在位的条目不得误伤）。逐文件单跑两次同读数 19 passed（落库前后）。
+tests/unit/core/test_singleton_convergence.py
+
+# 使用与采纳回流的账面：注入计数 + 采纳写面"仍未接线"的反向存在断言（`ad22beae`，§6-124）
+# 两半分开守，因为它们的"零"含义完全不同：注入账的零是**没走到/没锚点**（活体在真库拷贝上证过
+# 接缝活着：8 hops → 8 个 fact 落账、时间戳齐），而采纳回执的零是**结构性的**——`recordAdoption`
+# 全仓零生产调用点，列在、`usageMetrics.outcome_written` 在数、原语有测试，就是没人写。
+# 因此常驻的这两格是：① 调用点必须仍为 0（有人接线即红，红的那一刻就是该改判据与台账的时刻，
+# 不许留一条恒 0 的读数被当成"知识没被采纳"来读）；② 反空转——探测器必须抓得住人造调用点，
+# 且不得把定义与 docstring 数成调用（判"零调用"按节点形态判，不按文本数）。
+# 逐文件单跑两次同读数 15 passed（8.11s/8.38s，`ad22beae` 落库之后复取）
+tests/unit/knowledge/test_usage_writeback_foundation.py
+
+# 批 E：通用 KV 配置器合一 + load 侧 warning/error 分级并入（`9146989c`，§6-125）
+# 两份同职实现（分层版 `core/config.py:60` 354 行、简单版 `core/config_manager.py` 118 行）
+# **都零生产消费者**——`get_config_manager()` 全仓零调用，grep 到的同名命中全是同名词不同物
+# （`agent_config.py:438`、`negative_screen_settings.py:84`）。按教义第 7 条比后合到超集那份：
+# 简单版的 `clear()` 不并（零消费者＝没需求的 API，不因为"原来有"就搬家），但它 load 侧的
+# **warning-vs-error 分级**是真长处——读不到/损坏属可降级（沿用内存现有配置），一律 error 会把
+# 一次回落报成事故；写盘失败才是数据丢失，必须 error。分级并入 `config.py::load`，这四档 KV
+# 单测同步改指分层版（39 格；另摘 1 格 `test_clear` 随实现走、1 格只断"模块有 logger 属性"的
+# 形状检查——它不证任何行为）。第五档是"别再长出第二份"的单源判据，含探测器反向对照。
+# 逐文件单跑落库前后同读数：单源 5 passed、四档 KV 与既有 config 档并跑 83 passed。
+tests/unit/core/test_kvConfigSingleSource.py
+tests/unit/core/test_config.py
+tests/unit/core/test_config_manager.py
+tests/unit/core/test_config_manager_comprehensive.py
+tests/unit/core/test_config_manager_persistence.py
+
+# §6-136：睡眠闭环那两处缺陷（门面上当必空转 / 363 行按想象写的测试）的常驻判据（`4d774241`）
+# 五条断言的形状都是"调用面 ⊆ 定义面"与"读面 ⊆ 赋值面"——这两种形态能抓的门面不止睡眠这一处：
+# `IdleTimeTracker.adjust_parameters_based_on_sleep_quality()` 读一个从未赋值的 `self._storage`、
+# 再调一个全仓不存在的统计方法，外面套 catch-all，于是每次必抛必吞必原样返回，而全仓零生产调用方。
+# 第四条带**只降不升的棘轮**：按 import 来源解析后，"对 memory_layer 那只 MemoryStorage 传 db_path="
+# 的落点还剩 17 处 / 5 个文件（生产零命中；另有同名的 `memory.core.storage.MemoryStorage(db_path=)`
+# 属同名词不同物，判据按来源收窄后不误伤它）。新增落点即红，修掉一处就把计数改小。
+# 逐文件单跑落库前后同读数 5 passed。
+tests/unit/core/test_dreamReportSeamIsNotFabricated.py
+tests/unit/core/test_plugins_modules.py
+# §6-151 任务编排的单点活路：旧编排器(376) 退役后，这 8 格同时钉两面——
+# 活路面（真 await 注册表解析出的节点执行器、解析不到即 failed 带原因、代理注册表的 capabilities 格、
+# 执行实例 save/get 读写两面）与退役面（旧件不在位、不可 import、无任何代码把它当实现或 DCL 模板引用）。
+# 反向断言那 4 格拦的是「把顶替那条路一起删了来买绿」，以及摘掉本档活路面判据让退役面自动成立。
+# 退役面按构造今天恒绿；它翻红只有一种意思——有人把假流水线又写回来了。
+# 入册前逐文件单跑两次同读数 8 passed（7.64s / 8.36s）。
+tests/unit/cognitive/test_taskPipelineSingleSourceIsLive.py
+tests/unit/cognitive/test_workingMemoryAugmenterBehaviour.py
+# §6-166 三套零接线编排器退役的守卫面（比对与并格见 §6-157）。
+# 判据问的不是"这仨文件在不在"这一句形状，而是三件事一起成立：
+# ① 三只不可 import（真取数，不是注释说没了）；② 生产/测试/脚本无任何按路径或模块名的引用
+# ——清单条目与"DCL 模板"注释也算引用，留着就是 §6-116 那种"实现退了条目没跟"的悬空红；
+# ③ 顶替那条活路与本批迁进去的两格（层内 Semaphore 上限、幂等门节点重试）必须在位，
+#   门面也不得再把它列作在役成员（§6-115 的"文档声称有、代码没有"）。
+# 入册前逐文件单跑两次同读数 4 passed（6.32s / 6.26s）。
+tests/unit/core/test_orchestratorTriadRetired.py
+# §6-163（批 18 裁定甲）身份通道合并的常驻面：一条通道、一处派生、属主显式传参。
+# 入册前逐文件单跑两次同读数 15 passed（13.68s／10.64s）。
+tests/unit/core/test_identityChannelMergedToOneSource.py
+
+# §6-173 语音装配层契约（形状格退役后的替代证据）：
+# `test_voiceAssemblyContracts.py` 8 格——问的是「被读的那一侧真读到了什么」，不是「名字在不在」：
+# 端点按属性名读 `VoiceResult`，属性漂移就是运行期 AttributeError ⇒ 用真 dataclass 字段集合对真源码
+# 的属性读数取差；预检按 text 键读 ASR 返回 dict，键名一改就变成「转写成功、内容为空」（静默降级）
+# ⇒ 用真引擎产物的键集合去覆盖真源码里的读键集合；`_channel_voice` 由两条 hasattr 格改成行为格
+# （只回 asr_transcription 命中项、分数按 confidence×0.7＋时间衰减×0.3、limit 生效、空库回空列表不抛）。
+# 两格探测器自证（合成样本必被点名）：「X 不该出现」型断言在探测器失明时会自动成立，本批实测过——
+# 上限探测器第一版只认 ast.Constant，放过了真码里的 `10 * 1024 * 1024`。
+# 为什么不用 inspect.signature().bind：本层生产签名一律以 **kwargs 收口，bind 对 catch-all 恒成功，
+# 那样造出来的格子常年全绿且看着像契约——比 hasattr 更坏。
+# 入册前逐文件单跑两次同读数 8 passed；同批另补 7 格在 `test_voice_engine_api_integration.py`
+# （响应体真字节 / 魔数定媒体类型 / 空产物 500 / 引擎头读真名），并用四处生产变异验过牙。
+tests/unit/voice/test_voiceAssemblyContracts.py
+# §6-174 语音上下文的注入实现唯一性（三处拷贝合一口 + 退无主状态）：
+# 同一批标签串（语音识别文本/识别置信度/语言/识别引擎/语音情感/TTS引擎/TTS音色）此前被抄三遍——
+# `voice_context_module.inject_metadata` 一份（其两个调用点都在 `context_pool` 永假的分支里，生产从未执行），
+# `context/orchestrator.py` 池分支与候选池分支各一份（这两条才是现役读侧）。标签漂移的症状不是报错，
+# 是 prompt 里悄悄少一项，所以按定义处唯一判：扫描 7 个标签的定义文件集合必须恰为选定那一份。
+# 另钉三条：现役两处调用点对唯一实现的调用形状（≥2 处，按 AST/调用计数不按注释）、
+# 「构造 VoiceContextModule 后该名字再无去处」的 dead-one-shot（此前每次上下文组装都白跑一遍
+# EmotionModule 的导入与实例化），以及模块不再自持 `_current_context` 且两个退役读口全仓零调用点。
+# 状态符号那格的口径按归属收：`_current_context` 在 `auto_context_module.py` 里是另一回事
+# （对话窗口消息列表，同名词不同物）——扫全仓符号名会把别人的合法使用算成命中，故本模块状态只看
+# 本模块文件，读口按 `name(` 调用形状查。探测器自证一格（临时造一个含标签的文件，必须被抓到）。
+# 不选 bind 型契约格的理由同 §6-173：本层签名带 **kwargs 收口时 bind 恒成功。
+# 入册前逐文件单跑两次同读数 11 passed；红自证＝stash 两个生产档 ⇒ 10 格翻红且无收集错误；
+# A/B 基线（HEAD 仓外 worktree 铺入本判据）10 failed/1160 passed ↔ 本树 1170 passed、本树独有红 0。
+tests/unit/voice/test_voiceContextInjectionSingleSource.py
+# §6-178 全仓非法转义棘轮（零容忍，不留存量表）：Python 现在对未知转义按字面保留，只报
+# SyntaxWarning，所以文本没坏——害处在**导入期**：语言侧把它升级为错误的那天，断的是全仓 import，
+# 而断点在别人的文档注释上（本批现量 11 处命中，生产 3 / 脚本 2 / 判据 6，全在 docstring 里写给人看的
+# 正则字符类、Windows 路径段、Schema 锚点）。留一份"允许非法转义的文件清单"就是第二个事实源，
+# 且那份清单只会被顺手加长，故取零容忍。
+# 三格形状：全仓棘轮本体（扫描集合＝`git ls-files -z '*.py'` 的读数，不用 rglob——那会把 __pycache__
+# 算进来、把已跟踪但被 ignore 规则遮住的档漏掉，两个方向都能造假绿）；扫描面覆盖格（三池各自必须扫到
+# 且带 3000 文件地板——排除型断言在功能缺失时会自动成立，所以证"扫得到"而不只证"没命中"）；
+# 探测器自证三格（坏样本必须被抓、加 r 前缀后必须放过、编译失败的文件必须**点名**而不是被吞——
+# "语法坏就跳过"这条兜底一旦存在就是纯逃逸口）。
+# 一处自指形态写进判据文档并避开：样本里的反斜杠全部由 chr(92) 现拼，本文件若写裸反斜杠，
+# 判据就把自己算成第 12 处命中（"本文件不得出现 X"的源码包含检查把自己那句算进去＝恒红那一形）。
+# 口径边界如实：扫的是**工作树**，并发会话在途的半截文件可能让它本机一时红而 CI（扫提交态）不会。
+# 入册前逐文件单跑三次同读数 6 passed（8.3—8.6s，全仓 3340 个文件逐个 compile）；
+# 红自证＝仓外 SHA256 快照 + 只按路径还原被修的 6 个文件（判据档保留）⇒ 1 failed/5 passed 且红句
+# 恰是那 11 条点名，无收集错误；活体 sourceEscapeSequenceImportClean_live.py exit=0 共 20 条读数，
+# 含反证那段（HEAD 那份源码在同形状下真导入必须 exit=1 且点名 invalid escape sequence，否则正证只是恒 0）。
+# A/B（HEAD=5121779a 仓外 worktree，context+memory+core+ci+llm+evolution 六族）基线 24f+1e/6836p
+# ↔ 本树 24f/6842p（+6 即本批判据），仅本树红 0 条；仅基线那条 ERROR 单档两侧各两次复跑皆绿，不重现不认领。
+tests/unit/core/test_sourceEscapeSequenceHygiene.py
+# §6-179 批 33：稠密余弦 14 处收进 `core/vector_math` 一处。分叉的不是行数而是三种互相
+# 矛盾的口径——五份没有长度检查，`zip` 把长的那条截掉，4 维查询对 2 维存量算出 0.408 的**假分**
+# （真 `UnifiedVectorStore.search_neurova_hebbs` 上的活体读数；判据档那对构造样本上是 1.0 满分），
+# 假分不喊人还按它往上排，记忆召回／工具目录／技能合并三条路都吃它；另两份抛 ValueError、
+# 三份回 0.0，零范数有 `== 0`／`or 1.0`／`<= 1e-12` 三种写法，`skills/skill_semantics` 干脆拿
+# 点积冒充余弦（未归一时 `[3,4]·[3,4]` 给 25.0，而下游写的是 `if cos >= threshold`）。
+# 单源定三件事：原始值域、[0,1] 映射、以及**三态出口** `tryCosineSimilarity`——
+# `evolution/eval/constraints` 那条进化闸靠 None 回退 Jaccard，把"算不了"折成 0.0 等于告诉它
+# "算出来是 0"，回退条件从此永不成立。按定义域不并的一份：`vector_search` 吃 `Dict[str, float]`
+# 稀疏向量，判据里有专门一格钉它必须仍在原位（"顺手一起并了"就是洗掉稀疏语义）。
+# 红 4 failed/5 passed ⇒ 绿 11 passed；红自证＝按路径清单还原 19 生产件 + 3 测试件、判据与单源
+# 留在树里复跑 ⇒ 恰 4 格翻红无收集错误，复原逐文件 sha256 复证；变异 5 枚全咬，其中 M4 反过来
+# 抓到判据自己的洞：站点写成 `dot / na`（除数是已算好的范数变量）时探测器按式子不认变量名，
+# 第二份实现能从守卫底下滑过去——补分支后必须配自证样本（同一个 `continue` 控制流坑犯了两次：
+# 新分支写在 continue 之后等于没写）。活体 10 读数 exit=0，含与 numpy 逐值对照（偏差 0.000e+00，
+# 外部参照不是自证）与反向校准（把单源桩成 zip 截断 ⇒ 站点读数立刻变回 0.408 假分）。
+# A/B：四族基线 16 红 ↔ 本树 17 红，多的 `test_github_push_skill::test_get_status` 当场定性为
+# 盘符布局（`os.system("cd … &&")` 跨盘不改盘；基线代码把临时目录放 E: 同样红、放回 C: 同样绿）；
+# 另 13 条第二组候选在 HEAD 态逐格复跑 13/13 同红 ⇒ 全部预存不认领。
+# 入册前逐文件单跑三次同读数 11 passed（6.0~6.3s，含全仓 AST 数实现那一格）。
+tests/unit/core/test_denseCosineSingleSource.py
+# §6-182 批 34：向量原语（范数／点积／归一化）也接进 `core/vector_math` 单源——纯搬家，
+# 逐值不变。两处细节是搬家时最容易"顺手改好"而改坏契约的：零范数那支 `vectorNormalize`
+# 返回**传入对象本身**而不是副本（判据用 `is` 钉），`vectorDot` 对长度不等按 `zip` 截断
+# （那是点积的定义，维度守卫归余弦那一处）。另收三份"同一个原语的第 4/5/6 份写法"：
+# `positional_encoding._vec_norm`（零消费者）退役、`semantic_emotion._zero_norm` 与
+# `semantic_search` 降级嵌入里的内联模长改取单源。
+# 枚守卫按**形状**数而不是按函数名数——批 33 那枚 M4 教出来的：只认 `def vector_norm` 时，
+# 站点内联重写 `sum(x*x …) ** 0.5` 就滑过去了（本批 M3 正是这一形，第一版判据对它无牙）。
+# 两步写法的限度写在格子里，不装作覆盖。红 4 failed/1 passed ⇒ 绿 7 passed；变异 3 枚全咬
+# （M2 一枚同时翻红枚举/归属/形状三格）；活体 `vectorPrimitives_batch34.py` 8 读数 exit=0
+# （反向校准：桩坏 `vectorNorm` ⇒ 真质心读数跟着变 2.0，路上没有第二份模长）。
+# A/B 仅本树红 0。入册前单跑三次同读数 7 passed（11~12s，两枚全仓 AST 扫描占大头）。
+tests/unit/core/test_vectorPrimitivesSingleFace.py
+# 批：记忆双根收口（§6-202）：正文的 memories 表原跨两根有六处建表定义，其中认知引擎自建的
+# data/<agent>/memory.db 实测 0 行、崩溃恢复文件从未被创建，而每轮检索以最高优先级读它且
+# 返回空不报错。现收成一处：FTS5(trigram) 与 embedding 长在现役真行库上，引擎退为 L0/索引层。
+# 10 格里：1 格按 AST 面数「正文建表定义还有几个宿主」（配地板格与"唯一宿主必须是 manager"格，
+# 防空扫假绿）、3 格读真产物 sqlite_master/PRAGMA 钉影子表+三触发器+embedding 列、1 格中文子串
+# 必须 MATCH 得到（默认 unicode61 恒 0 命中，这一枚是变异对照锚点）、1 格删正文后影子必须同数
+# （防只删主表两表脱节）、1 格构造引擎不在数据根开第二落点、1 格恢复文件与正文库同目录、
+# 1 格引擎召回正文真行、1 格读侧带生效三元组（正例先断，反例后断——排除型断言单写会绿得没道理）。
+# 红自证与 A/B 同形：基线铺入本批判据 60 failed/12 errors ↔ 本树仅本树红 0 条。逐档单跑三次 10/10/10。
+tests/unit/memory/test_memoryDualRootMergedToOneStore.py
+# 批：记忆双根收口顺带改指的三档（判据本体未松，只把读数从引擎自建库换到正文库）：
+# 记账只在过滤后对真回出去的行发生（冷档不得被自己的命中复活）、崩溃恢复文件不无条件清空、
+# UPDATE 正文必同步影子表。逐档单跑三次 2/2/2、2/2/2、1/1/1。
+tests/unit/core/test_cognitive_wal_flush_race.py
+# 批 §6-203：`~/.neurova/` 那族配置/状态收进数据根（凭据 providers.json、审计 audit.db、
+# 治理白名单 governance_whitelist.json、技能安装根 skills/installed）。8 格里：4 格问"经生产
+# 接缝写一次，东西在不在数据根 + 假 home 里是否零文件"、1 格问"探针清单与写侧取同一处"
+# （resolve_probe_paths 曾自己再拼一遍 home，留着就会对不存在的库报缺索引）、2 格问收养
+# （旧凭据整份搬进且内容逐字节不变；两侧同时在场时不覆盖新那份、旧物不静默消失）、
+# 1 格双向咬合的家目录落点表（按 AST 数"以 .neurova 打头的路径段"且排除文档串——按子串数
+# 会把 `.neurova_token_secret` 这类环境变量名与 api.neurova.dev 一起算成假红），
+# 新增即红、修好了不摘表也红。逐档单跑三次 8/8/8；活体另带反证子进程（退回旧 home 形态必须看见文件冒出）。
+tests/unit/core/test_homeLandingMovedIntoDataRoot.py
+# 批 §6-204：`~/.neurova/` 那族的收养补权利闸——数据根被注入到别处（跑测临时根、探针隔离
+# 根）时一律不动主目录，只点名一次。10 格里 4 格问"别处根下四族旧物是否原地不动且不复制"
+# （§6-203 落地后的一次跑测实测把本机 providers.json 18 家／13 份加密凭据、audit.db 2361 行
+# 搬进了 Temp）、2 格问"跳过必须点名且无旧物时不报警"、2 格问"操作者自己的那一址照常收养"
+# （闸不是总开关，否则把救济做成开关）、2 格按 AST 钉"够着主目录的入口只有一号仓库"与
+# "四族都走带闸入口、不得直用无闸原语"。逐档单跑三次 10/10/10；活体
+# `tests/manual/homeAdoptionGateLive.py` 另带摘闸反证（桩成恒真必须把假 home 搬空）。
+tests/unit/core/test_homeAdoptionRefusedUnderForeignDataRoot.py
+# 批 §6-206：推理链持久化门接进治理面（此前只有裸 env `NEUROVA_TRACE_PERSIST` 能拨，而全仓
+# 无生产赋值点 ⇒ 门永远关且没人能开）。10 格里 4 格是 2026-09-05 事故的原防线（默认不写、
+# env=1 才写、无效值不算显式、开关两侧 trace 都要从活跃表摘掉），6 格是本批新增：治理面开
+# ⇒ 交棒引擎、env 显式 0 压住治理面（优先级三个方向都要断，少一个方向就是没锁）、默认值
+# 不得被收口翻转、读取时机必须在决策点（构造期快照＝"页面能改运行时不认"的幻影旋钮）、
+# 消费方不得再裸读该 env、键必须在 DEFAULTS 声明。同批还加了「DEFAULTS 每个布尔开关都得在
+# PUT 面有字段」的枚举报示——它一跑就跑出两处存量同形（consolidation_* 两键），已同批扫掉。
+# 逐档单跑三次 10/10/10；活体 `tests/manual/traceGateGovernanceFaceLive.py` 18 项读数 exit=0。
+tests/unit/cognitive/test_reasoning_trace_persist_gate.py
+# 批 45（裁定 G＝用户点单「缓存三本账收成一条」，走 B 项：实装搬进 neurova/core/cache.py）：
+# 退役 `neurova/memory/core/cache.py`(574 行实装) + `neurova/core/cache.py`(84 行门面，含第二条
+# 全局实例注册名 core_global 与四个零消费者便捷函数) + `memory_layer/cache.py`(21 行薄壳)。
+# 两条注册名的真实危害＝同一个进程的缓存被 /metrics 记成两列，消费方不知哪列是真；薄壳那条
+# import 是批 43 挖出的真循环载体（`memory/__init__.py` 的 `_MODULE_MAP["cache"]` 别名是唯一消费者，
+# 随批删）。同批三条同族断点：设置页「清缓存」不再跨模块读私有 `_cache_registry`（改吃
+# clearRegisteredCaches()）、恒 skip 的 TestBatchWriter 整类退（BatchWriter 全仓零实装）、
+# 四个零消费者便捷函数按 §2 退役并配零容忍格。
+# 判据 9 格里：1 格退役档必须不存在且选定那份必须在（反空转）、3 格按三条退役模块逐个查生产侧
+# import、1 格 `importlib.import_module("<退役路径>")` 那一形（importsOf 看不见）、1 格全局只一条
+# 注册名、1 格私有注册表不出本模块、1 格清缓存公开口作用在真实对象上、1 格四个便捷函数不得复活。
+# 改判 `test_dead_cache_module_removed.py`：它此前把"一份实装 + 两份薄门面"钉成合法形状。
+# 逐档单跑三次 9/9/9（改判档 8/8/8）；活体 8 读数 exit=0 含**纯搬家逐值对账**（本树与 HEAD 那份
+# 六组行为读数 sha256 相同）；A/B 两侧 errors 数一致（9↔9），"仅基线红"14 条即本批转绿的格。
+tests/unit/core/test_cacheAccountsMergedIntoOneModule.py
+# 批 §6-208：回声行永不进上下文（§6-206 三张票里第一张的裁定乙前半段）。11 格里 4 格是行为断言
+# （引擎/L0/统一检索口三处都取不到，且被丢掉的行不被 touch+creditRecallHits——先记账再过滤会让
+# 冷档被自己这次命中复活，与工单 017 同形）、4 格钉词表与单源（按 AST 扫 UnifiedMemoryNode(category="X")
+# 的字面量逼新类别在 CONTEXT_VISIBILITY 表态；表与谓词各只准定义一处）、3 格是**改码前就该绿的反证**
+# （真生产路确实存了一行 + 同一次查询仍捞得到 crystallized 与普通行——缺它们"没泄漏"就是空转读数）。
+# 形状取"默认放行 + 显式禁"而非白名单：正文普通行本来就靠这条路进上下文，白名单会当场掐死现网检索。
+# 逐档单跑三次 11/11/11；活体另扩到 22 项读数带摘闸反证。
+tests/unit/memory/test_recallContextFilterKeepsEchoRowsOut.py
+# 批 §6-209：用户回执接进结晶器证据面（裁定甲）。11 格里 9 格问结晶器接缝、2 格问端点接缝。
+# 钉死的三件"不做"各有独立一格：补票**不新增观察**（条目数就是 min_observations 的分母）、
+# **不覆盖客观票据**（工单 002/010 优先级，两个方向都断）、**模式键对不上时不新建键**
+# （新建即静默双计）；另加"不落盘不算补上"与"取消反馈不撤票"（三态不许被写成两态）。
+# 纯对话轮的 CHAT_PSEUDO_TOOL 条目永不因点赞吃票——§6-208 那个过滤器挡得住推理链回声、
+# 挡不住结晶类进上下文（结晶按设计就该注入），所以寒暄只能不吃票。
+# 活体 `tests/manual/crystallizerEvidenceFromFeedbackLive.py` 带反证基线（未点赞时 evidenced=0）。
+tests/unit/cognitive/test_crystallizerTurnEvidenceFromUserFeedback.py
+# 批 47（§6-212）：包门面上的通用名与被盖掉的 import。10 格里 3 条规则各按**零容忍**钉——
+# 甲 包 `__init__.py` 不得绑"本文件不读、也没进 __all__"的通用名；乙 顶层 import 不得被同文件
+# 后面的同名定义作废（那条 import 从绑定起就读不到）；丙 通用名不得写进 `__all__`（堵"加一行
+# 声明来消音"这条后门）。另 7 格是口径自己：扫描集合地板（1021 个生产文件 + 5 个已知包必在集合里，
+# 防口径收窄）、用了的不报、字符串注解算使用、**docstring 不算使用**（否则判据退化成文本匹配）、
+# try 里的可选依赖兜底属正当形状不报、**后定义在前不报**与**后定义在后必报**成对钉顺序语义
+# （变异 M8 一开始无牙，就是因为缺"定义在前"那一格——顺序写反照样全绿）。
+# 逐档单跑三次 10/10/10；活体 `tests/manual/facadeGenericNames_batch47.py` 带反向校准
+# （同一取数打在 HEAD 那份工作树上必须报出 1 处通用名 + 3 处被盖掉的 import）。
+tests/unit/core/test_packageInitBindsNoUnusedGenericNames.py
+# 批 49（§6-220）：包门面「声明的公开面」必须盖住「真被人经包路径取用的名字」——这条根因的**另一侧**。
+# 6 格：登记表格**两侧都要相等**（新长出隐式公开面要红，补了 __all__ 却忘了销行也要红，同 §6-197
+# 那张"落点已消失必须销行"的手法）；幽灵声明格（`__all__` 里不许有本包给不出的名字）；扫描面地板格
+# （包数 ≥60、跟踪 .py ≥3000、消费者表非空）；两条探测器成对格（正头：符号名被包外取用而未声明必报；
+# 反头：子模块名／包内自指／`__version__` 三条排除各自都不许顺手吞掉同包里的符号名）。
+# 动态供给（PEP 562 `__getattr__`、模块层 `globals()[alias] = ...`、`sys.modules[__name__ + "." + a] = ...`）
+# 静态证不了供出什么 ⇒ 幽灵那一格对这类包放过，是写进注释的口径边界，不是没看见。
+# 逐档单跑三次 6/6/6；活体 `tests/manual/declaredSurface_batch49.py` 带反向校准
+# （同一条取数打在 HEAD 那份工作树上必须报出本批修掉的 4 包 10 名）。
+tests/unit/core/test_packageDeclaredSurfaceCoversWhatIsTaken.py
+# 批 §6-213（§6-211 丙案落地）：引擎 flush 之后，取数面必须等于正文单源。8 格构成——主行为格 1；
+# 两个"不许越界"的方向各 1（对账只准在 flush 那一点触发；取数面每次读都不许扫盘——缺后一格就会被
+# "改成每调用全表读"那种假实现骗绿，而它会把五条每查询都走的检索通道变成查询放大器）；
+# L0 未 flush 不许倒进取数面 1（否则刚收口的单源又长出第二个）；往返键与 metadata 1；
+# 写入口回 False 时保住 L0 与恢复文件、且不触发对账 1（对账口的回收会删掉唯一那份内存副本）；
+# "manager 不得反向引引擎" 1（本批锁序 引擎锁→manager RLock 单向的前提，反向一出现即红）；反空转 1。
+# 逐档单跑三次 8/8/8；活体 tests/manual/sleepConsolidationReadFaceLive.py 的
+# same_process_bodyRows_visible_in_fetch 由 0 变 1——那个期望是上一批预先写在档头的，不是事后补的。
+tests/unit/memory/test_engineFlushConvergesFetchFace.py
+# 批 §6-214：睡眠固化不得把已 soft-forget 的源当活跃记忆再合并一次（两击同根，缺一即漏）。
+# 4 格里 2 格真红转绿——跨界转换必须认得 `lifecycle_stage` 这个真键（`Memory.to_dict()` 里
+# 压根没有 `is_archived`，此前读的是不存在的键 ⇒ 退役事实在进入固化那一刻就丢）、
+# 第二轮不得把退役源再拉进同一个簇（实测旧形状每轮稳定 +1 行，2026-09-05 全库翻倍的线性版）。
+# 另 2 格**落笔即绿**，红由变异提供：M1 把退役行重新并入 merged_memories ⇒ 1 红、
+# M2 写回不 soft-forget 源 ⇒ 3 红；M3/M4 各只退回一击，主格都照样红，这就是"两击必须一起修"的实证。
+# 逐档单跑三次 4/4/4；活体 tests/manual/sleepRetiredSourcesNotReMergedLive.py 走真 create_app()
+# + 真 agent 的 sleep_consolidation，反证段（单独退回聚类那一击）必须红在 3→4 行那条读数上。
+tests/unit/memory/test_sleepConsolidationSkipsRetiredMemories.py
+# 批 §6-215（§6-214 那张票的甲案）：正文出口 `Memory.to_dict()` 必须把 embedding 带得出去。
+# `from_dict()` 当年只补了读侧（M-16 注释还写着"round-trip 即丢"），写侧 23 个键里没这个字段
+# ⇒ 凡经 `get_all_memories()` 的读面都失明嵌入这件事，而睡眠聚类的相似度只在两侧都有嵌入时
+# 才算得出 ⇒ "合并"在自动路上从未触发过。5 格构成——出口带值 1、空值统一给 [] 而非 None/缺键 1、
+# round-trip 不丢 1、**从生产出口走完整条链能真聚出 ≥2 源簇** 1（形态集第 189 条要求的形状：
+# 只在转换之后补数据的判据测得到逻辑、测不到路通不通）、"写侧今天仍没人填嵌入 ⇒ 本批不让合并
+# 当场开工" 1（现值绿，红由变异 M5 提供；另 M6 空值给 None 咬形状格、M7 出口截断咬三格）。
+# 逐档单跑三次 5/5/5；活体 tests/manual/memoryEmbeddingReachesConsolidationLive.py 走真
+# create_app() + 真 agent 的 sleep_consolidation，读出 face_embedding_lengths=[4,4,0] 与
+# round1_real_merge=[[mem_000001, mem_000002]]——这条路第一次真走通；反证删那一行必须红在
+# "聚类退回全单例簇"上。
+tests/unit/memory/test_memoryToDictCarriesEmbedding.py
+# 批 §6-217：一次性嵌入回填工具的三条硬规矩，各有判据。8 格——只填 NULL 不覆盖既有向量、
+# 幂等（第二跑填 0 且不再调推理）、引擎缺席则一行不写且退出码非零、initialize_sync 失败要带原因、
+# 空内容跳过并计数（否则伪装成"填了个空向量"）、dry-run 不落盘只报 wouldFill、
+# 填完经 `get_all_memories()` → `MemoryRecord` 取回真能聚成簇（§6-215 那条出口闭环的下游半段）、
+# 形状格按 AST 钉工具不许 import sqlite3 / 不许裸 execute（绕开唯一写口＝第二个落点）。
+# 七枚变异 M1..M7 各咬各格（M6 只加一句 import 即红）。逐档单跑六次 8/8/8/8/8/8。
+# ⚠ 本档的桩引擎早期用内置 hash() 造出过间歇红——字符串哈希按进程加盐，无关文本余弦会跳过
+# 0.7 阈值；换 zlib.crc32 后才稳（形态集"判据自己不稳，红就没法归因"那一形）。
+tests/unit/memory/test_backfillMemoryEmbeddingsTool.py
+# 批 §6-222（甲3，§6-218 三态票 → §6-219 丙止血之后的机制批）：睡眠合并的准入是
+# "余弦达近等价下限 **且** 归一化后短者为长者子串"，只看余弦即误伤。11 格——正例 2
+# （逐字重复照合、包含关系取最长且短者正文一字不丢）、反例 4（余弦 1.0 而内容不等价＝
+# IMP-探针/DB-探针那一形、kai 形状两条不同回合在现网阈 0.7 下各成一簇、阈值调到 0.3 不许
+# 把语义合并放回来、空键不得互吞）、参数 1（调高到 0.995 仍真的收紧＝阈值不是装饰）、
+# 写回 3（合并后活跃面恰 1 条产物且退役的正是那两条源、产物带 metadata.merged_from、
+# 产物分类不被挪进 general）。前 3 格在新旧判据下同绿是设计如此：它们钉"这条腿别整条熄火"。
+# 逐档单跑 11/11；活体 tests/manual/mergeGateNearEquivalentLive.py 走真 create_app() + 真
+# start_sleep() + 真 ONNX 引擎，两枚反证各红在各自的读数上（去掉写回 id= ⇒ 两条真事实从
+# 活跃面消失；整条退回只看余弦 ⇒ kai 那条 0.7875 的姊妹条把它吞掉）。
+# ⚠ 只回退两个 clause 里的**一个**（去掉包含条款、留 0.98 下限）活体仍全绿——反证要整条退。
+tests/unit/memory/test_sleepMergeRequiresNearEquivalentContent.py
+# 批 §6-226（§6-223 三态票的乙＋甲）：固化必须按隔离作用域分桶，写回必须进源行自己的作用域。
+# 6 格——跨归属的两条（内容相同、余弦 1.0）不许进同簇；**同归属的重复照旧要合**（反向钉，
+# 防分桶收得比裁定更紧）；产物继承源行的归属三元组；写回在源行作用域内真退役（查盘上 lifecycle
+# 与 stats["forgotten"]，不信被拒时只回 False 不抛的那条计数）；外来作用域单例的温度盘上真降；
+# AST 形状锁：写回里不得出现 agent_wide（那是把越权写成契约），且必须出现 request_scope。
+# 逐档单跑 6/6；活体 tests/manual/sleepConsolidationScopesLiveCopy.py 走现网库**副本** + 真
+# create_app() + 真 start_sleep()，读出 added=2/forgotten=5（修前 forgotten=0），反证只把
+# request_scope 的实参退空即红在"3 条逐字重复仍活跃 + 一行温度都没降"上。
+tests/unit/memory/test_sleepConsolidationBucketsByIsolationScope.py
+# 批 §6-229（§6-227 那张三态票的甲）：M-25 作用域限定行必须记住"自己这一行的主键"。
+# 现网量到的形状：读回时 `_plain_memory_id()` 剥掉 `agent\x1fneuser\x1fuser\x1f` 前缀，对象只剩
+# 业务 id ⇒ 下一次 `_persist_memory` 按业务 id 出发，一旦那个 id 空出来就 INSERT 出同内容的
+# 第二行（现网 14→16、四条产物两两同内容）。`manager.py:617` 的注释早写明这件事并只在
+# creditRecallHits 一条路径上修了——本批推广到整条持久路径。4 格——
+# 主格（装载→改温度→写回后主表仍只有一行、温度落在该行上）、装载保真格（对象记得行 id 而
+# `to_dict()` 不泄漏 `\x1f`：持久细节不外泄）、`agent_wide` 硬删格（同根因第三击：按调用现场
+# 三元组删 ⇒ 内存删了盘上留着、重启复活）、**反向钉格**（普通新建仍按业务 id 原位落一行，
+# 不许凭空给每行套前缀）。
+# ⚠ 主格与装载格都必须在**乙作用域**里 reload：快照每个业务 id 只留一份（`_merge_loaded_memory`
+# 的既定取舍"生效作用域优先"），不在那个作用域里装载就看不到那条行。
+tests/unit/memory/test_memoryPersistWritesTheRowItCameFrom.py
+# 批 §6-231（§6-215 那张票的甲案）：新行入库时就把嵌入算出来——否则固化这条腿对新写入永久失明。
+# 现网读数：`default` 14 行里那 2 行固化产物 `embedding IS NULL`，按甲3「任一侧无嵌入不合」永不进簇；
+# 全仓该列此前唯一的生产者是一次性脚本 `scripts/backfill_memory_embeddings.py`。成本实测不是障碍：
+# 本地 ONNX 冷加载 0.412s／进程一次、暖调 3.2ms，召回路与写侧用同一个单例。
+# 5 格——主格（真 `remember()` 后内存对象与正文列两头都有引擎那份向量）、零向量格（引擎回全零
+# ＝没算出来，不许当"有向量"写进列——教义第 2 条）、引擎缺席格（行照写、列留空、不炸调用方）、
+# **导入路同根因格**（`_build_imported_memory` 是第二处建行，只修 `remember()` 就留一条瞎腿）、
+# 闭环格（产物带嵌入 → 第二 `start_sleep()` 真把它吸收掉；认本轮产物按 id 集合差，不按 `merged_` 前缀）。
+# 夹具两条实据写在档头：甲3 的 0.98 门要"只差一两个虚词"才够得着（`+了`=0.9952，`+，已复核`=0.9513）；
+# `+。` 那对 normalized_key 相同会被内容门吞成一句。
+tests/unit/memory/test_writeSideFillsEmbedding.py
+# 批 §6-232（§6-210 老账①⑤）：两条"同一件事的第二处定义"收成一处。
+# ① 记忆落点 `<root>/memory/memory.db` 此前在 `agent_core.py` 与 `manager._default_db_path_for`
+# 各拼一遍（同形、只差 root 来源），改一处即分叉＝数据搬迁事故；现收进
+# `agent_workspaces.agentMemoryDirUnder/agentMemoryDbPathUnder` 一份。
+# ⚠ 判据第一版按"单条除法链里两个字面量齐不齐"数命中，漏掉了 `dir = root/"memory"` 先落变量、
+# 下一行再 `dir/"memory.db"` 那种拆写——数到 1 处是**假干净**。现在按文件级取 `and`、行号级取 `or`。
+tests/unit/memory/test_AgentMemoryLandingIsSingleDerived.py
+# ② context 台账的 FTS 分词器不再自持一份字面量，改取 `sql_like.FTS_TOKENIZER`。
+# 取值本相同 ⇒ 纪律问题非行为问题，所以第三格是**真建库**读 `sqlite_master` 的 SQL：
+# 只钉"引用了常量"测不到那条 `%` 拼出来的建表语句拼错形态。换分词器要重建（影子表按 rowid
+# 回填后 RENAME），本批改的只是"谁定义这个词"，迁移语义未动。
+tests/unit/context/test_LedgerFtsTokenizerFollowsSingleSource.py
+# 批 §6-233（§6-209 票②）：睡眠固化的编排面只剩 `sleep.py` 一份实现——那层壳（198 行、
+# 生产零外部 import、自建 MemoryRecord 把隔离三元组抹成 "default"）已退役，同批摘掉它那 5 格、
+# 改指文档四处。另两格是**交付锁**（现值绿）：六个编排入口必须还在选定那份上、
+# `from_dict` 必须仍认壳当年手工搬的 9 个键——盯的是"退役别把唯一能力一起删没"。
+# ⚠ 主格取数走 `ast_scan.sourceRefsUnder`（共享预算＋文本预筛），不许改回 `rglob + read_text`：
+# 后者把判据成本绑在代码总量上，实测给同选择集的重扫描档加墙钟压力、造出一条假回归。
+tests/unit/memory/test_SleepConsolidationHasOneImplementation.py
+# 批 家目录落点收口：五处默认落点从 `~/.neurova/` 与裸相对（随 CWD）收进数据根。
+# 病灶形状是"数据根注入管不到主目录"——`tests/conftest.py` 只注入临时数据根，于是测试里的
+# bare 构造（rbac 那 7 处）会在操作者主目录建出真库。行为格从生产入口取数当场量到了实得值
+# （`C:/Users/xccoo/.neurova/rbac.db`、`.../.neurova/config/knowledge_config.json`）。
+# ⚠ 两格值得记：① 落点函数是"进程级单例"的（`get_image_pipeline_manager`）不许直接从判据走，
+# 要直接构造，否则改进程状态带倒同进程后续用例；② 只把字面量删掉而没接 `dataLanding`/
+# `adoptHomeLanding` 是另一种"看着修好了"，故接线格与行为格各钉一头。
+tests/unit/core/test_HomeFamilyLandingsFollowDataRoot.py
+# 批 导入行 id 并进属主：同一 identity_key 导入两个 owner 不再共用一个业务 id。
+# ⚠ 这档最有价值的部分不是断言，是档头记的两条：① 本票原前提"同业务 id 会顶掉索引槽"
+#   被**变异反证否掉**（旧公式下两属主都召得回——§6-229 起持久层按作用域限定行存、读侧每次
+#   只装一个作用域），所以召回断言降格为反向钉，主证只有 id 形状那条；② 第一版主格写成
+#   "甲召回为空"是假绿未遂——那道空是 `import_memories` 自陈"不喂关键词倒排"的既定设计，
+#   要按生产真实读法（第二份实例 reload 后召回）才测得到路。
+tests/unit/memory/test_IngestIdentityKeyIsScopedPerOwner.py
+# 票④第一包·benchmark 门面实装退役（用户裁定取甲）：主格两枚钉「实现不在门面里、且全仓无人提名
+# 那些退役名字」；另三枚是交付锁——RAG 子模块那条活路仍可解析、真装配点 12 条 benchmark 路由仍在册、
+# 上一批那张落点判据不许留一枚指向已退役落点的悬空 pin。交付锁的失效方向由「删过头」提供。
+tests/unit/benchmark/test_benchmarkFacadeImplementationRetired.py
+# 批 74（§6-302 断点①后端半区）：oauth 配置写成可存、读成可得——此前只有三处读取面，写侧从未接。
+# 三格别当装饰删：① `test_emptyOauthDictMeansUnconfigured` 钉的是**本批自己引入的过度收紧**
+# （第一版让 oauth={} 也走必填校验 ⇒ 所有普通注册恒 400，被 test_tool_layers_auth.py 整档拦下）；
+# ② `test_clientSecretGoesToDiskThroughTheRealManager` 走真 SharedConfigManager 而非直接调封存函数——
+# 前一版判据调纯函数 sealSecrets 验，绿而磁盘上是明文（活体才抓到），这条不许退回纯函数口径；
+# ③ `test_plainRegistrationWithoutOauthStillReachesPersistence` 是反向闸：允许新键不得改变既有形态。
+tests/unit/tools/test_mcpOAuthConfigWriteThrough.py
+# 批 81（§6-309）：`core/multi_agent_manager.py` 整座岛（453 行，引入即孤岛、全仓零 import）连同两座
+# 专用测试退役。本档两轨都要常驻：主格钉"任何导入通道都不再取它"，交付锁钉"多 Agent 对外面与工作区
+# 单源一点没少"——只删实现不立此档，下一次批量事件还能把同名骨架提回来而无人拦。
+tests/unit/core/test_multiAgentManagerIslandRetired.py
+# 批 109（§6-311 裁乙第三刀）：core 那份 870 行 `FlowOrchestrator` 连同它自产自销的 1005 行契约测试一起退。
+# 5 格里：两份档本体都不在树里（shim 与它的测试必须同批）、三条根零悬空导入、同一取数口对现役替代必须报非零
+# （面自证）、`class FlowOrchestrator` 在生产树归零（教义 7 闭环：同一功能只剩一处实现被消费）、替代入口可导入。
+tests/unit/core/test_flowOrchestratorShimRetirement.py
+# D19 重做第 2 组退役（§6-376）：memory_index／vector_index_manager／vector_search 三档
+# 导入均 ModuleNotFoundError；隔离 tags 已并进 MemoryStorage.list_by_tags（由 storage 测试守）。
+tests/unit/memory/test_d19SecondRoundRetirements.py
+# D19 剩余组退役（§6-378）：六档未接旋钮文件/导入面/门面导出全清零；正控活实现仍在。
+tests/unit/memory/test_d19ThirdGroupRetirements.py
+# A1 因果推理接线（§6-379）：真 MemoryManager 图上效应/根因/链/解释/环 + 端点 causal 分支。
+tests/unit/memory/test_causalReasoningWired.py
+# A2 question_decomposer 退役（§6-379）：文件/导入面/门面导出全清零；正控 live 替代仍在。
+tests/unit/memory/test_questionDecomposerRetirement.py
+# 第二环 agent_self/memory_stream 退役（§6-380）：跟踪源无导入、门面不导出；正控 EventBus/MemoryManager 仍在。
+tests/unit/memory/test_agentSelfAndMemoryStreamRetirements.py
+# §6-394（批 E）：整档 pytest.mark.skip 的存储旧档退役（46 格收了不跑＝零覆盖），本档钉四件「不许复活」——文件与包路径、裸引用面、MemoryStorage 构造口只收 storage_dir 且死方法不得回退、替代覆盖档在场；末格是扫描器反向控制。入册前逐文件单跑两次同读数（4.75s／4.80s，5 passed）。
+tests/unit/memory/test_storageComprehensiveRetired.py
+# §6-395（批 F）：闭环链两档退役的守卫——两个文件与其包路径不在场、链上四个死名字在代码行里清零、
+# 替代判据档在场（否则旧档会以“恢复覆盖”捞回来）、扫描器反向控制，另附一格专治形态 373：
+# REPO_ROOT 必须真指向含 neurova/ 的仓库根（本档三层深，parents[3]）。
+# 注释放宽只到注释行，docstring/代码行的引用仍必点名——该规则是落笔时被自家账目注释误咬之后收窄的。
+# 入册前逐文件单跑两次同读数（5.11s／5.32s，5 passed）。
+tests/unit/core/test_closedLoopChainRetired.py
+tests/unit/memory/test_sleep_phase_cycle.py
+tests/unit/core/test_steer_queue.py
+# §6-402（批 K 第三档）：Windows 只读位让「锁主已死」的回收器永久失效——两条新格（正检＋负对照）钉住
+# 「删不动 ≠ 不该删」。实测本机 TEMP 会话根下 10 个 `pytest-<N>` 目录里 **8 个含 git 只读对象文件**，
+# `shutil.rmtree` 撞 `[WinError 5] 拒绝访问` 后回收侧只 warn 就跳过 ⇒ 每轮跑测重复打同一批警告、残留只增不减
+# （最早一个是 2026-10-22 18:11 留下的）。修后现查会话目录 10→3（回到 pytest 自身 keep=3 的健康态）、警告归零。
+# 负对照同批建：锁主还活着的只读目录一律不碰，连只读位也不许顺手清。逐文件单跑两次同读数 21 passed（7.57s／7.07s）。
+tests/unit/core/test_temp_reclaim.py
+# §6-407（批 O-2）：空闲监控线程的 start/stop 成对——生产关闭口停线程、测试侧按格统一回收。
+# 判据钉的是**那条线程对象**不再存活 ＋ 状态机到 STOPPED，不是全局线程计数（后者会被别档残留
+# 污染，红绿都不说明问题）；回收口自己也有格（起点 0 → 起两条 → 报 2 → 两条真死 → 再报 0），
+# 否则 conftest 里那句每格后的 `stopAllIdleMonitors()` 可以是个空函数而全仓不红。
+# 活体读数：起 20 个 Agent 的睡眠链 ⇒ 监控线程 20 条；逐个 `shutdown_agent` ⇒ 残留 0 条；
+# 随后回收口返回 0 ⇒ 收干净的是生产那对手。A/B（把三档换回提交前逐字节还原）在
+# `tests/unit/memory`＋`tests/unit/core` 全量上：无修复态 14 failed／3233 passed ↔
+# 有修复态 12 failed／3235 passed，总数同为 3247、差集恰是本批那两格，无新增红；
+# 两态耗时 254.74s ↔ 258.94s ⇒ 按格回收的成本在噪声内。逐文件单跑两次同读数 7 passed（6.31s／8.24s）。
+tests/unit/memory/test_sleep_loop_wiring.py
+# §6-408 其二（批 O-2c）：审批节点不在测试里空等满窗口——同一根"合法超墙即整场打死"的第三条链。
+# 单格隔离计时 1 passed in 63.45s（`exec_approval` 会等满 `config["timeout"]`，而处理器是在它
+# 返回之后才被调的 ⇒ 60 就是 60 秒空等）；整档 7 passed in 130.03s。两处孤儿 60 收到本仓同族档
+# 既有口径 1s。新常驻判据三格：凡提到 `exec_approval` 的被收集测试里 `"timeout"` 字典项不得超 10s
+# ＋三面分开自证（枚举面 ≥1000／预筛候选面 ≥5（现数 7 档）／扫到的等待预算数 ≥12（现数 23 处））
+# ＋合成样本双向对照（60 要被抓、1 不得被抓、值挂模块常量上也要算得出来）。
+# 面为什么拆三条：合成一条就分辨不出失败形态——枚举面掉穿＝扫描根指错，候选面为空＝预筛写窄，
+# 只有站点数为零而前两面正常才是真绿。治理闸 `test_ratchetDoesNotRise` 当场把我第一版判成
+# offender：`assert len(sites) >= _SITE_FLOOR` 右边是个名字而非常数，闸只认"与常数比"那一形
+# ⇒ 形态 405 的现形复算：加行的同时跑闸，闸说的是加行者的问题，不是闸的问题。
+# 变异探针（`_APPROVAL_WAIT_S` 改 90）⇒ 仅主判据红，且整档计时同步涨到 190.50s（同一次探针
+# 既读出"形状被抓住"也读出"这确实是墙外成本"）；恢复后 10 passed（13.30s／12.51s 两次）。
+tests/unit/neurflow/test_approval_reply_mechanism.py
+# §6-409（批 O-3）：对象内键值状态袋收口成**一处**实装，三族共用；`BasePlugin` 那份错位接缝退役。
+# 收口前三份并存：`BaseModule`（在役，IdleTimeTracker 写 6 键＋一格读回）、`SleepConsolidation`
+# （同功能第二拷贝，读的是自己那个 `_state` dict）、`BasePlugin.get_state/set_state`（坏的：
+# 转发到 `StateManager` 从未存在的 `get_state(plugin_id,…)`，且 `_state_manager` 从不被注入、
+# 这一对方法全仓零调用方）。判据不数定义行就完事——它比**函数本体的同一性**
+# （`getattr(cls, name) is StateValuesStore.set_state_value`），各抄一份"长得像"的会当场红。
+# 反面控制两条：状态机那一对同名不同职的 `BaseModule.get_state()/set_state(ModuleState)` 必须
+# 仍在且仍不收 key（否则本批就成了顺手抹掉一半契约）；`BaseModule` 的具名注入位不得被一起削掉。
+# 红→绿读数：实现前 5 failed／4 passed（红在行为与形状断言上——`AttributeError` 级别的
+# "插件族没有这两条方法"、定义面报出的两处并存、广告了转不出去的构造参），实现后 9 passed
+# （3.22s／3.27s 两次同读数）。活体（真 tracker＋真 consolidation＋真 BasePlugin 实例，
+# 隔离数据根，脚本即用即删）：启动后 `running=True`／`initialized=True`／`started=True`，
+# 停止后 `running=False`／`stopped=True`，插件写读与默认值通路，`_state_manager` 已从实例字段消失。
+# A/B 归零验证：`tests/unit/core`＋`plugins`＋`memory`＋`test_base_plugin` 共 3373 passed／
+# 12 failed，12 条与批 O-2 那场的同 12 条逐名相同（并会话在途改动所致，见 §6-405/§6-406）；
+# 另把本批 4 个生产档临时换回 HEAD 态复跑 `tests/unit/ci` 那三档红（13 条）⇒ 与本批无关，预存性成立。
+tests/unit/core/test_perObjectStateValueStoreHasOneImplementation.py
+# §6-416（批 P-5 第三格）：内容级**第八张表**并进单源，挖掘门改接并退役自带表与同名实装。
+# 票面来自 §6-415 仍开①——§6-411 那次"七份收成一份"没数到 `evolution/eval/miner.py:SECRET_PATTERNS`，
+# 而它在役（`service.py:503-506` → `messages_from_sessions` → `sanitize_messages` → 命中即整条
+# 剔除，评测集随后喂进化分析）。先比后合的结论分四档：**六形单源一条都没有**（`ghu_`／`xoxb-`／
+# `xapp-`／`ntn_`／`AKIA{16}`／PEM 私钥头，实测原样进证据 ⇒ 并进表，表 12→18、凭据投影 7→13）；
+# **四条是冗余窄档不并**（`sk-ant-api`／`sk-or-v1`／`ghp_`／`Bearer \S{20,}` 实测由泛化档覆盖，
+# 再抄一遍＝同一件事第二把尺度，故反向钉一格）；**三条键值式单源本就更强**（值长下限统一走
+# §6-415 具名的 `MIN_SECRET_VALUE_LEN`）；**七个凭据环境变量名不是脱敏形状**——提到变量名不等于
+# 泄露凭据，打进打码投影会把运维散文糊平，故收成筛除词汇一处具名（`CREDENTIAL_ENV_NAMES`＋
+# `mentionsCredentialEnvVar`，大小写口径沿用原表 IGNORECASE）。第二段实装名 `contains_secret`
+# 一并去掉（改名 `_containsCredential`），仓内该功能只剩一处实装被消费才算闭环。
+# 判据 7 格全经**在役入口**问（真 `sanitize_messages`／`_redact`／`redact_secrets`），新符号走
+# hasattr／AST ⇒ 生产回退态收集得起；夹具 `_BENIGN_TASK` 刻意长过 `MIN_TEXT_LEN`，免得把"长度闸
+# 剔除"冒充成"密钥闸剔除"。红→绿 5 failed／2 passed → 7 passed；红自证两生产文件回退 HEAD 复跑
+# ＝5 failed／2 passed 与首轮逐条同号。变异探针三发各只红该红（剔除口恒 False／摘 AWS 形状且
+# 连投影名一起摘——只摘形状时 `_pick` 当场 KeyError，"投影写错宁可炸"被顺手自证／泛化档收到
+# 40 位⇒仅冗余窄档那格红）。活体十形经真链全剔除且两扇脱敏门全 `[REDACTED]`，而"请先设置
+# GITHUB_TOKEN 与 DATABASE_URL"这句挖掘门剔除、脱敏门逐字不动（＝筛除词汇与打码形状必须分开）。
+# 回归 7653 passed，十四条既有红逐条同选型两态对跑读数一致（含只在本场现形的 test_ttl_expiration
+# ERROR＝跨档串扰），本批不新增红。逐文件单跑两次同读数 7 passed。
+tests/unit/evolution/test_minerSecretDropPolicySharesOneTable.py

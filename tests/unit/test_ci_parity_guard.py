@@ -43,7 +43,11 @@ EXPECTED_MAP = {
     # unit-tests（Issue #301）：受保护子集只跑一腿，且那一腿是生产解释器
     # （3.12）。收敛依据与判据见 tests/unit/ci/test_unit_tests_single_leg.py：
     # 101 次 PR 构建里两腿状态完全一致（单边红 0 次）。
+    # 两侧都按分片跑（构建 `cnb-v9p-1k5pkvplt` 的 code 137），故 GitHub 侧多一个
+    # 合并各片数据再判阈值的 `coverage` job——它属同一条腿的第二步，cnb 侧对应的是
+    # 同一流水线里的第二个 stage（不是新流水线）。
     "unit-tests": ["unit-tests"],
+    "coverage": ["unit-tests"],
     "e2e": ["e2e-backend-boot"],
     "frontend": ["frontend"],
     "perf-gate": ["perf-gate"],
@@ -73,11 +77,20 @@ EXPECTED_CORE_COMMANDS = {
         # 最慢的一种，三条 job 装同一份精简依赖时尤其明显。
         "python -m pip install -r requirements-ci.lock",
     ],
+    # 受保护子集的**索引**（条目与顺序的唯一事实源）；两侧都按同目录的分片
+    # `protected_tests.<N>.txt` 逐片跑（`code 137` 的根修，判据见
+    # tests/unit/ci/test_protected_subset_shards.py）。这里断言索引在场而不是分片文件名：
+    # 片号的事实源是目录里有哪几片，抄进本表就是第二份片号清单。
     "unit-tests": [
-        "scripts/ci/protected_tests.txt",
-        "--cov-fail-under=60",
+        "scripts/ci/protected_tests",
+        # 跑测那一步只攒数据、不判阈值（逐片判 60% 会假红：单片实测 49%、整份 88%）；
+        # 阈值由紧随其后的合判步持有（cnb 同一流水线的第二个 stage / GitHub 的 coverage
+        # job），两侧同源同一脚本同一数值。
+        "--cov-report= --cov-fail-under=0",
         "requirements-ci.lock",
     ],
+    # 受保护子集的第二步：合并各片覆盖率数据后判一次阈值。
+    "coverage": ["scripts/ci/coverage_report.py --fail-under 60"],
     "e2e": ["python -m pytest tests/e2e/test_backend_boot.py -q --timeout 240"],
     "frontend": ["npm audit --audit-level=high", "npx vue-tsc --noEmit", "npx vitest run"],
     "perf-gate": [

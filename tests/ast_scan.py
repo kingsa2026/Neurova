@@ -146,10 +146,20 @@ def untrackedNotIgnoredPaths() -> List[str]:
 #:
 #: `root` 形参只为**合成控制格**保留（面自证棘轮要在临时目录里造一份假清单验探测器咬不咬）；
 #: 生产判据一律不传，向仓根要那份清单。
-def protectedSubsetEntries(root: Path = None) -> List[str]:
-    """`scripts/ci/protected_tests.txt` 的条目（剥 `#` 注释与空行，顺序保持清单原序）。"""
+#: 受保护子集的**索引**文件名。分片清单（`protected_tests.<N>.txt`）与它同格式，
+#: 分片号的事实源是目录里有哪些分片文件；`ledgerName` 只供索引与分片对账时点名。
+PROTECTED_SUBSET_INDEX = "protected_tests.txt"
+
+
+def protectedSubsetEntries(root: Path = None, ledgerName: str = PROTECTED_SUBSET_INDEX) -> List[str]:
+    """`scripts/ci/protected_tests*.txt` 的条目（剥 `#` 注释与空行，顺序保持清单原序）。
+
+    `ledgerName` 缺省取索引；分片对账时按文件名逐片读（同一把尺，不另写一份读者）。
+    """
+    # `root` 是**仓根**（与 `REPO_ROOT` 同一层级），不是清单所在目录：
+    # 合成样本传 tmp_path 时也得是"这棵树的仓根"，否则读的是 `<tmp>/scripts/ci/scripts/ci/…`。
     base = Path(root) if root is not None else REPO_ROOT
-    path = base / "scripts" / "ci" / "protected_tests.txt"
+    path = base / "scripts" / "ci" / ledgerName
     if not path.is_file():
         # 回空清单＝"扫了个空"读成"清单干净"，与本模块 `_gitLsFiles` 那条同形，响亮失败
         raise AssertionError(f"受保护子集清单不存在：{path}（判据的扫描面不可信）")
