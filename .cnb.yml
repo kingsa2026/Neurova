@@ -185,9 +185,23 @@ main:
         # 抬到 90m：整场是串行一条腿，余量按实测最慢批次的 1.6 倍留，且必须宽于
         # 子集里最高的单档父墙（`pytest.mark.timeout(120)`）足以让诚实超时先说话。
         - name: protected subset with coverage gate (fail_under=60)
+          # 输出**不许**重定向进文件。2026-10-25 构建 `cnb-sl8-1k5pih0k6` 曾把 stdout
+          # 全量吞进 `/tmp/pytest_protected.log`，换来两个后果，都实测过：
+          #   1. 日志里只剩命令回显，一条进度都没有——真出事（进程被掐）时 `tail`
+          #      根本执行不到，整场读数归零，只能靠事后拉 runner 日志才看见跑到哪；
+          #   2. 十几分钟零输出会让「无输出超时」这条生命线失去意义，也让
+          #      「平台强杀」与「跑挂」两种形态在日志上彻底同形。
+          # 这里改成 `tee` 之后按退出码判定：日志照存（排障要全文），stdout 照出（进度与
+          # 失败摘要都在），两者都不牺牲。`PIPESTATUS[0]` 取 pytest 自己的退出码——
+          # 写成 `$?` 会拿到 `tee` 的，门禁从此恒绿。
           script: |
             TESTS=$(grep -v '^#' scripts/ci/protected_tests.txt | tr '\n' ' ')
-            python -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS
+            set -o pipefail
+            python -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS \
+              2>&1 | tee /tmp/pytest_protected.log
+            RC=${PIPESTATUS[0]}
+            echo "── pytest 退出码: $RC（日志全文 /tmp/pytest_protected.log）"
+            exit $RC
           timeout: 90m
 
     # ── 5. E2E：后端启动冒烟 ─────────────────────────────────────────────
