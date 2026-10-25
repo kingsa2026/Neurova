@@ -63,11 +63,13 @@ def _blockedLoader(monkeypatch):
 
 
 class TestNoModelLoadOnTheGatePath:
-    def testSimilarityIsComputedWithoutTouchingTheModelLoader(self):
+    def testSimilarityIsComputedWithoutTouchingTheModelLoader(self, monkeypatch):
         """词面下界必须照算——回退路径不是"算不了"，是"不用模型也能算"。"""
         from neurova.evolution.eval import constraints
 
-        constraints._SEMANTIC_ENGINE_TOUCHED = ""
+        # 按用例钉、用例结束即撤销：这一格是生产侧的**观测面**（`_noteEngineProbe` 写的
+        # 就是它），裸赋值会把它留成空串，后续读它的判据看不到真实探测痕迹。
+        monkeypatch.setattr(constraints, "_SEMANTIC_ENGINE_TOUCHED", "")
         similar = semantic_similarity(*SIMILAR)
         assert 0.0 <= similar <= 1.0
         assert similar > 0.5, f"同义改写被算成 {similar}：词面下界这条腿断了"
@@ -94,12 +96,12 @@ class TestNoModelLoadOnTheGatePath:
         monkeypatch.setattr(onnx_embedding, "ONNXEmbeddingEngine",
                             lambda *a, **kw: _ReadyButEmpty())
         monkeypatch.setattr("neurova.embedding._embedding_engine", None, raising=False)
-        constraints._SEMANTIC_ENGINE_TOUCHED = ""
+        monkeypatch.setattr(constraints, "_SEMANTIC_ENGINE_TOUCHED", "")
         value = semantic_similarity(*SIMILAR)
         assert 0.0 <= value <= 1.0
         assert constraints._SEMANTIC_ENGINE_TOUCHED in ("probed", "ready")
 
-    def testTheEngineProbeActuallyRuns(self):
+    def testTheEngineProbeActuallyRuns(self, monkeypatch):
         """反向钉住"什么都不算也能绿"：这一跳必须真的被走到。
 
         摘掉 `_embedding_similarity` 的调用（例如把 `semantic_similarity`
@@ -107,7 +109,9 @@ class TestNoModelLoadOnTheGatePath:
         """
         from neurova.evolution.eval import constraints
 
-        constraints._SEMANTIC_ENGINE_TOUCHED = ""
+        # 按用例钉、用例结束即撤销：这一格是生产侧的**观测面**（`_noteEngineProbe` 写的
+        # 就是它），裸赋值会把它留成空串，后续读它的判据看不到真实探测痕迹。
+        monkeypatch.setattr(constraints, "_SEMANTIC_ENGINE_TOUCHED", "")
         semantic_similarity(*SIMILAR)
         assert constraints._SEMANTIC_ENGINE_TOUCHED in ("probed", "ready"), (
             "语义相似度的取引擎跳没被走到——判据面可能已经被摘掉了")
