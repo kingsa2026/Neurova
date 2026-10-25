@@ -25,12 +25,24 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = get_logger(__name__)
 
 # 可选依赖
-try:
-    import playwright  # noqa: F401 - 仅探测可用性
+def _playwrightAvailable() -> bool:
+    """真探测运行时面是否齐：`import playwright` 在 Linux/Windows 上对**任一**发行版都成立
+    （上游同一个分发名），故"能 import"只说明名字被占，不说明 `async_api` 在。
 
-    HAS_PLAYWRIGHT = True
-except ImportError:
-    HAS_PLAYWRIGHT = False
+    判据是那两件**本文件真要调**的东西：`PlaywrightBackend` 用 `async_playwright()` 起浏览器，
+    `DialogHandler` 读 `Dialog.type/.message`、调 `.accept()/.dismiss()`。名字被别的包占着、
+    或装了个缺 `async_api` 的残体时，`HAS_PLAYWRIGHT` 必须是 False——否则 `_load_config` 会
+    造出一个一调就炸的后端，把"没装"伪造成"装了但坏了"。
+    """
+    try:
+        import playwright  # noqa: F401 - 仅探测可用性
+        from playwright.async_api import Dialog, async_playwright  # noqa: F401
+    except Exception:  # noqa: BLE001 - 名字被占/残体装法都按"没装"处置
+        return False
+    return True
+
+
+HAS_PLAYWRIGHT = _playwrightAvailable()
 
 try:
     import scrapling.fetchers
