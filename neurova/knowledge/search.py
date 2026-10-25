@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import threading
 from enum import Enum
 from typing import Any, Dict, List, Tuple
 
@@ -80,29 +81,49 @@ def _ngram_tokenize(text: str) -> List[str]:
     return [t for t in tokens if len(t) >= 2]
 
 
+#: 取用 jieba 的**唯一入口**（全仓）。jieba 的冷启动（`initialize()` 建前缀字典）
+#: 实测 0.5–0.8s，在 CI 那种多格并行的场子里被 GIL 争抢放大到 8s 以上（实测 8.1s 构建
+#: 字典 + 8.65s 首调），足以把一条 30s 的用例墙撞穿——`test_service_closed_loop` 三格就
+#: 这么在 CI 红过。故本入口在第一次取用时**当场把字典建好**，把成本收在调用方手里。
+#:
+#: 在此之前全仓有两份各调各的取用口：本模块的 `_get_jieba()` 与
+#: `neurova/evolution/eval/constraints._token_jaccard()` 里那句裸 `import jieba`。
+#: 前者只 `import`（字典仍是懒建），后者连 import 都不缓存——两处都能在"用例跑着跑着"
+#: 触发一次冷启动，谁也说不清那次抖动是谁付的账。按教义第 6/7 条收口到这里一份。
+_JIEBA_LOAD_LOCK = threading.RLock()
+_jieba: Any = None
+
+
 def _get_jieba() -> Any:
     """进程级惰性加载 jieba；不可用返回 None（调用方回退 n-gram）。
 
     缺席走 n-gram 是"失败方向"的弱化版（缺一个 jieba 维度的精度，不是检索坏掉），
     但**必须**留下 WARN 日志——否则升级 ABI / funasr 冲突卸载会让 FTS/BM25
-    静默回退，监控盲。"""
+    静默回退，监控盲。
+
+    双检锁 + 首次即建字典（见上面 `_JIEBA_LOAD_LOCK` 那段）：并发的第二个调用方等第一个
+    建完再返回，不会各自 `initialize()` 一次；建失败的按 `False` 记下来，不反复重试。
+    """
     global _jieba
     if _jieba is not None:
         return _jieba if _jieba is not False else None
-    try:
-        import jieba as _j
+    with _JIEBA_LOAD_LOCK:
+        if _jieba is not None:
+            return _jieba if _jieba is not False else None
+        try:
+            import jieba as _j
 
-        _j.setLogLevel(logging.WARNING)
-        _jieba = _j
-    except Exception as exc:  # noqa: BLE001 — 可选依赖，缺席走回退
-        _jieba = False
-        logger.warning(
-            "知识库 jieba 不可用，FTS/BM25 静默回退 n-gram（中文检索精度降级）: %s", exc
-        )
+            _j.setLogLevel(logging.WARNING)
+            # 字典在这里一次建完：调用方拿到的就是"可直接切"的实例，
+            # 不会在后续某条无关键上付这笔冷启动。
+            _j.initialize()
+            _jieba = _j
+        except Exception as exc:  # noqa: BLE001 — 可选依赖，缺席走回退
+            _jieba = False
+            logger.warning(
+                "知识库 jieba 不可用，FTS/BM25 静默回退 n-gram（中文检索精度降级）: %s", exc
+            )
     return None if _jieba is False else _jieba
-
-
-_jieba: Any = None
 
 
 def tokenize(text: str) -> List[str]:
