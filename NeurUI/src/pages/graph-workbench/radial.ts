@@ -24,9 +24,16 @@ export interface LayoutPoint {
   y: number
 }
 
-/** 总半径归一：最大深度映射到固定半径，整图占地恒定 ~2800px——
- * fit 后 zoom 不随图深塌到不可辨认（曾实测节点缩到 30x8 『看起来空』）。 */
-export const DEFAULT_TOTAL_RADIUS = 1400
+/** 总半径归一：最大深度映射到固定半径。取值以『不叠即可』为准（用户口径）——
+ * 紧凑优先，容量项（MIN_ARC 圆周容量）兜底保证不叠；占地 ~1000px，
+ * fit 后 zoom 更高、节点更大更可读。 */
+export const DEFAULT_TOTAL_RADIUS = 500
+/** 同层相邻节点的最小弧长（px）：卡片宽 96 + 间距，低于它就视觉重叠。 */
+export const DEFAULT_MIN_ARC = 120
+/** 每层子环数：同层节点分内/外两个子环交错排布，圆周容量翻倍、占地减半。 */
+export const RINGS_PER_LAYER = 2
+/** 子环间距：卡片高 40 + 间隙，径向不叠。 */
+export const RING_INNER_GAP = 55
 
 interface TreeNode {
   parent: string | null
@@ -73,21 +80,41 @@ function layoutComponent(
   totalRadius: number,
   positions: Map<string, LayoutPoint>,
 ): void {
-  const assign = (u: string, a0: number, a1: number): void => {
-    const depth = tree.get(u)!.depth
-    // 半径按层深比例归一到总半径：深图不爆占地，浅图不挤成一团。
-    const radius = centerRadius + (maxDepth > 0 ? (depth / maxDepth) * totalRadius : 0)
-    const mid = (a0 + a1) / 2
-    positions.set(u, { x: radius * Math.cos(mid), y: radius * Math.sin(mid) })
-    const total = leafCount(tree, u)
-    let cursor = a0
-    for (const c of tree.get(u)!.children) {
-      const w = (leafCount(tree, c) / total) * (a1 - a0)
-      assign(c, cursor, cursor + w)
-      cursor += w
-    }
+  // 层内节点按 BFS 序收集（组内保持父序——层间序一致，树边交叉最少）。
+  const layers: string[][] = []
+  for (const [id, node] of tree) {
+    if (id === root) continue
+    ;(layers[node.depth] ??= []).push(id)
   }
-  assign(root, angleStart, angleEnd)
+  // 半径逐层递推：层深比例打底，但必须 ≥ 圆周容量（同层 N 个节点分
+  // RINGS_PER_LAYER 个子环交错排布，每个子环弧长 ≥ MIN_ARC）且 ≥
+  // 前层 + 子环跨度（相邻层不贴脸）。
+  const radii: number[] = [0]
+  for (let d = 1; d <= maxDepth; d++) {
+    const count = layers[d]?.length ?? 0
+    const perRing = Math.ceil(count / RINGS_PER_LAYER)
+    const capacity = perRing > 0 ? (perRing * DEFAULT_MIN_ARC) / Math.PI : 0
+    radii[d] = Math.max(
+      centerRadius + (maxDepth > 0 ? (d / maxDepth) * totalRadius : 0),
+      capacity,
+      radii[d - 1] + RINGS_PER_LAYER * RING_INNER_GAP)
+  }
+  // 根在圆心；每层节点分双子环交错排布（内环偶数位、外环奇数位，
+  // 层内序保持——相邻子环节点角度错开半个步长）。
+  positions.set(root, { x: centerRadius, y: centerRadius })
+  for (let d = 1; d <= maxDepth; d++) {
+    const ids = layers[d]
+    if (!ids) continue
+    const perRing = Math.ceil(ids.length / RINGS_PER_LAYER)
+    const baseRadius = centerRadius + radii[d]
+    ids.forEach((id, i) => {
+      // 角度按层内全局序连续分配（不按子环重置 slot）——序即角度序，
+      // 父子块的方向一致性才保得住；只有半径按奇偶分子环。
+      const mid = angleStart + ((i + 0.5) / ids.length) * (angleEnd - angleStart)
+      const radius = baseRadius + (i % 2) * RING_INNER_GAP
+      positions.set(id, { x: radius * Math.cos(mid), y: radius * Math.sin(mid) })
+    })
+  }
 }
 
 export function radialLayout(
@@ -154,11 +181,32 @@ export function radialLayout(
     }
   }
 
+  // 小分量保底角宽：碎片分量（2-5 节点）按叶权只能分到极窄扇区，
+  // 分量内部节点几乎同点（重叠重灾区）。每个分量至少 MIN_SPAN，
+  // 被挤占的角度从大分量按权重扣回。
+  const MIN_SPAN = (Math.PI * 2) / 60
   const totalLeaves = components.reduce((sum, c) => sum + c.leaves, 0)
+  const spans = components.map((c) => (c.leaves / totalLeaves) * Math.PI * 2)
+  let deficit = 0
+  let bigWeight = 0
+  spans.forEach((span, i) => {
+    if (span < MIN_SPAN) {
+      deficit += MIN_SPAN - span
+      spans[i] = MIN_SPAN
+    } else {
+      bigWeight += compWeight(i)
+    }
+  })
+  function compWeight(i: number): number {
+    return components[i].leaves
+  }
+  spans.forEach((span, i) => {
+    if (span > MIN_SPAN) spans[i] = span - (deficit * compWeight(i)) / (bigWeight || 1)
+  })
   let cursor = 0
   let componentIndex = 0
   for (const comp of components) {
-    const span = (comp.leaves / totalLeaves) * Math.PI * 2
+    const span = spans[componentIndex]
     // 非主分量的根统一放外环（半径封顶）：孤立分量可能多达几十个，
     // 根半径随序号线性增长会把包围盒撑到数万像素（实测 38710px）。
     const centerRadius = componentIndex === 0 ? 0 : DEFAULT_TOTAL_RADIUS * 1.25

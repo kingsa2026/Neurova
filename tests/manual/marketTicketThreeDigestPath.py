@@ -40,6 +40,8 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 WORK_ROOT = isolatedDataRoot(prefix="neurovaTicket3")
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 from fastapi.testclient import TestClient  # noqa: E402
 
 from neurova.api.app import create_app  # noqa: E402

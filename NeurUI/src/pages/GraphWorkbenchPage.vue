@@ -33,13 +33,23 @@
       <GlassCard class="canvas-card">
         <a-spin :spinning="loading">
           <div class="canvas-toolbar">
-            <a-input-search
-              v-model:value="nodeFilter"
-              size="sm"
-              allow-clear
-              :placeholder="t('knowledge.workbenchNodeSearch')"
-              style="max-width: 220px"
-            />
+            <div class="node-search">
+              <a-input-search
+                v-model:value="nodeFilter"
+                size="sm"
+                allow-clear
+                :placeholder="t('knowledge.workbenchNodeSearch')"
+                style="max-width: 220px"
+                @search="searchNodes"
+              />
+              <div v-if="searchHits.length" class="search-hits">
+                <div v-for="hit in searchHits" :key="hit.id" class="search-hit"
+                     @click="pickHit(hit)">
+                  <a-tag :color="kindColor(hit.type)" class="kind-tag">{{ hit.type }}</a-tag>
+                  <span class="term-id">{{ hit.label }}</span>
+                </div>
+              </div>
+            </div>
             <GlassButton
               size="sm"
               variant="secondary"
@@ -48,6 +58,17 @@
             >
               {{ t('knowledge.workbenchFocusNode') }}
             </GlassButton>
+            <GlassButton
+              v-if="focusNodeId"
+              size="sm"
+              variant="secondary"
+              @click="exitFocus"
+            >
+              {{ t('knowledge.workbenchFullGraph') }}
+            </GlassButton>
+            <a-checkbox v-model:checked="fullGraph" class="isolated-toggle">
+              {{ t('knowledge.workbenchFullGraph') }}
+            </a-checkbox>
             <a-checkbox v-model:checked="showIsolated" class="isolated-toggle">
               {{ t('knowledge.workbenchShowIsolated') }}
             </a-checkbox>
@@ -67,16 +88,19 @@
               :key="`${dataVersion}-${viewMode}`"
               :nodes="flowNodes"
               :edges="flowEdges"
-              :fit-view-on-init="true"
+              :fit-view-on-init="false"
+              :default-viewport="initialViewport"
               :min-zoom="0.35"
               :max-zoom="2"
               class="workbench-flow"
-              @pane-ready="onPaneReady"
               @node-click="onFlowNodeClick"
             >
               <Background />
               <MiniMap pannable zoomable />
               <Controls />
+              <template #edge-flow="edgeProps">
+                <FlowEdge v-bind="edgeProps" :label="String(edgeProps.label ?? '')" />
+              </template>
             </VueFlow>
             <div v-else-if="!loading" class="canvas-empty">
               <a-empty :description="t('common.noData')" />
@@ -245,7 +269,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, reactive, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import { VueFlow } from '@vue-flow/core'
@@ -264,6 +288,7 @@ import { useAgentPage } from '@/composables/useAgentPage'
 import { useAuthStore } from '@/stores/auth'
 import { request } from '@/api'
 import { radialLayout } from '@/pages/graph-workbench/radial'
+import FlowEdge from '@/pages/graph-workbench/FlowEdge.vue'
 
 // 3D/地图都是重依赖（WebGL/three、maplibre），defineAsyncComponent 懒加载：
 // 不切到对应视图就不下载，2D 主路径的包体不受影响。
@@ -307,6 +332,15 @@ const viewMode = ref<'2d' | '3d'>('2d')
 const selectedNodeId = ref('')
 const termFilter = ref('')
 const nodeFilter = ref('')
+// 按图谱检索：输入走后端 search_nodes 全图索引（不是前端过滤当前渲染集——
+// 邻域模式只加载了枢纽 2 跳，画布外的节点前端过滤永远搜不到）；
+// 命中后以命中节点为焦点加载其邻域（radial 以其为根重铺）。
+const focusNodeId = ref('')
+const searchHits = ref<StudioNode[]>([])
+const searchBusy = ref(false)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+const localRender = ref<StudioData | null>(null)
+const displayData = computed(() => localRender.value ?? studio.value)
 const termFormVisible = ref(false)
 const termSaving = ref(false)
 const edgeSaving = ref(false)
@@ -329,7 +363,7 @@ const flowNodes = computed(() => {
   // 放射布局：以选中节点为根（聚焦后以其为圆心重铺），无选中取度数枢纽——
   // 子树扇区不相交，树边互不交叉。
   const positions = radialLayout(
-    nodes, (studio.value?.edges ?? []) as never, selectedNodeId.value || undefined)
+    nodes, (displayData.value?.edges ?? []) as never, selectedNodeId.value || focusNodeId.value || undefined)
   // 自算包围盒（视口居中的唯一依据，不依赖 vue-flow 的节点测量）。
   if (positions.size) {
     const xs = Array.from(positions.values()).map((p) => p.x)
@@ -350,52 +384,84 @@ const flowNodes = computed(() => {
 })
 
 // fit-view-on-init 的实测缺陷：其包围盒测量与 zoom 夹取组合会把视口平移到
-// 节点区之外（『看起来空』的真身——节点全渲染着，只是屏外）。命令式
-// useVueFlow / pane-ready 同步 fitView 还会静默中止整组件渲染。最终方案
-// 完全自持：布局坐标是自己算的（radialLayout 输出），包围盒不依赖 vue-flow
-// 测量——pane-ready 后按自算包围盒直接 setViewport 居中，zoom 夹 [0.35,1.2]。
+// 节点区之外（『看起来空』的真身——节点全渲染着，只是屏外）；命令式视口
+// （useVueFlow / pane-ready 回调 / setViewport）要么静默中止渲染要么不生效。
+// 最终方案纯声明式：布局包围盒自算，数据到位后算出 initialViewport，
+// 数据版本号作 :key 重挂载画布时经 defaultViewport 应用——无实例 API。
 const dataVersion = ref(0)
-const flowInstance = ref<any>(null)
+const initialViewport = ref({ x: 0, y: 0, zoom: 0.5 })
 let layoutBounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 }
-const onPaneReady = (instance: any) => {
-  flowInstance.value = instance
-  setTimeout(() => {
-    try {
-      const el = canvasWrapRef.value
-      if (!el || !el.clientWidth) return
-      const bw = layoutBounds.maxX - layoutBounds.minX + 160
-      const bh = layoutBounds.maxY - layoutBounds.minY + 160
-      const zoom = Math.max(0.35, Math.min(1.2, Math.min(el.clientWidth / bw, el.clientHeight / bh)))
-      const cx = (layoutBounds.minX + layoutBounds.maxX) / 2
-      const cy = (layoutBounds.minY + layoutBounds.maxY) / 2
-      flowInstance.value?.setViewport({
-        x: el.clientWidth / 2 - cx * zoom,
-        y: el.clientHeight / 2 - cy * zoom,
-        zoom,
-      })
-    } catch {
-      // 视口计算失败保留默认，不中止渲染
-    }
-  }, 80)
+const computeInitialViewport = () => {
+  const el = canvasWrapRef.value
+  const vw = el && el.clientWidth ? el.clientWidth : 572
+  const vh = el && el.clientHeight ? el.clientHeight : 560
+  const bw = layoutBounds.maxX - layoutBounds.minX + 160
+  const bh = layoutBounds.maxY - layoutBounds.minY + 160
+  const zoom = Math.max(0.35, Math.min(1.2, Math.min(vw / bw, vh / bh)))
+  const cx = (layoutBounds.minX + layoutBounds.maxX) / 2
+  const cy = (layoutBounds.minY + layoutBounds.maxY) / 2
+  initialViewport.value = { x: vw / 2 - cx * zoom, y: vh / 2 - cy * zoom, zoom }
 }
 const flowEdges = computed(() =>
-  (studio.value?.edges ?? []).map((e, index) => ({
+  (displayData.value?.edges ?? []).map((e, index) => ({
     id: `e-${index}`,
     source: e.source,
     target: e.target,
     label: e.relation,
-    animated: false,
+    // 流光动效：自定义 flow 边（双层 path——底层实线 + 上层循环流光），
+    // 默认边只有一条 path，animated 虚线会整体覆盖底色做不出双层。
+    type: 'flow',
   })))
 
 const relationTerms = computed(() =>
   (studio.value?.schema?.terms ?? []).filter((term) => term.kind === 'relation'))
 const schemaRules = computed(() => studio.value?.schema?.rules ?? [])
 const showIsolated = ref(false)
+// 分级呈现：全图 145 节点 fit 到一屏时布局间距被缩到 42px，卡片压盖不可避
+// 免（布局坐标级无重叠，视觉级叠）。默认只渲染枢纽 2 跳邻域（节点少、zoom
+// 高、零压盖），『显示全图』显式切换后由用户缩放探索。
+const fullGraph = ref(false)
+const depthFromHub = computed(() => {
+  const depth = new Map<string, number>()
+  const adjacency = new Map<string, string[]>()
+  for (const e of displayData.value?.edges ?? []) {
+    if (e.source === e.target) continue
+    if (!adjacency.has(e.source)) adjacency.set(e.source, [])
+    if (!adjacency.has(e.target)) adjacency.set(e.target, [])
+    adjacency.get(e.source)!.push(e.target)
+    adjacency.get(e.target)!.push(e.source)
+  }
+  const roots: string[] = []
+  let best = -1
+  for (const [id, neighbours] of adjacency) {
+    if (neighbours.length > best) {
+      best = neighbours.length
+      roots.length = 0
+      roots.push(id)
+    } else if (neighbours.length === best) {
+      roots.push(id)
+    }
+  }
+  for (const r of roots) {
+    if (depth.has(r)) continue
+    depth.set(r, 0)
+    const queue = [r]
+    while (queue.length) {
+      const u = queue.shift()!
+      for (const v of adjacency.get(u) ?? []) {
+        if (depth.has(v)) continue
+        depth.set(v, depth.get(u)! + 1)
+        queue.push(v)
+      }
+    }
+  }
+  return depth
+})
 // 无边节点在关系图里没有布局意义：几十个孤立点会把放射图撑爆、fit 后
 // 全部不可读（『看起来空』的最终根因之一）。默认隐藏，开关显式打开才显示。
 const connectedIds = computed(() => {
   const ids = new Set<string>()
-  for (const e of studio.value?.edges ?? []) {
+  for (const e of displayData.value?.edges ?? []) {
     if (e.source === e.target) continue
     ids.add(e.source)
     ids.add(e.target)
@@ -403,14 +469,14 @@ const connectedIds = computed(() => {
   return ids
 })
 const filteredNodes = computed(() => {
-  const needle = nodeFilter.value.trim().toLowerCase()
-  const all = studio.value?.nodes ?? []
-  const searched = needle
-    ? all.filter((n) =>
-        n.label.toLowerCase().includes(needle) || n.id.toLowerCase().includes(needle))
-    : all
-  if (showIsolated.value || needle) return searched
-  return searched.filter((n) => connectedIds.value.has(n.id))
+  // nodeFilter 只作检索输入（后端全图索引 + 命中下拉），不参与画布过滤——
+  // 它曾被命中回填的 label 污染，把焦点邻域掐得只剩一个节点。
+  const all = displayData.value?.nodes ?? []
+  const byRelation = showIsolated.value
+    ? all
+    : all.filter((n) => connectedIds.value.has(n.id))
+  if (fullGraph.value) return byRelation
+  return byRelation.filter((n) => (depthFromHub.value.get(n.id) ?? 99) <= 2)
 })
 const focusFirstMatch = () => {
   const hit = filteredNodes.value[0]
@@ -433,6 +499,9 @@ const fetchStudio = async () => {
   try {
     const res: any = await request.get(`/knowledge-graph/${agentId.value}/studio`)
     studio.value = res?.data ?? res
+    // 强制求值 flowNodes：layoutBounds 在 computed 内更新，随后算初始视口。
+    void flowNodes.value
+    computeInitialViewport()
     dataVersion.value++
   } catch (e: any) {
     message.error(e?.message || t('common.error'))
@@ -631,6 +700,83 @@ const createInstance = async () => {
   }
 }
 
+// 按图谱检索：输入防抖后走后端 search_nodes 全图索引。
+const searchNodes = async () => {
+  const q = nodeFilter.value.trim()
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
+  if (q.length < 2) {
+    searchHits.value = []
+    return
+  }
+  searchBusy.value = true
+  try {
+    const res: any = await request.get(
+      `/knowledge-graph/${agentId.value}/knowledge-graph/search`,
+      { params: { q, limit: 10 } })
+    const data = res?.data ?? res
+    searchHits.value = (data?.nodes ?? []) as StudioNode[]
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
+  } finally {
+    searchBusy.value = false
+  }
+}
+
+watch(nodeFilter, (next: string) => {
+  if (searchTimer) clearTimeout(searchTimer)
+  const q = next.trim()
+  if (q.length < 2) {
+    searchHits.value = []
+    return
+  }
+  searchTimer = setTimeout(() => void searchNodes(), 350)
+})
+
+// 命中节点加载其邻域为渲染集（radial 以命中为根重铺，命中节点居中）。
+const loadFocusNeighborhood = async (id: string) => {
+  loading.value = true
+  try {
+    const res: any = await request.get(
+      `/knowledge-graph/${agentId.value}/subgraph`,
+      { params: { focus: id, hops: 2, limit: 200 } })
+    const data = res?.data ?? res
+    localRender.value = {
+      nodes: data?.nodes ?? [],
+      edges: data?.edges ?? [],
+      total_nodes: data?.total_nodes,
+      truncated: data?.truncated,
+      schema: studio.value?.schema,
+    }
+    void flowNodes.value
+    computeInitialViewport()
+    dataVersion.value++
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
+  } finally {
+    loading.value = false
+  }
+}
+
+const pickHit = (hit: StudioNode) => {
+  focusNodeId.value = hit.id
+  selectedNodeId.value = hit.id
+  searchHits.value = []
+  nodeFilter.value = hit.label
+  void loadFocusNeighborhood(hit.id)
+}
+
+const exitFocus = () => {
+  focusNodeId.value = ''
+  localRender.value = null
+  searchHits.value = []
+  void flowNodes.value
+  computeInitialViewport()
+  dataVersion.value++
+}
+
 const onFlowNodeClick = (mouseEvent: { node: { id: string } }) => {
   selectedNodeId.value = mouseEvent.node.id
 }
@@ -701,6 +847,48 @@ onMounted(() => {
 
 .workbench-flow :deep(.wb-node-selected) {
   box-shadow: 0 0 0 3px var(--nr-primary);
+}
+
+/* 节点卡片收窄到 96px：与布局 MIN_ARC=120 匹配（96+间距），
+   密集层的弧长才有足够余量；label 超宽省略。 */
+.workbench-flow :deep(.vue-flow__node-default) {
+  width: 96px;
+  font-size: 11px;
+  padding: 6px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 连接线双层：底层半透明实线表连接存在，流光层短划线循环流动
+   （FlowEdge.vue 两条 path 叠加，默认边单条 path 做不出双层）。 */
+.workbench-flow :deep(.vue-flow__edge .flow-base) {
+  stroke: rgba(129, 140, 248, 0.4);
+  stroke-width: 1.5;
+}
+
+.workbench-flow :deep(.vue-flow__edge .flow-stream) {
+  stroke: #a5b4fc;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 3 15;
+  stroke-dashoffset: 0;
+  animation: wb-flow-line 1.1s linear infinite;
+  filter: drop-shadow(0 0 3px rgba(129, 140, 248, 0.9));
+}
+
+/* 位移一个完整 dash 周期（3+15=18），循环无缝。 */
+@keyframes wb-flow-line {
+  to {
+    stroke-dashoffset: -18;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workbench-flow :deep(.vue-flow__edge .flow-stream) {
+    animation: none;
+    stroke: rgba(165, 180, 252, 0.6);
+  }
 }
 
 .explorer3d-embed {
@@ -810,6 +998,39 @@ onMounted(() => {
   align-items: center;
   gap: var(--nr-space-sm);
   margin-bottom: var(--nr-space-sm);
+}
+
+.node-search {
+  position: relative;
+}
+
+.search-hits {
+  position: absolute;
+  z-index: 20;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 260px;
+  overflow: auto;
+  margin-top: 4px;
+  padding: 4px;
+  border: 1px solid var(--nr-glass-border);
+  border-radius: var(--nr-radius-md, 12px);
+  background: var(--nr-bg-overlay, rgba(10, 14, 26, 0.95));
+  backdrop-filter: blur(8px);
+}
+
+.search-hit {
+  display: flex;
+  align-items: center;
+  gap: var(--nr-space-sm, 8px);
+  padding: 5px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.search-hit:hover {
+  background: var(--nr-glass-bg-hover);
 }
 
 .canvas-count {
