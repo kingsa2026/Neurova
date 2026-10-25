@@ -647,6 +647,15 @@ class TestProtectedSubsetStageOutputIsUnbuffered:
     - `pytest` 的 stderr 必须并进那道管道（`2>&1`）——pytest 的采集错误、
       超时栈、`Killed` 前的最后一行都在 stderr，不并进去就等于丢掉半边日志。
 
+    ## 判据认的是「合一」这件事，不是某一种写法
+
+    `2>&1` 与 `| tee` 之间可以夹东西：受保护子集那一步为了**不依赖任何一家的 shell**
+    取 pytest 退出码（`${PIPESTATUS[0]}` 是 bash 专有，`sh` 下整段以
+    `Bad substitution` 收场，构建 `cnb-8qu-1k5q3m315#003` 实测 7954 passed 之后 exit 2），
+    写成了 `{ python -u -m pytest ... 2>&1; echo $? > "$MARK"; } | tee ...`。
+    夹一个「就地落标记」不改变"stderr 进了同一道管道"这件事，故判据按
+    `2>&1 ... | tee` 认；把它读成"缺 `2>&1`"就是拿写法当判据（教义第 2 条另一面）。
+
     反向控制：把 `-u` 摘掉、或把 `2>&1` 摘掉，本档必须红。
     """
 
@@ -677,7 +686,7 @@ class TestProtectedSubsetStageOutputIsUnbuffered:
 
     def testStderrJoinsTheSamePipe(self):
         script = self._stageScript()
-        assert re.search(r"2>&1\s*\|\s*tee\b", script), (
+        assert re.search(r"2>&1[^|]*\|\s*tee\b", script), (
             "pytest 的 stderr 没并进 `tee` 那道管道——采集错误、超时栈、"
             "被杀前的最后一行都在 stderr，丢掉它们等于只留下半份日志"
         )
@@ -686,9 +695,12 @@ class TestProtectedSubsetStageOutputIsUnbuffered:
         """反向控制：缓冲形态必须被抓（判据不是对某份固定文件的快照）。"""
         original = _read(CNB)
         stage = self._stageScript()
+        # 反向控制的样本按**语义目标**取，不按上一种写法取：`2>&1` 与 `| tee` 之间
+        # 允许夹「就地落标记」（见类 docstring 末段）。故摘 `2>&1` 那一枚锚的是
+        # `| tee` 之前的那段原文，换成不带 `2>&1` 的同形写法。
         shapes = (
             ("unbuffered", "python -u -m pytest", "python -m pytest"),
-            ("stderr", "2>&1 | tee", "| tee"),
+            ("stderr", "2>&1; echo $? > \"$MARK\"; } | tee", "; } | tee"),
         )
         for label, target, broken in shapes:
             # 逐字替换脚本正文：按**缩进后的原文**比对（YAML 块标量的换行由读取侧统一，
@@ -709,5 +721,5 @@ class TestProtectedSubsetStageOutputIsUnbuffered:
         script = self._stageScript(path)
         assert re.search(r"python\s+-u\s+-m\s+pytest", script), (
             "pytest 没带 `-u`：stdout 落在管道里就是块缓冲，跑测在日志上呈现为无输出")
-        assert re.search(r"2>&1\s*\|\s*tee\b", script), (
+        assert re.search(r"2>&1[^|]*\|\s*tee\b", script), (
             "pytest 的 stderr 没并进 `tee` 那道管道")
