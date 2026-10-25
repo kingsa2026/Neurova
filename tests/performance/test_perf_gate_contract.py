@@ -515,12 +515,16 @@ class TestHeavyDepsAreDeclaredAtCollectionTime:
 
 
 class TestImportBudgetKeepsWallClock:
-    """冷 import 判分取**子进程墙钟**，并保留 CPU 读数作诊断。
+    """import 探针**同时回报**墙钟与 CPU 两个读数；判分取 CPU。
 
-    为什么是例外：它量的是"用户为首轮对话实际等了多久"——等待 CPU 的时间对用户
-    同样是延迟，必须计入；而进程内两处微基准正相反（"这段代码要花多少 CPU"）。
-    把 import 判分顺手改成 CPU 时间，就不再量首轮延迟了（教义第 5 条：同一根因
-    全命中点扫荡，但例外命中点不得顺手改）。
+    为什么不再是例外（2026-10-25 收口）：墙钟读数 = 本线程 CPU + 等 CPU + 等盘，
+    而探针跑在 CI 的子进程里，`sys.path` 长度、包体量、页面缓存都随机器不同，
+    于是同一份代码在两台机器上差一个数量级；更坏的是探针还会**穿过 `sys.path`
+    逐条尝试**（命中不到就继续找下一条），让"机器上装了什么"直接进读数。
+    于是它成为阻塞门禁里唯一一个"红与提交无关"的预算。
+
+    CPU 读数保留为"这段 import 干了多少活"的判分量；墙钟读数保留为诊断读数
+    （它仍是用户感知的那一份，只是不再单独裁决）。
 
     另一半：CPU 时钟看不到 import 期的**阻塞型**重活（网络/子进程/读数据文件），
     故由 `sys.addaudithook` 按结构形态点名（`sideEffects`），否则本次换时钟
@@ -623,12 +627,17 @@ class TestImportBudgetKeepsWallClock:
             f"import 期 250ms CPU 重活在墙钟口径下只读到 {busy['elapsed_ms']}ms——判据已被改空"
         )
 
-    def test_import_judging_uses_wallclock_only_for_the_probe(self, monkeypatch):
-        """预算判分读的是墙钟读数：把探针读数调大，检查必须报红。"""
+    def test_import_judging_reads_the_cpu_reading_of_the_probe(self, monkeypatch):
+        """预算判分读的是探针的**本线程 CPU 读数**：把它调大，检查必须报红。
+
+        判分口径从墙钟收到 CPU（根因与两轮构建读数见 `scripts/ci/perf_gate.py`
+        的模块 docstring：同一份代码在 `sys.path` 长度不同的机器上墙钟差一个数量级，
+        而探测的是"这段 import 干了多少活"）。`elapsed_ms` 仍在读数里回报。
+        """
         gate = importlib.import_module("scripts.ci.perf_gate")
 
         def inflated(module, searchPath=None):
-            return {"elapsed_ms": gate.IMPORT_BUDGET_MS + 1000.0, "cpu_ms": 1.0, "sideEffects": []}
+            return {"elapsed_ms": 1.0, "cpu_ms": gate.IMPORT_BUDGET_MS + 1000.0, "sideEffects": []}
 
         monkeypatch.setattr(gate, "measureImportProbe", inflated)
         failures = gate.Failures()
@@ -636,6 +645,23 @@ class TestImportBudgetKeepsWallClock:
         assert any(f["check"] == "import-budget" for f in failures), (
             "冷 import 超预算却未判红——import 判分被改空"
         )
+
+    def test_import_judging_ignores_waiting_time(self, monkeypatch):
+        """反向：墙钟读数再大、CPU 读数在预算内 ⇒ 不判红。
+
+        这条正是 2026-10-25 那次红的形状（`cnb-ht4` 的 1800s 墙钟 vs 1.7s CPU）：
+        隔壁进程被平台杀，本进程的 import 却在"等调度"。把等待计成工作量，
+        判据就随同机负载漂移，红与提交无关。
+        """
+        gate = importlib.import_module("scripts.ci.perf_gate")
+
+        def inflatedWall(module, searchPath=None):
+            return {"elapsed_ms": gate.IMPORT_BUDGET_MS * 100.0, "cpu_ms": 1.0, "sideEffects": []}
+
+        monkeypatch.setattr(gate, "measureImportProbe", inflatedWall)
+        failures = gate.Failures()
+        gate.check_import_budget(failures)
+        assert not failures, f"等待时间被当成工作量：{failures}"
 
 
 class TestJudgedValueIsLoadIndependent:
