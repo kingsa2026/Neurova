@@ -187,11 +187,7 @@ main:
         - name: protected subset with coverage gate (fail_under=60)
           script: |
             TESTS=$(grep -v '^#' scripts/ci/protected_tests.txt | tr '\n' ' ')
-            python -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS \
-              > /tmp/pytest_protected.log 2>&1
-            RC=$?
-            tail -n 400 /tmp/pytest_protected.log
-            exit $RC
+            python -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS
           timeout: 90m
 
     # ── 5. E2E：后端启动冒烟 ─────────────────────────────────────────────
@@ -781,7 +777,7 @@ main:
 # 时长上限由平台下发；轮数配额是 `$` 段的 maxTurns；这里只管单次工具执行。
 # 三处引用该锚点由 tests/unit/ci/test_npc_runtime_budget.py 常驻校验。
 .工具超时: &npc-tool-timeout
-  timeout: 45m
+  timeout: 30m
 
 # ── NPC 门禁的配置仓库物化（Issue #314）──────────────────────────────────────
 # 平台文档《NPC》「事件执行 → 执行位置」逐字：NPC 事件流水线跑在
