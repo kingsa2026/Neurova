@@ -55,8 +55,16 @@ class McpSourceSpec(BaseModel):
     tenant_id: str = "default"
 
 
+def _trustedHosts() -> set:
+    import os
+    # 企业内网 MCP server 部署在内网/环回：NEUROVA_MCP_TRUST_HOSTS 显式信任，
+    # 不开这个口子内网部署无法用；缺省空集=全部走公网校验。
+    raw = os.environ.get("NEUROVA_MCP_TRUST_HOSTS") or ""
+    return {h.strip().lower() for h in raw.split(",") if h.strip()}
+
+
 def _checkEndpoint(endpoint: str) -> None:
-    if not validate_public_http_url(endpoint):
+    if not validate_public_http_url(endpoint, trusted_hosts=_trustedHosts()):
         raise HTTPException(
             status_code=400, detail="Invalid URL: only public http(s) allowed")
 

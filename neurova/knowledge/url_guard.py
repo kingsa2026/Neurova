@@ -8,9 +8,10 @@ Allowlist 语义：不合规 → False，调用方据此拒绝。
 from __future__ import annotations
 
 import urllib.parse
+from typing import Optional
 
 
-def validate_public_http_url(url: str) -> bool:
+def validate_public_http_url(url: str, trusted_hosts: Optional[set] = None) -> bool:
     """校验外联 URL 安全（R-4 SSRF 防护）：
     - 仅 http/https
     - 拒绝 localhost/环回/私有/保留地址（解析后 IP 判断）
@@ -28,6 +29,10 @@ def validate_public_http_url(url: str) -> bool:
 
     # 主机名快速拒绝：localhost / 内部域名后缀
     lowered = host.lower()
+    # 信任名单（如企业内网 MCP server 部署在内网）：命中即放行，仍要求 http/https。
+    if trusted_hosts and (lowered in trusted_hosts or any(
+            lowered.endswith('.' + t) for t in trusted_hosts if '.' in t)):
+        return True
     if lowered in ("localhost",) or lowered.endswith(".localhost"):
         return False
 
