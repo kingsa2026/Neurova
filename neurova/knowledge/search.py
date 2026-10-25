@@ -94,17 +94,6 @@ _JIEBA_LOAD_LOCK = threading.RLock()
 _jieba: Any = None
 
 
-def isJiebaWarm() -> bool:
-    """进程内的 jieba 字典是否已建完（`False` = 未建/不可用）。
-
-    为什么需要这个口：`jieba.initialize()` 是**进程级一次性**冷启动——首次切词时在
-    调用方栈上同步建字典（CI runner 上实测把一格 30s 的判据撑到超时，而且红的位置在
-    建字典、不在被测逻辑）。已经有调用方在进程起手做暖机；没有这个口的话，那件事只能
-    靠"谁记得先 import 一次"来保证，谁也不知道自己是不是第一个。
-    """
-    return _jieba not in (None, False)
-
-
 def warmJieba() -> bool:
     """把字典**提前**建起来，返回是否可用（已在则直接返回，幂等）。
 
@@ -124,6 +113,12 @@ def warmJieba() -> bool:
     栈底停在 `_get_jieba() → _j.initialize() → gen_pfdict`：它是那场子里第一个切中文的
     用例，替所有人付了这笔账。这正是台账 §6-408 那一族（冷启动＋抢 GIL）在取用口上的
     残留——上一轮只把成本**收口**到一处，没有让它**提前**付。
+
+    **与「进化闸兜底支不用 jieba」是两条落点，不是两套口径**：本条管"真需要词级切分的
+    那条链"（`tokenize` → FTS/BM25），谁先走到都得有人先付；那条管"兜底的词面下界"，
+    那里压根不该挂可选依赖（判据
+    `tests/unit/ci/test_optionalImportWallOwedByLivePath.py`）。两处读到的是同一个
+    `_jieba`——不另设"暖没暖"的判断口（只读不写的判断等于第二份事实源）。
 
     两处消费方（都在前提侧，不在被测代码里）：`tests/conftest.py` 的
     `pytest_configure`（会话装配期）与需要显式暖机的脚本。失败按不可用记下、不抛。

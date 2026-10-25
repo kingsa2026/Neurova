@@ -246,28 +246,32 @@ class TestWarmUpFace:
 
     ## 判据（三格，缺一格都不闭环）
 
-    1. **能问**：`isJiebaWarm()` 如实上报，不可用时说"没暖"而不是"暖了"；
-    2. **能催且幂等**：`warmJieba()` 已在则直接返回，不重来；
+    1. **能催且幂等**：`warmJieba()` 已在则直接返回，不重来；
+    2. **不可用如实上报**：`False` 就是没暖，不许记成 `True`；
     3. **有人催**：`tests/conftest.py` 的会话装配必须调它——只加口没人调，等于把账从
        "某条用例"挪到"没人付"，下一次仍会以同一形态红回来。这一格是本类的要点。
+
+    原先还有一格钉 `isJiebaWarm()` 这个"能问"的口。本批把它退役了：全仓除测试外
+    **零调用点**，而它读的就是 `_jieba`——多一个同义判断口即多一份"暖没暖"的事实源
+    （纪律第 6 条）。要问就问 `warmJieba()`（幂等、返回布尔），要读就读 `_jieba`。
     """
 
-    def testWarmUpIsIdempotentAndReported(self):
+    def testWarmUpIsIdempotent(self):
         from neurova.knowledge import search
 
         assert search.warmJieba() is True, "装了 jieba 就该能建起字典"
-        assert search.isJiebaWarm() is True
         # 再催一次不重来（`_get_jieba` 的双检锁直接命中已建实例）
         assert search.warmJieba() is True
 
     def testUnavailableIsReportedAsColdNotAsWarm(self, monkeypatch):
-        """不可用要如实说"没暖"，不许把 `False` 记成 `True`——那会让判据以为字典已就绪。"""
+        """不可用要如实说"没暖"，不许把 `False` 记成"暖了"——那会让判据以为字典已就绪。"""
         from neurova.knowledge import search
 
         monkeypatch.setattr(search, "_jieba", False)
-        assert search.isJiebaWarm() is False
+        assert search.warmJieba() is False
         monkeypatch.setattr(search, "_jieba", None)
-        assert search.isJiebaWarm() is False
+        monkeypatch.setattr(search, "_get_jieba", lambda: None)
+        assert search.warmJieba() is False
 
     def testSessionAssemblyActuallyPaysTheBill(self):
         """会话装配必须调预热：加了入口没人调，账只是从"某条用例"挪到"没人付"。
