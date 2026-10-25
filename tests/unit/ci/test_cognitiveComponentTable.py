@@ -15,6 +15,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -25,6 +27,14 @@ SCRIPT = REPO_ROOT / "scripts" / "ci" / "cognitive_component_table.py"
 #: 诚实的 TimeoutExpired，而不是全局那道 thread 法的墙把整场跑测打死——§6-402 批 K 口径）。
 GIT_WALL_S = 20
 DOC = REPO_ROOT / "docs" / "01-architecture" / "cognitive-component-table.md"
+
+#: 本档的墙钟：「生成器 vs 文档」那几格各调一次 `componentRows()`，而它每次都要**扫全仓 AST**
+#: 建导入图（本机单次 ≈4s，CI 带 `--cov` 实测 ×2.2～3.7）。全局 30s 是按"单次调用"定的，
+#: 而 `TestComparisonItselfHasTeeth` 要调三次，于是它在构建 `cnb-173-1k5ov57v9#003` 上
+#: 以 `Failed: Timeout (>30.0s)` 收场——报出来的像"断言失败"，其实是父墙比判据成本窄
+#: （与 `.cnb.yml` unit-tests 抬到 90m 的根因同族：两墙错配）。同上位档口径取 120s，
+#: 仍宽于任何一次诚实耗时，慢机器不会被判死。
+pytestmark = pytest.mark.timeout(120)
 
 
 def _loadGenerator():

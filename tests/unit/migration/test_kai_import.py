@@ -7,7 +7,7 @@
    统一带显式偏移），且会话内按时间升序。
 2. 记忆导入后 MemoryManager 可加载（枚举合法、agent_id 隔离正确）。
 3. 幂等：重复执行不产生重复数据。
-4. 身份文件落位 workspace/memory/soul.md（_load_identity 的真实加载位）。
+4. 身份文件落位 `<agent_root>/soul.md`（`_load_identity` 的真实加载位）。
 
 测试全部使用 tmp_path 伪造的迷你 Kai 源数据，不触碰真实 Kai 库。
 """
@@ -590,16 +590,19 @@ class TestRemeNotes:
 
 class TestIdentityFiles:
     def test_soul_lands_in_memory_dir(self, kai_src):
-        from scripts.import_kai_to_neurova import import_identity
+        from scripts.import_kai_to_neurova import importIdentity
 
         kai, nv = kai_src
-        workspace = nv / "agent_workspaces" / "kai"
-        stats = import_identity(kai, workspace)
-        soul = workspace / "memory" / "soul.md"
+        agentRoot = nv / "agent_workspaces" / "kai"
+        workspace = agentRoot / "workspaces"
+        stats = importIdentity(kai, agentRoot)
+        # 两个身份文件落 agent 根 —— 与 `AgentCore._load_identity` 的读取位逐字对齐，
+        # 写进 `memory/` 的那一版运行期零读者（`4bf9b733` 收口前的旧落点）。
+        soul = agentRoot / "soul.md"
         assert soul.exists()
         assert "凯的灵魂" in soul.read_text(encoding="utf-8")
         # PROFILE → personality.md（_load_identity 第二加载位）
-        assert "凯的档案" in (workspace / "memory" / "personality.md").read_text(encoding="utf-8")
+        assert "凯的档案" in (agentRoot / "personality.md").read_text(encoding="utf-8")
         # PROFILE/MEMORY 在 workspace 根留档
         assert (workspace / "PROFILE.md").exists()
         assert (workspace / "MEMORY.md").exists()
