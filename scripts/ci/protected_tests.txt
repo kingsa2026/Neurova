@@ -3927,3 +3927,11 @@ tests/unit/api/test_mobilePairingStateClosure.py
 tests/unit/api/test_mobilePairingAdvertisedBaseUrlSingleSource.py
 tests/unit/tunnel/test_tunnelAdmissionAndChannelState.py
 tests/unit/test_tunnelStateEnumSingleSource.py
+# §6-418 蜂群上报信封批：旁路（邮箱/上下文池归档）投同一份 _uplinkEnvelope 投影、
+# 三处按字面量砍正文的写法撤除、下钻口补 recall_history(agent_id, session_id) 整取。
+# 反向各钉一格：不带 agent_id 的既有语义逐字不变（含 Issue #90 的属主派生）、
+# workflow 来源不回灌、被数据层拒绝的派生不投信。
+# 入册前置：逐文件单跑两次同读数 12／12、2／2、3／3（本机 2026-10-25 现跑）。
+tests/unit/agent/test_subagentTerminalReachesParentMail.py
+tests/unit/agent/test_subagentUplinkEnvelopeSharedByBothBypassPaths.py
+tests/unit/tools/test_recallHistoryReachesSubagentTranscript.py

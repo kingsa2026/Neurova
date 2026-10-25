@@ -121,6 +121,15 @@ CLOCK_LEDGER: Dict[str, tuple] = {
         "本守卫自身：它按语法树**检出**墙钟上界并比对台账，脚本里出现的 perf_counter "
         "字样是被检对象（用于构造检出器反向控制的样例），不参与任何计时读数。",
     ),
+    "tests/unit/agent/test_subagentTerminalReachesParentMail.py": (
+        ("wallClock",),
+        "本文件**只用单调钟做轮询护栏**，不量任何耗时：`_awaitMailArrival` 的 "
+        "`deadline = time.monotonic() + 2.0` 等的是「后台链把终态投进父邮箱」这件"
+        "状态迁移，到点仍未到就如实报缺信，负载再高只会让它自己红。"
+        "断言面全是结构不变量（信封键、`agent=`/`session=` 指针、正文不在旁路重复），"
+        "没有一处耗时上下界。§6-418 入册时漏登这一格——加文件的同时没复跑本闸，"
+        "与「逐文件单跑两次就够」的错觉同形。",
+    ),
     "tests/unit/skills/test_marketFetchBudgetIsSingleSource.py": (
         ("wallClock",),
         "本文件**不读真实墙钟**——`monotonic` 字样只出现在两处：本格自造的虚拟钟 "
