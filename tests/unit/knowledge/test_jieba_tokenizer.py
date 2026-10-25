@@ -197,8 +197,8 @@ class TestJiebaHasOneWarmEntry:
         assert not failures, f"并发取用失败：{failures}"
 
 
-class TestColdStartDoesNotRideOnTheFirstCaller:
-    """冷启动不许落在**首调方**的关键路径上——它要么提前付，要么不付。
+class TestWarmUpFace:
+    """字典冷启动是**进程级一次性**成本，必须有一个能问、能催的口，而且要有人催（§6-420/§6-422）。
 
     ## 现场（构建 `cnb-sq6-1k5q1kqrc#003`，受保护子集跑到 99%）
 
@@ -210,66 +210,68 @@ class TestColdStartDoesNotRideOnTheFirstCaller:
      neurova/knowledge/search.py:119: in _get_jieba
         _j.initialize()
      /usr/local/lib/python3.12/site-packages/jieba/__init__.py:83: in gen_pfdict
-        for ch in xrange(len(word)):
     = 1 failed, 7953 passed in 1469.68s
     ```
 
-    即：全仓 7953 格都绿，唯一那条红是**某条用例恰好第一个用到中文分词**，
-    它替所有人付了建字典这笔账，然后撞在 30s 那条格墙上。
+    全仓 7953 格都绿，唯一那条红是**某条用例恰好第一个用到中文分词**，它替所有人付了
+    建字典这笔账，然后撞在 30s 那条格墙上。同机器单跑 2.5s——判据读数取决于"谁先跑到"，
+    属前提形态，不归被测代码。
 
     ## 为什么"收口到一处取用口"还不够
 
-    `_get_jieba()` 的 DCL 解决了"谁来建"（并发的第二个调用方等第一个建完，
-    不重复建），但没解决"什么时候建"——首次取用**就地**建，成本仍在首调方的
-    关键路径上。本机实测这笔成本对负载极度敏感：
+    `_get_jieba()` 的 DCL 解决了"谁来建"（并发的第二个调用方等第一个建完，不重复建），
+    但没解决"什么时候建"——首次取用**就地**建，成本仍在首调方的关键路径上。这笔成本对
+    负载极度敏感（本机同一棵树）：
 
     ```
-    空载首次 _get_jieba():                              0.56s
-    3 条抢 GIL 的线程并发时首次 _get_jieba():            92.30s      ← 30s 墙的 3 倍
-    第二次取用:                                          0.0000s
+    空载首次 _get_jieba():                    0.56s
+    3 条抢 GIL 的线程并发时首次 _get_jieba():  92.30s     ← 30s 墙的 3 倍
+    预热之后再取用:                            0.001s
     ```
 
-    而 CI 的受保护子集正是一个 7953 格同进程、`--cov` 插桩、多档并发的场子。
-    这正是台账里 §6-408 那一族（"冷启动＋抢 GIL"，已三次把用例撞穿墙钟）的
-    同一根因在**取用口**上的残留。
+    ## 判据（三格，缺一格都不闭环）
 
-    ## 判据
-
-    1. 取用口必须提供**可提前付款**的入口（`warmUpJieba()`）；
-    2. `tests/conftest.py` 的会话装配必须调它——成本因此落在**会话启动**，
-       不落在"哪条用例恰好第一个调到分词"身上；
-    3. 预热失败不得影响任何用例（缺席 jieba 仍走 n-gram 回退，与今天一致）。
-
-    判据 2 是本格的要点：只加 `warmUpJieba()` 而没人调，等于把账从"某条用例"
-    挪到"没人付"，下一次仍会以同一形态红回来。
+    1. **能问**：`isJiebaWarm()` 如实上报，不可用时说"没暖"而不是"暖了"；
+    2. **能催且幂等**：`warmJieba()` 已在则直接返回，不重来；
+    3. **有人催**：`tests/conftest.py` 的会话装配必须调它——只加口没人调，等于把账从
+       "某条用例"挪到"没人付"，下一次仍会以同一形态红回来。这一格是本类的要点。
     """
 
-    def testWarmUpEntryExistsAndIsIdempotent(self):
-        import neurova.knowledge.search as search_mod
+    def testWarmUpIsIdempotentAndReported(self):
+        from neurova.knowledge import search
 
-        assert hasattr(search_mod, "warmUpJieba"), (
-            "取用口没提供可提前付款的入口（warmUpJieba）——冷启动只能落在首调方身上，"
-            "而首调方在 CI 并发场里实测要付 92s（30s 墙的 3 倍）")
-        first = search_mod.warmUpJieba()
-        second = search_mod.warmUpJieba()
-        assert first == second, "预热两次结论不一致——第二次不该重新建字典"
-        assert isinstance(first, bool), "预热返回值必须是布尔（是否可用），不得是模块对象"
+        assert search.warmJieba() is True, "装了 jieba 就该能建起字典"
+        assert search.isJiebaWarm() is True
+        # 再催一次不重来（`_get_jieba` 的双检锁直接命中已建实例）
+        assert search.warmJieba() is True
 
-    def testSessionAssemblyPaysTheBillUpFront(self):
-        """会话装配必须调预热：加了入口没人调，账只是从"某条用例"挪到"没人付"。"""
+    def testUnavailableIsReportedAsColdNotAsWarm(self, monkeypatch):
+        """不可用要如实说"没暖"，不许把 `False` 记成 `True`——那会让判据以为字典已就绪。"""
+        from neurova.knowledge import search
+
+        monkeypatch.setattr(search, "_jieba", False)
+        assert search.isJiebaWarm() is False
+        monkeypatch.setattr(search, "_jieba", None)
+        assert search.isJiebaWarm() is False
+
+    def testSessionAssemblyActuallyPaysTheBill(self):
+        """会话装配必须调预热：加了入口没人调，账只是从"某条用例"挪到"没人付"。
+
+        认三种写法——裸名 `warmJieba()`、属性 `search.warmJieba()`、以及
+        `from ... import warmJieba as X` 之后的别名 `X()`。判据要问的是"有没有人付这笔账"，
+        不是"调用方写了哪个名字"；只认裸名等于逼人为迎合判据而放弃别名。
+        """
         import ast
         import pathlib
 
         conftest = pathlib.Path(__file__).resolve().parents[3] / "tests" / "conftest.py"
         tree = ast.parse(conftest.read_text(encoding="utf-8"))
-        # 认三种写法：裸名 `warmUpJieba()`、属性 `search.warmUpJieba()`、以及
-        # `from ... import warmUpJieba as X` 之后的别名 `X()`——判据要问的是"有没有人付这笔账"，
-        # 不是"调用方写了哪个名字"。只认裸名会逼人为迎合判据而放弃别名，那是判据在管风格。
         aliases = {
-            (node.names[0].asname or node.names[0].name)
+            (alias.asname or alias.name)
             for node in ast.walk(tree)
             if isinstance(node, ast.ImportFrom)
-            and any(alias.name == "warmUpJieba" for alias in node.names)
+            for alias in node.names
+            if alias.name == "warmJieba"
         }
         called = {
             node.func.attr if isinstance(node.func, ast.Attribute) else
@@ -277,7 +279,7 @@ class TestColdStartDoesNotRideOnTheFirstCaller:
             for node in ast.walk(tree)
             if isinstance(node, ast.Call)
         }
-        assert called & ({"warmUpJieba"} | aliases), (
-            "tests/conftest.py 没有调用 warmUpJieba()——冷启动账单仍落在「哪条用例恰好"
-            "第一个用到中文分词」身上（构建 cnb-sq6-1k5q1kqrc#003 里那条 "
+        assert called & ({"warmJieba"} | aliases), (
+            "tests/conftest.py 没有调用 warmJieba()——冷启动账单仍落在「哪条用例恰好第一个"
+            "用到中文分词」身上（构建 cnb-sq6-1k5q1kqrc#003 里那条 "
             "test_accept_produces_pending_proposal 就是替所有人付账的那一格）")
