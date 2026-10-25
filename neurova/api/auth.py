@@ -14,6 +14,7 @@ import datetime
 from neurova.core import config
 from neurova.core.logger import get_logger
 import secrets
+import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -131,6 +132,12 @@ def _write_secret_file(secret: str) -> None:
         logger.warning("Failed to save JWT secret: %s", e)
 
 
+#: 自动生成密钥的**进程内唯一值**：一旦本进程确定，就不再因"谁在什么时候读它"而变。
+#: 加锁的理由与全仓其余懒建单例同（AGENTS.md §3）：并发首取不加锁会各建一份。
+_generatedSecretKey: Optional[str] = None
+_generatedSecretLock = threading.RLock()
+
+
 def _load_or_create_secret_key() -> str:
     """
     加载或创建持久化 JWT Secret Key
@@ -165,9 +172,23 @@ def _load_or_create_secret_key() -> str:
             pass
 
     # 3. 自动生成
-    secret = secrets.token_hex(32)
-    _write_secret_file(secret)
-    return secret
+    #
+    # **进程内只生成一次，落盘失败也不例外。** 此前每次都 `token_hex()` 现生成，而
+    # 数据根不可写时（容器里目录还没就绪、只读挂载、权限不足）`_write_secret_file`
+    # 只留一行 warning 就返回，调用方照旧拿到一枚**新**密钥——于是"谁在什么时候取过
+    # 密钥"决定了他签出的 token 能不能被别处验过。实测（数据根不可写）：
+    #
+    #   同一进程连取三次 → 三个不同值；模块常量与任何一次重算都不相等。
+    #
+    # 这不是"多一枚缓存"，是同一件事只留一个答案（教义第 6 条）：落盘成功时下一进程
+    # 从文件读回同一枚；落盘失败时本进程内保持稳定。跨重启换一枚是没有持久化的既定
+    # 代价，但**同进程内签与验因此恒等**。
+    global _generatedSecretKey
+    with _generatedSecretLock:
+        if _generatedSecretKey is None:
+            _generatedSecretKey = secrets.token_hex(32)
+            _write_secret_file(_generatedSecretKey)
+        return _generatedSecretKey
 
 
 # JWT Secret Key — 从环境变量或自动生成的文件加载
