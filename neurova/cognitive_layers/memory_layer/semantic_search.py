@@ -159,17 +159,25 @@ class SemanticSearch:
         if cache_key in self._cache:
             return self._cache[cache_key]
         
-        # 使用嵌入模型
+        # 使用嵌入模型。算不出（引擎缺档时它交一列 0）就走下面的字符哈希兜底：
+        # 把零向量当"真向量"存进缓存，余弦恒 0 会让语义检索静默退化成全不相似，
+        # 而日志上一切正常——判断留给引擎自己（`encodeOrNone` 是那一处的单源）。
         if self._embedding_model:
             try:
-                embedding = self._embedding_model.encode(text)
-                # 引擎兜底零向量＝"这一路没算出来"：入缓存会让本进程后续每次都拿它，
-                # 也不该当有效向量参与相似度——回落关键词嵌入（同"引擎缺席"那一支）。
-                if not vector_math.isZeroVector(embedding):
-                    self._cache[cache_key] = embedding
-                    return embedding
+                # 注入引擎可能只有 `encode`、没有 `encodeOrNone`（判据侧的替身就是这一形）：
+                # 两者都认，但"算没算出"仍按同一个口径判，不在这一层另立一套。
+                if hasattr(self._embedding_model, "encodeOrNone"):
+                    embedding = self._embedding_model.encodeOrNone(text)
+                else:
+                    embedding = self._embedding_model.encode(text)
+                    if vector_math.isZeroVector(embedding):
+                        embedding = None
             except Exception as e:
                 logger.warning("嵌入生成失败: %s", e)
+                embedding = None
+            if embedding is not None:
+                self._cache[cache_key] = embedding
+                return embedding
         
         # 降级到关键词嵌入
         return self._text_to_embedding(text)

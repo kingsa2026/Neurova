@@ -100,6 +100,9 @@ class CueVectorChannel:
             # 扇出门的挡下条数（C-3）。初值必须在这里给，不能等 `_build` 才出现——
             # 「读数只在事后存在」会让运维看不出「没建索引」与「建了但全被挡」的区别。
             "droppedByFanout": 0,
+            # 编码这一轮没交向量（引擎缺档/未就绪）而没能入索引的条数。没有这个读数，
+            # 「一条都没进去」与「进去了但全被门挡」在运维眼里同形（都是 injected=0）。
+            "droppedByNoEncoder": 0,
         }
 
     def invalidate(self) -> None:
@@ -129,6 +132,7 @@ class CueVectorChannel:
         vectors: List[Any] = []
         memoryIds: List[str] = []
         blocked = 0
+        noEncoder = 0
         for row in rows:
             key = row.get("norm_key") or row.get("cue_text", "")
             if len(fanout.get(key, ())) > CUE_FANOUT_CAP:
@@ -136,6 +140,7 @@ class CueVectorChannel:
                 continue
             vector = self._encodeOne(row.get("cue_text", ""))
             if not vector:
+                noEncoder += 1
                 continue
             normalized = vector_math.vectorNormalize([float(x) for x in vector])
             if not normalized:
@@ -147,6 +152,7 @@ class CueVectorChannel:
         self._built = True
         self._stats["indexed"] = len(memoryIds)
         self._stats["droppedByFanout"] = blocked
+        self._stats["droppedByNoEncoder"] = noEncoder
 
     def candidateMemoryIds(self) -> List[str]:
         """当前索引里出现过的记忆 id（去重、按索引顺序）——作用域门的可观测出口。"""

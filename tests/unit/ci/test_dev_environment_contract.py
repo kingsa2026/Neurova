@@ -621,3 +621,93 @@ class TestRuntimeDependenciesReachEveryUserSession:
             "里没有它，`import` 立刻 ModuleNotFound 而镜像里明明装着。"
             f"命中：{offenders}"
         )
+
+
+class TestProtectedSubsetStageOutputIsUnbuffered:
+    """受保护子集那一步的输出必须**每行即时可见**，不许落进块缓冲。
+
+    ## 要防的那件事
+
+    构建 `cnb-ast-1k5pqhnfi#003`（PR #367，`unit-tests`）在 23m11s 处被掐断：
+    日志停在中途某一档，既没有汇总行、也没有一条 FAILED，退出码 137 只说明
+    "进程没了"。读拉到的 runner 全文才知道原因不在测试：
+
+    ```
+    python -m pytest ... 2>&1 | tee /tmp/pytest_protected.log
+    ```
+
+    `2>&1` 只把 stderr 并进管道，**不改 stdout 的行缓冲**。pytest 的进度点与
+    `--cov` 的报告都走 stdout，而 stdout 一旦不是 tty 就按 4KiB/8KiB 块缓冲；
+    受保护子集要跑十几分钟，攒满一块要几十秒——平台的「长时间无输出」判据
+    在这一步上等于把仍在正常推进的跑测掐掉，而读数与"真有一套用例挂死"同形。
+
+    ## 判据只认两个形状，都从活配置现读
+
+    - `python` 必须带 `-u`（关解释器层缓冲）；
+    - `pytest` 的 stderr 必须并进那道管道（`2>&1`）——pytest 的采集错误、
+      超时栈、`Killed` 前的最后一行都在 stderr，不并进去就等于丢掉半边日志。
+
+    反向控制：把 `-u` 摘掉、或把 `2>&1` 摘掉，本档必须红。
+    """
+
+    _STAGE_HINT = "protected_tests.txt"
+
+    def _stageScript(self, path: Path | None = None) -> str:
+        """跑受保护子集那一步的脚本原文——按内容定位，不按 stage 名（改名不该让它失明）。"""
+        data = yaml.safe_load(_read(path or CNB))
+        for pipe in (data.get("main") or {}).get("push") or []:
+            if not isinstance(pipe, dict):
+                continue
+            for stage in pipe.get("stages") or []:
+                script = str((stage or {}).get("script", ""))
+                if self._STAGE_HINT in script and "pytest" in script:
+                    return script
+        raise AssertionError(
+            ".cnb.yml 里找不到跑受保护子集的那一步（含 %r 且调用 pytest）——"
+            "本判据无从作答，先确认清单与流水线还在。" % self._STAGE_HINT
+        )
+
+    def testInterpreterWritesThroughEveryLine(self):
+        script = self._stageScript()
+        assert re.search(r"python\s+-u\s+-m\s+pytest", script), (
+            "受保护子集的 pytest 没带 `-u`——stdout 落在管道里就会块缓冲，"
+            "十几分钟的跑测在平台上呈现为「长时间无输出」，被掐断后读数与真挂死同形"
+            "（构建 cnb-ast-1k5pqhnfi#003 即此形态）。现脚本：\n" + script
+        )
+
+    def testStderrJoinsTheSamePipe(self):
+        script = self._stageScript()
+        assert re.search(r"2>&1\s*\|\s*tee\b", script), (
+            "pytest 的 stderr 没并进 `tee` 那道管道——采集错误、超时栈、"
+            "被杀前的最后一行都在 stderr，丢掉它们等于只留下半份日志"
+        )
+
+    def testDetectorBitesTheBufferedShapes(self, tmp_path):
+        """反向控制：缓冲形态必须被抓（判据不是对某份固定文件的快照）。"""
+        original = _read(CNB)
+        stage = self._stageScript()
+        shapes = (
+            ("unbuffered", "python -u -m pytest", "python -m pytest"),
+            ("stderr", "2>&1 | tee", "| tee"),
+        )
+        for label, target, broken in shapes:
+            # 逐字替换脚本正文：按**缩进后的原文**比对（YAML 块标量的换行由读取侧统一，
+            # 拿 `yaml.safe_load` 读回来的字符串去 `str.replace` 会因缩进/换行重排而落空，
+            # 反向控制就退化成"什么都没改 ⇒ 当然不红"）。
+            body = "\n".join("            " + line for line in stage.splitlines())
+            assert target in body, "反向控制样本没改到目标形状：%r" % target
+            drifted = tmp_path / (".cnb-%s.yml" % label)
+            drifted.write_text(
+                original.replace(body, body.replace(target, broken, 1), 1),
+                encoding="utf-8",
+            )
+            with pytest.raises(AssertionError):
+                self._assertStageKeepsWritingThrough(drifted)
+
+    def _assertStageKeepsWritingThrough(self, path: Path) -> None:
+        """两条断言按 `path` 重放一遍——判据本体与反向控制共用同一把尺。"""
+        script = self._stageScript(path)
+        assert re.search(r"python\s+-u\s+-m\s+pytest", script), (
+            "pytest 没带 `-u`：stdout 落在管道里就是块缓冲，跑测在日志上呈现为无输出")
+        assert re.search(r"2>&1\s*\|\s*tee\b", script), (
+            "pytest 的 stderr 没并进 `tee` 那道管道")

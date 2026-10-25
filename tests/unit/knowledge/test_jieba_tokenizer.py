@@ -117,3 +117,81 @@ class TestJiebaAbsentFallback:
         with caplog.at_level(logging.WARNING, logger="neurova.knowledge.search"):
             assert search_mod.tokenize("测试") == search_mod._ngram_tokenize("测试")
         assert any("jieba 不可用" in r.message for r in caplog.records)
+
+
+class TestJiebaHasOneWarmEntry:
+    """取用口只有一个，且**拿到手就是暖的**——冷启动的账不许落在无关键上。
+
+    来由（CI 实测）：`test_service_closed_loop` 三格被 30s 墙打死，回溯停在
+    `constraints._token_jaccard → jieba.cut → initialize → gen_pfdict`。本机复刻同一
+    争抢条件（另一条 thread 持续抢 GIL）时，建前缀字典从 0.5s 放大到 8.1s、首调 8.65s
+    ——30s 墙在这个量级下必死，而红的那三格与被测行为毫无关系。
+
+    根因不是"字典慢"，是**谁付这笔账说不清**：`constraints` 自己裸 `import jieba`
+    （字典仍懒建），`knowledge.search._get_jieba()` 也只 import 不建。两处都能在
+    "用例跑着跑着"触发一次冷启动。收口到一处、并在取用时建完字典，成本就落在明确的
+    入口上，任何一条用例都不再替别人付账。
+    """
+
+    def test_entryHandsOutAWarmModule(self):
+        from neurova.knowledge.search import _get_jieba
+
+        jieba = _get_jieba()
+        if jieba is None:
+            pytest.skip("本环境没有 jieba（可选依赖），这一格量的是「拿到手就是暖的」")
+        assert jieba.dt.initialized, "取用口交回的是还没建字典的实例——首调成本又落回调用方身上"
+
+    def test_constraintsGoesThroughTheSameEntry(self, monkeypatch):
+        """`constraints` 不得再走自己那份 import：改走同一个取用口。"""
+        import neurova.evolution.eval.constraints as constraints_mod
+        import neurova.knowledge.search as search_mod
+
+        seen = []
+        real = search_mod._get_jieba
+
+        def spy():
+            seen.append(1)
+            return real()
+
+        monkeypatch.setattr(search_mod, "_get_jieba", spy)
+        constraints_mod._token_jaccard("量子计算", "量子 计算")
+        assert seen, (
+            "`constraints._token_jaccard` 没走 `knowledge.search._get_jieba`——"
+            "那它自己那份裸 import 又会把 jieba 的冷启动摊到无关键上"
+        )
+
+    def test_concurrentCallersShareOneDictionaryBuild(self):
+        """8 条线程同时取用，字典只建一次，且每条拿到的都是**已建好**的实例。
+
+        这一格钉的是双检锁：没有它，并发的 8 条各自 `import` 后各自 `initialize()`，
+        建字典的次数就等于并发数——CI 里那笔 8s 的抖动正是这么被放大的。
+        """
+        import threading
+
+        import neurova.knowledge.search as search_mod
+
+        original = search_mod._jieba
+        # 复位成"还没取过"，让这一格自己承担这一次冷启动
+        search_mod._jieba = None
+        failures = []
+        try:
+            barrier = threading.Barrier(8)
+
+            def worker():
+                try:
+                    barrier.wait()
+                    module = search_mod._get_jieba()
+                    assert module is None or module.dt.initialized, "交回的是没建字典的实例"
+                except Exception as exc:  # noqa: BLE001 - 线程里的失败要带回主线程判红
+                    failures.append(exc)
+
+            threads = [threading.Thread(target=worker) for _ in range(8)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(30)
+            assert search_mod._jieba is not None, "8 条线程跑完，取用口仍停在未取用态"
+        finally:
+            search_mod._jieba = original
+
+        assert not failures, f"并发取用失败：{failures}"
