@@ -84,6 +84,7 @@ SHARED_SCAN_ENTRIES = {
     "nodeScan", "sourceRefsUnder", "parsedModules", "walkedModules", "transientTree",
     "transientNodes", "callSites", "callNodes", "classDefsIn", "namesTakenFrom",
     "takenPerModule", "importersOfModule", "shadowedTopLevelNames", "filesUnder",
+    "transientTrees",
 }
 #: 私有文件系统枚举方法：这类调用的**根在接收者上**，第一个实参是模式。
 FILE_ENUM_ATTRS = {"rglob", "glob", "iglob", "iterdir", "listdir", "scandir"}
