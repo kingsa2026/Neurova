@@ -48,6 +48,7 @@ __all__ = [
     "getTurnCancelToken",
     "resetTurnCancelToken",
     "registerKillAction",
+    "currentCancelEpoch",
 ]
 
 
@@ -58,13 +59,16 @@ class CancelToken:
     worker 里（进程刚 `Popen` 出来就注册），故内部用 `RLock` 串行化。
     """
 
-    __slots__ = ("_lock", "_cancelled", "_reason", "_actions")
+    __slots__ = ("_lock", "_cancelled", "_reason", "_actions", "_cancelEpoch")
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._cancelled = False
         self._reason = ""
         self._actions: List[Callable[[], None]] = []
+        #: 每次置位递增。注册方用它表达"我这条回调只对上**这一次**取消"——
+        #: 见 `onCancel` 的 `cancelledSince` 语义。
+        self._cancelEpoch = 0
 
     def cancelled(self) -> bool:
         """worker 轮询点：长循环分片处自查，据此提前收手。"""
@@ -84,24 +88,69 @@ class CancelToken:
         if self._cancelled:
             raise asyncio.CancelledError(f"已取消（{self._reason or '未说明原因'}）")
 
-    def onCancel(self, action: Callable[[], None]) -> None:
-        """注册杀灭回调；**已置位则立即兑现**。
+    @property
+    def cancelEpoch(self) -> int:
+        """置位次数。注册方在起进程**之前**取一次，注册时交回来，
+        即表达"这条回调只服务这一次取消"（见 `onCancel` 的 `cancelledSince`）。"""
+        return self._cancelEpoch
+
+    def onCancel(
+        self,
+        action: Callable[[], None],
+        cancelledSince: Optional[int] = None,
+    ) -> Callable[[], None]:
+        """注册杀灭回调；**已置位则立即兑现**，并把"摘钩"交回给注册方。
 
         立即兑现不是便利：进程可能在上层置位之后、worker 拿到 PID 之前才注册
         回调（`Popen` 与注册之间存在窗口）。丢弃这个迟到的回调，等于那个进程
         永远不会被回收。
+
+        `cancelledSince` 就是这条规则的边界：注册方传"起进程那一刻的 `cancelEpoch`"，
+        则只有**这一发进程启动之后才发生**的取消会兑现它。传 `None`（默认）表示沿用
+        旧语义——任何已置位状态都算。为什么要有这个边界：一条长任务里顺序起多个进程时，
+        "本次取消"可能发生在前一发之后、这一发之前；旧语义会把这一发也当成"迟到的回调"
+        当场杀掉，于是用户点一次停止，取消会一路传染到后续所有命令。边界写在注册处、
+        由发起方声明，比在令牌里猜"哪些进程属于本次取消"要诚实。
+
+        返回值是**摘钩函数**（幂等、线程安全）：收尸之后调用它把自己那条摘掉。
+        为什么摘钩口径由注册方持有：回调按**进程**注册、令牌按**轮**持有，只有起进程的
+        那一层知道"这条进程已经结束了"。留着不摘的下场是——本轮后续任何一次取消都会去杀
+        一个已经结束的 pid，而 pid 会被系统复用。曾有一版用 `functools.partial(killTree, proc)`
+        当键去 `list.remove` 撤回，那永远撤不掉（每次 partial 都是新对象），于是"摘过钩"的
+        谎话把整条修复变成空转：本轮第一发命令之后的每一条都立即 `-9`。
 
         单个回调抛错不阻断其余回调——一个坏工具的进程失败不该拖住同一轮里
         其它工具的收尸。失败以警告形态暴露，不静默。
         """
         run_now = False
         with self._lock:
-            if self._cancelled:
+            if self._cancelled and (cancelledSince is None or self._cancelEpoch > cancelledSince):
                 run_now = True
-            else:
+            elif not self._cancelled:
                 self._actions.append(action)
         if run_now:
             self._run(action)
+        return lambda: self.release(action)
+
+    def release(self, action: Callable[[], None]) -> bool:
+        """撤回一条已注册的杀灭回调；撤回成功返回 True。
+
+        为什么需要撤回：回调是**按进程**注册的，而令牌是**按轮**持有的。一个进程
+        正常退出后它的回调仍留在令牌上，本轮后续任何一次取消（用户停止、上层超时）
+        都会去杀一个早已结束的 pid——pid 一旦被系统复用，杀的就是别人的进程。
+        所以起进程的人必须在自己收完尸之后把自己那条挂钩摘掉。
+
+        已置位时不再撤回并返回 False：那时回调要么已经执行完、要么正在执行，
+        "摘掉"不改变任何事实，谎报摘掉反而会让调用方以为安全。
+        """
+        with self._lock:
+            if self._cancelled:
+                return False
+            try:
+                self._actions.remove(action)
+            except ValueError:
+                return False
+        return True
 
     def cancel(self, reason: str = "") -> None:
         """置位并**同步**执行全部已注册的杀灭回调（幂等）。"""
@@ -109,6 +158,7 @@ class CancelToken:
             if self._cancelled:
                 return
             self._cancelled = True
+            self._cancelEpoch += 1
             self._reason = str(reason or "")
             actions = list(self._actions)
             self._actions.clear()
@@ -150,14 +200,35 @@ def resetTurnCancelToken() -> CancelToken:
     return token
 
 
-def registerKillAction(action: Callable[[], None]) -> bool:
-    """把杀灭动作挂到**当前轮**的令牌上；本轮无令牌返回 False。
+def registerKillAction(
+    action: Callable[[], None],
+    launchedAtEpoch: Optional[int] = None,
+) -> Callable[[], None]:
+    """把杀灭动作挂到**当前轮**的令牌上，返回**摘钩函数**（无令牌时返回空操作）。
+
+    `launchedAtEpoch`：起进程那一刻的 `CancelToken.cancelEpoch`（`currentCancelEpoch()` 取）。
+    传了它，本回调只为"这一发进程启动之后发生的取消"生效——一次用户停止不会顺着
+    同一轮里后续起的命令一路传染。不传即旧语义（任何已置位状态都兑现）。
 
     这是进程型执行体唯一该走的注册口（不各自 import 令牌再判断），
     保证"何处可被取消"只有一份判据。
+
+    调用方**必须**在进程收尸之后调用返回的摘钩函数：回调按进程注册、令牌按轮持有，
+    不摘就会在后续取消时去杀一个已经结束（且可能被复用）的 pid。摘钩函数的身份由
+    令牌自己给出，调用方不要另造一个等价对象去"撤回"——那撤不掉。
     """
     token = getTurnCancelToken()
     if token is None:
-        return False
-    token.onCancel(action)
-    return True
+        return _noop
+    return token.onCancel(action, cancelledSince=launchedAtEpoch)
+
+
+def currentCancelEpoch() -> Optional[int]:
+    """当前轮令牌的置位次数；本轮无令牌返回 None（注册方原样交给 `registerKillAction`）。"""
+    token = getTurnCancelToken()
+    return None if token is None else token.cancelEpoch
+
+
+def _noop() -> None:
+    """无令牌时的摘钩占位：调用方不必判空（判空口一多就会出现漏判的那一处）。"""
+    return None
