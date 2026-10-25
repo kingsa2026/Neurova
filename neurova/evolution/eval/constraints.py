@@ -223,42 +223,27 @@ def _embedding_similarity(a: str, b: str) -> Optional[float]:
 
 
 def _tokenize(text: str) -> set[str]:
-    """词面 token 集:拉丁词 + 中文 jieba 分词(jieba 不可用时 CJK 字符二元组)。
+    """词面 token 集:拉丁词 + 中文 **CJK 字符二元组**。
 
-    Jaccard 是词面下界——中文整段成单 token 会让改写/漂移都算不出差异,
-    必须按词切分(项目 RAG 已依赖 jieba,此处同源)。
+    这里**刻意不用 jieba**：语义闸是「embedding 不可用就跑」的兜底路径，兜底里再挂
+    一件可选依赖，等于把一次字典构建摊到"哪条 async 调用栈恰好第一个走到语义闸"身上。
+    实测构建 `cnb-sq6-1k5q1kqrc#003`：`test_service_closed_loop` 那格 30s 墙钟就是这么
+    被打穿的，回溯停在 `knowledge.search._get_jieba → jieba.initialize`，与该格被测行为
+    毫无关系。字二元组是纯 CPU、零可选依赖、离线可跑的——这正是本闸「不因可选依赖缺失
+    而失去这道闸」的取舍本身。判据见
+    `tests/unit/ci/test_optionalImportWallOwedByLivePath.py`（活体路径问取用口的次数必须为 0）。
+
+    Jaccard 是词面下界：中文按二元组切分已足以让"同义改写拿高分、主题漂移掉分"。
     """
     tokens: set[str] = set()
     latin_runs = re.findall(r"[a-z0-9]+", text.lower())
     tokens.update(r for r in latin_runs if len(r) >= 2)
-    cjk_runs = re.findall(r"[\u4e00-\u9fff]+", text)
-    jieba = _jiebaModule()
-    if cjk_runs and jieba is not None:
-        for run in cjk_runs:
-            tokens.update(w for w in jieba.cut(run) if len(w) >= 2)
-    elif cjk_runs:
-        for run in cjk_runs:
-            if len(run) == 1:
-                tokens.add(run)
-            else:
-                tokens.update(run[i : i + 2] for i in range(len(run) - 1))
+    for run in re.findall(r"[\u4e00-\u9fff]+", text):
+        if len(run) == 1:
+            tokens.add(run)
+        else:
+            tokens.update(run[i : i + 2] for i in range(len(run) - 1))
     return tokens
-
-
-def _jiebaModule():
-    """取 jieba：走 `knowledge.search` 那一个入口，不在这里裸 import。
-
-    裸 `import jieba` 只是把模块名拿到手，前缀字典仍是**首次 cut 时**才建（实测 0.5–0.8s，
-    CI 并行场里被 GIL 争抢放大到 8s+）——那笔账会落在"哪条无关键恰好第一个调到这里"身上，
-    上层完全看不出来。`knowledge.search._get_jieba()` 已在取用时把字典建完并把缺失记成
-    不可用，本模块复用它（教义第 6 条：同一件东西只有一处取用口）。
-    """
-    try:
-        from neurova.knowledge.search import _get_jieba
-
-        return _get_jieba()
-    except Exception:  # noqa: BLE001 - 取用口本身不可达时用二元组保持粒度
-        return None
 
 
 def _token_jaccard(a: str, b: str) -> float:
