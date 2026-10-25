@@ -2730,6 +2730,16 @@ tests/unit/channels/test_channelVoiceFactorySeamCloses.py
 # 另 13 条第二组候选在 HEAD 态逐格复跑 13/13 同红 ⇒ 全部预存不认领。
 # 入册前逐文件单跑三次同读数 11 passed（6.0~6.3s，含全仓 AST 数实现那一格）。
 tests/unit/core/test_denseCosineSingleSource.py
+# §6-419 续：零向量只有一种口径（`vector_math.isZeroVector`）+ 中文词表不得整段当一个 token。
+# 两处都是"静默做成假读数"的形态，不是抛错：`tool_search` 把引擎兜底的全零向量当有效向量，
+# 余弦恒 0 且**再也不回落 BM25** ⇒ 该查询恒空手，而空手在生产侧被投递成「能力缺口」并驱动
+# 自主造工具（`handle_control_tool` 的 S3 点）；词表那半是 `_TOKEN_SPLIT` 对中文无操作，
+# 「查询天气」与「天气」永不相等，目录里明明有天气工具却查不到。`muscle_memory` 同一根因
+# 的另一命中点：零向量入 metadata 后 `_compute_confidence` 走"有向量"分支、不回落到字符
+# 覆盖度，换实体近似句的置信度停在 0.5875（票面判据要 ≥0.85）。判据两向都钉：阈值不许在
+# 下游再抄一份（1e-9 那形），且这些模块必须真问过单源。入册前逐文件单跑三次同读数
+# 9 passed / 15 passed；红自证＝只按路径还原三处生产件 ⇒ 恰 4 格翻红、无收集错误。
+tests/unit/context/test_tool_search_semantic.py
 # §6-181 渠道 webhook 分派链：验签必须先于投递（安全判据，仿冒必拒 + 合法必通成对）。
 # 危害是活体量出来的，不是读代码读出来的：飞书支与钉钉支此前不做任何验签，把请求体直接拼成
 # ChannelMessage 投进 manager，而 sender_id 取自请求体 ⇒ 任何人能对已配置渠道冒充任意平台用户
