@@ -965,6 +965,15 @@ _weightEgressGate = _WeightEgressGate(_WEIGHT_EGRESS_SITES)
 
 def pytest_configure(config):
     config.pluginmanager.register(_weightEgressGate, "weightEgressGate")
+    # jieba 字典是进程级一次性冷启动：谁先切词，谁在**自己的栈上**付这笔建表时间。
+    # CI runner 上实测把 `test_service_closed_loop::test_accept_produces_pending_proposal`
+    # 撑过 30s 墙——红的位置在建字典（`jieba.initialize()` → `gen_pfdict`），不在被测逻辑；
+    # 本机 2.5s（字典已被同场更早的档暖过）。这是"判据读数取决于谁先跑到"的形态，
+    # 归前提不归被测代码，故在收集期一次建完，不留给某一条用例承担。
+    # 失败按不可用记下（`search._get_jieba` 自己 fail-soft 回退 n-gram），不影响收集。
+    from neurova.knowledge.search import warmJieba
+
+    warmJieba()
 
 
 @pytest.fixture(autouse=True)

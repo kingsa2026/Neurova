@@ -52,18 +52,21 @@ def embeddingUnavailableReason() -> str:
             "嵌入引擎缺席：模型档不在（`models/embedding/bge-small-zh-v1.5/model.onnx`），"
             "本仓这几档判据的向量分量与生产同链路，缺档给不出读数"
         )
-    try:
-        probe = engine.encode(PROBE_TEXT)
-    except Exception as err:  # noqa: BLE001
-        return f"嵌入引擎编码失败（{type(err).__name__}: {err}）"
-    if vector_math.isZeroVector(probe):
-        return (
-            "嵌入引擎回零向量：模型档在，但分词器/ONNX 运行时装不上"
-            "（`transformers` / `tokenizers` / `onnxruntime` 缺席时引擎走零向量兜底；"
-            "`requirements-ci.txt` 刻意排除这四件，故薄环境必然走到这里）。"
-            "要真读数请装 `requirements-full.lock` 或走云原生开发环境"
-        )
-    return ""
+    # 引擎就绪（能真算）时**不许**再用"缺件"蒙过：编码抛错或回零向量说明它坏了，
+    # 那是要人看的红，不是这台机器给不出读数。
+    if getattr(engine, "_initialized", True):
+        return ""
+    if hasattr(engine, "encodeOrNone"):
+        if engine.encodeOrNone(PROBE_TEXT) is not None:
+            return ""
+    elif not vector_math.isZeroVector(engine.encode(PROBE_TEXT)):
+        return ""
+    return (
+        "嵌入引擎回零向量：模型档在，但分词器/ONNX 运行时装不上"
+        "（`transformers` / `tokenizers` / `onnxruntime` 缺席时引擎走零向量兜底；"
+        "`requirements-ci.txt` 刻意排除这四件，故薄环境必然走到这里）。"
+        "要真读数请装 `requirements-full.lock` 或走云原生开发环境"
+    )
 
 
 def requireRealEmbeddingOrSkip(subject: str) -> None:
