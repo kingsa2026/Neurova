@@ -78,7 +78,14 @@ def testStopFlushesCacheViaLifecycle(probeBus):
 
     injector.stop()
     assert injector.get_state().value == "stopped"
-    assert probeBus.get_subscribers("context.build"), "stop 后订阅应仍在（退役由 unsubscribe 管）"
+    # 停止即退订（§6-419）：总线上存的是 handler 本体，bound method 持有 `self`，
+    # 订阅留着等于把整个注入器（连带它背后的记忆管理器与原生内存）钉在全局总线上。
+    # 原判据写的是「stop 后订阅应仍在（退役由 unsubscribe 管）」——而那个 `unsubscribe`
+    # 在仓里从未存在过：全仓没有任何一处退订调用，受保护子集因此每档建一次 app 就
+    # 单向 +230MB，第四次 137 就是这么来的。断言反过来，钉住"成对"这条纪律本身。
+    assert not probeBus.get_subscribers("context.build"), (
+        "stop() 之后订阅仍然挂在总线上——模块已停止却还在收事件，且整张对象图被钉住"
+    )
 
 
 def testNoAsyncHookWithoutAwaitInBody():
