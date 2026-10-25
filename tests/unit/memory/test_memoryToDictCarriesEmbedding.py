@@ -115,6 +115,10 @@ def test_writeSideNowFillsEmbeddingsButTheContentGateStillRules(tmp_path: Path, 
                 "会议纪要讨论了预算": [0.0, 1.0, 0.0, 0.0],
             }[text]
 
+        def encodeOrNone(self, text: str):
+            # 真引擎的同一个契约：问"算出向量了吗"就走这个口（算不出回 None）
+            return self.encode(text)
+
     monkeypatch.setattr("neurova.embedding.get_embedding_engine", lambda: _TableEngine())
 
     manager = bodyManager(tmp_path, agentId=AGENT)
