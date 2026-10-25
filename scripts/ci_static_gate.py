@@ -51,9 +51,12 @@ CHECK_DIRS = ["neurova", "scripts"]
 # 留在表里意味着"向量原语/分词判据因缺件而红"会被记成 OPTIONAL-SKIP 静默放行——
 # 那正是本表唯一会做错的事（把环境缺件与代码缺陷混成同一读数）。
 KNOWN_OPTIONAL_DEPS = {
+    # `onnxruntime` / `tokenizers` 已移出本表（2026-10-25）：它们进了
+    # requirements-ci.txt，环境里必须有。留在表里意味着"向量判据因零向量兜底而红"
+    # 会被记成 OPTIONAL-SKIP 静默放行——与本表唯一会做错的事同一形态（把环境缺件
+    # 与代码缺陷混成同一读数），与 numpy 2026-10-23 的处置逐字同构。
     # 科学计算 / 向量 / NeRF
     "torch",
-    "onnxruntime",
     "faiss",
     "chromadb",
     # ASR / TTS / 音频
@@ -67,7 +70,6 @@ KNOWN_OPTIONAL_DEPS = {
     # Embedding / NLP（会连带 torch，体积大）
     "sentence_transformers",
     "transformers",
-    "tokenizers",
     # Computer Use（视觉 / 桌面控制 / 浏览器自动化）
     "PIL",
     "cv2",
