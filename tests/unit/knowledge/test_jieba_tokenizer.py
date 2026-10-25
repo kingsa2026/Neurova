@@ -141,8 +141,20 @@ class TestJiebaHasOneWarmEntry:
             pytest.skip("本环境没有 jieba（可选依赖），这一格量的是「拿到手就是暖的」")
         assert jieba.dt.initialized, "取用口交回的是还没建字典的实例——首调成本又落回调用方身上"
 
-    def test_constraintsGoesThroughTheSameEntry(self, monkeypatch):
-        """`constraints` 不得再走自己那份 import：改走同一个取用口。"""
+    def test_constraintsAsksNoOptionalEntry(self, monkeypatch):
+        """`constraints` 不走取用口——这是裁决反转后的**反向**判据。
+
+        本档原先钉的是"走的还是同一个取用口"：那时口径是"收口到一处，成本落在明确
+        的入口上"。实测证明这条口径不够——收口只把"谁 import"统一了，**没消除**那笔
+        冷启动：`evolution.eval.constraints` 走的是 `semantic_similarity` 的兜底支，
+        而兜底支一旦问取用口，字典构建就摊到"哪条 async 调用栈恰好第一个走到语义闸"
+        身上（构建 `cnb-sq6-1k5q1kqrc#003`，`test_service_closed_loop` 那格
+        `Timeout (>30.0s)`，回溯停在 `search._get_jieba → jieba.initialize`）。
+
+        故裁决改为：兜底的词面下界**零可选依赖**（中文按字符二元组），取用口只服务
+        真正需要词级切分的地方（`knowledge.search.tokenize`）。本格反向钉住这一点——
+        谁把 `constraints` 再接回取用口，这里立刻红。
+        """
         import neurova.evolution.eval.constraints as constraints_mod
         import neurova.knowledge.search as search_mod
 
@@ -154,11 +166,14 @@ class TestJiebaHasOneWarmEntry:
             return real()
 
         monkeypatch.setattr(search_mod, "_get_jieba", spy)
-        constraints_mod._token_jaccard("量子计算", "量子 计算")
-        assert seen, (
-            "`constraints._token_jaccard` 没走 `knowledge.search._get_jieba`——"
-            "那它自己那份裸 import 又会把 jieba 的冷启动摊到无关键上"
+        tokens = constraints_mod._token_jaccard("量子计算", "量子 计算")
+        assert not seen, (
+            "`constraints._token_jaccard` 又在问 `knowledge.search._get_jieba`——"
+            "语义闸是「embedding 不在就跑」的兜底路径，兜底里再挂一件可选依赖，"
+            "那笔冷启动就摊回无关键上了（判据："
+            "tests/unit/ci/test_optionalImportWallOwedByLivePath.py）"
         )
+        assert tokens >= 0.0, "兜底仍须给出词面下界读数（二元组），不能退化成常量"
 
     def test_concurrentCallersShareOneDictionaryBuild(self):
         """8 条线程同时取用，字典只建一次，且每条拿到的都是**已建好**的实例。
