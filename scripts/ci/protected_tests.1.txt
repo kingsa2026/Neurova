@@ -1,0 +1,1099 @@
+# 受保护子集 · 分片 1 / 3
+# 分片不是新清单：条目与顺序逐行取自索引 protected_tests.txt（CI 分片跑，并集必须相等，
+# 判据见 tests/unit/ci/test_protected_subset_shards.py）。为什么分片：单一进程跑整份清单的
+# 峰值 RSS 实测 2.74~2.78 GiB 且仍在爬升，而这条腿 4 核 = 8 GiB 上限，构建
+# cnb-v9p-1k5pkvplt 的 code 137 就是被整段掐断。改清单请改索引后按同一片数重切。
+# P0-6 CI 受保护测试子集（unit-tests job 跑这份清单）
+# 原则：只进当前确定全绿的测试；预存失败模块不进 CI，修复后逐个搬入。
+# 维护方式：每完成一个 P0/P1 项，把它的测试文件加进来。
+tests/unit/test_audit_regressions.py
+tests/unit/test_ci_parity_guard.py
+# 受保护子集里的墙钟上界断言逐条有结论（CI 偶发红的根因：结构契约被编码成墙钟阈值）
+tests/unit/test_ci_wallclock_assertion_ledger.py
+tests/unit/test_ci_thin_env_guards.py
+tests/unit/security/test_governance_mcp.py
+tests/unit/security/test_url_guard.py
+tests/integration/test_tool_engine_integration.py
+# Issue #46 收口：bench_gate 中性只有一条来源（删注册表派生假咬合 + 中性外露到结果面）
+tests/unit/evolution/eval/test_bench_gate_honest_neutrality.py
+# Issue #46 收口：「清空生效正文」在带工具序列/编辑链两形态下也必须被拦
+tests/unit/skills/test_body_clear_is_gated.py
+# 轮级候选正文覆盖槽（§8 前置 2 双臂试评执行面，票面 2026-10-09 Task 2）：
+# 今天唯一的办法是原地改 registry 里的 `doc_text`（全局态，两臂并发即串——实测臂 A
+# 读到臂 B 的正文）。判据钉"各得其所 / 复位不泄漏 / 未设槽逐字节照旧"，并覆盖
+# 同契约第二命中点（SKILL.md 型技能经**工具返回**进模型的那条路）。
+tests/unit/skills/test_turnSkillTextOverride.py
+# 双臂试评的真 agent 执行器与「执行面来源」外露（票面 Task 4）：kind 必须由真正被拿去
+# 执行的那个对象推导——端点自己再猜一遍实测翻过车（真臂被改标成 simulated）。真臂必须
+# 经 agent.chat(save_memory=False) 且本轮带着自己那一臂的候选正文。
+tests/unit/evolution/eval/test_abCompareRealTrajectoryArms.py
+# Issue #48 NPC 思考档位修正：model 禁带思考强度后缀 / thinkingLevel 必须字面量枚举
+tests/unit/test_ci_npc_config_guard.py
+# §6-95 后半：`runs/*.json` 从"只写不读"接上读者——提案带着 `run_id` 指回那次运行，
+#   详情端点原样读回（三态各自出声：attached / missing / none_recorded）。
+#   两格分别打在"生产写侧真的写出这些键"与"HTTP 响应里真的带着运行"上；后者还钉住
+#   列表面不夹带运行明细（与"列表不夹带正文"同一口径）。
+tests/unit/evolution/eval/test_service_closed_loop.py
+tests/unit/llm/test_capability_cache_single_source.py
+# §6-381 续（TM-2a 批 A）：规则联想线索的写侧/索引侧/作用域门/渲染面沉默四条。
+# 该文件另含一条 `xfail(strict=True)`（规则线索抬不动情境型零词面查询，归批 C 转正）——
+# 达成时以 XPASS 变红，是要求摘标记的信号，不是子集坏掉。
+tests/unit/cognitive_layers/memory_layer/test_ruleAssociationCues.py
+# §6-383（批 C-1）：联想线索**向量通道**的净增益与安全性——配对断言（同 fixture 内开/关做差），
+# 不用绝对线：绝对读数受跑序影响（本文件单跑与同目录合跑 hit@5 差 2），根因待查已登记 §6-383。
+# 门限 0.45 是 bge-small-zh-v1.5 上的实测最优点，**不是**抄外部的 0.85（抄来即 droppedByGate 全吃）。
+tests/unit/cognitive_layers/memory_layer/test_cueVectorChannel.py
+# §6-385（批 C-2）：模型联想线索生成器——批量、封账、失败留队、超时、复述过滤、
+# 丙档护栏（「问过就封账」，否则无上限＝无界烧钱），以及一条反孤岛守卫
+# （生成必须由 post_chat 经 `_get_dependency("llm_client")` + `_spawn_background` 派发，
+# 不许长成「测试里自洽、生产上没人递客户端」的形态）。测试不打真模型。
+tests/unit/cognitive_layers/memory_layer/test_cueGenerationBatchC2.py
+# §6-388（批 C-3）：联想线索的去重与批量 N 解耦——跨记忆复用同词不再按批丢弃（那是正当共享），
+# 改由检索侧按 norm_key 全局扇出裁；判据含「切批方式不得改变落库集合」与「扇出门挡超限、不误伤共享」。
+tests/unit/cognitive_layers/memory_layer/test_cueFanoutDecoupledFromBatchC3.py
+# Issue #68 修复纪律落库：TDD 红绿灯/放大视角/修根因/禁抹除表面报错
+#   （AGENTS.md 修复教义事实源 + NPC 角色 prompt + .gitignore 白名单 + CONTRIBUTING）
+tests/unit/test_repair_discipline_guard.py
+# Issue #57 P1-4：manager.py DELETE 连接卫生（M-15 契约更新为池化后的强断言）
+tests/unit/cognitive_layers/memory_layer/test_m15_delete_persisted_conn_hygiene.py
+
+# Issue #61 部署配置一致性：门禁自检（R1~R9 不变量 + 周级 crontab 巡检接线）
+tests/unit/test_deploy_config_guard.py
+tests/unit/test_arch_deepening_candidates.py
+tests/unit/test_tool_call_breakpoints.py
+tests/unit/test_tool_call_breakpoints_v2.py
+tests/unit/test_tool_call_breakpoints_v3.py
+# Issue #62 收口守卫：开发机路径零写死 + MCP SDK 运行时声明
+tests/unit/test_dev_path_and_runtime_dep_guards.py
+tests/unit/execution/test_execution_engine_reset.py
+# RSI 进化闭环修复批 001-008 + 018（判据可证伪化）：三态判据、回滚留痕与天数起算、
+# roi 真值、评测分母与度量失明、降频巡检派发、参数事实源守卫、两条闭环基线
+tests/unit/evolution/rsi/test_gate_verdict.py
+tests/unit/evolution/rsi/test_parameter_source_of_truth.py
+tests/unit/evolution/rsi/test_rsi_rollback_evidence.py
+tests/unit/evolution/rsi/test_rsi_roi_truth.py
+tests/unit/evolution/rsi/test_eval_evidence_denominator.py
+tests/unit/evolution/rsi/test_convergence_evidence.py
+tests/unit/evolution/rsi/test_rsi_loop_baseline.py
+
+# 经验知识形成质量门控修复批 001-017（工单 009 门禁全绿后整批搬入，2026-09-20 逐文件
+# 单跑验证）。登记范围＝本批新增的测试文件；门禁脚本自身按 000-索引 纪律 7 不进清单。
+# 001 成败信号基线 / 002 三态 / 003 真实成败不被覆盖 / 004 结晶闸归位 / 005 候选生命周期
+tests/unit/evolution/experience/test_success_signal_baseline.py
+tests/unit/evolution/experience/test_outcome_propagation.py
+tests/unit/evolution/experience/test_crystallization_gate.py
+tests/unit/evolution/experience/test_crystallization_votes.py
+tests/unit/evolution/experience/test_candidate_lifecycle.py
+# 006 注入身份与采纳回写 / 006 检索命中记账
+tests/unit/evolution/experience/test_adoption_writeback.py
+# 007 检索质量门与注入优先级
+tests/unit/skills/test_ekb_retrieval_quality_gate.py
+# 008 经验族指标与告警 / 010 三条臂吃客观票据
+tests/unit/evolution/rsi/test_experience_quality_metrics.py
+tests/unit/evolution/experience/test_objective_tickets.py
+# 011 两个写入面的内容门 / 012 类型语义与冲突检测定性
+tests/unit/skills/test_ekb_content_gate.py
+tests/unit/cognitive_layers/memory_layer/test_content_gate.py
+tests/unit/cognitive_layers/memory_layer/test_memory_type_semantics.py
+# 017 通过门控不等于永久固化（温度封顶 + 衰减 + 冷档屏蔽）
+tests/unit/evolution/experience/test_pattern_lifecycle.py
+tests/unit/evolution/experience/test_pattern_reaping.py
+# 009 真实语料基准 + CI 门禁（低质注入必红、正常语料全绿、旋钮反向锁）
+tests/unit/test_experience_quality_gate.py
+# 015 治理开关收口（两个裸 env 进 governance_settings，优先级三方向 + 裁决时刻读取）
+tests/unit/security/test_governance_flag_resolver.py
+# 015 经验条目人工处置通路（降权/隐藏真的改检索排序与注入优先级；审核不洗证据）
+tests/unit/skills/test_ekb_operator_disposition.py
+# 016 经验质量读数进 RSI 阶段晋升判据（无据⇒unevidenced 不推进不否决、质差硬否决、阈值活旋钮）
+tests/unit/evolution/rsi/test_experience_quality_promotion.py
+# 005 单一控制器与阶段回写（proposer 不得自建第二个控制器、自动晋升必须回写 rsi_phase 且落盘失败可读）
+tests/unit/evolution/rsi/test_rsi_single_controller_phase_writeback.py
+# 012 观测面收口（规范指标全部有写入方、临时键删净、dashboard/推送口拆除、GET /rsi/status 接电）
+tests/unit/evolution/rsi/test_rsi_observation_surface.py
+# 009 升级通道可达性（度量失明/真ROI 触发、GateVerdict 三态、每个跳过点名、状态面可见）
+tests/unit/evolution/rsi/test_rsi_escalation_reachability.py
+# 010 批准即生效（人类授权装库+回灌注册表才算 APPLIED；无生效通道的类型显式 not_supported；台账按 agent 分域）
+tests/unit/evolution/rsi/test_rsi_proposal_activation.py
+# 014 身份键统一（name 与身份域归一为注册表内一次查找；字典直取由 AST 锁清零）
+tests/unit/skills/test_skill_identity_key_domain.py
+
+# Issue #68 分类闭环收口：分类词汇表唯一（枚举身份断言）+ ClassifierModule 值域收敛
+# + remember(auto_classify=True) 真落分类且留痕 + classify_memory 契约
+tests/unit/cognitive_layers/memory_layer/test_classification_closed_loop.py
+
+# pytest 运行器守卫：受保护子集的多路径收集下，tests/unit/evolution 的 conftest
+# fixture 必须仍可解析（收集缓存按节点身份去重 + 同名 collector 双身份导致的
+# 65 error 回归），且不得回退到"钉 pytest<9"来回避（那条落在 CVE-2025-71176 里）
+tests/unit/test_pytest_runner_guards.py
+
+# Issue #68 收口后下一层：docs/11-legacy 归档层悬空引用登记台账（逐条可达性判定 +
+# 前像回收 + 不得记成已修复），守卫与生成器 scripts/scan_docs_refs.py 同一口径
+tests/unit/test_legacy_ref_ledger_guard.py
+tests/unit/evolution/experience/test_success_three_state.py
+tests/unit/evolution/experience/test_ticket_context_observability.py
+tests/unit/evolution/experience/test_muscle_memory_param_shape.py
+tests/unit/evolution/experience/test_muscle_memory_recall.py
+tests/unit/skills/test_skill_view_key_domain.py
+tests/unit/skills/test_skill_entry_choke_migration.py
+# Issue #80 续（第八轮）：轮级耗时在**并行轮**也要回得到父轮次上下文（单源累加器）
+#   + 三态的第五个面（进 prompt 的那一段：池提取口 / 渲染口 / 传动轴）
+tests/unit/evolution/experience/test_turn_elapsed_accumulation.py
+
+# Issue #74 温度衰减双实现收敛：单一事实源（第二套实现不得回加）+ 连续衰减曲线
+# （阶跃边界 = 既有红灯 test_ebbinghaus_curve 的根因）+ 其余 5 组成建制死码退役锁定
+tests/unit/cognitive_layers/memory_layer/test_temperature_single_source.py
+# Issue #72 附带根因：构造期播种只补缺，不覆盖已登记的 domain/range/cardinality
+tests/unit/knowledge/ontology/test_term_seed_does_not_clobber.py
+# Issue #81 F-05 后半（可见性批）：运行中的后端不重启就看见别的进程写下的记忆。
+#   根因：快照只在进程构造时读一次盘，CLI 在另一个进程导入的记忆因此不可见——
+#   报告写"已写入"而界面一条看不见，是第三种假成功。
+#   判据：reload 增量且幂等（2/0）、不抹掉本进程运行期记忆、盘上行一字节不改、
+#   既有关键词倒排不被 clear、门索引咬合、快照口径不收窄、/reload 不被 /{memory_id} 吞掉。
+tests/unit/cognitive_layers/memory_layer/test_reload_memories_visibility.py
+# Issue #81 对账批（用户拍板三条）：① 跨进程撤销走 reload 双向对账；② 记忆写入口加属主；
+#   ③ 产物属主 + 注册表持久化。判据：盘上已消失的行在 reload 时被回收、复活路径（按 id
+#   改动写回盘）断掉、回收幂等且不误伤本进程行、倒排不留残留；属主两轴同定标且真的参与
+#   隔离（属主可见/非属主不可见）、幂等键按行作用域分槽、取代声明在属主作用域里找；
+#   产物条目带归属、共享批次显式标记、漏写属主一律诚实 404、注册表水合往返与丢盘清理。
+tests/unit/cognitive_layers/memory_layer/test_reload_reconciles_with_disk.py
+tests/context/test_context_pool_hash_index.py
+tests/unit/evolution/experience/test_three_state_four_faces.py
+tests/unit/evolution/experience/test_structure_identity_param_shape.py
+tests/unit/evolution/experience/test_muscle_memory_agent_identity.py
+tests/unit/evolution/experience/test_muscle_memory_rearchive_safety.py
+tests/unit/evolution/experience/test_rsi_idle_cost_recorded.py
+tests/unit/skills/test_skill_name_collision_recount.py
+# Issue #189 残留：存量库名字域迁移（同 name 不同身份 ⇒ 派生名携带身份；
+#   迁移幂等 + 装配后工具面条目数 = 库内条目数 + 新写入按构造成立）
+tests/unit/skills/test_skill_name_domain_migration.py
+tests/unit/test_script_index_registration.py
+
+# Issue #68 下一层：同名多份（回潮副本）逐条裁定 + 棘轮。
+# 根因 = 目录重排 fd7ea92c 之后，3b5d7e80 又把 306 个 docs 旧路径还原回来，
+# 同一篇文档在编号分层与旧路径各留一份，归档引用失去唯一裁定。本单收口为一份。
+tests/unit/test_docs_name_collision_guard.py
+# Issue #189 续：导航/纪律事实源不得手抄「仓库条目数」（第二份定义）。
+# 根因与 `.cnb.yml` 头部手抄流水线条数同形：索引里的数字与目录实况之间没有
+# 任何机器判据，已实测漂移三处（修复记录 47→37、模块设计 19→21、代码评审 3→4）；
+# `AGENTS.md` 的 `90+` 与总索引的 `97` 更是同一事实的两份手抄、同一时刻两个数。
+tests/unit/test_docs_index_hand_copied_counts.py
+# 同上批：回收契约的落盘判据已重定向（落盘在入池、回收只管常驻），
+#   原文件已在上册，无需重复登记
+
+# Issue #96 收尾：退役平铺目录的引用可达性。删副本必须同批改引用——否则报错从
+#   「两个候选」变成「零个候选」，洞只是换了个位置（活跃层链接 + INDEX 权威表两处）
+tests/unit/test_docs_retired_tree_refs_guard.py
+# Issue #72 残余项：记忆侧冲突信号必须落在「同一命题的否证」（子串含否定词 +
+#   0.3 相似度门是噪声根因），且判据全仓唯一（ConflictModule 不再自持第二份）
+tests/unit/cognitive_layers/memory_layer/test_conflict_signal_scope.py
+# Issue #72 残余项：冲突链闭环——检出带依据落账、读数可见（stats/summary/按来源）、
+#   依据缺失不入账、纯观测语义不变
+tests/unit/cognitive_layers/memory_layer/test_conflict_disposition_loop.py
+
+# Issue #96 收尾·第三轮（Ref: #68）：活跃层指向「不存在的具体文件」的引用。
+#   根因同 #96——三次搬家/退役（fd7ea92c / 5f94b93d / 3b5d7e80 / 663faa5d）
+#   都只改文件、不同批改引用方。前两轮只覆盖「归档层」与「退役目录」两类形态，
+#   活跃层指向不存在文件的引用一路无人拦。判据单源在 scripts/scan_docs_refs.py
+#   的 activeLayerDangling()，活跃层零容忍（硬零，不是棘轮）。
+tests/unit/test_active_layer_refs_guard.py
+
+# Issue #68 下一层：归档层 1800 余条按「是否影响当下导航」再筛一轮。
+#   前序口径把归档层一视同仁为「历史留痕，不就地改写」，副作用是把两类不同性质
+#   混在一起：绝大多数条目的载体今天没人走得到；少数条目的载体**导航可达**，
+#   其中可点击的引用点开就 404。判据单源在 scripts/scan_docs_refs.py 的
+#   navigationImpactRefs()（导航图传递闭包 + 可点击/指路两形态），
+#   甲类可点击硬零，乙类指路条目必须立项承接（登记不代替立项）。
+tests/unit/test_archive_nav_impact_guard.py
+
+# Issue #112 销账（Issue #68 归档层导航影响筛选·乙类）：前端 API 清单重生成。
+#   根因：docs/09-dev-progress/api_inventory.md 是专职指路文档（docs/0-index/README.md
+#   的 09-dev-progress 领域入口），但此前**只有手写正文、没有写者**——代码树一变
+#   它只能漂移，且没有任何命令能把它拉回来：实测声明 71 个前端模块里 29 个已不存在、
+#   现行 61 个里 20 个未列出。
+#   现为生成物：唯一写者 scripts/generate_api_inventory.py，判据单源在生成器内
+#   （前端调用面 ←→ create_app() 装配后的真实路由表）。过期判据由日历改为
+#   **双向差集 + 运行时常量对齐**（静态路由零假阳性自证）。
+#   两条守卫同源分工：freshness 守卫锁模块双向差集、前缀表、快照纪律与生成入口幂等；
+#   inventory 守卫锁机器区与生成器输出逐字一致、两组差异逐条登记、快照不逾期。
+#   模块双向差集为空，两组差异（前端未命中后端 / 后端无前端消费）逐条显式登记。
+#   棘轮基线 103 → 0。
+tests/unit/test_api_inventory_freshness_guard.py
+tests/unit/test_api_inventory_guard.py
+
+# Issue #148 跨文件 AST 判据的解析预算收口（CI 受保护子集偶发红根因）。
+#   根因：「单源 / 收口点」判据把**代码总量**编码成了时间上界——全仓 rglob + ast.parse
+#   实测 1.4ms/文件，单个用例 4–6s；与另外 170 个受保护文件共享机器、按 -q 一次性跑时
+#   撞 pytest-timeout 默认 30s 墙钟（2026-09-22 构建 cnb-2p6-1k347lfg1 实测转红：
+#   Failed: Timeout (>30.0s) from pytest-timeout）。判据本身与代码行数、与机器快慢都
+#   无关，墙钟上界不会因为它变松而更成立（教义第 2 条禁止的「降级断言换绿」近亲）。
+#   处置：解析单源到 tests/ast_scan.py（按文件整进程缓存 + 文本预筛）。预筛是**充分
+#   条件**：谓词是 `X.<name>`，连 `<name>` 都没出现的文件不可能命中——实测
+#   `neurova/` 1014 文件里含 `attest` 的只有 4 个，解析量从「代码总量」降到「命中面」
+#   （0.06s vs 6.5s）。守卫锁形态而非秒数：无预筛的全仓 rglob+parse 归零、
+#   共享入口真实可用、预筛不漏报（注入真实命中自证）。
+tests/unit/test_ci_ast_scan_budget_guard.py
+
+# Issue #80 工具↔经验↔再调用三环路修复批（第四轮）：票面正文入库与「判据可复核」收口。
+#   根因：001–011 的票面（即每张票的收工判据）只存在于 Issue 附件的对话里，仓内只有
+#   000-索引.md——索引表 11 行的落点指向 11 份并不存在的票面，复核者拿不到判据原文。
+#   守卫锁三条：索引声明的票号必须有同名唯一票面正文；票面的「执行结果」不得停在占位符；
+#   本批文档里的仓库路径引用与章节号必须可达（判据复用 scripts/scan_docs_refs.py）。
+tests/unit/test_tool_loop_ticket_set_guard.py
+# Issue #121 修复单：OSV 门禁「真扫到、且真拦得住」收口。
+#   根因三处（PR #121 的 dependency-audit 连续两次红，读数均为 `扫描器异常退出 code=127`）：
+#   ① 扫描器**不校验 CLI 契约**——取回二进制直接用。实测：v1.9.2 在 v2 拼法
+#      （`scan source`）下退 127、v1 拼法退 0；而 cnb 容器（python:3.12）无解压器时
+#      下载会落 127 字节 GitHub 错误页，它与真二进制 sha256 相同 → 原「指纹校验通过」
+#      压根没证明这二进制能用。现 `--with-binary` 先起一次真扫描自证：解析目标、
+#      出 JSON、退出码在契约集合 {0,1,65} 内。
+#   ② 被扫依赖树**没被点数**——`Scanned … found N packages` 的读数无人核，
+#      扫了 0 个包也能印绿字；告警若被 `2>&1 | cat` 吞掉，有漏洞也会退出 0。
+#      现把「由 Python 解析出的逐目标包数」与扫描器自报数对账（未登记类型取
+#      UNCOUNTED_SENTINEL 并显式报红，不猜 0）。
+#   ③ 下载段里的解压器死码删除——release 资产是未压缩单一静态二进制（v2.6.0 / v1.9.2 实测）。
+#   守卫另锁：命令契约与下载的扫描器版本自洽、门禁步骤的退出码能穿过管道
+#   （软管道实测吞码：子进程 127 → 管道整体 0）。
+tests/unit/test_osv_audit_hardening_guard.py
+# ③ 的既有契约面（工具名仍须满足 OpenAI 规范）与 ① 的既有消费者
+tests/unit/skills/test_scripts_port_utils.py
+
+# Issue #197 §7 台账 N4（预算账本边界）：
+#   金额域（成本侧 float，价格表与 cost_store 的 REAL 列）与账本域（Decimal 算术）
+#   的交界上两处都缺归一 —— float 进 Decimal 账本即 TypeError，被 fail-open
+#   兜住后记账整体静默失效（用量恒 0.00、超支闸恒 False）；
+#   告警阈值又写成 0~1 制，与用量读数（0~100 制）不同尺度，1% 用量即全档触发。
+#   RECOVERED 档同函数内被当成越线档，超支时反报"已恢复到 125000%"。
+#   三处判据同文件，全部经真实记账入口（record_llm_cost）驱动。
+tests/unit/models/test_cost_budget_ledger_boundary.py
+
+# 技能注入扫描守卫（P1-6）：NL 合成产物注册前必须过扫描，且正例要真走到注册出口。
+#   T-03 把 `_check_nl_synthesis` 的入口判据换成能力缺口后，本文件两例都在入口早退
+#   （正例看起来红、反例看起来绿，判据从未咬合）——它此前不在子集里，CI 看不见。
+tests/unit/security/test_p1_6_skill_guard.py
+
+# 轮级账本跨任务可见 + 耗时列「测到 0.0」不折叠（工单 016）：四个命中点实测转绿，
+#   反向锁证明标量 ContextVar.set 的子任务写入确实对父不可见（判据有区分力）。
+tests/unit/evolution/experience/test_turn_ledger_cross_task_and_measurement.py
+# T-10a 出口脱敏的键集合契约：载荷键集合单点声明，集合内每个键走同一条脱敏路径；
+#   `arguments` 的敏感值不得从 channel/SSE 原样透出（含反向控制）。
+tests/unit/security/test_tool_event_export_redaction.py
+# Issue #56 依赖安全收口四件套：锁完整性（声明↔锁漂移 / 缺 pin / 幽灵 root /
+#   孤儿包）、非 pip 依赖树审计门禁契约、运行时 npx 包钉版本、模型产物 sha256。
+tests/unit/test_lock_integrity_guard.py
+tests/unit/test_osv_audit_gate.py
+tests/unit/tts/test_model_integrity_manifest.py
+
+# Issue #223 CI 流水线耗时收口：四条结论（离线库跨构建复用 / 静态门禁合并 /
+#   重复依赖走同一份锁 / 不自举 pip）逐条钉住，回退即红。
+#   （根因：`.cnb.yml` 的 11 条流水线各装各的依赖、各扫各的全仓 AST，耗时构成
+#    此前无任何机器判据——改完就没人守，下一个人回填一处 `--upgrade pip` 不会有红。
+#    处置与刻意不动的三件事见 docs/04-plans/2026-09-25-ci-pipeline-cost-convergence.md）
+tests/unit/test_ci_pipeline_speed_guard.py
+tests/unit/security/test_command_segment_approval.py
+
+# Issue #271 M5 尾巴（第五命中点）：安装门的「已知工具全集」此前是一份 41 项
+#   手写探针清单，注释自陈理由（"注册表无直接列表 API"）不成立——
+#   `get_registered_tool_names()` 就是那个读侧，其 docstring 明确禁止再持第二份
+#   名字表。实测漏 30/71，后果是**安装门误拒**：白名单里写 deep_research /
+#   write_stdin / query_database / orchestrate_tools / git 等合法工具名会被判
+#   「含未知工具」而拒绝安装。判据：注册面逐名过门 + 真未知名仍被拒 +
+#   MCP 声明口径不变 + AST 复算"安装门里不得再出现手写名字表"。
+tests/unit/skills/test_install_gate_known_tools.py
+# Issue #271 M5 尾巴（第三命中点）：`file_operation` 沙箱根此前是「一条事实两处
+#   实现」——成员判定在 `sandbox_root.SANDBOX_ROOT_TOOLS` 与咽喉的
+#   `skill_name == "file_operation"` 各写一份，解析口径也各写一份且**已分叉**
+#   （helper 不校验 `is_dir()`、咽喉校验）。`_base_dir` 是覆盖 LLM 伪造参数的
+#   服务端赋值，故防线只在其中一条路径上成立。判据：成员单源 + 解析单源 +
+#   咽喉不得自带成员比较（AST）+ 真执行体落盘 + 防伪根回落。
+tests/unit/skills/test_sandbox_root_single_source.py
+# Issue #271 M5 尾巴（第四命中点）：能力面「系统面」此前是纯手写名单，而工具的
+#   "须真隔离执行"承诺是它自己的声明（`sandbox_required`）⇒ 两条事实无对账。
+#   实测缺口有后果：`computer_ssh_exec`（远端真 shell）与 `exec_command`
+#   （shell=True 跑真命令）声明了 sandbox_required 却不在系统面内，于是声明了
+#   `system: false` 的技能照样能调它们。判据：声明面逐名咬合（凡声明必须入面）、
+#   桌面动作族逐名在面、手写部分逐名钉住、平台能力不被误收紧（反向控制）。
+tests/unit/skills/test_permission_system_face_closure.py
+tests/integration/test_browser_automation.py
+tests/integration/test_browser_manager_integration.py
+tests/integration/test_scrapling_spider.py
+tests/integration/test_computer_use_integration.py
+tests/integration/test_computer_use_browser_integration.py
+# T-12 收尾 U-07：camofox 产出侧语义在**真 httpx socket**上的守卫（逐文件单跑 7 passed；
+# 三个变异对照各自咬住预期条目，摘掉空正文拒绝分支时红形即 T-12 的原始谎报）
+tests/integration/test_camofox_contract_stub_transport.py
+# Q-2 落地时活体撞出的缺陷：探测"下不了结论"不许写成"实测不支持图"（逐文件单跑 4 passed）
+tests/unit/llm/test_probe_inconclusive_is_not_a_verdict.py
+# U-01 的拦路虎：多模态探测图自己解不开（原内联 blob chunk 结构坏）。逐文件单跑 2 passed
+tests/unit/llm/test_image_probe_fixture_is_real_png.py
+# §37：413 闸门必须兑现——旧实现单趟编码实测出 3,169,770 B / 3,205,312 B 仍超 3MB。逐文件单跑 4 passed
+tests/unit/test_image_payload_gate_is_honored.py
+# §38：熔断器九条判据自五段框架退役起收集期 ImportError、从未进 CI。逐文件单跑 9 passed
+tests/unit/security/test_tool_circuit_breaker.py
+# §41：compat 声明位必须可达（字段→持久化→写侧→端点转发→运行态刷新），拼错键名不许静默。逐文件单跑 15 passed
+tests/unit/llm/test_provider_compat_declaration.py
+# §42：采样值被网关钉死必须按回执学（per-model 摘键+有界重发），认不出不许盲重试。逐文件单跑 17 passed
+tests/unit/llm/test_sampling_pin_receipt.py
+# T-20：model_adapter 整块退役的反向守卫——退役块不得复活、挂载表不得回流、生产源不得再引用其符号，
+# 且现役族表对六族模型仍推断出具体能力（防"退役把能力面删薄了"）。逐文件单跑 9 passed
+tests/unit/llm/test_no_parallel_vendor_capability_surface.py
+# 仓库根污染守卫：逐用例快照根目录顶层条目，新增即红并点名肇事用例。
+# 判据走行为（子进程探针真造污染），不钉 pytest 内部属性——pytest 9 已把夹具对象换成
+# FixtureFunctionDefinition，钉属性下次升级即碎。逐文件单跑 4 passed（约 12s，含 3 次嵌套跑测探针）
+tests/unit/test_repo_root_pollution_guard.py
+# 会话写入口能声明属主 + 生产侧调用点必须显式写 user_id=（含反向证明）。逐文件单跑 5 passed
+tests/unit/session/test_session_writer_declares_owner.py
+# 会话落点两层判据：默认隔离（conftest 单源）+ 收尾守卫（挡显式改回真实库）。
+# 探针全走子进程行为，不读 pytest 内部属性；顺序坑记在夹具 docstring（teardown 逆序，
+# 不显式声明依赖时守卫会在复位之后才跑，永远看不见肇事者）。逐文件单跑 4 passed（约 12s）
+tests/unit/test_session_landing_guard.py
+# 审计台账 commit 号必须可达 HEAD（并发会话 rebase/merge 会让号静默失效，而 cat-file 仍返回成功）。
+# 判据本体在 scripts/ci/audit_ledger_commit_guard.py；本单先自造悬空 commit 证明扫描器咬得住，
+# 再跑常驻判定（实测塞入一个失效号即红、还原即绿）。逐文件单跑 3 passed（约 8s，含全 HEAD 索引）
+tests/unit/test_audit_ledger_commit_guard.py
+# tests/manual/ 的活体脚本不得被 pytest 收集：它们在导入期改写进程 env，会掩盖一切依赖数据根的判据
+# （实测掩盖过会话落点守卫：同一选择集带 manual 时 0 ERROR，摘掉才露出 16 条真 ERROR）。
+# 拦截在 pytest_configure（收集之前）——pytest_ignore_collect 对显式路径在 pytest 9 无效，实测过。
+# 逐文件单跑 3 passed（约 4s，含 3 次子进程探针）
+tests/unit/test_manual_scripts_are_not_collectible.py
+# 技能符号只许一条取用路径（§9 序 8 四体收口）：顶层影子文件被同名包遮蔽时，取符号靠
+# importlib 反射 + sys.modules 别名 + 占位类，同一批符号在一个进程里长出三份 Skill 类，
+# isinstance 分支静默走错路。判据按"门面所发==运行时返回"取证，含源级反射加载防回流
+# （仓内另有正当 spec_from_file_location 落点，判据只锁 skill_system）。逐文件单跑 6 passed
+tests/unit/skills/test_skillSymbolSingleCarrier.py
+# github_push 曾另开一条反射后门自取基类（第二个 cache key），其 SkillResult 与注册表
+# 返回的那份不同一——`isinstance(create_github_push_skill(), Skill)` 实测为 False。
+# 判据锁对象同一性 + 无第二次 exec，搬家后仍成立（不锁符号来自哪个文件）。逐文件单跑 3 passed
+tests/unit/skills/test_github_push_single_symbol_source.py
+# 凭据存储必须是认证加密，且失败的读不得把存量抹掉（P0-3）：`secret_store_clean` 的重复密钥流
+# XOR（keystream=sha256(key) 循环）既无完整性（篡改一位只解出垃圾并当明文交给 SSH/社交凭据），
+# 又会"解不开→只 warning→下次保存按内存重写"静默丢凭据；写侧现走仓内唯一 AES-GCM 口径。
+# 判据含存量 XOR 读回、读到即升级、升级失败不动盘、缺依赖不降级。逐文件单跑 8 passed
+tests/unit/llm/test_credentialCipherDiscipline.py
+# admin 引导脚本的落点与口令（§6-33）：原脚本写死 db_path="data/users.db"（CWD 相对字面量，
+# NEUROVA_DATA_DIR 不生效，实测把账号写进仓内真库）+ 默认弱口令打印到 stdout + 失败仍以 0 退出。
+# 探针跑真子进程且 cwd 故意不同于数据根，使"CWD 落点"与"锚点落点"一眼可分。逐文件单跑 6 passed
+tests/unit/test_adminBootstrapLanding.py
+# Issue #354：pip-audit 一律经包装脚本调用，且「网络抖动」与「裁决已成立」必须可分辨
+# （直调时 pypi.org 的一次 15s 读超时 = 阻塞红灯，实测构建 cnb-tec-1k4b4771b 的 stage-2，
+# 与提交内容无关）。含两侧配置的反向锁、拼命令契约、以及重试语义的注入自证。
+# 逐文件单跑 19 passed
+tests/unit/test_pip_audit_gate.py
+# 前置守卫修复：跨文件 AST 判据的扫描面必须剪掉第三方树。实测本仓根下 35965 个 .py 里
+# **32711 个来自 `.venv`/`node_modules`**，文本预筛要先把每个文件读一遍 → 全量读 49.68s
+# 越过 pyproject 全局 `timeout = 30`，整个 `tests/unit/cognitive_layers/` 在开发机上不可跑
+# （同一判据在仓外精简 worktree 只 5.87s 通过——绿灯取决于本机装了什么，与 §6-43 同族）。
+# 四条：扫描面不含第三方；`neurova/ tests/ scripts/` 仍全覆盖且总量 >1000（防"排除"
+# 写成"什么都不扫"）；预筛结果不混入第三方；往 `neurova/` 种探针文件必须仍被扫到。
+# 逐文件单跑 4 passed
+tests/unit/test_astScanThirdPartyPrune.py
+# P3-11（B1）：429 的拍板口径与"累计预算"这一格。值层——interval=20s、wait_budget=200s
+# 必须由单源 DEFAULTS 给出，env 可覆盖，治理面 PUT 收这一格，前端类型与设置页也必须有
+# （**四格同现**，少一格就是"能配但看不见/读不到"的断点）；行为层——把 max_retries 调到 50、
+# 两个候选都恒 429 时，整条流累计等待必须 ≤ 预算且必须给出诚实终态（原状每个候选各带一份
+# 预算，5 候选最坏 ≈2 小时，且没有任何一格宣告过尽头）。逐文件单跑 6 passed
+tests/unit/llm/test_llm429WaitBudget.py
+# C1 的配套格：写侧收口后 CLI 第一次会对 `/memory save`、`/knowledge add` 这类命令回 401。
+# 后端那句 `detail` 是通用 HTTP 文案（写给浏览器用户），REPL 用户看不到登录框就等于死路。
+# 钉两件事：401 必须附可执行动作（/login），且**服务端原文保留在前**（抹掉就分不清
+# "没带凭证"与"凭证无效"，教义第 2 条）；非 401 的状态码一字不改——403/404/409 的自救动作
+# 各不相同，在这里统一加话术就是替别人编理由。逐文件单跑 4 passed
+tests/unit/test_cliFourOhOneSelfRescueHint.py
+# provider 层请求体的行为面（工具轮/多结果合并/坏参数/image_url/computer 描述符）。
+# 这 6 档是修法 A 的"搬过来"证据：删掉 `toAnthropicMessages` 的任一分支都落到行为断言上，
+# 不会退化成 ImportError。逐文件单跑 14 passed
+tests/unit/llm/test_anthropic_native_client.py
+# 例级不退化门：留出侧例级读数 + 撞坏既有用例即拒（§8 前置 1）
+tests/unit/evolution/eval/test_caseLevelRegressionGate.py
+# 运行终态回写台账：被拒的运行不得留着「已生效」，未量出不写成退化（§6-9）
+tests/unit/evolution/eval/test_runOutcomeLedgerConsistency.py
+# 生产装配路径的执行器必须来自同一接缝（evolve 与 ab_compare 过去各写一遍回落，
+# 已实测过一次代价：agent=None 落到真多模型客户端，真花配额并把整目录跑测挂死）。
+# 另两档钉"真轨迹能力由结构推导、不许写成旗标"——它是 §8 前置 2 探针的唯一读方。
+tests/unit/evolution/eval/test_evolutionExecutorSingleSource.py
+# M-D：评测用例的表示面/传输面/写侧/构造点四档——difficulty/category 两个只写不读
+# 标签字段退役后不得复活（写侧词频归零 + AST 构造点关键字为 0 + 扫描面下限钉住）。
+tests/unit/evolution/eval/test_evalExampleUnusedLabelFieldsRetired.py
+# §8 四条自动化前置落成晋升判据：前置未满足 ⇒ 自动执行档硬否决并点名哪一条；
+# 读数面另有反谎（旗标=探针）与反空转（摘掉实装必须报假）两档，外加一格
+# "测试脚手架还在吗"的守卫——脚手架被静默摘掉会红这一格，而不是红 44 格无主墙。
+tests/unit/evolution/rsi/test_automationPrerequisiteGate.py
+tests/unit/evolution/rsi/test_automationPrerequisiteScaffold.py
+# 联合轮的族级归因读数：族集合等值参数表、acted 带逐参数 from-to、被闸拦不折成 no_candidate、
+# 不臆造按族 gain；并钉跨文件闭环（投影出得了 jsonl、响应面读得回来）。
+tests/unit/evolution/rsi/test_jointRoundFamilyAttributionReadout.py
+# 评测结果绑定「被测基座」的读数：值由真正执行的那个对象推导（四种形状）、
+# ab_compare 两条返回路径都带、提案与列表端点两处出得去、未记基座自成一组；
+# 并钉住「只出读数不判」——换基座值分数不变、runner 判定链零引用（蕴涵格）。
+tests/unit/evolution/eval/test_evalResultIsKeyedByModelUnderTest.py
+
+# H2-2 · E 条 任务账本终态词汇单源（§6-82）：这一档锁的是"写侧落的词值读侧必须认得"。
+# 判据打在跨边界行为上——真 recovery/真端点收口出的成功件，喂给真 retention 一轮必须
+# 被删（改前 _TERMINAL=("done","failed") 认不出 succeeded，清理逻辑整轮空转且不打日志）；
+# 被 Studio 引用的产物保留、账本行永不删；终态/活跃集合只许 task_ledger 一份定义，
+# 扫描面按 import 现场反推（不手抄清单），两格各带反向对照防"扫空即全绿"。
+# 逐文件单跑两次各 21 passed
+tests/unit/llm/test_ledgerTerminalVocabularySingleSource.py
+
+# §9 序 1 收口（`8a1bb9e9`）：包根/仓根的 0 字节"重定向残留"文件防再生
+# 来历：`neurova/expected` 由 `98b5422a`「清理临时文件」以 0 字节引入（同笔还有仓根 `missing`
+#   与删掉的 471 行 `missing_files.txt`），形态是 shell 把命令名当成了重定向目标。
+# 判据按**类**收：0 字节 + 无扩展名的普通文件一律不许存在（`__init__.py` 有后缀不在射程内），
+# 含两格反向对照（造一枚必须抓到；仓根那半单独配对照，防"扫描面为空即绿"）
+# 与一格"git 索引里不得再留着它"（工作树删了而索引没删＝假退役）。
+# 逐文件单跑两次同读数 4 passed（`8a1bb9e9` 落库之后复取）
+tests/unit/test_zeroByteResidueGuard.py
+
+# 零模块空壳包防再生（`a83f2364`，§6-102）：§9 序 2 的常驻面
+# 空壳 ＝ `__init__.py` 只有 docstring **且** 整个子树再无别的模块。留着它的代价不是占地方，
+# 而是让 `import neurova.xxx` 看起来"这里有一个子系统"，而实际什么都不会发生。
+# 谓词必须两个条件同时成立——首版只看"子树里没有别的 .py"，误伤了把实现写在
+# `__init__.py` 里的 `execution_layers`(706 行) 与 `skill`(45 行)：形态相同，实质相反。
+# 四档判据：现网为空集 ＋ 造一枚空壳必须抓到（含"加纯数据子目录不许洗白"）
+# ＋ 有真模块的包不得误伤（拿上面那两个现网实例当反证）＋ 扫描根覆盖性（防空集假绿）。
+# 逐文件单跑两次同读数 4 passed（`a83f2364` 落库之后复取）
+tests/unit/test_emptyShellPackageGuard.py
+
+# 零语句模块防再生（`eec9d649`，§6-103）：§9 序 4 复算的常驻面
+# 判据＝「非 `__init__.py` 且除 docstring 外没有任何语句」。这类文件不会报错，
+# 只会骗人：按名字 grep 命中、按名字 import 不炸，而它什么都不做——
+# 「兼容性」只有在确实还有人从旧路径导入时才成立，零消费者的兼容层就是结构壳。
+# 反向对照三档：`__init__.py` 不在射程（现网 12 个 docstring-only 包标记不得误伤，
+# 首版只看"除 docstring 外无语句"就会把它们全判违规）；有一行代码的模块不误伤；
+# tmp 里造一枚零语句模块必须抓到。外加扫描根覆盖性格。
+# 逐文件单跑两次同读数 4 passed（`eec9d649` 落库之后复取）
+tests/unit/test_codelessModuleGuard.py
+
+# 图检索这条支路的"命中即回流"接缝（既有判据，本轮补登记，`ad22beae`/§6-124 的活体所本）
+# `test_adapterShapeAndInjectionFeedback` 断的是**真接缝**：真 `GraphFactWalker` + 真
+# `GraphRetrieverAdapter.retrieve`，末端 fact 的 `injected_count` 必须 ==1，注释原话
+# "图命中也要回流，否则用量账缺一条路"。这条此前一直不在子集里——所以 §6-124 的活体读数
+# 只在一次脚本里存在过，跑完就没了；登记之后它才成为会红的常驻判据。
+# 另含域隔离、单字标签不匹配、未命中问句走空等 11 格，全部单跑确定全绿。
+# 逐文件单跑两次同读数 12 passed（5.81s/5.34s）
+tests/integration/test_graph_retriever_in_chain.py
+
+# memory_layer 的 torch 依赖防回归：按 2026-10-10 实况改对的那三条（`8702f2be`，§6-52 闭环、§6-126）
+# 原三条里两条随 `memory_field.py` 退役（`0c333a76`）而失效，且形态不同：一条红（前提已死）、
+# 一条**恒绿**（符号缺失本来就抛 AttributeError，与 torch 无关 ⇒ 不可能失败）。
+# 恒绿比红更坏——它让人以为 H1 仍被守。现行三条都可失败：运行时不拉 torch /
+# 退役面不许复活（反向存在断言）/ 包内静态零 `import torch`（含函数内惰性写法）。
+# 逐文件单跑两次同读数 4 passed（1.98s/2.02s）
+tests/unit/cognitive_layers/memory_layer/test_torch_lazy_import.py
+
+# 记忆读路径的替身必须跟得上端点契约（`77f4ec60`，§6-55 闭环）
+# 两格红的根因是替身落后：端点读 `manager.get_memory(...)`（真身 `memory_manager.py:1788`），
+# 替身没有 ⇒ 落进 `except Exception` ⇒ 404 壳里装 500 的话。登记进常驻面，
+# 是为了"契约再演进时，替身没跟上要当场红"，而不是等下一轮跑整目录才发现。
+# 逐文件单跑两次同读数 12 passed（2.31s/2.28s）
+tests/test_api/test_memory_route_shadowing.py
+
+# §6-142：TTS 那批"红着的格子"与"会把整轮跑测带崩的写法"一起修（`97953c00`）
+# 两处替身把协程函数换成同步返回 list ⇒ 生产侧 await 抛错被吞、断言永远差两个音色；
+# 一处默认值期望停在 P1-12 之前（`engine` 现为 `auto`）；两处用
+# `patch("pathlib.Path.exists", return_value=True)` 造"模型都在"的假象——那会让被测代码真去
+# `ort.InferenceSession(不存在的路径)`，在装了真 onnxruntime 的机器上是**原生 access violation、
+# 整轮 pytest 直接没了**（宽域 A/B 实测被打断过）。改后主树 22 passed，且在新建 worktree 里
+# 重跑原本会崩的那条路径 31 passed 无崩溃。逐文件单跑落库前后同读数。
+tests/media/test_tts_module.py
+
+# 语言码口径单点化（用户 2026-10-11 裁「`language/` 保留并接进现有语言面」的前置根修，§6-145）
+# 两档钉的是同一件事的两半：`test_language_models.py` 15 格钉**口径与契约**——区域码
+# （`zh-CN`/`zh_CN`/`DE-de`）必须归一到主子标签、不识别返回 None 而不是借 `AUTO` 这个合法值
+# 装作认得、`Translation`/`UserLanguagePreference` 构造即归一（旧 dataclass 不校验，裸串存进去
+# 后 `to_dict()` 当场 AttributeError，而老判据只断"字段回显相等"所以恒绿）、并按 AST 钉
+# 「取主子标签」在语言包里只许有 `normalizeTag` 一处（原缺陷是 `detect_browser_language`
+# 自己那一刀是对的、枚举侧那一份是错的）；`test_language_externalLibraryTags.py` 7 格钉**读写两面
+# 真同源**——按 `zh-CN` 写入不得新长出 `auto` 桶、坏码只跳它自己不许带走整份文件、
+# 拒收时不留半写状态、且**换一个新实例从盘上读回**同一读数（只看内存会放过序列化那一半）。
+# 判据一律按 delta 取（"这一次多出了哪个桶"），不按"库里有没有 zh"取——内置表本就带 zh，
+# 后者是一条恒真断言（本文件第一版就踩过，已记进失效形态清单）。
+# 逐文件单跑落库前后同读数 15 passed / 7 passed。
+tests/language/test_language_models.py
+tests/language/test_language_externalLibraryTags.py
+
+# 批 14 裁定乙（§6-160）：语言包从"全仓零生产消费者"接成有读面、有落盘。
+# 两档各钉一半，缺一半都会回到今天这种"写进去了没人读得到"的形态：
+# `test_languageUserPreferencePersistence.py` 17 格钉**偏好真的留得住**——换一个实例(＝重启)
+# 从盘上读回同一个人、默认落点走 `callerPath` 单点且**不在译文 `*.json` glob 目录里**
+# （放里面会长出一条假的命名空间）、读不建文件、写盘失败即内存回滚并回 False（不许拿
+# "内存里已经有了"对用户承诺已保存）、坏文件改名隔离不原地覆盖、一个坏码只跳它自己、
+# `auto` 不许当首选/回退语言（那件事 `auto_detect` 已在承载）；其中一格用桩替
+# `atomic_write_text` 自证那条路真被走，否则"写盘失败"那格是在桩一条没人走的路。
+# `test_languageFaceReadSurface.py` 20 格钉**HTTP 面本身**——属主只从登录态取（体里多写
+# `user_id` 直接拒）、换 token 读不到别人的、无凭证 401 且配一格真 404 校准、
+# 不识别的语言码 400 点名（回 200 空列表会让打错字母的人以为自己那套语言没文案）、
+# 覆盖层读面把 `is_approved=False` 的条目**如实带状态**读出（裁定是不引入审批，
+# 不是把未审说成已审）、内置那条 `get_translation()` 的门一寸没松、写面只认管理员、
+# 拒因经 `LanguageManager.rejectedLanguageTags` 那一份单点（桩掉它读数必须从 400 变 500，
+# 否则 400 是端点自己另写的第二处实现）、命名空间不许变成穿越路径、
+# 另按 AST 钉住"面上不许多写一刀语言码归一"。
+# 逐文件单跑两次同读数 17 passed / 20 passed。
+tests/language/test_languageUserPreferencePersistence.py
+
+
+# 插件体系按裁定接回后的常驻判据（用户 2026-10-11 改裁「做插件体系并接线」，§6-150）
+# 上一档 `test_pluginSystemRetired.py`（钉"包不得复活"）随裁定撤销，同批换成钉"接线是真的、边界是真的"：
+# `test_pluginLoadIsReal.py` 21 格——真 exec 自证（插件文件模块级副作用落地）、作者基类按 manifest 构造
+# （历史实现 `plugin_class()` 无参构造必 TypeError，而自带 84 例因 mock 掉装载器全绿）、
+# 装载源必须在插件根内（含先 resolve 再判穿越）、远程源 501 不静默、unload 须摘掉 sys.modules、
+# `_PLUGINS` 内存账本不得再长回来、默认插件根落数据根而非 Path.home()。
+# 另三档是包体自身的契约（`test_plugins_modules.py` 36 / `test_base_plugin.py` 9 / `test_plugin_manifest.py` 41）
+# 与端点 HTTP 契约（`test_plugin_api.py` 12）——其中六格本次按新契约改判：旧格断的是
+# `install_plugin(...) is False` 与 mock 装载器返回 MagicMock 后的 `is True`，
+# 两种形态都证不了任何事（一个折成因、一个证不出执行）。
+# 逐文件单跑落库前同读数 21 / 36 / 9 / 41 / 12 passed。
+tests/unit/plugins/test_pluginLoadIsReal.py
+tests/unit/test_base_plugin.py
+tests/unit/test_plugin_manifest.py
+tests/unit/test_plugin_api.py
+# §6-155 → §6-159：授权存储的落盘与审计纪律（授予只随声明走、审计写不进即回滚、
+# 坏文件不静默读成"谁都没授予过"、卸载连授予与挂载授权一起摘掉）。
+# §6-159 收口时本档从 21 格降到 16 格：删掉的 4 格档位模型格（八项枚举与三档口径已退役，
+# 替代判据在 test_pluginPermissionSingleSource.py）与 4 格事件总线格（与 test_base_plugin.py
+# 同题，留那一档更贴生产接缝）——规则一条没少，只是不再两处钉。
+# 入册前逐文件单跑两次同读数 16 passed（3.54s / 2.00s）。
+tests/unit/plugins/test_pluginPermissionGate.py
+# §6-159 词汇单点：能力键必须**取用** `skills/permissions.py:KNOWN_CAPABILITY_KEYS`
+# （一格改那份集合、断插件侧跟着变——不留副本），AST 扫全包拦"再长出一份能力键集合"，
+# 八项枚举与三档口径不得复活（旧值只准被点名成历史，不参与判定），
+# 历史授权文件既不覆写也不自动映射（execute:commands → system 是变宽，只能人重做）。
+# 台账号勘误：`5cb8416b`/`e94720b5` 两笔正文写的 §6-157 是错号（157/158 已被并发会话的
+# 编排器批与媒体批占用），本批实为 §6-159，已提交历史不改写。
+# 入册前逐文件单跑两次同读数 14 passed（1.90s / 1.92s）。
+tests/unit/plugins/test_pluginPermissionSingleSource.py
+# §6-155 的 HTTP 面 + §6-159 的调用面：装载与挂载是两次授权。门（清单必须**显式声明过**
+# permissions——整节缺失即拒，修掉 §6-155 的空真通过；未确认/命名空间越界/绝对路径/
+# 同路径遮蔽/handler 取不到 ⇒ 整批不挂）、真挂载（请求落到插件方法并执行插件代码、
+# auth_required:false 不采信且可见）、**真拦**（挂载时把声明装进 skills 那份作用域：
+# 显式空声明 ⇒ 未声明工具在调用面被拒；声明并确认 network ⇒ 放行而 file 仍拒；
+# 作用域不外泄到请求外）、真摘除（撤销确认当场摘路由；显式 unmount、禁用、卸载后活路由表
+# 404 且不留孤儿授权），另加 AST"拒因↔HTTP 语义"双向闭集与两格反空转（把包装/声明判据
+# 桩掉，对应格必须红——回退生产件会断在 collection error，那种红什么也不证明）。
+# 入册前逐文件单跑两次同读数 24 passed（3.15s / 3.02s）。
+tests/unit/plugins/test_pluginRoutesAreMounted.py
+# §6-158（工单 2026-10-12 批 13，裁定乙）：媒体软删＋回收站四件，默认一档不许翻。
+# 面一：写口两档（?mode=trash / ?mode=permanent，缺省 permanent＝硬删，坏 mode 当场 400 且不留半成品状态）、
+# 读口 GET /trash（写了必须有人读，且按 agent 分账）、POST /{id}/restore（字节已不在即 410，
+# 不造「活但取不到」的记录）、重启复原（真 _load_index() 读进一份新 store，行仍是 trashed；
+# 另带反向对照钉住"盘上文件已不在即剔行"这条既有巡检不能被关掉来给回收站让路）。
+# 面二：现役六个读面（/list、/stats、/memory 三个列表口径 + /{id}、/download/{id}、/{id}/metadata
+# 三个取物口径）逐一排除回收站行——只排前三个，条目照样能按 id 被捞走。
+# 面三：路由顺序锚 + EXPECTED_ROUTES 同步；另两格审上传前门（存储根不得是 CWD 相对路径，
+# 这是活体跑第一步撞到的既有缺陷，判据在档）。
+# 入册前逐文件单跑两次同读数 21 passed（14.15s / 7.91s）。
+tests/media/test_mediaTrashLifecycle.py
+# §6-164 插件登记状态落盘的判据（用户 2026-10-12 裁「落盘状态 + 只发现不装载」）。
+# 判据问的不是"有没有 state.json"这一句形状，而是四件事一起成立：
+# ① 装／启／停／卸四个动作都写盘，删除路径**先写盘再改内存**（反序会得到"内存说删了、
+#   文件里还留着"，重启时那条记录自己活回来）；写不进去即回滚内存并点名 `state_write_failed`。
+# ② 状态文件坏掉不得被读成"这台机器没装过插件"——改名隔离＋响亮 `state_store_corrupt`，
+#   版本不认识一律拒、不自动映射（与 §6-159 授权存储同一口径）。
+# ③ `loaded` 刻意不落盘：读回时无条件清掉盘上残留，装载必须显式发生在本进程内
+#   （P3 的来源白名单与构件完整性未做，开机自动 exec 第三方代码是风险不是便利）。
+# ④ 发现与登记是两件事：盘上有目录但没登记过 ⇒ 只交 `discovered_not_installed` 读数，
+#   不静默登记也不静默装载；列表面另把"没读进来"与"没装过"分开回。
+# 另有两格钉写入面：只经 `core/atomic_io.atomic_write_text` 这一处，且生产码里不得再
+# 出现 `Path.home()` 那类第二落点（§6-150 复算过的那条）。
+# 入册前逐文件单跑两次同读数 14 passed（1.98s / 2.22s）。
+tests/unit/plugins/test_pluginStateSurvivesRestart.py
+# §6-165 兼容 shim `neurova/skill/` 退役的判据（用户 2026-10-12 裁「退役 shim，旧集成档另批分流」）。
+# 判据问的不是"那个文件删了没"，而是三件事一起成立：
+# ① 命名空间真取不到——且必须连**目录**一起判：只删 `__init__.py` 会留下一只隐式
+#   命名空间包，`import neurova.skill` 照样成功，防再生格就此空转（本批复算现场撞上）。
+# ② 全仓（生产/测试/脚本）不再有任何一处按这个命名空间取符号——口径同时收
+#   `from neurova.skill import …` 与 `import neurova.skill`，并按 **AST 形状**而不是文本
+#   包含，免得一档判据把自己那句断言算进命中面（§6-162 记过的那枚形态）。
+# ③ 退役不等于删能力：`Skill`/`ExperienceRecord`/`create_default_skills` 仍在
+#   `neurova.skills` 那条生产本来就在用的路径上取得到，被改指的那条消费方 import
+#   也真的解析成功。
+# 探测器自带**双侧对照**一格：合成样本里两形取用都必须点名，三个真近邻
+# （`neurova.skills`／`neurova.skill_system`／`neurova.skills.models`）一律不得误报。
+# 入册前逐文件单跑两次同读数 8 passed（10.93s / 11.31s）。
+tests/unit/skills/test_skillCompatShimRetired.py
+# §6-167 语言面「开箱默认」取长那一半的判据（用户 2026-10-12 裁「先取长补短再退役」）。
+# 判据问的不是"有没有新端点"，而是四件事一起成立：
+# ① 解析链三格（本人偏好 → 开箱默认 → 枚举级 last resort）**并把来源一起交出去**——
+#   不点名来源，「管理员定的起点到底生效了没」在生产里就不可观测，而这条链在收口之前
+#   正是靠不可观测活着的（四份默认值谁都没读过它）。
+# ② `configured` 与 `source` 分开：管理员设过起点之后，没选过的人 `configured` 仍是
+#   `False`（那不是他做过的决定），`source` 已是 `out_of_box`（那条决定确实生效在他身上）。
+# ③ 落盘是顶层**可选** `default` 键：不抬存储版本（抬了会让已落盘的每条按人偏好被自己的
+#   版本隔离逻辑改名隔离＝凭空丢真数据），也不占 `preferences` 里的用户行
+#   （占了就混进"多少人设过偏好"的计数）。写失败双向回滚并回 False。
+# ④ 来源词汇只有一处定义（`LanguageManager.EFFECTIVE_SOURCES`），探测器按 AST 只认
+#   字符串常量并带双侧对照：合成样本两形必点名、三个真近邻不得误报。
+# HTTP 面另钉：写面仅管理员、请求体没有"替他人绑"的口（多写 `user_id` → 422）、
+# 不识别码 400 点名、`auto` 当首选语言是 400 而不是 500、盘没写成回 500 不是 200。
+# 入册前逐文件单跑两次同读数 17 passed（6.27s / 5.63s）。
+tests/language/test_OutOfBoxDefaultLayer.py
+# §6-163 留案② 取证后立项（批 19）：两条读路必须给出同一个 session_id。
+# 入册前逐文件单跑两次同读数 8 passed（1.55s／1.54s）。
+tests/unit/session/test_sessionIdShapeAcrossReadPaths.py
+# §6-177 批 32：市场安装的解压判定收进咽喉。现役那条路是 `marketplace.install_skill`
+# → `market_importer.import_skill` → `market_sources.extract_remote_skill_zip`（**不是** `market_adapters`
+# 那张没人调的 install 面）。那里原来自写了一份判定（数条目、判 `..`、逐条 write_bytes），而咽喉
+# `security/safe_archive.py` 已被 6 处生产点消费——两份并存时咽喉修了这里不跟着修（教义第 6/7 条）。
+# 机制进咽喉、上限作**调用方递进来的参数**且缺省不设限（缺省就设限＝本批会把另外 6 处的形状
+# 莫名挪动），市场侧只留"把抛错折成 bool 契约"的薄适配（−33/+13）。
+# 红 3 failed/4 passed（红在行为断言上、无收集错误）⇒ 绿 7 passed；红自证只还原两个生产件、
+# 外溢 0 格、复原按 sha256 复证；变异 7 枚全咬——其中两枚第一版咬不住：无上限样本取 300 条，
+# 低于被变异出来的缺省 500，改取 501 条并补两格签名缺省读数才落到点上；活体 10 读数 exit=0
+# （四种恶意/超限样本全拒、三条拒因互不掩盖、咽喉桩成拒时市场侧必须跟着拒＝手里不留第二份
+# 判定的反向校准）。
+# ⚠ 本批随批还写了"市场装完即钉摘要"，做完才发现 `skill.json` 全仓**零读者**（钉进去就是只写
+# 不读的断点），已撤回并转 §6-177 待裁；判据档因此去掉 "&Pins" 改名。
+# 入册前逐文件单跑三次同读数 7 passed（第三格全仓 AST 数落点，单跑 5~8s）。
+tests/unit/skills/test_marketInstallUsesSingleFace.py
+# §6-176 P3 技能半区随批欠的那档（当时清单被并发会话占着）：摘要口径唯一出处
+# `security/artifact_digest.py`，门通过后钉进 manifest.json、`call_skill` 在 exec 前对账。
+# 首跑 5 行为格红；红自证只还原生产件并**保留新模块**（整体还原会断在 import＝无效红）；
+# 变异 6 枚全咬；活体 `artifactIntegrity_batch30.py` 9 读数。三条边界如实写死：不防定向重算、
+# 抹掉摘要即重采信、目录内新增文件也算改。入册前单跑三次同读数 15 passed；批 32 把解包机制
+# 收进咽喉后本档复跑过，读数未动。
+tests/unit/skills/test_artifactIntegrityAtInstallAndLoad.py
+# §6-176 P3 插件半区那档：`PluginRecord.artifactDigest` 落 `state.json` 用 `.get` 向后兼容、
+# **不升** `STATE_STORE_VERSION`（升版会让整店存量记录撞版本守卫读出空态）；对账放 `load_plugin`
+# 不放 `_load_plugin_module`（后者那圈宽 except 会把"构件被改过"折成"入口装载失败"）；
+# 已 loaded 的记录不重验，判据按冷启态取。首跑 6 格红；变异 5 枚全咬；活体
+# `pluginArtifact_batch31.py` 9 读数（换字节 ⇒ 409 带两条 sha256）。
+# 入册前单跑三次同读数 10 passed；批 32 之后复跑读数未动。
+tests/unit/plugins/test_pluginArtifactDigestPinnedAndVerified.py
+# 批 35（§6-186）市场安装让真字节走通账本咽喉：staging 从缓存拷真字节 ⇒ 安装门扫的、构件摘要
+# 钉的、执行体读的三处从此同源；咽喉拒装 ⇒ 一个可执行体都不注册，端点两条分支同判（409 点名拒因）。
+# 红自证（按显式路径清单还原 market_registry.py+marketplace.py）9 failed/3 passed ⇒ 绿 12+2 passed；
+# 逐文件单跑三次同读数（12/12/12 与 2/2/2）。变异 6 枚全咬；活体 marketRealBytes_batch35.py
+# 11 读数 exit=0，含 [OBSERVE] 反向校准段（桩掉来源目录后危险包照旧回 200、账本里只有空壳）。
+# A/B（skills+api）基线 3437/18f/8e ↔ 本树 3462/19f/8e，仅本树独有红 1 条＝
+# test_github_push_skill::test_get_status（Windows 跨盘 `cd` 不改盘的已登记环境形，不认领）。
+tests/unit/skills/test_marketInstallCarriesRealBytes.py
+# 批 36（§6-188）市场「装过什么」接真读侧 + SkillsMP 空装改如实：探针实证「包体与 skill.json 俱在，
+# 重启后 list_installed() 仍为空」⇒ 接线不退役（2026-10-13 裁定）。键取目录名、坏件出声跳过不改写、
+# 缺版本如实 unknown；空装回 False 并配"真 zip 仍装得动"的正向配对格。
+# 红自证 4 failed/4 passed ⇒ 绿 9 passed（逐文件单跑三次同读数）。变异 6 枚全咬；活体
+# marketInstalledStateReadBack_batch36.py 10 读数 exit=0（含真 create_app 的 GET /installed 读回）。
+tests/unit/skills/test_marketInstalledStateIsReadBack.py
+# 批 37（§6-191·裁定甲）安装门把文档/资产侧命中降为报告项，代码面与提示注入面照旧严：
+# 口径单点在 skill_scanner（DOC_ASSET_SUFFIXES + CODE_SHAPE_CATEGORIES + isDenyBearing），
+# findings 原样保留并在 metadata.report_only_rules 点名（放行不等于删读数）。判据 7 格
+# （含反空转样本与"包自带 .py 仍阻断"的实测格）；红自证＝skill_scanner.py 还原 HEAD ⇒
+# 3 failed/4 passed；逐文件单跑三次同读数 7/7/7 passed。变异 5 枚（M4 第一版没咬，
+# 补 isDenyBearing 直读断言后才咬）。活体 installGateDocCaliber_batch37.py 9 读数 exit=0，
+# 含反向校准桩与"同 id 二次安装会短路在门之前"的方法学读数。
+tests/unit/security/test_installGateDocFilesAreReportOnly.py
+# 批 38（§6-194，裁定甲″）：技能安装门从此看**文件名**——`.env`/`id_rsa`/`*.pem`/`.aws/credentials`
+# 与 `.exe`/`.dll` 参与 DENY，`.mjs/.cjs/.mts/.cts` 不再掉出可扫清单，未扫文件计进
+# `metadata.unscanned_file_count` + `unscanned_artifact` 报告项（放行不等于没看）；内容摘要折入文件名
+# 普查（否则包里多塞一个 .env 不改摘要，第二次扫读的是缓存不是门）。17 格含反误报格（正当资产名不得按
+# 子串冤枉）、名称级不受文档豁免那格、以及「第二套已退役」的 find_spec 格。逐文件单跑三次同读数 17/17/17。
+tests/unit/security/test_installGateArtifactNameRules.py
+# 批 40（§6-198，裁定 A）：市场取数的超时从三份各自写死收成一处（market_adapters 单点，原 30/20/30 三份），并给两条叠乘路径各补一条截止线——串行聚合 7 只市场原最坏 7×30=210s，现由 MARKET_SEARCH_AGGREGATE_SECONDS 兜（到点不再开新市场、且点名跳过谁）；hub_client 那条重试+退避叠乘由 HUB_FETCH_TOTAL_SECONDS 兜（只收单次超时时实测仍要 31.9s > 墙钟）。7 格里：市场数从 searcher 现读、墙钟从 pyproject 现读、重试数从 hub 现读，断言里不手抄数字；三类坏超时形状由同一函数判定并配正反样本。逐档单跑三次同读数 7/7/7。
+tests/unit/skills/test_marketFetchBudgetIsSingleSource.py
+# 批 42（§6-200，用户点单 B 项）：全仓「惰性 try 体（只有 pass/文档串）+ except ImportError」的空转块清零——现按 AST 数是 35 段 / 9 个文件（skills 13、llm/providers 11、memory_layer 4、admin 2，auth/xiaoyi/collaboration/recovery/tts 各 1；§6-194 那句「其余八段」数错了，已在 §6-200 勘误）。这类体永远不抛 ImportError ⇒ 那句「模块未可用」日志从不打印，是永不成立的自陈；xiaoyi 那一处还藏着不可达的「模拟模式 return True」假降级。同批把 skills 门面四条 first-party 导入改顶层直连、删 48 个 `X = None` 占位符（agent_core 三处 `from neurova.skills import create_default_skills` 一旦落到那条分支就是拿到 None 再调），并止住 `SkillSource` 被 models/hub_client 两份不同枚举同名先后绑进门面这条静默覆盖（现测该门面名零消费者）。7 格里：1 格全仓零容忍按 git ls-files 数（配 3000 文件地板格）、1 格反空转（合成样本必须计数 + 真 fail-soft 不许误伤）、2 格门面 None 占位符与被包导入、1 格档头清单行必须真存在（配清单样本）、1 格同名抢绑 + 门面符号是 models 那份、1 格关键符号非 None。红自证 9 生产件回 HEAD ⇒ 5 failed/2 passed（同名抢绑那枚靠红自证补牙）；变异 5 枚全咬，M2 特意把空转段藏进函数体证明探测器看得见嵌套；活体 8 读数 exit=0 含子进程反向校准；A/B 仅本树红 0 条（tests/unit/tts 因基线侧发真出网撞墙钟被排除，理由写在正文）。逐档单跑三次 7/7/7。
+tests/unit/test_noDeadImportSwallowFacadeBlocks.py
+tests/unit/test_cognitive_storage_flush_m11.py
+tests/unit/cognitive_layers/memory_layer/test_cse_fts_update_trigger.py
+# 批 43（§6-201，用户点单 E 项）：把「永远走不到的 None 兜底」从 21 个门面/模块里拆掉——现按 AST+依赖闭包数是 93 个 None 占位符节点 / 136 个名字，其中 70 个节点包的是 stdlib 或仓内纯模块（其模块级闭包一个第三方都不碰）⇒ 全清；23 个包真第三方（fastapi/httpx/aiohttp/langchain_*/bcrypt/Crypto/numpy）按 AGENTS.md §3 保留。判定口径三条各配样本：直接 import 第三方＝正当；仓内模块但闭包只触及 requirements 已声明的包＝不算保留理由（仓主点单时拍的）；闭包含未声明包＝真可选，保留。拆完暴露四条一直静默为 None 的坏指路（memory 门面的 SelfModel/UserProfile 指 agent_self、GraphTraversal/SleepConsolidation 指聚合模块、ProactiveQuestion/VersionControl 全仓无实装、memory_layer.cache 与 core.cache 真循环），HEAD 现读该门面 8 个公开符号为 None。6 格里：1 格全仓零容忍（git ls-files 取集合＋3000 文件地板）、1 格两向反空转（漏认必红、误伤 §3 正当档也必红）、1 格 requirements 名归一（连字符/下划线不归一会把 langchain_openai 误判成真可选）、2 格钉坏指路改对（`is` 同一对象＆没实装的名字不许再挂 __all__）、1 格门面 None 符号必须有第三方兜底作出处。探测器口径中途从「try 体清一色 import」加宽过一次，加宽靠 M2（体里多一条赋值那一形）现场验牙。红自证 4 failed/2 passed；变异 6 枚全咬；活体 10 读数 exit=0（真 create_app 下六个被改端点面仍 401 登录门，路径逐条实跑取码）；A/B 主体仅本树红 0 条，channels 一族分四组跑：三组 AB_PASS、一组基线侧挂死（整族挂死在 HEAD 干净 worktree 里同样复现，预存缺陷，已入账）。逐档单跑三次 6/6/6。
+tests/unit/test_noFirstPartyImportPlaceholder.py
+# 批 44（§6-204，用户点单 F 项）：跑测层「真权重出网」门 + 单元档预热不载真权重。
+# 根因两处同族：`heavy_manager` 只桩 `_engines` 缓存、没桩 manager 的构造接缝（TTL 释放
+# 把链顶丢出缓存后，后台预热构造生产那个 MOSSNanTTS，本树单格 19.32s / HEAD 干净 worktree
+# 31s）；真权重用例按「目录存在」放行，而 670MB 的 `.data` 不入 git（5 只 .onnx 入）⇒
+# 干净 worktree 里那条假前置为真、权重却缺，走到 `ensure_model` 就发真 HTTPS + 退避 sleep。
+# 终点同一个：全局 timeout=30 的 thread 法打死整场 ⇒ 无汇总行 ⇒ 批 42/43 各烧掉一轮 A/B。
+# 判据 6 格里：1 格门必须装着、1 格三处下载点逐个「先点名拒绝后一字节不写」且门记了账、
+# 1 格缺件即 skip（不许现场补下载）、1 格覆盖面按**调用点**双向相等且内含一条「扫描器
+# 必须看见 `import snapshot_download as 别名` 那一形」的前置断言（只按模块比的话悄悄删
+# 一处照样看着全覆盖，变异 M1 实测咬不住；M6 把别名改掉必须红）、
+# 1 格反空转（预热被整条摘掉即红）、1 格预热不得构造真引擎。
+# 逐档单跑三次 4/4/4 与 2/2/2；宽域 A/B 两轮皆 AB_PASS 且两侧产出汇总行
+# （tts/asr/voice/deploy/desktop：基线 451 passed 7 skipped ↔ 本树 458 passed；
+# channels 整族 + api：两侧同读数 16 failed 3060 passed 4 skipped 8 errors、集合逐条相同）。
+tests/unit/test_weightEgressGateRefusesBeforeBytes.py
+tests/unit/tts/test_unitTierNeverPaysForRealWeights.py
+# 批 46（§6-210）：技能门面只留被经取用的两个名字，`SkillSource` 两份枚举并成一份。7 格按接缝分段：
+# 门面侧 2 格（AST 比"包级绑定的名字"与"生产侧经该包路径取用的名字"两个集合 + 反空转配对格，
+# 缺后者则"只挂 2 个"可以靠把活着的那两个也摘掉来假绿）；枚举侧 5 格（全仓只准一份类定义、
+# 7 个成员值逐字锁住落盘词汇、两段取值域作为数据显式存在、`Skill.source` 仍收存储写的裸串——
+# 本批刻意不给它加运行时拒绝，因为 manifest 上还有第三套词汇未裁、加了就是借道上线、
+# 取径不许借 hub_client 转手）。
+# 合并带出的语义变更是实测过的：`SkillSource.LOCAL == "local"` 由假变真、`json.dumps` 由 TypeError
+# 变 "local"；`RemoteSkill.__post_init__` 的验段是"弱者那份保护"的落点，变异 M6/M7 专钉它。
+# 逐档单跑三次 7/7/7；活体面在同档 `tests/manual/deadImportFacade_batch42.py` 的 [1][6][8] 三项读数。
+tests/unit/skills/test_skillsFacadeAndSourceEnumAreSingleSourced.py
+# 安全集成判据改指现役 API（RBAC 的权限是枚举目录、角色自带权限集合；EventBus 递给 handler 的是
+# `Event` 数据类而不是 dict）。这档此前不在子集 ⇒ 调用不存在的名字长期只有本机显式跑才红；改绿后入册，
+# 让同一处再漂一次变成会红的判据。逐格差异写在该档自己的 docstring 里。
+tests/integration/test_security_integration.py
+# UserModel 夹具的收尾不再抢句柄：库改落本轮 `tmp_path`、删除交还 pytest（池化短连接按路径持句柄，
+# 夹具里 `os.remove` 必撞 WinError 32 —— 实测 13 格 ERROR 全是收尾，13 格断言本身都过）。
+# 入册是为了让归还顺序这一课留在 CI 的视野里，而不是只活在某台机器的临时目录里。
+tests/unit/security/test_auth_comprehensive.py
+# 批 56（§6-259，用户裁甲）：安装门的两条形状规则从此判**代码形态**而非字面串——
+# `re.compile(` 不再算 critical 级危险执行（旧 pattern 的 `\b` 在 `.` 与 `c` 之间也成立，真资产包 27 条命中
+# 里 26 条是正则预编译），`..` 只有在同行出现「拿去读/写/解包/落地」的调用形态时才成立（ES 模块说明符
+# `from "../x.mjs"` 不经文件系统）。第二个条件不满足时**降级为 low 照常上报**，不删读数。
+# 12 格分三组：误判侧放行 3 格（各带"读数仍在"的反删断言 + `blocking_rule_count` 自洽）、
+# 真形态侧照旧拦 6 格（裸 exec/eval/compile 三形 + open/Path/extract 三形 + 干净包反向控制）、
+# 真产物与回执 3 格（真 zip 只剩 1 条裸 compile 参与裁决且仍被拒、拒因只点名参与裁决的条目）。
+# 逐文件单跑三次同读数 12/12/12；红自证＝撤本批两生产件后恰好 5 格红；6 枚变异反证全红。
+tests/unit/security/test_installGateRulesFollowCodeShape.py
+# M-E 第二刀乙案（§6-262）：环节证据落到每条评测任务，归因读数按环节分组。
+# 十六格里三格是反向钉：peek 不许消费收件箱、空证据不许编出环节标签、
+# 读数不许改 accept/reject 终态（同分不同证据逐字段一致，要进判必须同批改判那一格）；
+# 还有一格钉旧病复发面——比对键用整串 task_input、台账展示面保留 80 字截断，
+# 两者混用曾让超 80 字的任务永远「命中不了」（红灯现量 hits == [] 实证）。
+tests/unit/evolution/eval/test_taskLevelEnvironmentEvidenceFeedsAttribution.py
+# P1-C 线（真臂进进化主路径 + 预算闸）两档判据。
+# 为什么值得常驻：闸的意义在**次序**——拒绝必须发生在第一个回合之前，这条只能在
+# "agent 一次都没被调"上判出来；默认不动那一条是安全档（RSI 自动晋升的第四条否决
+# 照旧 False），给它塞一个真回合声明也不许翻旗标（能力由结构推导）。
+# 计划数是上界而非等式（约束闸/泄漏闸会跳过候选），故逐格核对：真实计数 ≤ 计划数，
+# 且锚定地板那一格的差值正好等于"留出集再跑一遍无技能臂"。
+# 单跑读数：本档 15 passed 连跑 9 次全绿；其中一次另有 1 error 落在 fixture teardown
+# 形状上（15 格全过，未归属到本档任何一格）——如实登记，复现则查根 conftest 的隔离夹具。
+tests/unit/evolution/eval/test_realArmBudgetPlanMatchesActualTurns.py
+# B 批（裁定：接线而不是退役）：`EvalExample.source` 从只写不读接成提案的来源构成。
+# 与 M-D 退役 difficulty 的区别写在该档开头——source 是产出通道的记账，写侧本来有真值。
+# 三条口径分格钉：构成只算判据集（train 混进来就说的是另一件事）、旧记录归"未记"且
+# 不因为 dataclass 默认值被读成合成、"未记"词值与基座维度共用一处常量与一处计数实现。
+# 另有一格钉形状契约（data 仍是列表、覆盖面走同级新键）与一格蕴涵（同分不同来源，判据数字不变）。
+tests/unit/evolution/eval/test_proposalCarriesEvidenceSourceComposition.py
+# §6-255 甲案·治理护栏按参数语义分扫描面：双向钉——正向「无害路径不再被判 shell 规避」，
+# 反向「命令里的真规避仍被抓」；另三格是反绕过（夹带执行语义的假路径、未登记的键不豁免、
+# 路径 guardian 仍看得见命令里的受保护路径），两格钉清单单源与「清单真的同时驱动预检与守卫」。
+# 失效方向＝有人为了绿把 guardian 摘掉或把 severity 降了，故留一格 CRITICAL 交付锁。
+# 单跑读数：本档 8 passed 连跑 2 次同读数。
+tests/unit/security/test_guardScansFollowParameterSemantics.py
+# §6-267：账本里的构件摘要只准代表**真在盘上的构件**。病灶是次序——`call_skill` 把摘要对账排在入口判定
+# 之前，未钉分支"现算现钉并放行"，于是每次调用一只空壳条目（账本有 `enabled: true` 而目录里只有
+# manifest.json）都先把空壳摘要落进账本，下一行才报 `No entry point found`；那份读数不代表任何构件，
+# 日后真补上字节反被它判成篡改。改法是入口判定收成一处 `_resolveEntryPoint`，未钉分支只在有构件时首钉。
+# 6 格分三组：行为 2 格（单次与连调三次都不许多出摘要）、对照 2 格（有构件的未钉条目仍首钉并放行＝TOFU
+# 那条腿不许被改断；已钉条目被篡改仍先报摘要不符而非"没入口"）、形状 2 格（入口判定全档只许一处 + 探测器反空转）。
+# 逐文件单跑三次同读数 6/6/6；活体两侧对照：无修复那侧 [4][5][6] 三项 FAIL，拒因正是 artifact_digest_mismatch。
+tests/unit/skills/test_unpinnedShellIsNotPinnedAsAuthority.py
+# §6-272：读面对账——「账本在册」不等于「可得」。过去没有一面看过落盘：列表/详情只吐账本的 `enabled`，
+# 四个列表口照抄，轮级可见性只有三闸（运营开关/运行时 status/生命周期归档），而恢复口在造不出执行体时
+# 还兜底注册一个 `status=ACTIVE` 的裸基类 ⇒ 工具 schema 与提示词目录把空壳画成可调用，点到才失败。
+# 本机实测量到 8 条里 7 条是这种空壳（2026-10-06 旧代码留下的陈态），活体在 HEAD 上的读数就是"恢复了 8 条"。
+# 改法是把判定收成一处 `SkillService.availabilityFor`，三面必须同向。11 格分三组：
+# 投影 5 格（空壳/目录丢失 ⇒ 不可得；指令型、账本自证的 tool_sequence、`path` 为空的自动技能 ⇒ 不许误灰）、
+# 跨边界 3 格（恢复口不给空壳建执行体、指令型照旧注册、可见性第四闸拒空壳且放行正常条目）、
+# 契约 3 格（`app.openapi()` 里必须有 `available`/`unavailable_reason`——字段没人读就是新断点；
+# 两个 agent 面真走 HTTP 取 JSON 比对同向）。逐文件单跑三次同读数 11/11/11。
+tests/unit/skills/test_readFaceDoesNotClaimShellAsAvailable.py
+# §6-266 第③刀·shell 逃逸检测收成一张表：一格钉"六种形状并入后一条都不掉"（并退不丢能力），
+# 一格钉严重度与同族 `\xNN` 齐平（口径不分叉），一格按 AST 钉两个零调用的第二份判定不得回魂，
+# 一格钉 §6-266 第①刀与这条新规则的交界——路径键里的 `\u1234` 不许被读成转义（取值刻意带 `;`，
+# 否则把豁免改回双闸也照样绿；本批第一版就踩在这上面，变异 M4 打空被抓）。
+# 单跑读数：本档 4 passed 连跑 2 次同读数。
+tests/unit/security/test_shellEvasionPatternsAreOneFaceOnly.py
+# §6-276·解包失败点名原因：四族失败（安全拒／坏包／路径过长／与长度无关的 IO 故障）逐族钉"只许出现
+# 自己的关键字"——写成 `A in r or B in r` 的或式断言会被"全都报同一句"的实现蒙过去（本档变异 M3 第一次就打空）；
+# 另钉上限数字由 `WINDOWS_MAX_PATH` 算出（monkeypatch 那个常量，文案必须跟着动）、原因原样进回执、
+# 短根同包必须装成（点名不是新增拒绝），以及桩在原因面上的替身真的被生产调到。
+# 单跑读数：本档 7 passed 连跑 2 次同读数。
+tests/unit/skills/test_zipRefusalNamesItsCause.py
+# §6-285·暂存名不吃 Windows 路径预算：钉"暂存名与 skill_id 长度无关"＋绝对预算 40（取任何合理
+# 命名策略都成立的值，不钉实现选的那个数），前缀 `.incoming_` 与两处豁免按值各自等于真源，
+# 另有一格 Windows 行为格——成员在终点投影 259（合法上界）的包必须装得成（POSIX 无 260 上限故如实跳）。
+# 单跑读数：本档 6 passed 连跑 2 次同读数（其中 1 格设计成今天就绿，docstring 已写明牙在变异 M1）。
+tests/unit/skills/test_stagingDirStaysWithinPathBudget.py
+# §6-285·subprocess_call 改判命令形状（用户裁甲）：argv 三形降 low 且必须"读数仍在＋不参与裁决"
+# 分开钉，字符串首参／shell=True／os.system 三条真闸照旧拦，跨行字符串首参这一已接受盲区写成会红的
+# 断言而不是注释；"降级"由规则本体的 severityFor 在两行同族样本上给相反答案自证，不是按 rule_id 名单豁免。
+# 单跑读数：本档 11 passed 连跑 2 次同读数（牙在变异 M2/M3/M4，各恰咬自己那一侧）。
+tests/unit/security/test_subprocessCallJudgesCommandShape.py
+# §6-285·真资产包装上且不靠削弱门：整包过门＋报告面 4 条起进程读数一条不许少＋往同一棵树塞一条真裸名
+# exec 必须照样被拒＋这条包不许出现在白名单里（裁定是改资产，禁开豁免）。
+# 单跑读数：本档 5 passed 连跑 2 次同读数。
+tests/unit/skills/test_builtinBundleInstallsThroughGate.py
+# §6-286·同一本技能库只许一份内存态（用户裁乙＝全量收口）：真 HTTP 链装完，同进程读面必须立刻
+# 认账（改前实测 0 条）；全仓自建 SkillService 的实状与登记表**双向**咬合——多一处即红，把 offender
+# 修好了不摘表也红；唯一例外必须真的还带着 skills_dir=，否则它就该收进来。夹具半区同档钉：手写
+# 构造与工厂构造必须落到同一个、且在本次 tmp 下的库目录（旧夹具只切 None 那一支，工厂显式传的目录
+# 会漏回会话级数据根——本批 A/B 首轮 10 条回归的根因）。
+# 单跑读数：本档 9 passed 连跑 2 次同读数（10.95s×2）。
+tests/unit/skills/test_skillLibraryTakenFromOneFactory.py
+# §6-287·技能执行咽喉是协程：入口写成 `async def main` 的技能必须真被 await 到底——改前回包
+# `{"success": true, "result": <coroutine>}`（对外 500），回执与真相分家。三格真物（真装真加载
+# 真 HTTP）＋两格契约（链按 dict 取值／两处调用点必须 await）＋一格口径（判定在调用之前）＋
+# 两格形状牙：同步技能不许被挪进 asyncio.to_thread（锁取自 creation_governance.shared_lock(目录)，
+# 按目录共享、重入只在同线程，挪出去＝技能回调本服务即死锁；该格限时 8s 自己红，不许挂死整轮）。
+# 单跑读数：本档 8 passed 连跑 2 次同读数（9.8s／9.3s）。
+tests/unit/skills/test_callSkillThroatIsAwaitable.py
+# 批 62（§6-284 第②刀前半）：「哪些参数名算路径」收成四角色单源表——清单／回落正则字面／两档别名表
+# 三份名单必须由 `pathNamesWithRole()` 投影出来，改一处就三处一起动。三格有牙：生产面（现量 1020 档）
+# 扫第二份字面抄本、派生被换成**同值字面**也照样红（形状格按 AST 认赋值目标，Assign 与 AnnAssign 都认，
+# 只认一种时别名表那两处带类型标注的声明会静默掉出扫描面）、12 名命令面分歧矩阵逐名钉住"改前实状"
+# ——本批不改裁决，动裁决（扩表/缩表/回落截断）要先过下一拍的丁/甲。
+# 单跑读数：本档 19 passed（7.3s）。
+tests/unit/security/test_pathNameListsDerivedFromOneTable.py
+# 批 63（§6-280 甲·第②批）：执行咽喉先问代码映射表再回落盘——读面 available 与咽喉跑出必须同向。
+# 四格是本批的形状钉，别当装饰删：① 注册面 `_build_executable_skill` 必须是**第三条**同表读路
+# （本批真犯过"收口收到一半"：表改成 id→工厂后只改了构造那处，web-search 在注册面静默降级成裸壳，
+# 是既有判据抓出来的，N2 那枚变异就是它）；② 映射腿在执行体回调本服务时必须**出了锁再 await**
+# （shared_lock 按目录共享，主线程持锁 await＝工作线程等锁 ⇒ 当场死锁；该格自带 8s 限时，红成 FAILED 行）；
+# ③ 未钉的条目跑完仍不许有摘要、已钉的不许变（映射型完整性归代码本体，不是"摘要缺失所以放行"）；
+# ④ 四格对照——同形不在册照旧拒／停用闸不被绕过／账本外不凭空造技能／method 参数如实拒。
+# 单跑读数：本档 16 passed（7.3s）。
+tests/unit/skills/test_throatRecognizesExecutorMapping.py
+# 批 64（§6-290）：装侧两个写账本口不许在「落盘没有构件」时钉摘要——空壳那份摘要不代表任何构件，
+# 却会把日后补进同一目录的真字节判成篡改（§6-267 修的是 call 侧那一支，写侧这一半一直在新生那种账本）。
+# 三条形状格别当装饰删：① 一处定义三处调用（装两处＋读面一处），少一处＝那一处又写回内联形状；
+# ② 调用点上不许内联重述这一问；③ 探测器自己的反空转证明（豁免按 AST 认函数身份，不按行号也不按文件名）。
+tests/unit/skills/test_installDoesNotPinShellAsAuthority.py
+# 批 65（§6-291，用户裁甲）：一次工具调用里的**每一条**路径参数都要进裁决，命令文本恒常扫。
+# 同一根因有两层各写了一份"取第一个"——咽喉的 `for … : break` 与治理预检的 `next(...)`，
+# 后者把参数面塌成「1 命令+1 路径」，所以只修咽喉等于修在走不到的分支上。
+# 形状格别当装饰删：① 取数循环里不许留 `break`；② 命令支不许被"路径为空"包回去；
+# ③ governance 不许再自己遍历 `PATH_PARAM_KEYS`（两份名单是 §6-284 第③件事）。
+# 对照格写明改前改后都绿：case 4 自由文本仍零读数（甲不覆盖）、单路径三形读数不变、良性 dir 值不新增裁决。
+tests/unit/security/test_pathGuardScansEveryPathValue.py
+# 批 66（§6-292，用户裁丁）：路径语义由 schema 声明决定，名字表降为"查不到声明时"的兜底。
+# 现读到的真实漏名是 `exec_command.workdir`——它过去只被回落正则**偶然**咬到（`dir=` 命中 `workdir=` 的
+# 子串），同一次调用出现清单内键时偶然就消失（放行）。三条不许顺手做宽：形状不能顶替声明
+# （`looksLikePathValue` 把 "见 /etc/shadow" 也算路径形状，那就是甲拒掉的 case 4）；声明**只增不减**
+# （未声明的 `path` 键必须仍按名字表判，否则是拆闸）；远端无 schema 可问时兜底保留。
+# 棘轮一格钉"名字表只关不加"：往 `PATH_NAME_ROLES` 里添名字即红，新增语义请写进声明。
+tests/unit/security/test_pathSemanticsComeFromDeclaration.py
+# 批 69（§6-296，承 §6-295 乙）：裁决只许有一个口——`ToolEngine` 内层那道恒 safe 的门已退役，
+# "无 agent ⇒ 引擎直调"这条全仓唯一不经治理的回落支改经 `evaluate_tool_call`（scan_all=True）。
+# 三格别当装饰删：① 对照格 `testNonAdjudicableCallStillRuns` 钉"接治理"没被做成一律拒（既有那条
+# "无 agent 的评测/脚本路径仍可用引擎"反向锁依赖它）；② `test_init_rejects_guard_seam` 钉那个形参
+# 不许回来；③ `testOldEngineGuardCellsRetiredNotLeftZombie` 钉旧契约的测试格不许留成僵尸断言。
+# 刻意不做：两把 ToolEngine 实例合一（§6-295 末格另记的独立缺陷，另一张票）。
+tests/unit/execution/test_engineAdjudicationLivesOnlyInGovernance.py
+# 批 70（§6-298，承 §6-297 乙）：咽喉里"优先使用 ToolEngine"那一档恒不命中——它的注册面在全仓
+# 无任何写入者（唯一写入者 `ExecutionEngine.register_tool()` 零消费者），本批把那一档与整条装配链退役。
+# 两格别当装饰删：① `testCoreChainDocstringMatchesRealBranchOrder` 只判链条那一句（第一个句号前），
+# 解释段允许点名被拆掉的东西——整段扫词会被自己写的说明咬到（形态集 241／268）；
+# ② `testOldA18CriteriaRetiredNotLeftZombie` 钉 A-18 那档旧判据不许留成僵尸断言（被钉对象已不存在）。
+# 行为中性由差分证而不是由声明证：同一份活体脚本在 HEAD 基线树与本批侧 READOUT 完全一致。
+tests/unit/execution/test_throatHasNoEmptyEngineBranch.py
+# 批 73（§6-300 事故收尾）：这份判据是**并发会话写的**（票④包 4，传输半区退役），本会话只是按它重建被
+# 自己误抹的生产半区（见 §6-300 末格那条记录），故连判据一起入库、**一字未改**。
+# 两格别当装饰删：① 交付锁 `test_runtimeHalfStillProducesAWorkingLocalRuntime` 钉"删的是死半区"——
+# 工厂造得出本地运行时、单例语义不变、**真 exec 回得来**（整包判死会误杀在役符号）；
+# ② `test_noCodeAnywhereImportsTheRetiredTransportSurface` 按**导入通道**取数而非符号名——
+# `mcp_manager.py`（§6-349 已退役）里曾有一枚同名 `TransportType`，按名扫会把在役符号
+# 判成还在引用退役面——这条口径留在判据里，不随那份枚举一起消失。
+tests/unit/execution/test_executionLayersTransportHalfRetired.py
+# 批 74（§6-302 凭据落盘收口）：同一份配置文件里"哪些字段算凭据"只许有一个答案。
+# 三格别当装饰删：① 两格存量兼容（明文可读回 / 既有 enc:v1 密文可解回）——收口把递归通道换成
+# 唯一通道时，跑掉这两格就等于把线上已有配置读坏；② `test_nonCredentialKeysStayReadableAsPlaintext`
+# 是反向控制：不许靠把集合塞满来骗过"全都封了"，id/url/非凭据 env 键必须仍是明文。
+# 形状那三格按 AST 判代码身份（`_calledOrLoadedNames`），注释里提到退役符号不算命中。
+tests/unit/security/test_configCredentialSealingOneChannel.py
+# 批 76（承 §6-303 档案；生产笔 `a6052a38` ＋ `ff4f34a`）：`ExecutionEngine` 只剩监控器一条活路，
+# 十四条孤儿方法、那份进程内执行台账与 legacy 线性链引擎整档退役。三格别当装饰删：
+# ① 交付锁 `test_realSingletonStillHandsOutAMonitor` 走**真单例**取真 `ExecutionMonitor`——
+# 整包判死会误杀这条唯一来路（`api/endpoints/monitor.py` 三个端点就靠它）；
+# ② `test_initNoLongerWritesFieldsNobodyReads` 按 AST 判 `__init__` 里 `self.X =` 的目标集，
+# 它防的是**本批自己造新断点**（AGENTS §2「写出无人读的字段即断点」的形状化表达）；
+# ③ 反向钉 `test_monitorBusSurfaceIsKeptForPendingRuling` 钉的是"没裁的不许顺手删"：
+# `ExecutionMonitor._event_bus` 只写不读那处缺陷另有等裁票，被删的只是 `ExecutionEngine` 那条死路转发。
+# 另记一条取数坑：模块说明串的判据要按**体位**取裸字符串，`ast.get_docstring` 在
+# `from __future__` 写在最前的文件里返回 None——按它取就是恒红的空判。
+tests/unit/execution/test_executionEngineOrphanSurfaceRetired.py
+# 批 105（§6-334）：mcp 声明的**下界**必须与代码真正取用的 SDK 世代同代。
+# 上一族守卫钉"四处声明在不在"，本档钉"范围对不对"——两条不变量不同、互不重复。
+# 三格别当装饰删：① 正控 `test_production_uses_sdk_two_only_names` 在前提消失时先红，
+# 防这档沦为恒真；② 同值格防的是"两份清单各写一个下界"（那份齐备守卫放过这一形）；
+# ③ pin 满足下界那格是控制格，钉"改下界不改锁"这条路。变异两枚已实证各咬不同形状。
+tests/unit/test_mcpSdkFloorMatchesImportedEra.py
+# `emotion_adapter` 退役守卫（§6-368）：文件不在且不再被跟踪／无任何导入通道／正控（转发目标的
+# 八个方法齐全，防删错能力）／活跃层文档不再指向它（路径形与类名形都查，历史层允许保留）。
+tests/unit/cognitive_layers/memory_layer/test_emotionAdapterRetirement.py
+# 同属性异值判据并入单源（§6-370）：Postgres/MySQL 必报 attribute_conflict／同值·不同键·版本演进·
+# 复合词里的「为」不得误报／否定命题保持原类型／真 LegacyConflictDetector 与真冲突账同链
+# （防 `record_conflicts` 的类型白名单把新类型静默吞成 0）。
+tests/unit/cognitive_layers/memory_layer/test_attributeConflictCriterion.py
+# `conflict_detector_v2` 退役守卫（§6-370）：文件不在且不在跟踪态／无导入通道／两处门面不再导出
+# ConflictDetector／正控（合并后的判据仍在单源里报 attribute_conflict）。
+tests/unit/cognitive_layers/memory_layer/test_conflictDetectorV2Retirement.py
+# 反馈自适应通道权重（§6-377）：like/dislike 调意图权重并落盘／召回带 session 记归属／
+# 插件通道首次召回补激活（注册≠可用）／适配器透传 session／真 HTTP 端点接线。
+tests/unit/cognitive_layers/memory_layer/test_channelFeedbackAdaptiveWeights.py
+# §6-387 注册表执行腿的构件闸（§6-383 票三甲，用户 2026-10-22 拍）。
+# 活体已证：同一本账两条执行腿，`call_skill` 过闸、注册表那条（`SkillDocSkill.execute`，
+# LLM 实际走的那条）改一个字节照原样交模型、`checkArtifact` 调 0 次。本档钉的是把同一道闸
+# 接到这条腿上，且拒因/口径不在执行腿重抄：
+# ① 钉过且相符 ⇒ 照常回指令体；不符 / 目录没了 ⇒ 如实拒（`artifact_digest.refusalReason`
+#   那一处），并且**指令体一个字节都不许进回执**；
+# ② 没钉过 ⇒ 与 `call_skill` 同口径的 TOFU：有落账回调就现算现钉并放行一次（本实例随即
+#   以那枚值为口径），没有回调就拒 `artifact_digest_unpinned`——不许"没账可写所以放行"；
+# ③ 每次 execute **恰查一次**（不是"检查后放行"也不是"根本没查"）；
+# ④ `pinnedDigest=None` 是刻意的非生产口径（直接构造做实验），生产构造点必须传字符串；
+#   守卫按 AST 扫**整个 `neurova/`** 的所有 `_build_executable_skill` 调用点，漏传即红，
+#   并配一格变异对照证明探测器抓得住"没传"；映射型执行体不读盘上字节，不得被这道闸扫到。
+# 另有一格钉首钉的写口：`SkillService.pinArtifactDigest` 原子落账、不在册拒造条目、落盘失败回滚。
+# 入册前逐文件单跑两次同读数 12 passed（8.77s / 8.61s）；红自证＝只退三件生产面 ⇒ 9f/3p
+#（3 格是对照与 `None` 口径，本就该两侧绿）。
+tests/unit/skills/test_marketDocSkillDigestGate.py
+# §6-388 根外锚：数据根之外的摘要副本（票一甲①＋乙，用户 2026-10-22 拍）。
+# 边界先写在判据里，免得被读成"防篡改"：锚**不**防同权限攻击（能改构件与账本的人通常也能改锚）；
+# 它防的是**只动了数据根**的那类操作——整库恢复/快照回滚，以及"改完构件再把账本重钉一次"
+# （后者正是 §6-176 那条「账本与被保护构件同根同权限」的直接后果）。
+# ① 键的拼法只有一处（`artifactKey(channel, id)`，通道闭集 skill/plugin），两份账本共用一个锚文件，
+#   同名条目不许互相覆盖；
+# ② 锚落点在生产是 `~/.neurova/artifact_anchors.json`（**数据根之外**，判据按生产原件断言，
+#   不认跑测期改指的临时目录）；坏文件/版本不认识一律改名隔离并响亮报，不把"读不懂"读成"没钉过"；
+# ③ `checkArtifact` 在账本相符之后再看锚：锚不符 ⇒ 按 `mismatch` 拒（拒因仍取那一处）；
+#   锚里没有这条 ⇒ 维持只读账本的旧读数（TOFU 语义不变），不悄悄补写；
+# ④ 接线：技能的两处安装钉与重钉写口（`pinArtifactDigest`）、插件的钉写口都要同时落锚；
+#   锚写失败只出声、**不回滚账本**（账本那份仍是权威，锚缺只意味着整库回滚检测对它不成立）。
+# ⑤ 同一条政策还有第二半：所有 `checkArtifact` 调用点都必须带 `anchorKey`（在
+#   `test_pluginArtifactDigestPinnedAndVerified` 那条接缝判据里按全仓扫描钉住）。
+# 入册前逐文件单跑两次同读数 11 passed（3.37s / 3.30s）；红自证＝只退四件生产面 ⇒ 3 failed / 8 errors。
+tests/unit/security/test_artifactAnchor.py
+# §6-390 插件远程源的注册表、取回咽喉与安装接线（票二乙，用户 2026-10-22 拍「开，复用市场链」）。
+# 判据问的不是"能不能下载"，而是四件事一起成立：
+# ① **白名单在取回之前**：未注册 host、非 http(s)、重定向到别的 host 一律在发出/接受字节之前拒
+#   （拒因是闭集标识）；测试把 `urlopen` 换成"被调就炸"的桩，证明未注册时**一个请求都没发**；
+# ② **预算在解包那一步**：单包上限与条目上限只在 `plugin_sources` 一处，透传给
+#   `safe_extract_zip`；超限在读阶段就中止，zip-slip/坏 zip 按 `plugin_archive_unsafe` 拒；
+# ③ **取回即暂存、失败即清**：解到 `.incoming_<hex>`，核对 manifest 名字后才整体挪进插件根；
+#   名字不符 / 已存在 / 权限门拒 / 状态落盘失败，一律把网络得来的字节撤回，不留半个包；
+# ④ **远程包与本地包同链**：装时钉摘要、落根外锚、`state.json` 留 `install_source`，
+#   装载闸不因来源放行——改一个字节后 `load_plugin` 按 `artifact_digest_mismatch` 拒（活体第 10 格）。
+# 另三格钉 HTTP 语义：四条取回拒因各有状态码（403/502/413/400），
+# `already_installed`→409、`name_mismatch`→400；拒因集合的扫描器把 `plugin_sources` 的
+# `REASON_*` 常量收进来（与 artifact_digest 同机制，只在包内真引用时才算）。
+# 入册前逐文件单跑两次同读数 17 passed（4.42s / 4.28s）；红自证＝退三件生产面 ⇒ 整档 collection error
+#（新模块不在，行为红由活体承担：接线前该路径回 501）。
+tests/unit/plugins/test_pluginRemoteSources.py
+# §6-391 旧集成档 `tests/integration/test_full_chain.py` 的分流退役守卫（裁定「旧集成档另批分流」）。
+# 分流口径（§6-133）：该档是 2026-08 的配方，今天 import 的 `ContextBuilder`/`LLMClient` 已不在
+# `neurova.agent`、`Message(sender=)` 字段已删、`router.route()` 早已 async、fixture
+# `sample_memory_manager` 不存在，两格还会无凭据真连 OpenAI。逐类给存活守卫指针（见文件头表），
+# 然后整档退役——不给一条已不存在的链路补形状。
+# 判据钉三件"不许复活"：
+# ① 文件不存在；按**路径/模块**引用旧档的**行**不存在（带「退役」二字的指针行除外——
+#   本仓惯例就是原地留路标；配反向控制：裸引用必须点名、指针不得误报）；
+# ② `neurova.agent.ContextBuilder`/`LLMClient` 仍不存在（为复活旧档挂回去即红）；
+# ③ 全仓 `tests/`＋`scripts/` 不得再有"同步把 `Message(...)` 喂给 `.route(...)`"的落点；
+#   AST 口径：属性名 route + 第一参 Message 形态 + 非 async 上下文 + 未被
+#   `asyncio.run(...)`/`loop.run_until_complete(...)` 包住；配三格对照（同步必点名、
+#   await 不误报、asyncio.run 包住不误报——MoE 的 `route(query_vec)` 是另一条真 async 接口）。
+# 入册前逐文件单跑两次同读数 6 passed（4.36s / 4.22s）。
+tests/integration/test_fullChainRetired.py
+# §6-397（批 H · A）：请求侧输出预算认持久化探测值。探测值当时候只进了 clamp 的「上限」
+# 口径，请求值仍走静态目录（未收录即 DEFAULT 4096）——思考模型的思考与正文共享这一个
+# 预算，于是「探测到 65536」与「本次只带 4096」并存。判据含真装配点读数
+# （`_create_model_client` 建出的 `config.max_tokens`）。入册前逐文件单跑全绿（7 passed）。
+tests/unit/llm/test_requestMaxTokensUsesProbedLimit.py
+# §6-397（批 H · C）：流内静默的可见链。事故读数＝日志里 60/120/180/240s 全留过痕，
+# 前端只有转圈。判定并入 `chat_stream` 读取循环（独立看门狗只写得日志、让不出事件，
+# 两份判定并存即第二份定义），竞时只能用「不取消的 wait」——`wait_for(__anext__())`
+# 会撕裂上游流。两档分别钉客户端层与转发链（环→管道→SSE 帧映射，含 legacy 路径）。
+# 入册前逐文件单跑全绿（7 passed／7 passed）。
+tests/unit/llm/test_streamSilenceIsVisible.py
+# §6-398（批 I）：`MemoryManager` 事件接缝的三格预存红清零——原格读的是 §6-12 就退净的
+# 私有总线出口（`mgr.bus`／`mgr._bus.health_report()`），现改为「订共享单例、真发一次、
+# 订阅方必须收到」的行为判据＋「私有出口不得回来」的反向钉。变异自检：把生产投递口换成
+# 一条私有 EventBus 时，共享单例上的订阅收到 0 件（判据必红）；恢复单例收到 1 件。
+# 同批清掉 `SleepSettingsStore(base_dir=)`（落点走生产注入口 NEUROVA_AGENT_WORKSPACES_DIR）。
+# 逐文件单跑两次同读数：test_manager 39 passed（5.03s／4.96s）、test_sleep_phase_cycle 29 passed（3.47s／3.44s）。
+tests/unit/memory/core/test_manager.py
+tests/test_api/test_api_route_conflicts_v2.py
+# §6-403（批 L 第一档）：「这台网关收不收关思考的键」必须由知道本轮打到谁的路由边界回答。
+# 前一格（§6-397 批 H · E）的判据读的是路由门面 `AgentLLMClient.config.compat`，而门面那份
+# 是 `AgentConfig` 造 `LLMConfig` 时留下的 dataclass 默认值（构造点从不传 compat，全仓无
+# `config.compat =` 赋值）⇒ 恒答"收不到"。amd 恰好同结果所以活体看不出来，声明
+# `supports_thinking_toggle=True` 的网关却被反向误判、白丢一次真能自救的重试。
+# 本档把判据打在真 `AgentLLMClient`＋真 `MultiModelLLMClient`＋真 `LLMProviderManager` 上
+# （只有网络出口打桩），四态齐：amd 形状房 False／声明 toggle 的房 True／钉死静默房不被
+# 池里别的房救回／路由答不出即 fail-open。入册前逐文件单跑全绿（9 passed／4 passed）。
+tests/unit/llm/test_thinkingKnobResolvesAtRoutingBoundary.py
+# §6-411（批 O-5）：内容级敏感信息的规则表与脱敏引擎各只留一份（用户裁"先收口单源，暂不进回合链"）。
+# 比之前仓内有**七份**：cognitive 的 8 条键值表（sanitize 用 `split("=")[0]+"=***"` ⇒ 冒号形
+# `password: abc` 输出 `password: abc=***`，值一个没少还缀垃圾）、memory 的 8 条（中文键名＋校验型
+# 身份证＋带分隔卡号是它的长处，但 `bank_card`/`credit_card` 是同一条正则登记两次，且 `replacement`
+# 死模板表达不出"留首3末4"）、firewall 的 6 条**裸词**（打码的是关键词本身）＋它在 `:147` 先编译、
+# `:150` 才 `_load()` ⇒ 配置改规则永不生效；另三处**在役**的自有小抄（summarizing_compressor／
+# error_mapping／evolution_inputs_guard）本批先合表不接线 ⇒ 另立一票。
+# 合并尺度取三份里**较高**的一档（身份证 HIGH→CRITICAL、手机号 MEDIUM→HIGH、邮箱 LOW→MEDIUM），
+# 后果明写：`MemorySecurityGuard.should_remember("…手机号…")` 从此 False；这三条链今天零生产消费者。
+# 顺带修掉一个真错读数：`get_sensitivity_level` 原来是 `max(levels, key=lambda x: x.value)`——
+# 按**字符串**比大小，"medium" 赢过 "critical"，"最高敏感度"是错的；序现在由共享尺度一处给。
+# 判据核心是"同表同引擎"：同一串文本从 detector／MemorySecurity／firewall 三扇 door 读回必须
+# **逐字相等**（有人另起一张表或再写一遍循环就红），另含裸词反例、配置生效正检（这条今天该红）、
+# 枚举别名、重复正则、面自证与合成样本对照。13 passed（3.23s／4.02s 两次同读数）。
+# 活体（隔离数据根、生产函数无替身）：12 条规则 × 9 组文本，四扇 door 输出与单源引擎逐字一致，
+# `password: hunter2`→`password: ***`、`API_KEY=sk_test_1234567890`→`API_KEY=***`、
+# 手机号→`138****5678`、正常中文原样返回 ⇒ LIVE_PASS。
+# 回归：`tests/unit/security`＋`test_firewall`＋记忆安全两档合跑 **1209 passed／3 skipped**；
+# 其中 2 条红（`document_pipeline.py` 长出第二张后缀表、install-gate 那条）经 `git status` 现查
+# 是**并会话未跟踪的在途文件**所致，与本批无关，不记成回归。
+tests/unit/security/test_sensitiveInfoRulesAreSingleSourced.py
+# §6-412（批 P-4）：插件事件面过了权限门之后必须真落到总线上——`resolveEventBus` 全仓一个形状。
+# 现查根因：`BasePlugin.subscribe/unsubscribe/publish_event` 三条通道都是 `if self._event_bus:`，
+# 而生产侧**从没人给它赋值**（`plugin_manager.py` 里连 `event_bus` 这个词都不出现，全仓赋值点
+# 只有 `tests/unit/test_base_plugin.py:255/283/304`）⇒ 已逐项确认 `emit:events` 的插件调
+# `publish_event()`，效果＝打一条 warning 然后什么都没发生（`unsubscribe` 连 warning 都没有）。
+# 与 `core/base_module.py:115` 记的是同一条根因（注入位从不被填 ⇒ 恒走 None 分支），那边早已
+# "调用时现取单例"收口，插件族当时漏扫——本票即第 5 条补齐。
+# 门不动：`_requirePermission(read:events / emit:events)` 仍在最前，未授予抛
+# `permission_not_granted`（既有格子钉的顺序判据本批复跑仍绿）。能力面词汇仍单点在
+# `skills/permissions.py:KNOWN_CAPABILITY_KEYS`，本批不新增。
+# 判据 8 格＝三条行为正检（无注入时发布在真总线计数上可见／订阅收得到／退订不再收到）＋
+# 两条门控制（未授予必抛且一次都不落总线；显式注入优先于现取，防第二条口径）＋
+# 两条形状控制（两族无注入时解析到**同一个** bus 对象；`if self._event_bus:` 在插件族不得再现）。
+# 边界按实测收窄：`shared_core/infrastructure.py` 同形状是合法的（该类 `:130` 真会 `EventBus()`），
+# 故判据只点名插件族——全仓禁这个语法等于改坏正确的代码。
+# 红→绿 5 failed／3 passed（两条门控制今天就绿）→ 8 passed。同批清掉批 O-5 的两处半成品：
+# 本地同名 dataclass 把 `SensitiveRule as SensitivePattern` 的 import 盖掉（常驻守卫
+# `test_packageInitBindsNoUnusedGenericNames` 点名"import 从未生效"），以及"编译模式缓存"4 行被
+# 错接进 `set_memory_manager()`（未设记忆管理器的实例 import 即 AttributeError）。
+# 活体（真授权文件＋真全局总线，无 mock）：`_event_bus=None` 下发布使计数 0→1 且订阅侧收到；
+# 空授权表下仍先抛 `permission_not_granted` 且计数不动。
+tests/unit/plugins/test_pluginEventSurfaceResolvesTheBus.py
+# §6-413（批 P-5 第一格）：两处在役脱敏点改接单源引擎——出口词汇按调用方给、规则子集在单源声明。
+# 用户裁「保 token，子集在单源里声明」。`summarizing_compressor`（自带 5 条正则＋自己写 sub 循环）
+# 与 `error_mapping._KEY_PATTERN` 同批退役，都改成 `sanitizeSensitive(text, <投影>, "[REDACTED]")`。
+# 为什么不统一成 `***`：`[REDACTED]` 是这三条链**存量文本**与两条现有格子
+# （`test_summarizing_compressor.py:89`、`test_evolution_gates_wave_c.py:83`）共同钉住的字符串，
+# 换词汇会让新旧摘要/证据文本混排；现查也确认**没有逻辑把 token 当哨兵**（`contains_secret` 走正则），
+# 所以这是展示层选择，不是行为依赖。`keepEdges` 那一档明确不吃 token（靠补星保长度）。
+# 投影（`SUMMARY_RULES`／`ERROR_TEXT_RULES`）声明在单源里，`_pick()` 引用到不存在的规则名直接
+# KeyError——投影写错宁可炸，不要悄悄少脱敏。摘要侧只投密钥类，**不投手机号/IP**：
+# 整表糊上去会把可诊断性一起脱掉，这正是"按类别投影"而不是"一把全接"的理由。
+# 行为变宽是本格实收益（旧门 vs 新门逐条实测）：`Bearer abcdef123456`、`nvk_zzz…`、
+# `口令：MyRealPass1` 三形旧摘要门**原样放过**，现在都 `[REDACTED]`；`bearer_literal` 的值类
+# 也从字符类对齐到 `\S+`（收窄会漏 `Bearer ab$`）。
+# 判据不谎称"完全等值"：把两扇旧门的正则原样抄进测试当期望，只对"旧门本就正确"的形状逐字比，
+# 旧门漏脱的形状另记（注释写明旧错误门不含 `ghp_`），再加结构断言"投影名与 PII 名互斥"当试纸。
+# 逐文件单跑两次同读数 2 passed；我自己复跑 新档＋摘要器＋错误映射 28 passed（3 条既有红见
+# §6-412 的归因：并会话未跟踪的 `document_pipeline.py` 后缀表、mappingproxy、llm 跨文件污染）。
+tests/unit/security/test_liveRedactionDoorsUseTheSharedEngine.py
+# §6-415（批 P-5 第二格）：第三处在役脱敏点改接单源；形状差异是**两边各缺一半**，
+# 不是"护栏宽、单源窄"一句话——单源缺 `authorization|cookie|credential|裸 secret` 四键、
+# 缺 JSON 形（sep 不收键名右侧闭引号）、且表序把键值档排在 `bearer_literal` 之前，
+# 于是 `token: Bearer abcdef123456` 在摘要出口漏真令牌；护栏缺"引号值含空格"与全角冒号。
+# 顺序理由（Bearer 先行）原本写在护栏注释里，§6-411 合表时只并了规则没并次序——这条
+# 现在钉在 `SENSITIVE_RULES` 表上方，`_pick` 按表过滤故每扇 door 自动继承。
+# 值长下限从正则里摘出来具名成 `MIN_SECRET_VALUE_LEN`（下限留在正则＝脱敏面跟着收窄），
+# 判定走新口 `containsSensitive()`；键名档派生自同表（`keyPattern` 原文＋整名匹配），
+# 因此结构侧能问"`{"api_key": …}` 这个键是不是凭据"——孤立值字符串是内容正则看不见的一形，
+# 由活体自证第一轮抓出（残留 `Bravo9`／`MyRealSecret123`），修法在生产侧调顺序
+# （先脱结构再序列化），不在下游正则里猜转义引号。
+# 判据 14 格＝行为六格（三形摘要门＋两形护栏门＋序列化那一形）＋反向控制五格
+# （今天已脱对的形状不得被改坏／PII 不得被拉进这两扇门／正常文本逐字不动／短值不得
+# 触发 fail-closed／真凭据照样触发）＋形状面三格（同表同引擎逐字相等、护栏无自编译规则
+# 走 AST 而非子串——docstring 里的路标句不该算命中、以及只调单源各一次）。
+# 红→绿 6 failed／5 passed → 14 passed（4.02s／3.82s 两次同读数）；红自证把三个生产文件
+# 连同本档回退到 HEAD 复跑＝8 failed／6 passed 且八条全是断言失败（判据用 hasattr／AST 面，
+# 不 import 本批新符号，回退态才收集得起）。变异探针四发各自只红该红那一格。
+# 活体（真 `summarizeSkillIO`＋真 `evaluate_submission_gate`，无 mock）七片段残留＝无、
+# 带密钥提交 blocked=True、正常提交不沾。回归 6642 passed，13 条既有红逐条同选型 A/B 两态
+# 读数一致（context 2 条属并会话在途 orchestrator、llm 5 条跨文件污染、memory/cognitive 4 条
+# 数据根与 bus 旧账、security/skills 2 条治理闸既有红），本批不新增红。
+tests/unit/security/test_redactionDoorsShareOneLeakClosure.py
+# 裁决**按哪些路径值裁的**必须随裁决结果回到调用方。改前 `verdict.to_dict()` 的键里
+# 一格路径都没有，"被拦的是哪条路径"在结果面就丢了；`tool_executor` 的文件保护支路
+# 因此读一个从未绑定的 `file_path` 打日志——静态门禁报 F821，运行时被外层吞成 warning，
+# 文件类工具每到这一行就静默丢掉"拦了哪条路径"。本档钉三层：结果面带出路径值且
+# `to_dict()` 一并带出、与取数口 `extract_adjudicable_params` 同源、消费侧真日志点到路径。
+tests/unit/security/test_governancePathValuesReachCallers.py
+tests/unit/test_tunnelStateEnumSingleSource.py
