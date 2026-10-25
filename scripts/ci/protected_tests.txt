@@ -97,6 +97,13 @@ tests/unit/api/test_channelIdentityBindingEndpoints.py
 #   详情端点原样读回（三态各自出声：attached / missing / none_recorded）。
 #   两格分别打在"生产写侧真的写出这些键"与"HTTP 响应里真的带着运行"上；后者还钉住
 #   列表面不夹带运行明细（与"列表不夹带正文"同一口径）。
+# eval 目录的出站闸必须钉在「取单例那一刻」而不是导入时那个类。形态：SimulatedAgent /
+# SyntheticDatasetBuilder 每次 get_multi_model_client() 现取再 .chat(...)，单例被换成另一个类
+# 时只钉类的那层补丁一行都不生效 → 用例落到真实 provider 等待上，CI 全量批跑撞
+# pytest-timeout (>30s)，而单跑目录全绿（同代码两种读数）。判据在
+# tests/unit/test_dev_path_and_runtime_dep_guards.py::TestCiTestRunnerAndFixtureDepsAreReal
+# 的 test_evalOutboundGateCoversTheLiveSingleton（按行为打：换类后真调一次必须被拦）。
+# 入册前逐文件单跑全绿（43 passed）。
 tests/unit/evolution/eval/test_service_closed_loop.py
 tests/unit/api/test_text_evolution_api.py
 # Issue #55 P1：共享线程池复用（禁止热路径每次新建池）
