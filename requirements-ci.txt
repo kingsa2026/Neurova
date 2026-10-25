@@ -2,9 +2,9 @@
 #
 # 说明：
 #   - 本文件是 requirements.txt 的"轻量核心子集"，供 GitHub Actions 使用。
-#   - 刻意排除体积大 / 需本地模型 / 需显示器的重依赖（numpy、onnxruntime、
-#     sentence-transformers、transformers、tokenizers、soundfile、huggingface_hub、
-#     sentencepiece、edge-tts、pillow、pyautogui、playwright）。
+#   - 刻意排除体积大 / 需本地模型 / 需显示器的重依赖（sentence-transformers、
+#     transformers、soundfile、huggingface_hub、sentencepiece、edge-tts、pillow、
+#     pyautogui、playwright）。
 #   - 上述被排除依赖在代码中均为"惰性/try 降级"导入，缺席时模块仍可加载；
 #     它们在 scripts/ci_static_gate.py 的 KNOWN_OPTIONAL_DEPS 中登记，
 #     导入巡检会记为 OPTIONAL-SKIP（优雅降级），不算失败。
@@ -99,6 +99,27 @@ pypdf>=6.21.2
 # 于是重编锁时下界由父包给（`pillow>=9.0.0`）——公告的修复版全部只落在 13.0.0，
 # 旧下界永远合规、锁永远漂回 12.x。此处显式顶层声明，与生产清单同一口径。
 Pillow>=13.0.0
+
+# 记忆/知识的**向量通道**（联想线索 C-1/C-2/C-3、语义召回、持久层向量回填）。
+#
+# 受保护子集里有整族判据走真实编码（`test_cueVectorChannel`、`test_cueGenerationBatchC2`、
+# `test_cueFanoutDecoupledFromBatchC3`、`tests/performance/memory/test_associativeRecallGate`
+# 与 `test_longTermMemoryBaselineGate`）：不是断言"引擎缺席时优雅降级"，而是断言
+# 线索/记忆真的被编成了向量、真的能召回。薄环境缺这三件时它们只能拿到零向量，
+# 于是红在断言上（`线索没进通道索引` / `联想 MRR 掉到 …`），与产品行为无关——
+# 那是尺子缺件，不是代码坏了。
+#
+# 三件一台都不重，且**不进 transformers / sentence-transformers / torch**：
+#   onnxruntime —— `_try_load_onnx()` 的推理后端，模型 `models/embedding/bge-small-zh-v1.5`
+#                  随仓分发（`model.onnx` 已在跟踪清单里），不需要下载权重；
+#   tokenizers  —— `_load_hf_tokenizer()` 的首选，直接读随仓的 `tokenizer.json`；
+#   numpy       —— 通道索引与向量运算的地基（`np.vstack` / 矩阵点积）。
+# 刻意与 requirements.txt 的重依赖路线划开：那边三件 transformers/sentence-transformers/
+# tokenizers 是"另一条后端"，CI 只装得起、也只用到这一条。缺任何一件的失败形态都是
+# 「引擎初始化失败 → 零向量兜底 → 全族断言红」，故三件必须同进同出。
+onnxruntime>=1.16
+tokenizers>=0.13
+numpy>=1.24
 
 # CLI 呈现层（`cli.py` 模块级 `from rich import box`）——受保护子集里
 # tests/unit/test_cliFourOhOneSelfRescueHint.py 走真实导入 `from cli import _error_message`，

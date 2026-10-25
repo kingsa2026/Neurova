@@ -93,8 +93,14 @@ def test_state_dir_honors_injected_env(tmp_path: Path, monkeypatch):
 
 
 def test_state_dir_defaults_to_repo_data_when_env_unset(monkeypatch):
+    # 生产默认值是数据根（`core/data_root.get_data_root()`），不是仓库内写死的
+    # `data/`——`$NEUROVA_DATA_DIR` 一旦注入（CI、测试、便携部署都注入）两者就不是
+    # 同一个目录。旧断言钉的是字面路径，于是只要数据根被指到别处就红，
+    # 与"默认是否由数据根推导"这件事反而无关。
     monkeypatch.delenv("NEUROVA_MOE_INDEX_STATE_DIR", raising=False)
-    assert _moe_index_state_path("scope").parent == REPO_DATA_DIR
+    from neurova.core.data_root import get_data_root
+
+    assert _moe_index_state_path("scope").parent == get_data_root()
 
 
 def test_state_dir_pinned_out_of_repo_data_during_tests(tmp_path: Path):

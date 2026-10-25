@@ -50,9 +50,13 @@ charset-normalizer==3.5.1
     #   reportlab
     #   requests
 click==8.5.0
-    # via uvicorn
+    # via
+    #   huggingface-hub
+    #   uvicorn
 colorama==0.4.6 ; sys_platform == 'win32'
-    # via pytest
+    # via
+    #   pytest
+    #   tqdm
 coverage==7.16.1
     # via pytest-cov
 cryptography==50.0.1
@@ -71,12 +75,18 @@ feedparser==6.0.14
     # via -r requirements-ci.txt
 feedparser-sgmllib==2.1.0
     # via feedparser
+filelock==4.2.4
+    # via huggingface-hub
 filetype==1.2.0
     # via langchain-google-genai
+flatbuffers==25.12.19
+    # via onnxruntime
 frozenlist==1.8.0
     # via
     #   aiohttp
     #   aiosignal
+fsspec==2026.9.0
+    # via huggingface-hub
 google-auth==2.61.0
     # via google-genai
 google-genai==2.29.0
@@ -86,6 +96,8 @@ h11==0.16.0
     #   httpcore
     #   httpcore2
     #   uvicorn
+hf-xet==1.7.0 ; platform_machine == 'AMD64' or platform_machine == 'ARM64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
+    # via huggingface-hub
 httpcore==1.0.9
     # via httpx
 httpcore2==2.13.0 ; sys_platform != 'emscripten'
@@ -101,11 +113,14 @@ httpx==0.28.1
 httpx2==2.13.0
     # via
     #   anthropic
+    #   huggingface-hub
     #   langsmith
     #   mcp
     #   openai
 httpx2-jsfetch==1.0 ; python_full_version >= '3.12' and sys_platform == 'emscripten'
     # via httpx2
+huggingface-hub==2.3.0
+    # via tokenizers
 idna==3.20
     # via
     #   anyio
@@ -157,8 +172,18 @@ multidict==6.9.1
     # via
     #   aiohttp
     #   yarl
+numpy==2.4.6 ; python_full_version < '3.12'
+    # via
+    #   -r requirements-ci.txt
+    #   onnxruntime
+numpy==2.5.4 ; python_full_version >= '3.12'
+    # via
+    #   -r requirements-ci.txt
+    #   onnxruntime
 ollama==0.6.3
     # via langchain-ollama
+onnxruntime==1.31.0
+    # via -r requirements-ci.txt
 openai==3.14.1
     # via
     #   -r requirements-ci.txt
@@ -169,8 +194,10 @@ orjson==3.13.0 ; platform_python_implementation != 'PyPy'
     # via langsmith
 packaging==26.3
     # via
+    #   huggingface-hub
     #   langchain-core
     #   langsmith
+    #   onnxruntime
     #   pytest
 passlib==1.7.4
     # via -r requirements-ci.txt
@@ -188,6 +215,8 @@ propcache==0.5.4
     # via
     #   aiohttp
     #   yarl
+protobuf==7.36.2
+    # via onnxruntime
 psutil==7.2.2
     # via -r requirements-ci.txt
 pyasn1==0.6.4
@@ -250,6 +279,7 @@ pywin32==312 ; sys_platform == 'win32'
     # via mcp
 pyyaml==6.0.3
     # via
+    #   huggingface-hub
     #   langchain-core
     #   uvicorn
 referencing==0.37.0
@@ -298,8 +328,12 @@ tiktoken==0.14.0
     # via
     #   -r requirements-ci.txt
     #   langchain-openai
+tokenizers==0.23.3
+    # via -r requirements-ci.txt
 tomli==2.5.0 ; python_full_version <= '3.11'
     # via coverage
+tqdm==4.70.1
+    # via huggingface-hub
 truststore==0.10.4 ; sys_platform != 'emscripten'
     # via
     #   httpcore2
@@ -313,6 +347,7 @@ typing-extensions==4.16.0
     #   fastapi
     #   google-genai
     #   httpx2
+    #   huggingface-hub
     #   langchain-core
     #   langchain-protocol
     #   langsmith
