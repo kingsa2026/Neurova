@@ -98,6 +98,9 @@ jobs:
   unit-tests:
     name: Unit tests (protected subset + coverage)
     runs-on: ubuntu-latest
+    # 本 job 的墙：整段上限。它与上面的单档墙（`--timeout 1500`）必须严格有序，
+    # 与 .cnb.yml 那道 stage 的 `timeout: 90m` 同值同源。
+    timeout-minutes: 90
     steps:
       # fetch-depth: 0 是**判据的运行前提**，不是优化项：
       #   受保护子集里的 test_protected_subset_registration_history.py 按清单
@@ -120,9 +123,13 @@ jobs:
         run: uv pip install --system -r requirements-ci.lock
 
       - name: Run protected subset with coverage gate (fail_under=60)
+        # 单档墙（`--timeout 1500`＝25m）必须严格窄于本 job 的墙（`timeout-minutes: 90`）：
+        # 两层同为 30 时，慢格只来得及被记成 `Timeout`，先到点的是整段被掐断——
+        # 2026-10-24/25 两次红色都出在这个形状上。两侧命令同源由
+        # tests/unit/test_ci_parity_guard.py 逐字钉住。
         run: |
           TESTS=$(grep -v '^#' scripts/ci/protected_tests.txt | tr '\n' ' ')
-          python -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS
+          python -m pytest -q --timeout 1500 --cov --cov-report=term --cov-fail-under=60 $TESTS
 
   e2e:
     name: E2E backend boot smoke (P1-8)
