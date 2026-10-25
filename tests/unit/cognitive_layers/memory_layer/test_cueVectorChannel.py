@@ -72,6 +72,9 @@ def _attachModelCues(mgr: MemoryManager, rows: dict) -> None:
 def corpus(tmp_path):
     from tests.memory_embedding_precondition import requireRealEmbeddingOrSkip
 
+    # 前提自给：引擎真出非零向量。缺件（`requirements-ci.txt` 刻意不含
+    # onnxruntime/tokenizers）时 skip 并点名缺的是哪一件——这一步只说明"这台机器给不出
+    # 这条读数"，不说明被测代码对；装了模型却算不出仍然是红（判据在引擎那一处）。
     requireRealEmbeddingOrSkip("向量线索通道的净增益（生产同款稠密检索）")
     # 单例复位必须在这里做：`get_semantic_search()` 是进程级单例，而记忆 id 是每个 fixture
     # 从 mem_000001 确定性重放的——上一个用例并进去的线索词会串到下一个用例的倒排里，

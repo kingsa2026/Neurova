@@ -128,12 +128,12 @@ class SkillVectorCache:
                     out[name] = entry["vector"]
                     continue
                 try:
-                    vec = eng.encode(text)
+                    vec = eng.encodeOrNone(text)
                 except Exception as e:  # noqa: BLE001
                     logger.debug("技能 %s 向量编码失败: %s", name, e)
                     continue
-                if is_zero_vector(vec):
-                    continue  # 零向量=引擎失败，不入库不排序
+                if vec is None or is_zero_vector(vec):
+                    continue  # 引擎这一轮没给向量（或兜底全零），不入库不排序
                 self._entries[name] = {"hash": digest, "vector": vec}
                 changed = True
                 out[name] = vec
@@ -146,11 +146,10 @@ class SkillVectorCache:
         if eng is None or not str(query or "").strip():
             return None
         try:
-            vec = eng.encode(str(query))
+            return eng.encodeOrNone(str(query))
         except Exception as e:  # noqa: BLE001
             logger.debug("查询向量编码失败: %s", e)
             return None
-        return None if is_zero_vector(vec) else vec
 
     def _persist(self) -> None:
         if not self.cache_file:
