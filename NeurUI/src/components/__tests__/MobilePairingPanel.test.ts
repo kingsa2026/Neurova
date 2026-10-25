@@ -21,6 +21,8 @@ const getPairingStatus = vi.fn()
 const getPairedDevices = vi.fn()
 const revokePairing = vi.fn()
 const getPairingQrcodeBlob = vi.fn()
+const getTunnelStatus = vi.fn()
+const cancelPairing = vi.fn()
 
 vi.mock('@/api/modules/mobile', () => ({
   generatePairing: (...a: unknown[]) => generatePairing(...a),
@@ -28,6 +30,10 @@ vi.mock('@/api/modules/mobile', () => ({
   getPairedDevices: (...a: unknown[]) => getPairedDevices(...a),
   revokePairing: (...a: unknown[]) => revokePairing(...a),
   getPairingQrcodeBlob: (...a: unknown[]) => getPairingQrcodeBlob(...a),
+  // S0.5 起面板开局要问一次通道；撤码也要能桩。缺这两个，本档所有挂载都会
+  // 在 import 处拿到 undefined 然后当场炸——炸在装配上，不是炸在行为上。
+  getTunnelStatus: (...a: unknown[]) => getTunnelStatus(...a),
+  cancelPairing: (...a: unknown[]) => cancelPairing(...a),
 }))
 
 import MobilePairingPanel from '../MobilePairingPanel.vue'
@@ -59,6 +65,11 @@ beforeEach(() => {
   ;(URL as unknown as Record<string, unknown>).createObjectURL = createObjectURL
   ;(URL as unknown as Record<string, unknown>).revokeObjectURL = revokeObjectURL
   getPairedDevices.mockResolvedValue({ devices: [DEVICE], total: 1 })
+  getTunnelStatus.mockResolvedValue({ data: {
+    state: 'via_relay', configured: true, route_id: 'abc', instance_id: 'nv',
+    last_heartbeat_at: 1, last_rtt_ms: 10, active_streams: 0, address_source: 'via_relay',
+    last_error: '',
+  } })
   getPairingQrcodeBlob.mockResolvedValue(new Blob(['qr'], { type: 'image/png' }))
   generatePairing.mockResolvedValue(CODE)
   getPairingStatus.mockResolvedValue({ code: CODE.code, status: 'pending' })
@@ -129,10 +140,16 @@ describe('MobilePairingPanel — 确认即收摊', () => {
     expect(wrapper.find('[data-testid="pairing-active"]').exists(),
       '已经配好了还挂着凭据图＝纯暴露面').toBe(false)
     expect(wrapper.findAll('[data-testid="pairing-device"]')).toHaveLength(2)
-    // 「不再调用」不能只数调用次数：`tick` 首行 `if (!pairing.value) return` 会让一只
-    // 没停的定时器**永远不发调用**——那样变异"漏掉 stopPolling"就红不了。
-    // 要断的是**定时器本身没了**。
-    expect(vi.getTimerCount()).toBe(0)
+    // 在册原判据断的是"定时器本身没了"（`getTimerCount() === 0`）。S0.5 起面板保留一个
+    // **只刷设备列表与通道读数**的空频定时器（10s），因为 §2.5 那格实测缺口是
+    // "面板开着，在线/离线永不变化"。于是这条改钉它本来要守的意图，而不是那个字面值：
+    // 凭据面必须全停——二维码撤了、配对状态口不再被打。
+    const statusCalls = getPairingStatus.mock.calls.length
+    await vi.advanceTimersByTimeAsync(30000)
+    await flushPromises()
+    expect(getPairingStatus.mock.calls.length, '配对状态口仍在被打').toBe(statusCalls)
+    expect(wrapper.find('[data-testid="pairing-qr"]').exists()).toBe(false)
+    expect(getPairedDevices.mock.calls.length, '空频刷新要真在刷设备').toBeGreaterThan(1)
   })
 
   it('过期同样停轮询并释放图（过期码不再有机会被扫）', async () => {
@@ -146,8 +163,9 @@ describe('MobilePairingPanel — 确认即收摊', () => {
     await flushPromises()
 
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:pairing-qr')
-    expect(wrapper.find('[data-testid="pairing-status"]').text()).toBe('已过期')
-    expect(vi.getTimerCount()).toBe(0)
+    // 收摊之后终态仍要说得出口（终态提示位，不再是挂着的状态标签）
+    expect(wrapper.find('[data-testid="pairing-terminal"]').text()).toBe('已过期')
+    expect(wrapper.find('[data-testid="pairing-qr"]').exists()).toBe(false)
   })
 
   it('读不到状态要说"失败"，不能继续挂着"等待扫码"骗人', async () => {

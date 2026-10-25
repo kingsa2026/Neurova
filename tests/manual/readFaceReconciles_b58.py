@@ -98,24 +98,21 @@ def seed():
 
 try:
     SKILLS_DIR, LEDGER = seed()
-except Exception as error:  # noqa: BLE001
-    # 先把 repr 算出来再交给 read()：lambda 是延迟求值，而 `except ... as exc` 的名字
-    # 在块结束时就出栈（PEP 3110），闭包届时取不到，探针会以 UnboundLocalError 收场。
-    _seedFailure = repr(error)
-    read("[0] 复制真账本到隔离根", lambda: (False, _seedFailure))
+except Exception as exc:  # noqa: BLE001
+    # `as` 的绑定名出块即解绑（PEP 3110），进 lambda 懒求值就是 NameError——先取值再进
+    seedFailure = repr(exc)
+    read("[0] 复制真账本到隔离根", lambda: (False, seedFailure))
     sys.exit(1)
 
 svc = SkillService(agent_id=AGENT, skills_dir=str(SKILLS_DIR))
 rows = [r for r in svc.list_skills()]
+# 映射执行体型单列：它是「盘上没字节也真能跑」那一形，混进空壳就是探针自己冤枉判据。
+# 直连公共读面，不留同名桩：留一枚 `except ImportError` 里定义的 `hasExecutorMapping`，
+# 一旦真触发就把「在册判定」静默换成本档自己拼的字符串比较，读的人还以为在读同一个事实源。
+from neurova.skills.market_registry import hasExecutorMapping
+
+
 def classify(entry):
-    # 映射执行体型单列：它是「盘上没字节也真能跑」那一形，混进空壳就是探针自己冤枉判据。
-    # 判定只认生产那一个出口 `market_registry.hasExecutorMapping`：探针要对账的是生产读数，
-    # 不是"我自己也能算出来"。早先这里挂过一条「拿不到就自己查私有表」的兜底（`or lambda`），
-    # 那等于在同址另开一份判定——生产侧真改了口径，探针会拿自己那份算，还照样报同向。
-    from neurova.skills import market_registry
-
-    hasExecutorMapping = market_registry.hasExecutorMapping
-
     sid = entry["id"]
     d = SKILLS_DIR / sid
     hasBytes = (d / "SKILL.md").exists() or bool(list(d.glob("*.py")))

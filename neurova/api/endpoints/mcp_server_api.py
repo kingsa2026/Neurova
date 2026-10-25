@@ -120,7 +120,7 @@ def _callToolHandler(caller):
     return _onCallTool
 
 
-def _callerPrincipal(current_user) -> McpCaller:
+def _callerPrincipal(current_user):
     """把"这一发能不能驱动这个 agent"算成**一个布尔**交给核心，口径不在这文件里定义。
 
     判定用的是平台唯一那份属主源 `agent_access`（admin 全量／owner 匹配／无主仅 admin），

@@ -107,8 +107,9 @@ def test_runtimeHalfStillProducesAWorkingLocalRuntime():
     assert RuntimeFactory.list_supported_types() == [RuntimeType.LOCAL, RuntimeType.DOCKER]
     assert get_runtime_manager() is get_runtime_manager(), "单例语义被动过"
     assert isinstance(get_runtime_manager(), RuntimeManager)
-    # 解释器按**本进程那个**取：POSIX 上只有 `python3`，写死 `python` 时红的是探针
-    # （`FileNotFoundError: 'python'`），不是"运行时半区删错了"。
+    # 解释器取本进程的 `sys.executable`，不写字面量 `"python"`：该别名不是每台跑测机都有
+    # （Debian 系只有 `python3`），字面量会让这一格在解释器缺席时被读成"运行时坏了"。
+    # 本格钉的是"运行时那半的活路还在"，与跑测机上恰好有没有那个别名无关。
     result = asyncio.run(runtime.exec(command=sys.executable, args=["-c", "print(1)"], timeout=30))
     assert result.success and "1" in (result.stdout or ""), f"本地运行时执行不回来：{result}"
 

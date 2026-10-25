@@ -1,16 +1,22 @@
 # -*- coding: utf-8 -*-
-"""P2-8 防回归：mobile_pairing 三只全局 dict 不得只增不清。
+"""P2-8 防回归（内存态只增不清）＋ §4.9 改判后的在册设备判据。
 
 原缺陷（P2 第5条）：
 - ``_pairing_codes``：过期只改 status 从不 pop（每次生成配对码永久+1）；
 - ``_confirm_attempts``：IP 时间线整条滑窗后键残留（每新 IP 永久+1）；
 - ``_paired_devices``：无 unpair 的失效设备条目永驻（附随 _user_devices 空集键）。
 
-修复方向：过期码在创建新码时顺带 pop；限流清扫整条过期的 IP 键；
-设备列表检查过期时移除「离线且超过 WS Token 有效期（24h）」的失效条目；
-unpair 后空用户键一并删除。响应契约不变。
+**2026-10-24 改判（设计方案 §4.8／§4.9）**：后两条的载体已经退役——在册设备不再是
+内存 dict，而是 `mobile_device_store` 的持久权威。于是这一档里：
 
-隔离纪律：全部走模块内全局状态的构造/清理，无真实 WS、无真实 JWT。
+- 「设备列表把离线满 24h 的条目删掉」**不再是期望行为**：那是系统代属主删掉他自己
+  配的设备，且删完不吭声。现在的契约是**长期在册**，满 30 天只投一个 `dormant` 提醒位。
+- 「unpair 后空用户键连键删除」这条判据的对象（`_user_devices`）不存在了，
+  改判成**撤销必须落进持久标记并递增 epoch**——它守的是同一件事的另一半：
+  撤销要留下可被读者消费的痕迹，而不是只把内存条目抹掉。
+
+隔离纪律：配对码/限流走模块内全局状态；在册库按 `deviceStorePath` 单点重定向到 tmp，
+**不写进仓内 `data/`**（本仓有逐用例仓库根污染守卫）。
 """
 
 import asyncio
@@ -23,13 +29,14 @@ from neurova.api.endpoints import mobile_pairing as mp
 
 
 @pytest.fixture(autouse=True)
-def _clean_state():
-    stores = (mp._pairing_codes, mp._paired_devices, mp._user_devices, mp._confirm_attempts)
-    for s in stores:
-        s.clear()
+def _clean_state(_isolateMobileDeviceRegistry):
+    """每用例回到"进程刚起来"：内存表清空，在册单例释放并把库指向 tmp。"""
+    # 库路径与限流桶由 `tests/unit/api/conftest.py` 单点隔离。这里原来自己
+    # `setattr(mp, "deviceStorePath", ...)` 指到本档 tmp——teardown 恢复函数后，
+    # 后一档拿到的解析结果退回数据根，正是那格混档红的通道。自己只清本档要的配对码表。
+    mp._pairing_codes.clear()
     yield
-    for s in stores:
-        s.clear()
+    mp._pairing_codes.clear()
 
 
 def _request() -> SimpleNamespace:
@@ -68,13 +75,13 @@ def test_generate_pairing_prunes_expired_codes():
 
 
 def test_generate_pairing_prunes_confirmed_codes_past_expiry():
-    """confirmed 且过期的码条目同样回收（设备信息已在 _paired_devices，条目冗余）。"""
+    """confirmed 且过期的码条目同样回收；**在册设备不随码回收**（两套寿命，§5.0）。"""
     mp._pairing_codes["111111"] = {
         "code": "111111", "pairing_id": "pair-c", "user_id": "u1",
         "status": "confirmed", "created_at": time.time() - 400,
         "expires_at": time.time() - 100,
     }
-    mp._paired_devices["pair-c"] = {"pairing_id": "pair-c", "user_id": "u1"}
+    mp.getDeviceRegistry().register(pairingId="pair-c", userId="u1", deviceName="phone-c")
 
     asyncio.run(
         mp.generate_pairing(
@@ -85,7 +92,7 @@ def test_generate_pairing_prunes_confirmed_codes_past_expiry():
     )
 
     assert "111111" not in mp._pairing_codes
-    assert "pair-c" in mp._paired_devices, "设备条目不得随码回收"
+    assert mp.getDeviceRegistry().get("pair-c") is not None, "设备条目不得随码回收"
 
 
 def test_confirm_rate_limit_sweeps_stale_ip_keys():
@@ -113,45 +120,50 @@ def test_confirm_rate_limit_sweep_keeps_block_semantics():
     assert ei.value.status_code == 429
 
 
-def test_list_paired_devices_removes_stale_offline_devices():
-    """离线且超过 WS Token 有效期的设备被回收；在线/新鲜设备保留。"""
+def test_long_offline_devices_are_listed_and_flagged_not_deleted():
+    """§4.9 已裁改判的原 P2-8 判据：离线很久的设备**不删**，只投 `dormant` 提醒位。
+
+    原判据写的是「离线且超过 WS Token 有效期（24h）的设备被回收」——那条契约的实质是
+    **系统代属主删掉他自己配的设备**，且删完不吭声；面板只会说「还没有已配对的设备」。
+    现在长期在册，满 30 天给一位提醒，处置权回到人手上。
+    """
     now = time.time()
-
-    def _dev(pid, user, paired_at, online):
-        return {
-            "pairing_id": pid, "user_id": user, "device_name": pid,
-            "device_type": "mobile", "paired_at": paired_at,
-            "last_active": None, "is_online": online,
-        }
-
-    mp._paired_devices["p-stale"] = _dev("p-stale", "u1", now - mp._WS_TOKEN_TTL_SECONDS - 10, False)
-    mp._paired_devices["p-fresh"] = _dev("p-fresh", "u1", now - 60, False)
-    mp._paired_devices["p-online"] = _dev("p-online", "u1", now - mp._WS_TOKEN_TTL_SECONDS - 10, True)
-    mp._user_devices["u1"] = {"p-stale", "p-fresh", "p-online"}
+    registry = mp.getDeviceRegistry()
+    for pid, days in (("p-dormant", 35), ("p-fresh", 0), ("p-online", 40)):
+        registry.register(pairingId=pid, userId="u1", deviceName=pid)
+        registry.recordActivity(pid, at=now - days * 86400)
+    # 「在线」不靠库里的标记：叠的是当下活连接（唯一活连接源）
+    mp._ws_connections["p-online"] = object()  # 只当占位，list 只看键在不在
 
     resp = asyncio.run(mp.list_paired_devices(user_id="u1"))
 
     ids = {d["pairing_id"] for d in resp["data"]["devices"]}
-    assert ids == {"p-fresh", "p-online"}, f"设备列表契约被破坏: {ids}"
-    assert "p-stale" not in mp._paired_devices, "失效设备条目未被回收（P2-8）"
-    assert "p-online" in mp._paired_devices, "在线设备不得被回收"
-    assert "p-fresh" in mp._paired_devices, "有效期内设备不得被回收"
-    assert mp._user_devices["u1"] == {"p-fresh", "p-online"}
+    assert ids == {"p-dormant", "p-fresh", "p-online"}, f"在册设备被代删了: {ids}"
+    rows = {d["pairing_id"]: d for d in resp["data"]["devices"]}
+    assert rows["p-dormant"]["dormant"] is True, "满 30 天无活动却没提醒位"
+    assert rows["p-fresh"]["dormant"] is False, "新鲜设备被标休眠＝提醒位恒真，等于没有提醒"
+    assert rows["p-online"]["is_online"] is True, "活连接没被叠进在线读数"
+    assert rows["p-online"]["dormant"] is False, "有活连接的设备不该被算成休眠（在线优先）"
 
 
-def test_revoke_pairing_removes_empty_user_key():
-    """unpair 后空设备集连用户键一起删（原实现残留空集键）。"""
-    mp._paired_devices["p1"] = {
-        "pairing_id": "p1", "user_id": "u9", "device_name": "d",
-        "device_type": "mobile", "paired_at": time.time(), "is_online": False,
-    }
-    mp._user_devices["u9"] = {"p1"}
+def test_revoke_leaves_a_durable_marker_and_bumps_the_epoch():
+    """改判后的「撤销要留下可消费的痕迹」：对象从内存键残留换成**持久标记＋epoch**。
+
+    原判据审的是 `_user_devices` 里空集键残留（载体已随 P2-8 的实现一起退役）。
+    它守的那件事本身没错——撤销必须产生一个下游会读的结果——只是今天读的人变了：
+    少了 epoch，`revoke` 就只是把当下那条连接关掉，设备随后重连照样放行（§4.8）。
+    """
+    registry = mp.getDeviceRegistry()
+    registry.register(pairingId="p1", userId="u9", deviceName="d")
+    before = registry.epochOf("p1")
 
     resp = asyncio.run(mp.revoke_pairing(pairing_id="p1", user_id="u9"))
 
     assert resp["code"] == 0
-    assert "p1" not in mp._paired_devices
-    assert "u9" not in mp._user_devices, "空设备集的用户键残留（P2-8）"
+    assert registry.epochOf("p1") == before + 1, "撤销没递增 epoch——旧凭证仍然自洽"
+    assert not registry.isAdmissible("p1", str(before)), "撤销后旧 epoch 仍被放行"
+    listing = asyncio.run(mp.list_paired_devices(user_id="u9"))
+    assert listing["data"]["devices"] == [], "撤销的设备还出现在在册列表里"
 
 
 def test_expired_pairing_code_confirm_still_410():

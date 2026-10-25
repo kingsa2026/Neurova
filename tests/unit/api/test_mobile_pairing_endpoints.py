@@ -18,11 +18,10 @@ def client():
     from neurova.api.endpoints.mobile_pairing import router as mobile_router
     from neurova.api.endpoints.mobile_pairing import _get_current_user_id as get_current_user_id
 
-    # 生产 API 使用模块级全局存储，清理以保证测试隔离
+    # 配对码仍是内存表；在册设备已改为持久权威（§4.8），隔离走 conftest 的 tmp 库
     import neurova.api.endpoints.mobile_pairing as mp_module
     mp_module._pairing_codes.clear()
-    mp_module._paired_devices.clear()
-    mp_module._user_devices.clear()
+    mp_module.resetDeviceRegistry()
 
     app = FastAPI()
     app.include_router(mobile_router, prefix="/mobile")
@@ -69,7 +68,10 @@ class TestMobilePairingAPI:
         assert confirm_resp.status_code == 200
         data = confirm_resp.json()
         assert data["success"] is True
-        assert data["ws_token"]
+        # S1b：凭证是**一次性接入票据**，且不再出现在回连地址里（§4.2）——
+        # 旧断言读的是 `ws_token`，那个字段随"URL 挂凭证"这一形一起退役。
+        assert data["connect_ticket"]
+        assert "token" not in data["ws_url"] and "code" not in data["ws_url"], data["ws_url"]
 
     def test_status_polling_endpoint(self, client):
         """GET /mobile/pairing/status/{code} 返回配对状态"""
