@@ -16,13 +16,19 @@ from unittest.mock import patch
 import pytest
 import jwt
 
-os.environ["NEUROVA_JWT_SECRET_KEY"] = "test_secret_key_1234567890123456789012345678901234567890"
-TEST_SECRET = os.environ["NEUROVA_JWT_SECRET_KEY"]
+# 密钥只经环境注入，**不写模块全局**：这里曾有一句导入期赋值
+# `if auth.JWT_SECRET_KEY != TEST_SECRET: auth.JWT_SECRET_KEY = TEST_SECRET`。
+# 那是进程级改写：`api/auth.py` 此前不认 `NEUROVA_JWT_SECRET_KEY` 这个注入名（只认
+# `NEUROVA_JWT_SECRET`），各档"各设各的密钥"于是全落空、都吃同一份持久化密钥；
+# 而这句话一到手就改掉全进程的签名密钥，先签出的 token 被后导入的档改写后验签必失败
+# （受保护子集档序固定 ⇒ CI 上角色门/登录契约那几格 401，逐档单跑却全绿）。
+# 现在密钥只从环境来，本档只做一件事：用**解析出来的那一把**签、用同一把验。
+os.environ.setdefault("NEUROVA_JWT_SECRET_KEY",
+                      "test_secret_key_1234567890123456789012345678901234567890")
 
-from neurova.api import auth
+from neurova.api import auth  # noqa: E402
 
-if auth.JWT_SECRET_KEY != TEST_SECRET:
-    auth.JWT_SECRET_KEY = TEST_SECRET
+TEST_SECRET = auth.currentJwtSecretKey()
 
 ALGORITHM = auth.JWT_ALGORITHM
 
