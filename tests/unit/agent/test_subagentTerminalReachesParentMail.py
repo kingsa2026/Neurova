@@ -24,6 +24,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import json
+import sys
 import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -34,6 +35,11 @@ from neurova.agent.mailbox import get_agent_mailbox, reset_agent_mailbox
 from neurova.agent.swarm import SUBAGENT_PENDING, get_swarm_manager, reset_swarm_manager
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tests.ast_scan import filesUnder, transientTree  # noqa: E402
+
 PARENT_SESSION = "s-parent"
 REPORT_BODY = "调研结论：β 方案胜出，风险点集中在写入时序"
 LONG_REPORT = "长报告正文标记。" + "结论逐条铺开：" + ("证据链片段；" * 400)
@@ -232,17 +238,26 @@ class TestMailboxWriteSideIsSingleSource:
     """写点全仓唯一：投递只发生在蜂群终态，不在下游消费者手里。"""
 
     def testOnlySwarmWritesParentMailbox(self):
+        # 扫描面自证：根若被改窄，下面的「零命中」就不再来自代码（同档棘轮点名的形态）。
+        # 下限按本档现读的候选量定，不抄别处的数。
+        candidates = [
+            p for p in filesUnder(REPO_ROOT / "neurova")
+            if p.name != "mailbox.py"  # 定义处自己不算引用方
+        ]
+        assert len(candidates) > 900, (
+            f"候选面现读 {len(candidates)}——根指错了会得到『干净』的假结论"
+        )
+
         referencing: set[str] = set()
-        for py in (REPO_ROOT / "neurova").rglob("*.py"):
-            rel = py.relative_to(REPO_ROOT).as_posix()
-            if py.name == "mailbox.py":
-                continue
-            tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+        for py in candidates:
+            if "get_agent_mailbox" not in py.read_text(encoding="utf-8"):
+                continue  # 文本预筛：只为真候选建语法树，不常驻全仓 AST
+            tree = transientTree(py)
             for node in ast.walk(tree):
                 if isinstance(node, ast.Name) and node.id == "get_agent_mailbox":
-                    referencing.add(rel)
+                    referencing.add(py.relative_to(REPO_ROOT).as_posix())
                 elif isinstance(node, ast.Attribute) and node.attr == "get_agent_mailbox":
-                    referencing.add(rel)
+                    referencing.add(py.relative_to(REPO_ROOT).as_posix())
 
         assert referencing == {
             "neurova/agent/swarm.py",
