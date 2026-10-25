@@ -105,12 +105,16 @@ except Exception as exc:  # noqa: BLE001
 
 svc = SkillService(agent_id=AGENT, skills_dir=str(SKILLS_DIR))
 rows = [r for r in svc.list_skills()]
+# 映射执行体型单列：它是「盘上没字节也真能跑」那一形，混进空壳就是探针自己冤枉判据。
+# 直连公共读面，不留同名桩：留一枚 `except ImportError` 里定义的 `hasExecutorMapping`，
+# 一旦真触发就把「在册判定」静默换成本档自己拼的字符串比较，读的人还以为在读同一个事实源。
+from neurova.skills.market_registry import hasExecutorMapping
+
+
 def classify(entry):
     # 映射执行体型单列：它是「盘上没字节也真能跑」那一形，混进空壳就是探针自己冤枉判据。
-    # 这里**直连**取数，不留 try + 同名 def 桩：桩一旦触发，探针问的就不是产品那一句，
-    # 而对照腿要比的读数反而被自己的兜底改掉了（§6-228 零容忍那一条）。
-    from neurova.skills.market_registry import hasExecutorMapping
-
+    # 取数口是上面那句**直连**导入（模块级，无 try + 同名 def 桩）：桩一旦触发，探针问的
+    # 就不是产品那一句，而对照腿要比的读数反而被自己的兜底改掉了（§6-228 零容忍那一条）。
     sid = entry["id"]
     d = SKILLS_DIR / sid
     hasBytes = (d / "SKILL.md").exists() or bool(list(d.glob("*.py")))
