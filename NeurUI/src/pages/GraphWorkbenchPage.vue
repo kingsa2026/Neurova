@@ -33,13 +33,23 @@
       <GlassCard class="canvas-card">
         <a-spin :spinning="loading">
           <div class="canvas-toolbar">
-            <a-input-search
-              v-model:value="nodeFilter"
-              size="sm"
-              allow-clear
-              :placeholder="t('knowledge.workbenchNodeSearch')"
-              style="max-width: 220px"
-            />
+            <div class="node-search">
+              <a-input-search
+                v-model:value="nodeFilter"
+                size="sm"
+                allow-clear
+                :placeholder="t('knowledge.workbenchNodeSearch')"
+                style="max-width: 220px"
+                @search="searchNodes"
+              />
+              <div v-if="searchHits.length" class="search-hits">
+                <div v-for="hit in searchHits" :key="hit.id" class="search-hit"
+                     @click="pickHit(hit)">
+                  <a-tag :color="kindColor(hit.type)" class="kind-tag">{{ hit.type }}</a-tag>
+                  <span class="term-id">{{ hit.label }}</span>
+                </div>
+              </div>
+            </div>
             <GlassButton
               size="sm"
               variant="secondary"
@@ -47,6 +57,14 @@
               @click="focusFirstMatch"
             >
               {{ t('knowledge.workbenchFocusNode') }}
+            </GlassButton>
+            <GlassButton
+              v-if="focusNodeId"
+              size="sm"
+              variant="secondary"
+              @click="exitFocus"
+            >
+              {{ t('knowledge.workbenchFullGraph') }}
             </GlassButton>
             <a-checkbox v-model:checked="fullGraph" class="isolated-toggle">
               {{ t('knowledge.workbenchFullGraph') }}
@@ -251,7 +269,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, reactive, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import { VueFlow } from '@vue-flow/core'
@@ -314,6 +332,15 @@ const viewMode = ref<'2d' | '3d'>('2d')
 const selectedNodeId = ref('')
 const termFilter = ref('')
 const nodeFilter = ref('')
+// 按图谱检索：输入走后端 search_nodes 全图索引（不是前端过滤当前渲染集——
+// 邻域模式只加载了枢纽 2 跳，画布外的节点前端过滤永远搜不到）；
+// 命中后以命中节点为焦点加载其邻域（radial 以其为根重铺）。
+const focusNodeId = ref('')
+const searchHits = ref<StudioNode[]>([])
+const searchBusy = ref(false)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+const localRender = ref<StudioData | null>(null)
+const displayData = computed(() => localRender.value ?? studio.value)
 const termFormVisible = ref(false)
 const termSaving = ref(false)
 const edgeSaving = ref(false)
@@ -336,7 +363,7 @@ const flowNodes = computed(() => {
   // 放射布局：以选中节点为根（聚焦后以其为圆心重铺），无选中取度数枢纽——
   // 子树扇区不相交，树边互不交叉。
   const positions = radialLayout(
-    nodes, (studio.value?.edges ?? []) as never, selectedNodeId.value || undefined)
+    nodes, (displayData.value?.edges ?? []) as never, selectedNodeId.value || focusNodeId.value || undefined)
   // 自算包围盒（视口居中的唯一依据，不依赖 vue-flow 的节点测量）。
   if (positions.size) {
     const xs = Array.from(positions.values()).map((p) => p.x)
@@ -376,7 +403,7 @@ const computeInitialViewport = () => {
   initialViewport.value = { x: vw / 2 - cx * zoom, y: vh / 2 - cy * zoom, zoom }
 }
 const flowEdges = computed(() =>
-  (studio.value?.edges ?? []).map((e, index) => ({
+  (displayData.value?.edges ?? []).map((e, index) => ({
     id: `e-${index}`,
     source: e.source,
     target: e.target,
@@ -397,7 +424,7 @@ const fullGraph = ref(false)
 const depthFromHub = computed(() => {
   const depth = new Map<string, number>()
   const adjacency = new Map<string, string[]>()
-  for (const e of studio.value?.edges ?? []) {
+  for (const e of displayData.value?.edges ?? []) {
     if (e.source === e.target) continue
     if (!adjacency.has(e.source)) adjacency.set(e.source, [])
     if (!adjacency.has(e.target)) adjacency.set(e.target, [])
@@ -434,7 +461,7 @@ const depthFromHub = computed(() => {
 // 全部不可读（『看起来空』的最终根因之一）。默认隐藏，开关显式打开才显示。
 const connectedIds = computed(() => {
   const ids = new Set<string>()
-  for (const e of studio.value?.edges ?? []) {
+  for (const e of displayData.value?.edges ?? []) {
     if (e.source === e.target) continue
     ids.add(e.source)
     ids.add(e.target)
@@ -442,16 +469,12 @@ const connectedIds = computed(() => {
   return ids
 })
 const filteredNodes = computed(() => {
-  const needle = nodeFilter.value.trim().toLowerCase()
-  const all = studio.value?.nodes ?? []
-  const searched = needle
-    ? all.filter((n) =>
-        n.label.toLowerCase().includes(needle) || n.id.toLowerCase().includes(needle))
-    : all
-  if (needle) return searched
+  // nodeFilter 只作检索输入（后端全图索引 + 命中下拉），不参与画布过滤——
+  // 它曾被命中回填的 label 污染，把焦点邻域掐得只剩一个节点。
+  const all = displayData.value?.nodes ?? []
   const byRelation = showIsolated.value
-    ? searched
-    : searched.filter((n) => connectedIds.value.has(n.id))
+    ? all
+    : all.filter((n) => connectedIds.value.has(n.id))
   if (fullGraph.value) return byRelation
   return byRelation.filter((n) => (depthFromHub.value.get(n.id) ?? 99) <= 2)
 })
@@ -677,6 +700,83 @@ const createInstance = async () => {
   }
 }
 
+// 按图谱检索：输入防抖后走后端 search_nodes 全图索引。
+const searchNodes = async () => {
+  const q = nodeFilter.value.trim()
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
+  if (q.length < 2) {
+    searchHits.value = []
+    return
+  }
+  searchBusy.value = true
+  try {
+    const res: any = await request.get(
+      `/knowledge-graph/${agentId.value}/knowledge-graph/search`,
+      { params: { q, limit: 10 } })
+    const data = res?.data ?? res
+    searchHits.value = (data?.nodes ?? []) as StudioNode[]
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
+  } finally {
+    searchBusy.value = false
+  }
+}
+
+watch(nodeFilter, (next: string) => {
+  if (searchTimer) clearTimeout(searchTimer)
+  const q = next.trim()
+  if (q.length < 2) {
+    searchHits.value = []
+    return
+  }
+  searchTimer = setTimeout(() => void searchNodes(), 350)
+})
+
+// 命中节点加载其邻域为渲染集（radial 以命中为根重铺，命中节点居中）。
+const loadFocusNeighborhood = async (id: string) => {
+  loading.value = true
+  try {
+    const res: any = await request.get(
+      `/knowledge-graph/${agentId.value}/subgraph`,
+      { params: { focus: id, hops: 2, limit: 200 } })
+    const data = res?.data ?? res
+    localRender.value = {
+      nodes: data?.nodes ?? [],
+      edges: data?.edges ?? [],
+      total_nodes: data?.total_nodes,
+      truncated: data?.truncated,
+      schema: studio.value?.schema,
+    }
+    void flowNodes.value
+    computeInitialViewport()
+    dataVersion.value++
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
+  } finally {
+    loading.value = false
+  }
+}
+
+const pickHit = (hit: StudioNode) => {
+  focusNodeId.value = hit.id
+  selectedNodeId.value = hit.id
+  searchHits.value = []
+  nodeFilter.value = hit.label
+  void loadFocusNeighborhood(hit.id)
+}
+
+const exitFocus = () => {
+  focusNodeId.value = ''
+  localRender.value = null
+  searchHits.value = []
+  void flowNodes.value
+  computeInitialViewport()
+  dataVersion.value++
+}
+
 const onFlowNodeClick = (mouseEvent: { node: { id: string } }) => {
   selectedNodeId.value = mouseEvent.node.id
 }
@@ -898,6 +998,39 @@ onMounted(() => {
   align-items: center;
   gap: var(--nr-space-sm);
   margin-bottom: var(--nr-space-sm);
+}
+
+.node-search {
+  position: relative;
+}
+
+.search-hits {
+  position: absolute;
+  z-index: 20;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 260px;
+  overflow: auto;
+  margin-top: 4px;
+  padding: 4px;
+  border: 1px solid var(--nr-glass-border);
+  border-radius: var(--nr-radius-md, 12px);
+  background: var(--nr-bg-overlay, rgba(10, 14, 26, 0.95));
+  backdrop-filter: blur(8px);
+}
+
+.search-hit {
+  display: flex;
+  align-items: center;
+  gap: var(--nr-space-sm, 8px);
+  padding: 5px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.search-hit:hover {
+  background: var(--nr-glass-bg-hover);
 }
 
 .canvas-count {
