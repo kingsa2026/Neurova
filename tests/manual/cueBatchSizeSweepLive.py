@@ -35,6 +35,8 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 isolatedDataRoot()
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 from neurova.context.token_estimator import estimate_tokens as estimate_text_tokens  # noqa: E402
 from neurova.cognitive_layers.memory_layer import association_cue_generation as gen  # noqa: E402
 

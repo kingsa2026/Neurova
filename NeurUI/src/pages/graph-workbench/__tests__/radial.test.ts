@@ -131,6 +131,26 @@ describe('radialLayout（工作台 2D 放射布局）', () => {
     }
   })
 
+  it('密集层不重叠：同层相邻节点屏幕距离不小于最小弧长', () => {
+    // 12 个孩子挤一层：容量半径必须把圆周撑到弧长 ≥ MIN_ARC。
+    const nodes = [
+      { id: 'h', label: 'hub', type: 't' },
+      ...Array.from({ length: 12 }, (_, i) => ({
+        id: `c${i}`, label: `C${i}`, type: 't',
+      })),
+    ]
+    const edges = Array.from({ length: 12 }, (_, i) => ({
+      source: 'h', target: `c${i}`,
+    }))
+    const pos = radialLayout(nodes, edges, 'h')
+    const ring = Array.from({ length: 12 }, (_, i) => pos.get(`c${i}`)!)
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i]
+      const b = ring[(i + 1) % ring.length]
+      expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(100)
+    }
+  })
+
   it('确定性：同一份输入两次布局逐点相等', () => {
     expect([...radialLayout(STAR.nodes, STAR.edges, 'h')])
       .toEqual([...radialLayout([...STAR.nodes], STAR.edges.map((e) => ({ ...e })), 'h')])

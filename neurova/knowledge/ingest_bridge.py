@@ -283,9 +283,10 @@ class KnowledgeIngestBridge:
         return content.encode("utf-8"), "wecom-message.txt", "wecom"
 
     async def _fetchUrl(self, url: str) -> bytes:
-        from neurova.api.endpoints.knowledge_ingestion import _fetch_url, _validate_import_url
+        from neurova.api.endpoints.knowledge_ingestion import _fetch_url
+        from neurova.knowledge.url_guard import validate_public_http_url
 
-        if not _validate_import_url(url):
+        if not validate_public_http_url(url):
             raise DocumentParseError("unsafe_url")
         return await asyncio.to_thread(_fetch_url, url)
 
