@@ -161,8 +161,8 @@ def _embedding_similarity(a: str, b: str) -> Optional[float]:
         engine = get_embedding_engine()
         if engine is None or not engine.is_initialized():
             return None
-        va, vb = engine.encode(a), engine.encode(b)
-        if not va or not vb:
+        va, vb = engine.encodeOrNone(a), engine.encodeOrNone(b)
+        if va is None or vb is None:
             return None
         raw = vector_math.tryCosineSimilarity(va, vb)
         if raw is None:

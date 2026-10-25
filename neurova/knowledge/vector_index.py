@@ -278,11 +278,15 @@ class KnowledgeVectorIndex:
                     content = str(entry.get("content", ""))
                     texts.append((title + "\n" + content) if title else content)
                 try:
-                    if hasattr(engine, "encode_batch"):
+                    if hasattr(engine, "encodeOrNone"):
+                        # `encode_batch` 只走真引擎的批量推理，拦不住"引擎没就绪"这件
+                        # 事——它照样交一批零向量。逐条走 `encodeOrNone`：算不出的条目
+                        # 当场缺席，绝不把零向量当向量写进索引（写进去就再没人重算）。
+                        vectors = [engine.encodeOrNone(t) for t in texts]
+                    elif hasattr(engine, "encode_batch"):
                         batch = engine.encode_batch(texts)
-                        # 真引擎（ONNXEmbeddingEngine）契约：encode_batch →
-                        # EmbeddingResult（.vectors 才是向量列表）；注入引擎
-                        # 可直接返回 list。两者之外退回逐条 encode。
+                        # 注入引擎契约：encode_batch → EmbeddingResult（.vectors 才是
+                        # 向量列表）或直接 list。两者之外退回逐条 encode。
                         vectors = getattr(batch, "vectors", batch)
                         if not isinstance(vectors, list):
                             vectors = [engine.encode(t) for t in texts]
@@ -291,15 +295,19 @@ class KnowledgeVectorIndex:
                 except Exception as e:  # noqa: BLE001
                     logger.warning("向量索引：embedding 批量计算失败: %s", e)
                     return {"computed": 0, "entry_count": len(records)}
+                computed = 0
 
                 for (kid, entry), vec in zip(to_compute, vectors):
+                    if vec is None:
+                        continue
+                    computed += 1
                     records[kid] = {
-                        "vector": [float(x) for x in (vec or [])],
+                        "vector": [float(x) for x in vec],
                         "fingerprint": _fingerprint(entry),
                         "title": str(entry.get("title", "")),
                         "content": str(entry.get("content", ""))[:2000],
                     }
-                self._computed += len(to_compute)
+                self._computed += computed
 
             uid = str((user or {}).get("user_id") or "default")
             if to_compute or removed_count or engine_reset:
@@ -307,7 +315,7 @@ class KnowledgeVectorIndex:
             self._save_user(user, records, current_engine_id)
             self._cache[uid] = records
             self._last_uid = uid
-            return {"computed": len(to_compute), "entry_count": len(records)}
+            return {"computed": computed, "entry_count": len(records)}
 
     def dropEntry(self, knowledgeId: str) -> Dict[str, int]:
         """从所有用户分片里取掉该条目的向量与正文副本。
@@ -361,11 +369,11 @@ class KnowledgeVectorIndex:
             items = [(kid, dict(rec)) for kid, rec in records.items()]
 
         try:
-            qv = engine.encode(query)
+            qv = engine.encodeOrNone(query)
         except Exception as e:  # noqa: BLE001
             logger.warning("向量索引：query 编码失败: %s", e)
             return []
-        if not qv or vector_math.vectorNorm(qv) <= vector_math.ZERO_NORM_EPSILON:
+        if qv is None or vector_math.vectorNorm(qv) <= vector_math.ZERO_NORM_EPSILON:
             return []
 
         annHits = self._searchAnn(

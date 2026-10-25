@@ -1524,15 +1524,9 @@ class MemoryManager:
                     "固化对这些行不可见，直到引擎就绪或走 scripts/backfill_memory_embeddings.py"
                 )
             return None
-        try:
-            vector = [float(x) for x in engine.encode(content)]
-        except Exception as exc:  # noqa: BLE001 - 单条算不出不该断这次写入
-            logger.warning("嵌入计算失败，该行 embedding 留空: %s", exc)
-            return None
-        if not vector or not any(abs(x) > 0.0 for x in vector):
-            logger.warning("引擎回零向量（按未算出处置），该行 embedding 留空")
-            return None
-        return vector
+        # "算没算出向量"由引擎自己判（`encodeOrNone` 是那一处的单源）：零向量与真向量
+        # 在这一步就分开，本行不再凭全零反推——反推要在这里重写一遍同一份判据。
+        return engine.encodeOrNone(content)
 
     def remember(
         self,
