@@ -10447,7 +10447,17 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开（不冒充完成）**：① `security/privacy_gate.py:18 _SENSITIVE_KEY` 仍是第四份**键名**表，且它的 `_redact_value` 用 `ab***yz` 部分保留出口（渠道预览要看得出长度线索），要不要并进 §6-415 的 `isCredentialKey` 一处口径属**另拍**；② 已序列化文本的转义引号作独立入口仍不设防（§6-415 边界原样）；③ **P-6**（console SSE 永不返回 await，卡全量读数）→ P-2 → M3 → P-3 按裁定排队。
     - **下一枚空号现查**：`git grep -ohE "§6-4[0-9][0-9]" HEAD -- audit-reports docs scripts | sed 's/§6-//' | sort -u | tail -3` 现算最大＝**415**（其中 415 尾行的 416 是上一格写错的引用，已随本格更正），台账条目尾号＝415 ⇒ 本批取 **§6-416**，下批从 **417** 起。
 
-418. **批 L 落地：CI 静态门禁的 6 处 `undefined name` 分四类根因收口，闸门侧修「问错的问句」而非删报错（✅ 本批；受保护子集真条目 +2）** 🟢 —— 这批修的不是 6 个拼写，是**一条问错的判据**加**一处只写不读的取数**
+417. **前端把后端点名的拒因折成泛化文案——登记未扫完的命中面（本会话已闭一档）** ✅🟢 —— 触发点是真操作验证：管理端上架一条无来源技能，新闸回 **400** 并逐字点名「无可取件地址…」，UI 上却只剩一句"操作失败"（`NeurUI/src/pages/MarketplacePage.vue` 的 `installItem` catch）。管理员看不出自己少填了哪个字段，只能回头翻控制台——报错有了，可诊断性没了。
+
+    - **现算面（2026-10-25 本会话，口径见末条）**：`grep -rn "message.error(t('common.error'))" NeurUI/src` = **131 处 / 32 个文件**；同一仓里已有 **69 处**写法是先取 `err?.response?.data?.detail` 再兜底。⇒ 两种出口并存，就是"错误怎么给人看"的第二份定义（教义第 6 条形状）；新闸只是把这条差异从"看不见"变成"看得见却读不懂"。
+    - **本会话已闭的那一档（9 处）**：`MarketplacePage.vue` 的 9 个 `} catch {` 全改绑 `err` 并接一处 `errText(err, fallback)`（detail→error→message→兜底），配两格判据——该页不得再有 `message.error(t('common.error'))`，且 `errText` 落点数 ≥9（防"整段删掉也算整改"）。提交 `713959ed`。
+    - **建议收口次序（供人拍板，不自造）**：① 先把 `errText` 从那一页提到 `NeurUI/src/api/` 一处作全仓口径——不提这一步就逐页各抄一份，等于把"局部单点"变成第 33 份实现（教义第 7 条的反面）；② 再按"后端确实有拒因可读"的密度收，先 skills／marketplace／credentials 三族；③ 收完若干档后再谈要不要把结构判据升成常驻闸（目前只有 `MarketplacePage` 一档被钉住）。
+    - **同批已闭的另一处语义分家**：`market.submitUrlPh`（"ZIP 链接（可选）"）在**提交技能**路径下确实可选（审核物化可走 `pool_skill_id` 血缘），但管理端上架留空就装不上——两种语义共用一条文案必有一边说谎。故新增一键 `marketplace.downloadUrlPh`（"留空则此条目无法安装"），11 语一起铺，`market.submitUrlPh` 原样不动。无遗留。
+    - **仍开（不冒充完成）**：其余 **122 处**（131−9）未动——体量超出单批，且"每一处 toast 都该显示后端 detail"属 UX 口径，需人裁一刀再扫；本条只登记，不预改。
+    - **口径与空号**：本条数字只量 `NeurUI/src` 下的 `message.error(t('common.error'))` 字面形状（`src/pages/__tests__` 与组件内其它 toast 写法不在内）；口径若扩，读数会变，引用前先复算。下一枚空号现查按形态 419 的纪律两条一起跑：引用面 `git grep -ohE "§6-4[0-9][0-9]" HEAD -- audit-reports docs scripts` 现算最大＝**419**（并入 main 时 418/419 两格已按「改后到的、不改先到的」让到 419/420），条目行 `^[0-9]{3}\. ` 尾号亦＝**420** ⇒ 本批取 **§6-417**，下批从 **421** 起。
+
+
+419. **批 L 落地：CI 静态门禁的 6 处 `undefined name` 分四类根因收口，闸门侧修「问错的问句」而非删报错（✅ 本批；受保护子集真条目 +2）** 🟢 —— 这批修的不是 6 个拼写，是**一条问错的判据**加**一处只写不读的取数**
     - **✅ 起点（CI 现场，非本地臆测）**：PR #364 的 `cnb-8a0-1k5kcrpsh-001`（static-gate）红在 6 行，本地 `python scripts/ci_static_gate.py --skip-import` 逐行复现同一集合：`tool_executor.py:1646` 的 `file_path`、`channels.py:459` 的 `ChannelMessage`、`mcp_server_api.py:120` 的 `McpCaller`、`knowledge_facts.py:736/761` 的 `Tuple`、`provider_compat.py:202` 的 `Any`。同一次的 `-005`（frontend）红在 `npm audit --audit-level=high` 的 5 条（vitest/@vitest/mocker、dompurify critical、vite high）。
     - **✅ 根因分四类，不许合并成「补 import」一个动作**：①**真·漏 import**（`Tuple`/`Any`＝同文件其它模块都已从 `typing` 导入，这里漏了）；②**注解专用·局部导入**（`McpCaller` 的实体在 `_callerPrincipal` 函数体内导入，理由写在注释里＝`neurova.agent` 包 `__init__` 链回 `tool_executor` 的循环导入，AGENTS.md §3）；③**注解专用·近似懒加载**（`ChannelMessage` 只在注解里出现）；④**幻影变量**（`file_path` 在该函数作用域从未绑定）。
     - **✅ ①②③ 修在闸门侧，不是修在被报的代码**：把导入提到模块级会**改坏生产**（②直接拉循环导入），删掉注解会**丢解析器能读的事实**——两条都是把报错挪走（教义第 1、2 条）。改法是让 `scripts/ci_static_gate.py` 的未定义名判据多问一句「这个名字在**本文件**里被 import 过吗」（`collectUndefinedNames` 复核 pyflakes 自己的读数，不另写 AST 名解析＝教义第 6 条）。反向格同批钉死：拼错的名字、写错的**形参**（真实命中形态）照旧红，且「文件里别处 import 了同名名字」不得为真拼错开白名单。
@@ -10458,9 +10468,9 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **⚠ 本批自己的落笔错（两处，都在当场改掉）**：a) 首版 `_PYFLAKES_LINE` 贪心分组把 `undefined name` 拆成 `kind=undefined`、`detail=name 'x'`，导致**反向格全绿地漏报**（假绿，最坏的一种）——是反向格先红才发现的，反证了「只写正向格＝自证空转」；b) 首版判据里三处 `make()`／`logger` 未定义，把被测点淹在噪音里，改成逐条自足的小样例。
     - **✅ 同批扫掉 ruff 那 3 条存量（主干 `21d70a8a` 现场就有，不是本批引入）**：静态门禁绿了之后露出来的是同一条流水线的 ruff 阶段。逐条看是两类真缺陷，都不是「加 noqa」能了事的：①`tests/manual/readFaceReconciles_b58.py:102`／`shellEntryNotPinned_batch57.py:166` 的 `exc`——PEP 3110 规定 `except ... as exc` 的绑定名**出块即解绑**，而它被关进 `lambda` 里懒求值，于是那两行的失败读数一旦真被执行就是 `NameError`（脚本静默崩在诊断路径上）；改成出块前先取值。②`tests/manual/declaredSurface_batch49.py` 的 `PROBE`——`runProbe` 是 `readImplicit` 的上一代实现，全文件无人调用、`PROBE` 从未定义，按教义第 7 条**删**（不补一份 PROBE，那是留两处同功能实现）。另修 `tests/unit/neurflow/test_workflow_ownership_v2.py:151` 的 `# noqa: 仅记录`——不是码列表的 noqa 是空转指令，该行本就无违规，直接去掉。改后 `python -m ruff check neurova tests --no-cache` → `All checks passed!`
     - **⚠ 本批新登记的断点（不静默遗留）**：①`tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py::test_staticRootsNeverPointOutsideOrNowhere` 报 `tests/unit/test_session_landing_guard.py: missing`——**该文件真实存在且在 `protected_tests.txt:1636` 在册**，说明这条「根指不到真实目录」的静态根解析在 Linux 上误判，与本次改动无关，单独开票；②`tests/unit/tools/test_governance_mcp.py` 等 12 格在裸环境里报 `async def functions are not natively supported`（缺 `pytest-asyncio` 的 asyncio_mode 声明），CI 精简锁里有、本地没有，属环境差异不属回归。
-    - **下一枚空号现查**：本批初稿取 §6-403，落盘后并会话已在主干用掉该号（`d5c430c7`／`5a1a49fb`）⇒ 按「改后到的、不改先到的」让号改记 **§6-417**，主台账与此处一并改读。取号除了查台账，还要现查**主干**——同一 PR 期间主干会往前走，本地十分钟前算的号不作数。
+    - **下一枚空号现查**：本批初稿取 §6-403，落盘后并会话已在主干用掉该号（`d5c430c7`／`5a1a49fb`）⇒ 按「改后到的、不改先到的」让号改记：先在 main 上改记 **§6-417**，并入 main 后又因 417 已被占用再让一拍 ⇒ 现值 **§6-419**，主台账与此处一并改读。取号除了查台账，还要现查**主干**——同一 PR 期间主干会往前走，本地十分钟前算的号不作数。
 
-419. **批 M-2 落地：`dependency-audit` 的 Prepare 段按实测抬到 `cpus: 4`，并把「拉冻结库的流水线不许用最小规格」钉成常驻判据（✅ 本批；受保护子集真条目 +1）** 🟢 —— 现场是 PR #364 的 `cnb-nmd-1k5no13f9#003`：`unit-tests` 在 **Prepare** 段被杀，两条 stage 一条都没跑。
+420. **批 M-2 落地：`dependency-audit` 的 Prepare 段按实测抬到 `cpus: 4`，并把「拉冻结库的流水线不许用最小规格」钉成常驻判据（✅ 本批；受保护子集真条目 +1）** 🟢 —— 现场是 PR #364 的 `cnb-nmd-1k5no13f9#003`：`unit-tests` 在 **Prepare** 段被杀，两条 stage 一条都没跑。
     - **✅ 起点（CI 现场读数，非本地臆测）**：`cnb build get-build-status --sn cnb-nmd-1k5no13f9` 读回
       `stages: error,116717,Prepare / skipped,0,install uv… / skipped,0,protected subset…`，
       日志末行 `任务超过最大执行时间而被强制关闭：1m0s`。同一构建里八条邻居流水线的 Prepare 是

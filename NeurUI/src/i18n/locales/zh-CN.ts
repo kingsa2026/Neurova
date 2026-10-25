@@ -3030,6 +3030,7 @@ export default {
     unaddressed: '未处置',
   },
   marketplace: {
+    downloadUrlPh: 'ZIP 包下载地址；留空则此条目无法安装',
     title: '市场',
     browse: '浏览',
     installed: '已安装',

@@ -3015,6 +3015,7 @@ export default {
     unaddressed: '未処置',
   },
   marketplace: {
+    downloadUrlPh: 'ZIP ダウンロードリンク；取得元がないとこの項目はインストールできません',
     title: 'マーケットプレイス',
     browse: '閲覧',
     installed: 'インストール済み',
