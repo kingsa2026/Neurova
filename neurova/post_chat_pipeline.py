@@ -829,6 +829,7 @@ class PostChatPipeline:
         enable_tts: bool,
         metadata: Dict[str, Any],
         writer_claim=None,
+        user_already_persisted: bool = False,
     ) -> Dict[str, Any]:
         """
         执行对话后所有处理步骤，返回:
@@ -874,7 +875,8 @@ class PostChatPipeline:
             self._safe_step(
                 "save_session",
                 self._step_save_session(
-                    user_input, reply, session_id, save_memory, metadata, writer_claim
+                    user_input, reply, session_id, save_memory, metadata, writer_claim,
+                    user_already_persisted=user_already_persisted,
                 ),
                 default=session_id,
             ),
@@ -1082,6 +1084,7 @@ class PostChatPipeline:
         save_memory: bool,
         metadata: Dict[str, Any],
         writer_claim=None,
+        user_already_persisted: bool = False,
     ) -> str:
         """保存到 session 文件（备份机制）
 
@@ -1166,6 +1169,8 @@ class PostChatPipeline:
                 assistant_meta if assistant_meta else None,
                 writer_claim=writer_claim,
                 session_owner=resolveSessionOwner(metadata),
+                # 本轮 user 已由管线在 LLM 之前落盘 → 只补 assistant，不重复写 user
+                userAlreadyPersisted=user_already_persisted,
             )
             if not result_session_id:
                 # P1-10 复审修正: 围栏拒绝（陈旧 writer）返回 ""——不能把 "" 当
