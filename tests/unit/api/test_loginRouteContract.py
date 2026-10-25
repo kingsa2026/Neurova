@@ -37,15 +37,24 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock
 
+# 前提自给：本档只问"这一轮用的是哪把密钥"，问法收口在 `tests/auth_headers.pinJwtSecret()`。
+#
+# 那段历史值得留着：原先这里写 `setdefault("NEUROVA_JWT_SECRET_KEY", ...)`，实测对密钥
+# **完全无效** —— `auth.py:146` 读的是 `NEUROVA_JWT_SECRET`（无 `_KEY` 后缀），而
+# `JWT_SECRET_KEY` 在 `auth.py:175` 导入期就烘死。真正生效的只有"直接赋常量"那句，
+# 且它只覆盖**签名侧**；`deps` 再导出的身份门是**函数对象**，读的是自己 `__globals__`
+# 里那份模块字典。进程里一旦出现第二份密钥，端点为登录签出令牌、门用另一把验，
+# 本档就报 `InvalidSignatureError`。
+#
+# 本仓同一件事曾有四份写法（本档 / `test_roleGateIdentitySourceIsStrict.py` /
+# `test_memory_route_shadowing.py` / 记忆面各一份）——四份里任何一份漏配就复发，
+# 而台面上看不出谁的读法对。收成一处（教义第 6/7 条）：门名册按运行时现值取、
+# 令牌在用例内现签，见 `tests/auth_headers.pinJwtSecret()`。
 import neurova.api.endpoints.auth as authEndpoint  # noqa: E402
 from neurova.api import auth as authModule  # noqa: E402
 from neurova.api.endpoints.auth import router  # noqa: E402
 from tests.auth_headers import pinJwtSecret  # noqa: E402
 
-# 密钥不在这里烘：本档只问"这一轮用的是哪一把"（`tests/auth_headers.pinJwtSecret`
-# 是那份唯一事实源）。原先这里写 `setdefault("NEUROVA_JWT_SECRET_KEY", …)` ——
-# 实测那行对密钥完全无效：`auth.py:146` 读的是 `NEUROVA_JWT_SECRET`（无 `_KEY` 后缀），
-# 而模块全局早在导入期就烘死了。于是"本档有前提自给"只是看起来有。
 ALGORITHM = authModule.JWT_ALGORITHM
 
 
@@ -65,6 +74,7 @@ def _user(**over):
 
 @pytest.fixture()
 def client():
+    # `_pinSigningKeyForThisRound`（autouse）已在用例开始前对齐两侧；这里只建 app。
     app = FastAPI()
     app.include_router(router, prefix="/v1/auth")
     with TestClient(app, raise_server_exceptions=False) as c:
@@ -93,6 +103,8 @@ def userModel():
 
 
 def _login(client, username="alice", password="Passw0rd!123"):
+    # 令牌与验签门同源于**这一轮**：登录面签出来的令牌，门当场用同一把密钥验。
+    pinJwtSecret()
     return client.post("/v1/auth/login", json={"username": username, "password": password})
 
 
