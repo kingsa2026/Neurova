@@ -10501,3 +10501,50 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **⚠ 诚实边界**：本批只改 `dependency-audit` 这一格的 `cpus`，`unit-tests` 的 `cpus` 本来就是 4，
       **没有**动任何 stage 的 `timeout`、没有动受保护子集清单的覆盖面。`cpus: 4 → 8` 未采用：本仓现有读数
       不支持「这一格是核数瓶颈」的结论，先按最小可证的一步走。
+
+421. **批 M-3 落地：`unit-tests` 的整场受保护子集按实测重定预算——cpus 4→8、墙钟 90m→45m，并把「上限要么是预算、要么不是上限」钉成常驻判据（✅ 本批；受保护子集真条目现算 717）** 🟢 —— 与 §6-420 同族同现场，但那笔明写「`unit-tests` 的 cpus 本来就是 4，不动」，本笔正是把那句留白补上
+    - **✅ 起点（CI 现场读数）**：`cnb build get-build-stage --sn cnb-n45-1k5oultjs --pipelineId …-003 --stageId stage-1` 读回
+      末段 `tests/unit/skills/test_marketInstalledStateIsReadBack.py ......... [ 83%]` → `Killed` →
+      `Finished, code: 137, duration: 29m 23s`。`code: 137` 是 SIGKILL，日志里**一条失败墙都没有**：
+      不是「有测试红了」，是整段跑到点被掐断。同一构建里另外 8 条流水线全绿（`prepare 7.1s / stage-0 20.6s`），
+      所以也不是「机器慢」或「装依赖慢」。
+    - **✅ 先否掉「墙钟太窄」这一支**：该 stage 当时声明 `timeout: 90m`，而它在 **29m23s** 就被杀——距上限还有一小时。
+      83% 处已用 29m23s ⇒ 整场按此速率约 **35m20s**。上限远比实测宽，则「被掐」不可能归因到时间。
+    - **✅ 根因回到声明处（两条，同一句话：预算的两层数没对过表）**：
+      ① `runner.cpus: 4`。官方《语法手册》`runner.cpus` 一节：*内存 = CPU 核数 × 2 GiB*、*未配置时可用核数由
+      分配到的构建节点决定*；官方《构建节点》：`cnb:arch:amd64` 核数范围 **1~64**、同档节点**默认 8 核**。
+      ⇒ `cpus: 4` 不是上限，是把这一格按 **8GiB** 的最小可用档压着跑，而它是九条里唯一「装整份锁 + 串行跑
+      716 条清单 + 每格带 `--cov` 插桩」的一条。进程被 SIGKILL 的典型形态正是内存压力下的 OOM kill。
+      ② `timeout: 90m` 与实测 35m 脱钩两个量级。它不造成本次故障，但它**掩盖**了故障：上限若远高于实测，
+      「真撞墙」与「被资源杀掉」在日志里长得一模一样，读的人只能猜——本次就是猜错的现场。
+    - **✅ 处置（只动 `unit-tests` 这一格的两行声明，不动判据、不动覆盖面）**：`cpus 4 → 8`；
+      驱动受保护子集那一格的 `timeout 90m → 45m`（≈ 实测 1.3 倍，仍远宽于子集里最高的单档父墙
+      `pytest.mark.timeout(120)`，先到点的仍是单格那条诚实的超时）。`--cov-fail-under=60` 与
+      `scripts/ci/protected_tests.txt` 的覆盖面一字未动。
+    - **✅ 新判据（按阶段结构认，不按流水线名认）**：`tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py`，
+      扫「`stages[].script` 里有 `scripts/ci/protected_tests.txt` 清单驱动」的流水线条目（含 YAML 锚点复用），
+      两条不变量：`cpus ≥ 8`（`HEAVY_SUBSET_CPU_FLOOR`，内存 ×2GiB 为官方口径，cpus 是唯一代理量——
+      `runner` 只有 tags/cpus/namespace，没有 memory 字段）；驱动那一格的 `timeout ≤ 45m`
+      （`SUBSET_STAGE_TIMEOUT_CAP_MIN`）。受治面自证：扫到 0 条即红。
+    - **✅ 灯（红→绿逐条实测，本机 py3.11 + `requirements-ci.lock` 装齐）**：
+      `pytest tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py -q`
+      → 改前 **2 failed / 1 passed**（`'unit-tests': timeout='90m'（90m > 45m）` 与
+      `'unit-tests': cpus=4（内存 8GiB < 16GiB）`，各两命中＝锚点复用两处），改后 **3 passed**；
+      把 `cpus` 改回 `4` 再跑 → 当场回红（`1 failed`），恢复即绿。
+    - **✅ 同批回归面**：`tests/unit/ci` 整目录 **498 passed, 2 skipped**（含 `test_dev_environment_contract`
+      的 vscode `cpus: 8` 与 `workspace.launch.cpus` 一致性、`test_unit_tests_single_leg`、
+      `test_ci_pipeline_speed_guard`、`test_runnerAllocatedWallClockIsNotADeadline`）；
+      `test_dev_path_and_runtime_dep_guards` + `test_auditLedgerNumbering` + 登记历史 **54 passed**；
+      `python scripts/ci_static_gate.py --skip-import` → 🎉 全部通过；`ruff check neurova tests --no-cache`
+      → All checks passed。
+    - **⚠ 诚实边界（第一条是本笔最重要的边界）**：`code: 137` 的**直接**归因（OOM 还是别的信号源）不在仓内可读——
+      平台只在日志末行给退出码，不给内存读数。本笔证的是两条**可读事实**：①这一格被压在同档节点默认核数的一半上；
+      ②它在离自己声明的上限还有一小时时被杀。`cpus: 8` 是让声明回到「官方默认规格」，不是「按实测内存反推出来的数」；
+      真实内存曲线要等下一次构建的读数。② 45m 的余量可能仍偏紧（若下一次真超，**应当**变红并按实测重定，
+      不许为此再往上抬到 90m —— 那正是本笔在修的那种「上限不是预算」）。③ 本机没有 `python:3.12` + `uv` 锁的
+      整腿环境，上面的红→绿都在判据层面自证，端到端读数以新构建为准。
+    - **⚠ 撞号让号（本格按「改后到的、不改先到的」让一拍）**：本笔落笔时现查最大＝419、条目行尾号为 419 ⇒ 取 420；
+      推送时远端已被 `9051c590` 推前一步，它把分支原有的 418／419 顺让成 419／420（main 新占了 417）⇒ 420 已被占。
+      按纪律让号改记 **§6-421**，本笔的提交 `9ac1878d` 正文里没有写号，故无需改读；`protected_tests.txt` 的在册注释里也不含号次。
+    - **下一枚空号现查**：`git grep -ohE "§6-4[0-9][0-9]" HEAD -- audit-reports docs scripts | sed 's/§6-//' | sort -u | tail -3`
+      现算最大＝**421**（421 只出现在本格自身）；条目行 `^4NN\. ` 尾号为 **420** ⇒ 后继批次从 **422** 起。
