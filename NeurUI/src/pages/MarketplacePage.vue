@@ -239,7 +239,7 @@
           <a-input v-model:value="publishForm.author" />
         </a-form-item>
         <a-form-item :label="t('market.submitUrl')">
-          <a-input v-model:value="publishForm.download_url" :placeholder="t('market.submitUrlPh')" />
+          <a-input v-model:value="publishForm.download_url" :placeholder="t('marketplace.downloadUrlPh')" />
         </a-form-item>
         <a-form-item :label="t('common.description')">
           <a-textarea v-model:value="publishForm.description" :rows="3" />

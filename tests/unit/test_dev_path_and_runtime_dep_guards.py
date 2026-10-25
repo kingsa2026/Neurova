@@ -733,6 +733,72 @@ class TestCiTestRunnerAndFixtureDepsAreReal:
             "修复：uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
         )
 
+    def test_embeddingRuntimeDepsDeclaredInCi(self):
+        """受保护子集里"向量分量与生产同链路"的判据，CI 清单必须声明其两件运行时。
+
+        形态（2026-10-25 复现）：`ONNXEmbeddingEngine.initialize_sync()` 在
+        `onnxruntime` 或 `tokenizers` 缺席时返回 False，`encode()` 遂走零向量兜底；
+        而受保护子集里的 `test_longTermMemoryBaselineGate.py`（15 例）、
+        `test_associativeRecallGate.py`、`test_cueVectorChannel.py`、
+        `test_cueFanoutDecoupledFromBatchC3.py`、`test_muscle_memory_recall.py`
+        的判据全部建立在"向量有意义"之上，且**刻意不做 skip**（skip 会把它们变成
+        看着在、实际从不运行的件）。于是薄环境里同时红 19 例，
+        每一条的红因都指向同一件事：不是代码坏了，是环境缺件。
+
+        与 numpy（2026-10-23）/ reportlab / pypdf / rich 同一根因、同一处置：
+        "只在生产清单声明、不在 CI 清单声明"。故按**行为**钉两件——
+        真初始化引擎、真编码，读数必须是真向量。
+
+        `transformers` / `sentencepiece` **不在**此列：实测逐件屏蔽
+        （meta_path 拦截）后，只要上面两件在，`tokenizer.json` 直读即成功，
+        两者缺席不影响初始化——它们体积大且连带 torch，属本清单刻意排除之列。
+        """
+        ci = io.open(PROJECT_ROOT / "requirements-ci.txt", encoding="utf-8").read()
+        lock = io.open(PROJECT_ROOT / "requirements-ci.lock", encoding="utf-8").read()
+        for pkg in ("onnxruntime", "tokenizers"):
+            assert re.search(rf"(?m)^\s*{pkg}\s*[><=!~]", ci), (
+                f"requirements-ci.txt 缺 {pkg} 声明——受保护子集里"
+                "test_longTermMemoryBaselineGate / test_associativeRecallGate 等 19 例"
+                "的向量分量与生产同链路，缺席即零向量兜底，判据读数无意义。"
+            )
+            assert re.search(rf"(?m)^{pkg}==", lock), (
+                f"requirements-ci.lock 缺 {pkg} pin——CI 装的是锁文件。\n"
+                "修复：uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
+            )
+
+    def test_localEmbeddingEngineYieldsRealVectors(self):
+        """本机装了解释器就必须真出向量：零向量是"环境缺件"的显式形态。
+
+        判据按行为打，不按清单形状打——清单里写了名字但装不上的情形，
+        只有真跑一次编码才看得见。引擎是进程级单例，故造独立实例、用完即弃。
+        """
+        from neurova.embedding.onnx_embedding import ONNXEmbeddingEngine
+
+        engine = ONNXEmbeddingEngine()
+        try:
+            if not engine.initialize_sync():
+                import importlib.util as ilu
+
+                missing = [m for m in ("onnxruntime", "tokenizers")
+                           if ilu.find_spec(m) is None]
+                assert not missing, (
+                    f"嵌入引擎初始化失败，且 {'/'.join(missing)} 确实没装——"
+                    "这是环境缺件，不是被测代码的结论。装完再跑。"
+                )
+                pytest.fail(
+                    "嵌入引擎初始化失败，但两件运行时都在——这是真断链，按根因修。"
+                )
+            vector = engine.encode("把阳台浇花的活改成每周三定时自动滴灌")
+            assert vector, "引擎返回空向量"
+            assert any(abs(x) > 1e-12 for x in vector), (
+                "嵌入引擎给出的是零向量：模型档在，但分词器/ONNX 运行时没装上。"
+                "本仓的向量判据与生产同链路，零向量下读数无意义。"
+            )
+        finally:
+            closer = getattr(engine, "close", None)
+            if callable(closer):
+                closer()
+
     def test_evalOutboundGateCoversTheLiveSingleton(self):
         """eval 目录的出站闸必须钉在**取单例那一刻**，不是导入时那个类。
 
