@@ -217,3 +217,19 @@ class TestBackendsWithoutADialogSourceStayUnwired:
                 "REST/action RPC 面），挂上等于造一个'已应答'的假象" % cls.__name__
             )
 
+
+def test_loadConfigReadsTheLiveProbeFlag(monkeypatch):
+    """在册表必须跟着**模块的活属性**走：谁把 `HAS_PLAYWRIGHT` 钉住，`_load_config` 就得认。
+
+    受保护子集里本档的闭环两格与集成档 `camofoxOnlyManager` 都靠 monkeypatch 钉这个位来造
+    "只有一路后端"的在册表；脱钩时红出来的是与主题无关的 `KeyError: 'playwright'`。
+    """
+    from neurova.computer_use import browser_manager as bm
+
+    monkeypatch.setattr(bm, "HAS_PLAYWRIGHT", False)
+    assert "playwright" not in bm.BrowserManager()._backends, (
+        "探测位被钉成 False，在册表里却仍有 playwright ⇒ `_load_config` 读的不是活属性")
+
+    monkeypatch.setattr(bm, "HAS_PLAYWRIGHT", True)
+    assert "playwright" in bm.BrowserManager()._backends, (
+        "探测位被钉成 True，在册表里却没有 playwright ⇒ `_load_config` 读的不是活属性")
