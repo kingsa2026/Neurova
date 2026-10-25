@@ -65,14 +65,19 @@ def _scanTrees():
     """`[(相对路径, 语法树)]`——解析走 `ast_scan.transientTree`（一次性入口，不留常驻树）。
 
     原来这里是「共享枚举 + 各消费方自付 `ast.parse`」：门禁点名的免检通道形状。
+
+    为什么**逐文件产出**而不返回 `list`：本档的产物是语法树，攒成 list 就等于把整片
+    扫描面的树同时举在内存里，而消费方（计数、探测器）都是边读边丢的。受保护子集里
+    已有同形教训——`test_channelWebhookResolvesAdapterByAgentTable` 曾把 1053 棵树同时
+    留在 list 里（峰值 478MB），在 8GiB 的 CI 腿上把整场跑测 OOM 掉（构建
+    `cnb-rja-1k5pv9gbl#003` 的 `Killed`）。同一个洞不留两处：这里返回生成器，
+    峰值从「扫描面 × 单棵树」降到「一棵树」。
     """
-    out = []
     for path in _scanFiles():
         try:
-            out.append((ast_scan.relativeToRepo(path), ast_scan.transientTree(path)))
+            yield ast_scan.relativeToRepo(path), ast_scan.transientTree(path)
         except SyntaxError:
             continue
-    return out
 
 
 def _emitOffenders(sources) -> list:
@@ -362,9 +367,14 @@ class TestEveryEmitSitePaysTheDoor:
 
     def testScanScopeActuallyFoundCallSites(self):
         """地板：取数面不能是空的（空集与"全都合规"不可分辨，与 §6-190 那一格同族）。"""
-        sources = _scanTrees()
-        assert len(sources) >= 25, f"扫描目录里只有 {len(sources)} 个文件，扫描面收窄了"
+        # 两件事分开数，都不攒树：文件数看枚举面（不必解析），投递点数逐文件过、用完即弃。
+        scanned = len(_scanFiles())
+        assert scanned >= 25, f"扫描目录里只有 {scanned} 个文件，扫描面收窄了"
         # 投递点按 AST 数（文本数法会把注释与字符串也算进来，是另一种口径）
-        hits = [node for _f, tree in sources for node in ast.walk(tree)
-                if isinstance(node, ast.Call) and _calleeName(node.func) == "_emit_event"]
-        assert len(hits) >= 15, f"投递点只数到 {len(hits)} 条，口径失效"
+        hits = sum(
+            1
+            for _f, tree in _scanTrees()
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and _calleeName(node.func) == "_emit_event"
+        )
+        assert hits >= 15, f"投递点只数到 {hits} 条，口径失效"

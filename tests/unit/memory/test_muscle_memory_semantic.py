@@ -26,6 +26,10 @@ class FakeEngine:
         n = math.sqrt(sum(x * x for x in v)) or 1.0
         return [x / n for x in v]
 
+    def encodeOrNone(self, text: str):
+        """引擎那一处的判据口（生产契约）：算得出才给向量，算不出给 None。"""
+        return self.encode(text)
+
 
 @pytest.fixture(autouse=True)
 def _engine_on(monkeypatch):
