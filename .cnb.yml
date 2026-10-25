@@ -143,9 +143,17 @@ main:
     # 版本不在此处写死第二份：事实源是 Dockerfile 的 FROM，判据见
     # tests/unit/ci/test_unit_tests_single_leg.py（改镜像而这里不响即红）。
     - name: unit-tests
+      # cpus 8 而不是 4：这一格是九条流水线里唯一「装整份锁 + 串行跑 716 条清单 +
+      # 每格带 --cov 插桩」的一条。官方《语法手册》`runner.cpus` 一节写死
+      # 「内存 = CPU 核数 × 2 GiB」，官方《构建节点》给出 cnb:arch:amd64 的核数范围
+      # 1~64、同档节点默认 8 核 —— 即 cpus: 4 是把这一格按 8GiB 的最小可用档压着跑。
+      # 现场（构建 cnb-n45-1k5oultjs#003）：跑到 83%、29m23s 时被平台 SIGKILL
+      # （`Killed` / `code: 137`），日志里一条失败墙都没有 —— 那不是「有测试红了」，
+      # 是进程被资源杀掉。声明不反映真实需求时，报出来的只会是「Killed」。
+      # 判据见 tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py。
       runner:
         tags: cnb:arch:amd64
-        cpus: 4
+        cpus: 8
       docker:
         image: python:3.12
         volumes:
@@ -159,16 +167,21 @@ main:
           timeout: 30m
         # 墙钟按实测定，不按"看起来够"。30m 是照 --no-cov 那套读数定的，而这一步带
         # `--cov` 跑：插桩只惩罚纯 CPU 的解析/遍历，受保护子集里恰好有一批"扫全仓 AST"
-        # 的判据档，同一格实测 ×2.2～×3.7（`--durations` 逐条对照见台账 §6-4xx）。
-        # 2026-10-24 构建 `cnb-mn9-1k5n4fcl5` 在 85% 撞 30m 被平台强杀，日志里一条
-        # 失败墙都没有——那不是"有测试红了"，是整段跑到点被掐断。
-        # 抬到 90m：整场是串行一条腿，余量按实测最慢批次的 1.6 倍留，且必须宽于
-        # 子集里最高的单档父墙（`pytest.mark.timeout(120)`）足以让诚实超时先说话。
+        # 的判据档，同一格实测 ×2.2～×3.7。2026-10-24 构建 `cnb-mn9-1k5n4fcl5` 在 85%
+        # 撞 30m 被平台强杀；2026-10-25 `cnb-n45-1k5oultjs#003` 在 83%、29m23s 被
+        # SIGKILL（`code: 137`）——两次日志里都没有一条失败墙。
+        #
+        # 90m → 45m 不是收紧判据，是把"上限"重新变成预算：83% 处已用 29m23s，
+        # 整场按此速率约 35m。上限若远高于实测（90m vs 35m），"真撞墙"与"被资源
+        # 杀掉"在日志里长得一模一样，读的人只能猜。45m ≈ 实测的 1.3 倍，且仍远宽于
+        # 子集里最高的单档父墙（`pytest.mark.timeout(120)`）—— 先到点的应当是
+        # 单格那条诚实的超时，而不是平台把整段掐断。超了就是真超了，不许再往上抬
+        # 掩盖（判据：tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py）。
         - name: protected subset with coverage gate (fail_under=60)
           script: |
             TESTS=$(grep -v '^#' scripts/ci/protected_tests.txt | tr '\n' ' ')
             python -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS
-          timeout: 90m
+          timeout: 45m
 
     # ── 5. E2E：后端启动冒烟 ─────────────────────────────────────────────
     - name: e2e-backend-boot
