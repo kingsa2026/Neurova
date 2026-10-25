@@ -10492,6 +10492,19 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **活体**：`SkillEvolutionService.evolve` 真跑（真 service / 真 runner / 真约束闸，只替 judge 与 mutate 两个调用方注入点），取用口计数由 2 → **0**；`_token_jaccard("量子计算", "量子 计算")` 仍给正读数（兜底没退化成常量）。
     - **仍开（不冒充完成）**：① 两处**用例侧**的 `pytest.mark.timeout(120)` 现在已无必要（那条路径不再付冷启动），但删它们属于另一笔（同一 PR 里删掉会掩盖"生产侧确实改对了"的读数对照）——登记待办；② `knowledge.search.tokenize` 仍在取用口处同步建字典（FTS/BM25 的第一条无关键照旧付这笔账），它**不是** async 活体路径，本批不动，但若将来 FTS 也进 async 热路径需回看本格。
     - **口径与空号**：在册条数目取 `protectedSubsetEntries()` 现算 **720**（本档一行）。下一枚空号两条一起跑：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 现算最大均＝**425**（本格自身）⇒ 下批从 **§6-426** 起。**让号三次留案**：本条落笔取 422、与并发会话的 §6-422 撞号（唯一性判据当场红）→ 让到 424、又与两笔并发（§6-423 进化闸、§6-424 门禁在断言之外变红）连撞两次 → 终取 **425**。同一天三次让号，说明「空号现查」在多人并发写台账时必然滞后，**唯一性判据才是兜底**；也让号本身成了常态，别再指望现查一次就够了。
+
+426. **退役台账被"整理"掉两条署名：`delete + recreate` 的改名与 `rename` 不是一回事（构建 `cnb-bfa-1k5q9ub6e#003`）** ✅🟢 —— 又一条"有测试红了"的红，红在记录而不在行为。
+
+    - **读数**：unit-tests 腿 `8 failed, 7954 passed, 27 skipped, 3 xfailed`，其中
+      `test_protected_subset_registration_history::test_every_vanished_entry_is_signed_off`
+      逐字点名 `tests/unit/api/test_McpFaceCallerTier.py` 与 `tests/unit/api/test_McpFaceRidesSdkTransport.py` 两条未署名。其余 7 条（401 `Invalid or expired token`）与本条无关，另案（见下"仍开"）。
+    - **根因是"整理"时把不同来源的两条并成一条**：`745eae19` 往 `protectedSubsetRetired.txt` 补了 `testMcpFace*` 两条（无 `test_` 前缀那版），`9fa495cf` 判它们是"从未进过清单的空行"并删掉——那个判断只覆盖了**驼峰无前缀**这一族。而 `27c31327` 的改名在 git 眼里是 **delete + recreate**（`test_McpFaceCallerTier.py` 删一个文件、`test_mcpFaceCallerTier.py` 加一个文件，不是 rename），于是 `--full-history` 读到"带前缀的旧名**曾出现在清单里**、文件现已不在仓"——这正是本守卫要拦的第二向。同批另三条驼峰旧名（`testOutOfBoxDefaultLayer.py` 等）留了旧名行，唯独这两条没有。
+    - **为什么我一开始在本地看不到这条红**：`--full-history` 之外的简化会让"只在合并里发生"的变更不可见，这份判据的 `_listedEver()` 用了 `--full-history` 才看得见全貌；而**未推送的本地树**与**合并后的源分支**历史不同——同一份代码在 `origin` 的 HEAD 上红、在我的本地树上绿。合进来才复现。这也说明"本地绿"对**按历史取面**的判据不算数。
+    - **补法（只补记录，不动判据）**：给两条带前缀旧名各写一行签名，依据里写清"`27c31327` 走的是 delete + recreate，`745eae19` 只署了无前缀旧名"——下一次谁再看到这两行，能直接读出为什么必须有它。
+    - **实测**：`tests/unit/ci/test_protected_subset_registration_history.py` 单跑 `8 passed`；`tests/unit/ci/` 全量 `501 passed, 3 skipped`（本机补装 `pyflakes` 后 `test_staticGateUsesParserNotTypecheck` 6 格也全绿——那两格先前红是因为工具不在 PATH 上，红的是环境不是代码）。
+    - **仍开（不冒充完成）**：① 同一场里 7 条 `401 Invalid or expired token`（`test_roleGateIdentitySourceIsStrict` 4 格 + `test_memory_route_shadowing` 3 格）本机单跑 `20 passed`、CI 上红——形态是"JWT 密钥被同进程里更早的档改过"，属**跨档串扰**而非本次三笔改动；它需要的是"密钥来源在会话内唯一且不被用例改"的那层收口，与本条正交，未在本批处理。② `9fa495cf` 里"删两条从未进过清单的空行"这个判断，本可以避免——若当时按"曾出现过的**每个**名字"逐个核对，就不会误删。纪律：整理退役台账前必须先跑 `test_every_vanished_entry_is_signed_off` 的反向清单，不能凭"看起来像空行"删。
+    - **口径与空号**：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 现算最大均＝**426**（本格自身）⇒ 下批从 **§6-427** 起。
+
     - **与并发会话同一根因的三条落点先比后合（教义第 7 条，合批后重做）**：合批时源分支上已另有 §6-422（判据把整棵语法树举在内存里）与 §6-423（进化闸为算一次相似度去拉嵌入模型）两笔，加上本条共三条落点。逐条结论：
       · **§6-423 embedding 那半** — 更强，保留（`_initialized_embedding_engine()` 只读 `is_initialized`、绝不调 `initialize_sync()`，并有 `test_semanticGateLoadsNoModel.py` 钉住"这一跳走到了但没去建模型"）。本条只处理它够不着的另一半——引擎缺席时**兜底支**仍问 jieba。
       · **并发侧的预热口 `warmJieba()` 对本条是多余的** — 兜底支改走二元组后，`constraints` 一次都不会碰取用口（本条判据逐格量的是 0 次），预热对它"预"了个用不上的东西。但对 `tokenize` → FTS/BM25 那条**真需要词级切分**的链仍然成立（`_get_jieba()` 首次就地建字典，谁先走到谁付）。故两条落点**并行保留、各管一段**，并在 `warmJieba()` 的 docstring 里写明分工——不退它，也不让它冒充"兜底支的账已经付过了"。
