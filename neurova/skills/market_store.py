@@ -94,8 +94,10 @@ _BUILTIN_CATALOG: List[Dict[str, Any]] = [
 ]
 
 
-# 构件指针字段：内置表是这些字段的唯一事实源，存量 catalog 行按它回写。
-_BUNDLE_POINTER_FIELDS = ("bundle_zip",)
+# 内置表独占的字段：字节从哪取（bundle_zip）与这包从哪来（source/download_url 出处）。
+# 这几格以代码那一份为事实源，存量 catalog 行按它回写；文案（name/description/version/tags）
+# 仍归 admin 的话语权，不回写。
+_CODE_OWNED_ROW_FIELDS = ("bundle_zip", "source", "download_url")
 
 
 def _ensure_builtin_entries(items: List[Dict[str, Any]]) -> bool:
@@ -116,14 +118,15 @@ def _ensure_builtin_entries(items: List[Dict[str, Any]]) -> bool:
         row = rows.get(decl["skill_id"])
         if row is None:
             continue
-        for pointer in _BUNDLE_POINTER_FIELDS:
+        for pointer in _CODE_OWNED_ROW_FIELDS:
             if pointer in decl and row.get(pointer) != decl[pointer]:
                 row[pointer] = decl[pointer]
                 changed = True
 
-    # 同一句「有没有来源」在存量数据上的另一半：本仓自带条目（种子＋内置表）里那些不属于
-    # 任何注册源的 download_url，永远取不到东西，却会让读面显示一个能骗人的来源。新建种子
-    # 已经不写了，这一支管的是已经躺在各部署 catalog 里的旧行。
+    # 同一句「有没有来源」在存量数据上的另一半：清的是**死地址**，不是出处。
+    # 判据只看过没看过注册源，就会把内置包的 skillhub 署名出处一起抹掉（395c2dca 实测清了
+    # 3 条 bundle_zip 行，字节来自包内、与该字段无关，抹掉只损失 provenance 换不到诚实）。
+    # 所以带 bundle_zip 的条目跳过；新建种子已经不写死地址，这一支管的是各部署里的旧行。
     from neurova.skills import market_sources
 
     ownIds = {e["skill_id"] for e in _BUILTIN_CATALOG} | {e["skill_id"] for e in _DEFAULT_CATALOG}
@@ -132,7 +135,7 @@ def _ensure_builtin_entries(items: List[Dict[str, Any]]) -> bool:
         if row is None:
             continue
         url = str(row.get("download_url") or "")
-        if url and not market_sources.is_remote_market_url(url):
+        if url and not row.get("bundle_zip") and not market_sources.is_remote_market_url(url):
             row["download_url"] = ""
             changed = True
     return changed
