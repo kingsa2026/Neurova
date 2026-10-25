@@ -3019,6 +3019,7 @@ export default {
     unaddressed: 'غير معالج',
   },
   marketplace: {
+    downloadUrlPh: 'رابط تنزيل ZIP؛ بدون مصدر لا يمكن تثبيت هذا العنصر',
     title: 'السوق',
     browse: 'تصفح',
     installed: 'مثبت',
