@@ -157,6 +157,9 @@ def test_vector_cache_recomputes_on_content_change(tmp_path):
             self.calls.append(text)
             return [float(len(text) % 7), 1.0]
 
+        def encodeOrNone(self, text):
+            return self.encode(text)
+
     eng = _FakeEngine()
     cache = SkillVectorCache(eng, cache_file=tmp_path / "emb.json")
     s = _Skill("a", "第一版描述")
@@ -193,6 +196,10 @@ def test_vector_cache_zero_vector_not_trusted(tmp_path):
 
         def encode(self, text):
             return [0.0, 0.0]
+
+        def encodeOrNone(self, text):
+            """生产契约：算不出就给 None（这一格量的正是"引擎交不出向量"）。"""
+            return None
 
     cache = SkillVectorCache(_BoomEngine(), cache_file=tmp_path / "z.json")
     assert cache.vectors_for({"a": _Skill("a", "d")}) == {}
