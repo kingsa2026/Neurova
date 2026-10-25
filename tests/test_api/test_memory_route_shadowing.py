@@ -23,38 +23,19 @@ from neurova.api.endpoints.memory import router as memory_router
 from neurova.cognitive_layers.memory_layer.models import Memory
 from neurova.interfaces.api_standard import ErrorCodes
 
-from tests.auth_headers import bearerHeaders
+from tests.auth_headers import pinJwtSecret, signedBearerHeaders
 from tests.route_table import mountedLeafRoutes
 
 # C1（P3-12，2026-10-08）后写类请求必须有凭证；本文件测的是路由匹配与错误语义，
 # 身份不是被测面，但 DELETE 不带凭证会在路由级写门就 401，压根进不到被测的 handler。
 #
-# 前提自给（与 `tests/unit/api/test_roleGateIdentitySourceIsStrict.py` 同一处纪律）：
-# 这三格在生产里报的是 `401 Invalid or expired token` —— 刚签发的令牌被自己拒。那一条
-# 只可能来自**签名侧与验签侧各持一把密钥**：身份门是**函数对象**，读的是自己
-# `__globals__` 里那份模块字典，而 `JWT_SECRET_KEY` 在 `auth.py:175` 导入期就烘死。
-# "进程里出现第二份 auth 副本"因此会让本档 100% 红，而单跑与邻档合跑都绿。
-# 钉法：把签发与验签两侧的密钥在**档内**对齐到同一个值，前提不再取决于别的档做过什么。
-_TEST_SECRET = "test_secret_key_for_memory_route_shadowing_0123456789"
-
-
-def _pinSigningKeyToVerifyingGates() -> None:
-    """把验签门手里的密钥对齐到签发侧，返回时两侧同源。"""
-    from neurova.api import auth as authMod
-    from neurova.api import deps as depsMod
-
-    if authMod.JWT_SECRET_KEY != _TEST_SECRET:
-        authMod.JWT_SECRET_KEY = _TEST_SECRET
-    for gate in (depsMod.strictIdentityGate, depsMod.get_current_user,
-                 depsMod.get_optional_user):
-        if gate.__globals__.get("JWT_SECRET_KEY") != _TEST_SECRET:
-            gate.__globals__["JWT_SECRET_KEY"] = _TEST_SECRET
-
-
-def _writeHeaders() -> dict:
-    """写类请求的凭证**每次现签**：令牌与验签门同源于当前这一轮的密钥。"""
-    _pinSigningKeyToVerifyingGates()
-    return bearerHeaders("shadowing-probe")
+# 凭证在**用例内**现签（`pinJwtSecret()` + `signedBearerHeaders()`，唯一事实源在
+# `tests/auth_headers`）。原先这里有三个坑，每个都能单独造出"刚签发的令牌被自己拒 401"：
+#   1. 导入期烘一枚 `WRITE_HDR` —— 密钥是模块全局，别的档一改，这枚令牌就换了签名的另一方；
+#   2. 伪造密钥的那一步若与证书分处两个阶段，先对的会被后改的覆盖（本档实测：
+#      `client` 建完再签，签的已是另一把）；故对齐全轮与签发必须紧邻同一个请求；
+#   3. 同义实现在本档与 `test_roleGateIdentitySourceIsStrict.py` 各抄了一份，
+#      台面上谁先跑谁说了算 —— 收成一处（教义第 6/7 条）。
 
 
 # ============================================================
@@ -263,7 +244,9 @@ def test_get_self_model_returns_200(env):
 
 def test_delete_wm_returns_200(env):
     client, agent = env
-    resp = client.delete("/api/v1/memory/wm", params={"agent_id": "agent-1"}, headers=_writeHeaders())
+    pinJwtSecret()   # 先对齐全轮，再现签：凭证与验签门必须同源
+    resp = client.delete("/api/v1/memory/wm", params={"agent_id": "agent-1"},
+                         headers=signedBearerHeaders("shadowing-probe"))
     assert resp.status_code == 200, resp.text
     assert resp.json()["code"] == 0
     assert agent.memory_manager.cleared is True
@@ -298,7 +281,9 @@ def test_get_memory_detail_returns_200(env):
 
 def test_delete_memory_detail_returns_200(env):
     client, agent = env
-    resp = client.delete("/api/v1/memory/mem-2", params={"agent_id": "agent-1"}, headers=_writeHeaders())
+    pinJwtSecret()
+    resp = client.delete("/api/v1/memory/mem-2", params={"agent_id": "agent-1"},
+                         headers=signedBearerHeaders("shadowing-probe"))
     assert resp.status_code == 200, resp.text
     assert "mem-2" not in agent.memory_manager._store
 
@@ -319,6 +304,8 @@ def test_get_unknown_memory_returns_structured_404(env):
 
 def test_delete_unknown_memory_returns_structured_404(env):
     client, _ = env
-    resp = client.delete("/api/v1/memory/does-not-exist", params={"agent_id": "agent-1"}, headers=_writeHeaders())
+    pinJwtSecret()
+    resp = client.delete("/api/v1/memory/does-not-exist", params={"agent_id": "agent-1"},
+                         headers=signedBearerHeaders("shadowing-probe"))
     assert resp.status_code == 404, resp.text
     assert resp.json()["code"] == ErrorCodes.NOT_FOUND

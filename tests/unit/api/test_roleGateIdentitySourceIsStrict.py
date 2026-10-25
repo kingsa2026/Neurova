@@ -23,61 +23,40 @@ C1 收口记忆面时撞出来的那一格（台账 §6-54）：`deps.require_ro
   严格端点"的反向错误。
 """
 
-import os
 import typing
 
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
-# 前提自给：本档**就地**钉住本轮的签名密钥。
-#
-# 原先这里只有一行 `setdefault("NEUROVA_JWT_SECRET_KEY", ...)` —— 实测它对密钥
-# **完全无效**：`neurova/api/auth.py:146` 读的是 `NEUROVA_JWT_SECRET`（无 `_KEY` 后缀），
-# 而 `JWT_SECRET_KEY` 在 `auth.py:175` 导入期就烘死。于是"本档有前提自给"只是看起来有。
+from neurova.api import auth as auth_mod
+from neurova.api import deps as deps_mod
+from tests.auth_headers import pinJwtSecret
+
+# 前提自给：本档只问"这一轮用的是哪把密钥"，问法收口在 `tests/auth_headers.pinJwtSecret()`
+# ——轮内唯一事实源。原先这里有两笔各自抄的实现（本档一份 `_pinSecret`、
+# `tests/test_api/test_memory_route_shadowing.py` 一份 `_pinSigningKeyToVerifyingGates`），
+# 加上一行**对密钥完全无效**的 `setdefault("NEUROVA_JWT_SECRET_KEY", ...)`
+# （`auth.py:146` 读的是 `NEUROVA_JWT_SECRET`，且 `JWT_SECRET_KEY` 早已在导入期烘死）。
+# 两处同义实现里任何一处漏配都会让"自己签的令牌被自己拒 401"复发，而两边都看不出
+# 谁的读法对 —— 收成一处（教义第 6/7 条），本档与记忆面共用。
 #
 # 钉的是**本档自己那一轮**，不是去改别人：`JWT_SECRET_KEY` 是模块全局，`deps` 再导出的
 # 身份门是**函数对象**（`__globals__` 绑在它被定义的那份模块字典上）。只要进程里出现过
-# 第二份 auth 副本，签名侧与验签侧就各持一把密钥，形态是"本档刚签发的令牌被自己拒 401"。
-# 因此本档在**每个用例内**同步两侧密钥：收集期生成的模块级令牌与用例内生成的令牌
-# 各自只在那一轮有效，不跨用例共享一个烘死的旧值。
-#
-# 与 `tests/unit/api/test_shared_config_mcp_convergence.py:22-30` 是同一条纪律
-# （那里记的是"setdefault 会让别处先落进环境的弱值生效"）。
-os.environ["NEUROVA_JWT_SECRET"] = "test_secret_key_for_role_gate_0123456789"
-
-from neurova.api import auth as auth_mod
-from neurova.api import deps as deps_mod
-
-#: 本档轮内的签名密钥。`_pinSecret()` 每次取用时把它同步到签名侧与全部验签门。
-_TEST_SECRET = os.environ["NEUROVA_JWT_SECRET"]
-
-
-def _pinSecret() -> str:
-    """把签名侧与验签门的密钥对齐到 `_TEST_SECRET`，返回它。
-
-    令牌与验签必须同源于这一把：函数对象读的是自己 `__globals__` 里的现值，
-    只改 `auth_mod.JWT_SECRET_KEY` 会让它们继续用旧字典里的那一把。
-    """
-    if auth_mod.JWT_SECRET_KEY != _TEST_SECRET:
-        auth_mod.JWT_SECRET_KEY = _TEST_SECRET
-    for gate in (deps_mod.strictIdentityGate, deps_mod.get_current_user,
-                 deps_mod.get_optional_user):
-        if gate.__globals__.get("JWT_SECRET_KEY") != _TEST_SECRET:
-            gate.__globals__["JWT_SECRET_KEY"] = _TEST_SECRET
-    return _TEST_SECRET
+# 第二份 auth 副本，签名侧与验签侧就各持一把密钥。故令牌在**用例内**现签，
+# 不跨用例共享一个导入期烘死的旧值。
 
 
 def _token(claims: dict) -> str:
     """在**当前这一轮**的密钥下签发令牌（不在导入期烘死）。"""
-    _pinSecret()
+    pinJwtSecret()
     return auth_mod.create_access_token(dict(claims))
 
 
 _ADMIN = {"sub": "root-admin", "username": "root-admin", "role": "admin", "neuser_id": "root-admin"}
 _USER = {"sub": "plain-user", "username": "plain-user", "role": "user", "neuser_id": "plain-user"}
 
-# 令牌不在导入期烘死——在**用例内**签发（见 `client` 夹具里的 `_pinSecret()`）。
+# 令牌不在导入期烘死——在**用例内**签发（见 `client` 夹具里的 `pinJwtSecret()`）。
 # 导入期烘一枚令牌等于把"密钥是谁"钉死在那一刻，而那一格正是本档要钉的对象。
 
 
@@ -101,7 +80,7 @@ def app():
 def client(app):
     # 每个用例开始前重新对齐两侧密钥：令牌在**这一轮**签发，验签门读的是**这一轮**的字典。
     # 旧形态把令牌烘在导入期、密钥却可能被别的档换过，于是"自己签的令牌自己拒"。
-    _pinSecret()
+    pinJwtSecret()
     return TestClient(app)
 
 
