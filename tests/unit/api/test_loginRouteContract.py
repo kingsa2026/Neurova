@@ -38,16 +38,18 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock
 
+# 同上：不再写 `authModule.JWT_SECRET_KEY` 这个进程级全局（那句话会把先导入那档的密钥
+# 覆盖掉，使那一档签出的 token 在本档与角色门里一律 401）。密钥的唯一入口是环境变量，
+# 本档用的就是 `auth` 当前生效的那一把（上一档若已注入过，`setdefault` 不覆盖它——
+# 断言"我注入的生效了"在档序下不可成立，那正是本档先前越界改写全局的起因）。
 os.environ.setdefault("NEUROVA_JWT_SECRET_KEY",
                       "test_secret_key_1234567890123456789012345678901234567890")
-TEST_SECRET = os.environ["NEUROVA_JWT_SECRET_KEY"]
 
 import neurova.api.endpoints.auth as authEndpoint  # noqa: E402
 from neurova.api import auth as authModule  # noqa: E402
 from neurova.api.endpoints.auth import router  # noqa: E402
 
-if authModule.JWT_SECRET_KEY != TEST_SECRET:
-    authModule.JWT_SECRET_KEY = TEST_SECRET
+TEST_SECRET = authModule.currentJwtSecretKey()
 
 ALGORITHM = authModule.JWT_ALGORITHM
 
