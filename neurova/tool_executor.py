@@ -2613,8 +2613,14 @@ class ToolExecutor:
         executor = get_workflow_executor()
         # 请求级身份替代硬编码 "agent"：画布内知识库节点引用用户级远程配置
         # （默认私有）时按属主校验；无身份回退 "agent"（隔离校验将如实拒绝）
+        # agent_id 一并带进执行上下文：画布里的 agent 节点派生子 Agent 后，报告要
+        # 归进**发起这次画布的 Agent** 的上下文池（§6-418 仍开②）——REST 那条执行链
+        # 早就传了 agent_id，工具这条链漏传，`ResolutionContext.agent_id` 便恒为 None。
+        canvas_user_id, canvas_agent_id = "agent", None
         try:
-            canvas_user_id = str(self._agent_identity()[0] or "") or "agent"
+            identityUser, identityAgent = self._agent_identity()
+            canvas_user_id = str(identityUser or "") or "agent"
+            canvas_agent_id = str(identityAgent or "") or None
         except Exception:  # noqa: BLE001 - 身份解析失败不阻断画布执行
             canvas_user_id = "agent"
         try:
@@ -2623,6 +2629,7 @@ class ToolExecutor:
                 workflow,
                 inputs=inputs,
                 user_id=canvas_user_id,
+                agent_id=canvas_agent_id,
                 session_id=self._canvas_session_id(),
                 instance=instance,
             )
