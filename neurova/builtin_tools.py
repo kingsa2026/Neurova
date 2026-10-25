@@ -32,12 +32,13 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "recall_history": {
         # 并行能力声明：本地会话折叠台账的只读召回（执行体只读存储，无写作用域）。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
-        "description": "【历史召回】召回本会话被折叠/驱逐出当前上下文窗口的早期对话与工具结果（P1-1③ + P1-#6）。两种模式：①按指针直取——上下文里看到『[工具输出已移出上下文/已溢出至工作区文件: ... call=<id> ...]』的占位时，传 tool_call_id 精确取回完整结果（溢出条目自动读回工作区文件全文）；②按关键词召回——用户提到“之前讨论过”“刚才说的”时用 query 模糊匹配折叠台账。与 memory_search 的区别：memory_search 查长期记忆库（跨会话持久），本工具查当前会话的上下文台账（本会话内被折叠的内容）。【何时不用】查跨会话长期记忆改用 memory_search；查用户语音说过的话用 voice_memory_search；当前上下文里还找得到的内容不要召回。",
+        "description": "【历史召回】取回被移出当前上下文窗口的原文（P1-1③ + P1-#6）。三种模式：①按调用指针直取——上下文里看到『[工具输出已移出上下文/已溢出至工作区文件: ... call=<id> ...]』的占位时，传 tool_call_id 精确取回完整结果（溢出条目自动读回工作区文件全文）；②按会话整取——蜂群子 Agent 的终态信封带 transcript 指针时，**同时传 agent_id 与 session_id**，取回那条 member 会话的全部原文（它记在子 Agent 自己的会话目录下，不带 agent_id 便去主 Agent 的目录找一个不在那儿的地址）；③按关键词召回——用户提到“之前讨论过”“刚才说的”时用 query 模糊匹配折叠台账。与 memory_search 的区别：memory_search 查长期记忆库（跨会话持久），本工具取回指定会话原文或本会话被折叠的内容。【何时不用】查跨会话长期记忆改用 memory_search；查用户语音说过的话用 voice_memory_search；当前上下文里还找得到的内容不要召回。",
         "parameters": {
             "type": "object",
             "properties": {
                 "tool_call_id": {"type": "string", "description": "直取模式：占位指针里的 call= 值（如 tc-123），与 session_id 联用精确取回该次工具结果全文"},
-                "session_id": {"type": "string", "description": "直取模式可选：目标会话 id，缺省用当前会话"},
+                "session_id": {"type": "string", "description": "目标会话 id：直取模式可选（缺省用当前会话）；整取模式（带 agent_id）必填"},
+                "agent_id": {"type": "string", "description": "整取模式必填：目标会话的属主 agent_id（取终态信封 transcript.agent_id 的值）。给了它就按 (agent_id, session_id) 整取该会话原文；不给时既有语义不变（按当前 Agent 的属主读台账）"},
                 "query": {"type": "string", "description": "召回关键词（在折叠台账中匹配，留空返回最近折叠的内容）"},
                 "limit": {"type": "integer", "description": "返回数量上限", "default": 10},
             },
