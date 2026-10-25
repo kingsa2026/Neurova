@@ -183,8 +183,12 @@ class TestEndToEndOnSyntheticRepos:
             "from app.logic import answer\n\n"
             "def test_answer():\n"
             f"    assert answer() == {expected}\n", encoding="utf-8")
+        # `-c commit.gpgsign=false`：合成仓是夹具，不该继承宿主/镜像的签名配置——
+        # 宿主 `~/.gitconfig` 里 `commit.gpgsign=true` 而签名程序不可用（容器内无密钥）时，
+        # 这几条合成仓的 commit 会以 128 直接炸掉，红的是宿主配置而不是被测驱动。
         for args in (["init", "-q"], ["add", "."],
-                     ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "base"]):
+                     ["-c", "commit.gpgsign=false",
+                      "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "base"]):
             subprocess.run(["git"] + args, cwd=str(repo), capture_output=True, text=True,
                            encoding="utf-8", errors="replace", check=True,
                            timeout=_GIT_WALL_S)
