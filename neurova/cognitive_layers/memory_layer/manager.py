@@ -24,6 +24,7 @@ import json
 import datetime
 from neurova.core.content_identity import normalized_key
 from neurova.core import sql_like
+from neurova.core import vector_math
 from neurova.core.db_migration import migrate as applyMigrations, register_migration
 from neurova.core.logger import get_logger
 import os
@@ -74,9 +75,12 @@ def _row_embedding(row) -> "Optional[List[float]]":
     if not raw:
         return None
     try:
-        return json.loads(raw)
+        vector = json.loads(raw)
     except (ValueError, TypeError):
         return None
+    # 存量行里可能躺着引擎缺档期写下的全零：那不是向量，是"当时没算出来"。当"有向量"
+    # 交给召回，余弦恒 0、看上去只是"不相似"，缺陷在读数里再也看不见。
+    return None if vector_math.isZeroVector(vector) else vector
 
 
 # 审计修复 (three-tier-isolation-audit.md P0-1): 请求级隔离作用域。
