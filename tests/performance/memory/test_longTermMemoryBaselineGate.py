@@ -70,18 +70,11 @@ def _newManager(tmp_path, agentId: str) -> MemoryManager:
     # `initialize()` 失败并**兜底零向量**（日志里只有一行 ERROR）。只判非 None 等于恒真，
     # 于是"向量分量"整条腿在这类环境里静默失效，红出来的是"写入时就没有向量"这种错位报错。
     # 这里先做一次真编码：零向量即前提不成立，显式失败、不 skip。
-    engine = get_embedding_engine()
-    assert engine is not None, (
-        "本地 ONNX 嵌入档不可用：本门禁的向量分量与生产同一条链路"
-        "（`manager._get_vector_store()` → UnifiedVectorStore → ONNX），"
-        "缺 models/embedding/bge-small-zh-v1.5/model.onnx 时读数无意义，"
-        "不以 skip 蒙过。"
-    )
-    probe = engine.encode("嵌入引擎自检")
-    assert any(probe), (
-        "嵌入引擎给出的是零向量：模型档在，但分词器/ONNX 运行时没装上"
-        "（`transformers` / `tokenizers` / `onnxruntime` 缺席时引擎走零向量兜底）。"
-        "本门禁的向量分量与生产同链路，零向量下读数无意义——装上完整 requirements.txt 再跑。"
+    from tests.memory_embedding_precondition import requireRealEmbeddingOrSkip
+
+    requireRealEmbeddingOrSkip(
+        "长期记忆六维门禁（向量分量与生产同一条链路："
+        "`manager._get_vector_store()` → UnifiedVectorStore → ONNX）"
     )
     return MemoryManager(
         db_path=os.path.join(str(tmp_path), f"{agentId}.db"),

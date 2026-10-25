@@ -293,6 +293,11 @@ class KnowledgeVectorIndex:
                     return {"computed": 0, "entry_count": len(records)}
 
                 for (kid, entry), vec in zip(to_compute, vectors):
+                    if vector_math.isZeroVector(vec):
+                        # 引擎兜底零向量＝"这一路没算出来"，不是"这条与谁都无关"。
+                        # 落库即让该条对检索永久隐身（余弦恒 0），且下一轮指纹相同
+                        # 不会重算——缺陷在读数里完全不可见。不落记录，下轮重试。
+                        continue
                     records[kid] = {
                         "vector": [float(x) for x in (vec or [])],
                         "fingerprint": _fingerprint(entry),
@@ -365,7 +370,7 @@ class KnowledgeVectorIndex:
         except Exception as e:  # noqa: BLE001
             logger.warning("向量索引：query 编码失败: %s", e)
             return []
-        if not qv or vector_math.vectorNorm(qv) <= vector_math.ZERO_NORM_EPSILON:
+        if vector_math.isZeroVector(qv):
             return []
 
         annHits = self._searchAnn(

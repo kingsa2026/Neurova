@@ -163,8 +163,11 @@ class SemanticSearch:
         if self._embedding_model:
             try:
                 embedding = self._embedding_model.encode(text)
-                self._cache[cache_key] = embedding
-                return embedding
+                # 引擎兜底零向量＝"这一路没算出来"：入缓存会让本进程后续每次都拿它，
+                # 也不该当有效向量参与相似度——回落关键词嵌入（同"引擎缺席"那一支）。
+                if not vector_math.isZeroVector(embedding):
+                    self._cache[cache_key] = embedding
+                    return embedding
             except Exception as e:
                 logger.warning("嵌入生成失败: %s", e)
         

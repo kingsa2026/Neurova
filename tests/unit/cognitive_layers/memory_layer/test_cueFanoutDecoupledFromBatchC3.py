@@ -91,10 +91,10 @@ class TestFilterIsIndependentOfBatchSize:
 
 @pytest.fixture
 def fanoutManager(tmp_path):
-    from neurova.embedding import get_embedding_engine
     from neurova.cognitive_layers.memory_layer.semantic_search import reset_semantic_search
+    from tests.memory_embedding_precondition import requireRealEmbeddingOrSkip
 
-    assert get_embedding_engine() is not None, "本判据需要本地 ONNX 档（缺档时通道不点火，测不到门）"
+    requireRealEmbeddingOrSkip("线索扇出闸（缺档时通道不点火，测不到门）")
     reset_semantic_search()
     mgr = MemoryManager(
         db_path=os.path.join(str(tmp_path), "mem.db"), agent_id="cue_fanout_c3", enable_buffer=False
