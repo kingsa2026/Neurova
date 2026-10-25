@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
-"""P2-5 子代理完成回传 mailbox。
+"""P2-5 子代理终态回传 mailbox。
 
-会话级邮箱：子代理完成结果投递父会话；agent loop 工具轮间隙排空注入。
-嵌套等待模式下是增强可见性（完成摘要显式回灌），后台模式是唯一回传通道。
+会话级邮箱：蜂群子任务的**终态信封**投递父会话；agent loop 工具轮间隙排空注入。
+信封只带关键信息与 `transcript` 指针（投影单源在 `SwarmManager._uplinkEnvelope`），
+正文不在此重复——主 Agent 要详情就凭指针经 `recall_history` 下钻到 member 会话。
+前台模式下它是增强可见性，后台模式下它是唯一回传通道。
 """
 from __future__ import annotations
 

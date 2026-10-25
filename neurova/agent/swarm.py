@@ -4,12 +4,21 @@ SwarmManager — 蜂群编排核心（主 Agent 动态派生子 Agent）
 主 Agent 在对话/工作流中通过 spawn 工具动态派生子 Agent
 执行子任务，可并行（多次调用）、可后台（background=True）。
 
-输出双通道回流：
+输出回流三通道：
 1. 直传（主通道）：最终报告作为工具结果返回主 Agent，同时经 SessionSyncManager
    广播 SUBAGENT_STARTED / SUBAGENT_CHUNK / SUBAGENT_COMPLETED 到聊天会话
    （前端子 Agent 对话小窗的数据源）
 2. 池归档（辅助通道）：报告归档进发起者 Agent 的上下文池（EXPERIENCE 源），
    供后续轮次语义召回（活水）
+3. 终态回灌（对话侧通道）：终态（完成/失败/超时/取消）以**信封**投递发起者会话的
+   AgentMailbox，由 agent loop 在工具轮间隙以 user 角色排空注入——后台派生的
+   唯一回传通道。投递绑在**子任务终态**，不绑在 spawn() 返回处：后台那一刻还没有
+   任何终态可投。仅 chat 来源（workflow 的报告交给引擎 output）。
+
+旁路两条出口（邮箱、上下文池归档）投**同一份** `_uplinkEnvelope()` 投影：只带关键
+信息与 transcript 指针，不搬正文、也不按字面量截断。主 Agent 要看详情，凭指针经
+`recall_history(agent_id, session_id)` 下钻到记录该子任务全过程的会话 json；报告
+全文由主链路（工具返回值 `to_dict()` 的 `report` 键）同轮送达。
 
 设计约束（AGENTS.md）：
 - 深模块：延迟导入 Agent 注册中心（neurova.api.endpoints），避免循环依赖
@@ -20,6 +29,7 @@ SwarmManager — 蜂群编排核心（主 Agent 动态派生子 Agent）
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import threading
@@ -103,7 +113,8 @@ class SubAgentRun:
     session_id: Optional[str] = None  # 事件广播目标（发起者的聊天会话）
     # P2-9：member 会话键。
     # member 的任务对话经既有 save_to_session → SessionManager.add_message
-    # 持久化到 sessions/<agent_id>/session_<member_session_id>_*.json，
+    # 持久化到 <数据根>/<agent_id>/sessions/session_<member_session_id>_<日期>.json
+    # （落点由 `SessionManager._get_session_dir` 解析——活体实测过，别按字面拼路径去找它），
     # 完全复用单 agent 会话存储/历史恢复/usage 记账——不建第二套管线。
     # Windows 文件名安全。
     member_session_id: str = ""
@@ -367,17 +378,14 @@ class SwarmManager:
 
         P1（2026-09-10）：subagent_id 可省略——前台 spawn 被工具层转后台时，
         信封里的 task_id（bg_xxx）查不了 swarm 记录，主 agent 需按最近列表
-        主动轮询。列表模式截断 report 省 token，精确查询传 id。
+        主动轮询。列表与精确查询都给 report 全文（本工具是主链路，正文不砍），
+        体量由条数界定，不按字面量截断长度。
         """
         if not (subagent_id or "").strip():
-            runs = self.list_all(limit=10)
-            for r in runs:
-                if r.get("report"):
-                    r["report"] = r["report"][:300]
             return {
                 "status": "list",
-                "runs": runs,
-                "hint": "最近派生的子 Agent（新→旧）；精确查询请传 subagent_id",
+                "runs": self.list_all(limit=10),
+                "hint": "最近派生的子 Agent（新→旧，report 全文）；精确查询请传 subagent_id",
             }
         with self._lock:
             run = self._runs.get(subagent_id)
@@ -745,8 +753,10 @@ class SwarmManager:
             },
         )
 
-        # 双通道之池归档：报告进入发起者上下文池，供后续语义召回
+        # 池归档通道：报告进入发起者上下文池，供后续语义召回
         self._archive_to_pool(initiator_agent, run)
+        # 终态回灌通道：带正文投递发起者会话邮箱，供其 loop 下一轮排空
+        self._notifyParentMail(run)
 
     @staticmethod
     def _extract_text(response: Any) -> str:
@@ -808,7 +818,7 @@ class SwarmManager:
             logger.debug("Swarm: 事件广播失败 (%s): %s", event_name, e)
 
     def _archive_to_pool(self, initiator_agent: Optional[Any], run: SubAgentRun) -> None:
-        """双通道之池归档：子 Agent 报告进入发起者的上下文池（活水，按需召回）"""
+        """池归档通道：把终态信封归档进发起者的上下文池（活水，按需召回）"""
         if initiator_agent is None or run.status != SUBAGENT_COMPLETED or not run.report:
             return
         try:
@@ -817,13 +827,74 @@ class SwarmManager:
             pool = getattr(initiator_agent, "context_pool", None)
             if pool is None:
                 return
-            content = f"[子Agent报告] {run.agent_name}({run.agent_id}) 关于「{run.task[:80]}」: {run.report[:2000]}"
+            content = (
+                "[子Agent报告] "
+                + json.dumps(self._uplinkEnvelope(run), ensure_ascii=False)
+            )
             pool.add_context(
                 ContextInput(source=ContextSource.EXPERIENCE, content=content)
             )
-            logger.info("Swarm: 子 Agent 报告已归档进发起者上下文池 (%s)", run.subagent_id)
+            logger.info("Swarm: 子 Agent 终态信封已归档进发起者上下文池 (%s)", run.subagent_id)
         except Exception as e:  # noqa: BLE001 - 归档失败不影响返回
             logger.debug("Swarm: 报告归档失败: %s", e)
+
+    def _uplinkEnvelope(self, run: SubAgentRun) -> Dict[str, Any]:
+        """旁路上报的信封投影单源：关键信息 + 下钻指针，不含正文。
+
+        正文有两个去处——主链路的 `to_dict()["report"]`（全文，同轮送达）与 member
+        会话的 json（该子任务的全过程）。旁路再各抄一遍，就得为它发明长度尺度，
+        那三处 `[:400]`/`[:2000]`/`[:300]` 的字面量正是这么长出来的。
+
+        指针按 `agent_id` + `session_id` 二元组给：member 会话由写侧落在**子 Agent**
+        的目录下，只带 session_id 的寻址会去主 Agent 的目录找一个不在那儿的地址。
+        """
+        return {
+            "kind": "subagent_terminal",
+            "subagent_id": run.subagent_id,
+            "agent_id": run.agent_id,
+            "agent_name": run.agent_name,
+            "origin": run.origin,
+            "depth": run.depth,
+            "status": run.status,
+            "cause": run.cause,
+            "error": run.error,
+            "duration": run.duration,
+            "model": run.model,
+            "node_id": run.node_id,
+            "execution_id": run.execution_id,
+            "transcript": {
+                "agent_id": run.agent_id,
+                "session_id": run.member_session_id,
+                "recall": (
+                    f"recall_history(agent_id={run.agent_id}, "
+                    f"session_id={run.member_session_id})"
+                ),
+            },
+        }
+
+    def _notifyParentMail(self, run: SubAgentRun) -> None:
+        """终态回灌通道：把终态信封投递发起者会话的邮箱。
+
+        投递点是**终态**而不是 `spawn()` 的返回处——后台派生返回那一刻子任务还没
+        跑完，绑在返回处投不出终态；而报告在信封里只有一个键名 `report`
+        （见 `SubAgentRun.to_dict()`），在下游猜键名正是本处取代的旧形态。
+        失败/超时/取消同样投：终态沉默会让主 Agent 以为子任务还在跑。
+
+        只认 chat 来源——workflow 派生的报告交给引擎的 `output`，它的 `session_id`
+        只是事件广播目标，投进邮箱无人排空。
+        """
+        if run.origin != "chat" or not run.session_id:
+            return
+        try:
+            from neurova.agent.mailbox import get_agent_mailbox
+
+            get_agent_mailbox().push(
+                run.session_id,
+                "[子Agent终态] "
+                + json.dumps(self._uplinkEnvelope(run), ensure_ascii=False),
+            )
+        except Exception as e:  # noqa: BLE001 - 回灌失败不影响主流程
+            logger.debug("Swarm: 邮箱回灌失败 (%s): %s", run.subagent_id, e)
 
 
 # ── 单例生命周期 ────────────────────────────────────────────────
