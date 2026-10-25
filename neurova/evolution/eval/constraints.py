@@ -149,18 +149,68 @@ def semantic_similarity(a: str, b: str) -> float:
     return _token_jaccard(a, b)
 
 
-def _embedding_similarity(a: str, b: str) -> Optional[float]:
-    """尝试用项目 embedding 引擎算余弦;任何不可用原因都返回 None(不抛)。
+#: 取引擎这一步"没拿到可用引擎"的唯一哨兵值。它与"相似度算出差值"必须分开：
+#: 前者要回退到词面下界，后者要如实返回——两者都折进 `None` 时，`None` 就同时
+#: 表达"没有向量"和"向量算出了空"，调用方无从分辨。
+_ENGINE_UNAVAILABLE = object()
 
-    只消费**已初始化**的引擎(启动期 ONNX 懒加载策略,见 09-09 启动性能
-    修复):进化闸不触发模型加载,未就绪即 Jaccard 回退——离线可跑。
+
+def _noteEngineProbe(state: str) -> None:
+    """把"这一跳走到了哪一步"落进模块级读面（`probed` / `ready`）。
+
+    为什么要有这一格：判据要能分辨三件事——**根本没取引擎**（语义面被摘掉）、
+    **取了但没就绪就回退**（正常路径）、**取了且就绪**（用了向量）。只看返回值
+    分不出前两者（都回退到词面下界），于是把语义闸整段删掉也能"绿得很干净"。
+    """
+    global _SEMANTIC_ENGINE_TOUCHED
+    _SEMANTIC_ENGINE_TOUCHED = str(state)
+
+
+#: 取引擎这一跳的读数（空串 = 本轮进程里这一跳一次都没走到）。
+_SEMANTIC_ENGINE_TOUCHED = ""
+
+
+def _initialized_embedding_engine():
+    """取**已初始化**的 embedding 引擎；取不到回 `_ENGINE_UNAVAILABLE`。
+
+    ⚠ 这里只许读 `is_initialized`、**不许**调 `initialize_sync()`：工厂
+    `get_embedding_engine()` 在引擎缺席时会懒建一个 `ONNXEmbeddingEngine`，而它的
+    `initialize_sync()` 走 `ModelDownloader.ensure_model(..., auto_download=True)`——
+    也就是**在一条判据的路径上出网拉 130MB 权重**。`requirements-ci` 刻意不带
+    torch/onnxruntime/模型权重，于是这一跳在 CI 上要么超时、要么把跑测挂到整场
+    被平台掐断；开关也仍在，CI 一联网就会真下大件。懒加载策略要求"进化闸不触发
+    模型加载"，所以这里只认**已经就绪**的引擎，其余一律回退。
     """
     try:
         from neurova.embedding import get_embedding_engine
 
         engine = get_embedding_engine()
-        if engine is None or not engine.is_initialized():
+        if engine is None or not engine.is_initialized:
+            return _ENGINE_UNAVAILABLE
+        return engine
+    except Exception:  # noqa: BLE001 - 引擎装配失败属可选依赖缺席,回退词面
+        return _ENGINE_UNAVAILABLE
+    finally:
+        # 每一次判据都会走这一跳，必须让"这一跳走到了、且没去建模型"可被**读**出来：
+        # 只写在注释里的纪律，下一次有人把 `initialize_sync()` 加回来时没有任何东西会红
+        # （判据 `tests/unit/evolution/eval/test_semanticGateLoadsNoModel.py` 读这一格）。
+        if _SEMANTIC_ENGINE_TOUCHED != "ready":
+            _noteEngineProbe("probed")
+
+
+def _embedding_similarity(a: str, b: str) -> Optional[float]:
+    """尝试用项目 embedding 引擎算余弦;任何**不可用**原因都返回 None(不抛)。
+
+    只消费**已初始化**的引擎(启动期 ONNX 懒加载策略,见 09-09 启动性能
+    修复):进化闸不触发模型加载,未就绪即 Jaccard 回退——离线可跑。
+    """
+    try:
+        engine = _initialized_embedding_engine()
+        if engine is _ENGINE_UNAVAILABLE:
             return None
+        # 取向量一律走 `encodeOrNone`：全零向量是"引擎兜底"不是"有向量"（并发会话那笔
+        # `encodeOrNone` 的口径更彻底，按其收口）。这一跳只在**已就绪**的引擎上发生。
+        _noteEngineProbe("ready")
         va, vb = engine.encodeOrNone(a), engine.encodeOrNone(b)
         if va is None or vb is None:
             return None

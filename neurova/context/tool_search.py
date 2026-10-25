@@ -27,6 +27,9 @@ _BM25_K1 = 1.2
 _BM25_B = 0.75
 
 _TOKEN_SPLIT = re.compile(r"[^a-z0-9\u4e00-\u9fff]+")
+# 中文连续段的最小长度：低于它只剩单字噪声，不进词表（与 `knowledge.search.tokenize`
+# 的下限同口径；那里 jieba 路径同样丢弃 <2 字符的 token）。
+_MIN_CJK_RUN = 2
 
 # B0 预算治理：
 # 目录单条 description 截断上限——超预算时旧行为是整行丢工具（工具对模型
@@ -86,7 +89,28 @@ _ACTIVE_CATALOG: List[Dict[str, Any]] = []
 
 
 def _tokenize(text: str) -> List[str]:
-    return [t for t in _TOKEN_SPLIT.split(str(text).lower()) if t]
+    """检索词表：拉丁/数字按整段，中文按 2-3 字连续片段。
+
+    中文不能整段当一个 token——`[^a-z0-9\u4e00-\u9fff]+` 的切分对中文是无操作，
+    于是「查询天气」是一条词、「天气」是另一条，两者永不相等：目录里明明有天气工具，
+    查「天气」的检索却是零命中。而零命中在生产侧会被投递成「能力缺口」并驱动自主造工具
+    （`handle_control_tool` 的 S3 投递点）——词表口径的缺陷被翻译成了一个假缺口。
+    """
+    tokens: List[str] = []
+    for run in _TOKEN_SPLIT.split(str(text).lower()):
+        if not run:
+            continue
+        if re.fullmatch(r"[a-z0-9]+", run):
+            tokens.append(run)
+            continue
+        if len(run) < _MIN_CJK_RUN:
+            continue
+        for size in (2, 3):
+            tokens.extend(
+                run[start:start + size]
+                for start in range(len(run) - size + 1)
+            )
+    return tokens
 
 
 def build_catalog(tools: List[Dict]) -> List[Dict[str, Any]]:
@@ -212,11 +236,11 @@ def _hybrid_scores(query: str, entries: List[Dict[str, Any]]) -> Optional[Dict[s
         # 引擎缺档时 `encode` 老实交一列 0：拿它算余弦，每条目的 combined 都是 0，
         # `search_catalog` 于是把"引擎没就绪"读成"一条都不相关"——词面那一路本来能命中的
         # 也一并被吞掉。算得出算不出由引擎自己判（`encodeOrNone`），这一层只做降级。
-        q_vec = engine.encodeOrNone(query)
+        q_vec = engine.encodeOrNone(query) if hasattr(engine, "encodeOrNone") else engine.encode(query)
     except Exception as err:  # noqa: BLE001 - 编码故障降级，不阻断检索
         logger.debug("T3 查询嵌入失败，回落 BM25: %s", err)
         return None
-    if q_vec is None:
+    if q_vec is None or vector_math.isZeroVector(q_vec):
         logger.debug("T3 嵌入引擎未就绪，检索回落 BM25")
         return None
     with _index_lock:
@@ -226,11 +250,11 @@ def _hybrid_scores(query: str, entries: List[Dict[str, Any]]) -> Optional[Dict[s
             stored = vectors.get(e["name"])
             if stored is None or stored.get("fp") != _entry_fingerprint(e):
                 try:
-                    entry_vec = engine.encodeOrNone(_embed_text(e))
+                    entry_vec = engine.encodeOrNone(_embed_text(e)) if hasattr(engine, "encodeOrNone") else engine.encode(_embed_text(e))
                 except Exception as err:  # noqa: BLE001 - 单条失败该条仅 BM25 分
                     logger.debug("T3 条目 %s 嵌入失败: %s", e["name"], err)
                     continue
-                if entry_vec is None:
+                if entry_vec is None or vector_math.isZeroVector(entry_vec):
                     # 索引只存真向量：零向量入索引会让该条目的余弦恒 0，且指纹相同就永不重试。
                     continue
                 vectors[e["name"]] = {"fp": _entry_fingerprint(e), "v": entry_vec}

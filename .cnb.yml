@@ -55,7 +55,7 @@
 #     平台最小调度间隔 5 分钟，周级用第 5 段（星期）表达；本文件的周级巡检
 #     流水线（deploy-config 的时间维度兜底）同样不计入 `main.push` 的条数。
 #   - 单条流水线内的 stages 串行；任一 stage 失败即中止该流水线。
-#   - runner.cpus: N 对应内存 N×2GiB（本文件最大 4 → 8GiB）。
+#   - runner.cpus: N 对应内存 N×2GiB（本文件最大 8 → 16GiB）。
 #   - docker.volumes 为构建节点级缓存（copy-on-write 默认），跨节点不共享；
 #     同一流水线内不得声明存在包含关系的卷路径。
 #   - YAML 锚点仅在同文件内可用（跨文件 include 不支持锚点），
@@ -145,7 +145,12 @@ main:
     - name: unit-tests
       runner:
         tags: cnb:arch:amd64
-        cpus: 4
+        # 受保护子集 716 档，容器必须真装得下它。此前 cpus: 4（8GiB）在 82% 处
+        # 被 SIGKILL（构建 `cnb-rja-1k5pv9gbl#003`，`code: 137`，22m13s）——
+        # 日志里一条失败墙都没有，不是"有测试红了"，是宿主内存超限。
+        # 抬到 8（16GiB）：判据见 tests/unit/ci/test_unit_tests_runner_has_headroom.py，
+        # 它按"子集真条目数 × 单档足迹 + 底噪 × 余量"算需求，改子集或改 cpus 都会当场作答。
+        cpus: 8
       docker:
         image: python:3.12
         volumes:
@@ -192,8 +197,19 @@ main:
           #   2. 十几分钟零输出会让「无输出超时」这条生命线失去意义，也让
           #      「平台强杀」与「跑挂」两种形态在日志上彻底同形。
           # 这里改成 `tee` 之后按退出码判定：日志照存（排障要全文），stdout 照出（进度与
-          # 失败摘要都在），两者都不牺牲。`PIPESTATUS[0]` 取 pytest 自己的退出码——
-          # 写成 `$?` 会拿到 `tee` 的，门禁从此恒绿。
+          # 失败摘要都在），两者都不牺牲。
+          #
+          # **退出码不许用 `${PIPESTATUS[0]}`**：这些 stage 的脚本由 `sh`（dash）解释，
+          # 那是 bash 专有语法。实测构建 `cnb-8qu-1k5q3m315#003`：7954 passed / 覆盖率
+          # 88.10% / 一行 `================================================================`
+          # 全绿之后紧跟 `sh: 5: Bad substitution`，stage 以 **exit 2** 收场——
+          # **门禁在最后一行断言之外自己变红**。前几轮没撞见它，是因为它们都在到达
+          # 这一行之前就死了（137 OOM / 断言红），是「红盖着红」把这一行藏住了。
+          # 同一行本机 `sh` 下复现同一条报错（行号一致），`bash` 下才正常。
+          #
+          # 故判据改成「先落一个标记文件，再按标记判」：不依赖 shell 数组，
+          # `sh`/`bash`/`zsh` 下同义，且**仍然取的是 pytest 自己的退出码**
+          # （写成 `$?` 会拿到 `tee` 的，门禁从此恒绿）。
           #
           # `tee` 的输入必须走 stderr（`2>&1` 只挪 fd，不改行缓冲）：只要 stdout 落在管道里，
           # Python 就按 4KiB/8KiB 块缓冲写，构建输出是几十秒才攒满一块——平台「长时间无输出」
@@ -202,12 +218,16 @@ main:
           # 才是「每行都立刻可见」。
           script: |
             TESTS=$(grep -v '^#' scripts/ci/protected_tests.txt | tr '\n' ' ')
-            set -o pipefail
-            python -u -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS \
-              2>&1 | tee /tmp/pytest_protected.log
-            RC=${PIPESTATUS[0]}
+            MARK=/tmp/pytest_protected.rc
+            rm -f "$MARK"
+            # `{ ...; echo $? > "$MARK"; }` 里的 `$?` 是 **pytest** 的退出码（它紧跟 pytest，
+            # 中间没有别的命令），`tee` 只负责转发与落盘。整段的退出码因此可判：
+            # 标记在 ⇒ 取标记里的值；标记不在 ⇒ pytest 根本没跑起来，按 1 收（不许静默绿）。
+            { python -u -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS \
+                2>&1; echo $? > "$MARK"; } | tee /tmp/pytest_protected.log
+            RC=$(cat "$MARK" 2>/dev/null || echo 1)
             echo "── pytest 退出码: $RC（日志全文 /tmp/pytest_protected.log）"
-            exit $RC
+            exit "$RC"
           timeout: 90m
 
     # ── 5. E2E：后端启动冒烟 ─────────────────────────────────────────────
