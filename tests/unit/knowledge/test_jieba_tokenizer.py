@@ -195,3 +195,29 @@ class TestJiebaHasOneWarmEntry:
             search_mod._jieba = original
 
         assert not failures, f"并发取用失败：{failures}"
+
+
+class TestWarmUpFace:
+    """字典冷启动是**进程级一次性**成本，必须有一个能问、能催的口（§6-420）。
+
+    CI 实测：`test_service_closed_loop::test_accept_produces_pending_proposal` 在某次全量
+    跑里 30s 超时，回溯落在 `jieba.initialize() → gen_pfdict`——建字典，不在被测逻辑；
+    同机器单跑 2.5s（字典已被同场更早的档暖过）。判据读数取决于"谁先跑到"，属前提形态。
+    """
+
+    def testWarmUpIsIdempotentAndReported(self):
+        from neurova.knowledge import search
+
+        assert search.warmJieba() is True, "装了 jieba 就该能建起字典"
+        assert search.isJiebaWarm() is True
+        # 再催一次不重来（`_get_jieba` 的双检锁直接命中已建实例）
+        assert search.warmJieba() is True
+
+    def testUnavailableIsReportedAsColdNotAsWarm(self, monkeypatch):
+        """不可用要如实说"没暖"，不许把 `False` 记成 `True`——那会让判据以为字典已就绪。"""
+        from neurova.knowledge import search
+
+        monkeypatch.setattr(search, "_jieba", False)
+        assert search.isJiebaWarm() is False
+        monkeypatch.setattr(search, "_jieba", None)
+        assert search.isJiebaWarm() is False
