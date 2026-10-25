@@ -12,6 +12,7 @@ import pytest
 
 from neurova.computer_use.browser_manager import (
     BrowserResult,
+    HAS_PLAYWRIGHT,
     PlaywrightBackend,
     ScraplingBackend,
 )
@@ -127,6 +128,12 @@ class TestPlaywrightRoleLocator:
     @pytest.mark.asyncio
     async def test_click_role_timeout_returns_error_result(self):
         """元素不存在/不可交互时必须返回错误结果而非抛异常（agent 可读）"""
+        if not HAS_PLAYWRIGHT:
+            pytest.skip(
+                "精简锁不含 playwright（requirements-ci.txt 的排除名单），"
+                "`playwright.async_api.TimeoutError` 无从取——这一格测的是超时被折成失败结果，"
+                "缺件时等价于测不了，不是行为回归"
+            )
         from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
         backend, page = _make_backend_with_page()

@@ -733,6 +733,142 @@ class TestCiTestRunnerAndFixtureDepsAreReal:
             "修复：uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
         )
 
+    def test_embeddingRuntimeDepsDeclaredInCi(self):
+        """受保护子集里"向量分量与生产同链路"的判据，CI 清单必须声明其两件运行时。
+
+        形态（2026-10-25 复现）：`ONNXEmbeddingEngine.initialize_sync()` 在
+        `onnxruntime` 或 `tokenizers` 缺席时返回 False，`encode()` 遂走零向量兜底；
+        而受保护子集里的 `test_longTermMemoryBaselineGate.py`（15 例）、
+        `test_associativeRecallGate.py`、`test_cueVectorChannel.py`、
+        `test_cueFanoutDecoupledFromBatchC3.py`、`test_muscle_memory_recall.py`
+        的判据全部建立在"向量有意义"之上，且**刻意不做 skip**（skip 会把它们变成
+        看着在、实际从不运行的件）。于是薄环境里同时红 19 例，
+        每一条的红因都指向同一件事：不是代码坏了，是环境缺件。
+
+        与 numpy（2026-10-23）/ reportlab / pypdf / rich 同一根因、同一处置：
+        "只在生产清单声明、不在 CI 清单声明"。故按**行为**钉两件——
+        真初始化引擎、真编码，读数必须是真向量。
+
+        `transformers` / `sentencepiece` **不在**此列：实测逐件屏蔽
+        （meta_path 拦截）后，只要上面两件在，`tokenizer.json` 直读即成功，
+        两者缺席不影响初始化——它们体积大且连带 torch，属本清单刻意排除之列。
+        """
+        ci = io.open(PROJECT_ROOT / "requirements-ci.txt", encoding="utf-8").read()
+        lock = io.open(PROJECT_ROOT / "requirements-ci.lock", encoding="utf-8").read()
+        for pkg in ("onnxruntime", "tokenizers"):
+            assert re.search(rf"(?m)^\s*{pkg}\s*[><=!~]", ci), (
+                f"requirements-ci.txt 缺 {pkg} 声明——受保护子集里"
+                "test_longTermMemoryBaselineGate / test_associativeRecallGate 等 19 例"
+                "的向量分量与生产同链路，缺席即零向量兜底，判据读数无意义。"
+            )
+            assert re.search(rf"(?m)^{pkg}==", lock), (
+                f"requirements-ci.lock 缺 {pkg} pin——CI 装的是锁文件。\n"
+                "修复：uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
+            )
+
+    def test_localEmbeddingEngineYieldsRealVectors(self):
+        """本机装了解释器就必须真出向量：零向量是"环境缺件"的显式形态。
+
+        判据按行为打，不按清单形状打——清单里写了名字但装不上的情形，
+        只有真跑一次编码才看得见。引擎是进程级单例，故造独立实例、用完即弃。
+        """
+        from neurova.embedding.onnx_embedding import ONNXEmbeddingEngine
+
+        engine = ONNXEmbeddingEngine()
+        try:
+            if not engine.initialize_sync():
+                import importlib.util as ilu
+
+                missing = [m for m in ("onnxruntime", "tokenizers")
+                           if ilu.find_spec(m) is None]
+                assert not missing, (
+                    f"嵌入引擎初始化失败，且 {'/'.join(missing)} 确实没装——"
+                    "这是环境缺件，不是被测代码的结论。装完再跑。"
+                )
+                pytest.fail(
+                    "嵌入引擎初始化失败，但两件运行时都在——这是真断链，按根因修。"
+                )
+            vector = engine.encode("把阳台浇花的活改成每周三定时自动滴灌")
+            assert vector, "引擎返回空向量"
+            assert any(abs(x) > 1e-12 for x in vector), (
+                "嵌入引擎给出的是零向量：模型档在，但分词器/ONNX 运行时没装上。"
+                "本仓的向量判据与生产同链路，零向量下读数无意义。"
+            )
+        finally:
+            closer = getattr(engine, "close", None)
+            if callable(closer):
+                closer()
+
+    def test_evalOutboundGateCoversTheLiveSingleton(self):
+        """eval 目录的出站闸必须钉在**取单例那一刻**，不是导入时那个类。
+
+        形态（2026-10-25 实测）：`SimulatedAgent` 与 `SyntheticDatasetBuilder` 都不持有客户端
+        实例，它们每次 `get_multi_model_client()` 现取再 `.chat(...)`。只钉 `MultiModelLLMClient`
+        类时，单例一旦被换成另一个类的实例（前序用例重置过、或换了装配），补丁一行都不生效 ——
+        闸成了哑闸，用例落到真实 provider 等待上，在 CI 全量批跑里撞 `pytest-timeout`，
+        而单跑目录却全绿（同一份代码两种读数，那种绿比红更难查）。
+
+        判据按行为打，不按形状打：真的把单例换成另一个类，再真的调一次 `chat`，
+        必须被拦下且抛的是闸自己的 `_RealLlmCallAttempted`。
+        """
+        import asyncio
+
+        from tests.unit.evolution.eval import conftest as evalConftest
+
+        class _AlienClient:
+            calls = 0
+
+            async def chat(self, *args, **kwargs):
+                _AlienClient.calls += 1
+                return {"success": True, "response": "真发出去了"}
+
+            async def chat_stream(self, *args, **kwargs):
+                _AlienClient.calls += 1
+
+        import neurova.llm.multi_model_client as mmc
+        from neurova.evolution.eval.synthetic import SyntheticDatasetBuilder
+
+        class _Recorder:
+            """最小 monkeypatch 替身：只记下 setattr，用例结束按记录原样撤回。"""
+
+            def __init__(self) -> None:
+                self.undo = []
+
+            def setattr(self, target, name, value, raising=True):
+                had = hasattr(target, name)
+                old = getattr(target, name, None)
+                self.undo.append((target, name, had, old))
+                setattr(target, name, value)
+
+        recorder = _Recorder()
+        original = mmc._multi_model_client
+        gate = evalConftest._blockOutboundLlmCalls.__wrapped__(recorder)
+        next(gate)  # 进到 yield
+        try:
+            mmc._multi_model_client = _AlienClient()
+            builder = SyntheticDatasetBuilder.__new__(SyntheticDatasetBuilder)
+            builder.config = type("_C", (), {"judge_model": ""})()
+            builder._llm_call = None
+            try:
+                asyncio.run(builder._call_llm([{"role": "user", "content": "x"}], ""))
+            except BaseException as exc:  # noqa: BLE001 - 闸自己的异常是 BaseException 子类
+                assert type(exc).__name__ == "_RealLlmCallAttempted", (
+                    f"闸抛的不是它自己那一型：{type(exc).__name__}: {exc}")
+            else:
+                raise AssertionError(
+                    "换过类的单例把闸绕过去了：`get_multi_model_client()` 交回的实例身上没有拦子。")
+            assert _AlienClient.calls == 0, "真客户端被调到了 —— 闸没拦住"
+        finally:
+            mmc._multi_model_client = original
+            for target, name, had, old in reversed(recorder.undo):
+                if had:
+                    setattr(target, name, old)
+                else:
+                    try:
+                        delattr(target, name)
+                    except AttributeError:
+                        pass
+
     def test_protected_subset_keeps_fixture_consumers(self):
         """本守卫自身的靶点必须留在受保护子集里，否则回归无人看。
 
