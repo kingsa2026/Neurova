@@ -258,6 +258,10 @@ class KnowledgeVectorIndex:
                 str(e.get("knowledge_id", "")): e for e in entries if e.get("knowledge_id")
             }
 
+            # 本轮的计数起点：只在真有 `to_compute` 的分支里赋值的话，增量那一轮
+            # （to_compute 为空）会以 `computed` 未定义收场——UnboundLocalError 被下面的
+            # `except` 吞成一条 errors，读数看上去是「0 条目」。
+            computed = 0
             to_compute: List[Tuple[str, Dict[str, Any]]] = []
             for kid, entry in desired.items():
                 fp = _fingerprint(entry)
@@ -295,10 +299,11 @@ class KnowledgeVectorIndex:
                 except Exception as e:  # noqa: BLE001
                     logger.warning("向量索引：embedding 批量计算失败: %s", e)
                     return {"computed": 0, "entry_count": len(records)}
-                computed = 0
 
                 for (kid, entry), vec in zip(to_compute, vectors):
-                    if vec is None:
+                    if vec is None or vector_math.isZeroVector(vec):
+                        # 注入引擎（无 `encodeOrNone`）可能照样交全零：写进索引就永久隐身，
+                        # 且指纹未变、下轮不重算。同一个口径，不落记录。
                         continue
                     computed += 1
                     records[kid] = {
@@ -369,11 +374,11 @@ class KnowledgeVectorIndex:
             items = [(kid, dict(rec)) for kid, rec in records.items()]
 
         try:
-            qv = engine.encodeOrNone(query)
+            qv = engine.encodeOrNone(query) if hasattr(engine, "encodeOrNone") else engine.encode(query)
         except Exception as e:  # noqa: BLE001
             logger.warning("向量索引：query 编码失败: %s", e)
             return []
-        if qv is None or vector_math.vectorNorm(qv) <= vector_math.ZERO_NORM_EPSILON:
+        if vector_math.isZeroVector(qv):
             return []
 
         annHits = self._searchAnn(

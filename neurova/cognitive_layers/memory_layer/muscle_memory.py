@@ -72,12 +72,12 @@ def _lexical_coverage(item_fingerprint: str, query_fingerprint: str) -> float:
 
 
 def _semantic_vector(text: str) -> Optional[List[float]]:
-    """计算语义向量；失败/关闭返回 None（调用方回落词面分支）。
+    """计算语义向量；算不出来返回 None（调用方回落字符覆盖度分支）。
 
-    零向量也按"没算出来"返回 None：引擎缺档（`requirements-ci.txt` 刻意不含
-    onnxruntime/tokenizers）时它会老实交一列 0，拿去存进条目就把"有向量"这件事
-    伪造成了事实——余弦恒 0，随后 `_compute_confidence` 又落回 MD5 等值那一支，
-    近似问法的置信度直接掉到门槛下方。算得出算不出由引擎自己判（`encodeOrNone`）。
+    零向量不是"两句不相似"的证据，是"这一路没算出来"：按"有向量"交给
+    `_compute_confidence`，它会走"有向量"分支、余弦恒 0，**再也回落不到**字符覆盖度，
+    缺陷在读数里完全不可见（本仓实测：换实体近似句的置信度停在 0.5875）。算得出算不出
+    由引擎自己判（`encodeOrNone`，那一处的单源），本层不再凭全零反推一遍。
     """
     if not text or not _semantic_enabled():
         return None
@@ -88,7 +88,7 @@ def _semantic_vector(text: str) -> Optional[List[float]]:
         vec = engine.encodeOrNone(text)
     except Exception:  # noqa: BLE001
         return None
-    if vec is None:
+    if vec is None or vector_math.isZeroVector(vec):
         return None
     # 存储瘦身：4 位小数足够分档，落盘体积减半以上
     return [round(float(x), 4) for x in vec]
@@ -394,7 +394,7 @@ class MuscleMemory:
         item_emb = item.metadata.get("query_embedding") if _semantic_enabled() else None
         # 存量条目里躺着引擎缺档期写下的零向量：那不是向量，是"当时没算出来"。
         # 按它算余弦会得到恒 0，再落回 MD5 等值那一支——近似问法当场判死。
-        if item_emb is not None and not any(item_emb):
+        if item_emb is not None and vector_math.isZeroVector(item_emb):
             item_emb = None
         if query_emb and item_emb:
             sim = vector_math.cosineSimilarity(query_emb, item_emb)

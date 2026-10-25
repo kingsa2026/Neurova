@@ -33,6 +33,7 @@
 import ast
 import json
 import pathlib
+from pathlib import Path
 import re
 
 import pytest
@@ -83,8 +84,8 @@ def _resolutionCallsIn(src: str, funcName: str) -> list:
             and node.func.attr in ("get_adapter", "resolveInboundAdapter")]
 
 
-def _bareAdapterLookups(trees) -> dict:
-    """数"无 agent 维度的渠道取实例"落点。trees = [(relPath, 语法树)]。
+def _isBareAdapterLookup(node) -> bool:
+    """这**一个** `ast.Call` 是不是"无 agent 维度的渠道取实例"落点。
 
     三条口径都是被本仓的伪命中教出来的：① 只看接收者是 `manager`/`mgr`/`self` 的
     `.get_adapter(...)`——技能市场那个 `self.registry.get_adapter(market)` 是**同名异面**，
@@ -92,39 +93,56 @@ def _bareAdapterLookups(trees) -> dict:
     只认关键字会把 `manager.py` 里两处合法调用误报成欠账；③ `resolveInboundAdapter` 是本批新立的
     唯一入口，不该被算成欠账。
     """
-    hits = {}
-    for rel, tree in trees:
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
-                continue
-            if node.func.attr != "get_adapter":
-                continue
-            if not (isinstance(node.func.value, ast.Name)
-                    and node.func.value.id in ("manager", "mgr", "self")):
-                continue
-            if len(node.args) >= 2 or any(k.arg == "agent_id" for k in node.keywords):
-                continue
-            hits.setdefault(rel, []).append(node.lineno)
-    return hits
+    if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+        return False
+    if node.func.attr != "get_adapter":
+        return False
+    if not (isinstance(node.func.value, ast.Name)
+            and node.func.value.id in ("manager", "mgr", "self")):
+        return False
+    if len(node.args) >= 2 or any(k.arg == "agent_id" for k in node.keywords):
+        return False
+    return True
 
 
-def _neurovaTrees() -> list:
-    """`[(相对路径, 语法树)]`——枚举与解析都走 `tests/ast_scan.py` 的一次性入口。
+def _bareAdapterLookupLines(tree) -> list:
+    """单文件语法树里的落点行号（合成样本与自证格用；全仓面走 `_bareAdapterLookups`）。"""
+    return [node.lineno for node in ast.walk(tree) if _isBareAdapterLookup(node)]
 
-    原来这里是 `(rel, text)` + 各消费方自己 `ast.parse`：枚举走共享入口而解析自付，
-    正是门禁点名的"免检通道"形状；一次性入口 `transientTree` 不留常驻语法树，
-    成本与代码总量脱钩（本文件只扫一遍，不存在第二次命中）。
+
+def _bareAdapterLookups() -> dict:
+    """`{相对路径: [行号]}`——整棵树扫一遍，**枚举与解析都花在共享预算上**。
+
+    ## 扫描面与解析量不是一件事
+
+    旧版是 `[(rel, transientTree(path)) for path in filesUnder(NEUROVA)]`：把生产根下**全部**
+    1053 个文件的语法树同时留在 `list` 里。实测（本机 cpython 3.12，同一棵树）：
+
+    ```
+    旧版：1053 棵同时在 list 里 → 峰值 RSS 478.6 MB, 5.79s
+    现版：预筛后 10 档进解析     → 峰值 RSS  47.8 MB, 0.11s
+    ```
+
+    这份 478MB 与用例要判的东西毫无关系——它只是"整棵树同时在内存里"。CI 的
+    `unit-tests` 腿（4 核 = 8GiB，还要带 `--cov` 与 7964 格）跑到 82% 时被内核杀掉
+    （构建 `cnb-rja-1k5pv9gbl#003`：日志尾部一条 `Killed`、再 `Finished, code: 137`），
+    而死点正好落在本档。判据本身没有红格，红的是"判据自己的内存形状"。
+
+    ## 走共享预算，不自己写枚举 + 解析
+
+    谓词只认 `get_adapter` 这一个属性名，`ast_scan.callNodes` 正好是"带文本预筛的属性调用
+    取数口"：预筛（连这三个字都没出现的文件不解析）＋逐文件解析 ＋ 逐条产出节点，全部在
+    `tests/ast_scan.py` 的预算内完成，本档不持有一棵树。预筛是**充分条件**不是取样——
+    任何一条真命中都必然带着 `get_adapter` 这一串字。
     """
-    out = []
-    for path in ast_scan.filesUnder(NEUROVA):
-        try:
-            out.append((ast_scan.relativeToRepo(path), ast_scan.transientTree(path)))
-        except SyntaxError:
-            continue
-    assert len(out) > 500, (
-        f"扫描面现读 {len(out)} 档（根＝{NEUROVA}，本判据的域＝生产源码）——"
-        "根被改窄时这份「只有 default」的读数根本不来自代码")
-    return out
+    hits = {}
+    for path, node in ast_scan.callNodes(NEUROVA, "get_adapter"):
+        if _isBareAdapterLookup(node):
+            hits.setdefault(ast_scan.relativeToRepo(path), []).append(node.lineno)
+    assert len(ast_scan.filesUnder(NEUROVA)) > 500, (
+        f"扫描面现读 {len(ast_scan.filesUnder(NEUROVA))} 档（根＝{NEUROVA}，本判据的域＝生产源码）"
+        "——根被改窄时这份「只有一处欠账」的读数根本不来自代码")
+    return hits
 
 
 @pytest.fixture()
@@ -270,8 +288,7 @@ class TestTheResolutionHasOneFace:
             "    c = manager.get_adapter('feishu', 'kai')",           # 位置参数写法：放过
             "    d = manager.registry.get_adapter('feishu')",         # 同名异面：放过
         ])
-        assert _bareAdapterLookups([("synthetic.py", ast.parse(src))]) == {
-            "synthetic.py": [2]}, "探测器口径失真"
+        assert _bareAdapterLookupLines(ast.parse(src)) == [2], "探测器口径失真"
 
     def testRegisteredDebtSitesAreCountedByShape(self):
         """同根因余点由判据自己数——登记不等于留白：新长出一处裸调就红，落点消失了也必须销行。
@@ -285,10 +302,103 @@ class TestTheResolutionHasOneFace:
                 "共享面板的一栏只读状态——它读的这份渠道状态本身没有 agent 维度（sharing 配置是全局的），"
                 "要一并 agent 化属 sharing 整块的那次裁定，不在 §6-189/§6-190 两批里顺手改",
         }
-        hits = _bareAdapterLookups(_neurovaTrees())
+        hits = _bareAdapterLookups()
         extra = set(hits) - set(known)
         assert extra == set(), (
             f"新长出一处无 agent 维度的渠道取实例，先裁再合：{[(f, hits[f]) for f in sorted(extra)]}")
         vanished = set(known) - set(hits)
         assert vanished == set(), (
             f"登记表里的落点已消失，同批把那一行销掉（别留过期豁免）：{sorted(vanished)}")
+
+
+def _codeNames(tree) -> set:
+    """语法树里**真被调用/引用**的名字（不含注释与字符串字面量）。
+
+    判据要说的是"代码还走不走那个入口"，不是"文里有没有这几个字"：注释与 docstring
+    里出现旧写法的字样，恰恰是把根因留给后来人的地方。
+    """
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.add(node.attr)
+    return names
+
+
+class TestTheScanFaceDoesNotCarryItsTreesResident:
+    """扫描面必须走**共享预算**入口，不许自己枚举 + 解析、更不许把整片树举在内存里。
+
+    ## 要防的那件事（不是判据红，是判据自己把跑测撑死）
+
+    `tests/unit` 的受保护子集在 CI 上跑到 82% 时被内核杀掉（构建
+    `cnb-rja-1k5pv9gbl#003`：日志尾部一条 `Killed`、再 `Finished, code: 137`）。
+    死点正好落在这档——它此前把生产根下全部 1053 个文件的语法树同时装进 `list`
+    交给探测器。本机同一棵树上实测：
+
+    ```
+    旧版：1053 棵同时在 list 里 → 峰值 RSS 478.6 MB, 5.79s
+    现版：预筛后 10 档进解析     → 峰值 RSS  47.8 MB, 0.11s
+    ```
+
+    478MB 与用例要判的东西毫无关系，却要与 7964 格、`--cov` 插桩、8GiB 的 runner
+    一起抢内存。**判据的形状因此也是判据的一部分。**
+
+    ## 判据只认形状
+
+    扫描面必须经 `ast_scan` 的共享入口（`callNodes` / `callSites` / `sourceRefsUnder`
+    一族），代码里不得再出现"自己 `ast.parse` 生产源码"与"整批取树"的入口。
+    反向控制：把扫描面换回 `ast.parse(ref.code)` 即红。
+    """
+
+    def _face(self, path=None) -> str:
+        target = path or (REPO / "tests" / "unit" / "api"
+                          / "test_channelWebhookResolvesAdapterByAgentTable.py")
+        source = Path(target).read_text(encoding="utf-8")
+        names = _calledNames(ast.parse(source))
+        assert "callNodes" in names, (
+            "扫描面没走 `ast_scan.callNodes`——自己枚举 + `ast.parse` 生产源码就是"
+            "「成本随代码总量涨」的写法，且入口处一旦攒 list 就是 478MB 那笔账"
+            "（构建 cnb-rja-1k5pv9gbl#003 的 `Killed`）")
+        for banned in ("transientTree", "parsedModules", "walkedModules"):
+            assert banned not in names, (
+                f"扫描面又回到整批取树的入口（`{banned}`）——那会把全仓语法树攒在内存里")
+        return source
+
+    def testScanFaceGoesThroughTheSharedBudget(self):
+        self._face()
+
+    def testDetectorBitesTheResidentTreeShape(self, tmp_path):
+        """反向控制：把扫描面换回自付解析，本档必须红（判据不是对固定文件的快照）。"""
+        target = (REPO / "tests" / "unit" / "api"
+                  / "test_channelWebhookResolvesAdapterByAgentTable.py")
+        original = target.read_text(encoding="utf-8")
+        body = 'for path, node in ast_scan.callNodes(NEUROVA, "get_adapter"):'
+        assert body in original, "反向控制样本没改到目标形状"
+        drifted = tmp_path / "drifted.py"
+        drifted.write_text(
+            original.replace(
+                body,
+                'for path, node in [(p, n) for p in ast_scan.filesUnder(NEUROVA)\n'
+                '                    for n in ast.walk(ast_scan.transientTree(p))]:',
+                1,
+            ),
+            encoding="utf-8",
+        )
+        with pytest.raises(AssertionError):
+            self._face(drifted)
+
+
+def _calledNames(tree) -> set:
+    """语法树里**真被调用/引用**的名字（不含注释与字符串字面量）。
+
+    判据要说的是"代码还走不走那个入口"，不是"文里有没有这几个字"：注释与 docstring
+    里出现旧写法的字样，恰恰是把根因留给后来人的地方。
+    """
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.add(node.attr)
+    return names

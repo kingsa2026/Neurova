@@ -164,7 +164,14 @@ class SemanticSearch:
         # 而日志上一切正常——判断留给引擎自己（`encodeOrNone` 是那一处的单源）。
         if self._embedding_model:
             try:
-                embedding = self._embedding_model.encodeOrNone(text)
+                # 注入引擎可能只有 `encode`、没有 `encodeOrNone`（判据侧的替身就是这一形）：
+                # 两者都认，但"算没算出"仍按同一个口径判，不在这一层另立一套。
+                if hasattr(self._embedding_model, "encodeOrNone"):
+                    embedding = self._embedding_model.encodeOrNone(text)
+                else:
+                    embedding = self._embedding_model.encode(text)
+                    if vector_math.isZeroVector(embedding):
+                        embedding = None
             except Exception as e:
                 logger.warning("嵌入生成失败: %s", e)
                 embedding = None
