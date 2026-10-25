@@ -209,9 +209,15 @@ def _hybrid_scores(query: str, entries: List[Dict[str, Any]]) -> Optional[Dict[s
         return None
     bm25 = _bm25_scores(query, entries)
     try:
-        q_vec = engine.encode(query)
+        # 引擎缺档时 `encode` 老实交一列 0：拿它算余弦，每条目的 combined 都是 0，
+        # `search_catalog` 于是把"引擎没就绪"读成"一条都不相关"——词面那一路本来能命中的
+        # 也一并被吞掉。算得出算不出由引擎自己判（`encodeOrNone`），这一层只做降级。
+        q_vec = engine.encodeOrNone(query)
     except Exception as err:  # noqa: BLE001 - 编码故障降级，不阻断检索
         logger.debug("T3 查询嵌入失败，回落 BM25: %s", err)
+        return None
+    if q_vec is None:
+        logger.debug("T3 嵌入引擎未就绪，检索回落 BM25")
         return None
     with _index_lock:
         vectors = _load_index(_model_fingerprint(engine))
@@ -220,10 +226,15 @@ def _hybrid_scores(query: str, entries: List[Dict[str, Any]]) -> Optional[Dict[s
             stored = vectors.get(e["name"])
             if stored is None or stored.get("fp") != _entry_fingerprint(e):
                 try:
-                    vectors[e["name"]] = {"fp": _entry_fingerprint(e), "v": engine.encode(_embed_text(e))}
-                    changed = True
+                    entry_vec = engine.encodeOrNone(_embed_text(e))
                 except Exception as err:  # noqa: BLE001 - 单条失败该条仅 BM25 分
                     logger.debug("T3 条目 %s 嵌入失败: %s", e["name"], err)
+                    continue
+                if entry_vec is None:
+                    # 索引只存真向量：零向量入索引会让该条目的余弦恒 0，且指纹相同就永不重试。
+                    continue
+                vectors[e["name"]] = {"fp": _entry_fingerprint(e), "v": entry_vec}
+                changed = True
         if changed:
             _save_index(_model_fingerprint(engine), vectors)
     bmax = max(bm25.values()) if bm25 else 1.0

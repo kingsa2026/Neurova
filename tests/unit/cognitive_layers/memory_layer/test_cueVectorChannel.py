@@ -72,9 +72,13 @@ def _attachModelCues(mgr: MemoryManager, rows: dict) -> None:
 def corpus(tmp_path):
     from neurova.embedding import get_embedding_engine
 
-    assert get_embedding_engine() is not None, (
-        "本判据测的是生产同款稠密检索，缺本地 ONNX 档时读数无意义"
-        "（前提与 test_onnx_lazy_init_deadlock.py 一致，不以 skip 蒙过）"
+    engine = get_embedding_engine()
+    # 「引擎对象在」不等于「能算出向量」：精简 CI 锁不含 onnxruntime/tokenizers 时
+    # 它是个实例、却每次都交一列 0，通道随即一条都注不进来——读数无意义，结论却是红的。
+    # 前提自给按引擎自己的判定问（`encodeOrNone` 是那一处的单源）。
+    assert engine is not None and engine.encodeOrNone("通道的前提自证") is not None, (
+        "本判据测的是生产同款稠密检索，缺能算向量的本地 ONNX 档时读数无意义"
+        "（不以 skip 蒙过：装了模型却算不出，仍然是红）"
     )
     # 单例复位必须在这里做：`get_semantic_search()` 是进程级单例，而记忆 id 是每个 fixture
     # 从 mem_000001 确定性重放的——上一个用例并进去的线索词会串到下一个用例的倒排里，

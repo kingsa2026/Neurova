@@ -72,15 +72,23 @@ def _lexical_coverage(item_fingerprint: str, query_fingerprint: str) -> float:
 
 
 def _semantic_vector(text: str) -> Optional[List[float]]:
-    """计算语义向量；失败/关闭返回 None（调用方回落 MD5 分支）。"""
+    """计算语义向量；失败/关闭返回 None（调用方回落词面分支）。
+
+    零向量也按"没算出来"返回 None：引擎缺档（`requirements-ci.txt` 刻意不含
+    onnxruntime/tokenizers）时它会老实交一列 0，拿去存进条目就把"有向量"这件事
+    伪造成了事实——余弦恒 0，随后 `_compute_confidence` 又落回 MD5 等值那一支，
+    近似问法的置信度直接掉到门槛下方。算得出算不出由引擎自己判（`encodeOrNone`）。
+    """
     if not text or not _semantic_enabled():
         return None
     engine = _get_engine()
     if engine is None:
         return None
     try:
-        vec = engine.encode(text)
+        vec = engine.encodeOrNone(text)
     except Exception:  # noqa: BLE001
+        return None
+    if vec is None:
         return None
     # 存储瘦身：4 位小数足够分档，落盘体积减半以上
     return [round(float(x), 4) for x in vec]
@@ -384,6 +392,10 @@ class MuscleMemory:
         # 在它下面永远拿不到分——这正是"断层"的第二半。字符覆盖度衡量问法骨架
         # 是否一致，与上面按 token（含 2-gram）的多集包含度互补而不重复。
         item_emb = item.metadata.get("query_embedding") if _semantic_enabled() else None
+        # 存量条目里躺着引擎缺档期写下的零向量：那不是向量，是"当时没算出来"。
+        # 按它算余弦会得到恒 0，再落回 MD5 等值那一支——近似问法当场判死。
+        if item_emb is not None and not any(item_emb):
+            item_emb = None
         if query_emb and item_emb:
             sim = vector_math.cosineSimilarity(query_emb, item_emb)
             if sim > 0.75:
@@ -463,6 +475,10 @@ class MuscleMemory:
         emb = _semantic_vector(query)
         if emb:
             metadata["query_embedding"] = emb
+        else:
+            # 引擎这轮没给向量（缺档/未就绪）：不得把上一次留下的向量冒充成这一次的——
+            # 条目若续用旧向量，`_compute_confidence` 会拿它算这一次问句的余弦。
+            metadata.pop("query_embedding", None)
 
         with self._lock:
             # 尝试找到已有的条目
@@ -514,6 +530,10 @@ class MuscleMemory:
             item.result_summary = result_summary
             if metadata:
                 item.metadata.update(metadata)
+                if "query_embedding" not in metadata:
+                    # 这一次没算出向量：旧向量作废（见 record_usage 处的同一条口径），
+                    # 否则改写过的问法会继续沿用上一版问句的向量。
+                    item.metadata.pop("query_embedding", None)
 
             # 固化检查：连续成功 N 次提升层级
             if item.consecutive_successes >= _PROMOTE_THRESHOLD:

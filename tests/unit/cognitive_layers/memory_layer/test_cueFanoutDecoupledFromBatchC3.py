@@ -94,7 +94,14 @@ def fanoutManager(tmp_path):
     from neurova.embedding import get_embedding_engine
     from neurova.cognitive_layers.memory_layer.semantic_search import reset_semantic_search
 
-    assert get_embedding_engine() is not None, "本判据需要本地 ONNX 档（缺档时通道不点火，测不到门）"
+    engine = get_embedding_engine()
+    # 「引擎对象在」不等于「能算出向量」：`requirements-ci.txt` 刻意不含
+    # onnxruntime/tokenizers 时它照样是个实例，只是每次都交一列 0。本档的前提是
+    # **通道真能点火**（否则扇出门与它要挡的候选一条都不存在，读数是空的）。
+    # 引擎自己判这件事（`encodeOrNone` 是那一处的单源），这里只转述。
+    assert engine is not None and engine.encodeOrNone("门的前提自证") is not None, (
+        "本判据需要能算出向量的本地 ONNX 档（缺档时通道不点火，扇出门测不到）"
+    )
     reset_semantic_search()
     mgr = MemoryManager(
         db_path=os.path.join(str(tmp_path), "mem.db"), agent_id="cue_fanout_c3", enable_buffer=False
