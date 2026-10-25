@@ -481,8 +481,17 @@ class MemoryManager:
         try:
             from neurova.cognitive_layers.memory_layer.storage import MemoryStorage
 
-            db_dir = os.path.dirname(self._db_path) or "."
-            storage_dir = os.path.join(db_dir, "memory_storage")
+            # `db_path=":memory:"` / 纯文件名这类没有目录的库，`dirname` 是空串——
+            # 旧写法 `or "."` 于是把 JSON 存储落进**进程 CWD**（跑测时即仓库根）。
+            # 落点规则：有库目录就与库同目录（既有契约）；没有就由数据根推导
+            # （与 `storage.defaultStorageDir()` 同一纪律：先有唯一的根，再谈根下叫什么）。
+            db_dir = os.path.dirname(self._db_path)
+            if not db_dir:
+                from neurova.core.data_root import dataLanding
+
+                storage_dir = str(dataLanding("memory_storage"))
+            else:
+                storage_dir = os.path.join(db_dir, "memory_storage")
             os.makedirs(storage_dir, exist_ok=True)
             self._storage = MemoryStorage(storage_dir=storage_dir)
             logger.debug("MemoryStorage initialized: %s", storage_dir)

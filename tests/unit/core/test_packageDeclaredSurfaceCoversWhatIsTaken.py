@@ -59,7 +59,17 @@ import ast
 import functools
 from pathlib import Path
 
+import pytest
+
 from tests import ast_scan
+
+# 本档是**全仓扫描**类判据：`takenPerModule` 要把 3000 余个跟踪 `.py` 逐个解析、
+# 再把取用面与包门面交叉。pyproject 的全局 30s 是给普通单元用例定的，带 `--cov`
+# 插桩后纯 CPU 的 AST 遍历按 ×2～×3.7 惩罚（与本仓 2026-10-24 那次墙钟事故同源），
+# 实测 CI 上就是 `Timeout (>30.0s)` 而墙上没有任何断言红。
+# 抬到 180s：比最慢实测读数（local 25.6s，单格）留足余量，又仍宽于整档实跑，
+# 让"真挂死"由诚实超时说话，而不是被默认口径误杀。
+pytestmark = [pytest.mark.timeout(180)]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
