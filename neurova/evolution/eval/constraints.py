@@ -161,8 +161,8 @@ def _embedding_similarity(a: str, b: str) -> Optional[float]:
         engine = get_embedding_engine()
         if engine is None or not engine.is_initialized():
             return None
-        va, vb = engine.encode(a), engine.encode(b)
-        if not va or not vb:
+        va, vb = engine.encodeOrNone(a), engine.encodeOrNone(b)
+        if va is None or vb is None:
             return None
         raw = vector_math.tryCosineSimilarity(va, vb)
         if raw is None:
@@ -182,19 +182,33 @@ def _tokenize(text: str) -> set[str]:
     latin_runs = re.findall(r"[a-z0-9]+", text.lower())
     tokens.update(r for r in latin_runs if len(r) >= 2)
     cjk_runs = re.findall(r"[\u4e00-\u9fff]+", text)
-    if cjk_runs:
-        try:
-            import jieba
-
-            for run in cjk_runs:
-                tokens.update(w for w in jieba.cut(run) if len(w) >= 2)
-        except Exception:  # noqa: BLE001 - jieba 缺席时用二元组保持粒度
-            for run in cjk_runs:
-                if len(run) == 1:
-                    tokens.add(run)
-                else:
-                    tokens.update(run[i : i + 2] for i in range(len(run) - 1))
+    jieba = _jiebaModule()
+    if cjk_runs and jieba is not None:
+        for run in cjk_runs:
+            tokens.update(w for w in jieba.cut(run) if len(w) >= 2)
+    elif cjk_runs:
+        for run in cjk_runs:
+            if len(run) == 1:
+                tokens.add(run)
+            else:
+                tokens.update(run[i : i + 2] for i in range(len(run) - 1))
     return tokens
+
+
+def _jiebaModule():
+    """取 jieba：走 `knowledge.search` 那一个入口，不在这里裸 import。
+
+    裸 `import jieba` 只是把模块名拿到手，前缀字典仍是**首次 cut 时**才建（实测 0.5–0.8s，
+    CI 并行场里被 GIL 争抢放大到 8s+）——那笔账会落在"哪条无关键恰好第一个调到这里"身上，
+    上层完全看不出来。`knowledge.search._get_jieba()` 已在取用时把字典建完并把缺失记成
+    不可用，本模块复用它（教义第 6 条：同一件东西只有一处取用口）。
+    """
+    try:
+        from neurova.knowledge.search import _get_jieba
+
+        return _get_jieba()
+    except Exception:  # noqa: BLE001 - 取用口本身不可达时用二元组保持粒度
+        return None
 
 
 def _token_jaccard(a: str, b: str) -> float:

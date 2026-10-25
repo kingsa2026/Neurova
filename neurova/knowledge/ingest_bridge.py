@@ -14,6 +14,7 @@ import base64
 import datetime
 import json
 import re
+import threading
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
@@ -357,13 +358,18 @@ async def runIngestWorker(
 
 
 _bridge: Optional[KnowledgeIngestBridge] = None
+_bridgeLock = threading.RLock()
 
 
 def get_ingest_bridge() -> KnowledgeIngestBridge:
+    """懒建单例（DCL + RLock，AGENTS.md §3）：并发下只建一份。"""
     global _bridge
-    if _bridge is None:
-        _bridge = KnowledgeIngestBridge()
-    return _bridge
+    if _bridge is not None:
+        return _bridge
+    with _bridgeLock:
+        if _bridge is None:
+            _bridge = KnowledgeIngestBridge()
+        return _bridge
 
 
 def ingestEnabled(adapter: Any) -> bool:

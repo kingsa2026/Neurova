@@ -139,6 +139,36 @@ def _isolate_connection_pools():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_api_app_state():
+    """模块级全局 app 状态跨用例复位（`neurova.api.app._app_state`／`endpoints._app_state`）。
+
+    形态（2026-10-25 实测）：某用例 `with TestClient(create_app())` 跑完 lifespan 后，
+    `create_app()` 建的那份 `AppState`（`agents` 里已经装着启动期建出来的 default agent）
+    仍被两个模块级全局变量指着。下一个用例再 `create_app()` 会建新的，但
+    `neurova.api.endpoints.get_app_state()` 读到的是**上一份**——它带着一个
+    `memory_manager` 非空的 agent，于是"未就绪"那条路再也走不到：
+
+    - 单跑 `test_MemoryReadFaceRefusesToPaintFailureAsSuccess.py`：503（预期）；
+    - 同一进程里先跑 `test_monitorContractHonestWhenNoProducer.py`（它进出 lifespan）：
+      变成 200 —— 断言"故障不许画成成功"的那两格当场红。
+
+    这不是被测代码的缺陷，是测试进程内的跨用例状态泄漏：读侧的两处 `get_app_state()`
+    一份从 `neurova.api.app` 取、一份从 `neurova.api.endpoints` 取，复位必须同时清两处，
+    否则"清了一处、另一处还指着旧对象"——正是本仓点名的"两边各持一半"形态。
+    复位放在**用例结束后**（与上面几个 `_isolate_*` 同形），不碰用例内的装配。
+    """
+    yield
+    try:
+        from neurova.api import app as _appModule
+        from neurova.api import endpoints as _endpointsModule
+    except Exception:  # pragma: no cover - 模块不可用时跳过
+        return
+    _appModule._app_state = None
+    _appModule._app_instance = None
+    _endpointsModule._app_state = None
+
+
+@pytest.fixture(autouse=True)
 def _isolate_execution_engine_singleton():
     """ExecutionEngine 单例跨测试隔离（Issue #65）。
 
@@ -956,11 +986,11 @@ def _closeWeightEgressDuringTests(request, monkeypatch):
         site = importlib.import_module(moduleName)
         monkeypatch.setattr(site, attr, _weightEgressGate.refusalFor(moduleName, attr))
 
-# ── 根外锚的测试隔离（§6-388）──────────────────────────────────────────────
-# 生产的锚落点是 `~/.neurova/artifact_anchors.json`（**数据根之外**，理由见
+# ── 锚文件的测试隔离（§6-388）──────────────────────────────────────────────
+# 生产的锚落点是 `<数据根>/artifacts/artifact_anchors.json`（取法见
 # `artifact_digest.anchorPath` 的注释）。跑测时任何一次"钉摘要/装技能/装插件"都会
-# 去写那儿——所以按与数据根同形的思路在跑测期改指临时目录，且**仍在数据根之外**
-# （否则"锚在数据根里"这条会自己消失，判据就测不到实态）。
+# 去写那儿——默认按与数据根同形的思路改指临时目录，免得落进某个用例自己的隔离根。
+# 注意这条夹具**不改变**落点语义：锚仍与账本同根（整库回滚的检测边界见台账）。
 ANCHOR_SESSION_DIR = Path(tempfile.mkdtemp(prefix="neurovaAnchors-"))
 
 
