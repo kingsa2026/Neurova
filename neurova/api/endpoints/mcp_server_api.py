@@ -36,6 +36,9 @@ from neurova.api.auth import get_current_user_or_service, security
 from neurova.core.identity_context import set_request_user_id
 from neurova.core.logger import get_logger
 
+if typing.TYPE_CHECKING:  # 只作注解用；`neurova.tool_layers.mcp_server` 运行时按需 import
+    from neurova.tool_layers.mcp_server import McpCaller
+
 logger = get_logger(__name__)
 
 _SERVER_NAME = "neurova"

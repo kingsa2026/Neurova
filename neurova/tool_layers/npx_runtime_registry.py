@@ -43,7 +43,7 @@ PINNED: Dict[str, str] = {
     # 反检测浏览器服务（neurova/computer_use/camofox_supervisor.py 常驻拉起）
     "@askjo/camofox-browser": "1.16.0",
     # MCP 白名单目录：context7 库文档检索（neurova/tool_layers/mcp_catalog.py）
-    "@upstash/context7-mcp": "4.1.1",
+    "@upstash/context7-mcp": "4.4.4",
     # MCP 白名单目录：dbhub 只读 SQL（同文件）
     "@bytebase/dbhub": "1.2.5",
     # 共享配置默认模板里的 filesystem MCP server（neurova/shared_config.py）

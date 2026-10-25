@@ -97,6 +97,13 @@ tests/unit/api/test_channelIdentityBindingEndpoints.py
 #   详情端点原样读回（三态各自出声：attached / missing / none_recorded）。
 #   两格分别打在"生产写侧真的写出这些键"与"HTTP 响应里真的带着运行"上；后者还钉住
 #   列表面不夹带运行明细（与"列表不夹带正文"同一口径）。
+# eval 目录的出站闸必须钉在「取单例那一刻」而不是导入时那个类。形态：SimulatedAgent /
+# SyntheticDatasetBuilder 每次 get_multi_model_client() 现取再 .chat(...)，单例被换成另一个类
+# 时只钉类的那层补丁一行都不生效 → 用例落到真实 provider 等待上，CI 全量批跑撞
+# pytest-timeout (>30s)，而单跑目录全绿（同代码两种读数）。判据在
+# tests/unit/test_dev_path_and_runtime_dep_guards.py::TestCiTestRunnerAndFixtureDepsAreReal
+# 的 test_evalOutboundGateCoversTheLiveSingleton（按行为打：换类后真调一次必须被拦）。
+# 入册前逐文件单跑全绿（43 passed）。
 tests/unit/evolution/eval/test_service_closed_loop.py
 tests/unit/api/test_text_evolution_api.py
 # Issue #55 P1：共享线程池复用（禁止热路径每次新建池）
@@ -2723,6 +2730,16 @@ tests/unit/channels/test_channelVoiceFactorySeamCloses.py
 # 另 13 条第二组候选在 HEAD 态逐格复跑 13/13 同红 ⇒ 全部预存不认领。
 # 入册前逐文件单跑三次同读数 11 passed（6.0~6.3s，含全仓 AST 数实现那一格）。
 tests/unit/core/test_denseCosineSingleSource.py
+# §6-419 续：零向量只有一种口径（`vector_math.isZeroVector`）+ 中文词表不得整段当一个 token。
+# 两处都是"静默做成假读数"的形态，不是抛错：`tool_search` 把引擎兜底的全零向量当有效向量，
+# 余弦恒 0 且**再也不回落 BM25** ⇒ 该查询恒空手，而空手在生产侧被投递成「能力缺口」并驱动
+# 自主造工具（`handle_control_tool` 的 S3 点）；词表那半是 `_TOKEN_SPLIT` 对中文无操作，
+# 「查询天气」与「天气」永不相等，目录里明明有天气工具却查不到。`muscle_memory` 同一根因
+# 的另一命中点：零向量入 metadata 后 `_compute_confidence` 走"有向量"分支、不回落到字符
+# 覆盖度，换实体近似句的置信度停在 0.5875（票面判据要 ≥0.85）。判据两向都钉：阈值不许在
+# 下游再抄一份（1e-9 那形），且这些模块必须真问过单源。入册前逐文件单跑三次同读数
+# 9 passed / 15 passed；红自证＝只按路径还原三处生产件 ⇒ 恰 4 格翻红、无收集错误。
+tests/unit/context/test_tool_search_semantic.py
 # §6-181 渠道 webhook 分派链：验签必须先于投递（安全判据，仿冒必拒 + 合法必通成对）。
 # 危害是活体量出来的，不是读代码读出来的：飞书支与钉钉支此前不做任何验签，把请求体直接拼成
 # ChannelMessage 投进 manager，而 sender_id 取自请求体 ⇒ 任何人能对已配置渠道冒充任意平台用户
@@ -3850,6 +3867,15 @@ tests/unit/security/test_liveRedactionDoorsUseTheSharedEngine.py
 # 读数一致（context 2 条属并会话在途 orchestrator、llm 5 条跨文件污染、memory/cognitive 4 条
 # 数据根与 bus 旧账、security/skills 2 条治理闸既有红），本批不新增红。
 tests/unit/security/test_redactionDoorsShareOneLeakClosure.py
+# §6-417（本单新增；并线 main 时 §6-404 已被批 M 占走，本单改号）：本地执行体的取消挂钩必须随进程结束而摘掉，且只服务"起进程之后"的取消。
+# 病灶是一对生命周期错配：令牌按**轮**持有、杀灭回调按**进程**注册。上一发命令结束后回调仍
+# 留在令牌上（实测残留 1 条），本轮任何一次取消都会去杀一个早已结束的 pid；更直接的坏法在
+# 第二发：它 `Popen` 出来注册回调时令牌**已置位**，注册口按"迟到的回调立即兑现"当场把它杀掉
+# ——实测第一发 `print(1)` 成功、本轮 `cancel("user")` 之后下一发立即 `exit_code=-9`。
+# 两格打行为不打形状：① 执行完令牌零残留；② 取消之后新起的命令照常跑完。红→绿实测：
+#   改回旧登记行 ⇒ ②红（exit=-9）；恢复 ⇒ 2 passed（令牌侧另有 4 格钉"摘钩键必须是令牌给的那个"）。
+# 入册前逐文件单跑全绿（2 passed）。
+tests/unit/execution/test_execLocalRuntimeHangsUpKillHook.py
 # 静态门禁的"未定义名称"判据只许报**真·未定义**，不许把注解专用名算成缺陷。
 # 形态：CI static-gate 腿报 6 处 F821，5 处是注解里的名字（实体在函数体内懒加载，
 # 模块级导入会拉 `neurova.agent` 包 __init__ → `tool_executor` 的循环，AGENTS.md §3）。
@@ -3919,3 +3945,9 @@ tests/unit/test_tunnelStateEnumSingleSource.py
 tests/unit/agent/test_subagentTerminalReachesParentMail.py
 tests/unit/agent/test_subagentUplinkEnvelopeSharedByBothBypassPaths.py
 tests/unit/tools/test_recallHistoryReachesSubagentTranscript.py
+# §6-420 受保护子集那一腿的资源欠账：容器装不下自己（构建 cnb-rja-1k5pv9gbl#003
+# 跑到 82% 被 SIGKILL，code 137，一条失败墙都没有）。cpus 4→8（16GiB），
+# 判据按"子集真条目数 × 单档足迹 + 底噪 × 余量"算需求与墙钟下限，两侧都带反向控制。
+# 口径取**合并后**的清单：718 档（716 + §6-419 的补登项不新增文件 + 本档）。
+# 入册前置：逐文件单跑两次同读数 4/4（本机 2026-10-25 现跑）。
+tests/unit/ci/test_unit_tests_runner_has_headroom.py
