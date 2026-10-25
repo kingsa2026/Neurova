@@ -733,6 +733,76 @@ class TestCiTestRunnerAndFixtureDepsAreReal:
             "修复：uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
         )
 
+    def test_evalOutboundGateCoversTheLiveSingleton(self):
+        """eval 目录的出站闸必须钉在**取单例那一刻**，不是导入时那个类。
+
+        形态（2026-10-25 实测）：`SimulatedAgent` 与 `SyntheticDatasetBuilder` 都不持有客户端
+        实例，它们每次 `get_multi_model_client()` 现取再 `.chat(...)`。只钉 `MultiModelLLMClient`
+        类时，单例一旦被换成另一个类的实例（前序用例重置过、或换了装配），补丁一行都不生效 ——
+        闸成了哑闸，用例落到真实 provider 等待上，在 CI 全量批跑里撞 `pytest-timeout`，
+        而单跑目录却全绿（同一份代码两种读数，那种绿比红更难查）。
+
+        判据按行为打，不按形状打：真的把单例换成另一个类，再真的调一次 `chat`，
+        必须被拦下且抛的是闸自己的 `_RealLlmCallAttempted`。
+        """
+        import asyncio
+
+        from tests.unit.evolution.eval import conftest as evalConftest
+
+        class _AlienClient:
+            calls = 0
+
+            async def chat(self, *args, **kwargs):
+                _AlienClient.calls += 1
+                return {"success": True, "response": "真发出去了"}
+
+            async def chat_stream(self, *args, **kwargs):
+                _AlienClient.calls += 1
+
+        import neurova.llm.multi_model_client as mmc
+        from neurova.evolution.eval.synthetic import SyntheticDatasetBuilder
+
+        class _Recorder:
+            """最小 monkeypatch 替身：只记下 setattr，用例结束按记录原样撤回。"""
+
+            def __init__(self) -> None:
+                self.undo = []
+
+            def setattr(self, target, name, value, raising=True):
+                had = hasattr(target, name)
+                old = getattr(target, name, None)
+                self.undo.append((target, name, had, old))
+                setattr(target, name, value)
+
+        recorder = _Recorder()
+        original = mmc._multi_model_client
+        gate = evalConftest._blockOutboundLlmCalls.__wrapped__(recorder)
+        next(gate)  # 进到 yield
+        try:
+            mmc._multi_model_client = _AlienClient()
+            builder = SyntheticDatasetBuilder.__new__(SyntheticDatasetBuilder)
+            builder.config = type("_C", (), {"judge_model": ""})()
+            builder._llm_call = None
+            try:
+                asyncio.run(builder._call_llm([{"role": "user", "content": "x"}], ""))
+            except BaseException as exc:  # noqa: BLE001 - 闸自己的异常是 BaseException 子类
+                assert type(exc).__name__ == "_RealLlmCallAttempted", (
+                    f"闸抛的不是它自己那一型：{type(exc).__name__}: {exc}")
+            else:
+                raise AssertionError(
+                    "换过类的单例把闸绕过去了：`get_multi_model_client()` 交回的实例身上没有拦子。")
+            assert _AlienClient.calls == 0, "真客户端被调到了 —— 闸没拦住"
+        finally:
+            mmc._multi_model_client = original
+            for target, name, had, old in reversed(recorder.undo):
+                if had:
+                    setattr(target, name, old)
+                else:
+                    try:
+                        delattr(target, name)
+                    except AttributeError:
+                        pass
+
     def test_protected_subset_keeps_fixture_consumers(self):
         """本守卫自身的靶点必须留在受保护子集里，否则回归无人看。
 
