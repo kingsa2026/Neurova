@@ -72,9 +72,10 @@ def test_全仓不得再有单参调用形态():
     for rootName in SCAN_ROOTS:
         # 枚举走共享预算（`tests/ast_scan.sourceRefsUnder`）：本判据的谓词是「文本里出现
         # `_retrieve_memories` 才可能有单参调用」，hints 是这条谓词的充分条件，口径不变。
+        # 解析走一次性入口 `transientTree`：本档对同一棵树只走一遍，留常驻树只会让 gen2 按图收费。
         for ref in ast_scan.sourceRefsUnder(REPO_ROOT / rootName, ".py",
                                             hints=("_retrieve_memories",)):
-            lines = _singleArgCallsIn(ref.code)
+            lines = _singleArgCallsIn(ast_scan.transientTree(ref.path))
             if lines:
                 offenders.append(
                     f"{ref.path.relative_to(REPO_ROOT).as_posix()}:{lines}"
