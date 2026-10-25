@@ -373,6 +373,26 @@ def transientTree(path: Path) -> ast.AST:
     return ast.parse(sourceCode(path))
 
 
+def transientTrees(root: Path, suffix: str = ".py",
+                   hints: Tuple[str, ...] = ()) -> Iterator[Tuple[Path, ast.AST]]:
+    """**一次性**产出 `(路径, 语法树)`：不留常驻树，也**不让调用方自己枚举/解析**。
+
+    与 `transientNodes` 同一族（同样吃文本预筛、同样不进 `_cachedParse`），
+    区别是交出**树**而不是节点表：判据要按"模块层语句"这类结构位置读它，或者
+    同一棵树要读好几件事（走两遍 `ast.walk`）时，走这个入口只解析一遍 —— 而
+    自己 `filesUnder` + `ast.parse` 的写法既把成本绑在代码总量上，也让同一份文本
+    被反复编译（受保护子集实测：一次全仓取证解析三遍同一批 `.py`，30s 墙钟超时）。
+
+    什么时候**不**用它：会跨判据重复扫的（走 `parsedModules` / `nodeScan`），
+    预算实现自身（走 `sourceRefsUnder`）。
+    """
+    for ref in sourceRefsUnder(root, suffix, hints):
+        try:
+            yield ref.path, ast.parse(ref.code)
+        except SyntaxError:
+            continue
+
+
 def transientNodes(root: Path, suffix: str = ".py",
                    hints: Tuple[str, ...] = ()) -> Iterator[Tuple[Path, ast.AST]]:
     """**一次性**逐节点产出 `(路径, 节点)`，不留常驻语法树。
@@ -617,6 +637,27 @@ def namesTakenFrom(scan: Iterable[Tuple[Path, ast.AST]],
     return hits
 
 
+def _walkNodes(tree: ast.AST) -> List[ast.AST]:
+    """整棵树的节点清单（`ast.walk` 的同义实现）。
+
+    给出这个入口，是为了让"同一棵树要分几趟过"的调用方**只付一次下潜**：
+    本仓实测一遍 `ast.walk` 走 413 万节点要 2.86s，两趟就是白付一趟。
+    `ast.walk` 本身是一次 BFS 生成器，产出序是「父先于子、同级按字段序」。这里用
+    显式栈做 DFS 等价实现，`reversed(list(ast.iter_child_nodes(...)))` 只为把同级的
+    产出序摆回字段序 —— **顺序会改读数**：属性链的归属判据是"该文件 import 过那个前缀"，
+    先撞见 `x.y` 还是先撞见 `import x`，结果就是记不记这一条（实测本仓
+    `neurova/auth/qclaw_binding_model.py` 恰好两者都不按书写序，顺序一错读数就变）。
+    等价性由 `tests/unit/test_ci_ast_scan_budget_guard.py` 与 `takenPerModule` 的对拍钉住。
+    """
+    nodes: List[ast.AST] = []
+    stack = [tree]
+    while stack:
+        node = stack.pop()
+        nodes.append(node)
+        stack.extend(reversed(list(ast.iter_child_nodes(node))))
+    return nodes
+
+
 def takenPerModule(root: Path, suffix: str = ".py") -> dict:
     """一次遍历，按**被取用的绝对模块名**归集"谁从它取了什么名"。
 
@@ -638,9 +679,21 @@ def takenPerModule(root: Path, suffix: str = ".py") -> dict:
         except SyntaxError:
             continue
         rel = relativeToRepo(ref.path)
+        # 下潜**只付一次**：节点先收进一份清单，再在这份清单上分两趟过（import 面 → 属性面）。
+        #
+        # 为什么不能合成一趟：属性链的归属判据是"该文件确实 import 过那个前缀"，而
+        # `ast.walk` 的产出序列由**树形**决定，不由书写顺序：本仓
+        # `neurova/auth/qclaw_binding_model.py` 顶层 `try:` 里的
+        # `import cryptography.hazmat.primitives.kdf.pbkdf2` 就排在函数体里的
+        # `cryptography.fernet.Fernet(...)` **之后**。合成一趟会静默改写读数（实测：
+        # `cryptography.fernet::fernet` 凭空多一条、`…kdf.pbkdf2` 整条消失），而这张表是
+        # 仓内多处判据的事实源，读数必须逐条不变。
+        # 省下的是**下潜**那一遍（本机 2.86s / 413 万节点），不是语义：清单化后两趟
+        # 都只做线性过表（各 0.3s 量级）。
+        nodes = _walkNodes(tree)
         imported = set()                      # 该文件里真被 import 过的绝对模块名
         aliasTo = {}                          # 本地名 → 绝对模块名
-        for node in ast.walk(tree):
+        for node in nodes:
             if isinstance(node, ast.ImportFrom):
                 mod = resolveImportModule(rel, node)
                 if not mod:
@@ -656,7 +709,7 @@ def takenPerModule(root: Path, suffix: str = ".py") -> dict:
                 for a in node.names:
                     imported.add(a.name)
                     aliasTo[(a.asname or a.name).split(".")[0]] = a.name
-        for node in ast.walk(tree):
+        for node in nodes:
             if not isinstance(node, ast.Attribute):
                 continue
             base = node.value

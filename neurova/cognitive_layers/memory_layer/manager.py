@@ -24,6 +24,7 @@ import json
 import datetime
 from neurova.core.content_identity import normalized_key
 from neurova.core import sql_like
+from neurova.core import vector_math
 from neurova.core.db_migration import migrate as applyMigrations, register_migration
 from neurova.core.logger import get_logger
 import os
@@ -74,9 +75,12 @@ def _row_embedding(row) -> "Optional[List[float]]":
     if not raw:
         return None
     try:
-        return json.loads(raw)
+        vector = json.loads(raw)
     except (ValueError, TypeError):
         return None
+    # 存量行里可能躺着引擎缺档期写下的全零：那不是向量，是"当时没算出来"。当"有向量"
+    # 交给召回，余弦恒 0、看上去只是"不相似"，缺陷在读数里再也看不见。
+    return None if vector_math.isZeroVector(vector) else vector
 
 
 # 审计修复 (three-tier-isolation-audit.md P0-1): 请求级隔离作用域。
@@ -1524,15 +1528,9 @@ class MemoryManager:
                     "固化对这些行不可见，直到引擎就绪或走 scripts/backfill_memory_embeddings.py"
                 )
             return None
-        try:
-            vector = [float(x) for x in engine.encode(content)]
-        except Exception as exc:  # noqa: BLE001 - 单条算不出不该断这次写入
-            logger.warning("嵌入计算失败，该行 embedding 留空: %s", exc)
-            return None
-        if not vector or not any(abs(x) > 0.0 for x in vector):
-            logger.warning("引擎回零向量（按未算出处置），该行 embedding 留空")
-            return None
-        return vector
+        # "算没算出向量"由引擎自己判（`encodeOrNone` 是那一处的单源）：零向量与真向量
+        # 在这一步就分开，本行不再凭全零反推——反推要在这里重写一遍同一份判据。
+        return engine.encodeOrNone(content)
 
     def remember(
         self,

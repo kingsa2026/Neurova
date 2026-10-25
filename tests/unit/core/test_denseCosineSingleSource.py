@@ -320,3 +320,81 @@ def testSkillSemanticsScoresAreRealCosinesNotDotProducts():
     scores = skill_semantics.semantic_scores_for(_Cache(), "q", {"alpha": {}})
     assert scores["alpha"] == pytest.approx(1.0), f"点积冒充余弦：实得 {scores['alpha']}"
     assert scores["beta"] == 0.0
+
+
+# ── 三、零向量只有一种口径（`isZeroVector`，§6-419）──
+
+
+def testZeroVectorFaceCoversEveryShapeOfUncomputable():
+    """空、无分量、全零、范数低于阈值都是"这一路没算出来"；有分量的向量一个都不是。
+
+    阈值取 `ZERO_NORM_EPSILON` 本身，不在下游再抄一个 1e-9（见下一格）。
+    """
+    assert vector_math.isZeroVector(None) is True
+    assert vector_math.isZeroVector([]) is True
+    assert vector_math.isZeroVector([0.0] * 512) is True
+    assert vector_math.isZeroVector([1e-15, 0.0]) is True  # 范数 1e-15 < 1e-12
+    assert vector_math.isZeroVector([0.1, 0.2]) is False
+    assert vector_math.isZeroVector([1.0, -1.0, 0.0]) is False
+
+
+#: 零向量这件事有两个落点，二者都只有一处定义（否则就是第三份口径）：
+#: ①「这一轮算没算出向量」由引擎自己判（`ONNXEmbeddingEngine.encodeOrNone`）；
+#: ②「这条向量是不是全零/空」由 `vector_math.isZeroVector` 判——存量条目里躺着的、
+#:    注入引擎交上来的，都要过这一道。
+#: 下面这张表是**存量与注入入口**的命中面：两个口都要真的问过 ②（引擎缺档时交上来的
+#: 是零向量、存量条目里躺着的也是零向量），只走 ① 的地方则必须问过 `encodeOrNone`。
+ZERO_VECTOR_CONSUMERS = [
+    "cognitive_layers/memory_layer/manager.py",
+    "cognitive_layers/memory_layer/muscle_memory.py",
+    "cognitive_layers/memory_layer/semantic_search.py",
+    "context/tool_search.py",
+    "knowledge/vector_index.py",
+    "skills/skill_semantics.py",
+]
+
+
+def testZeroVectorThresholdHasNoSecondCopy():
+    """阈值只许有一处。下游各抄一个 1e-9／`all(abs(x) < ...)` 就是第二份口径：
+    引擎换档、阈值一改，两处读数立刻分叉，而分叉的那一侧永远是静默的那个。"""
+    offenders = []
+    for rel in sorted(set(ZERO_VECTOR_CONSUMERS)):
+        source = (NEUROVA_ROOT / rel).read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, ast.Compare):
+                continue
+            rendered = ast.unparse(node)
+            if "1e-9" in rendered or ("abs(" in rendered and "1e-" in rendered):
+                offenders.append(f"{rel}: {rendered}")
+    assert not offenders, (
+        "零向量阈值在外又抄了一份（应当只用 vector_math.isZeroVector / ZERO_NORM_EPSILON）："
+        f"{offenders}"
+    )
+
+
+def testEveryStockZeroVectorEntryAsksTheSingleFace():
+    """存量与注入入口逐个正检：这些模块要真的问过 `isZeroVector`，而不是各自记着
+    "零向量长什么样"。只走引擎判定口的写侧不在此列（它问的是 `encodeOrNone`）。"""
+    for rel in sorted(set(ZERO_VECTOR_CONSUMERS)):
+        source = (NEUROVA_ROOT / rel).read_text(encoding="utf-8")
+        assert "isZeroVector" in source or "ZERO_NORM_EPSILON" in source, (
+            f"{rel} 没有向单源问过零向量——它要么漏判（把算不出来的存量当有效向量），"
+            "要么自己记了一套阈值"
+        )
+
+
+def testZeroVectorProbeHasTeeth():
+    """反空转：探测器对合成坏样本必须点名，对合规写法不许误报。"""
+    def _offenders(snippet: str) -> list:
+        found = []
+        for node in ast.walk(ast.parse(snippet)):
+            if isinstance(node, ast.Compare):
+                rendered = ast.unparse(node)
+                if "1e-9" in rendered or ("abs(" in rendered and "1e-" in rendered):
+                    found.append(rendered)
+        return found
+
+    assert _offenders("def f(v):\n    return all(abs(x) < 1e-9 for x in v)\n")
+    assert _offenders("def f(v):\n    return max(abs(x) for x in v) < 1e-9\n")
+    assert not _offenders("def f(v):\n    return vector_math.isZeroVector(v)\n")
+    assert not _offenders("def f(v):\n    return vector_math.vectorNorm(v) <= vector_math.ZERO_NORM_EPSILON\n")

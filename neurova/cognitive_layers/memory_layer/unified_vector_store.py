@@ -455,6 +455,10 @@ class UnifiedVectorStore:
         vectors = getattr(result, "vectors", result)
         if not isinstance(vectors, list) or len(vectors) != len(texts):
             return [list(encoder.encode(text)) for text in texts]
+        # 引擎没就绪时批量 API 照样交一批零向量：那不是"不相似"，是"没算出来"。
+        # 整批退回逐条，让下面 `_encode_uncached` 按条落到 TF-IDF 兜底。
+        if hasattr(encoder, "encodeOrNone") and any(not any(vec) for vec in vectors):
+            return [list(encoder.encode(text)) for text in texts]
         return [list(vec) for vec in vectors]
 
     def _encode_uncached(self, text: str) -> List[float]:
@@ -473,7 +477,7 @@ class UnifiedVectorStore:
                         logger.warning("ONNX 编码器初始化失败，降级到 TF-IDF")
                         return self._tfidf_encode(text)
 
-                return self._encoder.encode(text)
+                return self._encoder.encodeOrNone(text) or self._tfidf_encode(text)
             else:
                 vec = list(self._encoder.embed([text]))[0]
             return list(vec)

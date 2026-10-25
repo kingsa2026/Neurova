@@ -325,22 +325,29 @@ class TestEnumerationSharesTheResolutionBaseline:
     修法是收口到一份事实源：既然解析基准只认入库文件，枚举也必须只认入库文件。
     """
 
-    def test_untracked_markdown_is_not_a_carrier(self):
-        """注入一份**未入库**的 Markdown（含空引用），不得被当作载体扫出来。"""
-        probe_dir = PROJECT_ROOT / "_erasure_untracked_probe"
-        probe_dir.mkdir(exist_ok=True)
+    def test_untracked_markdown_is_not_a_carrier(self, tmp_path):
+        """注入一份**未入库**的 Markdown（含空引用），不得被当作载体扫出来。
+
+        落点用 `tmp_path`：探针是"这份扫描树里的一棵未入库子树"，与被扫的树本就可以
+        是任意目录。写在仓库根是自找的——`tests/conftest.py` 的
+        `_guardRepoRootAgainstPollution` 逐用例比对仓库根顶层条目，探针目录在用例内
+        建了又删，取决于断言是否先抛、`finally` 有没有走完，它就可能把**建**这一步记到
+        这一条或下一条用例头上；受保护子集里就发生过这种错位——`test_deploy_config_guard.py`
+        的一条负控被点名成「在仓库根新增了顶层条目 ['_erasure_untracked_probe']」，
+        而探针根本不是它建的。判据要验的是「枚举只认入库文件」，与落点在哪棵树无关。
+        """
+        probe_dir = tmp_path / "repo" / "_erasure_untracked_probe"
+        probe_dir.mkdir(parents=True)
+        (tmp_path / "repo" / "tracked.md").write_text("正文\n", encoding="utf-8")
         probe = probe_dir / "probe.md"
         probe.write_text("参考：`` 与 `neurova/这条路径并不存在_zzz.py`。\n", encoding="utf-8")
-        try:
-            entries = scanner.scanDirectory(PROJECT_ROOT)
-            offenders = [e for e in entries if e["file"].startswith("_erasure_untracked_probe/")]
-            assert not offenders, (
-                "未入库文档被当成了悬空引用的载体——枚举走文件系统、解析走 git 索引，"
-                f"门禁读数会随工作区是否装过依赖而变:\n  {offenders[:3]}"
-            )
-        finally:
-            probe.unlink()
-            probe_dir.rmdir()
+
+        entries = scanner.scanDirectory(tmp_path / "repo")
+        offenders = [e for e in entries if e["file"].startswith("_erasure_untracked_probe/")]
+        assert not offenders, (
+            "未入库文档被当成了悬空引用的载体——枚举走文件系统、解析走 git 索引，"
+            f"门禁读数会随工作区是否装过依赖而变:\n  {offenders[:3]}"
+        )
 
     def test_enumeration_is_not_empty(self):
         """负向控制的反面：收口后枚举不得空转，已入库载体仍须被抓到。"""
