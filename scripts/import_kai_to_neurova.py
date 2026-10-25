@@ -547,9 +547,15 @@ def import_chats(kai_root: Path, sessions_dir: Path, agent_id: str = "kai") -> D
 # ══════════════════════════════════════════════════════════════════
 
 
-def import_identity(kai_root: Path, agent_root: Path) -> Dict[str, int]:
-    """SOUL.md → <agent_root>/soul.md；PROFILE.md → personality.md + workspace 留档；
-    MEMORY.md → workspace 留档。全部覆盖式同步（源即真相）。"""
+def importIdentity(kai_root: Path, agent_root: Path) -> Dict[str, int]:
+    """SOUL.md → `<agent_root>/soul.md`；PROFILE.md → `<agent_root>/personality.md` + 留档；
+    MEMORY.md → workspace 留档。全部覆盖式同步（源即真相）。
+
+    两个身份文件落 **agent 根**，不是 `memory/`：`AgentCore._load_identity` 读的正是
+    `<agent_root>/soul.md` 与 `<agent_root>/personality.md`（`4bf9b733` 把身份文件从
+    记忆目录收口到 agent 根，`agent_layout_migration` 迁移旧布局时也是这个方向）。
+    写进 `memory/` 的版本运行期一个读者都没有——导入看起来成功，人格却是默认那段。
+    """
     kai_root = Path(kai_root)
     agent_root = Path(agent_root)
     workspace = agent_root / "workspaces"
@@ -632,7 +638,7 @@ def main() -> int:
         print(f"[聊天] {chats}")
 
     if not args.skip_identity:
-        ident = import_identity(kai_root, agent_root)
+        ident = importIdentity(kai_root, agent_root)
         print(f"[身份] {ident}")
 
     if args.dry_run:

@@ -136,19 +136,31 @@ class TestTtsEnableContract:
 
 
 class TestIdentityLoadPath:
-    def test_load_identity_reads_from_workspace_memory(self, tmp_path):
+    def test_load_identity_reads_from_agent_root(self, tmp_path, monkeypatch):
+        """身份文件的读取位＝**agent 根**，且取法只有 `get_agent_root_dir` 一处。
+
+        旧断言写在 `workspace/memory/` 下，那条落点已由 `4bf9b733` 收口到 agent 根
+        （`agent_layout_migration` 迁移旧布局时也是这个方向），本格于是恒红。
+        这里不手工拼路径：把 agent 根的解析器钉到 tmp，断言的是"读的是解析器给的那个根"，
+        `workspace_path` 换成任何值都不该影响结果。
+        """
         from neurova.agent_core import Agent
+        from neurova.core import agent_workspaces
 
-        memory_dir = tmp_path / "memory"
-        memory_dir.mkdir()
-        (memory_dir / "soul.md").write_text("我是 Neurova", encoding="utf-8")
-        (memory_dir / "personality.md").write_text("温暖而好奇", encoding="utf-8")
+        agent_root = tmp_path / "data" / "test-agent"
+        agent_root.mkdir(parents=True)
+        (agent_root / "soul.md").write_text("我是 Neurova", encoding="utf-8")
+        (agent_root / "personality.md").write_text("温暖而好奇", encoding="utf-8")
+        (tmp_path / "memory").mkdir()
+        (tmp_path / "memory" / "soul.md").write_text("旧落点不该被读", encoding="utf-8")
 
-        fake = SimpleNamespace(config=SimpleNamespace(workspace_path=tmp_path, name="Test"))
+        monkeypatch.setattr(agent_workspaces, "get_agent_root_dir", lambda _id: agent_root)
+
+        fake = SimpleNamespace(config=SimpleNamespace(agent_id="test-agent", name="Test"))
         Agent._load_identity(fake)
 
         assert fake.soul == "我是 Neurova", (
-            "soul.md 位于 workspace/memory/ 下，_load_identity 不得去 workspace/workspace/memory/ 寻找"
+            "soul.md 在 agent 根下；读成旧落点 workspace/memory/ 就会拿到另一份人格"
         )
         assert fake.personality == "温暖而好奇"
 

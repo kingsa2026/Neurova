@@ -25,6 +25,14 @@ REPO = Path(__file__).resolve().parents[2]
 GIT_WALL_S = 20
 pytestmark = pytest.mark.timeout(60)
 
+#: 仓根的例外清单（单一出处，`test_repoRootHasNoNamelessEmptyFile` 与
+#: `test_theAllowedListDoesNotOutliveItsFiles` 共用这一份）。
+#:
+#: 现读为空：那两件由 `echo … >` 造出的中文文件名残留已在主树上 `git rm` 净，
+#: 本分支的合并又把它们从工作树带回来过一次、随后同样清掉 —— 按本档自述的第二条出路，
+#: **文件删净就把清单清空**，不留过期豁免（那样反向格子会永远指着已不存在的名字）。
+_ROOT_ALLOWED: frozenset = frozenset()
+
 
 def _isResidue(p: Path) -> bool:
     """0 字节、无扩展名的普通文件才算残留（`__init__.py`/`empty.txt` 有后缀，不在射程）。"""
@@ -61,14 +69,12 @@ class TestNoZeroByteResidueInPackage:
         本档的判据是"重定向残留不得再生"，不是"任何无名空文件都非法"；把它们删掉会让本格
         跟着绿——那时请把清单清空，别留过期豁免（`tests/unit/ci/...` 同族的双向判据口径）。
         """
-        allowed = {"新增或移动任何文档前，必须先更新本索引。", "本文件是"}
-        rootLevel = [name for name in _topLevelResidues(REPO) if name not in allowed]
+        rootLevel = [name for name in _topLevelResidues(REPO) if name not in _ROOT_ALLOWED]
         assert rootLevel == [], f"仓根有同类残留：{rootLevel}"
 
     def test_theAllowedListDoesNotOutliveItsFiles(self):
         """反向：清单里的名字一旦不在仓根了就必须摘掉——否则它成了永久免检通道。"""
-        allowed = {"新增或移动任何文档前，必须先更新本索引。", "本文件是"}
-        gone = sorted(name for name in allowed if not (REPO / name).exists())
+        gone = sorted(name for name in _ROOT_ALLOWED if not (REPO / name).exists())
         assert not gone, f"清单里这些文件已不在仓根，把它们从允许清单里摘掉：{gone}"
 
     def test_scannerCatchesASyntheticResidue(self, tmp_path):
