@@ -184,3 +184,51 @@ def test_staleDeadUrlOnOwnSeedIsCleared(tmp_path, monkeypatch):
     assert store.get("code-analysis")["download_url"] == "https://skills.aliyun.com/ca/download"
     # 反向控制二：不是本仓自带的条目（admin/远端同步来的）一个字都不碰
     assert store.get("aliyun--keep")["download_url"] == "https://other.example.invalid/keep.zip"
+
+
+def test_bundle_entry_keeps_its_provenance_url(tmp_path, monkeypatch):
+    """内置包条目的 `download_url` 是**出处**，不是取件口——清洗不许把它抹掉。
+
+    395c2dca 那一刀过宽：判据只看"不属注册源"，于是两条 skillhub 内置包的署名出处被一起清了
+    （生产 catalog 现算 3 条 bundle_zip 行 URL 归零）。字节来自包内 `bundle_zip`，与这个字段无关；
+    抹掉它只损失 provenance，不换来任何诚实。
+    """
+    import neurova.skills.market_sources as msrc
+
+    monkeypatch.setattr(msrc, "is_remote_market_url", lambda url: "skills.aliyun.com" in url)
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text(json.dumps([
+        {"skill_id": "builtin--multi-search-engine", "name": "搜索引擎", "version": "2.1.5",
+         "description": "d", "source": "builtin", "bundle_zip": "multi-search-engine.zip",
+         "download_url": "https://api.skillhub.cn/api/v1/download?slug=multi-search-engine"},
+        {"skill_id": "web-search", "name": "Web Search", "version": "1.2.0", "description": "d",
+         "download_url": "https://dead-market.example.invalid/web-search/download"},
+    ]), encoding="utf-8")
+
+    store = MarketStore(catalog_path=catalog)
+
+    assert store.get("builtin--multi-search-engine")["download_url"] == (
+        "https://api.skillhub.cn/api/v1/download?slug=multi-search-engine"), "有内置包的条目，出处 URL 被误清"
+    assert store.get("web-search")["download_url"] == "", "无包又无注册源地址的条目，死地址仍该清"
+
+
+def test_stale_row_gets_provenance_url_restored(tmp_path, monkeypatch):
+    """已经抹掉的出处要能恢复：内置表就是这几个字段的唯一事实源。
+
+    上一格防的是继续损害，本格管的是既有损害的回血——本机 catalog 里那 3 条已经归零了。
+    """
+    import neurova.skills.market_sources as msrc
+
+    monkeypatch.setattr(msrc, "is_remote_market_url", lambda url: False)
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text(json.dumps([
+        {"skill_id": "builtin--multi-search-engine", "name": "搜索引擎", "version": "2.1.5",
+         "description": "管理员改过的描述", "source": "builtin", "download_url": ""},
+    ]), encoding="utf-8")
+
+    store = MarketStore(catalog_path=catalog)
+
+    entry = store.get("builtin--multi-search-engine")
+    assert entry["download_url"] == "https://api.skillhub.cn/api/v1/download?slug=multi-search-engine"
+    # 文案的话语权重仍然守住：恢复的是出处，不是把 admin 改过的描述盖回去
+    assert entry["description"] == "管理员改过的描述"
