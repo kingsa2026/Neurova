@@ -211,10 +211,21 @@ main:
           timeout: 90m
 
     # ── 5. E2E：后端启动冒烟 ─────────────────────────────────────────────
+    # `services` 必须显式为空：不声明时平台给**每条流水线**自动起
+    # `git-clone-yyds` 与 `network-bus` 两个服务，而它们与"后端能不能启动"
+    # 毫无关系 —— 这两个服务的 `docker run` 会算进平台 `Prepare` 的 **60s**
+    # 上限里，撞上就是
+    # `Pipeline prepare error: 任务超过最大执行时间而被强制关闭：1m0s`，
+    # 本流水线自己一个 stage 都跑不到（构建 `cnb-13d-1k5pskuuj#004`：
+    # 两个服务分别吃掉 54.9s 与 1m2s）。同一批其它流水线吃 0.7–13s ——
+    # 故这不是配置里的判据，是共享负载下的运气。
+    # 显式空列表后同一条流水线仍是 2 个 stage，判据一字不变；
+    # 判据见 tests/unit/ci/test_pipelinePrepareStartsNoUnusedServices.py。
     - name: e2e-backend-boot
       runner:
         tags: cnb:arch:amd64
         cpus: 2
+      services: []
       docker:
         image: python:3.12
         volumes:
