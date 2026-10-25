@@ -668,9 +668,7 @@ OUTSIDE_SUBSET_LEDGER: Dict[str, int] = {
     "tests/unit/api/test_security_p0_audit_fixes.py": 1,
     "tests/unit/channels/test_wechat_ilink_qrcode.py": 1,
     "tests/unit/context/test_context_pool_agent_core_integration.py": 1,
-    # `tests/unit/memory/test_moe_routing.py` 已**销账**（原登记 2 处）：
-    # 该档在 `c2031c4c8`（批 138，通道插件未接旋钮退净）里随旧通道面一起退役，
-    # 文件已不在树里——键留着就是替一个不存在的靶点作保（"台账里已不存在"那半条判据会红）。
+    # `tests/unit/memory/test_moe_routing.py` 已**销账**（`c2031c4c`，批 138 §6-378）：
     "tests/unit/neurflow/test_parallel_execution.py": 1,
     "tests/unit/skills/test_skill_import_architecture.py": 1,
     "tests/unit/sync/test_slow_consumer_seq_policy.py": 1,
