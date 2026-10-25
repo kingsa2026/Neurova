@@ -30,17 +30,55 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
-os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_for_role_gate_0123456789")
+# 前提自给：本档**就地**钉住本轮的签名密钥。
+#
+# 原先这里只有一行 `setdefault("NEUROVA_JWT_SECRET_KEY", ...)` —— 实测它对密钥
+# **完全无效**：`neurova/api/auth.py:146` 读的是 `NEUROVA_JWT_SECRET`（无 `_KEY` 后缀），
+# 而 `JWT_SECRET_KEY` 在 `auth.py:175` 导入期就烘死。于是"本档有前提自给"只是看起来有。
+#
+# 钉的是**本档自己那一轮**，不是去改别人：`JWT_SECRET_KEY` 是模块全局，`deps` 再导出的
+# 身份门是**函数对象**（`__globals__` 绑在它被定义的那份模块字典上）。只要进程里出现过
+# 第二份 auth 副本，签名侧与验签侧就各持一把密钥，形态是"本档刚签发的令牌被自己拒 401"。
+# 因此本档在**每个用例内**同步两侧密钥：收集期生成的模块级令牌与用例内生成的令牌
+# 各自只在那一轮有效，不跨用例共享一个烘死的旧值。
+#
+# 与 `tests/unit/api/test_shared_config_mcp_convergence.py:22-30` 是同一条纪律
+# （那里记的是"setdefault 会让别处先落进环境的弱值生效"）。
+os.environ["NEUROVA_JWT_SECRET"] = "test_secret_key_for_role_gate_0123456789"
 
 from neurova.api import auth as auth_mod
 from neurova.api import deps as deps_mod
 
-ADMIN_TOKEN = auth_mod.create_access_token(
-    {"sub": "root-admin", "username": "root-admin", "role": "admin", "neuser_id": "root-admin"}
-)
-USER_TOKEN = auth_mod.create_access_token(
-    {"sub": "plain-user", "username": "plain-user", "role": "user", "neuser_id": "plain-user"}
-)
+#: 本档轮内的签名密钥。`_pinSecret()` 每次取用时把它同步到签名侧与全部验签门。
+_TEST_SECRET = os.environ["NEUROVA_JWT_SECRET"]
+
+
+def _pinSecret() -> str:
+    """把签名侧与验签门的密钥对齐到 `_TEST_SECRET`，返回它。
+
+    令牌与验签必须同源于这一把：函数对象读的是自己 `__globals__` 里的现值，
+    只改 `auth_mod.JWT_SECRET_KEY` 会让它们继续用旧字典里的那一把。
+    """
+    if auth_mod.JWT_SECRET_KEY != _TEST_SECRET:
+        auth_mod.JWT_SECRET_KEY = _TEST_SECRET
+    for gate in (deps_mod.strictIdentityGate, deps_mod.get_current_user,
+                 deps_mod.get_optional_user):
+        if gate.__globals__.get("JWT_SECRET_KEY") != _TEST_SECRET:
+            gate.__globals__["JWT_SECRET_KEY"] = _TEST_SECRET
+    return _TEST_SECRET
+
+
+def _token(claims: dict) -> str:
+    """在**当前这一轮**的密钥下签发令牌（不在导入期烘死）。"""
+    _pinSecret()
+    return auth_mod.create_access_token(dict(claims))
+
+
+_ADMIN = {"sub": "root-admin", "username": "root-admin", "role": "admin", "neuser_id": "root-admin"}
+_USER = {"sub": "plain-user", "username": "plain-user", "role": "user", "neuser_id": "plain-user"}
+
+# 令牌不在导入期烘死——在**用例内**签发（见 `client` 夹具里的 `_pinSecret()`）。
+# 导入期烘一枚令牌等于把"密钥是谁"钉死在那一刻，而那一格正是本档要钉的对象。
 
 
 @pytest.fixture
@@ -61,13 +99,16 @@ def app():
 
 @pytest.fixture
 def client(app):
+    # 每个用例开始前重新对齐两侧密钥：令牌在**这一轮**签发，验签门读的是**这一轮**的字典。
+    # 旧形态把令牌烘在导入期、密钥却可能被别的档换过，于是"自己签的令牌自己拒"。
+    _pinSecret()
     return TestClient(app)
 
 
 class TestRoleGateTakesIdentityFromStrictSource:
     def testQueryTokenDoesNotGrantAdmin(self, client):
         """管理员 token 出现在查询串上必须被拒——特权不走 URL。"""
-        resp = client.get("/admin-only", params={"access_token": ADMIN_TOKEN})
+        resp = client.get("/admin-only", params={"access_token": _token(_ADMIN)})
         assert resp.status_code == 401, (
             f"`?access_token=` 拿到了角色门：{resp.status_code} {resp.text[:120]} "
             "（token 进 URL 会落进访问日志/浏览器历史/Referer，管理员的串等于全站管理权）"
@@ -75,12 +116,12 @@ class TestRoleGateTakesIdentityFromStrictSource:
 
     def testHeaderStillGrantsAdmin(self, client):
         """收口不许把正路一起挡掉：同一枚 token 走 Authorization 头照常通。"""
-        resp = client.get("/admin-only", headers={"Authorization": f"Bearer {ADMIN_TOKEN}"})
+        resp = client.get("/admin-only", headers={"Authorization": f"Bearer {_token(_ADMIN)}"})
         assert resp.status_code == 200, f"管理员带头请求被拒：{resp.status_code} {resp.text[:120]}"
 
     def testNonAdminHeaderIs403Not401(self, client):
         """身份成立、角色不足 → 403。这条钉住"收口改的是凭证来源，不是角色判定"。"""
-        resp = client.get("/admin-only", headers={"Authorization": f"Bearer {USER_TOKEN}"})
+        resp = client.get("/admin-only", headers={"Authorization": f"Bearer {_token(_USER)}"})
         assert resp.status_code == 403, f"非管理员应 403，实得 {resp.status_code} {resp.text[:120]}"
 
     def testAnonymousIs401(self, client):
@@ -96,13 +137,13 @@ class TestResourceTagSurfaceUntouched:
         （`NeurUI/src/utils/genFiles.ts:6-8` 记的就是这个契约）。把这条一起收紧，
         就是 `deps.py:22-25` 点名警告的反向错误——所以要单独钉住，不许"顺手统一"。
         """
-        resp = client.get("/asset", params={"access_token": USER_TOKEN})
+        resp = client.get("/asset", params={"access_token": _token(_USER)})
         assert resp.status_code == 200, (
             f"资源标签面被一起打死：{resp.status_code} {resp.text[:120]}"
         )
 
     def testAssetEndpointHeaderPathWorksToo(self, client):
-        resp = client.get("/asset", headers={"Authorization": f"Bearer {USER_TOKEN}"})
+        resp = client.get("/asset", headers={"Authorization": f"Bearer {_token(_USER)}"})
         assert resp.status_code == 200, resp.text
 
 
