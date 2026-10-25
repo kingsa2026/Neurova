@@ -1866,6 +1866,7 @@ tests/unit/api/test_agentRunStatusVocabularyParity.py
 # 反向错误，`test_identity_gate_single_source.py` 早钉过）。结构判据取**对象同一性**
 # 不比函数名：本仓两次栽在"同名不同体、override 打到另一份静默失效"上。
 # 逐文件单跑 8 passed
+tests/unit/api/test_jwtSigningKeyLeakIsGuarded.py
 tests/unit/api/test_roleGateIdentitySourceIsStrict.py
 # §6-64 的 B 处置：子进程**文本模式捕获**必须显式写 encoding，否则父进程按本机 locale
 # （开发机 cp936）解子进程的 UTF-8 字节。三种坏法按危险度递增：全 ASCII 侥幸没事 /
