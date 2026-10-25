@@ -29,7 +29,8 @@ _DEFAULT_CATALOG: List[Dict[str, Any]] = [
         "version": "1.2.0",
         "description": "搜索互联网获取实时信息",
         "author": "Neurova Team",
-        "download_url": "https://api.neurova.dev/skills/web-search/download",
+        # 不填可取件地址：这条的能力在代码侧执行体映射里，装出来本就没有字节。
+        # 过去这里挂着一个从不存在的域名，于是读面永远"看着有来源"。
         "category": "utility",
         "tags": ["search", "web", "information"],
         "rating": 4.5,
@@ -119,6 +120,21 @@ def _ensure_builtin_entries(items: List[Dict[str, Any]]) -> bool:
             if pointer in decl and row.get(pointer) != decl[pointer]:
                 row[pointer] = decl[pointer]
                 changed = True
+
+    # 同一句「有没有来源」在存量数据上的另一半：本仓自带条目（种子＋内置表）里那些不属于
+    # 任何注册源的 download_url，永远取不到东西，却会让读面显示一个能骗人的来源。新建种子
+    # 已经不写了，这一支管的是已经躺在各部署 catalog 里的旧行。
+    from neurova.skills import market_sources
+
+    ownIds = {e["skill_id"] for e in _BUILTIN_CATALOG} | {e["skill_id"] for e in _DEFAULT_CATALOG}
+    for ownId in ownIds:
+        row = rows.get(ownId)
+        if row is None:
+            continue
+        url = str(row.get("download_url") or "")
+        if url and not market_sources.is_remote_market_url(url):
+            row["download_url"] = ""
+            changed = True
     return changed
 
 

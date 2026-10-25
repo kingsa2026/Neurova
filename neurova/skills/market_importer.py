@@ -104,14 +104,16 @@ class MarketImporter:
     支持从技能市场导入、更新和管理技能。
     """
 
-    def __init__(self, skills_dir: Path, market_url: Optional[str] = None):
+    def __init__(self, skills_dir: Path):
         """
         Args:
             skills_dir: 技能安装目录
-            market_url: 市场API地址
+
+        这里过去还挂着一个「市场 API 地址」参数，它唯一的读者是「条目没地址就凭空拼
+        一个」那句，而拼出来的域名从不存在（连注册源白名单都进不去）。那句摘掉之后
+        这个属性就是写口无人读的断点，参数与属性一起退役。
         """
         self._skills_dir = Path(skills_dir)
-        self._market_url = market_url or "https://api.neurova.dev/skills"
         self._lock = threading.RLock()
         self._import_tasks: Dict[str, ImportTask] = {}
         self._installed: Dict[str, str] = {}  # skill_id -> version
@@ -194,10 +196,9 @@ class MarketImporter:
                     version=item.get("version", "1.0.0"),
                     description=item.get("description", ""),
                     author=item.get("author", ""),
-                    download_url=(
-                        item.get("download_url")
-                        or f"{self._market_url}/{item.get('skill_id', '')}/download"
-                    ),
+                    # 没地址就是没地址：拼一个不存在的域名既骗人，又让安装闸的输入
+                    # 永远"看着有来源"。
+                    download_url=item.get("download_url", ""),
                     category=item.get("category", "general"),
                     tags=list(item.get("tags") or []),
                     rating=float(item.get("rating", 0.0)),
@@ -268,7 +269,6 @@ class MarketImporter:
                 # 安全解压到 skills_dir/{skill_id}（SKILL.md 格式技能包;
                 # 本地种子条目仍走原模拟链路）
                 bundle_name = (entry or {}).get("bundle_zip")
-                downloaded = False
                 download_url = (entry or {}).get("download_url") or ""
                 if bundle_name:
                     task.status = ImportStatus.INSTALLING
@@ -310,6 +310,18 @@ class MarketImporter:
                             task.error_message = f"download/extract skill from {download_url} failed: {refusal}"
                             logger.error("Failed to import skill '%s': remote download failed", skill_id)
                             return task
+
+                # 三条取件腿（内置包／已注册远端源／代码侧执行体映射）全不成立时，下面
+                # 两步写出来的就只有账本：装"成功"了，目录里什么都没有，读面只能把它
+                # 标灰。本机 code-analysis 的空壳、以及管理端任何一条不填可取件地址的
+                # 上架，走的都是这条尾巴。
+                if self.artifactSourceKind(skill_id) is None:
+                    task.status = ImportStatus.FAILED
+                    task.error_message = (
+                        "无可取件地址：条目既无内置技能包（bundle_zip），download_url 也不属"
+                        "已注册远端源，且没有代码侧执行体映射——拒绝落一具只会让技能页标灰的空壳")
+                    logger.error("Refused zero-byte install for '%s'", skill_id)
+                    return task
 
                 task.status = ImportStatus.INSTALLING
                 task.progress = 0.7
@@ -360,6 +372,25 @@ class MarketImporter:
         except Exception as e:  # noqa: BLE001 — catalog 不可用仍可走旧模拟链路
             logger.warning("market catalog lookup failed for %s: %s", skill_id, e)
             return None
+
+    def artifactSourceKind(self, skill_id: str) -> Optional[str]:
+        """这一条靠哪条腿取到字节：`bundle`／`remote`／`mapped`；三条全无 ⇒ None。
+
+        单点在这里，是因为咽喉（该不该装作安装成功）与端点（该回 4xx 还是 500）问的是
+        同一个问题；两处各写一份，就会出现"端点以为有来源、咽喉悄悄落了空壳"的分裂读数。
+        """
+        entry = self._lookup_catalog_entry(skill_id) or {}
+        if entry.get("bundle_zip"):
+            return "bundle"
+        url = str(entry.get("download_url") or "")
+        if url:
+            from neurova.skills import market_sources
+
+            if market_sources.is_remote_market_url(url):
+                return "remote"
+        from neurova.skills.market_registry import hasExecutorMapping
+
+        return "mapped" if hasExecutorMapping(skill_id) else None
 
     def get_import_status(self, skill_id: str) -> Optional[ImportTask]:
         """获取导入状态"""
