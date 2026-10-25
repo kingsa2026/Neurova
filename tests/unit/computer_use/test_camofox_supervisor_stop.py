@@ -45,7 +45,14 @@ def _fake_running_process(stdout_iter=None) -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_kill_process_windows_batch_taskkill(supervisor, monkeypatch):
-    """win32 分支行为锚：grace 等待后用跟踪 PIDs 批量 taskkill，状态复位"""
+    """win32 分支行为锚：grace 等待后用跟踪 PIDs 批量 taskkill，状态复位
+
+    前提必须由本格自己给：`_kill_process` 读的是 `sys.platform`，在 Linux 上跑时进的是
+    POSIX 分支——`_tracked_pids` 根本不参与，`killed` 恒为 `[]`。此前本格靠"整场里
+    排在它前面的某格把 `sys.platform` 钉成了 win32"才绿，单跑即红（受保护子集的准入口径
+    正是逐文件单跑）。下面那条 POSIX 对照格反过来钉 linux，两格各带各的前提。
+    """
+    monkeypatch.setattr(sys, "platform", "win32")
     supervisor._process = _fake_running_process()
     supervisor._managed_by_supervisor = True
     supervisor._tracked_pids = [111, 222, 333]
