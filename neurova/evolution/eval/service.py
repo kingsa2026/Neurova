@@ -475,13 +475,8 @@ class SkillEvolutionService:
         物化成功即喂结晶入库闸的语料工件（P1-1）：入库围栏与评测消费
         同一份题面——评测集长什么样，围栏就守什么。
         """
-        ds = await self._build_dataset_inner(
+        return await self._build_dataset_inner(
             skill_id, skill_text, source=source, messages=messages)
-        if ds is not None and ds.all_examples:
-            from neurova.evolution.eval.eval_corpus import update_eval_corpus
-
-            update_eval_corpus(self.agent_id, ds)
-        return ds
 
     async def _build_dataset_inner(
         self,
@@ -491,30 +486,111 @@ class SkillEvolutionService:
         source: str = "auto",
         messages: Optional[list[dict[str, Any]]] = None,
     ) -> Optional[EvalDataset]:
-        """golden → 会话挖掘 → 合成;全空返回 None。"""
+        """golden → 会话挖掘 → 合成;全空返回 None。
+
+        每一级的失败都单独兜住并记名：三级是**同一条**取语料链上的三个来源，
+        任一级抛出去都会让整条链断在"这本该由下一级接手"的位置上。合成器是
+        LLM 面（`SyntheticDatasetBuilder`），而 `requirements-ci` 刻意不带 LLM
+        凭据与配额——它抛出的那一刻，缺口不在合成档，在这条链少了一只接住的手。
+        """
+        issues: list[dict] = []
         if source in ("auto", "golden"):
-            ds = self._golden_dataset(skill_id)
+            try:
+                ds = self._golden_dataset(skill_id)
+            except Exception as e:  # noqa: BLE001 - golden 读不出来就交给下一级，但必须记名
+                issues.append(self._sourceIssue("golden", e))
+                ds = None
             if ds:
-                return ds
+                return self._builtDataset(ds, issues, requested=source)  # 早退分支也走同一收口
             if source == "golden":
-                return None
+                return self._attachSourceIssues(None, issues, requested=source)
         cfg = EvolutionConfig()
         if source in ("auto", "mined"):
-            from neurova.evolution.eval.miner import build_dataset as mine_dataset
-            from neurova.evolution.eval.miner import messages_from_sessions
+            try:
+                from neurova.evolution.eval.miner import build_dataset as mine_dataset
+                from neurova.evolution.eval.miner import messages_from_sessions
 
-            msgs = messages if messages is not None else messages_from_sessions(self.agent_id)
-            ds = await mine_dataset(
-                skill_name=skill_id, skill_text=skill_text, messages=msgs, seed=cfg.seed
-            )
-            if ds.all_examples:
-                return ds
+                msgs = (messages if messages is not None
+                        else messages_from_sessions(self.agent_id))
+                ds = await mine_dataset(
+                    skill_name=skill_id, skill_text=skill_text, messages=msgs, seed=cfg.seed
+                )
+            except Exception as e:  # noqa: BLE001 - 挖掘不出来就交给下一级，但必须记名
+                issues.append(self._sourceIssue("mined", e))
+                ds = None
+            if ds is not None and ds.all_examples:
+                return self._builtDataset(ds, issues, requested=source)
             if source == "mined":
-                return None
-        from neurova.evolution.eval.synthetic import SyntheticDatasetBuilder
+                return self._attachSourceIssues(None, issues, requested=source)
+        if source not in ("auto", "synthetic"):
+            # 未知来源名不猜：既有的显式来源语义只在上面几级，其余一律当调用方写错
+            return self._attachSourceIssues(None, issues, requested=source)
+        try:
+            from neurova.evolution.eval.synthetic import SyntheticDatasetBuilder
 
-        ds = await SyntheticDatasetBuilder(cfg).generate(skill_text, "skill")
-        return ds if ds.all_examples else None
+            ds = await SyntheticDatasetBuilder(cfg).generate(skill_text, "skill")
+        except Exception as e:  # noqa: BLE001 - 最后一级也失败 ⇒ 如实回空表 + 记名
+            issues.append(self._sourceIssue("synthetic", e))
+            ds = None
+        return self._builtDataset(
+            ds if ds is not None else EvalDataset(), issues, requested=source)
+
+    def _builtDataset(self, ds: EvalDataset, issues: list[dict],
+                      *, requested: str) -> EvalDataset:
+        """三级回退的**唯一**收口：挂记名，物化成功时顺带喂语料工件。
+
+        为什么必须是一个收口而不是每条分支各写一遍：三级各有早退分支（golden
+        命中即 return），喂语料的动作写在其中一个分支上时，另外两级物化出来的
+        评测集就进不了围栏——结晶闸守的题面与评测消费的题面于是不是同一份。
+        """
+        built = self._attachSourceIssues(ds, issues, requested=requested)
+        if built is not None and built.all_examples:
+            self._feedEvalCorpus(built)
+        return built
+
+    def _feedEvalCorpus(self, dataset: EvalDataset) -> None:
+        """把物化成功的评测集喂给结晶入库闸的语料工件（P1-1）。
+
+        围栏守的必须是**评测真正消费的那份题面**，所以喂料点只能有一个：
+        三级回退各有早退分支，喂料若挂在 `build_dataset` 的出口上，golden / 挖掘
+        命中的那两级就绕过了它——围栏守的与评测消费的于是不是同一份。
+        """
+        from neurova.evolution.eval.eval_corpus import update_eval_corpus
+
+        update_eval_corpus(self.agent_id, dataset)
+
+    @staticmethod
+    def _sourceIssue(stage: str, exc: BaseException) -> dict:
+        """一级回退失败的**记名**形态：来源 + 一行成因。
+
+        只记类型名与首行 —— 这条读数会进请求回执，凭据/密钥形态内容不得外泄
+        （与 runner 侧 `_redact_eval_error` 同一条纪律）；不记堆栈、不记整段。
+        首行先过**单源**脱敏引擎再截断：provider 的 401 报文常把 key 原样带在
+        消息里（`401 invalid api key sk-…`），截断挡不住它。
+        """
+        firstLine = str(exc).splitlines()[0] if str(exc) else ""
+        try:
+            from neurova.skills.evolution_inputs_guard import redact_secrets
+
+            firstLine = redact_secrets(firstLine)
+        except Exception:  # noqa: BLE001 - 脱敏器故障不外泄原文，只留类型
+            firstLine = ""
+        return {"source": stage,
+                "reason": f"{type(exc).__name__}: {firstLine}"[:200]}
+
+    @staticmethod
+    def _attachSourceIssues(ds: Optional[EvalDataset], issues: list[dict],
+                            *, requested: str) -> Optional[EvalDataset]:
+        """把"哪几级没成"挂在返回的评测集上（空表也要带，否则失败被读成"没有语料"）。
+
+        守卫只认 `issues`：**空表也必须带记名**，否则最后一级抛了、前三级的读数为空，
+        调用方拿到的就是一个没有任何标记的 `None` —— 那正是"失败被读成语料本来就没有"。
+        """
+        if not issues:
+            return ds
+        from neurova.evolution.eval.dataset import withSourceIssues
+
+        return withSourceIssues(ds, issues, requested=requested)
 
     # ── 进化主流程 ──
 
@@ -549,8 +625,16 @@ class SkillEvolutionService:
             dataset = await self.build_dataset(skill_id, skill_text)
         if not dataset or not dataset.all_examples:
             result.rejected = True
-            result.reject_reason = "empty_dataset"
+            sourceIssues = list(dataset.sourceIssues) if dataset else []
+            # "确实没有语料" 与 "取语料的那几级炸了" 是两件事：三级回退全空且一路
+            # 没抛 ⇒ empty_dataset；哪一级抛了 ⇒ 把该级与成因一并写进拒因，
+            # 否则下一跳（同步端点）只能把它折成一句泛化的 500，读的人看不出是
+            # 合成器请求失败还是这个技能本来就没有用例。
+            result.reject_reason = "dataset_source_failed" if sourceIssues else "empty_dataset"
+            result.sourceIssues = sourceIssues
             return result, None
+        result.sourceIssues = list(dataset.sourceIssues)
+        result.requestedSource = dataset.requestedSource
 
         # P0-2 holdout 防污染：配置了 heldout_ratio 且数据集没有真留出集时，
         # 从 holdout 尾部划出（确定性）。heldout 只做验收证据，不参与判定。

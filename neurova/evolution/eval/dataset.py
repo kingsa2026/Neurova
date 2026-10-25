@@ -51,6 +51,13 @@ class EvalDataset:
     val: list[EvalExample] = field(default_factory=list)
     holdout: list[EvalExample] = field(default_factory=list)
     heldout: list[EvalExample] = field(default_factory=list)
+    #: 取语料链上"哪几级没成、成因是什么"（`[{"source": "synthetic", "reason": "..."}]`）。
+    #: 三级回退里被跳过的那几级**不静默**：把它们记在产物上，请求回执与运行读数
+    #: 才能把"确实没有语料"与"取语料的哪一级炸了"分开——两者此前都收敛成一句
+    #: `empty_dataset`，于是"合成器请求失败"被读成"这个技能没有评测用例"。
+    #: 只在内存里传递，**不落盘**（分集落盘格式是既有的三/四键 jsonl 契约）。
+    sourceIssues: list[dict] = field(default_factory=list)
+    requestedSource: str = ""
 
     @property
     def all_examples(self) -> list[EvalExample]:
@@ -66,11 +73,14 @@ class EvalDataset:
             return self
         n_held = max(1, int(len(self.holdout) * heldout_ratio))
         n_held = min(n_held, len(self.holdout) - 1)
-        return EvalDataset(
+        carved = EvalDataset(
             train=list(self.train), val=list(self.val),
             holdout=list(self.holdout[:-n_held]),
             heldout=list(self.holdout[-n_held:]),
         )
+        # 取语料链的失败记名必须跟着切分走（见 `withSourceIssues` 的说明）
+        return withSourceIssues(carved, self.sourceIssues,
+                                requested=self.requestedSource)
 
     @classmethod
     def split(
@@ -134,6 +144,23 @@ class EvalDataset:
                             continue
             setattr(ds, name, examples)
         return ds
+
+
+def withSourceIssues(dataset: "EvalDataset", issues: list[dict],
+                     *, requested: str = "") -> "EvalDataset":
+    """把取语料链的失败记名挂到数据集上（**不改集合内容**，只补两格读数）。
+
+    `carve_heldout` 这类会重造对象的方法也走这一处，否则切完留出集就把它丢了——
+    丢了之后调用方看到的是"语料为空"，而真相是"合成那一级请求失败了"。
+
+    传 `None` 时原样回 `None`（记名无处可挂）；生产侧的调用方一律先备一个空集合，
+    让"三级全空且有级抛过"这条读数有地方落（`SkillEvolutionService._build_dataset_inner`）。
+    """
+    if dataset is None:
+        return None
+    dataset.sourceIssues = list(issues or [])
+    dataset.requestedSource = str(requested or "")
+    return dataset
 
 
 def evaluation_split(dataset: "EvalDataset") -> list[EvalExample]:
