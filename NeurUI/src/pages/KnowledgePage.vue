@@ -57,6 +57,9 @@
           <GlassButton variant="ghost" size="sm" @click="configVisible = true; fetchKbConfigs()">
             {{ t('knowledge.remoteConfig') }}
           </GlassButton>
+          <GlassButton variant="ghost" size="sm" @click="mcpVisible = true; fetchMcpSources()">
+            {{ t('knowledge.mcpTitle') }}
+          </GlassButton>
           <GlassButton variant="ghost" size="sm" @click="openIngress()">
             {{ t('knowledge.ingressBtn') }}
           </GlassButton>
@@ -685,7 +688,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useEnumLabel } from '@/composables/useEnumLabel'
 import { message, Modal } from 'ant-design-vue'
@@ -871,6 +874,130 @@ const importingUrl = ref(false)
 //        走顶层 api_key 加密通道
 //   custom: api_url(必填) + api_key(可选) + dataset_id
 const configVisible = ref(false)
+
+// MCP 信息源（B 方案）：外部 MCP server 作为知识库信息源。拉取直接入知识库
+// （dedupe/租户全链），token 只登记不回显（列表脱敏）。
+const mcpVisible = ref(false)
+const mcpLoading = ref(false)
+const mcpSaving = ref(false)
+const mcpProbing = ref(false)
+const mcpSources = ref<any[]>([])
+const mcpFormVisible = ref(false)
+const editingMcpId = ref('')
+const mcpTools = ref<Array<{ name: string; description: string }>>([])
+const pullingId = ref('')
+const mcpForm = reactive({
+  name: '', endpoint: '', auth_token: '', tool_name: '',
+  tool_args_json: '{}',
+})
+
+const fetchMcpSources = async () => {
+  mcpLoading.value = true
+  try {
+    const res: any = await request.get('/knowledge/mcp/sources')
+    const data = res?.data ?? res
+    mcpSources.value = data?.items ?? []
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
+  } finally {
+    mcpLoading.value = false
+  }
+}
+
+const openMcpForm = () => {
+  editingMcpId.value = ''
+  mcpForm.name = ''
+  mcpForm.endpoint = ''
+  mcpForm.auth_token = ''
+  mcpForm.tool_name = ''
+  mcpForm.tool_args_json = '{}'
+  mcpTools.value = []
+  mcpFormVisible.value = true
+}
+
+const probeMcpTools = async () => {
+  if (!mcpForm.endpoint.trim()) {
+    message.warning(t('knowledge.mcpEndpointRequired'))
+    return
+  }
+  mcpProbing.value = true
+  try {
+    const res: any = await request.post('/knowledge/mcp/sources/tools', {
+      endpoint: mcpForm.endpoint,
+      auth_token: mcpForm.auth_token,
+    })
+    mcpTools.value = (res?.data ?? res)?.tools ?? []
+    if (!mcpTools.value.length) message.info(t('knowledge.mcpToolsEmpty'))
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
+  } finally {
+    mcpProbing.value = false
+  }
+}
+
+const saveMcpSource = async () => {
+  if (!mcpForm.name.trim() || !mcpForm.endpoint.trim()) {
+    message.warning(t('knowledge.mcpNameRequired'))
+    return
+  }
+  let toolArgs: Record<string, unknown> = {}
+  try {
+    toolArgs = JSON.parse(mcpForm.tool_args_json || '{}')
+  } catch {
+    message.warning(t('knowledge.mcpArgsInvalid'))
+    return
+  }
+  mcpSaving.value = true
+  try {
+    const payload = {
+      name: mcpForm.name, endpoint: mcpForm.endpoint,
+      auth_token: mcpForm.auth_token, tool_name: mcpForm.tool_name,
+      tool_args: toolArgs, agent_id: agentId.value,
+    }
+    if (editingMcpId.value) {
+      await request.put(`/knowledge/mcp/sources/${editingMcpId.value}`, payload)
+      message.success(t('knowledge.mcpUpdated'))
+    } else {
+      await request.post('/knowledge/mcp/sources', payload)
+      message.success(t('knowledge.mcpCreated'))
+    }
+    mcpFormVisible.value = false
+    await fetchMcpSources()
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
+  } finally {
+    mcpSaving.value = false
+  }
+}
+
+const pullMcpSource = async (item: any) => {
+  pullingId.value = item.source_id
+  try {
+    const res: any = await request.post(`/knowledge/mcp/sources/${item.source_id}/pull`)
+    const data = res?.data ?? res
+    if (data?.duplicate) {
+      message.info(t('knowledge.duplicateMerged'))
+    } else {
+      message.success(t('knowledge.mcpPulled'))
+    }
+    await fetchMcpSources()
+    await fetchKnowledge()
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
+  } finally {
+    pullingId.value = ''
+  }
+}
+
+const deleteMcpSource = async (item: any) => {
+  try {
+    await request.delete(`/knowledge/mcp/sources/${item.source_id}`)
+    message.success(t('knowledge.mcpDeleted'))
+    await fetchMcpSources()
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
+  }
+}
 const configSaving = ref(false)
 const kbConfigs = ref<KbConfig[]>([])
 interface ConfigFormState {
@@ -1989,6 +2116,70 @@ watch(agentId, () => {
   max-width: 320px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.kb-mcp-toolbar {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: var(--nr-space-sm, 8px);
+}
+
+.kb-mcp-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nr-space-sm, 8px);
+  padding: var(--nr-space-sm, 8px);
+  margin-bottom: var(--nr-space-sm, 8px);
+  border: 1px solid var(--nr-glass-border);
+  border-radius: var(--nr-radius-md, 12px);
+  background: var(--nr-glass-bg);
+}
+
+.kb-mcp-row {
+  display: flex;
+  align-items: center;
+  gap: var(--nr-space-sm, 8px);
+}
+
+.kb-mcp-tools-hint {
+  opacity: 0.7;
+  font-size: 12px;
+}
+
+.kb-mcp-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--nr-space-sm, 8px);
+  width: 100%;
+}
+
+.kb-mcp-item-main {
+  display: flex;
+  align-items: center;
+  gap: var(--nr-space-sm, 8px);
+  overflow: hidden;
+}
+
+.kb-mcp-name {
+  font-weight: 600;
+  color: var(--nr-text-primary);
+}
+
+.kb-mcp-endpoint {
+  color: var(--nr-text-secondary);
+  font-size: 12px;
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-mcp-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
 }
 
 .kb-src-empty {
