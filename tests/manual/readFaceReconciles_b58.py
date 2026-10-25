@@ -99,21 +99,20 @@ def seed():
 try:
     SKILLS_DIR, LEDGER = seed()
 except Exception as exc:  # noqa: BLE001
-    # exc 在 except 块退出时即被删除，lambda 迟绑定会在那时取到未定义名——先收成实参
-    read("[0] 复制真账本到隔离根", lambda _exc=exc: (False, repr(_exc)))
+    # `as` 的绑定名出块即解绑（PEP 3110），进 lambda 懒求值就是 NameError——先取值再进
+    seedFailure = repr(exc)
+    read("[0] 复制真账本到隔离根", lambda: (False, seedFailure))
     sys.exit(1)
 
 svc = SkillService(agent_id=AGENT, skills_dir=str(SKILLS_DIR))
 rows = [r for r in svc.list_skills()]
-#: 映射执行体型的判法：`hasExecutorMapping` 是本仓对"这只 id 有没有代码侧执行体"的唯一出口
-#: （`market_registry` 的 docstring 明写"外面要问的是这一句，不是自己去读私有表"）。
-#: 早先这里有一段 `except ImportError` 里抬同名 def 的对照腿——那条腿的前提（这个 API 会缺席）
-#: 已不成立，留着它既误导读者，又让「同名桩豁免表」里多一条空账。
+# 映射执行体型单列：它是「盘上没字节也真能跑」那一形，混进空壳就是探针自己冤枉判据。
+# 直连公共读面，不留同名桩：留一枚 `except ImportError` 里定义的 `hasExecutorMapping`，
+# 一旦真触发就把「在册判定」静默换成本档自己拼的字符串比较，读的人还以为在读同一个事实源。
 from neurova.skills.market_registry import hasExecutorMapping  # noqa: E402
 
 
 def classify(entry):
-    # 映射执行体型单列：它是「盘上没字节也真能跑」那一形，混进空壳就是探针自己冤枉判据
     sid = entry["id"]
     d = SKILLS_DIR / sid
     hasBytes = (d / "SKILL.md").exists() or bool(list(d.glob("*.py")))
