@@ -338,10 +338,12 @@ def testZeroVectorFaceCoversEveryShapeOfUncomputable():
     assert vector_math.isZeroVector([1.0, -1.0, 0.0]) is False
 
 
-#: 生产侧必须在写库/打分前拦下零向量的那几个模块。**不是**"所有调用方"——列它是因为
-#: 每一条都是"把没算出来的东西当有效向量"会静默做成假读数的地方（§6-419 的命中面）：
-#: 写库（`manager` / `vector_index` / `semantic_search`）、打分（`muscle_memory`）、
-#: 检索回落（`tool_search`）、技能排序（`skill_semantics`）。
+#: 零向量这件事有两个落点，二者都只有一处定义（否则就是第三份口径）：
+#: ①「这一轮算没算出向量」由引擎自己判（`ONNXEmbeddingEngine.encodeOrNone`）；
+#: ②「这条向量是不是全零/空」由 `vector_math.isZeroVector` 判——存量条目里躺着的、
+#:    注入引擎交上来的，都要过这一道。
+#: 下面这张表是**存量与注入入口**的命中面：两个口都要真的问过 ②（引擎缺档时交上来的
+#: 是零向量、存量条目里躺着的也是零向量），只走 ① 的地方则必须问过 `encodeOrNone`。
 ZERO_VECTOR_CONSUMERS = [
     "cognitive_layers/memory_layer/manager.py",
     "cognitive_layers/memory_layer/muscle_memory.py",
@@ -356,7 +358,7 @@ def testZeroVectorThresholdHasNoSecondCopy():
     """阈值只许有一处。下游各抄一个 1e-9／`all(abs(x) < ...)` 就是第二份口径：
     引擎换档、阈值一改，两处读数立刻分叉，而分叉的那一侧永远是静默的那个。"""
     offenders = []
-    for rel in ZERO_VECTOR_CONSUMERS:
+    for rel in sorted(set(ZERO_VECTOR_CONSUMERS)):
         source = (NEUROVA_ROOT / rel).read_text(encoding="utf-8")
         for node in ast.walk(ast.parse(source)):
             if not isinstance(node, ast.Compare):
@@ -370,12 +372,13 @@ def testZeroVectorThresholdHasNoSecondCopy():
     )
 
 
-def testEveryZeroVectorConsumerAsksTheSingleFace():
-    """命中面逐个正检：这些模块都要真的问过单源，而不是各自记着"零向量长什么样"。"""
-    for rel in ZERO_VECTOR_CONSUMERS:
+def testEveryStockZeroVectorEntryAsksTheSingleFace():
+    """存量与注入入口逐个正检：这些模块要真的问过 `isZeroVector`，而不是各自记着
+    "零向量长什么样"。只走引擎判定口的写侧不在此列（它问的是 `encodeOrNone`）。"""
+    for rel in sorted(set(ZERO_VECTOR_CONSUMERS)):
         source = (NEUROVA_ROOT / rel).read_text(encoding="utf-8")
         assert "isZeroVector" in source or "ZERO_NORM_EPSILON" in source, (
-            f"{rel} 没有向单源问过零向量——它要么漏判（把没算出来的当有效向量），"
+            f"{rel} 没有向单源问过零向量——它要么漏判（把算不出来的存量当有效向量），"
             "要么自己记了一套阈值"
         )
 

@@ -8,6 +8,14 @@ from neurova.evolution.eval.config import EvolutionConfig
 from neurova.evolution.eval.dataset import EvalDataset, EvalExample
 from neurova.evolution.eval.service import SkillEvolutionService
 
+# 本档走 `service.evolve`，与同目录 `test_caseLevelRegressionGate` /
+# `test_runOutcomeLedgerConsistency` 同一条链路：约束闸的语义相似度面会用到 jieba
+# （`constraints.py` 的 `_tokenize`）。字典冷启动本身已在收集期一次建完
+# （`tests/conftest.py` 的 `pytest_configure` → `knowledge.search.warmJieba`），
+# 这一行是**父墙**：本档一次跑 8 例 × 若干次评测，正常 2s 级、机器忙时不该被全局 30s
+# 掐断在中间。数值与两档兄弟逐字相同，不新造第二种标法。
+pytestmark = pytest.mark.timeout(120)
+
 
 BASELINE = "基础技能正文。" + "补充说明文字用于满足增长闸的基线长度要求。" * 2  # >60 字符
 

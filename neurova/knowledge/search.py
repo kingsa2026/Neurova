@@ -94,6 +94,43 @@ _JIEBA_LOAD_LOCK = threading.RLock()
 _jieba: Any = None
 
 
+def isJiebaWarm() -> bool:
+    """进程内的 jieba 字典是否已建完（`False` = 未建/不可用）。
+
+    为什么需要这个口：`jieba.initialize()` 是**进程级一次性**冷启动——首次切词时在
+    调用方栈上同步建字典（CI runner 上实测把一格 30s 的判据撑到超时，而且红的位置在
+    建字典、不在被测逻辑）。已经有调用方在进程起手做暖机；没有这个口的话，那件事只能
+    靠"谁记得先 import 一次"来保证，谁也不知道自己是不是第一个。
+    """
+    return _jieba not in (None, False)
+
+
+def warmJieba() -> bool:
+    """把字典**提前**建起来，返回是否可用（已在则直接返回，幂等）。
+
+    为什么必须有一个"提前付"的口，而不只留 `_get_jieba()`：DCL 解决的是"谁来建"，
+    解决不了"什么时候建"。首次取用就地建字典，成本就落在**首调方**的关键路径上，
+    而首调方是随机的。本机实测这笔成本对负载极度敏感（同一棵树）：
+
+    ```
+    空载首次 _get_jieba():                    0.56s
+    3 条抢 GIL 的线程并发时首次 _get_jieba():  92.30s     ← 30s 格墙的 3 倍
+    预热之后再取用:                            0.001s
+    ```
+
+    CI 的受保护子集正是"7953 格同进程 + `--cov` 插桩 + 多档并发"的场子。构建
+    `cnb-sq6-1k5q1kqrc#003` 里 7953 格全绿、唯一那条红是
+    `test_service_closed_loop::test_accept_produces_pending_proposal` 撞 30s 墙，
+    栈底停在 `_get_jieba() → _j.initialize() → gen_pfdict`：它是那场子里第一个切中文的
+    用例，替所有人付了这笔账。这正是台账 §6-408 那一族（冷启动＋抢 GIL）在取用口上的
+    残留——上一轮只把成本**收口**到一处，没有让它**提前**付。
+
+    两处消费方（都在前提侧，不在被测代码里）：`tests/conftest.py` 的
+    `pytest_configure`（会话装配期）与需要显式暖机的脚本。失败按不可用记下、不抛。
+    """
+    return _get_jieba() is not None
+
+
 def _get_jieba() -> Any:
     """进程级惰性加载 jieba；不可用返回 None（调用方回退 n-gram）。
 
@@ -124,32 +161,6 @@ def _get_jieba() -> Any:
                 "知识库 jieba 不可用，FTS/BM25 静默回退 n-gram（中文检索精度降级）: %s", exc
             )
     return None if _jieba is False else _jieba
-
-
-def warmUpJieba() -> bool:
-    """把 jieba 前缀字典的冷启动**提前付掉**，返回是否可用。
-
-    为什么要单开一个入口而不只留 `_get_jieba()`：DCL 解决的是"谁来建"，
-    解决不了"什么时候建"。首次取用就地建字典，成本就落在首调方的关键路径上
-    ——而首调方是随机的。本机实测这笔成本对负载极度敏感：
-
-    ```
-    空载首次 _get_jieba():                    0.56s
-    3 条抢 GIL 的线程并发时首次 _get_jieba():  92.30s     ← 30s 格墙的 3 倍
-    第二次取用:                                0.0000s
-    ```
-
-    CI 的受保护子集正是"7953 格同进程 + `--cov` 插桩 + 多档并发"的场子。构建
-    `cnb-sq6-1k5q1kqrc#003` 里 7953 格全绿、唯一那条红是
-    `test_service_closed_loop::test_accept_produces_pending_proposal` 撞 30s 墙——
-    回溯停在 `_get_jieba() → _j.initialize()`：它是那场子里第一个用到中文分词的
-    用例，替所有人付了这笔账。这正是台账 §6-408 那一族（冷启动＋抢 GIL）在
-    取用口上的残留：上一轮只把成本**收口**到一处，没有让它**提前**付。
-
-    返回布尔而不是模块对象：调用方要的是"能不能用"这一个事实，不是 jieba 本体
-    （取用口仍是 `_get_jieba()`，单一事实源不变）。幂等——已建好即直接返回。
-    """
-    return _get_jieba() is not None
 
 
 def tokenize(text: str) -> List[str]:
