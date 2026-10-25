@@ -10468,8 +10468,20 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **红→绿实测**（本机现跑，`pip` 装齐 fastapi/jieba 后）：红 `1 failed, 4 passed`，原文 `tests/unit/agent/test_subagentTerminalReachesParentMail.py → ['wallClock']`；补登后绿 `5 passed`。同批复跑按清单取面的另两道守卫：`test_ci_wallclock_assertion_ledger` + `test_scanCriterionMustProveItsOwnSurfaceRatchet` 合跑 `72 passed`，`test_ci_ast_scan_budget_guard` + 本档判据 `80 passed`。
     - **仍开（不冒充完成）**：① 本格只补登记，不判该文件的轮询口径是否该改成「事件驱动等待」（要动得改 `AgentMailbox` 侧给通知口，属另拍）；② 同一形态的命中面未逐个回扫——§6-418 之前各笔入册若也有「清单加行但没复跑口径台账」的，历史读数已经稳定绿，扫也扫不出红，本格不假装覆盖；③ 管线里 pipeline-3 的 7m44s 里还含 `tests/unit/evolution/eval/test_service_closed_loop.py` 的 jieba 首载超时（30s 线程超时），那是**该档自身**的预算问题、与本红并列而非同因，本批未动。
     - **口径与空号**：在册条数目取 `tests.ast_scan.protectedSubsetEntries()` 的 reader 读数 **716**（本批不动清单，读数不变）。下一枚空号两条一起跑：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 现算最大均＝**419** ⇒ 下批从 **§6-420** 起。
+421. **受保护子集那一腿装不下自己：内存欠账 root 修在 `runner.cpus`，并落成双向判据（PR #367 构建 `cnb-rja-1k5pv9gbl#003`）** ✅🟢 —— 触发点是一次「CI 未通过」的报障，而日志里**一条失败墙都没有**。
 
-420. **零向量：出向量这条路上判一次，存量与注入入口再判一次（✅ 并入源分支上并发的零向量那笔之后按两处单源重写；受保护子集真条目现算 718）** 🟢 —— 承接 `2ee69acc`。本笔与并发会话那笔（"零向量从不是『有向量』"）撞在同一处根因上，合并后按两侧真实意图裁定，**不保留两份口径**。
+    - **形态与既有两格同源**：pytest 跑到 **82%** 被 SIGKILL，`Finished, code: 137, duration: 22m 13s`。这不是"有测试红了"，是宿主内存超限把进程掐掉；与 §6 里那条 30m 墙钟被强杀（构建 `cnb-mn9-1k5n4fcl5`，85%）是**同一类失败**——判据没变，容器装不下它自己。两次的形状差异只在旋钮：一个墙钟、一个内存。
+    - **证据链逐条现取，不引用叙述**：`runner.cpus: 4` ⇒ 8GiB（平台口径 内存 = cpus × 2GiB）；`protectedSubsetEntries()` reader 读数 **717** 档（合并后随并发会话的入册项为 **719** 档，需求随之抬到约 12.7GiB，结论不变）；同构建里 `static-gate`（1m）/`e2e`（1m）/`frontend`（3m）全绿，只有这一腿走到 22 分钟后被掐 ⇒ 与"提交内容有问题"无关。
+    - **根因位置（教义第 1 条）**：欠账在**配置侧供给**，不在测试侧消费。故修的是 `.cnb.yml` 的 `runner.cpus` 4 → 8（16GiB），不是往 716 个档里逐个加 `gc.collect()` 或拆子集——后者是把症状挪走：子集还会长，跑法不变，下一次换个 slot 就复现。
+    - **为什么必须落成判据而不是一次改数**：一次 137 可以被顺手重跑过去（换构建就差分毫），于是没人会去改配置；`timeout: 90m` 当初也是撞墙后手抬的，抬它的理由只写在注释里。新档 `tests/unit/ci/test_unit_tests_runner_has_headroom.py`（4 格）把供给与需求写成比值：内存侧 `cpus × 2GiB ≥ (底噪 1.5GiB + 档数 × 12.3MiB) × 1.25`，墙钟侧 `stage timeout ≥ 实测单场 × 3`。读数取**活配置**（`runner.cpus`、子集真条目数、`timeout` 字面量），不抄数——抄来的数就是下一次假红的来源。
+    - **先红后绿（实测原文）**：↑红＝`受保护子集 717 档需要约 12.6GiB（含 1.25× 余量），而 runner.cpus=4 只给到 8GiB`（`assert 8 >= 12.615`，1 failed / 3 passed）；改 cpus 后 `4 passed`，两次同读数（3.07s／2.97s）。两格反向控制各自只咬该咬的：cpus 掉回 4 时必须红、`timeout` 写成 `30m` 时必须读得出 1800s（不是恒真断言）。
+    - **同批扫荡（教义第 5 条）**：`.cnb.yml` 头部那条手抄口径 `最大 4 → 8GiB` 一并改成 `最大 8 → 16GiB`——它本身就是第二份定义，改 cpus 不改它即立刻说谎。其余 `cpus: 2` 的四条流水线（static-gate / e2e / dependency-audit / deploy-config 等）未动：它们的日志读数都在 1～3 分钟且无 137 记录，无证据不动。
+    - **不证什么**：不证"16GiB 一定跑得完"——它证的是配置侧不欠账（需求与供给之间有明确倍数并被钉住）；也不替 `test_ci_wallclock_assertion_ledger.py` 管"断言里不许绑死秒数"那件事。
+    - **仍开（不冒充完成）**：① 单档足迹 `GIB_PER_ENTRY = 12.3MiB` 与底噪 `1.5GiB` 是从一次 OOM 反推的量级，不是逐档实测；若有 `py-spy`/`tracemalloc` 级读数应回填这两个常量（现读数至少方向正确：8GiB 在 82% 处被掐，717×12.3MiB + 1.5GiB ≈ 10.1GiB > 8GiB）。② 本批只处理"装不下"，**没有**处理"跑得慢"：22 分钟对一条串行腿仍偏长，`--cov` 插桩对全仓 AST 扫描档的放大（×2.2～×3.7）仍是它最贵的一段，是否改 `--cov` 的覆盖范围属另拍。
+    - **口径与空号**：LOC 逐文件 `git show --numstat` 现取（`.cnb.yml` 改 7 增 5 删含注释；测试池新增 158 行不计入）；在册条数目取 `protectedSubsetEntries()` 现算 **719**（合并后基线；本档一行，其余为并发会话各自入册项），不用 `grep -c`。下一枚空号两条一起跑：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 现算最大均＝**421**（本格自身）⇒ 下批从 **§6-422** 起。**让号留案（两次）**：本条落笔时取 419，与源分支上已在的 §6-419（子集进程内计时口径补登）撞号，改取 420；合并时又与并发会话的 §6-420（零向量两处单源）撞号，`test_auditLedgerNumbering` 当场红（`{'420': 2}`）⇒ 按纪律**后来者让号**，本条终取 **421**，419／420 各归属先到的那两笔。这就是「空号现查只看本地树、看不见别人正在写的号」的代价，靠台账唯一性判据兜住，不靠人记得。
+
+
+420. **零向量：出向量这条路上判一次，存量与注入入口再判一次（✅ 并入源分支上并发的零向量那笔之后按两处单源重写；受保护子集真条目现算 718）** 🟢 —— 承接本单那笔「受保护子集 15 红按根因收口」的现场（该笔已随历史重写失去可达号，按内容指认：活动目录跨回合残留那一组）。本笔与并发会话那笔（"零向量从不是『有向量』"）撞在同一处根因上，合并后按两侧真实意图裁定，**不保留两份口径**。
 
     - **缺陷本体（两侧读数一致）**：引擎在模型档在、分词器/ONNX 运行时装不上时**兜底返回全零向量**（不是 None）。它传得下去，传下去之后就再没人分得开"没算出来"与"真算出个全零"：`tool_search._hybrid_scores` 拿它进语义加权，余弦恒 0，检索对该查询恒空手——而空手在 `handle_control_tool` 那儿是 S3「能力缺口」的投递条件（驱动自主造工具），一个口径缺陷被翻译成了假缺口；`muscle_memory` 把它存进条目，`_compute_confidence` 走"有向量"分支、再也回落不到字符覆盖度，换实体近似句的置信度停在 **0.5875**（票面要 ≥0.85）；`vector_index` 写侧落库后该条对检索永久隐身且指纹未变、下轮不重算。
     - **裁定：两处单源，各管一段，不合并成第三个口**。①**出向量**这条路上由引擎自己判——`ONNXEmbeddingEngine.encodeOrNone()`（并入那笔新增），算不出给 `None`，写侧（`manager._embeddingForNewRow`）与八处消费方改问它；②**存量与注入入口**由 `core/vector_math.isZeroVector` 判——落过盘的条目、注入引擎（判据替身、旧装配，只有 `encode`）交上来的向量，都可能是一列 0，`manager._row_embedding` / `semantic_search._get_embedding` / `muscle_memory._compute_confidence` / `tool_search._hybrid_scores` / `vector_index` / `skill_semantics.is_zero_vector` 一律过这一道。两个口的判据都不许在别处再写一遍（`1e-9` 那形），`skill_semantics` 自己那份 `all(abs(x) < 1e-9)` 降成对 ② 的一行委托。
@@ -10483,3 +10495,31 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开（需人裁）**：① CI 是否装 `onnxruntime`/`tokenizers`/`transformers`/`sentencepiece`——装了这四档回真读数、不装则恒 skip；代价是锁 +数十行、纯 wheel 若干、`huggingface-hub` 抬版本，还要把这四件从 `ci_static_gate.KNOWN_OPTIONAL_DEPS` 摘下（否则静态门禁继续 OPTIONAL-SKIP 放行）。属依赖口径变更。② `tool_search` 中文词表是 2–3 字滑窗、`knowledge.search.tokenize` 走 jieba（≥2 字词），两处对同一段中文给出的 token 集不同，检索与 FTS 因此不可比——要不要接真分词是另一次口径变更。
     - **补一笔（同一格的第二半，CI 才看得见）**：合并后构建 `cnb-sq6-1k5q1kqrc#003` 的受保护子集剩 **1 failed / 7953 passed**，那一格不是断言红——`test_service_closed_loop::test_accept_produces_pending_proposal` 的回溯落在 `jieba.initialize() → gen_pfdict`，即**建字典**而非被测逻辑（本机 2.5s，差别只在字典是否已被同场更早的档暖过；CI 日志里它是本进程第一个切中文的档）。修法是把"字典建完没有"变成能问能催的事实（`search.isJiebaWarm` / `warmJieba`），并在 `tests/conftest.py` 的 `pytest_configure` 里一次建完——它归前提，不归某一条用例。判据 `test_jieba_tokenizer.py::TestWarmUpFace` 两格，红自证＝把两个口钉成恒 `False` ⇒ 一格红、还原 18 passed ×3 同读数。
     - **口径与空号**：受保护子集真条目取 `tests.ast_scan.protectedSubsetEntries()` 读数 **718**（合并前 714；本笔加 `test_tool_search_semantic.py` 一行，并发侧另加三行）。引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 现算最大均＝**420**（并发那格已先占 419） ⇒ 下批从 **§6-421** 起。
+
+422. **同一次 OOM 的另一半：判据自己把整棵语法树举在内存里（✅ 本批；与 §6-421 同一现场，处置互补，两者都要）** ✅🟢 —— 触发点是 PR #367 的 `unit-tests` 腿连续多轮以 `错误信息: 任务执行失败，返回码：137` 收场
+
+    - **与 §6-421 是同一现场的两次独立归因，两份都要留**：那格把 137 归到**配置侧供给**（`runner.cpus: 4` = 8GiB，改 8 并落成比值判据），本格归到**判据侧消费**（一处判据独占 478MB）。两者不互斥，证据也不同源：本格的判据是**死点位置**——两次构建（`cnb-ast-1k5pqhnfi#003` 23m11s、`cnb-rja-1k5pv9gbl#003` 22m13s）都精确停在 82%、都停在同一个文件的同一个用例之后，而该文件正是把 1053 棵语法树整批装进 `list` 的那处；配置侧的解释说不出"为什么偏偏是这一档"。合起来的读数是：**内存账本里有一笔 478MB 的单笔支出，把它抹掉之后再谈供给余量**——只提 `runner.cpus` 而不抹这笔，等于让每个新 slot 继续按 478MB 的单价付租金；只抹这笔而不提余量，则留给后续增长的裕度仍然没被钉住。两笔都已落判据，各自反向控制。
+    - **先把"137 是什么"读对，这是本格最贵的一步**：此前几轮按"平台强杀/超时"解释（本单三笔 `revert(ci): 撤回取证的日志截留…`、`ci(diagnose): 受保护子集日志收到尾部 400 行…`、`fix(ci): 受保护子集 24 红按三个根因收口…` 都在这个前提上做事：日志截留、`tee`、`PIPESTATUS`）。实测读数否掉了它：构建 `cnb-rja-1k5pv9gbl-003` 的日志尾部是——一条进度点、单独一行 `Killed`、然后 `Finished, code: 137`。`Killed` 这个字**只有 shell 会打**，它出现在命令正常收场（有 stage 结束行、有退出码）的路径上，说明被打死的是**子进程**（python），不是 stage。若是平台掐断，不会有 `Finished` 行。
+    - **死点可复现，位置固定**：`cnb-ast-1k5pqhnfi#003`（23m11s）与 `cnb-rja-1k5pv9gbl#003`（22m13s）两次都停在 82%，都停在 `tests/unit/skills/test_marketInstalledStateIsReadBack.py` 之后、`tests/unit/api/test_channelWebhookResolvesAdapterByAgentTable.py` 的**同一个用例之后**。后者正是本格要动的判据。
+    - **根因：扫描面被当成了解析面**——`_neurovaTrees()` 用 `[(rel, transientTree(path)) for path in filesUnder(NEUROVA)]`，把生产根下 **1053** 个文件的语法树同时装进 `list` 交给探测器。本机同一棵树上实测（cpython 3.12，同一份代码）：
+
+      ```
+      旧形状：1053 棵同时在 list 里       → 峰值 RSS 478.6 MB, 5.79s
+      终形状：共享预算 callNodes（10 档进解析）→ 峰值 RSS  50.8 MB, 0.14s
+      ```
+
+      478MB 与用例要判的事毫无关系，却要与 7964 格、`--cov` 插桩、4 核 8GiB 的 runner 同池竞争。**判据没红，是判据的内存形状把跑测压死了**——这类红在读数上与"某格挂死"完全同形，是本格最值得记的一条。
+    - **修法按仓库既有口径，不新造机制，而且走了两步才对**：第一版是 `sourceRefsUnder(..., hints=("get_adapter",))` + 逐文件 `ast.parse`；它被**常驻门禁 `test_ci_ast_scan_budget_guard` 当场拦下**——受保护子集里「自己枚举 + 自己解析」的全仓扫描就是这道闸的靶心（判据与代码总量捆绑），合法出口只有共享预算。第二版改走 `ast_scan.callNodes(NEUROVA, "get_adapter")`：预筛、解析、逐条取节点全在 `tests/ast_scan.py` 的预算内完成，本档一棵树都不持有。探测谓词从"吃一片树"改成"吃一个节点"（`_isBareAdapterLookup(node)`），四形对照格原样保留。
+    - **教义第 5 条扫荡：同一形状的第二处**（`tests/unit/channels/test_channelInboundPayloadPaysTheEventDoor.py::_scanTrees()`，同样把扫描面的树攒成 list）：
+
+      ```
+      旧形状（59 棵整批留 list）→ 峰值 36.6 MB
+      新形状（生成器逐文件即弃）→ 峰值 17.6 MB
+      ```
+
+      它的扫描面只有 59 档，今天不致命；但同一个洞不留两处——改成生成器后调用方一处无需改动（`_emitOffenders` 本来就是消费者），第二处（地板格）拆成"枚举次数"与"逐文件计数"两次读，都不攒树。**没有**顺手改第三处：其余 28 档受保护子集判据现查都是 `for path in ...: tree = transientTree(path)` 的逐文件形状（含 `test_nestedPytestBudgetWallsAreOrdered`、`test_scanCriterionMustProveItsOwnSurfaceRatchet`），不存在整批保留。
+    - **真正的大头不在判据里，如实登记不擅改**：`tests/ast_scan.transientTree` 说明写着"不留常驻缓存"，但它读文本走 `_cachedCode`，而 `sourceRefsUnder` 是**全量读文本再按 hints 过滤**（`refs = [SourceRef(path, key, _cachedCode(key)) for path in filesUnder(root)]`）。即：即便调用方给了 hints，生产根下**全部**文件的文本也已进 `lru_cache(maxsize=None)`，与 hints 无关。实测这份文本缓存 ≈ **30MB**（1053 档，峰值 42.6MB），是 478MB 的 1/15，**本轮不是主因**，故不在本格改共享源——动它要改"文件系统只读一遍"这条契约的设计，属另一次裁定。登记在此，读数给到，不改。
+    - **红→绿实测**：新档 `TestTheScanFaceDoesNotCarryItsTreesResident` 两格（面判据 + 反向控制），面判据要求扫描面走 `callNodes`、且代码里不得再出现 `transientTree`/`parsedModules`/`walkedModules`。把扫描面换回 `ast.parse` + `transientTree` ⇒ 反向控制红；恢复后 **12 passed**。反向控制的实现被**判据自己**抓到过一次：淘汰名单按全文匹配时，docstring 里为讲清根因引用的旧写法字样把"记录根因"判成"又犯一次"——改为只认**语法树里的名字**（`_calledNames`），不看注释与字符串。
+    - **回归**：`test_channelWebhookResolvesAdapterByAgentTable` 12 passed、`test_channelInboundPayloadPaysTheEventDoor` 10 passed，加上本批**自己撞上的两道常驻闸** `test_ci_ast_scan_budget_guard` + `test_scanCriterionMustProveItsOwnSurfaceRatchet` 一并 **129 passed**；`test_dev_environment_contract` + `test_nestedPytestBudgetWallsAreOrdered` + `test_ci_parity_guard` + `test_unit_tests_single_leg` **87 passed, 1 skipped**。`ruff check` 与 `pyflakes` 均无新增。顺带清掉一处 `invalid escape sequence`（本格自己写进去的）。
+    - **仍未收口（不冒充完成）**：① 本格只动了两处**判据侧**的持仓形状，**未**在 CI 上实测整条受保护子集的峰值；若下一轮仍以 `Killed` 收场，按同一口径继续扫"整批保留"的第三处，不预先改 `runner.cpus`（提配置是把症状买下来，不是根修）；② `ast_scan` 的全量文本缓存（≈30MB）与 `hints` 语义不一致这条已登记未改；③ 平台侧同批有两次 `Prepare` 失败（`cnb-13d-1k5pskuuj-004`：`任务超过最大执行时间而被强制关闭：1m0s`）与流水线重分配，非本单代码所致，登记不追。
+    - **口径与空号**：本轮所有内存读数均为本机同进程 `ru_maxrss` 现取，两形状各起一个独立解释器量（避免前一形状的峰值污染后一形状）。下一枚空号两条一起跑：引用面与条目行现算最大均大于 421（并发会话已占到 421）⇒ 按「后来者让号」本格取 **§6-422**，下批从 **423** 起。

@@ -8,6 +8,14 @@ from neurova.evolution.eval.config import EvolutionConfig
 from neurova.evolution.eval.dataset import EvalDataset, EvalExample
 from neurova.evolution.eval.service import SkillEvolutionService
 
+# 本档走 `service.evolve`，与同目录 `test_caseLevelRegressionGate` /
+# `test_runOutcomeLedgerConsistency` 同一条冷启动：约束闸的语义相似度面第一次拉起
+# jieba（`constraints.py` 的 `_tokenize`），coverage 插桩下这一步会顶穿全局 30s。
+# 两档兄弟早按模块级 `pytestmark` 声明了 120s，本档漏了 —— 于是同一件事在 CI 上
+# 记了三种读数（`2ee69acc` 记「3×timeout」、`7d7c408e` 记「装齐依赖后 9 passed」、
+# 本轮 `cnb-sq6-1k5q1kqrc#003` 又是它）。数值沿用兄弟档同一个，不新造第二种标法。
+pytestmark = pytest.mark.timeout(120)
+
 
 BASELINE = "基础技能正文。" + "补充说明文字用于满足增长闸的基线长度要求。" * 2  # >60 字符
 
