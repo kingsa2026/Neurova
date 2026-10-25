@@ -70,12 +70,9 @@ def _attachModelCues(mgr: MemoryManager, rows: dict) -> None:
 
 @pytest.fixture
 def corpus(tmp_path):
-    from neurova.embedding import get_embedding_engine
+    from tests.memory_embedding_precondition import requireRealEmbeddingOrSkip
 
-    assert get_embedding_engine() is not None, (
-        "本判据测的是生产同款稠密检索，缺本地 ONNX 档时读数无意义"
-        "（前提与 test_onnx_lazy_init_deadlock.py 一致，不以 skip 蒙过）"
-    )
+    requireRealEmbeddingOrSkip("向量线索通道的净增益（生产同款稠密检索）")
     # 单例复位必须在这里做：`get_semantic_search()` 是进程级单例，而记忆 id 是每个 fixture
     # 从 mem_000001 确定性重放的——上一个用例并进去的线索词会串到下一个用例的倒排里，
     # 「关掉通道读数不降」这条差分因此测的是残留状态而不是通道（本轮就这么翻过车）。

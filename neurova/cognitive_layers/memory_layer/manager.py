@@ -24,6 +24,7 @@ import json
 import datetime
 from neurova.core.content_identity import normalized_key
 from neurova.core import sql_like
+from neurova.core import vector_math
 from neurova.core.db_migration import migrate as applyMigrations, register_migration
 from neurova.core.logger import get_logger
 import os
@@ -1529,7 +1530,7 @@ class MemoryManager:
         except Exception as exc:  # noqa: BLE001 - 单条算不出不该断这次写入
             logger.warning("嵌入计算失败，该行 embedding 留空: %s", exc)
             return None
-        if not vector or not any(abs(x) > 0.0 for x in vector):
+        if vector_math.isZeroVector(vector):
             logger.warning("引擎回零向量（按未算出处置），该行 embedding 留空")
             return None
         return vector

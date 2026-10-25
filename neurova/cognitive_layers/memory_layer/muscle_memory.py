@@ -72,7 +72,13 @@ def _lexical_coverage(item_fingerprint: str, query_fingerprint: str) -> float:
 
 
 def _semantic_vector(text: str) -> Optional[List[float]]:
-    """计算语义向量；失败/关闭返回 None（调用方回落 MD5 分支）。"""
+    """计算语义向量；算不出来返回 None（调用方走字符覆盖度分支）。
+
+    「算不出来」包括引擎缺席、编码抛错，以及引擎**兜底返回全零向量**——模型档在而
+    分词器/运行时缺席时就是这个形态。零向量不是"两句不相似"的证据，是"这一路没算出来"：
+    按"有向量"交给 `_compute_confidence`，它会走"有向量"分支、余弦恒 0，**再也回落不到**
+    字符覆盖度，缺陷在读数里完全不可见（本仓实测：换实体近似句的置信度停在 0.5875）。
+    """
     if not text or not _semantic_enabled():
         return None
     engine = _get_engine()
@@ -81,6 +87,8 @@ def _semantic_vector(text: str) -> Optional[List[float]]:
     try:
         vec = engine.encode(text)
     except Exception:  # noqa: BLE001
+        return None
+    if vector_math.isZeroVector(vec):
         return None
     # 存储瘦身：4 位小数足够分档，落盘体积减半以上
     return [round(float(x), 4) for x in vec]
@@ -384,6 +392,12 @@ class MuscleMemory:
         # 在它下面永远拿不到分——这正是"断层"的第二半。字符覆盖度衡量问法骨架
         # 是否一致，与上面按 token（含 2-gram）的多集包含度互补而不重复。
         item_emb = item.metadata.get("query_embedding") if _semantic_enabled() else None
+        # 存量条目里可能躺着零向量（写侧修好之前落库的那些）：与写侧同一口径，
+        # 一起按"没算出来"处置，否则读侧的回落永远走不到。
+        if vector_math.isZeroVector(query_emb):
+            query_emb = None
+        if vector_math.isZeroVector(item_emb):
+            item_emb = None
         if query_emb and item_emb:
             sim = vector_math.cosineSimilarity(query_emb, item_emb)
             if sim > 0.75:

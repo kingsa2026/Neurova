@@ -52,7 +52,9 @@ def skill_semantic_text(skill: Any) -> str:
 
 
 def is_zero_vector(vec: Optional[List[float]]) -> bool:
-    return not vec or all(abs(x) < 1e-9 for x in vec)
+    """零向量＝"这一路没算出来"（引擎兜底形态）。口径收在 `core/vector_math`，
+    本处只留名字给既有调用方——阈值不许在这里再抄一份。"""
+    return vector_math.isZeroVector(vec)
 
 
 class SkillVectorCache:

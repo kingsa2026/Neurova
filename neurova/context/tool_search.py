@@ -27,6 +27,9 @@ _BM25_K1 = 1.2
 _BM25_B = 0.75
 
 _TOKEN_SPLIT = re.compile(r"[^a-z0-9\u4e00-\u9fff]+")
+# 中文连续段的最小长度：低于它只剩单字噪声，不进词表（与 `knowledge.search.tokenize`
+# 的下限同口径；那里 jieba 路径同样丢弃 <2 字符的 token）。
+_MIN_CJK_RUN = 2
 
 # B0 预算治理：
 # 目录单条 description 截断上限——超预算时旧行为是整行丢工具（工具对模型
@@ -86,7 +89,28 @@ _ACTIVE_CATALOG: List[Dict[str, Any]] = []
 
 
 def _tokenize(text: str) -> List[str]:
-    return [t for t in _TOKEN_SPLIT.split(str(text).lower()) if t]
+    """检索词表：拉丁/数字按整段，中文按 2-3 字连续片段。
+
+    中文不能整段当一个 token——`[^a-z0-9\u4e00-\u9fff]+` 的切分对中文是无操作，
+    于是「查询天气」是一条词、「天气」是另一条，两者永不相等：目录里明明有天气工具，
+    查「天气」的检索却是零命中。而零命中在生产侧会被投递成「能力缺口」并驱动自主造工具
+    （`handle_control_tool` 的 S3 投递点）——词表口径的缺陷被翻译成了一个假缺口。
+    """
+    tokens: List[str] = []
+    for run in _TOKEN_SPLIT.split(str(text).lower()):
+        if not run:
+            continue
+        if re.fullmatch(r"[a-z0-9]+", run):
+            tokens.append(run)
+            continue
+        if len(run) < _MIN_CJK_RUN:
+            continue
+        for size in (2, 3):
+            tokens.extend(
+                run[start:start + size]
+                for start in range(len(run) - size + 1)
+            )
+    return tokens
 
 
 def build_catalog(tools: List[Dict]) -> List[Dict[str, Any]]:
@@ -212,6 +236,12 @@ def _hybrid_scores(query: str, entries: List[Dict[str, Any]]) -> Optional[Dict[s
         q_vec = engine.encode(query)
     except Exception as err:  # noqa: BLE001 - 编码故障降级，不阻断检索
         logger.debug("T3 查询嵌入失败，回落 BM25: %s", err)
+        return None
+    if vector_math.isZeroVector(q_vec):
+        # 零向量是"这一路没算出来"（模型档在、分词器/运行时缺席时引擎兜底给全零），
+        # 不是"两句话不相似"。当"有向量"处置的话，余弦恒 0 且**再也不会回落 BM25**：
+        # 检索从此对该查询恒空手，而空手在生产侧会被投递成「能力缺口」。
+        logger.debug("T3 查询嵌入回零向量，回落 BM25")
         return None
     with _index_lock:
         vectors = _load_index(_model_fingerprint(engine))
