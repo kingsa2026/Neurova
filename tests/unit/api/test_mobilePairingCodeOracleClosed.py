@@ -35,10 +35,13 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_for_oracle_01234567")
 
 from neurova.api.endpoints import mobile_pairing as MP
+from neurova.tunnel import protocol
 
 PREFIX = "/api/v1/mobile"
-#: 手机侧唯一该有的公开口（它拿不到 JWT）；其余按码回话的口一律要门。
-PUBLIC_BY_DESIGN = {"/pairing/confirm"}
+#: 手机侧该有的公开口（它们拿不到 JWT）：确认配对、扫码换地址、接入凭证续签。
+#: S1b 新增的两条按同口径登记——公开的前提是**各自有限流**，见
+#: `TestEveryCodeSpeakingRouteIsGated.test_every_public_door_keeps_its_own_rate_limiter`。
+PUBLIC_BY_DESIGN = {"/pairing/confirm", "/pairing/resolve", "/pairing/refresh"}
 
 
 def _mount(overrideIdentity: bool):
@@ -54,7 +57,8 @@ def anon():
     """没挂身份桩的 app：调用方不带任何凭证，读的就是外部人真能读到的那一面。"""
     MP._pairing_codes.clear()
     MP._pairing_codes["123456"] = {
-        "code": "123456", "pairing_id": "pair-oracle", "user_id": "kai", "device_name": "已配设备",
+        "code": "123456", "ref": "r" * protocol.PAIRING_REF_LENGTH,
+        "pairing_id": "pair-oracle", "user_id": "kai", "device_name": "已配设备",
         "status": "pending", "created_at": 0, "expires_at": 2 ** 31,
     }
     with TestClient(_mount(False), base_url="http://testserver",
@@ -67,7 +71,8 @@ def anon():
 def authed():
     MP._pairing_codes.clear()
     MP._pairing_codes["123456"] = {
-        "code": "123456", "pairing_id": "pair-oracle", "user_id": "kai", "device_name": "已配设备",
+        "code": "123456", "ref": "r" * protocol.PAIRING_REF_LENGTH,
+        "pairing_id": "pair-oracle", "user_id": "kai", "device_name": "已配设备",
         "status": "pending", "created_at": 0, "expires_at": 2 ** 31,
     }
     app = _mount(True)
@@ -171,6 +176,22 @@ class TestEveryCodeSpeakingRouteIsGated:
         source = inspect.getsource(route.endpoint)
         assert "_check_confirm_rate_limit" in source, (
             "confirm 公开却丢了每 IP 限流——10^6 个码直接变成可枚举目标，比本批关掉的更糟")
+
+    def test_every_public_door_keeps_its_own_rate_limiter(self):
+        """豁免名单每加一口，就要每口各自带闸——否则这条名单变成"无门口的许可证"。
+
+        S1b 新增的 `resolve`（按 ref 换地址）与 `refresh`（按设备身份续签）都是匿名口：
+        高熵 ref 不等于不限流（中继会被当成放大器打），可续签更是要防爆破。
+        """
+        ungated = []
+        for path in sorted(PUBLIC_BY_DESIGN):
+            route = next((r for r in MP.router.routes if r.path == path), None)
+            if route is None:
+                ungated.append(f"{path}（路由不存在，豁免名单悬空）")
+                continue
+            if "_check_confirm_rate_limit" not in inspect.getsource(route.endpoint):
+                ungated.append(path)
+        assert not ungated, f"这些匿名口没有每 IP 限流：{ungated}"
 
     def test_gate_detector_hits_a_revived_ungated_route(self):
         """反空转：门摘掉时探测器必须说"没有门"，否则上一条是恒真的空守卫。"""

@@ -3859,3 +3859,64 @@ tests/unit/security/test_redactionDoorsShareOneLeakClosure.py
 #   改回旧登记行 ⇒ ②红（exit=-9）；恢复 ⇒ 2 passed（令牌侧另有 4 格钉"摘钩键必须是令牌给的那个"）。
 # 入册前逐文件单跑全绿（2 passed）。
 tests/unit/execution/test_execLocalRuntimeHangsUpKillHook.py
+# 静态门禁的"未定义名称"判据只许报**真·未定义**，不许把注解专用名算成缺陷。
+# 形态：CI static-gate 腿报 6 处 F821，5 处是注解里的名字（实体在函数体内懒加载，
+# 模块级导入会拉 `neurova.agent` 包 __init__ → `tool_executor` 的循环，AGENTS.md §3）。
+# 判据曾埋在 subprocess 输出里数字符串，于是"判的是语义还是行格式"没人能反证；
+# 现在收成可调用口 `scripts.ci_static_gate.undefinedNamesIn`，本档按三层钉它：
+# 注解专用名不报、真拼错名照旧报（拼错的注解名与幻影变量各一格）、门禁入口仍走这唯一判据口。
+tests/unit/ci/test_staticGateUsesParserNotTypecheck.py
+# 裁决**按哪些路径值裁的**必须随裁决结果回到调用方。改前 `verdict.to_dict()` 的键里
+# 一格路径都没有，"被拦的是哪条路径"在结果面就丢了；`tool_executor` 的文件保护支路
+# 因此读一个从未绑定的 `file_path` 打日志——静态门禁报 F821，运行时被外层吞成 warning，
+# 文件类工具每到这一行就静默丢掉"拦了哪条路径"。本档钉三层：结果面带出路径值且
+# `to_dict()` 一并带出、与取数口 `extract_adjudicable_params` 同源、消费侧真日志点到路径。
+tests/unit/security/test_governancePathValuesReachCallers.py
+# §6-416（批 P-5 第三格）：内容级**第八张表**并进单源，挖掘门改接并退役自带表与同名实装。
+# 票面来自 §6-415 仍开①——§6-411 那次"七份收成一份"没数到 `evolution/eval/miner.py:SECRET_PATTERNS`，
+# 而它在役（`service.py:503-506` → `messages_from_sessions` → `sanitize_messages` → 命中即整条
+# 剔除，评测集随后喂进化分析）。先比后合的结论分四档：**六形单源一条都没有**（`ghu_`／`xoxb-`／
+# `xapp-`／`ntn_`／`AKIA{16}`／PEM 私钥头，实测原样进证据 ⇒ 并进表，表 12→18、凭据投影 7→13）；
+# **四条是冗余窄档不并**（`sk-ant-api`／`sk-or-v1`／`ghp_`／`Bearer \S{20,}` 实测由泛化档覆盖，
+# 再抄一遍＝同一件事第二把尺度，故反向钉一格）；**三条键值式单源本就更强**（值长下限统一走
+# §6-415 具名的 `MIN_SECRET_VALUE_LEN`）；**七个凭据环境变量名不是脱敏形状**——提到变量名不等于
+# 泄露凭据，打进打码投影会把运维散文糊平，故收成筛除词汇一处具名（`CREDENTIAL_ENV_NAMES`＋
+# `mentionsCredentialEnvVar`，大小写口径沿用原表 IGNORECASE）。第二段实装名 `contains_secret`
+# 一并去掉（改名 `_containsCredential`），仓内该功能只剩一处实装被消费才算闭环。
+# 判据 7 格全经**在役入口**问（真 `sanitize_messages`／`_redact`／`redact_secrets`），新符号走
+# hasattr／AST ⇒ 生产回退态收集得起；夹具 `_BENIGN_TASK` 刻意长过 `MIN_TEXT_LEN`，免得把"长度闸
+# 剔除"冒充成"密钥闸剔除"。红→绿 5 failed／2 passed → 7 passed；红自证两生产文件回退 HEAD 复跑
+# ＝5 failed／2 passed 与首轮逐条同号。变异探针三发各只红该红（剔除口恒 False／摘 AWS 形状且
+# 连投影名一起摘——只摘形状时 `_pick` 当场 KeyError，"投影写错宁可炸"被顺手自证／泛化档收到
+# 40 位⇒仅冗余窄档那格红）。活体十形经真链全剔除且两扇脱敏门全 `[REDACTED]`，而"请先设置
+# GITHUB_TOKEN 与 DATABASE_URL"这句挖掘门剔除、脱敏门逐字不动（＝筛除词汇与打码形状必须分开）。
+# 回归 7653 passed，十四条既有红逐条同选型两态对跑读数一致（含只在本场现形的 test_ttl_expiration
+# ERROR＝跨档串扰），本批不新增红。逐文件单跑两次同读数 7 passed。
+tests/unit/evolution/test_minerSecretDropPolicySharesOneTable.py
+# ── 移动端扫码经中继连无固定 IP 服务端（设计方案 docs/04-plans/2026-10-24-移动端扫码经中继连接无固定IP服务端设计方案.md；批 S1a＋S0＋S1b＋S2＋S0.5）──
+# 五档各钉一条链上断点，逐档 docstring 带 2026-10-24 的实测现状（file:line 可复核）；红→绿原文在
+# `8f7c9dc9` 提交正文（新判据先红：1 条 collection ImportError 与行为红分开报，绿后新判据 55 passed）。
+# · 在册权威（`test_mobileDeviceRegistryPersistence.py`，7 格）：`revoke` 此前只断当下那条连接，
+#   拦不住设备拿旧凭证重连（实测红形＝`assert 'accepted' != 'accepted'`），且 `_paired_devices` 是
+#   模块级 dict——重启即清空。现收进 SQLite（`core/mobile_device_store`）＋ `tokenEpoch`，
+#   撤销在**连接闸门**处判（`isAdmissible`）而不是只在端点里判；30 天无活动只标 dormant 不代删。
+#   其中一格是反向控制：点名一个"读注册表之外的放行处"的假想 handler，防闸门退化成装饰。
+# · 对外地址单源（`test_mobilePairingAdvertisedBaseUrlSingleSource.py`，10 格）：新增
+#   `NEUROVA_ADVERTISED_BASE_URL`（优先级 advertised > 入站请求），两个真启动点开 `proxy_headers`
+#   ＋`forwarded_allow_ips`——**不在端点里自解析 XFF**（那是第二份事实源，教义第 6 条）。
+#   路径仍向路由表要（批 26 那条判据不松动）；另有两格钉"启动点漏开代理参数"这一假想形状。
+# · 载荷与凭证分层（`test_mobilePairingStateClosure.py`，17 格）：二维码只含一次性 `ref`（不含 host），
+#   `resolve` 消费后 `pending→scanned` 且**无回边**；`confirm` 回一次性 `connectTicket`，
+#   回连 URL 不带任何凭证（旧形经中继必落中继访问日志）；`refresh` 续签不换身份。
+#   形状判据走 AST＋剥 docstring（本卷形态 410/414：自家正文里的 `token=` 路标句曾把自己撞红）。
+# · 中继准入（`tests/unit/tunnel/test_tunnelAdmissionAndChannelState.py`，14 格）：`routeId` 由
+#   (enrollment, instanceId) HMAC **派生**而非调用方自报，否则"抢名"就是注册接口的默认行为；
+#   配了中继却没注册上时发码显式 503 `tunnel_not_ready`、不渲染成"等待扫码"（AGENTS §2 故障要看得见）。
+# · 三侧字面量集合相等（`test_tunnelStateEnumSingleSource.py`，7 格）：Python/TS/ArkTS 读同一批词，
+#   只断集合相等，**不生成代码、不加同步脚本**（教义第 6 条点名的"两边都留着、加个同步脚本"）。
+# 入册前置：逐文件单跑两次同读数 7／17／10／14／7 passed（本机 2026-10-24 现跑）。
+tests/unit/api/test_mobileDeviceRegistryPersistence.py
+tests/unit/api/test_mobilePairingStateClosure.py
+tests/unit/api/test_mobilePairingAdvertisedBaseUrlSingleSource.py
+tests/unit/tunnel/test_tunnelAdmissionAndChannelState.py
+tests/unit/test_tunnelStateEnumSingleSource.py

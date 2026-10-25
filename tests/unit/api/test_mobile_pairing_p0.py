@@ -47,35 +47,44 @@ class TestWSUrlHardcoded:
         )
 
     def test_ws_url_should_derive_from_host_header(self):
-        """RED: ws_url 应从请求的 Host header 推导，而非硬编码 localhost:8000"""
+        """ws_url 从请求的 Host 推导，而非硬编码 localhost:8000。
+
+        2026-10-24 S1b 起，这条地址**不再携带任何凭证**（`?code=`／`?token=` 都退出 URL，
+        §4.2）：它会原样进中继的访问日志。所以本类审的只剩 host/scheme/路径那三件，
+        "凭证不在 URL 里"由 `test_mobilePairingStateClosure.py` 钉。
+        """
         from neurova.api.endpoints import mobile_pairing as mp
 
-        ws_url = mp._build_ws_url(self._request("example.com:9527", "http"), code="123456")
+        ws_url = mp._build_ws_url(self._request("example.com:9527", "http"))
 
-        # 期望: ws://example.com:9527/api/v1/mobile/ws?code=123456
         assert "localhost:8000" not in ws_url, "WS URL 不应硬编码 localhost:8000"
         assert "example.com:9527" in ws_url, "WS URL 应包含实际 host:port"
         assert ws_url.startswith("ws://"), "WS URL 应以 ws:// 开头"
-        assert "code=123456" in ws_url
+        assert "?" not in ws_url, f"回连地址又開始挂凭据了：{ws_url}"
 
     def test_ws_url_should_use_https_when_request_is_https(self):
-        """RED: HTTPS 请求应生成 wss:// URL"""
+        """HTTPS 请求应生成 wss:// URL"""
         from neurova.api.endpoints import mobile_pairing as mp
 
-        ws_url = mp._build_ws_url(self._request("secure.neurova.io", "https"), code="abc")
+        ws_url = mp._build_ws_url(self._request("secure.neurova.io", "https"))
 
         assert ws_url.startswith("wss://"), "HTTPS 请求应生成 wss:// URL"
         assert "secure.neurova.io" in ws_url
+        assert "?" not in ws_url, f"回连地址又开始挂凭据了：{ws_url}"
 
-    def test_ws_url_for_token_endpoint(self):
-        """RED: confirm_pairing 返回的 ws_url 也应从 Host 推导"""
+    def test_ws_url_for_confirm_endpoint_carries_no_credential(self):
+        """confirm 回的那条地址：host 照样推导，凭证一律走 header（§4.2）。
+
+        原判据断的是 `"token=test-token" in ws_url`——那正是本批要退役的形态，
+        按教义第 7 条与新接线同批改判，不留着当"两边都对"的第二份口径。
+        """
         from neurova.api.endpoints import mobile_pairing as mp
 
-        ws_url = mp._build_ws_url(self._request("192.168.1.100:9527", "http"), token="test-token")
+        ws_url = mp._build_ws_url(self._request("192.168.1.100:9527", "http"))
 
         assert "localhost:8000" not in ws_url
         assert "192.168.1.100:9527" in ws_url
-        assert "token=test-token" in ws_url
+        assert "token" not in ws_url and "code" not in ws_url, ws_url
 
 
 # ---------------------------------------------------------------------------
