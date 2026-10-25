@@ -10446,3 +10446,34 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **⚠ 本格顺手改的一处台账自身错误**：§6-415 末尾"下一枚空号现查"那行原本写作"⇒ 本批取 **§6-416**"，而那条目本身就是 415——落笔时把下一批的号当成了本批的号。已就地改回 415 并在原格加注。这一笔的代价超出一个数：空号现查配方扫的是**全仓引用面**，一个凭空写出的 `§6-416` 会让后来者误判 416 已占用（本批落账前就差点被它带偏）。⇒ 新纪律：**空号现查要同时看"条目行 `^NNN\. `"是否存在**，只看引用面会把引用当占用；引用面里出现自己上一格写错号的形状，必须在本格留案。
     - **仍开（不冒充完成）**：① `security/privacy_gate.py:18 _SENSITIVE_KEY` 仍是第四份**键名**表，且它的 `_redact_value` 用 `ab***yz` 部分保留出口（渠道预览要看得出长度线索），要不要并进 §6-415 的 `isCredentialKey` 一处口径属**另拍**；② 已序列化文本的转义引号作独立入口仍不设防（§6-415 边界原样）；③ **P-6**（console SSE 永不返回 await，卡全量读数）→ P-2 → M3 → P-3 按裁定排队。
     - **下一枚空号现查**：`git grep -ohE "§6-4[0-9][0-9]" HEAD -- audit-reports docs scripts | sed 's/§6-//' | sort -u | tail -3` 现算最大＝**415**（其中 415 尾行的 416 是上一格写错的引用，已随本格更正），台账条目尾号＝415 ⇒ 本批取 **§6-416**，下批从 **417** 起。
+
+417. **前端把后端点名的拒因折成泛化文案——登记未扫完的命中面（本会话已闭一档）** ✅🟢 —— 触发点是真操作验证：管理端上架一条无来源技能，新闸回 **400** 并逐字点名「无可取件地址…」，UI 上却只剩一句"操作失败"（`NeurUI/src/pages/MarketplacePage.vue` 的 `installItem` catch）。管理员看不出自己少填了哪个字段，只能回头翻控制台——报错有了，可诊断性没了。
+
+    - **现算面（2026-10-25 本会话，口径见末条）**：`grep -rn "message.error(t('common.error'))" NeurUI/src` = **131 处 / 32 个文件**；同一仓里已有 **69 处**写法是先取 `err?.response?.data?.detail` 再兜底。⇒ 两种出口并存，就是"错误怎么给人看"的第二份定义（教义第 6 条形状）；新闸只是把这条差异从"看不见"变成"看得见却读不懂"。
+    - **本会话已闭的那一档（9 处）**：`MarketplacePage.vue` 的 9 个 `} catch {` 全改绑 `err` 并接一处 `errText(err, fallback)`（detail→error→message→兜底），配两格判据——该页不得再有 `message.error(t('common.error'))`，且 `errText` 落点数 ≥9（防"整段删掉也算整改"）。提交 `713959ed`。
+    - **建议收口次序（供人拍板，不自造）**：① 先把 `errText` 从那一页提到 `NeurUI/src/api/` 一处作全仓口径——不提这一步就逐页各抄一份，等于把"局部单点"变成第 33 份实现（教义第 7 条的反面）；② 再按"后端确实有拒因可读"的密度收，先 skills／marketplace／credentials 三族；③ 收完若干档后再谈要不要把结构判据升成常驻闸（目前只有 `MarketplacePage` 一档被钉住）。
+    - **同批已闭的另一处语义分家**：`market.submitUrlPh`（"ZIP 链接（可选）"）在**提交技能**路径下确实可选（审核物化可走 `pool_skill_id` 血缘），但管理端上架留空就装不上——两种语义共用一条文案必有一边说谎。故新增一键 `marketplace.downloadUrlPh`（"留空则此条目无法安装"），11 语一起铺，`market.submitUrlPh` 原样不动。无遗留。
+    - **仍开（不冒充完成）**：其余 **122 处**（131−9）未动——体量超出单批，且"每一处 toast 都该显示后端 detail"属 UX 口径，需人裁一刀再扫；本条只登记，不预改。
+    - **口径与空号**：本条数字只量 `NeurUI/src` 下的 `message.error(t('common.error'))` 字面形状（`src/pages/__tests__` 与组件内其它 toast 写法不在内）；口径若扩，读数会变，引用前先复算。下一枚空号现查按形态 418 的纪律两条一起跑：引用面 `git grep -ohE "§6-4[0-9][0-9]" HEAD -- audit-reports docs scripts` 现算最大＝**416**，条目行 `^[0-9]{3}\. ` 尾号亦＝**416** ⇒ 本批取 **§6-417**，下批从 **418** 起。
+
+
+418. **受保护子集分片执行：`code 137` 不是"测试红了"，是跑测进程被整段掐断（本格把清单切成三片，判据一条不动）** ✅🟢 —— 触发点是 PR #365 的 `unit-tests` 红
+
+    - **✅ 现场读数（先定性，再动手）**：构建 `cnb-v9p-1k5pkvplt` 的第 3 条流水线，日志末尾是 `tests/unit/api/test_channelWebhookResolvesAdapterByAgentTable.py ...` / `Killed` / `Finished, code: 137`，**整场一条失败墙都没有**。`137` = SIGKILL ⇒ 不是断言红，是进程被杀。用同一份 `requirements-ci.lock` 在本机复跑同一份清单，读数落到同一根因：
+
+      | 口径 | 耗时 | 进程峰值 RSS |
+      |------|------|--------------|
+      | `--no-cov`（`--durations=40`） | 17m32s | **2.74 GiB**，仍在爬升、未见平台期 |
+      | `--cov`（CI 那一形） | 26m03s | **2.78 GiB** |
+
+      `unit-tests` 声明 `cpus: 4`，按平台语法「内存 = CPU 核数 × 2 GiB」＝ **8 GiB** 上限（该换算的出处是 `docs.cnb.cool/zh/build/grammar.md` 的 `runner.cpus` 节，不是本仓的自定义口径）。峰值贴着额度往上爬，任何一处抖动（依赖面变大、缓存状态不同）都能把它推过去。
+    - **✅ 根因不是某一条测试，是"一张清单一次 pytest"**：收集期就要把 7.9k 项全建出来，跑起来后各模块的常驻态（单例、连接池、内存索引）在一场里累积、谁也不释放。会话末尾的那一档只是恰好撞上刀口的那一格——把它单独跑 10 passed（34.65s），说明它自己是干净的。
+    - **✅ 修法：按目录族切成同目录三片，各起一个进程**（`scripts/ci/protected_tests.<N>.txt`）。片内**按目录族连续**（族内共享 fixture 与常驻目录态，打散会让原本同进程的用例跨进程），族间按收集项数做贪心均衡：三片分别 **224 / 251 / 238 个文件、2638 / 2640 / 2639 个收集项**。索引 `protected_tests.txt` 逐行保留原貌（注释与顺序），**片号的事实源是目录里有哪几片**——作业按通配派生，不手抄 `1 2 3`（抄进配置就与目录脱钩：加了一片而 CI 不跑它，没有任何红）。
+    - **✅ 判据一条不动，且分片不许把门禁切碎**：每片仍跑同一份清单文件、同一把 `--cov-fail-under=60`。但**逐片判阈值会假红**——实测分片 1 单独判是 `6771 语句 / 3429 未覆盖 = 49%`，而整份子集是 `12940 / 1603 = 88%`：门禁的语义是"受保护子集整体覆盖了多少"，它不认识分片。故跑测步只攒数据（`--cov-report= --cov-fail-under=0`），阈值与合并口径收在 `scripts/ci/coverage_report.py` 一处（阈值仍取 CI 命令行那一个 60，`pyproject` 不得再写一份）。GitHub 侧对应多一个 `coverage` job（矩阵各格上载 `data/coverage/.coverage*`，合并后判一次），`EXPECTED_MAP` 记成 `"coverage": ["unit-tests"]` —— 它是同一条腿的第二步，不是新门禁。
+    - **✅ 红→绿**：新档 `tests/unit/ci/test_protected_subset_shards.py` 9 格，首轮 **5 failed / 3 passed**（红原文含「分片与索引对不上…漏 713 条」「`scripts/ci/` 下一个分片清单都没有」「cnb 侧没有按分片循环」「GitHub 侧没有分片矩阵」「cnb 侧分片后不见了覆盖率门禁」），实现后 **9 passed**（3.18s / 3.20s 两次同读数）。三条反向控制各自独立：合成"漏一条"、"跨片重复登记"、"断号（1 与 3）"三种分片集必须各被抓到。
+    - **✅ live-verify（真跑三片、真合并判阈值）**：`--cov` 逐片真跑读数 **473s / 664s / 472s**，峰值 **1.34 GiB / 1.77 GiB / 1.25 GiB**（对照单进程 2.78 GiB、26m03s）⇒ 峰值降到 1/2 以下，墙钟由 26 分钟降到约 11 分钟一片（三轮并发即 ≈11 分钟，串行的最坏情形也低于原来的 26 分钟）。合判步用真实的 `data/coverage/.coverage.*` 演练两条通路：低于阈值时 `EXIT=1` 并印 `FAIL Required test coverage of 60.0% not reached. Total coverage: 23.58%`，达标时 `EXIT=0` 并印 `Required test coverage of 20.0% reached`，跑完目录被清空（下一批不串味）。
+    - **⚠ 无数据不得读成"通过"**：`coverage_report.py` 在目录里一份数据都没有时**响亮失败并点名**（`没有找到任何覆盖率数据…不要把它读成“通过”`），这是 `combine --strict` 之外的第二道——`combine` 按「目标文件名 + `.` + `*`」找同名族，目标叫 `.coverage.merged` 时它找的是 `.coverage.merged.*`，与各片落的 `.coverage.<host>.<pid>.<rand>` 对不上，实测会"合并成功但一份都没读到"。故改成把逐片文件显式交给它。
+    - **✅ 兼容改动（三处，逐条说明为什么是"跟随"而不是"放宽"）**：① `tests/unit/ci/test_unit_tests_single_leg.py` 的 GitHub 矩阵断言原本 `matrix is None`，现只禁 `python-version` 那一维（Issue #301 收敛的是解释器腿数，不是分片；片数一致性另由新档钉住）；取数断言的 `protected_tests.txt` 改成前缀 `scripts/ci/protected_tests`（索引与分片同前缀）；② `test_ci_parity_guard.py` 的 `unit-tests` 核心命令同理，并新增 `"coverage": ["unit-tests"]` 映射；③ `tests/ast_scan.py` 的 `protectedSubsetEntries(root, ledgerName=…)` 加一个文件名参数（同一把尺读分片，不另写一份读者）。
+    - **✅ 既有红逐条定责**：`tests/unit/ci` 全套 + CI 相关守卫合跑 **607 passed / 2 skipped**，另 5 条在**改动前就是红**（`test_abBaselineDriverReadings` 5 条：容器内无 git 身份，`git commit` 退 128）、3 条同样前后一致（`test_cognitiveComponentTable` 2 条生成器漂移、`test_liveIsolationSinglePointCoversBothRoots` 1 条路径口径），全部经 `git stash` 前后对跑逐名比对，**不是本格引入**。
+    - **仍开（不冒充完成）**：① 三片仍是**串行**跑在一个 stage 里（峰值已降，墙钟由分片内条目数决定），要不要改成三个并行 stage 属资源账，不是判据账，待裁；② 片数是 3 这个数没有常驻判据"必须不小于 N"，只有"目录里有几片就跑几片"的一致性判据——加到 4 片不会红也不会被拦；③ 这一刀只处理了内存，`--cov` 的插桩放大（同格实测 ×2.2～×3.7）仍在。
+    - **口径与空号**：本格数字全部现场复算（耗时、RSS 来自本轮三片真跑与单进程对照；条目数来自 `--collect-only` 现读 7916 项 + 1 条收集失败档）。引用面 `git grep -ohE "§6-4[0-9][0-9]" HEAD -- audit-reports docs scripts` 现算最大＝**417**，条目行 `^[0-9]{3}\. ` 尾号亦＝**417** ⇒ 本格取 **§6-418**，下批从 **419** 起。

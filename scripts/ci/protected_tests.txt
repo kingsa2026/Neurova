@@ -1,6 +1,14 @@
-# P0-6 CI 受保护测试子集（unit-tests job 跑这份清单）
+# P0-6 CI 受保护测试子集（unit-tests 这条腿跑的清单）——**索引**
 # 原则：只进当前确定全绿的测试；预存失败模块不进 CI，修复后逐个搬入。
-# 维护方式：每完成一个 P0/P1 项，把它的测试文件加进来。
+# 维护方式：每完成一个 P0/P1 项，把它的测试文件加进来（改本文件 = 改索引）。
+#
+# 本文件是**索引**，不是被跑的清单本身：CI 逐片跑同目录的
+# `protected_tests.<N>.txt`（片号的事实源是目录里有哪几片，作业不手抄片号）。
+# 索引与各片的并集必须逐条相等——漏跑、多跑、跨片重复登记都红，
+# 判据见 tests/unit/ci/test_protected_subset_shards.py。
+# 为什么分片：单一进程跑整份清单的峰值 RSS 实测 2.74~2.78 GiB 且仍在爬升，
+# 而这条腿 4 核 = 8 GiB 上限——构建 cnb-v9p-1k5pkvplt 的 code 137 就是被整段掐断。
+# **改完索引要按同一片数重切分片**（片内按目录族连续，族内共享 fixture，不许打散）。
 tests/unit/test_audit_regressions.py
 tests/unit/auth/test_password_hasher.py
 tests/unit/test_ci_parity_guard.py
