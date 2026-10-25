@@ -94,6 +94,22 @@ _JIEBA_LOAD_LOCK = threading.RLock()
 _jieba: Any = None
 
 
+def isJiebaWarm() -> bool:
+    """进程内的 jieba 字典是否已建完（`False` = 未建/不可用）。
+
+    为什么需要这个口：`jieba.initialize()` 是**进程级一次性**冷启动——首次切词时在
+    调用方栈上同步建字典（CI runner 上实测把一格 30s 的判据撑到超时，而且红的位置在
+    建字典、不在被测逻辑）。已经有调用方在进程起手做暖机；没有这个口的话，那件事只能
+    靠"谁记得先 import 一次"来保证，谁也不知道自己是不是第一个。
+    """
+    return _jieba not in (None, False)
+
+
+def warmJieba() -> bool:
+    """把字典建起来（已在则直接返回）。失败按不可用记下，不抛、不反复重试。"""
+    return _get_jieba() is not None
+
+
 def _get_jieba() -> Any:
     """进程级惰性加载 jieba；不可用返回 None（调用方回退 n-gram）。
 

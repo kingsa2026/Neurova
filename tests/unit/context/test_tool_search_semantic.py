@@ -27,6 +27,10 @@ class FakeEngine:
         norm = math.sqrt(sum(v * v for v in vec)) or 1.0
         return [v / norm for v in vec]
 
+    def encodeOrNone(self, text: str):
+        """引擎那一处的判据口（`ONNXEmbeddingEngine.encodeOrNone` 的契约）：算得出才给向量。"""
+        return self.encode(text)
+
 
 @pytest.fixture
 def entries():
@@ -115,13 +119,12 @@ class TestCjkLexicalFallback:
         """单字段只剩噪声，不进词表（与 `knowledge.search.tokenize` 的下限同口径）。"""
         assert ts._tokenize("a 天 b") == ["a", "b"]
 
-    def testSearchFallsBackToBm25WhenTheQueryVectorIsZero(self, isolated_index, monkeypatch):
-        """零向量查询必须整体回落 BM25——不许进语义加权。
+    def testSearchFallsBackToBm25WhenTheEngineGivesNoVector(self, isolated_index, monkeypatch):
+        """引擎算不出向量时，检索必须整体回落 BM25。
 
-        为什么要看**分数**而不是只看"有没有命中"：混合分是
-        `0.6×余弦 + 0.4×归一化BM25`。零向量查询若被当有效向量，余弦那一支给 0，
-        但 BM25 那一支照样有分（目录里就一个条目 ⇒ 归一化后是 1），结果仍然命中，
-        "命中"这一条判据就白写了（实测：撤掉回落仍绿）。分数才分得开两支。
+        `ONNXEmbeddingEngine.encodeOrNone()` 是"这一轮算没算出向量"的唯一判定处：引擎缺档
+        （`requirements-ci.txt` 刻意不含 onnxruntime/tokenizers）时它给 None。`_hybrid_scores`
+        若照旧拿"一列 0"进语义加权，余弦那一支恒 0 却仍参与，检索读数就随"装没装 tokenizer"变。
         """
 
         catalog = ts.build_catalog([
@@ -129,26 +132,27 @@ class TestCjkLexicalFallback:
               "description": "查询天气", "parameters": {"type": "object", "properties": {}}}},
         ])
 
-        class ZeroQueryEngine:
-            def encode(self, text):
-                if text == "天气":
-                    return [0.0] * 8
-                return [0.0] * 7 + [1.0]
+        class UnreadyEngine:
+            """查询算不出；条目照常编码（引擎半可用是常态，不是二值）。"""
 
-        monkeypatch.setattr(ts, "_get_engine", lambda: ZeroQueryEngine())
-        # 混合打分返回 None 即"这一路不参与"，调用方回落 BM25（`search_catalog` 的既定分支）
+            def encode(self, text):
+                return [1.0] + [0.0] * 7
+
+            def encodeOrNone(self, text):
+                return None if text == "天气" else self.encode(text)
+
+        monkeypatch.setattr(ts, "_get_engine", lambda: UnreadyEngine())
         assert ts._hybrid_scores("天气", catalog) is None, (
-            "零向量查询进了语义加权：余弦恒 0 却被当成『确实是 0 分』，"
-            "语义这一路再也不会回落到 BM25"
+            "引擎没给向量却仍进了语义加权：余弦那一支恒 0，检索读数随装没装 tokenizer 变"
         )
         assert ts.search_catalog("天气", catalog, limit=1)[0]["name"] == "mcp.weather.lookup", (
             "回落之后检索仍是空手——零命中在生产侧会被投递成能力缺口"
         )
 
-        class SelfConsistentEngine(ZeroQueryEngine):
-            def encode(self, text):
-                return [0.0] * 7 + [1.0]
+        class ReadyEngine(UnreadyEngine):
+            def encodeOrNone(self, text):
+                return self.encode(text)
 
-        # 反向控制：同一坐标下查询向量正常时必须走语义那一路（否则上面那条另有来源）
-        monkeypatch.setattr(ts, "_get_engine", lambda: SelfConsistentEngine())
+        # 反向控制：同一坐标下引擎算得出时，语义那一路必须真的进场
+        monkeypatch.setattr(ts, "_get_engine", lambda: ReadyEngine())
         assert ts._hybrid_scores("天气", catalog) is not None
