@@ -163,8 +163,9 @@ startFp = dataFingerprint()
 try:
     LEDGER_PATH, ENTRY_DIR = seedIsolated(ROOT)
 except Exception as exc:  # noqa: BLE001
-    # exc 在 except 块退出时即被删除，lambda 迟绑定会在那时取到未定义名——先收成实参
-    read("[0] 隔离根取真账本副本", lambda _exc=exc: (False, repr(_exc)))
+    # 同上：`as` 绑定名出块即解绑，进 lambda 前先取值
+    seedFailure = repr(exc)
+    read("[0] 隔离根取真账本副本", lambda: (False, seedFailure))
     LEDGER_PATH = ENTRY_DIR = None
 
 if LEDGER_PATH:

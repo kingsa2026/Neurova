@@ -149,7 +149,7 @@ main:
       #   cnb-a20-1k5lpircs#003 duration 24m13s → `Killed` / code 137
       # 两轮都是 `tests/unit/skills/test_marketInstalledStateIsReadBack.py` 之后、
       # 下一格被逐行印出的**同时**被掐，pytest 一行 summary 都没来得及打。
-      # 这不是"分钟数不够"（墙钟已于 733eba82 抬到 80m），是内存到顶：高水位随
+      # 这不是"分钟数不够"（墙钟已于 733eba82 抬过、本分支跟随主线取 90m），是内存到顶：高水位随
       # 那份装进内存里的测试集合一起长。8 核 = 16GiB 留一倍余量给同一批用例的内存峰值，
       # 判据一个字不动：清单、--cov-fail-under=60、每一格断言全部逐字未改。
       # 不写死"内存是多少"：事实源是平台口径 cpus × 2GiB（见文件头）。
@@ -167,19 +167,13 @@ main:
             python -m pip install uv
             uv pip install --system -r requirements-ci.lock
           timeout: 30m
-        # 为什么是 80m 而不是 30m：受保护子集一轮实测 33–35 分钟，30m 会先撞墙钟。
-        # 构建 cnb-fjp-1k5lebh9n#003 逐字读数：
-        #   [+4.0s 00:30:21] tests/unit/memory/test_d19ThirdGroupRetirements.py .
-        #   [+0ms  00:30:21] exit code: -1, signal: 9, duration: 30.0m
-        # 它死在 96% 处——既没给出 summary，也把已跑出的红一起吞了：
-        #   改前同一份配置下那 33 分钟里，唯一一处「成对红」是
-        #   test_cognitiveComponentTable 的两格（那是真账，按生成器重算已修），
-        #   剩下十几个单格失败在预存面上（与本次提交无关，逐条另账）。
-        # 换来的不是「变绿」而是「看得见」：判据一个字没动，
-        # 覆盖率门禁仍是 --cov-fail-under=60，清单仍是同一份 protected_tests.txt。
-        # 不把上限写成「刚好不再撞墙」的 35m：那只是同一场事故换一个更近的日期，
-        # 留一倍余量给 171 档在 4 核上共享的负载波动（与上方 90m 的
-        # 「per-file audit of the protected subset」同口径：跑同一批用例的腿不短于它）。
+        # 墙钟按实测定，不按"看起来够"。30m 是照 --no-cov 那套读数定的，而这一步带
+        # `--cov` 跑：插桩只惩罚纯 CPU 的解析/遍历，受保护子集里恰好有一批"扫全仓 AST"
+        # 的判据档，同一格实测 ×2.2～×3.7（`--durations` 逐条对照见台账 §6-4xx）。
+        # 2026-10-24 构建 `cnb-mn9-1k5n4fcl5` 在 85% 撞 30m 被平台强杀，日志里一条
+        # 失败墙都没有——那不是"有测试红了"，是整段跑到点被掐断。
+        # 抬到 90m：整场是串行一条腿，余量按实测最慢批次的 1.6 倍留，且必须宽于
+        # 子集里最高的单档父墙（`pytest.mark.timeout(120)`）足以让诚实超时先说话。
         - name: protected subset with coverage gate (fail_under=60)
           script: |
             # 清单的读法必须与 `tests/ast_scan.protectedSubsetEntries()` 同口径：行内 `#` 之后
@@ -188,7 +182,7 @@ main:
             # 整腿退出 4——与「某条判据真红了」同形。现读数：唯一读法 696 条，旧读法 838 条。
             TESTS=$(sed -e 's/#.*//' scripts/ci/protected_tests.txt | tr '\n' ' ')
             python -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS
-          timeout: 80m
+          timeout: 90m
 
     # ── 5. E2E：后端启动冒烟 ─────────────────────────────────────────────
     - name: e2e-backend-boot

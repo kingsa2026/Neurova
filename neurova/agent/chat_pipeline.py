@@ -33,8 +33,8 @@ from neurova.agent.retriever_adapters import (
 )
 from neurova.agent.knowledge_retriever_adapter import KnowledgeRetrieverAdapter
 from neurova.agent.gates import terminationNotice
+from neurova.agent import legacy_call
 from neurova.agent.continuation_hint import build_continue_hint, isApiConfigError
-from neurova.agent.legacy_stream_reader import LegacyStreamReader
 from neurova.agent.tkg_retriever_adapter import TKGRetrieverAdapter
 from neurova.agent.tool_execution_manager import ExecutionStatus, TimeoutStrategy, ToolExecutionManager
 from neurova.agent.actionability import evaluate_actionability, get_actionability_config
@@ -2919,57 +2919,16 @@ class ChatPipeline:
             return await self._call_legacy_normal(ctx)
 
     async def _call_legacy_normal(self, ctx: ChatContext) -> str:
-        """非流式 fallback"""
-        response = await self.llm_client.chat(ctx.context)
-        if isinstance(response, dict):
-            if response.get("success"):
-                raw = response.get("response", "")
-                if hasattr(raw, "content"):
-                    reply = raw.content
-                elif isinstance(raw, dict):
-                    reply = raw.get("content", raw.get("text", str(raw)))
-                else:
-                    reply = str(raw)
-            else:
-                reply = f"[LLM Error] {response.get('error', 'Unknown error')}"
-        elif hasattr(response, "content"):
-            reply = response.content
-        else:
-            reply = str(response)
-        return reply
+        """非流式 fallback（实现见 `agent/legacy_call.py`，此处只留接口）。"""
+        return await legacy_call.callLegacyNormal(self, ctx)
 
     async def _call_legacy_stream(self, ctx: ChatContext) -> str:
-        """流式 fallback
+        """流式 fallback（实现见 `agent/legacy_call.py`，此处只留接口）。
 
-        chat_stream 产出 LLMResponse 对象（与 _predict_stream 同契约）：
-        content 字段进入回复并向 emitter 转发；错误 dict 按语义分类后抛
-        LLMError（供应商错误守卫可识别，不再裸 RuntimeError）——不得把
-        对象当字符串 join 掩盖真实 LLM 错误。
-
-        读取循环本身在 `legacy_stream_reader.LegacyStreamReader`：它与环侧
-        共用同一份退化守卫与同一份错误分类，本方法只负责装配与收尾。
+        读取循环、退化守卫与错误分类都在那一份里：`chat_pipeline.py` 是每轮对话的
+        热路径，perf-gate 的 `hot-path-file-size` 要求新逻辑抽到独立模块。
         """
-        emitter = ctx.event_emitter
-        # ④ 流式 citation 缓冲（同 _call_loop_stream：仅本轮有句柄才启用）
-        citationBuffer = None
-        _cit_reg = getattr(ctx, "citation_registry", None)
-        if emitter is not None and _cit_reg is not None and not _cit_reg.is_empty():
-            from neurova.memory.citation import StreamCitationBuffer
-
-            citationBuffer = StreamCitationBuffer(_cit_reg)
-        reader = LegacyStreamReader(emitter, citationBuffer)
-        # 退化守卫与主路共用同一份事实源。这条路不转发思考，所以退化**不会**刷屏——
-        # 但它照样把输出预算吃满，而这里既没有环侧的恢复轮也没有任何交代，于是
-        # 安静地花几分钟交付一个空回复（§6-397 那起事故的形状）。接守卫的实质是
-        # "停止消费 + 非空交代"，不是"把思考显示出来"。
-        body, _aborted = await reader.consume(self.llm_client.chat_stream(ctx.context), ctx)
-        tail = ""
-        if citationBuffer is not None and emitter is not None:
-            try:
-                tail = citationBuffer.flush()
-            except Exception:  # noqa: BLE001
-                logger.debug("citation 缓冲结清失败", exc_info=True)
-        return reader.finish(tail, body)
+        return await legacy_call.callLegacyStream(self, ctx)
 
     # ══════════════════════════════════════════════════════════════
     # Step 4: 后处理
