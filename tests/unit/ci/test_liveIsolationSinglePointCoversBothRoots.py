@@ -106,7 +106,7 @@ def test_isolatedDataRootAloneMovesAgentWorkspaceOutOfRepo():
     # ⇒ 系统临时根就是 `tempfile.gettempdir()`。早先这里读的是 `os.environ.get("TEMP", "")`
     # 加 `"Temp" in str(ws)`：POSIX 上没有 TEMP（只有 TMPDIR），取到空串后
     # `Path("").resolve()` 就是**当前工作目录**，仓内落点也过判；后半句更只是大小写巧合。
-    # 两层都不咬 —— 所以按"落点在不在系统临时根下"判，并且只认一个根。
+    # 两层都不咬——所以按"落点在不在系统临时根下"判，并且只认一个根。
     tempRoot = pathlib.Path(tempfile.gettempdir()).resolve()
     assert ws.resolve().is_relative_to(tempRoot), (
         f"工作区根没有落在临时目录：{ws}（临时根＝{tempRoot}）——"
