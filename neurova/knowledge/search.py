@@ -126,6 +126,32 @@ def _get_jieba() -> Any:
     return None if _jieba is False else _jieba
 
 
+def warmUpJieba() -> bool:
+    """把 jieba 前缀字典的冷启动**提前付掉**，返回是否可用。
+
+    为什么要单开一个入口而不只留 `_get_jieba()`：DCL 解决的是"谁来建"，
+    解决不了"什么时候建"。首次取用就地建字典，成本就落在首调方的关键路径上
+    ——而首调方是随机的。本机实测这笔成本对负载极度敏感：
+
+    ```
+    空载首次 _get_jieba():                    0.56s
+    3 条抢 GIL 的线程并发时首次 _get_jieba():  92.30s     ← 30s 格墙的 3 倍
+    第二次取用:                                0.0000s
+    ```
+
+    CI 的受保护子集正是"7953 格同进程 + `--cov` 插桩 + 多档并发"的场子。构建
+    `cnb-sq6-1k5q1kqrc#003` 里 7953 格全绿、唯一那条红是
+    `test_service_closed_loop::test_accept_produces_pending_proposal` 撞 30s 墙——
+    回溯停在 `_get_jieba() → _j.initialize()`：它是那场子里第一个用到中文分词的
+    用例，替所有人付了这笔账。这正是台账 §6-408 那一族（冷启动＋抢 GIL）在
+    取用口上的残留：上一轮只把成本**收口**到一处，没有让它**提前**付。
+
+    返回布尔而不是模块对象：调用方要的是"能不能用"这一个事实，不是 jieba 本体
+    （取用口仍是 `_get_jieba()`，单一事实源不变）。幂等——已建好即直接返回。
+    """
+    return _get_jieba() is not None
+
+
 def tokenize(text: str) -> List[str]:
     """中英文分词（jieba 真分词优先，缺席回退 n-gram）：
 

@@ -85,6 +85,28 @@ sys.pycache_prefix = BYTECODE_CACHE_SESSION_DIR
 from tests.temp_reclaim import pytest_sessionstart  # noqa: F401
 
 
+# jieba 前缀字典的冷启动——**在会话装配时付掉**，不留给"哪条用例恰好第一个用到分词"。
+#
+# 实测（本机）这笔成本对负载极敏感：空载 0.56s，3 条抢 GIL 的线程并发时 **92.30s**；
+# 而受保护子集正是"7953 格同进程 + `--cov` 插桩 + 多档并发"的场子。构建
+# `cnb-sq6-1k5q1kqrc#003` 里 7953 格全绿、唯一那条红是
+# `test_service_closed_loop::test_accept_produces_pending_proposal` 撞 30s 墙，
+# 回溯停在 `_get_jieba() → _j.initialize()`——它是那场子里第一个用到中文分词的用例，
+# 替所有人付了这笔账（台账 §6-408 那一族的残留：上一轮只把成本收口到一处，没有提前付）。
+#
+# 预热**不改变任何判据**：缺席 jieba 时返回 False、所有消费方照旧走 n-gram 回退，
+# 与今天逐字一致。放在导入期的理由与上面 `sys.pycache_prefix` 同：它是一次取用，
+# 且必须在任何用例开始跑之前完成。
+# 判据（含反向控制）见 tests/unit/knowledge/test_jieba_tokenizer.py::
+# TestColdStartDoesNotRideOnTheFirstCaller。
+try:
+    from neurova.knowledge.search import warmUpJieba as _warmUpJieba
+
+    _warmUpJieba()
+except Exception:  # noqa: BLE001 — 预热是省时间的，不许因为没有 jieba 就让整个会话起不来
+    pass
+
+
 @pytest.fixture(scope="session")
 def moe_state_session_dir() -> Path:
     """会话级 MoE 状态目录（供断言兜底层生效）"""
