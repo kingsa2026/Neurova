@@ -1511,6 +1511,14 @@ tests/unit/ci/test_win_installer_pipeline.py
 #   冻结漏洞库，却与其余流水线同规格（cpus 2）。判据按**阶段结构 + 缓存卷**认这条不变量，
 #   不按流水线名认（名字是标签，改名不该让判据失效）。
 tests/unit/ci/test_runnerAllocatedWallClockIsNotADeadline.py
+# PR #364 现场（第三次同形态）：`unit-tests` 的受保护子集跑到 **83%、29m23s** 被平台
+#   SIGKILL（`Killed` / `code: 137`），日志里一条失败墙都没有——不是「有测试红了」。
+#   真因在声明处：这一格是九条流水线里唯一「装整份锁 + 串行跑 716 条清单 + 每格带
+#   `--cov` 插桩」的，却按 cpus 4 跑（官方口径：内存 = cpus × 2GiB ⇒ 8GiB；同档节点
+#   默认 8 核、范围 1~64）。判据两条：cpus 不得低于重活档；驱动这一格的 timeout 不得
+#   与实测量级脱钩（90m vs 实测 ≈35m 时，「真撞墙」与「被资源杀掉」在日志里长得一样）。
+#   两条都按**阶段结构**认（有没有清单驱动），不按流水线名认。
+tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py
 # Issue #332（实测断裂）：自定义界面壳的欢迎页把版本写死成字面量 `v1.0.0`，
 #   而产品版本事实源（tauri.conf.json / package.json）已跑到 `1.0.0-beta5` ——
 #   装出来的包**显示了一个错版本号**，用户无法据此判断装的是哪一版。
