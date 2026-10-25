@@ -3949,9 +3949,14 @@ tests/unit/test_tunnelStateEnumSingleSource.py
 tests/unit/agent/test_subagentTerminalReachesParentMail.py
 tests/unit/agent/test_subagentUplinkEnvelopeSharedByBothBypassPaths.py
 tests/unit/tools/test_recallHistoryReachesSubagentTranscript.py
-# §6-420 受保护子集那一腿的资源欠账：容器装不下自己（构建 cnb-rja-1k5pv9gbl#003
+# §6-421 受保护子集那一腿的资源欠账：容器装不下自己（构建 cnb-rja-1k5pv9gbl#003
 # 跑到 82% 被 SIGKILL，code 137，一条失败墙都没有）。cpus 4→8（16GiB），
 # 判据按"子集真条目数 × 单档足迹 + 底噪 × 余量"算需求与墙钟下限，两侧都带反向控制。
 # 口径取**合并后**的清单：718 档（716 + §6-419 的补登项不新增文件 + 本档）。
 # 入册前置：逐文件单跑两次同读数 4/4（本机 2026-10-25 现跑）。
 tests/unit/ci/test_unit_tests_runner_has_headroom.py
+# §6-422 可选依赖的墙钟成本不许落在活体 async 路径上（构建 cnb-sq6-1k5q1kqrc#003，
+# test_service_closed_loop 那格 Timeout >30.0s，回溯停在 search._get_jieba → initialize）。
+# 兜底支改零可选依赖（CJK 二元组）；JiebaHasOneWarmEntry 那一格裁决反转、同批翻成反向判据。
+# 入册前置：逐文件单跑两次同读数 3 passed/1 skipped（本机 2026-10-26 现跑）。
+tests/unit/ci/test_optionalImportWallOwedByLivePath.py
