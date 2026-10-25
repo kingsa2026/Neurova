@@ -142,8 +142,13 @@ def _load_or_create_secret_key() -> str:
 
     安全审计 M1: 环境变量来源的密钥强制强度校验；文件来源自动收紧权限。
     """
-    # 1. 环境变量
-    env_key = config.get("NEUROVA_JWT_SECRET")
+    # 1. 环境变量（两个名字都收：`NEUROVA_JWT_SECRET` 是历史名，也是部署侧
+    #    `deploy_config_consistency_check` 校验的那个；`NEUROVA_JWT_SECRET_KEY` 是全仓
+    #    60 余处测试与诊断脚本的注入名。只认前者时，后者一字不响地被忽略 ——
+    #    各档"各设各的密钥"于是全落空，实际都吃同一份持久化密钥；档与档之间再互相改写
+    #    模块级 `JWT_SECRET_KEY`，就到谁手上前一刻的密钥去签，验签必然失败
+    #    （受保护子集跑测顺序固定，故恒现于 CI 的角色门/登录契约那几格）。
+    env_key = config.get("NEUROVA_JWT_SECRET") or config.get("NEUROVA_JWT_SECRET_KEY")
     if env_key:
         return _validate_secret(env_key)
 
@@ -170,8 +175,18 @@ def _load_or_create_secret_key() -> str:
     return secret
 
 
+def currentJwtSecretKey() -> str:
+    """当前生效的签名/验签密钥 —— **只读取值口**，幂等、不触发加载。
+
+    为什么要一个取值口：判据要断言"本档注入的密钥真的生效了"，而这件事在只有模块级
+    变量 `JWT_SECRET_KEY` 时只能靠读那个变量（它同时又可被赋值 ⇒ 读到的可能是别的档
+    改写后的值）。取值口把它读成一次稳定的读取：签名、验签、判据三处读同一份。
+    """
+    return JWT_SECRET_KEY
+
+
 # JWT Secret Key — 从环境变量或自动生成的文件加载
-# 优先级: 环境变量 NEUROVA_JWT_SECRET > .jwt_secret 文件 > 自动生成
+# 优先级: 环境变量 NEUROVA_JWT_SECRET / NEUROVA_JWT_SECRET_KEY > .jwt_secret 文件 > 自动生成
 JWT_SECRET_KEY = _load_or_create_secret_key()
 
 
