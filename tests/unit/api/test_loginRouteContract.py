@@ -28,7 +28,6 @@
 | 内部异常原文不回传 | `auth.py:279-283`（S-11） |
 """
 
-import os
 import uuid
 from datetime import datetime, timezone
 
@@ -38,18 +37,22 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock
 
-os.environ.setdefault("NEUROVA_JWT_SECRET_KEY",
-                      "test_secret_key_1234567890123456789012345678901234567890")
-TEST_SECRET = os.environ["NEUROVA_JWT_SECRET_KEY"]
-
 import neurova.api.endpoints.auth as authEndpoint  # noqa: E402
 from neurova.api import auth as authModule  # noqa: E402
 from neurova.api.endpoints.auth import router  # noqa: E402
+from tests.auth_headers import pinJwtSecret  # noqa: E402
 
-if authModule.JWT_SECRET_KEY != TEST_SECRET:
-    authModule.JWT_SECRET_KEY = TEST_SECRET
-
+# 密钥不在这里烘：本档只问"这一轮用的是哪一把"（`tests/auth_headers.pinJwtSecret`
+# 是那份唯一事实源）。原先这里写 `setdefault("NEUROVA_JWT_SECRET_KEY", …)` ——
+# 实测那行对密钥完全无效：`auth.py:146` 读的是 `NEUROVA_JWT_SECRET`（无 `_KEY` 后缀），
+# 而模块全局早在导入期就烘死了。于是"本档有前提自给"只是看起来有。
 ALGORITHM = authModule.JWT_ALGORITHM
+
+
+@pytest.fixture(autouse=True)
+def _pinSigningKeyForThisRound():
+    """每个用例把签发侧与全部验签门对齐到同一把密钥，令牌在这一轮现签。"""
+    pinJwtSecret()
 
 
 def _user(**over):
@@ -122,7 +125,7 @@ class TestSuccessfulLoginCarriesIdentity:
     def test_roleComesFromTheUserRowNotAConstant(self, client, userModel):
         userModel.authenticate_user.return_value = _user(role="admin")
 
-        payload = jwt.decode(_login(client).json()["access_token"], TEST_SECRET,
+        payload = jwt.decode(_login(client).json()["access_token"], pinJwtSecret(),
                              algorithms=[ALGORITHM])
 
         assert payload["role"] == "admin", (
@@ -132,7 +135,7 @@ class TestSuccessfulLoginCarriesIdentity:
         """刷新 token 只带身份不带权限：拿它当 access token 用的人不该有角色。"""
         token = _login(client).json()["refresh_token"]
 
-        payload = jwt.decode(token, TEST_SECRET, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, pinJwtSecret(), algorithms=[ALGORITHM])
 
         assert "role" not in payload, sorted(payload)
 
@@ -236,7 +239,7 @@ class TestTheFixtureIsNotVacuous:
         sentinel = "alice-" + uuid.uuid4().hex[:8]
         userModel.authenticate_user.return_value = _user(username=sentinel)
 
-        payload = jwt.decode(_login(client).json()["access_token"], TEST_SECRET,
+        payload = jwt.decode(_login(client).json()["access_token"], pinJwtSecret(),
                              algorithms=[ALGORITHM])
 
         assert payload["username"] == sentinel, "端点没在读被打桩的那个 user_model（本档全部恒绿）"
@@ -249,7 +252,7 @@ class TestTheFixtureIsNotVacuous:
         """
         data = _login(client).json()
 
-        payload = jwt.decode(data["access_token"], TEST_SECRET, algorithms=[ALGORITHM])
+        payload = jwt.decode(data["access_token"], pinJwtSecret(), algorithms=[ALGORITHM])
         remaining = (datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
                      - datetime.now(timezone.utc)).total_seconds()
 
