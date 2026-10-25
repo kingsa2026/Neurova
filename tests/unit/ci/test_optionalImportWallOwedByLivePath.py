@@ -133,8 +133,16 @@ def _importPathInLandedFile() -> list[str]:
                 for alias in node.names:
                     queue.append(alias.name)
 
+    entries = protectedFiles()
+    # 面读数两条（本档自己也要给清单留证，否则清单截短＝扫描静默少跑、读数照样绿）：
+    # ① 量级 ② 条目指得到真实文件——只补第一条不够，路径写错那一形会让每条都 continue。
+    assert len(entries) > 500, f"受保护子集清单现读 {len(entries)} 条，量级不对＝没读到／路径写错"
+    resolved = sum(1 for rel in entries if (REPO_ROOT / rel).is_file())
+    assert resolved == len(entries), (
+        f"清单里有 {len(entries) - resolved} 条指不到真实文件——本档的逐条扫描会一起缩水")
+
     landed = []
-    for rel in protectedFiles():
+    for rel in entries:
         path = REPO_ROOT / rel
         if not path.is_file():
             continue
