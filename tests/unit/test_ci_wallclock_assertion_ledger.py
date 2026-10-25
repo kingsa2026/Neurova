@@ -668,7 +668,9 @@ OUTSIDE_SUBSET_LEDGER: Dict[str, int] = {
     "tests/unit/api/test_security_p0_audit_fixes.py": 1,
     "tests/unit/channels/test_wechat_ilink_qrcode.py": 1,
     "tests/unit/context/test_context_pool_agent_core_integration.py": 1,
-    "tests/unit/memory/test_moe_routing.py": 2,
+    # `tests/unit/memory/test_moe_routing.py` 已**销账**（`c2031c4c`，批 138 §6-378）：
+    # 该文件随通道插件旋钮退净一并删除，那 2 处墙钟上界跟着文件退场，
+    # 键按销账删除——不是"沉默地少登记一条"：任何新增的墙钟上界都会让本表重新判红。
     "tests/unit/neurflow/test_parallel_execution.py": 1,
     "tests/unit/skills/test_skill_import_architecture.py": 1,
     "tests/unit/sync/test_slow_consumer_seq_policy.py": 1,
