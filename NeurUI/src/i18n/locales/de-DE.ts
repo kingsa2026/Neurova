@@ -3019,6 +3019,7 @@ export default {
     unaddressed: 'Ohne Aktion',
   },
   marketplace: {
+    downloadUrlPh: 'ZIP-Download-Link; ohne Quelle kann dieser Eintrag nicht installiert werden',
     title: 'Marktplatz',
     browse: 'Durchsuchen',
     installed: 'Installiert',
