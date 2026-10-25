@@ -10470,3 +10470,30 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **口径与空号**：本批 LOC 一律逐文件 `git show --numstat` 现取（生产 `+150/-37` 净 **+113**，分项相加已对账）；在册条数目取 `tests.ast_scan.protectedSubsetEntries()` 的 reader 读数 **716**，不用 `grep -c` 自造口径。下一枚空号两条一起跑：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 现算最大均＝**418** ⇒ 下批从 **§6-419** 起。**注意撞号**：本节号 418 与「判据失效形态集」的形态 418 是两套序列（后者不带 `§6-` 前缀），互不可引。
 
 
+
+419. **受保护子集跑到 82% 被内核 OOM 掉：判据自己把整棵语法树举在内存里（✅ 本批；子集条数未动）** ✅🟢 —— 触发点是 PR #367 的 `unit-tests` 腿连续多轮以 `错误信息: 任务执行失败，返回码：137` 收场
+
+    - **先把"137 是什么"读对，这是本格最贵的一步**：此前几轮按"平台强杀/超时"解释（本单三笔 `revert(ci): 撤回取证的日志截留…`、`ci(diagnose): 受保护子集日志收到尾部 400 行…`、`fix(ci): 受保护子集 24 红按三个根因收口…` 都在这个前提上做事：日志截留、`tee`、`PIPESTATUS`）。实测读数否掉了它：构建 `cnb-rja-1k5pv9gbl-003` 的日志尾部是——一条进度点、单独一行 `Killed`、然后 `Finished, code: 137`。`Killed` 这个字**只有 shell 会打**，它出现在命令正常收场（有 stage 结束行、有退出码）的路径上，说明被打死的是**子进程**（python），不是 stage。若是平台掐断，不会有 `Finished` 行。
+    - **死点可复现，位置固定**：`cnb-ast-1k5pqhnfi#003`（23m11s）与 `cnb-rja-1k5pv9gbl#003`（22m13s）两次都停在 82%，都停在 `tests/unit/skills/test_marketInstalledStateIsReadBack.py` 之后、`tests/unit/api/test_channelWebhookResolvesAdapterByAgentTable.py` 的**同一个用例之后**。后者正是本格要动的判据。
+    - **根因：扫描面被当成了解析面**——`_neurovaTrees()` 用 `[(rel, transientTree(path)) for path in filesUnder(NEUROVA)]`，把生产根下 **1053** 个文件的语法树同时装进 `list` 交给探测器。本机同一棵树上实测（cpython 3.12，同一份代码）：
+
+      ```
+      旧形状：1053 棵同时在 list 里       → 峰值 RSS 478.6 MB, 5.79s
+      终形状：共享预算 callNodes（10 档进解析）→ 峰值 RSS  50.8 MB, 0.14s
+      ```
+
+      478MB 与用例要判的事毫无关系，却要与 7964 格、`--cov` 插桩、4 核 8GiB 的 runner 同池竞争。**判据没红，是判据的内存形状把跑测压死了**——这类红在读数上与"某格挂死"完全同形，是本格最值得记的一条。
+    - **修法按仓库既有口径，不新造机制，而且走了两步才对**：第一版是 `sourceRefsUnder(..., hints=("get_adapter",))` + 逐文件 `ast.parse`；它被**常驻门禁 `test_ci_ast_scan_budget_guard` 当场拦下**——受保护子集里「自己枚举 + 自己解析」的全仓扫描就是这道闸的靶心（判据与代码总量捆绑），合法出口只有共享预算。第二版改走 `ast_scan.callNodes(NEUROVA, "get_adapter")`：预筛、解析、逐条取节点全在 `tests/ast_scan.py` 的预算内完成，本档一棵树都不持有。探测谓词从"吃一片树"改成"吃一个节点"（`_isBareAdapterLookup(node)`），四形对照格原样保留。
+    - **教义第 5 条扫荡：同一形状的第二处**（`tests/unit/channels/test_channelInboundPayloadPaysTheEventDoor.py::_scanTrees()`，同样把扫描面的树攒成 list）：
+
+      ```
+      旧形状（59 棵整批留 list）→ 峰值 36.6 MB
+      新形状（生成器逐文件即弃）→ 峰值 17.6 MB
+      ```
+
+      它的扫描面只有 59 档，今天不致命；但同一个洞不留两处——改成生成器后调用方一处无需改动（`_emitOffenders` 本来就是消费者），第二处（地板格）拆成"枚举次数"与"逐文件计数"两次读，都不攒树。**没有**顺手改第三处：其余 28 档受保护子集判据现查都是 `for path in ...: tree = transientTree(path)` 的逐文件形状（含 `test_nestedPytestBudgetWallsAreOrdered`、`test_scanCriterionMustProveItsOwnSurfaceRatchet`），不存在整批保留。
+    - **真正的大头不在判据里，如实登记不擅改**：`tests/ast_scan.transientTree` 说明写着"不留常驻缓存"，但它读文本走 `_cachedCode`，而 `sourceRefsUnder` 是**全量读文本再按 hints 过滤**（`refs = [SourceRef(path, key, _cachedCode(key)) for path in filesUnder(root)]`）。即：即便调用方给了 hints，生产根下**全部**文件的文本也已进 `lru_cache(maxsize=None)`，与 hints 无关。实测这份文本缓存 ≈ **30MB**（1053 档，峰值 42.6MB），是 478MB 的 1/15，**本轮不是主因**，故不在本格改共享源——动它要改"文件系统只读一遍"这条契约的设计，属另一次裁定。登记在此，读数给到，不改。
+    - **红→绿实测**：新档 `TestTheScanFaceDoesNotCarryItsTreesResident` 两格（面判据 + 反向控制），面判据要求扫描面走 `callNodes`、且代码里不得再出现 `transientTree`/`parsedModules`/`walkedModules`。把扫描面换回 `ast.parse` + `transientTree` ⇒ 反向控制红；恢复后 **12 passed**。反向控制的实现被**判据自己**抓到过一次：淘汰名单按全文匹配时，docstring 里为讲清根因引用的旧写法字样把"记录根因"判成"又犯一次"——改为只认**语法树里的名字**（`_calledNames`），不看注释与字符串。
+    - **回归**：`test_channelWebhookResolvesAdapterByAgentTable` 12 passed、`test_channelInboundPayloadPaysTheEventDoor` 10 passed，加上本批**自己撞上的两道常驻闸** `test_ci_ast_scan_budget_guard` + `test_scanCriterionMustProveItsOwnSurfaceRatchet` 一并 **129 passed**；`test_dev_environment_contract` + `test_nestedPytestBudgetWallsAreOrdered` + `test_ci_parity_guard` + `test_unit_tests_single_leg` **87 passed, 1 skipped**。`ruff check` 与 `pyflakes` 均无新增。顺带清掉一处 `invalid escape sequence`（本格自己写进去的）。
+    - **仍未收口（不冒充完成）**：① 本格只动了两处**判据侧**的持仓形状，**未**在 CI 上实测整条受保护子集的峰值；若下一轮仍以 `Killed` 收场，按同一口径继续扫"整批保留"的第三处，不预先改 `runner.cpus`（提配置是把症状买下来，不是根修）；② `ast_scan` 的全量文本缓存（≈30MB）与 `hints` 语义不一致这条已登记未改；③ 平台侧同批有两次 `Prepare` 失败（`cnb-13d-1k5pskuuj-004`：`任务超过最大执行时间而被强制关闭：1m0s`）与流水线重分配，非本单代码所致，登记不追。
+    - **口径与空号**：本轮所有内存读数均为本机同进程 `ru_maxrss` 现取，两形状各起一个独立解释器量（避免前一形状的峰值污染后一形状）。下一枚空号两条一起跑：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 现算最大＝**419**（即本节上方那句"下批从 419 起"自身的引用），条目行 `^[0-9]{3}\. ` 尾号＝**418** ⇒ 本格取 **§6-419**，下批从 **420** 起。
