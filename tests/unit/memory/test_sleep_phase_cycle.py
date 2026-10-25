@@ -31,11 +31,35 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from neurova.api.auth import create_access_token
+from neurova.api import auth as authModule
+from neurova.api import deps as depsModule
 from neurova.cognitive_layers.memory_layer.sleep import MemoryRecord, SleepConsolidation
 from neurova.core.idle_tracker import IdleTimeTracker
 
-_TOKEN = create_access_token({"sub": "tester", "username": "tester", "role": "user"})
-_AUTH = {"Authorization": f"Bearer {_TOKEN}"}
+# 前提自给：本档的令牌与验签门必须同源于**这一轮**的那把密钥。
+#
+# 身份门是**函数对象**，读的是自己 `__globals__` 里那份模块字典，而 `JWT_SECRET_KEY`
+# 在 `auth.py:175` 导入期烘死。进程里一旦出现第二份 auth 副本，端点用一把签约、门用
+# 另一把验，本档的 `/status` `/settings` `/wake` 就一律 401（表现为 `KeyError: 'sleep_phase'`）。
+# 与 `tests/unit/api/test_roleGateIdentitySourceIsStrict.py` 是同一处纪律。
+_TEST_SECRET = "test_secret_key_for_sleep_phase_cycle_0123456789"
+
+
+def _pinSecretToEveryGate() -> None:
+    """把签名侧与全部验签门的密钥对齐到 `_TEST_SECRET`。"""
+    if authModule.JWT_SECRET_KEY != _TEST_SECRET:
+        authModule.JWT_SECRET_KEY = _TEST_SECRET
+    for gate in (depsModule.strictIdentityGate, depsModule.get_current_user,
+                 depsModule.get_optional_user):
+        if gate.__globals__.get("JWT_SECRET_KEY") != _TEST_SECRET:
+            gate.__globals__["JWT_SECRET_KEY"] = _TEST_SECRET
+
+
+def _headers() -> dict:
+    """凭证**每次现签**：令牌与验签门当前这一轮的密钥同源。"""
+    _pinSecretToEveryGate()
+    token = create_access_token({"sub": "tester", "username": "tester", "role": "user"})
+    return {"Authorization": f"Bearer {token}"}
 
 
 class FakeMemoryManager:
@@ -443,7 +467,7 @@ class StatusContractTest(unittest.TestCase):
         tracker._phase_start_time = time.time()
         agent = self._agent(sc, tracker)
         with patch.object(self.sleep_api, "_get_agent", return_value=agent):
-            resp = self.client.get("/api/v1/sleep/default/status", headers=_AUTH)
+            resp = self.client.get("/api/v1/sleep/default/status", headers=_headers())
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
         self.assertEqual(body["sleep_phase"], "rem", "状态页阶段应反映真实推进（统一源）")
@@ -454,7 +478,7 @@ class StatusContractTest(unittest.TestCase):
         tracker = IdleTimeTracker()
         agent = self._agent(sc, tracker)
         with patch.object(self.sleep_api, "_get_agent", return_value=agent):
-            resp = self.client.get("/api/v1/sleep/default/status", headers=_AUTH)
+            resp = self.client.get("/api/v1/sleep/default/status", headers=_headers())
         self.assertEqual(resp.json()["sleep_phase"], "awake")
         self.assertIsNone(resp.json()["next_wake"])
 
@@ -463,7 +487,7 @@ class StatusContractTest(unittest.TestCase):
         sc.start_sleep(duration_minutes=2)
         agent = self._agent(sc)
         with patch.object(self.sleep_api, "_get_agent", return_value=agent):
-            resp = self.client.get("/api/v1/sleep/default/status", headers=_AUTH)
+            resp = self.client.get("/api/v1/sleep/default/status", headers=_headers())
         body = resp.json()
         self.assertEqual(body["sleep_phase"], "deep_sleep")
         self.assertIsNotNone(body["next_wake"])
@@ -490,10 +514,10 @@ class SettingsEndpointFieldsTest(unittest.TestCase):
             resp = self.client.put(
                 "/api/v1/sleep/default/settings",
                 json={"phase_max_minutes_rem": 45},
-                headers=_AUTH,
+                headers=_headers(),
             )
             self.assertEqual(resp.status_code, 200)
-            got = self.client.get("/api/v1/sleep/default/settings", headers=_AUTH).json()
+            got = self.client.get("/api/v1/sleep/default/settings", headers=_headers()).json()
         self.assertEqual(got["phase_max_minutes_rem"], 45)
 
     def test_resolve_forwards_apply_to_store(self):
@@ -508,7 +532,7 @@ class SettingsEndpointFieldsTest(unittest.TestCase):
                 resp = self.client.post(
                     "/api/v1/sleep/default/conflicts/cr_1/resolve",
                     json={"resolution": "merge", "apply_to_store": True},
-                    headers=_AUTH,
+                    headers=_headers(),
                 )
         self.assertEqual(resp.status_code, 200)
         mock_resolve.assert_called_once_with("cr_1", "merge", True)
@@ -526,7 +550,7 @@ class SettingsEndpointFieldsTest(unittest.TestCase):
             idle_tracker = tracker
 
         with patch.object(self.sleep_api, "_get_agent", return_value=Stub()):
-            resp = self.client.post("/api/v1/sleep/default/wake", headers=_AUTH)
+            resp = self.client.post("/api/v1/sleep/default/wake", headers=_headers())
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(tracker.get_current_phase(), "active", "唤醒必须回落阶段推进链")
 

@@ -38,16 +38,40 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock
 
-os.environ.setdefault("NEUROVA_JWT_SECRET_KEY",
-                      "test_secret_key_1234567890123456789012345678901234567890")
-TEST_SECRET = os.environ["NEUROVA_JWT_SECRET_KEY"]
+# 前提自给：本档**就地**钉住本轮的签名密钥，并把验签门一起对齐。
+#
+# 原先这两行 `setdefault("NEUROVA_JWT_SECRET_KEY", ...)` 实测对密钥**完全无效**：
+# `neurova/api/auth.py:146` 读的是 `NEUROVA_JWT_SECRET`（无 `_KEY` 后缀），而
+# `JWT_SECRET_KEY` 在 `auth.py:175` 导入期就烘死。真正生效的是下面那句直接赋常量——
+# 它只覆盖了**签名侧**，`deps` 再导出的身份门是**函数对象**，读的是自己
+# `__globals__` 里那份模块字典。进程里一旦出现第二份 auth 副本，两侧就各持一把密钥：
+# 端点为登录签出令牌、门用另一把验，于是本档报 `InvalidSignatureError`。
+# 与 `tests/unit/api/test_roleGateIdentitySourceIsStrict.py` 是同一处纪律。
+os.environ["NEUROVA_JWT_SECRET"] = "test_secret_key_1234567890123456789012345678901234567890"
+TEST_SECRET = os.environ["NEUROVA_JWT_SECRET"]
 
 import neurova.api.endpoints.auth as authEndpoint  # noqa: E402
 from neurova.api import auth as authModule  # noqa: E402
+from neurova.api import deps as depsModule  # noqa: E402
 from neurova.api.endpoints.auth import router  # noqa: E402
 
-if authModule.JWT_SECRET_KEY != TEST_SECRET:
-    authModule.JWT_SECRET_KEY = TEST_SECRET
+
+def _pinSecretToEveryGate() -> str:
+    """把签名侧与全部验签门的密钥对齐到 `TEST_SECRET`，返回它。
+
+    只改 `authModule.JWT_SECRET_KEY` 不够：身份门是函数对象，它们读的是自己
+    `__globals__` 里的现值，改模块属性不会穿透过去。
+    """
+    if authModule.JWT_SECRET_KEY != TEST_SECRET:
+        authModule.JWT_SECRET_KEY = TEST_SECRET
+    for gate in (depsModule.strictIdentityGate, depsModule.get_current_user,
+                 depsModule.get_optional_user):
+        if gate.__globals__.get("JWT_SECRET_KEY") != TEST_SECRET:
+            gate.__globals__["JWT_SECRET_KEY"] = TEST_SECRET
+    return TEST_SECRET
+
+
+_pinSecretToEveryGate()
 
 ALGORITHM = authModule.JWT_ALGORITHM
 
@@ -62,6 +86,8 @@ def _user(**over):
 
 @pytest.fixture()
 def client():
+    # 每个用例开始前重新对齐：端点这一轮签出的令牌，门必须在这一轮用同一把密钥验。
+    _pinSecretToEveryGate()
     app = FastAPI()
     app.include_router(router, prefix="/v1/auth")
     with TestClient(app, raise_server_exceptions=False) as c:
@@ -90,6 +116,7 @@ def userModel():
 
 
 def _login(client, username="alice", password="Passw0rd!123"):
+    _pinSecretToEveryGate()
     return client.post("/v1/auth/login", json={"username": username, "password": password})
 
 
