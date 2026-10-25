@@ -342,14 +342,20 @@ def apply_tool_search_compaction(
     激活条件由调用方判断（env + 规模）；本函数只做纯变换：
     - direct_names 中的工具与控制工具保持模型可见
     - 其余进隐藏目录，仅以有界 directory 描述（由调用方注入 prompt）
+
+    **未压缩（返回 None）时必须把活动目录复位成空**：活动目录与"这次压缩"是同一份状态，
+    不压缩就等于"没有隐藏目录"，此时任何已登记的旧目录都是上一回合的残留。不复位会留下
+    两种可观察的错判：`tool_search` 拿上一回合的工具条目检索，零命中被当成"能力缺口"
+    投递出去（该信号会驱动自主造工具），而真实目录根本没被这次回合压过。
     """
     entries = build_catalog(tools)
     hidden = [e for e in entries if e["name"] not in set(direct_names)]
+    global _ACTIVE_CATALOG
     if len(hidden) < min_catalog:
+        _ACTIVE_CATALOG = []
         return None
     visible = [t for t in tools if ((t or {}).get("function") or {}).get("name") in set(direct_names)]
     visible.extend(control_tool_schemas())
-    global _ACTIVE_CATALOG
     _ACTIVE_CATALOG = hidden
     logger.info("Tool Search 目录压缩: %d 直连 + %d 隐藏", len(visible) - 3, len(hidden))
     return visible
