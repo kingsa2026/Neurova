@@ -250,28 +250,88 @@ class TestCaliberIsSingleSource:
         assert _suffixTableHosts({"neurova/skills/fake_loader.py": sample}) == {
             "neurova/skills/fake_loader.py"}
 
+    def test_tupleDomainManifestsAreNotThisCaliber(self):
+        """反误报格：别的领域用**元组**写自己的清单时，不算本门豁免口径的第二份。
+
+        `knowledge/document_pipeline` 的 `.txt/.md/.markdown/...` 元组判的是"这段字节由哪个
+        抽取分支解码"（文档解析），本门判的是"这段字节会不会被执行"（§6-189 的边界）。
+        两张表对象不同，合并只会让安全裁决跟着解析列表漂。副本长什么样抓什么样：
+        集合/列表/字典形态照旧入账。
+        """
+        tupleManifest = (
+            'MARK = (".txt", ".md", ".markdown")\n'
+            "def f(ext):\n"
+            "    return ext in MARK\n")
+        assert _suffixTableHosts({"neurova/knowledge/fake_pipeline.py": tupleManifest}) == set(), (
+            "元组形态的领域清单被误判成本门豁免口径的第二份——探测器口径过宽")
+        setManifest = 'DOCS = {".md", ".markdown", ".txt"}\n'
+        assert _suffixTableHosts({"neurova/knowledge/fake_pipeline.py": setManifest}) == {
+            "neurova/knowledge/fake_pipeline.py"}, (
+            "集合形态的豁免口径副本没被抓到——探测器口径过窄")
+
+
+#: 判据只认"**会拿去裁决**的那张表"，不认"文件里出现了这三个后缀"。
+#: `knowledge/document_pipeline` 的 `.txt/.md/.markdown/...` 声明的是"这段字节由哪个抽取
+#: 分支解码"，本门判的是"这段字节会不会被执行"——两张表对象不同，合并只会让安全裁决跟着
+#: 解析列表漂（§6-189 的边界）。故落点按**承载形态**认：模块级绑名的字面量
+#: （`NAME = frozenset({...})` / `NAME = {...}` / `NAME = [...]` / `NAME = {...: ...}`）
+#: 才是表——副本要长期存在才会被别的模块拿去裁决；函数体内当场用掉的元组是某个分支的
+#: 取值清单，不是表。
+TABLE_LITERALS = (ast.Set, ast.List, ast.Dict)
+
+
+def _tableLiteral(node):
+    """`node` 若是一张表（模块级绑名的字面量），返回那份字面量；否则 None。"""
+    if not isinstance(node, ast.Assign):
+        return None
+    value = node.value
+    while isinstance(value, ast.Call) and value.args:
+        value = value.args[0]  # `frozenset({...})` / `set([...])`
+    if not isinstance(value, TABLE_LITERALS):
+        return None
+    name = node.targets[0]
+    if not (isinstance(name, ast.Name) and name.id.isupper()):
+        return None  # 局部变量绑的清单不是"表"
+    return value
+
+
+def _declaredSuffixes(node) -> set:
+    """字面量节点里声明的后缀值域（集合/列表/元组/字典键；非字面量元素不计）。"""
+    if isinstance(node, ast.Dict):
+        elements = [k for k in node.keys if isinstance(k, ast.Constant)]
+    elif isinstance(node, (ast.Set, ast.List, ast.Tuple)):
+        elements = [e for e in node.elts if isinstance(e, ast.Constant)]
+    else:
+        return set()
+    return {str(e.value) for e in elements}
+
+
+#: 文本文档后缀三件套（任何一份"文档类"表都必然凑齐这三个），判据只此一处引用。
+DOC_SUFFIXES = frozenset({".md", ".markdown", ".txt"})
+
 
 def _hostsFromNodes(pairs) -> set:
-    """谓词单份：`(相对路径, 语法树节点)` 里凑齐三个后缀字面量的那些路径。"""
-    docs = {".md", ".markdown", ".txt"}
-    hosts = set()
-    for rel, node in pairs:
-        if not isinstance(node, (ast.Set, ast.List, ast.Tuple, ast.Dict)):
-            continue
-        elements = ([k for k in node.keys if isinstance(k, ast.Constant)]
-                    if isinstance(node, ast.Dict)
-                    else [e for e in node.elts if isinstance(e, ast.Constant)])
-        values = {str(e.value) for e in elements}
-        if docs <= values:
-            hosts.add(rel)
-    return hosts
+    """谓词单份：`(相对路径, 语法树节点)` 里以**表形态**凑齐三个文本文档后缀的那些路径。"""
+    return {_r for _r, _n in pairs if _isDocSuffixTable(_n)}
+
+
+def _isDocSuffixTable(node) -> bool:
+    """这个节点是不是一张"文本文档后缀表"（模块级绑名 + 三个后缀齐全）。"""
+    literal = _tableLiteral(node)
+    if literal is None:
+        return False
+    declared = _declaredSuffixes(literal)
+    if not declared:
+        return False
+    return DOC_SUFFIXES <= declared
 
 
 def _suffixTableHosts(overrides: dict | None = None) -> set:
-    """按 AST 找"把 .md/.markdown/.txt 三个后缀一起写进一个集合字面量"的文件。
+    """按 AST 找"把 .md/.markdown/.txt 三个后缀一起写进**一张模块级表**"的文件。
 
-    只认这种形状——单个后缀在别处出现是合法的（例如文件发现表的并集），把三者凑成一个集合
-    才意味着那里也在做"文档类"的裁决。
+    只认这种形状——单个后缀在别处出现是合法的（例如文件发现表的并集），把三者凑成一整张表
+    才意味着那里也在对"文档类"下裁决；函数体内当场用掉的元组只是某个分支的取值清单
+    （判据见 `_tableLiteral` 上面那段）。
 
     取数走 `ast_scan.transientNodes`（一次性入口）＋文本预筛：一份完整副本必然把三个后缀
     原样写进该文件的源码文本，连关键词都没出现的文件不可能命中（预筛是充分条件）。

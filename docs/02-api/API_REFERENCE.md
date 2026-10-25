@@ -333,7 +333,7 @@
 > 守卫 `tests/unit/api/test_authSurfaceFreshness.py` 逐字比对，漂移即红。
 > 口径：只认**路由依赖图**里的身份/角色门；在 handler 体内自验 token 的那一类**未覆盖**，要确认它只能真打请求。404/405 不算门。
 
-**汇总**：路由 960 条（含方法展开）——需认证 **856**、公开 **104**。
+**汇总**：路由 965 条（含方法展开）——需认证 **859**、公开 **106**。
 
 | 模块前缀 | 路由 | 需认证 | 公开 |
 |----------|------|--------|------|
@@ -358,7 +358,7 @@
 | `computer` | 25 | 25 | 0 |
 | `computers` | 11 | 8 | 3 |
 | `console` | 26 | 26 | 0 |
-| `context` | 10 | 4 | 6 |
+| `context` | 9 | 3 | 6 |
 | `cost-rollup` | 8 | 0 | 8 |
 | `enhanced-memory-search` | 11 | 6 | 5 |
 | `enhanced-users` | 8 | 8 | 0 |
@@ -374,7 +374,7 @@
 | `home` | 2 | 2 | 0 |
 | `image` | 5 | 5 | 0 |
 | `knowledge` | 2 | 2 | 0 |
-| `knowledge-graph` | 9 | 9 | 0 |
+| `knowledge-graph` | 11 | 11 | 0 |
 | `knowledge-integration` | 10 | 10 | 0 |
 | `language` | 6 | 6 | 0 |
 | `logs` | 4 | 4 | 0 |
@@ -387,7 +387,7 @@
 | `memory-share-groups` | 11 | 11 | 0 |
 | `memory-timeline` | 4 | 4 | 0 |
 | `metacognition` | 7 | 7 | 0 |
-| `mobile` | 6 | 5 | 1 |
+| `mobile` | 10 | 7 | 3 |
 | `models` | 15 | 14 | 1 |
 | `monitor` | 5 | 5 | 0 |
 | `negative-screen` | 4 | 4 | 0 |
@@ -507,6 +507,8 @@
 - `POST /api/v1/health/recover`
 - `GET /api/v1/health/report`
 - `POST /api/v1/mobile/pairing/confirm`
+- `POST /api/v1/mobile/pairing/refresh`
+- `POST /api/v1/mobile/pairing/resolve`
 - `GET /api/v1/models/active`
 - `GET /api/v1/neurflow/agents`
 - `POST /api/v1/neurflow/agents`

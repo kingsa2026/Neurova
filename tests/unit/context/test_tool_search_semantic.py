@@ -89,3 +89,66 @@ def test_env_off_forces_pure_bm25(entries, isolated_index, monkeypatch):
     monkeypatch.setenv("NEUROVA_TOOL_SEARCH_EMBEDDING", "0")
     ts.search_catalog("气温如何", entries, limit=1)
     assert eng.encode_calls == [], "开关关闭时不得调用任何嵌入"
+
+
+# ── 词表口径（§6-419）：中文不能整段当一个 token ──
+
+
+class TestCjkLexicalFallback:
+    """引擎缺席/回零向量时回落 BM25——回落得有一条能命中的词表。
+
+    改前 `_TOKEN_SPLIT` 对中文是无操作：「查询天气」是一条词、「天气」是另一条，
+    两者永不相等。目录里明明有天气工具，查「天气」零命中；而零命中在生产侧会被
+    `handle_control_tool` 投递成「能力缺口」并驱动自主造工具——词表口径的缺陷被
+    翻译成了一个假缺口（实测：`test_hitSearch_doesNotRecordGap` 的前提当场塌掉）。
+    """
+
+    def testChineseIsSplitIntoRunsTheQueryCanMatch(self):
+        tokens = ts._tokenize("查询天气")
+        assert "天气" in tokens, f"「查询天气」切不出「天气」：{tokens}"
+        assert ts._tokenize("天气") == ["天气"]
+
+    def testLatinAndDigitsStayWholeTokens(self):
+        assert ts._tokenize("mcp weather lookup x1") == ["mcp", "weather", "lookup", "x1"]
+
+    def testSingleCharacterCjkRunIsNotAWord(self):
+        """单字段只剩噪声，不进词表（与 `knowledge.search.tokenize` 的下限同口径）。"""
+        assert ts._tokenize("a 天 b") == ["a", "b"]
+
+    def testSearchFallsBackToBm25WhenTheQueryVectorIsZero(self, isolated_index, monkeypatch):
+        """零向量查询必须整体回落 BM25——不许进语义加权。
+
+        为什么要看**分数**而不是只看"有没有命中"：混合分是
+        `0.6×余弦 + 0.4×归一化BM25`。零向量查询若被当有效向量，余弦那一支给 0，
+        但 BM25 那一支照样有分（目录里就一个条目 ⇒ 归一化后是 1），结果仍然命中，
+        "命中"这一条判据就白写了（实测：撤掉回落仍绿）。分数才分得开两支。
+        """
+
+        catalog = ts.build_catalog([
+            {"type": "function", "function": {"name": "mcp.weather.lookup",
+              "description": "查询天气", "parameters": {"type": "object", "properties": {}}}},
+        ])
+
+        class ZeroQueryEngine:
+            def encode(self, text):
+                if text == "天气":
+                    return [0.0] * 8
+                return [0.0] * 7 + [1.0]
+
+        monkeypatch.setattr(ts, "_get_engine", lambda: ZeroQueryEngine())
+        # 混合打分返回 None 即"这一路不参与"，调用方回落 BM25（`search_catalog` 的既定分支）
+        assert ts._hybrid_scores("天气", catalog) is None, (
+            "零向量查询进了语义加权：余弦恒 0 却被当成『确实是 0 分』，"
+            "语义这一路再也不会回落到 BM25"
+        )
+        assert ts.search_catalog("天气", catalog, limit=1)[0]["name"] == "mcp.weather.lookup", (
+            "回落之后检索仍是空手——零命中在生产侧会被投递成能力缺口"
+        )
+
+        class SelfConsistentEngine(ZeroQueryEngine):
+            def encode(self, text):
+                return [0.0] * 7 + [1.0]
+
+        # 反向控制：同一坐标下查询向量正常时必须走语义那一路（否则上面那条另有来源）
+        monkeypatch.setattr(ts, "_get_engine", lambda: SelfConsistentEngine())
+        assert ts._hybrid_scores("天气", catalog) is not None

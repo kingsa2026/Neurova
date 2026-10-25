@@ -32,10 +32,19 @@ def test_repository_maintain_incremental_and_force(tmp_path):
 
 
 class Engine:
+    """维护面替身：**每段文本都有自己的非零向量**。
+
+    早先两行写成"含 alpha 才给 [1.0]，其余全 0"，于是 beta 那行拿到的是零向量——
+    那正是嵌入引擎"没算出来"的兜底形态，写侧按"未算出"拒收（教义第 2 条：零向量
+    不许当有效向量落库）。替身自己造出与生产同一型的坏输入，红出来的就是"少算了一条"。
+    实测：改前 `computed == 1`（beta 缺席），改后 2。
+    """
+
     model_name = "maintenance-stub"
 
     def encode(self, text):
-        return [1.0 if "alpha" in (text or "").lower() else 0.0]
+        lowered = (text or "").lower()
+        return [1.0 if "alpha" in lowered else 0.0, 1.0 if "beta" in lowered else 0.0]
 
     def encode_batch(self, texts):
         return [self.encode(t) for t in texts]
