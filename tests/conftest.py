@@ -355,6 +355,37 @@ def _guardSessionLandingIsIsolated(_isolateSessionsLanding):
         )
 
 
+@pytest.fixture(autouse=True)
+def _isolateMobileDeviceRegistry(tmp_path, monkeypatch):
+    """`/mobile/*` 的在册设备库与限流桶隔离（单点，各目录不自己抄）。
+
+    在册设备自 §4.8 起是**持久**权威（SQLite），缺省落数据根——而本仓的数据根在跑测期
+    是会话级共享目录（`neurovaDataRoot-*`，见本文件上方那条 `os.environ.setdefault`）。
+    不隔离的后果实测过：两档用例共用一份库，前一档配的设备出现在后一档的列表里，
+    读数长成"设备数 2 ≠ 1"，而肇事者与受害者不是同一条用例（逐档单跑恒绿）。
+    构造处另有 `refuseSharedRootInTests()` 兜底：真漏了会点名用例红在那里，不往下传。
+
+    `confirm`/`resolve`/`refresh` 的每 IP 滑窗桶（5 次/300s）同属模块级状态：跨文件不会
+    自己过期，前一档配满次数就会让后一档把 429 读成业务失败。
+    """
+    import os
+
+    from neurova.api.endpoints import mobile_pairing as mp
+
+    dbPath = str(tmp_path / "mobile_devices.db")
+    monkeypatch.setenv("NEUROVA_MOBILE_DEVICES_DB", dbPath)
+    mp.resetDeviceRegistry()
+    for suffix in ("", "-wal", "-shm"):
+        stale = dbPath + suffix
+        if os.path.exists(stale):
+            os.remove(stale)
+    mp._pairing_codes.clear()
+    mp._confirm_attempts.clear()
+    mp._ws_connections.clear()
+    yield
+    mp._confirm_attempts.clear()
+    mp.resetDeviceRegistry()
+
 @pytest.fixture
 def mock_logger():
     """模拟日志记录器"""

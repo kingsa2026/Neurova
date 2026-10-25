@@ -18,7 +18,7 @@ import { createI18n } from 'vue-i18n'
 import SkillMarketPage from '@/pages/SkillMarketPage.vue'
 
 vi.mock('@/api/modules/skill-pool', () => ({
-  getPublicSkills: vi.fn().mockResolvedValue({ data: { items: [], total: 0 } }),
+  getPublicSkills: vi.fn().mockResolvedValue([]),
   getPrivateSkills: vi.fn(),
   getSkill: vi.fn(),
   createSkill: vi.fn(),
@@ -172,25 +172,25 @@ describe('SkillMarketPage 提交与审核', () => {
     expect(wrapper.text()).toContain('提交技能')
   })
 
-  it('市场列表归一化: market 域 skill_id/downloads 映射渲染且安装用归一化 id', async () => {
-    vi.mocked(skillPoolApi.getPublicSkills).mockResolvedValue({
-      data: {
-        items: [
-          {
-            skill_id: 'web-search',
-            name: 'Web Search',
-            description: '搜索互联网获取实时信息',
-            downloads: 1200,
-            category: 'utility',
-          },
-        ],
-        total: 1,
+  // skill_id→id 的归一判据在 API 边界档（skill-pool.test.ts + skillRowIdSingleSource.test.ts）；
+  // 本档按边界出口形状（行带 id）钉页面行为：安装用 id、downloads 落成页内安装数。
+  it('市场列表：安装用边界归一后的 id，downloads 落成页内安装数', async () => {
+    vi.mocked(skillPoolApi.getPublicSkills).mockResolvedValue([
+      {
+        id: 'web-search',
+        skill_id: 'web-search',
+        name: 'Web Search',
+        description: '搜索互联网获取实时信息',
+        version: '1.0.0',
+        downloads: 1200,
+        category: 'utility',
       },
-    } as any)
+    ])
     const wrapper = mountPage()
     await flushPromises()
 
     expect(wrapper.text()).toContain('Web Search')
+    expect(wrapper.text()).toContain('1200')
     const card = wrapper.find('.glass-card')
     const installBtn = card.findAll('button').find((b) => b.text().includes('安装'))
     await installBtn!.trigger('click')

@@ -431,8 +431,15 @@ async def install_skill(
 
         # 检查导入状态
         if ImportStatus and task.status == ImportStatus.FAILED:
+            # 拒因分类：条目没有可取件来源是**目录数据的缺陷**（400，改条目的人负责），
+            # 折进 500 会让人去查一个没坏的服务端。判据与咽喉问同一个来源函数（单源）。
+            code = (
+                status.HTTP_400_BAD_REQUEST
+                if importer.artifactSourceKind(skill_id) is None
+                else status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status_code=code,
                 detail=f"Failed to install skill '{skill_id}': {task.error_message}",
             )
 

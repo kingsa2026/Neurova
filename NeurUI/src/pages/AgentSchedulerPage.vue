@@ -173,8 +173,9 @@ async function loadWorkflows() {
 async function loadSkills() {
   if (!agentId.value) { skillOptions.value = []; return }
   try {
-    const res = await getAgentSkills(agentId.value)
-    skillOptions.value = (res?.data ?? res ?? []) as Skill[]
+    // 行主键归一在 API 边界一处完成：旧写法直接把 wire 行塞进来，
+    // 下拉的 :value 取 s.id 恒 undefined，存下的调度任务指向不存在的技能。
+    skillOptions.value = await getAgentSkills(agentId.value)
   } catch {
     skillOptions.value = []
   }

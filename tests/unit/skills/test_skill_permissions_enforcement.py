@@ -92,6 +92,10 @@ class TestMarketImporterGate:
             "_lookup_catalog_entry",
             lambda skill_id: {
                 "name": "good_perm_skill",
+                # 合法声明之外还得有一条真取件腿：零字节来源的安装自丁批起显式拒绝
+                # （判据见 tests/unit/skills/test_importRefusesZeroByteShell.py）。本格要判的是
+                # "权限门放行"，不该靠那条"跳过下载照样 COMPLETED"的尾巴活着。
+                "bundle_zip": "multi-search-engine.zip",
                 "permissions": {"network": True, "tools": {"enabled": True, "allow": ["web_search"]}},
             },
         )
