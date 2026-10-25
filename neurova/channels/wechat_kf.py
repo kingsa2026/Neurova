@@ -92,7 +92,8 @@ class WeChatKfEventsMixin:
         """微信客服素材下载；失败返回 None（由入站桥报 media_unavailable）。
 
         HTTP 实装只有 `wecom.fetchWecomMediaBytes` 一处（教义第 6 条）——本方法只管
-        「客服这一侧要先有 token」这层前置，取字节的活全交给那一个门。
+        「客服这一侧要先有 token」这层前置，取字节的活全交给那一个门（含大小上限与
+        JSON 错误体识别，同一接口不按调用方给两种裁决）。
         """
         if not media_id or not self._ensure_wecom_token():
             return None
