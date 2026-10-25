@@ -222,3 +222,89 @@ class TestEvolveFlow:
         state, payload = service.runLookup("run_20260101T000000_abc123")
         assert state == "attached" and payload["run_id"] == "run_20260101T000000_abc123"
 
+
+
+class TestDatasetSourceFailuresAreNamed:
+    """三级取语料回退里被跳过的那些级**不许**静默收敛成"没有语料"。
+
+    来路：PR #367 的 CI 上，合成器是 LLM 面（`SyntheticDatasetBuilder`），而
+    `requirements-ci` 刻意不带凭据与配额——它抛出的那一刻，`evolve()` 只能回一句
+    `empty_dataset`，同步端点再把它折成一个没有名字的 500。读的人看不出是
+    "这个技能本来就没有评测用例"还是"取语料第三级请求失败了"，而这两件事
+    指向完全不同的处置（前者补语料，后者修链路）。
+    """
+
+    @pytest.mark.asyncio
+    async def testSyntheticFailureIsNamedInsteadOfSwallowed(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("NEUROVA_TEXT_EVOLUTION", "1")
+        service = SkillEvolutionService("agent-src", base_dir=tmp_path / "evo")
+
+        calls = {"golden": 0, "mined": 0}
+
+        def _noGolden(skill_id):
+            calls["golden"] += 1
+            return None
+
+        import neurova.evolution.eval.miner as miner_mod
+        import neurova.evolution.eval.synthetic as synthetic_mod
+
+        async def _noMined(**kwargs):
+            calls["mined"] += 1
+            return EvalDataset()
+
+        class _BoomSynthetic:
+            def __init__(self, cfg):
+                pass
+
+            async def generate(self, skill_text, artifact_type):
+                raise RuntimeError("合成器请求失败: 401 invalid api key sk-should-not-leak")
+
+        monkeypatch.setattr(SkillEvolutionService, "_golden_dataset", staticmethod(_noGolden))
+        monkeypatch.setattr(miner_mod, "build_dataset", _noMined)
+        monkeypatch.setattr(miner_mod, "messages_from_sessions", lambda agent_id: [])
+        monkeypatch.setattr(synthetic_mod, "SyntheticDatasetBuilder", _BoomSynthetic)
+
+        result, proposal = await service.evolve(skill_id="s1", skill_text=BASELINE)
+
+        assert calls == {"golden": 1, "mined": 1}, "三级回退没有逐级走到，读数不可信"
+        assert proposal is None
+        assert result.reject_reason == "dataset_source_failed", result.reject_reason
+        assert [issue["source"] for issue in result.sourceIssues] == ["synthetic"]
+        reason = result.sourceIssues[0]["reason"]
+        assert reason.startswith("RuntimeError:"), reason
+        # 回执会进请求响应：凭据形态内容不得跟着外泄
+        assert "sk-should-not-leak" not in reason, reason
+
+    @pytest.mark.asyncio
+    async def testTrulyEmptyCorpusStillReadsAsEmptyDataset(self, tmp_path, monkeypatch):
+        """三级都没抛、就是没有语料 ⇒ 仍是 `empty_dataset`。
+
+        把这条反向钉住，是为了防止"给失败起个名"顺手把所有空语料都读成故障：
+        两者处置不同，读数就必须不同。
+        """
+        monkeypatch.setenv("NEUROVA_TEXT_EVOLUTION", "1")
+        service = SkillEvolutionService("agent-empty", base_dir=tmp_path / "evo")
+
+        import neurova.evolution.eval.miner as miner_mod
+        import neurova.evolution.eval.synthetic as synthetic_mod
+
+        async def _emptyMined(**kwargs):
+            return EvalDataset()
+
+        class _EmptySynthetic:
+            def __init__(self, cfg):
+                pass
+
+            async def generate(self, skill_text, artifact_type):
+                return EvalDataset()
+
+        monkeypatch.setattr(SkillEvolutionService, "_golden_dataset",
+                            staticmethod(lambda skill_id: None))
+        monkeypatch.setattr(miner_mod, "build_dataset", _emptyMined)
+        monkeypatch.setattr(miner_mod, "messages_from_sessions", lambda agent_id: [])
+        monkeypatch.setattr(synthetic_mod, "SyntheticDatasetBuilder", _EmptySynthetic)
+
+        result, proposal = await service.evolve(skill_id="s1", skill_text=BASELINE)
+        assert proposal is None
+        assert result.reject_reason == "empty_dataset", result.reject_reason
+        assert result.sourceIssues == []
