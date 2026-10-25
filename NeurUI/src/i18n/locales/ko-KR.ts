@@ -3019,6 +3019,7 @@ export default {
     unaddressed: '미조치',
   },
   marketplace: {
+    downloadUrlPh: 'ZIP 다운로드 링크; 소스가 없으면 이 항목을 설치할 수 없습니다',
     title: '마켓플레이스',
     browse: '탐색',
     installed: '설치됨',

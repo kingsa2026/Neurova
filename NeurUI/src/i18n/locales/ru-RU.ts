@@ -3019,6 +3019,7 @@ export default {
     unaddressed: 'Без действия',
   },
   marketplace: {
+    downloadUrlPh: 'Ссылка на ZIP-архив; без источника эту запись нельзя установить',
     title: 'Маркетплейс',
     browse: 'Обзор',
     installed: 'Установлено',
