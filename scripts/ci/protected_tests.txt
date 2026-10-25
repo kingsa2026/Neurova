@@ -1733,6 +1733,13 @@ tests/unit/collaboration/test_yieldConcurrencySlots.py
 # 存量 v1 库经生产装配点原地补列。
 # 逐文件单跑 9 passed
 tests/unit/core/test_agentRunStoreParkedStatus.py
+# 137 真根因的常驻判据（§6-419）：`BaseModule.subscribe_event` 只有订阅没有退订，
+# `EventBus.subscribe` 存的是 handler 本体、bound method 持有 `self` ⇒ 每一轮
+# `create_app()` 都把整张对象图钉在全局总线上（实测单进程峰值 10.8 GiB，CI 8 GiB
+# 处 137）。本档钉「订阅与退订成对 / stop 后模块可回收 / stop 只退自己的订阅 /
+# 基类有退订口且 stop 真调它」四格，并带生产装配点（orchestrator + agent_shutdown）
+# 的成对性——只改基类不改装配点时它一次都走不到。
+tests/unit/core/test_subscriptionIsPairedOnStop.py
 # 让位闸接进**真回合入口**（HTTP 面，不是直调闸）：§6-5 断的正是"闸写好了没人问"，
 # 而上一批活体量出只测 `check_yield_rules()` 永远看不见端点级缺陷（§6-44）。判据含
 # 恰好问一次、超限那轮真没跑（agent 零调用）、等待期每次入睡前续租（预算 200s > 租约
