@@ -29,8 +29,10 @@ vi.mock('@/composables/useAgentPage', () => ({
   useAgentPage: () => ({ agentId: { value: 'agent_a' } }),
 }))
 
+const { authFixture } = vi.hoisted(() => ({ authFixture: { role: 'admin' } }))
+
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ user: { id: 'u1', username: 'tester', role: 'admin' } }),
+  useAuthStore: () => ({ user: { id: 'u1', username: 'tester', role: authFixture.role } }),
 }))
 
 vi.mock('vue-router', () => ({
@@ -122,9 +124,26 @@ describe('MemoryPage 行作用域闸门', () => {
     await state.confirmDeleteMemory(OWN_ROW)
     await flushPromises()
 
-    expect(apiSpies.getMemory).toHaveBeenCalledWith('m_own', 'agent_a')
+    // 夹具默认角色是 admin ⇒ 按 id 的读走管理通道（常规路对他人行仍"视同不存在"）
+    expect(apiSpies.getMemory).toHaveBeenCalledWith('m_own', 'agent_a', { management: true })
     expect(apiSpies.strengthenMemory).toHaveBeenCalled()
-    expect(apiSpies.deleteMemory).toHaveBeenCalledWith('m_own', 'agent_a')
+    expect(apiSpies.deleteMemory).toHaveBeenCalledWith('m_own', 'agent_a', { management: true })
+  })
+
+  it('非管理员一律打常规路：管理通道不许被"顺手试一下"', async () => {
+    authFixture.role = 'user'
+    try {
+      const state = setupState(await mountPage())
+
+      state.viewMemory(OWN_ROW)
+      await state.confirmDeleteMemory(OWN_ROW)
+      await flushPromises()
+
+      expect(apiSpies.getMemory).toHaveBeenCalledWith('m_own', 'agent_a', { management: false })
+      expect(apiSpies.deleteMemory).toHaveBeenCalledWith('m_own', 'agent_a', { management: false })
+    } finally {
+      authFixture.role = 'admin'
+    }
   })
 
   it('动作列的四处禁用都只问 rowIsActionable（绑定钉成源码形状）', () => {
