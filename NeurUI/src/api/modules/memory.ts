@@ -853,34 +853,46 @@ export function clearWorkingMemory(agentId: string) {
 
 const ENHANCE_BASE = '/memory-enhancement'
 
+/**
+ * 增强族的作用域参数。记忆 id 形如 `mem_%06d` 且**每个 Agent 库各有一套计数器**，
+ * 所以这一族的每一条腿都必须能指明"哪个 Agent 的库"——不带作用域时后端回落 default，
+ * 在别的 Agent 页面上就会改掉同 id 的另一行。
+ *
+ * 没给作用域就不塞空串：`?agent_id=` 空值会被当成"按空串找 Agent"，与"缺省回落 default"
+ * 是两种语义。
+ */
+function scopeParams(agentId?: string): Record<string, string> {
+  return agentId ? { agent_id: agentId } : {}
+}
+
 /** Forget (reduce importance) a memory. */
-export function forgetMemory(memoryId: string, reason?: string, importanceThreshold = 0.3) {
-  return api.post<ApiResponse<Record<string, unknown>>>(`${ENHANCE_BASE}/${memoryId}/forget`, { reason: reason || '', importance_threshold: importanceThreshold })
+export function forgetMemory(memoryId: string, reason?: string, importanceThreshold = 0.3, agentId?: string) {
+  return api.post<ApiResponse<Record<string, unknown>>>(`${ENHANCE_BASE}/${memoryId}/forget`, { reason: reason || '', importance_threshold: importanceThreshold }, { params: scopeParams(agentId) })
 }
 
 /** Strengthen a memory. */
-export function strengthenMemory(memoryId: string, importanceBoost = 0.2, reason?: string) {
-  return api.post<ApiResponse<Record<string, unknown>>>(`${ENHANCE_BASE}/${memoryId}/strengthen`, { importance_boost: importanceBoost, reason: reason || '' })
+export function strengthenMemory(memoryId: string, importanceBoost = 0.2, reason?: string, agentId?: string) {
+  return api.post<ApiResponse<Record<string, unknown>>>(`${ENHANCE_BASE}/${memoryId}/strengthen`, { importance_boost: importanceBoost, reason: reason || '' }, { params: scopeParams(agentId) })
 }
 
 /** Get memory categories. */
-export function getMemoryCategories() {
-  return api.get<ApiResponse<MemoryCategory[]>>(`${ENHANCE_BASE}/categories`)
+export function getMemoryCategories(agentId?: string) {
+  return api.get<ApiResponse<MemoryCategory[]>>(`${ENHANCE_BASE}/categories`, { params: scopeParams(agentId) })
 }
 
 /** Batch operation on memories (forget/strengthen/delete). */
-export function batchMemoryOperation(memoryIds: string[], operation: 'forget' | 'strengthen' | 'delete', params?: Record<string, unknown>) {
-  return api.post<ApiResponse<BatchOperationResult>>(`${ENHANCE_BASE}/batch`, { memory_ids: memoryIds, operation, params: params || {} })
+export function batchMemoryOperation(memoryIds: string[], operation: 'forget' | 'strengthen' | 'delete', params?: Record<string, unknown>, agentId?: string) {
+  return api.post<ApiResponse<BatchOperationResult>>(`${ENHANCE_BASE}/batch`, { memory_ids: memoryIds, operation, params: params || {} }, { params: scopeParams(agentId) })
 }
 
 /** Export memories. */
-export function exportMemories(params?: { format?: 'json' | 'csv'; category?: string; min_importance?: number }) {
-  return api.get<ApiResponse<unknown>>(`${ENHANCE_BASE}/export`, { params })
+export function exportMemories(params?: { format?: 'json' | 'csv'; category?: string; min_importance?: number }, agentId?: string) {
+  return api.get<ApiResponse<unknown>>(`${ENHANCE_BASE}/export`, { params: { ...(params || {}), ...scopeParams(agentId) } })
 }
 
 /** Import memories. */
-export function importMemories(memories: Record<string, unknown>[], mergeMode: 'skip' | 'overwrite' | 'merge' = 'skip') {
-  return api.post<ApiResponse<{ imported: number; skipped: number; errors: string[] }>>(`${ENHANCE_BASE}/import`, { memories, merge_mode: mergeMode })
+export function importMemories(memories: Record<string, unknown>[], mergeMode: 'skip' | 'overwrite' | 'merge' = 'skip', agentId?: string) {
+  return api.post<ApiResponse<{ imported: number; skipped: number; errors: string[] }>>(`${ENHANCE_BASE}/import`, { memories, merge_mode: mergeMode }, { params: scopeParams(agentId) })
 }
 
 // ---------------------------------------------------------------------------
