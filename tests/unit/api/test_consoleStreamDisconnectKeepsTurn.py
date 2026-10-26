@@ -231,12 +231,15 @@ def test_announcedSessionFrameDoesNotLeakIntoTimelineOrReplayBuffer(quietStack, 
     )
 
 
-def test_consoleCleanupAwaitOfTurnTaskIsDecoupled():
-    """结构判据：收尾处等后台轮的等待点必须与响应任务的取消脱钩。
+def test_consoleCleanupDoesNotAwaitTheTurnTaskAtAll():
+    """结构判据：响应生成器不得等待回合任务——无论裸 await 还是 shield 包裹。
 
-    与上面那条活体判据配对——撤掉 `asyncio.shield` 时本条当场红（行为判据量不到，
-    见上一格说明）。裸 `await task` 写在 finally 里看着像"等它跑完再收尾"，
-    实际是把响应任务的取消转交给这一轮。
+    第一版（`a48f815b`）把裸 `await task` 改成 `await asyncio.shield(task)`，
+    那只解决"取消别带走这一轮"，但回合的**收尾记账**（时间线／重放缓冲／done／
+    续租）当时仍长在生成器的 finally 里：客户端一走，四件一起停——实测断连 164s
+    后任务还活着（`chat@164s`）而 run 已被扫成 `failed/process_died`，且
+    `_timeline/e41ff42c.jsonl` 的写入停在断连那一秒。第 0 步把四件搬到生产侧后，
+    生成器连"等"这个动作都不该有：等 = 回合寿命还系在响应上。
     """
     import ast
     import pathlib
@@ -260,4 +263,7 @@ def test_consoleCleanupAwaitOfTurnTaskIsDecoupled():
         for sub in ast.walk(n)
         if isinstance(sub, ast.Call) and getattr(sub.func, "attr", "") == "shield"
     ]
-    assert shielded, "console 的 event_stream 收尾未把等待与响应任务的取消脱钩"
+    assert shielded == [], (
+        f"event_stream 仍在等待回合任务（shield 于行 {[n.lineno for n in shielded]}）——"
+        "收尾记账应系在生产侧 run_chat，不该由响应去等"
+    )
