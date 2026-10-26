@@ -73,6 +73,10 @@ class TestMemoryUpdateEndpoint:
                 # `manager.get_memory`（带 P1-6 归属校验），桩随之改这份契约
                 return mem.to_dict() if mid == "m1" else None
 
+            def isOwnedByRequestScope(self, row, agentWide=False):
+                # PUT 的响应投影逐条问 manager 归属；本桩的行就是请求作用域自己的行
+                return True
+
         client = _client(memory_router, "/mem")
         monkeypatch.setattr(memory_crud, "get_memory_manager", lambda aid, u: _Mgr())
         r = client.put("/mem/m1", json={"content": "new"})
