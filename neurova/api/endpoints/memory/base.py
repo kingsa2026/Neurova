@@ -117,11 +117,13 @@ def memory_to_dict(memory, *, owned: bool) -> dict:
     检索接口返回的是 Memory.to_dict() 字典列表，键为 importance/emotion，
     需映射到 API 契约的 is_important/emotion_score。）
 
-    `owned`＝这一行当前请求作用域**动得了一动不了**。列表面按 agent 全量口径放行
-    （含其他用户域的行），详情/改/删按三层隔离拒绝；不把这条差别说给前端，页面就会
+    `owned`＝**这一位请求方**对这一行动得了一动不了。列表面按 agent 全量口径放行
+    （含其他用户域的行），常规详情/改/删按三层隔离拒绝；不把这条差别说给前端，页面就会
     把服务端注定拒绝的行照常摆出「打开/编辑/遗忘/删除」（2026-10-26 现网读数：
     `GET /api/v1/memory/merged_mem_000010_2` 404）。取源唯一＝
-    `MemoryManager.isOwnedByRequestScope`，与闸门同一条规则，所以显示与放行不会分家。
+    `MemoryManager.isOwnedByRequestScope`，与闸门同一条规则，所以显示与放行不会分家；
+    跨用户作用域的特权另有一处定义（`agentWidePrivilege`，与 `require_admin()` 同规则），
+    管理员经管理通道动得了的行就给他 `true`。
     它是布尔，不是三元组：`neuser_id`/`user_id` 不上线上（P1-6 选"视同不存在"正是
     为了不给"按 id 探他人记录"留入口）。
     """
@@ -189,16 +191,32 @@ def memory_to_dict(memory, *, owned: bool) -> dict:
         }
 
 
-def memories_to_dicts(manager, memories) -> list:
+def memories_to_dicts(manager, memories, *, agentWide: bool) -> list:
     """列表口径的唯一投影：逐条附上 `owned`，取法与读写闸门同一条判定。
 
     四条列表腿（`/memory`、`/hot`、`/crystallized`、`/emotion/{type}`）共用这里，
     不在各端点里各写一遍 `[memory_to_dict(m) for m in …]`——漏一处就是那一页
     又回到「看得见、点不动」。
+
+    `agentWide`＝**这一位请求方**能不能跨用户作用域操作（取源见
+    `agentWidePrivilege`，与 `deps.require_admin()` 那道门同一条规则）。它决定披露的
+    口径：管理员经管理通道动得了他人用户域的行，就不能给他一个 `owned=false`
+    让页面白禁用；普通用户动不了，就必须给 `false`。
     """
     return [
-        memory_to_dict(m, owned=manager.isOwnedByRequestScope(m)) for m in memories
+        memory_to_dict(m, owned=manager.isOwnedByRequestScope(m, agentWide)) for m in memories
     ]
+
+
+def agentWidePrivilege(user: Optional[Dict[str, Any]]) -> bool:
+    """这一位请求方能不能跨用户作用域操作记忆。
+
+    特权只有一处定义：管理通道用它决定披露口径，`deps.require_admin()` 用它拦请求，
+    两侧一致由判据逐格咬住（同一个人「看见能动」与「真打得通」必须是同一批行）。
+    判据与 `require_role("admin")` 内部的 `user_role != required_role and user_role != "admin"`
+    逐字同规则——这里是「只认 admin」那一支，因为 required_role 就是 admin。
+    """
+    return (user or {}).get("role", "user") == "admin"
 
 
 def get_memory_manager(agent_id: Optional[str] = None, user: Optional[Dict[str, Any]] = None):
