@@ -517,6 +517,7 @@ import * as skillPoolApi from '@/api/modules/skill-pool'
 import * as evolutionApi from '@/api/modules/text-evolution'
 import * as governanceApi from '@/api/modules/governance'
 import type { EvolutionSettings, ProposalSummary, EvolutionProposal, AbReportData, ArmExecutorKind } from '@/api/modules/text-evolution'
+import { useAuthStore } from '@/stores/auth'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -548,6 +549,7 @@ interface MarketSkill extends Omit<skillPoolApi.Skill, 'usage'> {
 
 const props = defineProps<{ agentId: string }>()
 const { t } = useI18n()
+const authStore = useAuthStore()
 
 const skills = ref<Skill[]>([])
 const loading = ref(false)
@@ -1128,19 +1130,12 @@ async function confirmRollback() {
   }
 }
 
-/** 回滚留痕要记"谁按的"：取当前登录身份，取不到给稳定占位而不是空串。 */
+/** 回滚留痕要记"谁按的"：身份只问 store 那一份（它已解析过、且随 logout 失效），
+ *  取不到给稳定占位而不是空串。此前这里绕过 secureStorage 直摸 localStorage，
+ *  第一个兜底还读了一把**全仓没人写过**的 'auth_user'（§6-432 复核实状抓到）。 */
 function currentOperator(): string {
-  try {
-    const raw = localStorage.getItem('auth_user') || localStorage.getItem('user')
-    if (raw) {
-      const parsed = JSON.parse(raw)
-      const name = parsed?.username || parsed?.user_id || parsed?.id
-      if (name) return String(name)
-    }
-  } catch {
-    // 非浏览器/脏值：落到占位
-  }
-  return 'operator'
+  const name = authStore.user?.username || authStore.user?.id
+  return name ? String(name) : 'operator'
 }
 
 onMounted(() => {

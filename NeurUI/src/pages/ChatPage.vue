@@ -468,7 +468,7 @@ import type { ChatMessage, Session } from '@/types/chat'
 import { api } from '@/api'
 import { extractUploadedFileId } from '@/api/modules/files'
 import { useGovernanceApproval } from '@/composables/useGovernanceApproval'
-import { secureStorage } from '@/utils/security'
+import { readAccessToken } from '@/utils/authSession'
 import { renderMarkdown } from '@/utils/markdown'
 import { revokeMessageBlobUrls } from '@/utils/blobUrls'
 import { openArtifactTab, openCodeBlockTab, openFileTab, openImageTab, openToolResultArtifacts, artifactFromEvent, artifactsFromToolResult, mergeMessageArtifacts, openMessageArtifact, type ArtifactEventPayload, type MessageArtifact } from '@/utils/artifacts'
@@ -1450,7 +1450,7 @@ async function sendMessage() {
   // Initiate SSE streaming request
   // F-10：控制器由 readStream 独自创建/持有（重连重试会再建新控制器），
   // 此处不得预建——预建的控制器会被 readStream 内的创建覆盖成孤儿。
-  const token = secureStorage.get('auth_token')
+  const token = readAccessToken()
 
   // 补课 8（断线重连+replay 快进）：读流网络中断（非用户中止/非 HTTP 错）
   // 时自动带 replay_from=<已消费事件数> 重连一次——服务端快进重放缓冲尾段，
@@ -2051,7 +2051,7 @@ async function resumeParkedTurn(msg: ChatMessage): Promise<void> {
       `${baseUrl}/console/chat/resume?run_id=${encodeURIComponent(notice.runId)}`,
       {
         method: 'POST',
-        headers: { Authorization: `Bearer ${secureStorage.get('auth_token') || ''}` },
+        headers: { Authorization: `Bearer ${readAccessToken()}` },
         signal: controller.signal,
       },
     )
@@ -2119,7 +2119,7 @@ async function synthesizeTTS(msg: ChatMessage) {
 
   try {
     const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
-    const token = secureStorage.get('auth_token')
+    const token = readAccessToken()
     const response = await fetch(`${baseUrl}/audio/synthesize-stream`, {
       method: 'POST',
       headers: {
@@ -2460,7 +2460,7 @@ function startStreamTTS(): void {
   streamTTSRunner = new StreamTTSRunner({
     synthesize: async (text, signal) => {
       const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
-      const token = secureStorage.get('auth_token')
+      const token = readAccessToken()
       const resp = await fetch(`${baseUrl}/audio/synthesize-stream`, {
         method: 'POST',
         headers: {
@@ -2512,7 +2512,7 @@ function getToolAnnouncer(): SpeechAnnouncer | null {
   if (!toolAnnouncer) {
     toolAnnouncer = createSpeechAnnouncer(async (text) => {
       const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
-      const token = secureStorage.get('auth_token')
+      const token = readAccessToken()
       const resp = await fetch(`${baseUrl}/audio/synthesize-stream`, {
         method: 'POST',
         headers: {

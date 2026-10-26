@@ -1,8 +1,7 @@
 import api from '@/api'
 import config from '@/config'
-import { secureStorage } from '@/utils/security'
+import { readAccessToken } from '@/utils/authSession'
 
-const TOKEN_KEY = 'auth_token'
 import type { ApiResponse, PaginatedData, PageParams } from '@/types/response'
 
 // ---------------------------------------------------------------------------
@@ -97,7 +96,7 @@ export function subscribeUnreadStream(
   onStatus?: (status: UnreadStreamStatus) => void,
 ): () => void {
   const controller = new AbortController()
-  const token = secureStorage.get(TOKEN_KEY)
+  const token = readAccessToken()
   const base = config.apiBaseUrl
   const url = `${base}/notifications/stream?interval=10`
 
