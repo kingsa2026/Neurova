@@ -759,6 +759,8 @@ export default {
     originUntrustedTip: '이 기억은 외부 웹 콘텐츠에서 왔으며 가중치가 낮아집니다',
     foreignScope: '다른 사용자 영역',
     foreignScopeTip: '이 기억은 이 에이전트의 다른 사용자 영역에 속합니다. 열기·편집·망각·삭제는 서버에서 거부됩니다',
+    identityRequired: '메모리 라이브러리는 로그인 후 볼 수 있습니다 — 로그인하지 않았거나 세션이 만료되었습니다',
+    identityDenied: '이 계정은 이 에이전트의 메모리 라이브러리에 접근할 수 없습니다',
     pendingQueue: '확인 대기 메모리',
     pendingEmpty: '확인 대기 중인 메모리가 없습니다',
     pendingConfirm: '확인 후 저장',

@@ -759,6 +759,8 @@ export default {
     originUntrustedTip: 'この記憶は外部ウェブコンテンツ由来で重みが下がっています',
     foreignScope: '他ユーザー領域',
     foreignScopeTip: 'この記憶は本エージェント内の他ユーザー領域に属します。開く・編集・忘却・削除はサーバーに拒否されます',
+    identityRequired: 'メモリライブラリはログイン後に閲覧できます — 未ログインまたはセッションの有効期限が切れています',
+    identityDenied: 'このアカウントはこのエージェントのメモリライブラリにアクセスできません',
     pendingQueue: '確認待ちメモリ',
     pendingEmpty: '確認待ちのメモリはありません',
     pendingConfirm: '確認して保存',

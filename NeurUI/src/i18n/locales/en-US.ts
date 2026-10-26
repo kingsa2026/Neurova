@@ -761,6 +761,8 @@ export default {
     originUntrustedTip: 'This memory comes from external web content and is down-weighted',
     foreignScope: 'Other user scope',
     foreignScopeTip: 'This memory belongs to another user domain under this agent; opening, editing, forgetting or deleting it is refused by the server',
+    identityRequired: 'The memory library needs signing in - you are signed out, or your session has expired',
+    identityDenied: 'This account has no access to the memory library of this agent',
     pendingQueue: 'Pending Memories',
     pendingEmpty: 'No memories awaiting confirmation',
     pendingConfirm: 'Confirm',

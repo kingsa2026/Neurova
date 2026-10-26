@@ -1,5 +1,6 @@
 import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios'
 import { secureStorage } from '@/utils/security'
+import { LOGIN_PATH, loginHref } from '@/utils/authRedirect'
 import bus from '@/bus'
 import logger from '@/utils/logger'
 import config from '@/config'
@@ -159,9 +160,11 @@ request.interceptors.response.use(
         secureStorage.remove(TOKEN_KEY)
         secureStorage.remove(REFRESH_TOKEN_KEY)
         secureStorage.remove('user')
-        // Redirect to login if not already there
-        if (window.location.pathname !== '/login') {
-          window.location.href = '/login'
+        // 跳转要保住目的地。此前这里写死裸 '/login'，把路由守卫已经带上的 ?redirect=
+        // 整条覆盖掉——登录前那发 401 越是早发生（boot 期的 agents 列表就是），深链丢得
+        // 越彻底，用户登完落在总览而不是原来那一页。口径与守卫共用 loginHref() 一处。
+        if (window.location.pathname !== LOGIN_PATH) {
+          window.location.href = loginHref(`${window.location.pathname}${window.location.search}`)
         }
         // Don't treat expired/missing token as a real error — it's expected on page load
         logger.warn(`[API] 401 Auth required [${requestId}] → redirecting to login`)
