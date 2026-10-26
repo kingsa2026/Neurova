@@ -759,6 +759,8 @@ export default {
     originUntrustedTip: 'Este recuerdo proviene de contenido web externo y tiene menor peso',
     foreignScope: 'Otro dominio de usuario',
     foreignScopeTip: 'Este recuerdo pertenece a otro dominio de usuario de este agente; abrirlo, editarlo, olvidarlo o eliminarlo lo rechaza el servidor',
+    identityRequired: 'La biblioteca de memoria requiere iniciar sesión - sesión ausente o caducada',
+    identityDenied: 'Esta cuenta no tiene acceso a la biblioteca de memoria de este agente',
     pendingQueue: 'Memorias pendientes',
     pendingEmpty: 'No hay memorias por confirmar',
     pendingConfirm: 'Confirmar',

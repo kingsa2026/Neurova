@@ -759,6 +759,8 @@ export default {
     originUntrustedTip: 'Ce souvenir provient d’un contenu web externe et est pondéré à la baisse',
     foreignScope: 'Autre domaine utilisateur',
     foreignScopeTip: 'Ce souvenir appartient à un autre domaine utilisateur de cet agent ; ouverture, modification, oubli et suppression sont refusés par le serveur',
+    identityRequired: 'La bibliothèque de mémoire nécessite une connexion - session absente ou expirée',
+    identityDenied: 'Ce compte ne peut pas accéder à la bibliothèque de mémoire de cet agent',
     pendingQueue: 'Mémoires en attente',
     pendingEmpty: 'Aucune mémoire à confirmer',
     pendingConfirm: 'Confirmer',

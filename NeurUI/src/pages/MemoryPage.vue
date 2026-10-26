@@ -279,6 +279,12 @@
         </template>
       </a-table>
     </GlassCard>
+    <GlassCard v-else-if="identityNotice">
+      <p data-testid="memory-identity-notice">{{ identityNoticeText }}</p>
+      <GlassButton variant="primary" size="sm" data-testid="memory-go-login" @click="goLogin">
+        {{ t('auth.login') }}
+      </GlassButton>
+    </GlassCard>
     <GlassCard v-else>
       <a-empty :description="t('common.noData')" />
     </GlassCard>
@@ -427,9 +433,12 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { truncateText } from '@/utils/displayText'
 import { formatTimestampText } from '@/utils/displayText'
+import { identityFailureOf, type IdentityFailure } from '@/utils/authIdentity'
+import { loginHref } from '@/utils/authRedirect'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
@@ -446,6 +455,36 @@ const rowIsActionable = memoryApi.rowIsActionable
 const { t } = useI18n()
 const authStore = useAuthStore()
 const isAdmin = computed(() => authStore.user?.role === 'admin')
+const route = useRoute()
+const router = useRouter()
+
+// 记忆面自 §6-429 起一律要凭证，于是「读不到」有两种截然不同的原因：身份不行，
+// 或者这个 Agent 真的还没有记忆。合成一格就是把登录问题伪装成空数据集——本仓既有
+// 纪律（MobilePairingPanel 的「权限态与空态不合并」、AgentChannelPage 的 accessDenied
+// 独立一格）写的就是这件事，记忆页当时漏扫。
+const identityNotice = ref<IdentityFailure | null>(null)
+const identityNoticeText = computed(() =>
+  identityNotice.value === 'forbidden' ? t('memory.identityDenied') : t('memory.identityRequired'),
+)
+
+/** 身份失败落那一格，返回「这条确实是身份问题」。 */
+function noteIdentityFailure(e: any): boolean {
+  const kind = identityFailureOf(e?.response?.status)
+  if (!kind) return false
+  identityNotice.value = kind
+  return true
+}
+
+/** 身份失败只说「未登录/无权」；其余故障照旧红 toast，不许借道把真故障说成「请登录」。 */
+function reportApiFailure(e: any): void {
+  if (noteIdentityFailure(e)) return
+  message.error(e?.response?.data?.message || e?.message || t('common.error'))
+}
+
+function goLogin(): void {
+  router.push(loginHref(route.fullPath))
+}
+
 const pendingMemories = ref<memoryApi.PendingMemory[]>([])
 
 const { agentId, currentAgent } = useAgentPage({
@@ -686,7 +725,7 @@ const performSemanticSearch = async () => {
         channel_scores: r.channel_scores ?? r.metadata?.channel_scores,
       }))
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
     searchResults.value = []
   }
 }
@@ -697,6 +736,9 @@ const fetchStats = async () => {
     const res = await memoryApi.getMemoryStats(agentId.value)
     memoryStats.value = res.data ?? null
   } catch (e: any) {
+    // 统计是旁路展示，非身份故障照旧只进控制台；但 401/403 要说未登录——不然读腿全断时
+    // 页面上只剩一句「暂无数据」。
+    noteIdentityFailure(e)
     console.error('Failed to fetch memory stats:', e?.response?.data?.message || e?.message)
   } finally {
     loadingStats.value = false
@@ -722,8 +764,10 @@ const fetchMemories = async () => {
     const { items, total: t } = memoryApi.extractMemoryList(res?.data)
     memories.value = items
     total.value = t
+    // 读腿恢复 ⇒ 那一格自己收摊，不许留下一句过期的「请登录」
+    identityNotice.value = null
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   } finally {
     loading.value = false
   }
@@ -747,7 +791,7 @@ const createMemory = async () => {
     await fetchMemories()
     await fetchStats()
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   } finally {
     creating.value = false
   }
@@ -781,7 +825,7 @@ const updateMemory = async () => {
     await fetchMemories()
     await fetchStats()
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   } finally {
     updating.value = false
   }
@@ -795,7 +839,7 @@ const deleteMemory = async (record: MemoryEntry) => {
     await fetchMemories()
     await fetchStats()
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   }
 }
 
@@ -812,7 +856,7 @@ const fetchHotMemories = async () => {
     memories.value = items
     total.value = t
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   } finally {
     loading.value = false
   }
@@ -826,7 +870,7 @@ const fetchCrystallizedMemories = async () => {
     memories.value = items
     total.value = t
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   } finally {
     loading.value = false
   }
@@ -841,7 +885,7 @@ const handleTriggerDecay = async () => {
     await fetchMemories()
     await fetchStats()
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   } finally {
     decaying.value = false
   }
@@ -862,7 +906,7 @@ const handleReloadMemories = async () => {
     await fetchMemories()
     await fetchStats()
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   } finally {
     reloading.value = false
   }
@@ -878,7 +922,7 @@ const handleStrengthen = async (record: MemoryEntry) => {
     await fetchMemories()
     await fetchStats()
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   }
 }
 
@@ -890,7 +934,7 @@ const handleForget = async (record: MemoryEntry) => {
     await fetchMemories()
     await fetchStats()
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   }
 }
 
@@ -907,7 +951,7 @@ const handleExport = async () => {
     URL.revokeObjectURL(url)
     message.success(t('memorySettings.exportSuccess'))
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   }
 }
 
@@ -931,7 +975,7 @@ const handleImport = async () => {
     await fetchMemories()
     await fetchStats()
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   } finally {
     importing.value = false
   }
