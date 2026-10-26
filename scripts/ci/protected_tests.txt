@@ -1730,6 +1730,15 @@ tests/unit/core/test_agentRunStoreParkedStatus.py
 # 恰好问一次、超限那轮真没跑（agent 零调用）、等待期每次入睡前续租（预算 200s > 租约
 # 90s）、parked+done 立即收尾、属主/管理员续跑复用原行、**管理员不得把执行身份换成自己**、
 # 陌生 403/匿名 401，以及"身份先判、状态后判"的判序（否则终态行向陌生账号确认存在性）。
+# 断连只停投递不停回合：`finally` 里裸 `await task` 会把响应任务收到的取消沿等待链
+# 转交给 `run_chat`（真浏览器量到 run 终态 cancelled/stopped、finished_at＝断连那一刻）。
+# 结构一格钉"等待点必须脱钩"（撤掉 shield 当场红，行号点名）；行为一格走真 ASGI 栈
+# ——撤掉 shield 也照过（httpx 不真撤中间件的 anyio 作用域），故它只当回归闸，红证在
+# 活体 A/B，这格差异如实写进判据自己的 docstring，不让读者误以为它有红。另两格钉 `session`
+# 帧：开局第一帧就带 session_id（旧形态只在 done 回传，实测造出空 id 重连另起的 0 消息
+# 空会话），并反向钉住它不进断线重连缓冲、不进时间线。
+# 逐文件单跑 4 passed（两次同读数）
+tests/unit/api/test_consoleStreamDisconnectKeepsTurn.py
 # 逐文件单跑 8 passed
 tests/unit/api/test_consoleYieldGateWiring.py
 # 未归因回合不得建立空串 pin：前端默认不传 model（`ChatPage.vue` 的
