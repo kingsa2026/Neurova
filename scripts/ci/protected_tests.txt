@@ -3972,3 +3972,5 @@ tests/unit/agent/test_userMessageLandsBeforeModelSpeaks.py
 tests/unit/collaboration/test_workflowSpawnArchivesIntoInitiatorPool.py
 # 记忆列表面逐条披露 owned，且与读/改/删闸门共用同一条归属判定（§6-425）
 tests/integration/test_memoryRowOwnershipDisclosure.py
+# 记忆管理通道的 role 门、老门未放宽的反钉，与"读改删各只一份实现"（§6-426）
+tests/integration/test_memoryManagementChannelRoleGate.py
