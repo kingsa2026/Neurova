@@ -1747,6 +1747,17 @@ tests/unit/core/test_agentRunStoreParkedStatus.py
 # 自己创建的 `_keepLease`，投递循环里不得再出现 heartbeat/shield 等待）。行为级断连
 # 注入两种形态都给不出确定取样时刻（athrow 要等整轮跑完；只取一帧就不消费 ⇒ 回合
 # 从未被创建），已如实记在该格 docstring，红证另附活体 A/B 与 HEAD 态撤改动复跑。
+# 失败轮的权威落点：后处理（含唯一的会话写点 `_step_save_session`）只在正常收尾
+# 路径上被调，LLM 供应商错误时异常从 `_step_llm_call` 就离开管线 ⇒ 盘上只剩提前落好的
+# user 一条。活体量过两回：09:29 那轮超时后候选模型 400 not supported、整轮以错误收场
+# 而会话里 `messages` 只有 [user]；前端因此永远挂着「本轮仍在生成中」——run 已终态、
+# 任务表已空，读回的会话却说不出这一轮怎么结束的。
+# 修在管线 execute 的异常路径，落点复用单点 `_step_save_session`（不另起第二份写会话
+# 的代码，也不按 user_already_persisted 重复写 user）。四格里两格是反向控制：落点不许
+# 把故障兜成成功（异常仍必须外抛）、正常轮仍只落 user+assistant 一对——新代码曾在
+# except 处理器里因 NameError 顶掉原始异常，正是被这两格抓回来的。
+# 逐文件单跑 4 passed（两次同读数）
+tests/unit/agent/test_failedTurnLandsInSession.py
 # 逐文件单跑 3 passed（两次同读数）
 tests/unit/api/test_consoleTurnOutlivesItsResponse.py
 # 逐文件单跑 4 passed（两次同读数）
