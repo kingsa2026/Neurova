@@ -110,12 +110,20 @@ def _origin_to_str(origin) -> str:
     return value if isinstance(value, str) and value in ("owner", "agent", "untrusted", "system") else "agent"
 
 
-def memory_to_dict(memory) -> dict:
+def memory_to_dict(memory, *, owned: bool) -> dict:
     """将 Memory 对象或 recall() 返回的 to_dict() 字典转换为 API 响应字典
 
     （安全序列化，容忍损坏数据。MemoryManager.recall/get_hot_memories 等
     检索接口返回的是 Memory.to_dict() 字典列表，键为 importance/emotion，
     需映射到 API 契约的 is_important/emotion_score。）
+
+    `owned`＝这一行当前请求作用域**动得了一动不了**。列表面按 agent 全量口径放行
+    （含其他用户域的行），详情/改/删按三层隔离拒绝；不把这条差别说给前端，页面就会
+    把服务端注定拒绝的行照常摆出「打开/编辑/遗忘/删除」（2026-10-26 现网读数：
+    `GET /api/v1/memory/merged_mem_000010_2` 404）。取源唯一＝
+    `MemoryManager.isOwnedByRequestScope`，与闸门同一条规则，所以显示与放行不会分家。
+    它是布尔，不是三元组：`neuser_id`/`user_id` 不上线上（P1-6 选"视同不存在"正是
+    为了不给"按 id 探他人记录"留入口）。
     """
     try:
         if isinstance(memory, dict):
@@ -125,6 +133,7 @@ def memory_to_dict(memory) -> dict:
             return {
                 "id": str(memory.get("id", "")),
                 "agent_id": str(memory.get("agent_id", "")),
+                "owned": owned,
                 "content": str(memory.get("content", "")),
                 "category": str(memory.get("category", "")),
                 # type: memory_type 的契约别名（前端类型列/页签过滤键）
@@ -155,6 +164,7 @@ def memory_to_dict(memory) -> dict:
         return {
             "id": getattr(memory, "id", ""),
             "agent_id": getattr(memory, "agent_id", ""),
+            "owned": owned,
             "content": str(getattr(memory, "content", "")),
             "category": str(getattr(memory, "category", "")),
             # type: memory_type 的契约别名（前端类型列/页签过滤键）
@@ -174,7 +184,21 @@ def memory_to_dict(memory) -> dict:
             "id": str(getattr(memory, "id", "unknown")),
             "content": str(getattr(memory, "content", "(数据损坏)")),
             "category": "unknown",
+            # 连归属都判不出，就不给动：写侧闸门对它也是拒绝，这里不是兜底而是同口径。
+            "owned": False,
         }
+
+
+def memories_to_dicts(manager, memories) -> list:
+    """列表口径的唯一投影：逐条附上 `owned`，取法与读写闸门同一条判定。
+
+    四条列表腿（`/memory`、`/hot`、`/crystallized`、`/emotion/{type}`）共用这里，
+    不在各端点里各写一遍 `[memory_to_dict(m) for m in …]`——漏一处就是那一页
+    又回到「看得见、点不动」。
+    """
+    return [
+        memory_to_dict(m, owned=manager.isOwnedByRequestScope(m)) for m in memories
+    ]
 
 
 def get_memory_manager(agent_id: Optional[str] = None, user: Optional[Dict[str, Any]] = None):

@@ -23,6 +23,7 @@ from .base import (
     get_memory_manager,
     logger,
     memory_to_dict,
+    memories_to_dicts,
     router,
 )
 
@@ -56,7 +57,7 @@ async def search_memories(
         return success_response(
             data={
                 "count": len(memories),
-                "memories": [memory_to_dict(m) for m in memories],
+                "memories": memories_to_dicts(manager, memories),
             },
             message="搜索成功",
             request_id=_get_request_id(None),
@@ -151,7 +152,7 @@ async def get_hot_memories(
         return success_response(
             data={
                 "count": len(memories),
-                "memories": [memory_to_dict(m) for m in memories],
+                "memories": memories_to_dicts(manager, memories),
             },
             message="获取成功",
             request_id=_get_request_id(None),
@@ -180,7 +181,7 @@ async def get_crystallized_memories(
         return success_response(
             data={
                 "count": len(memories),
-                "memories": [memory_to_dict(m) for m in memories],
+                "memories": memories_to_dicts(manager, memories),
             },
             message="获取成功",
             request_id=_get_request_id(None),
@@ -245,7 +246,9 @@ async def get_memory(
             raise APIError.not_found(f"记忆不存在: {memory_id}")
 
         return success_response(
-            data=memory_to_dict(memory_data),
+            data=memory_to_dict(
+                memory_data, owned=manager.isOwnedByRequestScope(memory_data)
+            ),
             message="获取成功",
             request_id=_get_request_id(req),
         )
@@ -341,7 +344,11 @@ async def update_memory(
         updated = manager.get_memory(memory_id)
 
         return success_response(
-            data=memory_to_dict(updated) if updated else None,
+            data=(
+                memory_to_dict(updated, owned=manager.isOwnedByRequestScope(updated))
+                if updated
+                else None
+            ),
             message="更新成功",
             request_id=_get_request_id(None),
         )

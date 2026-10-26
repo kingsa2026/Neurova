@@ -42,21 +42,21 @@ class TestMemoryToDictOrigin:
         from neurova.api.endpoints.memory.base import memory_to_dict
         from neurova.cognitive_layers.memory_layer.models import Memory
 
-        d = memory_to_dict(Memory(id="m1", content="x"))
+        d = memory_to_dict(Memory(id="m1", content="x"), owned=True)
         assert d["origin"] == "agent"
 
     def test_dict_branch_valid_and_invalid(self):
         from neurova.api.endpoints.memory.base import memory_to_dict
 
-        assert memory_to_dict({"id": "m", "content": "c", "origin": "owner"})["origin"] == "owner"
-        assert memory_to_dict({"id": "m", "content": "c", "origin": "GOD"})["origin"] == "agent"
-        assert memory_to_dict({"id": "m", "content": "c"})["origin"] == "agent"
+        assert memory_to_dict({"id": "m", "content": "c", "origin": "owner"}, owned=True)["origin"] == "owner"
+        assert memory_to_dict({"id": "m", "content": "c", "origin": "GOD"}, owned=True)["origin"] == "agent"
+        assert memory_to_dict({"id": "m", "content": "c"}, owned=True)["origin"] == "agent"
 
     def test_untrusted_object_not_mangled(self):
         from neurova.api.endpoints.memory.base import memory_to_dict
         from neurova.cognitive_layers.memory_layer.models import Memory, MemoryOrigin
 
-        d = memory_to_dict(Memory(id="m2", content="x", origin=MemoryOrigin.UNTRUSTED))
+        d = memory_to_dict(Memory(id="m2", content="x", origin=MemoryOrigin.UNTRUSTED), owned=True)
         assert d["origin"] == "untrusted"
 
 

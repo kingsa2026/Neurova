@@ -91,6 +91,11 @@ class _FakeMemoryManager:
     def get_crystallized(self, limit=20, **kwargs):
         return []
 
+    def isOwnedByRequestScope(self, mem, agentWide=False):
+        # 列表投影逐条问 manager「这一行动得了吗」（单源判定）；本桩的行全是
+        # agent-1/default/default，即请求作用域自己的行，答 True 是事实而非兜底。
+        return True
+
     def get_stats(self, **kwargs):
         return {"total_memories": len(self._store)}
 
@@ -207,7 +212,7 @@ def test_memory_to_dict_accepts_recall_dict():
         temperature=88.0,
         importance=90.0,
     )
-    out = memory_to_dict(m.to_dict())
+    out = memory_to_dict(m.to_dict(), owned=True)
     assert out["id"] == "mem-9"
     assert out["content"] == "hello world"
     assert out["agent_id"] == "agent-1"
