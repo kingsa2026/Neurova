@@ -471,14 +471,29 @@ export function getMemories(
   })
 }
 
+/**
+ * 按 id 寻址的两种通道，路径只在这一处构造。
+ *
+ * 常规路对他人用户域的行列「视同不存在」（三层隔离，P1-6）；管理员跨用户操作走
+ * 带 role 门的管理通道 `/memory/management/{id}`。选择权不在前端：后端按调用方
+ * 权限逐条给的 `owned` 说动得了，`management` 这一位由页面的 `isAdmin` 供出。
+ */
+interface ChannelOptions {
+  management?: boolean
+}
+
+function memoryPath(id: string, opts?: ChannelOptions): string {
+  return opts?.management ? `${BASE}/management/${id}` : `${BASE}/${id}`
+}
+
 /** Get a single memory.
  *
  * `agentId` 取**行自带的 `record.agent_id`**：后端 `get_memory_manager` 缺这个参数就
  * 回落默认 Agent，于是选中非默认 Agent 时按 id 寻址必然打到错的 manager 上
  * （活体实证：`GET /memory/mem_000001` 404，`GET /memory/mem_000001?agent_id=kai` 200）。
  */
-export function getMemory(id: string, agentId?: string) {
-  return api.get<ApiResponse<MemoryEntry>>(`${BASE}/${id}`, {
+export function getMemory(id: string, agentId?: string, opts?: ChannelOptions) {
+  return api.get<ApiResponse<MemoryEntry>>(memoryPath(id, opts), {
     params: agentId ? { agent_id: agentId } : undefined,
   })
 }
@@ -489,15 +504,20 @@ export function createMemory(data: MemoryCreatePayload, agentId?: string) {
 }
 
 /** Update a memory. 同 `getMemory`：不带 agent_id 就改不到别的 Agent 的行。 */
-export function updateMemory(id: string, data: Partial<MemoryCreatePayload>, agentId?: string) {
-  return api.put<ApiResponse<MemoryEntry>>(`${BASE}/${id}`, data, {
+export function updateMemory(
+  id: string,
+  data: Partial<MemoryCreatePayload>,
+  agentId?: string,
+  opts?: ChannelOptions,
+) {
+  return api.put<ApiResponse<MemoryEntry>>(memoryPath(id, opts), data, {
     params: agentId ? { agent_id: agentId } : undefined,
   })
 }
 
 /** Delete a memory. 同 `getMemory`。 */
-export function deleteMemory(id: string, agentId?: string) {
-  return api.delete<ApiResponse<null>>(`${BASE}/${id}`, {
+export function deleteMemory(id: string, agentId?: string, opts?: ChannelOptions) {
+  return api.delete<ApiResponse<null>>(memoryPath(id, opts), {
     params: agentId ? { agent_id: agentId } : undefined,
   })
 }
