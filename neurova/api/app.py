@@ -1493,7 +1493,7 @@ async def _on_shutdown(app_state: AppState) -> None:
 
 def create_app(
     config: Optional[Dict[str, Any]] = None,
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     port: int = 8000,
     debug: bool = False,
     **kwargs,
@@ -1620,7 +1620,7 @@ def create_app(
 
 
 def run_server(
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     port: int = 8000,
     debug: bool = False,
     reload: bool = False,
@@ -1698,7 +1698,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Neurova API Server")
-    parser.add_argument("--host", default="0.0.0.0", help="Host to bind")
+    parser.add_argument("--host", default="127.0.0.1", help="Host to bind")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind")
     parser.add_argument("--debug", action="store_true", help="Debug mode")
     parser.add_argument("--reload", action="store_true", help="Auto reload")

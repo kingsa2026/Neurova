@@ -5,8 +5,10 @@
 （`api/auth.py:636`）挂在 memory 包里 **11 个文件**上（不只 crud+eki），
 无凭证时它返回 `_DEFAULT_USER`(:617) 即租户键 `default`——于是**匿名请求可以写**：
 POST/PUT/DELETE 一路共 26 个 handler 今天都不需要任何身份就能落进共享 default 桶。
-读侧匿名只落 default 是 2026-10-06 已定的政策（"匿名共享 default 桶可以，但租户键
-必须是 user_id"），本批不动；要修的是**写侧把"共享桶"当成了"无人看守的桶"**。
+读侧匿名只落 default 曾是 2026-10-06 定的政策，本文件当年**不动**它；
+2026-10-26 点单「甲」把它一起撤了（实测匿名可读走 24 行正文，而 `agent_wide=True`
+让"只见 default 桶"这句从未被执行），判据随之改见
+`testAnonymousReadIsNowRejectedToo`。要修的根因始终是：**回落身份被当成了身份**。
 
 修法取单点：memory 包 11 个子模块全部 `from .base import router` 注册到**同一个
 APIRouter**（`memory/base.py:22`），所以门挂在 router 级一处即可覆盖全门面，
@@ -126,19 +128,24 @@ def testEveryMemoryWriteRouteRejectsAnonymous(appClient):
     )
 
 
-def testAnonymousReadStillSeesOnlyDefaultBucket(appClient):
-    """② 政策不变的那一半：匿名可读，但租户键必须是 default。
+def testAnonymousReadIsNowRejectedToo(appClient):
+    """② 读侧那一半 2026-10-26 随点单「甲」撤销，本格随之改判（改前提，不是放弱闸）。
 
-    断言"能读"与"只读到 default 桶"两件事——只断前者会把越权读放过去。
+    原判据写的是"匿名**读**仍 200 且只见 default 桶"，钉的是 2026-10-06 那条政策。
+    撤销依据是两条实测：无凭证 `GET /api/v1/memory?agent_id=default` 返回 24 行正文
+    （含他人用户域 9 行），而列表腿传 `agent_wide=True` ⇒ 后半句"只见 default 桶"
+    在实现上从来没被执行过；`start_server.py` 默认 `0.0.0.0` 又把它送到同网段。
+
+    另如实记一格：原判据的"只读到 default 桶"那半句**早就是恒真**——它读
+    `row.get("user_id") or row.get("neuser_id")`，而 §6-425 之后投影里根本没有这两个键
+    （归属身份刻意不上线上），`owner` 恒为 None ⇒ 该循环什么都没咬过。改判成 401 之后
+    这半句不再需要，故一并删掉，不留一条不咬人的断言。
     """
     resp = appClient.get(f"{MEMORY_PREFIX}?limit=5")
-    assert resp.status_code == 200, f"匿名读被误收紧：{resp.status_code} {resp.text[:120]}"
-    body = resp.json()
-    data = body.get("data", body)
-    items = data if isinstance(data, list) else data.get("memories", []) if isinstance(data, dict) else []
-    for row in items if isinstance(items, list) else []:
-        owner = row.get("user_id") or row.get("neuser_id")
-        assert owner in (None, "default"), f"匿名读串进了租户 {owner!r} 的记忆"
+
+    assert resp.status_code == 401, (
+        f"记忆面读侧仍放行匿名（回落身份在 agent_wide 口径下等于没有身份）：{resp.status_code}"
+    )
 
 
 def _gatesDefinedInAuth():
