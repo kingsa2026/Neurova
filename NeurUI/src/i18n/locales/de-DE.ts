@@ -759,6 +759,8 @@ export default {
     originUntrustedTip: 'Diese Erinnerung stammt aus externen Webinhalten und wird abgewertet',
     foreignScope: 'Anderer Nutzerbereich',
     foreignScopeTip: 'Diese Erinnerung gehört zu einem anderen Nutzerbereich dieses Agents; Öffnen, Bearbeiten, Vergessen und Löschen lehnt der Server ab',
+    identityRequired: 'Das Gedächtnis dieses Agenten ist nur nach dem Anmelden sichtbar - nicht angemeldet oder Sitzung abgelaufen',
+    identityDenied: 'Dieses Konto hat keinen Zugriff auf die Gedächtnisbibliothek dieses Agenten',
     pendingQueue: 'Ausstehende Erinnerungen',
     pendingEmpty: 'Keine Erinnerungen zur Bestätigung',
     pendingConfirm: 'Bestätigen',
