@@ -16,9 +16,10 @@
 
 身份口径 2026-10-08 换过一次（P3-12 C1）：原来经 `dependency_overrides` 注入返回位，
 现在改签**生产同一个函数产出的真 JWT**。原因是写侧门挂在
-`APIRouter(dependencies=[Depends(requireIdentityForWrites)])` 上，它判的是**请求有没有
+`APIRouter(dependencies=[Depends(requireIdentityForMemoryFace)])` 上，它判的是**请求有没有
 凭证**，不看被 override 的那个函数——override 只能替掉处理器级的身份解析，替不掉路由级
 的凭证检查，于是旧夹具全部 401。换成真 token 反而把整条凭证链纳进覆盖范围。
+（2026-10-26 点单甲后，这道门从"只管写"收成"读写都要凭证"，名字随之改。）
 """
 
 import types
