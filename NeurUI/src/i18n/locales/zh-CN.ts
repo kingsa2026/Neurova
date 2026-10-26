@@ -768,6 +768,8 @@ export default {
     originUntrusted: '外部（不可信）',
     originSystem: '系统',
     originUntrustedTip: '该记忆来自外部网络内容，已降权处理',
+    foreignScope: '他人作用域',
+    foreignScopeTip: '该记忆属于本 Agent 下的其他用户域，打开、编辑、遗忘、删除会被服务端按归属拒绝',
     pendingQueue: '待确认记忆',
     pendingEmpty: '暂无待确认记忆',
     pendingConfirm: '确认入库',
