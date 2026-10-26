@@ -201,12 +201,24 @@ def currentJwtSecretKey() -> str:
     各自抄一份常量（四份），台面上看不出谁的读法对；签名与验签又各读一处模块字典，
     一旦分叉就表现为"本档刚签的令牌被自己拒"（401 / `Signature verification failed`）。
     收成这一处之后，两边都从它取数。
+
+    **取值发生在调用时，不在导入时**：优先环境变量，缺场才回落模块全局。全局是导入期
+    算出来的那一份——两者在环境变量在场时同源，故本函数不改任何既有语义，只是把
+    "何时读"从导入期挪到取用时。密钥轮换与测试注入因此只需改环境变量，不必摸私有状态。
     """
-    return JWT_SECRET_KEY
+    return config.get("NEUROVA_JWT_SECRET") or config.get("NEUROVA_JWT_SECRET_KEY") \
+        or JWT_SECRET_KEY
 
 
 # JWT Secret Key — 从环境变量或自动生成的文件加载
 # 优先级: 环境变量 NEUROVA_JWT_SECRET / NEUROVA_JWT_SECRET_KEY > .jwt_secret 文件 > 自动生成
+#
+# **签发与验签一律经 `currentJwtSecretKey()`，不要直接读这枚全局。**
+#
+# 这行赋值只在**导入期**跑一次，故它读到的环境变量被冻结在那一刻：进程内此后注入
+# `NEUROVA_JWT_SECRET`（测试夹具、密钥轮换）对生产侧一个字都不生效——而"生产侧读不到
+# 它"这件事，又逼得判据只能去改写这枚全局来对齐，形态是把症状从消费方挪一层。
+# 烘死者是"导入期取值"这件事本身。全局保留为兼容读法与取用口的回落值。
 JWT_SECRET_KEY = _load_or_create_secret_key()
 
 
@@ -240,7 +252,7 @@ def create_access_token(
         }
     )
 
-    return jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+    return jwt.encode(to_encode, currentJwtSecretKey(), algorithm=JWT_ALGORITHM)
 
 
 def create_refresh_token(
@@ -273,7 +285,7 @@ def create_refresh_token(
         }
     )
 
-    return jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+    return jwt.encode(to_encode, currentJwtSecretKey(), algorithm=JWT_ALGORITHM)
 
 
 def create_token_pair(
@@ -310,7 +322,7 @@ def decode_token(token: str) -> Optional[Dict[str, Any]]:
         Token 数据字典，失败返回 None
     """
     try:
-        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        payload = jwt.decode(token, currentJwtSecretKey(), algorithms=[JWT_ALGORITHM])
         return payload
     except jwt.ExpiredSignatureError:
         logger.warning("Token expired")
