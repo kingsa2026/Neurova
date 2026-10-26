@@ -3970,3 +3970,5 @@ tests/unit/agent/test_userMessageLandsBeforeModelSpeaks.py
 # workflow 派生的终态归档接上发起者：canvas_run 漏传身份是根因，归档随之全程惰性。
 # 两格反向控制钉住边界：workflow 不回灌父会话邮箱、取不到发起者时不归档也不谎报。
 tests/unit/collaboration/test_workflowSpawnArchivesIntoInitiatorPool.py
+# 记忆列表面逐条披露 owned，且与读/改/删闸门共用同一条归属判定（§6-425）
+tests/integration/test_memoryRowOwnershipDisclosure.py
