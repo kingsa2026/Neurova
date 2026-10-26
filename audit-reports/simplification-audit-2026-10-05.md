@@ -10662,3 +10662,34 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **A/B 与活体**：A/B 首轮 `AB_REGRESSION`（抓到上面那条 traverse 回归），修后复跑 `AB_PASS`，仅本树红 0 条，本树 1353 passed／基线 1348；两侧同红 2 条为已定责预存，基线 `test_decay_cycle_bounded` 那条 ERROR 单跑 10 passed ⇒ 顺序偶发不下结论。脚本另提示基线侧汇总报 8 条而抽取到 12 条——差集按抽取到的集合判读（form 400 同族：短汇总条数不能当红的全集）。活体走真 uvicorn 真端口（非 TestClient）：匿名 401 且无泄露／带生产签 token 200 且仍 24 行（收紧只针对匿名）／`/health` 200／现算 30 条 GET 腿逐条匿名打 `E_still_open=[]`／局域网地址从可连变 `ConnectionRefusedError`／`netstat` 复证监听由 `0.0.0.0:9527` 变 `127.0.0.1:9527`。服务经 `start.py --restart --backend --yes` 上线。在册四道闸＋跟踪与常驻守卫合跑 171 passed；前端本批无改动，memory 相关 27 档 330 passed。
     - **仍开（不冒充完成）**：① **本批关的是"匿名"，不是"跨用户"**：已登录的普通用户经列表腿仍按 agent 全量口径读得到他人用户域正文——那正是乙案（可见性收进权限源、普通用户只看自己作用域）的目标，用户未裁，故未动。② **未登录 UI 的体面状态需裁**：前端只有 1 条路由设了 `meta.requiresAuth`，而仪表盘与记忆页都调这四条腿；`NeurUI/src/api/index.ts:155-160` 在拿不到 refresh token 时会清库并整页跳登录 ⇒ 收紧后未登录打开这些页会被弹到登录页。本批如实报告没自改前端。③ §6-429 仍开① 不变：增强族 6 条端点仍不带 `agent_id`。④ Harmony/Tauri 侧未验。
     - **口径与空号**：生产池净 **+21**（`auth.py` 34/20 门本体改名与政策依据、`memory/base.py` 8/5 装配点、`app.py` 3/3、`start_server.py` 4/1、`docker-compose.yml` 4/1）。测试池：新判据 236 行，配对既有档 35/18。入册 `22c66f06` 基建 +2/−0，reader 现算 **725**。下一枚空号两条一起跑：本条原号 427 ⇒ 让号为 430。合并后重取空号两条一起跑：条目行现算最大 **430**、引用面最大 430 ⇒ 下批从 **§6-431** 起；合并后在册条目 reader 现算 **731**（两侧并集）。
+    - **代提交记录（2026-10-26，用户指令「还有未提交的部分，核验一下，一并提交推送」）**：
+      工作树里另有两个会话的在途改动放了很久未入库，本次代为核验后提交——**实现归属不在本批**，
+      本格只记"核验到哪一步"：
+      ① `ad4e56f8` N6 常驻面预算报告（`neurova/context/budget_report.py` 新档 90 行、
+      `context.py` +17/−0、`orchestrator.py` +42/−14，两档自带判据 91 与 60 行）；
+      ② `b8f77c1e` installer 版本文件写入修正（`build.cmd` +1/−1：
+      `> file echo|set /p=` 会把 `echo` 命令自己的输出重定向进文件且总带换行，
+      改成 `<nul set /p=` 才是原样写入；产物侧证据是 `bin/version.txt` 现为
+      `1.0.0-beta5`、无尾随换行）。
+      做到过的核验：跑它自带的两档判据（全绿）＋ `tests/unit/context` 整目录
+      （1007 passed，2 条红）；把这两个生产文件 stash 掉再跑同一目录，
+      `test_phase3_wiring.py::TestLazyWiring` 那 2 条红**照旧**⇒ 预存红，不归它们；
+      新模块体检（`_reports` 每 agent 一份且后写覆盖先写 ⇒ 不无界增长；读写都在
+      `threading.RLock` 内；`resetContextBudget()` 有两档判据的夹具在用；
+      `recordContextBudget` 的调用点在 orchestrator 构建 system_instructions 那条真路上）。
+      没做的也写明：这两批**没走过** §6 的红→绿→红自证→A/B→活体流水线、未入受保护子集；
+      `build.cmd` 未跑完整 WPF 构建（只核语义＋读已生成的产物）。
+    - **两条留给归属方或用户处置（不代决定）**：
+      ① `GET /api/v1/context/budget` 目前**全仓零消费者**——`NeurUI/src` 里 grep `budget`
+      只命中 cost/settings 两个别的域。按 AGENTS §2「写出无人读的字段/注册无消费者的模块
+      属断点」，要么接上仪表盘或成本页，要么把"只读取证面"的用途写进文档。
+      ② 工作树里另有**桌面运行时数据的删除**未入库（`agent_workspaces/default/agent_config.json`
+      15 行、`agent_workspaces/kai/memory/muscle_memory/muscle_l1..l3.json` 各 1 行）：
+      在 git 里记录它们的销毁是另一个决定，本次**故意排除**在两笔提交之外，连同构建产物
+      `bin/version.txt` 与跑测落点 `test_workspace/` 一起留在工作树，并由本次的
+      路径限定 stash（`keep-runtime-deletes-during-rebase`）变基后原样还原。
+    - **数字勘误两则（form 17 同族，本批第十遭；根因都是"先落字再去数"）**：
+      `ad4e56f8` 正文写"生产池 +59/−14"与"新档 91 行"，`git show --numstat` 真值是
+      **生产池 +149/−14**（17＋90＋42 / 14）与该档 **90** 行；`b8f77c1e` 正文那句
+      "现为 `1.0.0-beta1`…实际读到的 `1.0.0-beta5`"是落笔顺序颠倒，真值只有一个：
+      `1.0.0-beta5`、无尾随换行。提交均已入库不改写，正确值落在本格。
