@@ -1,5 +1,5 @@
 import { onBeforeUnmount, watch } from 'vue'
-import { secureStorage } from '@/utils/security'
+import { readAccessToken } from '@/utils/authSession'
 
 /**
  * 会话实时事件订阅（WebSocket /api/v1/sync/ws/{session_id}）
@@ -65,7 +65,7 @@ export function useSessionSync(
     const wsBase = base.replace(/^http/, 'ws')
     // S-03 鉴权契约：握手必须带 ?token=<JWT>（与 axios Authorization 同源，
     // 取 secureStorage auth_token；缺失时不带参数，后端将以 4401 关闭）
-    const token = secureStorage.get('auth_token') || ''
+    const token = readAccessToken()
     const auth = token ? `&token=${encodeURIComponent(token)}` : ''
     return `${wsBase}/sync/ws/${encodeURIComponent(sessionId)}?channel_type=${channelType}${auth}`
   }
