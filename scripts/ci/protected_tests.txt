@@ -4018,3 +4018,6 @@ tests/integration/test_memoryRowOwnershipDisclosure.py
 tests/integration/test_memoryManagementChannelRoleGate.py
 # 记忆面整面对匿名关死（路由级门）、23 条租户数据 GET 腿逐条钉、默认绑定与 compose 发布地址收成回环
 tests/integration/test_memoryFaceRejectsAnonymous.py
+# 增强族六条腿的作用域：两库同 id 时 strengthen/forget/batch/import/export/categories 只动指定
+# 那一库，未知 Agent 如实 404，缺省仍回落 default，归属校验照旧（台账 §6-433；逐文件单跑 10 passed）
+tests/integration/test_memoryEnhancementCarriesAgentScope.py
