@@ -1737,6 +1737,18 @@ tests/unit/core/test_agentRunStoreParkedStatus.py
 # 活体 A/B，这格差异如实写进判据自己的 docstring，不让读者误以为它有红。另两格钉 `session`
 # 帧：开局第一帧就带 session_id（旧形态只在 done 回传，实测造出空 id 重连另起的 0 消息
 # 空会话），并反向钉住它不进断线重连缓冲、不进时间线。
+# 回合的落地与续租跟着**回合**走，不跟着**响应**走（§6-421）。上一笔把断连从
+# 「掀掉回合」改成「只停投递」，但时间线／重放缓冲／done／租约四件仍长在响应生成器
+# 里，于是活体量到两条谎报：断连 164s 任务仍 `chat@164s` 而 run 已被周期扫描写成
+# `failed/process_died`；`_timeline/e41ff42c.jsonl` 的写入停在断连那一秒（要 120 条、
+# 编号止于 85）。本批改把四件搬到生产侧，投递退成纯渲染。
+# 三格里两格是行为判据（断连后增量仍入账；done 随回合置位 ⇒ replay_from 能收尾，
+# 不再是 P-6 那一族「永不返回的 await」），一格是结构判据（续租唯一驱动者必须是回合
+# 自己创建的 `_keepLease`，投递循环里不得再出现 heartbeat/shield 等待）。行为级断连
+# 注入两种形态都给不出确定取样时刻（athrow 要等整轮跑完；只取一帧就不消费 ⇒ 回合
+# 从未被创建），已如实记在该格 docstring，红证另附活体 A/B 与 HEAD 态撤改动复跑。
+# 逐文件单跑 3 passed（两次同读数）
+tests/unit/api/test_consoleTurnOutlivesItsResponse.py
 # 逐文件单跑 4 passed（两次同读数）
 tests/unit/api/test_consoleStreamDisconnectKeepsTurn.py
 # 逐文件单跑 8 passed
