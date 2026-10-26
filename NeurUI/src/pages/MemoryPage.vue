@@ -756,7 +756,8 @@ const createMemory = async () => {
 const viewMemory = async (record: MemoryEntry) => {
   if (!rowIsActionable(record)) return
   try {
-    const res = await memoryApi.getMemory(record.id, record.agent_id)
+    // 他人用户域的行只有管理通道收；常规路对它们仍「视同不存在」，所以通道随角色选。
+    const res = await memoryApi.getMemory(record.id, record.agent_id, { management: isAdmin.value })
     selectedMemory.value = { ...res.data }
   } catch {
     selectedMemory.value = { ...record }
@@ -773,6 +774,7 @@ const updateMemory = async () => {
       selectedMemory.value.id,
       { content: selectedMemory.value.content },
       selectedMemory.value.agent_id,
+      { management: isAdmin.value },
     )
     message.success(t('common.success'))
     editing.value = false
@@ -788,7 +790,7 @@ const updateMemory = async () => {
 const deleteMemory = async (record: MemoryEntry) => {
   if (!rowIsActionable(record)) return
   try {
-    await memoryApi.deleteMemory(record.id, record.agent_id)
+    await memoryApi.deleteMemory(record.id, record.agent_id, { management: isAdmin.value })
     message.success(t('common.success'))
     await fetchMemories()
     await fetchStats()
