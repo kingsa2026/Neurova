@@ -8,6 +8,7 @@ from xml.etree import ElementTree as ET
 from neurova.channels.base import ChannelEventType, ChannelMessage
 from neurova.channels.voice_ingress import AUDIO_BYTES_KEY
 from neurova.channels.wechat_kf_crypto import decryptKfPayload, verifyKfSignature
+from neurova.channels.wecom import fetchWecomMediaBytes
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -88,25 +89,15 @@ class WeChatKfEventsMixin:
         return data
 
     def download_kf_media(self, media_id: str) -> Optional[bytes]:
-        """微信客服素材下载；失败返回 None（由入站桥报 media_unavailable）。"""
+        """微信客服素材下载；失败返回 None（由入站桥报 media_unavailable）。
+
+        HTTP 那一层不走手抄：企业微信素材 GET 的全仓唯一实装是
+        `wecom.fetchWecomMediaBytes`（教义第 6 条，大小上限也在那里）。本方法只保留
+        客服通道自己的前置——先拿到 token。
+        """
         if not media_id or not self._ensure_wecom_token():
             return None
-        try:
-            import requests
-
-            response = requests.get(
-                f"{self.WECOM_API_BASE}/cgi-bin/media/get",
-                params={"access_token": self.access_token, "media_id": media_id},
-                timeout=10,
-            )
-            if response.status_code != 200 or not response.content:
-                return None
-            if "application/json" in (response.headers.get("content-type") or ""):
-                return None
-            return response.content
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("微信客服素材下载失败 media_id=%s: %s", media_id, exc)
-            return None
+        return fetchWecomMediaBytes(self.access_token, media_id)
 
     def _kfPayloadToEvents(
         self, payload: Dict[str, Any], openKfId: str

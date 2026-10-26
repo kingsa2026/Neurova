@@ -149,7 +149,7 @@ SHARED_BUDGET_ENTRIES = frozenset({
     "callSites", "callNodes", "classDefsIn",
     # 一次性复合入口（枚举＋解析都在预算内做完，不留常驻树）：调用方拿不到
     # 任何"自己解析"的机会，故不计枚举也不计解析、且不下潜。
-    "shadowedTopLevelNames", "importersOfModule", "takenPerModule",
+    "shadowedTopLevelNames", "importersOfModule", "takenPerModule", "transientTrees",
 })
 #: 共享预算的**只枚举**入口：枚举（`rglob`）归共享，但解析仍由调用方自付。
 #: 故它算枚举落点 —— 配私有 `ast.parse` 仍须报出（否则它成了免检通道）。
@@ -1316,6 +1316,22 @@ class TestOneShotScanDoesNotRetainTrees:
             "一次性入口把语法树留进了 `_cachedParse`：保留的收益（跨判据复用）"
             f"只对重复扫描成立，成本却每次扫描都付（currsize {before} → {after}）。\n"
             "修法：一次性扫描走 `transientTree`，显式不留常驻树。"
+        )
+
+    def test_transientTrees_leaves_no_retained_trees_and_keeps_the_prefilter(self, tmp_path):
+        """交**树**的一次性入口：同样不留常驻树、同样吃预筛。
+
+        为什么必须有这一格：本档别处的判据要按"模块层语句"读结构，只拿节点表做不了；
+        没有这条入口，那些判据只能自己 `filesUnder` + `ast.parse` —— 那正是上一轮
+        受保护子集 30s 墙钟超时的形状（见 `TestNoUnprefilteredRepoWideScan`）。
+        """
+        (tmp_path / "hit.py").write_text("def f(x):\n    return x.attest()\n", encoding="utf-8")
+        (tmp_path / "miss.py").write_text("def f(x):\n    return x.other()\n", encoding="utf-8")
+        ast_scan._cachedParse.cache_clear()
+        seen = {p.name: tree for p, tree in ast_scan.transientTrees(tmp_path, hints=("attest",))}
+        assert set(seen) == {"hit.py"}, f"一次性树入口的预筛口径失效：{sorted(seen)}"
+        assert ast_scan._cachedParse.cache_info().currsize == 0, (
+            "`transientTrees` 留下了常驻语法树——它的语义就是『读一棵、丢一棵』"
         )
 
     def test_transientNodes_leaves_no_retained_trees(self, tmp_path):

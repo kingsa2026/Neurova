@@ -28,8 +28,8 @@ from __future__ import annotations
 import math
 from typing import Optional, Sequence
 
-__all__ = ["ZERO_NORM_EPSILON", "cosineScore", "cosineSimilarity", "tryCosineSimilarity",
-           "vectorDot", "vectorNorm", "vectorNormalize"]
+__all__ = ["ZERO_NORM_EPSILON", "cosineScore", "cosineSimilarity", "isZeroVector",
+           "tryCosineSimilarity", "vectorDot", "vectorNorm", "vectorNormalize"]
 
 #: 范数低于此值按"没有信息"处理。取 1e-12 而不是 0：`context/semantic_drawer` 今天就是用
 #: 这个阈值防 float32 噪声，沿用它可让那支点保持原读数；对真实嵌入（范数量级 1）无影响。
@@ -84,6 +84,19 @@ def cosineScore(vecA: Sequence[float], vecB: Sequence[float]) -> float:
     """
     raw = _rawCosine(vecA, vecB)
     return 0.0 if raw is None else (raw + 1) / 2
+
+def isZeroVector(vec: Optional[Sequence[float]]) -> bool:
+    """这条向量是不是"算不出来"（空／无分量／范数低于 `ZERO_NORM_EPSILON`）。
+
+    嵌入引擎在模型档缺席时会**兜底返回全零向量**而不是 None。零向量不是"两句不相似"的
+    证据，是"这一路没算出来"——按"有向量"处置，缺陷在读数里就完全不可见（余弦恒 0，
+    看上去只是"不相似"）。生产侧写库前要拿它拦下占位向量，判据侧要拿它区分
+    「环境缺件」与「代码不对」，两处必须同一个口径，故定义在这里。
+    """
+    if not vec:
+        return True
+    return vectorNorm(vec) <= ZERO_NORM_EPSILON
+
 
 def vectorNorm(vec: Sequence[float]) -> float:
     """范数。`_rawCosine` 不复用它——检索热路要一次遍历同时算点积与两条范数。"""

@@ -14,6 +14,7 @@ import datetime
 from neurova.core import config
 from neurova.core.logger import get_logger
 import secrets
+import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -131,6 +132,12 @@ def _write_secret_file(secret: str) -> None:
         logger.warning("Failed to save JWT secret: %s", e)
 
 
+#: 自动生成密钥的**进程内唯一值**：一旦本进程确定，就不再因"谁在什么时候读它"而变。
+#: 加锁的理由与全仓其余懒建单例同（AGENTS.md §3）：并发首取不加锁会各建一份。
+_generatedSecretKey: Optional[str] = None
+_generatedSecretLock = threading.RLock()
+
+
 def _load_or_create_secret_key() -> str:
     """
     加载或创建持久化 JWT Secret Key
@@ -142,8 +149,11 @@ def _load_or_create_secret_key() -> str:
 
     安全审计 M1: 环境变量来源的密钥强制强度校验；文件来源自动收紧权限。
     """
-    # 1. 环境变量
-    env_key = config.get("NEUROVA_JWT_SECRET")
+    # 1. 环境变量（两个名字都收：`NEUROVA_JWT_SECRET` 是部署侧
+    #    `deploy_config_consistency_check` 校验的那份；`NEUROVA_JWT_SECRET_KEY` 是全仓
+    #    60 余处测试与诊断脚本的注入名 —— 只认前者的那些年里，后者一字不响地被忽略，
+    #    于是"设了没生效"成了默认状态。两个名字都是密钥的**入口**，不是两份密钥。）
+    env_key = config.get("NEUROVA_JWT_SECRET") or config.get("NEUROVA_JWT_SECRET_KEY")
     if env_key:
         return _validate_secret(env_key)
 
@@ -165,13 +175,38 @@ def _load_or_create_secret_key() -> str:
             pass
 
     # 3. 自动生成
-    secret = secrets.token_hex(32)
-    _write_secret_file(secret)
-    return secret
+    #
+    # **进程内只生成一次，落盘失败也不例外。** 此前每次都 `token_hex()` 现生成，而
+    # 数据根不可写时（容器里目录还没就绪、只读挂载、权限不足）`_write_secret_file`
+    # 只留一行 warning 就返回，调用方照旧拿到一枚**新**密钥——于是"谁在什么时候取过
+    # 密钥"决定了他签出的 token 能不能被别处验过。实测（数据根不可写）：
+    #
+    #   同一进程连取三次 → 三个不同值；模块常量与任何一次重算都不相等。
+    #
+    # 这不是"多一枚缓存"，是同一件事只留一个答案（教义第 6 条）：落盘成功时下一进程
+    # 从文件读回同一枚；落盘失败时本进程内保持稳定。跨重启换一枚是没有持久化的既定
+    # 代价，但**同进程内签与验因此恒等**。
+    global _generatedSecretKey
+    with _generatedSecretLock:
+        if _generatedSecretKey is None:
+            _generatedSecretKey = secrets.token_hex(32)
+            _write_secret_file(_generatedSecretKey)
+        return _generatedSecretKey
+
+
+def currentJwtSecretKey() -> str:
+    """当前生效的签名/验签密钥 —— 取值口，幂等、不触发加载。
+
+    存在的理由只有一个：让"这一轮用的是哪把密钥"有**一处**可问、可断言。判据侧此前
+    各自抄一份常量（四份），台面上看不出谁的读法对；签名与验签又各读一处模块字典，
+    一旦分叉就表现为"本档刚签的令牌被自己拒"（401 / `Signature verification failed`）。
+    收成这一处之后，两边都从它取数。
+    """
+    return JWT_SECRET_KEY
 
 
 # JWT Secret Key — 从环境变量或自动生成的文件加载
-# 优先级: 环境变量 NEUROVA_JWT_SECRET > .jwt_secret 文件 > 自动生成
+# 优先级: 环境变量 NEUROVA_JWT_SECRET / NEUROVA_JWT_SECRET_KEY > .jwt_secret 文件 > 自动生成
 JWT_SECRET_KEY = _load_or_create_secret_key()
 
 
