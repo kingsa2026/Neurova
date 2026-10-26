@@ -597,6 +597,7 @@ export default {
     retryYieldWait: '并发额度让位中，{seconds} 秒后重试（第 {retry}/{max} 次）',
     upstreamSilence: '上游已静默 {seconds} 秒，仍在等待…',
     turnParked: '本轮已挂起，等待人工续跑',
+    turnStillRunning: '本轮仍在生成中',
     parkedPinnedModel: '模型钉住 {pinned}，本次请求 {requested}',
     rateLimitedNotice: '模型触发限流（429），已在输入框上方提供切换建议',
     resumeRun: '续跑',

@@ -591,6 +591,7 @@ export default {
     retryYieldWait: 'Ausweichen wegen Kontingent - erneuter Versuch in {seconds} s (Versuch {retry}/{max})',
     upstreamSilence: 'Keine Daten vom Upstream seit {seconds}s – es wird weiterhin gewartet…',
     turnParked: 'Diese Antwort ist geparkt - manuelle Fortsetzung erforderlich',
+    turnStillRunning: 'Diese Antwort wird noch erstellt',
     parkedPinnedModel: 'Gepinntes Modell {pinned}; diese Anfrage {requested}',
     rateLimitedNotice: 'Modell ratenbegrenzt (429); oben im Eingabebereich wird ein Wechsel vorgeschlagen',
     resumeRun: 'Fortsetzen',
