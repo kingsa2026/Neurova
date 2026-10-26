@@ -717,6 +717,14 @@ async def post_console_chat(
             经 event_emitter → 队列 → SSE 即时推送，不再等整轮结束。"""
             nonlocal reply, reasoning, tool_messages
 
+            # 会话归属当场告知：`session_id` 是这里分配的（客户端没带时），
+            # 但旧形态要等到 `done` 帧才回传——首轮流式期间客户端手里是空。
+            # 实测后果（2026-10-26 真浏览器）：断线重连以空 session_id 重新 POST，
+            # 服务端另行 create_session，落出一个 0 消息空会话与真回合分家；
+            # 刷新后的页面也找不回自己那一轮。分配点与告知点必须是同一处。
+            # 不进 live_events、不进时间线：它是传输层的归属声明，不是会话内容。
+            yield f"data: {json.dumps({'type': 'session', 'session_id': session_id})}\n\n"
+
             queue: asyncio.Queue = asyncio.Queue()
 
 # run 先落库（queued）再执行，同 session
@@ -1005,7 +1013,12 @@ async def post_console_chat(
             finally:
                 _buffer_replay_events(session_id, live_events)
                 try:
-                    result = await task
+                    # shield：这一处等待的是"另一件事"（后台回合本身），客户端断连带来的
+                    # 取消只该停投递。裸 `await task` 会把取消沿等待链带进 run_chat——
+                    # 实测断连时 run 的终态被写成 cancelled/stopped，票面「刷新后看不到
+                    # agent 持续的输出」因此不止读不回，而是那一轮根本没了。
+                    # 真停止（/chat/stop 经 task_tracker 直接 cancel）仍走下面的 cancelled 分支。
+                    result = await asyncio.shield(task)
                 except asyncio.CancelledError:
                     if task.cancelled():
                         # P0-2：stop 端点取消——SSE 以 stopped 事件收尾                        #（done 恒发，前端状态机正常收口）
