@@ -44,6 +44,16 @@
 | `tests/integration/test_evolution_unified.py` | `neurova.evolution.experience_caller`；`ToolWeightEntry` from `neurova.evolution` | `experience_feedback`；`AdaptiveToolWeights` | ⏸️ SKIPPED | 进化统一测试，部分名称已改 |
 | `tests/integration/test_full_conflict_integration.py` | `neurova.core.闭环_manager`（非法模块名） | 无 | 🗑️ REMOVED（§6-395） | 含明显错误的中文模块名；另引用零定义的 `MemoryConflictDetector`／`ConflictLevel`。链上四个死名字的"不许复活"见 `tests/unit/core/test_closedLoopChainRetired.py`；冲突检测性质由 `tests/unit/agent/test_conflict_detection_observation_only.py`、`test_conflict_ledger_member_identity.py`、`test_memory_guards_wiring.py` 与 `tests/unit/cognitive_layers/memory_layer/test_attributeConflictCriterion.py` 在守 |
 
+| `tests/performance/longmeval_simple.py` | 18 | 已退役（§6-393） | 🗑 文档提及 |
+| `scripts/demo_optimization.py` | 22 | 已退役（§6-393） | 🗑 文档提及 |
+| `tests/unit/memory/test_storage_comprehensive.py` | 25 | 已退役（§6-394） | 🗑 文档提及 |
+| `scripts/demo_closed_loop.py` | 30 | 已退役（§6-395） | 🗑 文档提及 |
+| `tests/integration/test_full_conflict_integration.py` | 30 | 已退役（§6-395） | 🗑 文档提及 |
+| `tests/integration/test_full_chain.py` | 52 | 已退役（§6-391） | 🗑 文档提及 |
+| `tests/unit/api/test_communication_protocol_comprehensive.py` | 62 | 已退役（被测模块已删） | 🗑 文档提及 |
+| `tests/unit/core/test_acp_server.py` | 66 | 文件已迁移 | 见第三节同名行 |
+| `neurova/skill_system.py` | 73 | 模块已拆分 | 见下文 skill 段 |
+
 ## 二、引用了"已改名/可修复"名称的测试（重写时修正 import，不算死测试）
 
 | 测试文件 | 错误引用 | 真实存在物 | 处理 |

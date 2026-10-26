@@ -19,8 +19,15 @@ P0-4 配置收敛 + 掩码红测（评测 M7/M10/M12）
 
 import os
 
-os.environ.setdefault("NEUROVA_JWT_SECRET", "test_secret_p0_4_convergence")
-os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_p0_4_convergence")
+# 前提自给，且**覆盖**而不是 setdefault：`neurova.api.auth` 在导入期按
+# 「环境变量 > .jwt_secret 文件 > 自动生成」取密钥，取到弱值就在生产口径下直接
+# RuntimeError（`_MIN_SECRET_LENGTH = 32`，未设 `NEUROVA_ENV`/`NEUROVA_DEBUG`
+# 时按生产 fail-closed）。本档的取值只有 28 字节，且 setdefault 会让**别处先落进
+# 环境里的任何弱值**（本机 `.env`、上一档的残留）生效 —— 那两条路都让整个文件在
+# 收集期变成 ERROR，13 格判据一条不跑，而报错读起来像认证模块坏了。
+# 故这里写死一个 ≥32 字节的专用密钥，不依赖宿主机环境。
+os.environ["NEUROVA_JWT_SECRET"] = "test_secret_p0_4_convergence_0123456789abcdef"
+os.environ["NEUROVA_JWT_SECRET_KEY"] = "test_secret_p0_4_convergence_0123456789abcdef"
 
 import re
 from types import SimpleNamespace

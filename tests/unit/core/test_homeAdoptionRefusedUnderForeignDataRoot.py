@@ -220,7 +220,10 @@ class TestHomeAdoptionHasExactlyOneGate:
                     func.attr if isinstance(func, ast.Attribute) else "")
                 if name == "legacyHomeLanding":
                     callers.add(py.relative_to(NEUROVA).as_posix())
-        assert callers == {"core/data_root.py"}, (
+        # 受治面是「取法」本身：`data_root.py` 定义它，`security/artifact_digest.py` 的
+        # 根外锚**只借这一处拼法、不搬任何东西**（它那处是新写点，不是收养端）。
+        # 判据按**取法的调用方**判，不按"谁 read 了 home"判——后者才是收养端各判一次的那一族。
+        assert callers == {"core/data_root.py", "security/artifact_digest.py"}, (
             "home 旧落点的取法出了一号仓库（各算一遍就是各判一次要不要搬）：\n%s"
             % sorted(callers)
         )

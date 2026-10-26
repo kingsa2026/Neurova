@@ -40,6 +40,7 @@ import os
 from pathlib import Path
 from typing import Callable, Dict, Iterator, Optional, Tuple
 
+from neurova.core import data_root
 from neurova.core.atomic_io import atomic_write_text, quarantine_corrupt_file
 from neurova.core.logger import get_logger
 
@@ -176,7 +177,7 @@ def checkArtifact(root, pinnedValue, anchorKey: Optional[str] = None) -> Tuple[s
     前者走 TOFU 首钉，后者是拒绝。把它们混成一格，要么存量全被挡在门外，
     要么换包永远看不见。
 
-    `anchorKey`（§6-388，票一甲①）：账本相符之后再看根外锚。锚**不是**防同权限攻击的
+    `anchorKey`（§6-388，票一甲①）：账本相符之后再看锚。锚**不是**防同权限攻击的
     （攻击者若同时改锚就失效），它防的是**整库替换/回滚**与"改完构件再把账本重钉一次"
     ——后者是本模块同根同权限那条边界的直接后果。锚里没有这个键 ⇒ 维持只读账本的旧读数
     （`unpinned` 的 TOFU 语义不变），是否要补锚由调用方决定，这里不悄悄写。
@@ -191,17 +192,17 @@ def checkArtifact(root, pinnedValue, anchorKey: Optional[str] = None) -> Tuple[s
     if anchorKey:
         anchorStatus = checkAnchor(anchorKey, actual)
         if anchorStatus == STATUS_MISMATCH:
-            logger.error("构件 %s 与根外锚不符（账本相符、锚不符）——按篡改处置", anchorKey)
+            logger.error("构件 %s 与锚不符（账本相符、锚不符）——按篡改处置", anchorKey)
             return STATUS_MISMATCH, actual
     return STATUS_MATCH, actual
 
 
-# ── 根外锚（§6-388，用户 2026-10-22 拍「甲①＋乙」）────────────────────────────
-#: 锚文件落点：**数据根之外**（`~/.neurova/`）。这是本仓第一处**新写**在数据根之外的状态，
-#: 理由只有一个：它要对"整个数据根被替换/回滚"敏感，所以不能跟数据根同生共死
-#: （审计库当年是反方向——从 `~/.neurova/audit.db` 收养**进**数据根，别把两件事读混）。
-#: 它**不**防同权限攻击：能改构件与账本的人通常也能改这里；能挡住的是"只改了数据根"的那些
-#: 操作（整库恢复、快照回滚、只重钉账本的重装）。边界必须与能力一起写，不许只吹能力。
+# ── 锚（§6-388，用户 2026-10-22 拍「甲①＋乙」）──────────────────────────────
+#: 锚文件落点：**数据根之外**（`~/.neurova/`，取法只有 `data_root.legacyHomeLanding()`）。
+#: 它要对"整个数据根被替换/回滚"敏感，所以不能跟数据根同生共死（§6-388 的用户裁定）。
+#: 它是账本之外的第二份记录——账本被**单独重钉**（改完构件再把账本改对）时，
+#: 锚里那份旧值仍是原值，比对就会显露出来。它**不**防同权限攻击：能改构件与账本的人
+#: 通常也能改这里。边界必须与能力一起写，不许只吹能力。
 ANCHOR_FILE_NAME = "artifact_anchors.json"
 ANCHOR_STORE_VERSION = 1
 #: 通道词汇唯一闭集：账本里两条通道（技能/插件）共用锚文件，键必须带通道前缀，
@@ -219,8 +220,17 @@ def artifactKey(channel: str, artifactId: str) -> str:
 
 
 def anchorPath() -> Path:
-    """锚文件路径（唯一一处）。测试一律 monkeypatch 本函数到临时目录，不碰真实主目录。"""
-    return Path.home().joinpath(".neurova", ANCHOR_FILE_NAME)
+    """锚文件路径（唯一一处）。测试一律 monkeypatch 本函数到临时目录。
+
+    主目录的拼法不在这里手写：`~/.neurova` 是**收养端**的旧落点语义，取法只有
+    `data_root.legacyHomeLanding()` 一处（本仓「家目录 = 一个锚点」的判据，见
+    `tests/unit/core/test_homeLandingMovedIntoDataRoot.py`）。本函数只是一处**新写**，
+    读的是同一个取法而不是另拼一份 `.neurova`。
+
+    **不落数据根**：锚要对"整个数据根被替换/回滚"敏感，跟数据根同生共死就等于没有锚
+    （§6-388 的用户裁定）。
+    """
+    return Path(data_root.legacyHomeLanding(ANCHOR_FILE_NAME))
 
 
 def readAnchors() -> Dict[str, str]:
@@ -232,12 +242,12 @@ def readAnchors() -> Dict[str, str]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception as e:  # noqa: BLE001
         quarantined = quarantine_corrupt_file(path)
-        logger.error("根外锚文件无法解析，已隔离现场 %s：%s（本轮按空锚起，不覆盖原文件）",
+        logger.error("锚文件无法解析，已隔离现场 %s：%s（本轮按空锚起，不覆盖原文件）",
                      quarantined, e)
         return {}
     if not isinstance(data, dict) or data.get("version") != ANCHOR_STORE_VERSION:
         quarantined = quarantine_corrupt_file(path)
-        logger.error("根外锚文件版本不认识（现值 %r，期望 %r），已隔离 %s——不做自动映射",
+        logger.error("锚文件版本不认识（现值 %r，期望 %r），已隔离 %s——不做自动映射",
                      data.get("version") if isinstance(data, dict) else "<非映射>",
                      ANCHOR_STORE_VERSION, quarantined)
         return {}
@@ -248,7 +258,7 @@ def readAnchors() -> Dict[str, str]:
 
 
 def recordAnchor(anchorKeyValue: str, digestValue: str) -> bool:
-    """把一枚摘要写进根外锚；失败回 False（调用方必须出声，不许当成已落锚）。"""
+    """把一枚摘要写进锚；失败回 False（调用方必须出声，不许当成已落锚）。"""
     anchors = readAnchors()
     anchors[anchorKeyValue] = str(digestValue)
     payload = {"version": ANCHOR_STORE_VERSION, "anchors": anchors}
@@ -257,7 +267,7 @@ def recordAnchor(anchorKeyValue: str, digestValue: str) -> bool:
         atomic_write_text(anchorPath(), json.dumps(payload, ensure_ascii=False, indent=2))
         return True
     except Exception as e:  # noqa: BLE001
-        logger.error("根外锚写入失败（%s）：%s", anchorKeyValue, e)
+        logger.error("锚写入失败（%s）：%s", anchorKeyValue, e)
         return False
 
 
