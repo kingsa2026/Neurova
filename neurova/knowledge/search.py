@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import threading
 from enum import Enum
 from typing import Any, Dict, List, Tuple
 
@@ -80,29 +81,81 @@ def _ngram_tokenize(text: str) -> List[str]:
     return [t for t in tokens if len(t) >= 2]
 
 
+#: 取用 jieba 的**唯一入口**（全仓）。jieba 的冷启动（`initialize()` 建前缀字典）
+#: 实测 0.5–0.8s，在 CI 那种多格并行的场子里被 GIL 争抢放大到 8s 以上（实测 8.1s 构建
+#: 字典 + 8.65s 首调），足以把一条 30s 的用例墙撞穿——`test_service_closed_loop` 三格就
+#: 这么在 CI 红过。故本入口在第一次取用时**当场把字典建好**，把成本收在调用方手里。
+#:
+#: 在此之前全仓有两份各调各的取用口：本模块的 `_get_jieba()` 与
+#: `neurova/evolution/eval/constraints._token_jaccard()` 里那句裸 `import jieba`。
+#: 前者只 `import`（字典仍是懒建），后者连 import 都不缓存——两处都能在"用例跑着跑着"
+#: 触发一次冷启动，谁也说不清那次抖动是谁付的账。按教义第 6/7 条收口到这里一份。
+_JIEBA_LOAD_LOCK = threading.RLock()
+_jieba: Any = None
+
+
+def warmJieba() -> bool:
+    """把字典**提前**建起来，返回是否可用（已在则直接返回，幂等）。
+
+    为什么必须有一个"提前付"的口，而不只留 `_get_jieba()`：DCL 解决的是"谁来建"，
+    解决不了"什么时候建"。首次取用就地建字典，成本就落在**首调方**的关键路径上，
+    而首调方是随机的。本机实测这笔成本对负载极度敏感（同一棵树）：
+
+    ```
+    空载首次 _get_jieba():                    0.56s
+    3 条抢 GIL 的线程并发时首次 _get_jieba():  92.30s     ← 30s 格墙的 3 倍
+    预热之后再取用:                            0.001s
+    ```
+
+    CI 的受保护子集正是"7953 格同进程 + `--cov` 插桩 + 多档并发"的场子。构建
+    `cnb-sq6-1k5q1kqrc#003` 里 7953 格全绿、唯一那条红是
+    `test_service_closed_loop::test_accept_produces_pending_proposal` 撞 30s 墙，
+    栈底停在 `_get_jieba() → _j.initialize() → gen_pfdict`：它是那场子里第一个切中文的
+    用例，替所有人付了这笔账。这正是台账 §6-408 那一族（冷启动＋抢 GIL）在取用口上的
+    残留——上一轮只把成本**收口**到一处，没有让它**提前**付。
+
+    **与「进化闸兜底支不用 jieba」是两条落点，不是两套口径**：本条管"真需要词级切分的
+    那条链"（`tokenize` → FTS/BM25），谁先走到都得有人先付；那条管"兜底的词面下界"，
+    那里压根不该挂可选依赖（判据
+    `tests/unit/ci/test_optionalImportWallOwedByLivePath.py`）。两处读到的是同一个
+    `_jieba`——不另设"暖没暖"的判断口（只读不写的判断等于第二份事实源）。
+
+    两处消费方（都在前提侧，不在被测代码里）：`tests/conftest.py` 的
+    `pytest_configure`（会话装配期）与需要显式暖机的脚本。失败按不可用记下、不抛。
+    """
+    return _get_jieba() is not None
+
+
 def _get_jieba() -> Any:
     """进程级惰性加载 jieba；不可用返回 None（调用方回退 n-gram）。
 
     缺席走 n-gram 是"失败方向"的弱化版（缺一个 jieba 维度的精度，不是检索坏掉），
     但**必须**留下 WARN 日志——否则升级 ABI / funasr 冲突卸载会让 FTS/BM25
-    静默回退，监控盲。"""
+    静默回退，监控盲。
+
+    双检锁 + 首次即建字典（见上面 `_JIEBA_LOAD_LOCK` 那段）：并发的第二个调用方等第一个
+    建完再返回，不会各自 `initialize()` 一次；建失败的按 `False` 记下来，不反复重试。
+    """
     global _jieba
     if _jieba is not None:
         return _jieba if _jieba is not False else None
-    try:
-        import jieba as _j
+    with _JIEBA_LOAD_LOCK:
+        if _jieba is not None:
+            return _jieba if _jieba is not False else None
+        try:
+            import jieba as _j
 
-        _j.setLogLevel(logging.WARNING)
-        _jieba = _j
-    except Exception as exc:  # noqa: BLE001 — 可选依赖，缺席走回退
-        _jieba = False
-        logger.warning(
-            "知识库 jieba 不可用，FTS/BM25 静默回退 n-gram（中文检索精度降级）: %s", exc
-        )
+            _j.setLogLevel(logging.WARNING)
+            # 字典在这里一次建完：调用方拿到的就是"可直接切"的实例，
+            # 不会在后续某条无关键上付这笔冷启动。
+            _j.initialize()
+            _jieba = _j
+        except Exception as exc:  # noqa: BLE001 — 可选依赖，缺席走回退
+            _jieba = False
+            logger.warning(
+                "知识库 jieba 不可用，FTS/BM25 静默回退 n-gram（中文检索精度降级）: %s", exc
+            )
     return None if _jieba is False else _jieba
-
-
-_jieba: Any = None
 
 
 def tokenize(text: str) -> List[str]:

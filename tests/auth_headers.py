@@ -29,7 +29,11 @@ from neurova.api.auth import create_access_token
 
 def bearerHeaders(sub: str = "probe-user", **claims: Any) -> Dict[str, str]:
     """签发一枚真 token 并包成请求头（`sub` 即租户键 user_id）。"""
-    token = create_access_token(data={"sub": sub, **claims})
+    # 走模块对象调用，不用模块级再导出的那个函数对象："这一轮是哪把密钥"的答案只有
+    # `auth.currentJwtSecretKey()` 一处，判据要断也断这一处（不再各读各的副本）。
+    from neurova.api import auth as auth_mod
+
+    token = auth_mod.create_access_token(data={"sub": sub, **claims})
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -109,3 +113,68 @@ def overrideIdentity(app, identity: Any) -> None:
         snapshot = dict(identity)
         provider = lambda: dict(snapshot)
     app.dependency_overrides.update({fn: provider for fn in targets})
+
+
+#: ── 本轮签名密钥的唯一事实源 ────────────────────────────────────────────────
+#: 生产侧 `neurova/api/auth.py:175` 把密钥烘在模块全局，签发（`create_access_token`）
+#: 与验签（`verify_access_token` 与各身份门）都读**自己模块字典**里的那一份。
+#: 于是只要进程里出现过第二份 auth 模块字典（`deps` 再导出的身份门、夹具重载、
+#: 别的档改了全局），两侧就各持一把密钥 —— 形态恰好是"本档刚签发的令牌被自己拒"：
+#: `401 Invalid or expired token`，而单跑与邻档合跑都绿。
+#:
+#: 判据侧的处置不许是"每个档各自把密钥抄一遍"（那是第二份、第三份事实源，
+#: 台面上谁先跑谁说了算），也不许给生产加兜底（教义第 1 条：症状挪走，故障还在）。
+#: 收成这一处：**这一轮用的是哪把密钥**，由这里回答一次；令牌在用例内现签。
+#:
+#: 为什么认"函数对象的 `__globals__`"而不是逐个模块名：门是函数对象，它读的是
+#: 自己被定义时绑定的那份模块字典。改 `auth.JWT_SECRET_KEY` 对一份已经分叉出去的
+#: 字典无效 —— 那正是本仓反复踩红的那个缺口。
+#:
+#: 可达性边界（不假装能管别人）：已经**导出的名字**（`from neurova.api.auth import
+#: JWT_SECRET_KEY`）拿到的是那一刻的字符串，这里改不到它；本仓判据面没有这种写法，
+#: 将来有了它自己会红，不会被静默放过。
+_TEST_SECRET = "test_secret_key_shared_by_the_identity_gates_0123456789"
+
+#: 身份门名册：`auth` 与 `deps` 两侧的同名对象都要打（`deps` 那份是再导出，
+#: 同一对象只打一次 —— 但名字表要保持宽，将来多一条入口时这里自动跟上）。
+_GATE_NAMES = ("strictIdentityGate", "get_current_user", "get_current_userWithQueryToken",
+               "get_optional_user", "get_optional_userWithQueryToken",
+               "get_current_user_or_default", "verify_access_token")
+
+
+def _signingGates() -> list:
+    """当前仓内**全部**读密钥的入口函数对象（运行时现值，不抄名单）。"""
+    from neurova.api import auth as auth_mod
+    from neurova.api import deps as deps_mod
+
+    found, seen = [], set()
+    for module in (auth_mod, deps_mod):
+        for name in _GATE_NAMES:
+            fn = getattr(module, name, None)
+            if callable(fn) and id(fn) not in seen:
+                seen.add(id(fn))
+                found.append(fn)
+    return found
+
+
+def pinJwtSecret(secret: str = _TEST_SECRET) -> str:
+    """把签发侧与全部验签门的密钥对齐到 `secret`，返回它。
+
+    幂等：已经是这一把时什么都不做。返回值的用途是让调用方写
+    `token = create_access_token(..., ) if pinJwtSecret() else ...` 这类链式取用，
+    但**不要在导入期烘一枚令牌** —— 令牌属于"这一轮"，不属于"这个进程"。
+    """
+    from neurova.api import auth as auth_mod
+
+    if auth_mod.JWT_SECRET_KEY != secret:
+        auth_mod.JWT_SECRET_KEY = secret
+    for gate in _signingGates():
+        if gate.__globals__.get("JWT_SECRET_KEY") != secret:
+            gate.__globals__["JWT_SECRET_KEY"] = secret
+    return secret
+
+
+def signedBearerHeaders(sub: str = "probe-user", **claims: Any) -> Dict[str, str]:
+    """先对齐本轮密钥、再现签一枚真 token —— 两侧同源，用例内取用。"""
+    pinJwtSecret()
+    return bearerHeaders(sub, **claims)

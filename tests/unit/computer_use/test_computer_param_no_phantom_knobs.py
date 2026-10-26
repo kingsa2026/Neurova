@@ -95,7 +95,14 @@ def _sweepReadCounts() -> dict:
         for shape in _READ_SHAPES
     ]
     counts: dict = dict.fromkeys(_advertisedNames(), 0)
-    for ref in ast_scan.sourceRefsUnder(PROD_ROOT, ".py"):
+    refs = ast_scan.sourceRefsUnder(PROD_ROOT, ".py")
+    scanned = len(refs)
+    # 面自证：根被改窄时下面几个格子的读数会缩成「零残留」「零命中」而不是红
+    # （该形态由 `tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py` 点名）。
+    assert scanned > 500, (
+        f"生产语料现读 {scanned} 个文件（根＝{PROD_ROOT}）——面量级不对＝根指错，"
+        "「零残留」不来自代码")
+    for ref in refs:
         if ref.path.name == "builtin_tools.py":
             continue
         text = ref.code
@@ -114,6 +121,12 @@ class TestPhantomKnobSweep:
         assert "max_marks" not in str(_BUILTIN_SCHEMAS)
         assert "max_marks" not in str(_COMPUTER_TOOL_PARAM_KEYS)
         # hints 预筛是充分条件：连 "max_marks" 这七个字节都没出现的文件不可能命中
+        # 面自证走**未预筛**的根：`max_marks` 已被删干净，按它预筛的语料本来就该是 0，
+        # 拿它当"面"等于用命中数证面（与本档要防的假绿同形）。
+        corpus = len(ast_scan.filesUnder(PROD_ROOT, ".py"))
+        assert corpus > 500, (
+            f"生产语料现读 {corpus} 个文件（根＝{PROD_ROOT}）——面量级不对＝根指错，"
+            "「零残留」不来自代码")
         leftovers = [
             ref.path.relative_to(REPO).as_posix()
             for ref in ast_scan.sourceRefsUnder(PROD_ROOT, ".py", hints=("max_marks",))
@@ -130,6 +143,10 @@ class TestPhantomKnobSweep:
 
     def test_noAdvertisedParamIsUnread(self):
         """治理面每个工具的每个广告参数，都必须有读取点。"""
+        # 面自证：先证这次真扫到了生产树，再谈"每个参数都有读取点"——
+        # 根被改窄/改空时，计数全零会被下一条的"幻影旋钮"读成满盘红或缺席，两种都不是事实。
+        scanned = len(ast_scan.filesUnder(PROD_ROOT, ".py"))
+        assert scanned > 100, f"扫描面现读 {scanned} 个 .py（根＝PROD_ROOT）——根指错时判据不来自代码"
         counts = _sweepReadCounts()
         unread = []
         for tool in sorted(COMPUTER_USE_TOOLS):
@@ -161,8 +178,9 @@ class TestPhantomKnobSweep:
           （自己 `read_text` 的话，缓存计数一动不动，只看第一条就漏放行）。
         """
         corpus = len(ast_scan.filesUnder(PROD_ROOT, ".py"))
-        assert corpus >= 800, (
-            "生产语料现读 %d 个 .py——PROD_ROOT 指错时『没多读盘』会假绿（面自证）" % corpus)
+        assert corpus > 500, (
+            f"生产语料现读 {corpus} 个文件（根＝{PROD_ROOT}）——面量级不对＝根指错，"
+            "下面两条缓存读数都不来自代码")
         cache = ast_scan._cachedCode
         if not hasattr(cache, "cache_info"):
             pytest.fail("ast_scan._cachedCode 不再是带 cache_info 的缓存入口——"
