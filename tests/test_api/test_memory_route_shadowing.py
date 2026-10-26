@@ -134,7 +134,11 @@ class _FakeState:
 def env(monkeypatch):
     agent = SimpleNamespace(memory_manager=_FakeMemoryManager())
     monkeypatch.setattr("neurova.api.app.get_app_state", lambda: _FakeState(agent))
-    return TestClient(_make_app()), agent
+    # 记忆面读写一律要凭证（2026-10-26 点单甲，门挂在 router 级一处）。本文件测的是
+    # **路由匹配与错误语义**，匿名与否不是它的被测面——留在默认头里带一枚真 JWT，
+    # 让请求能进到 handler；"匿名必须 401"由
+    # `tests/integration/test_memoryFaceRejectsAnonymous.py` 逐条钉。
+    return TestClient(_make_app(), headers=WRITE_HDR), agent
 
 
 # ============================================================
@@ -257,7 +261,7 @@ def test_get_memory_stats_returns_200(env):
 
 def test_get_emotion_types_returns_200():
     """/emotion/types 不得因导入不存在的 EMOTION_WEIGHTS 而 500"""
-    client = TestClient(_make_app())
+    client = TestClient(_make_app(), headers=WRITE_HDR)
     resp = client.get("/api/v1/memory/emotion/types")
     assert resp.status_code == 200, resp.text
     body = resp.json()

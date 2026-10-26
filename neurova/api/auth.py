@@ -640,27 +640,34 @@ def _user_identity(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-_READ_ONLY_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-
-
-async def requireIdentityForWrites(
-    request: Request,
+async def requireIdentityForMemoryFace(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> Dict[str, Any]:
-    """写类请求必须**带凭证**；读类请求原样放行（匿名读仍只见 default 桶）。
+    """记忆面的**任何**方法都必须带凭证；无凭证一律 401，不再按读/写分岔。
 
-    为什么挂在这一处而不是逐个 handler 上：政策 2026-10-06 定的是"匿名共享 default 桶
-    可以，但租户键必须是 user_id"——那是**读**侧语义。写侧沿用同一条回落等于把
-    "共享桶"当成"无人看守的桶"：任何访客都能往同一个 `default` 租户里增删改，
-    事后既无从对账也无从撤销（§6-1 身份批修的是"跨租户越权"，这一格是同一条链上
-    "匿名可写"的另一半）。
+    来历：这道门 2026-10-08 建出来时只管写类方法，理由是政策 2026-10-06 记的
+    "匿名共享 default 桶可以，但租户键必须是 user_id"只对读成立。本批把读侧一起收进来，
+    依据是 2026-10-26 的两条实测：
 
-    形态上刻意不做"依赖严格门本体"：路由级依赖对 GET 也会解析，那样会把政策要留的
-    匿名读一起打死；凭证→身份这一步也不自解，直接调 `get_current_user` 用的同一份
-    `_identityFromCredentialsOr401`，只是**只对写类方法**调用它。
+    - 无凭证 `GET /api/v1/memory?agent_id=default` 与 `/hot` 各返回 **24 行正文**
+      （含 `('default','ne-alice','alice')` 那 9 行他人作用域记忆）；
+      逐条枚举后，记忆面 31 条 GET 里 **23 条**取租户数据的腿对匿名敞开，`/markdown`
+      匿名导出 12285 字本机内容。
+    - `start_server.py:70` 与 `neurova/api/app.py` 的默认监听都是 `0.0.0.0`，
+      实测从本机局域网地址直接 200 出正文。
+
+    两条叠起来，"匿名读 default 桶"不是本地便利，而是**同网段任一设备无凭据读走全部
+    会话转写**的入口。更要紧的是：列表腿传 `agent_wide=True`（不比 neuser/user），
+    所以回落的那个 `default` 身份在实现上根本没人比对——政策承诺的"只见 default 桶"
+    在这条腿上一个字节都没被执行过。
+
+    为什么仍挂在 router 级一处、而不是逐条 handler 换依赖：现算 29 条处理器里出现
+    `get_memory_manager(` 的 GET 腿。逐条改既是巨大改动，又让"下一条新路由忘了改"
+    静默复现本缺陷（这正是本仓 consumer-side guard 反指的那类形态）。门只有一道，
+    覆盖面就是"这个门面"。
+
+    凭证→身份不自解：复用 `get_current_user` 用的同一份 `_identityFromCredentialsOr401`。
     """
-    if request.method in _READ_ONLY_METHODS:
-        return _DEFAULT_USER.copy()
     return _identityFromCredentialsOr401(credentials)
 
 
@@ -668,9 +675,10 @@ async def requireIdentityForWrites(
 #: 判据 `tests/unit/api/test_memoryWriteIdentityGate.py` 双向钉：清单里的名字必须
 #: 真实存在，memory 包实际 import 的门必须都在清单内——第五道门自己长出来时会红。
 #:
-#: 为什么只有两道：政策 2026-10-06 记的是"读侧匿名可落 default 桶"（→
-#: `get_current_user_or_default`）与"租户键必须是 user_id"（→ 严格门
-#: `get_current_user`，写侧由 `requireIdentityForWrites` 复用它那份解析）。
+#: 为什么只有两道：政策记的是"租户键必须是 user_id"（→ 严格门 `get_current_user`），
+#: 而"无凭证回落 default"这条读侧语义**只在记忆面之外还留着**——记忆面 2026-10-26 起
+#: 由路由级的 `requireIdentityForMemoryFace` 一律要凭证，回落在这道门前面到不了 handler
+#: （撤销依据见该函数 docstring 里的两条实测）。
 #: 其余门（`WithQueryToken` / `or_api_key` / `or_service`）在全仓各有其用，
 #: 但**记忆面一条都不该用**：查询串凭证会把 token 落进 URL 与访问日志，而
 #: `X-Service-Token` 那条经 `semantic_search_api.py:114` 读记忆语料是**另一个面**
@@ -695,9 +703,15 @@ async def get_current_user_or_default(
     - 有凭证但无效 → 401（与 get_current_user 同契约）。
 
     2026-10-08 记一格边界（P3-12 拍板"跨租户不可读"）：上面那条"无凭证回落 default"
-    只对**读**成立。写类请求走 `requireIdentityForWrites`（同一条凭证链、同一份
+    只对**读**成立。写类请求走路由级那道身份门（同一条凭证链、同一份
     `_identityFromCredentialsOr401`），因为"共享 default 桶"不等于"无人看守的桶"——
     匿名写等于任何人都能改同一份数据，只是没人能对账。
+
+    2026-10-26 再收一格（点单甲）：**记忆面连读侧也不再回落**。实测无凭证
+    `GET /api/v1/memory?agent_id=default` 出 24 行正文、列表腿传 `agent_wide=True`
+    不比 neuser/user ⇒ "只见 default 桶"这句在记忆面从未被执行过；而默认监听 `0.0.0.0`
+    把它变成同网段任一设备可读。记忆 router 现在整面挂
+    `requireIdentityForMemoryFace`，本依赖的回落语义在其它面按各自政策保留。
     """
     if not credentials:
         return _DEFAULT_USER.copy()

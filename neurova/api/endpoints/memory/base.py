@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
-from neurova.api.auth import requireIdentityForWrites
+from neurova.api.auth import requireIdentityForMemoryFace
 from neurova.interfaces.api_standard import (
     APIError,
     ErrorCodes,
@@ -20,12 +20,15 @@ from neurova.interfaces.api_standard import (
 
 logger = get_logger(__name__)
 
-# 写类请求（POST/PUT/PATCH/DELETE）必须有可验证身份——门挂在**这一个点**上：
+# 记忆面的**任何**方法都必须有可验证身份——门挂在**这一个点**上：
 # 本包 11 个子模块全部 `from .base import router` 注册到同一个 APIRouter
 # （见 `memory/__init__.py` 的注册顺序注释），所以这里加一次即覆盖全门面，
-# 不需要在 26 个写 handler 上各补一遍判空（那是 consumer-side guard）。
-# 匿名**读**仍落 default 桶（2026-10-06 政策），本行不改读侧语义。
-router = APIRouter(tags=["记忆管理"], dependencies=[Depends(requireIdentityForWrites)])
+# 不需要在 29 条取租户数据的 GET 腿上各补一遍判空（那是 consumer-side guard，
+# 而且下一条新路由忘了改就静默复现）。
+# 读侧匿名回落 2026-10-26 撤销：实测无凭证 `GET /memory?agent_id=default` 出 24 行
+# 正文（含他人用户域），而列表腿传 agent_wide=True ⇒ 政策承诺的"只见 default 桶"
+# 从来没被执行过。语义与理由见 `auth.requireIdentityForMemoryFace`。
+router = APIRouter(tags=["记忆管理"], dependencies=[Depends(requireIdentityForMemoryFace)])
 
 # ============================================================
 # 辅助函数
