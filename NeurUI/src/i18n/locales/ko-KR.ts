@@ -757,6 +757,8 @@ export default {
     originUntrusted: '외부(신뢰 없음)',
     originSystem: '시스템',
     originUntrustedTip: '이 기억은 외부 웹 콘텐츠에서 왔으며 가중치가 낮아집니다',
+    foreignScope: '다른 사용자 영역',
+    foreignScopeTip: '이 기억은 이 에이전트의 다른 사용자 영역에 속합니다. 열기·편집·망각·삭제는 서버에서 거부됩니다',
     pendingQueue: '확인 대기 메모리',
     pendingEmpty: '확인 대기 중인 메모리가 없습니다',
     pendingConfirm: '확인 후 저장',

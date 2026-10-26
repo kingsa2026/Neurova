@@ -757,6 +757,8 @@ export default {
     originUntrusted: 'बाहरी (अविश्वसनीय)',
     originSystem: 'सिस्टम',
     originUntrustedTip: 'यह स्मृति बाहरी वेब सामग्री से है और इसका भार कम है',
+    foreignScope: 'अन्य उपयोगकर्ता डोमेन',
+    foreignScopeTip: 'यह स्मृति इस एजेंट के अन्य उपयोगकर्ता डोमेन की है; खोलना, संपादन, विस्मरण और हटाना सर्वर अस्वीकार करेगा',
     pendingQueue: 'पुष्टि प्रतीक्षित स्मृतियाँ',
     pendingEmpty: 'पुष्टि हेतु कोई स्मृति नहीं',
     pendingConfirm: 'पुष्टि करें',

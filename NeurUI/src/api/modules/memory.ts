@@ -61,6 +61,13 @@ export const MEMORY_CATEGORY_VALUES: ReadonlyArray<string> = [
 export interface MemoryEntry {
   id: string
   agent_id: string
+  /**
+   * 这一行归不归当前登录作用域（后端 `owned`，取源＝读写闸门那条三层隔离判定）。
+   * 列表面按 agent 全量放行，本 agent 下其他用户域的行也在同一张表里，而详情/改/删
+   * 对它们一律「视同不存在」——不给这条披露，页面就会摆出点下去必 404 的按钮。
+   * 后端只给布尔，不给 neuser_id/user_id：归属身份不上线上。
+   */
+  owned?: boolean
   content: string
   type: MemoryTypeValue
   category?: string
@@ -464,9 +471,16 @@ export function getMemories(
   })
 }
 
-/** Get a single memory. */
-export function getMemory(id: string) {
-  return api.get<ApiResponse<MemoryEntry>>(`${BASE}/${id}`)
+/** Get a single memory.
+ *
+ * `agentId` 取**行自带的 `record.agent_id`**：后端 `get_memory_manager` 缺这个参数就
+ * 回落默认 Agent，于是选中非默认 Agent 时按 id 寻址必然打到错的 manager 上
+ * （活体实证：`GET /memory/mem_000001` 404，`GET /memory/mem_000001?agent_id=kai` 200）。
+ */
+export function getMemory(id: string, agentId?: string) {
+  return api.get<ApiResponse<MemoryEntry>>(`${BASE}/${id}`, {
+    params: agentId ? { agent_id: agentId } : undefined,
+  })
 }
 
 /** Create a memory. */
@@ -474,14 +488,28 @@ export function createMemory(data: MemoryCreatePayload, agentId?: string) {
   return api.post<ApiResponse<MemoryEntry>>(BASE, data, { params: agentId ? { agent_id: agentId } : undefined })
 }
 
-/** Update a memory. */
-export function updateMemory(id: string, data: Partial<MemoryCreatePayload>) {
-  return api.put<ApiResponse<MemoryEntry>>(`${BASE}/${id}`, data)
+/** Update a memory. 同 `getMemory`：不带 agent_id 就改不到别的 Agent 的行。 */
+export function updateMemory(id: string, data: Partial<MemoryCreatePayload>, agentId?: string) {
+  return api.put<ApiResponse<MemoryEntry>>(`${BASE}/${id}`, data, {
+    params: agentId ? { agent_id: agentId } : undefined,
+  })
 }
 
-/** Delete a memory. */
-export function deleteMemory(id: string) {
-  return api.delete<ApiResponse<null>>(`${BASE}/${id}`)
+/** Delete a memory. 同 `getMemory`。 */
+export function deleteMemory(id: string, agentId?: string) {
+  return api.delete<ApiResponse<null>>(`${BASE}/${id}`, {
+    params: agentId ? { agent_id: agentId } : undefined,
+  })
+}
+
+/**
+ * 这一行动得了吗 —— 唯一的取源是后端逐条给的 `owned`，页面不得再猜一遍归属。
+ *
+ * 只有显式 `false` 才禁：别的列表腿（语义搜索卡片、按情绪查询）还没上这条披露，
+ * 把「没披露」读成「不能动」会把这些列表打成人人禁用。
+ */
+export function rowIsActionable(row: Pick<MemoryEntry, 'id'> & { owned?: boolean }): boolean {
+  return row.owned !== false
 }
 
 /** Get memory statistics. */

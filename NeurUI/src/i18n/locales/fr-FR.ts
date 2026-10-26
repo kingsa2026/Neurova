@@ -757,6 +757,8 @@ export default {
     originUntrusted: 'Externe (non fiable)',
     originSystem: 'Système',
     originUntrustedTip: 'Ce souvenir provient d’un contenu web externe et est pondéré à la baisse',
+    foreignScope: 'Autre domaine utilisateur',
+    foreignScopeTip: 'Ce souvenir appartient à un autre domaine utilisateur de cet agent ; ouverture, modification, oubli et suppression sont refusés par le serveur',
     pendingQueue: 'Mémoires en attente',
     pendingEmpty: 'Aucune mémoire à confirmer',
     pendingConfirm: 'Confirmer',

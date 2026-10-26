@@ -757,6 +757,8 @@ export default {
     originUntrusted: 'خارجي (غير موثوق)',
     originSystem: 'النظام',
     originUntrustedTip: 'هذه الذاكرة من محتوى ويب خارجي وتم تقليل وزنها',
+    foreignScope: 'نطاق مستخدم آخر',
+    foreignScopeTip: 'هذه الذاكرة تنتمي إلى نطاق مستخدم آخر ضمن هذا الوكيل؛ سيرفض الخادم فتحها أو تعديلها أو نسيانها أو حذفها',
     pendingQueue: 'ذكريات بانتظار التأكيد',
     pendingEmpty: 'لا توجد ذكريات بانتظار التأكيد',
     pendingConfirm: 'تأكيد',
