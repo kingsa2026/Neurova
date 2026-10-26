@@ -68,7 +68,7 @@ class TestMemoryUpdateEndpoint:
                     mem.content = kw["content"]
                 return True
 
-            def get_memory(self, mid):
+            def get_memory(self, mid, **kwargs):  # agent_wide 口径透传（接口演进同步）
                 # 端点的读回口已从 `storage.get`（全仓零写入方）改到
                 # `manager.get_memory`（带 P1-6 归属校验），桩随之改这份契约
                 return mem.to_dict() if mid == "m1" else None
@@ -88,7 +88,7 @@ class TestMemoryUpdateEndpoint:
             def update_memory(self, mid, **kw):
                 return False
 
-            def get_memory(self, mid):
+            def get_memory(self, mid, **kwargs):  # agent_wide 口径透传（接口演进同步）
                 return None
 
         client = _client(memory_router, "/mem")
@@ -101,7 +101,7 @@ class TestMemoryUpdateEndpoint:
             def update_memory(self, mid, **kw):  # pragma: no cover - 不应到达
                 raise AssertionError("空 body 不得触达 manager")
 
-            def get_memory(self, mid):  # pragma: no cover - 不应到达
+            def get_memory(self, mid, **kwargs):  # pragma: no cover - 不应到达
                 raise AssertionError("空 body 不得触达 manager")
 
         client = _client(memory_router, "/mem")

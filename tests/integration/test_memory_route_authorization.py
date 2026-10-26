@@ -132,9 +132,20 @@ class TestMemoryIdentityIsSingleSource:
         """判据取"这个端点会不会拿到租户数据"这个可核实的事实：
         处理器里出现 `get_memory_manager(` 的路由，身份必须来自依赖。
         （不写"全部路由都算"——`/emotion/types` 只回静态枚举，硬套依赖就成了
-        无人消费的装饰参数。）"""
+        无人消费的装饰参数。）
+
+        口径 2026-10-26 放宽过一次**前提**（不是放宽闸）：管理通道
+        `/management/{memory_id}` 的身份来自 `deps.require_admin()` 那条链上的**严格门**
+        `get_current_user`，而不是本文件当初唯一认的 `get_current_user_or_default`。
+        继续只认后者，就会把"取身份更严格"的那条路判成没鉴权。取源改为运行时现枚举
+        的全部身份入口（`tests/auth_headers._identityEntryPoints`，仓内为此事的单点），
+        入口再加一条时这里自动跟上。"严格到什么程度"由下一格单独钉。
+        """
         import inspect
 
+        from tests.auth_headers import _identityEntryPoints
+
+        identityEntries = set(_identityEntryPoints())
         offenders = []
         for route in memoryRouter.routes:
             src = inspect.getsource(route.endpoint)
@@ -149,7 +160,35 @@ class TestMemoryIdentityIsSingleSource:
                 if getattr(dep, "call", None) is not None:
                     calls.append(dep.call)
                 stack.extend(getattr(dep, "dependencies", []) or [])
-            if auth_mod.get_current_user_or_default not in calls:
+            if not identityEntries.intersection(calls):
                 offenders.append(f"{sorted(getattr(route, 'methods', []) or [])} {route.path}")
 
         assert offenders == [], "以下取租户数据的内存端点没有鉴权依赖：\n" + "\n".join(sorted(offenders))
+
+    def test_managementRoutesResolveIdentityThroughTheStrictGate(self):
+        """反向钉住上一条放宽的方向：管理通道必须取**严格门**那份身份。
+
+        上一格把"认哪一个函数"改成"认入口集合"，这一格保证集合里的宽松那份
+        （可回退 `?access_token=` 的那条策略）不能顶替严格那份——跨用户特权面
+        不该有一条能从 URL 参数带身份的入口。
+        """
+        management = [
+            r for r in memoryRouter.routes if r.path == "/management/{memory_id}"
+        ]
+
+        assert management, "管理通道路由不在册（本格失去被测对象即红）"
+        offenders = []
+        for route in management:
+            calls = []
+            stack = list(getattr(route, "dependencies", []) or [])
+            if getattr(route, "dependant", None) is not None:
+                stack.append(route.dependant)
+            while stack:
+                dep = stack.pop()
+                if getattr(dep, "call", None) is not None:
+                    calls.append(dep.call)
+                stack.extend(getattr(dep, "dependencies", []) or [])
+            if auth_mod.get_current_user not in calls:
+                offenders.append(f"{sorted(getattr(route, 'methods', []) or [])}")
+
+        assert offenders == [], f"以下管理通道端点没走严格身份门：{offenders}"
