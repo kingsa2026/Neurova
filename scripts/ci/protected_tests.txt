@@ -1758,8 +1758,20 @@ tests/unit/core/test_agentRunStoreParkedStatus.py
 # except 处理器里因 NameError 顶掉原始异常，正是被这两格抓回来的。
 # 逐文件单跑 4 passed（两次同读数）
 tests/unit/agent/test_failedTurnLandsInSession.py
-# 逐文件单跑 3 passed（两次同读数）
+# 逐文件单跑 4 passed（两次同读数；§6-423 追加「无订阅者也要起回合」一格后回填）
 tests/unit/api/test_consoleTurnOutlivesItsResponse.py
+# 失败落点的单源性扫荡（教义第 5 条：同一根因的命中面要闭环）：落点修在
+# `ChatPipeline.execute` 的异常路径，选这层的理由是四入口共用——本档把这条理由钉住，
+# 不默认它长绿：①`chat_pipeline.execute(` 全仓生产调用点恰 1 处（在 `Agent.chat`；
+# 多一处就是有人开了绕过落点的旁路）；②`Agent.chat_stream` 必须委托 `self.chat`
+# 而非自起管线（移动配对走的就是它）；③失败路径只许调单点 `_step_save_session`，
+# 出现第二份写会话的调用即红；④行为级：`chat_stream` 那一支失败后，会话里仍有权威
+# 落点；⑤反向控制：`save_memory=False` 的轮（蜂群内部派生等）按设计不落盘。
+# 两条形状判据一律走 AST——按行匹配会撞 docstring 里的路标句（本档初版就把
+# `objective_evidence.py` 的 Args 段误当成第二个调用点）。
+# 逐文件单跑 5 passed（两次同读数；变异探针各只红该红：多一处 execute 红①、
+# 打偏的 sed 改到 1242 行时判据正确地不动、按行号改到 1773 才红②④）
+tests/unit/agent/test_failureLandingSingleSourceAcrossEntries.py
 # 逐文件单跑 4 passed（两次同读数）
 tests/unit/api/test_consoleStreamDisconnectKeepsTurn.py
 # 逐文件单跑 8 passed
