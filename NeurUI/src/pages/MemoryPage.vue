@@ -915,9 +915,10 @@ const handleReloadMemories = async () => {
 const handleStrengthen = async (record: MemoryEntry) => {
   if (!rowIsActionable(record)) return
   try {
-    // /memory-enhancement 那一族按 id 寻址不带 agent_id（后端也没这个参数），
-    // 非默认 Agent 的行会被打到默认 Agent 上——已登记台账另拍，本批不在此处猜作用域。
-    await memoryApi.strengthenMemory(record.id, 0.2, 'Manual strengthen from UI')
+    // 作用域取**这一行自带的** agent_id（与 §6-425 已裁的读改删腿一字同规）：
+    // 记忆 id 是每个 Agent 库各一套的 `mem_%06d`，少带这一个参数就会改掉另一个库里
+    // 同 id 的行——不是"按钮失灵"，是静默写错记录。
+    await memoryApi.strengthenMemory(record.id, 0.2, 'Manual strengthen from UI', record.agent_id)
     message.success(t('memory.strengthen') + ' ✓')
     await fetchMemories()
     await fetchStats()
@@ -929,7 +930,7 @@ const handleStrengthen = async (record: MemoryEntry) => {
 const handleForget = async (record: MemoryEntry) => {
   if (!rowIsActionable(record)) return
   try {
-    await memoryApi.forgetMemory(record.id, 'Manual forget from UI')
+    await memoryApi.forgetMemory(record.id, 'Manual forget from UI', 0.3, record.agent_id)
     message.success(t('memory.forget') + ' ✓')
     await fetchMemories()
     await fetchStats()
@@ -940,7 +941,7 @@ const handleForget = async (record: MemoryEntry) => {
 
 const handleExport = async () => {
   try {
-    const res = await memoryApi.exportMemories({ format: 'json' })
+    const res = await memoryApi.exportMemories({ format: 'json' }, agentId.value)
     const data = (res as any)?.data ?? res
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -967,7 +968,7 @@ const handleImport = async () => {
       message.error('JSON must be an array of memory objects')
       return
     }
-    const res = await memoryApi.importMemories(memories, importMergeMode.value)
+    const res = await memoryApi.importMemories(memories, importMergeMode.value, agentId.value)
     const imported = (res as any)?.data?.imported ?? 0
     message.success(`${t('memory.importMem')}: ${imported} imported`)
     showImportModal.value = false
