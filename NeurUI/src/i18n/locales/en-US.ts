@@ -759,6 +759,8 @@ export default {
     originUntrusted: 'External (untrusted)',
     originSystem: 'System',
     originUntrustedTip: 'This memory comes from external web content and is down-weighted',
+    foreignScope: 'Other user scope',
+    foreignScopeTip: 'This memory belongs to another user domain under this agent; opening, editing, forgetting or deleting it is refused by the server',
     pendingQueue: 'Pending Memories',
     pendingEmpty: 'No memories awaiting confirmation',
     pendingConfirm: 'Confirm',

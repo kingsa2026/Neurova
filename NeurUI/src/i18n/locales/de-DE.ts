@@ -757,6 +757,8 @@ export default {
     originUntrusted: 'Extern (nicht vertrauenswürdig)',
     originSystem: 'System',
     originUntrustedTip: 'Diese Erinnerung stammt aus externen Webinhalten und wird abgewertet',
+    foreignScope: 'Anderer Nutzerbereich',
+    foreignScopeTip: 'Diese Erinnerung gehört zu einem anderen Nutzerbereich dieses Agents; Öffnen, Bearbeiten, Vergessen und Löschen lehnt der Server ab',
     pendingQueue: 'Ausstehende Erinnerungen',
     pendingEmpty: 'Keine Erinnerungen zur Bestätigung',
     pendingConfirm: 'Bestätigen',

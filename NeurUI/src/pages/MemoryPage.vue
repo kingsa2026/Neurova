@@ -230,26 +230,47 @@
           </template>
           <template v-else-if="column.key === 'actions'">
             <div class="row-actions">
-              <GlassButton size="sm" variant="ghost" @click="viewMemory(record)">
+              <!-- 后端列表面按 agent 全量放行，本 agent 下其他用户域的行也在这张表里；
+                   详情/写面按三层隔离对它们一律拒绝。禁用与标注取后端逐条给的 owned，
+                   页面不再自己判「这是谁的」。 -->
+              <a-tooltip v-if="!rowIsActionable(record)" :title="t('memory.foreignScopeTip')">
+                <a-tag color="default">{{ t('memory.foreignScope') }}</a-tag>
+              </a-tooltip>
+              <GlassButton
+                size="sm"
+                variant="ghost"
+                :disabled="!rowIsActionable(record)"
+                @click="viewMemory(record)"
+              >
                 {{ t('common.open') }}
               </GlassButton>
               <a-tooltip :title="t('memory.strengthen')">
-                <GlassButton size="sm" variant="ghost" @click="handleStrengthen(record.id)">
+                <GlassButton
+                  size="sm"
+                  variant="ghost"
+                  :disabled="!rowIsActionable(record)"
+                  @click="handleStrengthen(record)"
+                >
                   ↑
                 </GlassButton>
               </a-tooltip>
               <a-tooltip :title="t('memory.forget')">
-                <GlassButton size="sm" variant="ghost" @click="handleForget(record.id)">
+                <GlassButton
+                  size="sm"
+                  variant="ghost"
+                  :disabled="!rowIsActionable(record)"
+                  @click="handleForget(record)"
+                >
                   ↓
                 </GlassButton>
               </a-tooltip>
               <a-popconfirm
                 :title="t('memory.forget') + '?'"
-                @confirm="confirmDeleteMemory(record.id)"
+                @confirm="confirmDeleteMemory(record)"
                 :ok-text="t('common.yes')"
                 :cancel-text="t('common.no')"
               >
-                <GlassButton size="sm" variant="danger">
+                <GlassButton size="sm" variant="danger" :disabled="!rowIsActionable(record)">
                   {{ t('common.delete') }}
                 </GlassButton>
               </a-popconfirm>
@@ -420,6 +441,7 @@ import type { MemoryEntry, MemorySearchResult, MemoryStats } from '@/api/modules
 // 模板里直接读模块命名空间（memoryApi.X）会让渲染代理去 unref 命名空间对象，
 // 测试里被部分 mock 的模块会因此炸在 __v_isRef 上；在脚本里取一次即可。
 const MEMORY_TYPES = memoryApi.MEMORY_TYPES
+const rowIsActionable = memoryApi.rowIsActionable
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -732,8 +754,9 @@ const createMemory = async () => {
 }
 
 const viewMemory = async (record: MemoryEntry) => {
+  if (!rowIsActionable(record)) return
   try {
-    const res = await memoryApi.getMemory(record.id)
+    const res = await memoryApi.getMemory(record.id, record.agent_id)
     selectedMemory.value = { ...res.data }
   } catch {
     selectedMemory.value = { ...record }
@@ -746,9 +769,11 @@ const updateMemory = async () => {
   if (!selectedMemory.value) return
   updating.value = true
   try {
-    await memoryApi.updateMemory(selectedMemory.value.id, {
-      content: selectedMemory.value.content,
-    })
+    await memoryApi.updateMemory(
+      selectedMemory.value.id,
+      { content: selectedMemory.value.content },
+      selectedMemory.value.agent_id,
+    )
     message.success(t('common.success'))
     editing.value = false
     await fetchMemories()
@@ -760,9 +785,10 @@ const updateMemory = async () => {
   }
 }
 
-const deleteMemory = async (id: string) => {
+const deleteMemory = async (record: MemoryEntry) => {
+  if (!rowIsActionable(record)) return
   try {
-    await memoryApi.deleteMemory(id)
+    await memoryApi.deleteMemory(record.id, record.agent_id)
     message.success(t('common.success'))
     await fetchMemories()
     await fetchStats()
@@ -840,9 +866,12 @@ const handleReloadMemories = async () => {
   }
 }
 
-const handleStrengthen = async (id: string) => {
+const handleStrengthen = async (record: MemoryEntry) => {
+  if (!rowIsActionable(record)) return
   try {
-    await memoryApi.strengthenMemory(id, 0.2, 'Manual strengthen from UI')
+    // /memory-enhancement 那一族按 id 寻址不带 agent_id（后端也没这个参数），
+    // 非默认 Agent 的行会被打到默认 Agent 上——已登记台账另拍，本批不在此处猜作用域。
+    await memoryApi.strengthenMemory(record.id, 0.2, 'Manual strengthen from UI')
     message.success(t('memory.strengthen') + ' ✓')
     await fetchMemories()
     await fetchStats()
@@ -851,9 +880,10 @@ const handleStrengthen = async (id: string) => {
   }
 }
 
-const handleForget = async (id: string) => {
+const handleForget = async (record: MemoryEntry) => {
+  if (!rowIsActionable(record)) return
   try {
-    await memoryApi.forgetMemory(id, 'Manual forget from UI')
+    await memoryApi.forgetMemory(record.id, 'Manual forget from UI')
     message.success(t('memory.forget') + ' ✓')
     await fetchMemories()
     await fetchStats()
