@@ -3974,3 +3974,5 @@ tests/unit/collaboration/test_workflowSpawnArchivesIntoInitiatorPool.py
 tests/integration/test_memoryRowOwnershipDisclosure.py
 # 记忆管理通道的 role 门、老门未放宽的反钉，与"读改删各只一份实现"（§6-426）
 tests/integration/test_memoryManagementChannelRoleGate.py
+# 记忆面整面对匿名关死（路由级门）、23 条租户数据 GET 腿逐条钉、默认绑定与 compose 发布地址收成回环
+tests/integration/test_memoryFaceRejectsAnonymous.py
