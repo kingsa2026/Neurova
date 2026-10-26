@@ -591,6 +591,7 @@ export default {
     retryYieldWait: 'Уступаем из-за лимита параллельности - повтор через {seconds} с (попытка {retry}/{max})',
     upstreamSilence: 'Нет данных от upstream {seconds}с, всё ещё ждём…',
     turnParked: 'Ответ приостановлен - требуется ручное возобновление',
+    turnStillRunning: 'Этот ответ ещё генерируется',
     parkedPinnedModel: 'Закреплённая модель {pinned}; этот запрос {requested}',
     rateLimitedNotice: 'Модель ограничена (429); над полем ввода показана подсказка по смене',
     resumeRun: 'Возобновить',

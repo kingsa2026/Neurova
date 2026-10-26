@@ -591,6 +591,7 @@ export default {
     retryYieldWait: 'تنزيل بسبب حيص التنفيذ المتوازي - إعادة المحاولة بعد {seconds} ثانية (المحاولة {retry}/{max})',
     upstreamSilence: 'لا بيانات من المصدر منذ {seconds} ثانية، ما زلنا ننتظر…',
     turnParked: 'هذا الدور متوقف - يلزم استئناف يدوي',
+    turnStillRunning: 'لا يزال هذا الرد قيد الإنشاء',
     parkedPinnedModel: 'النموذج المثبت {pinned}؛ هذا الطلب {requested}',
     rateLimitedNotice: 'تم تقييد النموذج (429)؛ يظهر اقتراح التبديل أعلى حقل الإدخال',
     resumeRun: 'استئناف',

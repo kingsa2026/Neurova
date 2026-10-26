@@ -591,6 +591,7 @@ export default {
     retryYieldWait: '並行上限により待機中。{seconds} 秒後に再試行（{retry}/{max} 回目）',
     upstreamSilence: '上流が {seconds} 秒無応答です。引き続き待機中…',
     turnParked: 'この応答は保留中です。手動で再開できます',
+    turnStillRunning: 'この応答はまだ生成中です',
     parkedPinnedModel: '固定モデル {pinned}、今回のリクエスト {requested}',
     rateLimitedNotice: 'モデルがレート制限（429）に達しました。入力欄の上に切り替え候補を表示しています',
     resumeRun: '再開',
