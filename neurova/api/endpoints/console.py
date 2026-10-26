@@ -200,6 +200,10 @@ _REPLAY_BUFFER_TTL_SECONDS = 600.0
 MAX_BUFFERED_EVENTS = 500
 MAX_REPLAY_SESSIONS = 50
 _replay_buffers: Dict[str, Dict[str, Any]] = {}
+#: 生产侧回合任务的强引用集。裸 `asyncio.create_task` 的返回值若没人持有，
+#: 任务可能在下一次 GC 前就没了——"回合是否存在"绝不能取决于有没有人在读它，
+#: 更不能取决于解释器什么时候回收句柄（第 0b 步）。done 回调即时摘除，不越积越多。
+_TURN_TASKS: "set[asyncio.Task]" = set()
 _replay_buffers_lock = asyncio.Lock()
 
 
@@ -712,10 +716,426 @@ async def post_console_chat(
 
     if body.stream:
 
+        # ── 请求边界：回合在这里就被创建，下面的生成器只是它的订阅者（第 0b 步）──
+        queue: asyncio.Queue = asyncio.Queue()
+
+        # 记账侧的共享状态（原先长在生成器的投递段里，随投递一起搬上来：
+        # 去重集与 item 映射器都描述"这一轮产生过什么"，不是"谁在收"）
+        seen_calls: set = set()
+        seen_results: set = set()
+        item_mapper = ItemEventMapper(
+            thread_id=session_id, turn_id=f"turn-{int(time.time() * 1000)}"
+        )
+
+        def _item_events_of(events):
+            try:
+                return item_mapper.on_legacy_events(events)
+            except Exception:  # noqa: BLE001 - item 增强失败不影响旧事件流
+                return []
+
+        _delta_buffer: Dict[str, Dict[str, typing.Any]] = {}
+        _last_flush_at = [time.monotonic()]
+        _turn_started_at = [time.monotonic()]
+        _timeline_append = getattr(get_session_repository(), "append_timeline_event", None)
+
+        def _record(events: typing.List[Dict[str, Any]]) -> None:
+            if not events:
+                return
+            for ev in events:
+                try:
+                    _timeline_append(agent_id, session_id, ev)
+                except Exception:  # noqa: BLE001 - 时间线是增强，不翻案本轮
+                    logger.debug("时间线追加失败（不影响本轮）", exc_info=True)
+            _buffer_replay_events(session_id, events)
+
+        def _markBufferDone() -> None:
+            """重放缓冲的收尾标志——由"这一轮结束了"来置，不由"投递者收到"来置。"""
+            buf = _replay_buffers.get(session_id)
+            if buf:
+                buf["done"] = True
+
+        def _flush_deltas() -> typing.List[Dict[str, Any]]:
+            merged: typing.List[Dict[str, Any]] = []
+            for etype, buf in _delta_buffer.items():
+                if buf.get("content"):
+                    merged.append({"type": etype, "content": buf["content"]})
+            _delta_buffer.clear()
+            if merged:
+                _last_flush_at[0] = time.monotonic()
+                _record(merged + _item_events_of(merged))
+            return merged
+
+        _DELTA_FLUSH_INTERVAL = 0.06  # 60ms 最小合并间隔（与历史形态同尺）
+        _THINK_FLUSH_INTERVAL = 5.0  # 思考模型可在单个 content 调用里吐完
+                                      # 整轮，非 delta 事件不触发冲刷 ⇒ 空闲也得刷
+        _MIN_CHUNK_EVENTS = 40       # 长列表逐 token 出 delta ⇒ 按条数兜底冲刷
+
+        def _note(kind, data) -> typing.List[Dict[str, Any]]:
+            """管线的一次发射 → 记账后的事件列表（供投递复用）。"""
+            now = time.monotonic()
+            if kind in ("content", "reasoning"):
+                etype = "chunk" if kind == "content" else "reasoning"
+                buf = _delta_buffer.setdefault(etype, {"type": etype, "content": ""})
+                buf["content"] += str(data or "")
+                if (now - _last_flush_at[0] >= _DELTA_FLUSH_INTERVAL
+                        or len(buf["content"]) >= _MIN_CHUNK_EVENTS
+                        or now - _turn_started_at[0] >= _THINK_FLUSH_INTERVAL):
+                    return _flush_deltas()
+                return []
+            pending = _flush_deltas()
+            live = _sse_events_from_emitter_item(
+                (kind, data), seen_calls, seen_results, agent_id=agent_id, user_id=user_id
+            )
+            live_items = _item_events_of(live)
+            # usage 是累加语义的记账事件，不得进重放缓冲（重放会把它再消费
+            # 一遍＝用量双计，原实现在生成器里就地 yield 绕过缓冲）。改由投递
+            # 队列的 "unrecorded" 项单独送达，缓冲与时间线都不沾它。
+            replayable = [e for e in live + live_items if e.get("type") != "usage"]
+            _record(replayable)
+            return pending, live + live_items  # type: ignore[return-value]
+
+        def _emitFlush(result: Dict[str, Any]) -> None:
+            """收尾 flush 在**生产侧**算完即记账，再把同一份交给投递。
+
+            原实现在生成器的 `finally` 里边算边 `yield`——客户端已经走了，
+            于是收尾的工具事件、error/stopped/parked、`done` 与缓冲置位
+            一起消失（实测：断连过的那轮 `buf["done"]` 永不为真，带
+            `replay_from` 的重连就一直尾随一个不会来的结束标志）。
+            """
+            events: typing.List[Dict[str, Any]] = []
+            for tm in result.get("tool_messages") or []:
+                for event in _build_tool_events(tm, agent_id=agent_id, user_id=user_id):
+                    etype = event.get("type")
+                    if etype == "tool_call":
+                        # 核验轮修复①：键与流式侧共用 _call_key 规范化
+                        #（剔 taskName* + 紧凑序列化），否则 taskName 一出现必然两键不同
+                        key = _call_key(
+                            str(event.get("name", "")),
+                            json.dumps(tm.get("params", {}), ensure_ascii=False),
+                        )
+                        if key in seen_calls:
+                            continue
+                        seen_calls.add(key)
+                    elif etype == "tool_result":
+                        # key 基于完整原始 result 的 hash；event.result 是归一化+截断
+                        # 后的展示形式，不可用作 key
+                        key = str(event.get("name", "")) + ":" + _result_key_hash(str(tm.get("result", "")))
+                        if key in seen_results:
+                            continue
+                        seen_results.add(key)
+                    events.append(event)
+
+            # 2026-09-07 修复：LLM 失败必须作为 error 事件出去（原实现只写日志，
+            # 用户看到空白气泡）。错误也要有权威落点——上面 `_record` 已把它写进
+            # 时间线与缓冲，刷新后读得到"这一轮以错误收场"，不再挂着空等。
+            errMsg = str(result.get("error") or "")
+            if errMsg:
+                err_event = {"type": "error", "message": errMsg}
+                err_event.update(_error_event_payload(errMsg))
+                events.append(err_event)
+                if _should_emit_quota_event(errMsg):
+                    events.append({
+                        "type": "quota_limited",
+                        "message": errMsg,
+                        "model": str(getattr(body, "model", "") or ""),
+                        "session_id": session_id,
+                    })
+
+            if result.get("stopped"):
+                events.append({"type": "stopped", "session_id": session_id})
+
+            if result.get("parked"):
+                _parkDetails = result.get("park_details") or {}
+                events.append({
+                    "type": "parked",
+                    "session_id": session_id,
+                    "run_id": ledger.run_id or "",
+                    "reason": str(result.get("park_reason", "")),
+                    "attempts": int(result.get("park_attempts", 0) or 0),
+                    "waited_seconds": float(result.get("park_waited_seconds", 0.0) or 0.0),
+                    # 模型漂移的冲突双方：只给 reason 一个词，用户不知道钉住的是谁
+                    "pinned_model": str(_parkDetails.get("pinned_model") or ""),
+                    "requested_model": str(_parkDetails.get("requested_model") or ""),
+                })
+
+            events = _flush_deltas() + events
+            done_event = {"type": "done", "session_id": session_id}
+            item_events = _item_events_of(events + [done_event])
+            _record(events + item_events + [done_event])
+            for group in (events, item_events, [done_event]):
+                if group:
+                    queue.put_nowait(("events", group))
+            _markBufferDone()
+
+        def _emit(kind, data):
+            # 管线在事件循环线程内同步回调；put_nowait 不阻塞主流程
+            try:
+                out = _note(kind, data)
+                if isinstance(out, tuple):
+                    pending, live = out
+                    for group in (pending, live):
+                        if group:
+                            queue.put_nowait(("events", group))
+                elif out:
+                    queue.put_nowait(("events", out))
+            except Exception:  # noqa: BLE001 - 队列异常不拖垮聊天
+                pass
+
+# run 先落库（queued）再执行，同 session
+# 单活 + FIFO 晋升；排队期先行 queued 事件（fail-open 见类注释）
+        ledger = AgentRunLedger(
+            session_id,
+            user_id,
+            agent_id,
+            body.message or "",
+            run_id=resume_run_id or None,
+        )
+        async def _produceTurn():
+            """回合的生产者：排队、起回合、收尾记账——**不依赖有没有人在读**。
+
+            第 0b 步之前 `create_task(run_chat())` 长在响应生成器体内：投递者取一帧就
+            不再消费时，这一轮从未被创建（本仓实测踩过，见 §6-421 仍开①）。回合是否存在
+            该由请求边界决定，响应只是它的订阅者。
+            """
+            events = await ledger.acquire()
+            _record(events)
+            if events:
+                # 排队期事件照旧原样送达；这些事件此前是被生成器边收边 yield 的，
+                # 现在统一走入队（投递与记账分家）。
+                queue.put_nowait(("events", events))
+            if ledger.rejected:
+                # 台账拒收：queued/stopped/done 都由 acquire 那批事件带过，这里只补收尾
+                # 标志与终止信号——不写 done 的话，带 replay_from 的重连会尾随一个永远
+                # 不会来的结束信号。
+                _markBufferDone()
+                queue.put_nowait(_EMIT_DONE)
+                return
+            turnTask = asyncio.create_task(run_chat())
+            # P0-2：注册到 per-session asyncio 任务表，/chat/stop 据此真取消
+            from neurova.core.task_tracker import get_task_tracker
+
+            get_task_tracker().register_async_task(session_id, turnTask, kind="chat")
+            # 台账终态单点收敛：完成回调（投递者早退也不丢终态）
+            ledger.attach(turnTask)
+            try:
+                await turnTask
+            except BaseException:  # noqa: BLE001 - 终态与落点已由 run_chat 负责，这里只保引用
+                pass
+
+        # 强引用持有：裸 create_task 会被 GC 掉半路夭折；done 回调自行摘除
+        _spawned = asyncio.create_task(_produceTurn())
+        _TURN_TASKS.add(_spawned)
+        _spawned.add_done_callback(_TURN_TASKS.discard)
+
+
+        # ── 生产侧记账（第 0 步）────────────────────────────────
+        # 时间线、断线重放缓冲、done 收尾信号、回合租约——四件全都跟着
+        # **这一轮**走，不再跟着**这条响应**走。上一批把断连从"掀掉回合"
+        # 改成"只停投递"之后，这四件仍长在响应生成器里，于是实测出两条谎报：
+        #   · `_timeline/e41ff42c.jsonl` 最后写入 08:21:13 ＝ 断连那一秒，
+        #     编号停在 85（要的是 120），末帧是 item_delta 而非 done；
+        #   · 断连 164s 后 `GET /console/tasks` 仍是 `chat@164s`（活着），
+        #     run 却被周期扫描写成 `failed/process_died`（心跳随生成器一起停了）。
+        # 投递与记账就此分家：`_record` 是唯一落地处，渲染只做渲染。
+        metadata = {
+            "user_id": user_id,
+            "tenant_id": str((current_user or {}).get("tenant_id") or "default"),
+            "thinking_effort": (body.thinking_effort or "").lower(),
+            "thinking_enabled": getattr(body, "thinking_enabled", None),
+            "thinking_budget": getattr(body, "thinking_budget", None),
+            "event_emitter": _emit,
+            # 开启工具事件实时转发（默认关闭以保持蜂群子 Agent 纯文本流契约）
+            "emit_tool_events": True,
+            # 429 重试/切换倒计时事件转发（retry_status → SSE retry）
+            "emit_status_events": True,
+        }
+        # 请求级属主（§6-153 按教义第 5 条扫出的命中点）：批 9 把管线里那段"每轮按
+        # metadata['user_id'] 补写通道"的双写删掉时，只在 `api/endpoints/chat.py` 补了
+        # 边界写点，**这条 console 面漏了**——于是网页回合里 `get_request_user_id()` 为空：
+        # usage 入账落到 `"anonymous"`（`multi_model_client:876/1156`）、按日 LLM 配额整条
+        # 不判（`:1426` 无身份即放行）、客户端自带全新 session_id 时会话落空属主
+        # （`session_manager:1650` 空属主＝对全员可见）。写点必须落在 `event_stream` 内、
+        # `create_task(run_chat())`(:878) 之前：task 在创建时复制当前上下文。
+        from neurova.core.identity_context import set_request_user_id
+
+        set_request_user_id(user_id)
+        # R-3 修复: 附件元数据注入（file_ids → attachments，供 pipeline 附件注入）
+        attachments = attach_files(getattr(body, "file_ids", None), user_id)
+        logger.info("[附件注入] file_ids=%s user_id=%s → attachments=%d",
+                    getattr(body, "file_ids", None), user_id, len(attachments))
+        if attachments:
+            metadata["attachments"] = attachments
+        # 客户端时间戳随 metadata 落盘到该轮两条消息（_json_safe 会剔除
+        # event_emitter 等不可序列化对象，字符串保留），作为轮次定位键
+        if body.client_timestamp:
+            metadata["client_timestamp"] = body.client_timestamp
+
+        async def _gateWaitNotice(*, attempt: int, waitSeconds: float, reason: str) -> None:
+            """等待期的一次心跳 + 一次进度播报（闸在睡之前调它）。
+
+            复用既有 `retry` 事件形态而不是新造一种：前端已按倒计时渲染它，
+            再开一个"等待中"状态面就是第三份平行口径。`source` 用来区分
+            429 退避与让位退避，不改既有字段含义。
+            """
+            await ledger.heartbeat(force=True)
+            _emit(
+                "retry",
+                {
+                    "phase": "yield_wait",
+                    "source": "glance_yield",
+                    "retry": attempt,
+                    "max_retries": yieldWaitPolicy().maxAttempts,
+                    "wait_seconds": round(float(waitSeconds), 2),
+                    "reason": reason,
+                    "model": str(getattr(body, "model", "") or ""),
+                    "session_id": session_id,
+                },
+            )
+
+        async def _runTurn():
+            admission = None
+            turnSucceeded = False
+            try:
+                # P2-8：回合入口的让位闸 + 挂起落库都在 `requestTurnAdmission`
+                # 那一处实现（四入口共用）。放在本任务内而不是生成器里，是为了让
+                # 等待期间消费循环照常心跳与播报（生成器一旦 await 住，整条流就哑了）。
+                admission = await requestTurnAdmission(
+                    ledger=ledger,
+                    agentId=agent_id,
+                    modelName=str(getattr(body, "model", "") or ""),
+                    sessionId=session_id,
+                    userInput=body.message or "",
+                    payload=_turnResumePayload(body, session_id, agent_id),
+                    onWait=_gateWaitNotice,
+                )
+                if not admission.allowed:
+                    if admission.ledgerFailed:
+                        # 没落库的"挂起"没人能续，那就是假状态——如实报错
+                        return {
+                            "text": "",
+                            "reasoning": None,
+                            "tool_messages": [],
+                            "error": (
+                                f"让位闸判定挂起（原因 {admission.parkReason}），"
+                                "但 run 台账未能落库，本轮已中止且无续跑入口"
+                            ),
+                        }
+                    return {
+                        "text": "",
+                        "reasoning": None,
+                        "tool_messages": [],
+                        "parked": True,
+                        "park_reason": admission.parkReason,
+                        "park_attempts": admission.attempts,
+                        "park_waited_seconds": round(admission.waitedSeconds, 2),
+                        "park_details": dict(
+                            admission.outcome.details if admission.outcome else {}
+                        ),
+                    }
+                response = await agent.chat(
+                    body.message,
+                    stream=True,
+                    session_id=session_id,
+                    metadata=metadata,
+                    model=getattr(body, "model", None) or None,
+                )
+                # P2-6（审计 2026-09-11）：usage 事件在 record() 同任务
+                # 上下文内发射——任务级 ContextVar 必命中本次调用；原在
+                # 生成器 finally 读全局 last_call，并发会话下会被其它
+                # 请求的调用覆写（用量串号）。
+                try:
+                    from neurova.core.usage_accounting import get_usage_accounting
+
+                    _last = get_usage_accounting().last_call()
+                    if _last:
+                        _emit("usage", {
+                            "session_id": session_id,
+                            "model": str(_last.get("model", "")),
+                            "provider": str(_last.get("provider", "")),
+                            "prompt_tokens": int(_last.get("prompt_tokens", 0)),
+                            "completion_tokens": int(_last.get("completion_tokens", 0)),
+                            "total_tokens": int(_last.get("total_tokens", 0)),
+                            "estimated": bool(_last.get("estimated", False)),
+                        })
+                except Exception:  # noqa: BLE001 — usage 事件失败不影响本轮
+                    pass
+                if isinstance(response, dict):
+                    turnSucceeded = True
+                    return {
+                        "text": response.get("text", str(response)),
+                        "reasoning": response.get("reasoning"),
+                        "tool_messages": response.get("tool_messages", []) or [],
+                    }
+                turnSucceeded = True
+                return {"text": str(response), "reasoning": None, "tool_messages": []}
+            except Exception as e:
+                logger.warning("Console chat error: %s", e, exc_info=True)
+                # 2026-09-07 修复：携带 error 标志，flush 阶段以 error 事件
+                # 发给前端（此前该文本从不入 SSE → 前端气泡空白无提示）
+                return {"text": f"Error: {str(e)}", "reasoning": None,
+                        "tool_messages": [], "error": str(e)}
+            finally:
+                if admission is not None and admission.allowed:
+                    # 回填 pacing 统计；失败只点名不改写本轮结果（本轮成败已定）
+                    try:
+                        await reportAdmissionOutcome(admission, turnSucceeded)
+                    except Exception:  # noqa: BLE001
+                        logger.warning("让位闸回执失败（不影响本轮结果）", exc_info=True)
+                # 收尾记账与 `_EMIT_DONE` 由外层 `run_chat` 统一负责：
+                # 本函数被取消时这里的 await 会立刻再抛取消，把收尾挤掉——
+                # 那正是"投递者一走，done 就永不再置"的来源。
+
+        async def _keepLease():
+            """回合的租约续期跟着**这一轮**走。
+
+            原先 `ledger.heartbeat()` 长在响应生成器的消费循环里：客户端一断连，
+            心跳跟着停，而 `reconcile_stale` 只认 `lease_expires_at`——实测断连
+            164s 后任务仍是 `chat@164s`（活着），run 却被扫成 `failed/process_died`。
+            台账说"进程死了"而进程好好的，就是说谎的事实源。
+            节流沿用 `AgentRunLedger.HEARTBEAT_SECONDS`，与原循环同尺。
+            """
+            while True:
+                await asyncio.sleep(ledger.HEARTBEAT_SECONDS)
+                await ledger.heartbeat()
+
+        def _closeTurn(outcome: Dict[str, Any]) -> None:
+            try:
+                _emitFlush(outcome)
+            except Exception:  # noqa: BLE001 - 收尾记账失败不外泄，本轮成败已定
+                logger.warning("回合收尾记账失败（不影响台账终态）", exc_info=True)
+            finally:
+                queue.put_nowait(_EMIT_DONE)
+
+        async def run_chat():
+            keeper = asyncio.create_task(_keepLease())
+            try:
+                outcome = await _runTurn()
+            except asyncio.CancelledError:
+                # 真停止（/chat/stop 经 task_tracker cancel 这条任务）：
+                # 以 stopped 事件收尾，done 恒发，前端状态机正常收口
+                _closeTurn({"text": "", "reasoning": None,
+                            "tool_messages": [], "stopped": True})
+                raise
+            except BaseException as e:  # noqa: BLE001 - 记账要先做完，异常照常外抛
+                _closeTurn({"text": "", "reasoning": None,
+                            "tool_messages": [], "error": str(e)})
+                raise
+            else:
+                outcome = outcome if isinstance(outcome, dict) else {
+                    "text": str(outcome), "reasoning": None, "tool_messages": []
+                }
+                _closeTurn(outcome)
+                # 原样回传给台账：`ledger.attach(task)` 的完成回调要从**任务结果**
+                # 里读 error/stopped/parked 来定终态。外层若把它吞掉，出错轮会被
+                # 记成 completed（实测：`test_chat_error_writes_failed_run` 当场红）。
+                return outcome
+            finally:
+                keeper.cancel()
+
         async def event_stream():
+            """投递：只渲染。回合在生产侧已经跑起来了，走与留都不改变落账。"""
             """真流式：agent.chat 后台执行，管线产生的思考/内容/工具事件
             经 event_emitter → 队列 → SSE 即时推送，不再等整轮结束。"""
-            nonlocal reply, reasoning, tool_messages
 
             # 会话归属当场告知：`session_id` 是这里分配的（客户端没带时），
             # 但旧形态要等到 `done` 帧才回传——首轮流式期间客户端手里是空。
@@ -725,401 +1145,6 @@ async def post_console_chat(
             # 不进重放缓冲、不进时间线：它是传输层的归属声明，不是会话内容。
             yield f"data: {json.dumps({'type': 'session', 'session_id': session_id})}\n\n"
 
-            queue: asyncio.Queue = asyncio.Queue()
-
-            # 记账侧的共享状态（原先长在生成器的投递段里，随投递一起搬上来：
-            # 去重集与 item 映射器都描述"这一轮产生过什么"，不是"谁在收"）
-            seen_calls: set = set()
-            seen_results: set = set()
-            item_mapper = ItemEventMapper(
-                thread_id=session_id, turn_id=f"turn-{int(time.time() * 1000)}"
-            )
-
-            def _item_events_of(events):
-                try:
-                    return item_mapper.on_legacy_events(events)
-                except Exception:  # noqa: BLE001 - item 增强失败不影响旧事件流
-                    return []
-
-            _delta_buffer: Dict[str, Dict[str, typing.Any]] = {}
-            _last_flush_at = [time.monotonic()]
-            _turn_started_at = [time.monotonic()]
-            _timeline_append = getattr(get_session_repository(), "append_timeline_event", None)
-
-            def _record(events: typing.List[Dict[str, Any]]) -> None:
-                if not events:
-                    return
-                for ev in events:
-                    try:
-                        _timeline_append(agent_id, session_id, ev)
-                    except Exception:  # noqa: BLE001 - 时间线是增强，不翻案本轮
-                        logger.debug("时间线追加失败（不影响本轮）", exc_info=True)
-                _buffer_replay_events(session_id, events)
-
-            def _markBufferDone() -> None:
-                """重放缓冲的收尾标志——由"这一轮结束了"来置，不由"投递者收到"来置。"""
-                buf = _replay_buffers.get(session_id)
-                if buf:
-                    buf["done"] = True
-
-            def _flush_deltas() -> typing.List[Dict[str, Any]]:
-                merged: typing.List[Dict[str, Any]] = []
-                for etype, buf in _delta_buffer.items():
-                    if buf.get("content"):
-                        merged.append({"type": etype, "content": buf["content"]})
-                _delta_buffer.clear()
-                if merged:
-                    _last_flush_at[0] = time.monotonic()
-                    _record(merged + _item_events_of(merged))
-                return merged
-
-            _DELTA_FLUSH_INTERVAL = 0.06  # 60ms 最小合并间隔（与历史形态同尺）
-            _THINK_FLUSH_INTERVAL = 5.0  # 思考模型可在单个 content 调用里吐完
-                                          # 整轮，非 delta 事件不触发冲刷 ⇒ 空闲也得刷
-            _MIN_CHUNK_EVENTS = 40       # 长列表逐 token 出 delta ⇒ 按条数兜底冲刷
-
-            def _note(kind, data) -> typing.List[Dict[str, Any]]:
-                """管线的一次发射 → 记账后的事件列表（供投递复用）。"""
-                now = time.monotonic()
-                if kind in ("content", "reasoning"):
-                    etype = "chunk" if kind == "content" else "reasoning"
-                    buf = _delta_buffer.setdefault(etype, {"type": etype, "content": ""})
-                    buf["content"] += str(data or "")
-                    if (now - _last_flush_at[0] >= _DELTA_FLUSH_INTERVAL
-                            or len(buf["content"]) >= _MIN_CHUNK_EVENTS
-                            or now - _turn_started_at[0] >= _THINK_FLUSH_INTERVAL):
-                        return _flush_deltas()
-                    return []
-                pending = _flush_deltas()
-                live = _sse_events_from_emitter_item(
-                    (kind, data), seen_calls, seen_results, agent_id=agent_id, user_id=user_id
-                )
-                live_items = _item_events_of(live)
-                # usage 是累加语义的记账事件，不得进重放缓冲（重放会把它再消费
-                # 一遍＝用量双计，原实现在生成器里就地 yield 绕过缓冲）。改由投递
-                # 队列的 "unrecorded" 项单独送达，缓冲与时间线都不沾它。
-                replayable = [e for e in live + live_items if e.get("type") != "usage"]
-                _record(replayable)
-                return pending, live + live_items  # type: ignore[return-value]
-
-            def _emitFlush(result: Dict[str, Any]) -> None:
-                """收尾 flush 在**生产侧**算完即记账，再把同一份交给投递。
-
-                原实现在生成器的 `finally` 里边算边 `yield`——客户端已经走了，
-                于是收尾的工具事件、error/stopped/parked、`done` 与缓冲置位
-                一起消失（实测：断连过的那轮 `buf["done"]` 永不为真，带
-                `replay_from` 的重连就一直尾随一个不会来的结束标志）。
-                """
-                events: typing.List[Dict[str, Any]] = []
-                for tm in result.get("tool_messages") or []:
-                    for event in _build_tool_events(tm, agent_id=agent_id, user_id=user_id):
-                        etype = event.get("type")
-                        if etype == "tool_call":
-                            # 核验轮修复①：键与流式侧共用 _call_key 规范化
-                            #（剔 taskName* + 紧凑序列化），否则 taskName 一出现必然两键不同
-                            key = _call_key(
-                                str(event.get("name", "")),
-                                json.dumps(tm.get("params", {}), ensure_ascii=False),
-                            )
-                            if key in seen_calls:
-                                continue
-                            seen_calls.add(key)
-                        elif etype == "tool_result":
-                            # key 基于完整原始 result 的 hash；event.result 是归一化+截断
-                            # 后的展示形式，不可用作 key
-                            key = str(event.get("name", "")) + ":" + _result_key_hash(str(tm.get("result", "")))
-                            if key in seen_results:
-                                continue
-                            seen_results.add(key)
-                        events.append(event)
-
-                # 2026-09-07 修复：LLM 失败必须作为 error 事件出去（原实现只写日志，
-                # 用户看到空白气泡）。错误也要有权威落点——上面 `_record` 已把它写进
-                # 时间线与缓冲，刷新后读得到"这一轮以错误收场"，不再挂着空等。
-                errMsg = str(result.get("error") or "")
-                if errMsg:
-                    err_event = {"type": "error", "message": errMsg}
-                    err_event.update(_error_event_payload(errMsg))
-                    events.append(err_event)
-                    if _should_emit_quota_event(errMsg):
-                        events.append({
-                            "type": "quota_limited",
-                            "message": errMsg,
-                            "model": str(getattr(body, "model", "") or ""),
-                            "session_id": session_id,
-                        })
-
-                if result.get("stopped"):
-                    events.append({"type": "stopped", "session_id": session_id})
-
-                if result.get("parked"):
-                    _parkDetails = result.get("park_details") or {}
-                    events.append({
-                        "type": "parked",
-                        "session_id": session_id,
-                        "run_id": ledger.run_id or "",
-                        "reason": str(result.get("park_reason", "")),
-                        "attempts": int(result.get("park_attempts", 0) or 0),
-                        "waited_seconds": float(result.get("park_waited_seconds", 0.0) or 0.0),
-                        # 模型漂移的冲突双方：只给 reason 一个词，用户不知道钉住的是谁
-                        "pinned_model": str(_parkDetails.get("pinned_model") or ""),
-                        "requested_model": str(_parkDetails.get("requested_model") or ""),
-                    })
-
-                events = _flush_deltas() + events
-                done_event = {"type": "done", "session_id": session_id}
-                item_events = _item_events_of(events + [done_event])
-                _record(events + item_events + [done_event])
-                for group in (events, item_events, [done_event]):
-                    if group:
-                        queue.put_nowait(("events", group))
-                _markBufferDone()
-
-            def _emit(kind, data):
-                # 管线在事件循环线程内同步回调；put_nowait 不阻塞主流程
-                try:
-                    out = _note(kind, data)
-                    if isinstance(out, tuple):
-                        pending, live = out
-                        for group in (pending, live):
-                            if group:
-                                queue.put_nowait(("events", group))
-                    elif out:
-                        queue.put_nowait(("events", out))
-                except Exception:  # noqa: BLE001 - 队列异常不拖垮聊天
-                    pass
-
-# run 先落库（queued）再执行，同 session
-# 单活 + FIFO 晋升；排队期先行 queued 事件（fail-open 见类注释）
-            ledger = AgentRunLedger(
-                session_id,
-                user_id,
-                agent_id,
-                body.message or "",
-                run_id=resume_run_id or None,
-            )
-            for event in await ledger.acquire():
-                _record([event])
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-            if ledger.rejected:
-                # 台账拒收：queued/stopped/done 都由 `ledger.acquire()` 那批事件
-                # 带过（上面已逐条记账），这里只补收尾标志——不写 done 的话，
-                # 带 replay_from 的重连会尾随一个永远不会来的结束信号。
-                _markBufferDone()
-                yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
-                return
-
-            # ── 生产侧记账（第 0 步）────────────────────────────────
-            # 时间线、断线重放缓冲、done 收尾信号、回合租约——四件全都跟着
-            # **这一轮**走，不再跟着**这条响应**走。上一批把断连从"掀掉回合"
-            # 改成"只停投递"之后，这四件仍长在响应生成器里，于是实测出两条谎报：
-            #   · `_timeline/e41ff42c.jsonl` 最后写入 08:21:13 ＝ 断连那一秒，
-            #     编号停在 85（要的是 120），末帧是 item_delta 而非 done；
-            #   · 断连 164s 后 `GET /console/tasks` 仍是 `chat@164s`（活着），
-            #     run 却被周期扫描写成 `failed/process_died`（心跳随生成器一起停了）。
-            # 投递与记账就此分家：`_record` 是唯一落地处，渲染只做渲染。
-            metadata = {
-                "user_id": user_id,
-                "tenant_id": str((current_user or {}).get("tenant_id") or "default"),
-                "thinking_effort": (body.thinking_effort or "").lower(),
-                "thinking_enabled": getattr(body, "thinking_enabled", None),
-                "thinking_budget": getattr(body, "thinking_budget", None),
-                "event_emitter": _emit,
-                # 开启工具事件实时转发（默认关闭以保持蜂群子 Agent 纯文本流契约）
-                "emit_tool_events": True,
-                # 429 重试/切换倒计时事件转发（retry_status → SSE retry）
-                "emit_status_events": True,
-            }
-            # 请求级属主（§6-153 按教义第 5 条扫出的命中点）：批 9 把管线里那段"每轮按
-            # metadata['user_id'] 补写通道"的双写删掉时，只在 `api/endpoints/chat.py` 补了
-            # 边界写点，**这条 console 面漏了**——于是网页回合里 `get_request_user_id()` 为空：
-            # usage 入账落到 `"anonymous"`（`multi_model_client:876/1156`）、按日 LLM 配额整条
-            # 不判（`:1426` 无身份即放行）、客户端自带全新 session_id 时会话落空属主
-            # （`session_manager:1650` 空属主＝对全员可见）。写点必须落在 `event_stream` 内、
-            # `create_task(run_chat())`(:878) 之前：task 在创建时复制当前上下文。
-            from neurova.core.identity_context import set_request_user_id
-
-            set_request_user_id(user_id)
-            # R-3 修复: 附件元数据注入（file_ids → attachments，供 pipeline 附件注入）
-            attachments = attach_files(getattr(body, "file_ids", None), user_id)
-            logger.info("[附件注入] file_ids=%s user_id=%s → attachments=%d",
-                        getattr(body, "file_ids", None), user_id, len(attachments))
-            if attachments:
-                metadata["attachments"] = attachments
-            # 客户端时间戳随 metadata 落盘到该轮两条消息（_json_safe 会剔除
-            # event_emitter 等不可序列化对象，字符串保留），作为轮次定位键
-            if body.client_timestamp:
-                metadata["client_timestamp"] = body.client_timestamp
-
-            async def _gateWaitNotice(*, attempt: int, waitSeconds: float, reason: str) -> None:
-                """等待期的一次心跳 + 一次进度播报（闸在睡之前调它）。
-
-                复用既有 `retry` 事件形态而不是新造一种：前端已按倒计时渲染它，
-                再开一个"等待中"状态面就是第三份平行口径。`source` 用来区分
-                429 退避与让位退避，不改既有字段含义。
-                """
-                await ledger.heartbeat(force=True)
-                _emit(
-                    "retry",
-                    {
-                        "phase": "yield_wait",
-                        "source": "glance_yield",
-                        "retry": attempt,
-                        "max_retries": yieldWaitPolicy().maxAttempts,
-                        "wait_seconds": round(float(waitSeconds), 2),
-                        "reason": reason,
-                        "model": str(getattr(body, "model", "") or ""),
-                        "session_id": session_id,
-                    },
-                )
-
-            async def _runTurn():
-                admission = None
-                turnSucceeded = False
-                try:
-                    # P2-8：回合入口的让位闸 + 挂起落库都在 `requestTurnAdmission`
-                    # 那一处实现（四入口共用）。放在本任务内而不是生成器里，是为了让
-                    # 等待期间消费循环照常心跳与播报（生成器一旦 await 住，整条流就哑了）。
-                    admission = await requestTurnAdmission(
-                        ledger=ledger,
-                        agentId=agent_id,
-                        modelName=str(getattr(body, "model", "") or ""),
-                        sessionId=session_id,
-                        userInput=body.message or "",
-                        payload=_turnResumePayload(body, session_id, agent_id),
-                        onWait=_gateWaitNotice,
-                    )
-                    if not admission.allowed:
-                        if admission.ledgerFailed:
-                            # 没落库的"挂起"没人能续，那就是假状态——如实报错
-                            return {
-                                "text": "",
-                                "reasoning": None,
-                                "tool_messages": [],
-                                "error": (
-                                    f"让位闸判定挂起（原因 {admission.parkReason}），"
-                                    "但 run 台账未能落库，本轮已中止且无续跑入口"
-                                ),
-                            }
-                        return {
-                            "text": "",
-                            "reasoning": None,
-                            "tool_messages": [],
-                            "parked": True,
-                            "park_reason": admission.parkReason,
-                            "park_attempts": admission.attempts,
-                            "park_waited_seconds": round(admission.waitedSeconds, 2),
-                            "park_details": dict(
-                                admission.outcome.details if admission.outcome else {}
-                            ),
-                        }
-                    response = await agent.chat(
-                        body.message,
-                        stream=True,
-                        session_id=session_id,
-                        metadata=metadata,
-                        model=getattr(body, "model", None) or None,
-                    )
-                    # P2-6（审计 2026-09-11）：usage 事件在 record() 同任务
-                    # 上下文内发射——任务级 ContextVar 必命中本次调用；原在
-                    # 生成器 finally 读全局 last_call，并发会话下会被其它
-                    # 请求的调用覆写（用量串号）。
-                    try:
-                        from neurova.core.usage_accounting import get_usage_accounting
-
-                        _last = get_usage_accounting().last_call()
-                        if _last:
-                            _emit("usage", {
-                                "session_id": session_id,
-                                "model": str(_last.get("model", "")),
-                                "provider": str(_last.get("provider", "")),
-                                "prompt_tokens": int(_last.get("prompt_tokens", 0)),
-                                "completion_tokens": int(_last.get("completion_tokens", 0)),
-                                "total_tokens": int(_last.get("total_tokens", 0)),
-                                "estimated": bool(_last.get("estimated", False)),
-                            })
-                    except Exception:  # noqa: BLE001 — usage 事件失败不影响本轮
-                        pass
-                    if isinstance(response, dict):
-                        turnSucceeded = True
-                        return {
-                            "text": response.get("text", str(response)),
-                            "reasoning": response.get("reasoning"),
-                            "tool_messages": response.get("tool_messages", []) or [],
-                        }
-                    turnSucceeded = True
-                    return {"text": str(response), "reasoning": None, "tool_messages": []}
-                except Exception as e:
-                    logger.warning("Console chat error: %s", e, exc_info=True)
-                    # 2026-09-07 修复：携带 error 标志，flush 阶段以 error 事件
-                    # 发给前端（此前该文本从不入 SSE → 前端气泡空白无提示）
-                    return {"text": f"Error: {str(e)}", "reasoning": None,
-                            "tool_messages": [], "error": str(e)}
-                finally:
-                    if admission is not None and admission.allowed:
-                        # 回填 pacing 统计；失败只点名不改写本轮结果（本轮成败已定）
-                        try:
-                            await reportAdmissionOutcome(admission, turnSucceeded)
-                        except Exception:  # noqa: BLE001
-                            logger.warning("让位闸回执失败（不影响本轮结果）", exc_info=True)
-                    # 收尾记账与 `_EMIT_DONE` 由外层 `run_chat` 统一负责：
-                    # 本函数被取消时这里的 await 会立刻再抛取消，把收尾挤掉——
-                    # 那正是"投递者一走，done 就永不再置"的来源。
-
-            async def _keepLease():
-                """回合的租约续期跟着**这一轮**走。
-
-                原先 `ledger.heartbeat()` 长在响应生成器的消费循环里：客户端一断连，
-                心跳跟着停，而 `reconcile_stale` 只认 `lease_expires_at`——实测断连
-                164s 后任务仍是 `chat@164s`（活着），run 却被扫成 `failed/process_died`。
-                台账说"进程死了"而进程好好的，就是说谎的事实源。
-                节流沿用 `AgentRunLedger.HEARTBEAT_SECONDS`，与原循环同尺。
-                """
-                while True:
-                    await asyncio.sleep(ledger.HEARTBEAT_SECONDS)
-                    await ledger.heartbeat()
-
-            def _closeTurn(outcome: Dict[str, Any]) -> None:
-                try:
-                    _emitFlush(outcome)
-                except Exception:  # noqa: BLE001 - 收尾记账失败不外泄，本轮成败已定
-                    logger.warning("回合收尾记账失败（不影响台账终态）", exc_info=True)
-                finally:
-                    queue.put_nowait(_EMIT_DONE)
-
-            async def run_chat():
-                keeper = asyncio.create_task(_keepLease())
-                try:
-                    outcome = await _runTurn()
-                except asyncio.CancelledError:
-                    # 真停止（/chat/stop 经 task_tracker cancel 这条任务）：
-                    # 以 stopped 事件收尾，done 恒发，前端状态机正常收口
-                    _closeTurn({"text": "", "reasoning": None,
-                                "tool_messages": [], "stopped": True})
-                    raise
-                except BaseException as e:  # noqa: BLE001 - 记账要先做完，异常照常外抛
-                    _closeTurn({"text": "", "reasoning": None,
-                                "tool_messages": [], "error": str(e)})
-                    raise
-                else:
-                    outcome = outcome if isinstance(outcome, dict) else {
-                        "text": str(outcome), "reasoning": None, "tool_messages": []
-                    }
-                    _closeTurn(outcome)
-                    # 原样回传给台账：`ledger.attach(task)` 的完成回调要从**任务结果**
-                    # 里读 error/stopped/parked 来定终态。外层若把它吞掉，出错轮会被
-                    # 记成 completed（实测：`test_chat_error_writes_failed_run` 当场红）。
-                    return outcome
-                finally:
-                    keeper.cancel()
-
-            task = asyncio.create_task(run_chat())
-            # P0-2：注册到 per-session asyncio 任务表，/chat/stop 据此真取消            #（旧 stop 端点空壳假停止——只回 success，后端照常跑完整轮耗 token）
-            from neurova.core.task_tracker import get_task_tracker
-
-            get_task_tracker().register_async_task(session_id, task, kind="chat")
-            # 台账终态单点收敛：task 完成回调（生成器早退也不丢）
-            ledger.attach(task)
             # 投递：只渲染，不记账。客户端走与留都不改变"这一轮落了什么"。
             while True:
                 try:

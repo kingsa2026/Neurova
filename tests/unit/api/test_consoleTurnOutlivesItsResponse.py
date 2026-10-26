@@ -295,3 +295,40 @@ def test_replayReconnect_terminatesAfterDetachedTurnEnds(shortLeaseStack, monkey
         f"带 replay_from 的重连没有正常收尾（已收到 {out['got']}）——它在尾随一个永不置位的 "
         "done，属 P-6 那一族「永不返回的 await」，每重连一次就泄一条挂住的响应任务"
     )
+
+
+# ---------------------------------------------------------------------------
+# 四、回合是否存在，不该由"有没有人在读"决定（第 0b 步）
+# ---------------------------------------------------------------------------
+
+
+def test_turnStartsWithoutAnySubscriber(shortLeaseStack, monkeypatch):
+    """POST 一个流式请求后**一个字节都不消费**，这一轮也必须照跑。
+
+    `create_task(run_chat())` 此前长在响应生成器体内：生成器不被 `__anext__` 就一行
+    都不执行，于是"回合是否存在"取决于"有没有人在读"——本仓实测踩过（§6-421 仍开①），
+    也是"断连续租"那格行为判据在进程内给不出取样时刻的根因。
+    """
+    agent = StagedAgent(gap=0.25, pieces=6, tail=0.2)
+    _patch(monkeypatch, agent)
+    body = console_module.ChatRequest(message="你好", session_id="s-nosub", stream=True)
+
+    async def scenario() -> dict:
+        resp = await console_module.post_console_chat(body, _make_request(), current_user=CURRENT_USER)
+        assert isinstance(resp, StreamingResponse), f"未走流式分支：{type(resp).__name__}"
+        # 刻意不取 body_iterator：没有订阅者，也应有回合
+        await asyncio.sleep(1.0)
+        midway = agent.emitted
+        await _wait_until(lambda: agent.completed, seconds=10.0)
+        return {"midway": midway, "emitted": agent.emitted, "completed": agent.completed,
+                "cancelSeen": agent.cancel_seen}
+
+    got = asyncio.run(scenario())
+    assert got["midway"] >= 1, (
+        f"没人消费响应体时，这一轮根本没被创建（起手数={got['midway']}）——"
+        "回合的存在与否该由请求边界决定，响应只是订阅者"
+    )
+    assert got["completed"] is True, (
+        f"无订阅者的回合没跑完（emitted={got['emitted']}/6、completed={got['completed']}、"
+        f"cancelSeen={got['cancel_seen']}）"
+    )
