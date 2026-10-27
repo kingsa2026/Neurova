@@ -54,8 +54,18 @@ def unreadyClient():
     agents = endpointsModule.get_app_state().get("agents")
     saved = dict(agents)
     agents.clear()
+    # 记忆面自 2026-10-26 起在 router 级挂 `requireIdentityForMemoryFace`（无凭证一律 401，
+    # 且覆盖不了——这是"门只有一道"的设计）。本档判的是"故障长什么样"，不是门本身，
+    # 故走生产入口签一张真 token；门自身的判据在
+    # `tests/unit/api/test_memoryWriteIdentityGate.py` 与 `test_memory_route_authorization.py`。
+    from neurova.api.auth import create_access_token
+
+    client = TestClient(app)
+    client.headers.update({
+        "Authorization": "Bearer " + create_access_token(
+            {"user_id": "1", "username": "tester", "role": "user"})})
     try:
-        yield TestClient(app)
+        yield client
     finally:
         agents.clear()
         agents.update(saved)
