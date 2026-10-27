@@ -193,6 +193,74 @@ class TestBothSidesRunTheSameShards:
                 "逐片判 60% 会假红；分片只该攒数据")
 
 
+class TestCoverageDataLandsWhereTheMergeStepLooks:
+    """跑测落的 `.coverage*` 必须落在合并那一步 `--data-dir` 指的目录里。
+
+    事故（构建 `cnb-4gd-1k5us1o1q#003` 实读）：stage 2「protected subset shards」**全绿**
+    （`2737 passed`），紧接的 stage 3「coverage gate」报
+    `没有找到任何覆盖率数据（/workspace/data/coverage）`，整条 `unit-tests` 因此判红。
+
+    根因是两侧各猜了一次路径：coverage 的缺省落点是**当前目录的 `./.coverage`**，
+    而合并那一步（`scripts/ci/coverage_report.py --data-dir data/coverage`）只认那个目录。
+    这中间没有任何东西把两者对上——`--cov` 不出报告（`--cov-report=`）时，数据写在哪
+    完全由 `COVERAGE_FILE` 决定，而此前**全仓没有任何一处设置它**（`grep COVERAGE_FILE` 零命中）。
+
+    为什么这条要落成判据：症状是"跑测说全绿、合并说没数据"，两个 stage 各说各话，
+    中间隔着一层环境变量的缺省值——那正是"配置漂移"最典型的隐身衣，红一次修一次不够。
+    """
+
+    @staticmethod
+    def _mergeDirectory(scripts: str) -> str:
+        """合并步 `--data-dir` 的实参（不是合并脚本自己的缺省值：CI 上它由作业显式传）。"""
+        for line in scripts.splitlines():
+            if "coverage_report.py" in line:
+                parts = line.split()
+                if "--data-dir" in parts:
+                    return parts[parts.index("--data-dir") + 1].strip("\"'")
+        return "data/coverage"      # 与 scripts/ci/coverage_report.py 的缺省同源
+
+    def testCnbLegPointsCoverageFileAtTheMergeDirectory(self):
+        scripts = "\n".join(line.split("#", 1)[0]
+                            for line in _cnbScripts(_cnbPipeline()).splitlines())
+        assert "COVERAGE_FILE=" in scripts, (
+            "cnb 侧的跑测步没有设置 `COVERAGE_FILE`：`--cov` 会把数据落在 `./.coverage`，"
+            "而合并步只找 `%s`——stage 2 全绿、stage 3 报「没有找到任何覆盖率数据」，"
+            "整条 unit-tests 判红（构建 cnb-4gd-1k5us1o1q）。" % self._mergeDirectory(scripts)
+        )
+        directory = self._mergeDirectory(scripts)
+        assert f"COVERAGE_FILE={directory}" in scripts or f'COVERAGE_FILE="{directory}' in scripts, (
+            f"`COVERAGE_FILE` 指的不是合并步那个目录（{directory}）：两处各猜一次路径，"
+            "对不上时跑测那一侧永远看不出问题"
+        )
+
+    def testGithubLegPointsCoverageFileAtTheMergeDirectory(self):
+        runs = "\n".join(line.split("#", 1)[0]
+                         for line in (_ghwRuns(_ghwJob()) + _ghwRuns(_ghwJob("coverage"))).splitlines())
+        assert "COVERAGE_FILE=" in runs, (
+            "GitHub 侧同样没设 `COVERAGE_FILE`：`data/coverage/.coverage*` 的上传与合并"
+            "会一并落空（`if-no-files-found: error` 才让它露头）"
+        )
+        assert "COVERAGE_FILE=data/coverage/" in runs, (
+            "GitHub 侧的 `COVERAGE_FILE` 没指进 `data/coverage/`——上传那一步只收那个目录"
+        )
+
+    def testEveryShardGetsItsOwnCoverageFile(self):
+        """同名文件在多片之间互相覆盖：实测三片写同一个 `./.coverage` 只会剩最后一片。
+
+        片号必须进文件名。cnb 侧走 `$(basename "$shard" .txt)`，GitHub 侧走 `matrix.shard`，
+        两边都要体现"这一片有它自己的那份"。
+        """
+        cnb = "\n".join(line.split("#", 1)[0] for line in _cnbScripts(_cnbPipeline()).splitlines())
+        assert "COVERAGE_FILE=\"data/coverage/.coverage.$(basename \"$shard\"" in cnb, (
+            "cnb 侧三片写同一个数据文件名——后一片把前一片覆盖掉，合并出来只剩一片的读数"
+        )
+        github = "\n".join(line.split("#", 1)[0]
+                          for line in _ghwRuns(_ghwJob()).splitlines())
+        assert "matrix.shard" in github.split("COVERAGE_FILE=")[1].splitlines()[0], (
+            "GitHub 侧的 `COVERAGE_FILE` 没带片号——矩阵里多个 job 会抢同一个文件"
+        )
+
+
 class TestShardEntriesReachPytestLiterally:
     """清单要**逐条**交到 pytest 手上，缺一条就是静默少跑一条。
 

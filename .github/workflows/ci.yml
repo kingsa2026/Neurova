@@ -148,7 +148,13 @@ jobs:
           done <<EOF
           $(grep -v '^#' "scripts/ci/protected_tests.${{ matrix.shard }}.txt" | grep -v '^[[:space:]]*$')
           EOF
-          python -m pytest -q --timeout 1500 --cov --cov-report= --cov-fail-under=0 "$@"
+          # `COVERAGE_FILE` 指进 `data/coverage/`：coverage 的缺省落点是 `./.coverage`，
+          # 而合并那一步（`scripts/ci/coverage_report.py --data-dir data/coverage`）只认那个目录。
+          # 两处各猜一次路径就是"跑测说全绿、合并说没数据"——本仓实测过一次（cnb 构建
+          # `cnb-4gd-1k5us1o1q`：stage 2 全绿，stage 3 报 `没有找到任何覆盖率数据`）。
+          # 片号进文件名，免得矩阵里多个 job 抢同一个文件。
+          COVERAGE_FILE=data/coverage/.coverage.shard-${{ matrix.shard }} \
+            python -m pytest -q --timeout 1500 --cov --cov-report= --cov-fail-under=0 "$@"
 
       - name: Upload coverage data
         uses: actions/upload-artifact@v4
