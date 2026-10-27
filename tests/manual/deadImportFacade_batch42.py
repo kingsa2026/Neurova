@@ -31,6 +31,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+from tests.ast_scan import parseSource
 from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
 
 WORK_ROOT = isolatedDataRoot(prefix="neurovaFacadeB42")
@@ -47,7 +48,7 @@ files = [l for l in subprocess.run(["git", "ls-files", "-z"], cwd=sys.argv[1],
 hits = []
 for f in files:
     try:
-        tree = ast.parse(io.open(f, encoding="utf-8", errors="replace").read())
+        tree = parseSource(io.open(f, encoding="utf-8", errors="replace").read())
     except Exception:
         continue
     for node in ast.walk(tree):

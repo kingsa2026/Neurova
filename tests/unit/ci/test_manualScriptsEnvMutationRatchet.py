@@ -31,6 +31,7 @@ import ast
 import pathlib
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 MANUAL_DIR = REPO_ROOT / "tests" / "manual"
@@ -93,7 +94,7 @@ def _topLevelEnvWrites(source: str) -> int:
     判据取 AST 代码形态而不是搜文本——脚本里提一句 `os.environ` 的注释不该被判红。
     """
     try:
-        tree = ast.parse(source)
+        tree = parseSource(source)
     except SyntaxError:
         return 0
     count = 0

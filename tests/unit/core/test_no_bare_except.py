@@ -10,6 +10,7 @@ import ast
 import pathlib
 
 import pytest
+from tests.ast_scan import parseSource
 
 NEUROVA_ROOT = pathlib.Path(__file__).resolve().parents[3] / "neurova"
 
@@ -17,7 +18,7 @@ NEUROVA_ROOT = pathlib.Path(__file__).resolve().parents[3] / "neurova"
 def _find_bare_except(filepath: pathlib.Path) -> list[int]:
     """返回文件中裸 except: 所在行号列表"""
     try:
-        tree = ast.parse(filepath.read_text(encoding="utf-8"))
+        tree = parseSource(filepath.read_text(encoding="utf-8"))
     except SyntaxError:
         return []
     bare_lines = []

@@ -29,6 +29,7 @@ import pytest
 
 from neurova.core.base_module import BaseModule, ModuleState
 from neurova.core.event_bus import Event, EventBus, get_event_bus, reset_event_bus
+from tests.ast_scan import parseSource
 
 BASE_MODULE_PATH = Path(__file__).resolve().parents[3] / "neurova" / "core" / "base_module.py"
 
@@ -109,7 +110,7 @@ def testNoEmitAttributeOnEventBus():
 
     判 AST 里的调用形态，不钉词——本文件说明文字也提到 emit，钉词会把自己钉红。
     """
-    tree = ast.parse(BASE_MODULE_PATH.read_text(encoding="utf-8"))
+    tree = parseSource(BASE_MODULE_PATH.read_text(encoding="utf-8"))
     offenders = []
     for node in ast.walk(tree):
         if (

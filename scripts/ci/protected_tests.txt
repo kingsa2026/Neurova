@@ -1,6 +1,14 @@
-# P0-6 CI 受保护测试子集（unit-tests job 跑这份清单）
+# P0-6 CI 受保护测试子集（unit-tests 这条腿跑的清单）——**索引**
 # 原则：只进当前确定全绿的测试；预存失败模块不进 CI，修复后逐个搬入。
-# 维护方式：每完成一个 P0/P1 项，把它的测试文件加进来。
+# 维护方式：每完成一个 P0/P1 项，把它的测试文件加进来（改本文件 = 改索引）。
+#
+# 本文件是**索引**，不是被跑的清单本身：CI 逐片跑同目录的
+# `protected_tests.<N>.txt`（片号的事实源是目录里有哪几片，作业不手抄片号）。
+# 索引与各片的并集必须逐条相等——漏跑、多跑、跨片重复登记都红，
+# 判据见 tests/unit/ci/test_protected_subset_shards.py。
+# 为什么分片：单一进程跑整份清单的峰值 RSS 实测 2.74~2.78 GiB 且仍在爬升，
+# 而这条腿 4 核 = 8 GiB 上限——构建 cnb-v9p-1k5pkvplt 的 code 137 就是被整段掐断。
+# **改完索引要按同一片数重切分片**（片内按目录族连续，族内共享 fixture，不许打散）。
 tests/unit/test_audit_regressions.py
 tests/unit/auth/test_password_hasher.py
 tests/unit/test_ci_parity_guard.py
@@ -1756,6 +1764,13 @@ tests/unit/collaboration/test_yieldConcurrencySlots.py
 # 存量 v1 库经生产装配点原地补列。
 # 逐文件单跑 9 passed
 tests/unit/core/test_agentRunStoreParkedStatus.py
+# 137 真根因的常驻判据（§6-419）：`BaseModule.subscribe_event` 只有订阅没有退订，
+# `EventBus.subscribe` 存的是 handler 本体、bound method 持有 `self` ⇒ 每一轮
+# `create_app()` 都把整张对象图钉在全局总线上（实测单进程峰值 10.8 GiB，CI 8 GiB
+# 处 137）。本档钉「订阅与退订成对 / stop 后模块可回收 / stop 只退自己的订阅 /
+# 基类有退订口且 stop 真调它」四格，并带生产装配点（orchestrator + agent_shutdown）
+# 的成对性——只改基类不改装配点时它一次都走不到。
+tests/unit/core/test_subscriptionIsPairedOnStop.py
 # 让位闸接进**真回合入口**（HTTP 面，不是直调闸）：§6-5 断的正是"闸写好了没人问"，
 # 而上一批活体量出只测 `check_yield_rules()` 永远看不见端点级缺陷（§6-44）。判据含
 # 恰好问一次、超限那轮真没跑（agent 零调用）、等待期每次入睡前续租（预算 200s > 租约
@@ -3542,6 +3557,10 @@ tests/unit/api/test_mcpServerFaceIsIdentityBoundary.py
 # ⑤ GET 必须 405——实测换面后它会开一条不结束的流，这条是挂起面的闸；
 # ⑥⑦⑧ 协商回声、清单与调用等于核心那份（stub 取样，钉的是来源不是条数）。
 # 面读数来源：本档只解析自己那一个受治模块（不枚举目录），HTTP 侧走真挂载入口＋真令牌。
+# 文件名订正（§6-403 收尾）：原名 `testMcpFaceRidesSdkTransport.py` 不在活的
+# `python_files` 口径内（只认 `test_*` / `test[A-Z]*`），目录跑与 CI 都**静默不收**——
+# 它自 2026-09 起从没被执行过，却一直挂在受保护子集里占着「已覆盖」的位置。
+# 现名保留驼峰段、补收集前缀，本机复跑 8 passed。
 tests/unit/api/test_mcpFaceRidesSdkTransport.py
 # 批 110（§6-350）：MCP 面的**技能腿**必须走 ToolExecutor 那道咽喉，判据落在这个核心档里。
 # 三格：① 咽喉读到的分派逐字段等于请求（技能名与参数不许被面改写）；② 无 agent 时 fail-closed，
@@ -3556,6 +3575,10 @@ tests/unit/workflow/test_mcp_server_face.py
 # Authorization，§3 身份单通道）；一条按 AST 认"判定确实委托 `agent_access`、本模块没自己读
 # owner_user_id"的形状格——按词扫会被 docstring 里的同名说明骗到（形态集 241/268 那一族）。
 # 本档不枚举目录：形状格只解析自己受治的那一个模块（不触发解析预算门禁）。
+# 文件名订正（§6-403 收尾）：原名 `testMcpFaceCallerTier.py` 不在活的
+# `python_files` 口径内（只认 `test_*` / `test[A-Z]*`），目录跑与 CI 都**静默不收**——
+# 它自 2026-09 起从没被执行过，却一直挂在受保护子集里占着「已覆盖」的位置。
+# 现名保留驼峰段、补收集前缀，本机复跑 4 passed。
 tests/unit/api/test_mcpFaceCallerTier.py
 # 宽域 A/B 驱动的读数契约（§6-359）：汇总行两种形态都要读得到、抽取条数必须与汇总报数对账、
 # 没产出汇总行即 AB_FAIL、仅本树红那格在基线树跑不出亦 AB_FAIL、非本仓形态显式 AB_SKIP。

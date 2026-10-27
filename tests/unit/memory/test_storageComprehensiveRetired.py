@@ -42,6 +42,7 @@ import importlib.util
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OLD_FILE = REPO_ROOT / "tests" / "unit" / "memory" / "test_storage_comprehensive.py"
@@ -82,7 +83,7 @@ def _referenceLines(source: str) -> list:
 
 
 def _liveStorageMethods() -> tuple:
-    tree = ast.parse(STORAGE_PY.read_text(encoding="utf-8"))
+    tree = parseSource(STORAGE_PY.read_text(encoding="utf-8"))
     cls = next(
         n for n in ast.walk(tree)
         if isinstance(n, ast.ClassDef) and n.name == "MemoryStorage"
@@ -147,7 +148,7 @@ def test_真JSON存储与隔离面确有活档在守():
     iso = REPO_ROOT / "tests" / "unit" / "memory" / "test_isolation_unified.py"
     for path in (live, iso):
         assert path.exists(), f"替代覆盖档不见了：{path.relative_to(REPO_ROOT).as_posix()}"
-    tree = ast.parse(live.read_text(encoding="utf-8"))
+    tree = parseSource(live.read_text(encoding="utf-8"))
     cases = [
         n.name for n in ast.walk(tree)
         if isinstance(n, ast.FunctionDef) and n.name.startswith("test")
@@ -176,7 +177,7 @@ def test_扫描器真会咬():
         "    def close(self):\n"
         "        pass\n"
     )
-    tree = ast.parse(fake)
+    tree = parseSource(fake)
     cls = next(n for n in ast.walk(tree) if isinstance(n, ast.ClassDef))
     found = {n.name for n in cls.body if isinstance(n, ast.FunctionDef)}
     assert DEAD_METHODS & found == {"close"}, (

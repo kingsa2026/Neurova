@@ -16,6 +16,7 @@ import subprocess
 from pathlib import Path
 from tests import ast_scan  # noqa: E402
 from typing import Dict, List, Optional, Set
+from tests.ast_scan import parseSource
 
 _REPO = Path(__file__).resolve().parents[3]
 _LANES = ("neurova/knowledge/",)
@@ -55,7 +56,7 @@ def _importsOf(relPath: str) -> List[str]:
     """
     raw = _git("show", "HEAD:" + relPath)
     try:
-        tree = ast.parse(raw.decode("utf-8"))
+        tree = parseSource(raw.decode("utf-8"))
     except (SyntaxError, UnicodeDecodeError):
         return []
     found: List[str] = []

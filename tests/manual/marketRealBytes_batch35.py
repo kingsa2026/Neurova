@@ -32,6 +32,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+from tests.ast_scan import parseSource
 from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
 
 WORK_ROOT = isolatedDataRoot(prefix="neurovaMarketB35")
@@ -65,7 +66,7 @@ def _cacheLookerHosts(sourceText=None):
         sourceText = (Path(__file__).resolve().parents[2] / "neurova" / "skills"
                       / "market_registry.py").read_text(encoding="utf-8")
     hosts = set()
-    for node in ast.walk(ast.parse(sourceText)):
+    for node in ast.walk(parseSource(sourceText)):
         if not isinstance(node, ast.FunctionDef):
             continue
         for inner in ast.walk(node):

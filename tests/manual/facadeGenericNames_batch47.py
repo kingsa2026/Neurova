@@ -33,6 +33,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+from tests.ast_scan import parseSource
 from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
@@ -60,7 +61,7 @@ files = [l for l in subprocess.run(["git","-C",root,"ls-files","-z"],
 generic, shadowed, parsed = [], [], 0
 for rel in files:
     try:
-        tree = ast.parse(io.open(root + "/" + rel, encoding="utf-8", errors="replace").read())
+        tree = parseSource(io.open(root + "/" + rel, encoding="utf-8", errors="replace").read())
     except Exception:
         continue
     parsed += 1

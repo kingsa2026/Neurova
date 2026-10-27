@@ -33,6 +33,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 _TESTS_DIR = Path(__file__).resolve().parents[2]
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -158,7 +159,7 @@ def _guardSelfCaseNames() -> list:
     """
     text = Path(__file__).read_text(encoding="utf-8")
     found = []
-    for node in ast.parse(text).body:
+    for node in parseSource(text).body:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         if node.name.startswith(_CASE_PREFIX) and not _matchesCollectionPattern(

@@ -33,6 +33,7 @@ import pytest
 from neurova.core import vector_math
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 NEUROVA_ROOT = Path(vector_math.__file__).resolve().parent.parent
 SINGLE_FACE = "core/vector_math.py"
@@ -191,28 +192,28 @@ def testScanFaceIsWideEnough():
 
 def testCosineMathProbeHasTeeth():
     """排除型断言在缺功能时会自动成立——先证探测器抓得到真实现，且不被名字、注释或邻居骗。"""
-    dense = ast.parse(
+    dense = parseSource(
         "def fake(a, b):\n"
         "    dot = sum(x * y for x, y in zip(a, b))\n"
         "    return dot / (math.sqrt(sum(x * x for x in a)) or 1.0)\n"
     ).body[0]
-    denseTwoNorms = ast.parse(
+    denseTwoNorms = parseSource(
         "def fake(a, b):\n"
         "    na = math.sqrt(sum(x * x for x in a))\n"
         "    nb = math.sqrt(sum(y * y for y in b))\n"
         "    return sum(p * q for p, q in zip(a, b)) / (na * nb)\n"
     ).body[0]
-    namedButNotMath = ast.parse("def cosineSimilarity(a, b):\n    return 0.0\n").body[0]
-    normalizer = ast.parse(
+    namedButNotMath = parseSource("def cosineSimilarity(a, b):\n    return 0.0\n").body[0]
+    normalizer = parseSource(
         "def vector_norm(a):\n    return math.sqrt(sum(x * x for x in a))\n"
     ).body[0]
-    accumulator = ast.parse(
+    accumulator = parseSource(
         "def sim(a, b):\n"
         "    dot = 0.0\n    na = 0.0\n    nb = 0.0\n"
         "    for x, y in zip(a, b):\n        dot += x * y\n        na += x * x\n        nb += y * y\n"
         "    return dot / (math.sqrt(na) * math.sqrt(nb))\n"
     ).body[0]
-    sparse = ast.parse(
+    sparse = parseSource(
         "from typing import Dict\n"
         "def cosine(a: Dict[str, float], b: Dict[str, float]) -> float:\n"
         "    keys = set(a) | set(b)\n"
@@ -223,7 +224,7 @@ def testCosineMathProbeHasTeeth():
     assert _computesCosineMath(dense), "一行式假样本必须抓到"
     assert _computesCosineMath(denseTwoNorms), "先算两条范数再相除的形也要抓到"
     assert _computesCosineMath(accumulator), "for 累加写法（vector_index 改前那形）必须抓到"
-    singleNormVar = ast.parse(
+    singleNormVar = parseSource(
         "import math\n"
         "def f(a, b):\n"
         "    dot = sum(x * y for x, y in zip(a, b))\n"
@@ -257,7 +258,7 @@ def testSparseCosineRetiredWithItsModuleAndMustNotBeReintroducedAsDense():
         "memory_index 退净，恢复它要么给出完整稀疏消费者，要么就是第二条并行向量面"
     )
     singleSource = (NEUROVA_ROOT / SINGLE_FACE).read_text(encoding="utf-8")
-    tree = ast.parse(singleSource)
+    tree = parseSource(singleSource)
     sparseInFace = [
         n.name for n in ast.walk(tree)
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and _isSparseSignature(n)
@@ -272,7 +273,7 @@ def testEveryKnownSiteNowCallsTheSingleFace():
     """消费点逐个正检：文件里要有对单源的调用，且不再自己算。"""
     for rel in SITE_MODULES:
         source = (NEUROVA_ROOT / rel).read_text(encoding="utf-8")
-        tree = ast.parse(source)
+        tree = parseSource(source)
         calls = [
             n for n in ast.walk(tree)
             if isinstance(n, ast.Call) and ast.unparse(n.func).startswith("vector_math.")
@@ -294,7 +295,7 @@ def testCallerSidePreconditionStillSoundsTheAlarm():
 
     assert not any(
         _computesCosineMath(n)
-        for n in ast.walk(ast.parse(inspect_source(similarity_fusion)))
+        for n in ast.walk(parseSource(inspect_source(similarity_fusion)))
     ), "similarity_fusion 不该再自己算余弦"
     with pytest.raises(ValueError):
         similarity_fusion.cosine([1.0, 0.0, 0.0], [1.0])
@@ -360,7 +361,7 @@ def testZeroVectorThresholdHasNoSecondCopy():
     offenders = []
     for rel in sorted(set(ZERO_VECTOR_CONSUMERS)):
         source = (NEUROVA_ROOT / rel).read_text(encoding="utf-8")
-        for node in ast.walk(ast.parse(source)):
+        for node in ast.walk(parseSource(source)):
             if not isinstance(node, ast.Compare):
                 continue
             rendered = ast.unparse(node)
@@ -387,7 +388,7 @@ def testZeroVectorProbeHasTeeth():
     """反空转：探测器对合成坏样本必须点名，对合规写法不许误报。"""
     def _offenders(snippet: str) -> list:
         found = []
-        for node in ast.walk(ast.parse(snippet)):
+        for node in ast.walk(parseSource(snippet)):
             if isinstance(node, ast.Compare):
                 rendered = ast.unparse(node)
                 if "1e-9" in rendered or ("abs(" in rendered and "1e-" in rendered):

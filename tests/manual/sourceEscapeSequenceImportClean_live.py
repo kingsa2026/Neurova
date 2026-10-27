@@ -23,6 +23,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+from tests.ast_scan import parseSource
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
@@ -71,7 +72,7 @@ def _gitBlob(rel: str, rev: str) -> str:
 def _docstringValues(src: str) -> list:
     """按源码顺序取模块/类/函数的全部文档字符串值（转义已按该版本语义解算）。"""
     out = []
-    for node in ast.walk(ast.parse(src)):
+    for node in ast.walk(parseSource(src)):
         if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             doc = ast.get_docstring(node, clean=False)
             if doc is not None:
@@ -84,7 +85,7 @@ def _astDocByQualname(src: str, qual):
 
     找不到就直接抛——"取到 None 然后比通过"是弱保护那一形，这里宁可红在装配上。
     """
-    tree = ast.parse(src)
+    tree = parseSource(src)
     if qual is None:
         return ast.get_docstring(tree, clean=False)
     clsName, funcName = qual.split(".")

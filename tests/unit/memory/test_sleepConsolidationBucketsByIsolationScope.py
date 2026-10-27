@@ -18,6 +18,7 @@ import ast
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from tests.ast_scan import parseSource
 from tests.cognitive_body_store import bodyManager
 
 AGENT = "scopebucket"
@@ -230,7 +231,7 @@ def test_writeBackDoesNotBypassTheOwnershipGate():
     target = Path(__file__).resolve().parents[3] / "neurova" / "cognitive_layers" \
         / "memory_layer" / "sleep_writeback.py"
     assert target.exists(), "写回档不在 expected 处（%s）⇒ 这格会空转" % target
-    tree = ast.parse(target.read_text(encoding="utf-8"))
+    tree = parseSource(target.read_text(encoding="utf-8"))
 
     bypass = []
     scoped = 0

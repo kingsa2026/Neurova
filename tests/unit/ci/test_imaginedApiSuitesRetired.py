@@ -78,6 +78,7 @@ import pathlib
 import re
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 TESTS_ROOT = REPO_ROOT / "tests"
@@ -242,7 +243,7 @@ class TestImaginedApiSuitesRetired:
         offenders = []
         for path, code in _scanCollectedTests():
             try:
-                tree = ast.parse(code)
+                tree = parseSource(code)
             except SyntaxError:
                 continue
             for holder, flags in _wholeFileImportProbe(tree):
@@ -276,7 +277,7 @@ class TestImaginedApiSuitesRetired:
 
     def test_probeDetectorBitesTheSilentSkipShape(self):
         """静默 skip 探测自己的对照：违规样本被抓、裸 import 与单格 importorskip 不被抓。"""
-        bad = ast.parse(
+        bad = parseSource(
             "import unittest\n"
             "try:\n"
             "    from neurova.projects.project_manager import ProjectManager\n"
@@ -291,7 +292,7 @@ class TestImaginedApiSuitesRetired:
         )
         assert _wholeFileImportProbe(bad), "整档静默 skip 的形状认不出 ⇒ 上一条判据恒真"
 
-        good = ast.parse(
+        good = parseSource(
             "import pytest\n"
             "from neurova.security.rbac import RBACManager\n"
             "\n"
@@ -315,7 +316,7 @@ class TestImaginedApiSuitesRetired:
         for rel, floor in honest.items():
             path = REPO_ROOT / rel
             assert path.is_file(), "承接真实契约的档不见了：%s" % rel
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+            tree = parseSource(path.read_text(encoding="utf-8", errors="replace"))
             names = [n.name for n in ast.walk(tree)
                      if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
                      and (n.name.startswith("test_") or (n.name.startswith("test") and len(n.name) > 4

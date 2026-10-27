@@ -33,6 +33,7 @@ import pytest
 from neurova.llm.generators import retention as rt
 from neurova.llm.generators import task_ledger as tl
 from neurova.llm.generators.task_ledger import GenerationTaskLedger, TaskRecord
+from tests.ast_scan import parseSource
 
 pytestmark = pytest.mark.timeout(60)
 
@@ -111,7 +112,7 @@ def _parseSrc(src: str, rel: str = "<inline>") -> ast.AST:
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", SyntaxWarning)
-        return ast.parse(src, filename=rel)
+        return parseSource(src, filename=rel)
 
 
 #: 收集期现算的扫描面（import 现场反推，不手抄清单）

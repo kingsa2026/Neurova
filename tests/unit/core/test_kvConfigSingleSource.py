@@ -23,6 +23,7 @@ from pathlib import Path
 from tests import ast_scan
 
 import pytest
+from tests.ast_scan import parseSource
 
 REPO = Path(__file__).resolve().parents[3]
 PKG = REPO / "neurova"
@@ -58,7 +59,7 @@ def _kvConfigManagerClasses(root: Path) -> list[str]:
     hits = []
     for ref in ast_scan.sourceRefsUnder(root, ".py", ast_scan.textHints("ConfigManager")):
         try:
-            tree = ast.parse(ref.code)
+            tree = parseSource(ref.code)
         except SyntaxError:
             continue
         for node in ast.walk(tree):
@@ -99,7 +100,7 @@ def test_livePlanningFacesUntouched():
     `:402` 的 `_convert_env_value` 里躺着，把 load 的分级改回去这一格照样通过（存在性断言
     被别处同名满足，与 §6-106 那族同形）。现按 AST 取 `load` 函数体本身来判。
     """
-    tree = ast.parse((PKG / "core" / "config.py").read_text(encoding="utf-8"))
+    tree = parseSource((PKG / "core" / "config.py").read_text(encoding="utf-8"))
     cls = next(n for n in ast.walk(tree)
                if isinstance(n, ast.ClassDef) and n.name == "ConfigManager")
     load = next(n for n in cls.body

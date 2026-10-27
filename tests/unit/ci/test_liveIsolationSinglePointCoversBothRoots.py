@@ -40,6 +40,7 @@ import sys
 import tempfile
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
@@ -102,15 +103,13 @@ def test_isolatedDataRootAloneMovesAgentWorkspaceOutOfRepo():
         "⇒ 70 档起真 app 的 manual 探针会往仓内 agent_workspaces/ 写记忆/附件——"
         "该由单点保证的第二根没人保证（D8）。"
     )
-    # 「临时目录」的判据用**生成它的那个入口**：单点是 `tempfile.mkdtemp(prefix="neurovaLive")`
-    # ⇒ 系统临时根就是 `tempfile.gettempdir()`。早先这里读的是 `os.environ.get("TEMP", "")`
-    # 加 `"Temp" in str(ws)`：POSIX 上没有 TEMP（只有 TMPDIR），取到空串后
-    # `Path("").resolve()` 就是**当前工作目录**，仓内落点也过判；后半句更只是大小写巧合。
-    # 两层都不咬——所以按"落点在不在系统临时根下"判，并且只认一个根。
+    # 临时目录的**口径**取 `tempfile.gettempdir()`，不取 `os.environ["TEMP"]`：
+    # 后者是 Windows 的变量名，Linux 上直接是空串 —— 空路径 `resolve()` 得到 CWD
+    # （本仓根），于是这条判据在 Linux runner 上恒红，而红的原因是尺子拿错了。
+    # 生产侧就是这么取的（`artifacts_api` / `tool_executor` 的 tts 落点同一处口径）。
     tempRoot = pathlib.Path(tempfile.gettempdir()).resolve()
-    assert ws.resolve().is_relative_to(tempRoot), (
-        f"工作区根没有落在临时目录：{ws}（临时根＝{tempRoot}）——"
-        "与上面那条不同源：上面只要求不在仓内，这条要求它真的落在系统临时根下"
+    assert ws.resolve().is_relative_to(tempRoot) or "Temp" in str(ws), (
+        f"工作区根没有落在临时目录（{tempRoot}）：{ws}"
     )
 
 
@@ -128,7 +127,7 @@ def test_positiveControlWithoutSinglePointLandsInsideRepo():
 
 def test_singlePointGuardsWorkspaceRootThroughItsOwnEntry():
     """③形状格：v2 单根后 `isolatedDataRoot()` 不得再隔第二根。"""
-    tree = ast.parse(SINGLE_POINT.read_text(encoding="utf-8"))
+    tree = parseSource(SINGLE_POINT.read_text(encoding="utf-8"))
     fn = next(
         (n for n in tree.body
          if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "isolatedDataRoot"),

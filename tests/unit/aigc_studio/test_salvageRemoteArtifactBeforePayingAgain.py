@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from tests.ast_scan import parseSource
 
 pytestmark = pytest.mark.timeout(60)
 
@@ -266,7 +267,7 @@ class TestReconcileBoundaryUnchanged:
         repo = Path(__file__).resolve().parents[3]
         found = []
         for rel in ("neurova/aigc_studio/services.py", "neurova/aigc_studio/video_reconcile.py"):
-            tree = ast.parse((repo / rel).read_text(encoding="utf-8"))
+            tree = parseSource((repo / rel).read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
                         and node.name.startswith("salvage"):

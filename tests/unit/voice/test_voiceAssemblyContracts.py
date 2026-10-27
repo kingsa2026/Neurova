@@ -25,13 +25,14 @@ import ast
 import asyncio
 import dataclasses
 import pathlib
+from tests.ast_scan import parseSource
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
 
 
 def _attrReadsOn(path: pathlib.Path, varName: str, attrPrefix: str = "") -> set:
     """收集生产源码里 `varName.<attr>` 的属性读数（不是字符串包含，按 AST 形态判）。"""
-    tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    tree = parseSource(path.read_text(encoding="utf-8", errors="replace"))
     found = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
@@ -42,7 +43,7 @@ def _attrReadsOn(path: pathlib.Path, varName: str, attrPrefix: str = "") -> set:
 
 def _dictKeysReadBy(path: pathlib.Path, varName: str) -> set:
     """收集 `varName.get("字面键")` 的键名。"""
-    tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    tree = parseSource(path.read_text(encoding="utf-8", errors="replace"))
     found = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
@@ -70,7 +71,7 @@ class TestCrossModuleFieldContracts:
     def testDetectorHasTeethForFieldDrift(self):
         """自证：真改一个不存在的键名，探测器必须报出来（否则上面那格是空转）。"""
         sample = "def f():\n    return result.notARealField and result.audio_data\n"
-        tree = ast.parse(sample)
+        tree = parseSource(sample)
         read = {n.attr for n in ast.walk(tree)
                 if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "result"}
         assert "notARealField" in read
@@ -92,7 +93,7 @@ class TestCrossModuleFieldContracts:
 
     def testDetectorHasTeethForKeyDrift(self):
         sample = 'def f():\n    return result.get("text") or result.get("ghost_key")\n'
-        tree = ast.parse(sample)
+        tree = parseSource(sample)
         got = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \

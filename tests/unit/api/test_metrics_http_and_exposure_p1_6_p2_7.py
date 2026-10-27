@@ -15,6 +15,7 @@ import pytest
 
 prometheus_client = pytest.importorskip("prometheus_client")
 from prometheus_client import REGISTRY  # noqa: E402
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 APIDIR = PROJECT_ROOT / "neurova" / "api"
@@ -137,7 +138,7 @@ class TestCacheHitRateExport:
         src = io.open(
             PROJECT_ROOT / "neurova" / "core" / "cache.py", encoding="utf-8"
         ).read()
-        tree = ast.parse(src)
+        tree = parseSource(src)
         found = [node for node in tree.body
                  if isinstance(node, ast.FunctionDef) and node.name == "iter_caches"]
         assert found, "这份模块里没有 iter_caches——下面的走查会空转成恒真"

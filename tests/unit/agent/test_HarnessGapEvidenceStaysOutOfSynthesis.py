@@ -35,6 +35,7 @@ import ast
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 GATES_PY = PROJECT_ROOT / "neurova" / "agent" / "gates.py"
@@ -119,7 +120,7 @@ class TestPurposeIsolation:
 
     def test_6_synthesisEntryGatesOnCapabilityKindsOnly(self):
         """钉代码形态：自主创建的入口判 `capabilityKinds`，不再判 `hasGap`。"""
-        tree = ast.parse(CHAT_PIPELINE_PY.read_text(encoding="utf-8"))
+        tree = parseSource(CHAT_PIPELINE_PY.read_text(encoding="utf-8"))
         target = next(
             (n for n in ast.walk(tree)
              if isinstance(n, ast.AsyncFunctionDef) and n.name == "_check_nl_synthesis"),
@@ -130,7 +131,7 @@ class TestPurposeIsolation:
         assert "not gap.hasGap" not in body, "入口仍在用 hasGap——harness 族会误驱动自主创建"
 
     def test_7_pureGatesStaySideEffectFree(self):
-        tree = ast.parse(GATES_PY.read_text(encoding="utf-8"))
+        tree = parseSource(GATES_PY.read_text(encoding="utf-8"))
         offenders = [
             node.lineno for node in ast.walk(tree)
             if isinstance(node, ast.Call)

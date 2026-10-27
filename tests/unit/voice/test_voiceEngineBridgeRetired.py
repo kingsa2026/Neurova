@@ -39,6 +39,7 @@ from pathlib import Path
 from tests import ast_scan
 
 import pytest
+from tests.ast_scan import parseSource
 
 REPO = Path(__file__).resolve().parents[3]
 PROD_ROOT = REPO / "neurova"
@@ -76,7 +77,7 @@ def test_liveVoiceFacesStillWired():
     """反向对照：活的三件必须都还在——本批改的是不参与链路的桥，不是语音能力本身。"""
     # ① 渠道适配器可构造（channels/voice.py）
     chan = PROD_ROOT / "channels" / "voice.py"
-    names = {n.name for n in ast.walk(ast.parse(chan.read_text(encoding="utf-8")))
+    names = {n.name for n in ast.walk(parseSource(chan.read_text(encoding="utf-8")))
              if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
     assert {"VoiceAdapter", "create_voice_adapter"} <= names, "渠道侧语音适配器不见了"
     # ② 引擎分派在位（voice_engine.py 的 process + 两条内部支路）

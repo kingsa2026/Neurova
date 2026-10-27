@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from tests.ast_scan import parseSource
 
 ROOT = Path(__file__).resolve().parents[3]
 ENDPOINTS = ROOT / "neurova/api/endpoints"
@@ -24,7 +25,7 @@ def test_ordered_route_contract():
         assert route.operation_id is None
         path_format = expected["path"].replace(":path}", "}")
         assert route.unique_id == re.sub(r"\W", "_", expected["name"] + path_format) + "_" + expected["method"].lower()
-        function = ast.parse(inspect.getsource(route.endpoint)).body[0]
+        function = parseSource(inspect.getsource(route.endpoint)).body[0]
         assert ast.unparse(function.args) == expected["signature"]
         assert ast.get_docstring(function) == expected["doc"]
         decorator = expected["decorator"].replace("router.", "deliveries_router.", 1) if expected["path"].startswith("/trigger/deliveries") else expected["decorator"]
@@ -36,7 +37,7 @@ def test_leaf_domains_own_routes_and_reexport(domain):
     from neurova.api.endpoints import neurflow_api as api
     path = ENDPOINTS / f"neurflow_{domain}.py"
     assert path.is_file(), f"missing leaf domain: {domain}"
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+    tree = parseSource(path.read_text(encoding="utf-8"))
     functions = {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
     routes = [r for r in api.router.routes if r.endpoint.__module__.endswith(f"neurflow_{domain}")]
     assert len(routes) == 9
@@ -66,7 +67,7 @@ def test_exports_and_assembly_stay_explicit():
         for name, value in vars(module).items():
             if callable(value) and getattr(value, "__module__", None) == module.__name__:
                 assert getattr(api, name) is value
-    tree = ast.parse((ENDPOINTS / "neurflow_api.py").read_text(encoding="utf-8"))
+    tree = parseSource((ENDPOINTS / "neurflow_api.py").read_text(encoding="utf-8"))
     includes = [ast.unparse(n.value) for n in tree.body if isinstance(n, ast.Expr) and isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Attribute) and n.value.func.attr == "include_router"]
     assert includes == ["router.include_router(_stores_router)", "router.include_router(_triggers_router)", "router.include_router(_deliveries_router)"]
     retained = {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}

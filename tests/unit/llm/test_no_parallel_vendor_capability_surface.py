@@ -39,6 +39,7 @@ from pathlib import Path
 import pytest
 
 from neurova.llm.capability_detector import infer_capabilities
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -68,7 +69,7 @@ FAMILY_EXPECTATIONS = {
 
 def _mountedPrefixes() -> list:
     """按 AST 取 ``ENDPOINT_MODULES`` 各元组的第二项（挂载前缀）。"""
-    tree = ast.parse(ENDPOINT_INIT.read_text(encoding="utf-8", errors="replace"))
+    tree = parseSource(ENDPOINT_INIT.read_text(encoding="utf-8", errors="replace"))
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and any(
             isinstance(t, ast.Name) and t.id == "ENDPOINT_MODULES" for t in node.targets

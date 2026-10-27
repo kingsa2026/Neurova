@@ -118,7 +118,8 @@ def classify(entry):
     sid = entry["id"]
     d = SKILLS_DIR / sid
     hasBytes = (d / "SKILL.md").exists() or bool(list(d.glob("*.py")))
-    return sid, hasBytes, hasExecutorMapping(sid)
+    mapped = hasExecutorMapping(sid)
+    return sid, hasBytes, mapped
 
 
 perEntry = [classify(r) for r in rows]

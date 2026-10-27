@@ -21,6 +21,7 @@ import pytest
 
 prometheus_client = pytest.importorskip("prometheus_client")
 from prometheus_client import REGISTRY  # noqa: E402
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 APP_PY = PROJECT_ROOT / "neurova" / "api" / "app.py"
@@ -34,7 +35,7 @@ def _metrics_endpoint_source() -> str:
     """
     src = APP_PY.read_text(encoding="utf-8")
     lines = src.splitlines()
-    tree = ast.parse(src)
+    tree = parseSource(src)
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name == "_register_metrics_endpoint":
             body = lines[node.lineno - 1 : node.end_lineno]

@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from neurova.collaboration.neurflow.builtin import exec_approval
+from tests.ast_scan import parseSource
 
 #: 审批节点在测试里等多久（秒）。
 #:
@@ -289,7 +290,7 @@ class TestApprovalWaitBudgetStaysUnderTheWall:
              "值挂在模块常量上也要算得出来"),
         )
         for source, expectOver, why in cases:
-            tree = ast.parse(source)        # 合成样本自己先要合法
+            tree = parseSource(source)        # 合成样本自己先要合法
             table = {
                 stmt.targets[0].id: stmt.value
                 for stmt in tree.body
