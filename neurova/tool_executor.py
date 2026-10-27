@@ -2219,21 +2219,8 @@ class ToolExecutor:
             stream=True,
             initiator_agent=self._agent,
         )
-        # P2-5：完成结果投递父会话邮箱——嵌套模式下工具轮
-        # 间隙排空注入做显式回灌；后台模式下是逐轮可见的回传通道。fail-open。
-        try:
-            if isinstance(result, dict) and result.get("success") is not False:
-                from neurova.agent.mailbox import get_agent_mailbox
-
-                _summary = str(
-                    result.get("reply") or result.get("result") or result.get("output") or ""
-                ).strip()
-                get_agent_mailbox().push(
-                    str(session_id or ""),
-                    f"[子代理 {result.get('agent_id', '') or ''} 回传] {_summary[:400]}",
-                )
-        except Exception:  # noqa: BLE001
-            logger.debug("子代理邮箱投递失败(忽略)", exc_info=True)
+        # 终态回灌父会话邮箱由蜂群侧一处投递（`SwarmManager._notifyParentMail`）：
+        # 这里拿到的 result 在后台模式下只是 pending 回执，没有正文可投。
         return result
 
     async def _execute_subagent_status(self, params: Dict) -> Dict:
@@ -2628,8 +2615,14 @@ class ToolExecutor:
         executor = get_workflow_executor()
         # 请求级身份替代硬编码 "agent"：画布内知识库节点引用用户级远程配置
         # （默认私有）时按属主校验；无身份回退 "agent"（隔离校验将如实拒绝）
+        # agent_id 一并带进执行上下文：画布里的 agent 节点派生子 Agent 后，报告要
+        # 归进**发起这次画布的 Agent** 的上下文池（§6-418 仍开②）——REST 那条执行链
+        # 早就传了 agent_id，工具这条链漏传，`ResolutionContext.agent_id` 便恒为 None。
+        canvas_user_id, canvas_agent_id = "agent", None
         try:
-            canvas_user_id = str(self._agent_identity()[0] or "") or "agent"
+            identityUser, identityAgent = self._agent_identity()
+            canvas_user_id = str(identityUser or "") or "agent"
+            canvas_agent_id = str(identityAgent or "") or None
         except Exception:  # noqa: BLE001 - 身份解析失败不阻断画布执行
             canvas_user_id = "agent"
         try:
@@ -2638,6 +2631,7 @@ class ToolExecutor:
                 workflow,
                 inputs=inputs,
                 user_id=canvas_user_id,
+                agent_id=canvas_agent_id,
                 session_id=self._canvas_session_id(),
                 instance=instance,
             )
@@ -3259,6 +3253,12 @@ class ToolExecutor:
         # （T-10a 的 `tool_call_id` 与 T-10b 的重建都以它为唯一寻址）。
         # 属主派生复用本模块既有的 `_agent_identity()`，不另写第二份判据。
         _user_id, _owner_id = self._agent_identity()
+        # 调用方点名属主时按它读：蜂群下钻的目标会话落在**子 Agent** 的目录下，
+        # 用主 Agent 的属主去读等于换一个目录找同一个地址。缺省形态不动——Issue #90
+        # 那条判据钉的就是「不带 agent_id 时读侧必须用当前属主，不得用空值」。
+        _targetAgentId = str((params or {}).get("agent_id") or "").strip()
+        if _targetAgentId:
+            _owner_id = _targetAgentId
         history = repo.get_history(
             agent_id=str(_owner_id or ""), session_id=session_id
         ) or []
@@ -3314,6 +3314,43 @@ class ToolExecutor:
             "timestamp": entry.get("timestamp"),
             "source": "session_ledger",
             "content": entry.get("result"),
+        }
+
+    async def _recallSessionTranscript(self, agentId: str, params: Dict) -> Dict:
+        """整取模式：按 (agent_id, session_id) 取回那条会话的全部原文。
+
+        蜂群旁路只投终态信封与指针，正文靠这里下钻取回。走 `get_history` 的日期
+        聚合口——它自己扫该会话在各日期文件里的分片，调用方无须知道
+        `session_<id>_<date>.json` 这个落盘命名。取不到就如实报错并点名该核对
+        哪两个字段，不伪装空结果为成功（那条会话确实可能还没落盘）。
+        """
+        sessionId = str(params.get("session_id") or "").strip()
+        if not sessionId:
+            return {
+                "error": "整取模式需要 session_id（取终态信封 transcript.session_id 的值）"
+            }
+
+        repo = getattr(self._agent, "session_repo", None)
+        if repo is None:
+            from neurova.session_repository import get_session_repository
+
+            repo = get_session_repository()
+
+        history = await asyncio.to_thread(
+            repo.get_history, agent_id=agentId, session_id=sessionId
+        ) or []
+        if not history:
+            return {
+                "error": f"会话 {sessionId}（agent_id={agentId}）没有可读记录——"
+                         "核对信封 transcript 里的 agent_id/session_id，"
+                         "或改用 tool_call_id 直取单条"
+            }
+        return {
+            "mode": "transcript",
+            "agent_id": agentId,
+            "session_id": sessionId,
+            "count": len(history),
+            "messages": history,
         }
 
     async def _execute_recall_context_span(self, params: Dict) -> Dict:
@@ -3412,6 +3449,13 @@ class ToolExecutor:
             tool_call_id = str(params.get("tool_call_id") or "").strip()
             if tool_call_id:
                 return await self._recall_by_call_id(tool_call_id, params)
+
+            # 整取模式：蜂群终态信封的 transcript 指针按 (agent_id, session_id) 寻址。
+            # 只在**显式给出 agent_id** 时进这条分支——不带它的旧调用（含只给 session_id
+            # 的模糊召回）语义逐字不变。
+            targetAgentId = str(params.get("agent_id") or "").strip()
+            if targetAgentId:
+                return await self._recallSessionTranscript(targetAgentId, params)
 
             query = (params.get("query") or "").strip() or None
             try:
