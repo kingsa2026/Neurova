@@ -205,6 +205,22 @@ def _flag(flags: str, name: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+# compose 端口写法三形态：`8000`（只容器侧）、`"8000:8000"`（宿主:容器）、
+# `"127.0.0.1:9527:9527"`（宿主地址:宿主:容器）。只认中间一形等于把「收窄宿主发布
+# 地址」这种正当改动读成「端口缺失」——而缺失值随后被各规则的「过滤 None」逻辑
+# 静默放过（R2 只剩一句端口不符，R1 干脆全绿）。
+_COMPOSE_PORT_SHORT_SYNTAX = re.compile(r"^(?:(?P<host>[0-9.]+):)?(?P<published>\d+):(?P<target>\d+)$")
+
+
+def _composeContainerPort(entry: Any) -> int | None:
+    """容器侧端口（docker 端口代理真正指向的那一侧），也是与 EXPOSE 可比的那一侧。"""
+    text = str(entry).strip()
+    m = _COMPOSE_PORT_SHORT_SYNTAX.match(text)
+    if m:
+        return int(m.group("target"))
+    return int(text) if text.isdigit() else None
+
+
 def parse_compose() -> Dict[str, Any]:
     doc = _load_yaml("docker-compose.yml") or {}
     services = doc.get("services") or {}
@@ -221,9 +237,9 @@ def parse_compose() -> Dict[str, Any]:
 
     def port_of(svc: Dict[str, Any]) -> int | None:
         for entry in svc.get("ports") or []:
-            m = re.match(r"^(\d+):(\d+)$", str(entry))
-            if m:
-                return int(m.group(1))
+            target = _composeContainerPort(entry)
+            if target is not None:
+                return target
         return None
 
     return {name: {"env": env_of(svc), "port": port_of(svc), "raw": svc} for name, svc in services.items()}
@@ -433,6 +449,8 @@ def _check_health(docker: Dict[str, Any], compose: Dict[str, Any], helm: Dict[st
                 f"健康检查路径不一致：Dockerfile={path}, Helm healthCheck.path={hhc.get('path')}",
             )
         )
+    # 比的是**容器侧**端口：健康检查 URL 由镜像内的 curl 在容器里发，宿主侧发布地址
+    # 收窄与否不改变这条契约（`127.0.0.1:9527:9527` 的容器侧仍是 9527）。
     if dhc.get("port") and dhc["port"] != compose["backend"]["port"]:
         out.append(Finding("error", "R2-healthcheck", "compose 健康检查端口与 Dockerfile EXPOSE 不一致"))
     return out
