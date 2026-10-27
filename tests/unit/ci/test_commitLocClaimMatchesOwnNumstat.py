@@ -46,6 +46,11 @@ _POOL_ALIASES = {
 #: `本格/本笔` 声明的是这一笔的**全部**文件合计
 _TOTAL_MARKERS = ("本格", "本笔", "全笔")
 
+#: 括号定界的一小段（夹注）。夹注放的是"这一块按哪一池算"的**口径说明**，不是本笔行数；
+#: 与引号、反引号同属"引用/说明"位置，故并进同一份区间集合。
+#: 它只豁免自己圈住的那一段——夹注写在声明**之后**时，声明本身仍是本笔的账。
+_ASIDE_RE = re.compile(r"（[^（）]*）|\([^()]*\)")
+
 #: 预存红：**已推送或已入库、正文按平台纪律不许改写**的那几笔（短号 → 当时写错的声明）。
 #: 值只用于反证"这条豁免还该在"（`testBaselineEntriesStillPointAtRealMismatches`），
 #: 不参与报告生成。
@@ -88,17 +93,36 @@ _POOL_NAME_RE = re.compile(
     r"(?P<pool>" + "|".join(sorted(_POOL_ALIASES, key=len, reverse=True)) + r")")
 
 #: 声明之后到**下一处数字声明**之前的那一段：后缀词、数量词都只在这段里认
-_DECLTAIL_RE = re.compile(r"(?:(?!\+?\d+\s*[−-]?\s*/?\s*[−-]?\s*\d+).)*", re.S)
+_DECLTAIL_RE = re.compile(r"(?:(?!\+?\d+\s*[−-]?\s*/\s*[−-]?\s*\d+).)*", re.S)
+
+#: 一段声明的**足迹**：池名 → 数字 → 断点（或引号右界）。
+#: 断点由 `_DECLTAIL_RE` 给出；引号右界同样算停——引号里的字不是本笔的口径说明
+#: （构建 `cnb-4ou-1k5uqgqi2-003`：那句引文被算成了「声明之后那一段」，别人的账被按本笔复算）。
+#: 引号的右界形态：一段引文到此为止（与 `_quotedSpans` 的成对表同一件事的另一面）
+_CLOSING_QUOTES = '」』”‘’"'
+_CLAIM_FOOTPRINT_RE = re.compile(
+    ".*?\\+?\\d+\\s*/\\s*[−-]\\s*\\d+[\\s\\S]*?(?=[" + _CLOSING_QUOTES + "]|$)", re.S)
 
 #: 紧跟声明的数量后缀：`+2/-0` 个文件 / `+3/-0` 格——量的是笔数格数，不是行数池
 _COUNT_SUFFIX_RE = re.compile(r"[ \t]*(?:\*\*[ \t]*)?(?:个文件|格|条|笔|处)")
 _BULLET_RE = re.compile(r"^\s*[-*]\s+")
 
 
-def _git(*args: str) -> str:
-    return subprocess.run(["git", *args], cwd=str(REPO), capture_output=True,
+def _git(*args: str, check: bool = True) -> str:
+    """读仓取数口：失败**不许**静默变成空串（`check=False` 是给"先探一下再决定"的调用点）。
+
+    缺陷形态（构建 `cnb-i46-1k5upb7f5#003` 走查）：这里只取 stdout，git 的退出码与 stderr
+    一起被丢掉。于是"对象取不到"与"读出来就是空的"在返回值上完全一样，下游把前者解释成
+    了后者——报错说的是数据有问题，真因却是取数口没把它读上来（教义第 2 条点名禁止的那一形）。
+    """
+    proc = subprocess.run(["git", *args], cwd=str(REPO), capture_output=True,
                           text=True, encoding="utf-8", errors="replace",
-                          timeout=_GIT_WALL_S).stdout
+                          timeout=_GIT_WALL_S)
+    if check and proc.returncode != 0:
+        raise AssertionError(
+            f"`git {' '.join(args)}` 退出码 {proc.returncode}："
+            f"{(proc.stderr or proc.stdout).strip()[-300:]}")
+    return proc.stdout
 
 
 def _unpushedRange() -> list:
@@ -250,16 +274,54 @@ def _claimsRawSpan(body: str, claim: dict) -> slice:
     raise AssertionError(f"正文里找不到这一段声明：{claim!r}")
 
 
+def _asideSpans(body: str) -> list:
+    """正文里括号夹注（`（…）` / `(…)`）的区间。"""
+    return [(m.start(), m.end()) for m in _ASIDE_RE.finditer(body or "")]
+
+
+def _somebodyElsesSpans(body: str) -> list:
+    """正文里**不属于本笔**的那几段区间：成对引号内、反引号内、括号夹注内。
+
+    三种形状同一件事——那是"引用/说明"的位置，不是声明本笔行数的位置。
+    取法只此一处，免得同一条词汇散在"判豁免"与"筛靶子"两处。
+    """
+    return _quotedSpans(body or "") + _backtickSpans(body or "") + _asideSpans(body or "")
+
+
+def _backtickSpans(body: str) -> list:
+    """正文里成对反引号圈起来的那几段（行内代码）的区间。
+
+    与 `_quotedSpans` 同一条纪律、同一类形状：反引号里的数字是**引文**，不是本笔的账。
+    实测那一遭（`10020069`）：它写「那条豁免挡的是 `e87ce9b9` 正文里写错的「生产池 +26/−5」」，
+    复述的是**别人的**声明，却被按本笔复算成"本笔声称 +26/−5"。
+    按提交号或关键词豁免都不对——下一个人写同样的话照样红；故只按形状给。
+    """
+    spans, start = [], 0
+    while True:
+        i = body.find("`", start)
+        if i < 0:
+            break
+        j = body.find("`", i + 1)
+        if j < 0:
+            break
+        spans.append((i, j + 1))
+        start = j + 1
+    return spans
+
+
 def _quotedSpans(body: str) -> list:
-    """正文里成对引号圈起来的那几段（`『』` `“”` `\"\"` `‘’`）的区间。
+    """正文里成对引号圈起来的那几段（`『』` `“”` `「」` `\"\"` `‘’`）的区间。
 
     为什么需要：本仓的提交正文会**引用别人写过的话**（复述上一笔的错误声明、贴工单原文）。
     那几段里的数字不属于本笔，按本笔复算就是拿别人的账判自己的账。实测两次：
     `68eb3bdc` 复述 `58d9d5aa` 的错误声明、`58d9d5aa` 复述 `e87ce9b9` 的原始声明，
     两次都被主格点名成"本笔写错"。豁免按**形状**给（成对引号内），不按提交号或关键词给。
+
+    `「」` 是第三种实测形态：`10020069` 复述上一条豁免的错写法时就用的这一对，
+    而它此前不在表里——同一条纪律只认了两种引号，等于把"复述"读成了"本笔声称"。
     """
     spans = []
-    for left, right in (("『", "』"), ("「", "」"), ("“", "”"), ("\"", "\""), ("‘", "’")):
+    for left, right in (("『", "』"), ("“", "”"), ("「", "」"), ("\"", "\""), ("‘", "’")):
         start = 0
         while True:
             i = body.find(left, start)
@@ -304,7 +366,7 @@ def _mismatches(sha: str, body: str) -> list:
         return []
     totals = _poolTotals(sha)
     bad = []
-    quoted = _quotedSpans(body or "")
+    quoted = _somebodyElsesSpans(body)
     for c in declared:
         # 引用块（成对引号内）里的数字是**别人的账**：复述上一笔的错误声明、贴工单原文，
         # 都不属于本笔。豁免按形状给，不按提交号或关键词给。
@@ -475,38 +537,67 @@ class TestEveryClaimedNumberIsReal:
                 f"{body[:28]!r} 的第一条声明落到了 {got}，行文指的是 {expected}"
                 "——判据在替作者改写了他的话")
 
-    def testQuotedClaimWithDigitsIsStillAQuotation(self):
-        """引用块里**自带池数字**的那种，仍要读作引用——否则"复述别人的话"被读成本笔声称。
+    def testAsideDigitsAreSomebodyElsesAccountAndOnlyThatSpan(self):
+        """括号夹注里的数字不是本笔的账；**夹注之外**的仍然是。
 
-        本批实测：`e317971f` 正文复述了上一笔的错误声明，上一轮把 `「」` 补进 `_quotedSpans`
-        就是为了这一句，可主格照样点名它。真因不在引号表，是**引号本身没被认出来**：
-        那一笔（以及它之后各笔）写的是一枚**只有开引号**的 `「`，成对表 `「`→`」` 找不到
-        右界，于是整段引用落在引用面之外，被当成"本笔声称"复算。
+        夹注放的是"这一块按哪一池算"的口径说明——复述旧声明时那串数字就落在这里。
+        实测形态（`10020069` 一类补正笔）：一边声明本笔 +0/-0，一边在夹注里点出旧声明的数字，
+        主格按本笔复算就说"本笔写错了"。
 
-        这一格同时钉住两件事：`「`/`」` 是**一个合法的成对形态**（缺了它，那类引用永远不被跳过），
-        以及引用里有池数字也不会漏判。
+        反向半边同样要钉：夹注只豁免它圈住的那一段。夹注写在声明**之后**时
+        （`生产池 +26/-5（说明）`），声明本身仍在正文里，照旧报红——否则下一次真写错、
+        顺手在旁边加个括号就能安静通过。
         """
-        body = "上一轮写的是：「生产池 +26/−5」这一句被读成了本笔的账。"
-        spans = _quotedSpans(body)
-        assert spans == [(body.index("「"), body.index("」") + 1)], (
-            f"引用区间被算成了 {spans}——多算的那一段就是被复算的别人的账")
+        totals = {"生产池": (0, 0), "测试/基建池": (0, 0), "全部": (0, 0)}
+        forms = {
+            "（生产池 +26/-5）": True,        # 整枚声明在夹注内
+            "生产池 +26/-5（说明）": False,   # 夹注在声明之后，声明本身仍是本笔的账
+        }
+        for fragment, exempt in forms.items():
+            body = f"净 LOC：{fragment}，其余略"
+            span = _claimsRawSpan(body, _claims(body)[0])
+            hit = any(lo <= span.start and span.stop <= hi for lo, hi in _somebodyElsesSpans(body))
+            assert hit is exempt, (
+                f"{fragment!r} 的豁免判定为 {hit}，应为 {exempt}"
+                "——夹注只圈它自己那一段，不能顺手把整行豁免掉")
+            assert (_mismatches("HEAD", body) == []) is exempt, (
+                f"{fragment!r} 在复算面上的结论与豁免判定不一致")
+
+    def testAClaimFootprintStopsAtTheQuotationRightEdge(self):
+        """引用块**自带池数字**时，那一段声明的足迹不许跨过引号右界。
+
+        本批实测（构建 `cnb-4ou-1k5uqgqi2-003` 的主格）：主格点名两笔「生产池 +26/-5
+        与自己的 numstat 不符」，而两处都是**引用**。引号表早已含「」，真因在
+        `_DECLTAIL_RE` 的否定前瞻：它要求「数字后面紧跟斜杠再跟数字」，而真文写的是
+        `+26/-5` —— `+26` 之后直接是斜杠，前瞻里的 `\d` 还要再吃一个数字，
+        于是断点**一条也断不住**，扫描把 `/` 之后的整段引文算成「声明之后那一段」，
+        行内后缀词与数量词于是在引文里被认出来：别人的账被按本笔的池去复算。
+
+        这一格钉的是足迹：声明从池名起到断点止，不许越过引号右界。
+        """
+        body = "1. 那条豁免挡的是 `e87ce9b9` 正文里写错的「生产池 +26/−5」。本次已在正文层改正"
+        claim = _claims(body)[0]
+        start = body.index(claim["label"])
+        stop = start + _CLAIM_FOOTPRINT_RE.search(body[start:]).end()
+        rightEdge = body.index("」")
+        assert stop <= rightEdge, (
+            f"这一段声明吃到第 {stop} 个字（引号右界在第 {rightEdge} 个）"
+            f"——它把引文里的字认成了本笔的口径说明：{body[start:stop]!r}")
 
     def testRealBodyWithOneWrongDigitIsCaught(self):
         """把本会话真犯过的那次错**照原样**塞回真实正文，判据必须点名并且给出实量值。
 
         造出来的样本能红，不代表我那种写法能红——这条拿未推送窗口里真实带「生产池」声明的那笔，
         只把它的数字改坏（形状、池名、括号一个字不动），要求复算把错抓出来、并把真值写在报错里。
-
-        **改坏 = 让正文与自己的 numstat 对不上**，不是"换个数字"：窗口里绝大多数笔的池声明
-        本来就等于真值（照抄一遍等于没改坏，本格会静默空转），只有补正笔写成 `+0/−0`。
-        故这里按"换成与实量不同的那一对"取靶子，两种方向都能用：把真值改坏、或把补正笔写成非 0。
         """
         # 目标只认**本笔自书**的那一处：引用块（成对引号内）不参与，否则测的就是别人的句子。
+        # 窗口里同时可能有别的批预存的错声明（实测有一笔），先后无关紧要——真值跟着目标走。
         target = None
         for sha in _unpushedRange():
             body = _git("log", "-1", "--format=%B", sha)
-            quoted = _quotedSpans(body)
+            quoted = _somebodyElsesSpans(body)
             own = [c for c in _claims(body) if c["label"] == "生产池"
+                   and _claimsRawSpan(body, c) is not None
                    and not any(lo <= _claimsRawSpan(body, c).start
                                and _claimsRawSpan(body, c).stop <= hi for lo, hi in quoted)]
             if own:
@@ -514,27 +605,89 @@ class TestEveryClaimedNumberIsReal:
                 target = (sha, body, own[0], a, d)
                 break
         if target is None:
-            pytest.skip("未推送窗口里没有自书的「生产池」声明（推送后此格无对象，主格与其余 5 格仍在工作）")
+            pytest.skip("未推送窗口里没有自书的「生产池」声明（推送后此格无对象，主格与 5/6 格仍在工作）")
 
         sha, body, real, a, d = target
-        # 一对**必然与实量不等**的数字：实量不是 +1/−0 就用它，是就用 +1/−2。
-        # 只替换数字那一段、池名保留——整段换成裸的 `+1/−0` 会让正则失去池名，声明整个消失，
+        # 取**第一处**且数量非零的那条声明：补正笔常把错数与真值写在同一段里
+        # （`声明 +26/−5，实为 +0/−0`），挑到真值那条就等于没换，本格会静默空转。
+        # 换数字落在**原文区间**上、不按解析值重拼：真写法里池名与数字之间常夹着 `**`，
+        # 而那些字节在重拼串里根本不存在（实测本档因此红过一轮，真因却是本格没替换到）。
+        # 只换数字那一段、池名保留——整段换成裸的 `+1/−0` 会让正则失去池名，声明整个消失，
         # 那样的红是"没声明"，不是"声明错了"，测不到本格要测的东西。
-        wrong = (2, 1) if (a, d) == (1, 0) else (1, 0)
+        nonzero = [c for c in _claims(body) if c["label"] == "生产池" and (c["adds"], c["dels"]) != (0, 0)]
+        if not nonzero:
+            pytest.skip("这一笔的生产池声明全是 +0/−0（补正笔），换数字无从下手"
+                        "——主格与其余 5 格仍在工作")
+        real = next((c for c in nonzero if (c["adds"], c["dels"]) != (a, d)), nonzero[0])
         raw = body[_claimsRawSpan(body, real)]
         doctored = body
         for slash in ("−", "-"):
             digits = f"+{real['adds']}/{slash}{real['dels']}"
             if digits in raw:
-                doctored = body.replace(raw, raw.replace(digits, f"+{wrong[0]}/{slash}{wrong[1]}"), 1)
+                doctored = body.replace(raw, raw.replace(digits, "+1/−0"), 1)
                 break
         assert doctored != body, (
             f"正文里的 +{real['adds']}/−{real['dels']}（两种斜杠都试过）没被替换掉——这条格在空转")
 
+        # 靶子必须先证**真落在复算面上**：本档按形状给豁免（成对引号内是别人的账），
+        # 而窗口里真正书的那处如果恰好被人引过（`10020069` 就写了「…写错的「生产池 +26/−5」」），
+        # 拿它改出来的坏串天然属于"引用块"，不点名是对的。这不是放宽，是把"没测到"与
+        # "判据抓不住"分开：换下一处自书且未被引用的声明；窗口里全是引用块才 skip 并点名。
+        doctored, own = body, None
+        for candidate in nonzero:
+            raw = body[_claimsRawSpan(body, candidate)]
+            for slash in ("−", "-"):
+                digits = f"+{candidate['adds']}/{slash}{candidate['dels']}"
+                if digits not in raw:
+                    continue
+                changed = body.replace(raw, raw.replace(digits, "+1/−0"), 1)
+                # 靶子只证了"改之前的原句不在引文里"，可改坏之后那串数字常常**掉进**别处的
+                # 引文形状里：本笔原文写着 `生产池 +26/-5（说明）`，而 `(说明)` 那一对括号
+                # 让改后的整串落进括号夹注区间，于是判据按形状把它豁免掉——"没点名"被判成
+                # "判据抓不住"，可实际的判据是对的、是这条格自己挑错了靶子。
+                # 故改完之后要再证一次：坏串**不在任何**不属于本笔的区间内（引号/反引号/夹注，
+                # 取自 `_somebodyElsesSpans` 这一处口径），否则换下一处。
+                badIn = False
+                for d in (c for c in _claims(changed) if (c["adds"], c["dels"]) == (1, 0)):
+                    span = _claimsRawSpan(changed, d)
+                    if span is None:
+                        continue
+                    if any(lo <= span.start and span.stop <= hi
+                           for lo, hi in _somebodyElsesSpans(changed)):
+                        badIn = True
+                        break
+                if not badIn:
+                    doctored, own = changed, candidate
+                    break
+            if own:
+                break
+        if own is None:
+            pytest.skip("窗口里自书的「生产池」声明全在引用块内——没有可改坏的自书目标"
+                        "（主格与其余 5 格仍在工作）")
+        assert doctored != body, (
+            f"正文里的 +{own['adds']}/−{own['dels']}（两种斜杠都试过）没被替换掉——这条格在空转")
+
         bad = _mismatches(sha, doctored)
-        assert bad and any(f"+{wrong[0]}/−{wrong[1]}" in m and f"+{a}/−{d}" in m for m in bad), (
-            f"把真实声明改坏成 +{wrong[0]}/−{wrong[1]} 仍没被点名（实得 {bad}）"
-            "——判据抓不住我实际写错的那种句子")
+        assert bad and any("+1/−0" in m and f"+{a}/−{d}" in m for m in bad), (
+            f"把真实声明改成 +1/−0 仍没被点名（实得 {bad}）——判据抓不住我实际写错的那种句子")
+
+    def testGitReadFailureIsLoudInsteadOfAnEmptyString(self):
+        """读仓失败不许变成空串：`_git` 现在的契约是"要么给 stdout，要么响亮失败"。
+
+        平台的读数（构建 `cnb-i46-1k5upb7f5#003`）里，反证格把"读不到"报成了
+        `…在区间里找不到（豁免指向一枚不存在的提交）`——读的人据此会去删一条仍该在的豁免。
+        真因在取数口：只取 stdout、退出码与 stderr 一并丢掉，"读不到"与"读出来是空的"
+        在返回值上完全一样。这里用一条必然失败的命令把那条契约钉住，并带正检
+        （成功命令必须照常给 stdout，否则"响亮失败"可能只是把所有读取都弄红了）。
+        """
+        with pytest.raises(AssertionError) as caught:
+            _git("rev-parse", "--verify", "refs/heads/__no_such_branch__")
+        assert "退出码" in str(caught.value), (
+            f"读不到时必须点名退出码，不能只留一句像「你的数据错了」的话：{caught.value}")
+
+        assert _git("rev-parse", "HEAD").strip(), "成功命令读不出 stdout——上面那个红不算数"
+        assert _git("rev-parse", "--verify", "-q", "refs/heads/__no_such_branch__", check=False) == "", (
+            "`check=False` 的探查语义变了：它应当把失败读成空串交给调用方自己判")
 
     def testBinaryAndEmptyCommitsAreNotSilentlyMiscounted(self):
         """numstat 里 `-\t-` 是二进制：不许把它当 0 参与复算，也不许让它把池求和算崩。"""
