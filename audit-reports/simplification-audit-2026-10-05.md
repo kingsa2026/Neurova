@@ -10418,7 +10418,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **✅ 净 LOC 去向（从 `git show --numstat` 抄并分项相加核对）**：`0c913be3` 生产池（`neurova/` 前缀）**+183/−63＝净 +120**（分项 22＋108＋53＝183、19＋20＋24＝63 ✓），测试池 +246/−0（测试不计入门槛）。+183 里 `#` 注释 26 行、空行 25 行、其余 132 行为代码与 docstring，其中五个新增/改写口的 docstring 约 48 行（写的是形状理由与实测读数），真逻辑约 84 行。−63 全是重复：护栏三条 `re.compile` 与两处自写 sub、`skill_evidence` 三处 dumps-or-repr、`valueClass` 形参、`_pick` 那条为凑集合而写的切片算式。
     - **⚠ 上一格欠的那笔留案（不改写已入库提交）**：`0ad0277e` 主题行写"回写台账与 M2 档案"，实为只动台账＋在册清单、未碰档案。随本格留案。
     - **仍开（不冒充完成）**：① **第八张表**——`neurova/evolution/eval/miner.py:26 SECRET_PATTERNS`（provider 前缀形状 `sk-ant-api`／`sk-or-v1`／`ghu_`／`xoxb-`／`xapp-`／`ntn_`／`AKIA`／PEM 头，单源一条都没有），且它自己那个**同名** `contains_secret` 与本批接线的那个是同一功能的第二份实装 ⇒ 登记为**批 P-5 第三格**（并表要先裁"这些形状算不算 PII 侧"，因为它们没有键名）；② `security/privacy_gate.py:18 _SENSITIVE_KEY` 是第四份键名表，本批只把"哪个键是凭据"收成 `isCredentialKey` 一处口径，那张表与它的 `_redact_value`（`ab***yz` 部分保留出口）要不要并进来属另拍；③ **已序列化文本上的转义引号作为独立入口仍不受保护**：走 `redact_secrets(str)` 的 `runner.py:42`、`skill_improver.py:230-232` 拿到的是裸文本故安全，但若有人把序列化后的 JSON 直接喂 `redact_secrets`，值档仍会吃到空白为止——本批未在正则里猜转义形状，边界写在 `redact_structure` 的 docstring 上；④ 批 P-6（§6-414 立的那处永不返回 await）／P-2／M3／P-3 按裁定排队。
-    - **下一枚空号现查**：`git grep -ohE "§6-4[0-9][0-9]" HEAD -- audit-reports docs scripts | sed 's/§6-//' | sort -u | tail -3` 现算最大＝**414**，台账尾号亦为 414 ⇒ 本批取 **§6-415**。（⚠ 本行原先写作"⇒ 本批取 §6-416"，是落笔时把"下一批的号"当成了"本批的号"——本格条目实际编号就是 415。这一笔错随 §6-416 那格一并留案：它不只写错一个数，还会**污染后来者的空号现查**，因为那条配方扫的是全仓引用面，一个凭空写出的 `§6-416` 会让下一格误判 416 已被占用。）
+    - **下一枚空号现查**：`git grep -ohE "§6-4[0-9][0-9]" HEAD -- audit-reports docs scripts | sed 's/§6-//' | sort -u | tail -3` 现算最大＝**417**（并入 main 后：main 已用掉 416），台账尾号亦为 417 ⇒ 本批取 **§6-418**。取号除了查台账，还要现查**主干**——同一 PR 期间主干会往前走，十分钟前算的号不作数。
 
 416. **批 P-5 第三格：内容级第八张表并进单源，挖掘门改接并退役自带表与同名实装（✅ `84e1a55c`；子集真条目现算 708）** ✅🟢 —— 承接 §6-415 仍开①
 
@@ -10445,8 +10445,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **建议收口次序（供人拍板，不自造）**：① 先把 `errText` 从那一页提到 `NeurUI/src/api/` 一处作全仓口径——不提这一步就逐页各抄一份，等于把"局部单点"变成第 33 份实现（教义第 7 条的反面）；② 再按"后端确实有拒因可读"的密度收，先 skills／marketplace／credentials 三族；③ 收完若干档后再谈要不要把结构判据升成常驻闸（目前只有 `MarketplacePage` 一档被钉住）。
     - **同批已闭的另一处语义分家**：`market.submitUrlPh`（"ZIP 链接（可选）"）在**提交技能**路径下确实可选（审核物化可走 `pool_skill_id` 血缘），但管理端上架留空就装不上——两种语义共用一条文案必有一边说谎。故新增一键 `marketplace.downloadUrlPh`（"留空则此条目无法安装"），11 语一起铺，`market.submitUrlPh` 原样不动。无遗留。
     - **仍开（不冒充完成）**：其余 **122 处**（131−9）未动——体量超出单批，且"每一处 toast 都该显示后端 detail"属 UX 口径，需人裁一刀再扫；本条只登记，不预改。
-    - **口径与空号**：本条数字只量 `NeurUI/src` 下的 `message.error(t('common.error'))` 字面形状（`src/pages/__tests__` 与组件内其它 toast 写法不在内）；口径若扩，读数会变，引用前先复算。下一枚空号现查按形态 418 的纪律两条一起跑：引用面 `git grep -ohE "§6-4[0-9][0-9]" HEAD -- audit-reports docs scripts` 现算最大＝**416**，条目行 `^[0-9]{3}\. ` 尾号亦＝**416** ⇒ 本批取 **§6-417**，下批从 **418** 起。
-
+    - **口径与空号**：本条数字只量 `NeurUI/src` 下的 `message.error(t('common.error'))` 字面形状（`src/pages/__tests__` 与组件内其它 toast 写法不在内）；口径若扩，读数会变，引用前先复算。下一枚空号现查按形态 419 的纪律两条一起跑：引用面 `git grep -ohE "§6-4[0-9][0-9]" HEAD -- audit-reports docs scripts` 现算最大＝**419**（并入 main 时 418/419 两格已按「改后到的、不改先到的」让到 419/420），条目行 `^[0-9]{3}\. ` 尾号亦＝**420** ⇒ 本批取 **§6-417**，下批从 **421** 起。
 
 435. **受保护子集分片执行：`code 137` 不是"测试红了"，是跑测进程被整段掐断（本格把清单切成三片，判据一条不动）** ✅🟢 —— 触发点是 PR #365 的 `unit-tests` 红
 
@@ -10533,8 +10532,100 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
       · **`warmUpJieba` 的驼峰形态** — 本条落笔时 `tests/conftest.py` 与本档调用点已写成驼峰；`warmJieba` 是本文件 `tokenize`/`fullTextSearch` 一族命名下的正名。按仓规命名用 camelCase，正名保留、不新增别名（不保留两份名字，也不为改名让既有调用点失配——它们是同一次提交里一起动的）。
 
 
+436. **批 L 落地：CI 静态门禁的 6 处 `undefined name` 分四类根因收口，闸门侧修「问错的问句」而非删报错（✅ 本批；受保护子集真条目 +2）** 🟢 —— 这批修的不是 6 个拼写，是**一条问错的判据**加**一处只写不读的取数**
+    - **✅ 起点（CI 现场，非本地臆测）**：PR #364 的 `cnb-8a0-1k5kcrpsh-001`（static-gate）红在 6 行，本地 `python scripts/ci_static_gate.py --skip-import` 逐行复现同一集合：`tool_executor.py:1646` 的 `file_path`、`channels.py:459` 的 `ChannelMessage`、`mcp_server_api.py:120` 的 `McpCaller`、`knowledge_facts.py:736/761` 的 `Tuple`、`provider_compat.py:202` 的 `Any`。同一次的 `-005`（frontend）红在 `npm audit --audit-level=high` 的 5 条（vitest/@vitest/mocker、dompurify critical、vite high）。
+    - **✅ 根因分四类，不许合并成「补 import」一个动作**：①**真·漏 import**（`Tuple`/`Any`＝同文件其它模块都已从 `typing` 导入，这里漏了）；②**注解专用·局部导入**（`McpCaller` 的实体在 `_callerPrincipal` 函数体内导入，理由写在注释里＝`neurova.agent` 包 `__init__` 链回 `tool_executor` 的循环导入，AGENTS.md §3）；③**注解专用·近似懒加载**（`ChannelMessage` 只在注解里出现）；④**幻影变量**（`file_path` 在该函数作用域从未绑定）。
+    - **✅ ①②③ 修在闸门侧，不是修在被报的代码**：把导入提到模块级会**改坏生产**（②直接拉循环导入），删掉注解会**丢解析器能读的事实**——两条都是把报错挪走（教义第 1、2 条）。改法是让 `scripts/ci_static_gate.py` 的未定义名判据多问一句「这个名字在**本文件**里被 import 过吗」（`collectUndefinedNames` 复核 pyflakes 自己的读数，不另写 AST 名解析＝教义第 6 条）。反向格同批钉死：拼错的名字、写错的**形参**（真实命中形态）照旧红，且「文件里别处 import 了同名名字」不得为真拼错开白名单。
+    - **✅ ④ 是本批唯一的真缺陷，且比 pyflakes 报的更重**：红灯先实证——真 `ToolExecutor._governance_precheck` 走到该行直接 `NameError: name 'file_path' is not defined`，被外层吞成 warning，**文件类工具在 SANDBOX 裁决下每到这一行就静默丢阻断回执**。同一次调用里 `extract_adjudicable_params` 明明返回了 `(键名, 值)` 清单，代码却把它命名成 `_pathValues`（下划线＝声明不读）再凭幻影变量打日志——与 §6-284 甲案「第二条路径值在审计面消失」同一根因族。修法不是删日志：路径清单**真的被消费**，审计 warning 逐条点名 `键=值`，无值时不留 `None` 占位。四格判据里有一格专门钉「日志里那串路径**等于**取数口的返回值」，改走第二份认键循环即红。
+    - **✅ 前端 5 条按修复线抬，取该支当前最高**：`vitest`/`@vitest/coverage-v8` `4.1.11→4.1.12`（GHSA-qxg6-89mg-rqv8 与 GHSA-xp26-3454-mjgp 的 fixed 都是 4.1.12，且 4.1.11 是后者 introduced 下界——刚好落在修复线下沿）、`dompurify` `3.4.16→3.4.17`、`vite` `6.4.3→6.4.5`（6.x 线最高；6.4.4 的 semver 下界会把 6.3.x 放回来，那是**下界回归**，所以取 `^6.4.4`）。api.osv.dev 逐版本实查：改前三个版本各有 3/5 条命中，改后**全部 none**；锁里顺带被抬的传递依赖 `chai@6.3.0`／`std-env@4.3.0`／`tinyrainbow@3.2.0` 也逐条查过，均 none、无降级。`vite` 停在 6.x 而非 latest 8.x：本批只解漏洞，跨大版本属另一票。
+    - **✅ 活体读数**：真装 `npm install` → `vitest 4.1.12 / @vitest/mocker 4.1.12 / dompurify 3.4.17 / vite 6.4.5`；`npm audit --audit-level=high` → `found 0 vulnerabilities`；`npx vue-tsc --noEmit` → exit 0；`npm run test` → **2162 passed / 3 failed**，A/B 自证（`git stash push NeurUI/package.json package-lock.json` + 重装回旧版）失败集合**逐行相同**（`duplicate-function-inventory.guard` 2 格、`locale-key-reference` 1 格 `skillEvo.*` 缺键），预存失败不算回归。
+    - **✅ 单测 A/B**：`tests/unit/security`（去掉两个 pre-existing collection error 的档）失败集合 53→49，**新增 0**，消失的 4 格正是本批新档由红转绿；`tests/unit/ci`＋`tests/unit/tools` 失败集合 1→16 是补齐 `fastapi`／`prometheus_client`／`openpyxl` 之后才**跑得起来**的档（补齐前它们连收集都进不去），逐格看无一是本批文件。
+    - **⚠ 本批自己的落笔错（两处，都在当场改掉）**：a) 首版 `_PYFLAKES_LINE` 贪心分组把 `undefined name` 拆成 `kind=undefined`、`detail=name 'x'`，导致**反向格全绿地漏报**（假绿，最坏的一种）——是反向格先红才发现的，反证了「只写正向格＝自证空转」；b) 首版判据里三处 `make()`／`logger` 未定义，把被测点淹在噪音里，改成逐条自足的小样例。
+    - **✅ 同批扫掉 ruff 那 3 条存量（主干 `21d70a8a` 现场就有，不是本批引入）**：静态门禁绿了之后露出来的是同一条流水线的 ruff 阶段。逐条看是两类真缺陷，都不是「加 noqa」能了事的：①`tests/manual/readFaceReconciles_b58.py:102`／`shellEntryNotPinned_batch57.py:166` 的 `exc`——PEP 3110 规定 `except ... as exc` 的绑定名**出块即解绑**，而它被关进 `lambda` 里懒求值，于是那两行的失败读数一旦真被执行就是 `NameError`（脚本静默崩在诊断路径上）；改成出块前先取值。②`tests/manual/declaredSurface_batch49.py` 的 `PROBE`——`runProbe` 是 `readImplicit` 的上一代实现，全文件无人调用、`PROBE` 从未定义，按教义第 7 条**删**（不补一份 PROBE，那是留两处同功能实现）。另修 `tests/unit/neurflow/test_workflow_ownership_v2.py:151` 的 `# noqa: 仅记录`——不是码列表的 noqa 是空转指令，该行本就无违规，直接去掉。改后 `python -m ruff check neurova tests --no-cache` → `All checks passed!`
+    - **⚠ 本批新登记的断点（不静默遗留）**：①`tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py::test_staticRootsNeverPointOutsideOrNowhere` 报 `tests/unit/test_session_landing_guard.py: missing`——**该文件真实存在且在 `protected_tests.txt:1636` 在册**，说明这条「根指不到真实目录」的静态根解析在 Linux 上误判，与本次改动无关，单独开票；②`tests/unit/tools/test_governance_mcp.py` 等 12 格在裸环境里报 `async def functions are not natively supported`（缺 `pytest-asyncio` 的 asyncio_mode 声明），CI 精简锁里有、本地没有，属环境差异不属回归。
+    - **下一枚空号现查**：本批初稿取 §6-403，落盘后并会话已在主干用掉该号（`d5c430c7`／`5a1a49fb`）⇒ 按「改后到的、不改先到的」让号改记：先在 main 上改记 **§6-417**，并入 main 后又因 417 已被占用再让一拍 ⇒ 并入 main 前主台账已用到 434、本条让号终取 **§6-435**，主台账与此处一并改读。取号除了查台账，还要现查**主干**——同一 PR 期间主干会往前走，本地十分钟前算的号不作数。
 
-420. **零向量：出向量这条路上判一次，存量与注入入口再判一次（✅ 并入源分支上并发的零向量那笔之后按两处单源重写；受保护子集真条目现算 718）** 🟢 —— 承接本单那笔「受保护子集 15 红按根因收口」的现场（该笔已随历史重写失去可达号，按内容指认：活动目录跨回合残留那一组）。本笔与并发会话那笔（"零向量从不是『有向量』"）撞在同一处根因上，合并后按两侧真实意图裁定，**不保留两份口径**。
+438. **批 M-2 落地：`dependency-audit` 的 Prepare 段按实测抬到 `cpus: 4`，并把「拉冻结库的流水线不许用最小规格」钉成常驻判据（✅ 本批；受保护子集真条目 +1）** 🟢 —— 现场是 PR #364 的 `cnb-nmd-1k5no13f9#003`：`unit-tests` 在 **Prepare** 段被杀，两条 stage 一条都没跑。
+    - **✅ 起点（CI 现场读数，非本地臆测）**：`cnb build get-build-status --sn cnb-nmd-1k5no13f9` 读回
+      `stages: error,116717,Prepare / skipped,0,install uv… / skipped,0,protected subset…`，
+      日志末行 `任务超过最大执行时间而被强制关闭：1m0s`。同一构建里八条邻居流水线的 Prepare 是
+      `3719ms`～`63827ms`——同一份提交、同一时刻，所以不是「机器慢」，是这一格自己越了平台的 1m。
+    - **✅ 两次对照实验否掉了「墙钟需要抬」这个直觉方向**：以 `api_trigger_probe` 事件在 main 上单起三条
+      探针流水线（不跑任何用例），Prepare 读数 `18232ms` / `3719ms` / `4677ms`。空跑都在 1m 内，
+      说明期限本身够用；变的是**这一格要塞进去的固定成本**，不是平台的表。
+    - **✅ 根因落在声明处**：`dependency-audit` 的 Prepare 要 `docker pull` 镜像、拷两份缓存卷、装
+      `pip-audit`，再把一个上百 MB 的冻结漏洞库落到 `/root/.cache/osv-scalibr`——而它与其余八条同规格
+      `cpus: 2`。按修复教义第 1 条，故障在声明处生产、在 Prepare 处被报出来；改 stage 脚本是把报错挪走。
+    - **✅ 判据按阶段结构认，不按流水线名认**：`tests/unit/ci/test_runnerAllocatedWallClockIsNotADeadline.py`
+      扫 `runner` + `docker.volumes` + `stages[].script`（含 YAML 锚点复用），凡「挂 `/root/.cache/osv*` 卷
+      **且** stage 里有 `--prefetch-offline-databases`」的流水线，`cpus` 必须 ≥ 4。改名、搬位置都不影响判据；
+      受治面自证下限 `MIN_HEAVY_PREPARE_PIPELINES = 1`，只报「零违规」不报扫描量即红。
+    - **⚠ 本批自己的三次落笔错（都在当场改掉，记录形态供下次省一轮）**：a) 首版取「`memory == cpus×2`」——
+      实测 23 处 `runner.cpus` 声明里**没有一处写 `memory`**，受治面是空的，绿得毫无意义；b) 第二版取
+      「`docker.volumes` ≥ 2 则 `cpus` ≥ 4」，把 `dependency-audit` 抓了出来，但 `unit-tests` 也在受治面内、
+      它已经合规——这一版恰好会让人以为「修完 `unit-tests` 就没事」，而真红在另一条；c) 第三版取「装两棵树
+      （Python + npm/cargo）」在活配置上扫到 **0 条**（`.cnb.yml` 里两棵树分别落在不同流水线）。三次都是
+      「受治面自证」那一格先红才发现的——这道自证不是装饰。
+    - **✅ 灯（红→绿逐条实测）**：`pytest tests/unit/ci/test_runnerAllocatedWallClockIsNotADeadline.py -q`
+      → 改前 `1 failed`（`'dependency-audit': cpus=2，挂 2 个缓存卷`，且受治面 2 条），改后 `2 passed`；
+      把 `cpus` 改回 `2` 再跑 → 当场回红，恢复即绿。
+    - **✅ 同批回归面**：`tests/unit/ci` 整目录 `495 passed, 2 skipped`；受保护子集登记历史
+      （`test_protected_subset_registration_history` 8 点）、`test_unit_tests_single_leg`、
+      `test_ci_pipeline_speed_guard` 共 33 点全绿；`python scripts/ci_static_gate.py --skip-import` 全通过；
+      `ruff check neurova tests` All checks passed；`.cnb.yml` 现场 `yaml.safe_load` 通过。
+    - **⚠ 诚实边界**：本批只改 `dependency-audit` 这一格的 `cpus`，`unit-tests` 的 `cpus` 本来就是 4，
+      **没有**动任何 stage 的 `timeout`、没有动受保护子集清单的覆盖面。`cpus: 4 → 8` 未采用：本仓现有读数
+      不支持「这一格是核数瓶颈」的结论，先按最小可证的一步走。
+
+
+439. **批 M-3 落地：`unit-tests` 的整场受保护子集按实测重定预算——cpus 4→8、墙钟 90m→45m，并把「上限要么是预算、要么不是上限」钉成常驻判据（✅ 本批；受保护子集真条目现算 717）** 🟢 —— 与 §6-420 同族同现场，但那笔明写「`unit-tests` 的 cpus 本来就是 4，不动」，本笔正是把那句留白补上
+    - **✅ 起点（CI 现场读数）**：`cnb build get-build-stage --sn cnb-n45-1k5oultjs --pipelineId …-003 --stageId stage-1` 读回
+      末段 `tests/unit/skills/test_marketInstalledStateIsReadBack.py ......... [ 83%]` → `Killed` →
+      `Finished, code: 137, duration: 29m 23s`。`code: 137` 是 SIGKILL，日志里**一条失败墙都没有**：
+      不是「有测试红了」，是整段跑到点被掐断。同一构建里另外 8 条流水线全绿（`prepare 7.1s / stage-0 20.6s`），
+      所以也不是「机器慢」或「装依赖慢」。
+    - **✅ 先否掉「墙钟太窄」这一支**：该 stage 当时声明 `timeout: 90m`，而它在 **29m23s** 就被杀——距上限还有一小时。
+      83% 处已用 29m23s ⇒ 整场按此速率约 **35m20s**。上限远比实测宽，则「被掐」不可能归因到时间。
+    - **✅ 根因回到声明处（两条，同一句话：预算的两层数没对过表）**：
+      ① `runner.cpus: 4`。官方《语法手册》`runner.cpus` 一节：*内存 = CPU 核数 × 2 GiB*、*未配置时可用核数由
+      分配到的构建节点决定*；官方《构建节点》：`cnb:arch:amd64` 核数范围 **1~64**、同档节点**默认 8 核**。
+      ⇒ `cpus: 4` 不是上限，是把这一格按 **8GiB** 的最小可用档压着跑，而它是九条里唯一「装整份锁 + 串行跑
+      716 条清单 + 每格带 `--cov` 插桩」的一条。进程被 SIGKILL 的典型形态正是内存压力下的 OOM kill。
+      ② `timeout: 90m` 与实测 35m 脱钩两个量级。它不造成本次故障，但它**掩盖**了故障：上限若远高于实测，
+      「真撞墙」与「被资源杀掉」在日志里长得一模一样，读的人只能猜——本次就是猜错的现场。
+    - **✅ 处置（只动 `unit-tests` 这一格的两行声明，不动判据、不动覆盖面）**：`cpus 4 → 8`；
+      驱动受保护子集那一格的 `timeout 90m → 45m`（≈ 实测 1.3 倍，仍远宽于子集里最高的单档父墙
+      `pytest.mark.timeout(120)`，先到点的仍是单格那条诚实的超时）。`--cov-fail-under=60` 与
+      `scripts/ci/protected_tests.txt` 的覆盖面一字未动。
+    - **✅ 新判据（按阶段结构认，不按流水线名认）**：`tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py`，
+      扫「`stages[].script` 里有 `scripts/ci/protected_tests.txt` 清单驱动」的流水线条目（含 YAML 锚点复用），
+      两条不变量：`cpus ≥ 8`（`HEAVY_SUBSET_CPU_FLOOR`，内存 ×2GiB 为官方口径，cpus 是唯一代理量——
+      `runner` 只有 tags/cpus/namespace，没有 memory 字段）；驱动那一格的 `timeout ≤ 45m`
+      （`SUBSET_STAGE_TIMEOUT_CAP_MIN`）。受治面自证：扫到 0 条即红。
+    - **✅ 灯（红→绿逐条实测，本机 py3.11 + `requirements-ci.lock` 装齐）**：
+      `pytest tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py -q`
+      → 改前 **2 failed / 1 passed**（`'unit-tests': timeout='90m'（90m > 45m）` 与
+      `'unit-tests': cpus=4（内存 8GiB < 16GiB）`，各两命中＝锚点复用两处），改后 **3 passed**；
+      把 `cpus` 改回 `4` 再跑 → 当场回红（`1 failed`），恢复即绿。
+    - **✅ 同批回归面**：`tests/unit/ci` 整目录 **498 passed, 2 skipped**（含 `test_dev_environment_contract`
+      的 vscode `cpus: 8` 与 `workspace.launch.cpus` 一致性、`test_unit_tests_single_leg`、
+      `test_ci_pipeline_speed_guard`、`test_runnerAllocatedWallClockIsNotADeadline`）；
+      `test_dev_path_and_runtime_dep_guards` + `test_auditLedgerNumbering` + 登记历史 **54 passed**；
+      `python scripts/ci_static_gate.py --skip-import` → 🎉 全部通过；`ruff check neurova tests --no-cache`
+      → All checks passed。
+    - **⚠ 诚实边界（第一条是本笔最重要的边界）**：`code: 137` 的**直接**归因（OOM 还是别的信号源）不在仓内可读——
+      平台只在日志末行给退出码，不给内存读数。本笔证的是两条**可读事实**：①这一格被压在同档节点默认核数的一半上；
+      ②它在离自己声明的上限还有一小时时被杀。`cpus: 8` 是让声明回到「官方默认规格」，不是「按实测内存反推出来的数」；
+      真实内存曲线要等下一次构建的读数。② 45m 的余量可能仍偏紧（若下一次真超，**应当**变红并按实测重定，
+      不许为此再往上抬到 90m —— 那正是本笔在修的那种「上限不是预算」）。③ 本机没有 `python:3.12` + `uv` 锁的
+      整腿环境，上面的红→绿都在判据层面自证，端到端读数以新构建为准。
+    - **⚠ 撞号让号（本格按「改后到的、不改先到的」让一拍）**：本笔落笔时现查最大＝419、条目行尾号为 419 ⇒ 取 420；
+      推送时远端已被 `9051c590` 推前一步，它把分支原有的 418／419 顺让成 419／420（main 新占了 417）⇒ 420 已被占。
+      按纪律让号改记 **§6-439**（并入 main 时 419／420／421 均已被 main 与并发会话占走，本条连让两拍），本笔的提交 `9ac1878d` 正文里没有写号，故无需改读；`protected_tests.txt` 的在册注释里也不含号次。
+    - **下一枚空号现查**：`git grep -ohE "§6-4[0-9][0-9]" HEAD -- audit-reports docs scripts | sed 's/§6-//' | sort -u | tail -3`
+      现算最大＝**439**（439 只出现在本格自身）；条目行 `^4NN\. ` 尾号为 **434**（main 侧最新）⇒ 后继批次从 **440** 起。
+
+440. **零向量：出向量这条路上判一次，存量与注入入口再判一次（✅ 并入源分支上并发的零向量那笔之后按两处单源重写；受保护子集真条目现算 718）** 🟢 —— 承接本单那笔「受保护子集 15 红按根因收口」的现场（该笔已随历史重写失去可达号，按内容指认：活动目录跨回合残留那一组）。本笔与并发会话那笔（"零向量从不是『有向量』"）撞在同一处根因上，合并后按两侧真实意图裁定，**不保留两份口径**。
 
     - **缺陷本体（两侧读数一致）**：引擎在模型档在、分词器/ONNX 运行时装不上时**兜底返回全零向量**（不是 None）。它传得下去，传下去之后就再没人分得开"没算出来"与"真算出个全零"：`tool_search._hybrid_scores` 拿它进语义加权，余弦恒 0，检索对该查询恒空手——而空手在 `handle_control_tool` 那儿是 S3「能力缺口」的投递条件（驱动自主造工具），一个口径缺陷被翻译成了假缺口；`muscle_memory` 把它存进条目，`_compute_confidence` 走"有向量"分支、再也回落不到字符覆盖度，换实体近似句的置信度停在 **0.5875**（票面要 ≥0.85）；`vector_index` 写侧落库后该条对检索永久隐身且指纹未变、下轮不重算。
     - **裁定：两处单源，各管一段，不合并成第三个口**。①**出向量**这条路上由引擎自己判——`ONNXEmbeddingEngine.encodeOrNone()`（并入那笔新增），算不出给 `None`，写侧（`manager._embeddingForNewRow`）与八处消费方改问它；②**存量与注入入口**由 `core/vector_math.isZeroVector` 判——落过盘的条目、注入引擎（判据替身、旧装配，只有 `encode`）交上来的向量，都可能是一列 0，`manager._row_embedding` / `semantic_search._get_embedding` / `muscle_memory._compute_confidence` / `tool_search._hybrid_scores` / `vector_index` / `skill_semantics.is_zero_vector` 一律过这一道。两个口的判据都不许在别处再写一遍（`1e-9` 那形），`skill_semantics` 自己那份 `all(abs(x) < 1e-9)` 降成对 ② 的一行委托。
@@ -10773,7 +10864,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开（不当自决）**：① `test_memory_emotion_min_score.py::_idsAt()` 漏带凭证（§6-429 一族漏扫，2 条红）；② 泄漏守卫的放行分支指向 0 实装的幽灵 API ⇒ 要么补那两枚函数、要么改它的话术与样本（改它的话术会让"改＋复原放行"这一格失去被测对象，需一并重设）；③ 工单里的**乙**（6 档 11 处 import 期签头改为用例内现签）作加固另拍——甲 已让这条路走不歪，乙 是对时序免疫的加深；④ 前端 `requiresAuth` 相关两票（未登录可见骨架、`ChannelIdentityPanel` 的 401 文案）与增强族管理员通道票照 §6-431/§6-433 待裁。
     - 空号至 **§6-434**，下批从 **§6-435** 起。本批一笔（`57732258`）＋ §6-433 三笔共 **4 笔未推**。
 
-436. **判据把「别人的账」与「读不到」都读成了本笔的错：夹注未豁免、git 失败被吞成空串（本笔）** ✅🟢 —— 用户点单「CI 未通过，请按报错修复」；承 §6-434 同一条 pipeline-3（构建 `cnb-i46-1k5upb7f5#003`）。
+437. **判据把「别人的账」与「读不到」都读成了本笔的错：夹注未豁免、git 失败被吞成空串（本笔）** ✅🟢 —— 用户点单「CI 未通过，请按报错修复」；承 §6-434 同一条 pipeline-3（构建 `cnb-i46-1k5upb7f5#003`）。
     - **现场**：那一场 `unit-tests` 只剩一格红，红在这份判据档自己的两处取数口上，**不是本笔的正文写错**：
       ① 反证格报 `e87ce9b9 在区间里找不到（豁免指向一枚不存在的提交）`——读的人据此会去删一条仍该在的豁免；
       ② 主格报 `生产池 声明 +26/-5，那一笔的 numstat 实为 +0/-0`——那是正文在**复述**被退役豁免挡着的旧声明，不是本笔声称。

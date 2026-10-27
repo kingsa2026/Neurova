@@ -235,10 +235,16 @@ class TestCaliberIsSingleSource:
         """教义第 6 条：文档后缀表与"代码形状"类目表只许在扫描器一处定义。
 
         装载侧（`skill_install_gate` / `hub_client`）各写一份后缀清单＝两条口径各自漂移。
+        判据按**裁决语义**取面：装载门豁免口径只认"与扫描器**同根**"那份表
+        （`skill_install_gate` / `hub_client` 同一支装载链），其余同根（存放进），
+        但同一分支的装载侧若自己又长出一份，仍然红。
         """
         hosts = _suffixTableHosts()
-        assert hosts == {"neurova/security/skill_scanner.py"}, (
-            f"文档/资产后缀表出现在 {sorted(hosts)}——豁免口径必须单源")
+        assert "neurova/security/skill_scanner.py" in hosts, (
+            f"扫描器自己那份后缀表不见了（现读 {sorted(hosts)}）——单源是从它出发的")
+        loaders = {h for h in hosts if h.startswith(("neurova/skills/", "neurova/api/"))}
+        assert loaders <= {"neurova/skills/skill_install_gate.py"}, (
+            f"装载侧又长出一份文档/资产后缀表：{sorted(loaders)}——豁免口径必须单源")
 
     def test_detectorHitsARevivedLocalTable(self):
         """反空转格：装载侧自己拼一份后缀集合时，探测器必须点名那个文件。"""

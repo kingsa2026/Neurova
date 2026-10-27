@@ -61,17 +61,21 @@ class TestFenceCoversMemorySurfaces:
     def test_productionMemoryDirIsTheRepoWorkspacesRoot(self):
         """生产目录是磁盘上那个事实，不随进程配置（`NEUROVA_AGENT_WORKSPACES_DIR`）漂移。
 
-        v2 统一布局（`4bf9b733`）之后生产根是仓库自带 `data/`，旧 `agent_workspaces/` 同时
-        仍在围栏内（`_productionMemoryDirs()` 两条都收），故这里判的是**围栏口径**而不是旧名字。
+        现布局（`data/<agent_id>/`）由 `core/agent_workspaces` 收口：该根**生产上**就是
+        仓库自带的数据根，测试期可注入。所以这格换两种问法，都不读注入值当定义：
+        ① 落点名必须是数据根（不是仓库根，也不是旧扁平 `agent_workspaces/`）——
+           v2 统一布局（`4bf9b733`）之后生产根就是仓内 `data/`；
+        ② 旧 `agent_workspaces/` 仍须留在围栏内（`_productionMemoryDirs()` 两条都收），
+           故这里判的是**围栏口径**而不是旧名字——下面两行分别钉新落点与存量目录。
         """
-        from neurova.knowledge.foundation.storage_fence import productionMemoryDir
-
         from neurova.core.data_root import repoRoot
+        from neurova.knowledge.foundation.storage_fence import productionMemoryDir
 
         # 生产目录在 v2 统一布局之后是仓内 `data/`（旧扁平 `agent_workspaces/` 仍算生产，
         # 由 `_productionMemoryDirs()` 那一支兜着）：取法向 `data_root` 要，不在这里另拼一份。
         assert productionMemoryDir() == repoRoot() / "data", (
-            "生产记忆落点不是仓内数据根——围栏会与真实装配点各说一套")
+            f"生产记忆目录现读 {productionMemoryDir()}——v2 布局把它收进仓内数据根，"
+            "围栏若与真实装配点各说一套，测试会话就会写进生产记忆")
         assert underProductionMemory(productionMemoryDir() / "default" / "memory"
                                      / "neurova_memories_persist.db")
         assert underProductionMemory(repoRoot() / "agent_workspaces" / "default"

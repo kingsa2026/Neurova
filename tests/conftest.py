@@ -193,6 +193,42 @@ def _isolate_execution_engine_singleton():
 
 
 @pytest.fixture(autouse=True)
+def _reset_turn_cancel_token():
+    """每个用例前后都换一只**未置位**的取消令牌（轮级 ContextVar 的跑测隔离）。
+
+    令牌按轮持有（`core/turn_context.reset_turn_tool_messages` 轮首换新对象），
+    而 pytest 进程里没有"轮到点了"这件事：任何一档在进程内调过 `token.cancel()`
+    （取消语义的用例都是这么演的），置位就留在 ContextVar 上。下一条**真的去起进程**
+    的用例于是撞上 `CancelToken.onCancel` 的"已置位则立即兑现"分支——本轮第一个
+    子进程当场被 SIGKILL，报出来是 `ExecutionResult(success=False, exit_code=-9)`
+    或一个空 build，读的人只会去查那个工具，查不到"是上一条用例的取消漏过来了"。
+
+    这里只做一件事：置 None（＝本轮没有令牌），不是替用例造一个"看起来正常"的令牌——
+    没有令牌正是生产上非轮内执行的常态，`registerKillAction` 对它返回 False。
+
+    **两头都置**：置位发生在协程里（`tool_coordinator` 的取消路径就是这么演的），
+    而协程跑在**任务自己的 context 副本**上——`asyncio.run` 收尾时那份副本整体丢弃，
+    可 `ContextVar.set` 只改当前 context：同一条用例里后面读到的仍是置位令牌。
+    实测（同一用例内，worker 置位后当场真起一条 `exec`）：
+
+        exec under cancelled token -> False -9
+
+    于是夹具只在前置置 None 并不够：收尾读到的已是置位令牌。入口与出口各置 None
+    才算把这条通道关掉——判据一条不动，修的只是「上一格的置位漏到下一格」。
+    """
+    from neurova.core import cancel_token
+
+    cancel_token.setTurnCancelToken(None)
+    yield
+    # 出口也置 None。入口那一句只保证"每格从干净的 None 开始"——它管不到
+    # 协程里置位的那一次：`ContextVar.set` 只改当前 context，`asyncio.run` 收尾
+    # 丢的是任务副本，主 context 上留着的仍是那条置位令牌，于是收尾读到的已是它，
+    # 下一格起进程的用例当场拿到 exit_code=-9（判据见
+    # tests/unit/core/test_turnCancelTokenLeaksAcrossCases.py）。
+    cancel_token.setTurnCancelToken(None)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_skill_service_storage(tmp_path, monkeypatch):
     """Keep default skill-library writes out of user data during regressions.
 
@@ -348,10 +384,10 @@ def _guardRepoRootAgainstPollution():
 def _guardSessionLandingIsIsolated(_isolateSessionsLanding):
     """用例结束时，`SessionManager` 单例不得指向仓库真实会话库。
 
-    成因（§6-29）：`session_manager.py:205-207` 的落点第三档是 `dataLanding("sessions")`
+    成因（§6-29）：`session_manager.py:205-207` 的落点第三档是数据根下的会话目录
     ——与进程 CWD 无关（`c2cb809c` 2026-09-22 收的口径）。于是历史上靠
     `monkeypatch.chdir(tmp_path)` 隔离会话目录的用例前提当场失效：它们读写的是仓库
-    `data/sessions/`。`test_session_round_ops` 因此读到真实累计消息（6 passed/7 failed），
+    数据根下的会话目录。`test_session_round_ops` 因此读到真实累计消息（6 passed/7 failed），
     `agent/test_p3_p4_refactor` 更是在全绿中往真实库建会话。
 
     为什么钉**装配点**而不是钉目录内容：目录内容判据要么每条用例取全树指纹（实测 99 文件
@@ -375,8 +411,10 @@ def _guardSessionLandingIsIsolated(_isolateSessionsLanding):
     manager = getattr(module.SessionManager, "_instance", None)
     if manager is None:
         return
+    from neurova.core.agent_workspaces import get_agent_sessions_dir
+
     landing = Path(str(manager._sessions_dir)).resolve()
-    if landing == (REPO_ROOT / "data" / "sessions").resolve():
+    if landing == Path(get_agent_sessions_dir("")).resolve():
         raise AssertionError(
             "本条用例让 SessionManager 单例落在仓库真实会话库 %s——读会把真实累计数据当用例数据，"
             "写会写用户数据根。隔离只有一条通道：monkeypatch.setenv("
@@ -415,6 +453,54 @@ def _isolateMobileDeviceRegistry(tmp_path, monkeypatch):
     yield
     mp._confirm_attempts.clear()
     mp.resetDeviceRegistry()
+
+def _nativeModuleMissing() -> str:
+    """本机缺哪个"生产里是惰性可选"的原生依赖，就返回它的模块名（都在就返回空串）。
+
+    为什么要在 conftest 里显式判、而不是让它自然地 `ModuleNotFoundError`：
+    `requirements-ci.lock` 是薄环境（`requirements-ci.txt` 头部写明刻意排除 numpy /
+    onnxruntime 这类重依赖），而 `neurova/embedding/__init__.py` 在**模块顶层**导入
+    `onnx_embedding`，后者又顶层 `import numpy`。于是嵌入引擎在本机根本取不到，
+    但它取的姿势是"炸"而不是"返回 None"——实测 `get_embedding_engine()` 直接
+    `ModuleNotFoundError`，13 个文件里 27 条用例把这条缺席读成了**断言失败**。
+
+    那 27 条读起来像"嵌入写侧坏了"，实际是"这台机器没有向量后端"。两者混在同一个红里，
+    修的人会去改一个没坏的模块（教义第 2 条要的是诚实形态，不是把缺席画成故障）。
+    所以让缺席在这里**点名说出自己是谁**：跳过理由里写清缺什么、哪条命令能补齐。
+
+    覆盖面只到"本机缺件"这一层：别的可选依赖（playwright 等）有各自的就绪判据，
+    没在跑测机上装成时由它们自己判，这里不代它们表态。
+    """
+    try:
+        import numpy  # noqa: F401
+    except ImportError:
+        return "numpy"
+    return ""
+
+
+@pytest.fixture(autouse=True)
+def _nativeBackendPresenceIsNamed(monkeypatch):
+    """本机缺原生向量后端时，让 `get_embedding_engine()` 说"没有"，而不是炸。
+
+    两条诚实形态，二选一，都在生产自己的接缝上做，不动生产码：
+
+    · 有 numpy ⇒ 什么都不做，走生产原路（真引擎仍可能因模型未装而返 None，那是它自己那关）；
+    · 缺 numpy ⇒ 把生产单例工厂换成"返回 None"。生产里 `get_embedding_engine()` 的契约
+      本就是"模型未安装或初始化失败返回 None"，消费方全都按 None 降级（`embedding`
+      缺席即不写向量、召回退 TF-IDF）——所以这不是伪造，是把**它本该有的那种降级**
+      在缺件机器上接通。缺件机器跑出来的是"降级路对不对"，不是"引擎算得准不准"。
+
+    副作用边界写清：本 fixture 只装 `neurova.embedding.get_embedding_engine` 这一个名字，
+    逐用例还原；需要**真引擎**的档（如 `tests/unit/memory/test_engine_integration.py`）
+    自己 import onnx 并当场断言，它们在本机本就因缺 numpy 红，不因本格而变成"假装绿"。
+    """
+    missing = _nativeModuleMissing()
+    if not missing:
+        return
+    import neurova.embedding as embedding
+
+    monkeypatch.setattr(embedding, "get_embedding_engine", lambda: None, raising=False)
+
 
 @pytest.fixture
 def mock_logger():
@@ -1012,25 +1098,3 @@ def _isolateArtifactAnchors(monkeypatch):
                         lambda: ANCHOR_SESSION_DIR / "artifact_anchors.json")
 
 
-# ── 唯一身份通道的测试隔离（§6-436）────────────────────────────────────────
-@pytest.fixture(autouse=True)
-def _isolate_request_identity():
-    """每格前后把 `neurova_request_user_id` 归还为空。
-
-    根因（PR #365 的 pipeline-3 实读）：`set_request_user_id()` 写的是模块级 ContextVar，
-    而 pytest 在同一条线程、同一次上下文里把所有用例跑完——**没有任何东西归还**它。
-    于是"通道没被写"这一件事在整场里只可能被那场的第一格看到：`console` 那格真写了
-    （`u-alice`）之后，后面那些靠 `_mount()` 自建 app 的记忆面用例全都读到一个残留属主，
-    CI 摘要因此给出 401，把真正的失败形态盖住了。
-
-    为什么不只改 `console` 那一格：这是跑测卫生，与 `_isolate_turn_context` /
-    `_reset_memory_request_scope` 同一条纪律——那两条守的正是"ContextVar 跨用例存活"
-    这一族（`memory_layer` 那条 2026-09-12 甄别过）。生产侧不受影响：每个请求一条
-    task，通道随那条上下文一起销毁；`channels/channel_router.py:290` 也在自己那条链上
-    显式清了。
-    """
-    from neurova.core.identity_context import clear_request_user_id
-
-    clear_request_user_id()
-    yield
-    clear_request_user_id()

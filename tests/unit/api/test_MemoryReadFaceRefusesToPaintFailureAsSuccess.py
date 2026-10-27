@@ -30,19 +30,27 @@ MEMORY_PREFIX = "/api/v1/memory"
 
 
 @pytest.fixture()
-def unreadyClient():
+def unreadyClient(monkeypatch):
     """真 app、但不跑 lifespan ⇒ 没有默认 Agent，正是 6001 的产生态。
 
-    带一枚真 JWT：记忆面自 2026-10-26 点单甲起整面挂路由级
-    `requireIdentityForMemoryFace`，匿名请求在到达"未就绪"那一段之前就 401 了——
-    **那道 401 与本次要审的失败形态无关**，不绕开它红会咬在鉴权上。凭证走生产同一个签发口。
+    两件前提都不是被测对象，缺任一件红都不在这里：
+
+    ① **清掉上一场留下的 `_app_state`**：进程里**上一个**起了 lifespan 的 app 会把它留在
+       模块全局上（`create_app()` 本身不写、`lifespan` 才写）。同场跑测时它还在，本档拿到
+       的就不是"未就绪"，三条行为钉会读成 200 空成功——红在夹具没断干净，不是产品把故障
+       画成了成功。
+    ② **带一枚真 JWT**：记忆面自 2026-10-26 点单甲起整面挂路由级
+       `requireIdentityForMemoryFace`，匿名请求在到达"未就绪"那一段之前就 401 了。凭证走
+       生产同一个签发口（`tests/auth_headers.bearerHeaders`），不在生产侧加兜底——
+       `dependency_overrides` 压不住路由级那道门。
     """
     from fastapi.testclient import TestClient
 
-    from neurova.api.app import create_app
+    from neurova.api import app as app_module
     from tests.auth_headers import bearerHeaders
 
-    return TestClient(create_app(), headers=bearerHeaders("probe-user"))
+    monkeypatch.setattr(app_module, "_app_state", None, raising=False)
+    return TestClient(app_module.create_app(), headers=bearerHeaders("u-probe"))
 
 
 def testEveryDeclaredErrorCodeTakesAPosition():

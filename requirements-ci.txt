@@ -3,12 +3,19 @@
 # 说明：
 #   - 本文件是 requirements.txt 的"轻量核心子集"，供 GitHub Actions 使用。
 #   - 刻意排除体积大 / 需本地模型 / 需显示器的重依赖（sentence-transformers、
-#     transformers、soundfile、huggingface_hub、sentencepiece、edge-tts、pillow、
-#     pyautogui、playwright）。
+#     transformers、torch、soundfile、huggingface_hub、sentencepiece、edge-tts、
+#     pillow、pyautogui、playwright）。
 #   - **向量通道四件已在正文显式声明**（numpy / jieba / onnxruntime / tokenizers，
 #     见下方「向量与分词」一段）：受保护子集里有整族判据走真实向量原语、真实分词与
 #     真实编码，把它们排除在外时那几档是"环境缺件"而不是"代码坏了"——CI 里两者同形，
 #     红得说不清是谁的问题。
+#     引擎 `initialize_sync()` 在 onnxruntime / tokenizers 缺席时返回 False、`encode()`
+#     走零向量兜底，而联想召回基线 / 线索向量通道 / 长时记忆基线 / 写侧补嵌入那几族判据
+#     全部建立在"向量有意义"之上且**刻意不 skip**；把判据改成 skip 等于把这道门关掉（教义第 2 条）。
+#     模型权重随仓入库（`models/embedding/bge-small-zh-v1.5`），故缺的从来只是这几个包。
+#     transformers / sentencepiece 仍不声明：实测逐件屏蔽（meta_path 拦截）后，
+#     `tokenizer.json` 直读即成功，两者体积大且连带 torch。
+#     这四件**只在本文下方那一段声明**（正文其余处不再重复行）。
 #   - 上述被排除依赖在代码中均为"惰性/try 降级"导入，缺席时模块仍可加载；
 #     它们在 scripts/ci_static_gate.py 的 KNOWN_OPTIONAL_DEPS 中登记，
 #     导入巡检会记为 OPTIONAL-SKIP（优雅降级），不算失败。
@@ -23,6 +30,8 @@ pydantic>=2.5.0
 # HTTP & WebSocket
 httpx>=0.25.0
 websockets>=12.0
+# 下界 3.14.5：3.14.3 那一版在 2026-10 公告批里有 8 条（请求走私 GHSA-pqxq-w44r-73xw、
+# 分片请求耗尽 fd、cookie Secure 属性未强制等），修复版自 3.14.4 起。
 aiohttp>=3.14.5
 
 # Database
@@ -57,19 +66,6 @@ tiktoken>=0.5.0
 APScheduler>=3.10
 feedparser>=6.0
 segno>=1.6
-
-# `neurova/embedding/onnx_embedding.py` 的 `initialize_sync()` 在 onnxruntime 或
-# tokenizers 缺席时返回 False，`encode()` 遂走**零向量兜底**；而受保护子集里
-# test_longTermMemoryBaselineGate（15 例）、test_associativeRecallGate、
-# test_cueVectorChannel、test_cueFanoutDecoupledFromBatchC3、test_muscle_memory_recall
-# 的判据全部建立在"向量有意义"之上，且刻意不做 skip——薄环境里同时红 19 例，
-# 每条红因都指向同一件事：不是代码坏了，是环境缺件。
-# 模型档（`models/embedding/bge-small-zh-v1.5`）已在仓库跟踪，故只缺这两件运行时。
-# 只声明这两件、**不**声明 transformers/sentencepiece：逐件屏蔽实测（meta_path 拦截），
-# 只要这两件在，`tokenizer.json` 直读即成功；后两者体积大且连带 torch，
-# 仍属本文件开头刻意排除的重依赖之列。回归守卫见
-# tests/unit/test_dev_path_and_runtime_dep_guards.py::TestCiTestRunnerAndFixtureDepsAreReal
-# 的 test_embeddingRuntimeDepsDeclaredInCi 与 test_localEmbeddingEngineYieldsRealVectors。
 
 # MCP SDK（P0-6：MCP 受保护测试子集在 CI 运行必需）
 # 与 requirements.txt 同一条范围，且必须逐字同值——两份各写一个下界，
@@ -111,10 +107,15 @@ prometheus_client>=0.20
 # 两者都只在 requirements.txt / requirements-full.lock 声明、CI 薄环境没有 ——
 # 同一根因（"只在生产清单声明、不在 CI 清单声明"），故同处补齐。
 reportlab>=4.0
+# 下界 6.21.2：6.19.0 在 2026-10 公告批里有 11 条，修复版散落 6.21.1/6.21.2，
+# 取能覆盖全部的 6.21.2；与 requirements.txt 同一口径。
 pypdf>=6.21.2
-# 同一根因的第三件：Pillow 在 CI 清单里没有声明行，只是 reportlab 的传递依赖，
-# 于是重编锁时下界由父包给（`pillow>=9.0.0`）——公告的修复版全部只落在 13.0.0，
-# 旧下界永远合规、锁永远漂回 12.x。此处显式顶层声明，与生产清单同一口径。
+# Pillow 此前只以 reportlab 的传递依赖身份进入本锁（`# via reportlab`），下界因此在
+# 传递解析里漂到 12.3.0——而 12.x 线全版（含 12.3.0）都在 2026-10 那批公告里（39 条，
+# libtiff 编码器内存泄露 GHSA-xvh5-g6gv-559v 等），修复版只出现在 13.0.0。
+# 故由传递依赖改为**顶层声明**并钉同一修复下界：与 requirements.txt 的
+# `Pillow>=13.0.0` 同源（生产镜像按 Python 3.12 装，cp312 轮子齐备），
+# 让 CI 与生产跑同一个 Pillow 主版本，也让"锁里停在哪一版"有可追的声明面。
 Pillow>=13.0.0
 
 # 向量与分词（受保护子集的整族判据走真实链路，四件同进同出）：
@@ -137,3 +138,6 @@ tokenizers>=0.13.0
 # 它此前只在 requirements-full.lock 里作为 typer 的传递依赖出现，CI 薄环境没有 ——
 # 与 reportlab / pypdf 同一根因（"只在生产清单声明、不在 CI 清单声明"），故同处补齐。
 rich>=13.0
+
+# 本地嵌入引擎（ONNX）的三件运行时声明在上文「稠密向量原语」那一节，
+# 不在此处再写一份（第二份下界就是第二个事实源）。两者的取舍与理由同处。

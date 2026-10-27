@@ -513,3 +513,70 @@ class TestKillPrimitiveIsSingleSource:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ═══════════════════════════════════════════════════════════════
+# 五：轮次令牌只被**本轮**的取消置位（跨轮泄漏）
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestTurnTokenIsScopedToItsOwnTurn:
+    """轮末必须解绑，且被置位的令牌不得留给下一轮。
+
+    此前 `_turn_token_var` 只有 `resetTurnCancelToken()` 一个出口（轮首换新），
+    轮末**没人清**：一轮里某次超时置位之后，这只令牌就挂在线程的 ContextVar 上，
+    后面所有"没有轮次上下文"的调用方（`getTurnCancelToken()` 取到的还是它）
+    拿到的是一只**已取消**的令牌。`LocalExecutor.exec` 会把子进程句柄交给它，
+    `onCancel` 立即兑现 ⇒ 刚起的进程被上一次取消的理由杀掉（exit_code -9）。
+
+    在受保护子集里这是可见的：`test_executionLayersTransportHalfRetired` 的
+    "真 exec 回得来"整场恒红、单跑恒绿——因为整场跑序里有前序用例把令牌置位了。
+    """
+
+    def test_settledTurnLeavesNoTokenBehind(self, monkeypatch):
+        from neurova.core import cancel_token
+
+        token = cancel_token.resetTurnCancelToken()
+        token.cancel("timeout")
+        assert cancel_token.getTurnCancelToken() is token, "前置：本轮令牌已被置位"
+
+        cancel_token.clearTurnCancelToken()
+
+        assert cancel_token.getTurnCancelToken() is None, (
+            "轮末没有解绑：已置位的令牌留给下一轮，下一个进程注册回调即被立即杀灭"
+        )
+        # 注册口现在返回**摘钩函数**（无令牌时返回空操作），不再用布尔表示成败：
+        # "有没有挂上去"改由行为判——空操作跑一遍什么也不发生，而挂上去的回调会被兑现。
+        fired: list = []
+        release = cancel_token.registerKillAction(lambda: fired.append("fired"))
+        assert callable(release), "注册口必须交回可调用的摘钩函数（调用方不必判空）"
+        release()
+        assert fired == [], "无轮次上下文时注册的回调被兑现了——它挂到了上一轮的令牌上"
+
+    def test_clearKeepsOtherTokensAlone(self):
+        """解绑只影响当前上下文——别人的令牌（并发会话）不许被顺手抹掉。"""
+        import contextvars
+
+        from neurova.core import cancel_token
+
+        scoped = contextvars.ContextVar("probe_other_turn_token", default=None)
+        other = cancel_token.CancelToken()
+        scoped.set(other)
+        try:
+            # 本上下文里没有令牌可解绑：这一步不许动到 scoped 里的那一只
+            cancel_token.clearTurnCancelToken()
+            assert scoped.get() is other, "解绑越界，抹掉了别的上下文的令牌"
+        finally:
+            scoped.set(None)
+
+    def test_turnEndReleasesTheToken(self, monkeypatch):
+        """收尾点必须**真接到**解绑上：`execute()` 的 finally 是唯一覆盖全出口的地方。"""
+        from neurova.agent.chat_pipeline import ChatPipeline
+        from neurova.core import cancel_token
+
+        token = cancel_token.resetTurnCancelToken()
+        token.cancel("timeout")
+        ChatPipeline._release_turn_scope()
+        assert cancel_token.getTurnCancelToken() is None, (
+            "轮末解绑没有接线：已置位的令牌仍然挂在上下文上，下一个执行体会被它杀灭"
+        )

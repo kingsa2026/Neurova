@@ -47,6 +47,18 @@ CLOCK_PATTERNS = {
 #: 逐条结论台账：键 = 受保护子集相对路径，值 = (用到的时钟, 结论)。
 #: 结论文本必须点名"这份文件量什么、为什么这个口径"。
 CLOCK_LEDGER: Dict[str, tuple] = {
+    "tests/unit/api/test_consoleTurnOutlivesItsResponse.py": (
+        ("wallClock",),
+        "轮询护栏：等的是「后端那一轮在连接断开/回执返回之后仍要跑完」这件状态迁移，"
+        "墙钟读数只用来给等待封顶（到点仍未到就如实报缺），断言面全是结构不变量"
+        "（轮次未取消、事件已落、后续请求仍被受理），没有任何耗时上下界——"
+        "与 test_consoleStreamDisconnectKeepsTurn.py 同族形态。"
+    ),
+    "tests/unit/api/test_consoleStreamDisconnectKeepsTurn.py": (
+        ("wallClock",),
+        "同上（轮询护栏）：`deadline` 只封住「等 agent 完成/看见取消」这条等待的上界，"
+        "量的是墙上过了多久，不进任何判值；判据比的是取消语义是否生效，不是快不快。"
+    ),
     "tests/performance/test_perf_gate_contract.py": (
         ("threadCpu", "wallClock"),
         "门禁自检套件：判分面的取数口（measureThreadCpu）必须走本线程 CPU 时钟，"

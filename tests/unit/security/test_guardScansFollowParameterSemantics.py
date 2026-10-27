@@ -35,7 +35,7 @@ from tests import ast_scan
 import neurova
 from neurova.security import governance, tool_guard
 from neurova.security.tool_guard import (
-    GuardSeverity, GuardThreatCategory, ShellEvasionGuardian, ToolGuardEngine)
+    FilePathGuardian, GuardSeverity, GuardThreatCategory, ShellEvasionGuardian, ToolGuardEngine)
 
 NEUROVA_DIR = pathlib.Path(neurova.__file__).resolve().parent
 EVASION = GuardThreatCategory.SHELL_EVASION
@@ -44,23 +44,23 @@ SEMANTIC_KEY_NAMES = ("COMMAND_PARAM_KEYS", "PATH_PARAM_KEYS")
 
 #: 真实家目录下的无害文件名。本仓这条缺陷的触发条件正是**本机用户名形状**（`\` + `xcc` + 十六进制），
 #: 换成 `/tmp/x.txt` 就永远测不到——第一版踩过，红形是"修好了"的假绿。
-#:
-#: 但家目录**本身**可能落进 `FilePathGuardian` 的受保护面（CI 上是 `/root`），
-#: 那时"读取被拦"是受保护路径那条规则在正常工作，与 shell 规避面无关 —— 用家目录下的
-#: 文件名会把两条规则混成一次红。故各机一条取法：家目录受保护时退回系统临时目录，
-#: 两处都取不到就**响亮失败**（拿空路径跑只会得到一条恒真的假绿）。
-_SAFE_HOME = pathlib.Path.home() / "neurova_guard_255_safe_read.txt"
-SAFE_PATH = str(_SAFE_HOME)
-if _SAFE_HOME.as_posix().startswith("/root"):
-    SAFE_PATH = str(pathlib.Path(tempfile.gettempdir()) / "neurova_guard_255_safe_read.txt")
+#: 取样点选在 `/tmp/...` 这类**非受保护**落点，而不是真实家目录：本机家目录是 `/root`，
+#: 它本身就在守卫的受保护路径表里（`tool_guard._protected_paths`），拿它取样时红的是**另一条规则**
+#: （`protected_path`），判据锚在被测对象之外，就测不到 shell 规避面。
+#: 形状由字面路径承载，与跑测账户是谁无关——这条取样因此不随家目录长短、账户名而转红转绿。
+#: 形状自证：同一串落在**命令键**上必须仍被判为十六进制编码（否则这条取样根本没触发判据），
+#: 落在**路径键**上则不许进命令扫描面——两侧现读见下一格。
+SAFE_PATH = "/tmp/users\\xccoo/neurova_scan_probe/safe_read.txt"
 
-#: 判据问的是**扫描面归属**（命令面会不会把路径值再扫一遍），不是"这一发该放行"。
-#: 故主红只排除与命令扫描面相关的那两类 finding：受保护路径（`HOME=/root` 的容器里家目录
-#: 碰巧被 `_protected_paths` 覆盖，那是另一条按值的裁决，跟本档无关）。若把整条 `should_block`
-#: 当断言，判据就绑在了"跑测用户的家目录在不在受保护名单里"，本机绿、CI 红两头都不说明问题。
-#: 受保护路径那条（`protected_path`）是按值的裁决，与命令扫描面无关，故单独排除。
-_COMMAND_SURFACE_RULES = ("protected_path",)
-_EVASION_FAMILIES = (GuardThreatCategory.SHELL_EVASION, GuardThreatCategory.PATH_TRAVERSAL)
+
+def _safeSamples() -> list:
+    """无害路径的取样集合（含触发形状的那一条，前提明确时加一条家目录探针）。"""
+    samples = [str(pathlib.Path(tempfile.mkdtemp()) / "xcc" / "\\xcc9f.txt")]
+    homeProbe = str(pathlib.Path.home() / "x.txt")
+    if not any(f.rule_id == "protected_path"
+               for f in _findings("file_read", {"file_path": homeProbe})):
+        samples.append(SAFE_PATH)
+    return samples
 
 
 def _findings(toolName: str, params: dict) -> list:
@@ -77,13 +77,22 @@ def test_plainWindowsPathIsNotShellEvasion():
 
     assert not findings, (
         "无害路径被判成 shell 规避（finding=%s）⇒ 路径值混进了命令扫描面" % findings[:2])
-    # 命令面同族的两类都不许被这条路径值触发（`protected_path` 属按值的裁决，不在此列）。
+    # 判据问的是**扫描面归属**：命令面的两类都不许由这条路径值触发。`protected_path`
+    # 是另一条按值的裁决（家目录是否在受保护名单里），与命令扫描面无关，故单独排除——
+    # 若把整条 `should_block` 当断言，判据就绑在"跑测账户的家目录长什么样"上。
     onCommandSurface = [f for f in _findings("file_read", {"file_path": SAFE_PATH})
-                        if f.category in _EVASION_FAMILIES
-                        and f.rule_id not in _COMMAND_SURFACE_RULES]
+                        if f.category in (GuardThreatCategory.SHELL_EVASION,
+                                          GuardThreatCategory.PATH_TRAVERSAL)
+                        and f.rule_id != "protected_path"]
     assert not onCommandSurface, (
         "路径读取被命令扫描面拦下（finding=%s）⇒ 非交互链路（渠道/NPC/mobile/定时）"
         "的每一次文件工具调用都会被卡住" % onCommandSurface[:2])
+    for probe in _safeSamples():
+        blocked = [f for f in _findings("file_read", {"file_path": probe})
+                   if f.rule_id != "protected_path"]
+        assert not blocked, (
+            f"路径读取仍被拦（{probe}）⇒ 每一次文件工具调用在非交互链路"
+            "（渠道/NPC/mobile/定时）都会被卡住：%s" % blocked[:2])
 
 
 def test_realEvasionInCommandStillCaught():
