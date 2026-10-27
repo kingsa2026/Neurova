@@ -28,11 +28,22 @@ from neurova.api.auth import create_access_token
 
 
 def bearerHeaders(sub: str = "probe-user", **claims: Any) -> Dict[str, str]:
-    """签发一枚真 token 并包成请求头（`sub` 即租户键 user_id）。"""
+    """对齐本轮密钥，再签一枚真 token 并包成请求头（`sub` 即租户键 user_id）。
+
+    **这一句 `pinJwtSecret()` 是本仓唯一的身份取数不变式**：签发侧与验签门必须读同一把
+    密钥的"当时值"。此前 `bearerHeaders` 只签不对齐，于是任何在 import 期签头的档都会在
+    别人对齐之后变成「刚签的令牌被自己拒」（现算 6 档 11 处模块级签头、合跑 26 条红、
+    另有单档单跑即红 2 条，红形同为 401 —— 见
+    `docs/04-plans/记忆面测试密钥作用域工单_2026-10-27.md`）。幂等 ⇒ 已对齐时零开销。
+
+    这里同时退役了 `signedBearerHeaders`：对齐塞进签名口之后，它就是本函数的第二个名字，
+    而第二个名字等于第二个事实源（教义第 6/7 条）。
+    """
     # 走模块对象调用，不用模块级再导出的那个函数对象："这一轮是哪把密钥"的答案只有
     # `auth.currentJwtSecretKey()` 一处，判据要断也断这一处（不再各读各的副本）。
     from neurova.api import auth as auth_mod
 
+    pinJwtSecret()
     token = auth_mod.create_access_token(data={"sub": sub, **claims})
     return {"Authorization": f"Bearer {token}"}
 
@@ -173,8 +184,3 @@ def pinJwtSecret(secret: str = _TEST_SECRET) -> str:
             gate.__globals__["JWT_SECRET_KEY"] = secret
     return secret
 
-
-def signedBearerHeaders(sub: str = "probe-user", **claims: Any) -> Dict[str, str]:
-    """先对齐本轮密钥、再现签一枚真 token —— 两侧同源，用例内取用。"""
-    pinJwtSecret()
-    return bearerHeaders(sub, **claims)
