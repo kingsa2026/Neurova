@@ -22,14 +22,14 @@
 ## 摘要
 
 <!-- COGNITIVE:SUMMARY:BEGIN -->
-共 **95** 个模块 / **44654** 行。按状态：**在役 54** · **仅层内 34** · **仅测试 2** · **零读者 5**。
+共 **93** 个模块 / **43194** 行。按状态：**在役 52** · **仅层内 34** · **仅测试 2** · **零读者 5**。
 
 | 子层 | 模块数 | 行数 |
 |---|---|---|
 | `emotion_context_layer` | 4 | 2300 |
 | `growth_layer` | 1 | 813 |
 | `knowledge_graph` | 1 | 1269 |
-| `memory_layer` | 84 | 38000 |
+| `memory_layer` | 82 | 36540 |
 | `meta_cognition_layer` | 5 | 2272 |
 <!-- COGNITIVE:SUMMARY:END -->
 
@@ -127,8 +127,6 @@
 | `neurova/cognitive_layers/memory_layer/proactive_question.py` | 940 | 0 | 0 | 0 | 零读者 |
 | `neurova/cognitive_layers/memory_layer/reasoning_trace_manager.py` | 208 | 1 | 1 | 5 | 在役 |
 | `neurova/cognitive_layers/memory_layer/relation_mixin.py` | 400 | 0 | 0 | 0 | 零读者 |
-| `neurova/cognitive_layers/memory_layer/security.py` | 730 | 1 | 0 | 3 | 在役 |
-| `neurova/cognitive_layers/memory_layer/security.py` | 730 | 1 | 0 | 3 | 在役 |
 | `neurova/cognitive_layers/memory_layer/security.py` | 730 | 1 | 0 | 3 | 在役 |
 | `neurova/cognitive_layers/memory_layer/semantic_emotion.py` | 121 | 1 | 0 | 2 | 在役 |
 | `neurova/cognitive_layers/memory_layer/semantic_search.py` | 339 | 1 | 3 | 16 | 在役 |

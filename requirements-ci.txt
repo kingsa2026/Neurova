@@ -62,7 +62,9 @@ segno>=1.6
 # 的判据走真实 ndarray 运算，缺席即 ModuleNotFoundError——那是环境缺件，不是被测代码的结论。
 # 只装 numpy，不拉 onnxruntime/sentence-transformers：CI 需要的是"向量原语可用"，
 # 不是"本地模型可用"（真权重那一路仍按各档自己的 real_model 标记跳过）。
-numpy>=1.24.0
+# **numpy 的版本声明只有一处**——文件末尾「嵌入档的加载面」那段（带 Python 分支条件，
+# 与锁里那两条 `python_full_version` 标记同源）。这里再写一行无上界的同义声明，
+# 就是同一件事的第二份定义：两份迟早一个带界一个不带界，而锁只认其中一份。
 # 中文分词（同上）：`evolution.eval.constraints.semantic_similarity` 的 Jaccard 回退
 # 依赖 jieba 切词，缺席时中文整段成单 token，漂移闸会给出与生产不同的读数。
 jieba>=0.42.1
@@ -159,6 +161,14 @@ rich>=13.0
 # 收窄的理由是"有判据要求真实档"，不再是"缺了能优雅降级"。
 # 它们刻意**不**登记进 ci_static_gate.KNOWN_OPTIONAL_DEPS（那份表只收缺了能降级的项），
 # 缺席即由 tests/unit/test_ci_thin_env_guards.py 的嵌入档判据报红。
-numpy>=1.24.0,<2.5
+#
+# numpy 的上界不是引擎约束，是**解析面**的约束，故按 Python 分支各写一条：
+#   py<3.12  → `<2.5`：那棵树最高只发到 2.4.x（2.5.0 起 requires-python >= 3.12），
+#              不写上界时 `--universal` 解析会在该分支上倒回更老的档；
+#   py>=3.12 → 不设上界：这一支本来就只解析得到 >=2.5 的轮子，写 `<2.5` 在那里是**无解**。
+# 上界与锁必须同源：两条声明各带 `python_version` 条件，uv 就能复算出锁里那两条
+# `python_full_version` 标记——不必让锁与声明显式分叉，也不必在两处各写一份版本面。
+numpy>=1.24.0,<2.5 ; python_version < "3.12"
+numpy>=1.24.0 ; python_version >= "3.12"
 tokenizers>=0.15.0
 onnxruntime>=1.16.0
