@@ -28,15 +28,30 @@ from neurova.interfaces.api_standard import ErrorCodes
 USER = {"user_id": "1", "username": "tester", "role": "user"}
 
 
+def _authorized(client: TestClient) -> TestClient:
+    """带一张**真**签出来的 access token 的客户端。
+
+    记忆面 2026-10-26 起在 router 级挂 `requireIdentityForMemoryFace`：无凭证一律 401，
+    且它是 router 级依赖，`dependency_overrides` 覆盖不到（那正是它"门只有一道"的设计）。
+    故这里不再靠覆盖身份位，而是走生产入口签一张真 token——本档要判的是"故障长什么样"，
+    不该让红咬在"没鉴权"上；但也不许把门本身的判据挪走（那由
+    `tests/unit/api/test_memoryWriteIdentityGate.py` 与 `test_memory_route_authorization.py` 钉着）。
+    """
+    from neurova.api.auth import create_access_token
+
+    token = create_access_token(dict(USER))
+    client.headers.update({"Authorization": f"Bearer {token}"})
+    return client
+
+
 def _mount(router, prefix: str):
     app = FastAPI()
     app.include_router(router, prefix=prefix)
     register_error_handlers(app)
     app.dependency_overrides[get_current_user_or_default] = lambda: dict(USER)
-    # 装配噪声先排掉：firewall 的路由级依赖是 `get_current_user`，
-    # 不覆盖就整族 401——红会咬在"没鉴权"上而不是"把故障读成结论"上。
+    # firewall 的路由级依赖是 `get_current_user`，覆盖掉才不至于整族 401。
     app.dependency_overrides[get_current_user] = lambda: dict(USER)
-    return TestClient(app, raise_server_exceptions=False)
+    return _authorized(TestClient(app, raise_server_exceptions=False))
 
 
 class _BoomLedger:
