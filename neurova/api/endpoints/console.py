@@ -938,6 +938,18 @@ async def post_console_chat(
             except BaseException:  # noqa: BLE001 - 终态与落点已由 run_chat 负责，这里只保引用
                 pass
 
+        # 请求级属主（§6-153 按教义第 5 条扫出的命中点）：批 9 把管线里那段"每轮按
+        # metadata['user_id'] 补写通道"的双写删掉时，只在 `api/endpoints/chat.py` 补了
+        # 边界写点，**这条 console 面漏了**——于是网页回合里 `get_request_user_id()` 为空：
+        # usage 入账落到 `"anonymous"`（`multi_model_client:876/1156`）、按日 LLM 配额整条
+        # 不判（`:1426` 无身份即放行）、客户端自带全新 session_id 时会话落空属主
+        # （`session_manager:1650` 空属主＝对全员可见）。写点必须**先于**下面那个
+        # `create_task(_produceTurn())`：task 在创建那一刻复制当前上下文，反过来写就只能在
+        # 别人的上下文里补——`_runTurn` 里读到的仍是 None（本轮实测就是这么红的）。
+        from neurova.core.identity_context import set_request_user_id
+
+        set_request_user_id(user_id)
+
         # 强引用持有：裸 create_task 会被 GC 掉半路夭折；done 回调自行摘除
         _spawned = asyncio.create_task(_produceTurn())
         _TURN_TASKS.add(_spawned)
@@ -965,9 +977,6 @@ async def post_console_chat(
             # 429 重试/切换倒计时事件转发（retry_status → SSE retry）
             "emit_status_events": True,
         }
-        # 请求级属主已在端点同步段写过一次（见 `post_console_chat` 开头那段说明）——
-        # 这里不再写第二遍：同一个值两处写就是两条并行口径，而生成器体内那一次本来就
-        # 不在端点上下文的拷贝里（在星型线程池的另一次拷贝里推进）。
         # R-3 修复: 附件元数据注入（file_ids → attachments，供 pipeline 附件注入）
         attachments = attach_files(getattr(body, "file_ids", None), user_id)
         logger.info("[附件注入] file_ids=%s user_id=%s → attachments=%d",

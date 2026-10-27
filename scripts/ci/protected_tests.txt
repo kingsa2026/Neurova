@@ -1319,6 +1319,12 @@ tests/unit/agent/test_anthropic_loop_batch_handoff.py
 #   判据：令牌协议 / 处置声明与分派（真进程真断言，不用 MagicMock 冒充 Popen）/
 #   取消的裁决身份（不进 MIN(success) 粘性）/ 终态回到反馈环 / 杀灭单源。
 tests/unit/tools/test_tool_cancellation.py
+# 轮级取消令牌的跨用例隔离（`cnb-h41-1k5nnd37s#003` / `cnb-7o4-1k5nkg9f3#003` 两次
+#   7823 条里唯一一条红的根因）：上一条用例在协程里置位的令牌漏过用例边界，下一条起
+#   进程的用例被当场 SIGKILL，报出来是 exit_code=-9 的"本地运行时执行不回来"。
+#   判据两条：置位令牌真能杀掉进程（前提自证，不用 MagicMock 冒充）+ 上一格的置位
+#   到不了本格（关掉 conftest 夹具尾部那句即红）。
+tests/unit/core/test_turnCancelTokenLeaksAcrossCases.py
 
 # 跨轴一致性批（PR #287 尾巴）：名单成员资格收口到声明面的两份判据。
 #   · test_reproducible_flag.py：写作用域声明 ⇒ 不可重现（单向蕴含），含
@@ -1518,6 +1524,20 @@ tests/unit/deploy/test_image_runtime_selfproof.py
 #   `namespace: group` + tags。守卫逐条钉住「别把容器节点那套抄过来」，
 #   并要求 Windows 宿主自证（cmd /c ver）与构建工具链逐件点名。
 tests/unit/ci/test_win_installer_pipeline.py
+# PR #364 现场：`unit-tests` 的 Prepare 段在 116.7s 被杀（其余八条 17～64s），
+#   报的是「任务超过最大执行时间：1m0s」——两条 stage 一条都没跑。真因不在 stage 脚本，
+#   在 runner 声明处：`dependency-audit` 的 Prepare 要装 pip-audit、再落一个上百 MB 的
+#   冻结漏洞库，却与其余流水线同规格（cpus 2）。判据按**阶段结构 + 缓存卷**认这条不变量，
+#   不按流水线名认（名字是标签，改名不该让判据失效）。
+tests/unit/ci/test_runnerAllocatedWallClockIsNotADeadline.py
+# PR #364 现场（第三次同形态）：`unit-tests` 的受保护子集跑到 **83%、29m23s** 被平台
+#   SIGKILL（`Killed` / `code: 137`），日志里一条失败墙都没有——不是「有测试红了」。
+#   真因在声明处：这一格是九条流水线里唯一「装整份锁 + 串行跑 716 条清单 + 每格带
+#   `--cov` 插桩」的，却按 cpus 4 跑（官方口径：内存 = cpus × 2GiB ⇒ 8GiB；同档节点
+#   默认 8 核、范围 1~64）。判据两条：cpus 不得低于重活档；驱动这一格的 timeout 不得
+#   与实测量级脱钩（90m vs 实测 ≈35m 时，「真撞墙」与「被资源杀掉」在日志里长得一样）。
+#   两条都按**阶段结构**认（有没有清单驱动），不按流水线名认。
+tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py
 # Issue #332（实测断裂）：自定义界面壳的欢迎页把版本写死成字面量 `v1.0.0`，
 #   而产品版本事实源（tauri.conf.json / package.json）已跑到 `1.0.0-beta5` ——
 #   装出来的包**显示了一个错版本号**，用户无法据此判断装的是哪一版。
@@ -3939,7 +3959,7 @@ tests/unit/security/test_liveRedactionDoorsUseTheSharedEngine.py
 # 读数一致（context 2 条属并会话在途 orchestrator、llm 5 条跨文件污染、memory/cognitive 4 条
 # 数据根与 bus 旧账、security/skills 2 条治理闸既有红），本批不新增红。
 tests/unit/security/test_redactionDoorsShareOneLeakClosure.py
-# §6-417（本单新增；并线 main 时 §6-404 已被批 M 占走，本单改号）：本地执行体的取消挂钩必须随进程结束而摘掉，且只服务"起进程之后"的取消。
+# 本地执行体的取消挂钩必须随进程结束而摘掉，且只服务"起进程之后"的取消。
 # 病灶是一对生命周期错配：令牌按**轮**持有、杀灭回调按**进程**注册。上一发命令结束后回调仍
 # 留在令牌上（实测残留 1 条），本轮任何一次取消都会去杀一个早已结束的 pid；更直接的坏法在
 # 第二发：它 `Popen` 出来注册回调时令牌**已置位**，注册口按"迟到的回调立即兑现"当场把它杀掉
@@ -3948,18 +3968,19 @@ tests/unit/security/test_redactionDoorsShareOneLeakClosure.py
 #   改回旧登记行 ⇒ ②红（exit=-9）；恢复 ⇒ 2 passed（令牌侧另有 4 格钉"摘钩键必须是令牌给的那个"）。
 # 入册前逐文件单跑全绿（2 passed）。
 tests/unit/execution/test_execLocalRuntimeHangsUpKillHook.py
-# 静态门禁的"未定义名称"判据只许报**真·未定义**，不许把注解专用名算成缺陷。
+# 静态门禁的「未定义名称」判据只许报**真·未定义**，不许把注解专用名算成缺陷。
 # 形态：CI static-gate 腿报 6 处 F821，5 处是注解里的名字（实体在函数体内懒加载，
 # 模块级导入会拉 `neurova.agent` 包 __init__ → `tool_executor` 的循环，AGENTS.md §3）。
-# 判据曾埋在 subprocess 输出里数字符串，于是"判的是语义还是行格式"没人能反证；
-# 现在收成可调用口 `scripts.ci_static_gate.undefinedNamesIn`，本档按三层钉它：
-# 注解专用名不报、真拼错名照旧报（拼错的注解名与幻影变量各一格）、门禁入口仍走这唯一判据口。
+# 判据过去埋在 subprocess 输出里数字符串，没人能反证它判的是语义还是行格式；
+# 现收成可调用口 `scripts.ci_static_gate.collectUndefinedNames`，判形两问都要过：
+# 名字只出现在注解位置、且本文件以某种方式导入过它。真拼错的形参照旧红，
+# `test_sandboxFileBlockNamesThePath.py` 那侧的幻影变量同样照旧红。
 tests/unit/ci/test_staticGateUsesParserNotTypecheck.py
-# 裁决**按哪些路径值裁的**必须随裁决结果回到调用方。改前 `verdict.to_dict()` 的键里
-# 一格路径都没有，"被拦的是哪条路径"在结果面就丢了；`tool_executor` 的文件保护支路
-# 因此读一个从未绑定的 `file_path` 打日志——静态门禁报 F821，运行时被外层吞成 warning，
-# 文件类工具每到这一行就静默丢掉"拦了哪条路径"。本档钉三层：结果面带出路径值且
-# `to_dict()` 一并带出、与取数口 `extract_adjudicable_params` 同源、消费侧真日志点到路径。
+tests/unit/security/test_sandboxFileBlockNamesThePath.py
+# 裁决**按哪些路径值裁的**必须随裁决结果回到调用方：`verdict.to_dict()` 过去一格路径都没有，
+# 拒绝语只能报半句散文；`tool_executor` 的文件保护支路因此去读一个作用域里从未绑定的
+# 名字打日志——静态门禁报未定义名，运行时被外层吞成 warning，「拦了哪条路径」整个消失。
+# 本档钉三层：结果面带出路径值且 `to_dict()` 一并带出、与取数口同源、消费侧真日志点到路径。
 tests/unit/security/test_governancePathValuesReachCallers.py
 # §6-416（批 P-5 第三格）：内容级**第八张表**并进单源，挖掘门改接并退役自带表与同名实装。
 # 票面来自 §6-415 仍开①——§6-411 那次"七份收成一份"没数到 `evolution/eval/miner.py:SECRET_PATTERNS`，

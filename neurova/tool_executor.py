@@ -35,6 +35,8 @@ import sqlite3
 import threading
 from collections import OrderedDict
 import time
+
+import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from neurova.core.data_root import dataPath
@@ -1644,28 +1646,26 @@ class ToolExecutor:
                                 }
                             )
                 return sandbox_result
-            # 文件类操作暂无文件系统沙箱后端：降级为阻止并说明原因
-            return self._fileGuardDenial(verdict)
+            # 文件类操作暂无文件系统沙箱后端：降级为阻止并说明原因。
+            # 审计面要点名**哪一条路径**被拦：`pathValues` 是治理预检同一份取数口交出来的
+            # `(键名, 值)` 清单（教义第 6 条），多值时逐条带上键名，无值时不写占位。
+            logger.warning(
+                "文件操作命中沙箱策略但无文件沙箱后端，已阻止: %s",
+                "; ".join(f"{key}={value}" for key, value in pathValues) or "(无路径参数)",
+            )
+            # 拒绝语得点名**被拦的那条路径**：裁决结果自己带出来的 `path_values`，
+            # 不去 reasons 里抠散文（抠法一换工具就哑，§6-284 的出口断点）。
+            return {
+                "success": False,
+                "error": "该文件位置受保护，已阻止访问: " + "; ".join(
+                    [value for _name, value in verdict.path_values] or verdict.reasons),
+                "governance": verdict.to_dict(),
+            }
 
         if verdict.decision == GovernanceDecision.ASK:
             return await self._awaitApprovalVerdict(tool_name, params, verdict)
 
         return None  # ALLOW 放行
-
-    def _fileGuardDenial(self, verdict) -> Dict:
-        """文件类操作命中沙箱策略、且本平台无文件沙箱后端时的终态回执。
-
-        被拦的**是哪条路径**从裁决结果的 `path_values` 取，不从 `reasons` 的散文里抠，
-        也不拿本函数作用域里根本没有的名字——这一行此前读的是幻影变量 `file_path`，
-        静态门禁报 F821、运行时被外层吞成 warning，于是"拦了哪条路径"在日志面上整个消失。
-        """
-        blocked = "、".join("%s=%s" % (name, value) for name, value in verdict.path_values)
-        logger.warning("文件操作命中沙箱策略但无文件沙箱后端，已阻止: %s", blocked or "（无路径参数）")
-        return {
-            "success": False,
-            "error": "该文件位置受保护，已阻止访问: " + "; ".join(verdict.reasons),
-            "governance": verdict.to_dict(),
-        }
 
     async def _awaitApprovalVerdict(self, tool_name: str, params: Dict, verdict) -> Optional[Dict]:
         """ASK 的裁决通路：有界阻塞等人工裁决，醒来后由**本调用**在完整管线里执行。
@@ -5748,7 +5748,12 @@ class ToolExecutor:
             try:
                 # 构建执行命令
                 if language == "python":
-                    command = "python"
+                    # 用**本进程那个解释器**，不写字面量 "python"：后者只在 Windows/部分
+                    # 发行版上有那个名字；Debian 系的跑测机只有 `python3`，于是同一段
+                    # `run_code` 在 CI 上恒 `exit_code=-9`、`error` 里写着 "No such file or
+                    # directory: 'python'"——读起来像"沙箱坏了"，其实是"这台机器没有那个别名"。
+                    # sys.executable 还有个额外好处：执行环境与本进程的依赖/虚拟环境一致。
+                    command = sys.executable
                     args = ["-c", code]
                 elif language in ("shell", "bash", "sh"):
                     command = "sh"

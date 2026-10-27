@@ -34,13 +34,12 @@ def _mount(router, prefix: str):
     app.include_router(router, prefix=prefix)
     register_error_handlers(app)
     app.dependency_overrides[get_current_user_or_default] = lambda: dict(USER)
-    # 装配噪声先排掉：firewall 的路由级依赖是 `get_current_user`，
-    # 不覆盖就整族 401——红会咬在"没鉴权"上而不是"把故障读成结论"上。
-    app.dependency_overrides[get_current_user] = lambda: dict(USER)
+    # 装配噪声先排掉：路由级的鉴权依赖不覆盖就整族 401——红会咬在"没鉴权"上，
+    # 而不是"把故障读成结论"上。两处都是**装配点**，不是被测对象。
     # 记忆面另有一道**路由级**凭证门（`APIRouter(dependencies=[Depends(requireIdentityForMemoryFace)])`，
-    # 2026-10-26 点单甲把读写一起收进来）。它判的是"请求有没有凭证"，不看被 override 的
-    # 处理器级身份函数，所以替身压不住它——必须像用户那样带一枚真 JWT，否则整族 401 的
-    # 读数会被读成"故障被折成结论"。这是新增的装配前置条件，不是被测行为的变化。
+    # 2026-10-26 点单甲把读写一起收进来）：它判的是"请求有没有凭证"，不看被 override 的
+    # 处理器级身份函数，替身压不住它——故 client 挂一枚真 JWT（生产同一个签发口）。
+    app.dependency_overrides[get_current_user] = lambda: dict(USER)
     return TestClient(app, raise_server_exceptions=False, headers=bearerHeaders(USER["user_id"]))
 
 

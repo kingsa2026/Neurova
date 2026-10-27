@@ -183,10 +183,10 @@ class TestEndToEndOnSyntheticRepos:
             "from app.logic import answer\n\n"
             "def test_answer():\n"
             f"    assert answer() == {expected}\n", encoding="utf-8")
-        # `-c commit.gpgsign=false` 是**必须**的：宿主的 `~/.gitconfig` 一旦开了
-        # `commit.gpgsign = true`（开发者签名策略），合成仓里那条 `t@t` 身份就没有可用密钥，
-        # `git commit` 直接 128「gpg failed to sign the data」——判据红在宿主配置上，
-        # 与它要验的 A/B 读数一点关系都没有。合成仓是**一次性夹具**，签不签名不构成任何证据。
+        # `-c commit.gpgsign=false`：合成仓是夹具，不该继承宿主/镜像的签名配置——
+        # 宿主 `~/.gitconfig` 里 `commit.gpgsign=true` 而签名程序不可用（容器内无密钥）时，
+        # 这几条合成仓的 commit 会以 128 直接炸掉，红的是宿主配置而不是被测驱动（形态集 303 同族）。
+        # CI 上时有时无（各 runner 的全局配置不同），故钉在命令里而不是靠环境碰运气。
         for args in (["init", "-q"], ["add", "."],
                      ["-c", "user.email=t@t", "-c", "user.name=t",
                       "-c", "commit.gpgsign=false", "commit", "-q", "-m", "base"]):

@@ -293,6 +293,48 @@ class TestGateVerifiesLocalPatchesItself:
         )
 
 
+class TestAuditFloorsForRustTree:
+    """Cargo 树的公告修复下界——锁不许回退到有公告的版本。
+
+    与 `tests/unit/tools/test_npx_runtime_pinning.py::TestNoKnownVulnerableRuntimePackages`
+    同一纪律：osv-scanner 实扫发现 → 在此追加一条 → 回退即红。那条口径只覆盖
+    npx 运行时包锁，`NeurUI/src-tauri/Cargo.lock` 这一片此前**没有任何防回退闸门**：
+    公告被修掉之后，一次无关的依赖重解析就能把它转回旧版，而门禁要到下一次
+    实扫才报红（那时已与引入它的改动隔了几手）。本类补上这一环。
+
+    下界来源（api.osv.dev 逐版本实查，2026-10-24，构建 cnb-gsh-1k5n24puu）：
+      tokio 1.53.1 → RUSTSEC-2026-0386（`AsyncFd::new` 及同族构造器违反 I/O safety），
+      1.53.3 起清零（1.54.0 又落进 RUSTSEC-2026-0384，故下界不写成「该线最高版」）。
+    """
+
+    _FLOORS = {"tokio": "1.53.3"}
+
+    @staticmethod
+    def _version_key(version: str) -> tuple:
+        core = version.split("+", 1)[0]
+        return tuple(
+            (0, int(part), "") if part.isdigit() else (1, 0, part)
+            for part in core.replace("-", ".").split(".")
+        )
+
+    def test_cargo_crates_meet_audit_floors(self):
+        problems = []
+        for crate, floor in self._FLOORS.items():
+            block = _lock_block(crate)
+            if not block:
+                # 承载者被整体摘除（依赖被上游换掉）也是合格形态，不报红。
+                continue
+            version = _LOCK_VERSION.search(block).group(1)
+            if self._version_key(version) < self._version_key(floor):
+                problems.append(f"{crate}: 锁 {version} < 已修公告的修复下界 {floor}")
+        assert not problems, (
+            "Cargo.lock 里出现已修公告的未修版本（会直接红 dependency-audit）:\n  "
+            + "\n  ".join(problems)
+            + "\n修复：抬 Cargo.lock 对应条目（version 与 checksum 同一批改），"
+            "并在提交说明里附 osv 实扫读数。"
+        )
+
+
 class TestGuardIsWiredIntoCi:
     """本守卫必须真被 CI 跑到，否则以上断言全是摆设。"""
 

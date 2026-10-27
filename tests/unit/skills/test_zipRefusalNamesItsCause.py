@@ -25,7 +25,7 @@ import pytest
 
 from neurova.security import safe_archive
 from neurova.skills import market_sources
-from neurova.skills.market_importer import MarketImporter, read_builtin_bundle
+from neurova.skills.market_importer import BUILTIN_BUNDLE_DIR, MarketImporter, read_builtin_bundle
 
 BUNDLE = "adaptive-presentation-studio.zip"
 REFUSAL_API = "extractRemoteSkillZipRefusal"
@@ -50,9 +50,11 @@ def buildZip(members: dict) -> bytes:
 def deepRoot(tmp: Path, skill_id: str) -> Path:
     """复刻 pytest 那种"用例名即目录名"的深根。
 
-    根长只是**前提的一半**：超不超预算由"根 + 最长成员"一起决定，故长度不再按
-    写死的目录名赌（CI 的临时根比开发机短，写死会让「必被拒」那格悄悄变成「装成了」）。
-    调用方按 `overBudgetRoot(payload, ...)` 取根，那一处同时钉住"确实超了"。
+    原写法只拼 273 字符的根，赌的是"根 + 最长成员 ≥ 260"。这个赌注会过期：
+    内置资产包的最长成员后来缩到 125（根 133 + 1 + 125 = 259，正好卡在 260 预算内），
+    整档于是从"钉住路径过长这一族"退化成"报告说兜底没生效"——判据错的不是断言，是前提。
+    现在根按 `WINDOWS_MAX_PATH` 与**这份包真实的**成员长度反推，成员再缩也照样越限；
+    平台临时目录前缀多长也因此不再决定这一格红不红。
     """
     return (tmp / "pytest-of-operator" / "pytest-9999"
             / "test_import_builtin_offline[presentation-studio]0" / "skills" / skill_id)

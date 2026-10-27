@@ -91,9 +91,11 @@ class WeChatKfEventsMixin:
     def download_kf_media(self, media_id: str) -> Optional[bytes]:
         """微信客服素材下载；失败返回 None（由入站桥报 media_unavailable）。
 
-        HTTP 实装只有 `wecom.fetchWecomMediaBytes` 一处（教义第 6 条）——本方法只管
-        「客服这一侧要先有 token」这层前置，取字节的活全交给那一个门（含大小上限与
-        JSON 错误体识别，同一接口不按调用方给两种裁决）。
+        HTTP 那一层不走手抄：企业微信素材 GET 的全仓唯一实装是
+        `wecom.fetchWecomMediaBytes`（与语音通路同一个函数，教义第 6 条，大小上限也在
+        那里）。本方法只保留客服通道自己的前置——先拿到 token；请求形状不再手抄第二份，
+        手抄那一份既没有大小上限，也会在平台协议变更时与单源分叉。
+        导入在模块级一处（分支侧内联的那份重复 import 已随本笔退役）。
         """
         if not media_id or not self._ensure_wecom_token():
             return None
