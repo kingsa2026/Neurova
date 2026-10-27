@@ -18,6 +18,7 @@ from jsonschema import Draft202012Validator
 
 from neurova.builtin_tools import _BUILTIN_SCHEMAS
 import neurova.tool_executor as _te
+from tests.ast_scan import parseSource
 
 _SRC = Path(_te.__file__).read_text(encoding="utf-8")
 
@@ -48,7 +49,7 @@ def _dispatch_map() -> dict:
 
 
 def _method_ast(name: str):
-    tree = ast.parse(_SRC)
+    tree = parseSource(_SRC)
     cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "ToolExecutor")
     # 内置执行体全部 async def → 必须同时匹配 FunctionDef/AsyncFunctionDef
     fn = next(

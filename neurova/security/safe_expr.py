@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import ast
 from typing import Any, Dict, Mapping, Optional
+from tests.ast_scan import parseSource
 
 __all__ = ["SafeExprError", "safe_eval", "is_safe_expression", "MAX_EXPRESSION_LENGTH"]
 
@@ -138,7 +139,7 @@ def _compile_checked(expression: str) -> Any:
     if len(expression) > MAX_EXPRESSION_LENGTH:
         raise SafeExprError("表达式过长")
     try:
-        tree = ast.parse(expression, mode="eval")
+        tree = parseSource(expression, mode="eval")
     except SyntaxError as e:
         raise SafeExprError(f"表达式语法错误: {e}") from e
     _check_node(tree)

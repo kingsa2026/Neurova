@@ -19,12 +19,13 @@ import sqlite3
 from pathlib import Path
 
 from neurova.core import sql_like
+from tests.ast_scan import parseSource
 
 LEDGER_SRC = Path(__file__).resolve().parents[3] / "neurova" / "context" / "eviction_ledger_db.py"
 
 
 def _stringConstants(path: Path) -> set:
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+    tree = parseSource(path.read_text(encoding="utf-8"))
     return {n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
 
 
@@ -43,7 +44,7 @@ def testLedgerTakesTheTokenizerFromTheSingleSource():
     本文件对 `sql_like` 用的是模块式 import（`matchQuery`/`shouldMatch` 都这么走，同仓一致），
     只认 `from … import FTS_TOKENIZER` 会把正当形态判成没接线。
     """
-    tree = ast.parse(LEDGER_SRC.read_text(encoding="utf-8"))
+    tree = parseSource(LEDGER_SRC.read_text(encoding="utf-8"))
     takesIt = any(isinstance(n, ast.Attribute) and n.attr == "FTS_TOKENIZER"
                   and isinstance(n.value, ast.Name) and n.value.id == "sql_like"
                   for n in ast.walk(tree))

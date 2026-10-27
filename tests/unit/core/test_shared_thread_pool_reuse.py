@@ -30,6 +30,7 @@ from neurova.core.thread_pool import (
     get_thread_pool,
     shutdown_thread_pool,
 )
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -42,7 +43,7 @@ def _reset_pool_manager():
 
 
 def _tree(rel_path: str) -> ast.AST:
-    return ast.parse(io.open(PROJECT_ROOT / rel_path, encoding="utf-8").read())
+    return parseSource(io.open(PROJECT_ROOT / rel_path, encoding="utf-8").read())
 
 
 def _constructed_pool_names(tree: ast.AST) -> list:

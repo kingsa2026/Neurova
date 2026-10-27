@@ -38,6 +38,7 @@ import pytest
 from neurova.context.injector import UnifiedContextInjector
 from neurova.core.base_module import BaseModule
 from neurova.core.event_bus import EventBus
+from tests.ast_scan import parseSource
 
 INJECTOR_PATH = Path(__file__).resolve().parents[3] / "neurova" / "context" / "injector.py"
 #: 扫描根单点，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
@@ -139,7 +140,7 @@ def testInjectorDoesNotRedefineBaseModule():
     `neurova.core.base_module` 是仓内模块、恒可导入，用 try/except ImportError 给自己
     造一个"依赖缺失"再兜底，等于同时留着两份契约（且兜底那份把 handler 异常吞成 pass）。
     """
-    tree = ast.parse(INJECTOR_PATH.read_text(encoding="utf-8"))
+    tree = parseSource(INJECTOR_PATH.read_text(encoding="utf-8"))
     redefined = [
         n.lineno
         for n in ast.walk(tree)

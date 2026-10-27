@@ -25,6 +25,7 @@ from tests import ast_scan
 from neurova.api.app import create_app
 from neurova.collaboration.glance_yield_rules import GlanceYieldChecker
 from neurova.core import agent_run_store as ars
+from tests.ast_scan import parseSource
 
 AGENT_ID = "api-agent"
 OWNER = "api-owner"
@@ -203,7 +204,7 @@ class TestLedgerImplementationIsSingleSource:
 
     def _topLevelNames(self, relPath: str) -> Dict[str, Any]:
         src = (_REPO / relPath).read_text(encoding="utf-8")
-        tree = ast.parse(src)
+        tree = parseSource(src)
         return {n.name: n for n in tree.body if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))}
 
     def test_consoleNoLongerOwnsTheLedger(self):
@@ -224,7 +225,7 @@ class TestLedgerImplementationIsSingleSource:
             "neurova/channels/channel_router.py",
         ):
             src = (_REPO / relPath).read_text(encoding="utf-8")
-            tree = ast.parse(src)
+            tree = parseSource(src)
             imported = {
                 alias.name
                 for node in ast.walk(tree)
@@ -246,7 +247,7 @@ class TestLedgerImplementationIsSingleSource:
         """
         return [
             node.lineno
-            for node in ast.walk(ast.parse(source))
+            for node in ast.walk(parseSource(source))
             if isinstance(node, ast.Call)
             and name in (getattr(node.func, "id", None), getattr(node.func, "attr", None))
         ]

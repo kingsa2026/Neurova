@@ -20,6 +20,7 @@ import inspect
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 ROOT = Path(__file__).resolve().parents[2]
 NEUROVA_DIR = ROOT / "neurova"
@@ -192,7 +193,7 @@ class TestW4WebSearchSkillStub:
 
         mod = _runtimeSkillSystem()
         src = inspect.getsource(mod.WebSearchSkill._search_web)
-        tree = ast.parse(src.lstrip())
+        tree = parseSource(src.lstrip())
         func = tree.body[0]
         assert isinstance(func, (ast.AsyncFunctionDef, ast.FunctionDef)), "应解析为函数定义"
 

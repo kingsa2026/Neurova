@@ -33,6 +33,7 @@ from pathlib import Path
 from tests import ast_scan
 
 import pytest
+from tests.ast_scan import parseSource
 
 REPO = Path(__file__).resolve().parents[3]
 ROOTS = (REPO / "neurova", REPO / "tests", REPO / "scripts")
@@ -73,7 +74,7 @@ def _trees():
     for root in ROOTS:
         for ref in ast_scan.sourceRefsUnder(root, ".py"):
             try:
-                yield ref.path, ast.parse(ref.code)
+                yield ref.path, parseSource(ref.code)
             except (SyntaxError, UnicodeDecodeError):
                 continue
 
@@ -124,7 +125,7 @@ def test_idleTrackerHasNoUnassignedAttributeRead():
     类级属性（`PHASE_ORDER` 等）算"已定义"——它们是有意挂在类上的常量，不是孤儿读。
     """
     src = REPO / "neurova" / "core" / "idle_tracker.py"
-    tree = ast.parse(src.read_text(encoding="utf-8"))
+    tree = parseSource(src.read_text(encoding="utf-8"))
     cls = next(n for n in ast.walk(tree)
                if isinstance(n, ast.ClassDef) and n.name == "IdleTimeTracker")
     assigned = {t.attr for n in ast.walk(cls) if isinstance(n, ast.Assign)
@@ -141,7 +142,7 @@ def test_idleTrackerHasNoUnassignedAttributeRead():
             classLevel.add(n.target.id)
     # 继承面按真源解析（不硬抄名字）：BaseModule 的方法与 self.* 赋值都算已定义
     inherited = set()
-    baseTree = ast.parse((REPO / "neurova" / "core" / "base_module.py").read_text(encoding="utf-8"))
+    baseTree = parseSource((REPO / "neurova" / "core" / "base_module.py").read_text(encoding="utf-8"))
     for n in ast.walk(baseTree):
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
             inherited.add(n.name)
@@ -169,7 +170,7 @@ def test_memoryStorageIsConstructedByRealSignature():
     verify_attachment_feature.py:64` 用的就是它）——那是同名词不同物，不该被这条判据误伤，
     也不该被拿来越权证明"db_path 是普遍口子"（§6-128 那族"按符号局部名认通道"的老坑）。
     """
-    tree = ast.parse((REPO / "neurova" / "cognitive_layers" / "memory_layer" / "storage.py")
+    tree = parseSource((REPO / "neurova" / "cognitive_layers" / "memory_layer" / "storage.py")
                      .read_text(encoding="utf-8"))
     cls = next(n for n in ast.walk(tree)
                if isinstance(n, ast.ClassDef) and n.name == "MemoryStorage")
@@ -204,8 +205,8 @@ def test_scannerReallyBites(tmp_path):
     ghost = tmp_path / "ghost.py"
     ghost.write_text(
         "class X:\n    def f(self, s):\n        return s.save_dream_report({})\n", encoding="utf-8")
-    assert ({"save_dream_report"} - _definedNames(ast.parse(ghost.read_text("utf-8")))) == \
+    assert ({"save_dream_report"} - _definedNames(parseSource(ghost.read_text("utf-8")))) == \
         {"save_dream_report"}
-    tree = ast.parse(ghost.read_text(encoding="utf-8"))
+    tree = parseSource(ghost.read_text(encoding="utf-8"))
     assert _calledNames(tree) & DREAM_REPORT_METHODS == {"save_dream_report"}
     ghost.unlink()

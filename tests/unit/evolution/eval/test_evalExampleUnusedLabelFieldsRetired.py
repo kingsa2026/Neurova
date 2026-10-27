@@ -31,6 +31,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
@@ -61,7 +62,7 @@ def _evalExampleFields() -> tuple[str, ...]:
 
 def _callSitesAsEvalExampleKeywords(py: Path) -> list[str]:
     """AST 里 `EvalExample(...)` 调用上挂的两个退役关键字实参（只认构造调用形态）。"""
-    tree = ast.parse(py.read_text(encoding="utf-8"))
+    tree = parseSource(py.read_text(encoding="utf-8"))
     hits: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):

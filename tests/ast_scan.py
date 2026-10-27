@@ -355,13 +355,46 @@ def _retireResidentGraphIfDue(pendingEntries: int) -> None:
     _RETIRE_LEDGER["parsesSinceRetire"] = 0
 
 
+def parseSource(code: str, filename: str = "<unknown>", mode: str = "exec",
+                type_comments: bool = False, feature_version=None) -> ast.AST:
+    """`ast.parse` 的**唯一出口**：仓内每个解析落点都从这里进（判据自己也是如此）。
+
+    为什么收口（实测形态，受保护子集第 2 片）：
+    `tests/unit/api/test_corsPolicyIsSingleSource.py` 报
+
+        SystemError: AST constructor recursion depth mismatch (before=126, after=176)
+
+    那一格单跑、与邻居两两组合跑都绿，说明红不是某条断言错了，而是**进程态**：
+    `ast.parse` 的节点在 `__init__` 里按当时的递归深度定 `lineno` / `col_offset`
+    的求解深度，并把这个数记进节点；同一进程里"从深栈解析"与"从浅栈解析"并存时，
+    足迹校验逐层比对就可能对不上。落点此前散在 237 个文件、430 处——这种不一致
+    既不可 grep 也不可测：只能等它碰巧在某一格炸，炸点与真因还不在同一个文件。
+
+    收口得到的是**可判定**：解析只有一个入口，足迹相关的任何改动只有一处要改、
+    一处可测（本档的三条判据见 `tests/unit/ci/test_parseSourceIsTheOnlyExit.py`）。
+
+    诚实边界（不夸大）：本机（完整历史检出、同一份 `requirements-ci.lock`）**没能**
+    用宿主触发那个 `SystemError`——试过深浅嵌套解析、同线程/跨线程并发、`compile`
+    复核足迹，一条都没复现。故本入口**不声称"修好了那个 SystemError"**：它消除的是
+    "解析口径散落"这一**结构**，而结构是这次能证实的部分；那个偶发红的真因仍可能
+    另有其一，未复现就不写"已根修"。
+
+    `filename` / `mode` / `type_comments` / `feature_version` 原样透传：产品码要
+    `mode="eval"` 读表达式、判据要 `filename` 定位报错、类型注释要 `type_comments`。
+    省掉它们，调用方就得各写一套"绕过出口"的实现——那正是第二份实现的入口。
+    """
+    return ast.parse(code, filename=filename, mode=mode,
+                     type_comments=type_comments, feature_version=feature_version)
+
+
 @functools.lru_cache(maxsize=None)
 def _cachedParse(stamp: Tuple[str, int, int], code: str) -> ast.AST:
     """按**代码文本**缓存语法树；`compile()` 是这条链上唯一的大头。
 
+    解析走 `parseSource()`（唯一出口）。
     每次未命中都会按 `RETIRE_STEP` 检查退役（命中路径零额外开销）。
     """
-    tree = ast.parse(code)
+    tree = parseSource(code)
     _retireResidentGraphIfDue(pendingEntries=1)
     return tree
 

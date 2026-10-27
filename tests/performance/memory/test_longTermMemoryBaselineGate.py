@@ -38,6 +38,7 @@ import pytest
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 from tests import ast_scan
 from tests.performance.memory.test_associativeRecallGate import DISTRACTORS
+from tests.ast_scan import parseSource
 
 #: 扫描根一律写在**模块级常量**上：「面自证」棘轮（`test_scanCriterionMustProveItsOwnSurfaceRatchet`）
 #: 只按模块级绑定解根，绑进函数局部的名字认不出 ⇒ 那档整档掉出它的面，零命中与根写窄都不再被问。
@@ -443,7 +444,7 @@ class TestContentUpdateFollowsRecallIndexes:
         import ast
 
         src = PRODUCTION_ROOT / "cognitive_layers" / "memory_layer" / "manager.py"
-        tree = ast.parse(src.read_text(encoding="utf-8"))
+        tree = parseSource(src.read_text(encoding="utf-8"))
         # 面自证：根写错时 `read_text` 未必响，而「扫到 0 处赋值」永远读起来像干净。
         # 下限按**本档**的「根解到仓内真实目录」来给：`SCAN_FLOOR` 是跨三片树的总量口径，
         # 拿来量单个模块就变成常量错配（实测一个文件 49 个顶层节点）。
@@ -602,7 +603,7 @@ class TestUncollectedMeasurementFileIsRetired:
                 scanned += 1
                 path = ref.path
                 try:
-                    tree = ast.parse(ref.code)
+                    tree = parseSource(ref.code)
                 except (SyntaxError, UnicodeDecodeError):
                     unparsed.append(path.relative_to(REPO_ROOT).as_posix())
                     continue

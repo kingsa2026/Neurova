@@ -33,6 +33,7 @@ import pytest
 import neurova.api.endpoints as endpoints_pkg
 from neurova.api.endpoints import growth as growth_aggregator
 from neurova.api.endpoints import knowledge as knowledge_aggregator
+from tests.ast_scan import parseSource
 
 PKG = "neurova.api.endpoints"
 _ENDPOINTS_DIR = Path(endpoints_pkg.__file__).parent
@@ -120,7 +121,7 @@ def _edges_from_source(source: str, module_name: str) -> set[str]:
     只读调用实参里的字符串，不扫 docstring 与普通字面量——文档里提到兄弟模块
     名不构成依赖边。
     """
-    tree = ast.parse(source, filename=module_name)
+    tree = parseSource(source, filename=module_name)
     edges: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -272,7 +273,7 @@ def _routes(router):
 
 
 def _module_level_function_names(short_name: str) -> list[str]:
-    tree = ast.parse(_source_path(short_name).read_text(encoding="utf-8"), filename=str(short_name))
+    tree = parseSource(_source_path(short_name).read_text(encoding="utf-8"), filename=str(short_name))
     return [
         node.name
         for node in tree.body

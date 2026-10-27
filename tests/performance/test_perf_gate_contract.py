@@ -44,6 +44,7 @@ import time
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 GATE = PROJECT_ROOT / "scripts" / "ci" / "perf_gate.py"
@@ -173,7 +174,7 @@ class TestGateScriptExists:
         )
 
     def test_budgets_defined(self):
-        tree = ast.parse(io.open(GATE, encoding="utf-8").read())
+        tree = parseSource(io.open(GATE, encoding="utf-8").read())
         names = {t.id for n in ast.walk(tree) if isinstance(n, ast.Assign)
                  for t in n.targets if isinstance(t, ast.Name)}
         for budget in (
@@ -273,7 +274,7 @@ class TestJudgingIgnoresMachineLoad:
         不与迭代数同阶，不在此列。
         """
         source = io.open(__file__, encoding="utf-8").read()
-        tree = ast.parse(source)
+        tree = parseSource(source)
         parents = {}
         for node in ast.walk(tree):
             for child in ast.iter_child_nodes(node):

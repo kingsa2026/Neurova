@@ -22,6 +22,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tests import ast_scan as _astScan
+from tests.ast_scan import parseSource
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
 PKG = REPO / "neurova"
@@ -102,8 +103,8 @@ class TestNoErrorLevelDebugAnywhere:
 
     def test_detectorItselfIsNotBlind(self):
         """反向对照：探测器不是恒绿——同一棵 AST 上换个级别就必须不命中。"""
-        loud = ast.parse('logger.error("DEBUG: x=%s", x)')
-        quiet = ast.parse('logger.debug("DEBUG: x=%s", x)')
+        loud = parseSource('logger.error("DEBUG: x=%s", x)')
+        quiet = parseSource('logger.debug("DEBUG: x=%s", x)')
         assert _errorLevelDebugHits(loud) == [1]
         assert _errorLevelDebugHits(quiet) == []
 

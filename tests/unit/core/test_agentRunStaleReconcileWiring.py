@@ -34,6 +34,7 @@ from pathlib import Path
 import pytest
 
 from neurova.core import agent_run_store as ars
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 APP_MODULE = PROJECT_ROOT / "neurova" / "api" / "app.py"
@@ -54,7 +55,7 @@ def _seedRunning(store, session_id, owner):
 
 def _lifespanCallNames():
     """app.py 里出现过的 `startStaleSweep` / `stopStaleSweep` 调用点（AST，只认真调用）。"""
-    tree = ast.parse(io.open(APP_MODULE, encoding="utf-8").read())
+    tree = parseSource(io.open(APP_MODULE, encoding="utf-8").read())
     found = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):

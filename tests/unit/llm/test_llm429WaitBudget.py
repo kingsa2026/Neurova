@@ -62,7 +62,7 @@ def testBudgetKnobExistsInSingleSource():
     src = (REPO_ROOT / "neurova" / "security" / "llm_retry_settings.py").read_text(
         encoding="utf-8"
     )
-    tree = ast.parse(src)
+    tree = parseSource(src)
     defaultsNode = None
     for n in ast.walk(tree):
         # DEFAULTS 声明带类型标注（`DEFAULTS: Dict[str, Any] = {...}`）→ AnnAssign
@@ -103,6 +103,7 @@ def testFrontendSurfaceExposesTheBudget():
 # ── 行为判据：预算真的封顶得住，而且**跨模型切换共享** ──
 # 复用 test_chat_stream_429_retry 的脚本化夹具（同 tests/unit/llm 套件既有口径：
 # `_sleep_for_retry` 是显式留出的桩注入点，记录每次准备等多久）
+from tests.ast_scan import parseSource
 from tests.unit.llm.test_chat_stream_429_retry import (  # noqa: E402
     RL,
     _ScriptedStream,

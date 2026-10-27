@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 NEUROVA = PROJECT_ROOT / "neurova"
@@ -37,7 +38,7 @@ FACADE_KEEP = {"create_default_skills", "get_skill_registry"}
 
 def _facadeReexports():
     """门面包级 `from X import (...)` 绑定的名字 → 来源模块。"""
-    tree = ast.parse((PROJECT_ROOT / FACADE).read_text(encoding="utf-8"))
+    tree = parseSource((PROJECT_ROOT / FACADE).read_text(encoding="utf-8"))
     bound = {}
     for node in tree.body:
         if isinstance(node, ast.ImportFrom):

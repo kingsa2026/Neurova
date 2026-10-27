@@ -31,6 +31,7 @@ import ast
 from pathlib import Path
 
 from neurova.core import turn_context as tc
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TOOL_EXECUTOR = REPO_ROOT / "neurova" / "tool_executor.py"
@@ -43,7 +44,7 @@ DURATION_BINDS = {"start", "started", "start_time", "t0", "begin", "elapsed"}
 
 
 def _functionFeedingAccumulator() -> ast.AST:
-    tree = ast.parse(TOOL_EXECUTOR.read_text(encoding="utf-8"), filename=str(TOOL_EXECUTOR))
+    tree = parseSource(TOOL_EXECUTOR.read_text(encoding="utf-8"), filename=str(TOOL_EXECUTOR))
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue

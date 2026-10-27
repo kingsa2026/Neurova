@@ -53,6 +53,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION = REPO_ROOT / "neurova"
@@ -566,7 +567,7 @@ class TestEveryTurnEntryEstablishesTheOwner:
         stripped = stripped.replace("_establishRequestOwner(user_id)", "pass")
         stripped = stripped.replace("def _establishRequestOwner(user_id: str) -> None:", "def _retiredOwnerSeam(user_id: str) -> None:")
 
-        found = ownerWritesByTurnHandler(ast.parse(stripped))
+        found = ownerWritesByTurnHandler(parseSource(stripped))
         assert {"post_console_chat", "websocket_console"} <= set(found), (
             f"探测器没把这两个入口当「跑回合的鉴权端点」：{sorted(found)}——"
             "⑤ 对它们永远不会红（形状口径失效，不是代码没问题）"
@@ -603,45 +604,45 @@ class TestIdentityIsNotHandedBackToTheTurnFacade:
         """反向自证：两种写法都要抓，且不许把「只传两格」的正常调用报成违例。"""
         keywordForm = "def f(u, s, i):\n    set_request_identity(user_input=u, session_id=s, user_id=i)\n"
         positionalForm = "def f(u, s, i):\n    set_request_identity(u, s, i)\n"
-        assert len(turnSideSources(ast.parse(keywordForm))) == 1, (
+        assert len(turnSideSources(parseSource(keywordForm))) == 1, (
             "关键字形抓不到 ⇒ ⑥ 恒绿（复活了也没人红）")
-        assert len(turnSideSources(ast.parse(positionalForm))) == 1, (
+        assert len(turnSideSources(parseSource(positionalForm))) == 1, (
             "第三个位置实参抓不到 ⇒ 换个写法就绕过 ⑥")
         assert turnSideSources(
-            ast.parse("def f(u, s):\n    set_request_identity(user_input=u, session_id=s)\n")) == [], (
+            parseSource("def f(u, s):\n    set_request_identity(user_input=u, session_id=s)\n")) == [], (
             "合并后的正常调用形状被判成违例 ⇒ ⑥ 恒红，改了也白改")
 
 
 class TestTheComparatorsAreNotVacuous:
     def test_defaultTailIsStrippedButRealDifferencesAreKept(self):
-        pairA = ast.parse("(ctx.metadata or {}).get('user_id') or None").body[0].value
-        pairB = ast.parse("(ctx.metadata or {}).get('user_id')").body[0].value
+        pairA = parseSource("(ctx.metadata or {}).get('user_id') or None").body[0].value
+        pairB = parseSource("(ctx.metadata or {}).get('user_id')").body[0].value
         assert _normalizedDump(pairA) == _normalizedDump(pairB), (
             "缺省补皮没被剥掉：正确的代码会被 ② 报成分叉（假红）"
         )
-        drifted = ast.parse("(ctx.metadata or {}).get('owner_id') or None").body[0].value
+        drifted = parseSource("(ctx.metadata or {}).get('owner_id') or None").body[0].value
         assert _normalizedDump(pairA) != _normalizedDump(drifted), (
             "换掉 metadata 键名也判同形 ⇒ ② 恒真，本守卫空转"
         )
-        assert _normalizedDump(ast.parse("x or 'default'").body[0].value) \
-            == _normalizedDump(ast.parse("x").body[0].value), "or 'default' 未被视作缺省补皮"
-        assert _normalizedDump(ast.parse("a or b").body[0].value) \
-            != _normalizedDump(ast.parse("a").body[0].value), "真实语义差别被剥掉了"
+        assert _normalizedDump(parseSource("x or 'default'").body[0].value) \
+            == _normalizedDump(parseSource("x").body[0].value), "or 'default' 未被视作缺省补皮"
+        assert _normalizedDump(parseSource("a or b").body[0].value) \
+            != _normalizedDump(parseSource("a").body[0].value), "真实语义差别被剥掉了"
 
     def test_getattrFormReadsAreRecognisedButRandomStringsAreNot(self):
         """③ 的第三种写法（`getattr(x, "name", …)`）必须被认出，且不能靠松散匹配蒙中。"""
-        assert _readsNamed(ast.parse("def f(a):\n    return getattr(a, '_current_user_id', None)\n"),
+        assert _readsNamed(parseSource("def f(a):\n    return getattr(a, '_current_user_id', None)\n"),
                            ("_current_user_id",)), (
             "getattr 形式的读取链认不出来——③ 会把真派生报成脱节（假红）"
         )
         assert not _readsNamed(
-            ast.parse("def f(a):\n    return {'note': '_current_user_id'}\n"),
+            parseSource("def f(a):\n    return {'note': '_current_user_id'}\n"),
             ("_current_user_id",),
         ), "任意字符串常量也被算成读取口——③ 会被无关代码糊过去（放过）"
 
     def test_aSyntheticSixthEntryPointIsCaught(self):
         """①②③④ 的靶：合成一个"新入口"，四台检出器都必须对它出声。"""
-        synthetic = ast.parse(
+        synthetic = parseSource(
             "def _probe(meta):\n"
             "    from neurova.core.identity_context import set_request_user_id\n"
             "    set_request_user_id(meta['u'])\n"
@@ -657,7 +658,7 @@ class TestTheComparatorsAreNotVacuous:
         assert "user_id" in metaKeysOfTheWriterFunction(synthetic), (
             "键收集器看不见 meta 里的 `user_id`——④ 恒真"
         )
-        assigned = ast.parse("def f(meta):\n    meta['user_id'] = resolveTurnIdentity(1)\n")
+        assigned = parseSource("def f(meta):\n    meta['user_id'] = resolveTurnIdentity(1)\n")
         assert userIdAssignments(assigned) == ["resolveTurnIdentity"], (
             "下标赋值的来源抽不出来——④ 会被随手赋值绕过"
         )

@@ -28,6 +28,7 @@ from pathlib import Path
 import pytest
 
 import neurova.api.endpoints.knowledge as kb
+from tests.ast_scan import parseSource
 
 _PKG_ROOT = Path(__file__).resolve().parents[3]  # tests/unit/api/ → 仓库根
 _SCAN_ROOTS = ("neurova", "tests", "scripts")
@@ -107,7 +108,7 @@ def _collect_consumed_names_from_repo() -> set[str]:
                 continue
             if "endpoints.knowledge" not in text and "endpoints import knowledge" not in text:
                 continue
-            tree = ast.parse(text, filename=str(path))
+            tree = parseSource(text, filename=str(path))
             aliases: set[str] = set()
             for node in ast.walk(tree):
                 if isinstance(node, ast.ImportFrom) and node.module == _AGGREGATOR_MODULE:

@@ -31,6 +31,7 @@ import pytest
 from neurova.security import artifact_digest as AD
 from neurova.skills.skill_install_gate import reset_install_gate_scanner
 from neurova.skills.skill_service import SkillService
+from tests.ast_scan import parseSource
 
 REPO = Path(__file__).resolve().parents[3]
 SERVICE_SRC = REPO / "neurova" / "skills" / "skill_service.py"
@@ -155,7 +156,7 @@ class TestEntryPointResolutionIsSingleSourced:
     def _bodiesWithBothShapes(self, source: str):
         """找出**同时**含 `"main.py"` 字面量与 `glob(...)` 调用的函数体——入口判定该只有一处。"""
         hits = []
-        for node in ast.walk(ast.parse(source)):
+        for node in ast.walk(parseSource(source)):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             literals = {getattr(x, "value", None) for x in ast.walk(node)

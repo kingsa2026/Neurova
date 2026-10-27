@@ -35,6 +35,7 @@ from starlette.responses import StreamingResponse
 
 from neurova.api.endpoints import console as console_module
 from neurova.core import agent_run_store as ars
+from tests.ast_scan import parseSource
 
 
 @pytest.fixture()
@@ -245,7 +246,7 @@ def test_consoleCleanupDoesNotAwaitTheTurnTaskAtAll():
     import pathlib
 
     src = pathlib.Path("neurova/api/endpoints/console.py").read_text(encoding="utf-8")
-    tree = ast.parse(src)
+    tree = parseSource(src)
     offenders = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.AsyncFunctionDef) or node.name != "event_stream":
