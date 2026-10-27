@@ -18,6 +18,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import re
@@ -304,9 +305,11 @@ def scanFile(path: Path, byBasename: dict) -> list:
         for match in LINK_PATTERN.finditer(line):
             label, target = match.group(1).strip(), match.group(2).strip()
             if not label or not target:
-                found.append(_entry(relative, lineNo, match.group(0), VERDICT_EMPTY, "—"))
+                found.append(_entry(relative, lineNo, match.group(0), VERDICT_EMPTY, "—",
+                                    _lineAnchor(line, match.group(0))))
         for _ in emptyCodeSpans(line):
-            found.append(_entry(relative, lineNo, "``", VERDICT_EMPTY, "—"))
+            found.append(_entry(relative, lineNo, "``", VERDICT_EMPTY, "—",
+                                _lineAnchor(line, "``")))
         for match in CODE_PATH_PATTERN.finditer(line):
             ref = match.group(1)
             if not looksLikeARepoPath(ref):
@@ -318,7 +321,8 @@ def scanFile(path: Path, byBasename: dict) -> list:
             verdict, hit = resolveTarget(ref, path, byBasename)
             if verdict == VERDICT_REACHABLE:
                 continue
-            found.append(_entry(relative, lineNo, ref, verdict, hit))
+            found.append(_entry(relative, lineNo, ref, verdict, hit,
+                                _lineAnchor(line, ref)))
     return found
 
 
@@ -613,8 +617,35 @@ def activeLayerDangling() -> list:
     return sorted(found, key=lambda item: (item["file"], item["line"], item["ref"]))
 
 
-def _entry(file: str, line: int, ref: str, verdict: str, hit: str) -> dict:
-    return {"file": file, "line": line, "ref": ref, "verdict": verdict, "hit": hit}
+#: 台账「位置」列的前缀：它只声明「这份文档里有这么一处引用」，不声明是第几行。
+#: 取处单点在本模块，生成侧与守卫都从这里取，不各写一份字面量。
+ANCHOR_COLUMN_MARK = "本行"
+
+
+def _lineAnchor(lineText: str, ref: str) -> str:
+    """一处悬空引用的**内容锚点**：该行正文 + 引用原文的摘要。
+
+    为什么不用行号：行号是「扫描那一刻这份文档的属性」，不是引用的属性。台账
+    入库之后归档层文档仍会被改（补一节、挪一段），行号整片平移，于是台账与
+    扫描器逐格比对全部失配——CI 构建 `cnb-1f0-1k5uonjt2-003` 里
+    `test_ledger_machine_block_matches_scanner` 报的「期望行数 218，实际行数 228」
+    就是这个形态：被引用的路径一条没变，变的只是它们在第几行。
+
+    锚点取内容摘要，于是「补一节」不再动台账，而「改掉这一条引用」照样会动——
+    该报的漂移一个不漏。
+
+    已知边界：同一行内**重复同一处引用**时两处锚点相同，`scanDirectory` 按
+    （文件, 行, 引用）去重会把后一条并掉。这与行号时代的行为一致（同样的三元组，
+    同样被去重），台账上限是「每行每引用一条」，不是「每处出现一条」。
+    """
+    payload = lineText.strip() + "\u0000" + ref
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
+
+def _entry(file: str, line: int, ref: str, verdict: str, hit: str,
+           contentDigest: str = "") -> dict:
+    return {"file": file, "line": line, "ref": ref, "verdict": verdict,
+            "hit": hit, "contentDigest": contentDigest}
 
 
 # ---------------------------------------------------------------------------
@@ -923,6 +954,12 @@ def _cell(value: str) -> str:
     return text if text else "（空）"
 
 
+def _anchorCell(item: dict) -> str:
+    """台账「位置」单元格：`本行·<内容锚点前 8 位>`，缺锚点时诚实标出。"""
+    digest = (item.get("contentDigest") or "")[:8]
+    return f"{ANCHOR_COLUMN_MARK}·`{digest}`" if digest else f"{ANCHOR_COLUMN_MARK}·（无锚点）"
+
+
 def _code(ref: str) -> str:
     """把引用渲染成行内代码；空反引号用占位符避免又把表格打散。"""
     if ref == "``":
@@ -951,15 +988,19 @@ def renderSummary(entries: list) -> str:
 
 
 def renderTable(entries: list) -> str:
-    """把扫描结果渲染成台账表格（行按文件、行号排序，保证可复现）。"""
+    """把扫描结果渲染成台账表格（行按文件、行号排序，保证可复现）。
+
+    「位置」一列写的是**内容锚点**（`_lineAnchor` 的前 8 位），不是行号——
+    台账是入库的生成物，行号一入库就开始过期，而内容锚点不会。
+    """
     lines = [
         TABLE_BEGIN,
-        "| 文件 | 行 | 引用 | 判定 | 命中 / 候选 |",
-        "|------|----|------|------|-------------|",
+        "| 文件 | 位置 | 引用 | 判定 | 命中 / 候选 |",
+        "|------|------|------|------|-------------|",
     ]
     for item in sorted(entries, key=lambda e: (e["file"], e["line"], e["ref"])):
         lines.append(
-            f"| `{item['file']}` | {item['line']} | {_code(item['ref'])} "
+            f"| `{item['file']}` | {_anchorCell(item)} | {_code(item['ref'])} "
             f"| {item['verdict']} | {_cell(item['hit'])} |"
         )
     lines.append(TABLE_END)
