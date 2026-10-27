@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from tests.ast_scan import parseSource
 from tests.repo_paths import REPO_ROOT, repo_str
 
 #: 那枚「起子进程扫生产树」探针的预算唯一出处（§6-402 批 K 口径）。原写 30s **恰等于**
@@ -410,7 +411,7 @@ for pf in prod_files:
     if 'ToolExecutionPipeline' in content and 'import' in content:
         # 检查是否有实际 import 语句
         try:
-            tree = ast.parse(content)
+            tree = parseSource(content)
             for node in ast.walk(tree):
                 if isinstance(node, (ast.Import, ast.ImportFrom)):
                     names = [n.name for n in node.names] if isinstance(node, ast.Import) else [node.module]

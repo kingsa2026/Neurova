@@ -40,6 +40,7 @@ import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from neurova.core.data_root import dataPath
+from tests.ast_scan import parseSource
 
 logger = get_logger(__name__)
 
@@ -3148,7 +3149,7 @@ class ToolExecutor:
             raise ValueError(f"不支持的语法: {type(node).__name__}")
 
         try:
-            value = eval_node(ast.parse(expression, mode="eval"))
+            value = eval_node(parseSource(expression, mode="eval"))
         except ZeroDivisionError:
             return {"expression": expression, "error": "除零错误"}
         except OverflowError:

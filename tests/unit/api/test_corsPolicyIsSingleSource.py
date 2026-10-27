@@ -29,6 +29,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tests import ast_scan  # noqa: E402
+from tests.ast_scan import parseSource
 
 NEUROVA = REPO_ROOT / "neurova"
 
@@ -45,7 +46,7 @@ def _literalGroups(source: str):
     """一份源码里所有"字面量集合"（list/set/tuple）的字符串成员集合。"""
     groups = []
     try:
-        tree = ast.parse(source)
+        tree = parseSource(source)
     except SyntaxError:
         return groups
     for node in ast.walk(tree):

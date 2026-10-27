@@ -35,6 +35,7 @@ from neurova.channels.base import ChannelMessage  # noqa: E402
 from neurova.voice_context_module import VOICE_CONTEXT_KEY  # noqa: E402
 
 from tests import ast_scan  # noqa: E402
+from tests.ast_scan import parseSource
 
 # 现役 ASR 引擎的真产物键（funasr/mock 两档一致）——不发明键名
 ASR_PRODUCT = {"text": "帮我看下明天的排程", "language": "zh", "duration_sec": 2.4}
@@ -154,7 +155,7 @@ class TestKeyVocabularyIsDefinedOnce:
         直接 AttributeError；而按值扫会把 `{"type": "voice_context"}` 这种**取值**位置也算成
         第二份定义——那是假红，会把人逼成绕开判据。
         """
-        tree = ast.parse(src)
+        tree = parseSource(src)
         hits = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant) \

@@ -22,6 +22,7 @@ from pathlib import Path
 from neurova.core import vector_math
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 NEUROVA_ROOT = Path(vector_math.__file__).resolve().parent.parent
 SINGLE_FACE = "core/vector_math.py"
@@ -32,7 +33,7 @@ PRIMITIVES = ("vector_norm", "vector_dot", "vector_normalize", "vectorNorm", "ve
 
 
 def _parse(rel: str) -> ast.Module:
-    return ast.parse((NEUROVA_ROOT / rel).read_text(encoding="utf-8"))
+    return parseSource((NEUROVA_ROOT / rel).read_text(encoding="utf-8"))
 
 
 def _primitiveDefinitions() -> list:
@@ -85,17 +86,17 @@ def testNobodyImportsThePrimitivesFromTheOldHost():
 
 def testEnumerationProbesHaveTeeth():
     """排除型守卫要先证自己抓得到——否则"只剩一处"绿得没道理。"""
-    dup = ast.parse("def vector_norm(a):\n    return 0.0\n").body[0]
-    unrelated = ast.parse("def render(a):\n    return 0.0\n").body[0]
+    dup = parseSource("def vector_norm(a):\n    return 0.0\n").body[0]
+    unrelated = parseSource("def render(a):\n    return 0.0\n").body[0]
     assert dup.name in PRIMITIVES and unrelated.name not in PRIMITIVES
-    imports = ast.parse(
+    imports = parseSource(
         "from neurova.cognitive_layers.memory_layer.unified_vector_store import vector_norm, UnifiedVectorStore\n"
     ).body[0]
     assert sorted(a.name for a in imports.names if a.name in PRIMITIVES) == ["vector_norm"]
 
     # 本格对 `from .x import` 这一形是否有输入：相对名必须解得回旧落点的绝对模块名，
     # 否则 `_importsFromOldHost` 的等值比对就是瞎的（解名这件事由共享单点负责）
-    rel = ast.parse("from .unified_vector_store import vector_norm\n").body[0]
+    rel = parseSource("from .unified_vector_store import vector_norm\n").body[0]
     assert ast_scan.resolveImportModule(
         "neurova/cognitive_layers/memory_layer/some_module.py", rel) == OLD_HOST_MODULE, \
         "相对形解不回旧落点——本格看不见 `from .unified_vector_store import vector_norm`"

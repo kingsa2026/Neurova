@@ -21,6 +21,7 @@ import pytest
 from neurova.security import secret_store
 from neurova.shared_config import SharedConfigManager
 from neurova.tool_layers.mcp_config import validate_mcp_server_config
+from tests.ast_scan import parseSource
 
 API_KEY_SENTINEL = "probe-api-key-PLAINTEXT-SHOULD-NOT-REACH-DISK"
 CLIENT_SECRET_SENTINEL = "probe-client-secret-PLAINTEXT-SHOULD-NOT-REACH-DISK"
@@ -38,7 +39,7 @@ def _calledOrLoadedNames(source):
     反之真调用不许因为写成 `mod.fn()` 的属性形态而漏检。
     """
     names = set()
-    tree = ast.parse(source)
+    tree = parseSource(source)
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name):

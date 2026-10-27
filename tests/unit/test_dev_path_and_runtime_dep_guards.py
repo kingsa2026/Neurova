@@ -40,6 +40,7 @@ from pathlib import Path
 from tests import ast_scan
 
 import pytest
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -495,7 +496,7 @@ class TestProtectedGuardsUseNoExternalBinaries:
 
         与调用点分离，便于本类用合成源码反向自证（守卫自身可证伪）。
         """
-        tree = ast.parse(source)
+        tree = parseSource(source)
         offenders = []
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):

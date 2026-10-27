@@ -30,6 +30,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from tests.ast_scan import parseSource
 
 
 class TestChatPipelineTokenCountPrecedence:
@@ -37,7 +38,7 @@ class TestChatPipelineTokenCountPrecedence:
         from neurova.agent.chat_pipeline import ChatPipeline
 
         source = textwrap.dedent(inspect.getsource(ChatPipeline))
-        tree = ast.parse(source)
+        tree = parseSource(source)
         for node in ast.walk(tree):
             if isinstance(node, ast.Assign):
                 for target in node.targets:

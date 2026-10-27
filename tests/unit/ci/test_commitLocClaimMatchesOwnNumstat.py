@@ -645,7 +645,10 @@ class TestEveryClaimedNumberIsReal:
                 digits = f"+{candidate['adds']}/{slash}{candidate['dels']}"
                 if digits not in raw:
                     continue
-                changed = body.replace(raw, raw.replace(digits, "+1/−0"), 1)
+                # 坏串按**同一形状**写（保留池名的 `**` 与时序），只动数字：
+                # `+4/−2` → `+1/−0`。把整串拉平成 `+1/−0` 会丢掉池名，判据于是报
+                # "没有池名"而不认"这是生产池的声明"，本格就会把**对的判据**读成抓不住。
+                changed = body.replace(raw, raw.replace(digits, f"+1/{slash}0"), 1)
                 # 靶子只证了"改之前的原句不在引文里"，可改坏之后那串数字常常**掉进**别处的
                 # 引文形状里：本笔原文写着 `生产池 +26/-5（说明）`，而 `(说明)` 那一对括号
                 # 让改后的整串落进括号夹注区间，于是判据按形状把它豁免掉——"没点名"被判成
@@ -672,9 +675,20 @@ class TestEveryClaimedNumberIsReal:
         assert doctored != body, (
             f"正文里的 +{own['adds']}/−{own['dels']}（两种斜杠都试过）没被替换掉——这条格在空转")
 
+        # 反证只看"这一笔自己的那处坏声明被点名、且报出的是实量值"：
+        # 断言扫描的是 `own`（本格挑中的那处靶子），不再拿窗口里**第一处零删改**去比——
+        # 那两者在"整笔只有一处 +0/−0 的声明"时（补正笔的常见形状）不是同一件事，
+        # 断言会拿一处真值去要求另一处的报错，红得与"判据抓不住"完全无关。
         bad = _mismatches(sha, doctored)
-        assert bad and any("+1/−0" in m and f"+{a}/−{d}" in m for m in bad), (
-            f"把真实声明改成 +1/−0 仍没被点名（实得 {bad}）——判据抓不住我实际写错的那种句子")
+        wrongAnySlash = tuple(f"+1/{slash}0" for slash in ("−", "-"))
+        # 靶子名不叫 `d`：本档外层循环里 `d` 是字典（声明），`a`/`d` 那对数字取自
+        # `_poolTotals`，此处显式重取一次实量，免得两个 `d` 撞在一起（实测撞过）。
+        realAdds, realDels = _poolTotals(sha)["生产池"]
+        assert bad and any(
+            any(w in msg for w in wrongAnySlash) and f"+{realAdds}/−{realDels}" in msg
+            for msg in bad), (
+            f"把真实声明改成 +1/−0 仍没被点名（实得 {bad}，实量 +{realAdds}/−{realDels}）"
+            "——判据抓不住我实际写错的那种句子")
 
     def testGitReadFailureIsLoudInsteadOfAnEmptyString(self):
         """读仓失败不许变成空串：`_git` 现在的契约是"要么给 stdout，要么响亮失败"。

@@ -36,6 +36,7 @@ if str(REPO) not in sys.path:
 from neurova.security import tool_guard, tool_param_guard  # noqa: E402
 from neurova.security.tool_guard import (  # noqa: E402
     GuardThreatCategory, ToolGuardEngine)
+from tests.ast_scan import parseSource
 
 EVASION = GuardThreatCategory.SHELL_EVASION
 
@@ -118,7 +119,7 @@ class TestThreeViewsComeFromOneTable:
         return out
 
     def _secondLiteralOffenders(self, source: str, where: str) -> list:
-        tree = ast.parse(source, filename=where)
+        tree = parseSource(source, filename=where)
         allowed = {id(v) for name, v in self._assignedValues(tree).items() if name in self._ALLOWED}
         #: 别名表的形状是"若干路径名 → 规范名"，键名宇宙取**本档自己的登记表** `PATHISH_NAMES`，
         #: 不向被测对象借那张表：借了之后表一不在场，这一格就从"点名抄本"的行为红退化成
@@ -192,7 +193,7 @@ class TestThreeViewsComeFromOneTable:
             assert not fails, "\n  ".join(fails)
 
     def _viewShapeFailures(self, source: str, where: str, viewNames) -> list:
-        tree = ast.parse(source, filename=where)
+        tree = parseSource(source, filename=where)
         values = self._assignedValues(tree)
         out = []
         for view in viewNames:

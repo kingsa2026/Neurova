@@ -45,6 +45,7 @@ os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_for_qr_01234567
 from neurova.api.endpoints import mobile_pairing as MP
 from neurova.channels.qrcode_auth import generate_qrcode_image
 from neurova.tunnel import protocol
+from tests.ast_scan import parseSource
 
 REPO = Path(__file__).resolve().parents[3]
 CALLER = {"sub": "kai", "username": "kai"}
@@ -178,7 +179,7 @@ class TestDetectorsAreNotVacuous:
 def _undeclaredQrcodeImports(source: str) -> list:
     """AST 里 import 名恰为 `qrcode` 的节点（`qrcode_auth` 这种模块名不算——按整名比，不按片段）。"""
     hits = []
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(parseSource(source)):
         if isinstance(node, ast.Import):
             hits += [a.name for a in node.names if a.name.split(".")[0] == "qrcode"]
         elif isinstance(node, ast.ImportFrom):

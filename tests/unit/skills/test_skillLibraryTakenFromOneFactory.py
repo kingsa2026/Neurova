@@ -30,6 +30,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 REPO = Path(__file__).resolve().parents[3]
 if str(REPO) not in sys.path:
@@ -47,7 +48,7 @@ _ALLOWED_SELF_BUILT = {
 
 def _selfBuiltSkillService(path: Path):
     """按 AST 数这个文件里 `SkillService(...)` 的**构造**调用数（导入与注解不算）。"""
-    tree = ast.parse(io.open(path, encoding="utf-8").read(), filename=str(path))
+    tree = parseSource(io.open(path, encoding="utf-8").read(), filename=str(path))
     n = 0
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):

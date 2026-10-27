@@ -62,6 +62,7 @@ NEUROVA_ROOT = REPO_ROOT / "neurova"
 from neurova.plugins import plugin_permissions
 from neurova.plugins.base_plugin import BasePlugin
 from neurova.plugins.plugin_manifest import PluginManifest, SemVersion
+from tests.ast_scan import parseSource
 
 
 class _Probe(BasePlugin):
@@ -223,7 +224,7 @@ class TestBusResolutionHasOneShape:
         import ast as _ast
 
         path = NEUROVA_ROOT / "plugins" / "base_plugin.py"
-        tree = _ast.parse(path.read_text(encoding="utf-8"))
+        tree = parseSource(path.read_text(encoding="utf-8"))
         offenders = []
         for node in _ast.walk(tree):
             if isinstance(node, _ast.If):

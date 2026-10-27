@@ -39,6 +39,7 @@ from pathlib import Path
 import pytest
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ROUTE_TABLE = REPO_ROOT / "tests" / "route_table.py"
@@ -135,20 +136,20 @@ def test_扫描器真会咬():
         "    for r in client.app.routes:\n"
         "        print(r.path)\n"
     )
-    assert _readsMountedAppRoutes(ast.parse(naive)) == [2], "朴素形没被点名＝本守卫恒绿"
+    assert _readsMountedAppRoutes(parseSource(naive)) == [2], "朴素形没被点名＝本守卫恒绿"
 
     singleSource = (
         "from tests.route_table import registeredPaths\n"
         "def t(app):\n"
         "    return registeredPaths(app)\n"
     )
-    assert _readsMountedAppRoutes(ast.parse(singleSource)) == [], "单源形被误报"
+    assert _readsMountedAppRoutes(parseSource(singleSource)) == [], "单源形被误报"
 
     routerOwned = (
         "def t(memoryRouter):\n"
         "    return [r.path for r in memoryRouter.routes]\n"
     )
-    assert _readsMountedAppRoutes(ast.parse(routerOwned)) == [], (
+    assert _readsMountedAppRoutes(parseSource(routerOwned)) == [], (
         "模块自带路由表被误报——它不含挂载前缀，也不受 _IncludedRouter 形态影响，"
         "把它算进来会让守卫退化成「见 routes 就红」的假判据"
     )

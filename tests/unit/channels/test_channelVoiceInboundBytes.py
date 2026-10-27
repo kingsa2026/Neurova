@@ -43,6 +43,7 @@ INGRESS_MODULE = CHANNELS / "voice_ingress.py"
 from neurova.channels.base import ChannelEventType  # noqa: E402
 
 from tests import ast_scan as _astScan  # noqa: E402
+from tests.ast_scan import parseSource
 
 
 # --------------------------------------------------------------------------
@@ -248,7 +249,7 @@ def _moduleTree(path: pathlib.Path) -> ast.Module:
     """单文件语法树：单文件解析不是「全仓扫描」，但与 `_channelModules` 配成
     一处枚举 + 一处解析时就等同私有全仓扫描（Issue #148）。故本文件统一改走
     下面 `_channelTrees()` 一次取数，不再逐文件 `ast.parse`。"""
-    return ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    return parseSource(path.read_text(encoding="utf-8", errors="replace"))
 
 
 def _channelTrees(exclude: tuple = ()):
@@ -371,7 +372,7 @@ class TestInboundVoiceVocabularyIsSingleSource:
 
     def testDetectorsHaveTeeth(self):
         """探测器自证：合成样本必须被点名，真邻接不得误报（否则上面三格是空转）。"""
-        sample = ast.parse(
+        sample = parseSource(
             'd = {}\nd["audio_bytes"] = b"x"\nvo = {"voice", "audio"}\n'
             'M = [1, 2]\nMAX_BYTES = 20 * 1024 * 1024\n'
         )
@@ -379,7 +380,7 @@ class TestInboundVoiceVocabularyIsSingleSource:
         assert _setLiteralsMatching(sample, {"voice", "audio"}), "类型集合没被抓到"
         assert _intCapAssignments(sample), "上限赋值没被抓到"
 
-        benign = ast.parse(
+        benign = parseSource(
             '"""audio_bytes 在说明文字里出现"""\n'
             'x = m.get("image_bytes")\nk = {"voice": 1}\nSIZE = 128\n'
         )

@@ -28,6 +28,7 @@ import pytest
 
 from neurova.security.skill_scanner import SkillScanner, ScanPolicy, blockingFindings
 
+from tests.ast_scan import parseSource
 from tests import execShapes
 
 REPO = Path(__file__).resolve().parents[3]
@@ -169,7 +170,7 @@ def testRealBundleDeniesOnItsOwnTrueShapesNotOnRegex(gate, tmp_path):
 
     改判记录（教义第 5 条 / 形态集 235）：本格原写「② 真裸名 exec 只剩 1 条 ③ 这只包仍该被拦」，
     那是批 56 之后的实状。批 59 把包内 `scripts/package_check.py` 的
-    `compile(script.read_text(… ), …, "exec")` 换成等价的 `ast.parse(…, filename=…)`
+    `compile(script.read_text(… ), …, "exec")` 换成等价的 `parseSource(…, filename=…)`
     ——自检能力不丢，真信号归零。继续钉「== 1」就是拿旧口径当契约，所以钉法跟着换：
 
     ① `dangerous_exec` 的证据行里不得出现属性调用（`X.compile(`）——**这一条永不许松**；

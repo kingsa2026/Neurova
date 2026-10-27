@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import zlib
 from pathlib import Path
+from tests.ast_scan import parseSource
 
 STUB_DIM = 16
 # 甲3（§6-219）之后"聚成一簇"要求内容**近等价**：短者的归一化键是长者的子串，
@@ -207,7 +208,7 @@ def test_toolDoesNotBypassTheManagerWriteThroat():
     here = Path(__file__).resolve()
     candidate = here.parents[3] / "scripts" / "backfill_memory_embeddings.py"
     assert candidate.exists(), "工具档不在 expected 处（%s）⇒ 这格会空转" % candidate
-    tree = ast.parse(candidate.read_text(encoding="utf-8"))
+    tree = parseSource(candidate.read_text(encoding="utf-8"))
 
     banned_imports = set()
     banned_calls = []

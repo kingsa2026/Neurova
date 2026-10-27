@@ -20,6 +20,7 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
+from tests.ast_scan import parseSource
 
 
 class TestLanguageTagNormalization:
@@ -161,7 +162,7 @@ def _dashSplitSites(root):
     for ref in ast_scan.sourceRefsUnder(pathlib.Path(root), ".py",
                                         ast_scan.textHints("split")):
         try:
-            tree = _ast.parse(ref.code)
+            tree = parseSource(ref.code)
         except (OSError, SyntaxError, UnicodeDecodeError):
             continue
         for node in _ast.walk(tree):

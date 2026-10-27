@@ -19,6 +19,7 @@ import pytest
 from neurova.context.injector import UnifiedContextInjector
 from neurova.context.models import TokenBudget
 from neurova.context.token_estimator import estimate_tokens as estimateTextTokens
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BUDGET = 100
@@ -58,7 +59,7 @@ def testTruncationMarkerIsCountedInsideTheBudget():
 
 def testSecondConversionFactorIsRetired():
     """防回流：注入器里不得再有 token↔字符的固定系数，模型里不得再有两份比例。"""
-    injectorTree = ast.parse(
+    injectorTree = parseSource(
         (REPO_ROOT / "neurova" / "context" / "injector.py").read_text(encoding="utf-8")
     )
     attributeNames = {
@@ -73,7 +74,7 @@ def testSecondConversionFactorIsRetired():
         if isinstance(node, ast.FunctionDef)
     }, "零调用方的第二份截断实现回来了"
 
-    modelsTree = ast.parse(
+    modelsTree = parseSource(
         (REPO_ROOT / "neurova" / "context" / "models.py").read_text(encoding="utf-8")
     )
     defined = {

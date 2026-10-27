@@ -30,6 +30,7 @@ from fastapi.testclient import TestClient
 from neurova.aigc_studio import services as svc
 from neurova.aigc_studio import store as studio_store
 from neurova.aigc_studio.store import RUN_FAILED, RUN_RUNNING, StudioStore
+from tests.ast_scan import parseSource
 
 pytestmark = pytest.mark.timeout(60)
 
@@ -329,7 +330,7 @@ class TestServicesGetTheirCheckpoints:
 
         src = (Path(__file__).resolve().parents[3]
                / "neurova" / "aigc_studio" / "services.py").read_text(encoding="utf-8")
-        tree = ast.parse(src)
+        tree = parseSource(src)
         wanted = {"generate_shot_images", "generate_shot_videos",
                   "generate_asset_images", "synthesize_narration"}
         found = {}

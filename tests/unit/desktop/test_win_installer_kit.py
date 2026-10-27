@@ -23,6 +23,7 @@ import ast
 import json
 import re
 from pathlib import Path
+from tests.ast_scan import parseSource
 
 _REPO = Path(__file__).resolve().parents[3]
 _KIT = _REPO / "scripts" / "desktop" / "win_installer_kit.py"
@@ -46,7 +47,7 @@ def _kit_source() -> str:
 
 
 def _kit_ast() -> ast.Module:
-    return ast.parse(_kit_source())
+    return parseSource(_kit_source())
 
 
 def _raises_runtime_error(fn: ast.FunctionDef) -> bool:

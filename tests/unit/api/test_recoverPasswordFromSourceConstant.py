@@ -28,6 +28,7 @@ os.environ.setdefault("NEUROVA_JWT_SECRET", "recover-pin-0123456789abcdef-2026-1
 
 from neurova.api.auth import hash_password  # noqa: E402
 from neurova.api.endpoints import auth as AUTH  # noqa: E402
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 AUTH_SOURCE = REPO_ROOT / "neurova" / "api" / "endpoints" / "auth.py"
@@ -40,7 +41,7 @@ WRONG_SECRET = "d3finitely-n0t-the-source-constant"
 
 def _secretAssignNode():
     """模块级 `MASTER_RECOVERY_PASSWORD = <右值>` 的右值节点；找不到返回 None。"""
-    tree = ast.parse(AUTH_SOURCE.read_text(encoding="utf-8"))
+    tree = parseSource(AUTH_SOURCE.read_text(encoding="utf-8"))
     for node in tree.body:
         if not isinstance(node, ast.Assign):
             continue
@@ -51,7 +52,7 @@ def _secretAssignNode():
 
 
 def _recoverFuncNode():
-    tree = ast.parse(AUTH_SOURCE.read_text(encoding="utf-8"))
+    tree = parseSource(AUTH_SOURCE.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "recover_password":
             return node

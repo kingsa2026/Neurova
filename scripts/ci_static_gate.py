@@ -36,6 +36,14 @@ import pyflakes.reporter
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+# 解析走仓内唯一出口（`tests/ast_scan.parseSource`，口径见该函数 docstring）。
+# 本脚本不是包、也没有 pytest 的 rootdir 注入，故自己把仓根放进 `sys.path`——
+# 下面 `main()` 里那处注入只覆盖导入巡检，来得太晚。
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from tests.ast_scan import parseSource  # noqa: E402
+
 # Windows 控制台/重定向默认 GBK：本脚本面向人读、汇报含 emoji，直接打印会
 # UnicodeEncodeError 崩在第一行（门禁完全跑不起来）。把标准输出重配为 UTF-8，
 # 不可编码字符替换而非抛错——报告可读性与跨平台可跑性都要。
@@ -122,7 +130,11 @@ def check_syntax() -> bool:
 
 
 def _importedNamesIn(tree) -> set:
-    """本文件里以任何方式被 import 过的名字（含函数体内的局部导入）。"""
+    """本文件里以任何方式被 import 过的名字（含函数体内的局部导入）。
+
+    取数走 AST 而不在 pyflakes 的报告文本上做字符串补丁：闸门要判的是语义
+    （这个名字在本文件里到底被绑过没有），不是 pyflakes 的行格式。
+    """
     names = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
@@ -157,7 +169,7 @@ def collectUndefinedNames(source: str, filename: str) -> list:
         return []
 
     try:
-        imported = _importedNamesIn(ast.parse(source, filename=filename))
+        imported = _importedNamesIn(parseSource(source, filename=filename))
     except SyntaxError:
         imported = set()
 

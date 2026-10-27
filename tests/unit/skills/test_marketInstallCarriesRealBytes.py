@@ -29,6 +29,7 @@ from neurova.skills.market_registry import (
 from neurova.skills.skill_install_gate import reset_install_gate_scanner
 from neurova.skills.skill_service import SkillService
 from neurova.skill_system import SkillRegistry
+from tests.ast_scan import parseSource
 
 _MARKET_REGISTRY_PATH = Path(__file__).resolve().parents[3] / "neurova" / "skills" / "market_registry.py"
 
@@ -102,7 +103,7 @@ def _registrySource() -> str:
 def _cacheLookerHosts(source: str) -> set:
     """AST 数 `_default_market_skills_dir()` 的调用宿主（注释/定义行不算）。"""
     hosts = set()
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(parseSource(source)):
         if not isinstance(node, ast.FunctionDef):
             continue
         for inner in ast.walk(node):
