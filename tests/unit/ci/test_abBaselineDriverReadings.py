@@ -186,6 +186,7 @@ class TestEndToEndOnSyntheticRepos:
         # `-c commit.gpgsign=false`：合成仓是夹具，不该继承宿主/镜像的签名配置——
         # 宿主 `~/.gitconfig` 里 `commit.gpgsign=true` 而签名程序不可用（容器内无密钥）时，
         # 这几条合成仓的 commit 会以 128 直接炸掉，红的是宿主配置而不是被测驱动（形态集 303 同族）。
+        # CI 上时有时无（各 runner 的全局配置不同），故钉在命令里而不是靠环境碰运气。
         for args in (["init", "-q"], ["add", "."],
                      ["-c", "commit.gpgsign=false",
                       "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "base"]):

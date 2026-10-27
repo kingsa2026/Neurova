@@ -143,13 +143,25 @@ main:
     # 版本不在此处写死第二份：事实源是 Dockerfile 的 FROM，判据见
     # tests/unit/ci/test_unit_tests_single_leg.py（改镜像而这里不响即红）。
     - name: unit-tests
+      # cpus 8 而不是 4：这一格是九条流水线里唯一「装整份锁 + 串行跑 716 条清单 +
+      # 每格带 --cov 插桩」的一条。官方《语法手册》`runner.cpus` 一节写死
+      # 「内存 = CPU 核数 × 2 GiB」，官方《构建节点》给出 cnb:arch:amd64 的核数范围
+      # 1~64、同档节点默认 8 核 —— 即 cpus: 4 是把这一格按 8GiB 的最小可用档压着跑。
+      # 现场（构建 cnb-n45-1k5oultjs#003）：跑到 83%、29m23s 时被平台 SIGKILL
+      # （`Killed` / `code: 137`），日志里一条失败墙都没有 —— 那不是「有测试红了」，
+      # 是进程被资源杀掉。声明不反映真实需求时，报出来的只会是「Killed」。
+      # 判据见 tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py。
       runner:
         tags: cnb:arch:amd64
-        # 受保护子集 716 档，容器必须真装得下它。此前 cpus: 4（8GiB）在 82% 处
-        # 被 SIGKILL（构建 `cnb-rja-1k5pv9gbl#003`，`code: 137`，22m13s）——
-        # 日志里一条失败墙都没有，不是"有测试红了"，是宿主内存超限。
-        # 抬到 8（16GiB）：判据见 tests/unit/ci/test_unit_tests_runner_has_headroom.py，
-        # 它按"子集真条目数 × 单档足迹 + 底噪 × 余量"算需求，改子集或改 cpus 都会当场作答。
+        # 受保护子集 716 档，容器必须真装得下它：官方口径内存 = cpus × 2GiB，
+        # runner 只有 tags/cpus/namespace，故 cpus 是内存的唯一代理量。此前 cpus: 4
+        # （8GiB）在 82% 处被 SIGKILL（构建 `cnb-rja-1k5pv9gbl#003`，`code: 137`，
+        # 22m13s）。
+        # 成本口径与预算口径由两档分治、同处作答：
+        #   tests/unit/ci/test_unit_tests_runner_has_headroom.py  按「子集真条目数 ×
+        #     单档足迹 + 底噪 × 余量」算需求，改子集或改 cpus 都会当场作答；
+        #   tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py  按阶段结构认
+        #     「谁在驱动清单」，cpus 与 timeout 两层声明一起判。
         cpus: 8
       docker:
         image: python:3.12
@@ -185,17 +197,26 @@ main:
         # 墙钟按实测定，不按"看起来够"。30m 是照 --no-cov 那套读数定的，而这一步带
         # `--cov` 跑：插桩只惩罚纯 CPU 的解析/遍历，受保护子集里恰好有一批"扫全仓 AST"
         # 的判据档，同一格实测 ×2.2～×3.7（`--durations` 逐条对照见台账 §6-4xx）。
-        # 2026-10-24 构建 `cnb-mn9-1k5n4fcl5` 在 85% 撞 30m 被平台强杀，日志里一条
-        # 失败墙都没有——那不是"有测试红了"，是整段跑到点被掐断。
-        # 抬到 90m：整场是串行一条腿，余量按实测最慢批次的 1.6 倍留，且必须宽于
-        # 子集里最高的单档父墙（`pytest.mark.timeout(120)`）足以让诚实超时先说话。
+        # 2026-10-24 构建 `cnb-mn9-1k5n4fcl5` 在 85% 撞 30m 被平台强杀；2026-10-25
+        # `cnb-n45-1k5oultjs#003` 在 83%、29m23s 被 SIGKILL（`code: 137`）——两次
+        # 日志里都没有一条失败墙。
+        #
+        # 90m → 45m 不是收紧判据，是把"上限"重新变成预算：83% 处已用 29m23s，
+        # 整场按此速率约 35m。上限若远高于实测（90m vs 35m），"真撞墙"与"被资源
+        # 杀掉"在日志里长得一模一样，读的人只能猜。45m ≈ 实测的 1.3 倍，且仍远宽于
+        # 子集里最高的单档父墙（`pytest.mark.timeout(120)`）—— 先到点的应当是
+        # 单格那条诚实的超时，而不是平台把整段掐断。超了就是真超了，不许再往上抬
+        # 掩盖（判据：tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py）。
+        #
         # 输出**不许**重定向进文件，也**不许**让它块缓冲。2026-10-25 构建
         # `cnb-sl8-1k5pih0k6` 曾把 stdout 全量吞进 `/tmp/pytest_protected.log`，
         # 换来两个后果：日志里只剩命令回显，一条进度都没有；真出事（进程被掐）时
         # `tail` 根本执行不到，整场读数归零。
         # 改成 `tee` 之后按退出码判定：日志照存（排障要全文），stdout 照出（进度与
-        # 失败摘要都在）。`PIPESTATUS[0]` 取 pytest 自己的退出码——写成 `$?` 会拿到
-        # `tee` 的，门禁从此恒绿。
+        # 失败摘要都在）。**退出码不许用 `${PIPESTATUS[0]}`**：这些 stage 的脚本由
+        # `sh`（dash）解释，那是 bash 专有语法（构建 `cnb-8qu-1k5q3m315#003` 在
+        # 全绿之后拿 `sh: 5: Bad substitution` 以 exit 2 收场）。故先落标记文件，
+        # 再按标记判——不依赖 shell 数组，仍取的是 pytest 自己的退出码。
         # `-u` 与 `2>&1` 是同一条要求的两半：只要 stdout 落在管道里，Python 就按
         # 4KiB/8KiB **块**缓冲写，几十秒才攒满一块——平台「长时间无输出」判据会把
         # 仍在正常推进的跑测掐掉（构建 `cnb-ast-1k5pqhnfi#003` 读 23m 后被中断且
@@ -239,7 +260,7 @@ main:
             RC=$(cat "$MARK" 2>/dev/null || echo 1)
             echo "── pytest 退出码: $RC（日志全文 /tmp/pytest_protected.log）"
             exit "$RC"
-          timeout: 90m
+          timeout: 45m
 
     # ── 5. E2E：后端启动冒烟 ─────────────────────────────────────────────
     # `services` 必须显式为空：不声明时平台给**每条流水线**自动起
@@ -347,9 +368,14 @@ main:
 
     # ── 7. 依赖审计（阻塞，对齐 GitHub 已转阻塞的 dependency-audit）────────
     - name: dependency-audit
+      # cpus 4 而不是 2：这条流水线的 Prepare 里要 `docker pull` 镜像、拷两份缓存卷，
+      # 装完 pip-audit 之后还要把一个上百 MB 的冻结漏洞库落到 `/root/.cache/osv-scalibr`。
+      # 与其余八条同规格（cpus 2）时，Prepare 的固定成本压在平台 1m 期限的边沿上，
+      # 一旦越线报出来的就是「任务超过最大执行时间」——与「这次提交是否合格」无关。
+      # 判据见 tests/unit/ci/test_runnerAllocatedWallClockIsNotADeadline.py。
       runner:
         tags: cnb:arch:amd64
-        cpus: 2
+        cpus: 4
       docker:
         image: python:3.12
         volumes:

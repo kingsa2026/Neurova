@@ -35,7 +35,7 @@ from tests import ast_scan
 import neurova
 from neurova.security import governance, tool_guard
 from neurova.security.tool_guard import (
-    GuardSeverity, GuardThreatCategory, ShellEvasionGuardian, ToolGuardEngine)
+    FilePathGuardian, GuardSeverity, GuardThreatCategory, ShellEvasionGuardian, ToolGuardEngine)
 
 NEUROVA_DIR = pathlib.Path(neurova.__file__).resolve().parent
 EVASION = GuardThreatCategory.SHELL_EVASION
@@ -50,12 +50,14 @@ SEMANTIC_KEY_NAMES = ("COMMAND_PARAM_KEYS", "PATH_PARAM_KEYS")
 #: 取样点选在 `/tmp/...` 这类**非受保护**落点，而不是真实家目录：本机家目录是 `/root`，
 #: 它本身就在守卫的受保护路径表里（`tool_guard._protected_paths`），拿它取样时红的是**另一条规则**
 #: （`protected_path`），判据锚在被测对象之外，就测不到 shell 规避面。
+#: 形状由字面路径承载，与跑测账户是谁无关——这条取样因此不随家目录长短、账户名而转红转绿。
 #: 形状自证：同一串落在**命令键**上必须仍被判为十六进制编码（否则这条取样根本没触发判据），
 #: 落在**路径键**上则不许进命令扫描面——两侧现读见下一格。
 SAFE_PATH = "/tmp/users\\xccoo/neurova_scan_probe/safe_read.txt"
 
 
 def _safeSamples() -> list:
+    """无害路径的取样集合（含触发形状的那一条，前提明确时加一条家目录探针）。"""
     samples = [str(pathlib.Path(tempfile.mkdtemp()) / "xcc" / "\\xcc9f.txt")]
     homeProbe = str(pathlib.Path.home() / "x.txt")
     if not any(f.rule_id == "protected_path"
@@ -78,8 +80,10 @@ def test_plainWindowsPathIsNotShellEvasion():
 
     assert not findings, (
         "无害路径被判成 shell 规避（finding=%s）⇒ 路径值混进了命令扫描面" % findings[:2])
-    assert ToolGuardEngine().guard("file_read", {"file_path": SAFE_PATH}).should_block is False, (
-        "路径读取仍被拦 ⇒ 每一次文件工具调用在非交互链路（渠道/NPC/mobile/定时）都会被卡住")
+    for probe in _safeSamples():
+        assert ToolGuardEngine().guard("file_read", {"file_path": probe}).should_block is False, (
+            f"路径读取仍被拦（{probe}）⇒ 每一次文件工具调用在非交互链路"
+            "（渠道/NPC/mobile/定时）都会被卡住")
 
 
 def test_realEvasionInCommandStillCaught():
