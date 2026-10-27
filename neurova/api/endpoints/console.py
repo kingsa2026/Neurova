@@ -922,12 +922,6 @@ async def post_console_chat(
             except BaseException:  # noqa: BLE001 - 终态与落点已由 run_chat 负责，这里只保引用
                 pass
 
-        # 强引用持有：裸 create_task 会被 GC 掉半路夭折；done 回调自行摘除
-        _spawned = asyncio.create_task(_produceTurn())
-        _TURN_TASKS.add(_spawned)
-        _spawned.add_done_callback(_TURN_TASKS.discard)
-
-
         # ── 生产侧记账（第 0 步）────────────────────────────────
         # 时间线、断线重放缓冲、done 收尾信号、回合租约——四件全都跟着
         # **这一轮**走，不再跟着**这条响应**走。上一批把断连从"掀掉回合"
@@ -958,6 +952,11 @@ async def post_console_chat(
         # `create_task(run_chat())`(:878) 之前：task 在创建时复制当前上下文。
         from neurova.core.identity_context import set_request_user_id
 
+        # 写点必须**早于** `create_task(_produceTurn())`：任务在创建那一刻复制当前上下文，
+        # 晚写的身份进不了那一份。`73132b2f` 把生产者的创建上提到请求边界时留在了
+        # metadata 之后，于是 `run_chat` 跑在一个**没有**身份的上下文里（实测
+        # `get_request_user_id()` 在 `agent.chat` 里读到 None——判据
+        # `test_consoleChatTurnCarriesTheAuthenticatedOwner` 当场红）。
         set_request_user_id(user_id)
         # R-3 修复: 附件元数据注入（file_ids → attachments，供 pipeline 附件注入）
         attachments = attach_files(getattr(body, "file_ids", None), user_id)
@@ -1161,6 +1160,19 @@ async def post_console_chat(
                 if isinstance(item, tuple) and item[0] == "events":
                     for event in item[1]:
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+        # 强引用持有：裸 create_task 会被 GC 掉半路夭折；done 回调自行摘除。
+        #
+        # 位置是语义，不是风格，两条约束同时成立才放得下：
+        # ① 在身份写点与 `metadata` 定稿**之后**——`_produceTurn` 里的
+        #    `create_task(run_chat())` 继承的是**创建它时**的上下文，早起的任务拿不到
+        #    随后写入的 `set_request_user_id()`（`73132b2f` 把创建提到边界时就是这么漏的：
+        #    `agent.chat` 里 `get_request_user_id()` 读到 None）。
+        # ② 在 `run_chat` / `queue` / `_keepLease` 定义**之后**——`_produceTurn` 是闭包，
+        #    名字在它被调用那一刻才求值，但先建后定义的读法让人以为顺序可以随便排。
+        _spawned = asyncio.create_task(_produceTurn())
+        _TURN_TASKS.add(_spawned)
+        _spawned.add_done_callback(_TURN_TASKS.discard)
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
