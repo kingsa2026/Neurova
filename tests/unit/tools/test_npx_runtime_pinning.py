@@ -167,7 +167,76 @@ class TestNoKnownVulnerableRuntimePackages:
     # 包名 → (修复下界, 允许的引入链, CVE, 说明)
     _KNOWN_FLOORS = {
         "yaml": ("2.8.3", ("node_modules/swagger-jsdoc",), "CVE-2026-33532", "CVE-2026-33532"),
+        # 2026-10 公告批：MCP TS server SDK 2.0.0（`@modelcontextprotocol/server-filesystem`
+        # 的传递依赖）落在三条公告的区间内，修复版自 2.3.0 起；`ip-address` 10.7.2 的
+        # Address6 区号二次复杂度 DoS（GHSA-rxp7-6hxx-x8q5）修复版自 10.7.4 起。
+        # 两者父包都用精确版本声明，故由 tools/npx-runtime/package.json 的 overrides 抬升。
+        "@modelcontextprotocol/server": (
+            "2.3.0",
+            ("node_modules/@modelcontextprotocol/server-filesystem",),
+            "GHSA-46jr-4wx8-v453 / GHSA-jm63-cq47-j5jp / GHSA-rvq5-wwqv-78pq",
+            "MCP TS server SDK 三条（内存耗尽 / 传输实例串味 / bearer 令牌跨服务接受）",
+        ),
+        "ip-address": (
+            "10.7.4",
+            ("node_modules/@modelcontextprotocol/sdk",),
+            "GHSA-rxp7-6hxx-x8q5",
+            "Address6 区号标识符二次复杂度匹配（DoS）",
+        ),
+        # 2026-10 第二批（PR #364 的 dependency-audit 红灯）：hono 抬高后重新实扫，
+        # 同一棵审计树里还有五条可修公告，逐条按根因抬到修复版，不留静音。
+        "hono": (
+            "4.13.11",
+            ("node_modules/@hono/node-server", "node_modules/@modelcontextprotocol/sdk"),
+            "GHSA-5r4p-p66f-jhc7",
+            "serveStatic 与核心路由的双层解码差异（身份校验看到 A、文件落在 B）",
+        ),
+        "zod": (
+            "4.6.6",
+            ("node_modules/@modelcontextprotocol/sdk", "node_modules/@upstash/context7-mcp"),
+            "GHSA-mrhx-c7xc-m3w5",
+            "校验超大受限集合时内存耗尽",
+        ),
+        "undici": (
+            "7.30.1",
+            ("node_modules/@upstash/context7-mcp",),
+            "GHSA-xjj6-f33q-929c / GHSA-f72v-6w45-q472 / GHSA-4qv8-2p9j-2685",
+            "过量 content-encoding 的未捕获错误（DoS）", 
+        ),
+        "fast-uri": (
+            "3.1.9",
+            ("node_modules/ajv",),
+            "GHSA-333x-w4r6-6crp / GHSA-w74x-v6f9-j3xg / GHSA-wjr9-j795-jxcr / GHSA-xhq7-xmqj-769h",
+            "主机名规范化可被绕过（四条）",
+        ),
+        "body-parser": (
+            "1.20.9",
+            ("node_modules/express",),
+            "GHSA-27r3-jxmh-p828",
+            "压缩正文尾部残留字节导致 DoS（两条线：1.x 自 1.20.9、2.x 自 2.4.0）",
+        ),
+        "@azure/msal-node": (
+            "7.1.0",
+            ("node_modules/@azure/identity",),
+            "GHSA-xcx6-jx8p-x3h5",
+            "授权码流把参数泄露给攻击者可控端点",
+        ),
     }
+
+    def _compare_tuple(self, version: str) -> tuple:
+        """版本比较元组：按 `-` 切预发布尾，再按 `.` 切点分；非数字段逐位按字符串比。
+
+        为什么不用 `_release_tuple`：`ip-address` 这类包会把 `beta` 之类的非数字段放进
+        版本串，逐个 `int()` 会直接抛 ValueError。这里把所有段归一成可比的
+        `(0, 整数)` / `(1, 字符串)` 对，数字段恒排在非数字段之前（预发布低于正式版）。
+        """
+        pairs = []
+        for part in version.replace("-", ".").split("."):
+            pairs.append((0, int(part), "") if part.isdigit() else (1, 0, part))
+        return tuple(pairs)
+
+    def _floor_is_met(self, version: str, floor: str) -> bool:
+        return self._compare_tuple(version) >= self._compare_tuple(floor)
 
     def _release_tuple(self, version: str) -> tuple:
         """把版本串归一成可比元组：`2.0.0-1` 是"2.0.0 之后的第一个预发布"。"""
@@ -185,7 +254,7 @@ class TestNoKnownVulnerableRuntimePackages:
                 # 承载者被整体摘除（依赖被上游换掉）也是合格形态，不报红。
                 continue
             version = entry.get("version")
-            if self._release_tuple(version) < self._release_tuple(floor):
+            if not self._floor_is_met(version, floor):
                 problems.append(
                     f"{name}@{version} 低于 {cve} 的修复下界 {floor}——{note}。\n"
                     f"    引入链: {' → '.join(chains)}\n"
@@ -397,7 +466,7 @@ class TestNonPipAuditTreesStayAtTheAdvisoryFloors:
         expected = {
             "rustls": ("0.23.46", "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"),
             "rustls-webpki": ("0.103.16", "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"),
-            "webpki-roots": ("1.0.10", "1c1c8e20c8a38fc7d65abfe74eb7280e4aa667e8eec8bc84996d2874810748d9"),
+            "webpki-roots": ("1.0.11", "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"),
         }
         text = io.open(PROJECT_ROOT / "NeurUI/src-tauri/Cargo.lock", encoding="utf-8").read()
         problems = []
@@ -475,12 +544,18 @@ class TestMcpServerCarrierIsAtTheAdvisoryFloor:
         )
 
     def test_lock_entry_matches_the_exact_declaration_of_its_carrier(self):
-        """锁里 server 必须与引入方的精确声明逐字相同（手改条目的指纹会在这里现行）。
+        """锁里 server 必须与引入方的精确声明**同解**——逐字相同，或被顶层 overrides 顶替。
 
         为什么单列：`_FIXED_FLOOR` 是公告给的**最低**可接受版，而 `context7-mcp`
         用的是精确声明。两者一分开，就出现「锁 2.3.0 / 声明 2.3.1」这种既过下界、
-        又与声明分叉的形状——它是手改锁条目、没抬引入方留下的指纹，下一次
-        `npm install --package-lock-only` 会把锁打回声明值。判据取「逐字相等」即可咬住。
+        又与声明分叉的形状——它是手改锁条目、没抬引入方留下的指纹。
+
+        为什么还要认 overrides：`package.json` 已把 `@modelcontextprotocol/server`
+        钉在 `^2.4.0`（`overridesNote` 写明理由——引入方精确声明不因顶层 override
+        重解析，除 overrides 无路可走）。此时锁里停在 2.4.0 不是"手改的指纹"，
+        而是声明本身给出的解。判据若只认逐字相等，就会把**正确的** overrides 判红，
+        而读的人按提示去"抬引入方"也抬不动——引入方的值由上游发布决定。
+        故取「同解」：锁值等于声明值，或声明值被 overrides 收进锁值所在范围。
         """
         lock = _read_json("tools/npx-runtime/package-lock.json")
         declared = ((lock.get("packages") or {})
@@ -491,8 +566,33 @@ class TestMcpServerCarrierIsAtTheAdvisoryFloor:
             pytest.skip("@upstash/context7-mcp 不再声明 server——判据前提不成立")
         if not re.fullmatch(r"\d+\.\d+\.\d+[\w.\-+]*", declared):
             pytest.skip(f"引入方对 server 的声明是区间 {declared!r}，逐字相等不适用")
-        assert self._serverEntry()["version"] == declared, (
-            f"锁里 server 是 {self._serverEntry()['version']}，而引入方精确声明的是 {declared}——"
-            "锁与声明分叉（手改过锁条目、没抬引入方）。\n"
-            "   处置：抬 @upstash/context7-mcp，再让 npm 重新生成锁。"
+        locked = self._serverEntry()["version"]
+        if locked == declared:
+            return
+        override = self._serverOverride()
+        assert override and self._satisfies(locked, override), (
+            f"锁里 server 是 {locked}，引入方精确声明 {declared}，而 overrides 里没有"
+            f"能把 {locked} 收下的声明（现值 {override!r}）——三方不同源。"
+            "处置：要么同值，要么在 overrides 里写明顶替方向与理由。"
         )
+
+    def _serverOverride(self):
+        """`package.json` 里对 server 的 overrides 声明（唯一顶替口）。"""
+        declared = (_read_json("tools/npx-runtime/package.json").get("overrides") or {})
+        return declared.get("@modelcontextprotocol/server")
+
+    def _satisfies(self, version: str, spec: str) -> bool:
+        """`^2.4.0` / `>=2.4.0` / `2.4.0` 三类写法的满足判定（够用即可，不引 semver 依赖）。"""
+        match = re.fullmatch(r"(?:\^|>=?)?(\d+)\.(\d+)\.(\d+)", spec.strip())
+        if not match:
+            return False
+        base = tuple(int(p) for p in match.groups())
+        return self._releaseTuple(version)[:3] >= base
+
+    def test_lockEntryIsNotHandEditedAgainstItsCarrier(self):
+        """反向控制：锁与声明都被改成第三个值、又没 overrides 收口时，必须咬得住。"""
+        assert not self._satisfies("2.3.1", "^2.4.0"), (
+            "反向控制失效：2.3.1 被判为满足 ^2.4.0，说明满足判定写软了"
+        )
+        assert self._satisfies("2.4.0", "^2.4.0")
+        assert self._satisfies("2.5.1", "^2.4.0")

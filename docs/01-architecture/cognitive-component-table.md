@@ -22,14 +22,14 @@
 ## 摘要
 
 <!-- COGNITIVE:SUMMARY:BEGIN -->
-共 **93** 个模块 / **43192** 行。按状态：**在役 52** · **仅层内 34** · **仅测试 2** · **零读者 5**。
+共 **93** 个模块 / **43217** 行。按状态：**在役 52** · **仅层内 34** · **仅测试 2** · **零读者 5**。
 
 | 子层 | 模块数 | 行数 |
 |---|---|---|
 | `emotion_context_layer` | 4 | 2300 |
 | `growth_layer` | 1 | 813 |
 | `knowledge_graph` | 1 | 1269 |
-| `memory_layer` | 82 | 36538 |
+| `memory_layer` | 82 | 36563 |
 | `meta_cognition_layer` | 5 | 2272 |
 <!-- COGNITIVE:SUMMARY:END -->
 
@@ -92,7 +92,7 @@
 | `neurova/cognitive_layers/memory_layer/forgetting_recovery_storage_mixin.py` | 347 | 0 | 0 | 0 | 零读者 |
 | `neurova/cognitive_layers/memory_layer/graph_traversal.py` | 587 | 1 | 2 | 6 | 在役 |
 | `neurova/cognitive_layers/memory_layer/isolation.py` | 204 | 0 | 3 | 7 | 仅层内 |
-| `neurova/cognitive_layers/memory_layer/manager.py` | 5168 | 14 | 0 | 100 | 在役 |
+| `neurova/cognitive_layers/memory_layer/manager.py` | 5167 | 14 | 0 | 104 | 在役 |
 | `neurova/cognitive_layers/memory_layer/memory_exporter.py` | 271 | 1 | 0 | 1 | 在役 |
 | `neurova/cognitive_layers/memory_layer/meta_cognition.py` | 633 | 1 | 0 | 2 | 在役 |
 | `neurova/cognitive_layers/memory_layer/models.py` | 522 | 6 | 10 | 39 | 在役 |
@@ -114,7 +114,7 @@
 | `neurova/cognitive_layers/memory_layer/modules/working_memory_module.py` | 249 | 0 | 1 | 0 | 仅层内 |
 | `neurova/cognitive_layers/memory_layer/moe_dependency_extractor.py` | 287 | 1 | 2 | 5 | 在役 |
 | `neurova/cognitive_layers/memory_layer/moe_router.py` | 432 | 1 | 1 | 7 | 在役 |
-| `neurova/cognitive_layers/memory_layer/muscle_memory.py` | 835 | 1 | 0 | 12 | 在役 |
+| `neurova/cognitive_layers/memory_layer/muscle_memory.py` | 861 | 1 | 0 | 12 | 在役 |
 | `neurova/cognitive_layers/memory_layer/neuHebb_curator.py` | 156 | 0 | 1 | 1 | 仅层内 |
 | `neurova/cognitive_layers/memory_layer/neuHebb_forge.py` | 288 | 0 | 1 | 1 | 仅层内 |
 | `neurova/cognitive_layers/memory_layer/neuHebb_manager.py` | 242 | 1 | 0 | 3 | 在役 |

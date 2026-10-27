@@ -10418,7 +10418,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **✅ 净 LOC 去向（从 `git show --numstat` 抄并分项相加核对）**：`0c913be3` 生产池（`neurova/` 前缀）**+183/−63＝净 +120**（分项 22＋108＋53＝183、19＋20＋24＝63 ✓），测试池 +246/−0（测试不计入门槛）。+183 里 `#` 注释 26 行、空行 25 行、其余 132 行为代码与 docstring，其中五个新增/改写口的 docstring 约 48 行（写的是形状理由与实测读数），真逻辑约 84 行。−63 全是重复：护栏三条 `re.compile` 与两处自写 sub、`skill_evidence` 三处 dumps-or-repr、`valueClass` 形参、`_pick` 那条为凑集合而写的切片算式。
     - **⚠ 上一格欠的那笔留案（不改写已入库提交）**：`0ad0277e` 主题行写"回写台账与 M2 档案"，实为只动台账＋在册清单、未碰档案。随本格留案。
     - **仍开（不冒充完成）**：① **第八张表**——`neurova/evolution/eval/miner.py:26 SECRET_PATTERNS`（provider 前缀形状 `sk-ant-api`／`sk-or-v1`／`ghu_`／`xoxb-`／`xapp-`／`ntn_`／`AKIA`／PEM 头，单源一条都没有），且它自己那个**同名** `contains_secret` 与本批接线的那个是同一功能的第二份实装 ⇒ 登记为**批 P-5 第三格**（并表要先裁"这些形状算不算 PII 侧"，因为它们没有键名）；② `security/privacy_gate.py:18 _SENSITIVE_KEY` 是第四份键名表，本批只把"哪个键是凭据"收成 `isCredentialKey` 一处口径，那张表与它的 `_redact_value`（`ab***yz` 部分保留出口）要不要并进来属另拍；③ **已序列化文本上的转义引号作为独立入口仍不受保护**：走 `redact_secrets(str)` 的 `runner.py:42`、`skill_improver.py:230-232` 拿到的是裸文本故安全，但若有人把序列化后的 JSON 直接喂 `redact_secrets`，值档仍会吃到空白为止——本批未在正则里猜转义形状，边界写在 `redact_structure` 的 docstring 上；④ 批 P-6（§6-414 立的那处永不返回 await）／P-2／M3／P-3 按裁定排队。
-    - **下一枚空号现查**：`git grep -ohE "§6-4[0-9][0-9]" HEAD -- audit-reports docs scripts | sed 's/§6-//' | sort -u | tail -3` 现算最大＝**414**，台账尾号亦为 414 ⇒ 本批取 **§6-415**。（⚠ 本行原先写作"⇒ 本批取 §6-416"，是落笔时把"下一批的号"当成了"本批的号"——本格条目实际编号就是 415。这一笔错随 §6-416 那格一并留案：它不只写错一个数，还会**污染后来者的空号现查**，因为那条配方扫的是全仓引用面，一个凭空写出的 `§6-416` 会让下一格误判 416 已被占用。）
+    - **下一枚空号现查**：`git grep -ohE "§6-4[0-9][0-9]" HEAD -- audit-reports docs scripts | sed 's/§6-//' | sort -u | tail -3` 现算最大＝**417**（并入 main 后：main 已用掉 416），台账尾号亦为 417 ⇒ 本批取 **§6-418**。取号除了查台账，还要现查**主干**——同一 PR 期间主干会往前走，十分钟前算的号不作数。
 
 416. **批 P-5 第三格：内容级第八张表并进单源，挖掘门改接并退役自带表与同名实装（✅ `84e1a55c`；子集真条目现算 708）** ✅🟢 —— 承接 §6-415 仍开①
 
@@ -10445,312 +10445,97 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **建议收口次序（供人拍板，不自造）**：① 先把 `errText` 从那一页提到 `NeurUI/src/api/` 一处作全仓口径——不提这一步就逐页各抄一份，等于把"局部单点"变成第 33 份实现（教义第 7 条的反面）；② 再按"后端确实有拒因可读"的密度收，先 skills／marketplace／credentials 三族；③ 收完若干档后再谈要不要把结构判据升成常驻闸（目前只有 `MarketplacePage` 一档被钉住）。
     - **同批已闭的另一处语义分家**：`market.submitUrlPh`（"ZIP 链接（可选）"）在**提交技能**路径下确实可选（审核物化可走 `pool_skill_id` 血缘），但管理端上架留空就装不上——两种语义共用一条文案必有一边说谎。故新增一键 `marketplace.downloadUrlPh`（"留空则此条目无法安装"），11 语一起铺，`market.submitUrlPh` 原样不动。无遗留。
     - **仍开（不冒充完成）**：其余 **122 处**（131−9）未动——体量超出单批，且"每一处 toast 都该显示后端 detail"属 UX 口径，需人裁一刀再扫；本条只登记，不预改。
-    - **口径与空号**：本条数字只量 `NeurUI/src` 下的 `message.error(t('common.error'))` 字面形状（`src/pages/__tests__` 与组件内其它 toast 写法不在内）；口径若扩，读数会变，引用前先复算。下一枚空号现查按形态 418 的纪律两条一起跑：引用面 `git grep -ohE "§6-4[0-9][0-9]" HEAD -- audit-reports docs scripts` 现算最大＝**416**，条目行 `^[0-9]{3}\. ` 尾号亦＝**416** ⇒ 本批取 **§6-417**，下批从 **418** 起。
-
-418. **蜂群上报的三处形态一并收口：回灌空壳、正文硬截断、下钻指针指不到（✅ `a748aab5` 生产 +113／入册 `00226ef7`；子集真条目现算 716）** ✅🟢 —— 触发点不是报错，是「摸清主 agent 与蜂群 agent 信息交互方式」这一问的复核：把回程四条通道逐条读到生产侧，才发现其中一条**从投产起就没传出过正文**。
-
-    - **缺陷本体**：全仓唯一的邮箱写点挂在 `tool_executor._execute_spawn_subagent` 的 `spawn()` 返回之后，取 `reply|result|output` 三个信封里从不存在的键——报告只有一个键名 `report`（`SubAgentRun.to_dict()`）。**同一信封两个消费方一対一错**是铁证：工作流侧 `neurflow/builtin.py:1179` 一直取 `result.get("report")`，是对的。于是每条子任务往父会话注一句 `[子代理 xxx 回传] `（空正文），被数据层拒绝的派生也照注。
-    - **时机比键名更错**：`background=True` 时 `spawn()` 立即返回 pending 回执，那一刻子任务还没跑完——即便键名对了也投不出正文，而 `agent/mailbox.py` 的模块说明承诺的正是「后台模式是唯一回传通道」。修法把投递点收口到 `SwarmManager._run_member` 终态一处（退役 tool_executor 那 15 行），前台/后台同一一路径。
-    - **为什么单元测试看不见这类（本格最值得记的一条）**：既有 `TestSpawnMailboxPush` 用 FakeSwarm 返回自造的 `{"reply": ...}`——替身与读侧一起错向同一个不存在的键，两边自洽便恒绿。实测：**旧代码 + 旧测试 = `5 passed`**。判据假绿形态集的「夹具自造枚举值」那一格，在字段名上也成立。该格已退役，回灌行为改由真 `SwarmManager` 跨边界判定。
-    - **第二批裁定改变了表示形态**：旁路（邮箱、上下文池归档）不再搬正文，投同一份 `_uplinkEnvelope()` 投影（标识/结局/成因/量度 + `transcript` 指针）；三处按字面量砍正文的写法全部撤除（`[:400]`、`[:2000]` 与 `[:80]`、`[:300]`）。主链路与 `subagent_status` 给全文——体量由条数界定，不由砍长度界定。投影只定义一处，两条旁路引用它。
-    - **下钻此前是一条走不通的路，两处缺口叠加**：①`_recall_by_call_id` 把会话属主硬取**当前** Agent（`tool_executor.py:3246`），而 member 会话由写侧落在**子 Agent** 目录下——拿着正确 `session_id` 去错目录找一个不在那儿的地址，恒落空。这与 §6 里 Issue #90 那格（读侧传空 agent_id 被归进 `default/`）**同一条根因，只是偏移来源从空值换成兄弟目录**；②直取只认台账里 `type == "tool_result"` 且带 `tool_call_id` 的条目，而子 Agent 的报告是 assistant 正文。补法：`recall_history` 增 `agent_id` 参数与 `(agent_id, session_id)` 整取分支，**分流只在显式给出 agent_id 时发生**——不带它的旧调用（含只给 session_id 的模糊召回）语义逐字不变，`test_tool_call_recall_owner.py` 那两格既有判据反向钉住这一点。
-    - **实测读数**：红 `4f/3p`（批一）→ `8f/8p`（批二）→ 现全链 `228 passed, 2 skipped`（落库后复取）；红自证 批一 `4f/22p`、批二 `10f/94p`（失败集恰为本批判据增量，含被新裁定改写的旧池归档格）；A/B 仓外 HEAD 基线 批一 `155p/8f ⊃ 158p/4f`、批二 `10f/95p ⊃ 104p/0f`，两批**仅本树红均 0 条**，批一两侧同红的 4 条是 `test_p2_pipeline_fixes.py` 预存红。
-    - **活体与反证**：真 `SwarmManager` + 真 `AgentMailbox` + 真 `spawn` 全链 + 真 `SessionManager` 写侧 + 真 `ToolExecutor` 读侧，只替 LLM 边界。读数：`transcript.session_id` 与 chat 实收键**同值**（`swarm_b66de22b1783`）、文件真落 `<数据根>/lv_child_researcher/sessions/session_…_2026-10-25.json`、整取 `mode='transcript' count=2` 且正文逐字同源、不给 `agent_id` 时读不到（这条是指针必须带属主的实测）。反证两处：批一把 `body` 退回猜键名 → 3 FAIL；批二让整取忽略显式 `agent_id` → 2 FAIL；均 `md5sum -c` 复证还原后转绿。**这一层不证**真 `chat_pipeline` 自己会落盘——那一跳由 `testPointerSessionIsTheKeyThePipelinePersistsUnder` 与既有落盘判据分别覆盖，未冒充一体。
-    - **入册自带的两道闸，点名的正是本批自己的判据**（形态 405 复现）：`test_ci_ast_scan_budget_guard` 与 `test_scanCriterionMustProveItsOwnSurfaceRatchet` 双红——前者不许受保护子集里出现「rglob + ast.parse」全仓扫描，后者不许扫了源码树却不把扫到的数量当断言比。处置走正规入口而非登记豁免：`filesUnder(neurova/)` 取候选面 + 文本预筛 + `transientTree` 一次性建树，并按**实测**候选面 1054 写下限断言 `> 900`（抄别处的数是这类判据下一次的假红来源）。命中集合语义改前改后逐字相同。
-    - **仍开（不冒充完成）**：① `tool_executor.py:3241-3243` 的既有注释仍写 `<sessions>/<config.agent_id>/`，真实层级是 **`<数据根>/<agent_id>/sessions/`**（本批活体实测，`SessionManager._get_session_dir` 为准）——本批只修了 `swarm.py` 那条，同形态未扫完，下批按 `git grep -n "sessions/<"` 现算命中面；② workflow 来源既不回灌邮箱也不归档（`exec_agent` 不传 `initiator_agent`）：邮箱那半是刻意边界且已钉反向格，**归档那半没人裁过**——要不要给工作流也接上下文池，属产品语义，不自决；③ `recall_history` 现有三模式，整取分支**未加循环防护**（依同域先例 `recall_context_span` 的确定性取回不加），这一取向没落判据，若将来出现死循环刷整取需回看本格；④ §9.1 表本批未追加（沿 §6-302 起各笔口径）。
-    - **口径与空号**：本批 LOC 一律逐文件 `git show --numstat` 现取（生产 `+150/-37` 净 **+113**，分项相加已对账）；在册条数目取 `tests.ast_scan.protectedSubsetEntries()` 的 reader 读数 **716**，不用 `grep -c` 自造口径。下一枚空号两条一起跑：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 现算最大均＝**418** ⇒ 下批从 **§6-419** 起。**注意撞号**：本节号 418 与「判据失效形态集」的形态 418 是两套序列（后者不带 `§6-` 前缀），互不可引。
-
-419. **受保护子集的进程内计时口径补登一格：§6-418 入册时漏跑本闸，`test_subagentTerminalReachesParentMail.py` 未登记即进子集（✅ 待记；子集真条目现算 716，本条不动清单）** ✅🟢 —— 触发点是 PR #367 的 pipeline-3 实红，不是纸面推演。
-
-    - **缺陷本体**：`test_clock_caliber_ledger` 的判据是「受保护子集里每个出现 `perf_counter|monotonic|time_ns|thread_time` 的文件都必须在 `CLOCK_LEDGER` 里逐条写清量什么、为什么这个口径」。§6-418 那笔把 `test_subagentTerminalReachesParentMail.py` 加进了 `scripts/ci/protected_tests.txt`，而该文件第 72-73 行有 `time.monotonic() + 2.0` 轮询护栏——清单加了、台账没加，于是 CI 红在 `test_no_unledgered_process_clock`。
-    - **根因不是「漏了一条登记」，是入册流程缺最后一步**：§6-418 记录里写着「入册自带两道闸当场点名的不是别人，是本批自己的判据」，说明当时已经知道加行要复跑闸；但那两道闸是 `test_ci_ast_scan_budget_guard` 与 `test_scanCriterionMustProveItsOwnSurfaceRatchet`，**不是全部**——逐文件单跑两次同读数只证得了「这档自己绿」，证不了「在册合格」。凡是按子集清单取证/取数面的守卫（计时口径台账、墙钟台账），加行后都得跟着复跑；本格把「加行 → 复跑全部按清单取面的守卫」写成纪律。
-    - **口径为什么是墙钟而非 CPU**：这处 `monotonic` 是**轮询护栏**不是耗时判据——`_awaitMailArrival` 等的是「后台链把终态投进父邮箱」这件状态迁移，到点仍未到就如实报缺信；断言面全是结构不变量（信封键、`agent=`/`session=` 指针、正文不在旁路重复），没有一处耗时上下界。与 `tests/unit/security/test_tool_circuit_breaker.py`、`tests/unit/cognitive/test_workingMemoryAugmenterBehaviour.py` 同族形态。
-    - **红→绿实测**（本机现跑，`pip` 装齐 fastapi/jieba 后）：红 `1 failed, 4 passed`，原文 `tests/unit/agent/test_subagentTerminalReachesParentMail.py → ['wallClock']`；补登后绿 `5 passed`。同批复跑按清单取面的另两道守卫：`test_ci_wallclock_assertion_ledger` + `test_scanCriterionMustProveItsOwnSurfaceRatchet` 合跑 `72 passed`，`test_ci_ast_scan_budget_guard` + 本档判据 `80 passed`。
-    - **仍开（不冒充完成）**：① 本格只补登记，不判该文件的轮询口径是否该改成「事件驱动等待」（要动得改 `AgentMailbox` 侧给通知口，属另拍）；② 同一形态的命中面未逐个回扫——§6-418 之前各笔入册若也有「清单加行但没复跑口径台账」的，历史读数已经稳定绿，扫也扫不出红，本格不假装覆盖；③ 管线里 pipeline-3 的 7m44s 里还含 `tests/unit/evolution/eval/test_service_closed_loop.py` 的 jieba 首载超时（30s 线程超时），那是**该档自身**的预算问题、与本红并列而非同因，本批未动。
-    - **口径与空号**：在册条数目取 `tests.ast_scan.protectedSubsetEntries()` 的 reader 读数 **716**（本批不动清单，读数不变）。下一枚空号两条一起跑：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 现算最大均＝**419** ⇒ 下批从 **§6-420** 起。
-421. **受保护子集那一腿装不下自己：内存欠账 root 修在 `runner.cpus`，并落成双向判据（PR #367 构建 `cnb-rja-1k5pv9gbl#003`）** ✅🟢 —— 触发点是一次「CI 未通过」的报障，而日志里**一条失败墙都没有**。
-
-    - **形态与既有两格同源**：pytest 跑到 **82%** 被 SIGKILL，`Finished, code: 137, duration: 22m 13s`。这不是"有测试红了"，是宿主内存超限把进程掐掉；与 §6 里那条 30m 墙钟被强杀（构建 `cnb-mn9-1k5n4fcl5`，85%）是**同一类失败**——判据没变，容器装不下它自己。两次的形状差异只在旋钮：一个墙钟、一个内存。
-    - **证据链逐条现取，不引用叙述**：`runner.cpus: 4` ⇒ 8GiB（平台口径 内存 = cpus × 2GiB）；`protectedSubsetEntries()` reader 读数 **717** 档（合并后随并发会话的入册项为 **719** 档，需求随之抬到约 12.7GiB，结论不变）；同构建里 `static-gate`（1m）/`e2e`（1m）/`frontend`（3m）全绿，只有这一腿走到 22 分钟后被掐 ⇒ 与"提交内容有问题"无关。
-    - **根因位置（教义第 1 条）**：欠账在**配置侧供给**，不在测试侧消费。故修的是 `.cnb.yml` 的 `runner.cpus` 4 → 8（16GiB），不是往 716 个档里逐个加 `gc.collect()` 或拆子集——后者是把症状挪走：子集还会长，跑法不变，下一次换个 slot 就复现。
-    - **为什么必须落成判据而不是一次改数**：一次 137 可以被顺手重跑过去（换构建就差分毫），于是没人会去改配置；`timeout: 90m` 当初也是撞墙后手抬的，抬它的理由只写在注释里。新档 `tests/unit/ci/test_unit_tests_runner_has_headroom.py`（4 格）把供给与需求写成比值：内存侧 `cpus × 2GiB ≥ (底噪 1.5GiB + 档数 × 12.3MiB) × 1.25`，墙钟侧 `stage timeout ≥ 实测单场 × 3`。读数取**活配置**（`runner.cpus`、子集真条目数、`timeout` 字面量），不抄数——抄来的数就是下一次假红的来源。
-    - **先红后绿（实测原文）**：↑红＝`受保护子集 717 档需要约 12.6GiB（含 1.25× 余量），而 runner.cpus=4 只给到 8GiB`（`assert 8 >= 12.615`，1 failed / 3 passed）；改 cpus 后 `4 passed`，两次同读数（3.07s／2.97s）。两格反向控制各自只咬该咬的：cpus 掉回 4 时必须红、`timeout` 写成 `30m` 时必须读得出 1800s（不是恒真断言）。
-    - **同批扫荡（教义第 5 条）**：`.cnb.yml` 头部那条手抄口径 `最大 4 → 8GiB` 一并改成 `最大 8 → 16GiB`——它本身就是第二份定义，改 cpus 不改它即立刻说谎。其余 `cpus: 2` 的四条流水线（static-gate / e2e / dependency-audit / deploy-config 等）未动：它们的日志读数都在 1～3 分钟且无 137 记录，无证据不动。
-    - **不证什么**：不证"16GiB 一定跑得完"——它证的是配置侧不欠账（需求与供给之间有明确倍数并被钉住）；也不替 `test_ci_wallclock_assertion_ledger.py` 管"断言里不许绑死秒数"那件事。
-    - **仍开（不冒充完成）**：① 单档足迹 `GIB_PER_ENTRY = 12.3MiB` 与底噪 `1.5GiB` 是从一次 OOM 反推的量级，不是逐档实测；若有 `py-spy`/`tracemalloc` 级读数应回填这两个常量（现读数至少方向正确：8GiB 在 82% 处被掐，717×12.3MiB + 1.5GiB ≈ 10.1GiB > 8GiB）。② 本批只处理"装不下"，**没有**处理"跑得慢"：22 分钟对一条串行腿仍偏长，`--cov` 插桩对全仓 AST 扫描档的放大（×2.2～×3.7）仍是它最贵的一段，是否改 `--cov` 的覆盖范围属另拍。
-    - **口径与空号**：LOC 逐文件 `git show --numstat` 现取（`.cnb.yml` 改 7 增 5 删含注释；测试池新增 158 行不计入）；在册条数目取 `protectedSubsetEntries()` 现算 **719**（合并后基线；本档一行，其余为并发会话各自入册项），不用 `grep -c`。下一枚空号两条一起跑：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 现算最大均＝**421**（本格自身）⇒ 下批从 **§6-422** 起（同批 §6-422 已占用，见下格）。**让号留案（两次）**：本条落笔时取 419，与源分支上已在的 §6-419（子集进程内计时口径补登）撞号，改取 420；合并时又与并发会话的 §6-420（零向量两处单源）撞号，`test_auditLedgerNumbering` 当场红（`{'420': 2}`）⇒ 按纪律**后来者让号**，本条终取 **421**，419／420 各归属先到的那两笔。这就是「空号现查只看本地树、看不见别人正在写的号」的代价，靠台账唯一性判据兜住，不靠人记得。
-
-425. **可选依赖的墙钟成本落在活体 async 路径上：语义闸兜底支退回零依赖，取用口的既有裁决同批反转（构建 `cnb-sq6-1k5q1kqrc#003`）** ✅🟢 —— 内存那一格（§6-421）修好之后，同一格红**换了副面孔**：不再是 `code: 137` 被掐，而是**真红**。
-
-    - **形态与读数**：`FAILED tests/unit/evolution/eval/test_service_closed_loop.py::TestEvolveFlow::test_accept_produces_pending_proposal — Failed: Timeout (>30.0s) from pytest-timeout.`，回溯 `constraints._check_semantic → semantic_similarity → _token_jaccard → _tokenize → _jiebaModule → knowledge.search._get_jieba → jieba.initialize → gen_pfdict`。整场 `1 failed, 7953 passed, 26 skipped, 3 xfailed in 1469.68s`、覆盖率 88.10% ⇒ 其余全绿，这一条是唯一真红。
-    - **根因不是"字典慢"，是"账落在谁身上"**：字典实测 0.45～0.58s（本机），同一取用口复取 0.0s。它是**一次性**成本，却落在「本轮第一处走到语义闸的那条 async 调用栈」上——与那条用例测的东西毫无关系。而语义闸自己的取舍写着「embedding 不可用就退回 Jaccard，保证离线可跑」：兜底支**又挂了一件更贵的可选依赖**，于是"离线可跑"实际变成"离线的第一步先建一遍 jieba 字典"。
-    - **既有处置为什么没兜住**（教义第 1、5 条点名的形态）：仓内此前只在**用例**侧按这个形状放宽墙钟——`test_caseLevelRegressionGate.py` 与 `test_runOutcomeLedgerConsistency.py` 各一行 `pytestmark = pytest.mark.timeout(120)`，注释写着"coverage 下 jieba 冷启动实测 37.5s"。即：**同一个生产路径的其它入口照旧没人管**，判据改在消费方、一次一处。`test_service_closed_loop.py` 就是没被改到的那一处，于是它在 CI 上按 30s 全局墙红。
-    - **根修选择（先比后合，不自造第二份）**：兜底的词面下界改成**零可选依赖**——中文按 CJK 字符二元组切（`_tokenize` 里原本就有这条分支，只是被"有 jieba 就优先用"挡住）。Jaccard 是词面**下界**，二元组足以让"同义改写拿高分、主题漂移掉分"，与语义闸"不因可选依赖缺失而失去这道闸"的取舍**逐字一致**。取用口 `knowledge.search._get_jieba()` 保留给真正需要词级切分的地方（`knowledge.search.tokenize`，FTS/BM25 那条链），不在 `constraints` 里再挂一次。
-    - **裁决反转，既有判据同批翻面**（不许两边都留着）：`test_jieba_tokenizer.TestJiebaHasOneWarmEntry::test_constraintsGoesThroughTheSameEntry` 原本钉的是"`constraints` 走的还是同一个取用口"，依据是"收口到一处，成本落在明确入口上"。实测证明这条口径不够：收口只统一了"谁 import"，**没消除**那笔冷启动。故该格改为 `test_constraintsAsksNoOptionalEntry`，断言**相反**：`_token_jaccard` 调用期间取用口**一次都不许被问到**。谁把它接回去，这里立刻红。
-    - **先红后绿（实测原文）**：新档 `tests/unit/ci/test_optionalImportWallOwedByLivePath.py` 首轮 `2 failed, 2 passed`（判据自身一处 bug 已就地改掉）→ 干净红 `1 failed, 3 passed`，原文＝`活体路径 neurova/evolution/eval/service.py::SkillEvolutionService.evolve 在语义闸上问了 2 次可选依赖取用口（neurova.knowledge.search._get_jieba）`；改 `_tokenize` 后 `3 passed, 1 skipped`；同批复跑 `test_service_closed_loop` + `test_jieba_tokenizer` 共 `28 passed, 1 skipped`。反向控制两格各咬一处：把取用口换回"顺带初始化"形态时探针必须看得见调用、登记的生产入口必须真出现在子集活体面上（解析 import 图两跳 `service → runner → constraints`，不做文本子串匹配）。
-    - **回归 A/B（逐行比对，教义第 2 条口径）**：`tests/unit/evolution/` + `tests/unit/knowledge/` 全跑，改前 `9 failed / 2686 passed`、改后同集**逐行相同**（`comm` 后差为空集）——9 条全是预存缺可选依赖（`kreuzberg` / `openpyxl` / `pptx` 未装）与一条浮动精度断言，非本批引入。
-    - **活体**：`SkillEvolutionService.evolve` 真跑（真 service / 真 runner / 真约束闸，只替 judge 与 mutate 两个调用方注入点），取用口计数由 2 → **0**；`_token_jaccard("量子计算", "量子 计算")` 仍给正读数（兜底没退化成常量）。
-    - **仍开（不冒充完成）**：① 两处**用例侧**的 `pytest.mark.timeout(120)` 现在已无必要（那条路径不再付冷启动），但删它们属于另一笔（同一 PR 里删掉会掩盖"生产侧确实改对了"的读数对照）——登记待办；② `knowledge.search.tokenize` 仍在取用口处同步建字典（FTS/BM25 的第一条无关键照旧付这笔账），它**不是** async 活体路径，本批不动，但若将来 FTS 也进 async 热路径需回看本格。
-    - **口径与空号**：在册条数目取 `protectedSubsetEntries()` 现算 **720**（本档一行）。下一枚空号两条一起跑：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 现算最大均＝**425**（本格自身）⇒ 下批从 **§6-426** 起。**让号三次留案**：本条落笔取 422、与并发会话的 §6-422 撞号（唯一性判据当场红）→ 让到 424、又与两笔并发（§6-423 进化闸、§6-424 门禁在断言之外变红）连撞两次 → 终取 **425**。同一天三次让号，说明「空号现查」在多人并发写台账时必然滞后，**唯一性判据才是兜底**；也让号本身成了常态，别再指望现查一次就够了。
-
-426. **退役台账被"整理"掉两条署名：`delete + recreate` 的改名与 `rename` 不是一回事（构建 `cnb-bfa-1k5q9ub6e#003`）** ✅🟢 —— 又一条"有测试红了"的红，红在记录而不在行为。
-
-    - **读数**：unit-tests 腿 `8 failed, 7954 passed, 27 skipped, 3 xfailed`，其中
-      `test_protected_subset_registration_history::test_every_vanished_entry_is_signed_off`
-      逐字点名 `tests/unit/api/test_McpFaceCallerTier.py` 与 `tests/unit/api/test_McpFaceRidesSdkTransport.py` 两条未署名。其余 7 条（401 `Invalid or expired token`）与本条无关，另案（见下"仍开"）。
-    - **根因是"整理"时把不同来源的两条并成一条**：`745eae19` 往 `protectedSubsetRetired.txt` 补了 `testMcpFace*` 两条（无 `test_` 前缀那版），`9fa495cf` 判它们是"从未进过清单的空行"并删掉——那个判断只覆盖了**驼峰无前缀**这一族。而 `27c31327` 的改名在 git 眼里是 **delete + recreate**（`test_McpFaceCallerTier.py` 删一个文件、`test_mcpFaceCallerTier.py` 加一个文件，不是 rename），于是 `--full-history` 读到"带前缀的旧名**曾出现在清单里**、文件现已不在仓"——这正是本守卫要拦的第二向。同批另三条驼峰旧名（`testOutOfBoxDefaultLayer.py` 等）留了旧名行，唯独这两条没有。
-    - **为什么我一开始在本地看不到这条红**：`--full-history` 之外的简化会让"只在合并里发生"的变更不可见，这份判据的 `_listedEver()` 用了 `--full-history` 才看得见全貌；而**未推送的本地树**与**合并后的源分支**历史不同——同一份代码在 `origin` 的 HEAD 上红、在我的本地树上绿。合进来才复现。这也说明"本地绿"对**按历史取面**的判据不算数。
-    - **补法（只补记录，不动判据）**：给两条带前缀旧名各写一行签名，依据里写清"`27c31327` 走的是 delete + recreate，`745eae19` 只署了无前缀旧名"——下一次谁再看到这两行，能直接读出为什么必须有它。
-    - **实测**：`tests/unit/ci/test_protected_subset_registration_history.py` 单跑 `8 passed`；`tests/unit/ci/` 全量 `501 passed, 3 skipped`（本机补装 `pyflakes` 后 `test_staticGateUsesParserNotTypecheck` 6 格也全绿——那两格先前红是因为工具不在 PATH 上，红的是环境不是代码）。
-    - **仍开（不冒充完成）**：① 同一场里 7 条 `401 Invalid or expired token`（`test_roleGateIdentitySourceIsStrict` 4 格 + `test_memory_route_shadowing` 3 格）本机单跑 `20 passed`、CI 上红——形态是"JWT 密钥被同进程里更早的档改过"，属**跨档串扰**而非本次三笔改动；它需要的是"密钥来源在会话内唯一且不被用例改"的那层收口，与本条正交，未在本批处理。② `9fa495cf` 里"删两条从未进过清单的空行"这个判断，本可以避免——若当时按"曾出现过的**每个**名字"逐个核对，就不会误删。纪律：整理退役台账前必须先跑 `test_every_vanished_entry_is_signed_off` 的反向清单，不能凭"看起来像空行"删。
-    - **口径与空号**：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 现算最大均＝**426**（本格自身）⇒ 下批从 **§6-427** 起。
-
-    - **与并发会话同一根因的三条落点先比后合（教义第 7 条，合批后重做）**：合批时源分支上已另有 §6-422（判据把整棵语法树举在内存里）与 §6-423（进化闸为算一次相似度去拉嵌入模型）两笔，加上本条共三条落点。逐条结论：
-      · **§6-423 embedding 那半** — 更强，保留（`_initialized_embedding_engine()` 只读 `is_initialized`、绝不调 `initialize_sync()`，并有 `test_semanticGateLoadsNoModel.py` 钉住"这一跳走到了但没去建模型"）。本条只处理它够不着的另一半——引擎缺席时**兜底支**仍问 jieba。
-      · **并发侧的预热口 `warmJieba()` 对本条是多余的** — 兜底支改走二元组后，`constraints` 一次都不会碰取用口（本条判据逐格量的是 0 次），预热对它"预"了个用不上的东西。但对 `tokenize` → FTS/BM25 那条**真需要词级切分**的链仍然成立（`_get_jieba()` 首次就地建字典，谁先走到谁付）。故两条落点**并行保留、各管一段**，并在 `warmJieba()` 的 docstring 里写明分工——不退它，也不让它冒充"兜底支的账已经付过了"。
-      · **`isJiebaWarm()` 退役** — 合批后查实：全仓除测试外**零调用点**，且它读的就是 `_jieba`。多一个同义判断口即多一份"暖没暖"的事实源（教义第 6 条），故删；原先钉它的那一格改成直接问 `warmJieba()`（幂等、返回布尔）或读 `_jieba`。
-      · **`warmUpJieba` 的驼峰形态** — 本条落笔时 `tests/conftest.py` 与本档调用点已写成驼峰；`warmJieba` 是本文件 `tokenize`/`fullTextSearch` 一族命名下的正名。按仓规命名用 camelCase，正名保留、不新增别名（不保留两份名字，也不为改名让既有调用点失配——它们是同一次提交里一起动的）。
+    - **口径与空号**：本条数字只量 `NeurUI/src` 下的 `message.error(t('common.error'))` 字面形状（`src/pages/__tests__` 与组件内其它 toast 写法不在内）；口径若扩，读数会变，引用前先复算。下一枚空号现查按形态 419 的纪律两条一起跑：引用面 `git grep -ohE "§6-4[0-9][0-9]" HEAD -- audit-reports docs scripts` 现算最大＝**419**（并入 main 时 418/419 两格已按「改后到的、不改先到的」让到 419/420），条目行 `^[0-9]{3}\. ` 尾号亦＝**420** ⇒ 本批取 **§6-417**，下批从 **421** 起。
 
 
+435. **批 L 落地：CI 静态门禁的 6 处 `undefined name` 分四类根因收口，闸门侧修「问错的问句」而非删报错（✅ 本批；受保护子集真条目 +2）** 🟢 —— 这批修的不是 6 个拼写，是**一条问错的判据**加**一处只写不读的取数**
+    - **✅ 起点（CI 现场，非本地臆测）**：PR #364 的 `cnb-8a0-1k5kcrpsh-001`（static-gate）红在 6 行，本地 `python scripts/ci_static_gate.py --skip-import` 逐行复现同一集合：`tool_executor.py:1646` 的 `file_path`、`channels.py:459` 的 `ChannelMessage`、`mcp_server_api.py:120` 的 `McpCaller`、`knowledge_facts.py:736/761` 的 `Tuple`、`provider_compat.py:202` 的 `Any`。同一次的 `-005`（frontend）红在 `npm audit --audit-level=high` 的 5 条（vitest/@vitest/mocker、dompurify critical、vite high）。
+    - **✅ 根因分四类，不许合并成「补 import」一个动作**：①**真·漏 import**（`Tuple`/`Any`＝同文件其它模块都已从 `typing` 导入，这里漏了）；②**注解专用·局部导入**（`McpCaller` 的实体在 `_callerPrincipal` 函数体内导入，理由写在注释里＝`neurova.agent` 包 `__init__` 链回 `tool_executor` 的循环导入，AGENTS.md §3）；③**注解专用·近似懒加载**（`ChannelMessage` 只在注解里出现）；④**幻影变量**（`file_path` 在该函数作用域从未绑定）。
+    - **✅ ①②③ 修在闸门侧，不是修在被报的代码**：把导入提到模块级会**改坏生产**（②直接拉循环导入），删掉注解会**丢解析器能读的事实**——两条都是把报错挪走（教义第 1、2 条）。改法是让 `scripts/ci_static_gate.py` 的未定义名判据多问一句「这个名字在**本文件**里被 import 过吗」（`collectUndefinedNames` 复核 pyflakes 自己的读数，不另写 AST 名解析＝教义第 6 条）。反向格同批钉死：拼错的名字、写错的**形参**（真实命中形态）照旧红，且「文件里别处 import 了同名名字」不得为真拼错开白名单。
+    - **✅ ④ 是本批唯一的真缺陷，且比 pyflakes 报的更重**：红灯先实证——真 `ToolExecutor._governance_precheck` 走到该行直接 `NameError: name 'file_path' is not defined`，被外层吞成 warning，**文件类工具在 SANDBOX 裁决下每到这一行就静默丢阻断回执**。同一次调用里 `extract_adjudicable_params` 明明返回了 `(键名, 值)` 清单，代码却把它命名成 `_pathValues`（下划线＝声明不读）再凭幻影变量打日志——与 §6-284 甲案「第二条路径值在审计面消失」同一根因族。修法不是删日志：路径清单**真的被消费**，审计 warning 逐条点名 `键=值`，无值时不留 `None` 占位。四格判据里有一格专门钉「日志里那串路径**等于**取数口的返回值」，改走第二份认键循环即红。
+    - **✅ 前端 5 条按修复线抬，取该支当前最高**：`vitest`/`@vitest/coverage-v8` `4.1.11→4.1.12`（GHSA-qxg6-89mg-rqv8 与 GHSA-xp26-3454-mjgp 的 fixed 都是 4.1.12，且 4.1.11 是后者 introduced 下界——刚好落在修复线下沿）、`dompurify` `3.4.16→3.4.17`、`vite` `6.4.3→6.4.5`（6.x 线最高；6.4.4 的 semver 下界会把 6.3.x 放回来，那是**下界回归**，所以取 `^6.4.4`）。api.osv.dev 逐版本实查：改前三个版本各有 3/5 条命中，改后**全部 none**；锁里顺带被抬的传递依赖 `chai@6.3.0`／`std-env@4.3.0`／`tinyrainbow@3.2.0` 也逐条查过，均 none、无降级。`vite` 停在 6.x 而非 latest 8.x：本批只解漏洞，跨大版本属另一票。
+    - **✅ 活体读数**：真装 `npm install` → `vitest 4.1.12 / @vitest/mocker 4.1.12 / dompurify 3.4.17 / vite 6.4.5`；`npm audit --audit-level=high` → `found 0 vulnerabilities`；`npx vue-tsc --noEmit` → exit 0；`npm run test` → **2162 passed / 3 failed**，A/B 自证（`git stash push NeurUI/package.json package-lock.json` + 重装回旧版）失败集合**逐行相同**（`duplicate-function-inventory.guard` 2 格、`locale-key-reference` 1 格 `skillEvo.*` 缺键），预存失败不算回归。
+    - **✅ 单测 A/B**：`tests/unit/security`（去掉两个 pre-existing collection error 的档）失败集合 53→49，**新增 0**，消失的 4 格正是本批新档由红转绿；`tests/unit/ci`＋`tests/unit/tools` 失败集合 1→16 是补齐 `fastapi`／`prometheus_client`／`openpyxl` 之后才**跑得起来**的档（补齐前它们连收集都进不去），逐格看无一是本批文件。
+    - **⚠ 本批自己的落笔错（两处，都在当场改掉）**：a) 首版 `_PYFLAKES_LINE` 贪心分组把 `undefined name` 拆成 `kind=undefined`、`detail=name 'x'`，导致**反向格全绿地漏报**（假绿，最坏的一种）——是反向格先红才发现的，反证了「只写正向格＝自证空转」；b) 首版判据里三处 `make()`／`logger` 未定义，把被测点淹在噪音里，改成逐条自足的小样例。
+    - **✅ 同批扫掉 ruff 那 3 条存量（主干 `21d70a8a` 现场就有，不是本批引入）**：静态门禁绿了之后露出来的是同一条流水线的 ruff 阶段。逐条看是两类真缺陷，都不是「加 noqa」能了事的：①`tests/manual/readFaceReconciles_b58.py:102`／`shellEntryNotPinned_batch57.py:166` 的 `exc`——PEP 3110 规定 `except ... as exc` 的绑定名**出块即解绑**，而它被关进 `lambda` 里懒求值，于是那两行的失败读数一旦真被执行就是 `NameError`（脚本静默崩在诊断路径上）；改成出块前先取值。②`tests/manual/declaredSurface_batch49.py` 的 `PROBE`——`runProbe` 是 `readImplicit` 的上一代实现，全文件无人调用、`PROBE` 从未定义，按教义第 7 条**删**（不补一份 PROBE，那是留两处同功能实现）。另修 `tests/unit/neurflow/test_workflow_ownership_v2.py:151` 的 `# noqa: 仅记录`——不是码列表的 noqa 是空转指令，该行本就无违规，直接去掉。改后 `python -m ruff check neurova tests --no-cache` → `All checks passed!`
+    - **⚠ 本批新登记的断点（不静默遗留）**：①`tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py::test_staticRootsNeverPointOutsideOrNowhere` 报 `tests/unit/test_session_landing_guard.py: missing`——**该文件真实存在且在 `protected_tests.txt:1636` 在册**，说明这条「根指不到真实目录」的静态根解析在 Linux 上误判，与本次改动无关，单独开票；②`tests/unit/tools/test_governance_mcp.py` 等 12 格在裸环境里报 `async def functions are not natively supported`（缺 `pytest-asyncio` 的 asyncio_mode 声明），CI 精简锁里有、本地没有，属环境差异不属回归。
+    - **下一枚空号现查**：本批初稿取 §6-403，落盘后并会话已在主干用掉该号（`d5c430c7`／`5a1a49fb`）⇒ 按「改后到的、不改先到的」让号改记：先在 main 上改记 **§6-417**，并入 main 后又因 417 已被占用再让一拍 ⇒ 并入 main 前主台账已用到 434、本条让号终取 **§6-435**，主台账与此处一并改读。取号除了查台账，还要现查**主干**——同一 PR 期间主干会往前走，本地十分钟前算的号不作数。
 
-420. **零向量：出向量这条路上判一次，存量与注入入口再判一次（✅ 并入源分支上并发的零向量那笔之后按两处单源重写；受保护子集真条目现算 718）** 🟢 —— 承接本单那笔「受保护子集 15 红按根因收口」的现场（该笔已随历史重写失去可达号，按内容指认：活动目录跨回合残留那一组）。本笔与并发会话那笔（"零向量从不是『有向量』"）撞在同一处根因上，合并后按两侧真实意图裁定，**不保留两份口径**。
+436. **批 M-2 落地：`dependency-audit` 的 Prepare 段按实测抬到 `cpus: 4`，并把「拉冻结库的流水线不许用最小规格」钉成常驻判据（✅ 本批；受保护子集真条目 +1）** 🟢 —— 现场是 PR #364 的 `cnb-nmd-1k5no13f9#003`：`unit-tests` 在 **Prepare** 段被杀，两条 stage 一条都没跑。
+    - **✅ 起点（CI 现场读数，非本地臆测）**：`cnb build get-build-status --sn cnb-nmd-1k5no13f9` 读回
+      `stages: error,116717,Prepare / skipped,0,install uv… / skipped,0,protected subset…`，
+      日志末行 `任务超过最大执行时间而被强制关闭：1m0s`。同一构建里八条邻居流水线的 Prepare 是
+      `3719ms`～`63827ms`——同一份提交、同一时刻，所以不是「机器慢」，是这一格自己越了平台的 1m。
+    - **✅ 两次对照实验否掉了「墙钟需要抬」这个直觉方向**：以 `api_trigger_probe` 事件在 main 上单起三条
+      探针流水线（不跑任何用例），Prepare 读数 `18232ms` / `3719ms` / `4677ms`。空跑都在 1m 内，
+      说明期限本身够用；变的是**这一格要塞进去的固定成本**，不是平台的表。
+    - **✅ 根因落在声明处**：`dependency-audit` 的 Prepare 要 `docker pull` 镜像、拷两份缓存卷、装
+      `pip-audit`，再把一个上百 MB 的冻结漏洞库落到 `/root/.cache/osv-scalibr`——而它与其余八条同规格
+      `cpus: 2`。按修复教义第 1 条，故障在声明处生产、在 Prepare 处被报出来；改 stage 脚本是把报错挪走。
+    - **✅ 判据按阶段结构认，不按流水线名认**：`tests/unit/ci/test_runnerAllocatedWallClockIsNotADeadline.py`
+      扫 `runner` + `docker.volumes` + `stages[].script`（含 YAML 锚点复用），凡「挂 `/root/.cache/osv*` 卷
+      **且** stage 里有 `--prefetch-offline-databases`」的流水线，`cpus` 必须 ≥ 4。改名、搬位置都不影响判据；
+      受治面自证下限 `MIN_HEAVY_PREPARE_PIPELINES = 1`，只报「零违规」不报扫描量即红。
+    - **⚠ 本批自己的三次落笔错（都在当场改掉，记录形态供下次省一轮）**：a) 首版取「`memory == cpus×2`」——
+      实测 23 处 `runner.cpus` 声明里**没有一处写 `memory`**，受治面是空的，绿得毫无意义；b) 第二版取
+      「`docker.volumes` ≥ 2 则 `cpus` ≥ 4」，把 `dependency-audit` 抓了出来，但 `unit-tests` 也在受治面内、
+      它已经合规——这一版恰好会让人以为「修完 `unit-tests` 就没事」，而真红在另一条；c) 第三版取「装两棵树
+      （Python + npm/cargo）」在活配置上扫到 **0 条**（`.cnb.yml` 里两棵树分别落在不同流水线）。三次都是
+      「受治面自证」那一格先红才发现的——这道自证不是装饰。
+    - **✅ 灯（红→绿逐条实测）**：`pytest tests/unit/ci/test_runnerAllocatedWallClockIsNotADeadline.py -q`
+      → 改前 `1 failed`（`'dependency-audit': cpus=2，挂 2 个缓存卷`，且受治面 2 条），改后 `2 passed`；
+      把 `cpus` 改回 `2` 再跑 → 当场回红，恢复即绿。
+    - **✅ 同批回归面**：`tests/unit/ci` 整目录 `495 passed, 2 skipped`；受保护子集登记历史
+      （`test_protected_subset_registration_history` 8 点）、`test_unit_tests_single_leg`、
+      `test_ci_pipeline_speed_guard` 共 33 点全绿；`python scripts/ci_static_gate.py --skip-import` 全通过；
+      `ruff check neurova tests` All checks passed；`.cnb.yml` 现场 `yaml.safe_load` 通过。
+    - **⚠ 诚实边界**：本批只改 `dependency-audit` 这一格的 `cpus`，`unit-tests` 的 `cpus` 本来就是 4，
+      **没有**动任何 stage 的 `timeout`、没有动受保护子集清单的覆盖面。`cpus: 4 → 8` 未采用：本仓现有读数
+      不支持「这一格是核数瓶颈」的结论，先按最小可证的一步走。
 
-    - **缺陷本体（两侧读数一致）**：引擎在模型档在、分词器/ONNX 运行时装不上时**兜底返回全零向量**（不是 None）。它传得下去，传下去之后就再没人分得开"没算出来"与"真算出个全零"：`tool_search._hybrid_scores` 拿它进语义加权，余弦恒 0，检索对该查询恒空手——而空手在 `handle_control_tool` 那儿是 S3「能力缺口」的投递条件（驱动自主造工具），一个口径缺陷被翻译成了假缺口；`muscle_memory` 把它存进条目，`_compute_confidence` 走"有向量"分支、再也回落不到字符覆盖度，换实体近似句的置信度停在 **0.5875**（票面要 ≥0.85）；`vector_index` 写侧落库后该条对检索永久隐身且指纹未变、下轮不重算。
-    - **裁定：两处单源，各管一段，不合并成第三个口**。①**出向量**这条路上由引擎自己判——`ONNXEmbeddingEngine.encodeOrNone()`（并入那笔新增），算不出给 `None`，写侧（`manager._embeddingForNewRow`）与八处消费方改问它；②**存量与注入入口**由 `core/vector_math.isZeroVector` 判——落过盘的条目、注入引擎（判据替身、旧装配，只有 `encode`）交上来的向量，都可能是一列 0，`manager._row_embedding` / `semantic_search._get_embedding` / `muscle_memory._compute_confidence` / `tool_search._hybrid_scores` / `vector_index` / `skill_semantics.is_zero_vector` 一律过这一道。两个口的判据都不许在别处再写一遍（`1e-9` 那形），`skill_semantics` 自己那份 `all(abs(x) < 1e-9)` 降成对 ② 的一行委托。
-    - **词表（本笔独有，并发那笔未触及）**：`_TOKEN_SPLIT` 对中文是无操作，「查询天气」与「天气」永不相等——目录里明明有天气工具，查「天气」零命中。改为拉丁/数字整段、中文 2–3 字片段（下限 2 与 `knowledge.search.tokenize` 同口径）。这是"零命中被打成能力缺口"那条链的另一半。
-    - **为什么 CI 红的是「前提不成立」而不是断言**：`test_hitSearch_doesNotRecordGap` 自带目录、走生产入口压缩、再真调一次控制工具，断言"真命中时必须不记缺口"。词表与零向量任一处一坏，它的**前提**当场塌掉——这类红以前被当成"环境缺件"放过去。
-    - **前提自给（本笔）**：联想召回基线、向量线索通道、扇出闸、长期记忆六维门禁此前缺件时显式失败，而 `requirements-ci.txt` 刻意不含那四件 ⇒ CI 上恒红二十来格，真回归被稀释。改为走 `tests/memory_embedding_precondition.requireRealEmbeddingOrSkip`：只判一次**引擎真出非零向量**，缺件 skip 并点名缺的是哪一件；**装了模型却算不出仍是红**（引擎就绪即不再按缺件处置）。
-    - **红→绿（实跑，合并后）**：`test_hitSearch_doesNotRecordGap` 前提塌 → 全绿；`test_entity_swap_confidence_reaches_hit_threshold` `0.5875 → 0.87x`（并发侧提交说明的实测，本机真嵌入档复测同为 >= 0.85）；`test_vector_maintain_all_incremental_and_force` 的替身"含 alpha 才给 `[1.0]`"（beta 那条本来就是零向量）在被拒收后少算一条 ⇒ 改替身（每条文本各有非零向量、补 `encodeOrNone`），谓词一字未动。反向自证四枚：`manager._row_embedding` 退回旧写法 ⇒ 存量那格红；`tool_search` 抄一份 `1e-9` ⇒ 阈值单源那格红；注入引擎不认 `encodeOrNone` ⇒ 检索回落那格红；词表退回整段 ⇒ 两格红（`['查询天气']`、`['a','天','b']`）。
-    - **判据自己被咬过三次并当场改掉**：①第一版拿「气温如何」当查询，撤回回落照样绿（BM25 那支本来就空）——改成"词面真能命中 + 直接看 `_hybrid_scores` 是否为 None"；②第一版反向控制"正常引擎也命中"，落点只有一条目录时它恒真；③`_hybrid_scores` 里我先后写的"查询回全零即回落""条目一条都没算出即回落"两条，在"查询非零而条目全零"下叠加成误判（两条各自都是对的，合起来收窄了合法行为）——被上面那条判据抓出来，收成一条。
-    - **A/B 自证**（同一解释器 / 同一份锁，六目录 5000+ 用例）：改前 `20 failed`、改后 `22 failed`，逐行 `comm` 后新增两条均在 `test_context_pool_optimizations`（单跑 10 passed；`test_phase3_wiring` 同批 2 failed 两条 A/B 两侧同读数）⇒ 跨用例状态泄漏（预存），不认领。其余预存：`docx`/`kreuzberg` 缺件 14 格、`moe_index_state` 读 `NEUROVA_DATA_ROOT` 1 格、git 签名 1 格、`skill_permissions_compat` 2 格。**消失 0 条**，即本笔未借修红之名放宽任何判据。
-    - **live-verify**：同进程真 `ONNXEmbeddingEngine` 交 512 维零向量时 `encodeOrNone` 给 None、`_row_embedding('[0.0,0.0]') → None` 而 `[0.1,0.2]` 原样、`muscle_memory._semantic_vector → None`、`skill_semantics.is_zero_vector([0.0]*8) → True`、`vector_index` 写侧同口径拒收、`tool_search` 混分回落 BM25（`0.2877` 那支）。装齐四件后引擎回真向量，联想召回档回真读数（基线绿、2 条 strict xfail 照旧）。
-    - **仍开（需人裁）**：① CI 是否装 `onnxruntime`/`tokenizers`/`transformers`/`sentencepiece`——装了这四档回真读数、不装则恒 skip；代价是锁 +数十行、纯 wheel 若干、`huggingface-hub` 抬版本，还要把这四件从 `ci_static_gate.KNOWN_OPTIONAL_DEPS` 摘下（否则静态门禁继续 OPTIONAL-SKIP 放行）。属依赖口径变更。② `tool_search` 中文词表是 2–3 字滑窗、`knowledge.search.tokenize` 走 jieba（≥2 字词），两处对同一段中文给出的 token 集不同，检索与 FTS 因此不可比——要不要接真分词是另一次口径变更。
-    - **补一笔（同一格的第二半，CI 才看得见）**：合并后构建 `cnb-sq6-1k5q1kqrc#003` 的受保护子集剩 **1 failed / 7953 passed**，那一格不是断言红——`test_service_closed_loop::test_accept_produces_pending_proposal` 的回溯落在 `jieba.initialize() → gen_pfdict`，即**建字典**而非被测逻辑（本机 2.5s，差别只在字典是否已被同场更早的档暖过；CI 日志里它是本进程第一个切中文的档）。修法是把"字典建完没有"变成能问能催的事实（`search.isJiebaWarm` / `warmJieba`），并在 `tests/conftest.py` 的 `pytest_configure` 里一次建完——它归前提，不归某一条用例。判据 `test_jieba_tokenizer.py::TestWarmUpFace` 两格，红自证＝把两个口钉成恒 `False` ⇒ 一格红、还原 18 passed ×3 同读数。并发侧同一格另补了模块级父墙 `pytest.mark.timeout(120)`（与同目录两档兄弟逐字相同）——两者不重复：父墙管“这一档整体别被全局 30s 掐在中间”，收集期暖机管“这笔一次性成本不记在某一条用例头上”；注释已按这个分工改写，不留第二种说法。
-    - **口径与空号**：受保护子集真条目取 `tests.ast_scan.protectedSubsetEntries()` 读数 **718**（合并前 714；本笔加 `test_tool_search_semantic.py` 一行，并发侧另加三行）。引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 现算最大均＝**420**（并发那格已先占 419） ⇒ 下批从 **§6-421** 起。
-
-422. **同一次 OOM 的另一半：判据自己把整棵语法树举在内存里（✅ 本批；与 §6-421 同一现场，处置互补，两者都要）** ✅🟢 —— 触发点是 PR #367 的 `unit-tests` 腿连续多轮以 `错误信息: 任务执行失败，返回码：137` 收场
-
-    - **与 §6-421 是同一现场的两次独立归因，两份都要留**：那格把 137 归到**配置侧供给**（`runner.cpus: 4` = 8GiB，改 8 并落成比值判据），本格归到**判据侧消费**（一处判据独占 478MB）。两者不互斥，证据也不同源：本格的判据是**死点位置**——两次构建（`cnb-ast-1k5pqhnfi#003` 23m11s、`cnb-rja-1k5pv9gbl#003` 22m13s）都精确停在 82%、都停在同一个文件的同一个用例之后，而该文件正是把 1053 棵语法树整批装进 `list` 的那处；配置侧的解释说不出"为什么偏偏是这一档"。合起来的读数是：**内存账本里有一笔 478MB 的单笔支出，把它抹掉之后再谈供给余量**——只提 `runner.cpus` 而不抹这笔，等于让每个新 slot 继续按 478MB 的单价付租金；只抹这笔而不提余量，则留给后续增长的裕度仍然没被钉住。两笔都已落判据，各自反向控制。
-    - **先把"137 是什么"读对，这是本格最贵的一步**：此前几轮按"平台强杀/超时"解释（本单三笔 `revert(ci): 撤回取证的日志截留…`、`ci(diagnose): 受保护子集日志收到尾部 400 行…`、`fix(ci): 受保护子集 24 红按三个根因收口…` 都在这个前提上做事：日志截留、`tee`、`PIPESTATUS`）。实测读数否掉了它：构建 `cnb-rja-1k5pv9gbl-003` 的日志尾部是——一条进度点、单独一行 `Killed`、然后 `Finished, code: 137`。`Killed` 这个字**只有 shell 会打**，它出现在命令正常收场（有 stage 结束行、有退出码）的路径上，说明被打死的是**子进程**（python），不是 stage。若是平台掐断，不会有 `Finished` 行。
-    - **死点可复现，位置固定**：`cnb-ast-1k5pqhnfi#003`（23m11s）与 `cnb-rja-1k5pv9gbl#003`（22m13s）两次都停在 82%，都停在 `tests/unit/skills/test_marketInstalledStateIsReadBack.py` 之后、`tests/unit/api/test_channelWebhookResolvesAdapterByAgentTable.py` 的**同一个用例之后**。后者正是本格要动的判据。
-    - **根因：扫描面被当成了解析面**——`_neurovaTrees()` 用 `[(rel, transientTree(path)) for path in filesUnder(NEUROVA)]`，把生产根下 **1053** 个文件的语法树同时装进 `list` 交给探测器。本机同一棵树上实测（cpython 3.12，同一份代码）：
-
-      ```
-      旧形状：1053 棵同时在 list 里       → 峰值 RSS 478.6 MB, 5.79s
-      终形状：共享预算 callNodes（10 档进解析）→ 峰值 RSS  50.8 MB, 0.14s
-      ```
-
-      478MB 与用例要判的事毫无关系，却要与 7964 格、`--cov` 插桩、4 核 8GiB 的 runner 同池竞争。**判据没红，是判据的内存形状把跑测压死了**——这类红在读数上与"某格挂死"完全同形，是本格最值得记的一条。
-    - **修法按仓库既有口径，不新造机制，而且走了两步才对**：第一版是 `sourceRefsUnder(..., hints=("get_adapter",))` + 逐文件 `ast.parse`；它被**常驻门禁 `test_ci_ast_scan_budget_guard` 当场拦下**——受保护子集里「自己枚举 + 自己解析」的全仓扫描就是这道闸的靶心（判据与代码总量捆绑），合法出口只有共享预算。第二版改走 `ast_scan.callNodes(NEUROVA, "get_adapter")`：预筛、解析、逐条取节点全在 `tests/ast_scan.py` 的预算内完成，本档一棵树都不持有。探测谓词从"吃一片树"改成"吃一个节点"（`_isBareAdapterLookup(node)`），四形对照格原样保留。
-    - **教义第 5 条扫荡：同一形状的第二处**（`tests/unit/channels/test_channelInboundPayloadPaysTheEventDoor.py::_scanTrees()`，同样把扫描面的树攒成 list）：
-
-      ```
-      旧形状（59 棵整批留 list）→ 峰值 36.6 MB
-      新形状（生成器逐文件即弃）→ 峰值 17.6 MB
-      ```
-
-      它的扫描面只有 59 档，今天不致命；但同一个洞不留两处——改成生成器后调用方一处无需改动（`_emitOffenders` 本来就是消费者），第二处（地板格）拆成"枚举次数"与"逐文件计数"两次读，都不攒树。**没有**顺手改第三处：其余 28 档受保护子集判据现查都是 `for path in ...: tree = transientTree(path)` 的逐文件形状（含 `test_nestedPytestBudgetWallsAreOrdered`、`test_scanCriterionMustProveItsOwnSurfaceRatchet`），不存在整批保留。
-    - **真正的大头不在判据里，如实登记不擅改**：`tests/ast_scan.transientTree` 说明写着"不留常驻缓存"，但它读文本走 `_cachedCode`，而 `sourceRefsUnder` 是**全量读文本再按 hints 过滤**（`refs = [SourceRef(path, key, _cachedCode(key)) for path in filesUnder(root)]`）。即：即便调用方给了 hints，生产根下**全部**文件的文本也已进 `lru_cache(maxsize=None)`，与 hints 无关。实测这份文本缓存 ≈ **30MB**（1053 档，峰值 42.6MB），是 478MB 的 1/15，**本轮不是主因**，故不在本格改共享源——动它要改"文件系统只读一遍"这条契约的设计，属另一次裁定。登记在此，读数给到，不改。
-    - **红→绿实测**：新档 `TestTheScanFaceDoesNotCarryItsTreesResident` 两格（面判据 + 反向控制），面判据要求扫描面走 `callNodes`、且代码里不得再出现 `transientTree`/`parsedModules`/`walkedModules`。把扫描面换回 `ast.parse` + `transientTree` ⇒ 反向控制红；恢复后 **12 passed**。反向控制的实现被**判据自己**抓到过一次：淘汰名单按全文匹配时，docstring 里为讲清根因引用的旧写法字样把"记录根因"判成"又犯一次"——改为只认**语法树里的名字**（`_calledNames`），不看注释与字符串。
-    - **回归**：`test_channelWebhookResolvesAdapterByAgentTable` 12 passed、`test_channelInboundPayloadPaysTheEventDoor` 10 passed，加上本批**自己撞上的两道常驻闸** `test_ci_ast_scan_budget_guard` + `test_scanCriterionMustProveItsOwnSurfaceRatchet` 一并 **129 passed**；`test_dev_environment_contract` + `test_nestedPytestBudgetWallsAreOrdered` + `test_ci_parity_guard` + `test_unit_tests_single_leg` **87 passed, 1 skipped**。`ruff check` 与 `pyflakes` 均无新增。顺带清掉一处 `invalid escape sequence`（本格自己写进去的）。
-    - **仍未收口（不冒充完成）**：① 本格只动了两处**判据侧**的持仓形状，**未**在 CI 上实测整条受保护子集的峰值；若下一轮仍以 `Killed` 收场，按同一口径继续扫"整批保留"的第三处，不预先改 `runner.cpus`（提配置是把症状买下来，不是根修）；② `ast_scan` 的全量文本缓存（≈30MB）与 `hints` 语义不一致这条已登记未改；③ 平台侧同批有两次 `Prepare` 失败（`cnb-13d-1k5pskuuj-004`：`任务超过最大执行时间而被强制关闭：1m0s`）与流水线重分配，非本单代码所致，登记不追。
-    - **口径与空号**：本轮所有内存读数均为本机同进程 `ru_maxrss` 现取，两形状各起一个独立解释器量（避免前一形状的峰值污染后一形状）。下一枚空号两条一起跑：引用面与条目行现算最大均大于 421（并发会话已占到 421）⇒ 按「后来者让号」本格取 **§6-422**，下批从 **423** 起。
-423. **进化闸为了算一次语义相似度去把嵌入模型拉起来——同一格 30s 超时背后被判据前提掩盖的那一半（✅ 本批；子集真条目现算 717，新档入册 +1）** ✅🟢 —— 与 §6-419（父墙漏登记）、`5f2b2acd`／`aa7b5f36`（父墙 + 收集期暖机）是**同一个现场的三次独立归因**，三份都留：那两笔让这一格"不再被墙掐断"，本笔让它的**前提**不再是一次出网。
-
-    - **现象**：`cnb-sq6-1k5q1kqrc#003` 的 `unit-tests` 25 分 24 秒后被平台终止，日志里一条断言失败都没有，short summary 只有 `test_service_closed_loop.py::TestEvolveFlow::test_accept_produces_pending_proposal - Failed: Timeout (>30.0s)`。前两笔的读数把它归到 jieba 冷启动与父墙；本格问的是第三个问题：**这条判据除了建字典，还在等什么？**
-    - **根因在产生侧**：`semantic_similarity()` 的 embedding 分支调 `get_embedding_engine()`，而工厂**会懒建** `ONNXEmbeddingEngine`，其 `initialize_sync()` 走 `ModelDownloader.ensure_model(..., auto_download=True)` ⇒ 在一条**判据**的路径上出网拉 130MB 权重。`requirements-ci` 刻意不带 torch/onnxruntime/模型权重，于是这一跳只可能出网或等出网超时。`constraints.py` 的 docstring 早写着"进化闸不触发模型加载"，但代码在建引擎之前只读过一次 `is_initialized`——**纪律只写在注释里，没有任何东西会红**。这也解释了两笔兄弟修法为什么只能让读数变稳：抬父墙把等待罩住、暖机把字典那半提前，出网那半仍在判据里。
-    - **修在产生侧（教义第 1 条）**：取引擎收成 `_initialized_embedding_engine()`，只读 `is_initialized` 属性、**不调** `initialize_sync()`；取不到回哨兵值，`_embedding_similarity` 据此回退词面下界。合入并发会话那笔 `encodeOrNone` 口径（全零向量不是"有向量"），两处单源不保留第二份。判定阈值一个字没动——不是给等待加上限。
-    - **同一处假绿补上**：`_embedding_similarity` 原把"没拿到引擎"与"编码出空"都折进 `None`，只能靠回退方向分辨。加模块级读数 `_SEMANTIC_ENGINE_TOUCHED`（`probed` / `ready`）——**没有它，把语义闸整段摘掉换成恒真回退也能绿得很干净**。
-    - **红→绿与变异探针**：新档 `tests/unit/evolution/eval/test_semanticGateLoadsNoModel.py` 3 格。装载面用 `BaseException` 子类上锁（`semantic_similarity` 是全兜底 except，普通异常会被吞成"回退 Jaccard"，闸成哑闸——同形先例 `tests/unit/evolution/eval/conftest.py`）。**变异探针**：把 `engine.initialize_sync()` 加回判据路径 ⇒ `testSimilarityIsComputedWithoutTouchingTheModelLoader` 与 `testNoModelLoadWhenTheEngineIsReportedReady` 双双红（错误原文即"进化闸为了算一次相似度去装载/下载嵌入模型——判据在拿网络当计时器"）；还原后 3 passed。**红自证**（生产件整块回退 HEAD + 保留新档）⇒ `testTheEngineProbeActuallyRuns` 红，理由"取引擎跳没被走到"，证明这一格咬的是"语义面还在不在"而不是"结果像不像"。
-    - **顺手补上的同一处假绿**：`_embedding_similarity` 把"没拿到引擎"与"编码出空"都折进 `None`，两者只能靠回退方向分辨。故加模块级读数 `_SEMANTIC_ENGINE_TOUCHED`（`probed` / `ready`）——**没有它，把语义闸整段删掉也能绿得很干净**（两条判据都只看到"回退到 Jaccard 且分数合理"）。
-    - **顺带实测的两处同族形态（一并处置，不静默）**：① 三级取语料回退（golden→挖掘→合成）任一级抛出即整条链断，而合成器是 LLM 面、CI 不带凭据 ⇒ 失败被折成一句 `empty_dataset`，与"这个技能本来没有用例"完全同形。现每级单独兜住并**记名**（`sourceIssues`/`requestedSource` 两格读数，`evolve()` 的拒因分 `dataset_source_failed` 与 `empty_dataset`），首行过单源脱敏引擎再截断（provider 的 401 报文常把 key 原样带在消息里）。② 喂结晶闸语料工件的动作原本挂在 `build_dataset` 的公共出口，而三级各有早退分支（golden 命中即 return）⇒ 只有最后一级真喂到围栏。现收进 `_builtDataset` 单一收口，既有判据 `test_service_build_dataset_feeds_corpus` 反向钉住。两处都改在本批同一条"取语料链"上，所以并批而不是另立票。
-    - **A/B 逐条对号（不记本批账的红）**：`tests/unit/evolution`＋`tests/unit/api/test_text_evolution_api.py` 本树 **7 failed/1697 passed**，HEAD 基线 **10 failed/1694 passed**——差集恰是本批新增的 3 格（红自证那轮），交集 7 条（`test_rsi_proposal_activation` 5 条、`test_muscle_memory_recall` 1 条浮点、`test_c16_convergence_window_validation` 1 条浮点）两态同红，非本批。`tests/unit/evolution/eval` 单目录 **320 passed**（本批落地后复取）。
-    - **仍开（不冒充完成）**：① CI 是**先红后绿**的最后一道实证，本批只做到"本地活体 + 突变探针"，真绿要看下一次构建；② 本批的仓外实跑环境是 Python 3.11 + 手工最小依赖集，缺的包会让个别档 SKIP（如 `test_ci_npc_config_guard` 因缺 `yaml` 收集到 0 条并 skipped）——这类 SKIP 在 CI 里不存在，故"本地全绿"不能直接外推成"CI 全绿"；③ `_SEMANTIC_BACKEND` 与新增的 `_SEMANTIC_ENGINE_TOUCHED` 两个模块级读数的读者仍只有判据档，若将来要给面板读，需收成一处读数面（现按"判据自用"保留，不新造端点）。
-    - **口径与空号**：LOC 一律 `git diff --numstat` 现取；在册条数目取 `tests.ast_scan.protectedSubsetEntries()` 的 reader 读数（本批新档入册后 717）。本格取号一律现算：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 本笔落笔时最大＝**422** ⇒ 取 **§6-423**（419–422 已被并发会话占号，按「后来者让号」），下批从 **424** 起。
- (fix(evolution): 进化闸不再为算一次相似度装载嵌入模型（PR #367 的 CI 整条 unit-tests 被掐断的根因）)
-
-424. **门禁在断言之外自己变红——`sh` 不认 `${PIPESTATUS[0]}`，跑完全绿也判红（✅ 本批；`aa955f42`）** ✅🟢 —— 与 §6-422（内存形状、《判据把整棵树举在内存里》）、§6-423（进化闸装载模型）合成同一条腿的三次归因：那两笔管"跑到结束"，本格管"跑完了怎么判"。
-
-    - **现象**：`cnb-8qu-1k5q3m315#003`（受保护子集）尾部
-
-      ```
-      Required test coverage of 60% reached. Total coverage: 88.10%
-      === 7954 passed, 26 skipped, 3 xfailed, 5492 warnings in 2073.78s (0:34:33) ====
-      sh: 5: Bad substitution
-      Finished, code: 2, duration: 34m 45s
-      ```
-
-      **一条失败都没有**（exit 1 才是断言红），stage 却以 **exit 2** 收场。它藏在几十行 coverage 表格下面，最容易被读成"还有测试红"。
-    - **根因**：`e8329a64` 为修「日志被块缓冲吞掉」改成 `... | tee` 后按 `${PIPESTATUS[0]}` 取 pytest 退出码——而 stage 脚本由 **`sh`（dash）** 解释，那是 bash 专有数组展开。本机同形复现（`sh: Bad substitution`，行号亦对得上；`bash` 下正常）。前几轮没撞见，是因为它们都在到达这一行**之前**就死了（137 OOM / 断言红）：**红盖着红**。
-    - **修在产生侧（教义第 1 条）**：判据不许依赖某一家的 shell。把 pytest 的码**就地**写进标记文件，再从文件读回：
-
-      ```sh
-      { python -u -m pytest ... 2>&1; echo $? > "$MARK"; } | tee /tmp/pytest_protected.log
-      RC=$(cat "$MARK" 2>/dev/null || echo 1)
-      exit "$RC"
-      ```
-
-      取到的仍是 pytest 自己的码（`$?` 紧跟在 pytest 之后，`tee` 只转发）；标记缺失按 1 收，pytest 没跑起来也不许静默绿。
-    - **四形态实测（`sh`）**：真红 7→7、全绿 0→0、命令不存在 127→127、标记未落→1。
-    - **守卫两份，各咬一头**（`tests/unit/ci/test_pipelinePrepareStartsNoUnusedServices.py`）：① stage 脚本不得出现 `sh` 不认的语法（`${PIPESTATUS` / `set -o pipefail` / `[[ ` / `<<<`）；② 受保护子集不得用回数组取码、必须从标记文件读回。反向控制把标记读回改回 `${PIPESTATUS[0]}` ⇒ 两条断言当场红，恢复后 5 passed；连带 parity / 单腿 / runner 余量 / 流水线条数 **52 passed, 1 skipped**。
-    - **同一档的第三处顺带登记**：本文件同批的 `TestPrepareMustNotPayForUnusedServices` 咬的是另一半——`e2e-backend-boot` 不声明 `services` 时平台自动起的 `git-clone-yyds` 与 `network-bus` 算进 `Prepare` 的 **60s** 上限（`cnb-13d-1k5pskuuj-004`：54.9s + 1m2s ⇒ `任务超过最大执行时间而被强制关闭：1m0s`，两个 stage 全部 skipped）。显式 `services: []` 后同构建 `Prepare` 从 181s 落到 6s。两条都落在「准备与收尾不属于判据，却能把门禁判红」这同一个形状上。
-    - **口径与空号**：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 本笔落笔时最大＝**423** ⇒ 取 **§6-424**（419–423 已被并发会话占号，按「后来者让号」），下批从 **425** 起。
-
-427. **签名密钥的模块级改指缺复原——潜伏面（今天不在子集里，明天进子集就红）** ✅🟢 —— §6-425 是"这条腿怎么红"，本格是"还会怎么红一次"。
-
-    - **实测（同一树、同一本机依赖集）**：
-
-      ```
-      $ pytest test_roleGateIdentitySourceIsStrict.py memory_route_shadowing.py \
-               loginRouteContract.py test_sleep_phase_cycle.py test_api_auth.py
-      6 failed —— 全是 jwt.exceptions.InvalidSignatureError
-      ```
-
-      前四档按清单顺序排在前，`test_api_auth.py` 排在最后；后者**模块级**写
-      `auth.JWT_SECRET_KEY = TEST_SECRET` 且**从不复原**，于是同一条腿后面每一档
-      用生产口签的 token 都验不过。反过来排（把 `test_api_auth.py` 提前）全绿。
-    - **为什么 CI 今天不红**：`test_api_auth.py` **不在** `scripts/ci/protected_tests.txt` 里
-      （全仓 grep 现查 0 条）。这条泄漏是**潜伏**的：谁把它登记进子集、或谁再写一档
-      "模块级改指不复原"，那 6 条立刻在 CI 上现形。
-    - **判据**（`tests/unit/api/test_jwtSigningKeyLeakIsGuarded.py`，5 格）：受保护子集里的档
-      不得在模块体给 `auth.JWT_SECRET_KEY` 赋值而不带复原（复原的任何一种写法都算）；
-      另附反空转三形（只改不复原 ⇒ 红／改＋复原 ⇒ 放行／用例内临时改 ⇒ 放行）。
-    - **红→绿**：往 `test_roleGateIdentitySourceIsStrict.py` 的模块级加一行
-      `auth_mod.JWT_SECRET_KEY = "LEAKED_…"` ⇒ 该格当场红并点名它；删掉即 5 passed。
-    - **口径与空号**：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 现算最大均＝**426** ⇒ 取 **§6-427**（并发会话已取 421–426），下批从 **428** 起。
-428. **记忆页"看得见却点不动"根修：归属判定收成单源谓词，列表面逐条披露 owned（✅ `e74a865f` 生产净 +30；`a4c2406d` 生产净 +80；入册 `db3f9004` 722→723）** ✅🟢 —— 起点是用户贴的一行控制台读数：`GET /api/v1/memory/merged_mem_000010_2 → 404`。盘上这一行在（`data/default/memory/neurova_memories_persist.db`，归属三元组 `('default','ne-alice','alice')`），**根因不是记录丢了，是同一页两套口径**：列表腿传 `agent_wide=True` 把三层隔离第 2、3 层显式关掉，详情/改/删传 `agent_wide=False` 对他人用户域"视同不存在"（P1-6 既有口径）。表格于是照常摆出「打开/编辑/遗忘/删除」，而 `viewMemory` 把 404 catch 掉回落列表行——弹窗看着正常、只留一条 ERROR，同页的编辑/删除却没有兜底，是真失败。
-
-    - **改号说明（合并 `origin/main` 时补记，本批三段映射的唯一出处）**：本批的提交（`e74a865f`／`a4c2406d`／`db3f9004`／`776ccba5`／`275ab571`／`a25c1a21`／`9697d7cb`／`04e5fd31`／`4fec85ab`／`ed7c83d8`／`db0b9e65`／`22c66f06`／`cd815473`）在本地按**当时现算的空号**登为 §6-425／426／427；合并时发现远端已把这三个号用于**别的批次**（425 可选依赖的墙钟成本、426 退役台账两条署名、427 签名密钥的模块级改指）。提交历史不可改写，故台账内三条整体让号为 **§6-428／429／430**，三条内部对 `§6-42x` 的引用一并跟随。**后来者 grep 到提交正文里的 425/426/427 时以本条为映射准**；各笔正文里的 reader 读数（723／724／725）是当时的真值，不改写；合并后清单取并集，条目 reader 现算 **731**。\n    - **现场复算把缺陷量成两条，不是一条**：(a) 作用域那条与租户无关——`getMemories(agentId,…)` 带 `agent_id`，而按 id 寻址的 `getMemory`/`updateMemory`/`deleteMemory` 都不带（`memory.ts` 整个模块只有它们不带），后端 `get_memory_manager` 缺参即回落默认 Agent ⇒ 选中非默认 Agent 时该行**必**打错 manager。活体实证 `GET /memory/mem_000001` 404、`GET /memory/mem_000001?agent_id=kai` 200。(b) 租户那条与 `agent_id` 无关（那行本就在默认 Agent 上），是谁都能撞上的一条。用户在三态票（甲只修 a／乙把列表也收窄＝跨用户记忆视图消失／丙披露归属）里点**丙**。
-
-    - **处置是"收口"不是"新增"**：归属比较此前手抄**六处**（`_scoped_memories`/`_agent_memories`/`_semantic_recall` 入口过滤/`get_memory`/`update_memory`/`forget`），收成 `MemoryManager.isOwnedByRequestScope()` 一处（`manager.py:1324`，接受 `Memory` 对象与 `to_dict()` 字典两形——recall 交出来的是字典，判的是同一件事），投影与闸门同调它 ⇒ 页面显示的"能不能动"与服务端"让不让动"不可能再分家。HTTP 侧再加一个列表投影单点 `memories_to_dicts()`（`base.py:192`），四条列表腿（`/memory`、`/hot`、`/crystallized`、`/emotion/{type}`）共用，漏一条就是那一页又回到"看得见点不动"。**披露形态是布尔不是三元组**：`neuser_id`/`user_id` 不上线上，否则等于给"按 id 探他人记录"重开入口——判据里专门钉了这条反向格。
-
-    - **判据**：后端 9 格（4 行为：他人行 owned=false／自己行 true 同调用内反向控制／hot+crystallized 两腿同源／详情面对他人仍 404；3 结构：六处手抄清单 AST 取 `Compare` 形、六个闸门都调单源、端点裸调 `memory_to_dict` 即红＋列表腿必须走单点；2 反向控制：不泄漏归属身份、归属者详情不被打断）。前端 13 格（api 三函数把 `agent_id` 发出去＋不虚构作用域＋列表腿本来就带；`rowIsActionable` 真值表含"缺字段默认可动作"；页面两格行为＝他人行四个动作一个请求都不发、自己行按 id 那一路带上 `record.agent_id`；两格形状＝四处 `:disabled` 计数与 i18n 键存在）。红→绿：后端首跑 **7 failed, 2 passed**（全 AssertionError，无 collection error）→ 9 passed；前端首跑 **11 failed, 2 passed**（8 条 AssertionError＋3 条新符号 `rowIsActionable` 的 TypeError，**分列不混数**）→ 13 passed。
-
-    - **红自证两侧各自只 stash 生产文件**：后端 stash 4 个 py → 13 failed＝本笔 7 条新判据＋6 条因 `owned` 变必填而改写的既有用例（`memory_to_dict` 旧签名不收该 kwarg，属改动面配对，不是噪声，正文逐条写明）；前端 stash 13 个文件（memory.ts + MemoryPage.vue + 11 locale）→ 恰 11 failed 与首轮逐条同号，两条反向控制与既有 `MemoryPage.origin`/`search` 两档全绿。
-
-    - **活体（真 `create_app` + 真 lifespan + 生产 `create_access_token` + `_liveVerifyIsolation.isolatedDataRoot()` 单点）**读数：`bob_sees_row_owned=false`／`alice_sees_row_owned=true`；`detail_bob=404`、`detail_alice=200`；`put_bob=404`、`put_alice=200`；`owner_identity_on_wire=[]`；**`?agent_id=default` 200 而 `?agent_id=<不存在>` 404**（这条是 agent_id 那半的反证：若生产把参数当摆设， bogus 也照样 200）；`rows_carrying_owned=1/1`；探针行未落进仓内真库（判据按探针独有词面查库，不取文件清单——8100 上的现役服务会并发写自己的行）。**变异反证**：把 `owned=manager.isOwnedByRequestScope(m)` 单独退回 `owned=True` → 同一支探针只红在"他人行应 false"这一格，`cp` 还原后 md5 与 numstat 复证一致。
-
-    - **A/B（`ab_compare.sh -k HEAD`，基线＝仓外 HEAD worktree＋铺本批判据）**：`AB_PASS`，仅本树红 0 条，合跑本树 **1247 passed**。两侧同红 2 条（`test_memory_storage_fence::test_productionMemoryDirIsTheRepoWorkspacesRoot`／`test_moe_background_index::test_state_dir_defaults_to_repo_data_when_env_unset`）单跑复现＝预存；基线另有 1 条 ERROR（`test_decay_cycle_bounded::test_no_max_processes_all`，本树同选择集不出现、单跑 10 passed）＝**顺序偶发，不下结论**。其余门：相关回归 54 passed／增强族归属守卫 13 passed／在册四道闸 129 passed／常驻守卫与棘轮 42 passed＋78 passed／全量 vitest **2219 passed**／`vue-tsc --noEmit` exit 0／i18n 四道 52 passed。
-
-    - **仍开（不冒充完成）**：① **`/memory-enhancement` 一族 6 条端点**（`/{id}/forget`、`/{id}/strengthen`、`/batch`、`/export`、`/import`、`/categories`）按 id 寻址**不带 `agent_id`**，`_require_memory_manager(user)`（`memory_enhancement.py:99`）只供默认 Agent ⇒ 非默认 Agent 页面上的 ↑↓ 实际打到默认 Agent 那一份库上。本批只按 `owned` 闸住入口、没替它造作用域参数（造了就是端点收一个无人解析的查询参数＝新断点）。② 现网 8100 服务需重启才跑新代码，真浏览器的禁用态与实际 200 由本批收尾的复算补上；Harmony/Tauri 侧未验。③ `rowIsActionable` 对"后端没给 owned"按可动作处理——语义搜索卡片那一路没走这条投影（该卡片本就没有动作按钮），若将来给它加按钮，得先接披露再接动作。④ 前端两档新判据不入 `protected_tests.txt`（该清单是 pytest 子集，全仓仅一处 `NeurUI` 字样且在注释里），由 vitest 全量与 vue-tsc 两道门承担。⑤ §9.1 表本批未追加（沿 §6-302 起各笔口径）。
-
-    - **口径与空号**：生产池净 **+110**（后端 75/45＝+30；前端 104/24＝+80——去向逐条已写进两笔提交正文）；测试池＋判据 517 行（后端 253／前端 103＋144）＋基建适配 17/−8；入册笔 `db3f9004` 基建 +2/−0。在册条目 reader 现算 **723**。下一枚空号两条一起跑：本条原号 425（改号前的本地现算值）⇒ 让号为 428，映射唯一出处见本条首段「改号说明」。
-    - **真浏览器复算（本批收尾补上，闭合上面仍开②）**：走用户自己那条链（vite `:8100` 代理 → 真后端 `:9527`，登录态是页面里已有的 kingsa/Admin，`sub='1'`，未索取任何凭据）。读数：`GET /memory?limit=100&agent_id=default` 22 行**全带 owned**，其中 `owned=true` 恰 1 行（`mem_000013`，盘上作用域正是 `('default','1','1')`），false 21 行；表格 15 行全部渲染「他人作用域」Tag，且四个按钮在可访问性树里是**真 disabled**（不是测试桩，本批判据档自陈过这条形态限制）；控制台从列表加载起**再没有出现 memory 详情请求**——原缺陷形态 `GET /api/v1/memory/merged_mem_000010_2 → 404` 不再出现，因为根本不发那一枪；前端现在构造的那条 URL（`GET /memory/mem_000013?agent_id=default`）在真会话上 200 且 `owned=true`。
-    - **复算量出一个不在票面上的产品事实（需人裁，本批不裁）**：这条链对**该账号**的实际形态是——agent `default` 的 22 行里只有 1 行动得了。这不是本批引入的回归（改前那 21 行点了必 404，页面只是"看起来能点"），而是将既有事实显形。若产品要管理员能跨用户操作记忆，正确落点是 `crud.py:375-377` 那段注释早已预留的**带 role 门的 agent-wide 显式端点**，而不是把三层隔离改宽（那正是 §6 禁的平行口径回退）。属另一张票。
-
-429. **记忆管理通道落地：带 role 门的 agent-wide 显式端点，读改删各收成一份实现（✅ `a25c1a21` 生产净 +107；`9697d7cb` 生产净 +22；入册 `04e5fd31` 723→724）** ✅🟢 —— §6-428 收尾时量出一条不在票面上的事实：管理员在 agent `default` 的 22 行记忆里只有 1 行动得了（`owned=true` 那行是他的 `('default','1','1')`）。用户裁定「改：正当落点是 `crud.py` 注释里预留的带 role 门的 agent-wide 显式端点」，本批就是那张裁定落地。
-
-    - **通道形状（两处刻意不对称）**：新增 `GET/PUT/DELETE /memory/management/{memory_id}`，各挂现成的 `deps.require_admin()`（全仓 21 个文件在用的角色门工厂，不新造特权词汇）；**常规三条一个字没放宽**——管理员走 `GET /{memory_id}` 照样 404。这条反钉是护栏：「把默认口径改成 agent_wide」与「把门挂到整个 router 上」都看着更省，而那正是 P1-6 关掉的那扇门。`/management/{memory_id}` 是两段路径，不会被本文件那条"字面路由必须在参数路由之前注册的"旧坑吞掉，注释已随之更新。
-    - **读改删各只一份实现**（`_readEntry`/`_updateEntry`/`_forgetEntry`），两条通道只差 `agentWide` 一个参数。判据按「`manager.get_memory(`／`update_memory(`／`forget(` 在 crud.py 里各只出现一次」咬住——**本批第一版就是被这条自己写的判据抓回的**：两个 PUT handler 各写了一份 `update_memory` 调用（`{'update_memory': 2}`），当场红。另如实改窄一处语义：PUT 的读回此前可以是 `data: null`（改成功但拿不到结果），现在读不到就是 404——那个半态对前端没有意义。删除仍是 `forget(soft=True)` 的软遗忘（行按 id 读得到，`lifecycle_stage → forgotten`），既有端点语义本批没动，所以判据量的是"那一行真进入了 forgotten"而不是"读不到了"。
-    - **披露与门同源**：`owned` 的口径改成随**请求方可用的通道**判（`base.agentWidePrivilege(user)`，与 `require_role("admin")` 内部那条 `user_role != required_role and user_role != "admin"` 逐字同规则）。管理员经管理通道动得了他人行，就给他 `true`，否则页面白禁一片。一格端到端反钉同一个人「列表里看见能动」与「真打得通」是同一批行。
-    - **前端**（`9697d7cb`）：路径只在 `memoryPath()` 一处构造，`MemoryPage` 三处按 `isAdmin` 供出通道；**不给"先试常规、403 了再试管理"的回退**——那等于把特权面当探针用。不接这条，后端那条通道就是全仓零消费者的端点（AGENTS §2 断点）。
-    - **改既有在册判据的前提（不是放弱闸）**：`test_memory_route_authorization.py::test_everyTenantScopedRouteResolvesUserThroughTheDependency` 原先只认 `get_current_user_or_default` 一个入口，于是把"取身份更严格"的管理通道（走 `require_admin()` → 严格门 `get_current_user`）判成没鉴权。处置是把口径换成运行时现枚举的全部身份入口（`tests/auth_headers._identityEntryPoints`，仓内单点，入口再加一条自动跟上），**并另加一格**要求管理通道必须取严格门那份——否则可回退 `?access_token=` 的宽松策略就能顶替它。同档另修一处桩签名（`_Mgr.get_memory` 不收 `agent_wide` ⇒ 端点统一传参后被自己撞红）。
-    - **判据与读数**：后端新档 13 格，首跑 **10 failed, 3 passed**（全 AssertionError；3 passed 是今天就该绿的反向控制：老门未放宽两格＋常规路没挂角色门一格）→ 13 passed，落库后单跑两次同读数。前端 5＋2 格，首跑 6 failed | 4 passed → 合跑 19 passed。红自证两侧各自 stash：后端只 stash 3 个生产 py＋2 档配对既有测试 → 10 failed 全落在新判据档，其余 29 passed 逐条同号（含 §6-428 那档 9 格全绿，证上一批没被打退）；前端只 stash 2 个生产文件 → 恰 6 failed 与首轮同号。
-    - **门读数**：宽域 A/B（选择集含 `tests/test_api` 路由形状族与 `tests/unit/memory`）`AB_PASS`，仅本树红 0 条，本树 **1378 passed**／基线 1367；两侧同红 2 条是 §6-428 已定责的预存（storage fence／moe state dir，单跑复现），基线那条 `test_decay_cycle_bounded` ERROR 单跑 10 passed ⇒ 顺序偶发，**不下结论**。路由面另单跑 `tests/test_api` = 123 passed, 1 xfailed（三条新路由没撞任何端点计数棘轮）。在册四道治理闸 129 passed；常驻守卫与棘轮 78 passed 1 skipped；全量 vitest 2225 passed；`vue-tsc --noEmit` exit 0。
-    - **活体与摘门反证**：真 `create_app` + 真 lifespan + 生产签 token + `isolatedDataRoot()` 单点。读数：匿名 **401**／非管理员 **403**（不是 404——特权面存在但不给你，不许伪装成"没这东西"）／admin **200** 且内容＝属主那条且 `owned=true`／admin 走常规路 **404**／`owned` admin=true·plain=false·属主=true，高温腿同源／admin 经管理通道改后**属主走常规路读回新内容**／admin 删后属主读回 `forgotten`／探针行未落进仓内真库。反证：把管理 GET 的门从 `require_admin()` 降级成 `get_current_user_or_default` → 同一支探针只红在第 2（匿名 200）与第 3（非管理员 200）两格，其余 6 格照旧绿——正是这道门该管的范围；`cp` 还原后 md5 复证一致。
-    - **⚠ 落笔留案（form 17 同族，正文已入库不改写）**：入册笔 `04e5fd31` 的主题行写成"722→723"（抄了上一批那笔的号段），真值是 **723→724**（reader 现算 724，正文里写的就是真值）。已入库不改写，正确值落在本格。已入库不改写，正确值落在本格。同批 `4fec85ab`（本文件的 426 条目笔）正文写「文档池 +18/−0」，真值 **+14/−0**（`git show --numstat`）——同一根因第二遭，都是**先落字再去数**：正确顺序是先跑 numstat、再抄进正文。
-    - **仍开（不冒充完成）**：① §6-428 仍开① **未闭**——`/memory-enhancement` 一族 6 条端点（↑强化 ↓遗忘 /batch /export /import /categories）按 id 寻址仍不带 `agent_id`，`_require_memory_manager(user)` 只供默认 Agent ⇒ 非默认 Agent 页面上的 ↑↓ 仍打到默认 Agent 那份库。本批把读改删三条腿的通道打通了，增强族那两条腿是同一根因的另一族，没顺手改。② **新登记一条更硬的面（需人裁）**：列表面 `agent_wide=True` 今天**没有 role 门**——本会话开头实测无凭证 `GET /api/v1/memory?limit=100&agent_id=default` 直接返回 22 行，含他人用户域行的**正文**（`merged_mem_000010_2` 等）。也就是说跨用户记忆正文对匿名可读，P1-6 当年只堵了按 id 的详情口。给列表面也上 role 门是行为**收窄**（普通用户与匿名将看不见他人行），影响可见性产品语义与既有判据前提，故不自决，摆出来待人裁。③ Harmony／Tauri 侧未验管理通道。④ §9.1 表本批未追加（沿 §6-302 起各笔口径）。
-    - **口径与空号**：生产池净 **+129**（后端 +107：base 23/5、crud 163/77、emotion 4/1；前端 +22：memory.ts 26/6、MemoryPage.vue 4/2）。后端那 +107 的落点实测：三个 `*Entry` 内部口 57 行、三条管理路由 48 行、三条常规路由改薄后 52 行（抵掉旧体 −77）、`base.py` 两个投影口 24 行，其中注释与空行 66 行。测试池：新判据 261＋77 行，既有档 41/2 与 22/3、桩 3/3。在册 reader 现算 **724**。下一枚空号两条一起跑：本条原号 426 ⇒ 让号为 429（映射唯一出处在 428 首段）。
-
-430. **记忆面对匿名关死＋默认监听收成回环（✅ `db0b9e65` 生产净 +21；入册 `22c66f06` 724→725）** ✅🟢 —— §6-429 仍开②那条"更硬的面"落地（用户点单甲＋丙）。根因是两条叠加：列表腿传 `agent_wide=True`（基集只比 `agent_id`，第 2、3 层不参与过滤）× 身份依赖用可回退那份 `get_current_user_or_default`（无凭证回落 `default`）⇒ **回落身份在这条路上等于没有身份**，政策承诺的"匿名读只见 default 桶"一个字节都没被执行过。
-
-    - **改前的实测敞开程度**（不是推断）：无凭证 `GET /api/v1/memory?agent_id=default` 与 `/hot` 各 24 行正文（含 `('default','ne-alice','alice')` 那 9 行他人作用域），`/memory/markdown` 匿名导出 12285 字本机内容；现算 31 条 GET 里 **23 条**取租户数据的腿对匿名敞开。叠加 `start_server.py:70` 默认 `0.0.0.0`，从本机局域网地址 `192.168.1.5:9527` 直接 200 出正文 ⇒ 同网段任一设备一次 GET 读走全部会话转写。
-    - **甲 落点选在路由级那道门**，不是逐条换 29 个 handler 的依赖：门挂一次覆盖全门面，而"下一条新路由忘了改"正是本缺陷的成因形态。门随之改名 `requireIdentityForWrites` → `requireIdentityForMemoryFace`（留着旧名等于把下一个读侧缺口藏进"只管写"三个字里），`_READ_ONLY_METHODS` 失去读者一并删；凭证→身份仍复用同一份 `_identityFromCredentialsOr401`，不在门里自解 token。
-    - **丙 的关键是"两处必须不同键"**：宿主发布地址收成 `127.0.0.1:9527:9527`，容器内仍必须 `NEUROVA_HOST=0.0.0.0`——一起收窄看着更严，实际会把 docker 的端口代理关死，健康检查与宿主映射同时失效。`app.py` 三处启动默认（`create_app`／`run_server`／`--host`）同步收成回环，`start.py` 只传 `NEUROVA_PORT` 故新默认在真生产路上。移动配对不受影响：中继设计明写"服务端从不监听公网入口"（`neurova/relay/__init__.py`）。
-    - **改既有在册判据的前提两处（form 425 那条路，改前提不是放弱闸）**：① `test_memoryWriteIdentityGate.py::testAnonymousReadStillSeesOnlyDefaultBucket` 钉的正是被本批撤销的"匿名可读"政策 ⇒ 改判 401，并如实记它那半句"只读到 default 桶"读的是 `row.get("user_id") or row.get("neuser_id")`——§6-428 之后投影里没有这两个键，`owner` 恒 None，**该断言早已恒真**，改判后整格删掉不再留一条不咬人的断言；② A/B 首轮报 `AB_REGRESSION` 抓到真回归：`test_causalReasoningWired.py` 靠 `dependency_overrides` 顶身份而请求匿名，而路由级门判的是"有没有凭证"（这格坑本仓记在 `tests/auth_headers.py` 开头）⇒ 按先例改签生产 `create_access_token()` 产出的真 JWT，不在生产侧加兜底。另把 `test_memory_route_shadowing.py` 两处 client 挂真 JWT（它测路由匹配，匿名不是被测面）。
-    - **判据与读数**：新档 10 格（匿名列表／现算全部租户数据 GET 腿逐条／markdown 导出／静态枚举端点跟着门面**刻意不豁免**／门的名字不再只管写／身份入口仍是清单那两份／丙 的三处配置形状）。首跑 5 failed, 3 passed（失败全为 AssertionError，3 passed 是今天就该绿的反向控制）→ 补丙三格后 10 passed，落库后单跑两次同读数。红自证只 stash 5 生产文件＋4 档配对既有测试 → 5 failed 全在新判据档，其余 52 passed 逐条与基线同号。变异反证：`app.py` 三处默认退回 `0.0.0.0` ＋ compose 容器内一起收成回环 → 恰红 `test_appLaunchPointsAgree` 与 `test_composePinsHostSideButKeepsContainerOpen` 两格（钉配置形状的判据先证它会红，否则是恒绿装饰）；还原后 numstat 复证。
-    - **A/B 与活体**：A/B 首轮 `AB_REGRESSION`（抓到上面那条 traverse 回归），修后复跑 `AB_PASS`，仅本树红 0 条，本树 1353 passed／基线 1348；两侧同红 2 条为已定责预存，基线 `test_decay_cycle_bounded` 那条 ERROR 单跑 10 passed ⇒ 顺序偶发不下结论。脚本另提示基线侧汇总报 8 条而抽取到 12 条——差集按抽取到的集合判读（form 400 同族：短汇总条数不能当红的全集）。活体走真 uvicorn 真端口（非 TestClient）：匿名 401 且无泄露／带生产签 token 200 且仍 24 行（收紧只针对匿名）／`/health` 200／现算 30 条 GET 腿逐条匿名打 `E_still_open=[]`／局域网地址从可连变 `ConnectionRefusedError`／`netstat` 复证监听由 `0.0.0.0:9527` 变 `127.0.0.1:9527`。服务经 `start.py --restart --backend --yes` 上线。在册四道闸＋跟踪与常驻守卫合跑 171 passed；前端本批无改动，memory 相关 27 档 330 passed。
-    - **仍开（不冒充完成）**：① **本批关的是"匿名"，不是"跨用户"**：已登录的普通用户经列表腿仍按 agent 全量口径读得到他人用户域正文——那正是乙案（可见性收进权限源、普通用户只看自己作用域）的目标，用户未裁，故未动。② **未登录 UI 的体面状态需裁**：前端只有 1 条路由设了 `meta.requiresAuth`，而仪表盘与记忆页都调这四条腿；`NeurUI/src/api/index.ts:155-160` 在拿不到 refresh token 时会清库并整页跳登录 ⇒ 收紧后未登录打开这些页会被弹到登录页。本批如实报告没自改前端。③ §6-429 仍开① 不变：增强族 6 条端点仍不带 `agent_id`。④ Harmony/Tauri 侧未验。
-    - **口径与空号**：生产池净 **+21**（`auth.py` 34/20 门本体改名与政策依据、`memory/base.py` 8/5 装配点、`app.py` 3/3、`start_server.py` 4/1、`docker-compose.yml` 4/1）。测试池：新判据 236 行，配对既有档 35/18。入册 `22c66f06` 基建 +2/−0，reader 现算 **725**。下一枚空号两条一起跑：本条原号 427 ⇒ 让号为 430。合并后重取空号两条一起跑：条目行现算最大 **430**、引用面最大 430 ⇒ 下批从 **§6-431** 起；合并后在册条目 reader 现算 **731**（两侧并集）。
-    - **代提交记录（2026-10-26，用户指令「还有未提交的部分，核验一下，一并提交推送」）**：
-      工作树里另有两个会话的在途改动放了很久未入库，本次代为核验后提交——**实现归属不在本批**，
-      本格只记"核验到哪一步"：
-      ① `ad4e56f8` N6 常驻面预算报告（`neurova/context/budget_report.py` 新档 90 行、
-      `context.py` +17/−0、`orchestrator.py` +42/−14，两档自带判据 91 与 60 行）；
-      ② `b8f77c1e` installer 版本文件写入修正（`build.cmd` +1/−1：
-      `> file echo|set /p=` 会把 `echo` 命令自己的输出重定向进文件且总带换行，
-      改成 `<nul set /p=` 才是原样写入；产物侧证据是 `bin/version.txt` 现为
-      `1.0.0-beta5`、无尾随换行）。
-      做到过的核验：跑它自带的两档判据（全绿）＋ `tests/unit/context` 整目录
-      （1007 passed，2 条红）；把这两个生产文件 stash 掉再跑同一目录，
-      `test_phase3_wiring.py::TestLazyWiring` 那 2 条红**照旧**⇒ 预存红，不归它们；
-      新模块体检（`_reports` 每 agent 一份且后写覆盖先写 ⇒ 不无界增长；读写都在
-      `threading.RLock` 内；`resetContextBudget()` 有两档判据的夹具在用；
-      `recordContextBudget` 的调用点在 orchestrator 构建 system_instructions 那条真路上）。
-      没做的也写明：这两批**没走过** §6 的红→绿→红自证→A/B→活体流水线、未入受保护子集；
-      `build.cmd` 未跑完整 WPF 构建（只核语义＋读已生成的产物）。
-    - **两条留给归属方或用户处置（不代决定）**：
-      ① `GET /api/v1/context/budget` 目前**全仓零消费者**——`NeurUI/src` 里 grep `budget`
-      只命中 cost/settings 两个别的域。按 AGENTS §2「写出无人读的字段/注册无消费者的模块
-      属断点」，要么接上仪表盘或成本页，要么把"只读取证面"的用途写进文档。
-      ② 工作树里另有**桌面运行时数据的删除**未入库（`agent_workspaces/default/agent_config.json`
-      15 行、`agent_workspaces/kai/memory/muscle_memory/muscle_l1..l3.json` 各 1 行）：
-      在 git 里记录它们的销毁是另一个决定，本次**故意排除**在两笔提交之外，连同构建产物
-      `bin/version.txt` 与跑测落点 `test_workspace/` 一起留在工作树，并由本次的
-      路径限定 stash（`keep-runtime-deletes-during-rebase`）变基后原样还原。
-    - **数字勘误两则（form 17 同族，本批第十遭；根因都是"先落字再去数"）**：
-      `ad4e56f8` 正文写"生产池 +59/−14"与"新档 91 行"，`git show --numstat` 真值是
-      **生产池 +149/−14**（17＋90＋42 / 14）与该档 **90** 行；`b8f77c1e` 正文那句
-      "现为 `1.0.0-beta1`…实际读到的 `1.0.0-beta5`"是落笔顺序颠倒，真值只有一个：
-      `1.0.0-beta5`、无尾随换行。提交均已入库不改写，正确值落在本格。
-
-431. **记忆页登录前不再伪装成「暂无数据」：身份态与空态分格 + 401 跳登录保住深链（✅ `ff440629` 生产净 +127）** ✅🟢 —— 闭 §6-430 仍开②（用户点单「修一下记忆页登录前的空态」）。
-    - **先改判 §6-430② 的前提读数**：那条写"前端只有 1 条路由设了 `meta.requiresAuth`"，实测不成立——它挂在父记录 `/`（`MainLayout`）上，而 vue-router 4 的 `to.meta` 按匹配记录**合并**，于是 Layout 下**每一条**子路由都被这条守卫罩着（活体实证：未登录访问子路由直接弹到登录页）。真缺口不在守卫覆盖面，在下面三条。
-    - **根因三处（逐条实测，不沿用旧描述）**：① `App.vue` 的 `onMounted` 无条件 `agentStore.loadAgents()`——那是身份请求，未登录访客在**每一个**页面都先吃一发 401（真浏览器独立 profile 读数：logged-out 落地前只有 `401 /api/v1/agents` 与一次跳转，控制台红与跳转都不是记忆页造成的）；② 401 拦截器把跳转写死成裸 `/login`，把守卫已经生成的 `?redirect=` 整条覆盖掉；且全仓登录成功后**没人再拉过 agents**（`LoginPage`/`stores/auth` 里查不到 `loadAgents`）——"只在 boot 拉一次"对未登录访客是必然 401、对先登录后用是空侧栏，一条改动同时闭两形；③ 记忆页 13 处同形 `message.error(e?.response?.data?.message || e?.message || t('common.error'))` 把 401 弹成英文原文红 toast，页面同时渲染 `common.noData`——本仓 `MobilePairingPanel.vue`「权限态与空态不合并」注释与 `AgentChannelPage.vue` 的 accessDenied 独立一格早已禁这一形，§6-429 把记忆面收成一律要凭证时漏扫了记忆页。
-    - **收成两份单源**：`NeurUI/src/utils/authIdentity.ts::identityFailureOf(status)`（401＝未登录、403＝不够格，两态不合并；5xx／404／无码一律不算——不许借这道口吞真故障）与 `NeurUI/src/utils/authRedirect.ts::loginHref()/safeRedirectTarget()`（登录位置只此一处构造；深链只认站内路径，`//evil.com`、`/\evil.com`、协议形、`/login` 自身一律拒）。消费者全部改指单源：路由守卫、401 拦截器、登录页落地、记忆页、以及 `MobilePairingPanel` 那句 `code === 401 || code === 403` 成对手抄（输出文案守恒，只收形状）。常驻判据按 `import.meta.glob` 全 `src` 扫，钉"成对手抄只剩单源一处"，并带正检（单源那份确实两个码都判，否则"零命中"是大家都没判）。
-    - **红绿灯**：四档新判据 23 格。红（生产改动落地前）`Test Files 4 failed (4)`／`Tests 10 failed | 6 passed (16)`，另有 `authIdentityAndRedirectSingleSource.test.ts` 是**新单元 import 红**（`Failed to resolve import "@/utils/authIdentity"`），按教义第 3 条与行为红分开计；6 条反向格当天该绿（已在 `/login` 不再跳／500 照旧红 toast／immediate 门／匿名 200 的 `loadWorkflowAgents` 留门外／既有 `fetchCurrentUser` 门未被摘／agents 唯一调用点）。绿：`Test Files 276 passed | 2 skipped (278)` ＋ `vue-tsc --noEmit` exit 0，落库后复取同读数。红自证 pathset＝17 个已跟踪生产路径，两份新单源先移出扫描面（不卷并发会话的未跟踪件），复跑失败集恰等于本批新判据、多一条都没有；`git stash apply` 后只 `drop` 自己那条 tag（工作树里另一条 `redselfproof-failedturn-422` 属并发会话，未动）。
-    - **活体（系统 Chrome + Playwright 独立临时 profile，不动用户浏览器登录态）**：A 未登录开记忆页 → 落地 `/login?redirect=/agent/default/memory` 且 `/api/v1/agents` **一次都没发**（只剩匿名 200 的 `/api/v1/neurflow/agents`）；B 坏 token → `?redirect=%2Fagent%2Fdefault%2Fmemory`；C 有效 token＋记忆端点打 403 → 页面停在记忆页，`[data-testid=memory-identity-notice]` 渲染「当前账号无权访问这个 Agent 的记忆库」，`a-empty[description="暂无数据"]` 不存在；D 有效 token → 15 行真数据、无身份格、无「暂无数据」（空态仍在真空数据时如实出现）。反证两发各自只退一处：`if (authed)`→`if (true)` 让 A 复现 3 发 `401 /api/v1/agents`；`loginHref(…)`→裸 `'/login'` 让 B 丢深链；各自 `cp` 还原 + `md5sum -c` 复证。
-    - **本批自己抓到的两处"路径不存在"（形态 439 同族：判据夹具自造值）**：`/memory` 不是路由——真路径是 `/agent/:agentId/memory`，`/memory` 被 `pathMatch(.*)*` catch-all 兜到 `/dashboard`。上一轮活体与本轮第一次活体量的都是 Dashboard，判据夹具里也一度用了这个假路径，已全部换成真路由。**修法记账**：写深链／跳转类判据前先 `grep "path: '" NeurUI/src/router/index.ts` 验路径存在。
-    - **生成物联动（本批自引入的红，不是预存）**：两份新单源让 `docs/05-reports/同名函数盘点台账_2026-09-25.md` 的扫描面 336→338，常驻守卫 `NeurUI/src/tests/duplicate-function-inventory.guard.test.ts` 两格当场红；按判据自己给的命令重跑 `node scripts-qa/duplicate-function-audit.mjs --write-ledger <台账>` 回写即消（台账是生成物，不是手抄件）。
-    - **宽域 A/B 不适用并写明理由**：本批未碰任何 `.py`（改动面只有 `NeurUI/**` 与上面那份生成台账），`scripts/ab_compare.sh` 的 pytest 选择集无可比对象；验收面因此是 AGENTS.md §4 的两道前端实跑门。**入册不适用**：`scripts/ci/protected_tests.txt` 只收 pytest 文件（全清单里 `NeurUI` 一词仅出现在注释中），本批未动该清单——它现算 **731** 条有效条目（口径＝非注释、非空行；§6-430 记的 725 是并回 `ddc75b2f` 前的读数，远端 98 笔把清单抬高了，别再引旧值）。
-    - **净 LOC**：生产池 +148/−21＝净 **+127**，去向逐条见提交正文（两份单源 +49、记忆页 +57/−13 其中 13/13 是等量替换、11 份语言包各 +2、`App.vue` +4/−1、`api/index.ts` +6/−3、`router/index.ts` +3/−1、`LoginPage.vue` +4/−2、`MobilePairingPanel.vue` +3/−1）；测试池 +452/−0（四档新判据，按 §4 不计入生产净增）；生成台账 +2/−2。`git show --numstat` 合计 602 insertions／23 deletions，与分池相加一致。
-    - **仍开（不当自决）**：① `ChannelIdentityPanel.failureText` 只判 403，401 落进通用 `identityFailed` 文案——改它等于改那个面板"未登录说什么"的产品语义，不自决。② `TOKEN_KEY`/`REFRESH_TOKEN_KEY` 字面量在 4 个文件各写一份（值相同、暂无行为分歧，属同族手抄）。③ 未登录时记忆页仍由守卫弹登录，身份那一格真实服务的是"中途掉线"与"403 无权"两形；是否让未登录用户看见页面骨架（即放宽 `requiresAuth`）属产品裁决。④ Harmony/Tauri 侧未验（这两侧不走 vue-router 守卫）。
-    - 空号至 **§6-431**，下批从 **§6-432** 起。
-
-432. **会话存储键 12 处手抄收成一处，并退役一把没人写过的键（✅ `deea2a29` 生产净 +16）** ✅🟢 —— 承 §6-431 仍开②，用户点单「下一批」按建议续段。
-    - **先改判 §6-431② 自己的读数**：那条写「`TOKEN_KEY`/`REFRESH_TOKEN_KEY` 字面量在 4 个文件各写一份」，是我只 `grep 'TOKEN_KEY ='` 得出的**读小了的数**。现算命中面 **12 处**：4 份 const 定义（`api/index.ts:8`／`api/modules/collaboration.ts:7`／`api/modules/notifications.ts:5`／`stores/auth.ts:7`）＋ 8 处裸 `secureStorage.get('auth_token')`（`useSessionSync` 1、`ChatPage` 5、`audioUrl` 1、`genFiles` 1），另有 `api/index.ts:162` 一处裸 `remove('user')`。⇒ 教训：**判"手抄几份"要把「定义形态」与「使用形态」两条 grep 一起跑**，只数定义会把 12 读成 4。
-    - **为什么不是"只是难看"**：写侧只有一处、读侧散在八处。键名一旦在某一份里分家，那几处就安静地发**空头**——正是 §6-429 之后记忆面必 401 的那几条腿。
-    - **两条不在票面上的真发现**：① `pages/AgentSkillPage.vue:1134` 绕过 `secureStorage` 直摸 `localStorage`，且第一个兜底读 `'auth_user'`——**全仓没有任何地方写过这把键**（`grep -rn auth_user` 本仓只命中这一行，其余全在 `.venv` 第三方包内）⇒ 属主实装与既有判据都不认得它，是纯粹的悬空读法；按教义第 7 条与 `useAuthStore` 那份比后合（store 那份已解析、随 logout 失效），弱的一份退役。② `ChatPage` 三处 `Bearer ${token}` 的 token 可能为 null ⇒ 未登录时发字面 `Bearer null`；同一件事的第三种写法，读取口 `readAccessToken()` 无凭证给空串，把 8 处里 `\|\| ''` 与裸取两种形态收成一种。
-    - **属主落点选择记一条环境约束**：新增 `NeurUI/src/utils/authSession.ts`，**刻意不并进 `utils/security.ts`**——现仓有 **10 档**测试 `vi.mock('@/utils/security')` 只供 `secureStorage` 一个出口，把键常量塞进那份会被 mock 成 `undefined`（桩面撞红，与 §6-426「桩签名会被统一传参撞红」同族）。
-    - **红绿灯**：三档新判据 13 格。红 `Test Files 2 failed | 1 passed (3)`／`Tests 5 failed | 5 passed (10)`，5 条红是形状与正检四格＋改接格（offender 清单当场列出那 12 处、旁路格点名 AgentSkillPage）；`authSessionOwnerContract.test.ts` 是**新单元 import 绿前红**（`Failed to resolve import "@/utils/authSession"`），与行为红分开计。绿 `13 passed (13)`；全量 `Test Files 279 passed | 2 skipped (281)`／`Tests 2262 passed | 1 skipped | 16 todo`；`vue-tsc --noEmit` exit 0（落库后复取同读数）。当天就该绿的回归闸：跨边界闭环四格（写侧落盘 → 真拦截器读出 `Bearer SESSION-T-9`／logout 后不附空头／注册写回的新 token 立刻被下一请求读出）＋ 伪命中不误伤格（MCP 凭据字段 `auth_token` 与 Amazon 表单项 `refresh_token` 仍在原处但不算 offender）＋ 既有 `useSessionSync.auth`／`auth-refresh` 两档一字未改照过。
-    - **两处反证各证一层（这一批的关键证据）**：单元层把属主读取处改成 `secureStorage.get('auth_token_drifted')` ⇒ **闭环档 4 格全红、形状档 6 格照绿**——这正面说明"只钉字面量出处"抓不住"属主自己在读取处拼了另一把键"，闭环判据不是装饰件。活体层（系统 Chrome + Playwright 独立 profile）同一枚探针在分家时量到 `401 /api/v1/auth/me` → 弹回登录、rows 归零；收口态量到 `GET /api/v1/memory?limit=15&agent_id=default` **200／15 行真数据**，未登录形照旧 `/login?redirect=/agent/default/memory` 且零 401，技能页无 pageerror。凭据纪律：不真登录、不索取口令，按"登录后 storage 的实际形态"注入生产 `create_access_token()` 签出的 JWT（写侧 `persistTokens` 落的就是这把键的明文，形态等价）。
-    - **红自证**：9 个已跟踪生产文件带唯一 tag `red-selfproof-session-keys-432` 走 pathset stash（新单源先移出扫描面，不卷并发会话的未跟踪件），复跑 = `2 failed | 1 passed (3)`／`5 failed | 5 passed (10)`，失败恰为形状五格＋新单元 import；闭环四格按设计照绿（它钉的是"分家即红"，不依赖收口在场）。`apply` 后只 `drop` 自己那条（`redselfproof-failedturn-422` 属并发会话，未动）。
-    - **生成物联动**：新档让同名函数盘点扫描面 338→339，`duplicate-function-inventory.guard.test.ts` 两格当场红；按判据给的命令重跑 `node scripts-qa/duplicate-function-audit.mjs --write-ledger` 回写，差集只有那一行计数（本批自引入，非预存）。
-    - **宽域 A/B 与入册均不适用并写明理由**：未碰 `.py`；`protected_tests.txt` 只收 pytest 文件。
-    - **净 LOC**：生产池 +71/−55＝净 **+16**（属主 +22；`stores/auth.ts` +13/−15 三行 const 退役；`AgentSkillPage.vue` +7/−12 旁路读法与 try/catch 退役；`api/index.ts` +13/−10；其余五档各 +2/−2〜+2/−3 单点改接）。测试池 +260/−0；生成台账 +2/−2。`git show --numstat` 合计 333/57，与分池相加一致。
-    - **仍开（不当自决）**：① `'user'` 键的清除（`api/index.ts` 清会话）与读写（`stores/auth` 清档案）现在分属两个域的动作，要不要再收进 `authSession` 门面属设计裁；② `nr_last_session`／`nr_remembered_user` 等其它 localStorage 键仍各写各的（非身份面，本批不顺手扫）；③ §6-431 仍开①③④ 原样待裁（`ChannelIdentityPanel` 只判 403、未登录是否可见页面骨架、Harmony/Tauri 未验）。
-    - 空号至 **§6-432**，下批从 **§6-433** 起。
-
-433. **增强族六条腿接上 `agent_id`：作用域恒打默认库会静默改错行；另抓到 404 被改写成 503（✅ 后端 `5fc2b106` 生产净 +10＋入册 731→732；✅ 前端 `11ab4ba1` 生产净 +13）** ✅🟢 —— 承 §6-429 仍开①，用户点单「下一批」按建议续段。
-    - **根因一句话**：`_require_memory_manager(user)` 里是 `get_memory_manager(None, user)`——**None 就是 default**。`/{id}/forget`、`/{id}/strengthen`、`/batch`、`/export`、`/import`、`/categories` 六条腿的作用域因此与页面无关。
-    - **严重性取决于铸号形态**（这是本格最值得记的一条）：id 由 `memory_layer/manager.py:1624` 的 `f"mem_{self._counter:06d}"` 铸，**计数器每个 Agent 库各一份** ⇒ 两库同 id 是设计使然而非意外。现网只读取证：default 24 行、kai 6 行，同 id 跨库恰有 1 对 `mem_000006`，default 侧归 `('default','ne-alice','alice')`、kai 侧归 `('kai','default','default')`。⇒ **诚实边界**：这一对恰好被逐条归属校验拒掉，本批**没有量到已经发生的错行**；但结构是活的——某对同 id 的两行若都归同一说话人，↓ 就改掉另一个库那一行。判据因此按"两库各造一行、id 相同"来钉，并在夹具里自证两库内容不同（否则"另一库没被改"这半句是空话）。
-    - **不在票面上的第二个缺陷**：同一 helper 把任何 `APIError` 一律改写成 `HTTPException(503, 记忆系统不可用)` ⇒ 「Agent 不存在」这种调用方参数错误被说成服务端故障，与读改删腿的 `except APIError: raise` 分家。现原样上抛（全局处理器按单源码表映射：404 就是 404、6003 未就绪才是 503），`manager is None` 才 503；顺手删掉失效的 `APIError` import。
-    - **口径不新造**：透 `agent_id` + 归属校验照旧逐条把关 = §6-425/§6-426 已裁的读改删腿一字同规。**不放宽隔离、不开管理员特权面**（增强族要不要 agent-wide 通道属产品裁决，见仍开②）。行级取 `record.agent_id`（表格可能混着别的来源的行），页级取当前 `agentId`。
-    - **红绿灯（20 格）**：后端档 `tests/integration/test_memoryEnhancementCarriesAgentScope.py` 10 格——红 `8 failed, 2 passed`（原文取样 `assert 50.0 != 50.0`：指定 kai 而 kai 的行没动），绿 `10 passed`，与 `tests/test_api` 合跑 `133 passed`。前端两档 10 格——红 `8 failed | 2 passed (10)`，绿 `10 passed`；全量 `281 passed | 2 skipped (283)`／`Tests 2272 passed`；`vue-tsc --noEmit` exit 0。反向四格当天就该绿：不带参数仍回落 default 且不漏进 kai 库、他人用户域仍 404 且那行不变、`owned=false` 的行照旧不发请求、不给作用域就不塞空串。
-    - **三枚判据自身的坑（都在测试侧根修，未放宽判据）**：① **模块级签 token 被全轮污染**——`tests/test_api/test_memory_route_shadowing.py` 与 `tests/unit/api/test_api_auth.py` 调 `pinJwtSecret()` 对齐轮内密钥后**明确不复原**，import 期签的头在合跑时"刚签的令牌被自己拒"；正解就在同一仓：夹具内 `pinJwtSecret()` + `signedBearerHeaders()` 现签。② **GET 与 POST 的配置实参不同位**——`get(url, config)` 第二实参 vs `post(url, body, config)` 第三实参，一个通用槽位把 export/categories 读成恒 `undefined` 的**假绿**；拆成 `lastPost()`/`lastGet()` 并给反向格补 `format` 正检。③ **`setupState` 代理已解包 ref**——`state.importJson.value = …` 是往字符串上挂属性，静默无效，那条腿压根没跑；改直接赋 `state.importJson`。
-    - **⚠ 一枚新形态（记在本格内；形态另册的现号本批未重算，故不编号）**：**A/B 的差集采集会被非 ASCII 用例名打断**。中文 `def test_带agent_id…` 让脚本内部报 `comm: input is not in sorted order` + `Binary file (standard input) matches`，于是「仅本树红 0 条」在采集失效下被打印出来——**这正是本 Skill「零差集是假的」那条的 HTTP 侧新形态**：不是汇总没产出，而是集合比对本身静默失真。根修不是给脚本加豁免，而是把 10 个用例名改成 ASCII（本仓 pytest 命名本就是 ASCII camelCase，我用中文是随了 vitest 的习惯）。判据动作：**看 A/B 报告前先确认差集段没有 comm/awk/binary 告警**。
-    - **宽域 A/B**（改名后重跑，采集有效）：`AB_PASS`——基线 32 failed / 本树 24 failed，**仅本树红 0 条**；仅基线红 8 条逐条落在本批新档内＝交付证据。那 24 条**预存**：四个已入库的记忆面 integration 档与 `tests/test_api` 合跑互相污染（同①的密钥根因，命中面 10/5/5/4）；把本批生产面整体 stash 再跑同选择集，失败集合逐条相同（两侧均 13 failed/16 passed），且报错文本零次提及 `memory_enhancement`。
-    - **活体（真服务 9527，只读探针，不动用户数据；同一份脚本重启前后各一遍——比手工退回一行更硬的对照）**：`/export?agent_id=kai` 旧码 **24 行 default 正文** → 新码 **6 行 kai 自己的行**；`/export?agent_id=nope` 旧码 **200 照吐 default 数据** → 新码 `404 {"code":3000,"message":"Agent 不存在: nope"}`；`/categories?agent_id=kai` `['general']` → `['general','reflection']`；不带参数的 `/export` 两侧都是 24 行（缺省回落没被摘）。凭据按本轮口径本地现签，不落盘、不复述。
-    - **红自证**：三个生产文件（后端 helper + 前端两文件）带唯一 tag `red-selfproof-enhancement-agent-scope-433` 走 pathset stash ⇒ 后端 `8 failed, 2 passed`、前端 `8 failed, 2 passed`，失败集恰等于本批新判据；`apply` 后只 `drop` 自己那条（并发会话的 `redselfproof-failedturn-422` 未动）。
-    - **入册与守卫**：`scripts/ci/protected_tests.txt` 逐文件单跑 10 passed 后登一行（在册有效条目 **731→732**）；`TestProtectedSubsetEntriesAreTracked` + `test_protected_subset_registration_history.py` 23 passed。`tests/unit/ci` 另有 14 条红按上文对照证明预存（不归本批）。前端判据不入该清单（只收 pytest）。
-    - **净 LOC**：后端生产池 +26/−16＝**+10**、入册 +3/−0、前端生产池 +31/−18＝**+13**、测试池 +520/−0（292＋80＋148）。两笔 `git show --numstat` 分别 321/16 与 259/18，与分池相加一致。
-    - **仍开（不当自决）**：① **测试侧同根因待一票**：`pinJwtSecret()` 对齐后不复原，使任何"import 期签头"的档在全轮合跑时静默 401——现算命中面是四个已入库记忆档 24 条红；正解是把"轮内密钥"做成 fixture 作用域或让所有档统一用例内现签，属测试基建改动，不在本批顺手扫。② 增强族要不要管理员 agent-wide 通道（与 §6-426 同一条产品线）。③ `getMemoryCategories`／`batchMemoryOperation` 两条前端包装腿**零生产消费者**——本批只补作用域，接线或退役另裁。④ Harmony/Tauri 未验。
-    - 空号至 **§6-433**，下批从 **§6-434** 起。本批三笔（`5fc2b106`＋`11ab4ba1`＋本笔）**未推**。
-
-434. **身份取数口改为「先对齐本轮密钥再签」：合跑 26 条「刚签的令牌被自己拒」归零（✅ `57732258` 生产池 0／测试池净 +143）** ✅🟢 —— 按工单 `docs/04-plans/记忆面测试密钥作用域工单_2026-10-27.md` 点单的**甲**落地；同时**闭 §6-433 仍开①**（那一族 24/26 条预存红就是这条根因）。
-    - **根因**：`tests/auth_headers.py` 里两份身份头取数口差一步——`signedBearerHeaders()` 先 `pinJwtSecret()` 对齐再签，`bearerHeaders()` **只签不对齐**；而 `pinJwtSecret()` 的既定口径是"进程内唯一、不复原"（`test_api_auth.py:44` 有理由）。于是任何在 import 期用后者签头的档，都会在别人对齐之后被自己的令牌拒。规矩早就写在 `pinJwtSecret()` 的 docstring 里（「不要在导入期烘一枚令牌——令牌属于"这一轮"，不属于"这个进程"」），**但它是注释，不是会红的闸**。
-    - **现算命中面**：模块级签头 **6 档 / 11 处**；`bearerHeaders` 消费者 18 档 / 34 处，`signedBearerHeaders` 3 档 / 13 处；与 `tests/test_api` 合跑红 **26 条**。
-    - **排除丙的依据（一条不在票面上的真发现）**：泄漏守卫 `tests/unit/api/test_jwtSigningKeyLeakIsGuarded.py:48` 让违规者去调的 `adoptJwtSecretForTests` / `resetJwtSecretToProduction` **全仓 0 处实装**（生产侧 grep 现算 0；测试侧只在该守卫自己的合成样本里出现）。⇒ "改完再复原"是条幽灵路，没有回退口就只能把不变式立在"签之前必然对齐"；顺带记：那枚守卫「改＋复原即放行」的参数化样本验的是一条不存在的合规路径（仍开②）。
-    - **处置**：对齐塞进 `bearerHeaders()` 本身；第二个名字随之退役（教义第 6/7 条：对齐进签名口后它就是同一功能的第二个名字＝第二个事实源），13 处消费者改指唯一取数口。**生产码零改动**（`git diff --stat HEAD -- neurova/` 空）。
-    - **⚠ 一处判读纪律（本批起草时我判错过、按实测改判）**：**401 有两种子形态**——`Invalid or expired token`＝带了令牌但验不过（本族）；`Not authenticated`＝压根没带凭证（§6-429 那道路由级门的形态）。`test_memory_emotion_min_score.py` 单跑那 2 条属后者（它 `_idsAt()` 的 `client.get(...)` 没传 `headers`），**不属本族、不划进本格闭合**，登记为 §6-429 一族的漏扫补账（仍开①）。把两种 401 划成一族，既会误报闭合，也会掩盖真漏掉的那条腿。
-    - **新档 `tests/unit/api/test_identityHeadersAlignSecretBeforeSigning.py`（4 格）**：行为格用既有 API 造确定时序（`pinJwtSecret(sentinel)` → 签 → `pinJwtSecret()` → 打**只挂生产身份门的最小 app**），全程不做 `JWT_SECRET_KEY` 裸赋值（那正是泄漏守卫抓的形态）；两条形状格把「`bearerHeaders` 体内必须调对齐口」与「取数口名字表 `== ["bearerHeaders"]`」钉住并带**正检**（那唯一一份确实自己调 `create_access_token`，否则"只剩一个名字"可能只是大家都没签）；反向格钉幂等与"不许每签一头换一把"。
-    - **红绿灯**：红（pathset stash tag `red-selfproof-jwt-align-before-sign`，撤 `auth_headers.py` ＋三处改指）`3 failed, 1 passed`，原文 `签出的令牌被自己拒：401 {"detail":"Invalid or expired token"}`；绿 逐文件 `4 passed`、身份面回归 `67 passed`、验收选择集本族 **0 failed**。
-    - **宽域 A/B `AB_PASS`**：基线（HEAD 取数口＋本批新判据）**29 failed** / 本树 **0 failed**（198 passed），仅基线红 29 条＝26 污染＋3 新判据，仅本树红 0；**采集告警计数 0**（`comm:`／`not in sorted`／`Binary file`／multibyte 四项）——§6-433 那枚"非 ASCII 用例名打断差集采集"的形态这次是先验过的。
-    - **活体**（本批是测试地基，自证点是"生产签名路未被碰"）：真服务 9527 上，生产 `create_access_token()` 签的令牌 `GET /api/v1/memory?limit=5&agent_id=kai` ⇒ **200、5 行、agent_ids 只有 `kai`**；匿名 ⇒ 401；`Bearer not.a.token` ⇒ 401。另：服务在 §6-433 活体后停过（日志尾部停在 00:20:42 那次探针），已按规范入口起回（监听仍 `127.0.0.1:9527`）。
-    - **⚠ 落笔错一则（form 17 同族，本卷第十五遭）**：提交正文 `57732258` 写「测试池 +162/−**25**＝净 **+137**」，`git show --numstat` 真值是 **测试池 +162/−19＝净 +143**（文档池 +137/−0、总 299/−19）——删除数抄错连带净数错，且我把文档池的 137 错当成测试池净数。已入库不改写，正确值落在本格。根因仍是**先落字再去数**。
-    - **净 LOC**：生产池 **0**；测试池 **+162/−19＝净 +143**（取数口 +12/−6、三处改指 +13/−13 纯改名、入册 +4/−0、判据新档 +133）；文档池 +137/−0（工单，状态已改"已按甲实施"）。入册 `protected_tests.txt` 有效条目现算 **733**；跟踪与登记史守卫复跑通过。
-    - **仍开（不当自决）**：① `test_memory_emotion_min_score.py::_idsAt()` 漏带凭证（§6-429 一族漏扫，2 条红）；② 泄漏守卫的放行分支指向 0 实装的幽灵 API ⇒ 要么补那两枚函数、要么改它的话术与样本（改它的话术会让"改＋复原放行"这一格失去被测对象，需一并重设）；③ 工单里的**乙**（6 档 11 处 import 期签头改为用例内现签）作加固另拍——甲 已让这条路走不歪，乙 是对时序免疫的加深；④ 前端 `requiresAuth` 相关两票（未登录可见骨架、`ChannelIdentityPanel` 的 401 文案）与增强族管理员通道票照 §6-431/§6-433 待裁。
-    - 空号至 **§6-434**，下批从 **§6-435** 起。本批一笔（`57732258`）＋ §6-433 三笔共 **4 笔未推**。
-
-
-
+437. **批 M-3 落地：`unit-tests` 的整场受保护子集按实测重定预算——cpus 4→8、墙钟 90m→45m，并把「上限要么是预算、要么不是上限」钉成常驻判据（✅ 本批；受保护子集真条目现算 717）** 🟢 —— 与 §6-420 同族同现场，但那笔明写「`unit-tests` 的 cpus 本来就是 4，不动」，本笔正是把那句留白补上
+    - **✅ 起点（CI 现场读数）**：`cnb build get-build-stage --sn cnb-n45-1k5oultjs --pipelineId …-003 --stageId stage-1` 读回
+      末段 `tests/unit/skills/test_marketInstalledStateIsReadBack.py ......... [ 83%]` → `Killed` →
+      `Finished, code: 137, duration: 29m 23s`。`code: 137` 是 SIGKILL，日志里**一条失败墙都没有**：
+      不是「有测试红了」，是整段跑到点被掐断。同一构建里另外 8 条流水线全绿（`prepare 7.1s / stage-0 20.6s`），
+      所以也不是「机器慢」或「装依赖慢」。
+    - **✅ 先否掉「墙钟太窄」这一支**：该 stage 当时声明 `timeout: 90m`，而它在 **29m23s** 就被杀——距上限还有一小时。
+      83% 处已用 29m23s ⇒ 整场按此速率约 **35m20s**。上限远比实测宽，则「被掐」不可能归因到时间。
+    - **✅ 根因回到声明处（两条，同一句话：预算的两层数没对过表）**：
+      ① `runner.cpus: 4`。官方《语法手册》`runner.cpus` 一节：*内存 = CPU 核数 × 2 GiB*、*未配置时可用核数由
+      分配到的构建节点决定*；官方《构建节点》：`cnb:arch:amd64` 核数范围 **1~64**、同档节点**默认 8 核**。
+      ⇒ `cpus: 4` 不是上限，是把这一格按 **8GiB** 的最小可用档压着跑，而它是九条里唯一「装整份锁 + 串行跑
+      716 条清单 + 每格带 `--cov` 插桩」的一条。进程被 SIGKILL 的典型形态正是内存压力下的 OOM kill。
+      ② `timeout: 90m` 与实测 35m 脱钩两个量级。它不造成本次故障，但它**掩盖**了故障：上限若远高于实测，
+      「真撞墙」与「被资源杀掉」在日志里长得一模一样，读的人只能猜——本次就是猜错的现场。
+    - **✅ 处置（只动 `unit-tests` 这一格的两行声明，不动判据、不动覆盖面）**：`cpus 4 → 8`；
+      驱动受保护子集那一格的 `timeout 90m → 45m`（≈ 实测 1.3 倍，仍远宽于子集里最高的单档父墙
+      `pytest.mark.timeout(120)`，先到点的仍是单格那条诚实的超时）。`--cov-fail-under=60` 与
+      `scripts/ci/protected_tests.txt` 的覆盖面一字未动。
+    - **✅ 新判据（按阶段结构认，不按流水线名认）**：`tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py`，
+      扫「`stages[].script` 里有 `scripts/ci/protected_tests.txt` 清单驱动」的流水线条目（含 YAML 锚点复用），
+      两条不变量：`cpus ≥ 8`（`HEAVY_SUBSET_CPU_FLOOR`，内存 ×2GiB 为官方口径，cpus 是唯一代理量——
+      `runner` 只有 tags/cpus/namespace，没有 memory 字段）；驱动那一格的 `timeout ≤ 45m`
+      （`SUBSET_STAGE_TIMEOUT_CAP_MIN`）。受治面自证：扫到 0 条即红。
+    - **✅ 灯（红→绿逐条实测，本机 py3.11 + `requirements-ci.lock` 装齐）**：
+      `pytest tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py -q`
+      → 改前 **2 failed / 1 passed**（`'unit-tests': timeout='90m'（90m > 45m）` 与
+      `'unit-tests': cpus=4（内存 8GiB < 16GiB）`，各两命中＝锚点复用两处），改后 **3 passed**；
+      把 `cpus` 改回 `4` 再跑 → 当场回红（`1 failed`），恢复即绿。
+    - **✅ 同批回归面**：`tests/unit/ci` 整目录 **498 passed, 2 skipped**（含 `test_dev_environment_contract`
+      的 vscode `cpus: 8` 与 `workspace.launch.cpus` 一致性、`test_unit_tests_single_leg`、
+      `test_ci_pipeline_speed_guard`、`test_runnerAllocatedWallClockIsNotADeadline`）；
+      `test_dev_path_and_runtime_dep_guards` + `test_auditLedgerNumbering` + 登记历史 **54 passed**；
+      `python scripts/ci_static_gate.py --skip-import` → 🎉 全部通过；`ruff check neurova tests --no-cache`
+      → All checks passed。
+    - **⚠ 诚实边界（第一条是本笔最重要的边界）**：`code: 137` 的**直接**归因（OOM 还是别的信号源）不在仓内可读——
+      平台只在日志末行给退出码，不给内存读数。本笔证的是两条**可读事实**：①这一格被压在同档节点默认核数的一半上；
+      ②它在离自己声明的上限还有一小时时被杀。`cpus: 8` 是让声明回到「官方默认规格」，不是「按实测内存反推出来的数」；
+      真实内存曲线要等下一次构建的读数。② 45m 的余量可能仍偏紧（若下一次真超，**应当**变红并按实测重定，
+      不许为此再往上抬到 90m —— 那正是本笔在修的那种「上限不是预算」）。③ 本机没有 `python:3.12` + `uv` 锁的
+      整腿环境，上面的红→绿都在判据层面自证，端到端读数以新构建为准。
+    - **⚠ 撞号让号（本格按「改后到的、不改先到的」让一拍）**：本笔落笔时现查最大＝419、条目行尾号为 419 ⇒ 取 420；
+      推送时远端已被 `9051c590` 推前一步，它把分支原有的 418／419 顺让成 419／420（main 新占了 417）⇒ 420 已被占。
+      按纪律让号改记 **§6-437**（并入 main 时 419／420／421 均已被 main 与并发会话占走，本条连让两拍），本笔的提交 `9ac1878d` 正文里没有写号，故无需改读；`protected_tests.txt` 的在册注释里也不含号次。
+    - **下一枚空号现查**：`git grep -ohE "§6-4[0-9][0-9]" HEAD -- audit-reports docs scripts | sed 's/§6-//' | sort -u | tail -3`
+      现算最大＝**437**（437 只出现在本格自身）；条目行 `^4NN\. ` 尾号为 **434**（main 侧最新）⇒ 后继批次从 **438** 起。

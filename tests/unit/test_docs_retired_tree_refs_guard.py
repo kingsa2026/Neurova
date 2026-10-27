@@ -26,6 +26,7 @@
 3. **反向控制**：退役检出器不得空转（必须真的检出一个已退役目录），且真实存在的
    编号分层目录不得被误判为退役。缺了这条，规则 1 会在检出器失效时空过。
 """
+import concurrent.futures
 import io
 import posixpath
 import re
@@ -69,14 +70,26 @@ def retiredTrees(files: list) -> set:
             if not any(f.startswith(f"docs/{name}/") for f in files)}
 
 
-def activeDocs(files: list) -> list:
-    """活跃层文档（排除归档层，归档正文陈述的是当时结构，不就地改写）。"""
+def activeDocs(files: list, extraExcludes: tuple = ()) -> list:
+    """活跃层文档（排除归档层，归档正文陈述的是当时结构，不就地改写）。
+
+    `extraExcludes` 让规则 1b/1c 再排掉一次性审计快照（见 `SNAPSHOT_PREFIXES`）。
+    """
     return [f for f in files
-            if f.endswith(".md") and not f.startswith(ARCHIVE_PREFIXES)]
+            if f.endswith(".md") and not f.startswith(ARCHIVE_PREFIXES + extraExcludes)]
 
 
 #: 说明性文本而非路径（`文件:行号`、`bugfix-*.md`、`HARMONYOS_*.md`）
 NOT_A_PATH = re.compile(r"[*<>{}]|^[^/]*:[^/]*$")
+
+#: 规则 1b/1c 的**扫描面排除**：一次性审计快照。
+#:
+#: `audit-reports/` 是审计产物，正文里的 `docs/<旧目录>/<文件>` 是**当时的读数证据**
+#: （那一屏写着 `git log -S` 与命令输出）。就地改指，等于替证据换掉它当时指向的东西——
+#: 判据在这里要求"改指"，恰好把证据改成了不会失败的样子。与 `ARCHIVE_PREFIXES`
+#: （`docs/11-legacy/`、`docs/06-bugfix/`）同一口径：陈述当时结构的正文不就地改写。
+#: 规则 1（可点击链接）不适用本排除——链接点不动就是死链，与快照无关。
+SNAPSHOT_PREFIXES = ("audit-reports/",)
 
 
 def resolves(target: str, source: str, files: list) -> bool:
@@ -113,6 +126,51 @@ def resolves(target: str, source: str, files: list) -> bool:
 @pytest.fixture(scope="module")
 def files() -> list:
     return trackedFiles()
+
+
+#: 规则 1b 的读盘分片数。这一条要读**每一份活跃层文档**（上千档）：`--cov` 插桩下
+#: 单线程实测把整档推到 10s 量级，而它只是读盘 + 正则。分片只为把读盘并行起来，
+#: 判据一行不改；取小值——同场还有别的档在跑，不为这一条占满 runner。
+SCAN_SHARDS = 8
+
+
+def _rebasableOffendersInText(path: str, text: str, files: list, retired: set) -> list:
+    """逐文件判定（分片扫描与反空转格共用同一份口径）。"""
+    fileSet = set(files)
+    out = []
+    for number, line in enumerate(text.splitlines(), 1):
+        for match in SPECIFIC_REF.finditer(line):
+            target, tree = match.group(1), match.group(2)
+            if tree not in retired or "<" in target or "*" in target:
+                continue
+            if target in fileSet:
+                continue
+            suffix = "/" + target.split("/", 2)[-1]
+            matches = [f for f in files if f.endswith(suffix)]
+            if len(matches) == 1:
+                out.append(f"{path}:{number} `{target}` → {matches[0]}")
+    return out
+
+
+def rebasableOffenders(files: list, excludes: tuple = ()) -> list:
+    """规则 1b 的判定全体：分成 `SCAN_SHARDS` 片读盘，各片只 append 自己的命中。"""
+    retired = retiredTrees(files)
+    scanFiles = [f for f in files
+                 if (f.endswith(".md") or f.endswith((".json", ".dot", ".dsl")))
+                 and not f.startswith(ARCHIVE_PREFIXES + excludes)]
+    buckets: list = [[] for _ in range(SCAN_SHARDS)]
+
+    def scanSlice(index: int) -> None:
+        for path in scanFiles[index::SCAN_SHARDS]:
+            try:
+                text = io.open(PROJECT_ROOT / path, encoding="utf-8", errors="ignore").read()
+            except OSError:
+                continue
+            buckets[index].extend(_rebasableOffendersInText(path, text, files, retired))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=SCAN_SHARDS) as pool:
+        list(pool.map(scanSlice, range(SCAN_SHARDS)))
+    return [item for bucket in buckets for item in bucket]
 
 
 class TestRetiredTreeLinksAreRebased:
@@ -161,27 +219,33 @@ class TestNamedRetiredFilesAreRebased:
     """
 
     def testSpecificTargetsWithUniqueRebaseAreFixed(self, files):
-        retired = retiredTrees(files)
-        offenders = []
-        for path in activeDocs(files) + [f for f in files
-                                         if f.endswith((".json", ".dot", ".dsl"))
-                                         and not f.startswith(ARCHIVE_PREFIXES)]:
-            text = io.open(PROJECT_ROOT / path, encoding="utf-8", errors="ignore").read()
-            for number, line in enumerate(text.splitlines(), 1):
-                for match in SPECIFIC_REF.finditer(line):
-                    target, tree = match.group(1), match.group(2)
-                    if tree not in retired or "<" in target or "*" in target:
-                        continue
-                    if target in files:
-                        continue
-                    suffix = "/" + target.split("/", 2)[-1]
-                    matches = [f for f in files if f.endswith(suffix)]
-                    if len(matches) == 1:
-                        offenders.append(f"{path}:{number} `{target}` → {matches[0]}")
+        offenders = rebasableOffenders(files, SNAPSHOT_PREFIXES)
         assert not offenders, (
             "点名的退役目录文件在编号分层唯一可解，却没改指（同批删除漏改的同一根因）:\n  "
             + "\n  ".join(offenders)
         )
+
+    def testTheDetectorStillSeesAPlantableRebase(self, files):
+        """反空转：分片扫描后，探测器必须仍能从**合成的一份**里点名出可改指项。
+
+        上一格断言"没有 offending"——把扫描面整个关掉也能绿。这一格把一份必然命中的
+        合成材料喂给同一个判定函数，钉住"判定真在跑"。退役目录与"目录下唯一同名文档"
+        都取自仓内事实，不另造第二套路径源。
+        """
+        retired = sorted(retiredTrees(files))
+        assert retired, "退役目录检不出来——反空转格失去根据"
+        tree = next(t for t in retired if any(f.endswith(".md") for f in files))
+        # 规则 1b 的改指前提是 `endswith("/" + 文件名)` 命中一份：仓根的 `AGENTS.md`
+        # 不带目录段，拿它构造会把"认不认 `docs/<tree>/<leaf>`"和"有没有目录前缀"混成一件事。
+        byName: dict = {}
+        for path in files:
+            if path.endswith(".md") and "/" in path:
+                byName.setdefault(path.rsplit("/", 1)[-1], []).append(path)
+        leafName = next((name for name, paths in byName.items() if len(paths) == 1), None)
+        assert leafName, "仓库里没有目录下唯一同名的 md——反空转格失去构造前提"
+        hits = _rebasableOffendersInText(
+            "probe.md", f"见 `docs/{tree}/{leafName}`\n", files, retired)
+        assert hits, f"合成材料里的 `docs/{tree}/{leafName}` 没被点名——探测器失效"
 
 
 class TestSourcePathJoinRefsAreRebased:
@@ -200,7 +264,8 @@ class TestSourcePathJoinRefsAreRebased:
         fileSet = set(files)
         offenders = []
         for path in files:
-            if not path.endswith(self.SOURCE_SUFFIXES) or path.startswith(ARCHIVE_PREFIXES):
+            if (not path.endswith(self.SOURCE_SUFFIXES) or path.startswith(ARCHIVE_PREFIXES)
+                    or path.startswith(SNAPSHOT_PREFIXES)):
                 continue
             text = io.open(PROJECT_ROOT / path, encoding="utf-8", errors="ignore").read()
             for number, line in enumerate(text.splitlines(), 1):

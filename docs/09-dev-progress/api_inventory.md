@@ -24,7 +24,7 @@
 | `NeurUI/src/api/modules/collaboration.ts` | `/collaboration`, `/neurflow` | 是 | 23 |
 | `NeurUI/src/api/modules/collaborationRoom.ts` | `/collaboration` | **否** | 2 |
 | `NeurUI/src/api/modules/computer.ts` | `/computer` | 是 | 3 |
-| `NeurUI/src/api/modules/console.ts` | `/console` | 是 | 7 |
+| `NeurUI/src/api/modules/console.ts` | `/console` | 是 | 8 |
 | `NeurUI/src/api/modules/context.ts` | `/context` | 是 | 1 |
 | `NeurUI/src/api/modules/cost.ts` | `/budgets`, `/cost-rollup` | **否** | 2 |
 | `NeurUI/src/api/modules/enhanced-users.ts` | `/enhanced-users` | 是 | 0 |
@@ -43,7 +43,7 @@
 | `NeurUI/src/api/modules/logs-api.ts` | `/logs-api` | 是 | 1 |
 | `NeurUI/src/api/modules/media.ts` | `/media` | 是 | 1 |
 | `NeurUI/src/api/modules/memory-settings.ts` | `/memory-settings` | 是 | 4 |
-| `NeurUI/src/api/modules/memory.ts` | `/enhanced-memory-search`, `/memory`, `/memory-enhancement`, `/memory-share-groups`, `/memory-timeline`, `/semantic-search` | 是 | 14 |
+| `NeurUI/src/api/modules/memory.ts` | `/enhanced-memory-search`, `/memory`, `/memory-enhancement`, `/memory-share-groups`, `/memory-timeline`, `/semantic-search` | 是 | 17 |
 | `NeurUI/src/api/modules/metacognition.ts` | `/metacognition` | 是 | 4 |
 | `NeurUI/src/api/modules/mobile.ts` | `/mobile` | 是 | 2 |
 | `NeurUI/src/api/modules/models.ts` | `/models` | 是 | 12 |

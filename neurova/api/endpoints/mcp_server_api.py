@@ -20,7 +20,7 @@ JSON-RPC 分派链（四方法 if/elif、自造信封、`include_router` 登记�
 from __future__ import annotations
 
 import json
-import typing
+from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException
 from mcp.server.lowlevel import Server
@@ -36,7 +36,8 @@ from neurova.api.auth import get_current_user_or_service, security
 from neurova.core.identity_context import set_request_user_id
 from neurova.core.logger import get_logger
 
-if typing.TYPE_CHECKING:  # 只作注解用；`neurova.tool_layers.mcp_server` 运行时按需 import
+if TYPE_CHECKING:  # 仅类型检查期绑定：运行期入口仍在 `_callerPrincipal` 函数体内
+    # （`neurova.tool_layers.mcp_server` 在调用时按需 import，断循环导入，AGENTS.md §3）
     from neurova.tool_layers.mcp_server import McpCaller
 
 logger = get_logger(__name__)
@@ -245,7 +246,7 @@ class _McpFaceAsgi:
 
         request = Request(scope, receive)
         try:
-            current_user: typing.Any = await get_current_user_or_service(
+            current_user: Any = await get_current_user_or_service(
                 request, credentials=await security(request)
             )
         except HTTPException as exc:

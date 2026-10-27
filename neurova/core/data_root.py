@@ -204,8 +204,23 @@ def legacyHomeLanding(*parts: str) -> Path:
     历史上有一族配置/状态写在 `Path.home()/.neurova` 下（凭据、审计库、治理白名单、
     技能安装根），它们不在仓库根之下，`legacyLanding()` 表达不出那个语义。
     收进数据根时若各处再手拼一遍 home，就是把"一个锚点四处各算一遍"原样搬进收养端。
+
+    **只做收养的读者。** 在本仓里"主目录落点"有两类消费者，方向相反，不许共用这一支：
+    一类是把旧物搬进数据根（收养，主目录是**来源**）；另一类是数据根之外**新写**状态
+    （§6-388 的构件摘要根外锚——它一旦跟着搬进数据根，就再也察觉不到整库回滚）。
+    后者走 `homeAnchorPath`：同一个拼法，另一层语义。
     """
     return Path.home().joinpath(".neurova", *parts)
+
+
+def homeAnchorPath(*parts: str) -> Path:
+    """主目录落点的**现行地址**（`~/.neurova/<parts>` 的绝对路径），供不参与收养的消费方取用。
+
+    与 `legacyHomeLanding()` 同一口径、同一拼法：那一处是收养端（"旧物在哪、要不要搬"），
+    本函数是**只算落点**的读法（锚文件这类"对数据根被替换敏感"的状态）。消费方各拼一遍
+    `Path.home()/".neurova"` 就是第二份事实源（家目录落点面守卫逐文件计数即红）。
+    """
+    return legacyHomeLanding(*parts)
 
 
 def adoptLandingFrom(target: Path, legacy: Path) -> bool:
