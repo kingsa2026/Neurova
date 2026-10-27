@@ -362,6 +362,8 @@ _bridge: Optional[KnowledgeIngestBridge] = None
 
 @lazySingleton("_bridge")
 def get_ingest_bridge() -> KnowledgeIngestBridge:
+    """懒建单例：DCL + RLock 由 `core/lazy_singleton` 一处持有（AGENTS.md §3），
+    本函数体只写构造过程——判空与锁不再在这里手抄第二份。"""
     return KnowledgeIngestBridge()
 
 

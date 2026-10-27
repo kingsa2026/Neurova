@@ -23,12 +23,19 @@ from neurova.api.endpoints.memory import router as memory_router
 from neurova.cognitive_layers.memory_layer.models import Memory
 from neurova.interfaces.api_standard import ErrorCodes
 
-from tests.auth_headers import bearerHeaders
+from tests.auth_headers import pinJwtSecret, bearerHeaders
 from tests.route_table import mountedLeafRoutes
 
 # C1（P3-12，2026-10-08）后写类请求必须有凭证；本文件测的是路由匹配与错误语义，
 # 身份不是被测面，但 DELETE 不带凭证会在路由级写门就 401，压根进不到被测的 handler。
-WRITE_HDR = bearerHeaders("shadowing-probe")
+#
+# 凭证在**用例内**现签（`pinJwtSecret()` + `bearerHeaders()`，唯一事实源在
+# `tests/auth_headers`）。原先这里有三个坑，每个都能单独造出"刚签发的令牌被自己拒 401"：
+#   1. 导入期烘一枚 `WRITE_HDR` —— 密钥是模块全局，别的档一改，这枚令牌就换了签名的另一方；
+#   2. 伪造密钥的那一步若与证书分处两个阶段，先对的会被后改的覆盖（本档实测：
+#      `client` 建完再签，签的已是另一把）；故对齐全轮与签发必须紧邻同一个请求；
+#   3. 同义实现在本档与 `test_roleGateIdentitySourceIsStrict.py` 各抄了一份，
+#      台面上谁先跑谁说了算 —— 收成一处（教义第 6/7 条）。
 
 
 # ============================================================
@@ -91,6 +98,11 @@ class _FakeMemoryManager:
     def get_crystallized(self, limit=20, **kwargs):
         return []
 
+    def isOwnedByRequestScope(self, mem, agentWide=False):
+        # 列表投影逐条问 manager「这一行动得了吗」（单源判定）；本桩的行全是
+        # agent-1/default/default，即请求作用域自己的行，答 True 是事实而非兜底。
+        return True
+
     def get_stats(self, **kwargs):
         return {"total_memories": len(self._store)}
 
@@ -129,7 +141,13 @@ class _FakeState:
 def env(monkeypatch):
     agent = SimpleNamespace(memory_manager=_FakeMemoryManager())
     monkeypatch.setattr("neurova.api.app.get_app_state", lambda: _FakeState(agent))
-    return TestClient(_make_app()), agent
+    # 记忆面读写一律要凭证（2026-10-26 点单甲，门挂在 router 级一处）。本文件测的是
+    # **路由匹配与错误语义**，匿名与否不是它的被测面——默认头里带一枚真 JWT，
+    # 让请求能进到 handler；"匿名必须 401"由
+    # `tests/integration/test_memoryFaceRejectsAnonymous.py` 逐条钉。
+    # 令牌按"这一轮"现签（先对齐密钥再签）：本档已撤掉导入期烘一枚常量的写法，
+    # 密钥是模块全局，别的档一改，导入期那枚令牌就变成由另一方签名、自己拒自己 401。
+    return TestClient(_make_app(), headers=bearerHeaders("shadowing-probe")), agent
 
 
 # ============================================================
@@ -207,7 +225,7 @@ def test_memory_to_dict_accepts_recall_dict():
         temperature=88.0,
         importance=90.0,
     )
-    out = memory_to_dict(m.to_dict())
+    out = memory_to_dict(m.to_dict(), owned=True)
     assert out["id"] == "mem-9"
     assert out["content"] == "hello world"
     assert out["agent_id"] == "agent-1"
@@ -237,7 +255,9 @@ def test_get_self_model_returns_200(env):
 
 def test_delete_wm_returns_200(env):
     client, agent = env
-    resp = client.delete("/api/v1/memory/wm", params={"agent_id": "agent-1"}, headers=WRITE_HDR)
+    pinJwtSecret()   # 先对齐全轮，再现签：凭证与验签门必须同源
+    resp = client.delete("/api/v1/memory/wm", params={"agent_id": "agent-1"},
+                         headers=bearerHeaders("shadowing-probe"))
     assert resp.status_code == 200, resp.text
     assert resp.json()["code"] == 0
     assert agent.memory_manager.cleared is True
@@ -252,7 +272,7 @@ def test_get_memory_stats_returns_200(env):
 
 def test_get_emotion_types_returns_200():
     """/emotion/types 不得因导入不存在的 EMOTION_WEIGHTS 而 500"""
-    client = TestClient(_make_app())
+    client = TestClient(_make_app(), headers=bearerHeaders("shadowing-probe"))
     resp = client.get("/api/v1/memory/emotion/types")
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -272,7 +292,9 @@ def test_get_memory_detail_returns_200(env):
 
 def test_delete_memory_detail_returns_200(env):
     client, agent = env
-    resp = client.delete("/api/v1/memory/mem-2", params={"agent_id": "agent-1"}, headers=WRITE_HDR)
+    pinJwtSecret()
+    resp = client.delete("/api/v1/memory/mem-2", params={"agent_id": "agent-1"},
+                         headers=bearerHeaders("shadowing-probe"))
     assert resp.status_code == 200, resp.text
     assert "mem-2" not in agent.memory_manager._store
 
@@ -293,6 +315,8 @@ def test_get_unknown_memory_returns_structured_404(env):
 
 def test_delete_unknown_memory_returns_structured_404(env):
     client, _ = env
-    resp = client.delete("/api/v1/memory/does-not-exist", params={"agent_id": "agent-1"}, headers=WRITE_HDR)
+    pinJwtSecret()
+    resp = client.delete("/api/v1/memory/does-not-exist", params={"agent_id": "agent-1"},
+                         headers=bearerHeaders("shadowing-probe"))
     assert resp.status_code == 404, resp.text
     assert resp.json()["code"] == ErrorCodes.NOT_FOUND

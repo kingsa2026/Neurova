@@ -29,6 +29,8 @@ vi.mock('ant-design-vue', () => ({
 }))
 
 import MarketplacePage from '@/pages/MarketplacePage.vue'
+import zhCN from '@/i18n/locales/zh-CN'
+import enUS from '@/i18n/locales/en-US'
 import { request } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { message } from 'ant-design-vue'
@@ -217,5 +219,21 @@ describe('管理端上架表单 — 下载地址是提交体的一等字段', ()
     expect(src).not.toMatch(/message\.error\(t\('common\.error'\)\)/)
     const wired = (src.match(/errText\(err, t\('common\.error'\)\)/g) ?? []).length
     expect(wired).toBeGreaterThanOrEqual(9)
+  })
+
+  it('管理端 placeholder 说的是规则本身，不再借用「可选」那条共享文案', () => {
+    // `market.submitUrlPh`（"ZIP 链接（可选）"）在**提交技能**那条路径下确实是可选的——
+    // 审核物化可走 pool_skill_id 血缘，不需要 zip。但管理端上架留空，条目就装不上。
+    // 两种语义共用一条文案 = 其中一边永远在说谎，所以管理端另起一键，共享键原样留着。
+    const src = readFileSync(resolve(process.cwd(), 'src/pages/MarketplacePage.vue'), 'utf-8')
+    expect(src).toContain("t('marketplace.downloadUrlPh')")
+    expect(src, '管理端仍在借用提交路径的"可选"文案').not.toContain("t('market.submitUrlPh')")
+
+    const zh = String((zhCN as any).marketplace.downloadUrlPh)
+    const en = String((enUS as any).marketplace.downloadUrlPh)
+    expect(zh).toContain('无法安装')
+    expect(en.toLowerCase()).toContain('cannot be installed')
+    // 提交路径那一条不许被顺手改掉（它语义正确，动它就是把一边修好把另一边弄坏）
+    expect(String((zhCN as any).market.submitUrlPh)).toContain('可选')
   })
 })

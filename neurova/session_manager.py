@@ -507,6 +507,11 @@ class SessionManager(SessionRepository):
         序列化中途抛异常（如 metadata 混入函数对象）会把文件截断成非法 JSON,
         损坏已有会话历史。现在先在内存中完成序列化,失败则不触碰文件。
         """
+        # 不可序列化的 metadata 一律在上游 `_json_safe` 剔掉；真到这一步仍抛，
+        # 就**不写文件**——旧实现用 open("w") 先截断再 dump，异常会把已有会话
+        # 历史留成非法 JSON（判据见 test_unserializable_data_does_not_corrupt_existing_file
+        # / test_nonserializable_data_does_not_touch_existing_file）。
+        # 不在这里统一净化整棵 data：那会让"拒写保护"变成"净化后照写"，改掉契约。
         try:
             text = json.dumps(data, ensure_ascii=False, indent=2)
         except (TypeError, ValueError, OverflowError) as e:
@@ -536,6 +541,31 @@ class SessionManager(SessionRepository):
             # 上下文),内层重复 error 会产生双 error 日志 noise. 内层 debug = 详情层.
             logger.debug("写入 session 文件失败 (内层详情): %s", e, exc_info=True)
             return False
+
+    def _fenceRefusesWrite(self, agent_id: str, session_id: str, writer_claim) -> bool:
+        """P1-10 写入围栏的唯一判据：配了 claim 且已失效 → 拒写（跳过，不抛异常）。
+
+        单点的原因：这道闸原本只长在配对写 `add_message` 上。而「回合开始先写
+        user、回合末只补 assistant」这条读回路径给会话历史开了**第二个写口**
+        （单条写 `save_message`）——围栏若不一同搬过来，提前写那条就绕过 P1-10，
+        陈旧 writer 照样能落盘。
+        """
+        if writer_claim is None:
+            return False
+        try:
+            from neurova.agent.history_fence import get_history_write_fence
+
+            _fence = get_history_write_fence()
+            if not _fence.check(agent_id, session_id, writer_claim):
+                _fence.record_fenced_write()
+                logger.info(
+                    "会话写入被围栏拒绝（陈旧 writer）: agent=%s, session=%s, writer=%s",
+                    agent_id, session_id, getattr(writer_claim, "writer_id", "?"),
+                )
+                return True
+        except Exception as fence_err:  # noqa: BLE001 - 围栏故障绝不阻断正常写入
+            logger.debug("围栏检查异常,降级放行: %s", fence_err)
+        return False
 
     def add_message(
         self,
@@ -573,21 +603,9 @@ class SessionManager(SessionRepository):
         if date is None:
             date = datetime.now().strftime("%Y-%m-%d")
 
-        # P1-10 写入围栏: 参与 claim 已失效 → 拒绝写入（跳过,不抛异常）
-        if writer_claim is not None:
-            try:
-                from neurova.agent.history_fence import get_history_write_fence
-
-                _fence = get_history_write_fence()
-                if not _fence.check(agent_id, session_id, writer_claim):
-                    _fence.record_fenced_write()
-                    logger.info(
-                        "会话写入被围栏拒绝（陈旧 writer）: agent=%s, session=%s, writer=%s",
-                        agent_id, session_id, getattr(writer_claim, "writer_id", "?"),
-                    )
-                    return ""
-            except Exception as fence_err:  # noqa: BLE001 - 围栏故障绝不阻断正常写入
-                logger.debug("围栏检查异常,降级放行: %s", fence_err)
+        # P1-10 写入围栏：判据单点见 `_fenceRefusesWrite`（单条写走同一道闸）
+        if self._fenceRefusesWrite(agent_id, session_id, writer_claim):
+            return ""
 
         file_path = self._get_session_file(agent_id, session_id, date)
         file_lock = self._get_file_lock(file_path)
@@ -1292,6 +1310,8 @@ class SessionManager(SessionRepository):
         metadata: Optional[Dict[str, Any]] = None,
         *,
         user_id: str = "",
+        title: str = "",
+        writer_claim=None,
     ) -> bool:
         """保存单条消息到 session（不要求 user+assistant 配对）。
 
@@ -1301,6 +1321,10 @@ class SessionManager(SessionRepository):
         既有记录**只在属主为空时回填**，绝不把已有属主改成别人
         （`import_session_messages` 同一判据：归属一旦落盘就是只读事实）。
         """
+        # 与配对写共用同一道闸（判据单点见 `_fenceRefusesWrite`）：提前落 user
+        # 也是写会话历史，围栏不能只拦回合末那一次。
+        if self._fenceRefusesWrite(agent_id, session_id, writer_claim):
+            return False
         date = datetime.now().strftime("%Y-%m-%d")
         file_path = self._get_session_file(agent_id, session_id, date)
         # 2026-09-07 根因修复（audit SUB-P1-7）：read-modify-write 全程持
@@ -1308,6 +1332,13 @@ class SessionManager(SessionRepository):
         file_lock = self._get_file_lock(file_path)
         with file_lock:
             session_data = self._read_session_file(file_path)
+
+            # 持久化边界净化：与 `add_message` 用同一个 `_json_safe`、同一口径。
+            # metadata 里可能带着调用方（console/chat 的 SSE 桥接）注入的
+            # event_emitter 等 callable，不剔就在 json.dumps 处抛——而这条路径的
+            # 失败形态是"静默返回 False"，提前落盘那条新功能正是这样悄悄没落盘的。
+            if metadata:
+                metadata = _json_safe(metadata)
 
             now = datetime.now().isoformat()
             msg: Dict[str, Any] = {
@@ -1328,7 +1359,7 @@ class SessionManager(SessionRepository):
                     "created_at": now,
                     "updated_at": now,
                     "total_messages": 1,
-                    "title": "新对话",
+                    "title": str(title or "新对话"),
                     "user_id": str(user_id or ""),
                 }
             else:

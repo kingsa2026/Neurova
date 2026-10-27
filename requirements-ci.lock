@@ -130,6 +130,8 @@ idna==3.20
     #   yarl
 iniconfig==2.3.0
     # via pytest
+jieba==0.42.1
+    # via -r requirements-ci.txt
 jiter==0.17.0
     # via
     #   anthropic

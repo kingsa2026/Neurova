@@ -25,8 +25,15 @@ def _build_client():
     return TestClient(app), sleep_api
 
 
-_TOKEN = create_access_token({"sub": "tester", "username": "tester", "role": "user"})
-_AUTH = {"Authorization": f"Bearer {_TOKEN}"}
+#: 凭证**每次取用时现签**：密钥属于"这一轮"，不属于"这个进程"。
+#:
+#: 原先这里把令牌烘在导入期（`_TOKEN = create_access_token(...)` 提到模块级）。同一条腿
+#: （受保护子集是单进程、按清单顺序跑）里任何一个档换了密钥，这枚导入期令牌当场验不过
+#: ——形态是 `401`，读起来像鉴权坏了，实际是测试自己在赌"谁先导入"。
+#: 生产侧取用口 `auth.currentJwtSecretKey()` 运行时读环境变量，本档只保证令牌晚于它签发。
+def _authHeaders() -> dict:
+    return {"Authorization": "Bearer " + create_access_token(
+        {"sub": "tester", "username": "tester", "role": "user"})}
 
 
 class SleepAuthTest(unittest.TestCase):
@@ -48,7 +55,7 @@ class SleepAuthTest(unittest.TestCase):
 
     def test_status_with_valid_token(self):
         with patch.object(self.sleep_api, "_get_agent", return_value=self.agent):
-            resp = self.client.get("/api/v1/sleep/default/status", headers=_AUTH)
+            resp = self.client.get("/api/v1/sleep/default/status", headers=_authHeaders())
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(resp.json()["is_sleeping"])
 
