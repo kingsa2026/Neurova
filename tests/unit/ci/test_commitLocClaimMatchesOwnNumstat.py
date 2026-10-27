@@ -46,6 +46,11 @@ _POOL_ALIASES = {
 #: `本格/本笔` 声明的是这一笔的**全部**文件合计
 _TOTAL_MARKERS = ("本格", "本笔", "全笔")
 
+#: 括号定界的一小段（夹注）。夹注放的是"这一块按哪一池算"的**口径说明**，不是本笔行数；
+#: 与引号、反引号同属"引用/说明"位置，故并进同一份区间集合。
+#: 它只豁免自己圈住的那一段——夹注写在声明**之后**时，声明本身仍是本笔的账。
+_ASIDE_RE = re.compile(r"（[^（）]*）|\([^()]*\)")
+
 #: 预存红：**已推送或已入库、正文按平台纪律不许改写**的那几笔（短号 → 当时写错的声明）。
 #: 值只用于反证"这条豁免还该在"（`testBaselineEntriesStillPointAtRealMismatches`），
 #: 不参与报告生成。
@@ -95,10 +100,21 @@ _COUNT_SUFFIX_RE = re.compile(r"[ \t]*(?:\*\*[ \t]*)?(?:个文件|格|条|笔|�
 _BULLET_RE = re.compile(r"^\s*[-*]\s+")
 
 
-def _git(*args: str) -> str:
-    return subprocess.run(["git", *args], cwd=str(REPO), capture_output=True,
+def _git(*args: str, check: bool = True) -> str:
+    """读仓取数口：失败**不许**静默变成空串（`check=False` 是给"先探一下再决定"的调用点）。
+
+    缺陷形态（构建 `cnb-i46-1k5upb7f5#003` 走查）：这里只取 stdout，git 的退出码与 stderr
+    一起被丢掉。于是"对象取不到"与"读出来就是空的"在返回值上完全一样，下游把前者解释成
+    了后者——报错说的是数据有问题，真因却是取数口没把它读上来（教义第 2 条点名禁止的那一形）。
+    """
+    proc = subprocess.run(["git", *args], cwd=str(REPO), capture_output=True,
                           text=True, encoding="utf-8", errors="replace",
-                          timeout=_GIT_WALL_S).stdout
+                          timeout=_GIT_WALL_S)
+    if check and proc.returncode != 0:
+        raise AssertionError(
+            f"`git {' '.join(args)}` 退出码 {proc.returncode}："
+            f"{(proc.stderr or proc.stdout).strip()[-300:]}")
+    return proc.stdout
 
 
 def _unpushedRange() -> list:
@@ -250,6 +266,20 @@ def _claimsRawSpan(body: str, claim: dict) -> slice:
     raise AssertionError(f"正文里找不到这一段声明：{claim!r}")
 
 
+def _asideSpans(body: str) -> list:
+    """正文里括号夹注（`（…）` / `(…)`）的区间。"""
+    return [(m.start(), m.end()) for m in _ASIDE_RE.finditer(body or "")]
+
+
+def _somebodyElsesSpans(body: str) -> list:
+    """正文里**不属于本笔**的那几段区间：成对引号内、反引号内、括号夹注内。
+
+    三种形状同一件事——那是"引用/说明"的位置，不是声明本笔行数的位置。
+    取法只此一处，免得同一条词汇散在"判豁免"与"筛靶子"两处。
+    """
+    return _quotedSpans(body or "") + _backtickSpans(body or "") + _asideSpans(body or "")
+
+
 def _backtickSpans(body: str) -> list:
     """正文里成对反引号圈起来的那几段（行内代码）的区间。
 
@@ -328,7 +358,7 @@ def _mismatches(sha: str, body: str) -> list:
         return []
     totals = _poolTotals(sha)
     bad = []
-    quoted = _quotedSpans(body or "") + _backtickSpans(body or "")
+    quoted = _somebodyElsesSpans(body)
     for c in declared:
         # 引用块（成对引号内）里的数字是**别人的账**：复述上一笔的错误声明、贴工单原文，
         # 都不属于本笔。豁免按形状给，不按提交号或关键词给。
@@ -499,6 +529,32 @@ class TestEveryClaimedNumberIsReal:
                 f"{body[:28]!r} 的第一条声明落到了 {got}，行文指的是 {expected}"
                 "——判据在替作者改写了他的话")
 
+    def testAsideDigitsAreSomebodyElsesAccountAndOnlyThatSpan(self):
+        """括号夹注里的数字不是本笔的账；**夹注之外**的仍然是。
+
+        夹注放的是"这一块按哪一池算"的口径说明——复述旧声明时那串数字就落在这里。
+        实测形态（`10020069` 一类补正笔）：一边声明本笔 +0/-0，一边在夹注里点出旧声明的数字，
+        主格按本笔复算就说"本笔写错了"。
+
+        反向半边同样要钉：夹注只豁免它圈住的那一段。夹注写在声明**之后**时
+        （`生产池 +26/-5（说明）`），声明本身仍在正文里，照旧报红——否则下一次真写错、
+        顺手在旁边加个括号就能安静通过。
+        """
+        totals = {"生产池": (0, 0), "测试/基建池": (0, 0), "全部": (0, 0)}
+        forms = {
+            "（生产池 +26/-5）": True,        # 整枚声明在夹注内
+            "生产池 +26/-5（说明）": False,   # 夹注在声明之后，声明本身仍是本笔的账
+        }
+        for fragment, exempt in forms.items():
+            body = f"净 LOC：{fragment}，其余略"
+            span = _claimsRawSpan(body, _claims(body)[0])
+            hit = any(lo <= span.start and span.stop <= hi for lo, hi in _somebodyElsesSpans(body))
+            assert hit is exempt, (
+                f"{fragment!r} 的豁免判定为 {hit}，应为 {exempt}"
+                "——夹注只圈它自己那一段，不能顺手把整行豁免掉")
+            assert (_mismatches("HEAD", body) == []) is exempt, (
+                f"{fragment!r} 在复算面上的结论与豁免判定不一致")
+
     def testRealBodyWithOneWrongDigitIsCaught(self):
         """把本会话真犯过的那次错**照原样**塞回真实正文，判据必须点名并且给出实量值。
 
@@ -510,7 +566,7 @@ class TestEveryClaimedNumberIsReal:
         target = None
         for sha in _unpushedRange():
             body = _git("log", "-1", "--format=%B", sha)
-            quoted = _quotedSpans(body)
+            quoted = _somebodyElsesSpans(body)
             own = [c for c in _claims(body) if c["label"] == "生产池"
                    and _claimsRawSpan(body, c) is not None
                    and not any(lo <= _claimsRawSpan(body, c).start
@@ -574,6 +630,24 @@ class TestEveryClaimedNumberIsReal:
         bad = _mismatches(sha, doctored)
         assert bad and any("+1/−0" in m and f"+{a}/−{d}" in m for m in bad), (
             f"把真实声明改成 +1/−0 仍没被点名（实得 {bad}）——判据抓不住我实际写错的那种句子")
+
+    def testGitReadFailureIsLoudInsteadOfAnEmptyString(self):
+        """读仓失败不许变成空串：`_git` 现在的契约是"要么给 stdout，要么响亮失败"。
+
+        平台的读数（构建 `cnb-i46-1k5upb7f5#003`）里，反证格把"读不到"报成了
+        `…在区间里找不到（豁免指向一枚不存在的提交）`——读的人据此会去删一条仍该在的豁免。
+        真因在取数口：只取 stdout、退出码与 stderr 一并丢掉，"读不到"与"读出来是空的"
+        在返回值上完全一样。这里用一条必然失败的命令把那条契约钉住，并带正检
+        （成功命令必须照常给 stdout，否则"响亮失败"可能只是把所有读取都弄红了）。
+        """
+        with pytest.raises(AssertionError) as caught:
+            _git("rev-parse", "--verify", "refs/heads/__no_such_branch__")
+        assert "退出码" in str(caught.value), (
+            f"读不到时必须点名退出码，不能只留一句像「你的数据错了」的话：{caught.value}")
+
+        assert _git("rev-parse", "HEAD").strip(), "成功命令读不出 stdout——上面那个红不算数"
+        assert _git("rev-parse", "--verify", "-q", "refs/heads/__no_such_branch__", check=False) == "", (
+            "`check=False` 的探查语义变了：它应当把失败读成空串交给调用方自己判")
 
     def testBinaryAndEmptyCommitsAreNotSilentlyMiscounted(self):
         """numstat 里 `-\t-` 是二进制：不许把它当 0 参与复算，也不许让它把池求和算崩。"""
