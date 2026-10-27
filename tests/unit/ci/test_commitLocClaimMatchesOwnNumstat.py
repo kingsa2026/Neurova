@@ -250,40 +250,16 @@ def _claimsRawSpan(body: str, claim: dict) -> slice:
     raise AssertionError(f"正文里找不到这一段声明：{claim!r}")
 
 
-def _backtickSpans(body: str) -> list:
-    """正文里成对反引号圈起来的那几段（行内代码）的区间。
-
-    与 `_quotedSpans` 同一条纪律、同一类形状：反引号里的数字是**引文**，不是本笔的账。
-    实测那一遭（`10020069`）：它写「那条豁免挡的是 `e87ce9b9` 正文里写错的「生产池 +26/−5」」，
-    复述的是**别人的**声明，却被按本笔复算成"本笔声称 +26/−5"。
-    按提交号或关键词豁免都不对——下一个人写同样的话照样红；故只按形状给。
-    """
-    spans, start = [], 0
-    while True:
-        i = body.find("`", start)
-        if i < 0:
-            break
-        j = body.find("`", i + 1)
-        if j < 0:
-            break
-        spans.append((i, j + 1))
-        start = j + 1
-    return spans
-
-
 def _quotedSpans(body: str) -> list:
-    """正文里成对引号圈起来的那几段（`『』` `“”` `「」` `\"\"` `‘’`）的区间。
+    """正文里成对引号圈起来的那几段（`『』` `“”` `\"\"` `‘’`）的区间。
 
     为什么需要：本仓的提交正文会**引用别人写过的话**（复述上一笔的错误声明、贴工单原文）。
     那几段里的数字不属于本笔，按本笔复算就是拿别人的账判自己的账。实测两次：
     `68eb3bdc` 复述 `58d9d5aa` 的错误声明、`58d9d5aa` 复述 `e87ce9b9` 的原始声明，
     两次都被主格点名成"本笔写错"。豁免按**形状**给（成对引号内），不按提交号或关键词给。
-
-    `「」` 是第三种实测形态：`10020069` 复述上一条豁免的错写法时就用的这一对，
-    而它此前不在表里——同一条纪律只认了两种引号，等于把"复述"读成了"本笔声称"。
     """
     spans = []
-    for left, right in (("『", "』"), ("“", "”"), ("「", "」"), ("\"", "\""), ("‘", "’")):
+    for left, right in (("『", "』"), ("“", "”"), ("\"", "\""), ("‘", "’")):
         start = 0
         while True:
             i = body.find(left, start)
@@ -328,7 +304,7 @@ def _mismatches(sha: str, body: str) -> list:
         return []
     totals = _poolTotals(sha)
     bad = []
-    quoted = _quotedSpans(body or "") + _backtickSpans(body or "")
+    quoted = _quotedSpans(body or "")
     for c in declared:
         # 引用块（成对引号内）里的数字是**别人的账**：复述上一笔的错误声明、贴工单原文，
         # 都不属于本笔。豁免按形状给，不按提交号或关键词给。
@@ -543,33 +519,6 @@ class TestEveryClaimedNumberIsReal:
                 break
         assert doctored != body, (
             f"正文里的 +{real['adds']}/−{real['dels']}（两种斜杠都试过）没被替换掉——这条格在空转")
-
-        # 靶子必须先证**真落在复算面上**：本档按形状给豁免（成对引号内是别人的账），
-        # 而窗口里真正书的那处如果恰好被人引过（`10020069` 就写了「…写错的「生产池 +26/−5」」），
-        # 拿它改出来的坏串天然属于"引用块"，不点名是对的。这不是放宽，是把"没测到"与
-        # "判据抓不住"分开：换下一处自书且未被引用的声明；窗口里全是引用块才 skip 并点名。
-        doctored, own = body, None
-        for candidate in nonzero:
-            raw = body[_claimsRawSpan(body, candidate)]
-            for slash in ("−", "-"):
-                digits = f"+{candidate['adds']}/{slash}{candidate['dels']}"
-                if digits not in raw:
-                    continue
-                changed = body.replace(raw, raw.replace(digits, "+1/−0"), 1)
-                quoteIn = any(lo <= _claimsRawSpan(changed, c).start
-                              and _claimsRawSpan(changed, c).stop <= hi
-                              for c in _claims(changed) if (c["adds"], c["dels"]) == (1, 0)
-                              for lo, hi in _quotedSpans(changed))
-                if not quoteIn:
-                    doctored, own = changed, candidate
-                    break
-            if own:
-                break
-        if own is None:
-            pytest.skip("窗口里自书的「生产池」声明全在引用块内——没有可改坏的自书目标"
-                        "（主格与其余 5 格仍在工作）")
-        assert doctored != body, (
-            f"正文里的 +{own['adds']}/−{own['dels']}（两种斜杠都试过）没被替换掉——这条格在空转")
 
         bad = _mismatches(sha, doctored)
         assert bad and any("+1/−0" in m and f"+{a}/−{d}" in m for m in bad), (
