@@ -1273,6 +1273,20 @@ async def _on_startup(app_state: AppState) -> None:
     except Exception as e:
         logger.warning("产物保留清理启动失败: %s", e)
 
+    # 出站隧道代理（设计方案 §3／S2）。只在配了中继地址时才真拨号：
+    # 没配 ⇒ agent 状态 `disabled`，配对面板据此如实显示"未接中继"，
+    # 局域网/反代那两条路照走（§7 的优先级：隧道 route > advertised > 入站）。
+    # 这一段必须有人读它的状态——`GET /mobile/pairing/tunnel/status` 就是那个读者，
+    # 否则"启动了但没人问"正是 AGENTS §2 点名的断点。
+    try:
+        from neurova.tunnel.agent import getTunnelAgent
+
+        app_state.tunnel_agent = getTunnelAgent()
+        app_state.tunnel_agent.start()
+        logger.info("出站隧道代理状态: %s", app_state.tunnel_agent.tunnelStatus()["state"])
+    except Exception as _tunnelErr:  # noqa: BLE001 - 隧道起不来不影响本机其他能力
+        logger.warning("出站隧道代理启动失败（忽略）: %s", _tunnelErr)
+
     logger.info("=" * 60)
     logger.info("Neurova API Server started successfully")
     logger.info("=" * 60)
@@ -1287,6 +1301,15 @@ async def _on_shutdown(app_state: AppState) -> None:
     4. 关闭连接池
     """
     logger.info("Neurova API Server shutting down...")
+
+    # 出站隧道代理：控制连接是长连接，不收就会在关停时吊着一个未完成的 task
+    # （本仓实测过"承载 app 的线程永不结束"那一族，见上方 MCP 关停的注释）。
+    try:
+        agent = getattr(app_state, "tunnel_agent", None)
+        if agent is not None:
+            await agent.stop()
+    except Exception as _tunnelStopErr:  # noqa: BLE001 - 关停路径不互相牵连
+        logger.warning("出站隧道代理关停异常: %s", _tunnelStopErr)
 
     # P1 遗留③：停掉触发器调度器
     try:
@@ -1470,7 +1493,7 @@ async def _on_shutdown(app_state: AppState) -> None:
 
 def create_app(
     config: Optional[Dict[str, Any]] = None,
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     port: int = 8000,
     debug: bool = False,
     **kwargs,
@@ -1597,7 +1620,7 @@ def create_app(
 
 
 def run_server(
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     port: int = 8000,
     debug: bool = False,
     reload: bool = False,
@@ -1648,6 +1671,7 @@ def run_server(
         workers=workers,
         log_level="debug" if debug else "info",
         factory=True,
+        **config.proxyUvicornArgs(),
     )
 
 
@@ -1674,7 +1698,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Neurova API Server")
-    parser.add_argument("--host", default="0.0.0.0", help="Host to bind")
+    parser.add_argument("--host", default="127.0.0.1", help="Host to bind")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind")
     parser.add_argument("--debug", action="store_true", help="Debug mode")
     parser.add_argument("--reload", action="store_true", help="Auto reload")

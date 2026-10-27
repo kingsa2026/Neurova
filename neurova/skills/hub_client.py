@@ -711,8 +711,11 @@ class SkillHubClient:
         Returns:
             技能配置字典
         """
-        # 查找配置文件
-        config_files = ["skill.md", "manifest.json", "manifest.yaml", "manifest.yml"]
+        # 查找配置文件。`SKILL.md` 必须在这一串里：本仓技能档的规范名是全大写，
+        # 而权限声明就在它的 frontmatter 里——少了这一行，`_gate_check_and_rollback`
+        # 解析成"无声明"，`validate_permissions_for_install` 与 `_persist_declared_permissions`
+        # 两条腿一起静默失效（判据 `test_skill_permissions_compat.py` 两格红）。
+        config_files = ["SKILL.md", "skill.md", "manifest.json", "manifest.yaml", "manifest.yml"]
 
         for config_file in config_files:
             config_path = skill_dir / config_file

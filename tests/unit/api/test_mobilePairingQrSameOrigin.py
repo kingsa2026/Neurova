@@ -34,7 +34,6 @@ import functools
 import os
 import re
 from pathlib import Path
-from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 import pytest
@@ -45,6 +44,7 @@ os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_for_qr_01234567
 
 from neurova.api.endpoints import mobile_pairing as MP
 from neurova.channels.qrcode_auth import generate_qrcode_image
+from neurova.tunnel import protocol
 
 REPO = Path(__file__).resolve().parents[3]
 CALLER = {"sub": "kai", "username": "kai"}
@@ -72,8 +72,7 @@ def _productionSources() -> dict:
 def app_client():
     """真挂载：与注册表同一前缀 `/api` + `/v1/mobile`（`endpoints/__init__.py:292`）。"""
     MP._pairing_codes.clear()
-    MP._paired_devices.clear()
-    MP._user_devices.clear()
+    MP.resetDeviceRegistry()   # 在册设备是持久权威，清空靠释放单例（库已由 conftest 指向 tmp）
     app = FastAPI()
     app.include_router(MP.router, prefix="/api/v1/mobile")
     app.dependency_overrides[MP._get_current_user_id] = lambda: "kai"
@@ -81,8 +80,7 @@ def app_client():
         yield c
     app.dependency_overrides.clear()
     MP._pairing_codes.clear()
-    MP._paired_devices.clear()
-    MP._user_devices.clear()
+    MP.resetDeviceRegistry()
 
 
 def _pathOf(url: str) -> str:
@@ -95,20 +93,6 @@ def _generate(c) -> dict:
     r = c.post("/api/v1/mobile/pairing/generate", json={"device_name": "probe", "device_type": "mobile"})
     assert r.status_code == 200, r.text
     return r.json()
-
-
-def _wsRequest(app, host: str = HOST, scheme: str = "http") -> SimpleNamespace:
-    """替框架答两件事：请求的 scheme，与路由表里那条 WS 的路径。
-
-    路径从**真挂载后的 app** 取（批 26 之后 `_build_ws_url` 就是这么要的），
-    测试里不重抄一遍挂载前缀——抄了就成了第二份事实源，也正是这次要修的病。
-    """
-    wsPath = app.router.url_path_for("mobile_websocket")
-    return SimpleNamespace(
-        headers={"host": host},
-        url=SimpleNamespace(scheme=scheme),
-        url_for=lambda name, **params: f"{scheme}://{host}{wsPath}",
-    )
 
 
 class TestQrUrlStaysOnOrigin:
@@ -130,21 +114,23 @@ class TestQrUrlStaysOnOrigin:
         assert r.content[:4] == b"\x89PNG", "回的不是 PNG——端点承诺的就是 PNG"
         assert len(r.content) > 100, f"图太小，不像是真二维码：{len(r.content)} 字节"
 
-    def test_served_image_is_the_qr_of_the_pairing_address(self, app_client):
-        """实质判据：那张图必须**就是**配对地址的二维码（同一渲染器、同一地址）。
+    def test_served_image_is_the_qr_of_the_pairing_payload(self, app_client):
+        """实质判据：那张图必须**就是**配对载荷的二维码（同一渲染器、同一文本）。
 
-        期望值由生产那两处自己算（`_build_ws_url` + `generate_qrcode_image`），
+        S1b 起文本从"含 host 的回连地址"改成 `neurova://pair?ref=…`（§3.4：
+        「谁」与「在哪」分离，地址漂移不得让已发的码作废）。本格的职责没变——
+        仍是"served 字节 == 生产渲染器渲染生产载荷"，只是被渲染的那串换了。
+        期望值由生产那两处自己算（`protocol.pairingQrPayload` + `generate_qrcode_image`），
         测试不复刻渲染逻辑——复刻过的桩件会与被审那行犯同一个错。
         """
         body = _generate(app_client)
-        code = body["code"]
-        wsUrl = MP._build_ws_url(_wsRequest(app_client.app), code=code)
-        expected = base64.b64decode(generate_qrcode_image(wsUrl))
+        expected = base64.b64decode(
+            generate_qrcode_image(protocol.pairingQrPayload(body["ref"])))
 
         served = app_client.get(_pathOf(body["qr_code_url"])).content
         assert served == expected, (
-            f"served {len(served)}B ≠ 渲染器给的 {len(expected)}B——图与配对地址不同源，"
-            "手机扫到的不是那条 ws 地址")
+            f"served {len(served)}B ≠ 渲染器给的 {len(expected)}B——图与配对载荷不同源，"
+            "手机扫到的不是那条 ref")
 
 
 class TestFailureIsHonest:

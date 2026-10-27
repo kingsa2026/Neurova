@@ -208,21 +208,27 @@ class TestEventBroadcast:
 
 
 class TestPoolArchive:
-    """双通道之池归档"""
+    """池归档通道：投终态信封（关键信息 + 下钻指针），正文不在旁路重复一遍。"""
 
     @pytest.mark.asyncio
-    async def test_report_archived_to_initiator_pool(self, swarm):
+    async def test_envelopeArchivedToInitiatorPool(self, swarm):
         agent = make_mock_agent(name="研究员", reply="关键发现：结论A")
         initiator = make_initiator()
         with patch("neurova.api.endpoints.get_agent_instance", return_value=agent):
-            await swarm.spawn(task="分析数据", initiator_agent=initiator)
+            result = await swarm.spawn(task="分析数据", initiator_agent=initiator)
 
         initiator.context_pool.add_context.assert_called_once()
         ctx_input = initiator.context_pool.add_context.call_args.args[0]
         assert ctx_input.source.value == "experience"
         assert "[子Agent报告]" in ctx_input.content
         assert "研究员" in ctx_input.content
-        assert "结论A" in ctx_input.content
+        # ⚠ 原断言是 `"结论A" in ctx_input.content`——那钉的是「旁路抄正文」的旧契约，
+        # 按裁定正文由主链路全文与 member 会话承载，旁路只给能取回它的指针。
+        assert "结论A" not in ctx_input.content, "正文不得在旁路重复"
+        assert result["member_session_id"] in ctx_input.content, (
+            "归档缺下钻指针，主 Agent 无从取回详情"
+        )
+        assert "recall_history" in ctx_input.content
 
     @pytest.mark.asyncio
     async def test_failed_run_not_archived(self, swarm):

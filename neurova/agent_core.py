@@ -1862,12 +1862,15 @@ class Agent:
         assistant_metadata: Optional[Dict[str, Any]] = None,
         writer_claim=None,
         session_owner: Optional[str] = None,
+        userAlreadyPersisted: bool = False,
     ) -> str:
         """保存对话到session文件（委托 MemCore；writer_claim＝P1-10 围栏凭证；
-        `session_owner`（§6-163）＝会话可见性归属，口径与取法单点见 MemCore 同方法）。"""
+        `session_owner`（§6-163）＝会话可见性归属，口径与取法单点见 MemCore 同方法；
+        `userAlreadyPersisted`＝本轮 user 已由管线提前落盘，这里只补 assistant）。"""
         return self.memory_agent.save_to_session(
             user_input, reply, session_id, metadata, assistant_metadata,
-            writer_claim=writer_claim, session_owner=session_owner)
+            writer_claim=writer_claim, session_owner=session_owner,
+            userAlreadyPersisted=userAlreadyPersisted)
 
     def _update_memory_temperature(self):
         """更新记忆温度（批量衰减）"""

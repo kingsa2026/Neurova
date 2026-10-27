@@ -82,13 +82,40 @@ import asyncio
 from typing import Any, List, Tuple
 
 import pytest
-
-from neurova.computer_use import browser_manager
 from neurova.computer_use.browser_manager import (
     BrowserManager,
     DialogHandler,
+    HAS_PLAYWRIGHT,
     PlaywrightBackend,
 )
+
+#: 闭环那两格问的是「manager 交下去的后端是不是它自己那份 handler」，前提是**这台机器
+#: 真能建出 playwright 后端**。精简锁刻意不含 playwright（`requirements-ci.txt` 的排除名单、
+#: 以及 `tests/unit/ci/test_dev_environment_contract.py` 那句「只装精简锁得到的是薄环境」
+#: 都写着同一件事），那里 `HAS_PLAYWRIGHT` 为假、`_load_config` 一条后端都不建，
+#: 判据照着「本机装了」写就会红成 `KeyError: 'playwright'`——红因是环境缺件，不是接线错。
+#: 故前提由本档自给：缺件时 skip 并当场点名缺什么；装了却建不出后端仍照旧红（那才是断线）。
+#: 与 `TestTheSeamMatchesTheInstalledPlaywright` 同一口径——它早就在用
+#: `importorskip("playwright.async_api")` 自钉前提。**不该**改用 `importorskip`：
+#: 那会把整档在收集期切掉，连下面 `test_loadConfigReadsTheLiveProbeFlag`（本档自带的
+#: 「在册表跟着活探测位走」那一向）一起哑掉。
+_requiresPlaywright = pytest.mark.skipif(
+    not HAS_PLAYWRIGHT,
+    reason="本机没有可用的 playwright（精简 CI 锁刻意不含它），建不出后端无从判闭环",
+)
+
+
+def _managerWithPlaywrightBackend() -> BrowserManager:
+    """建 manager 并断言「装了 playwright 就一定有那条后端」——这断言本身是接线判据。
+
+    它留在辅助处而不是被 skip 掉：一旦环境里 playwright 可用却建不出后端，
+    上面那条 `skipif` 放行、这里当场红——把「环境缺件」与「接线断了」分开。
+    """
+    manager = BrowserManager(config={})
+    assert "playwright" in manager._backends, (
+        "`HAS_PLAYWRIGHT` 为真而 `_load_config` 没建出 playwright 后端——接面对象不存在"
+    )
+    return manager
 
 
 class _StubContext:
@@ -176,6 +203,7 @@ class TestDialogListenerIsRegistered:
         asyncio.run(listener(_StubDialog()))  # 不抛即通过
 
 
+@_requiresPlaywright
 class TestManagerReadFaceClosesTheLoop:
     """写侧闭环：`_dialog_handler` 不再只写不读，且后端拿的就是 manager 那一份。
 
@@ -184,26 +212,14 @@ class TestManagerReadFaceClosesTheLoop:
     """
 
     def testManagerSharesItsHandlerWithThePlaywrightBackend(self):
-        manager = BrowserManager(config={})
-        backend = manager._backends.get("playwright")
-        if not browser_manager.HAS_PLAYWRIGHT:
-            assert backend is None, (
-                "没装 playwright 却注册了 `playwright` 后端——那是"
-                "`configured-unreachable` 被谎报成可用（T-07 三态里的第三态）"
-            )
-            wired = manager._lastDialogHandler
-            assert wired is manager._dialog_handler, (
-                "`_load_config` 没把 manager 那一份 handler 交下去 ⇒ 事件写进别的口袋，"
-                "`BrowserManager.dialogLog()` 永远为空"
-            )
-            return
-        assert backend is not None, "装了 playwright，`_load_config` 却没建出后端——接面对象不存在"
+        manager = _managerWithPlaywrightBackend()
+        backend = manager._backends["playwright"]
         assert getattr(backend, "_dialog_handler", None) is manager._dialog_handler, (
             "后端用的是**另一份** handler ⇒ 事件写进别的口袋，`BrowserManager.dialogLog()` 永远为空"
         )
 
     def testManagerExposesTheDialogLogAsANamedReadFace(self):
-        manager = BrowserManager(config={})
+        manager = _managerWithPlaywrightBackend()
         assert manager.dialogLog() == [], "读口起点不为空：别的实例的留档漏进来了"
 
         backend = manager._backends.get("playwright")
@@ -258,3 +274,24 @@ class TestBackendsWithoutADialogSourceStayUnwired:
                 "REST/action RPC 面），挂上等于造一个'已应答'的假象" % cls.__name__
             )
 
+
+def test_loadConfigReadsTheLiveProbeFlag(monkeypatch):
+    """在册表必须跟着**模块的活属性**走：谁把 `HAS_PLAYWRIGHT` 钉住，`_load_config` 就得认。
+
+    受保护子集里本档的闭环两格与集成档 `camofoxOnlyManager` 都靠 monkeypatch 钉这个位来造
+    "只有一路后端"的在册表；脱钩时红出来的是与主题无关的 `KeyError: 'playwright'`。
+    """
+    from neurova.computer_use import browser_manager as bm
+
+    monkeypatch.setattr(bm, "HAS_PLAYWRIGHT", False)
+    assert "playwright" not in bm.BrowserManager()._backends, (
+        "探测位被钉成 False，在册表里却仍有 playwright ⇒ `_load_config` 读的不是活属性")
+
+    monkeypatch.setattr(bm, "HAS_PLAYWRIGHT", True)
+    # 这一向问的是「读的是不是活属性」，中间夹着「真能建出那个后端吗」：`PlaywrightBackend.__init__`
+    # 本身不碰 playwright，故后端对象照建；只有真用起来才需要依赖。CI 精简锁没有 playwright，
+    # 那不是这条判据要裁决的事——按同一前提自给，缺件时不把环境缺件报成脱钩。
+    if not HAS_PLAYWRIGHT:
+        return
+    assert "playwright" in bm.BrowserManager()._backends, (
+        "探测位被钉成 True，在册表里却没有 playwright ⇒ `_load_config` 读的不是活属性")

@@ -9,7 +9,7 @@
  * 成功创建的 blob URL 由 stores/chat.ts 丢弃路径的 revokeMessageBlobUrls 统一回收。
  */
 import { requireNonEmptyAudioBlob } from '@/composables/useStreamTTS'
-import { secureStorage } from '@/utils/security'
+import { readAccessToken } from '@/utils/authSession'
 
 /**
  * @returns 可播放 URL；非 `/api/` 形态原样返回（含空串，保持旧行为）；
@@ -24,7 +24,7 @@ export type FetchLike = (
 export async function resolveAudioUrl(url: string, fetchImpl: FetchLike = fetch): Promise<string | null> {
   if (!url.startsWith('/api/')) return url
   try {
-    const token = secureStorage.get('auth_token')
+    const token = readAccessToken()
     const resp = await fetchImpl(url, {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     })

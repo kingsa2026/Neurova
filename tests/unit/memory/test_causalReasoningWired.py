@@ -83,9 +83,14 @@ def test_traverseEndpointCausalBranch(monkeypatch):
     monkeypatch.setattr(crud, "get_memory_manager", lambda *a, **k: FakeManager())
     app = FastAPI()
     app.include_router(crud.router, prefix="/api/v1/memory")
-    app.dependency_overrides[crud.get_current_user_or_default] = lambda: {"user_id": "u1"}
+    # 身份走生产签的真 JWT：记忆面的门挂在 router 级依赖上，判的是"请求有没有凭证"，
+    # `dependency_overrides` 只能替掉处理器级解析、替不掉这道门（本仓记在
+    # `tests/auth_headers.py` 的开头，§6-426 那批也是同一条）。2026-10-26 点单甲之后
+    # 读侧同样要凭证，原先靠 override + 匿名请求的写法会停在 401。
+    from tests.auth_headers import bearerHeaders
 
-    with TestClient(app, raise_server_exceptions=False) as client:
+    with TestClient(app, headers=bearerHeaders("causal-probe"),
+                   raise_server_exceptions=False) as client:
         resp = client.get(
             "/api/v1/memory/relations/m1/traverse",
             params={"method": "causal", "target_id": "m2", "include_loops": "true"},

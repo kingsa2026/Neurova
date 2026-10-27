@@ -29,6 +29,7 @@ fixture `sample_memory_manager`，最后两格还会在无凭据时**真去连 O
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 
 from tests import ast_scan
@@ -63,15 +64,14 @@ def _isAwaitWrapped(node, parentMap) -> bool:
     return False
 
 
-def _syncRouteCallsIn(source: str) -> list:
-    """挑出"同步地把 Message 喂给 `.route(`"的行号。
+def _syncRouteCallsIn(tree) -> list:
+    """挑出"同步地把 Message 喂给 `.route(`"的行号（收已解析的树，不自付 `ast.parse`）。
 
     只认三件同时成立：非 async 上下文、属性名 route、**第一参是 `Message(...)` 形态**；
     且排除已被 `asyncio.run(...)` / `loop.run_until_complete(...)` 包住的调用——
     MoE 网络那只 `route(query_vec)` 是另一条真 async 接口，把它算进来会让本档退化成
     "见 route 就红"的假守卫（判据问错对象那一族）。
     """
-    tree = ast.parse(source)
     parentMap = {}
     for parent in ast.walk(tree):
         for child in ast.iter_child_nodes(parent):
@@ -124,6 +124,7 @@ class TestTheOldIntegrationFileIsRetired:
                           or "from tests.integration import test_full_chain" in line)
                 if refers and "退役" not in line:
                     hits.append("%s:%d" % (ref.path.relative_to(REPO_ROOT), lineno))
+
         assert hits == [], (
             "还有活引用指向旧集成档（会把人引回死文件）；确实要提就带上「退役」二字：%s" % hits[:5])
 
@@ -150,11 +151,14 @@ class TestNobodyCallsTheAsyncRouterSynchronously:
             path = ref.path
             source = ref.code
             try:
-                lines = _syncRouteCallsIn(source)
+                # 交给 `_syncRouteCallsIn` 的必须是**已解析的树**：`ast_scan` 的引用体是源码串，
+                # 直接传进去会让 `ast.walk` 撞上 str（口径写错，红的是判据自己而不是被检形状）。
+                lines = _syncRouteCallsIn(ast.parse(source))
             except SyntaxError:
                 continue
             if lines:
                 offenders.append("%s:%s" % (path.relative_to(REPO_ROOT), lines))
+
         # 面自证拆两条（形态 404）：枚举面证"根指得到"，候选面证"预筛没把命中滤空"。
         # 现算 tests 2483 ＋ scripts 76 ＝ 2559 个 .py；根少指一层（只剩 scripts）就掉到 76。
         assert enumerated >= 2000, (
@@ -170,9 +174,9 @@ class TestNobodyCallsTheAsyncRouterSynchronously:
         awaited = "async def t():\n    result = await router.route(Message(content='hi'))\n"
         wrapped = "def t():\n    result = asyncio.run(network.route(query_vec))\n"
 
-        assert _syncRouteCallsIn(bad) == [2], "同步样本没被点名，守卫会恒绿"
-        assert _syncRouteCallsIn(awaited) == [], "await 形态被误报了"
-        assert _syncRouteCallsIn(wrapped) == [], (
+        assert _syncRouteCallsIn(ast.parse(bad)) == [2], "同步样本没被点名，守卫会恒绿"
+        assert _syncRouteCallsIn(ast.parse(awaited)) == [], "await 形态被误报了"
+        assert _syncRouteCallsIn(ast.parse(wrapped)) == [], (
             "把 asyncio.run(...) 里的真 async 调用也算红了——判据问错对象")
 
     def testTheReferenceScannerSparesAPointerButCatchesABareReference(self):

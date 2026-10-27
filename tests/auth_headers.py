@@ -24,12 +24,25 @@ from __future__ import annotations
 import typing
 from typing import Any, Callable, Dict
 
-from neurova.api.auth import create_access_token
-
 
 def bearerHeaders(sub: str = "probe-user", **claims: Any) -> Dict[str, str]:
-    """签发一枚真 token 并包成请求头（`sub` 即租户键 user_id）。"""
-    token = create_access_token(data={"sub": sub, **claims})
+    """对齐本轮密钥，再签一枚真 token 并包成请求头（`sub` 即租户键 user_id）。
+
+    **这一句 `pinJwtSecret()` 是本仓唯一的身份取数不变式**：签发侧与验签门必须读同一把
+    密钥的"当时值"。此前 `bearerHeaders` 只签不对齐，于是任何在 import 期签头的档都会在
+    别人对齐之后变成「刚签的令牌被自己拒」（现算 6 档 11 处模块级签头、合跑 26 条红、
+    另有单档单跑即红 2 条，红形同为 401 —— 见
+    `docs/04-plans/记忆面测试密钥作用域工单_2026-10-27.md`）。幂等 ⇒ 已对齐时零开销。
+
+    这里同时退役了 `signedBearerHeaders`：对齐塞进签名口之后，它就是本函数的第二个名字，
+    而第二个名字等于第二个事实源（教义第 6/7 条）。
+    """
+    # 走模块对象调用，不用模块级再导出的那个函数对象："这一轮是哪把密钥"的答案只有
+    # `auth.currentJwtSecretKey()` 一处，判据要断也断这一处（不再各读各的副本）。
+    from neurova.api import auth as auth_mod
+
+    pinJwtSecret()
+    token = auth_mod.create_access_token(data={"sub": sub, **claims})
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -109,3 +122,67 @@ def overrideIdentity(app, identity: Any) -> None:
         snapshot = dict(identity)
         provider = lambda: dict(snapshot)
     app.dependency_overrides.update({fn: provider for fn in targets})
+
+
+#: ── 本轮签名密钥的唯一事实源 ────────────────────────────────────────────────
+#: 生产侧 `neurova/api/auth.py:175` 把密钥烘在模块全局，签发（`create_access_token`）
+#: 与验签（`verify_access_token` 与各身份门）都读**自己模块字典**里的那一份。
+#: 于是只要进程里出现过第二份 auth 模块字典（`deps` 再导出的身份门、夹具重载、
+#: 别的档改了全局），两侧就各持一把密钥 —— 形态恰好是"本档刚签发的令牌被自己拒"：
+#: `401 Invalid or expired token`，而单跑与邻档合跑都绿。
+#:
+#: 判据侧的处置不许是"每个档各自把密钥抄一遍"（那是第二份、第三份事实源，
+#: 台面上谁先跑谁说了算），也不许给生产加兜底（教义第 1 条：症状挪走，故障还在）。
+#: 收成这一处：**这一轮用的是哪把密钥**，由这里回答一次；令牌在用例内现签。
+#:
+#: 为什么认"函数对象的 `__globals__`"而不是逐个模块名：门是函数对象，它读的是
+#: 自己被定义时绑定的那份模块字典。改 `auth.JWT_SECRET_KEY` 对一份已经分叉出去的
+#: 字典无效 —— 那正是本仓反复踩红的那个缺口。
+#:
+#: 可达性边界（不假装能管别人）：已经**导出的名字**（`from neurova.api.auth import
+#: JWT_SECRET_KEY`）拿到的是那一刻的字符串，这里改不到它；本仓判据面没有这种写法，
+#: 将来有了它自己会红，不会被静默放过。
+_TEST_SECRET = "test_secret_key_shared_by_the_identity_gates_0123456789"
+
+#: 身份门名册：`auth` 与 `deps` 两侧的同名对象都要打（`deps` 那份是再导出，
+#: 同一对象只打一次 —— 但名字表要保持宽，将来多一条入口时这里自动跟上）。
+_GATE_NAMES = ("strictIdentityGate", "get_current_user", "get_current_userWithQueryToken",
+               "get_optional_user", "get_optional_userWithQueryToken",
+               "get_current_user_or_default", "verify_access_token")
+
+
+def _signingGates() -> list:
+    """当前仓内**全部**读密钥的入口函数对象（运行时现值，不抄名单）。"""
+    from neurova.api import auth as auth_mod
+    from neurova.api import deps as deps_mod
+
+    found, seen = [], set()
+    for module in (auth_mod, deps_mod):
+        for name in _GATE_NAMES:
+            fn = getattr(module, name, None)
+            if callable(fn) and id(fn) not in seen:
+                seen.add(id(fn))
+                found.append(fn)
+    return found
+
+
+def pinJwtSecret(secret: str = _TEST_SECRET) -> str:
+    """把本轮密钥对齐到 `secret`，返回它。
+
+    对齐的落点是**环境变量 `NEUROVA_JWT_SECRET`**，不是模块全局：生产侧的签发与验签
+    都走唯一取用口 `auth.currentJwtSecretKey()`（运行时读环境变量）。原先这里逐个改写
+    `auth.JWT_SECRET_KEY` 与各身份门 `__globals__` 里的同名全局，那是在测试里替生产
+    补一个它本该有的前提——取用口上线后，改全局对签发/验签**一个字都不生效**，
+    反而会读出一把谁都不用的"第三把密钥"（实测 10 格 `InvalidSignatureError`）。
+
+    幂等：已经是这一把时什么都不做。返回值的用途是链式取用；
+    但**不要在导入期烘一枚令牌** —— 令牌属于"这一轮"，不属于"这个进程"。
+    """
+    import os
+
+    from neurova.api import auth as auth_mod
+
+    if auth_mod.currentJwtSecretKey() != secret:
+        os.environ["NEUROVA_JWT_SECRET"] = secret
+    return secret
+

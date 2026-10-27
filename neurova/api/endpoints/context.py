@@ -386,6 +386,23 @@ async def get_context_composition(
     return ContextCompositionResponse(**comp)
 
 
+@router.get("/budget")
+async def get_context_budget(
+    agent_id: str = Query(default="default", description="Agent ID"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """获取最近一次系统提示的常驻分段预算（N6，只读）。
+
+    无实测记录返回 404——不伪造一份空报告；报告只测量、不改写 prompt。
+    """
+    from neurova.context.budget_report import getContextBudget
+
+    report = getContextBudget(agent_id or "default")
+    if report is None:
+        raise HTTPException(status_code=404, detail="No always-on budget measured for this agent yet")
+    return report
+
+
 @router.get("/{context_id}/preview", response_model=ContextPreview)
 async def get_context_preview(
     request: Request,

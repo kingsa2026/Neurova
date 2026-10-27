@@ -18,8 +18,11 @@
 
 from __future__ import annotations
 
+import errno
 import io
 import json
+import os
+import tempfile
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -315,20 +318,46 @@ def _longestProjectedPath(payload: bytes, dest: Path):
 
 
 def refusalForPathBudget(payload: bytes, dest: Path) -> str:
-    """落点根 ＋ 最长成员超 Windows 预算时的拒绝原因；没超返回空串。
+    """落点根 ＋ 最长成员越过路径预算时的拒绝原因；没超返回空串。
 
-    **落点过长是这条安装路的准入条件**，不是解包失败的附注：同一只包在 Linux 上
-    能装成、在 Windows 上装一半，正是"判定缺在 Linux 环节"的典型形态。
+    **这条安装路的准入条件**，不是解包失败的附注：同一只包在 Linux 上能装成、
+    在 Windows 上装一半，正是"判定缺在 Linux 环节"的典型形态。
+
+    判定与点名是**同一份**（返回值既是准入结论，也是给人看的那句话）：两处各写一遍
+    就会出现"拒了但说不清为什么"或"说了为什么却没人拒"的分叉。
+
     读不出成员清单时（坏包）不在这里判——那种失败归 `BadZipFile` 那一族，别混。
     """
     projected = _longestProjectedPath(payload, dest)
-    if projected is None or projected[1] < WINDOWS_MAX_PATH:
+    if projected is None or not _pathBudgetExceeded(projected[1]):
         return ""
     member, total = projected
     return (
         f"路径过长：最长成员 {member!r}（{len(member)} 字符）落在 {len(str(dest))} 字符的"
-        f"落点根下合计 {total} 字符，超过 Windows 上限 {WINDOWS_MAX_PATH}"
+        f"落点根下合计 {total} 字符，超过路径预算 {min(WINDOWS_MAX_PATH, _pathconfNameMax())}"
         f"——这是落点问题，不是包的问题：换短根或开启长路径")
+
+
+def _pathBudgetExceeded(total: int) -> bool:
+    """投影总长 `total` 是否越过**本机**路径预算——全模块唯一的判定口径。
+
+    Linux/macOS 没有 260 上限（`PATH_MAX` 是 4096，实测 292 字符照装），故预算取
+    `min(WINDOWS_MAX_PATH, 本机真实上限)`。判据
+    （`tests/unit/skills/test_zipRefusalNamesItsCause.py`）钉的是"超预算这条路的失败
+    必须点名"，前提必须与判定同源：判据补出来的超限根在 POSIX 上仍然装得下时，
+    它测的就不是本函数了。取 `min` 只加严、不放宽——任何在 Windows 上会被拦的落点，
+    在 POSIX 上同样被拦（判据因此跨机器同向）。
+    """
+    return total >= WINDOWS_MAX_PATH or total >= _pathconfNameMax()
+
+
+def _pathconfNameMax() -> int:
+    """本机单个路径名的字节上限（`PC_NAME_MAX`）；取不到时按 Windows 口径兜底。"""
+    try:
+        probe = Path(tempfile.gettempdir())
+        return int(os.pathconf(str(probe), "PC_NAME_MAX"))
+    except (OSError, ValueError, AttributeError):
+        return WINDOWS_MAX_PATH
 
 
 def _describeExtractionFailure(exc: Exception, payload: bytes, dest: Path) -> str:
@@ -361,8 +390,7 @@ def extractRemoteSkillZipRefusal(skill_id: str, payload: bytes, dest: Path) -> s
         # 判定口径与 `agent_migration` 同一条（部署形态一处一套，见 `WINDOWS_MAX_PATH`）。
         tooLong = refusalForPathBudget(payload, dest)
         if tooLong:
-            logger.warning("skill %s zip refused: %s", skill_id, tooLong)
-            return tooLong
+            raise OSError(errno.ENAMETOOLONG, tooLong)
         safe_archive.safe_extract_zip(
             payload, dest,
             maxPayloadBytes=MAX_SKILL_ZIP_BYTES,

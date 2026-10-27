@@ -409,6 +409,7 @@ CODE_REFERENCE_RULINGS = {
          "33-测试层节点指记忆闭环测试；原裁定的 tests/integration/ 那份在 `c2031c4c8`（批 138）"
          "随通道插件退役一并删除，闭环性质现由 tests/test_memory/test_closed_loop.py 与 "
          "tests/integration/test_data_flow_closed_loop.py 在守"),
+
 }
 
 RULING_SETTLED = "已裁定"

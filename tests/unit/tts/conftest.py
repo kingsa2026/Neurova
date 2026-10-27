@@ -13,6 +13,8 @@
 无汇总行）。判据见 `test_unitTierNeverPaysForRealWeights.py`。
 """
 
+import time
+
 import pytest
 
 from neurova.tts import manager as tts_manager_mod
@@ -23,6 +25,18 @@ from tests.unit.tts._fakeEngines import (
     fakeHeavyFactory,
     fakeLightFactory,
 )
+
+
+#: 「很久没用过」的时间锚。**必须相对当前时钟算**，不能写死一个绝对数：
+#: `synthesize()` 收尾会把握时器推成 `time.monotonic()`，而进程已跑了一段时间的机器上
+#: 那个读数早超过一百六十万秒 ⇒ 写死 `1_000_000` 反而成了"刚刚用过"，TTL 格因此红成
+#: "释放没换班到轻引擎"（判据与环境耦合，与实现无关）。
+IDLE_ANCHOR_OFFSET_SEC = 10_000.0
+
+
+def idleNow() -> float:
+    """比"现在"晚 `IDLE_ANCHOR_OFFSET_SEC` 的合成时钟读数——任何 TTL 都早已超时。"""
+    return time.monotonic() + IDLE_ANCHOR_OFFSET_SEC
 
 
 @pytest.fixture()

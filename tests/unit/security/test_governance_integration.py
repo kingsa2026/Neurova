@@ -62,11 +62,16 @@ class TestGovernanceIntegration(unittest.TestCase):
 
     def tearDown(self):
         reset_governance()
-        # 还原类属性，避免污染其他用例
+        # 还原类属性，避免污染其他用例。类 `__dict__` 是 mappingproxy（只读视图），
+        # 删除只能走 `delattr`——此前那句 `del Type.__dict__[name]` 在 tearDown 里必炸，
+        # 用例本身全绿却按 `TypeError` 记红。
         if self._original_tool_engine_prop is not None:
             ToolExecutor.tool_engine = self._original_tool_engine_prop  # type: ignore[assignment]
-        elif "tool_engine" in ToolExecutor.__dict__:
-            del ToolExecutor.__dict__["tool_engine"]
+        else:
+            try:
+                delattr(ToolExecutor, "tool_engine")
+            except AttributeError:
+                pass
 
     # ── DENY: 反弹 shell 在执行前被拦截 ────────────────────────
 

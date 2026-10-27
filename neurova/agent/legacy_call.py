@@ -7,7 +7,8 @@
 
 - `callLegacy`／`callLegacyNormal`／`callLegacyStream`：绕开 Loop 直接打 `llm_client`；
 - `raiseForLlmErrorDict`：错误 dict → 分类异常（供应商错误守卫靠分类决定要不要重试）；
-- `isApiConfigError`：API 配置类错误不 fallback。
+- `isApiConfigError`：**已退役**，取法收口到 `agent/continuation_hint`（同一件事曾有两份，
+  按 AGENTS.md 教义第 6 条只留一处；本模块的调用方经 `continuation_hint` 取）。
 
 **归属不变**：`ChatPipeline` 上仍留着同名方法作薄委托，调用点与测试面一行不用改——
 搬走的是实现，不是接口（教义第 7 条：同功能先比后合，不留第二份实现各自演化）。
@@ -190,17 +191,3 @@ def raiseForLlmErrorDict(chunk: Dict) -> Exception:
     if "connect" in low or "timeout" in low or "connection" in low:
         return LLMConnectionError(message)
     return LLMError(message)
-
-
-def isApiConfigError(exc: Exception) -> bool:
-    """判断是否为 API 配置类错误（不应 fallback）"""
-    try:
-        from openai import AuthenticationError, BadRequestError
-
-        if isinstance(exc, (BadRequestError, AuthenticationError)):
-            return True
-    except ImportError:
-        pass
-    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
-    return status in (400, 401, 403)
-

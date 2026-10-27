@@ -207,7 +207,7 @@ class LocalExecutor(ExecutionRuntime):
         try:
             # 局部导入：`exec_sandbox` 在自身函数内反向引用本模块（Docker 执行器），
             # 提到模块级会把这条懒加载环变成导入期环。
-            from neurova.core.cancel_token import registerKillAction
+            from neurova.core.cancel_token import currentCancelEpoch, registerKillAction
             from neurova.sandbox.exec_sandbox import (
                 KILL_GRACE_S,
                 killProcessTree,
@@ -229,7 +229,15 @@ class LocalExecutor(ExecutionRuntime):
             # 刻意**不**写 `self._process`：运行时实例经 RuntimeManager 复用，
             # 并发 exec 会互相覆盖该字段、并在 `finally` 里把对方的句柄抹掉
             # （它此前恒为 None，故这是一处新引入的竞态，不是既有缺陷）。
-            registerKillAction(lambda: killProcessTree(process))
+            # 注册口把"摘钩"一并交回来：撤回调的键必须**是令牌认的那个对象**，
+            # 所以只能由令牌给，不能在这里另造一个 partial 去"撤回"（造一个新的永远撤不掉）。
+            #
+            # `launchedAtEpoch` 是这条回调的生效边界：起进程**之后**才发生的取消才兑现它。
+            # 不传的话，同一轮里上一发命令之后的取消会把这一发新进程当场杀掉——用户点一次
+            # 停止，取消顺着整轮后续命令一路传染（实测：第一发 `print(1)` 成功、本轮 cancel
+            # 之后下一发立即 `exit_code=-9`，而它连一行都没跑）。
+            releaseKillAction = registerKillAction(
+                lambda: killProcessTree(process), currentCancelEpoch())
 
             # `communicate` 的第一个位置参是 `input` 而非 `timeout`，故经关键字传
             # （写成 `to_thread(process.communicate, timeout)` 会把秒数当 stdin 内容）。
@@ -246,6 +254,12 @@ class LocalExecutor(ExecutionRuntime):
                 except Exception:  # noqa: BLE001 - 收尸失败不改变超时契约
                     stdout, stderr = b"", b""
                 exit_code = -1
+            finally:
+                # 收尸之后必须摘钩：令牌按**轮**持有，而这条回调按**进程**注册。
+                # 不摘的话，本轮后续任何一次取消都会去杀一个已经结束的 pid；pid 被系统
+                # 复用时杀的就是别人的进程——实测表现是本轮第一发命令之后的每一条都
+                # 立即 -9（`Popen` 与注册之间那个窗口里回调被"立即兑现"）。
+                releaseKillAction()
 
             duration_ms = (time.time() - start_time) * 1000
 

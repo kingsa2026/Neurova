@@ -6,7 +6,7 @@
 
 1. 白名单在取回之前——未登记 host 的 URL 回 403（而不是先把字节拉回来再拒）；
 2. 登记之后，安装走的是取回咽喉：解包 → 名字核对 → 挪进插件根 → **同一条**登记链
-   （权限门、装时钉、根外锚、state.json 的 `install_source`）；
+   （权限门、装时钉、锚文件、state.json 的 `install_source`）；
 3. 装上之后改一个字节，`manager.load_plugin` 按 `artifact_digest_mismatch` 拒
    （远程包与本地包共享同一道装载闸）；
 4. 撤掉源之后同一个 host 立刻不可再取回；
@@ -158,7 +158,7 @@ def main():
                   state["plugins"]["remote-demo"].get("install_source") == baseUrl + "demo.zip",
                   str(state["plugins"]["remote-demo"].get("install_source")))
             anchors = json.loads((anchorDir / "artifact_anchors.json").read_text(encoding="utf-8"))
-            check("8 同一枚摘要也落了根外锚（§6-388 对远程包同样生效）",
+            check("8 同一枚摘要也落了锚文件（§6-388 对远程包同样生效）",
                   anchors["anchors"].get("plugin:remote-demo") == record.artifactDigest)
             check("9 暂存目录已清", not list(root.glob(".incoming_*")),
                   str([p.name for p in root.glob(".incoming_*")]))
