@@ -273,7 +273,13 @@ main:
               rm -f "$MARK"
               # `{ ...; echo $? > "$MARK"; }` 里的 `$?` 是 **pytest** 的退出码（它紧跟 pytest，
               # 中间没有别的命令），`tee` 只负责转发与落盘。
-              { python -u -m pytest -q --timeout 1500 --cov --cov-report= --cov-fail-under=0 "$@" \
+              # `COVERAGE_FILE` 指进 `data/coverage/`：coverage 的缺省落点是 `./.coverage`，
+              # 而合并那一步（`scripts/ci/coverage_report.py --data-dir data/coverage`）只认那个目录。
+              # 两处各猜一次路径就是"跑测说全绿、合并说没数据"——构建 `cnb-4gd-1k5us1o1q`
+              # 实测：stage 2 全绿（2737 passed），stage 3 报 `没有找到任何覆盖率数据`。
+              # 片号进文件名：一次构建里三片各写一份，同名会互相覆盖、合并后只剩最后一片。
+              { COVERAGE_FILE="data/coverage/.coverage.$(basename "$shard" .txt)" \
+                  python -u -m pytest -q --timeout 1500 --cov --cov-report= --cov-fail-under=0 "$@" \
                   2>&1; echo $? > "$MARK"; } | tee "/tmp/$(basename "$shard" .txt).log"
               RC=$(cat "$MARK" 2>/dev/null || echo 1)
               echo "── ${shard} pytest 退出码: $RC"
