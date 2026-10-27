@@ -163,12 +163,9 @@ def _measure(manager: MemoryManager, pickQuery) -> dict:
 
 @pytest.fixture
 def recallCorpus(tmp_path):
-    from tests.conftest import requireVectorPath
+    from tests.memory_embedding_precondition import requireRealEmbeddingOrSkip
 
-    # 前提是「生产同款稠密检索真的在跑」：引擎对象非 None 不等于 encode 给出非零向量，
-    # 薄环境（无 numpy/onnxruntime/tokenizer）里每次都是 512 维零向量，余弦恒 0——
-    # 那正是本判据此前把"缺依赖"量成"MRR 掉档"的原因。判据单一源在 conftest。
-    requireVectorPath()
+    requireRealEmbeddingOrSkip("联想召回基线（本判据测的是生产同款稠密+词法双路检索）")
 
     manager = MemoryManager(
         db_path=os.path.join(str(tmp_path), "mem.db"),

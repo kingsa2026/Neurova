@@ -18,8 +18,11 @@
 
 from __future__ import annotations
 
+import errno
 import io
 import json
+import os
+import tempfile
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -314,23 +317,28 @@ def _longestProjectedPath(payload: bytes, dest: Path):
     return longest, len(base) + 1 + len(longest)
 
 
-def _refuseOverlongLanding(payload: bytes, dest: Path) -> None:
-    """落点 + 最长成员的投影超 Windows 上限时，**在落盘之前**拒。
+def _pathBudgetExceeded(payload: bytes, dest: Path) -> bool:
+    """这条落点在这台机器上装得下吗——**路径预算的唯一判定口**（拒绝与点名都读它）。
 
-    为什么必须在解包前判：260 是 Windows 口径，而落盘那一步的失败**取决于跑它的机器**。
-    Linux 内核的路径上限是 4096，同一条 259 字符的落点在 Linux 上照常建得出来——
-    于是"落点根太长"这一族在 Linux 上永远捕获不到 `OSError`，原因面就返回空串（读作"装成了"）。
-    §6-276 立这一族判据时按 Windows 的症状写实现，判据却在 Linux 上跑，两边从没对上过。
-
-    取 `UnsafeArchiveError` 是"这个包在本落点落不下去，拒绝解包"的既有词汇
-    （越界、超字节、超成员数都归它），不另造异常类型；它随后经
-    `_describeExtractionFailure` 的同一条支路被点名成"路径过长 + 三个数"。
+    Linux/macOS 没有 260 上限（`PATH_MAX` 是 4096，实测 292 字符照装），故预算取
+    `min(WINDOWS_MAX_PATH, 本机真实上限)`。判据（`tests/unit/skills/test_zipRefusalNamesItsCause.py`）
+    钉的是"超预算这条路的失败必须点名"，前提必须与判定同源：判据补出来的超限根在 POSIX 上
+    仍然装得下时，它测的就不是本函数了。取 `min` 只加严、不放宽——任何在 Windows 上会被拦的
+    落点，在 POSIX 上同样被拦（判据因此跨机器同向）。
     """
     projected = _longestProjectedPath(payload, dest)
-    if projected is not None and projected[1] >= WINDOWS_MAX_PATH:
-        member, total = projected
-        raise safe_archive.UnsafeArchiveError(
-            f"落点根过长：最长成员 {member!r} 合计 {total} 字符 ≥ Windows 上限 {WINDOWS_MAX_PATH}")
+    if projected is None:
+        return False
+    return projected[1] >= WINDOWS_MAX_PATH or projected[1] >= _pathconfNameMax()
+
+
+def _pathconfNameMax() -> int:
+    """本机单个路径名的字节上限（`PC_NAME_MAX`）；取不到时按 Windows 口径兜底。"""
+    try:
+        probe = Path(tempfile.gettempdir())
+        return int(os.pathconf(str(probe), "PC_NAME_MAX"))
+    except (OSError, ValueError, AttributeError):
+        return WINDOWS_MAX_PATH
 
 
 def _describeExtractionFailure(exc: Exception, payload: bytes, dest: Path) -> str:
@@ -342,7 +350,7 @@ def _describeExtractionFailure(exc: Exception, payload: bytes, dest: Path) -> st
     """
     if isinstance(exc, (OSError, safe_archive.UnsafeArchiveError)):
         projected = _longestProjectedPath(payload, dest)
-        if projected is not None and projected[1] >= WINDOWS_MAX_PATH:
+        if _pathBudgetExceeded(payload, dest):
             return _pathTooLongReason(projected[0], dest, projected[1])
     return f"{type(exc).__name__}: {exc}"
 
@@ -389,7 +397,12 @@ def extractRemoteSkillZipRefusal(skill_id: str, payload: bytes, dest: Path) -> s
         logger.warning("skill %s zip refused: %s", skill_id, tooLong)
         return tooLong
     try:
-        _refuseOverlongLanding(payload, dest)
+        # 路径预算也是这条路的前置：Windows 未开长路径时超限落点是 ENOENT，
+        # 而在 POSIX 上同一份包会照装——拒绝口径不许随机器漂，故在解包机制之前先判一次。
+        if _pathBudgetExceeded(payload, dest):
+            raise OSError(
+                errno.ENAMETOOLONG,
+                "落点根 + 最长成员的投影越过本机路径预算（未解包）")
         safe_archive.safe_extract_zip(
             payload, dest,
             maxPayloadBytes=MAX_SKILL_ZIP_BYTES,

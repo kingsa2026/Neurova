@@ -365,6 +365,9 @@ def get_ingest_bridge() -> KnowledgeIngestBridge:
     """进程内唯一的入站桥（构造会建队列连接与 MQTT 传输面，无锁并发下会各建一份）。
 
     缓存槽就是模块全局 `_bridge`：`lazySingleton` 把判空护在 RLock 里，复位写回同一个名字。
+    函数体只负责构造，判空不再在这里手写第二遍——手写那一份正是本档要退役的形态
+    （`if _bridge is None: _bridge = ...` 无锁，两个线程各建一份，前一份带着已注册的
+    传输面被静默丢弃）。
     """
     return KnowledgeIngestBridge()
 

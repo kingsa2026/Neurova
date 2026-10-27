@@ -27,7 +27,7 @@ import re
 """
 
 from neurova.core.logger import get_logger
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from neurova.channels.base import ChannelMessage
 
@@ -37,6 +37,9 @@ from fastapi import Depends, APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from neurova.channels.manager import get_channel_manager
+
+if TYPE_CHECKING:  # 只作注解用；运行时靠 `from __future__ import annotations` 不解析
+    from neurova.channels.base import ChannelMessage
 
 logger = get_logger(__name__)
 

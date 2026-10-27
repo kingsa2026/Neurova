@@ -18,7 +18,6 @@ r"""解包失败必须点名原因（§6-276 立项落地：zip 成员名撞 Win
 from __future__ import annotations
 
 import io
-import os
 import zipfile
 from pathlib import Path
 
@@ -29,8 +28,6 @@ from neurova.skills import market_sources
 from neurova.skills.market_importer import BUILTIN_BUNDLE_DIR, MarketImporter, read_builtin_bundle
 
 BUNDLE = "adaptive-presentation-studio.zip"
-#: 深根相对预算下界的余量（见 `deepRoot`）：把"平台临时目录前缀有多长"从这里彻底移出去。
-_DEEP_ROOT_MARGIN = 20
 REFUSAL_API = "extractRemoteSkillZipRefusal"
 
 
@@ -51,33 +48,95 @@ def buildZip(members: dict) -> bytes:
 
 
 def deepRoot(tmp: Path, skill_id: str) -> Path:
-    """造一个**真的**越过 Windows 260 预算的落点根，根长由预算常量现算。
+    """复刻 pytest 那种"用例名即目录名"的深根，并按**实测成员长度**补到真超限。
 
-    原先写死 `pytest-of-operator/pytest-9999/test_import_builtin_offline[...]0/skills/<id>`，
-    读数是"合计 273 字符"——那读数依赖 `tmp` 的前缀长度：Linux 的 `pytest-of-root/pytest-71`
-    比 Windows 的 `pytest-of-<用户>/pytest-N` 短一截，实测只剩 259 ⇒ 包**装成了**、
-    三格红在"前置没造出来"上，而不是红在原因面上。落点长短不该由跑测机的家目录长度决定，
-    所以这里按目标预算倒推补足：让最长成员投影恰好落在 `WINDOWS_MAX_PATH - 1`（`>=` 才拒）。
+    原写法只拼 273 字符的根，赌的是"根 + 最长成员 ≥ 260"。这个赌注会过期：
+    内置资产包的最长成员后来缩到 125（根 133 + 1 + 125 = 259，正好卡在 260 预算内），
+    整档于是从"钉住路径过长这一族"退化成"报告说兜底没生效"——判据错的不是断言，是前提。
+    现在根按 `WINDOWS_MAX_PATH` 与**这份包真实的**成员长度反推，成员再缩也照样越限；
+    平台临时目录前缀多长也因此不再决定这一格红不红。
     """
-    # 三级叶子：用例名 + 技能 id + 包内那一级目录（安装落点是 <skills>/<id>/）。
-    # 少了最后一级，"最长成员投影"就短一截——第一版按"根 + 成员"算，于是只补到 259 就停手。
-    leaf = (tmp / "pytest-of-operator" / "pytest-9999"
-            / "test_import_builtin_offline[presentation-studio]0" / "skills" / "l" / skill_id)
-    bundlePath = BUILTIN_BUNDLE_DIR / BUNDLE
-    with zipfile.ZipFile(bundlePath) as zf:
-        longest = max(zf.namelist(), key=len)
-    # 预留余量：目标预算 = 上限 − 1 − 余量，于是投影稳稳落在拒的那一侧，
-    # 平台临时目录前缀长短不再决定这一格红不红。
-    shortfall = (market_sources.WINDOWS_MAX_PATH - 1 - _DEEP_ROOT_MARGIN) \
-        - (len(str(leaf)) + 1 + len(longest))
-    if shortfall > 0:
-        # 补足段插在**用例目录之前**，让它真的落在路径里（尾部追加会被 `/` 解析成
-        # 一个不存在的中间目录，长度白算）。用 `os.path.normpath` 而不是 `resolve()`：
-        # 后者会把 `/tmp` 这类符号链接展开，长度又是另一份读数。
-        rest = leaf.relative_to(tmp)
-        first, remainder = rest.parts[0], rest.parts[1:]
-        leaf = Path(os.path.normpath(str(tmp / first))) / ("p" * shortfall) / Path(*remainder)
-    return leaf
+    payload = read_builtin_bundle(BUNDLE)
+    projected = market_sources._longestProjectedPath(payload, tmp / "probe")
+    assert projected is not None, "读不出内置包的成员清单 ⇒ 本档失去根据，去查资产而不是关判据"
+    member, _total = projected
+    tail = ["skills", skill_id]
+    overflow = 4  # 越过上限的余量：判据要的是"超了"，不是"刚好等于"
+    tailLen = len("/".join(tail)) + 1
+    headFixed = len(str(tmp / "pytest-of-operator" / "pytest-9999")) + 1
+    room = market_sources.WINDOWS_MAX_PATH + overflow
+    padLen = room - headFixed - tailLen - len(member)
+    assert padLen > 0, (
+        f"临时根本身已占 {headFixed} 字符，补不出超限的深根：这份包的最长成员 {len(member)} 字符——"
+        "换更短的成员集再取样，别把断言改松")
+    base = (tmp / "pytest-of-operator" / "pytest-9999" / ("p" * padLen) / "skills" / skill_id)
+    assert len(str(base)) + 1 + len(member) > market_sources.WINDOWS_MAX_PATH, (
+        "深根没补到超限：本档两格的前提（路径过长这一族必须被拒）不成立")
+    return base
+
+
+def _pads(base: Path, skill_id: str, payload: bytes) -> list:
+    """从"刚够超限"往上排几档候选根长。
+
+    为什么要试：投影长度与"真会抛 OSError"不是同一个数——本机 ext4 的单段上限 255
+    （`PC_NAME_MAX`）先拦下的那一档，报的是"父目录建不出来"，不是本条要的那族失败。
+    """
+    member = market_sources._longestProjectedPath(payload, Path("x"))
+    assert member, "读不出成员清单 ⇒ 本档失去根据，去查资产包"
+    overshoot = market_sources.WINDOWS_MAX_PATH - len(str(base / skill_id)) - member[1] + 20
+    return [max(overshoot, 0) + step for step in (0, 150, 300, 450)]
+
+
+def longRoot(tmp: Path, skill_id: str) -> Path:
+    """够到预算**之上**的落点根：超限由本函数抬上去，不由机器决定。
+
+    为什么不能只靠 `deepRoot` 那一段：包被瘦身过（当前最长成员 125 字符），
+    `deepRoot` 只把投影顶到 247，落在开了长路径的机器上照样装成——那时这一族
+    "没被拒"是**机器配置**的读数，不是实现的读数。
+    """
+    payload = read_builtin_bundle(BUNDLE)
+    assert payload, f"仓内资产包缺失：{BUNDLE} ⇒ 本档失去根据"
+    base = deepRoot(tmp, "")
+    for pad in _pads(base, skill_id, payload):
+        dest = base / ("d" * pad) / skill_id
+        try:
+            market_sources.safe_archive.safe_extract_zip(
+                payload, dest,
+                maxPayloadBytes=market_sources.MAX_SKILL_ZIP_BYTES,
+                maxEntries=market_sources.MAX_ZIP_ENTRIES)
+        except OSError:
+            return dest
+    raise AssertionError(
+        "这台机器上抬到 %d 字符仍能装成 ⇒ 本档失去根据（资产包被改瘦、或路径上限放开），"
+        "去复测而不是删格" % (market_sources.WINDOWS_MAX_PATH + 450))
+
+
+def longLibraryRoot(tmp: Path) -> Path:
+    """同上，但抬的是**技能库根**，给 `MarketImporter` 用。
+
+    这格要的形状比 `longRoot` 挑剔两条：库根自己建得出来（否则死在本条之外），
+    而库根下面再压 `<skill_id>/<成员>` 会抛 OSError。两个鼓包（库根名、技能名前后缀）
+    分开调，因为 ext4 的单段上限 255 先咬住的是长的那一段，合并成一个只会两头不落。
+    """
+    payload = read_builtin_bundle(BUNDLE)
+    base = deepRoot(tmp, "")
+    for ctorPad in (0, 100, 200, 240, 254):
+        libRoot = base / ("c" * ctorPad) / "lib"
+        try:
+            MarketImporter(skills_dir=libRoot)
+        except OSError:
+            continue
+        for suffix in range(0, 320, 10):
+            dest = libRoot / ("s" * (suffix + 1)) / "adaptive-presentation-studio"
+            try:
+                market_sources.safe_archive.safe_extract_zip(
+                    payload, dest,
+                    maxPayloadBytes=market_sources.MAX_SKILL_ZIP_BYTES,
+                    maxEntries=market_sources.MAX_ZIP_ENTRIES)
+            except OSError:
+                return libRoot
+    raise AssertionError(
+        "这台机器上没有「库根能建、但装到最终位置会抛 OSError」的那一档 ⇒ 本档失去根据")
 
 
 @pytest.fixture()
@@ -89,7 +148,7 @@ def builtinPayload() -> bytes:
 
 def test_longRootFailureNamesPathTooLong(builtinPayload, tmp_path):
     """① 主红：长根下的失败必须点名"路径过长"，并给可行动的三个数字。"""
-    dest = deepRoot(tmp_path, "adaptive-presentation-studio")
+    dest = longRoot(tmp_path, "adaptive-presentation-studio")
 
     reason = refusalOf(builtinPayload, dest)
     assert reason, "这个组合在这台机器上装成了——原因面不该返回空串，去复测而不是删格"
@@ -112,7 +171,7 @@ def test_threeFailureFamiliesStayDistinguishable(tmp_path):
     broken = refusalOf(b"definitely-not-a-zip", tmp_path / "b")
     longPath = refusalOf(
         buildZip({"a" * 120 + "/" + "b" * 120 + "/deep.txt": "x"}),
-        deepRoot(tmp_path, "c"))
+        longRoot(tmp_path, "c"))
 
     reasons = {"安全拒": unsafe, "包坏了": broken, "路径过长": longPath, "IO故障(长度没问题)": ioFault}
     for label, reason in reasons.items():
@@ -147,7 +206,9 @@ def test_importerCarriesTheReasonIntoTheReceipt(builtinPayload, tmp_path):
     跨机器安全写法：长根那台机器若开了长路径会真装成，那种情况下本格改判"装成即可"，
     但**只要 FAILED，error_message 就必须点名**——这条不依赖本机 OS 设置。
     """
-    importer = MarketImporter(skills_dir=deepRoot(tmp_path, "skills"))
+    # 长根抬在**技能库之上一级**：再往下压一层，"最终位置"就会撞上本机单段/单路径上限，
+    # 用例会死在 `Path.exists()` 的 ENAMETOOLONG 上，测的就不是回执了。
+    importer = MarketImporter(skills_dir=longLibraryRoot(tmp_path))
     task = importer.import_skill("builtin--adaptive-presentation-studio")
 
     if task.status.value == "failed":
@@ -160,7 +221,7 @@ def test_importerCarriesTheReasonIntoTheReceipt(builtinPayload, tmp_path):
 def test_boolFaceAndReasonFaceAreOneImplementation(builtinPayload, tmp_path):
     """④' bool 老调用面与原因面必须同判：薄包装不是第二套口径（教义第 6 条）。"""
     short = tmp_path / "s" / "adaptive-presentation-studio"
-    long = deepRoot(tmp_path, "l") / "adaptive-presentation-studio"
+    long = longRoot(tmp_path, "l") / "adaptive-presentation-studio"
 
     assert market_sources.extract_remote_skill_zip("p", builtinPayload, short) is True
     assert refusalOf(builtinPayload, short) == ""

@@ -91,11 +91,13 @@ class TestFilterIsIndependentOfBatchSize:
 
 @pytest.fixture
 def fanoutManager(tmp_path):
-    from tests.conftest import requireVectorPath
     from neurova.cognitive_layers.memory_layer.semantic_search import reset_semantic_search
+    from tests.memory_embedding_precondition import requireRealEmbeddingOrSkip
 
-    # 通道不点火的前提是"向量路径不可跑"而不是"引擎对象为 None"——后者薄环境恒真。
-    requireVectorPath()
+    # 前提自给：本档要的是**通道真能点火**（否则扇出门与它要挡的候选一条都不存在，
+    # 读数是空的）。缺件就 skip 并点名缺的是哪一件；装了模型却算不出仍然是红。
+    # 与 C-1 / C-2 同一个前提单源（tests/memory_embedding_precondition.py）。
+    requireRealEmbeddingOrSkip("线索扇出闸（缺档时通道不点火，测不到门）")
     reset_semantic_search()
     mgr = MemoryManager(
         db_path=os.path.join(str(tmp_path), "mem.db"), agent_id="cue_fanout_c3", enable_buffer=False

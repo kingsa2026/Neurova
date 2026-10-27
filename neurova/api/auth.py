@@ -14,6 +14,7 @@ import datetime
 from neurova.core import config
 from neurova.core.logger import get_logger
 import secrets
+import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -131,6 +132,12 @@ def _write_secret_file(secret: str) -> None:
         logger.warning("Failed to save JWT secret: %s", e)
 
 
+#: 自动生成密钥的**进程内唯一值**：一旦本进程确定，就不再因"谁在什么时候读它"而变。
+#: 加锁的理由与全仓其余懒建单例同（AGENTS.md §3）：并发首取不加锁会各建一份。
+_generatedSecretKey: Optional[str] = None
+_generatedSecretLock = threading.RLock()
+
+
 def _load_or_create_secret_key() -> str:
     """
     加载或创建持久化 JWT Secret Key
@@ -142,8 +149,11 @@ def _load_or_create_secret_key() -> str:
 
     安全审计 M1: 环境变量来源的密钥强制强度校验；文件来源自动收紧权限。
     """
-    # 1. 环境变量
-    env_key = config.get("NEUROVA_JWT_SECRET")
+    # 1. 环境变量（两个名字都收：`NEUROVA_JWT_SECRET` 是部署侧
+    #    `deploy_config_consistency_check` 校验的那份；`NEUROVA_JWT_SECRET_KEY` 是全仓
+    #    60 余处测试与诊断脚本的注入名 —— 只认前者的那些年里，后者一字不响地被忽略，
+    #    于是"设了没生效"成了默认状态。两个名字都是密钥的**入口**，不是两份密钥。）
+    env_key = config.get("NEUROVA_JWT_SECRET") or config.get("NEUROVA_JWT_SECRET_KEY")
     if env_key:
         return _validate_secret(env_key)
 
@@ -165,13 +175,50 @@ def _load_or_create_secret_key() -> str:
             pass
 
     # 3. 自动生成
-    secret = secrets.token_hex(32)
-    _write_secret_file(secret)
-    return secret
+    #
+    # **进程内只生成一次，落盘失败也不例外。** 此前每次都 `token_hex()` 现生成，而
+    # 数据根不可写时（容器里目录还没就绪、只读挂载、权限不足）`_write_secret_file`
+    # 只留一行 warning 就返回，调用方照旧拿到一枚**新**密钥——于是"谁在什么时候取过
+    # 密钥"决定了他签出的 token 能不能被别处验过。实测（数据根不可写）：
+    #
+    #   同一进程连取三次 → 三个不同值；模块常量与任何一次重算都不相等。
+    #
+    # 这不是"多一枚缓存"，是同一件事只留一个答案（教义第 6 条）：落盘成功时下一进程
+    # 从文件读回同一枚；落盘失败时本进程内保持稳定。跨重启换一枚是没有持久化的既定
+    # 代价，但**同进程内签与验因此恒等**。
+    global _generatedSecretKey
+    with _generatedSecretLock:
+        if _generatedSecretKey is None:
+            _generatedSecretKey = secrets.token_hex(32)
+            _write_secret_file(_generatedSecretKey)
+        return _generatedSecretKey
+
+
+def currentJwtSecretKey() -> str:
+    """当前生效的签名/验签密钥 —— 取值口，幂等、不触发加载。
+
+    存在的理由只有一个：让"这一轮用的是哪把密钥"有**一处**可问、可断言。判据侧此前
+    各自抄一份常量（四份），台面上看不出谁的读法对；签名与验签又各读一处模块字典，
+    一旦分叉就表现为"本档刚签的令牌被自己拒"（401 / `Signature verification failed`）。
+    收成这一处之后，两边都从它取数。
+
+    **取值发生在调用时，不在导入时**：优先环境变量，缺场才回落模块全局。全局是导入期
+    算出来的那一份——两者在环境变量在场时同源，故本函数不改任何既有语义，只是把
+    "何时读"从导入期挪到取用时。密钥轮换与测试注入因此只需改环境变量，不必摸私有状态。
+    """
+    return config.get("NEUROVA_JWT_SECRET") or config.get("NEUROVA_JWT_SECRET_KEY") \
+        or JWT_SECRET_KEY
 
 
 # JWT Secret Key — 从环境变量或自动生成的文件加载
-# 优先级: 环境变量 NEUROVA_JWT_SECRET > .jwt_secret 文件 > 自动生成
+# 优先级: 环境变量 NEUROVA_JWT_SECRET / NEUROVA_JWT_SECRET_KEY > .jwt_secret 文件 > 自动生成
+#
+# **签发与验签一律经 `currentJwtSecretKey()`，不要直接读这枚全局。**
+#
+# 这行赋值只在**导入期**跑一次，故它读到的环境变量被冻结在那一刻：进程内此后注入
+# `NEUROVA_JWT_SECRET`（测试夹具、密钥轮换）对生产侧一个字都不生效——而"生产侧读不到
+# 它"这件事，又逼得判据只能去改写这枚全局来对齐，形态是把症状从消费方挪一层。
+# 烘死者是"导入期取值"这件事本身。全局保留为兼容读法与取用口的回落值。
 JWT_SECRET_KEY = _load_or_create_secret_key()
 
 
@@ -205,7 +252,7 @@ def create_access_token(
         }
     )
 
-    return jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+    return jwt.encode(to_encode, currentJwtSecretKey(), algorithm=JWT_ALGORITHM)
 
 
 def create_refresh_token(
@@ -238,7 +285,7 @@ def create_refresh_token(
         }
     )
 
-    return jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+    return jwt.encode(to_encode, currentJwtSecretKey(), algorithm=JWT_ALGORITHM)
 
 
 def create_token_pair(
@@ -275,7 +322,7 @@ def decode_token(token: str) -> Optional[Dict[str, Any]]:
         Token 数据字典，失败返回 None
     """
     try:
-        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        payload = jwt.decode(token, currentJwtSecretKey(), algorithms=[JWT_ALGORITHM])
         return payload
     except jwt.ExpiredSignatureError:
         logger.warning("Token expired")
@@ -640,27 +687,34 @@ def _user_identity(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-_READ_ONLY_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-
-
-async def requireIdentityForWrites(
-    request: Request,
+async def requireIdentityForMemoryFace(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> Dict[str, Any]:
-    """写类请求必须**带凭证**；读类请求原样放行（匿名读仍只见 default 桶）。
+    """记忆面的**任何**方法都必须带凭证；无凭证一律 401，不再按读/写分岔。
 
-    为什么挂在这一处而不是逐个 handler 上：政策 2026-10-06 定的是"匿名共享 default 桶
-    可以，但租户键必须是 user_id"——那是**读**侧语义。写侧沿用同一条回落等于把
-    "共享桶"当成"无人看守的桶"：任何访客都能往同一个 `default` 租户里增删改，
-    事后既无从对账也无从撤销（§6-1 身份批修的是"跨租户越权"，这一格是同一条链上
-    "匿名可写"的另一半）。
+    来历：这道门 2026-10-08 建出来时只管写类方法，理由是政策 2026-10-06 记的
+    "匿名共享 default 桶可以，但租户键必须是 user_id"只对读成立。本批把读侧一起收进来，
+    依据是 2026-10-26 的两条实测：
 
-    形态上刻意不做"依赖严格门本体"：路由级依赖对 GET 也会解析，那样会把政策要留的
-    匿名读一起打死；凭证→身份这一步也不自解，直接调 `get_current_user` 用的同一份
-    `_identityFromCredentialsOr401`，只是**只对写类方法**调用它。
+    - 无凭证 `GET /api/v1/memory?agent_id=default` 与 `/hot` 各返回 **24 行正文**
+      （含 `('default','ne-alice','alice')` 那 9 行他人作用域记忆）；
+      逐条枚举后，记忆面 31 条 GET 里 **23 条**取租户数据的腿对匿名敞开，`/markdown`
+      匿名导出 12285 字本机内容。
+    - `start_server.py:70` 与 `neurova/api/app.py` 的默认监听都是 `0.0.0.0`，
+      实测从本机局域网地址直接 200 出正文。
+
+    两条叠起来，"匿名读 default 桶"不是本地便利，而是**同网段任一设备无凭据读走全部
+    会话转写**的入口。更要紧的是：列表腿传 `agent_wide=True`（不比 neuser/user），
+    所以回落的那个 `default` 身份在实现上根本没人比对——政策承诺的"只见 default 桶"
+    在这条腿上一个字节都没被执行过。
+
+    为什么仍挂在 router 级一处、而不是逐条 handler 换依赖：现算 29 条处理器里出现
+    `get_memory_manager(` 的 GET 腿。逐条改既是巨大改动，又让"下一条新路由忘了改"
+    静默复现本缺陷（这正是本仓 consumer-side guard 反指的那类形态）。门只有一道，
+    覆盖面就是"这个门面"。
+
+    凭证→身份不自解：复用 `get_current_user` 用的同一份 `_identityFromCredentialsOr401`。
     """
-    if request.method in _READ_ONLY_METHODS:
-        return _DEFAULT_USER.copy()
     return _identityFromCredentialsOr401(credentials)
 
 
@@ -668,9 +722,10 @@ async def requireIdentityForWrites(
 #: 判据 `tests/unit/api/test_memoryWriteIdentityGate.py` 双向钉：清单里的名字必须
 #: 真实存在，memory 包实际 import 的门必须都在清单内——第五道门自己长出来时会红。
 #:
-#: 为什么只有两道：政策 2026-10-06 记的是"读侧匿名可落 default 桶"（→
-#: `get_current_user_or_default`）与"租户键必须是 user_id"（→ 严格门
-#: `get_current_user`，写侧由 `requireIdentityForWrites` 复用它那份解析）。
+#: 为什么只有两道：政策记的是"租户键必须是 user_id"（→ 严格门 `get_current_user`），
+#: 而"无凭证回落 default"这条读侧语义**只在记忆面之外还留着**——记忆面 2026-10-26 起
+#: 由路由级的 `requireIdentityForMemoryFace` 一律要凭证，回落在这道门前面到不了 handler
+#: （撤销依据见该函数 docstring 里的两条实测）。
 #: 其余门（`WithQueryToken` / `or_api_key` / `or_service`）在全仓各有其用，
 #: 但**记忆面一条都不该用**：查询串凭证会把 token 落进 URL 与访问日志，而
 #: `X-Service-Token` 那条经 `semantic_search_api.py:114` 读记忆语料是**另一个面**
@@ -695,9 +750,15 @@ async def get_current_user_or_default(
     - 有凭证但无效 → 401（与 get_current_user 同契约）。
 
     2026-10-08 记一格边界（P3-12 拍板"跨租户不可读"）：上面那条"无凭证回落 default"
-    只对**读**成立。写类请求走 `requireIdentityForWrites`（同一条凭证链、同一份
+    只对**读**成立。写类请求走路由级那道身份门（同一条凭证链、同一份
     `_identityFromCredentialsOr401`），因为"共享 default 桶"不等于"无人看守的桶"——
     匿名写等于任何人都能改同一份数据，只是没人能对账。
+
+    2026-10-26 再收一格（点单甲）：**记忆面连读侧也不再回落**。实测无凭证
+    `GET /api/v1/memory?agent_id=default` 出 24 行正文、列表腿传 `agent_wide=True`
+    不比 neuser/user ⇒ "只见 default 桶"这句在记忆面从未被执行过；而默认监听 `0.0.0.0`
+    把它变成同网段任一设备可读。记忆 router 现在整面挂
+    `requireIdentityForMemoryFace`，本依赖的回落语义在其它面按各自政策保留。
     """
     if not credentials:
         return _DEFAULT_USER.copy()

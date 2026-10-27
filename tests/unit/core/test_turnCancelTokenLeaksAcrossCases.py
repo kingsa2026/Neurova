@@ -46,6 +46,11 @@ from neurova.core import cancel_token
 from neurova.execution_layers import LocalExecutor
 
 
+def _hasKillAction(token) -> bool:
+    """这一轮令牌上有没有已注册的杀灭回调（`exec` 起完进程就会挂上）。"""
+    return bool(getattr(token, "_actions", None))
+
+
 def _execOnce():
     """真起一条进程，返回执行读数（不用替身：`-9` 只有真进程读得出）。"""
     return asyncio.run(LocalExecutor().exec(
@@ -53,16 +58,33 @@ def _execOnce():
 
 
 def test_cancelledTokenReallyKillsTheProcess():
-    """前提自证：置位令牌在场时本地运行时真起不来（`-9`，不是假红）。"""
+    """前提自证：**这一发进程启动之后**发生的取消，真把进程杀掉（`-9`，不是假红）。
+
+    为什么不能"先置位再起进程"：`registerKillAction` 收 `launchedAtEpoch`（起进程那一刻的
+    置位次数），回调只为**这一发进程启动之后**的取消兑现。起进程之前就置位时，epoch 与之
+    相等 ⇒ 那条回调不兑现——这正是"用户点一次停止，取消顺着整轮后续命令一路传染"要挡的
+    那一半（实测：第一发 `print(1)` 成功、本轮 `cancel("user")` 之后下一发立即 `-9`，
+    而它连一行都没跑）。所以本格把置位挪到进程**已经在跑**之后：请求发出 → 置位 → 拿读数。
+    """
     token = cancel_token.CancelToken()
     cancel_token.setTurnCancelToken(token)
     try:
-        asyncio.run(asyncio.to_thread(token.cancel, "user"))
-        result = _execOnce()
+        async def _execThenCancel():
+            task = asyncio.ensure_future(LocalExecutor().exec(
+                command=sys.executable, args=["-c", "import time; time.sleep(30)"], timeout=30))
+            # 等进程真起来并注册好回调：`exec` 的第一步就是把句柄交给令牌。
+            for _ in range(600):
+                await asyncio.sleep(0.01)
+                if token.cancelEpoch or _hasKillAction(token):
+                    break
+            token.cancel("user")
+            return await task
+
+        result = asyncio.run(_execThenCancel())
     finally:
         cancel_token.setTurnCancelToken(None)
     assert (result.success, result.exit_code) == (False, -9), (
-        f"置位令牌没拦住进程（{result}）——本档第 2 条的前提不成立，先查那条链")
+        f"进程在跑之后置位令牌，进程却没被杀掉（{result}）——本档第 2 条的前提不成立，先查那条链")
 
 
 def test_cancelledTokenFromPreviousCaseDoesNotReachThisOne():

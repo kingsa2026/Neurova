@@ -455,7 +455,9 @@ class TTSManager:
         if not self.is_initialized:
             return []
 
-        if isinstance(self._engine, EdgeTTS):
+        # 按**能力**判，不按身份判：`isinstance` 让替身/子类必须继承同一个真类才走得通，
+        # 判据要问的是"这个引擎会不会列音色"（`edge_tts` 可选依赖缺席时构造都走不到）。
+        if hasattr(self._engine, "list_voices"):
             return await self._engine.list_voices()
 
         return []

@@ -95,7 +95,14 @@ def _sweepReadCounts() -> dict:
         for shape in _READ_SHAPES
     ]
     counts: dict = dict.fromkeys(_advertisedNames(), 0)
-    for ref in ast_scan.sourceRefsUnder(PROD_ROOT, ".py"):
+    refs = ast_scan.sourceRefsUnder(PROD_ROOT, ".py")
+    scanned = len(refs)
+    # 面自证：根被改窄时下面几个格子的读数会缩成「零残留」「零命中」而不是红
+    # （该形态由 `tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py` 点名）。
+    assert scanned > 500, (
+        f"生产语料现读 {scanned} 个文件（根＝{PROD_ROOT}）——面量级不对＝根指错，"
+        "「零残留」不来自代码")
+    for ref in refs:
         if ref.path.name == "builtin_tools.py":
             continue
         text = ref.code
@@ -114,6 +121,12 @@ class TestPhantomKnobSweep:
         assert "max_marks" not in str(_BUILTIN_SCHEMAS)
         assert "max_marks" not in str(_COMPUTER_TOOL_PARAM_KEYS)
         # hints 预筛是充分条件：连 "max_marks" 这七个字节都没出现的文件不可能命中
+        # 面自证走**未预筛**的根：`max_marks` 已被删干净，按它预筛的语料本来就该是 0，
+        # 拿它当"面"等于用命中数证面（与本档要防的假绿同形）。
+        corpus = len(ast_scan.filesUnder(PROD_ROOT, ".py"))
+        assert corpus > 500, (
+            f"生产语料现读 {corpus} 个文件（根＝{PROD_ROOT}）——面量级不对＝根指错，"
+            "「零残留」不来自代码")
         leftovers = [
             ref.path.relative_to(REPO).as_posix()
             for ref in ast_scan.sourceRefsUnder(PROD_ROOT, ".py", hints=("max_marks",))
@@ -130,6 +143,10 @@ class TestPhantomKnobSweep:
 
     def test_noAdvertisedParamIsUnread(self):
         """治理面每个工具的每个广告参数，都必须有读取点。"""
+        # 面自证：先证这次真扫到了生产树，再谈"每个参数都有读取点"——
+        # 根被改窄/改空时，计数全零会被下一条的"幻影旋钮"读成满盘红或缺席，两种都不是事实。
+        scanned = len(ast_scan.filesUnder(PROD_ROOT, ".py"))
+        assert scanned > 100, f"扫描面现读 {scanned} 个 .py（根＝PROD_ROOT）——根指错时判据不来自代码"
         counts = _sweepReadCounts()
         unread = []
         for tool in sorted(COMPUTER_USE_TOOLS):
@@ -162,7 +179,8 @@ class TestPhantomKnobSweep:
         """
         corpus = len(ast_scan.filesUnder(PROD_ROOT, ".py"))
         # 面自证：语料量级先立住，下面两条"命中涨满语料"才有对象可比。根被改窄时 corpus 会
-        # 跟着变小，两条旧断言反而更容易通过——那正是"零缺陷"的假绿。
+        # 跟着变小，两条旧断言反而更容易通过——那正是"零缺陷"的假绿，下面两条缓存读数
+        # 也就不来自代码。现测 1055 档，>=800 是"根没指错"的下界而不是精确值。
         assert corpus >= 800, (
             f"语料现读 {corpus} 个 .py（根＝{PROD_ROOT}）——量级不对＝根指错，缓存判据失去对象")
         cache = ast_scan._cachedCode

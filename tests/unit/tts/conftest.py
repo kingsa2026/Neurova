@@ -22,6 +22,18 @@ from neurova.tts.manager import TTSConfig, TTSManager
 from tests.unit.tts._fakeEngines import _FakeHeavyEngine, _FakeLightEngine, fakeHeavyFactory
 
 
+#: 「很久没用过」的时间锚。**必须相对当前时钟算**，不能写死一个绝对数：
+#: `synthesize()` 收尾会把握时器推成 `time.monotonic()`，而进程已跑了一段时间的机器上
+#: 那个读数早超过一百六十万秒 ⇒ 写死 `1_000_000` 反而成了"刚刚用过"，TTL 格因此红成
+#: "释放没换班到轻引擎"（判据与环境耦合，与实现无关）。
+IDLE_ANCHOR_OFFSET_SEC = 10_000.0
+
+
+def idleNow() -> float:
+    """比"现在"晚 `IDLE_ANCHOR_OFFSET_SEC` 的合成时钟读数——任何 TTL 都早已超时。"""
+    return time.monotonic() + IDLE_ANCHOR_OFFSET_SEC
+
+
 @pytest.fixture()
 def heavy_manager(monkeypatch):
     """预注入假引擎的 manager：缓存与**构造**两条支路都留在假引擎里。
@@ -48,12 +60,6 @@ def heavy_manager(monkeypatch):
 
 #: 合成时钟必须**大于**上一步合成时记下的 `time.monotonic()` 读数，否则
 #: `release_idle_engines` 里 `now - _last_used_monotonic` 是负数，恒小于 TTL ⇒ 永不释放。
-#: 常量的 1_000_000 只在与 `_last_used_monotonic = 0.0`（手工置 0）并存时成立；
-#: 走真合成链的用例要用这个函数取"现在 + 远超 TTL"。
+#: 写死 `1_000_000` 只在与 `_last_used_monotonic = 0.0`（手工置 0）并存时成立；
+#: 走真合成链的用例一律用 `idleNow()` 取"现在 + 远超 TTL"。
 IDLE_TTL_SECONDS = 60
-SUPER_IDLE_AHEAD_SECONDS = 10_000
-
-
-def superIdleClock() -> float:
-    """当前单调时钟 + 远超 TTL 的偏移（走真合成链的用例用它，不写死常量）。"""
-    return time.monotonic() + SUPER_IDLE_AHEAD_SECONDS

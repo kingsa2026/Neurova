@@ -1,10 +1,9 @@
 import api from '@/api'
 import config from '@/config'
-import { secureStorage } from '@/utils/security'
+import { readAccessToken } from '@/utils/authSession'
 import type { ApiResponse } from '@/types/response'
 
 /** SSE 订阅取 token 的键名（与 notifications.ts 同源） */
-const TOKEN_KEY = 'auth_token'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -328,7 +327,7 @@ export function subscribeExecutionEvents(
   options?: { after?: number },
 ): () => void {
   const controller = new AbortController()
-  const token = secureStorage.get(TOKEN_KEY)
+  const token = readAccessToken()
   const base = config.apiBaseUrl
   const params = new URLSearchParams()
   if (options?.after != null) params.set('after', String(options.after))

@@ -553,11 +553,16 @@ def import_identity(kai_root: Path, agent_root: Path) -> Dict[str, int]:
 
     落点是 `Agent._load_identity` 的**真实加载位**（v2 布局起身份文件在 agent 根，
     不再藏在 `memory/` 或工作区里）：写到别处等于导入成功、运行时读不到。
+    `memory/soul.md` 那一份是 **v1 布局的旧落点**，不再写——旧物由
+    `core/agent_layout_migration` 在启动时搬回 agent 根，导入器再写一份就是
+    在两个落点各存一份身份（第二次导入时两份还可能各写各的）。
     """
     kai_root = Path(kai_root)
     agent_root = Path(agent_root)
     workspace = agent_root / "workspaces"
-    workspace.mkdir(parents=True, exist_ok=True)
+    memory_dir = agent_root / "memory"
+    for target in (workspace, memory_dir):
+        target.mkdir(parents=True, exist_ok=True)
     files = 0
 
     mapping = [

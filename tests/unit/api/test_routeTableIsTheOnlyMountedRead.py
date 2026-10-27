@@ -34,18 +34,25 @@
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 
 import pytest
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from tests import ast_scan
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
 ROUTE_TABLE = REPO_ROOT / "tests" / "route_table.py"
 #: 只扫会被 pytest 收集的目录；manual／archive／runners 是脚本区，本仓惯例不纳门禁
 SCAN_DIRS = ("unit", "integration", "api", "test_api", "media", "cognitive_layers", "core")
 #: 取装配后 app 路由表的合法出口——只此一家
 SINGLE_SOURCE_IMPORT = "tests.route_table"
+#: 文本预筛：谓词是 `X.app.routes` 这一形，连 `routes` 四个字母都没出现的档
+#: 不可能命中（`sourceRefsUnder` 的键仍是全量清单，预筛只减解析量）。
+SCAN_HINTS = ("routes",)
 
 pytestmark = pytest.mark.timeout(120)
 
@@ -78,7 +85,11 @@ def test_取数口径只有一份():
             source = ref.code
             if SINGLE_SOURCE_IMPORT in source:
                 continue          # 已在用单源的档，不重复数
-            hits = _readsMountedAppRoutes(ast.parse(source))
+            try:
+                tree = ast_scan.transientTree(path)
+            except SyntaxError:
+                continue
+            hits = _readsMountedAppRoutes(tree)
             if hits:
                 offenders.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{hits}")
     corpusFiles = len(ast_scan.sourceRefsUnder(REPO_ROOT / "tests", ".py"))

@@ -82,7 +82,9 @@ def _init_repo(tmp_path):
     _git("init", "-b", "main")
     (tmp_path / "a.txt").write_text("hello", encoding="utf-8")
     _git("add", "a.txt")
-    _git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "init")
+    # 合成仓是夹具，不该继承宿主的 `commit.gpgsign`（容器内无密钥即 128）。
+    _git("-c", "commit.gpgsign=false", "-c", "user.email=t@t", "-c", "user.name=t",
+         "commit", "-m", "init")
     return _git
 
 

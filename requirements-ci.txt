@@ -4,12 +4,19 @@
 #   - 本文件是 requirements.txt 的"轻量核心子集"，供 GitHub Actions 使用。
 #   - 刻意排除体积大 / 需本地模型 / 需显示器的重依赖（sentence-transformers、
 #     transformers、torch、soundfile、huggingface_hub、sentencepiece、edge-tts、
-#     pyautogui、playwright）。
-#     例外：numpy / onnxruntime / tokenizers 三个**必须装**——受保护子集里有
-#     多条语义检索判据（联想召回基线、线索向量通道、长时记忆基线、写侧补嵌入）
-#     只有真引擎在场才有读数，引擎缺席时它们不是"跳过"而是"红"；把判据改成 skip
-#     等于把这道门关掉（教义第 2 条）。模型权重随仓入库（models/embedding/
-#     bge-small-zh-v1.5），故缺的从来只是这三个 Python 包。
+#     pillow、pyautogui、playwright）。
+#     **例外一：numpy（2026-10-23 起）。** 受保护子集里有判据走真实向量原语与真实分词
+#     （`neurova/knowledge/vector_ann`、`neurova/core/vector_math`，
+#     `constraints.semantic_similarity` 的 jieba 切词）；被排除时那几档是"环境缺件"
+#     而不是"代码坏了"，CI 里两者同形，红得说不清是谁的问题。
+#     **例外二：onnxruntime / tokenizers（2026-10-25 起）。** 与 numpy 同一根因：引擎
+#     `initialize_sync()` 在它们缺席时返回 False、`encode()` 走零向量兜底，而联想召回
+#     基线 / 线索向量通道 / 长时记忆基线 / 写侧补嵌入那几族判据全部建立在"向量有意义"
+#     之上且**刻意不 skip**；把判据改成 skip 等于把这道门关掉（教义第 2 条）。
+#     模型权重随仓入库（`models/embedding/bge-small-zh-v1.5`），故缺的从来只是这几个包。
+#     transformers / sentencepiece 仍不声明：实测逐件屏蔽（meta_path 拦截）后，
+#     `tokenizer.json` 直读即成功，两者体积大且连带 torch。
+#     **三个例外都只在本文一份声明**（正文其余处不再重复行，见下文的声明面）。
 #   - 上述被排除依赖在代码中均为"惰性/try 降级"导入，缺席时模块仍可加载；
 #     它们在 scripts/ci_static_gate.py 的 KNOWN_OPTIONAL_DEPS 中登记，
 #     导入巡检会记为 OPTIONAL-SKIP（优雅降级），不算失败。
@@ -60,6 +67,29 @@ tiktoken>=0.5.0
 APScheduler>=3.10
 feedparser>=6.0
 segno>=1.6
+
+# 稠密向量原语（2026-10-23 起 CI 显式声明）：`core/vector_math` 与 `knowledge/vector_ann`
+# 的判据走真实 ndarray 运算，缺席即 ModuleNotFoundError——那是环境缺件，不是被测代码的结论。
+# 版本下界与 requirements.txt 逐字同值（第二份下界就是第二个事实源）。
+numpy>=1.24.0
+# 中文分词（同上）：`evolution.eval.constraints.semantic_similarity` 的 Jaccard 回退
+# 依赖 jieba 切词，缺席时中文整段成单 token，漂移闸会给出与生产不同的读数。
+jieba>=0.42.1
+# 嵌入引擎的两件运行时（2026-10-25）：与 numpy 同一根因、同一处置。
+# `neurova/embedding/onnx_embedding.py` 的 `initialize_sync()` 在 onnxruntime 或
+# tokenizers 缺席时返回 False，`encode()` 遂走**零向量兜底**；而受保护子集里
+# test_longTermMemoryBaselineGate（15 例）、test_associativeRecallGate、
+# test_cueVectorChannel、test_cueFanoutDecoupledFromBatchC3、test_muscle_memory_recall
+# 的判据全部建立在"向量有意义"之上，且刻意不做 skip——薄环境里同时红 19 例，
+# 每条红因都指向同一件事：不是代码坏了，是环境缺件。
+# 模型档（`models/embedding/bge-small-zh-v1.5`）已在仓库跟踪，故只缺这两件运行时。
+# 只声明这两件、**不**声明 transformers/sentencepiece：逐件屏蔽实测（meta_path 拦截），
+# 只要这两件在，`tokenizer.json` 直读即成功；后两者体积大且连带 torch，
+# 仍属本文件开头刻意排除的重依赖之列。回归守卫见
+# tests/unit/test_dev_path_and_runtime_dep_guards.py::TestCiTestRunnerAndFixtureDepsAreReal
+# 的 test_embeddingRuntimeDepsDeclaredInCi 与 test_localEmbeddingEngineYieldsRealVectors。
+onnxruntime>=1.16.0
+tokenizers>=0.13.0
 
 # MCP SDK（P0-6：MCP 受保护测试子集在 CI 运行必需）
 # 与 requirements.txt 同一条范围，且必须逐字同值——两份各写一个下界，
@@ -119,11 +149,5 @@ Pillow>=13.0.0
 # 与 reportlab / pypdf 同一根因（"只在生产清单声明、不在 CI 清单声明"），故同处补齐。
 rich>=13.0
 
-# 本地嵌入引擎（ONNX）——受保护子集里四条语义检索判据（联想召回基线 / 线索向量通道 /
-# 长时记忆基线 / 写侧补嵌入）走的是生产同款 `get_embedding_engine()` 单例，不是替身。
-# 缺包时它们报的是 ModuleNotFoundError: numpy（收集期就崩），表现为"整档红"而不是
-# "没测"——判据自己也明确写着"不以 skip 蒙过"。故三个包按生产清单同一口径补齐，
-# 版本下界与 requirements.txt 逐字同值（第二份下界就是第二个事实源）。
-numpy>=1.24.0
-onnxruntime>=1.16.0
-tokenizers>=0.13.0
+# 本地嵌入引擎（ONNX）的三件运行时声明在上文「稠密向量原语」那一节，
+# 不在此处再写一份（第二份下界就是第二个事实源）。两者的取舍与理由同处。

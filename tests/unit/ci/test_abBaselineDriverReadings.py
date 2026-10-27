@@ -183,12 +183,13 @@ class TestEndToEndOnSyntheticRepos:
             "from app.logic import answer\n\n"
             "def test_answer():\n"
             f"    assert answer() == {expected}\n", encoding="utf-8")
-        # `-c commit.gpgsign=false` 是**宿主无关**那一半：宿主开了全局 `commit.gpgsign`
-        # 而合成仓里没有可用的签名身份时，`git commit` 直接 128，红的是断言之外的环境。
-        # CI 上时有时无（runner 的全局配置不同），故钉在命令里而不是靠环境碰运气。
+        # `-c commit.gpgsign=false`：合成仓是夹具，不该继承宿主/镜像的签名配置——
+        # 宿主 `~/.gitconfig` 里 `commit.gpgsign=true` 而签名程序不可用（容器内无密钥）时，
+        # 这几条合成仓的 commit 会以 128 直接炸掉，红的是宿主配置而不是被测驱动（形态集 303 同族）。
+        # CI 上时有时无（各 runner 的全局配置不同），故钉在命令里而不是靠环境碰运气。
         for args in (["init", "-q"], ["add", "."],
-                     ["-c", "user.email=t@t", "-c", "user.name=t",
-                      "-c", "commit.gpgsign=false", "commit", "-q", "-m", "base"]):
+                     ["-c", "commit.gpgsign=false",
+                      "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "base"]):
             subprocess.run(["git"] + args, cwd=str(repo), capture_output=True, text=True,
                            encoding="utf-8", errors="replace", check=True,
                            timeout=_GIT_WALL_S)
