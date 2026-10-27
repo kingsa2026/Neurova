@@ -29,11 +29,19 @@ import asyncio
 import hashlib
 import json
 import sys
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # 本机编码编不出的字符不许把退出码变成 1
+
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import tempfile
 import time
 from pathlib import Path
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+# 同上：字面里的不可编码字符不许由「打印成败」来决定本档退出码。
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
 
@@ -52,8 +60,8 @@ from neurova.skills.market_importer import BUILTIN_BUNDLE_DIR  # noqa: E402
 
 SKILL_POOL = "/api/v1/skill-pool"
 
-# 生产的根外锚在 `~/.neurova/`（数据根之外）；探针把落点改到隔离区**之外**的同级目录，
-# 既不写真实主目录，又保住「锚不在数据根里」这条形状。
+# 生产的锚在数据根下的 `artifacts/`（取法见 `artifact_digest.anchorPath`）；探针把落点改到
+# 隔离根**之外**的临时目录，只避免污染本次隔离根，不改落点语义。
 ANCHOR_DIR = Path(tempfile.mkdtemp(prefix="neurovaAnchorsTicket3-"))
 artifact_digest.anchorPath = lambda: ANCHOR_DIR / "artifact_anchors.json"
 failures: list = []
@@ -210,11 +218,11 @@ def main():
                   and artifact_digest.REASON_MISMATCH not in json.dumps(calibrated),
                   str(calibrated)[:120])
 
-            # ── 根外锚（§6-388 票一甲①）：同权限者"改构件 + 重钉账本"要被锚抓住 ──
+            # ── 锚文件（§6-388 票一甲①）：同权限者"改构件 + 重钉账本"要被锚抓住 ──
             anchorFile = artifact_digest.anchorPath()
             anchorPayload = json.loads(anchorFile.read_text(encoding="utf-8"))
             anchorKey = artifact_digest.artifactKey("skill", skillId)
-            check("15 安装后根外锚里有一条，且与账本同值",
+            check("15 安装后锚里有一条，且与账本同值",
                   str((anchorPayload.get("anchors") or {}).get(anchorKey) or "") == pinned,
                   "%s -> %s" % (anchorKey, (anchorPayload.get("anchors") or {}).get(anchorKey)))
             check("16 锚落在数据根之外（否则整库回滚会把锚一起滚回去）",

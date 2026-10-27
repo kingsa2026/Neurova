@@ -189,6 +189,13 @@ class ChatContext:
     user_input: str
     stream: bool = False
     save_memory: bool = True
+    #: 本轮 user 消息是否已在 LLM 之前落盘（见 `_step_persist_user_early`）。
+    #: 回合末那一次写据此只补 assistant——同一条用户消息落两遍，历史里会长出
+    #: 一个重复气泡，且 usage 记账重复。
+    user_message_persisted: bool = False
+    # 后处理是否已经跑过（失败落点据此决定要不要补写）：True 一置，本轮的会话
+    # 落点已由 `_step_save_session` 负责，失败路径不得再写第二条 assistant。
+    post_chat_ran: bool = False
     session_id: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     enable_tts: bool = False
@@ -485,8 +492,50 @@ class ChatPipeline:
                          and bool(ctx.reply and ctx.reply.strip())
                          and getattr(ctx, "tool_decision", "") != "cancelled")
             return result
+        except BaseException as exc:  # noqa: BLE001 - 只加一次落点，不改故障语义
+            await self._landFailedTurn(ctx, exc)
+            raise
         finally:
             finish_task(self._agent, ctx.user_input, completed=completed)
+
+    async def _landFailedTurn(self, ctx: ChatContext, exc: BaseException) -> None:
+        """失败轮的会话落点：这一轮结束了，而且是以失败结束的。
+
+        为什么必须在管线而不是端点：后处理（含唯一的会话写点 `_step_save_session`）
+        只在正常收尾路径上被调，LLM 抛错时异常从 `_step_llm_call` 就离开了管线——
+        于是盘上只剩 §6-419 提前落好的 user 一条。活体量到过：09:29 那轮上游
+        5 分钟不吐字后超时、候选模型 400 not supported，整轮以错误收场，复算时
+        `messages` 只有 `[user]`，刷新后的页面挂着「本轮仍在生成中」永远等不到终态。
+
+        教义第 2 条：这是**诚实形态**，不是把失败兜成成功——异常照旧外抛，SSE 的
+        `error` 帧与 run 台账的 `failed` 终态一概不变；这里只是额外让读侧能看到
+        "这一轮以什么收场"。落点走既有单点（`_step_save_session`，同一份围栏与
+        owner 口径），不另起第二份写会话的代码。本函数自身失败不外抛、只点名。
+        """
+        if ctx.post_chat_ran or not ctx.save_memory:
+            return
+        post = self.post_chat_pipeline
+        if post is None:
+            logger.warning("失败轮无法落点：后处理管线未初始化（本轮盘上仍只有 user）")
+            return
+        reason = str(exc) or type(exc).__name__
+
+        if isinstance(exc, __import__("asyncio").CancelledError):
+            text = f"⚠️ 本轮被中止（未生成回复）：{reason}"
+        else:
+            text = f"⚠️ 未能生成回复：{reason}"
+        try:
+            await post._step_save_session(
+                ctx.user_input,
+                text,
+                ctx.session_id,
+                ctx.save_memory,
+                ctx.metadata,
+                writer_claim=ctx.writer_claim,
+                user_already_persisted=ctx.user_message_persisted,
+            )
+        except BaseException as landExc:  # noqa: BLE001 - 落点失败不得顶掉真因
+            logger.warning("失败轮落点未成（本轮读侧仍看不到终态）: %s", landExc)
 
     async def _execute_steps(self, ctx: ChatContext) -> Dict[str, Any]:
         """执行完整的对话管线
@@ -523,6 +572,9 @@ class ChatPipeline:
         # 否则 LLM 拿到的是构建上下文时的旧输入（附件内容永远进不了模型）。
         await self._step_inject_attachments(ctx)
 
+        # Step 0.8: 用户消息提前落盘——刷新/掉线后本轮不再是一片空白
+        await self._step_persist_user_early(ctx)
+
         # Step 1: 检索与上下文构建
         await self._step_retrieve_and_build_context(ctx)
         # 图像切片在此挂到 context（text 已在注入时并入 user_input）
@@ -541,6 +593,40 @@ class ChatPipeline:
         await self._sync_final_reply(ctx)
 
         return ctx.result
+
+    async def _step_persist_user_early(self, ctx: ChatContext):
+        """Step 0.8：LLM 开口之前，先把本轮用户消息落到会话盘。
+
+        位置为什么在这：必须在 `_step_pre_llm_checks` **之后**（被治理或配额拒掉的
+        回合，不该留下一条无人回答的用户消息），又必须在 `_step_inject_attachments`
+        **之后**（落盘的要是并入附件后的最终形态，与模型看到的保持一致）。
+
+        要补的实测缺口：此前全仓唯一的落盘点是 post-chat 管道里的 `_step_save_session`，
+        一次写 user + assistant 一对——整个回合进行中（前端正在流式收字）盘上本轮
+        一个字都没有，用户刷新或掉线就读不回任何东西，连自己刚发的那句都不见。
+
+        `save_memory=False`（评测/内部调用）不预写：那条路径本就不进会话历史。
+        围栏 claim 沿用本轮的，与回合末同过 `SessionManager._fenceRefusesWrite`
+        那一道闸——提前写也是写会话历史，不能因为它在开始就绕过 P1-10。
+        """
+        if not ctx.save_memory or ctx.user_message_persisted:
+            return
+        memory = getattr(self._agent, "memory_agent", None)
+        if memory is None or not hasattr(memory, "saveUserMessage"):
+            return
+
+        from neurova.post_chat_pipeline import resolveSessionOwner
+
+        persisted = memory.saveUserMessage(
+            ctx.user_input,
+            session_id=ctx.session_id,
+            metadata=ctx.metadata,
+            writer_claim=ctx.writer_claim,
+            session_owner=resolveSessionOwner(ctx.metadata),
+        )
+        if persisted:
+            ctx.user_message_persisted = True
+            ctx.session_id = persisted
 
     async def _sync_final_reply(self, ctx: ChatContext):
         """广播最终回复到 SessionSyncManager"""
@@ -3105,6 +3191,10 @@ class ChatPipeline:
                 "post_chat_pipeline is not initialized — cannot execute post-chat processing."
             )
 
+        # 落点责任已归后处理：此后若再抛（如 TTS/反思等旁路步骤炸），失败落点
+        # 不得补第二条 assistant——同轮两条回复会长出重复气泡。
+        ctx.post_chat_ran = True
+
         return await self.post_chat_pipeline.process(
             user_input=ctx.user_input,
             reply=ctx.reply,
@@ -3113,6 +3203,7 @@ class ChatPipeline:
             enable_tts=ctx.enable_tts,
             metadata=ctx.metadata,
             writer_claim=ctx.writer_claim,
+            user_already_persisted=ctx.user_message_persisted,
         )
 
     def _collect_tool_messages(self) -> List[Dict]:

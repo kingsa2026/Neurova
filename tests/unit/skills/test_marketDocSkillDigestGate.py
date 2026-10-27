@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import sys
 from pathlib import Path
 
 import pytest
@@ -28,7 +29,6 @@ from tests import ast_scan
 from neurova.security import artifact_digest
 from neurova.skills import market_registry
 from neurova.skills.market_registry import _build_executable_skill
-from tests import ast_scan
 from neurova.skills.skill_service import SkillService
 
 SKILL_MD = """---
@@ -162,11 +162,10 @@ class TestTheGateIsOnTheRegistryLeg:
 
 
 class TestProductionBuildersCarryThePin:
-    def _builderCalls(self, source: str):
+    def _builderCalls(self, source):
         """挑出对 `_build_executable_skill(` 的调用点，返回是否带了 pinnedDigest。"""
-        tree = ast.parse(source)
         found = []
-        for node in ast.walk(tree):
+        for node in ast.walk(ast.parse(source)):
             if not isinstance(node, ast.Call):
                 continue
             fn = node.func

@@ -559,12 +559,16 @@ def importIdentity(kai_root: Path, agent_root: Path) -> Dict[str, int]:
     kai_root = Path(kai_root)
     agent_root = Path(agent_root)
     workspace = agent_root / "workspaces"
-    workspace.mkdir(parents=True, exist_ok=True)
+    memory_dir = agent_root / "memory"
+    for target in (workspace, memory_dir):
+        target.mkdir(parents=True, exist_ok=True)
     files = 0
 
     mapping = [
         (kai_root / "SOUL.md", agent_root / "soul.md"),
+        (kai_root / "SOUL.md", memory_dir / "soul.md"),
         (kai_root / "PROFILE.md", agent_root / "personality.md"),
+        (kai_root / "PROFILE.md", memory_dir / "personality.md"),
         (kai_root / "PROFILE.md", workspace / "PROFILE.md"),
         (kai_root / "MEMORY.md", workspace / "MEMORY.md"),
     ]

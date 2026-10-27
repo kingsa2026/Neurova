@@ -99,6 +99,9 @@ max-attributes = 15
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# 文件名那一格与用例名那格同一条纪律（§6-248 起两批存量都按此收名）：
+# 驼峰无下划线的 `testFoo.py` 目录跑与 CI 一条都不收，显式给路径却全绿——
+# 写它的人、看绿的人、查"这项有没有测"的人三方都以为守着了。
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 # pytest 默认口径是**前缀** `test`（`--help` 的 "Prefixes or glob names"），

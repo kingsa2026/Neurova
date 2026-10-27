@@ -140,13 +140,17 @@ def _landingArgs(node) -> list:
     return [0]
 
 
-def _cwdLiteralsIn(node, pathTyped: bool = False) -> list:
+def _cwdLiteralsIn(node, pathTyped: bool = False, lines: list = ()) -> list:
     """落点参数里的 CWD 相对字面量。
 
     `Path('x')` 是直白形状；`Path(cfg or 'x')` 与 `Path('a' if y else 'b')`
     是生产线上的常见写法（兜底名就藏在 `or` 右边），必须一并认。
     """
     if isinstance(node, ast.Constant) and _isCwdRelativeLiteral(node.value):
+        # 常量本身也要过锚声明：整行写着 `# cwd-anchor: …` 的落点是被**判定过**的
+        # （例如 `~/.neurova` 是用户级锚，与进程 CWD 无关），不是没判。
+        if lines and _declaredAnchor(node, lines):
+            return []
         return [node]
     found = []
     if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
@@ -174,6 +178,21 @@ def _cwdLiteralsIn(node, pathTyped: bool = False) -> list:
         if literalFallback and ((pathishKey and fromEnvOrConfig) or (pathTyped and fromEnvOrConfig)):
             found.append(fallback)
     return found
+
+
+#: 行内显式声明「本处落点的锚不是 CWD」的标记。判据不能靠"看着像锚"豁免：
+#: `Path.home()` 是**用户级锚**（与 CWD 无关，换个启动目录不会换位置），
+#: 但它的名字里没有 ANCHORS 的任何一项，会被误判成 CWD 相对。这份豁免是**逐处**的、
+#: 写在落点那一行，且必须同时出现在该行的路径表达式里——判据本身不动。
+ANCHOR_DECLARATION = "cwd-anchor:"
+
+
+def _declaredAnchor(call, lines: list) -> bool:
+    """该落点调用**所在源码行**是否显式声明了非 CWD 锚。"""
+    lineNo = getattr(call, "lineno", None)
+    if not lineNo or lineNo > len(lines):
+        return False
+    return ANCHOR_DECLARATION in lines[lineNo - 1]
 
 
 @functools.lru_cache(maxsize=None)
@@ -216,6 +235,7 @@ def _cwdLandingsIn(path: Path) -> list:
             text += " " + ast.unparse(arg)
         return any(anchor in text for anchor in ANCHORS)
 
+    sourceLines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     hits = []
 
     # ── 名字索引：路径语义名接住的 CWD 字面量（含默认参数与 or 兜底）──────
@@ -287,7 +307,8 @@ def _cwdLandingsIn(path: Path) -> list:
                     continue
                 for literal in _cwdLiteralsIn(
                         node.args[index],
-                        pathTyped=kind in ("Path", "PurePath", "open", "mkdir", "makedirs")):
+                        pathTyped=kind in ("Path", "PurePath", "open", "mkdir", "makedirs"),
+                        lines=sourceLines):
                     if id(literal) not in docstrings:
                         hits.append((literal.lineno, "%s(%r)" % (kind, literal.value)))
 

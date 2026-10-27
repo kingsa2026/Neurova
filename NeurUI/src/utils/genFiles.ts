@@ -1,4 +1,4 @@
-import { secureStorage } from '@/utils/security'
+import { readAccessToken } from '@/utils/authSession'
 
 /**
  * 批次3：AIGC 产物文件访问凭证。
@@ -12,7 +12,7 @@ export function withFileToken(url: string): string {
   if (!url) return url
   if (/^https?:\/\//i.test(url)) return url
   if (url.includes('access_token=')) return url
-  const token = secureStorage.get('auth_token') || ''
+  const token = readAccessToken()
   if (!token) return url
   return `${url}${url.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token)}`
 }

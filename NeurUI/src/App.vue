@@ -155,7 +155,6 @@ onMounted(() => {
   appStore.init()
   document.documentElement.setAttribute('data-theme', appStore.theme)
   document.documentElement.setAttribute('data-skin', appStore.skin)
-  agentStore.loadAgents()
   agentStore.loadWorkflowAgents() // 遗留③b：合并 Neurflow 工作流 Agent（静默失败）
   if (authStore.isAuthenticated) {
     authStore.fetchCurrentUser()
@@ -174,6 +173,10 @@ watch(
   () => authStore.isAuthenticated,
   (authed) => {
     if (authed) {
+      // agents 列表是身份请求：未登录打过去必 401（实测：每一个匿名访客在每一个页面上
+      // 都先吃这一发，随之而来的那次跳转还会把路由守卫带上的 ?redirect= 覆盖成裸 /login）。
+      // 收进这一处 immediate 的门，同时补上「登录成功后没人再拉 agents」的旧断口。
+      agentStore.loadAgents()
       listPendingDownloads()
         .then((items) => {
           if (Array.isArray(items) && items.some((i) => i && !i.available)) {

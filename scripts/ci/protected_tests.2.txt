@@ -745,6 +745,17 @@ tests/unit/api/test_agentRunStatusVocabularyParity.py
 # 反向错误，`test_identity_gate_single_source.py` 早钉过）。结构判据取**对象同一性**
 # 不比函数名：本仓两次栽在"同名不同体、override 打到另一份静默失效"上。
 # 逐文件单跑 8 passed
+# §6-54 角色门身份源收口：`require_admin/require_role` 此前内部 `Depends(deps.get_current_user)`
+# 指的是**可回退 `?access_token=`** 那一份再导出，于是全仓 21 个文件在用的每一条特权端点
+# 都默认接受 URL 里的凭证——管理员的串贴进工单/落进访问日志即等于全站管理权。
+# 判据两面缺一不可：① 收口（`?access_token=<admin>` → 401，同一枚走头 → 200，
+# 非管理员带头 → 403 证明改的只是凭证来源不是角色判定，匿名 → 401 证明门没被删）；
+# ② **不许过界**（资源标签面 `/generation/files/{name}` 带 `?access_token=` 仍须放行——
+# `<img>`/`<a download>` 发不出 Authorization 头，这条收紧就是把放行面从 21 扩到 84 的
+# 反向错误，`test_identity_gate_single_source.py` 早钉过）。结构判据取**对象同一性**
+# 不比函数名：本仓两次栽在"同名不同体、override 打到另一份静默失效"上。
+# 逐文件单跑 8 passed
+tests/unit/api/test_jwtSigningKeyLeakIsGuarded.py
 tests/unit/api/test_roleGateIdentitySourceIsStrict.py
 # §6-64 的 B 处置：子进程**文本模式捕获**必须显式写 encoding，否则父进程按本机 locale
 # （开发机 cp936）解子进程的 UTF-8 字节。三种坏法按危险度递增：全 ASCII 侥幸没事 /
