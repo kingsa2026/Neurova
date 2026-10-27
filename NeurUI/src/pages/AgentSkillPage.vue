@@ -517,6 +517,7 @@ import * as skillPoolApi from '@/api/modules/skill-pool'
 import * as evolutionApi from '@/api/modules/text-evolution'
 import * as governanceApi from '@/api/modules/governance'
 import type { EvolutionSettings, ProposalSummary, EvolutionProposal, AbReportData, ArmExecutorKind } from '@/api/modules/text-evolution'
+import { useAuthStore } from '@/stores/auth'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -530,15 +531,11 @@ interface SkillUsage {
   last_activity_at_ms?: number
 }
 
-interface Skill {
-  id: string
-  name: string
-  description: string
-  enabled: boolean
+/** 行契约单点声明在 API 边界（skill-pool.Skill，含 skill_id→id 归一）；
+ *  页面只叠加视图态字段，不再各自复刻一份字段表。 */
+interface Skill extends Omit<skillPoolApi.Skill, 'usage'> {
   // 后端对账读数（单点 `SkillService.availabilityFor`）：`enabled` 是运营开关，
   // `available` 是"这条真能变成一个动得了的执行体"——两件事，两格都要显示得出。
-  available?: boolean
-  unavailable_reason?: string
   execution_count?: number
   usage?: SkillUsage
   _toggling?: boolean
@@ -546,16 +543,13 @@ interface Skill {
   _pushing?: boolean
 }
 
-interface MarketSkill {
-  id: string
-  name: string
-  description: string
-  category?: string
+interface MarketSkill extends Omit<skillPoolApi.Skill, 'usage'> {
   _installing?: boolean
 }
 
 const props = defineProps<{ agentId: string }>()
 const { t } = useI18n()
+const authStore = useAuthStore()
 
 const skills = ref<Skill[]>([])
 const loading = ref(false)
@@ -580,7 +574,8 @@ async function adoptHarness(item: skillPoolApi.DomainHarness) {
     message.success(t('skillEvo.adoptSuccess'))
     openProposals()
   } catch (err: any) {
-    message.error(err?.response?.data?.detail || err?.message || t('skillEvo.adoptError'))
+    const detail = err?.response?.data?.detail || err?.message
+    message.error(detail || t('skillEvo.adoptError'))
   }
 }
 
@@ -636,21 +631,15 @@ const filteredSkills = computed(() => {
 async function refreshSkills() {
   loading.value = true
   try {
-    const res = await skillPoolApi.getAgentSkills(props.agentId)
-    const data: any = (res as any)?.data ?? res
-    // 后端契约字段是 skill_id(SkillInfo);归一化为前端统一 id,
-    // 并合并生命周期 usage(状态/钉住/来源/使用次数)
+    const rows = await skillPoolApi.getAgentSkills(props.agentId)
+    // 行主键归一在 API 边界一处完成；这里只合并生命周期 usage(状态/钉住/来源/使用次数)
     const usageMap = await fetchLifecycleUsage()
-    skills.value = (Array.isArray(data) ? data : data?.items ?? []).map((s: any) => {
-      const id = s.skill_id ?? s.id ?? ''
-      return {
-        ...s,
-        id,
-        usage: usageMap[id] ?? s.usage ?? undefined,
-        _toggling: false,
-        _pinning: false,
-      }
-    })
+    skills.value = rows.map((s) => ({
+      ...s,
+      usage: usageMap[s.id] ?? (s.usage as SkillUsage | undefined),
+      _toggling: false,
+      _pinning: false,
+    }))
     if (!adoptTargetId.value && skills.value.length) {
       adoptTargetId.value = skills.value[0].id
     }
@@ -1141,19 +1130,12 @@ async function confirmRollback() {
   }
 }
 
-/** 回滚留痕要记"谁按的"：取当前登录身份，取不到给稳定占位而不是空串。 */
+/** 回滚留痕要记"谁按的"：身份只问 store 那一份（它已解析过、且随 logout 失效），
+ *  取不到给稳定占位而不是空串。此前这里绕过 secureStorage 直摸 localStorage，
+ *  第一个兜底还读了一把**全仓没人写过**的 'auth_user'（§6-432 复核实状抓到）。 */
 function currentOperator(): string {
-  try {
-    const raw = localStorage.getItem('auth_user') || localStorage.getItem('user')
-    if (raw) {
-      const parsed = JSON.parse(raw)
-      const name = parsed?.username || parsed?.user_id || parsed?.id
-      if (name) return String(name)
-    }
-  } catch {
-    // 非浏览器/脏值：落到占位
-  }
-  return 'operator'
+  const name = authStore.user?.username || authStore.user?.id
+  return name ? String(name) : 'operator'
 }
 
 onMounted(() => {
@@ -1170,12 +1152,9 @@ async function openMarketImportModal() {
 async function fetchMarketSkills() {
   marketLoading.value = true
   try {
-    const res = await skillPoolApi.getPublicSkills()
-    const data: any = (res as any)?.data ?? res
-    marketSkills.value = (Array.isArray(data) ? data : data?.items ?? []).map((s: any) => ({
-      ...s,
-      _installing: false,
-    }))
+    // 行主键归一已在 API 边界一处完成（skill-pool.toSkillRows），此处只加行内状态
+    const rows = await skillPoolApi.getPublicSkills()
+    marketSkills.value = rows.map((s) => ({ ...s, _installing: false }))
   } catch (err: any) {
     const msg = err?.response?.data?.error || err?.message || t('skill.loadError')
     message.error(msg)

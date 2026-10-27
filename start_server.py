@@ -60,13 +60,17 @@ def main():
         import uvicorn
 
         from neurova.api.app import create_app
+        from neurova.core import config
 
         # 端口预检必须在**任何重型装配之前**：uvicorn 的次序是 lifespan.startup()
         # 先跑完、再 loop.create_server()，所以端口被占的失败会落在全量装配（实测
         # 约 8 秒：4 个 Agent、LLM providers、DB、torch 预检、1253 行日志）之后，
         # 且还会再触发一轮完整关机整理——真正的失败信息被埋在日志尾部。
         # 判据与 `start.py` 同源（neurova/core/port_guard.py），两套启动器行为一致。
-        host = os.environ.get("NEUROVA_HOST", "0.0.0.0")
+        # 默认只绑回环（2026-10-26 点单丙）。原先默认 0.0.0.0 与"记忆面曾对匿名敞着"
+        # 叠过一次现网事故面：同网段任一设备可无凭据读走会话转写。要从局域网访问时
+        # 显式设 NEUROVA_HOST=0.0.0.0，让暴露面成为一个**被写下过的决定**，而不是默认值。
+        host = os.environ.get("NEUROVA_HOST", "127.0.0.1")
         port = int(os.environ.get("NEUROVA_PORT", "9527"))
         try:
             from neurova.core.port_guard import preflightPortAvailable
@@ -143,6 +147,7 @@ def main():
             host=host,
             port=port,
             log_level=_LOG_LEVEL_NAME.lower(),
+            **config.proxyUvicornArgs(),
         )
 
     except KeyboardInterrupt:

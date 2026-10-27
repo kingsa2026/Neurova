@@ -101,6 +101,13 @@ def _requireCompleteHistory(repo) -> None:
     )
 
 
+#: 历史清单取回的**分批**上限（每批一条 `git cat-file --batch` 管道）。
+#: 一批的字节量要远低于任何管道/缓冲的隐含上界：本仓全史 776 个版本、单份三百多 KB，
+#: 合计近百 MB——一次性取回时读到的只是其中一部分，而被丢掉的那一段不会报错，
+#: 「曾登记过」这一半的面就此静默变窄（台账里指向新名字的行全被判成「从未登记过」）。
+_HISTORY_BATCH = 40
+
+
 def _listedEver() -> set:
     """清单**历史上**出现过的全部条目（按提交逐个读清单全文，不解析 patch）。
 
@@ -113,8 +120,12 @@ def _listedEver() -> set:
     于是"只在合并里发生"的那次删除看不见。
     """
     _requireCompleteHistory(PROJECT_ROOT)
+    # `--all` 不是可选项：只走 `HEAD` 时，取到的是**本分支**的清单历史，而「曾登记过」
+    # 是仓库级事实。实测同一次读数：`HEAD` 侧 776 个版本、`main` 侧 821 个版本——
+    # 差的那 45 个版本里正躺着 `test_McpFaceCallerTier.py` 这类旧名，于是同一条判据
+    # 在分支上判「从未登记过」、在主干上判「已署名」，红绿取决于今天检出的是哪一支。
     shas = runText(
-        ["git", "log", "--full-history", "--format=%H", "--",
+        ["git", "log", "--all", "--full-history", "--format=%H", "--",
          "scripts/ci/protected_tests.txt"],
         cwd=str(PROJECT_ROOT), timeout=180,
     ).stdout.split()
@@ -124,18 +135,25 @@ def _listedEver() -> set:
             "本守卫按历史判「曾经登记过」，历史不可用即无法作答，"
             "故响亮失败而不是静默放行（教义第 2 条）。"
         )
-    # 一次进程批量取回各提交的清单全文（逐提交起进程会拖慢同一 CI 会话）。
-    batch = runText(
-        ["git", "cat-file", "--batch"],
-        input="\n".join(f"{sha}:scripts/ci/protected_tests.txt" for sha in shas)
-        .encode("utf-8"),
-        cwd=str(PROJECT_ROOT), timeout=180,
-    ).stdout
+    # 批量取回各提交的清单全文（逐提交起进程会拖慢同一 CI 会话），但**分批**：
+    # 全史 776 个版本 × 单份三百多 KB ≈ 96MB 一次性塞进一条管道时，取回的那份会被截在
+    # 约 55.6MB 处——后半段（含改名后的新名字）静默丢失，于是「曾登记过」这一半的面
+    # 悄悄变窄：台账里指向新名字的行全被判成「从未登记过」，而读数看起来一切正常。
+    # 分批后每批一条管道，边取边归集，单批字节量落在管道能整份交回的范围内。
     found = set()
-    for line in batch.splitlines():
-        entry = line.split("#", 1)[0].strip()
-        if entry.startswith(("tests/", "scripts/")):
-            found.add(entry)
+    for start in range(0, len(shas), _HISTORY_BATCH):
+        batch = runText(
+            ["git", "cat-file", "--batch"],
+            input="\n".join(
+                f"{sha}:scripts/ci/protected_tests.txt"
+                for sha in shas[start:start + _HISTORY_BATCH]
+            ).encode("utf-8"),
+            cwd=str(PROJECT_ROOT), timeout=180,
+        ).stdout
+        for line in batch.splitlines():
+            entry = line.split("#", 1)[0].strip()
+            if entry.startswith(("tests/", "scripts/")):
+                found.add(entry)
     return found
 
 

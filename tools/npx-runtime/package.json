@@ -4,31 +4,31 @@
   "private": true,
   "description": "运行时经 npx 拉取的 Node 包——仅用于解析依赖树并纳入 OSV 审计（不被 npm 安装执行）",
   "license": "Apache-2.0",
-  "overridesNote": "overrides 只作用于本清单的解析结果（审计面）。swagger-jsdoc 6.3.0 这类子依赖若用精确版本声明（如 yaml: \"2.0.0-1\"），锁文件里的传递依赖会一直停在该版本，重跑 npm install 也不会抬升——此时只能由 overrides 顶替。不属降级：顶替方向是抬到修复版，且实际运行的那份包由 neurova/tool_layers/npx_runtime_registry.py 的 PINNED 钉住。`@azure/msal-node` 与 `undici` 两条是另一形态：父包声明 `^6.0.0` / `^7.0.0`，区间顶不到已修复的大版本（前者上游只发 7.x），重跑 install 只会停在有漏洞的版本上，故同样由本段顶替。",
+  "overridesNote": "overrides 只作用于本清单的解析结果（审计面）。swagger-jsdoc 6.3.0 这类子依赖若用精确版本声明（如 yaml: \"2.0.0-1\"），锁文件里的传递依赖会一直停在该版本，重跑 npm install 也不会抬升——此时只能由 overrides 顶替。不属降级：顶替方向是抬到修复版，且实际运行的那份包由 neurova/tool_layers/npx_runtime_registry.py 的 PINNED 钉住。`@modelcontextprotocol/server`／`node` 是本仓 `@upstash/context7-mcp` 用精确版本钉住的子依赖（它写 `2.0.0`，不是 `^`），registry 上 2.0.0 只有那一版、修复版 2.3.0 起才有，故除 overrides 无路可走；`@azure/msal-node` 与 `undici` 被父包声明 `^6.0.0` / `^7.0.0`，区间顶不到已修复的大版本（前者上游只发 7.x）；其余（fast-uri／ip-address／zod）各有父包给的下界卡在旧值。一律抬到公告修复线以上，方向只有抬没有降。`body-parser` 按父包分段钉、不设平铺条目：平铺那条会先被命中而遮住分段条目，dbhub 的 express 4 子树随之被并到顶层，审计面与真实解析脱形（守卫见 tests/unit/tools/test_npx_runtime_pinning.py 的 TestNestedCarrierSubtreeIsKeptWhole）。",
   "dependencies": {
     "@askjo/camofox-browser": "1.16.0",
     "@bytebase/dbhub": "1.2.5",
     "@modelcontextprotocol/server-filesystem": "2026.8.31",
-    "@upstash/context7-mcp": "4.1.1"
+    "@upstash/context7-mcp": "4.4.4"
   },
   "overrides": {
     "swagger-jsdoc": {
       "yaml": "2.8.3"
     },
-    "@modelcontextprotocol/sdk": "^1.32.0",
-    "@modelcontextprotocol/server": "2.4.0",
-    "hono": "4.13.11",
-    "ip-address": "10.7.4",
-    "zod": "4.6.6",
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "@azure/msal-node": "^7.1.1",
+    "@modelcontextprotocol/node": "^2.1.2",
+    "fast-uri": "^3.1.9",
+    "ip-address": "^10.7.4",
+    "undici": "^7.30.1",
+    "zod": "^4.6.6",
     "@bytebase/dbhub": {
       "body-parser": "1.20.9",
       "express": "4.22.3"
     },
-    "fast-uri": "3.1.9",
-    "undici": "7.30.1",
-    "@azure/msal-node": "7.1.1",
     "express": {
       "body-parser": "2.4.0"
-    }
+    },
+    "@modelcontextprotocol/server": "2.3.1"
   }
 }

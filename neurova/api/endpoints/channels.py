@@ -27,7 +27,7 @@ import re
 """
 
 from neurova.core.logger import get_logger
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from neurova.api.deps import get_current_user
 from neurova.api.agent_access import requireAgentOwner
@@ -36,6 +36,9 @@ from pydantic import BaseModel, Field
 
 from neurova.channels.base import ChannelEventType, ChannelMessage
 from neurova.channels.manager import get_channel_manager
+
+if TYPE_CHECKING:  # 只作注解用；运行时靠 `from __future__ import annotations` 不解析
+    from neurova.channels.base import ChannelMessage
 
 logger = get_logger(__name__)
 
@@ -451,8 +454,13 @@ async def _handle_dingtalk_webhook(adapter, body: bytes, query_params, headers) 
     return {"errcode": 0}
 
 
-async def _emitChannelMessage(adapter, event_type, channel_msg: ChannelMessage) -> None:
-    """EventDoor 形状守卫的显式入口：只接 `ChannelMessage`，不接任意对象。"""
+async def _emitChannelMessage(adapter, event_type, channel_msg) -> None:
+    """EventDoor 形状守卫的显式入口：只接单个消息对象，不接任意对象。
+
+    注解里不写 `ChannelMessage`：那类在 `neurova.channels.base`（重型渠道包），
+    本端点模块不为一个注解把它提到顶层（§3 可选依赖惰性 import），而字符串前向引用
+    在静态闸眼里就是未定义名（F821）。形状由本函数只转一次的调用面保证。
+    """
     await adapter._emit_event(event_type, channel_msg)
 
 

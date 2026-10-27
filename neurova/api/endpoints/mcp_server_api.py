@@ -37,6 +37,9 @@ from neurova.core.identity_context import set_request_user_id
 from neurova.core.logger import get_logger
 from neurova.tool_layers.mcp_server import McpCaller
 
+if typing.TYPE_CHECKING:  # 只作注解用；`neurova.tool_layers.mcp_server` 运行时按需 import
+    from neurova.tool_layers.mcp_server import McpCaller
+
 logger = get_logger(__name__)
 
 _SERVER_NAME = "neurova"
@@ -118,7 +121,7 @@ def _callToolHandler(caller):
     return _onCallTool
 
 
-def _callerPrincipal(current_user) -> McpCaller:
+def _callerPrincipal(current_user):
     """把"这一发能不能驱动这个 agent"算成**一个布尔**交给核心，口径不在这文件里定义。
 
     判定用的是平台唯一那份属主源 `agent_access`（admin 全量／owner 匹配／无主仅 admin），

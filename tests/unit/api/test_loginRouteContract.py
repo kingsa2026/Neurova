@@ -28,7 +28,6 @@
 | 内部异常原文不回传 | `auth.py:279-283`（S-11） |
 """
 
-import os
 import uuid
 from datetime import datetime, timezone
 
@@ -38,18 +37,36 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock
 
-os.environ.setdefault("NEUROVA_JWT_SECRET_KEY",
-                      "test_secret_key_1234567890123456789012345678901234567890")
-TEST_SECRET = os.environ["NEUROVA_JWT_SECRET_KEY"]
-
+# 前提自给：本档只问"这一轮用的是哪把密钥"，问法收口在 `tests/auth_headers.pinJwtSecret()`。
+#
+# 那段历史值得留着：原先这里写 `setdefault("NEUROVA_JWT_SECRET_KEY", ...)`，实测对密钥
+# **完全无效** —— `auth.py:146` 读的是 `NEUROVA_JWT_SECRET`（无 `_KEY` 后缀），而
+# `JWT_SECRET_KEY` 在 `auth.py:175` 导入期就烘死。真正生效的只有"直接赋常量"那句，
+# 且它只覆盖**签名侧**；`deps` 再导出的身份门是**函数对象**，读的是自己 `__globals__`
+# 里那份模块字典。进程里一旦出现第二份密钥，端点为登录签出令牌、门用另一把验，
+# 本档就报 `InvalidSignatureError`。
+#
+# 本仓同一件事曾有四份写法（本档 / `test_roleGateIdentitySourceIsStrict.py` /
+# `test_memory_route_shadowing.py` / 记忆面各一份）——四份里任何一份漏配就复发，
+# 而台面上看不出谁的读法对。收成一处（教义第 6/7 条）：门名册按运行时现值取、
+# 令牌在用例内现签，见 `tests/auth_headers.pinJwtSecret()`。
 import neurova.api.endpoints.auth as authEndpoint  # noqa: E402
 from neurova.api import auth as authModule  # noqa: E402
 from neurova.api.endpoints.auth import router  # noqa: E402
+from tests.auth_headers import pinJwtSecret  # noqa: E402
 
-if authModule.JWT_SECRET_KEY != TEST_SECRET:
-    authModule.JWT_SECRET_KEY = TEST_SECRET
+# 本档当初的形态是"模块级直接赋 `auth.JWT_SECRET_KEY`、且从不复原"：只覆盖签名侧、
+# 还留到下一个档（`test_jwtSigningKeyLeakIsGuarded` 钉的正是这个泄漏面）。那一半的收口
+# 不在本档做，统一在 `tests/auth_headers.pinJwtSecret()`；本档只申请它、不复原它，
+# 因为密钥是**进程内唯一**的（`auth._generatedSecretKey` 只定一次），复原到旧值反而制造第二把。
 
 ALGORITHM = authModule.JWT_ALGORITHM
+
+
+@pytest.fixture(autouse=True)
+def _pinSigningKeyForThisRound():
+    """每个用例把签发侧与全部验签门对齐到同一把密钥，令牌在这一轮现签。"""
+    pinJwtSecret()
 
 
 def _user(**over):
@@ -62,6 +79,7 @@ def _user(**over):
 
 @pytest.fixture()
 def client():
+    # `_pinSigningKeyForThisRound`（autouse）已在用例开始前对齐两侧；这里只建 app。
     app = FastAPI()
     app.include_router(router, prefix="/v1/auth")
     with TestClient(app, raise_server_exceptions=False) as c:
@@ -90,6 +108,8 @@ def userModel():
 
 
 def _login(client, username="alice", password="Passw0rd!123"):
+    # 令牌与验签门同源于**这一轮**：登录面签出来的令牌，门当场用同一把密钥验。
+    pinJwtSecret()
     return client.post("/v1/auth/login", json={"username": username, "password": password})
 
 
@@ -122,7 +142,7 @@ class TestSuccessfulLoginCarriesIdentity:
     def test_roleComesFromTheUserRowNotAConstant(self, client, userModel):
         userModel.authenticate_user.return_value = _user(role="admin")
 
-        payload = jwt.decode(_login(client).json()["access_token"], TEST_SECRET,
+        payload = jwt.decode(_login(client).json()["access_token"], pinJwtSecret(),
                              algorithms=[ALGORITHM])
 
         assert payload["role"] == "admin", (
@@ -132,7 +152,7 @@ class TestSuccessfulLoginCarriesIdentity:
         """刷新 token 只带身份不带权限：拿它当 access token 用的人不该有角色。"""
         token = _login(client).json()["refresh_token"]
 
-        payload = jwt.decode(token, TEST_SECRET, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, pinJwtSecret(), algorithms=[ALGORITHM])
 
         assert "role" not in payload, sorted(payload)
 
@@ -236,7 +256,7 @@ class TestTheFixtureIsNotVacuous:
         sentinel = "alice-" + uuid.uuid4().hex[:8]
         userModel.authenticate_user.return_value = _user(username=sentinel)
 
-        payload = jwt.decode(_login(client).json()["access_token"], TEST_SECRET,
+        payload = jwt.decode(_login(client).json()["access_token"], pinJwtSecret(),
                              algorithms=[ALGORITHM])
 
         assert payload["username"] == sentinel, "端点没在读被打桩的那个 user_model（本档全部恒绿）"
@@ -249,7 +269,7 @@ class TestTheFixtureIsNotVacuous:
         """
         data = _login(client).json()
 
-        payload = jwt.decode(data["access_token"], TEST_SECRET, algorithms=[ALGORITHM])
+        payload = jwt.decode(data["access_token"], pinJwtSecret(), algorithms=[ALGORITHM])
         remaining = (datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
                      - datetime.now(timezone.utc)).total_seconds()
 

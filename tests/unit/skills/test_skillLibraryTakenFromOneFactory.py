@@ -85,14 +85,13 @@ class TestWriteThenReadSeeOneLedger:
         return client
 
     def test_install_then_agentFaceListsIt(self, app_client):
-        """走真安装链——用 **studio** 那只包（本批原先回避它，理由已经失效）。
+        """走真安装链，用真资产包（studio 那只）。
 
-        原先回避 studio 的原因是"跑测环境里连装到最终位置都放不下"（终点投影超 Windows 260，
-        §6-276 登记的落点问题），当时另用 `builtin--multi-search-engine` 代替。v2 统一布局把
-        agent 技能库收到 `data/<id>/skills`（比旧 `agent_workspaces/<id>/skills` 短一截）之后，
-        投影落到 247 字符、回到预算内——`test_studioPackageProjectionFitsTheWindowsBudget`
-        那格钉着这个读数。回避的理由没了，主格就该用真资产：本批要判的是"写完读得到"，
-        而 studio 是仓内成员最长、包内目录最深的那一只，拿它判才是真判。
+        起点是反过来的：本格原用 `multi-search-engine`，理由是"studio 的终点投影超 Windows
+        260 预算，装不到最终位置"。那条理由现在失效了——路径预算成了**解包闸的前置判定**
+        （`market_sources.refusalForPathBudget`，跨机器同向，不再赌本机 OS 设置），库根也短了
+        一截（实测终点投影 247 < 260），真资产在跑测环境里装得成。留短包就是把"能不能装"
+        这件事从判据里拿掉，读起来像通了、其实少测了真实尺寸那一路。
         """
         skill_id = "builtin--adaptive-presentation-studio"
         installed = app_client.post(f"/api/v1/skill-pool/{skill_id}/install",
@@ -106,33 +105,50 @@ class TestWriteThenReadSeeOneLedger:
             f"安装回执说成功，但同进程的面板数据源读到 {len(rows)} 条 {ids[:5]}——"
             "写侧与读侧各持一份内存账，这正是本批要合掉的")
 
-    def test_studioPackageProjectionFitsTheWindowsBudget(self):
-        """主格为什么敢用 studio：终点投影必须**真的**落在 Windows 预算内（读数钉在这里）。
+    def test_studioPackageBudgetIsDecidedByTheGateNotByTheOs(self):
+        """主格换包的理由必须**会红**，不许只写在话里（形态集 251 那条：归零的腿要留着读数）。
 
-        这条判据的语义随落点一起翻过面：落点还叫 `agent_workspaces/<id>/skills` 时它断的是
-        "装不下"（`projection > 260`），用途是给主格换包一个会红的理由；v2 收成
-        `data/<id>/skills` 之后投影回到预算内，它断的就必须反过来是"装得下"——
-        否则主格用真资产时会失败，而失败信息会指向安装链路，与真正的原因（路径预算）无关。
+        这条腿走完了一次翻面，两段读数都留在这里：
+        - 起点：终点投影 273 字符（库根 + `adaptive-presentation-studio` + 最长成员 125），
+          超 Windows 260 ⇒ 真资产在跑测环境里"装不到最终位置"，主格只好退用短包；
+        - 现在：库根短到 92，投影 247 **低于** 260，而真资产在 POSIX 上本来也装得下
+          （`PATH_MAX` 4096）⇒ 单靠"赌本机 OS 设置"这一维已经不成立。
+        所以判据改成钉那条**不再赌 OS** 的那一半：路径预算由
+        `market_sources.refusalForPathBudget` 在解包之前判定，超预算时真资产在这台机器上
+        必须被**拒并点名原因**，而短包照装。装得下还是装不下由闸说，不由本机碰巧是什么系统说。
         """
-        import re
-        import zipfile
 
+
+        from neurova.skills import market_sources as ms
         from neurova.skills.library_service import POOL_AGENT, resolve_library_dir
-        from neurova.skills.market_sources import WINDOWS_MAX_PATH   # 预算单源＝解包闸用的那个数
+        from neurova.skills.market_importer import read_builtin_bundle
 
-        bundle = REPO / "neurova" / "skills" / "market_bundles" / "adaptive-presentation-studio.zip"
-        with zipfile.ZipFile(io.BytesIO(bundle.read_bytes())) as zf:
-            longestMember = max(zf.namelist(), key=len)
-            # 落点目录名取包内 manifest 的 name——它是所有候选里最短的一个，短的都放不下就没得放
-            entryName = re.search(r"^name:\s*(\S+)",
-                                  zf.read("manifest.yaml").decode("utf-8"), re.M).group(1)
+        bundle = "adaptive-presentation-studio.zip"
+        payload = read_builtin_bundle(bundle)
+        assert payload, f"仓内资产包缺失：{bundle} ⇒ 本档失去根据，去补资产而不是关判据"
+        dest = REPO / "probe-skills" / "adaptive-presentation-studio"
+
+        # 预算正常时：真资产不被拦（247 < 260），本格同时是"不误伤"的反向控制
+        assert ms.refusalForPathBudget(payload, dest) == "", (
+            "真资产在正常落点下被判成超预算——闸门算错了投影，别把主格改回短包来绕开")
+        # 预算被压到 40 时：同一份包必须当场拒，且原因点的是"路径过长"这一族
+        original = ms.WINDOWS_MAX_PATH
+        try:
+            ms.WINDOWS_MAX_PATH = 40
+            reason = ms.refusalForPathBudget(payload, dest)
+            assert reason, "上限压到 40 后真资产仍被判装得下——判定没读那个数（常量成了摆设）"
+            assert "路径过长" in reason, f"超预算没点名原因：{reason[:120]}"
+            refusal = ms.extractRemoteSkillZipRefusal("probe", payload, dest)
+            assert "路径过长" in refusal, f"超预算没点名原因：{refusal[:120]}"
+        finally:
+            ms.WINDOWS_MAX_PATH = original
+        assert not (dest / "SKILL.md").exists(), "被拒的包不该在盘上留下任何成员"
+        # 真实库根那一档：投影 247 < 260，桩在这里是"不误伤"的现读（不是另开一格）。
         libRoot = str(resolve_library_dir(POOL_AGENT, "default"))
-        projection = len(str(Path(libRoot) / entryName / longestMember))
-
-        assert projection < WINDOWS_MAX_PATH, (
-            f"studio 终点投影现读 {projection} 字符（库根 {len(libRoot)} + 库内目录 {entryName} + "
-            f"最长成员 {len(longestMember)}），已越过 Windows {WINDOWS_MAX_PATH} 预算"
-            "——主格用真资产会失败，且失败信息会指向安装链路而不是这处路径预算")
+        assert ms.refusalForPathBudget(
+            payload, Path(libRoot) / "adaptive-presentation-studio") == "", (
+            f"studio 在真实库根 {libRoot} 下被判成超预算——主格用真资产会失败，"
+            "且失败信息会指向安装链路而不是这处路径预算")
 
     def test_factoryHandsOutOneInstancePerLibraryDir(self):
         """工厂语义：**同一库目录必须只对应一个实例**，且落点与解析单点一致。

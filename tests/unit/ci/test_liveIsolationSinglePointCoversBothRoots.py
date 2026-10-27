@@ -35,9 +35,9 @@ import ast
 import json
 import os
 import pathlib
-import tempfile
 import subprocess
 import sys
+import tempfile
 
 from tests import ast_scan
 
@@ -102,13 +102,15 @@ def test_isolatedDataRootAloneMovesAgentWorkspaceOutOfRepo():
         "⇒ 70 档起真 app 的 manual 探针会往仓内 agent_workspaces/ 写记忆/附件——"
         "该由单点保证的第二根没人保证（D8）。"
     )
-    # 临时目录只有一个来源：`tempfile` 自己算出的那个（Windows 下是 `%TEMP%`、
-    # Linux 下是 `/tmp`）。判据此前手抄 `os.environ["TEMP"]`，在 Linux CI 上那个变量
-    # 根本不存在 ⇒ `.resolve()` 变成进程 CWD，任何合法临时落点都判成"在仓内"；
-    # 补一条 `"Temp" in str(ws)` 也只在 Windows 上成立。两半都只在一种平台上对。
+    # 「临时目录」的判据用**生成它的那个入口**：单点是 `tempfile.mkdtemp(prefix="neurovaLive")`
+    # ⇒ 系统临时根就是 `tempfile.gettempdir()`。早先这里读的是 `os.environ.get("TEMP", "")`
+    # 加 `"Temp" in str(ws)`：POSIX 上没有 TEMP（只有 TMPDIR），取到空串后
+    # `Path("").resolve()` 就是**当前工作目录**，仓内落点也过判；后半句更只是大小写巧合。
+    # 两层都不咬——所以按"落点在不在系统临时根下"判，并且只认一个根。
     tempRoot = pathlib.Path(tempfile.gettempdir()).resolve()
     assert ws.resolve().is_relative_to(tempRoot), (
-        f"工作区根没有落在临时目录（临时根＝{tempRoot}）：{ws}"
+        f"工作区根没有落在临时目录：{ws}（临时根＝{tempRoot}）——"
+        "与上面那条不同源：上面只要求不在仓内，这条要求它真的落在系统临时根下"
     )
 
 

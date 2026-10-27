@@ -341,6 +341,22 @@
             </div>
           </div>
         </div>
+
+        <!-- 刷新/断连后仍在后台生成的回合（与上面 parked 同一族问题）：那一轮的
+             assistant 回复要到 post-chat 回合末才落盘，历史里没有属于它的气泡，
+             所以同样挂在会话级。停止复用现成的 /console/chat/stop（真取消那一轮）。
+             这里不写"完成后自动更新"——本组件不轮询，那样说是虚假承诺。 -->
+        <div v-if="runningTurn" class="nr-msg nr-msg--assistant">
+          <div class="nr-msg-avatar"><UiIcon name="monitor" :size="16" /></div>
+          <div class="nr-msg-body">
+            <div class="nr-parked-notice">
+              <span class="nr-parked-notice-label">{{ t('chat.turnStillRunning') }}</span>
+              <button class="nr-parked-resume" type="button" @click="stopRunningTurn">
+                {{ t('chat.stop') }}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- 跳至最新悬浮按钮：用户上翻离开底部时出现在输入区上方（纯 CSS 液态玻璃圆钮，
@@ -452,7 +468,7 @@ import type { ChatMessage, Session } from '@/types/chat'
 import { api } from '@/api'
 import { extractUploadedFileId } from '@/api/modules/files'
 import { useGovernanceApproval } from '@/composables/useGovernanceApproval'
-import { secureStorage } from '@/utils/security'
+import { readAccessToken } from '@/utils/authSession'
 import { renderMarkdown } from '@/utils/markdown'
 import { revokeMessageBlobUrls } from '@/utils/blobUrls'
 import { openArtifactTab, openCodeBlockTab, openFileTab, openImageTab, openToolResultArtifacts, artifactFromEvent, artifactsFromToolResult, mergeMessageArtifacts, openMessageArtifact, type ArtifactEventPayload, type MessageArtifact } from '@/utils/artifacts'
@@ -743,6 +759,8 @@ const {
   loadSessions: _loadSessions,
   createSession: _createSession,
   switchSession: _switchSession,
+  // 开局认领会话时同步写"上次会话"记忆（与 switchSession 同一实现，见 useChat）
+  rememberSession,
   deleteSession: _deleteSession,
   renameSession: _renameSession,
   pinSession: _pinSession,
@@ -756,8 +774,8 @@ const {
   // 会话分叉 / 消息钩子
   forkSession: _forkSession,
   setCheckpoint: _setCheckpoint,
-  // 时间线补课（Issue #262）：从落盘 append-only 事件重放缺失增量
-  replaySessionTimeline: _replaySessionTimeline,
+  // 时间线补课（Issue #262）已改由 `useChat.switchSession` 单点内部调用——
+  // 页面不再解构它，留着就是一条无人消费的旁路（刷新路径正是绕过这里才丢的补课）。
   // 用户主动调用 switchSession / deleteSession 失败时弹 toast 的错误策略 helper
   // (#2 / ADR 0008 函数调用库契约的一部分 — switchSession / deleteSession 本身
   //  不弹 toast, 调用方按需调 notifySwitchFailure / notifyDeleteFailure;
@@ -1230,13 +1248,9 @@ async function switchSession(sessionId: string): Promise<void> {
   _notifySwitchFailure(result)
   // 补课 D：恢复新会话草稿；补课 A6+F：历史会话打开定位到最新记录
   chatStore.setInputText(chatDraft.restore(sessionId))
-  // 补课 E（Issue #262）：历史（落盘消息）与时间线（落盘事件）是两份事实，
-  // 上次会话中途断流时历史只有已提交的部分，尾轮增量只在时间线里。
-  // 此处对账：历史能对上时间线前缀就把差额补上，对不上则不动（见
-  // replayTimelineInto 的前缀守卫）。
-  if (result.ok) {
-    await _replaySessionTimeline(sessionId, { continueTail: true })
-  }
+  // 补课 E（Issue #262）已下沉到 `useChat.switchSession` 单点——此前它只长在这个
+  // wrapper 上，而刷新走的 `loadSessions → auto-select` 不经这里，于是同一动作
+  // 一份补课一份不补（历史与时间线两份事实对不上）。两条路径现在都只经那一处。
   scrollToBottomForHistory()
 }
 
@@ -1436,7 +1450,7 @@ async function sendMessage() {
   // Initiate SSE streaming request
   // F-10：控制器由 readStream 独自创建/持有（重连重试会再建新控制器），
   // 此处不得预建——预建的控制器会被 readStream 内的创建覆盖成孤儿。
-  const token = secureStorage.get('auth_token')
+  const token = readAccessToken()
 
   // 补课 8（断线重连+replay 快进）：读流网络中断（非用户中止/非 HTTP 错）
   // 时自动带 replay_from=<已消费事件数> 重连一次——服务端快进重放缓冲尾段，
@@ -1571,6 +1585,32 @@ function followReasoningScroll(): void {
 }
 
 /** Process a single SSE event and update the assistant message. */
+/**
+ * 会话归属认领（单点）。
+ *
+ * 新会话的 id 由服务端当场分配，旧形态只在 `done` 帧回传——于是首轮流式期间
+ * `currentSessionId` 一直是空。实测代价有两处：① 补课 8 的断线重连以空 id 重新
+ * POST，服务端另起一个会话（实测落出一个 0 消息空会话，与真回合分家）；
+ * ② 首轮中途刷新后既找不回会话，也认不出"这一轮还在生成"。
+ * 后端因此把归属提到开局第一帧，这里在收到它的当场认领；`done` 仍调同一处，
+ * 已认领则跳过（不重复入列表）。
+ */
+function adoptStreamedSession(sid?: string): void {
+  if (!sid || currentSessionId.value) return
+  chatStore.setCurrentSession(sid)
+  // P1-12（审计 2026-09-11）：拿到 session_id 时同步流快照——否则 finally 守卫
+  // `currentSessionId === activeStreamSessionId` 变成 "新id" === null 恒假，
+  // 流式期间入队的消息永不自动续发
+  activeStreamSessionId = sid
+  // BUG-6 修复：标题取发送时文本（inputText 此时已被清空，流式中又输入的草稿会污染标题）
+  chatStore.addSession({
+    id: sid,
+    title: lastSentMessageText.slice(0, 50) || t('chat.newChat'),
+  })
+  // 记住这一轮写在哪个会话：刷新后据此找回（见 useChat.rememberSession）
+  rememberSession(sid)
+}
+
 function processSSEEvent(event: any, msg: ChatMessage) {
   const type = event.type || event.event
 
@@ -1833,21 +1873,14 @@ function processSSEEvent(event: any, msg: ChatMessage) {
         void attachAudioUrl(msg, event.audio_url)
       }
       // Auto-create session if this is the first exchange
-      if (!currentSessionId.value && event.session_id) {
-        chatStore.setCurrentSession(event.session_id)
-        // P1-12（审计 2026-09-11）：新会话首轮 done 拿到 session_id 时同步
-        // 流快照——否则 finally 守卫 `currentSessionId === activeStreamSessionId`
-        // 变成 "新id" === null 恒假，流式期间入队的消息永不自动续发
-        activeStreamSessionId = event.session_id
-        // BUG-6 修复：标题取发送时文本（inputText 此时已被清空，
-        // 流式中又输入的草稿会污染标题）
-        chatStore.addSession({
-          id: event.session_id,
-          title: lastSentMessageText.slice(0, 50) || t('chat.newChat'),
-        })
-      }
+      adoptStreamedSession(event.session_id)
       // 补课 6：默认标题（新对话/新建对话）→ 语义概括自动填充，不再停留默认名
       void maybeAutoTitle()
+      break
+
+    case 'session':
+      // 开局第一帧：服务端已分配好这一轮写在哪个会话，当场认领（见 adoptStreamedSession）
+      adoptStreamedSession(event.session_id)
       break
 
     case 'error': {
@@ -1904,6 +1937,57 @@ const parkedRuns = ref<ParkedRun[]>([])
  * 都不曾落盘——刷新后历史里根本没有属于它的气泡，贴到上一条已完成回复上
  * 等于把续跑按钮安在另一轮头上。
  */
+/**
+ * 刷新后仍在后台生成的回合（与 parkedRuns 同一族问题：**读面早就备好了，缺的是消费者**）。
+ *
+ * 后端 `GET /console/tasks` 返回 per-session 注册的 asyncio 任务
+ * （`session_id`/`kind`/`started_at`/`duration`，P0-2 任务跟踪器为后台任务面板准备的），
+ * 此前前端无人取用。用户刷新时那一轮应当还在跑（这句在初稿写作时是错的，见下方实测更正），
+ * 而它的 assistant 回复要到 post-chat 回合末才落盘——不说出来，界面就只剩一条
+ * 自己发的问句挂在那儿，看起来像卡死。
+ *
+ * 形态取会话级提示条，与 parkedRuns 同一条：那一轮还没有自己的气泡。样式直接复用
+ * `nr-parked-notice` 那一组（它是通用"本轮状态条"，类名只是首个使用者留下的，
+ * 更名另计，不在此另造第二套 CSS）。
+ *
+ * 2026-10-26 实测更正：本函数初稿这里写的是「`run_chat` 是独立 create_task，
+ * 断连不取消它」——**错的**。真浏览器复现读到的 run 终态是 `cancelled`/`error_type=stopped`，
+ * `finished_at` 正是断连那一刻：取消从响应任务沿 `finally: await task` 的等待链带走了这一轮。
+ * 后端同批改那处等待为 `asyncio.shield` 后复跑，断连 80s 的轮仍 `running` 并最终把
+ * assistant 回复落盘（3468 字），这条提示才有事实可说。
+ *
+ * 只查不轮询：取一次读数、如实显示"仍在生成中"，要停就点停止。**没有**声称
+ * "完成后会自动更新"——那需要轮询或推送，本函数不做这个承诺。
+ */
+const runningTurn = ref<{ sessionId: string; duration: number } | null>(null)
+
+async function loadRunningTurn(sid: string): Promise<void> {
+  runningTurn.value = null  // 会话级态：切换即清，跨会话不残留
+  if (!sid) return
+  try {
+    const res: any = await api.get('/console/tasks')
+    if (currentSessionId.value !== sid) return  // 已切走：过期响应不写当前视图
+    const tasks: any[] = res?.data?.tasks ?? res?.tasks ?? []
+    const hit = tasks.find((t) => t?.session_id === sid && t?.kind === 'chat')
+    if (hit) runningTurn.value = { sessionId: sid, duration: Number(hit.duration ?? 0) }
+  } catch (err: any) {
+    // 取不到就是"没有状态位"，但要留痕，不能让用户面对一个静默缺席的提示
+    console.error(
+      `[runningTurn] 取回在跑任务失败 HTTP ${err?.response?.status ?? '网络异常'}，本轮无生成状态提示`,
+      err,
+    )
+  }
+}
+
+async function stopRunningTurn(): Promise<void> {
+  const sid = currentSessionId.value
+  if (!sid) return
+  stopStreaming()  // 复用现成的一条：POST /console/chat/stop 真取消 + abort 本地流
+  runningTurn.value = null
+  // 停完重取一次：那一轮的已生成部分随取消路径落盘，不重取就欠着一条永远转着的提示
+  await switchSession(sid)
+}
+
 async function loadParkedRuns(sid: string): Promise<void> {
   parkedRuns.value = []  // 会话级态：切换即清，跨会话不残留
   if (!sid) return
@@ -1967,7 +2051,7 @@ async function resumeParkedTurn(msg: ChatMessage): Promise<void> {
       `${baseUrl}/console/chat/resume?run_id=${encodeURIComponent(notice.runId)}`,
       {
         method: 'POST',
-        headers: { Authorization: `Bearer ${secureStorage.get('auth_token') || ''}` },
+        headers: { Authorization: `Bearer ${readAccessToken()}` },
         signal: controller.signal,
       },
     )
@@ -2035,7 +2119,7 @@ async function synthesizeTTS(msg: ChatMessage) {
 
   try {
     const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
-    const token = secureStorage.get('auth_token')
+    const token = readAccessToken()
     const response = await fetch(`${baseUrl}/audio/synthesize-stream`, {
       method: 'POST',
       headers: {
@@ -2376,7 +2460,7 @@ function startStreamTTS(): void {
   streamTTSRunner = new StreamTTSRunner({
     synthesize: async (text, signal) => {
       const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
-      const token = secureStorage.get('auth_token')
+      const token = readAccessToken()
       const resp = await fetch(`${baseUrl}/audio/synthesize-stream`, {
         method: 'POST',
         headers: {
@@ -2428,7 +2512,7 @@ function getToolAnnouncer(): SpeechAnnouncer | null {
   if (!toolAnnouncer) {
     toolAnnouncer = createSpeechAnnouncer(async (text) => {
       const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
-      const token = secureStorage.get('auth_token')
+      const token = readAccessToken()
       const resp = await fetch(`${baseUrl}/audio/synthesize-stream`, {
         method: 'POST',
         headers: {
@@ -2614,6 +2698,7 @@ watch(
     // 挂起回合的取回同样放在这里而不是只 onMounted：`loadSessions` 异步自动选首会话时，
     // 挂载瞬间 currentSessionId 还是空（与上面重绑视图同一个理由）
     void loadParkedRuns(sid)
+    void loadRunningTurn(sid)
   },
   { immediate: true },
 )

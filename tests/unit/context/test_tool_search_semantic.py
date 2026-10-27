@@ -27,6 +27,10 @@ class FakeEngine:
         norm = math.sqrt(sum(v * v for v in vec)) or 1.0
         return [v / norm for v in vec]
 
+    def encodeOrNone(self, text: str):
+        """引擎那一处的判据口（`ONNXEmbeddingEngine.encodeOrNone` 的契约）：算得出才给向量。"""
+        return self.encode(text)
+
 
 @pytest.fixture
 def entries():
@@ -89,3 +93,66 @@ def test_env_off_forces_pure_bm25(entries, isolated_index, monkeypatch):
     monkeypatch.setenv("NEUROVA_TOOL_SEARCH_EMBEDDING", "0")
     ts.search_catalog("气温如何", entries, limit=1)
     assert eng.encode_calls == [], "开关关闭时不得调用任何嵌入"
+
+
+# ── 词表口径（§6-419）：中文不能整段当一个 token ──
+
+
+class TestCjkLexicalFallback:
+    """引擎缺席/回零向量时回落 BM25——回落得有一条能命中的词表。
+
+    改前 `_TOKEN_SPLIT` 对中文是无操作：「查询天气」是一条词、「天气」是另一条，
+    两者永不相等。目录里明明有天气工具，查「天气」零命中；而零命中在生产侧会被
+    `handle_control_tool` 投递成「能力缺口」并驱动自主造工具——词表口径的缺陷被
+    翻译成了一个假缺口（实测：`test_hitSearch_doesNotRecordGap` 的前提当场塌掉）。
+    """
+
+    def testChineseIsSplitIntoRunsTheQueryCanMatch(self):
+        tokens = ts._tokenize("查询天气")
+        assert "天气" in tokens, f"「查询天气」切不出「天气」：{tokens}"
+        assert ts._tokenize("天气") == ["天气"]
+
+    def testLatinAndDigitsStayWholeTokens(self):
+        assert ts._tokenize("mcp weather lookup x1") == ["mcp", "weather", "lookup", "x1"]
+
+    def testSingleCharacterCjkRunIsNotAWord(self):
+        """单字段只剩噪声，不进词表（与 `knowledge.search.tokenize` 的下限同口径）。"""
+        assert ts._tokenize("a 天 b") == ["a", "b"]
+
+    def testSearchFallsBackToBm25WhenTheEngineGivesNoVector(self, isolated_index, monkeypatch):
+        """引擎算不出向量时，检索必须整体回落 BM25。
+
+        `ONNXEmbeddingEngine.encodeOrNone()` 是"这一轮算没算出向量"的唯一判定处：引擎缺档
+        （`requirements-ci.txt` 刻意不含 onnxruntime/tokenizers）时它给 None。`_hybrid_scores`
+        若照旧拿"一列 0"进语义加权，余弦那一支恒 0 却仍参与，检索读数就随"装没装 tokenizer"变。
+        """
+
+        catalog = ts.build_catalog([
+            {"type": "function", "function": {"name": "mcp.weather.lookup",
+              "description": "查询天气", "parameters": {"type": "object", "properties": {}}}},
+        ])
+
+        class UnreadyEngine:
+            """查询算不出；条目照常编码（引擎半可用是常态，不是二值）。"""
+
+            def encode(self, text):
+                return [1.0] + [0.0] * 7
+
+            def encodeOrNone(self, text):
+                return None if text == "天气" else self.encode(text)
+
+        monkeypatch.setattr(ts, "_get_engine", lambda: UnreadyEngine())
+        assert ts._hybrid_scores("天气", catalog) is None, (
+            "引擎没给向量却仍进了语义加权：余弦那一支恒 0，检索读数随装没装 tokenizer 变"
+        )
+        assert ts.search_catalog("天气", catalog, limit=1)[0]["name"] == "mcp.weather.lookup", (
+            "回落之后检索仍是空手——零命中在生产侧会被投递成能力缺口"
+        )
+
+        class ReadyEngine(UnreadyEngine):
+            def encodeOrNone(self, text):
+                return self.encode(text)
+
+        # 反向控制：同一坐标下引擎算得出时，语义那一路必须真的进场
+        monkeypatch.setattr(ts, "_get_engine", lambda: ReadyEngine())
+        assert ts._hybrid_scores("天气", catalog) is not None

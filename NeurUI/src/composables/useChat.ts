@@ -95,6 +95,44 @@ export function useChat(options: UseChatOptions = {}) {
   // ---------------------------------------------------------------------------
 
   /**
+   * 上次打开的会话（刷新后回到它）。
+   *
+   * 口径与草稿持久化同族（`useChatDraft` 的 `nr_` 前缀 + try/catch 静默降级：
+   * 隐私模式/存储满不能让页面报错）。这里存的是**全局单键**而不是 per-agent：
+   * 读侧会用"是否在当前会话列表里"兜底，切 agent 后上一个 agent 的会话不在列表里，
+   * 自然退回首位——代价是来回切 agent 时彼此的记忆会互相覆盖，换掉的是签名侵入
+   * （switchSession 手上没有 agentId，为记一个键去改它的签名要动 14 处调用点）。
+   */
+  const LAST_SESSION_KEY = 'nr_last_session'
+
+  function readLastSession(): string {
+    try {
+      return localStorage.getItem(LAST_SESSION_KEY) || ''
+    } catch {
+      return ''
+    }
+  }
+
+  function writeLastSession(sessionId: string): void {
+    try {
+      localStorage.setItem(LAST_SESSION_KEY, sessionId)
+    } catch {
+      // 静默降级：找回是增强，不该因存储不可用而打断切换
+    }
+  }
+
+  /**
+   * 记住"这一轮写在哪个会话"——刷新后据此找回。
+   *
+   * 除 `switchSession` 外，流式开局认领会话时也要写：新会话首轮的服务端 id 是
+   * 当场分配的，若不在此处落记忆，页面在首轮中途刷新后回到的是上一个会话，
+   * 而那一轮既不在列表首位也不在记忆里。
+   */
+  function rememberSession(sessionId: string): void {
+    if (sessionId) writeLastSession(sessionId)
+  }
+
+  /**
    * Load the session list for the given agent. On success, auto-selects the
    * first session if none is currently active.
    */
@@ -117,10 +155,20 @@ export function useChat(options: UseChatOptions = {}) {
       )
       store.setSessions(mapped)
       if (store.sessions.length > 0 && !store.currentSessionId) {
-        // 副作用调用: 自动选第一个 session. switchSession 返回失败结果但
+        // 副作用调用: 自动选一个 session. switchSession 返回失败结果但
         // loadSessions 静默消费 (不调 notifySwitchFailure), 避免页面加载时
         // auto-select 历史失败弹 toast 让用户误以为加载失败 (chat.loadHistoryFailed).
-        await switchSession(store.sessions[0].id)
+        //
+        // 优先回到上次打开的那条：刷新前那一轮可能还在后台生成，而它的用户消息
+        // 已经在盘上了——回到别的会话等于把它藏起来。原实现只认 `sessions[0]`
+        // （后端 `list_sessions` 按 created_at 倒序，`pinned`/`sort_order` 取出来
+        // 却从不参与排序），所以在旧会话里中断再刷新就落到别的会话去了。
+        const remembered = readLastSession()
+        const target =
+          remembered && store.sessions.some((s) => s.id === remembered)
+            ? remembered
+            : store.sessions[0].id
+        await switchSession(target)
       }
     } catch {
       store.setSessions([])
@@ -284,6 +332,13 @@ export function useChat(options: UseChatOptions = {}) {
         }
       })
       store.setMessages(mapped)
+      // 补课 E（Issue #262）下沉到本函数单点。历史（落盘消息）与时间线（落盘事件）
+      // 是两份事实，中途断流那一轮的增量只在时间线里。此前这行只长在 ChatPage 的
+      // switchSession wrapper 上，而刷新走的 `loadSessions → auto-select` 直接调本函数、
+      // 绕过 wrapper ⇒ 同一个"切会话"动作两份实现、一份补课一份不补。现在两条都只经这一处。
+      await replaySessionTimeline(sessionId, { continueTail: true })
+      // 切换真成功了才记：失败/过期响应走不到这一行，不会把"没打开成"记成上次会话
+      writeLastSession(sessionId)
       bus.emit('chat:session-switched', { sessionId })
       return { ok: true }
     } catch (err) {
@@ -644,6 +699,7 @@ export function useChat(options: UseChatOptions = {}) {
     loadSessions,
     createSession,
     switchSession,
+    rememberSession,
     deleteSession,
     renameSession,
     pinSession,

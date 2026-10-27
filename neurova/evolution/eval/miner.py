@@ -19,36 +19,21 @@ from typing import Any, Callable, Iterable, Optional
 
 from neurova.core.logger import get_logger
 from neurova.evolution.eval.dataset import EvalDataset, EvalExample
+# ── 密钥检测：本模块不再自带表（§6-416 批 P-5 第三格，教义第 6/7 条）。──
+# 原先这里是一份 `SECRET_PATTERNS`（内容级敏感信息的第八张表）＋一个同名 `contains_secret`
+# 函数——与 `neurova/security/sensitive_info.py` 那份是同一功能的第二份实装。
+# 取长补短的逐项结论：provider 值形状六条（`ghu_`／`xoxb-`／`xapp-`／`ntn_`／`AKIA`／PEM 私钥头）
+# 单源**一条都没有**，已并进单源表；`sk-ant-api…`／`sk-or-v1-…`／`ghp_…`／`Bearer \S{20,}`
+# 四条由单源的泛化档覆盖，不再抄第二遍；`password/secret/token` 三条键值式单源本就更强
+# （含全角冒号与 JSON 形），值长下限由 `MIN_SECRET_VALUE_LEN` 一处给；七个凭据环境变量名
+# 不是"要脱敏的值"而是"**整条剔除**的词汇"，收成 `CREDENTIAL_ENV_NAMES` 一处具名。
+from neurova.security.sensitive_info import (
+    SUMMARY_RULES,
+    containsSensitive,
+    mentionsCredentialEnvVar,
+)
 
 logger = get_logger(__name__)
-
-# ── 密钥检测──# 每条锚定已知密钥格式,尽量减少对正常文本的误报。
-SECRET_PATTERNS = re.compile(
-    r"("
-    r"sk-ant-api\S+"           # Anthropic
-    r"|sk-or-v1-\S+"           # OpenRouter
-    r"|sk-\S{20,}"             # OpenAI 风格(sk- 后 20+ 字符)
-    r"|ghp_\S+"                # GitHub PAT
-    r"|ghu_\S+"                # GitHub user token
-    r"|xoxb-\S+"               # Slack bot
-    r"|xapp-\S+"               # Slack app
-    r"|ntn_\S+"                # Notion
-    r"|AKIA[0-9A-Z]{16}"       # AWS access key id
-    r"|Bearer\s+\S{20,}"       # Bearer 头
-    r"|-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----"
-    r"|ANTHROPIC_API_KEY"      # 已知环境变量名(精确)
-    r"|OPENAI_API_KEY"
-    r"|OPENROUTER_API_KEY"
-    r"|SLACK_BOT_TOKEN"
-    r"|GITHUB_TOKEN"
-    r"|AWS_SECRET_ACCESS_KEY"
-    r"|DATABASE_URL"
-    r"|\bpassword\s*[=:]\s*\S+"
-    r"|\bsecret\s*[=:]\s*\S+"
-    r"|\btoken\s*[=:]\s*\S{10,}"
-    r")",
-    re.IGNORECASE,
-)
 
 MIN_TEXT_LEN = 10
 _MIN_RELEVANCE_OVERLAP = 2
@@ -67,9 +52,17 @@ def _effective_len(text: str) -> int:
     return len(text) + cjk
 
 
-def contains_secret(text: str) -> bool:
-    """消息是否含密钥/凭据(命中即整条剔除)。"""
-    return bool(text and SECRET_PATTERNS.search(text))
+def _containsCredential(text: str) -> bool:
+    """这一条消息里是否还有凭据（命中即整条剔除，绝不进评测集）。
+
+    判据口只有一个：值形状与键值式走单源 `containsSensitive()`（与两扇在役脱敏门同表，
+    只差那一条具名下限 `MIN_SECRET_VALUE_LEN`），凭据环境变量名走 `mentionsCredentialEnvVar()`
+    ——后者是筛除词汇，不参与打码。本模块不再自带第八张表，也不再沿用与护栏同名的
+    `contains_secret` 这个第二段实装名（§6-416 批 P-5 第三格）。
+    """
+    if not text:
+        return False
+    return containsSensitive(text, SUMMARY_RULES) or mentionsCredentialEnvVar(text)
 
 
 def sanitize_messages(messages: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -80,7 +73,7 @@ def sanitize_messages(messages: Iterable[dict[str, Any]]) -> list[dict[str, Any]
         resp = (m.get("assistant_response") or "").strip()
         if _effective_len(task) < MIN_TEXT_LEN:
             continue
-        if contains_secret(task) or contains_secret(resp):
+        if _containsCredential(task) or _containsCredential(resp):
             continue
         clean.append({**m, "task_input": task, "assistant_response": resp})
     return clean

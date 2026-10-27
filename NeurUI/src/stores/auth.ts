@@ -2,19 +2,17 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authAPI } from '@/api/auth'
 import { secureStorage, validateUsername, validateEmail, validatePasswordStrength } from '@/utils/security'
+import { AUTH_REFRESH_TOKEN_KEY, AUTH_TOKEN_KEY, AUTH_USER_KEY } from '@/utils/authSession'
 import type { User, LoginForm, RegisterForm, AuthTokens } from '@/types/auth'
 
-const TOKEN_KEY = 'auth_token'
-const REFRESH_TOKEN_KEY = 'refresh_token'
-const USER_KEY = 'user'
 
 export const useAuthStore = defineStore('auth', () => {
   // ---------------------------------------------------------------------------
   // State
   // ---------------------------------------------------------------------------
-  const token = ref<string | null>(secureStorage.get(TOKEN_KEY))
-  const refreshToken = ref<string | null>(secureStorage.get(REFRESH_TOKEN_KEY))
-  const user = ref<User | null>(secureStorage.getObject<User | null>(USER_KEY, null))
+  const token = ref<string | null>(secureStorage.get(AUTH_TOKEN_KEY))
+  const refreshToken = ref<string | null>(secureStorage.get(AUTH_REFRESH_TOKEN_KEY))
+  const user = ref<User | null>(secureStorage.getObject<User | null>(AUTH_USER_KEY, null))
   const loading = ref<boolean>(false)
   const error = ref<string | null>(null)
   // 最近一次失败是否属于网络层（无 HTTP 响应）：登录页据此决定是否做
@@ -34,8 +32,8 @@ export const useAuthStore = defineStore('auth', () => {
   function persistTokens(tokens: AuthTokens): void {
     token.value = tokens.access_token
     refreshToken.value = tokens.refresh_token
-    secureStorage.set(TOKEN_KEY, tokens.access_token)
-    secureStorage.set(REFRESH_TOKEN_KEY, tokens.refresh_token)
+    secureStorage.set(AUTH_TOKEN_KEY, tokens.access_token)
+    secureStorage.set(AUTH_REFRESH_TOKEN_KEY, tokens.refresh_token)
   }
 
   function clearAuth(): void {
@@ -43,14 +41,14 @@ export const useAuthStore = defineStore('auth', () => {
     refreshToken.value = null
     user.value = null
     error.value = null
-    secureStorage.remove(TOKEN_KEY)
-    secureStorage.remove(REFRESH_TOKEN_KEY)
-    secureStorage.remove(USER_KEY)
+    secureStorage.remove(AUTH_TOKEN_KEY)
+    secureStorage.remove(AUTH_REFRESH_TOKEN_KEY)
+    secureStorage.remove(AUTH_USER_KEY)
   }
 
   function persistUser(u: User): void {
     user.value = u
-    secureStorage.setObject(USER_KEY, u)
+    secureStorage.setObject(AUTH_USER_KEY, u)
   }
 
   // ---------------------------------------------------------------------------
@@ -220,9 +218,9 @@ export const useAuthStore = defineStore('auth', () => {
    * Restore user from persisted storage (called on app init).
    */
   function restoreUser(): void {
-    const savedToken = secureStorage.get(TOKEN_KEY)
-    const savedRefresh = secureStorage.get(REFRESH_TOKEN_KEY)
-    const savedUser = secureStorage.getObject<User | null>(USER_KEY, null)
+    const savedToken = secureStorage.get(AUTH_TOKEN_KEY)
+    const savedRefresh = secureStorage.get(AUTH_REFRESH_TOKEN_KEY)
+    const savedUser = secureStorage.getObject<User | null>(AUTH_USER_KEY, null)
 
     if (savedToken) {
       token.value = savedToken

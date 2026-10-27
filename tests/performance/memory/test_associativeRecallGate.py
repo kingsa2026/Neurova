@@ -184,13 +184,9 @@ def _measure(manager: MemoryManager, pickQuery) -> dict:
 def recallCorpus(tmp_path):
     from neurova.embedding import get_embedding_engine
 
-    engine = get_embedding_engine()
-    assert engine is not None, (
-        "本地 ONNX 嵌入档不可用：本判据测的是生产同款稠密+词法双路检索，"
-        "缺 models/embedding/bge-small-zh-v1.5/model.onnx 时读数无意义。"
-        "该前提与 test_onnx_lazy_init_deadlock.py 直接构造 ONNXEmbeddingEngine 一致，"
-        "不以 skip 蒙过（skip 会让判据退化成第二条 longmeval_simple.py）。"
-    )
+    from tests.memory_embedding_precondition import requireRealEmbeddingOrSkip
+
+    requireRealEmbeddingOrSkip("联想召回基线（本判据测的是生产同款稠密+词法双路检索）")
 
     manager = MemoryManager(
         db_path=os.path.join(str(tmp_path), "mem.db"),

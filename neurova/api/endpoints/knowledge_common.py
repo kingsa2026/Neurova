@@ -41,6 +41,9 @@ class KnowledgeItem(BaseModel):
     graph_node_ids: List[str] = []
     valid_until: Optional[str] = None
     lifecycle_status: str = "active"
+    sources: List[Dict[str, Any]] = []
+    geo: Optional[Dict[str, float]] = None
+    duplicate: Optional[bool] = None
     lifecycle_reason: str = ""
     lifecycle_changed_at: Optional[str] = None
     # P0-2 分块契约：块数 + 检索命中的块级溯源（[{chunk_index, content, score}]）
@@ -60,6 +63,8 @@ class KnowledgeCreate(BaseModel):
     visibility: str = Field(default="private", description="可见性：private（默认）/ public（仅管理员）")
     valid_until: Optional[str] = Field(default=None, description="有效期截止（ISO8601，空=不过期）")
     lifecycle_status: Literal["active", "archived"] = Field(default="active", description="生命周期状态")
+    author: str = Field(default="", description="作者（文档元数据过滤维度）")
+    geo: Optional[Dict[str, float]] = Field(default=None, description="坐标 {lat, lon}，坏形状入库归 None")
 
 
 class KnowledgeUpdate(BaseModel):
@@ -159,6 +164,9 @@ def item_response(item: Dict[str, Any]) -> KnowledgeItem:
         lifecycle_changed_at=item.get("lifecycle_changed_at"),
         chunk_count=len(item.get("chunks") or []) or 1,
         chunk_hits=item.get("chunk_hits") or [],
+        sources=item.get("sources") or [],
+        geo=item.get("geo"),
+        duplicate=item.get("duplicate"),
     )
 
 

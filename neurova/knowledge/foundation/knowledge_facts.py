@@ -371,6 +371,28 @@ ALTER TABLE ontology_rules_t25 RENAME TO ontology_rules;
 CREATE INDEX IF NOT EXISTS idx_rule_head ON ontology_rules(tenant_id, head_predicate, enabled);
 """
 
+# v26：MCP 信息源配置（外部 MCP server 作为知识库信息源，B 方案）。
+# 配置与事实同库同迁移链；auth_token 属凭据，读取面（列表）脱敏、单条编辑才回。
+_SCHEMA_V26 = """
+CREATE TABLE IF NOT EXISTS knowledge_mcp_sources (
+    source_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    auth_token TEXT NOT NULL DEFAULT '',
+    tool_name TEXT NOT NULL DEFAULT '',
+    tool_args TEXT NOT NULL DEFAULT '{}',
+    agent_id TEXT NOT NULL DEFAULT 'default',
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_pull_at TEXT,
+    last_status TEXT NOT NULL DEFAULT 'never'
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_source_tenant
+    ON knowledge_mcp_sources(tenant_id, name);
+"""
+
 
 MANUAL_RESOLUTIONS: tuple = ("keep_both", "supersede_old", "dismiss")
 

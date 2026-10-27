@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 
 from neurova.api.auth import get_current_user_or_service
 from neurova.core.logger import get_logger
+from neurova.knowledge.url_guard import validate_public_http_url
 from neurova.api.endpoints.knowledge_common import get_repository
 
 logger = get_logger(__name__)
@@ -260,57 +261,6 @@ def _title_from_url(url: str) -> str:
     return name[:64] or parsed.netloc or "Web Page"
 
 
-# ── 远程网页导入（SSRF 防护） ─────────────────────────────────
-
-def _validate_import_url(url: str) -> bool:
-    """校验导入 URL 安全（R-4 SSRF 防护）：
-    - 仅 http/https
-    - 拒绝 localhost/环回/私有/保留地址（解析后 IP 判断）
-    Allowlist 语义：不合规 → False。
-    """
-    try:
-        parsed = urllib.parse.urlparse(url)
-    except Exception:
-        return False
-    if parsed.scheme not in ("http", "https"):
-        return False
-    host = parsed.hostname or ""
-    if not host:
-        return False
-
-    # 主机名快速拒绝：localhost / 内部域名后缀
-    lowered = host.lower()
-    if lowered in ("localhost",) or lowered.endswith(".localhost"):
-        return False
-
-    import ipaddress
-
-    # 直接 IP 字面量
-    try:
-        ip = ipaddress.ip_address(lowered)
-        return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast)
-    except ValueError:
-        pass
-
-    # 域名：解析后逐个 IP 检查（DNS rebinding 场景下至少列出全部分析结果）
-    import socket
-
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except Exception:
-        return False
-    if not infos:
-        return False
-    for info in infos:
-        try:
-            ip = ipaddress.ip_address(info[4][0])
-        except Exception:
-            continue
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-            return False
-    return True
-
-
 def _fetch_url(url: str) -> bytes:
     """抓取远程网页（测试可 monkeypatch）。校验通过后由 urllib 拉取。"""
     import urllib.request
@@ -329,7 +279,7 @@ async def import_knowledge_url(
     sync: bool = Query(default=True, description="true=同步导入；false=入队后台处理（P1-#9）"),
 ):
     """导入远程网页（抽取正文存为知识条目，归属当前用户、默认私有）"""
-    if not _validate_import_url(url):
+    if not validate_public_http_url(url):
         raise HTTPException(status_code=400, detail="Invalid URL: only public http(s) allowed")
 
     if not sync:

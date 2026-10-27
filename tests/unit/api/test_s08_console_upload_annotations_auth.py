@@ -73,8 +73,12 @@ def user_knowledge_client(knowledge_app, tmp_path):
 
 
 @pytest.fixture()
-def isolated_stores(tmp_path):
-    console_module._CONSOLE_UPLOAD_DIR = tmp_path / "uploads"
+def isolated_stores(tmp_path, monkeypatch):
+    # 按用例钉（`monkeypatch` 在用例结束即撤销）：裸赋值会把这个**共享**的模块级落点
+    # 留成 tmp_path，`console_files`（同一模块的写/列/读三处都读它）在后续用例里就指向
+    # 一个已消失的租户目录。与签名密钥那条腿同根因（判据不得改写别人模块的模块级状态，
+    # 改了就活过用例），只是这条还没在 CI 上现形——§6-425 的同族潜伏面。
+    monkeypatch.setattr(console_module, "_CONSOLE_UPLOAD_DIR", tmp_path / "uploads")
     console_module._CONSOLE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     from neurova.core.annotation_store import AnnotationStore
 

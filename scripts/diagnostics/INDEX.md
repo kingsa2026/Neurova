@@ -23,13 +23,11 @@
 |------|------|----------|--------|
 | `muscle_memory_rearchive.py` | 肌肉记忆脏条目作废重攒：原文件归档到仓内 `docs/05-reports/muscle-memory-ledger/` 后清空待重攒（**不删除**，可回退） | `python scripts/diagnostics/muscle_memory_rearchive.py [文件 ...]` | 改写 `agent_workspaces/*/memory/muscle_memory/muscle_l*.json` |
 | `skill_name_collisions.py` | 同名技能覆盖复算（默认）与**名字域迁移**（`--apply`）：同 name 不同身份的条目派生携带身份的名字（ADR 0021） | `python scripts/diagnostics/skill_name_collisions.py [--apply] [manifest.json ...]` | 默认只读；`--apply` 改写目标 manifest 的 `name` 字段（原子替换，幂等） |
+| `artifactDigestStockInventory.py` | 存量构件摘要清单（只读）：已装技能/插件的四态（`pinned-ok`/`pinned-mismatch`/`unpinned`/`missing-dir`）与根外锚三态（`match`/`anchor-missing`/`anchor-mismatch`），回答「哪些存量条目还没钉、钉了却不符、锚缺」（§6-383 留的待办落成可复跑读数） | `PYTHONPATH=$(git rev-parse --show-toplevel) python scripts/diagnostics/artifactDigestStockInventory.py [--json]`（退出码 2＝连数据根都读不出） | 只读（不写数据根、不补锚） |
 | `muscle_memory_threshold_attainability.py` | 肌肉记忆阈值可达性重算：0.85（装配起点）与 0.8（RSI setpoint）在新指纹分布下的触发率与梯度带规模 | `python scripts/diagnostics/muscle_memory_threshold_attainability.py [--json]` | 只读（临时目录建库） |
 | `_live_verify_growth_split.py` | 知识增长分槽 live-verify 复现（上下文三链路批） | `python scripts/diagnostics/_live_verify_growth_split.py` | 只读 / 临时库 |
 | `_live_verify_knowledge_split.py` | 知识分槽 live-verify 复现（上下文三链路批） | `python scripts/diagnostics/_live_verify_knowledge_split.py` | 只读 / 临时库 |
 | `_kb_backfill_rerun.py` | 知识库回填重跑（抽取产物入库） | `python scripts/diagnostics/_kb_backfill_rerun.py` | 写目标库（按参数） |
-| `artifactDigestStockInventory.py` | 存量构件摘要清单（只读）：已装技能/插件里 `pinned-ok` / `pinned-mismatch` / `unpinned` / `missing-dir` 四态，以及根外锚的 `match` / `anchor-missing` / `anchor-mismatch`——§6-383 三票收口留下的「存量未钉」那张清单 | `python scripts/diagnostics/artifactDigestStockInventory.py [--json]` | 只读（不写一个字节） |
-
-| `tool_parallelism_readout.py` | 工具并行收益取数（M3 前置）：批次形态分布 + 工具耗时分布 + **逐工具「值不值得为它成组等待」**（判据落 **P50 桶界夹逼**三态：整段过门槛=值得/整段不过=不值得/**跨门槛=边界**且不硬挑一侧；冷路径按保守下界**另档**呈现、不进常态判据）；**两个占比口径并列**（§10.1 原文口径「多工具轮/全部轮」与参考口径「成组批/多调用轮」），否证结论落原文口径；`no_data` 显式标注**不构成否证**，且**按成因分型**（`absent_in_this_scrape` 本份抓取里没有该族仪表⇒先核对抓取、确为完整抓取时才落到部署 / `zero_samples` 仪表在位⇒可达且已就位、该等真实轮次 / `schema_drift` 抓取里有本词表不认识的形态标签⇒分母残缺、该修词表；两段各自按本段仪表的表判，互不借用）；形态词表派生自写入侧单一事实源（`core/tool_capability.ToolBatchShape`），漂移样本点名且不再静默丢弃；可用 `--metrics-file` 离线复算（输入不可用退出码 2 并点名，不抛解释器栈） | `python scripts/diagnostics/tool_parallelism_readout.py [--json] [--metrics-file FILE]` | 只读（不连后端；`--metrics-file` 时不读进程注册表） |
 
 ## 二、检查脚本（checks）
 
@@ -39,7 +37,6 @@
 | `check_users_db.py` | 检查 `data/users.db` 表结构、用户列表与 admin 记录 | 项目根运行 |
 | `_tmp_check_tracked.py` | 检查 `tests/unit/core` 下测试文件的 git 跟踪状态 | 项目根运行 |
 | `analyze_issues.py` | 解析 `audit-reports/pylint-report-v4.json`，抽样打印 broad-exception-caught / wrong-import-position / undefined-variable | 项目根运行（需该报告存在） |
-| `artifactDigestStockInventory.py` | 存量构件摘要清单（只读）：已装技能/插件逐条给 `pinned-ok`/`pinned-mismatch`/`unpinned`/`missing-dir` 四态，另比根外锚（`match`/`anchor-missing`/`anchor-mismatch`）；不写一个字节 | `python scripts/diagnostics/artifactDigestStockInventory.py [--json]` |
 
 ## 三、一次性修复 / 补丁脚本（one-off，已完成使命）
 

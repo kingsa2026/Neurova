@@ -195,15 +195,11 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import * as skillPoolApi from '@/api/modules/skill-pool'
 
-interface PoolSkill {
-  id: string
-  name: string
-  description: string
-  category?: string
-  author?: string
+/** 行契约单点声明在 API 边界（skill-pool.LibrarySkillRow，含 skill_id→id 归一）；
+ *  页内只叠加视图态与本地编辑态字段。 */
+interface PoolSkill extends skillPoolApi.LibrarySkillRow {
   install_count?: number
-  shared?: boolean
-  version?: string
+  author?: string
   code?: string
   _installing?: boolean
 }
@@ -423,19 +419,13 @@ function editSkill(skill: PoolSkill) {
   modalVisible.value = true
 }
 
-// 三层库契约：GET 返回裸数组（拦截器已解包 body），主键字段是 skill_id——
-// 归一化为前端统一 id（旧实现读 res.data 恒 undefined → 两页签生产恒空）。
-function normLibraryRows(res: any): PoolSkill[] {
-  const data = res?.data ?? res
-  const arr = Array.isArray(data) ? data : data?.items ?? []
-  return arr.map((s: any) => ({ ...s, id: s.skill_id ?? s.id ?? '', _installing: false }))
-}
+// 三层库契约：GET 返回裸数组（拦截器已解包 body），主键 skill_id→id 的归一
+// 已在 API 边界一处完成（skill-pool.toSkillRows），页面直接消费 id。
 
 async function fetchPublic() {
   publicLoading.value = true
   try {
-    const res = await skillPoolApi.listPublicLibrarySkills()
-    publicSkills.value = normLibraryRows(res)
+    publicSkills.value = await skillPoolApi.listPublicLibrarySkills()
   } catch (err: any) {
     const msg = err?.response?.data?.error || err?.message || t('skillPool.loadError')
     message.error(msg)
@@ -447,8 +437,7 @@ async function fetchPublic() {
 async function fetchPrivate() {
   privateLoading.value = true
   try {
-    const res = await skillPoolApi.listMySkills()
-    privateSkills.value = normLibraryRows(res)
+    privateSkills.value = await skillPoolApi.listMySkills()
   } catch (err: any) {
     const msg = err?.response?.data?.error || err?.message || t('skillPool.loadError')
     message.error(msg)

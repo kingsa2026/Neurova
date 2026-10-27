@@ -8,6 +8,7 @@ from xml.etree import ElementTree as ET
 from neurova.channels.base import ChannelEventType, ChannelMessage
 from neurova.channels.voice_ingress import AUDIO_BYTES_KEY
 from neurova.channels.wechat_kf_crypto import decryptKfPayload, verifyKfSignature
+from neurova.channels.wecom import fetchWecomMediaBytes
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -90,15 +91,12 @@ class WeChatKfEventsMixin:
     def download_kf_media(self, media_id: str) -> Optional[bytes]:
         """微信客服素材下载；失败返回 None（由入站桥报 media_unavailable）。
 
-        取数走企微适配器里那份唯一实装 `fetchWecomMediaBytes`（教义第 6 条）：此前这里手抄了
-        一遍素材取回请求，与企微适配器那份并行存在——于是两道大小上限（声明长度 + 实际字节）
-        与「平台回 JSON 错误体不能当音频字节」这两条口径，只有一份会随改动更新，另一份静默
-        留在旧口径上。这里只负责拿 token。
+        HTTP 那一层不走手抄：企业微信素材 GET 的全仓唯一实装是
+        `wecom.fetchWecomMediaBytes`（教义第 6 条，大小上限也在那里）。本方法只保留
+        客服通道自己的前置——先拿到 token。
         """
         if not media_id or not self._ensure_wecom_token():
             return None
-        from neurova.channels.wecom import fetchWecomMediaBytes
-
         return fetchWecomMediaBytes(self.access_token, media_id)
 
     def _kfPayloadToEvents(

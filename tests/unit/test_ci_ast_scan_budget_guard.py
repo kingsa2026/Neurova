@@ -41,6 +41,7 @@ import functools
 import gc
 import io
 import sys
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -149,7 +150,7 @@ SHARED_BUDGET_ENTRIES = frozenset({
     "callSites", "callNodes", "classDefsIn",
     # 一次性复合入口（枚举＋解析都在预算内做完，不留常驻树）：调用方拿不到
     # 任何"自己解析"的机会，故不计枚举也不计解析、且不下潜。
-    "shadowedTopLevelNames", "importersOfModule", "takenPerModule",
+    "shadowedTopLevelNames", "importersOfModule", "takenPerModule", "transientTrees",
 })
 #: 共享预算的**只枚举**入口：枚举（`rglob`）归共享，但解析仍由调用方自付。
 #: 故它算枚举落点 —— 配私有 `ast.parse` 仍须报出（否则它成了免检通道）。
@@ -1318,6 +1319,22 @@ class TestOneShotScanDoesNotRetainTrees:
             "修法：一次性扫描走 `transientTree`，显式不留常驻树。"
         )
 
+    def test_transientTrees_leaves_no_retained_trees_and_keeps_the_prefilter(self, tmp_path):
+        """交**树**的一次性入口：同样不留常驻树、同样吃预筛。
+
+        为什么必须有这一格：本档别处的判据要按"模块层语句"读结构，只拿节点表做不了；
+        没有这条入口，那些判据只能自己 `filesUnder` + `ast.parse` —— 那正是上一轮
+        受保护子集 30s 墙钟超时的形状（见 `TestNoUnprefilteredRepoWideScan`）。
+        """
+        (tmp_path / "hit.py").write_text("def f(x):\n    return x.attest()\n", encoding="utf-8")
+        (tmp_path / "miss.py").write_text("def f(x):\n    return x.other()\n", encoding="utf-8")
+        ast_scan._cachedParse.cache_clear()
+        seen = {p.name: tree for p, tree in ast_scan.transientTrees(tmp_path, hints=("attest",))}
+        assert set(seen) == {"hit.py"}, f"一次性树入口的预筛口径失效：{sorted(seen)}"
+        assert ast_scan._cachedParse.cache_info().currsize == 0, (
+            "`transientTrees` 留下了常驻语法树——它的语义就是『读一棵、丢一棵』"
+        )
+
     def test_transientNodes_leaves_no_retained_trees(self, tmp_path):
         (tmp_path / "b.py").write_text("def g(x):\n    return x.attest()\n", encoding="utf-8")
         ast_scan._cachedParse.cache_clear()
@@ -1353,6 +1370,145 @@ class TestSharedBudgetIsReusedWithinOneProcess:
             "第二次扫描没有命中节点缓存——「跨用例复用一次解析」不成立，"
             "本预算就成了纸面承诺。"
         )
+
+
+#: 一趟下潜的 `iter_child_nodes` 调用上限＝节点总数 × 1.3。
+#:
+#: 一次下潜对**每个节点**调一次 `iter_child_nodes`，故次数≈节点数（实测本机 `neurova/`：
+#: 1053 棵 / 1668201 节点 / 1668201 次，两趟版 3336402 次）。判据不抄这个绝对值——
+#: 它随代码总量涨，抄了就成了"代码一多就红"的假门禁。改成**先量这本轮的树总量**，
+#: 再要求下潜次数不超过它的一趟上界：两趟必然越界（≈2×），单趟留 1.3 倍余量给
+#: `_walkNodes` 之外可能出现的少量逐节点读取。
+ONE_PASS_DIVE_FACTOR = 1.3
+
+#: 本档"下潜次数"那一格扫的根：**模块级常量**，不外提成函数内局部名。
+#: 函数内局部名会让 `test_scanRootsAreNeverBoundInsideAFunction` 认不出根 ⇒
+#: 那档整档掉出它的面（本档已实测被点名）。
+DIVE_SCAN_ROOT = PROJECT_ROOT / "neurova"
+
+
+class TestTakenPerModuleDivesOncePerTree:
+    """`takenPerModule` 对每棵树只下潜**一趟**，且读数逐条不变。
+
+    根因（构建 `cnb-dg2-1k5qd8q3g#003`）：它对每棵树跑**两趟** `ast.walk` ——
+    import 面一趟、属性面一趟。全仓 3684 档 / 828 万节点，第二趟纯为把下潜再付一遍
+    （`iter_child_nodes` 累计 15.3s、单次 14.1s），于是消费它的
+    `test_packageDeclaredSurfaceCoversWhatIsTaken` 在受保护子集里撞 30s 全局墙钟
+    （`Failed: Timeout (>30.0s)`）。与 Issue #148 同族：判据成本绑在代码总量上。
+
+    两条一起钉：
+    1. **只下潜一趟**——把 `ast.walk` 换成计数器，同一棵树只许走一次；
+    2. **读数不变**——单趟版与"两趟"参考实现（本格就地写的那份）在同一批夹具上
+       逐条相等。顺序敏感是实测过的：`ast.walk` 的产出序由**树形**决定，不由书写顺序
+       （本仓 `neurova/auth/qclaw_binding_model.py` 的顶层 `try:` 导入就排在函数体
+       用点之后），故"合成一趟"若按产出序即时判定归属会静默改读数——所以参考实现
+       必须真的存在，不能只靠"看着对"。
+    """
+
+    def test_eachTreeIsDivedOnceAndTheReadingIsUnchanged(self, monkeypatch):
+        """面取**仓内真档**：`relativeToRepo` 要求路径在仓内。
+
+        这批档是按"顺序敏感"挑的——`qclaw_binding_model.py` 顶层 `try:` 里的
+        `import cryptography.hazmat.primitives.kdf.pbkdf2` 排在函数体用点之后，
+        合成一趟即时判定归属就会静默改读数。
+        """
+        expected = self._twoPassReference(DIVE_SCAN_ROOT)
+
+        # 下潜用 `iter_child_nodes` 数：`_walkNodes` / `ast.walk` 都从它下潜，
+        # 而"两趟"在源码里可能写成两次 `ast.walk`、也可能写成一次 walk 加一次自建遍历
+        # ——按函数名数会被写法绕过（实测：两趟版把 `ast.walk` 内联后，按 `ast.walk`
+        # 计数读到 0 次）。这一层是**任何**下潜实现都躲不开的公共出口。
+        # 预算**先**量：量它自己也要下潜，若放在打桩之后就算进被测的那批里了
+        # （实测：判据自己那一趟让读数精确翻倍，单趟版被误判成两趟）。
+        trees = len(ast_scan.sourceRefsUnder(DIVE_SCAN_ROOT))
+        # 一趟的预算由**这一轮的节点总量**现量得出，不抄绝对值（抄了判据就会随代码总量红）。
+        nodeTotal = sum(len(ast_scan._walkNodes(ast.parse(ref.code)))
+                        for ref in ast_scan.sourceRefsUnder(DIVE_SCAN_ROOT) if ref.code)
+        onePassBudget = int(nodeTotal * ONE_PASS_DIVE_FACTOR)
+
+        dives = []
+        realIter = ast.iter_child_nodes
+
+        def countingIter(node):
+            dives.append(1)
+            return realIter(node)
+
+        monkeypatch.setattr(ast, "iter_child_nodes", countingIter)
+        got = ast_scan.takenPerModule(DIVE_SCAN_ROOT)
+        assert len(dives) <= onePassBudget, (
+            f"{trees} 棵 / {nodeTotal} 节点却下潜了 {len(dives)} 次 `iter_child_nodes`，"
+            f"超过一趟预算 {onePassBudget}—— "
+            "`takenPerModule` 又对同一棵树走了两趟。下潜是这条链上最贵的一步"
+            "（全仓 828 万节点、`iter_child_nodes` 累计 15.3s），成本会随代码总量涨到"
+            "撞 30s 墙钟（构建 `cnb-dg2-1k5qd8q3g#003`）。\n"
+            "修法：节点清单只收一次（`_walkNodes`），两趟判定都在这份清单上做。"
+        )
+        assert len(dives) >= trees, (
+            f"只下潜了 {len(dives)} 次，少于 {trees} 棵树——扫描面塌了（面自证）"
+        )
+        assert self._counterOf(got) == self._counterOf(expected), (
+            "单趟版的读数与两趟参考实现不等 —— 省成本不能改读数：这是多处判据的事实源。"
+        )
+
+    @staticmethod
+    def _counterOf(table):
+        """`{模块: {名字: Counter((文件, 行号))}}`——按**多重集**比，不比列表顺序。
+
+        为什么不能比顺序：原实现的两趟 `ast.walk` 产出序由**树形**决定，本身就不承载语义
+        （同一批 `(文件, 行号)` 换个遍历实现就换个排列）；比顺序等于把一个实现细节
+        钉成契约。判据要钉的是「记了哪些取点、各记几次」。
+        """
+        return {
+            module: {name: Counter(places) for name, places in names.items()}
+            for module, names in table.items()
+        }
+
+    @staticmethod
+    def _twoPassReference(root):
+        """**两趟**参考实现：与收口前逐字同义（import 面一趟、属性面一趟）。"""
+        out = {}
+        for ref in ast_scan.sourceRefsUnder(root):
+            try:
+                tree = ast.parse(ref.code)
+            except SyntaxError:
+                continue
+            rel = ast_scan.relativeToRepo(ref.path)
+            imported, aliasTo = set(), {}
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    mod = ast_scan.resolveImportModule(rel, node)
+                    if not mod:
+                        continue
+                    imported.add(mod)
+                    bucket = out.setdefault(mod, {})
+                    for alias in node.names:
+                        if alias.name == "*":
+                            continue
+                        imported.add(f"{mod}.{alias.name}")
+                        bucket.setdefault(alias.name, []).append((rel, node.lineno))
+                elif isinstance(node, ast.Import):
+                    for alias in node.names:
+                        imported.add(alias.name)
+                        aliasTo[(alias.asname or alias.name).split(".")[0]] = alias.name
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Attribute):
+                    continue
+                base = node.value
+                target = (aliasTo[base.id]
+                          if isinstance(base, ast.Name) and base.id in aliasTo else None)
+                if target:
+                    out.setdefault(target, {}).setdefault(
+                        node.attr, []).append((rel, node.lineno))
+                chain = ast_scan.dottedChain(node)
+                if not chain:
+                    continue
+                parts = chain.split(".")
+                for i in range(1, len(parts)):
+                    prefix = ".".join(parts[:i])
+                    if prefix in imported:
+                        out.setdefault(prefix, {}).setdefault(
+                            parts[i], []).append((rel, node.lineno))
+        return out
 
 
 class TestResidentGraphIsRetiredFromTheScannedGenerations:
