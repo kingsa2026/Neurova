@@ -364,13 +364,20 @@ class TestEveryClaimedNumberIsReal:
 
         留在表里但已经修好的条目，就是下一次真错的隐身衣——它会静默吞掉同一笔的正文错误。
         本格按"这一条现在还该被豁免吗"复算，答否即红，要求在表里删掉它。
+
+        **已推出去的豁免不按 `origin/main..HEAD` 判**：推送完那条区间就空了，而豁免指向的
+        正是推送走的那一笔——按区间判会把"豁免仍然成立"读成"指向不存在的提交"。
+        故这里只问"这一笔在仓里还在不在、它还对不对"，与它是否仍在未推送窗口无关。
+        （CI 实读：本格第一版在区间判定上红过一次，红形正是那句"找不到"。）
         """
         stale = []
         for short, declared in _KNOWN_BAD_COMMITS.items():
-            body = _git("log", "-1", "--format=%B", short)
-            if not body.strip():
-                stale.append(f"{short} 在区间里找不到（豁免指向一枚不存在的提交）")
+            probe = subprocess.run(["git", "cat-file", "-e", f"{short}^{{commit}}"],
+                                   cwd=str(REPO), capture_output=True, timeout=_GIT_WALL_S)
+            if probe.returncode != 0:
+                stale.append(f"{short} 在仓里找不到（豁免指向一枚不存在的提交）")
                 continue
+            body = _git("log", "-1", "--format=%B", short)
             if not _mismatches(short, body):
                 stale.append(f"{short} 今天已经对得上 numstat，不再需要豁免（当时声明：{declared}）")
         assert not stale, "这些豁免该删了：" + "；".join(stale)
