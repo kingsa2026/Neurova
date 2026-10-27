@@ -241,16 +241,32 @@ main:
             echo "受保护子集分片数：$(echo "$shards" | wc -l)"
             for shard in $shards; do
               echo "── ${shard} ──"
-              TESTS=$(grep -v '^#' "$shard" | tr '\n' ' ')
+              # pytest 收的是清单里的 tests 路径，"收到哪一个"由下面 while 逐行决定：
+              # 清单**逐行**读到位置参数上，一条也不许被 shell 再加工。
+              # 构建 `cnb-1f0-1k5uonjt2-003` 实读，此前 `TESTS=$(grep … | tr '\n' ' ')`
+              # 把清单压成一行交给 `$TESTS`，`$(...)` 的结果又被 shell 切了一次词，
+              # 同一片前 8 格全绿、第 9 格起两档红在「台账与扫描器不一致」，
+              # 而本机单文件跑同一批全绿。清单里一条空行、一个空格就能让条目错位，
+              # 而 pytest 从不说「你列的文件我少跑了几个」——它只跑收到的那部分。
+              # 故：注释行与空行滤掉 → 每个路径逐行读进 `set --` → pytest 收 `"$@"`。
+              # 找不到的路径当场报错退出（不许静默少跑）：
+              while IFS= read -r entry; do
+                [ -n "$entry" ] || continue
+                [ -f "$entry" ] || { echo "❌ 清单点名了不存在的文件：$entry（$shard）"; exit 1; }
+                set -- "$@" "$entry"
+              done <<EOF
+            $(grep -v '^#' "$shard" | grep -v '^[[:space:]]*$')
+            EOF
               MARK=/tmp/pytest_$(basename "$shard" .txt).rc
               rm -f "$MARK"
               # `{ ...; echo $? > "$MARK"; }` 里的 `$?` 是 **pytest** 的退出码（它紧跟 pytest，
               # 中间没有别的命令），`tee` 只负责转发与落盘。
-              { python -u -m pytest -q --timeout 1500 --cov --cov-report= --cov-fail-under=0 $TESTS \
+              { python -u -m pytest -q --timeout 1500 --cov --cov-report= --cov-fail-under=0 "$@" \
                   2>&1; echo $? > "$MARK"; } | tee "/tmp/$(basename "$shard" .txt).log"
               RC=$(cat "$MARK" 2>/dev/null || echo 1)
               echo "── ${shard} pytest 退出码: $RC"
               [ "$RC" -eq 0 ] || exit "$RC"
+              set --
             done
           timeout: 90m
 
