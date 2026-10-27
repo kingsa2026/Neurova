@@ -16,7 +16,10 @@ services:
       dockerfile: Dockerfile
     container_name: neurova-backend
     ports:
-      - "9527:9527"
+      # 2026-10-26 点单丙：暴露面由**宿主侧发布地址**决定，不由容器内绑定决定。
+      # 容器内仍必须监听 0.0.0.0（否则 docker 的端口代理进不去），但默认只把 9527
+      # 发布到宿主回环。要让局域网可达，显式改成 "9527:9527" 并把它当作一个决定写下来。
+      - "127.0.0.1:9527:9527"
     environment:
       - NEUROVA_PORT=9527
       - NEUROVA_HOST=0.0.0.0

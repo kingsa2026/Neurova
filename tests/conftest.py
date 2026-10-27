@@ -139,6 +139,36 @@ def _isolate_connection_pools():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_api_app_state():
+    """模块级全局 app 状态跨用例复位（`neurova.api.app._app_state`／`endpoints._app_state`）。
+
+    形态（2026-10-25 实测）：某用例 `with TestClient(create_app())` 跑完 lifespan 后，
+    `create_app()` 建的那份 `AppState`（`agents` 里已经装着启动期建出来的 default agent）
+    仍被两个模块级全局变量指着。下一个用例再 `create_app()` 会建新的，但
+    `neurova.api.endpoints.get_app_state()` 读到的是**上一份**——它带着一个
+    `memory_manager` 非空的 agent，于是"未就绪"那条路再也走不到：
+
+    - 单跑 `test_MemoryReadFaceRefusesToPaintFailureAsSuccess.py`：503（预期）；
+    - 同一进程里先跑 `test_monitorContractHonestWhenNoProducer.py`（它进出 lifespan）：
+      变成 200 —— 断言"故障不许画成成功"的那两格当场红。
+
+    这不是被测代码的缺陷，是测试进程内的跨用例状态泄漏：读侧的两处 `get_app_state()`
+    一份从 `neurova.api.app` 取、一份从 `neurova.api.endpoints` 取，复位必须同时清两处，
+    否则"清了一处、另一处还指着旧对象"——正是本仓点名的"两边各持一半"形态。
+    复位放在**用例结束后**（与上面几个 `_isolate_*` 同形），不碰用例内的装配。
+    """
+    yield
+    try:
+        from neurova.api import app as _appModule
+        from neurova.api import endpoints as _endpointsModule
+    except Exception:  # pragma: no cover - 模块不可用时跳过
+        return
+    _appModule._app_state = None
+    _appModule._app_instance = None
+    _endpointsModule._app_state = None
+
+
+@pytest.fixture(autouse=True)
 def _isolate_execution_engine_singleton():
     """ExecutionEngine 单例跨测试隔离（Issue #65）。
 
@@ -354,6 +384,37 @@ def _guardSessionLandingIsIsolated(_isolateSessionsLanding):
             "SessionManager._instance 置 None（见 9495f1db）。" % landing
         )
 
+
+@pytest.fixture(autouse=True)
+def _isolateMobileDeviceRegistry(tmp_path, monkeypatch):
+    """`/mobile/*` 的在册设备库与限流桶隔离（单点，各目录不自己抄）。
+
+    在册设备自 §4.8 起是**持久**权威（SQLite），缺省落数据根——而本仓的数据根在跑测期
+    是会话级共享目录（`neurovaDataRoot-*`，见本文件上方那条 `os.environ.setdefault`）。
+    不隔离的后果实测过：两档用例共用一份库，前一档配的设备出现在后一档的列表里，
+    读数长成"设备数 2 ≠ 1"，而肇事者与受害者不是同一条用例（逐档单跑恒绿）。
+    构造处另有 `refuseSharedRootInTests()` 兜底：真漏了会点名用例红在那里，不往下传。
+
+    `confirm`/`resolve`/`refresh` 的每 IP 滑窗桶（5 次/300s）同属模块级状态：跨文件不会
+    自己过期，前一档配满次数就会让后一档把 429 读成业务失败。
+    """
+    import os
+
+    from neurova.api.endpoints import mobile_pairing as mp
+
+    dbPath = str(tmp_path / "mobile_devices.db")
+    monkeypatch.setenv("NEUROVA_MOBILE_DEVICES_DB", dbPath)
+    mp.resetDeviceRegistry()
+    for suffix in ("", "-wal", "-shm"):
+        stale = dbPath + suffix
+        if os.path.exists(stale):
+            os.remove(stale)
+    mp._pairing_codes.clear()
+    mp._confirm_attempts.clear()
+    mp._ws_connections.clear()
+    yield
+    mp._confirm_attempts.clear()
+    mp.resetDeviceRegistry()
 
 @pytest.fixture
 def mock_logger():
@@ -904,6 +965,15 @@ _weightEgressGate = _WeightEgressGate(_WEIGHT_EGRESS_SITES)
 
 def pytest_configure(config):
     config.pluginmanager.register(_weightEgressGate, "weightEgressGate")
+    # jieba 字典是进程级一次性冷启动：谁先切词，谁在**自己的栈上**付这笔建表时间。
+    # CI runner 上实测把 `test_service_closed_loop::test_accept_produces_pending_proposal`
+    # 撑过 30s 墙——红的位置在建字典（`jieba.initialize()` → `gen_pfdict`），不在被测逻辑；
+    # 本机 2.5s（字典已被同场更早的档暖过）。这是"判据读数取决于谁先跑到"的形态，
+    # 归前提不归被测代码，故在收集期一次建完，不留给某一条用例承担。
+    # 失败按不可用记下（`search._get_jieba` 自己 fail-soft 回退 n-gram），不影响收集。
+    from neurova.knowledge.search import warmJieba
+
+    warmJieba()
 
 
 @pytest.fixture(autouse=True)
@@ -925,11 +995,11 @@ def _closeWeightEgressDuringTests(request, monkeypatch):
         site = importlib.import_module(moduleName)
         monkeypatch.setattr(site, attr, _weightEgressGate.refusalFor(moduleName, attr))
 
-# ── 根外锚的测试隔离（§6-388）──────────────────────────────────────────────
-# 生产的锚落点是 `~/.neurova/artifact_anchors.json`（**数据根之外**，理由见
+# ── 锚文件的测试隔离（§6-388）──────────────────────────────────────────────
+# 生产的锚落点是 `<数据根>/artifacts/artifact_anchors.json`（取法见
 # `artifact_digest.anchorPath` 的注释）。跑测时任何一次"钉摘要/装技能/装插件"都会
-# 去写那儿——所以按与数据根同形的思路在跑测期改指临时目录，且**仍在数据根之外**
-# （否则"锚在数据根里"这条会自己消失，判据就测不到实态）。
+# 去写那儿——默认按与数据根同形的思路改指临时目录，免得落进某个用例自己的隔离根。
+# 注意这条夹具**不改变**落点语义：锚仍与账本同根（整库回滚的检测边界见台账）。
 ANCHOR_SESSION_DIR = Path(tempfile.mkdtemp(prefix="neurovaAnchors-"))
 
 

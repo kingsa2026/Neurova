@@ -589,24 +589,32 @@ class TestRemeNotes:
 
 
 class TestIdentityFiles:
-    def test_soul_lands_in_memory_dir(self, kai_src):
-        from scripts.import_kai_to_neurova import import_identity
+    def test_identityFilesLandWhereTheLoaderReadsThem(self, kai_src):
+        """身份文件落点＝`<agent_root>/memory/soul.md`（与 `agentRoot/soul.md` **同批都写**）。
+
+        这一格钉的是"导入成功 ≠ agent 起来能读到"。落点以读取侧为准，而读取侧有两处实现：
+        现行 `agent_core._load_identity`（`agentRoot/soul.md`、`agentRoot/personality.md`）
+        与会读 `memory/` 的那条链（`core/agent_workspaces.get_agent_memory_dir`）。
+        导入侧因此**两处都写**（`scripts/import_kai_to_neurova.import_identity`），
+        本格把两处都验一遍——只验一处，另一处悄悄断掉时没人会知道。
+        """
+        from scripts.import_kai_to_neurova import import_identity, resolve_agent_root
 
         kai, nv = kai_src
-        # agent 根是 `data/<agent_id>/`（`resolve_agent_root`，v2 统一布局）；
-        # `import_identity` 自己再拼 `memory/` 与 `workspaces/` 两级——判据要按
-        # **落点契约**取文件，不能替生产侧决定它拼哪一层：此前判据假设身份文件落在
-        # `<agent_root>/memory/`，而实装写的是 `<agent_root>/workspaces/` 与其上一级，
-        # 于是判据红在"文件不在我猜的位置"，读起来像迁移失败。
-        agent_root = nv / "data" / "kai"
-        stats = import_identity(kai, agent_root)
-        workspace = agent_root / "workspaces"
-        soul = agent_root / "soul.md"
-        assert soul.exists()
-        assert "凯的灵魂" in soul.read_text(encoding="utf-8")
-        # PROFILE → personality.md（`_load_identity` 第二加载位，落 agent 根上）
-        assert "凯的档案" in (agent_root / "personality.md").read_text(encoding="utf-8")
-        # PROFILE/MEMORY 在 workspace 根留档
-        assert (workspace / "PROFILE.md").exists()
-        assert (workspace / "MEMORY.md").exists()
+        # agent 根由生产解析器给（`resolve_agent_root`：v2 统一布局 `data/<agent_id>/`），
+        # 判据不替它拼路径——注入根优先、目录名随布局变，复述一遍就等着脱钩。
+        agentRoot = resolve_agent_root(nv, "kai")
+        stats = import_identity(kai, agentRoot)
+        memoryDir = agentRoot / "memory"
+        for soul in (memoryDir / "soul.md", agentRoot / "soul.md"):
+            assert soul.exists(), f"身份文件没落在读取侧会看的位置：{soul}"
+            assert "凯的灵魂" in soul.read_text(encoding="utf-8")
+        # PROFILE → personality.md：读取侧两处读法各一份，判据两处都钉。
+        for personality in (memoryDir / "personality.md", agentRoot / "personality.md"):
+            assert "凯的档案" in personality.read_text(encoding="utf-8"), personality
+        # PROFILE/MEMORY 在工作区留档（`<agent_root>/workspaces/`，与
+        # `get_agent_workspace_dir()` 同一落点；导入产物必须落在读取侧会看的位置）
+        workspacesDir = agentRoot / "workspaces"
+        assert (workspacesDir / "PROFILE.md").exists(), sorted(p.name for p in agentRoot.iterdir())
+        assert (workspacesDir / "MEMORY.md").exists()
         assert stats["files"] >= 4

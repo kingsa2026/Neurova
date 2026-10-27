@@ -36,6 +36,10 @@ def get_embedding_engine():
             return None
         try:
             _embedding_engine = ONNXEmbeddingEngine()
+            # 交出的是**未装载模型**的裸实例：点名它，要求"不许为算一次分就把模型
+            # 拉起来"的消费方才能分辨"没装"与"装过"（判据见
+            # `tests/unit/evolution/eval/test_semanticGateLoadsNoModel.py`）。
+            _embedding_engine.markHandedOutByFactory()
             _logger.info("全局 ONNXEmbeddingEngine 已初始化")
         except Exception as e:
             _logger.warning("ONNXEmbeddingEngine 初始化失败: %s", e)

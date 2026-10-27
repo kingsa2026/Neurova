@@ -23,22 +23,18 @@ from pathlib import Path
 
 import pytest
 
+#: 本档在 `tests/unit/` 下（比 `tests/unit/ci/` 少一层）——N 必须是 2，写成 3 会解到仓外，
+#: 那时「仓根没有新增条目」读的是空目录，判据看着绿、其实一句话都没说。
 REPO_ROOT = Path(__file__).resolve().parents[2]
-#: 探针刻意落点的路径锚，必须写在模块级：绑在函数里的名字面自证棘轮认不出，整档会静默掉出它的面。
-#: 锚只写到**今天真实存在**的仓根，下面两级（`data` / `data/sessions`）由取值函数拼：棘轮按
-#: 「接收者的落点态」取数，接收者若是今天还不存在的路径就落 missing，被读成「根写错」——
-#: 与「这个目录本来就不该在仓库里」混成一句。
-SESSIONS_ANCHOR = REPO_ROOT
-
-
-def _sessionsParent() -> Path:
-    """探针回收的上限（`<repo>/data`）——只回收本探针建出来的那一层。"""
-    return SESSIONS_ANCHOR / "data"
-
-
-def _sessionsDir() -> Path:
-    """仓库真实会话库（`<repo>/data/sessions`）——探针刻意要落的那一处。"""
-    return _sessionsParent() / "sessions"
+#: 探针正文里引用的仓根锚（模块级：探针不现算 `parents[N]`）。
+REPO_ROOT_ANCHOR = REPO_ROOT
+#: 探针文件的落点（模块级：绑在函数内的根，面自证棘轮认不出）。
+PROBE_DIR = REPO_ROOT / "tests" / "unit"
+#: 回收上限：`<repo>/data`。**先写这一条**，`SESSIONS_DIR` 由它派生——反过来的话
+#: `DATA_DIR = SESSIONS_DIR.parent` 是纯派生表达式，面自证棘轮解不出静态落点（`dynamic`），
+#: 而 `<repo>/data/sessions` 在探针造出它之前并不存在（解成 `missing`），两条都会被点名。
+DATA_DIR = REPO_ROOT / "data"
+SESSIONS_DIR = DATA_DIR / "sessions"
 
 
 def _cleanupProbeRealLanding():
@@ -47,15 +43,21 @@ def _cleanupProbeRealLanding():
     只在目录为空（探针没往里写过会话）时删；非空说明有真实数据，
     宁可留着让人看见也不静默删（这里不吞异常的另一面）。
     回收上限是 `<repo>/data`：再往上不是本探针建的，不碰。
-    路径不进参数、不走函数内名字：本档的落点直接由模块级常量给，面自证棘轮才认得它。
+    空判定只看**一个**目录（`SESSIONS_DIR`）：它删空之后祖先才可能空，而祖先是从模块级
+    常量 `DATA_DIR` 取的同一条路径——不再就地拼 `<repo>/data`，面自证棘轮才不会把
+    「可能尚不存在的中间目录」解成 `missing`。
     """
-    sessionsDir = _sessionsDir()
-    sessionsParent = _sessionsParent()
+    def emptyDir(directory):
+        # 先 `is_dir()` 再枚举：目录不在时"没读到"不等于"空了"；枚举本身只能对着
+        # 模块级常量发起——把落点转进参数的写法，面自证棘轮解不出根、这一档会整档掉出它的面。
+        return directory.is_dir() and not any(directory.iterdir())
+
     try:
-        if sessionsDir.is_dir() and not any(sessionsDir.iterdir()):
-            sessionsDir.rmdir()
-        if sessionsParent.is_dir() and not any(sessionsParent.iterdir()):
-            sessionsParent.rmdir()
+        if emptyDir(SESSIONS_DIR):
+            SESSIONS_DIR.rmdir()
+        # 再回收 `data/`：它**只在确实空了**时删（非空说明有别的真实数据，留着让人看见）。
+        if emptyDir(DATA_DIR):
+            DATA_DIR.rmdir()
     except OSError:
         pass
 
@@ -79,7 +81,9 @@ def _runProbe(fileName: str, body: str, expectGreen: bool) -> str:
     probeEnv = copy.deepcopy(os.environ)
     probeEnv.pop("NEUROVA_SESSIONS_DIR", None)
     probeEnv["PYTHONIOENCODING"] = "utf-8"
-    probeFile = REPO_ROOT / "tests" / "unit" / fileName
+    probeFile = PROBE_DIR / fileName
+    # 探针正文里引用的仓根锚在同一段源码里补齐（锚只由模块级常量给，探针里不现算 `parents[N]`）。
+    body = f"from pathlib import Path\n\nREPO_ROOT_ANCHOR = Path({str(REPO_ROOT)!r})\n\n" + textwrap.dedent(body)
     # 探针会**刻意**把落点设回"仓库真实会话库"（这正是它要证的事），
     # 子进程构造 SessionManager 时 `mkdir` 便会在仓库根建出 `data/sessions/`。
     # 父进程的 `_guardRepoRootAgainstPollution` 会因此点名本用例——故探针退出后
@@ -87,10 +91,10 @@ def _runProbe(fileName: str, body: str, expectGreen: bool) -> str:
     # 面读数：本档的清理路径以仓根为锚——锚指错了，「探针没在仓库里留下会话目录」这句就落在不存在的路径上。
     repoEntries = [p for p in REPO_ROOT.iterdir()]
     assert len(repoEntries) > 20, (
-        f"仓根现读 {len(repoEntries)} 个条目（锚＝{REPO_ROOT}，会话落点＝{_sessionsDir()}）——"
+        f"仓根现读 {len(repoEntries)} 个条目（锚＝{REPO_ROOT}，会话落点＝{SESSIONS_DIR}）——"
         "量级不对＝锚指错，清理与判定都不来自代码")
     try:
-        probeFile.write_text(textwrap.dedent(body), encoding="utf-8")
+        probeFile.write_text(body, encoding="utf-8")
         proc = subprocess.run(
             [sys.executable, "-m", "pytest", f"tests/unit/{fileName}",
              "-p", "no:cacheprovider", "-q", "--tb=short"],
@@ -129,7 +133,10 @@ def test_bareSessionManagerIsIsolatedByDefault():
 
         def testBareSessionManagerLandsInTmp():
             from neurova.session_manager import SessionManager
-            real = Path(__file__).resolve().parents[2] / "data" / "sessions"
+            # 锚由父进程注入的模块级常量给：探针落到 `tests/unit/` 下，那里的
+            # `parents[2]` 是 `tests/` 不是仓根（写错时这格会拿 `tests/data/sessions`
+            # 跟真实落点比，恒不相等 ⇒ 假绿）。
+            real = REPO_ROOT_ANCHOR / "data" / "sessions"
             landing = Path(SessionManager()._sessions_dir)
             assert landing != real, "默认没设 env 时落点仍是仓库真实库：%s" % landing
             assert landing.name == "sessions", landing
@@ -148,15 +155,14 @@ def test_explicitRealLandingTripsGuard():
     out = _runProbe(
         "test_tmpSessionLandingTripProbe.py",
         '''
-        from pathlib import Path
-
-
         def testExplicitRealLanding(tmp_path, monkeypatch):
             from neurova.session_manager import SessionManager
-            real = Path(__file__).resolve().parents[2] / "data" / "sessions"
+            real = REPO_ROOT_ANCHOR / "data" / "sessions"
             monkeypatch.setenv("NEUROVA_SESSIONS_DIR", str(real))
             SessionManager._instance = None
-            assert SessionManager()._sessions_dir == real
+            # 落点比较两侧同型：`_sessions_dir` 是 `Path`，用 `Path` 比才比的是路径
+            # （`== str` 恒 False，那样"守卫没咬住"与"比较写错"就分不开）。
+            assert Path(SessionManager()._sessions_dir) == real
         ''',
         expectGreen=False,
     )

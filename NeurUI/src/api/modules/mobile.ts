@@ -1,5 +1,7 @@
 import api, { request } from '@/api'
 import type { ApiResponse } from '@/types/response'
+import type { PairingCodeState, DeviceRegistryState, TunnelState, AddressSource }
+  from '@/api/contracts/pairingStates'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -7,6 +9,8 @@ import type { ApiResponse } from '@/types/response'
 
 export interface PairingCode {
   code: string
+  /** 进二维码的高熵一次性引用；与 `code` 同属一条配对记录的两个入口，不是两个凭据 */
+  ref: string
   qr_code_url: string
   expires_in: number
   pairing_id: string
@@ -20,13 +24,32 @@ export interface PairedDevice {
   paired_at: number
   last_active?: number
   is_online: boolean
+  /** M1b 的投影态（`paired|online|offline|dormant|revoked`），字面量单源见 contracts */
+  state?: DeviceRegistryState
+  /** 长期在册的提醒位：满 30 天无活动只提示，系统不代删 */
+  dormant?: boolean
 }
 
 export interface PairingStatus {
   code: string
-  status: 'pending' | 'confirmed' | 'expired' | 'revoked'
+  /** 后端回的是同一批词；类型收成契约那一份，不在此重列（教义第 6 条） */
+  status: PairingCodeState
   device_name?: string
   confirmed_at?: number
+}
+
+/** 通道读数（`GET /mobile/pairing/tunnel/status`）——面板徽标的唯一来源 */
+export interface TunnelStatus {
+  state: TunnelState
+  configured: boolean
+  route_id?: string | null
+  instance_id?: string
+  last_heartbeat_at?: number | null
+  last_rtt_ms?: number | null
+  active_streams: number
+  /** 与隧道态可并存：本次发码实际用哪条地址来源 */
+  address_source: AddressSource
+  last_error?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -38,6 +61,16 @@ const BASE = '/mobile'
 /** Generate a pairing code and QR code. */
 export function generatePairing(data: { device_name?: string; device_type?: string }) {
   return api.post<ApiResponse<PairingCode>>(`${BASE}/pairing/generate`, data)
+}
+
+/** 通道状态（面板据此决定能不能发码；读不到就如实显示"不知道"）。 */
+export function getTunnelStatus() {
+  return api.get<ApiResponse<TunnelStatus>>(`${BASE}/pairing/tunnel/status`)
+}
+
+/** 主动撤回一张还没被扫的码（误扫/换码不必干等 300 秒）。 */
+export function cancelPairing(code: string) {
+  return api.post<ApiResponse<{ status: string }>>(`${BASE}/pairing/cancel`, { code })
 }
 
 /** Get pairing status by code. */

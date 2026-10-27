@@ -106,9 +106,10 @@ describe('SkillPoolPage — 流转确认队列（Wave H-W5）', () => {
     apiMock.listSkillTransfers.mockResolvedValue({ data: { items: [], total: 0 } })
   })
 
-  it('私有 tab 读用户私库并归一 skill_id→id（裸数组契约，非 res.data）', async () => {
+  // skill_id→id 归一判据已上收到 API 边界档；本档按边界出口形状（行带 id）钉页面行为
+  it('私有 tab 读用户私库并按边界归一的 id 渲染（裸数组契约，非 res.data）', async () => {
     apiMock.listMySkills.mockResolvedValue([
-      { skill_id: 'm1', name: '我的技能', description: 'd', version: '1.0.0', category: 'c' },
+      { id: 'm1', skill_id: 'm1', name: '我的技能', description: 'd', version: '1.0.0', category: 'c' },
     ])
     const wrapper = mountPage()
     await flushPromises()
@@ -120,7 +121,7 @@ describe('SkillPoolPage — 流转确认队列（Wave H-W5）', () => {
 
   it('公共 tab 安装走 installPublicToMine（落我的私库）', async () => {
     apiMock.listPublicLibrarySkills.mockResolvedValue([
-      { skill_id: 'p1', name: '公共技能', description: 'd', version: '1.0.0' },
+      { id: 'p1', skill_id: 'p1', name: '公共技能', description: 'd', version: '1.0.0' },
     ])
     const wrapper = mountPage()
     await flushPromises()

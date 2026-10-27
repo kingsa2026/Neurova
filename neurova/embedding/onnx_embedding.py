@@ -101,6 +101,8 @@ class ONNXEmbeddingEngine:
         self._dimension = 0
         self._initialized = False
         self._backend_type = None
+        #: 由工厂交出过的实例（见 `markHandedOutByFactory` / `isHandedOutByFactory`）。
+        self._handedOut = False
         self._lock = threading.RLock()
 
         # 推理统计
@@ -110,6 +112,28 @@ class ONNXEmbeddingEngine:
     @property
     def is_initialized(self) -> bool:
         return self._initialized
+
+    def markHandedOutByFactory(self) -> None:
+        """点名「本实例是 `get_embedding_engine()` 交出的那一份」。
+
+        工厂交出的是**尚未装载任何模型**的裸实例。这类实例一旦进入 `encode_batch`，
+        那一段的懒初始化自救就会去走
+        `initialize_sync() → ModelDownloader.ensure_model(..., auto_download=True)`——
+        在一条判据的路径上出网拉权重。判别「这个实例有没有被交出去过」若靠
+        「有没有模型」，就把"没装"与"装过"混成一件事；故由工厂在交出时点名，
+        消费方据此决定要不要读它（`isHandedOutByFactory`）。
+        """
+        self._handedOut = True
+
+    @property
+    def isHandedOutByFactory(self) -> bool:
+        """这个实例是不是由 `get_embedding_engine()` 交出、且尚未装载模型的那一份。
+
+        True 的含义不是"不能用"，而是"**读它就等于现场建模型**"：编码会走到
+        `initialize_sync()`/`ensure_model`。要求"不许为算一次分把模型拉起来"的
+        消费方据此回退，而不是各自去判一遍就绪位。
+        """
+        return bool(self._handedOut) and not self._initialized
 
     @property
     def dimension(self) -> int:
@@ -314,6 +338,37 @@ class ONNXEmbeddingEngine:
             logger.warning("HuggingFace tokenizer 加载失败: %s", e)
             return None
 
+    def encodeOrNone(self, text: str) -> Optional[List[float]]:
+        """能真算才返回向量。
+
+        为什么必须有这个口：`encode` 的契约是"总是给一列浮点"，算不出时给**零向量**。
+        零向量传得下去，但传下去之后就再没人和"真算出一个全零向量"区分得开——下游把
+        恒定 0 的余弦当"不相似"读，缺陷于是在读数里彻底不可见（`requirements-ci.txt`
+        刻意不含 onnxruntime/tokenizers 时，四个消费方全都读成了"有向量、只是不相似"）。
+
+        判据只有这一处：引擎自己交出的向量、维数对得上、且有一个分量不是 0。
+        想写"算不出就别写"的消费方一律走这个口，不各自再判一遍零向量。
+        """
+        vector = [float(x) for x in self.encode(text)]
+        if len(vector) != self._dimension or not any(vector):
+            logger.debug("嵌入引擎未就绪（%s），本轮不给向量", self._unreadyReason())
+            return None
+        return vector
+
+    def _unreadyReason(self) -> str:
+        """引擎未就绪的原因（点名到缺哪一件，好让调用方把它写进日志而不是留白）。"""
+        if self._initialized:
+            return "已初始化"
+        try:
+            import onnxruntime  # noqa: F401
+        except ImportError:
+            return "onnxruntime 未安装"
+        try:
+            import sentence_transformers  # noqa: F401
+        except ImportError:
+            return "onnxruntime/sentence_transformers 均缺或模型未加载"
+        return "后端未加载"
+
     def encode(self, text: str) -> List[float]:
         """
         将单条文本编码为向量
@@ -322,7 +377,7 @@ class ONNXEmbeddingEngine:
             text: 输入文本
 
         Returns:
-            归一化向量
+            向量；引擎未就绪时为全零（"算不出"要用 `encodeOrNone`，别从零向量反推）
         """
         result = self.encode_batch([text])
         return result.vectors[0] if result.vectors else [0.0] * self._dimension

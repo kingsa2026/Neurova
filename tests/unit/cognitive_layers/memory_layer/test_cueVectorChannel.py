@@ -68,36 +68,14 @@ def _attachModelCues(mgr: MemoryManager, rows: dict) -> None:
         )
 
 
-def _denseTierIsUsable() -> bool:
-    """本机这一档是不是**真能算**的稠密档。
-
-    `get_embedding_engine() is not None` 只是"工厂给了个对象"：缺 numpy／tokenizer 时它内部
-    退回零向量兜底（`backend_type` 为 None、`encode()` 全零），通道按零向量丢行 ⇒ 判据量到的
-    是"没有引擎"，不是"通道没用"。零向量档与真向量档在这两条判据上不可比，故缺档时**明说跳过**，
-    不在缺件环境里造一条"净增益不成立"的假红。前提本身不放松：
-    `test_onnx_lazy_init_deadlock.py` 那条照旧不许跳过。
-    """
-    from neurova.embedding import get_embedding_engine
-
-    engine = get_embedding_engine()
-    if engine is None:
-        return False
-    # 顺序是这条判据的要害：`get_embedding_engine()` 拿到的是**未加载模型**的裸实例，
-    # `backend_type` 在第一次 `encode` 之前恒为 None（懒初始化自救就发生在 `encode_batch` 里）。
-    # 先判档再编码，等于永远判成"没有这一档"——判据在此前实跑里就退成了整文件 skip。
-    try:
-        vector = engine.encode("探针")
-    except Exception:  # noqa: BLE001 - 探测失败即视为无可用档
-        return False
-    if not (vector and any(float(x) != 0.0 for x in vector)):
-        return False
-    return bool(getattr(engine, "backend_type", None))
-
-
 @pytest.fixture
 def corpus(tmp_path):
-    if not _denseTierIsUsable():
-        pytest.skip("本机没有可用的稠密嵌入档（numpy/tokenizer 缺席）——零向量档下的读数不可比")
+    from tests.memory_embedding_precondition import requireRealEmbeddingOrSkip
+
+    # 前提自给：引擎真出非零向量。缺件（`requirements-ci.txt` 刻意不含
+    # onnxruntime/tokenizers）时 skip 并点名缺的是哪一件——这一步只说明"这台机器给不出
+    # 这条读数"，不说明被测代码对；装了模型却算不出仍然是红（判据在引擎那一处）。
+    requireRealEmbeddingOrSkip("向量线索通道的净增益（生产同款稠密检索）")
     # 单例复位必须在这里做：`get_semantic_search()` 是进程级单例，而记忆 id 是每个 fixture
     # 从 mem_000001 确定性重放的——上一个用例并进去的线索词会串到下一个用例的倒排里，
     # 「关掉通道读数不降」这条差分因此测的是残留状态而不是通道（本轮就这么翻过车）。

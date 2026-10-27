@@ -33,22 +33,31 @@
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 
 import pytest
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from tests import ast_scan
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
 SCAN_ROOTS = ("neurova", "tests")
 
 pytestmark = [pytest.mark.timeout(60)]
 
 
-def _singleArgCallsIn(source: str) -> list:
-    """返回"只给了 ctx、没给 scopeCtx"的 `_retrieve_memories(...)` 调用行号。"""
+def _singleArgCallsIn(tree) -> list:
+    """返回"只给了 ctx、没给 scopeCtx"的 `_retrieve_memories(...)` 调用行号。
+
+    入参是**语法树**而不是源码：文件枚举与解析归 `tests/ast_scan.sourceRefsUnder`
+    ＋ 一次性入口 `transientTree`，本档不再自付"自己枚举一整棵根树再逐个 parse"
+    ——判据成本随代码总量涨正是本仓那条墙钟红的根因。
+    """
     bad = []
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
             continue
         if node.func.attr != "_retrieve_memories":
@@ -60,25 +69,29 @@ def _singleArgCallsIn(source: str) -> list:
 
 def test_全仓不得再有单参调用形态():
     offenders = []
-    scanned = 0
     for rootName in SCAN_ROOTS:
         # 枚举走共享预算（`tests/ast_scan.sourceRefsUnder`）：本判据的谓词是「文本里出现
         # `_retrieve_memories` 才可能有单参调用」，hints 是这条谓词的充分条件，口径不变。
+        # 解析走一次性入口 `transientTree`：本档对同一棵树只走一遍，留常驻树只会让 gen2 按图收费。
         for ref in ast_scan.sourceRefsUnder(REPO_ROOT / rootName, ".py",
                                             hints=("_retrieve_memories",)):
-            scanned += 1
-            path = ref.path
-            lines = _singleArgCallsIn(ref.code)
+            lines = _singleArgCallsIn(ast_scan.transientTree(ref.path))
             if lines:
                 offenders.append(
-                    f"{path.relative_to(REPO_ROOT).as_posix()}:{lines}"
+                    f"{ref.path.relative_to(REPO_ROOT).as_posix()}:{lines}"
                 )
+    # 候选面（预筛后真正被扫描/解析的档数）＝下面面自证要用的那条读数：
+    # 走共享入口再数一遍词表，而不是在循环里累加——循环里多一个只增不读的计数器，
+    # 一旦被改名/写坏，面自证读到的就是那个残值，判据当场变哑（批 M 第二档的实测形态）。
+    scanned = len(ast_scan.sourceRefsUnder(REPO_ROOT / "neurova", ".py",
+                                           hints=("_retrieve_memories",)))
     corpusFiles = len(ast_scan.sourceRefsUnder(REPO_ROOT / "neurova", ".py"))
     assert corpusFiles >= 800, (
         "生产语料现读 %d 个 .py——REPO_ROOT 指错时这条判据根本不说话" % corpusFiles)
-    # 候选面按**预筛后**读数定线：现算 13 个文件里含 `_retrieve_memories` 字样。
-    # 掉到 0 ＝ 预筛词或根写坏（命中被滤空），而不是"调用方都改好了"。
-    assert scanned >= 5, (
+    # 候选面按**预筛后**读数定线：现跑本机生产根 2 个档含 `_retrieve_memories` 字样
+    # （守卫档自己 1 个，外加 `neurova/` 那处调用）。掉到 0 ＝ 预筛词或根写坏
+    # （命中被滤空），而不是"调用方都改好了"。
+    assert scanned >= 1, (
         "候选面现读 %d 个文件——预筛把命中滤空或根被改窄，此时『零 offender』不作数（面自证）" % scanned)
     assert not offenders, (
         "这些调用还按 `_retrieve_memories(ctx)` 的旧形状写，运行即 TypeError："
@@ -89,7 +102,7 @@ def test_全仓不得再有单参调用形态():
 
 
 def test_扫描器真会咬():
-    # `await` 只能出现在 async 函数体内，样本得带宿主——否则 ast.parse 抛 SyntaxError，
+    # `await` 只能出现在 async 函数体内，样本得带宿主——否则解析即 SyntaxError，
     # 反向控制格本身先炸（本档落笔时踩过一次）。
     stale = "async def _probe(pipeline, ctx):\n    await pipeline._retrieve_memories(ctx)\n"
     fixed = (
@@ -98,12 +111,12 @@ def test_扫描器真会咬():
         "        ctx, turnScopeContext(ctx.metadata, ctx.session_id)\n"
         "    )\n"
     )
-    assert _singleArgCallsIn(stale) == [2], "反向控制失效：单参调用没被点名＝本守卫恒绿"
-    assert _singleArgCallsIn(fixed) == [], "正确形被误报"
-    assert _singleArgCallsIn("def _retrieve_memories(self, ctx, scopeCtx):\n    ...\n") == [], (
+    assert _singleArgCallsIn(ast.parse(stale)) == [2], "反向控制失效：单参调用没被点名＝本守卫恒绿"
+    assert _singleArgCallsIn(ast.parse(fixed)) == [], "正确形被误报"
+    assert _singleArgCallsIn(ast.parse("def _retrieve_memories(self, ctx, scopeCtx):\n    ...\n")) == [], (
         "方法定义被当成调用误报——守卫会咬住生产代码，口径不对"
     )
     # 合成样本自己得能过 ast.parse：带缩进的 def 顶格写会 IndentationError，
     # 于是反向控制格自身先炸（本档落笔时踩过两次，都在这一格）。
     with pytest.raises(SyntaxError):
-        _singleArgCallsIn("    def _retrieve_memories(self):\n        ...\n")
+        _singleArgCallsIn(ast.parse("    def _retrieve_memories(self):\n        ...\n"))

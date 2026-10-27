@@ -283,9 +283,10 @@ class KnowledgeIngestBridge:
         return content.encode("utf-8"), "wecom-message.txt", "wecom"
 
     async def _fetchUrl(self, url: str) -> bytes:
-        from neurova.api.endpoints.knowledge_ingestion import _fetch_url, _validate_import_url
+        from neurova.api.endpoints.knowledge_ingestion import _fetch_url
+        from neurova.knowledge.url_guard import validate_public_http_url
 
-        if not _validate_import_url(url):
+        if not validate_public_http_url(url):
             raise DocumentParseError("unsafe_url")
         return await asyncio.to_thread(_fetch_url, url)
 
@@ -363,12 +364,14 @@ _bridgeLock = threading.RLock()
 
 
 def get_ingest_bridge() -> KnowledgeIngestBridge:
+    """懒建单例（DCL + RLock，AGENTS.md §3）：并发下只建一份。"""
     global _bridge
-    if _bridge is None:
-        with _bridgeLock:
-            if _bridge is None:
-                _bridge = KnowledgeIngestBridge()
-    return _bridge
+    if _bridge is not None:
+        return _bridge
+    with _bridgeLock:
+        if _bridge is None:
+            _bridge = KnowledgeIngestBridge()
+        return _bridge
 
 
 def ingestEnabled(adapter: Any) -> bool:

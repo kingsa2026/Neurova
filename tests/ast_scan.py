@@ -374,6 +374,26 @@ def transientTree(path: Path) -> ast.AST:
     return ast.parse(sourceCode(path))
 
 
+def transientTrees(root: Path, suffix: str = ".py",
+                   hints: Tuple[str, ...] = ()) -> Iterator[Tuple[Path, ast.AST]]:
+    """**一次性**产出 `(路径, 语法树)`：不留常驻树，也**不让调用方自己枚举/解析**。
+
+    与 `transientNodes` 同一族（同样吃文本预筛、同样不进 `_cachedParse`），
+    区别是交出**树**而不是节点表：判据要按"模块层语句"这类结构位置读它，或者
+    同一棵树要读好几件事（走两遍 `ast.walk`）时，走这个入口只解析一遍 —— 而
+    自己 `filesUnder` + `ast.parse` 的写法既把成本绑在代码总量上，也让同一份文本
+    被反复编译（受保护子集实测：一次全仓取证解析三遍同一批 `.py`，30s 墙钟超时）。
+
+    什么时候**不**用它：会跨判据重复扫的（走 `parsedModules` / `nodeScan`），
+    预算实现自身（走 `sourceRefsUnder`）。
+    """
+    for ref in sourceRefsUnder(root, suffix, hints):
+        try:
+            yield ref.path, ast.parse(ref.code)
+        except SyntaxError:
+            continue
+
+
 def transientNodes(root: Path, suffix: str = ".py",
                    hints: Tuple[str, ...] = ()) -> Iterator[Tuple[Path, ast.AST]]:
     """**一次性**逐节点产出 `(路径, 节点)`，不留常驻语法树。
@@ -641,8 +661,6 @@ def _walkNodes(tree: ast.AST) -> list:
             found.append(node)
         pending.extend(ast.iter_child_nodes(node))
     return found
-
-
 def takenPerModule(root: Path, suffix: str = ".py") -> dict:
     """一次遍历，按**被取用的绝对模块名**归集"谁从它取了什么名"。
 
@@ -671,9 +689,27 @@ def takenPerModule(root: Path, suffix: str = ".py") -> dict:
         except SyntaxError:
             continue
         rel = relativeToRepo(ref.path)
+        # 下潜**只付一次**：节点先收进一份清单，再在这份清单上分两趟过（import 面 → 属性面）。
+        #
+        # 实测（本机，全仓 3684 档 / 828 万节点）：原形态对每棵树各跑一次 `ast.walk`，
+        # 下潜那一遍重复付了两次（`iter_child_nodes` 累计 15.3s），单次 14.1s——
+        # 于是消费它的 `test_packageDeclaredSurfaceCoversWhatIsTaken` 在受保护子集里
+        # 撞 30s 全局墙钟（构建 `cnb-dg2-1k5qd8q3g#003`，`Timeout (>30.0s)`）。
+        # 这是判据成本随**代码总量**涨的老形态（Issue #148 同族），不是"跑得慢"。
+        # 清单化后两趟都在清单上做，读数逐条不变（等价性由本文件下方的对拍格钉住）。
+        #
+        # 为什么不能合成一趟：属性链的归属判据是"该文件确实 import 过那个前缀"，而
+        # `ast.walk` 的产出序列由**树形**决定，不由书写顺序：本仓
+        # `neurova/auth/qclaw_binding_model.py` 顶层 `try:` 里的
+        # `import cryptography.hazmat.primitives.kdf.pbkdf2` 就排在函数体里的
+        # `cryptography.fernet.Fernet(...)` **之后**。合成一趟会静默改写读数（实测：
+        # `cryptography.fernet::fernet` 凭空多一条、`…kdf.pbkdf2` 整条消失），而这张表是
+        # 仓内多处判据的事实源，读数必须逐条不变。
+        # 省下的是**下潜**那一遍（本机 2.86s / 413 万节点），不是语义：清单化后两趟
+        # 都只做线性过表（各 0.3s 量级）。
+        walked = _walkNodes(tree)
         imported = set()                      # 该文件里真被 import 过的绝对模块名
         aliasTo = {}                          # 本地名 → 绝对模块名
-        walked = _walkNodes(tree)
         imports = [n for n in walked if n.__class__ is not ast.Attribute]
         attributes = [n for n in walked if n.__class__ is ast.Attribute]
         for node in imports:

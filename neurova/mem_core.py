@@ -1367,6 +1367,63 @@ class MemCore:
     # Session 文件保存（B5 闭环修复：GAP-3）
     # ══════════════════════════════════════════════════════════════
 
+    def _sessionWriteFrame(self, session_id: Optional[str], session_owner: Optional[str]) -> tuple:
+        """会话写侧四元组的单点解析：(SessionManager, agent_id, session_id, 属主)。
+
+        配对写 `save_to_session` 与单条写 `saveUserMessage` 共用——各抄一遍就会漂，
+        而属主口径正是 §6-163 裁定甲专门收成一处的那件事。
+
+        DATA-P1-1（审计 2026-09-11）→ §6-163（裁定甲）：会话属主**由调用方显式给**，
+        不再从环境里读。合并后那条身份通道装的是"谁在说话（sender）"，而会话记录的
+        可见性要的是"这条会话归谁（owner）"——渠道路径上这是两个不同的人
+        （群成员发的话要出现在 agent 属主的控制台里，Issue #290 Wave H-W0）。
+        拿前者当属主，渠道会话就会落到发送者的命名空间，属主控制台再也看不见它。
+        缺省（None/空）＝不声明属主 ⇒ 共享会话，与后台任务/排程的既有口径一致。
+        """
+        sm = self.session_manager
+        if not session_id:
+            from uuid import uuid4
+
+            session_id = f"auto-{uuid4().hex[:12]}"
+        agent_id = getattr(self.config, "agent_id", "unknown") if self.config else "unknown"
+        return sm, agent_id, session_id, str(session_owner or "")
+
+    def saveUserMessage(
+        self,
+        user_input: str,
+        session_id: Optional[str] = None,
+        metadata: Optional[Dict] = None,
+        writer_claim=None,
+        session_owner: Optional[str] = None,
+    ) -> str:
+        """回合开始前先把本轮用户消息落到会话盘（单条写）。
+
+        为什么需要这一步（实测，不是推测）：全仓唯一的落盘点在 post-chat 管道，
+        一次写 user+assistant 一对——整个回合进行中（前端正流式收字）盘上本轮
+        一个字都没有。用户在这期间刷新或掉线，`GET /chat/history` 读回来是空的，
+        连自己刚发的那句话都不见（票面症状）。
+
+        回合末那一次因此只补 assistant（见 `post_chat_pipeline` 的
+        `user_already_persisted`），不重复写 user——同一条用户消息落两遍会在历史里
+        长出一个重复气泡。
+        """
+        sm, agent_id, session_id, owner_id = self._sessionWriteFrame(session_id, session_owner)
+        if not sm:
+            logger.warning("SessionManager 不可用，跳过 user 消息预写")
+            return ""
+        ok = sm.save_message(
+            agent_id=agent_id,
+            session_id=session_id,
+            role="user",
+            content=user_input,
+            metadata=metadata,
+            user_id=owner_id,
+            # 渠道首条消息带可读标题（channel_router 注入 session_title）；仅建记录时生效
+            title=(metadata or {}).get("session_title", ""),
+            writer_claim=writer_claim,
+        )
+        return session_id if ok else ""
+
     def save_to_session(
         self,
         user_input: str,
@@ -1376,6 +1433,8 @@ class MemCore:
         assistant_metadata: Optional[Dict] = None,
         writer_claim=None,
         session_owner: Optional[str] = None,
+        *,
+        userAlreadyPersisted: bool = False,
     ) -> str:
         """保存对话到 session 文件，委托给 SessionManager.add_message()。
 
@@ -1394,26 +1453,25 @@ class MemCore:
         Returns:
             session 文件标识符: "agent_id_session_id_date"
         """
-        sm = self.session_manager
+        sm, agent_id, session_id, owner_id = self._sessionWriteFrame(session_id, session_owner)
         if not sm:
             logger.warning("SessionManager 不可用，跳过 session 保存")
             return session_id or ""
 
-        # 自动生成 session_id
-        if not session_id:
-            from uuid import uuid4
-
-            session_id = f"auto-{uuid4().hex[:12]}"
-
-        agent_id = getattr(self.config, "agent_id", "unknown") if self.config else "unknown"
-
-        # DATA-P1-1（审计 2026-09-11）→ §6-163（裁定甲）：会话属主**由调用方显式给**，
-        # 不再从环境里读。合并后那条身份通道装的是"谁在说话（sender）"，而会话记录的
-        # 可见性要的是"这条会话归谁（owner）"——渠道路径上这是两个不同的人
-        # （群成员发的话要出现在 agent 属主的控制台里，Issue #290 Wave H-W0）。
-        # 拿前者当属主，渠道会话就会落到发送者的命名空间，属主控制台再也看不见它。
-        # 缺省（None/空）＝不声明属主 ⇒ 共享会话，与后台任务/排程的既有口径一致。
-        owner_id = str(session_owner or "")
+        if userAlreadyPersisted:
+            # 本轮 user 已在 `ChatPipeline._step_persist_user_early` 落盘 ⇒ 这里只补
+            # assistant。仍走同一对门面（本方法）与同一道围栏，不让"配对写"成为
+            # 唯一能落盘的形态——否则提前写那条路径就得另开一个写口，口径立刻分叉。
+            ok = sm.save_message(
+                agent_id=agent_id,
+                session_id=session_id,
+                role="assistant",
+                content=reply,
+                metadata=assistant_metadata,
+                user_id=owner_id,
+                writer_claim=writer_claim,
+            )
+            return session_id if ok else ""
 
         return sm.add_message(
             agent_id=agent_id,

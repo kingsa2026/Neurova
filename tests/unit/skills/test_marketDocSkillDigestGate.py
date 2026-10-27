@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import sys
 from pathlib import Path
 
 import pytest
@@ -160,11 +161,10 @@ class TestTheGateIsOnTheRegistryLeg:
 
 
 class TestProductionBuildersCarryThePin:
-    def _builderCalls(self, source: str):
+    def _builderCalls(self, source):
         """挑出对 `_build_executable_skill(` 的调用点，返回是否带了 pinnedDigest。"""
-        tree = ast.parse(source)
         found = []
-        for node in ast.walk(tree):
+        for node in ast.walk(ast.parse(source)):
             if not isinstance(node, ast.Call):
                 continue
             fn = node.func

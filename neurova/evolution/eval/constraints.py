@@ -149,32 +149,72 @@ def semantic_similarity(a: str, b: str) -> float:
     return _token_jaccard(a, b)
 
 
-def _embedding_similarity(a: str, b: str) -> Optional[float]:
-    """尝试用项目 embedding 引擎算余弦;任何不可用原因都返回 None(不抛)。
+#: 取引擎这一步"没拿到可用引擎"的唯一哨兵值。它与"相似度算出差值"必须分开：
+#: 前者要回退到词面下界，后者要如实返回——两者都折进 `None` 时，`None` 就同时
+#: 表达"没有向量"和"向量算出了空"，调用方无从分辨。
+_ENGINE_UNAVAILABLE = object()
 
-    引擎**未就绪就自己把它叫起来**（`encode_batch` 的既有懒初始化自救，
-    `onnx_embedding.py:340` 那一段就是为这类消费方写的）：此前这里只认"已经就绪"，
-    而进化链路上没有任何一处会初始化引擎，于是稠密档在也**一律**退回词法档——
-    约束闸按 token Jaccard 判"语义漂移"，它的 docstring 却写着"优先 embedding 余弦"。
-    实测同一对文本：稠密档 0.94 / 词法档 0.714（阈值 0.75）⇒ 候选被恒定拒、提案一条不出。
-    真正的"离线可跑"由 try/except 保证（模型档缺失 / 依赖缺席照样返回 None），
-    不需要靠"不初始化"来保证。
+def _noteEngineProbe(state: str) -> None:
+    """把"这一跳走到了哪一步"落进模块级读面（`probed` / `ready`）。
+
+    为什么要有这一格：判据要能分辨三件事——**根本没取引擎**（语义面被摘掉）、
+    **取了但没就绪就回退**（正常路径）、**取了且就绪**（用了向量）。只看返回值
+    分不出前两者（都回退到词面下界），于是把语义闸整段删掉也能"绿得很干净"。
+    """
+    global _SEMANTIC_ENGINE_TOUCHED
+    _SEMANTIC_ENGINE_TOUCHED = str(state)
+
+
+#: 取引擎这一跳的读数（空串 = 本轮进程里这一跳一次都没走到）。
+_SEMANTIC_ENGINE_TOUCHED = ""
+
+
+def _initialized_embedding_engine():
+    """取 embedding 引擎；取不到回 `_ENGINE_UNAVAILABLE`。
+
+    工厂交出的是**未装载模型**的裸实例（`isHandedOutByFactory`）。这类实例一旦被
+    读，`encode_batch` 的懒初始化自救会走 `initialize_sync() →
+    ModelDownloader.ensure_model(..., auto_download=True)`——**在一条判据的路径上
+    出网拉 130MB 权重**，于是这一跳在 CI 上要么超时、要么把跑测挂到整场被平台掐断。
+    故判据只认**已经就绪**的引擎：工厂裸实例回 `_ENGINE_UNAVAILABLE`，由
+    `_embedding_similarity` 回退到词面下界（离线可跑）。
+
+    已就绪的引擎不再另判一次：取向量走 `encodeOrNone`，算不出就如实返回 `None`。
     """
     try:
         from neurova.embedding import get_embedding_engine
 
         engine = get_embedding_engine()
-        if engine is None:
+        if engine is None or engine.isHandedOutByFactory:
+            return _ENGINE_UNAVAILABLE
+        return engine
+    except Exception:  # noqa: BLE001 - 引擎装配失败属可选依赖缺席,回退词面
+        return _ENGINE_UNAVAILABLE
+    finally:
+        # 每一次判据都会走这一跳，必须让"这一跳走到了、且没去建模型"可被**读**出来：
+        # 只写在注释里的纪律，下一次有人把 `initialize_sync()` 加回来时没有任何东西会红
+        # （判据 `tests/unit/evolution/eval/test_semanticGateLoadsNoModel.py` 读这一格）。
+        if _SEMANTIC_ENGINE_TOUCHED != "ready":
+            _noteEngineProbe("probed")
+
+
+def _embedding_similarity(a: str, b: str) -> Optional[float]:
+    """尝试用项目 embedding 引擎算余弦;任何**不可用**原因都返回 None(不抛)。
+
+    只消费**已初始化**的引擎(启动期 ONNX 懒加载策略,见 09-09 启动性能
+    修复):进化闸不触发模型加载,未就绪即 Jaccard 回退——离线可跑。
+    """
+    try:
+        engine = _initialized_embedding_engine()
+        if engine is _ENGINE_UNAVAILABLE:
             return None
-        # 就绪判定要**在编码之后**取：`is_initialized` 是**属性**（不是方法，写成
-        # `is_initialized()` 会抛 TypeError 并被下面的 `except` 吞成"退回词法档"），
-        # 而裸实例的就绪是被 `encode_batch` 的懒初始化自救点亮的——先判 `not
-        # is_initialized` 等于把自救挡在门外（实测：稠密档在也恒走 Jaccard）。
-        va, vb = engine.encode(a), engine.encode(b)
-        if not engine.is_initialized:
+        # 取向量一律走 `encodeOrNone`：全零向量是"引擎兜底"不是"有向量"（并发会话那笔
+        # `encodeOrNone` 的口径更彻底，按其收口）。这一跳只在**能真算**的引擎上发生，
+        # 也就顺带把"未就绪即 Jaccard 回退"落在同一处判据上。
+        va, vb = engine.encodeOrNone(a), engine.encodeOrNone(b)
+        if va is None or vb is None:
             return None
-        if not va or not vb:
-            return None
+        _noteEngineProbe("ready")
         raw = vector_math.tryCosineSimilarity(va, vb)
         if raw is None:
             return None
@@ -184,27 +224,26 @@ def _embedding_similarity(a: str, b: str) -> Optional[float]:
 
 
 def _tokenize(text: str) -> set[str]:
-    """词面 token 集:拉丁词 + 中文 jieba 分词(jieba 不可用时 CJK 字符二元组)。
+    """词面 token 集:拉丁词 + 中文 **CJK 字符二元组**。
 
-    Jaccard 是词面下界——中文整段成单 token 会让改写/漂移都算不出差异,
-    必须按词切分(项目 RAG 已依赖 jieba,此处同源)。
+    这里**刻意不用 jieba**：语义闸是「embedding 不可用就跑」的兜底路径，兜底里再挂
+    一件可选依赖，等于把一次字典构建摊到"哪条 async 调用栈恰好第一个走到语义闸"身上。
+    实测构建 `cnb-sq6-1k5q1kqrc#003`：`test_service_closed_loop` 那格 30s 墙钟就是这么
+    被打穿的，回溯停在 `knowledge.search._get_jieba → jieba.initialize`，与该格被测行为
+    毫无关系。字二元组是纯 CPU、零可选依赖、离线可跑的——这正是本闸「不因可选依赖缺失
+    而失去这道闸」的取舍本身。判据见
+    `tests/unit/ci/test_optionalImportWallOwedByLivePath.py`（活体路径问取用口的次数必须为 0）。
+
+    Jaccard 是词面下界：中文按二元组切分已足以让"同义改写拿高分、主题漂移掉分"。
     """
     tokens: set[str] = set()
     latin_runs = re.findall(r"[a-z0-9]+", text.lower())
     tokens.update(r for r in latin_runs if len(r) >= 2)
-    cjk_runs = re.findall(r"[\u4e00-\u9fff]+", text)
-    if cjk_runs:
-        try:
-            import jieba
-
-            for run in cjk_runs:
-                tokens.update(w for w in jieba.cut(run) if len(w) >= 2)
-        except Exception:  # noqa: BLE001 - jieba 缺席时用二元组保持粒度
-            for run in cjk_runs:
-                if len(run) == 1:
-                    tokens.add(run)
-                else:
-                    tokens.update(run[i : i + 2] for i in range(len(run) - 1))
+    for run in re.findall(r"[\u4e00-\u9fff]+", text):
+        if len(run) == 1:
+            tokens.add(run)
+        else:
+            tokens.update(run[i : i + 2] for i in range(len(run) - 1))
     return tokens
 
 

@@ -30,6 +30,7 @@ import re
 import pytest
 
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+from tests.memory_embedding_precondition import requireRealEmbeddingOrSkip
 
 pytestmark = [pytest.mark.timeout(120)]
 
@@ -139,8 +140,7 @@ class TestGenerationIsBatchedAndSweeping:
 class TestGeneratedCuesAreUsable:
     def test_生成的线索能被向量通道召回(self, manager):
         """端到端：生成 → 入库 → 通道点火 → 无词面重合的提问能捞出对应记忆。"""
-        if not _denseTierIsUsable():
-            pytest.skip("本机没有可用的稠密嵌入档（numpy/tokenizer 缺席）——通道建不出索引")
+        requireRealEmbeddingOrSkip("线索批量生成（缺档时通道建不出索引）")
         target = ROWS[0]
         query = "团队聚餐选餐厅时要注意什么"
         # 查询与目标零中文字面重合（前提自证，否则用例白给）

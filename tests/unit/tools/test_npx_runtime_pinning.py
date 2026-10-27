@@ -270,115 +270,292 @@ class TestNoKnownVulnerableRuntimePackages:
         )
 
 
-class TestNestedCarrierSubtreeIsKeptWhole:
-    """body-parser 的两条声明线各落一份，抬版**不许**把嵌套子树并掉。
+class TestUndiciDecompressCarrierIsAtTheCveFloor:
+    """`undici` decompress 拦截器的版本下界门禁（CVE-2026-87029）。
 
-    背景（PR #369 构建 `cnb-p98-1k5la1aci#008` 的红）：GHSA-27r3-jxmh-p828 的两份载体
-    `node_modules/body-parser`（express 5.2.1 → `^2.2.1`）与
-    `node_modules/@bytebase/dbhub/node_modules/body-parser`（dbhub → express 4.22.3 →
-    `~1.20.5`）各自要走自己的声明线。
+    为什么单列一类、不并进上面的 `_KNOWN_FLOORS`：这里要钉的不只是「不比某版低」。
+    `undici` 是 **`PINNED` 之外的传递依赖**（`@upstash/context7-mcp` → `undici ^7.0.0`），
+    它的版本由上游声明区间 + 锁文件共同决定，谁都不在 `PINNED` 里看着它。而这条 CVE
+    的载体恰好是「运行起来才生效」的压缩面：7.15.0–7.30.0 / 8.0.0–8.12.1 的
+    decompress 把解压后的数据经 zlib 流回调交给下游，下游按设计抛出（例：dump 拦截器
+    响应超过 maxSize）时异常从回调里**异步**逃逸，成为未捕获异常并终止 Node 进程。
 
-    把嵌套落点并到顶层、只留一份的写法（`overrides: {"body-parser": "2.4.0"}` 这种
-    平铺覆盖）能让 OSV 变绿，代价是**审计面不再与真实解析同形**：
-    `@bytebase/dbhub/node_modules/express@4.22.3` 仍声明 `body-parser ~1.20.5`，
-    而 2.x 是 ESM + 命名导出，两者并不通用。故本仓的处置按父包分段钉：
-    `{"@bytebase/dbhub": {"body-parser": "1.20.9"}}`——子树保留、版本升到修复版。
+    判据取**受影响区间**而不是"到了某个下界"：7.x 线唯一的补丁版就是 7.30.1
+    （registry 的 `seven` 标签自 2026-10-15 未动），而它本身就落在
+    `7.15.0–7.30.1` / `8.0.0–8.12.1` 这两个区间之内（公告正文写 `–7.30.0`，同一条
+    公告的 `fixed` 字段给的却是 **7.30.1**，即修法落在 7.30.1 里）。把">= 7.30.1"
+    当判据，等于锁一旦退回 7.29.1 就不再拦——而降级恰恰是这一条最该拦的形态。
 
-    三类断言合起来才有意义：下界（上一类）、**在场**（本类）、**销账与清单咬合**
-    （本类的最后一条）。少任何一类，「审计面绿了、判据却空了」都能通过。
+    故判据两件事：① 锁里的版本必须**离开**受影响区间，上界两个都取公告的 `fixed`
+    （7.30.1 / 8.12.1）：取 7.30.0 会把 7.30.1 判成受影响，而 7.x 线没有更高的补丁版，
+    那条红没人能修；② 引入方声明的主版本必须与锁同线、且够得到锁里那一版。
     """
 
-    #: 本类钉住的包 → 它在本树里的**全部**落点（缺一即报红）。
-    _CARRIERS = {
-        "body-parser": (
-            "node_modules/body-parser",
-            "node_modules/@bytebase/dbhub/node_modules/body-parser",
+    #: 受影响区间的下沿（OSV 公告里的 `introduced`）；再往下是更老的版本，
+    #: 不含这段 decompress 实现，不落在本 CVE 面内。
+    _AFFECTED_FLOOR = "7.15.0"
+    #: 两条线各自的修复版（公告 `fixed` 字段）。
+    _FIXED_7X = "7.30.1"
+    _FIXED_IN_8X = "8.12.1"
+
+    def _releaseTuple(self, version: str) -> tuple:
+        """与 `TestNoKnownVulnerableRuntimePackages._release_tuple` 同口径的版本比较。"""
+        core, _, tail = version.partition("-")
+        nums = tuple(int(p) for p in core.split(".")[:3])
+        return nums + (0 if not tail else 1,)
+
+    def _undiciEntry(self) -> dict:
+        lock = _read_json("tools/npx-runtime/package-lock.json")
+        entry = (lock.get("packages") or {}).get("node_modules/undici")
+        if entry is None:
+            pytest.skip("undici 已不在这棵依赖树里——压缩面不适用")
+        return entry
+
+    def test_locked_undici_left_the_cve_affected_range(self):
+        """锁里的版本必须离开受影响区间——降级与「停在最后一个受影响的补丁版」都算红。"""
+        version = self._undiciEntry()["version"]
+        locked = self._releaseTuple(version)
+        belowFloor = locked < self._releaseTuple(self._AFFECTED_FLOOR)
+        in7xLine = 7 == locked[0] and locked < self._releaseTuple(self._FIXED_7X)
+        in8xLine = 8 == locked[0] and locked < self._releaseTuple(self._FIXED_IN_8X)
+        assert belowFloor or not (in7xLine or in8xLine), (
+            f"undici@{version} 落在 CVE-2026-87029 的受影响区间"
+            f"（{self._AFFECTED_FLOOR}–{self._FIXED_7X} 之前 / 8.0.0–{self._FIXED_IN_8X} 之前）——"
+            "decompress 拦截器里异步逃逸的未捕获异常会终止 Node 进程。\n"
+            "   引入链: node_modules/@upstash/context7-mcp → undici ^7.0.0\n"
+            "   处置：在 tools/npx-runtime 重生成锁把它抬到修复版，不接受降级。"
+        )
+
+    def test_context7_declared_range_is_consistent_with_the_lock(self):
+        """引入方声明的区间必须真的够到锁里那一版——否则锁是拼出来的。
+
+        原写法判「声明下界 <= 修复版」，锁停在 7.29.1 时下界 7.0.0 也 <= 7.30.1，
+        等于没拦。改成两端夹：主版本同线 ＋ 锁里那一版不低于声明下界。
+        """
+        lock = _read_json("tools/npx-runtime/package-lock.json")
+        declared = ((lock.get("packages") or {})
+                    .get("node_modules/@upstash/context7-mcp", {})
+                    .get("dependencies", {})
+                    .get("undici"))
+        assert declared, (
+            "@upstash/context7-mcp 不再声明 undici——本判据的引入链前提没了，"
+            "请先复核 undici 是否仍在这棵审计树里，再决定删判据还是改链。"
+        )
+        lockedVersion = self._undiciEntry()["version"]
+        locked = self._releaseTuple(lockedVersion)
+        declaredMajor = re.search(r"\d+", declared)
+        assert declaredMajor and int(declaredMajor.group()) == locked[0], (
+            f"引入方声明 {declared!r} 与锁里 {lockedVersion} "
+            "不在同一条主版本线上——锁是拼出来的（下界判据在降级时拦不住这一形）。"
+        )
+        declaredFloor = self._releaseTuple(declared.lstrip("^~>=< ").strip())
+        assert locked >= declaredFloor, (
+            f"锁里 {lockedVersion} 低于引入方声明的下界 {declared!r}——"
+            "下一次解析会把锁打回声明值，这份绿不可复现。"
+        )
+        if declared.startswith("^"):
+            assert locked < (locked[0] + 1, 0, 0, 0)
+        elif declared.startswith("~"):
+            assert locked[:2] == declaredFloor[:2]
+
+
+class TestNonPipAuditTreesStayAtTheAdvisoryFloors:
+    """非 pip 两片审计树的版本下界门禁（Rust 桌面壳 + npx 运行时树）。
+
+    为什么单列一类：`TestNoKnownVulnerableRuntimePackages` 只登记**子依赖被父包精确
+    声明卡住**的那一类载体（yaml），`TestUndiciDecompressCarrierIsAtTheCveFloor` 只钉
+    undici 一支。两片树里其余的包没有任何"抬版不许回退"的判据——本类补上。
+
+    判据刻意只钉**修复下界**，不钉具体版本：公告入库后 `scripts/ci/osv_audit.py` 会
+    先报红发现，发现者在此登记一条下界；此后谁把锁改回有漏洞的版本就立刻红。
+    这与 `docs/05-reports/dependency-cve-ledger.md` 的 allowlist 纪律同形：
+    能升级修掉的一律升级，不登记豁免。
+    """
+
+    #: 包名 → (修复下界, 公告 id 串, 载体说明)
+    npm_floors = {
+        "@modelcontextprotocol/server": (
+            "2.3.0",
+            "GHSA-46jr-4wx8-v453 / GHSA-jm63-cq47-j5jp / GHSA-rvq5-wwqv-78pq",
+            "MCP server SDK：单请求内存耗尽、跨客户端串话、bearer 未校验受众",
+        ),
+        "hono": (
+            "4.13.11",
+            "GHSA-5r4p-p66f-jhc7",
+            "serveStatic 二次解码绕过路由中间件",
+        ),
+        "ip-address": (
+            "10.7.4",
+            "GHSA-rxp7-6hxx-x8q5",
+            "Address6 区段标识二次扫描（O(N²)）",
         ),
     }
 
-    def test_everyRegisteredCarrierSurvives(self):
-        lock = _read_json("tools/npx-runtime/package-lock.json")
-        packages = lock.get("packages") or {}
-        missing = [
-            f"{name} → {key}"
-            for name, keys in self._CARRIERS.items()
-            for key in keys
-            if key not in packages
-        ]
-        assert not missing, (
-            "登记的载体落点消失了:\n  " + "\n  ".join(missing) + "\n"
-            "  上一类此时会静默退化为空转（看着绿、其实那一份没人查）。\n"
-            "  确属上游换掉了承载者，须同步改 _KNOWN_FLOOR_CARRIERS 与 _CARRIERS 并写明理由；\n"
-            "  只想让它变绿而把落点从登记里删掉，正是本判据要拦的形态。"
-        )
+    #: crate 名 → 同上
+    cargo_floors = {
+        "rustls": (
+            "0.23.46",
+            "RUSTSEC-2026-0346/0347/0348/0349",
+            "会话密钥经 Debug 泄漏、ECH 拒后外发缓冲数据、Brotli 证书 1 GiB 预分配、未认证降级",
+        ),
+        "rustls-webpki": (
+            "0.103.16",
+            "RUSTSEC-2026-0382",
+            "接受含被吊销 emSign 中间人的证书路径",
+        ),
+        # 0.26.x 是"兼容包"：不含独立信任库，只 re-export 1.x 的根，故判据落在 1.x 线上
+        # （两条都钉会把 0.26.11 这条 re-export 当成漏洞载体）。
+        "webpki-roots 1": (
+            "1.0.10",  # 下界；锁里现读 1.0.11（高于下界 = 合格形态，不另记两个数）
+            "RUSTSEC-2026-0381",
+            "内置根证书集含被吊销的 emSign 根",
+        ),
+    }
 
-    def test_nested_carrier_sits_under_its_own_parent(self):
-        """嵌套那份必须仍落在 dbhub 子树下——落在顶层就说明子树被并掉了。"""
-        lock = _read_json("tools/npx-runtime/package-lock.json")
-        packages = lock.get("packages") or {}
-        nested = "node_modules/@bytebase/dbhub/node_modules/body-parser"
-        express = "node_modules/@bytebase/dbhub/node_modules/express"
-        assert nested in packages, f"{nested} 不在锁里——dbhub 的 express 4 子树被并掉了"
-        declared = (packages[express].get("dependencies") or {}).get("body-parser")
-        assert declared, (
-            f"{express} 不再声明 body-parser——引入链变了，本类的分段下界需重核"
-        )
-        root_version = (packages.get("node_modules/body-parser") or {}).get("version", "")
-        nested_version = packages[nested].get("version", "")
-        assert root_version.split(".")[0] != nested_version.split(".")[0], (
-            f"两条声明线解析到同一个大版本（{root_version} / {nested_version}）——"
-            "子树已被并成一份，审计树不再与真实解析同形"
-        )
+    def _parseVersion(self, version: str) -> tuple:
+        core, _, tail = version.partition("-")
+        parts = tuple(int(p) for p in core.split(".")[:3])
+        return parts + (0 if not tail else 1,)
 
-    def test_overrides_pin_each_line_by_its_parent(self):
-        """body-parser 两条声明线各按自己的父包钉，**顶层不得有平铺条目**。
+    def test_lockedNpmPackagesAreAtOrAboveTheAdvisoryFloors(self):
+        packages = _read_json("tools/npx-runtime/package-lock.json").get("packages") or {}
+        problems = []
+        for name, (floor, advisories, note) in self.npm_floors.items():
+            entry = packages.get(f"node_modules/{name}")
+            if entry is None:
+                # 承载者被整体摘除（依赖被上游换掉）也是合格形态，不报红。
+                continue
+            version = entry.get("version")
+            if self._parseVersion(version) < self._parseVersion(floor):
+                problems.append(
+                    f"{name}@{version} 低于 {advisories} 的修复下界 {floor}——{note}。\n"
+                    "    处置：抬协议方包（PINNED）或重生成锁，不要手改版本号后不回写声明。"
+                )
+        assert not problems, "\n  ".join(["运行时审计树里出现已登记公告的未修版本:"] + problems)
 
-        为什么顶层那条必须缺位：它一旦存在，npm 按名字先命中它，`@bytebase/dbhub`
-        那条分段条目就被遮住——嵌套那份随之从树里消失（复审见下一条断言）。
-        两条线各自的钉法：根上 express 5 的 `^2.2.1` → 2.4.0；
-        dbhub 的 express 4 `~1.20.5` 按 semver 顶不到 1.20.9，只能按父包顶替。
-        """
-        pkg = _read_json("tools/npx-runtime/package.json")
-        overrides = pkg.get("overrides") or {}
-        assert "body-parser" not in overrides, (
-            "overrides 出现了顶层 flat `body-parser` 钉版——它会遮住按父包的分段条目，"
-            "把 dbhub 的 express 4 子树并到顶层（本类下一条断言即报红）"
-        )
-        express = overrides.get("express")
-        assert isinstance(express, dict) and express.get("body-parser"), (
-            "overrides 缺 `express → body-parser` 分段钉版——根上 express 5 那条线会重新解析到 2.3.0"
-        )
-        dbhub = overrides.get("@bytebase/dbhub")
-        assert isinstance(dbhub, dict) and dbhub.get("body-parser"), (
-            "overrides 缺 `@bytebase/dbhub → body-parser` 分段钉版——\n"
-            "  express@4.22.3 声明 `body-parser ~1.20.5`，按 semver 顶不到 1.20.9，\n"
-            "  只有按父包钉才能保住子树并把那一份抬到修复版。"
-        )
+    def test_lockedCratesAreAtOrAboveTheAdvisoryFloors(self):
+        text = io.open(PROJECT_ROOT / "NeurUI/src-tauri/Cargo.lock", encoding="utf-8").read()
+        problems = []
+        for name, (floor, advisories, note) in self.cargo_floors.items():
+            # 键可带版本线后缀（`webpki-roots 1` → crate `webpki-roots`，只认 1.x 线）。
+            crate, _, line = name.partition(" ")
+            found = re.findall(
+                r'\[\[package\]\]\nname = "%s"\nversion = "([^"]+)"' % re.escape(crate), text
+            )
+            if line:
+                found = [v for v in found if v.split(".")[0] == line]
+            if not found:
+                continue
+            for version in found:
+                if self._parseVersion(version) < self._parseVersion(floor):
+                    problems.append(
+                        f"{name}@{version} 低于 {advisories} 的修复下界 {floor}——{note}。"
+                    )
+        assert not problems, "\n  ".join(["桌面壳 crate 树里出现已登记公告的未修版本:"] + problems)
 
-    def test_overrides_never_merge_the_nested_subtree_away(self):
-        """平铺 overrides 一旦**真的**把嵌套那份并掉，本类前两条就会空转——故在这里拦。
-
-        背景（PR #369）：修 GHSA-27r3-jxmh-p828 时，清单里同时出现过顶层
-        `"body-parser": ...` 与按父包分段的 `{"@bytebase/dbhub": {"body-parser": ...}}`。
-        重生成锁之后 `node_modules/@bytebase/dbhub/node_modules/body-parser`
-        整条从树里消失：**分段那条被平铺那条遮住**，子树被并到顶层只剩一份 2.x。
-        OSV 仍是绿的（2.4.0 已修），本类前两条的载体却全部落空——"绿了，判据却空了"。
-
-        故判据落在 overrides 的形状上，而不是锁上：同名包被分段钉过，
-        就不得再有指向它的平铺条目。
-        """
-        pkg = _read_json("tools/npx-runtime/package.json")
-        overrides = pkg.get("overrides") or {}
-        segmented = {
-            name
-            for value in overrides.values()
-            if isinstance(value, dict)
-            for name in value
+    def test_cargoLockChecksumsMatchTheRegistry(self):
+        """锁里手改的 version 必须与 checksum 同源——否则 `cargo build` 直接校验失败。"""
+        #: crate → (版本, crates.io 公布的 sha256)。版本被抬而 checksum 没跟着改，
+        #: 就是"锁看着修了、实际装不上"的形态；这条钉住两者同源。
+        expected = {
+            "rustls": ("0.23.46", "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"),
+            "rustls-webpki": ("0.103.16", "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"),
+            "webpki-roots": ("1.0.11", "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"),
         }
-        flattened = sorted(segmented & {key for key in overrides if isinstance(overrides[key], str)})
-        assert not flattened, (
-            f"overrides 里 `{', '.join(flattened)}` 同时存在平铺条目与按父包分段条目——\n"
-            "  npm 会按名字先命中平铺那条，分段条目被遮住，嵌套子树随之被并到顶层。\n"
-            "  本仓要的是「子树保留、各自抬到修复版」，故只留分段那一条，"
-            "并把父包的声明线写进本文件的分段下界。"
+        text = io.open(PROJECT_ROOT / "NeurUI/src-tauri/Cargo.lock", encoding="utf-8").read()
+        problems = []
+        for name, (version, checksum) in expected.items():
+            # 精确到版本：同名的 0.26.x 兼容包不算本判据的载体（它 re-export 1.x 的根）。
+            pattern = (
+                r'\[\[package\]\]\nname = "%s"\nversion = "%s"\nsource = "[^"]+"\n'
+                r'checksum = "([^"]+)"' % (re.escape(name), re.escape(version))
+            )
+            match = re.search(pattern, text)
+            if match is None:
+                problems.append(f"{name}@{version} 不在 Cargo.lock 里——已登记的修复版被摘掉了")
+                continue
+            lockedSum = match.group(1)
+            if lockedSum != checksum:
+                problems.append(
+                    f"{name}@{version} 的 checksum 与 registry 公布值不一致（{lockedSum[:16]}… != "
+                    f"{checksum[:16]}…）——版本抬了、校验和没跟着改，构建会直接失败"
+                )
+        assert not problems, "\n  ".join(["Cargo.lock 与 registry 不同源:"] + problems)
+
+
+class TestMcpServerCarrierIsAtTheAdvisoryFloor:
+    """`@modelcontextprotocol/server` 三条公告的下界门禁（GHSA-46jr-4wx8-v453 一族）。
+
+    为什么单列一类、且判据落在**锁**上而不是 `PINNED` 上：`server` 是 `PINNED`
+    之外的传递依赖，被三个引入方同时钉住 —— `@upstash/context7-mcp`（曾是**精确
+    声明** 2.0.0）、`@bytebase/dbhub` 与 `@modelcontextprotocol/node`（`^2.0.0`）。
+    精确声明不因顶层 override 重解析，于是它一直停在 2.0.0；三条公告
+    ——请求体校验耗尽内存、共享 transport 串消息、bearer 令牌跨服务接受——
+    的修复下界都是 **2.3.0**。引入方抬到 4.4.4 之后它自己就精确声明在 2.3.1。
+    """
+
+    #: OSV 公告给出的首个修复版；引入方（4.4.4）自己精确声明在 2.3.1。
+    _FIXED_FLOOR = "2.3.0"
+    #: 同一批公告里的三个 id，红的时候要能一眼看出是三条而不是三条判据。
+    _ADVISORIES = (
+        "GHSA-46jr-4wx8-v453",
+        "GHSA-jm63-cq47-j5jp",
+        "GHSA-rvq5-wwqv-78pq",
+    )
+
+    def _releaseTuple(self, version: str) -> tuple:
+        core, _, tail = version.partition("-")
+        nums = tuple(int(p) for p in core.split(".")[:3])
+        return nums + (0 if not tail else 1,)
+
+    def _serverEntry(self) -> dict:
+        lock = _read_json("tools/npx-runtime/package-lock.json")
+        entry = (lock.get("packages") or {}).get("node_modules/@modelcontextprotocol/server")
+        if entry is None:
+            pytest.skip("server 已不在这棵依赖树里——下界不适用")
+        return entry
+
+    def test_locked_server_is_at_or_above_the_advisory_floor(self):
+        version = self._serverEntry()["version"]
+        assert self._releaseTuple(version) >= self._releaseTuple(self._FIXED_FLOOR), (
+            f"@modelcontextprotocol/server@{version} 低于 "
+            f"{' / '.join(self._ADVISORIES)} 的修复下界 {self._FIXED_FLOOR}。\n"
+            "   引入链: @upstash/context7-mcp（精确声明）/ @bytebase/dbhub ^2.0.0 / "
+            "@modelcontextprotocol/node ^2.0.0\n"
+            "   处置：抬引入方（精确声明只能由引入方自己抬），不是手改锁条目。"
+        )
+
+    def test_context7_still_carries_server(self):
+        """引入链前提必须仍在：context7 不再带 server 时本判据就该复核而不是静默绿。"""
+        lock = _read_json("tools/npx-runtime/package-lock.json")
+        declared = ((lock.get("packages") or {})
+                    .get("node_modules/@upstash/context7-mcp", {})
+                    .get("dependencies", {})
+                    .get("@modelcontextprotocol/server"))
+        assert declared, (
+            "@upstash/context7-mcp 不再声明 @modelcontextprotocol/server——"
+            "本判据的引入链前提没了，请先复核 server 是否仍在这棵审计树里。"
+        )
+
+    def test_lock_entry_matches_the_exact_declaration_of_its_carrier(self):
+        """锁里 server 必须与引入方的精确声明逐字相同（手改条目的指纹会在这里现行）。
+
+        为什么单列：`_FIXED_FLOOR` 是公告给的**最低**可接受版，而 `context7-mcp`
+        用的是精确声明。两者一分开，就出现「锁 2.3.0 / 声明 2.3.1」这种既过下界、
+        又与声明分叉的形状——它是手改锁条目、没抬引入方留下的指纹，下一次
+        `npm install --package-lock-only` 会把锁打回声明值。判据取「逐字相等」即可咬住。
+        """
+        lock = _read_json("tools/npx-runtime/package-lock.json")
+        declared = ((lock.get("packages") or {})
+                    .get("node_modules/@upstash/context7-mcp", {})
+                    .get("dependencies", {})
+                    .get("@modelcontextprotocol/server"))
+        if not declared:
+            pytest.skip("@upstash/context7-mcp 不再声明 server——判据前提不成立")
+        if not re.fullmatch(r"\d+\.\d+\.\d+[\w.\-+]*", declared):
+            pytest.skip(f"引入方对 server 的声明是区间 {declared!r}，逐字相等不适用")
+        assert self._serverEntry()["version"] == declared, (
+            f"锁里 server 是 {self._serverEntry()['version']}，而引入方精确声明的是 {declared}——"
+            "锁与声明分叉（手改过锁条目、没抬引入方）。\n"
+            "   处置：抬 @upstash/context7-mcp，再让 npm 重新生成锁。"
         )
