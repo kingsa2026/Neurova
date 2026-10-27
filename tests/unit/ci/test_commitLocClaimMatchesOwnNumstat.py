@@ -88,7 +88,7 @@ _POOL_NAME_RE = re.compile(
     r"(?P<pool>" + "|".join(sorted(_POOL_ALIASES, key=len, reverse=True)) + r")")
 
 #: 声明之后到**下一处数字声明**之前的那一段：后缀词、数量词都只在这段里认
-_DECLTAIL_RE = re.compile(r"(?:(?!\+?\d+\s*/\s*[−-]\s*\d).)*", re.S)
+_DECLTAIL_RE = re.compile(r"(?:(?!\+?\d+\s*[−-]?\s*/?\s*[−-]?\s*\d+).)*", re.S)
 
 #: 紧跟声明的数量后缀：`+2/-0` 个文件 / `+3/-0` 格——量的是笔数格数，不是行数池
 _COUNT_SUFFIX_RE = re.compile(r"[ \t]*(?:\*\*[ \t]*)?(?:个文件|格|条|笔|处)")
@@ -259,7 +259,7 @@ def _quotedSpans(body: str) -> list:
     两次都被主格点名成"本笔写错"。豁免按**形状**给（成对引号内），不按提交号或关键词给。
     """
     spans = []
-    for left, right in (("『", "』"), ("“", "”"), ("\"", "\""), ("‘", "’")):
+    for left, right in (("『", "』"), ("「", "」"), ("“", "”"), ("\"", "\""), ("‘", "’")):
         start = 0
         while True:
             i = body.find(left, start)
@@ -475,20 +475,38 @@ class TestEveryClaimedNumberIsReal:
                 f"{body[:28]!r} 的第一条声明落到了 {got}，行文指的是 {expected}"
                 "——判据在替作者改写了他的话")
 
+    def testQuotedClaimWithDigitsIsStillAQuotation(self):
+        """引用块里**自带池数字**的那种，仍要读作引用——否则"复述别人的话"被读成本笔声称。
+
+        本批实测：`e317971f` 正文复述了上一笔的错误声明，上一轮把 `「」` 补进 `_quotedSpans`
+        就是为了这一句，可主格照样点名它。真因不在引号表，是**引号本身没被认出来**：
+        那一笔（以及它之后各笔）写的是一枚**只有开引号**的 `「`，成对表 `「`→`」` 找不到
+        右界，于是整段引用落在引用面之外，被当成"本笔声称"复算。
+
+        这一格同时钉住两件事：`「`/`」` 是**一个合法的成对形态**（缺了它，那类引用永远不被跳过），
+        以及引用里有池数字也不会漏判。
+        """
+        body = "上一轮写的是：「生产池 +26/−5」这一句被读成了本笔的账。"
+        spans = _quotedSpans(body)
+        assert spans == [(body.index("「"), body.index("」") + 1)], (
+            f"引用区间被算成了 {spans}——多算的那一段就是被复算的别人的账")
+
     def testRealBodyWithOneWrongDigitIsCaught(self):
         """把本会话真犯过的那次错**照原样**塞回真实正文，判据必须点名并且给出实量值。
 
         造出来的样本能红，不代表我那种写法能红——这条拿未推送窗口里真实带「生产池」声明的那笔，
         只把它的数字改坏（形状、池名、括号一个字不动），要求复算把错抓出来、并把真值写在报错里。
+
+        **改坏 = 让正文与自己的 numstat 对不上**，不是"换个数字"：窗口里绝大多数笔的池声明
+        本来就等于真值（照抄一遍等于没改坏，本格会静默空转），只有补正笔写成 `+0/−0`。
+        故这里按"换成与实量不同的那一对"取靶子，两种方向都能用：把真值改坏、或把补正笔写成非 0。
         """
         # 目标只认**本笔自书**的那一处：引用块（成对引号内）不参与，否则测的就是别人的句子。
-        # 窗口里同时可能有别的批预存的错声明（实测有一笔），先后无关紧要——真值跟着目标走。
         target = None
         for sha in _unpushedRange():
             body = _git("log", "-1", "--format=%B", sha)
             quoted = _quotedSpans(body)
             own = [c for c in _claims(body) if c["label"] == "生产池"
-                   and _claimsRawSpan(body, c) is not None
                    and not any(lo <= _claimsRawSpan(body, c).start
                                and _claimsRawSpan(body, c).stop <= hi for lo, hi in quoted)]
             if own:
@@ -496,33 +514,27 @@ class TestEveryClaimedNumberIsReal:
                 target = (sha, body, own[0], a, d)
                 break
         if target is None:
-            pytest.skip("未推送窗口里没有自书的「生产池」声明（推送后此格无对象，主格与 5/6 格仍在工作）")
+            pytest.skip("未推送窗口里没有自书的「生产池」声明（推送后此格无对象，主格与其余 5 格仍在工作）")
 
         sha, body, real, a, d = target
-        # 取**第一处**且数量非零的那条声明：补正笔常把错数与真值写在同一段里
-        # （`声明 +26/−5，实为 +0/−0`），挑到真值那条就等于没换，本格会静默空转。
-        # 换数字落在**原文区间**上、不按解析值重拼：真写法里池名与数字之间常夹着 `**`，
-        # 而那些字节在重拼串里根本不存在（实测本档因此红过一轮，真因却是本格没替换到）。
-        # 只换数字那一段、池名保留——整段换成裸的 `+1/−0` 会让正则失去池名，声明整个消失，
+        # 一对**必然与实量不等**的数字：实量不是 +1/−0 就用它，是就用 +1/−2。
+        # 只替换数字那一段、池名保留——整段换成裸的 `+1/−0` 会让正则失去池名，声明整个消失，
         # 那样的红是"没声明"，不是"声明错了"，测不到本格要测的东西。
-        nonzero = [c for c in _claims(body) if c["label"] == "生产池" and (c["adds"], c["dels"]) != (0, 0)]
-        if not nonzero:
-            pytest.skip("这一笔的生产池声明全是 +0/−0（补正笔），换数字无从下手"
-                        "——主格与其余 5 格仍在工作")
-        real = next((c for c in nonzero if (c["adds"], c["dels"]) != (a, d)), nonzero[0])
+        wrong = (2, 1) if (a, d) == (1, 0) else (1, 0)
         raw = body[_claimsRawSpan(body, real)]
         doctored = body
         for slash in ("−", "-"):
             digits = f"+{real['adds']}/{slash}{real['dels']}"
             if digits in raw:
-                doctored = body.replace(raw, raw.replace(digits, "+1/−0"), 1)
+                doctored = body.replace(raw, raw.replace(digits, f"+{wrong[0]}/{slash}{wrong[1]}"), 1)
                 break
         assert doctored != body, (
             f"正文里的 +{real['adds']}/−{real['dels']}（两种斜杠都试过）没被替换掉——这条格在空转")
 
         bad = _mismatches(sha, doctored)
-        assert bad and any("+1/−0" in m and f"+{a}/−{d}" in m for m in bad), (
-            f"把真实声明改成 +1/−0 仍没被点名（实得 {bad}）——判据抓不住我实际写错的那种句子")
+        assert bad and any(f"+{wrong[0]}/−{wrong[1]}" in m and f"+{a}/−{d}" in m for m in bad), (
+            f"把真实声明改坏成 +{wrong[0]}/−{wrong[1]} 仍没被点名（实得 {bad}）"
+            "——判据抓不住我实际写错的那种句子")
 
     def testBinaryAndEmptyCommitsAreNotSilentlyMiscounted(self):
         """numstat 里 `-\t-` 是二进制：不许把它当 0 参与复算，也不许让它把池求和算崩。"""
