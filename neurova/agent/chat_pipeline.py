@@ -565,29 +565,14 @@ class ChatPipeline:
         位置为什么在这：必须在 `_step_pre_llm_checks` **之后**（被治理或配额拒掉的
         回合，不该留下一条无人回答的用户消息），又必须在 `_step_inject_attachments`
         **之后**（落盘的要是并入附件后的最终形态，与模型看到的保持一致）。
+        落盘实现见 `agent/failed_turn_landing.persistUserMessageEarly`——热文件的
+        尺寸受 perf gate 约束，新逻辑不进这里（与 `_landFailedTurn` 同一处置）。
 
-        要补的实测缺口：此前全仓唯一的落盘点是 post-chat 管道里的 `_step_save_session`，
-        一次写 user + assistant 一对——整个回合进行中（前端正在流式收字）盘上本轮
-        一个字都没有，用户刷新或掉线就读不回任何东西，连自己刚发的那句都不见。
-
-        `save_memory=False`（评测/内部调用）不预写：那条路径本就不进会话历史。
-        围栏 claim 沿用本轮的，与回合末同过 `SessionManager._fenceRefusesWrite`
-        那一道闸——提前写也是写会话历史，不能因为它在开始就绕过 P1-10。
+        返回的会话 id 与本轮「已落盘」标记要回写进 ctx：回合末那一次写据此只补
+        assistant，同一条用户消息才不会落两遍。
         """
-        if not ctx.save_memory or ctx.user_message_persisted:
-            return
-        memory = getattr(self._agent, "memory_agent", None)
-        if memory is None or not hasattr(memory, "saveUserMessage"):
-            return
-
-        from neurova.post_chat_pipeline import resolveSessionOwner
-
-        persisted = memory.saveUserMessage(
-            ctx.user_input,
-            session_id=ctx.session_id,
-            metadata=ctx.metadata,
-            writer_claim=ctx.writer_claim,
-            session_owner=resolveSessionOwner(ctx.metadata),
+        persisted = failed_turn_landing.persistUserMessageEarly(
+            ctx, getattr(self._agent, "memory_agent", None)
         )
         if persisted:
             ctx.user_message_persisted = True
