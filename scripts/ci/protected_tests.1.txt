@@ -34,6 +34,10 @@ tests/unit/test_ci_npc_config_guard.py
 #   两格分别打在"生产写侧真的写出这些键"与"HTTP 响应里真的带着运行"上；后者还钉住
 #   列表面不夹带运行明细（与"列表不夹带正文"同一口径）。
 tests/unit/evolution/eval/test_service_closed_loop.py
+# 进化闸的语义相似度面**不许**在判据路径上装载/下载嵌入模型（PR #367 的 CI 整条
+# unit-tests 被掐断的根因：`get_embedding_engine()` 会懒建引擎并出网拉权重）。
+# 另反向钉住"语义面必须还在"——摘掉那一跳就换成恒真回退，也能绿得很干净。
+tests/unit/evolution/eval/test_semanticGateLoadsNoModel.py
 tests/unit/llm/test_capability_cache_single_source.py
 # §6-381 续（TM-2a 批 A）：规则联想线索的写侧/索引侧/作用域门/渲染面沉默四条。
 # 该文件另含一条 `xfail(strict=True)`（规则线索抬不动情境型零词面查询，归批 C 转正）——
@@ -1095,5 +1099,53 @@ tests/unit/security/test_redactionDoorsShareOneLeakClosure.py
 # 因此读一个从未绑定的 `file_path` 打日志——静态门禁报 F821，运行时被外层吞成 warning，
 # 文件类工具每到这一行就静默丢掉"拦了哪条路径"。本档钉三层：结果面带出路径值且
 # `to_dict()` 一并带出、与取数口 `extract_adjudicable_params` 同源、消费侧真日志点到路径。
+# §6-417（本单新增；并线 main 时 §6-404 已被批 M 占走，本单改号）：本地执行体的取消挂钩必须随进程结束而摘掉，且只服务"起进程之后"的取消。
+# 病灶是一对生命周期错配：令牌按**轮**持有、杀灭回调按**进程**注册。上一发命令结束后回调仍
+# 留在令牌上（实测残留 1 条），本轮任何一次取消都会去杀一个早已结束的 pid；更直接的坏法在
+# 第二发：它 `Popen` 出来注册回调时令牌**已置位**，注册口按"迟到的回调立即兑现"当场把它杀掉
+# ——实测第一发 `print(1)` 成功、本轮 `cancel("user")` 之后下一发立即 `exit_code=-9`。
+# 两格打行为不打形状：① 执行完令牌零残留；② 取消之后新起的命令照常跑完。红→绿实测：
+#   改回旧登记行 ⇒ ②红（exit=-9）；恢复 ⇒ 2 passed（令牌侧另有 4 格钉"摘钩键必须是令牌给的那个"）。
+# 入册前逐文件单跑全绿（2 passed）。
+tests/unit/execution/test_execLocalRuntimeHangsUpKillHook.py
 tests/unit/security/test_governancePathValuesReachCallers.py
 tests/unit/test_tunnelStateEnumSingleSource.py
+# §6-418 蜂群上报信封批：旁路（邮箱/上下文池归档）投同一份 _uplinkEnvelope 投影、
+# 三处按字面量砍正文的写法撤除、下钻口补 recall_history(agent_id, session_id) 整取。
+# 反向各钉一格：不带 agent_id 的既有语义逐字不变（含 Issue #90 的属主派生）、
+# workflow 来源不回灌、被数据层拒绝的派生不投信。
+# 入册前置：逐文件单跑两次同读数 12／12、2／2、3／3（本机 2026-10-25 现跑）。
+tests/unit/agent/test_subagentTerminalReachesParentMail.py
+tests/unit/agent/test_subagentUplinkEnvelopeSharedByBothBypassPaths.py
+tests/unit/tools/test_recallHistoryReachesSubagentTranscript.py
+# §6-421 受保护子集那一腿的资源欠账：容器装不下自己（构建 cnb-rja-1k5pv9gbl#003
+# 跑到 82% 被 SIGKILL，code 137，一条失败墙都没有）。cpus 4→8（16GiB），
+# 判据按"子集真条目数 × 单档足迹 + 底噪 × 余量"算需求与墙钟下限，两侧都带反向控制。
+# 口径取**合并后**的清单：718 档（716 + §6-419 的补登项不新增文件 + 本档）。
+# 入册前置：逐文件单跑两次同读数 4/4（本机 2026-10-25 现跑）。
+tests/unit/ci/test_unit_tests_runner_has_headroom.py
+# §6-422 可选依赖的墙钟成本不许落在活体 async 路径上（构建 cnb-sq6-1k5q1kqrc#003，
+# test_service_closed_loop 那格 Timeout >30.0s，回溯停在 search._get_jieba → initialize）。
+# 兜底支改零可选依赖（CJK 二元组）；JiebaHasOneWarmEntry 那一格裁决反转、同批翻成反向判据。
+# 入册前置：逐文件单跑两次同读数 3 passed/1 skipped（本机 2026-10-26 现跑）。
+tests/unit/ci/test_optionalImportWallOwedByLivePath.py
+# 刷新/中断读不回本轮：用户消息须在 LLM 开口前落盘，且回合末不得重复写第二条。
+# 取证时刻钉在模型边界（真 Agent + 只替模型边界，本目录 conftest 禁止 __new__ 装配）；
+# 两格反向控制：save_memory=False 不预写、提前建记录必须带会话属主。
+tests/unit/agent/test_userMessageLandsBeforeModelSpeaks.py
+# workflow 派生的终态归档接上发起者：canvas_run 漏传身份是根因，归档随之全程惰性。
+# 两格反向控制钉住边界：workflow 不回灌父会话邮箱、取不到发起者时不归档也不谎报。
+tests/unit/collaboration/test_workflowSpawnArchivesIntoInitiatorPool.py
+# 记忆列表面逐条披露 owned，且与读/改/删闸门共用同一条归属判定（§6-425）
+tests/integration/test_memoryRowOwnershipDisclosure.py
+# 记忆管理通道的 role 门、老门未放宽的反钉，与"读改删各只一份实现"（§6-426）
+tests/integration/test_memoryManagementChannelRoleGate.py
+# 记忆面整面对匿名关死（路由级门）、23 条租户数据 GET 腿逐条钉、默认绑定与 compose 发布地址收成回环
+tests/integration/test_memoryFaceRejectsAnonymous.py
+# 增强族六条腿的作用域：两库同 id 时 strengthen/forget/batch/import/export/categories 只动指定
+# 那一库，未知 Agent 如实 404，缺省仍回落 default，归属校验照旧（台账 §6-433；逐文件单跑 10 passed）
+tests/integration/test_memoryEnhancementCarriesAgentScope.py
+# 身份取数口「签之前必然对齐」这条不变式：行为格（签完之后才对齐也必须验得过）＋形状格
+# （bearerHeaders 体内必须调对齐口、取数口只剩一个名字，带正检）。它钉掉的是合跑 26 条
+# "刚签的令牌被自己拒"的那一族；工单 docs/04-plans/记忆面测试密钥作用域工单_2026-10-27.md
+tests/unit/api/test_identityHeadersAlignSecretBeforeSigning.py

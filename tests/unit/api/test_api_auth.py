@@ -16,15 +16,36 @@ from unittest.mock import patch
 import pytest
 import jwt
 
-os.environ["NEUROVA_JWT_SECRET_KEY"] = "test_secret_key_1234567890123456789012345678901234567890"
-TEST_SECRET = os.environ["NEUROVA_JWT_SECRET_KEY"]
-
 from neurova.api import auth
+from tests.auth_headers import pinJwtSecret
 
-if auth.JWT_SECRET_KEY != TEST_SECRET:
-    auth.JWT_SECRET_KEY = TEST_SECRET
+# 密钥不在这里烘，也不在模块级改指：本档只问"这一轮用的是哪一把"，
+# 问法收口在 `tests/auth_headers.pinJwtSecret()`（轮内唯一事实源）。
+#
+# 原先这里是模块级 `os.environ[...KEY] = ...` 加一句直接赋 `auth.JWT_SECRET_KEY`——
+# 前者对密钥**完全无效**（`auth.py:146` 读的是 `NEUROVA_JWT_SECRET`，无 `_KEY` 后缀），
+# 后者只覆盖签名侧、且**从不复原**：同一进程里排在其后的档用 `create_access_token`
+# 签出的 token 就全部验不过（`test_jwtSigningKeyLeakIsGuarded` 钉的正是这个泄漏面）。
+# 逐处留一枚自己的常量，就是让"这把密钥归谁管"有第 N 份答案（教义第 6 条）。
+
+
+def _secret() -> str:
+    """这一轮的签名密钥（同时把验签门对齐到它）。"""
+    return pinJwtSecret()
+
+
+@pytest.fixture(autouse=True)
+def _pinSigningKeyForThisRound():
+    pinJwtSecret()
+
+# 本档当初的形态是"模块级直接赋 `auth.JWT_SECRET_KEY`、且从不复原"：只覆盖签名侧、
+# 还留到下一个档（`test_jwtSigningKeyLeakIsGuarded` 钉的正是这个泄漏面）。那一半的收口
+# 不在本档做，统一在 `tests/auth_headers.pinJwtSecret()`；本档只申请它、不复原它，
+# 因为密钥是**进程内唯一**的（`auth._generatedSecretKey` 只定一次），复原到旧值反而制造第二把。
+
 
 ALGORITHM = auth.JWT_ALGORITHM
+TEST_SECRET = pinJwtSecret()
 
 
 def _make_token(subject: str = "testuser", token_type: str = "access",
@@ -175,3 +196,59 @@ class TestAuthError:
     def test_raise_and_catch(self):
         with pytest.raises(auth.AuthError, match="test error"):
             raise auth.AuthError("test error")
+
+
+# ================================================================
+# 自动生成密钥的进程内稳定性（构建 cnb-9g5-1k5q8mego#003 那族红的根）
+# ================================================================
+
+class TestGeneratedSecretIsStableWithinTheProcess:
+    """数据根不可写时，密钥仍必须"同一进程只有一个答案"。
+
+    形态：`_write_secret_file` 落盘失败只打一行 warning 就返回，而 `_load_or_create_secret_key`
+    此前每次都 `token_hex()` 现生成一枚**新**密钥。于是「谁在什么时候取过密钥」决定了
+    他签出的 token 能不能被别处验过——受保护子集里出现 `Invalid or expired token` 的
+    那几格正是这条链断在"取两次得到两枚"上。
+
+    判据取**行为**：同一进程内多次取、以及模块常量与重算值，必须是同一枚。
+    """
+
+    def _withUnwritableDataRoot(self, monkeypatch, tmp_path):
+        """把数据根指到不可写处，并清掉可能盖过它的环境密钥。"""
+        unwritable = tmp_path / "no-such-dir" / "deeper"
+        monkeypatch.setenv("NEUROVA_DATA_DIR", str(unwritable))
+        monkeypatch.delenv("NEUROVA_JWT_SECRET", raising=False)
+        monkeypatch.setattr(auth, "_generatedSecretKey", None, raising=False)
+
+    def testRepeatedReadsAgree(self, monkeypatch, tmp_path):
+        self._withUnwritableDataRoot(monkeypatch, tmp_path)
+        values = [auth._load_or_create_secret_key() for _ in range(3)]
+        assert len(set(values)) == 1, (
+            f"数据根不可写时，同一进程连取三次拿到 {len(set(values))} 枚不同密钥："
+            "签与验会因此各用一枚（受保护子集里表现为 401 Invalid or expired token）"
+        )
+
+    def testModuleConstantMatchesAFreshRead(self, monkeypatch, tmp_path):
+        """模块常量必须就是**本进程按入口取到的那一枚**。
+
+        重放一次 import 期的取值：先把常量复位成"还没定过"的状态，再按生产入口取一次，
+        两者必须相等。此前落盘失败会让这次重算拿到另一枚——常量是 A、重算得 B，
+        于是任何重新取密钥的消费方都签出验不过的 token。
+        """
+        self._withUnwritableDataRoot(monkeypatch, tmp_path)
+        monkeypatch.setattr(auth, "JWT_SECRET_KEY", None, raising=False)
+        fresh = auth._load_or_create_secret_key()
+        monkeypatch.setattr(auth, "JWT_SECRET_KEY", fresh, raising=False)
+        assert auth._load_or_create_secret_key() == auth.JWT_SECRET_KEY, (
+            "模块常量与按入口重算的值不是同一枚——任何一处重新取密钥的消费方都会拿到"
+            "另一枚，签出的 token 在别处验不过"
+        )
+
+    def testTokenSignedByTheGateVerifiesOnTheSameGate(self, monkeypatch, tmp_path):
+        """端到端：同一进程里签出来的 token，按同一条入口必须验得回。"""
+        self._withUnwritableDataRoot(monkeypatch, tmp_path)
+        token = auth.create_access_token({"sub": "probe", "role": "admin"})
+        assert auth.verify_access_token(token), (
+            "同一进程里 create_access_token 签出的 token 验不过——"
+            "这正是受保护子集那几格 401 的形态"
+        )

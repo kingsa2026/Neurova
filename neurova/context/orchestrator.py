@@ -1212,30 +1212,33 @@ class ContextOrchestrator:
         # 变化）。
         frozen = getattr(self._agent, "_frozen_identity_snapshot", None)
         if isinstance(frozen, dict) and frozen.get("soul"):
-            system_instructions = [frozen["soul"]]
-            if frozen.get("personality"):
-                system_instructions.append(frozen["personality"])
-            if frozen.get("constitution"):
-                system_instructions.append(frozen["constitution"])
+            soul_text = frozen["soul"]
+            personality_text = frozen.get("personality") or ""
+            constitution_text = frozen.get("constitution") or ""
         else:
-            system_instructions = [self.soul]
-            if self.personality:
-                system_instructions.append(self.personality)
-            if self.config.constitution:
-                system_instructions.append(self.config.constitution)
+            soul_text = self.soul or ""
+            personality_text = self.personality or ""
+            constitution_text = self.config.constitution or ""
+        system_instructions = [soul_text]
+        if personality_text:
+            system_instructions.append(personality_text)
+        if constitution_text:
+            system_instructions.append(constitution_text)
 
         # Bug T-1 修复:注入当前时间上下文(避免 LLM 误用训练截止日期回答时间问题)
         # build_context 是 chat_pipeline 实际调用的路径(build_system_prompt 只是工具方法,未被调用),
         # 所以必须在此处注入时间,否则 LLM 看不到真实当前时间。
-        system_instructions.append(self._build_current_time_section())
+        time_section = self._build_current_time_section()
+        system_instructions.append(time_section)
 
         # 批次 C：恒定规则段（工具使用方法论/环境块/记忆写入规则）——除日期
         # 外全部恒定，system 会话内字节稳定；动态内容走 envelope（injector）
         from neurova.context.rules_sections import build_all_sections
 
-        system_instructions.append(
-            build_all_sections(workspace_path=str(getattr(self.config, "workspace_path", "") or ""))
+        rules_section = build_all_sections(
+            workspace_path=str(getattr(self.config, "workspace_path", "") or "")
         )
+        system_instructions.append(rules_section)
 
         # P0-1：工作区 AGENTS.md 文档树——与 build_system_prompt
         # 共用单源 helper（本方法是 chat_pipeline 实际调用路径，注入必须在此）
@@ -1249,9 +1252,34 @@ class ContextOrchestrator:
             system_instructions.append(catalog_section)
 
         # 使用配置的行为规则
-        developer_instructions = list(self.config.behavior_rules)
+        behavior_rules = list(self.config.behavior_rules or [])
+        developer_instructions = list(behavior_rules)
         if tools_desc:
             developer_instructions.append(tools_desc)
+
+        # N6：只读常驻面预算报告（不改写 prompt；路径见 /v1/context/budget）。
+        try:
+            from neurova.context.budget_report import recordContextBudget
+
+            agent_id = getattr(self.config, "agent_id", "")
+            if not isinstance(agent_id, str) or not agent_id:
+                agent_id = getattr(self._agent, "agent_id", "default")
+            recordContextBudget(
+                str(agent_id or "default"),
+                {
+                    "soul": soul_text,
+                    "personality": personality_text,
+                    "constitution": constitution_text,
+                    "time": time_section,
+                    "rules": rules_section,
+                    "workspace_docs": workspace_section or "",
+                    "skill_catalog": catalog_section or "",
+                    "behavior_rules": "\n".join(str(x) for x in behavior_rules),
+                    "tools": tools_desc or "",
+                },
+            )
+        except Exception as budget_err:  # noqa: BLE001 - 观测面故障不阻断上下文
+            logger.debug("常驻上下文预算记录失败: %s", budget_err)
 
         # Phase 2.5: 分析用户输入的情感状态（并更新长期情感状态机）
         agent_emotion = self._analyze_user_emotion(user_input)

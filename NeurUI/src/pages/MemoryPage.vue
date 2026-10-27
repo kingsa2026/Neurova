@@ -230,26 +230,47 @@
           </template>
           <template v-else-if="column.key === 'actions'">
             <div class="row-actions">
-              <GlassButton size="sm" variant="ghost" @click="viewMemory(record)">
+              <!-- 后端列表面按 agent 全量放行，本 agent 下其他用户域的行也在这张表里；
+                   详情/写面按三层隔离对它们一律拒绝。禁用与标注取后端逐条给的 owned，
+                   页面不再自己判「这是谁的」。 -->
+              <a-tooltip v-if="!rowIsActionable(record)" :title="t('memory.foreignScopeTip')">
+                <a-tag color="default">{{ t('memory.foreignScope') }}</a-tag>
+              </a-tooltip>
+              <GlassButton
+                size="sm"
+                variant="ghost"
+                :disabled="!rowIsActionable(record)"
+                @click="viewMemory(record)"
+              >
                 {{ t('common.open') }}
               </GlassButton>
               <a-tooltip :title="t('memory.strengthen')">
-                <GlassButton size="sm" variant="ghost" @click="handleStrengthen(record.id)">
+                <GlassButton
+                  size="sm"
+                  variant="ghost"
+                  :disabled="!rowIsActionable(record)"
+                  @click="handleStrengthen(record)"
+                >
                   ↑
                 </GlassButton>
               </a-tooltip>
               <a-tooltip :title="t('memory.forget')">
-                <GlassButton size="sm" variant="ghost" @click="handleForget(record.id)">
+                <GlassButton
+                  size="sm"
+                  variant="ghost"
+                  :disabled="!rowIsActionable(record)"
+                  @click="handleForget(record)"
+                >
                   ↓
                 </GlassButton>
               </a-tooltip>
               <a-popconfirm
                 :title="t('memory.forget') + '?'"
-                @confirm="confirmDeleteMemory(record.id)"
+                @confirm="confirmDeleteMemory(record)"
                 :ok-text="t('common.yes')"
                 :cancel-text="t('common.no')"
               >
-                <GlassButton size="sm" variant="danger">
+                <GlassButton size="sm" variant="danger" :disabled="!rowIsActionable(record)">
                   {{ t('common.delete') }}
                 </GlassButton>
               </a-popconfirm>
@@ -257,6 +278,12 @@
           </template>
         </template>
       </a-table>
+    </GlassCard>
+    <GlassCard v-else-if="identityNotice">
+      <p data-testid="memory-identity-notice">{{ identityNoticeText }}</p>
+      <GlassButton variant="primary" size="sm" data-testid="memory-go-login" @click="goLogin">
+        {{ t('auth.login') }}
+      </GlassButton>
     </GlassCard>
     <GlassCard v-else>
       <a-empty :description="t('common.noData')" />
@@ -406,9 +433,12 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { truncateText } from '@/utils/displayText'
 import { formatTimestampText } from '@/utils/displayText'
+import { identityFailureOf, type IdentityFailure } from '@/utils/authIdentity'
+import { loginHref } from '@/utils/authRedirect'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
@@ -420,10 +450,41 @@ import type { MemoryEntry, MemorySearchResult, MemoryStats } from '@/api/modules
 // 模板里直接读模块命名空间（memoryApi.X）会让渲染代理去 unref 命名空间对象，
 // 测试里被部分 mock 的模块会因此炸在 __v_isRef 上；在脚本里取一次即可。
 const MEMORY_TYPES = memoryApi.MEMORY_TYPES
+const rowIsActionable = memoryApi.rowIsActionable
 
 const { t } = useI18n()
 const authStore = useAuthStore()
 const isAdmin = computed(() => authStore.user?.role === 'admin')
+const route = useRoute()
+const router = useRouter()
+
+// 记忆面自 §6-429 起一律要凭证，于是「读不到」有两种截然不同的原因：身份不行，
+// 或者这个 Agent 真的还没有记忆。合成一格就是把登录问题伪装成空数据集——本仓既有
+// 纪律（MobilePairingPanel 的「权限态与空态不合并」、AgentChannelPage 的 accessDenied
+// 独立一格）写的就是这件事，记忆页当时漏扫。
+const identityNotice = ref<IdentityFailure | null>(null)
+const identityNoticeText = computed(() =>
+  identityNotice.value === 'forbidden' ? t('memory.identityDenied') : t('memory.identityRequired'),
+)
+
+/** 身份失败落那一格，返回「这条确实是身份问题」。 */
+function noteIdentityFailure(e: any): boolean {
+  const kind = identityFailureOf(e?.response?.status)
+  if (!kind) return false
+  identityNotice.value = kind
+  return true
+}
+
+/** 身份失败只说「未登录/无权」；其余故障照旧红 toast，不许借道把真故障说成「请登录」。 */
+function reportApiFailure(e: any): void {
+  if (noteIdentityFailure(e)) return
+  message.error(e?.response?.data?.message || e?.message || t('common.error'))
+}
+
+function goLogin(): void {
+  router.push(loginHref(route.fullPath))
+}
+
 const pendingMemories = ref<memoryApi.PendingMemory[]>([])
 
 const { agentId, currentAgent } = useAgentPage({
@@ -664,7 +725,7 @@ const performSemanticSearch = async () => {
         channel_scores: r.channel_scores ?? r.metadata?.channel_scores,
       }))
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
     searchResults.value = []
   }
 }
@@ -675,6 +736,9 @@ const fetchStats = async () => {
     const res = await memoryApi.getMemoryStats(agentId.value)
     memoryStats.value = res.data ?? null
   } catch (e: any) {
+    // 统计是旁路展示，非身份故障照旧只进控制台；但 401/403 要说未登录——不然读腿全断时
+    // 页面上只剩一句「暂无数据」。
+    noteIdentityFailure(e)
     console.error('Failed to fetch memory stats:', e?.response?.data?.message || e?.message)
   } finally {
     loadingStats.value = false
@@ -700,8 +764,10 @@ const fetchMemories = async () => {
     const { items, total: t } = memoryApi.extractMemoryList(res?.data)
     memories.value = items
     total.value = t
+    // 读腿恢复 ⇒ 那一格自己收摊，不许留下一句过期的「请登录」
+    identityNotice.value = null
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   } finally {
     loading.value = false
   }
@@ -725,15 +791,17 @@ const createMemory = async () => {
     await fetchMemories()
     await fetchStats()
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   } finally {
     creating.value = false
   }
 }
 
 const viewMemory = async (record: MemoryEntry) => {
+  if (!rowIsActionable(record)) return
   try {
-    const res = await memoryApi.getMemory(record.id)
+    // 他人用户域的行只有管理通道收；常规路对它们仍「视同不存在」，所以通道随角色选。
+    const res = await memoryApi.getMemory(record.id, record.agent_id, { management: isAdmin.value })
     selectedMemory.value = { ...res.data }
   } catch {
     selectedMemory.value = { ...record }
@@ -746,28 +814,32 @@ const updateMemory = async () => {
   if (!selectedMemory.value) return
   updating.value = true
   try {
-    await memoryApi.updateMemory(selectedMemory.value.id, {
-      content: selectedMemory.value.content,
-    })
+    await memoryApi.updateMemory(
+      selectedMemory.value.id,
+      { content: selectedMemory.value.content },
+      selectedMemory.value.agent_id,
+      { management: isAdmin.value },
+    )
     message.success(t('common.success'))
     editing.value = false
     await fetchMemories()
     await fetchStats()
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   } finally {
     updating.value = false
   }
 }
 
-const deleteMemory = async (id: string) => {
+const deleteMemory = async (record: MemoryEntry) => {
+  if (!rowIsActionable(record)) return
   try {
-    await memoryApi.deleteMemory(id)
+    await memoryApi.deleteMemory(record.id, record.agent_id, { management: isAdmin.value })
     message.success(t('common.success'))
     await fetchMemories()
     await fetchStats()
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   }
 }
 
@@ -784,7 +856,7 @@ const fetchHotMemories = async () => {
     memories.value = items
     total.value = t
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   } finally {
     loading.value = false
   }
@@ -798,7 +870,7 @@ const fetchCrystallizedMemories = async () => {
     memories.value = items
     total.value = t
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   } finally {
     loading.value = false
   }
@@ -813,7 +885,7 @@ const handleTriggerDecay = async () => {
     await fetchMemories()
     await fetchStats()
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   } finally {
     decaying.value = false
   }
@@ -834,37 +906,42 @@ const handleReloadMemories = async () => {
     await fetchMemories()
     await fetchStats()
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   } finally {
     reloading.value = false
   }
 }
 
-const handleStrengthen = async (id: string) => {
+const handleStrengthen = async (record: MemoryEntry) => {
+  if (!rowIsActionable(record)) return
   try {
-    await memoryApi.strengthenMemory(id, 0.2, 'Manual strengthen from UI')
+    // 作用域取**这一行自带的** agent_id（与 §6-425 已裁的读改删腿一字同规）：
+    // 记忆 id 是每个 Agent 库各一套的 `mem_%06d`，少带这一个参数就会改掉另一个库里
+    // 同 id 的行——不是"按钮失灵"，是静默写错记录。
+    await memoryApi.strengthenMemory(record.id, 0.2, 'Manual strengthen from UI', record.agent_id)
     message.success(t('memory.strengthen') + ' ✓')
     await fetchMemories()
     await fetchStats()
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   }
 }
 
-const handleForget = async (id: string) => {
+const handleForget = async (record: MemoryEntry) => {
+  if (!rowIsActionable(record)) return
   try {
-    await memoryApi.forgetMemory(id, 'Manual forget from UI')
+    await memoryApi.forgetMemory(record.id, 'Manual forget from UI', 0.3, record.agent_id)
     message.success(t('memory.forget') + ' ✓')
     await fetchMemories()
     await fetchStats()
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   }
 }
 
 const handleExport = async () => {
   try {
-    const res = await memoryApi.exportMemories({ format: 'json' })
+    const res = await memoryApi.exportMemories({ format: 'json' }, agentId.value)
     const data = (res as any)?.data ?? res
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -875,7 +952,7 @@ const handleExport = async () => {
     URL.revokeObjectURL(url)
     message.success(t('memorySettings.exportSuccess'))
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   }
 }
 
@@ -891,7 +968,7 @@ const handleImport = async () => {
       message.error('JSON must be an array of memory objects')
       return
     }
-    const res = await memoryApi.importMemories(memories, importMergeMode.value)
+    const res = await memoryApi.importMemories(memories, importMergeMode.value, agentId.value)
     const imported = (res as any)?.data?.imported ?? 0
     message.success(`${t('memory.importMem')}: ${imported} imported`)
     showImportModal.value = false
@@ -899,7 +976,7 @@ const handleImport = async () => {
     await fetchMemories()
     await fetchStats()
   } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+    reportApiFailure(e)
   } finally {
     importing.value = false
   }

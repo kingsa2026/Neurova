@@ -57,7 +57,7 @@ if "%SHELLVER%"=="" (
 set SHELLVER=%SHELLVER: =%
 set SHELLVER=%SHELLVER:"=%
 rem NOTE: writes inside a parenthesized block would use parse-time values; keep flat.
-> "%VERFILE%" echo|set /p="%SHELLVER%"
+> "%VERFILE%" <nul set /p="%SHELLVER%"
 set RESOURCES=%RESOURCES% /resource:"%VERFILE%",Neurova.Installer.version.txt
 echo [info] version=%SHELLVER% (from tauri.conf.json)
 if not "%~1"=="" (

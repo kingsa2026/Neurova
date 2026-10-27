@@ -29,6 +29,7 @@ fixture `sample_memory_manager`，最后两格还会在无凭据时**真去连 O
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 
 from tests import ast_scan
@@ -147,7 +148,7 @@ class TestNobodyCallsTheAsyncRouterSynchronously:
                 except SyntaxError:
                     continue
                 if lines:
-                    offenders.append("%s:%s" % (path.relative_to(REPO_ROOT), lines))
+                    offenders.append("%s:%s" % (ref.path.relative_to(REPO_ROOT), lines))
         # 面自证拆两条（形态 404）：枚举面证"根指得到"，候选面证"预筛没把命中滤空"。
         # 现算 tests 2483 ＋ scripts 76 ＝ 2559 个 .py；根少指一层（只剩 scripts）就掉到 76。
         assert enumerated >= 2000, (
