@@ -1,11 +1,15 @@
 import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios'
 import { secureStorage } from '@/utils/security'
+import {
+  AUTH_REFRESH_TOKEN_KEY,
+  AUTH_TOKEN_KEY,
+  AUTH_USER_KEY,
+  readAccessToken,
+} from '@/utils/authSession'
+import { LOGIN_PATH, loginHref } from '@/utils/authRedirect'
 import bus from '@/bus'
 import logger from '@/utils/logger'
 import config from '@/config'
-
-const TOKEN_KEY = 'auth_token'
-const REFRESH_TOKEN_KEY = 'refresh_token'
 
 /** 调用方可声明的"预期失败状态码"：拦截器降级为 debug，不当 error 刷控制台 */
 declare module 'axios' {
@@ -37,8 +41,8 @@ function refreshAccessToken(refreshToken: string): Promise<string> {
     const data = res?.data ?? res
     const accessToken = data?.access_token
     if (!accessToken) throw new Error('Refresh response missing access_token')
-    secureStorage.set(TOKEN_KEY, accessToken)
-    if (data.refresh_token) secureStorage.set(REFRESH_TOKEN_KEY, data.refresh_token)
+    secureStorage.set(AUTH_TOKEN_KEY, accessToken)
+    if (data.refresh_token) secureStorage.set(AUTH_REFRESH_TOKEN_KEY, data.refresh_token)
     return accessToken as string
   })().finally(() => {
     refreshInFlight = null
@@ -90,7 +94,7 @@ export const request: AxiosInstance = axios.create({
 request.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     // Attach auth token
-    const token = secureStorage.get(TOKEN_KEY)
+    const token = readAccessToken()
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`
     }
@@ -138,7 +142,7 @@ request.interceptors.response.use(
     if (status === 401) {
       const cfg = error.config ?? {}
       const alreadyReplayed = (cfg as any).__replayedAfterRefresh === true
-      const refreshTokenValue = secureStorage.get(REFRESH_TOKEN_KEY)
+      const refreshTokenValue = secureStorage.get(AUTH_REFRESH_TOKEN_KEY)
       if (!isAuthEndpoint(cfg.url) && !alreadyReplayed && refreshTokenValue) {
         try {
           const newToken = await refreshAccessToken(refreshTokenValue)
@@ -156,12 +160,14 @@ request.interceptors.response.use(
       // query.redirect 深链，多次整页跳转只会放大状态丢失
       if (!authRedirectInFlight) {
         authRedirectInFlight = true
-        secureStorage.remove(TOKEN_KEY)
-        secureStorage.remove(REFRESH_TOKEN_KEY)
-        secureStorage.remove('user')
-        // Redirect to login if not already there
-        if (window.location.pathname !== '/login') {
-          window.location.href = '/login'
+        secureStorage.remove(AUTH_TOKEN_KEY)
+        secureStorage.remove(AUTH_REFRESH_TOKEN_KEY)
+        secureStorage.remove(AUTH_USER_KEY)
+        // 跳转要保住目的地。此前这里写死裸 '/login'，把路由守卫已经带上的 ?redirect=
+        // 整条覆盖掉——登录前那发 401 越是早发生（boot 期的 agents 列表就是），深链丢得
+        // 越彻底，用户登完落在总览而不是原来那一页。口径与守卫共用 loginHref() 一处。
+        if (window.location.pathname !== LOGIN_PATH) {
+          window.location.href = loginHref(`${window.location.pathname}${window.location.search}`)
         }
         // Don't treat expired/missing token as a real error — it's expected on page load
         logger.warn(`[API] 401 Auth required [${requestId}] → redirecting to login`)

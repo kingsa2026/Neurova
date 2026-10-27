@@ -24,6 +24,7 @@ import json
 import datetime
 from neurova.core.content_identity import normalized_key
 from neurova.core import sql_like
+from neurova.core import vector_math
 from neurova.core.db_migration import migrate as applyMigrations, register_migration
 from neurova.core.logger import get_logger
 import os
@@ -74,9 +75,12 @@ def _row_embedding(row) -> "Optional[List[float]]":
     if not raw:
         return None
     try:
-        return json.loads(raw)
+        vector = json.loads(raw)
     except (ValueError, TypeError):
         return None
+    # 存量行里可能躺着引擎缺档期写下的全零：那不是向量，是"当时没算出来"。当"有向量"
+    # 交给召回，余弦恒 0、看上去只是"不相似"，缺陷在读数里再也看不见。
+    return None if vector_math.isZeroVector(vector) else vector
 
 
 # 审计修复 (three-tier-isolation-audit.md P0-1): 请求级隔离作用域。
@@ -1321,15 +1325,38 @@ class MemoryManager:
         pending 记忆提议的归属以此优先于调用方自报参数）。"""
         return self._eff_user_id()
 
+    def isOwnedByRequestScope(self, mem: Any, agentWide: bool = False) -> bool:
+        """这一条记忆归不归当前请求的生效作用域 —— 三层隔离的唯一判定处。
+
+        第 1 层 agent 恒校验；第 2、3 层（neuser/user）默认校验，`agentWide=True`
+        是管理页/浏览口径，只留 agent 那一层。
+
+        此前这条规则手抄在六处（两处基集、语义召回入口过滤、get/update/forget 三道
+        闸门），列表面于是无法告诉前端「这一行你动得了吗」——列表按 agent 全量放行、
+        闸门按三元组拒绝，同一页两套口径，用户点下去必 404（2026-10-26 现网读数）。
+        六处现在都问这一个函数，`owned` 与闸门不可能再分家。
+
+        接受 `Memory` 对象或 `to_dict()` 字典：recall 那一路交出来的是字典，判的是
+        同一件事，不该逼调用方先转回对象。
+        """
+        if isinstance(mem, dict):
+            agentId = mem.get("agent_id")
+            neuserId = mem.get("neuser_id")
+            userId = mem.get("user_id")
+        else:
+            agentId = mem.agent_id
+            neuserId = mem.neuser_id
+            userId = mem.user_id
+
+        if agentId != self._agent_id:
+            return False
+        if agentWide:
+            return True
+        return neuserId == self._eff_neuser_id() and userId == self._eff_user_id()
+
     def _scoped_memories(self) -> List[Any]:
         """按生效三元组过滤的内存记忆视图 (agent 恒取实例自身)"""
-        ne = self._eff_neuser_id()
-        uid = self._eff_user_id()
-        return [
-            m
-            for m in self._memories.values()
-            if m.agent_id == self._agent_id and m.neuser_id == ne and m.user_id == uid
-        ]
+        return [m for m in self._memories.values() if self.isOwnedByRequestScope(m)]
 
     def _agent_memories(self) -> List[Any]:
         """agent 级浏览视图基集: 仅按实例绑定的 agent_id 过滤。
@@ -1338,7 +1365,7 @@ class MemoryManager:
         展示本 agent 全部记忆(含其他用户域行); 聊天检索仍走
         _scoped_memories 三层过滤, 两者互不影响。
         """
-        return [m for m in self._memories.values() if m.agent_id == self._agent_id]
+        return [m for m in self._memories.values() if self.isOwnedByRequestScope(m, True)]
 
     @property
     def emotion_module(self):
@@ -1524,15 +1551,9 @@ class MemoryManager:
                     "固化对这些行不可见，直到引擎就绪或走 scripts/backfill_memory_embeddings.py"
                 )
             return None
-        try:
-            vector = [float(x) for x in engine.encode(content)]
-        except Exception as exc:  # noqa: BLE001 - 单条算不出不该断这次写入
-            logger.warning("嵌入计算失败，该行 embedding 留空: %s", exc)
-            return None
-        if not vector or not any(abs(x) > 0.0 for x in vector):
-            logger.warning("引擎回零向量（按未算出处置），该行 embedding 留空")
-            return None
-        return vector
+        # "算没算出向量"由引擎自己判（`encodeOrNone` 是那一处的单源）：零向量与真向量
+        # 在这一步就分开，本行不再凭全零反推——反推要在这里重写一遍同一份判据。
+        return engine.encodeOrNone(content)
 
     def remember(
         self,
@@ -2529,15 +2550,7 @@ class MemoryManager:
         与 get_memory(agent_wide=True) 的既有先例同规则——只校验 agent 归属。
         """
         # 隔离过滤（保留：双保险的第 2 层；agent_wide 管理口径豁免）
-        if not agent_wide:
-            memories = [
-                m for m in memories
-                if m.agent_id == self._agent_id
-                and m.neuser_id == self._eff_neuser_id()
-                and m.user_id == self._eff_user_id()
-            ]
-        else:
-            memories = [m for m in memories if m.agent_id == self._agent_id]
+        memories = [m for m in memories if self.isOwnedByRequestScope(m, agent_wide)]
         if not memories:
             return []
 
@@ -2626,12 +2639,8 @@ class MemoryManager:
         with self._lock:
             mem = self._memories.get(memory_id)
             # 审计修复 (P1-6): 与 forget 同规则 —— 不属于当前作用域的记忆视同不存在
-            if mem and mem.agent_id != self._agent_id:
-                mem = None
-            if mem and not agent_wide and (
-                mem.neuser_id != self._eff_neuser_id()
-                or mem.user_id != self._eff_user_id()
-            ):
+            # （三元组比较只在 isOwnedByRequestScope 一处，列表面的 owned 同源）
+            if mem and not self.isOwnedByRequestScope(mem, agent_wide):
                 mem = None
             if mem:
                 mem.touch()
@@ -2656,13 +2665,7 @@ class MemoryManager:
             mem = self._memories.get(memory_id)
             if not mem:
                 return False
-            if mem.agent_id != self._agent_id or (
-                not agent_wide
-                and (
-                    mem.neuser_id != self._eff_neuser_id()
-                    or mem.user_id != self._eff_user_id()
-                )
-            ):
+            if not self.isOwnedByRequestScope(mem, agent_wide):
                 logger.warning(
                     "拒绝越权更新记忆: id=%s 归属(%s,%s,%s) 请求作用域(%s,%s,%s) agent_wide=%s",
                     memory_id, mem.agent_id, mem.neuser_id, mem.user_id,
@@ -2739,13 +2742,7 @@ class MemoryManager:
             mem = self._memories[memory_id]
             # 审计修复 (P1-6): 校验记忆归属 —— 知道对方 memory_id 不能越权删除;
             # agent_wide=True(管理页口径)仅校验 agent 归属。
-            if mem.agent_id != self._agent_id or (
-                not agent_wide
-                and (
-                    mem.neuser_id != self._eff_neuser_id()
-                    or mem.user_id != self._eff_user_id()
-                )
-            ):
+            if not self.isOwnedByRequestScope(mem, agent_wide):
                 logger.warning(
                     "拒绝越权删除记忆: id=%s 归属(%s,%s,%s) 请求作用域(%s,%s,%s) agent_wide=%s",
                     memory_id, mem.agent_id, mem.neuser_id, mem.user_id,

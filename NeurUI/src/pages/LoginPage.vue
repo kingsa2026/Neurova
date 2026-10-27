@@ -184,6 +184,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { authAPI } from '@/api/auth'
+import { safeRedirectTarget } from '@/utils/authRedirect'
 import Galaxy from '@/components/Galaxy.vue'
 import BrandLogo from '@/components/BrandLogo.vue'
 import GlassSurface from '@/components/GlassSurface.vue'
@@ -311,8 +312,9 @@ async function handleLogin() {
       }
 
       // Navigate to the originally requested page, or dashboard
-      const redirect = (route.query.redirect as string) || '/dashboard'
-      router.push(redirect)
+      // `?redirect=` 是外人能改的一段字符串：`//evil.com`、`/\evil.com`、`http://evil.com`
+      // 都会被浏览器当外站，所以只认站内路径，其余一律回落总览。
+      router.push(safeRedirectTarget(route.query.redirect) ?? '/dashboard')
     } else if (authStore.lastNetworkFailed) {
       // 仅网络层失败（无 HTTP 响应）才做进程诊断；401 等有响应错误如实显示
       const diag = await backendDiagnosis()

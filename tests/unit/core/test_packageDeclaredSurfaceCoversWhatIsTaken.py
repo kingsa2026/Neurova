@@ -112,11 +112,15 @@ def submodulesOf(pkgDir: Path) -> set:
 
 
 def _moduleLevelStatements(tree: ast.AST) -> list:
-    """模块层语句，**含顶层 `try:` 体里的那几条**。
+    """模块层语句，**含顶层 `try:` 体里的那几条**（只解到 Body / `finally` 这一层）。
 
     不展开 try 就把 `neurova/cognitive_layers/memory_layer/__init__.py` 那种正当形状
     （可选依赖包在 `try: from .volume_renderer import (...) except ImportError`）读成
     "声明了给不出的名字"——第一版正是这么误报的。展开不放宽判据：那些名字确实绑在本包上。
+
+    只解一层 `Body` / `OrelseBody` / `FinalBody` 这些 `list`：`ast.Module` 与 `ast.Try`
+    都有 `.body`，而两者都只解到"直接子语句"为止——**不**顺着 `If` / `With` 往里穿透
+    （穿透会把条件块里的定义算成模块层绑定，那是另一种误报）。
     """
     out = []
     for node in tree.body:
@@ -126,6 +130,38 @@ def _moduleLevelStatements(tree: ast.AST) -> list:
             out.extend(node.finalbody or [])
         out.append(node)
     return out
+
+
+def _moduleLevelBindings(tree: ast.AST) -> tuple:
+    """`(模块层绑定的名字, 自己声明的 __all__)` —— 只走模块层语句，不下潜。
+
+    绑定读法原先在 `_moduleFacts()` 与 `_packages()` 里各写了一份：两处对"什么算绑定"
+    的读法一旦分叉，判据与取证就各说各话（教义第 6 条：参数、枚举、口径只许一处定义）。
+    收到这里，两处都从这里取。
+
+    只读**模块层**：函数体里的局部名不是"包给得出的名字"。这一条同时是把成本摁在
+    0.46s 的原因（全树 `ast.walk` 一遍 5.97s，本机 3686 个 `.py`）。
+    """
+    names, declared = set(), set()
+    stack = list(_moduleLevelStatements(tree))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.ImportFrom):
+            if node.module != "__future__":
+                names |= {a.asname or a.name for a in node.names if a.name != "*"}
+        elif isinstance(node, ast.Import):
+            names |= {(a.asname or a.name).split(".")[0] for a in node.names}
+        elif isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            names.add(node.name)
+        targets = ([t.id for t in node.targets if isinstance(t, ast.Name)]
+                   if isinstance(node, ast.Assign)
+                   else ([node.target.id]
+                         if isinstance(getattr(node, "target", None), ast.Name) else []))
+        names |= set(targets)
+        if "__all__" in targets:
+            declared |= {e.value for e in getattr(node.value, "elts", [])
+                         if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+    return names, declared
 
 
 def undeclaredFor(supplied: set, subs: set, declared: set, refs: dict, ownInit: str) -> list:
@@ -147,7 +183,12 @@ def undeclaredFor(supplied: set, subs: set, declared: set, refs: dict, ownInit: 
 
 @functools.lru_cache(maxsize=1)
 def _packages() -> dict:
-    """`{包名: {"init","bound","defs","all","subs","dynamicSupply"}}`，只看被跟踪的包门面。"""
+    """`{包名: {"init","bound","defs","all","subs","dynamicSupply"}}`，只看被跟踪的包门面。
+
+    门面只**解析一次**（`ast_scan.transientTree` 仍是一次性入口，不留常驻树）：
+    同一棵树接下来还要被 `_moduleFacts()` 逐字读一遍「模块层绑了什么、`__all__` 写了什么」，
+    两遍解析同一份文本是本档上一轮 30s 墙钟超时的一半账（另一半见 `_moduleFacts`）。
+    """
     found = {}
     for rel in [p for p in ast_scan.trackedPaths()
                 if p.startswith("neurova/") and p.endswith("__init__.py")]:
@@ -158,33 +199,24 @@ def _packages() -> dict:
             tree = ast_scan.transientTree(path)
         except SyntaxError:
             continue
-        bound, declared, subs, defs = {}, set(), set(), set()
+        # 绑定与 `__all__` 走**同一个读法**（`_moduleLevelBindings`），本函数不再自读一遍：
+        # 上一轮"同一批文本解析两遍"是本档 30s 墙钟超时的一半账。
+        names, declared = _moduleLevelBindings(tree)
+        bound = {name: 0 for name in names}
+        defs = set(names)
+        subs = set()
         pkgDir = path.parent
         for node in _moduleLevelStatements(tree):
-            if isinstance(node, ast.ImportFrom) and node.module != "__future__":
+            if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+                continue
+            if isinstance(node, ast.ImportFrom) and node.level > 0 and node.module is None:
                 for a in node.names:
-                    if a.name == "*":
-                        continue
-                    bound.setdefault(a.asname or a.name, node.lineno)
-                    if node.level > 0 and node.module is None and (
-                            (pkgDir / (a.name + ".py")).exists()
-                            or (pkgDir / a.name / "__init__.py").exists()):
+                    if a.name != "*" and ((pkgDir / (a.name + ".py")).exists()
+                                          or (pkgDir / a.name / "__init__.py").exists()):
                         subs.add(a.name)
-            elif isinstance(node, ast.Import):
-                for a in node.names:
-                    bound.setdefault((a.asname or a.name).split(".")[0], node.lineno)
-            elif isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-                defs.add(node.name)
-            targets = ([t.id for t in node.targets if isinstance(t, ast.Name)]
-                       if isinstance(node, ast.Assign)
-                       else ([node.target.id]
-                             if isinstance(getattr(node, "target", None), ast.Name) else []))
-            defs |= set(targets)
-            if "__all__" in targets:
-                declared |= {e.value for e in getattr(node.value, "elts", [])
-                             if isinstance(e, ast.Constant) and isinstance(e.value, str)}
         found[rel[:-len("/__init__.py")].replace("/", ".")] = {
-            "init": rel, "bound": bound, "all": declared, "subs": subs, "defs": defs,
+            "init": rel,
+            "bound": bound, "all": declared, "subs": subs, "defs": defs,
             # 动态供给两形，静态证不了供出的是什么：PEP 562 `__getattr__`、模块层
             # `globals()[alias] = importlib.import_module(...)`（`neurova/memory/__init__.py:107`）
             "dynamicSupply": any(
@@ -201,6 +233,91 @@ def _packages() -> dict:
 def suppliedNames(info: dict, pkgDir: Path) -> set:
     """这个包"给得出"的名字全集（见模块 docstring 的四条形）。"""
     return set(info["bound"]) | set(info["subs"]) | set(info["defs"]) | submodulesOf(pkgDir)
+
+
+@functools.lru_cache(maxsize=1)
+def _moduleFacts() -> dict:
+    """`{仓内相对路径: {"names", "all", "takeaways"}}`，全仓**一次**取证。
+
+    为什么要收成一次（本档上一轮在 CI 上的真红是 **两格 30s 墙钟超时**）：本档原先
+    对同一批 `.py` 各扫一遍——`_scan()` 走 `ast_scan.takenPerModule`（全仓 `ast.parse`），
+    `evidencePaths()` 走 `git ls-files`，`_packages()` 的每个门面再 `transientTree` 解析一次。
+    两次全量解析、三次读盘，成本全程绑在**代码总量**上：本机 3684 个 `.py` 已经是 18s
+    量级，CI 机器一慢就撞 `pyproject.toml` 的全局 `timeout = 30`。
+
+    故按"这条判据要的那几件事，一遍取证全交出来"做：`ast_scan.transientTrees` 交出的
+    那棵树在这里被读三件事 —— 模块层绑了哪些名字、`__all__` 写了什么、谁从哪个模块取了
+    什么（`takenPerModule` 那份消费者表）。解析只付一次，枚举也只付一次。
+
+    口径一个字没放宽：消费者表仍是"全仓 × 六种取法"，证据面之外取用照样由
+    `pruneNonEvidence` 剔掉；包集合仍按 `git ls-files` 取。第 1/2 格的断言面没动。
+    """
+    facts: dict = {}
+    # **逐个文件流式取证**（`transientTrees` 是逐个 `yield` 的）：解析、读两件事、
+    # 丢树，再走下一个。
+    #
+    # 不先 `parsedModules` 再统一处理：`_cachedParse` 会把整仓语法树常驻到会话结束
+    # （本仓实测 532 万对象、RSS 数百 MB，且 gen2 每次要扫完整棵图 —— `ast_scan`
+    # 顶部那段账记的就是这个成本）。本档对每棵树只读一次、不留复用需求，
+    # 流式是同一份读数下的最低账：本机 3686 档实测 6.1s（解析 3.3s + 每棵一次
+    # `ast.walk` 2.7s）。
+    for path, tree in ast_scan.transientTrees(PROJECT_ROOT):
+        rel = ast_scan.relativeToRepo(path)   # 键与 `_packages()` 的 `init` 同一口径
+        names, declared = _moduleLevelBindings(tree)
+        facts[rel] = {"names": names, "all": declared,
+                      "takeaways": _takeawaysIn(rel, tree)}
+        del tree
+    return facts
+
+
+def _takeawaysIn(rel: str, tree: ast.AST) -> dict:
+    """一个文件里的取用归集：`{模块名: {名字: [(路径, 行号)]}}`（与 `takenPerModule` 同口径）。
+
+    转写而不是调用 `ast_scan.takenPerModule`：那条入口的交出物是"整仓一张表"，
+    要拿到它就得把全仓**再**解析一遍 —— 本档要的正是不要那第二遍。取法逐条对着
+    共享源核过（`from M import X [as Y]` 记原名、相对形按发起文件解析成绝对名、
+    `import M` 之后 `M.X`／`p.X` 两种属性读法、多段属性链按"该文件确实 import 过那个前缀"
+    归属）；口径漂移由 `test_theTakeoverTableMatchesTheSharedEntry` 逐字对拍钉住。
+    """
+    out: dict = {}
+    imported = set()                     # 该文件里真被 import 过的绝对模块名
+    aliasTo: dict = {}                   # 本地名 → 绝对模块名
+    attributes = []                      # 属性面先收着，等 import 面建完再过（见 docstring）
+    # 下潜**一遍**，节点收进清单后分两次线性过：本机 3686 档实测（同一批树）
+    # `list(ast.walk)` 后线性过两遍 3.17s，两遍 `ast.walk` 5.25s。
+    nodes = list(ast.walk(tree))
+    for node in nodes:
+        if isinstance(node, ast.ImportFrom):
+            mod = ast_scan.resolveImportModule(rel, node)
+            if not mod:
+                continue
+            imported.add(mod)
+            bucket = out.setdefault(mod, {})
+            for a in node.names:
+                if a.name == "*":
+                    continue
+                imported.add(f"{mod}.{a.name}")
+                bucket.setdefault(a.name, []).append((rel, node.lineno))
+        elif isinstance(node, ast.Import):
+            for a in node.names:
+                imported.add(a.name)
+                aliasTo[(a.asname or a.name).split(".")[0]] = a.name
+        elif isinstance(node, ast.Attribute):
+            attributes.append(node)
+    for node in attributes:
+        base = node.value
+        target = aliasTo[base.id] if isinstance(base, ast.Name) and base.id in aliasTo else None
+        if target:
+            out.setdefault(target, {}).setdefault(node.attr, []).append((rel, node.lineno))
+        chain = ast_scan.dottedChain(node)
+        if not chain:
+            continue
+        parts = chain.split(".")
+        for i in range(1, len(parts)):
+            prefix = ".".join(parts[:i])
+            if prefix in imported:
+                out.setdefault(prefix, {}).setdefault(parts[i], []).append((rel, node.lineno))
+    return out
 
 
 @functools.lru_cache(maxsize=1)
@@ -226,8 +343,18 @@ def pruneNonEvidence(table: dict, evidence: frozenset) -> dict:
 
 @functools.lru_cache(maxsize=1)
 def _scan() -> dict:
-    """全仓"谁从哪个模块取了哪个名字"一张表，跑一次给所有格共用（只认证据面）。"""
-    return pruneNonEvidence(ast_scan.takenPerModule(PROJECT_ROOT), evidencePaths())
+    """全仓"谁从哪个模块取了哪个名字"一张表，跑一次给所有格共用（只认证据面）。
+
+    取数来自 `_moduleFacts()` 那一遍：同一批文件不为这张表再解析第二遍
+    （本档上一轮正是"两次全量解析"把 30s 墙钟撞穿的）。
+    """
+    table: dict = {}
+    for facts in _moduleFacts().values():
+        for mod, names in facts["takeaways"].items():
+            bucket = table.setdefault(mod, {})
+            for name, places in names.items():
+                bucket.setdefault(name, []).extend(places)
+    return pruneNonEvidence(table, evidencePaths())
 
 
 def undeclaredTakeaways() -> dict:
@@ -365,6 +492,38 @@ def test_scratchFilesOutsideTheEvidenceFaceAreNotConsumers():
         "混合取用没剔净：剩下的必须是证据面内的那几条")
     assert len(evidencePaths()) >= 3000, (
         f"证据面现读 {len(evidencePaths())} 个文件，地板 3000 被打破＝取用面塌了")
+
+
+def test_theTakeoverTableMatchesTheSharedEntry():
+    """对拍：本档的取用归集与 `ast_scan.takenPerModule` **逐条相同**。
+
+    本档为了不把同一批 `.py` 解析两遍，把那份归集转写进了 `_takeawaysIn()` ——
+    转写就意味着"第二份实现"，而两份口径一旦漂移，红的是别的判据、绿的是这里
+    （教义第 6 条点名的那种病）。故留一格对拍：共享源那边改了口径、这边没跟上，当场红。
+
+    成本：只在**这一格**里跑一遍共享源（全仓 `takenPerModule`），不进 `_scan()` 的取数面；
+    上一轮的红是"每条格都付一遍"，不是"不许付一遍"。
+    """
+    mine: dict = {}
+    for rel, facts in _moduleFacts().items():
+        for mod, names in facts["takeaways"].items():
+            bucket = mine.setdefault(mod, {})
+            for name, places in names.items():
+                bucket.setdefault(name, []).extend(places)
+    theirs = ast_scan.takenPerModule(PROJECT_ROOT)
+    assert sum(len(v) for v in mine.values()) >= 5000, (
+        f"转写出的消费者表现读 {sum(len(v) for v in mine.values())} 名，量级不对＝取数面塌了")
+    assert set(mine) == set(theirs), (
+        "模块集合与共享源不一致（转写漏了一种取法或换了归属判据）："
+        f"仅本档有 {sorted(set(mine) - set(theirs))[:5]}，"
+        f"仅共享源有 {sorted(set(theirs) - set(mine))[:5]}")
+    # 比**集合**不比列表：`takenPerModule` 按"全仓一次遍历"的顺序追加，本档按文件逐次归集，
+    # 同一名下的取点顺序天然不同（实测 `datetime` 那 1707 个取点内容一致、次序不同）。
+    # 比顺序会把一处真实差异淹没在排序噪声里，比集合才咬得住"少记/多记一个取点"。
+    drift = [mod for mod in sorted(theirs)
+             if {name: set(map(tuple, places)) for name, places in mine[mod].items()}
+             != {name: set(map(tuple, places)) for name, places in theirs[mod].items()}]
+    assert not drift, f"这些模块的取用归集与共享源不一致（转写与 `takenPerModule` 漂移）：{drift[:5]}"
 
 
 def test_theClearedFacesAreDeclaredAndReachableThroughThePackage():

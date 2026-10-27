@@ -55,7 +55,7 @@
 #     平台最小调度间隔 5 分钟，周级用第 5 段（星期）表达；本文件的周级巡检
 #     流水线（deploy-config 的时间维度兜底）同样不计入 `main.push` 的条数。
 #   - 单条流水线内的 stages 串行；任一 stage 失败即中止该流水线。
-#   - runner.cpus: N 对应内存 N×2GiB（本文件最大 4 → 8GiB）。
+#   - runner.cpus: N 对应内存 N×2GiB（本文件最大 8 → 16GiB）。
 #   - docker.volumes 为构建节点级缓存（copy-on-write 默认），跨节点不共享；
 #     同一流水线内不得声明存在包含关系的卷路径。
 #   - YAML 锚点仅在同文件内可用（跨文件 include 不支持锚点），
@@ -153,6 +153,15 @@ main:
       # 判据见 tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py。
       runner:
         tags: cnb:arch:amd64
+        # 受保护子集 716 档，容器必须真装得下它：官方口径内存 = cpus × 2GiB，
+        # runner 只有 tags/cpus/namespace，故 cpus 是内存的唯一代理量。此前 cpus: 4
+        # （8GiB）在 82% 处被 SIGKILL（构建 `cnb-rja-1k5pv9gbl#003`，`code: 137`，
+        # 22m13s）。
+        # 成本口径与预算口径由两档分治、同处作答：
+        #   tests/unit/ci/test_unit_tests_runner_has_headroom.py  按「子集真条目数 ×
+        #     单档足迹 + 底噪 × 余量」算需求，改子集或改 cpus 都会当场作答；
+        #   tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py  按阶段结构认
+        #     「谁在驱动清单」，cpus 与 timeout 两层声明一起判。
         cpus: 8
       docker:
         image: python:3.12
@@ -165,11 +174,32 @@ main:
             python -m pip install uv
             uv pip install --system -r requirements-ci.lock
           timeout: 30m
+        - name: regenerate shipped artifacts (drift gate)
+          # 生成物（API 清单 / 公开面机器段 / 认知层组件表）与代码树脱节时，受保护子集里
+          # 那几档守卫会红。它们的红只在 pytest 摘要里剩一行 `AssertionError`，
+          # 真正要跑的那条命令被埋在回溯里——读日志的人得先自己把生成器跑一遍才知道红在哪。
+          #
+          # 本步排在子集之前：先把漂移**修平**，并把差异打到日志顶部。它**不裁决**
+          # （生成器本身返回 0 就是幂等），裁决仍归下面的守卫——守卫若在漂移修平后仍红，
+          # 说明缺的不是重生成，而那才是要人看的东西。
+          script: |
+            for gen in \
+              "python scripts/generate_api_inventory.py --write" \
+              "python scripts/generate_api_auth_surface.py --write" \
+              "python scripts/ci/cognitive_component_table.py --write"; do
+              echo "── $gen"
+              $gen >/dev/null || echo "（生成器返回非 0，交由下面那档判据裁决）"
+            done
+            git --no-pager diff --stat -- docs/ | sed 's/^/[drift] /' || true
+          timeout: 10m
+        # 墙钟这个数**不绑判据**，只防跑挂：它覆盖的是本 stage 整段脚本，而"装依赖"与
+        # "重生成生成物"已经分别由上面两步各自的 timeout 约束，这里剩下的就是跑测本身。
         # 墙钟按实测定，不按"看起来够"。30m 是照 --no-cov 那套读数定的，而这一步带
         # `--cov` 跑：插桩只惩罚纯 CPU 的解析/遍历，受保护子集里恰好有一批"扫全仓 AST"
-        # 的判据档，同一格实测 ×2.2～×3.7。2026-10-24 构建 `cnb-mn9-1k5n4fcl5` 在 85%
-        # 撞 30m 被平台强杀；2026-10-25 `cnb-n45-1k5oultjs#003` 在 83%、29m23s 被
-        # SIGKILL（`code: 137`）——两次日志里都没有一条失败墙。
+        # 的判据档，同一格实测 ×2.2～×3.7（`--durations` 逐条对照见台账 §6-4xx）。
+        # 2026-10-24 构建 `cnb-mn9-1k5n4fcl5` 在 85% 撞 30m 被平台强杀；2026-10-25
+        # `cnb-n45-1k5oultjs#003` 在 83%、29m23s 被 SIGKILL（`code: 137`）——两次
+        # 日志里都没有一条失败墙。
         #
         # 90m → 45m 不是收紧判据，是把"上限"重新变成预算：83% 处已用 29m23s，
         # 整场按此速率约 35m。上限若远高于实测（90m vs 35m），"真撞墙"与"被资源
@@ -177,17 +207,77 @@ main:
         # 子集里最高的单档父墙（`pytest.mark.timeout(120)`）—— 先到点的应当是
         # 单格那条诚实的超时，而不是平台把整段掐断。超了就是真超了，不许再往上抬
         # 掩盖（判据：tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py）。
+        #
+        # 输出**不许**重定向进文件，也**不许**让它块缓冲。2026-10-25 构建
+        # `cnb-sl8-1k5pih0k6` 曾把 stdout 全量吞进 `/tmp/pytest_protected.log`，
+        # 换来两个后果：日志里只剩命令回显，一条进度都没有；真出事（进程被掐）时
+        # `tail` 根本执行不到，整场读数归零。
+        # 改成 `tee` 之后按退出码判定：日志照存（排障要全文），stdout 照出（进度与
+        # 失败摘要都在）。**退出码不许用 `${PIPESTATUS[0]}`**：这些 stage 的脚本由
+        # `sh`（dash）解释，那是 bash 专有语法（构建 `cnb-8qu-1k5q3m315#003` 在
+        # 全绿之后拿 `sh: 5: Bad substitution` 以 exit 2 收场）。故先落标记文件，
+        # 再按标记判——不依赖 shell 数组，仍取的是 pytest 自己的退出码。
+        # `-u` 与 `2>&1` 是同一条要求的两半：只要 stdout 落在管道里，Python 就按
+        # 4KiB/8KiB **块**缓冲写，几十秒才攒满一块——平台「长时间无输出」判据会把
+        # 仍在正常推进的跑测掐掉（构建 `cnb-ast-1k5pqhnfi#003` 读 23m 后被中断且
+        # 从不进入那一段）。`-u` 关掉解释器缓冲、`2>&1` 把 stderr 并进同一道管道。
         - name: protected subset with coverage gate (fail_under=60)
+          # 输出**不许**重定向进文件。2026-10-25 构建 `cnb-sl8-1k5pih0k6` 曾把 stdout
+          # 全量吞进 `/tmp/pytest_protected.log`，换来两个后果，都实测过：
+          #   1. 日志里只剩命令回显，一条进度都没有——真出事（进程被掐）时 `tail`
+          #      根本执行不到，整场读数归零，只能靠事后拉 runner 日志才看见跑到哪；
+          #   2. 十几分钟零输出会让「无输出超时」这条生命线失去意义，也让
+          #      「平台强杀」与「跑挂」两种形态在日志上彻底同形。
+          # 这里改成 `tee` 之后按退出码判定：日志照存（排障要全文），stdout 照出（进度与
+          # 失败摘要都在），两者都不牺牲。
+          #
+          # **退出码不许用 `${PIPESTATUS[0]}`**：这些 stage 的脚本由 `sh`（dash）解释，
+          # 那是 bash 专有语法。实测构建 `cnb-8qu-1k5q3m315#003`：7954 passed / 覆盖率
+          # 88.10% / 一行 `================================================================`
+          # 全绿之后紧跟 `sh: 5: Bad substitution`，stage 以 **exit 2** 收场——
+          # **门禁在最后一行断言之外自己变红**。前几轮没撞见它，是因为它们都在到达
+          # 这一行之前就死了（137 OOM / 断言红），是「红盖着红」把这一行藏住了。
+          # 同一行本机 `sh` 下复现同一条报错（行号一致），`bash` 下才正常。
+          #
+          # 故判据改成「先落一个标记文件，再按标记判」：不依赖 shell 数组，
+          # `sh`/`bash`/`zsh` 下同义，且**仍然取的是 pytest 自己的退出码**
+          # （写成 `$?` 会拿到 `tee` 的，门禁从此恒绿）。
+          #
+          # `tee` 的输入必须走 stderr（`2>&1` 只挪 fd，不改行缓冲）：只要 stdout 落在管道里，
+          # Python 就按 4KiB/8KiB 块缓冲写，构建输出是几十秒才攒满一块——平台「长时间无输出」
+          # 判据会把仍在正常推进的受保护子集掐掉（构建 `cnb-ast-1k5pqhnfi#003`，读 23m 后被
+          # 中断且从不进入那一段）。`-u` 关掉解释器缓冲、`2>&1` 把 stderr 并进管道，两个一起
+          # 才是「每行都立刻可见」。
           script: |
             TESTS=$(grep -v '^#' scripts/ci/protected_tests.txt | tr '\n' ' ')
-            python -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS
+            MARK=/tmp/pytest_protected.rc
+            rm -f "$MARK"
+            # `{ ...; echo $? > "$MARK"; }` 里的 `$?` 是 **pytest** 的退出码（它紧跟 pytest，
+            # 中间没有别的命令），`tee` 只负责转发与落盘。整段的退出码因此可判：
+            # 标记在 ⇒ 取标记里的值；标记不在 ⇒ pytest 根本没跑起来，按 1 收（不许静默绿）。
+            { python -u -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS \
+                2>&1; echo $? > "$MARK"; } | tee /tmp/pytest_protected.log
+            RC=$(cat "$MARK" 2>/dev/null || echo 1)
+            echo "── pytest 退出码: $RC（日志全文 /tmp/pytest_protected.log）"
+            exit "$RC"
           timeout: 45m
 
     # ── 5. E2E：后端启动冒烟 ─────────────────────────────────────────────
+    # `services` 必须显式为空：不声明时平台给**每条流水线**自动起
+    # `git-clone-yyds` 与 `network-bus` 两个服务，而它们与"后端能不能启动"
+    # 毫无关系 —— 这两个服务的 `docker run` 会算进平台 `Prepare` 的 **60s**
+    # 上限里，撞上就是
+    # `Pipeline prepare error: 任务超过最大执行时间而被强制关闭：1m0s`，
+    # 本流水线自己一个 stage 都跑不到（构建 `cnb-13d-1k5pskuuj#004`：
+    # 两个服务分别吃掉 54.9s 与 1m2s）。同一批其它流水线吃 0.7–13s ——
+    # 故这不是配置里的判据，是共享负载下的运气。
+    # 显式空列表后同一条流水线仍是 2 个 stage，判据一字不变；
+    # 判据见 tests/unit/ci/test_pipelinePrepareStartsNoUnusedServices.py。
     - name: e2e-backend-boot
       runner:
         tags: cnb:arch:amd64
         cpus: 2
+      services: []
       docker:
         image: python:3.12
         volumes:

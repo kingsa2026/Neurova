@@ -63,16 +63,22 @@ class TestFenceCoversMemorySurfaces:
 
         现布局（`data/<agent_id>/`）由 `core/agent_workspaces` 收口：该根**生产上**就是
         仓库自带的数据根，测试期可注入。所以这格换两种问法，都不读注入值当定义：
-        ① 落点名必须是数据根（不是仓库根，也不是旧扁平 `agent_workspaces/`）；
-        ② 未注入时围栏认得 `data/<id>/memory/` 里的主库。
+        ① 落点名必须是数据根（不是仓库根，也不是旧扁平 `agent_workspaces/`）——
+           v2 统一布局（`4bf9b733`）之后生产根就是仓内 `data/`；
+        ② 旧 `agent_workspaces/` 仍须留在围栏内（`_productionMemoryDirs()` 两条都收），
+           故这里判的是**围栏口径**而不是旧名字——下面两行分别钉新落点与存量目录。
         """
         from neurova.core.data_root import repoRoot
         from neurova.knowledge.foundation.storage_fence import productionMemoryDir
 
         assert productionMemoryDir() == repoRoot() / "data", (
-            f"生产记忆目录现读 {productionMemoryDir()}——v2 布局把它收进了仓库数据根")
+            f"生产记忆目录现读 {productionMemoryDir()}——v2 布局把它收进仓内数据根，"
+            "围栏若与真实装配点各说一套，测试会话就会写进生产记忆")
         assert underProductionMemory(productionMemoryDir() / "default" / "memory"
                                      / "neurova_memories_persist.db")
+        assert underProductionMemory(repoRoot() / "agent_workspaces" / "default"
+                                     / "memory" / "neurova_memories_persist.db"), (
+            "旧布局目录被移出围栏了：磁盘上仍有存量记忆，围栏必须同时守住两处")
 
     def test_isolatedDirectoryIsNotProduction(self, monkeypatch, tmp_path):
         monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path / "ws"))

@@ -594,7 +594,9 @@ class TestIdentityFiles:
 
         v2 布局把身份文件从 `memory/` 提到 `<agent_root>/`（`agent_core._load_identity` 现读那里），
         导入器若不跟着走，就是"导入成功、运行时读不到"——所以这格按加载器的读法判，
-        而不是按旧落点判存在性。
+        而不是按旧落点判存在性。旧落点由 `core/agent_layout_migration` 在启动时搬走，
+        导入器**不再**往 `memory/` 写第二份：两个落点各存一份身份，就等于
+        「导入成功、读到的却是另一份」，而这正是本格要拦的那种成功。
         """
         from scripts.import_kai_to_neurova import import_identity
 
@@ -606,6 +608,11 @@ class TestIdentityFiles:
         assert "凯的灵魂" in soul.read_text(encoding="utf-8")
         # PROFILE → personality.md（_load_identity 第二加载位，同根）
         assert "凯的档案" in (agent_root / "personality.md").read_text(encoding="utf-8")
+        # 旧落点不再写：v1 布局的 `memory/soul.md` 由 agent_layout_migration 搬走，
+        # 导入器留一份在那里就是"两个落点各存一份身份"。
+        memory_dir = agent_root / "memory"
+        assert not (memory_dir / "soul.md").exists(), sorted(p.name for p in memory_dir.iterdir())
+        assert not (memory_dir / "personality.md").exists()
         # PROFILE/MEMORY 工作区留档
         assert (agent_root / "workspaces" / "PROFILE.md").exists()
         assert (agent_root / "workspaces" / "MEMORY.md").exists()

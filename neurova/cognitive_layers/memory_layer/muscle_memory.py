@@ -77,17 +77,25 @@ def _lexical_coverage(item_fingerprint: str, query_fingerprint: str) -> float:
 
 
 def _semantic_vector(text: str) -> Optional[List[float]]:
-    """计算语义向量；失败/关闭/**降级**返回 None（调用方回落词法分支）。"""
+    """计算语义向量；算不出来 / 关闭 / 降级一律返回 None（调用方回落字符覆盖度分支）。
+
+    零向量不是"两句不相似"的证据，是"这一路没算出来"：按"有向量"交给
+    `_compute_confidence`，它会走"有向量"分支、余弦恒 0，**再也回落不到**字符覆盖度，
+    缺陷在读数里完全不可见（本仓实测：换实体近似句的置信度停在 0.5875）。算得出算不出
+    由引擎自己判（`encodeOrNone`，那一处的单源），本层不再凭全零反推一遍——
+    但引擎给回零向量时仍要拦（`isZeroVector`），否则那 512 个 0 会落进库，
+    下一轮读回来谁也不知道它是"当时没有向量"还是"当时量出来是 0"。
+    """
     if not text or not _semantic_enabled():
         return None
     engine = _get_engine()
     if engine is None:
         return None
     try:
-        vec = engine.encode(text)
+        vec = engine.encodeOrNone(text)
     except Exception:  # noqa: BLE001
         return None
-    if not any(vec):
+    if vec is None or vector_math.isZeroVector(vec):
         # 引擎在位但给零向量（模型权重 / 分词器 / 推理后端三者有缺席）：
         # 这一档**没量到**，不是一个读数。落成零向量存进库更糟——下一轮读回来
         # 谁也不知道那 512 个 0 是"当时没有向量"还是"当时量出来是 0"。
@@ -395,6 +403,9 @@ class MuscleMemory:
         # 在它下面永远拿不到分——这正是"断层"的第二半。字符覆盖度衡量问法骨架
         # 是否一致，与上面按 token（含 2-gram）的多集包含度互补而不重复。
         item_emb = item.metadata.get("query_embedding") if _semantic_enabled() else None
+        # 存量条目里躺着引擎缺档期写下的零向量：那不是向量，是"当时没算出来"。
+        # `_rawCosine` 对任一侧零范数返回 None，"没量到"这一档因此不用在这里
+        # 先手工把 item_emb 置空——判据与处置同一条路（教义第 6 条）。
         sim = vector_math._rawCosine(query_emb, item_emb) if (query_emb and item_emb) else None
         if sim is None:
             # 没有可比的余弦（开关关 / 旧条目无向量 / 两侧任一是零向量）⇒ 这一档
@@ -490,6 +501,10 @@ class MuscleMemory:
         emb = _semantic_vector(query)
         if emb:
             metadata["query_embedding"] = emb
+        else:
+            # 引擎这轮没给向量（缺档/未就绪）：不得把上一次留下的向量冒充成这一次的——
+            # 条目若续用旧向量，`_compute_confidence` 会拿它算这一次问句的余弦。
+            metadata.pop("query_embedding", None)
 
         with self._lock:
             # 尝试找到已有的条目
@@ -541,6 +556,10 @@ class MuscleMemory:
             item.result_summary = result_summary
             if metadata:
                 item.metadata.update(metadata)
+                if "query_embedding" not in metadata:
+                    # 这一次没算出向量：旧向量作废（见 record_usage 处的同一条口径），
+                    # 否则改写过的问法会继续沿用上一版问句的向量。
+                    item.metadata.pop("query_embedding", None)
 
             # 固化检查：连续成功 N 次提升层级
             if item.consecutive_successes >= _PROMOTE_THRESHOLD:

@@ -125,11 +125,11 @@ class TestGenerationIsBatchedAndSweeping:
 class TestGeneratedCuesAreUsable:
     def test_生成的线索能被向量通道召回(self, manager):
         """端到端：生成 → 入库 → 通道点火 → 无词面重合的提问能捞出对应记忆。"""
-        from tests.conftest import requireVectorPath
+        from tests.memory_embedding_precondition import requireRealEmbeddingOrSkip
 
         # 本格测的是"线索经向量通道点火"，通道本身依赖稠密向量：薄环境里 encode 返零向量，
-        # 通道永远不点火。前提口径与 C-1/C-3 同源（tests/conftest.py）。
-        requireVectorPath()
+        # 通道永远不点火。前提口径与 C-1/C-3 同源（tests/memory_embedding_precondition.py）。
+        requireRealEmbeddingOrSkip("线索生成批（通道靠向量点火才测得到）")
         target = ROWS[0]
         query = "团队聚餐选餐厅时要注意什么"
         # 查询与目标零中文字面重合（前提自证，否则用例白给）

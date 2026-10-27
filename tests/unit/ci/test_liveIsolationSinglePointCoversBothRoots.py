@@ -102,12 +102,15 @@ def test_isolatedDataRootAloneMovesAgentWorkspaceOutOfRepo():
         "⇒ 70 档起真 app 的 manual 探针会往仓内 agent_workspaces/ 写记忆/附件——"
         "该由单点保证的第二根没人保证（D8）。"
     )
-    # 「临时目录」这一族的判据只能用标准库口径：POSIX 上没有 `TEMP`（那是 Windows 的变量），
-    # 早先按 `os.environ.get("TEMP", "")` 取根，在 Linux 上退化成 `Path("")`＝进程 CWD，
-    # 于是 `/tmp/...` 也判"没落在临时目录"。`tempfile.gettempdir()` 是跨平台单一口径，
-    # 同时它正是 `isolatedAgentWorkspaces` 与 conftest 用来建隔离根的那一个。
-    assert ws.resolve().is_relative_to(pathlib.Path(tempfile.gettempdir()).resolve()), (
-        f"工作区根没有落在临时目录：{ws}（临时目录={tempfile.gettempdir()}）"
+    # 「临时目录」的判据用**生成它的那个入口**：单点是 `tempfile.mkdtemp(prefix="neurovaLive")`
+    # ⇒ 系统临时根就是 `tempfile.gettempdir()`。早先这里读的是 `os.environ.get("TEMP", "")`
+    # 加 `"Temp" in str(ws)`：POSIX 上没有 TEMP（只有 TMPDIR），取到空串后
+    # `Path("").resolve()` 就是**当前工作目录**，仓内落点也过判；后半句更只是大小写巧合。
+    # 两层都不咬——所以按"落点在不在系统临时根下"判，并且只认一个根。
+    tempRoot = pathlib.Path(tempfile.gettempdir()).resolve()
+    assert ws.resolve().is_relative_to(tempRoot), (
+        f"工作区根没有落在临时目录：{ws}（临时根＝{tempRoot}）——"
+        "与上面那条不同源：上面只要求不在仓内，这条要求它真的落在系统临时根下"
     )
 
 

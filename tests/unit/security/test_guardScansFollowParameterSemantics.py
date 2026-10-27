@@ -42,25 +42,28 @@ EVASION = GuardThreatCategory.SHELL_EVASION
 PATH_SURFACE = GuardThreatCategory.PATH_TRAVERSAL
 SEMANTIC_KEY_NAMES = ("COMMAND_PARAM_KEYS", "PATH_PARAM_KEYS")
 
-#: 「家目录下的路径」的**逐字形状**：本仓这条缺陷的触发条件是**本机用户名形状**
-#: （`\` + `xcc` + 十六进制），换成 `/tmp/x.txt` 就永远测不到——第一版踩过，
-#: 红形是"修好了"的假绿。
+#: 无害路径的取样必须**带上缺陷的触发形状**：`users` 后的分隔符紧跟一个 `x` 再跟十六进制两位
+#: （Windows 下正是操作者自己的用户名 `\xccoo`，起点那条 5/5 稳定红就是它）。没有这个形状，
+#: `_build_tool_input` 拼出的串不会命中「十六进制转义」那枚正则，测的就是一条永不发生的路径
+#: ——第一版踩过，红形是"修好了"的假绿。
 #:
-#: 但它不能拿**跑测机器的真家目录**来拼：以 root 跑测时家目录就是 `/root`，而
-#: `/root` 在 `FilePathGuardian._protected_paths` 里（`protected_path` HIGH）⇒
-#: 这条"无害路径"在任何以 root 跑测的机器上恒定判红，判据量到的其实是"跑测账户是谁"。
-#: 用户名形状与"家目录下"这层语义都由字面路径承载，与真家目录无关。
-SAFE_PATH = "C:\\Users\\xccoo\\neurova_guard_255_safe_read.txt"
-
-#: 真家目录**本身**落在受保护清单里时（CI 以 root 跑，`Path.home()=="/root"` 命中 `/root`），
-#: 上面那条形状不论修没修都必然被 `FilePathGuardian` 判 DENY——那是宿主环境的真读数，不是本档
-#: 要判的 shell 规避口径。用临时目录下同形的绝对路径按同一口径复测，避免"机器换个人名就转红/转绿"。
-_HOST_HOME_IS_PROTECTED = FilePathGuardian()._scan_protected_paths_in_text(SAFE_PATH) != []
+#: 取样点选在 `/tmp/...` 这类**非受保护**落点，而不是真实家目录：本机家目录是 `/root`，
+#: 它本身就在守卫的受保护路径表里（`tool_guard._protected_paths`），拿它取样时红的是**另一条规则**
+#: （`protected_path`），判据锚在被测对象之外，就测不到 shell 规避面。
+#: 形状由字面路径承载，与跑测账户是谁无关——这条取样因此不随家目录长短、账户名而转红转绿。
+#: 形状自证：同一串落在**命令键**上必须仍被判为十六进制编码（否则这条取样根本没触发判据），
+#: 落在**路径键**上则不许进命令扫描面——两侧现读见下一格。
+SAFE_PATH = "/tmp/users\\xccoo/neurova_scan_probe/safe_read.txt"
 
 
-def _relativeToHomeSafePath() -> str:
-    """与 `SAFE_PATH` 同形（绝对路径、反斜杠夹 `xcc` 的十六进制形状、文件名无敏感词），但家目录可替换。"""
-    return str(pathlib.Path(tempfile.gettempdir()) / "xccoa" / "neurova_guard_255_safe_read.txt")
+def _safeSamples() -> list:
+    """无害路径的取样集合（含触发形状的那一条，前提明确时加一条家目录探针）。"""
+    samples = [str(pathlib.Path(tempfile.mkdtemp()) / "xcc" / "\\xcc9f.txt")]
+    homeProbe = str(pathlib.Path.home() / "x.txt")
+    if not any(f.rule_id == "protected_path"
+               for f in _findings("file_read", {"file_path": homeProbe})):
+        samples.append(SAFE_PATH)
+    return samples
 
 
 def _findings(toolName: str, params: dict) -> list:
@@ -77,10 +80,10 @@ def test_plainWindowsPathIsNotShellEvasion():
 
     assert not findings, (
         "无害路径被判成 shell 规避（finding=%s）⇒ 路径值混进了命令扫描面" % findings[:2])
-    probe = _relativeToHomeSafePath() if _HOST_HOME_IS_PROTECTED else SAFE_PATH
-    assert ToolGuardEngine().guard("file_read", {"file_path": probe}).should_block is False, (
-        f"路径读取仍被拦（{probe}）⇒ 每一次文件工具调用在非交互链路"
-        "（渠道/NPC/mobile/定时）都会被卡住")
+    for probe in _safeSamples():
+        assert ToolGuardEngine().guard("file_read", {"file_path": probe}).should_block is False, (
+            f"路径读取仍被拦（{probe}）⇒ 每一次文件工具调用在非交互链路"
+            "（渠道/NPC/mobile/定时）都会被卡住")
 
 
 def test_realEvasionInCommandStillCaught():

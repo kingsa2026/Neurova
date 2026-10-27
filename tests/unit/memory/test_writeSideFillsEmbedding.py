@@ -30,7 +30,11 @@ VECTOR = [0.5] * 6
 
 
 class StubEngine:
-    """真引擎的替身：只回答"算得出/算不出"，向量取值由本格指定。"""
+    """真引擎的替身：只回答"算得出/算不出"，向量取值由本格指定。
+
+    `encodeOrNone` 与真引擎同一个契约（算不出回 None）：写侧问的是"算出向量了吗"，
+    不是一个恒有返回值的 `encode`——替身少了这一半，替的就不是那个接口。
+    """
 
     def __init__(self, vector: Optional[List[float]]):
         self._vector = vector
@@ -44,6 +48,14 @@ class StubEngine:
         if self._vector is None:
             raise RuntimeError("模型加载失败")
         return list(self._vector)
+
+    def encodeOrNone(self, text: str) -> Optional[List[float]]:
+        """算不出（未装模型 / 回全零）一律回 None —— 与真引擎同一契约。"""
+        if self._vector is None:
+            self.calls.append(text)
+            return None
+        vec = self.encode(text)
+        return vec if any(vec) else None
 
 
 def _patchEngine(monkeypatch, vector: Optional[List[float]]) -> StubEngine:

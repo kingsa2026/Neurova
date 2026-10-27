@@ -165,6 +165,61 @@ class TestCancelTokenProtocol:
         with pytest.raises(asyncio.CancelledError):
             token.raiseIfCancelled()
 
+    def testReleasedActionNoLongerFiresOnLaterCancel(self):
+        """收尸之后撤掉的那条回调不许再兑现：令牌按轮持有、回调按进程注册，两个生命周期不同。
+
+        留下来的代价不是"多跑一次空函数"：pid 会被系统复用，本轮后任何一次取消都可能
+        去杀一个早已结束（甚至已属于别人）的进程。
+        """
+        from neurova.core.cancel_token import CancelToken
+
+        ran = []
+        token = CancelToken()
+        release = token.onCancel(lambda: ran.append("killed"))
+        token.cancel("timeout")
+        assert ran == ["killed"], "第一次置位必须兑现（撤钩不许把已注册的回调提前摘掉）"
+
+        token2 = CancelToken()
+        release2 = token2.onCancel(lambda: ran.append("should-not-run"))
+        release2()
+        token2.cancel("user")
+        assert ran == ["killed"], "撤回后的回调仍被兑现——pid 复用时会误杀别人的进程"
+
+    def testReleaseIsIdempotentAndRefusesAfterCancel(self):
+        from neurova.core.cancel_token import CancelToken
+
+        token = CancelToken()
+        # 摘钩键是**注册时那条回调本身**：`onCancel` 交回的函数就是"再调一次即摘钩"的那个，
+        # 令牌自己的判定口也认同一把钥匙（`release(release)` 就等于第二次摘钩）。
+        release = token.onCancel(lambda: None)
+        assert release() is True, "第一次摘钩必须回报已摘掉"
+        assert release() is False, "重复摘钩必须如实回 False，而不是谎报成功"
+
+        token2 = CancelToken()
+        token2.onCancel(lambda: None)
+        token2.cancel("user")
+        assert token2.release(lambda: None) is False
+
+    def testRegistrationHandsBackTheVeryKeyTheTokenKnows(self):
+        """反空转：摘钩键必须由令牌给出——自己另造一个等价对象去"撤回"永远撤不掉。
+
+        实测踩过：用 `functools.partial(killTree, proc)` 当键去 `list.remove`，每次 partial
+        都是新对象，于是"摘钩"成功返回而回调仍在令牌上，本轮第一发命令之后的每条都立即 -9。
+        """
+        from neurova.core import cancel_token as cancelMod
+
+        token = cancelMod.CancelToken()
+        cancelMod.setTurnCancelToken(token)
+        try:
+            released = []
+            release = cancelMod.registerKillAction(lambda: released.append("fired"))
+            release()
+            token.cancel("user")
+            assert released == [], "registerKillAction 交回的摘钩函数没生效"
+            assert cancelMod.registerKillAction(lambda: None) is not None
+        finally:
+            cancelMod.setTurnCancelToken(None)
+
     def testBrokenActionDoesNotBlockRemainingActions(self):
         """一个杀灭回调失败不得连带阻断其余回调——否则一个坏工具的进程会拖住全部收尸。"""
         from neurova.core.cancel_token import CancelToken
@@ -490,9 +545,13 @@ class TestTurnTokenIsScopedToItsOwnTurn:
         assert cancel_token.getTurnCancelToken() is None, (
             "轮末没有解绑：已置位的令牌留给下一轮，下一个进程注册回调即被立即杀灭"
         )
-        assert cancel_token.registerKillAction(lambda: None) is False, (
-            "无轮次上下文时注册回调必须被拒绝（而不是挂到上一轮的令牌上）"
-        )
+        # 注册口现在返回**摘钩函数**（无令牌时返回空操作），不再用布尔表示成败：
+        # "有没有挂上去"改由行为判——空操作跑一遍什么也不发生，而挂上去的回调会被兑现。
+        fired: list = []
+        release = cancel_token.registerKillAction(lambda: fired.append("fired"))
+        assert callable(release), "注册口必须交回可调用的摘钩函数（调用方不必判空）"
+        release()
+        assert fired == [], "无轮次上下文时注册的回调被兑现了——它挂到了上一轮的令牌上"
 
     def test_clearKeepsOtherTokensAlone(self):
         """解绑只影响当前上下文——别人的令牌（并发会话）不许被顺手抹掉。"""

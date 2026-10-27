@@ -21,7 +21,11 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from neurova.api.auth import get_current_user, get_current_user_or_default
+from neurova.api.auth import (
+    get_current_user,
+    get_current_user_or_default,
+    requireIdentityForMemoryFace,
+)
 from neurova.api.error_handlers import register_error_handlers
 from neurova.interfaces.api_standard import ErrorCodes
 
@@ -33,9 +37,13 @@ def _mount(router, prefix: str):
     app.include_router(router, prefix=prefix)
     register_error_handlers(app)
     app.dependency_overrides[get_current_user_or_default] = lambda: dict(USER)
-    # 装配噪声先排掉：firewall 的路由级依赖是 `get_current_user`，
-    # 不覆盖就整族 401——红会咬在"没鉴权"上而不是"把故障读成结论"上。
+    # 装配噪声先排掉：路由级的鉴权依赖不覆盖就整族 401——红会咬在"没鉴权"上，
+    # 而不是"把故障读成结论"上。三处都是**装配点**，不是被测对象：
+    #   `get_current_user`          —— firewall 的路由级依赖
+    #   `requireIdentityForMemoryFace` —— 记忆面整面的凭证门（2026-10-26 起读侧一并要凭证）
+    # 这一档测的是"故障不许被画成结论"，与"没带凭证"是两件事。
     app.dependency_overrides[get_current_user] = lambda: dict(USER)
+    app.dependency_overrides[requireIdentityForMemoryFace] = lambda: dict(USER)
     return TestClient(app, raise_server_exceptions=False)
 
 
