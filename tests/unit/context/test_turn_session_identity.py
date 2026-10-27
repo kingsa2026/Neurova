@@ -49,6 +49,7 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
+from tests.ast_scan import parseSource
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -319,7 +320,7 @@ class TestNoSecondIdentityChannel:
     """禁止的假修复：给 `build_context` 新增 `session_id` 形参 = 第二份定义。"""
 
     def test_build_context_has_no_session_id_parameter(self):
-        tree = ast.parse(ORCHESTRATOR_SOURCE.read_text(encoding="utf-8"))
+        tree = parseSource(ORCHESTRATOR_SOURCE.read_text(encoding="utf-8"))
         found = None
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "build_context":

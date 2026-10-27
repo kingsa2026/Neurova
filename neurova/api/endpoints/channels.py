@@ -36,6 +36,7 @@ from neurova.api.agent_access import requireAgentOwner
 from fastapi import Depends, APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
+from neurova.channels.base import ChannelEventType, ChannelMessage
 from neurova.channels.manager import get_channel_manager
 
 if TYPE_CHECKING:  # 只作注解用；运行时靠 `from __future__ import annotations` 不解析
@@ -408,8 +409,6 @@ async def _handle_feishu_webhook(adapter, body: bytes, query_params) -> dict:
     channel_msg = await asyncio.to_thread(
         adapter.buildInboundMessage, data.get("event") or {}, data)
 
-    from neurova.channels.base import ChannelEventType
-
     await adapter._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg)
     return {"code": 0}
 
@@ -452,8 +451,6 @@ async def _handle_dingtalk_webhook(adapter, body: bytes, query_params, headers) 
         message_type=msg_type,
         raw_event=data,
     )
-
-    from neurova.channels.base import ChannelEventType
 
     await adapter._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg)
     return {"errcode": 0}

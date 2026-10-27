@@ -38,6 +38,7 @@ import pytest
 from neurova.context.injector import UnifiedContextInjector
 from neurova.core.base_module import BaseModule
 from neurova.core.event_bus import EventBus
+from tests.ast_scan import parseSource
 
 INJECTOR_PATH = Path(__file__).resolve().parents[3] / "neurova" / "context" / "injector.py"
 #: 扫描根单点，必须写在模块级：绑在函数里的名字，面自证棘轮的取数口认不出，整档会静默掉出它的面。
@@ -78,7 +79,14 @@ def testStopFlushesCacheViaLifecycle(probeBus):
 
     injector.stop()
     assert injector.get_state().value == "stopped"
-    assert probeBus.get_subscribers("context.build"), "stop 后订阅应仍在（退役由 unsubscribe 管）"
+    # 停止即退订（§6-419）：总线上存的是 handler 本体，bound method 持有 `self`，
+    # 订阅留着等于把整个注入器（连带它背后的记忆管理器与原生内存）钉在全局总线上。
+    # 原判据写的是「stop 后订阅应仍在（退役由 unsubscribe 管）」——而那个 `unsubscribe`
+    # 在仓里从未存在过：全仓没有任何一处退订调用，受保护子集因此每档建一次 app 就
+    # 单向 +230MB，第四次 137 就是这么来的。断言反过来，钉住"成对"这条纪律本身。
+    assert not probeBus.get_subscribers("context.build"), (
+        "stop() 之后订阅仍然挂在总线上——模块已停止却还在收事件，且整张对象图被钉住"
+    )
 
 
 def testNoAsyncHookWithoutAwaitInBody():
@@ -132,7 +140,7 @@ def testInjectorDoesNotRedefineBaseModule():
     `neurova.core.base_module` 是仓内模块、恒可导入，用 try/except ImportError 给自己
     造一个"依赖缺失"再兜底，等于同时留着两份契约（且兜底那份把 handler 异常吞成 pass）。
     """
-    tree = ast.parse(INJECTOR_PATH.read_text(encoding="utf-8"))
+    tree = parseSource(INJECTOR_PATH.read_text(encoding="utf-8"))
     redefined = [
         n.lineno
         for n in ast.walk(tree)

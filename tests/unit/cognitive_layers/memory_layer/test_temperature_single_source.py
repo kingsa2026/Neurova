@@ -35,6 +35,7 @@ from pathlib import Path
 import pytest
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
@@ -298,7 +299,7 @@ class TestOtherDeadCodeGroupsAreRetired:
             encoding="utf-8",
         )
         retired = {_module_of(p) for p in RETIRED_DEAD_MODULES}
-        tree = ast.parse(sample.read_text(encoding="utf-8"))
+        tree = parseSource(sample.read_text(encoding="utf-8"))
         found = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module:

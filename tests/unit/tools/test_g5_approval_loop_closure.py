@@ -39,6 +39,7 @@ import typing
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 _REPO = Path(__file__).resolve().parents[3]
 _NEUROVA = _REPO / "neurova"
@@ -59,7 +60,7 @@ def _readSource(relPath: str) -> str:
 
 
 def _functionNode(source: str, name: str) -> ast.AST:
-    tree = ast.parse(source)
+    tree = parseSource(source)
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
             return node

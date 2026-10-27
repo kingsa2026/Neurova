@@ -57,6 +57,7 @@ import inspect
 from pathlib import Path
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 NEUROVA_ROOT = REPO_ROOT / "neurova"
@@ -244,14 +245,14 @@ class TestTheStateValueStoreIsOneImplementation:
             "class B:\n"
             "    def set_state_value(self, key, value):\n        pass\n"
         )
-        assert sorted(_storeDefinitionSites(ast.parse(duplicated))) == [
+        assert sorted(_storeDefinitionSites(parseSource(duplicated))) == [
             "get_state_value", "set_state_value", "set_state_value"], "重复实装没被数出来 ⇒ 定义面判据是恒真的"
         onlyCalls = (
             "def use(x):\n"
             "    x.set_state_value('k', 1)\n"
             "    return x.get_state_value('k')\n"
         )
-        assert _storeDefinitionSites(ast.parse(onlyCalls)) == [], (
+        assert _storeDefinitionSites(parseSource(onlyCalls)) == [], (
             "把调用点数成了实装——定义面判据会把每一个消费者都误报成第二份拷贝"
         )
 

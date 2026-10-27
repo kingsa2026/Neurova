@@ -28,6 +28,7 @@ from fastapi.testclient import TestClient
 
 from neurova.api.deps import get_current_user
 from neurova.api.endpoints.governance import router
+from tests.ast_scan import parseSource
 from tests.auth_headers import overrideIdentity
 
 
@@ -270,7 +271,7 @@ def test_rsi_locator_is_only_reached_through_the_triage_layer():
     import ast
     from pathlib import Path
 
-    tree = ast.parse(Path("neurova/api/endpoints/governance.py").read_text(encoding="utf-8"))
+    tree = parseSource(Path("neurova/api/endpoints/governance.py").read_text(encoding="utf-8"))
     callers = set()
     for fn in (n for n in ast.walk(tree)
                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))):
@@ -289,7 +290,7 @@ def test_governance_module_no_longer_reads_the_process_singleton():
     from pathlib import Path
 
     path = Path("neurova/api/endpoints/governance.py")
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+    tree = parseSource(path.read_text(encoding="utf-8"))
     # 只看可执行代码里的名字使用：docstring 引用"被拆掉的历史实现"是正当的
     used = [
         node.id for node in ast.walk(tree)

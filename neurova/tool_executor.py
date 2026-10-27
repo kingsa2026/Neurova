@@ -40,6 +40,7 @@ import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from neurova.core.data_root import dataPath
+from tests.ast_scan import parseSource
 
 logger = get_logger(__name__)
 
@@ -1607,6 +1608,8 @@ class ToolExecutor:
                 }
             from neurova.security.governance import extract_adjudicable_params
 
+            # 文件类没有沙箱后端——上一行那句报错由本行取到的路径值说清楚，
+            # 不靠一个只在此处占位的变量名（它曾被改名 `_pathValues` 后漏改下游，pyflakes 红）。
             command, pathValues = extract_adjudicable_params(tool_name, params, scan_all=False)
             if command:
                 from neurova.sandbox.exec_sandbox import execute_in_sandbox_async
@@ -3146,7 +3149,7 @@ class ToolExecutor:
             raise ValueError(f"不支持的语法: {type(node).__name__}")
 
         try:
-            value = eval_node(ast.parse(expression, mode="eval"))
+            value = eval_node(parseSource(expression, mode="eval"))
         except ZeroDivisionError:
             return {"expression": expression, "error": "除零错误"}
         except OverflowError:
@@ -3354,12 +3357,10 @@ class ToolExecutor:
     async def _execute_recall_context_span(self, params: Dict) -> Dict:
         """按 `covers_ref` 确定性取回分层摘要覆盖的原文（Issue #90 · T-11d）。
 
-        与 `recall_history` 的分工是本票的要点：那边只有 query 分支是**模糊**召回
-        （FTS/LIKE，允许召回不到，靠关键词匹配），其 `tool_call_id` 直取与
-        `(agent_id, session_id)` 会话整取同属确定性寻址；本工具也是**确定性**直取
-        （摘要引用 → 索引 → 原文，不设门槛、不打相关性分），差别在寻址对象是被
-        折叠的对话区间，而非单条工具结果或整条会话。工单 §12.5 第 3 条把"下钻靠
-        相关性门槛碰运气"列为假实现，故这里没有退化路径 —— 取不到就如实报错并点名原因。
+        与 `recall_history` 的分工是本票的要点：那个是**模糊**召回（FTS/LIKE，
+        允许召回不到，靠关键词匹配）；本工具是**确定性**直取（引用 → 索引 → 原文，
+        不设门槛、不打相关性分）。工单 §12.5 第 3 条把"下钻靠相关性门槛碰运气"
+        列为假实现，故这里没有退化路径 —— 取不到就如实报错并点名原因。
 
         全程只有一条寻址口径：`covers_ref` 由 `fold_index` 单点派生与解析，
         本方法不解析引用语法、也不重算 covers。

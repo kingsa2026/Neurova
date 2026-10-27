@@ -445,8 +445,25 @@ def _check_health(docker: Dict[str, Any], compose: Dict[str, Any], helm: Dict[st
                 f"健康检查路径不一致：Dockerfile={path}, Helm healthCheck.path={hhc.get('path')}",
             )
         )
-    if dhc.get("port") and dhc["port"] != compose["backend"]["port"]:
-        out.append(Finding("error", "R2-healthcheck", "compose 健康检查端口与 Dockerfile EXPOSE 不一致"))
+    compose_port = compose["backend"]["port"]
+    if compose_port is None:
+        out.append(
+            Finding(
+                "error",
+                "R2-healthcheck",
+                "未能从 docker-compose.yml 解析到 backend 端口映射——"
+                "健康检查端口一致性比较会静默少一项（不要把该解析写成可选）",
+            )
+        )
+    elif dhc.get("port") and dhc["port"] != compose_port:
+        out.append(
+            Finding(
+                "error",
+                "R2-healthcheck",
+                f"compose 健康检查端口与 Dockerfile EXPOSE 不一致："
+                f"Dockerfile={dhc['port']}, compose 容器端口={compose_port}",
+            )
+        )
     return out
 
 

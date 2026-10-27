@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient
 from neurova.api.endpoints import mcp_server_api
 from neurova.core.identity_context import get_request_user_id
 from neurova.tool_layers.mcp_server import NeurovaMCPServer
+from tests.ast_scan import parseSource
 
 ENDPOINT = "/api/v1/mcp"
 
@@ -99,7 +100,7 @@ class TestNoSecondIdentityChannel:
     def test_boundaryUsesTheExistingSetter(self):
         """§3 身份只有一条通道：这一面必须调用既有 setter，且不自立第二条。"""
         source = Path(mcp_server_api.__file__).read_text(encoding="utf-8")
-        tree = ast.parse(source)
+        tree = parseSource(source)
         called = {
             node.func.id
             for node in ast.walk(tree)

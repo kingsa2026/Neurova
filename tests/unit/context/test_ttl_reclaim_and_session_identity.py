@@ -41,6 +41,7 @@ from scripts.ci import context_deadline_ledger as ledger  # noqa: E402
 ORCHESTRATOR_SOURCE = PROJECT_ROOT / "neurova" / "context" / "orchestrator.py"
 POOL_SOURCE = PROJECT_ROOT / "neurova" / "context_pool.py"
 from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
+from tests.ast_scan import parseSource
 GUARD_REL = "tests/unit/context/test_ttl_reclaim_and_session_identity.py"
 
 
@@ -118,7 +119,7 @@ class TestReclaimCallSiteIsWiredIntoTheWriteThroat:
     def test_add_context_calls_the_reclaim_helper(self):
         import ast
 
-        tree = ast.parse(POOL_SOURCE.read_text(encoding="utf-8"))
+        tree = parseSource(POOL_SOURCE.read_text(encoding="utf-8"))
         pool_cls = next(
             node for node in tree.body
             if isinstance(node, ast.ClassDef) and node.name == "ContextPool"

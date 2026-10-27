@@ -718,9 +718,7 @@ async def requireIdentityForMemoryFace(
     return _identityFromCredentialsOr401(credentials)
 
 
-#: **记忆面**允许出现的身份门名字（唯一清单，且刻意是闭集）。
-#: 判据 `tests/unit/api/test_memoryWriteIdentityGate.py` 双向钉：清单里的名字必须
-#: 真实存在，memory 包实际 import 的门必须都在清单内——第五道门自己长出来时会红。
+#: **记忆面**允许出现的身份门（唯一清单，且刻意是闭集）。
 #:
 #: 为什么只有两道：政策记的是"租户键必须是 user_id"（→ 严格门 `get_current_user`），
 #: 而"无凭证回落 default"这条读侧语义**只在记忆面之外还留着**——记忆面 2026-10-26 起
@@ -730,10 +728,13 @@ async def requireIdentityForMemoryFace(
 #: 但**记忆面一条都不该用**：查询串凭证会把 token 落进 URL 与访问日志，而
 #: `X-Service-Token` 那条经 `semantic_search_api.py:114` 读记忆语料是**另一个面**
 #: 的口径（登记在台账，不在本清单内）。
-MEMORY_IDENTITY_GATES = (
-    "get_current_user",
-    "get_current_user_or_default",
-)
+#:
+#: 存**函数对象**而不是名字：名单的用途是"这扇门是不是被这个门面用了"，而用它的人
+#: 手里拿的正是依赖注入解析出来的函数对象（`tests/auth_headers._identityEntryPoints`
+#: 的同形口径）。存字符串就得让每个消费者再写一遍名字→对象的映射，那份映射一旦与
+#: 上面的 import 分叉（改名、换再导出），比对就静默恒不命中——本清单 2026-10-26
+#: 漏收 `requireIdentityForMemoryFace` 时正是这个形态：路由级那道门不在名单里，
+#: 于是"取租户数据的端点必须有身份入口"这条判据把 8 个端点判成没鉴权。
 
 
 async def get_current_user_or_default(
@@ -774,3 +775,13 @@ async def get_current_user_or_default(
         )
 
     return _user_identity(payload)
+
+
+#: 落定位置必须是**模块末尾**：`get_current_user_or_default` 定义在上面那行之前不存在，
+#: 写到常量表声明处（紧随 `requireIdentityForMemoryFace`）会在导入期直接 NameError。
+#: 这不是风格问题——本文件被全仓导入，落错位置等于整站起不来。
+MEMORY_IDENTITY_GATES = (
+    get_current_user,
+    get_current_user_or_default,
+    requireIdentityForMemoryFace,
+)

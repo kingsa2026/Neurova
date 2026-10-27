@@ -663,11 +663,34 @@ class ONNXEmbeddingEngine:
                 inference_ms=round(inference_ms, 2),
             )
 
-    async def shutdown(self) -> None:
-        """关闭引擎"""
+    def releaseBackend(self) -> None:
+        """丢弃后端引用**并**把原生内存还回去（同步，不依赖事件循环）。
+
+        `InferenceSession` 持有的是原生内存，只把引用置 None 是交给 GC——
+        长进程（受保护子集单进程跑近八千档）里等于不释放，一路顶到 runner 的
+        内存上限被 SIGKILL（pipeline-3 的 137 就是这么来的）。故显式 close()。
+
+        为什么是同步方法而不是只有 async 的 `shutdown()`：重置入口
+        （`reset_embedding_engine`）可能在**已有事件循环**里被调用，
+        那里再 `asyncio.run()` 会抛 `RuntimeError`，协程从不执行、
+        session 也就不释放——泄漏在异步上下文里原样复发。
+        """
+        session = self._ort_session
         self._ort_session = None
+        if session is not None:
+            # 关闭动作本身不得把停机流程变成崩溃：缺 close() 的后端原样跳过。
+            closeSession = getattr(session, "close", None)
+            if callable(closeSession):
+                try:
+                    closeSession()
+                except Exception as e:
+                    logger.warning("关闭 ONNX 会话失败: %s", e)
         self._st_model = None
         self._tokenizer = None
+
+    async def shutdown(self) -> None:
+        """关闭引擎，**并把原生内存还回去**。"""
+        self.releaseBackend()
         self._initialized = False
         self._backend_type = None
         logger.info("ONNXEmbeddingEngine 已关闭 | 统计: %s", self.stats)

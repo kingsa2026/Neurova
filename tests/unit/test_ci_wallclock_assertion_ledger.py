@@ -34,6 +34,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 #: 取时钟的函数名（`time.perf_counter()` / `perf_counter()` / `time.time()` …）
 CLOCK_FUNCS = frozenset({"perf_counter", "monotonic", "time", "time_ns", "process_time"})
 
@@ -332,7 +333,7 @@ def wallclockBounds(source) -> List[Tuple[int, str, str]]:
     `source` 可以是源码文本（单用例自证时用），也可以已是语法树 —— 跨文件扫描
     走 `ast_scan._cachedParse` 取树，判定逻辑仍只有这一处（不新造平行入口）。
     """
-    tree = source if isinstance(source, ast.AST) else ast.parse(source)
+    tree = source if isinstance(source, ast.AST) else parseSource(source)
     clock = _clockNames(tree)
     constantNames = _constantBoundNames(tree)
     found: List[Tuple[int, str, str]] = []

@@ -6,6 +6,7 @@
 """
 
 import pytest
+from tests.ast_scan import parseSource
 
 
 class TestMemoryLayerExports:
@@ -124,7 +125,7 @@ class TestFirewallStatsEndpoint:
         from neurova.api.endpoints import firewall
 
         # 用 AST 而非文本匹配：注释里提到该名字是允许的，代码引用才是缺陷
-        tree = ast.parse(inspect.getsource(firewall))
+        tree = parseSource(inspect.getsource(firewall))
         referenced = [n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id == "_firewall_rules_store"]
         assert not referenced, "端点代码仍在引用不存在的 _firewall_rules_store"
 
@@ -158,7 +159,7 @@ class TestSyntaxErrorsFixed:
 
         root = pathlib.Path(__file__).resolve().parents[2]
         source = (root / path).read_text(encoding="utf-8")
-        ast.parse(source, filename=path)
+        parseSource(source, filename=path)
 
     def test_local_only_audit_scripts_are_not_in_parse_matrix(self):
         """从未入库的本地脚本不得作为 CI 断言目标（否则干净克隆必红）。"""

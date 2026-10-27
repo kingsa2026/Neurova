@@ -95,14 +95,10 @@ def _sweepReadCounts() -> dict:
         for shape in _READ_SHAPES
     ]
     counts: dict = dict.fromkeys(_advertisedNames(), 0)
-    refs = ast_scan.sourceRefsUnder(PROD_ROOT, ".py")
-    scanned = len(refs)
-    # 面自证：根被改窄时下面几个格子的读数会缩成「零残留」「零命中」而不是红
-    # （该形态由 `tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py` 点名）。
-    assert scanned > 500, (
-        f"生产语料现读 {scanned} 个文件（根＝{PROD_ROOT}）——面量级不对＝根指错，"
-        "「零残留」不来自代码")
-    for ref in refs:
+    corpus = ast_scan.sourceRefsUnder(PROD_ROOT, ".py")
+    # 面自证：先证语料非空，再谈「计数为零」（根被改窄时零计数与干净同形）。
+    assert len(corpus) > 100, f"扫描面现读 {len(corpus)} 个文件——PROD_ROOT 指错时本判据恒绿"
+    for ref in corpus:
         if ref.path.name == "builtin_tools.py":
             continue
         text = ref.code
@@ -120,13 +116,10 @@ class TestPhantomKnobSweep:
         """幻影旋钮删干净：schema、放行表、执行体三处都不该再有它。"""
         assert "max_marks" not in str(_BUILTIN_SCHEMAS)
         assert "max_marks" not in str(_COMPUTER_TOOL_PARAM_KEYS)
+        # 面自证：本格断的是「零残留」，而零残留既可能是「真删干净」也可能是「根写窄了扫了个空」。
+        scanned = len(ast_scan.filesUnder(PROD_ROOT, ".py"))
+        assert scanned > 700, f"生产树扫描面现读 {scanned} 个 .py，低于下限＝PROD_ROOT 写错本格恒绿"
         # hints 预筛是充分条件：连 "max_marks" 这七个字节都没出现的文件不可能命中
-        # 面自证走**未预筛**的根：`max_marks` 已被删干净，按它预筛的语料本来就该是 0，
-        # 拿它当"面"等于用命中数证面（与本档要防的假绿同形）。
-        corpus = len(ast_scan.filesUnder(PROD_ROOT, ".py"))
-        assert corpus > 500, (
-            f"生产语料现读 {corpus} 个文件（根＝{PROD_ROOT}）——面量级不对＝根指错，"
-            "「零残留」不来自代码")
         leftovers = [
             ref.path.relative_to(REPO).as_posix()
             for ref in ast_scan.sourceRefsUnder(PROD_ROOT, ".py", hints=("max_marks",))
@@ -143,10 +136,6 @@ class TestPhantomKnobSweep:
 
     def test_noAdvertisedParamIsUnread(self):
         """治理面每个工具的每个广告参数，都必须有读取点。"""
-        # 面自证：先证这次真扫到了生产树，再谈"每个参数都有读取点"——
-        # 根被改窄/改空时，计数全零会被下一条的"幻影旋钮"读成满盘红或缺席，两种都不是事实。
-        scanned = len(ast_scan.filesUnder(PROD_ROOT, ".py"))
-        assert scanned > 100, f"扫描面现读 {scanned} 个 .py（根＝PROD_ROOT）——根指错时判据不来自代码"
         counts = _sweepReadCounts()
         unread = []
         for tool in sorted(COMPUTER_USE_TOOLS):

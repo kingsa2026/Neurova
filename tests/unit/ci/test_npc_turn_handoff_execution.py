@@ -57,6 +57,7 @@ PROBE_WALL_S = 20
 CNB = PROJECT_ROOT / ".cnb.yml"
 SETTINGS = PROJECT_ROOT / ".cnb" / "settings.yml"
 from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
+from tests.ast_scan import parseSource
 
 #: 已作废的接力标记文件名（Issue #158 引入、Issue #189 废止）。
 #: 保留常量只为**反向钉住**「它不得再出现」—— 收尾 `if` 自 #189 起读平台
@@ -171,7 +172,7 @@ class TestGateScriptIsExecutedByTheBuild:
         assert GATE_SCRIPT.exists(), (
             "scripts/ci/npc_turn_handoff_gate.py 丢失 —— 接力判据的可达性无人自证"
         )
-        ast.parse(io.open(GATE_SCRIPT, encoding="utf-8").read())
+        parseSource(io.open(GATE_SCRIPT, encoding="utf-8").read())
 
     def test_npc_pipeline_runs_the_gate(self, cnb_doc):
         """每条 NPC 流水线都要跑门禁：门禁不跑，A 条判据在 CI 上就是空转。"""

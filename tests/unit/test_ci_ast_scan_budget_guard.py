@@ -51,6 +51,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from tests import ast_scan
+from tests.ast_scan import parseSource  # noqa: E402
 
 #: 允许保留的「枚举 + 解析」全仓扫描：**空集是默认政策**。
 #: 确需保留者必须逐条写明理由，并说明为何**两条**共享入口都不适用：
@@ -64,6 +65,15 @@ REPO_WIDE_SCAN_LEDGER: dict = {  # type: ignore[type-arg]
     # **不留常驻语法树**的一次性入口（保留的收益只在重复扫描时成立，成本却每次
     # 扫描都付：本机 2985 个 `.py` 空进程 gen2 1.0ms / 保留全部语法树 2243ms）。
     # 该判据是典型的一次性全仓扫描，改走一次性入口后既进 CI 也不再与代码总量捆绑。
+    #
+    # 本批（§6-403 收尾）另有五档同类命中，也**不留**任何登记：它们的枚举改成
+    # `ast_scan.filesUnder` / `sourceRefsUnder`，解析改走一次性入口
+    # `ast_scan.transientTree`（`test_longTermMemoryBaselineGate` 的类定义扫直接走
+    # `classDefsIn`）。逐文件的小谓词（`_syncRouteCallsIn` / `_singleArgCallsIn` /
+    # `_readsMountedAppRoutes` / `_builderCalls`）现在一律**吃语法树**而不是源码，
+    # 判据自己不再解析——反向控制格传 `ast.parse(样本)` 照样能证伪探测器。
+    # 即：能走共享入口就走，台账仍是空集（这条判据要防的是"成本随代码总量涨"，
+    # 不是"有没有登记"；登记是最后的出路，不是省事的出路）。
 }
 
 
@@ -152,9 +162,13 @@ SHARED_BUDGET_ENTRIES = frozenset({
     # 任何"自己解析"的机会，故不计枚举也不计解析、且不下潜。
     "shadowedTopLevelNames", "importersOfModule", "takenPerModule", "transientTrees",
 })
-#: 共享预算的**只枚举**入口：枚举（`rglob`）归共享，但解析仍由调用方自付。
-#: 故它算枚举落点 —— 配私有 `ast.parse` 仍须报出（否则它成了免检通道）。
-SHARED_ENUM_ENTRIES = frozenset({"filesUnder"})
+#: 共享预算的**只枚举**入口：枚举归共享、解析由调用方自付，**配私有解析仍须报出**。
+#: `filesUnder` 是当前唯一一条：它省的是目录遍历那一段，解析的成本照样随代码总量涨。
+#: 实测把它当免检通道时，受保护子集里 4 个落点（`test_fullChainRetired` /
+#: `test_longTermMemoryBaselineGate` / `test_retrieveMemoriesScopeArgContract` /
+#: `test_marketDocSkillDigestGate`）改走它之后**仍是**「枚举 + 私有解析」的组合而判据
+#: 全绿 —— 那正是本门禁要抓的形态，不是它该放行的形态。
+SHARED_ENUM_ENTRIES = frozenset({ast_scan.FILES_UNDER_ENTRY})
 
 #: 「解析」落点：**模块别名 → 该模块上属于解析原语的属性名**。
 #: 靶点是「成本随代码总量涨」，故凡把源码编译成语法树/字节码的入口都算：
@@ -173,8 +187,13 @@ PARSE_MODULE_ATTRS = {
     "libcst": frozenset({"parse_module", "parse_expression", "parse_statement"}),
     "astroid": frozenset({"parse"}),
 }
-#: 解析原语的**裸名**形态（无模块前缀）：内建 `compile` 与 `ast.parse` 的裸名 `parse`。
-BARE_PARSE_NAMES = frozenset({"compile", "parse"})
+#: 解析原语的**裸名**形态（无模块前缀）：内建 `compile` 与 `ast.parse` 的裸名 `parse`，
+#: 以及**共享单源入口** `ast_scan.parseSource`（判据与共享源一律经它解析）。
+#:
+#: 为什么 `parseSource` 算解析原语而不是"共享预算入口"：它内部就是 `ast.parse`，
+#: 调用方的成本照样随代码总量涨——枚举 ＋ 一次解析仍是全仓扫描。豁免它等于给
+#: "私有解析"换了个名字，那正是本门禁要抓的形态，不是它该放行的形态。
+BARE_PARSE_NAMES = frozenset({"compile", "parse", "parseSource"})
 
 
 def _importSurface(tree) -> tuple:
@@ -191,7 +210,11 @@ def _importSurface(tree) -> tuple:
     - 解析原语裸名：`from ast import parse as X` 之后的 `X` —— 它**就是**解析原语，
       与写 `ast.parse(...)` 等价，只是把模块名省掉了。
     """
-    wanted = set(PARSE_MODULE_ATTRS) | {"os"}
+    # 解析原语所在的模块分两类：标准库/第三方解析器（按属性名判），
+    # 以及**共享单源入口**所在模块（`from tests.ast_scan import parseSource` 之后，
+    # 本地名就是解析原语本身——它内部就是 `ast.parse`，成本照样随代码总量涨）。
+    parseModules = {**PARSE_MODULE_ATTRS, ast_scan.__name__: frozenset({"parseSource"})}
+    wanted = set(parseModules) | {"os"}
     aliases = {module: set() for module in wanted}
     parseMembers = set()
     for node in ast.walk(tree):
@@ -204,7 +227,7 @@ def _importSurface(tree) -> tuple:
             for alias in node.names:
                 local = alias.asname or alias.name
                 aliases[node.module].add(local)
-                if alias.name in PARSE_MODULE_ATTRS[node.module]:
+                if alias.name in parseModules[node.module]:
                     parseMembers.add(local)
     return aliases, parseMembers
 
@@ -382,7 +405,7 @@ def _repoWideAstScans(source: str) -> list:
     （`ast.walk(ast.parse(inspect.getsource(func)))`，它枚举的是树、不是仓库）、
     以及走 `tests/ast_scan` 共享预算的写法。
     """
-    tree = ast.parse(source)
+    tree = parseSource(source)
     aliases, parseMembers = _importSurface(tree)
     # `<模块>.<成员>` 的裸名形态（`from ast import parse as X` 之后的 `X`）与
     # 模块别名同属一张表，见 `_importSurface`。
@@ -459,7 +482,7 @@ def _oneShotRetainingScanHits(source: str) -> list:
     纯静态判定：只看调用了哪个入口名。不判「扫了几个文件」——那在不读运行时的
     前提下不可判定，而入口的**物化语义**是当场可判的事实。
     """
-    tree = ast.parse(source)
+    tree = parseSource(source)
     units, _byFunction = _scanUnits(tree)
     hits = []
     for label, body, _shadow in units:
@@ -1218,7 +1241,7 @@ class TestSharedParseBudgetIsReal:
                 ("neurova/skills/sub/x.py", "from .. import get_skill_registry\n"),
                 ("neurova/foo.py", 'NOTE = "neurova.skills 只是文本"\n'),
                 ("neurova/bar.py", "from neurova.skills_extra import create_default_skills\n")):
-            tree = ast.parse(source)
+            tree = parseSource(source)
             # `namesTakenFrom` 的入参形状与 `importsOf` 一致：nodeScan 吐的 (path, node) 对
             pairs += [(PROJECT_ROOT / relPath, node) for node in ast.walk(tree)]
         got = {name for name, _p, _l in ast_scan.namesTakenFrom(pairs, "neurova.skills")}
@@ -1230,7 +1253,7 @@ class TestSharedParseBudgetIsReal:
         assert ast_scan.resolveImportModule("neurova/skills/agent.py", rel) == \
             "neurova.skills.models", "单点相对导入解析错"
         assert ast_scan.resolveImportModule("neurova/skills/__init__.py",
-                                            ast.parse("from . import x").body[0]) == \
+                                            parseSource("from . import x").body[0]) == \
             "neurova.skills", "包 __init__ 的 level=1 应指回包自己"
 
     def test_prefilter_is_sufficient_not_a_loophole(self, tmp_path):
@@ -1422,7 +1445,7 @@ class TestTakenPerModuleDivesOncePerTree:
         # （实测：判据自己那一趟让读数精确翻倍，单趟版被误判成两趟）。
         trees = len(ast_scan.sourceRefsUnder(DIVE_SCAN_ROOT))
         # 一趟的预算由**这一轮的节点总量**现量得出，不抄绝对值（抄了判据就会随代码总量红）。
-        nodeTotal = sum(len(ast_scan._walkNodes(ast.parse(ref.code)))
+        nodeTotal = sum(len(ast_scan._walkNodes(parseSource(ref.code)))
                         for ref in ast_scan.sourceRefsUnder(DIVE_SCAN_ROOT) if ref.code)
         onePassBudget = int(nodeTotal * ONE_PASS_DIVE_FACTOR)
 
@@ -1469,7 +1492,7 @@ class TestTakenPerModuleDivesOncePerTree:
         out = {}
         for ref in ast_scan.sourceRefsUnder(root):
             try:
-                tree = ast.parse(ref.code)
+                tree = parseSource(ref.code)
             except SyntaxError:
                 continue
             rel = ast_scan.relativeToRepo(ref.path)

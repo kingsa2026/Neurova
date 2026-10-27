@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from neurova.collaboration.neurflow import external_api as api
+from tests.ast_scan import parseSource
 
 SNAPSHOT = json.loads(Path(__file__).with_name("external_api_contract_snapshot.json").read_text(encoding="utf-8"))
 LEAVES = {
@@ -49,7 +50,7 @@ def test_leaf_structure_identity_and_no_old_helper_bindings(leaf, names):
     assert (directory / f"{leaf}.py").is_file()
     assert (directory / "__init__.py").read_text(encoding="utf-8") == ""
     module = importlib.import_module(f"{api.__package__}.external_clients.{leaf}")
-    tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+    tree = parseSource(Path(module.__file__).read_text(encoding="utf-8"))
     assert [n.name for n in tree.body if isinstance(n, ast.ClassDef)] == names
     for name in names:
         cls = getattr(module, name)

@@ -26,6 +26,7 @@ from neurova.evolution.skill_improver import (
     SkillImprovement,
 )
 from neurova.skill_system import Skill, SkillRegistry
+from tests.ast_scan import parseSource
 
 NAME = "read_write_skill_alpha"
 IDENTITY = "skill_ab12cd34"
@@ -162,7 +163,7 @@ def test_no_direct_dictionary_lookup_outside_the_registry():
     targets = [root / "agent" / "chat_pipeline.py", root / "tool_executor.py"]
     offenders = []
     for target in targets:
-        tree = ast.parse(target.read_text(encoding="utf-8"))
+        tree = parseSource(target.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Call)

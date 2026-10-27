@@ -1097,3 +1097,4 @@ def _isolateArtifactAnchors(monkeypatch):
     monkeypatch.setattr(artifact_digest, "anchorPath",
                         lambda: ANCHOR_SESSION_DIR / "artifact_anchors.json")
 
+
