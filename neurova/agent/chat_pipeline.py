@@ -33,7 +33,7 @@ from neurova.agent.retriever_adapters import (
 )
 from neurova.agent.knowledge_retriever_adapter import KnowledgeRetrieverAdapter
 from neurova.agent.gates import terminationNotice
-from neurova.agent import legacy_call
+from neurova.agent import failed_turn_landing, legacy_call
 from neurova.agent.tkg_retriever_adapter import TKGRetrieverAdapter
 from neurova.agent.tool_execution_manager import ExecutionStatus, TimeoutStrategy, ToolExecutionManager
 from neurova.agent.actionability import evaluate_actionability, get_actionability_config
@@ -499,43 +499,8 @@ class ChatPipeline:
             finish_task(self._agent, ctx.user_input, completed=completed)
 
     async def _landFailedTurn(self, ctx: ChatContext, exc: BaseException) -> None:
-        """失败轮的会话落点：这一轮结束了，而且是以失败结束的。
-
-        为什么必须在管线而不是端点：后处理（含唯一的会话写点 `_step_save_session`）
-        只在正常收尾路径上被调，LLM 抛错时异常从 `_step_llm_call` 就离开了管线——
-        于是盘上只剩 §6-419 提前落好的 user 一条。活体量到过：09:29 那轮上游
-        5 分钟不吐字后超时、候选模型 400 not supported，整轮以错误收场，复算时
-        `messages` 只有 `[user]`，刷新后的页面挂着「本轮仍在生成中」永远等不到终态。
-
-        教义第 2 条：这是**诚实形态**，不是把失败兜成成功——异常照旧外抛，SSE 的
-        `error` 帧与 run 台账的 `failed` 终态一概不变；这里只是额外让读侧能看到
-        "这一轮以什么收场"。落点走既有单点（`_step_save_session`，同一份围栏与
-        owner 口径），不另起第二份写会话的代码。本函数自身失败不外抛、只点名。
-        """
-        if ctx.post_chat_ran or not ctx.save_memory:
-            return
-        post = self.post_chat_pipeline
-        if post is None:
-            logger.warning("失败轮无法落点：后处理管线未初始化（本轮盘上仍只有 user）")
-            return
-        reason = str(exc) or type(exc).__name__
-
-        if isinstance(exc, __import__("asyncio").CancelledError):
-            text = f"⚠️ 本轮被中止（未生成回复）：{reason}"
-        else:
-            text = f"⚠️ 未能生成回复：{reason}"
-        try:
-            await post._step_save_session(
-                ctx.user_input,
-                text,
-                ctx.session_id,
-                ctx.save_memory,
-                ctx.metadata,
-                writer_claim=ctx.writer_claim,
-                user_already_persisted=ctx.user_message_persisted,
-            )
-        except BaseException as landExc:  # noqa: BLE001 - 落点失败不得顶掉真因
-            logger.warning("失败轮落点未成（本轮读侧仍看不到终态）: %s", landExc)
+        """失败轮落点（实现见 `agent/failed_turn_landing.py`）。"""
+        return await failed_turn_landing.landFailedTurn(self, ctx, exc)
 
     async def _execute_steps(self, ctx: ChatContext) -> Dict[str, Any]:
         """执行完整的对话管线
