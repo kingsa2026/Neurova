@@ -137,9 +137,18 @@ jobs:
       # 覆盖率门禁不在分片里判（实测单片 49%、整份 88%，逐片判会假红）：
       # 各片只攒 `data/coverage/.coverage*`，由下面的 `coverage` job 合并后再判一次。
       - name: Run protected subset shard ${{ matrix.shard }} (collect coverage)
+        # 清单逐行读到位置参数上，`$TESTS` 那种"压成一行再交给 shell 切词"的写法
+        # 会因清单里的一条空行让后面的条目整片错位（构建 cnb-1f0-1k5uonjt2-003）。
+        # 两侧同一口径，判据 tests/unit/ci/test_protected_subset_shards.py 咬两头。
         run: |
-          TESTS=$(grep -v '^#' "scripts/ci/protected_tests.${{ matrix.shard }}.txt" | tr '\n' ' ')
-          python -m pytest -q --timeout 1500 --cov --cov-report= --cov-fail-under=0 $TESTS
+          while IFS= read -r entry; do
+            [ -n "$entry" ] || continue
+            [ -f "$entry" ] || { echo "❌ 清单点名了不存在的文件：$entry"; exit 1; }
+            set -- "$@" "$entry"
+          done <<EOF
+          $(grep -v '^#' "scripts/ci/protected_tests.${{ matrix.shard }}.txt" | grep -v '^[[:space:]]*$')
+          EOF
+          python -m pytest -q --timeout 1500 --cov --cov-report= --cov-fail-under=0 "$@"
 
       - name: Upload coverage data
         uses: actions/upload-artifact@v4
