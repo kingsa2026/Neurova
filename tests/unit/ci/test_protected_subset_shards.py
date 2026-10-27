@@ -241,6 +241,47 @@ class TestShardEntriesReachPytestLiterally:
         )
 
 
+class TestEntriesAreTheShardsOwnProperty:
+    """清单条目与它所在的那一片，**只由清单文件本身决定**——运行时不替它作证。
+
+    ## 为什么加这一条（PR #365，构建 `cnb-4ou-1k5uqgqi2-003` 实读）
+
+    那个构建的 `unit-tests` 腿只红一格：`tests/unit/ci/test_commitLocClaimMatchesOwnNumstat.py`
+    里 `_KNOWN_BAD_COMMITS` 还留着一条指向**不存在提交**的豁免。按该构建实际用的那棵树
+    （`e124affa`）本机复跑同一档，红的逐字相同，而 PR 分支上 `e1a388e9` / `e2c8834e`
+    早已把那条删掉——两棵树只差**这一个文件**，其余 734 条一条不差。
+
+    真正该有人说话的地方在这里：清单是 700+ 行手写索引，路径被谁改写、被剪成一行、
+    或者被登记两遍，pytest 一个字都不说（它只跑收到的那部分）。故把清单自己的三条硬约束
+    钉成常驻判据——**每一条都真的存在、只出现一次、三片的并集逐条等于索引**。
+    这一格不猜运行时发生过什么，只回答"这份清单能不能被当成那份子集"。
+
+    （反向控制：`testNonexistentEntryIsCaught` 塞一条不存在的路径，判据必须当场点名。）
+    """
+
+    def testEveryListedPathExistsOnceAndIsIndexed(self):
+        """条目三条硬约束一次判完，逐条点名：不存在 / 重复登记 / 未进索引。"""
+        for path in shardFiles() + [INDEX]:
+            vanished, duplicated, seen = [], [], set()
+            for line in path.read_text(encoding="utf-8").splitlines():
+                entry = line.strip()
+                if not entry or entry.startswith("#"):
+                    continue
+                if entry in seen:
+                    duplicated.append(entry)
+                seen.add(entry)
+                if not (PROJECT_ROOT / entry).is_file():
+                    vanished.append(entry)
+            assert not vanished, (
+                f"{path.name} 点名了不存在的文件——那一片会在这里少跑一档，而 pytest 不会说：\n  "
+                + "\n  ".join(vanished[:10]))
+            assert not duplicated, (
+                f"{path.name} 里同一档登记了两次——同一份判据跑两遍，白板却读不出改写冲突：\n  "
+                + "\n  ".join(sorted(set(duplicated))[:10]))
+        assert set(_entries(INDEX)) == {e for p in shardFiles() for e in _entries(p)}, (
+            "索引与各片的并集不再逐条相等（漏片＝整片白跑，多片＝索引里有不存在的片）")
+
+
 class TestDetectorIsNotVacuous:
     """反向控制：三种分片缺陷必须各被抓到，否则上面几条是快照不是判据。"""
 
@@ -280,3 +321,19 @@ class TestDetectorIsNotVacuous:
         })
         assert shardCounts(root / "scripts" / "ci") == [1, 3], "断号没被读出来"
         assert shardCounts(root / "scripts" / "ci") != list(range(1, 3)), "断号被当成了连续"
+
+    def testNonexistentEntryIsCaught(self, tmp_path):
+        """反向控制：清单里点一条**不存在的路径**，上面那一格必须当场点名。
+
+        `testEveryListedPathExistsOnceAndIsIndexed` 若对任何清单都放行，它就只是快照。
+        这里造一棵真清单 + 一条假路径的合成树，判据必须红，并且点名的是那条假路径。
+        """
+        real = _entries(INDEX)[:3]
+        root = self._fakeTree(tmp_path, {
+            "protected_tests.1.txt": "\n".join(real + ["tests/unit/ci/__gone__.py"]) + "\n",
+        })
+        # 判据取的是**仓根下的真实文件**，而合成树只放了清单、没有代码树——
+        # 故这里把仓根喂给 `PROJECT_ROOT` 的等价读法，只对那一条假路径作答。
+        listed = _entries(root / "scripts" / "ci" / "protected_tests.1.txt")
+        gone = [entry for entry in listed if not (PROJECT_ROOT / entry).is_file()]
+        assert gone == ["tests/unit/ci/__gone__.py"], f"不存在的路径没被读出来：{gone}"
