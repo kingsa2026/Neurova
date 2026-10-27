@@ -93,7 +93,15 @@ _POOL_NAME_RE = re.compile(
     r"(?P<pool>" + "|".join(sorted(_POOL_ALIASES, key=len, reverse=True)) + r")")
 
 #: 声明之后到**下一处数字声明**之前的那一段：后缀词、数量词都只在这段里认
-_DECLTAIL_RE = re.compile(r"(?:(?!\+?\d+\s*/\s*[−-]\s*\d).)*", re.S)
+_DECLTAIL_RE = re.compile(r"(?:(?!\+?\d+\s*[−-]?\s*/\s*[−-]?\s*\d+).)*", re.S)
+
+#: 一段声明的**足迹**：池名 → 数字 → 断点（或引号右界）。
+#: 断点由 `_DECLTAIL_RE` 给出；引号右界同样算停——引号里的字不是本笔的口径说明
+#: （构建 `cnb-4ou-1k5uqgqi2-003`：那句引文被算成了「声明之后那一段」，别人的账被按本笔复算）。
+#: 引号的右界形态：一段引文到此为止（与 `_quotedSpans` 的成对表同一件事的另一面）
+_CLOSING_QUOTES = '」』”‘’"'
+_CLAIM_FOOTPRINT_RE = re.compile(
+    ".*?\\+?\\d+\\s*/\\s*[−-]\\s*\\d+[\\s\\S]*?(?=[" + _CLOSING_QUOTES + "]|$)", re.S)
 
 #: 紧跟声明的数量后缀：`+2/-0` 个文件 / `+3/-0` 格——量的是笔数格数，不是行数池
 _COUNT_SUFFIX_RE = re.compile(r"[ \t]*(?:\*\*[ \t]*)?(?:个文件|格|条|笔|处)")
@@ -540,7 +548,6 @@ class TestEveryClaimedNumberIsReal:
         （`生产池 +26/-5（说明）`），声明本身仍在正文里，照旧报红——否则下一次真写错、
         顺手在旁边加个括号就能安静通过。
         """
-        totals = {"生产池": (0, 0), "测试/基建池": (0, 0), "全部": (0, 0)}
         forms = {
             "（生产池 +26/-5）": True,        # 整枚声明在夹注内
             "生产池 +26/-5（说明）": False,   # 夹注在声明之后，声明本身仍是本笔的账
@@ -554,6 +561,27 @@ class TestEveryClaimedNumberIsReal:
                 "——夹注只圈它自己那一段，不能顺手把整行豁免掉")
             assert (_mismatches("HEAD", body) == []) is exempt, (
                 f"{fragment!r} 在复算面上的结论与豁免判定不一致")
+
+    def testAClaimFootprintStopsAtTheQuotationRightEdge(self):
+        """引用块**自带池数字**时，那一段声明的足迹不许跨过引号右界。
+
+        本批实测（构建 `cnb-4ou-1k5uqgqi2-003` 的主格）：主格点名两笔「生产池 +26/-5
+        与自己的 numstat 不符」，而两处都是**引用**。引号表早已含「」，真因在
+        `_DECLTAIL_RE` 的否定前瞻：它要求「数字后面紧跟斜杠再跟数字」，而真文写的是
+        `+26/-5` —— `+26` 之后直接是斜杠，前瞻里的 `\d` 还要再吃一个数字，
+        于是断点**一条也断不住**，扫描把 `/` 之后的整段引文算成「声明之后那一段」，
+        行内后缀词与数量词于是在引文里被认出来：别人的账被按本笔的池去复算。
+
+        这一格钉的是足迹：声明从池名起到断点止，不许越过引号右界。
+        """
+        body = "1. 那条豁免挡的是 `e87ce9b9` 正文里写错的「生产池 +26/−5」。本次已在正文层改正"
+        claim = _claims(body)[0]
+        start = body.index(claim["label"])
+        stop = start + _CLAIM_FOOTPRINT_RE.search(body[start:]).end()
+        rightEdge = body.index("」")
+        assert stop <= rightEdge, (
+            f"这一段声明吃到第 {stop} 个字（引号右界在第 {rightEdge} 个）"
+            f"——它把引文里的字认成了本笔的口径说明：{body[start:stop]!r}")
 
     def testRealBodyWithOneWrongDigitIsCaught(self):
         """把本会话真犯过的那次错**照原样**塞回真实正文，判据必须点名并且给出实量值。
