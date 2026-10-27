@@ -24,8 +24,6 @@ from __future__ import annotations
 import typing
 from typing import Any, Callable, Dict
 
-from neurova.api.auth import create_access_token
-
 
 def bearerHeaders(sub: str = "probe-user", **claims: Any) -> Dict[str, str]:
     """对齐本轮密钥，再签一枚真 token 并包成请求头（`sub` 即租户键 user_id）。
@@ -169,18 +167,22 @@ def _signingGates() -> list:
 
 
 def pinJwtSecret(secret: str = _TEST_SECRET) -> str:
-    """把签发侧与全部验签门的密钥对齐到 `secret`，返回它。
+    """把本轮密钥对齐到 `secret`，返回它。
 
-    幂等：已经是这一把时什么都不做。返回值的用途是让调用方写
-    `token = create_access_token(..., ) if pinJwtSecret() else ...` 这类链式取用，
+    对齐的落点是**环境变量 `NEUROVA_JWT_SECRET`**，不是模块全局：生产侧的签发与验签
+    都走唯一取用口 `auth.currentJwtSecretKey()`（运行时读环境变量）。原先这里逐个改写
+    `auth.JWT_SECRET_KEY` 与各身份门 `__globals__` 里的同名全局，那是在测试里替生产
+    补一个它本该有的前提——取用口上线后，改全局对签发/验签**一个字都不生效**，
+    反而会读出一把谁都不用的"第三把密钥"（实测 10 格 `InvalidSignatureError`）。
+
+    幂等：已经是这一把时什么都不做。返回值的用途是链式取用；
     但**不要在导入期烘一枚令牌** —— 令牌属于"这一轮"，不属于"这个进程"。
     """
+    import os
+
     from neurova.api import auth as auth_mod
 
-    if auth_mod.JWT_SECRET_KEY != secret:
-        auth_mod.JWT_SECRET_KEY = secret
-    for gate in _signingGates():
-        if gate.__globals__.get("JWT_SECRET_KEY") != secret:
-            gate.__globals__["JWT_SECRET_KEY"] = secret
+    if auth_mod.currentJwtSecretKey() != secret:
+        os.environ["NEUROVA_JWT_SECRET"] = secret
     return secret
 
