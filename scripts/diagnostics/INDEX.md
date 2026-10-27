@@ -15,6 +15,7 @@
 | `_agent_probe.py` | 拉起后端(9527)并探测 agents 路由 | `python scripts/diagnostics/_agent_probe.py` | 启动临时 uvicorn 线程 |
 | `_trace_stack.py` | 最小 Agent 初始化 + 一次 chat，用于堆栈定位 | `python scripts/diagnostics/_trace_stack.py` | 创建 `./_smoke_workspace` |
 | `_run_backend.py` | 仅启动本地后端(9527)，供手工调试单独拉起服务 | `python scripts/diagnostics/_run_backend.py` | 占用 9527 端口 |
+| `artifactDigestStockInventory.py` | 存量构件摘要清单（只读）：已装技能／插件谁没钉、钉了不符、锚缺，四态逐条列出；不写一个字节 | `PYTHONPATH=$(git rev-parse --show-toplevel) python scripts/diagnostics/artifactDigestStockInventory.py [--json]` | 只读数据根与 `~/.neurova/artifact_anchors.json` |
 | `_tool_experience_loop_probe.py` | 工具↔经验↔再调用环路只读取证：一轮之后输出三读数 + 票据 `lookup`/`ticket_reason` 的 JSON（不触网，库落临时目录） | `python scripts/diagnostics/_tool_experience_loop_probe.py [--json] [--workspace DIR]` | 在临时目录建 EKB 库与 agent 工作区 |
 
 ### 数据迁移 / 复算（one-off + 可重复读数）
@@ -33,12 +34,15 @@
 | `artifactDigestStockInventory.py` | 存量构件摘要清单（只读）：已装技能/插件的四态（`pinned-ok`/`pinned-mismatch`/`unpinned`/`missing-dir`）与根外锚三态，回答「哪些存量条目还没钉、钉了却不符、锚缺」 | `PYTHONPATH=$(git rev-parse --show-toplevel) python scripts/diagnostics/artifactDigestStockInventory.py [--json]`（退出码 2＝连数据根都读不出） | 只读（不写数据根、不补锚） |
 | `tool_parallelism_readout.py` | 工具并行收益取数（M3 前置）：批次形态分布 + 工具耗时分布 + **逐工具「值不值得为它成组等待」**（判据落 **P50 桶界夹逼**三态：整段过门槛=值得/整段不过=不值得/**跨门槛=边界**且不硬挑一侧；冷路径按保守下界**另档**呈现、不进常态判据）；**两个占比口径并列**（§10.1 原文口径「多工具轮/全部轮」与参考口径「成组批/多调用轮」），否证结论落原文口径；`no_data` 显式标注**不构成否证**，且**按成因分型**（`absent_in_this_scrape` 本份抓取里没有该族仪表⇒先核对抓取、确为完整抓取时才落到部署 / `zero_samples` 仪表在位⇒可达且已就位、该等真实轮次 / `schema_drift` 抓取里有本词表不认识的形态标签⇒分母残缺、该修词表；两段各自按本段仪表的表判，互不借用）；形态词表派生自写入侧单一事实源（`core/tool_capability.ToolBatchShape`），漂移样本点名且不再静默丢弃；可用 `--metrics-file` 离线复算（输入不可用退出码 2 并点名，不抛解释器栈） | `python scripts/diagnostics/tool_parallelism_readout.py [--json] [--metrics-file FILE]` | 只读（不连后端；`--metrics-file` 时不读进程注册表） |
 
+| `artifactDigestStockInventory.py` | 存量构件摘要清单（只读）：技能/插件逐条四态（`pinned-ok` / `pinned-mismatch` / `unpinned` / `missing-dir`），根外锚逐键三态（`match` / `anchor-missing` / `anchor-mismatch`）；不写一个字节、不补钉 | `PYTHONPATH=$(git rev-parse --show-toplevel) python scripts/diagnostics/artifactDigestStockInventory.py [--json]` | 只读（读数据根与 `~/.neurova/artifact_anchors.json`；连数据根都读不出时退出码 2） |
+
 ## 二、检查脚本（checks）
 
 | 脚本 | 用途 | 运行方式 |
 |------|------|----------|
 | `check_databases.py` | 列出主要 SQLite 库（`neurova_memory.db`/`neurflow.db`/`data/neurova_memory.db`）及表名 | 项目根运行 |
 | `check_users_db.py` | 检查 `data/users.db` 表结构、用户列表与 admin 记录 | 项目根运行 |
+| `artifactDigestStockInventory.py` | 存量构件摘要清单（§6-383「存量未钉」待办的可复跑读数）：技能与插件各自给 `pinned-ok` / `pinned-mismatch` / `unpinned` / `missing-dir` 四态，根外锚给 `match` / `anchor-missing` / `anchor-mismatch`；退出码 0＝清单已产出（含空清单）、2＝连数据根都读不出 | `python scripts/diagnostics/artifactDigestStockInventory.py [--json]` | 只读（不写一个字节；不连后端） |
 | `_tmp_check_tracked.py` | 检查 `tests/unit/core` 下测试文件的 git 跟踪状态 | 项目根运行 |
 | `analyze_issues.py` | 解析 `audit-reports/pylint-report-v4.json`，抽样打印 broad-exception-caught / wrong-import-position / undefined-variable | 项目根运行（需该报告存在） |
 

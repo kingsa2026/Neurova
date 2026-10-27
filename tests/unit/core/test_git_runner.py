@@ -78,8 +78,15 @@ class TestCommitFDash:
         （-m 形态在 Windows 下会被空格化）。"""
         repo = tmp_path / "work"
         repo.mkdir()
+        # 跑测机上 `commit.gpgsign=true` 是全局配置（本仓开发机就是），而这条判据量的是
+        # **message 逐字保留**，与签名无关：不钉掉签名，提交会因机器没有可用私钥而失败，
+        # 红在 "gpg failed to sign the data"——读起来像 git transport 坏了。
+        # 显式关掉签名，把前提钉回判据描述的那个状态（不是放宽断言）。
         env_extra = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-                     "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+                     "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+                     "GIT_CONFIG_COUNT": "1",
+                     "GIT_CONFIG_KEY_0": "commit.gpgsign",
+                     "GIT_CONFIG_VALUE_0": "false"}
 
         def git(*args, stdin=None):
             proc = run_git(*args, cwd=str(repo), stdin=stdin, env_extra=env_extra)

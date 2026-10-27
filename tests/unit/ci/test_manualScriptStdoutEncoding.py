@@ -51,14 +51,35 @@ def _unencodableInLiterals(source: str) -> set:
     return out
 
 
+#: 两条形状都算钉住，只要**真的调用了** `reconfigure`：
+#:   ① 直写 `sys.stdout.reconfigure(...)`；
+#:   ② 经循环变量 `for stream in (sys.stdout, sys.stderr): stream.reconfigure(...)`
+#:      ——这形在生产里正是 §6-397 批认定的统一写法，它比 ① 多钉了 stderr。
+#: 判据防的从来不是"少了 `sys.` 这层"，而是"只在字符串/注释里提了一句"，
+#: 那一形仍然不被认（由 `testDetectorActuallyReadsCallsNotWords` 反向钉住）。
+_PIN_STREAM_NAMES = frozenset({"stdout", "stderr"})
+
+
 def _pinsStdoutEncoding(source: str) -> bool:
-    """模块顶层有没有真的调用 `sys.stdout.reconfigure(...)`——写进字符串或注释不算钉住。"""
-    for node in ast.walk(ast.parse(source)):
+    """有没有真的调用 `sys.stdout.reconfigure(...)`——写进字符串或注释不算钉住。"""
+    tree = ast.parse(source)
+    iterated = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.For, ast.AsyncFor)):
+            if (isinstance(node.iter, (ast.Tuple, ast.List))
+                    and any(isinstance(el, ast.Attribute) and el.attr in _PIN_STREAM_NAMES
+                            and isinstance(el.value, ast.Name) and el.value.id == "sys"
+                            for el in node.iter.elts)):
+                if isinstance(node.target, ast.Name):
+                    iterated.add(node.target.id)
+    for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
                 and node.func.attr == "reconfigure":
             receiver = node.func.value
             if isinstance(receiver, ast.Attribute) and isinstance(receiver.value, ast.Name) \
                     and receiver.value.id == "sys" and receiver.attr == "stdout":
+                return True
+            if isinstance(receiver, ast.Name) and receiver.id in iterated:
                 return True
     return False
 

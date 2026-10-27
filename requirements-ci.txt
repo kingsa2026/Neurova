@@ -2,13 +2,21 @@
 #
 # 说明：
 #   - 本文件是 requirements.txt 的"轻量核心子集"，供 GitHub Actions 使用。
-#   - 刻意排除体积大 / 需本地模型 / 需显示的器重依赖（onnxruntime、
-#     sentence-transformers、transformers、tokenizers、soundfile、huggingface_hub、
-#     sentencepiece、edge-tts、pillow、pyautogui、playwright）。
-#     **numpy 已于 2026-10-23 移出该名单并显式声明在下文**：受保护子集里有判据走真实
-#     向量原语与真实分词（`neurova/knowledge/vector_ann`、`neurova/core/vector_math`，
-#     `constraints.semantic_similarity` 的 jieba 分词），它们被刻意排除时那几档是
-#     "环境缺失"而不是"代码坏了"——CI 里两者同形，红得说不清是谁的问题。
+#   - 刻意排除体积大 / 需本地模型 / 需显示器的重依赖（sentence-transformers、
+#     transformers、torch、soundfile、huggingface_hub、sentencepiece、edge-tts、
+#     pillow、pyautogui、playwright）。
+#     **例外一：numpy（2026-10-23 起）。** 受保护子集里有判据走真实向量原语与真实分词
+#     （`neurova/knowledge/vector_ann`、`neurova/core/vector_math`，
+#     `constraints.semantic_similarity` 的 jieba 切词）；被排除时那几档是"环境缺件"
+#     而不是"代码坏了"，CI 里两者同形，红得说不清是谁的问题。
+#     **例外二：onnxruntime / tokenizers（2026-10-25 起）。** 与 numpy 同一根因：引擎
+#     `initialize_sync()` 在它们缺席时返回 False、`encode()` 走零向量兜底，而联想召回
+#     基线 / 线索向量通道 / 长时记忆基线 / 写侧补嵌入那几族判据全部建立在"向量有意义"
+#     之上且**刻意不 skip**；把判据改成 skip 等于把这道门关掉（教义第 2 条）。
+#     模型权重随仓入库（`models/embedding/bge-small-zh-v1.5`），故缺的从来只是这几个包。
+#     transformers / sentencepiece 仍不声明：实测逐件屏蔽（meta_path 拦截）后，
+#     `tokenizer.json` 直读即成功，两者体积大且连带 torch。
+#     **三个例外都只在本文一份声明**（正文其余处不再重复行，见下文的声明面）。
 #   - 上述被排除依赖在代码中均为"惰性/try 降级"导入，缺席时模块仍可加载；
 #     它们在 scripts/ci_static_gate.py 的 KNOWN_OPTIONAL_DEPS 中登记，
 #     导入巡检会记为 OPTIONAL-SKIP（优雅降级），不算失败。
@@ -23,6 +31,8 @@ pydantic>=2.5.0
 # HTTP & WebSocket
 httpx>=0.25.0
 websockets>=12.0
+# 下界 3.14.5：3.14.3 那一版在 2026-10 公告批里有 8 条（请求走私 GHSA-pqxq-w44r-73xw、
+# 分片请求耗尽 fd、cookie Secure 属性未强制等），修复版自 3.14.4 起。
 aiohttp>=3.14.5
 
 # Database
@@ -60,8 +70,7 @@ segno>=1.6
 
 # 稠密向量原语（2026-10-23 起 CI 显式声明）：`core/vector_math` 与 `knowledge/vector_ann`
 # 的判据走真实 ndarray 运算，缺席即 ModuleNotFoundError——那是环境缺件，不是被测代码的结论。
-# 只装 numpy，不拉 onnxruntime/sentence-transformers：CI 需要的是"向量原语可用"，
-# 不是"本地模型可用"（真权重那一路仍按各档自己的 real_model 标记跳过）。
+# 版本下界与 requirements.txt 逐字同值（第二份下界就是第二个事实源）。
 numpy>=1.24.0
 # 中文分词（同上）：`evolution.eval.constraints.semantic_similarity` 的 Jaccard 回退
 # 依赖 jieba 切词，缺席时中文整段成单 token，漂移闸会给出与生产不同的读数。
@@ -122,10 +131,15 @@ prometheus_client>=0.20
 # 两者都只在 requirements.txt / requirements-full.lock 声明、CI 薄环境没有 ——
 # 同一根因（"只在生产清单声明、不在 CI 清单声明"），故同处补齐。
 reportlab>=4.0
+# 下界 6.21.2：6.19.0 在 2026-10 公告批里有 11 条，修复版散落 6.21.1/6.21.2，
+# 取能覆盖全部的 6.21.2；与 requirements.txt 同一口径。
 pypdf>=6.21.2
-# 同一根因的第三件：Pillow 在 CI 清单里没有声明行，只是 reportlab 的传递依赖，
-# 于是重编锁时下界由父包给（`pillow>=9.0.0`）——公告的修复版全部只落在 13.0.0，
-# 旧下界永远合规、锁永远漂回 12.x。此处显式顶层声明，与生产清单同一口径。
+# Pillow 此前只以 reportlab 的传递依赖身份进入本锁（`# via reportlab`），下界因此在
+# 传递解析里漂到 12.3.0——而 12.x 线全版（含 12.3.0）都在 2026-10 那批公告里（39 条，
+# libtiff 编码器内存泄露 GHSA-xvh5-g6gv-559v 等），修复版只出现在 13.0.0。
+# 故由传递依赖改为**顶层声明**并钉同一修复下界：与 requirements.txt 的
+# `Pillow>=13.0.0` 同源（生产镜像按 Python 3.12 装，cp312 轮子齐备），
+# 让 CI 与生产跑同一个 Pillow 主版本，也让"锁里停在哪一版"有可追的声明面。
 Pillow>=13.0.0
 
 # CLI 呈现层（`cli.py` 模块级 `from rich import box`）——受保护子集里
@@ -134,3 +148,6 @@ Pillow>=13.0.0
 # 它此前只在 requirements-full.lock 里作为 typer 的传递依赖出现，CI 薄环境没有 ——
 # 与 reportlab / pypdf 同一根因（"只在生产清单声明、不在 CI 清单声明"），故同处补齐。
 rich>=13.0
+
+# 本地嵌入引擎（ONNX）的三件运行时声明在上文「稠密向量原语」那一节，
+# 不在此处再写一份（第二份下界就是第二个事实源）。两者的取舍与理由同处。

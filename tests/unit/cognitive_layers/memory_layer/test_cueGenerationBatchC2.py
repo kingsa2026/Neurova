@@ -125,15 +125,11 @@ class TestGenerationIsBatchedAndSweeping:
 class TestGeneratedCuesAreUsable:
     def test_生成的线索能被向量通道召回(self, manager):
         """端到端：生成 → 入库 → 通道点火 → 无词面重合的提问能捞出对应记忆。"""
-        from neurova.embedding import get_embedding_engine
+        from tests.memory_embedding_precondition import requireRealEmbeddingOrSkip
 
-        engine = get_embedding_engine()
-        probe = [float(x) for x in engine.encode("前提自证")] if engine is not None else []
-        if not probe or not any(abs(x) > 0.0 for x in probe):
-            # 通道的每条线索都要先编码成向量；引擎缺档（`requirements-ci.txt` 刻意不含
-            # onnxruntime/tokenizers/sentencepiece）时索引必空——那是**前置不成立**，
-            # 不是判据失败。如实说明并跳过，别把「这台机器上根本没编码器」读成缺陷。
-            pytest.skip("嵌入引擎不可用或回零向量：本档的向量通道前提不成立")
+        # 本格测的是"线索经向量通道点火"，通道本身依赖稠密向量：薄环境里 encode 返零向量，
+        # 通道永远不点火。前提口径与 C-1/C-3 同源（tests/memory_embedding_precondition.py）。
+        requireRealEmbeddingOrSkip("线索生成批（通道靠向量点火才测得到）")
         target = ROWS[0]
         query = "团队聚餐选餐厅时要注意什么"
         # 查询与目标零中文字面重合（前提自证，否则用例白给）
