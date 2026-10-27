@@ -116,7 +116,7 @@ class TestResponseTypeField:
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
-        d = memory_to_dict(mem)
+        d = memory_to_dict(mem, owned=True)
         assert d["type"] == "episodic"
 
     def test_recall_dict_row_type_passthrough(self):
@@ -124,7 +124,7 @@ class TestResponseTypeField:
         from neurova.api.endpoints.memory.base import memory_to_dict
 
         row = {"id": "m2", "content": "x", "memory_type": "semantic", "category": "general"}
-        d = memory_to_dict(row)
+        d = memory_to_dict(row, owned=True)
         assert d["type"] == "semantic"
 
 

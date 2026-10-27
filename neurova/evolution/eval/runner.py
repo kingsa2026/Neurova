@@ -117,6 +117,11 @@ class EvolutionRunResult:
     caseAllowance: int = 0
     # N5：本轮实验身份（技能正文+模型+数据集+seed+判据配置）。缓存/续跑只认它。
     experiment_fingerprint: str = ""
+    # 取语料链的失败记名（`[{"source": "synthetic", "reason": "..."}]`）与调用方
+    # 请求的来源档：三级回退里被跳过的那几级必须能被读出来，否则"这个技能没有
+    # 评测用例"与"合成那一级请求失败了"在结果面上完全同形（都是空集合 + 拒绝）
+    sourceIssues: list = field(default_factory=list)
+    requestedSource: str = ""
     # ── 臂来源与真臂花费（P1-C 线）──
     # 「这批分数是谁跑出来的」必须是结果的一部分：环节证据为空时，要能分得开
     # "压根没跑环"（模拟臂）与"跑环没卡"（真臂），否则读数会被读成两种不同的事实。
@@ -182,6 +187,10 @@ class EvolutionRunResult:
             "train_best": round(self.train_best, 4),
             "iterations_run": self.iterations_run,
             "experiment_fingerprint": self.experiment_fingerprint,
+            # 取语料链的失败记名紧跟实验身份：它与"这批读数是凭什么语料量出来的"
+            # 同一族问题，落盘进审计运行后，详情面才能把口径的缺口一起显示出来
+            "source_issues": list(self.sourceIssues),
+            "requested_source": self.requestedSource,
             "bench_gain": round(self.bench_gain, 4),
             "bench_neutral": self.bench_neutral,
             "bench_neutral_reason": self.bench_neutral_reason,

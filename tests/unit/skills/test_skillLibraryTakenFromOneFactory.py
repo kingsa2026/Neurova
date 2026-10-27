@@ -85,11 +85,13 @@ class TestWriteThenReadSeeOneLedger:
         return client
 
     def test_install_then_agentFaceListsIt(self, app_client):
-        """走真安装链，且直接装 studio 那只**真资产包**——形参最长的包能落地，链路才算真通。
+        """走真安装链，且用**真资产包**（studio 那只），装完按盘上实际路径实测。
 
-        本格此前绕开 studio，理由是它在跑测环境里"装不到最终位置"。那个理由已经不成立：
-        下面那格按真装之后的盘上路径实测，最长落点仍在 Windows 预算内。判据按落点形状改判，
-        不把"当时装不下"留成默认路径。
+        起点是反过来的：本格原用短包，理由是"studio 的终点投影超 Windows 260 预算，
+        装不到最终位置"。那条理由现在失效了——路径预算成了**解包闸的前置判定**
+        （`market_sources._pathBudgetExceeded`，跨机器同向，不再赌本机 OS 设置），库根也短了
+        一截（实测终点投影 247 < 260）。留短包就是把"能不能装"这件事从判据里拿掉，
+        读起来像通了、其实少测了真实尺寸那一路。
         """
         skill_id = "builtin--adaptive-presentation-studio"
         installed = app_client.post(f"/api/v1/skill-pool/{skill_id}/install",
@@ -102,6 +104,41 @@ class TestWriteThenReadSeeOneLedger:
         assert skill_id in ids, (
             f"安装回执说成功，但同进程的面板数据源读到 {len(rows)} 条 {ids[:5]}——"
             "写侧与读侧各持一份内存账，这正是本批要合掉的")
+
+    def test_studioPackageBudgetIsDecidedByTheGateNotByTheOs(self):
+        """主格换包的理由必须**会红**，不许只写在话里（形态集 251 那条：归零的腿要留着读数）。
+
+        这条腿走完了一次翻面，两段读数都留在这里：
+        - 起点：终点投影 273 字符（库根 + `adaptive-presentation-studio` + 最长成员 125），
+          超 Windows 260 ⇒ 真资产在跑测环境里"装不到最终位置"，主格只好退用短包；
+        - 现在：库根短到 92，投影 247 **低于** 260，而真资产在 POSIX 上本来也装得下
+          （`PATH_MAX` 4096）⇒ 单靠"赌本机 OS 设置"这一维已经不成立。
+        所以判据改成钉那条**不再赌 OS** 的那一半：路径预算由
+        `market_sources._pathBudgetExceeded` 在解包之前判定，超预算时真资产在这台机器上
+        必须被**拒并点名原因**，而短包照装。装得下还是装不下由闸说，不由本机碰巧是什么系统说。
+        """
+        from neurova.skills import market_sources as ms
+        from neurova.skills.market_importer import read_builtin_bundle
+
+        bundle = "adaptive-presentation-studio.zip"
+        payload = read_builtin_bundle(bundle)
+        assert payload, f"仓内资产包缺失：{bundle} ⇒ 本档失去根据，去补资产而不是关判据"
+        dest = REPO / "probe-skills" / "adaptive-presentation-studio"
+
+        # 预算正常时：真资产不被拦（247 < 260），本格同时是"不误伤"的反向控制
+        assert ms._pathBudgetExceeded(payload, dest) is False, (
+            "真资产在正常落点下被判成超预算——闸门算错了投影，别把主格改回短包来绕开")
+        # 预算被压到 40 时：同一份包必须当场拒，且原因点的是"路径过长"这一族
+        original = ms.WINDOWS_MAX_PATH
+        try:
+            ms.WINDOWS_MAX_PATH = 40
+            assert ms._pathBudgetExceeded(payload, dest) is True, (
+                "上限压到 40 后真资产仍被判装得下——判定没读那个数（常量成了摆设）")
+            reason = ms.extractRemoteSkillZipRefusal("probe", payload, dest)
+            assert "路径过长" in reason, f"超预算没点名原因：{reason[:120]}"
+        finally:
+            ms.WINDOWS_MAX_PATH = original
+        assert not (dest / "SKILL.md").exists(), "被拒的包不该在盘上留下任何成员"
 
     def test_studioPackageLandsUnderTheBudgetThroughTheRealInstallChain(self, app_client):
         """主格装真资产包的前置必须**实测自证**，不许从别处推。

@@ -40,9 +40,15 @@ def unreadyClient(monkeypatch):
     from fastapi.testclient import TestClient
 
     from neurova.api import app as app_module
+    from neurova.api.auth import requireIdentityForMemoryFace
 
     monkeypatch.setattr(app_module, "_app_state", None, raising=False)
-    return TestClient(app_module.create_app())
+    app = app_module.create_app()
+    # 记忆面整面的凭证门（`requireIdentityForMemoryFace`，2026-10-26 起读侧一并要凭证）
+    # 是**装配点**，不是本档的被测对象：不覆盖就整族 401，红会咬在"没登录"上，
+    # 而不是"未就绪被画成了空成功"。覆盖只影响本档这个 app 实例。
+    app.dependency_overrides[requireIdentityForMemoryFace] = lambda: {"user_id": "u-probe"}
+    return TestClient(app)
 
 
 def testEveryDeclaredErrorCodeTakesAPosition():

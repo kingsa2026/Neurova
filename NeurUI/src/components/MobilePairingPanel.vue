@@ -112,6 +112,7 @@
  */
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { identityFailureOf } from '@/utils/authIdentity'
 import GlassButton from '@/components/GlassButton.vue'
 import {
   cancelPairing, generatePairing, getPairedDevices, getPairingQrcodeBlob, getPairingStatus,
@@ -213,7 +214,8 @@ function startPanelPolling(ms: number) {
 
 function pairingErrorText(e: any): string {
   const code = e?.response?.status
-  if (code === 401 || code === 403) return t('channel.pairingDenied')
+  // 身份失败（没登录 / 登了但不够格）由单源判一次，本面板只决定说哪句人话
+  if (identityFailureOf(code)) return t('channel.pairingDenied')
   if (code === 503 && e?.response?.data?.detail?.code === 'tunnel_not_ready') {
     // 后端拒了并点名原因——照它说，不要改写成"操作失败"那种模糊话
     return t('channel.pairingBlockedByServer', {

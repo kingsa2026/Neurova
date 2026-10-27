@@ -97,7 +97,18 @@ tests/unit/api/test_channelIdentityBindingEndpoints.py
 #   详情端点原样读回（三态各自出声：attached / missing / none_recorded）。
 #   两格分别打在"生产写侧真的写出这些键"与"HTTP 响应里真的带着运行"上；后者还钉住
 #   列表面不夹带运行明细（与"列表不夹带正文"同一口径）。
+# eval 目录的出站闸必须钉在「取单例那一刻」而不是导入时那个类。形态：SimulatedAgent /
+# SyntheticDatasetBuilder 每次 get_multi_model_client() 现取再 .chat(...)，单例被换成另一个类
+# 时只钉类的那层补丁一行都不生效 → 用例落到真实 provider 等待上，CI 全量批跑撞
+# pytest-timeout (>30s)，而单跑目录全绿（同代码两种读数）。判据在
+# tests/unit/test_dev_path_and_runtime_dep_guards.py::TestCiTestRunnerAndFixtureDepsAreReal
+# 的 test_evalOutboundGateCoversTheLiveSingleton（按行为打：换类后真调一次必须被拦）。
+# 入册前逐文件单跑全绿（43 passed）。
 tests/unit/evolution/eval/test_service_closed_loop.py
+# 进化闸的语义相似度面**不许**在判据路径上装载/下载嵌入模型（PR #367 的 CI 整条
+# unit-tests 被掐断的根因：`get_embedding_engine()` 会懒建引擎并出网拉权重）。
+# 另反向钉住"语义面必须还在"——摘掉那一跳就换成恒真回退，也能绿得很干净。
+tests/unit/evolution/eval/test_semanticGateLoadsNoModel.py
 tests/unit/api/test_text_evolution_api.py
 # Issue #55 P1：共享线程池复用（禁止热路径每次新建池）
 tests/unit/core/test_shared_thread_pool_reuse.py
@@ -1750,6 +1761,50 @@ tests/unit/core/test_agentRunStoreParkedStatus.py
 # 恰好问一次、超限那轮真没跑（agent 零调用）、等待期每次入睡前续租（预算 200s > 租约
 # 90s）、parked+done 立即收尾、属主/管理员续跑复用原行、**管理员不得把执行身份换成自己**、
 # 陌生 403/匿名 401，以及"身份先判、状态后判"的判序（否则终态行向陌生账号确认存在性）。
+# 断连只停投递不停回合：`finally` 里裸 `await task` 会把响应任务收到的取消沿等待链
+# 转交给 `run_chat`（真浏览器量到 run 终态 cancelled/stopped、finished_at＝断连那一刻）。
+# 结构一格钉"等待点必须脱钩"（撤掉 shield 当场红，行号点名）；行为一格走真 ASGI 栈
+# ——撤掉 shield 也照过（httpx 不真撤中间件的 anyio 作用域），故它只当回归闸，红证在
+# 活体 A/B，这格差异如实写进判据自己的 docstring，不让读者误以为它有红。另两格钉 `session`
+# 帧：开局第一帧就带 session_id（旧形态只在 done 回传，实测造出空 id 重连另起的 0 消息
+# 空会话），并反向钉住它不进断线重连缓冲、不进时间线。
+# 回合的落地与续租跟着**回合**走，不跟着**响应**走（§6-421）。上一笔把断连从
+# 「掀掉回合」改成「只停投递」，但时间线／重放缓冲／done／租约四件仍长在响应生成器
+# 里，于是活体量到两条谎报：断连 164s 任务仍 `chat@164s` 而 run 已被周期扫描写成
+# `failed/process_died`；`_timeline/e41ff42c.jsonl` 的写入停在断连那一秒（要 120 条、
+# 编号止于 85）。本批改把四件搬到生产侧，投递退成纯渲染。
+# 三格里两格是行为判据（断连后增量仍入账；done 随回合置位 ⇒ replay_from 能收尾，
+# 不再是 P-6 那一族「永不返回的 await」），一格是结构判据（续租唯一驱动者必须是回合
+# 自己创建的 `_keepLease`，投递循环里不得再出现 heartbeat/shield 等待）。行为级断连
+# 注入两种形态都给不出确定取样时刻（athrow 要等整轮跑完；只取一帧就不消费 ⇒ 回合
+# 从未被创建），已如实记在该格 docstring，红证另附活体 A/B 与 HEAD 态撤改动复跑。
+# 失败轮的权威落点：后处理（含唯一的会话写点 `_step_save_session`）只在正常收尾
+# 路径上被调，LLM 供应商错误时异常从 `_step_llm_call` 就离开管线 ⇒ 盘上只剩提前落好的
+# user 一条。活体量过两回：09:29 那轮超时后候选模型 400 not supported、整轮以错误收场
+# 而会话里 `messages` 只有 [user]；前端因此永远挂着「本轮仍在生成中」——run 已终态、
+# 任务表已空，读回的会话却说不出这一轮怎么结束的。
+# 修在管线 execute 的异常路径，落点复用单点 `_step_save_session`（不另起第二份写会话
+# 的代码，也不按 user_already_persisted 重复写 user）。四格里两格是反向控制：落点不许
+# 把故障兜成成功（异常仍必须外抛）、正常轮仍只落 user+assistant 一对——新代码曾在
+# except 处理器里因 NameError 顶掉原始异常，正是被这两格抓回来的。
+# 逐文件单跑 4 passed（两次同读数）
+tests/unit/agent/test_failedTurnLandsInSession.py
+# 逐文件单跑 4 passed（两次同读数；§6-423 追加「无订阅者也要起回合」一格后回填）
+tests/unit/api/test_consoleTurnOutlivesItsResponse.py
+# 失败落点的单源性扫荡（教义第 5 条：同一根因的命中面要闭环）：落点修在
+# `ChatPipeline.execute` 的异常路径，选这层的理由是四入口共用——本档把这条理由钉住，
+# 不默认它长绿：①`chat_pipeline.execute(` 全仓生产调用点恰 1 处（在 `Agent.chat`；
+# 多一处就是有人开了绕过落点的旁路）；②`Agent.chat_stream` 必须委托 `self.chat`
+# 而非自起管线（移动配对走的就是它）；③失败路径只许调单点 `_step_save_session`，
+# 出现第二份写会话的调用即红；④行为级：`chat_stream` 那一支失败后，会话里仍有权威
+# 落点；⑤反向控制：`save_memory=False` 的轮（蜂群内部派生等）按设计不落盘。
+# 两条形状判据一律走 AST——按行匹配会撞 docstring 里的路标句（本档初版就把
+# `objective_evidence.py` 的 Args 段误当成第二个调用点）。
+# 逐文件单跑 5 passed（两次同读数；变异探针各只红该红：多一处 execute 红①、
+# 打偏的 sed 改到 1242 行时判据正确地不动、按行号改到 1773 才红②④）
+tests/unit/agent/test_failureLandingSingleSourceAcrossEntries.py
+# 逐文件单跑 4 passed（两次同读数）
+tests/unit/api/test_consoleStreamDisconnectKeepsTurn.py
 # 逐文件单跑 8 passed
 tests/unit/api/test_consoleYieldGateWiring.py
 # 未归因回合不得建立空串 pin：前端默认不传 model（`ChatPage.vue` 的
@@ -1875,6 +1930,7 @@ tests/unit/api/test_agentRunStatusVocabularyParity.py
 # 反向错误，`test_identity_gate_single_source.py` 早钉过）。结构判据取**对象同一性**
 # 不比函数名：本仓两次栽在"同名不同体、override 打到另一份静默失效"上。
 # 逐文件单跑 8 passed
+tests/unit/api/test_jwtSigningKeyLeakIsGuarded.py
 tests/unit/api/test_roleGateIdentitySourceIsStrict.py
 # §6-64 的 B 处置：子进程**文本模式捕获**必须显式写 encoding，否则父进程按本机 locale
 # （开发机 cp936）解子进程的 UTF-8 字节。三种坏法按危险度递增：全 ASCII 侥幸没事 /
@@ -2743,6 +2799,16 @@ tests/unit/channels/test_channelVoiceFactorySeamCloses.py
 # 另 13 条第二组候选在 HEAD 态逐格复跑 13/13 同红 ⇒ 全部预存不认领。
 # 入册前逐文件单跑三次同读数 11 passed（6.0~6.3s，含全仓 AST 数实现那一格）。
 tests/unit/core/test_denseCosineSingleSource.py
+# §6-419 续：零向量只有一种口径（`vector_math.isZeroVector`）+ 中文词表不得整段当一个 token。
+# 两处都是"静默做成假读数"的形态，不是抛错：`tool_search` 把引擎兜底的全零向量当有效向量，
+# 余弦恒 0 且**再也不回落 BM25** ⇒ 该查询恒空手，而空手在生产侧被投递成「能力缺口」并驱动
+# 自主造工具（`handle_control_tool` 的 S3 点）；词表那半是 `_TOKEN_SPLIT` 对中文无操作，
+# 「查询天气」与「天气」永不相等，目录里明明有天气工具却查不到。`muscle_memory` 同一根因
+# 的另一命中点：零向量入 metadata 后 `_compute_confidence` 走"有向量"分支、不回落到字符
+# 覆盖度，换实体近似句的置信度停在 0.5875（票面判据要 ≥0.85）。判据两向都钉：阈值不许在
+# 下游再抄一份（1e-9 那形），且这些模块必须真问过单源。入册前逐文件单跑三次同读数
+# 9 passed / 15 passed；红自证＝只按路径还原三处生产件 ⇒ 恰 4 格翻红、无收集错误。
+tests/unit/context/test_tool_search_semantic.py
 # §6-181 渠道 webhook 分派链：验签必须先于投递（安全判据，仿冒必拒 + 合法必通成对）。
 # 危害是活体量出来的，不是读代码读出来的：飞书支与钉钉支此前不做任何验签，把请求体直接拼成
 # ChannelMessage 投进 manager，而 sender_id 取自请求体 ⇒ 任何人能对已配置渠道冒充任意平台用户
@@ -3870,6 +3936,15 @@ tests/unit/security/test_liveRedactionDoorsUseTheSharedEngine.py
 # 读数一致（context 2 条属并会话在途 orchestrator、llm 5 条跨文件污染、memory/cognitive 4 条
 # 数据根与 bus 旧账、security/skills 2 条治理闸既有红），本批不新增红。
 tests/unit/security/test_redactionDoorsShareOneLeakClosure.py
+# 本地执行体的取消挂钩必须随进程结束而摘掉，且只服务"起进程之后"的取消。
+# 病灶是一对生命周期错配：令牌按**轮**持有、杀灭回调按**进程**注册。上一发命令结束后回调仍
+# 留在令牌上（实测残留 1 条），本轮任何一次取消都会去杀一个早已结束的 pid；更直接的坏法在
+# 第二发：它 `Popen` 出来注册回调时令牌**已置位**，注册口按"迟到的回调立即兑现"当场把它杀掉
+# ——实测第一发 `print(1)` 成功、本轮 `cancel("user")` 之后下一发立即 `exit_code=-9`。
+# 两格打行为不打形状：① 执行完令牌零残留；② 取消之后新起的命令照常跑完。红→绿实测：
+#   改回旧登记行 ⇒ ②红（exit=-9）；恢复 ⇒ 2 passed（令牌侧另有 4 格钉"摘钩键必须是令牌给的那个"）。
+# 入册前逐文件单跑全绿（2 passed）。
+tests/unit/execution/test_execLocalRuntimeHangsUpKillHook.py
 # 静态门禁的「未定义名称」判据只许报**真·未定义**，不许把注解专用名算成缺陷。
 # 形态：CI static-gate 腿报 6 处 F821，5 处是注解里的名字（实体在函数体内懒加载，
 # 模块级导入会拉 `neurova.agent` 包 __init__ → `tool_executor` 的循环，AGENTS.md §3）。
@@ -3932,3 +4007,42 @@ tests/unit/api/test_mobilePairingStateClosure.py
 tests/unit/api/test_mobilePairingAdvertisedBaseUrlSingleSource.py
 tests/unit/tunnel/test_tunnelAdmissionAndChannelState.py
 tests/unit/test_tunnelStateEnumSingleSource.py
+# §6-418 蜂群上报信封批：旁路（邮箱/上下文池归档）投同一份 _uplinkEnvelope 投影、
+# 三处按字面量砍正文的写法撤除、下钻口补 recall_history(agent_id, session_id) 整取。
+# 反向各钉一格：不带 agent_id 的既有语义逐字不变（含 Issue #90 的属主派生）、
+# workflow 来源不回灌、被数据层拒绝的派生不投信。
+# 入册前置：逐文件单跑两次同读数 12／12、2／2、3／3（本机 2026-10-25 现跑）。
+tests/unit/agent/test_subagentTerminalReachesParentMail.py
+tests/unit/agent/test_subagentUplinkEnvelopeSharedByBothBypassPaths.py
+tests/unit/tools/test_recallHistoryReachesSubagentTranscript.py
+# §6-421 受保护子集那一腿的资源欠账：容器装不下自己（构建 cnb-rja-1k5pv9gbl#003
+# 跑到 82% 被 SIGKILL，code 137，一条失败墙都没有）。cpus 4→8（16GiB），
+# 判据按"子集真条目数 × 单档足迹 + 底噪 × 余量"算需求与墙钟下限，两侧都带反向控制。
+# 口径取**合并后**的清单：718 档（716 + §6-419 的补登项不新增文件 + 本档）。
+# 入册前置：逐文件单跑两次同读数 4/4（本机 2026-10-25 现跑）。
+tests/unit/ci/test_unit_tests_runner_has_headroom.py
+# §6-422 可选依赖的墙钟成本不许落在活体 async 路径上（构建 cnb-sq6-1k5q1kqrc#003，
+# test_service_closed_loop 那格 Timeout >30.0s，回溯停在 search._get_jieba → initialize）。
+# 兜底支改零可选依赖（CJK 二元组）；JiebaHasOneWarmEntry 那一格裁决反转、同批翻成反向判据。
+# 入册前置：逐文件单跑两次同读数 3 passed/1 skipped（本机 2026-10-26 现跑）。
+tests/unit/ci/test_optionalImportWallOwedByLivePath.py
+# 刷新/中断读不回本轮：用户消息须在 LLM 开口前落盘，且回合末不得重复写第二条。
+# 取证时刻钉在模型边界（真 Agent + 只替模型边界，本目录 conftest 禁止 __new__ 装配）；
+# 两格反向控制：save_memory=False 不预写、提前建记录必须带会话属主。
+tests/unit/agent/test_userMessageLandsBeforeModelSpeaks.py
+# workflow 派生的终态归档接上发起者：canvas_run 漏传身份是根因，归档随之全程惰性。
+# 两格反向控制钉住边界：workflow 不回灌父会话邮箱、取不到发起者时不归档也不谎报。
+tests/unit/collaboration/test_workflowSpawnArchivesIntoInitiatorPool.py
+# 记忆列表面逐条披露 owned，且与读/改/删闸门共用同一条归属判定（§6-425）
+tests/integration/test_memoryRowOwnershipDisclosure.py
+# 记忆管理通道的 role 门、老门未放宽的反钉，与"读改删各只一份实现"（§6-426）
+tests/integration/test_memoryManagementChannelRoleGate.py
+# 记忆面整面对匿名关死（路由级门）、23 条租户数据 GET 腿逐条钉、默认绑定与 compose 发布地址收成回环
+tests/integration/test_memoryFaceRejectsAnonymous.py
+# 增强族六条腿的作用域：两库同 id 时 strengthen/forget/batch/import/export/categories 只动指定
+# 那一库，未知 Agent 如实 404，缺省仍回落 default，归属校验照旧（台账 §6-433；逐文件单跑 10 passed）
+tests/integration/test_memoryEnhancementCarriesAgentScope.py
+# 身份取数口「签之前必然对齐」这条不变式：行为格（签完之后才对齐也必须验得过）＋形状格
+# （bearerHeaders 体内必须调对齐口、取数口只剩一个名字，带正检）。它钉掉的是合跑 26 条
+# "刚签的令牌被自己拒"的那一族；工单 docs/04-plans/记忆面测试密钥作用域工单_2026-10-27.md
+tests/unit/api/test_identityHeadersAlignSecretBeforeSigning.py

@@ -177,7 +177,7 @@ def checkArtifact(root, pinnedValue, anchorKey: Optional[str] = None) -> Tuple[s
     前者走 TOFU 首钉，后者是拒绝。把它们混成一格，要么存量全被挡在门外，
     要么换包永远看不见。
 
-    `anchorKey`（§6-388，票一甲①）：账本相符之后再看根外锚。锚**不是**防同权限攻击的
+    `anchorKey`（§6-388，票一甲①）：账本相符之后再看锚。锚**不是**防同权限攻击的
     （攻击者若同时改锚就失效），它防的是**整库替换/回滚**与"改完构件再把账本重钉一次"
     ——后者是本模块同根同权限那条边界的直接后果。锚里没有这个键 ⇒ 维持只读账本的旧读数
     （`unpinned` 的 TOFU 语义不变），是否要补锚由调用方决定，这里不悄悄写。
@@ -192,7 +192,7 @@ def checkArtifact(root, pinnedValue, anchorKey: Optional[str] = None) -> Tuple[s
     if anchorKey:
         anchorStatus = checkAnchor(anchorKey, actual)
         if anchorStatus == STATUS_MISMATCH:
-            logger.error("构件 %s 与根外锚不符（账本相符、锚不符）——按篡改处置", anchorKey)
+            logger.error("构件 %s 与锚不符（账本相符、锚不符）——按篡改处置", anchorKey)
             return STATUS_MISMATCH, actual
     return STATUS_MATCH, actual
 
@@ -210,8 +210,9 @@ def checkArtifact(root, pinnedValue, anchorKey: Optional[str] = None) -> Tuple[s
 #: `homeAdoptionAllowed()` 那道权利闸，只有"本进程代表操作者本人"才动主目录）搬进来，
 #: 搬不动就以 warning 点名旧物仍在哪儿——把"读不到自己钉过的清单"变成一条可见的告警，
 #: 而不是一条悄悄重钉的 TOFU。
-#: 它**不**防同权限攻击：能改构件与账本的人通常也能改锚；封的是"在途/取回瞬间被换包"
-#: 与"落盘后被无意/并发改动"。边界必须与能力一起写，不许只吹能力。
+#: 它防的是账本之外那份记录能察觉的两种形态：**整库替换/回滚**，以及"改完构件再把账本
+#: 重钉一次"（后者是本模块同根同权限那条边界的直接后果）。它**不**防同权限攻击：能改
+#: 构件与账本的人通常也能改锚。边界必须与能力一起写，不许只吹能力。
 ANCHOR_FILE_NAME = "artifact_anchors.json"
 ANCHOR_STORE_VERSION = 1
 #: 通道词汇唯一闭集：账本里两条通道（技能/插件）共用锚文件，键必须带通道前缀，
@@ -253,12 +254,12 @@ def readAnchors() -> Dict[str, str]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception as e:  # noqa: BLE001
         quarantined = quarantine_corrupt_file(path)
-        logger.error("根外锚文件无法解析，已隔离现场 %s：%s（本轮按空锚起，不覆盖原文件）",
+        logger.error("锚文件无法解析，已隔离现场 %s：%s（本轮按空锚起，不覆盖原文件）",
                      quarantined, e)
         return {}
     if not isinstance(data, dict) or data.get("version") != ANCHOR_STORE_VERSION:
         quarantined = quarantine_corrupt_file(path)
-        logger.error("根外锚文件版本不认识（现值 %r，期望 %r），已隔离 %s——不做自动映射",
+        logger.error("锚文件版本不认识（现值 %r，期望 %r），已隔离 %s——不做自动映射",
                      data.get("version") if isinstance(data, dict) else "<非映射>",
                      ANCHOR_STORE_VERSION, quarantined)
         return {}
@@ -269,7 +270,7 @@ def readAnchors() -> Dict[str, str]:
 
 
 def recordAnchor(anchorKeyValue: str, digestValue: str) -> bool:
-    """把一枚摘要写进根外锚；失败回 False（调用方必须出声，不许当成已落锚）。"""
+    """把一枚摘要写进锚；失败回 False（调用方必须出声，不许当成已落锚）。"""
     anchors = readAnchors()
     anchors[anchorKeyValue] = str(digestValue)
     payload = {"version": ANCHOR_STORE_VERSION, "anchors": anchors}
@@ -278,7 +279,7 @@ def recordAnchor(anchorKeyValue: str, digestValue: str) -> bool:
         atomic_write_text(anchorPath(), json.dumps(payload, ensure_ascii=False, indent=2))
         return True
     except Exception as e:  # noqa: BLE001
-        logger.error("根外锚写入失败（%s）：%s", anchorKeyValue, e)
+        logger.error("锚写入失败（%s）：%s", anchorKeyValue, e)
         return False
 
 

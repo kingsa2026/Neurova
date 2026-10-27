@@ -47,6 +47,18 @@ CLOCK_PATTERNS = {
 #: 逐条结论台账：键 = 受保护子集相对路径，值 = (用到的时钟, 结论)。
 #: 结论文本必须点名"这份文件量什么、为什么这个口径"。
 CLOCK_LEDGER: Dict[str, tuple] = {
+    "tests/unit/api/test_consoleTurnOutlivesItsResponse.py": (
+        ("wallClock",),
+        "轮询护栏：等的是「后端那一轮在连接断开/回执返回之后仍要跑完」这件状态迁移，"
+        "墙钟读数只用来给等待封顶（到点仍未到就如实报缺），断言面全是结构不变量"
+        "（轮次未取消、事件已落、后续请求仍被受理），没有任何耗时上下界——"
+        "与 test_consoleStreamDisconnectKeepsTurn.py 同族形态。"
+    ),
+    "tests/unit/api/test_consoleStreamDisconnectKeepsTurn.py": (
+        ("wallClock",),
+        "同上（轮询护栏）：`deadline` 只封住「等 agent 完成/看见取消」这条等待的上界，"
+        "量的是墙上过了多久，不进任何判值；判据比的是取消语义是否生效，不是快不快。"
+    ),
     "tests/performance/test_perf_gate_contract.py": (
         ("threadCpu", "wallClock"),
         "门禁自检套件：判分面的取数口（measureThreadCpu）必须走本线程 CPU 时钟，"
@@ -111,6 +123,15 @@ CLOCK_LEDGER: Dict[str, tuple] = {
         "断言的是访问顺序与容量行为，不编码任何耗时上下界；负载再高只会让它自己报"
         "「本机读数一秒内没前进」，不会假绿。",
     ),
+    "tests/unit/agent/test_subagentTerminalReachesParentMail.py": (
+        ("wallClock",),
+        "唯一一处单调钟是**等旁路跑完的轮询护栏**，不是量时长：`_awaitMailArrival()` "
+        "按 2 秒上界轮询 `pending(sessionId)`，等的是「终态信封落进父信箱」这个"
+        "**状态到达**；断言的是信封内容与下钻（正文、指针、单一写入侧），"
+        "不编码任何耗时上下界。到点没到就如实红（读出空箱），负载再高只会让它自己报，"
+        "不会把结构契约写成墙钟阈值。该档 2026-10-25 入册时漏了本行署名（同一笔提交 "
+        "`00226ef7` 只过了另两道闸），2026-10-26 由构建 `cnb-bfa-1k5q9ub6e-003` 点名补齐。",
+    ),
     "tests/unit/ci/test_clock_caliber_ledger.py": (
         ("threadCpu", "wallClock"),
         "本守卫自身：CLOCK_PATTERNS 的正则字样（thread_time / perf_counter）与被检样例"
@@ -120,6 +141,15 @@ CLOCK_LEDGER: Dict[str, tuple] = {
         ("wallClock",),
         "本守卫自身：它按语法树**检出**墙钟上界并比对台账，脚本里出现的 perf_counter "
         "字样是被检对象（用于构造检出器反向控制的样例），不参与任何计时读数。",
+    ),
+    "tests/unit/agent/test_subagentTerminalReachesParentMail.py": (
+        ("wallClock",),
+        "本文件**只用单调钟做轮询护栏**，不量任何耗时：`_awaitMailArrival` 的 "
+        "`deadline = time.monotonic() + 2.0` 等的是「后台链把终态投进父邮箱」这件"
+        "状态迁移，到点仍未到就如实报缺信，负载再高只会让它自己红。"
+        "断言面全是结构不变量（信封键、`agent=`/`session=` 指针、正文不在旁路重复），"
+        "没有一处耗时上下界。§6-418 入册时漏登这一格——加文件的同时没复跑本闸，"
+        "与「逐文件单跑两次就够」的错觉同形。",
     ),
     "tests/unit/skills/test_marketFetchBudgetIsSingleSource.py": (
         ("wallClock",),

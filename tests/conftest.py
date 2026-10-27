@@ -139,6 +139,36 @@ def _isolate_connection_pools():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_api_app_state():
+    """模块级全局 app 状态跨用例复位（`neurova.api.app._app_state`／`endpoints._app_state`）。
+
+    形态（2026-10-25 实测）：某用例 `with TestClient(create_app())` 跑完 lifespan 后，
+    `create_app()` 建的那份 `AppState`（`agents` 里已经装着启动期建出来的 default agent）
+    仍被两个模块级全局变量指着。下一个用例再 `create_app()` 会建新的，但
+    `neurova.api.endpoints.get_app_state()` 读到的是**上一份**——它带着一个
+    `memory_manager` 非空的 agent，于是"未就绪"那条路再也走不到：
+
+    - 单跑 `test_MemoryReadFaceRefusesToPaintFailureAsSuccess.py`：503（预期）；
+    - 同一进程里先跑 `test_monitorContractHonestWhenNoProducer.py`（它进出 lifespan）：
+      变成 200 —— 断言"故障不许画成成功"的那两格当场红。
+
+    这不是被测代码的缺陷，是测试进程内的跨用例状态泄漏：读侧的两处 `get_app_state()`
+    一份从 `neurova.api.app` 取、一份从 `neurova.api.endpoints` 取，复位必须同时清两处，
+    否则"清了一处、另一处还指着旧对象"——正是本仓点名的"两边各持一半"形态。
+    复位放在**用例结束后**（与上面几个 `_isolate_*` 同形），不碰用例内的装配。
+    """
+    yield
+    try:
+        from neurova.api import app as _appModule
+        from neurova.api import endpoints as _endpointsModule
+    except Exception:  # pragma: no cover - 模块不可用时跳过
+        return
+    _appModule._app_state = None
+    _appModule._app_instance = None
+    _endpointsModule._app_state = None
+
+
+@pytest.fixture(autouse=True)
 def _isolate_execution_engine_singleton():
     """ExecutionEngine 单例跨测试隔离（Issue #65）。
 
@@ -1021,6 +1051,15 @@ _weightEgressGate = _WeightEgressGate(_WEIGHT_EGRESS_SITES)
 
 def pytest_configure(config):
     config.pluginmanager.register(_weightEgressGate, "weightEgressGate")
+    # jieba 字典是进程级一次性冷启动：谁先切词，谁在**自己的栈上**付这笔建表时间。
+    # CI runner 上实测把 `test_service_closed_loop::test_accept_produces_pending_proposal`
+    # 撑过 30s 墙——红的位置在建字典（`jieba.initialize()` → `gen_pfdict`），不在被测逻辑；
+    # 本机 2.5s（字典已被同场更早的档暖过）。这是"判据读数取决于谁先跑到"的形态，
+    # 归前提不归被测代码，故在收集期一次建完，不留给某一条用例承担。
+    # 失败按不可用记下（`search._get_jieba` 自己 fail-soft 回退 n-gram），不影响收集。
+    from neurova.knowledge.search import warmJieba
+
+    warmJieba()
 
 
 @pytest.fixture(autouse=True)
@@ -1042,11 +1081,11 @@ def _closeWeightEgressDuringTests(request, monkeypatch):
         site = importlib.import_module(moduleName)
         monkeypatch.setattr(site, attr, _weightEgressGate.refusalFor(moduleName, attr))
 
-# ── 根外锚的测试隔离（§6-388）──────────────────────────────────────────────
-# 生产的锚落点是 `~/.neurova/artifact_anchors.json`（**数据根之外**，理由见
+# ── 锚文件的测试隔离（§6-388）──────────────────────────────────────────────
+# 生产的锚落点是 `<数据根>/artifacts/artifact_anchors.json`（取法见
 # `artifact_digest.anchorPath` 的注释）。跑测时任何一次"钉摘要/装技能/装插件"都会
-# 去写那儿——所以按与数据根同形的思路在跑测期改指临时目录，且**仍在数据根之外**
-# （否则"锚在数据根里"这条会自己消失，判据就测不到实态）。
+# 去写那儿——默认按与数据根同形的思路改指临时目录，免得落进某个用例自己的隔离根。
+# 注意这条夹具**不改变**落点语义：锚仍与账本同根（整库回滚的检测边界见台账）。
 ANCHOR_SESSION_DIR = Path(tempfile.mkdtemp(prefix="neurovaAnchors-"))
 
 
@@ -1058,46 +1097,3 @@ def _isolateArtifactAnchors(monkeypatch):
     monkeypatch.setattr(artifact_digest, "anchorPath",
                         lambda: ANCHOR_SESSION_DIR / "artifact_anchors.json")
 
-# ── 稠密向量路径的前提判据（单一源）────────────────────────────────────────
-# 一批门禁与判据要的是「生产同款稠密检索真的在跑」，而不是「`get_embedding_engine()`
-# 不是 None」。两者不是一回事：薄环境（CI 的 `requirements-ci.lock` 刻意排除 numpy /
-# onnxruntime / tokenizers / transformers）里引擎对象照样拿得到，但 `encode()` 每次
-# 都走 `[0.0] * 512` 的兜底——余弦恒 0，召回掉档、线索通道不点火、近似问法恒不命中。
-# 这批判据于是把「缺依赖」量成了「缺陷」，红在环境上。
-#
-# 判据此前分散在五个文件里各写一遍 `assert get_embedding_engine() is not None`，
-# 且**没有一处**落到"encode 出来不是零向量"这一层（教义第 6 条：口径只许一处）。
-# 收口成本函数：探针文本编码一次，模长为 0 即说明这条路是兜底、不是模型。
-_PROBE_TEXT = "许昌今天天气怎么样"
-
-
-def vectorPathUnavailable() -> str:
-    """稠密向量路径不可跑的原因；可跑时返回空串。
-
-    依次点名三件事：用得了 numpy（onnx 前端的唯一依赖面）、引擎拿得到、
-    真给出非零向量。字符串给 `pytest.skip` 当理由，判据不自造第二份说明。
-    """
-    try:
-        import numpy  # noqa: F401 - 只探在不在
-    except ImportError as exc:
-        return f"薄环境缺 numpy，稠密向量路径降级为零向量兜底（{exc}）"
-    from neurova.embedding import get_embedding_engine
-
-    engine = get_embedding_engine()
-    if engine is None:
-        return "全局嵌入引擎不可用（get_embedding_engine() 返回 None）"
-    try:
-        vector = engine.encode(_PROBE_TEXT)
-    except Exception as exc:  # noqa: BLE001 - 缺依赖/缺权重都属"这条路不可跑"
-        return f"稠密向量路径编码失败：{exc}"
-    if not any(vector):
-        return ("稠密向量路径返回零向量（tokenizer 或推理后端缺席时的兜底），"
-                "余弦恒 0，读数无意义")
-    return ""
-
-
-def requireVectorPath() -> None:
-    """稠密向量路径不可跑时 skip，并在理由里点名缺的是哪一环。"""
-    reason = vectorPathUnavailable()
-    if reason:
-        pytest.skip(reason)

@@ -306,7 +306,7 @@ class PluginManager:
 
         顺序是契约：白名单在取回前（`plugin_sources.fetchArchive`）→ 解包受
         `safe_extract_zip` 的字节/条目/zip-slip 三件牙 → 核对 manifest 名字 →
-        整体挪进插件根 → 走**同一条** `install_plugin` 登记链（权限门、装时钉、根外锚、
+        整体挪进插件根 → 走**同一条** `install_plugin` 登记链（权限门、装时钉、锚文件、
         状态落盘一个都不跳）。任何一步失败都清掉暂存，不在插件根留下半个包。
         """
         try:
@@ -498,11 +498,11 @@ class PluginManager:
         # 构件完整性钉（§6-172 批 31）：过了能力门的这份字节留一次底。
         # 门证明的是"当时声明合法"，装载前比对证明的才是"跑的还是那份"。
         record.artifactDigest = artifact_digest.digestDir(plugin_path)
-        # 根外锚（§6-388）：同一枚值另存一份到数据根之外，用于发现"整库回滚/只重钉账本"
+        # 锚文件（§6-388）：同一枚值另存一份到账本之外，用于发现"改完构件再单独重钉账本"
         # 那一类改动；写不成只出声，不回滚登记（账本那份仍是权威）。
         if not artifact_digest.recordAnchor(
                 artifact_digest.artifactKey("plugin", record.name), record.artifactDigest):
-            logger.error("插件 %s 的根外锚没写成（账本已钉、锚缺）：整库回滚检测对它不成立",
+            logger.error("插件 %s 的锚没写成（账本已钉、锚缺）：单独重钉账本这一形态检测不到",
                          record.name)
 
         self._plugins[name] = record

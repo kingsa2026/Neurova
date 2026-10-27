@@ -16,8 +16,15 @@ from fastapi.testclient import TestClient
 from neurova.api.auth import create_access_token
 from neurova.cognitive_layers.memory_layer.sleep import MemoryRecord, SleepConsolidation
 
-_TOKEN = create_access_token({"sub": "tester", "username": "tester", "role": "user"})
-_AUTH = {"Authorization": f"Bearer {_TOKEN}"}
+#: 凭证**每次取用时现签**：密钥属于"这一轮"，不属于"这个进程"。
+#:
+#: 原先这里把令牌烘在导入期（`_TOKEN = create_access_token(...)` 提到模块级）。同一条腿
+#: （受保护子集是单进程、按清单顺序跑）里任何一个档换了密钥，这枚导入期令牌当场验不过
+#: ——形态是 `401`，读起来像鉴权坏了，实际是测试自己在赌"谁先导入"。
+#: 生产侧取用口 `auth.currentJwtSecretKey()` 运行时读环境变量，本档只保证令牌晚于它签发。
+def _authHeaders() -> dict:
+    return {"Authorization": "Bearer " + create_access_token(
+        {"sub": "tester", "username": "tester", "role": "user"})}
 
 
 class SimpleNamespaceStub:
@@ -49,7 +56,7 @@ class SleepConflictsEndpointTest(unittest.TestCase):
 
     def test_conflicts_return_frontend_shape(self):
         with patch.object(self.sleep_api, "_get_agent", return_value=self.agent):
-            resp = self.client.get("/api/v1/sleep/default/conflicts", headers=_AUTH)
+            resp = self.client.get("/api/v1/sleep/default/conflicts", headers=_authHeaders())
         self.assertEqual(resp.status_code, 200)
         items = resp.json()
         self.assertEqual(len(items), 1)
@@ -65,7 +72,7 @@ class SleepConflictsEndpointTest(unittest.TestCase):
             resp = self.client.post(
                 f"/api/v1/sleep/default/conflicts/{conflict_id}/resolve",
                 json={"resolution": "keep_newest"},
-                headers=_AUTH,
+                headers=_authHeaders(),
             )
         self.assertEqual(resp.status_code, 200)
         rec = self.sc.get_conflict_resolutions()[0]
@@ -76,7 +83,7 @@ class SleepConflictsEndpointTest(unittest.TestCase):
             resp = self.client.post(
                 "/api/v1/sleep/default/conflicts/nonexistent/resolve",
                 json={"resolution": "keep_newest"},
-                headers=_AUTH,
+                headers=_authHeaders(),
             )
         self.assertEqual(resp.status_code, 404)
 
@@ -96,7 +103,7 @@ class SleepSettingsEndpointTest(unittest.TestCase):
 
     def test_get_settings_exposes_phase_progression_keys(self):
         with patch.object(self.sleep_api, "_get_agent", return_value=self.agent):
-            resp = self.client.get("/api/v1/sleep/default/settings", headers=_AUTH)
+            resp = self.client.get("/api/v1/sleep/default/settings", headers=_authHeaders())
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
         for key in (
@@ -112,7 +119,7 @@ class SleepSettingsEndpointTest(unittest.TestCase):
             resp = self.client.put(
                 "/api/v1/sleep/default/settings",
                 json={"sleep_mode": "time", "temp_threshold_light_sleep": 40.0},
-                headers=_AUTH,
+                headers=_authHeaders(),
             )
         self.assertEqual(resp.status_code, 200)
         s = self.sc.get_settings()
