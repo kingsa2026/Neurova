@@ -208,10 +208,6 @@ class TestNoNewHomeLandingIsAllowed:
         # 已全部收进数据根，表里只剩**收养端本身**——它必须能算出旧落点，否则旧物搬无可搬。
         # 留空就是把收养能力一起删掉。（号不写在这里：让号是双向的，写死就等着撞别人的批。）
         "core/data_root.py": 1,
-        # 摘要副本的锚文件刻意**落在数据根之外**（`~/.neurova/artifact_anchors.json`）：
-        # 防的是"整库回滚"与"改完构件再重钉账本"——锚跟着数据库一起回滚就失去意义
-        # （§6-388 票一甲①）。故它是家目录落点，且是本表认可的那一档，不是待收编的存量。
-        "security/artifact_digest.py": 1,
     }
 
     def test_homeLandingOffendersAreExactlyTheRegisteredOnes(self):
