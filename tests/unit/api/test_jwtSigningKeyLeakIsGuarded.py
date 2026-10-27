@@ -43,6 +43,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tests import ast_scan  # noqa: E402
+from tests.ast_scan import parseSource
 
 #: 撤销/复原的任何一种写法都算"带了复原"（判据咬的是有没有人收拾，不是怎么写）。
 _RESTORE_CALLS = {"adoptJwtSecretForTests", "resetJwtSecretToProduction"}
@@ -90,7 +91,7 @@ def test_protectedEntriesNeverLeakAnUnrestoredSecret():
         if not path.is_file():
             continue
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+            tree = parseSource(path.read_text(encoding="utf-8", errors="replace"))
         except SyntaxError:  # pragma: no cover - 由 static-gate 抓
             continue
         if _assignsSecretAtModuleLevel(tree) and not _carriesRestore(tree):
@@ -113,5 +114,5 @@ def test_protectedEntriesNeverLeakAnUnrestoredSecret():
 ])
 def test_detectorSeesTheLeakNotTheWording(body, leaked):
     """反空转：只改不复原抓到；改＋复原、以及用例内临时改指都放行。"""
-    assert (_assignsSecretAtModuleLevel(ast.parse(body))
-            and not _carriesRestore(ast.parse(body))) is leaked
+    assert (_assignsSecretAtModuleLevel(parseSource(body))
+            and not _carriesRestore(parseSource(body))) is leaked

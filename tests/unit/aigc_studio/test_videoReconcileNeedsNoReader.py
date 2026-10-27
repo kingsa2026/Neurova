@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from neurova.aigc_studio.store import StudioStore
+from tests.ast_scan import parseSource
 
 pytestmark = pytest.mark.timeout(60)
 
@@ -118,7 +119,7 @@ class TestMappingHasOneImplementation:
     def testEndpointNoLongerOwnsTheConvergenceMapping(self):
         source = (REPO / "neurova" / "api" / "endpoints" / "studio_api.py").read_text(
             encoding="utf-8")
-        tree = ast.parse(source)
+        tree = parseSource(source)
         # 端点里"由账本推终态"这两件事都不该再出现：读账本、按 `succeeded` 收敛镜头
         readsLedger = [
             n for n in ast.walk(tree)

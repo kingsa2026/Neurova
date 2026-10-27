@@ -31,6 +31,7 @@ import textwrap
 from unittest.mock import MagicMock
 
 import pytest
+from tests.ast_scan import parseSource
 
 
 def _get_method_source(method) -> str:
@@ -60,7 +61,7 @@ class TestWarn2SyncEventLogLevel:
         from neurova.agent.chat_pipeline import ChatPipeline
 
         source = _get_method_source(ChatPipeline._sync_event)
-        tree = ast.parse(source)
+        tree = parseSource(source)
         for node in ast.walk(tree):
             if isinstance(node, ast.ExceptHandler):
                 for child in ast.walk(node):
@@ -82,7 +83,7 @@ class TestWarn2SyncEventLogLevel:
         from neurova.agent.chat_pipeline import ChatPipeline
 
         source = _get_method_source(ChatPipeline._sync_event)
-        tree = ast.parse(source)
+        tree = parseSource(source)
         warning_with_exc_info = []
         for node in ast.walk(tree):
             if isinstance(node, ast.ExceptHandler):
@@ -134,7 +135,7 @@ class TestWarn3ConsoleChatMetadata:
         from neurova.api.endpoints import console
 
         source = _get_method_source(console.post_console_chat)
-        tree = ast.parse(source)
+        tree = parseSource(source)
 
         # 收集"赋值为含 user_id 键的 Dict 字面量"的变量名
         # （实现把 metadata 字面量提取为变量，调用点传变量名）
@@ -191,7 +192,7 @@ class TestWarn4AddMessageWriteCheck:
         from neurova.session_manager import SessionManager
 
         source = _get_method_source(SessionManager.add_message)
-        tree = ast.parse(source)
+        tree = parseSource(source)
 
         # 收集所有 self._write_session_file_unlocked(...) 的 Call 节点
         write_calls = [
@@ -272,7 +273,7 @@ class TestWarn4InnerWriteLogLayering:
         from neurova.session_manager import SessionManager
 
         source = _get_method_source(SessionManager._write_session_file_unlocked)
-        tree = ast.parse(source)
+        tree = parseSource(source)
         for node in ast.walk(tree):
             if isinstance(node, ast.ExceptHandler):
                 for child in ast.walk(node):

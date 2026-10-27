@@ -58,6 +58,7 @@ SPEC_PROBE_WALL_S = 20
 from neurova.channels.base import ChannelConfig  # noqa: E402
 
 from tests import ast_scan  # noqa: E402
+from tests.ast_scan import parseSource
 
 
 def _voiceConfig() -> ChannelConfig:
@@ -161,7 +162,7 @@ class TestTheParallelAssemblyIsRetired:
     def _keySites(src: str) -> list:
         """只数**键位**用法：`x.get("voice_enabled")`、`x["voice_enabled"]`、字典字面量的键位。
         取值位置（`{"type": "voice_enabled"}` 这类）不算——按字符串包含扫会假红。"""
-        tree = ast.parse(src)
+        tree = parseSource(src)
         hits = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant) \

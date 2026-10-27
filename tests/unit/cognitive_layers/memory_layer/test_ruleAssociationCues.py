@@ -23,6 +23,7 @@ import re
 import pytest
 
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+from tests.ast_scan import parseSource
 
 pytestmark = [pytest.mark.timeout(60)]
 
@@ -252,7 +253,7 @@ class TestRuleDerivationIsModelFree:
         ]
         offenders = []
         for path in roots:
-            tree = ast.parse(io.open(path, encoding="utf-8").read(), filename=path)
+            tree = parseSource(io.open(path, encoding="utf-8").read(), filename=path)
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call):
                     continue
@@ -270,7 +271,7 @@ class TestRuleDerivationIsModelFree:
         `moe_dependency_extractor.py:1-4` 明写）。按 AST 取调用形态，不匹配散文字。"""
         from neurova.cognitive_layers.memory_layer import association_cues
 
-        tree = ast.parse(inspect.getsource(association_cues))
+        tree = parseSource(inspect.getsource(association_cues))
         banned = re.compile(r"(llm|client|generate|complete|chat_completion)", re.I)
         offenders = []
         for node in ast.walk(tree):

@@ -32,6 +32,7 @@ from neurova.cognitive_layers.memory_layer.working_memory import (
     WorkingMemoryAugmenter,
     _MISSING,
 )
+from tests.ast_scan import parseSource
 
 
 def _pastTick():
@@ -239,7 +240,7 @@ class TestTheShellsClaimIsNowBacked:
         按 **AST 的调用/装饰器形态**判，不按"文件里有没有这个词"判——上一版写的是
         源码文本包含检查，结果它把自己的断言字符串也当成了替身使用，恒红。
         """
-        tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+        tree = parseSource(Path(__file__).read_text(encoding="utf-8"))
         doubles = {"MagicMock", "Mock", "AsyncMock", "patch", "create_autospec"}
         used = set()
         for node in ast.walk(tree):

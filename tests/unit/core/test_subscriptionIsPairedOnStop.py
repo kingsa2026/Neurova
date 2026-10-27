@@ -52,6 +52,7 @@ from pathlib import Path
 
 from neurova.core.base_module import BaseModule, ModuleState
 from neurova.core.event_bus import EventBus
+from tests.ast_scan import parseSource
 
 BASE_MODULE_PATH = Path(__file__).resolve().parents[3] / "neurova" / "core" / "base_module.py"
 
@@ -143,7 +144,7 @@ def testBaseModuleHasAnUnsubscribeFaceAndStopCallsIt():
     按 AST 认 `stop` 函数体内的 `self.<退订方法>(...)` 调用，不按词——
     本文件说明文字里也有"退订"二字，钉词会把自己钉红。
     """
-    tree = ast.parse(BASE_MODULE_PATH.read_text(encoding="utf-8"))
+    tree = parseSource(BASE_MODULE_PATH.read_text(encoding="utf-8"))
     moduleClass = next(
         n for n in tree.body
         if isinstance(n, ast.ClassDef) and n.name == "BaseModule"
@@ -190,7 +191,7 @@ def testContextSystemHasAShutdownPairAndAgentStopCallsIt():
     )
 
     source = Path(agentShutdown.__file__).read_text(encoding="utf-8")
-    tree = ast.parse(source)
+    tree = parseSource(source)
     shutdownFn = next(
         n for n in tree.body
         if isinstance(n, ast.AsyncFunctionDef) and n.name == "shutdown_agent"

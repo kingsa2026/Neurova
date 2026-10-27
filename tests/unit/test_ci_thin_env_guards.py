@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -166,7 +167,7 @@ class TestAnnotationMineSweep:
 class TestStaticGateCapture:
     def test_import_sweep_catches_importerror_family(self):
         """check_imports 必须捕 ImportError 族（ModuleNotFoundError 的父类）。"""
-        tree = ast.parse(_read("scripts", "ci_static_gate.py"))
+        tree = parseSource(_read("scripts", "ci_static_gate.py"))
         fn = next(
             n for n in ast.walk(tree)
             if isinstance(n, ast.FunctionDef) and n.name == "check_imports"

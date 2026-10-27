@@ -33,6 +33,7 @@ import sys
 from pathlib import Path
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 OLD_CHAIN = REPO_ROOT / "tests" / "integration" / "test_full_chain.py"
@@ -164,9 +165,9 @@ class TestNobodyCallsTheAsyncRouterSynchronously:
         awaited = "async def t():\n    result = await router.route(Message(content='hi'))\n"
         wrapped = "def t():\n    result = asyncio.run(network.route(query_vec))\n"
 
-        assert _syncRouteCallsIn(ast.parse(bad)) == [2], "同步样本没被点名，守卫会恒绿"
-        assert _syncRouteCallsIn(ast.parse(awaited)) == [], "await 形态被误报了"
-        assert _syncRouteCallsIn(ast.parse(wrapped)) == [], (
+        assert _syncRouteCallsIn(parseSource(bad)) == [2], "同步样本没被点名，守卫会恒绿"
+        assert _syncRouteCallsIn(parseSource(awaited)) == [], "await 形态被误报了"
+        assert _syncRouteCallsIn(parseSource(wrapped)) == [], (
             "把 asyncio.run(...) 里的真 async 调用也算红了——判据问错对象")
 
     def testTheReferenceScannerSparesAPointerButCatchesABareReference(self):

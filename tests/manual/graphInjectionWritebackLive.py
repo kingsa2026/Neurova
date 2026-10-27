@@ -28,6 +28,7 @@ import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from tests.ast_scan import parseSource
 
 
 def _record(name: str, value) -> None:
@@ -97,7 +98,7 @@ def _adoptionWriterCallSites() -> list:
     hits = []
     for path in sorted((repoRoot / "neurova").rglob("*.py")):
         try:
-            tree = _ast.parse(path.read_text(encoding="utf-8"))
+            tree = parseSource(path.read_text(encoding="utf-8"))
         except (OSError, SyntaxError, UnicodeDecodeError):
             continue
         for node in _ast.walk(tree):

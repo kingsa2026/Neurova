@@ -23,6 +23,7 @@ import pathlib
 import sys
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 INIT = REPO_ROOT / "neurova" / "execution_layers" / "__init__.py"
@@ -33,7 +34,7 @@ TRANSPORT_SURFACE = ("TransportType", "ExecutionTransport", "HTTPTransport",
 
 
 def _topLevelNames() -> dict:
-    tree = ast.parse(INIT.read_text(encoding="utf-8", errors="replace"))
+    tree = parseSource(INIT.read_text(encoding="utf-8", errors="replace"))
     kinds = {}
     for node in tree.body:
         if isinstance(node, ast.ClassDef):
@@ -119,7 +120,7 @@ def test_transportHalfIsNoLongerDeclaredInThatModule():
     kinds = _topLevelNames()
     left = [n for n in TRANSPORT_SURFACE if n in kinds]
     declared = [n for n in TRANSPORT_SURFACE
-                if n in {c.value for c in ast.walk(ast.parse(INIT.read_text(encoding="utf-8")))
+                if n in {c.value for c in ast.walk(parseSource(INIT.read_text(encoding="utf-8")))
                           if isinstance(c, ast.Constant) and isinstance(c.value, str)}]
     assert not left, f"传输那半还留着顶层定义：{left}"
     assert not declared, f"`__all__`／字符串面还挂着已退役的传输名：{declared}"

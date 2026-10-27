@@ -40,6 +40,7 @@ import sys
 import tempfile
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
@@ -126,7 +127,7 @@ def test_positiveControlWithoutSinglePointLandsInsideRepo():
 
 def test_singlePointGuardsWorkspaceRootThroughItsOwnEntry():
     """③形状格：v2 单根后 `isolatedDataRoot()` 不得再隔第二根。"""
-    tree = ast.parse(SINGLE_POINT.read_text(encoding="utf-8"))
+    tree = parseSource(SINGLE_POINT.read_text(encoding="utf-8"))
     fn = next(
         (n for n in tree.body
          if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "isolatedDataRoot"),

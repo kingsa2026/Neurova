@@ -35,6 +35,7 @@ import pytest
 from neurova.collaborate.workflow.scheduler import AgentScheduler
 from neurova.collaborate.workflow.models import FlowContext, ScheduledTask, compute_next_run
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
@@ -70,7 +71,7 @@ def _flowContextSurface(source: str, where: str) -> dict:
     """
     constructions, uses = [], []
     try:
-        tree = ast.parse(source, filename=where)
+        tree = parseSource(source, filename=where)
     except SyntaxError:
         return {"constructions": [], "uses": [f"{where}: SyntaxError"]}
 

@@ -88,6 +88,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TESTS_ROOT = REPO_ROOT / "tests"
@@ -627,7 +628,7 @@ class TestNestedPytestBudgetWalls:
              False, "合规：子墙数值读不出，但该格显式声明了父墙，不再靠全局墙兜底"),
         ]
         for index, (source, expectFinding, why) in enumerate(cases):
-            tree = ast.parse(source)        # 合成样本自己先要合法（形态 376）
+            tree = parseSource(source)        # 合成样本自己先要合法（形态 376）
             label = "sample%d" % index
             findings, _budget, coarse, attributed = _judgeTree(tree, label)
             assert (coarse - attributed) == set(), "样本 %s 落点未归账：%s" % (label, why)
@@ -644,7 +645,7 @@ class TestNestedPytestBudgetWalls:
                   "def testNamesakeRuns():\n"
                   "    asyncio.run(_coro())\n"
                   "    engine.run(timeout=900)\n")
-        findings, budget, _coarse, _attributed = _judgeTree(ast.parse(source), "sampleNamesake")
+        findings, budget, _coarse, _attributed = _judgeTree(parseSource(source), "sampleNamesake")
         assert not findings and budget == 0, (
             "同名假阳进账了（现数 %d 格／%d 条）——扩面必须先关住这一口，"
             "否则全仓 28 处 asyncio.run 会把『违规』淹成噪声" % (budget, len(findings)))

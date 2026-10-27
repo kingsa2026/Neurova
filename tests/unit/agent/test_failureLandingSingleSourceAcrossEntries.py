@@ -29,6 +29,7 @@ import pytest
 
 from .conftest import text_chunk
 from neurova.session_repository import get_session_repository
+from tests.ast_scan import parseSource
 
 SESSION = "sess-fail-landing-single-source"
 USER_TEXT = "把这份清单逐条核对一遍再回我"
@@ -78,7 +79,7 @@ def testChatStreamDelegatesToChatInsteadOfOpeningASecondPipeline():
     假红一场——选取范围本身也得精确）。
     """
     src = pathlib.Path("neurova/agent_core.py").read_text(encoding="utf-8")
-    tree = ast.parse(src)
+    tree = parseSource(src)
     agentCls = next(
         (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == "Agent"),
         None,
@@ -118,7 +119,7 @@ def _landingImpl() -> ast.AsyncFunctionDef:
     """
     src = pathlib.Path("neurova/agent/failed_turn_landing.py").read_text(encoding="utf-8")
     node = next(
-        (n for n in ast.walk(ast.parse(src))
+        (n for n in ast.walk(parseSource(src))
          if isinstance(n, ast.AsyncFunctionDef) and n.name == "landFailedTurn"),
         None,
     )

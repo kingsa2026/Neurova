@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import sys
+from tests.ast_scan import parseSource
 
 
 def main() -> int:
@@ -36,7 +37,7 @@ def main() -> int:
 
     # 清单从判据文件里读，不在这儿抄第二份（教义第 6 条：口径只允许一处定义）
     judge = repo / "tests/unit/core/test_singleton_convergence.py"
-    tree = ast.parse(judge.read_text(encoding="utf-8"))
+    tree = parseSource(judge.read_text(encoding="utf-8"))
     lists: dict[str, list] = {}
     for node in tree.body:
         if isinstance(node, ast.Assign) and isinstance(node.value, ast.List):

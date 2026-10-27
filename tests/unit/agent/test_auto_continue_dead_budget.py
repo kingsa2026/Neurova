@@ -53,6 +53,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.ci import tool_loop_deadline_ledger as ledger  # noqa: E402
+from tests.ast_scan import parseSource
 
 PIPELINE = PROJECT_ROOT / "neurova" / "agent" / "chat_pipeline.py"
 
@@ -67,7 +68,7 @@ LEDGER_ENTRIES = ("MAX_TOOL_CALL_ROUNDS",)
 
 
 def _auto_continue_node() -> ast.AST:
-    tree = ast.parse(io.open(PIPELINE, encoding="utf-8").read())
+    tree = parseSource(io.open(PIPELINE, encoding="utf-8").read())
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "_auto_continue":
             return node

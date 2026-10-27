@@ -58,6 +58,7 @@ PROBE_WALL_S = 20
 CNB = PROJECT_ROOT / ".cnb.yml"
 SETTINGS = PROJECT_ROOT / ".cnb" / "settings.yml"
 from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
+from tests.ast_scan import parseSource
 
 #: 运行期预算量尺（Agent 的量尺）。它同时是「超时」与「超轮次」的读数入口。
 BUDGET_SCRIPT = PROJECT_ROOT / "scripts" / "ci" / "npc_runtime_budget.py"
@@ -267,7 +268,7 @@ class TestBudgetScriptIsExecutedByTheBuild:
             "Agent 没有量尺，只能靠猜「离死还有多久」（实测代价：零余量撞墙、连结论都发不出）"
         )
         import ast
-        ast.parse(io.open(BUDGET_SCRIPT, encoding="utf-8").read())
+        parseSource(io.open(BUDGET_SCRIPT, encoding="utf-8").read())
 
     def test_script_runs_without_cnb_variables(self):
         """变量缺失时必须**响亮**报 unknown，不得崩栈、也不得默认「时间还很多」。"""
@@ -486,7 +487,7 @@ class TestRoleAdmissionIsPinnedBeforeTheAgent:
             "角色名写错时平台静默回落，本仓无任何一处响亮"
         )
         import ast
-        ast.parse(io.open(ADMISSION_SCRIPT, encoding="utf-8").read())
+        parseSource(io.open(ADMISSION_SCRIPT, encoding="utf-8").read())
 
     def test_admission_runs_before_npc_go(self, cnb_doc):
         jobs = _npcJobs(cnb_doc)

@@ -30,6 +30,7 @@ import ast
 import pathlib
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 MODULE = REPO_ROOT / "neurova" / "shared_core" / "execution_engine.py"
@@ -51,7 +52,7 @@ ORPHAN_FIELDS = ("_executions", "_tool_engine", "_workflow_engine", "_event_bus"
 
 
 def _tree() -> ast.Module:
-    return ast.parse(MODULE.read_text(encoding="utf-8", errors="replace"))
+    return parseSource(MODULE.read_text(encoding="utf-8", errors="replace"))
 
 
 def _classBody() -> ast.ClassDef:
@@ -197,7 +198,7 @@ def test_docstringNoLongerClaimsTheRetiredDuties():
     取数按**模块开头那段裸字符串**（本仓这型文件把 `from __future__` 写在最前，那份说明串因此
     不是 `__doc__`；按 `ast.get_docstring` 取会拿到 None，这条格就变成恒红的空判——按体位取才咬得住）。
     """
-    tree = ast.parse(MODULE.read_text(encoding="utf-8", errors="replace"))
+    tree = parseSource(MODULE.read_text(encoding="utf-8", errors="replace"))
     block = next((n.value.value for n in tree.body
                   if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
                   and isinstance(n.value.value, str)), None)

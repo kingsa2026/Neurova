@@ -39,6 +39,7 @@ from neurova.api.app import create_app  # noqa: E402
 from neurova.channels.base import ChannelConfig  # noqa: E402
 from neurova.channels.feishu import FeishuAdapter  # noqa: E402
 from neurova.channels.manager import ChannelManager, get_channel_manager  # noqa: E402
+from tests.ast_scan import parseSource
 
 ADAPTER_PREFIX = "/api/v1/channel-adapters"
 #: 该 router 的模块名（取路由面用 router.routes，不是 app.routes——见 `_realRoutesOfTheRouter` 的说明）
@@ -277,7 +278,7 @@ class TestHealthSweepCoversEveryAgentInstance:
     def testViewKeyConventionHasOneImplementation(self):
         """键约定只许有一份：两份视图各自内联一遍，加维度时必然只改到一处。"""
         src = (REPO / "neurova" / "channels" / "manager.py").read_text(encoding="utf-8")
-        tree = ast.parse(src)
+        tree = parseSource(src)
         defs = [n for n in ast.walk(tree)
                 if isinstance(n, ast.FunctionDef) and n.name == "_adapterViewKey"]
         assert len(defs) == 1, f"`_adapterViewKey` 定义了 {len(defs)} 次"
