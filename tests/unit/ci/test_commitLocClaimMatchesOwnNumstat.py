@@ -49,8 +49,12 @@ _TOTAL_MARKERS = ("本格", "本笔", "全笔")
 #: 预存红：**已推送或已入库、正文按平台纪律不许改写**的那几笔（短号 → 当时写错的声明）。
 #: 值只用于反证"这条豁免还该在"（`testBaselineEntriesStillPointAtRealMismatches`），
 #: 不参与报告生成。
-_KNOWN_BAD_COMMITS = {
-    "e87ce9b9": "生产池 +26/-5 ＝ 净 +21",
+_KNOWN_BAD_COMMITS: dict = {
+    # 空表不是"这条判据没在用"：豁免机制本身由 `testBaselineEntriesStillPointAtRealMismatches`
+    # 逐条反证，表里留一个已经修好或已经不在仓里的条目，就是下一次真错的隐身衣。
+    # 唯一那条 `e87ce9b9` 已在它自己那笔的正文改正后退役（该提交同时被换链重写，
+    # 仓里已不存在这一枚），故整条删掉而不是把 sha 改指新提交——豁免要挡的是
+    # "写错的正文被放过"，正文已经改对，就没有再挡的对象。
 }
 
 #: 本档三枚 subprocess 落点（rev-parse / rev-list / commit-tree）都是仓库内 git 查询，
