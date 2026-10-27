@@ -131,6 +131,25 @@ def _get_user_id(request, current_user: Optional[Dict[str, Any]] = None) -> str:
     return getattr(request.state, "user_id", "anonymous")
 
 
+def _establishRequestOwner(user_id: str) -> None:
+    """在请求边界建立请求级属主——`/chat` 与 `/ws` 共用这一处取法。
+
+    §6-153 的命中点形状：批 9 把管线里"每轮按 `metadata['user_id']` 补写通道"的双写
+    删掉时只在 `chat.py` 补了边界写点，console 面漏了。漏了会怎样不是"少个字段"：
+    `get_request_user_id()` 为空 ⇒ usage 入账落 `"anonymous"`
+    （`multi_model_client:876/1156`）、按日 LLM 配额整条不判（`:1426` 无身份即放行）、
+    客户端自带全新 session_id 时会话落空属主，而 `session_manager:1650` 的口径是
+    "空属主不过滤"——那条会话出现在**每个**登录用户的列表里。
+
+    位置是语义不是风格：`set_request_user_id` 必须发生在
+    `asyncio.create_task(...)` **之前**，task 创建时复制的是当前上下文；
+    也不能写进 `event_stream` 闭包（那要等客户端开始读才执行，而回合在请求边界就成立了）。
+    """
+    from neurova.core.identity_context import set_request_user_id
+
+    set_request_user_id(user_id)
+
+
 # ── Models ─────────────────────────────────────────────
 
 
@@ -653,6 +672,8 @@ async def post_console_chat(
         # 续跑执行身份＝原回合属主（推导单源在 `core/agent_run_ledger`，四入口共用）
         user_id, agent_id = resumeTurnIdentity(runRow, user_id, agent_id)
 
+    _establishRequestOwner(user_id)
+
     # 会话 ID：客户端传入或新建
     if body.session_id:
         session_id = body.session_id
@@ -977,6 +998,8 @@ async def post_console_chat(
             # 429 重试/切换倒计时事件转发（retry_status → SSE retry）
             "emit_status_events": True,
         }
+        # 请求级属主已在端点同步段写过一次（见 `post_console_chat` 开头那段说明）——
+        # 这里不再写第二遍：同一个值两处写就是两条并行口径。
         # R-3 修复: 附件元数据注入（file_ids → attachments，供 pipeline 附件注入）
         attachments = attach_files(getattr(body, "file_ids", None), user_id)
         logger.info("[附件注入] file_ids=%s user_id=%s → attachments=%d",
@@ -2375,10 +2398,9 @@ async def websocket_console(websocket: WebSocket, client_id: str, token: str = Q
     # `agent.chat` 之后落盘的会话也是空属主（对全员可见）。取数走 `_user_identity`
     # 那份单点，不在这里另推一遍 `sub` 的口径。
     from neurova.api.auth import _user_identity
-    from neurova.core.identity_context import set_request_user_id
 
     user_id = str(_user_identity(payload).get("user_id") or "")
-    set_request_user_id(user_id)
+    _establishRequestOwner(user_id)
     conn_id = f"{payload.get('sub', 'unknown')}:{uuid.uuid4().hex[:8]}"
     await _manager.connect(websocket, conn_id)
     try:

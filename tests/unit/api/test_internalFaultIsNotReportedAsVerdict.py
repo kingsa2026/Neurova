@@ -21,7 +21,6 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from neurova.api.auth import get_current_user, get_current_user_or_default
 from neurova.api.error_handlers import register_error_handlers
 from neurova.interfaces.api_standard import ErrorCodes
 from tests.auth_headers import bearerHeaders
@@ -30,17 +29,27 @@ USER = {"user_id": "1", "username": "tester", "role": "user"}
 
 
 def _mount(router, prefix: str):
+    """装配噪声先排掉：身份门整族打成 USER，红才咬在"把故障读成结论"上。
+
+    覆盖面必须按**路由图实际用到的**门来打，不能手抄名字：记忆面 2026-10-26 点单甲
+    之后是路由级的 `requireIdentityForMemoryFace` 在守门，手抄的
+    `get_current_user(or_default)` 两个名字对它无效，于是本档曾整族 401——红落在
+    "没鉴权"上，被测对象（故障有没有被折成结论）根本没被执行到。
+    `tests/auth_headers.overrideIdentity` 是仓内为这件事立的那一处取法
+    （它同样钉死了 `deps` 那份同名再导出，避免"override 打错对象静默不生效"）。
+    """
+    from tests.auth_headers import overrideIdentity
+
     app = FastAPI()
     app.include_router(router, prefix=prefix)
     register_error_handlers(app)
-    app.dependency_overrides[get_current_user_or_default] = lambda: dict(USER)
-    # 装配噪声先排掉：路由级的鉴权依赖不覆盖就整族 401——红会咬在"没鉴权"上，
-    # 而不是"把故障读成结论"上。两处都是**装配点**，不是被测对象。
-    # 记忆面另有一道**路由级**凭证门（`APIRouter(dependencies=[Depends(requireIdentityForMemoryFace)])`，
-    # 2026-10-26 点单甲把读写一起收进来）：它判的是"请求有没有凭证"，不看被 override 的
-    # 处理器级身份函数，替身压不住它——故 client 挂一枚真 JWT（生产同一个签发口）。
-    app.dependency_overrides[get_current_user] = lambda: dict(USER)
-    return TestClient(app, raise_server_exceptions=False, headers=bearerHeaders(USER["user_id"]))
+    overrideIdentity(app, dict(USER))
+    # 路由级凭证门（`requireIdentityForMemoryFace`）判的是"这一趟请求有没有凭证"，
+    # 与处理器级身份是谁无关——替身压不住它，故 client 也挂一枚真 JWT（生产同一个签发口）。
+    # 两条一起上：只带证不 override 会让 firewall 那族按真身份裁决，只 override 不带证
+    # 会整族 401。两件都是**装配点**，不是被测对象。
+    return TestClient(app, raise_server_exceptions=False,
+                      headers=bearerHeaders(USER["user_id"]))
 
 
 class _BoomLedger:

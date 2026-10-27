@@ -17,8 +17,8 @@
 取数走真 `create_app()`＋`TestClient`——**不进 with 上下文**就是"启动尚未完成"的真实形状，
 那正是 6001 在生产里被抛出的那个态；不去 monkeypatch 私有 `_state`（那是绕过生产装配点）。
 反向钉不在本档重复：已就绪时这两个端点仍 200、写侧匿名仍 401，由
-`tests/unit/api/test_memoryWriteIdentityGate.py:88/:102` 钉着——本批只改"失败长什么样"，
-不许顺手把读面改成要登录。
+`tests/unit/api/test_memoryWriteIdentityGate.py` 钉着——本档只改"失败长什么样"，
+不许顺手把读面改成不要登录（2026-10-26 点单甲之后读面本就要登录，夹具按现行政策带证）。
 """
 from __future__ import annotations
 

@@ -58,7 +58,11 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION = REPO_ROOT / "neurova"
 
 #: 通道侧的写入函数名（清槽也算：它同样决定"这一轮是谁"）。
-REQUEST_WRITERS = ("set_request_user_id", "clear_request_user_id")
+#: 写/清请求级属主的门面名。`_establishRequestOwner` 是本批加的那一层：`console.py` 的
+#: REST 与 WS 两个入口共用**一处**写点（同一件事的两个调用方不该各写一遍取法），
+#: 探测器按形状数入口，故这一层名字必须与门面一起登记——否则"写点确实在，只是包了一层"
+#: 会被读成"没写"，两个入口被判违例。
+REQUEST_WRITERS = ("set_request_user_id", "clear_request_user_id", "_establishRequestOwner")
 #: 轮次内容门面的函数名——§6-163 之后它的签名里不再有 `user_id`，
 #: 本文件用它做的是**复活闸**（⑥）：全仓任何调用点往里塞 `user_id=` 就是红。
 TURN_WRITER = "set_request_identity"
@@ -553,8 +557,14 @@ class TestEveryTurnEntryEstablishesTheOwner:
         """
         rel = "neurova/api/endpoints/console.py"
         source = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        # 摘的是**门面那一句**，不是各调用方：两个入口现在共用 `_establishRequestOwner`，
+        # 只摘调用点等于留着那条写路径（写点仍在门面里），对照会假合规。
         stripped = source.replace("set_request_user_id(user_id)", "pass")
         assert stripped != source, "console.py 里没有可摘的写点，本对照不可信"
+        # 再把包了一层的那一处也摘掉：门面的函数体与它的两个调用点一起消失，
+        # 才是"这一面一个写点都没有"的形状。
+        stripped = stripped.replace("_establishRequestOwner(user_id)", "pass")
+        stripped = stripped.replace("def _establishRequestOwner(user_id: str) -> None:", "def _retiredOwnerSeam(user_id: str) -> None:")
 
         found = ownerWritesByTurnHandler(ast.parse(stripped))
         assert {"post_console_chat", "websocket_console"} <= set(found), (
