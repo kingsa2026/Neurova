@@ -652,6 +652,12 @@ def _walkNodes(tree: ast.AST) -> list:
     类判定用 `__class__ in <frozenset>` 而不是 `isinstance`：本集三个类都是叶子语义（`ast.Import`
     与 `ast.ImportFrom` 无子类），一次 set 查表比走 `isinstance` 的 MRO 便宜，实测每个节点
     少一次属性查找。
+
+    **它不是"整棵树的节点清单"**：`4ca3db33` 合并时曾把旧的"全量清单"实现与新的"三类节点"
+    调用方拼在一起，于是 `takenPerModule` 里那两句
+    `[n for n in walked if …` 等于对全量节点再线性过一遍——读数不变，但"清单"的体量
+    是下游要用的那三类的十倍以上，判据侧按清单长度现量的下潜预算当场失准
+    （`TestTakenPerModuleDivesOncePerTree` 读到 1671075 次下潜 / 预算 148479）。
     """
     found: list = []
     pending = collections.deque([tree])
