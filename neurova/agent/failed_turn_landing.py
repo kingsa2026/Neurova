@@ -1,13 +1,16 @@
-"""失败轮的会话落点——**这一轮以什么收场，读侧必须看得见**。
+"""回合落点——一轮对话在会话盘上的两个写入时机。
 
 从 `chat_pipeline.py` 抽出的独立模块。抽出的理由与 `agent/legacy_call.py` 同源：
 那个文件被 `scripts/ci/perf_gate.py` 的 `hot-path-file-size` 点名成每轮对话必经
 热路径，越过 160000B 之后每加一条逻辑都在拖慢 review 与重构，而门禁自己写的
 处置就是"新逻辑应抽到独立模块后再接线"。
 
-为什么这件事必须存在：后处理（含唯一的会话写点 `post_chat_pipeline._step_save_session`）
-只在正常收尾路径上被调，LLM 抛错时异常从 `_step_llm_call` 就离开了管线——于是盘上
-只剩提前落好的 user 一条，刷新后的页面挂着"本轮仍在生成中"永远等不到终态。
+两个时机各补一个实测缺口：
+- `persistUserMessageEarly`：LLM 开口之前就把本轮 user 落盘——否则整个回合进行中
+  （前端正在流式收字）盘上本轮一个字都没有，刷新/掉线连自己刚发的那句都读不回；
+- `landFailedTurn`：后处理（含唯一的会话写点 `post_chat_pipeline._step_save_session`）
+  只在正常收尾路径上被调，LLM 抛错时异常从 `_step_llm_call` 就离开了管线——于是盘上
+  只剩提前落好的 user 一条，刷新后的页面挂着"本轮仍在生成中"永远等不到终态。
 
 **归属不变**：`ChatPipeline` 上留同名薄委托，调用点与测试面一行不用改——搬走的
 是实现，不是接口（教义第 7 条：同功能先比后合，不留第二份实现各自演化）。
@@ -15,7 +18,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from neurova.core.logger import get_logger
 
@@ -58,3 +61,26 @@ async def landFailedTurn(pipeline, ctx: "ChatContext", exc: BaseException) -> No
         )
     except BaseException as landExc:  # noqa: BLE001 - 落点失败不得顶掉真因
         logger.warning("失败轮落点未成（本轮读侧仍看不到终态）: %s", landExc)
+
+
+def persistUserMessageEarly(ctx: "ChatContext", memory) -> Optional[str]:
+    """把本轮 user 消息写进会话盘，返回会话 id；未写返回 None。
+
+    `save_memory=False`（评测/内部调用）不预写：那条路径本就不进会话历史。
+    围栏 claim 沿用本轮的，与回合末同过 `SessionManager._fenceRefusesWrite` 那一道
+    闸——提前写也是写会话历史，不能因为它在开始就绕过 P1-10。
+    """
+    if not ctx.save_memory or ctx.user_message_persisted:
+        return None
+    if memory is None or not hasattr(memory, "saveUserMessage"):
+        return None
+
+    from neurova.post_chat_pipeline import resolveSessionOwner
+
+    return memory.saveUserMessage(
+        ctx.user_input,
+        session_id=ctx.session_id,
+        metadata=ctx.metadata,
+        writer_claim=ctx.writer_claim,
+        session_owner=resolveSessionOwner(ctx.metadata),
+    )
