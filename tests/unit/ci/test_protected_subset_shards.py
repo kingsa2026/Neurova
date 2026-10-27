@@ -193,6 +193,54 @@ class TestBothSidesRunTheSameShards:
                 "逐片判 60% 会假红；分片只该攒数据")
 
 
+class TestShardEntriesReachPytestLiterally:
+    """清单要**逐条**交到 pytest 手上，缺一条就是静默少跑一条。
+
+    事故（构建 `cnb-1f0-1k5uonjt2-003` 实读）：同一片里前 8 格全绿，第 9 格起
+    `test_legacy_ref_ledger_guard` / `test_archive_nav_impact_guard` 两档红在
+    「台账与扫描器不一致」，而本机按单文件跑同一批是 44 passed / 1 skipped。
+    差别在清单的**喂法**：cnb 侧写成
+
+        TESTS=$(grep -v '^#' "$shard" | tr '\n' ' ')
+        python -m pytest ... $TESTS
+
+    `$(...)` 的结果会被 shell 再切一次词，清单里混进一条空行、一个空格、一个 glob 字符，
+    后面的条目就整片错位；而 pytest 从不说「你列的文件我少跑了几个」——它只跑收到的那部分。
+
+    修法是**两侧同一口径**：清单先由 `sh` 逐行读到位置参数上（`set --`，引号包住每个路径，
+    不过 glob、不再切词），由 pytest 直接收位置参数。这条不变量两头钉住：
+    一侧 `$TESTS` 展开、一侧逐行 —— 也是两套放行标准。
+    """
+
+    @staticmethod
+    def _shellLines(scripts: str) -> str:
+        """`script:` 是 **shell**，`#` 之后是注释——注释里讲「旧写法长什么样」不改变行为，
+        把注释当成配置读会得出假阳性（本档自己就踩了一次）。故只留命令行。"""
+        return "\n".join(line.split("#", 1)[0] for line in scripts.splitlines())
+
+    def testCnbLegPassesTheListLineByLine(self):
+        scripts = self._shellLines(_cnbScripts(_cnbPipeline()))
+        assert "tr '\\n' ' '" not in scripts and 'tr "\\n" " "' not in scripts, (
+            "cnb 侧又把清单压成一行塞进 `$TESTS` 了——`$(...)` 会被 shell 再切一次词，"
+            "清单里一条空行就让后面的条目错位，被跳过的文件不会报错，只会安静地不跑"
+            "（构建 cnb-1f0-1k5uonjt2-003）。"
+        )
+        assert "set --" in scripts and '"$@"' in scripts, (
+            "cnb 侧没有把清单逐行读到位置参数上（`set -- …` + `pytest … \"$@\"`）："
+            "每一条都要原样交给 pytest，路径里带空格也不会被拆开"
+        )
+
+    def testGithubLegPassesTheListTheSameWay(self):
+        runs = self._shellLines(_ghwRuns(_ghwJob()))
+        assert "tr '\\n' ' '" not in runs and 'tr "\\n" " "' not in runs, (
+            "GitHub 侧仍在把清单压成一行塞进 `$TESTS`：两侧必须同一口径，"
+            "一处逐行、一处切词就是两套放行标准"
+        )
+        assert "set --" in runs and '"$@"' in runs, (
+            "GitHub 侧没有按 cnb 侧同一形态读清单（`set -- …` + `\"$@\"`）"
+        )
+
+
 class TestDetectorIsNotVacuous:
     """反向控制：三种分片缺陷必须各被抓到，否则上面几条是快照不是判据。"""
 
