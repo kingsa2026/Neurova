@@ -681,6 +681,13 @@ def takenPerModule(root: Path, suffix: str = ".py") -> dict:
         rel = relativeToRepo(ref.path)
         # 下潜**只付一次**：节点先收进一份清单，再在这份清单上分两趟过（import 面 → 属性面）。
         #
+        # 实测（本机，全仓 3684 档 / 828 万节点）：原形态对每棵树各跑一次 `ast.walk`，
+        # 下潜那一遍重复付了两次（`iter_child_nodes` 累计 15.3s），单次 14.1s——
+        # 于是消费它的 `test_packageDeclaredSurfaceCoversWhatIsTaken` 在受保护子集里
+        # 撞 30s 全局墙钟（构建 `cnb-dg2-1k5qd8q3g#003`，`Timeout (>30.0s)`）。
+        # 这是判据成本随**代码总量**涨的老形态（Issue #148 同族），不是"跑得慢"。
+        # 清单化后两趟都在清单上做，读数逐条不变（等价性由本文件下方的对拍格钉住）。
+        #
         # 为什么不能合成一趟：属性链的归属判据是"该文件确实 import 过那个前缀"，而
         # `ast.walk` 的产出序列由**树形**决定，不由书写顺序：本仓
         # `neurova/auth/qclaw_binding_model.py` 顶层 `try:` 里的
