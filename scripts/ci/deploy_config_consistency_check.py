@@ -220,10 +220,14 @@ def parse_compose() -> Dict[str, Any]:
         return out
 
     def port_of(svc: Dict[str, Any]) -> int | None:
+        # 端口映射的完整短语法是 `[<宿主IP>:][<宿主端口>:]<容器端口>[/协议]`。
+        # 只认 `宿主:容器` 两段会把回环发布 `127.0.0.1:9527:9527` 静默读成 None，
+        # 而 R2 的端口比对只在两侧都非 None 时比较 —— 于是"读不到"被当成了"对上了"。
+        # 取末尾两段：有宿主端口时它是容器侧，只有一段时那一段本身就是容器端口。
         for entry in svc.get("ports") or []:
-            m = re.match(r"^(\d+):(\d+)$", str(entry))
-            if m:
-                return int(m.group(1))
+            parts = str(entry).split("/")[0].split(":")
+            if len(parts) >= 2 and parts[-1].isdigit():
+                return int(parts[-1])
         return None
 
     return {name: {"env": env_of(svc), "port": port_of(svc), "raw": svc} for name, svc in services.items()}
@@ -433,8 +437,25 @@ def _check_health(docker: Dict[str, Any], compose: Dict[str, Any], helm: Dict[st
                 f"健康检查路径不一致：Dockerfile={path}, Helm healthCheck.path={hhc.get('path')}",
             )
         )
-    if dhc.get("port") and dhc["port"] != compose["backend"]["port"]:
-        out.append(Finding("error", "R2-healthcheck", "compose 健康检查端口与 Dockerfile EXPOSE 不一致"))
+    compose_port = compose["backend"]["port"]
+    if compose_port is None:
+        out.append(
+            Finding(
+                "error",
+                "R2-healthcheck",
+                "未能从 docker-compose.yml 解析到 backend 端口映射——"
+                "健康检查端口一致性比较会静默少一项（不要把该解析写成可选）",
+            )
+        )
+    elif dhc.get("port") and dhc["port"] != compose_port:
+        out.append(
+            Finding(
+                "error",
+                "R2-healthcheck",
+                f"compose 健康检查端口与 Dockerfile EXPOSE 不一致："
+                f"Dockerfile={dhc['port']}, compose 容器端口={compose_port}",
+            )
+        )
     return out
 
 
