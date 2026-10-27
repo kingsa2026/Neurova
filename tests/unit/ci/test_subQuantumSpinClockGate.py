@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Dict, List, Set
 
 import pytest
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CONTRACT = REPO_ROOT / "tests" / "performance" / "test_perf_gate_contract.py"
@@ -71,7 +72,7 @@ def _source() -> str:
 
 
 def _parse(source: str) -> ast.Module:
-    tree = ast.parse(source)
+    tree = parseSource(source)
     assert tree.body, "解析出零个顶层节点——扫描面为空，本守卫会空转"
     return tree
 

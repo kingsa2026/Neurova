@@ -29,6 +29,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from tests.ast_scan import parseSource
 
 _REPO = Path(__file__).resolve().parents[3]
 _GATE = _REPO / "scripts" / "desktop" / "disk_headroom.py"
@@ -115,7 +116,7 @@ def test_installerPipelineGatesBeforeFrontendAndRustBuild():
     却被判成"排在后面"。文档串不会被 walk 成 Call，假命中因此消失。
     """
     source = _INSTALLER.read_text(encoding="utf-8")
-    tree = ast.parse(source)
+    tree = parseSource(source)
     fn = next(n for n in ast.walk(tree)
               if isinstance(n, ast.FunctionDef) and n.name == "build_tauri")
     callSegments = [(n.lineno, ast.get_source_segment(source, n) or "")

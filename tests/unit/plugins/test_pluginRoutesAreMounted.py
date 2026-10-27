@@ -40,6 +40,7 @@ from neurova.plugins.plugin_permissions import (
     PluginPermissionStore,
     resetPermissionStore,
 )
+from tests.ast_scan import parseSource
 
 
 def _mount():
@@ -569,7 +570,7 @@ class TestEveryRefusalHasHttpSemantics:
             # 字面量扫不到——与 artifact_digest 同机制：包内**真引用**这份词汇才算。
             computedSources.append(PROJECT_ROOT / "neurova" / "plugins" / "plugin_sources.py")
         for sourceFile in computedSources:
-            for node in ast.walk(ast.parse(sourceFile.read_text(encoding="utf-8"),
+            for node in ast.walk(parseSource(sourceFile.read_text(encoding="utf-8"),
                                            filename=str(sourceFile))):
                 if not isinstance(node, ast.Assign):
                     continue

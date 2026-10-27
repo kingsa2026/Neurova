@@ -51,6 +51,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION = PROJECT_ROOT / "neurova"
@@ -82,7 +83,7 @@ def _roundScaleDerivations():
     hits = []
     for path in _productionPyFiles():
         try:
-            tree = ast.parse(_text(path))
+            tree = parseSource(_text(path))
         except SyntaxError:
             continue
         for node in ast.walk(tree):
@@ -108,7 +109,7 @@ def _instanceFieldWrites(field: str):
     """`self.<field> = ...` 的写入落点（AST，跨文件）。"""
     hits = []
     for path in _productionPyFiles():
-        tree = ast.parse(_text(path))
+        tree = parseSource(_text(path))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Assign):
                 continue

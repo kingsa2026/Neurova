@@ -28,6 +28,7 @@ from pathlib import Path
 import pytest
 
 from neurova.plugins.plugin_errors import PluginError
+from tests.ast_scan import parseSource
 
 _MANIFEST = {
     "name": "probe",
@@ -291,7 +292,7 @@ class TestNoSecondPersistencePath:
         import ast
 
         source = Path(__file__).resolve().parents[3] / "neurova" / "plugins" / "plugin_manager.py"
-        tree = ast.parse(source.read_text(encoding="utf-8"))
+        tree = parseSource(source.read_text(encoding="utf-8"))
 
         offenders = []
         for node in ast.walk(tree):

@@ -35,6 +35,7 @@ os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_stateclosure_01
 
 from neurova.api.endpoints import mobile_pairing as MP  # noqa: E402
 from neurova.tunnel import protocol  # noqa: E402
+from tests.ast_scan import parseSource
 
 PREFIX = "/api/v1/mobile"
 REPO = Path(__file__).resolve().parents[3]
@@ -309,7 +310,7 @@ class TestLegacyQueryTokenStillGuarded:
                 and id(node) not in docstrings]
 
     def test_ws_url_builder_puts_no_credential_into_the_url(self):
-        tree = ast.parse(io.open(REPO / "neurova/api/endpoints/mobile_pairing.py",
+        tree = parseSource(io.open(REPO / "neurova/api/endpoints/mobile_pairing.py",
                                  encoding="utf-8").read())
         body = self._functionCodeText(tree, "_build_ws_url")
         for forbidden in ("token", "ticket", "code"):
@@ -318,9 +319,9 @@ class TestLegacyQueryTokenStillGuarded:
 
     def test_payload_text_is_built_in_exactly_one_place(self):
         """载荷文本只在 `protocol.pairingQrPayload()` 造一次，端点不自己拼第二份。"""
-        endpointTree = ast.parse(io.open(REPO / "neurova/api/endpoints/mobile_pairing.py",
+        endpointTree = parseSource(io.open(REPO / "neurova/api/endpoints/mobile_pairing.py",
                                          encoding="utf-8").read())
-        protocolTree = ast.parse(io.open(REPO / "neurova/tunnel/protocol.py",
+        protocolTree = parseSource(io.open(REPO / "neurova/tunnel/protocol.py",
                                          encoding="utf-8").read())
         endpointLiterals = self._literalStringsOutsideDocstrings(endpointTree)
         assert not [s for s in endpointLiterals if "neurova://pair" in s], (
@@ -336,5 +337,5 @@ class TestLegacyQueryTokenStillGuarded:
             '    """原先这里挂过 ?token=，那是历史说明，不是当前行为。"""\n'
             '    return f"ws://h/ws?token={tok}"\n'
         )
-        body = self._functionCodeText(ast.parse(sample), "_build_ws_url")
+        body = self._functionCodeText(parseSource(sample), "_build_ws_url")
         assert "token=" in body, "剥完 docstring 把真回归也一起剥掉了——判据失明"

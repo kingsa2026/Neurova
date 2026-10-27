@@ -1153,10 +1153,6 @@ export default {
     sandboxRequired: 'Bac à sable requis',
   },
   skillEvo: {
-    adopt: 'Adopter',
-    adoptTarget: 'Compétence cible',
-    adoptSuccess: 'Proposition en attente créée',
-    adoptError: "Échec de l'adoption",
     abVerify: 'Contrôle à deux bras (véritable holdout)',
     abHint: 'Même jeu de tâches et même juge : texte de base contre texte candidat ; lecture seule, aucune proposition produite.',
     abRunSimulated: 'Lancer le bras simulé',
@@ -1309,6 +1305,10 @@ export default {
     noMarketSkills: 'Aucune compétence publique à importer',
     installSuccess: 'Installation réussie',
     installError: 'Échec de l\'installation',
+    adopt: 'Adopter',
+    adoptTarget: 'Compétence cible',
+    adoptSuccess: 'Proposition en attente créée',
+    adoptError: "Échec de l'adoption",
   },
   skillPool: {
     pendingReview: "En attente",

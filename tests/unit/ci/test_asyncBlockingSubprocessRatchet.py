@@ -27,6 +27,7 @@ import ast
 import pathlib
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 SCAN_ROOT = REPO_ROOT / "neurova"
@@ -52,7 +53,7 @@ def _blockingCallsInAsync(source: str) -> list[int]:
     含 `async def` 内嵌的 `def`——那种嵌套体一旦被同协程直接调用，照样占循环。
     """
     try:
-        tree = ast.parse(source)
+        tree = parseSource(source)
     except (SyntaxError, UnicodeDecodeError):
         return []
     hits: list[int] = []

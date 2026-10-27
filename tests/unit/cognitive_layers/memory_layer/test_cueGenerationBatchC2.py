@@ -30,6 +30,7 @@ import re
 import pytest
 
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+from tests.ast_scan import parseSource
 
 pytestmark = [pytest.mark.timeout(120)]
 
@@ -336,7 +337,7 @@ class TestProductionWiringIsOnThePath:
         path = os.path.join(_root, "neurova", "post_chat_pipeline.py")
         with io.open(path, encoding="utf-8") as fh:
             src = fh.read()
-        tree = ast.parse(src)
+        tree = parseSource(src)
         calls = {
             node.func.attr
             for node in ast.walk(tree)

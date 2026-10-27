@@ -21,6 +21,7 @@ Rust 侧编译早已成功（`app.exe` 已产出），卡在签名这一步。�
 from __future__ import annotations
 
 from pathlib import Path
+from tests.ast_scan import parseSource
 
 _REPO = Path(__file__).resolve().parents[3]
 _PKG_SCRIPT = _REPO / "scripts" / "desktop" / "package_installer_zip.py"
@@ -41,7 +42,7 @@ def testSigningIsInjectableNotHardwired():
     import ast
 
     src = _src()
-    tree = ast.parse(src)
+    tree = parseSource(src)
     funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
     assert "tauri_signing_args" in funcs, (
         "缺签名注入函数 —— 构建机会被绑死在写死指纹的那台机器上"
@@ -135,7 +136,7 @@ def testBuildRedirectsLocalAppDataOffSystemProfile():
     import ast
 
     src = _src()
-    tree = ast.parse(src)
+    tree = parseSource(src)
     funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
     assert "tauri_build_env" in funcs, (
         "缺 tauri_build_env()：SYSTEM 身份的 Runner 会让 Tauri 的 NSIS 落到 "
@@ -179,7 +180,7 @@ def testSeedsTauriNsisCacheInsteadOfSettingNsisDir():
     import ast
 
     src = _src()
-    tree = ast.parse(src)
+    tree = parseSource(src)
     funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
     assert "seed_tauri_nsis_cache" in funcs, (
         "缺 seed_tauri_nsis_cache()：tauri 只 exec <cache>/tauri/NSIS/makensis.exe，"
@@ -209,7 +210,7 @@ def testNsisCacheRootSharesLocalAppDataWithBuildEnv():
     """
     import ast
 
-    tree = ast.parse(_src())
+    tree = parseSource(_src())
     funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
     assert "tauri_nsis_cache_root" in funcs, "缺缓存根推导函数（不能只写死在调用点）"
     root_src = ast.unparse(funcs["tauri_nsis_cache_root"])

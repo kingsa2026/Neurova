@@ -20,6 +20,7 @@ import pathlib
 import sys
 
 import pytest
+from tests.ast_scan import parseSource
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
 LIVE_ENGINE = REPO / "neurova" / "collaboration" / "neurflow" / "execution_engine.py"
@@ -187,7 +188,7 @@ class TestSubstitutesMustStay:
 
         只断"函数存在"是形状检查；本档要的是派发面真的异步调用出去。
         """
-        tree = ast.parse(LIVE_ENGINE.read_text(encoding="utf-8"))
+        tree = parseSource(LIVE_ENGINE.read_text(encoding="utf-8"))
         fn = next(
             (n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "_execute_node"),
             None,

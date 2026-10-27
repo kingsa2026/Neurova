@@ -33,6 +33,7 @@ import ast
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SKILL_ATTRIBUTION_PY = PROJECT_ROOT / "neurova" / "evolution" / "skill_attribution.py"
@@ -75,7 +76,7 @@ class TestOperatorVocabularyHasOneDefinition:
         )
 
     def test_3_noSecondVocabularyLiteralInAttributionModule(self):
-        tree = ast.parse(SKILL_ATTRIBUTION_PY.read_text(encoding="utf-8"))
+        tree = parseSource(SKILL_ATTRIBUTION_PY.read_text(encoding="utf-8"))
         offenders = []
         for node in ast.walk(tree):
             if isinstance(node, (ast.Set, ast.Tuple, ast.List)):

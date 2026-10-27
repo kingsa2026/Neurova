@@ -1153,10 +1153,6 @@ export default {
     sandboxRequired: 'يتطلب صندوق حماية',
   },
   skillEvo: {
-    adopt: 'تبني',
-    adoptTarget: 'المهارة الهدف',
-    adoptSuccess: 'تم إنشاء اقتراح معلق',
-    adoptError: 'فشل التبني',
     abVerify: 'تحقق الذراعين (مجموعة معيارية حقيقية)',
     abHint: 'نفس مجموعة المهام ونفس المُحكِّم: النص الأساسي مقابل نص المرشح؛ للقراءة فقط ولا ينتج اقتراحًا.',
     abRunSimulated: 'تشغيل الذراع المحاكى',
@@ -1309,6 +1305,10 @@ export default {
     noMarketSkills: 'لا توجد مهارات عامة للاستيراد',
     installSuccess: 'تم التثبيت بنجاح',
     installError: 'فشل التثبيت',
+    adopt: 'تبني',
+    adoptTarget: 'المهارة الهدف',
+    adoptSuccess: 'تم إنشاء اقتراح معلق',
+    adoptError: 'فشل التبني',
   },
   skillPool: {
     pendingReview: "قيد المراجعة",

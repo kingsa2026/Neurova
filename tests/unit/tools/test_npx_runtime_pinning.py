@@ -26,6 +26,7 @@ from __future__ import annotations
 import io
 import json
 import re
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -179,12 +180,17 @@ class TestNoKnownVulnerableRuntimePackages:
         ),
         "ip-address": (
             "10.7.4",
-            ("node_modules/@modelcontextprotocol/sdk",),
+            ("node_modules/@modelcontextprotocol/sdk", "node_modules/express-rate-limit"),
             "GHSA-rxp7-6hxx-x8q5",
             "Address6 区号标识符二次复杂度匹配（DoS）",
         ),
         # 2026-10 第二批（PR #364 的 dependency-audit 红灯）：hono 抬高后重新实扫，
         # 同一棵审计树里还有五条可修公告，逐条按根因抬到修复版，不留静音。
+        # static 中间件二次解码路径：`serveStatic` 把请求路径再解一次，静态路径上的
+        # 中间件因此可被绕过。引入链有三条（@modelcontextprotocol/sdk、
+        # @modelcontextprotocol/node、@hono/node-server），都声明 `^4`。注意 `^4` 只是
+        # **可解析到**修复版，重跑 npm install 实测锁逐字节不变（同 undici / yaml 的事实），
+        # 故真正抬升靠 tools/npx-runtime/package.json 的 overrides。
         "hono": (
             "4.13.11",
             ("node_modules/@hono/node-server", "node_modules/@modelcontextprotocol/sdk"),
@@ -197,11 +203,16 @@ class TestNoKnownVulnerableRuntimePackages:
             "GHSA-mrhx-c7xc-m3w5",
             "校验超大受限集合时内存耗尽",
         ),
+        # 证书验证绕过：Agent 把 tls 选项做 JSON 深克隆转发给各源池，而 JSON 表示不了
+        # 函数，自定义 checkServerIdentity 因此在到达 TLS 层前被静默丢弃；对端证书只要
+        # 过了 Node 默认的 hostname + 证书链检查就被接受。Agent 是 request / fetch /
+        # setGlobalDispatcher 背后的默认调度器，故受影响面就是默认路径。
+        # 引入链：@upstash/context7-mcp 声明 `undici ^7.0.0`，7.x 线解析到 7.29.1（本单前）。
         "undici": (
             "7.30.1",
             ("node_modules/@upstash/context7-mcp",),
-            "GHSA-xjj6-f33q-929c / GHSA-f72v-6w45-q472 / GHSA-4qv8-2p9j-2685",
-            "过量 content-encoding 的未捕获错误（DoS）", 
+            "CVE-2026-109383 / GHSA-xjj6-f33q-929c / GHSA-f72v-6w45-q472 / GHSA-4qv8-2p9j-2685",
+            "证书验证绕过（tls 选项经 JSON 深克隆转发时检查函数被丢弃）+ 过量 content-encoding 的未捕获错误（DoS）",
         ),
         "fast-uri": (
             "3.1.9",
@@ -423,6 +434,21 @@ class TestNonPipAuditTreesStayAtTheAdvisoryFloors:
         parts = tuple(int(p) for p in core.split(".")[:3])
         return parts + (0 if not tail else 1,)
 
+    @staticmethod
+    def _registryChecksum(crate: str, version: str):
+        """crates.io 公布的 sha256；网络不可达时 `pytest.skip` 并点名原因。
+
+        跳过是**诚实形态**：本判据只证明"锁里版本与 checksum 同源"，离线时无从
+        证明，报绿就等于假装验过。CI 有网即真跑。
+        """
+        url = f"https://crates.io/api/v1/crates/{crate}/{version}"
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "neurova-ci-checksum"})
+            with urllib.request.urlopen(request, timeout=20) as response:
+                return json.load(response)["version"]["checksum"]
+        except Exception as e:  # noqa: BLE001 - 仅供离线分流，有网时仍逐字断言
+            pytest.skip(f"crates.io 不可达（{e}），本判据无从核对 @{version}")
+
     def test_lockedNpmPackagesAreAtOrAboveTheAdvisoryFloors(self):
         packages = _read_json("tools/npx-runtime/package-lock.json").get("packages") or {}
         problems = []
@@ -460,31 +486,38 @@ class TestNonPipAuditTreesStayAtTheAdvisoryFloors:
         assert not problems, "\n  ".join(["桌面壳 crate 树里出现已登记公告的未修版本:"] + problems)
 
     def test_cargoLockChecksumsMatchTheRegistry(self):
-        """锁里手改的 version 必须与 checksum 同源——否则 `cargo build` 直接校验失败。"""
-        #: crate → (版本, crates.io 公布的 sha256)。版本被抬而 checksum 没跟着改，
-        #: 就是"锁看着修了、实际装不上"的形态；这条钉住两者同源。
-        expected = {
-            "rustls": ("0.23.46", "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"),
-            "rustls-webpki": ("0.103.16", "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"),
-            "webpki-roots": ("1.0.11", "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"),
-        }
-        text = io.open(PROJECT_ROOT / "NeurUI/src-tauri/Cargo.lock", encoding="utf-8").read()
+        """锁里写着的 version 与 checksum 必须同源——否则 `cargo build` 直接校验失败。
+
+        版本取**锁里现读到的那个**，本文件不钉第二份字面量：版本由 `cargo update`
+        推着走（本分叉里 webpki-roots 1.0.10 → 1.0.11 就是 cargo 自己写的），
+        钉死字面量会在每次正常升级时变红，把"抬了版本没抬 checksum"这种真故障
+        淹在噪声里。核对值来自 crates.io 公布的 sha256。
+        """
+        lockText = io.open(PROJECT_ROOT / "NeurUI/src-tauri/Cargo.lock", encoding="utf-8").read()
         problems = []
-        for name, (version, checksum) in expected.items():
-            # 精确到版本：同名的 0.26.x 兼容包不算本判据的载体（它 re-export 1.x 的根）。
-            pattern = (
-                r'\[\[package\]\]\nname = "%s"\nversion = "%s"\nsource = "[^"]+"\n'
-                r'checksum = "([^"]+)"' % (re.escape(name), re.escape(version))
-            )
-            match = re.search(pattern, text)
-            if match is None:
-                problems.append(f"{name}@{version} 不在 Cargo.lock 里——已登记的修复版被摘掉了")
+        for name in ("rustls", "rustls-webpki", "webpki-roots"):
+            blocks = {}
+            for block in re.split(r"(?m)^\[\[package\]\]$", lockText)[1:]:
+                if not re.search(r'(?m)^name = "%s"$' % re.escape(name), block):
+                    continue
+                version = re.search(r'(?m)^version = "([^"]+)"', block)
+                checksum = re.search(r'(?m)^checksum = "([^"]+)"', block)
+                if version and checksum:
+                    blocks[version.group(1)] = checksum.group(1)
+            if not blocks:
+                problems.append(f"{name} 不在 Cargo.lock 里——已登记的修复版被摘掉了")
                 continue
-            lockedSum = match.group(1)
-            if lockedSum != checksum:
+            # 同名多版本在 Rust 锁里合法：只核大的那条（webpki-roots 1.x；0.26.x 是
+            # 兼容包，不持信任库，不在公告范围）。
+            version = max(blocks, key=lambda v: tuple(int(p) for p in v.split(".")[:3]))
+            published = self._registryChecksum(name, version)
+            if published is None:
+                problems.append(f"{name}@{version} 在 crates.io 查不到——版本号不是真发出过的")
+            elif published != blocks[version]:
                 problems.append(
-                    f"{name}@{version} 的 checksum 与 registry 公布值不一致（{lockedSum[:16]}… != "
-                    f"{checksum[:16]}…）——版本抬了、校验和没跟着改，构建会直接失败"
+                    f"{name}@{version} 的 checksum 与 registry 公布值不一致"
+                    f"（{blocks[version][:16]}… != {published[:16]}…）——"
+                    "版本抬了、校验和没跟着改，构建会直接失败"
                 )
         assert not problems, "\n  ".join(["Cargo.lock 与 registry 不同源:"] + problems)
 

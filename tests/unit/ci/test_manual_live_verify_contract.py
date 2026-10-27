@@ -70,6 +70,7 @@ if str(PROJECT_ROOT) not in sys.path:
 #: `tests/unit/test_ci_ast_scan_budget_guard.py` 判红：那是把代码总量编码成
 #: 时间上界，单跑绿、全套撞 `pytest-timeout` 的 30s 默认墙钟。
 from tests import ast_scan
+from tests.ast_scan import parseSource
 MANUAL_ROOT = PROJECT_ROOT / "tests" / "manual"
 ORCHESTRATOR = PROJECT_ROOT / "neurova" / "context" / "orchestrator.py"
 
@@ -464,7 +465,7 @@ def testManualScriptsConstructingProductionObjectsInjectDataRoot():
 def testMissingInjectionIsDetected():
     """反向控制：一份「构造生产对象 + 不注入」的样本必须被判红。"""
     sample = "from neurova.agent_core import Agent\nagent = Agent(cfg)\n"
-    tree = ast.parse(sample)
+    tree = parseSource(sample)
     assert _callsProductionBuilder(tree), "反向控制失效：判据认不出生产构造调用"
     assert not _injectsDataRoot(sample), "反向控制失效：样本意外含隔离单点"
     assert _injectsDataRoot(

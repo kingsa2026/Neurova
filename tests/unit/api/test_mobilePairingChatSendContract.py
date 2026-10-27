@@ -45,6 +45,7 @@ from fastapi.testclient import TestClient
 
 from neurova.api.endpoints import mobile_pairing as mobile_ep
 from neurova.core.identity_context import get_request_user_id
+from tests.ast_scan import parseSource
 
 REPO = Path(__file__).resolve().parents[3]
 PAIRING_CODE = "MOBILE-CODE-1"
@@ -223,7 +224,7 @@ class TestTheCatchAllNoLongerSwallowsSilently:
     @classmethod
     def _swallowsWithoutLogging(cls, source: str) -> List[str]:
         """把异常转成 `ws.send_json(...)` 却一行不记的 catch-all → 记为违例。"""
-        tree = ast.parse(source)
+        tree = parseSource(source)
         offenders: List[str] = []
         for fn in ast.walk(tree):
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):

@@ -69,7 +69,13 @@ def _patch(monkeypatch, agent) -> None:
 
 async def _call_and_drain(body) -> typing.Tuple[typing.Any, typing.List[dict]]:
     """调用端点并消费 SSE 流，返回 (response, 解析后的事件列表)。"""
-    resp = await console_module.post_console_chat(body, _make_request())
+    # 身份按**生产装配**传：`current_user` 是依赖注入给的那个 dict。
+    # 直接调用端点函数时它不会自己出现——不传就拿到 `Depends(...)` 占位对象，
+    # 端点里 `isinstance(current_user, dict)` 判假，红会落在
+    # `'Depends' object has no attribute 'get'` 上而不是被测的那件事。
+    resp = await console_module.post_console_chat(
+        body, _make_request(), type("U", (), {"get": lambda self, k, d=None: "u1"})(),
+    )
     events: typing.List[dict] = []
     if isinstance(resp, StreamingResponse):
         async for chunk in resp.body_iterator:

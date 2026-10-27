@@ -40,6 +40,7 @@ from neurova.channels.voice_ingress import (  # noqa: E402
     INBOUND_VOICE_PLACEHOLDER,
 )
 from neurova.channels.wecom import WeComAdapter, _wecom_callback_signature  # noqa: E402
+from tests.ast_scan import parseSource
 
 CALLBACK_TOKEN = "wecom-callback-token-for-tests"
 
@@ -183,7 +184,7 @@ class TestThePlaceholderVocabularyStaysSingleSource:
     def _literalLines(src: str, needle: str) -> list:
         """只数**值恰为该占位串的字符串字面量**所在行（注释与长 docstring 里的提及不算第二份定义）。"""
         hits = []
-        for node in ast.walk(ast.parse(src)):
+        for node in ast.walk(parseSource(src)):
             if isinstance(node, ast.Constant) and isinstance(node.value, str) \
                     and node.value == needle and node.lineno:
                 hits.append(node.lineno)

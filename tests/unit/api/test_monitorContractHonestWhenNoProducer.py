@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+from tests.ast_scan import parseSource
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 MONITOR_ENDPOINT = REPO_ROOT / "neurova" / "api" / "endpoints" / "monitor.py"
@@ -84,7 +85,7 @@ def test_connectionsDerivesMonitorHealthFromNothing():
     `status` 实参不许是一个 `IfExp`（老写法 `status="warning" if n_alerts else "connected"` 正是它）。
     按词扫会把注释里的解释句一起扫进去（形态集 241／268 同族），所以走 AST。
     """
-    tree = ast.parse(MONITOR_ENDPOINT.read_text(encoding="utf-8", errors="replace"))
+    tree = parseSource(MONITOR_ENDPOINT.read_text(encoding="utf-8", errors="replace"))
     fn = next((n for n in ast.walk(tree)
                if isinstance(n, ast.AsyncFunctionDef) and n.name == "get_connections"), None)
     assert fn is not None, "找不到 `get_connections`——端点被搬走了，本判据要跟着改"

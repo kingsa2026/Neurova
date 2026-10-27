@@ -41,6 +41,7 @@ from neurova.agent_core import Agent
 from neurova.core.identity_context import get_request_user_id, set_request_user_id
 from neurova.router import MessageRouter, RouteResult
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION = REPO_ROOT / "neurova"
@@ -299,7 +300,7 @@ def identityWritesAmong(nodes, tree: ast.AST,
 def identityWrites(source: str, rel: str) -> List[Tuple[str, str]]:
     """合成样本入口：与生产侧**共用同一套** tree 级检出器（各写一台，反向控制就只证明了
     那台空的那台会抓）。"""
-    return identityWritesIn(ast.parse(source), rel)
+    return identityWritesIn(parseSource(source), rel)
 
 
 def setIdentityCallersIn(tree: ast.AST, rel: str) -> List[str]:
@@ -323,7 +324,7 @@ def setIdentityCallersAmong(nodes, tree: ast.AST, rel: str) -> List[str]:
 
 
 def setIdentityCallers(source: str, rel: str) -> List[str]:
-    return setIdentityCallersIn(ast.parse(source), rel)
+    return setIdentityCallersIn(parseSource(source), rel)
 
 
 def senderIdReadersIn(tree: ast.AST) -> int:
@@ -341,7 +342,7 @@ def senderIdReadersAmong(nodes) -> int:
 
 
 def senderIdReaders(source: str) -> int:
-    return senderIdReadersIn(ast.parse(source))
+    return senderIdReadersIn(parseSource(source))
 
 
 def requestUserIdReadersIn(tree: ast.AST, rel: str) -> List[str]:
@@ -371,7 +372,7 @@ def requestUserIdReadersAmong(nodes, tree: ast.AST, rel: str) -> List[str]:
 
 
 def requestUserIdReaders(source: str, rel: str) -> List[str]:
-    return requestUserIdReadersIn(ast.parse(source), rel)
+    return requestUserIdReadersIn(parseSource(source), rel)
 
 
 #: 生产扫描面的**文本预筛词**：本文件六格的判据只可能命中含这些符号（或须建
@@ -648,7 +649,7 @@ class TestEntryDoesNotOpenASecondChannel:
             f"（真签名：{sorted(realParams)}）——桩件在替一个不存在的契约背书")
 
         calls: List[Tuple[int, Dict[str, object]]] = []
-        routerTree = ast.parse((REPO_ROOT / "neurova/router.py").read_text(encoding="utf-8"))
+        routerTree = parseSource((REPO_ROOT / "neurova/router.py").read_text(encoding="utf-8"))
         for node in ast.walk(routerTree):
             if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                     and node.func.attr == "chat" and "agent" in ast.unparse(node.func.value)):

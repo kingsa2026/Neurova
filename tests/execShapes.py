@@ -25,6 +25,7 @@ from typing import Iterable, List
 
 from neurova.security.skill_scanner import (
     Finding, PatternAnalyzer, ScanPolicy, ScanRule, SkillScanner, isBlocking)
+from tests.ast_scan import parseSource
 
 EXEC_RULE_ID = "dangerous_exec"
 DYNAMIC_NAMES = frozenset({"exec", "eval", "compile"})
@@ -55,7 +56,7 @@ def callShapesInLine(line: str) -> dict:
     解析不了就返回 `None`——调用方据此走兜底针，而不是把"看不见"读成"没有"。
     """
     try:
-        tree = ast.parse(line)
+        tree = parseSource(line)
     except SyntaxError:
         return None
     bare = attribute = 0

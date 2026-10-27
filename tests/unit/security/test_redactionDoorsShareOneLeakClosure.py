@@ -47,6 +47,7 @@ from neurova.security.sensitive_info import (
 )
 from neurova.skills import evolution_inputs_guard as _guard
 from neurova.skills.evolution_inputs_guard import contains_secret, redact_secrets
+from tests.ast_scan import parseSource
 
 # 一形一条：(说明, 文本, 必须消失的片段)。片段取原值里**最难被误伤**的一段，
 # 免得判据靠"整串被换掉"这种脆断言撑着。
@@ -66,7 +67,7 @@ _EVOLUTION_DOOR_LEAKS = (
 
 def _guardTree() -> ast.Module:
     """护栏模块的 AST（退役判据只认节点，不认正文里怎么叙述）。"""
-    return ast.parse(Path(_guard.__file__).read_text(encoding="utf-8"))
+    return parseSource(Path(_guard.__file__).read_text(encoding="utf-8"))
 
 
 def _importedNames(tree: ast.Module) -> set:

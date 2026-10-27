@@ -37,6 +37,7 @@ import functools
 from pathlib import Path
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -68,7 +69,7 @@ GENERIC_SOURCES = frozenset({
 def _identifiersInExprText(text: str) -> set:
     """字符串注解（PEP 563 风格）里的名字也算"在用"。不认就会造假红。"""
     try:
-        tree = ast.parse(text, mode="eval")
+        tree = parseSource(text, mode="eval")
     except SyntaxError:
         return set()
     return {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
@@ -224,7 +225,7 @@ def test_theScanActuallyCoversTheTrackedProductionTree():
 
 def test_aNameTheFileActuallyUsesIsNotReported():
     """反空转配对格：文件真在用的通用名不得被报（否则整仓一起红，规则活不过第二次改码）。"""
-    sample = ast.parse("from typing import Dict, Any\n\n"
+    sample = parseSource("from typing import Dict, Any\n\n"
                        "def f(x: Dict[str, Any]) -> int:\n    return 1\n")
     assert genericNameOffenders(sample) == [], (
         f"文件自己在用却被报：{genericNameOffenders(sample)}")
@@ -232,7 +233,7 @@ def test_aNameTheFileActuallyUsesIsNotReported():
 
 def test_aStringAnnotationStillCountsAsUse():
     """字符串注解（PEP 563 风格）也是"在用"——不认就会造假红，按真实写法钉住。"""
-    sample = ast.parse("from typing import Optional\n\n"
+    sample = parseSource("from typing import Optional\n\n"
                        "def f(x: \"Optional[str]\") -> None:\n    return None\n")
     assert genericNameOffenders(sample) == [], (
         f"字符串注解里的名字未被认作使用：{genericNameOffenders(sample)}")
@@ -240,7 +241,7 @@ def test_aStringAnnotationStillCountsAsUse():
 
 def test_aDocstringMentionIsNotAUse():
     """反向的另一半：只在 docstring 里提过 hashlib 仍然算"没读"——文本不是证据。"""
-    sample = ast.parse('"""这里说到 hashlib 只是文档。"""\nimport hashlib\n')
+    sample = parseSource('"""这里说到 hashlib 只是文档。"""\nimport hashlib\n')
     got = genericNameOffenders(sample)
     assert [n for _l, n, _s in got] == ["hashlib"], (
         f"docstring 被当成了使用（判据退化成文本匹配）：{got}")
@@ -248,14 +249,14 @@ def test_aDocstringMentionIsNotAUse():
 
 def test_anImportInsideTryIsNotCalledShadowed():
     """规则乙的另一半口径：可选依赖的 try/except 兜底是正当形状，不得被报。"""
-    sample = ast.parse("try:\n    import torch\nexcept ImportError:\n    torch = None\n")
+    sample = parseSource("try:\n    import torch\nexcept ImportError:\n    torch = None\n")
     assert shadowedImportOffenders(sample) == [], (
         f"try 里的可选依赖兜底被误报：{shadowedImportOffenders(sample)}")
 
 
 def test_aLaterTopLevelDefinitionDoesShadowTheImport():
     """规则乙必须真咬：同名后定义在顶层出现时报，且报的是 import 那一行。"""
-    sample = ast.parse("from neurova.core.logger import get_logger\n\n"
+    sample = parseSource("from neurova.core.logger import get_logger\n\n"
                        "def get_logger(name):\n    return None\n")
     got = shadowedImportOffenders(sample)
     assert [n for _l, n, _r in got] == ["get_logger"], (
@@ -267,7 +268,7 @@ def test_anEarlierDefinitionIsNotCalledShadowed():
 
     少了这一格，把 `rebound[nm] > ln` 写成 `nm in rebound` 也照样全绿——顺序就成了没人钉的装饰。
     """
-    sample = ast.parse("def get_logger(name):\n    return None\n\n"
+    sample = parseSource("def get_logger(name):\n    return None\n\n"
                        "from neurova.core.logger import get_logger\n")
     assert shadowedImportOffenders(sample) == [], (
         f"import 在后（覆盖旧定义）被误报成死 import：{shadowedImportOffenders(sample)}")

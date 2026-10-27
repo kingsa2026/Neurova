@@ -40,6 +40,7 @@ import sys
 from pathlib import Path
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
@@ -150,7 +151,7 @@ class TestNoReferenceToRetiredFaces:
         """生产树 + tests 树里对退役模块的 import 引用。
 
         取数走本仓唯一 AST 入口 `tests/ast_scan`（Issue #148 / #197）：
-        本判据原先自己 `rglob("*.py")` + `ast.parse()` 把 2905 个文件全量解析
+        本判据原先自己 `rglob("*.py")` + `parseSource()` 把 2905 个文件全量解析
         一遍（实测单次 5.2s），与受保护子集其余 260 余个文件共享机器时，
         成本随**代码总量**增长——判据本身与代码总量毫无关系（教义第 2 条）。
         改走共享预算后按 `_retiredModuleTexts()` 预筛（退役名必然以文本出现在

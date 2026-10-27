@@ -15,6 +15,7 @@ import ast
 import pathlib
 
 import pytest
+from tests.ast_scan import parseSource
 
 
 def _get_agent_core_source() -> str:
@@ -99,7 +100,7 @@ class TestSkillPackerExceptionType:
         修复后：except Exception as e — 覆盖所有常规异常
         """
         source = _get_agent_core_source()
-        tree = ast.parse(source)
+        tree = parseSource(source)
 
         skill_packer_try = _find_skill_packer_init_node(tree)
         assert skill_packer_try is not None, \
@@ -123,7 +124,7 @@ class TestSkillPackerExceptionType:
     def test_exception_caught_is_broad_enough(self):
         """验证 except 子句能捕获 Exception（覆盖 TypeError）"""
         source = _get_agent_core_source()
-        tree = ast.parse(source)
+        tree = parseSource(source)
 
         skill_packer_try = _find_skill_packer_init_node(tree)
         assert skill_packer_try is not None
@@ -160,7 +161,7 @@ class TestSkillPackerNoneFallback:
         修复后：except 分支显式 self.skill_packer = None
         """
         source = _get_agent_core_source()
-        tree = ast.parse(source)
+        tree = parseSource(source)
 
         skill_packer_try = _find_skill_packer_init_node(tree)
         assert skill_packer_try is not None
@@ -191,7 +192,7 @@ class TestSkillPackerDisabledWhenFlagFalse:
     def test_skill_packer_guarded_by_enable_flag(self):
         """验证 AutoSkillBuilder 初始化受 enable_skill_packer 配置守卫"""
         source = _get_agent_core_source()
-        tree = ast.parse(source)
+        tree = parseSource(source)
 
         # 找到包含 AutoSkillBuilder 的 try 块
         skill_packer_try = _find_skill_packer_init_node(tree)

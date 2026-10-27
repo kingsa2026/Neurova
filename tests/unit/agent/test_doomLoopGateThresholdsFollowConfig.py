@@ -55,6 +55,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 BASE_LOOP_PY = PROJECT_ROOT / "neurova" / "agent" / "loops" / "base.py"
@@ -192,7 +193,7 @@ class TestDoomLoopThresholdsFollowConfig:
 
     def test_06_assemblyPassesAllThreeKeywords(self):
         """唯一装配点上必须显式传三键（钉代码形态，不钉词）。"""
-        tree = ast.parse(BASE_LOOP_PY.read_text(encoding="utf-8"))
+        tree = parseSource(BASE_LOOP_PY.read_text(encoding="utf-8"))
         calls = [
             node for node in ast.walk(tree)
             if isinstance(node, ast.Call)

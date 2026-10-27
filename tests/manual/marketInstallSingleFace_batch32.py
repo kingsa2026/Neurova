@@ -28,6 +28,7 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from tests.ast_scan import parseSource
 from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -62,7 +63,7 @@ def _extractallFiles(root: Path) -> list:
         if "__pycache__" in path.parts:
             continue
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            tree = parseSource(path.read_text(encoding="utf-8"))
         except (SyntaxError, UnicodeDecodeError):
             continue
         for node in ast.walk(tree):
@@ -83,7 +84,7 @@ def _ledgerFileSites(relName: str) -> list:
             continue
         lines = path.read_text(encoding="utf-8").splitlines()
         try:
-            tree = ast.parse("\n".join(lines))
+            tree = parseSource("\n".join(lines))
         except (SyntaxError, UnicodeDecodeError):
             continue
         rel = path.relative_to(REPO_ROOT / "neurova").as_posix()

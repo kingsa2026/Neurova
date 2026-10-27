@@ -34,25 +34,19 @@
 from __future__ import annotations
 
 import ast
-import sys
 from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
 ROUTE_TABLE = REPO_ROOT / "tests" / "route_table.py"
 #: 只扫会被 pytest 收集的目录；manual／archive／runners 是脚本区，本仓惯例不纳门禁
 SCAN_DIRS = ("unit", "integration", "api", "test_api", "media", "cognitive_layers", "core")
 #: 取装配后 app 路由表的合法出口——只此一家
 SINGLE_SOURCE_IMPORT = "tests.route_table"
-#: 文本预筛：谓词是 `X.app.routes` 这一形，连 `routes` 四个字母都没出现的档
-#: 不可能命中（`sourceRefsUnder` 的键仍是全量清单，预筛只减解析量）。
-SCAN_HINTS = ("routes",)
 
 pytestmark = pytest.mark.timeout(120)
 
@@ -70,6 +64,9 @@ def _readsMountedAppRoutes(tree: ast.AST) -> list:
 
 
 def test_取数口径只有一份():
+    # 枚举与解析都走共享预算（tests/ast_scan.py）：本判据是一次性全仓扫描，
+    # 私有 rglob + ast.parse 会把「代码总量」编码成墙钟上界
+    # （tests/unit/test_ci_ast_scan_budget_guard.py 的根因，Issue #148）。
     offenders = []
     scannedRoots = []
     for d in SCAN_DIRS:
@@ -77,7 +74,8 @@ def test_取数口径只有一份():
         if not root.is_dir():
             continue
         scannedRoots.append(root)
-        # 枚举走共享预算；`.routes` 的字面串是判据谓词的必要条件，作预筛充分。
+        # 枚举走共享预算；`routes` 字面串是判据谓词的必要条件，作预筛充分
+        # （写窄成 `.routes` 会漏掉 `app . routes` 这类跨行/带空格的写法）。
         for ref in ast_scan.sourceRefsUnder(root, ".py", hints=("routes",)):
             path = ref.path
             if path == ROUTE_TABLE:
@@ -85,11 +83,7 @@ def test_取数口径只有一份():
             source = ref.code
             if SINGLE_SOURCE_IMPORT in source:
                 continue          # 已在用单源的档，不重复数
-            try:
-                tree = ast_scan.transientTree(path)
-            except SyntaxError:
-                continue
-            hits = _readsMountedAppRoutes(tree)
+            hits = _readsMountedAppRoutes(ast_scan.transientTree(path))
             if hits:
                 offenders.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{hits}")
     corpusFiles = len(ast_scan.sourceRefsUnder(REPO_ROOT / "tests", ".py"))
@@ -142,20 +136,20 @@ def test_扫描器真会咬():
         "    for r in client.app.routes:\n"
         "        print(r.path)\n"
     )
-    assert _readsMountedAppRoutes(ast.parse(naive)) == [2], "朴素形没被点名＝本守卫恒绿"
+    assert _readsMountedAppRoutes(parseSource(naive)) == [2], "朴素形没被点名＝本守卫恒绿"
 
     singleSource = (
         "from tests.route_table import registeredPaths\n"
         "def t(app):\n"
         "    return registeredPaths(app)\n"
     )
-    assert _readsMountedAppRoutes(ast.parse(singleSource)) == [], "单源形被误报"
+    assert _readsMountedAppRoutes(parseSource(singleSource)) == [], "单源形被误报"
 
     routerOwned = (
         "def t(memoryRouter):\n"
         "    return [r.path for r in memoryRouter.routes]\n"
     )
-    assert _readsMountedAppRoutes(ast.parse(routerOwned)) == [], (
+    assert _readsMountedAppRoutes(parseSource(routerOwned)) == [], (
         "模块自带路由表被误报——它不含挂载前缀，也不受 _IncludedRouter 形态影响，"
         "把它算进来会让守卫退化成「见 routes 就红」的假判据"
     )

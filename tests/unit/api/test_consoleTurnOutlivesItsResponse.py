@@ -38,6 +38,7 @@ from starlette.responses import StreamingResponse
 
 from neurova.api.endpoints import console as console_module
 from neurova.core import agent_run_store as ars
+from tests.ast_scan import parseSource
 
 CURRENT_USER = {"user_id": "u1", "tenant_id": "default", "role": "admin"}
 
@@ -183,7 +184,7 @@ def test_detachedTurn_keepsItsLeaseAlive():
     import pathlib
 
     srcTxt = pathlib.Path("neurova/api/endpoints/console.py").read_text(encoding="utf-8")
-    tree = ast.parse(srcTxt)
+    tree = parseSource(srcTxt)
 
     def _fn(name):
         for node in ast.walk(tree):

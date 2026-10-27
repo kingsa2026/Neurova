@@ -57,6 +57,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.ci import tool_loop_deadline_ledger as ledger  # noqa: E402
+from tests.ast_scan import parseSource
 
 PIPELINE_MODULE = PROJECT_ROOT / "neurova/agent/tool_pipeline.py"
 
@@ -98,7 +99,7 @@ def _defines(text: str, symbol: str) -> bool:
     """
     import ast
 
-    tree = ast.parse(text)
+    tree = parseSource(text)
     prefix = rf"(?<![A-Za-z0-9_]){re.escape(symbol)}(?![A-Za-z0-9_])"
     for node in ast.walk(tree):
         if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -181,7 +182,7 @@ def _consumedElsewhere(name: str) -> bool:
         for ref in ast_scan.sourceRefsUnder(ast_scan.PRODUCTION_ROOT, hints=(name,)):
             rel = ast_scan.relativeToRepo(ref.path)
             try:
-                tree = ast.parse((PROJECT_ROOT / rel).read_text(encoding="utf-8"))
+                tree = parseSource((PROJECT_ROOT / rel).read_text(encoding="utf-8"))
             except SyntaxError:
                 continue
             for node in ast.walk(tree):

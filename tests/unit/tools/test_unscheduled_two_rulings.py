@@ -63,6 +63,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.ci import tool_loop_deadline_ledger as ledger  # noqa: E402
+from tests.ast_scan import parseSource
 
 MIDDLEWARE_MODULE = PROJECT_ROOT / "neurova/llm/cost_tracking_middleware.py"
 COST_LEDGER_INTEGRATION = PROJECT_ROOT / "neurova/collaboration/cost_ledger_integration.py"
@@ -185,7 +186,7 @@ class TestSameRootCauseSweep:
 
     def test_integrationDecoratorIsRetired(self):
         """`track_llm_call_integration` 必须从生产侧消失（零引用的第三套装饰器）。"""
-        tree = ast.parse(COST_LEDGER_INTEGRATION.read_text(encoding="utf-8"))
+        tree = parseSource(COST_LEDGER_INTEGRATION.read_text(encoding="utf-8"))
         assert not _defines(tree, RETIRED_INTEGRATION_SYMBOL), (
             f"{RETIRED_INTEGRATION_SYMBOL} 仍在 cost_ledger_integration.py 里——"
             "它是同一根因的第二个命中点（第三套并行记账装饰器），零生产引用"
@@ -201,7 +202,7 @@ class TestSameRootCauseSweep:
             "cost_ledger_integration.py 被整体删除——它同时承载 phase3 的 on_* 回调"
             "（活面），按文件判死会砍断那条接线"
         )
-        tree = ast.parse(COST_LEDGER_INTEGRATION.read_text(encoding="utf-8"))
+        tree = parseSource(COST_LEDGER_INTEGRATION.read_text(encoding="utf-8"))
         for symbol in ("on_agent_created", "on_session_started", "on_task_completed"):
             assert _defines(tree, symbol), (
                 f"活面 {symbol} 被本批连带删除——它是该文件不能整删的依据"
