@@ -612,11 +612,22 @@ class TestEveryClaimedNumberIsReal:
                 if digits not in raw:
                     continue
                 changed = body.replace(raw, raw.replace(digits, "+1/−0"), 1)
-                quoteIn = any(lo <= _claimsRawSpan(changed, c).start
-                              and _claimsRawSpan(changed, c).stop <= hi
-                              for c in _claims(changed) if (c["adds"], c["dels"]) == (1, 0)
-                              for lo, hi in _quotedSpans(changed))
-                if not quoteIn:
+                # 靶子只证了"改之前的原句不在引文里"，可改坏之后那串数字常常**掉进**别处的
+                # 引文形状里：本笔原文写着 `生产池 +26/-5（说明）`，而 `(说明)` 那一对括号
+                # 让改后的整串落进括号夹注区间，于是判据按形状把它豁免掉——"没点名"被判成
+                # "判据抓不住"，可实际的判据是对的、是这条格自己挑错了靶子。
+                # 故改完之后要再证一次：坏串**不在任何**不属于本笔的区间内（引号/反引号/夹注，
+                # 取自 `_somebodyElsesSpans` 这一处口径），否则换下一处。
+                badIn = False
+                for d in (c for c in _claims(changed) if (c["adds"], c["dels"]) == (1, 0)):
+                    span = _claimsRawSpan(changed, d)
+                    if span is None:
+                        continue
+                    if any(lo <= span.start and span.stop <= hi
+                           for lo, hi in _somebodyElsesSpans(changed)):
+                        badIn = True
+                        break
+                if not badIn:
                     doctored, own = changed, candidate
                     break
             if own:
