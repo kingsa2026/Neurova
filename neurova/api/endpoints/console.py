@@ -629,6 +629,22 @@ async def post_console_chat(
     # _get_user_id(request, current_user) 读 request.state.user_id——中间件从未注入，
     # 恒为 "anonymous"，导致 attach_files 找不到属主文件。
     user_id = str(current_user.get("user_id", "")) if isinstance(current_user, dict) else _get_user_id(request, current_user)
+    # 请求级属主（§6-153 扫出的命中点；§6-436 修掉「写在生成器里」那半拉）：
+    # 批 9 把管线里那段"每轮按 metadata['user_id'] 补写通道"的双写删掉时，只在
+    # `api/endpoints/chat.py` 补了边界写点，**这条 console 面漏了**——于是网页回合里
+    # `get_request_user_id()` 为空：usage 入账落到 `"anonymous"`
+    # （`multi_model_client:876/1156`）、按日 LLM 配额整条不判（`:1426` 无身份即放行）、
+    # 客户端自带全新 session_id 时会话落空属主（`session_manager:1650` 空属主＝对全员可见）。
+    #
+    # 写点必须在**端点的同步段**、`StreamingResponse(...)` 之前：此前那一次写落在
+    # `event_stream` 生成器体内，而生成器体不在端点上下文的拷贝里——它由 starlette 的
+    # `iterate_in_threadpool` 在**工作线程池的另一次上下文拷贝**里推进，于是这一写既到不了
+    # 生成器自己的后续几行（`metadata` 就在它后面拼的），也不保证到得了回合任务。
+    # 那条链上唯一的确定性来自"建任务时复制当前上下文"，所以只有在端点里写下的这一次
+    # 才是可证的。`/v1/chat/stream` 的写点长在 `event_generator` 里，症状同源，另批收口。
+    from neurova.core.identity_context import set_request_user_id
+
+    set_request_user_id(user_id)
     repo = get_session_repository()
     agent_id = getattr(body, "agent_id", "") or ""
 
@@ -949,16 +965,9 @@ async def post_console_chat(
             # 429 重试/切换倒计时事件转发（retry_status → SSE retry）
             "emit_status_events": True,
         }
-        # 请求级属主（§6-153 按教义第 5 条扫出的命中点）：批 9 把管线里那段"每轮按
-        # metadata['user_id'] 补写通道"的双写删掉时，只在 `api/endpoints/chat.py` 补了
-        # 边界写点，**这条 console 面漏了**——于是网页回合里 `get_request_user_id()` 为空：
-        # usage 入账落到 `"anonymous"`（`multi_model_client:876/1156`）、按日 LLM 配额整条
-        # 不判（`:1426` 无身份即放行）、客户端自带全新 session_id 时会话落空属主
-        # （`session_manager:1650` 空属主＝对全员可见）。写点必须落在 `event_stream` 内、
-        # `create_task(run_chat())`(:878) 之前：task 在创建时复制当前上下文。
-        from neurova.core.identity_context import set_request_user_id
-
-        set_request_user_id(user_id)
+        # 请求级属主已在端点同步段写过一次（见 `post_console_chat` 开头那段说明）——
+        # 这里不再写第二遍：同一个值两处写就是两条并行口径，而生成器体内那一次本来就
+        # 不在端点上下文的拷贝里（在星型线程池的另一次拷贝里推进）。
         # R-3 修复: 附件元数据注入（file_ids → attachments，供 pipeline 附件注入）
         attachments = attach_files(getattr(body, "file_ids", None), user_id)
         logger.info("[附件注入] file_ids=%s user_id=%s → attachments=%d",
