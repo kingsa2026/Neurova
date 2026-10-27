@@ -16,9 +16,10 @@ from neurova.interfaces.api_standard import (
 
 from .base import (
     _get_request_id,
+    agentWidePrivilege,
     get_memory_manager,
     logger,
-    memory_to_dict,
+    memories_to_dicts,
     router,
 )
 
@@ -236,7 +237,9 @@ async def get_memories_by_emotion(
             data={
                 "count": len(memories),
                 "emotion_type": emotion_type,
-                "memories": [memory_to_dict(m) for m in memories],
+                "memories": memories_to_dicts(
+                    manager, memories, agentWide=agentWidePrivilege(user)
+                ),
             },
             message="获取成功",
             request_id=_get_request_id(None),

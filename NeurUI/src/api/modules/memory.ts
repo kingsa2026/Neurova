@@ -61,6 +61,13 @@ export const MEMORY_CATEGORY_VALUES: ReadonlyArray<string> = [
 export interface MemoryEntry {
   id: string
   agent_id: string
+  /**
+   * 这一行归不归当前登录作用域（后端 `owned`，取源＝读写闸门那条三层隔离判定）。
+   * 列表面按 agent 全量放行，本 agent 下其他用户域的行也在同一张表里，而详情/改/删
+   * 对它们一律「视同不存在」——不给这条披露，页面就会摆出点下去必 404 的按钮。
+   * 后端只给布尔，不给 neuser_id/user_id：归属身份不上线上。
+   */
+  owned?: boolean
   content: string
   type: MemoryTypeValue
   category?: string
@@ -464,9 +471,31 @@ export function getMemories(
   })
 }
 
-/** Get a single memory. */
-export function getMemory(id: string) {
-  return api.get<ApiResponse<MemoryEntry>>(`${BASE}/${id}`)
+/**
+ * 按 id 寻址的两种通道，路径只在这一处构造。
+ *
+ * 常规路对他人用户域的行列「视同不存在」（三层隔离，P1-6）；管理员跨用户操作走
+ * 带 role 门的管理通道 `/memory/management/{id}`。选择权不在前端：后端按调用方
+ * 权限逐条给的 `owned` 说动得了，`management` 这一位由页面的 `isAdmin` 供出。
+ */
+interface ChannelOptions {
+  management?: boolean
+}
+
+function memoryPath(id: string, opts?: ChannelOptions): string {
+  return opts?.management ? `${BASE}/management/${id}` : `${BASE}/${id}`
+}
+
+/** Get a single memory.
+ *
+ * `agentId` 取**行自带的 `record.agent_id`**：后端 `get_memory_manager` 缺这个参数就
+ * 回落默认 Agent，于是选中非默认 Agent 时按 id 寻址必然打到错的 manager 上
+ * （活体实证：`GET /memory/mem_000001` 404，`GET /memory/mem_000001?agent_id=kai` 200）。
+ */
+export function getMemory(id: string, agentId?: string, opts?: ChannelOptions) {
+  return api.get<ApiResponse<MemoryEntry>>(memoryPath(id, opts), {
+    params: agentId ? { agent_id: agentId } : undefined,
+  })
 }
 
 /** Create a memory. */
@@ -474,14 +503,33 @@ export function createMemory(data: MemoryCreatePayload, agentId?: string) {
   return api.post<ApiResponse<MemoryEntry>>(BASE, data, { params: agentId ? { agent_id: agentId } : undefined })
 }
 
-/** Update a memory. */
-export function updateMemory(id: string, data: Partial<MemoryCreatePayload>) {
-  return api.put<ApiResponse<MemoryEntry>>(`${BASE}/${id}`, data)
+/** Update a memory. 同 `getMemory`：不带 agent_id 就改不到别的 Agent 的行。 */
+export function updateMemory(
+  id: string,
+  data: Partial<MemoryCreatePayload>,
+  agentId?: string,
+  opts?: ChannelOptions,
+) {
+  return api.put<ApiResponse<MemoryEntry>>(memoryPath(id, opts), data, {
+    params: agentId ? { agent_id: agentId } : undefined,
+  })
 }
 
-/** Delete a memory. */
-export function deleteMemory(id: string) {
-  return api.delete<ApiResponse<null>>(`${BASE}/${id}`)
+/** Delete a memory. 同 `getMemory`。 */
+export function deleteMemory(id: string, agentId?: string, opts?: ChannelOptions) {
+  return api.delete<ApiResponse<null>>(memoryPath(id, opts), {
+    params: agentId ? { agent_id: agentId } : undefined,
+  })
+}
+
+/**
+ * 这一行动得了吗 —— 唯一的取源是后端逐条给的 `owned`，页面不得再猜一遍归属。
+ *
+ * 只有显式 `false` 才禁：别的列表腿（语义搜索卡片、按情绪查询）还没上这条披露，
+ * 把「没披露」读成「不能动」会把这些列表打成人人禁用。
+ */
+export function rowIsActionable(row: Pick<MemoryEntry, 'id'> & { owned?: boolean }): boolean {
+  return row.owned !== false
 }
 
 /** Get memory statistics. */
@@ -805,34 +853,46 @@ export function clearWorkingMemory(agentId: string) {
 
 const ENHANCE_BASE = '/memory-enhancement'
 
+/**
+ * 增强族的作用域参数。记忆 id 形如 `mem_%06d` 且**每个 Agent 库各有一套计数器**，
+ * 所以这一族的每一条腿都必须能指明"哪个 Agent 的库"——不带作用域时后端回落 default，
+ * 在别的 Agent 页面上就会改掉同 id 的另一行。
+ *
+ * 没给作用域就不塞空串：`?agent_id=` 空值会被当成"按空串找 Agent"，与"缺省回落 default"
+ * 是两种语义。
+ */
+function scopeParams(agentId?: string): Record<string, string> {
+  return agentId ? { agent_id: agentId } : {}
+}
+
 /** Forget (reduce importance) a memory. */
-export function forgetMemory(memoryId: string, reason?: string, importanceThreshold = 0.3) {
-  return api.post<ApiResponse<Record<string, unknown>>>(`${ENHANCE_BASE}/${memoryId}/forget`, { reason: reason || '', importance_threshold: importanceThreshold })
+export function forgetMemory(memoryId: string, reason?: string, importanceThreshold = 0.3, agentId?: string) {
+  return api.post<ApiResponse<Record<string, unknown>>>(`${ENHANCE_BASE}/${memoryId}/forget`, { reason: reason || '', importance_threshold: importanceThreshold }, { params: scopeParams(agentId) })
 }
 
 /** Strengthen a memory. */
-export function strengthenMemory(memoryId: string, importanceBoost = 0.2, reason?: string) {
-  return api.post<ApiResponse<Record<string, unknown>>>(`${ENHANCE_BASE}/${memoryId}/strengthen`, { importance_boost: importanceBoost, reason: reason || '' })
+export function strengthenMemory(memoryId: string, importanceBoost = 0.2, reason?: string, agentId?: string) {
+  return api.post<ApiResponse<Record<string, unknown>>>(`${ENHANCE_BASE}/${memoryId}/strengthen`, { importance_boost: importanceBoost, reason: reason || '' }, { params: scopeParams(agentId) })
 }
 
 /** Get memory categories. */
-export function getMemoryCategories() {
-  return api.get<ApiResponse<MemoryCategory[]>>(`${ENHANCE_BASE}/categories`)
+export function getMemoryCategories(agentId?: string) {
+  return api.get<ApiResponse<MemoryCategory[]>>(`${ENHANCE_BASE}/categories`, { params: scopeParams(agentId) })
 }
 
 /** Batch operation on memories (forget/strengthen/delete). */
-export function batchMemoryOperation(memoryIds: string[], operation: 'forget' | 'strengthen' | 'delete', params?: Record<string, unknown>) {
-  return api.post<ApiResponse<BatchOperationResult>>(`${ENHANCE_BASE}/batch`, { memory_ids: memoryIds, operation, params: params || {} })
+export function batchMemoryOperation(memoryIds: string[], operation: 'forget' | 'strengthen' | 'delete', params?: Record<string, unknown>, agentId?: string) {
+  return api.post<ApiResponse<BatchOperationResult>>(`${ENHANCE_BASE}/batch`, { memory_ids: memoryIds, operation, params: params || {} }, { params: scopeParams(agentId) })
 }
 
 /** Export memories. */
-export function exportMemories(params?: { format?: 'json' | 'csv'; category?: string; min_importance?: number }) {
-  return api.get<ApiResponse<unknown>>(`${ENHANCE_BASE}/export`, { params })
+export function exportMemories(params?: { format?: 'json' | 'csv'; category?: string; min_importance?: number }, agentId?: string) {
+  return api.get<ApiResponse<unknown>>(`${ENHANCE_BASE}/export`, { params: { ...(params || {}), ...scopeParams(agentId) } })
 }
 
 /** Import memories. */
-export function importMemories(memories: Record<string, unknown>[], mergeMode: 'skip' | 'overwrite' | 'merge' = 'skip') {
-  return api.post<ApiResponse<{ imported: number; skipped: number; errors: string[] }>>(`${ENHANCE_BASE}/import`, { memories, merge_mode: mergeMode })
+export function importMemories(memories: Record<string, unknown>[], mergeMode: 'skip' | 'overwrite' | 'merge' = 'skip', agentId?: string) {
+  return api.post<ApiResponse<{ imported: number; skipped: number; errors: string[] }>>(`${ENHANCE_BASE}/import`, { memories, merge_mode: mergeMode }, { params: scopeParams(agentId) })
 }
 
 // ---------------------------------------------------------------------------

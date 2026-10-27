@@ -1140,6 +1140,20 @@ async def exec_agent(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, A
     session_id = getattr(resolution_context, "session_id", None) if resolution_context else None
     execution_id = getattr(resolution_context, "execution_id", None) if resolution_context else None
 
+    # 发起者＝这次画布/工作流由哪个 Agent 触发，子 Agent 的报告就归进谁的上下文池。
+    # 取实例走 `get_agent_instance` 这个单点（`SwarmManager._resolve_agent` 用的也是
+    # 它），不另造第二种"发起者"表示。取不到就留 None：归档随之惰性，
+    # 不假装成功——trigger／cron 那类系统发起没有"下一个会读这份池的人"。
+    initiatorAgent = None
+    owningAgentId = getattr(resolution_context, "agent_id", None)
+    if owningAgentId:
+        try:
+            from neurova.api.endpoints import get_agent_instance
+
+            initiatorAgent = get_agent_instance(owningAgentId)
+        except ImportError:
+            logger.warning("Agent 注册中心不可用，工作流 %s 的子 Agent 报告不归档", owningAgentId)
+
     try:
         from neurova.agent.swarm import get_swarm_manager
 
@@ -1151,6 +1165,7 @@ async def exec_agent(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, A
             background=False,
             origin="workflow",
             stream=True,
+            initiator_agent=initiatorAgent,
             node_id=ctx.get("node_id"),
             execution_id=execution_id,
         )

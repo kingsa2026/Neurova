@@ -22,8 +22,12 @@ USER = {"user_id": "u1", "username": "alice", "role": "user", "neuser_id": "u1"}
 ADMIN = {"user_id": "u1", "username": "admin", "role": "admin", "neuser_id": "u1"}
 
 SKILL_ID = "s1"
-BASELINE = "基线技能正文。" * 10
-CANDIDATE = "基线技能正文。改进版。" * 10
+#: 正文刻意做到 40 句：离线变异只追加一句「改进版。」，候选与基线的 token 相似度
+#: 要落在 `semantic_similarity_threshold`（0.75）之上，否则候选在**约束闸**就被拒、
+#: 这一轮根本到不了评测与提案（本批实测：10 句时相似度 0.71，`proposal_id` 恒为 None；
+#: 40 句时 0.93。相似度按**句集合**算，重复句不增分母——故只能靠加不同句子撑面）。
+BASELINE = "".join(f"基线技能正文第{index}句。" for index in range(1, 41))
+CANDIDATE = BASELINE + "改进版。"
 
 
 class _AgentStub:

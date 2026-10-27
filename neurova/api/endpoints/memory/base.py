@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
-from neurova.api.auth import requireIdentityForWrites
+from neurova.api.auth import requireIdentityForMemoryFace
 from neurova.interfaces.api_standard import (
     APIError,
     ErrorCodes,
@@ -20,12 +20,15 @@ from neurova.interfaces.api_standard import (
 
 logger = get_logger(__name__)
 
-# 写类请求（POST/PUT/PATCH/DELETE）必须有可验证身份——门挂在**这一个点**上：
+# 记忆面的**任何**方法都必须有可验证身份——门挂在**这一个点**上：
 # 本包 11 个子模块全部 `from .base import router` 注册到同一个 APIRouter
 # （见 `memory/__init__.py` 的注册顺序注释），所以这里加一次即覆盖全门面，
-# 不需要在 26 个写 handler 上各补一遍判空（那是 consumer-side guard）。
-# 匿名**读**仍落 default 桶（2026-10-06 政策），本行不改读侧语义。
-router = APIRouter(tags=["记忆管理"], dependencies=[Depends(requireIdentityForWrites)])
+# 不需要在 29 条取租户数据的 GET 腿上各补一遍判空（那是 consumer-side guard，
+# 而且下一条新路由忘了改就静默复现）。
+# 读侧匿名回落 2026-10-26 撤销：实测无凭证 `GET /memory?agent_id=default` 出 24 行
+# 正文（含他人用户域），而列表腿传 agent_wide=True ⇒ 政策承诺的"只见 default 桶"
+# 从来没被执行过。语义与理由见 `auth.requireIdentityForMemoryFace`。
+router = APIRouter(tags=["记忆管理"], dependencies=[Depends(requireIdentityForMemoryFace)])
 
 # ============================================================
 # 辅助函数
@@ -110,12 +113,22 @@ def _origin_to_str(origin) -> str:
     return value if isinstance(value, str) and value in ("owner", "agent", "untrusted", "system") else "agent"
 
 
-def memory_to_dict(memory) -> dict:
+def memory_to_dict(memory, *, owned: bool) -> dict:
     """将 Memory 对象或 recall() 返回的 to_dict() 字典转换为 API 响应字典
 
     （安全序列化，容忍损坏数据。MemoryManager.recall/get_hot_memories 等
     检索接口返回的是 Memory.to_dict() 字典列表，键为 importance/emotion，
     需映射到 API 契约的 is_important/emotion_score。）
+
+    `owned`＝**这一位请求方**对这一行动得了一动不了。列表面按 agent 全量口径放行
+    （含其他用户域的行），常规详情/改/删按三层隔离拒绝；不把这条差别说给前端，页面就会
+    把服务端注定拒绝的行照常摆出「打开/编辑/遗忘/删除」（2026-10-26 现网读数：
+    `GET /api/v1/memory/merged_mem_000010_2` 404）。取源唯一＝
+    `MemoryManager.isOwnedByRequestScope`，与闸门同一条规则，所以显示与放行不会分家；
+    跨用户作用域的特权另有一处定义（`agentWidePrivilege`，与 `require_admin()` 同规则），
+    管理员经管理通道动得了的行就给他 `true`。
+    它是布尔，不是三元组：`neuser_id`/`user_id` 不上线上（P1-6 选"视同不存在"正是
+    为了不给"按 id 探他人记录"留入口）。
     """
     try:
         if isinstance(memory, dict):
@@ -125,6 +138,7 @@ def memory_to_dict(memory) -> dict:
             return {
                 "id": str(memory.get("id", "")),
                 "agent_id": str(memory.get("agent_id", "")),
+                "owned": owned,
                 "content": str(memory.get("content", "")),
                 "category": str(memory.get("category", "")),
                 # type: memory_type 的契约别名（前端类型列/页签过滤键）
@@ -155,6 +169,7 @@ def memory_to_dict(memory) -> dict:
         return {
             "id": getattr(memory, "id", ""),
             "agent_id": getattr(memory, "agent_id", ""),
+            "owned": owned,
             "content": str(getattr(memory, "content", "")),
             "category": str(getattr(memory, "category", "")),
             # type: memory_type 的契约别名（前端类型列/页签过滤键）
@@ -174,7 +189,37 @@ def memory_to_dict(memory) -> dict:
             "id": str(getattr(memory, "id", "unknown")),
             "content": str(getattr(memory, "content", "(数据损坏)")),
             "category": "unknown",
+            # 连归属都判不出，就不给动：写侧闸门对它也是拒绝，这里不是兜底而是同口径。
+            "owned": False,
         }
+
+
+def memories_to_dicts(manager, memories, *, agentWide: bool) -> list:
+    """列表口径的唯一投影：逐条附上 `owned`，取法与读写闸门同一条判定。
+
+    四条列表腿（`/memory`、`/hot`、`/crystallized`、`/emotion/{type}`）共用这里，
+    不在各端点里各写一遍 `[memory_to_dict(m) for m in …]`——漏一处就是那一页
+    又回到「看得见、点不动」。
+
+    `agentWide`＝**这一位请求方**能不能跨用户作用域操作（取源见
+    `agentWidePrivilege`，与 `deps.require_admin()` 那道门同一条规则）。它决定披露的
+    口径：管理员经管理通道动得了他人用户域的行，就不能给他一个 `owned=false`
+    让页面白禁用；普通用户动不了，就必须给 `false`。
+    """
+    return [
+        memory_to_dict(m, owned=manager.isOwnedByRequestScope(m, agentWide)) for m in memories
+    ]
+
+
+def agentWidePrivilege(user: Optional[Dict[str, Any]]) -> bool:
+    """这一位请求方能不能跨用户作用域操作记忆。
+
+    特权只有一处定义：管理通道用它决定披露口径，`deps.require_admin()` 用它拦请求，
+    两侧一致由判据逐格咬住（同一个人「看见能动」与「真打得通」必须是同一批行）。
+    判据与 `require_role("admin")` 内部的 `user_role != required_role and user_role != "admin"`
+    逐字同规则——这里是「只认 admin」那一支，因为 required_role 就是 admin。
+    """
+    return (user or {}).get("role", "user") == "admin"
 
 
 def get_memory_manager(agent_id: Optional[str] = None, user: Optional[Dict[str, Any]] = None):

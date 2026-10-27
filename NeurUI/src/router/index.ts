@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { loginHref } from '@/utils/authRedirect'
 import { canAccessModule } from '@/utils/permissions'
 
 const routes: RouteRecordRaw[] = [
@@ -541,7 +542,8 @@ router.beforeEach((to, _from, next) => {
 
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
     // Redirect unauthenticated users to login, preserving the intended destination
-    next({ name: 'Login', query: { redirect: to.fullPath } })
+    // 口径与 401 拦截器共用 loginHref()：两处各拼一份时，后跑的那份会把深链覆盖成裸 /login
+    next(loginHref(to.fullPath))
   } else if (to.meta.guest && authStore.isAuthenticated) {
     // Redirect already-authenticated users away from guest-only pages
     next({ name: 'Dashboard' })

@@ -25,6 +25,7 @@ import pytest
 
 from neurova.tts.manager import TTSConfig, TTSManager
 from tests.unit.tts._fakeEngines import _FakeHeavyEngine
+from tests.unit.tts.conftest import idleNow
 
 
 def test_default_config_has_lazy_release_off():
@@ -148,8 +149,9 @@ async def test_non_lazy_manager_never_releases():
     await mgr.initialize()
     engine = mgr._engine
     # 这一格判的是「lazy_release=False 时整条释放是 no-op」，不经过合成 ⇒ 没有"最后使用时刻"，
-    # 读数随便给（释放在此之前就已 short-circuit，读不到 TTL 那一支）。
-    await mgr.release_idle_engines(now_monotonic=1_000_000)
+    # 读数随便给（释放在此之前就已 short-circuit，读不到 TTL 那一支）。用 `idleNow()`
+    # 而不是写死的绝对数：本档已经有过一次"魔数在长跑机器上成了过去时刻"的红。
+    await mgr.release_idle_engines(now_monotonic=idleNow())
     assert mgr._engine is engine
 
 
@@ -181,7 +183,7 @@ async def test_ttl_release_skipped_for_light_engines(heavy_manager):
     mgr._initialized = True
     mgr._last_used_monotonic = 0.0
 
-    released = await mgr.release_idle_engines(now_monotonic=1_000_000)
+    released = await mgr.release_idle_engines(now_monotonic=idleNow())
     assert released is False
     assert mgr._engine_name == "edge-tts"
 
@@ -205,7 +207,7 @@ async def test_pinned_engine_never_released():
     mgr._initialized = True
     mgr._last_used_monotonic = 0.0
 
-    released = await mgr.release_idle_engines(now_monotonic=1_000_000)
+    released = await mgr.release_idle_engines(now_monotonic=idleNow())
     assert released is False
     assert heavy.released is False
     assert mgr._engine_name == "moss-nano"
