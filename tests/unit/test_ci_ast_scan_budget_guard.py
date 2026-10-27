@@ -1422,7 +1422,13 @@ class TestTakenPerModuleDivesOncePerTree:
         # （实测：判据自己那一趟让读数精确翻倍，单趟版被误判成两趟）。
         trees = len(ast_scan.sourceRefsUnder(DIVE_SCAN_ROOT))
         # 一趟的预算由**这一轮的节点总量**现量得出，不抄绝对值（抄了判据就会随代码总量红）。
-        nodeTotal = sum(len(ast_scan._walkNodes(ast.parse(ref.code)))
+        # 预算的基数是**下潜**的量，不是 `_walkNodes` 交出的条目数：`_walkNodes` 承诺的是
+        # "`takenPerModule` 要的那一集"（Import/ImportFrom/Attribute），一趟下潜却对树上
+        # **每一个**节点调一次 `iter_child_nodes`（`ast.walk` 的语义就是逐个产出）。
+        # 两个量在本仓差一个数量级（交付 11.4 万条 vs 树上 167 万节点 / 1057 棵），
+        # 拿前者当基数会让**正确实现**读出 14.6 倍而判红（本档实测过一次：
+        # `4ca3db33` 把 `_walkNodes` 的交付面收窄后，这一格先红在基数上而不是在趟数上）。
+        nodeTotal = sum(len(list(ast.walk(ast.parse(ref.code))))
                         for ref in ast_scan.sourceRefsUnder(DIVE_SCAN_ROOT) if ref.code)
         onePassBudget = int(nodeTotal * ONE_PASS_DIVE_FACTOR)
 
