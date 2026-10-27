@@ -46,6 +46,13 @@ _POOL_ALIASES = {
 #: `本格/本笔` 声明的是这一笔的**全部**文件合计
 _TOTAL_MARKERS = ("本格", "本笔", "全笔")
 
+#: 预存红：**已推送或已入库、正文按平台纪律不许改写**的那几笔（短号 → 当时写错的声明）。
+#: 值只用于反证"这条豁免还该在"（`testBaselineEntriesStillPointAtRealMismatches`），
+#: 不参与报告生成。
+_KNOWN_BAD_COMMITS = {
+    "e87ce9b9": "生产池 +26/-5 ＝ 净 +21",
+}
+
 #: 本档三枚 subprocess 落点（rev-parse / rev-list / commit-tree）都是仓库内 git 查询，
 #: 毫秒级；20s 是给满载机器留的余量。取**低于全局 30s** 的这一形，是为了不去给整档抬父墙——
 #: 子进程先到点时报的是诚实的 TimeoutExpired，而不是"整场跑测没了"（§6-402 批 K 口径）。
@@ -105,13 +112,54 @@ def _poolTotals(sha: str):
     return totals
 
 
+def _claimsRawSpan(body: str, claim: dict) -> slice:
+    """按解析出来的那一格，反查它在正文里的**原始区间**（数字连写的写法一个字节不动）。
+
+    用途只有一处：`testRealBodyWithOneWrongDigitIsCaught` 要把真实那一段改坏，
+    而"改坏"必须落在原文的同一段上——用 `+{adds}/−{dels}` 重拼只在正文纯 ASCII、
+    无 `**`、半角斜杠时才对得上，而这三点在本仓的正文里都不成立。
+    """
+    for m in CLAIM_RE.finditer(body or ""):
+        if (m.group("label") == claim["label"] and int(m.group("adds")) == claim["adds"]
+                and int(m.group("dels")) == claim["dels"]):
+            return slice(m.start(), m.end())
+    raise AssertionError(f"正文里找不到这一段声明：{claim!r}")
+
+
+def _quotedSpans(body: str) -> list:
+    """正文里成对引号圈起来的那几段（`『』` `“”` `\"\"` `‘’`）的区间。
+
+    为什么需要：本仓的提交正文会**引用别人写过的话**（复述上一笔的错误声明、贴工单原文）。
+    那几段里的数字不属于本笔，按本笔复算就是拿别人的账判自己的账。实测两次：
+    `68eb3bdc` 复述 `58d9d5aa` 的错误声明、`58d9d5aa` 复述 `e87ce9b9` 的原始声明，
+    两次都被主格点名成"本笔写错"。豁免按**形状**给（成对引号内），不按提交号或关键词给。
+    """
+    spans = []
+    for left, right in (("『", "』"), ("“", "”"), ("\"", "\""), ("‘", "’")):
+        start = 0
+        while True:
+            i = body.find(left, start)
+            if i < 0:
+                break
+            j = body.find(right, i + len(left))
+            if j < 0:
+                break
+            spans.append((i, j + len(right)))
+            start = j + len(right)
+    return spans
+
+
 def _mismatches(sha: str, body: str) -> list:
     declared = _claims(body)
     if not declared:
         return []
     totals = _poolTotals(sha)
     bad = []
+    quoted = _quotedSpans(body or "")
     for c in declared:
+        span = _claimsRawSpan(body or "", c)
+        if any(lo <= span.start and span.stop <= hi for lo, hi in quoted):
+            continue
         pool = "全部" if c["label"] in _TOTAL_MARKERS else _POOL_ALIASES[c["label"]]
         a, d = totals[pool]
         if (c["adds"], c["dels"]) != (a, d):
@@ -132,6 +180,12 @@ class TestEveryClaimedNumberIsReal:
             if bad:
                 title = body.splitlines()[0][:58] if body else sha[:8]
                 report.append(f"{sha[:8]} {title}\n    " + "\n    ".join(bad))
+        # 预存红基线：入库且**不许改写正文**的那几笔显式豁免，让本格对"这一轮新写的正文"
+        # 仍然会红。两条纪律都要：判据不该因为历史写错就整体失效（那正是"降级断言"），
+        # 也不该因为一条不许动的历史就长期全红（那会被读成"本档坏了"）。
+        # 基线表本身要被反证（`testBaselineEntriesStillPointAtRealMismatches`）——
+        # 一条已经修好的豁免留在表里，就是下次真错的隐身衣。
+        report = [r for r in report if r.split("\n")[0][:8] not in _KNOWN_BAD_COMMITS]
         assert not report, (
             f"{len(commits)} 笔未推送提交里有 {len(report)} 笔的正文数字与自己的 numstat 不符"
             "（这一类错在本会话已第五遭，见本档头部）——趁还没推送改正文，不是改基线：\n  "
@@ -150,6 +204,22 @@ class TestEveryClaimedNumberIsReal:
 
         assert mismatches, "正文里的 +1/−0 与真实 numstat 不符，判据却说没问题——口径失效"
         assert any("生产池" in m for m in mismatches), mismatches
+
+    def testBaselineEntriesStillPointAtRealMismatches(self):
+        """豁免表不是免死金牌：表里每一条，今天仍然必须真的与自己的 numstat 不符。
+
+        留在表里但已经修好的条目，就是下一次真错的隐身衣——它会静默吞掉同一笔的正文错误。
+        本格按"这一条现在还该被豁免吗"复算，答否即红，要求在表里删掉它。
+        """
+        stale = []
+        for short, declared in _KNOWN_BAD_COMMITS.items():
+            body = _git("log", "-1", "--format=%B", short)
+            if not body.strip():
+                stale.append(f"{short} 在区间里找不到（豁免指向一枚不存在的提交）")
+                continue
+            if not _mismatches(short, body):
+                stale.append(f"{short} 今天已经对得上 numstat，不再需要豁免（当时声明：{declared}）")
+        assert not stale, "这些豁免该删了：" + "；".join(stale)
 
     def testCorrectClaimPassesTheSameChecker(self, tmp_path):
         """反向配对格：同一棵树造一枚**数字正确**的号，同一套复算必须放行。
@@ -211,22 +281,42 @@ class TestEveryClaimedNumberIsReal:
         造出来的样本能红，不代表我那种写法能红——这条拿未推送窗口里真实带「生产池」声明的那笔，
         只把它的数字改坏（形状、池名、括号一个字不动），要求复算把错抓出来、并把真值写在报错里。
         """
+        # 目标只认**本笔自书**的那一处：引用块（成对引号内）不参与，否则测的就是别人的句子。
+        # 窗口里同时可能有别的批预存的错声明（实测有一笔），先后无关紧要——真值跟着目标走。
         target = None
         for sha in _unpushedRange():
             body = _git("log", "-1", "--format=%B", sha)
-            if _claims(body) and any(c["label"] == "生产池" for c in _claims(body)):
-                target = (sha, body)
+            quoted = _quotedSpans(body)
+            own = [c for c in _claims(body) if c["label"] == "生产池"
+                   and _claimsRawSpan(body, c) is not None
+                   and not any(lo <= _claimsRawSpan(body, c).start
+                               and _claimsRawSpan(body, c).stop <= hi for lo, hi in quoted)]
+            if own:
+                a, d = _poolTotals(sha)["生产池"]
+                target = (sha, body, own[0], a, d)
                 break
         if target is None:
-            pytest.skip("未推送窗口里没有带「生产池」声明的提交（推送后此格无对象，主格与 5/6 格仍在工作）")
+            pytest.skip("未推送窗口里没有自书的「生产池」声明（推送后此格无对象，主格与 5/6 格仍在工作）")
 
-        sha, body = target
-        real = [c for c in _claims(body) if c["label"] == "生产池"][0]
-        doctored = body.replace(f"+{real['adds']}/−{real['dels']}", "+1/−0", 1)
-        assert doctored != body, "正文里那句声明没被替换掉——这条格在空转"
+        sha, body, real, a, d = target
+        # 替换串按**原文那一段**取，不按解析值重拼：真实写法里的池名与数字之间常夹着
+        # `**`（`生产池 **+26/-5**`），按 `+{adds}/−{dels}` 重拼会一个字节都匹配不上，
+        # 于是这格在"替换失败"上判红——报的是"判据抓不住"，真因却是本格自己没替换到。
+        # 2026-10-27 实读：48 笔未推送里恰有这样一个提交，本格因此红了整整一轮。
+        raw = body[_claimsRawSpan(body, real)]
+        # 改坏的是**数字那一段**，池名保留：整段换成裸的 `+1/−0` 会让正则失去池名，
+        # 声明直接消失（实测 `生产池 +26/-5` 整段替换后 `_claims` 返回空）——那样的红是
+        # "没声明"，不是"声明错了"，测不到本格要测的东西。
+        # 数字那一段的两种斜杠写法都按原文换，池名与 `**` 一个字节都不动。
+        doctored = body
+        for digits in (f"+{real['adds']}/-{real['dels']}", f"+{real['adds']}/−{real['dels']}"):
+            if digits in raw:
+                doctored = body.replace(raw, raw.replace(digits, "+1/−0"), 1)
+                break
+        assert doctored != body, (
+            f"正文里那句声明没被替换掉（取到的原文片段 {raw!r}）——这条格在空转")
 
         bad = _mismatches(sha, doctored)
-        a, d = _poolTotals(sha)["生产池"]
         assert bad and any("+1/−0" in m and f"+{a}/−{d}" in m for m in bad), (
             f"把真实声明改成 +1/−0 仍没被点名（实得 {bad}）——判据抓不住我实际写错的那种句子")
 

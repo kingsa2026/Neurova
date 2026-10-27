@@ -31,12 +31,18 @@ MEMORY_PREFIX = "/api/v1/memory"
 
 @pytest.fixture()
 def unreadyClient():
-    """真 app、但不跑 lifespan ⇒ 没有默认 Agent，正是 6001 的产生态。"""
+    """真 app、但不跑 lifespan ⇒ 没有默认 Agent，正是 6001 的产生态。
+
+    带一枚真 JWT：记忆面自 2026-10-26 点单甲起整面挂路由级
+    `requireIdentityForMemoryFace`，匿名请求在到达"未就绪"那一段之前就 401 了——
+    **那道 401 与本次要审的失败形态无关**，不绕开它红会咬在鉴权上。凭证走生产同一个签发口。
+    """
     from fastapi.testclient import TestClient
 
     from neurova.api.app import create_app
+    from tests.auth_headers import bearerHeaders
 
-    return TestClient(create_app())
+    return TestClient(create_app(), headers=bearerHeaders("probe-user"))
 
 
 def testEveryDeclaredErrorCodeTakesAPosition():

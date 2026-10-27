@@ -1010,3 +1010,27 @@ def _isolateArtifactAnchors(monkeypatch):
 
     monkeypatch.setattr(artifact_digest, "anchorPath",
                         lambda: ANCHOR_SESSION_DIR / "artifact_anchors.json")
+
+
+# ── 唯一身份通道的测试隔离（§6-436）────────────────────────────────────────
+@pytest.fixture(autouse=True)
+def _isolate_request_identity():
+    """每格前后把 `neurova_request_user_id` 归还为空。
+
+    根因（PR #365 的 pipeline-3 实读）：`set_request_user_id()` 写的是模块级 ContextVar，
+    而 pytest 在同一条线程、同一次上下文里把所有用例跑完——**没有任何东西归还**它。
+    于是"通道没被写"这一件事在整场里只可能被那场的第一格看到：`console` 那格真写了
+    （`u-alice`）之后，后面那些靠 `_mount()` 自建 app 的记忆面用例全都读到一个残留属主，
+    CI 摘要因此给出 401，把真正的失败形态盖住了。
+
+    为什么不只改 `console` 那一格：这是跑测卫生，与 `_isolate_turn_context` /
+    `_reset_memory_request_scope` 同一条纪律——那两条守的正是"ContextVar 跨用例存活"
+    这一族（`memory_layer` 那条 2026-09-12 甄别过）。生产侧不受影响：每个请求一条
+    task，通道随那条上下文一起销毁；`channels/channel_router.py:290` 也在自己那条链上
+    显式清了。
+    """
+    from neurova.core.identity_context import clear_request_user_id
+
+    clear_request_user_id()
+    yield
+    clear_request_user_id()
