@@ -61,9 +61,34 @@ _GIT_WALL_S = 20
 #: 长名排在前面，免得备选被短名截走（`测试/基建池` 必须先于 `基建池` 试）
 CLAIM_RE = re.compile(
     r"(?P<label>" + "|".join(sorted({*_POOL_ALIASES, *_TOTAL_MARKERS}, key=len, reverse=True)) + r")"
-    r"\s*\**\s*\+?(?P<adds>\d+)\s*/\s*[−-]\s*(?P<dels>\d+)"
-    r"(?:\s*\**\s*(?:＝|=)\s*净\s*(?P<net>[+-]\d+))?"
+    r"\s*(?:\*\*\s*)?\+?(?P<adds>\d+)\s*/\s*[−-]\s*(?P<dels>\d+)"
+    r"(?:\s*\*\*\s*)?(?:\s*(?:＝|=)\s*净\s*(?P<net>[+-]\d+)\s*(?:\*\*\s*)?)?"
 )
+
+#: 声明所处的后缀词 → 复算用的池键。**这一份也是词汇的唯一出处**，与 `_POOL_ALIASES`
+#: 并列而不相叠：前者管「我改坏了什么」（production / tests），后者管「我量的是哪一块」。
+#: 池名的前缀（`生产`/`测试`/`基建`）从这里派生，别处不再手抄第二份。
+_SUFFIX_ALIASES = {"生产": "生产池", "测试": "测试/基建池", "基建": "测试/基建池"}
+
+#: 声明的**前缀**池名：`生产池 **+13/−5` 这类把池名写在数字前面的写法。
+#: 正则原本只认"名字紧贴数字"，故 `生产池 **+57/−56`（`**` 夹在中间）整条漏判——
+#: 漏判比误判更坏，它让主格在"没声明"上判绿。
+_LEADING_POOL_RE = re.compile(
+    r"(?P<lead>" + "|".join(sorted((f"{p}池" for p in _SUFFIX_ALIASES), key=len, reverse=True)) + r")"
+    r"\s*\**\s*$"
+)
+
+_FILES_HEADING_RE = re.compile(r"净 LOC")
+#: 池名声明（不带数字的定位用）：`生产池`/`测试/基建池`/`基建池`/`测试池` 出现在句中哪一处
+_POOL_NAME_RE = re.compile(
+    r"(?P<pool>" + "|".join(sorted(_POOL_ALIASES, key=len, reverse=True)) + r")")
+
+#: 声明之后到**下一处数字声明**之前的那一段：后缀词、数量词都只在这段里认
+_DECLTAIL_RE = re.compile(r"(?:(?!\+?\d+\s*/\s*[−-]\s*\d).)*", re.S)
+
+#: 紧跟声明的数量后缀：`+2/-0` 个文件 / `+3/-0` 格——量的是笔数格数，不是行数池
+_COUNT_SUFFIX_RE = re.compile(r"[ \t]*(?:\*\*[ \t]*)?(?:个文件|格|条|笔|处)")
+_BULLET_RE = re.compile(r"^\s*[-*]\s+")
 
 
 def _git(*args: str) -> str:
@@ -82,12 +107,107 @@ def _unpushedRange() -> list:
     return [c for c in _git("rev-list", "origin/main..HEAD").split() if c.strip()]
 
 
+class _ClaimContext:
+    """一条声明所在行上的判断依据：后缀词、是不是列表项、行前有没有「净 LOC」标题。
+
+    三个都只读**本行与前几行**的原文，不猜。后缀词取行尾那一枚（`+26/−5 ＝ 净 +21，全落在`
+    这类行由此判 `生产`，`+65/−5（含测试档）` 判 `测试`）；行里一个后缀词都没有时，
+    才看「净 LOC」标题下的列表项——那是「分池说明」的版式，不是跨池合计。
+    """
+
+    def __init__(self, body: str, start: int, end: int) -> None:
+        line_start = body.rfind("\n", 0, start) + 1
+        self.line = body[line_start:end]
+        self.before = body[:line_start]
+        self.after = body[end:]
+        self.leading = self._leadingPool()
+        self.suffix = self._tailSuffix()
+        self.listed = bool(_BULLET_RE.match(self.line))
+        self.underFiles = self._hasFilesHeading()
+        self.count = self._countSuffix()
+        self.headingPool = self._headingPool() if (self.listed or self.underFiles) else None
+
+    def _leadingPool(self):
+        """紧贴声明前、只隔 `**` 的池名；没有就 `None`。"""
+        m = _LEADING_POOL_RE.search(self.line)
+        return m.group("lead") if m else None
+
+    def _headingPool(self):
+        """这份小计属于哪一池：先看本行里第一处池名，再看标题行里的第一处池名。
+
+        这里只认池名、**不再走 `_claims`**：`_claims` 建 `_ClaimContext`、后者又要
+        `headingPool`，递归回来就是死循环（本批实测 `RecursionError`）。一份词汇、
+        两处取法：池名声明的位置只有一个判据（`_POOL_NAME_RE`），其余全从它派生。
+        """
+        rows = [self.line]
+        for row in reversed(self.before.splitlines()):
+            if row.strip():
+                rows.append(row)
+                break
+        for row in rows:
+            m = _POOL_NAME_RE.search(row)
+            if m:
+                return _POOL_ALIASES[m.group("pool")]
+        return None
+
+    def _countSuffix(self):
+        """紧跟声明（数字、可选 `**`）的那个数量词；不是数量词就是 `None`。"""
+        m = _COUNT_SUFFIX_RE.match(self.after)
+        return m.group(0).strip(" *") if m else None
+
+    #: `+2 个文件`、`+3 起`、`+1 号臂`、`+5 %` 里的中文紧跟在数字后面，若被当成池后缀，
+    #: `生产`/`测试`/`基建` 就会被这些词隔开而误判。这一份是"哪种中文不算池后缀"的唯一出处。
+    _SUFFIX_BREAKS = ("个", "条", "处", "格", "笔", "份", "起", "到", "至", "~", "～",
+                      "±", "#", "号", "%", "％", "行", "列", "次", "张")
+
+    def _tailSuffix(self):
+        """声明**之后**、下一处数字之前的第一枚后缀词。
+
+        取行尾那一枚是错的：`生产池 +0/-0，测试/基建池 +65/-5` 会把第一枚读成 `测试`——
+        判据于是替作者改写了他的话，把生产池的声明拿测试池去复算。后缀只认"领到下一处
+        声明为止"的那一段（`+65/-5（含测试档）` 仍是测试）；这一段里没有后缀词就没有。
+        """
+        segment = _DECLTAIL_RE.match(self.after)
+        span = segment.group(0) if segment else self.after
+        hits = [(span.find(word), key) for word, key in _SUFFIX_ALIASES.items() if word in span]
+        if not hits:
+            return None
+        at, key = min(hits)
+        if span[:at].rstrip().endswith(self._SUFFIX_BREAKS):
+            return None
+        return key
+
+    def _hasFilesHeading(self) -> bool:
+        """「净 LOC」标题行非空且**之前已经出现过带池名的声明**，这一段才算分池说明。
+
+        只认标题不够：单文件笔也常写 `净 LOC：本格 **+21/−0**（清单…）：4 处 1 行`——
+        那是标题行与正文同行的**整笔**声明。分池说明的形态是"标题行先给出各池，再逐项说
+        钱花在哪"，故要求前文出现过池名。两条一起才成立时，`本格` 才读作"本池"。
+        """
+        lines = self.before.splitlines()
+        for idx in range(len(lines) - 1, -1, -1):
+            if not lines[idx].strip():
+                continue
+            # 标题行自带池名声明（`净 LOC：生产池 +0/-0，测试/基建池 +65/-5`）时，
+            # 正文就在这一行里，不必再往前找——本格的小计指的就是它给的第一池
+            if not _FILES_HEADING_RE.search(lines[idx]):
+                return False
+            if _POOL_NAME_RE.search(lines[idx]):
+                return True
+            return any(name in "\n".join(lines[:idx]) for name in _POOL_ALIASES)
+        return False
+
+
 def _claims(body: str) -> list:
     out = []
     for m in CLAIM_RE.finditer(body or ""):
+        ctx = _ClaimContext(body or "", m.start(), m.end())
         out.append({"label": m.group("label"), "adds": int(m.group("adds")),
                     "dels": int(m.group("dels")),
-                    "net": int(m.group("net")) if m.group("net") else None})
+                    "net": int(m.group("net")) if m.group("net") else None,
+                    "suffix": ctx.suffix, "listed": ctx.listed, "underFiles": ctx.underFiles,
+                    "count": ctx.count, "leading": ctx.leading,
+                    "headingPool": ctx.headingPool})
     return out
 
 
@@ -149,6 +269,31 @@ def _quotedSpans(body: str) -> list:
     return spans
 
 
+def _resolvePool(claim: dict, totals: dict):
+    """一枚声明该拿哪一池去复算。**声明语义优先于字面块标记**：
+
+    主机上真出现过的两种错写法，靠记号（`**`）区分不了——`生产池 **+57/−56`（`**` 只包数字）
+    和 `本格 **+21/−0**（清单…）：4 处 1 行，池内实为…`（`**` 包住整句、`本格` 只是修饰语）。
+    故顺序是：池名声明（`生产池`/`测试池`/测试/基建池/`基建池`）→ 数量后缀（`+2/-0` 后面跟
+    `个文件`/`格`，量的是笔数不是行数，不参与复算）→ 行内后缀词（`测试`/`生产`/`基建`）→
+    列表项或「净 LOC」标题下的分池说明（`本格` 在这里指**本池**，不是整笔）→ 才回落到
+    `本笔`/`全笔`/`本格` 的整笔口径（真·单文件笔：行里没有后缀词、也没有分池上下文）。
+    """
+    if claim["label"] not in _TOTAL_MARKERS:
+        return _POOL_ALIASES[claim["label"]], None
+    if claim["suffix"] in _POOL_ALIASES:
+        return _POOL_ALIASES[claim["suffix"]], None
+    if claim["count"]:
+        return None, (f"这不量行数——`+{claim['adds']}/−{claim['dels']}` 后面跟的是"
+                      f"条数/格数（`{claim['count']}`），要声明行数请写池名，别拿数量词顶池名")
+    if claim["suffix"]:
+        return _SUFFIX_ALIASES[claim["suffix"]], None
+    if claim["listed"] or claim["underFiles"]:
+        # `本格` 在分池说明里指**本池**：标题行第一处带池名的声明就是这份小计的池
+        return claim["headingPool"] or "全部", None
+    return "全部", None
+
+
 def _mismatches(sha: str, body: str) -> list:
     declared = _claims(body)
     if not declared:
@@ -157,10 +302,19 @@ def _mismatches(sha: str, body: str) -> list:
     bad = []
     quoted = _quotedSpans(body or "")
     for c in declared:
+        # 引用块（成对引号内）里的数字是**别人的账**：复述上一笔的错误声明、贴工单原文，
+        # 都不属于本笔。豁免按形状给，不按提交号或关键词给。
         span = _claimsRawSpan(body or "", c)
         if any(lo <= span.start and span.stop <= hi for lo, hi in quoted):
             continue
-        pool = "全部" if c["label"] in _TOTAL_MARKERS else _POOL_ALIASES[c["label"]]
+        # 同一句话里被两处取数口重复抓到时（前缀池名格 + 数字处格），以带前缀池名的那条为准
+        if c["leading"] and any(o is not c and o["adds"] == c["adds"] and o["dels"] == c["dels"]
+                                and o["leading"] for o in declared if o is not c):
+            continue
+        pool, why = _resolvePool(c, totals)
+        if pool is None:
+            bad.append(f"{c['label']} 声明 +{c['adds']}/−{c['dels']}：{why}")
+            continue
         a, d = totals[pool]
         if (c["adds"], c["dels"]) != (a, d):
             bad.append(f"{c['label']} 声明 +{c['adds']}/−{c['dels']}，那一笔的 numstat 实为 +{a}/−{d}")
@@ -269,11 +423,46 @@ class TestEveryClaimedNumberIsReal:
             "测试池 **+6/−5 ＝ 净 +1**": [("测试池", 6, 5, 1)],
             "本笔 **+3/−0**": [("本笔", 3, 0, None)],
             "全笔 **+1/−2 ＝ 净 -1**": [("全笔", 1, 2, -1)],
+            # 主机上真出现过的四种写法，前三种**老正则整条漏判**（漏判＝那一类声明永不复算）
+            "净 LOC（测试不计入）：生产池 +26/-5 ＝ **净 +21**，全落在": [("生产池", 26, 5, None)],
+            "钉死的字面量换成按锁内版本取，生产池 +21/-0（这一个文件就是生产池全部改动）": [
+                ("生产池", 21, 0, None)],
+            "净 LOC：生产池 +13/-5 ＝ 净 +8，其余十一处各自带池名的声明同形": [("生产池", 13, 5, 8)],
+            # 分池说明里的小计：`本格` 在标题行之后读作"本池"，不是整笔
+            "净 LOC：生产池 +0/-0，测试/基建池 +65/-5\n本格 **+21/-0**（清单…）：4 处 1 行":
+                [("生产池", 0, 0, None), ("测试/基建池", 65, 5, None), ("本格", 21, 0, None)],
         }
         for body, expected in samples.items():
             got = [(c["label"], c["adds"], c["dels"], c["net"]) for c in _claims(body)]
             assert got == [tuple(e) for e in expected], (
                 f"解析结果与写法不符：{body[:34]!r} → {got}，期望 {expected}")
+
+    def testSilentFormsResolveToThePoolTheirContextNames(self):
+        """静默漏判的四种写法，复算必须落到**行文自己指的那个池**——落错池比漏判更坏。
+
+        `+26/-5` 后面跟着「＝ 净 +21，全落在」：这是**生产池**的声明，老正则连数字都抓不到；
+        `+65/-5（含测试档）` 是测试池；标题行下的列表项 `本格` 是分池说明里的**本池**小计。
+        同一套判据在三种上下文里要给出三种池，靠的就是行内后缀词与标题上下文，不是猜。
+        """
+        totals = {"生产池": (10, 1), "测试/基建池": (65, 5), "全部": (75, 6)}
+        cases = {
+            "净 LOC（测试不计入）：生产池 +26/-5 ＝ **净 +21**，全落在": "生产池",
+            "钉死的字面量换成按锁内版本取，生产池 +21/-0（这一个文件就是全部改动）": "生产池",
+            # 分池说明里的小计：语法上是 `本格`，语义上是本标题段第一池
+            "净 LOC：生产池 +0/-0，测试/基建池 +65/-5\n本格 **+21/-0**（清单…）：4 处 1 行": "生产池",
+        }
+        # 一行两个池名、各带自己的小计，逐条按本行算——两种池并存，靠的就是这段后缀边界
+        twoPools = "净 LOC：生产池 +0/-0 ＝ 净 0，测试/基建池 +65/-5"
+        got = [_resolvePool(c, totals)[0] for c in _claims(twoPools)]
+        assert got == ["生产池", "测试/基建池"], (
+            f"{twoPools[:28]!r} 逐条落到了 {got}——判据在替作者改写了他的话")
+
+        for body, expected in cases.items():
+            first = _claims(body)[0]                     # 每一条只断**它自己那条**声明的落池
+            got = {_resolvePool(first, totals)[0]}
+            assert got == {expected}, (
+                f"{body[:28]!r} 的第一条声明落到了 {got}，行文指的是 {expected}"
+                "——判据在替作者改写了他的话")
 
     def testRealBodyWithOneWrongDigitIsCaught(self):
         """把本会话真犯过的那次错**照原样**塞回真实正文，判据必须点名并且给出实量值。
@@ -299,22 +488,26 @@ class TestEveryClaimedNumberIsReal:
             pytest.skip("未推送窗口里没有自书的「生产池」声明（推送后此格无对象，主格与 5/6 格仍在工作）")
 
         sha, body, real, a, d = target
-        # 替换串按**原文那一段**取，不按解析值重拼：真实写法里的池名与数字之间常夹着
-        # `**`（`生产池 **+26/-5**`），按 `+{adds}/−{dels}` 重拼会一个字节都匹配不上，
-        # 于是这格在"替换失败"上判红——报的是"判据抓不住"，真因却是本格自己没替换到。
-        # 2026-10-27 实读：48 笔未推送里恰有这样一个提交，本格因此红了整整一轮。
+        # 取**第一处**且数量非零的那条声明：补正笔常把错数与真值写在同一段里
+        # （`声明 +26/−5，实为 +0/−0`），挑到真值那条就等于没换，本格会静默空转。
+        # 换数字落在**原文区间**上、不按解析值重拼：真写法里池名与数字之间常夹着 `**`，
+        # 而那些字节在重拼串里根本不存在（实测本档因此红过一轮，真因却是本格没替换到）。
+        # 只换数字那一段、池名保留——整段换成裸的 `+1/−0` 会让正则失去池名，声明整个消失，
+        # 那样的红是"没声明"，不是"声明错了"，测不到本格要测的东西。
+        nonzero = [c for c in _claims(body) if c["label"] == "生产池" and (c["adds"], c["dels"]) != (0, 0)]
+        if not nonzero:
+            pytest.skip("这一笔的生产池声明全是 +0/−0（补正笔），换数字无从下手"
+                        "——主格与其余 5 格仍在工作")
+        real = next((c for c in nonzero if (c["adds"], c["dels"]) != (a, d)), nonzero[0])
         raw = body[_claimsRawSpan(body, real)]
-        # 改坏的是**数字那一段**，池名保留：整段换成裸的 `+1/−0` 会让正则失去池名，
-        # 声明直接消失（实测 `生产池 +26/-5` 整段替换后 `_claims` 返回空）——那样的红是
-        # "没声明"，不是"声明错了"，测不到本格要测的东西。
-        # 数字那一段的两种斜杠写法都按原文换，池名与 `**` 一个字节都不动。
         doctored = body
-        for digits in (f"+{real['adds']}/-{real['dels']}", f"+{real['adds']}/−{real['dels']}"):
+        for slash in ("−", "-"):
+            digits = f"+{real['adds']}/{slash}{real['dels']}"
             if digits in raw:
                 doctored = body.replace(raw, raw.replace(digits, "+1/−0"), 1)
                 break
         assert doctored != body, (
-            f"正文里那句声明没被替换掉（取到的原文片段 {raw!r}）——这条格在空转")
+            f"正文里的 +{real['adds']}/−{real['dels']}（两种斜杠都试过）没被替换掉——这条格在空转")
 
         bad = _mismatches(sha, doctored)
         assert bad and any("+1/−0" in m and f"+{a}/−{d}" in m for m in bad), (
