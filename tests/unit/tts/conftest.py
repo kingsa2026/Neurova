@@ -36,8 +36,15 @@ def idleNow() -> float:
 
 @pytest.fixture()
 def heavy_manager(monkeypatch):
-    """预注入假引擎的 manager：缓存与**构造**两条支路都留在假引擎里。"""
+    """预注入假引擎的 manager：缓存与**构造**两条支路都留在假引擎里。
+
+    轻引擎那一支同样要桩：`release_idle_engines()` 的重引擎换班走 `_initialize_engine("edge-tts")`，
+    它对 `self._engines` 只做「有就复用」，而真 `EdgeTTS.initialize()` 会去连在线服务——
+    CI 无网时返回 False、换班失败，夹具「释放→换班」这条前置因此在这类机器上根本不成立。
+    桩构造接缝的同时也把 `_engines` 里那只换成假轻引擎，缓存与构造两条支路都留在替身里。
+    """
     monkeypatch.setattr(tts_manager_mod, "MOSSNanTTS", fakeHeavyFactory)
+    monkeypatch.setattr(tts_manager_mod, "EdgeTTS", lambda **_kwargs: _FakeLightEngine())
     cfg = TTSConfig(
         engine="auto",
         fallback_chain=["moss-nano", "edge-tts", "mock"],
@@ -49,3 +56,10 @@ def heavy_manager(monkeypatch):
     heavy, light = _FakeHeavyEngine(), _FakeLightEngine()
     mgr._engines = {"moss-nano": heavy, "edge-tts": light}
     return mgr, heavy, light
+
+
+#: 合成时钟必须**大于**上一步合成时记下的 `time.monotonic()` 读数，否则
+#: `release_idle_engines` 里 `now - _last_used_monotonic` 是负数，恒小于 TTL ⇒ 永不释放。
+#: 写死 `1_000_000` 只在与 `_last_used_monotonic = 0.0`（手工置 0）并存时成立；
+#: 走真合成链的用例一律用 `idleNow()` 取"现在 + 远超 TTL"。
+IDLE_TTL_SECONDS = 60

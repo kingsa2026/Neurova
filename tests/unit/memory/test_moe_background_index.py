@@ -92,15 +92,29 @@ def test_state_dir_honors_injected_env(tmp_path: Path, monkeypatch):
     assert path.name.startswith("moe_index_state_")
 
 
-def test_state_dir_defaults_to_repo_data_when_env_unset(monkeypatch):
-    # 生产默认值是数据根（`core/data_root.get_data_root()`），不是仓库内写死的
-    # `data/`——`$NEUROVA_DATA_DIR` 一旦注入（CI、测试、便携部署都注入）两者就不是
-    # 同一个目录。旧断言钉的是字面路径，于是只要数据根被指到别处就红，
-    # 与"默认是否由数据根推导"这件事反而无关。
-    monkeypatch.delenv("NEUROVA_MOE_INDEX_STATE_DIR", raising=False)
-    from neurova.core.data_root import get_data_root
+def test_state_dir_defaults_to_repo_data_when_env_unset(monkeypatch, tmp_path: Path):
+    """两级注入都不在时，回落的是**数据根**（生产＝仓库 `data/`）。
 
-    assert _moe_index_state_path("scope").parent == get_data_root()
+    此前这里删掉 env 就断言等于 `REPO_DATA_DIR`——它成立的前提是"进程里没有数据根注入"。
+    本仓的跑测进程从 `tests/conftest.py:58` 起就 `setdefault(NEUROVA_DATA_DIR, 临时根)`
+    （防真实 `data/` 被写），所以那一格在整场跑测里恒红、单跑也红：它测的其实是
+    "conftest 没注入"。
+
+    判据要的是**回落链**本身，两跳各钉一次：注入数据根 ⇒ 落在数据根；连数据根也没有
+    ⇒ 落在仓库 `data/`。`mem_core` 取的是 `core.data_root.get_data_root()`（不是 env 本身），
+    所以这里 monkeypatch 那个单点，而不是猜 env 名。
+    """
+    monkeypatch.delenv("NEUROVA_MOE_INDEX_STATE_DIR", raising=False)
+
+    # 桩在生产**自己 import 的那个名字**上（`mem_core` 是 `from ... import get_data_root`，
+    # 桩包模块上的同名函数打不中它——这正是"绕开生产装配点"的反面：要桩就桩它真用的那一格）。
+    from neurova import mem_core
+
+    monkeypatch.setattr(mem_core, "get_data_root", lambda: Path(str(tmp_path / "injectedRoot")))
+    assert _moe_index_state_path("scope").parent == tmp_path / "injectedRoot"
+
+    monkeypatch.setattr(mem_core, "get_data_root", lambda: REPO_DATA_DIR)
+    assert _moe_index_state_path("scope").parent == REPO_DATA_DIR
 
 
 def test_state_dir_pinned_out_of_repo_data_during_tests(tmp_path: Path):

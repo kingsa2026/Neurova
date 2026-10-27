@@ -85,13 +85,13 @@ class TestWriteThenReadSeeOneLedger:
         return client
 
     def test_install_then_agentFaceListsIt(self, app_client):
-        """走真安装链，用真资产包（studio 那只）。
+        """走真安装链，且用**真资产包**（studio 那只），装完按盘上实际路径实测。
 
-        起点是反过来的：本格原用 `multi-search-engine`，理由是"studio 的终点投影超 Windows
-        260 预算，装不到最终位置"。那条理由现在失效了——路径预算成了**解包闸的前置判定**
+        起点是反过来的：本格原用短包，理由是"studio 的终点投影超 Windows 260 预算，
+        装不到最终位置"。那条理由现在失效了——路径预算成了**解包闸的前置判定**
         （`market_sources._pathBudgetExceeded`，跨机器同向，不再赌本机 OS 设置），库根也短了
-        一截（实测终点投影 247 < 260），真资产在跑测环境里装得成。留短包就是把"能不能装"
-        这件事从判据里拿掉，读起来像通了、其实少测了真实尺寸那一路。
+        一截（实测终点投影 247 < 260）。留短包就是把"能不能装"这件事从判据里拿掉，
+        读起来像通了、其实少测了真实尺寸那一路。
         """
         skill_id = "builtin--adaptive-presentation-studio"
         installed = app_client.post(f"/api/v1/skill-pool/{skill_id}/install",
@@ -170,6 +170,34 @@ class TestWriteThenReadSeeOneLedger:
         finally:
             ms.WINDOWS_MAX_PATH = original
         assert not (dest / "SKILL.md").exists(), "被拒的包不该在盘上留下任何成员"
+
+    def test_studioPackageLandsUnderTheBudgetThroughTheRealInstallChain(self, app_client):
+        """主格装真资产包的前置必须**实测自证**，不许从别处推。
+
+        上一版这里是反向断言（"装不下"），它按设计在落点变短时转红——本轮正是那一格红了：
+        conftest 把库根切到 `tmp_path` 后理论投影 246 < 260。但"理论投影"不是可观测事实
+        （库根里落的是 `builtin--<包名>`，不是 `manifest.name`；装的成功与否另有一串变量），
+        改判为**真装完之后按盘上实际路径量**：同一用例里装、读面看得见、最长路径还在预算内。
+        """
+        from neurova.skills.library_service import agentLibrary
+        from neurova.skills.market_sources import WINDOWS_MAX_PATH   # 预算单源＝解包闸用的那个数
+
+        skill_id = "builtin--adaptive-presentation-studio"
+        installed = app_client.post(f"/api/v1/skill-pool/{skill_id}/install",
+                                    params={"agent_id": "default"})
+        assert installed.status_code == 200, (
+            f"安装本身没成：HTTP {installed.status_code} {str(installed.text)[:220]}")
+        ids = [r.get("skill_id") for r in
+               app_client.get("/api/v1/skill-pool/agent/default/skills").json()]
+        assert skill_id in ids, f"装完读面看不见：{ids[:5]}——内存态还是两份"
+
+        root = Path(str(agentLibrary("default").skills_dir))
+        landed = [p for p in root.rglob("*") if p.is_file()]
+        assert landed, f"落点 {root} 一个文件都没有——真装链没写盘"
+        longest = max(landed, key=lambda p: len(str(p)))
+        assert len(str(longest)) <= WINDOWS_MAX_PATH, (
+            f"最长落点 {len(str(longest))} 字符越过 Windows {WINDOWS_MAX_PATH} 预算："
+            f"{str(longest)[len(str(root)):]}")
 
     def test_factoryHandsOutOneInstancePerLibraryDir(self):
         """工厂语义：**同一库目录必须只对应一个实例**，且落点与解析单点一致。

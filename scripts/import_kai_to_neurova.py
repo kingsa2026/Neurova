@@ -14,8 +14,8 @@
                                     user 轮、tool_result 折叠不丢 assistant 文本）
 
 身份：
-  SOUL.md → agent_workspaces/kai/memory/soul.md（Agent._load_identity 真实加载位）
-  PROFILE.md → memory/personality.md + workspace 根留档
+  SOUL.md → data/kai/soul.md（Agent._load_identity 真实加载位）
+  PROFILE.md → data/kai/personality.md + workspaces/ 留档
   MEMORY.md → workspace 根留档
 
 幂等：记忆按 (agent_id, content, created_at) 去重；会话按消息
@@ -547,14 +547,15 @@ def import_chats(kai_root: Path, sessions_dir: Path, agent_id: str = "kai") -> D
 # ══════════════════════════════════════════════════════════════════
 
 
-def importIdentity(kai_root: Path, agent_root: Path) -> Dict[str, int]:
-    """SOUL.md → `<agent_root>/soul.md`；PROFILE.md → `<agent_root>/personality.md` + 留档；
-    MEMORY.md → workspace 留档。全部覆盖式同步（源即真相）。
+def import_identity(kai_root: Path, agent_root: Path) -> Dict[str, int]:
+    """SOUL.md → `<agent_root>/soul.md`；PROFILE.md → `<agent_root>/personality.md` + 工作区留档；
+    MEMORY.md → 工作区留档。全部覆盖式同步（源即真相）。
 
-    两个身份文件落 **agent 根**，不是 `memory/`：`AgentCore._load_identity` 读的正是
-    `<agent_root>/soul.md` 与 `<agent_root>/personality.md`（`4bf9b733` 把身份文件从
-    记忆目录收口到 agent 根，`agent_layout_migration` 迁移旧布局时也是这个方向）。
-    写进 `memory/` 的版本运行期一个读者都没有——导入看起来成功，人格却是默认那段。
+    落点是 `Agent._load_identity` 的**真实加载位**（v2 布局起身份文件在 agent 根，
+    不再藏在 `memory/` 或工作区里）：写到别处等于导入成功、运行时读不到。
+    `memory/soul.md` 那一份是 **v1 布局的旧落点**，不再写——旧物由
+    `core/agent_layout_migration` 在启动时搬回 agent 根，导入器再写一份就是
+    在两个落点各存一份身份（第二次导入时两份还可能各写各的）。
     """
     kai_root = Path(kai_root)
     agent_root = Path(agent_root)
@@ -566,9 +567,7 @@ def importIdentity(kai_root: Path, agent_root: Path) -> Dict[str, int]:
 
     mapping = [
         (kai_root / "SOUL.md", agent_root / "soul.md"),
-        (kai_root / "SOUL.md", memory_dir / "soul.md"),
         (kai_root / "PROFILE.md", agent_root / "personality.md"),
-        (kai_root / "PROFILE.md", memory_dir / "personality.md"),
         (kai_root / "PROFILE.md", workspace / "PROFILE.md"),
         (kai_root / "MEMORY.md", workspace / "MEMORY.md"),
     ]
@@ -642,7 +641,7 @@ def main() -> int:
         print(f"[聊天] {chats}")
 
     if not args.skip_identity:
-        ident = importIdentity(kai_root, agent_root)
+        ident = import_identity(kai_root, agent_root)
         print(f"[身份] {ident}")
 
     if args.dry_run:

@@ -178,9 +178,9 @@ class GovernanceResult:
     # P0-6 分段审批：多段命令的候选段列表（CommandSegment.to_dict）。
     # 单段命令恒 None（等价旧行为）；审批卡据此逐段展示。
     segments: Optional[List[Dict[str, Any]]] = None
-    # 本轮**按路径裁决过的那几个值**，`[(键名, 路径值), ...]`。裁决面逐值裁，结果面就逐值交回：
-    # 拒绝语与审计面从这里取路径，不去 `reasons` 的散文里抠（抠法一换工具就哑，
-    # `unlink_file({"path": ...})` 抠出来是空）。留空即"没裁过路径"，不是"裁过但无值"。
+    # 这一次调用里**按路径裁决过**的 (键名, 值)，取值口是 `pathValuesForTool`。
+    # 裁决面逐个值裁决，结果面就得把那些值带出来：否则拒绝语只能报半句散文，消费方被迫去
+    # reasons 里抠字符串——抠法一换工具就哑（§6-284 那条链断在出口上的正是这一格）。
     path_values: List[tuple] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -193,7 +193,7 @@ class GovernanceResult:
         if self.segments:
             d["segments"] = list(self.segments)
         if self.path_values:
-            d["path_values"] = [[str(name), value] for name, value in self.path_values]
+            d["path_values"] = [[str(k), str(v)] for k, v in self.path_values]
         return d
 
 
@@ -283,16 +283,16 @@ class GovernancePolicy:
         # P0-1：分段/白名单/内容检测统一看 shell
         # 实际执行的形态（续行已移除），防止换行拆分绕过。
         command = normalize_posix_line_continuations(command)
-        # 裁决面收到的每一条路径值，结果面原样交回（返回点逐个带出，不在这里再算一遍）
-        adjudicated = [(str(name), value) for name, value in path_values]
+        # 结果面要带的路径（见 GovernanceResult.path_values）：入参先钉成列表，各返回点原样带走
+        adjudicatedPaths = [(str(k), str(v)) for k, v in (path_values or ())]
 
         # 工具级覆盖优先于内容检测结果（显式配置 > 自动推断）
         if tool_name in self.tool_overrides:
             override = self.tool_overrides[tool_name]
             return GovernanceResult(
+                path_values=adjudicatedPaths,
                 decision=override,
                 reasons=[f"工具 '{tool_name}' 命中策略覆盖: {override.value}"],
-                path_values=adjudicated,
             )
 
         # P0-6 分段审批：多段命令全部段命中白名单才放行；
@@ -315,10 +315,10 @@ class GovernancePolicy:
             seg_hits = [self.match_whitelist(s.text, tool_name) for s in segs]
             if all(h is not None for h in seg_hits):
                 return GovernanceResult(
+                    path_values=adjudicatedPaths,
                     decision=GovernanceDecision.ALLOW,
                     reasons=[f"分段审批: 全部 {len(segs)} 段命中白名单"],
                     segments=[s.to_dict() for s in segs],
-                    path_values=adjudicated,
                 )
             hit = None
         else:
@@ -326,9 +326,9 @@ class GovernancePolicy:
 
         if hit is not None:
             return GovernanceResult(
+                path_values=adjudicatedPaths,
                 decision=GovernanceDecision.ALLOW,
                 reasons=[f"命中白名单条目 {hit.get('id', '?')}: {hit.get('pattern', '')}"],
-                path_values=adjudicated,
             )
 
         # 每个路径值都按它**自己的键名**进参数面，交给守卫逐值裁决；键名与守卫共用同一个取数口
@@ -347,57 +347,55 @@ class GovernancePolicy:
 
         critical = [f for f in findings if getattr(f, "severity", None) == GuardSeverity.CRITICAL]
         high = [f for f in findings if getattr(f, "severity", None) == GuardSeverity.HIGH]
-        medium = [f for f in findings if getattr(f, "severity", None) == GuardSeverity.MEDIUM]
-
-        # 注意：不使用 guard_result.safe 做裁决 —— 该标志在 AUTO 模式下
+        medium = [f for f in findings if getattr(f, "severity", None) == GuardSeverity.MEDIUM]        # 注意：不使用 guard_result.safe 做裁决 —— 该标志在 AUTO 模式下
         # 对任何 >=HIGH 的发现都为 False，会让 SANDBOX 分支变成死代码。
         if critical:
             reasons = [f"拦截: {getattr(f, 'message', str(f))}" for f in critical]
             return GovernanceResult(
+                path_values=adjudicatedPaths,
                 decision=GovernanceDecision.DENY,
                 reasons=reasons or ["命中阻断级规则"],
                 findings=findings,
                 segments=_seg_dicts_if_multi,
-                path_values=adjudicated,
             )
 
         if high:
             if self.ask_on_high:
                 return GovernanceResult(
+                    path_values=adjudicatedPaths,
                     decision=GovernanceDecision.ASK,
                     reasons=[f"需确认: {getattr(f, 'message', str(f))}" for f in high],
                     findings=findings,
                     segments=_seg_dicts_if_multi,
-                    path_values=adjudicated,
                 )
             # P1-7 诚实化：平台上无真隔离后端时，SANDBOX 判定是谎言（实际裸跑），
             # 升级为 DENY——拒绝优于静默放行
             if not _platform_has_enforced_sandbox():
                 return GovernanceResult(
+                    path_values=adjudicatedPaths,
                     decision=GovernanceDecision.DENY,
                     reasons=[f"高风险且当前平台无可用沙箱隔离，拒绝执行: "
                              + "; ".join(getattr(f, "message", str(f)) for f in high)],
                     severity=SandboxSeverity.NONE,
                     findings=findings,
                     segments=_seg_dicts_if_multi,
-                    path_values=adjudicated,
                 )
             return GovernanceResult(
+                path_values=adjudicatedPaths,
                 decision=GovernanceDecision.SANDBOX,
                 reasons=[f"高风险,启用沙箱: {getattr(f, 'message', str(f))}" for f in high],
                 severity=self.sandbox_severity,
                 findings=findings,
                 segments=_seg_dicts_if_multi,
-                path_values=adjudicated,
             )
 
         if medium and self.ask_on_high:
             return GovernanceResult(
+                path_values=adjudicatedPaths,
                 decision=GovernanceDecision.ASK,
                 reasons=[f"中风险,建议确认: {getattr(f, 'message', str(f))}" for f in medium],
                 findings=findings,
                 segments=_seg_dicts_if_multi,
-                path_values=adjudicated,
             )
 
         # P0-6 分段 ASK 兜底（顺序在内容检测之后）：多段命令有段未命中
@@ -406,18 +404,18 @@ class GovernancePolicy:
         if is_multi_seg and any(h is None for h in seg_hits):
             offender = next(s for s, h in zip(segs, seg_hits) if h is None)
             return GovernanceResult(
+                path_values=adjudicatedPaths,
                 decision=GovernanceDecision.ASK,
                 reasons=[
                     f"分段审批: 段 '{offender.text[:80]}' 未命中白名单，链式命令需逐段确认"
                 ],
                 findings=findings,
                 segments=_seg_dicts_if_multi,
-                path_values=adjudicated,
             )
 
         return GovernanceResult(
-            decision=self.default_action, reasons=[], findings=findings,
-            segments=_seg_dicts_if_multi, path_values=adjudicated,
+            path_values=adjudicatedPaths,
+            decision=self.default_action, reasons=[], findings=findings, segments=_seg_dicts_if_multi
         )
 
     def evaluate_tool_call(

@@ -314,20 +314,24 @@ def _chunkDocument(
     return allChildren, allParents
 
 
-#: 三档以上的**文档类**后缀（教义第 6 条：口径只许一处定义，实体在
-#: `skill_scanner.DOC_ASSET_SUFFIXES`）。判据 `test_installGateDocFilesAreReportOnly` 按
-#: AST 认「把 .md/.markdown/.txt 凑进一个集合字面量」的文件为第二份口径，故这里直接引用。
-_DOC_SUFFIXES = DOC_ASSET_SUFFIXES
-
-#: 纯文本但不在文档资产表里的两种：`.rst`/`.log` 没人当资产，却照样该按文本读。
-_TEXT_ONLY_SUFFIXES = frozenset({".rst", ".log"})
+#: 抽取器只认两档：`text` 走纯文本抽取，`document` 走文档抽取。
+#: 这张表是**抽取契约**，与"哪些后缀算文档类、可降为报告项"那份安全裁决不是同一件事——
+#: 后者只在 `security/skill_scanner.py` 的 `DOC_ASSET_SUFFIXES` 一处定义（§6-189 裁定甲），
+#: 本表以它为基础，不再另抄一份文档后缀。
+#: 两处形状**刻意不同**：本表以字符串（`os.path.splitext` 的产物）为语义，故从裁决表派生
+#: 再 `split`；裁决表那处是容器字面量。同形会被
+#: `tests/unit/security/test_installGateDocFilesAreReportOnly.py` 判成"豁免口径第二份"
+#: ——它按"文档后缀凑在一个容器字面量里"找副本，这判据是对的：两份同形的表迟早各自漂移。
+#:
+#: `.rst`/`.log` 两种不在裁决表里：没人当资产，却照样该按文本读，故在此追加。
+_TEXT_EXTRACT_SUFFIXES = frozenset(
+    " ".join(sorted(DOC_ASSET_SUFFIXES)).split() + [".rst", ".log"]
+)
 
 
 def _fileTypeFor(ext: str) -> str:
     """`extract_attachment_text` 的 `file_type` 入参：`text` 走解码抽取，其余走格式分支。"""
-    if ext in _DOC_SUFFIXES or ext in _TEXT_ONLY_SUFFIXES:
-        return "text"
-    return "document"
+    return "text" if ext in _TEXT_EXTRACT_SUFFIXES else "document"
 
 
 def parse_document(

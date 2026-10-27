@@ -220,14 +220,22 @@ def parse_compose() -> Dict[str, Any]:
         return out
 
     def port_of(svc: Dict[str, Any]) -> int | None:
-        # 端口映射的完整短语法是 `[<宿主IP>:][<宿主端口>:]<容器端口>[/协议]`。
-        # 只认 `宿主:容器` 两段会把回环发布 `127.0.0.1:9527:9527` 静默读成 None，
-        # 而 R2 的端口比对只在两侧都非 None 时比较 —— 于是"读不到"被当成了"对上了"。
-        # 取末尾两段：有宿主端口时它是容器侧，只有一段时那一段本身就是容器端口。
+        """容器端口（`宿主:容器` 里的**容器**那一侧）。
+
+        三种写法都要认：`9527:9527`、`127.0.0.1:9527:9527`（绑定宿主回环的现行写法）、
+        以及只写容器端口 `9527`。只认第一种时，加了宿主绑定就等于把这条比对**静默关掉**——
+        读出来是 None，而下面的判据只在两侧都有值时才比，于是"端口不一致"这一整条不再发声
+        （实测：合并把发布地址收成 `127.0.0.1:9527:9527` 之后，R2 直接报"与 EXPOSE 不一致"，
+        因为 compose 侧读成 None 而 Dockerfile 侧是 9527）。
+        """
         for entry in svc.get("ports") or []:
-            parts = str(entry).split("/")[0].split(":")
-            if len(parts) >= 2 and parts[-1].isdigit():
-                return int(parts[-1])
+            text = str(entry).strip().strip('"').strip("'")
+            m = re.match(r"^(?:.*:)?(\d+):(\d+)$", text)
+            if m:
+                return int(m.group(2))
+            m = re.match(r"^(\d+)(?:/(?:tcp|udp))?$", text)
+            if m:
+                return int(m.group(1))
         return None
 
     return {name: {"env": env_of(svc), "port": port_of(svc), "raw": svc} for name, svc in services.items()}

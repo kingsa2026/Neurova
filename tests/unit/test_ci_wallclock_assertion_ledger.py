@@ -668,10 +668,11 @@ OUTSIDE_SUBSET_LEDGER: Dict[str, int] = {
     "tests/unit/api/test_security_p0_audit_fixes.py": 1,
     "tests/unit/channels/test_wechat_ilink_qrcode.py": 1,
     "tests/unit/context/test_context_pool_agent_core_integration.py": 1,
-    # `tests/unit/memory/test_moe_routing.py` 已**销账**（`c2031c4c`，批 138 §6-378）：
-    # 该档按教义第 7 条退役（同功能判据已并入 `test_moe_background_index.py` 与记忆层门面判据），
-    # 文件从仓内消失，那 2 处墙钟上界跟着退场，键按销账删除——不是"沉默地少登记一条"：
-    # 本表的分布比对逐文件相等，任何一处新增的墙钟上界都会让这一格重新判红。
+    # `tests/unit/memory/test_moe_routing.py` 已**销账**（原登记 2 处）：`c2031c4c`（§6-378 批 138）
+    # 把该档连同未接线的 `channels/moe_router` 一并退役删除了，文件已不存在 ⇒ 它的墙钟上界归零，
+    # 键从本表消失。这不是"沉默地少登记一条"：本表的比对是 `live == 台账`，**残留**键（文件没了
+    # 却还登记着）与**新增**未登记的上界都会当场判红——2026-10-23 正是这条残留键让本档在 CI 上红
+    # （`台账里已不存在: ['tests/unit/memory/test_moe_routing.py']`）。
     "tests/unit/neurflow/test_parallel_execution.py": 1,
     "tests/unit/skills/test_skill_import_architecture.py": 1,
     "tests/unit/sync/test_slow_consumer_seq_policy.py": 1,

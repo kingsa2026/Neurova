@@ -497,6 +497,21 @@ class ChatPipeline:
             raise
         finally:
             finish_task(self._agent, ctx.user_input, completed=completed)
+            self._release_turn_scope()
+
+    @staticmethod
+    def _release_turn_scope() -> None:
+        """轮末解绑本轮取消令牌（这里是唯一的收尾点，异常与取消也过）。
+
+        轮首换新（`reset_turn_tool_messages`）只解决"上一轮置位的那个对象不再被用"，
+        不解决"它**还在**"：不换新的调用方（同进程里下一个无轮次上下文的执行体）
+        取到的仍是那只已置位的令牌，于是刚起的进程被上一轮的理由杀掉
+        （`LocalExecutor.exec` 的 `exit_code -9`）。解绑后它们拿到 `None`，
+        按"无令牌"处置：能跑，只是不可被轮次取消。
+        """
+        from neurova.core.cancel_token import clearTurnCancelToken
+
+        clearTurnCancelToken()
 
     async def _landFailedTurn(self, ctx: ChatContext, exc: BaseException) -> None:
         """失败轮落点（实现见 `agent/failed_turn_landing.py`）。"""
@@ -2981,8 +2996,21 @@ class ChatPipeline:
         return await legacy_call.callLegacyNormal(self, ctx)
 
     async def _call_legacy_stream(self, ctx: ChatContext) -> str:
-        """流式 fallback（实现见 `agent/legacy_call.py`，此处只留接口）。"""
-        return await legacy_call.callLegacyStream(self, ctx)
+        """流式 fallback
+
+        读取循环本体在 `legacy_stream_turn`（本文件是每轮对话的必经面，性能门禁对它
+        设了尺寸上限）；这里只做装配：产流、错误分类口径、citation 缓冲。
+        """
+        from neurova.agent.legacy_stream_turn import consumeLegacyStream
+
+        return await consumeLegacyStream(
+            self.llm_client.chat_stream(ctx.context),
+            eventEmitter=ctx.event_emitter,
+            metadata=ctx.metadata,
+            # ④ 流式 citation 缓冲（同 _call_loop_stream：仅本轮有句柄才启用）
+            citationRegistry=ctx.citation_registry,
+            buildLLMError=self._raise_for_llm_error_dict,
+        )
 
     @staticmethod
     def _raise_for_llm_error_dict(chunk: Dict) -> Exception:

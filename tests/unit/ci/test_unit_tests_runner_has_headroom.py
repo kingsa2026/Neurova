@@ -175,24 +175,39 @@ class TestUnitTestLegContainerFitsItsOwnSubset:
         )
 
 
-class TestUnitTestLegWallclockCoversTheWholeRun:
-    def testStageTimeoutExceedsTheMeasuredRun(self):
+class TestUnitTestLegWallclockIsABudgetNotAWindow:
+    """墙钟这一维的口径**只有一条**：上限要么是预算、要么不是上限。
+
+    本档原先钉的是"余量 ≥ 实测 3×"（`MEASURED_WALLCLOCK_SECONDS * 3`），而 3× 那条与
+    同一次现场的另一条判据方向相反：`test_protectedSubsetBudgetCoversItsRealCost.py`
+    要求驱动受保护子集那一格的 `timeout ≤ 45m`——理由正是"上限远比实测宽时，
+    『真撞墙』与『被资源杀掉』在日志里长得一模一样，读的人只能猜"。
+    两条判据同时在场时，任何取值都只能满足其中一条（2700s < 1333×3，而 90m > 45m），
+    那不是"两道门都要过"，是两套口径各自定义了一次"墙钟该多宽"。
+    故这里收口到预算口径，把 3× 那一条退役——不是把门槛改软：判据仍然逐字读活配置，
+    只是"该多宽"只由一处作答（教条第 6 条，同一事实只许一处定义）。
+    """
+
+    def testStageBudgetCoversTheMeasuredRun(self):
+        """预算必须覆盖实测——下界是"跑得完"，上界由预算判据那一档管。"""
         pipe = _unitTestPipeline()
         budget = _coverageStageTimeoutSeconds(pipe)
-        assert budget >= MEASURED_WALLCLOCK_SECONDS * 3, (
+        assert budget >= MEASURED_WALLCLOCK_SECONDS * 1.1, (
             f"受保护子集那一段给 {budget}s，而最新实测单场已 {MEASURED_WALLCLOCK_SECONDS}s"
             f"（构建 cnb-rja-1k5pv9gbl#003，被 SIGKILL 时读数，仍是下界）——"
-            "余量不足 3×。墙钟撞墙的日志形态与失败墙一模一样（整段被掐断、"
-            "一条红都没有），故这条必须留足，别让'超时'冒充'有测试红了'。"
+            "预算装不下一场真实的跑测。墙钟撞墙的日志形态与失败墙一模一样"
+            "（整段被掐断、一条红都没有），故这条下界必须守住。"
+            "上界（别把上限当窗口）由 test_protectedSubsetBudgetCoversItsRealCost.py 判。"
         )
 
     def testDetectorIsNotVacuous(self, tmp_path):
-        """反向控制：把 timeout 写成 30m 时必须读得出是个不足的数。"""
+        """反向控制：把 timeout 写成 5m 时必须读得出是个装不下一场的数。"""
         pipes = _pipelines()
         name = [n for n in pipes if n.startswith("unit-tests")][0]
         pipe = pipes[name]
         stages = [
-            dict(stage, timeout="30m") if _isSubsetStage(stage) else stage
+            dict(stage, timeout="5m") if _isSubsetStage(stage) else stage
             for stage in pipe["stages"]
         ]
-        assert _coverageStageTimeoutSeconds(dict(pipe, stages=stages)) == 1800
+        assert _coverageStageTimeoutSeconds(dict(pipe, stages=stages)) == 300
+        assert 300 < MEASURED_WALLCLOCK_SECONDS * 1.1

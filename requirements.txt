@@ -7,6 +7,8 @@ pydantic>=2.5.0
 # HTTP & WebSocket
 httpx>=0.25.0
 websockets>=12.0
+# 下界 3.14.5：3.14.3 那一版在 2026-10 公告批里有 8 条（请求走私 GHSA-pqxq-w44r-73xw、
+# 分片请求耗尽 fd、cookie Secure 属性未强制等），修复版自 3.14.4 起。
 aiohttp>=3.14.5
 curl_cffi>=0.7.0  # 静态抓取共享层（neurova.http_fetch）浏览器 TLS 指纹，过反爬 403
 
@@ -109,6 +111,8 @@ mcp>=2.0.0
 # 真实 import（Pillow 截图与图片解析、cryptography 密钥存储、jsonschema 工具层、
 # playwright/curl_cffi 抓取、pyautogui/paramiko/prometheus-client）；测试框架不在
 # 这里声明——pytest 三件由 requirements-ci.txt 单源持有，重复声明会被装进用户机器。
+# 下界 13.0.0：11.x/12.x 全版都在 2026-10 公告批内（libtiff 编码器内存泄露/段错误等），
+# 修复版自 13.0.0 起。生产镜像与 CI 同解释器线（Python 3.12），cp312 轮子齐备。
 Pillow>=13.0.0
 prometheus-client
 pyautogui>=0.9.54

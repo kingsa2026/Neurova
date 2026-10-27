@@ -1384,3 +1384,10 @@ tests/unit/core/test_perObjectStateValueStoreHasOneImplementation.py
 # 回归 7653 passed，十四条既有红逐条同选型两态对跑读数一致（含只在本场现形的 test_ttl_expiration
 # ERROR＝跨档串扰），本批不新增红。逐文件单跑两次同读数 7 passed。
 tests/unit/evolution/test_minerSecretDropPolicySharesOneTable.py
+
+# 索引补齐（main 侧新登记的四档）：分片并集必须与索引逐条相等，
+# 漏登记＝登记了却从未执行（判据见 tests/unit/ci/test_protected_subset_shards.py）。
+tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py
+tests/unit/ci/test_runnerAllocatedWallClockIsNotADeadline.py
+tests/unit/core/test_turnCancelTokenLeaksAcrossCases.py
+tests/unit/security/test_sandboxFileBlockNamesThePath.py

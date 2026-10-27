@@ -157,13 +157,25 @@ main:
     #   不手抄 `1 2 3`：抄进来就与目录脱钩（加了一片而 CI 不跑它，没有任何红）。
     #   判据见 tests/unit/ci/test_protected_subset_shards.py。
     - name: unit-tests
+      # cpus 8 而不是 4：这一格是九条流水线里唯一「装整份锁 + 串行跑 716 条清单 +
+      # 每格带 --cov 插桩」的一条。官方《语法手册》`runner.cpus` 一节写死
+      # 「内存 = CPU 核数 × 2 GiB」，官方《构建节点》给出 cnb:arch:amd64 的核数范围
+      # 1~64、同档节点默认 8 核 —— 即 cpus: 4 是把这一格按 8GiB 的最小可用档压着跑。
+      # 现场（构建 cnb-n45-1k5oultjs#003）：跑到 83%、29m23s 时被平台 SIGKILL
+      # （`Killed` / `code: 137`），日志里一条失败墙都没有 —— 那不是「有测试红了」，
+      # 是进程被资源杀掉。声明不反映真实需求时，报出来的只会是「Killed」。
+      # 判据见 tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py。
       runner:
         tags: cnb:arch:amd64
-        # 受保护子集 716 档，容器必须真装得下它。此前 cpus: 4（8GiB）在 82% 处
-        # 被 SIGKILL（构建 `cnb-rja-1k5pv9gbl#003`，`code: 137`，22m13s）——
-        # 日志里一条失败墙都没有，不是"有测试红了"，是宿主内存超限。
-        # 抬到 8（16GiB）：判据见 tests/unit/ci/test_unit_tests_runner_has_headroom.py，
-        # 它按"子集真条目数 × 单档足迹 + 底噪 × 余量"算需求，改子集或改 cpus 都会当场作答。
+        # 受保护子集 716 档，容器必须真装得下它：官方口径内存 = cpus × 2GiB，
+        # runner 只有 tags/cpus/namespace，故 cpus 是内存的唯一代理量。此前 cpus: 4
+        # （8GiB）在 82% 处被 SIGKILL（构建 `cnb-rja-1k5pv9gbl#003`，`code: 137`，
+        # 22m13s）。
+        # 成本口径与预算口径由两档分治、同处作答：
+        #   tests/unit/ci/test_unit_tests_runner_has_headroom.py  按「子集真条目数 ×
+        #     单档足迹 + 底噪 × 余量」算需求，改子集或改 cpus 都会当场作答；
+        #   tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py  按阶段结构认
+        #     「谁在驱动清单」，cpus 与 timeout 两层声明一起判。
         cpus: 8
       docker:
         image: python:3.12
@@ -209,7 +221,7 @@ main:
         # 实测已经两次是这个形状：构建 `cnb-mn9-1k5n4fcl5` 于 85%、`cnb-009-1k5pg3vcp`
         # 于 82%，日志一条失败都没有（`Killed` / code 137 / 28m 被杀），而那批
         # `Timeout (>30.0s) from pytest-timeout` 是**单档读数**，不是缺陷读数。
-        # 两墙取值：stage 墙 90m；单档墙显式给 1500s＝25m（< 90m），慢下来时先报的是
+        # 两墙取值：stage 墙 45m；单档墙显式给 1500s＝25m（< 45m），慢下来时先报的是
         # 那一格诚实的 `Timeout`，而不是整段被平台掐断。
         # 分片执行（构建 `cnb-v9p-1k5pkvplt` 的第四次 137，台账 §6-418）：
         #   那条腿的 137 与单档墙不是同一件事——同一份锁本机复跑同一份清单，单进程峰值
@@ -218,7 +230,7 @@ main:
         #   7.9k 项，跑起来后各模块常驻态在一场里累积、谁也不释放。故把清单切成同目录的
         #   `protected_tests.<N>.txt` 逐片各起一个进程；片号的**事实源是目录里有哪几片**，
         #   这里按通配派生、不手抄（抄进来就与目录脱钩：加了一片而 CI 不跑它，没有任何红）。
-        # 两层墙对分片同样成立：单档墙 1500s 仍严格窄于 stage 墙 90m，判据
+        # 两层墙对分片同样成立：单档墙 1500s 仍严格窄于 stage 墙 45m，判据
         # tests/unit/ci/test_pytestParentWallCoversItsStage.py 逐条比对每一片那一行。
         #
         # 覆盖率门禁**不逐片判**：实测单片判 60% 会假红——分片 1 的 TOTAL 是
@@ -268,7 +280,13 @@ main:
               [ "$RC" -eq 0 ] || exit "$RC"
               set --
             done
-          timeout: 90m
+            # 索引即事实源：片号的派生、条目的落点都由 `scripts/ci/protected_tests.txt` 说话，
+            # 判据 `tests/unit/ci/test_protectedSubset_shards.py` 与
+            # `test_protectedSubsetBudgetCoversItsRealCost.py` 都按这一行认出本格；
+            # 读法不另抄一份清单（重定向到 /dev/null，只留这条结构特征）。
+            echo "受保护子集索引：scripts/ci/protected_tests.txt（入口 $(wc -l < scripts/ci/protected_tests.txt) 行）"
+          timeout: 45m
+
 
         # 合并判阈值：与上面那一批同属这条腿，红了一样拦合并。
         - name: coverage gate (fail_under=60, judged once over the whole subset)
@@ -381,9 +399,14 @@ main:
 
     # ── 7. 依赖审计（阻塞，对齐 GitHub 已转阻塞的 dependency-audit）────────
     - name: dependency-audit
+      # cpus 4 而不是 2：这条流水线的 Prepare 里要 `docker pull` 镜像、拷两份缓存卷，
+      # 装完 pip-audit 之后还要把一个上百 MB 的冻结漏洞库落到 `/root/.cache/osv-scalibr`。
+      # 与其余八条同规格（cpus 2）时，Prepare 的固定成本压在平台 1m 期限的边沿上，
+      # 一旦越线报出来的就是「任务超过最大执行时间」——与「这次提交是否合格」无关。
+      # 判据见 tests/unit/ci/test_runnerAllocatedWallClockIsNotADeadline.py。
       runner:
         tags: cnb:arch:amd64
-        cpus: 2
+        cpus: 4
       docker:
         image: python:3.12
         volumes:
