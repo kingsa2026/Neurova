@@ -23,13 +23,13 @@ from neurova.api.endpoints.memory import router as memory_router
 from neurova.cognitive_layers.memory_layer.models import Memory
 from neurova.interfaces.api_standard import ErrorCodes
 
-from tests.auth_headers import pinJwtSecret, signedBearerHeaders
+from tests.auth_headers import pinJwtSecret, bearerHeaders
 from tests.route_table import mountedLeafRoutes
 
 # C1（P3-12，2026-10-08）后写类请求必须有凭证；本文件测的是路由匹配与错误语义，
 # 身份不是被测面，但 DELETE 不带凭证会在路由级写门就 401，压根进不到被测的 handler。
 #
-# 凭证在**用例内**现签（`pinJwtSecret()` + `signedBearerHeaders()`，唯一事实源在
+# 凭证在**用例内**现签（`pinJwtSecret()` + `bearerHeaders()`，唯一事实源在
 # `tests/auth_headers`）。原先这里有三个坑，每个都能单独造出"刚签发的令牌被自己拒 401"：
 #   1. 导入期烘一枚 `WRITE_HDR` —— 密钥是模块全局，别的档一改，这枚令牌就换了签名的另一方；
 #   2. 伪造密钥的那一步若与证书分处两个阶段，先对的会被后改的覆盖（本档实测：
@@ -147,7 +147,7 @@ def env(monkeypatch):
     # `tests/integration/test_memoryFaceRejectsAnonymous.py` 逐条钉。
     # 令牌按"这一轮"现签（先对齐密钥再签）：本档已撤掉导入期烘一枚常量的写法，
     # 密钥是模块全局，别的档一改，导入期那枚令牌就变成由另一方签名、自己拒自己 401。
-    return TestClient(_make_app(), headers=signedBearerHeaders("shadowing-probe")), agent
+    return TestClient(_make_app(), headers=bearerHeaders("shadowing-probe")), agent
 
 
 # ============================================================
@@ -257,7 +257,7 @@ def test_delete_wm_returns_200(env):
     client, agent = env
     pinJwtSecret()   # 先对齐全轮，再现签：凭证与验签门必须同源
     resp = client.delete("/api/v1/memory/wm", params={"agent_id": "agent-1"},
-                         headers=signedBearerHeaders("shadowing-probe"))
+                         headers=bearerHeaders("shadowing-probe"))
     assert resp.status_code == 200, resp.text
     assert resp.json()["code"] == 0
     assert agent.memory_manager.cleared is True
@@ -272,7 +272,7 @@ def test_get_memory_stats_returns_200(env):
 
 def test_get_emotion_types_returns_200():
     """/emotion/types 不得因导入不存在的 EMOTION_WEIGHTS 而 500"""
-    client = TestClient(_make_app(), headers=signedBearerHeaders("shadowing-probe"))
+    client = TestClient(_make_app(), headers=bearerHeaders("shadowing-probe"))
     resp = client.get("/api/v1/memory/emotion/types")
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -294,7 +294,7 @@ def test_delete_memory_detail_returns_200(env):
     client, agent = env
     pinJwtSecret()
     resp = client.delete("/api/v1/memory/mem-2", params={"agent_id": "agent-1"},
-                         headers=signedBearerHeaders("shadowing-probe"))
+                         headers=bearerHeaders("shadowing-probe"))
     assert resp.status_code == 200, resp.text
     assert "mem-2" not in agent.memory_manager._store
 
@@ -317,6 +317,6 @@ def test_delete_unknown_memory_returns_structured_404(env):
     client, _ = env
     pinJwtSecret()
     resp = client.delete("/api/v1/memory/does-not-exist", params={"agent_id": "agent-1"},
-                         headers=signedBearerHeaders("shadowing-probe"))
+                         headers=bearerHeaders("shadowing-probe"))
     assert resp.status_code == 404, resp.text
     assert resp.json()["code"] == ErrorCodes.NOT_FOUND

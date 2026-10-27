@@ -4021,3 +4021,7 @@ tests/integration/test_memoryFaceRejectsAnonymous.py
 # 增强族六条腿的作用域：两库同 id 时 strengthen/forget/batch/import/export/categories 只动指定
 # 那一库，未知 Agent 如实 404，缺省仍回落 default，归属校验照旧（台账 §6-433；逐文件单跑 10 passed）
 tests/integration/test_memoryEnhancementCarriesAgentScope.py
+# 身份取数口「签之前必然对齐」这条不变式：行为格（签完之后才对齐也必须验得过）＋形状格
+# （bearerHeaders 体内必须调对齐口、取数口只剩一个名字，带正检）。它钉掉的是合跑 26 条
+# "刚签的令牌被自己拒"的那一族；工单 docs/04-plans/记忆面测试密钥作用域工单_2026-10-27.md
+tests/unit/api/test_identityHeadersAlignSecretBeforeSigning.py

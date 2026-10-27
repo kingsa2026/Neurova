@@ -30,7 +30,7 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tests.auth_headers import signedBearerHeaders
+from tests.auth_headers import bearerHeaders
 from neurova.cognitive_layers.memory_layer.sleep import MemoryRecord, SleepConsolidation
 from neurova.core.idle_tracker import IdleTimeTracker
 
@@ -47,7 +47,7 @@ def _headers() -> dict:
 
     收口在 `tests/auth_headers.pinJwtSecret()`（轮内唯一事实源），本档只调它。
     """
-    return signedBearerHeaders("tester", username="tester", role="user")
+    return bearerHeaders("tester", username="tester", role="user")
 
 
 class FakeMemoryManager:
