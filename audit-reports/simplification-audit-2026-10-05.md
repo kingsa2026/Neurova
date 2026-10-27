@@ -10737,4 +10737,20 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开（不当自决）**：① **测试侧同根因待一票**：`pinJwtSecret()` 对齐后不复原，使任何"import 期签头"的档在全轮合跑时静默 401——现算命中面是四个已入库记忆档 24 条红；正解是把"轮内密钥"做成 fixture 作用域或让所有档统一用例内现签，属测试基建改动，不在本批顺手扫。② 增强族要不要管理员 agent-wide 通道（与 §6-426 同一条产品线）。③ `getMemoryCategories`／`batchMemoryOperation` 两条前端包装腿**零生产消费者**——本批只补作用域，接线或退役另裁。④ Harmony/Tauri 未验。
     - 空号至 **§6-433**，下批从 **§6-434** 起。本批三笔（`5fc2b106`＋`11ab4ba1`＋本笔）**未推**。
 
+434. **身份取数口改为「先对齐本轮密钥再签」：合跑 26 条「刚签的令牌被自己拒」归零（✅ `57732258` 生产池 0／测试池净 +143）** ✅🟢 —— 按工单 `docs/04-plans/记忆面测试密钥作用域工单_2026-10-27.md` 点单的**甲**落地；同时**闭 §6-433 仍开①**（那一族 24/26 条预存红就是这条根因）。
+    - **根因**：`tests/auth_headers.py` 里两份身份头取数口差一步——`signedBearerHeaders()` 先 `pinJwtSecret()` 对齐再签，`bearerHeaders()` **只签不对齐**；而 `pinJwtSecret()` 的既定口径是"进程内唯一、不复原"（`test_api_auth.py:44` 有理由）。于是任何在 import 期用后者签头的档，都会在别人对齐之后被自己的令牌拒。规矩早就写在 `pinJwtSecret()` 的 docstring 里（「不要在导入期烘一枚令牌——令牌属于"这一轮"，不属于"这个进程"」），**但它是注释，不是会红的闸**。
+    - **现算命中面**：模块级签头 **6 档 / 11 处**；`bearerHeaders` 消费者 18 档 / 34 处，`signedBearerHeaders` 3 档 / 13 处；与 `tests/test_api` 合跑红 **26 条**。
+    - **排除丙的依据（一条不在票面上的真发现）**：泄漏守卫 `tests/unit/api/test_jwtSigningKeyLeakIsGuarded.py:48` 让违规者去调的 `adoptJwtSecretForTests` / `resetJwtSecretToProduction` **全仓 0 处实装**（生产侧 grep 现算 0；测试侧只在该守卫自己的合成样本里出现）。⇒ "改完再复原"是条幽灵路，没有回退口就只能把不变式立在"签之前必然对齐"；顺带记：那枚守卫「改＋复原即放行」的参数化样本验的是一条不存在的合规路径（仍开②）。
+    - **处置**：对齐塞进 `bearerHeaders()` 本身；第二个名字随之退役（教义第 6/7 条：对齐进签名口后它就是同一功能的第二个名字＝第二个事实源），13 处消费者改指唯一取数口。**生产码零改动**（`git diff --stat HEAD -- neurova/` 空）。
+    - **⚠ 一处判读纪律（本批起草时我判错过、按实测改判）**：**401 有两种子形态**——`Invalid or expired token`＝带了令牌但验不过（本族）；`Not authenticated`＝压根没带凭证（§6-429 那道路由级门的形态）。`test_memory_emotion_min_score.py` 单跑那 2 条属后者（它 `_idsAt()` 的 `client.get(...)` 没传 `headers`），**不属本族、不划进本格闭合**，登记为 §6-429 一族的漏扫补账（仍开①）。把两种 401 划成一族，既会误报闭合，也会掩盖真漏掉的那条腿。
+    - **新档 `tests/unit/api/test_identityHeadersAlignSecretBeforeSigning.py`（4 格）**：行为格用既有 API 造确定时序（`pinJwtSecret(sentinel)` → 签 → `pinJwtSecret()` → 打**只挂生产身份门的最小 app**），全程不做 `JWT_SECRET_KEY` 裸赋值（那正是泄漏守卫抓的形态）；两条形状格把「`bearerHeaders` 体内必须调对齐口」与「取数口名字表 `== ["bearerHeaders"]`」钉住并带**正检**（那唯一一份确实自己调 `create_access_token`，否则"只剩一个名字"可能只是大家都没签）；反向格钉幂等与"不许每签一头换一把"。
+    - **红绿灯**：红（pathset stash tag `red-selfproof-jwt-align-before-sign`，撤 `auth_headers.py` ＋三处改指）`3 failed, 1 passed`，原文 `签出的令牌被自己拒：401 {"detail":"Invalid or expired token"}`；绿 逐文件 `4 passed`、身份面回归 `67 passed`、验收选择集本族 **0 failed**。
+    - **宽域 A/B `AB_PASS`**：基线（HEAD 取数口＋本批新判据）**29 failed** / 本树 **0 failed**（198 passed），仅基线红 29 条＝26 污染＋3 新判据，仅本树红 0；**采集告警计数 0**（`comm:`／`not in sorted`／`Binary file`／multibyte 四项）——§6-433 那枚"非 ASCII 用例名打断差集采集"的形态这次是先验过的。
+    - **活体**（本批是测试地基，自证点是"生产签名路未被碰"）：真服务 9527 上，生产 `create_access_token()` 签的令牌 `GET /api/v1/memory?limit=5&agent_id=kai` ⇒ **200、5 行、agent_ids 只有 `kai`**；匿名 ⇒ 401；`Bearer not.a.token` ⇒ 401。另：服务在 §6-433 活体后停过（日志尾部停在 00:20:42 那次探针），已按规范入口起回（监听仍 `127.0.0.1:9527`）。
+    - **⚠ 落笔错一则（form 17 同族，本卷第十五遭）**：提交正文 `57732258` 写「测试池 +162/−**25**＝净 **+137**」，`git show --numstat` 真值是 **测试池 +162/−19＝净 +143**（文档池 +137/−0、总 299/−19）——删除数抄错连带净数错，且我把文档池的 137 错当成测试池净数。已入库不改写，正确值落在本格。根因仍是**先落字再去数**。
+    - **净 LOC**：生产池 **0**；测试池 **+162/−19＝净 +143**（取数口 +12/−6、三处改指 +13/−13 纯改名、入册 +4/−0、判据新档 +133）；文档池 +137/−0（工单，状态已改"已按甲实施"）。入册 `protected_tests.txt` 有效条目现算 **733**；跟踪与登记史守卫复跑通过。
+    - **仍开（不当自决）**：① `test_memory_emotion_min_score.py::_idsAt()` 漏带凭证（§6-429 一族漏扫，2 条红）；② 泄漏守卫的放行分支指向 0 实装的幽灵 API ⇒ 要么补那两枚函数、要么改它的话术与样本（改它的话术会让"改＋复原放行"这一格失去被测对象，需一并重设）；③ 工单里的**乙**（6 档 11 处 import 期签头改为用例内现签）作加固另拍——甲 已让这条路走不歪，乙 是对时序免疫的加深；④ 前端 `requiresAuth` 相关两票（未登录可见骨架、`ChannelIdentityPanel` 的 401 文案）与增强族管理员通道票照 §6-431/§6-433 待裁。
+    - 空号至 **§6-434**，下批从 **§6-435** 起。本批一笔（`57732258`）＋ §6-433 三笔共 **4 笔未推**。
+
+
 
