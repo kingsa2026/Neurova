@@ -108,16 +108,29 @@ def testChatStreamDelegatesToChatInsteadOfOpeningASecondPipeline():
     )
 
 
-def testFailedTurnLandingDoesNotOpenASecondSessionWriter():
-    """落点必须复用既有单点，不许在失败路径上另写一份会话落盘代码。"""
-    src = pathlib.Path("neurova/agent/chat_pipeline.py").read_text(encoding="utf-8")
-    tree = ast.parse(src)
-    fn = next(
-        (n for n in ast.walk(tree)
-         if isinstance(n, ast.AsyncFunctionDef) and n.name == "_landFailedTurn"),
+def _landingImpl() -> ast.AsyncFunctionDef:
+    """落点实装的 AST 节点：整块已按 perf gate 的口径抽到独立模块。
+
+    `chat_pipeline.py` 是每轮对话必经的热文件、尺寸受 `scripts/ci/perf_gate.py` 的
+    `hot-path-file-size` 约束，门禁自己写的处置就是"新逻辑抽到独立模块后再接线"。
+    抽走后热文件里只留同名薄委托，实现搬到 `neurova/agent/failed_turn_landing.py`；
+    判据跟着实装走，否则这道常驻闸就再也看不见落点内部到底调了谁。
+    """
+    src = pathlib.Path("neurova/agent/failed_turn_landing.py").read_text(encoding="utf-8")
+    node = next(
+        (n for n in ast.walk(ast.parse(src))
+         if isinstance(n, ast.AsyncFunctionDef) and n.name == "landFailedTurn"),
         None,
     )
-    assert fn is not None, "失败落点实装不在了"
+    assert node is not None, (
+        "失败落点实装不在了（`agent/failed_turn_landing.py::landFailedTurn`）"
+    )
+    return node
+
+
+def testFailedTurnLandingDoesNotOpenASecondSessionWriter():
+    """落点必须复用既有单点，不许在失败路径上另写一份会话落盘代码。"""
+    fn = _landingImpl()
     called = [
         getattr(n.func, "attr", "") or getattr(n.func, "id", "")
         for n in ast.walk(fn) if isinstance(n, ast.Call)
