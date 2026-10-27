@@ -35,7 +35,7 @@ from neurova.api.endpoints.memory import router as memoryRouter
 from neurova.api.error_handlers import register_error_handlers
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 from tests import ast_scan
-from tests.auth_headers import pinJwtSecret, signedBearerHeaders
+from tests.auth_headers import pinJwtSecret, bearerHeaders
 
 ENHANCE = "/api/v1/memory-enhancement"
 ENHANCE_SOURCE = Path("neurova/api/endpoints/memory_enhancement.py")
@@ -49,11 +49,11 @@ def env(tmp_path, monkeypatch):
     **不复原**（那是它自己写明的口径），所以模块级 import 期签的头会在全轮跑时变成
     「刚签的令牌被自己拒」。仓内同一问题的正解就在
     `tests/test_api/test_memory_route_shadowing.py`：先 `pinJwtSecret()` 对齐，再
-    `signedBearerHeaders()` 现签——签名与验签必须同源。
+    `bearerHeaders()` 现签——签名与验签必须同源。
     """
     pinJwtSecret()
-    speaker = signedBearerHeaders("speaker-1", user_id="speaker-1", neuser_id="speaker-1")
-    other = signedBearerHeaders("alice", user_id="alice", neuser_id="ne-alice")
+    speaker = bearerHeaders("speaker-1", user_id="speaker-1", neuser_id="speaker-1")
+    other = bearerHeaders("alice", user_id="alice", neuser_id="ne-alice")
 
     managers = {
         agent: MemoryManager(db_path=str(tmp_path / f"{agent}.db"), agent_id=agent)
