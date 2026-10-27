@@ -38,6 +38,15 @@ if getattr(response, "tool_calls", None):
 被删的消费者确实恒假，**不能恢复**（恢复即复活一处死分支）。
 正确处置是删掉声明本身：护栏本来就没有存在的必要，因为 `while` 条件已经
 排除了所有带 `tool_calls` 的轮次 —— 续写段从一开始就走不到"工具轮次"这件事。
+
+## 判据面跟着实现走（2026-10 搬迁）
+
+续写循环整块搬进了 `neurova/agent/continuation_rounds.py`（`perf-gate` 的
+`hot-path-file-size` 把 `chat_pipeline.py` 钉在 160000B），管线只剩薄委托。
+本判据的**判据面**因此从 `chat_pipeline._auto_continue` 改为该模块的
+`runContinuationRounds`——判据要钉的是"同一函数里一条活护栏一条死残骸"这个事实，
+函数搬了、事实没变，钉住旧位置只会让判据静默空转。委托关系由
+`test_autoContinueExtractedToOwnModule.py` 反向钉住。
 """
 from __future__ import annotations
 
@@ -55,6 +64,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from scripts.ci import tool_loop_deadline_ledger as ledger  # noqa: E402
 
 PIPELINE = PROJECT_ROOT / "neurova" / "agent" / "chat_pipeline.py"
+#: 续写循环的**实现**所在地（管线只留薄委托）；本文件所有 AST 判据都钉这里。
+ROUNDS = PROJECT_ROOT / "neurova" / "agent" / "continuation_rounds.py"
 
 #: 台账（`scripts/ci/toolLoopDeadlines.txt`）登记为 `no_consumer` 的条目。
 #: 登记名必须与台账模块（`scripts/ci/tool_loop_deadline_ledger.py`）的登记表一致——
@@ -67,11 +78,11 @@ LEDGER_ENTRIES = ("MAX_TOOL_CALL_ROUNDS",)
 
 
 def _auto_continue_node() -> ast.AST:
-    tree = ast.parse(io.open(PIPELINE, encoding="utf-8").read())
+    tree = ast.parse(io.open(ROUNDS, encoding="utf-8").read())
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "_auto_continue":
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "runContinuationRounds":
             return node
-    pytest.fail("chat_pipeline._auto_continue 不见了——本判据的判据面失效，禁止空转通过")
+    pytest.fail("continuation_rounds.runContinuationRounds 不见了——本判据的判据面失效，禁止空转通过")
 
 
 def _nameAccesses(function: ast.AST) -> dict:
@@ -101,15 +112,22 @@ class TestLedgerEntriesAreGone:
         )
 
     def test_theFunctionStillHasLiveBudgetConstants(self):
-        """反向控制：同函数里活着的上界常量必须仍在且确实被读。
+        """反向控制：活着的上界必须仍在且确实被读。
 
-        若把这条也一起删了，下面的断言会失去判别力（判据退化成"删干净就算过"）。
+        若把这条也一起删了，上面的断言会失去判别力（判据退化成"删干净就算过"）。
+
+        搬迁后的形态：`MAX_CONTINUE_ROUNDS` 是模块级常量、在实现里被 `while` 读；
+        总字数上界由 `max_tokens × TOTAL_CHARS_MULTIPLIER` 现算（`MAX_TOTAL_CHARS`
+        作为函数内局部量已随"预算取值"一起收口到 `_totalCharsBudget`）。两者仍须
+        **真的被读**——只声明不读就是本条要抓的残骸。
         """
-        accesses = _nameAccesses(_auto_continue_node())
-        for name in ("MAX_CONTINUE_ROUNDS", "MAX_TOTAL_CHARS"):
-            entry = accesses.get(name, {})
-            assert entry.get("Store") and entry.get("Load"), (
-                f"`{name}` 应当既是声明又有读取点（它是活护栏）；实测 {entry}。"
+        moduleSource = io.open(ROUNDS, encoding="utf-8").read()
+        for name in ("MAX_CONTINUE_ROUNDS", "TOTAL_CHARS_MULTIPLIER"):
+            assert name in moduleSource, f"`{name}` 的声明不见了（它是活护栏的上界来源）"
+        for name in ("MAX_CONTINUE_ROUNDS", "max_total_chars"):
+            entry = _nameAccesses(_auto_continue_node()).get(name, {})
+            assert entry.get("Load"), (
+                f"`{name}` 在续写实现里没有读取点（它是活护栏）；实测 {entry}。"
                 "本判据不接受「把活常量也一起删掉」式的通过。"
             )
 
@@ -173,7 +191,7 @@ class TestLedgerScopeStaysBound:
 
     def test_everyScopedNameIsStillAbsentFromThePipeline(self):
         """本批的处置事实：这些名字在生产链路上已零出现（不只是本函数）。"""
-        source = io.open(PIPELINE, encoding="utf-8").read()
+        source = io.open(ROUNDS, encoding="utf-8").read() + io.open(PIPELINE, encoding="utf-8").read()
         lingering = [name for name in (*LEDGER_ENTRIES, "tool_call_rounds") if name in source]
         assert not lingering, (
             f"这些名字又回到了 chat_pipeline：{lingering}——本批已按「删声明本身」处置"
