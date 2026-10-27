@@ -249,13 +249,27 @@ main:
           # 中断且从不进入那一段）。`-u` 关掉解释器缓冲、`2>&1` 把 stderr 并进管道，两个一起
           # 才是「每行都立刻可见」。
           script: |
-            TESTS=$(grep -v '^#' scripts/ci/protected_tests.txt | tr '\n' ' ')
+            # 清单**逐行**读到位置参数上，一条也不许被 shell 再加工。
+            # 构建 `cnb-1f0-1k5uonjt2-003` 实读：此前 `TESTS=$(grep … | tr '\n' ' ')`
+            # 把清单压成一行交给 `$TESTS`，`$(...)` 的结果又被 shell 切了一次词——
+            # 清单里一条空行、一个空格就能让条目错位，而 pytest 从不说
+            # 「你列的文件我少跑了几个」，它只跑收到的那部分。
+            # 故：注释行与空行滤掉 → 每个路径逐行读进 `set --` → pytest 收 `"$@"`；
+            # 找不到的路径当场报错退出（不许静默少跑）。
+            set --
+            while IFS= read -r entry; do
+              [ -n "$entry" ] || continue
+              [ -f "$entry" ] || { echo "❌ 清单点名了不存在的文件：$entry"; exit 1; }
+              set -- "$@" "$entry"
+            done <<EOF
+            $(grep -v '^#' scripts/ci/protected_tests.txt | grep -v '^[[:space:]]*$')
+            EOF
             MARK=/tmp/pytest_protected.rc
             rm -f "$MARK"
             # `{ ...; echo $? > "$MARK"; }` 里的 `$?` 是 **pytest** 的退出码（它紧跟 pytest，
             # 中间没有别的命令），`tee` 只负责转发与落盘。整段的退出码因此可判：
             # 标记在 ⇒ 取标记里的值；标记不在 ⇒ pytest 根本没跑起来，按 1 收（不许静默绿）。
-            { python -u -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS \
+            { python -u -m pytest -q --cov --cov-report=term --cov-fail-under=60 "$@" \
                 2>&1; echo $? > "$MARK"; } | tee /tmp/pytest_protected.log
             RC=$(cat "$MARK" 2>/dev/null || echo 1)
             echo "── pytest 退出码: $RC（日志全文 /tmp/pytest_protected.log）"
