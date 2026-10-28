@@ -78,6 +78,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法在 `ast_scan.protectedSubsetEntries`
+from tests.ast_scan import parseSource  # noqa: E402  解析的唯一出口（`ast.parse` 只许出现在 `tests/ast_scan.py`）
 
 #: 认作"扫描落点"的共享预算入口（枚举与解析都在预算内完成）。
 SHARED_SCAN_ENTRIES = {
@@ -442,7 +443,7 @@ def _faceReadings(root: pathlib.Path, manifest: list) -> dict:
         except OSError:
             continue
         try:
-            tree = ast.parse(source)
+            tree = parseSource(source)
         except SyntaxError:
             continue
         stamp = path.stat()
@@ -684,7 +685,7 @@ def _moduleFacts(path: pathlib.Path, anchor: pathlib.Path) -> frozenset:
         _MODULE_LIST_NAMES[key] = frozenset()
         return _MODULE_LIST_NAMES[key]
     try:
-        tree = ast.parse(source)
+        tree = parseSource(source)
     except SyntaxError:
         _MODULE_LIST_NAMES[key] = frozenset()
         return _MODULE_LIST_NAMES[key]
@@ -1243,7 +1244,7 @@ def _readerCounts(root: pathlib.Path, manifest: list) -> dict:
         if not rel.endswith(".py") or not path.is_file():
             continue
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+            tree = parseSource(path.read_text(encoding="utf-8", errors="replace"))
         except (SyntaxError, OSError):
             continue
         sites = _manifestReadSites(tree, _constTable(tree), root, selfPath=path.resolve(),
@@ -1325,7 +1326,7 @@ def test_readerPredicateJudgesEachShape(tmp_path, label, source, expectSites):
     (tmp_path / "sub" / "items.txt").write_text("a.py\n", encoding="utf-8")
     sample = tmp_path / "tests" / "unit" / "ci" / "sample.py"
     sample.write_text(source, encoding="utf-8")
-    tree = ast.parse(source)
+    tree = parseSource(source)
     saved = MANIFEST_FILE_NAME
     MANIFEST_FILE_NAME = "items.txt"
     try:
@@ -1861,7 +1862,7 @@ def test_faceRulesPinDepthAndWrongRoots(tmp_path, rel, source, label, expectOffe
     ("`ast.walk(tree)` 不是文件扫描：别把它算成落点",
      "import ast\n\n\n"
      "def test_shape(source):\n"
-     "    nodes = list(ast.walk(ast.parse(source)))\n"
+     "    nodes = list(ast.walk(parseSource(source)))\n"
      "    assert nodes\n", False),
     ("循环里累加出来的计数器算自证",
      "from tests import ast_scan\n"
@@ -1915,7 +1916,7 @@ def test_lookupCostStaysLinearInStatementCount():
     201 次／句（同一份档、同一条命令），阈值取 60——落在两读数之间，两端各有两倍以上余量。
     """
     selfPath = pathlib.Path(__file__).resolve()
-    tree = ast.parse(selfPath.read_text(encoding="utf-8"))
+    tree = parseSource(selfPath.read_text(encoding="utf-8"))
     scoped, env = _allBindings(tree), _importEnv(tree, PROJECT_ROOT, selfPath)
     consts, helpers = _constTable(tree), _helpersOf(tree)
     statements = sum(1 for n in ast.walk(tree)

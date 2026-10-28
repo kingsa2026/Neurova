@@ -273,13 +273,19 @@ main:
               rm -f "$MARK"
               # `{ ...; echo $? > "$MARK"; }` 里的 `$?` 是 **pytest** 的退出码（它紧跟 pytest，
               # 中间没有别的命令），`tee` 只负责转发与落盘。
+              # 单档墙 `--timeout 300`（5m）压的是**墙钟余量，不是判据**：三片各起一个进程后
+              # 实测 473s / 664s / 472s（= 11m，含进程启动与收集期），最慢一片若把整段压在一格
+              # 死循环上，留给它的余量只有 5 分钟量级，1500s 那条墙（25m）到点时 stage 墙
+              # 早已先说话——**余量对不上的时候，先说真话的是整段强杀**，读的人只能猜
+              # （同一形态见台账 §6-418）。故单档墙取 300s：仍严格窄于 stage 墙 45m，
+              # 且窄于分片后单片实测耗时的 1.5 倍——真慢一格由它诚实地记 `Timeout`。
+              # 片号进文件名，免得几片写同一份 `./.coverage` 互相覆盖。
               # `COVERAGE_FILE` 指进 `data/coverage/`：coverage 的缺省落点是 `./.coverage`，
               # 而合并那一步（`scripts/ci/coverage_report.py --data-dir data/coverage`）只认那个目录。
               # 两处各猜一次路径就是"跑测说全绿、合并说没数据"——构建 `cnb-4gd-1k5us1o1q`
               # 实测：stage 2 全绿（2737 passed），stage 3 报 `没有找到任何覆盖率数据`。
-              # 片号进文件名：一次构建里三片各写一份，同名会互相覆盖、合并后只剩最后一片。
               { COVERAGE_FILE="data/coverage/.coverage.$(basename "$shard" .txt)" \
-                  python -u -m pytest -q --timeout 1500 --cov --cov-report= --cov-fail-under=0 "$@" \
+                  python -u -m pytest -q --timeout 300 --cov --cov-report= --cov-fail-under=0 "$@" \
                   2>&1; echo $? > "$MARK"; } | tee "/tmp/$(basename "$shard" .txt).log"
               RC=$(cat "$MARK" 2>/dev/null || echo 1)
               echo "── ${shard} pytest 退出码: $RC"
@@ -287,7 +293,7 @@ main:
               set --
             done
             # 索引即事实源：片号的派生、条目的落点都由 `scripts/ci/protected_tests.txt` 说话，
-            # 判据 `tests/unit/ci/test_protectedSubset_shards.py` 与
+            # 判据 `tests/unit/ci/test_protected_subset_shards.py` 与
             # `test_protectedSubsetBudgetCoversItsRealCost.py` 都按这一行认出本格；
             # 读法不另抄一份清单（重定向到 /dev/null，只留这条结构特征）。
             echo "受保护子集索引：scripts/ci/protected_tests.txt（入口 $(wc -l < scripts/ci/protected_tests.txt) 行）"
