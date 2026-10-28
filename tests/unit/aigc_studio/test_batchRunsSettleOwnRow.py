@@ -23,6 +23,7 @@ import json
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 pytestmark = [pytest.mark.timeout(90)]
 
@@ -184,7 +185,7 @@ class TestRunIdIsNotDiscarded:
     def _discardedRunIds(self, src: str) -> list[str]:
         """`lambda _runId: ...` 且体内没引用该形参 = 句柄被丢掉。"""
         hits = []
-        for node in ast.walk(ast.parse(src)):
+        for node in ast.walk(parseSource(src)):
             if not isinstance(node, ast.Lambda):
                 continue
             names = [a.arg for a in node.args.args]

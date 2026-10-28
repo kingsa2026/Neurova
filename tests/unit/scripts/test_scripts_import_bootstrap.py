@@ -35,6 +35,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 # 把仓库根放进 sys.path 的形态：层数反推（parents[N] / ".."*N）或根常量。
 _ROOT_TEXT_MARKERS = ("parents[", "REPO_ROOT", "PROJECT_ROOT", "dirname(__file__)")
@@ -183,4 +184,4 @@ class TestScriptsCanBeRunByPath:
 
 def _bootstrapLine_obj(path: Path) -> int | None:
     """测试用：直接对临时文件断言扫描器判定。"""
-    return _bootstrapLine(ast.parse(path.read_text(encoding="utf-8")))
+    return _bootstrapLine(parseSource(path.read_text(encoding="utf-8")))

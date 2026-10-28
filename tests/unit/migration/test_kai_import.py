@@ -7,7 +7,7 @@
    统一带显式偏移），且会话内按时间升序。
 2. 记忆导入后 MemoryManager 可加载（枚举合法、agent_id 隔离正确）。
 3. 幂等：重复执行不产生重复数据。
-4. 身份文件落位 workspace/memory/soul.md（_load_identity 的真实加载位）。
+4. 身份文件落位 `<agent_root>/soul.md`（`_load_identity` 的真实加载位）。
 
 测试全部使用 tmp_path 伪造的迷你 Kai 源数据，不触碰真实 Kai 库。
 """

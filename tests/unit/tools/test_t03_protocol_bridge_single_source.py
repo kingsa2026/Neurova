@@ -57,6 +57,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.ci import tool_loop_deadline_ledger as ledger  # noqa: E402
+from tests.ast_scan import parseSource
 
 #: 判别单一事实源所在模块。
 DETECTOR_MODULE = PROJECT_ROOT / "neurova/tool_layers/openai_schema.py"
@@ -78,7 +79,7 @@ class TestDetectionHasASingleSource:
 
     def test_detectorIsDefinedInTheSchemaModule(self):
         """判别函数必须在归一器模块里，且是**模块级纯函数**（两边都能调）。"""
-        tree = ast.parse(DETECTOR_MODULE.read_text(encoding="utf-8"))
+        tree = parseSource(DETECTOR_MODULE.read_text(encoding="utf-8"))
         found = [
             node for node in tree.body
             if isinstance(node, ast.FunctionDef) and node.name == DETECTOR_NAME
@@ -135,7 +136,7 @@ class TestNoSecondDetectionTable:
         所以真正的红线是：函数体里出现 `if <某个标识键> in ...` 这类**按形态
         自己判**的比较。
         """
-        tree = ast.parse(caller.read_text(encoding="utf-8"))
+        tree = parseSource(caller.read_text(encoding="utf-8"))
         offenders = []
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):

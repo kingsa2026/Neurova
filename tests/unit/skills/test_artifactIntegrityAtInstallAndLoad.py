@@ -28,6 +28,7 @@ import pytest
 from neurova.security import artifact_digest as AD
 from neurova.skills.skill_install_gate import reset_install_gate_scanner
 from neurova.skills.skill_service import SkillService
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -66,7 +67,7 @@ def _ledgerEntryDicts(source: str):
     键的写法两种都要认：字面量 `"artifact_digest"` 与常量引用 `artifact_digest.DIGEST_FIELD`
     ——只认字面量的探测器会把"用了常量"这份**正确**写法报成没钉，那种误报会让人把守卫关掉。
     """
-    tree = ast.parse(source)
+    tree = parseSource(source)
     guardedKeys = _guardedPinKeys(tree)
     out = []
     for node in ast.walk(tree):

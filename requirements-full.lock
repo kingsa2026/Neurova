@@ -254,7 +254,21 @@ networkx==3.6.1
     # via
     #   pymupdf
     #   torch
-numpy==2.5.3
+numpy==2.4.6 ; python_full_version < '3.12'
+    # via
+    #   -r requirements.txt
+    #   hnswlib
+    #   onnxruntime
+    #   opencv-python
+    #   pymupdf
+    #   rapidocr-onnxruntime
+    #   scikit-learn
+    #   scipy
+    #   sentence-transformers
+    #   shapely
+    #   soundfile
+    #   transformers
+numpy==2.5.3 ; python_full_version >= '3.12'
     # via
     #   -r requirements.txt
     #   hnswlib
@@ -345,6 +359,7 @@ passlib==1.7.4
 pillow==13.0.0
     # via
     #   -r requirements.txt
+    #   pyscreeze
     #   python-pptx
     #   rapidocr-onnxruntime
     #   reportlab
@@ -502,7 +517,11 @@ safetensors==0.8.0
     # via transformers
 scikit-learn==1.9.1
     # via sentence-transformers
-scipy==1.18.1
+scipy==1.17.1 ; python_full_version < '3.12'
+    # via
+    #   scikit-learn
+    #   sentence-transformers
+scipy==1.18.1 ; python_full_version >= '3.12'
     # via
     #   scikit-learn
     #   sentence-transformers

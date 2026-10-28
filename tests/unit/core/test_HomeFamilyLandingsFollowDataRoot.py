@@ -42,6 +42,7 @@ from tests import ast_scan
 
 import neurova
 from neurova.core import data_root
+from tests.ast_scan import parseSource
 
 NEUROVA_DIR = Path(neurova.__file__).resolve().parent
 #: 主目录族落点（§6-203 那张表里的真 home 两处 + rbac）
@@ -53,7 +54,7 @@ FAMILIES = {
 
 
 def _calledNames(relPath: str) -> set:
-    tree = ast.parse((NEUROVA_DIR / relPath).read_text(encoding="utf-8"))
+    tree = parseSource((NEUROVA_DIR / relPath).read_text(encoding="utf-8"))
     names = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
@@ -74,7 +75,7 @@ def testNoFamilyStillSpellsTheHomeLanding():
     offenders = []
     for rel in list(FAMILIES) + ["benchmark/__init__.py", "image_pipeline/__init__.py"]:
         path = NEUROVA_DIR / rel
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        tree = parseSource(path.read_text(encoding="utf-8"))
         hit = any(isinstance(n, ast.Constant) and isinstance(n.value, str)
                   and (n.value == ".neurova" or n.value.startswith(".neurova/"))
                   for n in ast.walk(tree))
@@ -131,7 +132,7 @@ def _relativeHomeLandingConstants(relPath: str) -> list:
     那是**交代来历**、不是落点。按词判会让哨兵被自家文档撞红（本仓这一形已栽过两次），
     所以取 AST 的 `Constant` 且只认"字符串本身以 `.neurova/` 开头"——真·裸相对默认值正是这个形状。
     """
-    tree = ast.parse((NEUROVA_DIR / relPath).read_text(encoding="utf-8", errors="replace"))
+    tree = parseSource((NEUROVA_DIR / relPath).read_text(encoding="utf-8", errors="replace"))
     hits = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and isinstance(node.value, str) \

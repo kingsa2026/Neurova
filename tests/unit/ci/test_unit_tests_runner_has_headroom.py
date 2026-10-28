@@ -74,9 +74,40 @@ def _pipelines() -> dict:
 
 
 def _protectedSubsetEntries(path: Path | None = None) -> int:
-    """受保护子集的真条目数（跳过注释与空行，与 .cnb.yml 里的 grep 同口径）。"""
-    lines = io.open(path or PROTECTED, encoding="utf-8").read().splitlines()
+    """**单进程**要一次装下的条目数。
+
+    分片之后这个数不再是索引总量：每个片各起一个进程，峰值随片内条目数走。
+    故取**最重那一片**——它是唯一会去撞 137 的那一场，拿索引总量算会把需求放大三倍
+    （那是另一个方向的失真：读数虚高，改配置的理由也跟着虚高）。
+    片号的事实源是目录里有哪几片（与 `.cnb.yml` 的通配派生同一口径，不手抄 `1 2 3`）。
+    """
+    if path is not None:
+        return _countEntries(path)
+    shards = sorted((PROJECT_ROOT / "scripts" / "ci").glob("protected_tests.*.txt"))
+    shards = [s for s in shards if re.fullmatch(r"protected_tests\.\d+\.txt", s.name)]
+    # 面自证（`tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py` 的面自证棘轮）：
+    # 这一次枚举就是本档的扫描面，零片时下面那句 `max(...)` 会空序列报错、而不是"零命中恒绿"，
+    # 但读数本身要被**断言**出来——根被改窄时「没命中」与「没扫到」必须长得不一样。
+    assert len(shards) >= 1, f"scripts/ci/ 下一个分片清单都没有（现读 {len(shards)}）——受保护子集没在跑"
+    heaviest = max(_countEntries(s) for s in shards)
+    assert heaviest > 0, "最重那一片现读 0 条目——清单被清空或读法变了"
+    return heaviest
+
+
+def _countEntries(path: Path) -> int:
+    """清单的真条目数（跳过注释与空行，与 .cnb.yml 里的 grep 同口径）。"""
+    lines = io.open(path, encoding="utf-8").read().splitlines()
     return len([line for line in lines if line.strip() and not line.strip().startswith("#")])
+
+
+def _isSubsetStage(stage: dict) -> bool:
+    """是不是跑受保护子集的那一段。
+
+    分片之后命令里认的是**分片通配**（`protected_tests.<N>.txt`，作业按目录派生），
+    不再是单一清单文件名；索引名仍收，读法一处（`scripts/ci/protected_tests` 前缀）。
+    """
+    script = str(stage.get("script", ""))
+    return "protected_tests" in script and "pytest" in script
 
 
 def _unitTestPipeline(pipelines: dict | None = None) -> dict:
@@ -96,9 +127,7 @@ def _cpus(pipe: dict) -> int:
 def _coverageStageTimeoutSeconds(pipe: dict) -> int:
     """受保护子集那一段的 `timeout`（秒）。`90m` / `5400s` 两种写法都收。"""
     for stage in pipe.get("stages") or []:
-        if not isinstance(stage, dict):
-            continue
-        if "protected_tests.txt" not in str(stage.get("script", "")):
+        if not isinstance(stage, dict) or not _isSubsetStage(stage):
             continue
         raw = str(stage.get("timeout", "")).strip()
         match = re.fullmatch(r"(\d+)([smh])", raw)
@@ -108,7 +137,7 @@ def _coverageStageTimeoutSeconds(pipe: dict) -> int:
         )
         scale = {"s": 1, "m": 60, "h": 3600}[match.group(2)]
         return int(match.group(1)) * scale
-    raise AssertionError("unit-tests 里找不到跑受保护子集的那一段（protected_tests.txt）")
+    raise AssertionError("unit-tests 里找不到跑受保护子集的那一段（protected_tests）")
 
 
 class TestUnitTestLegContainerFitsItsOwnSubset:
@@ -127,17 +156,23 @@ class TestUnitTestLegContainerFitsItsOwnSubset:
             "要么抬 cpus，要么把重量级档移出子集——别靠重跑碰运气。"
         )
 
-    def testDetectorIsNotVacuous(self, tmp_path):
-        """反向控制：cpus 掉回 4 时必须咬得住（判定不是对某份固件的快照）。"""
-        pipes = _pipelines()
-        name = [n for n in pipes if n.startswith("unit-tests")][0]
-        shrunken = {"unit-tests": dict(pipes[name], runner={"tags": "x", "cpus": 4})}
+    def testDetectorIsNotVacuous(self):
+        """反向控制：把供给压到需求以下时必须咬得住（判定不是对某份固件的快照）。
+
+        反向控制的**形状要跟着判据的口径走**：分片之后单进程要装的是「最重那一片」
+        （238 档），需求约 5.7GiB——8GiB 如今确实够用，那是分片修好的结果，不是门槛软化。
+        仍拿「4 核 8GiB 必须红」当反证，等于钉住了被修掉的那一版配置。
+        故这里按需求现算一个**确实不够**的供给（需求的 0.8），它必须被判红；
+        再证 8 核 16GiB 被判绿——否则判据是「全红」，同样没有说话。
+        """
         entries = _protectedSubsetEntries()
         needed = (BASE_GIB + entries * GIB_PER_ENTRY) * MEMORY_HEADROOM
-        assert 4 * GIB_PER_CPU < needed, (
-            "反向控制失效：4 核 8GiB 现在已被判为够用，说明门槛被改软了。"
+        undersupplied = int(needed * 0.8 / GIB_PER_CPU)
+        assert undersupplied * GIB_PER_CPU < needed, "反向控制自证失败：算出来的供给并不欠账"
+        assert 8 * GIB_PER_CPU >= needed, (
+            f"现行 8 核 16GiB 已装不下最重那一片（需 {needed:.1f}GiB）——"
+            "这才是要人看的那一格：要么抬 cpus，要么把重量级档移出子集"
         )
-        assert _cpus(shrunken["unit-tests"]) == 4
 
 
 class TestUnitTestLegWallclockIsABudgetNotAWindow:
@@ -171,7 +206,7 @@ class TestUnitTestLegWallclockIsABudgetNotAWindow:
         name = [n for n in pipes if n.startswith("unit-tests")][0]
         pipe = pipes[name]
         stages = [
-            dict(stage, timeout="5m") if "protected_tests.txt" in str(stage.get("script", "")) else stage
+            dict(stage, timeout="5m") if _isSubsetStage(stage) else stage
             for stage in pipe["stages"]
         ]
         assert _coverageStageTimeoutSeconds(dict(pipe, stages=stages)) == 300

@@ -5,7 +5,7 @@ r"""live-verify（批 59）：那只随包内置的真资产包，走**用户点
 
   ① 暂存目录名不再嵌整段 skill_id（Windows 260 预算被它白吃 24 字符 ⇒ 真入口报 500）
   ② `subprocess_call` 改判命令形状（argv 列表降 low 报告项；字符串首参照旧 high）——用户裁甲
-  ③ 包内 `scripts/package_check.py` 的裸名 `compile(...)` 换成等价 `ast.parse(...)`
+  ③ 包内 `scripts/package_check.py` 的裸名 `compile(...)` 换成等价 `parseSource(...)`
 
 真物：`create_app()` + `TestClient` + 真 JWT 之外的真身份覆盖（`neurova.api.deps.get_current_user`），
 数据根经 `_liveVerifyIsolation.isolatedDataRoot()` 单点隔离；跑完复证仓内 `data/` 未被写入。
@@ -26,6 +26,7 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
+from tests.ast_scan import parseSource
 from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
 
 ROOT = isolatedDataRoot(prefix="neurovaAssetB59")

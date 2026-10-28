@@ -30,6 +30,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 
 REPO = Path(__file__).resolve().parents[3]
@@ -108,7 +109,7 @@ class TestFallbackEngineCallIsGoverned:
 
         钉的是**代码形态**（调的是谁、有没有就地 new 一个引擎自己扫），不钉词。
         """
-        tree = ast.parse(TOOL_LAYERS.read_text(encoding="utf-8"), filename=str(TOOL_LAYERS))
+        tree = parseSource(TOOL_LAYERS.read_text(encoding="utf-8"), filename=str(TOOL_LAYERS))
         endpoint = next(n for n in ast.walk(tree)
                         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
                         and n.name == "execute_tool")
@@ -125,7 +126,7 @@ class TestFallbackEngineCallIsGoverned:
 class TestEngineNoLongerPretendsToAdjudicate:
     def testToolEngineHasNoGuardSeam(self):
         """门面退役：形参、属性、那段检查与那个恒 safe 的兜底类，一处不剩。"""
-        tree = ast.parse(TOOL_ENGINE.read_text(encoding="utf-8"), filename=str(TOOL_ENGINE))
+        tree = parseSource(TOOL_ENGINE.read_text(encoding="utf-8"), filename=str(TOOL_ENGINE))
         init = next(n for n in ast.walk(tree)
                     if isinstance(n, ast.FunctionDef) and n.name == "__init__"
                     and any(getattr(a, "arg", "") == "self" for a in n.args.args)
@@ -176,7 +177,7 @@ class TestEngineNoLongerPretendsToAdjudicate:
             "属性访问": "g = tool_engine.DefaultGuard\n",
         }
         for expected, source in forms.items():
-            tree = ast.parse(source)
+            tree = parseSource(source)
             found = {f for n in ast.walk(tree) if (f := _nameUseForm(n, "DefaultGuard"))}
             assert found == {expected}, f"{expected} 那形的取法判不出来：{found}"
 
@@ -185,13 +186,13 @@ class TestEngineNoLongerPretendsToAdjudicate:
             "被取的其它属性": "g = tool_engine.guard\n",
         }
         for label, source in neighbours.items():
-            found = [f for n in ast.walk(ast.parse(source)) if (f := _nameUseForm(n, "DefaultGuard"))]
+            found = [f for n in ast.walk(parseSource(source)) if (f := _nameUseForm(n, "DefaultGuard"))]
             assert not found, f"{label} 被误判成取用 DefaultGuard：{found}"
 
     def testOldEngineGuardCellsRetiredNotLeftZombie(self):
         """旧契约的格子必须跟着退役：留着就断言"引擎该自己裁决"这条被推翻的规矩。"""
         source = CHOKE_FILE.read_text(encoding="utf-8")
-        tree = ast.parse(source, filename=str(CHOKE_FILE))
+        tree = parseSource(source, filename=str(CHOKE_FILE))
         zombie = [n.name for n in ast.walk(tree)
                   if isinstance(n, ast.ClassDef) and n.name == "TestToolGuardWired"]
         assert not zombie, (

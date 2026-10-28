@@ -39,6 +39,7 @@ from neurova.api.endpoints import settings as SETTINGS
 from neurova.core import app_settings as APPS
 from neurova.core import settings_manager as SM
 from neurova.core import user_workspace as UW
+from tests.ast_scan import parseSource
 from tests.auth_headers import overrideIdentity
 
 ADMIN = {"user_id": "a1", "username": "a1", "role": "admin"}
@@ -61,7 +62,7 @@ def _languageDefaultEntries(files) -> List[str]:
     """
     hits: List[str] = []
     for path in files:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        tree = parseSource(path.read_text(encoding="utf-8"))
         rel = path.name
         for node in ast.walk(tree):
             if isinstance(node, ast.Dict):

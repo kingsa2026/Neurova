@@ -21,6 +21,7 @@ from tests import ast_scan
 
 import neurova
 from neurova.core import agent_workspaces
+from tests.ast_scan import parseSource
 
 NEUROVA_DIR = Path(neurova.__file__).resolve().parent
 REPO = Path(neurova.__file__).resolve().parents[1]
@@ -50,7 +51,7 @@ def _spellingsInCode(code: str) -> list:
     （本档第一版就是这么假干净的：只数到 manager 那一处）。文件级取 `and`、行号级取 `or`，
     两种写法都认，同时不牵连那些只出现 `"memory"` 一段的别的目录。
     """
-    tree = ast.parse(code)
+    tree = parseSource(code)
     chains = list(_divideChains(tree))
     allConsts: set = set()
     for _node, consts in chains:
@@ -89,7 +90,7 @@ def testTheMemoryLandingIsSpelledInExactlyOneFile():
 def testAgentCoreTakesTheSharedDerivation():
     """`agent_core` 那处必须改成调用单源函数——只删掉本地拼法而没接线，就是又造一条瞎腿。"""
     src = NEUROVA_DIR / "agent_core.py"
-    tree = ast.parse(src.read_text(encoding="utf-8"))
+    tree = parseSource(src.read_text(encoding="utf-8"))
     called = {n.func.id for n in ast.walk(tree)
               if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
     assert "get_agent_memory_db_path" in called, (

@@ -45,6 +45,22 @@ success；该 sha 之后两次主线构建 11/11 全绿，其间无 perf 相关�
 benchmark——追精确会让门禁变成 flaky 噪音源，最终被人绕过。
 取优抵的是调度抖动，不是放宽：真退化在每一轮都成立，取优抹不平它。
 
+**判分用时源（2026-10-25 收口）**：三处数量级契约**一致按本线程 CPU 时间判分**，
+import 探针也不例外。此前 import 一项留墙钟、其余两项走 CPU，理由是"用户为首轮
+对话实际等了多久"。那个理由在 CI 上不成立：探针量的是**冷 import 的等待**，而
+本机与 CI 部署的跟踪 `.py` 数量不同（submodule / 稀疏检出）、包数一致但解析量
+不同，命中 `ModuleNotFoundError` 前要**先遍历整条 `sys.path`**，于是同一份代码
+在两台机器上差一个数量级。构建 `cnb-ht4-1k5pa4k86` 的 pipeline-3 就是被这条
+卡在 83% 后被平台强杀（30m 上限、无汇总行、无 `E` 断言块）。
+
+墙钟口径本身没错，错在把它放进**阻塞门禁**：`cnb-ht4` 与 `cnb-pr3` 两轮的
+perf-gate 流水线（同一份脚本、同一份预算）34s / 46s 全绿，说明"变慢"发生在
+受保护子集的进程内，不在探针本身——一个只在"隔壁别人的进程"里变红的预算，
+就是本仓 §6 反复点名的"红与提交无关"。
+
+故：`elapsed_ms` 保留为**读数**（诊断用，进 JSON），判分改用 `cpu_ms`；
+`sideEffects` 那半（网络/子进程/读仓内数据文件）一条不减，结构判据照旧。
+
 **判分用时源（Issue #176 未闭环项，构建 cnb-6t7-1k3964vd2 实测）**：
 进程内的两处微基准量的是"这段代码要花多少 CPU"，故取**本线程 CPU 时间**
 （``time.thread_time``），不取墙钟。墙钟 = 本线程 CPU 时间 + **等 CPU 的时间**，
@@ -275,26 +291,27 @@ def measureImportProbe(
 
 
 def check_import_budget(failures: Failures) -> dict:
-    """检查 1：import 冷启动（**墙钟**判分 + 阻塞型副作用结构点名）。
+    """检查 1：import 冷启动（**本线程 CPU 时间**判分 + 阻塞型副作用结构点名）。
 
-    本检查是门禁里**唯一**该用墙钟的命中点：它量的是"用户为首轮对话实际等了
-    多久"，等待对用户同样是延迟，必须计入。与进程内两处微基准相反，
-    那两处量的是"这段代码要花多少 CPU"，故取本线程 CPU 时间。
+    判分取 `cpu_ms` 而不是 `elapsed_ms`：预算量的是"这段 import 干了多少活"，
+    等 CPU、等磁盘的时间不计入——那部分随机器负载与 `sys.path` 长度漂移，与提交
+    无关（根因与两轮构建读数见模块 docstring）。`elapsed_ms` 仍作为读数回报。
     """
     results = {}
     total = 0.0
     for module in ("neurova.core.metrics", "neurova.post_chat_pipeline"):
         probe = measureImportProbe(module)
-        ms = float(probe["elapsed_ms"])  # 探针墙钟读数（perf_counter），首轮延迟口径
+        ms = float(probe["cpu_ms"])  # 本线程 CPU 时间：等待不计入
         results[module] = ms
-        results[f"{module}::cpu_ms"] = probe["cpu_ms"]
+        results[f"{module}::elapsed_ms"] = probe["elapsed_ms"]
         results[f"{module}::sideEffects"] = probe["sideEffects"]
         total += ms
         if ms > IMPORT_BUDGET_MS:
             failures.add(
                 "import-budget",
-                f"import {module} 冷启动 {ms:.1f}ms > 预算 {IMPORT_BUDGET_MS:.0f}ms"
-                "（import 期重型副作用会进首轮对话延迟）",
+                f"import {module} 本线程 CPU {ms:.1f}ms > 预算 {IMPORT_BUDGET_MS:.0f}ms"
+                f"（墙钟读数 {probe['elapsed_ms']:.1f}ms 只作诊断；"
+                "import 期重型副作用会进首轮对话延迟）",
             )
         # 阻塞型重活不耗 CPU，CPU 时钟量不到它 —— 以结构形态点名，
         # 否则本次换时钟会把「import 期偷偷起网络/子进程」一并放行。

@@ -39,6 +39,7 @@ import pathlib
 import pytest
 
 from neurova.computer_use import browser_manager as bm
+from tests.ast_scan import parseSource
 
 MODULE_DIR = pathlib.Path(bm.__file__).parent
 
@@ -62,8 +63,8 @@ CONTRACT_BACKENDS = ("PlaywrightBackend", "CamofoxServerBackend")
 
 
 def _backendClasses(rootDir: pathlib.Path) -> dict:
-    tree = ast.parse((rootDir / "browser_manager.py").read_text(encoding="utf-8"))
-    camo = ast.parse((rootDir / "camofox_server_backend.py").read_text(encoding="utf-8"))
+    tree = parseSource((rootDir / "browser_manager.py").read_text(encoding="utf-8"))
+    camo = parseSource((rootDir / "camofox_server_backend.py").read_text(encoding="utf-8"))
     found = {}
     for module in (tree, camo):
         for cls in (n for n in ast.walk(module) if isinstance(n, ast.ClassDef)):

@@ -126,18 +126,37 @@ class TestEveryEntryIsClassified:
         )
 
     def test_every_row_is_in_the_ledger_block(self, entries):
-        """按「文件 + 行号」判定登记，不比对引用原文。
+        """按「文件 + 内容锚点」判定登记，不比对引用原文。
 
         引用原文会被表格渲染规范化（空反引号渲染成文字占位），拿它做包含判断
-        会得出假阳性——本守卫自己就踩过一次。行号是稳定身份。
+        会得出假阳性——本守卫自己就踩过一次。
+
+        身份用的也不是行号：台账入库之后归档层文档仍会被改（补一节、挪一段），
+        行号整片平移，同一份引用集合逐格失配——CI `cnb-1f0-1k5uonjt2-003`
+        的「期望行数 218，实际行数 228」就是这个形态，被引用的路径一条没变。
+        唯一稳定的身份是**这一行正文 + 引用原文**的摘要（`scanner._lineAnchor`，
+        与生成侧同一处取数，不在这里另算一份）。
         """
         block = _block(_ledger_text(), scanner.TABLE_BEGIN, scanner.TABLE_END)
         missing = [
             e for e in entries
-            if f"`{e['file']}` | {e['line']} " not in block
+            if scanner._anchorCell(e) not in block
         ]
         assert not missing, (
-            f"有悬空引用未登记进台账: {[(e['file'], e['line'], e['ref']) for e in missing][:5]}"
+            f"有悬空引用未登记进台账: {[(e['file'], e['ref']) for e in missing][:5]}"
+        )
+
+    def testLedgerRowsAnchorOnContentNotOnSourceLineNumbers(self, entries):
+        """台账「位置」列不得写源文档行号——它一入库就开始过期。
+
+        反向控制：把源文档行号整体平移，登记身份必须一动不动。
+        """
+        block = _block(_ledger_text(), scanner.TABLE_BEGIN, scanner.TABLE_END)
+        drifted = [e for e in entries if str(e["line"]) in
+                   [row.split("|")[2].strip() for row in block.splitlines()[2:] if row.startswith("|")]]
+        assert not drifted, (
+            "台账里仍有按源文档行号定位的行：%r。把行号写进生成物，"
+            "任何一次正文编辑都会让台账整片对不上——该定位的是内容。" % (drifted[:3],)
         )
 
 

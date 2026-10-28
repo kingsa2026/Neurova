@@ -28,6 +28,7 @@ from pathlib import Path
 import pytest
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 NEUROVA = PROJECT_ROOT / "neurova"
@@ -92,7 +93,7 @@ class TestOfflineCacheLabelled:
         src = io.open(
             NEUROVA / "llm" / "providers" / "capability_cache.py", encoding="utf-8"
         ).read()
-        doc = ast.get_docstring(ast.parse(src)) or ""
+        doc = ast.get_docstring(parseSource(src)) or ""
         assert "非生产路径" in doc, (
             "providers/capability_cache.py 必须显式标注'非生产路径/单一事实源'，"
             "否则下一个接入者会把两份缓存挑错"

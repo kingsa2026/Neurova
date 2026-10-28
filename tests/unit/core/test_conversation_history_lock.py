@@ -25,6 +25,7 @@ import threading
 from unittest.mock import MagicMock
 
 import pytest
+from tests.ast_scan import parseSource
 
 
 # ════════════════════════════════════════════════════════════
@@ -272,7 +273,7 @@ class TestD3NoFallbackPath:
 
         source = inspect.getsource(MemCore.update_history)
         # 解析 AST: 函数体不应包含 If 节点带非空 orelse (即 else fallback 分支)
-        tree = ast.parse(source.lstrip())
+        tree = parseSource(source.lstrip())
         for node in ast.walk(tree):
             if isinstance(node, ast.If) and node.orelse:
                 pytest.fail(

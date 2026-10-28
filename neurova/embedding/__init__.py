@@ -68,9 +68,28 @@ def _reset_embedding_engine():
     """测试用：重置单例
 
     生产代码不应调用此函数。
+
+    丢弃引用**之前**先把旧引擎关掉：`InferenceSession` 持有原生内存，
+    直接置 None 只是把它交给 GC，而 GC 回收时机不可控。单进程跑近八千档时
+    逐档 reset 会各留一个 session，累积顶到 runner 内存上限被 SIGKILL
+    （pipeline-3 的 137）。故这里主动释放，而不是指望 GC。
     """
     global _embedding_engine
+    previous = _embedding_engine
     _embedding_engine = None
+    if previous is None:
+        return
+    # 走同步的释放入口：本函数可能在**已有事件循环**里被调用（异步用例、异步服务
+    # 的测试隔离），那里 asyncio.run() 会抛 RuntimeError，协程从不执行、
+    # session 也就不释放——泄漏会在异步上下文里原样复发。
+    release = getattr(previous, "releaseBackend", None)
+    if not callable(release):
+        return
+    try:
+        release()
+    except Exception as e:
+        # 释放动作不得把重置流程变成崩溃（缺 close() 的后端已在引擎侧 fail-soft）。
+        _logger.warning("重置 embedding 引擎时释放失败: %s", e)
 
 
 def reset_embedding_engine():

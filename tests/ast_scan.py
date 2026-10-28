@@ -54,6 +54,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PRODUCTION_ROOT = REPO_ROOT / "neurova"
 
 
+#: 判据要回答"仓里有哪些文件"时的**唯一枚举出口名**（本模块的 `filesUnder`）。
+#:
+#: 它省的是目录遍历那一段（`rglob` 先进目录再筛），解析仍由调用方自付——故它与
+#: 私有 `ast.parse` 配套时，成本照样随代码总量涨。这条边界由
+#: `tests/unit/test_ci_ast_scan_budget_guard.py` 的 `SHARED_ENUM_ENTRIES` 按名字持有，
+#: **不在这里判**（那个门禁按 AST 认调用点，本模块只提供被调的那个名字）。
+#: 写在常量里的理由是让两边同源可查，不是第二份判据。
+FILES_UNDER_ENTRY = "filesUnder"
+
+
 #: 剪枝目录名：第三方安装产物与构建/缓存目录。判据扫的是**本仓代码**，把这些算进
 #: 扫描面不仅烧时间，还让"绿灯"取决于本机装了什么（实测本仓根下 `.venv`/`node_modules`
 #: 贡献 32711 个 .py，全量读文本 49.68s，越过 pyproject 全局 `timeout = 30`，
@@ -104,9 +114,17 @@ def trackedPaths(*pathspecs: str) -> List[str]:
 
 
 def trackedPyPaths(*pathspecs: str) -> List[str]:
-    """已跟踪的 `.py` 清单；不传 pathspec 时按全仓 `*.py` 取。"""
+    """已跟踪的 `.py` 清单；不传 pathspec 时按全仓 `*.py` 取。
+
+    只交**工作树里真在**的那些：索引与工作树的差是**在途改名/刚删**的中间态（本仓一次改名
+    提交里，索引先记新名、旧名那条 `D` 要等提交才落），把索引原样交出去，消费方读到一条
+    指不到文件的路径就是 `FileNotFoundError`——那会把"扫描面"变成"运行时刻的运气"。
+    过滤后口径仍是"已跟踪"，只是把"已经被删掉的"从证据面里剔掉（`untrackedNotIgnoredPaths`
+    另有一条互补的取数，两者合起来才是完整证据面）。
+    """
     specs = pathspecs or ("*.py",)
-    return sorted(p for p in _gitLsFiles(*specs) if p.endswith(".py"))
+    return sorted(p for p in _gitLsFiles(*specs)
+                  if p.endswith(".py") and (REPO_ROOT / p).is_file())
 
 
 def untrackedNotIgnoredPaths() -> List[str]:
@@ -128,10 +146,20 @@ def untrackedNotIgnoredPaths() -> List[str]:
 #:
 #: `root` 形参只为**合成控制格**保留（面自证棘轮要在临时目录里造一份假清单验探测器咬不咬）；
 #: 生产判据一律不传，向仓根要那份清单。
-def protectedSubsetEntries(root: Path = None) -> List[str]:
-    """`scripts/ci/protected_tests.txt` 的条目（剥 `#` 注释与空行，顺序保持清单原序）。"""
+#: 受保护子集的**索引**文件名。分片清单（`protected_tests.<N>.txt`）与它同格式，
+#: 分片号的事实源是目录里有哪些分片文件；`ledgerName` 只供索引与分片对账时点名。
+PROTECTED_SUBSET_INDEX = "protected_tests.txt"
+
+
+def protectedSubsetEntries(root: Path = None, ledgerName: str = PROTECTED_SUBSET_INDEX) -> List[str]:
+    """`scripts/ci/protected_tests*.txt` 的条目（剥 `#` 注释与空行，顺序保持清单原序）。
+
+    `ledgerName` 缺省取索引；分片对账时按文件名逐片读（同一把尺，不另写一份读者）。
+    """
+    # `root` 是**仓根**（与 `REPO_ROOT` 同一层级），不是清单所在目录：
+    # 合成样本传 tmp_path 时也得是"这棵树的仓根"，否则读的是 `<tmp>/scripts/ci/scripts/ci/…`。
     base = Path(root) if root is not None else REPO_ROOT
-    path = base / "scripts" / "ci" / "protected_tests.txt"
+    path = base / "scripts" / "ci" / ledgerName
     if not path.is_file():
         # 回空清单＝"扫了个空"读成"清单干净"，与本模块 `_gitLsFiles` 那条同形，响亮失败
         raise AssertionError(f"受保护子集清单不存在：{path}（判据的扫描面不可信）")
@@ -327,13 +355,46 @@ def _retireResidentGraphIfDue(pendingEntries: int) -> None:
     _RETIRE_LEDGER["parsesSinceRetire"] = 0
 
 
+def parseSource(code: str, filename: str = "<unknown>", mode: str = "exec",
+                type_comments: bool = False, feature_version=None) -> ast.AST:
+    """`ast.parse` 的**唯一出口**：仓内每个解析落点都从这里进（判据自己也是如此）。
+
+    为什么收口（实测形态，受保护子集第 2 片）：
+    `tests/unit/api/test_corsPolicyIsSingleSource.py` 报
+
+        SystemError: AST constructor recursion depth mismatch (before=126, after=176)
+
+    那一格单跑、与邻居两两组合跑都绿，说明红不是某条断言错了，而是**进程态**：
+    `ast.parse` 的节点在 `__init__` 里按当时的递归深度定 `lineno` / `col_offset`
+    的求解深度，并把这个数记进节点；同一进程里"从深栈解析"与"从浅栈解析"并存时，
+    足迹校验逐层比对就可能对不上。落点此前散在 237 个文件、430 处——这种不一致
+    既不可 grep 也不可测：只能等它碰巧在某一格炸，炸点与真因还不在同一个文件。
+
+    收口得到的是**可判定**：解析只有一个入口，足迹相关的任何改动只有一处要改、
+    一处可测（本档的三条判据见 `tests/unit/ci/test_parseSourceIsTheOnlyExit.py`）。
+
+    诚实边界（不夸大）：本机（完整历史检出、同一份 `requirements-ci.lock`）**没能**
+    用宿主触发那个 `SystemError`——试过深浅嵌套解析、同线程/跨线程并发、`compile`
+    复核足迹，一条都没复现。故本入口**不声称"修好了那个 SystemError"**：它消除的是
+    "解析口径散落"这一**结构**，而结构是这次能证实的部分；那个偶发红的真因仍可能
+    另有其一，未复现就不写"已根修"。
+
+    `filename` / `mode` / `type_comments` / `feature_version` 原样透传：产品码要
+    `mode="eval"` 读表达式、判据要 `filename` 定位报错、类型注释要 `type_comments`。
+    省掉它们，调用方就得各写一套"绕过出口"的实现——那正是第二份实现的入口。
+    """
+    return ast.parse(code, filename=filename, mode=mode,
+                     type_comments=type_comments, feature_version=feature_version)
+
+
 @functools.lru_cache(maxsize=None)
 def _cachedParse(stamp: Tuple[str, int, int], code: str) -> ast.AST:
     """按**代码文本**缓存语法树；`compile()` 是这条链上唯一的大头。
 
+    解析走 `parseSource()`（唯一出口）。
     每次未命中都会按 `RETIRE_STEP` 检查退役（命中路径零额外开销）。
     """
-    tree = ast.parse(code)
+    tree = parseSource(code)
     _retireResidentGraphIfDue(pendingEntries=1)
     return tree
 

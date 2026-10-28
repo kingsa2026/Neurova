@@ -13,6 +13,7 @@
 import pytest
 
 from neurova.knowledge.search import full_text_search, tokenize
+from tests.ast_scan import parseSource
 
 
 class TestTokenize:
@@ -284,7 +285,7 @@ class TestWarmUpFace:
         import pathlib
 
         conftest = pathlib.Path(__file__).resolve().parents[3] / "tests" / "conftest.py"
-        tree = ast.parse(conftest.read_text(encoding="utf-8"))
+        tree = parseSource(conftest.read_text(encoding="utf-8"))
         aliases = {
             (alias.asname or alias.name)
             for node in ast.walk(tree)

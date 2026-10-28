@@ -30,6 +30,7 @@ from fastapi.testclient import TestClient
 from neurova.api import auth as nf_auth
 from neurova.api.endpoints import mcp_server_api
 from neurova.tool_layers.mcp_server import NeurovaMCPServer
+from tests.ast_scan import parseSource
 
 ENDPOINT = "/api/v1/mcp"
 SOURCE = Path(inspect.getsourcefile(mcp_server_api)).resolve()
@@ -101,7 +102,7 @@ class TestTransportOwnership:
     """运输归 SDK，手写那份退役（教义 7：该功能仓内只剩一处实现被消费）。"""
 
     def test_transportIsSdkSessionManagerNotHandRolledDispatch(self):
-        tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
+        tree = parseSource(SOURCE.read_text(encoding="utf-8"))
         calleeNames = {
             node.func.id
             for node in ast.walk(tree)
@@ -123,7 +124,7 @@ class TestTransportOwnership:
     def test_statelessAndJsonResponseAreExplicit(self):
         """两条开关是本面承诺"单请求单 JSON 响应"的根据，不许靠 SDK 默认值。"""
         source = SOURCE.read_text(encoding="utf-8")
-        tree = ast.parse(source)
+        tree = parseSource(source)
         kwargs = {
             kw.arg: ast.unparse(kw.value)
             for node in ast.walk(tree)

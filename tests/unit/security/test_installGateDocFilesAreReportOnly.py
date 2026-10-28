@@ -29,6 +29,7 @@ from tests import ast_scan  # noqa: E402
 
 from neurova.skills.market_importer import read_builtin_bundle
 from neurova.skills.skill_install_gate import reset_install_gate_scanner, scan_skill_for_install
+from tests.ast_scan import parseSource
 
 #: 本档两条腿共用的扫描根：探测器与面自证必须向**同一个表达式**要根，
 #: 否则改窄读数时报错文本还在说老那一条（读数与它声称的根分家）。
@@ -178,7 +179,7 @@ class TestDocSamplesStopDenying:
                         if f.rule_id == "dangerous_exec"]
 
         # 改判记录（教义第 5 条 / 形态集 235）：本格原断「真裸名读数 1 条（package_check.py 的
-        # compile(）」。§6-280 那一刀把包内那处换成等价的 ast.parse(）——真信号被**合法清零**，
+        # compile(）」。§6-280 那一刀把包内那处换成等价的 parseSource(）——真信号被**合法清零**，
         # 继续钉 "==1" 就是拿旧实状当契约。但直接把断言删空会让这格变成**恒真的空守卫**，
         # 所以把"形状分类器与读数必须同向"这条腿改由**合成样本**钉：分类器不许因为真包里
         # 没东西可分就不再认得这一形。
@@ -346,7 +347,7 @@ def _suffixTableHosts(overrides: dict | None = None) -> set:
         pairs = []
         for rel, source in overrides.items():
             try:
-                tree = ast.parse(source)
+                tree = parseSource(source)
             except SyntaxError:
                 continue
             pairs += [(rel, node) for node in ast.walk(tree)]

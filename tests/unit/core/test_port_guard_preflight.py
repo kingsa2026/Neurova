@@ -23,6 +23,7 @@ import socket
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 START_SERVER = PROJECT_ROOT / "start_server.py"
@@ -108,7 +109,7 @@ class TestStartServerPreflightOrder:
 
     @staticmethod
     def _callLines(function_name: str) -> list[int]:
-        tree = ast.parse(START_SERVER.read_text(encoding="utf-8"))
+        tree = parseSource(START_SERVER.read_text(encoding="utf-8"))
         lines: list[int] = []
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -147,7 +148,7 @@ class TestEveryLauncherSharesTheSameJudgement:
 
     @staticmethod
     def _firstCallLine(src: str, names: tuple[str, ...]) -> int | None:
-        tree = ast.parse(src)
+        tree = parseSource(src)
         lines: list[int] = []
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):

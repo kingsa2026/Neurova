@@ -235,6 +235,9 @@ def anchorPath() -> Path:
     落点是**数据根之内**的 `<数据根>/anchors/<ANCHOR_FILE_NAME>`：`core/data_root.py` 是
     全仓落点的唯一装配点（AGENTS.md §3），锚没有理由做例外——回滚一个目录不会动它里面的
     文件，锚跟着整库快照一起回滚，敏感性一点没丢；而主目录落点会让锚换台机器就失联。
+    主目录那一族只剩**收养端**语义：取法只有 `data_root.legacyHomeLanding()` 一处，
+    本函数不手写 `~/.neurova`，多出第三处拼法才判红
+    （`tests/unit/core/test_homeAdoptionRefusedUnderForeignDataRoot.py` 按「取法的调用方」比对）。
 
     旧地址（主目录点目录）的存量经 `adoptHomeLanding()` 搬进来：那是主目录族的**唯一收养端**
     （带 `homeAdoptionAllowed()` 那道权利闸，只有"本进程代表操作者本人"才动主目录）；
