@@ -45,6 +45,7 @@ from fastapi.testclient import TestClient
 
 from neurova.api import auth as auth_mod
 from neurova.api.auth import get_current_user
+from tests.ast_scan import parseSource
 from tests.auth_headers import bearerHeaders, pinJwtSecret
 
 AUTH_HEADERS_SOURCE = Path("tests/auth_headers.py")
@@ -109,7 +110,7 @@ def test_bearerHeadersAlignsBeforeSigning():
 
 def test_identityHeaderFactoryExistsExactlyOnce():
     """两份取数口不许并存为两个名字：对齐塞进签名口之后，第二个名字就是第二个事实源。"""
-    tree = ast.parse(AUTH_HEADERS_SOURCE.read_text(encoding="utf-8"))
+    tree = parseSource(AUTH_HEADERS_SOURCE.read_text(encoding="utf-8"))
     factoryNames = [
         node.name
         for node in tree.body

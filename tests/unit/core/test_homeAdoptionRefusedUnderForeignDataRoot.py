@@ -30,6 +30,7 @@ NEUROVA = Path(__file__).resolve().parents[3] / "neurova"
 sys.path.insert(0, str(NEUROVA.parent))  # 仓根进 sys.path，`from tests import ast_scan` 才取得到
 
 from tests import ast_scan  # noqa: E402
+from tests.ast_scan import parseSource
 
 #: 四族落点的解析函数所在文件——形状格逐个问它走没走带闸的入口。
 _FACE_FILES = (
@@ -71,7 +72,7 @@ def _calledNames(relPath: str) -> set:
     """文件里被调用的名字（AST 形态，注释与 docstring 里的提法不算调用）。"""
     import ast
 
-    tree = ast.parse((NEUROVA / relPath).read_text(encoding="utf-8", errors="replace"))
+    tree = parseSource((NEUROVA / relPath).read_text(encoding="utf-8", errors="replace"))
     names = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):

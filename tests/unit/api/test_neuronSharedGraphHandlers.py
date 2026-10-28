@@ -39,6 +39,7 @@ from fastapi.testclient import TestClient
 
 from neurova.api import auth as authModule
 from neurova.api.endpoints import neuron as neuronModule
+from tests.ast_scan import parseSource
 
 BASE = "/api/neuron"
 USER = {"user_id": "u-1", "username": "u1", "role": "user", "neuser_id": "u-1"}
@@ -247,7 +248,7 @@ class TestTheSharedGraphHasExactlyOneConstructionPoint:
     def test_dependencyGraphIsBuiltOnlyInsideGetSharedGraph(self):
         """每个 handler 自己 `DependencyGraph()` 一次，共享就变成六份私有——
         而这在 HTTP 层完全看不出来（每条都 200）。"""
-        tree = ast.parse(Path(neuronModule.__file__).read_text(encoding="utf-8"))
+        tree = parseSource(Path(neuronModule.__file__).read_text(encoding="utf-8"))
         offenders = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):

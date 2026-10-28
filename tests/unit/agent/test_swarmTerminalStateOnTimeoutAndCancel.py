@@ -40,6 +40,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from neurova.agent.swarm import reset_swarm_manager, get_swarm_manager
+from tests.ast_scan import parseSource
 
 SWARM_FILE = "neurova/agent/swarm.py"
 REPO = Path(__file__).resolve().parents[3]
@@ -211,7 +212,7 @@ class TestStatusVocabularyIsDefinedOnce:
     def _compareOffenders(self, src: str):
         """`something.status == "running"` / `in ("pending","running")` 这类字面量比较。"""
         hits = []
-        for node in ast.walk(ast.parse(src)):
+        for node in ast.walk(parseSource(src)):
             if not isinstance(node, ast.Compare):
                 continue
             left = node.left
@@ -234,7 +235,7 @@ class TestStatusVocabularyIsDefinedOnce:
     def _defaultOffenders(self, src: str):
         """字段/变量默认值直接写词值（dataclass 那行 `status: str = "pending"` 属此类）。"""
         hits = []
-        for node in ast.walk(ast.parse(src)):
+        for node in ast.walk(parseSource(src)):
             target = None
             value = None
             if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):

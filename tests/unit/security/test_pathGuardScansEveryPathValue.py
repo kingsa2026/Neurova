@@ -52,6 +52,7 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from neurova.security.tool_guard import FilePathGuardian, ToolGuardEngine
+from tests.ast_scan import parseSource
 
 SAFE_PATH = "/home/agent/workspace/readme.txt"
 SHADOW = "/etc/shadow"
@@ -235,7 +236,7 @@ class TestThePrecheckDoesNotCollapseFirst:
         import ast
 
         src = (REPO / "neurova/security/governance.py").read_text(encoding="utf-8")
-        tree = ast.parse(src, filename="governance.py")
+        tree = parseSource(src, filename="governance.py")
         attrs = {n.func.id for n in ast.walk(tree)
                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
         ownLoops = [n for n in ast.walk(tree) if isinstance(n, ast.For)
@@ -253,7 +254,7 @@ class TestExtractionShapeIsPinned:
         return (REPO / "neurova/security/tool_guard.py").read_text(encoding="utf-8")
 
     def _guardianGuardBody(self):
-        tree = ast.parse(self._guardianSource(), filename="tool_guard.py")
+        tree = parseSource(self._guardianSource(), filename="tool_guard.py")
         for cls in ast.walk(tree):
             if isinstance(cls, ast.ClassDef) and cls.name == "FilePathGuardian":
                 for fn in cls.body:

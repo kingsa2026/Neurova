@@ -32,6 +32,7 @@ import ast
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 pytestmark = pytest.mark.timeout(60)
 
@@ -150,7 +151,7 @@ class TestNoSecondDefaultDefinition:
     def _literals_in_endpoint(self):
         src = (REPO / _API_FILE).read_text(encoding="utf-8")
         found = []
-        for node in ast.walk(ast.parse(src)):
+        for node in ast.walk(parseSource(src)):
             if isinstance(node, ast.Compare) and isinstance(node.left, ast.Attribute) \
                     and node.left.attr == "resolution":
                 continue
@@ -171,7 +172,7 @@ class TestNoSecondDefaultDefinition:
         """反向对照：判据不是摆设——把字面量塞回去必须报红（防扫空即全绿）。"""
         src = ('def f(b):\n    return g(resolution=str(b.get("resolution") or "1080p"))\n')
         found = []
-        for node in ast.walk(ast.parse(src)):
+        for node in ast.walk(parseSource(src)):
             if isinstance(node, ast.keyword) and node.arg == "resolution":
                 for sub in ast.walk(node.value):
                     if isinstance(sub, ast.Constant) and isinstance(sub.value, str) \

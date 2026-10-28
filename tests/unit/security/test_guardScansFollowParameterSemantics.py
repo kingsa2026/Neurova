@@ -31,6 +31,7 @@ import pathlib
 import tempfile
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 import neurova
 from neurova.security import governance, tool_guard
@@ -42,11 +43,8 @@ EVASION = GuardThreatCategory.SHELL_EVASION
 PATH_SURFACE = GuardThreatCategory.PATH_TRAVERSAL
 SEMANTIC_KEY_NAMES = ("COMMAND_PARAM_KEYS", "PATH_PARAM_KEYS")
 
-#: 无害路径的取样必须**带上缺陷的触发形状**：`users` 后的分隔符紧跟一个 `x` 再跟十六进制两位
-#: （Windows 下正是操作者自己的用户名 `\xccoo`，起点那条 5/5 稳定红就是它）。没有这个形状，
-#: `_build_tool_input` 拼出的串不会命中「十六进制转义」那枚正则，测的就是一条永不发生的路径
-#: ——第一版踩过，红形是"修好了"的假绿。
-#:
+#: 真实家目录下的无害文件名。本仓这条缺陷的触发条件正是**本机用户名形状**（`\` + `xcc` + 十六进制），
+#: 换成 `/tmp/x.txt` 就永远测不到——第一版踩过，红形是"修好了"的假绿。
 #: 取样点选在 `/tmp/...` 这类**非受保护**落点，而不是真实家目录：本机家目录是 `/root`，
 #: 它本身就在守卫的受保护路径表里（`tool_guard._protected_paths`），拿它取样时红的是**另一条规则**
 #: （`protected_path`），判据锚在被测对象之外，就测不到 shell 规避面。
@@ -80,10 +78,22 @@ def test_plainWindowsPathIsNotShellEvasion():
 
     assert not findings, (
         "无害路径被判成 shell 规避（finding=%s）⇒ 路径值混进了命令扫描面" % findings[:2])
+    # 判据问的是**扫描面归属**：命令面的两类都不许由这条路径值触发。`protected_path`
+    # 是另一条按值的裁决（家目录是否在受保护名单里），与命令扫描面无关，故单独排除——
+    # 若把整条 `should_block` 当断言，判据就绑在"跑测账户的家目录长什么样"上。
+    onCommandSurface = [f for f in _findings("file_read", {"file_path": SAFE_PATH})
+                        if f.category in (GuardThreatCategory.SHELL_EVASION,
+                                          GuardThreatCategory.PATH_TRAVERSAL)
+                        and f.rule_id != "protected_path"]
+    assert not onCommandSurface, (
+        "路径读取被命令扫描面拦下（finding=%s）⇒ 非交互链路（渠道/NPC/mobile/定时）"
+        "的每一次文件工具调用都会被卡住" % onCommandSurface[:2])
     for probe in _safeSamples():
-        assert ToolGuardEngine().guard("file_read", {"file_path": probe}).should_block is False, (
+        blocked = [f for f in _findings("file_read", {"file_path": probe})
+                   if f.rule_id != "protected_path"]
+        assert not blocked, (
             f"路径读取仍被拦（{probe}）⇒ 每一次文件工具调用在非交互链路"
-            "（渠道/NPC/mobile/定时）都会被卡住")
+            "（渠道/NPC/mobile/定时）都会被卡住：%s" % blocked[:2])
 
 
 def test_realEvasionInCommandStillCaught():
@@ -162,7 +172,7 @@ def test_semanticKeyListsAreSingleSourceAndDisjoint():
     for name in SEMANTIC_KEY_NAMES:
         writers = []
         for ref in ast_scan.sourceRefsUnder(NEUROVA_DIR, ".py", (name,)):
-            for node in ast.walk(ast.parse(ref.code)):
+            for node in ast.walk(parseSource(ref.code)):
                 if isinstance(node, ast.Assign) and any(
                         isinstance(t, ast.Name) and t.id == name for t in node.targets):
                     writers.append(ref.path.relative_to(NEUROVA_DIR.parent).as_posix())

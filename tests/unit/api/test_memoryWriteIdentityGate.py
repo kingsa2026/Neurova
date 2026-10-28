@@ -33,6 +33,8 @@ from tests import ast_scan
 import pytest
 from fastapi.testclient import TestClient
 
+from neurova.api import auth as auth_mod
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 AUTH_PY = REPO_ROOT / "neurova" / "api" / "auth.py"
 MEMORY_PKG = REPO_ROOT / "neurova" / "api" / "endpoints" / "memory"
@@ -148,31 +150,40 @@ def testAnonymousReadIsNowRejectedToo(appClient):
     )
 
 
-def _gatesDefinedInAuth():
-    tree = ast.parse(AUTH_PY.read_text(encoding="utf-8"))
-    return {
-        n.name
-        for n in ast.walk(tree)
-        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("get_current_user")
-    }
+def testTheDeclaredGateListIsCallableObjects():
+    """③ 清单里必须是**真函数对象**，不是名字字符串。
+
+    这一格是被一次真实故障逼出来的：清单只收 `get_current_user` /
+    `get_current_user_or_default` 两个名字，而 2026-10-26 点单甲之后记忆面真正守门的是
+    路由级的 `requireIdentityForMemoryFace`——它不在清单里，于是下面第 ④ 格（以及
+    `test_memory_route_authorization` 那条同口径判据）把 8 个端点判成"取租户数据却没
+    鉴权"，红落在判据上而不是代码上。存字符串的形态天然逼迫消费者各写一份
+    名字→对象映射，那份映射与 `auth.py` 的 import 一分叉就静默恒不命中。
+    """
+    declared = auth_mod.MEMORY_IDENTITY_GATES
+    assert declared, "名单空了 ⇒ 后面两格都在空转"
+
+    notCallable = [repr(g) for g in declared if not callable(g)]
+    assert not notCallable, f"名单里混进了不可调用的东西（名字字符串？）：{notCallable}"
+
+    modules = {getattr(g, "__module__", "") for g in declared}
+    assert modules == {auth_mod.__name__}, (
+        f"名单里的门有不是本文件定义的：{sorted(modules)}——"
+        "身份门只许来自 auth.py，别处的同名对象语义不同"
+    )
 
 
-def testGateNamesComeFromOneDeclaredList():
-    """③ 门的名字有唯一清单，且清单里的门都真实存在（防"名字写了、实现没跟上"）。"""
-    defined = _gatesDefinedInAuth()
-    match = re.search(
-        r"^MEMORY_IDENTITY_GATES[^=]*=\s*\(([^)]*)\)",
-        AUTH_PY.read_text(encoding="utf-8"),
-        re.M,
-    )
-    assert match, (
-        "auth.py 没有 `MEMORY_IDENTITY_GATES` 清单——门的名字散落各处，"
-        "第四道第五道门会自己长出来而无人核对（本批实测已存在四道）"
-    )
-    declared = {tok.strip().strip('"\'') for tok in match.group(1).split(",") if tok.strip()}
-    assert declared <= defined, f"清单里声明了不存在的门：{sorted(declared - defined)}"
-    assert declared == {"get_current_user", "get_current_user_or_default"}, (
-        f"记忆面允许的门不再是两道（{sorted(declared)}）——本批的收口结论要重写"
+def testTheGateNamesMatchTheMemoryFace():
+    """④ 清单与记忆面实际用的门**双向**咬合：多收一条少收一条都要红。"""
+    names = {g.__name__ for g in auth_mod.MEMORY_IDENTITY_GATES}
+    assert names == {
+        "get_current_user",
+        "get_current_user_or_default",
+        "requireIdentityForMemoryFace",
+    }, (
+        f"记忆面允许的门集合变了（{sorted(names)}）——"
+        "要么是有人给记忆面新开了一道门（须在本格与政策里同时表态），"
+        "要么是清单又漏收了路由级那道门（2026-10-26 的形态）"
     )
 
 
@@ -184,7 +195,7 @@ def testMemoryPackageUsesOnlyDeclaredGates():
     不同——这正是本仓"override 打错对象静默不生效"那一族的成因。故按 (来源, 名字)
     二元组判。
     """
-    declared = {"get_current_user", "get_current_user_or_default"}
+    declared = {g.__name__ for g in auth_mod.MEMORY_IDENTITY_GATES}
     offenders = []
     # 枚举与解析走 tests/ast_scan 的共享预算（不私有 rglob + ast.parse——
     # 后者把判据成本绑在代码总量上，见 tests/unit/test_ci_ast_scan_budget_guard.py）。

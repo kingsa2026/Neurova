@@ -30,9 +30,14 @@ def client():
     app = FastAPI()
     register_error_handlers(app)
     app.include_router(memoryRouter, prefix="/api/v1/memory")
-    testClient = TestClient(app)
-    testClient.app.dependency_overrides[auth_mod.get_current_user_or_default] = lambda: ADMIN
-    return testClient
+    # 身份门按**路由图实际用到的**来打：记忆面 2026-10-26 点单甲之后整面挂
+    # `requireIdentityForMemoryFace`（路由级），它不看处理器级的 override ⇒
+    # 只钉 `get_current_user_or_default` 会整族 401，红落在"没鉴权"上而不是
+    # 本档要测的"store 故障长什么样"。取法见 `tests/auth_headers.overrideIdentity`。
+    from tests.auth_headers import overrideIdentity
+
+    overrideIdentity(app, ADMIN)
+    return TestClient(app)
 
 
 def _failStore(monkeypatch, reason: str):

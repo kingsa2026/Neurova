@@ -26,6 +26,7 @@
 | `skill_name_collisions.py` | 同名技能覆盖复算（默认）与**名字域迁移**（`--apply`）：同 name 不同身份的条目派生携带身份的名字（ADR 0021） | `python scripts/diagnostics/skill_name_collisions.py [--apply] [manifest.json ...]` | 默认只读；`--apply` 改写目标 manifest 的 `name` 字段（原子替换，幂等） |
 | `artifactDigestStockInventory.py` | 存量构件摘要清单（只读）：已装技能/插件里哪些从未钉、钉了却不符、或根外锚缺失（§6-383 留的待办落成可复跑读数） | `python scripts/diagnostics/artifactDigestStockInventory.py [--json]` | 只读（不写数据根、不补锚） |
 | `muscle_memory_threshold_attainability.py` | 肌肉记忆阈值可达性重算：0.85（装配起点）与 0.8（RSI setpoint）在新指纹分布下的触发率与梯度带规模 | `python scripts/diagnostics/muscle_memory_threshold_attainability.py [--json]` | 只读（临时目录建库） |
+| `artifactDigestStockInventory.py` | 存量构件摘要清单（只读）：已装技能/插件四态（`pinned-ok` / `pinned-mismatch` / `unpinned` / `missing-dir`）与根外锚三态（`match` / `anchor-missing` / `anchor-mismatch`），即 §6-383 留的「存量未钉」待办读数 | `PYTHONPATH=$(git rev-parse --show-toplevel) python scripts/diagnostics/artifactDigestStockInventory.py [--json]` | 只读（不写数据根、不补锚） |
 | `_live_verify_growth_split.py` | 知识增长分槽 live-verify 复现（上下文三链路批） | `python scripts/diagnostics/_live_verify_growth_split.py` | 只读 / 临时库 |
 | `_live_verify_knowledge_split.py` | 知识分槽 live-verify 复现（上下文三链路批） | `python scripts/diagnostics/_live_verify_knowledge_split.py` | 只读 / 临时库 |
 | `_kb_backfill_rerun.py` | 知识库回填重跑（抽取产物入库） | `python scripts/diagnostics/_kb_backfill_rerun.py` | 写目标库（按参数） |
@@ -45,6 +46,7 @@
 | `artifactDigestStockInventory.py` | 存量构件摘要清单（§6-383「存量未钉」待办的可复跑读数）：技能与插件各自给 `pinned-ok` / `pinned-mismatch` / `unpinned` / `missing-dir` 四态，根外锚给 `match` / `anchor-missing` / `anchor-mismatch`；退出码 0＝清单已产出（含空清单）、2＝连数据根都读不出 | `python scripts/diagnostics/artifactDigestStockInventory.py [--json]` | 只读（不写一个字节；不连后端） |
 | `_tmp_check_tracked.py` | 检查 `tests/unit/core` 下测试文件的 git 跟踪状态 | 项目根运行 |
 | `analyze_issues.py` | 解析 `audit-reports/pylint-report-v4.json`，抽样打印 broad-exception-caught / wrong-import-position / undefined-variable | 项目根运行（需该报告存在） |
+| `artifactDigestStockInventory.py` | 只读盘点存量构件摘要：已装技能/插件的 `pinned-ok` / `pinned-mismatch` / `unpinned` / `missing-dir` 四态 + 根外锚的 `match` / `anchor-missing` / `anchor-mismatch`（不写盘） | `PYTHONPATH=$(git rev-parse --show-toplevel) python scripts/diagnostics/artifactDigestStockInventory.py [--json]`；退出码 2＝数据根都读不出 |
 
 ## 三、一次性修复 / 补丁脚本（one-off，已完成使命）
 

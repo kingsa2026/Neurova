@@ -22,6 +22,7 @@ import ast
 import pathlib
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 TARGET_ROOT = REPO_ROOT / 'neurova'
@@ -126,7 +127,7 @@ def scan(root: pathlib.Path):
     """
     hits = []
     for ref in ast_scan.sourceRefsUnder(root, '.py', ast_scan.textHints('except')):
-        path, tree = ref.path, ast.parse(ref.code, filename=str(ref.path))
+        path, tree = ref.path, parseSource(ref.code, filename=str(ref.path))
         rel = path.relative_to(root.parent).as_posix()
         enclosing = _enclosingFunctionMap(tree)
         for node, func in enclosing.items():

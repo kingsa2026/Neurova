@@ -49,13 +49,25 @@ async def test_ensure_ready_initializes_on_demand(heavy_manager):
     assert heavy._initialized is True
 
 
+def _pastTtl(mgr) -> float:
+    """「已超过 TTL」的读数，按**当前**最后一次使用时刻算。
+
+    早前这里写的是固定魔数 `1_000_000`：`time.monotonic()` 在跑测机器上早已越过它
+    （容器 uptime 以天计），于是"释放"根本不发生，一批用例一起红在"前置不成立"。
+    读数按 TTL 的整数倍推进，与机器 uptime 无关，也不引入第二个魔数。
+    """
+    last = mgr._last_used_monotonic
+    assert last is not None, "前置不成立：还没有过合成，谈不上 TTL"
+    return last + mgr._config.release_ttl_sec * 2
+
+
 @pytest.mark.asyncio
 async def test_ttl_release_switches_to_light_engine(heavy_manager):
     mgr, heavy, light = heavy_manager
     await mgr.synthesize("第一句")  # heavy 就绪
     assert mgr._engine_name == "moss-nano"
 
-    await mgr.release_idle_engines(now_monotonic=idleNow())  # 远超 TTL
+    await mgr.release_idle_engines(now_monotonic=_pastTtl(mgr))  # 远超 TTL
     assert heavy.released is True
     assert "moss-nano" not in mgr._engines  # 缓存一并丢弃（重载才重建）
     assert mgr._engine_name == "edge-tts"
@@ -71,7 +83,7 @@ async def test_ttl_release_skipped_while_inflight(heavy_manager):
     mgr, heavy, _ = heavy_manager
     await mgr.synthesize("第一句")
     mgr._active_requests = 1
-    await mgr.release_idle_engines(now_monotonic=idleNow())
+    await mgr.release_idle_engines(now_monotonic=_pastTtl(mgr))
     assert heavy.released is False
     assert mgr._engine_name == "moss-nano"
     mgr._active_requests = 0
@@ -91,7 +103,7 @@ async def test_release_updates_media_type(heavy_manager):
     mgr, _, _ = heavy_manager
     await mgr.synthesize("第一句")
     assert mgr.get_audio_media_type() == "audio/wav"
-    await mgr.release_idle_engines(now_monotonic=idleNow())
+    await mgr.release_idle_engines(now_monotonic=_pastTtl(mgr))
     assert mgr.get_audio_media_type() == "audio/mpeg"
 
 
@@ -134,6 +146,9 @@ async def test_non_lazy_manager_never_releases():
     mgr = TTSManager(config=cfg)
     await mgr.initialize()
     engine = mgr._engine
+    # 这一格判的是「lazy_release=False 时整条释放是 no-op」，不经过合成 ⇒ 没有"最后使用时刻"，
+    # 读数随便给（释放在此之前就已 short-circuit，读不到 TTL 那一支）。用 `idleNow()`
+    # 而不是写死的绝对数：本档已经有过一次"魔数在长跑机器上成了过去时刻"的红。
     await mgr.release_idle_engines(now_monotonic=idleNow())
     assert mgr._engine is engine
 
@@ -201,7 +216,7 @@ async def test_preheat_rebuilds_chain_top_after_release(heavy_manager, monkeypat
     """方案 C 闭环：释放换班后 _ensure_preheat 后台重建链顶并换回。"""
     mgr, heavy, light = heavy_manager
     await mgr.synthesize("第一句")
-    await mgr.release_idle_engines(now_monotonic=idleNow())
+    await mgr.release_idle_engines(now_monotonic=_pastTtl(mgr))
     assert mgr._engine_name == "edge-tts"
     assert heavy.released is True
 

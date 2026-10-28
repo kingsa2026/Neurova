@@ -61,6 +61,7 @@ from typing import Optional
 import pytest
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -303,7 +304,7 @@ def test_sample():
 
     def _report(self, source: str):
         return [
-            (name, target) for _lineno, name, target in handCopiedStubs(ast.parse(source))
+            (name, target) for _lineno, name, target in handCopiedStubs(parseSource(source))
         ]
 
     def test_handCopiedStubIsReported(self):

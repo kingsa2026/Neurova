@@ -166,11 +166,17 @@ class TestCnbRunsASingleLeg:
 
 class TestGithubRunsTheSameSingleLeg:
     def testGithubHasNoVersionMatrix(self):
-        """GitHub 侧不得保留版本 matrix（一侧单腿、一侧双跑即放行标准分叉）。"""
+        """GitHub 侧不得保留**解释器版本** matrix（一侧单腿、一侧双跑即放行标准分叉）。
+
+        只禁 `python-version` 那一维：分片矩阵（`shard`）把同一份清单切成几片各跑一个进程，
+        是内存/墙钟的根修，不是"同一份清单多跑一遍"——片数与对账由
+        `tests/unit/ci/test_protected_subset_shards.py` 钉住（漏跑、多跑、跨片重复都红）。
+        """
         job = _ghwJob()
         matrix = (job.get("strategy") or {}).get("matrix")
-        assert matrix is None, (
-            f"ci.yml 的 unit-tests 仍带 matrix {matrix!r}——"
+        versions = (matrix or {}).get("python-version")
+        assert not versions, (
+            f"ci.yml 的 unit-tests 仍带解释器矩阵 {versions!r}——"
             "收敛必须两侧同批完成，否则同一提交在两侧的放行标准不同。"
         )
 
@@ -189,13 +195,18 @@ class TestConvergenceDoesNotRelaxTheCriteria:
     def testCnbLegStillRunsProtectedSubsetWithCoverageGate(self):
         pipe = _cnbPipelines()[unitTestLegs(_cnbPipelines())[0]]
         scripts = _pipelineScripts(pipe)
-        assert "protected_tests.txt" in scripts, "余下的一腿不再跑受保护子集——判据被掏空"
-        assert "--cov-fail-under=60" in scripts, "覆盖率门禁没跟着走——判据被顺手放宽"
+        # 断言的是"清单被喂进 pytest"，不锁具体文件名：条目与顺序的唯一事实源是索引
+        # `protected_tests.txt`，被跑的清单是它派生出的同目录分片 `protected_tests.<N>.txt`
+        # （`code 137` 的根修，片号不手抄，见 tests/unit/ci/test_protected_subset_shards.py）。
+        assert "scripts/ci/protected_tests" in scripts, "余下的一腿不再跑受保护子集——判据被掏空"
+        # 阈值 60 与"合并各片数据再判一次"同在一步里（`scripts/ci/coverage_report.py`）；
+        # 跑测步只攒数据。逐片判 60% 会假红：单片实测 49%、整份 88%。
+        assert "coverage_report.py --fail-under 60" in scripts, "覆盖率门禁没跟着走——判据被顺手放宽"
 
     def testGithubLegStillRunsProtectedSubsetWithCoverageGate(self):
-        runs = _jobRuns(_ghwJob())
-        assert "protected_tests.txt" in runs, "GitHub 侧余下的一腿不再跑受保护子集"
-        assert "--cov-fail-under=60" in runs, "GitHub 侧覆盖率门禁没跟着走"
+        runs = _jobRuns(_ghwJob()) + _jobRuns(_ghwJob(job="coverage"))
+        assert "scripts/ci/protected_tests" in runs, "GitHub 侧余下的一腿不再跑受保护子集"
+        assert "coverage_report.py --fail-under 60" in runs, "GitHub 侧覆盖率门禁没跟着走"
 
 
 class TestDetectorIsNotVacuous:

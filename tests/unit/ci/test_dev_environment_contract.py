@@ -659,7 +659,10 @@ class TestProtectedSubsetStageOutputIsUnbuffered:
     反向控制：把 `-u` 摘掉、或把 `2>&1` 摘掉，本档必须红。
     """
 
-    _STAGE_HINT = "protected_tests.txt"
+    #: 按**语义目标**认那一步：命令里出现受保护子集清单（索引名或分片通配
+    #: `protected_tests.<N>.txt`，片号的事实源是目录里有哪几片）且调用 pytest。
+    #: 钉死索引文件名会让分片那次改动把它读成"那一步不见了"——判据失明，不是配置坏了。
+    _STAGE_HINT = "protected_tests"
 
     def _stageScript(self, path: Path | None = None) -> str:
         """跑受保护子集那一步的脚本原文——按内容定位，不按 stage 名（改名不该让它失明）。"""
@@ -672,7 +675,7 @@ class TestProtectedSubsetStageOutputIsUnbuffered:
                 if self._STAGE_HINT in script and "pytest" in script:
                     return script
         raise AssertionError(
-            ".cnb.yml 里找不到跑受保护子集的那一步（含 %r 且调用 pytest）——"
+            ".cnb.yml 里找不到跑受保护子集的那一步（命令含 %r 且调用 pytest）——"
             "本判据无从作答，先确认清单与流水线还在。" % self._STAGE_HINT
         )
 

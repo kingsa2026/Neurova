@@ -24,6 +24,11 @@ def _make_orchestrator(monkeypatch, tmp_path, llm_response="摘要文本"):
     mock_agent.config.name = "t-agent"
     mock_agent.config.llm_model = "test-model"
     mock_agent.conversation_history = []
+    # agent_id 是真值而非 MagicMock：台账落点 `get_agent_context_ledger_path(agent_id)`
+    # 按"安全路径段"校验（`^[A-Za-z0-9_-]+$`），MagicMock 的 repr 含 `` 与空格，
+    # 一构造就被判非法、台账永远装不上——那测的是身份校验，不是懒装配。
+    mock_agent.agent_id = "t-agent"
+    mock_agent.user_id = "u"
     mock_agent.llm_client = SimpleNamespace()
 
     # llm chat 桩（MultiModelLLMClient.chat 契约：await → dict 带 content）

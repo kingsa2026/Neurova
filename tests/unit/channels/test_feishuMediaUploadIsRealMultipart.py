@@ -30,6 +30,7 @@ import pytest
 
 from neurova.channels.feishu_auth import AuthMixin
 from neurova.channels.feishu_media import MediaMixin
+from tests.ast_scan import parseSource
 
 
 class _Stub(BaseHTTPRequestHandler):
@@ -136,7 +137,7 @@ class TestUploadDoesNotBlockTheEventLoop:
         import ast
 
         src = pathlib.Path("neurova/channels/feishu_media.py").read_text(encoding="utf-8")
-        tree = ast.parse(src)
+        tree = parseSource(src)
         offenders = []
         for cls in [node for node in tree.body if isinstance(node, ast.ClassDef)]:
             for fn in [m for m in cls.body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))]:
@@ -151,7 +152,7 @@ class TestUploadDoesNotBlockTheEventLoop:
         """反向对照：探测器不是恒绿——把 to_thread 摘掉就必须报出来。"""
         import ast
 
-        bad = ast.parse(
+        bad = parseSource(
             "class C:\n"
             "    async def upload_x(self):\n"
             "        return self._feishu_multipart('/p', {}, {})\n"

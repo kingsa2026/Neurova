@@ -29,6 +29,7 @@ from neurova.evolution.eval import miner as _miner
 from neurova.evolution.eval.miner import sanitize_messages
 from neurova.security import sensitive_info as _shared
 from neurova.skills.evolution_inputs_guard import redact_secrets
+from tests.ast_scan import parseSource
 
 # 挖掘门的剔除判定**经真入口问**（`sanitize_messages`）：本档原先直接 import
 # `miner.contains_secret`，而那一格断言的正是"这个名字不再作为第二段实装存在"——
@@ -68,7 +69,7 @@ _PROSE_WITH_ENV_NAME = "部署前请先设置 GITHUB_TOKEN 与 DATABASE_URL 两�
 
 
 def _minerTree() -> ast.Module:
-    return ast.parse(Path(_miner.__file__).read_text(encoding="utf-8"))
+    return parseSource(Path(_miner.__file__).read_text(encoding="utf-8"))
 
 
 def _topLevelDefNames(tree: ast.Module) -> set:

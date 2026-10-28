@@ -37,6 +37,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from tests.ast_scan import parseSource
 
 
 # ============================================================
@@ -228,7 +229,7 @@ def test_bug6_mem_core_uses_flush_not_flush_to_long_term_memory():
     from neurova import mem_core
 
     source = inspect.getsource(mem_core)
-    tree = ast.parse(source)
+    tree = parseSource(source)
 
     # 遍历 AST,查找实际的 flush_to_long_term_memory 属性访问(排除注释)
     flush_to_ltm_accesses = []
@@ -377,7 +378,7 @@ def test_bug10_cancel_awaits_task():
     from neurova.agent.tool_execution_manager import ToolExecutionManager
 
     source = textwrap.dedent(inspect.getsource(ToolExecutionManager.cancel))
-    tree = ast.parse(source)
+    tree = parseSource(source)
 
     has_cancel = False
     has_await_task = False

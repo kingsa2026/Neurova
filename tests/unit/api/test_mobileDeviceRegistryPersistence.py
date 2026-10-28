@@ -28,6 +28,7 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_registry_0123456789")
 
 from neurova.api.endpoints import mobile_pairing as MP  # noqa: E402
+from tests.ast_scan import parseSource
 
 PREFIX = "/api/v1/mobile"
 OWNER = "kai"
@@ -144,7 +145,7 @@ class TestRevocationStopsReconnect:
                     return
                 await websocket.accept()
         ''')
-        body = ast.parse(sample).body[0]
+        body = parseSource(sample).body[0]
         readsRegistry = any(
             isinstance(node, ast.Attribute) and node.attr == "isAdmissible"
             for node in ast.walk(body))

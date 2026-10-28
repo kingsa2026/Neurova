@@ -28,6 +28,7 @@ import re
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 pytestmark = pytest.mark.timeout(90)
 
@@ -63,7 +64,7 @@ async def _boom(prompt: str, system: str) -> str:
 
 def _handWrittenRunStatuses(src: str) -> list[str]:
     """`update_run(...)` 实参里带 `status` 键、且不在结算函数体内 → 各抄了一份终态口径。"""
-    tree = ast.parse(src)
+    tree = parseSource(src)
     exempt = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name == SETTLE_FN:

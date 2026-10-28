@@ -21,6 +21,7 @@ AGENTS.md 协作红线点名的"只写不读的配置"断点形态——表现�
 """
 
 from __future__ import annotations
+from tests.ast_scan import parseSource
 
 
 class _Sentinel:
@@ -87,7 +88,7 @@ def testNoCallSitePinsTheDefaultAgentIdentity():
         if "__pycache__" in path.parts or path.resolve() == singleSource:
             continue  # 单源模块本身就是那份定义的落点
         rel = str(path.relative_to(root))
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        tree = parseSource(path.read_text(encoding="utf-8"), filename=str(path))
 
         for node in ast.walk(tree):
             # (a) 实参里出现 default 字面量（含 `x or "default"` 这种回落）
@@ -129,7 +130,7 @@ def testDefaultAgentKeyLiteralHasExactlyOneHome():
         病灶记录，按原文扫会把说明当违规——本仓同类守卫（工单 011 的反向锁）也按
         AST 取用，不按文本取用。
         """
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        tree = parseSource(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Constant) and node.value == "default_agent_id":
                 return True

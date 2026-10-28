@@ -68,10 +68,10 @@
                 size="small"
                 style="width: 150px"
                 :options="skillOptions"
-                :placeholder="t('skillEvo.adoptTarget')"
+                :placeholder="t('skill.adoptTarget')"
               />
               <GlassButton variant="secondary" size="sm" @click="adoptHarness(item)">
-                {{ t('skillEvo.adopt') }}
+                {{ t('skill.adopt') }}
               </GlassButton>
             </div>
             <div class="domain-harness-desc">{{ item.description }}</div>
@@ -564,18 +564,18 @@ const skillOptions = computed(() =>
 
 async function adoptHarness(item: skillPoolApi.DomainHarness) {
   if (!adoptTargetId.value) {
-    message.warning(t('skillEvo.adoptTarget'))
+    message.warning(t('skill.adoptTarget'))
     return
   }
   try {
     await evolutionApi.adoptDomainHarness(
       props.agentId, item.skill_id, adoptTargetId.value,
     )
-    message.success(t('skillEvo.adoptSuccess'))
+    message.success(t('skill.adoptSuccess'))
     openProposals()
   } catch (err: any) {
     const detail = err?.response?.data?.detail || err?.message
-    message.error(detail || t('skillEvo.adoptError'))
+    message.error(detail || t('skill.adoptError'))
   }
 }
 

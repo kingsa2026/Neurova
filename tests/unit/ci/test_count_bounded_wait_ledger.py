@@ -60,6 +60,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 GUARD_REL = "tests/unit/ci/test_count_bounded_wait_ledger.py"
 
@@ -222,7 +223,7 @@ def countBoundedWaits(source) -> List[Tuple[int, str]]:
     - 缺「提前退出」的只是计量性让出，不声称"等到了"；
     - 缺「零延迟让步」的（真定时 `sleep(0.05)`）是让出到点，不是自旋。
     """
-    tree = source if isinstance(source, ast.AST) else ast.parse(source)
+    tree = source if isinstance(source, ast.AST) else parseSource(source)
     found: List[Tuple[int, str]] = []
     stack = [(tree.body, "<模块级>", frozenset())]
     visited: set = set()

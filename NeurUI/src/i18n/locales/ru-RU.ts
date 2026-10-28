@@ -1153,10 +1153,6 @@ export default {
     sandboxRequired: 'Песочница',
   },
   skillEvo: {
-    adopt: 'Принять',
-    adoptTarget: 'Целевой навык',
-    adoptSuccess: 'Создано предложение на утверждение',
-    adoptError: 'Не удалось принять',
     abVerify: 'Проверка двумя руками (настоящий holdout)',
     abHint: 'Тот же набор задач и тот же судья: базовый текст против текста-кандидата; только чтение, предложение не создаётся.',
     abRunSimulated: 'Запустить симулированную',
@@ -1309,6 +1305,10 @@ export default {
     noMarketSkills: 'Нет общедоступных навыков для импорта',
     installSuccess: 'Установка успешна',
     installError: 'Ошибка установки',
+    adopt: 'Принять',
+    adoptTarget: 'Целевой навык',
+    adoptSuccess: 'Создано предложение на утверждение',
+    adoptError: 'Не удалось принять',
   },
   skillPool: {
     pendingReview: "На рассмотрении",

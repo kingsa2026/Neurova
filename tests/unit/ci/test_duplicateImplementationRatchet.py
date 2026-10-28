@@ -46,6 +46,7 @@ import re
 from typing import NamedTuple
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO_ROOT = ast_scan.REPO_ROOT
 PRODUCTION_ROOT = ast_scan.PRODUCTION_ROOT
@@ -298,7 +299,7 @@ def test_baselineMatchesMeasuredCount():
 def test_spanBoundNeverSkipsALongBody(tmp_path):
     """预筛③必须打在**字符上界**上——两条腿都在真扫描上取读数，不在本档里 `ast.parse`。
 
-    第一版这格直接 `ast.parse(字面量)` 来单测 `_spanUpperBound()`，被本仓的解析预算门禁
+    第一版这格直接 `parseSource(字面量)` 来单测 `_spanUpperBound()`，被本仓的解析预算门禁
     报成"枚举＋解析"的落点（`tests/unit/test_ci_ast_scan_budget_guard.py`）——那是对的：
     要证的本来就是**扫描行为**，而扫描行为的读数只能从真扫描里取。改后的两条腿各自钉一个方向：
 

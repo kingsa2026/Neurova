@@ -60,6 +60,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法
+from tests.ast_scan import parseSource
 
 GUARD_REL = "tests/unit/ci/test_optionalImportWallOwedByLivePath.py"
 
@@ -125,7 +126,7 @@ def _importPathInLandedFile() -> list[str]:
         filePath = REPO_ROOT / (modulePath.replace(".", "/") + ".py")
         if not filePath.is_file():
             continue
-        tree = ast.parse(io.open(filePath, encoding="utf-8", errors="ignore").read())
+        tree = parseSource(io.open(filePath, encoding="utf-8", errors="ignore").read())
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
                 queue.append(node.module)
@@ -147,7 +148,7 @@ def _importPathInLandedFile() -> list[str]:
         if not path.is_file():
             continue
         try:
-            tree = ast.parse(io.open(path, encoding="utf-8", errors="ignore").read())
+            tree = parseSource(io.open(path, encoding="utf-8", errors="ignore").read())
         except SyntaxError:
             continue
         for node in ast.walk(tree):

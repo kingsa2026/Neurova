@@ -32,6 +32,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+from tests.ast_scan import parseSource
 from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
 
 WORK_ROOT = isolatedDataRoot(prefix="neurovaFacadeB43")
@@ -167,7 +168,7 @@ def main() -> int:
         text = (REPO_ROOT / rel).read_text(encoding="utf-8", errors="replace")
         offenders += jud.placeholderViolations(text, rel)
         try:
-            tree = _ast.parse(text)
+            tree = parseSource(text)
         except Exception:
             continue
         for node in _ast.walk(tree):

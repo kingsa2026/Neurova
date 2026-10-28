@@ -30,6 +30,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 REPO = Path(__file__).resolve().parents[3]
 if str(REPO) not in sys.path:
@@ -47,7 +48,7 @@ _ALLOWED_SELF_BUILT = {
 
 def _selfBuiltSkillService(path: Path):
     """按 AST 数这个文件里 `SkillService(...)` 的**构造**调用数（导入与注解不算）。"""
-    tree = ast.parse(io.open(path, encoding="utf-8").read(), filename=str(path))
+    tree = parseSource(io.open(path, encoding="utf-8").read(), filename=str(path))
     n = 0
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
@@ -104,6 +105,37 @@ class TestWriteThenReadSeeOneLedger:
         assert skill_id in ids, (
             f"安装回执说成功，但同进程的面板数据源读到 {len(rows)} 条 {ids[:5]}——"
             "写侧与读侧各持一份内存账，这正是本批要合掉的")
+
+    # 两格判的**不是一回事**，故都留：上行量的是「本档为何换包」的可携带读数（包内最长
+    # 成员长度，与宿主 / OS 无关）；下行量的是「路径预算由闸判、不由本机系统判」——后者
+    # 已经翻面一次（库根缩短后投影 247 < 260，单靠赌本机 OS 那一维不再成立）。
+    # 判据归为一族时不许只留一条：它们各自会红在完全不同的前提上。
+    def test_theRealStudioBundleIsLongerThanTheSwapReasonClaims(self):
+        """「本档为何换包」那条理由的**可携带读数**：包内最长成员本身就要占掉 125 字符。
+
+        旧版把这格写成「真资产在跑测环境里放不下」，判据里掺了宿主 tmp 根的长度——那是一条
+        绑在宿主上的假牙：本机 `/tmp/pytest-of-root/…` 量到 247 < 260 就红，CI 上深一点
+        量到 271 > 260 就绿，同一个包在两种宿主上给两个结论。落点根是部署量、不是包的属性，
+        故本格只量包本身：**最长成员 125 字符**这一读数与换包理由等价（库内目录名 28 字符
+        是任何包都躲不掉的固定项），且在任何宿主、任何 OS 上都是同一个数。
+
+        哪天这条红了＝包被裁短到换包的理由不成立，那时主格才可以改用真资产，并把上面那格的
+        替换理由一并改判——而不是把这格删掉（形态集 251：归零的腿要留着读数）。
+        """
+        import zipfile
+
+        from neurova.skills.market_sources import WINDOWS_MAX_PATH   # 预算单源＝解包闸用的那个数
+
+        bundle = REPO / "neurova" / "skills" / "market_bundles" / "adaptive-presentation-studio.zip"
+        with zipfile.ZipFile(io.BytesIO(bundle.read_bytes())) as zf:
+            longestMember = max(zf.namelist(), key=len)
+
+        # 下界取**现值只降不升**：它随包内容物变动，此处只钉"包没被裁短到理由不成立"。
+        floor = 100
+        assert len(longestMember) >= floor, (
+            f"包内最长成员只剩 {len(longestMember)} 字符（{longestMember}），"
+            f"已不足 {floor}——换包的理由（成员名自身就很长）不再成立，"
+            "主格该改用真资产包，把上面那格的替换理由一并改判")
 
     def test_studioPackageBudgetIsDecidedByTheGateNotByTheOs(self):
         """主格换包的理由必须**会红**，不许只写在话里（形态集 251 那条：归零的腿要留着读数）。
