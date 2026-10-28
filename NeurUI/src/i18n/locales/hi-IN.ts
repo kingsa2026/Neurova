@@ -1153,10 +1153,6 @@ export default {
     sandboxRequired: 'सैंडबॉक्स आवश्यक',
   },
   skillEvo: {
-    adopt: 'अपनाएं',
-    adoptTarget: 'लक्ष्य स्किल',
-    adoptSuccess: 'लंबित प्रस्ताव बनाया गया',
-    adoptError: 'अपनाने में विफल',
     abVerify: 'दो-आर्म जाँच (वास्तविक होल्डआउट)',
     abHint: 'एक ही कार्य-समुच्चय और एक ही जज: बेसलाइन बनाम उम्मीदवार पाठ; केवल-पठन, कोई प्रस्ताव नहीं बनाता।',
     abRunSimulated: 'सिम्युलेटेड आर्म चलाएँ',
@@ -1309,6 +1305,10 @@ export default {
     noMarketSkills: 'आयात के लिए कोई सार्वजनिक स्किल उपलब्ध नहीं',
     installSuccess: 'इंस्टॉलेशन सफल',
     installError: 'इंस्टॉलेशन विफल',
+    adopt: 'अपनाएं',
+    adoptTarget: 'लक्ष्य स्किल',
+    adoptSuccess: 'लंबित प्रस्ताव बनाया गया',
+    adoptError: 'अपनाने में विफल',
   },
   skillPool: {
     pendingReview: "समीक्षा लंबित",

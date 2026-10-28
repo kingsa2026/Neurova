@@ -24,10 +24,15 @@ from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 from neurova.post_chat_pipeline import PostChatPipeline
 
 
-def _make_manager(agent_id="test_agent"):
-    """创建隔离的 MemoryManager"""
+def _make_manager(tmpPath, agent_id="test_agent"):
+    """创建隔离的 MemoryManager（落点由 `tmp_path` 给，不落进程 CWD）。
+
+    `db_path=":memory:"` 时 `manager._init_storage` 用 `os.path.dirname(db_path) or "."`
+    当侧面库根，会在仓根建出 `memory_storage/`（全量顺序里由 `_guardRepoRootAgainstPollution`
+    点名；单跑恒绿）。
+    """
     unique_id = f"{agent_id}_{uuid.uuid4().hex[:8]}"
-    return MemoryManager(db_path=":memory:", agent_id=unique_id)
+    return MemoryManager(db_path=str(tmpPath / f"{unique_id}.db"), agent_id=unique_id)
 
 
 def _remember_decayable(manager, n, temperature=50.0, prefix="m"):
@@ -45,34 +50,34 @@ def _remember_decayable(manager, n, temperature=50.0, prefix="m"):
 class TestRunDecayCycleBounded:
     """max_memories 上限测试"""
 
-    def test_no_max_processes_all(self):
+    def test_no_max_processes_all(self, tmp_path):
         """默认（max_memories=None）应全量处理，保持向后兼容"""
-        manager = _make_manager()
+        manager = _make_manager(tmp_path)
         ids = _remember_decayable(manager, 20)
         count = manager.run_decay_cycle()
         assert count == 20
         assert all(manager._memories[mid].temperature < 50.0 for mid in ids)
 
-    def test_max_memories_bounds_processing(self):
+    def test_max_memories_bounds_processing(self, tmp_path):
         """设置 max_memories 后只处理有界数量的记忆"""
-        manager = _make_manager()
+        manager = _make_manager(tmp_path)
         ids = _remember_decayable(manager, 20)
         count = manager.run_decay_cycle(max_memories=5)
         assert count == 5
         changed = [mid for mid in ids if manager._memories[mid].temperature < 50.0]
         assert len(changed) == 5
 
-    def test_max_memories_above_count_processes_all(self):
+    def test_max_memories_above_count_processes_all(self, tmp_path):
         """max_memories 大于记忆总数时应全量处理"""
-        manager = _make_manager()
+        manager = _make_manager(tmp_path)
         ids = _remember_decayable(manager, 3)
         count = manager.run_decay_cycle(max_memories=10)
         assert count == 3
         assert all(manager._memories[mid].temperature < 50.0 for mid in ids)
 
-    def test_round_robin_rotates_coverage(self):
+    def test_round_robin_rotates_coverage(self, tmp_path):
         """轮询游标：连续两批应覆盖不同的记忆（公平性）"""
-        manager = _make_manager()
+        manager = _make_manager(tmp_path)
         ids = _remember_decayable(manager, 10)
 
         def changed_since(snapshot):
@@ -95,27 +100,27 @@ class TestRunDecayCycleBounded:
 class TestRunDecayCycleThrottle:
     """min_interval_seconds 节流测试"""
 
-    def test_throttle_skips_within_interval(self):
+    def test_throttle_skips_within_interval(self, tmp_path):
         """节流窗口内再次调用应跳过（返回 0）"""
-        manager = _make_manager()
+        manager = _make_manager(tmp_path)
         _remember_decayable(manager, 5)
         first = manager.run_decay_cycle(max_memories=5, min_interval_seconds=300.0)
         assert first == 5
         second = manager.run_decay_cycle(max_memories=5, min_interval_seconds=300.0)
         assert second == 0
 
-    def test_throttle_allows_after_interval(self):
+    def test_throttle_allows_after_interval(self, tmp_path):
         """超过节流窗口后应再次执行"""
-        manager = _make_manager()
+        manager = _make_manager(tmp_path)
         _remember_decayable(manager, 10)
         assert manager.run_decay_cycle(max_memories=5, min_interval_seconds=300.0) == 5
         # 模拟时间流逝（monotonic 秒）
         manager._last_decay_at = manager._last_decay_at - 400.0
         assert manager.run_decay_cycle(max_memories=5, min_interval_seconds=300.0) == 5
 
-    def test_no_throttle_by_default(self):
+    def test_no_throttle_by_default(self, tmp_path):
         """默认 min_interval_seconds=0 时不应节流（保持向后兼容）"""
-        manager = _make_manager()
+        manager = _make_manager(tmp_path)
         _remember_decayable(manager, 5)
         assert manager.run_decay_cycle(max_memories=5) == 5
         assert manager.run_decay_cycle(max_memories=5) == 5
@@ -185,9 +190,9 @@ class TestPostChatPipelineThreadDispatch:
         assert captured["args"][1].__func__ is PostChatPipeline._step_update_memory_temperature
 
     @pytest.mark.asyncio
-    async def test_event_loop_stays_responsive_during_sync_step(self):
+    async def test_event_loop_stays_responsive_during_sync_step(self, tmp_path):
         """同步阻塞步骤放入 to_thread 后，事件循环仍可处理其他任务"""
-        manager = _make_manager()
+        manager = _make_manager(tmp_path)
         _remember_decayable(manager, 200, temperature=50.0, prefix="stress")
 
         ticked = []

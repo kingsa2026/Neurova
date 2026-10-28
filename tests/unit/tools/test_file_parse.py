@@ -76,7 +76,9 @@ class TestFileParseRealDocuments:
 
     @pytest.mark.asyncio
     async def test_xlsx(self, tmp_path):
-        import openpyxl
+        # 生成夹具要 openpyxl，被测的解析本身也走它：缺件时这条量的是"这台机器没装"，
+        # 与 `test_pptx` 同一形态。跳过时点名，别让它读成"xlsx 解析退化了"。
+        openpyxl = pytest.importorskip("openpyxl", reason="本格要用 openpyxl 生成 xlsx 夹具")
 
         wb = openpyxl.Workbook()
         ws = wb.active
@@ -95,6 +97,7 @@ class TestFileParseRealDocuments:
 
     @pytest.mark.asyncio
     async def test_pptx(self, tmp_path):
+        pytest.importorskip("pptx", reason="本格要用 python-pptx 生成 pptx 夹具")
         from pptx import Presentation
         from pptx.util import Inches
 

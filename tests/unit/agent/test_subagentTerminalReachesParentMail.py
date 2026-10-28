@@ -38,7 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tests.ast_scan import filesUnder, transientTree  # noqa: E402
+from tests.ast_scan import filesUnder, transientTree, parseSource  # noqa: E402
 
 PARENT_SESSION = "s-parent"
 REPORT_BODY = "调研结论：β 方案胜出，风险点集中在写入时序"
@@ -286,7 +286,7 @@ class TestNoHardTruncationInUplink:
 
     def testSwarmNoLongerSlicesBodyByLiteralLength(self):
         src = (REPO_ROOT / "neurova" / "agent" / "swarm.py").read_text(encoding="utf-8")
-        tree = ast.parse(src)
+        tree = parseSource(src)
         sliced = [
             f"line{node.lineno}:{self._slicedSource(node)}[:{node.slice.upper.value}]"
             for node in ast.walk(tree)

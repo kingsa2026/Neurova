@@ -47,6 +47,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tests import ast_scan  # noqa: E402
+from tests.ast_scan import parseSource
 
 SKILLS_INIT = "neurova/skills/__init__.py"
 FACADE_FIRST_PARTY = ("neurova.skills.models", "neurova.skills.hub_client",
@@ -84,7 +85,7 @@ def deadSwallowBlocks(source: str, filename: str):
     解析失败**不静默跳过**——按形态集口径，"跳过编译失败"这条兜底本身必须被报出来。
     """
     try:
-        tree = ast.parse(source, filename=filename)
+        tree = parseSource(source, filename=filename)
     except SyntaxError as exc:
         return [("无法解析，扫描面未覆盖该文件", 0, str(exc))]
     hits = []
@@ -104,7 +105,7 @@ def deadSwallowBlocks(source: str, filename: str):
 def nonePlaceholders(source: str, filename: str):
     """except ImportError 分支里把名字赋成 None 的那些行。"""
     try:
-        tree = ast.parse(source, filename=filename)
+        tree = parseSource(source, filename=filename)
     except SyntaxError as exc:
         return [(0, str(exc))]
     out = []
@@ -157,7 +158,7 @@ class TestNoDeadImportSwallowBlocks:
 
     def testSkillsFacadeImportsAreNotSwallowed(self):
         """门面的 first-party 导入必须在顶层直接执行；而批 46 退役过的那批名字不得回来（§6-238）。"""
-        tree = ast.parse(io.open(REPO_ROOT / SKILLS_INIT, encoding="utf-8").read())
+        tree = parseSource(io.open(REPO_ROOT / SKILLS_INIT, encoding="utf-8").read())
         swallowed = []
         for node in tree.body:
             if not isinstance(node, ast.Try):
@@ -201,7 +202,7 @@ class TestNoDeadImportSwallowBlocks:
             return missing
 
         text = io.open(REPO_ROOT / SKILLS_INIT, encoding="utf-8").read()
-        doc = ast.get_docstring(ast.parse(text)) or ""
+        doc = ast.get_docstring(parseSource(text)) or ""
         pkgDir = REPO_ROOT / "neurova" / "skills"
         missing = inventoryLies(doc, pkgDir)
         assert not missing, (
@@ -222,7 +223,7 @@ class TestNoDeadImportSwallowBlocks:
         直取 `neurova.skills.models`（活体第 3 项现数）。⇒ 旧的那半句 `facade.SkillSource is
         models.SkillSource` 要求的是"门面上得有它"，方向已由本格反成"**有它就红**"。
         """
-        tree = ast.parse(io.open(REPO_ROOT / SKILLS_INIT, encoding="utf-8").read())
+        tree = parseSource(io.open(REPO_ROOT / SKILLS_INIT, encoding="utf-8").read())
         seen = {}
         dupes = []
         for node in ast.walk(tree):

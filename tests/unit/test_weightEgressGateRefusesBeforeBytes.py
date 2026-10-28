@@ -22,6 +22,7 @@ from pathlib import Path
 from tests import ast_scan  # noqa: E402
 
 import pytest
+from tests.ast_scan import parseSource
 
 # 出网那一层的调用点形状按**被调名字**认，不按文件名认：新开第四处下载点也必须被这条扫到
 _EGRESS_CALLEES = {"snapshot_download", "hf_hub_download", "HubApi"}
@@ -105,7 +106,7 @@ def _scanEgressCallSites():
     hits = set()
     for rel in ast_scan.trackedPyPaths("neurova"):
         try:
-            tree = ast.parse(Path(rel).read_text(encoding="utf-8"))
+            tree = parseSource(Path(rel).read_text(encoding="utf-8"))
         except (OSError, SyntaxError, UnicodeDecodeError):
             continue
         moduleName = rel[: -len(".py")].replace("/", ".")

@@ -88,6 +88,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TESTS_ROOT = REPO_ROOT / "tests"
@@ -480,6 +481,7 @@ def _scanCorpus():
     """
     findings: List[str] = []
     budgetTests = 0
+    scannedFiles = 0
     coarseAll: Set[Tuple[str, int]] = set()
     attributedAll: Set[Tuple[str, int]] = set()
     # 面自证落**枚举**那一趟，不落预筛结果：预筛命中的文件数随判据词表变，量不出"根被改窄"。
@@ -489,6 +491,7 @@ def _scanCorpus():
         f"扫描面现读 {len(enumerated)} 个 .py（根＝{TESTS_ROOT}）——根被改窄或指错了，"
         "『没有嵌套用例漏给自己的预算』这句话不来自代码")
     for path in enumerated:
+        scannedFiles += 1
         if not path.name.startswith("test_"):
             continue
         if any(part in path.parts for part in _NOT_COLLECTED_DIRS):
@@ -503,14 +506,14 @@ def _scanCorpus():
         budgetTests += fileBudget
         coarseAll |= fileCoarse
         attributedAll |= fileAttributed
-    return (tuple(findings), budgetTests, frozenset(coarseAll), frozenset(attributedAll))
+    return tuple(findings), budgetTests, scannedFiles, frozenset(coarseAll), frozenset(attributedAll)
 
 
 class TestNestedPytestBudgetWalls:
 
     def test_noCollectedCaseOutlivesItsOwnWall(self):
         """父墙必须严格高于子墙；把全局墙当父墙的嵌套 pytest 用例一律点名。"""
-        findings, budgetTests, _coarse, _attributed = _scanCorpus()
+        findings, budgetTests, _scanned, _coarse, _attributed = _scanCorpus()
         assert not findings, (
             "这些用例在子进程里等一件事，自己的预算却没声明（或声明得比子进程还低）。"
             "Windows 侧 pytest-timeout 走 thread 法，超时即终止进程——一格超墙＝整场跑测没了：\n"
@@ -520,10 +523,15 @@ class TestNestedPytestBudgetWalls:
 
     def test_scanFaceAndSiteAttributionAreNotVacuous(self):
         """面自证＋落点归账：这次真扫到了带子进程等待的用例，且粗尺读到的每一处落点都被归过账。"""
-        _findings, budgetTests, coarse, attributed = _scanCorpus()
-        scannedFiles = len(ast_scan.sourceRefsUnder(TESTS_ROOT, ".py"))
-        assert scannedFiles >= 1000, (
-            "被收集测试语料现读 %d 个 .py——TESTS_ROOT 指错时零违规不作数" % scannedFiles)
+        _findings, budgetTests, scannedFiles, coarse, attributed = _scanCorpus()
+        # 下限写成字面量而不是模块常量：面自证棘轮（`test_scanCriterionMustProveItsOwnSurfaceRatchet`）
+        # 只认 `assert <扫描计数> >= <字面量>` 这一形，取阈值的写法它读不到——本档会当场以
+        # 「扫了仓内源码树却没把这次扫到的数量当断言比」被点名（2026-10-23 实测）。
+        assert scannedFiles >= 100, (
+            "扫描面现读 %d 个 .py（下限 100，根＝%s）——根或文本预筛被改窄时，"
+            "下面两条的『零违规』与『全归账』都会变成空转"
+            % (scannedFiles, TESTS_ROOT)
+        )
         assert _globalWallSeconds() is not None, (
             "没能从 pyproject 读到全局墙——缺省父墙此刻无从判定，『合规』是假绿")
         assert budgetTests >= _WALL_FACE_FLOOR, (
@@ -620,7 +628,7 @@ class TestNestedPytestBudgetWalls:
              False, "合规：子墙数值读不出，但该格显式声明了父墙，不再靠全局墙兜底"),
         ]
         for index, (source, expectFinding, why) in enumerate(cases):
-            tree = ast.parse(source)        # 合成样本自己先要合法（形态 376）
+            tree = parseSource(source)        # 合成样本自己先要合法（形态 376）
             label = "sample%d" % index
             findings, _budget, coarse, attributed = _judgeTree(tree, label)
             assert (coarse - attributed) == set(), "样本 %s 落点未归账：%s" % (label, why)
@@ -637,7 +645,7 @@ class TestNestedPytestBudgetWalls:
                   "def testNamesakeRuns():\n"
                   "    asyncio.run(_coro())\n"
                   "    engine.run(timeout=900)\n")
-        findings, budget, _coarse, _attributed = _judgeTree(ast.parse(source), "sampleNamesake")
+        findings, budget, _coarse, _attributed = _judgeTree(parseSource(source), "sampleNamesake")
         assert not findings and budget == 0, (
             "同名假阳进账了（现数 %d 格／%d 条）——扩面必须先关住这一口，"
             "否则全仓 28 处 asyncio.run 会把『违规』淹成噪声" % (budget, len(findings)))

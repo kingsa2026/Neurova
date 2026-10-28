@@ -119,24 +119,33 @@ def test_bothCiSidesReadTheListTheSameWayAsTheSingleReader():
 
     为什么两条 CI 都要钉：`tests/unit/test_ci_parity_guard.py` 只比「核心命令逐字一致」，
     两侧一起写错时它一个字都不会说——那正是本次事故的形态。
+
+    取数口跟着**现行实现**走：两侧此后都改成了「把清单逐行读进位置参数」
+    （`while IFS= read -r entry`，见 `.cnb.yml` 的 `protected_subset_shards` 与
+    `.github/workflows/ci.yml` 的矩阵片），`TESTS=...` 那种“压成一行再交给 shell 切词”
+    的写法整体退役。判据因此不再盯某一行的字面写法，而是盯**同一件事**：
+    两侧都逐行喂清单、都不退回 `grep -v '^#'`、都把注释行与空行滤掉。
     """
     readerCount = len(ast_scan.protectedSubsetEntries())
     assert readerCount > 500, f"唯一读法现读 {readerCount} 条，量级不对＝没读到／路径写错"
     for configPath in (CNB, REPO_ROOT / ".github" / "workflows" / "ci.yml"):
         text = configPath.read_text(encoding="utf-8")
-        lines = [
-            line.strip() for line in text.splitlines()
-            if "TESTS=" in line and "protected_tests.txt" in line
-        ]
-        assert len(lines) == 1, (
-            f"{configPath.name} 里取 TESTS 的那一行应恰好一处，现读 {len(lines)} 处：{lines}")
-        line = lines[0]
-        assert "grep -v '^#'" not in line, (
-            f"{configPath.name} 退回 `grep -v '^#'` 读清单——行内注释条目会被当路径塞给 pytest，"
-            "整腿以 `file or directory not found` 退出 4（PR #369 事故原形）")
-        assert "sed -e 's/#.*//'" in line, (
-            f"{configPath.name} 取 TESTS 的写法不再剥行内注释：{line!r}。"
-            "清单读法必须与 tests/ast_scan.protectedSubsetEntries() 同口径")
+        feeders = [line.strip() for line in text.splitlines()
+                   if "IFS= read -r entry" in line]
+        assert feeders, (
+            f"{configPath.name} 里找不到「逐行把清单读进位置参数」的那一段——"
+            "压成一行交给 shell 切词时，清单里一条空行就能让后面的条目整片错位"
+            "（构建 cnb-1f0-1k5uonjt2-003 的形态）")
+        # 行内注释由**逐行读之后的那道存在性检查**兜住（`[ -f "$entry" ] || exit 1`）：
+        # 真出现 `路径  # 说明` 时当场报「清单点名了不存在的文件」并以 1 收场，
+        # 而不是像原来那样整腿退 4、与「某条判据真红了」同形。
+        assert 'grep -v \'^#\'' in text, (
+            f"{configPath.name} 不再滤整行注释——注释被当条目塞给 pytest 的形态回来了")
+        assert '"-f \"$entry\""' in text or '[ -f "$entry" ]' in text, (
+            f"{configPath.name} 的行内注释没有兜底：逐行读之后必须有存在性检查，"
+            "否则 `路径  # 说明` 会以 `file or directory not found` 收场")
+        assert "protected_tests" in text, (
+            f"{configPath.name} 的逐行读法与受保护子集清单脱钩")
 
 
 def test_rawReaderIsNotTheNormalizedOne(tmp_path):

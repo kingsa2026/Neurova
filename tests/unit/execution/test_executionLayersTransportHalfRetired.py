@@ -23,6 +23,7 @@ import pathlib
 import sys
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 INIT = REPO_ROOT / "neurova" / "execution_layers" / "__init__.py"
@@ -33,7 +34,7 @@ TRANSPORT_SURFACE = ("TransportType", "ExecutionTransport", "HTTPTransport",
 
 
 def _topLevelNames() -> dict:
-    tree = ast.parse(INIT.read_text(encoding="utf-8", errors="replace"))
+    tree = parseSource(INIT.read_text(encoding="utf-8", errors="replace"))
     kinds = {}
     for node in tree.body:
         if isinstance(node, ast.ClassDef):
@@ -117,9 +118,9 @@ def test_runtimeHalfStillProducesAWorkingLocalRuntime():
     assert RuntimeFactory.list_supported_types() == [RuntimeType.LOCAL, RuntimeType.DOCKER]
     assert get_runtime_manager() is get_runtime_manager(), "单例语义被动过"
     assert isinstance(get_runtime_manager(), RuntimeManager)
-    # 解释器取本进程的 `sys.executable`，不写字面量 `"python"`：该别名不是每台跑测机都有
-    # （Debian 系只有 `python3`），字面量会让这一格在解释器缺席时被读成"运行时坏了"。
-    # 本格钉的是"运行时那半的活路还在"，与跑测机上恰好有没有那个别名无关。
+    # 解释器必须取**当前这个**（`sys.executable`），不能写字面 `python`：该别名不是每台跑测机
+    # 都有（Debian 系只有 `python3`，精瘦容器里只有 `python3.12` 之类），字面量会让本格红在
+    # "容器里没这个命令"上，而不是红在"本地运行时还能不能执行"上。本格钉的只是后者。
     result = asyncio.run(runtime.exec(command=sys.executable, args=["-c", "print(1)"], timeout=30))
     assert result.success and "1" in (result.stdout or ""), f"本地运行时执行不回来：{result}"
 
@@ -129,7 +130,7 @@ def test_transportHalfIsNoLongerDeclaredInThatModule():
     kinds = _topLevelNames()
     left = [n for n in TRANSPORT_SURFACE if n in kinds]
     declared = [n for n in TRANSPORT_SURFACE
-                if n in {c.value for c in ast.walk(ast.parse(INIT.read_text(encoding="utf-8")))
+                if n in {c.value for c in ast.walk(parseSource(INIT.read_text(encoding="utf-8")))
                           if isinstance(c, ast.Constant) and isinstance(c.value, str)}]
     assert not left, f"传输那半还留着顶层定义：{left}"
     assert not declared, f"`__all__`／字符串面还挂着已退役的传输名：{declared}"

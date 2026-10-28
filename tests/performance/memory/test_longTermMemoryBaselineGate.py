@@ -27,6 +27,7 @@
 每条用例前后各重置一次，否则上一份语料的词条会冒充下一份的键。
 """
 
+import ast
 import datetime
 import os
 import time
@@ -34,27 +35,34 @@ from pathlib import Path
 
 import pytest
 
-from tests import ast_scan
-
-#: 扫描根绑在模块级：绑在函数里的名字，面自证棘轮（`test_scanCriterionMustProveItsOwnSurfaceRatchet`）
-#: 认不出，整档会安静地掉出它的面（§6-404 批 M 补这一处）。
-REPO_ROOT = Path(__file__).resolve().parents[3]
-PERFORMANCE_ROOT = REPO_ROOT / "tests" / "performance"
-
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 from tests import ast_scan
 from tests.performance.memory.test_associativeRecallGate import DISTRACTORS
+from tests.ast_scan import parseSource
+
+#: 扫描根一律写在**模块级常量**上：「面自证」棘轮（`test_scanCriterionMustProveItsOwnSurfaceRatchet`）
+#: 只按模块级绑定解根，绑进函数局部的名字认不出 ⇒ 那档整档掉出它的面，零命中与根写窄都不再被问。
+#: 本档深度 `tests/performance/memory/x.py` ⇒ 仓根是 `parents[3]`，`tests/performance` 是 `parents[1]`。
+REPO_ROOT = Path(__file__).resolve().parents[3]
+PERFORMANCE_ROOT = Path(__file__).resolve().parents[1]
 
 pytestmark = [pytest.mark.timeout(180)]
 
+#: 仓根 / 生产源码树 / 性能测试树——**模块级常量**。本档几处结构守卫都要扫仓内树，
+#: 根绑在函数里时面自证棘轮认不出（`tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py`），
+#: 整档会静默掉出它的面：那时「零命中」既可能来自代码干净、也可能来自根写错。
+REPO_ROOT = Path(__file__).resolve().parents[3]
+PRODUCTION_ROOT = REPO_ROOT / "neurova"
+PERFORMANCE_ROOT = Path(__file__).resolve().parents[1]
+#: 结构守卫要逐文件扫的三片源码树。写成模块级**路径元组**而不是目录名字符串：
+#: 扫描根必须是模块级常量（面自证棘轮按模块级解根），`REPO_ROOT / 名字` 那样的拼法
+#: 要再走一层循环变量，棘轮认不出它 = 整档掉出面。
+SOURCE_TREES = tuple(REPO_ROOT / name for name in ("neurova", "tests", "scripts"))
+#: 扫描面下限：三片树现读约 3500 个 `.py`、生产树约 1000 个，写错一层就落到个位数。
+SCAN_FLOOR = 700
+
 PROBE_LIMIT = 10
 CAPACITY_ROWS = 200
-#: 本档两处全仓判据的根：`tests/performance/` 与仓根。必须写在模块级——
-#: 绑在函数里的名字，面自证棘轮（`tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py`）
-#: 认不出根位置，整档会静默掉出它的面。深度按本档位置算（本档在 `tests/performance/memory/`）。
-PERFORMANCE_ROOT = Path(__file__).resolve().parents[1]
-#: 仓根：退役守卫按它拼三条扫描根。
-REPO_ROOT = Path(__file__).resolve().parents[3]
 
 OLD_WORDING = "用户: 我有一只青瓷茶壶是外婆留下的"
 NEW_WORDING = "用户: 我把阳台浇花的活改成了每周三定时自动滴灌"
@@ -63,8 +71,6 @@ NEW_QUERY = "自动滴灌"
 
 
 def _newManager(tmp_path, agentId: str) -> MemoryManager:
-    from neurova.embedding import get_embedding_engine
-
     # 前提要证"引擎真的出非零向量"，不能只证"对象不是 None"：`get_embedding_engine()`
     # 从未返回 None——模型档在、但分词器/运行时装不上时它照样给一个对象，随后
     # `initialize()` 失败并**兜底零向量**（日志里只有一行 ERROR）。只判非 None 等于恒真，
@@ -436,16 +442,15 @@ class TestContentUpdateFollowsRecallIndexes:
         任何新的 `x.content = ...` 落在这个方法之外，就是又一处「改了行、没跟索引」。
         """
         import ast
-        from pathlib import Path
 
-        src = (
-            Path(__file__).resolve().parents[3]
-            / "neurova"
-            / "cognitive_layers"
-            / "memory_layer"
-            / "manager.py"
+        src = PRODUCTION_ROOT / "cognitive_layers" / "memory_layer" / "manager.py"
+        tree = parseSource(src.read_text(encoding="utf-8"))
+        # 面自证：根写错时 `read_text` 未必响，而「扫到 0 处赋值」永远读起来像干净。
+        # 下限按**本档**的「根解到仓内真实目录」来给：`SCAN_FLOOR` 是跨三片树的总量口径，
+        # 拿来量单个模块就变成常量错配（实测一个文件 49 个顶层节点）。
+        assert len(tree.body) > 20, (
+            f"`manager.py` 顶层节点只有 {len(tree.body)} 个（下限 20）——根写错了"
         )
-        tree = ast.parse(src.read_text(encoding="utf-8"))
         offenders = []
         for func in ast.walk(tree):
             if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -559,18 +564,21 @@ class TestUncollectedMeasurementFileIsRetired:
     """退役守卫（教义第 7 条：留下第二份即未闭环）。"""
 
     def test_performance_目录下不得有不被收集的文件(self):
-        root = PERFORMANCE_ROOT
-        # 枚举走共享入口（`tests/ast_scan.filesUnder`）并**物化后自证面**：根被改窄或
-        # 写错一层时，读数会退化成"零散件"——那时这条断言看起来与"干净"一模一样。
-        # 两种坏法都只有把扫到的数量当断言比才咬得住。
-        files = ast_scan.filesUnder(PERFORMANCE_ROOT)
-        assert len(files) > 5, f"扫描面现读 {len(files)} 个 .py（根＝tests/performance/）——根被改窄了"
+        scanned = len(ast_scan.sourceRefsUnder(PERFORMANCE_ROOT, ".py"))
+        assert scanned >= 3, (
+            "该目录现读 %d 个 .py——PERFORMANCE_ROOT 指错时『没有散件』是假绿（面自证）" % scanned)
+        # 落点直接向模块级常量要根：函数内的 `root = PERFORMANCE_ROOT` 重绑会让
+        # 面自证棘轮的解根器认不出（它只收模块级绑定）。
         strays = [
-            p.relative_to(root.parent).as_posix()
-            for p in files
+            p.relative_to(PERFORMANCE_ROOT.parent).as_posix()
+            for p in PERFORMANCE_ROOT.rglob("*.py")
             if "__pycache__" not in p.parts and p.name != "__init__.py"
             and not p.name.startswith("test_")
         ]
+        scanned = len(list(PERFORMANCE_ROOT.rglob("*.py")))
+        assert scanned > 4, (
+            f"扫描面现读 {scanned} 个 .py（根＝{PERFORMANCE_ROOT}）——"
+            "根若被改窄，「零散件」这句就是空转")
         assert not strays, (
             f"这些件在 tests/performance/ 里但不会被 pytest 收集（pyproject 的 "
             f"python_files=[\"test_*.py\"]）：{strays}——"
@@ -578,34 +586,39 @@ class TestUncollectedMeasurementFileIsRetired:
         )
 
     def test_旧件与其符号不得复活(self):
-        import ast
-
-        repo = REPO_ROOT
-        assert not (repo / "tests" / "performance" / "longmeval_simple.py").exists(), (
+        # 落点与报错都直接向模块级常量要根：函数内的 `repo =` 重绑会让解根器认不出。
+        assert not (REPO_ROOT / "tests" / "performance" / "longmeval_simple.py").exists(), (
             "旧测量件被复活：它按不存在的 API 写、且文件名不被收集"
         )
         # 按**类定义**认，不按子串——本文件自己的 docstring 也要提到那个类名，
         # 用子串扫会变成「守卫咬住记录来历的注释」的假红（也拦不住真复活）。
-        ghosts, unparsed = [], []
-        # 枚举与解析走共享一次性入口（`tests/ast_scan`）：判据自己的 `rglob + ast.parse`
-        # 会把成本绑成「代码总量」。文本预筛取类名——没出现这三个字的文件不可能定义它。
-        for root in ("neurova", "tests", "scripts"):
-            # 枚举与解析都走共享预算（`sourceRefsUnder` 只读一遍盘、文本预筛一并做完，
-            # `transientTree` 不留常驻语法树）：判据成本不随代码总量涨，
-            # 也不是"自己枚举一整棵根树再逐个解析"那一形。
-            for ref in ast_scan.sourceRefsUnder(repo / root, hints=("SimpleLongMemEval",)):
-                tree = ast_scan.transientTree(ref.path)
+        # 枚举与读盘走 `tests/ast_scan` 的共享预算；预筛词就是这个类名——`class X` 这一行
+        # 必须出现它，是这条谓词的**充分条件**，口径仍是三棵树全量。
+        ghosts, unparsed, scanned = [], [], 0
+        for rootName in ("neurova", "tests", "scripts"):
+            for ref in ast_scan.sourceRefsUnder(REPO_ROOT / rootName, ".py",
+                                                hints=("SimpleLongMemEval",)):
+                if "__pycache__" in ref.path.parts:
+                    continue
+                scanned += 1
+                path = ref.path
+                try:
+                    tree = parseSource(ref.code)
+                except (SyntaxError, UnicodeDecodeError):
+                    unparsed.append(path.relative_to(REPO_ROOT).as_posix())
+                    continue
                 if any(
                     isinstance(n, ast.ClassDef) and n.name == "SimpleLongMemEval"
                     for n in ast.walk(tree)
                 ):
-                    ghosts.append(ref.path.relative_to(repo).as_posix())
-        # 面自证：零复活只有在"真的扫过这三棵根"时才说明退役落干净了（根指错时这格恒绿）。
-        scanned = sum(
-            len(ast_scan.filesUnder(repo / root)) for root in ("neurova", "tests", "scripts")
-        )
-        assert scanned > 500, (
-            f"扫描面现读 {scanned} 个 .py（根＝neurova/ tests/ scripts/）——"
-            "根被改窄时「零复活」不代表干净")
+                    ghosts.append(path.relative_to(REPO_ROOT).as_posix())
+        corpusFiles = len(ast_scan.sourceRefsUnder(REPO_ROOT / "neurova", ".py"))
+        assert corpusFiles >= 800, (
+            "生产语料现读 %d 个 .py——REPO_ROOT 指错时这条守卫根本不说话" % corpusFiles)
+        # 退役完成后，`SimpleLongMemEval` 这个字面串只剩本档自己的记录（现算 1 个文件）。
+        # 所以这里的线是 **≥1**：掉到 0 的唯一解释是预筛词写坏或根被换窄——
+        # 那正是"零命中"与"没扫到"长得一样的那一形。
+        assert scanned >= 1, (
+            "带类名的候选现读 %d 个文件——预筛或根写坏，此时『零幽灵』不作数（面自证）" % scanned)
         assert not unparsed, f"守卫无法解析这些文件，判定面出现盲区：{unparsed}"
         assert not ghosts, f"类 SimpleLongMemEval 仍被定义在：{ghosts}"

@@ -30,6 +30,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 REPO = Path(__file__).resolve().parents[3]
 if str(REPO) not in sys.path:
@@ -47,7 +48,7 @@ _ALLOWED_SELF_BUILT = {
 
 def _selfBuiltSkillService(path: Path):
     """按 AST 数这个文件里 `SkillService(...)` 的**构造**调用数（导入与注解不算）。"""
-    tree = ast.parse(io.open(path, encoding="utf-8").read(), filename=str(path))
+    tree = parseSource(io.open(path, encoding="utf-8").read(), filename=str(path))
     n = 0
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
@@ -85,12 +86,12 @@ class TestWriteThenReadSeeOneLedger:
         return client
 
     def test_install_then_agentFaceListsIt(self, app_client):
-        """走真安装链，用真资产包（studio 那只）。
+        """走真安装链，且用**真资产包**（studio 那只），装完按盘上实际路径实测。
 
-        起点是反过来的：本格原用 `multi-search-engine`，理由是"studio 的终点投影超 Windows
-        260 预算，装不到最终位置"。那条理由现在失效了——路径预算成了**解包闸的前置判定**
-        （`market_sources.refusalForPathBudget`，跨机器同向，不再赌本机 OS 设置），库根也短了
-        一截（实测终点投影 247 < 260），真资产在跑测环境里装得成。留短包就是把"能不能装"
+        起点是反过来的：本格原用短包，理由是"studio 的终点投影超 Windows 260 预算，
+        装不到最终位置"。那条理由现在失效了——路径预算成了**解包闸的前置判定**
+        （`market_sources.refusalForPathBudget`，判定与点名同一份、跨机器同向，不再赌本机
+        OS 设置），库根也短了一截（实测终点投影 247 < 260）。留短包就是把"能不能装"
         这件事从判据里拿掉，读起来像通了、其实少测了真实尺寸那一路。
         """
         skill_id = "builtin--adaptive-presentation-studio"
@@ -104,6 +105,37 @@ class TestWriteThenReadSeeOneLedger:
         assert skill_id in ids, (
             f"安装回执说成功，但同进程的面板数据源读到 {len(rows)} 条 {ids[:5]}——"
             "写侧与读侧各持一份内存账，这正是本批要合掉的")
+
+    # 两格判的**不是一回事**，故都留：上行量的是「本档为何换包」的可携带读数（包内最长
+    # 成员长度，与宿主 / OS 无关）；下行量的是「路径预算由闸判、不由本机系统判」——后者
+    # 已经翻面一次（库根缩短后投影 247 < 260，单靠赌本机 OS 那一维不再成立）。
+    # 判据归为一族时不许只留一条：它们各自会红在完全不同的前提上。
+    def test_theRealStudioBundleIsLongerThanTheSwapReasonClaims(self):
+        """「本档为何换包」那条理由的**可携带读数**：包内最长成员本身就要占掉 125 字符。
+
+        旧版把这格写成「真资产在跑测环境里放不下」，判据里掺了宿主 tmp 根的长度——那是一条
+        绑在宿主上的假牙：本机 `/tmp/pytest-of-root/…` 量到 247 < 260 就红，CI 上深一点
+        量到 271 > 260 就绿，同一个包在两种宿主上给两个结论。落点根是部署量、不是包的属性，
+        故本格只量包本身：**最长成员 125 字符**这一读数与换包理由等价（库内目录名 28 字符
+        是任何包都躲不掉的固定项），且在任何宿主、任何 OS 上都是同一个数。
+
+        哪天这条红了＝包被裁短到换包的理由不成立，那时主格才可以改用真资产，并把上面那格的
+        替换理由一并改判——而不是把这格删掉（形态集 251：归零的腿要留着读数）。
+        """
+        import zipfile
+
+        from neurova.skills.market_sources import WINDOWS_MAX_PATH   # 预算单源＝解包闸用的那个数
+
+        bundle = REPO / "neurova" / "skills" / "market_bundles" / "adaptive-presentation-studio.zip"
+        with zipfile.ZipFile(io.BytesIO(bundle.read_bytes())) as zf:
+            longestMember = max(zf.namelist(), key=len)
+
+        # 下界取**现值只降不升**：它随包内容物变动，此处只钉"包没被裁短到理由不成立"。
+        floor = 100
+        assert len(longestMember) >= floor, (
+            f"包内最长成员只剩 {len(longestMember)} 字符（{longestMember}），"
+            f"已不足 {floor}——换包的理由（成员名自身就很长）不再成立，"
+            "主格该改用真资产包，把上面那格的替换理由一并改判")
 
     def test_studioPackageBudgetIsDecidedByTheGateNotByTheOs(self):
         """主格换包的理由必须**会红**，不许只写在话里（形态集 251 那条：归零的腿要留着读数）。
@@ -149,6 +181,34 @@ class TestWriteThenReadSeeOneLedger:
             payload, Path(libRoot) / "adaptive-presentation-studio") == "", (
             f"studio 在真实库根 {libRoot} 下被判成超预算——主格用真资产会失败，"
             "且失败信息会指向安装链路而不是这处路径预算")
+
+    def test_studioPackageLandsUnderTheBudgetThroughTheRealInstallChain(self, app_client):
+        """主格装真资产包的前置必须**实测自证**，不许从别处推。
+
+        上一版这里是反向断言（"装不下"），它按设计在落点变短时转红——本轮正是那一格红了：
+        conftest 把库根切到 `tmp_path` 后理论投影 246 < 260。但"理论投影"不是可观测事实
+        （库根里落的是 `builtin--<包名>`，不是 `manifest.name`；装的成功与否另有一串变量），
+        改判为**真装完之后按盘上实际路径量**：同一用例里装、读面看得见、最长路径还在预算内。
+        """
+        from neurova.skills.library_service import agentLibrary
+        from neurova.skills.market_sources import WINDOWS_MAX_PATH   # 预算单源＝解包闸用的那个数
+
+        skill_id = "builtin--adaptive-presentation-studio"
+        installed = app_client.post(f"/api/v1/skill-pool/{skill_id}/install",
+                                    params={"agent_id": "default"})
+        assert installed.status_code == 200, (
+            f"安装本身没成：HTTP {installed.status_code} {str(installed.text)[:220]}")
+        ids = [r.get("skill_id") for r in
+               app_client.get("/api/v1/skill-pool/agent/default/skills").json()]
+        assert skill_id in ids, f"装完读面看不见：{ids[:5]}——内存态还是两份"
+
+        root = Path(str(agentLibrary("default").skills_dir))
+        landed = [p for p in root.rglob("*") if p.is_file()]
+        assert landed, f"落点 {root} 一个文件都没有——真装链没写盘"
+        longest = max(landed, key=lambda p: len(str(p)))
+        assert len(str(longest)) <= WINDOWS_MAX_PATH, (
+            f"最长落点 {len(str(longest))} 字符越过 Windows {WINDOWS_MAX_PATH} 预算："
+            f"{str(longest)[len(str(root)):]}")
 
     def test_factoryHandsOutOneInstancePerLibraryDir(self):
         """工厂语义：**同一库目录必须只对应一个实例**，且落点与解析单点一致。

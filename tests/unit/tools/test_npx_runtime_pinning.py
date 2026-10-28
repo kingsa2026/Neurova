@@ -26,6 +26,7 @@ from __future__ import annotations
 import io
 import json
 import re
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -167,46 +168,69 @@ class TestNoKnownVulnerableRuntimePackages:
     # 包名 → (修复下界, 允许的引入链, CVE, 说明)
     _KNOWN_FLOORS = {
         "yaml": ("2.8.3", ("node_modules/swagger-jsdoc",), "CVE-2026-33532", "CVE-2026-33532"),
-        # PR #369 构建 cnb-p98-1k5la1aci#008 实扫命中（osv_audit.py 退出 1）：
-        # 一个压缩帧 + 尾随字节即可让进程未捕获异常退出（HIGH，7.5），无鉴权、无路由要求。
-        # 树里有两份载体：express@5.2.1 → ^2.2.1 解析到 2.3.0；
-        # @bytebase/dbhub → express@4.22.3 → ~1.20.5 解析到 1.20.8。两条都要抬。
-        "body-parser": (
-            "1.20.9",
-            ("node_modules/express", "node_modules/@bytebase/dbhub/node_modules/express"),
-            "GHSA-27r3-jxmh-p828",
-            "两条声明线各有修复版：2.x 线 2.4.0，1.x 线 1.20.9",
+        # 2026-10 公告批：MCP TS server SDK 2.0.0（`@modelcontextprotocol/server-filesystem`
+        # 的传递依赖）落在三条公告的区间内，修复版自 2.3.0 起；`ip-address` 10.7.2 的
+        # Address6 区号二次复杂度 DoS（GHSA-rxp7-6hxx-x8q5）修复版自 10.7.4 起。
+        # 两者父包都用精确版本声明，故由 tools/npx-runtime/package.json 的 overrides 抬升。
+        "@modelcontextprotocol/server": (
+            "2.3.0",
+            ("node_modules/@modelcontextprotocol/server-filesystem",),
+            "GHSA-46jr-4wx8-v453 / GHSA-jm63-cq47-j5jp / GHSA-rvq5-wwqv-78pq",
+            "MCP TS server SDK 三条（内存耗尽 / 传输实例串味 / bearer 令牌跨服务接受）",
         ),
-        # 2026-10-23 一组四条（low/low/medium/medium，上游同日发布）：scheme 注入、
-        # 百分号编码的 scheme 伪造、WHATWG host 归一化导致的 host 混淆、相对引用
-        # 路径等价。开的是区间，不是单条 id——只销一条等于换个 id 重报。
-        # 载体是 ajv 8.20.0 声明 `fast-uri ^3.0.1` 解析到的 3.1.8，修复版 3.1.9。
-        "fast-uri": (
-            "3.1.9",
-            ("node_modules/ajv",),
-            "GHSA-333x-w4r6-6crp / GHSA-w74x-v6f9-j3xg / "
-            "GHSA-wjr9-j795-jxcr / GHSA-xhq7-xmqj-769h",
-            "fast-uri 四条（scheme 注入 / scheme 伪造 / host 混淆 / 路径等价）",
+        "ip-address": (
+            "10.7.4",
+            ("node_modules/@modelcontextprotocol/sdk", "node_modules/express-rate-limit"),
+            "GHSA-rxp7-6hxx-x8q5",
+            "Address6 区号标识符二次复杂度匹配（DoS）",
         ),
-        # 2026-10-24 实扫命中的另一组（undici 三条修复版同日同一处：7.30.1）：
-        # EventSource 解析器无界内存 DoS、非小写算法 token 绕过 SRI、
-        # 过量 content-encoding 未捕获异常 DoS。载体是 context7-mcp 声明
-        # `undici ^7.0.0` 解析到的 7.29.1；^7 区间顶得到 7.30.1，故按 7.x 线钉。
+        # 2026-10 第二批（PR #364 的 dependency-audit 红灯）：hono 抬高后重新实扫，
+        # 同一棵审计树里还有五条可修公告，逐条按根因抬到修复版，不留静音。
+        # static 中间件二次解码路径：`serveStatic` 把请求路径再解一次，静态路径上的
+        # 中间件因此可被绕过。引入链有三条（@modelcontextprotocol/sdk、
+        # @modelcontextprotocol/node、@hono/node-server），都声明 `^4`。注意 `^4` 只是
+        # **可解析到**修复版，重跑 npm install 实测锁逐字节不变（同 undici / yaml 的事实），
+        # 故真正抬升靠 tools/npx-runtime/package.json 的 overrides。
+        "hono": (
+            "4.13.11",
+            ("node_modules/@hono/node-server", "node_modules/@modelcontextprotocol/sdk"),
+            "GHSA-5r4p-p66f-jhc7",
+            "serveStatic 与核心路由的双层解码差异（身份校验看到 A、文件落在 B）",
+        ),
+        "zod": (
+            "4.6.6",
+            ("node_modules/@modelcontextprotocol/sdk", "node_modules/@upstash/context7-mcp"),
+            "GHSA-mrhx-c7xc-m3w5",
+            "校验超大受限集合时内存耗尽",
+        ),
+        # 证书验证绕过：Agent 把 tls 选项做 JSON 深克隆转发给各源池，而 JSON 表示不了
+        # 函数，自定义 checkServerIdentity 因此在到达 TLS 层前被静默丢弃；对端证书只要
+        # 过了 Node 默认的 hostname + 证书链检查就被接受。Agent 是 request / fetch /
+        # setGlobalDispatcher 背后的默认调度器，故受影响面就是默认路径。
+        # 引入链：@upstash/context7-mcp 声明 `undici ^7.0.0`，7.x 线解析到 7.29.1（本单前）。
         "undici": (
             "7.30.1",
             ("node_modules/@upstash/context7-mcp",),
-            "GHSA-4qv8-2p9j-2685 / GHSA-f72v-6w45-q472 / GHSA-xjj6-f33q-929c",
-            "undici 三条（EventSource DoS / SRI 绕过 / content-encoding DoS）",
+            "CVE-2026-109383 / GHSA-xjj6-f33q-929c / GHSA-f72v-6w45-q472 / GHSA-4qv8-2p9j-2685",
+            "证书验证绕过（tls 选项经 JSON 深克隆转发时检查函数被丢弃）+ 过量 content-encoding 的未捕获错误（DoS）",
         ),
-        # @azure/msal-node 6.0.1：授权码流把参数泄露给攻击者可控端点。
-        # 修复版 7.1.0（6.x 线无修复——上游只发 7.x），故钉 7.1.1。
-        # 载体是 @azure/identity 4.13.3 声明 `@azure/msal-node ^6.0.0`，
-        # ^6 顶不到 7.x，只能由 overrides 顶替。
+        "fast-uri": (
+            "3.1.9",
+            ("node_modules/ajv",),
+            "GHSA-333x-w4r6-6crp / GHSA-w74x-v6f9-j3xg / GHSA-wjr9-j795-jxcr / GHSA-xhq7-xmqj-769h",
+            "主机名规范化可被绕过（四条）",
+        ),
+        "body-parser": (
+            "1.20.9",
+            ("node_modules/express",),
+            "GHSA-27r3-jxmh-p828",
+            "压缩正文尾部残留字节导致 DoS（两条线：1.x 自 1.20.9、2.x 自 2.4.0）",
+        ),
         "@azure/msal-node": (
             "7.1.0",
             ("node_modules/@azure/identity",),
             "GHSA-xcx6-jx8p-x3h5",
-            "msal-node 授权码流参数泄露（6.x 线无修复版，须顶到 7.x）",
+            "授权码流把参数泄露给攻击者可控端点（6.x 线无修复版，须顶到 7.x）",
         ),
     }
 
@@ -225,6 +249,21 @@ class TestNoKnownVulnerableRuntimePackages:
     _FLOOR_BY_CARRIER = {
         "node_modules/body-parser": "2.4.0",
     }
+
+    def _compare_tuple(self, version: str) -> tuple:
+        """版本比较元组：按 `-` 切预发布尾，再按 `.` 切点分；非数字段逐位按字符串比。
+
+        为什么不用 `_release_tuple`：`ip-address` 这类包会把 `beta` 之类的非数字段放进
+        版本串，逐个 `int()` 会直接抛 ValueError。这里把所有段归一成可比的
+        `(0, 整数)` / `(1, 字符串)` 对，数字段恒排在非数字段之前（预发布低于正式版）。
+        """
+        pairs = []
+        for part in version.replace("-", ".").split("."):
+            pairs.append((0, int(part), "") if part.isdigit() else (1, 0, part))
+        return tuple(pairs)
+
+    def _floor_is_met(self, version: str, floor: str) -> bool:
+        return self._compare_tuple(version) >= self._compare_tuple(floor)
 
     def _release_tuple(self, version: str) -> tuple:
         """把版本串归一成可比元组：`2.0.0-1` 是"2.0.0 之后的第一个预发布"。"""
@@ -247,7 +286,9 @@ class TestNoKnownVulnerableRuntimePackages:
             for key in present:
                 version = packages[key].get("version")
                 carrier_floor = self._FLOOR_BY_CARRIER.get(key, floor)
-                if self._release_tuple(version) >= self._release_tuple(carrier_floor):
+                # 版本比较取 `_compare_tuple`：`ip-address` 这类包会把 `beta` 等非数字段
+                # 放进版本串，逐个 `int()` 会直接抛 ValueError。
+                if self._floor_is_met(version, carrier_floor):
                     continue
                 problems.append(
                     f"{key}@{version} 低于 {cve} 的修复下界 {carrier_floor}——{note}。\n"
@@ -417,6 +458,21 @@ class TestNonPipAuditTreesStayAtTheAdvisoryFloors:
         parts = tuple(int(p) for p in core.split(".")[:3])
         return parts + (0 if not tail else 1,)
 
+    @staticmethod
+    def _registryChecksum(crate: str, version: str):
+        """crates.io 公布的 sha256；网络不可达时 `pytest.skip` 并点名原因。
+
+        跳过是**诚实形态**：本判据只证明"锁里版本与 checksum 同源"，离线时无从
+        证明，报绿就等于假装验过。CI 有网即真跑。
+        """
+        url = f"https://crates.io/api/v1/crates/{crate}/{version}"
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "neurova-ci-checksum"})
+            with urllib.request.urlopen(request, timeout=20) as response:
+                return json.load(response)["version"]["checksum"]
+        except Exception as e:  # noqa: BLE001 - 仅供离线分流，有网时仍逐字断言
+            pytest.skip(f"crates.io 不可达（{e}），本判据无从核对 @{version}")
+
     def test_lockedNpmPackagesAreAtOrAboveTheAdvisoryFloors(self):
         packages = _read_json("tools/npx-runtime/package-lock.json").get("packages") or {}
         problems = []
@@ -454,31 +510,38 @@ class TestNonPipAuditTreesStayAtTheAdvisoryFloors:
         assert not problems, "\n  ".join(["桌面壳 crate 树里出现已登记公告的未修版本:"] + problems)
 
     def test_cargoLockChecksumsMatchTheRegistry(self):
-        """锁里手改的 version 必须与 checksum 同源——否则 `cargo build` 直接校验失败。"""
-        #: crate → (版本, crates.io 公布的 sha256)。版本被抬而 checksum 没跟着改，
-        #: 就是"锁看着修了、实际装不上"的形态；这条钉住两者同源。
-        expected = {
-            "rustls": ("0.23.46", "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"),
-            "rustls-webpki": ("0.103.16", "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"),
-            "webpki-roots": ("1.0.11", "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"),
-        }
-        text = io.open(PROJECT_ROOT / "NeurUI/src-tauri/Cargo.lock", encoding="utf-8").read()
+        """锁里写着的 version 与 checksum 必须同源——否则 `cargo build` 直接校验失败。
+
+        版本取**锁里现读到的那个**，本文件不钉第二份字面量：版本由 `cargo update`
+        推着走（webpki-roots 1.0.10 → 1.0.11 就是 cargo 自己写的），钉死字面量会在每次
+        正常升级时变红，把"抬了版本没抬 checksum"这种真故障淹在噪声里。
+        核对值来自 crates.io 公布的 sha256。
+        """
+        lockText = io.open(PROJECT_ROOT / "NeurUI/src-tauri/Cargo.lock", encoding="utf-8").read()
         problems = []
-        for name, (version, checksum) in expected.items():
-            # 精确到版本：同名的 0.26.x 兼容包不算本判据的载体（它 re-export 1.x 的根）。
-            pattern = (
-                r'\[\[package\]\]\nname = "%s"\nversion = "%s"\nsource = "[^"]+"\n'
-                r'checksum = "([^"]+)"' % (re.escape(name), re.escape(version))
-            )
-            match = re.search(pattern, text)
-            if match is None:
-                problems.append(f"{name}@{version} 不在 Cargo.lock 里——已登记的修复版被摘掉了")
+        for name in ("rustls", "rustls-webpki", "webpki-roots"):
+            blocks = {}
+            for block in re.split(r"(?m)^\[\[package\]\]$", lockText)[1:]:
+                if not re.search(r'(?m)^name = "%s"$' % re.escape(name), block):
+                    continue
+                version = re.search(r'(?m)^version = "([^"]+)"', block)
+                checksum = re.search(r'(?m)^checksum = "([^"]+)"', block)
+                if version and checksum:
+                    blocks[version.group(1)] = checksum.group(1)
+            if not blocks:
+                problems.append(f"{name} 不在 Cargo.lock 里——已登记的修复版被摘掉了")
                 continue
-            lockedSum = match.group(1)
-            if lockedSum != checksum:
+            # 同名多版本在 Rust 锁里合法：只核大的那条（webpki-roots 1.x；0.26.x 是
+            # 兼容包，不持信任库，不在公告范围）。
+            version = max(blocks, key=lambda v: tuple(int(p) for p in v.split(".")[:3]))
+            published = self._registryChecksum(name, version)
+            if published is None:
+                problems.append(f"{name}@{version} 在 crates.io 查不到——版本号不是真发出过的")
+            elif published != blocks[version]:
                 problems.append(
-                    f"{name}@{version} 的 checksum 与 registry 公布值不一致（{lockedSum[:16]}… != "
-                    f"{checksum[:16]}…）——版本抬了、校验和没跟着改，构建会直接失败"
+                    f"{name}@{version} 的 checksum 与 registry 公布值不一致"
+                    f"（{blocks[version][:16]}… != {published[:16]}…）——"
+                    "版本抬了、校验和没跟着改，构建会直接失败"
                 )
         assert not problems, "\n  ".join(["Cargo.lock 与 registry 不同源:"] + problems)
 
@@ -538,12 +601,18 @@ class TestMcpServerCarrierIsAtTheAdvisoryFloor:
         )
 
     def test_lock_entry_matches_the_exact_declaration_of_its_carrier(self):
-        """锁里 server 必须与引入方的精确声明逐字相同（手改条目的指纹会在这里现行）。
+        """锁里 server 必须与引入方的精确声明**同解**——逐字相同，或被顶层 overrides 顶替。
 
         为什么单列：`_FIXED_FLOOR` 是公告给的**最低**可接受版，而 `context7-mcp`
         用的是精确声明。两者一分开，就出现「锁 2.3.0 / 声明 2.3.1」这种既过下界、
-        又与声明分叉的形状——它是手改锁条目、没抬引入方留下的指纹，下一次
-        `npm install --package-lock-only` 会把锁打回声明值。判据取「逐字相等」即可咬住。
+        又与声明分叉的形状——它是手改锁条目、没抬引入方留下的指纹。
+
+        为什么还要认 overrides：`package.json` 已把 `@modelcontextprotocol/server`
+        钉在 `^2.4.0`（`overridesNote` 写明理由——引入方精确声明不因顶层 override
+        重解析，除 overrides 无路可走）。此时锁里停在 2.4.0 不是"手改的指纹"，
+        而是声明本身给出的解。判据若只认逐字相等，就会把**正确的** overrides 判红，
+        而读的人按提示去"抬引入方"也抬不动——引入方的值由上游发布决定。
+        故取「同解」：锁值等于声明值，或声明值被 overrides 收进锁值所在范围。
         """
         lock = _read_json("tools/npx-runtime/package-lock.json")
         declared = ((lock.get("packages") or {})
@@ -554,8 +623,33 @@ class TestMcpServerCarrierIsAtTheAdvisoryFloor:
             pytest.skip("@upstash/context7-mcp 不再声明 server——判据前提不成立")
         if not re.fullmatch(r"\d+\.\d+\.\d+[\w.\-+]*", declared):
             pytest.skip(f"引入方对 server 的声明是区间 {declared!r}，逐字相等不适用")
-        assert self._serverEntry()["version"] == declared, (
-            f"锁里 server 是 {self._serverEntry()['version']}，而引入方精确声明的是 {declared}——"
-            "锁与声明分叉（手改过锁条目、没抬引入方）。\n"
-            "   处置：抬 @upstash/context7-mcp，再让 npm 重新生成锁。"
+        locked = self._serverEntry()["version"]
+        if locked == declared:
+            return
+        override = self._serverOverride()
+        assert override and self._satisfies(locked, override), (
+            f"锁里 server 是 {locked}，引入方精确声明 {declared}，而 overrides 里没有"
+            f"能把 {locked} 收下的声明（现值 {override!r}）——三方不同源。"
+            "处置：要么同值，要么在 overrides 里写明顶替方向与理由。"
         )
+
+    def _serverOverride(self):
+        """`package.json` 里对 server 的 overrides 声明（唯一顶替口）。"""
+        declared = (_read_json("tools/npx-runtime/package.json").get("overrides") or {})
+        return declared.get("@modelcontextprotocol/server")
+
+    def _satisfies(self, version: str, spec: str) -> bool:
+        """`^2.4.0` / `>=2.4.0` / `2.4.0` 三类写法的满足判定（够用即可，不引 semver 依赖）。"""
+        match = re.fullmatch(r"(?:\^|>=?)?(\d+)\.(\d+)\.(\d+)", spec.strip())
+        if not match:
+            return False
+        base = tuple(int(p) for p in match.groups())
+        return self._releaseTuple(version)[:3] >= base
+
+    def test_lockEntryIsNotHandEditedAgainstItsCarrier(self):
+        """反向控制：锁与声明都被改成第三个值、又没 overrides 收口时，必须咬得住。"""
+        assert not self._satisfies("2.3.1", "^2.4.0"), (
+            "反向控制失效：2.3.1 被判为满足 ^2.4.0，说明满足判定写软了"
+        )
+        assert self._satisfies("2.4.0", "^2.4.0")
+        assert self._satisfies("2.5.1", "^2.4.0")

@@ -21,6 +21,7 @@ import json
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 AGENT_CORE = PROJECT_ROOT / "neurova" / "agent_core.py"
@@ -58,7 +59,7 @@ def _load_baseline():
 
 def _measure():
     src = io.open(AGENT_CORE, encoding="utf-8").read()
-    tree = ast.parse(src)
+    tree = parseSource(src)
     metrics = {"agent_core_lines": len(src.splitlines())}
     found = set()
     for node in tree.body:

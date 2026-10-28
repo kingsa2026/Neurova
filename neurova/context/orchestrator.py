@@ -1155,6 +1155,27 @@ class ContextOrchestrator:
             config={},
             unified_injector=unified_injector,
         )
+        # 记住本实例建出来的注入器：它 `initialize()` 过，即在**全局总线**上挂了三条
+        # bound method 订阅。不把句柄留住，关停链就只能看着它在总线上钉着整张对象图
+        # （受保护子集每档建一次 app、内存单向 +230MB 的那条）。
+        self._unifiedInjector = unified_injector
+
+    def shutdownContextSystem(self) -> int:
+        """拆掉 `init_context_system()` 建出的东西，返回释放的订阅条数。
+
+        与 `init_context_system` 成对；由 agent 关停链调用。为什么退订要在这里做而不是
+        留给 GC：总线上存的是 handler 本体，bound method 持有 `self`，只要不退订，
+        注入器连同它背后的记忆管理器、上下文池就永远是活引用（实测每轮 230MB 原生内存
+        不归还，`tracemalloc` 只看到不到 1MB —— 那部分是 onnxruntime 的原生内存）。
+        """
+        injector = self._unifiedInjector
+        self._unifiedInjector = None
+        if injector is None:
+            return 0
+        # `stop()` 只认 RUNNING 态，而本处注入器只 `initialize()` 过（INITIALIZED）——
+        # 直接调 stop() 会打一条 "not running" 且**什么都不做**，订阅照样留着。
+        # 故按订阅面本身退订：这是同一个方法，不新造第二个退订口。
+        return injector.unsubscribeAllEvents()
 
     # ══════════════════════════════════════════════════════════════
     # 上下文构建

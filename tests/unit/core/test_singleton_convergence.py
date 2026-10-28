@@ -20,6 +20,7 @@ import threading
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 NEUROVA_ROOT = Path(__file__).resolve().parents[3] / "neurova"
 
@@ -55,7 +56,7 @@ BENIGN_SINGLETONS = [
 
 def _get_function_source(rel_path: str, func_name: str) -> str:
     src = (NEUROVA_ROOT.parent / rel_path).read_text(encoding="utf-8")
-    tree = ast.parse(src)
+    tree = parseSource(src)
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name == func_name:
             return ast.get_source_segment(src, node) or ""
@@ -70,7 +71,7 @@ def _staleEntries(pairs) -> list[str]:
         if not p.is_file():
             stale.append(f"{rel_path}::{func_name} —— 文件不存在（实现已退役，条目未跟）")
             continue
-        tree = ast.parse(p.read_text(encoding="utf-8", errors="ignore"))
+        tree = parseSource(p.read_text(encoding="utf-8", errors="ignore"))
         if not any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
                    and n.name == func_name for n in tree.body):
             stale.append(f"{rel_path}::{func_name} —— 文件在，但没有这个模块级工厂")

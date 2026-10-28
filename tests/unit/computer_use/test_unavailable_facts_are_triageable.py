@@ -46,6 +46,7 @@ from neurova.computer_use.browser_manager import (
     PlaywrightBackend,
 )
 from neurova.computer_use.camofox_server_backend import CamofoxServerBackend
+from tests.ast_scan import parseSource
 
 # 错误文案必须含的"下一步动作"词：模型据此能直接动作，而不是拿英文词猜
 REMEDY_HINTS = ("browser_navigate", "browser_open_target")
@@ -143,7 +144,7 @@ class TestBareEnglishIsNotRevived:
         import neurova.computer_use.camofox_server_backend as cb
 
         for mod in (bm, cb):
-            tree = ast.parse(pathlib.Path(mod.__file__).read_text(encoding="utf-8"))
+            tree = parseSource(pathlib.Path(mod.__file__).read_text(encoding="utf-8"))
             bare = [
                 node.lineno
                 for node in ast.walk(tree)

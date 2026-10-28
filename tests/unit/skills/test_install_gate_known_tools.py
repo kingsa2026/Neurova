@@ -41,6 +41,7 @@ import pytest
 
 from neurova.builtin_tools import get_registered_tool_names, _BUILTIN_SCHEMAS
 from neurova.skills.skill_install_gate import validate_permissions_for_install
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 GATE_PATH = REPO_ROOT / "neurova" / "skills" / "skill_install_gate.py"
@@ -120,7 +121,7 @@ class TestNoSecondNameTable:
         探针调用在重建后不存在）。
         """
         registered = set(get_registered_tool_names())
-        tree = ast.parse(GATE_PATH.read_text(encoding="utf-8"), filename=str(GATE_PATH))
+        tree = parseSource(GATE_PATH.read_text(encoding="utf-8"), filename=str(GATE_PATH))
         offenders = []
         for node in ast.walk(tree):
             if not isinstance(node, (ast.Set, ast.List)):

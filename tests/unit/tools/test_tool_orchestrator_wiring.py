@@ -34,6 +34,7 @@ from neurova.builtin_tools import _BUILTIN_SCHEMAS
 from neurova.tool_layers.capability_graph import ToolCapabilityGraph
 from neurova.tool_layers.tool_orchestrator import ToolOrchestrator
 from neurova.tool_executor import ToolExecutor
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ORCHESTRATOR_PATH = REPO_ROOT / "neurova" / "tool_layers" / "tool_orchestrator.py"
@@ -346,7 +347,7 @@ class TestMaxParallelIsEnforced:
 class TestNoParallelPolicyDuplication:
     def test_unused_second_implementations_are_gone(self):
         source = io.open(ORCHESTRATOR_PATH, encoding="utf-8").read()
-        tree = ast.parse(source)
+        tree = parseSource(source)
         names = {
             node.name
             for node in ast.walk(tree)

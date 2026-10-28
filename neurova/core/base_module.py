@@ -95,6 +95,10 @@ class BaseModule(StateValuesStore, ABC):
         # 状态值存储（读写都在 `StateValuesStore` 那一份实现里）
         self._state_values: Dict[str, Any] = {}
 
+        # 本实例在总线上留下的订阅（`(总线, 订阅)` 对）：`stop()` 据此逐条退订。
+        # 存对象而不是只存事件名——同一事件上可能挂多次，按名退会漏或退错。
+        self._eventSubscriptions: list = []
+
     def set_state(self, new_state: ModuleState) -> None:
         """设置模块状态"""
         old_state = self._state
@@ -151,8 +155,38 @@ class BaseModule(StateValuesStore, ABC):
         `context/injector.py:36-69` 的降级替身给自己配了一套私有 `_event_handlers`
         （第三份总线，且 handler 异常被 `except Exception: pass` 吞掉）。订阅能力
         收在基类这一份，子类不再自带平行实现。
+
+        **订阅必须与 `stop()` 成对**：总线上存的是 handler 本体，bound method 持有
+        `self` ⇒ 只要不退订，模块就被总线钉着、整张对象图（含原生内存）永远不回收。
+        故本口把每条订阅落在 `self._eventSubscriptions` 上，由 `unsubscribeAllEvents()`
+        逐条退订；子类不必、也不该各自记得退订。
         """
-        self._resolveEventBus().subscribe(event_name, handler, module_name=self.MODULE_ID)
+        subscription = self._resolveEventBus().subscribe(
+            event_name, handler, module_name=self.MODULE_ID
+        )
+        self._eventSubscriptions.append((self._resolveEventBus(), subscription))
+
+    def unsubscribeAllEvents(self) -> int:
+        """退掉本模块在总线上留下的**全部**订阅，返回条数。
+
+        为什么按 `Subscription` 对象逐条退、而不是 `unsubscribe_module(MODULE_ID)`：
+        `MODULE_ID` 是**类级**常量（`context.unified_injector` 这类），同一进程里同时
+        活着的两个同类型实例共用一个 ID——按模块名整片清理会把另一个活着的实例的订阅
+        一起退掉。逐条退订只碰本实例自己持有的那几条。
+
+        幂等：重复调用只会把清单清空一次，第二次返回 0。
+        """
+        released = 0
+        pending, self._eventSubscriptions = self._eventSubscriptions, []
+        for bus, subscription in pending:
+            try:
+                if bus.unsubscribe(subscription.event_name, subscription.handler):
+                    released += 1
+            except Exception as e:  # noqa: BLE001 - 退订失败不阻断关停链
+                self._logger.warning(
+                    "Module %s: 退订 %s 失败: %s", self.MODULE_ID, subscription.event_name, e
+                )
+        return released
 
     def emit_event(self, event_type: str, data: Optional[Dict[str, Any]] = None) -> None:
         """发送事件（载荷必带 `module_id`——订阅者据此归因，缺它事件就是无主的）"""
@@ -214,6 +248,12 @@ class BaseModule(StateValuesStore, ABC):
         self.set_state(ModuleState.STOPPING)
         try:
             self.on_stop()
+        finally:
+            # 退订放进 finally：`on_stop` 抛错时模块同样已经不再运行，订阅若留在总线上
+            # 就是"停了的模块还在收事件"，且它的整张对象图被钉住（受保护子集每档建一次
+            # app 的内存单向上涨）。先退订再落状态——落状态是最便宜的收尾。
+            self.unsubscribeAllEvents()
+        try:
             self.set_state(ModuleState.STOPPED)
         except Exception as e:
             self.set_state(ModuleState.ERROR)

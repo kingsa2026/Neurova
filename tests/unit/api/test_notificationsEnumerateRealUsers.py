@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import List
 
 import pytest
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -109,7 +110,7 @@ def _usersStoreAccesses(source: str) -> List[str]:
     """抽出代码里对 `_users_store` 的**属性取用**（AST 形态，注释与说明文字不算）。"""
     import ast
 
-    tree = ast.parse(source)
+    tree = parseSource(source)
     return [
         node.attr
         for node in ast.walk(tree)

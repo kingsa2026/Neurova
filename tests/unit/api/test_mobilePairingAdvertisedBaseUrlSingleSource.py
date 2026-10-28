@@ -27,6 +27,7 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_advertised_01234567")
 
 from neurova.api.endpoints import mobile_pairing as MP  # noqa: E402
+from tests.ast_scan import parseSource
 
 PREFIX = "/api/v1/mobile"
 REPO = Path(__file__).resolve().parents[3]   # tests/unit/api/<本档> → 仓库根差三级
@@ -100,7 +101,7 @@ def _callKwargText(sourceText: str, functionName: str) -> str:
     只按方法名找会先撞上 `asyncio.run(...)` 那类同名调用——把别的调用说了不算带了参数，
     等于判据读错了对象（本卷形态 403）。所以按「接收者是 `uvicorn`」筛。
     """
-    tree = ast.parse(sourceText)
+    tree = parseSource(sourceText)
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue

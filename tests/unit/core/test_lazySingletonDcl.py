@@ -24,6 +24,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 
 def _productionTrees(hints):
@@ -135,7 +136,7 @@ def _lazySingletonViolations(source: str, moduleName: str):
     """
     import ast as _ast
 
-    tree = _ast.parse(source)
+    tree = parseSource(source)
     modGlobals = {
         t.id for n in tree.body if isinstance(n, _ast.Assign) for t in n.targets if isinstance(t, _ast.Name)
     } | {
@@ -261,7 +262,7 @@ class TestNoLockFreeLazySingletonRemains:
         count = 0
         for _path, code in _productionTrees(("with ", " is None", "@lazySingleton")):
             try:
-                tree = _ast.parse(code)
+                tree = parseSource(code)
             except SyntaxError:
                 continue
             lockKinds = {}

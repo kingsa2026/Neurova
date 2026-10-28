@@ -236,6 +236,14 @@ def parse_compose() -> Dict[str, Any]:
         return out
 
     def port_of(svc: Dict[str, Any]) -> int | None:
+        """容器端口（`宿主:容器` 里的**容器**那一侧）。
+
+        三种写法都要认：`9527:9527`、`127.0.0.1:9527:9527`（绑定宿主回环的现行写法）、
+        以及只写容器端口 `9527`。只认第一种时，加了宿主绑定就等于把这条比对**静默关掉**——
+        读出来是 None，而下面的判据只在两侧都有值时才比，于是"端口不一致"这一整条不再发声
+        （实测：合并把发布地址收成 `127.0.0.1:9527:9527` 之后，R2 直接报"与 EXPOSE 不一致"，
+        因为 compose 侧读成 None 而 Dockerfile 侧是 9527）。
+        """
         for entry in svc.get("ports") or []:
             target = _composeContainerPort(entry)
             if target is not None:
@@ -451,8 +459,19 @@ def _check_health(docker: Dict[str, Any], compose: Dict[str, Any], helm: Dict[st
         )
     # 比的是**容器侧**端口：健康检查 URL 由镜像内的 curl 在容器里发，宿主侧发布地址
     # 收窄与否不改变这条契约（`127.0.0.1:9527:9527` 的容器侧仍是 9527）。
-    if dhc.get("port") and dhc["port"] != compose["backend"]["port"]:
-        out.append(Finding("error", "R2-healthcheck", "compose 健康检查端口与 Dockerfile EXPOSE 不一致"))
+    compose_port = compose["backend"]["port"]
+    if compose_port is None:
+        out.append(Finding(
+            "error",
+            "R2-healthcheck",
+            "未能从 docker-compose.yml 解析到 backend 端口映射——"
+            "健康检查端口一致性比较会静默少一项（不要把该解析写成可选）"))
+    elif dhc.get("port") and dhc["port"] != compose_port:
+        out.append(Finding(
+            "error",
+            "R2-healthcheck",
+            f"compose 健康检查端口与 Dockerfile EXPOSE 不一致："
+            f"Dockerfile={dhc['port']}, compose 容器端口={compose_port}"))
     return out
 
 

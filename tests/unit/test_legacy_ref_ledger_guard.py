@@ -126,18 +126,90 @@ class TestEveryEntryIsClassified:
         )
 
     def test_every_row_is_in_the_ledger_block(self, entries):
-        """按「文件 + 行号」判定登记，不比对引用原文。
+        """按「文件 + 内容锚点」判定登记，不比对引用原文。
 
         引用原文会被表格渲染规范化（空反引号渲染成文字占位），拿它做包含判断
-        会得出假阳性——本守卫自己就踩过一次。行号是稳定身份。
+        会得出假阳性——本守卫自己就踩过一次。
+
+        身份用的也不是行号：台账入库之后归档层文档仍会被改（补一节、挪一段），
+        行号整片平移，同一份引用集合逐格失配——CI `cnb-1f0-1k5uonjt2-003`
+        的「期望行数 218，实际行数 228」就是这个形态，被引用的路径一条没变。
+        唯一稳定的身份是**这一行正文 + 引用原文**的摘要（`scanner._lineAnchor`，
+        与生成侧同一处取数，不在这里另算一份）。
         """
         block = _block(_ledger_text(), scanner.TABLE_BEGIN, scanner.TABLE_END)
         missing = [
             e for e in entries
-            if f"`{e['file']}` | {e['line']} " not in block
+            if scanner._anchorCell(e) not in block
         ]
         assert not missing, (
-            f"有悬空引用未登记进台账: {[(e['file'], e['line'], e['ref']) for e in missing][:5]}"
+            f"有悬空引用未登记进台账: {[(e['file'], e['ref']) for e in missing][:5]}"
+        )
+
+    def testLedgerRowsAnchorOnContentNotOnSourceLineNumbers(self, entries):
+        """台账「位置」列不得写源文档行号——它一入库就开始过期。
+
+        反向控制：把源文档行号整体平移，登记身份必须一动不动。
+        """
+        block = _block(_ledger_text(), scanner.TABLE_BEGIN, scanner.TABLE_END)
+        drifted = [e for e in entries if str(e["line"]) in
+                   [row.split("|")[2].strip() for row in block.splitlines()[2:] if row.startswith("|")]]
+        assert not drifted, (
+            "台账里仍有按源文档行号定位的行：%r。把行号写进生成物，"
+            "任何一次正文编辑都会让台账整片对不上——该定位的是内容。" % (drifted[:3],)
+        )
+
+
+class TestNavigationImpactKeepsItsCriterion:
+    """导航层筛选的入筛条件只有两条，形态只决定处置。
+
+    红过的那一版里，`navigationImpactRefs` 把「不可点击 + 载体不是指路文档」的行内码
+    直接 `continue` 掉，再由 `navigationImpactExemptions` 给它记一条自造的豁免理由
+    「描述性行内码（不可点击且非指路文档）」。于是八百余条**导航可达**载体里的失效路径
+    被记成"不构成当下导航问题"，摘要据此写出「影响当下导航 0 条 · 本类已归零」。
+
+    这里正面钉住那件事：**载体可达 + 引用非占位形态 ⇒ 必须入表**，且给出的处置是
+    「登记不就地改写」——处置与理由不是一回事，不许拿处置冒充理由。
+    """
+
+    def test_reachable_non_placeholder_entries_are_all_screened_in(self):
+        reached = scanner.readerReachableDocuments()
+        mustBeScreened = [
+            item for item in scanner.archiveDanglingUnion()
+            if item["file"] in reached
+            and not scanner.PLACEHOLDER_PATTERN.search(item["ref"])
+        ]
+        assert mustBeScreened, "导航图里一条失效引用都没有——先确认导航图没退化成空集。"
+        screened = {(row["file"], row["line"], row["ref"])
+                    for row in scanner.navigationImpactRefs()}
+        missing = [item for item in mustBeScreened
+                   if (item["file"], item["line"], item["ref"]) not in screened]
+        assert not missing, (
+            f"有 {len(missing)} 条「导航可达 + 非占位」的失效引用没有入表。\n"
+            "入筛只看「载体可达」与「引用是否占位」，形态（可点击/行内码）只决定处置。\n  "
+            + "\n  ".join(f"{m['file']}:{m['line']} [{m['ref']}]" for m in missing[:10])
+        )
+
+    def test_inline_form_is_registered_not_exempted(self):
+        rows = [r for r in scanner.navigationImpactRefs()
+                if r["form"] == scanner.IMPACT_FORM_INLINE]
+        assert rows, (
+            "丙类（行内码路径陈述）一条都没有:要么判据被改回只认可点击，"
+            "要么导航图里真的没有承载这类条目的文档——后者请先给出读数再改判据。"
+        )
+        wrong = [r for r in rows if r["disposition"] != scanner.DISPOSITION_REGISTER]
+        assert not wrong, (
+            f"丙类处置写错了 {len(wrong)} 条:归档正文陈述的是当时的代码结构，"
+            "处置是「登记不就地改写」。"
+        )
+
+    def test_disposition_column_never_borrows_the_exemption_wording(self):
+        """处置列不许写成「豁免」——那正是把结论当证据的写法。"""
+        block = _block(_ledger_text(), scanner.NAV_IMPACT_BEGIN, scanner.NAV_IMPACT_END)
+        offenders = [line for line in block.splitlines() if "豁免" in line]
+        assert not offenders, (
+            "入筛条目表里出现了「豁免」字样:入表就是需要处理,处置一列只写怎么处置。\n  "
+            + "\n  ".join(offenders[:5])
         )
 
 

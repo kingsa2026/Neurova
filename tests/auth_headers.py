@@ -60,6 +60,14 @@ def _identityEntryPoints() -> typing.List[Callable[..., Any]]:
             fn = getattr(mod, attr, None)
             if callable(fn):
                 names.append(fn)
+    # 路由级身份门：`requireIdentityForMemoryFace` 这类门不是 `get_current_user*` 命名，
+    # 但它在记忆面上是**唯一**真正生效的那道（2026-10-26 点单甲，读写一律要凭证）。
+    # 名单是白名单式的手抄，靠命名前缀猜门漏了它，于是记忆面整族 401——
+    # 而"整族 401"看起来像"鉴权更严"，很容易被当成环境噪声放过去。
+    # 取法：`auth.py` 自己那份闭集（`MEMORY_IDENTITY_GATES`）一处声明，这里只读不抄。
+    for fn in getattr(auth_mod, "MEMORY_IDENTITY_GATES", ()):
+        if callable(fn):
+            names.append(fn)
     # 去重但保留顺序：deps 那份是 auth 那份的再导出，同一对象只打一次
     seen, ordered = set(), []
     for fn in names:
@@ -72,23 +80,36 @@ def _identityEntryPoints() -> typing.List[Callable[..., Any]]:
 def _appDependencyCallables(app) -> set:
     """枚举这个 app 的路由图上**真正出现**的依赖函数对象。
 
+    `include_router` 之后，FastAPI 0.141 起把挂进来的路由器收成一条
+    `_IncludedRouter`（`path`/`methods`/`routes` 全为 None，真表在被挂路由器自己的
+    `.routes` 上，必要时再往下还有一层）。只看顶层 `app.routes` 会漏掉**整个被挂路由器**
+    的依赖——本函数曾因此在记忆面上返回空集，`overrideIdentity` 退回"全打"，
+    而记忆面真正的门是路由级的 `requireIdentityForMemoryFace`，它恰好不在全打名单里，
+    于是整族 401。
+
     拿不到就返回空集——调用方据此退回"全打"，宁可慢也不漏。
     """
     found = set()
-    stack = []
-    for route in getattr(app, "routes", []) or []:
-        dep = getattr(route, "dependant", None)
-        if dep is not None:
-            stack.append(dep)
-        # 路由级 dependencies（APIRouter(dependencies=[...]) 挂的那一类）
-        for d in getattr(route, "dependencies", []) or []:
-            stack.append(d)
+    stack = list(getattr(app, "routes", []) or [])
+    visited = set()
     while stack:
         node = stack.pop()
+        if id(node) in visited:
+            continue
+        visited.add(id(node))
         call = getattr(node, "call", None)
         if call is not None:
             found.add(call)
         stack.extend(getattr(node, "dependencies", []) or [])
+        # `_IncludedRouter`：真表在被挂路由器自己的 `.routes` 上（可能还有一层嵌套）
+        inner = getattr(node, "original_router", None)
+        if inner is not None:
+            stack.extend(getattr(inner, "routes", []) or [])
+        for sub in getattr(node, "routes", None) or ():
+            stack.append(sub)
+        dep = getattr(node, "dependant", None)
+        if dep is not None:
+            stack.extend(getattr(dep, "dependencies", []) or [])
     return found
 
 

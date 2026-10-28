@@ -35,6 +35,7 @@ from fastapi.testclient import TestClient
 from neurova.api.endpoints.memory import router as memoryRouter
 from neurova.api.error_handlers import register_error_handlers
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+from tests.ast_scan import parseSource
 from tests.auth_headers import bearerHeaders
 
 ALICE_HDR = bearerHeaders("alice")
@@ -188,7 +189,7 @@ class TestOwnershipRuleIsSingleSource:
         import ast
         import textwrap
 
-        tree = ast.parse(textwrap.dedent(self._body(methodName)))
+        tree = parseSource(textwrap.dedent(self._body(methodName)))
         hits = []
         for node in ast.walk(tree):
             if not isinstance(node, ast.Compare):

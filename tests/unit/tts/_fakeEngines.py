@@ -70,22 +70,6 @@ def fakeHeavyFactory(**_weightDirs):
     return _FakeHeavyEngine()
 
 
-
-def afterTtl(mgr) -> float:
-    """「已过 TTL」的那个时刻，按**本进程真实单调时钟**给——同域唯一取法。
-
-    `release_idle_engines` 拿传入值与 `_last_used_monotonic`（`time.monotonic()`
-    写入）相减判 TTL。写死一个绝对数（原先是 `1_000_000`）只在开机不足 11.6 天的
-    机器上像未来；Linux 的单调时钟从开机算起，超过那个数后 `now - last` 变负，
-    释放条件永不成立，用例全红在「重引擎没被释放」，读的人会去查 TTS 释放逻辑。
-
-    两个判据档（`test_tts_lazy_release.py` 九处、`test_unitTierNeverPaysForRealWeights.py`
-    一处）都要这个时刻：口径写成两份时改一份另一份静默失效，故收在这里。
-    """
-    import time
-
-    return time.monotonic() + mgr._config.release_ttl_sec + 1
-
 def fakeLightFactory(**_engineOptions):
     """顶替 `neurova.tts.manager` 模块级 `EdgeTTS` 的构造接缝（重引擎那侧的同形）。
 

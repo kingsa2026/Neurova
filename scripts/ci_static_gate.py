@@ -31,7 +31,18 @@ import sys
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
+import pyflakes.api
+import pyflakes.reporter
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# 解析走仓内唯一出口（`tests/ast_scan.parseSource`，口径见该函数 docstring）。
+# 本脚本不是包、也没有 pytest 的 rootdir 注入，故自己把仓根放进 `sys.path`——
+# 下面 `main()` 里那处注入只覆盖导入巡检，来得太晚。
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from tests.ast_scan import parseSource  # noqa: E402
 
 # Windows 控制台/重定向默认 GBK：本脚本面向人读、汇报含 emoji，直接打印会
 # UnicodeEncodeError 崩在第一行（门禁完全跑不起来）。把标准输出重配为 UTF-8，
@@ -118,68 +129,80 @@ def check_syntax() -> bool:
     return False
 
 
-_UNDEFINED_RE = re.compile(r"^.+?:\d+:\d+: undefined name '([^']+)'")
+def _importedNamesIn(tree) -> set:
+    """本文件里以任何方式被 import 过的名字（含函数体内的局部导入）。
 
-
-def _annotationOnlyNames(path: Path) -> set:
-    """本文件里只出现在**注解位置**、且实体在文件内某处（含函数体）被导入过的名字。
-
-    判形两问，两问都过才豁免：
-
-    1. 这个名字只出现在注解位置（形参注解、返回注解、注解表达式）——落进函数体就算缺陷面；
-    2. 文件里确实有 `import 名字` / `from … import … as 名字` 把它绑过——**不是**凭"注解位置"
-       一律免检。于是拼错的注解名（`ChannleMessage`）照旧红，而
-       「模块级导入会拉循环、实体就近导入、注解留名」这条正解不再被误报（AGENTS.md §3）。
-
-    只按 AST 判，不在报告文本上做字符串补丁：门禁要判的是语义，不是 pyflakes 的行格式。
+    取数走 AST 而不在 pyflakes 的报告文本上做字符串补丁：闸门要判的是语义
+    （这个名字在本文件里到底被绑过没有），不是 pyflakes 的行格式。
     """
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    except (OSError, SyntaxError, UnicodeDecodeError):
-        return set()
-
-    imported: set = set()
+    names = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
+        if isinstance(node, ast.ImportFrom):
             for alias in node.names:
-                imported.add(alias.asname or alias.name.split(".")[0])
-        elif isinstance(node, ast.ImportFrom):
+                names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
             for alias in node.names:
-                imported.add(alias.asname or alias.name)
-
-    annotated: set = set()
-    for node in ast.walk(tree):
-        for annotation in (
-            getattr(node, "annotation", None),
-            getattr(node, "returns", None),
-        ):
-            if annotation is not None:
-                annotated.update(
-                    sub.id for sub in ast.walk(annotation) if isinstance(sub, ast.Name)
-                )
-    return imported & annotated
+                if alias.asname:
+                    names.add(alias.asname)
+                else:
+                    names.add(alias.name.split(".")[0])
+    return names
 
 
-def undefinedNamesIn(path: str) -> list:
-    """判一个文件里真正的"未定义名称"，返回 pyflakes 那几行（已剔掉注解专用名）。
+def collectUndefinedNames(source: str, filename: str) -> list:
+    """pyflakes 的 `undefined name` 读数，剔除「注解专用」形状，返回 `[(行, 列, 名字)]`。
 
-    这是检查 2 的**唯一判据口**：`check_pyflakes` 只是把它挂到全仓、把结果打印出来。
-    独立成函数是为了让它可被调用、可被反证（`tests/unit/ci/test_staticGateUsesParserNotTypecheck.py`）。
+    判据仍是 pyflakes 自己的：本函数不另写 AST 名解析，只做**复核**（教义第 6 条）。
+    被剔除的只有一种：该名字在**本文件**里被 import 过（模块级、`TYPE_CHECKING` 块内、
+    或函数体内的局部导入），因而「按解析器可读、按求值未绑定」。
+
+    为什么这是修在闸门侧而不是修在被报的代码：`from __future__ import annotations`
+    下注解不求值（PEP 563）；而局部导入的存在理由就是断循环导入（AGENTS.md §3）。
+    把这类导入提到模块级会改坏生产，删掉注解会丢掉解析器能读的事实——两条都是把报错
+    挪走（教义第 1、2 条）。闸门问错的问句，改闸门。真·未定义（拼错的名字、写错的形参）
+    不在此列：那些名字在本文件里从来没有被 import 过，一条都跑不掉。
     """
-    filePath = Path(path)
-    done = subprocess.run(
-        [sys.executable, "-m", "pyflakes", str(filePath)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-        env=_utf8ChildEnv(),
-    )
-    reported = [
-        line for line in (done.stdout or "").splitlines() if "undefined name" in line
-    ]
-    if not reported:
+    reporter_out, reporter_err = io.StringIO(), io.StringIO()
+    pyflakes.api.check(source, filename, pyflakes.reporter.Reporter(reporter_out, reporter_err))
+    text = (reporter_out.getvalue() or "") + (reporter_err.getvalue() or "")
+    if not text.strip():
         return []
-    exemption = _annotationOnlyNames(filePath)
-    return [line for line in reported
-            if (_UNDEFINED_RE.match(line) is None or _UNDEFINED_RE.match(line).group(1) not in exemption)]
+
+    try:
+        imported = _importedNamesIn(parseSource(source, filename=filename))
+    except SyntaxError:
+        imported = set()
+
+    readings = []
+    for line in text.splitlines():
+        match = _PYFLAKES_LINE.match(line)
+        if not match:
+            continue
+        name = match.group("detail").split(" ", 2)[2].strip("'\"")
+        if name in imported:
+            continue
+        readings.append((int(match.group("row")), int(match.group("col")), name))
+    return readings
+
+
+#: pyflakes Reporter 输出的一行：`<file>:<行>:<列>: <消息>`。只取 `undefined name 'x'`
+#: 那一族——语法错、重复定义等不归本闸门管（`reject_duplicate*` 那几类没有这个前缀）。
+_PYFLAKES_LINE = re.compile(
+    r"^(?P<file>.+?):(?P<row>\d+):(?P<col>\d+): (?P<detail>undefined name '.+'|undefined name \".+\")$"
+)
+
+
+def scanUndefinedNamesUnder(path: str) -> list:
+    """遍历目录取未定义名读数，返回便于人读的行（`文件:行:列: undefined name 'x'`）。"""
+    readings = []
+    for py_file in sorted(Path(path).rglob("*.py")):
+        try:
+            source = py_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for row, col, name in collectUndefinedNames(source, str(py_file)):
+            readings.append(f"{py_file}:{row}:{col}: undefined name '{name}'")
+    return readings
 
 
 def check_pyflakes() -> bool:
@@ -191,10 +214,7 @@ def check_pyflakes() -> bool:
         print("❌ 未安装 pyflakes，请先执行：pip install pyflakes")
         return False
 
-    target = PROJECT_ROOT / "neurova"
-    undefined: list = []
-    for pyFile in sorted(target.rglob("*.py")):
-        undefined.extend(undefinedNamesIn(str(pyFile)))
+    undefined = scanUndefinedNamesUnder(str(PROJECT_ROOT / "neurova"))
     if not undefined:
         print("通过：neurova/ 无 'undefined name'")
         return True

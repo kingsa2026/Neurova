@@ -21,6 +21,7 @@ import pathlib
 
 from neurova.security.tool_guard import (
     GuardThreatCategory, ShellEvasionGuardian, ToolGuardEngine)
+from tests.ast_scan import parseSource
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 GUARD_FILE = REPO_ROOT / "neurova" / "security" / "tool_guard.py"
@@ -72,7 +73,7 @@ def test_retiredHelpersAreGoneFromTheGuardian():
     按词判会被自家注释与文档撞红（本仓这一形跑过两遭）；这里只看 `ShellEvasionGuardian`
     类体里的 `FunctionDef.name`——名字在这里就是被退役符号的身份，不是措辞。
     """
-    tree = ast.parse(GUARD_FILE.read_text(encoding="utf-8"))
+    tree = parseSource(GUARD_FILE.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef) and node.name == "ShellEvasionGuardian":
             alive = [f.name for f in node.body

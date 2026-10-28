@@ -44,6 +44,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from tests.ast_scan import parseSource
 
 pytestmark = pytest.mark.timeout(60)
 
@@ -230,7 +231,7 @@ class TestNoSecondLedgerWriter:
 
     def _rawSqlWrites(self, src: str) -> list[str]:
         hits = []
-        for node in ast.walk(ast.parse(src)):
+        for node in ast.walk(parseSource(src)):
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 text = node.value.lower()
                 if ("insert into agent_runs" in text or "update agent_runs" in text

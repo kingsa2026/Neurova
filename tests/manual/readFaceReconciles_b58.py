@@ -99,9 +99,8 @@ def seed():
 try:
     SKILLS_DIR, LEDGER = seed()
 except Exception as exc:  # noqa: BLE001
-    # `as` 的绑定名出块即解绑（PEP 3110），进 lambda 懒求值就是 NameError——先取值再进
-    seedFailure = repr(exc)
-    read("[0] 复制真账本到隔离根", lambda: (False, seedFailure))
+    readFailure = repr(exc)  # PEP 3110：`exc` 出了 except 块就不再绑定，先取值再交给懒求值的 lambda
+    read("[0] 复制真账本到隔离根", lambda: (False, readFailure))
     sys.exit(1)
 
 svc = SkillService(agent_id=AGENT, skills_dir=str(SKILLS_DIR))
@@ -113,10 +112,14 @@ from neurova.skills.market_registry import hasExecutorMapping  # noqa: E402
 
 
 def classify(entry):
+    # 映射执行体型单列：它是「盘上没字节也真能跑」那一形，混进空壳就是探针自己冤枉判据。
+    # 取数口是上面那句**直连**导入（模块级，无 try + 同名 def 桩）：桩一旦触发，探针问的
+    # 就不是产品那一句，而对照腿要比的读数反而被自己的兜底改掉了（§6-228 零容忍那一条）。
     sid = entry["id"]
     d = SKILLS_DIR / sid
     hasBytes = (d / "SKILL.md").exists() or bool(list(d.glob("*.py")))
-    return sid, hasBytes, hasExecutorMapping(sid)
+    mapped = hasExecutorMapping(sid)
+    return sid, hasBytes, mapped
 
 
 perEntry = [classify(r) for r in rows]

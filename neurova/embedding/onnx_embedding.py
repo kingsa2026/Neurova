@@ -8,30 +8,48 @@ ONNX Embedding Engine - ONNX Runtime 向量嵌入引擎
 - 支持批量编码和单条编码
 """
 
+from __future__ import annotations
+
 from neurova.core.logger import get_logger
+import json
+import re
 import threading
 import time
+import unicodedata
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-
-# numpy 是**可选**依赖（requirements-ci.txt 刻意排除，requirements.txt 装）：
-# 缺席时本模块仍须可导入——否则 `from neurova.embedding import get_embedding_engine`
-# 在薄环境里抛 ModuleNotFoundError，把每一个「引擎缺席即降级关键词档」的调用方
-# 从降级路径推到异常路径（AGENTS.md §3 可选依赖：惰性 + fail-soft）。
-# 缺 numpy 时 _normalize 走纯 Python 实现，`np` 为 None 即是「这一档不可用」的
-# 唯一判据——不新造第二个开关。
-try:  # pragma: no cover - 取决于运行环境的可选依赖
-    import numpy as np
-except ImportError:  # pragma: no cover
-    np = None
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 logger = get_logger(__name__)
+
+#: numpy 在 `requirements-ci.txt` 里是**登记过的可选依赖**（该清单头部的契约：被排除的重依赖
+#: 「在代码中均为惰性/try 降级导入，缺席时模块仍可加载」）。此处此前是模块级 `import numpy as np`，
+#: 于是「薄环境里导入本模块」直接抛 ModuleNotFoundError——`neurova/embedding/__init__.py` 是唯一
+#: 顶层导入点，连带 `get_embedding_engine` 都拿不到，受保护子集里 18 格整片红（`cnb-ggt-1k5ne7emk`）。
+#: 改成懒取：类型注解走 `from __future__ import annotations` 天然是字符串，运行期用到时
+#: `_numpy()` 现取；缺席时它是 `None`，即「这一档不可用」的**唯一判据**——不新造第二个开关，
+#: 也不在调用点抛异常（异常会把「引擎缺席即降级关键词档」的调用方从降级路径推到异常路径）。
+#: **不缓存到模块全局**：`import` 自身就带 `sys.modules` 缓存，再存一份 `np = ...` 是
+#: 第二个写法不同、判空不带锁的"懒建单例"（`test_lazySingletonDcl` 按形态抓的正是它）。
+
+
+if TYPE_CHECKING:  # 只为类型注解：运行期一律经 `_numpy()` 取，模块导入期不碰 numpy
+    from numpy.typing import NDArray
+
+
+def _numpy():
+    """取 numpy；缺席时返回 None（可选依赖缺席＝这一档不可用，不是异常）。"""
+    try:
+        import numpy as _np
+    except ImportError:
+        return None
+    return _np
 
 
 def _normalize(vec: Any) -> Any:
     """L2 归一化（numpy 档与纯 Python 档逐值同语义）。"""
-    if np is not None:
-        norm = np.linalg.norm(vec)
+    numpy = _numpy()
+    if numpy is not None:
+        norm = numpy.linalg.norm(vec)
         if norm > 0:
             return vec / norm
         return vec
@@ -60,6 +78,162 @@ class EmbeddingResult:
     def embedding(self) -> List[float]:
         """单条结果的便捷访问"""
         return self.vectors[0] if self.vectors else []
+
+
+class _WordPieceTokenizer:
+    """纯 Python 的 BERT WordPiece 分词器（零第三方依赖）。
+
+    `tokenizers` / `transformers` 都是**可选**依赖，薄环境（CI 的 `requirements-ci.lock`）
+    里两者都不在。此前 tokenizer 只走这两条 import，缺席即 `initialize_sync()` 返回
+    False，`encode_batch()` 从此对每次调用返回 512 维零向量——而所有消费方都判的是
+    「引擎不为 None」，于是"零向量"被当成"语义相似度 0"继续往下算：联想召回掉档、
+    线索通道不点火、肌肉记忆近似问法恒不命中。报错被吞进了兜底（教义第 1、2 条）。
+
+    词表就在模型目录里（`vocab.txt`），WordPiece 的切分规则也只有几十行，
+    没必要为它拉一个重型依赖：缺 `tokenizers` 时按同一份词表自解，
+    token 序列与 `tokenizers.Tokenizer` 读取同一份 `tokenizer.json` 的结果一致
+    （空格切词 → 小写/去重音 → CJK 逐字 → 贪心最长匹配 → [UNK]）。
+    """
+
+    #: BERT 基础常量（bge 系列的 tokenizer_config 同此）：[CLS]/[SEP]/[UNK] 与 100 字符上限
+    _MAX_CHARS_PER_WORD = 100
+
+    def __init__(self, vocab: Dict[str, int], *, do_lower_case: bool = False,
+                 strip_accents: bool = False) -> None:
+        self._vocab = vocab
+        self._do_lower_case = do_lower_case
+        self._strip_accents = strip_accents
+        self._cls_id = vocab.get("[CLS]", 101)
+        self._sep_id = vocab.get("[SEP]", 102)
+        self._unk_id = vocab.get("[UNK]", 100)
+
+    @classmethod
+    def fromModelDir(cls, model_dir: Path) -> "_WordPieceTokenizer":
+        model_dir = Path(model_dir)
+        if not (model_dir / "vocab.txt").exists():
+            raise FileNotFoundError(f"词表不存在: {model_dir / 'vocab.txt'}")
+        lower = False
+        strip = False
+        config_path = model_dir / "tokenizer_config.json"
+        if config_path.exists():
+            try:
+                config = json.loads(config_path.read_text(encoding="utf-8"))
+                lower = bool(config.get("do_lower_case", False))
+                strip = bool(config.get("strip_accents", False))
+            except Exception as e:      # noqa: BLE001 - 配置坏掉不该让分词器整体缺席
+                logger.debug("tokenizer_config.json 读取失败，按默认大小写口径: %s", e)
+        vocab = cls._vocabFromTokenizerJson(model_dir)
+        if vocab is None:
+            vocab = cls._vocabFromVocabTxt(model_dir / "vocab.txt")
+        return cls(vocab, do_lower_case=lower, strip_accents=strip)
+
+    @staticmethod
+    def _vocabFromTokenizerJson(model_dir: Path) -> Dict[str, int] | None:
+        """优先读 `tokenizer.json` 的 model.vocab。
+
+        `vocab.txt` 的**行号**与模型实际 id 只在小词表上逐位相等：这份 bge 词表里有两行
+        空 token，其后 2 万余个 token 的 id 整体偏移 2。行号当 id 会让同一个词落到别的
+        embedding 行上——不报错，但语义相似度全是错的。故以模型契约（tokenizer.json）为准，
+        `vocab.txt` 只在没有 tokenizer.json 时兜底。
+        """
+        path = model_dir / "tokenizer.json"
+        if not path.exists():
+            return None
+        try:
+            model = json.loads(path.read_text(encoding="utf-8")).get("model") or {}
+            vocab = model.get("vocab")
+            if isinstance(vocab, dict) and vocab:
+                return {str(token): int(index) for token, index in vocab.items()}
+        except Exception as e:      # noqa: BLE001 - 读不动就退到 vocab.txt
+            logger.debug("tokenizer.json 词表读取失败，退到 vocab.txt: %s", e)
+        return None
+
+    @staticmethod
+    def _vocabFromVocabTxt(vocab_path: Path) -> Dict[str, int]:
+        vocab: Dict[str, int] = {}
+        for index, line in enumerate(vocab_path.read_text(encoding="utf-8").splitlines()):
+            token = line.rstrip("\n")
+            if token:
+                vocab[token] = index
+        if not vocab:
+            raise ValueError(f"词表为空: {vocab_path}")
+        return vocab
+
+    def encode(self, text: str) -> "_WordPieceEncoding":
+        ids: List[int] = [self._cls_id]
+        for word in self._basicTokenize(text or ""):
+            ids.extend(self._wordPiece(word))
+        ids.append(self._sep_id)
+        return _WordPieceEncoding(ids)
+
+    def _basicTokenize(self, text: str) -> List[str]:
+        if self._strip_accents:
+            text = unicodedata.normalize("NFD", text)
+            text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+        if self._do_lower_case:
+            text = text.lower()
+        words: List[str] = []
+        for chunk in re.split(r"\s+", text.strip()):
+            if not chunk:
+                continue
+            piece = ""
+            for char in chunk:
+                if _isCjk(char):
+                    if piece:
+                        words.append(piece)
+                        piece = ""
+                    words.append(char)
+                else:
+                    piece += char
+            if piece:
+                words.append(piece)
+        return words
+
+    def _wordPiece(self, word: str) -> List[int]:
+        if len(word) > self._MAX_CHARS_PER_WORD:
+            return [self._unk_id]
+        ids: List[int] = []
+        start = 0
+        while start < len(word):
+            end = len(word)
+            matched: int | None = None
+            while start < end:
+                piece = word[start:end]
+                if start > 0:
+                    piece = "##" + piece
+                if piece in self._vocab:
+                    matched = self._vocab[piece]
+                    break
+                end -= 1
+            if matched is None:
+                return [self._unk_id]
+            ids.append(matched)
+            start = end
+        return ids
+
+
+class _WordPieceEncoding:
+    """`tokenizers.Encoding` 的最小同形：`encode()` 的调用方只读 `.ids`。"""
+
+    __slots__ = ("ids",)
+
+    def __init__(self, ids: List[int]) -> None:
+        self.ids = ids
+
+
+def _isCjk(char: str) -> bool:
+    """CJK 逐字切分的判定面（与 BERT 的 `_is_chinese_char` 同一批码位块）。"""
+    code = ord(char)
+    return (
+        0x4E00 <= code <= 0x9FFF
+        or 0x3400 <= code <= 0x4DBF
+        or 0x20000 <= code <= 0x2A6DF
+        or 0x2A700 <= code <= 0x2B73F
+        or 0x2B740 <= code <= 0x2B81F
+        or 0x2B820 <= code <= 0x2CEAF
+        or 0xF900 <= code <= 0xFAFF
+        or 0x2F800 <= code <= 0x2FA1F
+    )
 
 
 class ONNXEmbeddingEngine:
@@ -228,7 +402,7 @@ class ONNXEmbeddingEngine:
 
     def _try_load_onnx(self) -> bool:
         """尝试加载 ONNX Runtime 后端"""
-        if np is None:
+        if _numpy() is None:
             # 前处理与后处理全是 ndarray 运算：缺 numpy 时这一档整体不可用。
             # 让位给 sentence-transformers 档（它不需要 numpy），而不是先加载
             # session 再在 encode 时崩。
@@ -335,7 +509,16 @@ class ONNXEmbeddingEngine:
             logger.info("HuggingFace tokenizer 加载完成: %s", self._model_dir)
             return tokenizer
         except Exception as e:
-            logger.warning("HuggingFace tokenizer 加载失败: %s", e)
+            logger.debug("HuggingFace tokenizer 加载失败，改用内置 WordPiece 分词: %s", e)
+
+        # 最后一道：按模型目录自带的 `vocab.txt` 走纯 Python WordPiece。
+        # 前两条都是**可选**依赖，两条都缺席是薄环境的常态，不该等于"引擎初始化失败"。
+        try:
+            tokenizer = _WordPieceTokenizer.fromModelDir(self._model_dir)
+            logger.info("内置 WordPiece 分词器加载完成: %s", self._model_dir / "vocab.txt")
+            return tokenizer
+        except Exception as e:      # noqa: BLE001 - 词表真的不在，才是初始化失败
+            logger.error("分词器全部不可用（tokenizers / transformers / vocab.txt）: %s", e)
             return None
 
     def encodeOrNone(self, text: str) -> Optional[List[float]]:
@@ -410,7 +593,7 @@ class ONNXEmbeddingEngine:
         # 在此点名并返回零向量兜底（与下方既有的「初始化失败」兜底同一形态），
         # 而不是让 `np.array` 抛 AttributeError——后者会把「可选依赖缺席」
         # 伪装成「代码缺陷」。运行时按 backend_type 判定，不按代码位置假设。
-        if np is None and self._backend_type != "sentence_transformers":
+        if _numpy() is None and self._backend_type != "sentence_transformers":
             logger.error("numpy 缺席，ONNX 推理档不可用，返回零向量兜底")
             return EmbeddingResult(
                 vectors=[[0.0] * 512] * len(texts),
@@ -483,9 +666,10 @@ class ONNXEmbeddingEngine:
             for attention_mask in attention_mask_list:
                 attention_mask.extend([0] * (batch_longest - len(attention_mask)))
 
-            # 转为 numpy
-            input_ids = np.array(input_ids_list, dtype=np.int64)
-            attention_mask = np.array(attention_mask_list, dtype=np.int64)
+            # 转为 numpy（惰性取：薄环境里这一支根本走不到，本模块仍可导入）
+            numpy = _numpy()
+            input_ids = numpy.array(input_ids_list, dtype=numpy.int64)
+            attention_mask = numpy.array(attention_mask_list, dtype=numpy.int64)
 
             # ONNX 推理
             ort_inputs = {
@@ -494,7 +678,7 @@ class ONNXEmbeddingEngine:
             }
 
             # 尝试添加 token_type_ids
-            token_type_ids = np.zeros_like(input_ids, dtype=np.int64)
+            token_type_ids = numpy.zeros_like(input_ids, dtype=numpy.int64)
             input_names = [inp.name for inp in model_inputs]
             if "token_type_ids" in input_names:
                 ort_inputs["token_type_ids"] = token_type_ids
@@ -508,7 +692,7 @@ class ONNXEmbeddingEngine:
                 embeddings = embeddings[:, 0, :]
 
             # L2 归一化
-            embeddings = np.array([_normalize(vec) for vec in embeddings])
+            embeddings = numpy.array([_normalize(vec) for vec in embeddings])
 
             # 转为 Python list
             vectors = embeddings.tolist()
@@ -535,11 +719,34 @@ class ONNXEmbeddingEngine:
                 inference_ms=round(inference_ms, 2),
             )
 
-    async def shutdown(self) -> None:
-        """关闭引擎"""
+    def releaseBackend(self) -> None:
+        """丢弃后端引用**并**把原生内存还回去（同步，不依赖事件循环）。
+
+        `InferenceSession` 持有的是原生内存，只把引用置 None 是交给 GC——
+        长进程（受保护子集单进程跑近八千档）里等于不释放，一路顶到 runner 的
+        内存上限被 SIGKILL（pipeline-3 的 137 就是这么来的）。故显式 close()。
+
+        为什么是同步方法而不是只有 async 的 `shutdown()`：重置入口
+        （`reset_embedding_engine`）可能在**已有事件循环**里被调用，
+        那里再 `asyncio.run()` 会抛 `RuntimeError`，协程从不执行、
+        session 也就不释放——泄漏在异步上下文里原样复发。
+        """
+        session = self._ort_session
         self._ort_session = None
+        if session is not None:
+            # 关闭动作本身不得把停机流程变成崩溃：缺 close() 的后端原样跳过。
+            closeSession = getattr(session, "close", None)
+            if callable(closeSession):
+                try:
+                    closeSession()
+                except Exception as e:
+                    logger.warning("关闭 ONNX 会话失败: %s", e)
         self._st_model = None
         self._tokenizer = None
+
+    async def shutdown(self) -> None:
+        """关闭引擎，**并把原生内存还回去**。"""
+        self.releaseBackend()
         self._initialized = False
         self._backend_type = None
         logger.info("ONNXEmbeddingEngine 已关闭 | 统计: %s", self.stats)

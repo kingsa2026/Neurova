@@ -44,6 +44,7 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from tests import ast_scan  # noqa: E402
+from tests.ast_scan import parseSource
 
 SCOPED = [REPO / "neurova" / "channels"]
 
@@ -58,7 +59,7 @@ def _scanFiles():
 
 def _trees(*pairs):
     """把 `(名字, 源码字面量)` 变成 `(名字, 语法树)`——自证格仍按源码写，读得懂。"""
-    return [(name, ast.parse(src)) for name, src in pairs]
+    return [(name, parseSource(src)) for name, src in pairs]
 
 
 def _scanTrees():

@@ -37,6 +37,7 @@ from tests import ast_scan
 import pytest
 
 from neurova.core.event_bus import get_event_bus, reset_event_bus
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 NEUROVA_ROOT = REPO_ROOT / "neurova"
@@ -72,7 +73,7 @@ def _eventBusDefinitions() -> list:
     # 同名 ClassDef 就是第二份平行实装（各自订阅、各发各的事件，正是本判据要拦的那件事）。
     # 扩面实测零新命中，也不会自咬——本档没有名为 EventBus 的定义，只有字样出现在说明里。
     for ref in ast_scan.sourceRefsUnder(REPO_ROOT, ".py", ast_scan.textHints("class EventBus")):
-        tree = ast.parse(ref.code)
+        tree = parseSource(ref.code)
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef) and node.name == "EventBus":
                 hits.append(f"{ref.path.relative_to(REPO_ROOT).as_posix()}:{node.lineno}")

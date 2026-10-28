@@ -32,6 +32,7 @@ import json
 from pathlib import Path
 
 from neurova.skills.creation_governance import fingerprint, structure_key
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 GOVERNANCE = REPO_ROOT / "neurova" / "skills" / "creation_governance.py"
@@ -81,7 +82,7 @@ class TestParamShapeEntersIdentity:
         两个键（业务/结构）各自复写归并与 `json.dumps(...sha256...)` 时，
         "结构 = 工具序列 + 参数"就有了第二份实现。
         """
-        tree = ast.parse(GOVERNANCE.read_text(encoding="utf-8"))
+        tree = parseSource(GOVERNANCE.read_text(encoding="utf-8"))
         functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
         assert "structural_identity" in functions, "结构归一没有单源函数"
         assert "_hash_identity" in functions, "身份哈希没有单源函数"

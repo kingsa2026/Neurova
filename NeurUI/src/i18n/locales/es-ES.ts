@@ -1153,10 +1153,6 @@ export default {
     sandboxRequired: 'Sandbox requerido',
   },
   skillEvo: {
-    adopt: 'Adoptar',
-    adoptTarget: 'Habilidad objetivo',
-    adoptSuccess: 'Propuesta pendiente creada',
-    adoptError: 'Error de adopción',
     abVerify: 'Verificación de dos brazos (holdout real)',
     abHint: 'Mismo conjunto y mismo evaluador: texto base frente a texto candidato; solo lectura, no genera propuesta.',
     abRunSimulated: 'Ejecutar brazo simulado',
@@ -1309,6 +1305,10 @@ export default {
     noMarketSkills: 'No hay habilidades públicas para importar',
     installSuccess: 'Instalación exitosa',
     installError: 'Error de instalación',
+    adopt: 'Adoptar',
+    adoptTarget: 'Habilidad objetivo',
+    adoptSuccess: 'Propuesta pendiente creada',
+    adoptError: 'Error de adopción',
   },
   skillPool: {
     pendingReview: "Pendiente",

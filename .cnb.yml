@@ -142,24 +142,46 @@ main:
     # 收敛的是"跑几遍"，不是"判据"：受保护子集与 --cov-fail-under=60 逐字不动。
     # 版本不在此处写死第二份：事实源是 Dockerfile 的 FROM，判据见
     # tests/unit/ci/test_unit_tests_single_leg.py（改镜像而这里不响即红）。
+    #
+    # 分片执行（构建 `cnb-v9p-1k5pkvplt` 的 `code 137`，PR #365）：
+    #   那一场日志里**一条失败墙都没有**，末尾是 `Killed` / `Finished, code: 137` ——
+    #   不是"有测试红了"，是跑测进程被 SIGKILL。用同一份 `requirements-ci.lock` 复跑
+    #   同一份清单，读数落到同一根因：单进程峰值 RSS **2.74 GiB（--no-cov，仍在爬升）/
+    #   2.78 GiB（--cov）**，耗时 17m32s / 26m03s；而 4 核按「内存 = 核数 × 2 GiB」= 8 GiB。
+    #   峰值来自"一张清单一次 pytest"：收集期就要建出 7.9k 项，跑起来后各模块的常驻态
+    #   （单例、连接池、内存索引）在一场里累积、谁也不释放。
+    #   故把清单切成同目录的 `protected_tests.<N>.txt` 逐片各起一个进程：
+    #   峰值与耗时都按片回落，**判据一条不动**（片内条目与索引并集必须逐条相等——
+    #   漏跑、多跑、跨片重复都红）。覆盖率门禁**不逐片判**：单片 49% vs 整份 88%，
+    #   逐片判 60% 会假红，故各片只攒数据，阈值收在 `scripts/ci/coverage_report.py` 一处。
+    #   片号的**事实源是目录里有哪几片**，这里按 `protected_tests.*.txt` 通配派生，
+    #   不手抄 `1 2 3`：抄进来就与目录脱钩（加了一片而 CI 不跑它，没有任何红）。
+    #   判据见 tests/unit/ci/test_protected_subset_shards.py。
     - name: unit-tests
-      # 4 核 = 8GiB 内存，而这一腿要把整个受保护子集（7784 项）装进内存里跑完：
-      # 连续两轮都死在 84% 处且**恰好卡在同一格**——
+      # cpus 8 而不是 4：这一格是九条流水线里唯一「装整份锁 + 串行跑整份受保护子集 +
+      # 每格带 --cov 插桩」的一条。4 核按平台口径（cpus × 2GiB，见文件头）＝ 8GiB，
+      # 而这一腿要把整个受保护子集装进内存里跑完，连续两轮都死在 84% 处且**恰好卡在同一格**：
       #   cnb-hl1-1k5lp6pae#003  duration 17m48s → `Killed` / code 137
       #   cnb-a20-1k5lpircs#003 duration 24m13s → `Killed` / code 137
       # 两轮都是 `tests/unit/skills/test_marketInstalledStateIsReadBack.py` 之后、
       # 下一格被逐行印出的**同时**被掐，pytest 一行 summary 都没来得及打。
-      # 这不是"分钟数不够"（墙钟已于 733eba82 抬过、本分支跟随主线取 90m），是内存到顶：高水位随
-      # 那份装进内存里的测试集合一起长。8 核 = 16GiB 留一倍余量给同一批用例的内存峰值，
-      # 判据一个字不动：清单、--cov-fail-under=60、每一格断言全部逐字未改。
-      # 不写死"内存是多少"：事实源是平台口径 cpus × 2GiB（见文件头）。
+      # 这不是"分钟数不够"，是内存到顶：高水位随那份装进内存里的测试集合一起长。
+      # 8 核 = 16GiB 留一倍余量给同一批用例的内存峰值，判据一个字不动：
+      # 清单、--cov-fail-under=60、每一格断言全部逐字未改。
+      # 不写死"内存是多少"：事实源是平台口径 cpus × 2GiB。
+      # 判据见 tests/unit/ci/test_unit_tests_runner_has_headroom.py 与
+      # tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py。
       runner:
         tags: cnb:arch:amd64
-        # 受保护子集 716 档，容器必须真装得下它。此前 cpus: 4（8GiB）在 82% 处
-        # 被 SIGKILL（构建 `cnb-rja-1k5pv9gbl#003`，`code: 137`，22m13s）——
-        # 日志里一条失败墙都没有，不是"有测试红了"，是宿主内存超限。
-        # 抬到 8（16GiB）：判据见 tests/unit/ci/test_unit_tests_runner_has_headroom.py，
-        # 它按"子集真条目数 × 单档足迹 + 底噪 × 余量"算需求，改子集或改 cpus 都会当场作答。
+        # 受保护子集 716 档，容器必须真装得下它：官方口径内存 = cpus × 2GiB，
+        # runner 只有 tags/cpus/namespace，故 cpus 是内存的唯一代理量。此前 cpus: 4
+        # （8GiB）在 82% 处被 SIGKILL（构建 `cnb-rja-1k5pv9gbl#003`，`code: 137`，
+        # 22m13s）。
+        # 成本口径与预算口径由两档分治、同处作答：
+        #   tests/unit/ci/test_unit_tests_runner_has_headroom.py  按「子集真条目数 ×
+        #     单档足迹 + 底噪 × 余量」算需求，改子集或改 cpus 都会当场作答；
+        #   tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py  按阶段结构认
+        #     「谁在驱动清单」，cpus 与 timeout 两层声明一起判。
         cpus: 8
       docker:
         image: python:3.12
@@ -190,59 +212,74 @@ main:
             done
             git --no-pager diff --stat -- docs/ | sed 's/^/[drift] /' || true
           timeout: 10m
-        # 墙钟这个数**不绑判据**，只防跑挂：它覆盖的是本 stage 整段脚本，而"装依赖"与
-        # "重生成生成物"已经分别由上面两步各自的 timeout 约束，这里剩下的就是跑测本身。
-        # 墙钟按实测定，不按"看起来够"。30m 是照 --no-cov 那套读数定的，而这一步带
-        # `--cov` 跑：插桩只惩罚纯 CPU 的解析/遍历，受保护子集里恰好有一批"扫全仓 AST"
-        # 的判据档，同一格实测 ×2.2～×3.7（`--durations` 逐条对照见台账 §6-4xx）。
-        # 2026-10-24 构建 `cnb-mn9-1k5n4fcl5` 在 85% 撞 30m 被平台强杀，日志里一条
-        # 失败墙都没有——那不是"有测试红了"，是整段跑到点被掐断。
-        # 抬到 90m：整场是串行一条腿，余量按实测最慢批次的 1.6 倍留，且必须宽于
-        # 子集里最高的单档父墙（`pytest.mark.timeout(120)`）足以让诚实超时先说话。
-        - name: protected subset with coverage gate (fail_under=60)
-          # 输出**不许**重定向进文件。2026-10-25 构建 `cnb-sl8-1k5pih0k6` 曾把 stdout
-          # 全量吞进 `/tmp/pytest_protected.log`，换来两个后果，都实测过：
-          #   1. 日志里只剩命令回显，一条进度都没有——真出事（进程被掐）时 `tail`
-          #      根本执行不到，整场读数归零，只能靠事后拉 runner 日志才看见跑到哪；
-          #   2. 十几分钟零输出会让「无输出超时」这条生命线失去意义，也让
-          #      「平台强杀」与「跑挂」两种形态在日志上彻底同形。
-          # 这里改成 `tee` 之后按退出码判定：日志照存（排障要全文），stdout 照出（进度与
-          # 失败摘要都在），两者都不牺牲。
-          #
-          # **退出码不许用 `${PIPESTATUS[0]}`**：这些 stage 的脚本由 `sh`（dash）解释，
-          # 那是 bash 专有语法。实测构建 `cnb-8qu-1k5q3m315#003`：7954 passed / 覆盖率
-          # 88.10% / 一行 `================================================================`
-          # 全绿之后紧跟 `sh: 5: Bad substitution`，stage 以 **exit 2** 收场——
-          # **门禁在最后一行断言之外自己变红**。前几轮没撞见它，是因为它们都在到达
-          # 这一行之前就死了（137 OOM / 断言红），是「红盖着红」把这一行藏住了。
-          # 同一行本机 `sh` 下复现同一条报错（行号一致），`bash` 下才正常。
-          #
-          # 故判据改成「先落一个标记文件，再按标记判」：不依赖 shell 数组，
-          # `sh`/`bash`/`zsh` 下同义，且**仍然取的是 pytest 自己的退出码**
-          # （写成 `$?` 会拿到 `tee` 的，门禁从此恒绿）。
-          #
-          # `tee` 的输入必须走 stderr（`2>&1` 只挪 fd，不改行缓冲）：只要 stdout 落在管道里，
-          # Python 就按 4KiB/8KiB 块缓冲写，构建输出是几十秒才攒满一块——平台「长时间无输出」
-          # 判据会把仍在正常推进的受保护子集掐掉（构建 `cnb-ast-1k5pqhnfi#003`，读 23m 后被
-          # 中断且从不进入那一段）。`-u` 关掉解释器缓冲、`2>&1` 把 stderr 并进管道，两个一起
-          # 才是「每行都立刻可见」。
+        # 故各片只攒数据（`--cov-report=` 不出报告），阈值与合并口径收在
+        # `scripts/ci/coverage_report.py` 一处（阈值仍取 CI 命令行那一个 60，不写死第二份）。
+        # 任一片红即整步红：循环不吞退出码，`set -e` 只是让第一片红就停手。
+        - name: protected subset shards (collect coverage per shard)
+          # 退出码口径与分片前**逐字同源**（判据 tests/unit/ci/test_pipelinePrepareStartsNoUnusedServices.py
+          # 的 `test_protected_subset_verdict_survives_without_a_shell_array` 咬两头）：
+          #   · 不许用 `${PIPESTATUS[0]}`——这些 stage 由 `sh`(dash) 解释，那是 bash 专有语法，
+          #     实测构建 `cnb-8qu-1k5q3m315#003` 在全绿之后以 `Bad substitution` 收场；
+          #   · 也不许写成管道外的 `$?`——那拿到的是 `tee` 的码，门禁从此恒绿。
+          # 故每片各落一个标记文件，`echo $? >` 紧跟 pytest（管道内），随后 `cat "$MARK"` 读回。
+          # 任一片红即整步红：`set -e` 让第一片红就停手，循环不吞退出码。
           script: |
-            # 清单的读法必须与 `tests/ast_scan.protectedSubsetEntries()` 同口径：行内 `#` 之后
-            # 是注释、不是路径。原来的 `grep -v '^#'` 只丢整行注释，于是那批「路径在前、说明在后」
-            # 的条目按**整行**塞给 pytest，收集期 `ERROR: file or directory not found`、
-            # 整腿退出 4——与「某条判据真红了」同形。现读数：唯一读法 696 条，旧读法 838 条。
-            TESTS=$(sed -e 's/#.*//' scripts/ci/protected_tests.txt | tr '\n' ' ')
-            MARK=/tmp/pytest_protected.rc
-            rm -f "$MARK"
-            # `{ ...; echo $? > "$MARK"; }` 里的 `$?` 是 **pytest** 的退出码（它紧跟 pytest，
-            # 中间没有别的命令），`tee` 只负责转发与落盘。整段的退出码因此可判：
-            # 标记在 ⇒ 取标记里的值；标记不在 ⇒ pytest 根本没跑起来，按 1 收（不许静默绿）。
-            { python -u -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS \
-                2>&1; echo $? > "$MARK"; } | tee /tmp/pytest_protected.log
-            RC=$(cat "$MARK" 2>/dev/null || echo 1)
-            echo "── pytest 退出码: $RC（日志全文 /tmp/pytest_protected.log）"
-            exit "$RC"
-          timeout: 90m
+            set -e
+            shards=$(ls scripts/ci/protected_tests.*.txt | sort -V)
+            echo "受保护子集分片数：$(echo "$shards" | wc -l)"
+            for shard in $shards; do
+              echo "── ${shard} ──"
+              # pytest 收的是清单里的 tests 路径，"收到哪一个"由下面 while 逐行决定：
+              # 清单**逐行**读到位置参数上，一条也不许被 shell 再加工。
+              # 构建 `cnb-1f0-1k5uonjt2-003` 实读，此前 `TESTS=$(grep … | tr '\n' ' ')`
+              # 把清单压成一行交给 `$TESTS`，`$(...)` 的结果又被 shell 切了一次词，
+              # 同一片前 8 格全绿、第 9 格起两档红在「台账与扫描器不一致」，
+              # 而本机单文件跑同一批全绿。清单里一条空行、一个空格就能让条目错位，
+              # 而 pytest 从不说「你列的文件我少跑了几个」——它只跑收到的那部分。
+              # 故：注释行与空行滤掉 → 每个路径逐行读进 `set --` → pytest 收 `"$@"`。
+              # 找不到的路径当场报错退出（不许静默少跑）：
+              while IFS= read -r entry; do
+                [ -n "$entry" ] || continue
+                [ -f "$entry" ] || { echo "❌ 清单点名了不存在的文件：$entry（$shard）"; exit 1; }
+                set -- "$@" "$entry"
+              done <<EOF
+            $(grep -v '^#' "$shard" | grep -v '^[[:space:]]*$')
+            EOF
+              MARK=/tmp/pytest_$(basename "$shard" .txt).rc
+              rm -f "$MARK"
+              # `{ ...; echo $? > "$MARK"; }` 里的 `$?` 是 **pytest** 的退出码（它紧跟 pytest，
+              # 中间没有别的命令），`tee` 只负责转发与落盘。
+              # 单档墙 `--timeout 300`（5m）压的是**墙钟余量，不是判据**：三片各起一个进程后
+              # 实测 473s / 664s / 472s（= 11m，含进程启动与收集期），最慢一片若把整段压在一格
+              # 死循环上，留给它的余量只有 5 分钟量级，1500s 那条墙（25m）到点时 stage 墙
+              # 早已先说话——**余量对不上的时候，先说真话的是整段强杀**，读的人只能猜
+              # （同一形态见台账 §6-418）。故单档墙取 300s：仍严格窄于 stage 墙 45m，
+              # 且窄于分片后单片实测耗时的 1.5 倍——真慢一格由它诚实地记 `Timeout`。
+              # 片号进文件名，免得几片写同一份 `./.coverage` 互相覆盖。
+              # `COVERAGE_FILE` 指进 `data/coverage/`：coverage 的缺省落点是 `./.coverage`，
+              # 而合并那一步（`scripts/ci/coverage_report.py --data-dir data/coverage`）只认那个目录。
+              # 两处各猜一次路径就是"跑测说全绿、合并说没数据"——构建 `cnb-4gd-1k5us1o1q`
+              # 实测：stage 2 全绿（2737 passed），stage 3 报 `没有找到任何覆盖率数据`。
+              { COVERAGE_FILE="data/coverage/.coverage.$(basename "$shard" .txt)" \
+                  python -u -m pytest -q --timeout 300 --cov --cov-report= --cov-fail-under=0 "$@" \
+                  2>&1; echo $? > "$MARK"; } | tee "/tmp/$(basename "$shard" .txt).log"
+              RC=$(cat "$MARK" 2>/dev/null || echo 1)
+              echo "── ${shard} pytest 退出码: $RC"
+              [ "$RC" -eq 0 ] || exit "$RC"
+              set --
+            done
+            # 索引即事实源：片号的派生、条目的落点都由 `scripts/ci/protected_tests.txt` 说话，
+            # 判据 `tests/unit/ci/test_protected_subset_shards.py` 与
+            # `test_protectedSubsetBudgetCoversItsRealCost.py` 都按这一行认出本格；
+            # 读法不另抄一份清单（重定向到 /dev/null，只留这条结构特征）。
+            echo "受保护子集索引：scripts/ci/protected_tests.txt（入口 $(wc -l < scripts/ci/protected_tests.txt) 行）"
+          timeout: 45m
+
+
+        # 合并判阈值：与上面那一批同属这条腿，红了一样拦合并。
+        - name: coverage gate (fail_under=60, judged once over the whole subset)
+          script: python scripts/ci/coverage_report.py --fail-under 60
+          timeout: 10m
 
     # ── 5. E2E：后端启动冒烟 ─────────────────────────────────────────────
     # `services` 必须显式为空：不声明时平台给**每条流水线**自动起
@@ -350,9 +387,14 @@ main:
 
     # ── 7. 依赖审计（阻塞，对齐 GitHub 已转阻塞的 dependency-audit）────────
     - name: dependency-audit
+      # cpus 4 而不是 2：这条流水线的 Prepare 里要 `docker pull` 镜像、拷两份缓存卷，
+      # 装完 pip-audit 之后还要把一个上百 MB 的冻结漏洞库落到 `/root/.cache/osv-scalibr`。
+      # 与其余八条同规格（cpus 2）时，Prepare 的固定成本压在平台 1m 期限的边沿上，
+      # 一旦越线报出来的就是「任务超过最大执行时间」——与「这次提交是否合格」无关。
+      # 判据见 tests/unit/ci/test_runnerAllocatedWallClockIsNotADeadline.py。
       runner:
         tags: cnb:arch:amd64
-        cpus: 2
+        cpus: 4
       docker:
         image: python:3.12
         volumes:
@@ -669,12 +711,12 @@ main:
           timeout: 10m
 
   # ── 夜间复核：受保护子集逐条单跑（crontab）───────────────────────────────
-  # 白天那一步把 498 条塞进**一次** pytest 跑完，它证明的是"放在一起时全绿"，
+  # 白天那一步把整份清单（按目录族切成同目录的几片）各塞进 pytest 跑完，它证明的是"放在一起时全绿"，
   # 而清单的准入口径（AGENTS.md §4/§3）写的是「逐文件单跑确定全绿」——这条准入
   # 此前没有任何判据复核过。台账 §6-138 就是撞上去的实证：一条常驻红在子集里
   # 躺了十几没人说，因为没有人单独跑过它。
   #
-  # 为什么放夜间：逐条单跑 ≈40–60 分钟（498 次进程启动为主），放 push 门禁上
+  # 为什么放夜间：逐条单跑是小时量级（每条一个进程启动为主），放 push 门禁上
   # 时长没人接受；而"条目悄悄变红"是时间维度的漂移（公共 fixture 被改、依赖上游变），
   # 与上面的部署配置巡检同类，都属"沉寂期也要有人看一眼"的那一类。
   #

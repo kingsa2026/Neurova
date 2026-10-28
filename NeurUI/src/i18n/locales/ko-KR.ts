@@ -1153,10 +1153,6 @@ export default {
     sandboxRequired: '샌드박스 필요',
   },
   skillEvo: {
-    adopt: '채택',
-    adoptTarget: '대상 스킬',
-    adoptSuccess: '대기 중인 제안을 생성했습니다',
-    adoptError: '채택 실패',
     abVerify: '양쪽 팔 검증 (진짜 홀드아웃)',
     abHint: '같은 작업 집합과 같은 채점기로 기준 본문과 후보 본문을 비교합니다. 읽기 전용이며 제안을 만들지 않습니다.',
     abRunSimulated: '시뮬레이션 팔 실행',
@@ -1309,6 +1305,10 @@ export default {
     noMarketSkills: '가져올 공개 스킬이 없습니다',
     installSuccess: '설치 성공',
     installError: '설치 실패',
+    adopt: '채택',
+    adoptTarget: '대상 스킬',
+    adoptSuccess: '대기 중인 제안을 생성했습니다',
+    adoptError: '채택 실패',
   },
   skillPool: {
     pendingReview: "검토 대기",

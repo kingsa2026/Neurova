@@ -42,6 +42,7 @@ from neurova.skills.sandbox_root import (
     resolveWorkspaceRoot,
 )
 from neurova.tool_executor import ToolExecutor
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 NEUROVA = REPO_ROOT / "neurova"
@@ -127,7 +128,7 @@ class TestMembershipIsOneSource:
         判定条件是「注入语句受一个**字符串字面量比较**控制」——那正是第二处硬编码
         的形态。咽喉必须调单源 helper（`inject_sandbox_root`）。
         """
-        tree = ast.parse(
+        tree = parseSource(
             (NEUROVA / "tool_executor.py").read_text(encoding="utf-8"),
             filename="tool_executor.py",
         )

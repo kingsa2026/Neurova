@@ -131,6 +131,25 @@ def _get_user_id(request, current_user: Optional[Dict[str, Any]] = None) -> str:
     return getattr(request.state, "user_id", "anonymous")
 
 
+def _establishRequestOwner(user_id: str) -> None:
+    """在请求边界建立请求级属主——`/chat` 与 `/ws` 共用这一处取法。
+
+    §6-153 的命中点形状：批 9 把管线里"每轮按 `metadata['user_id']` 补写通道"的双写
+    删掉时只在 `chat.py` 补了边界写点，console 面漏了。漏了会怎样不是"少个字段"：
+    `get_request_user_id()` 为空 ⇒ usage 入账落 `"anonymous"`
+    （`multi_model_client:876/1156`）、按日 LLM 配额整条不判（`:1426` 无身份即放行）、
+    客户端自带全新 session_id 时会话落空属主，而 `session_manager:1650` 的口径是
+    "空属主不过滤"——那条会话出现在**每个**登录用户的列表里。
+
+    位置是语义不是风格：`set_request_user_id` 必须发生在
+    `asyncio.create_task(...)` **之前**，task 创建时复制的是当前上下文；
+    也不能写进 `event_stream` 闭包（那要等客户端开始读才执行，而回合在请求边界就成立了）。
+    """
+    from neurova.core.identity_context import set_request_user_id
+
+    set_request_user_id(user_id)
+
+
 # ── Models ─────────────────────────────────────────────
 
 
@@ -629,6 +648,22 @@ async def post_console_chat(
     # _get_user_id(request, current_user) 读 request.state.user_id——中间件从未注入，
     # 恒为 "anonymous"，导致 attach_files 找不到属主文件。
     user_id = str(current_user.get("user_id", "")) if isinstance(current_user, dict) else _get_user_id(request, current_user)
+    # 请求级属主（§6-153 扫出的命中点；§6-436 修掉「写在生成器里」那半拉）：
+    # 批 9 把管线里那段"每轮按 metadata['user_id'] 补写通道"的双写删掉时，只在
+    # `api/endpoints/chat.py` 补了边界写点，**这条 console 面漏了**——于是网页回合里
+    # `get_request_user_id()` 为空：usage 入账落到 `"anonymous"`
+    # （`multi_model_client:876/1156`）、按日 LLM 配额整条不判（`:1426` 无身份即放行）、
+    # 客户端自带全新 session_id 时会话落空属主（`session_manager:1650` 空属主＝对全员可见）。
+    #
+    # 写点必须在**端点的同步段**、`StreamingResponse(...)` 之前：此前那一次写落在
+    # `event_stream` 生成器体内，而生成器体不在端点上下文的拷贝里——它由 starlette 的
+    # `iterate_in_threadpool` 在**工作线程池的另一次上下文拷贝**里推进，于是这一写既到不了
+    # 生成器自己的后续几行（`metadata` 就在它后面拼的），也不保证到得了回合任务。
+    # 那条链上唯一的确定性来自"建任务时复制当前上下文"，所以只有在端点里写下的这一次
+    # 才是可证的。`/v1/chat/stream` 的写点长在 `event_generator` 里，症状同源，另批收口。
+    from neurova.core.identity_context import set_request_user_id
+
+    set_request_user_id(user_id)
     repo = get_session_repository()
     agent_id = getattr(body, "agent_id", "") or ""
 
@@ -636,6 +671,8 @@ async def post_console_chat(
         runRow = await _requireRunRow(resume_run_id)
         # 续跑执行身份＝原回合属主（推导单源在 `core/agent_run_ledger`，四入口共用）
         user_id, agent_id = resumeTurnIdentity(runRow, user_id, agent_id)
+
+    _establishRequestOwner(user_id)
 
     # 会话 ID：客户端传入或新建
     if body.session_id:
@@ -943,21 +980,8 @@ async def post_console_chat(
             # 429 重试/切换倒计时事件转发（retry_status → SSE retry）
             "emit_status_events": True,
         }
-        # 请求级属主（§6-153 按教义第 5 条扫出的命中点）：批 9 把管线里那段"每轮按
-        # metadata['user_id'] 补写通道"的双写删掉时，只在 `api/endpoints/chat.py` 补了
-        # 边界写点，**这条 console 面漏了**——于是网页回合里 `get_request_user_id()` 为空：
-        # usage 入账落到 `"anonymous"`（`multi_model_client:876/1156`）、按日 LLM 配额整条
-        # 不判（`:1426` 无身份即放行）、客户端自带全新 session_id 时会话落空属主
-        # （`session_manager:1650` 空属主＝对全员可见）。写点必须落在 `event_stream` 内、
-        # `create_task(run_chat())`(:878) 之前：task 在创建时复制当前上下文。
-        from neurova.core.identity_context import set_request_user_id
-
-        # 写点必须**早于** `create_task(_produceTurn())`：任务在创建那一刻复制当前上下文，
-        # 晚写的身份进不了那一份。`73132b2f` 把生产者的创建上提到请求边界时留在了
-        # metadata 之后，于是 `run_chat` 跑在一个**没有**身份的上下文里（实测
-        # `get_request_user_id()` 在 `agent.chat` 里读到 None——判据
-        # `test_consoleChatTurnCarriesTheAuthenticatedOwner` 当场红）。
-        set_request_user_id(user_id)
+        # 请求级属主已在端点同步段由 `_establishRequestOwner(user_id)` 写过一次——
+        # 这里不再写第二遍：同一个值两处写就是两条并行口径。
         # R-3 修复: 附件元数据注入（file_ids → attachments，供 pipeline 附件注入）
         attachments = attach_files(getattr(body, "file_ids", None), user_id)
         logger.info("[附件注入] file_ids=%s user_id=%s → attachments=%d",
@@ -2369,10 +2393,9 @@ async def websocket_console(websocket: WebSocket, client_id: str, token: str = Q
     # `agent.chat` 之后落盘的会话也是空属主（对全员可见）。取数走 `_user_identity`
     # 那份单点，不在这里另推一遍 `sub` 的口径。
     from neurova.api.auth import _user_identity
-    from neurova.core.identity_context import set_request_user_id
 
     user_id = str(_user_identity(payload).get("user_id") or "")
-    set_request_user_id(user_id)
+    _establishRequestOwner(user_id)
     conn_id = f"{payload.get('sub', 'unknown')}:{uuid.uuid4().hex[:8]}"
     await _manager.connect(websocket, conn_id)
     try:

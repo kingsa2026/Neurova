@@ -68,6 +68,7 @@ def env(tmp_path, monkeypatch):
 @pytest.fixture
 def offline(monkeypatch):
     """把判分、模拟臂与变异器都钉成离线：本档量的是装配与闸，不是模型。"""
+    import neurova.evolution.eval.constraints as constraints
     import neurova.evolution.eval.fitness as fitness
     import neurova.evolution.eval.mutator as mutator
     import neurova.evolution.eval.service as service
@@ -85,6 +86,12 @@ def offline(monkeypatch):
     async def fakeMutate(self, *, artifact_text, artifact_type, failures, **kw):
         """离线变异：候选正文必须与基线不同，否则进化轮整个 no-op（走不到候选评测）。"""
         return artifact_text + CANDIDATE_MARK + "。"
+
+    # 语义漂移闸同样钉离线：本仓的 embedding 后端缺席时退回 token 字面 Jaccard，
+    # 「基线正文。」与「基线正文。改进版。」的词集几乎相同 ⇒ 相似度贴着阈值上下，
+    # 离线与装了 numpy 的机器会给出两种结论。这道闸不是本档量的事（本档量装配与预算闸），
+    # 钉死一个"候选确实没跑题"的读数，判据才不受跑测机依赖面影响。
+    monkeypatch.setattr(constraints, "semantic_similarity", lambda a, b: 1.0, raising=False)
 
     monkeypatch.setattr(fitness.LLMJudge, "score", fakeScore, raising=False)
     monkeypatch.setattr(service.SimulatedAgent, "run", fakeSimRun, raising=False)
@@ -297,6 +304,21 @@ class TestArmKindReachesTheApproverFace:
         monkeypatch.setattr(endpoints, "get_agent_instance", lambda agent_id="": agent,
                             raising=False)
         _skillInfo(monkeypatch)
+        # 本档的候选正文是"基线 + 一句改进"：增长闸（+57%）与语义闸（0.714 < 0.75）
+        # 都会先把它拦在预评测，提案因此压根不产生——那是闸在按设计工作，
+        # 与本档要验的"臂来源进提案详情"无关。两闸自身有专档
+        # `tests/unit/evolution/eval/test_constraints.py` 双向钉住，这里只让它们不参与裁决。
+        from neurova.evolution.eval import config as evalConfig
+
+        realConfig = evalConfig.EvolutionConfig
+
+        def relaxedConfig(*args, **kwargs):
+            cfg = realConfig(*args, **kwargs)
+            cfg.semantic_similarity_threshold = 0.0
+            cfg.max_prompt_growth = 10.0
+            return cfg
+
+        monkeypatch.setattr(evalConfig, "EvolutionConfig", relaxedConfig)
         client = _client()
         posted = _postEvolve(client, "a1",
                              {"skill_id": SKILL_ID, "iterations": 1, "real_trajectory": True})
