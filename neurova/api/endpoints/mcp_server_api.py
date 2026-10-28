@@ -35,6 +35,7 @@ from starlette.types import Message, Receive, Scope, Send
 from neurova.api.auth import get_current_user_or_service, security
 from neurova.core.identity_context import set_request_user_id
 from neurova.core.logger import get_logger
+from neurova.tool_layers.mcp_server import McpCaller
 
 if TYPE_CHECKING:  # 仅类型检查期绑定：运行期入口仍在 `_callerPrincipal` 函数体内
     # （`neurova.tool_layers.mcp_server` 在调用时按需 import，断循环导入，AGENTS.md §3）

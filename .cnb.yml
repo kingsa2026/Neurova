@@ -151,20 +151,26 @@ main:
     #   峰值来自"一张清单一次 pytest"：收集期就要建出 7.9k 项，跑起来后各模块的常驻态
     #   （单例、连接池、内存索引）在一场里累积、谁也不释放。
     #   故把清单切成同目录的 `protected_tests.<N>.txt` 逐片各起一个进程：
-    #   峰值与耗时都按片回落，**判据一条不动**（每片仍带 --cov-fail-under=60，
-    #   片内条目与索引并集必须逐条相等——漏跑、多跑、跨片重复都红）。
+    #   峰值与耗时都按片回落，**判据一条不动**（片内条目与索引并集必须逐条相等——
+    #   漏跑、多跑、跨片重复都红）。覆盖率门禁**不逐片判**：单片 49% vs 整份 88%，
+    #   逐片判 60% 会假红，故各片只攒数据，阈值收在 `scripts/ci/coverage_report.py` 一处。
     #   片号的**事实源是目录里有哪几片**，这里按 `protected_tests.*.txt` 通配派生，
     #   不手抄 `1 2 3`：抄进来就与目录脱钩（加了一片而 CI 不跑它，没有任何红）。
     #   判据见 tests/unit/ci/test_protected_subset_shards.py。
     - name: unit-tests
-      # cpus 8 而不是 4：这一格是九条流水线里唯一「装整份锁 + 串行跑 716 条清单 +
-      # 每格带 --cov 插桩」的一条。官方《语法手册》`runner.cpus` 一节写死
-      # 「内存 = CPU 核数 × 2 GiB」，官方《构建节点》给出 cnb:arch:amd64 的核数范围
-      # 1~64、同档节点默认 8 核 —— 即 cpus: 4 是把这一格按 8GiB 的最小可用档压着跑。
-      # 现场（构建 cnb-n45-1k5oultjs#003）：跑到 83%、29m23s 时被平台 SIGKILL
-      # （`Killed` / `code: 137`），日志里一条失败墙都没有 —— 那不是「有测试红了」，
-      # 是进程被资源杀掉。声明不反映真实需求时，报出来的只会是「Killed」。
-      # 判据见 tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py。
+      # cpus 8 而不是 4：这一格是九条流水线里唯一「装整份锁 + 串行跑整份受保护子集 +
+      # 每格带 --cov 插桩」的一条。4 核按平台口径（cpus × 2GiB，见文件头）＝ 8GiB，
+      # 而这一腿要把整个受保护子集装进内存里跑完，连续两轮都死在 84% 处且**恰好卡在同一格**：
+      #   cnb-hl1-1k5lp6pae#003  duration 17m48s → `Killed` / code 137
+      #   cnb-a20-1k5lpircs#003 duration 24m13s → `Killed` / code 137
+      # 两轮都是 `tests/unit/skills/test_marketInstalledStateIsReadBack.py` 之后、
+      # 下一格被逐行印出的**同时**被掐，pytest 一行 summary 都没来得及打。
+      # 这不是"分钟数不够"，是内存到顶：高水位随那份装进内存里的测试集合一起长。
+      # 8 核 = 16GiB 留一倍余量给同一批用例的内存峰值，判据一个字不动：
+      # 清单、--cov-fail-under=60、每一格断言全部逐字未改。
+      # 不写死"内存是多少"：事实源是平台口径 cpus × 2GiB。
+      # 判据见 tests/unit/ci/test_unit_tests_runner_has_headroom.py 与
+      # tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py。
       runner:
         tags: cnb:arch:amd64
         # 受保护子集 716 档，容器必须真装得下它：官方口径内存 = cpus × 2GiB，
@@ -206,36 +212,6 @@ main:
             done
             git --no-pager diff --stat -- docs/ | sed 's/^/[drift] /' || true
           timeout: 10m
-        # 两条口径各取所长，次序由依赖定：
-        #   1. 先重生成生成物（main 那一笔）——子集里那几档生成物守卫的红，
-        #      根因常是生成器没跑过，而不是代码错；
-        #   2. 再逐片跑测（本单那一笔）——单进程 2.78 GiB 峰值贴着 8 GiB 额度爬，
-        #      分片把峰值与耗时按片回落；
-        #   3. 最后合并判一次覆盖率——门禁的语义是"子集整体覆盖了多少"，
-        #      逐片判会假红（单片实测 49% vs 整份 88%）。
-        # 墙钟按实测定，不按"看起来够"，而且这道 stage 有**两层墙**必须严格有序：
-        #   · stage 墙＝平台给的整段上限（下面 `timeout:`）；
-        #   · 单档墙＝pytest-timeout 给每一格的上限，没显式给时继承
-        #     `pyproject.toml` 的全局 `timeout = 30`。
-        # 两层同为 30 时，一格慢下来只让 pytest-timeout 记一笔，真正先到点的是整段强杀。
-        # 实测已经两次是这个形状：构建 `cnb-mn9-1k5n4fcl5` 于 85%、`cnb-009-1k5pg3vcp`
-        # 于 82%，日志一条失败都没有（`Killed` / code 137 / 28m 被杀），而那批
-        # `Timeout (>30.0s) from pytest-timeout` 是**单档读数**，不是缺陷读数。
-        # 两墙取值：stage 墙 45m；单档墙显式给 1500s＝25m（< 45m），慢下来时先报的是
-        # 那一格诚实的 `Timeout`，而不是整段被平台掐断。
-        # 分片执行（构建 `cnb-v9p-1k5pkvplt` 的第四次 137，台账 §6-418）：
-        #   那条腿的 137 与单档墙不是同一件事——同一份锁本机复跑同一份清单，单进程峰值
-        #   RSS 实测 2.74 GiB（--no-cov，仍在爬升）/ 2.78 GiB（--cov），而 4 核按平台口径
-        #   「内存 = 核数 × 2 GiB」＝ 8 GiB。峰值来自"一张清单一次 pytest"：收集期就要建出
-        #   7.9k 项，跑起来后各模块常驻态在一场里累积、谁也不释放。故把清单切成同目录的
-        #   `protected_tests.<N>.txt` 逐片各起一个进程；片号的**事实源是目录里有哪几片**，
-        #   这里按通配派生、不手抄（抄进来就与目录脱钩：加了一片而 CI 不跑它，没有任何红）。
-        # 两层墙对分片同样成立：单档墙 1500s 仍严格窄于 stage 墙 45m，判据
-        # tests/unit/ci/test_pytestParentWallCoversItsStage.py 逐条比对每一片那一行。
-        #
-        # 覆盖率门禁**不逐片判**：实测单片判 60% 会假红——分片 1 的 TOTAL 是
-        # `6771/3429 = 49%`，而整份子集是 `12940/1603 = 88%`。门禁的语义是
-        # "受保护子集整体覆盖了多少"，分片只该把跑测切小、不该把门禁切碎。
         # 故各片只攒数据（`--cov-report=` 不出报告），阈值与合并口径收在
         # `scripts/ci/coverage_report.py` 一处（阈值仍取 CI 命令行那一个 60，不写死第二份）。
         # 任一片红即整步红：循环不吞退出码，`set -e` 只是让第一片红就停手。

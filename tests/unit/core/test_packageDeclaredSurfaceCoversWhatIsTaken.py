@@ -377,6 +377,17 @@ def undeclaredTakeaways() -> dict:
     return out
 
 
+#: 全仓扫描（3639 档 / 3140 万字符）的实测耗时约 7–10s，而 `pyproject.toml` 的全局
+#: `timeout = 30` 是**按格**计的墙钟——同一进程里排在它前面的用例越快，留给这一格的余量
+#: 就越小（构建 `cnb-som-1k5m69s2v#003` 就是这么红的：超时点落在 `takenPerModule` 的
+#: 不同行上，两格各红一次，而单跑本档是绿的）。30s 对这条判据不是"够不够快"的问题，
+#: 是**判据成本与机器负载的比值**问题：受保护子集是 7784 项装进一台 runner 串行跑的。
+#: 故按仓内既有做法（`slow` 标记，见 `pyproject.toml` 的 markers）把这两格显式放宽，
+#: 而**不动**判据本身：断言、口径、扫描面逐字未改。
+_FULL_SCAN_TIMEOUT = 120
+
+
+@pytest.mark.timeout(_FULL_SCAN_TIMEOUT)
 def test_implicitSurfaceIsExactlyTheRegisteredOnes():
     """登记表两侧相等：新长出隐式公开面要红，补了 `__all__` 却忘了销行也要红。"""
     got = {pkg: set(names) for pkg, names in undeclaredTakeaways().items()}
@@ -400,6 +411,7 @@ def test_declaredNamesAreActuallySupplyableByThePackage():
     assert not phantoms, f"这些包声明了自己给不出的名字：{phantoms[:8]}"
 
 
+@pytest.mark.timeout(_FULL_SCAN_TIMEOUT)
 def test_theScanCoversTheTrackedTreeAndThePackageSet():
     """地板格：包集合与扫描集合都不许收窄（与批 22/47 同形）。"""
     pkgs = _packages()

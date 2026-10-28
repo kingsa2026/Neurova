@@ -21,12 +21,19 @@ from tests.unit.tts._fakeEngines import _FakeHeavyEngine
 
 
 async def _driveReleaseThenPreheat(heavy_manager):
-    """走一遍「服务 → TTL 释放 → 轻引擎顶班 → 后台预热重建链顶」，等预热落定。"""
+    """走一遍「服务 → TTL 释放 → 轻引擎顶班 → 后台预热重建链顶」，等预热落定。
+
+    「现在几点」必须相对**本进程真实的单调时钟**给：`release_idle_engines` 拿它跟
+    `_last_used_monotonic`（`time.monotonic()` 写入）相减判 TTL。写死一个
+    `1_000_000` 只在开机不足 11.6 天的机器上「像未来」；Linux CI 的单调时钟从
+    开机算起，一旦超过那个数，`now - last` 就是负数，释放条件永不成立——
+    而本档报的是「前置不成立：释放没换班到轻引擎」，读的人会去查 TTS 释放逻辑。
+    """
     mgr, heavy, light = heavy_manager
     await mgr.synthesize("第一句")
     # TTL 是**相对**比较（`now - _last_used_monotonic >= release_ttl_sec`），故"现在"必须
     # 从这台机器这一轮的真实读数上往后推——写死的 `1_000_000` 在运行时长已过 11.5 天的
-    # CI 上是一个**过去**的时刻，差值变负数，释放不发生，于是红在"前置不成立"而非判据。
+    # CI 上是一个**过去**的时刻，差值变负数，释放不发生。
     await mgr.release_idle_engines(
         now_monotonic=(mgr._last_used_monotonic or 0.0) + 120.0)
     assert mgr._engine_name == "edge-tts", "前置不成立：释放没换班到轻引擎"

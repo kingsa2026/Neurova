@@ -176,7 +176,12 @@ class TestProductionBuildersCarryThePin:
         return found
 
     def testEveryProductionCallSitePassesThePin(self):
-        """扫**整个 `neurova/`**：任何构造点不传 pin，都会落进 `None` 的静默旁路。"""
+        """扫**整个 `neurova/`**：任何构造点不传 pin，都会落进 `None` 的静默旁路。
+
+        取数走 `tests/ast_scan` 的唯一入口（`hints` 做文本预筛）：此前自己
+        `rglob("*.py")` ＋ 逐档裸读，"枚举 + 解析"两半都在本档里，判据成本随
+        `neurova/` 的 `.py` 总量涨（`test_ci_ast_scan_budget_guard.py` 点名的形状）。
+        """
         package = Path(market_registry.__file__).resolve().parents[1]
         offenders = []
         checked = 0
@@ -187,12 +192,10 @@ class TestProductionBuildersCarryThePin:
             "枚举面现读 %d 个 .py（neurova/ 现算 1024）——package 指错时『都传了 pin』是假绿" % enumerated)
         for ref in ast_scan.sourceRefsUnder(
                 package, ".py", hints=("_build_executable_skill",)):
-            path = ref.path
-            source = ref.code
-            flags = self._builderCalls(source)
+            flags = self._builderCalls(ref.code)
             checked += len(flags)
             if any(flag is False for flag in flags):
-                offenders.append(str(path.relative_to(package)))
+                offenders.append(str(ref.path.relative_to(package)))
         assert checked >= 2, ("构造点数比预期少（%d）：规则可能与代码脱节" % checked)
         assert offenders == [], (
             "这些文件的构造点没传 pinnedDigest ⇒ 执行腿的闸对它们形同虚设：%s" % offenders)

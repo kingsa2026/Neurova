@@ -267,47 +267,60 @@ class TestToolFailureSignalWiring:
 
 class TestCatalogMissSignalWiring:
     @staticmethod
-    def _compactedCatalog():
-        """用**生产入口**把活动目录压出来，不直改 `_ACTIVE_CATALOG` 这个私有名。
+    def _activeCatalog() -> list:
+        from neurova.context import tool_search
 
-        前提自给的理由（教义第 3 条禁"绕过生产装配点直接赋私有字段"的镜像）：活动目录是
-        进程级的，谁先跑谁留下。上一版本格既不造目录也不清，靠"本进程恰好还没人往目录里
-        放过东西"才绿：同批跑在 `tests/unit/evolution/test_p2_items.py` 之后时，目录里躺着
-        45 条 mcp 条目，`tool_search("zzzz …")` 照样零命中，判据因此咬不住真正的断点。
-        本格先走一次「不满足激活条件」的生产入口（`min_catalog` 高过候选数即返回 None），
-        把活动目录复位成空——用 `tool_search("zzzz …")` 判「真实目录里没有这个能力」，
-        而不是靠一个语料恰好没有任何词面/语义交集的目录。
+        tools = [{"type": "function",
+                  "function": {"name": "core_one", "description": "direct tool"}}]
+        tools += [{"type": "function",
+                   "function": {"name": "mcp.srv%d.op" % i, "description": "capability %d" % i}}
+                  for i in range(45)]
+        assert tool_search.apply_tool_search_compaction(
+            tools, ["core_one"], min_catalog=40) is not None, "目录压缩没激活，本格前提不成立"
+        catalog = tool_search.get_active_catalog()
+        assert len(catalog) == 45, f"隐藏目录现读 {len(catalog)} 条——前提不成立，读到的不是压缩结果"
+        return catalog
+
+    def test_zeroHitSearch_recordsGap(self, monkeypatch):
+        """S3 的投递条件是「检索**真的**空手」，不是「这个函数被调了一次」。
+
+        本组原先只有一格：清缺口之后直接 `handle_control_tool(...)`，指望它投 `catalog_miss`。
+        它长期绿只因为**活动目录恰好是空表**（`_ACTIVE_CATALOG` 是进程级，要靠一次真压缩才填）——
+        空目录下 `search_catalog` 恒回 `[]`，等于让被测对象永远走"没得检"那条兜底路。而在装了
+        稠密引擎的机器上，混合检索对任意两条文本都给正分（实测 45 条目录、无意义查询，余弦一档
+        把全部 45 条排在 0.15 以上），`results` 于是不为空，同一句断言就红——红绿挂在"这台机器
+        有没有 onnxruntime"上，与 S3 无关。
+
+        按生产装配点改：先真压缩出一份隐藏目录（45 条，与 P1-5 的激活阈值同量级），再把引擎缺席
+        这一支**显式**钉住。S3 的语义是"已注册集里没有能解决眼前这事的原语"，词法档就足以回答；
+        稠密档下"零命中"本身不可判定（`_hybrid_scores` 的 `combined > 0` 恒真），那是另张票的账，
+        不在这里假装。
         """
-        from neurova.context.tool_search import apply_tool_search_compaction
-
-        assert (
-            apply_tool_search_compaction(
-                [
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "weather",
-                            "description": "查询天气",
-                            "parameters": {"type": "object", "properties": {}, "required": []},
-                        },
-                    }
-                ],
-                ["weather"],
-                min_catalog=40,
-            )
-            is None
-        ), "前提不成立：这一步必须走到「未压缩」那条路"
-
-    def test_zeroHitSearch_recordsGap(self):
         from neurova.agent.capability_gap import clearCapabilityGap, detectCapabilityGap
         from neurova.context import tool_search
 
-        self._compactedCatalog()
+        self._activeCatalog()
+        # 词法档：不引入嵌入引擎的"全条正分"，让"零命中"这件事可判定。
+        monkeypatch.setattr(tool_search, "_get_engine", lambda: None)
         clearCapabilityGap("s3")
-        tool_search.handle_control_tool("tool_search", {"query": "zzzz 不存在的查询"})
+        hits = tool_search.handle_control_tool("tool_search", {"query": "zzzz 不存在的查询"})
+        assert hits["results"] == [], "本格要的是真零命中，读到的却不是空"
         verdict = detectCapabilityGap()
         assert verdict.hasGap is True
         assert GAP_CATALOG_MISS in verdict.kinds
+
+    def test_hitSearchRecordsNoGap(self, monkeypatch):
+        """反向格：真有命中就不许投缺口——否则"检索成功"与"检索空手"在读数上同形。"""
+        from neurova.agent.capability_gap import clearCapabilityGap, detectCapabilityGap
+        from neurova.context import tool_search
+
+        self._activeCatalog()
+        monkeypatch.setattr(tool_search, "_get_engine", lambda: None)
+
+        clearCapabilityGap("s3")
+        hits = tool_search.handle_control_tool("tool_search", {"query": "capability 7"})
+        assert hits["results"], "本格要的是有命中，读到的却是空"
+        assert detectCapabilityGap().hasGap is False
 
     def test_hitSearch_doesNotRecordGap(self):
         """反向控制：同一条判据在**真命中**时必须不投递——否则上面那条只是"恒真"。

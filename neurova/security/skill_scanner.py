@@ -110,6 +110,13 @@ SECRET_STORE_DIR_MARKERS = frozenset({".ssh", ".aws", ".gnupg"})
 EXECUTABLE_SUFFIXES = frozenset({
     ".exe", ".dll", ".so", ".dylib", ".msi", ".scr", ".elf", ".ocx",
 })
+#: 「这是文本文档」的后缀（单源）。扫描器判「内容不是可执行字节」、文档管线段判
+#: 「按文本解码」是同一个事实的两种用法——各写一份就会一边收、一边漏（`.rst`/`.log`
+#: 曾经只在后者出现，校验这边把 `.rst` 当二进制拒收）。谁要判这件事都从这里取。
+TEXT_DOCUMENT_SUFFIXES = frozenset({
+    ".md", ".markdown", ".txt", ".rst", ".json", ".yaml", ".yml", ".toml", ".log",
+})
+
 #: 内容扫描读哪些后缀（单源，P1-6）。不在表内的文件不会「没问题」，而是「没被读」——
 #: 后者由 `unscanned_artifact` 报告项显式记账（§6-194）。
 SCANNABLE_SUFFIXES = frozenset({

@@ -120,7 +120,13 @@ def _run(cmd, cwd, env=None):
 
 
 def _runPytest(cwd: Path, selection, extraEnv=None):
-    env = {**os.environ, "PYTHONPATH": str(cwd), "PYTHONIOENCODING": "utf-8"}
+    # 两侧都要能 import 到被测树**与**每个依赖：把 `PYTHONPATH` 覆写成只有 `cwd` 时，
+    # 当解释器把依赖装在 `PYTHONPATH` 上（`pip install --target`、或环境里没装 pytest
+    # 而靠 PYTHONPATH 提供）时，两侧一起来一句 `No module named pytest` ⇒ 读数退成
+    # 「没产出汇总行 ⇒ AB_FAIL」，与"基线真的跑不过"同形。故按冒号追加，不覆写。
+    inherited = [p for p in (os.environ.get("PYTHONPATH") or "").split(os.pathsep) if p]
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join([str(cwd)] + inherited),
+           "PYTHONIOENCODING": "utf-8"}
     env.update(extraEnv or {})
     return _run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
                  *selection], cwd, env)

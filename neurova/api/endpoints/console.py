@@ -959,24 +959,6 @@ async def post_console_chat(
             except BaseException:  # noqa: BLE001 - 终态与落点已由 run_chat 负责，这里只保引用
                 pass
 
-        # 请求级属主（§6-153 按教义第 5 条扫出的命中点）：批 9 把管线里那段"每轮按
-        # metadata['user_id'] 补写通道"的双写删掉时，只在 `api/endpoints/chat.py` 补了
-        # 边界写点，**这条 console 面漏了**——于是网页回合里 `get_request_user_id()` 为空：
-        # usage 入账落到 `"anonymous"`（`multi_model_client:876/1156`）、按日 LLM 配额整条
-        # 不判（`:1426` 无身份即放行）、客户端自带全新 session_id 时会话落空属主
-        # （`session_manager:1650` 空属主＝对全员可见）。写点必须**先于**下面那个
-        # `create_task(_produceTurn())`：task 在创建那一刻复制当前上下文，反过来写就只能在
-        # 别人的上下文里补——`_runTurn` 里读到的仍是 None（本轮实测就是这么红的）。
-        from neurova.core.identity_context import set_request_user_id
-
-        set_request_user_id(user_id)
-
-        # 强引用持有：裸 create_task 会被 GC 掉半路夭折；done 回调自行摘除
-        _spawned = asyncio.create_task(_produceTurn())
-        _TURN_TASKS.add(_spawned)
-        _spawned.add_done_callback(_TURN_TASKS.discard)
-
-
         # ── 生产侧记账（第 0 步）────────────────────────────────
         # 时间线、断线重放缓冲、done 收尾信号、回合租约——四件全都跟着
         # **这一轮**走，不再跟着**这条响应**走。上一批把断连从"掀掉回合"
@@ -998,7 +980,7 @@ async def post_console_chat(
             # 429 重试/切换倒计时事件转发（retry_status → SSE retry）
             "emit_status_events": True,
         }
-        # 请求级属主已在端点同步段写过一次（见 `post_console_chat` 开头那段说明）——
+        # 请求级属主已在端点同步段由 `_establishRequestOwner(user_id)` 写过一次——
         # 这里不再写第二遍：同一个值两处写就是两条并行口径。
         # R-3 修复: 附件元数据注入（file_ids → attachments，供 pipeline 附件注入）
         attachments = attach_files(getattr(body, "file_ids", None), user_id)
@@ -1202,6 +1184,19 @@ async def post_console_chat(
                 if isinstance(item, tuple) and item[0] == "events":
                     for event in item[1]:
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+        # 强引用持有：裸 create_task 会被 GC 掉半路夭折；done 回调自行摘除。
+        #
+        # 位置是语义，不是风格，两条约束同时成立才放得下：
+        # ① 在身份写点与 `metadata` 定稿**之后**——`_produceTurn` 里的
+        #    `create_task(run_chat())` 继承的是**创建它时**的上下文，早起的任务拿不到
+        #    随后写入的 `set_request_user_id()`（`73132b2f` 把创建提到边界时就是这么漏的：
+        #    `agent.chat` 里 `get_request_user_id()` 读到 None）。
+        # ② 在 `run_chat` / `queue` / `_keepLease` 定义**之后**——`_produceTurn` 是闭包，
+        #    名字在它被调用那一刻才求值，但先建后定义的读法让人以为顺序可以随便排。
+        _spawned = asyncio.create_task(_produceTurn())
+        _TURN_TASKS.add(_spawned)
+        _spawned.add_done_callback(_TURN_TASKS.discard)
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 

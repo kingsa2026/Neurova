@@ -31,6 +31,7 @@ import pytest
 
 from neurova.cognitive_layers.memory_layer.manager import MemoryManager
 from tests.ast_scan import parseSource
+from tests.memory_embedding_precondition import requireRealEmbeddingOrSkip
 
 pytestmark = [pytest.mark.timeout(120)]
 
@@ -71,6 +72,20 @@ class FakeCueClient:
             },
             ensure_ascii=False,
         )
+
+
+def _denseTierIsUsable() -> bool:
+    """本机这一档是不是**真能算**的稠密档（零向量兜底档下通道一个候选也建不出来）。"""
+    from neurova.embedding import get_embedding_engine
+
+    engine = get_embedding_engine()
+    if engine is None or not getattr(engine, "backend_type", None):
+        return False
+    try:
+        vector = engine.encode("探针")
+    except Exception:  # noqa: BLE001 - 探测失败即视为无可用档
+        return False
+    return bool(vector) and any(float(x) != 0.0 for x in vector)
 
 
 @pytest.fixture
@@ -126,10 +141,9 @@ class TestGenerationIsBatchedAndSweeping:
 class TestGeneratedCuesAreUsable:
     def test_生成的线索能被向量通道召回(self, manager):
         """端到端：生成 → 入库 → 通道点火 → 无词面重合的提问能捞出对应记忆。"""
-        from tests.memory_embedding_precondition import requireRealEmbeddingOrSkip
-
         # 本格测的是"线索经向量通道点火"，通道本身依赖稠密向量：薄环境里 encode 返零向量，
-        # 通道永远不点火。前提口径与 C-1/C-3 同源（tests/memory_embedding_precondition.py）。
+        # 通道永远不点火。前提口径与 C-1/C-3 同源（`tests/memory_embedding_precondition.py`），
+        # 取法在模块顶部导入，不在函数体里再 import 一遍。
         requireRealEmbeddingOrSkip("线索生成批（通道靠向量点火才测得到）")
         target = ROWS[0]
         query = "团队聚餐选餐厅时要注意什么"

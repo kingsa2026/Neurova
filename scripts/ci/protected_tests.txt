@@ -1154,6 +1154,11 @@ tests/unit/cognitive/test_cognitive_storage_engine.py
 tests/unit/test_lock_integrity_guard.py
 tests/unit/test_osv_audit_gate.py
 tests/unit/tools/test_npx_runtime_pinning.py
+# 前端树（`NeurUI`）的修复下界：`overrides` 写成区间时"顶替"会自我失效
+#   （PR #369 构建 cnb-9jl-1k5lkat1o#005：`undici: ^7.29.1` 的下界恰等于锁内现值，
+#   重跑 install 原地复刻，audit 那一步红在 7.29.1）。判据落在锁与清单两处，不吃实扫。
+tests/unit/tools/test_frontend_audit_floor_guard.py
+tests/unit/memory/test_muscle_memory_semantic.py
 tests/unit/tts/test_model_integrity_manifest.py
 
 # 清单历史登记的守卫本身：曾登记过、文件仍在仓、却不在清单里的条目即红
