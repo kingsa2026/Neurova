@@ -236,7 +236,7 @@ class XiaoYiAdapter(ChannelAdapter):
 
         try:
             if not self._connected:
-                logger.warning("[小艺模拟] 发送消息: ", message)
+                logger.warning("[小艺模拟] 发送消息: %s", message)
                 return True
 
             # 构建消息

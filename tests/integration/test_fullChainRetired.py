@@ -39,6 +39,20 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 OLD_CHAIN = REPO_ROOT / "tests" / "integration" / "test_full_chain.py"
 
 
+def _pySourcesUnderTheScanFace(hints: tuple = ()):
+    """本档扫描面（`tests/` ＋ `scripts/`）的源码引用清单——走 `tests/ast_scan` 的唯一取数口。
+
+    此前两处各写一遍 `rglob("*.py")` ＋ 裸 `read_text`：那是受保护子集里
+    「枚举 + 解析」组合（`test_ci_ast_scan_budget_guard.py` 逐条点名要销账的形状），
+    判据成本因此与仓内 `.py` 总量捆绑，同一台机器上与其余近五百档共享 30s 墙钟。
+    预筛按 `hints` 给：连那个词都没出现的文件不可能命中，这不是放宽判据。
+    """
+    refs = []
+    for root in (REPO_ROOT / "tests", REPO_ROOT / "scripts"):
+        refs.extend(ast_scan.sourceRefsUnder(root, hints=hints))
+    return refs
+
+
 def _isAwaitWrapped(node, parentMap) -> bool:
     parent = parentMap.get(id(node))
     if not isinstance(parent, ast.Call):
@@ -102,18 +116,16 @@ class TestTheOldIntegrationFileIsRetired:
         不是把人引回去的活引用。判据按**行**判，不对整档豁免。
         """
         hits = []
-        for root in (REPO_ROOT / "tests", REPO_ROOT / "scripts"):
-            # 枚举走共享预算入口（判据与文件总量脱钩，见 tests/ast_scan.py）
-            for path in ast_scan.filesUnder(root):
-                if "__pycache__" in path.parts or path.name == Path(__file__).name:
-                    continue
-                for lineno, line in enumerate(
-                        ast_scan.sourceCode(path).splitlines(), 1):
-                    refers = ("test_full_chain.py" in line
-                              or "integration.test_full_chain" in line
-                              or "from tests.integration import test_full_chain" in line)
-                    if refers and "退役" not in line:
-                        hits.append("%s:%d" % (path.relative_to(REPO_ROOT), lineno))
+        # 枚举走共享预算入口（`ast_scan.sourceRefsUnder`，产物目录由它自身剪掉）
+        for ref in _pySourcesUnderTheScanFace():
+            if ref.path.name == Path(__file__).name:
+                continue
+            for lineno, line in enumerate(ref.code.splitlines(), 1):
+                refers = ("test_full_chain.py" in line
+                          or "integration.test_full_chain" in line
+                          or "from tests.integration import test_full_chain" in line)
+                if refers and "退役" not in line:
+                    hits.append("%s:%d" % (ref.path.relative_to(REPO_ROOT), lineno))
         assert hits == [], (
             "还有活引用指向旧集成档（会把人引回死文件）；确实要提就带上「退役」二字：%s" % hits[:5])
 
@@ -134,22 +146,22 @@ class TestNobodyCallsTheAsyncRouterSynchronously:
         # 「代码总量」编码成墙钟上界（Issue #148 的根因形态）。产物目录由 filesUnder
         # 自身剪掉，这里不再重复过滤。
         candidates = 0
-        roots = (REPO_ROOT / "tests", REPO_ROOT / "scripts")
         # 枚举面：不带预筛地量一次根（走同一个共享入口，避免"我只数了预筛后的"那种自证）。
-        enumerated = sum(len(ast_scan.sourceRefsUnder(root, ".py")) for root in roots)
-        for root in roots:
-            # 候选面：预筛词 `.route(` 是本判据谓词的**充分条件**（没有这个字面串就不可能
-            # 有同步 `route` 调用），口径仍是全量清单。
-            for ref in ast_scan.sourceRefsUnder(root, ".py", hints=(".route(",)):
-                candidates += 1
-                path = ref.path
-                try:
-                    # 解析走共享预算的一次性入口（不留常驻语法树；本判据只扫一次）。
-                    lines = _syncRouteCallsIn(ast_scan.transientTree(path))
-                except SyntaxError:
-                    continue
-                if lines:
-                    offenders.append("%s:%s" % (ref.path.relative_to(REPO_ROOT), lines))
+        enumerated = len(_pySourcesUnderTheScanFace(hints=()))
+        # 候选面：预筛词 `.route(` 是本判据谓词的**充分条件**（没有这个字面串就不可能
+        # 有同步 `route` 调用），口径仍是全量清单。
+        for ref in _pySourcesUnderTheScanFace(hints=(".route(",)):
+            candidates += 1
+            path = ref.path
+            try:
+                # 交给 `_syncRouteCallsIn` 的必须是**已解析的树**：`ast_scan` 的引用体是源码串，
+                # 直接传进去会让 `ast.walk` 撞上 str（口径写错，红的是判据自己而不是被检形状）。
+                # 解析走一次性入口，不留常驻语法树（本判据只扫一次）。
+                lines = _syncRouteCallsIn(ast_scan.transientTree(path))
+            except SyntaxError:
+                continue
+            if lines:
+                offenders.append("%s:%s" % (path.relative_to(REPO_ROOT), lines))
         # 面自证拆两条（形态 404）：枚举面证"根指得到"，候选面证"预筛没把命中滤空"。
         # 现算 tests 2483 ＋ scripts 76 ＝ 2559 个 .py；根少指一层（只剩 scripts）就掉到 76。
         assert enumerated >= 2000, (

@@ -279,8 +279,13 @@ class TestCtxSnapshotJoinsReverseControls:
         assert row["consumer_count"] >= 1, (
             "ctx_snapshot 的读取点数归零——它不再是活的，反向控制的登记理由消失"
         )
-        source = (PROJECT_ROOT / "neurova/agent/chat_pipeline.py").read_text(encoding="utf-8")
-        assert "ctx_snapshot" in source, "chat_pipeline.py 里已无 ctx_snapshot"
+        # 取数面跟着实现走：续写循环整块搬进 continuation_rounds.py 之后，
+        # 还去管线里找它就等于把这条判据钉在一个已不存在的路径上（perf-gate 抽离那一笔）。
+        home = PROJECT_ROOT / "neurova" / "agent" / "continuation_rounds.py"
+        assert home.is_file(), f"{home} 不存在——续写实现搬家了，判据取数面需重核"
+        assert "ctx_snapshot" in home.read_text(encoding="utf-8"), (
+            "continuation_rounds.py 里已无 ctx_snapshot"
+        )
 
     def test_pendingBatchEnumKeepsTheIssueScopeSentinel(self):
         """「未分期」哨兵必须**留在枚举里**——它是判据的可表达能力，不是域状态。

@@ -598,22 +598,25 @@ class TestIdentityFiles:
         导入器**不再**往 `memory/` 写第二份：两个落点各存一份身份，就等于
         「导入成功、读到的却是另一份」，而这正是本格要拦的那种成功。
         """
-        from scripts.import_kai_to_neurova import import_identity
+        from scripts.import_kai_to_neurova import import_identity, resolve_agent_root
 
         kai, nv = kai_src
-        agent_root = nv / "data" / "kai"
-        stats = import_identity(kai, agent_root)
-        soul = agent_root / "soul.md"
-        assert soul.exists(), f"身份文件没落在加载位：{sorted(p.name for p in agent_root.iterdir())}"
+        # agent 根由生产解析器给（`resolve_agent_root`：v2 统一布局 `data/<agent_id>/`，
+        # 注入根优先），判据不替它拼路径——拼一份就等着与生产脱钩。
+        agentRoot = resolve_agent_root(nv, "kai")
+        stats = import_identity(kai, agentRoot)
+        soul = agentRoot / "soul.md"
+        assert soul.exists(), f"身份文件没落在加载位：{sorted(p.name for p in agentRoot.iterdir())}"
         assert "凯的灵魂" in soul.read_text(encoding="utf-8")
-        # PROFILE → personality.md（_load_identity 第二加载位，同根）
-        assert "凯的档案" in (agent_root / "personality.md").read_text(encoding="utf-8")
-        # 旧落点不再写：v1 布局的 `memory/soul.md` 由 agent_layout_migration 搬走，
-        # 导入器留一份在那里就是"两个落点各存一份身份"。
-        memory_dir = agent_root / "memory"
-        assert not (memory_dir / "soul.md").exists(), sorted(p.name for p in memory_dir.iterdir())
-        assert not (memory_dir / "personality.md").exists()
-        # PROFILE/MEMORY 工作区留档
-        assert (agent_root / "workspaces" / "PROFILE.md").exists()
-        assert (agent_root / "workspaces" / "MEMORY.md").exists()
+        # PROFILE → personality.md（`_load_identity` 第二加载位，同根）
+        assert "凯的档案" in (agentRoot / "personality.md").read_text(encoding="utf-8")
+        # 旧落点不再写：v1 布局的 `memory/soul.md` 由 layout 迁移搬走，
+        # 导入器在那里再存一份就是"两个落点各存一份身份"。
+        memoryDir = agentRoot / "memory"
+        assert not (memoryDir / "soul.md").exists(), sorted(p.name for p in memoryDir.iterdir())
+        assert not (memoryDir / "personality.md").exists()
+        # PROFILE/MEMORY 工作区留档（`<agent_root>/workspaces/`，导入产物必须落在读取侧会看的位置）
+        workspacesDir = agentRoot / "workspaces"
+        assert (workspacesDir / "PROFILE.md").exists(), sorted(p.name for p in agentRoot.iterdir())
+        assert (workspacesDir / "MEMORY.md").exists()
         assert stats["files"] >= 4

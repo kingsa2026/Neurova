@@ -317,19 +317,38 @@ def _longestProjectedPath(payload: bytes, dest: Path):
     return longest, len(base) + 1 + len(longest)
 
 
-def _pathBudgetExceeded(payload: bytes, dest: Path) -> bool:
-    """这条落点在这台机器上装得下吗——**路径预算的唯一判定口**（拒绝与点名都读它）。
+def refusalForPathBudget(payload: bytes, dest: Path) -> str:
+    """落点根 ＋ 最长成员越过路径预算时的拒绝原因；没超返回空串。
 
-    Linux/macOS 没有 260 上限（`PATH_MAX` 是 4096，实测 292 字符照装），故预算取
-    `min(WINDOWS_MAX_PATH, 本机真实上限)`。判据（`tests/unit/skills/test_zipRefusalNamesItsCause.py`）
-    钉的是"超预算这条路的失败必须点名"，前提必须与判定同源：判据补出来的超限根在 POSIX 上
-    仍然装得下时，它测的就不是本函数了。取 `min` 只加严、不放宽——任何在 Windows 上会被拦的
-    落点，在 POSIX 上同样被拦（判据因此跨机器同向）。
+    **这条安装路的准入条件**，不是解包失败的附注：同一只包在 Linux 上能装成、
+    在 Windows 上装一半，正是"判定缺在 Linux 环节"的典型形态。
+
+    判定与点名是**同一份**（返回值既是准入结论，也是给人看的那句话）：两处各写一遍
+    就会出现"拒了但说不清为什么"或"说了为什么却没人拒"的分叉。
+
+    读不出成员清单时（坏包）不在这里判——那种失败归 `BadZipFile` 那一族，别混。
     """
     projected = _longestProjectedPath(payload, dest)
-    if projected is None:
-        return False
-    return projected[1] >= WINDOWS_MAX_PATH or projected[1] >= _pathconfNameMax()
+    if projected is None or not _pathBudgetExceeded(projected[1]):
+        return ""
+    member, total = projected
+    return (
+        f"路径过长：最长成员 {member!r}（{len(member)} 字符）落在 {len(str(dest))} 字符的"
+        f"落点根下合计 {total} 字符，超过路径预算 {min(WINDOWS_MAX_PATH, _pathconfNameMax())}"
+        f"——这是落点问题，不是包的问题：换短根或开启长路径")
+
+
+def _pathBudgetExceeded(total: int) -> bool:
+    """投影总长 `total` 是否越过**本机**路径预算——全模块唯一的判定口径。
+
+    Linux/macOS 没有 260 上限（`PATH_MAX` 是 4096，实测 292 字符照装），故预算取
+    `min(WINDOWS_MAX_PATH, 本机真实上限)`。判据
+    （`tests/unit/skills/test_zipRefusalNamesItsCause.py`）钉的是"超预算这条路的失败
+    必须点名"，前提必须与判定同源：判据补出来的超限根在 POSIX 上仍然装得下时，
+    它测的就不是本函数了。取 `min` 只加严、不放宽——任何在 Windows 上会被拦的落点，
+    在 POSIX 上同样被拦（判据因此跨机器同向）。
+    """
+    return total >= WINDOWS_MAX_PATH or total >= _pathconfNameMax()
 
 
 def _pathconfNameMax() -> int:
@@ -349,36 +368,11 @@ def _describeExtractionFailure(exc: Exception, payload: bytes, dest: Path) -> st
     就会去改一个没坏的包（§6-259 那条 "zip refused" 的真实成因正是第三种，被折了 17 天）。
     """
     if isinstance(exc, (OSError, safe_archive.UnsafeArchiveError)):
-        projected = _longestProjectedPath(payload, dest)
-        if _pathBudgetExceeded(payload, dest):
-            return _pathTooLongReason(projected[0], dest, projected[1])
+        # 文案与判定都取 `refusalForPathBudget`（准入那一步用的同一份），不在这里写第二遍
+        tooLong = refusalForPathBudget(payload, dest)
+        if tooLong:
+            return tooLong
     return f"{type(exc).__name__}: {exc}"
-
-
-def _pathTooLongReason(member: str, dest: Path, total: int) -> str:
-    """「路径过长」那一族的原因文案（唯一一处；解包前的闸与解包失败后的描述共用）。"""
-    return (
-        f"路径过长：最长成员 {member!r}（{len(member)} 字符）落在 {len(str(dest))} 字符的"
-        f"落点根下合计 {total} 字符，超过 Windows 上限 {WINDOWS_MAX_PATH}"
-        f"——这是落点问题，不是包的问题：换短根或开启长路径")
-
-
-def _projectedPathVerdict(payload: bytes, dest: Path) -> str:
-    """落点根太长的**判定**：先于解包算，不靠"解包失败了"这一征兆。
-
-    为什么要在解包前判：同一份包在长根下的结局**取决于跑在哪个内核上**——
-    Linux 的 NAME_MAX 是单个成员的字符数（与整条路径长度无关），整条路径的上界也
-    只对路径分量生效，于是 `根(135) + 成员(125) = 261` 在 Windows 上是硬失败、在 Linux 上
-    照装不误；解包成功 ⇒ `except OSError` 那一支根本不会跑，原因面读到的是空串。
-    而 `extractall` 非事务，撞到中途才发现会留下半棵树。
-
-    这就是"判据依赖某台机器的 OS 开关"的第二副面孔：**失败征兆不可跨平台移植，判定条件可以**。
-    `_longestProjectedPath` 本来就算得出这个数，现在它也是判定的依据。
-    """
-    longest = _longestProjectedPath(payload, dest)
-    if longest is None or longest[1] < WINDOWS_MAX_PATH:
-        return ""
-    return _pathTooLongReason(longest[0], dest, longest[1])
 
 
 def extractRemoteSkillZipRefusal(skill_id: str, payload: bytes, dest: Path) -> str:
@@ -389,20 +383,18 @@ def extractRemoteSkillZipRefusal(skill_id: str, payload: bytes, dest: Path) -> s
     写过一份（§6-172 批 32 收敛），两份并存时咽喉那 6 个调用点修了这里也不会跟着修。
     `extractall` 非事务，可能留下部分文件，调用方 uninstall 可清理。
 
-    落点预算在**解包之前**判（`_projectedPathVerdict`）：跨平台的拒因不该由"这台机器的
-    文件系统有没有拦下它"决定。
+    落点预算在**解包之前**判（`refusalForPathBudget`）：跨平台的拒因不该由"这台机器的
+    文件系统有没有拦下它"决定——Linux 的 NAME_MAX 只管单个成员，`根(135) + 成员(125) = 261`
+    在 Windows 上是硬失败、在 Linux 上照装不误，等到失败征兆出现时 `extractall` 已留下半棵树。
     """
-    tooLong = _projectedPathVerdict(payload, dest)
-    if tooLong:
-        logger.warning("skill %s zip refused: %s", skill_id, tooLong)
-        return tooLong
     try:
-        # 路径预算也是这条路的前置：Windows 未开长路径时超限落点是 ENOENT，
-        # 而在 POSIX 上同一份包会照装——拒绝口径不许随机器漂，故在解包机制之前先判一次。
-        if _pathBudgetExceeded(payload, dest):
-            raise OSError(
-                errno.ENAMETOOLONG,
-                "落点根 + 最长成员的投影越过本机路径预算（未解包）")
+        # 长根必须**拒**，不能等解包在 Windows 上撞 ENAMETOOLONG 再补一句说明：
+        # 那种写法在 Linux/macOS 上永远绿（那边单段/总长都宽松），同一只包在部署机上
+        # 装一半失败——判据 `test_longRootFailureNamesPathTooLong` 要的正是"这里就拒"。
+        # 判定与点名同源（`refusalForPathBudget`），且必须在解包机制之前。
+        tooLong = refusalForPathBudget(payload, dest)
+        if tooLong:
+            raise OSError(errno.ENAMETOOLONG, tooLong)
         safe_archive.safe_extract_zip(
             payload, dest,
             maxPayloadBytes=MAX_SKILL_ZIP_BYTES,

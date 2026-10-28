@@ -154,7 +154,6 @@ def semantic_similarity(a: str, b: str) -> float:
 #: 表达"没有向量"和"向量算出了空"，调用方无从分辨。
 _ENGINE_UNAVAILABLE = object()
 
-
 def _noteEngineProbe(state: str) -> None:
     """把"这一跳走到了哪一步"落进模块级读面（`probed` / `ready`）。
 
@@ -171,26 +170,25 @@ _SEMANTIC_ENGINE_TOUCHED = ""
 
 
 def _initialized_embedding_engine():
-    """取**已初始化**的 embedding 引擎；取不到回 `_ENGINE_UNAVAILABLE`。
+    """取 embedding 引擎；取不到回 `_ENGINE_UNAVAILABLE`。
 
-    ⚠ 这里只许读 `is_initialized`、**不许**调 `initialize_sync()`：工厂
-    `get_embedding_engine()` 在引擎缺席时会懒建一个 `ONNXEmbeddingEngine`，而它的
-    `initialize_sync()` 走 `ModelDownloader.ensure_model(..., auto_download=True)`——
-    也就是**在一条判据的路径上出网拉 130MB 权重**。`requirements-ci` 刻意不带
-    torch/onnxruntime/模型权重，于是这一跳在 CI 上要么超时、要么把跑测挂到整场
-    被平台掐断；开关也仍在，CI 一联网就会真下大件。懒加载策略要求"进化闸不触发
-    模型加载"，所以这里只认**已经就绪**的引擎，其余一律回退。
+    工厂交出的是**未装载模型**的裸实例（`isHandedOutByFactory`）。这类实例一旦被
+    读，`encode_batch` 的懒初始化自救会走 `initialize_sync() →
+    ModelDownloader.ensure_model(..., auto_download=True)`——**在一条判据的路径上
+    出网拉 130MB 权重**，于是这一跳在 CI 上要么超时、要么把跑测挂到整场被平台掐断。
+    故判据只认**已经就绪**的引擎：工厂裸实例回 `_ENGINE_UNAVAILABLE`，由
+    `_embedding_similarity` 回退到词面下界（离线可跑）。
+
+    已就绪的引擎不再另判一次：取向量走 `encodeOrNone`，算不出就如实返回 `None`。
     """
     try:
         from neurova.embedding import get_embedding_engine
 
         engine = get_embedding_engine()
-        # `is_initialized` 是**属性**（`onnx_embedding.ONNXEmbeddingEngine` 上的 property），
-        # 早前这里按方法调用 ⇒ `TypeError: 'bool' object is not callable`，被下面那条
-        # `except Exception` 吞成"引擎不可用"，于是嵌入那条腿**从来没走过**：每台机器都静默
-        # 退回 token_jaccard。本批按真形状取，缺模型资产的宿主仍会因 encode 失败而回退，
-        # 但那是**响亮**的回退（有资产就走嵌入）。
-        if engine is None or not engine.is_initialized:
+        # 只读不建：`is_initialized` 是**属性**（早前按方法调用过，`TypeError` 被下面那条
+        # `except Exception` 吞成"引擎不可用"，嵌入那条腿于是从来没走过）；而未装载模型的
+        # 裸实例被读一次，`encode_batch` 的自救就会去出网拉权重。
+        if engine is None or not engine.is_initialized or engine.isHandedOutByFactory:
             return _ENGINE_UNAVAILABLE
         return engine
     except Exception:  # noqa: BLE001 - 引擎装配失败属可选依赖缺席,回退词面
@@ -214,11 +212,12 @@ def _embedding_similarity(a: str, b: str) -> Optional[float]:
         if engine is _ENGINE_UNAVAILABLE:
             return None
         # 取向量一律走 `encodeOrNone`：全零向量是"引擎兜底"不是"有向量"（并发会话那笔
-        # `encodeOrNone` 的口径更彻底，按其收口）。这一跳只在**已就绪**的引擎上发生。
-        _noteEngineProbe("ready")
+        # `encodeOrNone` 的口径更彻底，按其收口）。这一跳只在**能真算**的引擎上发生，
+        # 也就顺带把"未就绪即 Jaccard 回退"落在同一处判据上。
         va, vb = engine.encodeOrNone(a), engine.encodeOrNone(b)
         if va is None or vb is None:
             return None
+        _noteEngineProbe("ready")
         raw = vector_math.tryCosineSimilarity(va, vb)
         if raw is None:
             return None

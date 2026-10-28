@@ -34,6 +34,10 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
+# 读数里带 `⇒`（cp936 编不出）：不钉 stdout 编码时 `print` 会抛 UnicodeEncodeError，
+# 退出码变 1，看着像"有一条腿 FAIL"——而实际只是终端编码不认这个字形。
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")

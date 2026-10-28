@@ -26,8 +26,16 @@ SKILL_ID = "s1"
 #: 要落在 `semantic_similarity_threshold`（0.75）之上，否则候选在**约束闸**就被拒、
 #: 这一轮根本到不了评测与提案（本批实测：10 句时相似度 0.71，`proposal_id` 恒为 None；
 #: 40 句时 0.93。相似度按**句集合**算，重复句不增分母——故只能靠加不同句子撑面）。
+#: 候选里的改进标记与判分桩、变异器共用**这一个**名字：三处各写一个词时，
+#: 改了一处另两处就静默失效（实测 `改进版` 与 `改进` 不互通，候选因此被判成与基线同分）。
+CANDIDATE_MARK = "改进版"
+
+#: 正文刻意做到 40 句：离线变异只追加一句 `CANDIDATE_MARK`，候选与基线的 token 相似度
+#: 要落在 `semantic_similarity_threshold`（0.75）之上，否则候选在**约束闸**就被拒、
+#: 这一轮根本到不了评测与提案（本批实测：10 句时相似度 0.71，`proposal_id` 恒为 None；
+#: 40 句时 0.93。相似度按**句集合**算，重复句不增分母——故只能靠加不同句子撑面）。
 BASELINE = "".join(f"基线技能正文第{index}句。" for index in range(1, 41))
-CANDIDATE = BASELINE + "改进版。"
+CANDIDATE = BASELINE + CANDIDATE_MARK + "。"
 
 
 class _AgentStub:
@@ -68,7 +76,7 @@ def offline(monkeypatch):
     async def fakeScore(self, **kw):
         from neurova.evolution.eval.fitness import FitnessScore
 
-        value = 0.9 if "改进版" in kw.get("skill_text", "") else 0.2
+        value = 0.9 if CANDIDATE_MARK in kw.get("skill_text", "") else 0.2
         return FitnessScore(correctness=value, procedure_following=value,
                             conciseness=value, feedback="")
 
@@ -77,7 +85,7 @@ def offline(monkeypatch):
 
     async def fakeMutate(self, *, artifact_text, artifact_type, failures, **kw):
         """离线变异：候选正文必须与基线不同，否则进化轮整个 no-op（走不到候选评测）。"""
-        return artifact_text + "改进版。"
+        return artifact_text + CANDIDATE_MARK + "。"
 
     # 语义漂移闸同样钉离线：本仓的 embedding 后端缺席时退回 token 字面 Jaccard，
     # 「基线正文。」与「基线正文。改进版。」的词集几乎相同 ⇒ 相似度贴着阈值上下，
@@ -316,7 +324,7 @@ class TestArmKindReachesTheApproverFace:
                              {"skill_id": SKILL_ID, "iterations": 1, "real_trajectory": True})
         assert posted.status_code == 200, posted.text
         proposalId = (posted.json()["data"].get("proposal") or {}).get("proposal_id")
-        assert proposalId, "这条链没出提案，详情面无可验"
+        assert proposalId, f"这条链没出提案，详情面无可验；响应={posted.text[:800]}"
 
         r = client.get(f"{BASE}/skills/a1/proposals/{proposalId}")
         assert r.status_code == 200, r.text

@@ -1595,8 +1595,8 @@ def _instream_error_dict(error: Exception) -> Dict[str, Any]:
     provider 调用一旦开始，一切失败编码为流内错误消息而非异常。dict
     固定三键：error（脱敏原文）/ error_type（五类标准错误，error_mapping
     单一事实源）/ retryable（消费方可重试判断）。消费方：
-    openai_loop._raise_for_error_dict（error_type 优先）与 chat_pipeline
-    _raise_for_llm_error_dict（消息兜底）。
+    ``BaseAgentLoop._raise_for_error_dict``（error_type 优先、消息兜底）
+    是全仓唯一分类处，环侧与 chat_pipeline 的 legacy 流式路都指着它。
     """
     from neurova.llm.providers.error_mapping import normalize_provider_error
 

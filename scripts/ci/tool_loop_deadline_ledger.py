@@ -19,8 +19,9 @@ Issue #175 的前置是本仓已在上下文域（B6-1）趟通一条可机器�
 
 Issue #175 点名的符号里有两类是上下文域的取数模型看不见的：
 
-1. **函数内局部量**（`MAX_TOOL_CALL_ROUNDS` = chat_pipeline.py:2443、
-   `ctx_snapshot` = :2451）。它们不是类/函数/属性，`ast.Attribute` 口径下取数为零，
+1. **函数内局部量**（`MAX_TOOL_CALL_ROUNDS`，曾登记在 `chat_pipeline.py:2443`；
+   `ctx_snapshot` 现落在 `continuation_rounds.py:107`——续写循环已整块搬出管线）。
+   它们不是类/函数/属性，`ast.Attribute` 口径下取数为零，
    会被误判成 `absent`（「符号不存在」）。故新增**局部绑定取数**：按 `ast.Name` 的
    Store/Load 计写入与读取，并**限定在首次写入所在的函数作用域内**——否则全仓
    同名局部会互相串台（同名变量的读取被算成消费）。
@@ -257,8 +258,10 @@ AUDIT_SYMBOLS: Tuple[Tuple[str, str, str], ...] = (
     ("reset_pipeline_observers", KIND_SYMBOL, "agent/tool_pipeline.py:453（放大视角补登）"),
     ("ToolExecutionResult", KIND_SYMBOL, "tool_layers/schemas.py:291（放大视角补登）"),
     ("tool_choice", KIND_KEY, "agent/loops/openai_loop.py:281（只写不读）"),
-    ("MAX_TOOL_CALL_ROUNDS", KIND_BINDING, "agent/chat_pipeline.py:2443（写后无读）"),
-    ("ctx_snapshot", KIND_BINDING, "agent/chat_pipeline.py:2451"),
+    ("MAX_TOOL_CALL_ROUNDS", KIND_BINDING,
+     "agent/continuation_rounds.py（续写段·前像在 agent/chat_pipeline.py:2443，写后无读）"),
+    ("ctx_snapshot", KIND_BINDING,
+     "agent/continuation_rounds.py:107（续写段·前像在 agent/chat_pipeline.py:2451）"),
     ("max_parallel_tools", KIND_KEY, "security/agent_limits_settings.py（工具批次并行上限）"),
     ("max_subagent_depth", KIND_KEY, "security/agent_limits_settings.py（子代理派生深度上限，Issue #268 切片 D）"),
     # G4 工具取消/超时处置（Issue #288）：会话进程回收的接线。
@@ -275,7 +278,7 @@ AUDIT_SYMBOLS: Tuple[Tuple[str, str, str], ...] = (
 #: `TokenBudgetGate` 判据 `consumed`，钉住「阈值轴不是恒判 shadowed」。
 #:
 #: `ctx_snapshot`（Issue #310 收口）与上三条**同类但不同判据类**：它的判据是
-#: `self_loop`（写 1 读 3，全落在 `_auto_continue` 自身作用域内）——**它是活的**，
+#: `self_loop`（写 1 读 3，全落在续写实现 `runContinuationRounds` 自身作用域内）——**它是活的**，
 #: 只是活在自己函数里。它登记的意义与 `MAX_TOOL_CALL_ROUNDS` **成对**：两者同处
 #: 一个函数，一条活一条死，判据必须能把它们分开（同「符号级而非文件级」纪律）。
 #: 故它的正解就是「待处置」——不是「暂时没空处理」，而是「没有可处置的动作」。

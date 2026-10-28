@@ -26,8 +26,8 @@ logger = get_logger(__name__)
 #: 于是「薄环境里导入本模块」直接抛 ModuleNotFoundError——`neurova/embedding/__init__.py` 是唯一
 #: 顶层导入点，连带 `get_embedding_engine` 都拿不到，受保护子集里 18 格整片红（`cnb-ggt-1k5ne7emk`）。
 #: 改成懒取：类型注解走 `from __future__ import annotations` 天然是字符串，运行期用到时
-#: `_numpy()` 现取；缺席就在**调用点**抛带因的 ImportError（不是把错吞掉，`get_embedding_engine`
-#: 那一侧仍按既有契约返回 None 并写 warning）。
+#: `_numpy()` 现取；缺席时它是 `None`，即「这一档不可用」的**唯一判据**——不新造第二个开关，
+#: 也不在调用点抛异常（异常会把「引擎缺席即降级关键词档」的调用方从降级路径推到异常路径）。
 #: **不缓存到模块全局**：`import` 自身就带 `sys.modules` 缓存，再存一份 `np = ...` 是
 #: 第二个写法不同、判空不带锁的"懒建单例"（`test_lazySingletonDcl` 按形态抓的正是它）。
 
@@ -37,24 +37,26 @@ if TYPE_CHECKING:  # 只为类型注解：运行期一律经 `_numpy()` 取，�
 
 
 def _numpy():
-    """取 numpy；缺席时抛出点名原因的 ImportError（而不是让模块导入期就崩）。"""
+    """取 numpy；缺席时返回 None（可选依赖缺席＝这一档不可用，不是异常）。"""
     try:
         import numpy as _np
-    except ImportError as e:      # 薄环境：点名是谁缺的，别让调用方只看到 No module
-        raise ImportError(
-            "ONNX 嵌入引擎需要 numpy（requirements.txt 的 Utilities 段声明，"
-            "requirements-ci.txt 刻意不含）。当前环境未安装：%s" % e
-        ) from e
+    except ImportError:
+        return None
     return _np
 
 
-def _normalize(vec: "NDArray") -> "NDArray":
-    """L2 归一化"""
+def _normalize(vec: Any) -> Any:
+    """L2 归一化（numpy 档与纯 Python 档逐值同语义）。"""
     numpy = _numpy()
-    norm = numpy.linalg.norm(vec)
+    if numpy is not None:
+        norm = numpy.linalg.norm(vec)
+        if norm > 0:
+            return vec / norm
+        return vec
+    norm = sum(float(x) * float(x) for x in vec) ** 0.5
     if norm > 0:
-        return vec / norm
-    return vec
+        return [float(x) / norm for x in vec]
+    return list(vec)
 
 
 class EmbeddingResult:
@@ -273,6 +275,8 @@ class ONNXEmbeddingEngine:
         self._dimension = 0
         self._initialized = False
         self._backend_type = None
+        #: 由工厂交出过的实例（见 `markHandedOutByFactory` / `isHandedOutByFactory`）。
+        self._handedOut = False
         self._lock = threading.RLock()
 
         # 推理统计
@@ -283,9 +287,42 @@ class ONNXEmbeddingEngine:
     def is_initialized(self) -> bool:
         return self._initialized
 
+    def markHandedOutByFactory(self) -> None:
+        """点名「本实例是 `get_embedding_engine()` 交出的那一份」。
+
+        工厂交出的是**尚未装载任何模型**的裸实例。这类实例一旦进入 `encode_batch`，
+        那一段的懒初始化自救就会去走
+        `initialize_sync() → ModelDownloader.ensure_model(..., auto_download=True)`——
+        在一条判据的路径上出网拉权重。判别「这个实例有没有被交出去过」若靠
+        「有没有模型」，就把"没装"与"装过"混成一件事；故由工厂在交出时点名，
+        消费方据此决定要不要读它（`isHandedOutByFactory`）。
+        """
+        self._handedOut = True
+
+    @property
+    def isHandedOutByFactory(self) -> bool:
+        """这个实例是不是由 `get_embedding_engine()` 交出、且尚未装载模型的那一份。
+
+        True 的含义不是"不能用"，而是"**读它就等于现场建模型**"：编码会走到
+        `initialize_sync()`/`ensure_model`。要求"不许为算一次分把模型拉起来"的
+        消费方据此回退，而不是各自去判一遍就绪位。
+        """
+        return bool(self._handedOut) and not self._initialized
+
     @property
     def dimension(self) -> int:
         return self._dimension
+
+    @property
+    def backend_type(self) -> Optional[str]:
+        """本次实例实际走的是哪一档（`onnx` / `sentence_transformers` / `None`）。
+
+        只读公开面：`_backend_type` 此前只在**模块内部**被读写，调用方要判档只能摸私有
+        属性。而"哪一档在服务"是可观测契约——同一份语料在两档下的检索读数本征不同
+        （实测词法兜底 MRR 0.303、稠密档 0.35），判据与日志都必须能指名档位，
+        否则「换了档」会读成「检索退化了」。
+        """
+        return self._backend_type
 
     @property
     def stats(self) -> Dict[str, Any]:
@@ -365,6 +402,12 @@ class ONNXEmbeddingEngine:
 
     def _try_load_onnx(self) -> bool:
         """尝试加载 ONNX Runtime 后端"""
+        if _numpy() is None:
+            # 前处理与后处理全是 ndarray 运算：缺 numpy 时这一档整体不可用。
+            # 让位给 sentence-transformers 档（它不需要 numpy），而不是先加载
+            # session 再在 encode 时崩。
+            logger.debug("numpy 未安装，跳过 ONNX Runtime 后端")
+            return False
         try:
             import onnxruntime as ort
         except ImportError:
@@ -545,6 +588,19 @@ class ONNXEmbeddingEngine:
                 )
 
         start_time = time.time()
+
+        # 缺 numpy 时 ONNX 这一档整段不可用（前处理/后处理都是 ndarray 运算）：
+        # 在此点名并返回零向量兜底（与下方既有的「初始化失败」兜底同一形态），
+        # 而不是让 `np.array` 抛 AttributeError——后者会把「可选依赖缺席」
+        # 伪装成「代码缺陷」。运行时按 backend_type 判定，不按代码位置假设。
+        if _numpy() is None and self._backend_type != "sentence_transformers":
+            logger.error("numpy 缺席，ONNX 推理档不可用，返回零向量兜底")
+            return EmbeddingResult(
+                vectors=[[0.0] * 512] * len(texts),
+                model_name=self._model_name,
+                dimension=512,
+                inference_ms=0,
+            )
 
         try:
             # sentence-transformers 后端

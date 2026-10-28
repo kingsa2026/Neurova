@@ -72,6 +72,19 @@ def _evasionFindings(toolName: str, params: dict) -> list:
     return [f for f in _findings(toolName, params) if f.category == EVASION]
 
 
+def test_windowsUserNameShapeIsNotShellEvasion():
+    r"""用户名形状那一半：`C:\Users\xcc1b\...` 里的 `\xcc` 不是十六进制转义（见本篇顶栏）。
+
+    与上一条分开判，是因为上一条的载体曾取 `Path.home()`——容器里 `HOME=/root` 时它会
+    因为「家目录在保护清单里」而红，与"用户名形状被判成 shell 规避"毫无关系。
+    """
+    path = "C:\\Users\\xcc1b\\neurova_safe_read.txt"
+    findings = _evasionFindings("file_read", {"file_path": path})
+    assert not findings, (
+        f"Windows 用户名的转义形状被判成 shell 规避（finding={findings[:2]}）⇒ "
+        "路径值混进了命令扫描面")
+
+
 def test_plainWindowsPathIsNotShellEvasion():
     """主红：只带一个路径参数的读取，不该因为操作者用户名里有 `\\xcc` 就要审批。"""
     findings = _evasionFindings("file_read", {"file_path": SAFE_PATH})

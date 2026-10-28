@@ -196,6 +196,30 @@ class TestNoSilentFallback:
         assert reply == "legacy ok"
 
 
+class TestApiConfigErrorClassifier:
+    """「是不是 API 配置类错误」是全仓单点（agent/llm_config_error）。
+
+    它决定 `_call_agent_loop` 上抛还是 fallback：同一颗异常若被两处判成不同
+    结论，同一次故障会在两条路上表现不同。故判据只认这一处。
+    """
+
+    def test_plain_exceptions_are_not_config_errors(self):
+        from neurova.agent.continuation_hint import isApiConfigError
+
+        assert isApiConfigError(Exception("test")) is False
+        assert isApiConfigError(ValueError("test")) is False
+
+    def test_http_status_on_the_exception_counts(self):
+        from neurova.agent.continuation_hint import isApiConfigError
+
+        for status in (400, 401, 403):
+            assert isApiConfigError(SimpleNamespace(status_code=status)) is True
+        assert isApiConfigError(SimpleNamespace(status_code=500)) is False
+
+    def test_pipeline_holds_no_second_copy(self):
+        assert not hasattr(ChatPipeline, "_is_api_config_error")
+
+
 # ══════════════════════════════════════════════════════════════
 # B. 停滞检测闭环
 # ══════════════════════════════════════════════════════════════
