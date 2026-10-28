@@ -64,7 +64,12 @@ def _patch(monkeypatch, agent) -> None:
 
 
 async def _call_and_drain(body) -> typing.Tuple[typing.Any, typing.List[dict]]:
-    resp = await console_module.post_console_chat(body, _make_request())
+    # `current_user` 是依赖注入给的那个 dict；直接调端点函数时得按生产装配传进去，
+    # 否则拿到 `Depends(...)` 占位对象，红会落在 "'Depends' object has no attribute 'get'"
+    # 上（2026-10-26 点单甲把读面身份改成依赖解析后露出的形态）。
+    resp = await console_module.post_console_chat(
+        body, _make_request(), type("U", (), {"get": lambda self, k, d=None: "u1"})(),
+    )
     events: typing.List[dict] = []
     if isinstance(resp, StreamingResponse := __import__("starlette.responses", fromlist=["StreamingResponse"]).StreamingResponse):
         async for chunk in resp.body_iterator:

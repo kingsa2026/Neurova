@@ -151,6 +151,21 @@ CLOCK_LEDGER: Dict[str, tuple] = {
         "没有一处耗时上下界。§6-418 入册时漏登这一格——加文件的同时没复跑本闸，"
         "与「逐文件单跑两次就够」的错觉同形。",
     ),
+    "tests/unit/api/test_consoleStreamDisconnectKeepsTurn.py": (
+        ("wallClock",),
+        "唯一一处单调钟是**等断连被观测到的轮询护栏**：`deadline = time.monotonic() + 8.0` "
+        "配 `while not agent.completed and not agent.cancel_seen and time.monotonic() < deadline`，"
+        "等的是「回合被取消 / 上游断开」这件**状态迁移**。断言面全在状态上（cancel_seen、"
+        "回合是否仍可续、流是否收尾），没有一处耗时上下界——到点没到就如实红，"
+        "负载只会让它自己报，不会把结构契约写成墙钟阈值。",
+    ),
+    "tests/unit/api/test_consoleTurnOutlivesItsResponse.py": (
+        ("wallClock",),
+        "两处单调钟同形，都是**等状态到达的轮询护栏**：`deadline = time.monotonic() + 6.0` "
+        "与 `_await(seconds)` 里的 `while time.monotonic() < deadline`，等的是「回合在响应"
+        "断掉之后仍在跑」「后台续跑落定」这两件状态迁移。断言读的是回合表与流收尾，"
+        "不编码任何耗时上下界；到点未到就如实报缺状态。",
+    ),
     "tests/unit/skills/test_marketFetchBudgetIsSingleSource.py": (
         ("wallClock",),
         "本文件**不读真实墙钟**——`monotonic` 字样只出现在两处：本格自造的虚拟钟 "

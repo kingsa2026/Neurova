@@ -28,6 +28,7 @@ import pathlib
 import pytest
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 #: 本档在 `tests/unit/benchmark/` 下 ⇒ 仓根是 parents[3]（写成一层的 [2] 会得到 `tests/neurova/…`，
 #: 三格全撞 FileNotFoundError——那是装配噪声，不是一条红判据）。
@@ -66,7 +67,7 @@ def test_benchmarkFacadeHoldsNoImplementation():
     取 AST 而不是数关键词：docstring 与注释里出现 "BenchmarkFramework" 不算实现存在，
     按词判会把自己家的说明文档判红（本仓这一形跑过两遭）。
     """
-    tree = ast.parse(BENCH_INIT.read_text(encoding="utf-8", errors="replace"))
+    tree = parseSource(BENCH_INIT.read_text(encoding="utf-8", errors="replace"))
     impl = [n.name for n in tree.body if isinstance(n, (ast.ClassDef, ast.FunctionDef))]
     assigned = [t.id for n in tree.body if isinstance(n, ast.Assign)
                 for t in n.targets if isinstance(t, ast.Name)]
@@ -83,7 +84,7 @@ def _codeReferences(text: str) -> set:
     """
     found = set()
     try:
-        tree = ast.parse(text)
+        tree = parseSource(text)
     except SyntaxError:
         return found
     for node in ast.walk(tree):

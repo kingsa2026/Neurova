@@ -31,6 +31,7 @@ import tomllib
 import time
 
 import pytest
+from tests.ast_scan import parseSource
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -46,7 +47,7 @@ SEARCHER = "neurova/skills/market_searcher.py"
 
 
 def _tree(rel: str) -> ast.Module:
-    return ast.parse((REPO_ROOT / rel).read_text(encoding="utf-8", errors="replace"),
+    return parseSource((REPO_ROOT / rel).read_text(encoding="utf-8", errors="replace"),
                      filename=rel)
 
 
@@ -213,7 +214,7 @@ class TestBudgetIsSingleSource:
             "def f(url):\n"
             "    urllib.request.urlopen(url, timeout=30)\n"
             "    return {}.get('HTTP_TIMEOUT', '30')\n".format("config"))
-        hits = _timeoutOffenders(ast.parse(sample), "sample")
+        hits = _timeoutOffenders(parseSource(sample), "sample")
         assert len(hits) == 3, f"应当点名三类落点，实得 {hits}"
 
 

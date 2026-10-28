@@ -71,6 +71,8 @@ class TestFenceCoversMemorySurfaces:
         from neurova.core.data_root import repoRoot
         from neurova.knowledge.foundation.storage_fence import productionMemoryDir
 
+        # 生产目录在 v2 统一布局之后是仓内 `data/`（旧扁平 `agent_workspaces/` 仍算生产，
+        # 由 `_productionMemoryDirs()` 那一支兜着）：取法向 `data_root` 要，不在这里另拼一份。
         assert productionMemoryDir() == repoRoot() / "data", (
             f"生产记忆目录现读 {productionMemoryDir()}——v2 布局把它收进仓内数据根，"
             "围栏若与真实装配点各说一套，测试会话就会写进生产记忆")

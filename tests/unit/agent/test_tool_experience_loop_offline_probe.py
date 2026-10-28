@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "scripts" / "diagnostics" / "_tool_experience_loop_probe.py"
@@ -79,7 +80,7 @@ class TestOfflineProbeScript:
         """脚本必须把库落进临时目录，禁止把生产库路径写进代码。"""
         import ast
 
-        tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
+        tree = parseSource(SCRIPT.read_text(encoding="utf-8"))
         offenders = [
             node.value for node in ast.walk(tree)
             if isinstance(node, ast.Constant) and isinstance(node.value, str)

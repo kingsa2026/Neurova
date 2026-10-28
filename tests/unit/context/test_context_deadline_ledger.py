@@ -31,6 +31,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from scripts.ci import context_deadline_ledger as ledger  # noqa: E402
 
 from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法（本档不再自己开那份清单）
+from tests.ast_scan import parseSource
 GUARD_REL = "tests/unit/context/test_context_deadline_ledger.py"
 
 
@@ -171,7 +172,7 @@ class TestTakeIsIndependentOfProductionNodeCount:
         func = ledger._classifyNode
         first_param = list(_inspect.signature(func).parameters)[0]
         inspected = set()
-        for node in _ast.walk(_ast.parse(_inspect.getsource(func))):
+        for node in _ast.walk(parseSource(_inspect.getsource(func))):
             if not (isinstance(node, _ast.Call)
                     and isinstance(node.func, _ast.Name)
                     and node.func.id == "isinstance"):

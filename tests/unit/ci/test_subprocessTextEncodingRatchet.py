@@ -52,7 +52,7 @@ PROBE_WALL_S = 20
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tests.ast_scan import filesUnder  # noqa: E402
+from tests.ast_scan import filesUnder, parseSource  # noqa: E402
 
 #: 会被判的 subprocess 入口（这几个都把子进程输出交给父进程解码）
 CAPTURE_FUNCS = ("run", "check_output", "check_call", "call", "Popen",
@@ -121,7 +121,7 @@ def _violationCount(source: str) -> int:
     docstring 里写一句 `text=True` 不该把文件判红（本仓被自己的文档撞红过一次）。
     """
     try:
-        tree = ast.parse(source)
+        tree = parseSource(source)
     except SyntaxError:
         return 0
     count = 0
@@ -253,7 +253,7 @@ def test_knownBadFormsAreCounted(bad):
 #: 真钉过却被旧谓词记进账，见 `test_knownBothPinnedFilesAreNotCountedAsHalfPinned`）。
 def _envExprOfFirstCall(snippet: str):
     """取片段里第一个 `subprocess.*` 调用的 `env=` 表达式（没有 env 就返 None）。"""
-    for node in ast.walk(ast.parse(snippet)):
+    for node in ast.walk(parseSource(snippet)):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
                 and isinstance(node.func.value, ast.Name) and node.func.value.id == "subprocess":
             for kw in node.keywords:
@@ -335,7 +335,7 @@ HALF_PINNED_BASELINE = 0
 
 def _callNodes(source: str):
     try:
-        tree = ast.parse(source)
+        tree = parseSource(source)
     except SyntaxError:
         return []
     out = []
@@ -357,7 +357,7 @@ def _pythonChildArgvNames(source: str) -> set:
     它们和字面形态一样会静默毁读数）。看不见就不是"没病"，是"病历上没写"。
     """
     try:
-        tree = ast.parse(source)
+        tree = parseSource(source)
     except SyntaxError:
         return set()
     names = set()
@@ -423,7 +423,7 @@ def _mutatesProcessEnv(source: str) -> bool:
     只认 `os.environ` 这条下标/更新链，别把 `env["X"]=` 那种局部字典也算成进程级。
     """
     try:
-        tree = ast.parse(source)
+        tree = parseSource(source)
     except SyntaxError:
         return False
     for node in ast.walk(tree):
@@ -502,7 +502,7 @@ def _halfPinnedLines(source: str) -> list:
     if "subprocess" not in source or "sys.executable" not in source:
         return []
     try:
-        tree = ast.parse(source)
+        tree = parseSource(source)
     except SyntaxError:
         return []
     if _mutatesProcessEnv(source):

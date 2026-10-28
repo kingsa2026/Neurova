@@ -26,6 +26,7 @@ import ast
 import pathlib
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 ISLAND = REPO_ROOT / "neurova" / "core" / "multi_agent_manager.py"
@@ -93,7 +94,7 @@ def test_workspaceSingleSourceStillServesTheRealEndpoint():
     assert WORKSPACE_SINGLE_SOURCE.exists(), "agent 工作区的唯一装配点不见了"
     path = get_agent_workspace_dir("b81-probe")
     assert path.name == "workspaces" and path.parent.name == "b81-probe" and path.is_absolute(), f"取根口径变了：{path}"
-    tree = ast.parse(AGENT_ENDPOINT.read_text(encoding="utf-8", errors="replace"))
+    tree = parseSource(AGENT_ENDPOINT.read_text(encoding="utf-8", errors="replace"))
     taken = {n.module for n in ast.walk(tree)
              if isinstance(n, ast.ImportFrom) and (n.module or "").endswith("agent_workspaces")}
     assert taken, "对外端点不再经唯一装配点取工作区路径了"

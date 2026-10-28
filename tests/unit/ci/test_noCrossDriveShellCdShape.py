@@ -38,7 +38,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tests.ast_scan import filesUnder  # noqa: E402
+from tests.ast_scan import filesUnder, parseSource  # noqa: E402
 
 #: 扫描根。刻意含 `examples/`：建档时的两处命中之一就是那份演示脚本，
 #: 只扫 `neurova/tests/scripts` 会把它静默漏掉。
@@ -92,7 +92,7 @@ def shellCdHits(source: str, filename: str = "<str>") -> list[int]:
     """该份源码里 `cd <路径> &&` 形状的 shell 调用行号清单（口径唯一定义在此）。"""
     hits: list[int] = []
     try:
-        tree = ast.parse(source, filename=filename)
+        tree = parseSource(source, filename=filename)
     except SyntaxError:
         return hits
     for node in ast.walk(tree):

@@ -42,6 +42,7 @@ from pathlib import Path
 from tests import ast_scan
 
 import pytest
+from tests.ast_scan import parseSource
 
 REPO = Path(__file__).resolve().parents[3]
 PROD_ROOT = REPO / "neurova"
@@ -106,7 +107,7 @@ def test_livePoolCacheContractStillHolds():
     组装链已经失去缓存。所以这一格必须在删除前后都绿。
     """
     src = (PROD_ROOT / "context_pool.py").read_text(encoding="utf-8")
-    tree = ast.parse(src)
+    tree = parseSource(src)
     names = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
     assert "build_context_for_model" in names, "现役组装结果缓存的入口不见了"
     assert "_cache_version" in src and "_last_build_version" in src, (

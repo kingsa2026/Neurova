@@ -35,6 +35,7 @@ from fastapi.testclient import TestClient
 from neurova.api import auth as authModule
 from neurova.api.deps import require_admin  # noqa: F401  （只用它的存在性做门，见 fixture）
 from neurova.language import manager as languageManagerModule
+from tests.ast_scan import parseSource
 
 BASE = "/api/v1/language"
 USER = {"user_id": "u-1", "username": "u1", "role": "user", "neuser_id": "u-1"}
@@ -347,7 +348,7 @@ class TestTheFaceDoesNotOwnASecondNormalization:
         from neurova.api.endpoints import language_api
 
         source = Path(language_api.__file__).read_text(encoding="utf-8")
-        tree = ast.parse(source)
+        tree = parseSource(source)
         offenders = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Attribute) and node.attr in ("split", "lower", "replace"):

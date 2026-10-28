@@ -40,6 +40,7 @@ from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
 isolatedDataRoot(prefix="neurovaFacadeB55")     # 本档会真装配，落点必须走仓内唯一隔离口
 
 from tests import ast_scan  # noqa: E402
+from tests.ast_scan import parseSource
 
 GUARD = "tests/unit/test_noDeadImportSwallowFacadeBlocks.py"
 OTHER = "tests/unit/skills/test_skillsFacadeAndSourceEnumAreSingleSourced.py"
@@ -67,7 +68,7 @@ def observe(desc: str, fn) -> None:
 def sourceBoundNames(text: str) -> dict:
     """门面源码里**模块级** `from X import name` 绑定的名字 → 来源模块（与判据同口径）。"""
     bound = {}
-    for node in ast.parse(text).body:
+    for node in parseSource(text).body:
         if isinstance(node, ast.ImportFrom):
             for alias in node.names:
                 bound[alias.asname or alias.name] = node.module
@@ -149,7 +150,7 @@ def _reverseProof():
     assert back, "把旧契约塞回去之后 cell 4 那半句读不到任何退役名单名字——反向钉是空的"
 
     seen, dupes = {}, []
-    for node in ast.walk(ast.parse(copy.read_text(encoding="utf-8"))):
+    for node in ast.walk(parseSource(copy.read_text(encoding="utf-8"))):
         if isinstance(node, ast.ImportFrom):
             for alias in node.names:
                 key = alias.asname or alias.name

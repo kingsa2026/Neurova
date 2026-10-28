@@ -39,6 +39,7 @@ if str(REPO) not in sys.path:
 
 from neurova.skills.skill_install_gate import reset_install_gate_scanner  # noqa: E402
 from neurova.skills.skill_service import SkillService  # noqa: E402
+from tests.ast_scan import parseSource
 
 SKILL_MD = "# demo\n\n演示技能，说明文档。\n"
 
@@ -196,7 +197,7 @@ class TestContractIsConsistentAtEveryHit:
                  ("neurova/skills/skill_chain_executor.py", "_execute_step")]
         offenders = []
         for rel, _fn in sites:
-            tree = ast.parse(io.open(REPO / rel, encoding="utf-8").read(), filename=rel)
+            tree = parseSource(io.open(REPO / rel, encoding="utf-8").read(), filename=rel)
             for node in ast.walk(tree):
                 if isinstance(node, ast.Call) and _calleeIsCallSkill(node):
                     parent = node
@@ -215,7 +216,7 @@ class TestContractIsConsistentAtEveryHit:
         assert asyncio.iscoroutinefunction(throat), (
             "call_skill 还是同步函数——端点在 running loop 里内联它，协程入口永远跑不起来")
 
-        tree = ast.parse(io.open(_throatSourceFile(), encoding="utf-8").read())
+        tree = parseSource(io.open(_throatSourceFile(), encoding="utf-8").read())
         fn = next(n for n in ast.walk(tree)
                   if isinstance(n, ast.AsyncFunctionDef) and n.name == "call_skill")
         checkLine, callLine = None, None
@@ -235,7 +236,7 @@ class TestContractIsConsistentAtEveryHit:
             src = (REPO / rel).read_text(encoding="utf-8")
             if "asyncio.run(" not in src:
                 continue
-            tree = ast.parse(src, filename=rel)
+            tree = parseSource(src, filename=rel)
             for node in ast.walk(tree):
                 if isinstance(node, ast.Call) and _calleeName(node) == "asyncio.run":
                     for inner in ast.walk(node):

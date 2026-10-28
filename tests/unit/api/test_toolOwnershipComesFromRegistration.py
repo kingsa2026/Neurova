@@ -23,6 +23,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO = Path(__file__).resolve().parents[3]
 TOOL_LAYERS = REPO / "neurova" / "api" / "endpoints" / "tool_layers.py"
@@ -163,7 +164,7 @@ class TestOwnershipComesFromRegistration:
 
 class TestDerivationIsTheOnlyInterpreter:
     def _tree(self):
-        return ast.parse(TOOL_LAYERS.read_text(encoding="utf-8"), filename=str(TOOL_LAYERS))
+        return parseSource(TOOL_LAYERS.read_text(encoding="utf-8"), filename=str(TOOL_LAYERS))
 
     def _functions(self):
         return {n.name: n for n in ast.walk(self._tree())
@@ -258,7 +259,7 @@ def _tagInterpretations(source: str, rel: str):
     `MCP_SOURCE`）都算；写侧 `tags=["mcp", sid]` 是 Assign 不是 Compare，不会命中；
     通用标签过滤（`tag in t.tags`）里没有那个值，也不会命中。
     """
-    tree = ast.parse(source, filename=rel)
+    tree = parseSource(source, filename=rel)
     mcpNames = set()
     for node in tree.body:
         value = getattr(node, "value", None)

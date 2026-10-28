@@ -23,6 +23,7 @@ import pytest
 
 from neurova.skills.market_importer import read_builtin_bundle
 from neurova.skills.skill_install_gate import reset_install_gate_scanner, scan_skill_for_install
+from tests.ast_scan import parseSource
 
 BUNDLE_NAME = "adaptive-presentation-studio.zip"
 SKILL_ID = "builtin--adaptive-presentation-studio"
@@ -77,7 +78,7 @@ class TestAssetCarriesNoBareDynamicExecutionShape:
     def test_syntaxCheckStepIsStillThereAndNoLongerUsesBareCompile(self):
         """语法校验这一能力不许被删——它只是换了等价写法（`ast.parse` 同样抛 SyntaxError）。"""
         source = self._memberSource()
-        tree = ast.parse(source, filename=SELF_CHECK_MEMBER)
+        tree = parseSource(source, filename=SELF_CHECK_MEMBER)
         bareCompile = [n.lineno for n in ast.walk(tree)
                        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
                        and n.func.id == "compile"]

@@ -42,6 +42,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 _REPO = Path(__file__).resolve().parents[3]
 _INSTALL = _REPO / "install.py"
@@ -246,7 +247,7 @@ class TestEnginePackageShortageIsNamed:
         )
 
     def test_worker_names_the_missing_package(self):
-        tree = ast.parse(_INSTALL_SRC)
+        tree = parseSource(_INSTALL_SRC)
         fn = next(
             n for n in ast.walk(tree)
             if isinstance(n, ast.FunctionDef) and n.name == "modelWorker"
@@ -261,7 +262,7 @@ class TestEnginePackageShortageIsNamed:
 
     def test_download_stage_skips_instead_of_warning(self):
         """引擎未装时是「跳过权重」而非「下载失败」——可选能力不该报故障噪音。"""
-        tree = ast.parse(_INSTALL_SRC)
+        tree = parseSource(_INSTALL_SRC)
         fn = next(
             n for n in ast.walk(tree)
             if isinstance(n, ast.FunctionDef) and n.name == "downloadModels"
@@ -288,7 +289,7 @@ class TestInstallProbesShareTheSupplyContract:
         判据链：verifyInstallation → probeModels → 下载器的 is_model_available /
         asr 的 is_model_ready（同一批就绪事实源，不在这里另立一套）。
         """
-        tree = ast.parse(_INSTALL_SRC)
+        tree = parseSource(_INSTALL_SRC)
         by_name = {
             n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
         }
@@ -364,7 +365,7 @@ class TestOutcomeProjectionsAreTrue:
 
     @staticmethod
     def _hasModuleLevelImport(path: Path, leaf: str) -> bool:
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        tree = parseSource(path.read_text(encoding="utf-8", errors="ignore"))
         return any(isinstance(node, ast.Import)
                    and any(a.name == leaf or a.name.startswith(leaf + ".") for a in node.names)
                    for node in tree.body)          # 只看模块级：函数体内的一律不算

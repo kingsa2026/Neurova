@@ -43,6 +43,7 @@ import re
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -121,7 +122,7 @@ class TestRuleTableAndEngineAreSingleSourced:
             path = Path(ref.path)
             text = path.read_text(encoding="utf-8", errors="replace")
             try:
-                tree = ast.parse(text)
+                tree = parseSource(text)
             except SyntaxError:
                 continue
             for node in ast.walk(tree):

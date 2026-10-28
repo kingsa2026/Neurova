@@ -50,6 +50,7 @@ pytestmark = pytest.mark.timeout(90)
 REPO = Path(__file__).resolve().parents[3]
 
 from tests import ast_scan  # noqa: E402  (仓根在 sys.path 上，见 tests/conftest.py)
+from tests.ast_scan import parseSource
 
 _STORE = REPO / "neurova" / "aigc_studio" / "store.py"
 _SERVICES = REPO / "neurova" / "aigc_studio" / "services.py"
@@ -107,7 +108,7 @@ def _interfaceBody(src: str, name: str) -> str:
 
 
 def _functionSource(path: Path, fn: str) -> str:
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+    tree = parseSource(path.read_text(encoding="utf-8"))
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == fn:
             return ast.get_source_segment(path.read_text(encoding="utf-8"), node) or ""
@@ -169,7 +170,7 @@ class TestRetirementScannerFormIsRight:
     @staticmethod
     def _pyCodeText(source: str) -> str:
         """把源码解析成树再取形（与生产扫描同一份口径：`_codeText(tree)`）。"""
-        return _codeText(ast.parse(source))
+        return _codeText(parseSource(source))
 
     def test_pyCommentMentionIsNotAUsage_butStringConstantIs(self, tmp_path):
         assert "bgm_prompt" not in self._pyCodeText(

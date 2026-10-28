@@ -44,6 +44,7 @@ import pathlib
 import time
 
 import pytest
+from tests.ast_scan import parseSource
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
 CHANNELS_PY = REPO / "neurova" / "api" / "endpoints" / "channels.py"
@@ -367,7 +368,7 @@ class TestWecomVerifyFaceIsOneImplementation:
                        "verifyCallbackSignature"), "企微没有独立的验签面 ⇒ 谓词只能靠复制公式"
         hits = _callsInWecom()
         assert len(hits) >= 2, f"签名公式的调用点只有 {hits}——抽取没做到（还是各写各的）"
-        tree = ast.parse(WECOM_SRC)
+        tree = parseSource(WECOM_SRC)
         bodies = {n.name: n for n in ast.walk(tree)
                   if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
         for func in ("verifyCallbackSignature", "verify_url", "handle_callback"):

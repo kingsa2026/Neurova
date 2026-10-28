@@ -9,6 +9,7 @@ from __future__ import annotations
 import inspect
 
 import pytest
+from tests.ast_scan import parseSource
 
 
 # ============================================================================
@@ -70,7 +71,7 @@ class TestNoneFallbackExceptionType:
 
         init_path = pathlib.Path(evolution_mod.__file__)
         source = init_path.read_text(encoding="utf-8")
-        tree = ast.parse(source)
+        tree = parseSource(source)
 
         import_error_only_handlers = []
         for node in ast.walk(tree):

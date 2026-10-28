@@ -27,6 +27,7 @@ import ast
 import sys
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
@@ -40,7 +41,7 @@ PIN_CALL_FRAGMENT = "stdout.reconfigure("
 def _unencodableInLiterals(source: str) -> set:
     """字面常量里 cp936（本机默认 stdout 编码）编不出的字符集合。"""
     out = set()
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(parseSource(source)):
         if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
             continue
         for ch in node.value:
@@ -62,7 +63,7 @@ _PIN_STREAM_NAMES = frozenset({"stdout", "stderr"})
 
 def _pinsStdoutEncoding(source: str) -> bool:
     """有没有真的调用 `sys.stdout.reconfigure(...)`——写进字符串或注释不算钉住。"""
-    tree = ast.parse(source)
+    tree = parseSource(source)
     iterated = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.For, ast.AsyncFor)):

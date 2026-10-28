@@ -22,6 +22,7 @@ from neurova.analytics.collector import (
     MockMetricsDisabledError,
     mock_metrics_enabled,
 )
+from tests.ast_scan import parseSource
 
 
 @pytest.fixture(autouse=True)
@@ -97,7 +98,7 @@ class TestModuleIsLabelledDevOnly:
         src = io.open(
             "neurova/analytics/collector.py", encoding="utf-8"
         ).read()
-        doc = ast.get_docstring(ast.parse(src)) or ""
+        doc = ast.get_docstring(parseSource(src)) or ""
         assert "dev-only" in doc, "模块 docstring 必须显式标注 dev-only 与假数风险"
         assert ALLOW_MOCK_METRICS_ENV in doc, "docstring 必须写明开关名"
 
@@ -106,7 +107,7 @@ class TestModuleIsLabelledDevOnly:
         import io
 
         src = io.open("neurova/analytics/collector.py", encoding="utf-8").read()
-        doc = ast.get_docstring(ast.parse(src)) or ""
+        doc = ast.get_docstring(parseSource(src)) or ""
         assert "neurova.core.metrics" in doc, (
             "必须指路真实指标源（prometheus 埋点），否则接线者仍会用假数"
         )

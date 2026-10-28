@@ -210,6 +210,12 @@ class TestNoNewHomeLandingIsAllowed:
         # `homeAnchorPath` 复用这一个拼法（只算落点、不收养），不新增第二条字面——
         # 锚本体也已收进数据根（回滚一个目录不动其中的文件），主目录只剩旧地址待收养。
         "core/data_root.py": 1,
+        # §6-388 用户 2026-10-22 拍「甲①＋乙」：**根外锚**必须住在数据根之外
+        # （整库恢复/快照回滚会把数据根里的构件、账本、锚一起滚回去）。
+        # 这是"新写"方向的唯一一处例外，理由在 artifact_digest.anchorPath() 上方。
+        # 文案：它现在**向收养端那一个取法要**（`data_root.legacyHomeLanding`）而不是手拼，
+        # 故本表回到只剩 `core/data_root.py` 一处；「一号仓库」那条由
+        # `test_homeAdoptionRefusedUnderForeignDataRoot` 按调用点咬住（同一契约的两面）。
     }
 
     def test_homeLandingOffendersAreExactlyTheRegisteredOnes(self):

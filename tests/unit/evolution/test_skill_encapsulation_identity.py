@@ -23,6 +23,7 @@ import pytest
 
 from neurova.evolution.skill_encapsulation import AutoSkillBuilder
 from neurova.skills.skill_service import SkillService
+from tests.ast_scan import parseSource
 
 SEQ = ["memory_search", "file_read", "file_write"]
 PURPOSE = "读改写同一文件"
@@ -126,7 +127,7 @@ def test_memory_template_id_resolves_on_disk(harness):
 
 def test_skill_id_concatenation_has_a_single_construction_point():
     """身份拼接只能有一处构造点，否则两套键域迟早再长回来。"""
-    tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
+    tree = parseSource(SOURCE.read_text(encoding="utf-8"))
     offenders = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.JoinedStr):
