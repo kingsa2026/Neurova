@@ -160,6 +160,59 @@ class TestEveryEntryIsClassified:
         )
 
 
+class TestNavigationImpactKeepsItsCriterion:
+    """导航层筛选的入筛条件只有两条，形态只决定处置。
+
+    红过的那一版里，`navigationImpactRefs` 把「不可点击 + 载体不是指路文档」的行内码
+    直接 `continue` 掉，再由 `navigationImpactExemptions` 给它记一条自造的豁免理由
+    「描述性行内码（不可点击且非指路文档）」。于是八百余条**导航可达**载体里的失效路径
+    被记成"不构成当下导航问题"，摘要据此写出「影响当下导航 0 条 · 本类已归零」。
+
+    这里正面钉住那件事：**载体可达 + 引用非占位形态 ⇒ 必须入表**，且给出的处置是
+    「登记不就地改写」——处置与理由不是一回事，不许拿处置冒充理由。
+    """
+
+    def test_reachable_non_placeholder_entries_are_all_screened_in(self):
+        reached = scanner.readerReachableDocuments()
+        mustBeScreened = [
+            item for item in scanner.archiveDanglingUnion()
+            if item["file"] in reached
+            and not scanner.PLACEHOLDER_PATTERN.search(item["ref"])
+        ]
+        assert mustBeScreened, "导航图里一条失效引用都没有——先确认导航图没退化成空集。"
+        screened = {(row["file"], row["line"], row["ref"])
+                    for row in scanner.navigationImpactRefs()}
+        missing = [item for item in mustBeScreened
+                   if (item["file"], item["line"], item["ref"]) not in screened]
+        assert not missing, (
+            f"有 {len(missing)} 条「导航可达 + 非占位」的失效引用没有入表。\n"
+            "入筛只看「载体可达」与「引用是否占位」，形态（可点击/行内码）只决定处置。\n  "
+            + "\n  ".join(f"{m['file']}:{m['line']} [{m['ref']}]" for m in missing[:10])
+        )
+
+    def test_inline_form_is_registered_not_exempted(self):
+        rows = [r for r in scanner.navigationImpactRefs()
+                if r["form"] == scanner.IMPACT_FORM_INLINE]
+        assert rows, (
+            "丙类（行内码路径陈述）一条都没有:要么判据被改回只认可点击，"
+            "要么导航图里真的没有承载这类条目的文档——后者请先给出读数再改判据。"
+        )
+        wrong = [r for r in rows if r["disposition"] != scanner.DISPOSITION_REGISTER]
+        assert not wrong, (
+            f"丙类处置写错了 {len(wrong)} 条:归档正文陈述的是当时的代码结构，"
+            "处置是「登记不就地改写」。"
+        )
+
+    def test_disposition_column_never_borrows_the_exemption_wording(self):
+        """处置列不许写成「豁免」——那正是把结论当证据的写法。"""
+        block = _block(_ledger_text(), scanner.NAV_IMPACT_BEGIN, scanner.NAV_IMPACT_END)
+        offenders = [line for line in block.splitlines() if "豁免" in line]
+        assert not offenders, (
+            "入筛条目表里出现了「豁免」字样:入表就是需要处理,处置一列只写怎么处置。\n  "
+            + "\n  ".join(offenders[:5])
+        )
+
+
 class TestEmptyLabelsCarryPreimage:
     """空标签是「删掉目标」的产物——必须回填前像，否则信息永久丢失。"""
 

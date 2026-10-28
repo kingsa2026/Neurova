@@ -71,7 +71,7 @@ class TestSkillPackerParamName:
         from neurova.evolution.skill_encapsulation import AutoSkillBuilder
 
         source = _get_agent_core_source()
-        tree = ast.parse(source)
+        tree = parseSource(source)
         call = next(
             (node for node in ast.walk(tree)
              if isinstance(node, ast.Call)

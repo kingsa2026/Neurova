@@ -37,6 +37,7 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 MANUAL_DIR = REPO / "tests" / "manual"
 
@@ -111,7 +112,7 @@ class TestProbesAreRunOnlyAfterTheyCanResolve:
     def testNoLambdaReachesIntoAFinishedExceptHandler(self):
         offenders = []
         for ref in _liveScripts():
-            for hit in _lambdaEscapesHandler(ast.parse(ref.code)):
+            for hit in _lambdaEscapesHandler(parseSource(ref.code)):
                 offenders.append(f"{ref.path.name} {hit}")
         assert not offenders, (
             "读数 lambda 引用了 except 变量却没绑默认参数——真炸时 NameError 会盖住原始异常，"
@@ -120,11 +121,11 @@ class TestProbesAreRunOnlyAfterTheyCanResolve:
     def testNoScriptRunsAProbeNameItNeverBinds(self):
         offenders = []
         for ref in _liveScripts():
-            bound = _moduleLevelBound(ast.parse(ref.code)) | set(dir(builtins))
+            bound = _moduleLevelBound(parseSource(ref.code)) | set(dir(builtins))
             # 函数内的局部绑定与参数也算"绑得住"：取全树 Store 名并集，只留真·从未出现过的名字
-            everyName = {n.id for n in ast.walk(ast.parse(ref.code))
+            everyName = {n.id for n in ast.walk(parseSource(ref.code))
                          if isinstance(n, ast.Name)} | set(bound)
-            used = {n.id for n in ast.walk(ast.parse(ref.code))
+            used = {n.id for n in ast.walk(parseSource(ref.code))
                     if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
             for name in sorted(used - everyName):
                 offenders.append(f"{ref.path.name}: {name}")
@@ -145,10 +146,10 @@ class TestProbesAreRunOnlyAfterTheyCanResolve:
                  "except Exception as exc:\n"
                  "    read('x', lambda exc=exc: (False, repr(exc)))\n"
                  "    sys.exit(1)\n")
-        assert _lambdaEscapesHandler(ast.parse(broken)), "违规写法没被咬到——那这格是橡皮章"
-        assert not _lambdaEscapesHandler(ast.parse(fixed)), "合规写法被判成违规——零容忍格会误伤"
+        assert _lambdaEscapesHandler(parseSource(broken)), "违规写法没被咬到——那这格是橡皮章"
+        assert not _lambdaEscapesHandler(parseSource(fixed)), "合规写法被判成违规——零容忍格会误伤"
         probeMissing = "import subprocess, sys\nsubprocess.run([sys.executable, '-c', PROBE])\n"
-        tree = ast.parse(probeMissing)
+        tree = parseSource(probeMissing)
         used = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
         assert "PROBE" in used and "PROBE" not in _moduleLevelBound(tree), (
             "未绑定名扫描没咬到 `-c PROBE` 这一形")

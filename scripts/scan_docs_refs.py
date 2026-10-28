@@ -35,7 +35,7 @@ FENCE_PATTERN = re.compile(r"```|~~~")
 # 视为「路径引用」的文件后缀（避免把 `foo.bar()` 这类代码片段当路径）
 PATH_SUFFIXES = ("py", "md", "yml", "yaml", "json", "toml", "sh", "bat", "js", "ts", "vue", "html", "css")
 # 通配/占位形态（`bugfix-*.md`、`HARMONYOS_*.md`）不是具体路径，单独归类
-PLACEHOLDER_PATTERN = re.compile(r"[*<>{}\[\]]")
+PLACEHOLDER_PATTERN = re.compile(r"[*<>{}\[\]]|YYYY|MM-DD|\bxxx\b|\byyy\b")
 
 # 「行内码是不是仓库内位置」的判据（`scanFile` 的入账门槛，只此一份）：
 # 带目录分隔符即视为路径（`context/fold_resolution.py`）；
@@ -677,18 +677,18 @@ def _entry(file: str, line: int, ref: str, verdict: str, hit: str,
 
 #: 导航承载文档的标题特征（文档存在的意义是指路，不是叙事）
 NARRATIVE_TITLE_PATTERN = re.compile(r"清单|索引|图谱|单一事实源")
-#: 占位/模板形态的具体路径：不是任何真实目标，改指无从谈起
-PLACEHOLDER_PATH_PATTERN = re.compile(r"YYYY|MM-DD|\bxxx\b|\byyy\b|<[^>]+>")
-
 IMPACT_FORM_CLICKABLE = "甲·可点击引用"
 IMPACT_FORM_POINTER = "乙·指路条目"
+IMPACT_FORM_INLINE = "丙·行内码路径陈述"
 
 DISPOSITION_REPOINT = "改指真实路径"
 DISPOSITION_DESTINATION = "改显式文本交代去处"
 DISPOSITION_PROJECT = "单独立项（整篇级过期）"
+#: 丙类的处置：归档正文陈述的是**当时**的代码结构，就地改写成今天的形态反而与史实不符。
+#: 这一列写的是**处置**（登记、不改），不是**理由**——它仍然是"当下把人带错路"，故入表。
+DISPOSITION_REGISTER = "登记不就地改写"
 
 EXEMPT_UNREACHABLE = "无当下读者（不在导航图内）"
-EXEMPT_NARRATIVE = "描述性行内码（不可点击且非指路文档）"
 EXEMPT_PLACEHOLDER = "占位/模板路径（非真实目标）"
 
 
@@ -804,13 +804,22 @@ def archiveDanglingUnion() -> list:
 def navigationImpactRefs() -> list:
     """筛选出**真正影响当下导航**的归档层失效引用，并给出逐条处置。
 
-    不入筛的条目由 `navigationImpactExemptions()` 按理由计数登记——
-    筛选不是"眼不见为净"，被豁免的每一条都能说出为什么。
+    **入筛条件只有两条**：引用不是占位/模板形态，且载体在导航图里（当下就有读者走得到）。
+    形态（可点击 / 行内码）只决定**处置**，不决定入不入筛：
+
+    - 甲类·可点击引用：点开即 404，与活跃层同一条纪律，没有归档层豁免；
+    - 乙类·指路条目：载体是专职指路的文档，指错地方要单独立项由人决定去留；
+    - 丙类·行内码路径陈述：归档正文里写着"某个文件在 `x/y.py`"，而它不在了。读者把这个
+      名字复制走同样落空——与甲类同属"当下把人带错路"，只是不可点击。处置是**登记不就地
+      改写**（归档正文陈述的是当时的代码结构），那是一条处置，不是"这件事不影响当下导航"
+      的豁免理由。
+
+    不入筛的条目由 `navigationImpactExemptions()` 按理由计数登记——筛选不是"眼不见为净"。
     """
     reached = readerReachableDocuments()
     rows = []
     for item in archiveDanglingUnion():
-        if PLACEHOLDER_PATH_PATTERN.search(item["ref"]):
+        if PLACEHOLDER_PATTERN.search(item["ref"]):
             continue
         if item["file"] not in reached:
             continue
@@ -822,22 +831,31 @@ def navigationImpactRefs() -> list:
             form = IMPACT_FORM_POINTER
             disposition = DISPOSITION_PROJECT
         else:
-            continue
+            form = IMPACT_FORM_INLINE
+            disposition = DISPOSITION_REGISTER
         rows.append(dict(item, form=form, disposition=disposition))
     return rows
 
 
 def navigationImpactExemptions() -> dict:
-    """被筛掉的条目按理由计数（理由取自同一判据，不另写一套）。"""
+    """被筛掉的条目按理由计数（理由取自同一判据，不另写一套）。
+
+    **两条，不是三条。** 此前这里另立一条「描述性行内码（不可点击且非指路文档）」，把
+    八百余条**导航可达**载体里的失效行内码记成"不构成当下导航问题"。读者当下就打开得到
+    那篇文档，里面的路径陈述复制走也不存在——与「字面所指的对象今天还在不在」（判据本身
+    就写着「与活跃层同一条纪律」）无关。它与甲类同属"当下把人带错路"，只是形态不同。
+
+    给它一条豁免理由，等于把**处置选择**（归档层不就地改写）说成了**豁免理由**（这件事
+    不影响当下导航）：摘要那句「本类已归零」正是由这个计数器推出来的。登记仍在——
+    `renderNavigationImpact` 逐条落表，处置一列写明"登记不就地改写"；只是不再自称豁免。
+    """
     reached = readerReachableDocuments()
-    counters = {EXEMPT_UNREACHABLE: 0, EXEMPT_NARRATIVE: 0, EXEMPT_PLACEHOLDER: 0}
+    counters = {EXEMPT_UNREACHABLE: 0, EXEMPT_PLACEHOLDER: 0}
     for item in archiveDanglingUnion():
-        if PLACEHOLDER_PATH_PATTERN.search(item["ref"]):
+        if PLACEHOLDER_PATTERN.search(item["ref"]):
             counters[EXEMPT_PLACEHOLDER] += 1
         elif item["file"] not in reached:
             counters[EXEMPT_UNREACHABLE] += 1
-        elif item["form"] != "可点击" and not isNavigationBearing(item["file"]):
-            counters[EXEMPT_NARRATIVE] += 1
     return counters
 
 
@@ -875,7 +893,7 @@ def renderNavigationImpactSummary(rows: list) -> str:
     lines.append("")
     lines.append("| 豁免理由 | 条数 |")
     lines.append("|------|------|")
-    for reason, count in sorted(counters.items()):
+    for reason, count in sorted(counters.items(), key=lambda kv: (-kv[1], kv[0])):
         lines.append(f"| {reason} | {count} |")
     lines.append(NAV_IMPACT_SUMMARY_END)
     return "\n".join(lines)

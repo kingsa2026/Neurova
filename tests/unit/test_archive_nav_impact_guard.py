@@ -129,9 +129,24 @@ class TestScreeningDoesNotRunVacuous:
 
     def test_placeholder_paths_are_exempt(self):
         """占位/模板路径不是真实目标，改指无从谈起。"""
-        assert scanner.PLACEHOLDER_PATH_PATTERN.search("daily_reports/YYYY-MM-DD.md")
-        assert scanner.PLACEHOLDER_PATH_PATTERN.search("neurova/xxx/yyy.py")
-        assert not scanner.PLACEHOLDER_PATH_PATTERN.search("neurova/api/endpoints/auth.py")
+        assert scanner.PLACEHOLDER_PATTERN.search("daily_reports/YYYY-MM-DD.md")
+        assert scanner.PLACEHOLDER_PATTERN.search("neurova/xxx/yyy.py")
+        assert not scanner.PLACEHOLDER_PATTERN.search("neurova/api/endpoints/auth.py")
+
+    def test_placeholder_criterion_is_single_sourced(self):
+        """占位判据只准一处定义。
+
+        两份判据都曾各自成立：行内码通道那份不认日期模板，导航层那份认。于是同一篇模板
+        说明在台账里被记成「源已删除」的整体过期形态，在筛选里又被豁免掉——同一条事实
+        两处判据各说各话。
+        """
+        assert not hasattr(scanner, "PLACEHOLDER_PATH_PATTERN"), (
+            "扫描器仍有第二份占位判据 PLACEHOLDER_PATH_PATTERN——两份判据必然分叉，"
+            "收口到 PLACEHOLDER_PATTERN 一处。"
+        )
+        assert scanner.PLACEHOLDER_PATTERN.search("docs/05-reports/YYYY-MM-DD-日报.md"), (
+            "行内码通道必须认得日期模板，否则模板说明会被记成整篇过期。"
+        )
 
 
 class TestClickableRefsAreFixed:
@@ -251,9 +266,46 @@ class TestExemptionsAreAccountedFor:
 
     def test_exemption_reasons_are_enumerated(self):
         counters = scanner.navigationImpactExemptions()
-        assert set(counters) == {scanner.EXEMPT_UNREACHABLE, scanner.EXEMPT_NARRATIVE,
-                                 scanner.EXEMPT_PLACEHOLDER}, (
-            "豁免理由必须逐条枚举（三条），不得用「其他」兜底——兜底理由等于没理由。"
+        assert set(counters) == {scanner.EXEMPT_UNREACHABLE, scanner.EXEMPT_PLACEHOLDER}, (
+            "豁免理由必须逐条枚举，不得用「其他」兜底——兜底理由等于没理由。"
+        )
+
+    def test_disposition_is_not_dressed_up_as_an_exemption(self):
+        """处置（登记、不改）不得被写成豁免理由（不影响当下导航）。
+
+        红过的那一版里有一条「描述性行内码（不可点击且非指路文档）」，把八百余条
+        **导航可达**载体里的失效行内码记成"不构成当下导航问题"，摘要据此写出
+        「影响当下导航 0 条 · 本类已归零」。读者当下就打开得到那篇文档，里面的路径陈述
+        复制走同样落空——那不是豁免，是处置选择。
+        """
+        reasons = " ".join(scanner.navigationImpactExemptions())
+        assert "行内码" not in reasons, (
+            "豁免理由里出现了「行内码」：形态不是豁免理由，形态决定的是处置。\n"
+            f"实得理由: {reasons}"
+        )
+
+    def test_reachable_inline_dangling_is_screened_in(self):
+        """反向控制：导航可达的失效行内码必须入表，不能落进任何豁免桶。
+
+        入筛只看「占位形态」与「载体可达」；形态决定处置，不决定去留。
+        """
+        reached = scanner.readerReachableDocuments()
+        mustBeScreened = [
+            item for item in scanner.archiveDanglingUnion()
+            if item["file"] in reached
+            and not scanner.PLACEHOLDER_PATTERN.search(item["ref"])
+        ]
+        assert mustBeScreened, (
+            "导航可达的归档文档里一条失效引用都没有?先确认导航图没退化成空集。"
+        )
+        screened = {(row["file"], row["line"], row["ref"])
+                    for row in scanner.navigationImpactRefs()}
+        missing = [item for item in mustBeScreened
+                   if (item["file"], item["line"], item["ref"]) not in screened]
+        assert not missing, (
+            f"有 {len(missing)} 条「导航可达 + 非占位」的失效引用没有入表——"
+            "它们既没被处理，也没被记成需要处理。\n  "
+            + "\n  ".join(f"{m['file']}:{m['line']} [{m['ref']}]" for m in missing[:10])
         )
 
     def test_majority_of_archive_is_exempt_for_a_statable_reason(self):

@@ -31,6 +31,7 @@ import pathlib
 import tempfile
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 import neurova
 from neurova.security import governance, tool_guard
@@ -171,7 +172,7 @@ def test_semanticKeyListsAreSingleSourceAndDisjoint():
     for name in SEMANTIC_KEY_NAMES:
         writers = []
         for ref in ast_scan.sourceRefsUnder(NEUROVA_DIR, ".py", (name,)):
-            for node in ast.walk(ast.parse(ref.code)):
+            for node in ast.walk(parseSource(ref.code)):
                 if isinstance(node, ast.Assign) and any(
                         isinstance(t, ast.Name) and t.id == name for t in node.targets):
                     writers.append(ref.path.relative_to(NEUROVA_DIR.parent).as_posix())
