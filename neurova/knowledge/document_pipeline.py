@@ -330,7 +330,12 @@ _TEXT_EXTRACT_SUFFIXES = frozenset(
 
 
 def _fileTypeFor(ext: str) -> str:
-    """`extract_attachment_text` 的 `file_type` 入参：`text` 走解码抽取，其余走格式分支。"""
+    """`extract_attachment_text` 的 `file_type` 入参：`text` 走解码抽取，其余走格式分支。
+
+    后缀表是**本模块上方那一张**（从安全裁决表 `DOC_ASSET_SUFFIXES` 派生、再追加
+    `.rst`/`.log`）。`security.skill_scanner.TEXT_DOCUMENT_SUFFIXES` 是同一件事的第二份
+    口径（9 个后缀），两张表迟早各自漂移——抽取契约只认一处。
+    """
     return "text" if ext in _TEXT_EXTRACT_SUFFIXES else "document"
 
 

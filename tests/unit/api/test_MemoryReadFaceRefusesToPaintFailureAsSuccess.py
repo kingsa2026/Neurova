@@ -31,14 +31,15 @@ MEMORY_PREFIX = "/api/v1/memory"
 
 @pytest.fixture()
 def unreadyClient(monkeypatch):
-    """真 app、但不跑 lifespan ⇒ 没有默认 Agent，正是 6001 的产生态。
+    """真 app、且**本轮装配里确实一个 Agent 也没有**——6001 的产生态。
 
     两件前提都不是被测对象，缺任一件红都不在这里：
 
-    ① **清掉上一场留下的 `_app_state`**：进程里**上一个**起了 lifespan 的 app 会把它留在
-       模块全局上（`create_app()` 本身不写、`lifespan` 才写）。同场跑测时它还在，本档拿到
-       的就不是"未就绪"，三条行为钉会读成 200 空成功——红在夹具没断干净，不是产品把故障
-       画成了成功。
+    ① **清掉上一场留下的 `_app_state`**：`create_app()` 是进程级单例（`_app_instance`
+       命中即复用），进程里**上一个**起了 lifespan 的 app 会把它留在模块全局上
+       （`create_app()` 本身不写、`lifespan` 才写）。同场跑测时它还在，本档拿到的就不是
+       "未就绪"，三条行为钉会读成 200 空成功——红在夹具没断干净，不是产品把故障画成了成功
+       （2026-10-24 整份受保护子集实测：本档单独跑 4 passed，整份跑 2 failed）。
     ② **带一枚真 JWT**：记忆面自 2026-10-26 点单甲起整面挂路由级
        `requireIdentityForMemoryFace`，匿名请求在到达"未就绪"那一段之前就 401 了。凭证走
        生产同一个签发口（`tests/auth_headers.bearerHeaders`），不在生产侧加兜底——

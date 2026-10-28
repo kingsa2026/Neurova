@@ -18,7 +18,7 @@ import os
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from neurova.core.logger import get_logger
-from neurova.core.vector_math import vectorNorm
+from neurova.core.vector_math import ZERO_NORM_EPSILON, vectorNorm
 
 logger = get_logger(__name__)
 
@@ -177,7 +177,7 @@ def prepareVectors(
             dimension = len(vector)
         elif len(vector) != dimension:
             return None
-        if vectorNorm(vector) <= 1e-12:
+        if vectorNorm(vector) <= ZERO_NORM_EPSILON:
             continue  # 零向量没有任何余弦信号，不进 ANN
         vectors[str(kid)] = vector
     return vectors if vectors else None

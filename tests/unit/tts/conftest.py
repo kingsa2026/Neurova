@@ -19,7 +19,12 @@ import pytest
 
 from neurova.tts import manager as tts_manager_mod
 from neurova.tts.manager import TTSConfig, TTSManager
-from tests.unit.tts._fakeEngines import _FakeHeavyEngine, _FakeLightEngine, fakeHeavyFactory
+from tests.unit.tts._fakeEngines import (
+    _FakeHeavyEngine,
+    _FakeLightEngine,
+    fakeHeavyFactory,
+    fakeLightFactory,
+)
 
 
 #: 「很久没用过」的时间锚。**必须相对当前时钟算**，不能写死一个绝对数：
@@ -44,7 +49,9 @@ def heavy_manager(monkeypatch):
     桩构造接缝的同时也把 `_engines` 里那只换成假轻引擎，缓存与构造两条支路都留在替身里。
     """
     monkeypatch.setattr(tts_manager_mod, "MOSSNanTTS", fakeHeavyFactory)
-    monkeypatch.setattr(tts_manager_mod, "EdgeTTS", lambda **_kwargs: _FakeLightEngine())
+    # 轻引擎同样桩在**构造**接缝上：TTL 释放把 edge-tts 从 `_engines` 丢掉后走的是构造
+    # 支路，真类 `initialize()` 的 `import edge_tts` 在精简锁（按设计不含它）下必失败。
+    monkeypatch.setattr(tts_manager_mod, "EdgeTTS", fakeLightFactory)
     cfg = TTSConfig(
         engine="auto",
         fallback_chain=["moss-nano", "edge-tts", "mock"],

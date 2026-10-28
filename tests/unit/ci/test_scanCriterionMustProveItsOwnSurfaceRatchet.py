@@ -67,8 +67,10 @@
 from __future__ import annotations
 
 import ast
+import functools
 import os
 import pathlib
+import subprocess
 import sys
 
 import pytest
@@ -79,6 +81,17 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from tests import ast_scan  # noqa: E402  受保护子集清单的唯一读法在 `ast_scan.protectedSubsetEntries`
 from tests.ast_scan import parseSource  # noqa: E402  解析的唯一出口（`ast.parse` 只许出现在 `tests/ast_scan.py`）
+
+#: 本闸裁决的锚（"仓内"这个词的**唯一**口径）。
+#:
+#: 不直接用本档的 `PROJECT_ROOT`：CI 的 `unit-tests` 腿按 `--import-mode=importlib` + 相对路径
+#: 参数跑，pytest 会把一个**影子包**塞进 `sys.modules["tests"]`——它的 `__file__` 落在
+#: pytest 的 basetemp 下，于是本档 `from tests import ast_scan` 取到的是临时目录里的那份，
+#: `ast_scan.REPO_ROOT` 随之指向临时目录，整闸把全仓的扫描根判成"仓外"（构建
+#: `cnb-eum-1k5lir51n#003` 的 2 红就是这么来的）。`ast_scan` 是**按自家 `__file__` 定位仓根**的
+#: 单点，所以裁决锚只能是它的读数；`PROJECT_ROOT` 仍留给"本档自己那份清单"用（本闸自带的反证格
+#: 要在 tmp 合成仓上跑）。
+ANCHOR = ast_scan.REPO_ROOT
 
 #: 认作"扫描落点"的共享预算入口（枚举与解析都在预算内完成）。
 SHARED_SCAN_ENTRIES = {
@@ -247,7 +260,9 @@ def _rootStatus(expr, consts: dict, anchor: pathlib.Path, selfPath: pathlib.Path
 #:   offender 读数仍是 0、摘表两格全绿——绿在这里是假事实源。
 #:   修法只有一条：把根提到模块级，并把同档多处根写法收成同一个名字；提上去之后这档进入 DIR 那一支，
 #:   面自证的要求随即生效，所以**两处要同批改**，别只提根不补读数。
-DYNAMIC, LOCAL, DIR, FILE, OUTSIDE, MISSING = "dynamic", "local", "dir", "file", "outside", "missing"
+DYNAMIC, LOCAL, DIR, FILE, OUTSIDE, MISSING, NOT_CHECKED_OUT = (
+    "dynamic", "local", "dir", "file", "outside", "missing", "not_checked_out"
+)
 
 
 def _resolveRoot(expr: ast.AST, consts: dict, anchor: pathlib.Path, depth: int = 0,
@@ -309,6 +324,112 @@ def _resolveRoot(expr: ast.AST, consts: dict, anchor: pathlib.Path, depth: int =
     return None
 
 
+def _gitKnownPaths(anchor: str) -> frozenset:
+    """仓内 git 认得的路径前缀（已跟踪 + 被忽略）——一次取全，判定只查集合。
+
+    `git ls-files` 之外还要 `git check-ignore --stdin`：`data/` 这类被整目录忽略的落点
+    在 `ls-files` 里永远不出现，而它恰恰是"仓内、干净检出里不存在"的正当形态。
+    仓库不可用（无 git、非工作树）时给空集 ⇒ 全落 MISSING，维持原来那句更响的报错。
+
+    **不缓存**：`anchor` 是每个 tmp 工作树一把的唯一路径，缓存只会让"本进程此前判过某个
+    临时仓"与"从没判过"两种情形给出不同读数（同一台机器上本档 2 红 1 绿的那次，
+    绿的成因就是 `/tmp` 路径在缓存里留过一份非空集合）。取数一次约 10ms。
+    """
+    def run(*args, stdin=None):
+        try:
+            # 两头都钉：父端按 utf-8 解、子端也按 utf-8 写（`git ls-files` 会吐出仓内
+            # 中文路径；父端不钉就按本机码页解，读数被静默改写。§6-64 那条「半修计数」
+            # 棘轮就是量这个的）。
+            proc = subprocess.run(
+                ["git", *args], cwd=anchor, input=stdin,
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            return []
+        if proc.returncode != 0:
+            return []
+        return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+
+    known = set(run("ls-files", "--cached"))
+    # `data/` 这类**整目录**规则不会被 `ls-files --ignored` 点名：它只列磁盘上真存在的
+    # 忽略项，干净检出里那个目录压根没有——而这一支要判的恰恰是"该缺席、且缺席正当"。
+    # 故额外问一次 `check-ignore --no-index`（`--no-index` 才问得到不存在的路径）。
+    for name in sorted(_ignoredTopLevelDirs(anchor)):
+        known.add(name + "/")
+    known.update(run("ls-files", "--others", "--ignored", "--exclude-standard", "--directory"))
+    return frozenset(known)
+
+
+def _gitWorktreeRoot(anchor: str):
+    """`anchor` 所在工作树的**顶层**；不是工作树时给 `None`。
+
+    `--no-index` 只免掉"该路径在不在索引里"，不免"这是不是一个工作树"——非工作树里
+    `check-ignore` 仍以 128 退出。故取证前先问一次顶层，顺带拿到本树自己的 `.gitignore`
+    位置：取证只认这份树，绝不回落到宿主仓（那会让读数随宿主布局变）。
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"], cwd=anchor, capture_output=True,
+            text=True, encoding="utf-8", errors="replace",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    top = proc.stdout.strip()
+    return pathlib.Path(top) if top else None
+
+
+def _ignoredTopLevelDirs(anchor: str) -> set:
+    """仓根层面被忽略的顶级目录名——名单取自本树自己的 `.gitignore` 左值，逐条问 git。"""
+    root = _gitWorktreeRoot(anchor)
+    if root is None:
+        return set()
+    ignoreFile = root / ".gitignore"
+    if not ignoreFile.is_file():
+        return set()
+    names = set()
+    for line in ignoreFile.read_text(encoding="utf-8", errors="replace").splitlines():
+        rule = line.strip().lstrip("/").rstrip("/")
+        if rule and not rule.startswith(("#", "!")) and "/" not in rule:
+            names.add(rule)
+    return {name for name in names if _gitIgnoreAnswers(str(root), name)}
+
+
+def _gitIgnoreAnswers(anchor: str, name: str) -> bool:
+    """`git check-ignore --no-index`：问得到**不存在**的路径，这是本支唯一能用的一问。"""
+    try:
+        proc = subprocess.run(
+            ["git", "check-ignore", "-q", "--no-index", name + "/"], cwd=anchor,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
+
+
+def _pathIsTrackedOrIgnored(path: pathlib.Path, anchor: pathlib.Path) -> bool:
+    """该路径（或其任一祖先）是否由 git 认作本仓的一部分。"""
+    try:
+        rel = path.relative_to(anchor)
+    except ValueError:
+        return False
+    known = _gitKnownPaths(str(anchor))
+    if not known:
+        return False
+    parts = rel.parts
+    for index in range(1, len(parts) + 1):
+        prefix = "/".join(parts[:index])
+        if index == len(parts):
+            # 末级：目录规则在集合里以 `<名>/` 收录（`check-ignore` 那支给的形态就是目录），
+            # 故 `data` 与 `data/` 要一起认——同一条事实的两种写法。
+            return prefix in known or prefix + "/" in known
+        if prefix + "/" in known:
+            # 中间级被**整目录忽略**：忽略规则连内容一起盖住，末级自然也不在检出里。
+            return True
+    return False
+
+
 def _classifyRoot(path, anchor: pathlib.Path) -> str:
     """把解出来的路径归到五态之一。大小写与分隔符按 `os.path.normcase` 归一再比。"""
     if path is None:
@@ -320,6 +441,20 @@ def _classifyRoot(path, anchor: pathlib.Path) -> str:
         return DIR if inside else OUTSIDE
     if norm.is_file():
         return FILE if inside else OUTSIDE
+    # 落点指到仓内的路径、但它在**这个工作树里不存在**：两件不同的事被折成了一句
+    # "missing"，而本闸接着会把它读成"根写错了"。实测两例各错一半：
+    #   ① `<repo>/data` —— 仓内目录且被 `.gitignore` 忽略，干净检出里本就不该有它，
+    #      判据在**调用处**拼末级（`_sessionsDir()`）本身是对的；
+    #   ② CI 的 `unit-tests` 腿用 `python -m pytest` 跑，**没有 `tests/__init__.py`**
+    #      的空间里 `from tests import ast_scan` 取的是 pytest 装出来的**影子包**，
+    #      它的 `__file__` 在 pytest 的 basetemp 下 ⇒ 同一份源码在这条腿上把仓根解到
+    #      临时目录，本机也复现：临时目录被回收以后那些 `_Repo / 'neurova'` 就全成了
+    #      "仓内、但不存在"。
+    # 两种都**不是**根写错，也都不是"目录被改名删掉"（那一形是仓内路径解析正常、
+    # 只是名字不对——它仍归 MISSING 点名）。判据只认一条可机器验的事实：
+    # 解出来的**仓内相对路径能否由 git 认出它属于本仓**（`git ls-files` / `git check-ignore`）。
+    if inside and _pathIsTrackedOrIgnored(norm, anchor):
+        return NOT_CHECKED_OUT
     return MISSING
 
 
@@ -533,11 +668,30 @@ def _faceFindings(root: pathlib.Path, manifest: list, gaps: dict = None,
                 gaps[rel] = reading["gap"]
             offenders.append(rel)
             continue
+        # 落点态由取数口一处给出（`reading["hasDir"]`）：本函数拿不到 `sites`
+        # ——那要再扫一遍语法树，是同一判据的第二遍成本。
         if not reading["hasDir"]:
             continue
         if not reading["proof"]:
             offenders.append(rel)
     return sorted(offenders)
+
+
+def _firstSiteStatus(path: pathlib.Path, root: pathlib.Path):
+    """这档第一个落点的落点态（不经过 `_faceFindings` 的点名过滤）。
+
+    `gaps` 只回填被判为 offender 的档（那是它给报错文案用的契约）；反检格要验
+    「不点名、且落点是 X」，得直接问取数口——否则它只能断言空串，
+    而空串与"压根没取到数"在文本上同形。
+    """
+    try:
+        tree = parseSource(path.read_text(encoding="utf-8", errors="replace"))
+    except SyntaxError:
+        return None
+    consts = _constTable(tree)
+    scoped = _scopedBindings(tree)
+    sites = _scanSites(tree, consts, root, selfPath=path.resolve(), scoped=scoped)
+    return sites[0][1] if sites else None
 
 
 #: ── 第七类形状：以清单为扫描面（§6-331 那张票的表示法落地）──────────────────────
@@ -1262,7 +1416,7 @@ def test_protectedSubsetReaderIsSingleSource():
     返回 list 还是 set——`_gitLsFiles` 那一族就是因为这个才收的）。教义第 6 条要的是"只有一处定义"，
     而"只剩一处"这件事必须有个会红的格子看着。
     """
-    now = _readerCounts(PROJECT_ROOT, _manifestOf(PROJECT_ROOT))
+    now = _readerCounts(ANCHOR, _manifestOf(ANCHOR))
     grew = {f: (now[f], READER_BASELINE.get(f, 0)) for f in now
             if now[f] > READER_BASELINE.get(f, 0)}
     assert not grew, (
@@ -1366,9 +1520,15 @@ _SURFACE_SCAN_TIMEOUT = 180
 
 @pytest.mark.timeout(_SURFACE_SCAN_TIMEOUT)
 def test_ratchetDoesNotRise():
-    """新增「扫仓内路径而不自证面」或「根写错」的判据档一律拦。"""
+    """新增「扫仓内路径而不自证面」或「根写错」的判据档一律拦。
+
+    报错文案按**全量现读**分组，不按 `now - BASELINE`：`BASELINE` 已是空表（四波存量收完），
+    两者当天同值；但只要有人把 offender 加回表里换这一格变绿，按差集取数就会印出**空的**
+    「根写错了」那一栏——红着，却一个字都没说清是哪一档，而同一棵树里的
+    `test_staticRootsNeverPointOutsideOrNowhere` 会把那档点名（判据与文案分家，形态集 304 同族）。
+    """
     gaps = {}
-    now = set(_faceFindings(PROJECT_ROOT, _manifestOf(PROJECT_ROOT), gaps))
+    now = set(_faceFindings(ANCHOR, _manifestOf(ANCHOR), gaps))
     grew = sorted(now - set(BASELINE))
     gaps = _dropSignedOffMissing(gaps)
     grew = [rel for rel in grew if rel not in set(MISSING_BASELINE) or gaps.get(rel)]
@@ -1399,7 +1559,7 @@ def test_staticRootsNeverPointOutsideOrNowhere():
     但修法相反（前者改 N，后者是"那个目录由运行态才建出来"），混成一句会把人引去改本来对的根。
     """
     gaps = {}
-    _faceFindings(PROJECT_ROOT, _manifestOf(PROJECT_ROOT), gaps)
+    _faceFindings(ANCHOR, _manifestOf(ANCHOR), gaps)
     gaps = _dropSignedOffMissing(gaps)
     assert not gaps, (
         "这些受保护子集里的判据，静态根解到了仓外或指不到真实目录（它的「零命中」不来自代码）：\n  "
@@ -1424,7 +1584,7 @@ def test_scanRootsAreNeverBoundInsideAFunction():
     否则这里的"零新增"只说明探测器没在跑。
     """
     locals_ = {}
-    _faceFindings(PROJECT_ROOT, _manifestOf(PROJECT_ROOT), localGaps=locals_)
+    _faceFindings(ANCHOR, _manifestOf(ANCHOR), localGaps=locals_)
     grew = sorted(set(locals_) - LOCAL_BASELINE)
     assert not grew, (
         "这些判据把扫描根绑在函数内的名字上（本闸按模块级常量解根，认不出＝那档整档不在面内）：\n  "
@@ -1454,7 +1614,7 @@ def test_manifestSurfaceWithoutProofIsNamed():
     反证在册：同一批控制格必须交出**非空**的 manifestGaps，否则这里的零断言只说明探测器没在跑。
     """
     mg = {}
-    _faceFindings(PROJECT_ROOT, _manifestOf(PROJECT_ROOT), manifestGaps=mg)
+    _faceFindings(ANCHOR, _manifestOf(ANCHOR), manifestGaps=mg)
     grew = sorted(set(mg) - MANIFEST_BASELINE)
     assert not grew, (
         "这些判据按清单逐条读文件动手，却没给这份清单留面读数"
@@ -1676,7 +1836,7 @@ def test_crossModuleReaderShapesAreJudgedByCodeForm(tmp_path, label, body, expec
 
 def test_ratchetRecordsImprovementLoudly():
     """存量被消化要**显式收表**：基线里有、现在不 offender 的档，必须从表里摘掉。"""
-    now = set(_faceFindings(PROJECT_ROOT, _manifestOf(PROJECT_ROOT)))
+    now = set(_faceFindings(ANCHOR, _manifestOf(ANCHOR)))
     dropped = sorted(set(BASELINE) - now)
     assert not dropped, (
         "以下档已经自带面自证（或不再扫仓内路径）了——把 BASELINE 里那几行摘掉再提交，"
@@ -1728,7 +1888,7 @@ def test_surfaceReadingIsNotVacuous():
 
     这条格专防本仓反复吃过的那一形：清单路径写错 ⇒ 空 manifest ⇒ offender 恒空 ⇒ 两条断言全绿。
     """
-    manifest = _manifestOf(PROJECT_ROOT)
+    manifest = _manifestOf(ANCHOR)
     assert len(manifest) > 500, f"受保护子集清单现读 {len(manifest)} 条，量级不对＝没读到"
     parsed = 0
     for rel in manifest:
@@ -1807,6 +1967,25 @@ _NO_PROOF_TAIL = "    hits = [p for p, _n in ast_scan.nodeScan(_Target, '.py')]\
      "    hits = [p for p, _n in ast_scan.nodeScan(root, '.py')]\n"
      "    assert hits == []\n",
      "运行时才定的根不承载面的声明：既不点名也不免罪，维持原设计", False, ""),
+    ("tests/unit/sample.py",
+     "import pathlib\n_Repo = pathlib.Path(__file__).resolve().parents[2]\n"
+     "_Data = _Repo / 'data' / 'sessions'\n\n\n"
+     "def test_shape():\n"
+     "    assert not list(_Data.rglob('*.json'))\n",
+     "正检·接收者落在「仓根 ＋ 末级目录」，而这份 tmp 树里它既不在册也没被忽略 ⇒ 归 missing，点名。"
+     "判据只认一条可机器验的事实（git 认不认得这条仓内路径），所以修法只能是把末级目录拼在调用处"
+     "（`test_session_landing_guard.py` 把常量收成 `SESSIONS_PARENT` 就是为此）",
+     True, MISSING),
+    ("tests/unit/ci/sample.py",
+     "import pathlib\n"
+     "_Repo = pathlib.Path(__file__).resolve().parents[3]\n"
+     "_Data = _Repo / 'data'\n\n\n"
+     "def test_shape():\n"
+     "    assert not list(_Data.rglob('*.json'))\n",
+     "反检·同一形状，但落点是被 `.gitignore` 整目录盖住的 `data/`：它不是「根写错」，"
+     "也与「目录被改名删掉」不同读——归 `not_checked_out`，不点名。这一格与上面那格只差"
+     "「git 认不认得」这一条，故它钉的正是判据本身而不是目录在不在",
+     False, NOT_CHECKED_OUT),
 ])
 def test_faceRulesPinDepthAndWrongRoots(tmp_path, rel, source, label, expectOffender, expectGap):
     """根的形状要按**被档自身深度**解，且「静态根解到仓外／指不到目录」必须点名。
@@ -1822,11 +2001,27 @@ def test_faceRulesPinDepthAndWrongRoots(tmp_path, rel, source, label, expectOffe
     (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
     (tmp_path / rel).write_text(source, encoding="utf-8")
 
+    if expectGap == NOT_CHECKED_OUT:
+        # 「被整目录忽略」这一形只有 git 认得出来：钉一份本树自己的 `.gitignore` 并把它
+        # 变成工作树。不这么做时两格都退回保守态，反检那格整条断言等于没跑。
+        (tmp_path / ".gitignore").write_text("/data/\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=False,
+                       capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", timeout=30)
+
     gaps = {}
     offenders = _faceFindings(tmp_path, [rel], gaps)
     assert bool(offenders) is expectOffender, f"{label} ⇒ 判错：{offenders}"
-    assert gaps.get(rel, "") == expectGap, (
-        f"{label} ⇒ 落点态判错：{gaps} 里要的是 {expectGap!r}")
+    # 只在该格要求验落点态时才走旁路：要求空串的那些格验的是"没有落点"
+    # （运行时根／真实文件那一类），旁路会把它们读出别的值。
+    # 反检格要求"不点名、且落点是 X"：`gaps` 只填 offender，故这一支直接问取数口；
+    # 其余格沿用原契约（`gaps` 为空即"没有落点"），不改它们的验收口径。
+    if expectGap in (NOT_CHECKED_OUT, DIR):
+        actual = _firstSiteStatus(tmp_path / rel, tmp_path) or ""
+    else:
+        actual = gaps.get(rel, "")
+    assert actual == expectGap, (
+        f"{label} ⇒ 落点态判错：{actual!r} 里要的是 {expectGap!r}")
 
 
 @pytest.mark.parametrize("label, source, expectOffender", [

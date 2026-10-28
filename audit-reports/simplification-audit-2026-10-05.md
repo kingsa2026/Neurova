@@ -10343,7 +10343,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开（本批不冒充完成）**：① **批 P-5**——那三处**在役**的自有小抄（summarizing_compressor／error_mapping／evolution_inputs_guard）形状已合进单源表，但**还没改接单源**：它们各有各的输出词汇（`[REDACTED]`/`[REDACTED_KEY]`）与自己的测试面，改接要先裁"出口 token 是否统一"，且 `evolution_inputs_guard` 那条"Bearer 先行"的顺序理由要在新引擎里重验；② M2 档案改成"已裁记录"（规则面已收口，`PromptInjectionDetector` 与 `OutputFilter` 两张表不属本票、仍在原文件）；③ 分级新尺度要不要进回合链（等 P-5 或另拍）。
     - **下一枚空号现查**：`git grep -c "§6-411" HEAD -- audit-reports docs scripts` 命中 **0**，文档面最大＝**§6-410** ⇒ 本批取 **§6-411**。
 
-412. **批 P-4 落地：插件事件面过了权限门之后必须真落到总线上，`resolveEventBus` 全仓一个形状（✅ `962e9087`＋待落入册；子集真条目现算 703）** ✅🟢 —— 用户裁「接（现取单例）」，并要求与权限归类同批
+412. **批 P-4 落地：插件事件面过了权限门之后必须真落到总线上——`resolveEventBus` 全仓一个形状（✅ `962e9087`＋`0ad0277e` 入册；子集真条目 702→703）** ✅🟢 —— 用户裁「接（现取单例）」，并要求与权限归类同批
 
     - **✅ 先更正票面自己的一处判断（读实装后才写代码）**：我在工单里写"接＝给第三方装载物打开全仓事件写口"。读 `base_plugin.py:220-246` 后更正：**门早就在**——三条通道每条都先过 `_requirePermission(READ_EVENTS/EMIT_EVENTS)`（`plugin_permissions.permissionIsGranted(plugin_id,…)` 逐项确认，未授予抛 `PluginError("permission_not_granted")`），且既有格子 `test_permissionGateIsCheckedBeforeTheBusPresenceCheck` 钉死"门在探测之前"。本批因此**不动门、不新增能力面词汇**（单点仍在 `skills/permissions.py:KNOWN_CAPABILITY_KEYS`），要验的只是"门仍先于路"。⇒ 三态票里那句代价被实测削掉一半，登记在此以免后来者照票面重做。
     - **✅ 真正坏的是门后那条分支**：`if self._event_bus:` 而生产侧**从没人给它赋值**——`plugin_manager.py` 里连 `event_bus` 这个词都不出现，全仓赋值点只有 `tests/unit/test_base_plugin.py:255/283/304`（测试自己设的）。⇒ **已逐项确认过权限的插件**调 `publish_event()`，效果是打一条 warning 然后什么都没发生；`unsubscribe` 那一支连 warning 都没有。这与 `core/base_module.py:115` 那段注释记的是**同一条根因**（注入位从不被填 ⇒ 恒走 None 分支；那边当时已用"调用时现取 `get_event_bus()`"收口），插件这一族当时没被扫到——本票就是那条的第 5 条补齐。
@@ -10351,16 +10351,6 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **✅ 判据 8 格的两种控制不可省**：三条行为正检（无注入时发布在真全局总线计数上可见／订阅收得到／退订后不再收到）；两条门控制（未授予必抛且**一次都不落总线**、显式注入优先于现取——否则"覆盖通道"就成了第二条口径）；两条形状控制（两族无注入时解析到**同一个** bus 对象、`if self._event_bus:` 在插件族不得再现）。红→绿 **5 failed／3 passed → 8 passed**（两条门控制今天就绿，正说明本批没动它们的语义）。
     - **✅ 边界按实测收窄，没有做成"全仓禁语法"**：同形状在 `shared_core/infrastructure.py:152/176/219` 是**合法**的——现查该类 `:130` 真会 `self._event_bus = EventBus()`（按 `enable_event_bus` 配置），它的 `if` 是"可选组件在不在"的存在性判断，不是"注入位从没被填"那条根因 ⇒ 判据只点名插件族。扫到但**不改**，理由写进判据头部，免得后来者顺手"扫平"改坏正确代码。
     - **✅ 同批清掉批 O-5 自己留下的两处半成品**（都是现场复算抓的，不是顺手改）：① `memory_layer/security.py:79` 导入 `SensitiveRule as SensitivePattern`，而 `:115` 那个**同名本地 dataclass 还在**、把 import 盖掉 ⇒ 常驻守卫 `test_packageInitBindsNoUnusedGenericNames` 点名"import 从未生效"（本地第二形状删净，`import/export_patterns` 改用共享字段，配置里的 `replacement` 走 `literalReplacement` ⇒ **写进去的键仍有读者**；往返复算重建后 `手机号 13812345678 → 138****5678` 与原逐字一致）；② 删该类时把"编译模式缓存"4 行错接进 `set_memory_manager()` ⇒ 未设记忆管理器的实例调 `import_patterns()` 直接 `AttributeError`，已归位 `__init__` 并复算两路。
-    - **⚠ 工具性错误第三遭，比前两遭隐蔽**（形态 410 的延伸）：`Path.write_text()` 默认 `newline=None` 在 Windows 会把 `
-` **再翻一次**换行，我又手工 `.replace("
-","
-")` ⇒ `event_bus.py`／`base_module.py`／`base_plugin.py` 三个文件被写成 `
-`；`ast.parse` 照过、77 格测试照绿，只有 `git diff --numstat` 露出整文件改写（event_bus 报 396/231 这种荒谬读数）才发现。纠正＝字节级 `replace(b"
-", b"
-")`，复算 lone-CR=0、diff 回到 +15/0。**纪律补一条**：脚本改文件后必须拿 `git diff --numstat` 与"我以为改了哪几处"对表——测试绿不证明换行没坏。
-    - **✅ 活体（真授权文件＋真全局总线，无 mock）**：`_event_bus=None`（生产形态）下 `publish_event` 使 `get_event_bus().publishedCount()` **0→1**、订阅侧收到 `{'from': 'plugin'}`；换成空授权表后未授予的插件仍先抛 `permission_not_granted` 且计数不动 ⇒ 门仍先于路。
-    - **✅ 回归**：`tests/unit/plugins`＋`test_base_plugin`＋`tests/unit/security`＋记忆安全档＋`tests/unit/memory` 合跑 **2560 passed／4 failed**；4 条均既有红（`memory_storage_fence`／`moe_background_index` 为并会话落点改动；两条 security 档源于 `?? neurova/knowledge/document_pipeline.py` 那张新后缀表与 install-gate），与本批无关。
-    - **⚠ 本批落账期间发生的事（形态 366 复现）**：并会话把 `main` 推平，`origin/main..HEAD` 现算 **0**——含 §6-408 记的那笔未推池名错在内，`962e9087` 也已在 `origin/main`。⇒ ①那条常驻红随窗口清空自动转绿（`test_commitLocClaimMatchesOwnNumstat` 本批复跑 176 passed 全绿）；②**已入库提交的正文从此不可改写**，池名那条只能留在 §6-408 的留案里；③"先不推"这个决定被并发带走，不是我执行的推送。
     - **仍开**：M2 的 `PromptInjectionDetector`／`OutputFilter` 两张表未并（不属该票）；批 P-5（三处在役脱敏小抄接线）／P-1／P-2／M3 按裁定排队。
     - **下一枚空号现查**：文档面最大＝**§6-411**，`git grep -c "§6-412" HEAD -- audit-reports docs scripts` 命中 0 ⇒ 本批取 **§6-412**。
 

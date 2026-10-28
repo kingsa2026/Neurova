@@ -38,9 +38,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 #: 静态根解析会当场报 `missing`（根指不到真实目录 ⇒ 零命中不来自代码）。
 #: 消费单点＝`neurova.core.agent_workspaces.get_agent_sessions_dir`，本档不拼第二份。
 SESSIONS_DIR = Path(get_agent_sessions_dir(""))
-#: 回收上限：`<repo>/data`（数据根），模块级静态可解。
-#: 两条锚都**不许**写成纯派生表达式（`DATA_DIR = SESSIONS_DIR.parent`）：面自证棘轮解不出
-#: 静态落点（判成 `dynamic`），本档整档掉出它的面。
+#: 回收上限：`<repo>/data`（数据根），模块级静态可解——不许写成纯派生表达式
+#: （`DATA_DIR = SESSIONS_DIR.parent`）：面自证棘轮解不出静态落点（判成 `dynamic`），
+#: 本档整档掉出它的面。
 DATA_DIR = REPO_ROOT / "data"
 #: 探针正文里引用的仓根锚（模块级：探针不现算 `parents[N]`）。
 REPO_ROOT_ANCHOR = REPO_ROOT

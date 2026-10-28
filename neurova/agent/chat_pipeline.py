@@ -33,7 +33,8 @@ from neurova.agent.retriever_adapters import (
 )
 from neurova.agent.knowledge_retriever_adapter import KnowledgeRetrieverAdapter
 from neurova.agent.gates import terminationNotice
-from neurova.agent import failed_turn_landing, legacy_call
+from neurova.agent import continuation_rounds, failed_turn_landing, legacy_call
+from neurova.agent.continuation_hint import isApiConfigError
 from neurova.agent.tkg_retriever_adapter import TKGRetrieverAdapter
 from neurova.agent.tool_execution_manager import ExecutionStatus, TimeoutStrategy, ToolExecutionManager
 from neurova.agent.actionability import evaluate_actionability, get_actionability_config
@@ -2628,7 +2629,7 @@ class ChatPipeline:
             # 错误时兜底。
             from neurova.llm_client import LLMError
 
-            if isinstance(e, LLMError) or self._is_api_config_error(e):
+            if isinstance(e, LLMError) or isApiConfigError(e):
                 logger.error("Agent Loop LLM 供应商错误，不 fallback: %s", e)
                 raise
             # Loop 实现错误 fallback 到 legacy（记录原因，禁止静默）
@@ -2870,114 +2871,8 @@ class ChatPipeline:
         return None
 
     async def _auto_continue(self, ctx: ChatContext, response, reply: str, tools_for_llm: Optional[List]) -> str:
-        """截断自动续写逻辑"""
-        MAX_CONTINUE_ROUNDS = 100
-        # A-17：getattr 默认值只兜属性缺失不兜属性值为 None——max_tokens=None
-        # 时 None*10 直接 TypeError 炸穿续写段。对 None 值同样回落 8192。
-        MAX_TOTAL_CHARS = (getattr(self.llm_client.config, "max_tokens", None) or 8192) * 10
-        OVERLAP_CHECK_LEN = 200
-        OVERLAP_THRESHOLD = 0.6
-        MIN_CONTINUE_LEN = 10
-        TAIL_CONTEXT_CHARS = 800
-        SIMILARITY_WINDOW = 3
-        SIMILARITY_THRESHOLD = 0.8
-
-        # 语言检测
-        hint = self._build_continue_hint(ctx.user_input, reply)
-
-        continue_round = 0
-        recent_contents = []
-        ctx_snapshot = list(ctx.context)
-
-        while (
-            response
-            and _is_length_truncated(getattr(response, "finish_reason", ""))
-            and not getattr(response, "tool_calls", None)
-            and continue_round < MAX_CONTINUE_ROUNDS
-            and len(reply) < MAX_TOTAL_CHARS
-        ):
-
-            continue_round += 1
-            tail_text = (response.content or "")[-TAIL_CONTEXT_CHARS:].strip()
-
-            if tail_text:
-                full_hint = f"{hint}\n\n<previous-tail>\n{tail_text}\n</previous-tail>"
-            else:
-                full_hint = hint
-
-            ctx_snapshot.append({"role": "assistant", "content": response.content})
-            ctx_snapshot.append({"role": "user", "content": full_hint})
-
-            _tools = tools_for_llm if continue_round == 1 else None
-
-            # Bug A-5 修复: 删除死代码——while 条件 (line 938) 已保证
-            # `not getattr(response, "tool_calls", None)`，此处的
-            # `if _tools and getattr(response, "tool_calls", None):` 永远 False。
-
-            logger.info("截断续写第 %s 轮 (tools=%s, 已输出 %s 字符)", continue_round, 'on' if _tools else 'off', len(reply))
-
-            response = await self.loop.predict_step(
-                messages=ctx_snapshot, tools=_tools, stream=False,
-                thinking_effort=self._effort_of(ctx),
-                thinking_enabled=self._thinking_flag_of(ctx),
-                thinking_budget=self._thinking_budget_of(ctx),
-            )
-            new_content = getattr(response, "content", "") if response else ""
-
-            # 护栏 A: 续写过短
-            if not new_content or len(new_content.strip()) < MIN_CONTINUE_LEN:
-                break
-
-            # 护栏 B: 重叠检测
-            prev_tail = reply[-OVERLAP_CHECK_LEN:] if len(reply) >= OVERLAP_CHECK_LEN else reply
-            new_head = new_content[:OVERLAP_CHECK_LEN]
-            if prev_tail and new_head:
-                overlap_chars = sum(1 for a, b in zip(prev_tail, new_head) if a == b)
-                if overlap_chars / max(len(prev_tail), 1) > OVERLAP_THRESHOLD:
-                    break
-
-            # 护栏 C: 语义循环检测
-            recent_contents.append(new_content[:500])
-            if len(recent_contents) > SIMILARITY_WINDOW:
-                recent_contents.pop(0)
-            if len(recent_contents) >= SIMILARITY_WINDOW:
-                if self._agent.detect_content_loop(recent_contents, SIMILARITY_THRESHOLD):
-                    break
-
-            # Bug A-5 修复: 删除死代码——while 条件 (line 938) 已保证
-            # `not getattr(response, "tool_calls", None)`，如果新 response 有
-            # tool_calls，下一轮 while 条件会 False 退出循环，此处的
-            # `_tools = None` 不会影响任何后续行为。
-
-            reply += new_content
-
-        _recordFinishOutcome(getattr(response, "finish_reason", None))
-        _recordFinishReason(ctx, getattr(response, "finish_reason", None))
-        ctx.execution_completed = getattr(response, "finish_reason", None) in {"stop", "end_turn"}
-        return reply
-
-    def _build_continue_hint(self, user_input: str, reply: str) -> str:
-        """构建自适应续写提示（中英文）"""
-        sample = (user_input or "") + (reply or "")
-        cjk = sum(1 for c in sample if "\u4e00" <= c <= "\u9fff")
-        is_cjk = cjk > len(sample) * 0.15 if sample else False
-
-        if is_cjk:
-            return (
-                "<system-hint>上轮回复因长度限制被截断。"
-                "请结合下文 <previous-tail> 片段判断："
-                "若仍需执行操作则立刻调用工具；"
-                "若仅为文本未写完，从截断处直接接续，不要重复已说内容。"
-                "</system-hint>"
-            )
-        else:
-            return (
-                "<system-hint>Previous reply was truncated due to length limit. "
-                "Review <previous-tail> below and decide: "
-                "if tools are still needed, call them now; "
-                "if only text remains, continue from cutoff, do NOT repeat."
-                "</system-hint>"
-            )
+        """截断自动续写（实现见 `agent/continuation_rounds.py`，此处只留接口）。"""
+        return await continuation_rounds.runContinuationRounds(self, ctx, response, reply, tools_for_llm)
 
     async def _call_legacy(self, ctx: ChatContext) -> str:
         """传统 fallback — 直接通过 llm_client 调用 LLM
@@ -3011,16 +2906,6 @@ class ChatPipeline:
             citationRegistry=ctx.citation_registry,
             buildLLMError=self._raise_for_llm_error_dict,
         )
-
-    @staticmethod
-    def _raise_for_llm_error_dict(chunk: Dict) -> Exception:
-        """错误 dict → 分类异常（实现见 `agent/legacy_call.py`）。"""
-        return legacy_call.raiseForLlmErrorDict(chunk)
-
-    @staticmethod
-    def _is_api_config_error(exc: Exception) -> bool:
-        """API 配置类错误不 fallback（实现见 `agent/legacy_call.py`）。"""
-        return legacy_call.isApiConfigError(exc)
 
     # ══════════════════════════════════════════════════════════════
     # Step 4: 后处理

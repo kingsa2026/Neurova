@@ -174,6 +174,79 @@ class TestRuleSetNotShrunk:
         assert module.memory_bytes("512Mi") == 512 * 1024**2
 
 
+class TestComposePortShortSyntax:
+    """compose 端口三形态都要认，且比的是**容器侧**。
+
+    §6-427（`db0b9e65` 点单丙）把宿主发布地址收窄成 `"127.0.0.1:9527:9527"`，门禁解析器
+    只认 `宿主:容器` 那一形，于是 compose 端口读成 None。两个后果同时发生、且方向相反：
+
+    - R2 凭空红了一句「compose 健康检查端口与 Dockerfile EXPOSE 不一致」——红的是声明，
+      不是事实（同一文件里 `curl localhost:9527` 与 EXPOSE 9527 本来就同源）；
+    - R1 端口一致性因为「过滤 None」把缺失值悄悄放过 ⇒ **真漂移从此无人看得见**。
+
+    端口缺失在两个方向上都不可接受，故按形态逐条钉住，并加一条完整性判据：全仓 compose
+    里每个 backend 端口声明都必须被解析出来（门禁漏解析即红，而不是退回"永远绿"）。
+    """
+
+    FAMILIES = {
+        "9527": 9527,
+        "9527:9527": 9527,
+        "127.0.0.1:9527:9527": 9527,
+        "8100:8100": 8100,
+        "127.0.0.1:8100:8100": 8100,
+    }
+
+    def test_shortSyntaxFamiliesAllResolveToContainerPort(self):
+        module = _load_gate_module()
+        for entry, expected in self.FAMILIES.items():
+            assert _composeContainerPort(module, entry) == expected, (
+                f"compose 端口写法 `{entry}` 解析成 {_composeContainerPort(module, entry)}，应为 {expected}"
+            )
+
+    def test_numericYamlEntryIsNotLost(self):
+        """YAML 里不加引号的 `- 9527` 会被读成 int，不是 str。"""
+        module = _load_gate_module()
+        assert _composeContainerPort(module, 9527) == 9527
+
+    def test_random_syntaxStillRejected(self):
+        module = _load_gate_module()
+        for entry in ("abc", "", "9527:abc", "127.0.0.1:9527"):
+            assert _composeContainerPort(module, entry) is None, f"`{entry}` 不该被当成端口"
+
+    def test_everyDeclaredBackendPortIsResolved(self):
+        """完整性：compose backend 声明的每条端口都要解析出来。
+
+        漏解析不会报错，只会让 R1/R2 少比一项——本判据就是那条"少比"的护栏。
+        """
+        module = _load_gate_module()
+        raw = yaml.safe_load(io.open(PROJECT_ROOT / "docker-compose.yml", encoding="utf-8").read())
+        entries = raw["services"]["backend"]["ports"]
+        assert entries, "compose backend 没有端口声明——端口一致性比较等于没做"
+        for entry in entries:
+            assert _composeContainerPort(module, entry) is not None, (
+                f"端口声明 `{entry}` 未被门禁解析（R1/R2 会因此静默少比一项）"
+            )
+        assert module.parse_compose()["backend"]["port"] is not None
+
+    def test_hostAddressNarrowingIsNotAPortDrift(self):
+        """收窄宿主发布地址不改变容器侧端口——不得因此判红。"""
+        module = _load_gate_module()
+        compose = module.parse_compose()
+        helm = module.parse_helm()
+        docker = module.parse_dockerfile()
+        assert compose["backend"]["port"] == docker["expose"][0]
+        assert [f.to_dict() for f in module._check_ports(docker, compose, helm)] == []
+        assert not [
+            f for f in module._check_health(docker, compose, helm) if f.rule == "R2-healthcheck"
+        ]
+
+
+def _composeContainerPort(module, entry):
+    parse = getattr(module, "_composeContainerPort", None)
+    assert parse is not None, "门禁缺失 compose 端口三形态解析入口（只认宿主:容器时 `127.0.0.1:9527:9527` 会读成 None）"
+    return parse(entry)
+
+
 class TestEnvReadFaceResolvesConstantAlias:
     """读取面必须认「键名收进常量」那一形——不认就把活配置报成死配置。
 

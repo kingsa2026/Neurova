@@ -108,7 +108,7 @@ rows = [r for r in svc.list_skills()]
 # 映射执行体型单列：它是「盘上没字节也真能跑」那一形，混进空壳就是探针自己冤枉判据。
 # 直连公共读面，不留同名桩：留一枚 `except ImportError` 里定义的 `hasExecutorMapping`，
 # 一旦真触发就把「在册判定」静默换成本档自己拼的字符串比较，读的人还以为在读同一个事实源。
-from neurova.skills.market_registry import hasExecutorMapping
+from neurova.skills.market_registry import hasExecutorMapping  # noqa: E402
 
 
 def classify(entry):

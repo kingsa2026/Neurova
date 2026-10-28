@@ -1445,7 +1445,14 @@ class TestTakenPerModuleDivesOncePerTree:
         # （实测：判据自己那一趟让读数精确翻倍，单趟版被误判成两趟）。
         trees = len(ast_scan.sourceRefsUnder(DIVE_SCAN_ROOT))
         # 一趟的预算由**这一轮的节点总量**现量得出，不抄绝对值（抄了判据就会随代码总量红）。
-        nodeTotal = sum(len(ast_scan._walkNodes(parseSource(ref.code)))
+        # 预算的基数是**下潜**的量，不是 `_walkNodes` 交出的条目数：`_walkNodes` 承诺的是
+        # "`takenPerModule` 要的那一集"（Import/ImportFrom/Attribute），一趟下潜却对树上
+        # **每一个**节点调一次 `iter_child_nodes`（`ast.walk` 的语义就是逐个产出）。
+        # 两个量在本仓差一个数量级（交付 11.4 万条 vs 树上 167 万节点 / 1057 棵），
+        # 拿前者当基数会让**正确实现**读出 14.6 倍而判红（本档实测过一次：
+        # `4ca3db33` 把 `_walkNodes` 的交付面收窄后，这一格先红在基数上而不是在趟数上）。
+        # 遍历用标准库 `ast.walk`（基数要的是**全量**节点，不是共享入口交付的那一集）。
+        nodeTotal = sum(len(list(ast.walk(parseSource(ref.code))))
                         for ref in ast_scan.sourceRefsUnder(DIVE_SCAN_ROOT) if ref.code)
         onePassBudget = int(nodeTotal * ONE_PASS_DIVE_FACTOR)
 
@@ -1773,3 +1780,107 @@ def test_known_hit_points_use_the_shared_budget(rel):
     assert rel not in live, (
         f"{rel} 又出现了 rglob + ast.parse 的同用例组合：{live.get(rel, [])}"
     )
+
+
+#: 本格拿真仓子树当**扫描面**，故根写在模块级：函数内的局部根会让整档从
+#: 「仓内目录」那一支掉出去（`test_scanCriterionMustProveItsOwnSurfaceRatchet` 按模块级
+#: 常量解根，解不出＝该档整档不在面内，面自证随之失效）。
+_WALK_FACE_ROOT = PROJECT_ROOT / "neurova" / "computer_use"
+
+
+class TestNodeWalkIsSharedOncePerFile:
+    """`takenPerModule` 的节点面：**一档只走一遍**，且走法与 `ast.walk()` 同序。
+
+    根因（构建 `cnb-som-1k5m69s2v#003`，受保护子集两格各红一次）：
+    `test_packageDeclaredSurfaceCoversWhatIsTaken` 的 `_scan()` 调 `takenPerModule`，
+    它把每棵树 `ast.walk()` 了两遍（一遍收 import、一遍收属性链）。本仓 3639 档实测
+    `ast.walk` 的 `iter_child_nodes` 合计 21.4s，而 `compile()` 只有 5.0s——走两遍的账
+    比解析本身还贵。墙钟 30s 是**按格**的（`pyproject.toml` 的 `timeout`），于是判据的
+    成本重新与代码总量挂上了钩（`tests/ast_scan.py` 开头那条根因的复现）。
+
+    这一格锁三件事，缺一即空转：
+      1. **一遍**：`_walkNodes` 对每档的调用次数 === 该档被扫的次数。计数**必须在
+         `takenPerModule` 层面**：在 `_walkNodes` 内部数 `iter_child_nodes` 只看得见
+         "一遍走得多完整"，看不见"同一档被走了两遍"——本地实证过这条假绿（把
+         `takenPerModule` 改成每档调两次 `_walkNodes`，内部计数照旧是 1 倍）。
+      2. **同序**：`_walkNodes` 吐出的三类节点与 `ast.walk()` 的顺序逐位相同——
+         顺序会落进 `takenPerModule()` 两张表的列表里，换了走法就会让"两次读数比对"
+         出现无法解释的红（本地已实证：换成先序 DFS 后 589 个模块的列表顺序全变）。
+      3. **不窄**：三类节点一个都不许漏（漏一类＝归属表静默缺项）。
+    """
+
+    #: 一档**小而齐**的夹具：三个 import 形态 + 多层属性链 + 类/函数嵌套。
+    #: 不拿仓内真档当夹具，是为了让"节点数"这件事在断言里可数、可读。
+    SOURCE = '''\
+import os
+import a.b.c
+from . import sibling
+from pkg.mod import thing as alias
+
+
+class Holder:
+    def method(self, value):
+        return os.path.join(a.b.c, value.attr)
+
+
+def outside():
+    return alias.deep.chain()
+'''
+
+    def test_eachFileIsWalkedOnce(self):
+        tree = parseSource(self.SOURCE)
+        nodes = len(list(ast.walk(tree)))
+        seen = {"n": 0}
+
+        def counting(node):
+            seen["n"] += 1
+            return realIterChildNodes(node)
+
+        realIterChildNodes = ast.iter_child_nodes
+        ast.iter_child_nodes = counting
+        try:
+            ast_scan._walkNodes(tree)
+        finally:
+            ast.iter_child_nodes = realIterChildNodes
+        assert seen["n"] == nodes, (
+            f"{nodes} 个节点却展开了 {seen['n']} 次子节点——"
+            "`takenPerModule` 的节点面又回到「每档走两遍」，判据成本重新与代码总量挂钩"
+            "（墙钟是按格计的，构建 cnb-som-1k5m69s2v#003 就是这么红的）。"
+        )
+
+    def test_walkOrderIsTheSameAsAstWalk(self):
+        tree = parseSource(self.SOURCE)
+        kinds = (ast.Import, ast.ImportFrom, ast.Attribute)
+        want = [id(n) for n in ast.walk(tree) if isinstance(n, kinds)]
+        got = [id(n) for n in ast_scan._walkNodes(tree)]
+        assert got == want, (
+            "`_walkNodes` 的产出顺序与 `ast.walk()` 不一致——条目顺序会落进 "
+            "`takenPerModule()` 的两张表，换了走法会让两次读数比对出现无法解释的红。"
+        )
+
+    def test_eachFileEntersTheWalkExactlyOnce(self):
+        """整表层面：一档只进一次 `_walkNodes`（两次＝把节点面走了双份）。"""
+        files = len(ast_scan.sourceRefsUnder(_WALK_FACE_ROOT, ".py"))
+        assert files >= 10, f"夹具面太小（{files} 档），判不出一档走了几遍"
+        seen = {"n": 0}
+        real = ast_scan._walkNodes
+
+        def counting(tree):
+            seen["n"] += 1
+            return real(tree)
+
+        ast_scan._walkNodes = counting
+        try:
+            ast_scan.takenPerModule(_WALK_FACE_ROOT)
+        finally:
+            ast_scan._walkNodes = real
+        assert seen["n"] == files, (
+            f"{files} 档却进了 {seen['n']} 次节点遍历——`takenPerModule` 的节点面"
+            "又走成每档多遍，判据成本重新与代码总量挂钩。"
+        )
+
+    def test_tokenCoversAllThreeKinds(self):
+        """探测器面：三类节点一个都不许漏（漏一类＝归属表静默缺项）。"""
+        tree = parseSource(self.SOURCE)
+        kinds = {type(n) for n in ast_scan._walkNodes(tree)}
+        assert kinds == {ast.Import, ast.ImportFrom, ast.Attribute}, kinds

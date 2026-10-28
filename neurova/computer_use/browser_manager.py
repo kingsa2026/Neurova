@@ -1685,12 +1685,17 @@ class BrowserManager:
 
     def _load_config(self) -> None:
         """加载配置"""
+        # 要交下去的那一份 handler **先记下来**，再决定注册哪几路后端："交出去"这件事
+        # 与"这台机器装没装 playwright"是两回事——受保护子集跑在薄依赖集上
+        # （`requirements-ci.lock` 无 playwright），接线是否成立在那里也必须读得到。
+        # 读者：`tests/unit/computer_use/test_dialogResponseIsWired.py` 的接线格（不留只写不读）。
+        self._lastDialogHandler: Optional[DialogHandler] = self._dialog_handler
         # 自动检测可用后端
         if HAS_PLAYWRIGHT:
-            # 把 manager 那份 handler 交下去——事件源只有 playwright 一路（见
-            # `PlaywrightBackend._attachDialogListener`），另两路拿不到 dialog 事件。
+            # 事件源只有 playwright 一路（见 `PlaywrightBackend._attachDialogListener`），
+            # 另两路拿不到 dialog 事件。
             self._backends["playwright"] = PlaywrightBackend(
-                self._config, dialog_handler=self._dialog_handler
+                self._config, dialog_handler=self._lastDialogHandler
             )
         if HAS_SCRAPLING:
             self._backends["scrapling"] = ScraplingBackend(self._config)

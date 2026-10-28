@@ -331,3 +331,68 @@ class TestWebReachImportsWithoutItsOptionalDeps:
             "CI 精简环境（requirements-ci.lock）不含 playwright，整条导入链会在收集期崩：\n"
             f"--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"
         )
+
+
+class TestEmbeddingTierIsInstallableInCi:
+    """稠密向量档的加载面必须在 CI 精简锁里装得到（§6-406 其三）。
+
+    受保护子集里有几格读的是**真实嵌入档**的读数：联想召回棘轮（MRR 0.35 基线）、
+    长期记忆的向量库存与刷新、换实体近似句的置信度地板。它们的前提不是"导入得到
+    `neurova.embedding`"（懒加载壳恒有对象，`is not None` 恒真），而是
+    "`initialize_sync()` 真能算出非零向量"。
+
+    三根轮子缺任一根，`initialize_sync()` 都会走不到成功分支：
+
+    - `tokenizers`  → 字表（`tokenizer.json`）读不进，第一道就 return False；
+    - `onnxruntime` → `_try_load_onnx()` 撞 ImportError，return False；
+    - `numpy`       → `onnx_embedding.py` 的运行期张量契约，`_normalize` 无 numpy 档。
+
+    缺任一根时的读数是「MRR 0.303 对基线 0.35、索引里没有新向量、置信度 0.5875」——
+    看起来像检索退化，真相是档没装。判据落在这三根**都在 CI 锁里**，而不是
+    "那几格要么红要么绿"：判据自己把缺席读成 `uninitialized` 档时，红的是判据里的
+    前置断言，读的人会去查检索逻辑（同一形态的历史代价见 requirements-ci.txt 注释）。
+    """
+
+    _TIER = ("numpy", "tokenizers", "onnxruntime")
+
+    def test_denseTierWheelsArePinnedInCiLock(self):
+        lock = _read("requirements-ci.lock")
+        pinned = {
+            m.group(1).lower().replace("-", "_")
+            for m in re.finditer(r"(?m)^([A-Za-z0-9_.-]+)==", lock)
+        }
+        missing = [pkg for pkg in self._TIER if pkg not in pinned]
+        assert not missing, (
+            f"requirements-ci.lock 缺稠密向量档的加载面 {missing}——\n"
+            "  嵌入档在 CI 里加载不了，引擎静默退成零向量兜底，\n"
+            "  联想召回/向量库存/近似问法那几格的读数就都不是检索本身。\n"
+            "修法：uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
+        )
+
+    def test_denseTierIsDeclaredInCiTxt(self):
+        """锁里的三根必须来自本文件自己的声明，不是谁顺手带进来的传递依赖。"""
+        declared = _ci_top_packages()
+        missing = [pkg for pkg in self._TIER if pkg not in declared]
+        assert not missing, (
+            f"requirements-ci.txt 未声明 {missing}——\n"
+            "  只靠传递依赖的话，上游哪天换实现这档就静默消失，而那几格仍会红成"
+            "「检索退化」"
+        )
+
+    def test_everyDeclaredTierIsActuallyRequiredByTheEngine(self):
+        """面自证：声明的三根必须真出现在引擎的加载路径上。
+
+        否则上一格退化成一串与引擎无关的包名——锁里钉着三个用不上的东西，
+        而真正的缺口照样在。取法是"引擎源码里 import 了谁"，避免手工维护第二份清单。
+        """
+        source = _read("neurova", "embedding", "onnx_embedding.py")
+        # `from tokenizers import Tokenizer` 是字表侧真实的取法（不是 `import tokenizers`），
+        # 两种形态都得认，否则面自证会把真加载点读成脱钩。
+        absent = [
+            pkg for pkg in self._TIER
+            if not re.search(rf"(?m)^\s*(?:import|from)\s+{pkg}\b", source)
+        ]
+        assert not absent, (
+            f"{absent} 未出现在 `neurova/embedding/onnx_embedding.py` 的 import 里——"
+            "本判据的清单已与引擎脱钩，请按引擎现读的加载面重核（不要改判据的期望值）"
+        )

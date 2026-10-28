@@ -230,8 +230,24 @@ class TestNoKnownVulnerableRuntimePackages:
             "7.1.0",
             ("node_modules/@azure/identity",),
             "GHSA-xcx6-jx8p-x3h5",
-            "授权码流把参数泄露给攻击者可控端点",
+            "授权码流把参数泄露给攻击者可控端点（6.x 线无修复版，须顶到 7.x）",
         ),
+    }
+
+    #: 每条包的**全部载体条目**：同名包在树里可能以嵌套形态并存（`<父>/node_modules/<包>`），
+    #: 只核根条目等于给嵌套那份放行。键为包名，值为承载条目的 lock 键元组。
+    _KNOWN_FLOOR_CARRIERS = {
+        "body-parser": (
+            "node_modules/body-parser",
+            "node_modules/@bytebase/dbhub/node_modules/body-parser",
+        ),
+    }
+
+    #: 载体键 → 该载体所在声明线的修复下界。只有分段修复的包需要它：
+    #: 拿 1.20.9 去卡 2.x 那份等于把「已修」判成「未修」，两条声明线各有自己的下界。
+    #: 未登记的载体一律按 `_KNOWN_FLOORS` 的取值卡。
+    _FLOOR_BY_CARRIER = {
+        "node_modules/body-parser": "2.4.0",
     }
 
     def _compare_tuple(self, version: str) -> tuple:
@@ -260,14 +276,22 @@ class TestNoKnownVulnerableRuntimePackages:
         packages = lock.get("packages") or {}
         problems = []
         for name, (floor, chains, cve, note) in self._KNOWN_FLOORS.items():
-            entry = packages.get(f"node_modules/{name}")
-            if entry is None:
-                # 承载者被整体摘除（依赖被上游换掉）也是合格形态，不报红。
+            carriers = self._KNOWN_FLOOR_CARRIERS.get(name, (f"node_modules/{name}",))
+            present = [key for key in carriers if key in packages]
+            if not present:
+                # 只有**全部**载体都消失才算「承载者被整体摘除」（合格形态，不报红）；
+                # 少一份而另一份还在，就是本类要拦的形态——缺失的落点由
+                # `test_everyRegisteredCarrierSurvives` 报红，这里不重复。
                 continue
-            version = entry.get("version")
-            if not self._floor_is_met(version, floor):
+            for key in present:
+                version = packages[key].get("version")
+                carrier_floor = self._FLOOR_BY_CARRIER.get(key, floor)
+                # 版本比较取 `_compare_tuple`：`ip-address` 这类包会把 `beta` 等非数字段
+                # 放进版本串，逐个 `int()` 会直接抛 ValueError。
+                if self._floor_is_met(version, carrier_floor):
+                    continue
                 problems.append(
-                    f"{name}@{version} 低于 {cve} 的修复下界 {floor}——{note}。\n"
+                    f"{key}@{version} 低于 {cve} 的修复下界 {carrier_floor}——{note}。\n"
                     f"    引入链: {' → '.join(chains)}\n"
                     "    处置：不要手改锁文件里的版本号（父包用的是精确版本声明，"
                     "真实解析仍是旧版），改为在 tools/npx-runtime 重跑 "
@@ -423,7 +447,7 @@ class TestNonPipAuditTreesStayAtTheAdvisoryFloors:
         # 0.26.x 是"兼容包"：不含独立信任库，只 re-export 1.x 的根，故判据落在 1.x 线上
         # （两条都钉会把 0.26.11 这条 re-export 当成漏洞载体）。
         "webpki-roots 1": (
-            "1.0.10",
+            "1.0.10",  # 下界；锁里现读 1.0.11（高于下界 = 合格形态，不另记两个数）
             "RUSTSEC-2026-0381",
             "内置根证书集含被吊销的 emSign 根",
         ),
@@ -489,9 +513,9 @@ class TestNonPipAuditTreesStayAtTheAdvisoryFloors:
         """锁里写着的 version 与 checksum 必须同源——否则 `cargo build` 直接校验失败。
 
         版本取**锁里现读到的那个**，本文件不钉第二份字面量：版本由 `cargo update`
-        推着走（本分叉里 webpki-roots 1.0.10 → 1.0.11 就是 cargo 自己写的），
-        钉死字面量会在每次正常升级时变红，把"抬了版本没抬 checksum"这种真故障
-        淹在噪声里。核对值来自 crates.io 公布的 sha256。
+        推着走（webpki-roots 1.0.10 → 1.0.11 就是 cargo 自己写的），钉死字面量会在每次
+        正常升级时变红，把"抬了版本没抬 checksum"这种真故障淹在噪声里。
+        核对值来自 crates.io 公布的 sha256。
         """
         lockText = io.open(PROJECT_ROOT / "NeurUI/src-tauri/Cargo.lock", encoding="utf-8").read()
         problems = []

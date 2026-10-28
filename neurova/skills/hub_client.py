@@ -712,10 +712,9 @@ class SkillHubClient:
             技能配置字典
         """
         # 查找配置文件。第一个按**技能文档的唯一规范名**取（`SKILL.md`，大写）：
-        # 此前写的是小写 `skill.md`，而 `Path.exists()` 在 Linux 上是大小写敏感的 ⇒
-        # 真资产包里的 `SKILL.md` 读不到、frontmatter 里的 `permissions` 声明静默丢失，
-        # 安装门于是"看不见声明"地放行（`§6-419` 那一批红出来的正是这个）。
-        # 小写那份留作历史兼容：Windows 上两者同址，Linux 上允许老包里是小写。
+        # `Path.exists()` 在 Linux 上大小写敏感，小写那份读不到真资产包里的 `SKILL.md`，
+        # frontmatter 的 `permissions` 声明随之静默丢失，安装门"看不见声明"地放行。
+        # 小写留作历史兼容：Windows 上两者同址，Linux 上允许老包里是小写。
         config_files = ["SKILL.md", "skill.md", "manifest.json", "manifest.yaml", "manifest.yml"]
 
         for config_file in config_files:

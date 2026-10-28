@@ -163,6 +163,20 @@ class TestEndToEndOnSyntheticRepos:
     """真 git worktree＋真 pytest 子进程跑通四种标记，才叫这脚本能用。"""
 
     @staticmethod
+    def _gitEnvironment() -> dict:
+        """合成仓的 git 子进程环境：把**继承来的**签名配置摘掉。
+
+        判据问的是「驱动能不能在合成仓上跑出四种标记」，不是「宿主配没配好 git」。
+        而开发容器常带 `commit.gpgsign=true` + 一个本宿主没有的 `gpg.program`
+        （CNB 开发环境实测 `gpg.program=cnb-gpgsign`），于是 `git commit` 直接
+        `error: gpg failed to sign the data` / 退 128 —— 红在前置上，读的人会去查驱动。
+        显式传 `-c commit.gpgsign=false` 把这个外部依赖根除，不改宿主配置。
+        """
+        return {**os.environ, "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "commit.gpgsign",
+                "GIT_CONFIG_VALUE_0": "false"}
+
+    @staticmethod
     def _makeRepo(tmp_path: Path, *, body="return 1", expected=1):
         if shutil.which("git") is None:
             pytest.skip("本宿主没有 git，合成仓起不来（不是通过，是没跑）")
@@ -183,15 +197,15 @@ class TestEndToEndOnSyntheticRepos:
             "from app.logic import answer\n\n"
             "def test_answer():\n"
             f"    assert answer() == {expected}\n", encoding="utf-8")
-        # `-c commit.gpgsign=false`：合成仓是夹具，不该继承宿主/镜像的签名配置——
-        # 宿主 `~/.gitconfig` 里 `commit.gpgsign=true` 而签名程序不可用（容器内无密钥）时，
-        # 这几条合成仓的 commit 会以 128 直接炸掉，红的是宿主配置而不是被测驱动（形态集 303 同族）。
-        # CI 上时有时无（各 runner 的全局配置不同），故钉在命令里而不是靠环境碰运气。
+        # 宿主签名配置的隔离由 `_gitEnvironment()` 一处给（`GIT_CONFIG_*` 传下去）；
+        # 命令里不再写第二份 `-c commit.gpgsign=false`：两处各写一遍时，改一处另一处静默失效
+        # （宿主 `commit.gpgsign=true` 而签名程序不可用时，合成仓的 commit 会以 128 炸掉）。
         for args in (["init", "-q"], ["add", "."],
                      ["-c", "user.email=t@t", "-c", "user.name=t",
-                      "-c", "commit.gpgsign=false", "commit", "-q", "-m", "base"]):
+                      "commit", "-q", "-m", "base"]):
             subprocess.run(["git"] + args, cwd=str(repo), capture_output=True, text=True,
                            encoding="utf-8", errors="replace", check=True,
+                           env=TestEndToEndOnSyntheticRepos._gitEnvironment(),
                            timeout=_GIT_WALL_S)
         return repo
 
@@ -202,7 +216,8 @@ class TestEndToEndOnSyntheticRepos:
              "--root", str(repo), "--tmp", str(tmp_path / "abtmp"), *extra,
              "--", "tests"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=_DRIVER_WALL_S)
+            env={**self._gitEnvironment(), "PYTHONIOENCODING": "utf-8"},
+            timeout=_DRIVER_WALL_S)
         return proc
 
     def test_noDifferenceYieldsPass(self, tmp_path):
@@ -252,7 +267,7 @@ class TestEndToEndOnSyntheticRepos:
         #: 宿主默认 stdout 是 cp936 时，读数里那个箭头会把驱动自己打死（退出码 1、stdout 空）——
         #: 红会指向脚本而不是被测行为。修在产生侧：脚本自己把 stdout 钉成 utf-8。
         repo = self._makeRepo(tmp_path)
-        env = {**os.environ, "PYTHONIOENCODING": "gbk"}
+        env = {**self._gitEnvironment(), "PYTHONIOENCODING": "gbk"}
         proc = subprocess.run(
             [sys.executable, str(SCRIPT), "-k", "HEAD", "-n", "1",
              "--root", str(repo), "--tmp", str(tmp_path / "abtmp"), "--", "tests"],
@@ -281,7 +296,8 @@ class TestDriverIsNotVacuous:
             [sys.executable, str(SCRIPT), "-k", "HEAD", "-n", "1", "--json",
              "--root", str(repo), "--tmp", str(tmp_path / "abtmp"), "--", "tests"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=_DRIVER_WALL_S)
+            env={**TestEndToEndOnSyntheticRepos._gitEnvironment(), "PYTHONIOENCODING": "utf-8"},
+            timeout=_DRIVER_WALL_S)
         payload = [json.loads(ln) for ln in proc.stdout.splitlines() if ln.startswith("{")]
         assert payload, "带 `--json` 却没给出机器可读读数"
         assert {"marker", "baseline", "tree"} <= set(payload[0])
