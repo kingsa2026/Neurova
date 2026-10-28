@@ -62,6 +62,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.ci import tool_loop_deadline_ledger as ledger  # noqa: E402
+from tests.ast_scan import parseSource
 
 PIPELINE = PROJECT_ROOT / "neurova" / "agent" / "chat_pipeline.py"
 #: 续写循环的**实现**所在地（管线只留薄委托）；本文件所有 AST 判据都钉这里。
@@ -78,7 +79,9 @@ LEDGER_ENTRIES = ("MAX_TOOL_CALL_ROUNDS",)
 
 
 def _auto_continue_node() -> ast.AST:
-    tree = ast.parse(io.open(ROUNDS, encoding="utf-8").read())
+    # 续写循环已整块搬出热路径（`chat_pipeline` 只留薄委托），判据面跟住实现所在地；
+    # 解析走共享预算入口 `parseSource`，不再自己 `ast.parse`。
+    tree = parseSource(io.open(ROUNDS, encoding="utf-8").read())
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "runContinuationRounds":
             return node

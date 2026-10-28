@@ -31,6 +31,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
@@ -61,7 +62,7 @@ def _evalExampleFields() -> tuple[str, ...]:
 
 def _callSitesAsEvalExampleKeywords(py: Path) -> list[str]:
     """AST 里 `EvalExample(...)` 调用上挂的两个退役关键字实参（只认构造调用形态）。"""
-    tree = ast.parse(py.read_text(encoding="utf-8"))
+    tree = parseSource(py.read_text(encoding="utf-8"))
     hits: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -91,8 +92,11 @@ def _trackedScanFace(scanRoots: tuple[str, ...]) -> list[Path]:
         timeout=GIT_WALL_S,
     )
     assert listed.returncode == 0, f"git ls-files 失败：{listed.stderr}"
+    # 只留工作树里真在的：索引与工作树的差是在途改名/刚删的中间态，读到一条指不到文件的
+    # 路径就是 FileNotFoundError——扫描面成了"跑的时刻撞不撞上在途改动"的运气
+    # （同一取数口径见 `tests/ast_scan.trackedPyPaths`）。
     return [PROJECT_ROOT / rel for rel in sorted(listed.stdout.split("\0"))
-            if rel.endswith(".py")]
+            if rel.endswith(".py") and (PROJECT_ROOT / rel).is_file()]
 
 
 class TestEvalExampleUnusedLabelFieldsRetired:

@@ -11,6 +11,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from neurova.api.endpoints import console as api
+from tests.ast_scan import parseSource
 from tests.route_table import leafRoutes
 from tests.auth_headers import overrideIdentity
 
@@ -87,7 +88,7 @@ def test_structure(domain):
         for param in inspect.signature(endpoint).parameters.values():
             if hasattr(param.default, "dependency"):
                 assert next(d for d in route.dependant.dependencies if d.name == param.name).call is param.default.dependency
-    calls = [n.func.id for n in ast.walk(ast.parse(inspect.getsource(leaf)))
+    calls = [n.func.id for n in ast.walk(parseSource(inspect.getsource(leaf)))
              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)]
     assert not {"exec", "globals"}.intersection(calls)
 

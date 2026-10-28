@@ -98,6 +98,18 @@ jobs:
   unit-tests:
     name: Unit tests (protected subset + coverage)
     runs-on: ubuntu-latest
+    # 本 job 的墙：整段上限。它与下面的单档墙（`--timeout 1500`）必须严格有序，
+    # 与 .cnb.yml 那道 stage 的 `timeout: 90m` 同值同源。
+    timeout-minutes: 90
+    # 分片矩阵：与 cnb 侧同片数（片号的事实源是 `scripts/ci/protected_tests.*.txt` 有几个文件）。
+    # 为什么分片：单进程跑整份清单的峰值 RSS 实测 2.74~2.78 GiB 且仍在爬升，
+    # 构建 `cnb-v9p-1k5pkvplt` 的 `code 137` 就是跑测进程被整段掐断；
+    # 分片后每片各自一个 pytest 进程，判据（覆盖率阈值）不逐片判、见下方 coverage job。
+    # 判据见 tests/unit/ci/test_protected_subset_shards.py（两侧片数不一致即红）。
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       # fetch-depth: 0 是**判据的运行前提**，不是优化项：
       #   受保护子集里的 test_protected_subset_registration_history.py 按清单
@@ -119,12 +131,70 @@ jobs:
       - name: Install locked dependencies
         run: uv pip install --system -r requirements-ci.lock
 
-      - name: Run protected subset with coverage gate (fail_under=60)
+      # 单档墙（`--timeout 1500`＝25m）必须严格窄于本 job 的墙（`timeout-minutes: 90`）：
+      # 两层同为 30 时，慢格只来得及被记成 `Timeout`，先到点的是整段被掐断——
+      # 2026-10-24/25 两次红色都出在这个形状上。分片后这条口径逐片照旧。
+      # 覆盖率门禁不在分片里判（实测单片 49%、整份 88%，逐片判会假红）：
+      # 各片只攒 `data/coverage/.coverage*`，由下面的 `coverage` job 合并后再判一次。
+      - name: Run protected subset shard ${{ matrix.shard }} (collect coverage)
+        # 清单逐行读到位置参数上，`$TESTS` 那种"压成一行再交给 shell 切词"的写法
+        # 会因清单里的一条空行让后面的条目整片错位（构建 cnb-1f0-1k5uonjt2-003）。
+        # 两侧同一口径，判据 tests/unit/ci/test_protected_subset_shards.py 咬两头。
         run: |
-          # 清单的读法必须与 `tests/ast_scan.protectedSubsetEntries()` 同口径：行内 `#` 之后
-          # 是注释、不是路径（见 .cnb.yml 同段的读数与事故形态）。
-          TESTS=$(sed -e 's/#.*//' scripts/ci/protected_tests.txt | tr '\n' ' ')
-          python -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS
+          while IFS= read -r entry; do
+            [ -n "$entry" ] || continue
+            [ -f "$entry" ] || { echo "❌ 清单点名了不存在的文件：$entry"; exit 1; }
+            set -- "$@" "$entry"
+          done <<EOF
+          $(grep -v '^#' "scripts/ci/protected_tests.${{ matrix.shard }}.txt" | grep -v '^[[:space:]]*$')
+          EOF
+          # `COVERAGE_FILE` 指进 `data/coverage/`：coverage 的缺省落点是 `./.coverage`，
+          # 而合并那一步（`scripts/ci/coverage_report.py --data-dir data/coverage`）只认那个目录。
+          # 两处各猜一次路径就是"跑测说全绿、合并说没数据"——本仓实测过一次（cnb 构建
+          # `cnb-4gd-1k5us1o1q`：stage 2 全绿，stage 3 报 `没有找到任何覆盖率数据`）。
+          # 片号进文件名，免得矩阵里多个 job 抢同一个文件。
+          COVERAGE_FILE=data/coverage/.coverage.shard-${{ matrix.shard }} \
+            python -m pytest -q --timeout 1500 --cov --cov-report= --cov-fail-under=0 "$@"
+
+      - name: Upload coverage data
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-shard-${{ matrix.shard }}
+          path: data/coverage/.coverage*
+          include-hidden-files: true
+          if-no-files-found: error
+
+  # 覆盖率门禁（受保护子集整体口径）：分片各攒数据，这里合并后再判一次。
+  # 阈值 60 与 cnb 侧同源（`scripts/ci/coverage_report.py --fail-under 60`），
+  # pyproject 不得再写一份 `fail_under`（由 tests/unit/ci/test_context_coverage_scope.py 钉住）。
+  coverage:
+    name: Coverage gate (protected subset, fail_under=60)
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install locked dependencies
+        run: uv pip install --system -r requirements-ci.lock
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-shard-*
+          path: data/coverage-raw
+
+      - name: Gather shard coverage data
+        run: |
+          mkdir -p data/coverage
+          find data/coverage-raw -name '.coverage*' -exec cp {} data/coverage/ \;
+
+      - name: Coverage gate (fail_under=60, judged once over the whole subset)
+        run: python scripts/ci/coverage_report.py --fail-under 60
 
   e2e:
     name: E2E backend boot smoke (P1-8)

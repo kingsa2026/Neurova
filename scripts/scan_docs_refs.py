@@ -18,6 +18,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import re
@@ -34,7 +35,7 @@ FENCE_PATTERN = re.compile(r"```|~~~")
 # 视为「路径引用」的文件后缀（避免把 `foo.bar()` 这类代码片段当路径）
 PATH_SUFFIXES = ("py", "md", "yml", "yaml", "json", "toml", "sh", "bat", "js", "ts", "vue", "html", "css")
 # 通配/占位形态（`bugfix-*.md`、`HARMONYOS_*.md`）不是具体路径，单独归类
-PLACEHOLDER_PATTERN = re.compile(r"[*<>{}\[\]]")
+PLACEHOLDER_PATTERN = re.compile(r"[*<>{}\[\]]|YYYY|MM-DD|\bxxx\b|\byyy\b")
 
 # 「行内码是不是仓库内位置」的判据（`scanFile` 的入账门槛，只此一份）：
 # 带目录分隔符即视为路径（`context/fold_resolution.py`）；
@@ -92,7 +93,11 @@ def trackedFiles() -> list:
     if proc.returncode != 0:
         detail = (proc.stderr or b"").decode("utf-8", "replace").strip()
         raise RuntimeError(f"git ls-files 取不到入库清单（rc={proc.returncode}）：{detail}")
-    return [p for p in proc.stdout.decode("utf-8", "surrogateescape").split("\0") if p.strip()]
+    # 只交**工作树里真在**的：索引与工作树的差是在途改名/刚删的中间态（改名那一笔提交里，
+    # 索引先记新名、旧名的删除要等提交才落），把索引原样交出去，消费方读到一条指不到文件的
+    # 路径就是 `FileNotFoundError`——扫描面成了"跑的时刻撞不撞上在途改动"的运气。
+    return [p for p in proc.stdout.decode("utf-8", "surrogateescape").split("\0")
+            if p.strip() and (PROJECT_ROOT / p).is_file()]
 
 
 def indexByBasename(files: list) -> dict:
@@ -300,9 +305,11 @@ def scanFile(path: Path, byBasename: dict) -> list:
         for match in LINK_PATTERN.finditer(line):
             label, target = match.group(1).strip(), match.group(2).strip()
             if not label or not target:
-                found.append(_entry(relative, lineNo, match.group(0), VERDICT_EMPTY, "—"))
+                found.append(_entry(relative, lineNo, match.group(0), VERDICT_EMPTY, "—",
+                                    _lineAnchor(line, match.group(0))))
         for _ in emptyCodeSpans(line):
-            found.append(_entry(relative, lineNo, "``", VERDICT_EMPTY, "—"))
+            found.append(_entry(relative, lineNo, "``", VERDICT_EMPTY, "—",
+                                _lineAnchor(line, "``")))
         for match in CODE_PATH_PATTERN.finditer(line):
             ref = match.group(1)
             if not looksLikeARepoPath(ref):
@@ -314,7 +321,8 @@ def scanFile(path: Path, byBasename: dict) -> list:
             verdict, hit = resolveTarget(ref, path, byBasename)
             if verdict == VERDICT_REACHABLE:
                 continue
-            found.append(_entry(relative, lineNo, ref, verdict, hit))
+            found.append(_entry(relative, lineNo, ref, verdict, hit,
+                                _lineAnchor(line, ref)))
     return found
 
 
@@ -406,10 +414,8 @@ CODE_REFERENCE_RULINGS = {
         ("", "知识层节点列举的 `neurova/knowledge/integration/` 全史未入库"),
     ("docs/11-legacy/源码图谱.md", "1598"):
         ("tests/test_memory/test_closed_loop.py",
-         "33-测试层节点指记忆闭环测试；原裁定的 tests/integration/ 那份在 `c2031c4c8`（批 138）"
-         "随通道插件退役一并删除，闭环性质现由 tests/test_memory/test_closed_loop.py 与 "
-         "tests/integration/test_data_flow_closed_loop.py 在守"),
-
+         "33-测试层节点列举的是「测试层」节点，唯一现存候选在 tests/test_memory/；"
+         "原名 `tests/integration/test_closed_loop.py` 全史未入库，判「已裁定」到现存那份"),
 }
 
 RULING_SETTLED = "已裁定"
@@ -611,8 +617,35 @@ def activeLayerDangling() -> list:
     return sorted(found, key=lambda item: (item["file"], item["line"], item["ref"]))
 
 
-def _entry(file: str, line: int, ref: str, verdict: str, hit: str) -> dict:
-    return {"file": file, "line": line, "ref": ref, "verdict": verdict, "hit": hit}
+#: 台账「位置」列的前缀：它只声明「这份文档里有这么一处引用」，不声明是第几行。
+#: 取处单点在本模块，生成侧与守卫都从这里取，不各写一份字面量。
+ANCHOR_COLUMN_MARK = "本行"
+
+
+def _lineAnchor(lineText: str, ref: str) -> str:
+    """一处悬空引用的**内容锚点**：该行正文 + 引用原文的摘要。
+
+    为什么不用行号：行号是「扫描那一刻这份文档的属性」，不是引用的属性。台账
+    入库之后归档层文档仍会被改（补一节、挪一段），行号整片平移，于是台账与
+    扫描器逐格比对全部失配——CI 构建 `cnb-1f0-1k5uonjt2-003` 里
+    `test_ledger_machine_block_matches_scanner` 报的「期望行数 218，实际行数 228」
+    就是这个形态：被引用的路径一条没变，变的只是它们在第几行。
+
+    锚点取内容摘要，于是「补一节」不再动台账，而「改掉这一条引用」照样会动——
+    该报的漂移一个不漏。
+
+    已知边界：同一行内**重复同一处引用**时两处锚点相同，`scanDirectory` 按
+    （文件, 行, 引用）去重会把后一条并掉。这与行号时代的行为一致（同样的三元组，
+    同样被去重），台账上限是「每行每引用一条」，不是「每处出现一条」。
+    """
+    payload = lineText.strip() + "\u0000" + ref
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
+
+def _entry(file: str, line: int, ref: str, verdict: str, hit: str,
+           contentDigest: str = "") -> dict:
+    return {"file": file, "line": line, "ref": ref, "verdict": verdict,
+            "hit": hit, "contentDigest": contentDigest}
 
 
 # ---------------------------------------------------------------------------
@@ -644,18 +677,18 @@ def _entry(file: str, line: int, ref: str, verdict: str, hit: str) -> dict:
 
 #: 导航承载文档的标题特征（文档存在的意义是指路，不是叙事）
 NARRATIVE_TITLE_PATTERN = re.compile(r"清单|索引|图谱|单一事实源")
-#: 占位/模板形态的具体路径：不是任何真实目标，改指无从谈起
-PLACEHOLDER_PATH_PATTERN = re.compile(r"YYYY|MM-DD|\bxxx\b|\byyy\b|<[^>]+>")
-
 IMPACT_FORM_CLICKABLE = "甲·可点击引用"
 IMPACT_FORM_POINTER = "乙·指路条目"
+IMPACT_FORM_INLINE = "丙·行内码路径陈述"
 
 DISPOSITION_REPOINT = "改指真实路径"
 DISPOSITION_DESTINATION = "改显式文本交代去处"
 DISPOSITION_PROJECT = "单独立项（整篇级过期）"
+#: 丙类的处置：归档正文陈述的是**当时**的代码结构，就地改写成今天的形态反而与史实不符。
+#: 这一列写的是**处置**（登记、不改），不是**理由**——它仍然是"当下把人带错路"，故入表。
+DISPOSITION_REGISTER = "登记不就地改写"
 
 EXEMPT_UNREACHABLE = "无当下读者（不在导航图内）"
-EXEMPT_NARRATIVE = "描述性行内码（不可点击且非指路文档）"
 EXEMPT_PLACEHOLDER = "占位/模板路径（非真实目标）"
 
 
@@ -771,13 +804,22 @@ def archiveDanglingUnion() -> list:
 def navigationImpactRefs() -> list:
     """筛选出**真正影响当下导航**的归档层失效引用，并给出逐条处置。
 
-    不入筛的条目由 `navigationImpactExemptions()` 按理由计数登记——
-    筛选不是"眼不见为净"，被豁免的每一条都能说出为什么。
+    **入筛条件只有两条**：引用不是占位/模板形态，且载体在导航图里（当下就有读者走得到）。
+    形态（可点击 / 行内码）只决定**处置**，不决定入不入筛：
+
+    - 甲类·可点击引用：点开即 404，与活跃层同一条纪律，没有归档层豁免；
+    - 乙类·指路条目：载体是专职指路的文档，指错地方要单独立项由人决定去留；
+    - 丙类·行内码路径陈述：归档正文里写着"某个文件在 `x/y.py`"，而它不在了。读者把这个
+      名字复制走同样落空——与甲类同属"当下把人带错路"，只是不可点击。处置是**登记不就地
+      改写**（归档正文陈述的是当时的代码结构），那是一条处置，不是"这件事不影响当下导航"
+      的豁免理由。
+
+    不入筛的条目由 `navigationImpactExemptions()` 按理由计数登记——筛选不是"眼不见为净"。
     """
     reached = readerReachableDocuments()
     rows = []
     for item in archiveDanglingUnion():
-        if PLACEHOLDER_PATH_PATTERN.search(item["ref"]):
+        if PLACEHOLDER_PATTERN.search(item["ref"]):
             continue
         if item["file"] not in reached:
             continue
@@ -789,22 +831,31 @@ def navigationImpactRefs() -> list:
             form = IMPACT_FORM_POINTER
             disposition = DISPOSITION_PROJECT
         else:
-            continue
+            form = IMPACT_FORM_INLINE
+            disposition = DISPOSITION_REGISTER
         rows.append(dict(item, form=form, disposition=disposition))
     return rows
 
 
 def navigationImpactExemptions() -> dict:
-    """被筛掉的条目按理由计数（理由取自同一判据，不另写一套）。"""
+    """被筛掉的条目按理由计数（理由取自同一判据，不另写一套）。
+
+    **两条，不是三条。** 此前这里另立一条「描述性行内码（不可点击且非指路文档）」，把
+    八百余条**导航可达**载体里的失效行内码记成"不构成当下导航问题"。读者当下就打开得到
+    那篇文档，里面的路径陈述复制走也不存在——与「字面所指的对象今天还在不在」（判据本身
+    就写着「与活跃层同一条纪律」）无关。它与甲类同属"当下把人带错路"，只是形态不同。
+
+    给它一条豁免理由，等于把**处置选择**（归档层不就地改写）说成了**豁免理由**（这件事
+    不影响当下导航）：摘要那句「本类已归零」正是由这个计数器推出来的。登记仍在——
+    `renderNavigationImpact` 逐条落表，处置一列写明"登记不就地改写"；只是不再自称豁免。
+    """
     reached = readerReachableDocuments()
-    counters = {EXEMPT_UNREACHABLE: 0, EXEMPT_NARRATIVE: 0, EXEMPT_PLACEHOLDER: 0}
+    counters = {EXEMPT_UNREACHABLE: 0, EXEMPT_PLACEHOLDER: 0}
     for item in archiveDanglingUnion():
-        if PLACEHOLDER_PATH_PATTERN.search(item["ref"]):
+        if PLACEHOLDER_PATTERN.search(item["ref"]):
             counters[EXEMPT_PLACEHOLDER] += 1
         elif item["file"] not in reached:
             counters[EXEMPT_UNREACHABLE] += 1
-        elif item["form"] != "可点击" and not isNavigationBearing(item["file"]):
-            counters[EXEMPT_NARRATIVE] += 1
     return counters
 
 
@@ -842,7 +893,7 @@ def renderNavigationImpactSummary(rows: list) -> str:
     lines.append("")
     lines.append("| 豁免理由 | 条数 |")
     lines.append("|------|------|")
-    for reason, count in sorted(counters.items()):
+    for reason, count in sorted(counters.items(), key=lambda kv: (-kv[1], kv[0])):
         lines.append(f"| {reason} | {count} |")
     lines.append(NAV_IMPACT_SUMMARY_END)
     return "\n".join(lines)
@@ -921,6 +972,12 @@ def _cell(value: str) -> str:
     return text if text else "（空）"
 
 
+def _anchorCell(item: dict) -> str:
+    """台账「位置」单元格：`本行·<内容锚点前 8 位>`，缺锚点时诚实标出。"""
+    digest = (item.get("contentDigest") or "")[:8]
+    return f"{ANCHOR_COLUMN_MARK}·`{digest}`" if digest else f"{ANCHOR_COLUMN_MARK}·（无锚点）"
+
+
 def _code(ref: str) -> str:
     """把引用渲染成行内代码；空反引号用占位符避免又把表格打散。"""
     if ref == "``":
@@ -949,15 +1006,19 @@ def renderSummary(entries: list) -> str:
 
 
 def renderTable(entries: list) -> str:
-    """把扫描结果渲染成台账表格（行按文件、行号排序，保证可复现）。"""
+    """把扫描结果渲染成台账表格（行按文件、行号排序，保证可复现）。
+
+    「位置」一列写的是**内容锚点**（`_lineAnchor` 的前 8 位），不是行号——
+    台账是入库的生成物，行号一入库就开始过期，而内容锚点不会。
+    """
     lines = [
         TABLE_BEGIN,
-        "| 文件 | 行 | 引用 | 判定 | 命中 / 候选 |",
-        "|------|----|------|------|-------------|",
+        "| 文件 | 位置 | 引用 | 判定 | 命中 / 候选 |",
+        "|------|------|------|------|-------------|",
     ]
     for item in sorted(entries, key=lambda e: (e["file"], e["line"], e["ref"])):
         lines.append(
-            f"| `{item['file']}` | {item['line']} | {_code(item['ref'])} "
+            f"| `{item['file']}` | {_anchorCell(item)} | {_code(item['ref'])} "
             f"| {item['verdict']} | {_cell(item['hit'])} |"
         )
     lines.append(TABLE_END)

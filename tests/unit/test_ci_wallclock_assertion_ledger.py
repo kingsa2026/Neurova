@@ -34,6 +34,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 #: 取时钟的函数名（`time.perf_counter()` / `perf_counter()` / `time.time()` …）
 CLOCK_FUNCS = frozenset({"perf_counter", "monotonic", "time", "time_ns", "process_time"})
 
@@ -332,7 +333,7 @@ def wallclockBounds(source) -> List[Tuple[int, str, str]]:
     `source` 可以是源码文本（单用例自证时用），也可以已是语法树 —— 跨文件扫描
     走 `ast_scan._cachedParse` 取树，判定逻辑仍只有这一处（不新造平行入口）。
     """
-    tree = source if isinstance(source, ast.AST) else ast.parse(source)
+    tree = source if isinstance(source, ast.AST) else parseSource(source)
     clock = _clockNames(tree)
     constantNames = _constantBoundNames(tree)
     found: List[Tuple[int, str, str]] = []
@@ -668,9 +669,11 @@ OUTSIDE_SUBSET_LEDGER: Dict[str, int] = {
     "tests/unit/api/test_security_p0_audit_fixes.py": 1,
     "tests/unit/channels/test_wechat_ilink_qrcode.py": 1,
     "tests/unit/context/test_context_pool_agent_core_integration.py": 1,
-    # `tests/unit/memory/test_moe_routing.py` 已**销账**（`c2031c4c`，批 138 §6-378）：
-    # 该文件随通道插件旋钮退净一并删除，那 2 处墙钟上界跟着文件退场，
-    # 键按销账删除——不是"沉默地少登记一条"：任何新增的墙钟上界都会让本表重新判红。
+    # `tests/unit/memory/test_moe_routing.py` 已**销账**（原登记 2 处）：`c2031c4c`（§6-378 批 138）
+    # 把该档连同未接线的 `channels/moe_router` 一并退役删除了，文件已不存在 ⇒ 它的墙钟上界归零，
+    # 键从本表消失。这不是"沉默地少登记一条"：本表的比对是 `live == 台账`，**残留**键（文件没了
+    # 却还登记着）与**新增**未登记的上界都会当场判红——2026-10-23 正是这条残留键让本档在 CI 上红
+    # （`台账里已不存在: ['tests/unit/memory/test_moe_routing.py']`）。
     "tests/unit/neurflow/test_parallel_execution.py": 1,
     "tests/unit/skills/test_skill_import_architecture.py": 1,
     "tests/unit/sync/test_slow_consumer_seq_policy.py": 1,

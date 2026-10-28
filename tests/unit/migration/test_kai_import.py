@@ -7,7 +7,7 @@
    统一带显式偏移），且会话内按时间升序。
 2. 记忆导入后 MemoryManager 可加载（枚举合法、agent_id 隔离正确）。
 3. 幂等：重复执行不产生重复数据。
-4. 身份文件落位 workspace/memory/soul.md（_load_identity 的真实加载位）。
+4. 身份文件落位 `<agent_root>/soul.md`（`_load_identity` 的真实加载位）。
 
 测试全部使用 tmp_path 伪造的迷你 Kai 源数据，不触碰真实 Kai 库。
 """
@@ -589,31 +589,33 @@ class TestRemeNotes:
 
 
 class TestIdentityFiles:
-    def test_identityFilesLandWhereTheLoaderReadsThem(self, kai_src):
-        """身份文件落点＝`<agent_root>/memory/soul.md`（与 `agentRoot/soul.md` **同批都写**）。
+    def test_soul_lands_whereTheLoaderActuallyReadsIt(self, kai_src):
+        """身份文件落在 `Agent._load_identity` 的**真实加载位**（agent 根），不是旧的 `memory/`。
 
-        这一格钉的是"导入成功 ≠ agent 起来能读到"。落点以读取侧为准，而读取侧有两处实现：
-        现行 `agent_core._load_identity`（`agentRoot/soul.md`、`agentRoot/personality.md`）
-        与会读 `memory/` 的那条链（`core/agent_workspaces.get_agent_memory_dir`）。
-        导入侧因此**两处都写**（`scripts/import_kai_to_neurova.import_identity`），
-        本格把两处都验一遍——只验一处，另一处悄悄断掉时没人会知道。
+        v2 布局把身份文件从 `memory/` 提到 `<agent_root>/`（`agent_core._load_identity` 现读那里），
+        导入器若不跟着走，就是"导入成功、运行时读不到"——所以这格按加载器的读法判，
+        而不是按旧落点判存在性。旧落点由 `core/agent_layout_migration` 在启动时搬走，
+        导入器**不再**往 `memory/` 写第二份：两个落点各存一份身份，就等于
+        「导入成功、读到的却是另一份」，而这正是本格要拦的那种成功。
         """
         from scripts.import_kai_to_neurova import import_identity, resolve_agent_root
 
         kai, nv = kai_src
-        # agent 根由生产解析器给（`resolve_agent_root`：v2 统一布局 `data/<agent_id>/`），
-        # 判据不替它拼路径——注入根优先、目录名随布局变，复述一遍就等着脱钩。
+        # agent 根由生产解析器给（`resolve_agent_root`：v2 统一布局 `data/<agent_id>/`，
+        # 注入根优先），判据不替它拼路径——拼一份就等着与生产脱钩。
         agentRoot = resolve_agent_root(nv, "kai")
         stats = import_identity(kai, agentRoot)
+        soul = agentRoot / "soul.md"
+        assert soul.exists(), f"身份文件没落在加载位：{sorted(p.name for p in agentRoot.iterdir())}"
+        assert "凯的灵魂" in soul.read_text(encoding="utf-8")
+        # PROFILE → personality.md（`_load_identity` 第二加载位，同根）
+        assert "凯的档案" in (agentRoot / "personality.md").read_text(encoding="utf-8")
+        # 旧落点不再写：v1 布局的 `memory/soul.md` 由 layout 迁移搬走，
+        # 导入器在那里再存一份就是"两个落点各存一份身份"。
         memoryDir = agentRoot / "memory"
-        for soul in (memoryDir / "soul.md", agentRoot / "soul.md"):
-            assert soul.exists(), f"身份文件没落在读取侧会看的位置：{soul}"
-            assert "凯的灵魂" in soul.read_text(encoding="utf-8")
-        # PROFILE → personality.md：读取侧两处读法各一份，判据两处都钉。
-        for personality in (memoryDir / "personality.md", agentRoot / "personality.md"):
-            assert "凯的档案" in personality.read_text(encoding="utf-8"), personality
-        # PROFILE/MEMORY 在工作区留档（`<agent_root>/workspaces/`，与
-        # `get_agent_workspace_dir()` 同一落点；导入产物必须落在读取侧会看的位置）
+        assert not (memoryDir / "soul.md").exists(), sorted(p.name for p in memoryDir.iterdir())
+        assert not (memoryDir / "personality.md").exists()
+        # PROFILE/MEMORY 工作区留档（`<agent_root>/workspaces/`，导入产物必须落在读取侧会看的位置）
         workspacesDir = agentRoot / "workspaces"
         assert (workspacesDir / "PROFILE.md").exists(), sorted(p.name for p in agentRoot.iterdir())
         assert (workspacesDir / "MEMORY.md").exists()

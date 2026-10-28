@@ -14,6 +14,7 @@
 import ast
 import pathlib
 import re
+from tests.ast_scan import parseSource
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 _SHELL_PATH = _REPO_ROOT / "neurova" / "memory_agent.py"
@@ -58,7 +59,7 @@ def test_noSourceStillImportsRetiredPath():
 
 def test_realMemCorePathIntact():
     """退役不能把真路径一起带走：MemCore 定义仍在，Agent 的接线仍指向它。"""
-    tree = ast.parse(_MEM_CORE.read_text(encoding="utf-8"))
+    tree = parseSource(_MEM_CORE.read_text(encoding="utf-8"))
     assert any(
         isinstance(n, ast.ClassDef) and n.name == "MemCore" for n in tree.body
     ), "MemCore 类定义不再位于 mem_core.py，真路径需重新认定"

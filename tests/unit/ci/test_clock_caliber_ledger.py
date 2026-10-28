@@ -47,6 +47,18 @@ CLOCK_PATTERNS = {
 #: 逐条结论台账：键 = 受保护子集相对路径，值 = (用到的时钟, 结论)。
 #: 结论文本必须点名"这份文件量什么、为什么这个口径"。
 CLOCK_LEDGER: Dict[str, tuple] = {
+    "tests/unit/api/test_consoleTurnOutlivesItsResponse.py": (
+        ("wallClock",),
+        "轮询护栏：等的是「后端那一轮在连接断开/回执返回之后仍要跑完」这件状态迁移，"
+        "墙钟读数只用来给等待封顶（到点仍未到就如实报缺），断言面全是结构不变量"
+        "（轮次未取消、事件已落、后续请求仍被受理），没有任何耗时上下界——"
+        "与 test_consoleStreamDisconnectKeepsTurn.py 同族形态。"
+    ),
+    "tests/unit/api/test_consoleStreamDisconnectKeepsTurn.py": (
+        ("wallClock",),
+        "同上（轮询护栏）：`deadline` 只封住「等 agent 完成/看见取消」这条等待的上界，"
+        "量的是墙上过了多久，不进任何判值；判据比的是取消语义是否生效，不是快不快。"
+    ),
     "tests/performance/test_perf_gate_contract.py": (
         ("threadCpu", "wallClock"),
         "门禁自检套件：判分面的取数口（measureThreadCpu）必须走本线程 CPU 时钟，"
@@ -165,6 +177,21 @@ CLOCK_LEDGER: Dict[str, tuple] = {
         "断言面全是结构不变量（信封键、`agent=`/`session=` 指针、正文不在旁路重复），"
         "没有一处耗时上下界。§6-418 入册时漏登这一格——加文件的同时没复跑本闸，"
         "与「逐文件单跑两次就够」的错觉同形。",
+    ),
+    "tests/unit/api/test_consoleStreamDisconnectKeepsTurn.py": (
+        ("wallClock",),
+        "唯一一处单调钟是**等断连被观测到的轮询护栏**：`deadline = time.monotonic() + 8.0` "
+        "配 `while not agent.completed and not agent.cancel_seen and time.monotonic() < deadline`，"
+        "等的是「回合被取消 / 上游断开」这件**状态迁移**。断言面全在状态上（cancel_seen、"
+        "回合是否仍可续、流是否收尾），没有一处耗时上下界——到点没到就如实红，"
+        "负载只会让它自己报，不会把结构契约写成墙钟阈值。",
+    ),
+    "tests/unit/api/test_consoleTurnOutlivesItsResponse.py": (
+        ("wallClock",),
+        "两处单调钟同形，都是**等状态到达的轮询护栏**：`deadline = time.monotonic() + 6.0` "
+        "与 `_await(seconds)` 里的 `while time.monotonic() < deadline`，等的是「回合在响应"
+        "断掉之后仍在跑」「后台续跑落定」这两件状态迁移。断言读的是回合表与流收尾，"
+        "不编码任何耗时上下界；到点未到就如实报缺状态。",
     ),
     "tests/unit/skills/test_marketFetchBudgetIsSingleSource.py": (
         ("wallClock",),

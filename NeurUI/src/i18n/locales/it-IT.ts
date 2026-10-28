@@ -1153,10 +1153,6 @@ export default {
     sandboxRequired: 'Sandbox richiesta',
   },
   skillEvo: {
-    adopt: 'Adotta',
-    adoptTarget: 'Abilità di destinazione',
-    adoptSuccess: 'Proposta in attesa creata',
-    adoptError: 'Adozione non riuscita',
     abVerify: 'Verifica a due bracci (holdout reale)',
     abHint: 'Stesso set di attività e stesso giudice: testo base contro testo candidato; sola lettura, non produce proposte.',
     abRunSimulated: 'Esegui braccio simulato',
@@ -1309,6 +1305,10 @@ export default {
     noMarketSkills: 'Nessuna abilità pubblica da importare',
     installSuccess: 'Installazione riuscita',
     installError: 'Installazione fallita',
+    adopt: 'Adotta',
+    adoptTarget: 'Abilità di destinazione',
+    adoptSuccess: 'Proposta in attesa creata',
+    adoptError: 'Adozione non riuscita',
   },
   skillPool: {
     pendingReview: "In attesa",

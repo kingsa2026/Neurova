@@ -38,6 +38,7 @@ from neurova.core.logger import get_logger
 from neurova.knowledge import parser_shadow
 from neurova.knowledge.ocr_engines import selectOcrEngine
 from neurova.knowledge.splitter import build_entry_chunks
+from neurova.security.skill_scanner import DOC_ASSET_SUFFIXES
 
 logger = get_logger(__name__)
 
@@ -313,14 +314,29 @@ def _chunkDocument(
     return allChildren, allParents
 
 
-def _fileTypeFor(ext: str) -> str:
-    # 后缀表从 `security.skill_scanner` 那一份取（教义第 6 条）：它同时被「内容不是可执行
-    # 字节」那条判定使用，同一份事实在两处各写一份就必然一边收一边漏。
-    from neurova.security.skill_scanner import TEXT_DOCUMENT_SUFFIXES
+#: 抽取器只认两档：`text` 走纯文本抽取，`document` 走文档抽取。
+#: 这张表是**抽取契约**，与"哪些后缀算文档类、可降为报告项"那份安全裁决不是同一件事——
+#: 后者只在 `security/skill_scanner.py` 的 `DOC_ASSET_SUFFIXES` 一处定义（§6-189 裁定甲），
+#: 本表以它为基础，不再另抄一份文档后缀。
+#: 两处形状**刻意不同**：本表以字符串（`os.path.splitext` 的产物）为语义，故从裁决表派生
+#: 再 `split`；裁决表那处是容器字面量。同形会被
+#: `tests/unit/security/test_installGateDocFilesAreReportOnly.py` 判成"豁免口径第二份"
+#: ——它按"文档后缀凑在一个容器字面量里"找副本，这判据是对的：两份同形的表迟早各自漂移。
+#:
+#: `.rst`/`.log` 两种不在裁决表里：没人当资产，却照样该按文本读，故在此追加。
+_TEXT_EXTRACT_SUFFIXES = frozenset(
+    " ".join(sorted(DOC_ASSET_SUFFIXES)).split() + [".rst", ".log"]
+)
 
-    if ext in TEXT_DOCUMENT_SUFFIXES:
-        return "text"
-    return "document"
+
+def _fileTypeFor(ext: str) -> str:
+    """`extract_attachment_text` 的 `file_type` 入参：`text` 走解码抽取，其余走格式分支。
+
+    后缀表是**本模块上方那一张**（从安全裁决表 `DOC_ASSET_SUFFIXES` 派生、再追加
+    `.rst`/`.log`）。`security.skill_scanner.TEXT_DOCUMENT_SUFFIXES` 是同一件事的第二份
+    口径（9 个后缀），两张表迟早各自漂移——抽取契约只认一处。
+    """
+    return "text" if ext in _TEXT_EXTRACT_SUFFIXES else "document"
 
 
 def parse_document(

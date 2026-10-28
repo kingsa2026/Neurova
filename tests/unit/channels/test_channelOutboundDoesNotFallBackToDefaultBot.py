@@ -31,6 +31,7 @@ import ast
 import pathlib
 
 import pytest
+from tests.ast_scan import parseSource
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
 MANAGER_PY = REPO / "neurova" / "channels" / "manager.py"
@@ -39,7 +40,7 @@ MANAGER_SRC = MANAGER_PY.read_text(encoding="utf-8")
 
 def _calleesInside(src: str, funcName: str) -> set:
     """某个函数体里被调用的名字集合（按形状数，不按注释里的名字）。"""
-    tree = ast.parse(src)
+    tree = parseSource(src)
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == funcName:
             out = set()
@@ -59,7 +60,7 @@ def _viewKeyForgers(src: str) -> list:
     （`resolve_session_scope_id` 里那条，2026-09-13 裁定的 `{agent_id}:{chat_id}` 口径）
     **同形不同域**，不在这条守卫的范围里——两份口径各自演进，硬并成一份就是制造耦合。
     """
-    tree = ast.parse(src)
+    tree = parseSource(src)
     owners = {}
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -260,7 +261,7 @@ class TestBroadcastSweepsEveryAgentInstance:
 
     def testBroadcastUsesTheOneViewKey(self):
         """键约定只许一份：`_adapterViewKey` 定义唯一，且四份对外视图都用它。"""
-        defs = [n for n in ast.walk(ast.parse(MANAGER_SRC))
+        defs = [n for n in ast.walk(parseSource(MANAGER_SRC))
                 if isinstance(n, ast.FunctionDef) and n.name == "_adapterViewKey"]
         assert len(defs) == 1, f"`_adapterViewKey` 定义了 {len(defs)} 次"
         for func in ("list_adapters", "health_check", "broadcast_message", "conflict_check"):

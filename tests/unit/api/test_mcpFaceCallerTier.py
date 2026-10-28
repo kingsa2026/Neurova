@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 from neurova.api import auth as nf_auth
 from neurova.api.endpoints import mcp_server_api
 from neurova.tool_layers.mcp_server import NeurovaMCPServer
+from tests.ast_scan import parseSource
 
 ENDPOINT = "/api/v1/mcp"
 
@@ -111,7 +112,7 @@ class TestCallerCarriesTheAgentAccessRuling:
 
         source = Path(mcp_server_api.__file__).read_text(encoding="utf-8")
         imported = set()
-        for node in ast.walk(ast.parse(source)):
+        for node in ast.walk(parseSource(source)):
             if isinstance(node, ast.ImportFrom) and node.module:
                 imported.add(node.module)
         assert "neurova.api.agent_access" in imported, (

@@ -27,6 +27,7 @@ import asyncio
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 pytestmark = pytest.mark.timeout(60)
 
@@ -36,7 +37,7 @@ _API_FILE = REPO / "neurova" / "api" / "endpoints" / "studio_api.py"
 
 def _moduleLevelBareSets(src: str) -> list[str]:
     """模块级 `X = set()` 且该名字在后面被 `.add(...)` 用过——就是无键句柄袋。"""
-    tree = ast.parse(src)
+    tree = parseSource(src)
     declared = {
         t.id for node in tree.body if isinstance(node, ast.Assign)
         for t in node.targets

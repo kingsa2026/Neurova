@@ -31,6 +31,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tests import ast_scan  # noqa: E402
+from tests.ast_scan import parseSource
 
 NEUROVA = REPO_ROOT / "neurova"
 
@@ -142,7 +143,7 @@ def touchesRealOptional(mod: str) -> bool:
 def placeholderViolations(source: str, rel: str):
     """返回「except ImportError 里赋 None，但所包导入一个第三方都不碰」的节点。"""
     try:
-        tree = ast.parse(source, filename=rel)
+        tree = parseSource(source, filename=rel)
     except SyntaxError as exc:
         return [("语法解析失败，扫描面未覆盖该文件", rel, 0, str(exc))]
     out = []
@@ -182,7 +183,7 @@ STUB_LEDGER: dict = {}  # type: ignore[type-arg]
 def stubViolations(source: str, rel: str):
     """返回「except ImportError 里定义同名 class/def 桩，而所包导入不触及真可选依赖」的节点。"""
     try:
-        tree = ast.parse(source, filename=rel)
+        tree = parseSource(source, filename=rel)
     except SyntaxError as exc:
         return [("语法解析失败，扫描面未覆盖该文件", rel, 0, str(exc))]
     out = []

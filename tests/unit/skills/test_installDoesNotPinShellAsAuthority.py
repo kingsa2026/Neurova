@@ -44,6 +44,7 @@ if str(REPO) not in sys.path:
 from neurova.security import artifact_digest as AD
 from neurova.skills.skill_install_gate import reset_install_gate_scanner
 from neurova.skills.skill_service import SkillService
+from tests.ast_scan import parseSource
 
 SKILL_MD = "# demo\n指令型技能的说明体。\n"
 ENTRY = "def main(**kwargs):\n    return {'ok': True, 'saw': sorted(kwargs)}\n"
@@ -173,7 +174,7 @@ class TestPinDecisionComesFromOnePredicate:
 
     def _callSites(self, rel):
         src = (REPO / rel).read_text(encoding="utf-8")
-        tree = ast.parse(src, filename=rel)
+        tree = parseSource(src, filename=rel)
         return [n.lineno for n in ast.walk(tree)
                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
                 and n.func.attr == PREDICATE]
@@ -199,7 +200,7 @@ class TestPinDecisionComesFromOnePredicate:
         **唯一实装自己那一处不算**——豁免按 AST 判（函数名），不按行号也不按文件名：
         按行号会在下次编辑后错位，按文件名会把整个文件的复查一起放掉（形态集 223）。
         """
-        tree = ast.parse(source, filename=where)
+        tree = parseSource(source, filename=where)
         insideDefinition = set()
         for fn in ast.walk(tree):
             if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) and fn.name == PREDICATE:
@@ -245,7 +246,7 @@ class TestPinDecisionComesFromOnePredicate:
         assert self._inlinedRestatements(onlyDefinition, "synthetic.py") == [], (
             "干净形态被误报，说明豁免没按 AST 认函数身份")
         src = (REPO / "neurova/skills/skill_service.py").read_text(encoding="utf-8")
-        tree = ast.parse(src, filename="skill_service.py")
+        tree = parseSource(src, filename="skill_service.py")
         bodies = [n for n in ast.walk(tree)
                   if isinstance(n, ast.FunctionDef) and n.name == PREDICATE]
         assert len(bodies) == 1 and any(isinstance(n, ast.BoolOp) for n in ast.walk(bodies[0])), (

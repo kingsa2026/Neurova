@@ -37,6 +37,7 @@ import pytest
 
 from neurova.core.turn_context import set_turn_identity
 from neurova.tool_executor import ToolExecutor
+from tests.ast_scan import parseSource
 
 SESSION_A = "t05-session-A"
 SESSION_B = "t05-session-B"
@@ -175,7 +176,7 @@ class TestSomMarksAreSessionScoped:
 
         import neurova.tool_executor as te
 
-        tree = ast.parse(pathlib.Path(te.__file__).read_text(encoding="utf-8"))
+        tree = parseSource(pathlib.Path(te.__file__).read_text(encoding="utf-8"))
         bare = [
             node.lineno
             for node in ast.walk(tree)

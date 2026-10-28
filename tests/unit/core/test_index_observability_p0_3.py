@@ -21,6 +21,7 @@ import pytest
 
 prometheus_client = pytest.importorskip("prometheus_client")
 from prometheus_client import REGISTRY  # noqa: E402
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DB_INDEXES = PROJECT_ROOT / "neurova" / "core" / "db_indexes.py"
@@ -60,7 +61,7 @@ class TestCollectorNotSecondSourceOfTruth:
 
     def test_no_static_index_list_constant(self):
         src = io.open(DB_INDEXES, encoding="utf-8").read()
-        tree = ast.parse(src)
+        tree = parseSource(src)
         for node in tree.body:
             if isinstance(node, ast.Assign):
                 for t in node.targets:
@@ -77,7 +78,7 @@ class TestCollectorNotSecondSourceOfTruth:
         里叙述历史（"全仓 155 处 CREATE INDEX"）属说明，不是能力。
         """
         src = io.open(DB_INDEXES, encoding="utf-8").read()
-        tree = ast.parse(src)
+        tree = parseSource(src)
         for node in ast.walk(tree):
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 # 只看作为 SQL 传入 execute 的字面量

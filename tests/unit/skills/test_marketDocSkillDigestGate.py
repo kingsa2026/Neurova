@@ -25,10 +25,12 @@ from pathlib import Path
 import pytest
 
 from tests import ast_scan
+
 from neurova.security import artifact_digest
 from neurova.skills import market_registry
 from neurova.skills.market_registry import _build_executable_skill
 from neurova.skills.skill_service import SkillService
+from tests.ast_scan import parseSource
 
 SKILL_MD = """---
 name: demo-skill
@@ -164,7 +166,7 @@ class TestProductionBuildersCarryThePin:
     def _builderCalls(self, source):
         """挑出对 `_build_executable_skill(` 的调用点，返回是否带了 pinnedDigest。"""
         found = []
-        for node in ast.walk(ast.parse(source)):
+        for node in ast.walk(parseSource(source)):
             if not isinstance(node, ast.Call):
                 continue
             fn = node.func

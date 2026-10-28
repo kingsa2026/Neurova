@@ -14,10 +14,10 @@ import base64
 import datetime
 import json
 import re
-import threading
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
+from neurova.core.lazy_singleton import lazySingleton
 from neurova.core.logger import get_logger
 from neurova.knowledge.document_pipeline import DocumentParseError, parse_document
 from neurova.knowledge.ingest_bus import (
@@ -358,20 +358,18 @@ async def runIngestWorker(
 
 
 _bridge: Optional[KnowledgeIngestBridge] = None
-#: DCL 的门（AGENTS.md §3）：无锁的那一版在并发下每个线程都会穿过 `if _bridge is None`
-#: 各建一份，先建的那份带着已注册的入站总线订阅被静默丢掉——消费者与生产者从此看不见彼此。
-_bridgeLock = threading.RLock()
 
 
+@lazySingleton("_bridge")
 def get_ingest_bridge() -> KnowledgeIngestBridge:
-    """懒建单例（DCL + RLock，AGENTS.md §3）：并发下只建一份。"""
-    global _bridge
-    if _bridge is not None:
-        return _bridge
-    with _bridgeLock:
-        if _bridge is None:
-            _bridge = KnowledgeIngestBridge()
-        return _bridge
+    """进程内唯一的入站桥（构造会建队列连接与 MQTT 传输面，无锁并发下会各建一份）。
+
+    缓存槽就是模块全局 `_bridge`：`lazySingleton` 把判空护在 RLock 里，复位写回同一个名字。
+    函数体只负责构造，判空不再在这里手写第二遍——手写那一份正是本档要退役的形态
+    （`if _bridge is None: _bridge = ...` 无锁，两个线程各建一份，前一份带着已注册的
+    传输面被静默丢弃）。
+    """
+    return KnowledgeIngestBridge()
 
 
 def ingestEnabled(adapter: Any) -> bool:

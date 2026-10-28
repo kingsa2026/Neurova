@@ -33,6 +33,7 @@ import sys
 from pathlib import Path
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 OLD_CHAIN = REPO_ROOT / "tests" / "integration" / "test_full_chain.py"
@@ -64,8 +65,8 @@ def _isAwaitWrapped(node, parentMap) -> bool:
     return False
 
 
-def _syncRouteCallsIn(tree) -> list:
-    """挑出"同步地把 Message 喂给 `.route(`"的行号（收已解析的树，不自付 `ast.parse`）。
+def _syncRouteCallsIn(tree: ast.AST) -> list:
+    """挑出"同步地把 Message 喂给 `.route(`"的行号。
 
     只认三件同时成立：非 async 上下文、属性名 route、**第一参是 `Message(...)` 形态**；
     且排除已被 `asyncio.run(...)` / `loop.run_until_complete(...)` 包住的调用——
@@ -115,6 +116,7 @@ class TestTheOldIntegrationFileIsRetired:
         不是把人引回去的活引用。判据按**行**判，不对整档豁免。
         """
         hits = []
+        # 枚举走共享预算入口（`ast_scan.sourceRefsUnder`，产物目录由它自身剪掉）
         for ref in _pySourcesUnderTheScanFace():
             if ref.path.name == Path(__file__).name:
                 continue
@@ -124,7 +126,6 @@ class TestTheOldIntegrationFileIsRetired:
                           or "from tests.integration import test_full_chain" in line)
                 if refers and "退役" not in line:
                     hits.append("%s:%d" % (ref.path.relative_to(REPO_ROOT), lineno))
-
         assert hits == [], (
             "还有活引用指向旧集成档（会把人引回死文件）；确实要提就带上「退役」二字：%s" % hits[:5])
 
@@ -141,6 +142,9 @@ class TestTheDeadFacadesStayDead:
 class TestNobodyCallsTheAsyncRouterSynchronously:
     def testNoSyncRouteCallsRemainInTestsOrScripts(self):
         offenders = []
+        # 枚举与解析都走共享预算入口（tests/ast_scan.py）：私有 rglob + ast.parse 会把
+        # 「代码总量」编码成墙钟上界（Issue #148 的根因形态）。产物目录由 filesUnder
+        # 自身剪掉，这里不再重复过滤。
         candidates = 0
         # 枚举面：不带预筛地量一次根（走同一个共享入口，避免"我只数了预筛后的"那种自证）。
         enumerated = len(_pySourcesUnderTheScanFace(hints=()))
@@ -149,16 +153,15 @@ class TestNobodyCallsTheAsyncRouterSynchronously:
         for ref in _pySourcesUnderTheScanFace(hints=(".route(",)):
             candidates += 1
             path = ref.path
-            source = ref.code
             try:
                 # 交给 `_syncRouteCallsIn` 的必须是**已解析的树**：`ast_scan` 的引用体是源码串，
                 # 直接传进去会让 `ast.walk` 撞上 str（口径写错，红的是判据自己而不是被检形状）。
-                lines = _syncRouteCallsIn(ast.parse(source))
+                # 解析走一次性入口，不留常驻语法树（本判据只扫一次）。
+                lines = _syncRouteCallsIn(ast_scan.transientTree(path))
             except SyntaxError:
                 continue
             if lines:
                 offenders.append("%s:%s" % (path.relative_to(REPO_ROOT), lines))
-
         # 面自证拆两条（形态 404）：枚举面证"根指得到"，候选面证"预筛没把命中滤空"。
         # 现算 tests 2483 ＋ scripts 76 ＝ 2559 个 .py；根少指一层（只剩 scripts）就掉到 76。
         assert enumerated >= 2000, (
@@ -174,9 +177,9 @@ class TestNobodyCallsTheAsyncRouterSynchronously:
         awaited = "async def t():\n    result = await router.route(Message(content='hi'))\n"
         wrapped = "def t():\n    result = asyncio.run(network.route(query_vec))\n"
 
-        assert _syncRouteCallsIn(ast.parse(bad)) == [2], "同步样本没被点名，守卫会恒绿"
-        assert _syncRouteCallsIn(ast.parse(awaited)) == [], "await 形态被误报了"
-        assert _syncRouteCallsIn(ast.parse(wrapped)) == [], (
+        assert _syncRouteCallsIn(parseSource(bad)) == [2], "同步样本没被点名，守卫会恒绿"
+        assert _syncRouteCallsIn(parseSource(awaited)) == [], "await 形态被误报了"
+        assert _syncRouteCallsIn(parseSource(wrapped)) == [], (
             "把 asyncio.run(...) 里的真 async 调用也算红了——判据问错对象")
 
     def testTheReferenceScannerSparesAPointerButCatchesABareReference(self):

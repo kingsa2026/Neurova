@@ -40,6 +40,7 @@ from neurova.api.deps import get_current_user as depsUser
 from neurova.api.endpoints import chat as chat_ep
 from neurova.api.endpoints import console as console_ep
 from neurova.session_manager import SessionManager
+from tests.ast_scan import parseSource
 
 _REPO = Path(__file__).resolve().parents[3]
 AGENT_ID = "stream-owner-agent"
@@ -192,7 +193,7 @@ class TestTheWriteSitsWhereTheTaskCanSeeIt:
 
     @staticmethod
     def _orderViolation(source: str) -> str:
-        tree = ast.parse(source)
+        tree = parseSource(source)
         stream = next((n for n in tree.body
                        if isinstance(n, ast.AsyncFunctionDef) and n.name == "chat_stream"), None)
         if stream is None:

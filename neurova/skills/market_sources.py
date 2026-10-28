@@ -367,7 +367,7 @@ def _describeExtractionFailure(exc: Exception, payload: bytes, dest: Path) -> st
     **处置方向完全不同**：前者该拒、中者该退回上游、后者该改部署——读的人拿不到区分，
     就会去改一个没坏的包（§6-259 那条 "zip refused" 的真实成因正是第三种，被折了 17 天）。
     """
-    if isinstance(exc, OSError):
+    if isinstance(exc, (OSError, safe_archive.UnsafeArchiveError)):
         # 文案与判定都取 `refusalForPathBudget`（准入那一步用的同一份），不在这里写第二遍
         tooLong = refusalForPathBudget(payload, dest)
         if tooLong:
@@ -382,12 +382,16 @@ def extractRemoteSkillZipRefusal(skill_id: str, payload: bytes, dest: Path) -> s
     越出目标目录的判定与解包机制在 `neurova/security/safe_archive.py`——本函数此前自己
     写过一份（§6-172 批 32 收敛），两份并存时咽喉那 6 个调用点修了这里也不会跟着修。
     `extractall` 非事务，可能留下部分文件，调用方 uninstall 可清理。
+
+    落点预算在**解包之前**判（`refusalForPathBudget`）：跨平台的拒因不该由"这台机器的
+    文件系统有没有拦下它"决定——Linux 的 NAME_MAX 只管单个成员，`根(135) + 成员(125) = 261`
+    在 Windows 上是硬失败、在 Linux 上照装不误，等到失败征兆出现时 `extractall` 已留下半棵树。
     """
     try:
         # 长根必须**拒**，不能等解包在 Windows 上撞 ENAMETOOLONG 再补一句说明：
         # 那种写法在 Linux/macOS 上永远绿（那边单段/总长都宽松），同一只包在部署机上
         # 装一半失败——判据 `test_longRootFailureNamesPathTooLong` 要的正是"这里就拒"。
-        # 判定口径与 `agent_migration` 同一条（部署形态一处一套，见 `WINDOWS_MAX_PATH`）。
+        # 判定与点名同源（`refusalForPathBudget`），且必须在解包机制之前。
         tooLong = refusalForPathBudget(payload, dest)
         if tooLong:
             raise OSError(errno.ENAMETOOLONG, tooLong)

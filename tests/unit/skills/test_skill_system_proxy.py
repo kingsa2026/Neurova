@@ -12,6 +12,7 @@ TDD vertical slices:
 import importlib
 import sys
 from pathlib import Path
+from tests.ast_scan import parseSource
 
 
 def test_get_skill_registry_proxied():
@@ -100,7 +101,7 @@ def test_facadeIsStaticReexport():
     import ast
 
     init_path = Path(__file__).resolve().parents[3] / "neurova" / "skill_system" / "__init__.py"
-    tree = ast.parse(init_path.read_text(encoding="utf-8"))
+    tree = parseSource(init_path.read_text(encoding="utf-8"))
     defined = sorted(
         node.name
         for node in tree.body

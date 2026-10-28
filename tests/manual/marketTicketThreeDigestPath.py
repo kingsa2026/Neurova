@@ -43,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 WORK_ROOT = isolatedDataRoot(prefix="neurovaTicket3")
 
@@ -107,13 +108,14 @@ def _runMaybeCoroutine(value):
     return value
 
 
+# 读数里有 ⇒ 这类非 GBK 字符：控制台/重定向一律按 UTF-8 写，免得 print 自己抛。
+# 钉在模块级而不是 `main()` 里：判据认的是**模块顶层**那一次调用，写在 `main()` 内
+# 只覆盖被 main 包住的那一半输出（`__main__` 之外先跑的路由、异常收尾都漏在外面）。
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+
 def main():
-    # 读数里有 ⇒ 这类非 GBK 字符：控制台/重定向一律按 UTF-8 写，免得 print 自己抛
-    for stream in (sys.stdout, sys.stderr):
-        try:
-            stream.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:  # noqa: BLE001 —— 老环境不支持就算了，读数不该被它打断
-            pass
     startedAt = time.time()
     before = _dataDirFingerprint()
     realCheck = artifact_digest.checkArtifact

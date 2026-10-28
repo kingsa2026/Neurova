@@ -19,6 +19,7 @@ import pytest
 
 from neurova.builtin_tools import get_registered_tool_names
 from neurova.evolution.nl_synthesizer import NLToolSynthesizer
+from tests.ast_scan import parseSource
 
 
 @pytest.fixture
@@ -79,7 +80,7 @@ class TestAlphabetIsRegistered:
 
         offenders = []
         for ref in sourceRefsUnder(PRODUCTION_ROOT):
-            tree = ast.parse(ref.code)
+            tree = parseSource(ref.code)
             for node in ast.walk(tree):
                 if isinstance(node, ast.Constant) and node.value in _PHANTOM_NAMES:
                     offenders.append(f"{ref.path.relative_to(PRODUCTION_ROOT)}:{node.lineno}")

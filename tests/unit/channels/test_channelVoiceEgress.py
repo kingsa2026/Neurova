@@ -35,6 +35,7 @@ from neurova.channels.voice_egress import (  # noqa: E402
     VoiceReply,
     resolveVoiceReply,
 )
+from tests.ast_scan import parseSource
 
 
 def _makeWav(path: pathlib.Path, seconds: float = 0.05) -> pathlib.Path:
@@ -273,7 +274,7 @@ class TestDeclaredCapabilityMustBeImplemented:
     def test_detectorIsNotBlind(self):
         """反向对照：同一段代码里把 send_message 换成不读任何 kwargs，探测器必须报出来。"""
         src = "class A:\n    voiceOutMode = VOICE_OUT_AUDIO_FILE\n    async def send_message(self, c, x, **kw):\n        return 1\n"
-        tree = ast.parse(src)
+        tree = parseSource(src)
         cls = tree.body[0]
         send = cls.body[1]
         read = {n.id for n in ast.walk(send) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
@@ -378,7 +379,7 @@ class TestFeishuEgressIsReal:
     def test_declaringModeIsBackedByAnUploadCall(self):
         """AST 反查：声明 audio_file 的适配器，其语音分支必须真调用上传面。"""
         src = (CHANNELS / "feishu.py").read_text(encoding="utf-8")
-        tree = ast.parse(src)
+        tree = parseSource(src)
         cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "FeishuAdapter")
         called = {
             getattr(c.func, "attr", "")

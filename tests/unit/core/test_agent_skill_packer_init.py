@@ -15,6 +15,7 @@ import ast
 import pathlib
 
 import pytest
+from tests.ast_scan import parseSource
 
 
 def _get_agent_core_source() -> str:
@@ -54,11 +55,39 @@ class TestSkillPackerParamName:
         assert "min_occurrences=" not in source, \
             "agent_core.py 仍有错误的参数名 min_occurrences=，应为 min_pattern_occurrences="
 
-    def test_has_correct_param_name(self):
-        """验证源码中有正确的 min_pattern_occurrences 参数名"""
+    def test_constructorKwargsExistOnTheRealSignature(self):
+        """构造面用到的每个关键字参数，必须真在 `AutoSkillBuilder.__init__` 的签名上。
+
+        上一版这里断言的是**源码里出现过** `min_pattern_occurrences=` 这个字符串。那是一条
+        源码文本判据，读的不是契约：
+          · 它因为"少写一个 kwarg"红（`min_success_rate` 才是本仓给的值，`min_pattern_occurrences`
+            走类默认值），红得有理——但断言文字说的是另一件事；
+          · 它被删掉一个字符就能"修绿"——把没人用的参数补回源码即可，构造面照旧错。
+        文本判据两头都不成立，所以改判**签名**：从 `agent_core` 里那份构造调用取出关键字名字，
+        逐个对着 `inspect.signature` 验。少传、传错、拼错都红，且红在真原因上。
+        """
+        import inspect
+
+        from neurova.evolution.skill_encapsulation import AutoSkillBuilder
+
         source = _get_agent_core_source()
-        assert "min_pattern_occurrences=" in source, \
-            "agent_core.py 缺少正确的参数名 min_pattern_occurrences="
+        tree = parseSource(source)
+        call = next(
+            (node for node in ast.walk(tree)
+             if isinstance(node, ast.Call)
+             and ((isinstance(node.func, ast.Name) and node.func.id == "AutoSkillBuilder")
+                  or (isinstance(node.func, ast.Attribute) and node.func.attr == "AutoSkillBuilder"))),
+            None,
+        )
+        assert call is not None, "agent_core.py 里找不到 AutoSkillBuilder 的构造调用——判据失去对象"
+
+        accepted = set(inspect.signature(AutoSkillBuilder.__init__).parameters)
+        offered = {kw.arg for kw in call.keywords if kw.arg}
+        unknown = sorted(offered - accepted)
+        assert not unknown, (
+            "agent_core.py 给 AutoSkillBuilder 传了它签名上没有的参数 %s（真签名接受 %s）"
+            % (unknown, sorted(accepted - {"self"}))
+        )
 
 
 class TestSkillPackerExceptionType:
@@ -71,7 +100,7 @@ class TestSkillPackerExceptionType:
         修复后：except Exception as e — 覆盖所有常规异常
         """
         source = _get_agent_core_source()
-        tree = ast.parse(source)
+        tree = parseSource(source)
 
         skill_packer_try = _find_skill_packer_init_node(tree)
         assert skill_packer_try is not None, \
@@ -95,7 +124,7 @@ class TestSkillPackerExceptionType:
     def test_exception_caught_is_broad_enough(self):
         """验证 except 子句能捕获 Exception（覆盖 TypeError）"""
         source = _get_agent_core_source()
-        tree = ast.parse(source)
+        tree = parseSource(source)
 
         skill_packer_try = _find_skill_packer_init_node(tree)
         assert skill_packer_try is not None
@@ -132,7 +161,7 @@ class TestSkillPackerNoneFallback:
         修复后：except 分支显式 self.skill_packer = None
         """
         source = _get_agent_core_source()
-        tree = ast.parse(source)
+        tree = parseSource(source)
 
         skill_packer_try = _find_skill_packer_init_node(tree)
         assert skill_packer_try is not None
@@ -163,7 +192,7 @@ class TestSkillPackerDisabledWhenFlagFalse:
     def test_skill_packer_guarded_by_enable_flag(self):
         """验证 AutoSkillBuilder 初始化受 enable_skill_packer 配置守卫"""
         source = _get_agent_core_source()
-        tree = ast.parse(source)
+        tree = parseSource(source)
 
         # 找到包含 AutoSkillBuilder 的 try 块
         skill_packer_try = _find_skill_packer_init_node(tree)

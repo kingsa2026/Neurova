@@ -14,8 +14,8 @@
                                     user 轮、tool_result 折叠不丢 assistant 文本）
 
 身份：
-  SOUL.md → agent_workspaces/kai/memory/soul.md（Agent._load_identity 真实加载位）
-  PROFILE.md → memory/personality.md + workspace 根留档
+  SOUL.md → data/kai/soul.md（Agent._load_identity 真实加载位）
+  PROFILE.md → data/kai/personality.md + workspaces/ 留档
   MEMORY.md → workspace 根留档
 
 幂等：记忆按 (agent_id, content, created_at) 去重；会话按消息
@@ -548,16 +548,14 @@ def import_chats(kai_root: Path, sessions_dir: Path, agent_id: str = "kai") -> D
 
 
 def import_identity(kai_root: Path, agent_root: Path) -> Dict[str, int]:
-    """SOUL.md → `<agent_root>/soul.md` **与** `<agent_root>/memory/soul.md`；
-    PROFILE.md → 同两处的 `personality.md` + workspace 留档；MEMORY.md → workspace 留档。
-    全部覆盖式同步（源即真相）。
+    """SOUL.md → `<agent_root>/soul.md`；PROFILE.md → `<agent_root>/personality.md` + 工作区留档；
+    MEMORY.md → 工作区留档。全部覆盖式同步（源即真相）。
 
-    **两处都写**，因为读取侧今天有两处实现，谁也没被退役：
-    ① 现行 `agent_core._load_identity` 读 `<agent_root>/soul.md`、`<agent_root>/personality.md`；
-    ② 另一条链经 `core/agent_workspaces.get_agent_memory_dir` 取 `<agent_root>/memory/`。
-    只写一处就会出现"导入成功、运行时读到默认身份"——那是最坏的一种"成功"，
-    而且两处谁在读取决于调用链，静态看代码看不出来。两份落点写在同一个 mapping 里，
-    同源同批，不存在第二份推导。
+    落点是 `Agent._load_identity` 的**真实加载位**（v2 布局起身份文件在 agent 根，
+    不再藏在 `memory/` 或工作区里）：写到别处等于导入成功、运行时读不到。
+    `memory/soul.md` 那一份是 **v1 布局的旧落点**，不再写——旧物由
+    `core/agent_layout_migration` 在启动时搬回 agent 根，导入器再写一份就是
+    在两个落点各存一份身份（第二次导入时两份还可能各写各的）。
     """
     kai_root = Path(kai_root)
     agent_root = Path(agent_root)
@@ -569,9 +567,7 @@ def import_identity(kai_root: Path, agent_root: Path) -> Dict[str, int]:
 
     mapping = [
         (kai_root / "SOUL.md", agent_root / "soul.md"),
-        (kai_root / "SOUL.md", memory_dir / "soul.md"),
         (kai_root / "PROFILE.md", agent_root / "personality.md"),
-        (kai_root / "PROFILE.md", memory_dir / "personality.md"),
         (kai_root / "PROFILE.md", workspace / "PROFILE.md"),
         (kai_root / "MEMORY.md", workspace / "MEMORY.md"),
     ]

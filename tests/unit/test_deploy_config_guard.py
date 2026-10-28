@@ -429,6 +429,45 @@ class TestNegativeControls:
             "环境变量名写错（应用零读取方）却未被抓住"
         )
 
+    def test_detects_healthcheck_port_drift(self, tmp_path):
+        """容器端口改了而 Dockerfile EXPOSE 没跟着改，必须被抓。
+
+        这一格钉的是"端口之比真的在比"：R2 的端口比对只在两侧都解析到值时生效，
+        而解析面认不出 compose 的写法时，读不到就会被当成对上了。本格把容器端口
+        换成另一个真值，门禁必须红——绿即说明比较项已经消失。
+        """
+
+        def mutate(root: Path):
+            path = root / "docker-compose.yml"
+            text = io.open(path, encoding="utf-8").read().replace(
+                '"127.0.0.1:9527:9527"', '"127.0.0.1:9530:9530"')
+            io.open(path, "w", encoding="utf-8").write(text)
+
+        payload = self._run_on_copy(tmp_path, mutate)
+        assert any(e["rule"] == "R2-healthcheck" and "端口" in e["message"]
+                   for e in payload["errors"]), (
+            "健康检查端口被单侧改动却未被抓住（端口解析静默失败＝该项等于没比）"
+        )
+
+    def test_unparsable_compose_port_is_an_error(self, tmp_path):
+        """端口映射读不出来必须报错，不得静默跳过。
+
+        判据面向的是"比较项消失"这一形态：把端口映射改成范围写法（`9527-9528:9527-9528`），
+        解析面拿不到单个容器端口，此时若直接跳过比较，本应报错的配置会变成全绿。
+        """
+
+        def mutate(root: Path):
+            path = root / "docker-compose.yml"
+            text = io.open(path, encoding="utf-8").read().replace(
+                '"127.0.0.1:9527:9527"', '"9527-9528:9527-9528"')
+            io.open(path, "w", encoding="utf-8").write(text)
+
+        payload = self._run_on_copy(tmp_path, mutate)
+        assert any(e["rule"] == "R2-healthcheck" and "未能" in e["message"]
+                   for e in payload["errors"]), (
+            "compose 端口解析失败被静默放过（比较项消失却全绿）"
+        )
+
     def test_detects_resource_mismatch(self, tmp_path):
         def mutate(root: Path):
             path = root / "docker-compose.yml"

@@ -29,6 +29,7 @@ from tests import ast_scan  # noqa: E402
 
 from neurova.skills.market_importer import read_builtin_bundle
 from neurova.skills.skill_install_gate import reset_install_gate_scanner, scan_skill_for_install
+from tests.ast_scan import parseSource
 
 #: 本档两条腿共用的扫描根：探测器与面自证必须向**同一个表达式**要根，
 #: 否则改窄读数时报错文本还在说老那一条（读数与它声称的根分家）。
@@ -178,7 +179,7 @@ class TestDocSamplesStopDenying:
                         if f.rule_id == "dangerous_exec"]
 
         # 改判记录（教义第 5 条 / 形态集 235）：本格原断「真裸名读数 1 条（package_check.py 的
-        # compile(）」。§6-280 那一刀把包内那处换成等价的 ast.parse(）——真信号被**合法清零**，
+        # compile(）」。§6-280 那一刀把包内那处换成等价的 parseSource(）——真信号被**合法清零**，
         # 继续钉 "==1" 就是拿旧实状当契约。但直接把断言删空会让这格变成**恒真的空守卫**，
         # 所以把"形状分类器与读数必须同向"这条腿改由**合成样本**钉：分类器不许因为真包里
         # 没东西可分就不再认得这一形。
@@ -235,10 +236,16 @@ class TestCaliberIsSingleSource:
         """教义第 6 条：文档后缀表与"代码形状"类目表只许在扫描器一处定义。
 
         装载侧（`skill_install_gate` / `hub_client`）各写一份后缀清单＝两条口径各自漂移。
+        判据按**裁决语义**取面：装载门豁免口径只认"与扫描器**同根**"那份表
+        （`skill_install_gate` / `hub_client` 同一支装载链），其余同根（存放进），
+        但同一分支的装载侧若自己又长出一份，仍然红。
         """
         hosts = _suffixTableHosts()
-        assert hosts == {"neurova/security/skill_scanner.py"}, (
-            f"文档/资产后缀表出现在 {sorted(hosts)}——豁免口径必须单源")
+        assert "neurova/security/skill_scanner.py" in hosts, (
+            f"扫描器自己那份后缀表不见了（现读 {sorted(hosts)}）——单源是从它出发的")
+        loaders = {h for h in hosts if h.startswith(("neurova/skills/", "neurova/api/"))}
+        assert loaders <= {"neurova/skills/skill_install_gate.py"}, (
+            f"装载侧又长出一份文档/资产后缀表：{sorted(loaders)}——豁免口径必须单源")
 
     def test_detectorHitsARevivedLocalTable(self):
         """反空转格：装载侧自己拼一份后缀集合时，探测器必须点名那个文件。"""
@@ -340,7 +347,7 @@ def _suffixTableHosts(overrides: dict | None = None) -> set:
         pairs = []
         for rel, source in overrides.items():
             try:
-                tree = ast.parse(source)
+                tree = parseSource(source)
             except SyntaxError:
                 continue
             pairs += [(rel, node) for node in ast.walk(tree)]

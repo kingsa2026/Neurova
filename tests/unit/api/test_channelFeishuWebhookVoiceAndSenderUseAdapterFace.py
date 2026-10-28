@@ -48,6 +48,7 @@ from neurova.channels.voice_ingress import (  # noqa: E402
     AUDIO_BYTES_KEY,
     INBOUND_VOICE_PLACEHOLDER,
 )
+from tests.ast_scan import parseSource
 
 WEBHOOK = "/api/v1/channel-adapters/feishu/webhook"
 VERIFY_TOKEN = "fs-verification-token-batch26"
@@ -247,7 +248,7 @@ def _bannedShapesIn(src: str, funcName: str) -> list:
     排除型断言会把合法代码一起报掉，本仓记过这一族）。
     """
     found = []
-    tree = ast.parse(src)
+    tree = parseSource(src)
     target = next((n for n in ast.walk(tree)
                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == funcName),
                   None)

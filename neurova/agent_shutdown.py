@@ -171,13 +171,25 @@ async def shutdown_agent(agent) -> None:
         # B4/003 轮补（Issue #90）：ContextPool 的持久台账常驻连接（一个 agent 一个
         # 库文件）——不入清单则同一根因再现：关闭/删除 agent 时 sqlite 句柄残留。
         (getattr(agent, "context_orchestrator", None), "context_pool"),
+        # 同上一条的同一个持有者：`init_context_system()` 建出的 UnifiedContextInjector
+        # 在**全局总线**上挂了三条订阅（`initialize()` 时），而 bound method 持有 `self`
+        # ⇒ 不退订就整张上下文/记忆对象图连同原生内存一起被钉住。受保护子集每档建一个
+        # app，实测每轮 +230MB 单向累积，到 83% 撞 SIGKILL（第四次 137 的真根因）。
+        # 注意取的是**退订口**不是 shutdown/close：注入器只 initialize() 过（INITIALIZED 态），
+        # `stop()`（`BaseModule.stop`）在这种态下只打一行 "not running" 就返回、什么都不做，
+        # 订阅照样留着——这一条正是第一版修完读数不变的原因。
+        (getattr(agent, "context_orchestrator", None), "_unifiedInjector"),
     ):
         if _holder is None:
             continue
         _component = getattr(_holder, _attr, None)
         if _component is None:
             continue
-        _closer = getattr(_component, "shutdown", None) or getattr(_component, "close", None)
+        _closer = (
+            getattr(_component, "shutdown", None)
+            or getattr(_component, "close", None)
+            or getattr(_component, "unsubscribeAllEvents", None)
+        )
         if _closer is None:
             continue
         try:
