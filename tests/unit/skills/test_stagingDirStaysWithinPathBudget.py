@@ -29,6 +29,7 @@ from neurova.security import artifact_digest as AD
 from neurova.skills.market_registry import _STAGING_IGNORED
 from neurova.skills.skill_install_gate import reset_install_gate_scanner
 from neurova.skills.skill_service import SkillService
+from tests.ast_scan import parseSource
 
 REPO = Path(__file__).resolve().parents[3]
 SERVICE_SRC = REPO / "neurova" / "skills" / "skill_service.py"
@@ -177,7 +178,7 @@ class TestStagingNameBuilderIsSingleSourced:
 
     def _bodiesHoldingPrefix(self, source: str):
         hits = []
-        for node in ast.walk(ast.parse(source)):
+        for node in ast.walk(parseSource(source)):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             for x in ast.walk(node):

@@ -197,8 +197,9 @@ class TestEndToEndOnSyntheticRepos:
             "from app.logic import answer\n\n"
             "def test_answer():\n"
             f"    assert answer() == {expected}\n", encoding="utf-8")
-        # 宿主签名配置的隔离由 `_gitEnvironment()` 一处给（`GIT_CONFIG_*` 传下去），
-        # 这里不再写第二份 `-c commit.gpgsign=false`：两处各写一遍时，改一处另一处静默失效。
+        # 宿主签名配置的隔离由 `_gitEnvironment()` 一处给（`GIT_CONFIG_*` 传下去）；
+        # 命令里不再写第二份 `-c commit.gpgsign=false`：两处各写一遍时，改一处另一处静默失效
+        # （宿主 `commit.gpgsign=true` 而签名程序不可用时，合成仓的 commit 会以 128 炸掉）。
         for args in (["init", "-q"], ["add", "."],
                      ["-c", "user.email=t@t", "-c", "user.name=t",
                       "commit", "-q", "-m", "base"]):

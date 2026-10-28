@@ -19,6 +19,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from tests.ast_scan import parseSource
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -320,7 +321,7 @@ class TestEndToEndSkillAcquisitionChain:
         # 查文本会被自己的自陈抓红（本批第三次撞这一形）。
         import ast as _ast
 
-        tree = _ast.parse(inspect.getsource(skills))
+        tree = parseSource(inspect.getsource(skills))
         swallowed = [
             f":{node.lineno}"
             for node in _ast.walk(tree)

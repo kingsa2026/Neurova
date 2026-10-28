@@ -182,8 +182,6 @@ def _measure(manager: MemoryManager, pickQuery) -> dict:
 
 @pytest.fixture
 def recallCorpus(tmp_path):
-    from neurova.embedding import get_embedding_engine
-
     from tests.memory_embedding_precondition import requireRealEmbeddingOrSkip
 
     requireRealEmbeddingOrSkip("联想召回基线（本判据测的是生产同款稠密+词法双路检索）")

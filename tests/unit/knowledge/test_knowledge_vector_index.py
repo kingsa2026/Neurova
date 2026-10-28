@@ -39,6 +39,13 @@ class RealContractEngine(StubEngine):
     """
 
     def encode_batch(self, texts):
+        # `EmbeddingResult` 住在真 ONNX 引擎模块里，而那个模块顶层 `import numpy`——
+        # CI 的精简锁按设计不含 numpy ⇒ 这一格从前在 CI 上**测的是一句假失败**
+        # （契约一个字节都没验到，验的是"这台机器装没装 numpy"）。缺依赖时跳过并点名，
+        # 不把"缺依赖"画成"契约破了"（教义第 2 条）。
+        pytest.importorskip(
+            "numpy",
+            reason="EmbeddingResult 的定义在真 ONNX 引擎模块里，该模块顶层依赖 numpy")
         from neurova.embedding.onnx_embedding import EmbeddingResult
 
         return EmbeddingResult(

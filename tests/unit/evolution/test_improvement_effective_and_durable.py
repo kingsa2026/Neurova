@@ -26,6 +26,7 @@ from neurova.evolution.skill_experience import SkillExperienceStore
 from neurova.evolution.skill_improver import ImprovementType, SkillImprovement
 from neurova.post_chat_pipeline import PostChatPipeline
 from neurova.skill_system import Skill, SkillRegistry
+from tests.ast_scan import parseSource
 
 IMPROVER = Path("neurova/evolution/skill_improver.py")
 
@@ -164,7 +165,7 @@ def test_improvements_key_is_not_written_without_a_reader():
     只扫 AST 不扫原文 —— 解释这段历史的注释里必然出现键名，按原文匹配会
     把"写下原因"当成"仍在写数据"。
     """
-    tree = ast.parse(IMPROVER.read_text(encoding="utf-8"))
+    tree = parseSource(IMPROVER.read_text(encoding="utf-8"))
     written = set()
     for node in ast.walk(tree):
         if (

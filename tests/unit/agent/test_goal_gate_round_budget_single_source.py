@@ -41,6 +41,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION = PROJECT_ROOT / "neurova"
@@ -158,7 +159,7 @@ class TestRoundBudgetIsDeclaredNotLiteral:
         `set_goal_gate(..., max_rounds: int = 15)` 是同一份 15 的两处落点。
         """
         src = _text(OPENAI_LOOP)
-        tree = ast.parse(src)
+        tree = parseSource(src)
         offenders = []
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and node.name in (

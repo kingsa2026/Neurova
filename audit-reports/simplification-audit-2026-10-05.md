@@ -10437,6 +10437,7 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开（不冒充完成）**：其余 **122 处**（131−9）未动——体量超出单批，且"每一处 toast 都该显示后端 detail"属 UX 口径，需人裁一刀再扫；本条只登记，不预改。
     - **口径与空号**：本条数字只量 `NeurUI/src` 下的 `message.error(t('common.error'))` 字面形状（`src/pages/__tests__` 与组件内其它 toast 写法不在内）；口径若扩，读数会变，引用前先复算。下一枚空号现查按形态 418 的纪律两条一起跑：引用面 `git grep -ohE "§6-4[0-9][0-9]" HEAD -- audit-reports docs scripts` 现算最大＝**416**，条目行 `^[0-9]{3}\. ` 尾号亦＝**416** ⇒ 本批取 **§6-417**，下批从 **418** 起。
 
+
 418. **蜂群上报的三处形态一并收口：回灌空壳、正文硬截断、下钻指针指不到（✅ `a748aab5` 生产 +113／入册 `00226ef7`；子集真条目现算 716）** ✅🟢 —— 触发点不是报错，是「摸清主 agent 与蜂群 agent 信息交互方式」这一问的复核：把回程四条通道逐条读到生产侧，才发现其中一条**从投产起就没传出过正文**。
 
     - **缺陷本体**：全仓唯一的邮箱写点挂在 `tool_executor._execute_spawn_subagent` 的 `spawn()` 返回之后，取 `reply|result|output` 三个信封里从不存在的键——报告只有一个键名 `report`（`SubAgentRun.to_dict()`）。**同一信封两个消费方一対一错**是铁证：工作流侧 `neurflow/builtin.py:1179` 一直取 `result.get("report")`，是对的。于是每条子任务往父会话注一句 `[子代理 xxx 回传] `（空正文），被数据层拒绝的派生也照注。
@@ -10469,54 +10470,6 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **不证什么**：不证"16GiB 一定跑得完"——它证的是配置侧不欠账（需求与供给之间有明确倍数并被钉住）；也不替 `test_ci_wallclock_assertion_ledger.py` 管"断言里不许绑死秒数"那件事。
     - **仍开（不冒充完成）**：① 单档足迹 `GIB_PER_ENTRY = 12.3MiB` 与底噪 `1.5GiB` 是从一次 OOM 反推的量级，不是逐档实测；若有 `py-spy`/`tracemalloc` 级读数应回填这两个常量（现读数至少方向正确：8GiB 在 82% 处被掐，717×12.3MiB + 1.5GiB ≈ 10.1GiB > 8GiB）。② 本批只处理"装不下"，**没有**处理"跑得慢"：22 分钟对一条串行腿仍偏长，`--cov` 插桩对全仓 AST 扫描档的放大（×2.2～×3.7）仍是它最贵的一段，是否改 `--cov` 的覆盖范围属另拍。
     - **口径与空号**：LOC 逐文件 `git show --numstat` 现取（`.cnb.yml` 改 7 增 5 删含注释；测试池新增 158 行不计入）；在册条数目取 `protectedSubsetEntries()` 现算 **719**（合并后基线；本档一行，其余为并发会话各自入册项），不用 `grep -c`。下一枚空号两条一起跑：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 现算最大均＝**421**（本格自身）⇒ 下批从 **§6-422** 起（同批 §6-422 已占用，见下格）。**让号留案（两次）**：本条落笔时取 419，与源分支上已在的 §6-419（子集进程内计时口径补登）撞号，改取 420；合并时又与并发会话的 §6-420（零向量两处单源）撞号，`test_auditLedgerNumbering` 当场红（`{'420': 2}`）⇒ 按纪律**后来者让号**，本条终取 **421**，419／420 各归属先到的那两笔。这就是「空号现查只看本地树、看不见别人正在写的号」的代价，靠台账唯一性判据兜住，不靠人记得。
-
-425. **可选依赖的墙钟成本落在活体 async 路径上：语义闸兜底支退回零依赖，取用口的既有裁决同批反转（构建 `cnb-sq6-1k5q1kqrc#003`）** ✅🟢 —— 内存那一格（§6-421）修好之后，同一格红**换了副面孔**：不再是 `code: 137` 被掐，而是**真红**。
-
-    - **形态与读数**：`FAILED tests/unit/evolution/eval/test_service_closed_loop.py::TestEvolveFlow::test_accept_produces_pending_proposal — Failed: Timeout (>30.0s) from pytest-timeout.`，回溯 `constraints._check_semantic → semantic_similarity → _token_jaccard → _tokenize → _jiebaModule → knowledge.search._get_jieba → jieba.initialize → gen_pfdict`。整场 `1 failed, 7953 passed, 26 skipped, 3 xfailed in 1469.68s`、覆盖率 88.10% ⇒ 其余全绿，这一条是唯一真红。
-    - **根因不是"字典慢"，是"账落在谁身上"**：字典实测 0.45～0.58s（本机），同一取用口复取 0.0s。它是**一次性**成本，却落在「本轮第一处走到语义闸的那条 async 调用栈」上——与那条用例测的东西毫无关系。而语义闸自己的取舍写着「embedding 不可用就退回 Jaccard，保证离线可跑」：兜底支**又挂了一件更贵的可选依赖**，于是"离线可跑"实际变成"离线的第一步先建一遍 jieba 字典"。
-    - **既有处置为什么没兜住**（教义第 1、5 条点名的形态）：仓内此前只在**用例**侧按这个形状放宽墙钟——`test_caseLevelRegressionGate.py` 与 `test_runOutcomeLedgerConsistency.py` 各一行 `pytestmark = pytest.mark.timeout(120)`，注释写着"coverage 下 jieba 冷启动实测 37.5s"。即：**同一个生产路径的其它入口照旧没人管**，判据改在消费方、一次一处。`test_service_closed_loop.py` 就是没被改到的那一处，于是它在 CI 上按 30s 全局墙红。
-    - **根修选择（先比后合，不自造第二份）**：兜底的词面下界改成**零可选依赖**——中文按 CJK 字符二元组切（`_tokenize` 里原本就有这条分支，只是被"有 jieba 就优先用"挡住）。Jaccard 是词面**下界**，二元组足以让"同义改写拿高分、主题漂移掉分"，与语义闸"不因可选依赖缺失而失去这道闸"的取舍**逐字一致**。取用口 `knowledge.search._get_jieba()` 保留给真正需要词级切分的地方（`knowledge.search.tokenize`，FTS/BM25 那条链），不在 `constraints` 里再挂一次。
-    - **裁决反转，既有判据同批翻面**（不许两边都留着）：`test_jieba_tokenizer.TestJiebaHasOneWarmEntry::test_constraintsGoesThroughTheSameEntry` 原本钉的是"`constraints` 走的还是同一个取用口"，依据是"收口到一处，成本落在明确入口上"。实测证明这条口径不够：收口只统一了"谁 import"，**没消除**那笔冷启动。故该格改为 `test_constraintsAsksNoOptionalEntry`，断言**相反**：`_token_jaccard` 调用期间取用口**一次都不许被问到**。谁把它接回去，这里立刻红。
-    - **先红后绿（实测原文）**：新档 `tests/unit/ci/test_optionalImportWallOwedByLivePath.py` 首轮 `2 failed, 2 passed`（判据自身一处 bug 已就地改掉）→ 干净红 `1 failed, 3 passed`，原文＝`活体路径 neurova/evolution/eval/service.py::SkillEvolutionService.evolve 在语义闸上问了 2 次可选依赖取用口（neurova.knowledge.search._get_jieba）`；改 `_tokenize` 后 `3 passed, 1 skipped`；同批复跑 `test_service_closed_loop` + `test_jieba_tokenizer` 共 `28 passed, 1 skipped`。反向控制两格各咬一处：把取用口换回"顺带初始化"形态时探针必须看得见调用、登记的生产入口必须真出现在子集活体面上（解析 import 图两跳 `service → runner → constraints`，不做文本子串匹配）。
-    - **回归 A/B（逐行比对，教义第 2 条口径）**：`tests/unit/evolution/` + `tests/unit/knowledge/` 全跑，改前 `9 failed / 2686 passed`、改后同集**逐行相同**（`comm` 后差为空集）——9 条全是预存缺可选依赖（`kreuzberg` / `openpyxl` / `pptx` 未装）与一条浮动精度断言，非本批引入。
-    - **活体**：`SkillEvolutionService.evolve` 真跑（真 service / 真 runner / 真约束闸，只替 judge 与 mutate 两个调用方注入点），取用口计数由 2 → **0**；`_token_jaccard("量子计算", "量子 计算")` 仍给正读数（兜底没退化成常量）。
-    - **仍开（不冒充完成）**：① 两处**用例侧**的 `pytest.mark.timeout(120)` 现在已无必要（那条路径不再付冷启动），但删它们属于另一笔（同一 PR 里删掉会掩盖"生产侧确实改对了"的读数对照）——登记待办；② `knowledge.search.tokenize` 仍在取用口处同步建字典（FTS/BM25 的第一条无关键照旧付这笔账），它**不是** async 活体路径，本批不动，但若将来 FTS 也进 async 热路径需回看本格。
-    - **口径与空号**：在册条数目取 `protectedSubsetEntries()` 现算 **720**（本档一行）。下一枚空号两条一起跑：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 现算最大均＝**425**（本格自身）⇒ 下批从 **§6-426** 起。**让号三次留案**：本条落笔取 422、与并发会话的 §6-422 撞号（唯一性判据当场红）→ 让到 424、又与两笔并发（§6-423 进化闸、§6-424 门禁在断言之外变红）连撞两次 → 终取 **425**。同一天三次让号，说明「空号现查」在多人并发写台账时必然滞后，**唯一性判据才是兜底**；也让号本身成了常态，别再指望现查一次就够了。
-
-426. **退役台账被"整理"掉两条署名：`delete + recreate` 的改名与 `rename` 不是一回事（构建 `cnb-bfa-1k5q9ub6e#003`）** ✅🟢 —— 又一条"有测试红了"的红，红在记录而不在行为。
-
-    - **读数**：unit-tests 腿 `8 failed, 7954 passed, 27 skipped, 3 xfailed`，其中
-      `test_protected_subset_registration_history::test_every_vanished_entry_is_signed_off`
-      逐字点名 `tests/unit/api/test_McpFaceCallerTier.py` 与 `tests/unit/api/test_McpFaceRidesSdkTransport.py` 两条未署名。其余 7 条（401 `Invalid or expired token`）与本条无关，另案（见下"仍开"）。
-    - **根因是"整理"时把不同来源的两条并成一条**：`745eae19` 往 `protectedSubsetRetired.txt` 补了 `testMcpFace*` 两条（无 `test_` 前缀那版），`9fa495cf` 判它们是"从未进过清单的空行"并删掉——那个判断只覆盖了**驼峰无前缀**这一族。而 `27c31327` 的改名在 git 眼里是 **delete + recreate**（`test_McpFaceCallerTier.py` 删一个文件、`test_mcpFaceCallerTier.py` 加一个文件，不是 rename），于是 `--full-history` 读到"带前缀的旧名**曾出现在清单里**、文件现已不在仓"——这正是本守卫要拦的第二向。同批另三条驼峰旧名（`testOutOfBoxDefaultLayer.py` 等）留了旧名行，唯独这两条没有。
-    - **为什么我一开始在本地看不到这条红**：`--full-history` 之外的简化会让"只在合并里发生"的变更不可见，这份判据的 `_listedEver()` 用了 `--full-history` 才看得见全貌；而**未推送的本地树**与**合并后的源分支**历史不同——同一份代码在 `origin` 的 HEAD 上红、在我的本地树上绿。合进来才复现。这也说明"本地绿"对**按历史取面**的判据不算数。
-    - **补法（只补记录，不动判据）**：给两条带前缀旧名各写一行签名，依据里写清"`27c31327` 走的是 delete + recreate，`745eae19` 只署了无前缀旧名"——下一次谁再看到这两行，能直接读出为什么必须有它。
-    - **实测**：`tests/unit/ci/test_protected_subset_registration_history.py` 单跑 `8 passed`；`tests/unit/ci/` 全量 `501 passed, 3 skipped`（本机补装 `pyflakes` 后 `test_staticGateUsesParserNotTypecheck` 6 格也全绿——那两格先前红是因为工具不在 PATH 上，红的是环境不是代码）。
-    - **仍开（不冒充完成）**：① 同一场里 7 条 `401 Invalid or expired token`（`test_roleGateIdentitySourceIsStrict` 4 格 + `test_memory_route_shadowing` 3 格）本机单跑 `20 passed`、CI 上红——形态是"JWT 密钥被同进程里更早的档改过"，属**跨档串扰**而非本次三笔改动；它需要的是"密钥来源在会话内唯一且不被用例改"的那层收口，与本条正交，未在本批处理。② `9fa495cf` 里"删两条从未进过清单的空行"这个判断，本可以避免——若当时按"曾出现过的**每个**名字"逐个核对，就不会误删。纪律：整理退役台账前必须先跑 `test_every_vanished_entry_is_signed_off` 的反向清单，不能凭"看起来像空行"删。
-    - **口径与空号**：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 现算最大均＝**426**（本格自身）⇒ 下批从 **§6-427** 起。
-
-    - **与并发会话同一根因的三条落点先比后合（教义第 7 条，合批后重做）**：合批时源分支上已另有 §6-422（判据把整棵语法树举在内存里）与 §6-423（进化闸为算一次相似度去拉嵌入模型）两笔，加上本条共三条落点。逐条结论：
-      · **§6-423 embedding 那半** — 更强，保留（`_initialized_embedding_engine()` 只读 `is_initialized`、绝不调 `initialize_sync()`，并有 `test_semanticGateLoadsNoModel.py` 钉住"这一跳走到了但没去建模型"）。本条只处理它够不着的另一半——引擎缺席时**兜底支**仍问 jieba。
-      · **并发侧的预热口 `warmJieba()` 对本条是多余的** — 兜底支改走二元组后，`constraints` 一次都不会碰取用口（本条判据逐格量的是 0 次），预热对它"预"了个用不上的东西。但对 `tokenize` → FTS/BM25 那条**真需要词级切分**的链仍然成立（`_get_jieba()` 首次就地建字典，谁先走到谁付）。故两条落点**并行保留、各管一段**，并在 `warmJieba()` 的 docstring 里写明分工——不退它，也不让它冒充"兜底支的账已经付过了"。
-      · **`isJiebaWarm()` 退役** — 合批后查实：全仓除测试外**零调用点**，且它读的就是 `_jieba`。多一个同义判断口即多一份"暖没暖"的事实源（教义第 6 条），故删；原先钉它的那一格改成直接问 `warmJieba()`（幂等、返回布尔）或读 `_jieba`。
-      · **`warmUpJieba` 的驼峰形态** — 本条落笔时 `tests/conftest.py` 与本档调用点已写成驼峰；`warmJieba` 是本文件 `tokenize`/`fullTextSearch` 一族命名下的正名。按仓规命名用 camelCase，正名保留、不新增别名（不保留两份名字，也不为改名让既有调用点失配——它们是同一次提交里一起动的）。
-
-
-
-420. **零向量：出向量这条路上判一次，存量与注入入口再判一次（✅ 并入源分支上并发的零向量那笔之后按两处单源重写；受保护子集真条目现算 718）** 🟢 —— 承接本单那笔「受保护子集 15 红按根因收口」的现场（该笔已随历史重写失去可达号，按内容指认：活动目录跨回合残留那一组）。本笔与并发会话那笔（"零向量从不是『有向量』"）撞在同一处根因上，合并后按两侧真实意图裁定，**不保留两份口径**。
-
-    - **缺陷本体（两侧读数一致）**：引擎在模型档在、分词器/ONNX 运行时装不上时**兜底返回全零向量**（不是 None）。它传得下去，传下去之后就再没人分得开"没算出来"与"真算出个全零"：`tool_search._hybrid_scores` 拿它进语义加权，余弦恒 0，检索对该查询恒空手——而空手在 `handle_control_tool` 那儿是 S3「能力缺口」的投递条件（驱动自主造工具），一个口径缺陷被翻译成了假缺口；`muscle_memory` 把它存进条目，`_compute_confidence` 走"有向量"分支、再也回落不到字符覆盖度，换实体近似句的置信度停在 **0.5875**（票面要 ≥0.85）；`vector_index` 写侧落库后该条对检索永久隐身且指纹未变、下轮不重算。
-    - **裁定：两处单源，各管一段，不合并成第三个口**。①**出向量**这条路上由引擎自己判——`ONNXEmbeddingEngine.encodeOrNone()`（并入那笔新增），算不出给 `None`，写侧（`manager._embeddingForNewRow`）与八处消费方改问它；②**存量与注入入口**由 `core/vector_math.isZeroVector` 判——落过盘的条目、注入引擎（判据替身、旧装配，只有 `encode`）交上来的向量，都可能是一列 0，`manager._row_embedding` / `semantic_search._get_embedding` / `muscle_memory._compute_confidence` / `tool_search._hybrid_scores` / `vector_index` / `skill_semantics.is_zero_vector` 一律过这一道。两个口的判据都不许在别处再写一遍（`1e-9` 那形），`skill_semantics` 自己那份 `all(abs(x) < 1e-9)` 降成对 ② 的一行委托。
-    - **词表（本笔独有，并发那笔未触及）**：`_TOKEN_SPLIT` 对中文是无操作，「查询天气」与「天气」永不相等——目录里明明有天气工具，查「天气」零命中。改为拉丁/数字整段、中文 2–3 字片段（下限 2 与 `knowledge.search.tokenize` 同口径）。这是"零命中被打成能力缺口"那条链的另一半。
-    - **为什么 CI 红的是「前提不成立」而不是断言**：`test_hitSearch_doesNotRecordGap` 自带目录、走生产入口压缩、再真调一次控制工具，断言"真命中时必须不记缺口"。词表与零向量任一处一坏，它的**前提**当场塌掉——这类红以前被当成"环境缺件"放过去。
-    - **前提自给（本笔）**：联想召回基线、向量线索通道、扇出闸、长期记忆六维门禁此前缺件时显式失败，而 `requirements-ci.txt` 刻意不含那四件 ⇒ CI 上恒红二十来格，真回归被稀释。改为走 `tests/memory_embedding_precondition.requireRealEmbeddingOrSkip`：只判一次**引擎真出非零向量**，缺件 skip 并点名缺的是哪一件；**装了模型却算不出仍是红**（引擎就绪即不再按缺件处置）。
-    - **红→绿（实跑，合并后）**：`test_hitSearch_doesNotRecordGap` 前提塌 → 全绿；`test_entity_swap_confidence_reaches_hit_threshold` `0.5875 → 0.87x`（并发侧提交说明的实测，本机真嵌入档复测同为 >= 0.85）；`test_vector_maintain_all_incremental_and_force` 的替身"含 alpha 才给 `[1.0]`"（beta 那条本来就是零向量）在被拒收后少算一条 ⇒ 改替身（每条文本各有非零向量、补 `encodeOrNone`），谓词一字未动。反向自证四枚：`manager._row_embedding` 退回旧写法 ⇒ 存量那格红；`tool_search` 抄一份 `1e-9` ⇒ 阈值单源那格红；注入引擎不认 `encodeOrNone` ⇒ 检索回落那格红；词表退回整段 ⇒ 两格红（`['查询天气']`、`['a','天','b']`）。
-    - **判据自己被咬过三次并当场改掉**：①第一版拿「气温如何」当查询，撤回回落照样绿（BM25 那支本来就空）——改成"词面真能命中 + 直接看 `_hybrid_scores` 是否为 None"；②第一版反向控制"正常引擎也命中"，落点只有一条目录时它恒真；③`_hybrid_scores` 里我先后写的"查询回全零即回落""条目一条都没算出即回落"两条，在"查询非零而条目全零"下叠加成误判（两条各自都是对的，合起来收窄了合法行为）——被上面那条判据抓出来，收成一条。
-    - **A/B 自证**（同一解释器 / 同一份锁，六目录 5000+ 用例）：改前 `20 failed`、改后 `22 failed`，逐行 `comm` 后新增两条均在 `test_context_pool_optimizations`（单跑 10 passed；`test_phase3_wiring` 同批 2 failed 两条 A/B 两侧同读数）⇒ 跨用例状态泄漏（预存），不认领。其余预存：`docx`/`kreuzberg` 缺件 14 格、`moe_index_state` 读 `NEUROVA_DATA_ROOT` 1 格、git 签名 1 格、`skill_permissions_compat` 2 格。**消失 0 条**，即本笔未借修红之名放宽任何判据。
-    - **live-verify**：同进程真 `ONNXEmbeddingEngine` 交 512 维零向量时 `encodeOrNone` 给 None、`_row_embedding('[0.0,0.0]') → None` 而 `[0.1,0.2]` 原样、`muscle_memory._semantic_vector → None`、`skill_semantics.is_zero_vector([0.0]*8) → True`、`vector_index` 写侧同口径拒收、`tool_search` 混分回落 BM25（`0.2877` 那支）。装齐四件后引擎回真向量，联想召回档回真读数（基线绿、2 条 strict xfail 照旧）。
-    - **仍开（需人裁）**：① CI 是否装 `onnxruntime`/`tokenizers`/`transformers`/`sentencepiece`——装了这四档回真读数、不装则恒 skip；代价是锁 +数十行、纯 wheel 若干、`huggingface-hub` 抬版本，还要把这四件从 `ci_static_gate.KNOWN_OPTIONAL_DEPS` 摘下（否则静态门禁继续 OPTIONAL-SKIP 放行）。属依赖口径变更。② `tool_search` 中文词表是 2–3 字滑窗、`knowledge.search.tokenize` 走 jieba（≥2 字词），两处对同一段中文给出的 token 集不同，检索与 FTS 因此不可比——要不要接真分词是另一次口径变更。
-    - **补一笔（同一格的第二半，CI 才看得见）**：合并后构建 `cnb-sq6-1k5q1kqrc#003` 的受保护子集剩 **1 failed / 7953 passed**，那一格不是断言红——`test_service_closed_loop::test_accept_produces_pending_proposal` 的回溯落在 `jieba.initialize() → gen_pfdict`，即**建字典**而非被测逻辑（本机 2.5s，差别只在字典是否已被同场更早的档暖过；CI 日志里它是本进程第一个切中文的档）。修法是把"字典建完没有"变成能问能催的事实（`search.isJiebaWarm` / `warmJieba`），并在 `tests/conftest.py` 的 `pytest_configure` 里一次建完——它归前提，不归某一条用例。判据 `test_jieba_tokenizer.py::TestWarmUpFace` 两格，红自证＝把两个口钉成恒 `False` ⇒ 一格红、还原 18 passed ×3 同读数。并发侧同一格另补了模块级父墙 `pytest.mark.timeout(120)`（与同目录两档兄弟逐字相同）——两者不重复：父墙管“这一档整体别被全局 30s 掐在中间”，收集期暖机管“这笔一次性成本不记在某一条用例头上”；注释已按这个分工改写，不留第二种说法。
-    - **口径与空号**：受保护子集真条目取 `tests.ast_scan.protectedSubsetEntries()` 读数 **718**（合并前 714；本笔加 `test_tool_search_semantic.py` 一行，并发侧另加三行）。引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 现算最大均＝**420**（并发那格已先占 419） ⇒ 下批从 **§6-421** 起。
 
 422. **同一次 OOM 的另一半：判据自己把整棵语法树举在内存里（✅ 本批；与 §6-421 同一现场，处置互补，两者都要）** ✅🟢 —— 触发点是 PR #367 的 `unit-tests` 腿连续多轮以 `错误信息: 任务执行失败，返回码：137` 收场
 
@@ -10585,6 +10538,39 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **守卫两份，各咬一头**（`tests/unit/ci/test_pipelinePrepareStartsNoUnusedServices.py`）：① stage 脚本不得出现 `sh` 不认的语法（`${PIPESTATUS` / `set -o pipefail` / `[[ ` / `<<<`）；② 受保护子集不得用回数组取码、必须从标记文件读回。反向控制把标记读回改回 `${PIPESTATUS[0]}` ⇒ 两条断言当场红，恢复后 5 passed；连带 parity / 单腿 / runner 余量 / 流水线条数 **52 passed, 1 skipped**。
     - **同一档的第三处顺带登记**：本文件同批的 `TestPrepareMustNotPayForUnusedServices` 咬的是另一半——`e2e-backend-boot` 不声明 `services` 时平台自动起的 `git-clone-yyds` 与 `network-bus` 算进 `Prepare` 的 **60s** 上限（`cnb-13d-1k5pskuuj-004`：54.9s + 1m2s ⇒ `任务超过最大执行时间而被强制关闭：1m0s`，两个 stage 全部 skipped）。显式 `services: []` 后同构建 `Prepare` 从 181s 落到 6s。两条都落在「准备与收尾不属于判据，却能把门禁判红」这同一个形状上。
     - **口径与空号**：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 本笔落笔时最大＝**423** ⇒ 取 **§6-424**（419–423 已被并发会话占号，按「后来者让号」），下批从 **425** 起。
+
+425. **可选依赖的墙钟成本落在活体 async 路径上：语义闸兜底支退回零依赖，取用口的既有裁决同批反转（构建 `cnb-sq6-1k5q1kqrc#003`）** ✅🟢 —— 内存那一格（§6-421）修好之后，同一格红**换了副面孔**：不再是 `code: 137` 被掐，而是**真红**。
+
+    - **形态与读数**：`FAILED tests/unit/evolution/eval/test_service_closed_loop.py::TestEvolveFlow::test_accept_produces_pending_proposal — Failed: Timeout (>30.0s) from pytest-timeout.`，回溯 `constraints._check_semantic → semantic_similarity → _token_jaccard → _tokenize → _jiebaModule → knowledge.search._get_jieba → jieba.initialize → gen_pfdict`。整场 `1 failed, 7953 passed, 26 skipped, 3 xfailed in 1469.68s`、覆盖率 88.10% ⇒ 其余全绿，这一条是唯一真红。
+    - **根因不是"字典慢"，是"账落在谁身上"**：字典实测 0.45～0.58s（本机），同一取用口复取 0.0s。它是**一次性**成本，却落在「本轮第一处走到语义闸的那条 async 调用栈」上——与那条用例测的东西毫无关系。而语义闸自己的取舍写着「embedding 不可用就退回 Jaccard，保证离线可跑」：兜底支**又挂了一件更贵的可选依赖**，于是"离线可跑"实际变成"离线的第一步先建一遍 jieba 字典"。
+    - **既有处置为什么没兜住**（教义第 1、5 条点名的形态）：仓内此前只在**用例**侧按这个形状放宽墙钟——`test_caseLevelRegressionGate.py` 与 `test_runOutcomeLedgerConsistency.py` 各一行 `pytestmark = pytest.mark.timeout(120)`，注释写着"coverage 下 jieba 冷启动实测 37.5s"。即：**同一个生产路径的其它入口照旧没人管**，判据改在消费方、一次一处。`test_service_closed_loop.py` 就是没被改到的那一处，于是它在 CI 上按 30s 全局墙红。
+    - **根修选择（先比后合，不自造第二份）**：兜底的词面下界改成**零可选依赖**——中文按 CJK 字符二元组切（`_tokenize` 里原本就有这条分支，只是被"有 jieba 就优先用"挡住）。Jaccard 是词面**下界**，二元组足以让"同义改写拿高分、主题漂移掉分"，与语义闸"不因可选依赖缺失而失去这道闸"的取舍**逐字一致**。取用口 `knowledge.search._get_jieba()` 保留给真正需要词级切分的地方（`knowledge.search.tokenize`，FTS/BM25 那条链），不在 `constraints` 里再挂一次。
+    - **裁决反转，既有判据同批翻面**（不许两边都留着）：`test_jieba_tokenizer.TestJiebaHasOneWarmEntry::test_constraintsGoesThroughTheSameEntry` 原本钉的是"`constraints` 走的还是同一个取用口"，依据是"收口到一处，成本落在明确入口上"。实测证明这条口径不够：收口只统一了"谁 import"，**没消除**那笔冷启动。故该格改为 `test_constraintsAsksNoOptionalEntry`，断言**相反**：`_token_jaccard` 调用期间取用口**一次都不许被问到**。谁把它接回去，这里立刻红。
+    - **先红后绿（实测原文）**：新档 `tests/unit/ci/test_optionalImportWallOwedByLivePath.py` 首轮 `2 failed, 2 passed`（判据自身一处 bug 已就地改掉）→ 干净红 `1 failed, 3 passed`，原文＝`活体路径 neurova/evolution/eval/service.py::SkillEvolutionService.evolve 在语义闸上问了 2 次可选依赖取用口（neurova.knowledge.search._get_jieba）`；改 `_tokenize` 后 `3 passed, 1 skipped`；同批复跑 `test_service_closed_loop` + `test_jieba_tokenizer` 共 `28 passed, 1 skipped`。反向控制两格各咬一处：把取用口换回"顺带初始化"形态时探针必须看得见调用、登记的生产入口必须真出现在子集活体面上（解析 import 图两跳 `service → runner → constraints`，不做文本子串匹配）。
+    - **回归 A/B（逐行比对，教义第 2 条口径）**：`tests/unit/evolution/` + `tests/unit/knowledge/` 全跑，改前 `9 failed / 2686 passed`、改后同集**逐行相同**（`comm` 后差为空集）——9 条全是预存缺可选依赖（`kreuzberg` / `openpyxl` / `pptx` 未装）与一条浮动精度断言，非本批引入。
+    - **活体**：`SkillEvolutionService.evolve` 真跑（真 service / 真 runner / 真约束闸，只替 judge 与 mutate 两个调用方注入点），取用口计数由 2 → **0**；`_token_jaccard("量子计算", "量子 计算")` 仍给正读数（兜底没退化成常量）。
+    - **仍开（不冒充完成）**：① 两处**用例侧**的 `pytest.mark.timeout(120)` 现在已无必要（那条路径不再付冷启动），但删它们属于另一笔（同一 PR 里删掉会掩盖"生产侧确实改对了"的读数对照）——登记待办；② `knowledge.search.tokenize` 仍在取用口处同步建字典（FTS/BM25 的第一条无关键照旧付这笔账），它**不是** async 活体路径，本批不动，但若将来 FTS 也进 async 热路径需回看本格。
+    - **口径与空号**：在册条数目取 `protectedSubsetEntries()` 现算 **720**（本档一行）。下一枚空号两条一起跑：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 现算最大均＝**425**（本格自身）⇒ 下批从 **§6-426** 起。**让号三次留案**：本条落笔取 422、与并发会话的 §6-422 撞号（唯一性判据当场红）→ 让到 424、又与两笔并发（§6-423 进化闸、§6-424 门禁在断言之外变红）连撞两次 → 终取 **425**。同一天三次让号，说明「空号现查」在多人并发写台账时必然滞后，**唯一性判据才是兜底**；也让号本身成了常态，别再指望现查一次就够了。
+
+426. **退役台账被"整理"掉两条署名：`delete + recreate` 的改名与 `rename` 不是一回事（构建 `cnb-bfa-1k5q9ub6e#003`）** ✅🟢 —— 又一条"有测试红了"的红，红在记录而不在行为。
+
+    - **读数**：unit-tests 腿 `8 failed, 7954 passed, 27 skipped, 3 xfailed`，其中
+      `test_protected_subset_registration_history::test_every_vanished_entry_is_signed_off`
+      逐字点名 `tests/unit/api/test_McpFaceCallerTier.py` 与 `tests/unit/api/test_McpFaceRidesSdkTransport.py` 两条未署名。其余 7 条（401 `Invalid or expired token`）与本条无关，另案（见下"仍开"）。
+    - **根因是"整理"时把不同来源的两条并成一条**：`745eae19` 往 `protectedSubsetRetired.txt` 补了 `testMcpFace*` 两条（无 `test_` 前缀那版），`9fa495cf` 判它们是"从未进过清单的空行"并删掉——那个判断只覆盖了**驼峰无前缀**这一族。而 `27c31327` 的改名在 git 眼里是 **delete + recreate**（`test_McpFaceCallerTier.py` 删一个文件、`test_mcpFaceCallerTier.py` 加一个文件，不是 rename），于是 `--full-history` 读到"带前缀的旧名**曾出现在清单里**、文件现已不在仓"——这正是本守卫要拦的第二向。同批另三条驼峰旧名（`testOutOfBoxDefaultLayer.py` 等）留了旧名行，唯独这两条没有。
+    - **为什么我一开始在本地看不到这条红**：`--full-history` 之外的简化会让"只在合并里发生"的变更不可见，这份判据的 `_listedEver()` 用了 `--full-history` 才看得见全貌；而**未推送的本地树**与**合并后的源分支**历史不同——同一份代码在 `origin` 的 HEAD 上红、在我的本地树上绿。合进来才复现。这也说明"本地绿"对**按历史取面**的判据不算数。
+    - **补法（只补记录，不动判据）**：给两条带前缀旧名各写一行签名，依据里写清"`27c31327` 走的是 delete + recreate，`745eae19` 只署了无前缀旧名"——下一次谁再看到这两行，能直接读出为什么必须有它。
+    - **实测**：`tests/unit/ci/test_protected_subset_registration_history.py` 单跑 `8 passed`；`tests/unit/ci/` 全量 `501 passed, 3 skipped`（本机补装 `pyflakes` 后 `test_staticGateUsesParserNotTypecheck` 6 格也全绿——那两格先前红是因为工具不在 PATH 上，红的是环境不是代码）。
+    - **仍开（不冒充完成）**：① 同一场里 7 条 `401 Invalid or expired token`（`test_roleGateIdentitySourceIsStrict` 4 格 + `test_memory_route_shadowing` 3 格）本机单跑 `20 passed`、CI 上红——形态是"JWT 密钥被同进程里更早的档改过"，属**跨档串扰**而非本次三笔改动；它需要的是"密钥来源在会话内唯一且不被用例改"的那层收口，与本条正交，未在本批处理。② `9fa495cf` 里"删两条从未进过清单的空行"这个判断，本可以避免——若当时按"曾出现过的**每个**名字"逐个核对，就不会误删。纪律：整理退役台账前必须先跑 `test_every_vanished_entry_is_signed_off` 的反向清单，不能凭"看起来像空行"删。
+    - **口径与空号**：引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 现算最大均＝**426**（本格自身）⇒ 下批从 **§6-427** 起。
+
+    - **与并发会话同一根因的三条落点先比后合（教义第 7 条，合批后重做）**：合批时源分支上已另有 §6-422（判据把整棵语法树举在内存里）与 §6-423（进化闸为算一次相似度去拉嵌入模型）两笔，加上本条共三条落点。逐条结论：
+      · **§6-423 embedding 那半** — 更强，保留（`_initialized_embedding_engine()` 只读 `is_initialized`、绝不调 `initialize_sync()`，并有 `test_semanticGateLoadsNoModel.py` 钉住"这一跳走到了但没去建模型"）。本条只处理它够不着的另一半——引擎缺席时**兜底支**仍问 jieba。
+      · **并发侧的预热口 `warmJieba()` 对本条是多余的** — 兜底支改走二元组后，`constraints` 一次都不会碰取用口（本条判据逐格量的是 0 次），预热对它"预"了个用不上的东西。但对 `tokenize` → FTS/BM25 那条**真需要词级切分**的链仍然成立（`_get_jieba()` 首次就地建字典，谁先走到谁付）。故两条落点**并行保留、各管一段**，并在 `warmJieba()` 的 docstring 里写明分工——不退它，也不让它冒充"兜底支的账已经付过了"。
+      · **`isJiebaWarm()` 退役** — 合批后查实：全仓除测试外**零调用点**，且它读的就是 `_jieba`。多一个同义判断口即多一份"暖没暖"的事实源（教义第 6 条），故删；原先钉它的那一格改成直接问 `warmJieba()`（幂等、返回布尔）或读 `_jieba`。
+      · **`warmUpJieba` 的驼峰形态** — 本条落笔时 `tests/conftest.py` 与本档调用点已写成驼峰；`warmJieba` 是本文件 `tokenize`/`fullTextSearch` 一族命名下的正名。按仓规命名用 camelCase，正名保留、不新增别名（不保留两份名字，也不为改名让既有调用点失配——它们是同一次提交里一起动的）。
+
+
 
 427. **签名密钥的模块级改指缺复原——潜伏面（今天不在子集里，明天进子集就红）** ✅🟢 —— §6-425 是"这条腿怎么红"，本格是"还会怎么红一次"。
 
@@ -10743,4 +10729,142 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - 空号至 **§6-434**，下批从 **§6-435** 起。本批一笔（`57732258`）＋ §6-433 三笔共 **4 笔未推**。
 
 
+437. **受保护子集分片执行：`code 137` 不是"测试红了"，是跑测进程被整段掐断（本格把清单切成三片，判据一条不动）** ✅🟢 —— 触发点是 PR #365 的 `unit-tests` 红
 
+    - **✅ 现场读数（先定性，再动手）**：构建 `cnb-v9p-1k5pkvplt` 的第 3 条流水线，日志末尾是 `tests/unit/api/test_channelWebhookResolvesAdapterByAgentTable.py ...` / `Killed` / `Finished, code: 137`，**整场一条失败墙都没有**。`137` = SIGKILL ⇒ 不是断言红，是进程被杀。用同一份 `requirements-ci.lock` 在本机复跑同一份清单，读数落到同一根因：
+
+      | 口径 | 耗时 | 进程峰值 RSS |
+      |------|------|--------------|
+      | `--no-cov`（`--durations=40`） | 17m32s | **2.74 GiB**，仍在爬升、未见平台期 |
+      | `--cov`（CI 那一形） | 26m03s | **2.78 GiB** |
+
+      `unit-tests` 声明 `cpus: 4`，按平台语法「内存 = CPU 核数 × 2 GiB」＝ **8 GiB** 上限（该换算的出处是 `docs.cnb.cool/zh/build/grammar.md` 的 `runner.cpus` 节，不是本仓的自定义口径）。峰值贴着额度往上爬，任何一处抖动（依赖面变大、缓存状态不同）都能把它推过去。
+    - **✅ 根因不是某一条测试，是"一张清单一次 pytest"**：收集期就要把 7.9k 项全建出来，跑起来后各模块的常驻态（单例、连接池、内存索引）在一场里累积、谁也不释放。会话末尾的那一档只是恰好撞上刀口的那一格——把它单独跑 10 passed（34.65s），说明它自己是干净的。
+    - **✅ 修法：按目录族切成同目录三片，各起一个进程**（`scripts/ci/protected_tests.<N>.txt`）。片内**按目录族连续**（族内共享 fixture 与常驻目录态，打散会让原本同进程的用例跨进程），族间按收集项数做贪心均衡：三片分别 **224 / 251 / 238 个文件、2638 / 2640 / 2639 个收集项**。索引 `protected_tests.txt` 逐行保留原貌（注释与顺序），**片号的事实源是目录里有哪几片**——作业按通配派生，不手抄 `1 2 3`（抄进配置就与目录脱钩：加了一片而 CI 不跑它，没有任何红）。
+    - **✅ 判据一条不动，且分片不许把门禁切碎**：每片仍跑同一份清单文件、同一把 `--cov-fail-under=60`。但**逐片判阈值会假红**——实测分片 1 单独判是 `6771 语句 / 3429 未覆盖 = 49%`，而整份子集是 `12940 / 1603 = 88%`：门禁的语义是"受保护子集整体覆盖了多少"，它不认识分片。故跑测步只攒数据（`--cov-report= --cov-fail-under=0`），阈值与合并口径收在 `scripts/ci/coverage_report.py` 一处（阈值仍取 CI 命令行那一个 60，`pyproject` 不得再写一份）。GitHub 侧对应多一个 `coverage` job（矩阵各格上载 `data/coverage/.coverage*`，合并后判一次），`EXPECTED_MAP` 记成 `"coverage": ["unit-tests"]` —— 它是同一条腿的第二步，不是新门禁。
+    - **✅ 红→绿**：新档 `tests/unit/ci/test_protected_subset_shards.py` 9 格，首轮 **5 failed / 3 passed**（红原文含「分片与索引对不上…漏 713 条」「`scripts/ci/` 下一个分片清单都没有」「cnb 侧没有按分片循环」「GitHub 侧没有分片矩阵」「cnb 侧分片后不见了覆盖率门禁」），实现后 **9 passed**（3.18s / 3.20s 两次同读数）。三条反向控制各自独立：合成"漏一条"、"跨片重复登记"、"断号（1 与 3）"三种分片集必须各被抓到。
+    - **✅ live-verify（真跑三片、真合并判阈值）**：`--cov` 逐片真跑读数 **473s / 664s / 472s**，峰值 **1.34 GiB / 1.77 GiB / 1.25 GiB**（对照单进程 2.78 GiB、26m03s）⇒ 峰值降到 1/2 以下，墙钟由 26 分钟降到约 11 分钟一片（三轮并发即 ≈11 分钟，串行的最坏情形也低于原来的 26 分钟）。合判步用真实的 `data/coverage/.coverage.*` 演练两条通路：低于阈值时 `EXIT=1` 并印 `FAIL Required test coverage of 60.0% not reached. Total coverage: 23.58%`，达标时 `EXIT=0` 并印 `Required test coverage of 20.0% reached`，跑完目录被清空（下一批不串味）。
+    - **⚠ 无数据不得读成"通过"**：`coverage_report.py` 在目录里一份数据都没有时**响亮失败并点名**（`没有找到任何覆盖率数据…不要把它读成“通过”`），这是 `combine --strict` 之外的第二道——`combine` 按「目标文件名 + `.` + `*`」找同名族，目标叫 `.coverage.merged` 时它找的是 `.coverage.merged.*`，与各片落的 `.coverage.<host>.<pid>.<rand>` 对不上，实测会"合并成功但一份都没读到"。故改成把逐片文件显式交给它。
+    - **✅ 兼容改动（三处，逐条说明为什么是"跟随"而不是"放宽"）**：① `tests/unit/ci/test_unit_tests_single_leg.py` 的 GitHub 矩阵断言原本 `matrix is None`，现只禁 `python-version` 那一维（Issue #301 收敛的是解释器腿数，不是分片；片数一致性另由新档钉住）；取数断言的 `protected_tests.txt` 改成前缀 `scripts/ci/protected_tests`（索引与分片同前缀）；② `test_ci_parity_guard.py` 的 `unit-tests` 核心命令同理，并新增 `"coverage": ["unit-tests"]` 映射；③ `tests/ast_scan.py` 的 `protectedSubsetEntries(root, ledgerName=…)` 加一个文件名参数（同一把尺读分片，不另写一份读者）。
+    - **✅ 既有红逐条定责**：`tests/unit/ci` 全套 + CI 相关守卫合跑 **607 passed / 2 skipped**，另 5 条在**改动前就是红**（`test_abBaselineDriverReadings` 5 条：容器内无 git 身份，`git commit` 退 128）、3 条同样前后一致（`test_cognitiveComponentTable` 2 条生成器漂移、`test_liveIsolationSinglePointCoversBothRoots` 1 条路径口径），全部经 `git stash` 前后对跑逐名比对，**不是本格引入**。
+    - **仍开（不冒充完成）**：① 三片仍是**串行**跑在一个 stage 里（峰值已降，墙钟由分片内条目数决定），要不要改成三个并行 stage 属资源账，不是判据账，待裁；② 片数是 3 这个数没有常驻判据"必须不小于 N"，只有"目录里有几片就跑几片"的一致性判据——加到 4 片不会红也不会被拦；③ 这一刀只处理了内存，`--cov` 的插桩放大（同格实测 ×2.2～×3.7）仍在。
+    - **口径与空号**：本格数字全部现场复算（耗时、RSS 来自本轮三片真跑与单进程对照；条目数来自 `--collect-only` 现读 7916 项 + 1 条收集失败档）。引用面 `git grep -ohE "§6-4[0-9][0-9]" HEAD -- audit-reports docs scripts` 现算最大＝**417**，条目行 `^[0-9]{3}\. ` 尾号亦＝**417** ⇒ 本格取 **§6-437**（原取 §6-418，与同日 main 侧先落的「蜂群上报三处形态」撞号，**后来者让号**：main 那一格保留 418。⚠ 首次让号只改了号次、没挪位置——435 依旧夹在 417 与 418 之间，于是唯一性判据全绿地放行了一格"号在别处"，直到 §6-437 那笔补上「尾部号次必须沿文件顺序前进」才现形，本格随那笔一并移到尾部）；下批从 **440** 起。
+438. **零向量：出向量这条路上判一次，存量与注入入口再判一次（✅ 并入源分支上并发的零向量那笔之后按两处单源重写；受保护子集真条目现算 718）** 🟢 —— 承接本单那笔「受保护子集 15 红按根因收口」的现场（该笔已随历史重写失去可达号，按内容指认：活动目录跨回合残留那一组）。本笔与并发会话那笔（"零向量从不是『有向量』"）撞在同一处根因上，合并后按两侧真实意图裁定，**不保留两份口径**。
+
+    - **缺陷本体（两侧读数一致）**：引擎在模型档在、分词器/ONNX 运行时装不上时**兜底返回全零向量**（不是 None）。它传得下去，传下去之后就再没人分得开"没算出来"与"真算出个全零"：`tool_search._hybrid_scores` 拿它进语义加权，余弦恒 0，检索对该查询恒空手——而空手在 `handle_control_tool` 那儿是 S3「能力缺口」的投递条件（驱动自主造工具），一个口径缺陷被翻译成了假缺口；`muscle_memory` 把它存进条目，`_compute_confidence` 走"有向量"分支、再也回落不到字符覆盖度，换实体近似句的置信度停在 **0.5875**（票面要 ≥0.85）；`vector_index` 写侧落库后该条对检索永久隐身且指纹未变、下轮不重算。
+    - **裁定：两处单源，各管一段，不合并成第三个口**。①**出向量**这条路上由引擎自己判——`ONNXEmbeddingEngine.encodeOrNone()`（并入那笔新增），算不出给 `None`，写侧（`manager._embeddingForNewRow`）与八处消费方改问它；②**存量与注入入口**由 `core/vector_math.isZeroVector` 判——落过盘的条目、注入引擎（判据替身、旧装配，只有 `encode`）交上来的向量，都可能是一列 0，`manager._row_embedding` / `semantic_search._get_embedding` / `muscle_memory._compute_confidence` / `tool_search._hybrid_scores` / `vector_index` / `skill_semantics.is_zero_vector` 一律过这一道。两个口的判据都不许在别处再写一遍（`1e-9` 那形），`skill_semantics` 自己那份 `all(abs(x) < 1e-9)` 降成对 ② 的一行委托。
+    - **词表（本笔独有，并发那笔未触及）**：`_TOKEN_SPLIT` 对中文是无操作，「查询天气」与「天气」永不相等——目录里明明有天气工具，查「天气」零命中。改为拉丁/数字整段、中文 2–3 字片段（下限 2 与 `knowledge.search.tokenize` 同口径）。这是"零命中被打成能力缺口"那条链的另一半。
+    - **为什么 CI 红的是「前提不成立」而不是断言**：`test_hitSearch_doesNotRecordGap` 自带目录、走生产入口压缩、再真调一次控制工具，断言"真命中时必须不记缺口"。词表与零向量任一处一坏，它的**前提**当场塌掉——这类红以前被当成"环境缺件"放过去。
+    - **前提自给（本笔）**：联想召回基线、向量线索通道、扇出闸、长期记忆六维门禁此前缺件时显式失败，而 `requirements-ci.txt` 刻意不含那四件 ⇒ CI 上恒红二十来格，真回归被稀释。改为走 `tests/memory_embedding_precondition.requireRealEmbeddingOrSkip`：只判一次**引擎真出非零向量**，缺件 skip 并点名缺的是哪一件；**装了模型却算不出仍是红**（引擎就绪即不再按缺件处置）。
+    - **红→绿（实跑，合并后）**：`test_hitSearch_doesNotRecordGap` 前提塌 → 全绿；`test_entity_swap_confidence_reaches_hit_threshold` `0.5875 → 0.87x`（并发侧提交说明的实测，本机真嵌入档复测同为 >= 0.85）；`test_vector_maintain_all_incremental_and_force` 的替身"含 alpha 才给 `[1.0]`"（beta 那条本来就是零向量）在被拒收后少算一条 ⇒ 改替身（每条文本各有非零向量、补 `encodeOrNone`），谓词一字未动。反向自证四枚：`manager._row_embedding` 退回旧写法 ⇒ 存量那格红；`tool_search` 抄一份 `1e-9` ⇒ 阈值单源那格红；注入引擎不认 `encodeOrNone` ⇒ 检索回落那格红；词表退回整段 ⇒ 两格红（`['查询天气']`、`['a','天','b']`）。
+    - **判据自己被咬过三次并当场改掉**：①第一版拿「气温如何」当查询，撤回回落照样绿（BM25 那支本来就空）——改成"词面真能命中 + 直接看 `_hybrid_scores` 是否为 None"；②第一版反向控制"正常引擎也命中"，落点只有一条目录时它恒真；③`_hybrid_scores` 里我先后写的"查询回全零即回落""条目一条都没算出即回落"两条，在"查询非零而条目全零"下叠加成误判（两条各自都是对的，合起来收窄了合法行为）——被上面那条判据抓出来，收成一条。
+    - **A/B 自证**（同一解释器 / 同一份锁，六目录 5000+ 用例）：改前 `20 failed`、改后 `22 failed`，逐行 `comm` 后新增两条均在 `test_context_pool_optimizations`（单跑 10 passed；`test_phase3_wiring` 同批 2 failed 两条 A/B 两侧同读数）⇒ 跨用例状态泄漏（预存），不认领。其余预存：`docx`/`kreuzberg` 缺件 14 格、`moe_index_state` 读 `NEUROVA_DATA_ROOT` 1 格、git 签名 1 格、`skill_permissions_compat` 2 格。**消失 0 条**，即本笔未借修红之名放宽任何判据。
+    - **live-verify**：同进程真 `ONNXEmbeddingEngine` 交 512 维零向量时 `encodeOrNone` 给 None、`_row_embedding('[0.0,0.0]') → None` 而 `[0.1,0.2]` 原样、`muscle_memory._semantic_vector → None`、`skill_semantics.is_zero_vector([0.0]*8) → True`、`vector_index` 写侧同口径拒收、`tool_search` 混分回落 BM25（`0.2877` 那支）。装齐四件后引擎回真向量，联想召回档回真读数（基线绿、2 条 strict xfail 照旧）。
+    - **仍开（需人裁）**：① CI 是否装 `onnxruntime`/`tokenizers`/`transformers`/`sentencepiece`——装了这四档回真读数、不装则恒 skip；代价是锁 +数十行、纯 wheel 若干、`huggingface-hub` 抬版本，还要把这四件从 `ci_static_gate.KNOWN_OPTIONAL_DEPS` 摘下（否则静态门禁继续 OPTIONAL-SKIP 放行）。属依赖口径变更。② `tool_search` 中文词表是 2–3 字滑窗、`knowledge.search.tokenize` 走 jieba（≥2 字词），两处对同一段中文给出的 token 集不同，检索与 FTS 因此不可比——要不要接真分词是另一次口径变更。
+    - **补一笔（同一格的第二半，CI 才看得见）**：合并后构建 `cnb-sq6-1k5q1kqrc#003` 的受保护子集剩 **1 failed / 7953 passed**，那一格不是断言红——`test_service_closed_loop::test_accept_produces_pending_proposal` 的回溯落在 `jieba.initialize() → gen_pfdict`，即**建字典**而非被测逻辑（本机 2.5s，差别只在字典是否已被同场更早的档暖过；CI 日志里它是本进程第一个切中文的档）。修法是把"字典建完没有"变成能问能催的事实（`search.isJiebaWarm` / `warmJieba`），并在 `tests/conftest.py` 的 `pytest_configure` 里一次建完——它归前提，不归某一条用例。判据 `test_jieba_tokenizer.py::TestWarmUpFace` 两格，红自证＝把两个口钉成恒 `False` ⇒ 一格红、还原 18 passed ×3 同读数。并发侧同一格另补了模块级父墙 `pytest.mark.timeout(120)`（与同目录两档兄弟逐字相同）——两者不重复：父墙管“这一档整体别被全局 30s 掐在中间”，收集期暖机管“这笔一次性成本不记在某一条用例头上”；注释已按这个分工改写，不留第二种说法。
+    - **口径与空号**：受保护子集真条目取 `tests.ast_scan.protectedSubsetEntries()` 读数 **718**（合并前 714；本笔加 `test_tool_search_semantic.py` 一行，并发侧另加三行）。引用面 `git grep -ohE "§6-4[0-9][0-9]"` 与条目行 `^[0-9]{3}\. ` 现算最大均＝**420**（并发那格已先占 419） ⇒ 下批从 **§6-421** 起。
+
+439. **判据把「别人的账」与「读不到」都读成了本笔的错：夹注未豁免、git 失败被吞成空串（本笔）** ✅🟢 —— 用户点单「CI 未通过，请按报错修复」；承 §6-434 同一条 pipeline-3（构建 `cnb-i46-1k5upb7f5#003`）。
+    - **现场**：那一场 `unit-tests` 只剩一格红，红在这份判据档自己的两处取数口上，**不是本笔的正文写错**：
+      ① 反证格报 `e87ce9b9 在区间里找不到（豁免指向一枚不存在的提交）`——读的人据此会去删一条仍该在的豁免；
+      ② 主格报 `生产池 声明 +26/-5，那一笔的 numstat 实为 +0/-0`——那是正文在**复述**被退役豁免挡着的旧声明，不是本笔声称。
+    - **同批已由并发会话落地的一半**（远端 `e317971f`／`4ee3441b` 及后续；前者的短号见 `git log`，本档不抄重写前的旧号）：豁免形状补 `「」` 与反引号段；`CLAIM_RE` 补「净」前加粗那种写法。本格只记本笔补上的两处，不重复记账。
+    - **根因一 · 夹注没有进入"别人的账"**：本档对"引用"的口径是按**形状**给（成对引号内），但括号夹注 `（…）` 一直不在名单里。夹注放的是"这一块按哪一池算"的口径说明，与本笔行数无关；补正笔恰好把旧声明的数字写在这一格里。**反向半边同样钉住**：夹注只豁免它圈住的那一段——夹注写在声明**之后**时（`生产池 +26/-5（说明）`），声明本身仍是本笔的账，照旧报红，否则下一次真写错、顺手加个括号就能安静通过。
+    - **根因二 · `_git()` 把失败吞成空串**：只取 stdout，git 的退出码与 stderr 一起丢掉。"对象取不到"与"读出来就是空的"在返回值上完全一样，下游把前者解释成了后者——报错说的像"你的数据错了"，真因却在取数口（教义第 2 条点名禁止的那一形）。现在失败即抛，要"先探一下"的调用点显式 `check=False`。
+    - **取法收成一处**：`_somebodyElsesSpans()` = 引号段 + 反引号段 + 括号夹注，一处给出；判豁免与筛靶子两处都从这里拿（教义第 6 条，免得同一条词汇散成两份）。
+    - **红→绿（本机实跑，两处各自反证）**：撤掉夹注 ⇒ `1 failed, 8 passed, 1 skipped`，原文 `'（生产池 +26/-5）' 的豁免判定为 False，应为 True`；撤掉 `_git` 的失败即抛 ⇒ `1 failed, 9 passed`，原文 `DID NOT RAISE <class 'AssertionError'>`。恢复後 `10 passed, 1 skipped`。
+    - **回归与门禁**：`pytest tests/unit/ci -q` ⇒ **532 passed, 3 skipped**；`scripts/ci_static_gate.py --skip-import` 三道全绿；`ruff check` 该文件 All checks passed。
+    - **净 LOC**：生产池 **+0/−0**；测试/基建池 `tests/unit/ci/test_commitLocClaimMatchesOwnNumstat.py` **+79/−5 ＝ 净 +74**（`_git` 失败即抛 +12/−4、`_asideSpans`/`_somebodyElsesSpans` 与夹注口径 +17、两处改指 +2/−1、两枚新判据 +48）。文档池 +12/−2（本格）。`git diff --numstat` 合计 91/7，与分池相加一致。
+    - 空号至 **§6-439**（本格号），下批从 **§6-440** 起。
+
+440. **批 L 落地：CI 静态门禁的 6 处 `undefined name` 分四类根因收口，闸门侧修「问错的问句」而非删报错（✅ 本批；受保护子集真条目 +2）** 🟢 —— 这批修的不是 6 个拼写，是**一条问错的判据**加**一处只写不读的取数**
+    - **✅ 起点（CI 现场，非本地臆测）**：PR #364 的 `cnb-8a0-1k5kcrpsh-001`（static-gate）红在 6 行，本地 `python scripts/ci_static_gate.py --skip-import` 逐行复现同一集合：`tool_executor.py:1646` 的 `file_path`、`channels.py:459` 的 `ChannelMessage`、`mcp_server_api.py:120` 的 `McpCaller`、`knowledge_facts.py:736/761` 的 `Tuple`、`provider_compat.py:202` 的 `Any`。同一次的 `-005`（frontend）红在 `npm audit --audit-level=high` 的 5 条（vitest/@vitest/mocker、dompurify critical、vite high）。
+    - **✅ 根因分四类，不许合并成「补 import」一个动作**：①**真·漏 import**（`Tuple`/`Any`＝同文件其它模块都已从 `typing` 导入，这里漏了）；②**注解专用·局部导入**（`McpCaller` 的实体在 `_callerPrincipal` 函数体内导入，理由写在注释里＝`neurova.agent` 包 `__init__` 链回 `tool_executor` 的循环导入，AGENTS.md §3）；③**注解专用·近似懒加载**（`ChannelMessage` 只在注解里出现）；④**幻影变量**（`file_path` 在该函数作用域从未绑定）。
+    - **✅ ①②③ 修在闸门侧，不是修在被报的代码**：把导入提到模块级会**改坏生产**（②直接拉循环导入），删掉注解会**丢解析器能读的事实**——两条都是把报错挪走（教义第 1、2 条）。改法是让 `scripts/ci_static_gate.py` 的未定义名判据多问一句「这个名字在**本文件**里被 import 过吗」（`collectUndefinedNames` 复核 pyflakes 自己的读数，不另写 AST 名解析＝教义第 6 条）。反向格同批钉死：拼错的名字、写错的**形参**（真实命中形态）照旧红，且「文件里别处 import 了同名名字」不得为真拼错开白名单。
+    - **✅ ④ 是本批唯一的真缺陷，且比 pyflakes 报的更重**：红灯先实证——真 `ToolExecutor._governance_precheck` 走到该行直接 `NameError: name 'file_path' is not defined`，被外层吞成 warning，**文件类工具在 SANDBOX 裁决下每到这一行就静默丢阻断回执**。同一次调用里 `extract_adjudicable_params` 明明返回了 `(键名, 值)` 清单，代码却把它命名成 `_pathValues`（下划线＝声明不读）再凭幻影变量打日志——与 §6-284 甲案「第二条路径值在审计面消失」同一根因族。修法不是删日志：路径清单**真的被消费**，审计 warning 逐条点名 `键=值`，无值时不留 `None` 占位。四格判据里有一格专门钉「日志里那串路径**等于**取数口的返回值」，改走第二份认键循环即红。
+    - **✅ 前端 5 条按修复线抬，取该支当前最高**：`vitest`/`@vitest/coverage-v8` `4.1.11→4.1.12`（GHSA-qxg6-89mg-rqv8 与 GHSA-xp26-3454-mjgp 的 fixed 都是 4.1.12，且 4.1.11 是后者 introduced 下界——刚好落在修复线下沿）、`dompurify` `3.4.16→3.4.17`、`vite` `6.4.3→6.4.5`（6.x 线最高；6.4.4 的 semver 下界会把 6.3.x 放回来，那是**下界回归**，所以取 `^6.4.4`）。api.osv.dev 逐版本实查：改前三个版本各有 3/5 条命中，改后**全部 none**；锁里顺带被抬的传递依赖 `chai@6.3.0`／`std-env@4.3.0`／`tinyrainbow@3.2.0` 也逐条查过，均 none、无降级。`vite` 停在 6.x 而非 latest 8.x：本批只解漏洞，跨大版本属另一票。
+    - **✅ 活体读数**：真装 `npm install` → `vitest 4.1.12 / @vitest/mocker 4.1.12 / dompurify 3.4.17 / vite 6.4.5`；`npm audit --audit-level=high` → `found 0 vulnerabilities`；`npx vue-tsc --noEmit` → exit 0；`npm run test` → **2162 passed / 3 failed**，A/B 自证（`git stash push NeurUI/package.json package-lock.json` + 重装回旧版）失败集合**逐行相同**（`duplicate-function-inventory.guard` 2 格、`locale-key-reference` 1 格 `skillEvo.*` 缺键），预存失败不算回归。
+    - **✅ 单测 A/B**：`tests/unit/security`（去掉两个 pre-existing collection error 的档）失败集合 53→49，**新增 0**，消失的 4 格正是本批新档由红转绿；`tests/unit/ci`＋`tests/unit/tools` 失败集合 1→16 是补齐 `fastapi`／`prometheus_client`／`openpyxl` 之后才**跑得起来**的档（补齐前它们连收集都进不去），逐格看无一是本批文件。
+    - **⚠ 本批自己的落笔错（两处，都在当场改掉）**：a) 首版 `_PYFLAKES_LINE` 贪心分组把 `undefined name` 拆成 `kind=undefined`、`detail=name 'x'`，导致**反向格全绿地漏报**（假绿，最坏的一种）——是反向格先红才发现的，反证了「只写正向格＝自证空转」；b) 首版判据里三处 `make()`／`logger` 未定义，把被测点淹在噪音里，改成逐条自足的小样例。
+    - **✅ 同批扫掉 ruff 那 3 条存量（主干 `21d70a8a` 现场就有，不是本批引入）**：静态门禁绿了之后露出来的是同一条流水线的 ruff 阶段。逐条看是两类真缺陷，都不是「加 noqa」能了事的：①`tests/manual/readFaceReconciles_b58.py:102`／`shellEntryNotPinned_batch57.py:166` 的 `exc`——PEP 3110 规定 `except ... as exc` 的绑定名**出块即解绑**，而它被关进 `lambda` 里懒求值，于是那两行的失败读数一旦真被执行就是 `NameError`（脚本静默崩在诊断路径上）；改成出块前先取值。②`tests/manual/declaredSurface_batch49.py` 的 `PROBE`——`runProbe` 是 `readImplicit` 的上一代实现，全文件无人调用、`PROBE` 从未定义，按教义第 7 条**删**（不补一份 PROBE，那是留两处同功能实现）。另修 `tests/unit/neurflow/test_workflow_ownership_v2.py:151` 的 `# noqa: 仅记录`——不是码列表的 noqa 是空转指令，该行本就无违规，直接去掉。改后 `python -m ruff check neurova tests --no-cache` → `All checks passed!`
+    - **⚠ 本批新登记的断点（不静默遗留）**：①`tests/unit/ci/test_scanCriterionMustProveItsOwnSurfaceRatchet.py::test_staticRootsNeverPointOutsideOrNowhere` 报 `tests/unit/test_session_landing_guard.py: missing`——**该文件真实存在且在 `protected_tests.txt:1636` 在册**，说明这条「根指不到真实目录」的静态根解析在 Linux 上误判，与本次改动无关，单独开票；②`tests/unit/tools/test_governance_mcp.py` 等 12 格在裸环境里报 `async def functions are not natively supported`（缺 `pytest-asyncio` 的 asyncio_mode 声明），CI 精简锁里有、本地没有，属环境差异不属回归。
+    - **下一枚空号现查**：本批初稿取 §6-403，落盘后并会话已在主干用掉该号（`d5c430c7`／`5a1a49fb`）⇒ 按「改后到的、不改先到的」让号改记：先在 main 上改记 **§6-417**，并入 main 后又因 417 已被占用再让一拍 ⇒ 并入 main 前主台账已用到 434、本条让号终取 **§6-435**，主台账与此处一并改读。取号除了查台账，还要现查**主干**——同一 PR 期间主干会往前走，本地十分钟前算的号不作数。
+
+441. **批 M-2 落地：`dependency-audit` 的 Prepare 段按实测抬到 `cpus: 4`，并把「拉冻结库的流水线不许用最小规格」钉成常驻判据（✅ 本批；受保护子集真条目 +1）** 🟢 —— 现场是 PR #364 的 `cnb-nmd-1k5no13f9#003`：`unit-tests` 在 **Prepare** 段被杀，两条 stage 一条都没跑。
+    - **✅ 起点（CI 现场读数，非本地臆测）**：`cnb build get-build-status --sn cnb-nmd-1k5no13f9` 读回
+      `stages: error,116717,Prepare / skipped,0,install uv… / skipped,0,protected subset…`，
+      日志末行 `任务超过最大执行时间而被强制关闭：1m0s`。同一构建里八条邻居流水线的 Prepare 是
+      `3719ms`～`63827ms`——同一份提交、同一时刻，所以不是「机器慢」，是这一格自己越了平台的 1m。
+    - **✅ 两次对照实验否掉了「墙钟需要抬」这个直觉方向**：以 `api_trigger_probe` 事件在 main 上单起三条
+      探针流水线（不跑任何用例），Prepare 读数 `18232ms` / `3719ms` / `4677ms`。空跑都在 1m 内，
+      说明期限本身够用；变的是**这一格要塞进去的固定成本**，不是平台的表。
+    - **✅ 根因落在声明处**：`dependency-audit` 的 Prepare 要 `docker pull` 镜像、拷两份缓存卷、装
+      `pip-audit`，再把一个上百 MB 的冻结漏洞库落到 `/root/.cache/osv-scalibr`——而它与其余八条同规格
+      `cpus: 2`。按修复教义第 1 条，故障在声明处生产、在 Prepare 处被报出来；改 stage 脚本是把报错挪走。
+    - **✅ 判据按阶段结构认，不按流水线名认**：`tests/unit/ci/test_runnerAllocatedWallClockIsNotADeadline.py`
+      扫 `runner` + `docker.volumes` + `stages[].script`（含 YAML 锚点复用），凡「挂 `/root/.cache/osv*` 卷
+      **且** stage 里有 `--prefetch-offline-databases`」的流水线，`cpus` 必须 ≥ 4。改名、搬位置都不影响判据；
+      受治面自证下限 `MIN_HEAVY_PREPARE_PIPELINES = 1`，只报「零违规」不报扫描量即红。
+    - **⚠ 本批自己的三次落笔错（都在当场改掉，记录形态供下次省一轮）**：a) 首版取「`memory == cpus×2`」——
+      实测 23 处 `runner.cpus` 声明里**没有一处写 `memory`**，受治面是空的，绿得毫无意义；b) 第二版取
+      「`docker.volumes` ≥ 2 则 `cpus` ≥ 4」，把 `dependency-audit` 抓了出来，但 `unit-tests` 也在受治面内、
+      它已经合规——这一版恰好会让人以为「修完 `unit-tests` 就没事」，而真红在另一条；c) 第三版取「装两棵树
+      （Python + npm/cargo）」在活配置上扫到 **0 条**（`.cnb.yml` 里两棵树分别落在不同流水线）。三次都是
+      「受治面自证」那一格先红才发现的——这道自证不是装饰。
+    - **✅ 灯（红→绿逐条实测）**：`pytest tests/unit/ci/test_runnerAllocatedWallClockIsNotADeadline.py -q`
+      → 改前 `1 failed`（`'dependency-audit': cpus=2，挂 2 个缓存卷`，且受治面 2 条），改后 `2 passed`；
+      把 `cpus` 改回 `2` 再跑 → 当场回红，恢复即绿。
+    - **✅ 同批回归面**：`tests/unit/ci` 整目录 `495 passed, 2 skipped`；受保护子集登记历史
+      （`test_protected_subset_registration_history` 8 点）、`test_unit_tests_single_leg`、
+      `test_ci_pipeline_speed_guard` 共 33 点全绿；`python scripts/ci_static_gate.py --skip-import` 全通过；
+      `ruff check neurova tests` All checks passed；`.cnb.yml` 现场 `yaml.safe_load` 通过。
+    - **⚠ 诚实边界**：本批只改 `dependency-audit` 这一格的 `cpus`，`unit-tests` 的 `cpus` 本来就是 4，
+      **没有**动任何 stage 的 `timeout`、没有动受保护子集清单的覆盖面。`cpus: 4 → 8` 未采用：本仓现有读数
+      不支持「这一格是核数瓶颈」的结论，先按最小可证的一步走。
+
+442. **批 M-3 落地：`unit-tests` 的整场受保护子集按实测重定预算——cpus 4→8、墙钟 90m→45m，并把「上限要么是预算、要么不是上限」钉成常驻判据（✅ 本批；受保护子集真条目现算 717）** 🟢 —— 与 §6-420 同族同现场，但那笔明写「`unit-tests` 的 cpus 本来就是 4，不动」，本笔正是把那句留白补上
+    - **✅ 起点（CI 现场读数）**：`cnb build get-build-stage --sn cnb-n45-1k5oultjs --pipelineId …-003 --stageId stage-1` 读回
+      末段 `tests/unit/skills/test_marketInstalledStateIsReadBack.py ......... [ 83%]` → `Killed` →
+      `Finished, code: 137, duration: 29m 23s`。`code: 137` 是 SIGKILL，日志里**一条失败墙都没有**：
+      不是「有测试红了」，是整段跑到点被掐断。同一构建里另外 8 条流水线全绿（`prepare 7.1s / stage-0 20.6s`），
+      所以也不是「机器慢」或「装依赖慢」。
+    - **✅ 先否掉「墙钟太窄」这一支**：该 stage 当时声明 `timeout: 90m`，而它在 **29m23s** 就被杀——距上限还有一小时。
+      83% 处已用 29m23s ⇒ 整场按此速率约 **35m20s**。上限远比实测宽，则「被掐」不可能归因到时间。
+    - **✅ 根因回到声明处（两条，同一句话：预算的两层数没对过表）**：
+      ① `runner.cpus: 4`。官方《语法手册》`runner.cpus` 一节：*内存 = CPU 核数 × 2 GiB*、*未配置时可用核数由
+      分配到的构建节点决定*；官方《构建节点》：`cnb:arch:amd64` 核数范围 **1~64**、同档节点**默认 8 核**。
+      ⇒ `cpus: 4` 不是上限，是把这一格按 **8GiB** 的最小可用档压着跑，而它是九条里唯一「装整份锁 + 串行跑
+      716 条清单 + 每格带 `--cov` 插桩」的一条。进程被 SIGKILL 的典型形态正是内存压力下的 OOM kill。
+      ② `timeout: 90m` 与实测 35m 脱钩两个量级。它不造成本次故障，但它**掩盖**了故障：上限若远高于实测，
+      「真撞墙」与「被资源杀掉」在日志里长得一模一样，读的人只能猜——本次就是猜错的现场。
+    - **✅ 处置（只动 `unit-tests` 这一格的两行声明，不动判据、不动覆盖面）**：`cpus 4 → 8`；
+      驱动受保护子集那一格的 `timeout 90m → 45m`（≈ 实测 1.3 倍，仍远宽于子集里最高的单档父墙
+      `pytest.mark.timeout(120)`，先到点的仍是单格那条诚实的超时）。`--cov-fail-under=60` 与
+      `scripts/ci/protected_tests.txt` 的覆盖面一字未动。
+    - **✅ 新判据（按阶段结构认，不按流水线名认）**：`tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py`，
+      扫「`stages[].script` 里有 `scripts/ci/protected_tests.txt` 清单驱动」的流水线条目（含 YAML 锚点复用），
+      两条不变量：`cpus ≥ 8`（`HEAVY_SUBSET_CPU_FLOOR`，内存 ×2GiB 为官方口径，cpus 是唯一代理量——
+      `runner` 只有 tags/cpus/namespace，没有 memory 字段）；驱动那一格的 `timeout ≤ 45m`
+      （`SUBSET_STAGE_TIMEOUT_CAP_MIN`）。受治面自证：扫到 0 条即红。
+    - **✅ 灯（红→绿逐条实测，本机 py3.11 + `requirements-ci.lock` 装齐）**：
+      `pytest tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py -q`
+      → 改前 **2 failed / 1 passed**（`'unit-tests': timeout='90m'（90m > 45m）` 与
+      `'unit-tests': cpus=4（内存 8GiB < 16GiB）`，各两命中＝锚点复用两处），改后 **3 passed**；
+      把 `cpus` 改回 `4` 再跑 → 当场回红（`1 failed`），恢复即绿。
+    - **✅ 同批回归面**：`tests/unit/ci` 整目录 **498 passed, 2 skipped**（含 `test_dev_environment_contract`
+      的 vscode `cpus: 8` 与 `workspace.launch.cpus` 一致性、`test_unit_tests_single_leg`、
+      `test_ci_pipeline_speed_guard`、`test_runnerAllocatedWallClockIsNotADeadline`）；
+      `test_dev_path_and_runtime_dep_guards` + `test_auditLedgerNumbering` + 登记历史 **54 passed**；
+      `python scripts/ci_static_gate.py --skip-import` → 🎉 全部通过；`ruff check neurova tests --no-cache`
+      → All checks passed。
+    - **⚠ 诚实边界（第一条是本笔最重要的边界）**：`code: 137` 的**直接**归因（OOM 还是别的信号源）不在仓内可读——
+      平台只在日志末行给退出码，不给内存读数。本笔证的是两条**可读事实**：①这一格被压在同档节点默认核数的一半上；
+      ②它在离自己声明的上限还有一小时时被杀。`cpus: 8` 是让声明回到「官方默认规格」，不是「按实测内存反推出来的数」；
+      真实内存曲线要等下一次构建的读数。② 45m 的余量可能仍偏紧（若下一次真超，**应当**变红并按实测重定，
+      不许为此再往上抬到 90m —— 那正是本笔在修的那种「上限不是预算」）。③ 本机没有 `python:3.12` + `uv` 锁的
+      整腿环境，上面的红→绿都在判据层面自证，端到端读数以新构建为准。
+    - **⚠ 撞号让号（本格按「改后到的、不改先到的」让一拍）**：本笔落笔时现查最大＝419、条目行尾号为 419 ⇒ 取 420；
+      推送时远端已被 `9051c590` 推前一步，它把分支原有的 418／419 顺让成 419／420（main 新占了 417）⇒ 420 已被占。
+      按纪律让号改记 **§6-439**（并入 main 时 419／420／421 均已被 main 与并发会话占走，本条连让两拍），本笔的提交 `9ac1878d` 正文里没有写号，故无需改读；`protected_tests.txt` 的在册注释里也不含号次。
+    - **下一枚空号现查**：`git grep -ohE "§6-4[0-9][0-9]" HEAD -- audit-reports docs scripts | sed 's/§6-//' | sort -u | tail -3`
+      现算最大＝**439**（439 只出现在本格自身）；条目行 `^4NN\. ` 尾号为 **434**（main 侧最新）⇒ 后继批次从 **440** 起。

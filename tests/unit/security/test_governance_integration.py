@@ -13,7 +13,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, patch
 
 
 def _shutil_rmtree_ignore(path: str) -> None:
@@ -29,7 +29,7 @@ from neurova.tool_executor import ToolExecutor  # noqa: E402
 
 
 def _make_executor() -> ToolExecutor:
-    """构造隔离的 ToolExecutor：agent 为 mock，tool_engine 强制为 None。"""
+    """构造隔离的 ToolExecutor：agent 为 mock（不碰真实引擎与真实审批库）。"""
     agent = MagicMock()
     agent.user_id = "test-user"
     agent.agent_id = "test-agent"
@@ -42,9 +42,11 @@ class TestGovernanceIntegration(unittest.TestCase):
 
     def setUp(self):
         reset_governance()
-        # 保存原始 tool_engine property，用例内替换为恒 None 以隔离真实引擎
-        self._original_tool_engine_prop = ToolExecutor.__dict__.get("tool_engine")
-        ToolExecutor.tool_engine = property(lambda self: None)  # type: ignore[assignment]
+        # 不再有"把 tool_engine 桩成 None"这一步：`ToolExecutor.tool_engine` 与它那条
+        # 恒不可达的执行档已在 §6-297 乙一并退役（`9b5f446e`），本档是那批的残留桩——
+        # 桩一个不存在的属性会抛 `AttributeError`，而它从前的 teardown
+        # `del ToolExecutor.__dict__["tool_engine"]` 撞的是只读的 `mappingproxy`，
+        # 红在 tearDown 里、被 setUp 自己塞进去的桩掩盖着，谁也没看见。
         self.executor = _make_executor()
         # on_tool_executed 是记忆钩子，mock 掉避免副作用
         self.executor.on_tool_executed = MagicMock()
@@ -62,16 +64,6 @@ class TestGovernanceIntegration(unittest.TestCase):
 
     def tearDown(self):
         reset_governance()
-        # 还原类属性，避免污染其他用例。类 `__dict__` 是 mappingproxy（只读视图），
-        # 删除只能走 `delattr`——此前那句 `del Type.__dict__[name]` 在 tearDown 里必炸，
-        # 用例本身全绿却按 `TypeError` 记红。
-        if self._original_tool_engine_prop is not None:
-            ToolExecutor.tool_engine = self._original_tool_engine_prop  # type: ignore[assignment]
-        else:
-            try:
-                delattr(ToolExecutor, "tool_engine")
-            except AttributeError:
-                pass
 
     # ── DENY: 反弹 shell 在执行前被拦截 ────────────────────────
 
@@ -123,7 +115,6 @@ class TestGovernanceIntegration(unittest.TestCase):
         if not result.get("sandbox"):
             self.assertNotIn("returncode", result)
         # 分支判定：有沙箱后端 → sandbox 标记；无后端 → fail-closed 拒绝
-        from neurova.sandbox.exec_sandbox import execute_in_sandbox_async  # 可用性探针
         if result.get("sandbox"):
             self.assertTrue(result["sandbox"])
         else:

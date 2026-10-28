@@ -35,6 +35,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
@@ -1027,7 +1028,7 @@ class TestShapeVocabularyHasOneSource:
                 PROJECT_ROOT / "scripts", hints=tuple(sorted(labels))
             )
         ):
-            tree = ast.parse(ref.code)
+            tree = parseSource(ref.code)
             docstrings = set()
             for node in ast.walk(tree):
                 if isinstance(

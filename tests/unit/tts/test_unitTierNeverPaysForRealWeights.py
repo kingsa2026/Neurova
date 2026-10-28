@@ -17,7 +17,7 @@ HTTPS 把权重拉下来（`~/.cache/modelscope/.lock` 与落地的两份 `.data
 import pytest
 
 from neurova.tts.moss_nano import MOSSNanTTS
-from tests.unit.tts._fakeEngines import _FakeHeavyEngine, afterTtl
+from tests.unit.tts._fakeEngines import _FakeHeavyEngine
 
 
 async def _driveReleaseThenPreheat(heavy_manager):
@@ -31,7 +31,11 @@ async def _driveReleaseThenPreheat(heavy_manager):
     """
     mgr, heavy, light = heavy_manager
     await mgr.synthesize("第一句")
-    await mgr.release_idle_engines(now_monotonic=afterTtl(mgr))
+    # TTL 是**相对**比较（`now - _last_used_monotonic >= release_ttl_sec`），故"现在"必须
+    # 从这台机器这一轮的真实读数上往后推——写死的 `1_000_000` 在运行时长已过 11.5 天的
+    # CI 上是一个**过去**的时刻，差值变负数，释放不发生。
+    await mgr.release_idle_engines(
+        now_monotonic=(mgr._last_used_monotonic or 0.0) + 120.0)
     assert mgr._engine_name == "edge-tts", "前置不成立：释放没换班到轻引擎"
 
     await mgr.synthesize("第二句")  # 轻引擎立即服务，同时触发后台预热

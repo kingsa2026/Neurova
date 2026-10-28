@@ -25,18 +25,14 @@ import tempfile
 import time
 from pathlib import Path
 
+# 读数里有 ⇒ / ✗ 这类非 GBK 字符：控制台/重定向一律按 UTF-8 写，免得 print 自己抛
+# （`UnicodeEncodeError` 会把退出码变成 1，读日志的人只能看到"有一条腿 FAIL"）。
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
-# 本档字面里有本机编码编不出的字符：不钉住，`print` 抛 UnicodeEncodeError 会让退出码变 1，
-# 而活体档的证据就是「退出码 + 读数」——那会读成「有一条腿 FAIL」，查的是坏掉的对象。
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-
-# stdout 编码自钉：本档会打出中文读数，本机编码（cp936）编不出的字符会让 `print` 抛
-# `UnicodeEncodeError`、退出码变成 1——读起来像"这条腿 FAIL"，其实判据一条都没跑。
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 # 读数里带 `⇒`（cp936 编不出）：不钉 stdout 编码时 `print` 会抛 UnicodeEncodeError，
 # 退出码变 1，看着像"有一条腿 FAIL"——而实际只是终端编码不认这个字形。
@@ -44,11 +40,9 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 isolatedDataRoot()
-
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # 本机编码编不出的字符不许把退出码变成 1
-
-sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 from neurova.context.token_estimator import estimate_tokens as estimate_text_tokens  # noqa: E402
 from neurova.cognitive_layers.memory_layer import association_cue_generation as gen  # noqa: E402
@@ -184,6 +178,13 @@ def _run(manager, client, N):
 
 
 def main() -> int:
+    # 读数里有 ① ② 与箭头这类非 GBK 字符：控制台/重定向一律按 UTF-8 写，
+    # 免得 print 自己抛 UnicodeEncodeError、退出码 1 被读成"有一条腿 FAIL"。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:  # noqa: BLE001 —— 老环境不支持就算了，读数不该被它打断
+            pass
     corpus = buildCorpus()
     partOneCost(corpus)
     partTwoWindowLeak(corpus)

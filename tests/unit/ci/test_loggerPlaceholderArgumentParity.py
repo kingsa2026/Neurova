@@ -31,6 +31,8 @@ import ast
 import re
 from pathlib import Path
 
+from tests.ast_scan import parseSource
+
 REPO = Path(__file__).resolve().parents[3]
 
 #: 扫描面：生产代码、CI 脚本、测试——三处都会在真链路里打日志。
@@ -102,7 +104,7 @@ def _literalFormat(node: ast.Call) -> str | None:
 def halfMatchedLoggerSites(source: str, relPath: str = "") -> list:
     """返回 `(行号, 方法名, 转换符数, 实参数)` 的问题站点。"""
     try:
-        tree = ast.parse(source)
+        tree = parseSource(source)
     except SyntaxError:
         return []
     # 本模块是不是把 `logger` 这个名字绑给了 logging（`logging.getLogger(...)`）——

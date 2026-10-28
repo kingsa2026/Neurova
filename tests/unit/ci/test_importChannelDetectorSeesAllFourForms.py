@@ -29,6 +29,7 @@ import ast
 import pathlib
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 MODULE = "pkg.sub.leaf"
 RETIRED = "neurova.core.multi_agent_manager"
@@ -39,7 +40,7 @@ CONSOLE_MODULE = "neurova.api.endpoints.console"
 
 def _firstImport(source: str) -> ast.AST:
     """取这段源码里的第一个 import 节点（合成样本一律走这里，判定与枚举因此分开）。"""
-    tree = ast.parse(source)
+    tree = parseSource(source)
     return next(n for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom)))
 
 

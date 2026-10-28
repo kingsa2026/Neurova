@@ -17,8 +17,8 @@
 取数走真 `create_app()`＋`TestClient`——**不进 with 上下文**就是"启动尚未完成"的真实形状，
 那正是 6001 在生产里被抛出的那个态；不去 monkeypatch 私有 `_state`（那是绕过生产装配点）。
 反向钉不在本档重复：已就绪时这两个端点仍 200、写侧匿名仍 401，由
-`tests/unit/api/test_memoryWriteIdentityGate.py:88/:102` 钉着——本批只改"失败长什么样"，
-不许顺手把读面改成要登录。
+`tests/unit/api/test_memoryWriteIdentityGate.py` 钉着——本档只改"失败长什么样"，
+不许顺手把读面改成不要登录（2026-10-26 点单甲之后读面本就要登录，夹具按现行政策带证）。
 """
 from __future__ import annotations
 
@@ -30,45 +30,28 @@ MEMORY_PREFIX = "/api/v1/memory"
 
 
 @pytest.fixture()
-def unreadyClient():
+def unreadyClient(monkeypatch):
     """真 app、且**本轮装配里确实一个 Agent 也没有**——6001 的产生态。
 
-    这里不许只写「不跑 lifespan」：`create_app()` 是进程级单例（`_app_instance`
-    命中即复用），受保护子集里先跑过带 lifespan 的档之后，复用的那份 `AppState`
-    装着已启动的 `default` Agent，本档于是读到 200——**前置悄悄不成立，红的却是
-    生产断言**（2026-10-24 整份受保护子集实测：本档单独跑 4 passed，整份跑 2 failed，
-    且 `get_memory_manager` 在 200 那条路上正常返回了一个 MemoryManager）。
+    两件前提都不是被测对象，缺任一件红都不在这里：
 
-    故把产生态显式摆出来：复用实例时先摘掉 Agent 注册，用例结束原样放回
-    （同一字典对象，不换壳——`endpoints` 侧的 `_app_state["agents"]` 指的就是它）。
-    这一处也顺带解释了 CI 上「实得 200」的另一半成因：端点请求期读的是运行时注册表
-    里那份 **`agents` 引用**，不是 `AppState.agents`；只摘 `AppState` 一侧看不见效果。
+    ① **清掉上一场留下的 `_app_state`**：`create_app()` 是进程级单例（`_app_instance`
+       命中即复用），进程里**上一个**起了 lifespan 的 app 会把它留在模块全局上
+       （`create_app()` 本身不写、`lifespan` 才写）。同场跑测时它还在，本档拿到的就不是
+       "未就绪"，三条行为钉会读成 200 空成功——红在夹具没断干净，不是产品把故障画成了成功
+       （2026-10-24 整份受保护子集实测：本档单独跑 4 passed，整份跑 2 failed）。
+    ② **带一枚真 JWT**：记忆面自 2026-10-26 点单甲起整面挂路由级
+       `requireIdentityForMemoryFace`，匿名请求在到达"未就绪"那一段之前就 401 了。凭证走
+       生产同一个签发口（`tests/auth_headers.bearerHeaders`），不在生产侧加兜底——
+       `dependency_overrides` 压不住路由级那道门。
     """
     from fastapi.testclient import TestClient
 
-    from neurova.api import endpoints as endpointsModule
-    from neurova.api.app import create_app
+    from neurova.api import app as app_module
+    from tests.auth_headers import bearerHeaders
 
-    app = create_app()
-
-    agents = endpointsModule.get_app_state().get("agents")
-    saved = dict(agents)
-    agents.clear()
-    # 记忆面自 2026-10-26 起在 router 级挂 `requireIdentityForMemoryFace`（无凭证一律 401，
-    # 且覆盖不了——这是"门只有一道"的设计）。本档判的是"故障长什么样"，不是门本身，
-    # 故走生产入口签一张真 token；门自身的判据在
-    # `tests/unit/api/test_memoryWriteIdentityGate.py` 与 `test_memory_route_authorization.py`。
-    from neurova.api.auth import create_access_token
-
-    client = TestClient(app)
-    client.headers.update({
-        "Authorization": "Bearer " + create_access_token(
-            {"user_id": "1", "username": "tester", "role": "user"})})
-    try:
-        yield client
-    finally:
-        agents.clear()
-        agents.update(saved)
+    monkeypatch.setattr(app_module, "_app_state", None, raising=False)
+    return TestClient(app_module.create_app(), headers=bearerHeaders("u-probe"))
 
 
 def testEveryDeclaredErrorCodeTakesAPosition():

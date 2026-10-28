@@ -115,6 +115,7 @@ def fanoutManager(tmp_path):
 
     # 前提自给：本档要的是**通道真能点火**（否则扇出门与它要挡的候选一条都不存在，
     # 读数是空的）。缺件就 skip 并点名缺的是哪一件；装了模型却算不出仍然是红。
+    # 与 C-1 / C-2 同一个前提单源（tests/memory_embedding_precondition.py）。
     requireRealEmbeddingOrSkip("线索扇出闸（缺档时通道不点火，测不到门）")
     reset_semantic_search()
     mgr = MemoryManager(

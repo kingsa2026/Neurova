@@ -21,37 +21,35 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from neurova.api.auth import get_current_user, get_current_user_or_default
 from neurova.api.error_handlers import register_error_handlers
 from neurova.interfaces.api_standard import ErrorCodes
+from tests.auth_headers import bearerHeaders
 
 USER = {"user_id": "1", "username": "tester", "role": "user"}
 
 
-def _authorized(client: TestClient) -> TestClient:
-    """带一张**真**签出来的 access token 的客户端。
-
-    记忆面 2026-10-26 起在 router 级挂 `requireIdentityForMemoryFace`：无凭证一律 401，
-    且它是 router 级依赖，`dependency_overrides` 覆盖不到（那正是它"门只有一道"的设计）。
-    故这里不再靠覆盖身份位，而是走生产入口签一张真 token——本档要判的是"故障长什么样"，
-    不该让红咬在"没鉴权"上；但也不许把门本身的判据挪走（那由
-    `tests/unit/api/test_memoryWriteIdentityGate.py` 与 `test_memory_route_authorization.py` 钉着）。
-    """
-    from neurova.api.auth import create_access_token
-
-    token = create_access_token(dict(USER))
-    client.headers.update({"Authorization": f"Bearer {token}"})
-    return client
-
-
 def _mount(router, prefix: str):
+    """装配噪声先排掉：身份门整族打成 USER，红才咬在"把故障读成结论"上。
+
+    覆盖面必须按**路由图实际用到的**门来打，不能手抄名字：记忆面 2026-10-26 点单甲
+    之后是路由级的 `requireIdentityForMemoryFace` 在守门，手抄的
+    `get_current_user(or_default)` 两个名字对它无效，于是本档曾整族 401——红落在
+    "没鉴权"上，被测对象（故障有没有被折成结论）根本没被执行到。
+    `tests/auth_headers.overrideIdentity` 是仓内为这件事立的那一处取法
+    （它同样钉死了 `deps` 那份同名再导出，避免"override 打错对象静默不生效"）。
+    """
+    from tests.auth_headers import overrideIdentity
+
     app = FastAPI()
     app.include_router(router, prefix=prefix)
     register_error_handlers(app)
-    app.dependency_overrides[get_current_user_or_default] = lambda: dict(USER)
-    # firewall 的路由级依赖是 `get_current_user`，覆盖掉才不至于整族 401。
-    app.dependency_overrides[get_current_user] = lambda: dict(USER)
-    return _authorized(TestClient(app, raise_server_exceptions=False))
+    overrideIdentity(app, dict(USER))
+    # 路由级凭证门（`requireIdentityForMemoryFace`）判的是"这一趟请求有没有凭证"，
+    # 与处理器级身份是谁无关——替身压不住它，故 client 也挂一枚真 JWT（生产同一个签发口）。
+    # 两条一起上：只带证不 override 会让 firewall 那族按真身份裁决，只 override 不带证
+    # 会整族 401。两件都是**装配点**，不是被测对象。
+    return TestClient(app, raise_server_exceptions=False,
+                      headers=bearerHeaders(USER["user_id"]))
 
 
 class _BoomLedger:

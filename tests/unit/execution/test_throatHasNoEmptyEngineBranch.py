@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from tests.ast_scan import parseSource
 
 REPO = Path(__file__).resolve().parents[3]
 TOOL_EXECUTOR = REPO / "neurova" / "tool_executor.py"
@@ -31,7 +32,7 @@ RETIRED_MEMBERS = {"_create_tool_engine", "tool_engine", "_tool_engine"}
 
 
 def _tree() -> ast.AST:
-    return ast.parse(TOOL_EXECUTOR.read_text(encoding="utf-8"), filename=str(TOOL_EXECUTOR))
+    return parseSource(TOOL_EXECUTOR.read_text(encoding="utf-8"), filename=str(TOOL_EXECUTOR))
 
 
 def _functionTree(name: str):

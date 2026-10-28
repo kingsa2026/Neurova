@@ -185,7 +185,10 @@ def _initialized_embedding_engine():
         from neurova.embedding import get_embedding_engine
 
         engine = get_embedding_engine()
-        if engine is None or engine.isHandedOutByFactory:
+        # 只读不建：`is_initialized` 是**属性**（早前按方法调用过，`TypeError` 被下面那条
+        # `except Exception` 吞成"引擎不可用"，嵌入那条腿于是从来没走过）；而未装载模型的
+        # 裸实例被读一次，`encode_batch` 的自救就会去出网拉权重。
+        if engine is None or not engine.is_initialized or engine.isHandedOutByFactory:
             return _ENGINE_UNAVAILABLE
         return engine
     except Exception:  # noqa: BLE001 - 引擎装配失败属可选依赖缺席,回退词面

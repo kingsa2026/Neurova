@@ -50,6 +50,7 @@ from neurova.api.app import create_app  # noqa: E402
 from neurova.channels.base import ChannelConfig  # noqa: E402
 from neurova.channels.feishu import FeishuAdapter  # noqa: E402
 from neurova.channels.manager import ChannelManager, get_channel_manager  # noqa: E402
+from tests.ast_scan import parseSource
 
 WEBHOOK = "/api/v1/channel-adapters/{}/webhook"
 VERIFY_TOKEN = "fs-token-b28"
@@ -75,7 +76,7 @@ def _eventBody(user="ou_real_b28", token=VERIFY_TOKEN):
 
 def _resolutionCallsIn(src: str, funcName: str) -> list:
     """某函数体内对"取适配器"两副面孔的调用名（`get_adapter` 是旧面、`resolveInboundAdapter` 是单源）。"""
-    target = next((n for n in ast.walk(ast.parse(src))
+    target = next((n for n in ast.walk(parseSource(src))
                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == funcName),
                   None)
     assert target is not None, f"{funcName} 不在了——扫描口径失效"
@@ -288,7 +289,7 @@ class TestTheResolutionHasOneFace:
             "    c = manager.get_adapter('feishu', 'kai')",           # 位置参数写法：放过
             "    d = manager.registry.get_adapter('feishu')",         # 同名异面：放过
         ])
-        assert _bareAdapterLookupLines(ast.parse(src)) == [2], "探测器口径失真"
+        assert _bareAdapterLookupLines(parseSource(src)) == [2], "探测器口径失真"
 
     def testRegisteredDebtSitesAreCountedByShape(self):
         """同根因余点由判据自己数——登记不等于留白：新长出一处裸调就红，落点消失了也必须销行。
@@ -348,14 +349,14 @@ class TestTheScanFaceDoesNotCarryItsTreesResident:
 
     扫描面必须经 `ast_scan` 的共享入口（`callNodes` / `callSites` / `sourceRefsUnder`
     一族），代码里不得再出现"自己 `ast.parse` 生产源码"与"整批取树"的入口。
-    反向控制：把扫描面换回 `ast.parse(ref.code)` 即红。
+    反向控制：把扫描面换回 `parseSource(ref.code)` 即红。
     """
 
     def _face(self, path=None) -> str:
         target = path or (REPO / "tests" / "unit" / "api"
                           / "test_channelWebhookResolvesAdapterByAgentTable.py")
         source = Path(target).read_text(encoding="utf-8")
-        names = _calledNames(ast.parse(source))
+        names = _calledNames(parseSource(source))
         assert "callNodes" in names, (
             "扫描面没走 `ast_scan.callNodes`——自己枚举 + `ast.parse` 生产源码就是"
             "「成本随代码总量涨」的写法，且入口处一旦攒 list 就是 478MB 那笔账"

@@ -22,6 +22,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from tests.ast_scan import parseSource
 from tests.repo_paths import repo_str
 
 
@@ -35,7 +36,7 @@ def _emptyHistoryLiterals(path: str) -> list:
     docstring 是 `Expr(Constant(str))`、不是 `Dict`，故 AST 判据天然不受叙述影响，
     而真正的强制注入（`metadata={"history": []}`）仍是 `Dict` 节点。
     """
-    tree = ast.parse(Path(path).read_text(encoding="utf-8"))
+    tree = parseSource(Path(path).read_text(encoding="utf-8"))
     out = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Dict):

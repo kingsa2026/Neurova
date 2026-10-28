@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from tests import ast_scan
+from tests.ast_scan import parseSource
 
 REPO = Path(__file__).resolve().parents[3]
 PKG = REPO / "neurova"
@@ -42,7 +43,7 @@ def _importers(root: Path) -> list[str]:
     out = []
     for ref in ast_scan.sourceRefsUnder(root, ".py", ast_scan.textHints(RETIRED)):
         try:
-            tree = ast.parse(ref.code)
+            tree = parseSource(ref.code)
         except SyntaxError:
             continue
         for node in ast.walk(tree):

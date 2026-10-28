@@ -30,6 +30,7 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_for_ws_path_01234567")
 
 from neurova.api.endpoints import mobile_pairing as MP
+from tests.ast_scan import parseSource
 
 REPO = Path(__file__).resolve().parents[3]
 PREFIX = "/api/v1/mobile"
@@ -126,7 +127,7 @@ def _functionSource(source: str, name: str) -> str:
     缘由是老坑重演：`_build_ws_url` 的 docstring 里正写着"原先把 `/mobile/ws` 抄在函数里"，
     连着 docstring 一起查会把自己那句解释算成违例——恒红，且不判事。
     """
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(parseSource(source)):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
             body = list(node.body)
             if (body and isinstance(body[0], ast.Expr)

@@ -12,6 +12,7 @@ import pathlib
 import pytest
 
 from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
+from tests.ast_scan import parseSource
 
 ADOPTION_OUTCOMES = ("success", "failure", "unevidenced")
 
@@ -154,7 +155,7 @@ def _adoptionCallSites(root):
     # 预筛词 `recordAdoption` 是判据的**充分条件**：谓词只认这一处属性调用。
     for ref in ast_scan.sourceRefsUnder(root, '.py', ast_scan.textHints('recordAdoption')):
         try:
-            tree = _ast.parse(ref.code, filename=str(ref.path))
+            tree = parseSource(ref.code, filename=str(ref.path))
         except (OSError, SyntaxError, UnicodeDecodeError):
             continue
         for node in _ast.walk(tree):

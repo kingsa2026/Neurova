@@ -13,6 +13,7 @@ import ast
 import pathlib
 
 import pytest
+from tests.ast_scan import parseSource
 
 _MEM_CORE = pathlib.Path(__file__).resolve().parents[3] / "neurova" / "mem_core.py"
 _CLASS_NAME = "MemCore"
@@ -20,7 +21,7 @@ _CLASS_NAME = "MemCore"
 
 @pytest.fixture(scope="module")
 def classNode():
-    tree = ast.parse(_MEM_CORE.read_text(encoding="utf-8"))
+    tree = parseSource(_MEM_CORE.read_text(encoding="utf-8"))
     for node in tree.body:
         if isinstance(node, ast.ClassDef) and node.name == _CLASS_NAME:
             return node
@@ -88,7 +89,7 @@ def test_memCore_hasNoDanglingSelfDelegate(classNode):
 
 def test_guardActuallyCatchesDanglingDelegate():
     """反向锁：若扫描失去判别力，上一用例会被静默放空。"""
-    cls = ast.parse(
+    cls = parseSource(
         "class MemCore:\n"
         "    def ok(self):\n"
         "        return self.alreadyDefined()\n"
