@@ -139,6 +139,8 @@ tests/unit/cognitive_layers/memory_layer/test_ruleAssociationCues.py
 # 不用绝对线：绝对读数受跑序影响（本文件单跑与同目录合跑 hit@5 差 2），根因待查已登记 §6-383。
 # 门限 0.45 是 bge-small-zh-v1.5 上的实测最优点，**不是**抄外部的 0.85（抄来即 droppedByGate 全吃）。
 tests/unit/cognitive_layers/memory_layer/test_cueVectorChannel.py
+# 联想线索通道在 numpy 缺席时照样给候选（矩阵只是加速，不是前置；生产侧修复随 MR #369 入主线，判据重落于此）
+tests/unit/cognitive_layers/memory_layer/test_cueChannelSurvivesWithoutNumpy.py
 # §6-385（批 C-2）：模型联想线索生成器——批量、封账、失败留队、超时、复述过滤、
 # 丙档护栏（「问过就封账」，否则无上限＝无界烧钱），以及一条反孤岛守卫
 # （生成必须由 post_chat 经 `_get_dependency("llm_client")` + `_spawn_background` 派发，
@@ -1164,6 +1166,8 @@ tests/unit/tts/test_model_integrity_manifest.py
 # 清单历史登记的守卫本身：曾登记过、文件仍在仓、却不在清单里的条目即红
 #   （根因：删一行即可让整票判据从 CI 消失且无任何红；本批已复原 9 条）。
 tests/unit/ci/test_protected_subset_registration_history.py
+# 分片口径自身的判据：三源（上面那些行的事实源）也得在 CI 里跑——它此前只出现在分片清单的注里，自己不在执行面上
+tests/unit/ci/test_protected_subset_shards.py
 
 # AGENTS.md §0：NPC 分支合并/废弃后必须立即删除远端分支（Issue #204 遗留清理）。
 #   （根因：构建配置随分支走，归档分支的过期 .cnb.yml 会永久复现同一场失败。

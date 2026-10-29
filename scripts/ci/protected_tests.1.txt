@@ -1149,3 +1149,5 @@ tests/integration/test_memoryEnhancementCarriesAgentScope.py
 # （bearerHeaders 体内必须调对齐口、取数口只剩一个名字，带正检）。它钉掉的是合跑 26 条
 # "刚签的令牌被自己拒"的那一族；工单 docs/04-plans/记忆面测试密钥作用域工单_2026-10-27.md
 tests/unit/api/test_identityHeadersAlignSecretBeforeSigning.py
+# 联想线索通道在 numpy 缺席时照样给候选（矩阵只是加速，不是前置；生产侧修复随 MR #369 入主线，判据重落于此）
+tests/unit/cognitive_layers/memory_layer/test_cueChannelSurvivesWithoutNumpy.py

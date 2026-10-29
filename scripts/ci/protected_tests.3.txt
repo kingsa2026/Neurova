@@ -1396,3 +1396,5 @@ tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py
 tests/unit/ci/test_runnerAllocatedWallClockIsNotADeadline.py
 tests/unit/core/test_turnCancelTokenLeaksAcrossCases.py
 tests/unit/security/test_sandboxFileBlockNamesThePath.py
+# 分片口径自身的判据：三源（上面那些行的事实源）也得在 CI 里跑——它此前只出现在分片清单的注里，自己不在执行面上
+tests/unit/ci/test_protected_subset_shards.py
