@@ -33,18 +33,18 @@ def test_noImporterRemains():
     # 面自证：`importersOfModule` 的扫描面就是仓内源码树，先立住语料量级。
     # 根被改窄时它一律回空表，「退役后无人导入」这句就变成"没人看"而不是"没人导入"。
     # 下限取实测全仓 3657 个 .py 的一半——根少指一层掉到 tests 2521／neurova 1043 任一侧都够不着。
-    enumerated = len(ast_scan.filesUnder(REPO_ROOT, ".py"))
+    enumerated = len(ast_scan.trackedFilesUnder(".py"))
     assert enumerated >= 1800, f"扫描面现读 {enumerated} 个 .py（根＝{REPO_ROOT}）——量级不对＝根指错"
 
     offenders = {}
     # 面读数：零命中的基数必须是"这次真扫到了仓内源码"，根被改窄时它会掉下来——
     # 没有这一句，零命中也可能是"什么都没扫"（面自证棘轮 `test_scanCriterionMustProveItsOwnSurfaceRatchet.py`）。
-    pairs = list(ast_scan.nodeScan(REPO_ROOT, ".py"))
+    pairs = list(ast_scan.trackedNodeScan(".py"))
     scanned = len(pairs)
     assert scanned > 500, f"扫描面现读 {scanned}"
     for name in RETIRED:
-        hits = ast_scan.importersOfModule(
-            REPO_ROOT, f"neurova.cognitive_layers.memory_layer.{name}")
+        hits = ast_scan.trackedImportersOfModule(
+            f"neurova.cognitive_layers.memory_layer.{name}")
         # 只认跟踪源（neurova/ 与 tests/）；NeurUI 下的 Tauri 打包副本被 .gitignore 忽略，
         # 是构建产物，不是可导入的本仓源码。
         hits = [hit for hit in hits if hit[0].startswith(("neurova/", "tests/"))]

@@ -81,3 +81,41 @@ def testPlantedViolationInsideRepoIsStillFound(tmp_path, monkeypatch):
         )
     finally:
         planted.unlink()
+
+
+#: ── 同一把尺的第二段（2026-10-29）：本仓自己的**构建产物副本**与**仓根在途散件**──────────
+#: 上面那些表剪的是"仓外第三方"。同日实测两类**仓内**的本地产物把三条存量比对判据读成了
+#: 仓库缺陷（CI 那棵干净检出里它们根本不红）：
+#: ① `NeurUI/src-tauri/resources/backend/**` 与 `NeurUI/src-tauri/target/release/backend/**`
+#:    各是一棵**完整后端源码的副本**（`git check-ignore -v` 分别命中 `.gitignore:367` 与
+#:    `NeurUI/src-tauri/.gitignore:3`；`git ls-files` 两棵都 0 条），于是
+#:    「全仓只剩一处 `class EventBus`」量到 3 处、「`SkillSource` 只定义在 `models.py`」量到 3 个档；
+#: ② 仓根躺着别人在途的 `.tmp_*.py`／`_*.py`（`.gitignore:378`／`:135`，都是根锚定模式），
+#:    其中一份语法不通时「退役后无人导入」当场红，报错还点名一个不存在的文件。
+#: 判据的**牙齿探针**会把样本档现种进仓内（上面那格就是），所以这两张表按**位置**剪，
+#: 不按 gitignore 状态剪——后者实测一把滤掉三处牙齿，且白名单只要按进程缓存，
+#: 跑测中途新建的档就永久不可见。
+def testBuildProductBackendCopiesStayOutOfTheFace():
+    """行为一格：真身在面里，两棵构建产物副本不在（撤剪枝时这一格必须红）。"""
+    rels = {p.relative_to(REPO_ROOT).as_posix() for p in ast_scan.filesUnder(REPO_ROOT)}
+    assert "neurova/core/event_bus.py" in rels, "生产根那份真身都不在面里＝扫描面塌了"
+    copies = sorted(r for r in rels if r.startswith("NeurUI/src-tauri/"))
+    assert not copies, (
+        f"Tauri 构建产物副本进了扫描面（{len(copies)} 档，示例 {copies[:3]}）——"
+        "「全仓只剩一处 `class EventBus`」这类判据会把它读成第二份实装"
+    )
+
+
+def testRepoRootScratchStaysOutOfTheFace():
+    """行为一格：仓根当层的在途散件不进面；下限格先立住"确实扫到了"。"""
+    files = ast_scan.filesUnder(REPO_ROOT)
+    rels = {p.relative_to(REPO_ROOT).as_posix() for p in files}
+    scratch = sorted(r for r in rels if "/" not in r and (
+        r.startswith(".tmp_") or (r.startswith("_") and r.endswith(".py"))))
+    assert not scratch, (
+        f"仓根在途散件进了扫描面（示例 {scratch[:4]}）——其中一份语法不通时，"
+        "「退役后无人导入」这类存量比对会红在一个不存在的文件上"
+    )
+    assert len(files) > 3000, (
+        f"扫描面只剩 {len(files)} 个 .py，地板 3000 被打破＝剪枝把仓内代码也剪没了")
+

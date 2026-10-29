@@ -164,7 +164,7 @@ class TestAggregateAgreesWithTheSinglePoint:
         assert len(sample) >= 3, "四态里至少要有三态有行，否则本格失去抽样面"
         for row in sample:
             module = row["path"][:-3].replace("/", ".")
-            hits = ast_scan.importersOfModule(REPO_ROOT, module)
+            hits = ast_scan.trackedImportersOfModule(module)
             outside = {p for (p, _ln, _form) in hits
                        if p.startswith("neurova/") and not p.startswith(gen.LAYER + "/")}
             assert len(outside) == row["outsideReaders"], (
