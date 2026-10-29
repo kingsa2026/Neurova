@@ -32,11 +32,3 @@ tests/unit/api/testMcpFaceRidesSdkTransport.py | 改名迁移署名（**不是�
 tests/unit/api/testMcpFaceCallerTier.py | 同上（**不是撤判据**）：文件名补 `test_` 前缀才进活口径，此前目录跑与 CI 对旧名一条都不收；内容一字未动，现由 tests/unit/api/test_mcpFaceCallerTier.py 持有
 tests/unit/cognitive_layers/memory_layer/test_d19IslandRetirement.py | 随 `36a337c4`（批 133 · §6-373）撤回 §6-371 九档退役一并收回：该守卫钉的是"九档已退净"，撤回后方向反了，守住的不再是本仓不变量。撤回收回是 `f50bf83a` 登记它的那一批之后的显式裁定，本次只补欠下的退役署名
 tests/unit/api/test_mcpFaceCallerTierIsScopedByOwner.py | 改名链末跳署名（**不是撤判据**）：`1a635220`（源分支）把 `test_mcpFaceCallerTier.py` 改名为带「按属主限定」语义的这一名并登记进清单，`9051c590`／`121d4d7f` 期间在册；本次合并按「取更严一侧」把文件名与清单一起退回 `test_mcpFaceCallerTier.py`（三处内容逐字节相同，md5 现读一致），本条署名那个不再存在的中间名——曾在清单里出现过的每个名字都要有一行，否则这一次改动会从记录里消失。内容一字未动，现由 tests/unit/api/test_mcpFaceCallerTier.py 持有
-tests/unit/agent/test_retrievalContextCarriesTenantScope.py | 随 `f28c5b35`（检索上下文的租户作用域被合并带回主线口径）登记进清单；文件现已不在仓里。退役核验：`find tests -name` 无匹配，`git log --all --diff-filter=D` 无删除记录（登记与删件发生在不同分支），故本条只补「曾登记过、现不在仓」的署名，判据不再指望它跑
-tests/unit/api/test_tokenSecretSurvivesSameProcess.py | 随 `68ca8600`（测试进程里的 JWT 密钥一枚到底）登记；文件现已不在仓里。退役核验同上：`find tests` 无匹配、`--all` 历史无删除记录，补署名以留痕
-tests/unit/ci/test_offlinePrefetchIsPerEcosystem.py | 随 `3122b169`（离线库预取按生态分步）登记；文件现已不在仓里。退役核验同上：`find tests` 无匹配、`--all` 历史无删除记录，补署名以留痕
-tests/unit/ci/test_protectedCoverageScopeFollowsSubset.py | 随 `15a3bf94`（覆盖率分母改成跟着受保护子集走）登记；文件现已不在仓里。退役核验同上：`find tests` 无匹配、`--all` 历史无删除记录，补署名以留痕
-tests/unit/ci/test_protectedSubsetShardCoversTheList.py | 随 `08cbf9b9`（unit-tests 腿按条目数分片跑）登记；分片口径现由 `tests/unit/ci/test_protected_subset_shards.py` 在守，本文件已不在仓里
-tests/unit/ci/test_protectedSubsetSliceCostIsBounded.py | 随 `2d722af0`（分片固定成本收口到一处）登记；成本口径现由 `tests/unit/ci/test_protectedSubsetBudgetCoversItsRealCost.py` 与 `tests/unit/ci/test_runnerAllocatedWallClockIsNotADeadline.py` 在守，本文件已不在仓里
-tests/unit/cognitive_layers/memory_layer/test_cueChannelSurvivesWithoutNumpy.py | 随 `e6596821`（新判据登进受保护子集）登记；「通道不依赖 numpy」这条现由 `tests/unit/memory/test_muscle_memory_semantic.py` 与 `tests/unit/cognitive_layers/memory_layer/test_cueGenerationBatchC2.py` 在守，本文件已不在仓里
-tests/unit/context/test_tool_search_catalog_is_per_turn.py | 随 `11a267e9`（tool_search 活动目录落回轮次级）登记；文件现已不在仓里。退役核验同上：`find tests` 无匹配、`--all` 历史无删除记录，补署名以留痕
