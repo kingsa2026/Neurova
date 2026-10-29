@@ -128,6 +128,68 @@ def trackedPyPaths(*pathspecs: str) -> List[str]:
                   if p.endswith(".py") and (REPO_ROOT / p).is_file())
 
 
+def trackedSourceRefs(suffix: str = ".py", hints: Tuple[str, ...] = (),
+                      root: Path = None, *pathspecs: str) -> List["SourceRef"]:
+    """**已跟踪面**的源码引用清单——「存量比对」型判据该用的扫描面。
+
+    与 `sourceRefsUnder` **求交**得到扫描面，不另写一条枚举：文本预筛口径、`SourceRef`
+    结构、文本缓存都只有一份，两面不会静默分叉；而求交发生在**解析之前**，
+    这一步才真正挡住误红。
+
+    为什么要有这一条（2026-10-27 实测）：仓根可能躺着**别人的在途脚本**
+    （`.tmp_*.py` 与 `/_*.py` 都被 `.gitignore` 豁免，CI 那棵干净的检出树里没有它们）。
+    按文件系统枚举的守卫会去解析这些档；其中一份语法不通时，
+    「退役后无人导入」「机器块与生成物相等」这类**存量比对**判据就当场红，
+    而且报错点名的是一个根本不存在的文件（`File "<unknown>"`）——
+    本地脏树被读成了仓库存量缺陷。本模块开头那条「两条路面区别」早写了该用哪一面，
+    这里把它做成一个真能用的入口。
+    """
+    base = Path(root) if root is not None else REPO_ROOT
+    specs = pathspecs or (f"*{suffix}",)
+    keep = {p for p in _gitLsFiles(*specs) if p.endswith(suffix)}
+    return [ref for ref in sourceRefsUnder(base, suffix, hints)
+            if _relOrAbs(ref.path) in keep]
+
+
+def trackedFilesUnder(suffix: str = ".py", root: Path = None) -> List[Path]:
+    """已跟踪面的文件清单（`filesUnder` 的对应物，给"枚举面下限"那一格用）。"""
+    return [ref.path for ref in trackedSourceRefs(suffix, (), root)]
+
+
+def trackedModules(suffix: str = ".py", hints: Tuple[str, ...] = (),
+                   root: Path = None) -> List[Tuple[Path, ast.AST]]:
+    """已跟踪面的 `(路径, 语法树)`（`parsedModules` 的对应物，复用同一份解析缓存）。"""
+    return [(ref.path, _cachedParse(ref.stamp, ref.code))
+            for ref in trackedSourceRefs(suffix, hints, root)]
+
+
+def trackedNodeScan(suffix: str = ".py", hints: Tuple[str, ...] = (),
+                    root: Path = None) -> Iterator[Tuple[Path, ast.AST]]:
+    """已跟踪面**惰性**产出 `(路径, 节点)`（`nodeScan` 的对应物，复用同一份遍历缓存）。"""
+    for ref in trackedSourceRefs(suffix, hints, root):
+        for node in _cachedNodes(ref):
+            yield ref.path, node
+
+
+def trackedImportersOfModule(moduleName: str, suffix: str = ".py",
+                             root: Path = None) -> List[Tuple[str, int, str]]:
+    """`importersOfModule` 的已跟踪面对应物——**核心判定只有一份**（`importersOfScan`）。"""
+    base = moduleName.split(".")[-1]
+    return importersOfScan(trackedNodeScan(suffix, textHints(base), root), moduleName)
+
+
+def importersOfScan(pairs: Iterable[Tuple[Path, ast.AST]],
+                    moduleName: str) -> List[Tuple[str, int, str]]:
+    """「谁还在导入这个模块」的唯一判定：吃任意 `(路径, 节点)` 流，工作树面与已跟踪面共用。"""
+    hits: List[Tuple[str, int, str]] = []
+    for path, node in pairs:
+        rel = _relOrAbs(path)
+        form = importFormForModule(rel, node, moduleName)
+        if form:
+            hits.append((rel, node.lineno, form))
+    return hits
+
+
 def untrackedNotIgnoredPaths() -> List[str]:
     """未跟踪**且未被 `.gitignore` 豁免**的清单（= 别人/自己正在写、还没提交的在途档）。
 
@@ -184,11 +246,61 @@ def rawManifestLines(path: Path) -> List[str]:
             if line.strip() and not line.strip().startswith("#")]
 
 
+#: 枚举面按**位置**剪掉的本地散件与产物副本（与 `_PRUNED_DIR_NAMES` 同一张表的家）。
+#:
+#: 为什么按位置而不是按 `gitignore` 状态滤（2026-10-29 走过后改的判）：本仓有一族判据的
+#: **牙齿探针**会把样本档现种进仓内再验探测器咬不咬（`test_astScanThirdPartyPrune`／
+#: `test_manualScriptsEnvMutationRatchet`／`test_voiceContextInjectionSingleSource`）。
+#: 按 git 状态滤＝"这档 git 看不见，所以不算仓内"，而那些探针种的档同样"git 看不见"——
+#: 实测一把滤掉三处牙齿（红的形状是 `assert None == 1` 与 `'…_tmp_probe_marker.py' in [...]`）。
+#: 更坏的是白名单只要按进程缓存，跑测中途新建的档就永久不可见 ⇒「不许新增」型守卫静默失明。
+#: 位置表没有这个问题：规则只认"哪儿是本地产物"，仓内代码面一个文件都不缩。
+_PRUNED_REL_PREFIXES = (
+    "NeurUI/src-tauri/resources/backend/",   # Tauri 打包时复制进去的**整棵后端源码**（.gitignore:367）
+    "NeurUI/src-tauri/target/",              # Rust 构建产物，内含 `…/release/backend/neurova/**` 副本
+)
+
+#: `relativeToRepo(REPO_ROOT)` 给的是 `"."`；两种写法都算"仓根当层"，别只认一种。
+_REPO_ROOT_RELS = frozenset({".", ""})
+
+
+def _isRepoRootScratch(name: str) -> bool:
+    """仓根**当层**的在途散件：`.gitignore:378 /.tmp_*` 与 `:135 /_*.py` 那两条的镜像。
+
+    两个模式本就根锚定（前导 `/`），所以判"在不在仓根当层"就够，不必问 git；
+    conftest 的 `_guardRepoRootAgainstPollution` 也本就禁止跑测期间在仓根留档。
+    """
+    return name.startswith(".tmp_") or (name.startswith("_") and name.endswith(".py"))
+
+
+def _dirRelForPrune(base: Path):
+    """目录的仓内相对路径（正斜杠）；**仓外**（探测器在 `tmp_path` 造的合成夹具）回 `None`。
+
+    回 `None` 时位置规则整体不适用——那一面本就不属于仓库，把它滤空只会让控制格读成
+    "没扫到"（与 `_gitLsFiles` 不许回空表同一条理由）。
+    """
+    try:
+        return relativeToRepo(base)
+    except ValueError:
+        return None
+
+
+def _isPrunedProductTree(relDir: str) -> bool:
+    return (relDir + "/").startswith(_PRUNED_REL_PREFIXES)
+
+
 def filesUnder(root: Path, suffix: str = ".py") -> List[Path]:
     """`root` 子树下的源码文件清单（原地剪掉第三方/产物目录，路径排序稳定）。
 
     用 `os.walk` 而不是 `rglob` 后过滤：`rglob` 会**先进目录再筛**，实测剪枝前
     光是遍历 11376 个目录就要 1.82s，而真正被扫的仓内文件只有约 3200 个。
+
+    剪枝三张表：`_PRUNED_DIR_NAMES`（第三方目录名）、`_PRUNED_REL_PREFIXES`（本仓的构建
+    产物副本）、`_isRepoRootScratch`（仓根在途散件）。后两张治同一枚根因——**本地脏树被
+    读成仓库存量**（2026-10-29 三次现形）：那两棵 Tauri 副本里各有一份完整后端源码，于是
+    「全仓只剩一处 `class EventBus`」量到 3 处、「`SkillSource` 只定义在 `models.py`」量到
+    3 个档；仓根一份别人在途的 `.tmp_*.py` 语法不通时，「退役后无人导入」这类存量比对
+    当场红、且报错点名一个不存在的文件。这些在 CI 那棵干净检出里都不成立。
     """
     import os
 
@@ -196,9 +308,16 @@ def filesUnder(root: Path, suffix: str = ".py") -> List[Path]:
     for dirPath, dirNames, fileNames in os.walk(root):
         dirNames[:] = [d for d in dirNames if d not in _PRUNED_DIR_NAMES]
         base = Path(dirPath)
+        rel = _dirRelForPrune(base)
+        if rel is not None and _isPrunedProductTree(rel):
+            dirNames[:] = []                       # 整棵产物副本不进去：剪遍历，不只剪结果
+            continue
         for name in fileNames:
-            if name.endswith(suffix):
-                found.append(base / name)
+            if not name.endswith(suffix):
+                continue
+            if rel in _REPO_ROOT_RELS and _isRepoRootScratch(name):
+                continue
+            found.append(base / name)
     return sorted(found)
 
 
@@ -395,7 +514,7 @@ def _cachedParse(stamp: Tuple[str, int, int], code: str) -> ast.AST:
     解析走 `parseSource()`（唯一出口）。
     每次未命中都会按 `RETIRE_STEP` 检查退役（命中路径零额外开销）。
     """
-    tree = parseSource(code)
+    tree = parseSource(code, filename=stamp[0])
     _retireResidentGraphIfDue(pendingEntries=1)
     return tree
 
@@ -576,13 +695,7 @@ def importersOfModule(root: Path, moduleName: str, suffix: str = ".py") -> List[
     """
     parts = moduleName.split(".")
     base = parts[-1]
-    hits: List[Tuple[str, int, str]] = []
-    for path, node in transientNodes(root, suffix, textHints(base)):
-        rel = _relOrAbs(path)
-        form = importFormForModule(rel, node, moduleName)
-        if form:
-            hits.append((rel, node.lineno, form))
-    return hits
+    return importersOfScan(transientNodes(root, suffix, textHints(base)), moduleName)
 
 
 def importFormForModule(relPath: str, node: ast.AST, moduleName: str) -> str:

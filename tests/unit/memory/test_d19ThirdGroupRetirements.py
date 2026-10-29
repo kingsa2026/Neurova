@@ -48,18 +48,18 @@ def test_noImporterRemains():
     # 面自证：`importersOfModule` 扫的是仓内源码树，先立住语料量级——根被改窄时它回空表，
     # 「退役后无人导入」就变成"没人看"而不是"没人导入"。下限取实测全仓 3657 个 .py 的一半，
     # 根少指一层会掉到 tests 2521／neurova 1043 里任一侧，都低于这条线。
-    enumerated = len(ast_scan.filesUnder(REPO_ROOT, ".py"))
+    enumerated = len(ast_scan.trackedFilesUnder(".py"))
     assert enumerated >= 1800, (
         "枚举面现读 %d 个 .py——REPO_ROOT 指错时『零 importer』与『没扫到』长得一样" % enumerated)
 
     offenders = {}
     # 面读数：零命中的基数必须是"这次真扫到了仓内源码"，根被改窄时它会掉下来。
-    pairs = list(ast_scan.nodeScan(REPO_ROOT, ".py"))
+    pairs = list(ast_scan.trackedNodeScan(".py"))
     scanned = len(pairs)
     assert scanned > 500, f"扫描面现读 {scanned}"
     for name in RETIRED:
-        hits = ast_scan.importersOfModule(
-            REPO_ROOT, f"neurova.cognitive_layers.memory_layer.channels.{name}")
+        hits = ast_scan.trackedImportersOfModule(
+            f"neurova.cognitive_layers.memory_layer.channels.{name}")
         if hits:
             offenders[name] = hits[:3]
     # 面自证：退役名清单被清空时下面那句"零导入"与真干净同形

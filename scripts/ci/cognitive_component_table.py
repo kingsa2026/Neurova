@@ -58,7 +58,7 @@ def componentRows() -> list:
     componentPaths = [p for p in _trackedPy(LAYER) if not p.endswith("/__init__.py")]
     knownModules = {_moduleName(p) for p in _trackedPy("neurova")}
     importers: dict = {}
-    for path, tree in ast_scan.parsedModules(REPO_ROOT):
+    for path, tree in ast_scan.trackedModules():
         rel = ast_scan.relativeToRepo(path)
         for node in ast.walk(tree):
             targets = set()
