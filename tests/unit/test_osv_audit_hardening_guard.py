@@ -1380,6 +1380,182 @@ class TestCausalLineNamesTheReasonNotTheTail:
             "报错路径没走 _causalLine —— 说因那句会被 allowlist 列表挤掉（死码）"
         )
 
+class TestPrefetchIsPerEcosystemNotPerRun:
+    """预取**按生态各调一次**——合一轮跑会让一个生态失败把其余几份一起丢掉。
+
+    成因（PR #366 构建 `cnb-o6p-1k5lj9qk2` 实测）：`--download-offline-databases`
+    遇到任一生失败就**整条**退非零，而 CI 那一步是 `|| true`。于是 PyPI 那份没备成时，
+    crates.io 与 npm 明明下载成功的库也不再被认——门禁本体整轮回退直连，
+    红的成因写成「离线库缺失」，而缓存其实就在旁边。
+    **失败的粒度必须与它实际影响的通路同宽。**
+
+    判据真调 `prefetch_offline_databases`（`_runScannerProcess` 换成记账桩，
+    `OSV_DB_CACHE` 指到 `tmp_path`），不比对脚本文本。回退路径：把循环改回
+    「一次调用带全部锁」→ 前两格当场红（实测桩记录的调用数从 3 变 1）。
+    """
+
+    #: 三个真实锁文件，分属三个生态——用仓内真路径，`_scopeOfTarget` 的相对路径推导才成立。
+    _TARGETS = ("NeurUI/src-tauri/Cargo.lock",
+                "tools/npx-runtime/package-lock.json",
+                "requirements-ci.lock")
+    _BY_SCOPE = {"crates.io": {"Cargo.lock"},
+                 "npm": {"package-lock.json"},
+                 "PyPI": {"requirements-ci.lock"}}
+
+    class _Proc:
+        def __init__(self, returncode: int, stderr: str = ""):
+            self.returncode = returncode
+            self.stdout = ""
+            self.stderr = stderr
+
+    def _harness(self, auditModule, tmp_path, monkeypatch, failScopes=()):
+        """把扫描器进程换成记账桩：成功的生态才落 `all.zip`，并记录每次调用的锁文件。"""
+        cache = tmp_path / "cache"
+        calls = []
+
+        def recorder(cmd, **kwargs):
+            # Python 锁会被暂存成 `<原名>.txt`（扫描器按文件名认解析器），还原原名再对账
+            locks = {Path(a).name[:-4] if Path(a).name.endswith(".lock.txt")
+                     else Path(a).name
+                     for a in cmd if str(a).endswith((".lock", ".json", ".txt"))
+                     and Path(a).name not in ("osv-scanner",)}
+            scopes = {s for s, names in self._BY_SCOPE.items() if names & locks}
+            calls.append((tuple(sorted(locks)), tuple(sorted(scopes))))
+            for scope in scopes - set(failScopes):
+                (cache / scope).mkdir(parents=True, exist_ok=True)
+                (cache / scope / "all.zip").write_bytes(b"zip")
+            # 桩的退出码按「这次调用涉及的生态里有没有指定失败的」给，不看循环残留变量
+            return self._Proc(1 if scopes & set(failScopes) else 0, "simulated")
+
+        monkeypatch.setattr(auditModule, "OSV_DB_CACHE", cache)
+        monkeypatch.setattr(auditModule, "resolveBinaryPath", lambda scanner: Path(sys.executable))
+        monkeypatch.setattr(auditModule, "assertScannerExecutable", lambda binary: "")
+        monkeypatch.setattr(auditModule, "_runScannerProcess", recorder)
+        return calls, cache
+
+    def test_eachEcosystemGetsItsOwnInvocation(self, auditModule, tmp_path, monkeypatch):
+        calls, cache = self._harness(auditModule, tmp_path, monkeypatch)
+        rc = auditModule.prefetch_offline_databases(
+            Path("osv-scanner"), [str(PROJECT_ROOT / rel) for rel in self._TARGETS])
+
+        assert rc == 0, f"三份库都已在场却返回非 0：rc={rc}"
+        assert len(calls) == 3, (
+            f"预取调了 {len(calls)} 次，应为每生态一次（实测读数 {calls}）——"
+            "合一轮跑时，一个生态失败会把其余两份一起丢掉")
+        for locks, scopes in calls:
+            assert len(scopes) == 1, f"一次调用跨了多个生态：{scopes}（锁：{locks}）"
+            scope = scopes[0]
+            assert set(locks) == self._BY_SCOPE[scope], (
+                f"生态 {scope} 那次带的锁对不上：{sorted(locks)} != {sorted(self._BY_SCOPE[scope])}")
+
+    def test_oneEcosystemFailureLeavesTheOthersLanded(self, auditModule, tmp_path, monkeypatch,
+                                                      capsys):
+        calls, cache = self._harness(auditModule, tmp_path, monkeypatch, failScopes=("PyPI",))
+        rc = auditModule.prefetch_offline_databases(
+            Path("osv-scanner"), [str(PROJECT_ROOT / rel) for rel in self._TARGETS])
+
+        assert rc == 2, f"PyPI 那份没备成，返回值却是 {rc}——失败被吞成了成功"
+        for scope in ("crates.io", "npm"):
+            assert (cache / scope / "all.zip").is_file(), (
+                f"PyPI 失败把 {scope} 的库也带走了（桩明明为它落了库）——失败面比通路宽")
+        assert len(calls) == 3, f"失败生态让其余生态不再被尝试：{calls}"
+        err = capsys.readouterr().err
+        assert "PyPI" in err, f"报错没点名失败的那个生态：{err}"
+        assert "其余生态" in err, f"报错没说明其余生态的库已在场（读日志的人会以为整条离线路都塌了）：{err}"
+
+    def test_noLockIsDroppedOrRunTwiceAcrossScopes(self, auditModule, tmp_path, monkeypatch):
+        calls, _ = self._harness(auditModule, tmp_path, monkeypatch)
+        auditModule.prefetch_offline_databases(
+            Path("osv-scanner"), [str(PROJECT_ROOT / rel) for rel in self._TARGETS])
+
+        flat = [lock for locks, _ in calls for lock in locks]
+        assert sorted(flat) == sorted(n for names in self._BY_SCOPE.values() for n in names), (
+            f"逐生态切分后锁文件不守恒（丢一份＝那个生态永远走直连；重一份＝白跑一趟）：{flat}")
+
+    def test_scopeComesFromTheOneTable(self, auditModule):
+        """归属必须由 `OFFLINE_DB_SCOPE` 派生——第二份映射会在预取与门禁之间分家。"""
+        for rel, expected in auditModule.OFFLINE_DB_SCOPE.items():
+            assert auditModule._scopeOfTarget(PROJECT_ROOT / rel) == expected, (
+                f"{rel} 的归属与单源表不一致：预取按一处分组、门禁按另一处裁决")
+        assert auditModule._scopeOfTarget(PROJECT_ROOT / "README.md") == "", (
+            "表外目标被凭空给了一个生态——`--lockfile` 会带进不相干的下载里")
+
+    def test_threeRealProcessInvocationsLandTheThreeDatabases(
+            self, auditModule, tmp_path, monkeypatch, capsys):
+        """活体一格：**真起子进程**跑完三步，而不是 monkeypatch 掉调用点。
+
+        这一档治的正是「怎么调用」，所以把 `_runScannerProcess` 换掉就等于没测。
+        桩形按宿主给（Windows 认 `.cmd`，POSIX 认 `#!/bin/sh`）——`_execStub` 那份理由
+        在这里同样成立：这台 Windows 上无扩展名文件走 `CreateProcess` 必抛 `WinError 193`。
+        """
+        cache = tmp_path / "cache"
+        log = tmp_path / "calls.log"
+        stub = self._scannerStub(
+            tmp_path, cache=cache, log=log, failScope="PyPI",
+            table={Path(rel).name: scope for rel, scope in auditModule.OFFLINE_DB_SCOPE.items()})
+
+        monkeypatch.setattr(auditModule, "OSV_DB_CACHE", cache)
+        rc = auditModule.prefetch_offline_databases(
+            stub, [str(PROJECT_ROOT / rel) for rel in self._TARGETS])
+
+        invocations = [l for l in log.read_text(encoding="utf-8").splitlines() if l.strip()]
+        assert len(invocations) == 3, (
+            f"真起进程跑了 {len(invocations)} 次，应为每生态一次：{invocations}")
+        assert rc == 2, f"PyPI 那份桩里没落库，返回码却是 {rc}"
+        for scope in ("crates.io", "npm"):
+            assert (cache / scope / "all.zip").is_file(), (
+                f"真跑一遍后 {scope} 的库不在场——一个生态失败带走了其余")
+        assert not (cache / "PyPI" / "all.zip").exists(), "桩说没备成，缓存里却出现了它"
+        assert "PyPI" in capsys.readouterr().err, "报错没点名真失败的那个生态"
+
+    def _scannerStub(self, directory: Path, *, cache: Path, log: Path, failScope: str,
+                     table: dict) -> Path:
+        """生成一个**真能被 subprocess 起来**的假扫描器：按 argv 里的锁落库并记一行日志。"""
+        impl = directory / "stub_impl.py"
+        impl.write_text(
+            "import json, sys\n"
+            "from pathlib import Path\n"
+            "cfg = json.loads(r'''%s''')\n"
+            "argv = sys.argv[1:]\n"
+            "if argv[:1] == ['--version']:\n"
+            "    print('osv-scanner stub 0.0')\n"
+            "    raise SystemExit(0)\n"
+            "locks = [argv[i + 1] for i, a in enumerate(argv) if a == '--lockfile']\n"
+            "names = [Path(x).name for x in locks]\n"
+            "names = [n[:-4] if n.endswith('.lock.txt') else n for n in names]\n"
+            "with open(cfg['log'], 'a', encoding='utf-8') as f:\n"
+            "    f.write('|'.join(names) + '\\n')\n"
+            "failed = False\n"
+            "for n in names:\n"
+            "    scope = cfg['table'].get(n, '')\n"
+            "    if not scope:\n"
+            "        continue\n"
+            "    if scope == cfg['fail']:\n"
+            "        failed = True\n"
+            "        continue\n"
+            "    db = Path(cfg['cache']) / scope\n"
+            "    db.mkdir(parents=True, exist_ok=True)\n"
+            "    (db / 'all.zip').write_bytes(b'zip')\n"
+            "raise SystemExit(1 if failed else 0)\n" % json.dumps(
+                {"cache": str(cache), "log": str(log), "fail": failScope, "table": table},
+                ensure_ascii=False)
+            , encoding="utf-8")
+        if os.name == "nt":
+            stub = directory / "osv-scanner.cmd"
+            body = "@echo off\r\n\"%s\" \"%s\" %%*\r\n" % (sys.executable, impl)
+            # 两条都是这台上实测的坑：① `write_text` 的 `newline=None` 会把已写的 `\r\n`
+            #   再翻一次（`\r\r\n`），cmd 读出来是坏行；② 宿主解释器路径含中文，
+            #   `.cmd` 按 UTF-8 写就会被 cmd 的 OEM 码页读成乱码 ⇒「系统找不到指定的路径」。
+            #   故按**字节**写、编码用 `mbcs`（与 zh-CN 的 ANSI/OEM 同码页）。
+            stub.write_bytes(body.encode("mbcs"))
+        else:
+            stub = directory / "osv-scanner"
+            stub.write_bytes(("#!/bin/sh\nexec \"%s\" \"%s\" \"$@\"\n"
+                              % (sys.executable, impl)).encode("utf-8"))
+            stub.chmod(0o755)
+        return stub
+
+
 class TestPrefetchFailureDoesNotBecomeABlockingGate:
     """预取是 best-effort（CI 里写 `|| true`），而门禁是阻塞的 `--require-offline`。
 
