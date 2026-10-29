@@ -1824,6 +1824,13 @@ tests/unit/api/test_consoleTurnOutlivesItsResponse.py
 # 落点；⑤反向控制：`save_memory=False` 的轮（蜂群内部派生等）按设计不落盘。
 # 两条形状判据一律走 AST——按行匹配会撞 docstring 里的路标句（本档初版就把
 # `objective_evidence.py` 的 Args 段误当成第二个调用点）。
+# v1 流式缺 session_id 时当场铸并在 start 帧回传（第 1 步前置）。缺 id 时台账行与
+# task_tracker 注册都以空串为键 ⇒ stop 停不掉、挂起没有续跑凭据、客户端在回合结束前
+# 也不知道这一轮属于哪个会话——与 §6-420 在 console 修掉的是同一个洞。三格：①不带 id
+# 时 start 帧回传非空 id；②自带 id 原样使用（不铸第二个）；③回传的 id 必须是台账真正
+# 用来建键的那个（夹具 enable_memory=False 不落会话文件，故改读 run 台账取证）。
+# 逐文件单跑 3 passed（三次同读数）
+tests/unit/api/test_v1StreamSessionIdMinted.py
 # 逐文件单跑 5 passed（两次同读数；变异探针各只红该红：多一处 execute 红①、
 # 打偏的 sed 改到 1242 行时判据正确地不动、按行号改到 1773 才红②④）
 tests/unit/agent/test_failureLandingSingleSourceAcrossEntries.py
