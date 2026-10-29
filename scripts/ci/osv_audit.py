@@ -384,16 +384,26 @@ OFFLINE_DB_SCOPE = {
 }
 
 
+def _scopeOfTarget(target) -> str:
+    """这个被扫目标属于哪个生态（不在表里回空串）。
+
+    归属只认 `OFFLINE_DB_SCOPE` 这一张表；相对路径的算法也只在这一处
+    （`_requiredOfflineScopes` 由它派生，不另立第二份映射——否则「预取按 A 分组、
+    门禁按 B 分组」会出现在同一脚本的两行里）。
+    """
+    path = Path(target)
+    try:
+        rel = path.resolve().relative_to(PROJECT_ROOT).as_posix()
+    except ValueError:
+        rel = path.name
+    return OFFLINE_DB_SCOPE.get(rel, "")
+
+
 def _requiredOfflineScopes(targets) -> list:
     """从被扫目标推出「必须备好哪几个生态的离线库」（相对 PROJECT_ROOT 的路径）。"""
     scopes = []
     for target in targets:
-        path = Path(target)
-        try:
-            rel = path.resolve().relative_to(PROJECT_ROOT).as_posix()
-        except ValueError:
-            rel = path.name
-        scope = OFFLINE_DB_SCOPE.get(rel)
+        scope = _scopeOfTarget(target)
         if scope and scope not in scopes:
             scopes.append(scope)
     return scopes
@@ -500,33 +510,55 @@ def prefetch_offline_databases(scanner: Path, targets) -> int:
         print("[osv] 没有可归属到生态的被扫目标——不预取", file=sys.stderr)
         return 2
     print(f"[osv] 预取离线漏洞库 → {OSV_DB_CACHE}（生态: {', '.join(scopes)}）")
+    # 逐生态各跑一次：`--download-offline-databases` 遇到**任一**生态失败就整条退非零，
+    # 而 CI 那一步是 `|| true`——合一轮跑的话，一个生态没备成会把别的那几份一起丢掉，
+    # 门禁本体就只能整轮回退直连（PR #366 构建 `cnb-o6p-1k5lj9qk2` 即此形：PyPI 那份缺，
+    # crates.io 与 npm 明明下载成功）。**失败的粒度必须与它实际影响的通路同宽。**
+    incomplete = []
+    for scope in scopes:
+        scopeTargets = [t for t in targets if _scopeOfTarget(t) == scope]
+        if not _prefetchOneScope(binary, scope, scopeTargets):
+            incomplete.append(scope)
+    if incomplete:
+        print(
+            f"[osv] 预取未完成：{', '.join(incomplete)}"
+            "（其余生态的库已在场，门禁本体按各目标自己的库裁决）",
+            file=sys.stderr,
+        )
+        return 2
+    return 0
+
+
+def _prefetchOneScope(binary, scope: str, scopeTargets) -> bool:
+    """只为这一个生态预取它自己那几份锁，回答「这个生态的离线库齐不齐」。
+
+    成功与否**不看退出码**：实测「刚下载完」rc=1（扫描器下完顺手拿新库扫了一遍，
+    报了允许清单外的历史命中）、「已最新」rc=0——码在这里没有判别力。判据落在
+    **缓存文件是否在场**，与门禁本体吃的那条离线通路同一处（`offlineDatabaseProblems`）。
+    """
     cmd = [str(binary), "scan", "source", "--offline", "--download-offline-databases"]
     # Python 锁要暂存成扫描器认得出的文件名才能被解析（见 scannerReadableAlias）。
-    # 暂存目录随调用结束一并清理，不留残件。
+    # 暂存目录随本次调用结束一并清理，不留残件。
     stage = tempfile.TemporaryDirectory(prefix="osv-prefetch-")
     stage_dir = Path(stage.name)
-    for t in targets:
-        path = Path(t)
+    for target in scopeTargets:
+        path = Path(target)
         cmd += ["--lockfile",
                 str(scannerReadableAlias(path, stage_dir) if _needsAlias(path) else path)]
     proc = _runScannerProcess(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True)
-    # 退出码语义：「已经是最新」与「刚下载完」都不该算失败。实测下载完 rc=1
-    # （扫描器先下载、再拿新库扫了一遍并报了允许清单外的历史命中），
-    # 「已最新」实测 rc=0。故判据落在**缓存文件是否在场**上，码只打日志。
-    problems = offlineDatabaseProblems(targets)
+    problems = offlineDatabaseProblems(scopeTargets)
     if problems:
-        print(f"[osv] 预取未完成（扫描器退出码 {proc.returncode}）:", file=sys.stderr)
+        print(f"[osv] 生态 {scope} 预取未完成（扫描器退出码 {proc.returncode}）:", file=sys.stderr)
         for item in problems:
             print(f"      - {item}", file=sys.stderr)
         print(
             f"      扫描器自述：{_causalLine((proc.stderr or '') + (proc.stdout or ''))}",
             file=sys.stderr,
         )
-        return 2
-    for scope in scopes:
-        db = OSV_DB_CACHE / scope / "all.zip"
-        print(f"[osv]       - {scope}: {db.stat().st_size // (1 << 20)} MB")
-    return 0
+        return False
+    db = OSV_DB_CACHE / scope / "all.zip"
+    print(f"[osv]       - {scope}: {db.stat().st_size // (1 << 20)} MB")
+    return True
 
 
 def _platform_key() -> str:
