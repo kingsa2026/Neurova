@@ -432,6 +432,19 @@ async def chat_stream(
         user_id, ownerAgentId = resumeTurnIdentity(row, user_id, body.agent_id)
         body.agent_id = ownerAgentId or body.agent_id
 
+    # 会话归属：客户端没带就**当场铸**，并在下面的 `start` 帧回传（分配点与告知点同处）。
+    # 与 console 面 §6-420 修掉的是同一个洞：缺 id 时台账行/任务表都以空串为键，
+    # `/console/chat/stop` 停不掉、挂起没有续跑凭据（`acquire()` 的拒收分支自己写着
+    # "请求缺 session_id …本轮已中止"），客户端在回合结束前也不知道这一轮属于哪个会话。
+    # 铸法走仓内单点 `create_session`（与 console 同一个入口），不自造 id 格式。
+    if not sessionId:
+        from neurova.session_repository import get_session_repository
+
+        sessionId = get_session_repository().create_session(
+            agent_id=body.agent_id or "", user_id=user_id, title="新对话"
+        )
+        body.session_id = sessionId
+
     ledger = AgentRunLedger(
         sessionId, user_id, body.agent_id, body.message, run_id=resume_run_id or None
     )
@@ -536,7 +549,7 @@ async def chat_stream(
         task = None
         try:
             # 发送开始事件
-            yield f"event: start\ndata: {json.dumps({'request_id': request_id})}\n\n"
+            yield f"event: start\ndata: {json.dumps({'request_id': request_id, 'session_id': sessionId})}\n\n"
 
             # P2-8 §6-46：先落库再执行；排队进度/超时/被取消都以同一条 SSE 上的
             # 具名事件如实透出（rejected 时台账已补发收尾事件）
