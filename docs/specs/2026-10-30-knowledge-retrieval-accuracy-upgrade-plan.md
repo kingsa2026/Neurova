@@ -1,6 +1,8 @@
 # 知识库检索准确性与事实守卫升级计划
 
-- **状态**：方案稿，未实施；本文只定义目标、差距、分期、判据与拍板项，不改代码。
+- **状态**：已实施（B1–B5 五批 + 接线修复全部落地，2026-10-30/31；批次提交、
+  偏差归一与 live-verify 补证见 §11 实施台账）。§9 拍板项按建议项执行
+  （D1 影子先行 / D2 独立面 / D3 三门槛 / D4 甲案 / D5 确定性规则）。
 - **基线日期**：2026-10-29（主干 `295cd0cc`）。
 - **输入依据**：
   - 2026-10-29 对知识库检索链路的只读复盘结论（对话记录）；
@@ -363,11 +365,13 @@ CREATE UNIQUE INDEX ux_alias_candidate_query
   断言抽取 v1 为确定性规则（数字/百分比/日期正则），零新依赖（可选依赖纪律）。
 - 判定从保守：`contradicted` 仅当同主体同谓词存在数值不同的事实**且**该值不出现在
   任何命中证据文本中；其余归 `unverified`。宁可少报，不可误伤。
-- 接线：`post_chat_pipeline` 注册一个 flag 门控的后置步骤（注册区
-  `post_chat_pipeline.py:3234` 一带，懒 import 守循环依赖纪律）：
-  - shadow（默认 off，shadow 为中档）：报告进回合 metadata/读数，消息零变化；
-  - on：在消息末尾追加一行可见核验注记，列出不符声明（"以下数值未在知识库证据中
-    核到：…"）——以诚实形态暴露，不重写答案。
+- 接线（**实施终态**，与原稿不同——原稿写 post_chat_pipeline，实施钉在回复
+  定稿上游，理由见 §11.2）：`chat_pipeline.py` 的 `_applyAnswerFactGuard`
+  在 Step 3.5（LLM 调用之后、后处理落盘之前）执行，flag 门控 + 懒 import：
+  - 开关 `NEUROVA_KB_ANSWER_FACT_GUARD=off|shadow|on`，默认 off；
+  - shadow：报告进回合 metadata/读数，消息零变化；
+  - on：在消息末尾追加一行可见核验注记，列出不符声明（"核验注记：以下数值
+    未在知识库证据中核到：…"）——以诚实形态暴露，不重写答案。
 - 成本：零额外 LLM token；纯 SQLite/文本比对，预算在 post-chat 现有同步段内。
 
 ### 6.3 判据
@@ -441,3 +445,69 @@ CREATE UNIQUE INDEX ux_alias_candidate_query
 - 不重写冲突裁决（读侧只消费冲突账）；
 - 不做全文事实核对、不让守卫改写答案；
 - 不在 off 档引入任何行为或读数开销。
+
+---
+
+## 11. 实施状态与 live-verify 台账（2026-10-31）
+
+### 11.1 批次与提交
+
+| 批 | 提交 | 内容 | 判据 |
+|---|---|---|---|
+| B1/W1 | `dc2b24b5` | 查询侧别名归一（`query_normalization` + adapter 接线 + 归一读数） | 9 用例 |
+| B2/W2 | `9322b49a` | 脱靶登记与审批闭环（底座 v27 + store 四方法 + 三端点） | 22 用例 |
+| B3/W3 | `a1c1f5f1` | 影子读数（graphShadow 四计数）+ golden 多跳评测 | 7 用例 |
+| 接线修复 | `d4518d0a` | 检索上下文统一带 agent 域——W1/W2 在聊天主路原是休眠态、图锚跨 agent 挑起点 | 3 用例 |
+| B4/W4 | `23e8b7d3` | 同名多口径读侧暴露（`ambiguity_clarification` + 链透传/渲染接线） | 9 用例 |
+| B5/W5 | `848e013e` | 生成后事实回查守卫（`guards/answer_fact_guard` + Step 3.5 接线） | 8 用例 |
+| 守卫收口 | `2dc05196` | 八档判据入受保护子集（逐文件单跑两轮读数相同） | 58 用例 |
+| 遗留收口 | `21e2c755` | legacy 流式装配点接回单源错误分类器（验收中发现的预存雷，连带转绿 12 例预存红） | — |
+
+受保护子集 8 文件单跑复现（2026-10-31）：9/15/7/3/5/2/9/8，共 58 passed 全绿；
+全套件 1165 passed、2 failed 均判预存（redundancy 1==2 用例、`_raise_for_llm_error_dict`
+悬空引用——后者已由 `21e2c755` 根修，修复后 agent 套件 15 failed/1600 passed，
+无改动对照 27 failed，差集恰为修复的 12 例）。
+
+### 11.2 与原稿的偏差（均已在对应提交说明给据）
+
+1. **W5 接线点**：原稿写 post_chat_pipeline 后置步骤，实施钉在 `chat_pipeline.py`
+   Step 3.5（回复定稿之前）——post 处理第一步就落盘 reply，事后追加注记会让会话盘
+   与返回体各说各话（`848e013e` 提交说明）。本文 §6.2 已按实施终态改写。
+2. **W5 开关名**：实现定名 `NEUROVA_KB_ANSWER_FACT_GUARD`（原稿未定名）。
+3. **W2 审批面归属（拍板项 D2）**：实施核对结论=消解的 needsHumanReview 只在决策
+   对象与 admission 校验里流转，无可承载外部行的人工回判队列——按预案落独立表 +
+   独立端点（`9322b49a` 提交说明附比对结论）。
+4. **路由快照守护顺手收口**：`test_knowledge_route_order` 的 `_KB_ROUTES` 快照停在
+   拆分时 34 条，10-24 批次的 `/ontology/* /mcp/sources* /geo` 等 16 条一直未登记
+   （守护带病漂红）——随 B2 收口到实测 84 条。
+
+### 11.3 live-verify 补证（2026-10-31）
+
+`tests/manual/liveVerify_kbW1W2W4.py`（可复跑：`PYTHONPATH=$(git rev-parse --show-toplevel)
+.venv/Scripts/python.exe tests/manual/liveVerify_kbW1W2W4.py`；数据根
+`isolatedDataRoot()` 单点，`X-Service-Token` 走真管理员通道，真 `create_app()`/
+lifespan + 真默认 agent + 真 `ChatPipeline._step_retrieve_and_build_context`）全绿，
+补齐 B1/B2/W4 三批此前缺记录的 live 证据（B3/W5 的 live 段见各自提交说明）：
+
+- **W2**：空库真检索脱靶（hits=0）→ 候选捕获 pending（raw_query="跑量"）→
+  `POST /knowledge/alias-candidates/{id}/approve` 200 且别名挂上（activity 留痕）→
+  复测命中；`/reject` 200 只结行，pending 不含被拒行。
+- **W1**：同一查询"跑量"复测 hybrid hits=6、归一读数 `with_matches=1`——别名驱动
+  召回在真链生效（条目 knowledge_id 出现在 `ctx.relevant_memories`）。
+- **W4**：同名多口径（"跑量"=甲主体别名+乙主体本名，两主体均经真咽喉建边）→
+  `multi_subject` 歧义载荷两候选；on 档真 `build_context` 收到受控指引：
+  `[检索歧义]「跑量」在知识库中有 2 个口径：客户流失率；跑量；用户意图不明时先澄清再作答，不得静默择一。`
+- 探针不证 LLM 生成段（需真模型凭据，与本升级判据无关）与 SSE 传输层
+  （与 batch D / W5 探针同形）。
+
+### 11.4 实施中发现的新登记项（不在本升级范围，待立项）
+
+**链采纳门使小语料/低命中回合的知识结果整包被弃。** `MemoryRetrievalChain` 的
+采纳条件是 `quality ≥ min_quality(0.3)`，而知识路质量 =
+`0.6×命中数/10 + 0.4×词面重合`（`get_quality_score`）——命中 1 条 = 0.06 < 0.3，
+被当"不足"整包丢弃，MoE 的 `no_memory` 占位（score=1.0）反而成为主结果。探针实测：
+1 条命中时 `ctx.relevant_memories` 只有占位（无知识条目、无歧义载荷）；凑到 6 条
+命中（quality 0.36）后知识补入与 W4 载荷才出现。且 quality 打分用原始查询——
+W1 展开追加的规范词不计入词面重合，别名驱动的命中被双重折损。影响面：新建
+agent 的知识库冷启动期，W1/W4 的用户可见效果被链门挡住（捕获/审批/读数不受影响）。
+候选方向：知识路质量公式与 `min_quality` 口径复核——独立缺陷单，勿混入本升级。
