@@ -673,7 +673,10 @@ def _broadcast_public_upgrade(skill_id: str, version: str, name: str) -> int:
                 except Exception:
                     acct = ""
                 confirm = f"u:{acct}" if acct else "admin"
-                targets.append((pool, owner_key, confirm, row))
+            # append 必须在 if/else 之外：4bf9b733 重写扫描循环时把它缩进了
+            # agent 分支——user 池副本永不进 targets，公共升级广播对持有副本
+            # 的用户全量漏发（test_public_upgrade_broadcasts_confirmations 钉住）
+            targets.append((pool, owner_key, confirm, row))
 
         store = get_skill_transfer_store()
         for pool, owner_key, confirm, row in targets:
