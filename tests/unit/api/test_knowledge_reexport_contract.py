@@ -50,7 +50,9 @@ _CONSUMED_SURFACE: dict[str, str | None] = {
     # ---- 测试消费方（聚合器别名属性访问全集，逐文件核实）----
     "KnowledgeSearchRequest": "knowledge_common",  # test_knowledge_chunking_api（请求模型构造）
     "_try_extract_to_graph": "knowledge_ingestion",  # test_knowledge_chunking_api
-    "_validate_import_url": "knowledge_ingestion",  # test_knowledge_import（SSRF 守卫直调）
+    # c3efc886 起 SSRF 校验收口 url_guard 单源，endpoints 包内已无真身叶子；
+    # 聚合器留兼容别名（= neurova.knowledge.url_guard.validate_public_http_url）
+    "_validate_import_url": None,
     "get_knowledge": "knowledge_core",             # test_knowledge_import
     "import_knowledge_file": "knowledge_ingestion",  # test_knowledge_chunking_api / import
     "preview_chunking": "knowledge_core",          # test_knowledge_preview_chunking

@@ -83,7 +83,8 @@ def test_cancelledTokenReallyKillsTheProcess():
         result = asyncio.run(_execThenCancel())
     finally:
         cancel_token.setTurnCancelToken(None)
-    assert (result.success, result.exit_code) == (False, -9), (
+    expected_code = 1 if sys.platform == "win32" else -9  # win32 走 taskkill /T /F（TerminateProcess 退出码 1），POSIX 才是 SIGKILL
+    assert (result.success, result.exit_code) == (False, expected_code), (
         f"进程在跑之后置位令牌，进程却没被杀掉（{result}）——本档第 2 条的前提不成立，先查那条链")
 
 
