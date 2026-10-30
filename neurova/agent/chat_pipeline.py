@@ -585,6 +585,10 @@ class ChatPipeline:
         # Step 3: LLM 调用（含自动续写）
         await self._step_llm_call(ctx)
 
+        # Step 3.5: 生成后事实回查（W5）——必须在回复定稿之前：后处理第一步就把
+        # reply 落盘，事后再改文本会让会话盘与返回体各说各话
+        self._applyAnswerFactGuard(ctx)
+
         # Step 4: 后处理
         await self._step_post_processing(ctx)
 
@@ -2975,6 +2979,45 @@ class ChatPipeline:
             service.snapshot_auto(session_key, session_data, kb_files={})
         except Exception as e:
             logger.debug("自动检查点跳过: %s", e)
+
+    def _applyAnswerFactGuard(self, ctx: "ChatContext") -> None:
+        """W5 生成后事实回查（specs/2026-10-30 §6）：只标记，不改写原句。
+
+        shadow 只把报告写进本轮 metadata（消息零变化）；on 才在消息末尾追加一行
+        核验注记，且只列"未在证据中核到"的声明。守卫自身任何失败都让路。
+        """
+        if not ctx.reply:
+            return
+        try:
+            from neurova.knowledge.guards.answer_fact_guard import (
+                guardMode,
+                renderGuardNote,
+                runAnswerFactGuard,
+            )
+
+            mode = guardMode()
+            if mode == "off":
+                return
+            from neurova.knowledge.foundation.knowledge_facts import (
+                get_knowledge_fact_store,
+            )
+
+            report = runAnswerFactGuard(
+                ctx.reply,
+                ctx.relevant_memories or [],
+                get_knowledge_fact_store(),
+                self._factDomain(),
+                str((ctx.metadata or {}).get("tenant_id") or "default"),
+            )
+        except Exception as exc:  # noqa: BLE001 - 守卫失败绝不影响回复
+            logger.debug("事实回查跳过: %s", exc)
+            return
+        if report is None:
+            return
+        if isinstance(ctx.metadata, dict):
+            ctx.metadata["answer_fact_guard"] = report.toMetadata()
+        if mode == "on" and report.contradicted:
+            ctx.reply = f"{ctx.reply}\n\n{renderGuardNote(report)}"
 
     async def _step_post_processing(self, ctx: ChatContext):
         """对话历史更新、轨迹记录、PostChatPipeline"""
