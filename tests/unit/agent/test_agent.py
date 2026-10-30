@@ -357,18 +357,36 @@ class TestAgentStats:
         assert agent.memory_manager is None
 
     @pytest.mark.asyncio
-    async def test_get_llm_stats(self, tmp_path):
+    async def test_get_llm_stats(self, tmp_path, monkeypatch):
         """获取LLM统计 - get_llm_stats 返回多模型客户端统计
 
         新结构 (multi_model_client.py:468 get_stats): 包含 total_clients,
         current_model, current_provider, models 等字段 (非旧版 request_count)
         """
-        agent = Agent(workspace_path=str(tmp_path), enable_memory=False)
-        # 发起一次对话以产生统计
-        await agent.chat("测试统计")
-        stats = agent.get_llm_stats()
-        assert "total_clients" in stats
-        assert stats["total_clients"] >= 1
+        # conftest 把数据根隔离到会话临时目录：无 provider 配置时诚实 0。
+        # 经生产登记面（ProviderManager.add_provider）加一个带 key 的服务商，
+        # Agent 初始化默认客户端后统计才可能有数——不塞私有字段、不读机器配置。
+        from neurova.llm.provider_manager import get_provider_manager
+
+        pm = get_provider_manager(scope="admin")
+        monkeypatch.setattr(pm, "_save_config", lambda: None)  # 不落会话数据根
+        provider = pm.add_provider(
+            name="统计测试", provider="openai",
+            base_url="http://127.0.0.1:9/v1", api_key="sk-test",
+            default_model="test-model", models=["test-model"],
+        )
+        # scope 单例可能已被同会话更早的用例建空——走生产换源刷新面注册客户端，
+        # 不依赖“本用例是第一个建单例的”这种顺序运气
+        from neurova.llm.multi_model_client import refreshProviderClients
+
+        refreshProviderClients(provider.id)
+        try:
+            agent = Agent(workspace_path=str(tmp_path), enable_memory=False)
+            stats = agent.get_llm_stats()
+            assert "total_clients" in stats
+            assert stats["total_clients"] >= 1
+        finally:
+            pm.remove_provider(provider.id)
 
 
 class TestAgentClearHistory:

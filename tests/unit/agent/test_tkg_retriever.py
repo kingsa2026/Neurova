@@ -24,6 +24,13 @@ def tkg():
         ]
 
     tkg.query_tkg_for_context.side_effect = fake_query
+    # 适配器优先走 forQuery（时效读面）：MagicMock auto-attr 会以 MagicMock
+    # 冒充返回值，切片迭代抛错被吞成空结果——必须显式接同一份事实。
+    # 转发到 mock 自身：各用例对 query_tkg_for_context 的 side_effect 配置
+    # （事实列表/空/异常）原样生效，forQuery 只是生产适配器的优先入口
+    tkg.forQuery.side_effect = lambda query, maxFacts=10, tenantId=None: (
+        tkg.query_tkg_for_context(query, max_facts=maxFacts)
+    )
     return tkg
 
 

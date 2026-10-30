@@ -39,12 +39,18 @@ class TestChatPipelineTokenCountPrecedence:
 
         source = textwrap.dedent(inspect.getsource(ChatPipeline))
         tree = parseSource(source)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Assign):
-                for target in node.targets:
-                    if isinstance(target, ast.Name) and target.id == "total_tokens":
-                        return node.value
-        raise AssertionError("ChatPipeline 中未找到 total_tokens 赋值")
+        # 锚点=估算条件表达式（len(input)+len(reply) if reply else len(input)）。
+        # 精确记账引入了更靠前的 `total_tokens = 0` 初始化，第一个赋值不再是它。
+        found = [
+            node.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "total_tokens" for t in node.targets)
+            and isinstance(node.value, ast.IfExp)
+        ]
+        if len(found) != 1:
+            raise AssertionError(f"预期唯一的 total_tokens 估算条件表达式，实得 {len(found)}")
+        return found[0]
 
     def test_empty_reply_counts_input_once(self):
         expr = self._get_total_tokens_expr()
