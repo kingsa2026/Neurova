@@ -252,10 +252,15 @@ class TestPostChatPipeline:
         out.write_text("live-verify 产出物卡片", encoding="utf-8")
         monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path))
         monkeypatch.setattr(artifacts_api, "_artifacts_store", {})
-
+        # 白名单根=已发现 agent 的 workspaces/ 目录——单测关注提取与落盘链，
+        # 不复刻发现机制：直接放行 tmp_path；agent_id 给真值串（A-03 读 config）
+        monkeypatch.setattr(artifacts_api, "_allowed_roots", lambda: [tmp_path])
         mock_agent = Mock()
         mock_agent.current_reasoning = None
         mock_agent.current_user_id = "1"
+        # A-03：agent_id 从 config 读——真值串，MagicMock 垃圾串会注册失败
+        from types import SimpleNamespace
+        mock_agent.config = SimpleNamespace(agent_id="tester")
         mock_agent._collect_tool_messages = Mock(
             return_value=[
                 {

@@ -91,7 +91,7 @@
     "chat": "(self, user_input: str, stream: bool = False, save_memory: bool = True, session_id: str = None, metadata: Optional[Dict[str, Any]] = None, enable_tts: bool = None, event_emitter: Optional[Callable] = None, model: Optional[str] = None) -> Dict[str, Any]",
     "chat_stream": "(self, user_input: str, session_id: str = None, metadata: Optional[Dict[str, Any]] = None, **kwargs)",
     "_record_tool_failure_lesson": "(self, tool_name: str, user_input: str, error_msg: str) -> None",
-    "_save_to_session": "(self, user_input: str, reply: str, session_id: str = None, metadata: Optional[Dict[str, Any]] = None, assistant_metadata: Optional[Dict[str, Any]] = None, writer_claim=None, session_owner: Optional[str] = None) -> str",
+    "_save_to_session": "(self, user_input: str, reply: str, session_id: str = None, metadata: Optional[Dict[str, Any]] = None, assistant_metadata: Optional[Dict[str, Any]] = None, writer_claim=None, session_owner: Optional[str] = None, userAlreadyPersisted: bool = False) -> str",
     "_update_memory_temperature": "(self)",
     "get_llm_stats": "(self) -> Dict[str, Any]",
     "clear_history": "(self)",
@@ -146,7 +146,6 @@
     "crystallizer",
     "dependency_graph",
     "evolution",
-    "evolution_engine",
     "experience_fusion",
     "genetic_engine",
     "growth_analyzer",
@@ -180,9 +179,14 @@
     "unified_retriever",
     "version_control",
     "voice_memory_bridge",
-    "voice_pipeline"
+    "voice_pipeline",
+    "evolution_engine"
   ],
-  "agent_instance_fields_migrated": ["_tkg_instance", "model_adapter"],
+  "agent_instance_fields_migrated": [
+    "_tkg_instance",
+    "model_adapter",
+    "evolution_engine"
+  ],
   "patch_targets": {
     "module": [
       "AgentLLMClient",

@@ -224,7 +224,10 @@ class TestConsoleLiveStreaming:
         with patch.object(console, "get_agent_instance", return_value=FakeAgent()), patch.object(
             console, "get_session_repository"
         ):
-            resp = await console.post_console_chat(body, fake_request)
+            resp = await console.post_console_chat(
+                body, fake_request,
+                {"user_id": "1", "role": "admin", "tenant_id": "default"},
+            )
             events = []
             async for chunk in resp.body_iterator:
                 line = chunk.decode() if isinstance(chunk, bytes) else str(chunk)
@@ -260,7 +263,10 @@ class TestConsoleFlushDedup:
         with patch.object(console, "get_agent_instance", return_value=fake_agent), patch.object(
             console, "get_session_repository"
         ):
-            resp = await console.post_console_chat(body, fake_request)
+            resp = await console.post_console_chat(
+                body, fake_request,
+                {"user_id": "1", "role": "admin", "tenant_id": "default"},
+            )
             events = []
             async for chunk in resp.body_iterator:
                 line = chunk.decode() if isinstance(chunk, bytes) else str(chunk)

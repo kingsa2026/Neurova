@@ -54,9 +54,15 @@ def test_entry_feedback_audit_admin_only(api):
 
 
 def test_admin_reads_redundancy_report(api):
+    """A1 内容去重后同正文只建一行：重复导入幂等归还既有条目，
+    冗余审计对全独立正文如实报 0（历史数据才可能再出重复组）。"""
     client, holder, _repo = api
-    _create(client, "dup-a", "same body")
-    _create(client, "dup-b", "same body")
+    first = _create(client, "dup-a", "same body")
+    second = _create(client, "dup-b", "same body")
+    _create(client, "solo", "unique body")
+    first_id = first.get("knowledge_id") or first.get("data", {}).get("knowledge_id")
+    second_id = second.get("knowledge_id") or second.get("data", {}).get("knowledge_id")
+    assert first_id and first_id == second_id, "同正文两次创建必须幂等归还同一条目"
 
     holder["user"] = dict(ADMIN)
     resp = client.get(PREFIX + "/audit/redundancy")
@@ -64,10 +70,8 @@ def test_admin_reads_redundancy_report(api):
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
     assert data["total_rows"] == 2
-    assert data["distinct_content_keys"] == 1
-    assert data["redundant_rows"] == 1
-    assert data["duplicate_group_count"] == 1
-    assert data["groups"][0]["count"] == 2
+    assert data["distinct_content_keys"] == 2
+    assert data["redundant_rows"] == 0
 
 
 def test_non_admin_gets_403(api):
