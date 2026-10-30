@@ -71,12 +71,18 @@ class TestCreateAgent:
         assert len(agents) == 1
         assert agents[0]["id"] == "test_agent"
 
-    def test_creates_soul_dir(self, manager):
-        """实现建 souls/<id> 目录（无 workspace_path 键）"""
+    def test_creates_soul_file(self, manager, tmp_path, monkeypatch):
+        """实现契约：魂显式落 agent 根目录 soul.json（工作区单源，已无 souls/<id> 目录）"""
+        monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path))
         manager.create_agent("a1", "Agent1")
         agent = manager.get_agent("a1")
         assert agent is not None
-        assert (manager._souls_dir / "a1").exists()
+        payload = {"name": "Agent1", "personality": "沉稳"}
+        assert manager.save_agent_soul("a1", payload) is True
+        from neurova.core.agent_workspaces import get_agent_soul_path
+
+        assert get_agent_soul_path("a1").exists()
+        assert manager.get_agent_soul("a1")["personality"] == "沉稳"
 
     def test_duplicate_id_returns_false(self, manager):
         """实现契约：重复 id 返回 False（不抛）"""
