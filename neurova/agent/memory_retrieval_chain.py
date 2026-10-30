@@ -419,20 +419,25 @@ class MemoryRetrievalChain:
                     merged_memories.append(k)
                     seen.add(key)
             # 知识并入后质量略升（不虚高，取主结果质量）
+            mergedMetadata: Dict[str, Any] = {
+                ** (primary_result.metadata or {}),
+                "knowledge_supplement": len(supplement_result.memories),
+                "lineage_ids": list(dict.fromkeys(
+                    list((primary_result.metadata or {}).get("lineage_ids") or [])
+                    + list((supplement_result.metadata or {}).get("lineage_ids") or [])
+                )),
+            }
+            # 歧义载荷来自知识路（W4）：合并时不许静默丢——丢了就是"算了但没人看得见"
+            supplementAmbiguity = (supplement_result.metadata or {}).get("ambiguity")
+            if supplementAmbiguity:
+                mergedMetadata["ambiguity"] = supplementAmbiguity
             return RetrievalResult(
                 memories=merged_memories,
                 source=f"{primary_result.source}+KnowledgeRetriever",
                 quality=primary_result.quality,
                 quality_level=primary_result.quality_level,
                 retrieval_time=primary_result.retrieval_time,
-                metadata={
-                    ** (primary_result.metadata or {}),
-                    "knowledge_supplement": len(supplement_result.memories),
-                    "lineage_ids": list(dict.fromkeys(
-                        list((primary_result.metadata or {}).get("lineage_ids") or [])
-                        + list((supplement_result.metadata or {}).get("lineage_ids") or [])
-                    )),
-                },
+                metadata=mergedMetadata,
             )
 
         # 知识独立命中（主源未命中）

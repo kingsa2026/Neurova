@@ -1198,6 +1198,7 @@ class ContextOrchestrator:
         chat_channel_group: bool = False,
         chat_channel: str = "",
         chat_group_id: str = "",
+        retrieval_guidance: Optional[str] = None,
     ) -> List[Dict]:
         """构建完整的 LLM 上下文（Phase 2-5）
 
@@ -1213,6 +1214,8 @@ class ContextOrchestrator:
             voice_context: 语音上下文（ASR 元数据、情感分析等）
             citation_registry: P0#5 本轮引用句柄表（CitationRegistry）——注入
                 记忆/知识时把长 UUID 压缩为 m1/k1 句柄；None 保持旧全 id 格式
+            retrieval_guidance: 本轮检索侧受控指引（W4 歧义澄清）——挂在注入
+                块首、随信封同受预算管辖；空则不注（D4 甲案：动态检索文本不进 system 行）
 
         Returns:
             上下文消息列表，可直接传给 LLM
@@ -1660,6 +1663,13 @@ class ContextOrchestrator:
                 compress_envelope,
             )
             envelope_blocks = {tag: "\n".join(lines) for tag, lines in blocks.items() if lines}
+            if retrieval_guidance:
+                # W4：歧义指引挂在注入块首（与召回行同一信封、同一额度）
+                envelope_blocks["memories"] = (
+                    f"{retrieval_guidance}\n{envelope_blocks['memories']}"
+                    if envelope_blocks.get("memories")
+                    else retrieval_guidance
+                )
             envelope_blocks["time"] = build_time_block()
             _env = build_envelope(envelope_blocks)
             if _env:
@@ -1724,7 +1734,11 @@ class ContextOrchestrator:
                 )
             )
 
-        # 添加记忆
+        # 添加记忆（W4：歧义指引挂在记忆/知识块首，与池分支同一位置）
+        if retrieval_guidance:
+            candidate_pool.append(
+                ContextInput(source=ContextSource.MEMORY, content=retrieval_guidance)
+            )
         for memory in relevant_memories or []:
             if isinstance(memory, dict):
                 content = memory.get("content", str(memory))

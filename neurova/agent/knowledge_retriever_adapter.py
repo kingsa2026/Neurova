@@ -16,6 +16,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.knowledge.ambiguity_clarification import ambiguityMode, buildAmbiguityBlock
 from neurova.knowledge.feedback_prior import rerankByAdoption
 from neurova.knowledge.query_normalization import normalizeMode, normalizeQueryForRetrieval
 
@@ -323,6 +324,27 @@ class KnowledgeRetrieverAdapter:
                     except Exception as exc:  # noqa: BLE001
                         logger.debug("知识条目注入计数跳过: %s", exc)
 
+            # W4 同名多口径（specs/2026-10-30 §5）：只消费既有主体别名表与冲突账，
+            # 只产读侧载荷不改排序；任何异常让路，检索主路不受影响。
+            ambiguityMeta: Optional[Dict[str, Any]] = None
+            if ambiguityMode() != "off":
+                try:
+                    from neurova.knowledge.foundation.knowledge_facts import (
+                        get_knowledge_fact_store,
+                    )
+
+                    ambiguityBlock = buildAmbiguityBlock(
+                        get_knowledge_fact_store(),
+                        str(context.query or ""),
+                        knowledge_items,
+                        str(agent_id) if agent_id else None,
+                        str(metadata.get("tenant_id") or "default"),
+                    )
+                    if ambiguityBlock is not None:
+                        ambiguityMeta = ambiguityBlock.toMetadata()
+                except Exception as exc:  # noqa: BLE001 - 歧义计算绝不影响检索返回
+                    logger.debug("歧义载荷计算跳过: %s", exc)
+
             elapsed = time.monotonic() - start_time
 
             if not knowledge_items:
@@ -374,6 +396,8 @@ class KnowledgeRetrieverAdapter:
             }
             if normMetadata is not None:
                 resultMetadata["query_normalization"] = normMetadata
+            if ambiguityMeta is not None:
+                resultMetadata["ambiguity"] = ambiguityMeta
 
             return RetrievalResult(
                 memories=memories,
