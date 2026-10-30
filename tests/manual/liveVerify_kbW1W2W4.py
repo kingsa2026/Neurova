@@ -174,20 +174,15 @@ def main() -> int:
               approved.text[:180])
 
         # ── [4] 真条目 + W1 判据：同一查询复测命中（归一展开→召回）──────
-        # 链的采纳门是 quality ≥ 0.3，知识路质量 = 0.6×命中数/10 + 0.4×词面重合
-        # ——1 条命中(0.06)会被链当"不足"整包丢弃（MoE 的 no_memory 占位
-        # score=1.0 反而当选）。探针按真链规则凑命中数：6 条含规范词的条目。
-        kid = ""
-        for index in range(6):
-            suffix = "" if index == 0 else f"（{index}）"
-            entry = client.post(KB, headers=TOKEN, json={
-                "title": f"客户流失率口径说明{suffix}",
-                "content": f"客户流失率按月统计，当前口径为百分之八，归属留存域。{suffix}",
-            })
-            check(f"知识条目真建 200（{index + 1}/6）", entry.status_code == 200,
-                  entry.text[:100])
-            data = entry.json().get("data") or entry.json()
-            kid = kid or str(data.get("knowledge_id") or "")
+        # 1 条命中即入上下文——链采纳门修后（重合按实跑查询计 + 词面重合通道
+        # 独立达标，specs/2026-10-30 §11.4 根修），小语料不再被整包丢弃。
+        entry = client.post(KB, headers=TOKEN, json={
+            "title": "客户流失率口径说明",
+            "content": "客户流失率按月统计，当前口径为百分之八，归属留存域。",
+        })
+        check("知识条目真建 200", entry.status_code == 200, entry.text[:120])
+        data = entry.json().get("data") or entry.json()
+        kid = str(data.get("knowledge_id") or "")
 
         turn1 = retrievalTurn("跑量")
         hitKids = [

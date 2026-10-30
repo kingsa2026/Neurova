@@ -376,7 +376,9 @@ class KnowledgeRetrieverAdapter:
             # 归一化为 memories 载荷（与记忆条目字段一致：content/title 等）
             memories = [self._normalize_item(item) for item in knowledge_items]
 
-            quality = self.get_quality_score(knowledge_items, context.query)
+            # 质量重合按**实跑查询**计：W1 展开追加的规范词才是真正命中正文
+            # 的词——按原始查询计，别名驱动的命中重合恒为 0（双重折损）。
+            quality = self.get_quality_score(knowledge_items, searchQuery)
             quality_level = self._quality_from_score(quality)
 
             resultMetadata: Dict[str, Any] = {
@@ -413,28 +415,43 @@ class KnowledgeRetrieverAdapter:
             raise
 
     def get_quality_score(self, results: List[Dict[str, Any]], query: str) -> float:
-        """评估知识检索质量：数量 + 标题/内容关键词相关度"""
+        """评估知识检索质量：命中数量 + 查询词面重合，两通道取大。
+
+        重合按"查询词在标题/正文中出现"计（分词与 bm25 同源走 tokenize，
+        CJK 可分词）；旧实现按空格切词做集合相等，中文查询的重合恒为 0，
+        relevance 通道对中文从来是死重。
+
+        通道取大而非加权和一票否决：命中数项（0.6×命中数/10）是语义/向量
+        命中的唯一载体，词面重合项（0.75×重合，≥0.4 即独立过门）是精确小
+        语料的唯一载体——specs/2026-10-30 §11.4 的缺陷形态是加权和把 1 条
+        半重合的别名命中稀释到 0.26 < min_quality(0.3)，整包被链丢弃，
+        MoE 的 no_memory 占位（score=1.0）反而当选。
+        """
         if not results:
             return 0.0
 
         count_score = min(len(results) / 10, 1.0)
 
-        query_keywords = set((query or "").lower().split())
+        from neurova.knowledge.search import tokenize as _tokenize
+
+        query_tokens = set(_tokenize(query or ""))
         relevance_score = 0.0
-        if query_keywords:
+        if query_tokens:
             total_overlap = 0.0
             n = 0
             for item in results:
-                title = (item.get("title") or "").lower()
-                content = (item.get("content") or "").lower()
-                combined = set(title.split()) | set(content.split())
-                overlap = len(query_keywords.intersection(combined))
-                if combined:
-                    total_overlap += overlap / len(query_keywords)
-                    n += 1
+                text = (
+                    str(item.get("title") or "") + " " + str(item.get("content") or "")
+                ).lower()
+                overlap = sum(1 for token in query_tokens if token in text)
+                total_overlap += overlap / len(query_tokens)
+                n += 1
             relevance_score = total_overlap / n if n else 0.0
 
-        quality = 0.6 * count_score + 0.4 * relevance_score
+        quality = max(
+            0.6 * count_score + 0.4 * relevance_score,
+            0.75 * relevance_score,
+        )
         return min(max(quality, 0.0), 1.0)
 
     def _quality_from_score(self, score: float) -> Any:
