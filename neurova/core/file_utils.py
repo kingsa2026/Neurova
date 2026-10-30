@@ -306,8 +306,11 @@ def save_file_to_isolated_path(
 
     # 清理文件名并限制长度
     sanitized_filename = sanitize_name(filename)
-    # Windows MAX_PATH is 260; reserve space for directory + file_id prefix + extension
-    max_name_len = 100
+    # Windows MAX_PATH is 260：预算按**实际隔离目录深度**动态计算（数据根被
+    # 部署/测试注入到深层时，静态 100 会让"目录前缀 + file_id + 名"超限直接
+    # FileNotFoundError——8a91e721 的防御漏算了目录本身的长度）。按实效上限
+    # 259（260 含结尾留空位）扣分隔符并设下限，防极端深目录把预算算成负数。
+    max_name_len = max(259 - len(str(isolated_path)) - len(f"{file_id}_") - 1, 32)
     if len(sanitized_filename) > max_name_len:
         ext = get_file_extension(filename)
         base = sanitized_filename[: max_name_len - len(ext) - 1] if ext else sanitized_filename[:max_name_len]
