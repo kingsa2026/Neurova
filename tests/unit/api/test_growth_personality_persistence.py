@@ -30,8 +30,9 @@ class _FakeAgent:
 
 @pytest.fixture()
 def store(tmp_path, monkeypatch):
-    # 2026-09-16 拆分后持久层常量住叶子模块（import 时值绑定，须 patch 真身）
-    monkeypatch.setattr("neurova.api.endpoints.personality_persistence.PERSONALITY_DIR", str(tmp_path / "personality"))
+    # personality 已收口工作区单源（get_agent_personality_path 按调用时 env
+    # 解析）：隔离靠 NEUROVA_AGENT_WORKSPACES_DIR，不再有可 patch 的目录常量
+    monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path))
 
     def _fake(agent_id="default", *a, **k):
         return _FakeAgent()
@@ -48,7 +49,9 @@ def store(tmp_path, monkeypatch):
 
 
 def _path(tmp_path, agent_id="a1"):
-    return Path(str(tmp_path)) / "personality" / f"{agent_id}.json"
+    from neurova.core.agent_workspaces import get_agent_personality_path
+
+    return get_agent_personality_path(agent_id)
 
 
 class TestPersonalityRoundTrip:

@@ -61,7 +61,9 @@ def test_all_23_routes_live_after_split():
 def client(tmp_path, monkeypatch):
     import types
 
-    monkeypatch.setattr(growth_api, "_PERSONALITY_DIR", str(tmp_path / "personality"))
+    # personality 已收口工作区单源（get_agent_personality_path 按调用时 env
+    # 解析）：隔离靠 NEUROVA_AGENT_WORKSPACES_DIR，不再有可 patch 的目录常量
+    monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path))
     monkeypatch.setattr(growth_api, "_CONSTITUTION_DIR", str(tmp_path / "constitution"))
     monkeypatch.setattr("neurova.api.endpoints.get_agent_instance",
                         lambda agent_id="default", *a, **k: types.SimpleNamespace(

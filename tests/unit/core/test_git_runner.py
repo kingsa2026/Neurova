@@ -54,8 +54,12 @@ class TestPitfall2And3CommitMessage:
         tree = run_git("mktree", git_dir=str(bare),
                        stdin=f"100644 blob {blob_sha}\tf.txt\n")
         msg = commit_message("evolution: s1 evo_a", '{"holdout_after": 0.9}')
+        # 本机无全局 git 身份（dfea16d3：身份由调用方自带，通用层不注入）——
+        # 与 TestCommitFDash 同口径经 env_extra 传作者
+        identity = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                    "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
         commit = run_git("commit-tree", tree.stdout.decode("ascii").strip(),
-                         git_dir=str(bare), stdin=msg)
+                         git_dir=str(bare), stdin=msg, env_extra=identity)
         assert commit.returncode == 0, commit.stderr
         run_git("update-ref", "refs/heads/main", commit.stdout.decode("ascii").strip(),
                 git_dir=str(bare))

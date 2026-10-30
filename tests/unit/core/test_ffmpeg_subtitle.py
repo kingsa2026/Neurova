@@ -172,6 +172,9 @@ class TestCjkFontProbeRejectsLatinOnlyNoto:
     @pytest.fixture()
     def single_root(self, monkeypatch):
         """只认第一个字体根，避免同一替身文件被两个根各收一遍产生重复项。"""
+        # Windows 分支提前 return 系统字体清单（b802866d），rglob 判读只在
+        # POSIX 分支——桩到 posix 才能测到判据本身
+        monkeypatch.setattr(ff.os, "name", "posix")
         monkeypatch.setattr(
             ff.os.path, "isdir", lambda p: p == "/usr/share/fonts", raising=False
         )

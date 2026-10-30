@@ -50,7 +50,11 @@ def client(mock_manager):
             "neuser_id": "7",
             "role": "user",
         }
-        yield TestClient(app)
+        # 路由级身份门 requireIdentityForMemoryFace（db0b9e65）判的是这趟
+        # 请求有没有凭证——按 tests/auth_headers 教义挂真 JWT，不用 override 压门
+        from tests.auth_headers import bearerHeaders
+
+        yield TestClient(app, headers=bearerHeaders("7"))
 
 
 def test_timeline_returns_bucketed_points(client, mock_manager):
@@ -86,7 +90,10 @@ def test_agent_id_selects_manager_scope(mock_manager):
             "neuser_id": "7",
             "role": "user",
         }
-        res = TestClient(app).get(f"{BASE}/emotion/timeline", params={"agent_id": "agent-9"})
+        from tests.auth_headers import bearerHeaders
+
+        res = TestClient(app, headers=bearerHeaders("7")).get(
+            f"{BASE}/emotion/timeline", params={"agent_id": "agent-9"})
 
     assert res.status_code == 200
     assert getter.call_args.args[0] == "agent-9"

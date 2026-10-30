@@ -81,4 +81,6 @@ class TestAgentWidePassthrough:
         """删除走归属校验：可见性口径不外溢成销毁权限（见模块 docstring 的修订说明）"""
         resp = app_client.delete(f"{BASE}/mem_x", params={"agent_id": "default"})
         assert resp.status_code == 200
-        assert "agent_wide" not in mock_manager.forget.call_args.kwargs
+        # a25c1a21 后显式传 agent_wide=False（默认值本来就是 False，行为等价）——
+        # 钉行为口径（不得为 True），不再钉"键不存在"这一实现细节
+        assert mock_manager.forget.call_args.kwargs.get("agent_wide") is not True
