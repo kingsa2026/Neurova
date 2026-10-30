@@ -148,6 +148,38 @@ def _cachedAliasTerms(
     return terms
 
 
+def subjectsMatchingQuery(
+    store: Any, query: str, agentId: Optional[str], tenantId: str = "default"
+) -> List[Tuple[str, List[SubjectMatch]]]:
+    """查询命中的主体词 → 该词消解出的**全部**幸存主体（W4 歧义触发器）。
+
+    与 `normalizeQueryForRetrieval` 共用同一份别名账、同一套归一与合并链语义；
+    唯一的差别是**不**按"已用词"去重——同名多口径（两个主体挂同一个别名）
+    正是要观察的形态，展开侧去重后只剩一个代表，这里必须都看得见。
+    返回按词长降序（长词优先，与展开同序）。
+    """
+    original = str(query or "")
+    if not original.strip() or not agentId:
+        return []
+    try:
+        terms = _cachedAliasTerms(store, str(agentId), str(tenantId or "default"))
+    except Exception as exc:  # noqa: BLE001 - 别名账不可用不让路，由调用方决定缺省
+        logger.debug("歧义候选词读取跳过（别名账不可用）: %s", exc)
+        return []
+    normQuery = _normText(original)
+    if not normQuery:
+        return []
+    groups: Dict[str, List[SubjectMatch]] = {}
+    for normTerm, rawTerm, targetKey, targetCanonical, via in terms:
+        if normTerm not in normQuery:
+            continue
+        bucket = groups.setdefault(normTerm, [])
+        if any(match.subjectKey == targetKey for match in bucket):
+            continue
+        bucket.append(SubjectMatch(targetKey, targetCanonical, rawTerm, via))
+    return [(matches[0].matchedTerm, matches) for matches in groups.values()]
+
+
 def normalizeQueryForRetrieval(
     store: Any, query: str, agentId: Optional[str], tenantId: str = "default"
 ) -> NormalizedQuery:

@@ -1785,6 +1785,10 @@ class ChatPipeline:
         except Exception:  # noqa: BLE001 - citation 基建故障退回旧全 id 格式
             ctx.citation_registry = None
 
+        # W4 同名多口径：on 档把歧义载荷翻成一段模型面向的受控指引，挂在注入块首；
+        # shadow 只留 metadata（上面已落到 ctx.metadata），不碰提示词。
+        retrievalGuidance = self._ambiguityGuidance(ctx)
+
         ctx.context = await self.context_orchestrator.build_context(
             user_input=ctx.user_input,
             tool_memory_result=ctx.tool_memory_result,
@@ -1801,6 +1805,7 @@ class ChatPipeline:
             chat_channel_group=_scopeCtx["channel_group"],
             chat_channel=_scopeCtx["channel"],
             chat_group_id=_scopeCtx["chat_id"],
+            retrieval_guidance=retrievalGuidance,
         )
 
         # Private guidance is turn-local, never archived into the shared experience pool.
@@ -1830,6 +1835,30 @@ class ChatPipeline:
                 ctx.context.append({"role": "system", "content": _note})
         except Exception:  # noqa: BLE001 - 增量提示失败不影响主链路
             logger.debug("环境增量注入失败(忽略)", exc_info=True)
+
+    def _ambiguityGuidance(self, ctx: "ChatContext") -> Optional[str]:
+        """W4：on 档把歧义载荷翻成注入块首的受控指引；shadow/off 一律 None。
+
+        shadow 的语义是"只写读数、提示词逐字不变"，所以门开在**这里**而不是
+        渲染侧——渲染侧再判一次就会让 shadow 与 on 两档各有一条判据。
+        """
+        payload = (
+            (ctx.metadata or {}).get("knowledge_ambiguity")
+            if isinstance(ctx.metadata, dict)
+            else None
+        )
+        if not payload:
+            return None
+        try:
+            from neurova.knowledge.ambiguity_clarification import (
+                ambiguityMode,
+                renderAmbiguityGuidance,
+            )
+
+            return renderAmbiguityGuidance(payload) if ambiguityMode() == "on" else None
+        except Exception as exc:  # noqa: BLE001 - 指引生成失败不阻断上下文构建
+            logger.debug("歧义澄清指引生成跳过: %s", exc)
+            return None
 
     async def _retrieve_memories(self, ctx: ChatContext, scopeCtx: Dict[str, Any]):
         """统一检索（使用 MemoryRetrievalChain 深度模块）
@@ -1873,6 +1902,10 @@ class ChatPipeline:
         if isinstance(ctx.metadata, dict):
             ctx.metadata["retrieval_hits"] = len(ctx.relevant_memories)
             ctx.metadata["retrieval_quality"] = float(result.quality or 0.0)
+            # W4 歧义载荷随检索结果上抛一层，供本步之后的上下文组装取用（shadow 只落读数）
+            ambiguityPayload = (getattr(result, "metadata", None) or {}).get("ambiguity")
+            if ambiguityPayload:
+                ctx.metadata["knowledge_ambiguity"] = ambiguityPayload
         self._recordKnowledgeLineage(ctx, result)
         self._recordKnowledgeCostInputs(ctx)
 
