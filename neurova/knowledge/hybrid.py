@@ -18,6 +18,7 @@ ONNX 向量索引只挂在 semantic-search 端点——两套索引互不相认�
 
 from __future__ import annotations
 
+import inspect
 import math
 import os
 import time
@@ -114,6 +115,35 @@ def bm25_rank(
     return raw_scores[:top_k]
 
 
+def _graphShadowReading(out: Any, boundArguments) -> Optional[Dict[str, Any]]:
+    """影子读数（specs/2026-10-30 W3）：graph 候选与最终 top-k 的关系。
+
+    rank 从 1 起；不改变返回值，纯读数。无候选返回 None（缺读数点名，不伪造 0）。
+    """
+    graphRanks = boundArguments.arguments.get("graphRanks")
+    if not graphRanks:
+        return None
+    candidateIds = [str(entryId) for entryId, _score in graphRanks if entryId]
+    if not candidateIds:
+        return None
+    outIds = [
+        str(row.get("knowledge_id"))
+        for row in out or [] if (row or {}).get("knowledge_id")
+    ]
+    topRank = None
+    for entryId in candidateIds:
+        if entryId in outIds:
+            topRank = outIds.index(entryId) + 1
+            break
+    limit = boundArguments.arguments.get("limit") or 10
+    topSet = set(outIds[: max(1, int(limit))])
+    return {
+        "candidates": len(candidateIds),
+        "top_candidate_final_rank": topRank,
+        "overlap_at_k": sum(1 for entryId in candidateIds if entryId in topSet),
+    }
+
+
 def _recordRetrieval(func):
     """记录成功/失败的检索读数；装饰器不改变返回值和异常传播。"""
 
@@ -127,16 +157,31 @@ def _recordRetrieval(func):
                 hits=0, elapsedMs=(time.monotonic() - started) * 1000, error=True
             )
             raise
+        try:
+            boundArguments = inspect.signature(func).bind(*args, **kwargs)
+        except TypeError:
+            boundArguments = None
+        # 影子档 graphWeight=0：graph 候选仍在 breakdown 里（供诊断），但没参与融合，
+        # 路计数把它算成命中就会让「on 才含 graph」恒真——路计数只认真参与融合的路。
+        graphFused = bool(
+            boundArguments is not None
+            and float(boundArguments.arguments.get("graphWeight") or 0.0) > 0.0
+        )
         route_counts: Dict[str, int] = {}
         for row in out or []:
             breakdown = (row or {}).get("confidence_breakdown") or {}
-            for route in ("tfidf", "bm25", "fts", "vector"):
+            routes = ("tfidf", "bm25", "fts", "vector") + (("graph",) if graphFused else ())
+            for route in routes:
                 if float(breakdown.get(route, 0.0) or 0.0) > 0.0:
                     route_counts[route] = route_counts.get(route, 0) + 1
+        graphShadow = (
+            _graphShadowReading(out, boundArguments) if boundArguments is not None else None
+        )
         get_retrieval_metrics().record(
             hits=len(out or []),
             elapsedMs=(time.monotonic() - started) * 1000,
             routeCounts=route_counts,
+            graphShadow=graphShadow,
         )
         return out
 
