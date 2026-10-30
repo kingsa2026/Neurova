@@ -27,6 +27,12 @@ class RetrievalMetrics:
             self._routes: Dict[str, int] = {}
             self._outcomes: Dict[str, int] = {"model_refusal": 0}
             self._queryNorm = {"retrievals": 0, "with_matches": 0, "matched_subjects_total": 0}
+            self._graphShadow = {
+                "retrievals_with_candidates": 0,
+                "candidates_total": 0,
+                "top5_reach": 0,
+                "top1_reach": 0,
+            }
 
     def recordQueryNormalization(self, *, matchedSubjects: int) -> None:
         """查询侧别名归一读数（specs/2026-10-30 W1）：只在 shadow/on 生效时被调。"""
@@ -43,6 +49,7 @@ class RetrievalMetrics:
         elapsedMs: float,
         routeCounts: Optional[Dict[str, int]] = None,
         error: bool = False,
+        graphShadow: Optional[Dict[str, Any]] = None,
     ) -> None:
         with self._lock:
             self._requests += 1
@@ -57,6 +64,17 @@ class RetrievalMetrics:
             for route, count in (routeCounts or {}).items():
                 if int(count) > 0:
                     self._routes[route] = self._routes.get(route, 0) + int(count)
+            if graphShadow:
+                self._graphShadow["retrievals_with_candidates"] += 1
+                self._graphShadow["candidates_total"] += max(0, int(
+                    graphShadow.get("candidates", 0) or 0
+                ))
+                rank = graphShadow.get("top_candidate_final_rank")
+                if rank is not None:
+                    if int(rank) <= 5:
+                        self._graphShadow["top5_reach"] += 1
+                    if int(rank) == 1:
+                        self._graphShadow["top1_reach"] += 1
 
     def recordOutcome(self, kind: str, count: int = 1) -> None:
         """记录回答完成态的硬信号；只收本层真能识别的 kind。"""
@@ -82,6 +100,11 @@ class RetrievalMetrics:
                 **(
                     {"query_normalization": dict(self._queryNorm)}
                     if self._queryNorm["retrievals"] > 0
+                    else {}
+                ),
+                **(
+                    {"graph_shadow": dict(self._graphShadow)}
+                    if self._graphShadow["retrievals_with_candidates"] > 0
                     else {}
                 ),
                 "uninstrumented": {
