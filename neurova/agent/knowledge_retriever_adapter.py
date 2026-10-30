@@ -25,6 +25,36 @@ logger = get_logger(__name__)
 ADOPTION_CANDIDATE_FACTOR = 3
 ADOPTION_CANDIDATE_MAX = 100
 
+#: W2 检索脱靶登记（specs/2026-10-30）：0 命中查询落候选别名，只进人工审批面。
+MISS_CAPTURE_ENV = "NEUROVA_KB_MISS_CAPTURE"
+
+
+def _missCaptureEnabled() -> bool:
+    return str(os.environ.get(MISS_CAPTURE_ENV) or "").strip().lower() in (
+        "on", "1", "true", "yes",
+    )
+
+
+def _isCapturableMissQuery(query: str) -> bool:
+    """平凡查询（空/纯符号/单字符）不登记，防审批面被噪声灌满。"""
+    text = str(query or "").strip()
+    if len(text) < 2:
+        return False
+    return any(ch.isalnum() for ch in text)
+
+
+def _captureRetrievalMiss(agentId: str, tenantId: str, query: str) -> None:
+    try:
+        from neurova.knowledge.foundation.knowledge_facts import (
+            get_knowledge_fact_store,
+        )
+
+        get_knowledge_fact_store().captureAliasCandidate(
+            agentId, query, tenantId=tenantId
+        )
+    except Exception as exc:  # noqa: BLE001 - 脱靶登记失败绝不影响检索返回
+        logger.debug("检索脱靶登记跳过: %s", exc)
+
 
 class KnowledgeRetrieverAdapter:
     """适配知识库 Repository，作为检索链的一级检索器。
@@ -296,6 +326,17 @@ class KnowledgeRetrieverAdapter:
             elapsed = time.monotonic() - start_time
 
             if not knowledge_items:
+                if (
+                    agent_id and _missCaptureEnabled()
+                    and _isCapturableMissQuery(searchQuery)
+                    and not (normMetadata and normMetadata.get("matched_subjects"))
+                ):
+                    # 归一已命中主体的查询不算脱靶（别名已知，缺的是内容本身）
+                    _captureRetrievalMiss(
+                        str(agent_id),
+                        str(metadata.get("tenant_id") or "default"),
+                        searchQuery,
+                    )
                 emptyMetadata: Dict[str, Any] = {
                     "retriever_type": "knowledge", "hits": 0,
                 }

@@ -393,6 +393,32 @@ CREATE INDEX IF NOT EXISTS idx_mcp_source_tenant
     ON knowledge_mcp_sources(tenant_id, name);
 """
 
+# v27：检索脱靶登记（specs/2026-10-30 W2）。0 命中查询的候选别名只进人工审批，
+# 机器永不自动合并；同查询重复脱靶在 pending 行上累计 occurrences 不灌水；
+# 唯一键带 status——结行后同查询再脱靶允许新起 pending 行，旧行留作审计。
+_SCHEMA_V27 = """
+CREATE TABLE IF NOT EXISTS knowledge_alias_candidates (
+    candidate_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    raw_query TEXT NOT NULL,
+    normalized_query TEXT NOT NULL,
+    proposed_subject_key TEXT,
+    evidence TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'pending',
+    occurrences INTEGER NOT NULL DEFAULT 1,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    decided_by TEXT NOT NULL DEFAULT '',
+    decided_at TEXT,
+    decide_reason TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_alias_candidate_query
+    ON knowledge_alias_candidates(agent_id, tenant_id, normalized_query, status);
+CREATE INDEX IF NOT EXISTS idx_alias_candidate_status
+    ON knowledge_alias_candidates(tenant_id, status, last_seen_at);
+"""
+
 
 MANUAL_RESOLUTIONS: tuple = ("keep_both", "supersede_old", "dismiss")
 
@@ -608,6 +634,158 @@ class KnowledgeFactStore:
     def subjectCount(self) -> int:
         with self._lock:
             return int(self._conn.execute("SELECT COUNT(*) FROM knowledge_subjects").fetchone()[0])
+
+    # ── 检索脱靶登记（specs/2026-10-30 W2）────────────────────
+    # 0 命中查询 → 候选别名，只进人工审批面；机器永不自动合并。
+
+    def captureAliasCandidate(
+        self, agentId: str, query: str, tenantId: str = "default"
+    ) -> Optional[str]:
+        """登记/累计一条脱靶查询。resolveSubjectKey 命中即回填 proposed_subject_key
+        提示审批人；同 (agent, tenant, 归一查询) 的 pending 行 occurrences+1。"""
+        raw = str(query or "").strip()
+        if not raw:
+            return None
+        normalized = normalizeLabel(raw)
+        if not normalized:
+            return None
+        tenant = str(tenantId or "default")
+        # 提示走"问的是谁"的唯一判据 subjectsMentionedIn（包含匹配）——精确匹配的
+        # resolveSubjectKey 只认整词，接不住"跑量怎么算"这类整句脱靶查询。
+        from .temporal_facts import subjectsMentionedIn
+
+        hints = subjectsMentionedIn(self, raw, agentId, tenant)
+        hint = str(hints[0]) if hints else None
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT candidate_id FROM knowledge_alias_candidates"
+                " WHERE agent_id = ? AND tenant_id = ? AND normalized_query = ?"
+                " AND status = 'pending'",
+                (agentId, tenant, normalized),
+            ).fetchone()
+            stamp = _now()
+            if row:
+                self._conn.execute(
+                    "UPDATE knowledge_alias_candidates SET occurrences = occurrences + 1,"
+                    " last_seen_at = ?, proposed_subject_key = COALESCE(proposed_subject_key, ?)"
+                    " WHERE candidate_id = ?",
+                    (stamp, hint, row["candidate_id"]),
+                )
+                return str(row["candidate_id"])
+            candidateId = "kbac_%s" % uuid.uuid4().hex[:12]
+            self._conn.execute(
+                "INSERT INTO knowledge_alias_candidates (candidate_id, agent_id, tenant_id,"
+                " raw_query, normalized_query, proposed_subject_key, evidence, status,"
+                " occurrences, first_seen_at, last_seen_at)"
+                " VALUES (?,?,?,?,?,?,?,'pending',1,?,?)",
+                (candidateId, agentId, tenant, raw, normalized, hint,
+                 json.dumps({"source": "retrieval_miss"}, ensure_ascii=False),
+                 stamp, stamp),
+            )
+            return candidateId
+
+    def listAliasCandidates(
+        self, tenantId: str = "default", status: Optional[str] = None,
+        agentId: Optional[str] = None, limit: int = 50, offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        sql = "SELECT * FROM knowledge_alias_candidates WHERE tenant_id = ?"
+        params: List[Any] = [str(tenantId or "default")]
+        if status:
+            sql += " AND status = ?"
+            params.append(str(status))
+        if agentId:
+            sql += " AND agent_id = ?"
+            params.append(str(agentId))
+        sql += " ORDER BY last_seen_at DESC, candidate_id LIMIT ? OFFSET ?"
+        params += [max(1, int(limit)), max(0, int(offset))]
+        with self._lock:
+            rows = self._conn.execute(sql, tuple(params)).fetchall()
+        out = []
+        for row in rows:
+            d = dict(row)
+            d["evidence"] = json.loads(d.pop("evidence", "{}") or "{}")
+            out.append(d)
+        return out
+
+    def attachAlias(
+        self, agentId: str, subjectKey: str, alias: str,
+        tenantId: str = "default", operator: str = "", reason: str = "",
+    ) -> Dict[str, Any]:
+        """把别名并入既有主体（人工动作；机器只产候选不落地）。
+        活动账留痕（操作人/依据），语义与 upsertSubject 的别名合并同源。
+        返回 {"aliases": 合并后全量, "activity_id": 活动痕 id}。"""
+        normalized = normalizeLabel(alias)
+        if not normalized:
+            raise ValueError("alias 不能为空")
+        tenant = str(tenantId or "default")
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT agent_id, tenant_id, aliases_json, status, merged_into"
+                " FROM knowledge_subjects WHERE subject_key = ?",
+                (subjectKey,),
+            ).fetchone()
+            if row is None or str(row["agent_id"]) != str(agentId) \
+                    or str(row["tenant_id"] or "default") != tenant:
+                raise LookupError("目标主体不存在: %s" % subjectKey)
+            if row["status"] == "merged" or row["merged_into"]:
+                raise ValueError(
+                    "主体已并入 %s，别名应挂到幸存主体" % (row["merged_into"] or "")
+                )
+            merged = self._mergeAliases(json.loads(row["aliases_json"] or "[]"), [alias])
+            self._conn.execute(
+                "UPDATE knowledge_subjects SET aliases_json = ?, updated_at = ?"
+                " WHERE subject_key = ?",
+                (json.dumps(merged, ensure_ascii=False), _now(), subjectKey),
+            )
+        activityId = self.insertActivity(
+            "subject_alias_attached",
+            inputs={"subject_key": subjectKey, "alias": alias, "agent_id": agentId},
+            basis=reason or "人工审批",
+            tenantId=tenant,
+        )
+        self.finishActivity(activityId, outputs={"operator": operator, "aliases": merged})
+        return {"aliases": merged, "activity_id": activityId}
+
+    def decideAliasCandidate(
+        self, candidateId: str, decision: str, operator: str = "",
+        reason: str = "", subjectKey: Optional[str] = None, tenantId: str = "default",
+    ) -> Dict[str, Any]:
+        """人工处置候选别名：approved 并入主体表（attachAlias，幂等），rejected 只结行。"""
+        if decision not in ("approved", "rejected"):
+            raise ValueError("decision 只允许 approved|rejected，收到 %r" % decision)
+        tenant = str(tenantId or "default")
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM knowledge_alias_candidates WHERE candidate_id = ?",
+                (candidateId,),
+            ).fetchone()
+        if row is None or str(row["tenant_id"] or "default") != tenant:
+            raise LookupError("候选别名不存在: %s" % candidateId)
+        if row["status"] != "pending":
+            raise ValueError("候选已结（%s），不能重复处置" % row["status"])
+        agentId = str(row["agent_id"])
+        result: Dict[str, Any] = {"candidate_id": candidateId, "status": decision}
+        if decision == "approved":
+            targetKey = str(subjectKey or row["proposed_subject_key"] or "")
+            if not targetKey:
+                raise ValueError("无主体可挂：请指定 subject_key")
+            attached = self.attachAlias(
+                agentId, targetKey, str(row["raw_query"]),
+                tenantId=tenant, operator=operator, reason=reason,
+            )
+            result["subject_key"] = targetKey
+            result["aliases"] = attached["aliases"]
+            result["activity_id"] = attached["activity_id"]
+        with self._lock, self._conn:
+            cursor = self._conn.execute(
+                "UPDATE knowledge_alias_candidates SET status = ?, decided_by = ?,"
+                " decided_at = ?, decide_reason = ?"
+                " WHERE candidate_id = ? AND status = 'pending'",
+                (decision, operator, _now(), reason, candidateId),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("候选状态已变化，处置未生效: %s" % candidateId)
+        return result
 
     # ── 事实层 ────────────────────────────────────────────────
 
