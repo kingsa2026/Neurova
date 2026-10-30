@@ -4085,3 +4085,18 @@ tests/integration/test_memoryEnhancementCarriesAgentScope.py
 # （bearerHeaders 体内必须调对齐口、取数口只剩一个名字，带正检）。它钉掉的是合跑 26 条
 # "刚签的令牌被自己拒"的那一族；工单 docs/04-plans/记忆面测试密钥作用域工单_2026-10-27.md
 tests/unit/api/test_identityHeadersAlignSecretBeforeSigning.py
+# 知识库检索准确性升级（specs/2026-10-30 W1–W5，B1–B5 五批）：
+# W1 查询侧别名归一——off 逐字不变、shadow 只带读数、on 只追加（别名账写而不读的断点）
+tests/unit/knowledge/test_querySideNormalization.py
+# W2 脱靶登记与审批闭环——0 命中长成候选别名，approve 后下一查立刻命中（写→读→反馈）
+tests/unit/knowledge/test_aliasCandidateCapture.py
+tests/unit/api/test_aliasCandidateEndpoints.py
+# 检索上下文必须带本 agent 的域：缺了它 W1/W2 在聊天主路整段休眠、图锚还会跨 agent 挑起点
+tests/unit/agent/test_retrievalContextAgentDomain.py
+# W3 图谱影子读数与 golden 多跳：影子档零改序但必须出读数，on 档才计 graph 路
+tests/unit/knowledge/test_graphShadowReadings.py
+tests/unit/knowledge/test_goldenMultiHopGraphRoute.py
+# W4 同名多口径读侧暴露：multi_subject / open_conflict 两触发器，shadow 只落载荷、on 落块首指引
+tests/unit/knowledge/test_ambiguityClarification.py
+# W5 生成后事实回查：contradicted 从保守、shadow 消息逐字不变、on 只追加注记不改原句
+tests/unit/knowledge/test_answerFactGuard.py
