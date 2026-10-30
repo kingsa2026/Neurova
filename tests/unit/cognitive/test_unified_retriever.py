@@ -158,7 +158,7 @@ class TestUnifiedRetrieverRecall:
         retriever = UnifiedRetriever(engine=engine, recall_engine=recall)
         result = asyncio.run(retriever.retrieve("test query", limit=5))
         
-        recall.recall_flat.assert_called_once_with("test query", limit=5)
+        recall.recall_flat.assert_called_once_with("test query", limit=5, session_id=None)
         assert any("recall result" in r.get('content', '') for r in result)
 
     def test_retrieve_does_not_call_recall_when_none(self):

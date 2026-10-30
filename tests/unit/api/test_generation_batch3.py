@@ -107,7 +107,7 @@ class TestOpenAIEditsMultipart:
 
 @pytest.fixture()
 def auth_client(tmp_path, monkeypatch):
-    from neurova.api import deps as deps_mod
+    from neurova.api import auth as auth_mod
 
     app = FastAPI()
     app.include_router(gen_ep.router, prefix="/api/v1/generation")
@@ -118,8 +118,10 @@ def auth_client(tmp_path, monkeypatch):
     monkeypatch.setattr(ledger_mod, "_ledger", led)
 
     payload = {"sub": "u1"}
-    monkeypatch.setattr(deps_mod, "verify_access_token", lambda tok: payload if tok == "good" else None)
-    monkeypatch.setattr(deps_mod, "_user_identity",
+    # get_current_user → _identityFromCredentialsOr401 在 auth 模块内解析
+    # verify_access_token/_user_identity——打桩必须落在同一模块
+    monkeypatch.setattr(auth_mod, "verify_access_token", lambda tok: payload if tok == "good" else None)
+    monkeypatch.setattr(auth_mod, "_user_identity",
                         lambda p: {"user_id": "u1", "username": "u1", "role": "user", "neuser_id": "u1"})
     return TestClient(app), led, tmp_path
 
@@ -173,7 +175,7 @@ class TestTasksExpiredDisplay:
         import time
         led = auth_client[1]
         gone = str(auth_client[2] / "purged.png")
-        led.add(TaskRecord(kind="image", task_id="px1", status="done",
+        led.add(TaskRecord(kind="image", task_id="px1", status="succeeded",
                            local_path=gone, owner_user_id="u1",
                            submitted_at=time.time(), updated_at=time.time()))
         resp = auth_client[0].get("/api/v1/generation/tasks?kind=image",
@@ -181,7 +183,7 @@ class TestTasksExpiredDisplay:
         row = resp.json()["data"]["tasks"][0]
         assert row["file_missing"] is True
         assert row["url"] == ""
-        assert row["status"] == "done"  # 账本原状态不篡改
+        assert row["status"] == "succeeded"  # 账本原状态不篡改
 
     def test_present_file_not_flagged(self, auth_client):
         led = auth_client[1]

@@ -36,6 +36,9 @@ def app(tmp_path, monkeypatch):
     monkeypatch.setenv("NEUROVA_MARKET_SUBMISSIONS", str(tmp_path / "submissions.json"))
     monkeypatch.setenv("NEUROVA_NOTIFICATIONS_PATH", str(tmp_path / "notifications.json"))
     monkeypatch.setattr(lib, "_BASE_DIR", tmp_path)
+    # agent 库目录已收口到工作区单源（4bf9b733）：get_agent_skills_dir
+    # 不再读 _BASE_DIR——不打这层桩，agent 落点会泄到会话数据根
+    monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path))
     lib.reset_libraries_for_tests()
     reset_market_store()
 
@@ -174,9 +177,13 @@ def test_public_endpoints_read_library(app):
 def test_pool_skill_submit_carries_exec_payload(app):
     client, tmp = app
     u = lib.get_library("user", "u:u1")
+    # auto 语义保留（工单 010 创作门）：先经生产证据面记满三个独立真实成功
+    steps = ["web_search", "file_operation"]
+    for index in range(3):
+        u.creation_evidence.record(f"task-{index}", steps, "来自 agent 的合成技能", True)
     assert u.register_auto_skill(
         "gen_kit", name="进化套件", description="来自 agent 的合成技能", version="1.4.0",
-        config={"tool_sequence": ["web_search", "file_operation"], "category": "研究"},
+        config={"tool_sequence": steps, "category": "研究"},
         manifest_source="auto",
     )
     # 提交面 name/version 故意与库内不符 → 服务端以库内条目为权威覆写
@@ -195,6 +202,9 @@ def test_pool_skill_submit_carries_exec_payload(app):
     # 装机链闭环：from-public 副本携带 tool_sequence（公共→私库不再退化为元目）
     # （_approve_pending 把鉴权态留在 ADMIN，装机须以 u1 本人身份发起）
     overrideIdentity(client.app, USER)
+    # cb8b54ed 指纹判重：gen_kit 与 kit_pub 同结构同意图，不摘旧条目装回即 409；
+    # 证据按结构聚合不消耗，卸载后指纹查重空过
+    u.uninstall_skill("gen_kit")
     r2 = client.post(f"{BASE}/me/skills/kit_pub/from-public")
     assert r2.status_code == 200, r2.text
     mine = lib.get_library("user", "u:u1").get_skill_info("kit_pub")

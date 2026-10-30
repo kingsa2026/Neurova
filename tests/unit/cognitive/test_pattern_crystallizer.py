@@ -7,6 +7,16 @@
 import pytest
 import tempfile
 import shutil
+
+
+@pytest.fixture(autouse=True)
+def _crystallizerDirectWrite(monkeypatch):
+    """本文件判据全部针对直写分支（工单 005 前的 TDD 契约）。
+
+    闸开时结晶候选进 LLM 待裁决队列、不落库（工单 005/015），闸行为由
+    TestLLMAdjudicationGate 钉住；这里显式关闸，保持各断言语义不变。
+    """
+    monkeypatch.setenv("NEUROVA_CRYSTALLIZATION_LLM_GATE", "0")
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from typing import List, Dict, Any
@@ -14,6 +24,26 @@ from datetime import datetime, timezone
 
 
 # ── Tracer Bullet 1: PatternCrystallizer 初始化 ──────────────────────────────
+
+
+class TestLLMAdjudicationGate:
+    """闸开（生产默认）时候选只进待裁决队列，不直写存储（工单 005/015）。"""
+
+    def test_gate_on_queues_candidate_instead_of_store(self, monkeypatch):
+        from neurova.cognitive_layers.memory_layer.pattern_crystallizer import PatternCrystallizer
+        from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import CognitiveStorageEngine
+
+        monkeypatch.setenv("NEUROVA_CRYSTALLIZATION_LLM_GATE", "1")
+        engine = MagicMock(spec=CognitiveStorageEngine)
+        crystallizer = PatternCrystallizer(engine=engine)
+
+        for _ in range(3):
+            crystallizer.observe(tool_name="file_read", context="读取配置文件", success=True)
+
+        engine.store.assert_not_called()
+        assert len(crystallizer._pending) == 1
+        assert crystallizer._pending[0]["key"] == "读取配置文件"
+
 
 class TestPatternCrystallizerInit:
     """PatternCrystallizer 可以正确初始化"""
@@ -307,10 +337,16 @@ class TestPatternCrystallizerRetrieve:
         crystallizer = PatternCrystallizer(engine=engine)
         result = crystallizer.retrieve("test query", limit=5)
         
+        from neurova.cognitive_layers.memory_layer.pattern_crystallizer import (
+            COLD_PATTERN_TEMPERATURE,
+        )
+
+        # 工单 017：冷档以下的结晶模式不进注入池，filters 带温度下限
         engine.retrieve.assert_called_once_with(
             "test query",
             limit=5,
-            filters={'memory_type': 'pattern'},
+            filters={'memory_type': 'pattern',
+                     'min_temperature': COLD_PATTERN_TEMPERATURE},
         )
         
         assert len(result) == 1
@@ -349,15 +385,16 @@ class TestPatternCrystallizerEvolution:
         
         crystallizer._try_crystallize(key)
         
-        # 生产代码通过 EvolutionFacade.record_experience() 调用
+        # 工单 005：改走 notify_pattern_crystallized 只通报"有新模式入库"，
+        # 不回灌 record_experience——那等于门槛给自己投成功票（自喂递归）
         MockEvolutionFacade.assert_called_once_with(evolution)
         facade_instance = MockEvolutionFacade.return_value
-        facade_instance.record_experience.assert_called_once()
-        call_args = facade_instance.record_experience.call_args[0]
-        assert "模式" in call_args[0]  # content
-        assert call_args[1] == key  # pattern_key
-        assert call_args[2] == ["file_read"]  # tools
-        assert call_args[3] is True  # success
+        facade_instance.notify_pattern_crystallized.assert_called_once()
+        call_kwargs = facade_instance.notify_pattern_crystallized.call_args[1]
+        assert call_kwargs["pattern_key"] == key
+        assert call_kwargs["primary_tool"] == "file_read"
+        assert call_kwargs["success_rate"] == 1.0
+        assert call_kwargs["sample_count"] == 3
 
     def test_crystallize_does_not_call_evolution_when_none(self):
         """EvolutionOrchestrator 为 None 时不调用"""

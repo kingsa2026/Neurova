@@ -29,6 +29,9 @@ BASE = "/api/v1/skill-pool"
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     monkeypatch.setattr(lib, "_BASE_DIR", tmp_path)
+    # agent 库目录已收口到工作区单源（4bf9b733）：get_agent_skills_dir
+    # 不再读 _BASE_DIR——不打这层桩，agent 落点会泄到会话数据根
+    monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path))
     lib.reset_libraries_for_tests()
     monkeypatch.setenv("NEUROVA_SKILL_TRANSFERS", str(tmp_path / "transfers.json"))
     monkeypatch.setenv("NEUROVA_NOTIFICATIONS_PATH", str(tmp_path / "notifications.json"))
@@ -114,7 +117,10 @@ def test_from_public_refused_over_local_same_name(env):
     # 本地条目是 uuid sid；直接以同 sid 造公共条目
     sid = client.get(f"{BASE}/me/skills").json()[0]["skill_id"]
     pub = lib.get_library("public")
-    pub.register_auto_skill(sid, name="公共同名", pool_type="public", owner_user_id="")
+    # 夹具造数走 user 源（工单 010：auto 来源要三个独立真实证据，
+    # 无证据登记会被创作门静默拒收——返回 False 必须被夹具当真）
+    pub.register_auto_skill(sid, name="公共同名", manifest_source="user",
+                            pool_type="public", owner_user_id="")
     r = client.post(f"{BASE}/me/skills/{sid}/from-public")
     assert r.status_code == 409
 
@@ -170,7 +176,9 @@ def test_install_target_routing(env):
     client, tmp = env
     svc, pool, owner = skill_pool_api._install_target(None, USER)
     assert pool == "agent" and owner == "default"
-    assert str(svc.skills_dir).replace("\\", "/").endswith("agents/default/skills")
+    from neurova.core.agent_workspaces import get_agent_skills_dir
+
+    assert str(svc.skills_dir) == str(get_agent_skills_dir("default"))
     svc2, pool2, owner2 = skill_pool_api._install_target("me", USER)
     assert pool2 == "user" and owner2 == "u:7"
     assert "users/u%3A7/skills" in str(svc2.skills_dir).replace("\\", "/")
@@ -207,7 +215,9 @@ def test_install_from_zip_default_target_lands_in_agent_library(env):
     body = r.json()
     assert body.get("success") is True, body
     assert lib.get_library("agent", "default").get_skill_info("zipdemo") is not None
-    assert (tmp / "agents" / "default" / "skills" / "manifest.json").exists()
+    from neurova.core.agent_workspaces import get_agent_skills_dir
+
+    assert (get_agent_skills_dir("default") / "manifest.json").exists()
 
 
 def test_install_from_zip_target_me_lands_in_user_library(env):
