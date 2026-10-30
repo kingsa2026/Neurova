@@ -32,6 +32,9 @@ BASE = "/api/v1/skill-pool"
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     monkeypatch.setattr(lib, "_BASE_DIR", tmp_path)
+    # agent 库目录已收口到工作区单源（4bf9b733）：get_agent_skills_dir
+    # 不再读 _BASE_DIR——不打这层桩，agent 落点会泄到会话数据根
+    monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path))
     lib.reset_libraries_for_tests()
     monkeypatch.setenv("NEUROVA_SKILL_TRANSFERS", str(tmp_path / "transfers.json"))
     monkeypatch.setenv("NEUROVA_NOTIFICATIONS_PATH", str(tmp_path / "notifications.json"))
@@ -56,6 +59,7 @@ def _seed_agent_skill(tmp, skill_id="gen_tool", version="1.0.0", name="Gen Tool"
     svc.register_auto_skill(
         skill_id, name=name, description="进化产物", version=version,
         config={"tool_sequence": ["a", "b"]}, pool_type="agent", owner_user_id="myagent",
+        manifest_source="user",  # 夹具造数：auto 源会被创作门按无证据拒收
     )
     return svc
 
@@ -155,7 +159,8 @@ def test_cross_source_same_name_rejected(env):
     client, tmp = env
     _seed_agent_skill(tmp, skill_id="gen_tool")
     svc_b = lib.get_library("agent", "otheragent")
-    svc_b.register_auto_skill("gen_tool", name="Hijack", pool_type="agent", owner_user_id="otheragent")
+    svc_b.register_auto_skill("gen_tool", name="Hijack", manifest_source="user",
+                              pool_type="agent", owner_user_id="otheragent")
     _as(client, USER)
     t1 = client.post(
         f"{BASE}/transfers",

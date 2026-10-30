@@ -250,7 +250,10 @@ class TestD3ActiveMemoryEscalation(unittest.TestCase):
 
         from types import SimpleNamespace as SN
 
-        ctx = SN(user_input=user_input, session_id="s", trace_id=None)
+        # _retrievalMetadata(d4518d0a) 会读 ctx.metadata——缺了它升级路径
+        # 在 try 里抛 AttributeError，被「异常保留首查」兜成不升级
+        ctx = SN(user_input=user_input, session_id="s", trace_id=None,
+                 metadata={"role": "user"})
         first = self._result(first_quality, ["existing"])
 
         with patch.dict(os.environ, {"NEUROVA_ACTIVE_MEMORY": "1"}):

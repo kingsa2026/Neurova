@@ -77,9 +77,11 @@ class GrowthPersistenceTest(unittest.TestCase):
             GrowthAnalyzer(agent_id="g1", workspace_path="relative/dir")
 
     def test_init_cognition_passes_workspace_path(self):
-        """agent_core.init_cognition 应传入 workspace_path 恢复原持久化设计"""
+        """init_cognition 的持久化落点走 agent 私有数据单源（4bf9b733：
+        data/<agent_id>/memory/growth/，不再从 workspace_path 拼长路径）"""
         tmpdir = tempfile.mkdtemp()
         try:
+            os.environ["NEUROVA_AGENT_WORKSPACES_DIR"] = tmpdir
 
             class _Cfg:
                 enable_cognitive_capabilities = True
@@ -96,13 +98,16 @@ class GrowthPersistenceTest(unittest.TestCase):
             SubSystemContainer.init_cognition(container)
 
             self.assertIsNotNone(container.agent.growth_analyzer)
-            expected = (Path(tmpdir) / "memory" / "growth" / "growth.json").resolve()
+            from neurova.core.agent_workspaces import get_agent_memory_dir
+
+            expected = (get_agent_memory_dir("persist_agent") / "growth" / "growth.json").resolve()
             self.assertEqual(
                 container.agent.growth_analyzer._storage_file,
                 expected,
-                "init_cognition 应把 workspace/memory/growth 作为持久化目录",
+                "init_cognition 持久化落点=agent 私有 memory/growth 单源（4bf9b733）",
             )
         finally:
+            os.environ.pop("NEUROVA_AGENT_WORKSPACES_DIR", None)
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 

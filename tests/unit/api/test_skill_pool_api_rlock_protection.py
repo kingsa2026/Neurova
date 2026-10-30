@@ -63,11 +63,14 @@ def test_private_chain_no_longer_touches_memory_dict(fn_name):
     ["register_auto_skill", "update_auto_skill", "uninstall_skill", "install_skill"],
 )
 def test_skill_service_critical_sections_hold_rlock(method_name):
-    """Wave F 并发契约下沉: SkillService 读改写临界区必须 with self._lock。"""
+    """Wave F 并发契约演进: 读改写临界区必须持锁——原语两形态并存，
+    self._lock（RLock）或 creation_evidence 事务（SQLite 串行化）均可，
+    裸读改写即红。API 层把并发保护责任交给服务层的契约不变。"""
     from neurova.skills.skill_service import SkillService
 
     src = inspect.getsource(getattr(SkillService, method_name))
-    assert "with self._lock" in src, (
-        f"{method_name} 必须在 self._lock 内做 read-modify-write（API 层已把"
+    assert ("with self._lock" in src
+            or "with self.creation_evidence.transaction()" in src), (
+        f"{method_name} 必须在锁或事务内做 read-modify-write（API 层已把"
         "并发保护责任交给服务层）"
     )
