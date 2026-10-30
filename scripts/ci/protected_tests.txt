@@ -4100,3 +4100,6 @@ tests/unit/knowledge/test_goldenMultiHopGraphRoute.py
 tests/unit/knowledge/test_ambiguityClarification.py
 # W5 生成后事实回查：contradicted 从保守、shadow 消息逐字不变、on 只追加注记不改原句
 tests/unit/knowledge/test_answerFactGuard.py
+# 知识路质量门（specs/2026-10-30 §11.4 根修）：重合按实跑查询计 + 词面重合通道独立
+# 达标——1 条别名驱动的相关命中必须过链采纳门，不相关/全空/满载边界不回归
+tests/unit/agent/test_knowledgeQualityGate.py
