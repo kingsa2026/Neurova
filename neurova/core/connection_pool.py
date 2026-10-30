@@ -110,8 +110,17 @@ class SQLiteConnectionPool:
             timeout=self.timeout,
         )
         conn.row_factory = sqlite3.Row
-        for pragma in self._pragmas:
-            conn.execute(pragma)
+        try:
+            for pragma in self._pragmas:
+                conn.execute(pragma)
+        except BaseException:
+            # 基线 PRAGMA 失败（典型：坏库文件首查即错）——连接尚未入池登记，
+            # 不关就是进程级句柄泄漏（Windows 下该文件从此删不掉）。
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001 - 关闭失败不再叠加掩真
+                pass
+            raise
         with self._lock:
             self._owned.add(conn)
         _metric_created(self.db_path)
@@ -138,6 +147,9 @@ class SQLiteConnectionPool:
                 return conn
             except sqlite3.ProgrammingError:
                 # 连接已关闭：注销并计数，随后创建新连接
+                self._discard_connection(conn)
+            except Exception:
+                # 坏库等不可用连接：同样注销（句柄先关），不能带着泄漏走人
                 self._discard_connection(conn)
         except Empty:
             pass
