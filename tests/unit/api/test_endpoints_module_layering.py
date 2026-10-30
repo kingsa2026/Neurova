@@ -59,7 +59,7 @@ class DomainSpec:
 
 DOMAINS = (
     # knowledge：纯聚合器（34 条路由全部住在叶子），共享层只有 knowledge_common，
-    # 四个叶子彼此独立 → 同层零交叉即「叶子之间零交叉」。
+    # 六个叶子彼此独立 → 同层零交叉即「叶子之间零交叉」。
     DomainSpec(
         name="knowledge",
         aggregator="knowledge",
@@ -70,6 +70,8 @@ DOMAINS = (
                 "knowledge_sharing",
                 "knowledge_remote",
                 "knowledge_ingestion",
+                "knowledge_mcp_source",   # c3efc886
+                "knowledge_ontology",     # 9aeff802
             ),
         ),
         delegated_prefixes=None,

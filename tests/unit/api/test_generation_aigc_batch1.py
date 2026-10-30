@@ -220,4 +220,6 @@ class TestLedgerPathSingleSource:
     def test_default_ledger_path_absolute(self):
         p = Path(ledger_mod.DEFAULT_LEDGER_PATH)
         assert p.is_absolute(), f"账本路径不得 CWD 相对：{p}"
-        assert p == gen_runtime.PROJECT_ROOT / "data" / "generation_tasks.json"
+        from neurova.core.data_root import get_data_root
+
+        assert p == get_data_root() / "generation_tasks.json"

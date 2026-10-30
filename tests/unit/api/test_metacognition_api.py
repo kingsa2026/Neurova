@@ -38,7 +38,9 @@ class MetacognitionApiTest(unittest.TestCase):
 
         app_mem = FastAPI()
         app_mem.include_router(memory_metacog.router, prefix="/api/v1/memory")
-        self.mem_client = TestClient(app_mem)
+        from tests.auth_headers import bearerHeaders
+
+        self.mem_client = TestClient(app_mem, headers=bearerHeaders(AGENT))
 
         ledger = get_meta_ledger(AGENT)
         ledger.create_record(
