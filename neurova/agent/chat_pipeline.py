@@ -2938,6 +2938,7 @@ class ChatPipeline:
         设了尺寸上限）；这里只做装配：产流、错误分类口径、citation 缓冲。
         """
         from neurova.agent.legacy_stream_turn import consumeLegacyStream
+        from neurova.agent.loops.base import BaseAgentLoop
 
         return await consumeLegacyStream(
             self.llm_client.chat_stream(ctx.context),
@@ -2945,7 +2946,10 @@ class ChatPipeline:
             metadata=ctx.metadata,
             # ④ 流式 citation 缓冲（同 _call_loop_stream：仅本轮有句柄才启用）
             citationRegistry=ctx.citation_registry,
-            buildLLMError=self._raise_for_llm_error_dict,
+            # 错误分类口径单源在 BaseAgentLoop（testPipelineHoldsNoSecondClassifier）：
+            # 缺了它 legacy 路退回裸 RuntimeError，404 模型级分类失效 → 供应商
+            # 守卫认不出 → 错误地二次 fallback 撞同一个坏模型（"回复时有时无"）。
+            buildLLMError=BaseAgentLoop._raise_for_error_dict,
         )
 
     # ══════════════════════════════════════════════════════════════
