@@ -34,6 +34,7 @@ from .knowledge_facts import (
     _SCHEMA_V24,
     _SCHEMA_V25,
     _SCHEMA_V26,
+    _SCHEMA_V27,
 )
 from .digest_chain import _SCHEMA_V11
 from ..ontology.derivation_ledger import _SCHEMA_V10
@@ -83,6 +84,8 @@ _STEPS: List[tuple] = [
     (25, _SCHEMA_V25),
     # v26：MCP 信息源配置表（B 方案）
     (26, _SCHEMA_V26),
+    # v27：检索脱靶登记（specs/2026-10-30 W2）——候选别名只进人工审批面
+    (27, _SCHEMA_V27),
 ]
 
 _registered = False

@@ -176,8 +176,9 @@ class TestMigrationVersions:
         # 而标记必须落在这一张表的列上，不能靠别处的第二份状态推断。
         # v25：本体按租户分区（两表重建为 (tenant_id, id) 复合主键）。
         # v26：MCP 信息源配置表（B 方案）。
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 26
-        assert {'knowledge_mcp_sources'} <= names
+        # v27：检索脱靶登记（specs/2026-10-30 W2，候选别名审批面）。
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 27
+        assert {'knowledge_mcp_sources', 'knowledge_alias_candidates'} <= names
         # v14-v18（token 归因精度）：事实/轮级/entry 用量表 + 未归因列。
         assert {'knowledge_fact_usage', 'knowledge_turn_usage',
                 'knowledge_entry_usage'} <= names

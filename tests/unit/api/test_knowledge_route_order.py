@@ -15,23 +15,25 @@ from neurova.api.endpoints import knowledge as kb
 
 from tests.route_table import registeredPathMethods
 
-# 拆分前 knowledge.py 的 34 条路由快照（按注册顺序）+ 工单 002 新增的评测基线只读路由
+# knowledge.py 聚合路由多重集快照。2026-10-30 随 W2 审批面刷新：
+# 此前快照停在拆分时的 34 条+评测路由，10-24 批次的 /ontology/* /mcp/sources*
+# /geo /graph/instances 等一直未登记（守护带病漂红）；本次以 kb.router 实测
+# 84 条收口，此后新增路由必须随批更新本清单（多重集相等，不锁注册顺序）。
 _KB_ROUTES = [
-    ("", "GET"),
+    ("", "GET"), ("", "POST"),
     ("/search", "POST"),
     ("/preview-chunking", "POST"),
-    ("", "POST"),
     ("/public-submissions", "GET"),
     ("/conflicts", "GET"),
+    ("/conflicts/{conflict_id}", "GET"),
     ("/conflicts/{conflict_id}/resolve", "POST"),
     ("/evaluation/baseline", "GET"),
     ("/audit/redundancy", "GET"),
     ("/audit/lifecycle", "GET"),
     ("/audit/ingest", "GET"),
     ("/audit/ingest/resume", "POST"),
-    ("/audit/conflict-metrics", "GET"),
+    ("/audit/conflict-metrics", "GET"), ("/audit/conflict-metrics", "POST"),
     ("/audit/conflict-eval", "POST"),
-    ("/audit/conflict-metrics", "POST"),
     ("/audit/evaluation/compare", "POST"),
     ("/audit/entry-feedback", "GET"),
     ("/audit/retrieval-metrics", "GET"),
@@ -44,13 +46,11 @@ _KB_ROUTES = [
     ("/facts/{fact_id}/lineage", "GET"),
     ("/facts/{fact_id}/turtle", "GET"),
     ("/facts/{fact_id}/adoption", "POST"),
-    ("/conflicts/{conflict_id}", "GET"),
-    ("/documents/{document_id}", "GET"),
     ("/facts/{fact_id}/history", "GET"),
     ("/facts/{fact_id}/rollback", "POST"),
-    ("/facts/baselines", "GET"),
-    ("/facts/baselines", "POST"),
+    ("/facts/baselines", "GET"), ("/facts/baselines", "POST"),
     ("/deleted", "GET"),
+    ("/documents/{document_id}", "GET"),
     ("/{knowledge_id}/restore", "POST"),
     ("/{knowledge_id}/revisions", "GET"),
     ("/{knowledge_id}/chunks", "GET"),
@@ -79,6 +79,25 @@ _KB_ROUTES = [
     ("/annotations/{annotation_id}", "PUT"),
     ("/annotations/{annotation_id}", "DELETE"),
     ("/annotations/export", "GET"),
+    # 2026-10-24 批次：本体/实例编辑/租户化（S1–S3）+ GIS + MCP 信息源
+    ("/ontology/schema", "GET"),
+    ("/ontology/impact", "GET"),
+    ("/ontology/terms", "POST"),
+    ("/ontology/terms/{term_id}", "PUT"),
+    ("/ontology/terms/{term_id}", "DELETE"),
+    ("/ontology/rules", "POST"),
+    ("/ontology/rules/{rule_id}", "PUT"),
+    ("/ontology/rules/{rule_id}", "DELETE"),
+    ("/graph/instances", "POST"),
+    ("/geo", "GET"),
+    ("/mcp/sources", "GET"), ("/mcp/sources", "POST"),
+    ("/mcp/sources/tools", "POST"),
+    ("/mcp/sources/{source_id}", "PUT"), ("/mcp/sources/{source_id}", "DELETE"),
+    ("/mcp/sources/{source_id}/pull", "POST"),
+    # specs/2026-10-30 W2：检索脱靶候选别名审批面（字面 GET，注册于参数路由之前）
+    ("/alias-candidates", "GET"),
+    ("/alias-candidates/{candidate_id}/approve", "POST"),
+    ("/alias-candidates/{candidate_id}/reject", "POST"),
 ]
 
 

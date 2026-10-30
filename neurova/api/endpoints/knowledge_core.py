@@ -678,6 +678,89 @@ async def get_conflict_metrics(
     return {"code": 0, "message": "ok", "data": conflictMetrics(records)}
 
 
+class AliasCandidateDecisionRequest(BaseModel):
+    """候选别名人工处置（specs/2026-10-30 W2）：
+    approve 可带 subject_key（缺省用捕获时的提示）；reason 留痕。"""
+
+    subject_key: Optional[str] = None
+    reason: str = Field(default="", max_length=500)
+
+
+@router.get("/alias-candidates")
+async def list_alias_candidates(
+    status: Optional[str] = Query(None),
+    agent_id: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """检索脱靶候选别名清单（管理员）：人工审批面的读取侧，按操作者租户隔离。"""
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="候选别名审批面仅管理员可访问")
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+
+    store = get_knowledge_fact_store()
+    items = store.listAliasCandidates(
+        tenantId=str(current_user.get("tenant_id") or "default"),
+        status=status, agentId=agent_id, limit=limit, offset=offset,
+    )
+    return {"code": 0, "message": "ok", "data": {"items": items, "count": len(items)}}
+
+
+@router.post("/alias-candidates/{candidate_id}/approve")
+async def approve_alias_candidate(
+    candidate_id: str = Path(...),
+    body: AliasCandidateDecisionRequest = AliasCandidateDecisionRequest(),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """批准候选别名：并入主体表、活动留痕、失效查询归一缓存（W1→W2 闭环）。"""
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="候选别名审批面仅管理员可访问")
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+
+    store = get_knowledge_fact_store()
+    operator = str(current_user.get("user_id") or current_user.get("username") or "")
+    try:
+        result = store.decideAliasCandidate(
+            candidate_id, "approved", operator=operator, reason=body.reason,
+            subjectKey=body.subject_key,
+            tenantId=str(current_user.get("tenant_id") or "default"),
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    from neurova.knowledge.query_normalization import invalidateQueryNormalizationCache
+
+    invalidateQueryNormalizationCache()
+    return {"code": 0, "message": "ok", "data": result}
+
+
+@router.post("/alias-candidates/{candidate_id}/reject")
+async def reject_alias_candidate(
+    candidate_id: str = Path(...),
+    body: AliasCandidateDecisionRequest = AliasCandidateDecisionRequest(),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """否决候选别名：只结行留痕，不动主体表。"""
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="候选别名审批面仅管理员可访问")
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+
+    store = get_knowledge_fact_store()
+    operator = str(current_user.get("user_id") or current_user.get("username") or "")
+    try:
+        result = store.decideAliasCandidate(
+            candidate_id, "rejected", operator=operator, reason=body.reason,
+            tenantId=str(current_user.get("tenant_id") or "default"),
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"code": 0, "message": "ok", "data": result}
+
+
 @router.get("/audit/retrieval-metrics")
 async def get_retrieval_metrics_snapshot(
     request: Request,
