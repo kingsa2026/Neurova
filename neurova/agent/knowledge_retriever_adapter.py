@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.knowledge.feedback_prior import rerankByAdoption
+from neurova.knowledge.query_normalization import normalizeMode, normalizeQueryForRetrieval
 
 logger = get_logger(__name__)
 
@@ -190,6 +191,32 @@ class KnowledgeRetrieverAdapter:
             metadata = getattr(context, "metadata", None) or {}
             agent_id = metadata.get("agent_id")
 
+            # W1 查询侧别名归一（specs/2026-10-30）：off 零开销；shadow 只带读数
+            # 不改查询；on 把命中主体的规范名追加进检索词。归一失败让路，主路照跑。
+            normMode = normalizeMode()
+            normMetadata: Optional[Dict[str, Any]] = None
+            searchQuery = str(context.query or "")
+            if normMode in ("shadow", "on") and agent_id:
+                try:
+                    from neurova.knowledge.foundation.knowledge_facts import (
+                        get_knowledge_fact_store,
+                    )
+                    from neurova.knowledge.retrieval_metrics import get_retrieval_metrics
+
+                    tenantId = str(metadata.get("tenant_id") or "default")
+                    norm = normalizeQueryForRetrieval(
+                        get_knowledge_fact_store(), searchQuery, str(agent_id), tenantId
+                    )
+                    normMetadata = norm.toMetadata()
+                    normMetadata["mode"] = normMode
+                    get_retrieval_metrics().recordQueryNormalization(
+                        matchedSubjects=len(norm.matchedSubjects)
+                    )
+                    if normMode == "on":
+                        searchQuery = norm.expanded
+                except Exception as exc:  # noqa: BLE001 - 归一失败不阻断检索主路
+                    logger.debug("查询侧别名归一跳过: %s", exc)
+
             # 元数据过滤只在调用方显式给出时生效；filter 必须进候选集，
             # 不能检索完再在结果上筛（否则 top-k 已被标签外内容占满）。
             filters: Dict[str, Any] = {}
@@ -221,7 +248,7 @@ class KnowledgeRetrieverAdapter:
             knowledge_items = _kb_hybrid.hybrid_search_knowledge(
                 self._repo,
                 user=user,
-                query=context.query,
+                query=searchQuery,
                 limit=candidateLimit,
                 scope="all",
                 agent_id=agent_id,
@@ -269,13 +296,18 @@ class KnowledgeRetrieverAdapter:
             elapsed = time.monotonic() - start_time
 
             if not knowledge_items:
+                emptyMetadata: Dict[str, Any] = {
+                    "retriever_type": "knowledge", "hits": 0,
+                }
+                if normMetadata is not None:
+                    emptyMetadata["query_normalization"] = normMetadata
                 return RetrievalResult(
                     memories=[],
                     source=self._name,
                     quality=0.0,
                     quality_level=RetrievalQuality.FAILED,
                     retrieval_time=elapsed,
-                    metadata={"retriever_type": "knowledge", "hits": 0},
+                    metadata=emptyMetadata,
                 )
 
             # 归一化为 memories 载荷（与记忆条目字段一致：content/title 等）
@@ -284,27 +316,31 @@ class KnowledgeRetrieverAdapter:
             quality = self.get_quality_score(knowledge_items, context.query)
             quality_level = self._quality_from_score(quality)
 
+            resultMetadata: Dict[str, Any] = {
+                "retriever_type": "knowledge",
+                "hits": len(memories),
+                "lineage_ids": selectedLineage,
+                "knowledge_entry_ids": selectedEntries,
+                "knowledge_entry_scores": {
+                    str(item["knowledge_id"]): float(item.get("score", 0.0) or 0.0)
+                    for item in knowledge_items
+                    if item.get("knowledge_id") and not item.get("lineage_id")
+                },
+                "adoption_rerank": {
+                    "requested": requested,
+                    "candidate_limit": candidateLimit,
+                },
+            }
+            if normMetadata is not None:
+                resultMetadata["query_normalization"] = normMetadata
+
             return RetrievalResult(
                 memories=memories,
                 source=self._name,
                 quality=quality,
                 quality_level=quality_level,
                 retrieval_time=elapsed,
-                metadata={
-                    "retriever_type": "knowledge",
-                    "hits": len(memories),
-                    "lineage_ids": selectedLineage,
-                    "knowledge_entry_ids": selectedEntries,
-                    "knowledge_entry_scores": {
-                        str(item["knowledge_id"]): float(item.get("score", 0.0) or 0.0)
-                        for item in knowledge_items
-                        if item.get("knowledge_id") and not item.get("lineage_id")
-                    },
-                    "adoption_rerank": {
-                        "requested": requested,
-                        "candidate_limit": candidateLimit,
-                    },
-                },
+                metadata=resultMetadata,
             )
 
         except Exception as e:
