@@ -384,6 +384,24 @@ class ChatPipeline:
         config = getattr(self._agent, "config", None)
         return str(getattr(config, "agent_id", "") or "default")
 
+    def _retrievalMetadata(self, ctx: "ChatContext", **extra: Any) -> Dict[str, Any]:
+        """三条检索路径（主路 / Active Memory 升级 / Adaptive 二次检索）的身份元数据单源。
+
+        `agent_id` 是知识 adapter 的作用域：别名归一（W1）、脱靶登记（W2）、
+        图锚（W3）都按它取数——缺了它归一与登记整段静默跳过，而图锚
+        `subjectsMentionedIn(agentId=None)` 会不加 agent 过滤地从别人的主体表挑起点。
+        取域口径与时效、多跳两条读面同源（`_factDomain`）。
+        """
+        metadata = {
+            "session_id": ctx.session_id,
+            "trace_id": ctx.trace_id,
+            "role": (ctx.metadata or {}).get("role", "user"),
+            "tenant_id": str((ctx.metadata or {}).get("tenant_id") or "default"),
+            "agent_id": self._factDomain(),
+        }
+        metadata.update(extra)
+        return metadata
+
     # ---- 属性代理 ----
     @property
     def config(self):
@@ -1831,13 +1849,7 @@ class ChatPipeline:
             session_id=ctx.session_id,
             strategy=RetrievalStrategy.CHAIN,  # 责任链策略（按优先级降级）
             min_quality=0.3,  # 最低质量要求
-            metadata={
-                "session_id": ctx.session_id,
-                "trace_id": ctx.trace_id,
-                # 角色透传：知识库检索的 admin 全可见依赖 role（隔离语义与 API 层一致）
-                "role": (ctx.metadata or {}).get("role", "user"),
-                "tenant_id": str((ctx.metadata or {}).get("tenant_id") or "default"),
-            },
+            metadata=self._retrievalMetadata(ctx),
         )
 
         # 使用 MemoryRetrievalChain 执行检索
@@ -1902,11 +1914,7 @@ class ChatPipeline:
                     session_id=ctx.session_id,
                     strategy=RetrievalStrategy.CHAIN,
                     min_quality=0.0,
-                    metadata={
-                        "session_id": ctx.session_id,
-                        "trace_id": ctx.trace_id,
-                        "active_memory_escalation": True,
-                    },
+                    metadata=self._retrievalMetadata(ctx, active_memory_escalation=True),
                 )
             )
             merged = list(first_result.memories)
@@ -1974,11 +1982,7 @@ class ChatPipeline:
                         session_id=ctx.session_id,
                         strategy=RetrievalStrategy.CHAIN,
                         min_quality=0.3,
-                        metadata={
-                            "session_id": ctx.session_id,
-                            "trace_id": ctx.trace_id,
-                            "adaptive": True,
-                        },
+                        metadata=self._retrievalMetadata(ctx, adaptive=True),
                     )
                 )
                 for m in second.memories:
