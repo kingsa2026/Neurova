@@ -23,8 +23,10 @@ from tests.cognitive_body_store import cognitiveEngine
 class TestCognitiveGraphFullStack:
     """认知图谱全栈集成：Engine → Crystallizer → Retriever → ReasoningTrace"""
 
-    def test_store_observe_crystallize_retrieve_flow(self, tmp_path):
-        """完整流程：存储 → 观察 → 结晶 → 检索"""
+    def test_store_observe_crystallize_retrieve_flow(self, tmp_path, monkeypatch):
+        """完整流程：存储 → 观察 → 结晶 → 检索（关闸测直写分支；闸判据在
+        test_pattern_crystallizer.TestLLMAdjudicationGate）"""
+        monkeypatch.setenv("NEUROVA_CRYSTALLIZATION_LLM_GATE", "0")
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
             UnifiedMemoryNode, MemoryType,
         )
@@ -126,8 +128,9 @@ class TestCognitiveGraphFullStack:
         stage = TemperatureEngine.get_lifecycle_stage(10.0)
         assert stage == "archived"
 
-    def test_crystallizer_temperature_is_0_to_100(self, tmp_path):
-        """结晶器温度输出在 0-100 范围"""
+    def test_crystallizer_temperature_is_0_to_100(self, tmp_path, monkeypatch):
+        """结晶器温度输出在 0-100 范围（关闸测直写分支）"""
+        monkeypatch.setenv("NEUROVA_CRYSTALLIZATION_LLM_GATE", "0")
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
             UnifiedMemoryNode, MemoryType,
         )
@@ -150,7 +153,8 @@ class TestCognitiveGraphFullStack:
             crystallizer.observe("file_read", "test context", success=True)
 
         assert len(stored_nodes) == 1
-        assert stored_nodes[0].temperature == pytest.approx(100.0)
+        # 成功率即温度，但封顶 75（626e2e88：免衰减豁免区之下，PATTERN 不享豁免）
+        assert stored_nodes[0].temperature == pytest.approx(75.0)
         assert stored_nodes[0].memory_type == MemoryType.PATTERN
 
     def test_wal_persistence_across_restart(self, tmp_path):
@@ -167,11 +171,11 @@ class TestCognitiveGraphFullStack:
 
         # 第二次启动：崩溃恢复文件取回（另起一份正文库，模拟进程重启）
         engine2 = cognitiveEngine(tmp_path)
-        results = engine2.retrieve("memory", limit=10)
-        assert len(results) == 5
-        # 温度应保持 80.0
-        for r in results:
-            assert r.temperature == 80.0
+        # 记账只给真回出去的节点（契约 006 第 3 条 / 工单 017）：retrieve 有
+        # touch +10 副作用，落盘温度用不做访问记账的 iter_nodes() 核对
+        assert len(list(engine2.iter_nodes())) == 5
+        for node in engine2.iter_nodes():
+            assert node.temperature == 80.0
 
     def test_flush_preserves_temperature_values(self, tmp_path):
         """L0 并入正文库后温度值保持不变"""
@@ -188,9 +192,8 @@ class TestCognitiveGraphFullStack:
         # 手动 flush
         engine._flushL0ToBody()
 
-        # 从正文库检索
-        results = engine.retrieve("temp", limit=10)
-        result_temps = sorted([r.temperature for r in results])
+        # 落盘温度用不做访问记账的 iter_nodes() 核对（retrieve 会 touch +10）
+        result_temps = sorted([n.temperature for n in engine.iter_nodes()])
         assert result_temps == sorted(temps)
 
 

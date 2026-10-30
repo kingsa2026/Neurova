@@ -19,6 +19,11 @@ class TestFilesStorePersistence(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.db_path = str(Path(self.tmp.name) / "users.db")
         self.addCleanup(self.tmp.cleanup)
+        # 池化短连接归还后 OS 句柄仍由池持有——Windows 删临时目录必撞
+        # WinError 32；清理顺序（LIFO）= 先关池再删目录
+        from neurova.core.database import close_all_pools
+
+        self.addCleanup(close_all_pools)
 
     def _make_record(self, file_id: str, real_file: bool = True) -> dict:
         path = Path(self.tmp.name) / f"{file_id}_a.txt"
