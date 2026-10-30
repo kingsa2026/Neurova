@@ -247,15 +247,18 @@ class BaseModule(StateValuesStore, ABC):
 
         self.set_state(ModuleState.STOPPING)
         try:
-            self.on_stop()
-        finally:
-            # 退订放进 finally：`on_stop` 抛错时模块同样已经不再运行，订阅若留在总线上
-            # 就是"停了的模块还在收事件"，且它的整张对象图被钉住（受保护子集每档建一次
-            # app 的内存单向上涨）。先退订再落状态——落状态是最便宜的收尾。
-            self.unsubscribeAllEvents()
-        try:
+            try:
+                self.on_stop()
+            finally:
+                # 退订放进 finally：`on_stop` 抛错时模块同样已经不再运行，订阅若留在总线上
+                # 就是"停了的模块还在收事件"，且它的整张对象图被钉住（受保护子集每档建一次
+                # app 的内存单向上涨）。先退订再落状态——落状态是最便宜的收尾。
+                self.unsubscribeAllEvents()
             self.set_state(ModuleState.STOPPED)
         except Exception as e:
+            # on_stop 抛错或落 STOPPED 失败都必须落 ERROR——4d0e0df1 把退订收进
+            # finally 时，异常穿出了第一段，落 ERROR 的分支变为不可达，态停在
+            # STOPPING（回归由 test_stop_error 钉住）。
             self.set_state(ModuleState.ERROR)
             raise
 
