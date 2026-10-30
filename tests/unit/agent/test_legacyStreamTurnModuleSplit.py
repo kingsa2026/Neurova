@@ -36,9 +36,21 @@ class TestReadLoopLivesInItsOwnModule:
     def testPipelineOnlyAssembles(self):
         src = io.open(PIPELINE, encoding="utf-8").read()
         start = src.index("    async def _call_legacy_stream")
-        end = src.index("    @staticmethod\n    def _raise_for_llm_error_dict")
+        # 边界＝下一个真实方法定义。旧边界（@staticmethod _raise_for_llm_error_dict）
+        # 随 ed49a0d4 删除分类方法而悬空——分类器已单源到 BaseAgentLoop（见
+        # test_legacyStreamErrorClassification.testPipelineHoldsNoSecondClassifier）。
+        end = src.index("    async def _auto_checkpoint")
         body = src[start:end]
         assert "consumeLegacyStream" in body, "装配点没有接上独立模块"
+        # 装配点必须把错误分类口径指到单源分类器：legacy_stream_turn 的
+        # buildLLMError=None 会退回裸 RuntimeError，98f333e9 的 404 模型级分类
+        # （供应商守卫据此免二次 fallback）在 legacy 路就失效了。
+        assert "BaseAgentLoop._raise_for_error_dict" in body, (
+            "legacy 装配点没有接单源分类器——错误分类口径归调用方，缺了它就退回裸 RuntimeError"
+        )
+        assert "_raise_for_llm_error_dict" not in body, (
+            "管线不得引用已删除的私有分类器（悬空调用＝运行时 AttributeError）"
+        )
         for marker in ("__anext__", "ReasoningStreamGuard", "DEGENERATE_STREAM_STOPPED_NOTICE"):
             assert marker not in body, (
                 f"读取循环被抄回 chat_pipeline（命中 {marker}）＝谁都能在原位继续加行，"
