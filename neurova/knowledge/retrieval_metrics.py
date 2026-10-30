@@ -26,6 +26,15 @@ class RetrievalMetrics:
             self._latency_ms_max = 0.0
             self._routes: Dict[str, int] = {}
             self._outcomes: Dict[str, int] = {"model_refusal": 0}
+            self._queryNorm = {"retrievals": 0, "with_matches": 0, "matched_subjects_total": 0}
+
+    def recordQueryNormalization(self, *, matchedSubjects: int) -> None:
+        """查询侧别名归一读数（specs/2026-10-30 W1）：只在 shadow/on 生效时被调。"""
+        with self._lock:
+            self._queryNorm["retrievals"] += 1
+            if int(matchedSubjects) > 0:
+                self._queryNorm["with_matches"] += 1
+                self._queryNorm["matched_subjects_total"] += int(matchedSubjects)
 
     def record(
         self,
@@ -70,6 +79,11 @@ class RetrievalMetrics:
                 },
                 "route_hits": dict(sorted(self._routes.items())),
                 "outcomes": dict(self._outcomes),
+                **(
+                    {"query_normalization": dict(self._queryNorm)}
+                    if self._queryNorm["retrievals"] > 0
+                    else {}
+                ),
                 "uninstrumented": {
                     "refusal_rate": "本进程只统计 finish_reason=content_filter；safety_refusal/tool_failure 等完成态见 /v1/quality/metrics",
                     "human_takeover_rate": "接管事件按 /v1/quality/metrics 的 channel_event/console_mark/api 分账，不在检索进程指标内",
