@@ -761,7 +761,8 @@ class ApprovalManager:
 
     def _send_approval_notification(self, request: ApprovalRequest):
         """发送审批通知"""
-        for callback in self._notification_callbacks:
+        callbacks_snapshot = list(self._notification_callbacks)
+        for callback in callbacks_snapshot:
             try:
                 callback("approval_request", request.to_dict())
             except Exception as e:
@@ -775,7 +776,8 @@ class ApprovalManager:
 
     def _send_approval_result(self, request: ApprovalRequest):
         """发送审批结果通知"""
-        for callback in self._notification_callbacks:
+        callbacks_snapshot = list(self._notification_callbacks)
+        for callback in callbacks_snapshot:
             try:
                 callback("approval_result", request.to_dict())
             except Exception as e:

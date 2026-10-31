@@ -1435,7 +1435,7 @@ class KnowledgeRepository:
                                 "page_count", "ocr_used", "ocr_engine",
                                 "ocr_confidence_avg", "document_id")
                 }
-                changed = [key for key, value in old.items() if item.get(key) != value]
+                changed = [key for key in old if old[key] != item.get(key)]
                 item.setdefault("revisions", []).append({
                     "old": old,
                     "changed_fields": changed,
