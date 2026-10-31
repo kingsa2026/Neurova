@@ -281,7 +281,8 @@ class CrystallizedExperienceManager:
             raise ValueError("结晶器未初始化")
 
         # 调用结晶器检索
-        raw_results = self._crystallizer.retrieve(query, limit=limit)
+        import asyncio as _aio
+        raw_results = await _aio.to_thread(self._crystallizer.retrieve, query, limit=limit)
 
         # 转换为 CrystallizedExperience
         experiences = []
@@ -323,7 +324,8 @@ class CrystallizedExperienceManager:
 
         try:
             # 使用记忆管理器检索
-            memories = self._memory_manager.recall(query, limit=limit)
+            import asyncio as _aio
+            memories = await _aio.to_thread(self._memory_manager.recall, query, limit=limit)
 
             # 转换为 CrystallizedExperience（模拟格式）
             experiences = []

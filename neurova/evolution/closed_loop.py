@@ -126,9 +126,24 @@ class AdaptiveToolWeights:
                 },
             }
         try:
+            import tempfile as _tf
+            import os as _os
+
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            # 批 R4：tmp+os.replace 原子写——直写在 10s 节流窗口内进程被杀
+            # 即截断 JSON，下次 load 回退空表（全部学习权重归零）
+            fd, tmp_path = _tf.mkstemp(
+                dir=str(target.parent), suffix=".tmp", prefix="weights_")
+            try:
+                with _os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(json.dumps(payload, ensure_ascii=False, indent=2))
+                _os.replace(tmp_path, str(target))
+            except BaseException:
+                try:
+                    _os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
             self._last_save_at = time.time()
             return True
         except Exception:  # noqa: BLE001 - 落盘失败不阻断权重更新
