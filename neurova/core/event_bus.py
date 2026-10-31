@@ -209,6 +209,13 @@ class EventBus:
                             _qloop.call_soon_threadsafe(
                                 self._async_queue.put_nowait, (sub, event))
                         else:
+                            # 队列存在而目标 loop 未知（非 start() 正常路径，仅防御）：
+                            # 直接入队不保证唤醒消费协程，且跨线程时不受 asyncio.Queue
+                            # 保证。不静默——留一条可检索的痕迹。
+                            logger.debug(
+                                "EventBus: async queue present but no owner loop — "
+                                "direct put without wakeup guarantee: %s", event_name,
+                            )
                             self._async_queue.put_nowait((sub, event))
                     except asyncio.QueueFull:
                         with self._lock:
