@@ -10963,3 +10963,14 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **agent 全量**：1628 passed / 0 failed。
     - **⚠ 自伤**：swarm.py 补丁漏了 `create_task(` 的闭合括号——7 个测试文件收集期 SyntaxError（补回后全绿）。脚本改文件后必须编译验证（form 410 同族：改文件后必须拿 numstat/compile 与改动面对表）。
     - **下一枚空号现查**：条目行最大 454 ⇒ 后继从 §6-455 起。
+453. **批 W2：EventBus 跨线程投递 / safe_paths O_NOFOLLOW / 守卫多主体 / 注入计数分组 / 前端四条（✅ `event_bus.py +1/−0`、`safe_paths.py +3/−3`、`answer_fact_guard.py +12/−6`、`knowledge_retriever_adapter.py +4/−4`、前端四文件 +23/−20）** ✅🟢 —— §6-448 批 W2。
+    - EventBus：跨线程 publish 经 call_soon_threadsafe 投递 + start() 登记 _queue_loop（修前 asyncio.Queue 直接 put_nowait 跨线程丢唤醒/竞态）。
+    - safe_paths：写模式补 O_NOFOLLOW（修前只堵读分支的 TOCTOU 窗口）。
+    - answer_fact_guard：多主体句聚合全部命中主体事实值再核对（修前只看 matchedSubjects[0]）。
+    - 注入计数：按条目实际 agent_id 分组（修前全记 default）。
+    - neuron.ts：裸 axios 改统一 api 单例（修前 NeuronPage 整页 401）。
+    - CanvasDesignerPage：isDisposed 漏 .value 修正（修前降级轮询死代码）。
+    - GraphWorkbenchPage：切换 Agent 清焦点态（修前画布串显+写操作用错 agentId）。
+    - GraphExplorer3D：异步初始化记忆化单 Promise（修前 WebGL 上下文泄漏）。
+    - 绿灯：vue-tsc exit 0 零 error；batchS/batchCR/batchF/answerFactGuard/retrievalCacheIsolation 合跑 35+ passed；core+agent 全量回归无新增失败。
+    - **下一枚空号现查**：条目行最大 452（§6-453 未见条目行）⇒ 后继从 §6-454 起。
