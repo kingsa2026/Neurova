@@ -1521,7 +1521,8 @@ class KnowledgeFactStore:
         return self._hydrate(row) if row else None
 
     def activeNarrativeFact(
-        self, agentId: str, knowledgeId: str, contentKey: Optional[str] = None
+        self, agentId: str, knowledgeId: str, contentKey: Optional[str] = None,
+        tenantId: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """条目 → 当前治理行。内容键与客体一起认，两种立身方式都能查到。
 
@@ -1531,6 +1532,11 @@ class KnowledgeFactStore:
         """
         clauses = ["agent_id = ?", "record_kind = 'narrative'", "status = 'active'"]
         params: List[Any] = [agentId]
+        # 租户维度必须随行：同内容、同 agent 的两条条目分属两个租户时，
+        # 不带租户会折回对方那一行（条目投影把别人的治理行认成自己的）。
+        if tenantId is not None:
+            clauses.append("tenant_id = ?")
+            params.append(str(tenantId or "default"))
         if contentKey:
             # 给了内容键就必须按内容键认：旧说法也带着同一个条目的 source_turn_id，
             # 允许它靠溯源回退命中，投影就会把"还没改写"当成"已经对齐"。

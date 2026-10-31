@@ -57,7 +57,8 @@ class EntryLedger:
                 if not isRetrievable(item):
                     # 归档/过期条目不再主张事实；未被认领的旧行由收尾统一 retract。
                     continue
-                held = self._store.activeNarrativeFact(agentId, kid, key)
+                tenantId = str(item.get("tenant_id") or "default")
+                held = self._store.activeNarrativeFact(agentId, kid, key, tenantId=tenantId)
                 if held:
                     claims.add(held["fact_id"])
                     confidences[kid] = held.get("confidence")
@@ -66,6 +67,7 @@ class EntryLedger:
                 receipt = self._gate.admit(
                     AdmissionRequest(
                         agentId=agentId, subjectLabel=_subjectLabel(item, kid),
+                        tenantId=tenantId,
                         category=str(item.get("category") or ""),
                         recordKind="narrative", objectTerm=kid,
                         content=str(item.get("content") or ""),
@@ -102,7 +104,10 @@ class EntryLedger:
                     continue
                 if not key:
                     continue  # 无内容身份本就不进治理层，不算分叉
-                if self._store.activeNarrativeFact(agentId, kid, key) is None:
+                tenantId = str(item.get("tenant_id") or "default")
+                if self._store.activeNarrativeFact(
+                    agentId, kid, key, tenantId=tenantId
+                ) is None:
                     drift.append("%s/%s 缺 active 治理行" % (agentId, kid))
         return drift
 
