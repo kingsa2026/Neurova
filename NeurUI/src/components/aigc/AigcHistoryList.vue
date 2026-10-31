@@ -196,7 +196,7 @@ defineExpose({ load, tasks, kindFilter, setKind })
 .aigc-history-error {
   margin-top: 4px;
   font-size: 12px;
-  color: var(--nr-danger, #ff4d4f);
+  color: var(--nr-danger, var(--nr-error));
 }
 
 .aigc-history-download {

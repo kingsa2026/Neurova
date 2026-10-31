@@ -377,7 +377,7 @@ onBeforeUnmount(() => {
 .nr-mpp-route, .nr-mpp-rtt { font-size: 11px; color: var(--nr-text-muted); font-family: var(--nr-font-mono); }
 .nr-mpp-terminal { margin: var(--nr-space-xs) 0 0; font-size: 12px; color: var(--nr-text-secondary); }
 .nr-mpp-blocked { margin: var(--nr-space-xs) 0 0; font-size: 12px; color: var(--nr-text-secondary); }
-.nr-mpp-error { margin: 12px 0 0; font-size: 12px; color: var(--nr-color-danger, #e11d48); }
+.nr-mpp-error { margin: 12px 0 0; font-size: 12px; color: var(--nr-error); }
 .nr-mpp-idle { margin: 12px 0 0; font-size: 12px; color: var(--nr-text-tertiary); }
 .nr-mpp-active { display: flex; gap: 18px; align-items: center; margin-top: var(--nr-space-md); }
 .nr-mpp-qr { display: flex; flex-direction: column; align-items: center; gap: 6px; }

@@ -339,7 +339,7 @@ async function handleLogin() {
   align-items: center;
   justify-content: center;
   /* 深空蓝底色：Galaxy 为透明模式画布，星流叠加在本底色上 */
-  background: #090020;
+  background: var(--nr-bg-deep);
   overflow: hidden;
 }
 

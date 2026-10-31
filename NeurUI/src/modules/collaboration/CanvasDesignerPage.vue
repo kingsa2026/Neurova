@@ -2607,12 +2607,12 @@ onBeforeUnmount(() => {
 
 /* 店铺授权节点面板（§6.2/节点管理页入口） */
 .store-auth-status { margin: 4px 0 0; font-size: 12px; color: var(--nr-text-secondary, rgba(255,255,255,0.7)); }
-.store-auth-error { margin: 4px 0 0; font-size: 12px; color: #ff4d4f; word-break: break-all; }
+.store-auth-error { margin: 4px 0 0; font-size: 12px; color: var(--nr-error); word-break: break-all; }
 .store-auth-actions { display: flex; gap: 8px; }
 .store-badge { font-size: 12px; padding: 0 6px; border-radius: 8px; }
-.badge-active { background: rgba(82, 196, 26, 0.15); color: #52c41a; }
-.badge-error { background: rgba(255, 77, 79, 0.15); color: #ff4d4f; }
-.badge-expired, .badge-pending { background: rgba(250, 173, 20, 0.15); color: #faad14; }
+.badge-active { background: rgba(82, 196, 26, 0.15); color: var(--nr-success); }
+.badge-error { background: rgba(255, 77, 79, 0.15); color: var(--nr-error); }
+.badge-expired, .badge-pending { background: rgba(250, 173, 20, 0.15); color: var(--nr-warning); }
 
 /* 工具栏 */
 .canvas-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: var(--nr-glass-bg); border-bottom: 1px solid var(--nr-border, rgba(255, 255, 255, 0.08)); }

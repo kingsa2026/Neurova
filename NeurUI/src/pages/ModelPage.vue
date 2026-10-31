@@ -2182,8 +2182,8 @@ watch(() => defaultConfig.provider_id, () => {
   border-radius: 4px;
 }
 .nr-mgmt-tag.user-added { background: rgba(59, 130, 246, 0.12); color: #3b82f6; }
-.nr-mgmt-tag.free { background: rgba(34, 197, 94, 0.1); color: #22c55e; }
-.nr-mgmt-tag.builtin { background: rgba(34, 197, 94, 0.1); color: #22c55e; }
+.nr-mgmt-tag.free { background: rgba(34, 197, 94, 0.1); color: var(--nr-success); }
+.nr-mgmt-tag.builtin { background: rgba(34, 197, 94, 0.1); color: var(--nr-success); }
 .nr-mgmt-actions {
   display: flex;
   gap: 4px;
@@ -2202,7 +2202,7 @@ watch(() => defaultConfig.provider_id, () => {
   transition: background 0.15s;
 }
 .nr-mgmt-act:hover { background: rgba(255, 255, 255, 0.08); }
-.nr-mgmt-act.is-active { color: #22c55e; background: rgba(34, 197, 94, 0.08); }
+.nr-mgmt-act.is-active { color: var(--nr-success); background: rgba(34, 197, 94, 0.08); }
 .nr-mgmt-act.danger:hover { background: rgba(239, 68, 68, 0.12); }
 
 /* Add model row */
@@ -2416,7 +2416,7 @@ watch(() => defaultConfig.provider_id, () => {
 .nr-mm-item-result.result-success {
   background: rgba(34, 197, 94, 0.1);
   border: 1px solid rgba(34, 197, 94, 0.35);
-  color: #16a34a;
+  color: var(--nr-success);
 }
 
 .nr-mm-item-result.result-warning {
@@ -2556,7 +2556,7 @@ watch(() => defaultConfig.provider_id, () => {
   border-radius: 6px;
   border: 1px solid transparent;
 }
-.nr-mm-tag-text { background: rgba(148, 163, 184, 0.08); border-color: rgba(148, 163, 184, 0.1); color: #94a3b8; }
+.nr-mm-tag-text { background: rgba(148, 163, 184, 0.08); border-color: rgba(148, 163, 184, 0.1); color: var(--nr-text-tertiary); }
 .nr-mm-tag-user { background: rgba(59, 130, 246, 0.1); border-color: rgba(59, 130, 246, 0.12); color: var(--nr-info); }
 .nr-mm-tag-free { background: rgba(34, 197, 94, 0.08); border-color: rgba(34, 197, 94, 0.1); color: var(--nr-success); }
 .nr-mm-tag-builtin { background: rgba(34, 197, 94, 0.08); border-color: rgba(34, 197, 94, 0.1); color: var(--nr-success); }

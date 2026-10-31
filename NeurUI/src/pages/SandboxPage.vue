@@ -224,6 +224,6 @@ onMounted(fetchSandboxes)
 .exec-output { margin-top: 16px; }
 .exec-output h4 { color: var(--nr-text-primary); font-size: 14px; margin-bottom: 8px; }
 .exec-meta { font-size: 12px; color: var(--nr-text-tertiary); font-family: var(--nr-font-mono); margin-bottom: 6px; }
-.exec-meta-warn { color: var(--nr-warning, #faad14); }
+.exec-meta-warn { color: var(--nr-warning, var(--nr-warning)); }
 .exec-output pre { background: rgba(0,0,0,0.3); padding: 12px; border-radius: 8px; font-size: 12px; color: var(--nr-text-secondary); font-family: var(--nr-font-mono); max-height: 300px; overflow: auto; white-space: pre-wrap; margin: 0; }
 </style>

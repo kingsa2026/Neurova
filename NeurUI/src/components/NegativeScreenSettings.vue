@@ -303,12 +303,12 @@ onMounted(() => {
 }
 
 .test-result.success {
-  color: #52c41a;
+  color: var(--nr-success);
   background: rgba(82, 196, 26, 0.1);
 }
 
 .test-result.error {
-  color: #ff4d4f;
+  color: var(--nr-error);
   background: rgba(255, 77, 79, 0.1);
 }
 

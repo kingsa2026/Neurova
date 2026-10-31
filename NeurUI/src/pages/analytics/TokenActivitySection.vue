@@ -421,7 +421,7 @@ onMounted(fetchData)
 .nr-provider-meta {
   display: flex;
   justify-content: space-between;
-  color: var(--nr-text-tertiary, #94a3b8);
+  color: var(--nr-text-tertiary, var(--nr-text-tertiary));
   font-size: 12px;
 }
 
@@ -444,7 +444,7 @@ onMounted(fetchData)
   gap: 10px;
   padding: 8px 10px;
   border-radius: 10px;
-  color: var(--nr-text-secondary, #94a3b8);
+  color: var(--nr-text-secondary, var(--nr-text-tertiary));
   font-size: 13px;
 }
 

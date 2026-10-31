@@ -231,7 +231,7 @@ watch(() => props.agentId, () => { issued.value = null; load() }, { immediate: t
 .nr-cid-issue { display: flex; gap: 8px; align-items: center; }
 .nr-cid-blocked { margin: 12px 0 0; font-size: 12px; color: var(--nr-text-secondary); max-width: 60ch; }
 .nr-cid-issued { margin: 12px 0 0; font-size: 12px; color: var(--nr-accent, #6366f1); }
-.nr-cid-error { margin: 12px 0 0; font-size: 12px; color: var(--nr-color-danger, #e11d48); }
+.nr-cid-error { margin: 12px 0 0; font-size: 12px; color: var(--nr-error); }
 .nr-cid-empty { margin-top: 14px; font-size: 12px; color: var(--nr-text-tertiary); }
 .nr-cid-table { width: 100%; margin-top: 14px; border-collapse: collapse; font-size: 12px; }
 .nr-cid-table th { text-align: left; color: var(--nr-text-tertiary); font-weight: 500; padding: 6px 8px; }

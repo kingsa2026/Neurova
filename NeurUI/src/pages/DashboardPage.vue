@@ -177,6 +177,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useAgentStore } from '@/stores/agents'
+import { useAppStore } from '@/stores/app'
 import GlassStatCard from '@/components/GlassStatCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassCard from '@/components/GlassCard.vue'
@@ -188,6 +189,25 @@ const { t } = useI18n()
 const router = useRouter()
 const authStore = useAuthStore()
 const agentStore = useAgentStore()
+const appStore = useAppStore()
+
+/** 运行时读取主题令牌：ECharts 画在 canvas 上，不解析 `var(--nr-*)`。 */
+function cssToken(name: string, fallback: string): string {
+  if (typeof document === 'undefined') return fallback
+  const resolved = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return resolved || fallback
+}
+
+/** 图表配色随皮肤/明暗重算（依赖放这里，选项 computed 才能跟着刷新）。 */
+const chartColors = computed(() => {
+  void appStore.skin
+  void appStore.theme
+  return {
+    text: cssToken('--nr-text-tertiary', '#94a3b8'),
+    accent: cssToken('--nr-accent', '#22d3ee'),
+    accentSecondary: cssToken('--nr-accent-secondary', '#a78bfa'),
+  }
+})
 
 const currentDate = new Date().toLocaleDateString()
 
@@ -215,12 +235,12 @@ const CARD_META: Record<
   DashboardStatCard['key'],
   { emoji: string; color: string; labelKey: string; format?: (n: number) => string }
 > = {
-  agents: { emoji: '🤖', color: '#6366f1', labelKey: 'dashboard.totalAgents' },
-  conversations: { emoji: '💬', color: '#22d3ee', labelKey: 'dashboard.totalConversations' },
-  tokens: { emoji: '📊', color: '#a78bfa', labelKey: 'dashboard.totalTokens', format: formatTokenCount },
-  calls: { emoji: '⚡', color: '#10b981', labelKey: 'dashboard.totalCalls' },
-  memories: { emoji: '🧠', color: '#f472b6', labelKey: 'dashboard.totalMemories' },
-  knowledge: { emoji: '📚', color: '#fbbf24', labelKey: 'dashboard.totalKnowledge' },
+  agents: { emoji: '🤖', color: 'var(--nr-primary)', labelKey: 'dashboard.totalAgents' },
+  conversations: { emoji: '💬', color: 'var(--nr-accent)', labelKey: 'dashboard.totalConversations' },
+  tokens: { emoji: '📊', color: 'var(--nr-accent-secondary)', labelKey: 'dashboard.totalTokens', format: formatTokenCount },
+  calls: { emoji: '⚡', color: 'var(--nr-success)', labelKey: 'dashboard.totalCalls' },
+  memories: { emoji: '🧠', color: 'var(--nr-warning)', labelKey: 'dashboard.totalMemories' },
+  knowledge: { emoji: '📚', color: 'var(--nr-info)', labelKey: 'dashboard.totalKnowledge' },
 }
 
 const healthStatus = computed(() => {
@@ -234,16 +254,16 @@ const trendChartOption = computed(() => {
   if (!tr.labels.length) return null
   return {
     tooltip: { trigger: 'axis' },
-    legend: { textStyle: { color: '#94a3b8' } },
+    legend: { textStyle: { color: chartColors.value.text } },
     grid: { left: 44, right: 48, top: 36, bottom: 28 },
     xAxis: { type: 'category', data: tr.labels },
     yAxis: [
-      { type: 'value', name: t('dashboard.trendSession'), nameTextStyle: { color: '#94a3b8' } },
-      { type: 'value', name: t('dashboard.trendMessage'), nameTextStyle: { color: '#94a3b8' } },
+      { type: 'value', name: t('dashboard.trendSession'), nameTextStyle: { color: chartColors.value.text } },
+      { type: 'value', name: t('dashboard.trendMessage'), nameTextStyle: { color: chartColors.value.text } },
     ],
     series: [
-      { name: t('dashboard.trendSession'), type: 'bar', data: tr.conversation, barWidth: '44%', itemStyle: { color: '#22d3ee' } },
-      { name: t('dashboard.trendMessage'), type: 'line', yAxisIndex: 1, smooth: true, data: tr.message, itemStyle: { color: '#a78bfa' } },
+      { name: t('dashboard.trendSession'), type: 'bar', data: tr.conversation, barWidth: '44%', itemStyle: { color: chartColors.value.accent } },
+      { name: t('dashboard.trendMessage'), type: 'line', yAxisIndex: 1, smooth: true, data: tr.message, itemStyle: { color: chartColors.value.accentSecondary } },
     ],
   }
 })
@@ -253,14 +273,14 @@ const tokenPieOption = computed(() => {
   if (!tokenByModel.value.length) return null
   return {
     tooltip: { trigger: 'item' },
-    legend: { bottom: 0, textStyle: { color: '#94a3b8' } },
+    legend: { bottom: 0, textStyle: { color: chartColors.value.text } },
     series: [
       {
         type: 'pie',
         radius: ['42%', '68%'],
         center: ['50%', '44%'],
         data: tokenByModel.value.map((m) => ({ name: m.model, value: m.total_tokens })),
-        label: { color: '#94a3b8', fontSize: 11 },
+        label: { color: chartColors.value.text, fontSize: 11 },
       },
     ],
   }
@@ -503,7 +523,7 @@ onMounted(() => {
 
 .nr-feedback-count--dislike {
   background: rgba(229, 72, 77, 0.12);
-  color: #e5484d;
+  color: var(--nr-error);
 }
 
 .nr-feedback-recent {

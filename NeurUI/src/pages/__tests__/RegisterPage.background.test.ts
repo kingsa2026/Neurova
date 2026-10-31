@@ -4,7 +4,7 @@
  * 需求：注册页与登录页保持一致的背景和液态玻璃效果——
  * 1. 深色主题渲染 Galaxy 银河背景（替换旧 StarBackground 2D 星空）；
  * 2. 登录卡片用 GlassSurface（真 backdrop 折射，替换 GlassPanel）；
- * 3. 页面底色 #090020 深空蓝（Galaxy 透明画布叠于其上）；
+ * 3. 页面底色走 --nr-bg-deep 令牌（深空蓝，Galaxy 透明画布叠于其上）；
  * 4. 入场动画 fill 禁用 forwards/both（残留 transform 破坏 backdrop 采样，
  *    同 LoginPage.glassAncestor 契约）。
  */
@@ -87,9 +87,9 @@ describe('RegisterPage 背景与玻璃卡（与登录页一致）', () => {
     wrapper.unmount()
   })
 
-  it('页面底色为深空蓝 #090020（与登录页一致）', () => {
+  it('页面底色走 --nr-bg-deep 令牌（与登录页一致）', () => {
     const rule = /\.nr-auth-page\s*\{[^}]*\}/.exec(src)?.[0] ?? ''
-    expect(rule).toMatch(/background:\s*#090020/)
+    expect(rule).toMatch(/background:\s*var\(--nr-bg-deep\)/)
   })
 
   it('入场动画不得使用 forwards/both 填充（残留 transform 破坏 backdrop 采样）', () => {

@@ -172,6 +172,6 @@ defineExpose({ open })
 .model-info .meta { font-size: 12px; color: var(--nr-text-secondary, #999); margin-top: 2px; }
 .actions { width: 260px; }
 .btns { margin-top: 8px; display: flex; gap: 8px; }
-.err { color: #e05555; font-size: 12px; margin-top: 4px; word-break: break-all; }
+.err { color: var(--nr-error); font-size: 12px; margin-top: 4px; word-break: break-all; }
 .foot { text-align: right; margin-top: 8px; }
 </style>
