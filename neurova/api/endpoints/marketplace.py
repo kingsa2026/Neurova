@@ -1075,8 +1075,12 @@ async def review_skill_submission(
                         detail=f"Skill '{submission['skill_id']}' vanished before approval",
                     )
                 if result.get("version_changed"):
+                    # 批 X1：old_version 取**更新前**的版本（与 update_market_
+                    # skill 同口径）——submission.version 是新版本，自比自=文案
+                    # "v2.0.0 (v2.0.0 → v2.0.0)" 毫无信息量
+                    _before = market.get(submission["skill_id"]) or {}
                     _notify_market_update(result["entry"], old_version=str(
-                        (submission.get("version") or "?")))
+                        _before.get("version") or "?"))
             else:
                 if market.get(submission["skill_id"]) is not None:
                     raise HTTPException(

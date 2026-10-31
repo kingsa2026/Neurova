@@ -1608,8 +1608,9 @@ async def reorder_chat_sessions(
     ordered_ids = [sid for sid in (body.ordered_ids or []) if sid]
     if not ordered_ids:
         raise HTTPException(status_code=400, detail="ordered_ids is required")
-    # 越权防护:逐一校验会话归属(空 user_id 会话视为共享,与 delete 端点口径一致)
-    sessions = repo.list_sessions(agent_id=body.agent_id)
+    # 越权防护:逐一校验会话归属——visible 集必须带 user_id 过滤，否则
+    # 其他用户在该 agent 下的会话也会被本端点重排序（批 X1 契约对齐）
+    sessions = repo.list_sessions(agent_id=body.agent_id, user_id=user_id)
     visible = {s.get("session_id") or s.get("id", "") for s in sessions}
     unknown = [sid for sid in ordered_ids if sid not in visible]
     if unknown:
