@@ -53,7 +53,6 @@ class _Stream:
 def makeOpenAiLoop(items):
     agent = MagicMock()
     agent._tool_messages_list = []
-    agent._round_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     agent.skill_registry = None
     stream = _Stream(items)
     loop = OpenAILoop(agent)
@@ -65,7 +64,6 @@ def makeOpenAiLoop(items):
 def makeAnthropicLoop(items):
     agent = MagicMock()
     agent._tool_messages_list = []
-    agent._round_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     agent.skill_registry = None
     agent.config.name = "silence-probe"
     agent.config.agent_id = "silence-probe-id"

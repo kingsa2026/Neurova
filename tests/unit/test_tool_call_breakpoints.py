@@ -221,7 +221,6 @@ class TestToolsSupportedNotPermanent:
         agent = MagicMock()
         agent.llm_client = llm
         agent.config = SimpleNamespace(name="probe", llm_model="gpt-4o")
-        agent._round_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         loop = OpenAILoop(agent)
         loop.llm_client = llm
         tools = [{"type": "function", "function": {"name": "weather", "parameters": {}}}]

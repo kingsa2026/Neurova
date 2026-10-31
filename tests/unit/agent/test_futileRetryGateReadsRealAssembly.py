@@ -75,7 +75,6 @@ def _runTurn(routing, *, model, provider_id=""):
     facade = AgentLLMClient(model=model, provider_id=provider_id)
     agent = MagicMock()
     agent._tool_messages_list = []
-    agent._round_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     agent.skill_registry = None
     agent.llm_client = facade
     loop = OpenAILoop(agent)

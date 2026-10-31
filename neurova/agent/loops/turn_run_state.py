@@ -68,6 +68,13 @@ class TurnRunState:
     #: `DoomLoopGate` 的滑动窗口与中断计数都挂在这份实例上，同一轮内多建一份
     #: 会让窗口不再累计、后续追加的门控只落在其中一份上。
     gateRunner: Any = None
+    #: 本轮流式循环的轮间标志（原 `OpenAILoop._rounds`）。挂 loop 单例时，
+    #: 交叠会话的入口会整只替换它——另一会话的 `lengthEmptyRetried` 等标志
+    #: 在流中途被清零，恢复判定随之失效。
+    rounds: Any = None
+    #: 本轮 token 用量（原 `agent._round_usage`）。语义是"这一轮"：随调用链
+    #: 传递，不跨请求、不跨会话；TokenBudgetGate 与 done 事件同读这一份。
+    roundUsage: Dict[str, Any] = field(default_factory=dict)
     #: 创建者指纹（Issue #268 切片 C）：轮次归属已迁到本就是唯一事实源，
     #: 但"谁创建了它"此前从未被记录——把上一轮的 state 误递进新请求时，
     #: 新请求会继承旧轮次计数且**静默**（计数合法、上限不被违反）。

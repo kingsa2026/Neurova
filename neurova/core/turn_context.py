@@ -124,7 +124,7 @@ def mark_turn_goal_continuation() -> int:
 
 
 def reset_turn_goal_continuations() -> None:
-    """清零续跑计数（轮次起点调用；与 `_round_usage` 同属"本轮"语义）。"""
+    """清零续跑计数（轮次起点调用；与 `TurnRunState.roundUsage` 同属"本轮"语义）。"""
     _goal_continuations_var.set(0)
 
 
