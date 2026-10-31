@@ -1802,7 +1802,8 @@ class KnowledgeFactStore:
         return self._conflictRow(conflictId).get("winner_fact_id")
 
     def resolveConflict(self, conflictId: str, resolution: str, resolvedBy: str = "",
-                        winnerFactId: Optional[str] = None) -> bool:
+                        winnerFactId: Optional[str] = None,
+                        tenantId: Optional[str] = None) -> bool:
         """人工裁决一条治理层分歧。
 
         `supersede_old` 不只是记一笔：它必须真把败方退出活动集——否则队列清空了而两条
@@ -1816,10 +1817,15 @@ class KnowledgeFactStore:
             raise ValueError("supersede_old 需要 winner_fact_id：得有人指明哪条说法胜出")
         with self._lock, self._conn:
             row = self._conn.execute(
-                "SELECT status, member_fact_ids_json FROM knowledge_conflicts"
+                "SELECT status, tenant_id, member_fact_ids_json FROM knowledge_conflicts"
                 " WHERE conflict_id = ?", (conflictId,)
             ).fetchone()
             if row is None or row["status"] != "pending":
+                return False
+            # 租户分区（v21）：跨租户拿 id 裁决按"不存在"处理，不泄露该 id 是否真实存在。
+            if tenantId is not None and str(
+                row["tenant_id"] or "default"
+            ) != str(tenantId or "default"):
                 return False
             members = json.loads(row["member_fact_ids_json"] or "[]")
             if resolution == "supersede_old" and winner not in members:
