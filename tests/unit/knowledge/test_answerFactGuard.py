@@ -167,3 +167,32 @@ def test_wiring_guardFailure_leavesMessage(seeded, monkeypatch):
 
     assert ctx.reply == "华北回款率现在达到 92%。", "守卫失败不得改消息"
     assert "answer_fact_guard" not in (ctx.metadata or {})
+
+
+def test_contradicted_attributesConflictToSubjectHoldingTheValue(tmp_path, monkeypatch):
+    """双主体句：冲突归属必须落在**持有该数值事实**的主体上，而非固定 [0]。
+
+    主体 A 没有数值事实（对象是状态词），主体 B 的数值与答复相斥；两句同时
+    命中时旧实现固定取 matchedSubjects[0]=A，subject_key 指向一个根本不带数值
+    的主体，治理侧无法据此定位是哪条事实被说错。
+    """
+    factStore = KnowledgeFactStore(str(tmp_path / "facts.db"))
+    try:
+        subjectA = factStore.upsertSubject(AGENT, "华东地区")
+        factA = factStore.upsertFact(AGENT, subjectA, "status_of", "已上线", "华东地区已上线")
+        subjectB = factStore.upsertSubject(AGENT, "西南地区")
+        factB = factStore.upsertFact(AGENT, subjectB, "rate_of", "65%", "西南地区 65%")
+        hits = [
+            {"knowledge_id": "ka", "lineage_id": factA, "title": "华东地区", "content": "华东地区已上线"},
+            {"knowledge_id": "kb", "lineage_id": factB, "title": "西南地区", "content": "西南地区 65%"},
+        ]
+        monkeypatch.setenv("NEUROVA_KB_ANSWER_FACT_GUARD", "shadow")
+
+        report = runAnswerFactGuard("华东地区已上线，西南地区达到 92%。", hits, factStore, AGENT)
+
+        assert report is not None
+        assert len(report.contradicted) == 1
+        assert report.contradicted[0]["subject_key"] == subjectB
+        assert report.contradicted[0]["subject_key"] != subjectA
+    finally:
+        factStore.close()

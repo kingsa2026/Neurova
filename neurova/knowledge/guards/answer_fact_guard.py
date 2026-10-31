@@ -167,22 +167,29 @@ def runAnswerFactGuard(
         report.checked += 1
         # 批 W2：多主体句——聚合全部命中主体的事实值再核对（修前只看
         # matchedSubjects[0]，双主体句的第二个主体数字会被误判 contradicted）
-        allFactValues = []
-        for sk in matchedSubjects:
-            allFactValues.extend(_numericFactValues(factsBySubject.get(sk) or []))
-        subjectKey = matchedSubjects[0] if matchedSubjects else ""
+        valuesBySubject = {
+            sk: _numericFactValues(factsBySubject.get(sk) or []) for sk in matchedSubjects
+        }
+        allFactValues = [value for sk in matchedSubjects for value in valuesBySubject[sk]]
         for claim in claims:
             normalized = _normalizeNumber(claim)
             if normalized and (normalized in evidenceNormalized or normalized in allFactValues):
                 report.supported += 1
                 continue
-            otherValues = [value for value in allFactValues if value != normalized]
-            if otherValues:
+            # 冲突归属：取**持有与 claim 不同数值**的主体，而不是固定 [0]。
+            # 多主体句里 [0] 可能根本不带数值事实，subject_key 指向它就等于
+            # 把"哪条事实被说错"指错人（治理侧据此定位会落空）。
+            conflictKey = next(
+                (sk for sk in matchedSubjects
+                 if any(value != normalized for value in valuesBySubject[sk])),
+                "",
+            )
+            if conflictKey:
                 report.contradicted.append({
                     "sentence": sentence,
                     "claim": claim,
                     "evidenceStatus": "contradicted",
-                    "subject_key": subjectKey,
+                    "subject_key": conflictKey,
                 })
             else:
                 report.unverified += 1
