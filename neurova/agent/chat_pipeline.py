@@ -515,7 +515,15 @@ class ChatPipeline:
             await self._landFailedTurn(ctx, exc)
             raise
         finally:
-            finish_task(self._agent, ctx.user_input, completed=completed)
+            try:
+                finish_task(self._agent, ctx.user_input, completed=completed)
+            except Exception as finish_err:
+                # 批 R2：finish_task 在 finally 里裸奔——证据库写失败会顶掉
+                # 已生成的回复（或顶替真实异常带偏排障方向），只留痕不外抛
+                logger.warning(
+                    "finish_task 收尾失败（不阻断回复路径）: %s", finish_err,
+                    exc_info=True,
+                )
             self._release_turn_scope()
 
     @staticmethod

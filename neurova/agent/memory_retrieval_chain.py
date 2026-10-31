@@ -395,7 +395,11 @@ class MemoryRetrievalChain:
                     if retriever.name == "KnowledgeRetriever":
                         supplement_result = result
                     else:
-                        primary_result = result
+                        # 批 C2：主源已找到时不再被后续检索器覆写——
+                        # Annotation(quality=1.0) 命中后被 MoE(0.35) 顶掉是
+                        # 人为降级，修前无"主源已找到"标记
+                        if primary_result is None:
+                            primary_result = result
                         # 非知识检索器命中即视为主源完成，但让知识检索器仍有机会执行
                         # 知识检索器优先级 25，位于 Cache(30) 之前
                         if not any(r.name == "KnowledgeRetriever" for r in self._retrievers):

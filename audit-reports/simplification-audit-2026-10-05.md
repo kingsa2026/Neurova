@@ -10941,3 +10941,4 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **仍开**：EntryLedger 的 AdmissionRequest 不带 tenantId（叙述治理行恒落 default）属同类第三处，本批未动（与批 X 一起）。
     - **下一枚空号现查**：条目行最大 **451**、引用面最大 **450** ⇒ 后继从 **§6-452** 起。
 451. (续) **批 C/R A/B 定责附记**：`test_skillLibraryTakenFromOneFactory` 三格在四域全量里红，经三段 stash A/B（connection_pool／+creation_governance／+file_utils／+全量生产文件）确认与本批改动无关——根因是 pytest 临时目录路径长度随 `pytest-NNNNN` 计数增长，越过后该测试 docstring 自陈的 260 阈值即触发 `market_sources.refusalForPathBudget` 拒装（该测试 docstring 自己也写了"起点 273 字符超 260"）。属环境敏感的已知形态，非本批回归。另 `test_scripts_health_check::test_check_dependencies_returns_dict` 在四域全量里超时挂死（subprocess 外部命令），亦与本批无关。
+451. (续 2) **批 C2/R2 生产修复补齐**：`memory_retrieval_chain.py` 主源命中后置位标志（`if primary_result is None` 才赋值）——修后 Annotation(1.0) 命中不再被 MoE(0.35) 覆写；`chat_pipeline.py` finally 里 finish_task 套 try/except——证据库写失败只 warning 不外抛。判据两格均在 `test_batchCR_debtFixes.py`（C2 用 `_retrievers` 直塞三链成员测覆写序，R2 断言源码含 try/except）。
