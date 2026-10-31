@@ -91,6 +91,7 @@ class EventBus:
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 self._async_queue = asyncio.Queue(maxsize=self._async_queue_max)
+                self._queue_loop = loop  # 批 W2：跨线程投递的目标 loop（call_soon_threadsafe 用）
                 self._async_task = asyncio.ensure_future(self._process_async_queue())
         except RuntimeError:
             pass  # 没有事件循环，异步功能不可用

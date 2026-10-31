@@ -4,24 +4,9 @@
  * 提供依赖图谱、级联推理、缺失推理等 API 调用接口。
  */
 
-import axios from 'axios'
-
-const api = axios.create({
-  baseURL: '/api/neuron',
-  timeout: 30000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-})
-
-// 响应拦截器
-api.interceptors.response.use(
-  (response) => response.data,
-  (error) => {
-    console.error('NEURON API Error:', error)
-    return Promise.reject(error)
-  }
-)
+// 批 W2：改走统一 api 单例（带鉴权拦截器）——修前裸 axios 实例不带
+// Authorization 头，NeuronPage 整页必 401 静默失效
+import api from '@/api'
 
 // ============ 实体 API ============
 
