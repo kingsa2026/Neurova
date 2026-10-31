@@ -15,10 +15,15 @@ API 层 (neurova.api.endpoints / neurova.api.deps) 通过 get_health_checker()
 
 from __future__ import annotations
 
+import asyncio
+import threading
 import time
 from enum import Enum
 from typing import Any, Callable, Dict, Optional, Tuple
 from neurova.core.lazy_singleton import lazySingleton
+from neurova.core.logger import get_logger
+
+logger = get_logger(__name__)
 
 # 检查函数签名：无参数，返回 (成功: bool, 消息: str)
 CheckFunc = Callable[[], Tuple[bool, str]]
@@ -126,6 +131,12 @@ class HealthChecker:
     def __init__(self) -> None:
         self._checks: Dict[str, HealthCheck] = {}
         self._results: Dict[str, HealthCheckResult] = {}
+        # 每项最近一次**写入结果的时刻**（墙钟）；周期调度据此判 interval 是否到期。
+        self._lastRunAt: Dict[str, float] = {}
+        # 调度在事件循环里、检查函数经 to_thread 在工作线程里写结果——读写两侧要互斥，
+        # get_report 还要在迭代前取快照（字典边迭代边被写会抛 RuntimeError）。
+        self._resultsLock = threading.RLock()
+        self._schedulerTask: Optional[asyncio.Task] = None
 
     # -- 注册 ----------------------------------------------------------------
 
@@ -186,26 +197,83 @@ class HealthChecker:
             duration=duration,
             check_type=health_check.check_type,
         )
-        self._results[name] = result
+        with self._resultsLock:
+            self._results[name] = result
+            self._lastRunAt[name] = time.time()
         return result
 
     def run_all_checks(self) -> Dict[str, HealthCheckResult]:
         """执行所有已注册的健康检查"""
-        return {name: self.run_check(name) for name in self._checks}
+        return {name: self.run_check(name) for name in list(self._checks)}
+
+    # -- 周期调度 ------------------------------------------------------------
+
+    def startScheduler(self) -> None:
+        """启动按 `interval` 刷新的后台任务（幂等；必须在运行中的事件循环里调用）。"""
+        if self._schedulerTask is not None and not self._schedulerTask.done():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.warning("健康检查周期调度未启动：当前没有运行中的事件循环")
+            return
+        self._schedulerTask = loop.create_task(
+            self._schedulerLoop(), name="health-check-scheduler"
+        )
+        logger.info("健康检查周期调度已启动（%d 项）", len(self._checks))
+
+    def stopScheduler(self) -> None:
+        """停止周期任务（幂等）。"""
+        task = self._schedulerTask
+        self._schedulerTask = None
+        if task is not None and not task.done():
+            task.cancel()
+
+    def _tickSeconds(self) -> float:
+        """调度最小步长：取各检查 interval 的最小值，夹在 [0.05, 5] 秒。"""
+        intervals = [max(float(check.interval), 0.05) for check in list(self._checks.values())]
+        return min(min(intervals), 5.0) if intervals else 5.0
+
+    async def _schedulerLoop(self) -> None:
+        """按每个检查自己的 `interval` 到期即刷新缓存。
+
+        检查函数是同步 I/O，经 `to_thread` 执行——直接 await 会占住事件循环
+        （本仓 §6-93/§6-99 同族故障：一次慢查询拖住整个服务）。
+        """
+        try:
+            while True:
+                now = time.time()
+                for check in list(self._checks.values()):
+                    dueAt = self._lastRunAt.get(check.name, 0.0) + max(
+                        float(check.interval), 0.05
+                    )
+                    if now < dueAt:
+                        continue
+                    try:
+                        await asyncio.to_thread(self.run_check, check.name)
+                    except Exception:  # noqa: BLE001 - 单项失败不影响其余检查
+                        logger.warning("健康检查 %s 周期执行异常", check.name, exc_info=True)
+                await asyncio.sleep(self._tickSeconds())
+        except asyncio.CancelledError:
+            raise
 
     # -- 查询 ----------------------------------------------------------------
 
     def get_check_result(self, name: str) -> Optional[HealthCheckResult]:
         """获取某检查的最近一次结果"""
-        return self._results.get(name)
+        with self._resultsLock:
+            return self._results.get(name)
 
     def get_all_results(self) -> Dict[str, HealthCheckResult]:
-        """获取所有检查结果"""
-        return self._results
+        """获取所有检查结果的快照（迭代期间不被调度写入干扰）。"""
+        with self._resultsLock:
+            return dict(self._results)
 
     def clear_results(self) -> None:
         """清空所有缓存的检查结果"""
-        self._results.clear()
+        with self._resultsLock:
+            self._results.clear()
+            self._lastRunAt.clear()
 
     def get_overall_status(self) -> HealthStatus:
         """根据最近结果聚合整体健康状态"""
@@ -219,7 +287,7 @@ class HealthChecker:
 
     def get_report(self) -> Dict[str, Any]:
         """生成健康报告（与 API 层 HealthReportResponse 字段对齐）"""
-        results = self._results
+        results = self.get_all_results()
         status = self.get_overall_status()
         checks: Dict[str, Any] = {
             name: result.to_dict() for name, result in results.items()

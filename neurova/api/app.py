@@ -788,11 +788,23 @@ def _add_health_routes(app: FastAPI, app_state: AppState) -> None:
 
     @app.get("/health/detailed")
     async def detailed_health():
-        """详细的健康检查"""
-        if app_state.health_checker:
-            app_state.health_checker.run_all_checks()
-            return app_state.health_checker.get_report()
-        return {"status": "unknown", "message": "Health checker not available"}
+        """详细的健康检查（读周期调度维护的缓存）。
+
+        修前每请求现场跑全部检查：慢检查会把请求延迟和事件循环一起拖住，而
+        `interval` 参数全仓零消费。现在由 lifespan 起的调度按 interval 刷新；
+        本端点只读缓存，并用 `cached` 如实标注这一份是不是缓存值。冷启动尚无
+        读数时现场跑一次（`cached=false`），避免开局返回 unknown。
+        """
+        checker = app_state.health_checker
+        if not checker:
+            return {"status": "unknown", "message": "Health checker not available",
+                    "cached": False}
+        cached = bool(checker.get_all_results())
+        if not cached:
+            await asyncio.to_thread(checker.run_all_checks)
+        report = checker.get_report()
+        report["cached"] = cached
+        return report
 
     @app.get("/api/v1/status")
     async def get_status():
@@ -873,6 +885,14 @@ async def _on_startup(app_state: AppState) -> None:
     # 初始化组件（BUG AUDIT S-13: 原同步直调, Agent/TTS/ASR 等秒级重初始化
     # 阻塞事件循环 → 移入工作线程执行）
     await asyncio.to_thread(_initialize_components, app_state)
+
+    # 健康检查周期调度：`interval` 参数此前只存不用（检查只在请求时现场跑）。
+    # 启停成对——关停侧显式 stop，否则常驻 task 会拖住退出路径。
+    if app_state.health_checker is not None:
+        try:
+            app_state.health_checker.startScheduler()
+        except Exception as _healthSchedErr:  # noqa: BLE001 - 调度故障不阻断启动
+            logger.warning("健康检查周期调度启动失败（忽略）: %s", _healthSchedErr)
 
     # 进化权重持久化装配（P2-6：此前仅 start_server.py 调用，uvicorn 直启
     # get_app 的入口权重纯内存，重启即丢。幂等——已装配时 no-op）。
@@ -1301,6 +1321,13 @@ async def _on_shutdown(app_state: AppState) -> None:
     4. 关闭连接池
     """
     logger.info("Neurova API Server shutting down...")
+
+    # 健康检查周期调度：与启动侧成对。
+    try:
+        if app_state.health_checker is not None:
+            app_state.health_checker.stopScheduler()
+    except Exception as _healthStopErr:  # noqa: BLE001 - 关停路径不互相牵连
+        logger.warning("健康检查周期调度停止异常: %s", _healthStopErr)
 
     # 出站隧道代理：控制连接是长连接，不收就会在关停时吊着一个未完成的 task
     # （本仓实测过"承载 app 的线程永不结束"那一族，见上方 MCP 关停的注释）。
