@@ -42,6 +42,10 @@ class TestSkillsRouteSeparation:
         assert items[0]["usage"]["pinned"] is True
 
     def test_pending_path_uses_packer_not_service(self, client, monkeypatch):
+        import neurova.api.deps as _deps
+        client.app.dependency_overrides[_deps.get_current_user] = lambda: {
+            "user_id": "admin1", "username": "admin1", "role": "admin", "neuser_id": "admin1",
+        }
         """pending-skills 路径必须仍走 packer(审批面),不被技能列表顶替。"""
         import neurova.api.endpoints.governance as gov
         import neurova.skills.skill_service as ss
@@ -55,7 +59,7 @@ class TestSkillsRouteSeparation:
         monkeypatch.setattr(ss.SkillService, "__init__", lambda self, **kw: None)
         monkeypatch.setattr(ss.SkillService, "list_skills", fake_list)
         agent = type("A", (), {"skill_packer": None})()
-        monkeypatch.setattr(gov, "_get_agent", lambda: agent)
+        monkeypatch.setattr(gov, "_get_agent", lambda *a, **k: agent)
         r = client.get(f"{BASE}/agent/a1/pending-skills")
         assert r.status_code == 200 and r.json() == []
         assert not called["skills"], "pending 路径不得触碰 SkillService.list_skills"

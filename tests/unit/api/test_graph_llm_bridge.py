@@ -210,6 +210,11 @@ def test_backfill_extracts_only_pending_entries(registry, monkeypatch, tmp_path)
             assert agent_id == "default"
             return [dict(entry_pending), dict(entry_done)]
 
+        def visible_items(self, user, scope="all", agent_id=None, **kw):
+            # 批 S3：backfill 抽取范围改走可见集（admin 可见全部）
+            assert agent_id == "default"
+            return [dict(entry_pending), dict(entry_done)]
+
         def find_item(self, knowledge_id):
             if knowledge_id == "k1":
                 return ("default", entry_pending)
@@ -273,7 +278,7 @@ def test_backfill_extracts_only_pending_entries(registry, monkeypatch, tmp_path)
     app.include_router(kg.router, prefix="/api/v1/knowledge-graph")
     app.dependency_overrides[auth.get_current_user_or_service] = lambda: {
         "user_id": "1",
-        "role": "user",
+        "role": "admin",  # 批 S3：backfill 收管理员门，行为判据夹具随契约对齐
     }
     client = TestClient(app)
 
@@ -300,7 +305,7 @@ def test_backfill_without_llm_reports_reason(registry, monkeypatch):
     app.include_router(kg.router, prefix="/api/v1/knowledge-graph")
     app.dependency_overrides[auth.get_current_user_or_service] = lambda: {
         "user_id": "1",
-        "role": "user",
+        "role": "admin",  # 批 S3：backfill 收管理员门，行为判据夹具随契约对齐
     }
     client = TestClient(app)
 
