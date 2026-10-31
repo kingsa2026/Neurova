@@ -146,13 +146,14 @@ def open_within(
             raise UnsafePathError(f"拒绝打开链接: {rel!r}")
         return open(target, mode)
     flags = os.O_RDONLY
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
     if "w" in mode or "a" in mode or "x" in mode:
-        flags = os.O_WRONLY | os.O_CREAT
+        flags = os.O_WRONLY | os.O_CREAT | nofollow
         if "a" in mode:
             flags |= os.O_APPEND
         if "x" in mode:
             flags |= os.O_EXCL
     else:
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        flags = os.O_RDONLY | nofollow
     fd = os.open(str(target), flags)
     return os.fdopen(fd, mode)

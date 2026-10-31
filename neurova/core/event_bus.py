@@ -200,7 +200,15 @@ class EventBus:
                 # 异步处理器放入队列(有界: 满时丢弃并计告警, 防无界堆积)
                 if self._async_queue:
                     try:
-                        self._async_queue.put_nowait((sub, event))
+                        # 批 W2：asyncio.Queue 只保证所属 loop 内线程安全——
+                        # 跨线程投递必须经 call_soon_threadsafe
+                        import asyncio as _aio
+                        _qloop = getattr(self, "_queue_loop", None)
+                        if _qloop is not None:
+                            _qloop.call_soon_threadsafe(
+                                self._async_queue.put_nowait, (sub, event))
+                        else:
+                            self._async_queue.put_nowait((sub, event))
                     except asyncio.QueueFull:
                         with self._lock:
                             self._async_queue_full_dropped += 1

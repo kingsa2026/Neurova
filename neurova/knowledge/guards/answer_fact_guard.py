@@ -165,14 +165,18 @@ def runAnswerFactGuard(
         if not claims:
             continue  # 无数字/日期的句子不进 checked
         report.checked += 1
-        subjectKey = matchedSubjects[0]
-        factValues = _numericFactValues(factsBySubject.get(subjectKey) or [])
+        # 批 W2：多主体句——聚合全部命中主体的事实值再核对（修前只看
+        # matchedSubjects[0]，双主体句的第二个主体数字会被误判 contradicted）
+        allFactValues = []
+        for sk in matchedSubjects:
+            allFactValues.extend(_numericFactValues(factsBySubject.get(sk) or []))
+        subjectKey = matchedSubjects[0] if matchedSubjects else ""
         for claim in claims:
             normalized = _normalizeNumber(claim)
-            if normalized and (normalized in evidenceNormalized or normalized in factValues):
+            if normalized and (normalized in evidenceNormalized or normalized in allFactValues):
                 report.supported += 1
                 continue
-            otherValues = [value for value in factValues if value != normalized]
+            otherValues = [value for value in allFactValues if value != normalized]
             if otherValues:
                 report.contradicted.append({
                     "sentence": sentence,
