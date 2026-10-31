@@ -324,7 +324,16 @@ class KnowledgeRetrieverAdapter:
                 recordEntryInjections = getattr(self._repo, "recordEntryInjections", None)
                 if callable(recordEntryInjections):
                     try:
-                        recordEntryInjections(agent_id or "default", selectedEntries)
+                        # 批 W2：按条目实际 agent_id 分组计数——修前全记
+                        # default，跨 agent 组条目的 injected_count 永不增长
+                        from collections import defaultdict as _dd
+                        by_agent = _dd(list)
+                        for it in knowledge_items:
+                            kid = it.get("knowledge_id")
+                            if kid and kid in selectedEntries:
+                                by_agent[it.get("agent_id") or agent_id or "default"].append(kid)
+                        for aid, kids in by_agent.items():
+                            recordEntryInjections(aid, kids)
                     except Exception as exc:  # noqa: BLE001
                         logger.debug("知识条目注入计数跳过: %s", exc)
 
