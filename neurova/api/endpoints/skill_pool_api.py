@@ -614,7 +614,10 @@ async def install_public_skill_to_mine(skill_id: str, current_user: Dict[str, An
 
 
 @router.get("/agent/{agent_id}/pending-skills")
-async def list_pending_skills(agent_id: str):
+async def list_pending_skills(
+    agent_id: str, current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    _require_agent_access(agent_id, current_user, "查看")
     """C10 审批面：列出待审自动技能（评审闸开启时的配套生态）。
 
     pending 数据在 Agent 的 `skill_packer` 属性上——该属性挂的是
@@ -643,7 +646,11 @@ async def list_pending_skills(agent_id: str):
 
 
 @router.post("/agent/{agent_id}/pending-skills/{template_id}/approve")
-async def approve_pending_skill(agent_id: str, template_id: str):
+async def approve_pending_skill(
+    agent_id: str, template_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    _require_agent_access(agent_id, current_user, "批准")
     """C10 审批面：批准待审模板（激活后下轮 pattern_mining 注册进 Registry）。"""
     from neurova.api.endpoints.governance import _get_agent
 
@@ -658,7 +665,11 @@ async def approve_pending_skill(agent_id: str, template_id: str):
 
 
 @router.post("/agent/{agent_id}/pending-skills/{template_id}/reject")
-async def reject_pending_skill(agent_id: str, template_id: str):
+async def reject_pending_skill(
+    agent_id: str, template_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    _require_agent_access(agent_id, current_user, "拒绝")
     """C10 审批面：拒绝并删除待审模板。"""
     from neurova.api.endpoints.governance import _get_agent
 
@@ -676,7 +687,10 @@ async def reject_pending_skill(agent_id: str, template_id: str):
 
 
 @router.get("/agent/{agent_id}/pending-experiences")
-async def list_pending_experiences(agent_id: str):
+async def list_pending_experiences(
+    agent_id: str, current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    _require_agent_access(agent_id, current_user, "查看")
     """C10 审批面：列出待审的自动化 applied 经验记录（评审闸开启时非空）。"""
     try:
         from neurova.evolution.skill_experience import get_skill_experience_store
@@ -699,7 +713,11 @@ async def list_pending_experiences(agent_id: str):
 
 
 @router.post("/agent/{agent_id}/pending-experiences/{record_id}/approve")
-async def approve_pending_experience(agent_id: str, record_id: str):
+async def approve_pending_experience(
+    agent_id: str, record_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    _require_agent_access(agent_id, current_user, "批准")
     """批准待审经验：注入技能描述（立即生效）并计入重建阈值。"""
     from neurova.api.endpoints.governance import _get_agent
     from neurova.evolution.skill_experience import get_skill_experience_store
@@ -713,7 +731,11 @@ async def approve_pending_experience(agent_id: str, record_id: str):
 
 
 @router.post("/agent/{agent_id}/pending-experiences/{record_id}/reject")
-async def reject_pending_experience(agent_id: str, record_id: str):
+async def reject_pending_experience(
+    agent_id: str, record_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    _require_agent_access(agent_id, current_user, "拒绝")
     """拒绝待审经验：直接丢弃。"""
     from neurova.evolution.skill_experience import get_skill_experience_store
 

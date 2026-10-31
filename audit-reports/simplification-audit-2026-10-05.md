@@ -10918,3 +10918,13 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **分批**：S 安全四条（console 附件零属主／skill_pool 审批六腿漏门／图谱补建跨租户抽取／检索缓存无属主键）→ F 假成功三兄弟（非流式 chat 恒空／WS Echo／eki 三腿键名错位）→ D 数据两条（supersede 漏持久化、内容去重漏 tenantId）→ C 并发三条（loop 单例态 ×3、责任链覆写、同步重 IO 占事件循环）→ R 可靠性六条 → X 其余 P2 按域。修复计划文档含每条红灯判据。
     - **方法留案（形态族）**：① 六片并行探查撞「user concurrency limit exceeded」——限流下并行探查要退化为串行；② 探查代理报告不能直接当结论，最重项必须人工抽查（本批抽查 4/4 属实，但抽查率 7%，报告里如实标注抽查率）。
     - **口径**：本格为登记格（修复尚未开始），生产池 0；修复各批落格从 §6-449 起现查。`docs/specs/2026-10-31-full-repo-defect-sweep-fixplan.md` +60/−0 随本格入库。
+449. **批 S 安全四条：console 附件属主隔离 / skill_pool 审批六腿门 / 图谱补建管理员门+可见集 / 检索缓存作用域+TTL（✅ 本批四生产文件 +120/−58；判据两档 +206/−0；既有测试契约对齐 +23/−9）** ✅🟢 —— §6-448 批 S（用户点单「按照工程纪律修复」）。
+    - **S1**：console 附件原共享目录全可见可删——现按上传者 user_id 分域落盘（`_user_scope`，id 归一为安全路径段），list/download/delete 只在本人域内活动；跨属主 download/delete 404。**判据三格 + 修前红**：user2 list 恒空／download 404／delete 404（修前 200/200/200）。
+    - **S2**：skill_pool 待审六腿（pending-skills/experiences 的 list/approve/reject）原无 current_user 参数、路径 agent_id 即授权——六腿补 `Depends(get_current_user)` + `_require_agent_access`（与同文件 consolidation 面同一助手）；判据 6 参数化格（越权 403）+ 3 反向格（owner 照常可达）。
+    - **S3**：backfill 补建原无角色门且 `list_knowledge` 无租户/属主过滤——补管理员 403 门（**门在 llm 早退分支之前**：首插落在 llm None 兜底之后，无 LLM 时 200 先返回、门摸不到——自伤被判据当场抓回后前置）+ 抽取范围改 `visible_items` 可见集；既有两例 backfill 行为判据夹具随契约改 admin。
+    - **S4**：检索结果缓存键原只有 query 文本（无 user/agent 维度、无 TTL）——键改 md5(user|agent|tenant|query)、条目改 (result, cached_at) 带 300s TTL 过期重检。判据三格：跨用户不共享（fake 检索器调用序列 ["u1","u2"]）/过期失效/键含作用域。
+    - **既有测试契约对齐（4 例）**：test_graph_llm_bridge 两例夹具改 admin（backfill 门）；test_console_split_contract 落点/断言改属主域；test_skill_pool_agent_skills_route 的 pending 路由分工判据改 admin 身份 + `_get_agent` 桩补 `*a, **k`（旧 lambda 零参是靠 except 吞 TypeError 才绿的，属形态 431 族）。
+    - **红→绿与 A/B**：红 `10 failed/3 passed`（判据文件首跑）→ 绿 `13 passed`；`tests/unit/api + tests/unit/agent` 全量 **4380 passed / 0 failed**（修前全量态：本批判据 10 红 + 契约对齐 4 红，生产修复后全数转绿，零新增失败）。
+    - **口径**：生产 `console_files.py +89/−47、skill_pool_api.py +18/−6、knowledge_graph_api.py +21/−5、memory_retrieval_chain.py +33/−21`；判据 `test_batchS_security_gates.py +183/−0`、`test_retrievalCacheIsolation.py +105/−0`、契约对齐 +23/−9。修复计划表 S 行已回填。
+    - **仍开**：§6-448 批 F/D/C/R/X（见修复计划文档）；S1 属主域迁移注记——存量共享根文件对新接口不可见（一次性切域，无属主信息可迁移，如实告知）。
+    - **下一枚空号现查**：条目行 `^4NN\. ` 最大 **449**、引用面最大 **448**（本格自身 448）⇒ 后继批次从 **§6-450** 起。
