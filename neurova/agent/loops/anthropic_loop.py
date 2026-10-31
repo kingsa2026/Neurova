@@ -59,20 +59,14 @@ class AnthropicLoop(BaseAgentLoop):
         # 轮次态与门控执行器都按本轮构造、逐轮传递（Issue #268：loop 是 per-agent
         # 单例，实例态会让交叠会话互踩）；装配单点在基类，两条环共用同一份门清单。
         runner = self._buildGateRunner()
-        self._gate_runner = runner
         state = TurnRunState.forTurn(
             agentId=self._agentFingerprint(),
             roundUserKey=self._fingerprintUserMessage(messages),
             gateRunner=runner,
             maxToolRounds=resolveToolRoundBudget(),
         )
-        # `_round_usage` 与目标续跑计数都是"本轮"语义：不重置就跨请求累计，
-        # TokenBudgetGate 第二轮即掐死回复（OpenAI 环 2026-09-07 的同一回归教训）。
-        self.agent._round_usage = {
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0,
-        }
+        # 本轮用量与目标续跑计数都随 state / turn_context 走：state 每请求新建，
+        # 天然不跨请求累计（OpenAI 环 2026-09-07 的回归教训）。
         from neurova.core import turn_context
 
         turn_context.reset_turn_goal_continuations()
@@ -99,15 +93,16 @@ class AnthropicLoop(BaseAgentLoop):
             response = await self._predict_anthropic(
                 await self._build_request(drive["tools"], drive["computer_handler"], messages)
             )
-            self._accumulateRoundUsage(getattr(response, "usage", None) or {})
+            self._accumulateRoundUsage(getattr(response, "usage", None) or {}, state)
 
             if not response.tool_calls:
                 decision = await evaluateLoopExit(
                     self,
                     reply=getattr(response, "content", "") or "",
-                    roundUsage=getattr(self.agent, "_round_usage", None) or {},
+                    roundUsage=state.roundUsage,
                     toolRound=state.toolRounds,
                     roundSignature=state.exitSignature(),
+                    gateRunner=state.gateRunner,
                 )
                 if decision.action == LOOP_CONTINUE:
                     # 出口续跑仍属本轮：state 继续传递，就地开下一轮（不递归重建）
@@ -148,7 +143,7 @@ class AnthropicLoop(BaseAgentLoop):
                 _gd = state.gateRunner.on_round_end(state.gateContext(
                     self._toolSignatures(response.tool_calls),
                     round_reply=getattr(response, "content", "") or "",
-                    round_usage=getattr(self.agent, "_round_usage", None) or {},
+                    round_usage=state.roundUsage,
                     goal=self.resolveTurnGoal() or {},
                 ))
                 if _gd is not None and _gd.action == _SA.TERMINATE:
@@ -232,7 +227,7 @@ class AnthropicLoop(BaseAgentLoop):
                 finish_reason = finish_reason or "length"
 
             if pending_usage is not None:
-                self._accumulateRoundUsage(pending_usage)
+                self._accumulateRoundUsage(pending_usage, state)
 
             round_reply = "".join(reply_parts)
 
@@ -240,9 +235,10 @@ class AnthropicLoop(BaseAgentLoop):
                 decision = await evaluateLoopExit(
                     self,
                     reply=round_reply,
-                    roundUsage=getattr(self.agent, "_round_usage", None) or {},
+                    roundUsage=state.roundUsage,
                     toolRound=state.toolRounds,
                     roundSignature=state.exitSignature(),
+                    gateRunner=state.gateRunner,
                 )
                 if decision.action == LOOP_CONTINUE:
                     messages.append({"role": "user", "content": decision.continuation_prompt})
@@ -261,7 +257,7 @@ class AnthropicLoop(BaseAgentLoop):
                     "type": "done",
                     "reply": round_reply,
                     "finish_reason": finish_reason,
-                    "usage": getattr(self.agent, "_round_usage", None) or {},
+                    "usage": state.roundUsage,
                 }
                 return
 
@@ -304,7 +300,7 @@ class AnthropicLoop(BaseAgentLoop):
                 _gd = state.gateRunner.on_round_end(state.gateContext(
                     self._toolSignatures(pending_tool_calls),
                     round_reply=round_reply,
-                    round_usage=getattr(self.agent, "_round_usage", None) or {},
+                    round_usage=state.roundUsage,
                     goal=self.resolveTurnGoal() or {},
                 ))
                 if _gd is not None and _gd.action == _SA.TERMINATE:
@@ -316,7 +312,7 @@ class AnthropicLoop(BaseAgentLoop):
                         "type": "done",
                         "reply": round_reply,
                         "finish_reason": finish_reason,
-                        "usage": getattr(self.agent, "_round_usage", None) or {},
+                        "usage": state.roundUsage,
                     }
                     return
                 if _gd is not None and _gd.action == _SA.INTERRUPT_AND_CONTINUE:
@@ -340,7 +336,7 @@ class AnthropicLoop(BaseAgentLoop):
                         "type": "done",
                         "reply": round_reply,
                         "finish_reason": finish_reason,
-                        "usage": getattr(self.agent, "_round_usage", None) or {},
+                        "usage": state.roundUsage,
                     }
                     return
                 messages.append({

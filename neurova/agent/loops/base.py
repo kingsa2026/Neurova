@@ -75,6 +75,7 @@ async def evaluateLoopExit(
     roundUsage: Any,
     toolRound: int,
     roundSignature: Optional[str] = None,
+    gateRunner: Any = None,
 ) -> LoopExitDecision:
     """主出口的门控求值（**唯一实现点**，两条路径共用）。
 
@@ -103,7 +104,10 @@ async def evaluateLoopExit(
         # 收到一次没有意义的"换策略"续跑（实测：length 恢复重试被多打一轮）。
         return LoopExitDecision.done()
 
-    runner = loop.gateRunnerForExit()
+    # 优先用本轮 state 上的执行器（Issue #268）：实例引用是"最后进入本 loop 的
+    # 会话"留下的，交叠会话下会把别人的门控窗口接过来。无 state 的调用方仍走
+    # 实例兜底（直接驱动本函数的老用例）。
+    runner = gateRunner if gateRunner is not None else loop.gateRunnerForExit()
     if runner is None:
         return LoopExitDecision.done()
 
@@ -641,8 +645,8 @@ class BaseAgentLoop(ABC):
             logger.debug("reasoning 回放判定失败(忽略)", exc_info=True)
             return False
 
-    def _accumulateRoundUsage(self, usage: Any) -> None:
-        """把一次往返的 usage 累进**本轮**预算口 `agent._round_usage`。
+    def _accumulateRoundUsage(self, usage: Any, state: Any) -> None:
+        """把一次往返的 usage 累进**本轮**预算口 `state.roundUsage`。
 
         TokenBudgetGate 只读这一个数；不累计的那条环等于该闸永不触发（写了不读的反面：
         读了不写）。键集合与 `OpenAILoop` 一致，不新造第三份形状。
@@ -657,8 +661,8 @@ class BaseAgentLoop(ABC):
             return
         read = usage.get if isinstance(usage, dict) else lambda key, default=0: getattr(usage, key, default)
         try:
-            prev = getattr(self.agent, "_round_usage", None) or {}
-            self.agent._round_usage = {
+            prev = state.roundUsage or {}
+            state.roundUsage = {
                 "prompt_tokens": int(prev.get("prompt_tokens", 0)) + int(read("prompt_tokens", 0) or 0),
                 "completion_tokens": int(prev.get("completion_tokens", 0)) + int(read("completion_tokens", 0) or 0),
                 "total_tokens": int(prev.get("total_tokens", 0)) + int(read("total_tokens", 0) or 0),

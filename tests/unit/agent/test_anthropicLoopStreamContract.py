@@ -291,15 +291,15 @@ class TestAnthropicStreamUsageCountedOnce:
             ]
         )
         loop = makeLoop(client)
-        loop.agent._round_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         messages = [{"role": "user", "content": "你好"}]
 
         async def go():
             gen = await loop.predict_step(messages, tools=None, stream=True)
             return [e async for e in gen]
 
-        asyncio.run(go())
-        assert loop.agent._round_usage["total_tokens"] == 10, (
+        events = asyncio.run(go())
+        done = [e for e in events if e.get("type") == "done"][-1]
+        assert done["usage"]["total_tokens"] == 10, (
             f"Anthropic 环把同一调用的两个 usage chunk 累加成 "
-            f"{loop.agent._round_usage['total_tokens']}"
+            f"{done['usage']['total_tokens']}"
         )

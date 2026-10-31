@@ -80,7 +80,6 @@ def make_loop(chat, max_tool_rounds=2, suspend_at=None):
     agent = SimpleNamespace(
         llm_client=chat,
         config=SimpleNamespace(name="probe", llm_model="gpt-4o"),
-        _round_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         _tool_messages_list=[],
         skill_registry=None,
         _skill_registry=None,
