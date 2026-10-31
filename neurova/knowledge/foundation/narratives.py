@@ -71,6 +71,9 @@ class NarrativeStore:
         if self._db_path != ":memory:":
             Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self._db_path)
+        # 批 X6：WAL + busy_timeout（与 facts 层同一库文件）
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
         try:
             conn.row_factory = sqlite3.Row
             from .foundation_schema import applyTo  # 惰性：链的单主注册处依赖本模块

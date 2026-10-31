@@ -465,6 +465,11 @@ class KnowledgeFactStore:
         if db_path != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        # 批 X6：WAL + busy_timeout——修前三套连接（facts/narratives/entry
+        # ledger）同开 knowledge_facts.db 无 WAL，并发写即 SQLITE_BUSY 5s
+        # 后抛错沿 _syncEntryGovernance 的不吞异常通道放大成写入失败
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.RLock()
         self._ensureSchema()
