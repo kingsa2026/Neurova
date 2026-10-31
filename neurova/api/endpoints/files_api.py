@@ -521,6 +521,8 @@ async def approve_file(
     info = _get_owned_file(file_id, current_user)
     info["status"] = "approved"
     info["updated_at"] = time.time()
+    # 批 X1：落盘——修前只改内存，重启水合后审批结果回退 "active"
+    persist_file(file_id, info)
     return {"code": 0, "message": "File approved"}
 
 
@@ -533,4 +535,5 @@ async def reject_file(
     info = _get_owned_file(file_id, current_user)
     info["status"] = "rejected"
     info["updated_at"] = time.time()
+    persist_file(file_id, info)
     return {"code": 0, "message": "File rejected"}
