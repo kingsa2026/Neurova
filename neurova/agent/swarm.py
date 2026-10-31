@@ -774,12 +774,17 @@ class SwarmManager:
         调度广播（chunk 级 fire-and-forget 可接受，不阻塞生成循环）。
         """
 
+        _fire_refs: set = set()  # 批 X2：强引用集——事件循环对 Task 只持弱引用
+
+        def _reap(task):
+            _fire_refs.discard(task)
+
         def emitter(event_type: str, data: Any) -> None:
             try:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
                 return
-            loop.create_task(
+            task = loop.create_task(
                 self._broadcast(
                     run,
                     "subagent_chunk",
@@ -791,6 +796,8 @@ class SwarmManager:
                     },
                 )
             )
+            _fire_refs.add(task)
+            task.add_done_callback(_reap)
 
         return emitter
 

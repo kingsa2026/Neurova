@@ -1100,7 +1100,9 @@ class SessionManager(SessionRepository):
             return []
 
         # 按日期排序，获取最新的
-        sessions.sort(key=lambda x: x.get("session_date", ""), reverse=True)
+        # 批 X2：正序拼装（旧→新）后取尾部——修前 reverse=True 拼装再取
+        # [-N:] 实际取到最旧日期的消息（跨天会话必然触发）
+        sessions.sort(key=lambda x: x.get("session_date", ""))
 
         # 模型上下文只含 user/assistant 轮次——工具/审计型行（save_message 写侧不设防，如 session fork 带入）不得回灌模型诱发幻觉。展示路径 get_history 不筛（UI 可见性不变）
         all_messages = []

@@ -254,15 +254,16 @@ class CacheRetrieverAdapter:
         try:
             # 从缓存检索
             memories = []
-            # BUG#4: cache_key 始终基于 query 计算(无 cache_manager 时用作 _simple_cache 的键)
             cache_key = context.query[:100].strip().lower()
 
             if self._cache:
-                # 使用缓存管理器
                 memories = self._cache.get(context.query, [])
             else:
-                # 简单内存缓存(BUG#4: 直接用 self._simple_cache,不再用 getattr 死代码)
-                memories = self._simple_cache.get(cache_key, [])
+                # 批 X2：空列表不再回写——修前每次都写入刚取到的空列表，
+                # 缓存永远存不进任何东西（BUG#4 修复写反了方向）
+                cached = self._simple_cache.get(cache_key)
+                if cached is not None:
+                    memories = cached
 
             elapsed = time.monotonic() - start_time
 
