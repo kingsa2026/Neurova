@@ -52,6 +52,7 @@ class ClassifyMemoryResponse(BaseModel):
 class ProcessTaskRequest(BaseModel):
     """EKI任务处理请求"""
 
+    task_id: Optional[str] = Field(default=None, description="任务标识（缺省由服务端生成）")
     task_embedding: List[float] = Field(..., description="任务嵌入向量")
     memory_context: List[str] = Field(default_factory=list, description="相关记忆ID列表")
     user_feedback: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="用户反馈 (0-1)")
@@ -245,10 +246,16 @@ async def process_eki_task(
     """
     try:
         manager = get_memory_manager(agent_id, user)
+        # 批 F3：真身（manager.eki_process_task）读 task_id/memory_id/
+        # observation——原三键全错位，恒对虚构 task_unknown 出假读数
         result = manager.eki_process_task(
-            task_embedding=request.task_embedding,
-            memory_context=request.memory_context,
-            user_feedback=request.user_feedback,
+            task_id=request.task_id or f"task-{request.model_fields.get('task_id') is not None}",
+            memory_id=(request.memory_context[0] if request.memory_context else None)
+            or request.task_id
+            or "task_unknown",
+            observation=request.user_feedback
+            if request.user_feedback is not None
+            else 0.5,
         )
 
         return success_response(
@@ -276,7 +283,10 @@ async def predict_memory_decay(
     """
     try:
         manager = get_memory_manager(agent_id, user)
-        prediction = manager.eki_predict_decay(memory_id=memory_id, horizon=horizon)
+        # 批 F3：真身读 hours_ahead（小时）——horizon 语义是天，须换算
+        prediction = manager.eki_predict_decay(
+            memory_id=memory_id, hours_ahead=horizon * 24
+        )
 
         return success_response(
             data=prediction,
@@ -355,7 +365,8 @@ async def batch_update_cognitive_state(
     """
     try:
         manager = get_memory_manager(agent_id, user)
-        results = manager.eki_batch_update(batch_data=request.batch_data)
+        # 批 F3：真身读 updates——原 batch_data 键被 **kwargs 静默丢弃
+        results = manager.eki_batch_update(updates=request.batch_data)
 
         return success_response(
             data={
