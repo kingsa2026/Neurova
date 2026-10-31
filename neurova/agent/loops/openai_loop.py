@@ -739,12 +739,16 @@ class OpenAILoop(BaseAgentLoop):
             "data": "检测到回复为空（输出预算被思考过程耗尽），正在放宽输出预算并压缩上下文后重试…",
         }
 
+    _fire_refs: set = set()  # 批 X2：强引用集——裸 ensure_future 可能被 GC 静默吞
+
     def _rollupFoldedDigest(self, info: Dict) -> None:
         """被折叠消息生成摘要回写池（fire-and-forget，不阻塞重试；无池 no-op）。"""
         try:
             pool = getattr(getattr(self.agent, "context_orchestrator", None), "context_pool", None)
             if pool is not None:
-                asyncio.ensure_future(pool.rollup_overflow_digest(info.get("folded_messages") or []))
+                task = asyncio.ensure_future(pool.rollup_overflow_digest(info.get("folded_messages") or []))
+                self._fire_refs.add(task)
+                task.add_done_callback(self._fire_refs.discard)
         except Exception:
             logger.debug("折叠摘要回写跳过", exc_info=True)
 
