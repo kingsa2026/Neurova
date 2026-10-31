@@ -326,7 +326,13 @@ class KnowledgeAdmissionGate:
                 # 让它由咽喉兜底而不是要求每个调用方自觉，否则条目再也找不回自己的治理行。
                 request = replace(request, sourceTurnId="entry:%s" % entryId)
             request = replace(request, objectTerm=contentKey or request.objectTerm)
-        dupe = self._store.findFactByContentKey(request.agentId, contentKey) if contentKey else None
+        # 批 D2：租户维度必须随行——硬编码 default 会让非 default 租户的
+        # 同内容折回别人的行（租户隔离穿透）
+        dupe = (
+            self._store.findFactByContentKey(request.agentId, contentKey, request.tenantId)
+            if contentKey
+            else None
+        )
         if dupe:
             # 折回旧行也要补窗口：同一句话第一次带窗口、第二次不带，行为不该随调用顺序漂移
             self._store.fillValidityWindow(dupe["fact_id"], request.validFrom, request.validUntil)
