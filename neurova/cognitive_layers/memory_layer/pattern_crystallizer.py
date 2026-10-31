@@ -355,7 +355,13 @@ class PatternCrystallizer:
         self._save_buffer_state()
 
     def _enqueue_candidate(self, candidate: Dict[str, Any]) -> None:
-        """候选入待裁决队列；有界，且溢出丢弃必须可数（工单 005）。"""
+        """候选入待裁决队列；有界，且溢出丢弃必须可数（工单 005）。
+        批 W3：同 key 去重——同模式 48h 内再次达阈不得双写两条结晶节点。"""
+        for existing in self._pending:
+            if existing.get("key") == candidate.get("key"):
+                existing["sample_count"] = candidate.get("sample_count",
+                                                        existing.get("sample_count", 0))
+                return
         self._pending.append(candidate)
         self._enforce_pending_bound()
 
