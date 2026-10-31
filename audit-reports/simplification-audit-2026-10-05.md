@@ -10955,3 +10955,11 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - files approve/reject 补 persist_file 落盘——修前只改内存，重启水合后审批结果回退 "active"。
     - **合跑**：api 全量 2753 passed / 0 failed。
     - **下一枚空号现查**：条目行最大 453 ⇒ 后继从 §6-454 起。
+454. **批 X2：跨天取尾正序化 / swarm 发射器强引用 / 溢出回写强引用 / 死缓存不再回写空列表（✅ `session_manager.py +2/−2`、`swarm.py +8/−1`、`openai_loop.py +5/−1`、`retriever_adapters.py +6/−5`）** ✅🟢 —— §6-448 批 X2。
+    - 跨天会话"最近 N 条"改为正序拼装后取尾部（修前倒序拼装取尾部=最旧日期）。
+    - swarm 发射器逐 chunk `create_task` 挂强引用集 + done 回调摘除（修前 Task 只持弱引用可能被 GC 静默吞）。
+    - 溢出折叠摘要回写同法挂强引用（修前裸 ensure_future）。
+    - CacheRetriever `_simple_cache` 不再回写空列表（修前 BUG#4 修复写反了方向，缓存永远存不进任何东西）。
+    - **agent 全量**：1628 passed / 0 failed。
+    - **⚠ 自伤**：swarm.py 补丁漏了 `create_task(` 的闭合括号——7 个测试文件收集期 SyntaxError（补回后全绿）。脚本改文件后必须编译验证（form 410 同族：改文件后必须拿 numstat/compile 与改动面对表）。
+    - **下一枚空号现查**：条目行最大 454 ⇒ 后继从 §6-455 起。
