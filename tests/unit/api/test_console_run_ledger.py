@@ -70,6 +70,23 @@ def client(store, monkeypatch):
     return TestClient(app)
 
 
+def _wait_for_queued(store, session_id: str, digest: str, timeout: float = 10.0) -> None:
+    """等到目标请求的台账行进入 queued（intake 是 acquire 第一步，必现）。
+
+    替代固定睡眠：release/stop 触发器若抢在 intake 之前发射，blocker 放行
+    与取消意图都会落空（前者秒晋升、后者排队轮询空等到 120s 超时=挂死）。
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        rows = [
+            row for row in store.list_runs(session_id)
+            if row.get("message_digest") == digest and row.get("status") == "queued"
+        ]
+        if rows:
+            return
+        time.sleep(0.05)
+
+
 def _sse_types(response_text: str):
     types = []
     for line in response_text.splitlines():
@@ -122,7 +139,7 @@ def test_single_active_run_queues_then_proceeds(client, store):
     assert store.claim_next(sid, owner="blocker-w") == blocker
 
     def _release_later():
-        time.sleep(0.5)
+        _wait_for_queued(store, sid, "waited")
         store.finish(blocker, owner="blocker-w", status="completed")
 
     t = threading.Thread(target=_release_later)
@@ -203,7 +220,7 @@ def test_stop_while_queued_terminates_stream(client, store):
     store.claim_next(sid, owner="blocker-w")
 
     def _stop_soon():
-        time.sleep(0.4)
+        _wait_for_queued(store, sid, "queued-and-stopped")
         store.request_cancel(sid)
 
     t = threading.Thread(target=_stop_soon)
