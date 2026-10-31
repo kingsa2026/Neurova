@@ -300,7 +300,13 @@ const GeoMapPanel = defineAsyncComponent(
 const { t } = useI18n()
 // onAgentChange：agent 切换后重拉工作台数据（与旧图谱页同款联动，切换族测试钉着）。
 const { agentId, currentAgent } = useAgentPage({
-  onAgentChange: () => fetchStudio(),
+  onAgentChange: () => {
+    // 批 W2：清焦点态——修前切 Agent 后画布串显上一个 Agent 的子图
+    localRender.value = null
+    focusNodeId.value = ''
+    selectedNodeId.value = ''
+    fetchStudio()
+  },
 })
 const authStore = useAuthStore()
 
