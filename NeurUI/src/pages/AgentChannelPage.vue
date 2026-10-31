@@ -468,9 +468,9 @@ watch(agentId, () => { fetchConfigs() }, { immediate: true })
   display: flex; align-items: center; gap: 8px;
   font-size: 14px; font-weight: 600; color: var(--nr-text-primary);
 }
-.nr-ac-panel-count { color: var(--nr-success, #22c55e); }
+.nr-ac-panel-count { color: var(--nr-success, var(--nr-success)); }
 .nr-ac-panel-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--nr-text-tertiary, #6b7280); }
-.nr-ac-panel-dot.on { background: var(--nr-success, #22c55e); }
+.nr-ac-panel-dot.on { background: var(--nr-success, var(--nr-success)); }
 
 .nr-ac-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
 .nr-ac-card { display: flex; flex-direction: column; gap: 12px; }

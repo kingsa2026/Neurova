@@ -95,7 +95,7 @@ const btnRef = ref<HTMLElement | null>(null)
 /* Danger: iOS 红色 */
 .nr-glass-btn--danger .nr-glass-btn-bg {
   position: absolute; inset: 0;
-  background: linear-gradient(180deg, #ff5f52 0%, var(--nr-error) 60%, #e3372c 100%);
+  background: var(--nr-error);
   border-radius: inherit; transition: opacity 0.3s;
 }
 .nr-glass-btn--danger {

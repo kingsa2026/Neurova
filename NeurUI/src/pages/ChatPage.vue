@@ -3197,12 +3197,12 @@ onBeforeUnmount(() => {
 }
 
 .nr-msg-action--active-negative {
-  color: var(--nr-danger, #e5484d);
+  color: var(--nr-danger, var(--nr-error));
   background: rgba(229, 72, 77, 0.12);
 }
 
 .nr-msg-action--danger:hover {
-  color: var(--nr-danger, #e5484d);
+  color: var(--nr-danger, var(--nr-error));
 }
 
 /* 编辑最后一条用户消息（内联编辑框） */
@@ -3321,7 +3321,7 @@ onBeforeUnmount(() => {
 
 .nr-retry-notice-label {
   font-size: 12px;
-  color: #d2994a;
+  color: var(--nr-warning);
   white-space: nowrap;
 }
 

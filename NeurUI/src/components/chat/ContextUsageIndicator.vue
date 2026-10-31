@@ -265,10 +265,10 @@ watch(
   transition: stroke-dasharray 0.4s ease, stroke 0.3s ease;
 }
 .nr-ctx-usage--warn .nr-ctx-ring-fg {
-  stroke: #e6a23c;
+  stroke: var(--nr-warning);
 }
 .nr-ctx-usage--danger .nr-ctx-ring-fg {
-  stroke: #f56c6c;
+  stroke: var(--nr-error);
 }
 .nr-ctx-usage-text {
   font-size: 11px;
@@ -381,7 +381,7 @@ watch(
 }
 
 .nr-ctx-panel-footer b {
-  color: #67c23a;
+  color: var(--nr-success);
   font-weight: 600;
 }
 

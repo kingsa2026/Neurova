@@ -103,7 +103,7 @@ onBeforeUnmount(releaseSrc)
 }
 .nr-dock-error {
   padding: 12px;
-  color: #e5484d;
+  color: var(--nr-error);
   font-size: 13px;
 }
 </style>

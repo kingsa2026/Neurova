@@ -4,7 +4,7 @@
  * 同 RegisterPage.background.test.ts 契约：
  * 1. 深色主题渲染 Galaxy 银河背景（替换旧 StarBackground）；
  * 2. 卡片用 GlassSurface（真 backdrop 折射，替换 GlassPanel）；
- * 3. 页面底色 #090020 深空蓝；
+ * 3. 页面底色走 --nr-bg-deep 令牌（深空蓝，与登录页一致）；
  * 4. 入场动画 fill 禁用 forwards/both（残留 transform 破坏 backdrop 采样）。
  */
 import { describe, it, expect, vi } from 'vitest'
@@ -80,9 +80,9 @@ describe.each(cases)('$name 与登录页对齐', ({ comp, src, container }) => {
     wrapper.unmount()
   })
 
-  it('页面底色为深空蓝 #090020（与登录页一致）', () => {
+  it('页面底色走 --nr-bg-deep 令牌（与登录页一致）', () => {
     const rule = /\.nr-auth-page\s*\{[^}]*\}/.exec(src)?.[0] ?? ''
-    expect(rule).toMatch(/background:\s*#090020/)
+    expect(rule).toMatch(/background:\s*var\(--nr-bg-deep\)/)
   })
 
   it('入场动画不得使用 forwards/both 填充（残留 transform 破坏 backdrop 采样）', () => {

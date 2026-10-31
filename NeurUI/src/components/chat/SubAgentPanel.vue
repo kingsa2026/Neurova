@@ -130,7 +130,7 @@ function onOutputScroll(e: Event): void {
 .panel-btn {
   border: none;
   background: transparent;
-  color: var(--nr-text-tertiary, #94a3b8);
+  color: var(--nr-text-tertiary, var(--nr-text-tertiary));
   cursor: pointer;
   font-size: 12px;
   padding: 0 3px;
@@ -141,7 +141,7 @@ function onOutputScroll(e: Event): void {
 .panel-task {
   padding: 6px 10px 2px;
   font-size: 11px;
-  color: var(--nr-text-tertiary, #94a3b8);
+  color: var(--nr-text-tertiary, var(--nr-text-tertiary));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

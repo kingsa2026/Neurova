@@ -134,6 +134,6 @@ watch(
   font-size: 13px;
 }
 .nr-dock-error {
-  color: #e5484d;
+  color: var(--nr-error);
 }
 </style>

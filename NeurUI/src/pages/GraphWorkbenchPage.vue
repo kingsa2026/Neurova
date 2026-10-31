@@ -874,7 +874,7 @@ onMounted(() => {
 }
 
 .workbench-flow :deep(.vue-flow__edge .flow-stream) {
-  stroke: #a5b4fc;
+  stroke: var(--nr-primary-light);
   stroke-width: 2;
   stroke-linecap: round;
   stroke-dasharray: 3 15;
