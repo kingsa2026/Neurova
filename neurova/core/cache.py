@@ -142,8 +142,9 @@ class MemoryCache:
             if expired_keys:
                 logger.debug("Cleaned up %s expired cache entries", len(expired_keys))
 
-            # 重新启动定时器
-            self._start_cleanup_timer()
+            # 重新启动定时器（shutdown 后不再复活——批 W4）
+            if not self._shutdown:
+                self._start_cleanup_timer()
 
     def get(self, key: str, default: Any = None) -> Any:
         """
@@ -424,8 +425,12 @@ class MemoryCache:
 
             return evicted
 
+    _shutdown: bool = False
+
     def shutdown(self):
-        """关闭缓存"""
+        """关闭缓存（批 W4：置位标志——修前 _cleanup_expired 结尾无条件
+        _start_cleanup_timer，shutdown 后定时器会复活）"""
+        self._shutdown = True
         if self._cleanup_timer:
             self._cleanup_timer.cancel()
             self._cleanup_timer = None
