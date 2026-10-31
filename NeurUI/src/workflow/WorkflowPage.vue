@@ -774,11 +774,11 @@ onMounted(() => {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #ff4d4f;
+  background: var(--nr-error);
   transition: background 0.2s;
 }
 .comfyui-status.available .status-dot {
-  background: #52c41a;
+  background: var(--nr-success);
 }
 .comfyui-status .status-text {
   flex: 1;

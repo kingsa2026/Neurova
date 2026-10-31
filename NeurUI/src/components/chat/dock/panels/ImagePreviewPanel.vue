@@ -167,7 +167,7 @@ watch(() => props.tab.id, () => {
 }
 .nr-dock-error {
   padding: 20px;
-  color: #e5484d;
+  color: var(--nr-error);
   font-size: 13px;
 }
 </style>

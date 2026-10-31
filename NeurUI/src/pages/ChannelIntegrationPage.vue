@@ -819,7 +819,7 @@ onMounted(() => {
 }
 
 .nr-ci-ingress-item.warn {
-  color: var(--nr-warning, #faad14);
+  color: var(--nr-warning, var(--nr-warning));
 }
 
 .nr-ci-tabs {
@@ -885,7 +885,7 @@ onMounted(() => {
   color: var(--nr-text-primary);
 }
 .nr-ci-panel-count {
-  color: var(--nr-success, #22c55e);
+  color: var(--nr-success, var(--nr-success));
 }
 .nr-ci-panel-dot {
   width: 8px;
@@ -894,7 +894,7 @@ onMounted(() => {
   background: var(--nr-text-tertiary, #6b7280);
 }
 .nr-ci-panel-dot.on {
-  background: var(--nr-success, #22c55e);
+  background: var(--nr-success, var(--nr-success));
 }
 .nr-ci-prefix {
   margin-top: 6px;
@@ -1065,7 +1065,7 @@ onMounted(() => {
 }
 
 .nr-ci-status-dot.enabled {
-  background: #22c55e;
+  background: var(--nr-success);
 }
 
 .nr-ci-status-text {

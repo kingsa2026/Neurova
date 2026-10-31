@@ -266,17 +266,17 @@ async function doRunCommand() {
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  color: var(--nr-text-tertiary, #94a3b8);
+  color: var(--nr-text-tertiary, var(--nr-text-tertiary));
   margin-right: auto;
 }
 .cu-status-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #64748b;
+  background: var(--nr-text-tertiary);
 }
 .cu-status.busy .cu-status-dot {
-  background: #facc15;
+  background: var(--nr-warning);
   animation: cu-pulse 1s ease-in-out infinite;
 }
 @keyframes cu-pulse {
@@ -285,7 +285,7 @@ async function doRunCommand() {
 .cu-btn {
   border: none;
   background: transparent;
-  color: var(--nr-text-tertiary, #94a3b8);
+  color: var(--nr-text-tertiary, var(--nr-text-tertiary));
   cursor: pointer;
   font-size: 12px;
   padding: 2px 5px;
@@ -324,7 +324,7 @@ async function doRunCommand() {
   font-family: 'Cascadia Code', 'Consolas', 'Menlo', monospace;
   font-size: 12px;
   line-height: 1.5;
-  color: #d6e2c0;
+  color: var(--nr-text-primary);
   white-space: pre-wrap;
   word-break: break-word;
   align-self: stretch;
@@ -343,7 +343,7 @@ async function doRunCommand() {
   height: 14px;
   margin: -7px 0 0 -7px;
   border-radius: 50%;
-  border: 2px solid #facc15;
+  border: 2px solid var(--nr-warning);
   box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.25);
   pointer-events: none;
   animation: cu-marker-pulse 1s ease-out 2;
@@ -360,17 +360,17 @@ async function doRunCommand() {
   line-height: 1;
   padding: 2px 5px;
   border-radius: 4px;
-  color: #4ade80;
+  color: var(--nr-success);
   background: rgba(74, 222, 128, 0.1);
   border: 1px solid rgba(74, 222, 128, 0.3);
 }
 .cu-badge.unverified {
-  color: #facc15;
+  color: var(--nr-warning);
   background: rgba(250, 204, 21, 0.08);
   border-color: rgba(250, 204, 21, 0.3);
 }
 .cu-badge.refused {
-  color: #fca5a5;
+  color: var(--nr-error);
   background: rgba(252, 165, 165, 0.08);
   border-color: rgba(252, 165, 165, 0.3);
 }
@@ -387,7 +387,7 @@ async function doRunCommand() {
   margin: 0;
   font-size: 12px;
   line-height: 1.6;
-  color: var(--nr-text-tertiary, #94a3b8);
+  color: var(--nr-text-tertiary, var(--nr-text-tertiary));
   max-width: 260px;
 }
 .cu-coords {
@@ -396,7 +396,7 @@ async function doRunCommand() {
   bottom: 6px;
   font-family: var(--nr-font-mono, monospace);
   font-size: 11px;
-  color: var(--nr-text-tertiary, #94a3b8);
+  color: var(--nr-text-tertiary, var(--nr-text-tertiary));
   background: rgba(0, 0, 0, 0.55);
   padding: 2px 6px;
   border-radius: 4px;
@@ -435,7 +435,7 @@ async function doRunCommand() {
   padding: 7px 12px 4px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--nr-text-tertiary, #94a3b8);
+  color: var(--nr-text-tertiary, var(--nr-text-tertiary));
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -458,11 +458,11 @@ async function doRunCommand() {
   color: var(--nr-text-secondary, #cbd5e1);
 }
 .cu-log-item:nth-child(odd) { background: rgba(255, 255, 255, 0.02); }
-.cu-log-item.failed { color: #fca5a5; }
+.cu-log-item.failed { color: var(--nr-error); }
 .cu-log-time {
   font-family: var(--nr-font-mono, monospace);
   font-size: 10px;
-  color: var(--nr-text-tertiary, #64748b);
+  color: var(--nr-text-tertiary, var(--nr-text-tertiary));
   flex-shrink: 0;
 }
 .cu-log-summary {
@@ -472,12 +472,12 @@ async function doRunCommand() {
   text-overflow: ellipsis;
 }
 .cu-log-status { flex-shrink: 0; font-size: 11px; }
-.cu-log-item:not(.failed) .cu-log-status { color: #4ade80; }
+.cu-log-item:not(.failed) .cu-log-status { color: var(--nr-success); }
 .cu-log-empty {
   padding: 14px;
   text-align: center;
   font-size: 12px;
-  color: var(--nr-text-tertiary, #64748b);
+  color: var(--nr-text-tertiary, var(--nr-text-tertiary));
 }
 
 /* Manual controls */

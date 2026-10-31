@@ -312,14 +312,14 @@ async function handleDelete(store: ConnectedStore): Promise<void> {
 .store-row-title { display: flex; align-items: center; gap: 8px; }
 .store-name { font-weight: 500; }
 .store-badge { font-size: 12px; padding: 0 6px; border-radius: 8px; }
-.badge-active { background: rgba(82, 196, 26, 0.15); color: #52c41a; }
-.badge-error { background: rgba(255, 77, 79, 0.15); color: #ff4d4f; }
-.badge-expired, .badge-pending { background: rgba(250, 173, 20, 0.15); color: #faad14; }
+.badge-active { background: rgba(82, 196, 26, 0.15); color: var(--nr-success); }
+.badge-error { background: rgba(255, 77, 79, 0.15); color: var(--nr-error); }
+.badge-expired, .badge-pending { background: rgba(250, 173, 20, 0.15); color: var(--nr-warning); }
 .store-meta { font-size: 12px; color: var(--nr-text-secondary, rgba(255, 255, 255, 0.55)); margin-top: 2px; }
-.store-error { color: #ff4d4f; }
+.store-error { color: var(--nr-error); }
 .store-row-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .store-form { display: flex; flex-direction: column; gap: 10px; }
 .form-row { display: flex; align-items: center; gap: 10px; }
 .form-row label { width: 120px; flex-shrink: 0; font-size: 13px; text-align: right; }
-.store-admission { font-size: 12px; color: #faad14; margin: 0; }
+.store-admission { font-size: 12px; color: var(--nr-warning); margin: 0; }
 </style>

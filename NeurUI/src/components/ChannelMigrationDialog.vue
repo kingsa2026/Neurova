@@ -179,5 +179,5 @@ watch(() => props.open, (open) => { if (open) loadSources() }, { immediate: true
 .nr-mig-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
 .nr-mig-empty-title { font-size: 14px; font-weight: 600; color: var(--nr-text-primary); }
 .nr-mig-empty-hint { font-size: 12px; color: var(--nr-text-tertiary); }
-.nr-mig-error { font-size: 12px; color: var(--nr-color-danger, #e11d48); margin-top: 12px; }
+.nr-mig-error { font-size: 12px; color: var(--nr-error); margin-top: 12px; }
 </style>

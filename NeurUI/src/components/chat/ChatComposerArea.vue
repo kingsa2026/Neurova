@@ -1102,7 +1102,7 @@ defineExpose({ closeSlashPanel, autoResize })
   border-radius: 50%;
 }
 .nr-model-dot.is-ok {
-  background: #22c55e;
+  background: var(--nr-success);
   box-shadow: 0 0 4px rgba(34, 197, 94, 0.55);
 }
 .nr-model-dot.is-off {
@@ -1165,7 +1165,7 @@ defineExpose({ closeSlashPanel, autoResize })
   cursor: not-allowed;
 }
 .nr-composer-send.is-stop {
-  background: var(--nr-danger, #f56c6c);
+  background: var(--nr-danger, var(--nr-error));
 }
 /* P1-9 steer 插话：流式中与停止按钮并列，用主色区分语义（不取消当前轮） */
 .nr-composer-send.is-steer {

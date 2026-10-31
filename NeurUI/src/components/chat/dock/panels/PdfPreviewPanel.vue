@@ -130,7 +130,7 @@ onBeforeUnmount(releaseSrc)
   width: 100%;
   min-height: 0;
   border: none;
-  background: #1f1f1f;
+  background: var(--nr-bg-deep);
 }
 .nr-dock-pdf-note {
   padding: 18px 12px;

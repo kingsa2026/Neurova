@@ -228,6 +228,6 @@ const totalSize = computed(() => {
 .nr-artifact-btn--primary {
   background: rgba(99, 102, 241, 0.22);
   border-color: rgba(129, 140, 248, 0.5);
-  color: #c7d2fe;
+  color: var(--nr-primary-light);
 }
 </style>

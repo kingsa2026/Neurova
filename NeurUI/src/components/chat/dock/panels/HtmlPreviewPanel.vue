@@ -102,7 +102,7 @@ watch(
 .nr-dock-error {
   padding: 20px;
   text-align: center;
-  color: #e5484d;
+  color: var(--nr-error);
   font-size: 13px;
 }
 </style>

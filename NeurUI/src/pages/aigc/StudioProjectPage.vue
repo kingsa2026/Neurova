@@ -626,7 +626,7 @@ defineExpose({
 }
 .studio-rail-step:hover { background: rgba(125, 125, 125, 0.1); }
 .studio-rail-step.active { background: rgba(64, 150, 255, 0.12); color: var(--nr-text-primary); font-weight: 600; }
-.studio-rail-step.done .studio-rail-dot { background: #52c41a; color: #fff; }
+.studio-rail-step.done .studio-rail-dot { background: var(--nr-success); color: #fff; }
 .studio-rail-dot {
   width: 20px; height: 20px; border-radius: 50%; display: inline-flex;
   align-items: center; justify-content: center; font-size: 11px;
@@ -654,7 +654,7 @@ defineExpose({
 .studio-shot-card { border: 1px solid var(--nr-border, rgba(255,255,255,.08)); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
 .studio-shot-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .studio-shot-no { font-weight: 700; color: var(--nr-text-primary); }
-.studio-shot-error { font-size: 12px; color: #ff4d4f; flex: 1; min-width: 0; word-break: break-word; }
+.studio-shot-error { font-size: 12px; color: var(--nr-error); flex: 1; min-width: 0; word-break: break-word; }
 .studio-shot-grid { display: grid; grid-template-columns: 180px 1fr; gap: 14px; }
 .studio-shot-img { width: 100%; border-radius: 8px; }
 .studio-shot-lastframe { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
@@ -667,7 +667,7 @@ defineExpose({
 .studio-shot-row { display: flex; gap: 8px; }
 .studio-shot-actions { display: flex; gap: 8px; margin-top: 6px; }
 .studio-composed { display: flex; flex-direction: column; gap: 8px; }
-.studio-merge-warn { font-size: 12px; color: #d48806; }
+.studio-merge-warn { font-size: 12px; color: var(--nr-warning); }
 .studio-merge-mode { font-size: 12px; color: var(--nr-text-secondary); }
 @media (max-width: 900px) { .studio-body { grid-template-columns: 1fr; } .studio-shot-grid { grid-template-columns: 1fr; } }
 </style>
