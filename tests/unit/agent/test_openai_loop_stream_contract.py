@@ -173,8 +173,6 @@ class TestStreamUsageCountedOncePerCall:
 
     def test_duplicate_usage_chunks_are_not_summed(self):
         loop = make_loop()
-        # 生产路径由 predict_step 每请求重置；这里直调 _predict_stream，显式给真 dict
-        loop.agent._round_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         usage = SimpleNamespace(prompt_tokens=8, completion_tokens=2, total_tokens=10)
         llm = ChunkLLM(
             [
@@ -187,19 +185,19 @@ class TestStreamUsageCountedOncePerCall:
         loop.llm_client = llm
         loop.agent.llm_client = llm
 
-        asyncio.run(
+        events = asyncio.run(
             collect(loop._predict_stream({"messages": [{"role": "user", "content": "hi"}], "stream": True}))
         )
 
-        assert loop.agent._round_usage["total_tokens"] == 10, (
-            f"同一调用的两个 usage chunk 被累加成 {loop.agent._round_usage['total_tokens']}；"
+        done = [e for e in events if e.get("type") == "done"][-1]
+        assert done["usage"]["total_tokens"] == 10, (
+            f"同一调用的两个 usage chunk 被累加成 {done['usage']['total_tokens']}；"
             "预算门会在真实用量一半处提前开火"
         )
 
     def test_two_calls_still_accumulate_across_tool_rounds(self):
         """同一请求的两个工具轮：每轮 usage 计一次，跨轮仍累加（10+10=20）。"""
         loop = make_loop()
-        loop.agent._round_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         usage = SimpleNamespace(prompt_tokens=8, completion_tokens=2, total_tokens=10)
         round1 = [
             LLMResponse(
@@ -220,11 +218,12 @@ class TestStreamUsageCountedOncePerCall:
         loop.llm_client = llm
         loop.agent.llm_client = llm
 
-        asyncio.run(
+        events = asyncio.run(
             collect(loop._predict_stream({"messages": [{"role": "user", "content": "hi"}], "stream": True}))
         )
 
-        assert loop.agent._round_usage["total_tokens"] == 20, (
+        done = [e for e in events if e.get("type") == "done"][-1]
+        assert done["usage"]["total_tokens"] == 20, (
             f"两个工具轮、每轮两个 usage chunk，应计 20，实得 "
-            f"{loop.agent._round_usage['total_tokens']}"
+            f"{done['usage']['total_tokens']}"
         )

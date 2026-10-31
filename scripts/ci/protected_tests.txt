@@ -4103,3 +4103,16 @@ tests/unit/knowledge/test_answerFactGuard.py
 # 知识路质量门（specs/2026-10-30 §11.4 根修）：重合按实跑查询计 + 词面重合通道独立
 # 达标——1 条别名驱动的相关命中必须过链采纳门，不相关/全空/满载边界不回归
 tests/unit/agent/test_knowledgeQualityGate.py
+# 剩余 11 条交接（docs/specs/2026-10-31-remaining-11-fixes.md）：
+# R5 outbox 四件——失败态落盘/退避被消费/死信移出 pending/清理同步删文件（重启不重投）
+tests/unit/collaboration/test_outbox_handler.py
+# 治理端点租户隔离——跨租户 resolve/restore/待审按不存在处理
+tests/unit/knowledge/test_governance_tenant_isolation.py
+# EntryLedger 租户分区——非 default 租户落本租户治理行，同内容跨租户不共享
+tests/unit/knowledge/test_entry_ledger_tenant.py
+# EventBus 异步订阅在无队列/无归属 loop 时不得静默丢
+tests/unit/core/test_event_bus_no_loop_drop.py
+# 健康检查 interval 周期调度 + /health/detailed 缓存语义（cached 透明化）
+tests/unit/core/test_health_checker_scheduler.py
+# C1 轮次态三件随调用链走——交叠会话的用量与轮间标志各归各
+tests/unit/agent/test_turnStateConcurrency.py

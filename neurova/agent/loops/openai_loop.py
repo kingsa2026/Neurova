@@ -221,11 +221,11 @@ class OpenAILoop(BaseAgentLoop):
         空 turnId，正是"构造点各写一份、指纹无人记"的形态。
         """
         _runner = self._buildGateRunner()
-        self._gate_runner = _runner
         state = TurnRunState.forTurn(
             agentId=self._agentFingerprint(),
             roundUserKey=self._fingerprintUserMessage(messages),
             gateRunner=_runner,
+            rounds=_StreamRounds(),
         )
         state.maxToolRounds = resolveToolRoundBudget()
         return state
@@ -254,29 +254,18 @@ class OpenAILoop(BaseAgentLoop):
         # `max_loop_rounds // 2` 存进 `self._max_tool_rounds` —— 既让同键读出两个
         # 尺度（门控因此恒被守卫抢先，第二轴记 `scaled_sparse`），又把值挂在单例上
         # （切片 A 已从轮次态里消灭的形态）。
-        # 门控执行器每轮一份：**读取面就是判定面**（同一份实例）。
-        # `DoomLoopGate` 的窗口与中断计数是会话级态，挂在单例 loop 上会让两个会话
-        # 互相把对方的正常调用判成重复（Issue #268 缺陷 A）；但同一轮内两条路径
-        # 各建一份，会让窗口在同一轮内不再累计、经实例追加的门控只落在其中一份上。
-        # 故入口重建一次、实例引用即本轮判定面，`TurnRunState.gateRunner` 直接持有它。
+        # 门控执行器每轮一份，**只挂在 state 上**：`DoomLoopGate` 的窗口与中断计数
+        # 是会话级态，挂单例 loop 上会让两个会话互判重复（Issue #268 缺陷 A）；同一轮
+        # 内两条路径共用这一份（各建一份会让窗口不再累计）。
         _round_gate_runner = self._buildGateRunner()
-        self._gate_runner = _round_gate_runner
         state = TurnRunState.forTurn(
             agentId=self._agentFingerprint(),
             roundUserKey=self._fingerprintUserMessage(messages),
             gateRunner=_round_gate_runner,
         )
         state.maxToolRounds = resolveToolRoundBudget()
-        # 2026-09-07 回归修复：_round_usage 是"本轮 token 预算"语义，必须
-        # 每次用户请求重置——原修复只加了写入方，忘了重置，跨请求无限累计
-        # 导致第二轮 LLM 调用被 TokenBudgetGate 掐死（回复空白回归）
-        self.agent._round_usage = {
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0,
-        }
-        # 同理由：目标续跑次数是"本轮"语义，跨请求残留会让下一轮一开局就
-        # 撞上已耗尽的续跑预算（目标门在出口直接 TERMINATE，回复被掐断）。
+        # 目标续跑次数是"本轮"语义：跨请求残留会让下一轮一开局就撞上已耗尽的
+        # 续跑预算（目标门在出口直接 TERMINATE，回复被掐断）。
         turn_context.reset_turn_goal_continuations()
         request_params = {
             "messages": messages,
@@ -500,7 +489,7 @@ class OpenAILoop(BaseAgentLoop):
             _gd = state.gateRunner.on_round_end(state.gateContext(
                 _tool_sigs,
                 round_reply=getattr(response, "content", "") or "",
-                round_usage=getattr(self.agent, "_round_usage", None) or {},
+                round_usage=state.roundUsage,
                 goal=self.resolveTurnGoal() or {},
             ))
             if _gd is not None and _gd.action == _SA.TERMINATE:
@@ -534,8 +523,8 @@ class OpenAILoop(BaseAgentLoop):
         （单一实现点，流式路径同调它）。
 
         `state` 必须随调用链**继续传递**（Issue #268）：出口续跑是本轮的续跑，
-        不传 state 会让续跑段重建一份轮次态，其门控执行器取自实例引用
-        `self._gate_runner`——那是**最后进入本 loop 的会话**留下的，交叠会话下
+        不传 state 会让续跑段重建一份轮次态，其门控执行器只能退回实例兜底
+        `gateRunnerForExit()`——那是**最后进入本 loop 的会话**留下的，交叠会话下
         等于把别人的门控窗口接过来（实测：续跑轮的调用签名落到另一会话窗口，
         被死循环门误判终止）。
         """
@@ -544,9 +533,10 @@ class OpenAILoop(BaseAgentLoop):
         decision = await evaluateLoopExit(
             self,
             reply=getattr(response, "content", "") or "",
-            roundUsage=getattr(self.agent, "_round_usage", None) or {},
+            roundUsage=state.roundUsage,
             toolRound=state.toolRounds,
             roundSignature=state.exitSignature(),
+            gateRunner=state.gateRunner,
         )
         if decision.action == LOOP_CONTINUE:
             request_params["messages"].append(
@@ -586,7 +576,7 @@ class OpenAILoop(BaseAgentLoop):
         if state is None:
             state = self._startTurnState(request_params.get("messages") or [])
 
-        self._rounds = _StreamRounds()  # 本轮流式循环的轮间标志（见 `_resumeAfterLengthEmpty`）
+        state.rounds = _StreamRounds()  # 本轮流式循环的轮间标志（见 `_resumeAfterLengthEmpty`）
         while True:
             # 轮入口不变量（切片 C）：与非流式同判据，两条路径共用同一份自证。
             state.assertRoundInvariant()
@@ -596,7 +586,7 @@ class OpenAILoop(BaseAgentLoop):
                 async for item in self._streamOneRound(request_params, state):
                     if isinstance(item, _RoundEnd):
                         produced, gotContent = item.done, item.gotContent
-                        self._rounds.advanced = item.advanced
+                        state.rounds.advanced = item.advanced
                         break
                     if isinstance(item, dict) and item.get("type") == "content" and item.get("data"):
                         gotContent = True
@@ -610,16 +600,17 @@ class OpenAILoop(BaseAgentLoop):
                 request_params = resumed
                 continue
 
-            if self._rounds.exhausted:
+            if state.rounds.exhausted:
                 # 轮次超限：本轮没有 done 可交，静默收尾（与非流式「终止」同判据）
                 return
 
-            if self._rounds.lengthEmpty:
+            if state.rounds.lengthEmpty:
                 # 输出预算耗尽（本轮 length 且正文为空）→ 放宽预算后就地重试。
                 # 本轮的空 done 不让出（无正文可看），只让出提示；重试仍空由
                 # `retriedStillEmpty` 分支补可见提示并改写 done.reply（杜绝空气泡）。
                 resumed, notice = self._resumeAfterLengthEmpty(
-                    request_params, compact_messages_for_overflow, state.degeneratedRound
+                    request_params, compact_messages_for_overflow,
+                    state.degeneratedRound, state,
                 )
                 if resumed is None:
                     # 不重试的两类原因都走这里：交代替式提示（若有）+ 原样交出该 done。
@@ -642,7 +633,7 @@ class OpenAILoop(BaseAgentLoop):
                 # 首轮(或重试轮)的 done：重试仍空 → 补可见提示并改写 done.reply，
                 # 使 ctx.reply 非空、落盘与前端气泡均有内容（杜绝空气泡，闭环）
                 if not (produced.get("reply") or "").strip() and (
-                    self._rounds.retriedStillEmpty or self._rounds.lengthEmptyRetried
+                    state.rounds.retriedStillEmpty or state.rounds.lengthEmptyRetried
                 ):
                     # `lengthEmptyRetried` 为真 = 重试轮仍空（本轮就是那次重试）
                     yield {"type": "content", "data": _LENGTH_EMPTY_NOTICE}
@@ -650,7 +641,7 @@ class OpenAILoop(BaseAgentLoop):
                 yield produced
                 return
 
-            if self._rounds.advanced:
+            if state.rounds.advanced:
                 # 本轮被接续（工具轮续写 / 出口续跑）：下一轮由循环开
                 continue
             return
@@ -683,7 +674,8 @@ class OpenAILoop(BaseAgentLoop):
         return {**request_params, "messages": compact, "_overflowRetried": True}
 
     def _resumeAfterLengthEmpty(
-        self, request_params: Dict, compactMessages, degenerated: bool = False
+        self, request_params: Dict, compactMessages, degenerated: bool,
+        state: TurnRunState,
     ):
         """输出预算耗尽恢复：返回（下一轮的 request_params, 首轮提示事件）。
 
@@ -731,9 +723,9 @@ class OpenAILoop(BaseAgentLoop):
         if "reasoning_effort" in request_params:
             retryParams["reasoning_effort"] = "low"
         retryParams.pop("thinking_budget", None)
-        self._rounds.lengthEmptyRetried = True
+        state.rounds.lengthEmptyRetried = True
         # 紧接着的这一轮若仍空即"重试仍空"：由收尾路径补可见提示（不再重试，防循环）
-        self._rounds.retriedStillEmpty = True
+        state.rounds.retriedStillEmpty = True
         return retryParams, {
             "type": "reasoning",
             "data": "检测到回复为空（输出预算被思考过程耗尽），正在放宽输出预算并压缩上下文后重试…",
@@ -758,7 +750,7 @@ class OpenAILoop(BaseAgentLoop):
         循环推进的语义（三类）都在这里落地成 `rounds` 上的标志，由
         `_predict_stream` 决定是继续下一轮还是收尾——单轮本身不递归、不循环。
         """
-        self._rounds.beginNextRound()
+        state.rounds.beginNextRound()
         gotContent = False
         advanced = False
         doneEvent: Optional[Dict[str, Any]] = None
@@ -776,10 +768,10 @@ class OpenAILoop(BaseAgentLoop):
                 continue
             yield event
 
-        self._rounds.advanced = advanced
+        state.rounds.advanced = advanced
         if not advanced and not gotContent and doneEvent is not None:
             # 输出预算耗尽防线（前置于 done 事件的判定，见 `_predict_stream` 分支）
-            self._rounds.lengthEmpty = (
+            state.rounds.lengthEmpty = (
                 not request_params.get("_length_empty_retried")
                 and not (doneEvent.get("reply") or "").strip()
                 and str(doneEvent.get("finish_reason") or "").lower() in ("length", "max_tokens")
@@ -849,7 +841,7 @@ class OpenAILoop(BaseAgentLoop):
                 reply_parts.append(content)
                 yield {"type": "content", "data": content}
             if getattr(chunk, "usage", None):
-                # 2026-09-07 根因修复（audit P2-8）：agent._round_usage 全仓无写入方
+                # 2026-09-07 根因修复（audit P2-8）：本轮预算口全仓无写入方
                 # → TokenBudgetGate 恒死门；从流式 usage 聚合写入。形状归一与累加都只在
                 # 基类 `_accumulateRoundUsage` 那一份里做（§6-77）——环内再拼一遍就是
                 # 第二份实现，两份迟早漂移成"某条环的预算闸恒不触发"。
@@ -892,8 +884,8 @@ class OpenAILoop(BaseAgentLoop):
 
         # 本次调用只累加一次：usage 是累计值，重复 chunk 不是增量
         if pending_usage is not None:
-            self._accumulateRoundUsage(pending_usage)
-            round_usage = getattr(self.agent, "_round_usage", None) or {}
+            self._accumulateRoundUsage(pending_usage, state)
+            round_usage = state.roundUsage
 
         # 保存思考过程到 agent（供 post-chat 持久化/前端展示）
         reasoning_text = reasoningGuard.cleanText
@@ -958,7 +950,7 @@ class OpenAILoop(BaseAgentLoop):
                 gate_decision = state.gateRunner.on_round_end(state.gateContext(
                     _tool_sigs,
                     round_reply=round_reply,
-                    round_usage=getattr(self.agent, "_round_usage", None) or {},
+                    round_usage=state.roundUsage,
                     goal=self.resolveTurnGoal() or {},
                 ))
             if gate_decision.action.value == "terminate":
@@ -1029,9 +1021,10 @@ class OpenAILoop(BaseAgentLoop):
         _exitDecision = await evaluateLoopExit(
             self,
             reply="".join(reply_parts),
-            roundUsage=getattr(self.agent, "_round_usage", None) or {},
+            roundUsage=state.roundUsage,
             toolRound=state.toolRounds,
             roundSignature=state.exitSignature(),
+            gateRunner=state.gateRunner,
         )
         if _exitDecision.action == LOOP_CONTINUE:
             request_params["messages"].append(
@@ -1060,7 +1053,7 @@ class OpenAILoop(BaseAgentLoop):
             "type": "done",
             "reply": "".join(reply_parts),
             "finish_reason": finish_reason,
-            # done 的用量读数与门控、预算闸同源（`agent._round_usage` 的转引，见上方
+            # done 的用量读数与门控、预算闸同源（`state.roundUsage` 的转引，见上方
             # 聚合点）。改前这里是"最后一个带 usage 的 chunk"自己拼的那份，与那两处
             # 不同源——多次回传 usage 的网关下，同一轮会给出两个不同的数（§6-77 命中点）。
             # 没收到任何 usage 时仍是 None："没有读数"不等于"读数为 0"。

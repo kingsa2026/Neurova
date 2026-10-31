@@ -86,7 +86,7 @@ class TestStreamUsageAggregation:
         "逐 chunk 累加会把 token 双计"；环内必须同口径，否则 TokenBudgetGate
         会被抬到真实用量的一倍（50k 真实被算成 100k 提前终止）。
         """
-        loop, agent = _make_loop([
+        loop, _agent = _make_loop([
             _llm_response(
                 content="a",
                 usage=SimpleNamespace(prompt_tokens=60, completion_tokens=20, total_tokens=80),
@@ -97,12 +97,13 @@ class TestStreamUsageAggregation:
                 finish_reason="stop",
             ),
         ])
-        events = [e async for e in loop._predict_stream_once({"messages": [{"role": "user", "content": "hi"}]})]
+        state = loop._startTurnState([{"role": "user", "content": "hi"}])
+        events = [e async for e in loop._predict_stream_once({"messages": [{"role": "user", "content": "hi"}]}, state)]
         done = events[-1]
         assert done["usage"] == {
             "prompt_tokens": 100, "completion_tokens": 30, "total_tokens": 130,
         }, f"done 与预算闸必须同源，且 usage 是全量不是增量：{done['usage']}"
-        assert done["usage"] == agent._round_usage
+        assert done["usage"] == state.roundUsage
 
 
 class TestPipelineRecords:

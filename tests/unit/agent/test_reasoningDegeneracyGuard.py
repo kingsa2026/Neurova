@@ -80,7 +80,6 @@ class FakeStreamClient:
 def makeOpenAiLoop(client):
     agent = MagicMock()
     agent._tool_messages_list = []
-    agent._round_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     agent.skill_registry = None
     agent.tool_router = SimpleNamespace(
         execute=lambda **kw: SimpleNamespace(success=True, result={"ok": 1}, error=None)
@@ -94,7 +93,6 @@ def makeOpenAiLoop(client):
 def makeAnthropicLoop(client):
     agent = MagicMock()
     agent._tool_messages_list = []
-    agent._round_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     agent.skill_registry = None
     agent.config.name = "degeneracy-probe"
     agent.config.agent_id = "degeneracy-probe-id"
@@ -243,7 +241,6 @@ class TestNonStreamStorageSanitized:
 
         agent = MagicMock()
         agent._tool_messages_list = []
-        agent._round_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         agent.skill_registry = None
         loop = OpenAILoop(agent)
         loop.llm_client = ChatClient()

@@ -26,7 +26,6 @@ def _make_loop():
         llm_client=SimpleNamespace(),
         config=SimpleNamespace(name="t-agent"),
         set_current_reasoning=lambda text: None,
-        _round_usage=None,
     )
     return OpenAILoop(agent)
 

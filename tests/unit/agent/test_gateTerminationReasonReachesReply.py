@@ -179,7 +179,6 @@ def toolCallChunks(callId="call_1", name="probe_read"):
 def makeOpenAiLoop(client):
     agent = MagicMock()
     agent._tool_messages_list = []
-    agent._round_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     agent.skill_registry = None
     agent.tool_router = SimpleNamespace(
         execute=lambda **kw: SimpleNamespace(success=True, result={"ok": 1}, error=None)
@@ -194,7 +193,6 @@ def makeOpenAiLoop(client):
 def makeAnthropicLoop(client):
     agent = MagicMock()
     agent._tool_messages_list = []
-    agent._round_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     agent.skill_registry = None
     agent.config.name = "gate-visibility-probe"
     agent.config.agent_id = "gate-visibility-probe-id"
@@ -328,7 +326,6 @@ class TestStagnationTerminationIsAlsoVisible:
         client = _StreamClient([roundChunks(n) for n in range(1, 7)])
         agent = MagicMock()
         agent._tool_messages_list = []
-        agent._round_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         agent.skill_registry = None
         agent.tool_router = SimpleNamespace(
             execute=lambda **kw: SimpleNamespace(success=True, result={"ok": 1}, error=None)
@@ -363,7 +360,6 @@ class TestNonStreamPathsCarryCause:
         )
         agent = MagicMock()
         agent._tool_messages_list = []
-        agent._round_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         agent.skill_registry = None
         agent.tool_router = SimpleNamespace(
             execute=lambda **kw: SimpleNamespace(success=True, result={"ok": 1}, error=None)

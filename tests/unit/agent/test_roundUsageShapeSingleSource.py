@@ -20,11 +20,11 @@ from types import SimpleNamespace
 
 from neurova.agent.loops.anthropic_loop import AnthropicLoop
 from neurova.agent.loops.openai_loop import OpenAILoop
+from neurova.agent.loops.turn_run_state import TurnRunState
 
 
 class _Agent:
-    def __init__(self):
-        self._round_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    pass
 
 
 def _loop(cls):
@@ -33,35 +33,43 @@ def _loop(cls):
     return loop
 
 
+def _state() -> TurnRunState:
+    return TurnRunState.forTurn(agentId="usage-shape")
+
+
 class TestBothUsageShapesAccumulate:
     def test_dict_usage_still_accumulates(self):
         loop = _loop(AnthropicLoop)
-        loop._accumulateRoundUsage({"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10})
-        assert loop.agent._round_usage == {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}
+        state = _state()
+        loop._accumulateRoundUsage({"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}, state)
+        assert state.roundUsage == {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}
 
     def test_sdk_object_usage_accumulates_not_raises(self):
         """真网关（OpenRouter/AMD 实测）给的是 SDK 对象，不是 dict。"""
         loop = _loop(AnthropicLoop)
+        state = _state()
         loop._accumulateRoundUsage(
-            SimpleNamespace(prompt_tokens=11, completion_tokens=4, total_tokens=15))
-        assert loop.agent._round_usage == {
+            SimpleNamespace(prompt_tokens=11, completion_tokens=4, total_tokens=15), state)
+        assert state.roundUsage == {
             "prompt_tokens": 11, "completion_tokens": 4, "total_tokens": 15,
         }, "流式 usage 原样透传的 SDK 形状必须被归一，AttributeError 会掐死整条流"
 
     def test_accumulation_is_additive_across_rounds(self):
         loop = _loop(AnthropicLoop)
-        loop._accumulateRoundUsage(SimpleNamespace(prompt_tokens=2, completion_tokens=1, total_tokens=3))
-        loop._accumulateRoundUsage({"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7})
-        assert loop.agent._round_usage == {
+        state = _state()
+        loop._accumulateRoundUsage(SimpleNamespace(prompt_tokens=2, completion_tokens=1, total_tokens=3), state)
+        loop._accumulateRoundUsage({"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}, state)
+        assert state.roundUsage == {
             "prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10,
         }
 
     def test_missing_fields_do_not_poison_the_counter(self):
         """网关只回部分字段时按 0 记账，而不是让 `int(None)` 抛异常。"""
         loop = _loop(AnthropicLoop)
-        loop._accumulateRoundUsage(SimpleNamespace(prompt_tokens=9, completion_tokens=None, total_tokens=None))
-        assert loop.agent._round_usage["prompt_tokens"] == 9
-        assert loop.agent._round_usage["completion_tokens"] == 0
+        state = _state()
+        loop._accumulateRoundUsage(SimpleNamespace(prompt_tokens=9, completion_tokens=None, total_tokens=None), state)
+        assert state.roundUsage["prompt_tokens"] == 9
+        assert state.roundUsage["completion_tokens"] == 0
 
 
 class TestAggregationHasOneImplementation:

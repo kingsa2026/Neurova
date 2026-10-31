@@ -92,7 +92,6 @@ class FakeStreamClient:
 def makeLoop(client):
     agent = MagicMock()
     agent._tool_messages_list = []
-    agent._round_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     agent.skill_registry = None
     agent.llm_client = client
     loop = OpenAILoop(agent)

@@ -122,7 +122,6 @@ def makeLoop(chat, toolRounds=10):
         llm_client=chat,
         config=SimpleNamespace(name="probe", user_id="u1", agent_id="a1", llm_model="gpt-4o"),
         _tool_messages_list=[],
-        _round_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         skill_registry=None,
         _skill_registry=None,
         tool_router=None,

@@ -287,7 +287,6 @@ class TestPathSymmetry:
             skill_registry=None,
             tool_router=None,
             current_session_id="s-goal",
-            _round_usage={"total_tokens": 1234},
         )
 
         async def _handle(tool_calls, messages):
