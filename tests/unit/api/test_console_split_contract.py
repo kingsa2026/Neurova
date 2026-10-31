@@ -110,16 +110,19 @@ def test_files_old_patch_seams(client, monkeypatch, tmp_path):
     response = client.post("/upload", files={"file": ("input.txt", b"hello", "text/plain")})
     assert response.status_code == 200
     assert response.json()["data"]["file_id"] == "12345678"
-    assert (tmp_path / "12345678_safe.txt").read_bytes() == b"hello"
+    # 批 S1：附件按上传者分域落盘（user_id=「test」子目录）
+    assert (tmp_path / "test" / "12345678_safe.txt").read_bytes() == b"hello"
     assert client.get("/uploads").json()["data"]["total"] == 1
     safe.return_value = "12345678_safe.txt"
     assert client.get("/uploads/input.txt").content == b"hello"
     response_factory = Mock(return_value={"patched": True})
     monkeypatch.setattr(api, "FileResponse", response_factory)
     assert client.get("/uploads/input.txt").json() == {"patched": True}
-    response_factory.assert_called_once_with(str(tmp_path / "12345678_safe.txt"), filename="12345678_safe.txt")
+    response_factory.assert_called_once_with(
+        str(tmp_path / "test" / "12345678_safe.txt"), filename="12345678_safe.txt")
     assert client.delete("/uploads/input.txt").status_code == 200
-    assert not list(tmp_path.iterdir())
+    # 批 S1：附件按属主分域——根目录只剩空的属主子目录，文件确已删除
+    assert not list((tmp_path / "test").iterdir())
     assert client.get("/uploads/input.txt").status_code == 404
     assert client.delete("/uploads/input.txt").status_code == 404
     assert safe.call_count == 6

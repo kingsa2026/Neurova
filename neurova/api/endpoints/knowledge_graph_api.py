@@ -295,9 +295,19 @@ async def backfill_graph_from_knowledge(
 ):
     """存量知识条目补跑「条目→图谱节点」抽取（graph_node_ids 为空的条目）。
 
+    批 S3（specs/2026-10-31-full-repo-defect-sweep-fixplan.md）：对全 agent
+    域条目跑 LLM 抽取属管理动作——修前无角色门且抽取范围不走可见集。
+
     抽取只挂在导入时刻，且曾因 LLM 解析断链恒被跳过（见 knowledge.
     _default_llm_call 根因修复）——存量条目需要一次性补建入口。
+
+    越权门必须先于 llm 早退分支：无 LLM 时若先走 200 兜底，门就永远摸不到。
     """
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="图谱补建是对全 agent 域条目的批量抽取，仅管理员可用",
+        )
     from neurova.api.endpoints.knowledge import _default_llm_call
     from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
     from neurova.knowledge.graph_bridge import extract_knowledge_to_graph, extractionPending
@@ -316,6 +326,8 @@ async def backfill_graph_from_knowledge(
             },
         }
 
+    # 批 S3：抽取范围必须走可见集（修前 list_knowledge 无租户/属主过滤，
+    # 任意登录用户可抽取他人 private 条目入自己租户视图）
     repo = get_knowledge_repository()
     graph = _get_kg_manager(agent_id, _tenant_of(current_user))
     # 补建同样要落权威：只补 JSON 投影等于把"两面分裂"复制到存量条目上。
@@ -323,9 +335,17 @@ async def backfill_graph_from_knowledge(
     # 早有值（旧实现只落投影也照样回写），而权威侧一条都没有。按投影筛，最需要
     # 补抽的那批存量会被全部跳过，端点报表写 `entries=0`（Issue #72 §5）。
     authority = get_knowledge_fact_store()
+    visible = repo.visible_items(
+        {
+            "user_id": str(current_user.get("user_id") or ""),
+            "role": str(current_user.get("role") or "user"),
+            "tenant_id": str(current_user.get("tenant_id") or "default"),
+        },
+        scope="all", agent_id=agent_id,
+    )
     pending = [
         it
-        for it in repo.list_knowledge(agent_id, limit=limit)
+        for it in list(visible)[:limit]
         if extractionPending(it, authority, agent_id)
     ]
 

@@ -172,8 +172,12 @@ class MemoryRetrievalChain:
     def __init__(self):
         """初始化 MemoryRetrievalChain"""
         self._retrievers: List[Retriever] = []
-        self._cache: OrderedDict[str, RetrievalResult] = OrderedDict()  # C-3: LRU 缓存
+        # S4（specs/2026-10-31-full-repo-defect-sweep-fixplan.md）：条目改为
+        # (result, cached_at)——键含用户/agent 作用域（跨用户串味根因）且带 TTL
+        # （陈旧结果永不过期的根因）。
+        self._cache: OrderedDict[str, tuple] = OrderedDict()  # C-3: LRU 缓存
         self._cache_max_size: int = 200
+        self._cache_ttl_seconds: float = 300.0
         self._statistics: Dict[str, Any] = {
             "total_retrievals": 0,
             "successful_retrievals": 0,
@@ -272,7 +276,7 @@ class MemoryRetrievalChain:
                         self._statistics["cache_hits"] += 1
 
             # 更新缓存
-            self._update_cache(context.query, result)
+            self._update_cache(context, result)
 
             # C-1: 根据 result.source 判定成功/失败
             is_exhausted = result.source.endswith(("_exhausted", "_failed", "_all_failed")) or result.source == "no_retrievers"
@@ -666,22 +670,27 @@ class MemoryRetrievalChain:
             return None
 
     async def _retrieve_from_cache(self, context: RetrievalContext) -> Optional[RetrievalResult]:
-        """从缓存检索(LRU: 命中时移到末尾)"""
-        cache_key = self._get_cache_key(context.query)
-        if cache_key in self._cache:
-            # C-3: LRU — 命中时移到末尾
-            self._cache.move_to_end(cache_key)
-            cached = self._cache[cache_key]
-            logger.debug("Cache hit for query: %s...", context.query[:50])
-            return cached
+        """从缓存检索(LRU: 命中时移到末尾；S4：键带作用域、条目带 TTL)"""
+        cache_key = self._get_cache_key(context)
+        entry = self._cache.get(cache_key)
+        if entry is None:
+            return None
+        cached, cached_at = entry
+        if time.monotonic() - cached_at > self._cache_ttl_seconds:
+            # S4：过期条目失效重检，不再让陈旧结果永生
+            self._cache.pop(cache_key, None)
+            logger.debug("Cache expired for query: %s...", context.query[:50])
+            return None
+        # C-3: LRU — 命中时移到末尾
+        self._cache.move_to_end(cache_key)
+        logger.debug("Cache hit for query: %s...", context.query[:50])
+        return cached
 
-        return None
-
-    def _update_cache(self, query: str, result: RetrievalResult) -> None:
-        """更新缓存(LRU: 超限时淘汰最旧条目)"""
+    def _update_cache(self, context: RetrievalContext, result: RetrievalResult) -> None:
+        """更新缓存(LRU: 超限时淘汰最旧条目；S4：键带作用域、带落缓存时刻)"""
         if result.memories and result.quality > 0.5:  # 只缓存高质量结果
-            cache_key = self._get_cache_key(query)
-            self._cache[cache_key] = result
+            cache_key = self._get_cache_key(context)
+            self._cache[cache_key] = (result, time.monotonic())
             # C-3: 新条目移到末尾
             self._cache.move_to_end(cache_key)
 
@@ -690,10 +699,17 @@ class MemoryRetrievalChain:
                 # C-3: LRU — 淘汰最旧(第一个)条目
                 self._cache.popitem(last=False)
 
-    def _get_cache_key(self, query: str) -> str:
-        """C-3: 生成缓存键(用 hash 避免长查询截断冲突)"""
-        normalized = query.strip().lower()
-        return hashlib.md5(normalized.encode("utf-8")).hexdigest()
+    def _get_cache_key(self, context: RetrievalContext) -> str:
+        """C-3: 生成缓存键；S4：键含 user/agent/tenant 作用域——同一 agent 服务
+        多用户时，缓存必须按请求者隔离（跨用户记忆泄漏的根因在键缺失维度）。"""
+        normalized = context.query.strip().lower()
+        metadata = context.metadata or {}
+        scope = "|".join([
+            str(context.user_id or ""),
+            str(metadata.get("agent_id") or ""),
+            str(metadata.get("tenant_id") or ""),
+        ])
+        return hashlib.md5(f"{scope}|{normalized}".encode("utf-8")).hexdigest()
 
     def __repr__(self) -> str:
         """字符串表示"""
