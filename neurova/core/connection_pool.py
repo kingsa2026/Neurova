@@ -165,10 +165,12 @@ class SQLiteConnectionPool:
                 except Empty:
                     raise RuntimeError("无法获取数据库连接：连接池超时")
             
-            self._created_count += 1
-        
         logger.debug("创建新连接: %s (总数: %d)", self.db_path, self._created_count)
         conn = self._create_connection()
+        # 批 R3：计数只在建连**成功**后 +1——放在 create 之前，坏库/占用等
+        # 建连失败会永久泄漏配额（累计 max 次失败后整池砖死到重启）
+        with self._lock:
+            self._created_count += 1
         self._mark_checked_out(conn)
         return conn
 
