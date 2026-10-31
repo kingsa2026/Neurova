@@ -10912,3 +10912,9 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **口径**：生产池（`neurova/**`）0；`scripts/ci/osv_audit.py` +51/−19；`tests/unit/test_osv_audit_hardening_guard.py` +176/−0；合计 +227/−19＝净 +208。入册不适用：两档都已在 `scripts/ci/protected_tests.txt`（现算 **743** 条有效条目），零新增文件。
     - **仍开（不当自决）**：① §6-444 仍开① 的第二票——覆盖率**分母跟整子集走**：主线 `[tool.coverage.run] include` 现算是 11 条**手写**模式（只覆盖 context 域等），而退役档那 6 格里"declared include ≡ 由子集派生""子集够到的每个域都要在""生成器报它丢了什么"三格主线无对应；其生成器 `scripts/ci/coverage_scope.py` 在主线**根本不存在**（只在悬空提交里），重落＝把那份生成器一并搬回并核它是否与 main 的 `coverage_report.py` 冲突，属另批工作量。② §6-444 仍开② 那票（`activeCatalog` 轮次级）仍未处理：主线生产码 0 命中该符号，要先定"主线现状由哪一处承担同一职责"才能谈重落，不顺手做。③ 上面那枚 `test_pip_audit_gate` 的预存在册红需单独定性（本机形态还是真缺陷）。
     - **下一枚空号现查**：条目行 `^4NN\. ` 尾号现算 **445**、引用面（HEAD 与工作树两跑）现算 **446** ⇒ 取两把尺之外的 **447**；若并发会话随后落 446 那格，按「改后到的、不改先到的」由后到者让号。`origin/main..HEAD` 本笔落笔时现算 1 笔（`f45fb996`），本台账笔自身入库后为 2 笔——引用前一律现算。
+
+448. **全库缺陷清扫登记：六片体检 55 条 + 分批修复计划（⬜ `docs/specs/2026-10-31-full-repo-defect-sweep-fixplan.md`）** ⬜ —— 用户点单「全库检查是不是存在不合理或潜在 bug」。
+    - **方法**：六片并行只读探查（core+security／knowledge／api/endpoints／agent 链路／辅助子系统／NeurUI），每条要求「读实现 → grep 调用方/测试」两步取证；共 **55 条**（P1 19／P2 36），4 条最重 P1 经人工复核全部属实（console 非流式假成功、画像端点签名错位、supersede 漏 _save、池计数泄漏——最后一条是 `2808a4bb` 同路径残留）。
+    - **分批**：S 安全四条（console 附件零属主／skill_pool 审批六腿漏门／图谱补建跨租户抽取／检索缓存无属主键）→ F 假成功三兄弟（非流式 chat 恒空／WS Echo／eki 三腿键名错位）→ D 数据两条（supersede 漏持久化、内容去重漏 tenantId）→ C 并发三条（loop 单例态 ×3、责任链覆写、同步重 IO 占事件循环）→ R 可靠性六条 → X 其余 P2 按域。修复计划文档含每条红灯判据。
+    - **方法留案（形态族）**：① 六片并行探查撞「user concurrency limit exceeded」——限流下并行探查要退化为串行；② 探查代理报告不能直接当结论，最重项必须人工抽查（本批抽查 4/4 属实，但抽查率 7%，报告里如实标注抽查率）。
+    - **口径**：本格为登记格（修复尚未开始），生产池 0；修复各批落格从 §6-449 起现查。`docs/specs/2026-10-31-full-repo-defect-sweep-fixplan.md` +60/−0 随本格入库。
