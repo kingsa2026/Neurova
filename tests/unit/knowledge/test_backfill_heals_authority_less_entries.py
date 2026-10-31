@@ -88,7 +88,10 @@ class TestBackfillEndpointPicksThemUp:
             lambda *_a, **_k: (lambda _p: _LLM))
 
         app = FastAPI()
-        app.dependency_overrides[auth.get_current_user_or_service] = lambda: {"user_id": "u1"}
+        # 批 S3：backfill 收管理员门——本例判"补建真修 authority-less 条目"，
+        # 夹具身份随契约对齐为 admin
+        app.dependency_overrides[auth.get_current_user_or_service] = lambda: {
+            "user_id": "u1", "role": "admin"}
         app.include_router(kg.router, prefix="/api/v1/knowledge-graph")
         client = TestClient(app)
 

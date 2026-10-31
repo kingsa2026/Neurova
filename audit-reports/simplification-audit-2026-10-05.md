@@ -10928,3 +10928,15 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **口径**：生产 `console_files.py +89/−47、skill_pool_api.py +18/−6、knowledge_graph_api.py +21/−5、memory_retrieval_chain.py +33/−21`；判据 `test_batchS_security_gates.py +183/−0`、`test_retrievalCacheIsolation.py +105/−0`、契约对齐 +23/−9。修复计划表 S 行已回填。
     - **仍开**：§6-448 批 F/D/C/R/X（见修复计划文档）；S1 属主域迁移注记——存量共享根文件对新接口不可见（一次性切域，无属主信息可迁移，如实告知）。
     - **下一枚空号现查**：条目行 `^4NN\. ` 最大 **449**、引用面最大 **448**（本格自身 448）⇒ 后继批次从 **§6-450** 起。
+450. **批 F 假成功三兄弟：非流式 chat 真调 agent / WS 异常 error 帧 / eki 三腿键名对齐（✅ `console.py +18/−2`、`memory/eki.py +10/−6`、`ProcessTaskRequest +2/−0`；判据 +156/−0）** ✅🟢 —— §6-448 批 F。
+    - **F1**：非流式 `/console/chat` 把 `reply=""` 一路漏到收尾——agent 在位时 chat 从未被调用，200 假成功；现真调 `agent.chat(stream=False)` 并补前端消费键 `response`（`console.ts:88` 期待 `{response}`，shape 漂移一并收口）。
+    - **F2**：WS `except: reply="Echo: …"` 吞掉 agent 故障——改 error 帧点名原因（与 HTTP 面 2026-09-07 根治同病，WS 腿漏网）。
+    - **F3**：eki 三腿参数键名与真身（manager.eki_* 的 **kwargs 读键）全错位——process 的 task_embedding/memory_context/user_feedback 换 task_id/memory_id/observation 映射（`ProcessTaskRequest` 补可选 `task_id`）、decay 的 horizon（天）换算 hours_ahead、batch_update 的 batch_data 换 updates。
+    - **判据**：`test_batchF_fakeSuccess.py` 5 格（修前 5 failed）。⚠ 本批自伤两处：① eki 夹具先试裸 FastAPI+include——本仓 .venv 的 fastapi include 走懒加载 `_IncludedRouter`，dependency_overrides 不生效（401 "Not authenticated"），改真 create_app+真 JWT；② decay 测试自己把路由顺序写反（`/eki/mem-1/decay` vs 真路由 `/eki/decay/{memory_id}`，404 Not Found）。
+    - **合跑**：api+knowledge 全量 3827 passed（1 failed = test_backfill_heals 的夹具身份，属批 S3 契约对齐，同批修掉 → 3 passed）。
+    - **下一枚空号现查**：条目行最大 **450**、引用面最大 **448** ⇒ 本格取 450，后继从 **§6-451** 起。
+451. **批 D 数据正确性：supersede_old 补叙述层落盘 / 内容去重补租户维度（✅ `repository.py +4/−0`、`admission.py +4/−1`；判据 +78/−0）** ✅🟢 —— §6-448 批 D。
+    - **D1**：`resolve_conflict` supersede_old 分支 pop 只动内存，漏 `_syncEntryGovernance()`+`_save()`（与 delete/restore 同序收尾）——修前重启水合把已裁决出列的旧条目装回检索面，人工裁决被静默反转。判据：两实例跨水合断言旧条目不再可见。
+    - **D2**：咽喉内容去重 `findFactByContentKey` 漏传 tenantId（硬编码 default）——非 default 租户同内容折回 default 租户的行。判据：t1/t2 同内容各建各行、`searchableFacts` 按租户互不串。⚠ 判据装配走 `productionAdmissionGate`（裸门缺五段会被 `AdmissionSegmentMissing` 拒收，`AdmissionReceipt.factId` 是属性不是键）。
+    - **仍开**：EntryLedger 的 AdmissionRequest 不带 tenantId（叙述治理行恒落 default）属同类第三处，本批未动（与批 X 一起）。
+    - **下一枚空号现查**：条目行最大 **451**、引用面最大 **450** ⇒ 后继从 **§6-452** 起。

@@ -1200,7 +1200,26 @@ async def post_console_chat(
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
-    return {"code": 0, "message": "success", "data": {"reply": reply, "session_id": session_id}}
+    # 批 F1（specs/2026-10-31-full-repo-defect-sweep-fixplan.md）：非流式腿
+    # 此前把 reply="" 一路漏到收尾——agent 在位时 chat 从未被调用，200 假成功。
+    if agent:
+        try:
+            result = await agent.chat(
+                body.message, stream=False, session_id=session_id,
+            )
+            payload = result if isinstance(result, dict) else {"text": str(result)}
+            reply = str(payload.get("text") or "")
+            reasoning = payload.get("reasoning")
+            tool_messages = payload.get("tool_messages") or []
+        except Exception as e:
+            logger.warning("Console chat error: %s", e, exc_info=True)
+            reply = f"Error: {str(e)}"
+
+    return {"code": 0, "message": "success", "data": {
+        "reply": reply,
+        "response": reply,  # 前端 sendConsoleMessage 消费键
+        "session_id": session_id,
+    }}
 
 
 class ReviewRequest(BaseModel):
@@ -2417,8 +2436,13 @@ async def websocket_console(websocket: WebSocket, client_id: str, token: str = Q
                         message,
                         session_id=ws_session_id,
                     ) if agent else f"Echo: {message}"
-                except Exception:
-                    reply = f"Echo: {message}"
+                except Exception as e:
+                    # 批 F2：agent 故障必须以 error 帧出去——吞成 Echo 与
+                    # HTTP 面 2026-09-07 根治的是同一个病（WS 腿漏网）
+                    await websocket.send_json(
+                        {"type": "error", "message": f"chat failed: {e}"}
+                    )
+                    continue
                 await websocket.send_json({"type": "chat_reply", "content": reply})
             else:
                 await websocket.send_json({"type": "ack", "data": data})

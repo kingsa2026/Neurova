@@ -2162,6 +2162,10 @@ class KnowledgeRepository:
             # keep_both 不改条目文本（conflict 簿记字段不进索引）；仅
             # supersede_old 使旧条目墓碑化 → 增量剥离
             if resolution == "supersede_old":
+                # 批 D1：pop 只动了内存——漏 _save 会重启反转裁决（水合把
+                # 旧条目装回来）。与 delete_knowledge/restore 同序收尾。
+                self._syncEntryGovernance()
+                self._save()
                 self._record_index_op("remove", rec["old_id"])
             return True
 
