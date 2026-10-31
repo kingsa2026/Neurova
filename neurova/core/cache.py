@@ -200,6 +200,7 @@ class MemoryCache:
                 entry = self._cache[key]
                 entry.value = value
                 entry.last_accessed = time.time()
+                entry.created_at = time.time()  # 批 X3：TTL 从最近一次写入算起
                 if ttl is not None:
                     entry.ttl = ttl
                 elif self._default_ttl is not None:
