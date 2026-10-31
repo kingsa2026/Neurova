@@ -10974,3 +10974,9 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - GraphExplorer3D：异步初始化记忆化单 Promise（修前 WebGL 上下文泄漏）。
     - 绿灯：vue-tsc exit 0 零 error；batchS/batchCR/batchF/answerFactGuard/retrievalCacheIsolation 合跑 35+ passed；core+agent 全量回归无新增失败。
     - **下一枚空号现查**：条目行最大 452（§6-453 未见条目行）⇒ 后继从 §6-454 起。
+454. **批 W3：上传上限 100MB / 结晶器去重 / HealthCheck 超时（✅ `console_files.py +3/−0`、`skill_pool_api.py +2/−0`、`pattern_crystallizer.py +5/−1`、`health_checker.py +7/−1`）** ✅🟢 —— §6-448 批 W3。
+    - 上传上限：console_files + skill_pool install_from_zip 两条路加 100MB 钳制（与 files_api S-15 同款）。
+    - 结晶器 _enqueue_candidate 同 key 去重（同模式 48h 内再次达阈不再双写两条结晶节点）。
+    - HealthCheck run_check 包 ThreadPoolExecutor + timeout（修前同步检查在 async def 端点内直跑，数据库被锁时事件循环停摆）。
+    - 绿灯：core 2074 passed、skills/cognitive 无新增失败。
+    - 下一枚空号：条目行最大 454 ⇒ 后继从 §6-455 起。
