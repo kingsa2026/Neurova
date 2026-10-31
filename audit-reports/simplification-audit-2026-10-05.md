@@ -10949,3 +10949,9 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **R6**：trace_recorder 索引裁剪同步 unlink 被裁条目的 JSON 文件——修前被裁条目变孤儿（本开发机实测 539 个 JSON 3.3MB），磁盘慢漏+明文滞留。
     - **合跑**：knowledge_retriever_adapter+batchCR+batchS 29 passed；evolution 1689 passed；core 2074 passed（1 failed = test_session_list_order，stash A/B 双向同败判预存）。
     - **下一枚空号现查**：条目行最大 **452**、引用面最大 **450**（§6-451/452 为新登记）⇒ 后继从 **§6-453** 起。
+453. **批 X1：marketplace old_version / 会话排序跨用户 / files 审批落盘（✅ `marketplace.py +4/−2`、`console.py +2/−1`、`files_api.py +4/−0`）** ✅🟢 —— §6-448 批 X。
+    - marketplace kind=update 的 old_version 取**更新前**的版本（与 update_market_skill 同口径）——修前 submission.version 是新版本自比自。
+    - 会话排序 visible 集带 user_id 过滤——修前其他用户的会话也在集合里可被重排序。
+    - files approve/reject 补 persist_file 落盘——修前只改内存，重启水合后审批结果回退 "active"。
+    - **合跑**：api 全量 2753 passed / 0 failed。
+    - **下一枚空号现查**：条目行最大 453 ⇒ 后继从 §6-454 起。
