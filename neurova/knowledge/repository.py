@@ -1157,11 +1157,16 @@ class KnowledgeRepository:
             item["visibility"] = VISIBILITY_PUBLIC
         return self._set_entry(agent_id, item)
 
-    def pending_submissions(self) -> List[Dict[str, Any]]:
-        """待审批提交清单（仅 admin 消费，API 层把关）。"""
+    def pending_submissions(self, tenantId: Optional[str] = None) -> List[Dict[str, Any]]:
+        """待审批提交清单（仅 admin 消费，API 层把关）；可按租户过滤。"""
         with self._lock:
             snapshot = [dict(i) for items in self._items.values() for i in items]
-        return [i for i in snapshot if (i.get("submission") or {}).get("status") == _SUBMISSION_PENDING]
+        tenant = None if tenantId is None else str(tenantId or "default")
+        return [
+            i for i in snapshot
+            if (i.get("submission") or {}).get("status") == _SUBMISSION_PENDING
+            and (tenant is None or str(i.get("tenant_id") or "default") == tenant)
+        ]
 
     def listAgents(self) -> List[str]:
         with self._lock:
@@ -1740,11 +1745,15 @@ class KnowledgeRepository:
             return {"state": "absent", "count": 0,
                     "conflicts_pruned": self._pruneEntryConflicts(knowledge_id)}
 
-    def restore_knowledge(self, knowledge_id: str) -> bool:
-        """从墓碑复活条目（普通复活不带 supersede 链）。活着/不存在返回 False。"""
+    def restore_knowledge(self, knowledge_id: str, tenantId: Optional[str] = None) -> bool:
+        """从墓碑复活条目（普通复活不带 supersede 链）。活着/不存在/跨租户返回 False。"""
         with self._lock:
             rec = self._tombstones.get(knowledge_id)
             if rec is None:
+                return False
+            if tenantId is not None and str(
+                (rec.get("item") or {}).get("tenant_id") or "default"
+            ) != str(tenantId or "default"):
                 return False
             agent_id = rec.get("agent_id") or "default"
             self._items.setdefault(agent_id, []).append(rec["item"])
@@ -1756,10 +1765,17 @@ class KnowledgeRepository:
             self._record_index_op("reindex", knowledge_id)
             return True
 
-    def list_deleted(self) -> List[Dict[str, Any]]:
-        """墓碑清单（admin 审计消费）。记录含 item 快照 + 删除元数据。"""
+    def list_deleted(self, tenantId: Optional[str] = None) -> List[Dict[str, Any]]:
+        """墓碑清单（admin 审计消费）。记录含 item 快照 + 删除元数据；可按租户过滤。"""
         with self._lock:
-            return [dict(rec, knowledge_id=kid) for kid, rec in self._tombstones.items()]
+            recs = [dict(rec, knowledge_id=kid) for kid, rec in self._tombstones.items()]
+        if tenantId is None:
+            return recs
+        tenant = str(tenantId or "default")
+        return [
+            rec for rec in recs
+            if str((rec.get("item") or {}).get("tenant_id") or "default") == tenant
+        ]
 
     def expireDueEntries(self, now: Optional[datetime.datetime] = None,
                          apply: bool = False,
@@ -2112,12 +2128,18 @@ class KnowledgeRepository:
             ]
 
     def has_conflict(self, conflict_id: str) -> bool:
-        """这条 id 是不是条目侧账本的——队列端点要靠它分派，不能猜 id 长相。"""
+        """这条 id 是不是条目侧账本的——队列端点要靠它分派，不能猜 id 长相。
+
+        只判存在、不判租户：分派是"这个 id 归哪条轴"，租户校验在变更点
+        （`resolve_conflict(tenantId=...)`）——否则跨租户 id 会被分派到事实轴，
+        去另一个库里找一条根本不存在于本租户的记录。
+        """
         with self._lock:
             return conflict_id in self._conflicts
 
     def resolve_conflict(
-        self, conflict_id: str, resolution: str, resolved_by: str = ""
+        self, conflict_id: str, resolution: str, resolved_by: str = "",
+        tenantId: Optional[str] = None,
     ) -> bool:
         """人工裁决冲突：keep_both 保留双条目关闭记录；supersede_old 旧条目
  打 superseded_by 链并 tombstone（新说法接管
@@ -2127,6 +2149,10 @@ class KnowledgeRepository:
         with self._lock:
             rec = self._conflicts.get(conflict_id)
             if rec is None or rec.get("status") != "pending":
+                return False
+            if tenantId is not None and str(
+                rec.get("tenant_id") or "default"
+            ) != str(tenantId or "default"):
                 return False
             supersede_payload: Optional[Dict[str, Any]] = None
             if resolution == "supersede_old":

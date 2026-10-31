@@ -56,7 +56,8 @@ async def list_public_submissions(
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="仅管理员可查看公共库审批队列")
     repo = get_repository()
-    return [item_response(i) for i in repo.pending_submissions()]
+    tenant = str(current_user.get("tenant_id") or "default")
+    return [item_response(i) for i in repo.pending_submissions(tenantId=tenant)]
 
 
 @router.get("/conflicts")
@@ -140,9 +141,11 @@ async def resolve_conflict(
         raise HTTPException(status_code=403, detail="仅管理员可裁决冲突")
     repo = get_repository()
     actor = str(current_user.get("user_id", ""))
+    tenant = str(current_user.get("tenant_id") or "default")
     if repo.has_conflict(conflict_id):
         try:
-            ok = repo.resolve_conflict(conflict_id, body.resolution, resolved_by=actor)
+            ok = repo.resolve_conflict(conflict_id, body.resolution, resolved_by=actor,
+                                       tenantId=tenant)
         except ValueError as e:
             raise guard(e)
         except LookupError as e:
@@ -152,7 +155,8 @@ async def resolve_conflict(
         try:
             ok = _factStore().resolveConflict(conflict_id, body.resolution,
                                              resolvedBy=actor,
-                                             winnerFactId=body.winner_fact_id)
+                                             winnerFactId=body.winner_fact_id,
+                                             tenantId=tenant)
         except ValueError as e:
             raise guard(e)
         axis = "fact"
@@ -174,8 +178,9 @@ async def list_deleted_knowledge(
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="仅管理员可查看墓碑清单")
     repo = get_repository()
+    tenant = str(current_user.get("tenant_id") or "default")
     out = []
-    for rec in repo.list_deleted():
+    for rec in repo.list_deleted(tenantId=tenant):
         item = rec.get("item") or {}
         out.append(
             {
@@ -199,13 +204,15 @@ async def restore_knowledge(
     """从墓碑复活条目（属主或管理员）"""
     get_request_id(request)
     repo = get_repository()
-    rec = next((r for r in repo.list_deleted() if r.get("knowledge_id") == knowledge_id), None)
+    tenant = str(current_user.get("tenant_id") or "default")
+    rec = next((r for r in repo.list_deleted(tenantId=tenant)
+                if r.get("knowledge_id") == knowledge_id), None)
     if rec is None:
         raise HTTPException(status_code=404, detail="Knowledge '%s' is not deleted" % knowledge_id)
     owner_id = str((rec.get("item") or {}).get("owner_user_id", "") or "")
     if current_user.get("role") != "admin" and str(current_user.get("user_id", "")) != owner_id:
         raise HTTPException(status_code=403, detail="仅条目属主或管理员可恢复")
-    if not repo.restore_knowledge(knowledge_id):
+    if not repo.restore_knowledge(knowledge_id, tenantId=tenant):
         raise HTTPException(status_code=404, detail="Knowledge '%s' is not deleted" % knowledge_id)
     return {
         "code": 0,
