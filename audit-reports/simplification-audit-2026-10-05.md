@@ -10980,3 +10980,8 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - HealthCheck run_check 包 ThreadPoolExecutor + timeout（修前同步检查在 async def 端点内直跑，数据库被锁时事件循环停摆）。
     - 绿灯：core 2074 passed、skills/cognitive 无新增失败。
     - 下一枚空号：条目行最大 454 ⇒ 后继从 §6-455 起。
+455. **批 X6-1：knowledge_facts.db 三套连接统一开 WAL + busy_timeout（✅ `knowledge_facts.py +3/−0`、`narratives.py +3/−0`）** ✅🟢 —— §6-448 批 X3 剩余。
+    - **根因**：KnowledgeFactStore（单例长连接）、NarrativesLayer（每次操作新连接）、EntryLedger（repository 每次知识写新建 KnowledgeFactStore）三套连接同开 `knowledge_facts.db` 无 WAL——并发写即 SQLITE_BUSY 5s 后抛错沿 `_syncEntryGovernance` 的不吞异常通道放大成写入失败。
+    - **修法**：两处连接创建各加 `PRAGMA journal_mode=WAL` + `PRAGMA busy_timeout=5000`。
+    - **绿灯**：knowledge 全量 1067 passed / 0 failed。
+    - **下一枚空号**：条目行最大 455 ⇒ 后继从 §6-456 起。
