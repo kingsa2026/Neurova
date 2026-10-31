@@ -10943,3 +10943,9 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
 451. (续) **批 C/R A/B 定责附记**：`test_skillLibraryTakenFromOneFactory` 三格在四域全量里红，经三段 stash A/B（connection_pool／+creation_governance／+file_utils／+全量生产文件）确认与本批改动无关——根因是 pytest 临时目录路径长度随 `pytest-NNNNN` 计数增长，越过后该测试 docstring 自陈的 260 阈值即触发 `market_sources.refusalForPathBudget` 拒装（该测试 docstring 自己也写了"起点 273 字符超 260"）。属环境敏感的已知形态，非本批回归。另 `test_scripts_health_check::test_check_dependencies_returns_dict` 在四域全量里超时挂死（subprocess 外部命令），亦与本批无关。
 451. (续 2) **批 C2/R2 生产修复补齐**：`memory_retrieval_chain.py` 主源命中后置位标志（`if primary_result is None` 才赋值）——修后 Annotation(1.0) 命中不再被 MoE(0.35) 覆写；`chat_pipeline.py` finally 里 finish_task 套 try/except——证据库写失败只 warning 不外抛。判据两格均在 `test_batchCR_debtFixes.py`（C2 用 `_retrievers` 直塞三链成员测覆写序，R2 断言源码含 try/except）。
 452. **批 C1（TurnRunState 迁移）立项不实施——热路径循环文件改 Risks 太大** ⬜ —— §6-448 批 C 剩余项（_rounds/_gate_runner/_round_usage 三件并入 TurnRunState）涉及 openai_loop.py/anthropic_loop.py/base.py 三个热路径循环文件的状态机重构。本会话上下文接近耗尽，不敢在生产热路径上冒险改（改坏了所有的轮都受影响）。已写立条留给下一会话以完整精力做。
+452. (续) **批 C3/R4/R6 三条补齐**（✅ `knowledge_retriever_adapter.py +7/−5`、`crystallized_experience_manager.py +6/−2`、`closed_loop.py +14/−3`、`trace_recorder.py +11/−1`）✅🟢 —— §6-448 批 C3/R4/R6。
+    - **C3**：知识/结晶/记忆三路同步重 IO 包 `asyncio.to_thread`——修前 `asyncio.wait_for` 对同步代码无效，语料大时事件循环停摆（Fallback 路 SUB-P1-16 已修，此三路漏）。
+    - **R4**：AdaptiveToolWeights.save 改 tmp+os.replace 原子写——修前直写在 10s 节流窗口内进程被杀即截断 JSON，下次 load 回退空表（全部学习权重归零）。
+    - **R6**：trace_recorder 索引裁剪同步 unlink 被裁条目的 JSON 文件——修前被裁条目变孤儿（本开发机实测 539 个 JSON 3.3MB），磁盘慢漏+明文滞留。
+    - **合跑**：knowledge_retriever_adapter+batchCR+batchS 29 passed；evolution 1689 passed；core 2074 passed（1 failed = test_session_list_order，stash A/B 双向同败判预存）。
+    - **下一枚空号现查**：条目行最大 **452**、引用面最大 **450**（§6-451/452 为新登记）⇒ 后继从 **§6-453** 起。
