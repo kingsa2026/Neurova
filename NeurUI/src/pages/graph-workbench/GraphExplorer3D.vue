@@ -135,6 +135,18 @@ const render = async (data: { nodes: Array<{ id: string; name: string; type: str
   const links = data.links
   empty3d.value = nodes.length === 0
   if (!graph) {
+    // 批 W2：记忆化为单 Promise——修前 await import 期间第二次 render
+    // 同样通过判空，同一容器 new 两个 ForceGraph3D（WebGL 上下文泄漏）
+    if (!initPromise) {
+      initPromise = _createGraph()
+    }
+    await initPromise
+  }
+  graph.graphData({ nodes, links })
+}
+
+let initPromise: Promise<void> | null = null
+const _createGraph = async () => {
     const mod = await import('3d-force-graph')
     // v1.80 起是类构造 new ForceGraph3D(element)：旧版 Kapsule 双调用
     // ForceGraph3D()(el) 会把 class 当普通函数调，TypeError 后静默空白。
@@ -163,8 +175,6 @@ const render = async (data: { nodes: Array<{ id: string; name: string; type: str
       empty3d.value = true
       return
     }
-  }
-  graph.graphData({ nodes, links })
 }
 
 watch(() => props.focusId, (next) => {

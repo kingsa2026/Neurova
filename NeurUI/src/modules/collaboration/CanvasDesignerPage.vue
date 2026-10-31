@@ -2201,7 +2201,7 @@ async function waitForRunCompletion(canvasId: string, runId: string, runSource?:
   // 审计 P1-G3：原无卸载守卫，切走画布后 for(;;) 持续请求并写已卸载组件 ref）
   for (;;) {
     await new Promise(r => setTimeout(r, 1000))
-    if (isDisposed) return
+    if (isDisposed.value) return
     try {
       const statusRes = await getCanvasRun(canvasId, runId, runSource)
       const data = statusRes as unknown as CanvasRunStatus
