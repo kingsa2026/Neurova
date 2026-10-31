@@ -149,11 +149,17 @@ class EvidenceStore:
                 # 旧库迁移：structure 列缺席则补列并按结构回填（不回填 = 存量
                 # 证据在结构查询下全部"消失"，闸门对老库恒不可达）。
                 columns = {row[1] for row in db.execute("PRAGMA table_info(evidence)")}
-                if "structure" not in columns:
+                needs_backfill = "structure" not in columns
+                if needs_backfill:
+                    # ALTER 是 DDL（sqlite legacy 模式下自动提交），可留在
+                    # BEGIN 之前；UPDATE 是 DML（隐式开启事务）——放在 BEGIN
+                    # 之后的事务体内，否则 BEGIN IMMEDIATE 撞隐式事务必炸，
+                    # 回填从未成功（本机最小复现实证）。
                     db.execute("ALTER TABLE evidence ADD COLUMN structure TEXT")
+                db.execute("BEGIN IMMEDIATE")
+                if needs_backfill:
                     db.execute("UPDATE evidence SET structure=? WHERE structure IS NULL",
                                (self._legacy_structure_fill(),))
-                db.execute("BEGIN IMMEDIATE")
                 yield db
                 db.commit()
             except BaseException:
