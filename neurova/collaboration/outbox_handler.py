@@ -141,7 +141,7 @@ class OutboxHandler:
     _instance = None
     _lock = threading.RLock()
 
-    def __new__(cls):
+    def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -338,10 +338,16 @@ class OutboxHandler:
                 reverse=True,
             )
 
+            now = time.time()
             for event_id in sorted_events:
                 event = self._events.get(event_id)
 
                 if not event or event.status != EventStatus.PENDING:
+                    continue
+
+                # 退避窗口未到：不得提前重投（此前 scheduled_at 只写不读，
+                # 失败事件会在每一轮被立即重试，退避形同虚设）。
+                if event.scheduled_at and event.scheduled_at > now:
                     continue
 
                 # Check if expired
@@ -356,6 +362,7 @@ class OutboxHandler:
 
                 if success:
                     event.mark_delivered()
+                    self._save_event(event)
                     self._stats["successful_deliveries"] += 1
                     processed_count += 1
                 else:
@@ -367,8 +374,11 @@ class OutboxHandler:
                         # Reschedule with backoff
                         delay = min(2 ** event.retry_count * 5, 300)  # Exponential backoff
                         event.scheduled_at = time.time() + delay
+                        # 失败态必须落盘：只改内存时重启 retry_count 归零，
+                        # 毒事件会被无限重试（退避也随之丢）。
+                        self._save_event(event)
                     else:
-                        # Move to dead letter queue
+                        # Move to dead letter queue（其内部会移除 pending 原文件）
                         self._move_to_dead_letter(event)
 
             # Clean up processed events from pending list
@@ -414,6 +424,10 @@ class OutboxHandler:
 
             with open(event_file, "w", encoding="utf-8") as f:
                 json.dump(event.to_dict(), f, ensure_ascii=False, indent=2)
+
+            # 死信副本写成功后才移除 pending 原文件：只写副本的话，重启时
+            # `events/` 里的原文件会把它重新加载回待投队列。
+            (self.data_dir / "events" / f"{event.event_id}.json").unlink(missing_ok=True)
 
             logger.warning(f"Moved event to dead letter queue: {event.event_id}")
 
@@ -486,6 +500,8 @@ class OutboxHandler:
                         pass  # Could implement backup logic here
 
                     del self._events[event_id]
+                    # 内存清理必须同步删盘：否则重启会把"已清理"的事件全量装回来
+                    (self.data_dir / "events" / f"{event_id}.json").unlink(missing_ok=True)
 
                     # Update indexes
                     if event.agent_id:
@@ -518,6 +534,11 @@ def get_outbox_handler() -> OutboxHandler:
     return _outbox_handler_instance
 
 def reset_outbox_handler() -> None:
-    """重置 OutboxHandler 实例 (用于测试)"""
+    """重置 OutboxHandler 实例（用于测试与重启语义复现）。
+
+    两处都要清：模块级持有与类级单例。只清前者时下一次 `OutboxHandler(...)`
+    仍会拿回同一个旧实例，`data_dir` 入参被静默忽略——"重启"根本无从复现。
+    """
     global _outbox_handler_instance
     _outbox_handler_instance = None
+    OutboxHandler._instance = None
