@@ -166,8 +166,14 @@ class HealthChecker:
 
         start = time.monotonic()
         try:
-            success, message = health_check.check_func()
+            import concurrent.futures as _cf
+            with _cf.ThreadPoolExecutor(max_workers=1) as _pool:
+                future = _pool.submit(health_check.check_func)
+                success, message = future.result(timeout=health_check.timeout)
             status = HealthStatus.HEALTHY if success else HealthStatus.UNHEALTHY
+        except _cf.TimeoutError:
+            status = HealthStatus.UNHEALTHY
+            message = f"Health check '{name}' timed out after {health_check.timeout}s"
         except Exception as exc:  # 检查函数抛异常视为不健康
             status = HealthStatus.UNHEALTHY
             message = str(exc)

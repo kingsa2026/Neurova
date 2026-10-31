@@ -953,6 +953,8 @@ async def install_from_zip(
         with tempfile.TemporaryDirectory() as tmpdir:
             zip_path = os.path.join(tmpdir, file.filename or "skill.zip")
             content = await file.read()
+            if len(content) > 100 * 1024 * 1024:
+                raise HTTPException(status_code=413, detail="File too large (max 100MB)")
             with open(zip_path, "wb") as f:
                 f.write(content)
             service, pool, owner = _install_target(target, current_user)
