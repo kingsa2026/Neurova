@@ -390,6 +390,11 @@ class PatternCrystallizer:
         key = candidate["key"]
         primary_tool = candidate["primary_tool"]
         rate = candidate["rate"]
+        # 批 W4：同 pattern_key 查重——confirm_pending 同 key 重复候选或
+        # 排队期二次达阈不得双写两条 PATTERN 节点（检索双份注入）
+        for node in self.engine.iter_nodes():
+            if node.metadata.get("primary_tool") == primary_tool and node.content == key:
+                return False
         sample_ctx = candidate.get("sample_context", "")[:80]
 
         gate = self._ingestion_gate
