@@ -40,6 +40,8 @@ async def post_console_upload(
     dest = scope / f"{file_id}_{safe_name}"
 
     content = await file.read()
+    if len(content) > 100 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large (max 100MB)")
     dest.write_bytes(content)
 
     file_info = {
