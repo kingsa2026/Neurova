@@ -276,7 +276,11 @@ class KnowledgeRetrieverAdapter:
             graphRanks, graphSupport, graphWeight = self._graphRoute(
                 context, agent_id, requested
             )
-            knowledge_items = _kb_hybrid.hybrid_search_knowledge(
+            # 批 C3：同步重 IO 包 to_thread——否则 asyncio.wait_for 对
+            # 同步代码无效，语料大时事件循环停摆，超时护栏形同虚设
+            import asyncio as _aio
+            knowledge_items = await _aio.to_thread(
+                _kb_hybrid.hybrid_search_knowledge,
                 self._repo,
                 user=user,
                 query=searchQuery,

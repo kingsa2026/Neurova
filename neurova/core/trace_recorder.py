@@ -363,8 +363,18 @@ class TrajectoryRecorder:
             )
             # 资源修复: _max_traces_in_memory 此前定义却无人消费,
             # 索引无限增长并每次全量重写 index.json。超限丢最老条目。
+            # 批 R6：裁掉的条目同步删文件——修前被裁条目变孤儿，
+            # 磁盘慢漏 + 明文永久滞留 + list_traces 全树 rglob 线性变慢
             if len(self._saved_traces) > self._max_traces_in_memory:
+                evicted = self._saved_traces[:-self._max_traces_in_memory]
                 self._saved_traces = self._saved_traces[-self._max_traces_in_memory:]
+                for entry in evicted:
+                    orphan = Path(entry.get("file_path", ""))
+                    try:
+                        if orphan.is_file():
+                            orphan.unlink()
+                    except OSError:
+                        pass  # 文件已不在或权限不够——留痕不阻塞
             self._save_traces_index()
 
             logger.info("Saved trace %s to %s", trace_id, save_path)
