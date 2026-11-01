@@ -13,8 +13,8 @@
 先冻结、后续按目录分批消化）。当场把 38 个文件一起改，会让"哪条红是哪一个文件带来的"
 无法归因，且部分判据在补上 encoding 后会从"假绿"翻成"真红"——那是另一轮改动面。
 
-基线口径（本轮实测，不抄旧数）：**26 个文件 / 36 处**（`BASELINE` 表与 `scanViolations()` 现读
-同数——§6-463 收掉 `tests/unit/ci` 一族 6 处后的现算；上一轮是 30 个文件 / 42 处，建档那轮是 37 个文件 / 59 处，把这句话停在旧数上
+基线口径（本轮实测，不抄旧数）：**23 个文件 / 31 处**（`BASELINE` 表与 `scanViolations()` 现读
+同数——§6-464 再收 `scripts/ci` 一族 5 处后的现算；上一轮（§6-463）是 26 个文件 / 36 处，再上一轮 30/42，建档那轮 37/59，把这句话停在旧数上
 就是本文件自己反对的「基线与判据不同源」）。
 （2026-11-02 收：`tests/unit/test_pip_audit_gate.py` 的最后 1 处随 §6-462 清零——那一处正是
 「预存在册红」的真因：`--help` 子件把自己的 stdout 钉了 utf-8（`pip_audit_gate.py:399`），
@@ -33,6 +33,7 @@
   `git ls-files` 出仓内相对路径），属"侥幸没事"那一支，一并钉齐是防蔓延。Python 子件那四处按本档口径两头钉
   （父端 `encoding="utf-8"` ＋ 子端 `PYTHONIOENCODING`）；`git` 那一处只钉父端——给非 Python 子件钉
   `PYTHONIOENCODING` 是无意义的第二份口径。六行基线一并摘除，不留 0。）
+（2026-11-02 收：`scripts/ci` 一族 3 个文件 / 5 处随 §6-464 清零——动手前先把**每类子件到底写什么编码**量出来，因为这一族的修法不能套同一个模板：`git ls-files`／`git ls-remote`／`git branch --list` 现量 289134/138/7 字节、非 ASCII **0**（`core.quotepath` 默认把中文路径转成八进制转义）⇒ 只钉父端 `encoding="utf-8"` 就是正口径；`perf_gate.py` 的 import 探针是本仓 Python 子件，实测不带 env 时它写 **cp936**（17 字节里 4 个非 ASCII，按 utf-8 当场抛 invalid continuation byte@3）⇒ 必须两头钉，只钉父端会把今天读得通的读数改成炸；`osv-scanner --version` 是外部件且**本宿主没装**（`where` 取不到），这一处按外部工具既有先例取 `encoding="utf-8", errors="replace"`——它回答的是「能不能起来」，是点名探测而不是数据通道，取 replace 就是如实承认「量不到就不冒充精确」。三行基线一并摘除，不留 0。）
 （2026-10-09 收：`tests/unit/test_repo_root_pollution_guard.py` 的 1 处已随该文件三处
  子进程文本捕获全部钉上显式 `encoding="utf-8"` 而清零，该文件从基线摘除——
  摘除而不是留 0：日后它再长出一处，`BASELINE.get(f, 0)` 会让棘轮当场红。）
@@ -99,9 +100,6 @@ SCAN_ROOTS = ("neurova", "scripts", "tests")
 #: ——看着像判据自己坏了，其实是修法文案里"并让子进程写侧也钉成 UTF-8"那半没做。
 #: 钉齐后同一 env 下 8 格全绿，故这条红**不是**环境噪声，也不是"常驻红"，别再往那一栏里记。
 BASELINE: dict[str, int] = {
-    "scripts/ci/npc_branch_cleanup.py": 3,
-    "scripts/ci/osv_audit.py": 1,
-    "scripts/ci/perf_gate.py": 1,
     "scripts/desktop/bundle_backend.py": 1,
     "scripts/desktop/package_installer_zip.py": 3,
     "scripts/desktop/win_installer_kit.py": 4,
