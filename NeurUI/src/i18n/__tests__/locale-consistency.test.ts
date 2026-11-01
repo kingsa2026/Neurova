@@ -116,11 +116,11 @@ const CJK_BACKLOG_BASELINE: Record<string, number> = {
   'en-US': 0,
   'ru-RU': 0,
   'fr-FR': 0,
-  'ar-SA': 220,
-  'ko-KR': 224,
+  'ar-SA': 0,
+  'ko-KR': 0,
   'es-ES': 0,
   'de-DE': 0,
-  'hi-IN': 219,
+  'hi-IN': 0,
   'it-IT': 0,
 }
 
