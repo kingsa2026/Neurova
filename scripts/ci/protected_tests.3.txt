@@ -40,6 +40,8 @@ tests/unit/context/test_context_pool_retention_contract.py
 # 反思反哺闭环审计 2026-09-19：链B 教训注入的生产构造点接线 + 调控门纳入治理配置
 # （原有用例在测试内手工传 metacog_agent_id / 手工设 env，绿灯覆盖了契约却漏掉布线）
 tests/unit/context/test_metacog_production_wiring.py
+# D-6 提示面契约单源（字面量只在常量定义处）
+tests/unit/context/test_promptContractSingleSource.py
 tests/unit/context/test_metacog_lessons_injection.py
 tests/unit/cognitive/test_regulation_gate.py
 tests/unit/memory/test_cse_retrieve_touch.py
@@ -1351,6 +1353,8 @@ tests/unit/memory/test_sleep_loop_wiring.py
 # 变异探针（`_APPROVAL_WAIT_S` 改 90）⇒ 仅主判据红，且整档计时同步涨到 190.50s（同一次探针
 # 既读出"形状被抓住"也读出"这确实是墙外成本"）；恢复后 10 passed（13.30s／12.51s 两次）。
 tests/unit/neurflow/test_approval_reply_mechanism.py
+# D-3 审批回复按未决键隔离（一句回复不得批所有在等节点）
+tests/unit/neurflow/test_approvalReplyIsolation.py
 # §6-409（批 O-3）：对象内键值状态袋收口成**一处**实装，三族共用；`BasePlugin` 那份错位接缝退役。
 # 收口前三份并存：`BaseModule`（在役，IdleTimeTracker 写 6 键＋一格读回）、`SleepConsolidation`
 # （同功能第二拷贝，读的是自己那个 `_state` dict）、`BasePlugin.get_state/set_state`（坏的：
@@ -1368,6 +1372,8 @@ tests/unit/neurflow/test_approval_reply_mechanism.py
 # 12 failed，12 条与批 O-2 那场的同 12 条逐名相同（并会话在途改动所致，见 §6-405/§6-406）；
 # 另把本批 4 个生产档临时换回 HEAD 态复跑 `tests/unit/ci` 那三档红（13 条）⇒ 与本批无关，预存性成立。
 tests/unit/core/test_perObjectStateValueStoreHasOneImplementation.py
+# D-2 运行阶段由心跳/租约事实反推
+tests/unit/core/test_runStageDerivation.py
 # §6-416（批 P-5 第三格）：内容级**第八张表**并进单源，挖掘门改接并退役自带表与同名实装。
 # 票面来自 §6-415 仍开①——§6-411 那次"七份收成一份"没数到 `evolution/eval/miner.py:SECRET_PATTERNS`，
 # 而它在役（`service.py:503-506` → `messages_from_sessions` → `sanitize_messages` → 命中即整条
