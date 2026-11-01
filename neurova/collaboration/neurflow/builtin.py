@@ -15,6 +15,8 @@ Neurflow 内置节点定义模块 — 垂直切片 9
 """
 
 import asyncio
+import re
+import threading
 from neurova.core.logger import get_logger
 from typing import Any, Callable, Dict, List, Optional
 
@@ -2096,6 +2098,97 @@ async def exec_output(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, 
     }
 
 
+#: 审批默认等待预算（秒）。具名是为了能和父墙一起核算，不在函数体里现写 3600。
+DEFAULT_APPROVAL_TIMEOUT_SECONDS = 3600
+
+APPROVE_KEYWORDS = ("approve", "approved", "批准", "同意", "通过", "ok", "okay", "yes", "是")
+REJECT_KEYWORDS = ("reject", "拒绝", "驳回", "不通过", "不同意", "不批准", "反对",
+                   "不是", "不行", "取消", "cancel", "no", "nope", "否")
+
+#: 同一审批人可能同时有多个未决节点：键是 (execution_id, node_id)，值为审批人。
+_PENDING_APPROVALS: Dict[str, Dict[str, str]] = {}
+_PENDING_APPROVALS_LOCK = threading.Lock()
+
+
+def _approvalKey(executionId: str, nodeId: str) -> str:
+    return f"{executionId or 'unknown'}:{nodeId or 'unknown'}"
+
+
+def _registerPendingApproval(approvalKey: str, approver: str, executionId: str, nodeId: str) -> None:
+    with _PENDING_APPROVALS_LOCK:
+        _PENDING_APPROVALS[approvalKey] = {
+            "approver": str(approver or ""),
+            "execution_id": str(executionId or ""),
+            "node_id": str(nodeId or ""),
+        }
+
+
+def _unregisterPendingApproval(approvalKey: str) -> None:
+    with _PENDING_APPROVALS_LOCK:
+        _PENDING_APPROVALS.pop(approvalKey, None)
+
+
+def _resetPendingApprovalsForTests() -> None:
+    with _PENDING_APPROVALS_LOCK:
+        _PENDING_APPROVALS.clear()
+
+
+def _pendingApprovalCountForTests() -> int:
+    with _PENDING_APPROVALS_LOCK:
+        return len(_PENDING_APPROVALS)
+
+
+def _mentionsToken(text: str, token: str) -> bool:
+    if not token:
+        return False
+    return re.search(rf"(?<![A-Za-z0-9_]){re.escape(token)}(?![A-Za-z0-9_])", text) is not None
+
+
+def _resolveApprovalTarget(content: str, senderId: str) -> Optional[str]:
+    """把一条回复定向到**至多一个**未决审批。
+
+    定向规则（从严到宽）：完整键 → 执行号＋节点号 → 唯一执行号 → 唯一未决。
+    仍不能唯一确定时返回 None：宁可让双方继续等（超时是诚实形态），也不许
+    一句回复把所有在等的工作流一起批准。
+    """
+    text = str(content or "")
+    with _PENDING_APPROVALS_LOCK:
+        candidates = [
+            (key, dict(info)) for key, info in _PENDING_APPROVALS.items()
+            if info.get("approver") == str(senderId or "")
+        ]
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0][0]
+
+    keyHits = [key for key, _ in candidates if key in text]
+    if len(keyHits) == 1:
+        return keyHits[0]
+
+    pairHits = [
+        key for key, info in candidates
+        if _mentionsToken(text, info.get("execution_id", ""))
+        and _mentionsToken(text, info.get("node_id", ""))
+    ]
+    if len(pairHits) == 1:
+        return pairHits[0]
+
+    execHits = [
+        key for key, info in candidates
+        if _mentionsToken(text, info.get("execution_id", ""))
+    ]
+    if len(execHits) == 1:
+        return execHits[0]
+    return None
+
+
+def _keywordHit(text: str, keyword: str) -> bool:
+    if keyword.isascii():
+        return re.search(rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])", text) is not None
+    return keyword in text
+
+
 async def exec_approval(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
     """
     审批节点执行器
@@ -2113,7 +2206,7 @@ async def exec_approval(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str
     approver = config.get("approver", "")
     channel = config.get("channel", "")
     message = config.get("message", "")
-    timeout = config.get("timeout", 3600)
+    timeout = config.get("timeout", DEFAULT_APPROVAL_TIMEOUT_SECONDS)
     chat_id = config.get("chat_id", approver)
 
     # 获取 ChannelManager
@@ -2128,6 +2221,7 @@ async def exec_approval(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str
     # 构建审批消息
     approval_id = ctx.get("execution_id", "unknown")
     node_id = ctx.get("node_id", "unknown")
+    approval_key = _approvalKey(approval_id, node_id)
     approval_message = f"""📋 工作流审批请求
 
 审批ID: {approval_id}
@@ -2138,19 +2232,32 @@ async def exec_approval(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str
 - 批准: approve 或 同意
 - 拒绝: reject 或 拒绝"""
 
-    # 发送审批通知
-    try:
+    # 发送审批通知（走出口注意力预算：同键未发出者被新值覆盖、同键严格排队）
+    async def _sendApprovalNotification(notificationText: str):
         if channel:
-            # 指定渠道发送
-            msg_id = await channel_manager.send_message(
-                channel_type=channel, chat_id=chat_id, content=approval_message, message_type="text"
+            return await channel_manager.send_message(
+                channel_type=channel, chat_id=chat_id, content=notificationText,
+                message_type="text",
             )
-        else:
-            # 广播到所有已连接渠道
-            results = await channel_manager.broadcast_message(content=approval_message, message_type="text")
-            msg_id = list(results.values())[0] if results else None
+        results = await channel_manager.broadcast_message(
+            content=notificationText, message_type="text")
+        if not results:
+            return None
+        return next((value for value in results.values() if value), None)
 
-        if not msg_id:
+    try:
+        from neurova.channels.attention_budget import getAttentionBudget
+
+        delivery = await getAttentionBudget().deliver(
+            f"approval:{channel or 'broadcast'}:{chat_id}:{approval_key}",
+            approval_message,
+            _sendApprovalNotification,
+        )
+        msg_id = delivery.message_id
+        if delivery.coalesced:
+            logger.info("审批通知同键已有在发消息，本条并入待发槽: %s", approval_key)
+
+        if not msg_id and not delivery.coalesced:
             logger.error("发送审批通知失败")
             # 返回 pending 状态，允许工作流继续
             return {
@@ -2183,26 +2290,21 @@ async def exec_approval(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str
         """同步处理审批回复（从线程安全回调调用）"""
         content_lower = message_content.lower().strip()
 
-        # 批准关键词
-        approve_keywords = ["approve", "批准", "同意", "通过", "ok", "yes", "是"]
-        # 拒绝关键词
-        reject_keywords = ["reject", "拒绝", "驳回", "不通过", "no", "否"]
+        # 拒绝词先判：`不同意` / `不通过` 含批准子串，先比批准会把拒绝读成通过
+        if any(_keywordHit(content_lower, kw) for kw in REJECT_KEYWORDS):
+            approval_result["approved"] = False
+            reason = content_lower
+            for kw in REJECT_KEYWORDS:
+                if _keywordHit(content_lower, kw):
+                    reason = reason.replace(kw, "").strip()
+            approval_result["reason"] = reason or "未说明原因"
+            approval_event.set()
+            return True
 
-        for keyword in approve_keywords:
-            if keyword in content_lower:
-                approval_result["approved"] = True
-                approval_event.set()
-                return True
-
-        for keyword in reject_keywords:
-            if keyword in content_lower:
-                approval_result["approved"] = False
-                # 提取拒绝原因
-                for kw in reject_keywords:
-                    content_lower = content_lower.replace(kw, "").strip()
-                approval_result["reason"] = content_lower or "未说明原因"
-                approval_event.set()
-                return True
+        if any(_keywordHit(content_lower, kw) for kw in APPROVE_KEYWORDS):
+            approval_result["approved"] = True
+            approval_event.set()
+            return True
 
         return False
 
@@ -2213,15 +2315,26 @@ async def exec_approval(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str
 
     # 将回调注册到消息处理器（使用多处理器模式，避免覆盖其他处理器）
     async def message_handler(message):
-        """消息处理器 — 过滤审批回复"""
-        # 只处理来自审批人的消息
+        """消息处理器 — 过滤审批回复
+
+        同一审批人可能有多个未决节点，本处理器只认**定向到自己**的回复；
+        无法唯一确定的裸关键词不唤醒任何人（等超时，而不是误批）。
+        """
         if hasattr(message, "sender_id") and message.sender_id == approver:
-            # 尝试解析审批回复
             content = message.content if hasattr(message, "content") else str(message)
+            target = _resolveApprovalTarget(content, str(message.sender_id))
+            if target != approval_key:
+                if target is None:
+                    logger.info(
+                        "审批回复无法定向到具体未决节点（同一审批人存在多个未决），已忽略: %s",
+                        approval_key,
+                    )
+                return None
             await on_approval_reply_async(content)
         return None  # 不自动回复
 
     # 使用 add_message_handler 而不是 set_message_handler，避免覆盖其他处理器
+    _registerPendingApproval(approval_key, approver, approval_id, node_id)
     handler_id = channel_manager.add_message_handler(message_handler, priority=10)
     logger.info("等待审批回复: %s, handler_id=%s", approval_id, handler_id)
 
@@ -2230,9 +2343,6 @@ async def exec_approval(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str
         # 使用 run_in_executor 将 threading.Event.wait() 包装为异步操作
         # threading.Event.wait(timeout) 返回 True（事件已设置）或 False（超时）
         event_set = await loop.run_in_executor(None, approval_event.wait, timeout)
-
-        # 移除消息处理器
-        channel_manager.remove_message_handler(handler_id)
 
         if not event_set:
             # threading.Event.wait 返回 False 表示超时
@@ -2270,8 +2380,6 @@ async def exec_approval(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str
             }
 
     except Exception:
-        # 移除消息处理器
-        channel_manager.remove_message_handler(handler_id)
         logger.warning("审批异常: %s", approval_id)
         return {
             "status": "timeout",
@@ -2282,6 +2390,10 @@ async def exec_approval(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str
                 "reason": "审批超时",
             },
         }
+    finally:
+        # 取消/超时/异常都走这里：留着的处理器会吞掉后续审批回复
+        channel_manager.remove_message_handler(handler_id)
+        _unregisterPendingApproval(approval_key)
 
 
 # ==================== 执行器注册 ====================
