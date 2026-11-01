@@ -813,7 +813,7 @@ def _add_health_routes(app: FastAPI, app_state: AppState) -> None:
             "status": "running",
             "uptime": app_state.get_uptime(),
             "agents": len(app_state.agents),
-            "version": "1.0.0-beta1",
+            "version": "1.0.0-beta6",
             "timestamp": time.time(),
         }
 
@@ -1563,7 +1563,7 @@ def create_app(
         app = FastAPI(
             title="Neurova API",
             description="Neurova - 智能 Agent 系统 API",
-            version="1.0.0-beta1",
+            version="1.0.0-beta6",
             # API 文档面移除（2026-09-16）：Swagger/ReDoc/openapi 全链路零消费者
             # （前端不链、桌面壳不链、无代码依赖），对终端用户是死面，且随后端
             # 0.0.0.0 监听把完整 API 面暴露到局域网。API 版本上报归 /health。
