@@ -47,7 +47,7 @@ class SystemStatus(BaseModel):
 
     status: str = "running"
     uptime: float = 0
-    version: str = "1.0.0-beta1"
+    version: str = "1.0.0-beta6"
     python_version: str = ""
     start_time: float = 0
 
@@ -117,7 +117,7 @@ async def get_system_status(request: Request, _admin: dict = Depends(require_adm
     return SystemStatus(
         status="running",
         uptime=time.time() - start_time,
-        version="1.0.0-beta1",
+        version="1.0.0-beta6",
         python_version=f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         start_time=start_time,
     )
