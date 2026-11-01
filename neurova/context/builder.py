@@ -82,7 +82,8 @@ class ContextBuilder:
             system_prompt = self._extract_from_pool(candidate_pool, ContextSource.SYSTEM_INSTRUCTION)
             developer_instr = self._extract_from_pool(candidate_pool, ContextSource.DEVELOPER_INSTRUCTION)
             if developer_instr:
-                system_prompt += "\n\n## 行为规则\n" + developer_instr
+                from neurova.context.rules_sections import BEHAVIOR_RULES_HEADER
+                system_prompt += "\n\n" + BEHAVIOR_RULES_HEADER + "\n" + developer_instr
 
             memories = self._extract_memory_dicts_from_pool(candidate_pool)
             emotion = self._extract_emotion_from_pool(candidate_pool)

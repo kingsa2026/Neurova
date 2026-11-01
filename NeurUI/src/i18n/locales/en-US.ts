@@ -1838,6 +1838,8 @@ export default {
     analytics: 'Analytics',
     stats: 'Statistics',
     audit: 'Audit Logs',
+    waitingHuman: 'Awaiting human',
+    longestWaitMinutes: 'Longest wait (min)',
     benchmark: 'Benchmark',
     runtime: 'Runtime',
     notifications: 'Notifications',

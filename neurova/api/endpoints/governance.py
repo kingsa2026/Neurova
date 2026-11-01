@@ -872,10 +872,15 @@ async def list_desktop_audit(
     from neurova.security.desktop_audit import get_desktop_audit_store
 
     since = (time.time() - days * 86400) if days else None
-    rows = get_desktop_audit_store().query_actions(
+    store = get_desktop_audit_store()
+    rows = store.query_actions(
         tool=tool, user=user, since=since, needs_human=needs_human, limit=limit
     )
-    return {"code": 0, "data": {"entries": rows}}
+    # 待人队列读数（N-3）：与 entries 各自取数，不受分页 limit 影响。
+    waiting = store.summarize_actions(
+        tool=tool, user=user, since=since, needs_human=True, now=time.time()
+    )
+    return {"code": 0, "data": {"entries": rows, "waiting_human": waiting}}
 
 
 # ── profile 附身授权管理（R3-4）─────────────────────────────────

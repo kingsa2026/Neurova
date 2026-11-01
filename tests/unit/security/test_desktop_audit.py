@@ -128,6 +128,26 @@ class TestStoreLifecycle:
         rows = store.query_actions(needs_human=True)
         assert len(rows) == 1 and rows[0]["tool_name"] == "computer_click"
 
+    def test_summarize_waiting_human_counts_and_oldest_wait(self, store):
+        """待人队列读数：几个、最久等了多久——只回计数与时间，不回内容。"""
+        store.record_computer_action("computer_click", {}, {"success": True}, 1.0)
+        store.record_computer_action("computer_click", {}, {
+            "action_result": {"effect": "refused", "refusal_code": "permission_required"},
+        }, 1.0)
+        store.record_computer_action("computer_type", {}, {
+            "action_result": {"effect": "unverifiable"},
+        }, 1.0)
+        store._conn.execute(
+            "UPDATE desktop_action_audit SET ts=? WHERE needs_human=1", (time.time() - 120,))
+        store._conn.commit()
+
+        summary = store.summarize_actions(needs_human=True)
+        assert summary["count"] == 2
+        assert summary["oldest_wait_seconds"] >= 110
+
+        empty = store.summarize_actions(tool="computer_scroll", needs_human=True)
+        assert empty["count"] == 0 and empty["oldest_wait_seconds"] == 0.0
+
     def test_purge_older_than(self, store):
         store.record_computer_action("computer_click", {}, {"success": True}, 1.0)
         # 手改时间戳为 100 天前再 purge

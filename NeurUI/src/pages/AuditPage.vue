@@ -26,6 +26,8 @@
       <GlassStatCard :label="t('common.total')" :value="stats.total ?? 0" emoji="📋" />
       <GlassStatCard :label="t('system.today')" :value="stats.today ?? 0" emoji="📅" />
       <GlassStatCard :label="t('system.warnings')" :value="stats.warnings ?? 0" emoji="⚠️" />
+      <GlassStatCard :label="t('system.waitingHuman')" :value="waitingHuman" emoji="⏳" />
+      <GlassStatCard :label="t('system.longestWaitMinutes')" :value="longestWaitMinutes" emoji="⌛" />
     </div>
 
     <!-- Audit table -->
@@ -71,6 +73,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { listAuditRecords, exportAudit as exportAuditApi } from '@/api/modules/audit'
+import { getDesktopAuditWaiting } from '@/api/modules/governance'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -86,6 +89,9 @@ const stats = ref<Record<string, any>>({})
 const page = ref(1)
 const pageSize = ref(50)
 const total = ref(0)
+/** 待人队列读数（N-3）：几条、最久等多久；取不到时留痕，卡片保持 0。 */
+const waitingHuman = ref(0)
+const longestWaitMinutes = ref(0)
 
 const filters = ref<{ user: string; action: string | undefined; dateRange: any }>({
   user: '',
@@ -151,7 +157,25 @@ const exportAudit = async () => {
 
 const onPageChange = (p: number, ps: number) => { page.value = p; pageSize.value = ps; fetchAudit() }
 
-onMounted(fetchAudit)
+const fetchWaitingHuman = async () => {
+  try {
+    const res = await getDesktopAuditWaiting()
+    const waiting = res?.data?.waiting_human
+    waitingHuman.value = Number(waiting?.count ?? 0)
+    longestWaitMinutes.value = Math.floor(Number(waiting?.oldest_wait_seconds ?? 0) / 60)
+  } catch (err: any) {
+    // 403（非管理员）/ 503 / 网络异常都留痕：静默归零会让"待人 0 条"看起来像事实
+    console.error(
+      `[waitingHuman] 取回待人队列读数失败 HTTP ${err?.response?.status ?? '网络异常'}`,
+      err,
+    )
+  }
+}
+
+onMounted(() => {
+  void fetchAudit()
+  void fetchWaitingHuman()
+})
 </script>
 
 <style scoped>

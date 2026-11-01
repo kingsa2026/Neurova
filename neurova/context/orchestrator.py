@@ -26,6 +26,10 @@ from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
+#: 技能目录段的标题与提示语——同一函数的两条注册表分支共用一份，防两处措辞漂移。
+SKILL_CATALOG_HEADER = "## 可用技能目录"
+SKILL_CATALOG_HINT = "可用 $技能名 显式调用完整内容。"
+
 # Wave E 语义档向量缓存（按 agent 隔离的进程内注册表；SkillVectorCache 自带
 # 磁盘持久化，这里只避免每轮重建对象）
 _VECTOR_CACHES: dict = {}
@@ -2781,7 +2785,7 @@ class ContextOrchestrator:
                     on_present=lambda n: _onPresent(n, _view),
                 )
                 if catalog:
-                    return "## 可用技能目录\n" + catalog + "\n可用 $技能名 显式调用完整内容。"
+                    return SKILL_CATALOG_HEADER + "\n" + catalog + "\n" + SKILL_CATALOG_HINT
                 return ""
 
             _trust = None
@@ -2805,7 +2809,7 @@ class ContextOrchestrator:
                 on_present=_onPresent,
             )
             if catalog:
-                return "## 可用技能目录\n" + catalog + "\n可用 $技能名 显式调用完整内容。"
+                return SKILL_CATALOG_HEADER + "\n" + catalog + "\n" + SKILL_CATALOG_HINT
         except Exception:  # noqa: BLE001 - 目录渲染失败不阻断 system prompt
             logger.warning("技能目录渲染失败(跳过)", exc_info=True)
         return ""
@@ -2828,7 +2832,7 @@ class ContextOrchestrator:
         if self.config.constitution:
             parts.append("\n\n## 行为准则（宪法）\n" + self.config.constitution)
 
-        from neurova.context.rules_sections import build_all_sections
+        from neurova.context.rules_sections import BEHAVIOR_RULES_HEADER, build_all_sections
 
         parts.append(
             "\n\n"
@@ -2848,7 +2852,7 @@ class ContextOrchestrator:
 
         # 使用配置的行为规则
         if self.config.behavior_rules:
-            parts.append("\n\n## 行为规则\n")
+            parts.append("\n\n" + BEHAVIOR_RULES_HEADER + "\n")
             parts.extend(self.config.behavior_rules)
 
         if tools_desc:
