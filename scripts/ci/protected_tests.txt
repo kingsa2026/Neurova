@@ -4116,3 +4116,11 @@ tests/unit/core/test_event_bus_no_loop_drop.py
 tests/unit/core/test_health_checker_scheduler.py
 # C1 轮次态三件随调用链走——交叠会话的用量与轮间标志各归各
 tests/unit/agent/test_turnStateConcurrency.py
+
+# D-1/D-2/D-3/D-5/D-6 本批新判据（出口预算/阶段反推/审批隔离/渠道契约/提示单源）
+tests/unit/channels/test_channelAccessPolicy.py
+tests/unit/channels/test_channelContractChecklist.py
+tests/unit/channels/test_attentionBudget.py
+tests/unit/core/test_runStageDerivation.py
+tests/unit/neurflow/test_approvalReplyIsolation.py
+tests/unit/context/test_promptContractSingleSource.py
