@@ -189,7 +189,7 @@ class DesktopAuditStore:
 
     # ── 查询 ──────────────────────────────────────────────────
 
-    def query_actions(
+    def _filterClauses(
         self,
         *,
         tool: Optional[str] = None,
@@ -197,8 +197,8 @@ class DesktopAuditStore:
         since: Optional[float] = None,
         until: Optional[float] = None,
         needs_human: Optional[bool] = None,
-        limit: int = 200,
-    ) -> List[Dict[str, Any]]:
+    ):
+        """查询与聚合共用的一份过滤条件——两条读面口径不得分叉。"""
         clauses: List[str] = []
         args: List[Any] = []
         if tool:
@@ -216,6 +216,20 @@ class DesktopAuditStore:
         if needs_human is not None:
             clauses.append("needs_human=?")
             args.append(1 if needs_human else 0)
+        return clauses, args
+
+    def query_actions(
+        self,
+        *,
+        tool: Optional[str] = None,
+        user: Optional[str] = None,
+        since: Optional[float] = None,
+        until: Optional[float] = None,
+        needs_human: Optional[bool] = None,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        clauses, args = self._filterClauses(
+            tool=tool, user=user, since=since, until=until, needs_human=needs_human)
         sql = "SELECT * FROM desktop_action_audit"
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
@@ -223,6 +237,35 @@ class DesktopAuditStore:
         args.append(max(1, min(int(limit), 5000)))
         with self._lock:
             return [dict(r) for r in self._conn.execute(sql, args).fetchall()]
+
+    def summarize_actions(
+        self,
+        *,
+        tool: Optional[str] = None,
+        user: Optional[str] = None,
+        since: Optional[float] = None,
+        until: Optional[float] = None,
+        needs_human: Optional[bool] = None,
+        now: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """待人队列读数：当前几条、最久一条等了多久。不随分页 limit 缩水。"""
+        clauses, args = self._filterClauses(
+            tool=tool, user=user, since=since, until=until, needs_human=needs_human)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*), MIN(ts) FROM desktop_action_audit" + where, args
+            ).fetchone()
+        count = int(row[0] or 0)
+        oldest = row[1]
+        if not count or oldest is None:
+            return {"count": 0, "oldest_ts": None, "oldest_wait_seconds": 0.0}
+        current = time.time() if now is None else now
+        return {
+            "count": count,
+            "oldest_ts": float(oldest),
+            "oldest_wait_seconds": max(0.0, current - float(oldest)),
+        }
 
     # ── 保留策略（TTL，防膨胀——立项 §3.4 风险行）──────────────
 
