@@ -1,6 +1,6 @@
 {
   "name": "neurui",
-  "version": "1.0.0-beta5",
+  "version": "1.0.0-beta6",
   "private": true,
   "type": "module",
   "scripts": {
