@@ -105,3 +105,70 @@ async def testFailurePropagatesAndReleasesTheKey():
 
     result = await budget.deliver("k", "B", ok)
     assert result.message_id == "mid", "失败后键必须释放，后续消息还能发"
+
+
+@pytest.mark.asyncio
+async def testHeldDeliveryIsFlushedOnRelease():
+    budget = getAttentionBudget()
+    sent = []
+
+    async def send(text):
+        sent.append(text)
+        return "mid"
+
+    budget.hold("chat:1")
+    held = await budget.deliver("auto:1", "提醒", send, holdKey="chat:1")
+    assert held.held and sent == []
+
+    flushed = await budget.release("chat:1")
+    assert sent == ["提醒"], "释放后必须补发；压住等于丢消息"
+    assert flushed and flushed[0].message_id == "mid"
+
+
+@pytest.mark.asyncio
+async def testHoldIsRefCountedAcrossOverlappingTurns():
+    budget = getAttentionBudget()
+    sent = []
+
+    async def send(text):
+        sent.append(text)
+        return "mid"
+
+    budget.hold("chat:1")
+    budget.hold("chat:1")
+    await budget.deliver("auto:1", "提醒", send, holdKey="chat:1")
+
+    await budget.release("chat:1")
+    assert sent == [], "还有一层在等，不能提前放行"
+    await budget.release("chat:1")
+    assert sent == ["提醒"]
+
+
+@pytest.mark.asyncio
+async def testLatestHeldValueWins():
+    budget = getAttentionBudget()
+    sent = []
+
+    async def send(text):
+        sent.append(text)
+        return "mid"
+
+    budget.hold("chat:1")
+    await budget.deliver("auto:1", "旧提醒", send, holdKey="chat:1")
+    await budget.deliver("auto:1", "新提醒", send, holdKey="chat:1")
+    await budget.release("chat:1")
+    assert sent == ["新提醒"], "持窗期间同名只保留最新一条"
+
+
+@pytest.mark.asyncio
+async def testHoldKeyOnlyAffectsItsOwnChat():
+    budget = getAttentionBudget()
+    sent = []
+
+    async def send(text):
+        sent.append(text)
+        return "mid"
+
+    budget.hold("chat:1")
+    result = await budget.deliver("auto:2", "另一个会话", send, holdKey="chat:2")
+    assert not result.held and sent == ["另一个会话"]
