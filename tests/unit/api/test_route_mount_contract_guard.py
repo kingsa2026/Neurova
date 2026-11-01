@@ -216,9 +216,10 @@ async def _noop():
 class TestFrontendBaseUrlIsReadFromEveryDeclaredForm:
     """前端客户端的基地址有三类写法，判据必须全认——漏认就是**假阳性**。
 
-    `neuron.ts` 用的是 `axios.create({ baseURL: '/api/neuron' })`。漏认这一形态时，
-    它的 8 个调用会被拼成 `/api/v1/<资源段>` 并被报成「后端未注册」——而
-    `/api/neuron/stats` 这类路由其实好好地挂在 `/api/neuron` 下。
+    `neuron.ts` 走统一 api 实例、逐调用覆写 `baseURL: '/api/neuron'`（NEURON 面
+    不在 `/api/v1` 下）。漏认这一形态时，它的 8 个调用会被拼成
+    `/api/v1/<资源段>` 并被报成「后端未注册」——而 `/api/neuron/stats` 这类路由
+    其实好好地挂在 `/api/neuron` 下。
     假阳性比漏报更坏：它会训练人忽略这张差异表（教义第 2 条的同型反面）。
     """
 
@@ -228,8 +229,8 @@ class TestFrontendBaseUrlIsReadFromEveryDeclaredForm:
         assert calls, "neuron.ts 解析不出任何调用——取数口径失效"
         for _method, fullPath, _raw in calls:
             assert fullPath.startswith("/api/neuron/"), (
-                f"`neuron.ts` 的调用被拼成 {fullPath}：其 `axios.create({{baseURL:"
-                " '/api/neuron'}})` 声明未被识别，会产生成批假阳性。"
+                f"`neuron.ts` 的调用被拼成 {fullPath}：其模块内 `baseURL:"
+                " '/api/neuron'` 声明未被识别，会产生成批假阳性。"
             )
 
     def test_neuron_calls_match_the_registered_routes(self):
