@@ -15,6 +15,7 @@ try:
 except ImportError:
     REQUESTS_AVAILABLE = False
 
+from neurova.channels.access_policy import chatAccessDecision
 from neurova.channels.base import MessageChannel
 from neurova.channels.models import ContentType, UnifiedMessage
 
@@ -254,19 +255,27 @@ class WeChatMessagingMixin:
         chat_type = raw_data.get("chat_type", "single")
         from_user = raw_data.get("from_user", "")
 
-        # 私聊策略
+        # 私聊策略（判定单源：channels/access_policy.py）
         if chat_type == "single":
-            if a.ilink_private_strategy == "closed":
+            allowed, _ = chatAccessDecision(
+                "p2p",
+                {"private_chat_strategy": a.ilink_private_strategy,
+                 "whitelist_users": a.ilink_whitelist_users},
+                from_user,
+            )
+            if not allowed:
                 return False
-            if a.ilink_private_strategy == "whitelist":
-                return from_user in a.ilink_whitelist_users
 
         # 群聊策略
         if chat_type == "group":
-            if a.ilink_group_strategy == "closed":
+            allowed, _ = chatAccessDecision(
+                "group",
+                {"group_chat_strategy": a.ilink_group_strategy,
+                 "whitelist_users": a.ilink_whitelist_users},
+                from_user,
+            )
+            if not allowed:
                 return False
-            if a.ilink_group_strategy == "whitelist":
-                return from_user in a.ilink_whitelist_users
             if a.ilink_require_mention:
                 mention_list = raw_data.get("mention_list", [])
                 bot_id = raw_data.get("to_user", "")

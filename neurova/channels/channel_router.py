@@ -24,6 +24,7 @@ import logging
 from typing import Any, Callable, Dict, Optional
 
 from neurova.channels.base import ChannelMessage
+from neurova.channels.access_policy import chatAccessDecision
 from neurova.channels.voice_egress import turnAudioCandidate
 from neurova.voice_context_module import VOICE_CONTEXT_KEY
 from neurova.channels.group_leadership import (
@@ -49,7 +50,12 @@ def _default_agent_lookup(agent_id: str):
 
 def _channel_cfg(manager, channel_type: str, agent_id: str) -> Dict[str, Any]:
     """读该 (agent,渠道) 适配器的配置 extra（公共参数：show_thinking 等存这里）。
-    未注册适配器时返回空 dict（各开关取默认）。"""
+    未注册适配器时返回空 dict（各开关取默认）。
+
+    策略类字段在 Gen2 适配器上被 `authenticate()` 读成**实例属性**、并不回写 extra
+    （Discord/Telegram 等）。这里把实例属性补进同一视图，否则「UI 里配了 whitelist」
+    在路由层永远看不到——那正是 D-5 的失败方向。
+    """
     try:
         adapter = manager.get_adapter(channel_type, agent_id=agent_id)
     except Exception:
@@ -58,6 +64,25 @@ def _channel_cfg(manager, channel_type: str, agent_id: str) -> Dict[str, Any]:
         return {}
     cfg = getattr(adapter, "config", None)
     extra = dict(getattr(cfg, "extra", {}) or {}) if cfg else {}
+    for key in ("private_chat_strategy", "group_chat_strategy", "whitelist_users", "require_mention"):
+        if key not in extra and hasattr(adapter, key):
+            extra[key] = getattr(adapter, key)
+    # iLink/历史配置用的是另一组键名（`private_strategy` / `ilink_*`）：不归一到同一视图，
+    # 「UI 里配了 whitelist」在路由层就等于没配（D-5 的失败方向）。
+    for source, target in (
+        ("private_strategy", "private_chat_strategy"),
+        ("group_strategy", "group_chat_strategy"),
+        ("ilink_private_strategy", "private_chat_strategy"),
+        ("ilink_group_strategy", "group_chat_strategy"),
+        ("ilink_whitelist_users", "whitelist_users"),
+        ("ilink_require_mention", "require_mention"),
+    ):
+        if target in extra:
+            continue
+        if source in extra:
+            extra[target] = extra[source]
+        elif hasattr(adapter, source):
+            extra[target] = getattr(adapter, source)
     # 兼容顶层 use_stream 作为连接方式，不覆盖 extra 的 stream_mode（流式回复开关）
     return extra
 
@@ -110,10 +135,13 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
         cfg = _channel_cfg(manager, message.channel_type, agent_id)
 
         # 访问控制传导（此前所有渠道都忽略这两个开关）：
-        # 私聊/群聊策略 closed → 不处理；群聊 require_mention 且未 @ 机器人 → 不处理。
-        strategy = cfg.get("group_chat_strategy") if message.chat_type == "group" else cfg.get("private_chat_strategy")
-        if str(strategy or "open").lower() == "closed":
-            logger.info("ChannelRouter: %s %s 策略=closed，忽略消息", message.channel_type, message.chat_type)
+        # 判定单源在 `channels/access_policy.py`；closed/whitelist/未知策略一律拒绝。
+        allowed, denyReason = chatAccessDecision(message.chat_type, cfg, message.sender_id)
+        if not allowed:
+            logger.info(
+                "ChannelRouter: %s %s 准入拒绝（%s），忽略消息",
+                message.channel_type, message.chat_type, denyReason,
+            )
             return None
         if message.chat_type == "group" and _flag(cfg.get("require_mention")):
             mentioned = bool(message.metadata.get("mentions")) or "@" in content

@@ -20,6 +20,7 @@ except ImportError:
     REQUESTS_AVAILABLE = False
 
 from neurova.channels import ChannelAdapter, ChannelConfig, ContentType, MessageChannel, UnifiedMessage
+from neurova.channels.access_policy import chatAccessDecision
 
 
 class DiscordAdapter(ChannelAdapter):
@@ -367,23 +368,16 @@ class DiscordAdapter(ChannelAdapter):
         # Discord中私聊的channel_id通常对应DM channel，而频道消息的channel_id对应Guild channel
         is_dm = raw_data.get("type", 0) == 1  # DM channel type is 1
 
-        # 检查私聊/群聊策略
-        if is_dm:
-            if self.private_chat_strategy == "closed":
-                logging.debug("私聊已关闭，忽略消息")
-                return None
-            elif self.private_chat_strategy == "whitelist":
-                if user_id not in self.whitelist_users:
-                    logging.debug("用户 %s 不在白名单中", user_id)
-                    return None
-        else:
-            if self.group_chat_strategy == "closed":
-                logging.debug("群聊已关闭，忽略消息")
-                return None
-            elif self.group_chat_strategy == "whitelist":
-                if user_id not in self.whitelist_users:
-                    logging.debug("用户 %s 不在白名单中", user_id)
-                    return None
+        # 检查私聊/群聊策略（判定单源与路由层同一份；未知策略一律拒绝）
+        accessCfg = {
+            "private_chat_strategy": self.private_chat_strategy,
+            "group_chat_strategy": self.group_chat_strategy,
+            "whitelist_users": self.whitelist_users,
+        }
+        allowed, denyReason = chatAccessDecision("p2p" if is_dm else "group", accessCfg, user_id)
+        if not allowed:
+            logging.debug("渠道准入拒绝（%s），忽略消息", denyReason)
+            return None
 
         return UnifiedMessage(
             message_id=message_id,
@@ -453,17 +447,16 @@ class DiscordAdapter(ChannelAdapter):
         # 判断是私聊还是群聊
         is_dm = raw_data.get("type", 0) == 1
 
-        # 检查私聊/群聊策略
-        if is_dm:
-            if self.private_chat_strategy == "closed":
-                return False
-            elif self.private_chat_strategy == "whitelist":
-                return user_id in self.whitelist_users
-        else:
-            if self.group_chat_strategy == "closed":
-                return False
-            elif self.group_chat_strategy == "whitelist":
-                return user_id in self.whitelist_users
+        # 检查私聊/群聊策略（判定单源与路由层同一份；未知策略一律拒绝）
+        accessCfg = {
+            "private_chat_strategy": self.private_chat_strategy,
+            "group_chat_strategy": self.group_chat_strategy,
+            "whitelist_users": self.whitelist_users,
+        }
+        allowed, denyReason = chatAccessDecision("p2p" if is_dm else "group", accessCfg, user_id)
+        if not allowed:
+            logging.debug("渠道准入拒绝（%s），忽略消息", denyReason)
+            return False
 
         return True
 
