@@ -80,7 +80,8 @@ def listRemoteHeads(repo: str = "origin", timeout: int = 60) -> Dict[str, str]:
     try:
         result = subprocess.run(
             ["git", "ls-remote", "--heads", repo],
-            cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=timeout,
+            cwd=str(PROJECT_ROOT), capture_output=True, text=True,
+            encoding="utf-8", timeout=timeout,
         )
     except FileNotFoundError as exc:  # pragma: no cover - 环境缺 git
         raise RuntimeError(f"git 不可用：{exc}") from exc
@@ -105,7 +106,8 @@ def isMergedIntoMain(ref: str, main_ref: str = MAIN_REF) -> bool:
     """该引用是否已是主线的祖先（＝已被合并进主线）。"""
     result = subprocess.run(
         ["git", "merge-base", "--is-ancestor", ref, main_ref],
-        cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=60,
+        cwd=str(PROJECT_ROOT), capture_output=True, text=True,
+        encoding="utf-8", timeout=60,
     )
     # merge-base --is-ancestor：0 = 是祖先，1 = 不是，其余 = 出错
     if result.returncode == 0:
@@ -143,7 +145,8 @@ def mergedSourceTips(main_ref: str = MAIN_REF) -> set:
     """
     result = subprocess.run(
         ["git", "log", "--merges", "--format=%P", main_ref],
-        cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=60,
+        cwd=str(PROJECT_ROOT), capture_output=True, text=True,
+        encoding="utf-8", timeout=60,
     )
     if result.returncode != 0:
         raise RuntimeError(f"读取主线合并记录失败：{result.stderr.strip()[-500:]}")

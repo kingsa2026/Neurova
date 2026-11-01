@@ -868,7 +868,8 @@ def _invocationProbe(scanner) -> list:
     """
     try:
         proc = subprocess.run(
-            [str(scanner), "--version"], capture_output=True, text=True, timeout=60
+            [str(scanner), "--version"], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=60
         )
     except OSError as e:
         return [
