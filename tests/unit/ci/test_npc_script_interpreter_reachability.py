@@ -206,6 +206,26 @@ class TestInterpreterIsProbedBeforeUse:
 SEEDED_ROLE_NAME = "codebuddy"
 
 
+def _minimalEnv(**extra: str) -> dict:
+    """子进程最小 env：刻意只给 PATH/PYTHONIOENCODING，另补宿主必需项。
+
+    Windows 上 Node 初始化需要 `SystemRoot`——缺了会在 `ncrypto::CSPRNG`
+    断言处直接崩（rc=134，实测）。那是宿主事实，不是被测判据的一部分；
+    不补它，双运行时 parity 在 Windows 恒假红。
+    """
+    env = {"PATH": "/usr/bin:/bin:/usr/local/bin", "PYTHONIOENCODING": "utf-8"}
+    if os.name == "nt":
+        env["SystemRoot"] = os.environ.get("SystemRoot", r"C:\Windows")
+        # `sh -c "<registered node command>"` 经 PATH 解析 node；Windows 上 node
+        # 不在 Unix 形态的 PATH 里（实测 rc=127）。把宿主 node 目录前置，
+        # 被测的仍是"登记的命令形态"，不是 PATH 内容。
+        node = shutil.which("node")
+        if node:
+            env["PATH"] = os.path.dirname(node) + os.pathsep + env["PATH"]
+    env.update(extra)
+    return env
+
+
 def _seedWorkspaceSettings(workspace: Path) -> None:
     """把角色名单事实源铺进夹具工作区，使落点是可用构建工作区。
 
@@ -247,7 +267,7 @@ class TestGateScriptRunsOnBothInterpreters:
 
         workspace = tmp_path / "ws"
         workspace.mkdir()
-        base_env = {"PATH": "/usr/bin:/bin:/usr/local/bin", "PYTHONIOENCODING": "utf-8"}
+        base_env = {**_minimalEnv(), "PYTHONIOENCODING": "utf-8"}
 
         for workspace_env in (
             {"CNB_BUILD_WORKSPACE": str(workspace)},   # 落点可达
@@ -332,7 +352,7 @@ class TestGateScriptRunsOnBothInterpreters:
         result = subprocess.run(
             [node, str(node_script), "--json"],
             capture_output=True, text=True, encoding="utf-8", cwd=str(tmp_path),
-            env={"PATH": "/usr/bin:/bin"}, timeout=PROBE_WALL_S,
+            env=_minimalEnv(), timeout=PROBE_WALL_S,
         )
         assert result.returncode == 1, (
             f"缺 CNB_BUILD_WORKSPACE 时 node 分支没判红: rc={result.returncode}\n{result.stdout}"
@@ -451,7 +471,7 @@ class TestNodeDispatchReallyWorks:
 
         workspace = tmp_path / "ws"
         workspace.mkdir()
-        base_env = {"PATH": "/usr/bin:/bin:/usr/local/bin", "PYTHONIOENCODING": "utf-8"}
+        base_env = {**_minimalEnv(), "PYTHONIOENCODING": "utf-8"}
 
         for workspace_env in (
             {"CNB_BUILD_WORKSPACE": str(workspace)},
@@ -492,7 +512,7 @@ class TestNodeDispatchReallyWorks:
         result = subprocess.run(
             [node, str(GATE_SCRIPT), "--json"],
             capture_output=True, text=True, encoding="utf-8", cwd=str(PROJECT_ROOT),
-            env={"PATH": "/usr/bin:/bin", "CNB_BUILD_WORKSPACE": "/tmp"}, timeout=PROBE_WALL_S,
+            env=_minimalEnv(CNB_BUILD_WORKSPACE="/tmp"), timeout=PROBE_WALL_S,
         )
         assert result.returncode != 0, (
             "node 居然能直接跑 .py 了 —— 请复核探测段的 node 桥是否还需要"
@@ -618,6 +638,24 @@ class TestGateScriptsAreReachableFromTheRealWorkspace:
         if shell is None:
             pytest.skip("本环境无 sh，跑不了配置里登记的调用形态")
         return shell
+
+    def _firstRunnableForm(self, commands: list, workspace: Path) -> str | None:
+        """登记形态里第一条解释器真能跑起来的。
+
+        探测只问解释器本身（首 token `--version`），不执行门禁——本仓判据不把
+        "宿主装没装 python3" 写进结论：Windows 上 `python3` 常是 Store 别名
+        （实测 rc=49、零输出），而 CI 镜像里它是真的。哪一支可用由 `which` 定，
+        读数的等价性由上一档 parity 判据钉住。
+        """
+        for command in commands:
+            probe = subprocess.run(
+                [self._shell(), "-c", f"{command.split()[0]} --version"],
+                capture_output=True, text=True, encoding="utf-8", cwd=str(workspace),
+                env=self._gate_env(workspace), timeout=PROBE_WALL_S,
+            )
+            if probe.returncode == 0:
+                return command
+        return None
 
     @staticmethod
     def _gate_env(workspace: Path) -> dict:
@@ -772,7 +810,11 @@ class TestGateScriptsAreReachableFromTheRealWorkspace:
         problems = []
         for script, (needle, expect_ok) in expectations.items():
             commands = self._interpreter_forms(cnb_text, script)
-            run = self._runInWorkspace(commands[0], workspace)
+            command = self._firstRunnableForm(commands, workspace)
+            if command is None:
+                problems.append(f"{script}: 本机没有任何可用的登记调用形态")
+                continue
+            run = self._runInWorkspace(command, workspace)
             blob = run.stdout + run.stderr
             if needle not in blob:
                 problems.append(
