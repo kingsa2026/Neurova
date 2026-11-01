@@ -127,7 +127,7 @@ Pillow>=13.0.0
 # 四件缺席的失败形态都是「零向量兜底 → 断言红」，故同一段声明、同一份下界（与
 # requirements.txt 逐字同值，由 tests/unit/test_dev_path_and_runtime_dep_guards.py 比对）。
 # 刻意不拉 transformers/sentence-transformers/torch：CI 只要"向量可用"，不要本地模型。
-numpy>=1.24.0
+numpy>=2.5.4
 jieba>=0.42.1
 onnxruntime>=1.16.0
 tokenizers>=0.13.0
