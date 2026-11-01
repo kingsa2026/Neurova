@@ -19,6 +19,10 @@ from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
+#: 行为规则段的标题——system prompt 的两条拼装路径（orchestrator / builder）共用，
+#: 改一次即两处同时生效；不要在各路径里另写一份字面量。
+BEHAVIOR_RULES_HEADER = "## 行为规则"
+
 
 def build_tool_rules_section() -> str:
     """工具使用规则（恒定）。与 render_tools_description 的策略头分工：

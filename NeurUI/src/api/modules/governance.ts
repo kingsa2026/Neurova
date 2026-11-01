@@ -72,6 +72,20 @@ export function getPendingApprovals() {
   )
 }
 
+/** 待人队列读数：几条、最久等多久（不含明细；明细仍走 desktop-audit 的 entries） */
+export interface DesktopAuditWaiting {
+  count: number
+  oldest_ts: number | null
+  oldest_wait_seconds: number
+}
+
+export function getDesktopAuditWaiting() {
+  return api.get<ApiResponse<{ waiting_human: DesktopAuditWaiting }>>(
+    `${BASE}/desktop-audit`,
+    { params: { needs_human: true, days: 7, limit: 1 } }
+  )
+}
+
 /** 审批详情 */
 export function getApprovalDetail(requestId: string) {
   return api.get<ApiResponse<{ request: ApprovalRequest }>>(
