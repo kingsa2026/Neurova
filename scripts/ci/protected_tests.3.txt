@@ -1428,3 +1428,8 @@ tests/unit/knowledge/test_answerFactGuard.py
 tests/unit/knowledge/test_goldenMultiHopGraphRoute.py
 tests/unit/knowledge/test_graphShadowReadings.py
 tests/unit/knowledge/test_querySideNormalization.py
+# 知识 FTS 的行指纹必须覆盖「索引行真正存/过滤的列」（§6-461）：旧版手抄 5 个字段，
+#   而治理层会不动 updated_at 地改写条目 source → docs.source 变脏，按来源过滤查不到。
+#   判据四格：同 source 改动须重写行／按新来源过滤须命中且旧来源不再命中（端到端跨重启）、
+#   反向格钉住「未变条目不许重写」（增量不许退化成全量）。
+tests/unit/knowledge/test_ftsFingerprintCoversIndexedColumns.py
