@@ -59,6 +59,8 @@ tests/unit/channels/test_channel_router.py
 tests/unit/channels/test_channelAccessPolicy.py
 tests/unit/channels/test_channelContractChecklist.py
 tests/unit/channels/test_attentionBudget.py
+# D-1 ③ 人在等窗口：回合期间压住同会话自动通知
+tests/unit/channels/test_attentionHoldDuringTurn.py
 # 工单 2026-10-10 批 4：绑定码的流程面（一次性、不跨 agent/渠道、归属只从码里取、
 #   指令不被普通聊天吃掉）＋ 控制台面四端点（发码/列表/手工绑/解绑，门沿既有归属口径）。
 # 端点判据第一次把 `verification_code` 放上跨线程路径，撞出常驻连接缺
