@@ -119,7 +119,7 @@ const CJK_BACKLOG_BASELINE: Record<string, number> = {
   'ar-SA': 220,
   'ko-KR': 224,
   'es-ES': 220,
-  'de-DE': 220,
+  'de-DE': 42, // 法务 42 条留母语/法务审校；UI 178 条已翻
   'hi-IN': 219,
   'it-IT': 220,
 }
