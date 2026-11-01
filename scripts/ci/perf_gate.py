@@ -86,6 +86,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import os
 import subprocess
 import sys
 
@@ -279,6 +280,8 @@ def measureImportProbe(
         [sys.executable, "-c", _IMPORT_PROBE_SOURCE, payload],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         cwd=str(PROJECT_ROOT),
         timeout=180,
     )
