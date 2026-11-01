@@ -604,38 +604,55 @@ class ChannelManager:
         )
 
     async def _dispatch_message(self, message: ChannelMessage):
-        """把一条渠道消息送进处理器链（原 _on_channel_event 分发体）。"""
-        # 优先使用多处理器链
-        # C-24: 快照遍历——处理器在回调中增删列表时不再被并发修改影响
-        if self._message_handlers:
-            for priority, handler_id, handler in list(self._message_handlers):
+        """把一条渠道消息送进处理器链（原 _on_channel_event 分发体）。
+
+        「人在等」窗口：从入站消息进入分发到本轮回复真正发出，这个会话处于等待态；
+        同会话的自动/提醒消息（当前唯一自动渠道出口是审批通知）由出口预算压住，
+        关窗时补发最新一条。窗口挂在**这一层**而不是 handler 内部：只有这里同时包住
+        「handler 执行」与「回复发送」，早退点也覆盖得到。
+        """
+        from neurova.channels.attention_budget import getAttentionBudget
+
+        holdKey = f"chat:{message.channel_type}:{message.chat_id}"
+        budget = getAttentionBudget()
+        budget.hold(holdKey)
+        try:
+            # 优先使用多处理器链
+            # C-24: 快照遍历——处理器在回调中增删列表时不再被并发修改影响
+            if self._message_handlers:
+                for priority, handler_id, handler in list(self._message_handlers):
+                    try:
+                        reply = await handler(message)
+                        if reply:
+                            # 2026-09-14 契约扩展：handler 可返回多条消息（思考/工具/
+                            # 正文拆分）；2026-10-12 起项可为文本或 VoiceReply（语音）。
+                            await self._sendReplyItems(message, reply)
+                            break  # 第一个返回回复的处理器获胜
+                    except Exception as e:
+                        logger.exception("Message handler %s error: %s", handler_id, e)
+            # 回退到单处理器模式
+            elif self._message_handler:
                 try:
-                    reply = await handler(message)
+                    reply = await self._message_handler(message)
                     if reply:
-                        # 2026-09-14 契约扩展：handler 可返回多条消息（思考/工具/
-                        # 正文拆分）；2026-10-12 起项可为文本或 VoiceReply（语音）。
                         await self._sendReplyItems(message, reply)
-                        break  # 第一个返回回复的处理器获胜
                 except Exception as e:
-                    logger.exception("Message handler %s error: %s", handler_id, e)
-        # 回退到单处理器模式
-        elif self._message_handler:
+                    logger.exception("Message handler error: %s", e)
+                    # 尝试发送错误提示
+                    try:
+                        await self.send_message(
+                            message.channel_type,
+                            message.chat_id,
+                            "抱歉，处理消息时出现错误，请稍后重试。",
+                            **self._reply_kwargs(message),
+                        )
+                    except Exception:
+                        pass
+        finally:
             try:
-                reply = await self._message_handler(message)
-                if reply:
-                    await self._sendReplyItems(message, reply)
-            except Exception as e:
-                logger.exception("Message handler error: %s", e)
-                # 尝试发送错误提示
-                try:
-                    await self.send_message(
-                        message.channel_type,
-                        message.chat_id,
-                        "抱歉，处理消息时出现错误，请稍后重试。",
-                        **self._reply_kwargs(message),
-                    )
-                except Exception:
-                    pass
+                await budget.release(holdKey)
+            except Exception as exc:  # noqa: BLE001 - 收尾冲洗失败不得顶掉本轮结果
+                logger.warning("待人窗口释放失败（待发自动消息未冲洗）: %s", exc)
 
     async def _sync_to_session_sync(self, event_type: ChannelEventType, message: ChannelMessage):
         """同步事件到 SessionSyncManager"""

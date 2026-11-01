@@ -162,10 +162,11 @@ async def test_approvalNotificationGoesThroughTheAttentionBudget(manager, monkey
     seen = {}
 
     class _Budget:
-        async def deliver(self, key, text, sendFn):
+        async def deliver(self, key, text, sendFn, holdKey=None):
             from neurova.channels.attention_budget import DeliveryResult
 
             seen["key"] = key
+            seen["holdKey"] = holdKey
             return DeliveryResult(sent=True, coalesced=False, message_id=await sendFn(text))
 
     monkeypatch.setattr("neurova.channels.attention_budget.getAttentionBudget", lambda: _Budget())
@@ -174,4 +175,7 @@ async def test_approvalNotificationGoesThroughTheAttentionBudget(manager, monkey
     assert result["status"] == "timeout"
     assert "execA" in seen.get("key", "") and "n1" in seen.get("key", ""), (
         "审批通知没有走出口预算（key 应按 execution:node 区分）"
+    )
+    assert seen.get("holdKey") == "chat:feishu:u1", (
+        "审批通知没带会话 holdKey——人在等的窗口里压不住它"
     )
