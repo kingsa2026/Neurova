@@ -20,6 +20,11 @@ def _sources() -> dict:
 
 def test_behaviorRulesHeaderIsDeclaredOnceAndConsumedByName():
     sources = _sources()
+    # 面自证：根被改窄时"零命中"与"真干净"同形，先量扫到了多少再谈字面量只有一处。
+    scanned = len(sources)
+    assert scanned >= 25, (
+        f"扫描面现读 {scanned}（`neurova/context/*.py` 实测 31）——根解窄了本判据就成了空转"
+    )
     # 裸短语而不是带闭合引号的完整字面量：变异形态是 `"## 行为规则\n"`，
     # 带结尾引号的匹配会当场失明（本判据第一次写就这样假绿过一次）。
     holders = [name for name, text in sources.items() if "## 行为规则" in text]
