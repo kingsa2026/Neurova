@@ -176,9 +176,7 @@ class ChannelConfig:
     app_secret: Optional[str] = None
     bot_name: str = "Neurova"
     welcome_message: str = "你好！我是 Neurova，有什么可以帮你的？"
-    max_message_length: int = 4096
     allowed_content_types: List[ContentType] = field(default_factory=lambda: [ContentType.TEXT])
-    rate_limit: int = 60
     metadata: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:

@@ -40,6 +40,7 @@ except ImportError:
     logging.warning("httpx 库未安装，部分AI生成功能可能不可用")
 
 from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
+from neurova.channels.access_policy import chatAccessDecision
 from neurova.channels.base import ChannelConfig
 
 logger = logging.getLogger(__name__)
@@ -428,23 +429,18 @@ class QQBotAdapter(ChannelAdapter):
                 logging.debug("群消息未@机器人，忽略")
                 return None
 
-        # 检查私聊/群聊策略
-        if message_type == "private":
-            if self.private_chat_strategy == "closed":
-                logging.debug("私聊已关闭，忽略消息")
+        # 检查私聊/群聊策略（判定单源：channels/access_policy.py）
+        if message_type in ("private", "group"):
+            allowed, denyReason = chatAccessDecision(
+                "p2p" if message_type == "private" else "group",
+                {"private_chat_strategy": self.private_chat_strategy,
+                 "group_chat_strategy": self.group_chat_strategy,
+                 "whitelist_users": self.whitelist_users},
+                user_id,
+            )
+            if not allowed:
+                logging.debug("渠道准入拒绝（%s），忽略消息", denyReason)
                 return None
-            elif self.private_chat_strategy == "whitelist":
-                if user_id not in self.whitelist_users:
-                    logging.debug("用户 %s 不在白名单中", user_id)
-                    return None
-        elif message_type == "group":
-            if self.group_chat_strategy == "closed":
-                logging.debug("群聊已关闭，忽略消息")
-                return None
-            elif self.group_chat_strategy == "whitelist":
-                if user_id not in self.whitelist_users:
-                    logging.debug("用户 %s 不在白名单中", user_id)
-                    return None
 
         return UnifiedMessage(
             message_id=message_id,
@@ -808,17 +804,17 @@ class QQBotAdapter(ChannelAdapter):
             if bot_at_pattern not in raw_data.get("message", ""):
                 return False
 
-        # 检查私聊/群聊策略
-        if message_type == "private":
-            if self.private_chat_strategy == "closed":
+        # 检查私聊/群聊策略（判定单源：channels/access_policy.py）
+        if message_type in ("private", "group"):
+            allowed, _ = chatAccessDecision(
+                "p2p" if message_type == "private" else "group",
+                {"private_chat_strategy": self.private_chat_strategy,
+                 "group_chat_strategy": self.group_chat_strategy,
+                 "whitelist_users": self.whitelist_users},
+                user_id,
+            )
+            if not allowed:
                 return False
-            elif self.private_chat_strategy == "whitelist":
-                return user_id in self.whitelist_users
-        elif message_type == "group":
-            if self.group_chat_strategy == "closed":
-                return False
-            elif self.group_chat_strategy == "whitelist":
-                return user_id in self.whitelist_users
 
         return True
 

@@ -19,9 +19,21 @@ CHANNEL_TEXT_LIMITS = {
     "dingtalk": 3500,
     "feishu": 4000,
     "wechat": 4000,
+    "discord": 2000,     # Discord 单条 content 上限 2000（官方硬限）
     "console": 8000,
 }
 DEFAULT_TEXT_LIMIT = 4000
+
+#: 明确接受默认上限的渠道（新增渠道若要落默认，必须先登记并写明理由）。
+#: 工厂里加了分支却既不进 `CHANNEL_TEXT_LIMITS` 也不进本表 = 契约判据红：
+#: 否则长回复会按 4000 悄悄发出，平台上限更小时整条被拒而无人发现。
+DEFAULT_TEXT_LIMIT_CHANNELS = {
+    "xiaoyi": "平台未给出固定单条上限，按默认分片",
+    "qclaw": "桥接出口，单条上限由下游决定，按默认分片",
+    "mqtt": "payload 上限由 broker 配置，按默认分片",
+    "sip": "语音面，文本出口不适用",
+    "voice": "语音面，文本出口不适用",
+}
 
 
 def text_limit_for(channel_type: str) -> int:

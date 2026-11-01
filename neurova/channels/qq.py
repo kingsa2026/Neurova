@@ -44,6 +44,7 @@ except ImportError:
     ED25519_AVAILABLE = False
 
 from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
+from neurova.channels.access_policy import chatAccessDecision
 from neurova.channels.base import ChannelConfig
 
 # access_token 换取接口（官方规范，Bot {appid}.{token} 头已废弃）
@@ -453,15 +454,17 @@ class QQAdapter(ChannelAdapter):
                 logging.debug("消息未@机器人，忽略")
                 return None
 
-        # 检查私聊/群聊策略
+        # 检查私聊/群聊策略（判定单源：channels/access_policy.py）
         # QQ频道都是群聊，所以检查群聊策略
-        if self.group_chat_strategy == "closed":
-            logging.debug("群聊已关闭，忽略消息")
+        allowed, denyReason = chatAccessDecision(
+            "group",
+            {"group_chat_strategy": self.group_chat_strategy,
+             "whitelist_users": self.whitelist_users},
+            user_id,
+        )
+        if not allowed:
+            logging.debug("渠道准入拒绝（%s），忽略消息", denyReason)
             return None
-        elif self.group_chat_strategy == "whitelist":
-            if user_id not in self.whitelist_users:
-                logging.debug("用户 %s 不在白名单中", user_id)
-                return None
 
         return UnifiedMessage(
             message_id=message_id,
@@ -602,13 +605,14 @@ class QQAdapter(ChannelAdapter):
             if not bot_mentioned:
                 return False
 
-        # 检查群聊策略 (QQ频道都是群聊)
-        if self.group_chat_strategy == "closed":
-            return False
-        elif self.group_chat_strategy == "whitelist":
-            return user_id in self.whitelist_users
-
-        return True
+        # 检查群聊策略 (QQ频道都是群聊；判定单源：channels/access_policy.py)
+        allowed, _ = chatAccessDecision(
+            "group",
+            {"group_chat_strategy": self.group_chat_strategy,
+             "whitelist_users": self.whitelist_users},
+            user_id,
+        )
+        return allowed
 
 
 def create_qq_adapter(app_id: str = "", token: str = "", secret: str = "") -> QQAdapter:

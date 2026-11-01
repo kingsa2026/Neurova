@@ -7,6 +7,7 @@ from neurova.core.logger import get_logger
 from typing import Any, Dict, Optional
 
 from neurova.channels import ChannelAdapter, ChannelConfig, MessageChannel
+from neurova.channels.access_policy import chatAccessDecision
 from neurova.channels.base import ChannelEventType, ChannelMessage
 from neurova.channels.voice_ingress import AUDIO_BYTES_KEY, INBOUND_VOICE_PLACEHOLDER
 
@@ -354,17 +355,23 @@ class TelegramAdapter(
         sender_id = str(msg.get("from", {}).get("id", ""))
 
         if chat_type == "private":
-            if self.private_chat_strategy == "closed":
-                return False
-            elif self.private_chat_strategy == "whitelist":
-                return sender_id in self.whitelist_users
-            return True
+            allowed, _ = chatAccessDecision(
+                "p2p",
+                {"private_chat_strategy": self.private_chat_strategy,
+                 "whitelist_users": self.whitelist_users},
+                sender_id,
+            )
+            return allowed
 
         if chat_type in ("group", "supergroup"):
-            if self.group_chat_strategy == "closed":
+            allowed, _ = chatAccessDecision(
+                "group",
+                {"group_chat_strategy": self.group_chat_strategy,
+                 "whitelist_users": self.whitelist_users},
+                sender_id,
+            )
+            if not allowed:
                 return False
-            elif self.group_chat_strategy == "whitelist":
-                return sender_id in self.whitelist_users
             if self.require_mention:
                 text = msg.get("text", "")
                 entities = msg.get("entities", [])

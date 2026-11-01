@@ -35,3 +35,16 @@ def test_channel_limits_present():
     assert text_limit_for("telegram") <= 4096
     assert text_limit_for("wecom") < text_limit_for("telegram")
     assert text_limit_for("unknown_channel") > 0
+
+
+def test_discordLimitMatchesThePlatformSingleMessageCap():
+    """Discord 单条 content 上限 2000；落默认 4000 会让长回复整条被平台拒绝。"""
+    assert text_limit_for("discord") == 2000
+
+
+def test_discordLongReplyIsSplitUnderThePlatformCap():
+    text = "长" * 4500
+    parts = split_message(text, text_limit_for("discord"))
+    assert len(parts) >= 3
+    assert all(len(p) <= 2000 for p in parts)
+    assert "".join(parts) == text
