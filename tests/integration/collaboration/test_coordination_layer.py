@@ -14,14 +14,14 @@ from neurova.collaboration.glance_yield_rules import (
     GlanceYieldChecker, 
     YieldDecision, 
     YieldReason,
-    reset_glance_yield_checker,
 )
 
 
 @pytest.fixture
-def cursor_manager():
-    """Create fresh SeenCursorManager for each test"""
-    manager = SeenCursorManager()
+def cursor_manager(tmp_path):
+    """每个用例一份独立落点的 SeenCursorManager（单例两处都重置）。"""
+    reset_seen_cursor_manager()
+    manager = SeenCursorManager(data_dir=str(tmp_path / "seen"))
     yield manager
     reset_seen_cursor_manager()
 
@@ -29,14 +29,7 @@ def cursor_manager():
 @pytest.fixture
 def yield_checker():
     """Create fresh GlanceYieldChecker for each test"""
-    checker = GlanceYieldChecker()
-    checker.initialize(
-        max_concurrent_agents_per_model=3,
-        min_spawn_interval_seconds=1.0,
-        adaptive_pacer_enabled=True,
-    )
-    yield checker
-    reset_glance_yield_checker()
+    yield GlanceYieldChecker()
 
 
 class TestSeenCursorCreation:
@@ -144,29 +137,30 @@ class TestGLANCE_YIELD_Rules:
     """Test GLANCE_YIELD_RULES implementation"""
     
     def test_register_agent(self, yield_checker):
-        """Test agent registration"""
+        """登记后模型 pin 可见；未开工时并发桶为空（查询不占用）。"""
         yield_checker.register_agent("agent_a", "model_gpt4")
-        
-        load = yield_checker.get_current_load("model_gpt4")
-        
-        assert load["active_agents"] == 1
-        assert "agent_a" in load["agents"]
+
+        assert yield_checker.get_stats()["registered_agents"] == 1
+        assert yield_checker._agent_pins["agent_a"].model_name == "model_gpt4"
+        assert yield_checker.get_stats()["active_per_model"] == {}
     
     def test_concurrency_limit(self, yield_checker):
-        """Test concurrency cap enforcement"""
-        # Register 3 agents (max allowed)
-        for i in range(3):
-            yield_checker.register_agent(f"agent_{i}", "model_small")
-        
-        # Try to check another agent
+        """并发桶满额后，下一个同模型 agent 必须让位。"""
+        limit = GlanceYieldChecker.DEFAULT_MAX_CONCURRENT_AGENTS
+        for i in range(limit):
+            agent = f"agent_{i}"
+            yield_checker.register_agent(agent, "model_small")
+            yield_checker.record_operation_start(agent, f"op_{i}")
+
         decision = yield_checker.check_yield_rules(
             agent_id="agent_new",
             model_name="model_small",
             proposed_operations=["op1"],
         )
-        
+
         assert decision.should_yield is True
-        assert decision.reason == YieldReason.MODEL_CONCURRENCY_LIMIT
+        assert decision.reason == YieldReason.CONCURRENT_AGENT
+        assert decision.details["current_count"] == limit
     
     def test_spawn_spacing(self, yield_checker):
         """Test spawn interval enforcement"""
@@ -185,22 +179,22 @@ class TestGLANCE_YIELD_Rules:
         assert decision.should_yield is True
         assert decision.reason == YieldReason.DETERMINISTIC_SPACING
     
-    def test_verbatim_dup_detection(self, yield_checker):
-        """Test verbatim duplicate detection"""
+    def test_verbatimDupIsOwnedBySeenCursorNotThisGate(self, yield_checker, cursor_manager):
+        """逐字重复的执法点在 SeenCursor；本闸不提供第二份判据。"""
         yield_checker.register_agent("agent_dup", "model_dup")
-        
-        # Mark operations as pending
-        yield_checker._pending_operations["agent_dup"] = {"op_a", "op_b"}
-        
-        # Check identical operations
+        cursor_manager.create_cursor(agent_id="agent_dup", op_hashes=["op_a"])
+
+        is_fresh, reason = cursor_manager.check_freshness(
+            agent_id="agent_dup", expected_op_hashes=["op_a"],
+        )
+        assert is_fresh is False and "already seen" in reason.lower()
+
         decision = yield_checker.check_yield_rules(
             agent_id="agent_dup",
             model_name="model_dup",
-            proposed_operations=["op_a", "op_b"],
+            proposed_operations=["op_a"],
         )
-        
-        assert decision.should_yield is True
-        assert decision.reason == YieldReason.VERBATIM_DUPLICATE
+        assert decision.should_yield is False, "本闸不得另立一套逐字重复判据"
     
     def test_all_rules_pass(self, yield_checker):
         """Test when all rules pass"""
@@ -221,26 +215,24 @@ class TestAdaptivePacing:
     
     def test_high_error_rate_backoff(self, yield_checker):
         """Test backoff on high error rate"""
-        # Simulate high error rate
+        # 成功率低于 0.5 触发自适应退避（阈值与公式的唯一实现在 check 内）
         yield_checker._pacing_stats["model_stress"] = {
             "total_ops": 100,
-            "successful_ops": 60,
-            "failed_ops": 40,
-            "success_rate": 0.6,
-            "error_rate": 0.4,
+            "successful_ops": 40,
+            "success_rate": 0.4,
         }
-        
+
         yield_checker.register_agent("agent_stress", "model_stress")
-        
+
         decision = yield_checker.check_yield_rules(
             agent_id="agent_stress",
             model_name="model_stress",
             proposed_operations=["op1"],
         )
-        
+
         assert decision.should_yield is True
-        assert decision.reason == YieldReason.RESOURCE_CONTENTION
-        assert decision.wait_time_seconds >= 5.0
+        assert decision.reason == YieldReason.ADAPTIVE_PACER
+        assert decision.wait_time_seconds > 0
     
     def test_normal_operation_no_backoff(self, yield_checker):
         """Test no backoff on normal operation"""
@@ -272,16 +264,12 @@ class TestOperationLifecycle:
         yield_checker.register_agent("agent_cycle", "model_cycle")
         
         op_hash = "cycle_op_hash"
-        
-        # Start
+
         yield_checker.record_operation_start("agent_cycle", op_hash)
-        
-        assert op_hash in yield_checker._pending_operations["agent_cycle"]
-        
-        # Complete successfully
+        assert "agent_cycle" in yield_checker._activeOps["model_cycle"]
+
         yield_checker.record_operation_complete("agent_cycle", op_hash, success=True)
-        
-        assert op_hash not in yield_checker._pending_operations["agent_cycle"]
+        assert "model_cycle" not in yield_checker._activeOps
     
     def test_failure_tracking(self, yield_checker):
         """Test failure tracking updates pacing stats"""
@@ -299,7 +287,8 @@ class TestOperationLifecycle:
         
         stats = yield_checker._pacing_stats["model_fail"]
         assert stats["total_ops"] == 11
-        assert stats["failed_ops"] == 6
+        assert stats["successful_ops"] == 5
+        assert stats["success_rate"] == pytest.approx(5 / 11)
 
 
 class TestCleanup:
@@ -317,7 +306,8 @@ class TestCleanup:
         # Cleanup keeping only 100
         cleaned = cursor_manager.cleanup_old_cursors(keep_count=100)
         
-        assert cleaned >= 40  # At least 50 should be cleaned (150-100)
+        # cursor_id 若靠时钟生成会撞 id 覆盖，存量就不是 150；唯一 id 下应恰清 50 条
+        assert cleaned == 50
 
 
 class TestIntegration:
