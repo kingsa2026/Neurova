@@ -6,8 +6,8 @@
   "license": "Apache-2.0",
   "overridesNote": "overrides 只作用于本清单的解析结果（审计面）。swagger-jsdoc 6.3.0 这类子依赖若用精确版本声明（如 yaml: \"2.0.0-1\"），锁文件里的传递依赖会一直停在该版本，重跑 npm install 也不会抬升——此时只能由 overrides 顶替。不属降级：顶替方向是抬到修复版，且实际运行的那份包由 neurova/tool_layers/npx_runtime_registry.py 的 PINNED 钉住。`@modelcontextprotocol/server`／`node` 是本仓 `@upstash/context7-mcp` 用精确版本钉住的子依赖（它写 `2.0.0`，不是 `^`），registry 上 2.0.0 只有那一版、修复版 2.3.0 起才有，故除 overrides 无路可走；`@azure/msal-node` 与 `undici` 被父包声明 `^6.0.0` / `^7.0.0`，区间顶不到已修复的大版本（前者上游只发 7.x）；其余（fast-uri／ip-address／zod）各有父包给的下界卡在旧值。一律抬到公告修复线以上，方向只有抬没有降。`body-parser` 按父包分段钉、不设平铺条目：它的公告 fixed 落在 2.4.0（2.x 线），1.x 线的最后修复点是 1.20.9，两条声明线各有自己的下界；平铺那条会先被命中而遮住分段条目，dbhub 的 express 4 子树随之被并到顶层，审计面与真实解析脱形（守卫见 tests/unit/tools/test_npx_runtime_pinning.py 的 TestNestedCarrierSubtreeIsKeptWhole）。",
   "dependencies": {
-    "@askjo/camofox-browser": "1.16.0",
-    "@bytebase/dbhub": "1.2.5",
+    "@askjo/camofox-browser": "1.18.1",
+    "@bytebase/dbhub": "1.5.0",
     "@modelcontextprotocol/server-filesystem": "2026.8.31",
     "@upstash/context7-mcp": "4.4.4"
   },
