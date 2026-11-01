@@ -275,12 +275,12 @@ class TestChannelConfig:
     """ChannelConfig 渠道配置测试"""
 
     def test_create_config(self):
-        """验证创建基本配置"""
+        """验证创建基本配置（单条长度上限的单源在 message_chunker，不在本模型）"""
         config = ChannelConfig(channel=MessageChannel.TELEGRAM)
         assert config.channel == MessageChannel.TELEGRAM
         assert config.enabled is True
-        assert config.max_message_length == 4096
-        assert config.rate_limit == 60
+        assert not hasattr(config, "max_message_length")
+        assert not hasattr(config, "rate_limit")
 
     def test_default_content_types(self):
         """验证默认允许的内容类型"""
