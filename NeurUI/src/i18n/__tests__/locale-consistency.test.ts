@@ -114,14 +114,14 @@ describe('locale placeholder consistency', () => {
  */
 const CJK_BACKLOG_BASELINE: Record<string, number> = {
   'en-US': 0,
-  'ru-RU': 220,
-  'fr-FR': 220,
+  'ru-RU': 0,
+  'fr-FR': 0,
   'ar-SA': 220,
   'ko-KR': 224,
-  'es-ES': 220,
-  'de-DE': 42, // 法务 42 条留母语/法务审校；UI 178 条已翻
+  'es-ES': 0,
+  'de-DE': 0,
   'hi-IN': 219,
-  'it-IT': 220,
+  'it-IT': 0,
 }
 
 describe('untranslated Chinese values do not grow', () => {
