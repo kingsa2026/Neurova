@@ -10949,6 +10949,10 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **R6**：trace_recorder 索引裁剪同步 unlink 被裁条目的 JSON 文件——修前被裁条目变孤儿（本开发机实测 539 个 JSON 3.3MB），磁盘慢漏+明文滞留。
     - **合跑**：knowledge_retriever_adapter+batchCR+batchS 29 passed；evolution 1689 passed；core 2074 passed（1 failed = test_session_list_order，stash A/B 双向同败判预存）。
     - **下一枚空号现查**：条目行最大 **452**、引用面最大 **450**（§6-451/452 为新登记）⇒ 后继从 **§6-453** 起。
+452. (续 2) **C1 已实施——本格的 ⬜ 是 2026-10-31 的登记时态，11-01 由 `7f0e20ae` 闭合，实施笔没回写本格** ✅🟢 —— §6-459 复核落笔。
+    - 现读而非信主题行：`neurova/agent/loops/turn_run_state.py` 三件齐备——`toolRounds`（原 `OpenAILoop._rounds`）／`gateRunner`（**必填**，`_buildGateRunner` 单点装配，同轮三条调用路径共用一份滑动窗口）／`roundUsage`（原 `agent._round_usage`）。`base.py:648` `_accumulateRoundUsage(usage, state)` 已改为写 `state.roundUsage`（调用链局部对象）⇒ §6-456 第 10 条「原子性附注」随 #1 一起消失，不需要另加锁。
+    - **先后关系决定这不是判错**：`edeed820`（10-31 19:24）登记「本会话上下文接近耗尽，不敢在生产热路径上冒险改，留给下一会话」是当时的实话；`7f0e20ae`（11-01 00:18）把它做完，却只动了 `loops/*.py`＋`protected_tests.txt`＋测试档，**没碰台账**。形态归 §6-459 仍开①：实施笔的改动面若不含台账，账就会长期停在「没干」。
+
 453. **批 X1：marketplace old_version / 会话排序跨用户 / files 审批落盘（✅ `marketplace.py +4/−2`、`console.py +2/−1`、`files_api.py +4/−0`）** ✅🟢 —— §6-448 批 X。
     - marketplace kind=update 的 old_version 取**更新前**的版本（与 update_market_skill 同口径）——修前 submission.version 是新版本自比自。
     - 会话排序 visible 集带 user_id 过滤——修前其他用户的会话也在集合里可被重排序。
@@ -10990,3 +10994,20 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - HealthCheck run_check 包 ThreadPoolExecutor + timeout（修前同步检查在 async def 端点内直跑，数据库被锁时事件循环停摆）。
     - 绿灯：core 2074 passed、skills/cognitive 无新增失败。
     - **号次说明**：原记 §6-454，与批 X2 同号；本格后到，按让号规则改为 §6-458 并移到尾部。
+459. **dsh-superagent 对比批（D-1~D-6／N-1~N-5）补落账，并更正三处账实不符（`68582111..HEAD` 15 笔：生产 +660/−180＝净 +480／判据 +854/−4／前端 +2192/−1961＝净 +231／基建 +138/−22／文档 +73/−0；触及 60 文件）** ✅🟢 —— §6-448 之后的外部对比批，用户点单「按这个文档进行修复和升级」→「按照推荐裁定 然后继续处理欠账」→「按推荐 甲」。
+    - **本格为什么是补记而不是正常落格**：`git log --format=%H -- audit-reports/simplification-audit-2026-10-05.md` 现算最后一笔动台账的是 `68582111`，其后 **15 笔提交逐笔 `git show --numstat` 对台账的读数全为空**——D-5 `30dc59eb`／D-2 `f7d24f1c`／D-3 `b97e3251`／待人队列 `1fa15241`·`f1810aa5`／D-1③ `9c082683`／判据入册 `bd2b7d25`·`e82256fc`／i18n `54af5bce`·`73af07ea`·`ca81c16b`／研究档 `6907412b`／发布 `d4e5574b`·`feff1532`·`0c0bf510`。这批活干完而账上无一行，读者按号序翻到 458 就以为 §6-448 之后什么都没发生。
+    - **D-1（甲案三段）**：新建 `channels/attention_budget.py` 单点——回合级 `hold/release` 引用计数、同键最新一条胜出（latest-wins）、出站严格串行；`manager._dispatch_message` 以 `chat:<channel>:<chat_id>` 为键包住整轮；审批通知改走同一预算（`neurflow/builtin.py`）。判据 `test_attentionBudget.py`＋`test_attentionHoldDuringTurn.py`。
+    - **D-2**：`core/agent_run_store.deriveRunStage()` 由心跳/租约**事实**反推 `done/waiting_human/stalled/running/unknown`，`console.py` 读侧不再只信写出来的 `status`；前端 `ChatPage.vue` 待人过滤改认 `stage`。判据 `test_runStageDerivation.py`。
+    - **D-3／N-4**：审批回复按 `execution_id:node_id` 未决键隔离，Reject 词先于 Approve 判且带 ASCII 词边界，超时收成具名 `DEFAULT_APPROVAL_TIMEOUT_SECONDS`；`finally` 注销句柄与登记。判据 `test_approvalReplyIsolation.py`。
+    - **D-4**：出口长度预算补 `"discord": 2000`，并登记 `DEFAULT_TEXT_LIMIT_CHANNELS`（xiaoyi/qclaw/mqtt/sip/voice 五处**无长度契约**渠道清单）——判据不数定义行，数「每个渠道要么有预算要么在清单里」。
+    - **D-5**：新建 `channels/access_policy.py` 为全仓唯一准入判定（`normalizeWhitelist` 吃逗号串或列表、`chatAccessDecision` 三态），`discord`／`qq`／`qqbot`／`telegram`／`wechat_messaging` 各自判空逻辑退役；未知策略与空白名单**失败关闭**。判据 `test_channelAccessPolicy.py`＋`test_channelContractChecklist.py`。
+    - **D-6／N-1~N-5**：提示契约段（行为规则／技能目录）收成 `context/rules_sections.py` 单源，`orchestrator` 与 `builder` 共用；`locale-consistency.test.ts` 加占位符集合相等判据＋`CJK_BACKLOG_BASELINE` 棘轮，de/fr/es/it/ru/ar/ko/hi/ja 全量补齐（八语种未翻清零，`zh-CN` 两处占位符错位随批修）；`channels/models.py` 的 `max_message_length`／`rate_limit` 只写不读字段撤除；待人读数 `desktop_audit.summarize_actions` → `governance` 端点 → `utils/waitingHuman.ts` → `AuditPage.vue` 两路并行取数，`getPendingApprovals` 拿到首个消费者。
+    - **在册**：本批 7 档判据入 `protected_tests.txt`（`bd2b7d25` 六档＋`e82256fc` 一档）；子集读数按唯一 reader `protected_subset_nightly.readEntries()` 现算 **765**（不按行数心算，form 420 同族）。
+    - **发布（同区间三笔）**：`d4e5574b`＋`feff1532` 把 7 处版本字面量统一 `1.0.0-beta6`；`0c0bf510` 给发布链加 GitHub 平台适配器（**不另起第二份脚本**——`win_installer_kit.py` 的守卫按文件名钉住发布链唯一）。tag `v1.0.0-beta6`＝`f8029e1a`（挂 `feff1532`，即打包时代码态，不随工具笔挪），双平台 release 均实测复核：安装包 145,695,744 B 两处一致、GitHub 直链 HEAD 200 且 Content-Length 同值、正文两处 1259 字一致。
+    - **更正一（§6-449 谎报回填）**：那格正文写「修复计划表 S 行已回填」——经复核为**不实**：`git log --oneline -- docs/specs/2026-10-31-full-repo-defect-sweep-fixplan.md` 全史只有一笔 `ee534bc6`（建文档那笔），`git log -S "| S | ✅"` 空读数，六行状态到本批前仍是全 ⬜。本批真回填 S/F/D/C/R/X ＋ W 行，并把「自称已回填而实际没动」记进仍开①。
+    - **更正二（§6-452 停在 ⬜）**：C1 已由 `7f0e20ae` 实施，实施笔没回写台账——见本格上方「452. (续 2)」。
+    - **更正三（§6-456 交接文档停在 ⬜）**：11 条已全落地。逐条**读现码**对表而非认主题行：#1 与 #10 读 `turn_run_state.py` 三字段与 `base.py:648` 签名；#5 读 `guards/answer_fact_guard.py:180-192`（取「持有冲突数值」的主体 key）＋判据 `test_answerFactGuard.py:195-196` 双向断言；#2 `f391bda3`／#3 `39296e3a`／#4 `2890ae66`／#6 `48be5b7d`／#7 `098fe4c6`／#8 `bfb176f9`；#9/#11/#12 是「已修确认」节（标题写 11 条、正文 12 节即此因）。状态表落在交接文档首部。
+    - **仍开（不当自决）**：① **落笔面缺口**——本仓「实施笔不碰台账」的形态在同一天第三次现形（§6-449 谎报回填、§6-452 未回写、本批 15 笔零落格）。要不要给「提交触及生产码但未触及台账」上一道常驻闸，属工具裁：加了会把纯文档/纯测试笔一并咬住，需先定豁免口径，本批不顺手做。② `bundle_backend.py` 增量指纹只看 `{files, bytes}`——beta1→beta6 同尺寸被静默跳过（实测暂存区仍是 beta1，靠 `--force` 绕开），根修＝指纹收内容哈希或最大 mtime，属构建链另拍。③ GitHub 缺 `v1.0.0-beta5` release（beta4→beta6 断档），补发需重取当时产物。④ §6-444 两票（覆盖率分母跟整子集走／`activeCatalog` 轮次级重落）与 §6-447 仍开③（`test_pip_audit_gate` 预存在册红待归因）一字未变，本批未复跑。⑤ 安装包**未签名**（本机无证书），双平台 release 正文已如实标注，签名构建须在打包机重跑。
+    - **口径**：本格为**记账格**，生产池 0（未新增产品代码）；改动面只有两份计划文档：`docs/specs/2026-10-31-full-repo-defect-sweep-fixplan.md` 与 `docs/specs/2026-10-31-remaining-11-fixes.md` 的状态表回填，加本台账格。
+    - **下一枚空号现查**：条目行 `^[0-9]{3}\. ` 与引用面 `git grep -ohE "§6-[0-9]{3}" HEAD -- audit-reports docs scripts` 两把尺一起跑（§6-416/418 同族：只跑一条会读出假号）。落笔后现读：条目行最大 **459**（尾部号次 451→459 单调前进，`test_auditLedgerNumbering.py` 9 passed）、引用面最大亦 **459**——但引用面那 6 处**全是回指**（本格自陈 2 处、两份计划文档的状态表各 1 处、§6-458 那句「后继从 §6-459 起」1 处，另 2 处在本格正文），占号与否只认条目行 ⇒ 本格取 459 合法，后继从 **§6-460** 起。
+
