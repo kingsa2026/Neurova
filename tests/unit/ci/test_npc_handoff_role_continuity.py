@@ -325,10 +325,12 @@ class TestRosterKeepsTheBareDSCoderRole:
         script = PROJECT_ROOT / "scripts" / "ci" / "npc_role_admission.py"
         env = {k: v for k, v in os.environ.items() if k != "CNB_NPC_NAME"}
         env.setdefault("CNB_BUILD_WORKSPACE", str(PROJECT_ROOT))
+        env["PYTHONIOENCODING"] = "utf-8"
         env["CNB_NPC_NAME"] = self.BARE_ROLE
         proc = subprocess.run(
             [sys.executable, str(script)],
-            capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env,
+            capture_output=True, text=True, encoding="utf-8",
+            cwd=str(PROJECT_ROOT), env=env,
             timeout=PROBE_WALL_S,
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -370,10 +372,12 @@ class TestRosterRestoresTheMaxAliasRole:
         script = PROJECT_ROOT / "scripts" / "ci" / "npc_role_admission.py"
         env = {k: v for k, v in os.environ.items() if k != "CNB_NPC_NAME"}
         env.setdefault("CNB_BUILD_WORKSPACE", str(PROJECT_ROOT))
+        env["PYTHONIOENCODING"] = "utf-8"
         env["CNB_NPC_NAME"] = self.RESTORED_ROLE
         proc = subprocess.run(
             [sys.executable, str(script)],
-            capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env,
+            capture_output=True, text=True, encoding="utf-8",
+            cwd=str(PROJECT_ROOT), env=env,
             timeout=PROBE_WALL_S,
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr

@@ -357,10 +357,12 @@ class TestRelayJudgmentAlsoAsksAboutTheQuotaWall:
                 os.environ,
                 CNB_PIPELINE_MAX_RUN_TIME=str(TOTAL_MS),
                 CNB_BUILD_START_TIME=start,
+                PYTHONIOENCODING="utf-8",
             )
             proc = subprocess.run(
                 [sys.executable, str(script), "--predicate"],
-                capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env,
+                capture_output=True, text=True, encoding="utf-8",
+                cwd=str(PROJECT_ROOT), env=env,
                 timeout=PROBE_WALL_S,
             )
             assert proc.returncode == 0, proc.stderr
@@ -380,9 +382,11 @@ class TestRelayJudgmentAlsoAsksAboutTheQuotaWall:
         script = PROJECT_ROOT / BUDGET_SCRIPT_REL
         env = {k: v for k, v in os.environ.items()
                if k not in ("CNB_PIPELINE_MAX_RUN_TIME", "CNB_BUILD_START_TIME")}
+        env["PYTHONIOENCODING"] = "utf-8"
         proc = subprocess.run(
             [sys.executable, str(script), "--predicate"],
-            capture_output=True, text=True, cwd=str(PROJECT_ROOT), env=env,
+            capture_output=True, text=True, encoding="utf-8",
+            cwd=str(PROJECT_ROOT), env=env,
             timeout=PROBE_WALL_S,
         )
         assert proc.returncode == 0, proc.stderr
