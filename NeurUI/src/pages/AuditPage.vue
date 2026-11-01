@@ -73,7 +73,8 @@
 import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { listAuditRecords, exportAudit as exportAuditApi } from '@/api/modules/audit'
-import { getDesktopAuditWaiting } from '@/api/modules/governance'
+import { getDesktopAuditWaiting, getPendingApprovals } from '@/api/modules/governance'
+import { mergeWaitingHuman } from '@/utils/waitingHuman'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -158,18 +159,41 @@ const exportAudit = async () => {
 const onPageChange = (p: number, ps: number) => { page.value = p; pageSize.value = ps; fetchAudit() }
 
 const fetchWaitingHuman = async () => {
-  try {
-    const res = await getDesktopAuditWaiting()
-    const waiting = res?.data?.waiting_human
-    waitingHuman.value = Number(waiting?.count ?? 0)
-    longestWaitMinutes.value = Math.floor(Number(waiting?.oldest_wait_seconds ?? 0) / 60)
-  } catch (err: any) {
-    // 403（非管理员）/ 503 / 网络异常都留痕：静默归零会让"待人 0 条"看起来像事实
+  // 两个待人来源并行取；任一失败保留另一来源并留痕，不把"取不到"静默读成 0。
+  const [auditRes, approvalsRes] = await Promise.allSettled([
+    getDesktopAuditWaiting(),
+    getPendingApprovals(),
+  ])
+  if (auditRes.status === 'rejected') {
     console.error(
-      `[waitingHuman] 取回待人队列读数失败 HTTP ${err?.response?.status ?? '网络异常'}`,
-      err,
+      `[waitingHuman] 桌面审计读数失败 HTTP ${auditRes.reason?.response?.status ?? '网络异常'}`,
+      auditRes.reason,
     )
   }
+  if (approvalsRes.status === 'rejected') {
+    console.error(
+      `[waitingHuman] 审批待办读数失败 HTTP ${approvalsRes.reason?.response?.status ?? '网络异常'}`,
+      approvalsRes.reason,
+    )
+  }
+
+  const waiting = auditRes.status === 'fulfilled' ? auditRes.value?.data?.waiting_human : null
+  const auditSource = waiting
+    ? {
+        count: Number(waiting.count ?? 0),
+        oldestWaitSeconds: Number(waiting.oldest_wait_seconds ?? 0),
+      }
+    : null
+  const requests = approvalsRes.status === 'fulfilled'
+    ? (approvalsRes.value?.data?.requests ?? [])
+    : null
+
+  const summary = mergeWaitingHuman(
+    auditSource,
+    requests ? requests.map((req: any) => req.created_at) : null,
+  )
+  waitingHuman.value = summary.count
+  longestWaitMinutes.value = Math.floor(summary.oldestWaitSeconds / 60)
 }
 
 onMounted(() => {
