@@ -13,8 +13,8 @@
 先冻结、后续按目录分批消化）。当场把 38 个文件一起改，会让"哪条红是哪一个文件带来的"
 无法归因，且部分判据在补上 encoding 后会从"假绿"翻成"真红"——那是另一轮改动面。
 
-基线口径（本轮实测，不抄旧数）：**30 个文件 / 42 处**（`BASELINE` 表与 `scanViolations()` 现读
-同数——2026-11-02 复算；建档那轮是 37 个文件 / 59 处，此后各批逐目录消化，把这句话停在旧数上
+基线口径（本轮实测，不抄旧数）：**26 个文件 / 36 处**（`BASELINE` 表与 `scanViolations()` 现读
+同数——§6-463 收掉 `tests/unit/ci` 一族 6 处后的现算；上一轮是 30 个文件 / 42 处，建档那轮是 37 个文件 / 59 处，把这句话停在旧数上
 就是本文件自己反对的「基线与判据不同源」）。
 （2026-11-02 收：`tests/unit/test_pip_audit_gate.py` 的最后 1 处随 §6-462 清零——那一处正是
 「预存在册红」的真因：`--help` 子件把自己的 stdout 钉了 utf-8（`pip_audit_gate.py:399`），
@@ -22,6 +22,17 @@
 `proc.stdout` 静默变 None，`re.search` 撞 `TypeError`。补 `encoding="utf-8"` 后本档另一条
 `HALF_PINNED` 口径随即点名「只钉父端是半修」，故同处再把子端 `env` 的 `PYTHONIOENCODING` 一起钉上；
 站点数回到 0，同样从基线摘除而不是留 0。）
+（2026-11-02 收：`tests/unit/ci` 一族 4 个文件 / 6 处随 §6-463 清零——量读数才发现这一族的坏法比"侥幸没事"更实：
+  两个被起的子件把自己的 stdout 交回**UTF-8 字节**（现量 `npc_role_admission.py` 100 字节里 84 个非 ASCII、
+  `npc_turn_handoff_gate.py --json` 346 里 96），父端 `text=True` 不写 `encoding` 就按 cp936 解 ⇒ reader 线程
+  `UnicodeDecodeError`、`proc.stdout` 静默变 None。取证读数：改前四档 `51 passed, 2 warnings`，warning 原文即
+  `Exception in thread Thread-59 (_readerthread) … can't decode byte 0xaa in position 40`（落在
+  `test_bare_role_is_callable_through_admission`）；改后 `51 passed`，warning 归零。更险的是消费面：那两处断言写成
+  `assert proc.returncode == 0, proc.stdout + proc.stderr` —— 门禁真判红时 `None + str` 会把取证通道自己炸成 TypeError，
+  人看到的不是门禁的话而是判据的碎渣。另两处今天只出 ASCII（`npc_runtime_budget.py --predicate` 现量 6 字节 `false`；
+  `git ls-files` 出仓内相对路径），属"侥幸没事"那一支，一并钉齐是防蔓延。Python 子件那四处按本档口径两头钉
+  （父端 `encoding="utf-8"` ＋ 子端 `PYTHONIOENCODING`）；`git` 那一处只钉父端——给非 Python 子件钉
+  `PYTHONIOENCODING` 是无意义的第二份口径。六行基线一并摘除，不留 0。）
 （2026-10-09 收：`tests/unit/test_repo_root_pollution_guard.py` 的 1 处已随该文件三处
  子进程文本捕获全部钉上显式 `encoding="utf-8"` 而清零，该文件从基线摘除——
  摘除而不是留 0：日后它再长出一处，`BASELINE.get(f, 0)` 会让棘轮当场红。）
@@ -103,10 +114,6 @@ BASELINE: dict[str, int] = {
     "tests/manual/context_persistence_baseline_90.py": 2,
     "tests/manual/context_persistence_restart_90.py": 1,
     "tests/manual/image_runtime_selfproof_330.py": 1,
-    "tests/unit/ci/test_issue197_judgement_registration.py": 1,
-    "tests/unit/ci/test_npc_auto_continue_wiring.py": 2,
-    "tests/unit/ci/test_npc_handoff_role_continuity.py": 2,
-    "tests/unit/ci/test_npc_turn_handoff_execution.py": 1,
     "tests/unit/cognitive_layers/memory_layer/test_torch_lazy_import.py": 1,
     "tests/unit/context/test_b5_scale_batch_registration.py": 1,
     "tests/unit/core/test_safe_paths.py": 1,
