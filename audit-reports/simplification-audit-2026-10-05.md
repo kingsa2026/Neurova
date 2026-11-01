@@ -10963,7 +10963,17 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **agent 全量**：1628 passed / 0 failed。
     - **⚠ 自伤**：swarm.py 补丁漏了 `create_task(` 的闭合括号——7 个测试文件收集期 SyntaxError（补回后全绿）。脚本改文件后必须编译验证（form 410 同族：改文件后必须拿 numstat/compile 与改动面对表）。
     - **下一枚空号现查**：条目行最大 454 ⇒ 后继从 §6-455 起。
-453. **批 W2：EventBus 跨线程投递 / safe_paths O_NOFOLLOW / 守卫多主体 / 注入计数分组 / 前端四条（✅ `event_bus.py +1/−0`、`safe_paths.py +3/−3`、`answer_fact_guard.py +12/−6`、`knowledge_retriever_adapter.py +4/−4`、前端四文件 +23/−20）** ✅🟢 —— §6-448 批 W2。
+455. **批 X6-1：knowledge_facts.db 三套连接统一开 WAL + busy_timeout（✅ `knowledge_facts.py +3/−0`、`narratives.py +3/−0`）** ✅🟢 —— §6-448 批 X3 剩余。
+    - **根因**：KnowledgeFactStore（单例长连接）、NarrativesLayer（每次操作新连接）、EntryLedger（repository 每次知识写新建 KnowledgeFactStore）三套连接同开 `knowledge_facts.db` 无 WAL——并发写即 SQLITE_BUSY 5s 后抛错沿 `_syncEntryGovernance` 的不吞异常通道放大成写入失败。
+    - **修法**：两处连接创建各加 `PRAGMA journal_mode=WAL` + `PRAGMA busy_timeout=5000`。
+    - **绿灯**：knowledge 全量 1067 passed / 0 failed。
+    - **下一枚空号**：条目行最大 455 ⇒ 后继从 §6-456 起。
+456. **剩余 11 条修复交接文档（⬜ `docs/specs/2026-10-31-remaining-11-fixes.md` +67/−0）** ⬜ —— §6-448 收欠账收尾。
+    - 全库体检 55 条中已修 44 条（§6-448~452 + §6-453/454），本文覆盖剩余 11 条的详细修复方案：每条含现状/根因/可直接落代码的修法/红灯判据/影响面/实施者注意事项。
+    - 按推荐实施顺序：R5 outbox（2h 低风险）→ 治理租户过滤（2h 中）→ 守卫多主体完整（1h 低）→ EventBus 无循环日志（15min 低）→ HealthCheck 周期调度（2h 中）→ EntryLedger tenantId（30min 低）→ 前端主题守卫（4h+ 中）→ C1 TurnRunState（4h+ 高，热路径状态机重构须完整精力）。
+    - **下一枚空号现查**：条目行最大 **458**、引用面最大 **448**（453–458 为新条目）⇒ 后继从 **§6-459** 起。
+
+457. **批 W2：EventBus 跨线程投递 / safe_paths O_NOFOLLOW / 守卫多主体 / 注入计数分组 / 前端四条（✅ `event_bus.py +1/−0`、`safe_paths.py +3/−3`、`answer_fact_guard.py +12/−6`、`knowledge_retriever_adapter.py +4/−4`、前端四文件 +23/−20）** ✅🟢 —— §6-448 批 W2。
     - EventBus：跨线程 publish 经 call_soon_threadsafe 投递 + start() 登记 _queue_loop（修前 asyncio.Queue 直接 put_nowait 跨线程丢唤醒/竞态）。
     - safe_paths：写模式补 O_NOFOLLOW（修前只堵读分支的 TOCTOU 窗口）。
     - answer_fact_guard：多主体句聚合全部命中主体事实值再核对（修前只看 matchedSubjects[0]）。
@@ -10973,19 +10983,10 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - GraphWorkbenchPage：切换 Agent 清焦点态（修前画布串显+写操作用错 agentId）。
     - GraphExplorer3D：异步初始化记忆化单 Promise（修前 WebGL 上下文泄漏）。
     - 绿灯：vue-tsc exit 0 零 error；batchS/batchCR/batchF/answerFactGuard/retrievalCacheIsolation 合跑 35+ passed；core+agent 全量回归无新增失败。
-    - **下一枚空号现查**：条目行最大 452（§6-453 未见条目行）⇒ 后继从 §6-454 起。
-454. **批 W3：上传上限 100MB / 结晶器去重 / HealthCheck 超时（✅ `console_files.py +3/−0`、`skill_pool_api.py +2/−0`、`pattern_crystallizer.py +5/−1`、`health_checker.py +7/−1`）** ✅🟢 —— §6-448 批 W3。
+    - **号次说明**：原记 §6-453，与批 X1 同号；本格后到，按让号规则改为 §6-457 并移到尾部（只改号不挪位会让号次插进旧段）。
+458. **批 W3：上传上限 100MB / 结晶器去重 / HealthCheck 超时（✅ `console_files.py +3/−0`、`skill_pool_api.py +2/−0`、`pattern_crystallizer.py +5/−1`、`health_checker.py +7/−1`）** ✅🟢 —— §6-448 批 W3。
     - 上传上限：console_files + skill_pool install_from_zip 两条路加 100MB 钳制（与 files_api S-15 同款）。
     - 结晶器 _enqueue_candidate 同 key 去重（同模式 48h 内再次达阈不再双写两条结晶节点）。
     - HealthCheck run_check 包 ThreadPoolExecutor + timeout（修前同步检查在 async def 端点内直跑，数据库被锁时事件循环停摆）。
     - 绿灯：core 2074 passed、skills/cognitive 无新增失败。
-    - 下一枚空号：条目行最大 454 ⇒ 后继从 §6-455 起。
-455. **批 X6-1：knowledge_facts.db 三套连接统一开 WAL + busy_timeout（✅ `knowledge_facts.py +3/−0`、`narratives.py +3/−0`）** ✅🟢 —— §6-448 批 X3 剩余。
-    - **根因**：KnowledgeFactStore（单例长连接）、NarrativesLayer（每次操作新连接）、EntryLedger（repository 每次知识写新建 KnowledgeFactStore）三套连接同开 `knowledge_facts.db` 无 WAL——并发写即 SQLITE_BUSY 5s 后抛错沿 `_syncEntryGovernance` 的不吞异常通道放大成写入失败。
-    - **修法**：两处连接创建各加 `PRAGMA journal_mode=WAL` + `PRAGMA busy_timeout=5000`。
-    - **绿灯**：knowledge 全量 1067 passed / 0 failed。
-    - **下一枚空号**：条目行最大 455 ⇒ 后继从 §6-456 起。
-456. **剩余 11 条修复交接文档（⬜ `docs/specs/2026-10-31-remaining-11-fixes.md` +67/−0）** ⬜ —— §6-448 收欠账收尾。
-    - 全库体检 55 条中已修 44 条（§6-448~452 + §6-453/454），本文覆盖剩余 11 条的详细修复方案：每条含现状/根因/可直接落代码的修法/红灯判据/影响面/实施者注意事项。
-    - 按推荐实施顺序：R5 outbox（2h 低风险）→ 治理租户过滤（2h 中）→ 守卫多主体完整（1h 低）→ EventBus 无循环日志（15min 低）→ HealthCheck 周期调度（2h 中）→ EntryLedger tenantId（30min 低）→ 前端主题守卫（4h+ 中）→ C1 TurnRunState（4h+ 高，热路径状态机重构须完整精力）。
-    - **下一枚空号现查**：条目行最大 **456**、引用面最大 **448**（453/454/455/456 为新条目）⇒ 后继从 **§6-457** 起。
+    - **号次说明**：原记 §6-454，与批 X2 同号；本格后到，按让号规则改为 §6-458 并移到尾部。
