@@ -13,7 +13,15 @@
 先冻结、后续按目录分批消化）。当场把 38 个文件一起改，会让"哪条红是哪一个文件带来的"
 无法归因，且部分判据在补上 encoding 后会从"假绿"翻成"真红"——那是另一轮改动面。
 
-基线口径（本轮实测，不抄旧数）：**37 个文件 / 59 处**。
+基线口径（本轮实测，不抄旧数）：**30 个文件 / 42 处**（`BASELINE` 表与 `scanViolations()` 现读
+同数——2026-11-02 复算；建档那轮是 37 个文件 / 59 处，此后各批逐目录消化，把这句话停在旧数上
+就是本文件自己反对的「基线与判据不同源」）。
+（2026-11-02 收：`tests/unit/test_pip_audit_gate.py` 的最后 1 处随 §6-462 清零——那一处正是
+「预存在册红」的真因：`--help` 子件把自己的 stdout 钉了 utf-8（`pip_audit_gate.py:399`），
+父端却 `text=True` 不写 `encoding`，本机按 cp936 解 ⇒ reader 线程 `UnicodeDecodeError`、
+`proc.stdout` 静默变 None，`re.search` 撞 `TypeError`。补 `encoding="utf-8"` 后本档另一条
+`HALF_PINNED` 口径随即点名「只钉父端是半修」，故同处再把子端 `env` 的 `PYTHONIOENCODING` 一起钉上；
+站点数回到 0，同样从基线摘除而不是留 0。）
 （2026-10-09 收：`tests/unit/test_repo_root_pollution_guard.py` 的 1 处已随该文件三处
  子进程文本捕获全部钉上显式 `encoding="utf-8"` 而清零，该文件从基线摘除——
  摘除而不是留 0：日后它再长出一处，`BASELINE.get(f, 0)` 会让棘轮当场红。）
@@ -107,7 +115,6 @@ BASELINE: dict[str, int] = {
     "tests/unit/sandbox/test_c22_process_tree_kill.py": 1,
     "tests/unit/test_adminBootstrapLanding.py": 2,
     "tests/unit/test_api_inventory_freshness_guard.py": 1,
-    "tests/unit/test_pip_audit_gate.py": 1,
     "tests/unit/test_start_script.py": 2,
     "tests/unit/tools/test_git_tool.py": 1,
     "tests/unit/tools/test_tool_layer_breakpoints_zoom_out.py": 1,
