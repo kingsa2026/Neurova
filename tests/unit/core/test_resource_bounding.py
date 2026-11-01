@@ -146,15 +146,21 @@ class TestEventBusBounded(unittest.TestCase):
 
             bus.subscribe("evt", slow_handler, module_name="m")
             bus.start()  # 在运行中的 loop 内启动, 队列即创建
-            for i in range(12):
-                bus.publish("evt", {"i": i}, "test")
-            size = bus._async_queue.qsize()
-            dropped = bus._async_queue_full_dropped
-            bus._async_task.cancel()
+            # 先停消费者再灌事件：消费者边收边处理会让 qsize 读数不确定
+            consumer = bus._async_task
+            consumer.cancel()
             try:
-                await bus._async_task
+                await consumer
             except asyncio.CancelledError:
                 pass
+            for i in range(12):
+                bus.publish("evt", {"i": i}, "test")
+            # 跨线程投递经 call_soon_threadsafe 排到下一轮事件循环；
+            # 不让出一拍，put_nowait 还没执行，qsize/dropped 必然读成 0
+            await asyncio.sleep(0.05)
+            size = bus._async_queue.qsize()
+            dropped = bus._async_queue_full_dropped
+            bus.stop()
             return size, dropped
 
         size, dropped = asyncio.run(_run())
