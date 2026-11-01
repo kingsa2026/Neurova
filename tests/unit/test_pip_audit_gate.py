@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import io
 import importlib.util
+import os
 import re
 import subprocess
 import sys
@@ -136,7 +137,9 @@ class TestCommandContract:
         # 直接查 argparse 声明的默认值（避免与 main 的实现细节耦合）
         proc = subprocess.run(
             [sys.executable, str(GATE), "--help"],
-            capture_output=True, text=True, cwd=str(PROJECT_ROOT),
+            capture_output=True, text=True, encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            cwd=str(PROJECT_ROOT),
             timeout=PROBE_WALL_S,
         )
         assert proc.returncode == 0, proc.stderr
