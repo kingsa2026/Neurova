@@ -200,32 +200,22 @@ class EventBus:
             if sub.is_async:
                 # 异步处理器放入队列(有界: 满时丢弃并计告警, 防无界堆积)
                 if self._async_queue:
-                    try:
-                        # 批 W2：asyncio.Queue 只保证所属 loop 内线程安全——
-                        # 跨线程投递必须经 call_soon_threadsafe
-                        import asyncio as _aio
-                        _qloop = getattr(self, "_queue_loop", None)
-                        if _qloop is not None:
-                            _qloop.call_soon_threadsafe(
-                                self._async_queue.put_nowait, (sub, event))
-                        else:
-                            # 队列存在而目标 loop 未知（非 start() 正常路径，仅防御）：
-                            # 直接入队不保证唤醒消费协程，且跨线程时不受 asyncio.Queue
-                            # 保证。不静默——留一条可检索的痕迹。
-                            logger.debug(
-                                "EventBus: async queue present but no owner loop — "
-                                "direct put without wakeup guarantee: %s", event_name,
-                            )
-                            self._async_queue.put_nowait((sub, event))
-                    except asyncio.QueueFull:
-                        with self._lock:
-                            self._async_queue_full_dropped += 1
-                            snapshotFull = self._async_queue_full_dropped
-                        if snapshotFull in (1, 100, 1000, 10000):
-                            logger.warning(
-                                "EventBus 异步队列已满, 已丢弃 %s 个事件(生产慢于消费)",
-                                snapshotFull,
-                            )
+                    # 批 W2：asyncio.Queue 只保证所属 loop 内线程安全——
+                    # 跨线程投递必须经 call_soon_threadsafe。但入队动作因此**在
+                    # loop 里**执行，QueueFull 也只能在那里捕；放在这里 try 会
+                    # 捕不到（计数恒 0，且每次丢弃都打一条未处理异常）。
+                    _qloop = getattr(self, "_queue_loop", None)
+                    if _qloop is not None:
+                        _qloop.call_soon_threadsafe(self._offerAsync, sub, event)
+                    else:
+                        # 队列存在而目标 loop 未知（非 start() 正常路径，仅防御）：
+                        # 直接入队不保证唤醒消费协程，且跨线程时不受 asyncio.Queue
+                        # 保证。不静默——留一条可检索的痕迹。
+                        logger.debug(
+                            "EventBus: async queue present but no owner loop — "
+                            "direct put without wakeup guarantee: %s", event_name,
+                        )
+                        self._offerAsync(sub, event)
                 else:
                     # §6-49: 没有队列（总线在未运行循环的上下文里创建/启动）时，异步
                     # 订阅者收不到这一发。必须留痕——否则"订上了"会被读成"收得到"。
@@ -256,6 +246,25 @@ class EventBus:
                         self._subscribers[event_name].remove(sub)
 
         return results
+
+    def _offerAsync(self, sub: Subscription, event: Event) -> None:
+        """有界队列入队（唯一实现点）：满时丢弃并计数/节流告警。
+
+        跨线程投递时本方法由 `call_soon_threadsafe` 在 loop 内回调，
+        `QueueFull` 只能在这里捕——调用处再包 try 捕不到。
+        """
+        queue = self._async_queue
+        if queue is None:
+            return
+        try:
+            queue.put_nowait((sub, event))
+        except asyncio.QueueFull:
+            with self._lock:
+                self._async_queue_full_dropped += 1
+                snapshot = self._async_queue_full_dropped
+            if snapshot in (1, 100, 1000, 10000):
+                logger.warning(
+                    "EventBus 异步队列已满, 已丢弃 %s 个事件(生产慢于消费)", snapshot)
 
     async def publish_async(self, event_name: str, data: Any = None, source: str = "") -> List[Any]:
         """
