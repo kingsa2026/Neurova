@@ -2252,6 +2252,8 @@ async def exec_approval(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str
             f"approval:{channel or 'broadcast'}:{chat_id}:{approval_key}",
             approval_message,
             _sendApprovalNotification,
+            # 审批通知是自动出口：同一会话「人在等」时压住，回合结束补发
+            holdKey=f"chat:{channel}:{chat_id}" if channel else None,
         )
         msg_id = delivery.message_id
         if delivery.coalesced:
