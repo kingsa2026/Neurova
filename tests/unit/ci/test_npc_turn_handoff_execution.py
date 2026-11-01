@@ -216,8 +216,9 @@ class TestGateScriptIsExecutedByTheBuild:
         """门禁必须能独立跑起来（不依赖仓库内其它模块的导入副作用）。"""
         r = subprocess.run(
             [sys.executable, str(GATE_SCRIPT), "--json"],
-            capture_output=True, text=True, cwd=str(PROJECT_ROOT),
-            env={"PATH": "/usr/bin:/bin", "CNB_BUILD_WORKSPACE": str(PROJECT_ROOT)},
+            capture_output=True, text=True, encoding="utf-8", cwd=str(PROJECT_ROOT),
+            env={"PATH": "/usr/bin:/bin", "CNB_BUILD_WORKSPACE": str(PROJECT_ROOT),
+                 "PYTHONIOENCODING": "utf-8"},
             timeout=PROBE_WALL_S,
         )
         assert r.returncode == 0, (
