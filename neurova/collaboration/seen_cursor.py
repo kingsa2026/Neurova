@@ -6,6 +6,7 @@ import json
 import hashlib
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple, Any
 from dataclasses import dataclass, field
@@ -25,7 +26,10 @@ class SeenCursor:
     - timestamp: when this cursor was created
     """
 
-    cursor_id: str = field(default_factory=lambda: f"seen_{hashlib.sha256(str(time.time()).encode()).hexdigest()[:16]}")
+    # 唯一性不能靠时钟：Windows 的 time.time() 粒度约 15ms，同一 tick 内连续
+    # create_cursor 会算出同一个 id，后写静默覆盖前一条（实测 150 条只剩 125 条，
+    # 清理数因此对不上）。id 语义就是"唯一"，用 uuid 才是它。
+    cursor_id: str = field(default_factory=lambda: f"seen_{uuid.uuid4().hex[:16]}")
     agent_id: str = ""
     session_id: Optional[str] = None
     turn_id: Optional[str] = None
@@ -85,7 +89,7 @@ class SeenCursorManager:
     _instance = None
     _lock = threading.RLock()
 
-    def __new__(cls):
+    def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
@@ -465,6 +469,11 @@ def get_seen_cursor_manager() -> SeenCursorManager:
     return _seen_cursor_manager_instance
 
 def reset_seen_cursor_manager() -> None:
-    """重置 SeenCursorManager 实例 (用于测试)"""
+    """重置 SeenCursorManager 实例（用于测试）。
+
+    两处都要清：模块级持有与类级单例。只清前者时下一次 `SeenCursorManager(...)`
+    仍会拿回同一个旧实例，`data_dir` 入参被静默忽略——测试隔离是假的。
+    """
     global _seen_cursor_manager_instance
     _seen_cursor_manager_instance = None
+    SeenCursorManager._instance = None
