@@ -592,6 +592,11 @@ tests/unit/desktop/test_installer_version_single_source.py
 #   缓存根与 tauri_build_env 必须读同一份 LOCALAPPDATA 推导）。
 tests/unit/desktop/test_installer_signing_contract.py
 tests/unit/desktop/test_win_installer_kit.py
+# 打包增量指纹必须是内容函数（§6-460）：`{files, bytes}` 的形状指纹把「改了版本号但长度没变」
+#   读成未变，默认路径会产出装着旧后端的安装包而文件名替它撒谎——beta6 实测踩到。
+#   判据九格：同尺寸改内容须重拷／未变仍跳过（反向，防根修做成每次全量重拷）/
+#   超阈值大文件靠 mtime 项／文本后缀逐个参数化／同一棵树两次算等值。
+tests/unit/desktop/test_bundleBackendFingerprint.py
 # 电脑操控面修正工单集（T-02…T-16）判据：逐文件单跑确定全绿（2026-09-30 复跑记录）
 tests/unit/computer_use/test_snapshot_fold_replaces_chop.py
 tests/unit/computer_use/test_snapshot_truncation_honesty.py

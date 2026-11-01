@@ -12,7 +12,8 @@
 Python、Node.js 运行时不再内嵌（减小安装包体积），由 Neurova 首次启动时
 通过 Rust 层自动下载到 runtime/ 目录。
 
-增量策略：neurova/config/models 走快速校验重拷。
+增量策略：neurova/config/models 走「逐文件内容项」校验重拷——只数文件数与总字节的形状
+指纹会把「改了版本号但长度没变」读成未变（§6-459 仍开②，beta6 实测），故内容项是必须的。
 models/ 只保留空壳与 MANIFEST.json，权重文件由前端下载链路按需获取。
 
 用法（仓库根）：
@@ -21,6 +22,7 @@ models/ 只保留空壳与 MANIFEST.json，权重文件由前端下载链路按�
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import subprocess
@@ -41,17 +43,58 @@ def log(msg: str) -> None:
     print(f"[bundle] {msg}", flush=True)
 
 
-def dir_fingerprint(d: Path) -> dict:
+#: 进内容哈希的后缀。实测 neurova/ 全树 43.2MB 里这些文本面占 14.6MB、整树算完 0.61s；
+#: models/ 那 1001.7MB 权重不进内容哈希（文本面只 1.1MB），改由「尺寸＋修改时刻」那一项兜住。
+HASH_SUFFIXES = frozenset({
+    ".py", ".json", ".toml", ".txt", ".md", ".rst", ".yaml", ".yml", ".ini", ".cfg",
+    ".js", ".ts", ".html", ".css", ".sql",
+})
+MAX_HASH_BYTES = 32 * 1024 * 1024
+TERM_CHARS = 16
+
+
+def _fileTerm(rel: str, f: Path, size: int, mtime_ns: int) -> str:
+    """单文件指纹项：够小的文本源读内容，其余退化成「尺寸＋修改时刻」。
+
+    退化方向是安全的——换掉一个大文件必然动 mtime；真正看不见改动的是**只数文件数与总字节**，
+    那正是「版本号改了、长度没改 ⇒ 整树判未变」的成因（§6-459 仍开②，beta6 实测）。
+    """
+    if size <= MAX_HASH_BYTES and f.suffix.lower() in HASH_SUFFIXES:
+        try:
+            digest = hashlib.sha256(f.read_bytes()).hexdigest()[:TERM_CHARS]
+        except OSError:
+            return f"{rel}|{size}|unreadable:{mtime_ns}"
+        return f"{rel}|{size}|content:{digest}"
+    return f"{rel}|{size}|mtime:{mtime_ns}"
+
+
+def _fingerprint(entries) -> dict:
     files = 0
     total = 0
-    for f in d.rglob("*"):
+    terms = []
+    for rel, f in entries:
         try:
-            if f.is_file():
-                files += 1
-                total += f.stat().st_size
+            if not f.is_file():
+                continue
+            st = f.stat()
         except OSError:
             continue
-    return {"files": files, "bytes": total}
+        files += 1
+        total += st.st_size
+        terms.append(_fileTerm(rel, f, st.st_size, st.st_mtime_ns))
+    # 排序是确定性的前提：rglob 的返回序不保证，乱序会让同一棵树两次算出两个 digest
+    joined = "\n".join(sorted(terms)).encode("utf-8")
+    return {"files": files, "bytes": total, "digest": hashlib.sha256(joined).hexdigest()[:32]}
+
+
+def dir_fingerprint(d: Path) -> dict:
+    """树指纹 `{files, bytes, digest}`——digest 是逐文件内容项的有序聚合，不是尺寸聚合。"""
+    return _fingerprint((f.relative_to(d).as_posix(), f) for f in sorted(d.rglob("*")))
+
+
+def file_fingerprint(p: Path) -> dict:
+    """单文件指纹（start_server.py / requirements.txt 这类直拷件走同一把尺）。"""
+    return _fingerprint([(p.name, p)])
 
 
 def robocopy(src: Path, dst: Path, extra: list[str] | None = None) -> int:
@@ -125,8 +168,10 @@ def _ignore_model_weights(directory: str, entries: list[str]) -> list[str]:
 
 
 def copy_tree_light(src: Path, dst: Path, manifest: dict, key: str, skip_heavy: bool = False) -> None:
-    """小目录/文件快速同步：先粗校验（文件数+大小），不一致才重拷。"""
-    fp = dir_fingerprint(src) if src.is_dir() else {"files": 0, "bytes": src.stat().st_size if src.exists() else 0}
+    """小目录/文件同步：先比指纹（含逐文件内容项），不一致才重拷。"""
+    fp = dir_fingerprint(src) if src.is_dir() else (
+        file_fingerprint(src) if src.exists() else {"files": 0, "bytes": 0, "digest": ""}
+    )
     if manifest.get(key) == fp and (dst.exists() if src.is_dir() else dst.exists()):
         log(f"{key} 未变，跳过")
         return
