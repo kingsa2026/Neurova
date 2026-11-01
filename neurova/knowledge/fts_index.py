@@ -8,6 +8,7 @@ doc 粒度 = 知识条目（与 BM25/FTS 辅助路同粒度）；中文先走仓
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import sqlite3
 import threading
@@ -74,15 +75,45 @@ class KnowledgeFtsIndex:
         with self._lock:
             self._conn.close()
 
-    @staticmethod
-    def _fingerprint(item: Dict[str, Any]) -> str:
-        return "%s:%d:%s:%s:%s" % (
-            item.get("updated_at", 0),
-            len(str(item.get("content") or "")),
-            item.get("lifecycle_status", "active"),
-            item.get("valid_until") or "",
-            item.get("tenant_id") or "default",
+    #: 索引行里「随条目走」的列——**这张清单是唯一事实源**：写库的参数、写库的列名、
+    #: 行指纹三处都从它取。旧版把指纹写成手抄的 5 个字段，而 `source` 会由治理层在
+    #: **不动 `updated_at`** 的前提下改写（`repository._syncEntryGovernance` ←
+    #: `entry_ledger._mediumOf` 取最近断言的 medium_ref），于是 docs.source 变脏，
+    #: `search(source=...)` 按脏列过滤就查不到本该命中的条目。
+    _ROW_VALUE_KEYS = (
+        "knowledge_id", "agent_id", "visibility", "owner_user_id", "tenant_id",
+        "shared_with_json", "category", "tags_json", "source", "updated_at",
+        "lifecycle_status", "valid_until",
+    )
+
+    @classmethod
+    def _rowValues(cls, agentId: str, item: Dict[str, Any]) -> tuple:
+        """按 `_ROW_VALUE_KEYS` 的顺序取这一行的值。"""
+        return (
+            str(item.get("knowledge_id") or ""),
+            str(agentId),
+            str(item.get("visibility") or "private"),
+            str(item.get("owner_user_id") or ""),
+            str(item.get("tenant_id") or "default"),
+            json.dumps(item.get("shared_with") or [], ensure_ascii=False),
+            str(item.get("category") or ""),
+            json.dumps(item.get("tags") or [], ensure_ascii=False),
+            str(item.get("source") or ""),
+            float(item.get("updated_at") or 0),
+            str(item.get("lifecycle_status") or "active"),
+            str(item.get("valid_until") or ""),
         )
+
+    @classmethod
+    def _fingerprint(cls, agentId: str, item: Dict[str, Any], tokens: str) -> str:
+        """行指纹＝那一整列值＋实际入库文本 的哈希。
+
+        入库文本也在内：`title` 与 `content` 都不落在 docs 列上，只进倒排表，
+        旧指纹用 `len(content)` 量它——同长度改正文、只改标题，都是「索引看得见、
+        指纹看不见」。
+        """
+        payload = repr(cls._rowValues(agentId, item)) + "\n" + tokens
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
 
     def _deleteDoc(self, docId: str) -> None:
         row = self._conn.execute(
@@ -98,42 +129,32 @@ class KnowledgeFtsIndex:
         if not kid or not isRetrievable(item):
             self._deleteDoc(kid)
             return False
-        fingerprint = self._fingerprint(item)
+        values = self._rowValues(agentId, item)
+        tokens = _tokens(build_index_content(
+            str(item.get("title") or ""), str(item.get("content") or "")
+        ))
+        fingerprint = self._fingerprint(agentId, item, tokens)
         row = self._conn.execute(
             "SELECT rowid, fingerprint FROM knowledge_fts_docs WHERE doc_id = ?", (kid,)
         ).fetchone()
         if row is not None and row["fingerprint"] == fingerprint:
             return False
-        visibility = str(item.get("visibility") or "private")
-        tenant = str(item.get("tenant_id") or "default")
-        shared = json.dumps(item.get("shared_with") or [], ensure_ascii=False)
-        tags = json.dumps(item.get("tags") or [], ensure_ascii=False)
-        tokens = _tokens(build_index_content(
-            str(item.get("title") or ""), str(item.get("content") or "")
-        ))
+        # 列名与占位符由 `_ROW_VALUE_KEYS` 现场生成：再手抄一份就是第二张字段表
         if row is not None:
             rowid = int(row["rowid"])
             self._conn.execute("DELETE FROM knowledge_fts WHERE rowid = ?", (rowid,))
+            assignments = ", ".join("%s=?" % col for col in self._ROW_VALUE_KEYS)
             self._conn.execute(
-                "UPDATE knowledge_fts_docs SET knowledge_id=?, agent_id=?, visibility=?,"
-                " owner_user_id=?, tenant_id=?, shared_with_json=?, category=?, tags_json=?,"
-                " source=?, updated_at=?, lifecycle_status=?, valid_until=?, fingerprint=?"
-                " WHERE rowid=?",
-                (kid, str(agentId), visibility, str(item.get("owner_user_id") or ""), tenant,
-                 shared, str(item.get("category") or ""), tags, str(item.get("source") or ""),
-                 float(item.get("updated_at") or 0), str(item.get("lifecycle_status") or "active"),
-                 str(item.get("valid_until") or ""), fingerprint, rowid),
+                "UPDATE knowledge_fts_docs SET %s, fingerprint=? WHERE rowid=?" % assignments,
+                values + (fingerprint, rowid),
             )
         else:
+            columns = ", ".join(self._ROW_VALUE_KEYS)
+            marks = ", ".join(["?"] * (len(self._ROW_VALUE_KEYS) + 2))
             cur = self._conn.execute(
-                "INSERT INTO knowledge_fts_docs (doc_id, knowledge_id, agent_id, visibility,"
-                " owner_user_id, tenant_id, shared_with_json, category, tags_json, source,"
-                " updated_at, lifecycle_status, valid_until, fingerprint)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (kid, kid, str(agentId), visibility, str(item.get("owner_user_id") or ""), tenant,
-                 shared, str(item.get("category") or ""), tags, str(item.get("source") or ""),
-                 float(item.get("updated_at") or 0), str(item.get("lifecycle_status") or "active"),
-                 str(item.get("valid_until") or ""), fingerprint),
+                "INSERT INTO knowledge_fts_docs (doc_id, %s, fingerprint) VALUES (%s)"
+                % (columns, marks),
+                (kid,) + values + (fingerprint,),
             )
             rowid = int(cur.lastrowid)
         self._conn.execute(
