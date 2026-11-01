@@ -4,6 +4,26 @@
 > 修复纪律：`AGENTS.md` 修复教义第 1–7 条 + Qoder 记忆 `project-rulings-*` 的台账/受保护子集/形态集体系。
 > 每条含：现状/根因/修法（可直接落代码）/红灯判据/影响面/实施者注意事项。
 
+## 0. 实施状态（2026-11-01 由 §6-459 闭合）
+
+标题写「11 条」而正文有 12 个 `## N.` 小节——第 9／11／12 节是「已修确认」不是待修项，
+故待修 11、行文 12。下表逐条对表：**每条都读的是现码**，不是提交说明里的自称。
+
+| # | 条目 | 状态 | 提交 | 现读证据 |
+|---|---|---|---|---|
+| 1 | C1 · TurnRunState 迁移 | ✅ | `7f0e20ae` | `turn_run_state.py` 三件齐备：`toolRounds`／`gateRunner`（必填，`_buildGateRunner` 单点装配）／`roundUsage` |
+| 2 | R5 · OutboxHandler 四件 | ✅ | `f391bda3` | 失败态／退避／死信／清理四处持久化 |
+| 3 | 治理端点租户过滤 | ✅ | `39296e3a` | 裁决／复活／待审／墓碑／事实冲突五腿按租户闭环 |
+| 4 | EntryLedger 无 tenantId | ✅ | `2890ae66` | 条目投影的治理行随条目租户分区 |
+| 5 | 守卫多主体完整实现 | ✅ | `bb9fe887` | `guards/answer_fact_guard.py:180-192` 取「持有冲突数值」的主体 key；判据 `test_answerFactGuard.py:195-196` 双向断言（＝B 且 ≠A） |
+| 6 | EventBus 无循环场景 | ✅ | `48be5b7d` | 队列在而归属 loop 未知时不再静默直投 |
+| 7 | HealthCheck 周期调度 | ✅ | `098fe4c6` | 按 `interval` 周期调度，`/health/detailed` 读缓存 |
+| 8 | 前端主题守卫盲区 | ✅ | `bfb176f9` | 全站 `.vue` 硬编码色改令牌 ＋ 全量扫描守卫 |
+| 9 | 结晶器双写已修确认 | ✅ | `2ab14586`·`956f2f1a` | 确认档，本批未再动 |
+| 10 | C1 附注 · `_round_usage` 原子性 | ✅ | 随 #1 | `base.py:648` `_accumulateRoundUsage(usage, state)` 写 `state.roundUsage`——调用链局部对象，读-改-写窗口随载体一起消失，无需加锁 |
+| 11 | safe_paths O_NOFOLLOW 已修确认 | ✅ | `5c61fd41` | 确认档 |
+| 12 | 上传上限已修确认 | ✅ | `956f2f1a` | 确认档 |
+
 ---
 
 ## 1. C1 · TurnRunState 迁移（P1，热路径状态机重构）
