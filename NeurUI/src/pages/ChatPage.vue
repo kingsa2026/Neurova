@@ -1996,7 +1996,9 @@ async function loadParkedRuns(sid: string): Promise<void> {
     if (currentSessionId.value !== sid) return  // 已切走：过期响应不写当前视图
     const runs: any[] = res?.data?.runs ?? res?.runs ?? []
     parkedRuns.value = runs
-      .filter((r) => r?.status === 'parked' && r?.run_id)
+      // 阶段优先：后端由心跳/租约反推的 stage 是事实面，status 只是写者意图。
+      // 保留 status 兜底，兼容尚未升级的后端（两把认法取并集，不是第二份判据）。
+      .filter((r) => (r?.stage === 'waiting_human' || r?.status === 'parked') && r?.run_id)
       .map((r) => ({
         runId: String(r.run_id),
         reason: String(r.park_reason ?? ''),
