@@ -38,6 +38,7 @@ import ast
 import importlib.util
 import io
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -298,8 +299,12 @@ class TestSpinCellsSkipRatherThanBurn:
             "「量子 × 迭代数」而非「目标 × 迭代数」——本文件在受保护子集里，"
             "于是本机整场性能门禁不可复跑。\n" + output[-1500:]
         )
-        expected = f"{len(required)} skipped" if " skipped" in output[-400:] \
-            else f"{len(required)} passed"
+        # 按 pytest 摘要行取数，不在输出尾部猜关键字：告警/编码提示会跟在摘要行
+        # 后面，固定窗口一旦截不到 " skipped" 就会把"全跳过"读成"应为 passed"。
+        skippedCount = re.search(r"(\d+) skipped", output)
+        expected = (f"{len(required)} skipped"
+                    if skippedCount and int(skippedCount.group(1)) == len(required)
+                    else f"{len(required)} passed")
         assert proc.returncode == 0 and expected in output, (
             f"这些格既没整批跳过也没全跑完（应为 {expected}），"
             f"实际退码 {proc.returncode}：\n{output[-1200:]}"

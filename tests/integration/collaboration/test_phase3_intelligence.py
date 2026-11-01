@@ -388,7 +388,10 @@ class TestEdgeCases:
             event_type="expire_test",
             agent_id="agent_expire",
             payload={},
-            expiration_ttl=0,  # Immediate expiration
+            # 负数 TTL = 到期时刻落在过去。别用 0：Windows 的 time.time() 粒度
+            # 约 15.6ms，publish 与 is_expired 落在同一 tick 时 `now > now` 为假，
+            # 判据会按执行速度忽绿忽红。
+            expiration_ttl=-1,
         )
         
         # Should be marked as expired

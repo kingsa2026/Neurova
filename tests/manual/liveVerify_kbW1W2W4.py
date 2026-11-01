@@ -34,14 +34,23 @@ from tests.manual._liveVerifyIsolation import isolatedDataRoot
 
 isolatedDataRoot()
 
-os.environ["NEUROVA_SERVICE_TOKEN"] = "liveverify-kb-w124-token"
-os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "liveverify_kb_w124_secret_0123456789")
-# 三个升级开关全开（真链取 on 档行为；off/shadow 档的行为由单测钉住）
-os.environ["NEUROVA_KB_QUERY_NORMALIZE"] = "on"
-os.environ["NEUROVA_KB_MISS_CAPTURE"] = "on"
-os.environ["NEUROVA_KB_AMBIGUITY_CLARIFY"] = "on"
 
-TOKEN = {"X-Service-Token": os.environ["NEUROVA_SERVICE_TOKEN"]}
+def applyVerifyEnv() -> dict:
+    """注入本探针需要的 env；由 main() 在任何 neurova 导入之前调用。
+
+    不在模块顶层直接写 `os.environ`：被 pytest 导入时会把变量带进整个跑测
+    进程（`tests/unit/ci/test_manualScriptsEnvMutationRatchet.py` 的冻结基线
+    就是钉这件事）。
+    """
+    os.environ["NEUROVA_SERVICE_TOKEN"] = "liveverify-kb-w124-token"
+    os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "liveverify_kb_w124_secret_0123456789")
+    # 三个升级开关全开（真链取 on 档行为；off/shadow 档的行为由单测钉住）
+    os.environ["NEUROVA_KB_QUERY_NORMALIZE"] = "on"
+    os.environ["NEUROVA_KB_MISS_CAPTURE"] = "on"
+    os.environ["NEUROVA_KB_AMBIGUITY_CLARIFY"] = "on"
+    return {"X-Service-Token": os.environ["NEUROVA_SERVICE_TOKEN"]}
+
+
 AGENT = "default"
 KB = "/api/v1/knowledge"
 
@@ -67,6 +76,7 @@ def metricsDelta(before: dict, after: dict) -> dict:
 
 
 def main() -> int:
+    token = applyVerifyEnv()
     from fastapi.testclient import TestClient
 
     from neurova.api.app import create_app
@@ -115,7 +125,7 @@ def main() -> int:
             }
 
         def pendingCandidates() -> list:
-            resp = client.get(f"{KB}/alias-candidates?status=pending", headers=TOKEN)
+            resp = client.get(f"{KB}/alias-candidates?status=pending", headers=token)
             return (resp.json().get("data") or {}).get("items") or []
 
         # ── [1] 空库阶段：真检索脱靶 → 两条候选捕获（真链 0 命中分支）──
@@ -132,7 +142,7 @@ def main() -> int:
         # ── [2] 真本体写面：登记两个主体（真 admission 咽喉）─────────────
         # 消解是宁合勿分：别名「跑量」一旦挂在甲主体上，再经咽喉建同名主体会被
         # 消解进甲主体（exact 命中即归并）——所以两个主体都必须在审批之前建好。
-        schema = client.get(f"{KB}/ontology/schema", headers=TOKEN)
+        schema = client.get(f"{KB}/ontology/schema", headers=token)
         check("本体 schema 读面 200", schema.status_code == 200, str(schema.status_code))
         terms = (schema.json().get("data") or {}).get("terms") or []
         relTerms = [t for t in terms if str(t.get("kind")) == "relation"]
@@ -140,7 +150,7 @@ def main() -> int:
         check("schema 关系谓词可读", bool(predicate), f"{len(relTerms)} 个")
 
         def createSubject(label: str) -> dict:
-            r = client.post(f"{KB}/graph/instances", headers=TOKEN, json={
+            r = client.post(f"{KB}/graph/instances", headers=token, json={
                 "agent_id": AGENT, "subject_label": label,
                 "predicate_term_id": predicate, "object_term": "口径说明",
                 "content": f"{label} 口径说明", "evidence_text": f"{label} 口径说明",
@@ -167,7 +177,7 @@ def main() -> int:
         # ── [3] W2 判据 B：真审批端点把别名「跑量」并入主体 ─────────────
         approved = client.post(
             f"{KB}/alias-candidates/{candRun['candidate_id']}/approve",
-            headers=TOKEN, json={"subject_key": key1, "reason": "live-verify 审批"},
+            headers=token, json={"subject_key": key1, "reason": "live-verify 审批"},
         )
         check("审批端点 200 且别名「跑量」已挂", approved.status_code == 200
               and "跑量" in str((approved.json().get("data") or {}).get("aliases")),
@@ -176,7 +186,7 @@ def main() -> int:
         # ── [4] 真条目 + W1 判据：同一查询复测命中（归一展开→召回）──────
         # 1 条命中即入上下文——链采纳门修后（重合按实跑查询计 + 词面重合通道
         # 独立达标，specs/2026-10-30 §11.4 根修），小语料不再被整包丢弃。
-        entry = client.post(KB, headers=TOKEN, json={
+        entry = client.post(KB, headers=token, json={
             "title": "客户流失率口径说明",
             "content": "客户流失率按月统计，当前口径为百分之八，归属留存域。",
         })
@@ -217,7 +227,7 @@ def main() -> int:
         # ── [6] W2 判据 C：真 reject 端点只结行不动主体 ──────────────────
         rejected = client.post(
             f"{KB}/alias-candidates/{candRej['candidate_id']}/reject",
-            headers=TOKEN, json={"reason": "live-verify 否决"},
+            headers=token, json={"reason": "live-verify 否决"},
         )
         check("否决端点 200", rejected.status_code == 200, rejected.text[:150])
         stillPending = [r["raw_query"] for r in pendingCandidates()]
