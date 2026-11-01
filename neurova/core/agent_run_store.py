@@ -116,6 +116,41 @@ TERMINAL_STATUSES = ("completed", "failed", "cancelled")
 PARKED_STATUS = "parked"
 NON_TERMINAL_STATUSES = ("queued", "running", PARKED_STATUS)
 
+
+def deriveRunStage(row: Dict[str, Any], now: Optional[float] = None) -> str:
+    """由**事实**反推这一轮处于什么阶段（读面用；不写库）。
+
+    `status` 是写者意图，可能与事实相反。事实只有两列：`heartbeat_at`（执行体最近
+    一次续租）与 `lease_expires_at`（租约到期时刻）。两条反推规则：
+
+    - 字段说 running、租约已过期 ⇒ `stalled`：执行体已不再心跳，不是"还在跑"；
+    - 字段说 failed/process_died、但心跳晚于 `finished_at` ⇒ `running`：终态落下
+      之后仍有执行体在续租，终态是误判（§6-421 活体同形）。
+
+    只有 `process_died` 这一条已知误判路径反推；真错误（chat_error 等）不翻案。
+    词表与存储状态**分开**：读面要"等人"和"还在跑"两种语义，存储状态里没有。
+    """
+    status = str(row.get("status") or "")
+    if status in TERMINAL_STATUSES:
+        if status == "failed" and str(row.get("error_type") or "") == "process_died":
+            heartbeat = float(row.get("heartbeat_at") or 0)
+            finished = float(row.get("finished_at") or 0)
+            if heartbeat > 0 and finished > 0 and heartbeat > finished:
+                return "running"
+        return "done" if status == "completed" else status
+    if status == PARKED_STATUS:
+        return "waiting_human"
+    if status == "running":
+        lease = float(row.get("lease_expires_at") or 0)
+        now = time.time() if now is None else now
+        if lease > 0 and lease < now:
+            return "stalled"
+        return "running"
+    if status == "queued":
+        return "queued"
+    return "unknown"
+
+
 # 进程 identity：owner 栅栏的比较基准
 OWNER_IDENTITY = f"p{os.getpid()}-{uuid.uuid4().hex[:8]}"
 

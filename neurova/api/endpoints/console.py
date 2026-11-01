@@ -1468,6 +1468,9 @@ async def get_console_chat_runs(
                 {
                     "run_id": r.get("run_id"),
                     "status": r.get("status"),
+                    # 阶段由事实反推（`agent_run_store.deriveRunStage`）：字段与心跳/
+                    # 租约打架时读面取事实，前端据此认「等人」而不是只认存储状态
+                    "stage": _ars.deriveRunStage(r),
                     "park_reason": r.get("park_reason") or "",
                     # 刷新后仍要能看见"钉住了谁、请求的是谁"；只投模型名，不投原文
                     "park_details": _parkDetailsForRow(r),
