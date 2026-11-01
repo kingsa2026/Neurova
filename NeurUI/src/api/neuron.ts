@@ -5,8 +5,13 @@
  */
 
 // 批 W2：改走统一 api 单例（带鉴权拦截器）——修前裸 axios 实例不带
-// Authorization 头，NeuronPage 整页必 401 静默失效
+// Authorization 头，NeuronPage 整页必 401 静默失效。
+// NEURON 面挂在 `/api/neuron`（不在统一实例的 `/api/v1` 下）：逐调用覆写
+// baseURL，既复用鉴权/刷新/解包拦截器，又不会把请求打到错前缀。
+import type { AxiosRequestConfig } from 'axios'
 import api from '@/api'
+
+const NEURON_BASE: AxiosRequestConfig = { baseURL: '/api/neuron' }
 
 // ============ 实体 API ============
 
@@ -31,13 +36,13 @@ export async function listEntities(
 ): Promise<{ success: boolean; data: Entity[]; total: number }> {
   const params: Record<string, any> = { limit }
   if (entityType) params.entity_type = entityType
-  return api.get('/entities', { params })
+  return api.get('/entities', { ...NEURON_BASE, params })
 }
 
 export async function createEntity(
   entity: EntityCreate
 ): Promise<{ success: boolean; data: Entity; message: string }> {
-  return api.post('/entities', entity)
+  return api.post('/entities', entity, NEURON_BASE)
 }
 
 // ============ 依赖 API ============
@@ -63,7 +68,7 @@ export interface DependencyCreate {
 export async function createDependency(
   dep: DependencyCreate
 ): Promise<{ success: boolean; data: Dependency; message: string }> {
-  return api.post('/dependencies', dep)
+  return api.post('/dependencies', dep, NEURON_BASE)
 }
 
 export async function getEntityDependencies(
@@ -72,6 +77,7 @@ export async function getEntityDependencies(
   maxDepth: number = 5
 ): Promise<{ success: boolean; data: { entity_id: string; downstream: string[]; upstream: string[] } }> {
   return api.get(`/dependencies/${entityId}`, {
+    ...NEURON_BASE,
     params: { direction, max_depth: maxDepth },
   })
 }
@@ -102,7 +108,7 @@ export async function cascadeReasoning(
     entity_id: entityId,
     direction,
     max_depth: maxDepth,
-  })
+  }, NEURON_BASE)
 }
 
 export async function wouldAffect(
@@ -111,6 +117,7 @@ export async function wouldAffect(
   threshold: number = 0.5
 ): Promise<{ success: boolean; data: { would_affect: boolean; confidence: number; paths: string[][] } }> {
   return api.post('/would-affect', null, {
+    ...NEURON_BASE,
     params: { source_id: sourceId, target_id: targetId, threshold },
   })
 }
@@ -136,7 +143,7 @@ export async function detectAbsence(
     expected_entity: expectedEntity,
     expected_relation: expectedRelation,
     context_entities: contextEntities,
-  })
+  }, NEURON_BASE)
 }
 
 // ============ 依赖提取 API ============
@@ -158,7 +165,7 @@ export async function extractDependencies(
     memory_id: memoryId,
     content,
     metadata: metadata || {},
-  })
+  }, NEURON_BASE)
 }
 
 // ============ 统计 API ============
@@ -171,11 +178,11 @@ export interface NeuronStats {
 }
 
 export async function getNeuronStats(): Promise<{ success: boolean; data: NeuronStats }> {
-  return api.get('/stats')
+  return api.get('/stats', NEURON_BASE)
 }
 
 export async function neuronHealth(): Promise<{ success: boolean; status: string; components: Record<string, string> }> {
-  return api.get('/health')
+  return api.get('/health', NEURON_BASE)
 }
 
 export default api
