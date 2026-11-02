@@ -17,6 +17,8 @@ Neurflow 内置节点定义模块 — 垂直切片 9
 import asyncio
 import re
 import threading
+from contextvars import ContextVar
+
 from neurova.core.logger import get_logger
 from typing import Any, Callable, Dict, List, Optional
 
@@ -2105,37 +2107,89 @@ APPROVE_KEYWORDS = ("approve", "approved", "批准", "同意", "通过", "ok", "
 REJECT_KEYWORDS = ("reject", "拒绝", "驳回", "不通过", "不同意", "不批准", "反对",
                    "不是", "不行", "取消", "cancel", "no", "nope", "否")
 
-#: 同一审批人可能同时有多个未决节点：键是 (execution_id, node_id)，值为审批人。
-_PENDING_APPROVALS: Dict[str, Dict[str, str]] = {}
-_PENDING_APPROVALS_LOCK = threading.Lock()
+# ═════════════════════════════════════════════════════════════════
+# 批 B3（真合并，教义第 7 条）：未决登记与裁决下沉 ApprovalManager。
+# 工作流审批此前自持一份内存平行登记＋Event 等待；治理 ASK（ApprovalManager）
+# 有 SQLite 落库、裁决回调、带外重放。同一功能两套实现并存：登记与裁决收口
+# 到 ApprovalManager（唯一事实源），本模块只保留渠道关键词前端、会话串行
+# 队列（B1）与定向规则。复活语义：工作流实例是进程内状态，重启后 PENDING 行
+# **不假复活**——由 ApprovalManager 的 TTL 惰性到期诚实闭单。
+# ═════════════════════════════════════════════════════════════════
+
+#: 消息级裁决护栏：记录最近一次经本模块落库裁决的**消息身份**。事实源的
+#: 裁决同步生效——同一 fanout 里后跑的处理器若还走"唯一未决"回退，会把
+#: "回给 A 的消息"读到"B 成了唯一未决"而误批（旧内存登记因滞后清理而侥幸
+#: 不触发）。护栏按消息 id 作用：下一条消息自然解禁，显式定向不受限。
+_lastSettledMessageKey: "ContextVar[str]" = ContextVar("approvalLastSettledMessageKey", default="")
 
 
 def _approvalKey(executionId: str, nodeId: str) -> str:
     return f"{executionId or 'unknown'}:{nodeId or 'unknown'}"
 
 
-def _registerPendingApproval(approvalKey: str, approver: str, executionId: str, nodeId: str) -> None:
-    with _PENDING_APPROVALS_LOCK:
-        _PENDING_APPROVALS[approvalKey] = {
-            "approver": str(approver or ""),
-            "execution_id": str(executionId or ""),
-            "node_id": str(nodeId or ""),
-        }
+def _registerPendingApproval(approvalKey: str, approver: str, executionId: str,
+                             nodeId: str, message: str = "") -> str:
+    """未决登记下沉 ApprovalManager（SQLite 落库，TTL 由其管理）；返回 request_id。
+
+    创建失败向上抛——没有登记的等待是假面（回复没人听），诚实失败由调用方
+    转为 failed 终态。
+    """
+    from neurova.security.approval_manager import get_approval_manager
+
+    request = get_approval_manager().create_approval_request(
+        agent_id="workflow",
+        user_id=str(approver or ""),
+        command=f"workflow:{approvalKey}",
+        description=str(message or "")[:200],
+        metadata={"source": "workflow", "approval_key": approvalKey,
+                  "execution_id": str(executionId or ""), "node_id": str(nodeId or "")},
+    )
+    return request.request_id
 
 
-def _unregisterPendingApproval(approvalKey: str) -> None:
-    with _PENDING_APPROVALS_LOCK:
-        _PENDING_APPROVALS.pop(approvalKey, None)
+def _unregisterPendingApproval(requestId: str) -> None:
+    """节点终结（超时/取消/异常）时显式闭单——不留给 HTTP 裁决一个
+    "批了也没人听"的假面；已裁决的请求幂等返回 False。"""
+    if not requestId:
+        return
+    try:
+        from neurova.security.approval_manager import get_approval_manager
+
+        get_approval_manager().expire_request(requestId, reason="审批节点已终结")
+    except Exception:  # noqa: BLE001 - 闭单失败不改变节点终态，但必须出声
+        logger.warning("审批闭单失败（request_id=%s）", requestId, exc_info=True)
+
+
+def _workflowPendingOf(senderId: str) -> list:
+    """该审批人的工作流未决（定向候选源 = ApprovalManager 唯一事实源）。"""
+    from neurova.security.approval_manager import get_approval_manager
+
+    out = []
+    for req in get_approval_manager().get_pending_requests():
+        meta = req.metadata or {}
+        if meta.get("source") != "workflow":
+            continue
+        if str(req.user_id or "") != str(senderId or ""):
+            continue
+        out.append((str(meta.get("approval_key") or ""), {
+            "execution_id": str(meta.get("execution_id") or ""),
+            "node_id": str(meta.get("node_id") or ""),
+            "request_id": req.request_id,
+        }))
+    return out
 
 
 def _resetPendingApprovalsForTests() -> None:
-    with _PENDING_APPROVALS_LOCK:
-        _PENDING_APPROVALS.clear()
+    from neurova.security.approval_manager import get_approval_manager
+
+    get_approval_manager()._resetForTests()
 
 
 def _pendingApprovalCountForTests() -> int:
-    with _PENDING_APPROVALS_LOCK:
-        return len(_PENDING_APPROVALS)
+    from neurova.security.approval_manager import get_approval_manager
+
+    return sum(1 for r in get_approval_manager().get_pending_requests()
+               if (r.metadata or {}).get("source") == "workflow")
 
 
 #: 同一 chat 会话的审批串行锁登记表（批 B1，T2 已裁串行排队）：键与出口预算
@@ -2171,23 +2225,27 @@ def _mentionsToken(text: str, token: str) -> bool:
     return re.search(rf"(?<![A-Za-z0-9_]){re.escape(token)}(?![A-Za-z0-9_])", text) is not None
 
 
-def _resolveApprovalTarget(content: str, senderId: str) -> Optional[str]:
-    """把一条回复定向到**至多一个**未决审批。
+def _resolveApprovalTarget(content: str, senderId: str, allowFallback: bool = True) -> Optional[str]:
+    """把一条回复定向到**至多一个**未决审批（候选源：ApprovalManager，批 B3）。
 
-    定向规则（从严到宽）：完整键 → 执行号＋节点号 → 唯一执行号 → 唯一未决。
+    定向规则（从严到宽，语义不变）：完整键 → 执行号＋节点号 → 唯一执行号 → 唯一未决。
     仍不能唯一确定时返回 None：宁可让双方继续等（超时是诚实形态），也不许
     一句回复把所有在等的工作流一起批准。
     """
     text = str(content or "")
-    with _PENDING_APPROVALS_LOCK:
-        candidates = [
-            (key, dict(info)) for key, info in _PENDING_APPROVALS.items()
-            if info.get("approver") == str(senderId or "")
-        ]
+    try:
+        candidates = _workflowPendingOf(senderId)
+    except Exception:
+        logger.warning("审批未决读面失败（按无未决处理）", exc_info=True)
+        return None
     if not candidates:
         return None
     if len(candidates) == 1:
-        return candidates[0][0]
+        # "唯一未决"回退受消息级护栏约束：本条消息已经裁决过别的未决时，
+        # 这条回复不属于它（防 fanout 内状态同步变化造成的误命中）
+        if allowFallback:
+            return candidates[0][0]
+        return None
 
     keyHits = [key for key, _ in candidates if key in text]
     if len(keyHits) == 1:
@@ -2325,19 +2383,42 @@ async def _execApprovalCore(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict
             "output": {"approver": approver, "message": message},
         }
 
-    # 等待审批回复
-    # 使用线程安全的 threading.Event 替代 asyncio.Event，解决跨事件循环问题
-    import threading
+    # 等待审批回复（批 B3：登记与裁决下沉 ApprovalManager，等待走 relay future）
+    # 未决登记下沉：创建失败 = 诚实 failed——没有登记的等待是假面（回复没人听）
+    try:
+        request_id = _registerPendingApproval(approval_key, approver, approval_id,
+                                              node_id, message)
+    except Exception as e:
+        logger.error("审批未决登记失败: %s", e)
+        return {
+            "status": "failed",
+            "error": f"审批未决登记失败: {e}",
+            "output": {"approver": approver, "message": message, "approved": None},
+        }
 
-    approval_event = threading.Event()
     approval_result = {"approved": None, "reason": ""}
 
-    # 获取当前事件循环，用于线程安全调度
-    loop = asyncio.get_event_loop()
+    def _settleThroughManager(msgKey: str = "") -> None:
+        """关键词裁决经 ApprovalManager 落库（唯一裁决通道）：状态机幂等，
+        回调链唤醒等待方；裁决未生效（已终态/过期）不唤醒，等待走向超时。"""
+        from neurova.security.approval_manager import get_approval_manager
+
+        if approval_result["approved"]:
+            ok = get_approval_manager().approve_request(
+                request_id, approved_by=approver,
+                note=str(approval_result.get("reason") or ""))
+        else:
+            ok = get_approval_manager().reject_request(
+                request_id, rejected_by=approver,
+                note=str(approval_result.get("reason") or ""))
+        if not ok:
+            logger.warning("关键词裁决未生效（请求已终态或过期）: %s", approval_key)
+        else:
+            _lastSettledMessageKey.set(msgKey)
 
     # 注册审批回调
-    def on_approval_reply_sync(message_content: str) -> bool:
-        """同步处理审批回复（从线程安全回调调用）"""
+    def on_approval_reply_sync(message_content: str, msgKey: str = "") -> bool:
+        """同步处理审批回复（关键词解析 + 经事实源落库裁决）"""
         content_lower = message_content.lower().strip()
 
         # 拒绝词先判：`不同意` / `不通过` 含批准子串，先比批准会把拒绝读成通过
@@ -2348,20 +2429,20 @@ async def _execApprovalCore(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict
                 if _keywordHit(content_lower, kw):
                     reason = reason.replace(kw, "").strip()
             approval_result["reason"] = reason or "未说明原因"
-            approval_event.set()
+            _settleThroughManager(msgKey)
             return True
 
         if any(_keywordHit(content_lower, kw) for kw in APPROVE_KEYWORDS):
             approval_result["approved"] = True
-            approval_event.set()
+            _settleThroughManager(msgKey)
             return True
 
         return False
 
     # 异步包装器，用于 ChannelManager 的异步处理器
-    async def on_approval_reply_async(message_content: str) -> bool:
+    async def on_approval_reply_async(message_content: str, msgKey: str = "") -> bool:
         """异步处理审批回复"""
-        return on_approval_reply_sync(message_content)
+        return on_approval_reply_sync(message_content, msgKey)
 
     # 将回调注册到消息处理器（使用多处理器模式，避免覆盖其他处理器）
     async def message_handler(message):
@@ -2372,7 +2453,10 @@ async def _execApprovalCore(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict
         """
         if hasattr(message, "sender_id") and message.sender_id == approver:
             content = message.content if hasattr(message, "content") else str(message)
-            target = _resolveApprovalTarget(content, str(message.sender_id))
+            msgKey = str(getattr(message, "message_id", "") or id(message))
+            alreadySettled = _lastSettledMessageKey.get() == msgKey
+            target = _resolveApprovalTarget(content, str(message.sender_id),
+                                            allowFallback=not alreadySettled)
             if target != approval_key:
                 if target is None:
                     logger.info(
@@ -2380,63 +2464,24 @@ async def _execApprovalCore(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict
                         approval_key,
                     )
                 return None
-            await on_approval_reply_async(content)
+            await on_approval_reply_async(content, msgKey)
         return None  # 不自动回复
 
-    # 使用 add_message_handler 而不是 set_message_handler，避免覆盖其他处理器
-    _registerPendingApproval(approval_key, approver, approval_id, node_id)
     handler_id = channel_manager.add_message_handler(message_handler, priority=10)
-    logger.info("等待审批回复: %s, handler_id=%s", approval_id, handler_id)
+    logger.info("等待审批回复: %s, request_id=%s", approval_id, request_id)
 
     try:
-        # 等待审批事件，带超时（批 B1：轮询换掉 run_in_executor——threading.Event
-        # 不能被 await，此前 event.wait 整体进默认线程池，取消时那颗线程卡在
-        # wait 里最长泄漏 timeout 秒；轮询让取消即时生效、线程零占用）。
-        deadline = loop.time() + timeout
-        while not approval_event.is_set():
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                break
-            await asyncio.sleep(min(APPROVAL_WAIT_POLL_INTERVAL_S, remaining))
-        event_set = approval_event.is_set()
+        # 批 B3：等待 = relay future（跨线程裁决经 call_soon_threadsafe 唤醒），
+        # 取代 threading.Event + 轮询。渠道关键词面与治理 HTTP 面从此同源同权：
+        # 谁先裁决谁生效（ApprovalManager 状态机幂等，后到者拿 False）。
+        from neurova.security.approval_relay import registerApprovalWaiter
 
-        if not event_set:
-            # threading.Event.wait 返回 False 表示超时
-            logger.warning("审批超时: %s", approval_id)
-            return {
-                "status": "timeout",
-                "output": {
-                    "approver": approver,
-                    "message": message,
-                    "approved": None,
-                    "reason": "审批超时",
-                },
-            }
-
-        # 返回审批结果
-        if approval_result["approved"]:
-            return {
-                "status": "success",
-                "output": {
-                    "approver": approver,
-                    "message": message,
-                    "approved": True,
-                    "reason": "审批通过",
-                },
-            }
-        else:
-            return {
-                "status": "success",
-                "output": {
-                    "approver": approver,
-                    "message": message,
-                    "approved": False,
-                    "reason": approval_result["reason"],
-                },
-            }
-
-    except Exception:
-        logger.warning("审批异常: %s", approval_id)
+        future = registerApprovalWaiter(request_id)
+        if future is None:
+            raise RuntimeError("审批等待无法登记（当前无运行事件循环）")
+        await asyncio.wait_for(future, timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.warning("审批超时: %s", approval_id)
         return {
             "status": "timeout",
             "output": {
@@ -2446,10 +2491,55 @@ async def _execApprovalCore(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict
                 "reason": "审批超时",
             },
         }
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.warning("审批异常: %s (%s)", approval_id, e)
+        return {
+            "status": "timeout",
+            "output": {
+                "approver": approver,
+                "message": message,
+                "approved": None,
+                "reason": f"审批异常: {e}",
+            },
+        }
     finally:
-        # 取消/超时/异常都走这里：留着的处理器会吞掉后续审批回复
+        # 取消/超时/异常都走这里：留着的处理器会吞掉后续审批回复；
+        # 未决请求显式闭单（已裁决的幂等跳过）——不留给 HTTP 一个假面
         channel_manager.remove_message_handler(handler_id)
-        _unregisterPendingApproval(approval_key)
+        _unregisterPendingApproval(request_id)
+
+    # 裁决终态：关键词面读本地面；带外面（治理 HTTP）从事实源读
+    approved = approval_result["approved"]
+    reason = approval_result.get("reason") or ""
+    if approved is None:
+        from neurova.security.approval_manager import get_approval_manager
+
+        settled = get_approval_manager().get_request(request_id)
+        if settled is not None:
+            approved = settled.status.value == "approved"
+            reason = settled.approval_note or reason
+
+    if approved:
+        return {
+            "status": "success",
+            "output": {
+                "approver": approver,
+                "message": message,
+                "approved": True,
+                "reason": reason or "审批通过",
+            },
+        }
+    return {
+        "status": "success",
+        "output": {
+            "approver": approver,
+            "message": message,
+            "approved": False,
+            "reason": reason or "未说明原因",
+        },
+    }
 
 
 # ==================== 执行器注册 ====================
