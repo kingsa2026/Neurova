@@ -11318,3 +11318,22 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **就地划闭**：无（计划第二批，不指旧账）。
     - **仍开**：计划面沿 §6-478（批 F/G1/G2/B1/B2/B3/C/D/H 未跑）；全仓仍开清单沿 §6-477 尾，本批无新增、无划闭。
     - **下一枚空号现查**：条目行尾号现算 **479** ⇒ 本格取 **480**，后继从 §6-481 起。推送态：本格落笔时 `origin/main..HEAD` 现算 **3 笔**未推（`68053c5f`/`027e040a`/`553bdced`，本台账笔入库后 4），推送需单独点单，引用前一律现算。
+
+481. **批 F 落格：出口失败片归宿——同片重试一次＋落出口失败台账** ✅🟢 —— 承 §6-478 批次面（批 F），用户点单「推送并进行下一步」。
+    - **实施**：新模块 `channels/outbound_ledger.py`（OutboundFailureLedger：单 SQLite＋RLock＋WAL，`callerPath` 取径、env 可覆盖；recordFailure/queryFailures，内容头截 80）；`manager.send_message` 加 `OUTBOUND_CHUNK_RETRIES=1` 具名常量——失败片同片重试一次，重试仍败落台账（渠道/会话/agent/片序/尝试数/原因/内容头），适配器异常也按失败片记账不再静默上抛，台账故障退化为只告警（点名退化）。域边界：回合级 chat_error 归 agent_run_ledger（结算点早于出站），两域不合并。顺带修潜伏病：`parts.index(part)` 遇重复片报错序号 → enumerate。
+    - **前提修正兑现**：§6-478 撤回的「幂等标记」未做（出口无自动重投路径，无受益场景）——本格只补归宿。
+    - **红→绿**：红灯＝特性缺席红（collection error：模块与常量均不存在）→ 绿灯 7 passed；多片格首版按段落手搓分片假设被 chunker 句级重分配打脸（标记泄漏两片），改为注入受控分片表——本批主张是片序/台账/重试，chunker 内部归它自己的测试。宽域 `tests/unit/channels` 728 passed＋1 预存失败（见仍开①，stash 本批生产文件复跑同红，A/B 与本批无关）。
+    - **live-verify（真组件真故障）**：真 `FeishuAdapter` 打真 open.feishu.cn——无效凭据被真 API 拒绝（`ObtainAccessTokenException code 10003` 入日志），5500 字两片 × 各重试＝4 次真实 HTTP，2 行台账落 WAL 库（片序 1/2、attempts=2、内容头齐全），整体回执诚实 None。故障不是桩出来的。
+    - **口径（numstat 实抄）**：生产池 **+186/−4**（manager +66/−4、outbound_ledger +120）；测试/基建池 **+187/−0**（新档 184、主清单 2、分片 1）；合计 **+373/−4**。子集 772→**773**。首版提交正文按估算写错（+93/+160），amend 实抄改正。
+    - **就地划闭**：无（不指旧账）。
+    - **仍开（不当自决）**：① **新登**：`test_missing_dependency_honest_failure::testMqttInitConnectionWithoutPahoIsHonestFailure` 在当前环境预存红——venv 已装 paho-mqtt（实测 `site-packages/paho` 在），测试前提「确实缺依赖」不成立；该档 docstring 自带处方（「若依赖已装上，请改用 monkeypatch 强制置 False」），修法现成但不属本批顺手做；② 计划面沿 §6-478（批 B1-B3/C/D/H 未跑）；③ 全仓仍开清单沿 §6-477 尾。
+    - **下一枚空号现查**：条目行尾号现算 **480** ⇒ 本格取 **481**，批 G 实施格取 **482**，后继从 §6-483 起。推送态：本格落笔时 `origin/main..HEAD` 现算 **2 笔**未推（`d1707e20` 与其前笔，本台账笔入库后 3），推送需单独点单，引用前一律现算。
+
+482. **批 G 落格：渠道兜底文案单源＋APIError 码→默认文案登记表** ✅🟢 —— 承 §6-478 批次面（批 G1+G2），同上点单。
+    - **实施**：G1——`manager.py` 兜底文案收进模块常量 `FALLBACK_ERROR_TEXT`（发送点引常量），兜底回发的 `except Exception: pass` 改点名日志（回发失败的台账归宿批 F 已给，此处只接 send_message 抛异常的残余路径）。G2——`api_standard.py` 增 `DEFAULT_ERROR_MESSAGES`（17 码全登记，与 ErrorCodes 同文件同源）；`error_handlers.py` 新增 `resolveErrorMessage` 单点归一并接进信封装配：原话直通 → 空话回落默认 → 无默认点名码本身，**空串绝不过 API 边界**。全量收口 1184 处裸 detail 维持不立项（§6-478 口径）。
+    - **红→绿**：G1 两红（常量缺失＋行为面无常量可引）＋探针自纠——首版 pass-only 过滤要求 `node.type is None`，漏掉 `except Exception: pass`；现读扫描面后收窄到 `_dispatch_message` 全体 pass-only（实测恰一处：兜底回发行 711）。G2 collection error（登记表与归一函数均不存在）。绿灯 9 passed。宽域 `tests/unit/api` **2767 passed**＋`tests/unit/channels` 731 passed＋1 预存（同上仍开①）。
+    - **口径（numstat 实抄）**：生产池 **+52/−6**（error_handlers +18/−2、manager +9/−4、api_standard +25）；测试/基建池 **+172/−0**（新档 52+116、主清单 2、分片 2）；合计 **+224/−6**。子集 773→**775**。
+    - **过程事实（连续第三遭行数错，升格为固定动作）**：F、G 两批首版正文均按估算写错（F +93/+160→实 +186−4/+187；G +47/+159→实 +52−6/+172），均趁未推送 amend 实抄改正——提交正文数字无守卫射程，**下批起一律先 `git show --numstat --format=` 后写正文**，估算值不落正文。
+    - **就地划闭**：无。
+    - **仍开**：①（沿 §6-481 新登的 paho 预存红）＋计划面批 B1-B3/C/D/H＋全仓仍开沿 §6-477 尾。
+    - **下一枚空号现查**：条目行尾号现算 **481** ⇒ 本格取 **482**，后继从 §6-483 起。推送态：本格落笔时 `origin/main..HEAD` 现算 **3 笔**未推（`d1707e20`/`10beabee` 及其前，本台账笔入库后 4），推送需单独点单，引用前一律现算。
