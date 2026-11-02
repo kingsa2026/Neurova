@@ -534,9 +534,13 @@ tests/unit/test_archive_nav_impact_guard.py
 #     库单调增长；改后触发点落在归档提交，FTS 对齐改分批删除）
 tests/unit/context/test_ledger_gc_retention.py
 
+# 取证档的结论必须由读数派生（§6-471）：`tests/manual/context_persistence_baseline_90.py` 曾把
+#   2026-09-21 的结论写死在报告串里，与同页当天的实算读数并排印出——三份结论今天全假、读数全对。
+#   本档钉两件事：写死那句一出现即红（形态格），且派生通道必须真接上——只删结论行不算修好（反向格）。
+tests/unit/context/test_baselineForensicsVerdictsDeriveFromReadings.py
 # 上下文持久层批（Issue #90）B4 工单 008：召回作用域闸口（A8）
 #   （根因：持久层这条读路径把可见性交给 session 精确等值——单聊池恒空、
-#     无会话池全放行；改后过 memory_scope.filter_by_scope，与视图路径同源，
+#     无会话池全放行；改后过作用域闸口（池读 filter_by_tag／视图 filter_by_scope，二者汇于 allowed_scopes_for_tag），与视图路径同源，
 #     闸口落在两条源合并之后）
 tests/unit/context/test_ledger_recall_scope_gate.py
 
