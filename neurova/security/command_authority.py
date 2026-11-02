@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS command_authority (
     channel_gate INTEGER,
     policy_gate INTEGER,
     decision TEXT NOT NULL,
-    reason TEXT NOT NULL DEFAULT ''
+    reason TEXT NOT NULL DEFAULT '',
+    bound_user TEXT NOT NULL DEFAULT ''
 )
 """
 
@@ -71,17 +72,24 @@ class CommandAuthorityLedger:
         self._conn.execute("PRAGMA journal_mode=WAL")
         with self._conn:
             self._conn.execute(_SCHEMA)
+        # H3：旧库补 bound_user 列（本表自有、量小，就地 ALTER 而非注册表迁移）
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(command_authority)")}
+        if "bound_user" not in cols:
+            with self._conn:
+                self._conn.execute("ALTER TABLE command_authority ADD COLUMN bound_user TEXT NOT NULL DEFAULT ''")
 
     def recordJudgment(self, *, sender_id: str, channel_type: str, agent_id: str,
                        tool_name: str, channel_gate: Optional[bool],
-                       policy_gate: Optional[bool], decision: str, reason: str = "") -> int:
+                       policy_gate: Optional[bool], decision: str, reason: str = "",
+                       bound_user: str = "") -> int:
         with self._lock, self._conn:
             cur = self._conn.execute(
                 "INSERT INTO command_authority (ts, sender_id, channel_type, agent_id,"
-                " tool_name, channel_gate, policy_gate, decision, reason)"
-                " VALUES (?,?,?,?,?,?,?,?,?)",
+                " tool_name, channel_gate, policy_gate, decision, reason, bound_user)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (time.time(), sender_id or "", channel_type or "", agent_id or "",
-                 tool_name or "", channel_gate, policy_gate, decision, reason or ""),
+                 tool_name or "", channel_gate, policy_gate, decision, reason or "",
+                 bound_user or ""),
             )
             return int(cur.lastrowid)
 
@@ -95,12 +103,12 @@ class CommandAuthorityLedger:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT id, ts, sender_id, channel_type, agent_id, tool_name,"
-                " channel_gate, policy_gate, decision, reason"
+                " channel_gate, policy_gate, decision, reason, bound_user"
                 f" FROM command_authority {where} ORDER BY id DESC LIMIT ?",
                 params,
             ).fetchall()
         keys = ("id", "ts", "sender_id", "channel_type", "agent_id", "tool_name",
-                "channel_gate", "policy_gate", "decision", "reason")
+                "channel_gate", "policy_gate", "decision", "reason", "bound_user")
         return [dict(zip(keys, r)) for r in rows]
 
     def close(self) -> None:
@@ -142,6 +150,15 @@ def resetCommandAuthorityLedger() -> None:
             except Exception:  # noqa: BLE001 - 关闭失败不阻断重置
                 pass
         _ledgerInstance = None
+
+
+def _resolveBoundUser(agentId: str, channelType: str, senderId: str) -> Optional[str]:
+    """渠道发送者 → 平台账号（批 H3）：复用 identity_binding 既有单源反查，
+    不建第二张映射表（教义第 6 条）。未绑定返回 None（调用方按缺省兜底记
+    anonymous）；反查故障向上抛（调用方记空并出声，不劫持判定主链）。"""
+    from neurova.channels.user_identity import UserIdentityManager
+
+    return UserIdentityManager().resolveUserId(agentId, channelType, senderId)
 
 
 def _judgePolicy(*, userId: str, toolName: str, params, scanAll: bool):
@@ -206,11 +223,20 @@ def resolveCommandAuthority(
 
     allowed = decision in ("pass",)
 
+    # H3 归属：有渠道事实才反查"这是谁"——未绑定按缺省兜底纪律记 anonymous，
+    # 反查故障记空（未知）并出声，不劫持判定主链
+    boundUser = ""
+    if channelCfg is not None and senderId:
+        try:
+            boundUser = _resolveBoundUser(agentId, channelType, senderId) or "anonymous"
+        except Exception as e:  # noqa: BLE001 - 归属是观测增强，不是判定前提
+            logger.warning("指挥归属反查失败（sender=%s）: %s", senderId, e)
+
     try:
         getCommandAuthorityLedger().recordJudgment(
             sender_id=senderId, channel_type=channelType, agent_id=agentId,
             tool_name=toolName, channel_gate=channelGate, policy_gate=policyGate,
-            decision=decision, reason=reason,
+            decision=decision, reason=reason, bound_user=boundUser,
         )
     except Exception as e:  # noqa: BLE001 - 台账是观测面不是主链，但必须出声
         logger.warning("指挥资格台账写入失败（判定不受影响）: %s", e)

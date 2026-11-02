@@ -156,3 +156,60 @@ class TestLedgerStandalone:
                               decision="deny_policy", reason="x")
         rows = ledger.queryAuthorityLog(sender_id="a")
         assert len(rows) == 1 and rows[0]["decision"] == "allow"
+
+
+class TestH3Attribution:
+    """批 H3：判定台账的归属列——渠道发送者经 identity_binding 既有单源反查
+    平台账号；未映射按缺省兜底纪律记 anonymous；反查故障不劫持判定主链。"""
+
+    def test_attributionRecordsBoundUser(self, isolatedRoot, monkeypatch):
+        import neurova.security.command_authority as ca
+
+        monkeypatch.setattr(ca, "_resolveBoundUser",
+                            lambda agent, channel, sender: "alice")
+        resolveCommandAuthority(senderId="ou_1", channelType="feishu",
+                                chatType="private",
+                                channelCfg={"private_chat_strategy": "open"})
+        row = getCommandAuthorityLedger().queryAuthorityLog(sender_id="ou_1")[0]
+        assert row["bound_user"] == "alice", (
+            f"绑定归属没有进台账（实得 {row['bound_user']!r}）——'谁在指挥'仍只有半张脸"
+        )
+
+    def test_unmappedSenderIsAnonymous(self, isolatedRoot, monkeypatch):
+        import neurova.security.command_authority as ca
+
+        monkeypatch.setattr(ca, "_resolveBoundUser",
+                            lambda agent, channel, sender: None)
+        resolveCommandAuthority(senderId="ou_2", channelType="feishu",
+                                chatType="private",
+                                channelCfg={"private_chat_strategy": "open"})
+        row = getCommandAuthorityLedger().queryAuthorityLog(sender_id="ou_2")[0]
+        assert row["bound_user"] == "anonymous", "未映射发送者没按缺省兜底纪律记 anonymous"
+
+    def test_lookupFailureDoesNotHijackJudgment(self, isolatedRoot, monkeypatch):
+        import neurova.security.command_authority as ca
+
+        def _boom(agent, channel, sender):
+            raise RuntimeError("binding db broken")
+
+        monkeypatch.setattr(ca, "_resolveBoundUser", _boom)
+        decision = resolveCommandAuthority(senderId="ou_3", channelType="feishu",
+                                           chatType="private",
+                                           channelCfg={"private_chat_strategy": "open"})
+        assert decision.allowed is True, "反查故障劫持了判定主链"
+        row = getCommandAuthorityLedger().queryAuthorityLog(sender_id="ou_3")[0]
+        assert row["bound_user"] == "", "反查故障应记空（未知），不冒充 anonymous"
+
+    def test_toolPathWithoutChannelFactsSkipsAttribution(self, isolatedRoot, monkeypatch):
+        import neurova.security.command_authority as ca
+
+        called = {"n": 0}
+
+        def _spy(agent, channel, sender):
+            called["n"] += 1
+            return None
+
+        monkeypatch.setattr(ca, "_resolveBoundUser", _spy)
+        monkeypatch.setattr(ca, "_judgePolicy", lambda **kwargs: None)
+        resolveCommandAuthority(senderId="ou_4", toolName="memory_search", params={})
+        assert called["n"] == 0, "工具路径没有渠道事实却触发了身份反查"
