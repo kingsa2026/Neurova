@@ -11,6 +11,8 @@
 - 字段说 running 但租约已过期 ⇒ `stalled`（执行体不再心跳）；
 - 字段说 failed/process_died 但**心跳晚于 finished_at** ⇒ `running`
   （终态落下之后仍有执行体在续租，终态是误判）。
+- 边界裁定（2026-11-03 批 E）：心跳==finished_at、租约==now 都算**未漂移**——
+  反推只咬严格晚于/严格早于，相等侧没有"终态之后仍在续租／租约已失效"的证据。
 """
 from __future__ import annotations
 
@@ -68,6 +70,26 @@ def test_realFailureWithFreshHeartbeatIsNotResurrected():
 
 def test_unknownStatusDoesNotInventAWord():
     assert deriveRunStage(_row("weird"), now=1000) == "unknown"
+
+
+def test_queuedStatusProjectsQueued():
+    """queued 是存储状态之一，读面必须原样投出——丢了这一格，排队中的轮次会被
+    读面谎报成 unknown，面板阶段列从此缺一类。"""
+    assert deriveRunStage(_row("queued"), now=1000) == "queued"
+
+
+def test_heartbeatEqualToFinishedAtIsNotDrift():
+    """边界裁定：心跳==finished_at 是"终态与心跳同刻落下"，没有"终态之后仍在续租"
+    的证据 ⇒ 按未漂移处理，终态保持。反推只咬严格晚于（store 里是 `>`）。"""
+    row = _row("failed", lease=1100, heartbeat=1000, finished=1000,
+               error_type="process_died")
+    assert deriveRunStage(row, now=1010) == "failed"
+
+
+def test_leaseExactlyAtNowIsStillAlive():
+    """边界裁定：租约到点那一刻仍算活着——"过期"必须是严格早于 now（store 里是
+    `<`），否则租约临界点上的正常轮次会被读面判成 stalled。"""
+    assert deriveRunStage(_row("running", lease=1000, heartbeat=990), now=1000) == "running"
 
 
 def test_consoleRunsReadFaceProjectsTheDerivedStage():
