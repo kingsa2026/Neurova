@@ -4129,6 +4129,7 @@ tests/unit/channels/test_attentionBudget.py
 tests/unit/core/test_runStageDerivation.py
 tests/unit/neurflow/test_approvalReplyIsolation.py
 tests/unit/context/test_promptContractSingleSource.py
+tests/unit/context/test_promptSurfaceBudgetRatchet.py
 tests/unit/channels/test_attentionHoldDuringTurn.py
 
 # 打包增量指纹必须是内容函数（§6-460）：`{files, bytes}` 的形状指纹把「改了版本号但长度没变」
