@@ -171,6 +171,27 @@ async def list_pending_approvals(
     return {"code": 0, "data": {"requests": [r.to_dict() for r in pending]}}
 
 
+@router.get("/authority-log")
+async def query_authority_log(
+    request: Request,
+    sender_id: str = Query(default="", description="按发送者过滤（'谁在指挥'聚合读数）"),
+    limit: int = Query(default=100, ge=1, le=500),
+    _admin: Any = Depends(_governance_admin_dep),
+):
+    """指挥资格判定台账（批 H2 读面）：每次准入/工具预检的判定行。
+
+    台账不可用时如实报 available=False——观测面故障不冒充空数据。
+    """
+    from neurova.security.command_authority import getCommandAuthorityLedger
+
+    try:
+        rows = getCommandAuthorityLedger().queryAuthorityLog(
+            sender_id=sender_id, limit=limit)
+    except Exception as e:  # noqa: BLE001 - 台账故障诚实呈现
+        return {"code": 0, "data": {"available": False, "error": str(e), "rows": []}}
+    return {"code": 0, "data": {"available": True, "rows": rows}}
+
+
 @router.get("/approvals/{request_id}")
 async def get_approval_detail(request: Request, request_id: str, _admin: Any = Depends(_governance_admin_dep)):
     """审批请求详情"""
