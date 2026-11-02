@@ -134,13 +134,18 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
         agent_id = str(message.metadata.get("agent_id") or "default")
         cfg = _channel_cfg(manager, message.channel_type, agent_id)
 
-        # 访问控制传导（此前所有渠道都忽略这两个开关）：
-        # 判定单源在 `channels/access_policy.py`；closed/whitelist/未知策略一律拒绝。
-        allowed, denyReason = chatAccessDecision(message.chat_type, cfg, message.sender_id)
-        if not allowed:
+        # 访问控制传导（此前所有渠道都忽略这两个开关）：closed/whitelist/未知
+        # 策略一律拒绝的口径在 `channels/access_policy.py`；批 H1 起判定走
+        # 指挥资格组合点（单一判定落点＋台账行——"谁在指挥"可审计）。
+        from neurova.security.command_authority import resolveCommandAuthority
+
+        verdict = resolveCommandAuthority(
+            senderId=str(message.sender_id or ""), channelType=message.channel_type,
+            chatType=message.chat_type, channelCfg=cfg, agentId=agent_id)
+        if not verdict.allowed:
             logger.info(
                 "ChannelRouter: %s %s 准入拒绝（%s），忽略消息",
-                message.channel_type, message.chat_type, denyReason,
+                message.channel_type, message.chat_type, verdict.reason,
             )
             return None
         if message.chat_type == "group" and _flag(cfg.get("require_mention")):

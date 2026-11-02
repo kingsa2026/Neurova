@@ -1115,6 +1115,7 @@ tests/unit/security/test_redactionDoorsShareOneLeakClosure.py
 # 入册前逐文件单跑全绿（2 passed）。
 tests/unit/execution/test_execLocalRuntimeHangsUpKillHook.py
 tests/unit/security/test_governancePathValuesReachCallers.py
+tests/unit/security/test_commandAuthority.py
 tests/unit/test_tunnelStateEnumSingleSource.py
 # §6-418 蜂群上报信封批：旁路（邮箱/上下文池归档）投同一份 _uplinkEnvelope 投影、
 # 三处按字面量砍正文的写法撤除、下钻口补 recall_history(agent_id, session_id) 整取。

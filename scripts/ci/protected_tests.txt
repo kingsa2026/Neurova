@@ -4009,6 +4009,7 @@ tests/unit/security/test_sandboxFileBlockNamesThePath.py
 # 名字打日志——静态门禁报未定义名，运行时被外层吞成 warning，「拦了哪条路径」整个消失。
 # 本档钉三层：结果面带出路径值且 `to_dict()` 一并带出、与取数口同源、消费侧真日志点到路径。
 tests/unit/security/test_governancePathValuesReachCallers.py
+tests/unit/security/test_commandAuthority.py
 # §6-416（批 P-5 第三格）：内容级**第八张表**并进单源，挖掘门改接并退役自带表与同名实装。
 # 票面来自 §6-415 仍开①——§6-411 那次"七份收成一份"没数到 `evolution/eval/miner.py:SECRET_PATTERNS`，
 # 而它在役（`service.py:503-506` → `messages_from_sessions` → `sanitize_messages` → 命中即整条
