@@ -2302,7 +2302,11 @@ async def _execApprovalCore(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict
         if delivery.coalesced:
             logger.info("审批通知同键已有在发消息，本条并入待发槽: %s", approval_key)
 
-        if not msg_id and not delivery.coalesced:
+        # 批 B2①：held（通知压在「人在等」窗口、关窗补发）不是发送失败——
+        # 此前这种在途态提前返回 pending，审批人稍后收到补发通知、回复却
+        # 没有任何处理器在听（死审批）。held 继续走注册与等待；送达延迟是
+        # 同回合窗口收尾（毫秒-秒级），相对超时预算可忽略（"未送达不计时"落形）。
+        if not msg_id and not delivery.coalesced and not delivery.held:
             logger.error("发送审批通知失败")
             # 返回 pending 状态，允许工作流继续
             return {
