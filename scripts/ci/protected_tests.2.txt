@@ -597,6 +597,12 @@ tests/unit/desktop/test_win_installer_kit.py
 #   判据九格：同尺寸改内容须重拷／未变仍跳过（反向，防根修做成每次全量重拷）/
 #   超阈值大文件靠 mtime 项／文本后缀逐个参数化／同一棵树两次算等值。
 tests/unit/desktop/test_bundleBackendFingerprint.py
+# 打包机 PATH 回读必须两侧同钉 UTF-8（§6-465）：PowerShell 两个输出通道编码不一致（裸打字符串
+#   走机器码页、点源后的对象流走 UTF-8），只钉父端在中文 Windows 上不算修好——旧形当场
+#   `AttributeError: 'NoneType' object has no attribute 'strip'`，`win_installer_kit.py run` 跑不到底。
+#   判据三层：跨平台代码形态格＋Windows 真跑行为格（非 nt 明确 skip 自陈，不拿恒真凑数）
+#   ＋反空转格（四种合成形态读数方向各异）。
+tests/unit/desktop/test_winInstallerKitPathProbe.py
 # 电脑操控面修正工单集（T-02…T-16）判据：逐文件单跑确定全绿（2026-09-30 复跑记录）
 tests/unit/computer_use/test_snapshot_fold_replaces_chop.py
 tests/unit/computer_use/test_snapshot_truncation_honesty.py
