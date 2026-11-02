@@ -11347,3 +11347,36 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **就地划闭**：无。
     - **仍开（不当自决）**：① paho 预存红（§6-481①，处方在档）；② **新登**：`tests/unit/neurflow` 的 `test_domain_split_contract` ×3＋`test_storage` ×2 error 预存红——stash 自证与本批无关，疑另一会话在途或环境态，归属与修法待现查；③ 计划面批 B2/B3/C/D/H 未跑；④ 全仓仍开沿 §6-477 尾。
     - **下一枚空号现查**：条目行尾号现算 **482** ⇒ 本格取 **483**，后继从 §6-484 起。推送态：本格落笔时 `origin/main..HEAD` 现算 **1 笔**未推（`a20947f4`，本台账笔入库后 2），推送需单独点单，引用前一律现算。
+
+484. **批 B2 落格：审批等待语义——held 不再产生死审批＋引擎读面外显 timeout/pending** ✅🟢 —— 承 §6-478 批次面（批 B2），用户点单「推送 并完成文档中剩余的所有任务」。
+    - **实施**：①held（通知压在「人在等」窗口、关窗补发）此前被判据当发送失败提前返回 pending——审批人收到补发通知后回复没人听（死审批）；判据并入 held 继续注册与等待（"未送达不计时"以本形落死：送达延迟＝同回合窗口收尾，相对预算可忽略）。②引擎 builtin 节点完成面把内层 pending/timeout 一律写 success——改为外显；resume 恢复集同步扩（timeout/pending 有终态输出照 success 恢复不重跑，否则审批人被二次打扰）——行为不变、真相可见。
+    - **红→绿**：3 failed（死审批红/引擎画 success 红/恢复集结构红）→ 3 passed；过程一错：测试工作流节点类型写 `builtin:exec_approval`（注册表实为 `builtin:approval`）→ 节点走失败路径假红，改键即绿。宽域 tests/unit/neurflow 736 passed＋预存 3 failed/2 error（§6-483②）。
+    - **口径（numstat 实抄）**：生产池 +14/−3（builtin +5/−1、engine +9/−2）；测试/基建池 +157/−0（新档 155、清单 2）；合计 +171/−3。子集 776→**777**。
+    - **仍开**：预存集沿 §6-483②。
+    - **下一枚空号现查**：尾号现算 483 ⇒ 本格取 **484**，后继从 §6-485 起。
+
+485. **批 C+D 落格：出口拆分策略登记表/禁拆诚实截断＋入站旁路台账** ✅🟢 —— 承 §6-478 批次面（批 C、D，T1/T4 已裁），同上点单。两批共享 manager.py 分片决策点，同提交、判据分列。
+    - **C**：message_chunker 增 SPLIT_POLICY_ALLOW/FORBID 具名常量＋SYSTEM_NOTICE_MAX_CHARS(1700，≤最小渠道上限 wecom 1800)＋truncate_forbidden（显式标记，绝不静默丢字符）；审批通知与兜底错误文案两处接线 forbid；agent 正文照旧拆分（T1 范围）；未知策略点名回落。live-verify：真 FeishuAdapter——forbid 超长单条 1700 字符截断件＋真 API 拒绝后按批 F 语义重试；诊断一笔：测试文本恰 4000 字（≤上限不拆），两次调用＝1 片×重试，非异常。
+    - **D**：ChannelBypassLedger（与批 F 同库同族第二张表）；IngressQueueUnavailable 分支改**有界直发**——同一 dispatch 路径＋旁路台账行＋点名告警（静默绕过消失）；读面 getIngressBypassReadout＋GET /channel-adapters/ingress/bypass-stats。路由契约守卫当场抓了两处漏登记（API_REFERENCE 清单＋channels.py 模块头清单）——补登记＋auth surface 重生成后绿，判据的牙实录。
+    - **红→绿**：C 红灯＝collection error → 8 passed；D 红灯＝collection error → 4 passed；宽域 channels 743 passed＋1 预存（paho）、api 2767 passed（契约守卫 20 passed）。
+    - **口径（numstat 实抄）**：生产池 +183/−7（manager +74/−5、chunker +27、outbound_ledger +67、channels.py +11、builtin +1、API_REFERENCE +3/−2）；测试/基建池 +287/−0（新档 162+121、清单 4）；合计 +470/−7。子集 777→**779**。
+    - **仍开**：D 读面的前端接线（waitingHuman 并集加旁路计数）登记为尾巴格，后端读数已常驻。
+    - **下一枚空号现查**：尾号现算 484 ⇒ 本格取 **485**，后继从 §6-486 起。
+
+486. **批 B3 落格：审批双链真合并——登记与裁决下沉 ApprovalManager（唯一事实源）** ✅🟢 —— 承 §6-478 批次面（批 B3，T3 已裁真合并），同上点单。
+    - **实施（存储下沉→回传接通→退役清理）**：登记经 create_approval_request 落库（metadata.source=workflow）；节点终结显式闭单（新增 expire_request——不留给 HTTP 一个"批了也没人听"的假面）；等待改 relay future（跨线程裁决 call_soon_threadsafe 唤醒，取代 Event＋轮询）；关键词裁决经 approve/reject_request 落库——渠道关键词面与治理 HTTP 面同源同权、谁先谁生效（状态机幂等）；带外终态从事实源读（新增 get_request）；内存 dict/锁整体退役，定向候选源改读事实源（定向规则不变）。
+    - **变异揭出的新护栏**：事实源裁决同步生效——同一 fanout 内后跑的处理器走"唯一未决"回退会把"回给 A 的消息"误批给 B（旧内存登记因滞后清理侥幸不触发）。护栏按**消息 id** 作用：一条消息至多消费一个回退名额，下一条自然解禁，显式定向不受限。连带教训：测试假消息无 id 使护栏键落 `id(obj)`，对象回收后 id 复用假红——四个测试夹具补自增 message_id。
+    - **复活语义（与设计稿偏差，已入档）**：工作流实例是进程内状态，重启后 PENDING 行**不假复活**——由 ApprovalManager TTL 惰性到期诚实闭单；登记落库的价值是治理面可见与带外裁决，不是假装工作流还活着。
+    - **红→绿**：5 failed（登记未落库/关键词不落库/带外不唤醒/超时不闭单/dict 残留）→ 22 passed（四套审批档全绿，B1/B2 语义回归同跑）。宽域 neurflow 741 passed＋预存 3 failed/2 error（§6-483②）、security 1228 passed＋1 预存（stash 自证）。
+    - **口径（numstat 实抄）**：生产池 +210/−93（builtin +183/−93、approval_manager +27）；测试/基建池 +182/−5（新档 169、夹具适配 +11/−5、清单 2）；合计 +392/−98。子集 779→**780**。
+    - **仍开**：paho（§6-481①）、neurflow 预存集（§6-483②）、**新登**：security `test_anonymizeReachesTheEngine` 1 红预存（stash 自证与本批无关）。
+    - **下一枚空号现查**：尾号现算 485 ⇒ 本格取 **486**，后继从 §6-487 起。
+
+487. **批 H 落格：指挥资格单一判定落点＋判定台账（H1/H2 主体；H3 前置调查入档）** ✅🟢 —— 承 §6-478 批次面（批 H，T6 已裁本轮动），同上点单。
+    - **实施**：新模块 `security/command_authority.py`——resolveCommandAuthority 组合点：适用的门全判、任一拒绝即整体拒绝（渠道拒绝**短路**治理门）、缺事实的门如实记 n-a（不越权代答）、两门全缺＝not_supported（诚实点名不假装放行）；SANDBOX 等 verdict 语义经 raw 原样透传，tool 路径既有分支不变。H2 台账：CommandAuthorityLedger（security 域自有 SQLite，RLock+WAL），每次判定落一行，台账故障 fail-soft 且出声。消费点接线：channel_router 准入与 tool_executor 治理预检全部改指组合点；读面 GET /api/v1/governance/authority-log（admin，按发送者聚合；台账故障如实报 available=False）。
+    - **红→绿**：红灯＝collection error → 10 passed（过程三小错：公开访问器漏导出/阶段命名与设计四态没对齐/良性命令在真治理下判放行——均测试侧修正，生产零改）。宽域 security 1238 passed＋1 预存（stash 自证）、channels 743 passed＋1 预存、tool 三档 26 passed＋3 预存（**新登**：`test_tool_bugs_v2` ×2＋`test_tool_bugs_v3` ×1，stash 自证与本批无关——统一失败文案与 skill 注册域）、api 契约/auth surface 守卫全绿（governance 新端点已重生成）。
+    - **H3 前置调查（结论入档，拆格待做）**：渠道配置存 channel_configs.json（channel_config.py:53-74，callerPath＋凭据 seal）；console 用户身份走 api/deps（get_current_userWithQueryToken，auth/enhanced_user_model 有用户模型）。身份映射可行落点＝渠道实例配置加"发送者→user"绑定（admin 管理，未映射按既有缺省兜底记 anonymous）——拆格时按此定稿。
+    - **口径（numstat 实抄）**：生产池 +263/−15（command_authority +220、governance +21、router +10/−5、tool_executor +10/−8、API_REFERENCE +2/−2）；测试/基建池 +160/−0（新档 158、清单 2）；合计 +423/−15。子集 780→**781**。
+    - **就地划闭**：§6-478 计划面**八批全部落码**（E/A/F/G/B1/B2/C+D/B3/H），计划格就此收口；H3 与 D 读面前端接线为登记在册的尾巴格。
+    - **仍开**：① paho 预存（§6-481①）；② neurflow 预存集（§6-483②）；③ security anonymize 预存（§6-486）；④ tool 三档预存（本格新登）；⑤ H3 身份贯通拆格；⑥ D 旁路读数前端接线。全仓仍开沿 §6-477 尾。
+    - **下一枚空号现查**：尾号现算 486 ⇒ 本格取 **487**，后继从 §6-488 起。推送态：本格落笔时 `origin/main..HEAD` 现算 **4 笔**未推（a78d17cd/ad7f61ee/d6ad7bff/494dab17，本台账笔入库后 5），推送需单独点单，引用前一律现算。
