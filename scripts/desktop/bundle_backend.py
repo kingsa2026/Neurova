@@ -112,7 +112,9 @@ def robocopy(src: Path, dst: Path, extra: list[str] | None = None) -> int:
     ]
     if extra:
         cmd += extra
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    # robocopy 的静默形（/NFL /NDL /NJH /NJS /NP）输出本就只剩空行，这里也只取 rc：
+    # 不声明文本面，就不存在「按哪个码页解」这个问题。
+    r = subprocess.run(cmd, capture_output=True)
     # robocopy 返回码 < 8 都算成功（1=拷了文件，3=拷了文件+ Extra 等）
     return r.returncode
 
