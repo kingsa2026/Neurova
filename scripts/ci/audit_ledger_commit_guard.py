@@ -2,14 +2,20 @@
 # -*- coding: utf-8 -*-
 """审计台账 commit 号可达性扫描器（判据唯一出处，守卫与人共用）。
 
-为什么要有这个扫描器：`audit-reports/*.md` 以 `` `xxxxxxxx` `` 形式引用 commit 号，
-而并发会话的 rebase / merge 会**重写历史**——号对应的对象仍留在 `.git` 里，于是
-`git cat-file -e` 照样成功，但那个号已经不在任何分支历史上了。只查"对象存在"
+为什么要有这个扫描器：`audit-reports/*.md` 与 `docs/**/*.md` 都以 `` `xxxxxxxx` `` 形式
+引用 commit 号，而并发会话的 rebase / merge 会**重写历史**——号对应的对象仍留在 `.git` 里，
+于是 `git cat-file -e` 照样成功，但那个号已经不在任何分支历史上了。只查"对象存在"
 证明不了"号还在"，台账会长期指向不在历史里的提交，而读的人无从发现。
 
 可达性判据：`git merge-base --is-ancestor <h> HEAD`。
 替代号判据：同标题 **且** `git show --numstat` 逐行一致，且唯一——只凭标题相同就替换
 不安全（遇到"同题重做"会张冠李戴），不满足则宁可留空由人工判定。
+
+扫描面（`SCAN_DIRS`）在**调用期**从仓根派生：绝对路径若在 import 时冻进常量，
+换根不生效，守卫与真仓脱钩的那一刻只有生产装配点知道（§6-477）。docs 必须**递归**——
+实测引用落在 `docs/03-user-guide/i18n/` 这类嵌套档里，只扫一层等于没扩面。
+`isCommit` 预筛是扩面不假红的前提：docs 面实测 274 枚十六进制串根本不是 commit（树号、
+对象 ID、色值残片），撤掉预筛它们会整批以「不可达」名义报红。
 
 性能口径：HEAD 索引一次 `git log` 取回（标题随行），diffstat 只对同标题候选计算。
 早先写法是逐个 HEAD 提交起一次 `git log`/`git show`，在万级仓库上直接超时。
@@ -27,9 +33,11 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import List
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-REPORT_DIR = PROJECT_ROOT / "audit-reports"
+#: 扫描面唯一出处（相对仓根的目录，均递归）。
+SCAN_DIRS = ("audit-reports", "docs")
 HASH_RE = re.compile(r"`([0-9a-f]{8,40})`")
 HEX_ONLY = re.compile(r"^[0-9a-f]{8,40}$")
 
@@ -95,6 +103,21 @@ def findReplacement(token: str, index: list) -> str:
     return matched[0] if len(matched) == 1 else ""
 
 
+def scanDirs() -> List[Path]:
+    """扫描面目录**调用期**从仓根派生；目录清单的唯一出处是 `SCAN_DIRS`。"""
+    return [PROJECT_ROOT / name for name in SCAN_DIRS]
+
+
+def markdownFiles(base: Path) -> List[Path]:
+    """该目录树下的 markdown，**递归**——docs 的 commit 引用实测藏在嵌套目录里。"""
+    return sorted(p for p in base.rglob("*.md") if p.is_file())
+
+
+def displayName(path: Path) -> str:
+    """相对仓根的 posix 路径：两棵树里的同名档必须能看出是谁。"""
+    return path.relative_to(PROJECT_ROOT).as_posix()
+
+
 def scanReport(path: Path, index: list):
     """返回 (该报告引用的 commit 号列表, [(失效号, 替代号)])。"""
     text = io.open(path, encoding="utf-8", errors="replace").read()
@@ -119,26 +142,29 @@ def main(argv=None) -> int:
 
     index = headIndex()
     totalRefs, staleRows = 0, []
-    for report in sorted(REPORT_DIR.glob("*.md")):
-        tokens, stale = scanReport(report, index)
-        totalRefs += len(tokens)
-        for bad, repl in stale:
-            staleRows.append((report.name, bad, repl))
-        if not args.porcelain:
-            print("%-46s 引用 %3d 个号，失效 %d" % (report.name, len(tokens), len(stale)))
+    for base in scanDirs():
+        for report in markdownFiles(base):
+            tokens, stale = scanReport(report, index)
+            totalRefs += len(tokens)
             for bad, repl in stale:
-                print("    失效 %s%s" % (bad, "  → 可回写为 " + repl if repl
-                                         else "  （无可安全回写的替代号）"))
+                staleRows.append((displayName(report), bad, repl))
+            if not args.porcelain:
+                print("%-46s 引用 %3d 个号，失效 %d"
+                      % (displayName(report), len(tokens), len(stale)))
+                for bad, repl in stale:
+                    print("    失效 %s%s" % (bad, "  → 可回写为 " + repl if repl
+                                             else "  （无可安全回写的替代号）"))
 
     if args.porcelain:
         for row in staleRows:
             print("|".join(row))
     if staleRows:
-        print("失效引用 %d 条 / 共 %d 条引用（目录 %s）"
-              % (len(staleRows), totalRefs, REPORT_DIR.relative_to(PROJECT_ROOT)),
+        print("失效引用 %d 条 / 共 %d 条引用（扫描面 %s）"
+              % (len(staleRows), totalRefs, " + ".join(SCAN_DIRS)),
               file=sys.stderr)
         return 1
-    print("台账 commit 号全部可达（共 %d 条引用）" % totalRefs)
+    print("commit 号全部可达（共 %d 条引用，扫描面 %s）"
+          % (totalRefs, " + ".join(SCAN_DIRS)))
     return 0
 
 

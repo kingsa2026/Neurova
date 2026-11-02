@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 """审计台账 commit 号必须可达（并发会话会重写历史，号会静默失效）。
 
-判据本体在 `scripts/ci/audit_ledger_commit_guard.py`，本文件只做两件事：
+判据本体在 `scripts/ci/audit_ledger_commit_guard.py`，本文件只做三件事：
 ① 用一条**真造的悬空 commit** 证明扫描器咬得住（防"扫描器写错→永远绿"）；
-② 把常驻判定接进跑测：`audit-reports/` 里任何 `` `xxxxxxxx` `` 引用一旦不在
-   HEAD 历史里就红。
+② 把常驻判定接进跑测：扫描面（`audit-reports/` + `docs/`）里任何 `` `xxxxxxxx` ``
+   引用一旦不在 HEAD 历史里就红；
+③ 钉住**扫描面本身**——面若被缩小（只扫台账、或 docs 只扫平铺一层、或路径在 import
+   时冻成写死的绝对目录），上面两件事会安静地变成"对已经不存在的档全绿"。
 
 为什么需要这条守卫（实测成因）：2026-10-07 一轮并发会话 rebase/merge 重写历史后，
 台账里 4 个号已不可达，而 `git cat-file -e` 对它们**仍然成功**——对象还在 `.git` 里，
@@ -12,7 +14,9 @@
 可达性判据只能是 `git merge-base --is-ancestor <h> HEAD`。
 """
 
+import contextlib
 import importlib
+import io
 import subprocess
 import sys
 from pathlib import Path
@@ -26,6 +30,17 @@ if str(PROJECT_ROOT) not in sys.path:
 # scripts/ci 无 __init__.py，按仓内既有做法走 namespace 包导入
 # （tests/performance/test_perf_gate_under_node.sh / test_perf_gate_contract.py 同款）
 ledger = importlib.import_module("scripts.ci.audit_ledger_commit_guard")
+
+
+def _runMain(argv):
+    """调生产 `main()` 并取回它的 stdout——扫描面「到底扫了谁」只能从出口读。
+
+    不用 capsys：本文件的会话级夹具与模块级缓存都要在同一次真实扫描上复用同一份出口。
+    """
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = ledger.main(argv)
+    return rc, buf.getvalue()
 
 #: 本档两枚 git 落点（rev-parse / commit-tree）的预算唯一出处，毫秒级。取**低于全局 30s**
 #: 的这一形，且此前两处根本没有 `timeout=`——无界等待配 thread 法全局墙时，先到点的那一层
@@ -85,9 +100,13 @@ def test_replacementIsOfferedOnlyWhenSafe(tmp_path, danglingCommit):
     )
 
 
-#: 本轮扫描的父墙（唯一出处）。**实测单格 48.64s**：`ledger.main([])` 逐号起一次
-#: `git merge-base`，台账里的 commit 引用有多少个就起多少次——这是一次**合法超墙**，
+#: 本轮扫描的父墙（唯一出处）。**实测 79.38s**（§6-477 扩面后现取；扩面前单树 48.64s，
+#: 新增的 20.2s 全部来自 docs 面的 600 档 / 391 次 `cat-file`）：`ledger.main([])` 逐号起一次
+#: `git merge-base`，扫描面里的 commit 引用有多少个就起多少次——这是一次**合法超墙**，
 #: 而全局 30s 先到时 Windows 侧 thread 法直接终止进程，报的是"整场跑测没了"。
+#:
+#: 这 79.38s 落在 `realScan` 的 module setup 上、由「面覆盖」与「无悬空」两格共用：
+#: 逐格各扫一遍就是 160s，等于把同一笔成本付两遍——墙够用不是因为宽，是因为只付一次。
 #:
 #: 常驻闸 `test_nestedPytestBudgetWallsAreOrdered.py` 看不见这一处：它的边界写明「只在
 #: 同文件闭包内认落点」，而真正阻塞的那次 subprocess 在 `scripts/ci/audit_ledger_commit_guard.py`
@@ -97,11 +116,85 @@ def test_replacementIsOfferedOnlyWhenSafe(tmp_path, danglingCommit):
 LEDGER_SCAN_WALL_S = 180
 
 
+@pytest.fixture(scope="module")
+def realScan():
+    """真仓根**只扫一次**，供「扫描面覆盖」与「无悬空号」两格共用。
+
+    全仓扫描是几十秒级（逐号一次 git），逐格复算等于把同一笔成本付两遍；
+    共用一份出口读数后，两格判的是同一场的同一事实。
+    """
+    return _runMain([])
+
+
 @pytest.mark.timeout(LEDGER_SCAN_WALL_S)
-def test_auditLedger_hasNoUnreachableReference():
-    """常驻判定：`audit-reports/` 全部 commit 引用必须可达 HEAD。"""
-    rc = ledger.main([])
+def test_scanSurfaceCoversLedgerAndDocsTrees(realScan):
+    """扫描面必须含 `docs/` 树下的档，且是**递归**进去的。
+
+    为什么 docs 也要进面：文档同样以 `` `xxxxxxxx` `` 引 commit 号，而并发会话重写历史
+    不挑目录——台账侧 §6-468 已量过 0 悬空，docs 侧此前**从未被核验过**（本批实测 268 对
+    引用、0 不可达 ⇒ 扩面第一天 0 红，所以这道判据只会因"面被缩小"而红，不会因存量而红）。
+    """
+    rc, out = realScan
+    scanned = [line.strip().split(" ")[0] for line in out.splitlines() if "引用" in line]
+    docsDeep = [p for p in scanned if p.startswith("docs/") and "/" in p[len("docs/"):]]
+    assert any(p.startswith("audit-reports/") for p in scanned), (
+        "扫描面里连台账目录都没有：%s" % (scanned[:3],))
+    assert docsDeep, (
+        "扫描面没进 docs 树的深层目录——`docs/*.md` 只扫平铺一层就等于没扩面"
+        "（实测引用落在 docs/03-user-guide/i18n/ 这类嵌套档里）；当前扫到 %d 档：%s"
+        % (len(scanned), scanned[:3]))
+
+
+@pytest.mark.timeout(LEDGER_SCAN_WALL_S)
+def test_auditLedger_hasNoUnreachableReference(realScan):
+    """常驻判定：扫描面内全部 commit 引用必须可达 HEAD。"""
+    rc, _ = realScan
     assert rc == 0, (
         "台账存在不可达的 commit 引用（并发会话重写历史所致）——"
         "按扫描器给出的替代号回写，替代号为空的须人工判定，不得留悬空号"
     )
+
+
+@pytest.mark.timeout(LEDGER_SCAN_WALL_S)
+def test_scanDirsComeFromRepoRootAtCallTime(tmp_path, monkeypatch, danglingCommit):
+    """扫描面得在**调用期**从仓根派生：挂一个假仓根，两棵目录树的悬空号都要被点到。
+
+    这一格同时钉两件曾被导入期常量悄悄做错的事：①目录集合写死成单个 `audit-reports`；
+    ②绝对路径在 import 时就冻结（改根不生效 ⇒ 守卫与真仓脱钩，只在生产装配点坏时才发现）。
+    """
+    (tmp_path / "audit-reports").mkdir()
+    deep = tmp_path / "docs" / "03-user-guide" / "i18n"
+    deep.mkdir(parents=True)
+    reachable = _git("rev-parse", "HEAD").strip()[:8]
+    (tmp_path / "audit-reports" / "ledgerProbe.md").write_text(
+        "失效 `%s`\n" % danglingCommit, encoding="utf-8")
+    (deep / "guideProbe.md").write_text(
+        "可达 `%s`、失效 `%s`\n" % (reachable, danglingCommit), encoding="utf-8")
+    monkeypatch.setattr(ledger, "PROJECT_ROOT", tmp_path)
+
+    rc, out = _runMain([])
+
+    assert "audit-reports/ledgerProbe.md" in out, (
+        "假仓根下的台账树没进扫描面（挂根不生效＝路径在导入期就冻住了）：%s" % out)
+    assert "docs/03-user-guide/i18n/guideProbe.md" in out, (
+        "假仓根下 docs 的深层档没进扫描面——扩面若只到 `docs/*.md` 一层，"
+        "真仓里绝大多数引用仍然无人核验：%s" % out)
+    assert rc == 1, (
+        "两棵树里的悬空号都没让判定变红，扫描器在新面上恒绿：%s" % out)
+
+
+def test_nonCommitHexTokensAreNotTreatedAsReferences(tmp_path):
+    """反引号里的十六进制串未必是 commit——`isCommit` 预筛是扩面不假红的前提。
+
+    实测 docs 面有 274 枚这样的串（树号、对象 ID、色值残片）。撤掉预筛的那一刻，
+    它们整批以「不可达」名义报红，而红的是判据自己，不是历史。
+    """
+    treeToken = _git("rev-parse", "HEAD^{tree}").strip()[:8]
+    report = tmp_path / "notACommit.md"
+    report.write_text("`%s`、`ffffffff`、`zzzzzzzz`\n" % treeToken, encoding="utf-8")
+    assert not ledger.isCommit(treeToken), "探针选中的竟是 commit，本格的反向前提不成立"
+
+    tokens, stale = ledger.scanReport(report, ledger.headIndex())
+
+    assert tokens == [], "非 commit 形态的十六进制串被当成了引用：%s" % (tokens,)
+    assert stale == []
