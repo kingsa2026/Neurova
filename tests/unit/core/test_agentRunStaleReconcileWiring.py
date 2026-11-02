@@ -138,3 +138,49 @@ class TestDriverLifecycle:
             await ars.stopStaleSweep()  # 可重复调用，关闭序列不因二次停止炸
 
         asyncio.run(scenario())
+
+
+class TestSweepLoopBody:
+    """循环体自身的两格（2026-11-03 批 E 补）：start/stop/间隔公式都钉过，
+    「循环体按间隔反复跑」与「单轮异常不带走循环」没有直接断言。"""
+
+    def test_loopTicksRepeatedlyUntilCancelled(self, monkeypatch):
+        """周期性：循环体必须按间隔反复调 sweepStaleOnce——只测 start/stop 钉不住
+        「循环体被改成只跑一次」这类回归。"""
+        calls = []
+
+        async def scenario():
+            monkeypatch.setattr(ars, "sweepStaleOnce", lambda s: calls.append(1))
+            task = asyncio.create_task(ars._staleSweepLoop(None, 0.01))
+            await asyncio.sleep(0.06)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert len(calls) >= 2, (
+                f"循环体没有按间隔反复扫描（0.06s 窗口/0.01s 间隔应至少 2 轮，实测 {len(calls)}）"
+            )
+
+        asyncio.run(scenario())
+
+    def test_sweepExceptionDoesNotStopTheLoop(self, monkeypatch):
+        """fail-open：单轮收敛异常只记不退出——扫描炸一轮就把常驻循环带走，
+        「进程活着而工作卡死」的 run 又会永驻 running（本文件立项理由的同形复发）。"""
+        state = {"calls": 0, "raised": False}
+
+        def flakySweep(store):
+            state["calls"] += 1
+            if state["calls"] == 1:
+                state["raised"] = True
+                raise RuntimeError("第一轮炸")
+
+        async def scenario():
+            monkeypatch.setattr(ars, "sweepStaleOnce", flakySweep)
+            task = asyncio.create_task(ars._staleSweepLoop(None, 0.01))
+            await asyncio.sleep(0.06)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert state["raised"], "前置未生效：第一轮没有真的抛"
+            assert state["calls"] >= 2, "扫描异常把常驻循环带走了（应记日志下一轮再试）"
+
+        asyncio.run(scenario())
