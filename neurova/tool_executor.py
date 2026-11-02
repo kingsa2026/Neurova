@@ -1563,14 +1563,16 @@ class ToolExecutor:
             return _decl_verdict
 
         try:
-            from neurova.security.governance import GovernanceDecision, get_governance
+            from neurova.security.command_authority import resolveCommandAuthority
+            from neurova.security.governance import GovernanceDecision
 
-            verdict = get_governance().evaluate_tool_call(
-                tool_name,
-                params,
-                user_id=self._agent_identity()[0],
-                scan_all=is_mcp,
-            )
+            # 批 H1：治理预检改走指挥资格组合点（判定单源＋台账行）。渠道门在
+            # 本上下文无事实，记 n-a——它的裁决在渠道路由准入已做出；SANDBOX
+            # 等 verdict 语义经 decision.raw 原样透传，下方分支不变。
+            decision = resolveCommandAuthority(
+                userId=self._agent_identity()[0], toolName=tool_name, params=params,
+                scanAll=is_mcp)
+            verdict = decision.raw
         except Exception as e:
             logger.warning("治理预检不可用 %s（fail-%s）: %s",
                            tool_name, "open/builtin" if is_builtin else "closed", e)
