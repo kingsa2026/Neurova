@@ -42,6 +42,8 @@ tests/unit/context/test_context_pool_retention_contract.py
 tests/unit/context/test_metacog_production_wiring.py
 # D-6 提示面契约单源（字面量只在常量定义处）
 tests/unit/context/test_promptContractSingleSource.py
+# 批 A1 提示面常驻预算棘轮（只降不升，测量单源 budget_report）
+tests/unit/context/test_promptSurfaceBudgetRatchet.py
 tests/unit/context/test_metacog_lessons_injection.py
 tests/unit/cognitive/test_regulation_gate.py
 tests/unit/memory/test_cse_retrieve_touch.py
