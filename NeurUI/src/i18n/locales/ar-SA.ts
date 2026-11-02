@@ -1837,6 +1837,7 @@ export default {
     stats: 'الإحصائيات',
     audit: 'سجلات التدقيق',
     waitingHuman: 'بانتظار تدخل بشري',
+    ingressBypass: 'تجاوز الدخول',
     longestWaitMinutes: 'أطول انتظار (دقيقة)',
     benchmark: 'المعايير',
     runtime: 'بيئة التشغيل',

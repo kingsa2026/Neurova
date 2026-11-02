@@ -1837,6 +1837,7 @@ export default {
     stats: 'आंकड़े',
     audit: 'ऑडिट लॉग',
     waitingHuman: 'मानव प्रतीक्षा',
+    ingressBypass: 'इनग्रेस बायपास',
     longestWaitMinutes: 'सबसे लंबी प्रतीक्षा (मिनट)',
     benchmark: 'बेंचमार्क',
     runtime: 'रनटाइम',

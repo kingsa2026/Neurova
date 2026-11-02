@@ -1837,6 +1837,7 @@ export default {
     stats: 'Estadísticas',
     audit: 'Registros de auditoría',
     waitingHuman: 'Esperando a una persona',
+    ingressBypass: 'Bypass de entrada',
     longestWaitMinutes: 'Espera máxima (min)',
     benchmark: 'Pruebas de referencia',
     runtime: 'Entorno de ejecución',
