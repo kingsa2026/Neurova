@@ -192,5 +192,66 @@ class TestWriteFailureIsVisible:
         assert (stats["written"], stats["failed"]) == (0, 1)
 
 
+class TestThroatAssembly:
+    """A1 必须真的经过咽喉：真 Agent 门面下 `ContextOrchestrator` 的台账装配（§6-474）。
+
+    本文件其余用例都走 `_productionPool()`——手工建一个 `EvictionLedgerDB` 注进池。
+    形状与 `ContextOrchestrator.__init__` 相同，**但没有经过那段装配代码**，于是装配层
+    按门面上并不存在的属性取身份（`agent_ref.agent_id`／`agent_ref.user_id`；真门上身份在
+    `config.agent_id`／`config.owner_user_id`——同一个文件里 1021／1140／1289 行都是这么取的）
+    这件事永远看不见：台账恒不装配、池的身份恒为 `"default"`，判据却全绿。
+    替身对象通常自己就带 `agent_id`，所以 mock 面的用例更不可能发现（教义第 3 条禁的
+    正是"用替身冒充业务对象"这一形）。
+    """
+
+    @pytest.fixture()
+    def dataRoot(self, tmp_path, monkeypatch):
+        """生产数据根的唯一注入口（`NEUROVA_DATA_DIR`）：台账落临时根，不碰仓库 data/。"""
+        root = tmp_path / "data"
+        root.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv("NEUROVA_DATA_DIR", str(root))
+        return root
+
+    def _agent(self, dataRoot, agent_id):
+        from neurova.agent_core import Agent, AgentConfig
+
+        workspace = dataRoot / agent_id
+        workspace.mkdir(parents=True, exist_ok=True)
+        return Agent(AgentConfig(
+            name=agent_id, agent_id=agent_id, llm_model="gpt-4o",
+            workspace_path=str(workspace), owner_user_id="u1",
+        ))
+
+    def test_ledgerAssemblesThroughTheRealFace(self, dataRoot):
+        orch = self._agent(dataRoot, "ctxThroat474").context_orchestrator
+        record = orch._context_health["ledger"]
+        assert record["enabled"] is True, (
+            "真 Agent 门面下台账没装配成，跨重启召回在生产里落空：%s" % record)
+        assert orch.context_pool._ledger_db is not None, (
+            "`_ledger_db` 为 None 却把池建起来了——能力静默关闭，读数面上看不见：%s" % record)
+
+    def test_poolIdentityComesFromTheConfigNotTheMissingFaceAttribute(self, dataRoot):
+        pool = self._agent(dataRoot, "ctxThroat475").context_orchestrator.context_pool
+        assert pool.agent_id == "ctxThroat475", (
+            "池的身份取的是门面上不存在的属性 ⇒ 每条归档元数据都被标成 default：%r"
+            % pool.agent_id)
+        assert pool.user_id == "u1", (
+            "同上：user_id 也取错属性，恒兜成 default ⇒ 归属与隔离键都失去真值：%r"
+            % pool.user_id)
+
+    def test_archivesWrittenThroughTheThroatSurviveANewOrchestrator(self, dataRoot):
+        """写 → 丢实例 → 新实例（同库）取回原文：全程不手工注入台账。"""
+        orch = self._agent(dataRoot, "ctxThroat476").context_orchestrator
+        orch._archive_conversation_to_pool(
+            [{"role": "user", "content": s} for s in _SECRETS])
+        stats = orch.context_pool.get_retention_stats()["ledger_persistence"]
+        assert stats["enabled"] is True and stats["written"] >= len(_SECRETS), stats
+
+        fresh = self._agent(dataRoot, "ctxThroat476").context_orchestrator
+        recalled = [c.content for c in fresh.context_pool.recall_evicted(limit=20)]
+        missing = [s for s in _SECRETS if s not in recalled]
+        assert not missing, "跨实例取不回归档（缺失 %d 条）：%s" % (len(missing), missing)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
