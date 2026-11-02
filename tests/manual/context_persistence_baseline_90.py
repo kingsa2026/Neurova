@@ -21,6 +21,7 @@ import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from tests.manual._forensicsVerdicts import a1Verdict, tailCount, visibilityVerdict  # noqa: E402
 from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
