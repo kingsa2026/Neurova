@@ -4137,3 +4137,10 @@ tests/unit/desktop/test_bundleBackendFingerprint.py
 #   判据四格：同 source 改动须重写行／按新来源过滤须命中且旧来源不再命中（端到端跨重启）、
 #   反向格钉住「未变条目不许重写」（增量不许退化成全量）。
 tests/unit/knowledge/test_ftsFingerprintCoversIndexedColumns.py
+
+# 打包机 PATH 回读必须两侧同钉 UTF-8（§6-465）：PowerShell 两个输出通道编码不一致（裸打字符串
+#   走机器码页、点源后的对象流走 UTF-8），只钉父端在中文 Windows 上不算修好——旧形当场
+#   `AttributeError: 'NoneType' object has no attribute 'strip'`，`win_installer_kit.py run` 跑不到底。
+#   判据三层：跨平台代码形态格＋Windows 真跑行为格（非 nt 明确 skip 自陈，不拿恒真凑数）
+#   ＋反空转格（四种合成形态读数方向各异）。
+tests/unit/desktop/test_winInstallerKitPathProbe.py
