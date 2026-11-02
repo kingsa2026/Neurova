@@ -39,3 +39,36 @@ def test_skillCatalogHintIsDeclaredOnceAndUsedByBothBranches():
     assert source.count("SKILL_CATALOG_HINT") >= 3, (
         "常量至少应被两条分支各引用一次（定义 1 处 + 使用 2 处）"
     )
+
+
+def test_sectionTitlesLiveOnlyInRulesSections():
+    """批 A2：四段标题全部单源——只许在 rules_sections.py 定义，任何拼装路径
+    出现第二份字面量即双源（改一处忘另一处的分叉温床，同上两个判据的根）。"""
+    sources = _sources()
+    scanned = len(sources)
+    assert scanned >= 25, (
+        f"扫描面现读 {scanned}（`neurova/context/*.py` 实测 31）——根解窄了本判据就成了空转"
+    )
+    for title in ("## 工具使用规则", "## 环境", "## 记忆写入规则", "## 桌面操作纪律"):
+        holders = [name for name, text in sources.items() if title in text]
+        assert holders == ["rules_sections.py"], (
+            f"段标题「{title}」出现处 {holders}，应只在 rules_sections.py 单源定义"
+        )
+
+
+def test_rulesSectionToolMentionsMustBeRegistered():
+    """批 A2：恒定段提及的工具名必须真实注册——防幽灵路由句（拼错的工具名
+    写进规则段，模型会照着调然后失败）。工具名清单单源在
+    `builtin_tools.get_registered_tool_names()`，改文案先对表。"""
+    import re
+
+    from neurova.builtin_tools import get_registered_tool_names
+    from neurova.context.rules_sections import build_all_sections
+
+    text = build_all_sections(workspace_path="")
+    mentioned = sorted(set(re.findall(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)+", text)))
+    registered = set(get_registered_tool_names())
+    unknown = [t for t in mentioned if t not in registered]
+    assert not unknown, (
+        f"恒定规则段提及了未注册的工具名: {unknown}——拼写错误或工具已更名"
+    )

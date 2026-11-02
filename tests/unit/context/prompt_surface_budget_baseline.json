@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "goal": {
+    "total_always_on_chars": 14000
+  },
+  "history": [
+    {
+      "phase": "批A-initial",
+      "date": "2026-11-03",
+      "description": "批 A 初始基线：恒定规则四段 + 内置工具清单（72 工具）实测；测量单源 budget_report.buildAlwaysOnBudgetReport",
+      "rules_sections": 1439,
+      "tools_description": 13252,
+      "total_always_on_chars": 14691
+    }
+  ]
+}
