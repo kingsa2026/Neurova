@@ -1359,6 +1359,7 @@ tests/unit/neurflow/test_approval_reply_mechanism.py
 tests/unit/neurflow/test_approvalReplyIsolation.py
 tests/unit/neurflow/test_approvalSerialQueueAndCleanCancel.py
 tests/unit/neurflow/test_approvalWaitSemantics.py
+tests/unit/neurflow/test_approvalManagedRegistration.py
 # §6-409（批 O-3）：对象内键值状态袋收口成**一处**实装，三族共用；`BasePlugin` 那份错位接缝退役。
 # 收口前三份并存：`BaseModule`（在役，IdleTimeTracker 写 6 键＋一格读回）、`SleepConsolidation`
 # （同功能第二拷贝，读的是自己那个 `_state` dict）、`BasePlugin.get_state/set_state`（坏的：

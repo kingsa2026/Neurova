@@ -548,6 +548,33 @@ class ApprovalManager:
             return sorted(requests, key=lambda r: r.created_at, reverse=True)
 
     def get_request(self, request_id: str) -> Optional[ApprovalRequest]:
+        """按 id 读请求（批 B3 读面：等待方被唤醒后取终态；调用方只读不改）。"""
+        with self._lock:
+            return self._requests.get(request_id)
+
+    def expire_request(self, request_id: str, reason: str = "") -> bool:
+        """显式闭单（批 B3）：工作流审批节点终结（超时/取消）时调用——请求
+        不再可裁决，防"批了也没人听"的假面。已裁决的请求幂等返回 False。"""
+        with self._lock:
+            request = self._requests.get(request_id)
+            if not request or request.status != ApprovalStatus.PENDING:
+                return False
+            request.status = ApprovalStatus.EXPIRED
+            request.approval_note = str(reason or "")
+            request.updated_at = datetime.datetime.now(datetime.timezone.utc)
+            self._upsert_request_sqlite(request)
+            self._save_requests()
+        # 终态同样走回调面（relay/站内镜像），与人工裁决同一条出路
+        self._send_approval_result(request)
+        return True
+
+    def _resetForTests(self) -> None:
+        """测试隔离钩子：清内存登记与裁决历史（SQLite 文件随隔离数据根）。"""
+        with self._lock:
+            self._requests.clear()
+            self._approved_history.clear()
+
+    def get_request(self, request_id: str) -> Optional[ApprovalRequest]:
         """按 ID 获取审批请求（任意状态）"""
         with self._lock:
             return self._requests.get(request_id)
