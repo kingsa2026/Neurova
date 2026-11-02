@@ -11380,3 +11380,11 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **就地划闭**：§6-478 计划面**八批全部落码**（E/A/F/G/B1/B2/C+D/B3/H），计划格就此收口；H3 与 D 读面前端接线为登记在册的尾巴格。
     - **仍开**：① paho 预存（§6-481①）；② neurflow 预存集（§6-483②）；③ security anonymize 预存（§6-486）；④ tool 三档预存（本格新登）；⑤ H3 身份贯通拆格；⑥ D 旁路读数前端接线。全仓仍开沿 §6-477 尾。
     - **下一枚空号现查**：尾号现算 486 ⇒ 本格取 **487**，后继从 §6-488 起。推送态：本格落笔时 `origin/main..HEAD` 现算 **4 笔**未推（a78d17cd/ad7f61ee/d6ad7bff/494dab17，本台账笔入库后 5），推送需单独点单，引用前一律现算。
+
+488. **尾巴两格收口：H3 身份贯通（复用既有单源）＋D 旁路读数前端接线；顺带补 B3 spec 偏差注记与新登 outbox 断点** ✅🟢 —— 承 §6-487 的两格在册尾巴，用户点单「全部做好」。
+    - **H3（判定台账的归属列）**：实施前现读发现**身份映射设施已存在**——`channels/identity_binding`（绑定码/撤销/读面齐全，UserIdentityManager.resolveUserId 就是"渠道发送者→平台账号"反查）⇒ 按教义第 6 条**复用既有单源，不建第二张映射表**（§6-487 调查结论的"新增 admin 映射登记"作废——管理面就是绑定码流＋revoke，已存在）。command_authority 台账加 `bound_user` 列（自有表就地 ALTER 自迁移）：有渠道事实才反查；未绑定按缺省兜底纪律记 `anonymous`；反查故障记空并出声、不劫持判定主链；工具路径无渠道事实不触发反查。
+    - **D 前端接线（含口径修正）**：§6-485 原记"waitingHuman 并集加旁路计数"——实施时改判：旁路是**机器事件**，并进"等待人工"读数是冒充（同一教义：报数不许把没等的算成等的）⇒ 改为 AuditPage **独立统计卡**（`system.ingressBypass`，11 语言键齐补，locale-consistency 守卫咬合）；取数经 `GET /channel-adapters/ingress/bypass-stats` 第三腿进 Promise.allSettled（失败留痕不吞 0，与既有两腿同纪律）。
+    - **红→绿**：H3 红灯 4 failed（归属列缺失/anonymous 缺/故障劫持/工具路径误触发）→ 14 passed；前端两道门：`npx vue-tsc --noEmit` 静默过、`npm run test` **283 文件/2299 tests 全绿**（含 locale-consistency）。
+    - **新登（不当自决）**：`collaboration/outbox_handler.py` **零生产接线**断点独立成格——register_handler 全仓零调用方、唯一驱动是 phase3_api 端点、发布方（cost_ledger_integration 生命周期钩子）的事件无 handler 可路由 → 每轮失败三次进死信；它是否该并入渠道出口可靠性体系（批 F 的台账族）还是退役，属设计取向，待拍板（§6-478 撤回 D-8 时遗留的悬账，此处落格）。
+    - **口径（numstat 实抄）**：见本格两笔提交统计；前端 12 文件（AuditPage + governance.ts + 11 语言）。
+    - **下一枚空号现查**：尾号现算 487 ⇒ 本格取 **488**，后继从 §6-489 起。
