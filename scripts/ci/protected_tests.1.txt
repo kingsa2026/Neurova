@@ -1156,3 +1156,4 @@ tests/integration/test_memoryEnhancementCarriesAgentScope.py
 tests/unit/api/test_identityHeadersAlignSecretBeforeSigning.py
 # 联想线索通道在 numpy 缺席时照样给候选（矩阵只是加速，不是前置；生产侧修复随 MR #369 入主线，判据重落于此）
 tests/unit/cognitive_layers/memory_layer/test_cueChannelSurvivesWithoutNumpy.py
+tests/unit/context/test_baselineForensicsVerdictsDeriveFromReadings.py
