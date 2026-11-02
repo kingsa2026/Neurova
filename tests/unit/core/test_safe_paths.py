@@ -29,7 +29,7 @@ def _make_link(link: Path, target: Path) -> bool:
             try:
                 r = subprocess.run(
                     ["cmd", "/c", "mklink", "/J", str(link), str(target)],
-                    capture_output=True, text=True, timeout=10,
+                    capture_output=True, timeout=10,
                 )
                 return r.returncode == 0 and link.exists()
             except Exception:

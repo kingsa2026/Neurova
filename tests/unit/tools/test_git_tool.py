@@ -75,7 +75,8 @@ def _init_repo(tmp_path):
     def _git(*args):
         return subprocess.run(
             ["git", *args],
-            cwd=str(tmp_path), capture_output=True, text=True, timeout=GIT_WALL_S,
+            cwd=str(tmp_path), capture_output=True, text=True,
+            encoding="utf-8", timeout=GIT_WALL_S,
             env=_no_ambient_config_env(),
         )
 

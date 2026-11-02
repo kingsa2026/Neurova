@@ -13,8 +13,8 @@
 先冻结、后续按目录分批消化）。当场把 38 个文件一起改，会让"哪条红是哪一个文件带来的"
 无法归因，且部分判据在补上 encoding 后会从"假绿"翻成"真红"——那是另一轮改动面。
 
-基线口径（本轮实测，不抄旧数）：**20 个文件 / 23 处**（`BASELINE` 表与 `scanViolations()` 现读
-同数——§6-465 再收 `scripts/desktop` 一族 8 处后的现算；§6-464 那轮是 23/31，上一轮（§6-463）是 26 个文件 / 36 处，再上一轮 30/42，建档那轮 37/59，把这句话停在旧数上
+基线口径（本轮实测，不抄旧数）：**9 个文件 / 10 处**（`BASELINE` 表与 `scanViolations()` 现读
+同数——§6-466 再收 `tests/unit` 余 11 档 / 13 处后的现算；§6-465 那轮是 20/23，§6-464 那轮是 23/31，上一轮（§6-463）是 26 个文件 / 36 处，再上一轮 30/42，建档那轮 37/59，把这句话停在旧数上
 就是本文件自己反对的「基线与判据不同源」）。
 （2026-11-02 收：`tests/unit/test_pip_audit_gate.py` 的最后 1 处随 §6-462 清零——那一处正是
 「预存在册红」的真因：`--help` 子件把自己的 stdout 钉了 utf-8（`pip_audit_gate.py:399`），
@@ -34,6 +34,7 @@
   （父端 `encoding="utf-8"` ＋ 子端 `PYTHONIOENCODING`）；`git` 那一处只钉父端——给非 Python 子件钉
   `PYTHONIOENCODING` 是无意义的第二份口径。六行基线一并摘除，不留 0。）
 （2026-11-02 收：`scripts/ci` 一族 3 个文件 / 5 处随 §6-464 清零——动手前先把**每类子件到底写什么编码**量出来，因为这一族的修法不能套同一个模板：`git ls-files`／`git ls-remote`／`git branch --list` 现量 289134/138/7 字节、非 ASCII **0**（`core.quotepath` 默认把中文路径转成八进制转义）⇒ 只钉父端 `encoding="utf-8"` 就是正口径；`perf_gate.py` 的 import 探针是本仓 Python 子件，实测不带 env 时它写 **cp936**（17 字节里 4 个非 ASCII，按 utf-8 当场抛 invalid continuation byte@3）⇒ 必须两头钉，只钉父端会把今天读得通的读数改成炸；`osv-scanner --version` 是外部件且**本宿主没装**（`where` 取不到），这一处按外部工具既有先例取 `encoding="utf-8", errors="replace"`——它回答的是「能不能起来」，是点名探测而不是数据通道，取 replace 就是如实承认「量不到就不冒充精确」。三行基线一并摘除，不留 0。）
+（2026-11-02 收：`tests/unit` 余 11 个文件 / 13 处随 §6-466 清零，`tests/` 这一族到此收空。分形与 §6-465 同：本仓 Python 子件 8 处两头钉（其中 `test_adminBootstrapLanding.py` 两处已有 env 字典，把写侧口径注进原字典，不新造第二份 env 拼法）；真读文本的外部件 4 处只钉父端（git 三处、pgrep 一处）；`test_safe_paths.py` 那处 mklink 只取 rc、根本不读文本 ⇒ **撤掉 `text=True`** 而不是补 encoding。复跑时另抓到一条**与本批无关但在册的常驻红**：`test_api_inventory_freshness_guard.py` 两格红于清单漂移（`governance.ts` 的端点数 3 → 4），根因是我自己 §6-459 那批加了 `getDesktopAuditWaiting` 没重跑生成器——按判据自己给的修法 `generate_api_inventory.py --write` 重生成后 26 passed，A/B 复算（stash 本档复跑）证明那两红与编码改动无关。至此基线只剩 `scripts/` 3 处与 `tests/manual/` 7 处，不留 0 的摘行照旧。）
 
 （2026-11-02 收：`scripts/desktop` 一族 3 个文件 / 8 处随 §6-465 清零，且这一族里有**真缺陷**而不只是口径不统一：`win_installer_kit.refresh_machine_path()` 在中文 Windows 上当场 `AttributeError: 'NoneType' object has no attribute 'strip'`（第 141 行）——PowerShell 把点源 helper 后的对象流按 **UTF-8** 交出（现量 1968 字节 56 个非 ASCII，按 utf-8 解 0 个 U+FFFD、按 cp936 解在 @31 抛），父端不写 `encoding` 就按机器码页解 ⇒ 读线程抛异常、`stdout` 静默变 None，而子件 rc 仍是 0。也就是说**打包机入口文档里那条 `win_installer_kit.py run` 今天跑不到底**。同一进程还量到 PowerShell 两个输出通道编码不一致（裸打字符串走 cp936 的 `cf ee c4 bf`，点源后的对象流走 UTF-8），所以只钉父端在这台机器上都不算修好——PATH 那一处两侧同钉 UTF-8（前缀提成 `PS_UTF8_PREFIX` 单一定义）。余下按**有没有读文本面**分形：读文本的（版本串日志、cnb 触发与阶段查询）给显式 `encoding`；只取 rc 的（robocopy 静默形、makensis 缓存探测、证书存在性探测、INSTALL_PS1 直写控制台）**撤掉 `text=True`**——不声明用不到的读盘面，就不存在「按哪个码页解」这第二个问题。三行基线一并摘除，不留 0。未量到的一项写明白：`cnb` CLI 本宿主没装，两处的写侧没实测，取的是「Node CLI 交 UTF-8」的假定 + 触发处 `errors="replace"`（只正则一个 ASCII 的 `sn:`），阶段查询那处走 `json.loads` 故不取 replace，宁可脏字节抛错也不要静默改字。
 （2026-10-09 收：`tests/unit/test_repo_root_pollution_guard.py` 的 1 处已随该文件三处
@@ -111,17 +112,6 @@ BASELINE: dict[str, int] = {
     "tests/manual/context_persistence_baseline_90.py": 2,
     "tests/manual/context_persistence_restart_90.py": 1,
     "tests/manual/image_runtime_selfproof_330.py": 1,
-    "tests/unit/cognitive_layers/memory_layer/test_torch_lazy_import.py": 1,
-    "tests/unit/context/test_b5_scale_batch_registration.py": 1,
-    "tests/unit/core/test_safe_paths.py": 1,
-    "tests/unit/evolution/test_rsi_result_summary_wiring.py": 1,
-    "tests/unit/memory_ingest/test_protected_registration.py": 1,
-    "tests/unit/sandbox/test_c22_process_tree_kill.py": 1,
-    "tests/unit/test_adminBootstrapLanding.py": 2,
-    "tests/unit/test_api_inventory_freshness_guard.py": 1,
-    "tests/unit/test_start_script.py": 2,
-    "tests/unit/tools/test_git_tool.py": 1,
-    "tests/unit/tools/test_tool_layer_breakpoints_zoom_out.py": 1,
 }
 
 

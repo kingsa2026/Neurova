@@ -17,6 +17,7 @@
 3. 静态面：本包源码内 `import torch` 必须仍为 0 处（含函数内惰性写法）。
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -36,6 +37,7 @@ pytestmark = pytest.mark.timeout(TORCH_PROBE_WALL_S + 60)
 def _run(code: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, '-c', code], capture_output=True, text=True,
+        encoding='utf-8', env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         timeout=TORCH_PROBE_WALL_S
     )
 
