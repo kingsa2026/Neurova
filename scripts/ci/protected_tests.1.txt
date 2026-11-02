@@ -357,7 +357,8 @@ tests/unit/session/test_session_writer_declares_owner.py
 tests/unit/test_session_landing_guard.py
 # 审计台账 commit 号必须可达 HEAD（并发会话 rebase/merge 会让号静默失效，而 cat-file 仍返回成功）。
 # 判据本体在 scripts/ci/audit_ledger_commit_guard.py；本单先自造悬空 commit 证明扫描器咬得住，
-# 再跑常驻判定（实测塞入一个失效号即红、还原即绿）。逐文件单跑 3 passed（约 8s，含全 HEAD 索引）
+# 再跑常驻判定（实测塞入一个失效号即红、还原即绿）。扫描面＝ audit-reports + docs 递归（§6-477）。
+# 逐文件单跑 6 passed（实测 85s：两棵树全扫一次 79s，由 module fixture 让两格共用，只付一遍）
 tests/unit/test_audit_ledger_commit_guard.py
 # tests/manual/ 的活体脚本不得被 pytest 收集：它们在导入期改写进程 env，会掩盖一切依赖数据根的判据
 # （实测掩盖过会话落点守卫：同一选择集带 manual 时 0 ERROR，摘掉才露出 16 条真 ERROR）。
