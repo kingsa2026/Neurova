@@ -4154,3 +4154,9 @@ tests/unit/desktop/test_winInstallerKitPathProbe.py
 #   字节（login 现量 13817 字节 / 1470 非 ASCII），stdout 静默变 None ⇒ 计数处当场 AttributeError。
 #   判据三层：跨平台形态格＋真机行为格（Linux 恒 UTF-8 故明确 skip 自陈）＋反空转格。
 tests/unit/test_apiInventoryConsumerCountReadFace.py
+
+# 知识向量索引的指纹必须由实际入库文本派生（§6-473）：旧形状 `updated_at:len(content)`
+#   看不见「同长度改正文」与「只改标题」；反方向更常驻——走咽喉的非文本变更
+#   （share/unshare/公开审核）无条件刷时间戳 ⇒ 每分享一次白算一遍 embedding。
+#   活体 A/B 读数：分享 3 条后旧码 computed=3、新码 0，其余四组逐项相等。
+tests/unit/knowledge/test_knowledge_vector_index.py

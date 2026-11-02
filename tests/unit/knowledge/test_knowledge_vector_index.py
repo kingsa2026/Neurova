@@ -9,6 +9,8 @@
 - 索引持久化在 storage_dir（JSON：条目 id → 向量 + updated_at 指纹）
 - embedding 引擎不可用时优雅降级（search 返回 []，ensure 不抛出）
 """
+import json
+
 import pytest
 
 from neurova.knowledge.vector_index import KnowledgeVectorIndex
@@ -62,6 +64,99 @@ class NamedEngine(StubEngine):
     def __init__(self, model_name: str):
         self.model_name = model_name
         self.dimension = len(self.VOCAB)
+
+
+class TestFingerprintTracksIndexedText:
+    """指纹的输入必须是**实际入库的嵌入文本**，不是时间戳与长度（§6-473）。
+
+    §6-461 给倒排索引把指纹换成「整行列清单＋入库文本」后，向量这一侧仍留在
+    `updated_at:len(content)` 上，当时写的是「今后任何不刷 updated_at 的条目写路径都会让它
+    复发」——那句话只落在散文里，没有通道。本批把它根修掉：指纹改由嵌入文本哈希，
+    前提不再需要任何人记得，也就不必配一张靠人登记的豁免表。
+
+    可达形状有两头的账，各配一格，不许互相冒充：
+    - **看不见改字**（漏重算）：同长度改正文、只改标题——时间戳不动时旧量都判"没变"。
+      今天没有哪条公开路径会这样写（`_set_entry`/`update_knowledge` 都强刷时间戳），
+      所以这一头用**规格格**钉指纹函数本身，不伪造存储路径冒充活体。
+    - **白重算**（多算）：`share_entry`/`unshare`/`submit_to_public` 等都走 `_set_entry`，
+      它无条件刷时间戳（repository.py:1051），而文本一个字没变 ⇒ 旧指纹照变 ⇒ 每分享一次
+      就重算一遍 embedding。这一头今天真实可达，用行为格。
+    """
+
+    def _frozen(self, repo, kid):
+        """取条目当前的时间戳（规格格里手工构造条目时用）。"""
+        return repo.find_item(kid)[1].get("updated_at")
+
+    def test_sameLengthContentEditChangesFingerprint(self, repo):
+        """规格格：正文同长度改字 ⇒ 指纹必须变。"""
+        from neurova.knowledge.vector_index import _fingerprint
+
+        made = repo.create_knowledge("a", title="Sales Note", content="sales plan",
+                                     owner_user_id="1")
+        kid = made["knowledge_id"]
+        before = _fingerprint(repo.find_item(kid)[1])
+        entry = repo.find_item(kid)[1]
+        entry["content"] = "sales plam"                 # 等长改字
+        entry["updated_at"] = self._frozen(repo, kid)   # 时间戳不动：正是旧量看不见的那一形
+        assert _fingerprint(entry) != before, "同长度改正文在指纹上不可见 ⇒ 索引会沿用旧向量"
+
+    def test_titleOnlyEditChangesFingerprint(self, repo):
+        """规格格：只改标题 ⇒ 指纹必须变（标题是嵌入文本的前半段）。"""
+        from neurova.knowledge.vector_index import _fingerprint
+
+        made = repo.create_knowledge("a", title="Travel Plan", content="travel quantum rust",
+                                     owner_user_id="1")
+        kid = made["knowledge_id"]
+        before = _fingerprint(repo.find_item(kid)[1])
+        entry = repo.find_item(kid)[1]
+        entry["title"] = "Sales Plan"
+        entry["updated_at"] = self._frozen(repo, kid)
+        assert _fingerprint(entry) != before, "只改标题在指纹上不可见 ⇒ 向量仍是旧标题算出来的"
+
+    def test_nonTextChangeDoesNotRecomputeVectors(self, repo, tmp_path):
+        """行为格：只改可见性（文本未变）⇒ 向量不许重算。
+
+        今天红的是这一条的反面：`share_entry` 走 `_set_entry` 强刷 `updated_at`，而旧指纹正是
+        时间戳＋长度 ⇒ 分享一次就重算一遍从未变过的文本。修后指纹只认文本 ⇒ 零重算。
+        """
+        made = repo.create_knowledge("a", title="Secret Recipe", content="grandma cookie recipe",
+                                     owner_user_id="1")
+        first = KnowledgeVectorIndex(str(tmp_path / "vec"), engine=StubEngine())
+        first.ensure_indexed(repo, ALICE)
+        assert first.stats()["computed"] == 3
+
+        bob = {"user_id": "2", "username": "b", "role": "user", "neuser_id": "2"}
+        repo.share_entry(ALICE, made["knowledge_id"], ["2"])
+        assert repo.find_item(made["knowledge_id"])[1].get("updated_at") != \
+            made.get("updated_at"), "前提核对：分享确实刷新了时间戳（否则这格测不到东西）"
+
+        again = KnowledgeVectorIndex(str(tmp_path / "vec"), engine=StubEngine())
+        stats = again.ensure_indexed(repo, ALICE)
+        assert stats["computed"] == 0, (
+            "文本没变却被重算（每分享/撤销公开一次就白算一遍 embedding）：%s" % stats)
+
+    def test_legacyFingerprintShapedRecordIsRecomputed(self, repo, tmp_path):
+        """一次性代价要可见：旧形状（`时间戳:长度`）留在磁盘上时必须整条重算，不许沿用。"""
+        vecDir = str(tmp_path / "vec")
+        made = repo.create_knowledge("a", title="Async Rust", content="async rust plan",
+                                     owner_user_id="1")
+        kid = made["knowledge_id"]
+        entry = repo.find_item(kid)[1]
+        first = KnowledgeVectorIndex(vecDir, engine=StubEngine())
+        first.ensure_indexed(repo, ALICE)
+        # 分片文件名与载荷形状由索引自己定义，这里读它的口（不另抄一份命名规则）
+        path = first._file_for(ALICE)
+        assert path.is_file(), "索引分片没落盘，这格什么都没测：%s" % path
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        records = payload["vectors"]
+        assert kid in records, "条目没进磁盘记录 ⇒ 磁盘形状变了，请同步本判据"
+        records[kid]["fingerprint"] = "%s:%d" % (entry.get("updated_at", 0),
+                                                 len(entry.get("content", "")))
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+        again = KnowledgeVectorIndex(vecDir, engine=StubEngine())
+        stats = again.ensure_indexed(repo, ALICE)
+        assert stats["computed"] >= 1, "旧形状指纹被当作有效沿用 ⇒ 升级后仍可能带着旧向量检索"
 
 
 @pytest.fixture()
