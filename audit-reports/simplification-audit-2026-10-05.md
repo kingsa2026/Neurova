@@ -11102,6 +11102,22 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **棘轮收口**：`BASELINE` 摘三行（不留 0），docstring 读数改成现算的 **20 个文件 / 23 处**，复证表与 `scanViolations()` 逐文件差集为空；该档 31 passed。
     - **宽域与 A/B**：`tests/unit/desktop` ＋ `tests/unit/ci` 本树 **715 passed / 2 failed / 2 skipped**（那两条红是 `test_bundle_runtime_dirs::TestBundleCreatesWorkspaces` 两格预存，退回旧实现同跑逐条同号，挂 §6-460 仍开②）；A/B（基线＝HEAD 仓外 worktree ＋ 铺入本批两档判据）基线 712/5 failed ↔ 本树 715/2 failed，**仅本树独有失败 0 ⇒ AB_PASS**；仅基线那 3 条逐条可归：本批新判据 2 格（交付证据）＋ `test_ratchetDoesNotRise`（基线树是「HEAD 生产码 ＋ 摘行后的表」，未修代码必被点新增 offender——正是「判据与代码必须同批」的形状）。
     - **在册**：新档入索引＋分片 2 的 desktop 族（各 +6/−0，无删除＝CRLF 未被翻）；子集按唯一 reader 现算 **768**。落库后复跑五闸（分片相等·跟踪态·池数·面棘轮·解析口）合跑 **129 passed / 1 skipped**；`test_commitLocClaimMatchesOwnNumstat` 对本笔 `d0b4b886` 的池声明无异议（生产池 0/0、测试/基建池 194/14 与自身 numstat 相等）。
-    - **仍开（不当自决）**：① cnb CLI 两处写侧未实测（本宿主没装），若哪天装上且交回非 UTF-8，阶段查询那处会显形；② 编码基线余 20 档 / 23 处：`tests/unit` 13 处、`tests/manual/` 7 处、`scripts/` 3 处；③ `agent_workspaces/default` 两格预存红（§6-460 仍开①② 未裁）；④ §6-463 flaky skip；⑤ §6-444 两票；⑥ §6-461 仍开②；⑦ §6-459 仍开①；⑧ GitHub 缺 beta5 release。
+    - **仍开（不当自决）**：① cnb CLI 两处写侧未实测（本宿主没装），若哪天装上且交回非 UTF-8，阶段查询那处会显形；② 编码基线余 20 档 / 23 处：`tests/unit` 13 处、`tests/manual/` 7 处、`scripts/` 3 处（**§6-466 已收掉 `tests/unit` 那 13 处，现余 9 档 / 10 处**；「钉齐前不必逐处看读盘面」这句不行——本批正是按读盘面分成三形落的）；③ `agent_workspaces/default` 两格预存红（§6-460 仍开①② 未裁）；④ §6-463 flaky skip；⑤ §6-444 两票；⑥ §6-461 仍开②；⑦ §6-459 仍开①；⑧ GitHub 缺 beta5 release。
     - **下一枚空号现查**：条目行与引用面两把尺一起跑 ⇒ 本格取 **465**，后继从 **§6-466** 起（§6-464 里那句「现余 20 档 / 23 处」与本格标题里的数字都不是占号）。
+
+466. **编码棘轮按目录消化第四步：`tests/unit` 余 11 档 / 13 处收空，`tests/` 这一族到此清账（另消一条在册红 `40d1c702`）** ✅🟢 —— 承 §6-465 仍开②，用户点单「继续清理欠账」。
+    - **13 处按「子件类型 ＋ 有没有读文本面」分三形**（承 §6-465 的口径，不套同一个模板）：
+      · 本仓 Python 子件 **8 处**两头钉——`torch_lazy_import:37`、`rsi_result_summary_wiring:164`、`api_inventory_freshness_guard:93`（这处 `json.loads` 读的是 JSON，路径含中文，两侧不同径就当场抛）、`start_script:36 与 :54`、`adminBootstrapLanding:41 与 :136`（两处**已有 env 字典**，把 `PYTHONIOENCODING` 注进原字典而不是新造第二份 env 拼法）、`tool_layer_breakpoints_zoom_out:399`；
+      · 真读文本的外部件 **4 处**只钉父端——`git ls-files` 两处（`b5_scale_batch_registration:68`、`protected_registration:62`）、`git_tool:76`（git 子命令全集，父端 utf-8）、`pgrep`（`c22_process_tree_kill:105`，Linux 侧工具，读的是 PID 空不空）；
+      · 根本不读文本的 **1 处**撤掉 `text=True`——`test_safe_paths:30` 的 `cmd /c mklink /J` 只取 rc 与 `link.exists()`，不声明文本面就没有码页问题。
+      另有 5 个档缺 `import os`（`{**os.environ, ...}` 要用），随批按各档既有形补：模块级档补模块级 import，函数内 `import subprocess` 的档补函数内 import。
+    - **顺带消掉一条在册红，且归因归到自己头上**：`test_api_inventory_freshness_guard.py` 两格红于清单漂移（governance 行 `否 | 3` 对不上生成结果 `4`）。先 A/B 定性（把本批主体档单独 stash 复跑，两红逐条同号 ⇒ 与编码改动无关），再按判据自己给的修法 `generate_api_inventory.py --write` 重生成，单独入库 `40d1c702`。漂移源是本会话 §6-459 那批给 `governance.ts` 加了 `getDesktopAuditWaiting` 却**没重跑生成器**——加前端 API 与重生成清单是一件事的两半，做半截就是留一条在册红。
+    - **红自证（形状与前两批不同：这批没有新判据，咬合者是棘轮本身）**：把 11 处主体档退回、保留摘行后的表 ⇒ `test_ratchetDoesNotRise` 当场红并逐档点名「基线 0 处 / 现读 1·2 处」；复原后 31 passed。⚠ 第一次自证把棘轮档自己也 stash 了——**表和代码一起回退，读数自然对上，等于没测**；剔除棘轮档重做才现形（pathset 必须等于「本次改动面减去被验判据自身」，这条记进本档教训）。
+    - **棘轮收口**：摘 11 行（不留 0），docstring 读数改现算的 **9 个文件 / 10 处**（只剩 `scripts/diagnostics/_tmp_check_tracked.py`、`scripts/generate_api_inventory.py`、`scripts/setup_computer_use.py` 各 1 处，与 `tests/manual/` 6 档 / 7 处）；复证表与 `scanViolations()` 逐文件差集为空。
+    - **宽域 A/B**（`ab_compare.sh`，基线＝HEAD 仓外 worktree；本批无新判据故不给 `-c`）：十个选择集合计 基线 6917 passed / 17 failed + 1 error（失败集 18 条）↔ 本树 6920 passed / 14 failed（14 条），**仅本树独有失败 0 ⇒ AB_PASS**。仅基线那 4 条逐条对号，两种性质分开写清：
+      · `test_api_inventory_freshness_guard` 两格＝本批交付证据（`40d1c702` 重生成后本树绿）；
+      · `test_start_script.py::test_force_restart_flag_exists_in_help` 的 **ERROR** 与 `test_code_execution_sandbox_contract.py::test_timeout_is_enforced` 的 FAILED **不在本批改动面**（后者一字未动；前者虽被本批触及，但把本档退回旧形单跑与钉齐后单跑都是 7 passed，未复现）⇒ 按**基线侧负载/顺序效应**登记，不认领成"本批修好了"，也不下"已修"结论。
+    - **在册与守卫**：本批无新判据档 ⇒ 子集不动（现算仍 768）。合跑 `test_subprocessTextEncodingRatchet`（31 passed）＋ 十一档主体判据（146 passed，其中 2 红即上面那对 api 格，随 `40d1c702` 转绿）。
+    - **仍开（不当自决）**：① 编码基线余 **9 档 / 10 处**：`tests/manual/` 6 档 / 7 处（活体脚本，按 §8 不走 pytest 收集，改它们要逐档实跑自证）与 `scripts/` 3 处；② `scripts/diagnostics/_tmp_check_tracked.py` 这个名字本身像一次性诊断残留——是否该退役属死码裁（要走 `dead-code-provenance-audit` 那套证据档案），本批只登记不顺手删；③ cnb 两处写侧仍未实测（§6-465 仍开①）；④ `agent_workspaces/default` 两格预存红；⑤ §6-463 flaky skip；⑥ §6-444 两票；⑦ §6-461 仍开②；⑧ §6-459 仍开①；⑨ GitHub 缺 beta5 release。
+    - **下一枚空号现查**：条目行与引用面两把尺一起跑 ⇒ 本格取 **466**，后继从 **§6-467** 起（§6-465 里「§6-466 再收…」那句是回指，不构成占号）。
 

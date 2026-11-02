@@ -61,7 +61,8 @@ def test_registered_package_files_are_tracked_by_git():
     files = _packageTestFiles()
     result = subprocess.run(
         ["git", "ls-files", *files],
-        cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=GIT_WALL_S,
+        cwd=str(PROJECT_ROOT), capture_output=True, text=True,
+        encoding="utf-8", timeout=GIT_WALL_S,
     )
     tracked = {line.strip() for line in result.stdout.splitlines() if line.strip()}
     assert tracked == set(files), (

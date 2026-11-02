@@ -37,11 +37,13 @@ def _run(root: Path, cwd: Path, envExtra: dict) -> subprocess.CompletedProcess:
     env = dict(os.environ)
     env["NEUROVA_DATA_DIR"] = str(root)
     env.pop("NEUROVA_ADMIN_PASSWORD", None)
+    env["PYTHONIOENCODING"] = "utf-8"
     env.update(envExtra)
     return subprocess.run(
         [sys.executable, str(SCRIPT)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         cwd=str(cwd),
         stdin=subprocess.DEVNULL,
@@ -133,6 +135,7 @@ def testServerResolvesTheSamePath(tmp_path):
     """脚本与登录服务端必须指向同一个库——否则建了账号也登不上。"""
     env = dict(os.environ)
     env["NEUROVA_DATA_DIR"] = str(tmp_path)
+    env["PYTHONIOENCODING"] = "utf-8"
     probe = subprocess.run(
         [
             sys.executable,
@@ -142,6 +145,7 @@ def testServerResolvesTheSamePath(tmp_path):
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=env,
         cwd=str(REPO_ROOT),
         timeout=PROBE_WALL_S,

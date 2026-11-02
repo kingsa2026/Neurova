@@ -392,6 +392,7 @@ class TestDeadCodeRemoved:
 
     def test_tool_pipeline_not_imported_in_production(self):
         """生产代码不应 import ToolExecutionPipeline。"""
+        import os
         import subprocess
         import sys
         # grep 生产代码（排除 tests/）确认无 import
@@ -423,8 +424,8 @@ for pf in prod_files:
 if violations:
     print(','.join(violations))
 """],
-                capture_output=True, text=True, cwd=str(REPO_ROOT),
-                timeout=SCAN_WALL_S
+                capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=str(REPO_ROOT), timeout=SCAN_WALL_S
             )
             violations = result.stdout.strip()
             assert not violations, (

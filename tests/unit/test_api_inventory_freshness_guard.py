@@ -24,6 +24,7 @@ import functools
 import importlib
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -90,8 +91,10 @@ def _runtimeRoutePaths() -> frozenset:
     只拿 openapi 当"运行时真表"就会把一张活着的外表面读成"不存在"，
     于是挂载表里那条真前缀反而被判成"表在报一个不存在的挂载点"。
     """
+    # 子件交回的是 JSON（路径含中文），两侧必须同一个口径：只钉父端时子件按机器码页写
     proc = subprocess.run([sys.executable, "-c", _APP_PROBE], cwd=str(PROJECT_ROOT),
-                          capture_output=True, text=True, timeout=APP_PROBE_WALL_S)
+                          capture_output=True, text=True, encoding="utf-8",
+                          env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=APP_PROBE_WALL_S)
     assert proc.returncode == 0, f"应用创建失败：{proc.stderr[-800:]}"
     paths = json.loads(proc.stdout.strip().splitlines()[-1])
     return frozenset(path.rstrip("/") or "/" for path in paths)
