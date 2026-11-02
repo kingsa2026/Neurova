@@ -72,11 +72,12 @@ def _spawn(fn_name, agent_id, cwd):
     env = dict(os.environ)
     env["PYTHONPATH"] = ROOT
     env["NEUROVA_AGENT_DB"] = os.path.join(cwd, "agent.db")
+    env["PYTHONIOENCODING"] = "utf-8"
     run = subprocess.run(
         [sys.executable, "-c", f"import sys; sys.path.insert(0, {ROOT!r}); "
                                f"import tests.manual.context_persistence_restart_90 as m; "
                                f"m.{fn_name}({agent_id!r})"],
-        cwd=cwd, env=env, capture_output=True, text=True,
+        cwd=cwd, env=env, capture_output=True, text=True, encoding="utf-8",
     )
     if run.returncode != 0:
         raise RuntimeError(f"{fn_name} 子进程失败：\n{run.stdout[-2000:]}\n{run.stderr[-2000:]}")

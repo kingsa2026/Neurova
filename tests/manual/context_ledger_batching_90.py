@@ -187,7 +187,8 @@ def readFromOtherProcess(dbPath):
         "print(len(rows)); print(rows[0]['content'] if rows else '')\n"
         "ledger.close()\n"
     ) % ROOT
-    run = subprocess.run([sys.executable, "-c", code, dbPath], capture_output=True, text=True)
+    run = subprocess.run([sys.executable, "-c", code, dbPath], capture_output=True, text=True,
+                         encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     if run.returncode != 0:
         raise RuntimeError(f"读取子进程失败：\n{run.stdout[-1500:]}\n{run.stderr[-1500:]}")
     lines = run.stdout.strip().splitlines()
