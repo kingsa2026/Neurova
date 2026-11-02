@@ -45,7 +45,9 @@ class FakeChannelManager:
         return True
 
     async def fanout(self, content, sender_id):
-        message = SimpleNamespace(content=content, sender_id=sender_id)
+        self._fanoutSeq = getattr(self, "_fanoutSeq", 0) + 1
+        message = SimpleNamespace(content=content, sender_id=sender_id,
+                                  message_id=f"om_fanout_{self._fanoutSeq}")
         for handler in list(self.handlers.values()):
             await handler(message)
 
