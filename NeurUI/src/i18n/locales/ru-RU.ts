@@ -1837,6 +1837,7 @@ export default {
     stats: 'Статистика',
     audit: 'Журналы аудита',
     waitingHuman: 'Ожидают человека',
+    ingressBypass: 'Входной байпас',
     longestWaitMinutes: 'Макс. ожидание (мин)',
     benchmark: 'Бенчмарк',
     runtime: 'Среда выполнения',

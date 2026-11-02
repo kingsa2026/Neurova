@@ -1839,6 +1839,7 @@ export default {
     stats: 'Statistics',
     audit: 'Audit Logs',
     waitingHuman: 'Awaiting human',
+    ingressBypass: 'Ingress bypass',
     longestWaitMinutes: 'Longest wait (min)',
     benchmark: 'Benchmark',
     runtime: 'Runtime',
