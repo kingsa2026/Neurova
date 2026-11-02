@@ -222,6 +222,11 @@ tests/unit/test_archive_nav_impact_guard.py
 #   模块双向差集为空，两组差异（前端未命中后端 / 后端无前端消费）逐条显式登记。
 #   棘轮基线 103 → 0。
 tests/unit/test_api_inventory_freshness_guard.py
+# 清单生成器的消费面计数必须显式声明解码口径（§6-467）：不写 encoding 时走 Windows ANSI 码页，
+#   且**不受父进程 PYTHONIOENCODING 影响**（两种父环境实跑都抛）。grep 交回的是前端源码原始
+#   字节（login 现量 13817 字节 / 1470 非 ASCII），stdout 静默变 None ⇒ 计数处当场 AttributeError。
+#   判据三层：跨平台形态格＋真机行为格（Linux 恒 UTF-8 故明确 skip 自陈）＋反空转格。
+tests/unit/test_apiInventoryConsumerCountReadFace.py
 tests/unit/test_api_inventory_guard.py
 
 # Issue #148 跨文件 AST 判据的解析预算收口（CI 受保护子集偶发红根因）。

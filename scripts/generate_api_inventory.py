@@ -648,9 +648,13 @@ def _nonTestConsumers(exported: str) -> int:
         return 0
     import subprocess
     pattern = r"\b" + re.escape(exported) + r"\b"
+    # grep 交回的是文件原始字节（前端源码是 UTF-8）。必须显式声明解码口径：
+    # `text=True` 不写 encoding 时走 Windows ANSI 码页（cp936），且它不受父进程
+    # `PYTHONIOENCODING` 影响——两种父环境实跑都照样抛（§6-467 量过）。
     found = subprocess.run(
         ["grep", "-rEn", pattern, "NeurUI/src", "--include=*.vue", "--include=*.ts"],
-        cwd=str(PROJECT_ROOT), capture_output=True, text=True).stdout
+        cwd=str(PROJECT_ROOT), capture_output=True, text=True,
+        encoding="utf-8").stdout
     return sum(1 for line in found.splitlines()
                if not any(part in line for part in _CONSUMER_EXCLUDED)
                and not _isOwnDefinition(line, exported)

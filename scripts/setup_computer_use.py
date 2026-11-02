@@ -88,6 +88,8 @@ def install_missing(packages: typing.Optional[typing.List[str]] = None) -> typin
             [sys.executable, "-m", "pip", "install", spec],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
         ok = proc.returncode == 0 and _importable(IMPORT_NAMES[pkg])
         results[pkg] = ok
