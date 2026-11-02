@@ -110,8 +110,9 @@ def resolve_working_nsis() -> Path | None:
         if not exe.exists():
             continue
         try:
+            # 版本串只进一行日志；取 replace 是如实承认「这是诊断文本，不是数据通道」。
             r = subprocess.run([str(exe), "/VERSION"], capture_output=True,
-                               text=True, timeout=30)
+                               text=True, encoding="utf-8", errors="replace", timeout=30)
         except OSError:
             continue
         if r.returncode == 0:
@@ -159,8 +160,9 @@ def seed_tauri_nsis_cache() -> None:
         # 已是可用副本（makensis 实跑通过）则不动：避免每次构建重拷 ~30MB。
         probe = target / "makensis.exe"
         try:
+            # 只问 rc（能不能实跑），不读文本面 ⇒ 撤掉 text 声明
             r = subprocess.run([str(probe), "/VERSION"], capture_output=True,
-                               text=True, timeout=30)
+                               timeout=30)
         except OSError:
             r = None
         if r is not None and r.returncode == 0:
@@ -263,7 +265,7 @@ def cert_is_in_store(thumbprint: str) -> bool:
     )
     r = subprocess.run(
         ["powershell", "-NoProfile", "-Command", ps],
-        capture_output=True, text=True,
+        capture_output=True,
     )
     return r.returncode == 0
 
