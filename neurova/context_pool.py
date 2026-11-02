@@ -1560,19 +1560,36 @@ def _archivedRowMetadata(row: Dict[str, Any]) -> Dict[str, Any]:
     return md
 
 
+def identityStrings(agent_ref) -> tuple:
+    """身份真串对 (agent_id, user_id)；取不到就是空串——**不兜 default，也不 str() 一包**。
+
+    `Agent` 实例上没有 `agent_id`／`user_id` 这两个属性：它们住在 `AgentConfig` 的
+    `agent_id` 与 `owner_user_id` 上。此前这里按 `getattr(agent_ref, "agent_id", ...)` 取，
+    在真门上恒空 ⇒ 台账从不装配（`_ledger_db` 恒 None）、池身份恒为 "default"
+    （归档元数据全被标错），而替身对象自己带这两个属性，mock 面判据一直看不见（§6-474）。
+
+    只认 `str` 而不 `str(value)`：后者把 MagicMock 的自动属性变成一串看着像 id 的文本，
+    把"取不到身份"藏进日志里（6bcd6eaf 立的口径，规则随派生处搬到这里）。
+    """
+    cfg = getattr(agent_ref, "config", None)
+    agentId = (getattr(cfg, "agent_id", None) if isinstance(getattr(cfg, "agent_id", None), str) else "") \
+        or (getattr(agent_ref, "agent_id", None) if isinstance(getattr(agent_ref, "agent_id", None), str) else "")
+    userId = (getattr(cfg, "owner_user_id", None) if isinstance(getattr(cfg, "owner_user_id", None), str) else "") \
+        or (getattr(agent_ref, "user_id", None) if isinstance(getattr(agent_ref, "user_id", None), str) else "")
+    return agentId.strip(), userId.strip()
+
+
 def poolIdentityOf(agent_ref, session_id: Optional[str] = None) -> tuple:
     """池身份三元组的**唯一派生处**（(user_id, agent_id, session_id)）。
 
     构造侧（编排器）与查询侧（端点 / 工作流节点）必须用同一份派生：各写一遍
     `getattr(...) or "default"` 就会出现"构造时用 default、查询时用 JWT user"
     这类查不到的静默失配——池明明活着，取池返回 None，消费方再各造一个
-    （审计 P2-3 的形态）。
+    （审计 P2-3 的形态）。兜 default 是**取池键**的口径；要判"身份到底取没取到"，
+    读 `identityStrings`，别在这里兜完再回去猜。
     """
-    return (
-        str(getattr(agent_ref, "user_id", None) or "default"),
-        str(getattr(agent_ref, "agent_id", None) or "default"),
-        session_id,
-    )
+    agentId, userId = identityStrings(agent_ref)
+    return (userId or "default", agentId or "default", session_id)
 
 
 def get_context_pool(
