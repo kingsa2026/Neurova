@@ -106,6 +106,13 @@ def csc_path() -> Path | None:
     return None
 
 
+#: PowerShell 的控制台输出**不是一个答案**：本机实测裸打字符串走机器码页（`'项目A'` → cp936 的
+#: `cf ee c4 bf`），而点源 helper 之后的对象流走 UTF-8。父端不写 `encoding` 就按
+#: `locale.getpreferredencoding()` 解 ⇒ 读线程抛 UnicodeDecodeError、`stdout` 静默变 None（子进程
+#: rc 仍是 0，看着像成功）。两侧一起钉 UTF-8，口径才只剩一个（§6-225 那条「半修」纪律）。
+PS_UTF8_PREFIX = "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
+
+
 def refresh_machine_path() -> None:
     """把**机器/用户级** PATH 合并进本进程（自托管环境里必须做）。
 
@@ -133,8 +140,9 @@ def refresh_machine_path() -> None:
     # 让 helper 在子进程里跑一遍、回读它合并后的 PATH（helper 打印的只是段数）。
     probe = subprocess.run(
         ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
-         f'. "{helper}"; [Environment]::GetEnvironmentVariable("Path", "Process")'],
-        capture_output=True, text=True,
+         PS_UTF8_PREFIX + f'. "{helper}"; '
+         + '[Environment]::GetEnvironmentVariable("Path", "Process")'],
+        capture_output=True, text=True, encoding="utf-8",
     )
     if probe.returncode != 0:
         raise RuntimeError(f"PATH 刷新失败：{probe.stderr.strip()}")
@@ -262,9 +270,10 @@ Write-Host "     python scripts\desktop\win_installer_kit.py run --repo <克隆�
 
 def cmd_install(args) -> int:
     if os.name == "nt":
+        # 这一处不取子进程输出（直写控制台），Python 侧根本没有解码面：
+        # 留着 `text=True` 是声明一个不存在的读盘面，按「只声明真用到的」撤掉。
         ps = subprocess.run(
             ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", INSTALL_PS1],
-            text=True,
         )
         if ps.returncode != 0:
             raise RuntimeError("工具链初始化失败（见上方输出）")
@@ -424,7 +433,7 @@ def cmd_check(args) -> int:
         )
         r = subprocess.run(
             ["cnb", "build", "start-build", "--repo", args.repo, "--data", body],
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         m = re.search(r"sn: (\S+)", r.stdout)
         if not m:
@@ -435,7 +444,7 @@ def cmd_check(args) -> int:
         st = subprocess.run(
             ["cnb", "build", "get-build-stage", "--repo", args.repo, "--sn", sn,
              "--pipelineId", f"{sn}-001", "--stageId", "prepare", "--verbose"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="utf-8",
         )
         err = ""
         try:
