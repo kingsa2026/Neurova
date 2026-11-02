@@ -532,7 +532,9 @@ class WorkflowExecutor:
             # 结果/变量从 instance 恢复、skipped 集从 node_results 重建
             if resume and instance is not None:
                 for nid, res in (instance.node_results or {}).items():
-                    if res.status == "success":
+                    # B2②：timeout/pending 有终态输出，照 success 恢复（不重跑，
+                    # 否则审批人被二次打扰）；skipped 仍是跳过。
+                    if res.status in ("success", "timeout", "pending"):
                         resolution_context.node_results[nid] = {
                             "status": res.status,
                             "output": res.output,
@@ -796,9 +798,14 @@ class WorkflowExecutor:
                 },
             )
             finished_at = time.time()
+            # B2②：审批类节点的内层 status（pending/timeout）外显——读面不再把
+            # 没批下来的节点画成 success。resume 恢复集同步扩（见 Resume 分支）：
+            # 这两类节点有终态输出、重跑会二次打扰审批人，照 success 一样恢复。
+            inner_status = str(result.get("status") or "")
+            outer_status = inner_status if inner_status in ("timeout", "pending") else "success"
             instance.node_results[node_id] = NodeExecutionResult(
                 node_id=node_id,
-                status="success",
+                status=outer_status,
                 output=result.get("output"),
                 started_at=started_at,
                 finished_at=finished_at,
