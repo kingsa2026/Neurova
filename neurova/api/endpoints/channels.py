@@ -11,6 +11,7 @@ import re
 路由清单（挂载前缀 `/api/v1` + `/channel-adapters`；每条都是**可寻址的真地址**）：
 - GET  /api/v1/channel-adapters                                  - 全部实例健康状态（跨 agent）
 - GET  /api/v1/channel-adapters/health/all                       - 同一份健康视图
+- GET  /api/v1/channel-adapters/ingress/bypass-stats           - 入站旁路直发读数（批 D）
 - GET  /api/v1/channel-adapters/conflicts/check                  - 跨 agent 机器人身份冲突检测
 - GET  /api/v1/channel-adapters/{channel_type}                   - 指定实例健康状态
 - POST /api/v1/channel-adapters/{channel_type}/connect           - 连接该实例
@@ -521,6 +522,16 @@ async def health_check_all():
     """检查所有渠道的健康状态"""
     manager = get_channel_manager()
     return await manager.health_check()
+
+
+@router.get("/ingress/bypass-stats", summary="入站旁路直发读数（批 D）")
+async def ingress_bypass_stats(limit: int = Query(50, ge=1, le=500)):
+    """队列不可用时旁路直发的台账读数：总数＋最近记录。
+
+    批 D（T4 已裁有界直发）：旁路计数是常驻读数——队列可用性有了事实判据，
+    "队列坏了多久、旁路了多少条"从这里查。
+    """
+    return get_channel_manager().getIngressBypassReadout(limit=limit)
 
 
 # ============================================================
