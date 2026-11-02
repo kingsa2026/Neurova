@@ -6,12 +6,15 @@
 七次，其中两次靠人肉让号）。同号双格的代价是"错号比没错更难查"——两个读者会各自引用
 同一号却读到不同内容，而后人完全无从发现。
 
-四条都可失败：
+五条都可失败：
 ① 台账正文里每个 `^N. **` 形式的格号必须唯一；
 ② 扫描面不得收缩（标题数少于下限即红——防止"扫了个空目录所以永远绿"）；
 ③ 反空转：临时拼一份含重复号的台账文本，判据必须抓到；
 ④ 最近落下的那几格的号次必须沿文件顺序前进——唯一性只挡住"同号双格"，
-   挡不住"号在别处"（PR #365 构建 `cnb-iom-1k5us8cmk-003` 分片 2 的现场）。
+   挡不住"号在别处"（PR #365 构建 `cnb-iom-1k5us8cmk-003` 分片 2 的现场）；
+⑤ **被正文引用的格号必须能在本卷定位到那一格**（§6-472 新增）。前两把尺都只看条目行，
+   引用面从来没人核：并发让号或分支重写把某格抹掉之后，正文里那些 `§6-N` 就指向了不存在的格，
+   而读者按号翻目录只会以为是自己找不到。
 """
 
 from __future__ import annotations
@@ -116,3 +119,112 @@ def testTailBreakDetectorCountsRegressionsNotDuplicates(body, expected):
     两条判据各咬一头，不互相冒充。
     """
     assert _tailBreaks(body) == expected
+
+
+#: 引用面的取数口：正文里 `§6-N` 形式的号。`§6-4[0-9][0-9]` 这类正则字面量不会被匹配到。
+_CITE = re.compile(r"§6-(\d{2,3})")
+
+#: 记账句词汇：这类句子里出现的号是"下一个空号"的指针或让号叙述，**不是对某一格的引用**。
+#: 这张表不是豁免名单，是把口径定准——§6-471 就是没辨这两类，把 8 处「下一枚空号现查 §6-N」
+#: 和「条目行最大 458 ⇒ 后继从 §6-459 起」正常形态当成"悬空引用/后继写反"登进了账。
+_POINTER_WORDS = re.compile(
+    r"(下一枚空号现查|下批从|后继批次从|后继从|空号至|现算最大|以现算为准|写前必须现场重取"
+    r"|若并发会话先落格|让号|撞号|改取|改记|原拟|本应落|号位说明|被并发会话"
+    # 声明"这个号不在本卷"的句子本身就是悬空登记，不是又一次悬空引用
+    r"|从未建档|没有条目行|定位不到|悬空)"
+)
+
+#: 转述形态：号被引号包着 ⇒ 那句在说"某人某文写过这个号"，不是在指向本卷某一格。
+#: 不分开就会把 §6-221 那种"提交正文里写的是 §6-221，后来让号了"的自纠记成悬空引用。
+_QUOTED_SPANS = (re.compile(r"「[^」]*」"), re.compile(r'"[^"]*"'), re.compile(r"“[^”]*”"))
+
+
+def _isQuoted(line: str, at: int) -> bool:
+    for span in _QUOTED_SPANS:
+        for m in span.finditer(line):
+            if m.start() <= at < m.end():
+                return True
+    return False
+
+
+def _entryAnchors(text: str) -> set:
+    """本卷能定位到的格号：主格 `^N. **` 与续格 `^N. (续` 都算。
+
+    续格算定位点：引用者对着 `121. (续)` 同样读得到内容。把它判成悬空会逼人再去并续格，
+    那不是本条要咬的事；而"宽正则把续格误判成重号"那一坑由 `_HEADING` 单口径挡住。
+    """
+    anchors = set()
+    for pattern in (r"^(\d{2,3})\. \*\*", r"^(\d{2,3})\. \(续"):
+        anchors |= {int(m.group(1)) for m in re.finditer(pattern, text, re.M)}
+    return anchors
+
+
+def _sentenceOf(line: str, at: int) -> str:
+    """取出包含该命中的那一句（按 。／；断句）——判"这是引用还是记账句"只看这一句。"""
+    start = max(line.rfind("。", 0, at), line.rfind("；", 0, at)) + 1
+    end = line.find("。", at)
+    return line[start:] if end < 0 else line[start:end + 1]
+
+
+def _danglingCitations(text: str) -> list:
+    """返回 [(号, 行号)]：正文以 `§6-N` 引用了本卷定位不到的格号。"""
+    anchors = _entryAnchors(text)
+    out = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        for match in _CITE.finditer(line):
+            num = int(match.group(1))
+            if num in anchors:
+                continue
+            if _POINTER_WORDS.search(_sentenceOf(line, match.start())) or _isQuoted(line, match.start()):
+                continue
+            out.append((num, lineno))
+    return out
+
+
+def testCitedCellNumbersHaveEntryLines():
+    """被引用的号必须查得到格：号在并发让号或分支重写里消失时，正文得跟着改指向。
+
+    这一条是 §6-472 现场立起来的：`§6-420` 那一格在两次撞号的让号过程中没有留下条目行，
+    而正文有两处按号引用它（一处说"与 §6-420 同族同现场"，一处说"与 §6-420 在 console 修掉
+    的是同一个洞"）——两个读者按号翻目录，一个也读不到。
+    """
+    assert LEDGER.is_file(), "台账路径变了——这条守卫已经在扫不存在的文件"
+    text = LEDGER.read_text(encoding="utf-8")
+    anchors = _entryAnchors(text)
+    assert len(anchors) >= _MIN_HEADINGS, (
+        "只认出 %d 个格号（下限 %d）——定位面收缩时「引用都查得到格」什么都不证明"
+        % (len(anchors), _MIN_HEADINGS))
+
+    dangling = _danglingCitations(text)
+    assert not dangling, (
+        "正文引用了本卷定位不到的格号（读者按号找不到格）：\n"
+        + "\n".join("  §6-%d 在行 %d" % (n, ln) for n, ln in dangling)
+        + "\n修法：把它改指向仍在的格（先核内容同不同族，别拿近似号糊过去），"
+          "或如实写明「那一格的条目行已在让号/重写中丢失」——不许臆造补写内容。"
+    )
+
+
+@pytest.mark.parametrize('body, expected', [
+    # 记账句里的号不是引用：那号本来就是留给下一批的
+    ('120. **甲**\n    - **下一枚空号现查 §6-121。**\n', []),
+    ('120. **甲**\n    - 条目行最大 **122**、引用面最大 **118** ⇒ 后继从 **§6-123** 起。\n', []),
+    # 让号叙述同理：号是被让出去/撞掉的那一个
+    ('120. **甲**\n    - 本条原拟 §6-119，与并发会话撞号后改取 120。\n', []),
+    # 续格算定位点：引用得到，就不算悬空
+    ('120. **甲**\n121. (续) **乙**\n正文引用 §6-121\n', []),
+    # 转述不算引用：那句说的是"别人写过这个号"
+    ('120. **甲**\n    - 提交正文里写的是"台账 §6-121 随下一笔"，后来让号了。\n', []),
+    ('120. **甲**\n    - 三处以「E 批 §6-121」为引用落点。\n', []),
+    # 声明该号缺失的句子本身就是登记，不是又一次悬空
+    ('120. **甲**\n    - §6-121 从未建档，属悬空引用。\n', []),
+    # 但"引用了却查不到"必须点名——上面三种排除口径不许把真悬空一起放掉
+    ('120. **甲**\n    - 形态与 §6-121 第四格同源。\n', [(121, 2)]),
+    # 真正文引用而本卷无格 ⇒ 必须点名
+    ('120. **甲**\n正文引用 §6-121\n', [(121, 2)]),
+    # 引用面不被"号存在于别处"糊弄：主格在就不报
+    ('120. **甲**\n121. **乙**\n正文引用 §6-121\n', []),
+])
+def testDanglingCitationDetectorSeparatesRecordsFromCitations(body, expected):
+    """反空转：记账句与续格不得误报，真正悬空必须点名——两者都要有样本。"""
+    assert _danglingCitations(body) == expected
+
