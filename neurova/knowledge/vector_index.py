@@ -3,7 +3,9 @@
 
 设计：
 - 每用户一个索引文件（knowledge_vectors_{user_id}.json）：可见性由文件边界保证，
-  索引内容 = 该用户 visible_items 的向量 + 指纹（updated_at+长度）
+  索引内容 = 该用户 visible_items 的向量 + 指纹（嵌入文本哈希）
+- 指纹 = 实际入库文本（title+正文）的哈希 ⇒ "同长度改正文""只改标题"都看得见；
+  时间戳不再充当正确性前提（§6-473，与 §6-461 给倒排索引的那一步同法）
 - ensure_indexed 增量同步：新增/变更才计算 embedding，删除条目即剔除向量，
   重启从磁盘恢复（未变条目零重算）
 - search(query, user)：query 单次 embedding，索引内余弦相似度，返回带
@@ -17,6 +19,7 @@ from __future__ import annotations
 
 from neurova.core import vector_math
 import datetime
+import hashlib
 import json
 import threading
 from pathlib import Path
@@ -73,8 +76,22 @@ def _engine_id(engine) -> str:
 
 
 
+def embeddingText(entry: Dict[str, Any]) -> str:
+    """条目的嵌入文本单点：`title + 换行 + content`，无标题时只取正文。
+
+    计算侧与指纹侧都必须读这一份（§6-473）：过去两侧不同源——指纹取
+    `updated_at:len(content)`，于是「同长度改正文」与「只改标题」两种文本变化它都看不见，
+    跳过决策沿用旧向量，检索交回的还是旧文本的语义。改成文本哈希后，
+    "有没有人记得刷时间戳"不再是正确性的前提，也不再需要给它配豁免表。
+    """
+    title = str(entry.get("title", ""))
+    content = str(entry.get("content", ""))
+    return (title + "\n" + content) if title else content
+
+
 def _fingerprint(entry: Dict[str, Any]) -> str:
-    return "%s:%d" % (entry.get("updated_at", 0), len(entry.get("content", "") or ""))
+    """指纹＝实际入库文本的哈希（不是时间戳，也不是长度——那两者量不到改字）。"""
+    return hashlib.sha1(embeddingText(entry).encode("utf-8")).hexdigest()[:16]
 
 
 class KnowledgeVectorIndex:
@@ -276,11 +293,7 @@ class KnowledgeVectorIndex:
                     removed_count += 1
 
             if to_compute:
-                texts = []
-                for _kid, entry in to_compute:
-                    title = str(entry.get("title", ""))
-                    content = str(entry.get("content", ""))
-                    texts.append((title + "\n" + content) if title else content)
+                texts = [embeddingText(entry) for _kid, entry in to_compute]
                 try:
                     if hasattr(engine, "encodeOrNone"):
                         # `encode_batch` 只走真引擎的批量推理，拦不住"引擎没就绪"这件

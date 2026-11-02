@@ -99,14 +99,14 @@ def _load_corpus(body: "HybridSearchRequest", request: Request, current_user: Di
 
         entries = get_knowledge_repository().visible_items(current_user)
         corpus: List[Dict[str, Any]] = []
+        from neurova.knowledge.vector_index import embeddingText
+
         for e in entries:
-            title = str(e.get("title", ""))
-            content = str(e.get("content", ""))
             corpus.append(
                 {
                     "id": str(e.get("knowledge_id", "")),
-                    "content": (title + "\n" + content) if title else content,
-                    "title": title,
+                    "content": embeddingText(e),
+                    "title": str(e.get("title", "")),
                 }
             )
         return corpus
