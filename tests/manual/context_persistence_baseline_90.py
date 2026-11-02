@@ -22,6 +22,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from tests.manual._forensicsVerdicts import a1Verdict, tailCount, visibilityVerdict  # noqa: E402
 from tests.manual._liveVerifyIsolation import isolatedDataRoot  # noqa: E402
 isolatedDataRoot()
 
@@ -126,11 +127,15 @@ def main():
         user_id="u1", agent_id="a1", session_id="s1",
         ledger_db=EvictionLedgerDB(db_path=ledgerPath, user_id="u1", agent_id="a1"),
     )
-    report("1 现状 P1-3：写入口不可达", [
+    ledgerRows = pool._ledger_db.count()
+    restartedRecall = len(restarted.recall_evicted())
+    report("1 写入口与重启回载（P1-3＝2026-09-21 的复现面；契约判据源＝test_context_persistence_restart.py）", [
         "生产同型构造（不传 resident_limit）→ resident_limit=%s, ttl_seconds=%s" % (pool.resident_limit, pool.ttl_seconds),
         "写入 600 条常驻 → 常驻 %d 条；cleanup_expired()=%d" % (pool.resident_count(), pool.cleanup_expired()),
-        "台账 DB 行数 = %d；recall_evicted(query) = %d" % (pool._ledger_db.count(), len(pool.recall_evicted(query="折叠判据"))),
-        "模拟重启后的新实例：常驻 %d 条；recall_evicted = %d（归档活不过重启）" % (restarted.resident_count(), len(restarted.recall_evicted())),
+        "台账 DB 行数 = %d；recall_evicted(query) = %d" % (ledgerRows, len(pool.recall_evicted(query="折叠判据"))),
+        "模拟重启后的新实例：常驻 %d 条；recall_evicted = %d ⇒ 台账写入%s、归档%s重启"
+        % (restarted.resident_count(), restartedRecall,
+           "已落盘" if ledgerRows else "未落盘", "活得过" if restartedRecall else "活不过"),
     ])
 
     # ── 1b. 真跨进程复核（D1 的验收判据就在跨进程，不是同进程换实例） ──
@@ -163,10 +168,12 @@ def main():
         [sys.executable, "-c", readerCode, xprocDb], capture_output=True, text=True,
         encoding="utf-8", env=childEnv,
     )
+    readerRecall = tailCount(readerRun.stdout, "recall_evicted")
+    verdict = a1Verdict(readerRecall)
     report("1b 真跨进程复核（D1 判据）", [
         "writer 进程（写入后即退出）: %s" % (writerRun.stdout.strip() or writerRun.stderr.strip()[-200:]),
         "reader 进程（同库新开池）: %s" % (readerRun.stdout.strip() or readerRun.stderr.strip()[-200:]),
-        "结论：写入进程的归档在新进程里取不到 → A1 当前为红",
+        "结论：新进程 recall_evicted = %s ⇒ %s" % (readerRecall, verdict),
     ])
 
     # ── 2. 写放大（三种形状，同一轮定义 = 24 条，各 20 轮取样） ──
@@ -549,11 +556,15 @@ CREATE VIRTUAL TABLE fts USING fts5(content, tokenize='unicode61 remove_diacriti
     )
     directPool = ContextPool(user_id="u1", agent_id="a1", session_id="s_direct", ledger_db=scoped)
     nonePool = ContextPool(user_id="u1", agent_id="a1", session_id=None, ledger_db=scoped)
-    scopeVerdict.append("群聊归档在单聊池（session_id=s_direct）召回条数 = %d（恒空：本轮会话 id 与归档会话 id 不等）"
-                        % len(directPool.recall_evicted(query="机密")))
-    scopeVerdict.append("无会话池（session_id=None）召回条数 = %d，且无 filter_by_scope 闸口 → 房间内容可见"
-                        % len(nonePool.recall_evicted(query="机密")))
-    report("8 读侧缺陷", scopeVerdict)
+    directHits = len(directPool.recall_evicted(query="机密"))
+    noneHits = len(nonePool.recall_evicted(query="机密"))
+    scopeVerdict.append("群聊归档在单聊池（session_id=s_direct）召回条数 = %d ⇒ 房间内容%s"
+                        % (directHits, visibilityVerdict(directHits)))
+    scopeVerdict.append("无会话池（session_id=None）召回条数 = %d ⇒ 房间内容%s；挡它的是作用域闸口"
+                        "（`_allowedRecallItems` → `memory_scope.filter_by_tag`，允许集单源 `allowed_scopes_for_tag`），"
+                        "不再是以前的会话 id 等值过滤"
+                        % (noneHits, visibilityVerdict(noneHits)))
+    report("8 读侧作用域闸口（B4/008 判据 A8；契约判据源＝test_ledger_recall_scope_gate.py）", scopeVerdict)
 
     # ── 8b. 索引顺序对照（热集查询用 (user,agent,id) 而非 (…,session)） ──
     ipath = os.path.join(tmp, "index_order.db")
