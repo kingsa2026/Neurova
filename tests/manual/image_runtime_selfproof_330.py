@@ -46,7 +46,8 @@ def demote():
 def runProbe(home: Path) -> str:
     r = subprocess.run([sys.executable, "-c", PROBE, str(home)],
                        capture_output=True, text=True, preexec_fn=demote,
-                       env={**os.environ, "HOME": str(home)})
+                       encoding="utf-8",
+                       env={**os.environ, "HOME": str(home), "PYTHONIOENCODING": "utf-8"})
     return (r.stdout.strip() or r.stderr.strip()).replace("\n", " ; ")
 
 def chownTree(path: Path, uid_: int, gid_: int):

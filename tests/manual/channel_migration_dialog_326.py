@@ -134,6 +134,7 @@ def buildHarness(stage: Path, outDir: Path) -> bool:
     proc = subprocess.run(
         ["npx", "vite", "build", "--config", f"{stage.name}/vite.config.ts"],
         cwd=str(FRONTEND), capture_output=True, text=True, timeout=600,
+        encoding="utf-8", errors="replace",
     )
     if proc.returncode != 0:
         print(proc.stdout[-2000:], file=sys.stderr)
