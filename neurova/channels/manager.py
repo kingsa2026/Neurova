@@ -346,11 +346,30 @@ class ChannelManager:
 
         # 统一出站分片：长回复按渠道单条上限切分逐条发，避免超限被截断/整条失败
         # （各平台 text 上限不同；此前全渠道单条整发且吞错）。非文本类型原样发。
-        from neurova.channels.message_chunker import split_message, text_limit_for
+        # 批 C（T1 已裁）：split_policy="forbid" 的系统生成文案（审批通知、兜底
+        # 错误）不拆分——超长按渠道上限诚实截断（显式标记 + 全文进日志）。
+        from neurova.channels.message_chunker import (
+            SPLIT_POLICY_ALLOW,
+            SPLIT_POLICY_FORBID,
+            split_message,
+            text_limit_for,
+            truncate_forbidden,
+        )
 
-        parts = [content]
-        if message_type == "text":
-            parts = split_message(content, text_limit_for(channel_type))
+        split_policy = str(kwargs.pop("split_policy", SPLIT_POLICY_ALLOW) or SPLIT_POLICY_ALLOW)
+        if split_policy not in (SPLIT_POLICY_ALLOW, SPLIT_POLICY_FORBID):
+            logger.warning("未知拆分策略 %r，按允许拆分处理", split_policy)
+            split_policy = SPLIT_POLICY_ALLOW
+        if message_type == "text" and split_policy == SPLIT_POLICY_FORBID:
+            truncated = truncate_forbidden(content, channel_type)
+            if truncated != content:
+                logger.info("系统通知禁拆分已截断（channel=%s chat=%s）全文：\n%s",
+                            channel_type, str(chat_id)[:20], content)
+            parts = [truncated]
+        else:
+            parts = [content]
+            if message_type == "text":
+                parts = split_message(content, text_limit_for(channel_type))
 
         # 批 F：失败片同片重试一次（抓瞬态），重试仍败落出口失败台账——
         # 此前只告警（半静默），失败片没有可查的归宿。
@@ -539,7 +558,21 @@ class ChannelManager:
                 try:
                     enqueued = queue.enqueue(message)
                 except IngressQueueUnavailable as e:
-                    logger.warning("Ingress queue unavailable, fail-open to direct dispatch: %s", e)
+                    # 批 D（T4 已裁有界直发）：旁路直发必留痕——同一 dispatch 路径
+                    # （行为不分叉）＋旁路台账行＋点名告警；旁路计数成为常驻读数后，
+                    # 队列可用性本身有了事实判据。
+                    logger.warning("入站队列不可用，旁路直发（已落旁路台账）: %s", e)
+                    bypass = self._get_bypass_ledger()
+                    if bypass is not None:
+                        try:
+                            bypass.recordBypass(
+                                channel_type=str(getattr(message, "channel_type", "") or ""),
+                                chat_id=str(getattr(message, "chat_id", "") or ""),
+                                message_id=str(getattr(message, "message_id", "") or ""),
+                                reason=str(e)[:200],
+                            )
+                        except Exception:  # noqa: BLE001 - 台账故障退化为只告警
+                            logger.warning("旁路台账写入失败（本轮退化为只告警）", exc_info=True)
                 else:
                     if not enqueued:
                         return  # 重复消息（tombstone 去重），不再直发
@@ -606,6 +639,41 @@ class ChannelManager:
             logger.warning("出口失败台账不可用，失败片退化为只告警: %s", e)
             self._outbound_ledger_failed = True
             return None
+
+    def _get_bypass_ledger(self):
+        """惰性取入站旁路台账（批 D）。测试注入 `manager.bypass_ledger`
+        （实例或 False 强制关闭）；打开失败退回 None——旁路退化为只告警。"""
+        injected = getattr(self, "bypass_ledger", None)
+        if injected is False:
+            return None
+        if injected is not None:
+            return injected
+        if getattr(self, "_bypass_ledger_failed", False):
+            return None
+        try:
+            from neurova.channels.outbound_ledger import ChannelBypassLedger
+
+            import os
+
+            db_path = callerPath(os.environ.get("NEUROVA_CHANNEL_BYPASS_LEDGER_DB"), "channel_outbound.db")
+            ledger = ChannelBypassLedger(db_path=db_path)
+            self.bypass_ledger = ledger
+            return ledger
+        except Exception as e:
+            logger.warning("旁路台账不可用，旁路直发退化为只告警: %s", e)
+            self._bypass_ledger_failed = True
+            return None
+
+    def getIngressBypassReadout(self, limit: int = 50) -> dict:
+        """旁路直发读数（批 D 读面）：总数＋最近记录；台账不可用如实报。"""
+        ledger = self._get_bypass_ledger()
+        if ledger is None:
+            return {"available": False, "total": None, "recent": []}
+        return {
+            "available": True,
+            "total": ledger.countBypass(),
+            "recent": ledger.queryBypass(limit=max(1, int(limit))),
+        }
 
     def _reply_kwargs(self, message: ChannelMessage) -> dict:
         """回发时携带的上下文：agent 归属（按实例查适配器）+ 群@提问者所需 sender/群标记。
@@ -710,6 +778,7 @@ class ChannelManager:
                             message.channel_type,
                             message.chat_id,
                             FALLBACK_ERROR_TEXT,
+                            split_policy="forbid",  # 批 C：兜底错误文案禁拆
                             **self._reply_kwargs(message),
                         )
                     except Exception as send_exc:

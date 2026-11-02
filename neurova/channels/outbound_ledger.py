@@ -118,3 +118,70 @@ class OutboundFailureLedger:
     def close(self) -> None:
         with self._lock:
             self._conn.close()
+
+
+_BYPASS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS ingress_bypass (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    channel_type TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT ''
+)
+"""
+
+
+class ChannelBypassLedger:
+    """入站旁路台账（批 D，T4 已裁有界直发）：队列不可用时的直发必须留痕——
+    旁路计数成为常驻读数后，队列可用性本身有了事实判据。
+
+    与 OutboundFailureLedger 同库同族（"出入口可观测单源族"）：一个 SQLite
+    文件两张表，不另建第二份库。打开失败由调用方退化为只告警（点名退化）。
+    """
+
+    def __init__(self, db_path):
+        self.db_path = str(db_path)
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        with self._conn:
+            self._conn.execute(_BYPASS_SCHEMA)
+
+    def recordBypass(self, *, channel_type: str, chat_id: str,
+                     message_id: str, reason: str = "") -> int:
+        """落一行旁路直发；返回行 id。"""
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO ingress_bypass (ts, channel_type, chat_id, message_id, reason)"
+                " VALUES (?,?,?,?,?)",
+                (time.time(), channel_type or "", chat_id or "", message_id or "", reason or ""),
+            )
+            return int(cur.lastrowid)
+
+    def queryBypass(self, *, channel_type: str = "", limit: int = 100) -> List[Dict[str, Any]]:
+        """按渠道过滤倒序读。"""
+        clauses, params = [], []
+        if channel_type:
+            clauses.append("channel_type = ?")
+            params.append(channel_type)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(max(1, int(limit)))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, ts, channel_type, chat_id, message_id, reason"
+                f" FROM ingress_bypass {where} ORDER BY id DESC LIMIT ?",
+                params,
+            ).fetchall()
+        keys = ("id", "ts", "channel_type", "chat_id", "message_id", "reason")
+        return [dict(zip(keys, r)) for r in rows]
+
+    def countBypass(self) -> int:
+        with self._lock:
+            return int(self._conn.execute(
+                "SELECT COUNT(*) FROM ingress_bypass").fetchone()[0])
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
