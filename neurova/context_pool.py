@@ -408,7 +408,7 @@ class ContextPool:
         """把作用域与归属标签注入 chunk.metadata（池的唯一写入咽喉）。
 
         标签三件套 + 作用域：
-        - `chat_scope`：读侧隔离闸口（`memory_scope.filter_by_scope`）的唯一判据。
+        - `chat_scope`：读侧隔离闸口的唯一判据（池读 `filter_by_tag`／视图 `filter_by_scope` 都读它）。
           缺它则 `scope_from_metadata` 恒判 direct —— 隔离契约形同虚设。
         - `session_id` / `agent_id` / `user_id`：隔离键与查询分区用。
 
@@ -819,9 +819,9 @@ class ContextPool:
     def _allowedRecallItems(self, items: List) -> List:
         """召回作用域闸口：本进程允许看到的作用域集（B4/008 判据 A8）。
 
-        与视图路径**同源**：调 `collaboration.memory_scope.filter_by_scope`，
-        判据取自各条 `metadata`。单聊/非协作轮只见 `direct`，群轮见
-        `direct + 本群`——本方法不重写任何阈值或前缀规则（第二份规则就是第二份事实源）。
+        与视图路径**同源**：本方法调 `memory_scope.filter_by_tag`、视图路径调 `filter_by_scope`，
+        两条入口都汇到 `allowed_scopes_for_tag`＋`scope_from_metadata`；判据取自各条 `metadata`。
+        单聊/非协作轮只见 `direct`，群轮见 `direct + 本群`——本方法不重写阈值或前缀规则（第二份规则＝第二份事实源）。
 
         本群/本房间的判定取 `self.turn_scope`（池的轮次作用域，由 orchestrator 每轮
         写入）：它是**写入侧打标与读侧放行的同一个值**，故不存在"写 room:A 读 room:B"
@@ -845,7 +845,7 @@ class ContextPool:
         双源合并去重（按内容 hash），持久源覆盖重启前历史。
 
         B4/008：持久层是**第二条读路径**，与视图路径同样过作用域闸口
-        （`_allowedRecallItems`，判据单源 `filter_by_scope`）。改前这条路径
+        （`_allowedRecallItems` → `filter_by_tag`，判据单源 `allowed_scopes_for_tag`）。改前这条路径
         按 session 精确等值过滤——单聊池恒空、无会话池全放行，两个方向都不对。
 
         Args:

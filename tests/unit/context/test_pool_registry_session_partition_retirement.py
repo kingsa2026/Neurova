@@ -15,7 +15,7 @@
 注册表的多池机制（`get_or_create` 按 `(user, agent, session)` 造池 + `query_agent`
 跨 session 分区调取）与 `ContextPool.isolation_key` 是**按池分会话**的隔离设计。
 而 T-02/ADR-0015 交付的真设计是**单池 + 作用域标签**：池是"永不丢失"的归档，
-`chat_scope` 随内容落进 metadata，隔离由 `filter_by_scope` 判，池归属不承担隔离。
+`chat_scope` 随内容落进 metadata，隔离由读侧闸口判（池 `filter_by_tag`／视图 `filter_by_scope`），池归属不承担隔离。
 
 两套机制并存的结果实测（2026-09-26，真 `ContextOrchestrator` 构造面）：
 

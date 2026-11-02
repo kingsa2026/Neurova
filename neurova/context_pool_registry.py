@@ -13,7 +13,7 @@
 `get_pool_count` 生命周期管理）。那是**按池分会话**的隔离设计，与
 `ContextPool.isolation_key` 同源；而 T-02 / ADR-0015 交付的真设计是
 **单池 + 作用域标签**：池是"永不丢失"的归档，隔离由内容的 `chat_scope`
-（随写入咽喉落进 metadata）经 `filter_by_scope` 判，池归属不承担隔离。
+（随写入咽喉落进 metadata）经读侧闸口判（池 `filter_by_tag`／视图 `filter_by_scope`），池归属不承担隔离。
 
 两套并存的结果实测（2026-09-26，真 `ContextOrchestrator` 构造面）：
 
