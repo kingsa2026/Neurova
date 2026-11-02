@@ -714,6 +714,7 @@ tests/unit/collaboration/test_yieldGateModelAttribution.py
 # 吞掉渠道应答（与网页那条 fail-open 同契约）。
 # 逐文件单跑 4 passed
 tests/unit/channels/test_channelTurnRunLedger.py
+tests/unit/channels/test_channelOutboundFailureLedger.py
 # P2-8 第三批：两条公开 API 入口 + "实现只许一份"的结构守卫。最硬的一条是**假成功**：
 # `/v1/chat` 超限那一轮原本回 `{"code":0,"message":"success","data":{"reply":…}}`——
 # 没跑的一轮被报成答完了（§6-8 那族形态的另一副面孔），现按各面本来的样子回 parked。
