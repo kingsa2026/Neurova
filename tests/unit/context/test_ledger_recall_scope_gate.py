@@ -11,8 +11,8 @@
 
 契约（修复后，判据 A8）：
 
-- `recall_evicted` 过与视图路径**同一个** `collaboration.memory_scope.filter_by_scope`
-  ——不新写第二份作用域规则与阈值；
+- `recall_evicted` 过与视图路径**同一对原语**（池读 `filter_by_tag`／视图 `filter_by_scope`，
+  二者汇于 `allowed_scopes_for_tag`）——不新写第二份作用域规则与阈值；
 - 单聊轮（`collab=False`）只见 `direct`；群 R 轮见 `direct + room:R`；跨房间互不可见；
 - 无会话池同样不得泄露房间内容；
 - 不能修过头：本群自己的归档仍可召回（隔离不等于全挡）；

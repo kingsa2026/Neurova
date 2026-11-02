@@ -93,7 +93,7 @@ class TestArchiveCarriesScopeAtWriteTime:
             md = chunk.metadata or {}
             assert md.get("chat_scope") == "room:project_roomB", (
                 f"归档条目缺作用域：metadata={md}——池侧没有写入口，"
-                "读侧 filter_by_scope 只能恒判 direct"
+                "读侧 scope_from_metadata 只能恒判 direct"
             )
             assert scope_from_metadata(md) == "room:project_roomB"
 

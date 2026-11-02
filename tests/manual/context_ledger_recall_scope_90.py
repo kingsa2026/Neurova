@@ -8,8 +8,8 @@
 验四件事（判据 A8 + 规格 D13）：
 - 群聊归档落库后，在**单聊轮**与**无会话池**召回均不可见（改前无会话池可见）；
 - 群轮可见 direct + 本群；他群互不可见；
-- 判据与视图路径同源：两条路径都经 `memory_scope.filter_by_scope`
-  （探针打在事实源函数上，复刻第二份规则会被抓出）；
+- 判据与视图路径同源：两条入口（池读 `filter_by_tag`／视图 `filter_by_scope`）都汇到
+  `memory_scope.allowed_scopes_for_tag`（探针打在这一个事实源函数上，复刻第二份规则会被抓出）；
 - 跨进程：另一进程同库开池召回，闸口对其同样生效（闸口不在进程内缓存里）。
 """
 import json
@@ -77,23 +77,26 @@ def recallFromChildProcess(dbPath, sessionId):
 
 
 def sameSourceProbe(dbPath):
-    """两路判据同源：召回路径必须走 `memory_scope.filter_by_scope`。
+    """两路判据同源：召回路径必须经 `memory_scope.allowed_scopes_for_tag`。
 
     探针打在**事实源函数**上。若召回侧自己复刻了一份作用域判定（第二份规则），
     这个探针就抓不到任何调用——那正是本判据要防的形态。
+    入口名自「批 3」起有两条（池读 `filter_by_tag`／视图 `filter_by_scope`），两条都汇到
+    `allowed_scopes_for_tag`，故探针下移到那一个更深的单点：少一层封装反而更严——任何一条
+    不经它的召回路径都会红（在册判据 `test_ledger_recall_scope_gate.py::test_same_judgementAsViewPath` 同形）。
     """
     from neurova.collaboration import memory_scope
     from neurova.context.eviction_ledger_db import EvictionLedgerDB
     from neurova.context_pool import ContextPool
 
-    calls = []
-    original = memory_scope.filter_by_scope
+    tags = []
+    original = memory_scope.allowed_scopes_for_tag
 
-    def counting(items, metadata_of, **kwargs):
-        calls.append(kwargs)
-        return original(items, metadata_of, **kwargs)
+    def countingTag(turn_scope_tag):
+        tags.append(turn_scope_tag)
+        return original(turn_scope_tag)
 
-    memory_scope.filter_by_scope = counting
+    memory_scope.allowed_scopes_for_tag = countingTag
     try:
         pool = ContextPool(
             user_id=USER_ID, agent_id=AGENT_ID, session_id="s_direct", ttl_seconds=0,
@@ -102,8 +105,8 @@ def sameSourceProbe(dbPath):
         pool.recall_evicted(limit=10)
         pool.close()
     finally:
-        memory_scope.filter_by_scope = original
-    return {"recall_path_calls": len(calls), "kwargs": calls}
+        memory_scope.allowed_scopes_for_tag = original
+    return {"recall_path_calls": len(tags), "tags_seen": tags}
 
 
 def main():
@@ -137,7 +140,7 @@ def main():
     probe = sameSourceProbe(dbPath)
     print(f"[5 判据同源探针] {json.dumps(probe, ensure_ascii=False)}")
     assert probe["recall_path_calls"] >= 1, (
-        "召回路径没走 memory_scope.filter_by_scope（复刻了第二份作用域规则）"
+        "召回路径没经 memory_scope.allowed_scopes_for_tag（复刻了第二份作用域规则）"
     )
 
     print(
