@@ -159,6 +159,73 @@ class TestFingerprintTracksIndexedText:
         assert stats["computed"] >= 1, "旧形状指纹被当作有效沿用 ⇒ 升级后仍可能带着旧向量检索"
 
 
+class TestAnnHandleInvalidation:
+    """加速面的缓存键必须跟着**被索引的集合**动（§6-476，承 §6-473 的同一病灶）。
+
+    ANN 本身无状态（`vector_ann.py` 里没有指纹、不判新鲜度），但它每次检索都按
+    `_recordVersions[uid]` 决定"复用 handle 还是重建"。这个版本号就是那条跳过决策的输入——
+    哪一处改了 `records` 却忘了动它，handle 就会继续用旧成员集合回答：**新增条目永远检索不到**
+    （被 `records.get(kid)` 过滤掉的是反方向，救不了这一头）。所以钉两头：长出来要能命中，
+    擦除掉要不再出现在 handle 里。
+    """
+
+    class _CountingBackend:
+        """ANN 后端是注入口，不是被测对象——它只负责把"每次 build 看到哪些 id"记下来。"""
+
+        name = "counting"
+
+        def __init__(self):
+            self.builds = []
+
+        def build(self, vectors):
+            self.builds.append(sorted(vectors))
+            return {"labels": list(vectors)}
+
+        def search(self, handle, query, topK):
+            return [(kid, 1.0) for kid in handle["labels"][:max(1, int(topK))]]
+
+    def _face(self, tmp_path, repo, backend):
+        idx = KnowledgeVectorIndex(
+            str(tmp_path / "annvec"), engine=StubEngine(),
+            annBackend=backend, annMinRecordCount=1,
+        )
+        idx.ensure_indexed(repo, ALICE)
+        return idx
+
+    def test_growthIsVisibleToAnnSearch(self, tmp_path, repo):
+        backend = self._CountingBackend()
+        idx = self._face(tmp_path, repo, backend)
+        assert idx.search("quantum", ALICE, top_k=10), "ANN 路应能给出命中"
+        firstLabels = list(backend.builds[-1])
+        assert len(firstLabels) == 2, "首轮 handle 应含 2 条"
+
+        made = repo.create_knowledge("a", title="Quantum Travel", content="quantum travel plan",
+                                     owner_user_id="1")
+        newKid = made["knowledge_id"]
+        idx.ensure_indexed(repo, ALICE)
+        hits = {h["id"] for h in idx.search("quantum", ALICE, top_k=10)}
+        assert newKid in hits, (
+            "集合长大了 handle 却没重建 ⇒ 新条目在 ANN 路永远检索不到；builds=%s" % backend.builds)
+        assert backend.builds[-1] != firstLabels, "handle 未重建即命中，说明它不是靠重建得到的"
+
+    def test_dropEntryRebuildsHandleWithoutTheErasedId(self, tmp_path, repo):
+        backend = self._CountingBackend()
+        idx = self._face(tmp_path, repo, backend)
+        victims = repo.visible_items(ALICE)
+        victim = victims[0]["knowledge_id"]
+        # 先检索一次，把 handle 建起来——不warm就没有"陈旧复用"可测，这格会假绿
+        warm = {h["id"] for h in idx.search("quantum", ALICE, top_k=10)}
+        assert victim in warm and len(backend.builds) == 1, (
+            "前置条件不成立（没建出可被复用的 handle）：warm=%s builds=%s" % (warm, backend.builds))
+
+        idx.dropEntry(victim)
+        hits = {h["id"] for h in idx.search("quantum", ALICE, top_k=10)}
+        assert victim not in hits, "擦除后该条仍被检索命中"
+        assert len(backend.builds) == 2 and victim not in backend.builds[-1], (
+            "擦除没有让 handle 重来：命中面今天靠 records 过滤兜住，但成员集合已经与实际入库内容脱钩"
+            "（同一形状的漂移在增长那一头就是漏召回）。builds=%s" % backend.builds)
+
+
 @pytest.fixture()
 def repo(tmp_path):
     r = KnowledgeRepository(str(tmp_path / "kb"))
