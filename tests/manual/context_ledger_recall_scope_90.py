@@ -68,7 +68,8 @@ def recallFromChildProcess(dbPath, sessionId):
         "print('|'.join(str(c.content) for c in pool.recall_evicted(limit=10)))\n"
         "pool.close()\n"
     ) % (ROOT, USER_ID, AGENT_ID, sessionId, USER_ID, AGENT_ID)
-    run = subprocess.run([sys.executable, "-c", code, dbPath], capture_output=True, text=True)
+    run = subprocess.run([sys.executable, "-c", code, dbPath], capture_output=True, text=True,
+                         encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     if run.returncode != 0:
         raise RuntimeError(f"子进程召回失败：\n{run.stdout[-1200:]}\n{run.stderr[-1200:]}")
     out = run.stdout.strip().splitlines()

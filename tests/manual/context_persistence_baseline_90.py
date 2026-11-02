@@ -154,11 +154,14 @@ def main():
         " ledger_db=EvictionLedgerDB(db_path=sys.argv[1], user_id='u1', agent_id='a1'))\n"
         "print('reader 常驻 %%d / recall_evicted %%d' %% (pool.resident_count(), len(pool.recall_evicted(query='固件升级'))))\n"
     ) % os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    childEnv = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     writerRun = subprocess.run(
-        [sys.executable, "-c", writerCode, xprocDb], capture_output=True, text=True
+        [sys.executable, "-c", writerCode, xprocDb], capture_output=True, text=True,
+        encoding="utf-8", env=childEnv,
     )
     readerRun = subprocess.run(
-        [sys.executable, "-c", readerCode, xprocDb], capture_output=True, text=True
+        [sys.executable, "-c", readerCode, xprocDb], capture_output=True, text=True,
+        encoding="utf-8", env=childEnv,
     )
     report("1b 真跨进程复核（D1 判据）", [
         "writer 进程（写入后即退出）: %s" % (writerRun.stdout.strip() or writerRun.stderr.strip()[-200:]),
