@@ -104,6 +104,6 @@ def test_posix_timeout_kills_grandchild():
     time.sleep(0.5)
     probe = subprocess.run(
         ["pgrep", "-f", "sleep 30"], capture_output=True, text=True,
-        timeout=SYSTEM_TOOL_WALL_S,
+        encoding="utf-8", timeout=SYSTEM_TOOL_WALL_S,
     )
     assert probe.stdout.strip() == ""

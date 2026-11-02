@@ -6,6 +6,7 @@
 - 附带验证 --force-restart 与 -y 别名可解析
 """
 
+import os
 import subprocess
 import sys
 import unittest
@@ -37,6 +38,8 @@ class TestStartArgParsing(unittest.TestCase):
             [sys.executable, str(START_PY), "--skip-install", "--check", *extra],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             timeout=CHECK_WALL_S,
         )
         return proc.returncode
@@ -53,7 +56,8 @@ class TestStartArgParsing(unittest.TestCase):
     def test_force_restart_flag_exists_in_help(self):
         proc = subprocess.run(
             [sys.executable, str(START_PY), "--help"],
-            capture_output=True, text=True, timeout=HELP_WALL_S,
+            capture_output=True, text=True, encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=HELP_WALL_S,
         )
         self.assertIn("--force-restart", proc.stdout)
 

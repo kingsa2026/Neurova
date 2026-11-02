@@ -153,6 +153,7 @@ class TestPackageExports:
 
     def test_import_is_stdlib_only_no_heavy_pull(self):
         """摘要模块只依赖标准库——import 期不得拉起 evolution 重链。"""
+        import os
         import subprocess
         import sys
 
@@ -162,7 +163,9 @@ class TestPackageExports:
             "print('ok')"
         )
         proc = subprocess.run([sys.executable, "-c", code], capture_output=True,
-                              text=True, cwd=str(PROJECT_ROOT), timeout=PROBE_WALL_S)
+                              text=True, encoding="utf-8",
+                              env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+                              cwd=str(PROJECT_ROOT), timeout=PROBE_WALL_S)
         assert proc.returncode == 0, proc.stderr[-800:]
 
 
