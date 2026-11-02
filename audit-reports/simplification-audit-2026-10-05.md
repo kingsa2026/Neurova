@@ -11175,3 +11175,25 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **一处刻意不动，登记在此**：`tests/manual/context_persistence_baseline_90.py:554` 那行把结论写进了字符串——「无会话池（session_id=None）召回条数 = %d，**且无 filter_by_scope 闸口 → 房间内容可见**」。它左边是运行时实算的数，右边是 2026-09-21 的结论；按现码该结论**已不成立**（`scope_from_metadata` 缺标即 `direct`，`allowed_scopes_for_tag("")` 只放 `{direct}`，房间内容取不到）。本批不改它，因为"该档第 8 节的现状陈述是否整片过时"属**基线取证档复跑复核**这一条更大的账——只改半句反而让同一档里一半新一半旧。
     - **仍开（不当自决）**：① 基线取证档 `context_persistence_baseline_90.py` 的"现状"各节需按今天重算（上面那条是其中一处，可能不止）；② §6-469 仍开①(a) 一字未变——`context_persistence_restart_90.py:54` 无条件 `pool._ledger_db.count()`，真 Agent 构造面给的仍是 None，该档 `assert wrote["ledger_enabled"]` 永远跑不到，属产品裁；③ manual 族"平台可跑性"标注（§6-469 仍开②）；④ cnb 两处写侧未实测（§6-465 仍开①）；⑤ `agent_workspaces/default` 两格预存红；⑥ §6-463 flaky skip；⑦ §6-444 两票；⑧ §6-461 仍开②；⑨ §6-459 仍开①；⑩ §6-468 仍开⑨／⑩；⑪ GitHub 缺 `v1.0.0-beta5` release；⑫ `PYTHONIOENCODING` 拼法 71 档 / 84 处无单源 helper（§6-469 另登）。
     - **下一枚空号现查**：条目行 `^4NN. ` 尾号现算 **469**；引用面尾号 470 的那一次命中即 §6-469 结尾"后继批次从 **§6-470** 起"那句指针，不构成占号 ⇒ 本格取 **470**，后继批次从 **§6-471** 起。本格落笔时 `origin/main..HEAD` 现算 **19 笔**未推（含 `93210197`／`6abf992a`／`e0b3480b`，本台账笔入库后 20），推送需单独点单，引用前一律现算。
+
+471. **取证档把结论写死、与同页实算读数并排印出——三份结论今天全假而读数全对；改由读数派生并上常驻闸（✅ `d5bbffb6` 生产池 0／测试/基建池 +158/−10；子集 769→770）** ✅🟢 —— 承 §6-470 仍开①，用户点单「继续清理台账」。
+    - **2026-11-02 实跑原文（三份结论 vs 同一页的实算读数）**：
+      · `模拟重启后的新实例：常驻 0 条；recall_evicted = 20（归档活不过重启）`——同一行左边的数就把括号里的话证伪；
+      · `结论：写入进程的归档在新进程里取不到 → A1 当前为红`——上一行刚印出 `recall_evicted 20`；
+      · `无会话池（session_id=None）召回条数 = 0，且无 filter_by_scope 闸口 → 房间内容可见`——印着 0 却说可见。
+      三份都是 2026-09-21 的台账时态，读数却是当天的；取证档手工跑、不进 CI，所以没人复核散文。
+    - **它已经差点带偏下一笔**：§6-469 登记的那条"生产复刻了第二份作用域规则"的假红，出处之一就是这句「且无 filter_by_scope 闸口」。⇒ 这类句子的代价不是难看，是**被当作今天的事实源引用**。
+    - **改法不是把句子改对**（改对的那句下次实现一变照样过时），而是**结论只能由读数派生**：派生口径收成单点 `tests/manual/_forensicsVerdicts.py`（`tailCount`／`a1Verdict`／`visibilityVerdict`），与同族 `_liveVerifyIsolation.py` 一个格局；解析不出来时点名"本行不可用"，绝不沿用上一次运行留下的话。
+    - **常驻闸两层**（新判据 `tests/unit/context/test_baselineForensicsVerdictsDeriveFromReadings.py`，5 格）：形态格钉那六串字面量一出现即红（整串钉，不钉"不可见／活不过"这种散词——散词是派生分支的产物，钉它们会把正确修法判红）；反向格钉派生通道确实接上（**只把结论行删掉不算修好**）；另有一格防判据自己空转——取证档路径变了就直接抛，"没有写死结论"就不代表任何事。这一格当场起作用：首跑就把 `parents[2]` 写错的事暴露成 `is_file()` False，否则本批会量到一个不存在的文件上还报"全绿"。
+    - **红→绿（逐字）**：红＝把取证档退回 `HEAD` 那一版复跑该档 ⇒ `FAILED ::test_noHardcodedVerdictSurvives` ＋ `FAILED ::test_derivationIsActuallyWired`，`E   assert 'from tests.manual._forensicsVerdicts import' in '#!/usr/bin/env python3...'`，`2 failed, 3 passed`（红落在结构断言上，不是 import 噪声）→ 绿＝改后同档 `5 passed`，逐文件单跑三次同读数后才入册。
+    - **活体**：整档 exit 0、12 节全出、reader 线程异常 0，三份结论变成 `⇒ 台账写入已落盘、归档活得过重启`／`⇒ A1 绿（新进程取得到写入进程的归档）`／`⇒ 房间内容不可见；挡它的是作用域闸口`。这一层只证"报告行不再与自身读数矛盾"；**契约本身的事实源仍是** `test_context_persistence_restart.py::test_archive_survives_restart` 与 `test_ledger_recall_scope_gate.py::test_sessionless_pool_never_sees_room_content`（本格点名，绝不让取证档的散文继续充当事实源）。
+    - **同根因扫荡（教义第 5 条）**：`tests/manual/*.py` 里其余带「永远／恒／不可达」字样的落点全是 **assert 消息**（`context_ledger_gc_90.py:117`、`fold_layer_index_t11b_90.py:174`、`channelVoiceFactorySeam_live.py:104` 等）——断言只在失败时说话，天然不与读数冲突，属正例不动。写死结论并与实算读数并排印出的，全仓只此一档三处。
+    - **一处自我更正（本批判的正是自己上批的扫荡口径）**：§6-470 那批只过了 `--include=*.py`，漏掉 CI 注册注释面——`scripts/ci/protected_tests.txt:539` 与 `protected_tests.3.txt:174` 两条注释同样写着"改后过 `memory_scope.filter_by_scope`"，本批改成"池读 `filter_by_tag`／视图 `filter_by_scope`，二者汇于 `allowed_scopes_for_tag`"。`docs/` 里另有 10 处（09-21 工单、台账、审计、设计档）属**过程档案的历史陈述**，不改写——与 §6-470「视图路径确实调 filter_by_scope 的那几句一字未动」同一原则。
+    - **本批顺手给台账自身做了一次体检，量出三类真问题（下一批的票，本批只登记不顺手改）**：
+      ① **悬空引用**：条目行共 364 格、尾号 470，但有 **11 个号没有条目行却被正文引用**——§6-221（6 次）、§6-420（6 次）、§6-435（2 次），§6-245／252／256／258／260／263／436／446 各 1 次。
+      ② **「后继」写反两处**：条目 442 写后继 440（倒退），条目 456 写后继 459（跳号）。
+      ③ **在册编号守卫看不见这些**：`tests/unit/ci/test_auditLedgerNumbering.py` 今天只有两把尺（同号双格 ＋ 尾号单调前进），**不查引用面**——上面三类它全绿着过（9 passed）。拟修＝加第三把尺「引用面里的号必须有条目行」，并按本仓棘轮手法把现存 11 号登成基线（只许降、降要显式收），而不是指望谁下次记得查。
+      ④ 体检探针自己的一课：首版用 `^(\d{3})\. ` 数条目行，把台账的 `451. (续)`／`452. (续 2)` 续格误判成**重号**。守卫的口径是 `^(\d{2,3})\. \*\*`（号后必须紧跟加粗），续格形状天然排除在外。⇒ 新闸必须抄守卫同一个正则，并把「(续)」形状做成反证格，否则下一批又造出一批自假问题。
+    - **口径**：生产池 0（`d5bbffb6` 无 `neurova/` 改动）；测试/基建池 **+158/−10**＝单点新档 43 ＋ 判据新档 89 ＋ 取证档 +20/−9 ＋ 注册索引 +5/−1 ＋ 分片 1 +1/−0。在册子集 **769→770**；`test_protected_subset_shards` ＋ `TestProtectedSubsetEntriesAreTracked` 合跑 **31 passed**（新档先 `git add` 再复跑——§6-444 记过同一条：清单指着未跟踪文件即红，红得对）。
+    - **仍开（不当自决）**：① 上面 ①②③ 那三类台账自身缺口（下一批的票）；② §6-469 仍开①(a) 一字未变——`context_persistence_restart_90.py:54` 无条件 `pool._ledger_db.count()`，真 `Agent` 构造面给的仍是 None，该档 `assert wrote["ledger_enabled"]` 永远跑不到，属产品裁；③ manual 族"平台可跑性"标注；④ cnb 两处写侧未实测（§6-465 仍开①）；⑤ `agent_workspaces/default` 两格预存红；⑥ §6-463 flaky skip；⑦ §6-444 两票；⑧ §6-461 仍开②；⑨ §6-459 仍开①；⑩ §6-468 仍开⑨／⑩；⑪ GitHub 缺 `v1.0.0-beta5`；⑫ `PYTHONIOENCODING` 拼法 71 档 / 84 处无单源 helper。
+    - **下一枚空号现查**：条目行尾号现算 **470**；引用面尾号 471 的那一次命中即 §6-470 结尾"后继批次从 **§6-471** 起"那句指针，不构成占号 ⇒ 本格取 **471**，后继批次从 **§6-472** 起。本格落笔时 `origin/main..HEAD` 现算 **21 笔**未推（含 `e0b3480b`／`978292f1`／`d5bbffb6`，本台账笔入库后 22），推送需单独点单，引用前一律现算。
