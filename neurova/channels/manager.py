@@ -64,6 +64,10 @@ def _get_session_sync_manager():
 MessageHandler = Callable[[ChannelMessage], Coroutine[Any, Any, str]]
 
 
+#: 失败片同片重试次数（批 F 具名常量；0 = 不重试。重试仍败落出口失败台账）
+OUTBOUND_CHUNK_RETRIES = 1
+
+
 class ChannelManager:
     """
     渠道管理器
@@ -345,14 +349,47 @@ class ChannelManager:
         if message_type == "text":
             parts = split_message(content, text_limit_for(channel_type))
 
+        # 批 F：失败片同片重试一次（抓瞬态），重试仍败落出口失败台账——
+        # 此前只告警（半静默），失败片没有可查的归宿。
+        ledger = self._get_outbound_ledger()
         first_id: Optional[str] = None
         failed = 0
-        for part in parts:
-            result = await adapter.send_message(chat_id, part, message_type, **kwargs)
+        for partIndex, part in enumerate(parts, start=1):
+            result: Optional[str] = None
+            last_error = ""
+            for attempt in range(1, OUTBOUND_CHUNK_RETRIES + 2):
+                try:
+                    result = await adapter.send_message(chat_id, part, message_type, **kwargs)
+                    last_error = ""
+                except Exception as e:  # noqa: BLE001 - 异常按失败片记账，不静默上抛
+                    result = None
+                    last_error = f"{type(e).__name__}: {e}"[:200]
+                if result is not None:
+                    break
+                if attempt <= OUTBOUND_CHUNK_RETRIES:
+                    logger.warning("渠道 %s 分片发送失败，重试（chat=%s，第 %d/%d 片）",
+                                   channel_type, str(chat_id)[:20], partIndex, len(parts))
             if result is None:
                 failed += 1
-                logger.warning("渠道 %s 分片发送失败（chat=%s，第 %d/%d 片）",
-                               channel_type, str(chat_id)[:20], parts.index(part) + 1, len(parts))
+                if ledger is not None:
+                    try:
+                        row_id = ledger.recordFailure(
+                            channel_type=channel_type,
+                            chat_id=str(chat_id),
+                            agent_id=agent_id,
+                            part_index=partIndex,
+                            total_parts=len(parts),
+                            attempts=OUTBOUND_CHUNK_RETRIES + 1,
+                            error=last_error,
+                            content=str(part),
+                        )
+                        logger.error("渠道 %s 分片发送失败已落出口台账（chat=%s，第 %d/%d 片，尝试 %d 次，行 id=%s）",
+                                     channel_type, str(chat_id)[:20], partIndex, len(parts),
+                                     OUTBOUND_CHUNK_RETRIES + 1, row_id)
+                    except Exception:  # noqa: BLE001 - 台账故障退化为只告警，不阻断发送主流程
+                        logger.warning("出口失败台账写入失败（本轮退化为只告警）", exc_info=True)
+                        logger.error("渠道 %s 分片发送失败（chat=%s，第 %d/%d 片）",
+                                     channel_type, str(chat_id)[:20], partIndex, len(parts))
             elif first_id is None:
                 first_id = result
             await self._sync_reply_to_session(session_scope, part, channel_type)
@@ -540,6 +577,31 @@ class ChannelManager:
         except Exception as e:
             logger.warning("Ingress queue unavailable, fail-open to direct dispatch: %s", e)
             self._ingress_queue_failed = True
+            return None
+
+    def _get_outbound_ledger(self):
+        """惰性取出口失败台账（批 F）。测试可注入 `manager.outbound_ledger`
+        （实例，或 False 强制关闭）；打开失败退回 None——失败片退化为只告警
+        （与入站队列 fail-open 同形，但必须点名退化本身）。"""
+        injected = getattr(self, "outbound_ledger", None)
+        if injected is False:
+            return None
+        if injected is not None:
+            return injected
+        if getattr(self, "_outbound_ledger_failed", False):
+            return None
+        try:
+            from neurova.channels.outbound_ledger import OutboundFailureLedger
+
+            import os
+
+            db_path = callerPath(os.environ.get("NEUROVA_CHANNEL_OUTBOUND_LEDGER_DB"), "channel_outbound.db")
+            ledger = OutboundFailureLedger(db_path=db_path)
+            self.outbound_ledger = ledger
+            return ledger
+        except Exception as e:
+            logger.warning("出口失败台账不可用，失败片退化为只告警: %s", e)
+            self._outbound_ledger_failed = True
             return None
 
     def _reply_kwargs(self, message: ChannelMessage) -> dict:
