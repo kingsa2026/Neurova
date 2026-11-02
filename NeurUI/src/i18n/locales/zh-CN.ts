@@ -1849,6 +1849,7 @@ export default {
     stats: '统计信息',
     audit: '审计日志',
     waitingHuman: '等待人工',
+    ingressBypass: '入站旁路',
     longestWaitMinutes: '最久等待（分钟）',
     benchmark: '基准测试',
     runtime: '运行时',

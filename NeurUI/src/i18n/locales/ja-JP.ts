@@ -1837,6 +1837,7 @@ export default {
     stats: '統計情報',
     audit: '監査ログ',
     waitingHuman: '対応待ち',
+    ingressBypass: '入站バイパス',
     longestWaitMinutes: '最長待ち（分）',
     benchmark: 'ベンチマーク',
     runtime: 'ランタイム',

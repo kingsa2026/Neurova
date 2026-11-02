@@ -28,6 +28,7 @@
       <GlassStatCard :label="t('system.warnings')" :value="stats.warnings ?? 0" emoji="⚠️" />
       <GlassStatCard :label="t('system.waitingHuman')" :value="waitingHuman" emoji="⏳" />
       <GlassStatCard :label="t('system.longestWaitMinutes')" :value="longestWaitMinutes" emoji="⌛" />
+      <GlassStatCard :label="t('system.ingressBypass')" :value="ingressBypass" emoji="↩️" />
     </div>
 
     <!-- Audit table -->
@@ -73,7 +74,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { listAuditRecords, exportAudit as exportAuditApi } from '@/api/modules/audit'
-import { getDesktopAuditWaiting, getPendingApprovals } from '@/api/modules/governance'
+import { getDesktopAuditWaiting, getIngressBypassStats, getPendingApprovals } from '@/api/modules/governance'
 import { mergeWaitingHuman } from '@/utils/waitingHuman'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
@@ -93,6 +94,8 @@ const total = ref(0)
 /** 待人队列读数（N-3）：几条、最久等多久；取不到时留痕，卡片保持 0。 */
 const waitingHuman = ref(0)
 const longestWaitMinutes = ref(0)
+/** 入站旁路直发读数（批 D）：队列可用性的事实判据；独立卡片，不混入"待人"。 */
+const ingressBypass = ref(0)
 
 const filters = ref<{ user: string; action: string | undefined; dateRange: any }>({
   user: '',
@@ -160,9 +163,10 @@ const onPageChange = (p: number, ps: number) => { page.value = p; pageSize.value
 
 const fetchWaitingHuman = async () => {
   // 两个待人来源并行取；任一失败保留另一来源并留痕，不把"取不到"静默读成 0。
-  const [auditRes, approvalsRes] = await Promise.allSettled([
+  const [auditRes, approvalsRes, bypassRes] = await Promise.allSettled([
     getDesktopAuditWaiting(),
     getPendingApprovals(),
+    getIngressBypassStats(),
   ])
   if (auditRes.status === 'rejected') {
     console.error(
@@ -188,12 +192,22 @@ const fetchWaitingHuman = async () => {
     ? (approvalsRes.value?.data?.requests ?? [])
     : null
 
+  if (bypassRes.status === 'rejected') {
+    console.error(
+      `[waitingHuman] 旁路直发读数失败 HTTP ${bypassRes.reason?.response?.status ?? '网络异常'}`,
+      bypassRes.reason,
+    )
+  }
   const summary = mergeWaitingHuman(
     auditSource,
     requests ? requests.map((req: any) => req.created_at) : null,
   )
   waitingHuman.value = summary.count
   longestWaitMinutes.value = Math.floor(summary.oldestWaitSeconds / 60)
+  // 旁路计数独立呈现：机器事件不冒充"人在等"（口径修正，随格入档 §6-488）
+  if (bypassRes.status === 'fulfilled') {
+    ingressBypass.value = Number(bypassRes.value?.data?.total ?? 0)
+  }
 }
 
 onMounted(() => {

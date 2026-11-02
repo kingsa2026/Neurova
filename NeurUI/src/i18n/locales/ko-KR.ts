@@ -1837,6 +1837,7 @@ export default {
     stats: '통계 정보',
     audit: '감사 로그',
     waitingHuman: '사람 대기 중',
+    ingressBypass: '인그레스 우회',
     longestWaitMinutes: '최장 대기(분)',
     benchmark: '벤치마크',
     runtime: '런타임',

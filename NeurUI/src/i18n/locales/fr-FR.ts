@@ -1837,6 +1837,7 @@ export default {
     stats: 'Statistiques',
     audit: 'Journaux d\'audit',
     waitingHuman: 'En attente humaine',
+    ingressBypass: 'Contournement entrant',
     longestWaitMinutes: 'Attente max. (min)',
     benchmark: 'Référenciel',
     runtime: 'Environnement d\'exécution',

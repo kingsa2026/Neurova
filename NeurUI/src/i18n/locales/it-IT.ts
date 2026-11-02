@@ -1837,6 +1837,7 @@ export default {
     stats: 'Statistiche',
     audit: 'Log di audit',
     waitingHuman: 'In attesa di una persona',
+    ingressBypass: 'Bypass in ingresso',
     longestWaitMinutes: 'Attesa massima (min)',
     benchmark: 'Benchmark',
     runtime: 'Ambiente di esecuzione',

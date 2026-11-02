@@ -155,3 +155,10 @@ export function rollbackSkill(skillId: string, operator: string, agentId?: strin
     { operator, ...(agentId ? { agent_id: agentId } : {}) }
   )
 }
+
+/** 入站旁路直发读数（批 D 读面）：队列不可用时旁路直发的总数＋最近记录。 */
+export function getIngressBypassStats() {
+  return api.get<ApiResponse<{ available: boolean; total: number | null; recent: Array<Record<string, unknown>> }>>(
+    `/channel-adapters/ingress/bypass-stats`
+  )
+}
