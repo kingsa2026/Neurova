@@ -67,6 +67,9 @@ MessageHandler = Callable[[ChannelMessage], Coroutine[Any, Any, str]]
 #: 失败片同片重试次数（批 F 具名常量；0 = 不重试。重试仍败落出口失败台账）
 OUTBOUND_CHUNK_RETRIES = 1
 
+#: 处理器异常时发给用户的兜底文案（批 G1 单源：发送点引常量，不许再写内联字面量）
+FALLBACK_ERROR_TEXT = "抱歉，处理消息时出现错误，请稍后重试。"
+
 
 class ChannelManager:
     """
@@ -700,16 +703,18 @@ class ChannelManager:
                         await self._sendReplyItems(message, reply)
                 except Exception as e:
                     logger.exception("Message handler error: %s", e)
-                    # 尝试发送错误提示
+                    # 尝试发送错误提示（文案单源 FALLBACK_ERROR_TEXT；回发自身
+                    # 失败必须出声——吞成无声就连"兜底也没兜住"都看不到了）
                     try:
                         await self.send_message(
                             message.channel_type,
                             message.chat_id,
-                            "抱歉，处理消息时出现错误，请稍后重试。",
+                            FALLBACK_ERROR_TEXT,
                             **self._reply_kwargs(message),
                         )
-                    except Exception:
-                        pass
+                    except Exception as send_exc:
+                        logger.warning("兜底错误文案回发失败（chat=%s）: %s",
+                                       str(message.chat_id)[:20], send_exc)
         finally:
             try:
                 await budget.release(holdKey)

@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from neurova.core.logger import get_logger
-from neurova.interfaces.api_standard import APIError, ErrorCodes
+from neurova.interfaces.api_standard import APIError, DEFAULT_ERROR_MESSAGES, ErrorCodes
 
 logger = get_logger(__name__)
 
@@ -53,6 +53,22 @@ _SERVER_FAULT_CODES = frozenset({
 })
 
 
+def resolveErrorMessage(code: int, message: str) -> str:
+    """信封 message 的单点归一（批 G2）：抛出点给了话用原话；空话回落该码的
+    默认文案（DEFAULT_ERROR_MESSAGES）；连默认都没有就点名码本身——
+    绝不让空字符串过 API 边界（前端把 detail 原样显示给用户）。"""
+    if message and str(message).strip():
+        return str(message)
+    try:
+        default = DEFAULT_ERROR_MESSAGES.get(ErrorCodes(int(code)))
+    except (ValueError, TypeError):
+        default = None
+    if default:
+        return default
+    logger.warning("错误码 %s 既无原话也无默认文案——按码本身呈现", code)
+    return f"错误码 {code}"
+
+
 def register_error_handlers(app: FastAPI) -> None:
     """在应用上注册 APIError 全局处理器"""
 
@@ -69,7 +85,7 @@ def register_error_handlers(app: FastAPI) -> None:
             status_code = 500
         body = {
             "code": exc.code,
-            "message": exc.message,
+            "message": resolveErrorMessage(exc.code, exc.message),
             "timestamp": time.time(),
         }
         if exc.data is not None:
