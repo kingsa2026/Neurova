@@ -53,8 +53,11 @@ class FakeChannelManager:
             await handler(message)
 
 
-def _cfg(approver="u1", timeout=0.4):
-    return {"approver": approver, "channel": "feishu", "message": "请审批", "timeout": timeout}
+def _cfg(approver="u1", timeout=0.4, chat_id=None):
+    cfg = {"approver": approver, "channel": "feishu", "message": "请审批", "timeout": timeout}
+    if chat_id is not None:
+        cfg["chat_id"] = chat_id  # 批 B1：同会话已裁串行排队，多未决并存只在跨会话
+    return cfg
 
 
 def _ctx(execution_id, node_id):
@@ -84,8 +87,10 @@ def manager(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_bareKeywordDoesNotApproveTwoPendingNodes(manager):
-    t1 = asyncio.create_task(builtin.exec_approval(_cfg(), _ctx("execA", "n1")))
-    t2 = asyncio.create_task(builtin.exec_approval(_cfg(), _ctx("execB", "n2")))
+    """同一审批人两个未决（批 B1 语义适配：同会话已裁串行排队，多未决并存
+    只可能跨会话）——裸关键词定向不了任何一个，宁可都超时。"""
+    t1 = asyncio.create_task(builtin.exec_approval(_cfg(chat_id="oc_1"), _ctx("execA", "n1")))
+    t2 = asyncio.create_task(builtin.exec_approval(_cfg(chat_id="oc_2"), _ctx("execB", "n2")))
     assert await _waitUntil(lambda: len(manager.handlers) == 2)
 
     await manager.fanout("approve", "u1")
@@ -97,8 +102,8 @@ async def test_bareKeywordDoesNotApproveTwoPendingNodes(manager):
 
 @pytest.mark.asyncio
 async def test_explicitApprovalIdResolvesOnlyItsNode(manager):
-    t1 = asyncio.create_task(builtin.exec_approval(_cfg(), _ctx("execA", "n1")))
-    t2 = asyncio.create_task(builtin.exec_approval(_cfg(), _ctx("execB", "n2")))
+    t1 = asyncio.create_task(builtin.exec_approval(_cfg(chat_id="oc_1"), _ctx("execA", "n1")))
+    t2 = asyncio.create_task(builtin.exec_approval(_cfg(chat_id="oc_2"), _ctx("execB", "n2")))
     assert await _waitUntil(lambda: len(manager.handlers) == 2)
 
     await manager.fanout("审批ID: execA 节点: n1 approve", "u1")
@@ -148,12 +153,14 @@ async def test_pendingRegistryIsEmptyAfterTimeout(manager):
 
 
 def test_timeoutDefaultIsANamedBudget():
-    """60/3600 这类等待预算必须是具名常量，便于与父墙一起核算。"""
+    """60/3600 这类等待预算必须是具名常量，便于与父墙一起核算。
+    （批 B1 后 exec_approval 是串行排队外壳，等待体在 _execApprovalCore——两个都扫。）"""
     import inspect
 
-    source = inspect.getsource(builtin.exec_approval)
-    assert "DEFAULT_APPROVAL_TIMEOUT_SECONDS" in source
     assert isinstance(builtin.DEFAULT_APPROVAL_TIMEOUT_SECONDS, (int, float))
+    assert "DEFAULT_APPROVAL_TIMEOUT_SECONDS" in inspect.getsource(builtin._execApprovalCore), (
+        "等待预算常量不在等待实现体里（排队外壳与等待体哪段丢了具名都算破）"
+    )
 
 
 @pytest.mark.asyncio
