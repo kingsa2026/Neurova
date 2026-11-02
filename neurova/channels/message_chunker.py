@@ -40,6 +40,33 @@ def text_limit_for(channel_type: str) -> int:
     return CHANNEL_TEXT_LIMITS.get(channel_type, DEFAULT_TEXT_LIMIT)
 
 
+# ═════════════════════════════════════════════════════════════════
+# 拆分策略登记表（批 C，T1 已裁"仅系统生成文案"）
+# -----------------------------------------------------------------
+# 消息类别 → 是否允许拆分。agent 正文与管理员手动发送保持"可靠性优先拆分"；
+# 系统生成的结构化出口（审批通知、兜底错误文案）**禁拆**——拆散丢上下文。
+# 禁拆类超长时按渠道上限**诚实截断**：显式标记 + 全文进日志，不静默丢字符。
+# 适用范围（T1）：agent 正文不设词数预算、不改变拆分行为。
+# ═════════════════════════════════════════════════════════════════
+SPLIT_POLICY_ALLOW = "allow"
+SPLIT_POLICY_FORBID = "forbid"
+
+#: 禁拆类的字符预算（发送层断言）：与最小渠道上限（wecom 1800）对齐，
+#: 留出截断标记余量。系统生成文案超过它就该改写文案，不是靠拆分兜底。
+SYSTEM_NOTICE_MAX_CHARS = 1700
+
+_TRUNCATION_MARKER = "\n\n⚠️ 内容超长已截断（系统通知禁拆分），全文见服务端日志。"
+
+
+def truncate_forbidden(text: str, channel_type: str) -> str:
+    """禁拆类的诚实截断：预算取渠道上限与系统文案预算的较小值，
+    超长截断并附显式标记——绝不静默丢字符，也绝不拆成多条。"""
+    budget = min(text_limit_for(channel_type), SYSTEM_NOTICE_MAX_CHARS)
+    if len(text) <= budget:
+        return text
+    return text[: budget - len(_TRUNCATION_MARKER)] + _TRUNCATION_MARKER
+
+
 def split_message(text: str, limit: int) -> List[str]:
     """把长文本按段落/句子边界切成 <=limit 的多段；短文本原样单段。
 

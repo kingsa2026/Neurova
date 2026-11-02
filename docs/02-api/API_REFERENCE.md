@@ -333,7 +333,7 @@
 > 守卫 `tests/unit/api/test_authSurfaceFreshness.py` 逐字比对，漂移即红。
 > 口径：只认**路由依赖图**里的身份/角色门；在 handler 体内自验 token 的那一类**未覆盖**，要确认它只能真打请求。404/405 不算门。
 
-**汇总**：路由 969 条（含方法展开）——需认证 **863**、公开 **106**。
+**汇总**：路由 970 条（含方法展开）——需认证 **863**、公开 **107**。
 
 | 模块前缀 | 路由 | 需认证 | 公开 |
 |----------|------|--------|------|
@@ -350,7 +350,7 @@
 | `benchmark` | 14 | 14 | 0 |
 | `budgets` | 7 | 0 | 7 |
 | `builder` | 5 | 5 | 0 |
-| `channel-adapters` | 10 | 8 | 2 |
+| `channel-adapters` | 11 | 8 | 3 |
 | `channel-configs` | 16 | 16 | 0 |
 | `channel-sharing` | 7 | 7 | 0 |
 | `chat` | 6 | 6 | 0 |
@@ -469,6 +469,7 @@
 - `GET /api/v1/budgets/status/{agent_id}`
 - `GET /api/v1/budgets/{scope}/{identifier}/status`
 - `GET /api/v1/channel-adapters/health/all`
+- `GET /api/v1/channel-adapters/ingress/bypass-stats`
 - `POST /api/v1/channel-adapters/{channel_type}/webhook`
 - `GET /api/v1/collaboration/history`
 - `GET /api/v1/collaboration/sessions`

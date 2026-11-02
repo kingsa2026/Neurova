@@ -2281,6 +2281,7 @@ async def _execApprovalCore(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict
             return await channel_manager.send_message(
                 channel_type=channel, chat_id=chat_id, content=notificationText,
                 message_type="text",
+                split_policy="forbid",  # 批 C：审批通知是结构化出口，禁拆（超长诚实截断）
             )
         results = await channel_manager.broadcast_message(
             content=notificationText, message_type="text")
