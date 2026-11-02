@@ -32,7 +32,7 @@
 | `NeurUI/src/api/modules/files.ts` | `/files` | 是 | 7 |
 | `NeurUI/src/api/modules/firewall.ts` | `/firewall` | 是 | 2 |
 | `NeurUI/src/api/modules/generation.ts` | `/generation` | 是 | 6 |
-| `NeurUI/src/api/modules/governance.ts` | `/governance` | **否** | 3 |
+| `NeurUI/src/api/modules/governance.ts` | `/governance` | **否** | 4 |
 | `NeurUI/src/api/modules/groups.ts` | `/groups` | 是 | 2 |
 | `NeurUI/src/api/modules/growth.ts` | `/growth` | 是 | 5 |
 | `NeurUI/src/api/modules/health.ts` | `/health` | 是 | 5 |
