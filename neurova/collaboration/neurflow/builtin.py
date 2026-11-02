@@ -2138,6 +2138,33 @@ def _pendingApprovalCountForTests() -> int:
         return len(_PENDING_APPROVALS)
 
 
+#: 同一 chat 会话的审批串行锁登记表（批 B1，T2 已裁串行排队）：键与出口预算
+#: 的 holdKey 同口径（`chat:{channel}:{chat_id}`）。锁对象随会话数有界增长、
+#: **不回收**——"有等待者时换锁"的窗口会让第二单和第三单并行，破坏串行语义；
+#: 会话数在部署里有限，锁对象是小常数。
+_CHAT_APPROVAL_LOCKS: Dict[str, "asyncio.Lock"] = {}
+_CHAT_APPROVAL_LOCKS_LOCK = threading.Lock()
+
+#: 审批等待的轮询间隔（秒）。threading.Event 不能被 await：此前把
+#: `event.wait(timeout)` 整体丢进默认线程池（run_in_executor），任务取消时
+#: 那颗线程卡在 wait 里最长泄漏 timeout 秒；轮询让取消即时生效、线程零占用。
+APPROVAL_WAIT_POLL_INTERVAL_S = 0.2
+
+
+def _chatApprovalLock(chatQueueKey: str) -> "asyncio.Lock":
+    with _CHAT_APPROVAL_LOCKS_LOCK:
+        lock = _CHAT_APPROVAL_LOCKS.get(chatQueueKey)
+        if lock is None:
+            lock = asyncio.Lock()
+            _CHAT_APPROVAL_LOCKS[chatQueueKey] = lock
+        return lock
+
+
+def _resetChatApprovalQueuesForTests() -> None:
+    with _CHAT_APPROVAL_LOCKS_LOCK:
+        _CHAT_APPROVAL_LOCKS.clear()
+
+
 def _mentionsToken(text: str, token: str) -> bool:
     if not token:
         return False
@@ -2190,6 +2217,22 @@ def _keywordHit(text: str, keyword: str) -> bool:
 
 
 async def exec_approval(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """审批节点执行器（批 B1 外壳：同会话串行排队）。
+
+    同一 `chat:{channel}:{chat_id}` 至多一个未决在"问"（T2 已裁串行排队）：
+    锁从发通知一直持到等待终结，第二单在前一单终结后自动继续；**排队时间
+    不计入本单超时**（超时只管轮到自己之后的等待）。广播（无 channel）没有
+    会话可排，维持原行为。等待实现与通知细节见 `_execApprovalCore`。
+    """
+    channel = str(config.get("channel", "") or "")
+    chat_id = str(config.get("chat_id", "") or config.get("approver", "") or "")
+    if not channel or not chat_id:
+        return await _execApprovalCore(config, ctx)
+    async with _chatApprovalLock(f"chat:{channel}:{chat_id}"):
+        return await _execApprovalCore(config, ctx)
+
+
+async def _execApprovalCore(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
     """
     审批节点执行器
 
@@ -2341,10 +2384,16 @@ async def exec_approval(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str
     logger.info("等待审批回复: %s, handler_id=%s", approval_id, handler_id)
 
     try:
-        # 等待审批事件，带超时
-        # 使用 run_in_executor 将 threading.Event.wait() 包装为异步操作
-        # threading.Event.wait(timeout) 返回 True（事件已设置）或 False（超时）
-        event_set = await loop.run_in_executor(None, approval_event.wait, timeout)
+        # 等待审批事件，带超时（批 B1：轮询换掉 run_in_executor——threading.Event
+        # 不能被 await，此前 event.wait 整体进默认线程池，取消时那颗线程卡在
+        # wait 里最长泄漏 timeout 秒；轮询让取消即时生效、线程零占用）。
+        deadline = loop.time() + timeout
+        while not approval_event.is_set():
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(APPROVAL_WAIT_POLL_INTERVAL_S, remaining))
+        event_set = approval_event.is_set()
 
         if not event_set:
             # threading.Event.wait 返回 False 表示超时
