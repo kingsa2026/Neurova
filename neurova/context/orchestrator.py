@@ -211,10 +211,14 @@ class ContextOrchestrator:
             self._context_health = self._emptyContextHealth()
             _ledger_db = self._buildLedgerDb(agent_ref)
             _summarizer = self._buildSummarizer(agent_ref)
+            from neurova.context_pool import poolIdentityOf
+
+            # 构造侧与查询侧同一次派生（此前 ctor 自己 getattr 一遍，恒兜成 default）
+            _poolUser, _poolAgent, _poolSession = poolIdentityOf(agent_ref, session_id)
 
             self.context_pool = ContextPool(
-                user_id=getattr(agent_ref, "user_id", "default"),
-                agent_id=getattr(agent_ref, "agent_id", "default"),
+                user_id=_poolUser,
+                agent_id=_poolAgent,
                 session_id=session_id,
                 ledger_db=_ledger_db,
                 summarizer=_summarizer,
@@ -229,7 +233,6 @@ class ContextOrchestrator:
             from neurova.context_pool_registry import get_registry
 
             get_registry().adopt(self.context_pool)
-            self._pool_identity = poolIdentityOf(agent_ref, session_id)
             logger.info(
                 "ContextPool 初始化完成（无损归档模式），模型: %s，Token 预算: %s, session_id: %s",
                 model_name, max_tokens, session_id,
@@ -398,15 +401,6 @@ class ContextOrchestrator:
 
         return dict(EMPTY_REPORT)
 
-    @staticmethod
-    def _realIdentityString(value) -> str:
-        """身份取真串：非 `str` 一律视为"没取到"（替身的自动属性不是身份）。
-
-        只认 `str` 而不是 `str(value)`：后者会把 MagicMock 的名字变成一串看着像 id 的
-        文本，把"取不到身份"这件事藏进日志里（`<MagicMock name='mock.agent_id' ...>`）。
-        """
-        return value.strip() if isinstance(value, str) else ""
-
     def _buildLedgerDb(self, agent_ref):
         """装配驱逐台账持久层（失败如实登记，不静默、不粘死）。"""
         record = self._context_health["ledger"]
@@ -421,8 +415,9 @@ class ContextOrchestrator:
             # 于是整座台账装配失败、池子照建而 `_ledger_db` 恒 None。
             # 不是"替身不合法"，是这里没做身份归一：与 `_build_metacog_lessons` 同一口径
             # （取不到真串就不建那条连接）。id 的合法形态仍归 `agent_workspaces` 单源。
-            agentId = self._realIdentityString(getattr(agent_ref, "agent_id", None))
-            userId = self._realIdentityString(getattr(agent_ref, "user_id", None))
+            from neurova.context_pool import identityStrings
+
+            agentId, userId = identityStrings(agent_ref)
             if not agentId:
                 raise ValueError("agent 身份不可用（未取到真实 agent_id），本轮不建驱逐台账")
             db = EvictionLedgerDB(
@@ -1286,9 +1281,9 @@ class ContextOrchestrator:
         try:
             from neurova.context.budget_report import recordContextBudget
 
-            agent_id = getattr(self.config, "agent_id", "")
-            if not isinstance(agent_id, str) or not agent_id:
-                agent_id = getattr(self._agent, "agent_id", "default")
+            from neurova.context_pool import identityStrings as _identityStrings
+
+            agent_id = _identityStrings(self._agent)[0] or "default"
             recordContextBudget(
                 str(agent_id or "default"),
                 {
