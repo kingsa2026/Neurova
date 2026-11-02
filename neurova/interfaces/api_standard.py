@@ -53,6 +53,31 @@ class ErrorCodes(int, Enum):
     MEMORY_INVALID_CONTENT = 7004
 
 
+#: 码 → 默认文案（批 G2）。抛出点必须给具体的 message；这里兜的是"抛出点
+#: 没给话"的那一形——信封里出现空 message 比出现默认文案更伤（前端把
+#: detail 原样显示给用户）。表与 ErrorCodes 同文件同源：加码必须同步加文案
+#: （守卫 tests/unit/api/test_apiErrorCodesHaveDefaultCopy.py 缺一即红）。
+DEFAULT_ERROR_MESSAGES: Dict["ErrorCodes", str] = {
+    ErrorCodes.SUCCESS: "success",
+    ErrorCodes.UNKNOWN_ERROR: "未知错误，请稍后重试",
+    ErrorCodes.AUTH_FAILED: "认证失败，请重新登录",
+    ErrorCodes.TOKEN_EXPIRED: "登录已过期，请重新登录",
+    ErrorCodes.PERMISSION_DENIED: "没有执行此操作的权限",
+    ErrorCodes.NOT_FOUND: "请求的资源不存在",
+    ErrorCodes.VALIDATION_ERROR: "请求参数不合法",
+    ErrorCodes.RATE_LIMITED: "请求过于频繁，请稍后再试",
+    ErrorCodes.SERVER_ERROR: "服务器开小差了，请稍后重试",
+    ErrorCodes.INTERNAL_ERROR: "内部错误，请稍后重试",
+    ErrorCodes.AGENT_NOT_INITIALIZED: "智能体尚未初始化完成，请稍后再试",
+    ErrorCodes.AGENT_NOT_FOUND: "指定的智能体不存在",
+    ErrorCodes.AGENT_NOT_READY: "智能体尚未就绪，请稍后再试",
+    ErrorCodes.MEMORY_OPERATION_FAILED: "记忆操作未能完成，请稍后重试",
+    ErrorCodes.MEMORY_NOT_FOUND: "找不到那条记忆",
+    ErrorCodes.MEMORY_SEARCH_FAILED: "记忆检索未能完成，请稍后重试",
+    ErrorCodes.MEMORY_INVALID_CONTENT: "记忆内容不合规，无法写入",
+}
+
+
 @dataclass
 class APIResponse(Generic[T]):
     """统一 API 响应格式"""

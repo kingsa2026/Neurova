@@ -1858,6 +1858,7 @@ tests/unit/collaboration/test_yieldGateModelAttribution.py
 tests/unit/channels/test_channelTurnRunLedger.py
 # 批 F：出口失败片归宿（重试一次 + 台账；逐文件单跑 7 passed）
 tests/unit/channels/test_channelOutboundFailureLedger.py
+tests/unit/channels/test_channelFallbackErrorCopy.py
 # P2-8 第三批：两条公开 API 入口 + "实现只许一份"的结构守卫。最硬的一条是**假成功**：
 # `/v1/chat` 超限那一轮原本回 `{"code":0,"message":"success","data":{"reply":…}}`——
 # 没跑的一轮被报成答完了（§6-8 那族形态的另一副面孔），现按各面本来的样子回 parked。
@@ -3275,6 +3276,7 @@ tests/unit/memory/test_IngestIdentityKeyIsScopedPerOwner.py
 # ② `testAnonymousReadStillSeesOnlyDefaultBucket` 那个 200 是假信封给的（夹具根本没有 app state），
 #   "匿名读只看到 default 桶"从未被真测过——修法是给夹具装真 MemoryManager，不是放宽断言。
 tests/unit/api/test_MemoryReadFaceRefusesToPaintFailureAsSuccess.py
+tests/unit/api/test_apiErrorCodesHaveDefaultCopy.py
 # 安全集成判据改指现役 API（RBAC 的权限是枚举目录、角色自带权限集合；EventBus 递给 handler 的是
 # `Event` 数据类而不是 dict）。这档此前不在子集 ⇒ 调用不存在的名字长期只有本机显式跑才红；改绿后入册，
 # 让同一处再漂一次变成会红的判据。逐格差异写在该档自己的 docstring 里。

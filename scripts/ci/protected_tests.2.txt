@@ -715,6 +715,7 @@ tests/unit/collaboration/test_yieldGateModelAttribution.py
 # 逐文件单跑 4 passed
 tests/unit/channels/test_channelTurnRunLedger.py
 tests/unit/channels/test_channelOutboundFailureLedger.py
+tests/unit/channels/test_channelFallbackErrorCopy.py
 # P2-8 第三批：两条公开 API 入口 + "实现只许一份"的结构守卫。最硬的一条是**假成功**：
 # `/v1/chat` 超限那一轮原本回 `{"code":0,"message":"success","data":{"reply":…}}`——
 # 没跑的一轮被报成答完了（§6-8 那族形态的另一副面孔），现按各面本来的样子回 parked。
@@ -1260,6 +1261,7 @@ tests/unit/ci/test_trackedScanFaceIsSingleSourced.py
 # ② `testAnonymousReadStillSeesOnlyDefaultBucket` 那个 200 是假信封给的（夹具根本没有 app state），
 #   "匿名读只看到 default 桶"从未被真测过——修法是给夹具装真 MemoryManager，不是放宽断言。
 tests/unit/api/test_MemoryReadFaceRefusesToPaintFailureAsSuccess.py
+tests/unit/api/test_apiErrorCodesHaveDefaultCopy.py
 tests/unit/api/test_evolveRealArmPathAndBudgetGate.py
 # A 批（PUT 白名单补齐到配置单源全量键）的同族守卫，一档管两面（agent-limits + 进化设置）。
 # 立它的理由是"下一个加键的人不知道这里还有一份名单"——它随后真的咬住了本会话自己：
