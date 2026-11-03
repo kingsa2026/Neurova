@@ -1165,3 +1165,10 @@ tests/unit/knowledge/test_knowledge_vector_index.py
 # 别名必须被棘轮识别器认作一跳」——不跟这一跳，收口单源的那一刻就把已修站点读成新半修。
 # 逐文件单跑 5 passed（12.09s／11.75s 两次同读数）
 tests/unit/ci/test_childEncodingSingleSource.py
+# §6-491 的防线：integration 族跑完不许在仓内 `data/outbox` 留文件。
+# 成因是复算翻案：`data/outbox/dead-letter/` 曾有 460 个 json（event_type 全测试夹具名、mtime 停
+# 2026-10-06），本批复跑目标档并前后各数一次目录 ⇒ 460 → 460 不变，污染早被数据根单点挡住，
+# 那 460 个是历史遗留（本批归档后清）。⇒ 本档钉"别再发生"：行为格真起子进程比快照差、
+# 牙齿格用合成快照验比较函数会报新增、不空转格验子进程真收集到用例。
+# 逐文件单跑 3 passed（10.91s）；变异自证＝目标临时指向往仓内落文件的探针 ⇒ 行为格红
+tests/unit/ci/test_integrationSuiteLeavesRepoDataRootClean.py
