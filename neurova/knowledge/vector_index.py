@@ -43,6 +43,46 @@ DEFAULT_STORAGE_DIR = PRODUCTION_STORAGE_DIR
 _SENTINEL_DEFAULT = "__default__"
 
 
+def revisionPathFor(shardPath: Path) -> Path:
+    """分片版本文件的命名单点：与分片同名，后缀换成 `.revision`。
+
+    取向已裁为**读盘版本号**（§6-501）；mtime 那条被否——同秒两次改动 mtime 可以一样，
+    时钟回拨还会把新判成旧。写的侧 `stampRevision`、读的侧 `readRevision` 共用这一个命名。
+    """
+    return shardPath.with_suffix(".revision")
+
+
+def readRevision(shardPath: Path) -> Tuple[int, str]:
+    """读回 `(计数, 内容指纹)`；读不出或形状不对一律返回 `(-1, "")`＝**不知道**。
+
+    "不知道"不能当成"没变"：存量分片（这功能落地之前写的）旁边没有版本文件，
+    把它读成相等就等于把旧缓存永久钉住——正病换个形态留下。
+    """
+    try:
+        parts = revisionPathFor(shardPath).read_text(encoding="utf-8").split()
+    except FileNotFoundError:
+        return (-1, "")
+    except Exception as e:  # noqa: BLE001 - 编码/权限一类的读失败要留名，但不猜内容
+        logger.warning("知识向量分片版本读不出 %s: %s", shardPath, e)
+        return (-1, "")
+    if len(parts) != 2:
+        return (-1, "")
+    try:
+        return (int(parts[0]), parts[1])
+    except ValueError:
+        return (-1, "")
+
+
+def recordsDigest(records: Dict[str, Any]) -> str:
+    """整份分片记录的指纹：规范化 JSON 取摘要，**不另列字段清单**。
+
+    列字段清单就是第二份口径——记录里以后多一个键、忘了同步清单，
+    就会把真变化读成"没变"（与 §6-473 把时间戳当正确性前提是同族的病）。
+    """
+    payload = json.dumps(records, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
 def _default_engine():
     """默认 embedding 引擎（ONNX，bge-small-zh-v1.5）；不可用返回 None。"""
     try:
@@ -124,7 +164,12 @@ class KnowledgeVectorIndex:
         self._annLastError = ""
         # 记录版本只在写路径递增：ANN 缓存命中判断 O(1)，不再每次检索
         # 扫全量记录做指纹（大语料下那会把 ANN 的收益吃掉）。
+        # 跨进程的改动不靠它感知，而靠下面这个"上次读到的盘上版本"（见 `_load_user`），
+        # 感知到之后 ANN handle 直接作废重建。
         self._recordVersions: Dict[str, int] = {}
+        # 本进程**上一次真正读盘时**看到的分片版本 `(计数, 指纹)`；跨进程失效就靠它比对。
+        # 缺席（未登记）＝没读过，第一次读必然走盘。
+        self._loadedRevisions: Dict[str, Tuple[int, str]] = {}
 
     # ── 引擎 ─────────────────────────────────────────────────
 
@@ -213,9 +258,14 @@ class KnowledgeVectorIndex:
 
     def _load_user(self, user: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         uid = str((user or {}).get("user_id") or "default")
-        if uid in self._cache:
-            return self._cache[uid]
         path = self._file_for(user)
+        revision = readRevision(path)
+        # 命中缓存的唯一凭据是"盘上版本与我上次读到的相同"。
+        # `(-1, "")` 是"读不出版本"——它**不等于**任何已读版本，于是必然重读；
+        # 把它当"没变"就是让老分片永远吃旧缓存（§6-476 那条跨进程边界的反面）。
+        if uid in self._cache and revision != (-1, "") \
+                and revision == self._loadedRevisions.get(uid):
+            return self._cache[uid]
         records: Dict[str, Dict[str, Any]] = {}
         if path.exists():
             try:
@@ -224,8 +274,38 @@ class KnowledgeVectorIndex:
                     records = data["vectors"]
             except Exception as e:  # noqa: BLE001
                 logger.warning("向量索引加载失败 %s: %s", path, e)
+        if uid in self._cache:
+            # 本进程已读过、而盘上版本对不上 ⇒ 别的进程改过这份分片（含 `dropEntry`
+            # 的当场擦除），ANN handle 是从旧记录建的，不能再复用。
+            # 读不出版本的老分片同理：判不了变化就不许拿热 handle 赌它没变。
+            self._annIndexes.pop(uid, None)
+            self._annVersions.pop(uid, None)
+            self._annFailures.pop(uid, None)
         self._cache[uid] = records
+        self._loadedRevisions[uid] = revision
         return records
+
+    def stampRevision(self, user: Optional[Dict[str, Any]], records: Dict[str, Dict[str, Any]]) -> None:
+        """把这份记录的分片版本写在分片旁边的小文件里（内容没变就不进位）。
+
+        只认计数不够：两个进程都读到 N、都写 N+1，第二个进程的改动在计数上看不出来。
+        所以版本是 `计数 指纹`——**任何真实内容变化必然换指纹**，与写者之间的调度无关；
+        计数只用来让"看没看过这一版"这个比较保持单调可读。
+        """
+        path = self._file_for(user)
+        uid = str((user or {}).get("user_id") or "default")
+        digest = recordsDigest(records)
+        count, previous = readRevision(path)
+        if count >= 0 and previous == digest:
+            self._loadedRevisions[uid] = (count, digest)
+            return
+        newCount = count + 1 if count >= 0 else 0
+        try:
+            revisionPathFor(path).write_text("%d %s" % (newCount, digest), encoding="utf-8")
+        except Exception as e:  # noqa: BLE001 - 版本写不进≠数据写不进；如实报错，读侧按"不知道"兜
+            logger.error("向量分片版本写入失败 %s: %s", path, e)
+            return
+        self._loadedRevisions[uid] = (newCount, digest)
 
     def _save_user(self, user: Optional[Dict[str, Any]], records: Dict[str, Dict[str, Any]], engine_id: str) -> None:
         path = self._file_for(user)
@@ -239,6 +319,9 @@ class KnowledgeVectorIndex:
             )
         except Exception as e:  # noqa: BLE001
             logger.error("向量索引保存失败 %s: %s", path, e)
+            return
+        # 版本必须在分片**落稳之后**才进位：先写版本再写数据，读侧会读到新版本号配半份分片
+        self.stampRevision(user, records)
 
     # ── 同步与检索 ────────────────────────────────────────────
 
