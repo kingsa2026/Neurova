@@ -30,6 +30,18 @@ export function formatEpochSecondText(value?: number | null): string {
 }
 
 /**
+ * epoch 秒 → 本地**日期**文案（表格列用）；空值/0 → `'—'` 占位。
+ * 与 formatEpochSecondText 同一契约（后端秒级数字），只是展示粒度不同；
+ * 0 是"从未写入"的哨兵值，必须显示占位符而不是 1970。
+ * （回归钉：KnowledgePage/AgentFilePage 曾把秒值直接喂 `new Date`，
+ * 全表渲染成 1970-01-21 同一天。）
+ */
+export function formatEpochSecondDate(value?: number | null): string {
+  if (!value) return '—'
+  return new Date(value * 1000).toLocaleDateString()
+}
+
+/**
  * 0~1 的比例 → 百分比文案；null / undefined → `'-'`。
  * 注意 `0` 是合法比例，必须显示成 `0%` 而不是占位符，故判空只认 null/undefined。
  */

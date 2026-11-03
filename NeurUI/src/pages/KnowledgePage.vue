@@ -134,7 +134,7 @@
             </div>
           </template>
           <template v-if="column.key === 'created_at'">
-            {{ formatDate(record.created_at) }}
+            {{ formatEpochSecondDate(record.created_at) }}
           </template>
           <template v-if="column.key === 'actions'">
             <a-space>
@@ -313,7 +313,7 @@
       <a-empty v-if="!revisions.length" :description="t('knowledge.revisionsEmpty')" />
       <a-timeline v-else>
         <a-timeline-item v-for="(rev, idx) in revisions" :key="idx">
-          <p class="rev-time">{{ formatDate(rev.updated_at) }}</p>
+          <p class="rev-time">{{ formatTimestampText(rev.updated_at) }}</p>
           <p v-for="field in rev.changed_fields" :key="field" class="rev-field">
             <span class="rev-name">{{ field }}</span>
             <span class="rev-old">{{ truncate(String(rev.old?.[field] ?? ''), 120) }}</span>
@@ -689,6 +689,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, reactive, watch } from 'vue'
+import { formatEpochSecondDate, formatTimestampText } from '@/utils/displayText'
 import { useI18n } from 'vue-i18n'
 import { useEnumLabel } from '@/composables/useEnumLabel'
 import { message, Modal } from 'ant-design-vue'
@@ -1293,10 +1294,7 @@ function truncate(str: string, len: number) {
   return str?.length > len ? str.slice(0, len) + '...' : str ?? ''
 }
 
-function formatDate(dateStr?: string) {
-  if (!dateStr) return '—'
-  return new Date(dateStr).toLocaleDateString()
-}
+
 
 function onTableChange(pag: any) {
   currentPage.value = pag.current

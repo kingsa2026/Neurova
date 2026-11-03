@@ -67,7 +67,7 @@
             <a-badge :status="record.status === 'ready' ? 'success' : 'processing'" :text="record.status" />
           </template>
           <template v-if="column.key === 'created_at'">
-            {{ formatDate(record.created_at) }}
+            {{ formatEpochSecondDate(record.created_at) }}
           </template>
           <template v-if="column.key === 'actions'">
             <a-space>
@@ -119,6 +119,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { formatEpochSecondDate } from '@/utils/displayText'
 import { useI18n } from 'vue-i18n'
 import { message, Modal } from 'ant-design-vue'
 import { listFiles, uploadFile as uploadFileApi, getFileContent, updateFile, deleteFile, downloadFile as downloadFileBlob } from '@/api/modules/files'
@@ -181,9 +182,7 @@ function formatSize(bytes?: number) {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
 
-function formatDate(d?: string) {
-  return d ? new Date(d).toLocaleDateString() : '—'
-}
+
 
 function getFileIcon(type?: string) {
   if (!type) return '📄'

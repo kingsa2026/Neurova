@@ -88,8 +88,11 @@ describe('跨文件同名函数盘点', () => {
     const { tiers } = auditDuplicateFunctions()
     const collapsed = tiers.C.filter((group) => (group.variants ?? 0) < 2).map((group) => group.name)
     expect(collapsed, '同名异体的「体数」掉到 1 说明已被按名合并').toEqual([])
-    // 同名异体组里，至少这几组是"同名同意图、口径不同"的高危项，必须保留差异
-    const hazardous = ['formatDate', 'getFileIcon', 'formatTime', 'formatSize']
+    // 同名异体组里，至少这几组是"同名同意图、口径不同"的高危项，必须保留差异。
+    // （formatDate 已于 2026-11-04 合法消亡：三页错误体被正确命名的单源
+    //   formatEpochSecondDate 替代，仅剩 MetacognitionPage 的 ISO 语义体——
+    //   不再构成同名异体组；若未来同名多体重现，把它加回本清单。）
+    const hazardous = ['getFileIcon', 'formatTime', 'formatSize']
     for (const name of hazardous) {
       const groups = tiers.C.filter((group) => group.name === name)
       expect(groups.length, `${name} 应作为同名异体登记在 C 类`).toBe(1)
