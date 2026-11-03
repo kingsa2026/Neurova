@@ -1180,3 +1180,7 @@ tests/unit/api/test_authorityLogReadFaceRefusesToPaintFailureAsSuccess.py
 # §6-495 降成本验收：可达性与对象类型两处都不许逐号起 git（一场 79.38s → 2.5s）；
 # 前缀歧义保守判不可达；悬空 commit 仍必须判不可达。逐文件单跑 5 passed（6.12s）
 tests/unit/test_auditLedgerReachabilitySingleProbe.py
+# §6-496：`scripts/` 族会 print 非 ASCII 的档必须钉住 stdout 出口（cp936 宿主上一句 print
+# 就把退出码变成 1）。裸奔面 35 档→等号基线 30（本批收 `scripts/ci/` 5 档）；谓词认三种写法、
+# 不放过"只钉 stderr"。逐文件单跑 7 passed
+tests/unit/ci/test_scriptsCiStdoutIsPinnedBeforePrint.py

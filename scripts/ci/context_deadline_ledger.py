@@ -434,6 +434,12 @@ def reconcile() -> Dict[str, List[Dict[str, object]]]:
 
 
 def main() -> int:
+    # Windows 宿主默认 cp936：本脚本会 print 中文与箭头，出口不钉 utf-8 就会在一句 print 上
+    # 抛 UnicodeEncodeError、退出码 1，让"红"指向脚本自己而不是被测行为（§6-496）。
+    # 放在 main 里而不是模块级：这几档会被 pytest 以 importlib 加载，模块级钉等于改宿主进程。
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="上下文域死线判据取数与台账对账")
     parser.add_argument("--json", action="store_true", help="机器可读输出")
     args = parser.parse_args()
