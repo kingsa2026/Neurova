@@ -11593,3 +11593,11 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **口径**：生产池 **0/0**；测试/基建池 **+9/−0**（只本格台账。落笔前估成 +6，`git diff --numstat` 现量 9 后改正——"写死读数"一族在本会话里已连发十余次，办法只能是**量完再填这句**，不是先写后改）。
     - **仍开**：① 上面那条「before/after 各扫一次」是小切口，下一批起手就做；② §6-507 的「按时间轴切一次行归属」待拍；③ outbox 并体系未实施；④ 沿 §6-507／§6-506／§6-505／§6-504／§6-500／§6-499／§6-497 全部仍开清单不变。
     - **下一枚空号现查**：本格取 **508**，后继从 **§6-509** 起。推送态（`git rev-list --count` 现量）：两远端在 `0d1d4998`，本地已领先 **1 笔**（§6-507 那笔 `3a9199ec`），本格入库后 **2 笔**，推送需点单。
+509. **内置包那条再排一格：装配期规则集不是差异——而且直解 zip 时这道门根本放行** ✅⬜ —— §6-508 留下的唯一候选，本批做完，结论是**该候选被否**，方向改指"两趟扫的不是同一份内容"。
+    - **怎么做的**：把 `NEUROVA_DATA_DIR`／`NEUROVA_AGENT_WORKSPACES_DIR` 都钉到仓外临时目录（§6-505 那条自报的教训，这回不碰真数据根），把 `neurova/skills/market_bundles/adaptive-presentation-studio.zip` 直接解到临时目录（**138 个成员**，最长成员就是那条 125 字符的 `embedded_skills/presentations/assets/builtin_templates/codex-grid-layout-library/artifact-tool-compose/template-registry.json`），然后对**同一个目录**用 `scan_skill_for_install` 各扫一次——每次先 `reset_install_gate_scanner()`，两趟都重新装配规则集；中间插入 `create_app(enable_memory=False, enable_channels=False)`。
+    - **读数**：`BEFORE` 与 `AFTER` 完全相同——`blocked=False action=allow`，`rule_ids=['dangerous_import_os', 'dangerous_import_subprocess', 'dangerous_path_traversal', 'file_write', 'subprocess_call', 'unscanned_artifact']`。**两边都没有 `dangerous_exec`**。⇒ ①装配期没改规则集（§6-508 那条候选出局）；②更要紧的是：这条真资产包在**直解 zip 的落盘形状**上，安装门是**放行**的，而 §6-505 活体里它被 `critical(dangerous_exec)` 拒——**两趟被扫的内容不是同一份**。
+    - **新的最可能方向**（下一批起手验，比"请求参数"更近）：真链上被扫的是 `.incoming_<纳秒>` 那份**从市场缓存复制来的树**，而市场缓存那一侧在落盘时可能多出/改写了脚本文件（例如解包时带上的生成物、或缓存里存的是另一版包）；直解 zip 与走缓存复制两条路径的字节不同，`dangerous_exec` 只在后者命中。验证动作很小：在 `install_skill` 里被拦那一刻把 `incoming` 的**文件清单与 SHA** 打出来，与直解 zip 的清单对表——差集里那个文件就是触发者。
+    - **仍未排除的**：`human_approved`／`pool_type` 在两条链上的传递（§6-508 写的第二条退路），以及"白名单命中与否"造成的 action 差——本次两边 action 都是 allow，所以在本对照里它不是变量。
+    - **口径**：生产池 **0/0**；测试/基建池只本格台账，**行数以本笔提交的 `git diff --numstat` 为准，不在这句里写数**——本会话已在同一句上错过十余次，改成不在档案里预填。
+    - **仍开**：① 上面那条"被扫内容差异"的对表；② §6-507 的按时间轴切行归属待拍；③ outbox 并体系未实施；④ 沿 §6-508／§6-507／§6-506／§6-505／§6-504／§6-500／§6-499／§6-497 全部仍开清单不变。
+    - **下一枚空号现查**：本格取 **509**，后继从 **§6-510** 起。推送态（`git rev-list --count` 现量）：两远端在 `0d1d4998`，本格入库前本地已领先 **2 笔**（`3a9199ec`／`914f85b0`），本格入库后 **3 笔**，推送需点单。
