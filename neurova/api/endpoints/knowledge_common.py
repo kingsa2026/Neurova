@@ -34,6 +34,8 @@ class KnowledgeItem(BaseModel):
     confidence: float = 0.5
     created_at: float = 0
     updated_at: float = 0
+    source_created_at: str = ""
+    source_modified_at: str = ""
     visibility: str = "private"
     owner_user_id: str = ""
     shared_with: List[str] = []
@@ -91,6 +93,8 @@ class KnowledgeSearchRequest(BaseModel):
     ocr_used: Optional[bool] = None
     page_min: Optional[int] = Field(default=None, ge=0)
     updated_after: Optional[float] = None
+    source_modified_after: Optional[str] = None
+    source_modified_before: Optional[str] = None
     geo_radius: Optional[Dict[str, float]] = Field(
         default=None, description="半径过滤 {lat, lon, radius_km}")
     geo_bbox: Optional[Dict[str, float]] = Field(
@@ -153,6 +157,8 @@ def item_response(item: Dict[str, Any]) -> KnowledgeItem:
         confidence=item.get("confidence", 0.5),
         created_at=item.get("created_at", 0),
         updated_at=item.get("updated_at", 0),
+        source_created_at=str(item.get("source_created_at", "") or ""),
+        source_modified_at=str(item.get("source_modified_at", "") or ""),
         visibility=item.get("visibility", "private"),
         owner_user_id=item.get("owner_user_id", ""),
         shared_with=item.get("shared_with") or [],

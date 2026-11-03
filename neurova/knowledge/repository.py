@@ -194,6 +194,37 @@ class ChunkRevisionConflict(Exception):
     时不静默覆盖，调用方须重读最新块后重试。"""
 
 
+def _parseSourceDate(value: Any) -> Optional[datetime.datetime]:
+    """源时间解析（批 TB/TC）：三形——epoch 秒（条目入库钟）、ISO 串、
+    PDF 元数据形 `D:YYYYMMDDHHMMSS+zz'zz'`。不可考一律 None（调用方不猜）。"""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            return datetime.datetime.fromtimestamp(float(value), datetime.timezone.utc)
+        except (ValueError, OSError, OverflowError):
+            return None
+    v = str(value or "").strip()
+    if not v:
+        return None
+    m = re.match(r"^D:(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?", v)
+    if m:
+        g = m.groups()
+        try:
+            return datetime.datetime(
+                int(g[0]), int(g[1] or 1), int(g[2] or 1),
+                int(g[3] or 0), int(g[4] or 0), int(g[5] or 0),
+                tzinfo=datetime.timezone.utc,
+            )
+        except ValueError:
+            return None
+    try:
+        dt = datetime.datetime.fromisoformat(v.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return dt
+    except ValueError:
+        return None
+
+
 def _contentFingerprint(tenantId: str, content: str) -> str:
     """精确去重键：租户 + 规范化正文；空白差异不算不同文档。"""
     normalized = unicodedata.normalize("NFKC", str(content or ""))
@@ -672,6 +703,11 @@ class KnowledgeRepository:
             item["shared_with"] = []
         if not isinstance(item.get("tenant_id"), str) or not item.get("tenant_id"):
             item["tenant_id"] = "default"
+        # 批 TA：存量行三时间戳细分字段补齐（不可考，如实留空）
+        if not isinstance(item.get("source_created_at"), str):
+            item["source_created_at"] = ""
+        if not isinstance(item.get("source_modified_at"), str):
+            item["source_modified_at"] = ""
         if not isinstance(item.get("content_fingerprint"), str) or not item.get("content_fingerprint"):
             item["content_fingerprint"] = _contentFingerprint(
                 item["tenant_id"], str(item.get("content") or "")
@@ -807,11 +843,60 @@ class KnowledgeRepository:
         tenant_id: str = "default",
         dedupe: bool = False,
         geo: Optional[Dict[str, Any]] = None,
+        source_created_at: str = "",
+        source_modified_at: str = "",
     ) -> Dict[str, Any]:
         status = normalizeLifecycleStatus(lifecycle_status)
         now = datetime.datetime.now(datetime.timezone.utc).timestamp()
         tenant = str(tenant_id or "default")
         fingerprint = _contentFingerprint(tenant, content)
+        # 批 TB（T-E 已裁）：同源更新重入库——同 source_path 且源修改时间
+        # 明确更晚 ⇒ 覆盖既有条目（旧值进 revisions、刷新入库时间、保留
+        # knowledge_id），不并存两代。更早/相同/不可考 ⇒ 维持现状不猜。
+        if dedupe and str(source_path or "") and str(source_modified_at or ""):
+            newSourceT = _parseSourceDate(source_modified_at)
+            if newSourceT is not None:
+                with self._lock:
+                    for existing in self._items.get(agent_id, []):
+                        if (
+                            str(existing.get("tenant_id") or "default") != tenant
+                            or str(existing.get("source_path") or "") != str(source_path)
+                        ):
+                            continue
+                        oldSourceT = _parseSourceDate(existing.get("source_modified_at"))
+                        if oldSourceT is None or newSourceT <= oldSourceT:
+                            continue
+                        existing.setdefault("revisions", []).append({
+                            "old": {
+                                "title": existing.get("title"),
+                                "content": existing.get("content"),
+                            },
+                            "changed_fields": ["title", "content"],
+                            "updated_at": datetime.datetime.now(
+                                datetime.timezone.utc).isoformat(),
+                            "reason": "source_update_reingest",
+                        })
+                        existing["title"] = title
+                        existing["content"] = content
+                        existing["chunks"] = list(chunks or [])
+                        existing["parents"] = list(parents or [])
+                        existing["content_fingerprint"] = fingerprint
+                        existing["source_modified_at"] = str(source_modified_at)
+                        if str(source_created_at or ""):
+                            existing["source_created_at"] = str(source_created_at)
+                        existing["created_at"] = now
+                        existing["updated_at"] = now
+                        evidence = _sourceEvidence({
+                            "source": source, "source_type": source_type,
+                            "source_path": source_path, "ingest_time": ingest_time,
+                        })
+                        sources = existing.setdefault("sources", [])
+                        if evidence.get("source") and evidence not in sources:
+                            sources.append(evidence)
+                        self._save()
+                        updated = dict(existing)
+                        updated["source_updated"] = True
+                        return updated
         if dedupe:
             with self._lock:
                 for existing in self._items.get(agent_id, []):
@@ -840,6 +925,10 @@ class KnowledgeRepository:
             "confidence": float(confidence),
             "created_at": now,
             "updated_at": now,
+            # 批 TA：源文档自身时间（管线元数据透传，缺失留空不猜）；
+            # created_at/updated_at 语义不变＝入库/条目更新时刻
+            "source_created_at": str(source_created_at or ""),
+            "source_modified_at": str(source_modified_at or ""),
             "visibility": visibility if visibility in (VISIBILITY_PUBLIC, VISIBILITY_PRIVATE) else VISIBILITY_PRIVATE,
             "owner_user_id": str(owner_user_id or "default"),
             "tenant_id": tenant,
@@ -952,6 +1041,8 @@ class KnowledgeRepository:
         tags: Optional[List[str]] = None,
         source: Optional[str] = None,
         updated_after: Optional[float] = None,
+        source_modified_after: Optional[str] = None,
+        source_modified_before: Optional[str] = None,
         author: Optional[str] = None,
         source_type: Optional[str] = None,
         ocr_used: Optional[bool] = None,
@@ -1030,6 +1121,19 @@ class KnowledgeRepository:
                     except (TypeError, ValueError):
                         # 时间戳坏了不隐藏条目：错误方向是“多检一条”，不是“知识消失”
                         pass
+                # 批 TD①（T-C 已裁先过滤）：源文档修改时间范围——无源时间
+                # （或不可考）的条目不满足"按源时间检索"的语义，如实排除
+                # （检索精准度优先：日期不明的条目混进来就是污染）
+                if source_modified_after is not None or source_modified_before is not None:
+                    srcT = _parseSourceDate(item.get("source_modified_at"))
+                    if srcT is None:
+                        continue
+                    afterT = _parseSourceDate(source_modified_after) if source_modified_after else None
+                    beforeT = _parseSourceDate(source_modified_before) if source_modified_before else None
+                    if afterT is not None and srcT < afterT:
+                        continue
+                    if beforeT is not None and srcT > beforeT:
+                        continue
                 results.append(item)
         return results
 
@@ -1222,6 +1326,8 @@ class KnowledgeRepository:
         tags: Optional[List[str]] = None,
         source: Optional[str] = None,
         updated_after: Optional[float] = None,
+        source_modified_after: Optional[str] = None,
+        source_modified_before: Optional[str] = None,
         author: Optional[str] = None,
         source_type: Optional[str] = None,
         ocr_used: Optional[bool] = None,
@@ -1240,6 +1346,8 @@ class KnowledgeRepository:
         visible = self.visible_items(
             user, scope=scope, category=category, agent_id=agent_id, tags=tags,
             source=source, updated_after=updated_after,
+            source_modified_after=source_modified_after,
+            source_modified_before=source_modified_before,
             author=author, source_type=source_type, ocr_used=ocr_used,
             page_min=page_min, geo_radius=geo_radius, geo_bbox=geo_bbox,
         )
@@ -1952,6 +2060,45 @@ class KnowledgeRepository:
 
     _CONFLICT_SIMILARITY_THRESHOLD = 0.9
 
+    @staticmethod
+    def _conflictTimeContext(old_item: Dict[str, Any], new_item: Dict[str, Any]) -> Dict[str, Any]:
+        """冲突行的时间读数（批 TC，T-D 已裁：只出建议不改判）。
+
+        钟的取法：双方都有 source_modified_at ⇒ 用源文档钟；任一方缺 ⇒
+        回退入库钟（created_at）。哪边新只作建议，裁决仍归人。
+        """
+        def _t(item: Dict[str, Any]) -> Optional[datetime.datetime]:
+            v = _parseSourceDate(item.get("source_modified_at"))
+            if v is not None:
+                return v
+            try:
+                created = float(item.get("created_at") or 0)
+            except (TypeError, ValueError):
+                created = 0.0
+            if created > 0:
+                try:
+                    return datetime.datetime.fromtimestamp(created, datetime.timezone.utc)
+                except (ValueError, OSError, OverflowError):
+                    return None
+            return None
+
+        oldT, newT = _t(old_item), _t(new_item)
+        newer = None
+        if oldT is not None and newT is not None and oldT != newT:
+            newer = "new" if newT > oldT else "old"
+        basis = ("source_modified_at"
+                 if (str(old_item.get("source_modified_at") or "")
+                     and str(new_item.get("source_modified_at") or ""))
+                 else "ingested_at")
+        return {
+            "old_source_modified_at": str(old_item.get("source_modified_at") or ""),
+            "new_source_modified_at": str(new_item.get("source_modified_at") or ""),
+            "old_ingested_at": float(old_item.get("created_at") or 0) or None,
+            "new_ingested_at": float(new_item.get("created_at") or 0) or None,
+            "newer_side": newer,
+            "basis": basis,
+        }
+
     def _detect_conflicts(self, agent_id: str, new_item: Dict[str, Any]) -> None:
         """新条目 vs 同 agent 旧条目的同值冲突检测（调用方持有锁）。
 
@@ -2010,6 +2157,7 @@ class KnowledgeRepository:
             "similarity": round(title_sim, 4),
             "reason": "same_title: 新条目与旧条目标题一致，疑似同一事实的新说法",
             "detected_at": datetime.datetime.now(datetime.timezone.utc).timestamp(),
+            "time_context": self._conflictTimeContext(old_item, new_item),
             "status": "pending",
             "tenant_id": str(new_item.get("tenant_id") or "default"),
             "resolution": None,
