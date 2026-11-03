@@ -1697,6 +1697,13 @@ tests/unit/test_audit_ledger_commit_guard.py
 # 真造的悬空 commit 仍必须判不可达（省调用不许把语义弄松）。
 # 逐文件单跑 5 passed（6.12s）；一场扫描实测 79.38s → 2.5s，两边父墙同步收到 60
 tests/unit/test_auditLedgerReachabilitySingleProbe.py
+# §6-496：`scripts/` 族里会 print 非 ASCII 的档必须自己钉住 stdout 出口——Windows 宿主默认
+# cp936，一句 print 就能把退出码变成 1，让"红"指向脚本自己而不是被测行为。裸奔面现算 35 档
+# （§6-493 那句「5 档」只数了 `scripts/ci/`，口径写窄了，本格更正），本批收掉进 CI 的那 5 档，
+# 其余 30 档进只降不升等号基线。谓词认三种已有写法（直写／hasattr 守卫／助手形），
+# 但"只钉 stderr"与"只在文字里提一句"必须照样点名。
+# 逐文件单跑 7 passed（4.67s／4.96s 两次同读数）
+tests/unit/ci/test_scriptsCiStdoutIsPinnedBeforePrint.py
 # tests/manual/ 的活体脚本不得被 pytest 收集：它们在导入期改写进程 env，会掩盖一切依赖数据根的判据
 # （实测掩盖过会话落点守卫：同一选择集带 manual 时 0 ERROR，摘掉才露出 16 条真 ERROR）。
 # 拦截在 pytest_configure（收集之前）——pytest_ignore_collect 对显式路径在 pytest 9 无效，实测过。

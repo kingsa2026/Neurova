@@ -90,6 +90,12 @@ def runOne(entry: str, perFileTimeout: float) -> Tuple[str, float, str]:
 
 
 def main(argv: List[str] | None = None) -> int:
+    # Windows 宿主默认 cp936：本脚本会 print 中文与箭头，出口不钉 utf-8 就会在一句 print 上
+    # 抛 UnicodeEncodeError、退出码 1，让"红"指向脚本自己而不是被测行为（§6-496）。
+    # 放在 main 里而不是模块级：这几档会被 pytest 以 importlib 加载，模块级钉等于改宿主进程。
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--limit", type=int, default=0, help="只跑前 N 条（冒烟用）")
     parser.add_argument("--list", action="store_true", help="只列条目，不起子进程")
