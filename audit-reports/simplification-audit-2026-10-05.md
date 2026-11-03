@@ -11584,3 +11584,12 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **口径**：生产池 **0/0**；测试/基建池 **+8/−0**（只本格台账，落笔后按 `git diff --numstat` 现量改正——首版写成 +7，同一族第十二次）。
     - **仍开**：① 上面那条"要不要按时间切一次行归属"待重拍（连同 §6-506 的三态一起，作废归档那一态已不适用）；② 迁移设施两套源路径口径谁真；③ §6-505 仍开①（内置包在全 app 被 `dangerous_exec` 拒 409 而裸 router 装成 200）——**这条是本批接下来要做的**；④ outbox 并体系仍未实施；⑤ 沿 §6-505／§6-504／§6-500／§6-499／§6-497 全部仍开清单不变。
     - **下一枚空号现查**：本格取 **507**，后继从 **§6-508** 起。
+508. **§6-505 新登那条（内置包在全 app 被 `dangerous_exec` 拒、裸 router 装成）：两条猜测已被现量排除，剩「启动态」一条** ✅⬜ —— 用户点单「下一步」，本批只做到排除面，未结案。
+    - **两个读数都还在（先确认现象不是噪声）**：同一只 `builtin--adaptive-presentation-studio`，`create_app(enable_memory=False, enable_channels=False)` + `TestClient` ⇒ HTTP **409**、`被安装安全门拒绝: 安全扫描未通过: critical(dangerous_exec)`；`tests/unit/skills/test_skillLibraryTakenFromOneFactory.py` 那两格（裸 `FastAPI()` 只挂 `skill_pool_api.router`）⇒ 200 且读面看得见。两边**都没跑 lifespan**（`TestClient(app)` 不进上下文管理器就不跑），所以"起没起生命周期"不是差异。
+    - **已排除 ①「走的是不同处理器」**：用 `tests/route_table.py` 的 `leafRoutes` 现数两边的 `install` 路由——裸 app 只有 `neurova.api.endpoints.skill_pool_api`；全 app 里 `/{skill_id}/install` 同样指 `skill_pool_api`（另有 `marketplace` 的 `/skills/{skill_id}/install` 与 `plugin` 的 `/market/install`，路径不同、不参与本次请求）。⇒ 同一个 handler，同一条咽喉。
+    - **已排除 ②「差异在数据根/白名单落点」**：扫描器 `_get_scanner()` 每次新建 `SkillScanner(workspace_path=".")` 且强设 `ScanPolicy.DENY`，白名单落 `dataLanding("whitelist.json")`（`skill_scanner.py:600`）。把 `NEUROVA_DATA_DIR` 指到一个**全新空目录**复跑那两格 ⇒ `2 passed, 9 deselected in 12.65s`，仍放行。⇒ 不是仓内 `data/` 里的白名单或残留造成的。
+    - **唯一剩下的候选**：`create_app()` 在**装配期**改了扫描面的状态（例如注册自定义规则/加载策略配置/设置某个 review-gate 环境变量），使同一份包内容在全 app 下命中 `dangerous_exec` 而裸 app 不命中。下一步该做的是一件很小的事：在 `create_app()` **之前**与**之后**各跑一次 `scan_skill_for_install(<同一只解包后的目录>)`，比对 findings 的 rule_id 集合——如果 before 无、after 有，就是装配期注册的规则集差；如果两边都有，那 409 与 200 的差就不在扫描器，得回头看请求参数（`human_approved`/`pool_type`）在两条链上的传递。
+    - **为什么值得追**：这条不定，就不知道**随包内置的资产今天到底装不装得进生产**——本会话给目录形安装接的那道预算闸，前面还压着一道可能一直拒着它的扫描门。
+    - **口径**：生产池 **0/0**；测试/基建池 **+9/−0**（只本格台账。落笔前估成 +6，`git diff --numstat` 现量 9 后改正——"写死读数"一族在本会话里已连发十余次，办法只能是**量完再填这句**，不是先写后改）。
+    - **仍开**：① 上面那条「before/after 各扫一次」是小切口，下一批起手就做；② §6-507 的「按时间轴切一次行归属」待拍；③ outbox 并体系未实施；④ 沿 §6-507／§6-506／§6-505／§6-504／§6-500／§6-499／§6-497 全部仍开清单不变。
+    - **下一枚空号现查**：本格取 **508**，后继从 **§6-509** 起。推送态（`git rev-list --count` 现量）：两远端在 `0d1d4998`，本地已领先 **1 笔**（§6-507 那笔 `3a9199ec`），本格入库后 **2 笔**，推送需点单。
