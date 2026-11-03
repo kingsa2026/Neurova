@@ -1196,3 +1196,7 @@ tests/api/neurflow/test_webhook_receive.py
 tests/unit/security/test_anonymizeReachesTheEngine.py
 tests/unit/test_tool_bugs_v2.py
 tests/unit/test_tool_bugs_v3.py
+# §6-504：跨进程分片失效改走读盘版本号后，这条判据把"别的进程写／擦必须被看见"钉成常驻——
+# 四格全走在役入口（两实例共享分片目录＝两进程边界），反向格钉住"不许用重读全盘换正确性"。
+# 逐文件单跑 4 passed
+tests/unit/knowledge/test_shardRevisionInvalidatesOtherProcessCache.py
