@@ -115,7 +115,11 @@ class ExperienceTurnProbe:
 class RecordingEngine:
     """只记录被存节点的存储引擎替身。
 
-    被测判据是"门槛按谁的值算"，不是存储层；引擎在此只当收集器。
+    被测判据是「门槛按谁的值算」，不是存储层；引擎在此只当收集器。
+    `iter_nodes` 是产品在 `pattern_crystallizer.py:395`（同 key 查重）与 `:617`
+    （冷档巡检）开始遍历节点后补上的——**过滤语义不另抄一份**，直接借真实引擎那个
+    不依赖实例状态的谓词 `_apply_filters`。抄一份窄的（比如只看 `memory_type` 不看
+    `min_temperature`）会让「泄漏闸」那几格在错误的节点集上通过：判据失明的方向比红更糟。
     """
 
     def __init__(self) -> None:
@@ -124,6 +128,13 @@ class RecordingEngine:
     def store(self, node: Any) -> Any:
         self.stored.append(node)
         return getattr(node, "id", len(self.stored))
+
+    def iter_nodes(self, filters: Dict = None, limit: int = 500) -> List[Any]:
+        from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
+            CognitiveStorageEngine)
+
+        return [n for n in self.stored
+                if not CognitiveStorageEngine._apply_filters(None, n, filters)][:limit]
 
 
 @pytest.fixture

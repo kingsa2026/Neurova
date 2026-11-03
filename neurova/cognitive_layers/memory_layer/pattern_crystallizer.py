@@ -391,9 +391,12 @@ class PatternCrystallizer:
         primary_tool = candidate["primary_tool"]
         rate = candidate["rate"]
         # 批 W4：同 pattern_key 查重——confirm_pending 同 key 重复候选或
-        # 排队期二次达阈不得双写两条 PATTERN 节点（检索双份注入）
+        # 排队期二次达阈不得双写两条 PATTERN 节点（检索双份注入）。
+        # 身份只比 `metadata["pattern_key"]`：`node.content` 是**格式化后的整句话**
+        # （`模式: '<key>' 类任务用 …`），拿它等裸 `key` 恒不成立 ⇒ 这道闸此前从不触发。
         for node in self.engine.iter_nodes():
-            if node.metadata.get("primary_tool") == primary_tool and node.content == key:
+            if node.metadata.get("pattern_key") == key:
+                logger.info("结晶候选同 key 已入库，不双写: '%s' (%s)", key, primary_tool)
                 return False
         sample_ctx = candidate.get("sample_context", "")[:80]
 
