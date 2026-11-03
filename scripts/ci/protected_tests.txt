@@ -4224,3 +4224,7 @@ tests/unit/test_tool_bugs_v3.py
 # 四格全走在役入口（两实例共享分片目录＝两进程边界），反向格钉住"不许用重读全盘换正确性"。
 # 逐文件单跑 4 passed
 tests/unit/knowledge/test_shardRevisionInvalidatesOtherProcessCache.py
+# §6-505：目录形安装的落点预算是准入条件，不是拷贝失败的注脚——五格钉"这条路走单源判定"
+# 与"两个落点根都要量"（只量最终根＝放行后照样炸），另带不误伤的正对照。
+# 逐文件单跑 5 passed
+tests/unit/skills/test_pathBudgetAdmitsTheDirectoryRoute.py
