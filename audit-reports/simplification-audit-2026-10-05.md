@@ -11665,3 +11665,12 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **红→绿**：红灯 3 failed（单源不存在）→ 3 passed（含真实仓库值的回归钉＋相邻时间不同日期的反向钉）。全量门：vitest 284 文件/2302 tests 全绿、vue-tsc 0 错。过程中 `duplicate-function-inventory` 守卫两度咬合：①生成物台账按其处方重生成；②formatDate 同名异体组**合法消亡**（错误体被正确命名的单源替代，仅剩 MetacognitionPage 的 ISO 体）——守卫高危名单如实维护并留复职说明，台账处置行同步改写。
     - **口径（numstat 实抄）**：前端 7 文件 +91/−40（c2494b3b）。生产池（displayText.ts）+15；其余为测试/收编/生成物。
     - **下一枚空号现查**：尾号现算 **515** ⇒ 本格取 **516**（原误占 489——并发会话同刻写账撞号，本笔重编号移序；引用方无一，改号无伤），后继从 §6-517 起。推送态：本格落笔时 `origin/main..HEAD` 现算 **2 笔**未推（`c2494b3b`/`157d0445`，本台账笔入库后 3），推送需单独点单，引用前一律现算。
+
+    - **下一枚空号现查**：尾号现算 **515** ⇒ 本格取 **516**（原误占 489——并发会话同刻写账撞号，本笔重编号移序；引用方无一，改号无伤），后继从 §6-517 起。推送态：本格落笔时 `origin/main..HEAD` 现算 **2 笔**未推（`c2494b3b`/`157d0445`，本台账笔入库后 3），推送需单独点单，引用前一律现算。
+
+517. **落格：知识库三时间戳细分与时间感知消费面（源创建/源修改/入库 → 重导入更新/冲突建议/范围过滤）** ✅🟢 —— 用户点单「时间戳能否细分…作为检索精准度、冲突判断、重复度判断的时间感知条件」；设计先行（`docs/specs/2026-11-04-知识库三时间戳与时间感知消费面设计.md`，T-C/T-D/T-E 三问全按推荐裁）。
+    - **现状（现读）**：文档管线早已抽源文档 created/modified（docx/PDF 元数据）但 `create_knowledge` 不收——摄取边界即丢；条目只有入库时刻却顶着"创建时间"展示；hybrid 打分零时间信号；冲突读数无源时间；同文档改后重导入**新旧两代并存**（检索污染）。
+    - **实施（契约只增不改；存量 37 行语义不动）**：批 TA——`source_created_at/source_modified_at` 顶层字段＋摄取边界透传（网页等无源时间来源诚实回退抓取时刻；缺失不回退 mtime 编造，沿管线"不猜"哲学）＋存量迁移补齐＋前端列改语义（colCreated→入库时间）＋文档修改时间列＋明细两行；批 TB（T-E）——同 source_path 且源修改时间更晚 ⇒ **更新重入库**（旧值进 revisions[source_update_reingest]、刷新入库时间、保留 knowledge_id），更早/相同/不可考维持现状不猜，`_parseSourceDate` 三形解析（epoch/ISO/PDF D:）；批 TC（T-D 只建议不改判）——条目级冲突行加 time_context（newer_side 建议＋basis 点名哪口钟），底座 facts 层 most_recent 钟细化（需 schema 迁移）登记后续；批 TD①（T-C 先过滤）——search_visible_items/POST search 增 source_modified_after/before，无源时间条目如实排除（精准度优先），前端 a-date-picker 区间过滤。
+    - **红→绿**：契约红灯 7 failed → 7 passed；TB/TC 红灯 collection error → 10 passed（PDF D: 解析/迟到旧版不覆盖/无源时间不猜三格反向钉）；TD① 2 failed → passed；活体 2 passed（真 docx core_properties → 真导入端点 → 真仓库；改时间重导全链）。宽域 tests/unit/knowledge 1104 passed、tests/unit/api 2773 passed 零新增；前端 vue-tsc 0 错＋vitest 284 文件/2302 tests 全绿。
+    - **口径（numstat 实抄）**：后端生产池 +172（repository +148、ingestion +16、common +6、core +2）、测试 3 新档 +345（106+156+83... 实抄见 15d23a09：+517/0 全档合计）；前端 13 文件 +89/−14（c2ed2966）。
+    - **下一枚空号现查**：条目行尾号现算 **516** ⇒ 本格取 **517**，后继从 §6-518 起。
