@@ -1993,6 +1993,16 @@ tests/unit/ci/test_subprocessTextEncodingRatchet.py
 # 站点读成新半修，判据反过来惩罚单源化。登记名单由本档反向验实装，不许成空文。
 # 逐文件单跑 5 passed（12.09s／11.75s 两次同读数）
 tests/unit/ci/test_childEncodingSingleSource.py
+# §6-491 的防线：integration 族跑完不许在仓内 `data/outbox` 留文件。成因是**复算翻案**——
+# `data/outbox/dead-letter/` 曾有 460 个 json（event_type 全是测试夹具名，mtime 停 2026-10-06），
+# 本批把目标档复跑一遍并前后各数一次目录：460 → 460 不变 ⇒ 污染早已被数据根单点
+# （`tests/conftest.py:58` ＋ `neurova/core/data_root.py:96` 的 `callerPath`）挡住，那 460 个是
+# 历史遗留（本批整目录归档后清掉，归档在仓外并留 SHA-256 清单）。⇒ 本档钉的是"别再发生"。
+# 三格各防一种空转：行为格真起子进程比快照差／牙齿格用合成快照验比较函数会报新增／不空转格
+# 验子进程真收集到用例（目标档改名消失时"没污染"就是假绿）。
+# 逐文件单跑 3 passed（10.91s）；变异自证＝把目标临时指向一发往仓内落文件的探针，行为格红
+# `assert ['dead-letter/mut491.json'] == []`
+tests/unit/ci/test_integrationSuiteLeavesRepoDataRootClean.py
 # §6-66 的实际待办：`tests/manual/` 脚本"模块顶层改进程 env"的只降不升棘轮。
 # 上一轮把 E 档判成"改造脚本 + 退役收集拦截层"，读码后推翻：拦截层是**收集期根修**
 # （脚本必须在 `import neurova` 之前改环境，被收集即导入即把变量带进整个跑测进程，
