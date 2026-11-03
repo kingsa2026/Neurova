@@ -310,23 +310,57 @@ class TestA2ToolMessagesListFormatSplit:
 # A-6: GeneticEngine 进化工具未注册 (genetic_engine.py + post_chat_pipeline.py)
 # ═══════════════════════════════════════════════════════════════
 
-class TestA6GeneticEngineNotRegistered:
-    """Bug A-6: ToolGeneticEngine 进化产出的高适应度工具基因未注册到 SkillRegistry。
+class TestA6GeneticEngineRegistration:
+    """A-6 的现役契约：高适应度基因型经创建治理闸**落盘＋进运行态**，两态都要能读回。
 
-    现状（genetic_engine.py）:
-    - ToolGeneticEngine.register_if_valid (line 444) 仅调用 add_to_population，
-      把基因型塞进内部种群，**从不向 SkillRegistry 注册**
-    - ToolGenotype 没有 to_skill()/to_manifest() 方法
-    - post_chat_pipeline.py::_step_genetic_evolution (line 1285) 调用
-      genetic_engine.evolve() 后只更新 tool_weights，**也不注册**
-
-    后果: 进化算法产生的高适应度工具组合永远停留在遗传引擎内部种群，
-    下次对话时 chat_pipeline._check_nl_synthesis 仍会因 has_tool=False 触发重复合成。
-
-    修复模板: 仿照 evolution/skill_encapsulation.py:441-487
-    AutoSkillBuilder.register_to_skill_registry，给 ToolGeneticEngine 增加
-    register_to_skill_registry 方法，并在 post_chat_pipeline 桥接调用。
+    建档时（2026-09）`ToolGeneticEngine` 只把基因型塞进内部种群，从不注册 ⇒ 进化成果
+    永远出不去，下一轮 `_check_nl_synthesis` 仍因 `has_tool=False` 重复合成。
+    后来补了 `register_to_skill_registry(registry, skill_service=None)`，并改了口径
+    （§6-499 定责）：**不给 `skill_service` 就直接返回 0**——因为 `SkillRegistry._skills`
+    是纯内存 dict，只写它等于"重启即丢、前端技能页看不见"的断点，宁可不写。
+    于是本档原两格同时失效：`registered_count >= 1` 红（前提被换），而"低适应度不注册"
+    那格**恒真**（不传 service 时任何种群都返回 0，它从没咬过任何东西）。
+    现按三态钉：无 service ⇒ 零写；有 service ⇒ 高适应度过闸落盘、低适应度被适应度闸挡
+    （两格都把证据补齐，挡它的只能是适应度，不是证据闸）。
     """
+
+    @pytest.fixture
+    def registry(self):
+        """`SkillRegistry` 是单例——存原值、清干净、跑完照原值铺回。"""
+        from neurova.skills.registry import SkillRegistry
+
+        instance = SkillRegistry()
+        saved = dict(instance._skills)
+        instance._skills.clear()
+        yield instance
+        instance._skills.clear()
+        instance._skills.update(saved)
+
+    @pytest.fixture
+    def service(self, tmp_path):
+        from neurova.skills.skill_service import SkillService
+
+        return SkillService(agent_id="genetic-probe-agent", skills_dir=str(tmp_path))
+
+    @staticmethod
+    def _engine(high, low=None):
+        from neurova.evolution.genetic_engine import ToolGeneticEngine, ToolGenotype
+
+        engine = ToolGeneticEngine(validation_threshold=0.5)
+        engine.add_to_population(ToolGenotype(
+            tool_sequence=list(high), success_rate=0.95, execution_time_ms=100.0,
+            reuse_count=5, generation=2))
+        if low is not None:
+            engine.add_to_population(ToolGenotype(
+                tool_sequence=list(low), success_rate=0.1, execution_time_ms=2000.0,
+                reuse_count=0, generation=1))
+        return engine
+
+    @staticmethod
+    def _vote(service, steps):
+        """给某个工具序列记 3 条独立成功——否则挡它的是证据闸，本格就白跑。"""
+        for i in range(3):
+            assert service.creation_evidence.record(f"task-{i}", list(steps), "遗传进化", True)
 
     def test_register_to_skill_registry_method_exists(self):
         """ToolGeneticEngine 应暴露 register_to_skill_registry 方法。"""
@@ -341,93 +375,54 @@ class TestA6GeneticEngineNotRegistered:
             "register_to_skill_registry 应为可调用方法"
         )
 
-    def test_high_fitness_genotype_registered_to_skill_registry(self):
-        """高适应度 ToolGenotype 应被注册到 SkillRegistry。"""
+    def test_withoutServiceWritesNothingRatherThanAnEphemeralBreakpoint(self, registry):
+        """没给 skill_service ⇒ 一条都不写：只写内存 dict 就是重启即丢的断点。
+
+        这一格把"返回 0"从**意外**钉成**约定**——原档那格红的原因正是这条约定落地，
+        而没人来改文档。反向读法：哪天有人把默认改回"只写 registry"，本格红。
+        """
+        engine = self._engine(["file_read", "memory_store"])
+
+        assert engine.register_to_skill_registry(registry) == 0
+        assert registry._skills == {}, "没给持久面却写了运行态——纯内存断点复活"
+
+    def test_high_fitness_genotype_registered_to_skill_registry(self, registry, service):
+        """高适应度个体过闸后：运行态与磁盘两侧都读得到，config 带 tool_sequence。"""
+        steps = ["file_read", "memory_store"]
+        self._vote(service, steps)
+        engine = self._engine(steps, low=["file_write"])
+
+        registered = engine.register_to_skill_registry(registry, service)
+
+        assert registered == 1, (
+            f"应注册 1 个高适应度基因型，实际 {registered}；"
+            f"种群={[g.to_dict() for g in engine.population]}")
+        assert len(registry._skills) == 1, sorted(registry._skills)
+        for skill_id, skill in registry._skills.items():
+            assert skill.config, (
+                f"进化工具 {skill_id} config 不应为空，应携带 tool_sequence 元数据")
+            assert skill.config.get("tool_sequence") == steps, skill.config
+        # 写→读闭环：磁盘侧没有它，前端技能页与重启后的读面就看不见这条进化成果
+        persisted = str(service.list_skills())
+        assert "file_read" in persisted and "memory_store" in persisted, persisted
+
+    @staticmethod
+    def _lowEngine(steps):
         from neurova.evolution.genetic_engine import ToolGeneticEngine, ToolGenotype
-        from neurova.skills.models import SkillSource
-        from neurova.skills.registry import SkillRegistry
 
-        # SkillRegistry 是单例，保存/恢复原状态
-        skill_registry = SkillRegistry()
-        saved_skills = dict(skill_registry._skills)
-        skill_registry._skills.clear()
+        engine = ToolGeneticEngine(validation_threshold=0.5)
+        engine.add_to_population(ToolGenotype(
+            tool_sequence=list(steps), success_rate=0.1, execution_time_ms=2000.0,
+            reuse_count=0))
+        return engine
 
-        try:
-            engine = ToolGeneticEngine(validation_threshold=0.5)
+    def test_low_fitness_genotype_not_registered(self, registry, service):
+        """低适应度个体被**适应度闸**挡住——证据已补齐，所以挡它的不是证据闸。"""
+        low = ["file_read"]
+        self._vote(service, low)
+        engine = self._lowEngine(low)
 
-            # 高适应度基因型（success_rate 高 + 含可识别工具序列）
-            high_fit = ToolGenotype(
-                tool_sequence=["file_read", "memory_store"],
-                success_rate=0.95,
-                execution_time_ms=100.0,
-                reuse_count=5,
-                generation=2,
-            )
-            # 低适应度基因型（应被过滤）
-            low_fit = ToolGenotype(
-                tool_sequence=["file_write"],
-                success_rate=0.1,
-                execution_time_ms=2000.0,
-                reuse_count=0,
-                generation=1,
-            )
-            engine.add_to_population(high_fit)
-            engine.add_to_population(low_fit)
+        registered = engine.register_to_skill_registry(registry, service)
 
-            registered_count = engine.register_to_skill_registry(skill_registry)
-
-            assert registered_count >= 1, (
-                f"至少应注册 1 个高适应度基因型，实际注册 {registered_count} 个；"
-                f"种群={[g.to_dict() for g in engine.population]}"
-            )
-
-            # 验证注册的是高适应度个体
-            registered_ids = set(skill_registry._skills.keys())
-            assert registered_ids, "SkillRegistry 应包含注册的进化工具"
-
-            # 检查注册的技能字段（ADR 0011：_skills 值为 Skill 对象，
-            # manifest.source 面随 class B 删除；config.tool_sequence 意图保留。
-            # 残留处理 2026-09-13）
-            for skill_id, skill in skill_registry._skills.items():
-                assert skill.config, (
-                    f"进化工具 {skill_id} config 不应为空，应携带 tool_sequence 元数据"
-                )
-                assert "tool_sequence" in (skill.config or {}), (
-                    f"进化工具 {skill_id} config 应包含 tool_sequence 字段，"
-                    f"实际字段: {list((skill.config or {}).keys())}"
-                )
-        finally:
-            skill_registry._skills.clear()
-            skill_registry._skills.update(saved_skills)
-
-    def test_low_fitness_genotype_not_registered(self):
-        """低适应度 ToolGenotype 不应被注册到 SkillRegistry。"""
-        from neurova.evolution.genetic_engine import ToolGeneticEngine, ToolGenotype
-        from neurova.skills.registry import SkillRegistry
-
-        skill_registry = SkillRegistry()
-        saved_skills = dict(skill_registry._skills)
-        skill_registry._skills.clear()
-
-        try:
-            engine = ToolGeneticEngine(validation_threshold=0.5)
-
-            low_fit = ToolGenotype(
-                tool_sequence=["file_read"],
-                success_rate=0.1,
-                execution_time_ms=2000.0,
-                reuse_count=0,
-            )
-            engine.add_to_population(low_fit)
-
-            registered_count = engine.register_to_skill_registry(skill_registry)
-
-            assert registered_count == 0, (
-                f"低适应度基因型不应被注册，但注册了 {registered_count} 个"
-            )
-            assert len(skill_registry._skills) == 0, (
-                "SkillRegistry 应为空，实际包含注册项"
-            )
-        finally:
-            skill_registry._skills.clear()
-            skill_registry._skills.update(saved_skills)
+        assert registered == 0, f"低适应度基因型不应被注册，实际注册 {registered} 个"
+        assert registry._skills == {}, "SkillRegistry 应为空，实际包含注册项"

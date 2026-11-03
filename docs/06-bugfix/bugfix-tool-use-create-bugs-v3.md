@@ -312,3 +312,21 @@ $ python -m pytest tests/unit/test_tool_bugs_v2.py tests/unit/evolution/test_too
 ## 未修复的架构观察（仍存在）
 
 无。本轮已处理全部 8 项（A-1 ~ A-8）。A-7/A-8 确认为死代码但保留以避免破坏测试，建议未来统一清理。
+
+---
+
+## 后续更正（2026-11-03，台账 §6-499）
+
+本文上方那三段 `PASSED` 是 2026-09 的历史读数，**照原样留着不改**；A-6 那一族的判据后来
+被产品换掉了前提，此处登记现值，避免后来人按本文的口径去理解那三格：
+
+- `register_to_skill_registry(registry, skill_service=None)` 现在在没有 `skill_service` 时
+  **直接返回 0**——`SkillRegistry._skills` 是纯内存 dict，只写它等于"重启即丢、前端技能页
+  看不见"的断点，宁可不写。
+- 因此原 `test_high_fitness_genotype_registered_to_skill_registry` 恒红（前提被换），
+  而原 `test_low_fitness_genotype_not_registered` **恒真**（不传 service 时任何种群都返回
+  0，它从没咬穿过任何东西）——一红一假绿，同一条根因的两种下场。
+- 类名 `TestA6GeneticEngineNotRegistered` → `TestA6GeneticEngineRegistration`，现按三态钉：
+  无 service ⇒ 零写；有 service 且三任务证据补齐 ⇒ 高适应度过闸（运行态＋磁盘两侧都要读得到）；
+  低适应度被**适应度闸**挡（证据同样补齐，否则挡它的其实是证据闸，那格又是白跑）。
+- 现值：`tests/unit/test_tool_bugs_v3.py` 10 passed（本批当场实跑）。

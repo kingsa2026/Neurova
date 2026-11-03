@@ -753,9 +753,16 @@ class TestSearchTreatsInputAsSubstring:
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
+        storage = None
         try:
-            yield NeurflowStorage(db_path)
+            storage = NeurflowStorage(db_path)
+            yield storage
         finally:
+            # WAL 模式下连接句柄不关，Windows 上 `os.unlink` 直接 WinError 32——
+            # 用例本身早已通过，红的却是 teardown。同档第 19 行的夹具一直先 close 再删，
+            # 这一支是漏抄（不是产品缺陷：`NeurflowStorage.close()` 本来就在）。
+            if storage is not None:
+                storage.close()
             os.unlink(db_path)
 
     def test_workflowSearchDoesNotTreatPercentAsWildcard(self, storage):

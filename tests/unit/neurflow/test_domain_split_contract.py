@@ -9,16 +9,29 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from tests.ast_scan import parseSource
+from tests.route_table import leafRoutes
 
 ROOT = Path(__file__).resolve().parents[3]
 ENDPOINTS = ROOT / "neurova/api/endpoints"
 SNAPSHOT = json.loads(Path(__file__).with_name("route_contract_snapshot.json").read_text(encoding="utf-8"))
 
 
+def _flatRoutes(api):
+    """装配后的叶子路由表（遍历只此一份，见 `tests/route_table.py`）。
+
+    现行 FastAPI 的 `include_router` 不再就地摊平：顶层 `router.routes` 里每个被挂
+    路由器收成一条 `_IncludedRouter`（无 `.endpoint`/`.path`）。直接读裸表会得到
+    47+3＝50 条并对包装层取 `.endpoint` 而 `AttributeError`——这是形状取数错了，
+    不是路由真的少了：展开后仍是 65 条、顺序不变，故本档的逐条快照断言照旧成立。
+    """
+    return leafRoutes(api.router)
+
+
 def test_ordered_route_contract():
     from neurova.api.endpoints import neurflow_api as api
-    assert len(api.router.routes) == 65
-    for route, expected in zip(api.router.routes, SNAPSHOT):
+    routes = _flatRoutes(api)
+    assert len(routes) == 65
+    for route, expected in zip(routes, SNAPSHOT):
         assert sorted(route.methods) == [expected["method"]]
         assert route.path == expected["path"]
         assert route.name == expected["name"]
@@ -39,7 +52,7 @@ def test_leaf_domains_own_routes_and_reexport(domain):
     assert path.is_file(), f"missing leaf domain: {domain}"
     tree = parseSource(path.read_text(encoding="utf-8"))
     functions = {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
-    routes = [r for r in api.router.routes if r.endpoint.__module__.endswith(f"neurflow_{domain}")]
+    routes = [r for r in _flatRoutes(api) if r.endpoint.__module__.endswith(f"neurflow_{domain}")]
     assert len(routes) == 9
     sibling = "neurflow_triggers" if domain == "stores" else "neurflow_stores"
     for node in ast.walk(tree):

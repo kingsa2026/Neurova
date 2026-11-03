@@ -16,6 +16,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from tests.route_table import registeredPathMethods
+
 
 @pytest.fixture
 def app():
@@ -49,7 +51,7 @@ class TestBreakpointEndpointRegistered:
         """请求体 schema 至少含 breakpoints 字段（字符串列表）。"""
         from neurova.api.endpoints.neurflow_api import router
 
-        paths = [(r.path, r.methods) for r in router.routes if hasattr(r, "path")]
+        paths = registeredPathMethods(router)
         # 找到含 'breakpoint' 的路由
         bp_paths = [p for p, _ in paths if "breakpoint" in p]
         assert len(bp_paths) >= 1, "未注册 breakpoint 端点"
@@ -61,7 +63,7 @@ class TestResumeEndpointRegistered:
     def test_resume_endpoint_exists(self):
         from neurova.api.endpoints.neurflow_api import router
 
-        paths = [(r.path, r.methods) for r in router.routes if hasattr(r, "path")]
+        paths = registeredPathMethods(router)
         resume_paths = [
             (p, m)
             for p, m in paths
@@ -72,8 +74,7 @@ class TestResumeEndpointRegistered:
     def test_resume_endpoint_path_template(self):
         from neurova.api.endpoints.neurflow_api import router
 
-        paths = [(r.path, r.methods) for r in router.routes if hasattr(r, "path")]
-        resume_paths = [p for p, _ in paths if "resume" in p and "POST" in ({} or set())]
+        paths = registeredPathMethods(router)
         # 至少一个 resume 路径含 execution_id 占位符
         for p, m in [(pp, mm) for pp, mm in paths if "resume" in pp]:
             if "POST" in m:
@@ -86,7 +87,7 @@ class TestVariablesEndpointRegistered:
     def test_variables_endpoint_exists(self):
         from neurova.api.endpoints.neurflow_api import router
 
-        paths = [(r.path, r.methods) for r in router.routes if hasattr(r, "path")]
+        paths = registeredPathMethods(router)
         var_paths = [
             (p, m)
             for p, m in paths
@@ -101,7 +102,7 @@ class TestMockNodeEndpointRegistered:
     def test_mock_endpoint_exists(self):
         from neurova.api.endpoints.neurflow_api import router
 
-        paths = [(r.path, r.methods) for r in router.routes if hasattr(r, "path")]
+        paths = registeredPathMethods(router)
         mock_paths = [
             (p, m)
             for p, m in paths
