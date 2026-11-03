@@ -116,11 +116,16 @@ def testDependencyMissingBranchNeverReturnsSuccessValue():
     )
 
 
-def testMqttInitConnectionWithoutPahoIsHonestFailure(caplog):
-    """本机就没装 paho：`_init_connection()` 今天真的 return True —— 当前可达的假成功。"""
-    assert mqtt_module.MQTT_AVAILABLE is False, (
-        "本条断言的前提是「当前环境确实缺 paho」；若依赖已装上，请改用 monkeypatch 强制置 False"
-    )
+def testMqttInitConnectionWithoutPahoIsHonestFailure(monkeypatch, caplog):
+    """paho 缺席时 `_init_connection()` 必须点名失败——这条契约不该随宿主装了什么而变。
+
+    首版把前提写成 `assert MQTT_AVAILABLE is False`，于是"本机装了 paho-mqtt"（实测
+    `site-packages/paho` 在）就把一条**行为契约**判成红——红在宿主状态，不在产品（§6-481①
+    登记、§6-493 收口）。本仓对可选依赖的口径是「惰性 import + fail-soft」（AGENTS §3），
+    要测的是缺失分支的行为；同档 `testDiscordVerifyTokenWithoutRequestsIsHonestFailure`
+    早就是 monkeypatch 那一形，这里向它对齐，不另造第三种写法。
+    """
+    monkeypatch.setattr(mqtt_module, "MQTT_AVAILABLE", False)
     adapter = MQTTAdapter()
     with caplog.at_level(logging.WARNING):
         assert adapter._init_connection() is False, "paho 缺失却报初始化成功"
