@@ -1160,3 +1160,8 @@ tests/unit/api/test_identityHeadersAlignSecretBeforeSigning.py
 tests/unit/cognitive_layers/memory_layer/test_cueChannelSurvivesWithoutNumpy.py
 tests/unit/context/test_baselineForensicsVerdictsDeriveFromReadings.py
 tests/unit/knowledge/test_knowledge_vector_index.py
+# §6-490 的账实闸：子进程写侧编码 helper 全仓只准一处实装（三份逐字相同的
+# `_utf8ChildEnv()` 收一到 `neurova/core/text_encoding.py`）；另钉「跨文件单源 helper 的 import
+# 别名必须被棘轮识别器认作一跳」——不跟这一跳，收口单源的那一刻就把已修站点读成新半修。
+# 逐文件单跑 5 passed（12.09s／11.75s 两次同读数）
+tests/unit/ci/test_childEncodingSingleSource.py
