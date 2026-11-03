@@ -1172,3 +1172,8 @@ tests/unit/ci/test_childEncodingSingleSource.py
 # 牙齿格用合成快照验比较函数会报新增、不空转格验子进程真收集到用例。
 # 逐文件单跑 3 passed（10.91s）；变异自证＝目标临时指向往仓内落文件的探针 ⇒ 行为格红
 tests/unit/ci/test_integrationSuiteLeavesRepoDataRootClean.py
+# §6-493 治理读面的失败形态：指挥资格台账读不动必须 503 并点名原因，不许回
+# `{"code":0,…,"available":false}`——`code:0` 是成功信封，那条形状让「台账坏了」与「今天一条
+# 判定都没有」两条相反事实共用一个 200。健康态那格钉 `available` 只剩读数可达义、`rows` 是列表。
+# 逐文件单跑 2 格（19 passed／5 passed 两次合跑同读数）
+tests/unit/api/test_authorityLogReadFaceRefusesToPaintFailureAsSuccess.py

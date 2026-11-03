@@ -180,15 +180,17 @@ async def query_authority_log(
 ):
     """指挥资格判定台账（批 H2 读面）：每次准入/工具预检的判定行。
 
-    台账不可用时如实报 available=False——观测面故障不冒充空数据。
+    读不动就是读不动——503 并点名原因（§6-493）。`available` 只描述读数可达性，
+    不再当故障的替身：故障若折成 `code:0 + available:false`，「台账坏了」与
+    「今天一条判定都没有」这两条相反事实在同一个 200 里无法区分。
     """
     from neurova.security.command_authority import getCommandAuthorityLedger
 
     try:
         rows = getCommandAuthorityLedger().queryAuthorityLog(
             sender_id=sender_id, limit=limit)
-    except Exception as e:  # noqa: BLE001 - 台账故障诚实呈现
-        return {"code": 0, "data": {"available": False, "error": str(e), "rows": []}}
+    except Exception as e:  # noqa: BLE001 - 统一出口：点名并上抛 5xx，不折成成功信封
+        raise _authorityLedgerUnavailable(e) from e
     return {"code": 0, "data": {"available": True, "rows": rows}}
 
 
@@ -392,6 +394,20 @@ def _rsiAgentAbsent(agentId: Optional[str]) -> "HTTPException":
         status_code=503,
         detail=f"agent {_agentLabel(agentId)} 不在运行池中：审批无处落脚，"
         "且不回落到别的 agent（回落等于把批准动作装进别人的技能库）",
+    )
+
+
+def _authorityLedgerUnavailable(err: BaseException) -> "HTTPException":
+    """指挥资格台账读不动（打不开库／表缺／查询报错）。
+
+    与「今天一条判定都没有」是两条相反的事实：前者要修台账，后者是系统在干净地跑。
+    这两条过去共用一个 200 信封（`{"code":0,…,"available":false}`），值班照着"没有判定行"
+    去排查，走的是一条必定不通的路——与 `_rsiAgentAbsent`／`_rsiNotAssembled` 被拆成两个
+    具名口同形（§6-493，教义第 2 条：故障要么根修，要么以诚实形态暴露，不许折成成功）。
+    """
+    return HTTPException(
+        status_code=503,
+        detail=f"指挥资格台账读不动：{type(err).__name__}: {err}",
     )
 
 
