@@ -1184,3 +1184,15 @@ tests/unit/test_auditLedgerReachabilitySingleProbe.py
 # 就把退出码变成 1）。裸奔面 35 档→等号基线 30（本批收 `scripts/ci/` 5 档）；谓词认三种写法、
 # 不放过"只钉 stderr"。逐文件单跑 7 passed
 tests/unit/ci/test_scriptsCiStdoutIsPinnedBeforePrint.py
+# §6-497／§6-498／§6-499 三族预存红定责后收口（FastAPI 0.142 的 `_IncludedRouter`
+# 让聚合器模块的裸 `router.routes` 同样失明——判据改接 `tests/route_table.py` 单源，
+# 禁令的豁免口径从「名字带 router」收紧为「那个模块真不挂子路由」；注解面改钉
+# 「声明的名字解得出来」而不是某一种拼法；NL 合成与遗传注册两族按创建治理闸的三态重钉，
+# 其中原「低适应度不注册」那格被证实恒真（不传 skill_service 时任何种群都返回 0）。
+# 逐文件单跑：8／10／15／7／16／10 passed
+tests/unit/neurflow/test_domain_split_contract.py
+tests/api/neurflow/test_debug_api.py
+tests/api/neurflow/test_webhook_receive.py
+tests/unit/security/test_anonymizeReachesTheEngine.py
+tests/unit/test_tool_bugs_v2.py
+tests/unit/test_tool_bugs_v3.py
