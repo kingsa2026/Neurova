@@ -14,12 +14,27 @@ import pathlib
 
 import pytest
 
+from tests.ast_scan import parseSource
+
 REPO = pathlib.Path(__file__).resolve().parents[3]
 CHANNELS_DIR = REPO / "neurova" / "channels"
 
 
 def _channelSources() -> dict:
-    return {p.name: p.read_text(encoding="utf-8") for p in CHANNELS_DIR.glob("*.py")}
+    """渠道族源码面——**先验面宽，再谈「零命中」**。
+
+    根写错（`parents[3]` 按本档所在深度算）时这里返回空 dict，于是本档那两条
+    「字面量只在 manager.py 一处」「`_dispatch_message` 里没有 pass-only except」
+    会以零命中假绿——读数说"干净"，其实什么都没看（§6-491 由常驻棘轮
+    `test_scanCriterionMustProveItsOwnSurfaceRatchet` 抓到这一形）。
+    """
+    sources = {p.name: p.read_text(encoding="utf-8") for p in CHANNELS_DIR.glob("*.py")}
+    scanned = len(sources)
+    assert scanned > 50, (
+        f"扫描面现读 {scanned} 个文件（`neurova/channels/*.py` 本批实测 61）——"
+        "根指不到该目录时，本档的「零命中」断言全部失真"
+    )
+    return sources
 
 
 class TestFallbackErrorCopySingleSource:
@@ -43,7 +58,7 @@ class TestFallbackErrorCopySingleSource:
         """_dispatch_message 里不许有 pass-only 的 except——兜底回发自身失败
         必须出声（现读该函数恰一处：兜底 send 的 except Exception: pass）。"""
         src = _channelSources()["manager.py"]
-        tree = ast.parse(src)
+        tree = parseSource(src)
         found = []
         for node in ast.walk(tree):
             if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)) \

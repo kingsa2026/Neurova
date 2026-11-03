@@ -210,8 +210,10 @@ class TestCleanCancel:
         import ast
         import pathlib
 
+        from tests.ast_scan import parseSource
+
         src = pathlib.Path(builtin.__file__).read_text(encoding="utf-8")
-        tree = ast.parse(src)
+        tree = parseSource(src)
         for node in ast.walk(tree):
             if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)) \
                     and node.name in ("exec_approval", "_execApprovalCore"):
