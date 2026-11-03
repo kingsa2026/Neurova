@@ -1986,6 +1986,13 @@ tests/unit/api/test_roleGateIdentitySourceIsStrict.py
 # 防谓词宽到把正确写法算进基线、把棘轮稀释成噪声。降了会**红着提示收基线**，
 # 不让"悄悄比基线好"变成"再没人回来核"。逐文件单跑 9 passed in 6.19s
 tests/unit/ci/test_subprocessTextEncodingRatchet.py
+# §6-490 的账实闸：子进程写侧编码 helper 全仓只准一处实装（`neurova/web_reach/reach.py`、
+# `scripts/ci_static_gate.py`、`scripts/ci/protected_subset_nightly.py` 三份逐字相同的
+# `_utf8ChildEnv()` 收一到 `neurova/core/text_encoding.py`）。另钉住「跨文件单源 helper 的 import
+# 别名」必须被上面那把棘轮认作一跳——识别器不跟这一跳，收口单源的那一刻就会把**已修**的
+# 站点读成新半修，判据反过来惩罚单源化。登记名单由本档反向验实装，不许成空文。
+# 逐文件单跑 5 passed（12.09s／11.75s 两次同读数）
+tests/unit/ci/test_childEncodingSingleSource.py
 # §6-66 的实际待办：`tests/manual/` 脚本"模块顶层改进程 env"的只降不升棘轮。
 # 上一轮把 E 档判成"改造脚本 + 退役收集拦截层"，读码后推翻：拦截层是**收集期根修**
 # （脚本必须在 `import neurova` 之前改环境，被收集即导入即把变量带进整个跑测进程，

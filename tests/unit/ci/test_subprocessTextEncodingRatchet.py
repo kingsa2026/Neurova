@@ -449,8 +449,18 @@ def _bodyReturnsPinnedDict(fn) -> bool:
     return False
 
 
+#: 跨文件单源 helper 的登记名单（§6-490，唯一出处）。调用点本档没有定义、键在单源模块的
+#: 返回值里——识别器不跟这一跳，把三份逐字相同的 `_utf8ChildEnv()` 收成
+#: `neurova/core/text_encoding.py` 的那一刻，就会把**已经钉好的**站点读成新半修：
+#: 判据反过来惩罚单源化。名单不许成空文，由
+#: `tests/unit/ci/test_childEncodingSingleSource.py::test_ratchetRegistryNamesHaveRealImplementations`
+#: 逐名验证生产面真有带键实装；名单外的名字一律照旧点名（见那条 `childEnvLike` 反检样本）。
+SINGLE_SOURCE_CHILD_ENV_NAMES = frozenset({"utf8ChildEnv"})
+
+
 def _pinHoldingNames(tree) -> set:
-    """本文件里"持有或产出带键字典"的名字——覆盖 helper 函数与局部字典改写这两类一跳来源。
+    """本文件里"持有或产出带键字典"的名字——覆盖 helper 函数、局部字典改写，
+    以及**跨文件单源 helper 的 import 别名**这三类一跳来源。
 
     实测两类误判都靠这一处收回来：`neurova/web_reach/reach.py` 与 `scripts/ci_static_gate.py`
     都写 `env=_utf8ChildEnv()`，键在那个 helper 的返回值里；`tests/manual/
@@ -461,6 +471,10 @@ def _pinHoldingNames(tree) -> set:
     """
     names = set()
     for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name in SINGLE_SOURCE_CHILD_ENV_NAMES:
+                    names.add(alias.asname or alias.name)   # 一跳·跨文件单源（§6-490）
         if isinstance(node, ast.Assign):
             value = node.value
             direct = (isinstance(value, ast.Dict) and any(
@@ -570,6 +584,17 @@ def test_fileLevelExemptionDoesNotHideAnUnpinnedCallInSameFile():
     ("import os, subprocess, sys\n"
      "def _utf8ChildEnv():\n    return {**os.environ, 'PYTHONIOENCODING': 'utf-8'}\n"
      "subprocess.run([sys.executable], encoding='utf-8', env=_utf8ChildEnv())\n", []),
+    # 一跳·**跨文件**的单源 helper（§6-490）：调用点本档没有定义，键在
+    # `neurova/core/text_encoding.py` 的返回值里。识别器不跟这一跳，把三份逐字相同的
+    # `_utf8ChildEnv()` 收成单源的那一刻，就会把**已经钉好的**站点读成三处新半修——
+    # 判据反过来惩罚单源化，是判据自己的缺陷，不是存量在涨。
+    ("import subprocess, sys\nfrom neurova.core.text_encoding import utf8ChildEnv\n"
+     "subprocess.run([sys.executable], encoding='utf-8', env=utf8ChildEnv())\n", []),
+    # 反检：从别处 import 一个不带键的 helper ⇒ 照样点名（跟 import 不等于见 import 放行）。
+    # 模块名得是合法标识符：首版写成 `somewhere.else`，`else` 是关键字 ⇒ parseSource 抛
+    # SyntaxError 被识别器吞成 []，于是这条反证红在"我的样本不合法"上，而不是红在判据上。
+    ("import subprocess, sys\nfrom elsewhere.registry import childEnvLike\n"
+     "subprocess.run([sys.executable], encoding='utf-8', env=childEnvLike())\n", [3]),
     # 一跳·局部字典改写：先建 env 再写键（`tests/manual/sourceEscapeSequenceImportClean_live.py` 形）
     ("import os, subprocess, sys\nenv = dict(os.environ)\n"
      "env['PYTHONIOENCODING'] = 'utf-8'\n"
