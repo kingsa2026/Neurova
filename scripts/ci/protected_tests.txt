@@ -1691,6 +1691,12 @@ tests/unit/test_session_landing_guard.py
 # 再跑常驻判定（实测塞入一个失效号即红、还原即绿）。扫描面＝ audit-reports + docs 递归（§6-477）。
 # 逐文件单跑 6 passed（实测 85s：两棵树全扫一次 79s，由 module fixture 让两格共用，只付一遍）
 tests/unit/test_audit_ledger_commit_guard.py
+# §6-495 的降成本验收：可达性探测必须**一次性建集合**，不许逐号起 `git merge-base`，
+# 对象类型也不许逐号起 `git cat-file -t`（同一条根因的两处命中点，第一版只扫荡了前者）。
+# 另钉两条：前缀歧义必须保守判不可达（判据可以变便宜，不许比 git 更宽松）；
+# 真造的悬空 commit 仍必须判不可达（省调用不许把语义弄松）。
+# 逐文件单跑 5 passed（6.12s）；一场扫描实测 79.38s → 2.5s，两边父墙同步收到 60
+tests/unit/test_auditLedgerReachabilitySingleProbe.py
 # tests/manual/ 的活体脚本不得被 pytest 收集：它们在导入期改写进程 env，会掩盖一切依赖数据根的判据
 # （实测掩盖过会话落点守卫：同一选择集带 manual 时 0 ERROR，摘掉才露出 16 条真 ERROR）。
 # 拦截在 pytest_configure（收集之前）——pytest_ignore_collect 对显式路径在 pytest 9 无效，实测过。
