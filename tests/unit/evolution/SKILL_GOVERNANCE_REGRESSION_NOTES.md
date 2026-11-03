@@ -16,7 +16,7 @@
 工具执行直接回归：76 passed / 2 failed。
 
 - `test_p0_p1_refactor.py::TestToolExecutor::test_on_tool_executed_dispatches_to_all_three`：断言学习回调直接调用 skill_packer.observe，当前没有该调用。需要依照任务完成后记账契约验证，不应恢复匿名观测凑票。
-- `test_tool_bugs_v3.py::TestA6GeneticEngineNotRegistered::test_high_fitness_genotype_registered_to_skill_registry`：仅模拟高 fitness，无三任务证据及 SkillService；当前拒绝注册。
+- `test_tool_bugs_v3.py::TestA6GeneticEngineNotRegistered::test_high_fitness_genotype_registered_to_skill_registry`：仅模拟高 fitness，无三任务证据及 SkillService；当前拒绝注册。**已结（2026-11-03，台账 §6-499）**：该格的前提被产品换掉了——`register_to_skill_registry(registry, skill_service=None)` 现在没有 `skill_service` 就直接返回 0（只写纯内存 dict 等于重启即丢的断点）。类名改为 `TestA6GeneticEngineRegistration`，按三态重钉：无 service ⇒ 零写；有 service 且证据补齐 ⇒ 高适应度过闸（运行态＋磁盘两侧可读）；低适应度被**适应度闸**挡（证据同样补齐，否则那格恒真）。
 
 技能目录全套另因 `test_skill_import_architecture.py::test_install_skill_with_url_does_not_return_path_not_found` 真实网络下载重试超时退出，未完成全套；不计为通过。
 

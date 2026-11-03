@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 
 from neurova.core.trigger_rate_limiter import TriggerRateLimiter
 from neurova.core.webhook_security import compute_signature
+from tests.route_table import registeredPaths
 
 
 @pytest.fixture
@@ -273,7 +274,10 @@ class TestWebhookReceiveEndpoint:
     def test_endpoint_registered(self):
         from neurova.api.endpoints.neurflow_api import router
 
-        paths = [r.path for r in router.routes if hasattr(r, "path")]
+        # 取数走单源：receive 端点长在 `neurflow_triggers` 那片被 include 的子路由里，
+        # 朴素口径（`hasattr(r, "path")`）把它连同其余 18 条一起滤掉了——端点是挂着的，
+        # 红的是取数口（§6-497，与 §6-401 的 steer 同形）。
+        paths = registeredPaths(router)
         assert any("receive" in p and "trigger" in p for p in paths)
 
     def test_missing_trigger_returns_404(self, client):

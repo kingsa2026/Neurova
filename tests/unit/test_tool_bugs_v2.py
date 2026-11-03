@@ -190,8 +190,23 @@ class TestN5DuplicateToolResultOnException:
             f"异常时应只写 1 条 tool_result，实际 {len(tool_results)}: {tool_results}"
         )
 
-    def test_exception_tool_result_uses_first_format(self):
-        """异常 tool_result 应使用第一次写的格式（"执行出错: ..."），非 "Error: ..."。"""
+    def test_exception_tool_result_uses_the_single_failure_producer(self):
+        """异常 tool_result 的正文只许由**那台**失败正文生产者构造（原 N5 的第二格式不得复活）。
+
+        现契约（§6-499 定责后重写）：
+        - 工具异常由执行咽喉 `native_tool_dispatch.execute_native_tool` 转成
+          `{"success": False, "error": "工具执行异常: <原因>"}`，回装正文一律走
+          `buildFailureToolBody`（诊断键名单也在它内部，此处不抄第二份）；
+        - 本档建档时钉的字面量（先 `"执行出错: "` 后 `"执行失败"`）跟着措辞走，
+          产品改词它就红——判据要钉的是「正文出自单源、原因传得出去、旧格式不复活」，
+          不是某一句中文。
+        - 接缝同步跟到咽喉：异常须由 `tool_executor.execute_tool` 抛出（当年打的是
+          `skill_registry.execute_skill`，原生链改走咽喉后那个接缝已不在执行路径上，
+          于是诱发出的是 `MagicMock can't be used in 'await'`——测的是替身，不是产品）。
+        """
+        import json
+
+        from neurova.agent import native_tool_dispatch as native
         from neurova.agent.loops.base import BaseAgentLoop
 
         class _ConcreteLoop(BaseAgentLoop):
@@ -203,8 +218,9 @@ class TestN5DuplicateToolResultOnException:
         # P3-c 收窄：base.handle_tool_calls 经 append_tool_messages 回装，桥接到真实列表
         mock_agent.append_tool_messages = lambda records: mock_agent._tool_messages_list.extend(records or [])
         mock_agent.llm_client = MagicMock()
-        mock_agent.skill_registry = AsyncMock()
-        mock_agent.skill_registry.execute_skill = AsyncMock(side_effect=RuntimeError("boom"))
+        executor = MagicMock()
+        executor.execute_tool = AsyncMock(side_effect=RuntimeError("boom"))
+        mock_agent.tool_executor = executor
         mock_agent.tool_router = None
         mock_agent.config.agent_id = "test_agent"
         mock_agent.config.user_id = "test_user"
@@ -224,11 +240,14 @@ class TestN5DuplicateToolResultOnException:
             m for m in mock_agent._tool_messages_list if m.get("type") == "tool_result"
         ]
         assert len(tool_results) == 1
-        # 契约统一后单一失败文案（原 N5 bug=两种格式双写；现"执行失败"
-        # 为唯一格式，条数仍钉 1。残留处理 2026-09-13）
-        assert "执行失败" in tool_results[0]["result"], (
-            f"应写入统一失败文案，实际: {tool_results[0]['result']}"
-        )
+        body = json.loads(tool_results[0]["result"])
+        assert tool_results[0]["success"] is False, "失败轮不得把 success 写成真"
+        assert "boom" in body["error"], f"原因必须在回环正文里，实际 {body}"
+        assert set(body) <= {"error"} | set(native.FAILURE_DIAGNOSTIC_KEYS), (
+            f"失败正文混进了单源名单之外的键：{sorted(body)}")
+        assert body == native.buildFailureToolBody(body["error"], None), (
+            f"正文不是那台生产者构造的：{body}")
+        assert "Error:" not in tool_results[0]["result"], "原 N5 的第二格式复活"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -380,54 +399,113 @@ class TestN10ParseDescriptionResultDiscarded:
 # N-1: NL 合成工具未注册 [CRITICAL] (chat_pipeline.py:542-549)
 # ═══════════════════════════════════════════════════════════════
 
-class TestN1NLSynthesizedToolNotRegistered:
-    """Bug N-1 [CRITICAL]: _check_nl_synthesis 合成工具成功后只 log，
-    从不注册到 skill_registry。导致每次相同请求都重新合成，且合成出的工具
-    永远无法被 agent 发现和调用——整个 NL 合成管线是死代码。
+class TestN1NLSynthesizedToolRegistration:
+    """N-1 的现役契约：合成产物**经创建治理闸**注册；闸拦下时要看得见理由。
 
-    原代码 (chat_pipeline.py:542-549):
-        if synth_result and synth_result.success and synth_result.synthesized_tool:
-            tool = synth_result.synthesized_tool
-            if tool.stage.value == "completed":
-                logger.info("NL工具合成: %s (置信度=%.2f)", tool.name, tool.confidence)
-                # ← 到此结束，从未调用 skill_registry.register_skill()
+    建档时（2026-09）产品里合成成功只 log、从不注册 ⇒ 整条管线是死代码。后来接上了
+    `publish_automatic(agentLibrary(agent_id), registry, manifest)`，而它自带一道
+    「同一工具序列至少 3 条独立真实成功」的闸（`creation_governance.eligible`／
+    `MIN_SUCCESSES`）。于是原断言的前提被换掉了：注册不再是"合成即注册"，而是
+    "证据够才注册"——所以本档现钉三态，而不是只钉最后一态：
 
-    修复: 将 SynthesizedTool 转为 Skill manifest 并注册到 skill_registry，
-    使后续 chat 轮次可通过 list_skills/get_skill 发现已合成的工具。
+    1. 没有能力缺口信号 ⇒ 合成器根本不该被调（入口判据 T-03 已从"用户话说得像命令"
+       改成 `capability_gap` 单源投出的 capability 族缺口；本批定责前那条红的确切成因
+       就是这条：测试只塞了 `user_input`，第一步就 return）；
+    2. 有缺口、合成出 COMPLETED 产物，但零证据 ⇒ 治理闸拒绝，且拒绝理由进日志
+       （工单 014 那条"拦了还是根本没门"必须能从读数看出来）；
+    3. 补齐 3 条独立证据 ⇒ 经同一个闸注册，`list_skills()` 与 `SkillService` 两侧都读得到
+       （写→读闭环，N-1 的原命题在这一态照旧成立）。
     """
 
-    def test_synthesized_tool_registered_to_skill_registry(self):
-        """合成成功的工具应注册到 _skill_registry，使 list_skills() 可发现。"""
-        from neurova.agent.chat_pipeline import ChatPipeline, ChatContext
-        from neurova.evolution.nl_synthesizer import NLToolSynthesizer
+    _USER_INPUT = "搜索用户数据"
+    _AGENT_ID = "test_agent"
+
+    @pytest.fixture(autouse=True)
+    def _isolate(self, tmp_path, monkeypatch):
+        from neurova.agent.capability_gap import clearCapabilityGap
         from neurova.skills.registry import SkillRegistry
+        from neurova.skills.skill_service import SkillService
 
-        # 真实组件
-        skill_registry = SkillRegistry()
-        tool_synthesizer = NLToolSynthesizer()
+        clearCapabilityGap("session-tool-bugs-n1")
+        registry = SkillRegistry()
+        saved = dict(registry._skills)
+        registry._skills.clear()
+        service = SkillService(agent_id=self._AGENT_ID, skills_dir=str(tmp_path))
+        # 接缝打在**使用方**的模块名上：`chat_pipeline` 顶层 import 了 agentLibrary，
+        # 落盘走向由它决定（不 patch 就会写进 NEUROVA_DATA_DIR 的常驻库）。
+        monkeypatch.setattr("neurova.agent.chat_pipeline.agentLibrary", lambda agent_id: service)
+        self._registry, self._service = registry, service
+        yield
+        registry._skills.clear()
+        registry._skills.update(saved)
+        clearCapabilityGap("session-tool-bugs-n1")
 
-        # mock agent：仅暴露 _check_nl_synthesis 需要的属性
+    def _pipeline(self):
+        from neurova.agent.chat_pipeline import ChatPipeline
+        from neurova.evolution.nl_synthesizer import NLToolSynthesizer
+
         mock_agent = MagicMock()
-        mock_agent.tool_synthesizer = tool_synthesizer
-        mock_agent._skill_registry = skill_registry
-        mock_agent.skill_manager = None  # 跳过 auto_acquire 检查
-        mock_agent.config.agent_id = "test_agent"
-
-        # 绕过 __init__（它需要大量依赖）
-        pipeline = object.__new__(ChatPipeline)
+        mock_agent.tool_synthesizer = NLToolSynthesizer()
+        mock_agent._skill_registry = self._registry
+        mock_agent.skill_manager = None      # 跳过 auto_acquire 互斥
+        mock_agent.config.agent_id = self._AGENT_ID
+        pipeline = object.__new__(ChatPipeline)   # __init__ 需要大量依赖
         pipeline._agent = mock_agent
+        return pipeline
 
-        ctx = ChatContext(user_input="搜索用户数据")
+    def _check(self, *, withGap: bool):
+        from neurova.agent.capability_gap import GAP_CATALOG_MISS, recordCapabilityGap
+        from neurova.agent.chat_pipeline import ChatContext
 
-        asyncio.run(pipeline._check_nl_synthesis(ctx))
+        if withGap:
+            recordCapabilityGap(GAP_CATALOG_MISS, {"query": self._USER_INPUT},
+                                session_id="session-tool-bugs-n1")
+        asyncio.run(self._pipeline()._check_nl_synthesis(ChatContext(user_input=self._USER_INPUT)))
 
-        skills = skill_registry.list_skills()
-        assert len(skills) > 0, (
-            "合成成功的工具应注册到 skill_registry，但 list_skills() 为空"
-        )
-        # 注册的 skill 应携带合成工具的信息
+    def test_noGapSignalMeansNoSynthesisAttempt(self):
+        """缺口没投 ⇒ 一条技能都不会多出（入口判据是缺口，不是措辞）。"""
+        self._check(withGap=False)
+        assert self._registry.list_skills() == [], "没有缺口信号却注册了技能——入口闸失效"
+
+    def test_gapWithoutEvidenceIsRefusedWithAReason(self, caplog):
+        """闸拦下必须留痕：零证据时不注册，且日志说得出是闸拦的。"""
+        with caplog.at_level("INFO"):
+            self._check(withGap=True)
+        assert self._registry.list_skills() == [], (
+            "零证据却注册成功——创建治理闸被绕过（MIN_SUCCESSES 失效）")
+        text = "\n".join(r.getMessage() for r in caplog.records)
+        assert "合成技能未发布" in text and "证据" in text, (
+            "拒绝没留痕，读不出「闸拦了」还是「根本没门」：" + text[-400:])
+
+    def test_gapWithThreeEvidence_registersAndStaysReadable(self):
+        """补齐 3 条独立真实成功 ⇒ 同一道闸放行，注册面与持久面都读得到。"""
+        from neurova.evolution.nl_synthesizer import NLToolSynthesizer
+
+        # 先按同一输入问一次真实合成器，拿它的工具序列去记账——证据的「结构身份」
+        # 由序列决定（`task_results` 按 structure 聚合），抄来的序列不算证据。
+        probe = NLToolSynthesizer().synthesize(description=self._USER_INPUT,
+                                               context={"author_id": self._AGENT_ID})
+        assert probe.success and probe.synthesized_tool is not None, "合成器离线不可用"
+        steps = list(probe.synthesized_tool.tool_sequence)
+        for i in range(3):
+            assert self._service.creation_evidence.record(
+                f"task-{i}", steps, self._USER_INPUT, True)
+
+        self._check(withGap=True)
+
+        skills = self._registry.list_skills()
+        assert len(skills) == 1, f"应注册 1 条合成技能，实际 {len(skills)}"
         registered = skills[0]
         assert registered.name, "注册的 skill 应有 name"
-        assert registered.description == "搜索用户数据", (
-            f"注册的 skill description 应为原始描述，实际: {registered.description}"
-        )
+        assert registered.description == self._USER_INPUT, (
+            f"description 应为原始描述，实际: {registered.description}")
+        # 门面（list_skills 返回 SkillInfo，没有 config）之外还要钉运行态条目本体：
+        # 合成标记与工具序列丢了，下一轮 has_tool 判据照样看不见它 ⇒ 重复合成（N-1 原命题）
+        runtime = next(iter(self._registry._skills.values()))
+        config = getattr(runtime, "config", None) or {}
+        assert config.get("synthesized") is True, config
+        assert config.get("tool_sequence") == steps, config
+        # 写→读闭环：磁盘侧（前端技能页读的那一面）也必须看见它，否则又是重启即丢
+        persisted = str(self._service.list_skills())
+        assert self._USER_INPUT in persisted, persisted
+
