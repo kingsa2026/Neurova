@@ -74,7 +74,20 @@ class TestReachConfigPath:
         assert str(tmp_path / "user-7" / "config.yaml") == str(p)
 
     def test_config_loads_user_yaml(self, tmp_path):
-        from agent_reach.config import Config
+        """上游 `agent-reach` 的 Config 真按 config_path 读用户桶——那**不是本仓的实现**。
+
+        现查：`agent_reach` 不在本仓依赖清单里（requirements.txt 与两把锁 0 声明），
+        产品侧把它当可选外部集成（`neurova/web_reach/reach.py:348-356` 试导失败即降级）。
+        ⇒ 未安装时这一格**无从验证**，按宿主条件 skip 并写明缺什么：留一条永远红的格子
+        会被后来人读成"本仓有缺陷"（§6-490 就是被这么一条坑的），xfail 则把"上游契约
+        没验过"这件事藏起来——两者都比不上明写条件。
+        本仓那半条契约由上一格 `test_config_path_points_to_user_bucket` 钉，它不依赖上游包。
+        """
+        configModule = pytest.importorskip(
+            "agent_reach.config",
+            reason="可选外部集成 agent-reach 未安装，且不在本仓依赖清单里（§6-494）",
+        )
+        Config = configModule.Config
 
         from neurova.web_reach.credentials import user_config_path
 

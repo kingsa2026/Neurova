@@ -11,7 +11,8 @@
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
+from tests.unit.web_reach._playwrightStub import stubAsyncPlaywright
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -60,7 +61,8 @@ class TestBrowserReadFreshSession(unittest.TestCase):
         browser = _make_fake_browser(page)
         pw = _make_fake_playwright(browser)
 
-        with patch("neurova.web_reach.browser_read.async_playwright", return_value=pw):
+        with stubAsyncPlaywright() as _pwFactory:
+            _pwFactory.return_value = pw
             result = browser_read("https://example.com/long")
 
         self.assertTrue(result["success"])
@@ -85,7 +87,8 @@ class TestBrowserReadFreshSession(unittest.TestCase):
         browser = _make_fake_browser(page)
         pw = _make_fake_playwright(browser)
 
-        with patch("neurova.web_reach.browser_read.async_playwright", return_value=pw):
+        with stubAsyncPlaywright() as _pwFactory:
+            _pwFactory.return_value = pw
             result = browser_read("https://example.com/short")
 
         data = result["data"]
@@ -104,7 +107,8 @@ class TestBrowserReadFreshSession(unittest.TestCase):
         browser = _make_fake_browser(page)
         pw = _make_fake_playwright(browser)
 
-        with patch("neurova.web_reach.browser_read.async_playwright", return_value=pw):
+        with stubAsyncPlaywright() as _pwFactory:
+            _pwFactory.return_value = pw
             result = browser_read("https://example.com/c", chunk_size=200)
 
         data = result["data"]
@@ -130,7 +134,8 @@ class TestBrowserReadContinuation(unittest.TestCase):
         from neurova.web_reach.browser_read import browser_read
 
         pw = _make_fake_playwright(AsyncMock())
-        with patch("neurova.web_reach.browser_read.async_playwright", return_value=pw) as mock_pw:
+        with stubAsyncPlaywright() as mock_pw:
+            mock_pw.return_value = pw
             result = browser_read(session_id=self.session_id)
 
         mock_pw.assert_not_called()  # 续读零浏览器开销
