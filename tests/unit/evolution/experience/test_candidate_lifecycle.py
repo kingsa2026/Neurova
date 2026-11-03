@@ -100,3 +100,26 @@ def test_queue_overflow_drop_is_counted(make_crystallizer):
 
     assert cryst.pending_dropped > 0, (
         f"溢出静默丢候选：pending={len(cryst._pending)}")
+
+
+def test_sameKeyCandidateIsWrittenOnlyOnce(make_crystallizer):
+    """同 key 的重复候选不得双写两条 PATTERN 节点——检索侧会注入两份。
+
+    这一格是**先红后绿**补的，不是给已闭合的行为补绿灯：产品把身份写成
+    `node.content == key`，而 `content` 是格式化后的整句话（`模式: '<key>' 类任务用 …`），
+    与裸 `key` 恒不相等 ⇒ 批 W4 那道查重闸**从没咬过**。证据是反向的：把替身的
+    `iter_nodes` 改成返回空集，本目录仍 162 passed（见 §6-501）。
+    """
+    cryst, engine = make_crystallizer()
+    candidate = {"key": "模式_pdf_dup", "primary_tool": "pdf_export", "rate": 0.9,
+                 "sample_count": 3, "sample_context": CONTEXT,
+                 "queued_at": datetime.now(timezone.utc).isoformat()}
+    cryst._pending = [dict(candidate), dict(candidate)]
+
+    outcome = cryst.confirm_pending([{"key": candidate["key"], "approved": True,
+                                      "reason": ""}])
+
+    assert len(engine.stored) == 1, (
+        f"同 key 双写了两条模式节点（检索会注入两份）：{len(engine.stored)}")
+    assert outcome["approved"] == 1, outcome
+    assert engine.stored[0].metadata["pattern_key"] == candidate["key"]
