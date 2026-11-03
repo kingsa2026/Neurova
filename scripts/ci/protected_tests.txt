@@ -3295,6 +3295,12 @@ tests/unit/memory/test_IngestIdentityKeyIsScopedPerOwner.py
 # ② `testAnonymousReadStillSeesOnlyDefaultBucket` 那个 200 是假信封给的（夹具根本没有 app state），
 #   "匿名读只看到 default 桶"从未被真测过——修法是给夹具装真 MemoryManager，不是放宽断言。
 tests/unit/api/test_MemoryReadFaceRefusesToPaintFailureAsSuccess.py
+# §6-493 同一根因的第二处命中点（治理读面）：指挥资格台账读不动必须 503 并点名原因，
+# 不许回 `{"code":0,…,"available":false}`——`code:0` 是成功信封，那条形状让「台账坏了」与
+# 「今天一条判定都没有」两条相反事实共用一个 200，值班照着后者去查必不通（`_rsiAgentAbsent`
+# 与 `_rsiNotAssembled` 被拆成两个具名口是同一个理由）。健康态那格钉 `available` 只剩读数可达
+# 义、`rows` 必须是列表。逐文件单跑 2 格（在 19 passed／5 passed 两次合跑里同读数）
+tests/unit/api/test_authorityLogReadFaceRefusesToPaintFailureAsSuccess.py
 tests/unit/api/test_apiErrorCodesHaveDefaultCopy.py
 # 安全集成判据改指现役 API（RBAC 的权限是枚举目录、角色自带权限集合；EventBus 递给 handler 的是
 # `Event` 数据类而不是 dict）。这档此前不在子集 ⇒ 调用不存在的名字长期只有本机显式跑才红；改绿后入册，
