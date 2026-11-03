@@ -11389,6 +11389,13 @@ LOC 口径统一为 py 文本行（`git ls-files | grep '\.py$' | xargs wc -l`�
     - **新登（不当自决）**：`collaboration/outbox_handler.py` **零生产接线**断点独立成格——`OutboxHandler.register_handler` 零**生产**调用方、唯一驱动是 phase3_api 端点（§6-489 复算更正：`register_handler` 这词在全仓另有三处同名他类方法且都在生产调用，字面写「全仓零调用方」不成立）、发布方（cost_ledger_integration 生命周期钩子）的事件无生产注册方可路由 → 进死信；**「每轮失败」不实**（§6-489 复算：发布方在生产生命周期零调用点，唯一驱动链是 HTTP `POST /api/v1/phase3/hooks/*`；`data/outbox/dead-letter/` 现存 460 个 json 的 event_type 全部出自 `tests/integration/collaboration/test_phase3_intelligence.py`，最新 mtime 2026-10-06）；它是否该并入渠道出口可靠性体系（批 F 的台账族）还是退役，属设计取向，待拍板（§6-478 撤回 D-8 时遗留的悬账，此处落格）。
     - **口径（numstat 实抄）**：见本格两笔提交统计；前端 12 文件（AuditPage + governance.ts + 11 语言）。
     - **下一枚空号现查**：尾号现算 487 ⇒ 本格取 **488**，后继从 §6-489 起。
+
+489. **落格：知识库文档"创建时间全一样且与实际不符"——根因是前端把 epoch 秒当毫秒解析，三页收口到单源格式化器** ✅🟢 —— 用户点单「修复…修根因」。
+    - **定位（数据先说话）**：权威仓 `knowledge_facts.db` 叙述表 payload 实测 37 条 created_at **各不相同**（如 `1791279148.074471`）——数据无病；病在前端 `KnowledgePage` 私有 `formatDate`：后端契约的秒级 epoch（KnowledgeItem `created_at: float`）被直接喂 `new Date`，JS 按毫秒解析 → 全表渲染 1970-01-21 同一天。同根全命中点扫荡（教义第 5 条）：`AgentFilePage` 同病（files_api `created_at: float` REAL）；`AgentMediaPage` 语义正确但属第三份私有实现（一并收编）；`MetacognitionPage` 的 trend date 是 `substr(iso,1,10)` 日期串——不命中，不动。
+    - **根因处修复（教义第 6 条）**：`displayText.ts` 增 `formatEpochSecondDate`（秒→本地日期；空值/0→`'—'`，0 是"从未写入"哨兵不能渲染成 1970），与既有 `formatEpochSecondText` 同契约族；三页私有 formatDate 全删改引单源。revision 抽屉的 `updated_at` 是 ISO 串契约（两处产者均 isoformat，实测核过）——误替换被 vue-tsc 当场抓住，改回既有 ISO 单源 `formatTimestampText`，不误伤。
+    - **红→绿**：红灯 3 failed（单源不存在）→ 3 passed（含真实仓库值的回归钉＋相邻时间不同日期的反向钉）。全量门：vitest 284 文件/2302 tests 全绿、vue-tsc 0 错。过程中 `duplicate-function-inventory` 守卫两度咬合：①生成物台账按其处方重生成；②formatDate 同名异体组**合法消亡**（错误体被正确命名的单源替代，仅剩 MetacognitionPage 的 ISO 体）——守卫高危名单如实维护并留复职说明，台账处置行同步改写。
+    - **口径（numstat 实抄）**：前端 7 文件 +91/−40（c2494b3b）。生产池（displayText.ts）+15；其余为测试/收编/生成物。
+    - **下一枚空号现查**：尾号现算 488 ⇒ 本格取 **489**，后继从 §6-490 起。推送态：本格落笔时 `origin/main..HEAD` 现算 **1 笔**未推（`c2494b3b`，本台账笔入库后 2），推送需单独点单，引用前一律现算。
 489. **账本复算第 1 条：一处悬空号去引号让常驻守卫转绿，另把 outbox 那条断点的两处不实改成实状** ✅🟢 —— 用户点单「按顺序全部处理」；本格只动账面（生产代码 0 改），第 2 条（stdout／childEnv 收单源）与第 3 条（integration 数据根隔离＋清死信）各起一格。
     - **触发（现读）**：7 档账本类守卫合跑 `1 failed, 92 passed, 1 skipped in 101.98s`，红的正是 §6-477 那把可达性尺；`--porcelain` 一行直接点名 `audit-reports/simplification-audit-2026-10-05.md|25d5e705|553bdced`（失效号＋守卫算出的安全替代号）。
     - **修法按本仓既有口径＝旧号去引号，不是改指**：§6-480「过程事实」子项把被 amend 作废的旧号写成了活引用形状 ⇒ 改裸写，新号 `553bdced` 保留反引号；该格复跑 `1 passed in 86.29s`。引入者 `f16e4613`（并发会话）。**这是同族第五次**（§6-468 那批一次清了 8 枚）⇒ 「写号前先问这枚号可达吗」到今天仍没有任何常驻东西拦得住，§6-459 仍开① 要的就是这把闸，本格再添一例证据。
