@@ -22,6 +22,8 @@
                           :options="[{ value: true, label: t('knowledge.filterOcrYes') }, { value: false, label: t('knowledge.filterOcrNo') }]" />
                 <a-input-number v-model:value="metaFilters.page_min" size="small" :min="0" :placeholder="t('knowledge.filterPageMin')" style="width: 100%" />
                 <a-input v-model:value="metaFilters.source" size="small" :placeholder="t('knowledge.filterSource')" />
+                <a-date-picker v-model:value="metaFilters.modifiedRange" type="daterange" value-format="YYYY-MM-DD" size="small"
+                               style="width: 100%" :placeholder="[t('knowledge.filterDocModifiedFrom'), t('knowledge.filterDocModifiedTo')]" />
                 <div class="kb-filter-actions">
                   <GlassButton size="sm" @click="clearMetaFilters">{{ t('knowledge.filterClear') }}</GlassButton>
                   <GlassButton size="sm" variant="primary" @click="applyMetaFilters">{{ t('knowledge.filterApply') }}</GlassButton>
@@ -86,6 +88,14 @@
       >
         <template #expandedRowRender="{ record }">
           <div class="kb-meta-detail">
+            <div v-if="record.source_created_at" class="kb-meta-line">
+              <span class="kb-meta-name">{{ t('knowledge.itemSourceCreated') }}</span>
+              <span>{{ formatTimestampText(record.source_created_at) }}</span>
+            </div>
+            <div v-if="record.source_modified_at" class="kb-meta-line">
+              <span class="kb-meta-name">{{ t('knowledge.itemSourceModified') }}</span>
+              <span>{{ formatTimestampText(record.source_modified_at) }}</span>
+            </div>
             <div v-if="record.geo" class="kb-meta-line">
               <span class="kb-meta-name">{{ t('knowledge.itemGeo') }}</span>
               <span>{{ record.geo.lat }}, {{ record.geo.lon }}</span>
@@ -135,6 +145,9 @@
           </template>
           <template v-if="column.key === 'created_at'">
             {{ formatEpochSecondDate(record.created_at) }}
+          </template>
+          <template v-if="column.key === 'source_modified_at'">
+            {{ formatTimestampText(record.source_modified_at) }}
           </template>
           <template v-if="column.key === 'actions'">
             <a-space>
@@ -748,6 +761,8 @@ interface KnowledgeItem {
   tags?: string[]
   created_at?: string
   updated_at?: string
+  source_created_at?: string
+  source_modified_at?: string
   visibility?: 'public' | 'private'
   owner_user_id?: string
   shared_with?: string[]
@@ -833,9 +848,9 @@ const form = ref({ title: '', category: '', content: '', tags: [] as string[], a
 
 // A3 元数据过滤（后端 visible/search 已支持；这里只做入口与透传，判权在服务端）。
 const filterOpen = ref(false)
-const metaFilters = ref<{ author: string; source_type: string; ocr_used?: boolean; page_min?: number; source: string }>({ author: '', source_type: '', ocr_used: undefined, page_min: undefined, source: '' })
+const metaFilters = ref<{ author: string; source_type: string; ocr_used?: boolean; page_min?: number; source: string; modifiedRange: [string, string] | undefined }>({ author: '', source_type: '', ocr_used: undefined, page_min: undefined, source: '', modifiedRange: undefined })
 const activeFilterCount = computed(() =>
-  [metaFilters.value.author, metaFilters.value.source_type, metaFilters.value.source]
+  [metaFilters.value.author, metaFilters.value.source_type, metaFilters.value.source, metaFilters.value.modifiedRange]
     .filter((v) => String(v || '').trim()).length
   + (metaFilters.value.ocr_used !== undefined ? 1 : 0)
   + (metaFilters.value.page_min !== undefined && metaFilters.value.page_min !== null ? 1 : 0))
@@ -844,7 +859,7 @@ const applyMetaFilters = () => {
   void fetchKnowledge()
 }
 const clearMetaFilters = () => {
-  metaFilters.value = { author: '', source_type: '', ocr_used: undefined, page_min: undefined, source: '' }
+  metaFilters.value = { author: '', source_type: '', ocr_used: undefined, page_min: undefined, source: '', modifiedRange: undefined }
   void fetchKnowledge()
 }
 
@@ -1279,6 +1294,7 @@ const columns = computed(() => [
   { title: t('knowledge.colVisibility'), key: 'visibility', width: 170 },
   { title: t('knowledge.colContent'), key: 'content', dataIndex: 'content', ellipsis: true },
   { title: t('knowledge.colCreated'), key: 'created_at', dataIndex: 'created_at', width: 160 },
+  { title: t('knowledge.colModified'), key: 'source_modified_at', dataIndex: 'source_modified_at', width: 170 },
   { title: t('knowledge.colActions'), key: 'actions', width: 260 },
 ])
 
@@ -1321,6 +1337,8 @@ async function fetchKnowledge() {
       const f = metaFilters.value
       const searchFilters: Record<string, any> = {}
       if (f.author.trim()) searchFilters.author = f.author.trim()
+      if (f.modifiedRange?.[0]) searchFilters.source_modified_after = `${f.modifiedRange[0]}T00:00:00`
+      if (f.modifiedRange?.[1]) searchFilters.source_modified_before = `${f.modifiedRange[1]}T23:59:59`
       if (f.source_type.trim()) searchFilters.source_type = f.source_type.trim()
       if (f.ocr_used !== undefined && f.ocr_used !== null) searchFilters.ocr_used = f.ocr_used
       if (f.page_min !== undefined && f.page_min !== null) searchFilters.page_min = f.page_min

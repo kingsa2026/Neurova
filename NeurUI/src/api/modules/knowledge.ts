@@ -105,6 +105,8 @@ export interface KnowledgeSearchFilters {
   page_min?: number
   source?: string
   updated_after?: number
+  source_modified_after?: string
+  source_modified_before?: string
   geo_radius?: { lat: number; lon: number; radius_km: number }
   geo_bbox?: { min_lat: number; min_lon: number; max_lat: number; max_lon: number }
 }
