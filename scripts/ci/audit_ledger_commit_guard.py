@@ -17,8 +17,10 @@
 `isCommit` 预筛是扩面不假红的前提：docs 面实测 274 枚十六进制串根本不是 commit（树号、
 对象 ID、色值残片），撤掉预筛它们会整批以「不可达」名义报红。
 
-性能口径：HEAD 索引一次 `git log` 取回（标题随行），diffstat 只对同标题候选计算。
-早先写法是逐个 HEAD 提交起一次 `git log`/`git show`，在万级仓库上直接超时。
+性能口径（§6-495）：一趟 `git log --format=%H%x09%h%x09%s HEAD` 同时供起「HEAD 祖先全号集合」
+与「替代号索引」，可达性在内存里判；`git rev-list --all` 只多取一次，专门用来识短号前缀歧义。
+diffstat 只对同标题候选计算。这已经是第二次返工：最早逐提交起 `git log`/`git show`，在万级仓库
+直接超时；上一版改成逐号起 `git merge-base`（实测一场 79.38s），本质仍是把 O(号数) 当成本。
 
 用法：
     python scripts/ci/audit_ledger_commit_guard.py              # 人读摘要
@@ -64,9 +66,100 @@ def isCommit(token: str) -> bool:
     return _objectTypeCache[token] == "commit"
 
 
+#: 一次性取数缓存（§6-495）。旧形态是**逐号**起 `git merge-base --is-ancestor`——扫描面里
+#: 有多少枚 commit 引用就起多少次进程，实测一场 79.38s（§6-477 扩面后）。一次 `git log`
+#: 就能拿回 HEAD 的全部祖先全号（本仓 3428 个提交），集合建在内存里判即可。
+#: ⚠ 缓存是**进程级**的：守卫是一次性脚本，跑测里同场多格共用一趟取数正是省时间的来源；
+#: 若将来把它做成常驻服务，得先问"HEAD 会不会在一场内移动"，别拿旧读数当新事实。
+_headLogRowsCache: "list | None" = None
+_ancestorCache: "frozenset | None" = None
+_otherRefCache: "frozenset | None" = None
+_prefixBuckets: dict = {}
+
+
+def _headLogRows() -> list:
+    """一次 `git log` 同时取回 (全号, 短号, 标题)——祖先集合与替代号索引共用这一趟。"""
+    global _headLogRowsCache
+    if _headLogRowsCache is None:
+        rows = []
+        for line in _git("log", "--format=%H%x09%h%x09%s", "HEAD").splitlines():
+            parts = line.split("\t")
+            if len(parts) >= 3 and HEX_ONLY.match(parts[0]):
+                rows.append((parts[0], parts[1], "\t".join(parts[2:]).strip()))
+        _headLogRowsCache = rows
+    return _headLogRowsCache
+
+
+def ancestorHashes() -> frozenset:
+    """HEAD 的全部祖先全号（含 HEAD 自身）。"""
+    global _ancestorCache
+    if _ancestorCache is None:
+        _ancestorCache = frozenset(full for full, _short, _subj in _headLogRows())
+    return _ancestorCache
+
+
+def otherRefHashes() -> frozenset:
+    """挂在别的 ref 上、却不在 HEAD 历史里的全号——**只用来识别短号前缀歧义**。"""
+    global _otherRefCache
+    if _otherRefCache is None:
+        others = frozenset(h for h in _git("rev-list", "--all").split() if HEX_ONLY.match(h))
+        _otherRefCache = others - ancestorHashes()
+    return _otherRefCache
+
+
+def _prefixSet(names, length: int) -> set:
+    """按号长分桶的前缀集合（桶只在被问到那一刻建，一次建、多次用）。"""
+    key = (id(names), length)
+    bucket = _prefixBuckets.get(key)
+    if bucket is None:
+        bucket = {h[:length] for h in names if len(h) >= length}
+        _prefixBuckets[key] = bucket
+    return bucket
+
+
+def reachabilityDecides(token: str, ancestorPrefixes: set, otherPrefixes: set) -> bool:
+    """判定本体——具名纯函数，只收**前缀集合**，好让"歧义"这条语义能被单独证伪。
+
+    规则：**前缀落在祖先里、且不与别的 ref 上的对象撞前缀**才算可达。撞前缀时
+    `git merge-base --is-ancestor` 自己就会因短号歧义拒绝解析（= 判不可达），
+    内存判若只看祖先集合会把它读成"可达"——判据可以变便宜，**不许比 git 更宽松**。
+
+    取数与缓存留在上游 `isReachable()`：判定只有一份、缓存也只有一份（教义第 6 条）。
+    """
+    token = str(token).strip()
+    if not token:
+        return False
+    return token in ancestorPrefixes and token not in otherPrefixes
+
+
+def batchProbe(tokens) -> None:
+    """一次 `git cat-file --batch-check` 把整批候选的类型填进缓存（§6-495 第二处命中点）。
+
+    为什么必须有这一处：`isCommit()` 逐号起进程，本仓扫描面里唯一候选号 1232 枚 ⇒ 实测一场
+    光这一件事就 1254 次 fork。`--batch-check` 对每个输入行**恰好输出一个行**（`<全号> <类型>
+    [<size>]`，不存在的对象输出 `<输入> missing`），所以按顺序 zip 就能回填，不必解析行首号——
+    按号匹配反而会错：请求的是 8 位短号，回的是 40 位全号。
+    """
+    pending = [t for t in tokens if t not in _objectTypeCache]
+    if not pending:
+        return
+    proc = subprocess.run(["git", "cat-file", "--batch-check"],
+                          input="\n".join(pending) + "\n",
+                          capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=GIT_WALL_S)
+    lines = proc.stdout.splitlines()
+    for index, token in enumerate(pending):
+        parts = lines[index].split() if index < len(lines) else []
+        # `missing` 不是对象类型，统一记成空串：`isCommit` 只认 "commit"，其余一律不进判据面
+        _objectTypeCache[token] = "" if (not parts or parts[-1] == "missing") else parts[1]
+
+
 def isReachable(token: str) -> bool:
-    return subprocess.run(["git", "merge-base", "--is-ancestor", token, "HEAD"],
-                          capture_output=True, timeout=GIT_WALL_S).returncode == 0
+    token = str(token).strip()
+    length = len(token)
+    return reachabilityDecides(token,
+                               _prefixSet(ancestorHashes(), length),
+                               _prefixSet(otherRefHashes(), length))
 
 
 def numstatDigest(token: str) -> str:
@@ -81,13 +174,12 @@ def numstatDigest(token: str) -> str:
 
 
 def headIndex() -> list:
-    """一次 `git log` 取回 [(短号, 标题)]——不可逐提交再起进程（万级仓库会超时）。"""
-    rows = []
-    for line in _git("log", "--format=%h%x09%s", "HEAD").splitlines():
-        if "\t" in line:
-            short, subj = line.split("\t", 1)
-            rows.append((short, subj.strip()))
-    return rows
+    """[(短号, 标题)]——不可逐提交再起进程（万级仓库会超时）。
+
+    取数与祖先集合**共用同一趟 `git log`**（`_headLogRows()`）：两条判据原来各起一次，
+    等于把同一份历史读两遍（教义第 6 条：一次取数一处存）。
+    """
+    return [(short, subj) for _full, short, subj in _headLogRows()]
 
 
 def findReplacement(token: str, index: list) -> str:
@@ -121,15 +213,17 @@ def displayName(path: Path) -> str:
 def scanReport(path: Path, index: list):
     """返回 (该报告引用的 commit 号列表, [(失效号, 替代号)])。"""
     text = io.open(path, encoding="utf-8", errors="replace").read()
-    tokens, seen = [], set()
+    candidates, seen = [], set()
     for match in HASH_RE.finditer(text):
         if not HEX_ONLY.match(match.group(1)):
             continue
         short = match.group(1)[:8]
-        if short in seen or not isCommit(short):
+        if short in seen:
             continue
         seen.add(short)
-        tokens.append(short)
+        candidates.append(short)
+    batchProbe(candidates)          # 一次进程问完整批；逐号 fork 是这场扫描的成本主体
+    tokens = [short for short in candidates if isCommit(short)]
     stale = [(t, findReplacement(t, index)) for t in tokens if not isReachable(t)]
     return tokens, stale
 

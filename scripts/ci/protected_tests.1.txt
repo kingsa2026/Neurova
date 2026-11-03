@@ -1177,3 +1177,6 @@ tests/unit/ci/test_integrationSuiteLeavesRepoDataRootClean.py
 # 判定都没有」两条相反事实共用一个 200。健康态那格钉 `available` 只剩读数可达义、`rows` 是列表。
 # 逐文件单跑 2 格（19 passed／5 passed 两次合跑同读数）
 tests/unit/api/test_authorityLogReadFaceRefusesToPaintFailureAsSuccess.py
+# §6-495 降成本验收：可达性与对象类型两处都不许逐号起 git（一场 79.38s → 2.5s）；
+# 前缀歧义保守判不可达；悬空 commit 仍必须判不可达。逐文件单跑 5 passed（6.12s）
+tests/unit/test_auditLedgerReachabilitySingleProbe.py

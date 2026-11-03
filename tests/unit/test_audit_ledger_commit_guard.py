@@ -100,20 +100,19 @@ def test_replacementIsOfferedOnlyWhenSafe(tmp_path, danglingCommit):
     )
 
 
-#: 本轮扫描的父墙（唯一出处）。**实测 79.38s**（§6-477 扩面后现取；扩面前单树 48.64s，
-#: 新增的 20.2s 全部来自 docs 面的 600 档 / 391 次 `cat-file`）：`ledger.main([])` 逐号起一次
-#: `git merge-base`，扫描面里的 commit 引用有多少个就起多少次——这是一次**合法超墙**，
-#: 而全局 30s 先到时 Windows 侧 thread 法直接终止进程，报的是"整场跑测没了"。
+#: 本轮扫描的父墙（唯一出处）。**实测一场 2.5–3.5s**（§6-495 之后）：可达性改成一次
+#: `git log` 取回祖先全号内存判、对象类型改成一次 `git cat-file --batch-check` 问完整批，
+#: 两条"逐号起进程"都没了。历史读数 48.64s（单树逐号 merge-base）→ 79.38s（§6-477 扩到
+#: 两棵树）→ 2.5s（本批）。
 #:
-#: 这 79.38s 落在 `realScan` 的 module setup 上、由「面覆盖」与「无悬空」两格共用：
-#: 逐格各扫一遍就是 160s，等于把同一笔成本付两遍——墙够用不是因为宽，是因为只付一次。
+#: 墙从 180 收到 **60** 是这笔降成本的验收项：留着 180 等于把"合法超墙"的记账留在一个已经不
+#: 存在的问题上，而下一次真变慢时，宽墙会把回归读成正常。余量仍是实测的 17 倍——这台机器上
+#: git 进程调度的抖动比代码变化大。
 #:
 #: 常驻闸 `test_nestedPytestBudgetWallsAreOrdered.py` 看不见这一处：它的边界写明「只在
 #: 同文件闭包内认落点」，而真正阻塞的那次 subprocess 在 `scripts/ci/audit_ledger_commit_guard.py`
-#: 里（批 P-2 的归账面）。故这里按 §6-402 同一口径把父墙显式声明上，并留这句实话：
-#: 判据扫全仓的固有成本应当被**降**而不是被放宽——把逐号 git 收成一次
-#: `rev-list --all` 建集合再内存判可达，是另批的一票（登记在 §6-414「仍开」）。
-LEDGER_SCAN_WALL_S = 180
+#: 里（批 P-2 的归账面）。故这里按 §6-402 同一口径把父墙显式声明上。
+LEDGER_SCAN_WALL_S = 60
 
 
 @pytest.fixture(scope="module")
