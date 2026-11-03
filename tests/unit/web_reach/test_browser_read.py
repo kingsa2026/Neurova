@@ -10,7 +10,8 @@
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
+from tests.unit.web_reach._playwrightStub import stubAsyncPlaywright
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -47,7 +48,7 @@ class TestBrowserReadSSRF(unittest.TestCase):
     def test_private_loopback_blocked(self):
         from neurova.web_reach.browser_read import browser_read
 
-        with patch("neurova.web_reach.browser_read.async_playwright") as mock_pw:
+        with stubAsyncPlaywright() as mock_pw:
             result = browser_read("http://127.0.0.1:9527/health")
             self.assertFalse(result.get("success"))
             self.assertIn("source", result)
@@ -56,7 +57,7 @@ class TestBrowserReadSSRF(unittest.TestCase):
     def test_scheme_rejected(self):
         from neurova.web_reach.browser_read import browser_read
 
-        with patch("neurova.web_reach.browser_read.async_playwright") as mock_pw:
+        with stubAsyncPlaywright() as mock_pw:
             result = browser_read("file:///etc/passwd")
             self.assertFalse(result.get("success"))
             mock_pw.assert_not_called()
@@ -64,7 +65,7 @@ class TestBrowserReadSSRF(unittest.TestCase):
     def test_metadata_ip_blocked(self):
         from neurova.web_reach.browser_read import browser_read
 
-        with patch("neurova.web_reach.browser_read.async_playwright") as mock_pw:
+        with stubAsyncPlaywright() as mock_pw:
             result = browser_read("http://169.254.169.254/latest/meta-data/")
             self.assertFalse(result.get("success"))
             mock_pw.assert_not_called()
@@ -80,7 +81,8 @@ class TestBrowserReadSuccess(unittest.TestCase):
         browser = _make_fake_browser(page)
         pw = _make_fake_playwright(browser)
 
-        with patch("neurova.web_reach.browser_read.async_playwright", return_value=pw):
+        with stubAsyncPlaywright() as _pwFactory:
+            _pwFactory.return_value = pw
             result = browser_read("https://example.com/docs", timeout=15)
 
         self.assertTrue(result.get("success"))
@@ -100,7 +102,8 @@ class TestBrowserReadSuccess(unittest.TestCase):
         browser = _make_fake_browser(page)
         pw = _make_fake_playwright(browser)
 
-        with patch("neurova.web_reach.browser_read.async_playwright", return_value=pw):
+        with stubAsyncPlaywright() as _pwFactory:
+            _pwFactory.return_value = pw
             browser_read("https://example.com", timeout=30)
 
         page.goto.assert_awaited_once()
@@ -121,7 +124,8 @@ class TestBrowserReadErrors(unittest.TestCase):
         pw.chromium.launch = AsyncMock(
             side_effect=Exception("Executable doesn't exist at ... run playwright install")
         )
-        with patch("neurova.web_reach.browser_read.async_playwright", return_value=pw):
+        with stubAsyncPlaywright() as _pwFactory:
+            _pwFactory.return_value = pw
             result = browser_read("https://example.com")
         self.assertFalse(result.get("success"))
         self.assertIn("浏览器未安装", result.get("error", ""))
@@ -132,7 +136,8 @@ class TestBrowserReadErrors(unittest.TestCase):
         page = _make_fake_page({"title": "", "text": "   "})
         browser = _make_fake_browser(page)
         pw = _make_fake_playwright(browser)
-        with patch("neurova.web_reach.browser_read.async_playwright", return_value=pw):
+        with stubAsyncPlaywright() as _pwFactory:
+            _pwFactory.return_value = pw
             result = browser_read("https://example.com")
         self.assertFalse(result.get("success"))
         self.assertIn("未提取到文本", result.get("error", ""))
@@ -144,7 +149,8 @@ class TestBrowserReadErrors(unittest.TestCase):
         pw.__aenter__.return_value = pw
         pw.__aexit__.return_value = None
         pw.chromium.launch = AsyncMock(side_effect=Exception("boom"))
-        with patch("neurova.web_reach.browser_read.async_playwright", return_value=pw):
+        with stubAsyncPlaywright() as _pwFactory:
+            _pwFactory.return_value = pw
             result = browser_read("https://example.com")
         self.assertFalse(result.get("success"))
         self.assertIn("boom", result.get("error", ""))
