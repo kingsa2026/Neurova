@@ -63,6 +63,33 @@ class TestWriteThenReadSeeOneLedger:
     """真链上的闭环：同一个进程里写完，读面必须立刻看得见——不许等重启。"""
 
     @pytest.fixture()
+    def shortWorkspaceRoot(self, monkeypatch):
+        """把 agent 工作区根换到一个**短**临时根，并自证它真的在预算内。
+
+        为什么需要：pytest 默认 `tmp_path` 带 `pytest-of-<user>/pytest-<n>/test_<用例名><序号>`，
+        光 `default/skills` 那层的落点根就量到 154 字符；studio 真资产最长成员 125 字符
+        ⇒ 投影 280 越过预算 260。而**主格判的是"写后读同一份账"，落点深度不是它的判据**——
+        深落点该由 `tests/unit/skills/test_pathBudgetAdmitsTheDirectoryRoute.py` 那族钉
+        （§6-503 裁的是"接闸"：闸要拒得点名，本档要装得下去）。
+        缩短之后本格仍然用真资产、真端点、真目录，一寸语义没减。
+        """
+        import shutil
+        import tempfile
+
+        from neurova.skills.market_sources import WINDOWS_MAX_PATH
+
+        root = Path(tempfile.mkdtemp(prefix="kb_"))
+        monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(root))
+        probe = root / "default" / "skills"
+        # 面自证：换不到短根时宁可红在这一句，也不要让主格红在一条它不该判的路径预算上
+        assert len(str(probe)) + 1 + 125 < WINDOWS_MAX_PATH, (
+            f"临时根仍然过长：{probe}（{len(str(probe))} 字符），"
+            f"加最长成员 125 已越过预算 {WINDOWS_MAX_PATH}——本机临时目录太深，"
+            "本档的主格无法用真资产自证")
+        yield root
+        shutil.rmtree(root, ignore_errors=True)
+
+    @pytest.fixture()
     def app_client(self):
         """裸 app + 真路由，**不跑 lifespan**。
 
@@ -85,7 +112,7 @@ class TestWriteThenReadSeeOneLedger:
             "id": "u-b60", "sub": "u-b60", "username": "u-b60", "role": "admin"}
         return client
 
-    def test_install_then_agentFaceListsIt(self, app_client):
+    def test_install_then_agentFaceListsIt(self, shortWorkspaceRoot, app_client):
         """走真安装链，且用**真资产包**（studio 那只），装完按盘上实际路径实测。
 
         起点是反过来的：本格原用短包，理由是"studio 的终点投影超 Windows 260 预算，
@@ -137,7 +164,7 @@ class TestWriteThenReadSeeOneLedger:
             f"已不足 {floor}——换包的理由（成员名自身就很长）不再成立，"
             "主格该改用真资产包，把上面那格的替换理由一并改判")
 
-    def test_studioPackageBudgetIsDecidedByTheGateNotByTheOs(self):
+    def test_studioPackageBudgetIsDecidedByTheGateNotByTheOs(self, shortWorkspaceRoot):
         """主格换包的理由必须**会红**，不许只写在话里（形态集 251 那条：归零的腿要留着读数）。
 
         这条腿走完了一次翻面，两段读数都留在这里：
@@ -182,7 +209,8 @@ class TestWriteThenReadSeeOneLedger:
             f"studio 在真实库根 {libRoot} 下被判成超预算——主格用真资产会失败，"
             "且失败信息会指向安装链路而不是这处路径预算")
 
-    def test_studioPackageLandsUnderTheBudgetThroughTheRealInstallChain(self, app_client):
+    def test_studioPackageLandsUnderTheBudgetThroughTheRealInstallChain(self, shortWorkspaceRoot,
+                                                                        app_client):
         """主格装真资产包的前置必须**实测自证**，不许从别处推。
 
         上一版这里是反向断言（"装不下"），它按设计在落点变短时转红——本轮正是那一格红了：

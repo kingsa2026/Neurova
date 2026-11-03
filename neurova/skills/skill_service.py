@@ -728,6 +728,17 @@ class SkillService:
                     from neurova.skills.skill_install_gate import scan_skill_for_install
 
                     incoming = self.skills_dir / _incomingStagingName(skill_id)
+                    # 落点预算是**准入条件**，不是拷贝失败的注脚：zip 那支早在解包前判过，
+                    # 目录这支直接 copytree 就等于同一只包换个入口绕过闸——今天那 3 条红
+                    # 正是这样变成 `WinError 206` 的（§6-500／§6-503 裁"接闸"）。
+                    # 暂存根与最终根都要量：谁长没规律，只判一个会"闸放行、真拷贝照样炸"。
+                    from neurova.skills.market_sources import refusalForTreeBudget
+
+                    tooLong = refusalForTreeBudget(Path(skill_path),
+                                                   (incoming, self.skills_dir / str(skill_id)))
+                    if tooLong:
+                        self._logger.warning("技能 %s 安装被路径预算拦下: %s", skill_id, tooLong)
+                        return {"success": False, "error": tooLong, "code": "path_budget"}
                     shutil.copytree(skill_path, incoming)
                     scan = scan_skill_for_install(skill_id, str(incoming))
                     if scan.get("blocked"):

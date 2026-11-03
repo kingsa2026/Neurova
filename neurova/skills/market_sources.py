@@ -317,6 +317,17 @@ def _longestProjectedPath(payload: bytes, dest: Path):
     return longest, len(base) + 1 + len(longest)
 
 
+def pathBudgetRefusal(member: str, dest: Path, total: int) -> str:
+    """路径预算越限时给人看的那句话——**判定与文案只这一处**（zip 路与目录路共用）。
+
+    两处各写一遍就会出现"拒了但说不清为什么"或"说了为什么却没人拒"的分叉。
+    """
+    return (
+        f"路径过长：最长成员 {member!r}（{len(member)} 字符）落在 {len(str(dest))} 字符的"
+        f"落点根下合计 {total} 字符，超过路径预算 {min(WINDOWS_MAX_PATH, _pathconfNameMax())}"
+        f"——这是落点问题，不是包的问题：换短根或开启长路径")
+
+
 def refusalForPathBudget(payload: bytes, dest: Path) -> str:
     """落点根 ＋ 最长成员越过路径预算时的拒绝原因；没超返回空串。
 
@@ -332,10 +343,43 @@ def refusalForPathBudget(payload: bytes, dest: Path) -> str:
     if projected is None or not _pathBudgetExceeded(projected[1]):
         return ""
     member, total = projected
-    return (
-        f"路径过长：最长成员 {member!r}（{len(member)} 字符）落在 {len(str(dest))} 字符的"
-        f"落点根下合计 {total} 字符，超过路径预算 {min(WINDOWS_MAX_PATH, _pathconfNameMax())}"
-        f"——这是落点问题，不是包的问题：换短根或开启长路径")
+    return pathBudgetRefusal(member, dest, total)
+
+
+def longestMemberUnder(sourceDir: Path):
+    """目录形包的「最长成员相对路径」；空目录返回 None。
+
+    与 zip 那条的 `_longestProjectedPath` 同职责，只是成员清单来自盘上遍历——
+    预算本身（`_pathBudgetExceeded`）与文案（`pathBudgetRefusal`）都复用同一份。
+    """
+    longest = None
+    for p in sourceDir.rglob("*"):
+        rel = p.relative_to(sourceDir).as_posix()
+        if longest is None or len(rel) > len(longest):
+            longest = rel
+    return longest
+
+
+def refusalForTreeBudget(sourceDir: Path, dests) -> str:
+    """把一份**目录形**包落到这些落点根之一时，路径预算越界的拒绝原因；没超返回空串。
+
+    为什么需要它：本地目录/zip/`install-from-zip` 都汇到 `skill_service.install_skill`
+    这个咽喉，而 zip 那支早在解包前判过预算，目录这支直接 `shutil.copytree`——同一只包
+    换个入口就绕过了准入，于是失败由这台机器的文件系统决定（`WinError 206`），
+    而不是由闸点名（§6-500 复算命中的就是这条）。
+
+    `dests` 要**全给**：暂存根 `.incoming_<纳秒>` 与最终根 `<skill_id>` 谁长并无规律，
+    只判其中一个就会"闸放行、真拷贝照样炸"。
+    """
+    member = longestMemberUnder(sourceDir)
+    if member is None:
+        return ""
+    for dest in dests:
+        base = str(dest).rstrip("\\/")
+        total = len(base) + 1 + len(member)
+        if _pathBudgetExceeded(total):
+            return pathBudgetRefusal(member, Path(base), total)
+    return ""
 
 
 def _pathBudgetExceeded(total: int) -> bool:
