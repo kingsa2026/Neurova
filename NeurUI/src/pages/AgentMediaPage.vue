@@ -111,7 +111,7 @@
                 {{ formatSize(record.size) }}
               </template>
               <template v-if="column.key === 'created_at'">
-                {{ formatDate(trashMode ? record.deleted_at : record.created_at) }}
+                {{ formatEpochSecondDate(trashMode ? record.deleted_at : record.created_at) }}
               </template>
               <template v-if="column.key === 'actions'">
                 <a-space>
@@ -164,7 +164,7 @@
             <a-descriptions-item :label="t('media.metaName')">{{ detailItem.name }}</a-descriptions-item>
             <a-descriptions-item :label="t('media.metaType')">{{ detailItem.type }}</a-descriptions-item>
             <a-descriptions-item :label="t('media.metaSize')">{{ formatSize(detailItem.size) }}</a-descriptions-item>
-            <a-descriptions-item :label="t('media.metaCreated')">{{ formatDate(detailItem.created_at) }}</a-descriptions-item>
+            <a-descriptions-item :label="t('media.metaCreated')">{{ formatEpochSecondDate(detailItem.created_at) }}</a-descriptions-item>
           </a-descriptions>
         </div>
     </a-modal>
@@ -173,6 +173,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { formatEpochSecondDate } from '@/utils/displayText'
 import { useI18n } from 'vue-i18n'
 import { message, Modal } from 'ant-design-vue'
 import GlassPanel from '@/components/GlassPanel.vue'
@@ -250,9 +251,7 @@ function formatSize(bytes?: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function formatDate(d?: number) {
-  return d ? new Date(d * 1000).toLocaleDateString() : '—'
-}
+
 
 /** 拉取媒体字节生成预览 object URL（带缓存；失败返回空串）。 */
 async function resolvePreviewUrl(id: string): Promise<string> {
