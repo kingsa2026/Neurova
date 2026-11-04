@@ -66,15 +66,19 @@ class TestPublicPathRegistry:
         assert required <= PUBLIC_EXACT_PATHS
 
     def test_health_and_ops_are_public(self):
-        """健康检查/指标/状态/前端错误上报必须公开"""
+        """健康检查/状态/前端错误上报必须公开；/metrics 与 /health/detailed
+        已按 P2-1（2026-11-04）裁定移入限环回集，不再全公开"""
         required = {
             "/health",
-            "/health/detailed",
-            "/metrics",
             "/api/v1/status",
             "/api/v1/frontend/errors",
         }
         assert required <= PUBLIC_EXACT_PATHS
+        from neurova.api.global_auth import LOOPBACK_ONLY_PUBLIC_PATHS
+
+        assert {"/metrics", "/health/detailed"} <= LOOPBACK_ONLY_PUBLIC_PATHS
+        assert not ({"/metrics", "/health/detailed"} & PUBLIC_EXACT_PATHS), \
+            "限环回路径不得留在全公开白名单（双重放行即收口失效）"
 
     def test_is_public_path_exact_match(self):
         assert is_public_path("/health") is True

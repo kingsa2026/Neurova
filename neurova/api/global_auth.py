@@ -28,12 +28,12 @@ from neurova.core.logger import get_logger
 logger = get_logger(__name__)
 
 # 首启/登录链路（桌面端注册即管理员、登录、验证码、找回密码）
-# + 运维可观测（健康检查/指标/状态）+ 前端错误上报（公开写入设计）。
+# + 运维可观测（健康检查/状态）+ 前端错误上报（公开写入设计）。
+# P2-1（2026-11-04 裁定）：/metrics 与 /health/detailed 移入「限环回」集——
+# 容器内/本机 healthcheck（环回）照常匿名读；非环回匿名按未鉴权处理。
 PUBLIC_EXACT_PATHS: Set[str] = {
-    # 健康与运维
+    # 健康与运维（healthcheck 面，保持全公开）
     "/health",
-    "/health/detailed",
-    "/metrics",
     "/api/v1/status",
     "/test",
     # 认证链路（/api/v1/auth/me 等不在内，仍需鉴权）
@@ -47,6 +47,14 @@ PUBLIC_EXACT_PATHS: Set[str] = {
     # 前端错误自动上报（匿名写入设计）
     "/api/v1/frontend/errors",
 }
+
+# 限环回白名单（P2-1）：命中且 client 为环回 ⇒ 视同公开；非环回匿名走鉴权判决。
+LOOPBACK_ONLY_PUBLIC_PATHS: Set[str] = {
+    "/metrics",
+    "/health/detailed",
+}
+
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
 MODE_OFF = "off"
 MODE_SHADOW = "shadow"
@@ -66,6 +74,15 @@ def get_global_auth_mode() -> str:
 def is_public_path(path: str) -> bool:
     """精确白名单匹配（不做前缀扩散）"""
     return path in PUBLIC_EXACT_PATHS
+
+
+def isLoopbackClient(scope) -> bool:
+    """ASGI scope 的 client 地址是否环回（P2-1 限环回白名单判定）。"""
+    client = scope.get("client")
+    if not client:
+        return False
+    host = client[0] if isinstance(client, (tuple, list)) else client
+    return str(host).strip("[]").lower() in _LOOPBACK_HOSTS
 
 
 def shadow_audit_paths() -> List[str]:
@@ -96,8 +113,11 @@ class GlobalAuthMiddleware:
 
         path = scope.get("path", "")
 
-        # CORS 预检先于鉴权放行；白名单精确放行
+        # CORS 预检先于鉴权放行；白名单精确放行；限环回白名单按 client 判定
         if scope.get("method", "").upper() == "OPTIONS" or is_public_path(path):
+            await self.app(scope, receive, send)
+            return
+        if path in LOOPBACK_ONLY_PUBLIC_PATHS and isLoopbackClient(scope):
             await self.app(scope, receive, send)
             return
 

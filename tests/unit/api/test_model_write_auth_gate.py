@@ -95,3 +95,42 @@ class TestAuthedWriteStillWorks:
     def test_delete_with_token_200(self, client):
         resp = client.delete("/api/v1/models/m1", headers=_authHeaders())
         assert resp.status_code == 200, resp.text
+
+
+class TestRoleGate:
+    """分级收口（2026-11-04 裁定）：删/改/下载面 → admin；
+    /switch、/probe-*、/check-connection 保持登录即可（探针是读型操作，
+    切模型是每个 agent 的工作面）。普通用户持有效凭证也不得过写面。"""
+
+    def _userHeaders(self):
+        return {"Authorization": "Bearer " + create_access_token({
+            "sub": "peasant", "username": "peasant", "role": "user", "tenant_id": "default",
+        })}
+
+    def test_non_admin_delete_is_403(self, client):
+        resp = client.delete("/api/v1/models/m1", headers=self._userHeaders())
+        assert resp.status_code == 403, f"role=user 竟可删模型（{resp.status_code}）"
+
+    def test_non_admin_update_is_403(self, client):
+        resp = client.put("/api/v1/models/m1", json={"name": "x"}, headers=self._userHeaders())
+        assert resp.status_code == 403
+
+    def test_non_admin_download_is_403(self, client):
+        resp = client.post("/api/v1/models/download", json={"model": "m1"}, headers=self._userHeaders())
+        assert resp.status_code == 403
+
+    def test_non_admin_download_source_is_403(self, client):
+        resp = client.post(
+            "/api/v1/models/download-source", json={"model": "m1", "choice": "skip"},
+            headers=self._userHeaders(),
+        )
+        assert resp.status_code == 403
+
+    def test_non_admin_switch_not_role_gated(self, client):
+        """分级裁定：/switch 不收 admin——普通用户可切 agent 模型。"""
+        resp = client.post("/api/v1/models/switch", json={"model_id": "m1"}, headers=self._userHeaders())
+        assert resp.status_code != 403, "/switch 被角色门误伤"
+
+    def test_admin_delete_still_200(self, client):
+        resp = client.delete("/api/v1/models/m1", headers=_authHeaders())
+        assert resp.status_code == 200, resp.text
