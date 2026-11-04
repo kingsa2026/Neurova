@@ -239,7 +239,7 @@ class DetectCapabilitiesRequest(BaseModel):
 async def detect_capabilities(
     request: Request,
     body: DetectCapabilitiesRequest,
-    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """批量自动检测模型能力(文本/推理/图片理解/视频理解/图片生成/视频生成)并持久化。
 
@@ -330,7 +330,7 @@ async def list_models_by_capability(
 async def delete_model(
     request: Request,
     model_id: str = Path(...),
-    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """删除模型（从所属服务商的模型列表中移除）"""
     _get_request_id(request)
@@ -381,7 +381,7 @@ async def update_model(
     request: Request,
     model_id: str = Path(...),
     body: UpdateModelRequest = Body(...),
-    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """编辑模型条目(模型 ID / 显示名称),内置/发现的条目同样可编辑。
 
@@ -462,7 +462,7 @@ async def get_active_model(request: Request, agent_id: str = Query(default="defa
 
 
 @router.post("/switch")
-async def switch_model(request: Request, body: SwitchModelRequest, current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),):
+async def switch_model(request: Request, body: SwitchModelRequest, current_user: Dict[str, Any] = Depends(get_current_user),):
     """切换模型"""
     _get_request_id(request)
 
@@ -493,7 +493,7 @@ async def switch_model(request: Request, body: SwitchModelRequest, current_user:
 async def probe_multimodal(
     request: Request,
     body: ProbeRequest,
-    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """模型多模态探测"""
     _get_request_id(request)
@@ -526,7 +526,7 @@ async def probe_multimodal(
 async def probe_output_limit(
     request: Request,
     body: ProbeOutputLimitRequest,
-    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """探测模型输出上限并持久化。
 
@@ -560,7 +560,7 @@ async def probe_output_limit(
 async def check_connection(
     request: Request,
     model_id: str = Query(...),
-    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """检查模型连接"""
     _get_request_id(request)
@@ -647,7 +647,7 @@ async def get_download_source(current_user: Optional[Dict[str, Any]] = Depends(g
 @router.post("/download-source")
 async def set_download_source(
     body: DownloadSourceRequest,
-    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """写某模型的下载源选择（非法值/未知模型 400）。"""
     from neurova.tts.download_source import DownloadSourceChoice, set as set_choice
@@ -665,7 +665,7 @@ async def set_download_source(
 @router.post("/download")
 async def trigger_download(
     body: DownloadTriggerRequest,
-    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """触发模型下载（幂等；重复触发返回同一状态）。"""
     try:
