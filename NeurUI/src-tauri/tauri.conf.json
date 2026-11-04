@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:8100",
-    "beforeDevCommand": "python ../../scripts/desktop/disk_headroom.py",
-    "beforeBuildCommand": "python ../../scripts/desktop/disk_headroom.py && npm run build:desktop"
+    "beforeDevCommand": "python ../scripts/desktop/disk_headroom.py",
+    "beforeBuildCommand": "python ../scripts/desktop/disk_headroom.py && npm run build:desktop"
   },
   "app": {
     "windows": [
@@ -24,7 +24,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:9527 http://localhost:9527 ws://127.0.0.1:9527 ws://localhost:9527 http://localhost:8100 ws://localhost:8100; media-src 'self' blob: data:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     },
     "withGlobalTauri": true
   },
