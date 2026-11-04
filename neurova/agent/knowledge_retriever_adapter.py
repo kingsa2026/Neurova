@@ -80,8 +80,15 @@ class KnowledgeRetrieverAdapter:
         self._priority = 25  # 中等偏下优先级（记忆 >> 知识）
 
     def _graphRoute(self, context, agentId: Optional[str], limit: int):
-        """图谱条目影子路由：fact→entry 映射；默认权重 0，不改变排序。"""
-        mode = str(os.environ.get("NEUROVA_KB_GRAPH_ROUTE") or "shadow").lower()
+        """图谱条目路由：fact→entry 映射；默认 on（C1 转正，2026-11-05）。
+
+        转正判据（specs/2026-10-30 §4.3）在真管线实测达标：recall 不降、
+        NDCG@3Δ=+0.0615（compareVariants improved、零回归门 PASS）。
+        成本注记：shadow 态本就执行 walkFromQuery（只差权重生效），默认 on
+        不新增走查成本；显式 off 逃生门保留，NEUROVA_KB_GRAPH_ROUTE_WEIGHT
+        可调（默认 0.10）。
+        """
+        mode = str(os.environ.get("NEUROVA_KB_GRAPH_ROUTE") or "on").lower()
         if mode in ("off", "0", "false", "no"):
             return [], {}, 0.0
         try:
