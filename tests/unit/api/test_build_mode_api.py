@@ -146,3 +146,60 @@ def test_pausedAskUserBecomesBuildInteractionEvent():
     assert event["interaction_id"] == "int_1"
     assert event["question"] == "选哪个店铺？"
     assert event["kind"] == "choice"
+
+
+def test_interaction_answer_starts_server_resume(client, monkeypatch):
+    start = client.post(
+        "/api/v1/build/sessions",
+        json={"request": "帮我搭一条广告复盘流程", "agent_id": "default"},
+    )
+    sessionId = start.json()["data"]["session"]["session_id"]
+    client.post(
+        f"/api/v1/build/sessions/{sessionId}/answers",
+        json={"answers": [{"id": "q1", "selected": [], "custom": "按 ACOS 复盘"}]},
+    )
+    client.post(f"/api/v1/build/sessions/{sessionId}/approve", json={})
+
+    manager = bs.get_build_session_manager()
+    interaction = manager.ask(
+        sessionId,
+        "选哪个店铺？",
+        options=[{"label": "店铺 A"}, {"label": "店铺 B"}],
+        why="需要数据源",
+        impact="影响拉取",
+        chat_session_id="chat-1",
+    )
+    monkeypatch.setattr(
+        "neurova.build_mode.resume.startBuildResume", lambda sid, iid: True
+    )
+    response = client.post(
+        f"/api/v1/build/sessions/{sessionId}/interactions/{interaction['interaction_id']}/answer",
+        json={"selected": ["店铺 A"]},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["resume_started"] is True
+    assert data["chat_session_id"] == "chat-1"
+    assert "店铺 A" in data["resume_prompt"]
+
+
+def test_interaction_answer_without_chat_session_falls_back(client):
+    start = client.post(
+        "/api/v1/build/sessions",
+        json={"request": "帮我搭一条广告复盘流程", "agent_id": "default"},
+    )
+    sessionId = start.json()["data"]["session"]["session_id"]
+    client.post(
+        f"/api/v1/build/sessions/{sessionId}/answers",
+        json={"answers": [{"id": "q1", "selected": [], "custom": "按 ACOS 复盘"}]},
+    )
+    client.post(f"/api/v1/build/sessions/{sessionId}/approve", json={})
+    manager = bs.get_build_session_manager()
+    interaction = manager.ask(sessionId, "选哪个店铺？")
+    response = client.post(
+        f"/api/v1/build/sessions/{sessionId}/interactions/{interaction['interaction_id']}/answer",
+        json={"selected": ["店铺 A"]},
+    )
+    data = response.json()["data"]
+    assert data["resume_started"] is False
+    assert data["resume_prompt"]

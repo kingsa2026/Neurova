@@ -372,6 +372,8 @@ class ToolExecutor:
         "canvas_remove_node": "_execute_canvas_remove_node",
         "canvas_layout": "_execute_canvas_layout",
         "canvas_run": "_execute_canvas_run",
+        # B5：多条画布 op 一个事务提交，失败整批不落盘
+        "canvas_apply_batch": "_execute_canvas_apply_batch",
         "canvas_list_nodes": "_execute_canvas_list_nodes",
         # 单节点精确契约（N1）：添加节点前查参数/端口/环境
         "node_schema": "_execute_node_schema",
@@ -1997,6 +1999,7 @@ class ToolExecutor:
             "canvas_remove_node",
             "canvas_layout",
             "canvas_run",
+            "canvas_apply_batch",
             "schedule_task",
             "custom_node_create",
             "custom_node_update",
@@ -2488,6 +2491,7 @@ class ToolExecutor:
                 impact=str(params.get("impact") or ""),
                 secret_key=str(params.get("secret_key") or ""),
                 timeout_seconds=int(params.get("timeout_seconds") or 600),
+                chat_session_id=str(self._canvas_session_id() or ""),
             )
             return {
                 "success": True,
@@ -3381,6 +3385,29 @@ class ToolExecutor:
             "node_results": node_results,
             "duration": getattr(instance, "duration", None),
         }
+
+    async def _execute_canvas_apply_batch(self, params: Dict) -> Dict:
+        canvas_id = str(params.get("canvas_id") or "").strip()
+        if not canvas_id:
+            return {"success": False, "code": "invalid_params", "error": "缺少 canvas_id"}
+        operations = params.get("operations")
+        if not isinstance(operations, list) or not operations:
+            return {
+                "success": False,
+                "code": "invalid_params",
+                "error": "operations 必须是非空列表",
+            }
+        result = await self._canvas_call(
+            "apply_batch",
+            canvas_id=canvas_id,
+            operations=operations,
+            base_version=params.get("base_version"),
+            session_id=self._canvas_session_id(),
+            actor="agent",
+        )
+        if self._is_canvas_error(result):
+            return result
+        return {"success": True, **result}
 
     async def _execute_orchestrate_tools(self, params: Dict) -> Dict:
         """多步编排入口（DAG 工具编排器 `ToolOrchestrator` 的生产消费方）。

@@ -63,6 +63,10 @@ class EventType(str, Enum):
     # （payload: {canvas_id, op, version, actor, data}，驱动画布页实时渲染）
     CANVAS_OP = "canvas_op"
 
+    # 构建交互 / 服务端续跑：ask_user 面板与回答后自动拉起 Agent 回合
+    BUILD_INTERACTION = "build_interaction_required"
+    BUILD_RESUME_FAILED = "build_resume_failed"
+
     # 会话状态
     SESSION_CREATED = "session_created"
     SESSION_RESUMED = "session_resumed"

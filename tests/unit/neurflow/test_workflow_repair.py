@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from neurova.collaboration.canvas_ops import CanvasOpService
+from neurova.collaboration.canvas_ops import CanvasOpService
 from neurova.collaboration.canvas_store import CanvasStore
 from neurova.collaboration.neurflow.custom_nodes import CustomNodeService
 from neurova.collaboration.neurflow.env_preflight import preflightNodeEnv
@@ -617,6 +618,121 @@ class TestWorkflowRepairSupervisor:
             candidate.get("action") == "replace_node"
             for candidate in result["candidates_considered"]
         )
+
+    @pytest.mark.asyncio
+    async def testCanvasStructuralCommitUsesOneBatchVersion(
+        self, storage, custom_service, ekb, canvas_store
+    ):
+        _create_probe(custom_service)
+        record = canvas_store.create(
+            {
+                "name": "结构化提交",
+                "nodes": [
+                    {"id": "start", "type": "builtin:start", "position": {"x": 0, "y": 0}, "config": {}},
+                    {"id": "end", "type": "builtin:end", "position": {"x": 400, "y": 0}, "config": {}},
+                ],
+                "edges": [
+                    {"id": "old", "source": {"nodeId": "start"}, "target": {"nodeId": "end"}}
+                ],
+            },
+            user_id="u1",
+        )
+        canvasOpService = CanvasOpService(store=canvas_store, broadcaster=_noopBroadcast)
+        supervisor = _supervisor(
+            storage,
+            custom_service,
+            ekb,
+            _ScriptedExecute([]),
+            canvasStore=canvas_store,
+            canvasOpService=canvasOpService,
+        )
+        draft = WorkflowDefinition(
+            id="draft_canvas_struct",
+            name="结构化草稿",
+            description="",
+            version="1.0.0",
+            nodes=[
+                _node("start", "builtin:start"),
+                _node("probe", "custom:repair_probe", {"good_key": "v"}),
+                _node("end", "builtin:end"),
+            ],
+            edges=[
+                WorkflowEdge(id="e1", source="start", target="probe"),
+                WorkflowEdge(id="e2", source="probe", target="end"),
+            ],
+            variables=[],
+            tags=[],
+            category="test",
+            author="u1",
+            created_at=time.time(),
+            updated_at=time.time(),
+            status=WorkflowStatus.DRAFT,
+        )
+        result = await supervisor._commitCanvas(record["id"], draft, "u1", "")
+
+        assert result["success"] is True, result
+        assert result["applied_operations"] > 0
+        assert result["version"] == 2
+        updated = canvas_store.get(record["id"])
+        assert sorted(node["id"] for node in updated["nodes"]) == ["end", "probe", "start"]
+        assert len(updated["edges"]) == 2
+        assert updated["version"] == 2
+
+    @pytest.mark.asyncio
+    async def testCanvasStructuralCommitFailureLeavesNoPartialState(
+        self, storage, custom_service, ekb, canvas_store
+    ):
+        record = canvas_store.create(
+            {
+                "name": "结构化失败",
+                "nodes": [
+                    {"id": "start", "type": "builtin:start", "position": {"x": 0, "y": 0}, "config": {}},
+                    {"id": "end", "type": "builtin:end", "position": {"x": 400, "y": 0}, "config": {}},
+                ],
+                "edges": [
+                    {"id": "old", "source": {"nodeId": "start"}, "target": {"nodeId": "end"}}
+                ],
+            },
+            user_id="u1",
+        )
+        canvasOpService = CanvasOpService(store=canvas_store, broadcaster=_noopBroadcast)
+        supervisor = _supervisor(
+            storage,
+            custom_service,
+            ekb,
+            _ScriptedExecute([]),
+            canvasStore=canvas_store,
+            canvasOpService=canvasOpService,
+        )
+        draft = WorkflowDefinition(
+            id="draft_canvas_bad",
+            name="坏草稿",
+            description="",
+            version="1.0.0",
+            nodes=[
+                _node("start", "builtin:start"),
+                _node("bad", "custom:no_such_type"),
+                _node("end", "builtin:end"),
+            ],
+            edges=[
+                WorkflowEdge(id="e1", source="start", target="bad"),
+                WorkflowEdge(id="e2", source="bad", target="end"),
+            ],
+            variables=[],
+            tags=[],
+            category="test",
+            author="u1",
+            created_at=time.time(),
+            updated_at=time.time(),
+            status=WorkflowStatus.DRAFT,
+        )
+        result = await supervisor._commitCanvas(record["id"], draft, "u1", "")
+
+        assert result["success"] is False
+        updated = canvas_store.get(record["id"])
+        assert updated["version"] == 1
+        assert sorted(node["id"] for node in updated["nodes"]) == ["end", "start"]
+        assert len(updated["edges"]) == 1
 
     @pytest.mark.asyncio
     async def testEkbHitIsSurfacedButStillEvaluated(
