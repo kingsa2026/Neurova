@@ -32,6 +32,72 @@ def read_builtin_bundle(name: str) -> Optional[bytes]:
         return None
 
 
+def builtinCacheDrift(bundle_name: str, cacheDir: Path) -> List[str]:
+    """随包 zip 与池内缓存之间漂移的成员（空表＝一致／不归本机制管）。
+
+    只比 zip 里有的那些成员，逐条 CRC-32（`ZipInfo.CRC` 无需解压，盘上按块算）：
+    缓存里多出来的生成物（咽喉合成的 `manifest.json`、`skill.json` 等）由咽喉自己管，
+    不算漂移——否则每次装都判成"不一致"，等价于无脑重解。
+    `bundle_name` 为空＝这只条目不是随包内置，本函数一字不管。
+    """
+
+    import io
+    import zlib
+    import zipfile
+
+    if not bundle_name or not cacheDir.is_dir():
+        return []
+    payload = read_builtin_bundle(bundle_name)
+    if payload is None:
+        return []
+    drift: List[str] = []
+    with zipfile.ZipFile(io.BytesIO(payload)) as zf:
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            disk = cacheDir / info.filename
+            if not disk.is_file():
+                drift.append(info.filename)
+                continue
+            digest = 0
+            with disk.open("rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    digest = zlib.crc32(chunk, digest)
+            if digest != info.CRC:
+                drift.append(info.filename)
+    return drift
+
+
+def refreshBuiltinCache(bundle_name: str, cacheDir: Path) -> List[str]:
+    """缓存与随包不一致时删掉重解，返回被判定漂移的成员（无漂移返回空表）。
+
+    为什么需要它：`market_registry._marketSourceDir` 过去"目录存在就交给安装"，于是同一只
+    发布包两种结果——干净机器现解 zip 装得成；装过一次、盘上留着旧版缓存的机器从旧版取
+    字节，被安装安全门按 `critical(dangerous_exec)` 拒（旧版 `scripts/package_check.py` 是裸
+    `compile(..., "exec")`，随包新版早已改成 `ast.parse`，台账 §6-512 钉到行、§6-514 用
+    读数钉死"安装读的是盘上那一版"）。修在知道包名的那一层往下递，不在下游补判空。
+
+    重解复用同步那条路同一个单源（`extractRemoteSkillZipRefusal`），不另写第二份解包逻辑。
+    """
+
+    import shutil
+
+    drift = builtinCacheDrift(bundle_name, cacheDir)
+    if not drift:
+        return []
+    shutil.rmtree(cacheDir, ignore_errors=True)
+    from neurova.skills import market_sources
+
+    refusal = market_sources.extractRemoteSkillZipRefusal(
+        skill_id=cacheDir.name, payload=read_builtin_bundle(bundle_name) or b"", dest=cacheDir)
+    if refusal:
+        # 重解失败不许退回"交旧字节"：那正是本函数要拦的形态，宁缺（返回后目录不在＝无真字节）
+        logger.error("内置包缓存重解失败 %s: %s", cacheDir, refusal)
+    else:
+        logger.info("内置包缓存已与随包 zip 对齐: %s（重解 %d 项漂移）", cacheDir, len(drift))
+    return drift
+
+
 class ImportStatus(str, Enum):
     """导入状态"""
 
@@ -391,6 +457,17 @@ class MarketImporter:
         from neurova.skills.market_registry import hasExecutorMapping
 
         return "mapped" if hasExecutorMapping(skill_id) else None
+
+    def builtinBundleName(self, skill_id: str) -> str:
+        """这只条目是否随包内置、是哪只包——与 `artifactSourceKind` 同一个来源问法。
+
+        只在这一层查 catalog：`market_registry._marketSourceDir` 拿到的是**调用方递下来**的
+        字符串，它自己不再查（台账 §6-518：在新调用点查全局 catalog 等于造第二个事实源，
+        那时测试自造的那份 catalog 与我这份会给出不一致的答案）。
+        """
+        entry = self._lookup_catalog_entry(skill_id) or {}
+        name = str(entry.get("bundle_zip") or "")
+        return Path(name).name if name and Path(name).name == name else ""
 
     def get_import_status(self, skill_id: str) -> Optional[ImportTask]:
         """获取导入状态"""

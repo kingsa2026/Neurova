@@ -132,12 +132,28 @@ def _default_market_skills_dir() -> Path:
         return get_data_root() / "skills"
 
 
-def _marketSourceDir(skill_id: str, market_skills_dir: Any = None) -> Optional[Path]:
-    """安装期真字节的来源目录（不存在则 None，staging 退回只挂 manifest）。"""
+def _marketSourceDir(skill_id: str, market_skills_dir: Any = None,
+                     bundle_name: str = "") -> Optional[Path]:
+    """安装期真字节的来源目录（不存在则 None，staging 退回只挂 manifest）。
+
+    `bundle_name` 由**已经持有 catalog 条目那一层**递下来（调用点用自家 importer 的
+    `builtinBundleName`）：本函数自己不查 catalog、不碰单例——在新调用点查全局 catalog
+    等于造第二个事实源，测试自造的那份 catalog 会拿到不一致答案（台账 §6-518 实测）。
+    非空时，交出前必须先与随包 zip 对表（`refreshBuiltinCache`）：否则同一版本在两台机器
+    上给出两种字节，被安全门扫的、装进 agent 目录的都是盘上那一版（§6-512／§6-514）。
+    """
     try:
         base = Path(market_skills_dir) if market_skills_dir else _default_market_skills_dir()
         source = base / skill_id
-        return source if source.is_dir() else None
+        if not source.is_dir():
+            return None
+        if bundle_name:
+            from neurova.skills.market_importer import refreshBuiltinCache
+
+            refreshBuiltinCache(bundle_name, source)
+            if not source.is_dir():
+                return None
+        return source
     except Exception as e:  # noqa: BLE001 — 来源目录取不到不阻断，退化为无真字节
         logger.warning("market source dir for %s unresolved: %s", skill_id, e)
         return None
@@ -370,6 +386,7 @@ def link_market_skill_to_agent(
     registry: Any,
     extra_registries: Optional[list] = None,
     market_skills_dir: Any = None,
+    bundle_name: str = "",
 ) -> Dict[str, Any]:
     """市场安装成功后的联邦注册：技能页（manifest）+ 工具注册表（可执行）
 
@@ -379,10 +396,13 @@ def link_market_skill_to_agent(
 
     market_skills_dir: 市场安装根目录，**只作安装期的真字节来源**（staging 从这里
     取包体，之后一律经账本 `path` 读）；None 时用 MarketImporter 单例目录。
+
+    bundle_name: 这只条目的随包内置资产名（非内置传空串）。由**调用方**用它自己的
+    importer 问出来递下来，本层不再查 catalog——查了就是第二个事实源（§6-518）。
     """
     outcome = _writeAgentManifestOutcome(
         service, skill_id, name, description, version,
-        source_dir=_marketSourceDir(skill_id, market_skills_dir),
+        source_dir=_marketSourceDir(skill_id, market_skills_dir, bundle_name),
     )
     if not outcome["ok"]:
         # 没过门 / 没落账 ⇒ 一个可执行体都不注册：给被拒的字节开工具面，等于
