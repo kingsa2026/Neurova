@@ -6,6 +6,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Text;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -862,14 +863,12 @@ namespace Neurova.Installer
                 return "请设置密码";
             if (p1.Length > 16)
                 return "密码长度须为 16 位以内";
-            // 密码不得含空白：内核命令行开关 /NP= 以空格分界，${GetOptions} 会把
-            // 含空格的密码截断。静默通道传不了 → 服务端 BuildAdminCredentialArgs
-            // 会整条拒绝（不写 ini、不写错凭据）。与其让用户填完在安装后被静默丢弃，
-            // 不如在此挡在界面上，明示原因。
+            // 密码不得含换行或引号：内核以 INI 键值读取，换行会截断值；
+            // 引号在 bootstrap_admin.ini 的键值里没有转义语义，一并挡在界面。
             foreach (char c in p1)
             {
-                if (char.IsWhiteSpace(c) || c == '"')
-                    return "密码不能含空格或引号";
+                if (c == '\r' || c == '\n' || c == '"')
+                    return "密码不能含换行或引号";
             }
             if (string.CompareOrdinal(p1, p2) != 0)
                 return "两次输入的密码不一致，请重新确认";
@@ -941,17 +940,20 @@ namespace Neurova.Installer
                 });
 
                 // 阶段二：NSIS /S 静默安装（15-95% 按目录增长映射）
-                // 凭据必须随命令行带进去：/S 下 NSIS 不执行任何 Page custom 回调
-                // （含 PRE/显示/LEAVE），内核的 PageLeaveAdminAccount 一次都不会跑。
-                // 内核 .onInit 的 IfSilent 分支专收 /NU= /NP=，据此写
-                // <安装目录>\backend\data\bootstrap_admin.ini。
-                // 升级安装（_isUpgrade）adminUser/adminPass 为 null：不带这两个开关，
-                // 内核静默分支同样不置 $AdminWritten——沿用既有安装的账号，不重复写入。
+                // 凭据不进命令行：/S 下 NSIS 不执行任何 Page custom 回调
+                // （含 PRE/显示/LEAVE），但把凭据放进内核同目录的临时 INI，
+                // .onInit 静默分支读取后立即删除。命令行里没有用户名/密码，
+                // 同机进程经 WMI Win32_Process 看不到凭据。
+                // 升级安装（_isUpgrade）adminUser/adminPass 为 null：不写凭据文件，
+                // 内核静默分支同样不置 $AdminWritten——沿用既有账号，不重复写入。
+                if (!PrepareAdminCredentialFile(adminUser, adminPass))
+                {
+                    TryDeleteAdminCredentialFile();
+                }
                 var psi = new ProcessStartInfo
                 {
                     FileName = effectiveKernel,
-                    Arguments = "/S" + BuildAdminCredentialArgs(adminUser, adminPass)
-                        + " /D=" + targetDir,
+                    Arguments = "/S /D=" + targetDir,
                     UseShellExecute = true,
                     Verb = "runas",
                 };
@@ -961,6 +963,7 @@ namespace Neurova.Installer
                 }
                 catch (Exception ex)
                 {
+                    TryDeleteAdminCredentialFile();
                     Dispatcher.Invoke(delegate { InstallFailed("无法启动安装内核：" + ex.Message); });
                     return;
                 }
@@ -974,6 +977,8 @@ namespace Neurova.Installer
                     proc.Refresh();
                     if (proc.HasExited)
                     {
+                        // 内核 .onInit 已读并删除；这里兜底清理，避免异常退出留下凭据。
+                        TryDeleteAdminCredentialFile();
                         int exit = proc.ExitCode;
                         if (exit != 0)
                         {
@@ -1001,32 +1006,51 @@ namespace Neurova.Installer
             });
         }
 
-        // 首装凭据 → 内核命令行开关（.onInit 的 IfSilent 分支消费）。
-        // 两条实测约束（wine 真机，非推断）：
-        //  1. 禁止加引号。ProcessStartInfo.Arguments 不做 shell 解析，Windows 上
-        //     引号会原样进命令行；而 NSIS ${GetOptions} **不剥引号**——
-        //     `/NU="alice"` 取回来是 `"alice"`，会连引号一起写进 bootstrap_admin.ini，
-        //     管理员用户名/密码直接错掉。
-        //  2. 因此凭据必须是单 token（无空格）。含空格的凭据一律拒绝随命令行传递：
-        //     静默通道拿不到它，宁可不传（内核不置 $AdminWritten → 不写 ini，
-        //     首启由应用内向导兜底），也不能写一份错的凭据进去。
-        // 空/含空格 → 返回不带开关，静默分支据此保持 $AdminWritten=0。
-        private static string BuildAdminCredentialArgs(string adminUser, string adminPass)
+        // 首装凭据 → 内核同目录的临时 INI（.onInit 静默分支读取后立即删除）。
+        // 不再走 /NU= /NP=：命令行可被同机进程经 WMI Win32_Process 读取，
+        // 密码不该出现在任何进程的 CommandLine 里。文件放在 %TEMP%\NeurovaSetup\
+        // （内核也在这里，$EXEDIR 可直接定位），用户临时目录默认仅当前用户可读；
+        // 内核读完即删，WPF 在进程退出后再兜底删一次。
+        private static string AdminCredentialPath()
         {
-            bool usable = IsKernelSafeCredential(adminUser) && IsKernelSafeCredential(adminPass);
-            if (!usable) return "";
-            return " /NU=" + adminUser + " /NP=" + adminPass;
+            return Path.Combine(Path.GetTempPath(), "NeurovaSetup", "bootstrap_admin.cred");
+        }
+
+        private static bool PrepareAdminCredentialFile(string adminUser, string adminPass)
+        {
+            if (!IsKernelSafeCredential(adminUser) || !IsKernelSafeCredential(adminPass))
+                return false;
+            string dir = Path.Combine(Path.GetTempPath(), "NeurovaSetup");
+            Directory.CreateDirectory(dir);
+            // NSIS Unicode 的 ReadINIStr 按 UTF-16 读；Encoding.Unicode 带 BOM。
+            string text = "[bootstrap]" + Environment.NewLine
+                + "username=" + adminUser + Environment.NewLine
+                + "password=" + adminPass + Environment.NewLine;
+            File.WriteAllText(AdminCredentialPath(), text, Encoding.Unicode);
+            return true;
+        }
+
+        private static void TryDeleteAdminCredentialFile()
+        {
+            try
+            {
+                string path = AdminCredentialPath();
+                if (File.Exists(path)) File.Delete(path);
+            }
+            catch
+            {
+                // 内核读完会删；这里只是兜底，删不掉不阻断安装
+            }
         }
 
         private static bool IsKernelSafeCredential(string value)
         {
             if (string.IsNullOrEmpty(value)) return false;
-            // NSIS 硬约束：用户名 1-32 位（ValidateAdminUsername 同口径），
-            // 且不得含引号/空白——两者都会让 ${GetOptions} 截断或误纳引号。
+            // NSIS INI 值仍不接受换行；用户名 1-32 位（ValidateAdminUsername 同口径）。
             if (value.Length > 32) return false;
             foreach (char c in value)
             {
-                if (char.IsWhiteSpace(c) || c == '"') return false;
+                if (c == '\r' || c == '\n') return false;
             }
             return true;
         }

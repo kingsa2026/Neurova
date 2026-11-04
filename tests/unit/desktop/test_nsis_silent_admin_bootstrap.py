@@ -27,8 +27,9 @@ $ cat C:\\out\\out.txt                 # → u=[]：页面里 StrCpy 的值也�
 ```
 
 所以凭据**不能**只能由页面回调产生——必须有一条不经页面的通道。
-本守卫钉住这条通道：`.onInit` 从 `/NU=<user>` `/NP=<pass>` 取命令行凭据，
-且在静默模式下无条件置 `$AdminWritten`，安装段据此写 ini。
+本守卫钉住这条通道：`.onInit` 从内核同目录的 `bootstrap_admin.cred`
+（`[bootstrap] username/password`）读凭据，读完即删；WPF 不再把
+用户名/密码拼进命令行（P2-4：命令行可被同机进程经 WMI 读取）。
 """
 from __future__ import annotations
 
@@ -37,6 +38,7 @@ from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[3]
 _NSI = _REPO / "NeurUI" / "src-tauri" / "nsis" / "installer.nsi"
+_WPF = _REPO / "NeurUI" / "src-tauri" / "installer-wpf" / "MainWindow.cs"
 
 
 def _source() -> str:
@@ -53,15 +55,42 @@ def _function_body(src: str, name: str) -> str:
     return m.group(1) if m else ""
 
 
-def testOnInitReadsAdminCredentialFromCommandLine():
-    """静默通道：.onInit 必须解析 /NU= 与 /NP= 两个命令行开关。"""
+def testOnInitReadsAdminCredentialFromKernelDirIni():
+    """静默通道：.onInit 从 $EXEDIR 的临时 INI 读取用户名/密码并立即删除。
+
+    凭据不得走 /NU= /NP= 命令行开关——那会被同机进程经 WMI Win32_Process
+    读到明文。
+    """
     body = _function_body(_source(), ".onInit")
     assert body, "installer.nsi 缺少 .onInit 函数"
+    assert '"$EXEDIR\\bootstrap_admin.cred"' in body, (
+        ".onInit 未从内核同目录读取 bootstrap_admin.cred——静默安装拿不到凭据"
+    )
+    for key in ("username", "password"):
+        assert re.search(
+            rf'ReadINIStr\s+\$Admin\w+\s+"\$EXEDIR\\bootstrap_admin\.cred"\s+"bootstrap"\s+"{key}"',
+            body,
+        ), f".onInit 未读取 bootstrap_admin.cred 的 {key} 键"
+    assert re.search(r'Delete\s+"\$EXEDIR\\bootstrap_admin\.cred"', body), (
+        "读取凭据后必须立即删除临时文件"
+    )
     for opt in ("/NU=", "/NP="):
-        assert f'"{opt}"' in body, (
-            f".onInit 未解析命令行开关 {opt}——静默安装（/S，WPF 壳走的正是这条路）"
-            "拿不到管理员凭据，只能靠页面回调，而页面回调在 /S 下不执行"
+        assert f'"{opt}"' not in body, (
+            f".onInit 仍在解析命令行开关 {opt}——凭据会出现在进程 CommandLine 里"
         )
+
+
+def testWpfNeverPutsCredentialsOnCommandLine():
+    """WPF 只能写临时凭据文件；命令行里只允许 /S 与 /D。"""
+    src = _WPF.read_text(encoding="utf-8")
+    assert "bootstrap_admin.cred" in src, "WPF 未使用临时凭据文件通道"
+    assert "Encoding.Unicode" in src, "凭据文件需按 NSIS Unicode 读取的 UTF-16 写入"
+    assert re.search(r'Arguments\s*=\s*"/S\s*/D="\s*\+\s*targetDir', src), (
+        "WPF 启动内核的命令行应只含 /S 与 /D"
+    )
+    assert "TryDeleteAdminCredentialFile" in src, "WPF 未在进程退出/启动失败时兜底清理凭据文件"
+    for opt in ("/NU=", "/NP="):
+        assert f'"{opt}"' not in src, f"WPF 仍把 {opt} 拼进命令行"
 
 
 def testSilentPathMarksAdminWrittenWithoutPageCallback():

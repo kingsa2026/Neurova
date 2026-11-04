@@ -716,26 +716,24 @@ Function .onInit
   ; `Process.Start(kernel, "/S /D=<dir>")` 调起本内核。NSIS 对 Page custom 的
   ; 硬语义是：/S 下页面回调（PRE / 显示 / LEAVE）一律不执行，所以
   ; PageLeaveAdminAccount 里那套"校验并置 $AdminWritten"的逻辑在静默路径上
-  ; 从来不会跑。凭据必须由一条不经页面的通道带进来：/NU=<用户名> /NP=<密码>。
-  ; 不置位则安装段 $AdminWritten == "1" 判据不成立 → ini 不写、
-  ; 安装却报成功 → 用户设的管理员账号被静默丢弃。
-  ; 无 /NU= 或无 /NP= 时保持 "0"：宁可不写 ini（首启由应用内向导兜底，
+  ; 从来不会跑。凭据改由内核同目录的临时 INI 带进来（不经过命令行）：
+  ;   %TEMP%\NeurovaSetup\bootstrap_admin.cred
+  ;   [bootstrap] username=<u> / password=<p>
+  ; WPF 以 UTF-16 写入；本段读取后立即 Delete，不让凭据留在磁盘。
+  ; 无文件时保持 "0"：宁可不写 ini（首启由应用内向导兜底，
   ; 后端 consume_bootstrap_admin_file 对空文件本就是 no-op），
   ; 也不写一份只有用户名没有密码的半截凭据。
   IfSilent silentAdminCred
     Goto adminCredDone
   silentAdminCred:
-    ${GetOptions} $CMDLINE "/NU=" $AdminUsername
-    ${If} ${Errors}
-      StrCpy $AdminUsername ""
-    ${EndIf}
-    ${GetOptions} $CMDLINE "/NP=" $AdminPassword
-    ${If} ${Errors}
-      StrCpy $AdminPassword ""
-    ${EndIf}
-    ${If} "$AdminUsername" != ""
-    ${AndIf} "$AdminPassword" != ""
-      StrCpy $AdminWritten "1"
+    ${If} ${FileExists} "$EXEDIR\bootstrap_admin.cred"
+      ReadINIStr $AdminUsername "$EXEDIR\bootstrap_admin.cred" "bootstrap" "username"
+      ReadINIStr $AdminPassword "$EXEDIR\bootstrap_admin.cred" "bootstrap" "password"
+      Delete "$EXEDIR\bootstrap_admin.cred"
+      ${If} "$AdminUsername" != ""
+      ${AndIf} "$AdminPassword" != ""
+        StrCpy $AdminWritten "1"
+      ${EndIf}
     ${EndIf}
   adminCredDone:
 
