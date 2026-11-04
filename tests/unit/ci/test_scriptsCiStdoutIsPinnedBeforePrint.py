@@ -167,15 +167,44 @@ def pinsStdoutStream(source: str) -> bool:
     return False
 
 
-def barePrinters(root: str = "scripts") -> list:
+#: 扫描面：仓根入口档＋`scripts/`。此前只看 `scripts/`，于是仓根的 `start.py`／`install.py`
+#: （167 处中文 print）从头到尾不在任何闸眼下——「余 3 档裸奔」的读数指错了对象。
+#: 只用**跟踪文件**：仓根的 `.tmp_*.py` 探针残件已被 gitignore，不该进面。
+SCAN_ROOTS = ("", "scripts")
+
+
+def faceFiles(roots=SCAN_ROOTS) -> list:
+    """扫描面本身：跟踪的仓根顶层档＋`scripts/` 全部档（去重、按名排序）。"""
+    rels = set()
+    for root in roots:
+        for rel in (trackedPyPaths(root) if root else trackedPyPaths()):
+            if not root and "/" in rel:
+                continue   # 仓根那一路只看顶层档，子目录交给各自的 root
+            rels.add(rel)
+    return sorted(rels)
+
+
+def barePrinters(roots=SCAN_ROOTS) -> list:
     """会打非 ASCII、却没钉自家 stdout 的档。"""
     bare = []
-    for rel in trackedPyPaths(root):
+    for rel in faceFiles(roots):
         source = sourceCode(REPO_ROOT / rel)
         if _nonAsciiPrintLines(source) and not pinsStdoutStream(source):
             bare.append(rel)
     return sorted(bare)
 
+
+def test_faceIsWiderThanTheOldScriptsOnlyBlindSpot():
+    """面自证：扫描面必须真含仓根入口档。
+
+    只报「裸奔 3 档」而不报面有多大，就会把面缺口读成债已清——
+    `start.py`／`install.py` 合计 167 处中文 print 此前一直在闸外。
+    """
+    face = faceFiles()
+    assert len(face) >= 88, "扫描面现算只有 %d 档——面缩了，裸奔计数再小也不可信" % len(face)
+    rootTop = {f for f in face if "/" not in f}
+    assert {"start.py", "install.py"} <= rootTop, "仓根入口档掉出扫描面：%s" % sorted(rootTop)
+    assert any(f.startswith("scripts/") for f in face), "scripts/ 那一半掉了"
 
 def test_barePrintersMatchTheRegisteredBaseline():
     """等号格：裸奔集合必须等于基线数——多了是新增裸 print，少了是有人收完没销账。"""
