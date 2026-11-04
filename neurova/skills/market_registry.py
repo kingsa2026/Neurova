@@ -26,7 +26,6 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from neurova.core.logger import get_logger
-from neurova.core.data_root import get_data_root
 from neurova.security import artifact_digest
 
 logger = get_logger(__name__)
@@ -120,16 +119,17 @@ _STAGING_IGNORED = shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo", ".inc
 
 
 def _default_market_skills_dir() -> Path:
-    """市场安装根目录（与 MarketImporter 单例一致；异常时回退 data/skills）
+    """市场安装根目录——只问 importer 的公开读口，不在这里另推一份。
 
     只服务安装期的**来源目录**——运行时取径已经收在账本 `path` 一处。
+    旧实现有两份事实源：直取私有 `_skills_dir`，异常时又抄一遍 `get_data_root()/\"skills\"`。
+    抄的那份与单例构造期同源但**不保证同步**（单例可被显式传目录构造），于是取到的是
+    "看着像、可能不是"的目录——交出去比取不到更坏。现让异常照实抛出，由调用侧
+    `_marketSourceDir` 按「取不到来源」退化为无真字节（端点回 4xx 那条腿已在 §6-186）。
     """
-    try:
-        from neurova.skills.market_importer import get_market_importer
+    from neurova.skills.market_importer import get_market_importer
 
-        return get_market_importer()._skills_dir
-    except Exception:  # noqa: BLE001
-        return get_data_root() / "skills"
+    return get_market_importer().marketSkillsDir()
 
 
 def _marketSourceDir(skill_id: str, market_skills_dir: Any = None,
