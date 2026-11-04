@@ -358,9 +358,25 @@ def _check_ports(docker: Dict[str, Any], compose: Dict[str, Any], helm: Dict[str
                 "端口一致性比较会静默少一项（不要把该解析写成可选）",
             )
         )
+    # scripts/config.py 的端口常量是 health_check.py 的探活输入（scripts/health_check.py
+    # 直接 import 这两个常量）。它此前不在交付面比对内 ⇒ compose/Helm 改端口后，
+    # 健康检查会静默探错端口。两端口都纳入同一张表。
+    script_config = _read("scripts", "config.py")
+    cfg_backend = re.search(r"^BACKEND_PORT\s*=\s*(\d+)", script_config, re.M)
+    cfg_frontend = re.search(r"^FRONTEND_PORT\s*=\s*(\d+)", script_config, re.M)
+    if not cfg_backend or not cfg_frontend:
+        out.append(
+            Finding(
+                "error",
+                "R1-ports",
+                "未能在 scripts/config.py 解析 BACKEND_PORT/FRONTEND_PORT——"
+                "health_check 的探活端口会与部署面静默分叉",
+            )
+        )
     observed = {
         "Dockerfile EXPOSE": (docker["expose"] or [None])[0],
         "start_server 默认端口": int(start_server.group(1)) if start_server else None,
+        "scripts/config.py BACKEND_PORT": int(cfg_backend.group(1)) if cfg_backend else None,
         "compose backend 端口映射": compose["backend"]["port"],
         "Helm backend.service.port": base["backend"]["service"]["port"],
         "Helm backend.service.targetPort": base["backend"]["service"]["targetPort"],
@@ -377,13 +393,20 @@ def _check_ports(docker: Dict[str, Any], compose: Dict[str, Any], helm: Dict[str
                 "后端端口在交付形态间不一致：" + "，".join(f"{k}={v}" for k, v in observed.items()),
             )
         )
-    if base["frontend"]["service"]["port"] != compose.get("frontend", {}).get("port"):
+    frontend_observed = {
+        "scripts/config.py FRONTEND_PORT": int(cfg_frontend.group(1)) if cfg_frontend else None,
+        "Helm frontend.service.port": base["frontend"]["service"]["port"],
+        "compose frontend 端口映射": compose.get("frontend", {}).get("port"),
+    }
+    frontend_distinct = {str(v) for v in frontend_observed.values() if v is not None}
+    if len(frontend_distinct) != 1:
         out.append(
             Finding(
                 "error",
                 "R1-ports",
-                f"前端端口不一致：Helm {base['frontend']['service']['port']} vs "
-                f"compose {compose.get('frontend', {}).get('port')}",
+                "前端端口在交付形态间不一致：" + "，".join(
+                    f"{k}={v}" for k, v in frontend_observed.items()
+                ),
             )
         )
     return out

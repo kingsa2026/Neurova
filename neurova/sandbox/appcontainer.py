@@ -202,7 +202,8 @@ class AppContainerSandbox:
         try:
             _DLL.userenv.DeleteAppContainerProfile(name)
         except Exception:
-            pass
+            # 残留 profile 会让下次同名创建报错；失败原因必须在第一现场可见。
+            logger.debug("AppContainer profile 删除失败: %s", name, exc_info=True)
 
     def _grant_dir_access(self, directory: str, sid_string: str) -> None:
         """容器对输出目录的写权限（icacls 授 ACE）。"""

@@ -205,14 +205,32 @@ def _parseSourceDate(value: Any) -> Optional[datetime.datetime]:
     v = str(value or "").strip()
     if not v:
         return None
-    m = re.match(r"^D:(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?", v)
+    m = re.match(
+        r"^D:(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?"
+        r"(?:(Z)|([+-])(\d{2})'?(\d{2})?'?)?",
+        v,
+    )
     if m:
         g = m.groups()
+        tz = datetime.timezone.utc
+        if g[7]:
+            # PDF 时间戳可带 ±HH'mm' 偏移；丢掉它会让 UTC+8 的源时间整体偏 8 小时，
+            # 日期边界的 TB 判定与 TD① 过滤都会错。
+            try:
+                offset = datetime.timedelta(hours=int(g[8]), minutes=int(g[9] or 0))
+            except (TypeError, ValueError):
+                return None
+            if g[7] == "-":
+                offset = -offset
+            try:
+                tz = datetime.timezone(offset)
+            except ValueError:
+                return None
         try:
             return datetime.datetime(
                 int(g[0]), int(g[1] or 1), int(g[2] or 1),
                 int(g[3] or 0), int(g[4] or 0), int(g[5] or 0),
-                tzinfo=datetime.timezone.utc,
+                tzinfo=tz,
             )
         except ValueError:
             return None

@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import quote
@@ -40,7 +41,12 @@ def cnb_token() -> str:
     if tok:
         return tok
     # fallback: git remote url 里的内嵌凭据 https://<user>:<token>@cnb.cool/...
-    out = os.popen("git remote get-url cnb 2>nul").read().strip()
+    # 不用 os.popen 的 `2>nul`：那是 Windows 专用重定向，非 Windows 下会静默取不到。
+    proc = subprocess.run(
+        ["git", "remote", "get-url", "cnb"],
+        capture_output=True, text=True, check=False,
+    )
+    out = (proc.stdout or "").strip()
     m = re.search(r"https://[^:]+:([^@]+)@cnb\.cool", out)
     if not m:
         raise RuntimeError("未找到 CNB token（设 CNB_TOKEN 或检查 git remote cnb 的 URL 凭据）")

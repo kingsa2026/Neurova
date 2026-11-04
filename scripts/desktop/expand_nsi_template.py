@@ -2,17 +2,19 @@
 """展开 installer.nsi 模板占位符/条件块，供 makensis 独立编译验证。
 
 Tauri 打包时由 bundler 注入（handlebars 子集：{{#if}}/{{#unless}}/{{var}}）。
-本脚本按 tauri.conf.json + 构建假值复现同一注入，产出 /tmp/nsis_verify/installer_expanded.nsi。
+本脚本按 tauri.conf.json + 构建假值复现同一注入，产出系统临时目录下
+`nsis_verify/installer_expanded.nsi`（tempfile.gettempdir()，跨账户可用）。
 """
 import json
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent.parent
 NSI = REPO / "NeurUI" / "src-tauri" / "nsis" / "installer.nsi"
 CONF = REPO / "NeurUI" / "src-tauri" / "tauri.conf.json"
-OUT_DIR = Path(r"C:\Users\xccoo\AppData\Local\Temp\nsis_verify")
+OUT_DIR = Path(tempfile.gettempdir()) / "nsis_verify"
 OUT_FILE = OUT_DIR / "installer_expanded.nsi"
 
 
@@ -33,7 +35,7 @@ def main() -> int:
         "manufacturer": "Neurova",
         "copyright": "© 2026 Neurova",
         "main_binary_name": "Neurova",
-        "main_binary_path": "C:\\Users\\xccoo\\AppData\\Local\\Temp\\nsis_verify\\Neurova.exe",
+        "main_binary_path": str(OUT_DIR / "Neurova.exe"),
         "install_mode": "perMachine",
         "arch": "x64",
         "bundle_id": identifier,
@@ -53,7 +55,7 @@ def main() -> int:
         # bundler 语义：additional_plugins_path 指向只含附加插件的干净目录
         # （标准 NSIS 插件混入会触发 "Plugin command conflicts" 编译错）。
         # 验证目录 plugins/ 仅含 nsis_tauri_utils.dll。
-        "additional_plugins_path": "C:\\Users\\xccoo\\AppData\\Local\\Temp\\nsis_verify\\plugins",
+        "additional_plugins_path": str(OUT_DIR / "plugins"),
         "signed_plugins_path": "",
         "allow_downgrades": "true",
         "estimated_size": "5000",
