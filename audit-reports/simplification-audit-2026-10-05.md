@@ -11870,3 +11870,13 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **红绿灯**：纠正批（接线已存在故 AST 守卫本批即绿，价值在防再生）；14 passed（新增 6+既有 8）。
     - **仍开（P3 待点单）**：C5 lost-in-the-middle 位置缓解进 ContextOrchestrator（对照 dolphin apply_lost_in_middle_mitigation；本仓折叠分辨率阶梯只管「留多少」不管「放哪里」）；C6 评测面产品化（retrieval_benchmark 已有 API+用例库+基线冻结，缺 NeurUI 控制台页；前端双门工作量）。候选出处见对比报告 §5。
     - **下一枚空号现查**：本格取 546，后继从 547 起。
+547. **C5：lost-in-the-middle 位置缓解进 draw 装配路径（KWeaver 对比候选收尾）** ✅🟢
+    - **勘探收窄（上会话遗留问题本轮钉死）**：window_compactor/fold_resolution 均纯计量无排序；注入块顺序在 build_context 的 draw 召回装配段逐条 append（orchestrator.py:1585 起）——缓解唯一接线位。rank＝抽屉输出序（SemanticMatchDrawer (-hits,-priority,插入序) 为唯一排序裁决处），不造第二份打分（教义第 6 条）。
+    - **修复**：25887972a——新模块 context/position_strategy.py（primacy-recency 两端发牌：最优置首/次优置尾/最弱居中；≤2 条恒等；异常回落原序）；默认关（advanced 分区 lost_in_middle_enabled＋env NEUROVA_LOST_IN_MIDDLE 显式 0/1 最优先）；接线 draw 循环前（gate+调用），AST 守卫防静默拆除。
+    - **红绿灯**：7 用例（AST 接线守卫红→绿＋发牌/开关/恒等/无第二打分定义守卫）；context 域回归 1036 passed。
+    - **预存红登记（stash 自证与本批无关）**：test_promptSurfaceBudgetRatchet 3 用例（tools_description/total_always_on_chars/tools_growth_requires_waiver）——暂存本批 app_settings 改动复跑同红，疑并发会话在途漂移，归属待现查（口径沿 §6-481..488）。
+    - **诚实声明**：位置重排是 prompt 内部装配，无 HTTP 可观测面；行为面以真模块单测为准，接线以 AST 守卫钉住。
+    - **下一枚空号现查**：本格取 547，后继从 548 起。
+548. **KWeaver 对比候选收尾状态：C6 维持缓办（范围已核清）**
+    - **C6 评测面产品化**：API 面已核（knowledge_core.py benchmark 端点、NDCG+基线冻结+用例库在库）；缺 NeurUI 控制台页——路由+菜单+i18n×11 语言对齐守卫+vitest+vue-tsc 双门，为一个完整前端批的工作量，本会话预算不足以按双门纪律做完，硬塞即半成品，维持待点单（对比报告 §5 / 记忆 project-kweaver-comparison-backlog 均有交接笔记）。
+    - **零代码改动**，本格即登记。后继自 549 起。
