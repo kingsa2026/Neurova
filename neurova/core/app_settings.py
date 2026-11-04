@@ -71,10 +71,18 @@ ROUTING_DEFAULTS: Dict[str, Any] = {
     # leader 租约时长（秒）：静默超时后候选自动接管。
     "group_lease_ttl_seconds": 90,
 }
+# 安全设置分区（认知安全门 C1 接线）——默认观察态：只记读数，零行为漂移。
+SECURITY_DEFAULTS: Dict[str, Any] = {
+    # 认知安全门模式（off/observe/enforce）：off=旁路；observe=只记读数（默认）；
+    # enforce=输入面阻断+记忆面脱敏。误拦不可逆，enforce 必须显式开启。
+    # env NEUROVA_COGNITIVE_SECURITY 显式值最优先（运维逃生门）。
+    "cognitive_security_mode": "observe",
+}
 SECTION_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "general": GENERAL_DEFAULTS,
     "advanced": ADVANCED_DEFAULTS,
     "routing": ROUTING_DEFAULTS,
+    "security": SECURITY_DEFAULTS,
 }
 
 
