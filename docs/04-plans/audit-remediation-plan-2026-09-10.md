@@ -151,14 +151,14 @@ P0-A 安全 → P0-B 并发 → P0-C 流式 → P1-D 记忆 → P1-E 扫荡 → 
 
 | 批次 | 提交 | 内容 |
 |------|------|------|
-| P0-A 安全收口 | c326bc8b + 7487a18e | A1-A8 全部：沙箱探测表填充（兼容类/实例）、docker 假分支显式拒绝、fail-open 收窄只读白名单、白名单 fullmatch、单调守卫恒开、审批单例、休眠审批 API 删除、/attachment 鉴权 |
-| P0-B 并发正确性 | a0500416 | B1-B6 全部：轮次态迁 ContextVar（新模块 core/turn_context.py）、recall guard 按 session 分桶、provider 读锁、ECB 锁、热切换串行锁、tool_engine 双检锁 |
-| P0-C 真流式 | d48a5c51 | C1-C5 全部：/chat/stream 真流式接线（emitter→队列模式）、SSE 心跳、chat_stream 限流熔断同源、SDK 重试禁用（3→0）、条件缓冲 |
-| P1-D 记忆层 | 3820cdd9 | D1/D2/D6/D7/D8/D9：persist.db WAL+常驻连接、touch 批量、关键词索引增量 upsert/remove、温度通道 SQL Top-N、_PersistDbStore 常驻、MoE 增量刷新 |
-| P1-E 扫荡 | da1dba2a | E1/E5/E6/E7：memory+file 五工具 to_thread、降级 MemoryManager 缓存单例、usage 记账常驻 WAL、肌肉落盘下沉、updater 去重+删死方法 |
-| P1-F 假接线 | 04f8f186 | F1/F3/F4/F7：provider 健康链接线、fallback 双定义删除、find_session 索引式定位（4 消费点）、RSI 参数 clamp |
-| P1-G 前端 | 27bd4f95 | G3/G5：Canvas 轮询卸载守卫、AgentStore TTL 缓存+in-flight 去重 |
-| P2-H 清理 | 141ed493 | H4/H5/H6/H7：/test debug 门控+单例锁、死 stub 删除、AGENTS 勘误（本地，文件被 gitignore）、三处 except-pass 可观测化 |
+| P0-A 安全收口 | c326bc8b + 7c49edbdd | A1-A8 全部：沙箱探测表填充（兼容类/实例）、docker 假分支显式拒绝、fail-open 收窄只读白名单、白名单 fullmatch、单调守卫恒开、审批单例、休眠审批 API 删除、/attachment 鉴权 |
+| P0-B 并发正确性 | 6d0ef1c74 | B1-B6 全部：轮次态迁 ContextVar（新模块 core/turn_context.py）、recall guard 按 session 分桶、provider 读锁、ECB 锁、热切换串行锁、tool_engine 双检锁 |
+| P0-C 真流式 | 13a3268d1 | C1-C5 全部：/chat/stream 真流式接线（emitter→队列模式）、SSE 心跳、chat_stream 限流熔断同源、SDK 重试禁用（3→0）、条件缓冲 |
+| P1-D 记忆层 | cecd28341 | D1/D2/D6/D7/D8/D9：persist.db WAL+常驻连接、touch 批量、关键词索引增量 upsert/remove、温度通道 SQL Top-N、_PersistDbStore 常驻、MoE 增量刷新 |
+| P1-E 扫荡 | 6384545e3 | E1/E5/E6/E7：memory+file 五工具 to_thread、降级 MemoryManager 缓存单例、usage 记账常驻 WAL、肌肉落盘下沉、updater 去重+删死方法 |
+| P1-F 假接线 | c0410ba26 | F1/F3/F4/F7：provider 健康链接线、fallback 双定义删除、find_session 索引式定位（4 消费点）、RSI 参数 clamp |
+| P1-G 前端 | 6564bd3ad | G3/G5：Canvas 轮询卸载守卫、AgentStore TTL 缓存+in-flight 去重 |
+| P2-H 清理 | 9bb89f793 | H4/H5/H6/H7：/test debug 门控+单例锁、死 stub 删除、AGENTS 勘误（本地，文件被 gitignore）、三处 except-pass 可观测化 |
 
 ### 后置台账（未在本轮执行，原因与建议）
 
@@ -183,7 +183,7 @@ P0-A 安全 → P0-B 并发 → P0-C 流式 → P1-D 记忆 → P1-E 扫荡 → 
 5. **test_moe_router_reads_persist_db_not_json_store 套件顺序污染**（HEAD 基线同样失败，单跑通过）
 6. **canvas-edges 悬浮层断言**（CRLF/注释匹配问题，HEAD 基线同样失败）
 
-> **⚠️ 2026-09-10 上午更正**：以上 6 条均因夜间误用系统 python 3.15.0a7 alpha 所致——项目实际解释器 `.venv`（3.12.10）下 PIL/pydantic/prometheus/openai/aiohttp/numpy 全部健康，这些失败在 venv 下不存在。真实残留仅 2 条且已处理：rsi_receipts.jsonl 归档至 logs/rsi-archive-20260910/；B6 与 governance_integration 的 property 手术交叉污染已修（9de3a6f3）；附带修复 sandbox_backends 测试的占位 import 漏网。跑测试一律用 `.venv/Scripts/python.exe`。
+> **⚠️ 2026-09-10 上午更正**：以上 6 条均因夜间误用系统 python 3.15.0a7 alpha 所致——项目实际解释器 `.venv`（3.12.10）下 PIL/pydantic/prometheus/openai/aiohttp/numpy 全部健康，这些失败在 venv 下不存在。真实残留仅 2 条且已处理：rsi_receipts.jsonl 归档至 logs/rsi-archive-20260910/；B6 与 governance_integration 的 property 手术交叉污染已修（a7847dab8）；附带修复 sandbox_backends 测试的占位 import 漏网。跑测试一律用 `.venv/Scripts/python.exe`。
 
 ### 事故登记
 

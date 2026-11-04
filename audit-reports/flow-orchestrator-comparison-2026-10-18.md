@@ -122,7 +122,7 @@ core 那份建档于 7835c367(2026-06-04「pyc 骨架恢复 - 全量导入修复
 来历形态（git 实证，主会话复算关键几条 ✅）：
 - collaborate 支：`git log -S "get_orchestrator" -- neurova/` **仅命中 1832a12b 一笔** ⇒ **引入即未接线**，
   没有"接入后被摘除"的提交可寻。
-- core 支：逐符号 pickaxe 命中集恒为 `{7835c367, 8a91e721, 4a3c9380}`，且
+- core 支：逐符号 pickaxe 命中集恒为 `{7835c367, 8a91e721, 6bff43f23}`，且
   `from neurova.core.flow_orchestrator import` 这条 import 只由 6bff43f2(2026-09-04 测试入库) 添加
   ⇒ 15 个符号**全部"从未被接进活链路"**（◑，主会话未逐符号复跑）。
 - 两份后来都**吃过维护成本**：6b9bc3df(2026-10-07) 懒建单例双检锁收口把两个工厂都改了、

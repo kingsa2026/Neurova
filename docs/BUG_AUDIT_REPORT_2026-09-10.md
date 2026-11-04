@@ -643,13 +643,13 @@ const started: PlanSession = res.data.data.session   // res.data={session} → r
 
 ### 9.7.4 顺带修复的台账预存项（只提升）
 
-1. **`test_auth_system::TestTokenBlacklist`（台账项）**：101cfb4e 将黑名单改 token→exp Dict（S-21）后遗留测试仍按 set 契约写（`.add/.discard`）→ 按新契约重写（登记/命中/过期惰性清理/移除），绿。
+1. **`test_auth_system::TestTokenBlacklist`（台账项）**：c33c47278 将黑名单改 token→exp Dict（S-21）后遗留测试仍按 set 契约写（`.add/.discard`）→ 按新契约重写（登记/命中/过期惰性清理/移除），绿。
 2. **`test_files_api_security_p0` 隔离挂起（台账项）**：根因 = `_make_upload_file` 的 `AsyncMock(return_value=content)` 永不返回 EOF，`upload_file` 分块循环死循环——mock 不忠实，非端点缺陷；改 `side_effect=[content, b""]` 忠实模拟一次内容 + EOF，挂起消除，5 绿。
 3. 修复后 `tests/unit/api/` 全目录 **4 failed / 1213 passed**，4 失败恰为台账预存集（agent_package×2 / execution_events / mobile_pairing），较此前净减 2 项台账。
 
 ### 9.7.5 第三轮复核与前端匹配检查（同日收口）
 
-**后端复核结论（四提交 9e6d292b/3ce8a30f/d04e8aa0/0eede9d8）**：
+**后端复核结论（四提交 4645a6ba7/ab48fea05/e1d6607c2/e9caa49ff）**：
 
 - 提交均在史且关键文件未被并行会话再改动；global_auth 边界自检通过：OPTIONS 先于鉴权放行、WS scope 透传、查询串不参与路径匹配、服务令牌空值短路、shadow 取证按路径去重有界、纯 ASGI 实现对 SSE/流式安全（不经 BaseHTTPMiddleware）。
 - 已知边界（记录不修）：白名单精确匹配不含尾斜杠变体（`/api/v1/auth/login/` 在 enforce 下 401 而非 307 重定向——前端无尾斜杠调用，enforce 迁移时留意）；根路径 `/` 非白名单（无业务路由）。
@@ -658,7 +658,7 @@ const started: PlanSession = res.data.data.session   // res.data={session} → r
 
 **前端匹配检查：发现并修复 5 处现存 UI 断点**（与 enforce 无关，当日即坏）：
 
-- 根因：内容端点 `/files/{id}/download`、`/files/{id}/preview`、`/artifacts/{id}/content` 均有 JWT+属主鉴权（dd5b00be 起），而 `<img>/<audio>/<iframe>/<a download>` 无法携带 Authorization 头，前端直链消费必 401——预览空白/下载得到 401 JSON：
+- 根因：内容端点 `/files/{id}/download`、`/files/{id}/preview`、`/artifacts/{id}/content` 均有 JWT+属主鉴权（b09e58e90 起），而 `<img>/<audio>/<iframe>/<a download>` 无法携带 Authorization 头，前端直链消费必 401——预览空白/下载得到 401 JSON：
   1. `AgentFilePage.vue` 图片/PDF 预览（previewUrl 直链）；
   2. `AgentFilePage.vue` 下载（a.href 直链）；
   3. `FilePage.vue` 下载（a.href 直链）；

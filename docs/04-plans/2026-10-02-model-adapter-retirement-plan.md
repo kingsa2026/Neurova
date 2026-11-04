@@ -118,7 +118,7 @@ history 追加、指标只降不升）——不更新就当场红，红是对的
 ## 3. 落账清单（执行时逐条勾）
 
 - [x] S0 判据新增，改前 3 红 1 绿的读数原文留存（3 failed + 6 passed；§44.1）
-- [x] S1 台账预存红名单留存（实测为 ∅：工单立项时的 5 条预存红已被 c84d9fda 根修；§44.1）
+- [x] S1 台账预存红名单留存（实测为 ∅：工单立项时的 5 条预存红已被 5b8b65125 根修；§44.1）
 - [x] `neurova/cognitive_layers/model_adapter/` 四件已 `git rm`
 - [x] `agent_core.py` 三行赋值已删（装配段整块 −13 行）；尺寸棘轮基线已按其机制更新并复跑（17 passed）
 - [x] `api/endpoints/model_adapter.py` 已 `git rm`；挂载表行已删；直挂点核查读数=仅表驱动

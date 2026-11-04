@@ -31,7 +31,7 @@
 - **关键入口**：`ConflictGroup:19`、`ConflictDetector:30`、`detect:50`、`_is_contradictory:169`、`_extract_attributes:198`。
 - **来历**：2482c042（2026-06-03「添加完整的项目核心文件」）批量引入——`git log --diff-filter=A` 唯一添加笔。
   **生产侧从未接线**：全史唯一消费者 `result_processor.py`（`:17` import、`:63` 实例化、`:100` 调 `detect`）本身
-  只有测试 import；`git grep result_processor 0c333a76^ -- neurova/` 只命中它自己的定义与 `__main__` 演示（`:235`），
+  只有测试 import；`git grep result_processor 807ca120e^ -- neurova/` 只命中它自己的定义与 `__main__` 演示（`:235`），
   `git log -S "from neurova.cognitive_layers.memory_layer.result_processor" --all -- neurova/` **零命中**。
   807ca120（2026-09-21「温度衰减双实现收敛…清退 5 组死码」）删掉 `result_processor.py`，
   退役报告记「生产 0，逐个按类名复核」并把 MoE 检索面的真实消费方改指 `MoERetrieverAdapter`
