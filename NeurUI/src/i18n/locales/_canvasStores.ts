@@ -97,6 +97,7 @@ const entries: Array<[string, string]> = [
   ['admitXianyu', '⚠️ 闲鱼开放能力为运营定向邀请（官方：未经邀请的注册将不予通过），个人卖家暂无自助开放 API。'],
   ['oauthAuthorize', 'OAuth 一键授权（跳转平台登录页回调本系统）'],
   ['msgOAuthNeedCreds', '请先填入应用 Key / Secret 后再发起 OAuth 授权'],
+  ['msgOAuthFailed', '发起 OAuth 授权失败，请稍后重试'],
   ['storeAuthOpen', '店铺管理（授权）'],
 ]
 

@@ -963,6 +963,12 @@ export default {
     conflictSeverity: '严重度 {score}%',
     conflictPolicy: '建议策略：{policy}',
     conflictNoBasis: '无依据 · 须人工指明胜方',
+conflictNewerNew: '较新：新条目',
+conflictNewerOld: '较新：旧条目',
+conflictNewerUnknown: '时间不可比',
+conflictBasisSource: '源修改时间',
+conflictBasisIngested: '入库时间',
+conflictTimeReadout: '时间读数：{basis}（旧 {old} → 新 {new}）',
 
     conflictResolved: '已裁决',
     tombstones: '知识墓碑',

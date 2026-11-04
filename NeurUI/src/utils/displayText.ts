@@ -42,6 +42,26 @@ export function formatEpochSecondDate(value?: number | null): string {
 }
 
 /**
+ * 本地日期串（YYYY-MM-DD）→ 当天 00:00 的 UTC ISO 串。
+ *
+ * 知识库按源修改时间过滤时，后端按 UTC 解析 ISO；直接把 `YYYY-MM-DDT00:00:00`
+ * 裸串发过去会被当成 UTC，UTC+8 用户选"11-04 起"实际从本地 08:00 生效。
+ * 这里用本地时间构造再 `toISOString()`，边界随用户时区正确换算。
+ */
+export function localDayStartIso(date: string): string {
+  const [y, m, d] = date.split('-').map(Number)
+  const dt = new Date(y, m - 1, d, 0, 0, 0, 0)
+  return Number.isNaN(dt.getTime()) ? '' : dt.toISOString()
+}
+
+/** 本地日期串 → 当天 23:59:59.999 的 UTC ISO 串（含当天最后一毫秒）。 */
+export function localDayEndIso(date: string): string {
+  const [y, m, d] = date.split('-').map(Number)
+  const dt = new Date(y, m - 1, d, 23, 59, 59, 999)
+  return Number.isNaN(dt.getTime()) ? '' : dt.toISOString()
+}
+
+/**
  * 0~1 的比例 → 百分比文案；null / undefined → `'-'`。
  * 注意 `0` 是合法比例，必须显示成 `0%` 而不是占位符，故判空只认 null/undefined。
  */

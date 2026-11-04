@@ -56,12 +56,12 @@
     "doc": "强制刷新令牌（仅限归属用户）"
   },
   {
-    "method": "GET",
+    "method": "POST",
     "path": "/stores/oauth/authorize",
     "name": "oauth_authorize",
-    "decorator": "router.get('/stores/oauth/authorize')",
-    "signature": "request: Request, platform: str=Query(...), app_key: str=Query(''), app_secret: str=Query(''), store_name: str=Query(''), current_user: Dict[str, Any]=Depends(get_current_user_or_default)",
-    "doc": "构造平台授权 URL 并 302 跳转（Tier 2）；先落 pending 店铺与应用凭据"
+    "decorator": "router.post('/stores/oauth/authorize')",
+    "signature": "request: Request, data: Dict[str, Any]=Body(...), current_user: Dict[str, Any]=Depends(get_current_user_or_default)",
+    "doc": "构造平台授权 URL（Tier 2）；凭据走 POST body，不进 URL/访问日志。"
   },
   {
     "method": "GET",

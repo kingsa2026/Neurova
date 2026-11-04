@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatEpochSecondDate } from '../displayText'
+import { formatEpochSecondDate, localDayEndIso, localDayStartIso } from '../displayText'
 
 /**
  * 知识库文档"创建时间全一样且与实际不符"的回归钉（N-约定：epoch 秒）。
@@ -27,5 +27,22 @@ describe('formatEpochSecondDate', () => {
     expect(formatEpochSecondDate(undefined)).toBe('—')
     expect(formatEpochSecondDate(null)).toBe('—')
     expect(formatEpochSecondDate(0)).toBe('—')
+  })
+})
+
+describe('本地日期边界 → UTC ISO（P3-3）', () => {
+  it('startAndEndRoundTripToTheSameLocalDay', () => {
+    const start = new Date(localDayStartIso('2026-11-04'))
+    expect([start.getFullYear(), start.getMonth(), start.getDate(),
+      start.getHours(), start.getMinutes(), start.getSeconds()]).toEqual([2026, 10, 4, 0, 0, 0])
+
+    const end = new Date(localDayEndIso('2026-11-04'))
+    expect([end.getFullYear(), end.getMonth(), end.getDate(),
+      end.getHours(), end.getMinutes(), end.getSeconds()]).toEqual([2026, 10, 4, 23, 59, 59])
+  })
+
+  it('serializesWithExplicitUtcSuffix', () => {
+    expect(localDayStartIso('2026-11-04')).toMatch(/Z$/)
+    expect(localDayEndIso('2026-11-04')).toMatch(/Z$/)
   })
 })

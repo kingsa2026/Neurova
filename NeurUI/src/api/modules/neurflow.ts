@@ -352,6 +352,17 @@ export async function createStore(payload: Record<string, unknown>): Promise<Con
   return body.store
 }
 
+/** 发起 Tier 2 OAuth：凭据走 POST body，返回值是平台授权 URL。 */
+export async function authorizeStoreOAuth(payload: {
+  platform: string
+  app_key: string
+  app_secret: string
+  store_name?: string
+}): Promise<string> {
+  const body = await api.post<{ authorize_url: string }>(`${BASE}/stores/oauth/authorize`, payload)
+  return body.authorize_url
+}
+
 export async function updateStore(storeId: string, payload: Record<string, unknown>): Promise<ConnectedStore> {
   const body = await api.put<{ store: ConnectedStore }>(`${BASE}/stores/${storeId}`, payload)
   return body.store

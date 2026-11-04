@@ -323,6 +323,16 @@ export function restoreKnowledgeNode(id: string) {
  */
 export type ConflictResolution = 'keep_both' | 'supersede_old' | 'dismiss'
 
+/** 条目侧冲突的时间读数（批 TC；只出建议不改判）。 */
+export interface ConflictTimeContext {
+  old_source_modified_at?: string
+  new_source_modified_at?: string
+  old_ingested_at?: number | null
+  new_ingested_at?: number | null
+  newer_side?: 'new' | 'old' | null
+  basis?: string
+}
+
 export interface EntryConflict {
   axis: 'entry'
   conflict_id: string
@@ -335,6 +345,7 @@ export interface EntryConflict {
   status: string
   resolution?: string
   resolved_by?: string
+  time_context?: ConflictTimeContext
 }
 
 export interface FactConflict {

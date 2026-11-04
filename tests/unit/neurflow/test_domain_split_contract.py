@@ -114,8 +114,12 @@ async def test_oauth_leaf_consumes_patched_exchange_and_writes_state(monkeypatch
     monkeypatch.setattr(api, "_oauth_authorize_url", authorize)
     monkeypatch.setattr(api, "_oauth_exchange_token", exchange)
     request = Request({"type": "http", "headers": []})
-    response = await leaf.oauth_authorize(request, "jd", "fake-key", "fake-secret", "shop", {"user_id": "owner"})
-    assert response.status_code == 302
+    response = await leaf.oauth_authorize(
+        request,
+        {"platform": "jd", "app_key": "fake-key", "app_secret": "fake-secret", "store_name": "shop"},
+        {"user_id": "owner"},
+    )
+    assert response["authorize_url"] == "https://example.invalid/authorize"
     state, meta = manager.oauth_state_set.call_args.args
     assert meta["user_id"] == "owner" and meta["store_id"] == "store"
     manager.create_store.assert_called_once_with("jd", "shop", credentials={"app_key": "fake-key", "app_secret": "fake-secret"}, user_id="owner", status="pending")

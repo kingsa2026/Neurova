@@ -131,6 +131,41 @@ describe('知识页冲突队列 · 两条轴', () => {
     expect(queue(wrapper).text()).toContain('93%')
   })
 
+  it('条目侧露出时间读数（P2-8）', async () => {
+    const wrapper = await mountWithConflicts([{
+      ...ENTRY_CONFLICT,
+      time_context: {
+        old_source_modified_at: '2024-03-01T08:00:00+00:00',
+        new_source_modified_at: '2026-01-02T10:00:00+00:00',
+        old_ingested_at: 1700000000,
+        new_ingested_at: 1800000000,
+        newer_side: 'new',
+        basis: 'source_modified_at',
+      },
+    }])
+    const text = queue(wrapper).text()
+
+    expect(queue(wrapper).find('[data-testid="conflict-newer-side"]').text()).toContain('较新：新条目')
+    expect(queue(wrapper).find('[data-testid="conflict-time-readout"]').text()).toContain('源修改时间')
+    expect(text).toContain('2024')
+    expect(text).toContain('2026')
+  })
+
+  it('条目侧时间不可比时如实说不可比，不冒充有结论', async () => {
+    const wrapper = await mountWithConflicts([{
+      ...ENTRY_CONFLICT,
+      time_context: {
+        old_ingested_at: 1700000000,
+        new_ingested_at: 1800000000,
+        newer_side: null,
+        basis: 'ingested_at',
+      },
+    }])
+    const readout = queue(wrapper).find('[data-testid="conflict-time-readout"]').text()
+    expect(queue(wrapper).find('[data-testid="conflict-newer-side"]').text()).toContain('时间不可比')
+    expect(readout).toContain('入库时间')
+  })
+
   it('事实侧露出种类 / 严重度 / 建议策略 / 依据', async () => {
     const wrapper = await mountWithConflicts([factConflict()])
     const text = queue(wrapper).text()

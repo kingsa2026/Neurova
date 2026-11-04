@@ -2,7 +2,8 @@
 Tier 2 OAuth（stores/oauth/authorize + callback）契约测试 — TDD 红灯先行。
 
 范围（§5.3 Tier 2）：
-1. authorize：构造平台授权 URL 302（redirect_uri 回调 + state）；未支持平台 400；
+1. authorize：POST 凭据 → 返回平台授权 URL（redirect_uri 回调 + state）；
+   凭据不进 URL；未支持平台 400；旧 GET 形态 405；
 2. callback：校验 state → 换 token → 更新店铺凭据 → 302 回前端；
 3. state 一次性（重复使用 400）、错误 state 400、无 state 400。
 
@@ -65,14 +66,13 @@ def _extract_code(location_or_body: str) -> str:
 
 
 class TestOAuthAuthorize:
-    def test_taobao_authorize_302_with_state(self, client, storage, secret_store):
-        resp = client.get(
+    def test_taobao_authorize_returnsUrlWithState(self, client, storage, secret_store):
+        resp = client.post(
             "/stores/oauth/authorize",
-            params={"platform": "taobao", "app_key": _AK, "app_secret": _SK, "store_name": "淘宝店"},
-            follow_redirects=False,
+            json={"platform": "taobao", "app_key": _AK, "app_secret": _SK, "store_name": "淘宝店"},
         )
-        assert resp.status_code == 302
-        location = resp.headers["location"]
+        assert resp.status_code == 200
+        location = resp.json()["authorize_url"]
         assert "oauth.taobao.com/authorize" in location
         assert "redirect_uri=http%3A%2F%2Ftestserver%2Fapi%2Fv1%2Fneurflow%2Fstores%2Foauth%2Fcallback" in location
         state = _extract_state(location)
@@ -86,34 +86,43 @@ class TestOAuthAuthorize:
         # state 值进入密钥库（防 CSRF）
         keys = [k for k in secret_store.list_keys() if k.startswith("OAUTH_STATE_")]
         assert state in [k.split("OAUTH_STATE_", 1)[1] for k in keys]
+        # 凭据不得出现在返回的授权 URL 里
+        assert _SK not in location
 
     def test_verified_xhs_authorize_url(self, client):
-        resp = client.get(
+        resp = client.post(
             "/stores/oauth/authorize",
-            params={"platform": "xiaohongshu", "app_key": _AK, "app_secret": _SK, "store_name": "小红书店"},
-            follow_redirects=False,
+            json={"platform": "xiaohongshu", "app_key": _AK, "app_secret": _SK, "store_name": "小红书店"},
         )
-        assert resp.status_code == 302
-        assert "ark.xiaohongshu.com/ark/authorization" in resp.headers["location"]
-        assert "appId=" + _AK in resp.headers["location"]
+        assert resp.status_code == 200
+        location = resp.json()["authorize_url"]
+        assert "ark.xiaohongshu.com/ark/authorization" in location
+        assert "appId=" + _AK in location
 
     def test_amazon_unsupported_400(self, client):
-        resp = client.get(
+        resp = client.post(
             "/stores/oauth/authorize",
-            params={"platform": "amazon", "app_key": _AK, "app_secret": _SK, "store_name": "北美店"},
+            json={"platform": "amazon", "app_key": _AK, "app_secret": _SK, "store_name": "北美店"},
         )
         assert resp.status_code == 400
+
+    def test_old_get_shape_is_gone(self, client):
+        """凭据进 query 的旧形态必须退役：GET 同路径返回 405，而不是静默继续收 secret。"""
+        resp = client.get(
+            "/stores/oauth/authorize",
+            params={"platform": "taobao", "app_key": _AK, "app_secret": _SK},
+        )
+        assert resp.status_code == 405
 
 
 class TestOAuthCallback:
     def _authorize(self, client, platform="taobao"):
-        resp = client.get(
+        resp = client.post(
             "/stores/oauth/authorize",
-            params={"platform": platform, "app_key": _AK, "app_secret": _SK, "store_name": f"{platform}店"},
-            follow_redirects=False,
+            json={"platform": platform, "app_key": _AK, "app_secret": _SK, "store_name": f"{platform}店"},
         )
-        assert resp.status_code == 302
-        return _extract_state(resp.headers["location"])
+        assert resp.status_code == 200
+        return _extract_state(resp.json()["authorize_url"])
 
     def test_callback_exchanges_code_and_updates_store(self, client, secret_store):
         state = self._authorize(client, "taobao")
