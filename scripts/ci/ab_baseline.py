@@ -142,17 +142,13 @@ def _git(cwd: Path, *args):
                           text=True, encoding="utf-8", errors="replace")
 
 
-def _reconfigureStdout():
-    """本脚本的读数里带中文与箭头，Windows 默认 stdout 是 cp936——不打这一行就会
-    在一句 `print` 上抛 UnicodeEncodeError、退出码 1，于是"红"指向脚本自己而不是被测行为
-    （本仓 manual 档早就为同一件事钉过这一行，这里同口径，不另造写法）。"""
-    for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding="utf-8", errors="replace")
-
-
 def main(argv=None) -> int:
-    _reconfigureStdout()
+    # 读数里带中文与箭头：cp936 控制台上不钉这一行，会在一句 print 上抛 UnicodeEncodeError、
+    # 退出码 1，于是"红"指向脚本自己而不是被测行为。写法与仓内多数档同形（不另造助手形）。
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="宽域 A/B（仓外只读 worktree 基线）")
     parser.add_argument("-k", "--ref", default="HEAD")
     parser.add_argument("-n", "--reruns", type=int, default=3)
