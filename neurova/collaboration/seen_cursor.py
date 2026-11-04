@@ -419,6 +419,34 @@ class SeenCursorManager:
         content = ",".join(sorted_ops)
         return hashlib.sha256(content.encode()).hexdigest()
 
+    def stats(self) -> Dict[str, Any]:
+        """进程内游标读数（agents / cursors / 已记录操作数 / 最新游标数）。"""
+        with self._lock:
+            return {
+                "agents": len(self._cursors),
+                "cursors": sum(len(cursors) for cursors in self._cursors.values()),
+                "seen_operations": sum(
+                    len(cursor.op_hashes)
+                    for cursors in self._cursors.values()
+                    for cursor in cursors.values()
+                ),
+                "latest_cursors": len(self._latest_cursors),
+            }
+
+    def reset(self) -> None:
+        """清空内存与落盘游标（运维 reset 端点用；单例重置单靠内存清不干净）。"""
+        with self._lock:
+            self._cursors.clear()
+            self._agent_cursors.clear()
+            self._latest_cursors.clear()
+            for path in list(self._iter_cursor_files()):
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:  # noqa: BLE001 - 单个文件删不掉不阻断其余清理
+                    logger.warning("清理 seen-cursor 文件失败 %s: %s", path, exc)
+
     def cleanup_old_cursors(self, keep_count: int = 100) -> int:
         """
         清理旧的 cursors
