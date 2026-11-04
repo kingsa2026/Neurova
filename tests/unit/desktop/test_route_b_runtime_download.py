@@ -290,6 +290,58 @@ class TestPythonArchiveExtraction:
         assert not re.search(r'let _ = Command::new\("tar"\)', body), "tar 的调用结果被 let _ = 丢弃"
 
 
+class TestRuntimeArchiveIntegrity:
+    """P1-6（审计 2026-11-04）：运行时归档必须带摘要并在解压前校验。
+
+    缺陷：download_python_runtime / download_node_runtime 下载完直接 tar/Expand-Archive
+    落地；候选源含 npmmirror、阿里云两个第三方镜像。镜像投毒或上游 tag 被篡改
+    ⇒ 下载被替换的 Python/Node ⇒ 后端以其身份执行任意代码。
+    """
+
+    @pytest.mark.parametrize("component", ["python", "node"])
+    def test_manifest_declares_real_sha256(self, component):
+        spec = (_manifest().get("runtime") or {}).get(component) or {}
+        digest = str(spec.get("sha256") or "")
+        assert re.fullmatch(r"[0-9a-f]{64}", digest), (
+            f"runtime.{component}.sha256 缺失或不是小写 64 位十六进制: {digest!r}"
+        )
+        assert digest != "0" * 64, "占位摘要不能当真摘要用"
+
+    def test_fallback_verifies_every_candidate_before_accepting(self):
+        m = re.search(r"fn download_with_fallback\(.*?\n\}", _SRC, re.S)
+        assert m, "lib.rs 找不到 download_with_fallback"
+        body = m.group(0)
+        assert "verify_sha256" in body, (
+            "download_with_fallback 未校验摘要——候选源只要回 200 就被接受"
+        )
+        assert body.index("verify_sha256") < body.index("return Ok(())"), (
+            "摘要校验必须在接受候选之前"
+        )
+
+    def test_hash_helper_uses_sha2_over_the_whole_file(self):
+        m = re.search(r"fn sha256_file\(.*?\n\}", _SRC, re.S)
+        assert m, "lib.rs 找不到 sha256_file"
+        body = m.group(0)
+        assert "Sha256" in body and "update" in body, (
+            "摘要必须对整份文件分块 update，不许只算首块/长度"
+        )
+
+    @pytest.mark.parametrize("fn", ["download_python_runtime", "download_node_runtime"])
+    def test_runtime_download_passes_hash_and_verifies_before_extract(self, fn):
+        m = re.search(rf"fn {fn}\(.*?\n\}}", _SRC, re.S)
+        assert m, f"lib.rs 找不到 {fn}"
+        body = m.group(0)
+        assert ".sha256" in body, f"{fn} 未把清单摘要传给下载链"
+        extract_markers = [
+            pos for pos in (body.find('Command::new("tar")'), body.find("Expand-Archive"))
+            if pos >= 0
+        ]
+        assert extract_markers, f"{fn} 未找到解压调用，判据失效"
+        assert body.index(".sha256") < min(extract_markers), (
+            f"{fn} 的摘要校验落在解压之后（此时已被执行/落地）"
+        )
+
+
 class TestDependencySupplyIsShipped:
     """首启 pip 装依赖的前提：清单文件得真的在包里，且它只声明运行时所需。
 

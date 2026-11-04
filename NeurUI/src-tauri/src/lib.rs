@@ -93,6 +93,9 @@ struct RuntimeSources {
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct RuntimeSpec {
     version: String,
+    /// 归档的 SHA256（小写十六进制）。下载链在每个候选被接受前逐份校验，
+    /// 镜像投毒/上游 tag 被替换时不会进入解压步骤（审计 2026-11-04 P1-6）。
+    sha256: String,
     urls: Vec<String>,
 }
 
@@ -269,7 +272,43 @@ fn relocate_payload(
         .map_err(|e| format!("落地 {} → {} 失败: {e}", payload.display(), dst.display()))
 }
 
-// ---- 运行时下载（ureq 同步下载 + 系统工具解压）----
+// ---- 运行时下载（ureq 同步下载 + 校验摘要 + 系统工具解压）----
+
+/// 整份文件的 SHA256（小写十六进制）。
+fn sha256_file(path: &std::path::Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| format!("打开待校验文件 {} 失败: {e}", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file
+            .read(&mut buf)
+            .map_err(|e| format!("读取待校验文件 {} 失败: {e}", path.display()))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let digest = hasher.finalize();
+    Ok(digest.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// 摘要不符必须诚实报出期望值与实际值（不进解压、不静默重试同一坏文件）。
+fn verify_sha256(path: &std::path::Path, expected: &str) -> Result<(), String> {
+    let actual = sha256_file(path)?;
+    if !actual.eq_ignore_ascii_case(expected.trim()) {
+        return Err(format!(
+            "SHA256 不匹配（{}）：期望 {}，实际 {}",
+            path.display(),
+            expected.trim(),
+            actual
+        ));
+    }
+    Ok(())
+}
 
 fn download_file(
     url: &str,
@@ -298,16 +337,20 @@ fn download_file(
     Ok(())
 }
 
-/// 按候选顺序逐个尝试下载，全败才报错，且错误里点名试过的每一个源。
-/// 只说「下载失败」而不说换过源，排查会被引向本机网络而不是某个源的 404。
+/// 按候选顺序逐个尝试下载，**每个候选先校验摘要再接受**；全败才报错，
+/// 且错误里点名试过的每一个源。只说「下载失败」而不说换过源，排查会被引向
+/// 本机网络而不是某个源的 404 / 被篡改。
 fn download_with_fallback(
     urls: &[String],
     dest: &std::path::Path,
+    expected_sha256: &str,
     mut on_progress: impl FnMut(u8),
 ) -> Result<(), String> {
     let mut failures: Vec<String> = Vec::new();
     for url in urls {
-        match download_file(url, dest, &mut on_progress) {
+        match download_file(url, dest, &mut on_progress)
+            .and_then(|()| verify_sha256(dest, expected_sha256))
+        {
             Ok(()) => return Ok(()),
             Err(e) => {
                 log::warn!("候选源失败 {url}: {e}");
@@ -319,9 +362,12 @@ fn download_with_fallback(
 }
 
 fn download_python_runtime(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Result<(), String> {
-    // 候选源来自 models/MANIFEST.json 的 runtime.python.urls：镜像在前、官方兜底，
-    // 版本与 URL 同源（守卫 tests/unit/desktop/test_route_b_runtime_download.py）。
-    let urls = read_model_manifest(&layout.root)?.runtime.python.urls;
+    // 候选源与归档摘要都来自 models/MANIFEST.json 的 runtime.python：
+    // 镜像在前、官方兜底，任一候选先过 SHA256 才允许进入解压
+    //（守卫 tests/unit/desktop/test_route_b_runtime_download.py）。
+    let spec = read_model_manifest(&layout.root)?.runtime.python;
+    let urls = spec.urls;
+    let expected_sha256 = spec.sha256;
     let dest = layout.root.join("runtime/_python.tar.gz");
     let extract_dir = layout.root.join("runtime/_python_extract");
 
@@ -333,7 +379,7 @@ fn download_python_runtime(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Re
     });
     let _ = app.emit("runtime-status", "python:downloading");
 
-    download_with_fallback(&urls, &dest, |p| {
+    download_with_fallback(&urls, &dest, &expected_sha256, |p| {
         let _ = write_download_status(&layout.root, &DownloadStatus {
             phase: "python".into(),
             progress: p,
@@ -398,7 +444,9 @@ fn download_python_runtime(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Re
 }
 
 fn download_node_runtime(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Result<(), String> {
-    let urls = read_model_manifest(&layout.root)?.runtime.node.urls;
+    let spec = read_model_manifest(&layout.root)?.runtime.node;
+    let urls = spec.urls;
+    let expected_sha256 = spec.sha256;
     let dest = layout.root.join("runtime/_node.zip");
     let extract_dir = layout.root.join("runtime/_node_extract");
 
@@ -410,7 +458,7 @@ fn download_node_runtime(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Resu
     });
     let _ = app.emit("runtime-status", "node:downloading");
 
-    download_with_fallback(&urls, &dest, |p| {
+    download_with_fallback(&urls, &dest, &expected_sha256, |p| {
         let _ = write_download_status(&layout.root, &DownloadStatus {
             phase: "node".into(),
             progress: p,
@@ -1167,11 +1215,29 @@ mod runtime_extract_tests {
             "http://127.0.0.1:9/first.tar.gz".to_string(),
             "http://127.0.0.1:8/second.tar.gz".to_string(),
         ];
-        let err = download_with_fallback(&urls, &case.join("payload"), |_| {}).unwrap_err();
+        let err = download_with_fallback(&urls, &case.join("payload"), &"0".repeat(64), |_| {}).unwrap_err();
         let _ = std::fs::remove_dir_all(&case);
 
         assert!(err.contains("127.0.0.1:9") && err.contains("127.0.0.1:8"), "未点名两个源: {err}");
         assert!(err.starts_with("2 个候选源全部失败"), "计数不对: {err}");
+    }
+
+    /// 摘要校验（P1-6）：已知向量通过；不符时错误必须同时点名期望值与实际值，
+    /// 不许只回「校验失败」让排查自己重算。
+    #[test]
+    fn sha256_matches_known_vector_and_names_both_sides_on_mismatch() {
+        let case = temp_case("sha256");
+        let payload = case.join("payload.bin");
+        std::fs::write(&payload, b"abc").unwrap();
+
+        let expected = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        verify_sha256(&payload, expected).expect("已知 SHA256 向量应通过");
+
+        let wrong = "0".repeat(64);
+        let err = verify_sha256(&payload, &wrong).unwrap_err();
+        assert!(err.contains(expected) && err.contains(&wrong), "未点名两侧摘要: {err}");
+
+        let _ = std::fs::remove_dir_all(&case);
     }
 
     /// 后端进程已经退出时，就绪轮询必须立刻返回 false。真机取证：下载来的裸

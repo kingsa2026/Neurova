@@ -3,6 +3,7 @@
   "runtime": {
     "python": {
       "version": "3.12.14",
+      "sha256": "e90c1b6419da3bd812dd73bb3de40287a21abf153438147639ec5e20375ea93f",
       "urls": [
         "https://registry.npmmirror.com/-/binary/python-build-standalone/20260901/cpython-3.12.14+20260901-x86_64-pc-windows-msvc-install_only.tar.gz",
         "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14+20260901-x86_64-pc-windows-msvc-install_only.tar.gz"
@@ -10,6 +11,7 @@
     },
     "node": {
       "version": "24.16.0",
+      "sha256": "edaca9bd58ec8e92037dac4e877d52f6b8f430b81c18b57e264b4e2fb111cd56",
       "urls": [
         "https://npmmirror.com/mirrors/node/v24.16.0/node-v24.16.0-win-x64.zip",
         "https://mirrors.aliyun.com/nodejs-release/v24.16.0/node-v24.16.0-win-x64.zip",
