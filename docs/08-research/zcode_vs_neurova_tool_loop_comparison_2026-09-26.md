@@ -486,7 +486,7 @@ sed -n '43,219p' zcode-ref/apps/zcode-cli/packages/core/src/runtime/methods/turn
 sed -n '85,205p' zcode-ref/apps/zcode-cli/packages/core/src/tool/scheduler.ts
 sed -n '157,237p' zcode-ref/apps/zcode-cli/packages/core/src/runtime/methods/turn-stop.ts
 
-# —— Neurova 侧缺口逐条复验（对准 c55e1f37）——
+# —— Neurova 侧缺口逐条复验（对准 94e16d502）——
 grep -n "use_parallel\|is_concurrency_safe" neurova/agent/loops/base.py       # G3
 # G1 轮内重入是否归零（2026-10-01 修正此条，见 §9 #10：旧式 `_predict_stream(request_params)` 匹配不到带 `state` 实参的真行，恒得 0，即"递归仍在也返回 0"，不能作证据）
 grep -nE "self\._predict_(stream|normal)\(" neurova/agent/loops/openai_loop.py   # → 实测 1 命中 `:500`，系入口一次性分派（其上注释："此处不再重入整条循环"），非轮内重入

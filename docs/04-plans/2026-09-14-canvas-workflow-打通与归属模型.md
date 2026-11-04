@@ -42,7 +42,7 @@
 ### 2.2 推荐模型（单安全属主 + 双可空归属列 + 来源列）
 
 ```
-user_id    : str   必填，安全属主（判定/迁移回填 'default'，沿用 6238766c 语义）
+user_id    : str   必填，安全属主（判定/迁移回填 'default'，沿用 8f33c3710 语义）
 project_id : str?  可空，协作归属上下文（非空=项目工作流，成员共享）
 agent_id   : str?  可空，agent 资产池归属（决定运行时可引用集）
 origin     : str   来源：manual | nl_chat | template | comfyui | evolution
@@ -61,7 +61,7 @@ public     : bool  沿用现状：跨用户全局可读（已发布）
 
 - 命名建议：用户口中的"公共工作流"改叫**个人工作流**，避免与 `public` 标志（全局公共）撞名。
 - 对话内 agent 生成时**上下文继承**：会话带项目 → 同时写 `project_id + agent_id, origin=nl_chat`，条目同时出现在项目视图与 agent 视图；无项目 → `agent_id` only。这就是不做互斥 type 列的收益——无需仲裁规则。
-- 判定下沉 storage 单点（`get_canvas/save_workflow` 的 `requester_id/is_admin` 模式），deny 与不存在同构 404 防枚举，18 端点挂载清单直接复用 6238766c 的先例；非 HTTP 入口（cron/webhook/chat 桥/`WorkflowTaskExecutor`）接属主方式同样复用。
+- 判定下沉 storage 单点（`get_canvas/save_workflow` 的 `requester_id/is_admin` 模式），deny 与不存在同构 404 防枚举，18 端点挂载清单直接复用 8f33c3710 的先例；非 HTTP 入口（cron/webhook/chat 桥/`WorkflowTaskExecutor`）接属主方式同样复用。
 
 ---
 

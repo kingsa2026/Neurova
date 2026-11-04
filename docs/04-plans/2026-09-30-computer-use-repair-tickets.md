@@ -1066,7 +1066,7 @@ tests/unit/core/test_subprocess_encoding_discipline.py → sitesWithoutEncoding 
 ### 其余各簇的定性（都带取证方式，不是"应该不是我的"）
 
 - **osv 加固守卫 8 例**：最小窗口原地对照——把 `scripts/ci/osv_audit.py` 退回我改它之前
-  （`f899df20^`）的内容跑同一条命令，**两侧同为 8 failed / 63 passed**，失败集合不变；
+  （`b3d075529^`）的内容跑同一条命令，**两侧同为 8 failed / 63 passed**，失败集合不变；
   还原后 sha256 与 `cmp` 双校验一致。失败点指向扫描器二进制路径（`E:\bin\true` 非可执行），
   与本轮两行 bootstrap 无关。
 - **api 清单守卫 5 例**：机器区与生成器不一致——"后端挂载前缀"文档里是 **0 条**、生成器给 **90 条**，
@@ -1088,7 +1088,7 @@ tests/unit/core/test_subprocess_encoding_discipline.py → sitesWithoutEncoding 
 - **块 1 的 15 例里，13 例确实是我的**（这条推翻本节初稿的归因）：初稿写"块 1 内我碰过的文件为
   0 个"，那是**拿测试文件名去比对**——而我改的 `scripts/ci/*.py` 是被这些测试当**被测对象**
   调用的，不在测试文件清单里，比对法漏了它。让 runner 落 raw 输出、`--timeout=300` 重跑拿到
-  完整摘要后，再按 A/B（三个脚本退回 `f899df20^` 内容、跑同一条命令、还原 sha256+cmp 双校验）
+  完整摘要后，再按 A/B（三个脚本退回 `b3d075529^` 内容、跑同一条命令、还原 sha256+cmp 双校验）
   定死：现值 15 failed vs 旧值 2 failed，13 例全在 `test_deploy_config_guard.py`。
   根因与修法见 §15 末（模块级 reconfigure 撞上"脚本被进程内加载" + 父进程读子进程不带编码）。
   修完：`test_deploy_config_guard` 全绿；perf / experience 各留 1 例，与旧值同形 ⇒ 预存。

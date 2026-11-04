@@ -17,6 +17,7 @@
 import contextlib
 import importlib
 import io
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -197,3 +198,90 @@ def test_nonCommitHexTokensAreNotTreatedAsReferences(tmp_path):
 
     assert tokens == [], "非 commit 形态的十六进制串被当成了引用：%s" % (tokens,)
     assert stale == []
+
+
+def test_bareCommitReferenceIsFlaggedWithoutBackticks(tmp_path, danglingCommit):
+    """可达性判据不许依赖 markdown 语法——裸写的号同样是引用。
+
+    实测成因（本批红灯咬的现场）：11-04 11:03 那笔「台账号面随批回写」把整枚 `` `旧号` ``
+    连反引号一起换成裸新号（diff 现场：``-其中 `7835c367` `` ↔ ``+其中 7835c367``），
+    识别数从该笔之前的现算 **1150 枚**（台账 882 ＋ docs 268）塌到 **5 枚**。当天
+    `test_auditLedgerNumbering`＋本格旧形态＋`test_auditLedgerReachabilitySingleProbe`
+    合跑 **31 passed**——判据一行没坏，是判据的面被一次格式化改动掏空了。
+    """
+    report = tmp_path / "bareRefProbe.md"
+    reachable = _git("rev-parse", "HEAD").strip()[:8]
+    report.write_text("裸写可达 %s、裸写失效 %s、反引号失效 `%s`\n"
+                      % (reachable, danglingCommit, danglingCommit), encoding="utf-8")
+
+    tokens, stale = ledger.scanReport(report, ledger.headIndex())
+
+    assert reachable in tokens and danglingCommit in tokens, (
+        "裸写的 commit 号没被认成引用——认得出反引号才算面，改个写法就整段空转：%s" % (tokens,))
+    assert [s[0] for s in stale] == [danglingCommit], (
+        "同一枚悬空号裸写时不报、包进反引号才报（或两种写法各报一遍，去重没做）：%s" % (stale,))
+
+
+#: 识别数下限，**只升不降**；下调只能在提交正文里说清「面真的变小了」才许动。
+#: 基线现算（本批）：全扫描面候选 1633 枚、其中确为 commit 1297 枚、不可达 140 枚。
+#: 取 1000 而不是 1297：并发的文档增删会小幅摆动识别数，而这道尺要拦的是
+#: 「一次格式化改动把面掏空」（1150 → 5 那种量级），不是个位数抖动。
+MIN_RECOGNIZED_REFS = 1000
+
+
+@pytest.mark.timeout(LEDGER_SCAN_WALL_S)
+def test_recognizedReferenceSurfaceDoesNotCollapse(realScan):
+    """「认了多少枚号」本身要有尺——否则判据绿不绿取决于别人怎么写 markdown。
+
+    反向前提自证：本格的读数取自扫描器自己的出口（逐档 `引用 N 个号`），不是另起一把
+    正则复算；扫描器若把提取口径改窄到只剩反引号，这里当场红，而 `hasNoUnreachableReference`
+    那条会照样绿——那正是 11:03 那笔过去时没人拦住的形状。
+    """
+    rc, out = realScan
+    recognized = sum(int(n) for n in re.findall(r"引用\s+(\d+)\s+个号", out))
+    assert recognized >= MIN_RECOGNIZED_REFS, (
+        "扫描面只认出 %d 枚 commit 引用（下限 %d）：提取口径又和某一种 markdown 语法绑上了。"
+        "回到只认反引号那一形，读数是 5 枚" % (recognized, MIN_RECOGNIZED_REFS))
+
+
+@pytest.mark.timeout(LEDGER_SCAN_WALL_S)
+def test_signedExceptionsReleaseOnlyWhatTheyName(tmp_path, monkeypatch, danglingCommit):
+    """例外清单两向都可证伪：署过名的不可达号放行；名单与现场不符即红。
+
+    为什么需要清单而不是「把号从文档里删掉」：那 11 枚里 9 枚在**任何 ref 上都不存在**
+    （并发重写整段撤账，对象还在 .git 只是不挂分支），1 枚是合并提交（同标题 6 枚、
+    diffstat 各异，无可唯一对号的替代），1 枚挂在非主线的 ref 上。它们是真发生过的笔，
+    删掉即抹掉证据；留着又必须让机器知道「这是已判定过的，不是漏网」。
+    """
+    (tmp_path / "audit-reports").mkdir()
+    (tmp_path / "scripts" / "ci").mkdir(parents=True)
+    report = tmp_path / "audit-reports" / "probe.md"
+    reachable = _git("rev-parse", "HEAD").strip()[:8]
+    exceptions = tmp_path / "scripts" / "ci" / "audit_ledger_unreachable_refs.txt"
+
+    def writeReport(refs):
+        report.write_text("\n".join(refs) + "\n", encoding="utf-8")
+
+    def run():
+        rc, out = _runMain([])
+        return rc, out
+
+    # ① 已署名的不可达号 ⇒ 放行
+    writeReport([danglingCommit])
+    exceptions.write_text("# 注释与空行不算条目\n%s  本格自证用\n" % danglingCommit,
+                          encoding="utf-8")
+    monkeypatch.setattr(ledger, "PROJECT_ROOT", tmp_path)
+    rc, out = run()
+    assert rc == 0, "已署名的不可达号仍让判定变红（清单没接进判据）：%s" % out
+
+    # ② 同一枚号从清单里摘掉 ⇒ 必须红（否则清单形同虚设，任何号写进去就静音）
+    exceptions.write_text("# 空清单\n", encoding="utf-8")
+    rc, out = run()
+    assert rc == 1, "不可达号未署名仍然绿——例外清单成了一键静音：%s" % out
+
+    # ③ 清单里留了一枚**已经可达**的号 ⇒ 红（清单只能随现场一起退役）
+    writeReport([reachable])
+    exceptions.write_text("%s  早先署名、现在这笔已在主线\n" % reachable, encoding="utf-8")
+    rc, out = run()
+    assert rc == 1, "清单里过期的署名行不会被点名——下次真有号失联就没人发现：%s" % out
+

@@ -2,10 +2,13 @@
 # -*- coding: utf-8 -*-
 """审计台账 commit 号可达性扫描器（判据唯一出处，守卫与人共用）。
 
-为什么要有这个扫描器：`audit-reports/*.md` 与 `docs/**/*.md` 都以 `` `xxxxxxxx` `` 形式
-引用 commit 号，而并发会话的 rebase / merge 会**重写历史**——号对应的对象仍留在 `.git` 里，
+为什么要有这个扫描器：`audit-reports/*.md` 与 `docs/**/*.md` 都以 commit 号（裸写或 `` `xxxxxxxx` ``
+两种写法同等）引用提交，而并发会话的 rebase / merge 会**重写历史**——号对应的对象仍留在 `.git` 里，
 于是 `git cat-file -e` 照样成功，但那个号已经不在任何分支历史上了。只查"对象存在"
 证明不了"号还在"，台账会长期指向不在历史里的提交，而读的人无从发现。
+
+认号的口径**不绑 markdown 语法**：要求反引号等于把判据的生效与否交给「别人怎么写」——
+实测一次连反引号一起替换的批量回写，就让识别数从 1150 枚掉到 5 枚而全档照绿。
 
 可达性判据：`git merge-base --is-ancestor <h> HEAD`。
 替代号判据：同标题 **且** `git show --numstat` 逐行一致，且唯一——只凭标题相同就替换
@@ -40,8 +43,15 @@ from typing import List
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 #: 扫描面唯一出处（相对仓根的目录，均递归）。
 SCAN_DIRS = ("audit-reports", "docs")
-HASH_RE = re.compile(r"`([0-9a-f]{8,40})`")
+#: 引用形态：**不要求反引号**。裸写与 `` `xxxxxxxx` `` 两种写法同等对待——可达性判据一旦绑在
+#: markdown 语法上，任何人改掉引用写法就能让整台守卫静默空转。实测现场：11-04 11:03 那笔
+#: 「台账号面随批回写」把整枚 `` `旧号` `` 连反引号一起替换成裸新号，识别数从该笔之前的
+#: 现算 1150 枚（台账 882 ＋ docs 268）塌到 5 枚，而当天三档在册闸 31 passed。
+#: 界只禁十六进制邻接（长号的一段不算独立引用），不禁反引号本身。
+REF_RE = re.compile(r"(?<![0-9a-f])([0-9a-f]{8,40})(?![0-9a-f])")
 HEX_ONLY = re.compile(r"^[0-9a-f]{8,40}$")
+#: 已判定过的不可达号清单——例外只在这一份里署名，不在判据代码里另开一份（教义第 6 条）。
+EXCEPTIONS_REL = ("scripts", "ci", "audit_ledger_unreachable_refs.txt")
 
 _numstatCache: dict = {}
 _objectTypeCache: dict = {}
@@ -210,11 +220,35 @@ def displayName(path: Path) -> str:
     return path.relative_to(PROJECT_ROOT).as_posix()
 
 
-def scanReport(path: Path, index: list):
-    """返回 (该报告引用的 commit 号列表, [(失效号, 替代号)])。"""
+def exceptionsPath() -> Path:
+    """例外清单路径**调用期**从仓根派生——与 `scanDirs()` 同一个道理：挂假仓根得真生效。"""
+    return PROJECT_ROOT.joinpath(*EXCEPTIONS_REL)
+
+
+def signedExceptions() -> dict:
+    """{短号: 理由}。注释行与空行不算条目；清单不存在即空例外（不放行任何号）。"""
+    path = exceptionsPath()
+    if not path.is_file():
+        return {}
+    signed = {}
+    for line in io.open(path, encoding="utf-8", errors="replace"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        token, _, reason = line.partition(" ")
+        signed[token.strip()] = reason.strip()
+    return signed
+
+
+def scanReport(path: Path, index: list, signed=frozenset()):
+    """返回 (该报告引用的 commit 号列表, [(失效号, 替代号)])。
+
+    `signed` 里的号仍算**引用**（识别数不许因例外而虚低），但不再逐枚去凑替代号——
+    那件事已经人工做过一次并署名了，机器重复付钱没有意义。
+    """
     text = io.open(path, encoding="utf-8", errors="replace").read()
     candidates, seen = [], set()
-    for match in HASH_RE.finditer(text):
+    for match in REF_RE.finditer(text):
         if not HEX_ONLY.match(match.group(1)):
             continue
         short = match.group(1)[:8]
@@ -224,7 +258,8 @@ def scanReport(path: Path, index: list):
         candidates.append(short)
     batchProbe(candidates)          # 一次进程问完整批；逐号 fork 是这场扫描的成本主体
     tokens = [short for short in candidates if isCommit(short)]
-    stale = [(t, findReplacement(t, index)) for t in tokens if not isReachable(t)]
+    stale = [(t, findReplacement(t, index)) for t in tokens
+             if not isReachable(t) and t not in signed]
     return tokens, stale
 
 
@@ -241,10 +276,12 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     index = headIndex()
+    signed = signedExceptions()
+    batchProbe(sorted(signed))
     totalRefs, staleRows = 0, []
     for base in scanDirs():
         for report in markdownFiles(base):
-            tokens, stale = scanReport(report, index)
+            tokens, stale = scanReport(report, index, signed)
             totalRefs += len(tokens)
             for bad, repl in stale:
                 staleRows.append((displayName(report), bad, repl))
@@ -255,16 +292,24 @@ def main(argv=None) -> int:
                     print("    失效 %s%s" % (bad, "  → 可回写为 " + repl if repl
                                              else "  （无可安全回写的替代号）"))
 
+    # 例外清单的第二个方向：署过名不等于永远成立。号若已回到主线（或被 gc 到连对象都不剩，
+    # 不再是一枚 commit），这一行就是过期署名——留着它，下次真有号失联也没人能看出来。
+    retired = sorted(t for t in signed if not (isCommit(t) and not isReachable(t)))
     if args.porcelain:
         for row in staleRows:
             print("|".join(row))
-    if staleRows:
-        print("失效引用 %d 条 / 共 %d 条引用（扫描面 %s）"
-              % (len(staleRows), totalRefs, " + ".join(SCAN_DIRS)),
+        for token in retired:
+            print("|".join(("<例外清单>", token, "该行已不成立，须删除")))
+    if retired:
+        print("例外清单里有 %d 行已不成立（号已可达或已不是 commit），该行须删除：%s"
+              % (len(retired), " ".join(retired)), file=sys.stderr)
+    if staleRows or retired:
+        print("失效引用 %d 条 / 共 %d 条引用（扫描面 %s，例外清单署名 %d 条）"
+              % (len(staleRows), totalRefs, " + ".join(SCAN_DIRS), len(signed)),
               file=sys.stderr)
         return 1
-    print("commit 号全部可达（共 %d 条引用，扫描面 %s）"
-          % (totalRefs, " + ".join(SCAN_DIRS)))
+    print("commit 号全部可达（共 %d 条引用，扫描面 %s，例外清单署名 %d 条）"
+          % (totalRefs, " + ".join(SCAN_DIRS), len(signed)))
     return 0
 
 
