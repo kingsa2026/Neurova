@@ -227,21 +227,21 @@ async def _oauth_exchange_token(platform: str, app_key: str, app_secret: str, co
     return out
 
 
-@router.get("/stores/oauth/authorize")
+@router.post("/stores/oauth/authorize")
 async def oauth_authorize(
     request: Request,
-    platform: str = Query(...),
-    app_key: str = Query(""),
-    app_secret: str = Query(""),
-    store_name: str = Query(""),
+    data: Dict[str, Any] = Body(...),
     current_user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
-    """构造平台授权 URL 并 302 跳转（Tier 2）；先落 pending 店铺与应用凭据"""
+    """构造平台授权 URL（Tier 2）；凭据走 POST body，不进 URL/访问日志。"""
     from neurova.api.endpoints import neurflow_api as api
 
     manager = api._get_store_manager()
     user_id = str(current_user.get("user_id") or "")
-    platform = str(platform or "").strip().lower()
+    platform = str(data.get("platform") or "").strip().lower()
+    app_key = str(data.get("app_key") or "")
+    app_secret = str(data.get("app_secret") or "")
+    store_name = str(data.get("store_name") or "")
     if platform not in api._OAUTH_SUPPORTED:
         raise HTTPException(status_code=400, detail=f"平台 {platform} 不支持 OAuth 直连（亚马逊为自授权，请走 Tier 1 录入 refresh_token）")
     if not (app_key and app_secret):
@@ -259,7 +259,7 @@ async def oauth_authorize(
         {"platform": platform, "store_id": conn.store_id, "user_id": user_id, "created_at": time.time()},
     )
     url = api._oauth_authorize_url(platform, app_key, api._oauth_callback_uri(request), state)
-    return RedirectResponse(url, status_code=302)
+    return {"authorize_url": url}
 
 
 @router.get("/stores/oauth/callback")

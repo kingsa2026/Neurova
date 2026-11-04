@@ -241,6 +241,12 @@
             />
             <div class="kb-conflict-meta">
               <a-tag data-testid="conflict-axis">{{ t(`conflictAxis.${item.axis}`) }}</a-tag>
+              <template v-if="item.axis === 'entry' && item.time_context">
+                <a-tag data-testid="conflict-newer-side">{{ conflictNewerSideLabel(item.time_context) }}</a-tag>
+                <p class="kb-conflict-basis" data-testid="conflict-time-readout">
+                  {{ conflictTimeReadout(item.time_context) }}
+                </p>
+              </template>
               <template v-if="item.axis === 'fact'">
                 <a-tag data-testid="conflict-kind">{{ enumLabel('conflictKind', item.kind) }}</a-tag>
                 <a-tag :color="item.severity >= 0.7 ? 'red' : 'orange'">
@@ -702,7 +708,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, reactive, watch } from 'vue'
-import { formatEpochSecondDate, formatTimestampText } from '@/utils/displayText'
+import { formatEpochSecondDate, formatEpochSecondText, formatTimestampText, localDayEndIso, localDayStartIso } from '@/utils/displayText'
 import { useI18n } from 'vue-i18n'
 import { useEnumLabel } from '@/composables/useEnumLabel'
 import { message, Modal } from 'ant-design-vue'
@@ -743,7 +749,7 @@ import {
   resolveResolutionReview,
   runEntityResolution,
 } from '@/api/modules/knowledge'
-import type { KbConfig, KbCollection, KnowledgeNode, KnowledgeScope, KnowledgeConflict, DeletedKnowledge, GraphResolutionReview, KnowledgeChunkRow, IngressTask, IngressSpan } from '@/api/modules/knowledge'
+import type { KbConfig, KbCollection, KnowledgeNode, KnowledgeScope, KnowledgeConflict, ConflictTimeContext, DeletedKnowledge, GraphResolutionReview, KnowledgeChunkRow, IngressTask, IngressSpan } from '@/api/modules/knowledge'
 import { request } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import GlassPanel from '@/components/GlassPanel.vue'
@@ -1337,8 +1343,8 @@ async function fetchKnowledge() {
       const f = metaFilters.value
       const searchFilters: Record<string, any> = {}
       if (f.author.trim()) searchFilters.author = f.author.trim()
-      if (f.modifiedRange?.[0]) searchFilters.source_modified_after = `${f.modifiedRange[0]}T00:00:00`
-      if (f.modifiedRange?.[1]) searchFilters.source_modified_before = `${f.modifiedRange[1]}T23:59:59`
+      if (f.modifiedRange?.[0]) searchFilters.source_modified_after = localDayStartIso(f.modifiedRange[0])
+      if (f.modifiedRange?.[1]) searchFilters.source_modified_before = localDayEndIso(f.modifiedRange[1])
       if (f.source_type.trim()) searchFilters.source_type = f.source_type.trim()
       if (f.ocr_used !== undefined && f.ocr_used !== null) searchFilters.ocr_used = f.ocr_used
       if (f.page_min !== undefined && f.page_min !== null) searchFilters.page_min = f.page_min
@@ -1544,6 +1550,28 @@ function conflictDescription(item: KnowledgeConflict): string {
     return t('knowledge.conflictSimilarity', { score: (item.similarity * 100).toFixed(0) })
   }
   return t('knowledge.conflictMembers', { members: item.members_summary.join(' ｜ ') })
+}
+
+function conflictNewerSideLabel(ctx: ConflictTimeContext): string {
+  if (ctx.newer_side === 'new') return t('knowledge.conflictNewerNew')
+  if (ctx.newer_side === 'old') return t('knowledge.conflictNewerOld')
+  return t('knowledge.conflictNewerUnknown')
+}
+
+function conflictTimeReadout(ctx: ConflictTimeContext): string {
+  const sourceBasis = ctx.basis === 'source_modified_at'
+  const basis = sourceBasis ? t('knowledge.conflictBasisSource') : t('knowledge.conflictBasisIngested')
+  const oldTime = sourceBasis
+    ? formatTimestampText(ctx.old_source_modified_at)
+    : formatEpochSecondText(ctx.old_ingested_at)
+  const newTime = sourceBasis
+    ? formatTimestampText(ctx.new_source_modified_at)
+    : formatEpochSecondText(ctx.new_ingested_at)
+  return t('knowledge.conflictTimeReadout', {
+    basis,
+    old: oldTime || '—',
+    new: newTime || '—',
+  })
 }
 
 function conflictMemberOptions(item: KnowledgeConflict) {

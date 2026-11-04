@@ -73,8 +73,8 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { uiMessage } from '@/utils/message'
-import config from '@/config'
 import {
+  authorizeStoreOAuth,
   createStore,
   deleteStore,
   listStores,
@@ -182,7 +182,7 @@ function resetForm(): void {
 const OAUTH_SUPPORTED = ['taobao', 'xianyu', 'jd', 'pdd', 'douyin-ecom', 'tiktok', 'ali1688', 'xiaohongshu']
 const oauthSupported = computed(() => OAUTH_SUPPORTED.includes(platform.value))
 
-function handleOAuth(): void {
+async function handleOAuth(): Promise<void> {
   const creds = credentialFields.value.filter(f => f.into === 'credentials')
   const appKey = String(credentialDraft.value[creds.find(f => f.key.includes('key') || f.key === 'client_id')?.key ?? 'app_key'] ?? '')
   const appSecret = String(credentialDraft.value[creds.find(f => f.key.includes('secret') || f.key === 'client_secret')?.key ?? 'app_secret'] ?? '')
@@ -190,13 +190,19 @@ function handleOAuth(): void {
     uiMessage.warning(t('canvas.msgOAuthNeedCreds'))
     return
   }
-  const params = new URLSearchParams({
-    platform: platform.value,
-    app_key: appKey,
-    app_secret: appSecret,
-    store_name: storeName.value || '',
-  })
-  window.open(`${config.apiBaseUrl}/neurflow/stores/oauth/authorize?${params.toString()}`, '_blank')
+  try {
+    // 凭据走 POST body，不回落到 query（旧形态会把 app_secret 写进浏览器历史
+    // 与服务端访问日志）。
+    const authorizeUrl = await authorizeStoreOAuth({
+      platform: platform.value,
+      app_key: appKey,
+      app_secret: appSecret,
+      store_name: storeName.value || '',
+    })
+    window.open(authorizeUrl, '_blank', 'noopener')
+  } catch {
+    uiMessage.error(t('canvas.msgOAuthFailed'))
+  }
 }
 
 async function loadStores(): Promise<void> {
