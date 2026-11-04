@@ -155,23 +155,25 @@ class TestCacheHitRateExport:
 class TestMetricsExposurePolicy:
     """P2-7：三档策略 + fail-closed 边界。"""
 
-    def test_default_is_public(self, monkeypatch):
-        from neurova.api.metrics_access import MODE_PUBLIC, get_metrics_access_mode
+    def test_default_is_local(self, monkeypatch):
+        """审计 2026-11-04 P2-1：默认只信回环，跨机抓取必须显式配置。"""
+        from neurova.api.metrics_access import MODE_LOCAL, get_metrics_access_mode
 
         monkeypatch.delenv("NEUROVA_METRICS_ACCESS", raising=False)
-        assert get_metrics_access_mode() == MODE_PUBLIC
+        assert get_metrics_access_mode() == MODE_LOCAL
 
-    def test_invalid_value_falls_back_public_with_warning(self, monkeypatch, caplog):
-        from neurova.api.metrics_access import MODE_PUBLIC, get_metrics_access_mode
+    def test_invalid_value_falls_back_local_with_warning(self, monkeypatch, caplog):
+        from neurova.api.metrics_access import MODE_LOCAL, get_metrics_access_mode
 
         monkeypatch.setenv("NEUROVA_METRICS_ACCESS", "bogus")
         with caplog.at_level("WARNING"):
-            assert get_metrics_access_mode() == MODE_PUBLIC
+            assert get_metrics_access_mode() == MODE_LOCAL
         assert any("NEUROVA_METRICS_ACCESS" in r.getMessage() for r in caplog.records)
 
-    def test_public_allows_any_source(self):
+    def test_public_allows_any_source(self, monkeypatch):
         from neurova.api.metrics_access import check_metrics_access
 
+        monkeypatch.setenv("NEUROVA_METRICS_ACCESS", "public")
         allowed, _ = check_metrics_access("203.0.113.9", {})
         assert allowed is True
 

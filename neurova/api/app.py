@@ -730,8 +730,9 @@ def _register_metrics_endpoint(app: FastAPI) -> None:
     单一事实源：本端点只负责"抓取时刷新 gauge + 输出 registry"，不得再手工
     拼接 # HELP/# TYPE 文本（历史上残留过一套死代码，制造双事实源错觉）。
 
-    P2-7：暴露策略由 `neurova.api.metrics_access` 决定（public/local/token，
-    默认 public 保持向后兼容）。本端点仍在 global_auth 的公共白名单内 ——
+    P2-7/P2-1：暴露策略由 `neurova.api.metrics_access` 决定（public/local/
+    token，默认 local——只信回环，跨机抓取需显式配置）。本端点仍在
+    global_auth 的公共白名单内 ——
     全局鉴权放行"未登录"，本端点再按抓取策略判来源/令牌，是两层不同的门。
     """
     from neurova.core.metrics import get_metrics as _get_prom_metrics
@@ -787,14 +788,26 @@ def _add_health_routes(app: FastAPI, app_state: AppState) -> None:
         return {"status": "ok", "version": app.version, "timestamp": time.time()}
 
     @app.get("/health/detailed")
-    async def detailed_health():
+    async def detailed_health(request: Request):
         """详细的健康检查（读周期调度维护的缓存）。
 
         修前每请求现场跑全部检查：慢检查会把请求延迟和事件循环一起拖住，而
         `interval` 参数全仓零消费。现在由 lifespan 起的调度按 interval 刷新；
         本端点只读缓存，并用 `cached` 如实标注这一份是不是缓存值。冷启动尚无
         读数时现场跑一次（`cached=false`），避免开局返回 unknown。
+
+        暴露面与 /metrics 同一套三档策略（`NEUROVA_HEALTH_ACCESS`，默认
+        local）：详细报告含路径级读数，不能因为"健康检查"名字就默认匿名开放。
         """
+        from fastapi import HTTPException
+
+        from neurova.api.metrics_access import check_health_access
+
+        clientHost = request.client.host if request.client else None
+        allowed, reason = check_health_access(clientHost, dict(request.headers))
+        if not allowed:
+            logger.warning("拒绝 /health/detailed: %s (client=%s)", reason, clientHost or "?")
+            raise HTTPException(status_code=403, detail="forbidden")
         checker = app_state.health_checker
         if not checker:
             return {"status": "unknown", "message": "Health checker not available",
