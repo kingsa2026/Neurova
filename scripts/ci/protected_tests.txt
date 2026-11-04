@@ -4231,3 +4231,8 @@ tests/unit/skills/test_pathBudgetAdmitsTheDirectoryRoute.py
 # §6-519：内置包的池内缓存先与随包 zip 对表才准当安装源——五格钉"取源层不查 catalog"、
 # "一致时不许重解"、"非内置条目一字不动"，反向各钉自己的失效态。逐文件单跑 5 passed
 tests/unit/skills/test_builtinCacheIsCheckedAgainstItsBundle.py
+# §6-521/§6-523：模型写面必须过真身份、重定向每一跳都过 SSRF 守卫。逐文件单跑 11／5 passed
+tests/unit/api/test_model_write_auth_gate.py
+tests/unit/web_reach/test_http_fetch_redirect_guard.py
+# §6-525：企微入站与文件导入同口径透传源时间（缺失回退入库时刻，不许恒空）。逐文件单跑 2 passed
+tests/unit/knowledge/test_wecomIngestSourceDates.py
