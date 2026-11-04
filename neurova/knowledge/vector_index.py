@@ -21,6 +21,7 @@ from neurova.core import vector_math
 import datetime
 import hashlib
 import json
+import os
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -41,6 +42,19 @@ logger = get_logger(__name__)
 # 生产目录只有 storage_fence 一处定义；向量缓存与条目库同目录，测试同样不许写真文件。
 DEFAULT_STORAGE_DIR = PRODUCTION_STORAGE_DIR
 _SENTINEL_DEFAULT = "__default__"
+
+#: 双向量索引门控（SAG 对比候选 C4，2026-11-05）：默认 off＝旧行为逐位。
+#: on 时记录附加 heading_vector（encode(title)）与 content_vector（encode(content)），
+#: 检索融合分 = max(1.0·cos_heading, 0.95·cos_content)——标题命中的精确实体名
+#: 不被正文长文本稀释；ANN 旁路（融合分与单向量 ANN 空间不相容）。
+ENV_DUAL_VECTOR = "NEUROVA_KB_DUAL_VECTOR"
+_HEADING_WEIGHT = 1.0
+_CONTENT_WEIGHT = 0.95
+
+
+def _dualVectorOn() -> bool:
+    raw = str(os.environ.get(ENV_DUAL_VECTOR) or "").strip().lower()
+    return raw in ("1", "true", "on", "yes")
 
 
 def revisionPathFor(shardPath: Path) -> Path:
@@ -362,11 +376,15 @@ class KnowledgeVectorIndex:
             # （to_compute 为空）会以 `computed` 未定义收场——UnboundLocalError 被下面的
             # `except` 吞成一条 errors，读数看上去是「0 条目」。
             computed = 0
+            dualOn = _dualVectorOn()
             to_compute: List[Tuple[str, Dict[str, Any]]] = []
             for kid, entry in desired.items():
                 fp = _fingerprint(entry)
                 rec = records.get(kid)
-                if rec is None or rec.get("fingerprint") != fp:
+                if rec is None or rec.get("fingerprint") != fp \
+                        or (dualOn and "heading_vector" not in rec):
+                    # C4：开闸态下旧分片（单向量形状、指纹未变）按需补算自愈一次；
+                    # 关闸态不补——旧行为逐位。
                     to_compute.append((kid, entry))
             # 剔除已删除条目（当前可见集合之外的既有记录）
             removed_count = 0
@@ -396,18 +414,49 @@ class KnowledgeVectorIndex:
                     logger.warning("向量索引：embedding 批量计算失败: %s", e)
                     return {"computed": 0, "entry_count": len(records)}
 
-                for (kid, entry), vec in zip(to_compute, vectors):
+                # C4：标题/正文通道独立编码（仅开闸态；标题为空记 None＝该通道缺席）。
+                headingVectors: List[Optional[List[float]]] = []
+                contentVectors: List[Optional[List[float]]] = []
+                if dualOn:
+                    try:
+                        headingTexts = [str(e.get("title", "")) for _k, e in to_compute]
+                        contentTexts = [str(e.get("content", "")) for _k, e in to_compute]
+
+                        def _encodeColumn(texts: List[str]) -> List[Optional[List[float]]]:
+                            if hasattr(engine, "encodeOrNone"):
+                                return [engine.encodeOrNone(t) if t else None for t in texts]
+                            return [engine.encode(t) if t else None for t in texts]
+
+                        headingVectors = _encodeColumn(headingTexts)
+                        contentVectors = _encodeColumn(contentTexts)
+                    except Exception as e:  # noqa: BLE001 - 通道失败退单向量，不挡主路
+                        logger.warning("向量索引：双向量通道计算失败（本批退单向量）: %s", e)
+                        headingVectors, contentVectors = [], []
+
+                for i, ((kid, entry), vec) in enumerate(zip(to_compute, vectors)):
                     if vec is None or vector_math.isZeroVector(vec):
                         # 注入引擎（无 `encodeOrNone`）可能照样交全零：写进索引就永久隐身，
                         # 且指纹未变、下轮不重算。同一个口径，不落记录。
                         continue
                     computed += 1
-                    records[kid] = {
+                    record = {
                         "vector": [float(x) for x in vec],
                         "fingerprint": _fingerprint(entry),
                         "title": str(entry.get("title", "")),
                         "content": str(entry.get("content", ""))[:2000],
                     }
+                    if dualOn and i < len(headingVectors):
+                        hv = headingVectors[i]
+                        record["heading_vector"] = (
+                            [float(x) for x in hv]
+                            if hv is not None and not vector_math.isZeroVector(hv) else None
+                        )
+                        cv = contentVectors[i] if i < len(contentVectors) else None
+                        record["content_vector"] = (
+                            [float(x) for x in cv]
+                            if cv is not None and not vector_math.isZeroVector(cv) else None
+                        )
+                    records[kid] = record
                 self._computed += computed
 
             uid = str((user or {}).get("user_id") or "default")
@@ -477,18 +526,35 @@ class KnowledgeVectorIndex:
         if vector_math.isZeroVector(qv):
             return []
 
-        annHits = self._searchAnn(
-            str((user or {}).get("user_id") or "default"),
-            dict(items),
-            qv,
-            top_k,
-        )
+        annHits: Optional[List[Dict[str, Any]]] = None
+        if not _dualVectorOn():
+            annHits = self._searchAnn(
+                str((user or {}).get("user_id") or "default"),
+                dict(items),
+                qv,
+                top_k,
+            )
         if annHits is not None:
             return annHits
 
+        dualOn = _dualVectorOn()
         scored: List[Tuple[str, float, Dict[str, Any]]] = []
         for kid, rec in items:
-            score = vector_math.cosineSimilarity(qv, rec.get("vector") or [])
+            scoreMain = vector_math.cosineSimilarity(qv, rec.get("vector") or [])
+            score = scoreMain
+            if dualOn:
+                # C4 融合分：max(1.0·cos_heading, 0.95·cos_content)。通道缺席
+                # （旧记录/空标题/全零）如实退让——heading 缺席记 0 分，
+                # content 缺席退 0.95·cos_main（与有通道时的折扣同口径）。
+                headingScore = (
+                    vector_math.cosineSimilarity(qv, rec["heading_vector"])
+                    if rec.get("heading_vector") else 0.0
+                )
+                contentScore = (
+                    vector_math.cosineSimilarity(qv, rec["content_vector"])
+                    if rec.get("content_vector") else scoreMain
+                )
+                score = max(_HEADING_WEIGHT * headingScore, _CONTENT_WEIGHT * contentScore)
             if score > 0.0:
                 scored.append((kid, score, rec))
         scored.sort(key=lambda x: x[1], reverse=True)
