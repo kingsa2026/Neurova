@@ -1207,3 +1207,6 @@ tests/unit/skills/test_pathBudgetAdmitsTheDirectoryRoute.py
 # §6-519：内置包的池内缓存先与随包 zip 对表才准当安装源——五格钉"取源层不查 catalog"、
 # "一致时不许重解"、"非内置条目一字不动"，反向各钉自己的失效态。逐文件单跑 5 passed
 tests/unit/skills/test_builtinCacheIsCheckedAgainstItsBundle.py
+# 拒因必须念得出「哪条规则、包内哪个文件、第几行」：定位口径收成相对技能根一份，
+# 两处出口（安装门拒因、NL 合成注入拦截日志）都经同一个 findingLocator 取定位。
+tests/unit/security/test_refusalTextLocatesTheTriggeringLine.py
