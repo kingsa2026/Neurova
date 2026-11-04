@@ -1210,3 +1210,5 @@ tests/unit/skills/test_builtinCacheIsCheckedAgainstItsBundle.py
 # 拒因必须念得出「哪条规则、包内哪个文件、第几行」：定位口径收成相对技能根一份，
 # 两处出口（安装门拒因、NL 合成注入拦截日志）都经同一个 findingLocator 取定位。
 tests/unit/security/test_refusalTextLocatesTheTriggeringLine.py
+# 市场安装根目录只留一个公开读口：三格钉「跨模块不再直取私有字段／取不到来源要如实抛出／端点两处都经公开口」，两格钉恒等不变量（定义方内部读取数只降不升、缺省取法与单例同目录）。逐文件单跑 5 passed
+tests/unit/skills/test_marketSkillsDirHasOnePublicFace.py

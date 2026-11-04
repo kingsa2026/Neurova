@@ -4242,3 +4242,5 @@ tests/unit/security/test_refusalTextLocatesTheTriggeringLine.py
 # 协作 Outbox 的投递器与排空：结构三格钉「装配面注册唯一落点／排空启停成对／间隔读数写坏不回落成立刻停」，
 # 两格反向各钉自己的失效态（没注册不得报成已投递、真投递必须落到站内通知面）。逐文件单跑 5 passed
 tests/unit/collaboration/test_outboxDeliveredIntoNotificationFace.py
+# 市场安装根目录只留一个公开读口：三格钉「跨模块不再直取私有字段／取不到来源要如实抛出／端点两处都经公开口」，两格钉恒等不变量（定义方内部读取数只降不升、缺省取法与单例同目录）。逐文件单跑 5 passed
+tests/unit/skills/test_marketSkillsDirHasOnePublicFace.py
