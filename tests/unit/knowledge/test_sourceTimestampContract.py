@@ -63,21 +63,21 @@ class TestContractFields:
 
 class TestIngestionFallback:
     def test_resolveSourceDates_prefersMetadata(self):
-        from neurova.api.endpoints.knowledge_ingestion import _resolveSourceDates
+        from neurova.knowledge.document_pipeline import resolveSourceDates  # P1-5 单源迁移
 
-        created, modified = _resolveSourceDates(
+        created, modified = resolveSourceDates(
             {"created_at": "2019-01-01T00:00:00Z", "modified_at": "2025-06-01T00:00:00Z"},
             ingest_time="2026-11-04T00:00:00+00:00")
         assert (created, modified) == ("2019-01-01T00:00:00Z", "2025-06-01T00:00:00Z")
 
     def test_resolveSourceDates_fallsBackToIngestTime(self):
         """网页/无元数据来源：诚实记抓取（入库）时刻为源时间——不编造更早的历史。"""
-        from neurova.api.endpoints.knowledge_ingestion import _resolveSourceDates
+        from neurova.knowledge.document_pipeline import resolveSourceDates  # P1-5 单源迁移
 
-        created, modified = _resolveSourceDates({}, ingest_time="2026-11-04T00:00:00+00:00")
+        created, modified = resolveSourceDates({}, ingest_time="2026-11-04T00:00:00+00:00")
         assert created == modified == "2026-11-04T00:00:00+00:00"
 
     def test_resolveSourceDates_emptyIngestTimeStaysEmpty(self):
-        from neurova.api.endpoints.knowledge_ingestion import _resolveSourceDates
+        from neurova.knowledge.document_pipeline import resolveSourceDates  # P1-5 单源迁移
 
-        assert _resolveSourceDates({}, ingest_time="") == ("", "")
+        assert resolveSourceDates({}, ingest_time="") == ("", "")
