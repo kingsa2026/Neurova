@@ -19,6 +19,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Reques
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_optional_user, get_current_user
+from neurova.api.deps import require_admin  # 分级收口（2026-11-04）：删/改/下载面复用现役角色门（audit.py 同源）
 from neurova.core.lazy_singleton import lazySingleton
 from neurova.core.logger import get_logger
 
@@ -330,7 +331,7 @@ async def list_models_by_capability(
 async def delete_model(
     request: Request,
     model_id: str = Path(...),
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_admin()),
 ):
     """删除模型（从所属服务商的模型列表中移除）"""
     _get_request_id(request)
@@ -381,7 +382,7 @@ async def update_model(
     request: Request,
     model_id: str = Path(...),
     body: UpdateModelRequest = Body(...),
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_admin()),
 ):
     """编辑模型条目(模型 ID / 显示名称),内置/发现的条目同样可编辑。
 
@@ -647,7 +648,7 @@ async def get_download_source(current_user: Optional[Dict[str, Any]] = Depends(g
 @router.post("/download-source")
 async def set_download_source(
     body: DownloadSourceRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_admin()),
 ):
     """写某模型的下载源选择（非法值/未知模型 400）。"""
     from neurova.tts.download_source import DownloadSourceChoice, set as set_choice
@@ -665,7 +666,7 @@ async def set_download_source(
 @router.post("/download")
 async def trigger_download(
     body: DownloadTriggerRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_admin()),
 ):
     """触发模型下载（幂等；重复触发返回同一状态）。"""
     try:

@@ -7,7 +7,8 @@
 - POST /v1/models/download            触发下载（幂等，unknown → 400）
 - GET  /v1/models/download-progress   触发过的模型状态快照
 
-写端点要求登录（get_current_user）；读端点登录可选。
+写端点要求登录；删/改/下载面要求 admin（分级收口 2026-11-04）。
+读端点登录可选。
 """
 import pytest
 from fastapi import FastAPI
@@ -47,9 +48,10 @@ def client(tmp_path, monkeypatch):
 
     app = FastAPI()
     app.include_router(model_api.router, prefix="/v1/models")
-    # POST 端点要求登录：注入 fake 登录用户
+    # POST 端点要求登录；下载面另要求 admin（分级收口 2026-11-04）——
+    # 假身份必须带 role 键（check_role 读的是 role，不是 is_admin）
     app.dependency_overrides[model_api.get_current_user] = lambda: {
-        "id": 1, "username": "tester", "is_admin": True,
+        "id": 1, "username": "tester", "role": "admin", "is_admin": True,
     }
     yield TestClient(app)
     app.dependency_overrides.clear()
