@@ -11847,3 +11847,26 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **P2-2 延后**：web_reach 凭据 keyfile 接 OS 级保护（DPAPI/Keychain），触发条件＝多端同步或凭据面扩大；零改动，本格即登记。
     - **新缺陷（审计收尾现抓，P2-14 同类硬编码路径病）**：仓级 NeurUI/src-tauri/.cargo/config.toml 把 link.exe 钉死在 C 盘标准安装位，VS2022 实装已迁 E 盘 neurova-build-tools——任何 cargo 调用必败且报错与代码无关（"linker not found"）。680e0ea8 去钉：rustc 原生 vswhere 探测可用，钉值态以 --config 覆盖真路径 50.58s Finished（lib.rs P1-6 校验代码可编实证）→ 去钉后零注入干净环境 52.05s Finished。P1-6 编译验证遗留至此闭环。
     - **下一枚空号现查**：本格取 542，后继从 543 起。推送态不在此预填数字。
+543. **KWeaver 对比候选 C1：认知安全门接线——cognitive_security 三件套零消费断点闭环** ✅🟢
+    - **断点（对比报告 N1，docs/08-research/kweaver_vs_neurova_ontology_knowledge_base_comparison_2026-11-05.md）**：PromptInjectionDetector/CognitiveSafetyChecker/MemorySecurityGuard 与组合器 CognitiveSecuritySystem 生产侧零消费，测试护着主链不用（有码未接）；对面 KWeaver README 主张防注入亦无代码——双方空窗，本仓接线即领先。
+    - **修复**：da0548ccd——新模块 security/cognitive_security_gate.py（唯一装配与读数出口，DCL+RLock 单例，off/observe/enforce 三态默认 observe）；chat_pipeline Step 0.5 挂 _check_cognitive_security（enforce 置 blocked，_step_llm_call 早退诚实拒答）；记忆写入咽喉 MemoryManager.remember 单点挂 runMemoryWriteGuard（remember_with_trace 委托到它，全生产方一轮覆盖）；app_settings 新 security 分区。默认观察态＝零行为漂移，enforce 显式开启（误拦不可逆）。
+    - **红绿灯**：12 用例红灯（ModuleNotFoundError 接线面缺失）→ 12/12 绿；安全域+chat 管线域回归 1292 passed/5 skipped 零新增失败。
+    - **live-verify**：真后端 9527 真端点——enforce 注入样本→诚实拒答+双行安全门日志；observe（默认态）同样本放行且真 LLM 应答、读数照记。
+    - **下一枚空号现查**：本格取 543，后继从 544 起。
+544. **C2：trace 落盘出口接单源脱敏 + data_masking 退役（教义第 7 条先比后合）** ✅🟢
+    - **断点（对比报告 N2）**：data_masking.py 生产侧零消费；其 4 条 PII 正则与 sensitive_info 单源规则表同契约重复（第二份定义），结构化脱敏与已接线 privacy_gate 职能重叠；真实缺口在 trace 落盘出口无文本卫生（tool_trace buffer 经 POST_EXECUTE 流向进化证据落点、trace_recorder 落 trajectory 工件）。
+    - **修复**：b6fb05379——键驱动复用 privacy_gate 公共入口 redactSensitiveValueByKey（键模式唯一出处），内容驱动走 sensitive_info.sanitizeSensitive；接线 tool_trace.recordToolTrace 入口（params/error）与 trace_recorder.save_trace（逐字符串值组合脱敏——整串替换实测产出非法 JSON、孤立值内容规则不命中，两坑均实测钉死）；退役 data_masking.py（311 行）及其测试，integration 组合断言改走单源。生产净 −253 行。
+    - **红绿灯**：3 用例红（参数含原文/工件含原文/模块未退役）→ 5/5 绿；integration+recorder 域 36 passed。
+    - **live-verify**：真后端真轮次（POST /api/v1/chat 含 password=SuperSecret99）→ 落盘工件含原文 0 次、打码形态 password=*** 在案、JSON 可解析。
+    - **下一枚空号现查**：本格取 544，后继从 545 起。
+545. **C3 批次 1：带外批准重放后自动拉起续跑轮（缺口收窄裁定＝帧树机器不做）** ✅🟢
+    - **摸底收窄（spec：docs/specs/2026-11-05-审批带外执行后自动续跑轮设计.md）**：审批域三路径实测——预算内进程内等待（approval_relay 唤醒）/超时让出+带外重放/重启后审批单在库可带外批准。真缺口＝带外重放后工具终态只进 _pending_hints 无人续读（用户批准后拿不到任何主动汇报）；dolphin 式帧级快照裁为投机面不做（教义第 1 条）。
+    - **修复**：75a90a7d7——新模块 security/approval_continuation.py（复用 §12.4 build_resume 服务端拉起形态：identity 单通道→agent.chat 原管线）；批准端点带外分支接 startApprovalContinuation；成败读数收敛 _outcomeSuccess 单点；默认关（工单 015 口径），governance_settings.approval_continuation_enabled+env 双拨，治理页 PUT 面同步补字段（test_everyBoolDefaultHasAnUpdateField 咬住）。
+    - **红绿灯**：9 用例红（模块缺位+wiring 缺失）→ 9/9 绿；治理域回归 116 passed。
+    - **live-verify**：真后端真审批周期——computer_shell 分段审批（dir 段未命中白名单→ASK）真实触发→HTTP 批准→带外重放真实执行（executed=true）→日志「续跑轮已拉起（会话 sec_verify_c3）」+「收到用户输入: 审批 797da948…已由人工批准并带外执行完毕」。续跑轮内 LLM 429 为外部免费模型配额（失败路径如实返回，在测试契约内）；LLM 完整应答未在本会话完成观测，如实登记。
+    - **下一枚空号现查**：本格取 545，后继从 546 起。
+546. **C4 改判批：OutputRef「装配缺位」前提不成立 + C5/C6 状态** ✅🟢
+    - **改判**：C4 候选前提「装配缺位」经亲验不成立——ensure_output_ref_installed_from_env 早已在 api/app.py:599-601 lifespan 接线（e4a311321，W1）；此前消费方 grep 被 head 截断误判。279557e60：误导性旧注释（tool_executor.py:1393「默认未」）修正、docstring 口径矛盾钉死（库级不自动安装 vs 应用装配默认开启 W1-4）、6 个回归守卫（AST 接线守卫防静默拆除+env 两态+折叠/透传/失败不折叠）。「策略注册表」不立项：与回环处 apply_offload_policy 单源折叠冲突（教义第 6/7 条），需求未现。
+    - **红绿灯**：纠正批（接线已存在故 AST 守卫本批即绿，价值在防再生）；14 passed（新增 6+既有 8）。
+    - **仍开（P3 待点单）**：C5 lost-in-the-middle 位置缓解进 ContextOrchestrator（对照 dolphin apply_lost_in_middle_mitigation；本仓折叠分辨率阶梯只管「留多少」不管「放哪里」）；C6 评测面产品化（retrieval_benchmark 已有 API+用例库+基线冻结，缺 NeurUI 控制台页；前端双门工作量）。候选出处见对比报告 §5。
+    - **下一枚空号现查**：本格取 546，后继从 547 起。
