@@ -1390,7 +1390,8 @@ class ToolExecutor:
                 tool_source = "background"
                 return result
             result, success, tool_source = core_out
-            # P1-6：大输出落盘为引用——默认未
+            # P1-6：大输出落盘为引用——装配在 api/app.py lifespan（W1-4），
+            # env NEUROVA_TOOL_OUTPUT_REF=0 逃生；未装配时 maybe_output_ref 恒透传。
             # 装配恒透传；写盘失败诚实降级原样返回（宁可膨胀不丢输出）。
             # 成败判据由本处传入（`_result_is_success` 是全仓唯一判据）：
             # **失败结果不折叠**——它的正文（error/stderr/exit_code）就是模型

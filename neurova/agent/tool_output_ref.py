@@ -55,6 +55,10 @@ _install_lock = threading.RLock()
 def install_tool_output_ref(max_chars: int = 8192, output_dirname: str = "tool_outputs") -> OutputRefHandle:
     """装配大输出引用（幂等：已安装返回同一句柄）。
 
+    口径（C4 收口钉死，两处 docstring 曾互相矛盾）：**库级**不自动安装——
+    本函数只该被装配面调用；**生产装配**在 `api/app.py` lifespan（W1-4，
+    默认开启，env NEUROVA_TOOL_OUTPUT_REF=0 逃生）。未装配时
+    maybe_output_ref 恒透传（零行为变化）。
     """
     global _global_handle
     with _install_lock:
