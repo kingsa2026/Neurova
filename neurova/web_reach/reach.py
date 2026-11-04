@@ -354,16 +354,25 @@ def bilibili_search(query: str, limit: int = 5, timeout: float = _YTDLP_TIMEOUT)
 
 
 def run_doctor() -> Dict[str, Any]:
-    """运行 agent-reach 体检（渠道后端状态；只读配置，不执行渠道探测）"""
+    """运行 agent-reach 体检（渠道后端状态；只读配置，不执行渠道探测）。
+
+    不可得时**如实报不可得**（旧形态交回 `{}`，调用方与"后端在但没配登录态"完全同形，
+    于是给用户念的是"去跑 agent-reach doctor --json 验证"——一个装不上的命令）。
+    现量依据：PyPI `agent-reach` 0.1.0 与上游仓 `jgalea/agent-reach`（main，src 布局）
+    都没有本集成要的 `agent_reach.core`／`agent_reach.config` 两个模块。
+    """
     try:
         from agent_reach.core import AgentReach
         from agent_reach.config import Config
 
         eyes = AgentReach(Config(read_only=True))
         return eyes.doctor()
-    except Exception as e:  # noqa: BLE001 - 未安装/版本不匹配时优雅降级
+    except Exception as e:  # noqa: BLE001 - 降级可以，但必须说得出降级成了什么
         logger.debug("agent-reach doctor 不可用: %s", e)
-        return {}
+        return _error(
+            "agent-reach 后端不可得（未安装，或上游未提供 agent_reach.core／agent_reach.config）："
+            f"{type(e).__name__}: {e}"
+        )
 
 
 def social_search(
@@ -388,6 +397,20 @@ def social_search(
             f"不支持的平台: {platform}（支持: {'/'.join(sorted(_SOCIAL_CHANNELS))}）"
         )
     doctor = run_doctor()
+    if isinstance(doctor, dict) and doctor.get("success") is False:
+        # 「后端根本不可得」与「后端在但没配登录态」是两件事：
+        # 前者不能让用户去跑一个装不上的命令，也不能让他去配一个不存在的凭据。
+        return {
+            "success": False,
+            "backend_unavailable": True,
+            "error": doctor.get("error") or "agent-reach 后端不可得",
+            "guide": (
+                f"{platform_key} 的社交平台后端目前不可得——这不是你没配登录态。"
+                "上游（PyPI 与源码仓 main）都未提供本集成所需的 agent_reach.core／agent_reach.config，"
+                "需先按仓库登记的依赖口径处理，再重试本功能。"
+            ),
+            "platform": platform_key,
+        }
     channels = doctor.get("channels") if isinstance(doctor, dict) else {}
     channel = (channels or {}).get(_SOCIAL_CHANNELS[platform_key], {})
     active = channel.get("active_backend") if isinstance(channel, dict) else None
