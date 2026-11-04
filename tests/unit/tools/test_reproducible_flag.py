@@ -19,7 +19,11 @@ from neurova.builtin_tools import (
 # 漏一条就少一份「只读也可能不可重放」的证据（教义第 5 条）。
 EXPECTED_NON_REPRODUCIBLE = {
     "run_code", "git", "file_write", "file_create", "file_edit", "file_delete",
-    "create_skill", "spawn_subagent", "planning",
+    "create_skill", "spawn_subagent", "planning", "schedule_task", "ask_user", "sync_nodes",
+    "custom_node_create", "custom_node_update", "custom_node_activate", "custom_node_delete",
+    # 工作流定义：get 可能补安全版本基线（写共享库），其余为重放制造新版本的动作
+    "workflow_definition_get", "workflow_definition_update", "workflow_definition_duplicate",
+    "workflow_rollback", "workflow_publish", "workflow_execute", "workflow_repair",
     # 产物件：落产物目录并注册 artifact（重放登记出第二份产物与下载口）
     "write_pdf",
     "canvas_add_node", "canvas_connect", "canvas_create", "canvas_remove_node",

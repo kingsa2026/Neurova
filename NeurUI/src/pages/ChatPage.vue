@@ -380,6 +380,7 @@
         @stop="stopStreaming()"
         @send-queued-now="onSendQueuedNow"
         @slash-plan="onSlashPlan"
+        @slash-build="onSlashBuild"
         @slash-compact="onSlashCompact"
         @steer="onSteer"
       />
@@ -423,6 +424,17 @@
       :initial-request="planRequestSeed"
       @close="planPanelOpen = false"
       @approved="onPlanApproved"
+    />
+
+    <!-- 构建就绪门面板（/build）：问答 → 批次审批；ask_user 事件也打开它 -->
+    <BuildPanel
+      :open="buildPanelOpen"
+      :agent-id="agentId || 'default'"
+      :initial-request="buildRequestSeed"
+      :interaction="buildInteraction"
+      @close="onBuildPanelClose"
+      @approved="onBuildApproved"
+      @resumed="onBuildResumed"
     />
 
     <!-- 流式实时语音：常驻隐藏 live 播放器。src 逐句切换，播完自动推进下一句 -->
@@ -491,6 +503,8 @@ import RightDock from '@/components/chat/dock/RightDock.vue'
 import ContextUsageIndicator from '@/components/chat/ContextUsageIndicator.vue'
 import QueuedMessageCards from '@/components/chat/QueuedMessageCards.vue'
 import PlanPanel from '@/components/chat/PlanPanel.vue'
+import BuildPanel from '@/components/chat/BuildPanel.vue'
+import type { BuildInteraction } from '@/api/modules/build'
 import CrossSessionSearch from '@/components/chat/CrossSessionSearch.vue'
 import { useComputerPanel, isComputerTool, } from '@/composables/useComputerPanel'
 import { useRightDockStore } from '@/stores/rightDock'
@@ -636,6 +650,10 @@ const ttsAvailable = ref(true) // assume available, verify on mount
 // 计划模式（/plan）：面板开关 + 初始需求种子；会话态收敛在 PlanPanel 内部
 const planPanelOpen = ref(false)
 const planRequestSeed = ref('')
+const buildPanelOpen = ref(false)
+const buildRequestSeed = ref('')
+const buildSessionId = ref('')
+const buildInteraction = ref<BuildInteraction | null>(null)
 
 function onPlanApproved(executePrompt: string): void {
   planPanelOpen.value = false
@@ -649,6 +667,59 @@ function onPlanApproved(executePrompt: string): void {
 function onSlashPlan(seed: string): void {
   planRequestSeed.value = seed
   planPanelOpen.value = true
+}
+
+/** /build：一句话需求 → 就绪门面板（先问清再动手） */
+function onSlashBuild(seed: string): void {
+  buildRequestSeed.value = seed
+  buildInteraction.value = null
+  buildPanelOpen.value = true
+}
+
+function onBuildPanelClose(): void {
+  buildPanelOpen.value = false
+  buildInteraction.value = null
+}
+
+function onBuildApproved(payload: { sessionId: string; request: string; batchId: string }): void {
+  buildSessionId.value = payload.sessionId
+  buildPanelOpen.value = false
+  chatStore.setInputText(t('build.startPrompt'))
+  void sendMessage()
+}
+
+function onBuildResumed(payload: { sessionId: string; request: string }): void {
+  buildSessionId.value = payload.sessionId
+  buildPanelOpen.value = false
+  buildInteraction.value = null
+  chatStore.setInputText(t('build.resumePrompt'))
+  void sendMessage()
+}
+
+function onBuildInteraction(event: any): void {
+  const question = {
+    id: `int_${event.interaction_id}`,
+    question: event.question || '',
+    kind: event.kind || 'choice',
+    options: event.options || [],
+    multi: Boolean(event.multi),
+    allow_custom: Boolean(event.allow_custom),
+    why: event.why || '',
+    impact: event.impact || '',
+    required: true,
+    secret_key: event.secret_key || '',
+    timeout_seconds: event.timeout_seconds || 600,
+  }
+  buildInteraction.value = {
+    interaction_id: event.interaction_id,
+    build_session_id: event.build_session_id,
+    question,
+    status: 'pending',
+    answer: null,
+    created_at: 0,
+    answered_at: 0,
+  }
+  buildPanelOpen.value = true
 }
 
 /** /compact 斜杠命令（ChatComposerArea emit 上抛）：经 sendMessage 原链路
@@ -1462,6 +1533,7 @@ async function sendMessage() {
     file_ids: fileIds.length > 0 ? fileIds : undefined,
     // 轮次定位键：随 metadata 持久化，供编辑/删除/反馈定位实时轮次
     client_timestamp: roundTimestamp,
+    build_session_id: buildSessionId.value || undefined,
     // 手动模型切换：携带用户选择的模型。
     // 含富媒体文件时不携带（置空），交由后端自动路由至多模态能力 LLM。
     model: fileIds.length > 0 ? undefined : (selectedModel.value || undefined),
@@ -1745,6 +1817,12 @@ function processSSEEvent(event: any, msg: ChatMessage) {
     case 'approval_required': {
       // 治理 ASK: 弹出人工确认框（P0）→ useGovernanceApproval 状态机
       openApprovalModal(event)
+      break
+    }
+
+    case 'build_interaction_required': {
+      // 构建 ask_user：打开交互面板，回答后恢复构建
+      onBuildInteraction(event)
       break
     }
 

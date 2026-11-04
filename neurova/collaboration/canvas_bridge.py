@@ -39,7 +39,7 @@ except ImportError:  # pragma: no cover
 logger = get_logger(__name__)
 
 
-def _known_node_types() -> set:
+def known_node_types() -> set:
     """注册表中已知的节点类型集合（含 builtin/tool/skill/mcp/comfyui/custom）"""
     registry = get_node_registry()
     registry.ensure_builtin()
@@ -87,7 +87,7 @@ def canvas_to_workflow(snapshot: Dict[str, Any], name: str = "") -> WorkflowDefi
     if not canvas_nodes:
         raise ValueError("画布为空，至少需要一个节点")
 
-    known_types = _known_node_types()
+    known_types = known_node_types()
 
     # ── 节点转换 + 类型校验 ──
     wf_nodes: List[WorkflowNode] = []

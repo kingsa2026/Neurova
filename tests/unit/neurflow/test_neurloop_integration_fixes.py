@@ -430,19 +430,43 @@ class TestNeurloopIntegration:
         )
         
         # 执行
-        executor = get_workflow_executor()
-        result = asyncio.run(executor.execute(
-            workflow=workflow,
-            inputs={"query": "测试"},
-            memory_manager=mock_memory,
-            context_pool=mock_context
-        ))
-        
+        # builtin:llm 无可用模型时 exec_llm 会如实返回 failed；本用例只测
+        # ResolutionContext 注入，故在注册表边界换成成功替身，避免把
+        # 「模型不可用」误当成注入判据的背景噪声。
+        from neurova.collaboration.neurflow.node_registry import get_node_registry
+
+        registry = get_node_registry()
+        registry.ensure_builtin()
+        llmDefinition = registry.get("builtin:llm")
+        originalExecutor = registry.get_executor("builtin:llm")
+        captured = {}
+
+        async def _fakeLlm(config, ctx):
+            captured["config"] = config
+            captured["ctx"] = ctx
+            return {"status": "success", "output": "ok"}
+
+        registry.register(llmDefinition, executor=_fakeLlm)
+        try:
+            executor = get_workflow_executor()
+            result = asyncio.run(executor.execute(
+                workflow=workflow,
+                inputs={"query": "测试"},
+                memory_manager=mock_memory,
+                context_pool=mock_context
+            ))
+        finally:
+            registry.register(llmDefinition, executor=originalExecutor)
+
         # 验证
         assert result.status == WorkflowStatus.COMPLETED
         # 验证变量被正确解析（通过检查 LLM 节点的输入）
         llm_result = result.node_results.get("llm_1")
         assert llm_result is not None
+        assert captured["ctx"]["memory_manager"] is mock_memory
+        assert captured["ctx"]["context_pool"] is mock_context
+        assert mock_memory.search.called
+        assert "$memory.search" not in str(captured["config"].get("prompt") or "")
 
 
 if __name__ == "__main__":

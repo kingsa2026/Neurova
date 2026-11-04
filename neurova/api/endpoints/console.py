@@ -175,6 +175,8 @@ class ChatRequest(BaseModel):
     # 补课 8（断线重连+replay 快进）：从该缓冲序号起重放事件（客户端已
     # 消费的最后序号）；None=全新请求（不重放）。配合会话级事件缓冲使用。
     replay_from: typing.Optional[int] = None
+    # 构建会话：本回合由 BuildSession 发起时携带；工具门禁据此做就绪检查
+    build_session_id: typing.Optional[str] = None
 
 
 def attach_files(file_ids: typing.Optional[typing.List[str]], user_id: str) -> typing.List[dict]:
@@ -435,6 +437,9 @@ def _sse_events_from_emitter_item(
             approval_payload = _extract_approval_payload(content, {"tool_name": name})
             if approval_payload:
                 events.append({"type": "approval_required", **approval_payload})
+            build_payload = _extract_build_interaction(content, {"tool_name": name})
+            if build_payload:
+                events.append({"type": "build_interaction_required", **build_payload})
             # P1-7：update_plan 结果 → plan_update 事件（完整文本上解析）
             plan_payload = _extract_plan_update(content)
             if plan_payload:
@@ -514,6 +519,40 @@ def _extract_plan_update(result_text) -> dict:
     if parsed.get("explanation"):
         event["explanation"] = str(parsed["explanation"])
     return event
+
+
+def _extract_build_interaction(result_text, tm: dict) -> dict:
+    """ask_user 的 paused 结果 → 前端构建交互面板事件。"""
+    parsed = None
+    if isinstance(result_text, dict):
+        parsed = result_text
+    elif isinstance(result_text, str):
+        try:
+            candidate = json.loads(result_text)
+            if isinstance(candidate, dict):
+                parsed = candidate
+        except Exception:
+            return {}
+    if not parsed or parsed.get("status") != "paused":
+        return {}
+    interaction = parsed.get("interaction") or {}
+    question = interaction.get("question") or {}
+    interaction_id = str(parsed.get("interaction_id") or interaction.get("interaction_id") or "")
+    if not interaction_id:
+        return {}
+    return {
+        "build_session_id": str(parsed.get("build_session_id") or ""),
+        "interaction_id": interaction_id,
+        "question": str(question.get("question") or ""),
+        "kind": str(question.get("kind") or "choice"),
+        "options": question.get("options") or [],
+        "multi": bool(question.get("multi")),
+        "allow_custom": bool(question.get("allow_custom")),
+        "why": str(question.get("why") or ""),
+        "impact": str(question.get("impact") or ""),
+        "secret_key": str(question.get("secret_key") or ""),
+        "timeout_seconds": int(question.get("timeout_seconds") or 600),
+    }
 
 
 def _extract_approval_payload(result_text, tm: dict) -> dict:
@@ -619,6 +658,9 @@ def _build_tool_events(
         approval_payload = _extract_approval_payload(result_text, tm)
         if approval_payload:
             events.append({"type": "approval_required", **approval_payload})
+        build_payload = _extract_build_interaction(result_text, tm)
+        if build_payload:
+            events.append({"type": "build_interaction_required", **build_payload})
         # P1-7：update_plan 结果 → plan_update 事件（完整文本上解析）
         plan_payload = _extract_plan_update(result_text)
         if plan_payload:
@@ -673,6 +715,9 @@ async def post_console_chat(
         user_id, agent_id = resumeTurnIdentity(runRow, user_id, agent_id)
 
     _establishRequestOwner(user_id)
+    from neurova.core.build_context import setCurrentBuildSessionId
+
+    setCurrentBuildSessionId(getattr(body, "build_session_id", None))
 
     # 会话 ID：客户端传入或新建
     if body.session_id:
@@ -970,6 +1015,7 @@ async def post_console_chat(
         # 投递与记账就此分家：`_record` 是唯一落地处，渲染只做渲染。
         metadata = {
             "user_id": user_id,
+            "build_session_id": getattr(body, "build_session_id", None),
             "tenant_id": str((current_user or {}).get("tenant_id") or "default"),
             "thinking_effort": (body.thinking_effort or "").lower(),
             "thinking_enabled": getattr(body, "thinking_enabled", None),

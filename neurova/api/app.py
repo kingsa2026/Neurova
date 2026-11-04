@@ -1258,6 +1258,22 @@ async def _on_startup(app_state: AppState) -> None:
         except Exception as e:
             logger.warning("Channel manager start failed: %s", e)
 
+    # 定时任务调度器：重启后接上 pending 任务；无任务不起 1s 轮询线程。
+    # 新建任务的入口（REST / Agent 的 schedule_task）落库后也会调用 ensure。
+    try:
+        from neurova.collaborate.workflow.scheduler import (
+            ensure_scheduler_running,
+            get_scheduler,
+            register_action_handlers,
+        )
+
+        _sched = get_scheduler()
+        register_action_handlers(_sched)
+        if ensure_scheduler_running(_sched):
+            logger.info("Agent scheduler started with pending tasks")
+    except Exception as e:
+        logger.warning("Agent scheduler bootstrap skipped: %s", e)
+
     # 批次2：生成任务重启恢复轮询——账本 unfinished() 收口
     try:
         from neurova.llm.generators.recovery import start_generation_recovery
@@ -1434,6 +1450,14 @@ async def _on_shutdown(app_state: AppState) -> None:
         flush_evolution_persistence()
     except Exception as e:  # noqa: BLE001 - 落盘失败不阻断关停
         logger.warning("进化状态关停落盘失败: %s", e)
+
+    # 停掉定时任务调度线程（daemon，但显式收口更干净）
+    try:
+        from neurova.collaborate.workflow.scheduler import get_scheduler
+
+        get_scheduler().stop()
+    except Exception as e:  # noqa: BLE001 - 关停失败不阻断
+        logger.warning("定时任务调度器停止失败: %s", e)
 
     # 停止启动管理器
     if app_state.startup_manager:

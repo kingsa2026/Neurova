@@ -83,7 +83,11 @@ class NeurflowStorage:
                     user_id TEXT,
                     project_id TEXT,
                     agent_id TEXT,
-                    origin TEXT
+                    origin TEXT,
+                    safe_version INTEGER,
+                    safe_reason TEXT DEFAULT '',
+                    safe_at REAL DEFAULT 0,
+                    safe_evidence_json TEXT DEFAULT '{}'
                 )
             """)
             # P0-1 属主隔离：旧库迁移补 user_id 列 + 存量回填（幂等）
@@ -97,6 +101,13 @@ class NeurflowStorage:
                 ("project_id", "ALTER TABLE workflows ADD COLUMN project_id TEXT"),
                 ("agent_id", "ALTER TABLE workflows ADD COLUMN agent_id TEXT"),
                 ("origin", "ALTER TABLE workflows ADD COLUMN origin TEXT"),
+                ("safe_version", "ALTER TABLE workflows ADD COLUMN safe_version INTEGER"),
+                ("safe_reason", "ALTER TABLE workflows ADD COLUMN safe_reason TEXT DEFAULT ''"),
+                ("safe_at", "ALTER TABLE workflows ADD COLUMN safe_at REAL DEFAULT 0"),
+                (
+                    "safe_evidence_json",
+                    "ALTER TABLE workflows ADD COLUMN safe_evidence_json TEXT DEFAULT '{}'",
+                ),
             ):
                 if col not in wf_cols:
                     self._conn.execute(ddl)
@@ -128,7 +139,9 @@ class NeurflowStorage:
                     tier TEXT,
                     executor_body_json TEXT,
                     status TEXT DEFAULT 'active',
-                    created_by TEXT
+                    created_by TEXT,
+                    env_requirements_json TEXT DEFAULT '[]',
+                    batch_id TEXT
                 )
             """)
 
@@ -204,6 +217,8 @@ class NeurflowStorage:
                 "CREATE INDEX IF NOT EXISTS idx_workflow_versions_wf "
                 "ON workflow_versions(workflow_id)"
             )
+            # B6：存量已发布工作流补安全基线（幂等；无版本快照的先补快照）
+            self._backfill_workflow_safe_versions()
 
             # Webhook 投递记录表（P1 Step 7）
             self._conn.execute("""
@@ -416,6 +431,14 @@ class NeurflowStorage:
             self._conn.execute(
                 "ALTER TABLE node_definitions ADD COLUMN idempotent INTEGER DEFAULT 0"
             )
+        if "env_requirements_json" not in existing:
+            self._conn.execute(
+                "ALTER TABLE node_definitions ADD COLUMN env_requirements_json TEXT DEFAULT '[]'"
+            )
+        if "batch_id" not in existing:
+            self._conn.execute(
+                "ALTER TABLE node_definitions ADD COLUMN batch_id TEXT"
+            )
 
     def close(self):
         """关闭数据库连接"""
@@ -455,19 +478,30 @@ class NeurflowStorage:
 
         with self._lock:
             try:
+                existing_row = self._conn.execute(
+                    "SELECT user_id, safe_version, safe_reason, safe_at, safe_evidence_json "
+                    "FROM workflows WHERE id = ?",
+                    (workflow.id,),
+                ).fetchone()
                 if user_id is None:
-                    existing_owner = self._conn.execute(
-                        "SELECT user_id FROM workflows WHERE id = ?", (workflow.id,)
-                    ).fetchone()
-                    user_id = (existing_owner["user_id"] if existing_owner else None) or "default"
+                    user_id = (existing_row["user_id"] if existing_row else None) or "default"
+                # INSERT OR REPLACE 会整行重写：安全版本列不在 WorkflowDefinition 上，
+                # 必须显式继承，否则每次保存都会抹掉可回滚底线。
+                safe_version = existing_row["safe_version"] if existing_row else None
+                safe_reason = (existing_row["safe_reason"] if existing_row else "") or ""
+                safe_at = (existing_row["safe_at"] if existing_row else 0) or 0
+                safe_evidence = (
+                    existing_row["safe_evidence_json"] if existing_row else "{}"
+                ) or "{}"
                 self._conn.execute(
                     """
                     INSERT OR REPLACE INTO workflows
                     (id, name, description, version, nodes_json, edges_json,
                      variables_json, tags_json, category, author, created_at,
                      updated_at, status, template, public, metadata_json, user_id,
-                     project_id, agent_id, origin)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     project_id, agent_id, origin, safe_version, safe_reason,
+                     safe_at, safe_evidence_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         workflow.id,
@@ -490,6 +524,10 @@ class NeurflowStorage:
                         workflow.project_id,
                         workflow.agent_id,
                         workflow.origin or "manual",
+                        safe_version,
+                        safe_reason,
+                        safe_at,
+                        safe_evidence,
                     ),
                 )
                 # P2-4.4：内容变化才产生新版本（首次保存即 v1 基线，上限 20）
@@ -580,15 +618,17 @@ class NeurflowStorage:
             """,
             (workflow_id, next_version, fingerprint, "auto snapshot", _time.time()),
         )
-        # 容量裁剪：仅保留最新 N 条
+        # 容量裁剪：仅保留最新 N 条；安全版本快照永不裁剪（否则回滚底线消失）
         self._conn.execute(
             """
             DELETE FROM workflow_versions WHERE workflow_id = ? AND version NOT IN (
                 SELECT version FROM workflow_versions WHERE workflow_id = ?
                 ORDER BY version DESC LIMIT ?
+            ) AND version != COALESCE(
+                (SELECT safe_version FROM workflows WHERE id = ?), -1
             )
             """,
-            (workflow_id, workflow_id, self._VERSION_CAPACITY),
+            (workflow_id, workflow_id, self._VERSION_CAPACITY, workflow_id),
         )
 
     def list_workflow_versions(self, workflow_id: str) -> list:
@@ -665,6 +705,185 @@ class NeurflowStorage:
             )
             self._conn.commit()
         return True
+
+    # ==================== 安全版本（N4，§5.4） ====================
+
+    @staticmethod
+    def _rowFingerprint(row: sqlite3.Row) -> str:
+        """按行内当前内容算指纹（与 save_workflow 同一口径）。"""
+        return NeurflowStorage._workflow_fingerprint(
+            row["name"],
+            row["description"] or "",
+            row["nodes_json"] or "[]",
+            row["edges_json"] or "[]",
+            row["variables_json"] or "[]",
+        )
+
+    def _safeVersionFromRow(self, row: sqlite3.Row) -> Optional[Dict[str, Any]]:
+        if row["safe_version"] is None:
+            return None
+        version = int(row["safe_version"])
+        exists = self._conn.execute(
+            "SELECT 1 FROM workflow_versions WHERE workflow_id = ? AND version = ?",
+            (row["id"], version),
+        ).fetchone()
+        try:
+            evidence = json.loads(row["safe_evidence_json"] or "{}")
+        except (TypeError, ValueError):
+            evidence = {}
+        return {
+            "version": version,
+            "reason": row["safe_reason"] or "",
+            "at": float(row["safe_at"] or 0),
+            "evidence": evidence if isinstance(evidence, dict) else {},
+            "valid": exists is not None,
+        }
+
+    def getSafeVersion(self, workflow_id: str) -> Optional[Dict[str, Any]]:
+        """读取安全版本标记；未设置返回 None。
+
+        valid=False 表示标记指向的快照已不存在（异常态，应重新建立基线）。
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM workflows WHERE id = ?", (workflow_id,)
+            ).fetchone()
+            if not row:
+                return None
+            return self._safeVersionFromRow(row)
+
+    def setSafeVersion(
+        self,
+        workflow_id: str,
+        version: int,
+        reason: str = "",
+        evidence: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """把已存在的版本快照标记为安全版本（不存在则拒绝，不伪造基线）。"""
+        import time as _time
+
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id FROM workflows WHERE id = ?", (workflow_id,)
+            ).fetchone()
+            if not row:
+                return False
+            exists = self._conn.execute(
+                "SELECT 1 FROM workflow_versions WHERE workflow_id = ? AND version = ?",
+                (workflow_id, int(version)),
+            ).fetchone()
+            if not exists:
+                raise ValueError(f"版本快照不存在，不能标记为安全版本: {version}")
+            self._conn.execute(
+                "UPDATE workflows SET safe_version = ?, safe_reason = ?, safe_at = ?, "
+                "safe_evidence_json = ? WHERE id = ?",
+                (
+                    int(version),
+                    str(reason or ""),
+                    _time.time(),
+                    json.dumps(evidence or {}, ensure_ascii=False, default=str),
+                    workflow_id,
+                ),
+            )
+            self._conn.commit()
+            return True
+
+    def ensureSafeVersion(
+        self,
+        workflow_id: str,
+        reason: str = "baseline",
+        evidence: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """确保工作流有一个可回滚的安全版本；必要时为当前内容补快照。
+
+        返回 {version, reason, at, evidence, valid, created}。
+        快照失败时抛异常——不拿内存内容冒充安全版本。
+        """
+        import time as _time
+
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM workflows WHERE id = ?", (workflow_id,)
+            ).fetchone()
+            if not row:
+                raise ValueError(f"工作流不存在: {workflow_id}")
+
+            existing = self._safeVersionFromRow(row)
+            if existing is not None and existing["valid"]:
+                return {**existing, "created": False}
+
+            fingerprint = self._rowFingerprint(row)
+            self._record_version_if_changed(workflow_id, fingerprint)
+            latest = self._conn.execute(
+                "SELECT version FROM workflow_versions WHERE workflow_id = ? "
+                "ORDER BY version DESC LIMIT 1",
+                (workflow_id,),
+            ).fetchone()
+            if latest is None:
+                raise RuntimeError(f"无法建立安全版本基线: {workflow_id}")
+
+            now = _time.time()
+            evidence_data = dict(evidence or {})
+            self._conn.execute(
+                "UPDATE workflows SET safe_version = ?, safe_reason = ?, safe_at = ?, "
+                "safe_evidence_json = ? WHERE id = ?",
+                (
+                    int(latest["version"]),
+                    str(reason or ""),
+                    now,
+                    json.dumps(evidence_data, ensure_ascii=False, default=str),
+                    workflow_id,
+                ),
+            )
+            self._conn.commit()
+            return {
+                "version": int(latest["version"]),
+                "reason": str(reason or ""),
+                "at": now,
+                "evidence": evidence_data,
+                "valid": True,
+                "created": True,
+            }
+
+    def _backfill_workflow_safe_versions(self) -> None:
+        """B6：存量已发布工作流补安全基线（幂等）。
+
+        已有有效安全版本 → 跳过；无版本快照或快照与当前内容不一致 →
+        先补当前内容快照，再把它标为安全版本。单行失败不拖垮建库。
+        """
+        import time as _time
+
+        rows = self._conn.execute(
+            "SELECT * FROM workflows WHERE status = 'published' "
+            "AND (safe_version IS NULL OR safe_version <= 0)"
+        ).fetchall()
+        if not rows:
+            return
+        for row in rows:
+            try:
+                fingerprint = self._rowFingerprint(row)
+                self._record_version_if_changed(row["id"], fingerprint)
+                latest = self._conn.execute(
+                    "SELECT version FROM workflow_versions WHERE workflow_id = ? "
+                    "ORDER BY version DESC LIMIT 1",
+                    (row["id"],),
+                ).fetchone()
+                if latest is None:
+                    continue
+                self._conn.execute(
+                    "UPDATE workflows SET safe_version = ?, safe_reason = ?, safe_at = ?, "
+                    "safe_evidence_json = ? WHERE id = ?",
+                    (
+                        int(latest["version"]),
+                        "migration_baseline",
+                        _time.time(),
+                        json.dumps({"source": "migration"}, ensure_ascii=False),
+                        row["id"],
+                    ),
+                )
+            except Exception as exc:  # noqa: BLE001 - 单行损坏不阻塞建库
+                logger.warning("安全版本基线回填失败 %s: %s", row["id"], exc)
+        self._conn.commit()
 
     def delete_workflow(self, workflow_id: str, requester_id: Optional[str] = None,
                         is_admin: bool = False,
@@ -1143,8 +1362,8 @@ class NeurflowStorage:
                     (type, label, icon, category, description, sub_blocks_json,
                      inputs_json, outputs_json, source, source_id, version,
                      tags_json, deprecated, tier, executor_body_json, status, created_by,
-                     idempotent)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     idempotent, env_requirements_json, batch_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         node_def.type,
@@ -1167,6 +1386,8 @@ class NeurflowStorage:
                         node_def.status,
                         node_def.created_by,
                         1 if getattr(node_def, "idempotent", False) else 0,
+                        json.dumps(list(getattr(node_def, "env_requirements", []) or []), ensure_ascii=False),
+                        getattr(node_def, "batch_id", None),
                     ),
                 )
                 self._conn.commit()
@@ -1297,6 +1518,12 @@ class NeurflowStorage:
             deprecated=bool(row["deprecated"]),
             tier=row["tier"] if "tier" in columns else None,
             idempotent=bool(row["idempotent"]) if "idempotent" in columns else False,
+            env_requirements=(
+                json.loads(row["env_requirements_json"])
+                if "env_requirements_json" in columns and row["env_requirements_json"]
+                else []
+            ),
+            batch_id=row["batch_id"] if "batch_id" in columns else None,
             executor_body=json.loads(executor_body_raw) if executor_body_raw else None,
             status=(row["status"] if "status" in columns else None) or "active",
             created_by=row["created_by"] if "created_by" in columns else None,

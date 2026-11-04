@@ -109,12 +109,19 @@ class CustomNodeService:
     # ==================== CRUD ====================
 
     def create_node(
-        self, spec: Dict[str, Any], *, created_by: Optional[str] = None
+        self,
+        spec: Dict[str, Any],
+        *,
+        created_by: Optional[str] = None,
+        status: str = "active",
+        batch_id: Optional[str] = None,
     ) -> NodeDefinition:
         """按 spec 创建自定义节点：校验 → 落库 → 注册执行器"""
         normalized = self._validate_spec(spec)
         node_type = normalized["type"]
 
+        if status not in ("draft", "active"):
+            raise CustomNodeError("status 必须是 draft 或 active", code="invalid_spec")
         if self._storage.get_node_definition(node_type) is not None:
             raise CustomNodeError(f"节点类型已存在: {node_type}", code="exists")
 
@@ -132,13 +139,36 @@ class CustomNodeService:
             tier=normalized["tier"],
             executor_body=normalized["executor_body"],
             idempotent=normalized["idempotent"],
-            status="active",
+            env_requirements=normalized["env_requirements"],
+            batch_id=batch_id,
+            status=status,
             created_by=created_by,
         )
         self._storage.save_node_definition(node_def)
-        self._registry.register(node_def, executor=self.build_executor(node_def))
+        if status == "active":
+            self._registry.register(node_def, executor=self.build_executor(node_def))
+        else:
+            # draft 不进 active 节点库：画布/工作流引用必须在批次审批激活之后
+            self._registry.unregister(node_type)
         logger.info("自定义节点已创建: %s (tier=%s, by=%s)", node_type, node_def.tier, created_by)
         return node_def
+
+    def activate_node(self, node_type: str) -> NodeDefinition:
+        """把 draft 自定义节点提升为 active；active 节点重复激活是幂等成功。"""
+        existing = self._storage.get_node_definition(node_type)
+        if existing is None:
+            raise CustomNodeError(f"节点不存在: {node_type}", code="not_found")
+        if existing.status == "active":
+            return existing
+        if existing.status != "draft":
+            raise CustomNodeError(
+                f"只有 draft 节点可激活（当前 {existing.status}）", code="invalid_spec"
+            )
+        existing.status = "active"
+        self._storage.save_node_definition(existing)
+        self._registry.register(existing, executor=self.build_executor(existing))
+        logger.info("自定义节点已激活: %s", node_type)
+        return existing
 
     def update_node(
         self, node_type: str, spec: Dict[str, Any], *, created_by: Optional[str] = None
@@ -187,6 +217,10 @@ class CustomNodeService:
             existing.executor_body = merged["executor_body"]
         if "idempotent" in spec:
             existing.idempotent = bool(spec["idempotent"])
+        if "env_requirements" in spec:
+            existing.env_requirements = [
+                str(item) for item in (spec.get("env_requirements") or []) if str(item).strip()
+            ]
         if "form_schema" in spec:
             existing.sub_blocks = self._parse_form_schema(spec["form_schema"])
         if "inputs" in spec:
@@ -196,7 +230,10 @@ class CustomNodeService:
 
         existing.version = self._bump_version(existing.version)
         self._storage.save_node_definition(existing)
-        self._registry.register(existing, executor=self.build_executor(existing))
+        if existing.status == "active":
+            self._registry.register(existing, executor=self.build_executor(existing))
+        else:
+            self._registry.unregister(node_type)
         logger.info("自定义节点已更新: %s → v%s", node_type, existing.version)
         return existing
 
@@ -392,6 +429,9 @@ class CustomNodeService:
             "outputs": self._parse_ports(spec.get("outputs"), kind="output"),
             # 幂等声明：默认 False（不声明＝不重试）。重试是否安全由节点类型的作者判定
             "idempotent": bool(spec.get("idempotent", False)),
+            "env_requirements": [
+                str(item) for item in (spec.get("env_requirements") or []) if str(item).strip()
+            ],
         }
 
     def _parse_form_schema(self, form_schema: Any) -> List[SubBlockConfig]:

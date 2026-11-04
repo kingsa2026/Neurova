@@ -1212,3 +1212,14 @@ tests/unit/skills/test_builtinCacheIsCheckedAgainstItsBundle.py
 tests/unit/security/test_refusalTextLocatesTheTriggeringLine.py
 # 市场安装根目录只留一个公开读口：三格钉「跨模块不再直取私有字段／取不到来源要如实抛出／端点两处都经公开口」，两格钉恒等不变量（定义方内部读取数只降不升、缺省取法与单例同目录）。逐文件单跑 5 passed
 tests/unit/skills/test_marketSkillsDirHasOnePublicFace.py
+# Agent 节点作者 N0–N5：逐文件单跑 5／6／3／5／3／4／26／17／40 passed（2026-11-04 现跑）
+# 覆盖交互门、环境自描述、custom draft 批次激活、定义安全版本、自愈循环与 REST 同口径。
+tests/unit/build_mode/test_build_session.py
+tests/unit/agent/test_build_gate_and_ask_user.py
+tests/unit/api/test_build_mode_api.py
+tests/unit/neurflow/test_agent_node_schema.py
+tests/unit/agent/test_sync_nodes_tool.py
+tests/unit/agent/test_custom_node_authoring_tools.py
+tests/unit/neurflow/test_workflow_definition_tools.py
+tests/unit/neurflow/test_workflow_repair.py
+tests/unit/neurflow/test_api.py
