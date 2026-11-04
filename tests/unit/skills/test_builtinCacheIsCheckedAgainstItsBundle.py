@@ -27,6 +27,7 @@ import pytest
 from neurova.skills.market_importer import (BUILTIN_BUNDLE_DIR, builtinCacheDrift,
                                             read_builtin_bundle)
 from neurova.skills.market_registry import _marketSourceDir
+from tests.ast_scan import parseSource
 
 REPO = Path(__file__).resolve().parents[3]
 SID = "builtin--adaptive-presentation-studio"
@@ -105,7 +106,7 @@ def test_resolvedSourceLayerNeverLooksUpCatalog():
     造成的——它查的是全局那份 catalog，而调用方手上是自己那份（§6-518）。
     """
     src = (REPO / "neurova" / "skills" / "market_registry.py").read_text(encoding="utf-8")
-    tree = ast.parse(src)
+    tree = parseSource(src, "market_registry.py")
     target = next(n for n in tree.body
                   if isinstance(n, ast.FunctionDef) and n.name == "_marketSourceDir")
     called = {getattr(n.func, "id", None) or getattr(n.func, "attr", None)
@@ -114,7 +115,7 @@ def test_resolvedSourceLayerNeverLooksUpCatalog():
         f"取源层又去查 catalog 了：{sorted(x for x in called if x)}")
 
     importerSrc = (REPO / "neurova" / "skills" / "market_importer.py").read_text(encoding="utf-8")
-    itree = ast.parse(importerSrc)
+    itree = parseSource(importerSrc, "market_importer.py")
     for name in ("builtinCacheDrift", "refreshBuiltinCache"):
         fn = next(n for n in itree.body if isinstance(n, ast.FunctionDef) and n.name == name)
         got = {getattr(n.func, "attr", None) for n in ast.walk(fn) if isinstance(n, ast.Call)}

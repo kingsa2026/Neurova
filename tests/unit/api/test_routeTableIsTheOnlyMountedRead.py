@@ -56,6 +56,9 @@ from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ROUTE_TABLE = REPO_ROOT / "tests" / "route_table.py"
+#: 聚合器扫描根提到模块级：绑在函数内的名字上时，本档的落点会安静地掉出
+#: `test_scanCriterionMustProveItsOwnSurfaceRatchet` 的面（既不要求面自证，也不算根写错）。
+ENDPOINTS_ROOT = REPO_ROOT / "neurova" / "api" / "endpoints"
 #: 只扫会被 pytest 收集的目录；manual／archive／runners 是脚本区，本仓惯例不纳门禁
 SCAN_DIRS = ("unit", "integration", "api", "test_api", "media", "cognitive_layers", "core")
 #: 取装配后 app 路由表的合法出口——只此一家
@@ -87,9 +90,8 @@ def _aggregatorModules() -> set:
     这些模块"自带的路由表"就是挂载后的表：包装层长在它自己 `router.routes` 里，
     所以朴素读法在这里同样失明。真叶子模块（不挂子路由）不受本形态影响，可以继续豁免。
     """
-    root = REPO_ROOT / "neurova" / "api" / "endpoints"
     out = set()
-    for ref in ast_scan.sourceRefsUnder(root, ".py", hints=("include_router",)):
+    for ref in ast_scan.sourceRefsUnder(ENDPOINTS_ROOT, ".py", hints=("include_router",)):
         tree = ast_scan.transientTree(ref.path)
         for node in tree.body:
             if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
