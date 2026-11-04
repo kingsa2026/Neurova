@@ -119,6 +119,12 @@
 - 近重复：进入现有冲突队列，不自动删。
 - 验收：同文重复导入不新建条目；不同租户同文不互斥；回填脚本支持幂等重跑。
 
+> **注（2026-11-04）**：同 `source_path` 且 `source_modified_at` 更晚的重导入已由
+> [三时间戳设计](2026-11-04-知识库三时间戳与时间感知消费面设计.md) 批 TB 升级为
+> **更新重入库**（覆盖旧版＋revisions＋刷新入库时间＋保留 knowledge_id），本批 A1 的
+> "duplicate 标记"语义在该路径上被取代；其余去重语义（指纹精确重复标记／近重复冲突队列）
+> 不变。台账 §6-517。
+
 ### Batch A2 · OCR provider 协议（P1）
 
 - 抽 `OcrEngine` 协议（`available/recognize`），现 `RapidOcrEngine` 作为实现；新增可选 PaddleOCR/Tesseract provider，惰性加载、不可用显式 `ocr_unavailable`。
