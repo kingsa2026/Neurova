@@ -11880,3 +11880,10 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
 548. **KWeaver 对比候选收尾状态：C6 维持缓办（范围已核清）**
     - **C6 评测面产品化**：API 面已核（knowledge_core.py benchmark 端点、NDCG+基线冻结+用例库在库）；缺 NeurUI 控制台页——路由+菜单+i18n×11 语言对齐守卫+vitest+vue-tsc 双门，为一个完整前端批的工作量，本会话预算不足以按双门纪律做完，硬塞即半成品，维持待点单（对比报告 §5 / 记忆 project-kweaver-comparison-backlog 均有交接笔记）。
     - **零代码改动**，本格即登记。后继自 549 起。
+549. **C6：知识检索评测控制台页——KWeaver 对比候选全部收口** ✅🟢
+    - **上格缓办解除，本批实施**：d9941722f——不加后端，把既有三端点接进 NeurUI（baseline 基线读数含 unevidenced 诚实态 / evaluation/compare A/B 对照管理员 / audit/retrieval-metrics 在线快照管理员）。落点沿仓内范式：api/modules/knowledgeEval.ts 聚合导出、KnowledgeEvalPage.vue（单根模板+Glass 系+var(--nr-*)+信封解包+isAdmin 门与后端 403 对称+unevidenced 不伪造 0 值）、路由 knowledge-eval+侧栏项+modules.ts 目录项、i18n 新段独立文件（11 语言真翻译，键集合/占位符严格一致，11 locale 各 3 行打点）。
+    - **红绿灯**：页面 7 用例（信封解包/unevidenced 不伪造/失败出声/角色门双向/min_cases 缺省 30 透传/未填禁用）；双门 vitest 全量 288 文件 2321 用例零失败＋vue-tsc 干净；守卫族全绿（locale 四守卫+NavigationZones+routePageRootNode+hardcodedColors+hardcodedCopy.p0+modules）。
+    - **中途修两处（tsc 抓 esbuild 漏）**：①fr nav 值撇号打断单引号字符串→双引号；②recall@K 的 @ 触发 vue-i18n linked-format→仓内 {'@'} 字面量转义（同点位单引号→双引号）。
+    - **生成物重生成**：同名函数盘点台账（守卫自述命令 --write-ledger），scannedFiles 340→343 零重名组新增，纯计数更新。
+    - **KWeaver 对比候选终态**：C1-C5 已实施（§6-543..547），C6 本格收口——对比报告 §5 候选清单全部处置完毕。
+    - **下一枚空号现查**：本格取 549，后继自 550 起。
