@@ -1583,6 +1583,19 @@ class ContextOrchestrator:
                 chat_id=chat_group_id,
             )
             logger.debug("ContextPool.draw() 调取 %s 条归档", len(drawn_contexts))
+            # C5：lost-in-the-middle 位置缓解（默认关）——抽屉输出序即 rank 序
+            # （不造第二份打分），两端发牌把最优置首、次优置尾、最弱居中；
+            # 关闭时恒等映射零漂移，缓解失败按原序装配（fail-open）。
+            try:
+                from neurova.context.position_strategy import (
+                    applyLostInMiddleMitigation,
+                    isLostInMiddleEnabled,
+                )
+
+                if isLostInMiddleEnabled():
+                    drawn_contexts = applyLostInMiddleMitigation(drawn_contexts)
+            except Exception:  # noqa: BLE001 - 位置缓解失败不影响装配
+                logger.debug("位置缓解跳过（按原序装配）", exc_info=True)
             for ctx in drawn_contexts:
                 if ctx.hash and ctx.hash in injected_hashes:
                     continue  # 已在窗口或本轮产物中，跳过避免重复
