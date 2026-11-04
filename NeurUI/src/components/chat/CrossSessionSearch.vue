@@ -218,7 +218,7 @@ async function search(): Promise<void> {
 }
 
 .nr-xsearch-hit:hover {
-  background: rgba(74, 158, 255, 0.12);
+  background: var(--nr-primary-soft);
 }
 
 .nr-xsearch-hit-session {

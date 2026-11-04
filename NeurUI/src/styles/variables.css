@@ -59,6 +59,8 @@
   --nr-primary-soft: rgba(99, 102, 241, 0.12);
   --nr-primary-soft-border: rgba(99, 102, 241, 0.2);
   --nr-primary-ring: rgba(99, 102, 241, 0.15);
+  --nr-primary-soft-strong: rgba(99, 102, 241, 0.35);
+  --nr-primary-soft-strong-border: rgba(99, 102, 241, 0.45);
   --nr-accent: #22d3ee;
   --nr-accent-secondary: #a78bfa;
   --nr-gradient-primary: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
@@ -147,6 +149,8 @@
   --nr-primary-soft: rgba(77, 107, 254, 0.08);
   --nr-primary-soft-border: rgba(77, 107, 254, 0.22);
   --nr-primary-ring: rgba(77, 107, 254, 0.12);
+  --nr-primary-soft-strong: rgba(77, 107, 254, 0.35);
+  --nr-primary-soft-strong-border: rgba(77, 107, 254, 0.45);
   --nr-accent: #0891b2;
   --nr-accent-secondary: #7c3aed;
   --nr-gradient-primary: linear-gradient(135deg, #4d6bfe 0%, #6a86ff 50%, #8ba3ff 100%);
@@ -214,6 +218,8 @@
   --nr-primary-soft: rgba(10, 132, 255, 0.16);
   --nr-primary-soft-border: rgba(10, 132, 255, 0.32);
   --nr-primary-ring: rgba(10, 132, 255, 0.22);
+  --nr-primary-soft-strong: rgba(10, 132, 255, 0.35);
+  --nr-primary-soft-strong-border: rgba(10, 132, 255, 0.45);
   --nr-accent: #64d2ff;
   --nr-accent-secondary: #bf5af2;
   --nr-gradient-primary: linear-gradient(180deg, #2f9bff 0%, #0a84ff 45%, #0770d9 100%);
@@ -302,6 +308,8 @@
   --nr-primary-soft: rgba(0, 122, 255, 0.1);
   --nr-primary-soft-border: rgba(0, 122, 255, 0.24);
   --nr-primary-ring: rgba(0, 122, 255, 0.16);
+  --nr-primary-soft-strong: rgba(0, 122, 255, 0.35);
+  --nr-primary-soft-strong-border: rgba(0, 122, 255, 0.45);
   --nr-accent: #5ac8fa;
   --nr-accent-secondary: #af52de;
   --nr-gradient-primary: linear-gradient(180deg, #2b92ff 0%, #007aff 55%, #0067e0 100%);
