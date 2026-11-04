@@ -2,7 +2,7 @@
 
 > **对象（先立证据边界）**：用户投递稿指认 SAG 为「新一代 RAG 开源解决方案」，给三路证据：
 > 论文 arXiv:2606.15971（v1 2026-06-14 / v2 2026-08-25，期间一次修订误发为 arXiv:2608.12129
-> 已撤回）、开源仓 `github.com/Zleap-AI/SAG`（本次克隆 HEAD `e68cdeb`，v1.9.2，2026-10-22）、
+> ——该号 API 实测存在且内容即 SAG v2，abs 页标注撤回）、开源仓 `github.com/Zleap-AI/SAG`（本次克隆 HEAD `e68cdeb`，v1.9.2，2026-10-22）、
 > 及一条宣传话术（含「数亿级生产环境验证」「1.6k stars」）。
 >
 > **本次最重要判定——「开源」要拆开读**：MIT 开源的是**应用壳**（FastAPI 后端 +
@@ -17,16 +17,21 @@
 > **证据分级**：对方侧锚点由一路只读子代理实读（47 次工具调用），主代理亲验五组
 > （pyproject pin / uv.lock 来源 / README 数字 / 本仓权重表与 adapter 默认态 / FactSurface
 > 消费方 grep，清单见 §8）；本仓侧锚点由一路只读子代理实读（61 次工具调用），主代理
-> 亲验三处。论文数字取自 v1/v2 全文 HTML 的表格转述，未逐页核对 PDF。
+> 亲验三处。**复核轮（2026-11-05 当日）**：主代理对全部承载结论的锚点重验——SAG 仓
+> 十组（pin/uv.lock/README 数字/唯一 adapter 宣称/import 清单/策略映射/防线/测试规模/
+> 规模宣称 grep/fixture）、GitHub API 两仓实测、本仓六组，并逐字核 v1 表 2；修正三处
+> 子代理转述偏差（测试规模 935→1030、SAG-Benchmark commits 4→11、「唯一 adapter」
+> 精确化）后重新提交。论文数字取自 v1/v2 全文 HTML 的表格转述，未逐页核对 PDF。
 
 ---
 
 ## 0. 一页结论
 
-1. **「开源解决方案」打折成立**：应用壳 MIT 开源且工程质量高（101 个后端测试文件约 935
-   测试函数、pgvector 真容器 E2E、CI 全 pin SHA）；论文核心引擎**闭源**（`zleap-sag==0.15.0`
+1. **「开源解决方案」打折成立**：应用壳 MIT 开源且工程质量高（后端 125 个测试文件约
+   1030 个测试函数，web+desktop 另 109 个；pgvector 真容器 E2E、CI 全 pin SHA）；
+   论文核心引擎**闭源**（`zleap-sag==0.15.0`
    wheel，事件-实体 DDL、JOIN 扩展函数体、抽取提示词全部不可见）——其论文数字在仓外
-   仅以截图呈现，复现指向外部 `SAG-Benchmark` 仓（55 stars / 4 commits）。
+   仅以截图呈现，复现指向外部 `SAG-Benchmark` 仓（55 stars / 11 commits，API 实测）。
 2. **技术主张在黑盒层面证实**：chunk→语义事件（1:N）＋多维实体→潜在超边；查询时把
    共享实体当 JOIN keys 动态构图（策略名 `full_expand`/`pruned_expand_rff`/
    `pruned_expand_jev` 在应用侧可见、函数体在 wheel 内不可见）；增量只插自身行、
@@ -56,19 +61,20 @@
 
 | 件 | 状态 | 栈 | 体量 | 许可 | 定位 |
 |---|---|---|---|---|---|
-| Zleap-AI/SAG | 活跃（v1.9.2，2026-10-22，261 commits，实测 2.6k stars/185 forks） | Python 3.11+（FastAPI）+ TS（Next.js 15/React 19/Electron） | 后端 101 测试文件约 935 测试函数；web+desktop 100 个测试文件 | MIT | **开源应用壳**三端 |
+| Zleap-AI/SAG | 活跃（v1.9.2，2026-10-22，261 commits，API 实测 2,650 stars/186 forks） | Python 3.11+（FastAPI）+ TS（Next.js 15/React 19/Electron） | 后端 125 测试文件约 1030 测试函数；web+desktop 109 个测试文件 | MIT | **开源应用壳**三端 |
 | `zleap-sag==0.15.0` | PyPI wheel（`uv.lock` source=pypi.org） | Python | 源码不可见 | wheel 内未读 | **闭源引擎**：事件-实体索引/JOIN 扩展/抽取提示词/schema |
-| Zleap-AI/SAG-Benchmark | 公开（55 stars / 4 commits） | Python 脚本 | `main-results.json`/`verify_paper_results.py`/外部五方法复现指南 | MIT | 论文复现仓；**同仓已分层出 SAG2（embedding-free：SQLite FTS5+BM25+JEV）** |
+| Zleap-AI/SAG-Benchmark | 公开（55 stars / 11 commits，API 实测） | Python 脚本 | `main-results.json`/`verify_paper_results.py`/外部五方法复现指南 | MIT | 论文复现仓；**同仓已分层出 SAG2（embedding-free：SQLite FTS5+BM25+JEV）** |
 
 - 应用侧依赖闭源件两个：`zleap-sag==0.15.0`（引擎）、`octx[vectors]==0.1.6`（知识包导入导出）。
-  引擎自身再依赖 lancedb/openai/json-repair/aiosqlite（`uv.lock:4184-4192`）。
+  引擎自身再依赖 lancedb/openai/json-repair/aiosqlite（`uv.lock:4181-4197`）。
 - **中间件足迹**：关系库 SQLite（默认）→ Postgres/asyncpg（生产 extra）→ MySQL/OceanBase；
   向量 LanceDB（默认）→ pgvector/pg16（生产 compose）→ Elasticsearch；LLM API（论文配置
   Qwen3.6-Flash 抽取/作答）；JEV 独立精排服务（30s 限时）。外部服务十余件——本仓
   `docs/specs/2026-09-20-knowledge-foundation-design.md:11` 明确禁止外部服务，
   这是取向差异，不是本仓短板（与 KWeaver/Semantica 对比同一条裁定）。
-- README 宣称「sag/ 是唯一 import zleap-sag 之处」——**实际 7 个模块直接 import zleap**
-  （jobs/tasks、generation/llm、services/{chatbot,document,source,octx_gc}_service、
+- README 宣称「sag/ 是唯一 import zleap-sag 之处」——**全仓 grep 21 个文件直接
+  import zleap**（sag/ 适配层内 14 个，适配层**之外另有 7 个**：jobs/tasks、
+  generation/llm、services/{chatbot,document,source,octx_gc}_service、
   upgrades/fresh_workspace）。「唯一」是宣传性说法；引擎触点确实以 sag/ 为主体。
 
 ## 2. 对方技术拆解（按子系统，标注可见性：仓内可审 / wheel 内不可见 / 论文级）
@@ -150,7 +156,7 @@
 | 「Recall@2 平均提升 **16.4%**（SAG 79.30 vs HippoRAG 68.14）」 | v1 表 2：SAG 64.1/82.3/91.6（均值 **79.3**）vs HippoRAG 2 49.5/76.6/78.4（均值 ≈68.2）——数字吻合；(79.3−68.2)/68.2≈16.3%。**论文原文表述是绝对「11.1 percentage points」**，16.4% 是相对提升换算 | 数字有出处（v1+换算）；「提升 16.4%」**非论文表述**；v2 已漂移至 79.70/68.14 |
 | 「最难数据集 MuSiQue 提升达 **29.3%**」 | v1 MuSiQue R@2 64.1 vs 49.5 = **+29.5% 相对**（论文原文绝对 14.6 点） | 同上：相对换算，非论文表述 |
 | 「已在**数亿级**生产环境验证」 | 仓内 grep 亿/million/billion 零命中；论文无生产实验（future work 才提 larger-scale） | **不成立**（无出处） |
-| 「GitHub 获 1.6k stars」 | 实测 2.6k stars / 185 forks | 已过时 |
+| 「GitHub 获 1.6k stars」 | API 实测 2,650 stars / 186 forks | 已过时 |
 
 **对账结论**：数字本身未造假（v1 表 2 可对上），但宣传稿把**绝对百分点换算成相对
 提升**来放大（11.1 点→16.4%、14.6 点→29.3%），并**虚构了生产规模验证**。
@@ -193,7 +199,7 @@
 | 5 | 时效语义/冲突治理 | 10% | **9** | 3 | 本仓 validity window+三时间戳+冲突裁决阶梯+墓碑/擦除喉/血缘链；对方仅 start_time/软删标志，无 validity/冲突概念 |
 | 6 | 成本与自持性 | 15% | **9** | 4 | 本仓本地 ONNX+SQLite 单进程零外部服务；对方在线 15.93 s/11,536 tokens 每查询（论文自认无成本优势）+LLM API 依赖 |
 | 7 | 工程纪律/测试 | 10% | 8 | 8 | 本仓测:源 1:1+红灯判据；对方 935 测试+pgvector E2E+CI pin SHA（扣：版本号双源、golden fixture 未提交、「唯一 adapter」宣称不实） |
-| 8 | 可审计/可复现 | 10% | **9** | 3 | 本仓全仓可审；对方引擎闭源、主表结果仅截图、复现指外部 55-star 仓（4 commits） |
+| 8 | 可审计/可复现 | 10% | **9** | 3 | 本仓全仓可审；对方引擎闭源、主表结果仅截图、复现指外部 55-star 仓（11 commits） |
 
 **加权合计：Neurova 8.3 vs SAG 6.6。**
 
@@ -271,17 +277,25 @@
 | 宣传把绝对百分点换算成相对提升放大 | 论文原文「11.1 percentage points」→ 宣传「提升 16.4%」 |
 | 版本号双源 + 陈旧注释 | `pyproject.toml:3` 0.1.0 vs 产品 1.9.2；`config_builder.py:1` docstring 写 0.8.2 实 pin 0.15.0 |
 | eval 脚本引用的默认 fixture 未提交 | `eval_retrieval.py:521` → `tests/fixtures/golden_queries.yaml` 不在仓 |
-| 一次修订误发他号后撤回 | arXiv v2 说明（2608.12129 撤回） |
+| 一次修订误发他号（abs 页标注撤回；该号 API 实测仍存在） | arXiv v2 说明 + arxiv API feed |
 
 ## 8. 证据清单与亲验范围
 
 - **克隆**：`git clone --depth 1 https://github.com/Zleap-AI/SAG` →
   `C:/Users/xccoo/.zcode/tmp/sag-analysis/SAG`（未进本仓工作树），HEAD `e68cdeb`
-  （2026-10-22，v1.9.2）。未进本仓工作树。
+  （2026-10-22，v1.9.2）。
 - **论文**：v1/v2 全文 HTML 转述（abs 页 + html 版各一）；v1 表 2 用于宣传对账，
   v2 表 1/4/8 用于现行数字与成本。SAG-Benchmark 仓仅页面级取证（未克隆）。
-- **主代理亲验（SAG 侧）**：①`apps/api/pyproject.toml` zleap pin（grep :25/:40）；
-  ②uv.lock zleap-sag 段；③README.md:137-138 性能数字。
+- **主代理亲验（SAG 侧，首轮＋复核轮）**：①`apps/api/pyproject.toml` zleap pin
+  （grep :25/:40）；②uv.lock zleap-sag 段（source=PyPI，:4181-4197）；③README.md:137-138
+  性能数字；④README.md:415「唯一 adapter」原文＋全仓 import zleap 清单（21 文件）；
+  ⑤`engine_manager.py:313-318` 策略映射原文；⑥`incremental_processor.py` 防线段原文；
+  ⑦测试规模复数（`^\s*(async )?def test_` ＝ 1030，递归 125 文件；web+desktop 109）；
+  ⑧README 双语 grep 亿/billion/hundreds of millions 零命中；⑨eval_retrieval.py:521
+  fixture 默认值＋tests/fixtures/ 实际内容（无 golden_queries.yaml）；⑩GitHub API 两仓
+  实测（stars/forks/commits）；⑪arxiv API 2608.12129 原始 feed；⑫v1 表 2 逐字引用
+  （SAG 64.1/80.0、82.3/88.0、91.6/96.5、Avg 79.3/88.2；HippoRAG 2 49.5/65.1、76.6/90.4、
+  78.4/94.4、Avg 68.2/83.3）。
 - **主代理亲验（本仓侧）**：④`hybrid.py:37` 权重表与影子读数机制；⑤adapter:84/:122
   默认 shadow 与权重 env；⑥FactSurface 消费方 grep（neurova/ 与 tests/ 全量）+
   adapter:134-146 引用性质（富化闸，非调 search）。
@@ -289,4 +303,6 @@
   行号随双方推进漂移，复核请锁上述 HEAD。
 - **未取证项（如实登记）**：`zleap-sag` wheel 内部实现（未拆包；黑盒边界即本次判定
   依据）；SAG-Benchmark 的 `main-results.json` 数值（未下载核对）；JEV 精排模型细节
-  （v1.9.0 CHANGELOG 转述）；对方引擎内部是否做实体归一（不可见）。
+  （v1.9.0 CHANGELOG 转述）；对方引擎内部是否做实体归一（不可见）；2608.12129 的
+  withdrawn 标记仅见 abs 页转述（arxiv API feed 无状态字段，该号实测存在且内容为
+  SAG v2）。
