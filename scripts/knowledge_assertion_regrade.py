@@ -41,6 +41,10 @@ from neurova.knowledge.foundation.knowledge_facts import (  # noqa: E402
     KnowledgeFactStore,
 )
 
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 def _unlinkedCount(store: KnowledgeFactStore) -> int:
     with store._lock:

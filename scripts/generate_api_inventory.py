@@ -40,6 +40,10 @@ INVENTORY_PATH = PROJECT_ROOT / "docs" / "09-dev-progress" / "api_inventory.md"
 #: 判据只写一份，多个守卫各调一次也不重复付解析成本（Issue #148）。
 from tests import ast_scan as _scan  # noqa: E402  （仓根已在上面插入 sys.path）
 
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 FRONTEND_MODULES_DIR = PROJECT_ROOT / "NeurUI" / "src" / "api" / "modules"
 #: 模块目录的短名（守卫按此名做「磁盘多出一个模块」的负向控制；同一对象，非第二份定义）
 MODULES_DIR = FRONTEND_MODULES_DIR

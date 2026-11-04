@@ -8,6 +8,11 @@ import requests
 import json
 import time
 from typing import Dict, Any, Optional
+import sys
+
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 BASE_URL = "http://192.168.10.132:9527/api/v1"
 

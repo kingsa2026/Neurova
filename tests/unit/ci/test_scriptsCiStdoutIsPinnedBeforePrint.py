@@ -29,8 +29,11 @@ import pytest
 
 from tests.ast_scan import REPO_ROOT, parseSource, sourceCode, trackedPyPaths
 
-#: 只降不升基线（本批现算：裸奔 35 档，收掉下面 5 档 ⇒ 余 30）。
-BARE_BASELINE = 30
+#: 只降不升基线（11-04 现算：30 档 → 补钉 28 档 → 余 3）。
+#: 余下三档 **不是入口脚本而是被 import 的模块**（`scripts/config.py` 21 处、`scripts/health_check.py` 7 处、
+#: `scripts/port_utils.py` 6 处引用，三档都没有 `__main__` 块）：在模块顶层钉 stdout 会**劫持导入方的 stdout**，
+#: 所以本批不给它们补钉——正解要么把中文 print 改成 log/参数化输出，要么给各档加自己的入口块，属另批。
+BARE_BASELINE = 3
 
 #: 本批点名收口的档（进 CI／跑测面的那一族）。
 CLOSED_IN_THIS_BATCH = (

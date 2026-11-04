@@ -16,6 +16,11 @@ import statistics
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+import sys
+
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 N = 1000
 

@@ -27,6 +27,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from neurova.core.data_root import get_data_root  # noqa: E402
 from neurova.security import artifact_digest  # noqa: E402
 
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 UNPINNED = "unpinned"
 OK = "pinned-ok"
 MISMATCH = "pinned-mismatch"

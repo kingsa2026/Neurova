@@ -18,6 +18,11 @@ Neurova 文档单一事实源 —— 安全重组脚本
   python scripts/reorg_docs.py --apply --purge  # 执行移动 + 删除白名单冗余
 """
 import os, re, argparse, shutil
+import sys
+
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DOCS = os.path.join(ROOT, "docs")

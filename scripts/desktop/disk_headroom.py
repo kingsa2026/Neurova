@@ -20,6 +20,10 @@ import sys
 from pathlib import Path
 from typing import Iterable, List, Sequence, Tuple
 
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 REPO = Path(__file__).resolve().parents[2]
 
 MIN_FREE_GB = 12.0

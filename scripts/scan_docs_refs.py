@@ -26,6 +26,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Markdown 链接 / 反引号路径引用 / 空标签

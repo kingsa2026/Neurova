@@ -11,6 +11,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 REPO = Path(__file__).resolve().parent.parent.parent
 NSI = REPO / "NeurUI" / "src-tauri" / "nsis" / "installer.nsi"
 CONF = REPO / "NeurUI" / "src-tauri" / "tauri.conf.json"

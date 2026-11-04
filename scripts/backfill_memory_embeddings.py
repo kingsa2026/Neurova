@@ -37,6 +37,10 @@ from neurova.core.agent_workspaces import get_agent_workspaces_root
 from neurova.core.logger import get_logger
 from neurova.embedding import get_embedding_engine
 
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 logger = get_logger(__name__)
 
 #: 取数口 `iterBodyMemories(limit=…)` 不给就是 500；一次性回填要的是全表。
