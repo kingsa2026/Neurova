@@ -277,3 +277,10 @@ class TestAdCommerceTemplateIntegrity:
         ]
         for ref in ad_refs:
             assert ref in executors, f"模板引用的广告节点未定义执行器: {ref}"
+
+def test_ad_nodes_declare_env_requirements():
+    """N1：广告节点必须声明所需环境变量，供 canvas_list_nodes/node_schema 预检。"""
+    for node_type in ("builtin:ad-monitor", "builtin:ad-streaming", "builtin:ad-strategy"):
+        node = next(n for n in COMMERCE_NODES if n["type"] == node_type)
+        assert "NEUROVA_AMAZON_ADS_CLIENT_ID" in (node.get("env_requirements") or []), node_type
+        assert "NEUROVA_AMAZON_ADS_CLIENT_SECRET" in (node.get("env_requirements") or []), node_type

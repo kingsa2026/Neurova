@@ -21,7 +21,12 @@ from typing import Any, Callable, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from .models import NodeDefinition
-from .external_api import CommercePlatformClient
+from .external_api import CommercePlatformClient, get_amazon_ads_client
+from .ad_action_policy import (
+    AdActionLedger,
+    AdActionPolicy,
+    DEFAULT_DEDUPE_WINDOW_SECONDS,
+)
 from .store_connections import get_store_connection_manager
 
 logger = get_logger(__name__)
@@ -707,10 +712,11 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
     },
     {
         "type": "builtin:ad-streaming",
+        "env_requirements": ["NEUROVA_AMAZON_ADS_CLIENT_ID", "NEUROVA_AMAZON_ADS_CLIENT_SECRET"],
         "label": "广告流投放",
         "icon": "📡",
         "category": "commerce",
-        "description": "创建并管理电商平台广告投放计划（活动/预算/定向）。亚马逊广告为独立的 Amazon Ads 开放平台（advertising-api.amazon.com），需 LWA client_id/secret 与 profileId",
+        "description": "创建并管理电商平台广告投放计划（活动/预算/定向）。apply=true 时真实执行 Amazon Ads 写操作：读活动现值 → 预算/出价闸门 → 更新预算/状态/关键词出价，并写幂等账本与审计流水；apply=false 只出计划。亚马逊广告为独立的 Amazon Ads 开放平台（advertising-api.amazon.com），需 LWA client_id/secret 与 profileId",
         "sub_blocks": [
             {
                 "id": "platform",
@@ -745,6 +751,67 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
                 "options": ["转化", "点击", "曝光", "加购"],
             },
             {
+                "id": "apply",
+                "name": "apply",
+                "type": "select",
+                "label": "真实执行（关=只出计划）",
+                "default": "false",
+                "options": ["false", "true"],
+                "condition": _WHEN_AMAZON,
+            },
+            {
+                "id": "campaign_id",
+                "name": "campaign_id",
+                "type": "input",
+                "label": "广告活动 ID（apply=true 必填）",
+                "default": "",
+                "placeholder": "Amazon Ads campaignId",
+                "condition": _WHEN_AMAZON,
+            },
+            {
+                "id": "daily_budget",
+                "name": "daily_budget",
+                "type": "input",
+                "label": "目标日预算（留空=不改）",
+                "default": "",
+                "placeholder": "写操作的目标日预算",
+                "condition": _WHEN_AMAZON,
+            },
+            {
+                "id": "state",
+                "name": "state",
+                "type": "select",
+                "label": "活动状态（留空=不改）",
+                "default": "",
+                "options": ["", "ENABLED", "PAUSED"],
+                "condition": _WHEN_AMAZON,
+            },
+            {
+                "id": "keyword_id",
+                "name": "keyword_id",
+                "type": "input",
+                "label": "关键词 ID（改出价时填）",
+                "default": "",
+                "condition": _WHEN_AMAZON,
+            },
+            {
+                "id": "bid",
+                "name": "bid",
+                "type": "input",
+                "label": "目标出价（留空=不改）",
+                "default": "",
+                "condition": _WHEN_AMAZON,
+            },
+            {
+                "id": "auto_apply",
+                "name": "auto_apply",
+                "type": "select",
+                "label": "无人执行（env=跟随全局；false=强制审批）",
+                "default": "env",
+                "options": ["env", "false"],
+                "condition": _WHEN_AMAZON,
+            },
+            {
                 "id": "profile_id",
                 "name": "profile_id",
                 "type": "input",
@@ -771,6 +838,7 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
     },
     {
         "type": "builtin:ad-monitor",
+        "env_requirements": ["NEUROVA_AMAZON_ADS_CLIENT_ID", "NEUROVA_AMAZON_ADS_CLIENT_SECRET"],
         "label": "广告监控",
         "icon": "👁️",
         "category": "commerce",
@@ -835,6 +903,7 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
     },
     {
         "type": "builtin:ad-strategy",
+        "env_requirements": ["NEUROVA_AMAZON_ADS_CLIENT_ID", "NEUROVA_AMAZON_ADS_CLIENT_SECRET"],
         "label": "广告策略",
         "icon": "🧠",
         "category": "commerce",
@@ -1019,6 +1088,312 @@ def _to_num(value: Any, default: float = 0.0) -> float:
         return float(str(value).replace(",", "").replace("，", "").strip())
     except (ValueError, TypeError):
         return default
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _upstreamPayload(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """取上游节点产物。
+
+    工作流引擎把「本节点输入」放在 `node_results[上游id].output`
+    （`expected_upstream` 给出上游 id 清单），而不是顶层 `inputs`——
+    顶层 inputs 是整张工作流的调用入参。两种入口都兼容，优先读前者。
+    """
+    if not isinstance(ctx, dict):
+        return {}
+    node_results = ctx.get("node_results")
+    expected = ctx.get("expected_upstream") or []
+    if isinstance(node_results, dict) and isinstance(expected, (list, tuple)):
+        for node_id in expected:
+            result = node_results.get(node_id)
+            if isinstance(result, dict) and isinstance(result.get("output"), dict):
+                return result["output"]
+    if isinstance(ctx.get("output"), dict):
+        return ctx["output"]
+    inputs = ctx.get("inputs") or {}
+    if isinstance(inputs, dict):
+        for value in inputs.values():
+            if isinstance(value, dict):
+                if isinstance(value.get("output"), dict):
+                    return value["output"]
+                return value
+    return {}
+
+
+def _upstreamSimulated(ctx: Dict[str, Any]) -> bool:
+    """上游监控是否明确标记为模拟数据；标记了就不许据此自动花钱。"""
+    if not isinstance(ctx, dict):
+        return False
+    if ctx.get("simulated") is True:
+        return True
+    payload = _upstreamPayload(ctx)
+    return payload.get("simulated") is True
+
+
+def _campaignBudget(campaign: Dict[str, Any]) -> float:
+    budget = campaign.get("dailyBudget")
+    if budget is None:
+        budget = (campaign.get("budget") or {}).get("budget")
+    return _to_num(budget)
+
+
+async def _applyAdChange(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """执行一次真实的 Amazon Ads 写操作（预算/状态/关键词出价）。
+
+    前置：平台必须是 amazon、profileId 与 campaign_id 齐全、上游数据不是模拟值。
+    写前先读现值和策略闸门；未武装返回 approval_required，超限返回 denied，
+    窗口内重复返回 duplicate——三者都不碰广告账户。
+    """
+    platform = str(config.get("platform") or "amazon").lower()
+    if platform != "amazon":
+        return {
+            "status": "unsupported",
+            "error": f"自动写操作暂只支持 Amazon，收到 {platform}",
+            "output": None,
+        }
+    if _upstreamSimulated(ctx):
+        return {
+            "status": "refused",
+            "error": "上游监控数据是模拟值；拒绝据此自动调整广告（先修数据源，再谈自动）",
+            "output": None,
+        }
+
+    campaign_id = str(config.get("campaign_id") or "").strip()
+    profile_id = str(config.get("profile_id") or "").strip()
+    region = str(config.get("region") or "na")
+    if not campaign_id:
+        return {"status": "failed", "error": "apply=true 需要 campaign_id", "output": None}
+    if not profile_id:
+        return {"status": "failed", "error": "apply=true 需要 profile_id", "output": None}
+
+    client = get_amazon_ads_client()
+    policy = AdActionPolicy.fromEnv()
+    # 节点配置只能**收紧密码**（false=强制人工审批），不能自行 arm；
+    # 否则画布/提示词注入写一个 auto_apply=true 就绕过了全局武装开关。
+    if str(config.get("auto_apply") or "").strip().lower() == "false":
+        policy.auto_apply = False
+
+    before: Dict[str, Any] = {}
+    after: Dict[str, Any] = {}
+    updates: Dict[str, Any] = {"campaignId": campaign_id}
+    decisions = []
+
+    proposal = _upstreamPayload(ctx).get("proposal") or {}
+    if not isinstance(proposal, dict):
+        proposal = {}
+    proposalAction = str(proposal.get("action") or "").strip()
+    proposalRatio = _to_num(proposal.get("delta_ratio"), 0.0)
+
+    explicitBudget = config.get("daily_budget") not in (None, "")
+    explicitState = bool(str(config.get("state") or "").strip())
+    keyword_id = str(config.get("keyword_id") or "").strip()
+    explicitBid = keyword_id and config.get("bid") not in (None, "")
+
+    wantsBudget = explicitBudget or (proposalAction == "campaign_budget" and proposalRatio != 0)
+    wantsState = explicitState or proposalAction == "pause"
+    wantsBid = explicitBid or (
+        proposalAction == "keyword_bid" and bool(keyword_id) and proposalRatio != 0
+    )
+
+    if wantsBudget or wantsState:
+        listed = await client.list_campaigns([campaign_id], profile_id=profile_id, region=region)
+        if listed.get("status") != "success":
+            return {
+                "status": "failed",
+                "error": f"读取活动现值失败: {listed.get('error')}",
+                "output": listed.get("output"),
+            }
+        campaigns = (listed.get("output") or {}).get("campaigns") or []
+        current = next(
+            (c for c in campaigns if str(c.get("campaignId") or c.get("campaign_id")) == campaign_id),
+            None,
+        )
+        if current is None:
+            return {
+                "status": "failed",
+                "error": f"活动不存在或无权访问: {campaign_id}",
+                "output": listed.get("output"),
+            }
+        before["daily_budget"] = _campaignBudget(current)
+        before["state"] = str(current.get("state") or "")
+        if wantsBudget:
+            proposed = (
+                _to_num(config.get("daily_budget"))
+                if explicitBudget
+                else round(before["daily_budget"] * (1 + proposalRatio), 2)
+            )
+            decisions.append(policy.evaluate("campaign_budget", before["daily_budget"], proposed))
+            updates["dailyBudget"] = proposed
+            after["daily_budget"] = proposed
+        if wantsState:
+            proposed_state = (
+                str(config.get("state") or "").strip().upper()
+                if explicitState
+                else "PAUSED"
+            )
+            decisions.append(policy.evaluate("campaign_state", before["state"], proposed_state))
+            updates["state"] = proposed_state
+            after["state"] = proposed_state
+
+    keyword_update: Dict[str, Any] = {}
+    if wantsBid:
+        listed = await client.list_keywords([keyword_id], profile_id=profile_id, region=region)
+        if listed.get("status") != "success":
+            return {
+                "status": "failed",
+                "error": f"读取关键词现值失败: {listed.get('error')}",
+                "output": listed.get("output"),
+            }
+        keywords = (listed.get("output") or {}).get("keywords") or []
+        current_kw = next(
+            (k for k in keywords if str(k.get("keywordId") or k.get("keyword_id")) == keyword_id),
+            None,
+        )
+        if current_kw is None:
+            return {
+                "status": "failed",
+                "error": f"关键词不存在或无权访问: {keyword_id}",
+                "output": listed.get("output"),
+            }
+        before["bid"] = _to_num(current_kw.get("bid"))
+        proposed_bid = (
+            _to_num(config.get("bid"))
+            if explicitBid
+            else round(before["bid"] * (1 + proposalRatio), 4)
+        )
+        decisions.append(policy.evaluate("keyword_bid", before["bid"], proposed_bid))
+        keyword_update = {"keywordId": keyword_id, "bid": proposed_bid}
+        after["bid"] = proposed_bid
+
+    if not decisions:
+        if proposalAction == "none":
+            return {
+                "status": "no_action",
+                "error": str(proposal.get("reason") or "上游策略建议本轮不动"),
+                "proposal": proposal,
+                "output": None,
+            }
+        return {
+            "status": "failed",
+            "error": "apply=true 但没有可执行字段（daily_budget / state / keyword_id+bid 至少一项）",
+            "output": None,
+        }
+
+    denied = [d for d in decisions if d["decision"] == "deny"]
+    if denied:
+        return {
+            "status": "denied",
+            "error": "; ".join(reason for d in denied for reason in d["reasons"]),
+            "decisions": decisions,
+            "proposed": after,
+            "output": None,
+        }
+
+    if len(decisions) > policy.max_actions_per_run:
+        return {
+            "status": "denied",
+            "error": f"单次动作数 {len(decisions)} 超过上限 {policy.max_actions_per_run}",
+            "decisions": decisions,
+            "proposed": after,
+            "output": None,
+        }
+
+    needsApproval = [d for d in decisions if d["decision"] == "approval_required"]
+    if needsApproval:
+        return {
+            "status": "approval_required",
+            "error": "; ".join(reason for d in needsApproval for reason in d["reasons"]),
+            "decisions": decisions,
+            "proposed": after,
+            "output": None,
+        }
+
+    ledger = AdActionLedger()
+    recentActions = ledger.countRecent(campaign_id, windowSeconds=86400)
+    if recentActions >= policy.max_actions_per_day:
+        return {
+            "status": "denied",
+            "error": f"活动 {campaign_id} 24 小时内已执行 {recentActions} 次，"
+            f"达到每日上限 {policy.max_actions_per_day}",
+            "decisions": decisions,
+            "proposed": after,
+            "output": None,
+        }
+    ledgerKey = ledger.key(
+        {
+            "platform": platform,
+            "campaign_id": campaign_id,
+            "campaign_update": {k: v for k, v in updates.items() if k != "campaignId"},
+            "keyword_update": keyword_update,
+        },
+        windowSeconds=DEFAULT_DEDUPE_WINDOW_SECONDS,
+    )
+    if ledger.isApplied(ledgerKey):
+        return {
+            "status": "duplicate",
+            "error": "同一动作在去重窗口内已执行，本次不重复写",
+            "result": {"before": before, "after": after},
+            "output": None,
+        }
+
+    results = []
+    if len(updates) > 1:
+        updated = await client.update_campaigns([updates], profile_id=profile_id, region=region)
+        results.append({"kind": "campaign", "result": updated})
+        if updated.get("status") != "success":
+            return {
+                "status": "failed",
+                "error": f"活动更新失败: {updated.get('error')}",
+                "result": {"before": before, "after": after},
+                "output": updated.get("output"),
+            }
+    if keyword_update:
+        updated = await client.update_keywords([keyword_update], profile_id=profile_id, region=region)
+        results.append({"kind": "keyword", "result": updated})
+        if updated.get("status") != "success":
+            return {
+                "status": "failed",
+                "error": f"关键词更新失败: {updated.get('error')}",
+                "result": {"before": before, "after": after},
+                "output": updated.get("output"),
+            }
+
+    ledger.record(
+        ledgerKey,
+        {
+            "campaign_id": campaign_id,
+            "before": before,
+            "after": after,
+            "decisions": decisions,
+        },
+    )
+    ledger.audit(
+        {
+            "platform": platform,
+            "campaign_id": campaign_id,
+            "keyword_id": keyword_id or None,
+            "before": before,
+            "after": after,
+            "decisions": decisions,
+            "ledger_key": ledgerKey,
+        }
+    )
+    return {
+        "status": "applied",
+        "error": None,
+        "result": {"before": before, "after": after, "ledger_key": ledgerKey},
+        "proposed": after,
+        "output": {
+            "platform": platform,
+            "campaign_id": campaign_id,
+            "executed": True,
+            "actions": results,
+        },
+    }
 
 
 # ==================== 节点执行器 ====================
@@ -1677,7 +2052,11 @@ async def exec_ad_streaming(config: dict, ctx: dict) -> dict:
 
     创建并管理广告投放计划（活动/预算/定向），
     优先调用 Agent 生成投放方案，无 Agent 时降级为规则模拟。
+    `apply=true` 时不再只出计划：读现值、过闸门、真写 Amazon Ads。
     """
+    if _truthy(config.get("apply")):
+        return await _applyAdChange(config, ctx)
+
     platform = str(config.get("platform") or "amazon")
     budget = str(config.get("budget") or "1000")
     targeting = str(config.get("targeting") or "自动定向")
@@ -1717,9 +2096,11 @@ async def exec_ad_streaming(config: dict, ctx: dict) -> dict:
                         "total_budget": float(_to_num(budget)),
                         "targeting": targeting,
                         "objective": objective,
-                        "status": "created",
+                        "status": "planned",
                     },
                     "source": "agent",
+                    "executed": False,
+                    "plan_only": True,
                 },
             }
         except Exception as e:  # noqa: BLE001
@@ -1737,7 +2118,7 @@ async def exec_ad_streaming(config: dict, ctx: dict) -> dict:
         "objective": objective,
         "profile_id": profile_id,
         "region": region,
-        "status": "created",
+        "status": "planned",
     }
     return {
         "status": "success",
@@ -1748,9 +2129,11 @@ async def exec_ad_streaming(config: dict, ctx: dict) -> dict:
                 "total_budget": daily,
                 "targeting": targeting,
                 "objective": objective,
-                "status": "created",
+                "status": "planned",
             },
             "fallback": True,
+            "executed": False,
+            "plan_only": True,
         },
     }
 
@@ -1791,9 +2174,19 @@ async def exec_ad_monitor(config: dict, ctx: dict) -> dict:
     except Exception as e:  # noqa: BLE001
         logger.debug("广告监控 API 不可用，使用本地模拟: %s", e)
 
-    # 模拟监控指标
+    # 平台 API 没有返回数据时，下面的指标是**模拟值**：必须如实标记，
+    # 下游任何自动调优看到 simulated=true 都不得据此花钱。
+    simulated = platform_metrics is None
     metrics = []
     alerts = []
+    if simulated:
+        alerts.append(
+            {
+                "ad_id": "",
+                "level": "warning",
+                "message": "平台 API 不可用：以下指标为模拟值，禁止用于自动投放决策",
+            }
+        )
     for idx, ad_id in enumerate(ad_ids):
         # 平台 API 有数据时优先使用平台数据
         if platform_metrics and idx < len(platform_metrics):
@@ -1849,6 +2242,13 @@ async def exec_ad_monitor(config: dict, ctx: dict) -> dict:
             "alerts": alerts,
             "platform": platform,
             "metric_fields": metric_list,
+            "simulated": simulated,
+            "data_quality": "simulated" if simulated else "real",
+            "source": (
+                "simulated"
+                if simulated
+                else ("amazon-ads" if platform == "amazon" else "platform-api")
+            ),
             "summary": {
                 "total_impressions": sum(m["impressions"] for m in metrics),
                 "total_clicks": sum(m["clicks"] for m in metrics),
@@ -1859,17 +2259,90 @@ async def exec_ad_monitor(config: dict, ctx: dict) -> dict:
     }
 
 
+def _strategyProposal(upstream: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
+    """由监控数据算出**可执行**的调优提案；模型只负责解释，不负责拍数字。
+
+    规则（脚本判定，避免模型幻觉直接改预算）：
+    - 缺销售额 / 模拟数据 → action=none（本条链没有可执行动作）；
+    - ACOS > 目标 × 1.2 → 预算下调 10%；
+    - ACOS < 目标 × 0.7 → 预算上调 10%；
+    - 其余保持不动。
+    10% 的步长落在 AdActionPolicy 的 30% 单次上限内，且每次仍会再过一次闸门。
+    """
+    summary = upstream.get("summary") if isinstance(upstream.get("summary"), dict) else {}
+    metrics = upstream.get("metrics") if isinstance(upstream.get("metrics"), list) else []
+    spend = _to_num(summary.get("total_spend"))
+    sales = _to_num(summary.get("total_sales"))
+    if (not spend or not sales) and metrics:
+        spend = spend or sum(_to_num(item.get("spend")) for item in metrics if isinstance(item, dict))
+        sales = sales or sum(
+            _to_num(item.get("sales7d") or item.get("sales"))
+            for item in metrics
+            if isinstance(item, dict)
+        )
+    targetAcos = _to_num(config.get("target_acos"), 0.30)
+    observed = {"spend": round(spend, 2), "sales": round(sales, 2), "target_acos": targetAcos}
+
+    if upstream.get("simulated") is True:
+        return {
+            "action": "none",
+            "reason": "上游监控为模拟数据，不产出可执行动作",
+            "observed": observed,
+        }
+    if sales <= 0:
+        return {
+            "action": "none",
+            "reason": "缺少销售额，无法计算 ACOS，本轮不动",
+            "observed": observed,
+        }
+    acos = spend / sales
+    observed["acos"] = round(acos, 4)
+    if acos > targetAcos * 1.2:
+        return {
+            "action": "campaign_budget",
+            "delta_ratio": -0.10,
+            "reason": f"ACOS {acos:.1%} 高于目标 {targetAcos:.0%} 的 1.2 倍，预算下调 10%",
+            "observed": observed,
+        }
+    if acos < targetAcos * 0.7:
+        return {
+            "action": "campaign_budget",
+            "delta_ratio": 0.10,
+            "reason": f"ACOS {acos:.1%} 低于目标 {targetAcos:.0%} 的 0.7 倍，预算上调 10%",
+            "observed": observed,
+        }
+    return {
+        "action": "none",
+        "reason": f"ACOS {acos:.1%} 在目标区间内，本轮不动",
+        "observed": observed,
+    }
+
+
 async def exec_ad_strategy(config: dict, ctx: dict) -> dict:
     """
     广告策略执行器
 
     基于平台/预算/目标生成智能投放策略，
     优先调用 Agent 生成策略建议，无 Agent 时降级为规则兜底策略。
+    上游监控数据参与判定：脚本算出 proposal，模型只解释与补充建议。
     """
     platform = str(config.get("platform") or "amazon")
     goal = str(config.get("goal") or "increase_sales")
     budget = str(config.get("budget") or "5000")
     product = str(config.get("product") or "")
+
+    upstream = _upstreamPayload(ctx)
+    proposal = _strategyProposal(upstream, config)
+    observed = proposal.get("observed") or {}
+    dataQuality = "simulated" if upstream.get("simulated") is True else (
+        "real" if observed.get("sales") else "missing"
+    )
+    dataHint = ""
+    if observed.get("sales"):
+        dataHint = (
+            f" 监控数据：花费 {observed.get('spend')} 元，销售额 {observed.get('sales')} 元，"
+            f"ACOS {observed.get('acos')}，目标 ACOS {observed.get('target_acos')}。"
+        )
 
     agent = _get_agent()
     if agent is not None:
@@ -1879,6 +2352,7 @@ async def exec_ad_strategy(config: dict, ctx: dict) -> dict:
                 f"目标：{goal}，预算：{budget} 元"
                 + (f"，商品：{product}" if product else "")
                 + "。请给出出价方式、目标人群、投放时段和预算分配建议。"
+                + dataHint
             )
             text = await agent.chat(prompt, system_prompt="你是资深电商广告投放专家。", metadata={"history": []})
             strategy_text = _extract_llm_text(text)
@@ -1892,8 +2366,19 @@ async def exec_ad_strategy(config: dict, ctx: dict) -> dict:
                 "time_range": "高峰时段优先",
                 "budget_allocation": "70% 核心词 / 30% 长尾词",
                 "source": "agent",
+                "proposal": proposal,
+                "data_quality": dataQuality,
             }
-            return {"status": "success", "output": {"strategy": strategy, "platform": platform, "goal": goal}}
+            return {
+                "status": "success",
+                "output": {
+                    "strategy": strategy,
+                    "platform": platform,
+                    "goal": goal,
+                    "proposal": proposal,
+                    "data_quality": dataQuality,
+                },
+            }
         except Exception as e:  # noqa: BLE001
             logger.warning("广告策略 Agent 生成失败，降级为规则策略: %s", e)
 
@@ -1915,8 +2400,19 @@ async def exec_ad_strategy(config: dict, ctx: dict) -> dict:
         "time_range": "高峰时段优先",
         "budget_allocation": "70% 核心词 / 30% 长尾词",
         "source": "rule",
+        "proposal": proposal,
+        "data_quality": dataQuality,
     }
-    return {"status": "success", "output": {"strategy": strategy, "platform": platform, "goal": goal}}
+    return {
+        "status": "success",
+        "output": {
+            "strategy": strategy,
+            "platform": platform,
+            "goal": goal,
+            "proposal": proposal,
+            "data_quality": dataQuality,
+        },
+    }
 
 
 async def exec_ad_cross(config: dict, ctx: dict) -> dict:
@@ -2015,6 +2511,7 @@ def register_commerce_nodes(registry) -> int:
                 inputs=node_def.get("inputs", []),
                 outputs=node_def.get("outputs", []),
                 source=node_def.get("source", "builtin"),
+                env_requirements=list(node_def.get("env_requirements") or []),
             ),
             executor,
         )

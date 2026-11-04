@@ -239,11 +239,16 @@
         "_resolve_credentials": "(self, client_id: 'str' = '', client_secret: 'str' = '') -> 'tuple'",
         "is_available": "(self, client_id: 'str' = '', client_secret: 'str' = '') -> 'bool'",
         "get_access_token": "(self, client_id: 'str' = '', client_secret: 'str' = '') -> 'str'",
-        "_ads_headers": "(self, token: 'str', client_id: 'str', profile_id: 'str') -> 'Dict[str, str]'",
+        "_ads_headers": "(self, token: 'str', client_id: 'str', profile_id: 'str', content_type: 'str' = 'application/json') -> 'Dict[str, str]'",
         "_region_base": "(self, region: 'str') -> 'str'",
         "fetch_campaign_metrics": "(self, campaign_ids: 'List[str]', metrics: 'List[str]', start_date: 'str', end_date: 'str', profile_id: 'str', region: 'str' = 'na', client_id: 'str' = '', client_secret: 'str' = '', max_polls: 'int' = 10, poll_interval: 'float' = 3.0) -> 'Dict[str, Any]'",
         "_download_rows": "(self, url: 'str') -> 'List[Dict[str, Any]]'",
-        "_aggregate_rows": "(rows: 'List[Dict[str, Any]]') -> 'List[Dict[str, Any]]'"
+        "_aggregate_rows": "(rows: 'List[Dict[str, Any]]') -> 'List[Dict[str, Any]]'",
+        "_writeResult": "(rows: 'Any') -> 'Dict[str, Any]'",
+        "list_campaigns": "(self, campaign_ids: 'List[str]', profile_id: 'str', region: 'str' = 'na', client_id: 'str' = '', client_secret: 'str' = '') -> 'Dict[str, Any]'",
+        "list_keywords": "(self, keyword_ids: 'List[str]', profile_id: 'str', region: 'str' = 'na', client_id: 'str' = '', client_secret: 'str' = '') -> 'Dict[str, Any]'",
+        "update_campaigns": "(self, campaigns: 'List[Dict[str, Any]]', profile_id: 'str', region: 'str' = 'na', client_id: 'str' = '', client_secret: 'str' = '') -> 'Dict[str, Any]'",
+        "update_keywords": "(self, keywords: 'List[Dict[str, Any]]', profile_id: 'str', region: 'str' = 'na', client_id: 'str' = '', client_secret: 'str' = '') -> 'Dict[str, Any]'"
       }
     },
     "_OpenGatewayClientBase": {
