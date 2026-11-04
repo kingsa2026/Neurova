@@ -1683,6 +1683,18 @@ class BrowserManager:
         """
         return self._dialog_handler.get_dialogs()
 
+    def availableBackendNames(self) -> List[str]:
+        """这台机器真能用的浏览器后端名（含按需池化的 camofox）。
+
+        与 `_backends`/`_backend_configs` 的关系：前者是运行时实装、后者是配置声明；
+        本方法只报实装，供 system prompt 的能力描述按真后端渲染，不把配置声明
+        当成可用能力。
+        """
+        names = sorted(self._backends.keys())
+        if self._camofox_enabled:
+            names.append("camofox")
+        return names
+
     def _load_config(self) -> None:
         """加载配置"""
         # 要交下去的那一份 handler **先记下来**，再决定注册哪几路后端："交出去"这件事
