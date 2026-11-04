@@ -684,8 +684,11 @@ canvas_run 失败 / 定时任务失败
 
 #### 5.8.5 安全闸门（节点修复专用，不借 RSI 的阶段 gate）
 
-- 改 config / 换已注册节点：可在 `NEUROVA_NODE_REPAIR=1` 武装下自动执行，
+- 改 config：可在 `NEUROVA_NODE_REPAIR=1` 武装下自动执行，
   但每轮写审计、最多 5 轮、总成本上限；
+- 换已注册节点：候选按同类别 + 标签近似生成，**默认只返回
+  `needs_approval`**；显式 `allow_replacements=true`（已批准构建批次）
+  才自动执行并重新评估，因为近似不等于语义等价；
 - 新建自定义节点 / 改已发布工作流：必须审批（复用 5.3/5.4 的闸门）；
 - 缺凭据 / 缺环境：发起 §5.0.4 的 secret/补充面板；Agent 不代写、不读取凭据值，
   用户不提供则 `blocked`，不拿默认值继续；
@@ -1167,7 +1170,8 @@ rg -n "workflows/.*/definition|writebackDefinition" \
 - B5 已结（见 §12.9）：画布批量一次事务提交；跨工具（画布+定义+custom 节点）
   仍不是单事务，按批次逐条审计；
 - `create_node` 候选仍不自动执行（需审批）；画布结构化差异已随 B5 batch 提交；
-- 「换节点」候选按同类别 + 标签近似生成，不保证语义等价，交给审批确认；
+- 「换节点」候选默认 `needs_approval`；显式 `allow_replacements=true`
+  才执行（§12.14）；
 - 真实 Amazon Ads 账号/凭据仍未验证（与 B10 一致）。
 
 
@@ -1306,7 +1310,8 @@ Amazon Ads 凭据，**不得声称已通过**；以下清单供有凭据的环�
 ### 12.13 跨工具事务边界裁定（2026-11-04）
 
 **结论**：不实现画布 + 自定义节点 + 工作流定义的跨存储 2PC；按 surface
-各自事务提交，失败可见、可回滚、逐条审计。这是**明确裁定**，不是遗漏。
+各自事务提交，并由**批次补偿日志 + `build_batch_compensate` 显式回滚**
+兜住半批风险（§12.14）。这是明确裁定，不是遗漏。
 
 **为什么不合并**：
 
@@ -1321,10 +1326,58 @@ Amazon Ads 凭据，**不得声称已通过**；以下清单供有凭据的环�
 - 批次审计（`workflow_definition_audit.jsonl` / AdActionLedger / 画布版本号）
   能逐条还原谁在哪个 surface 做了什么，人工/Agent 可按 surface 回滚。
 
-**残余风险（如实登记）**：
+**残余风险（已用补偿日志收敛）**：
 
-- 一次任务里先改画布成功、再激活自定义节点失败，会留下画布已变、
-  节点仍 draft 的半批状态；此时失败会在工具返回值与审计里显式可见，
-  需要 Agent 继续修复或用户按画布版本/节点批次回滚；
-- 不做自动补偿事务；如未来要补，应在 build 批次层引入**补偿日志**
-  （记录每个 surface 的 undo 操作），而不是把三套存储塞进一个 2PC。
+- 一次任务里先改画布成功、再激活自定义节点失败，仍可能留下画布已变、
+  节点仍 draft 的半批状态；失败会在工具返回值与审计里显式可见；
+- 现在可调用 `build_batch_compensate(batch_id)` 按逆序回滚本批次已记录的
+  undo（画布快照/新建画布/节点激活/工作流版本），已补偿条目不重放；
+- **自动补偿仍未做**：没有在失败瞬间自动触发补偿，需要 Agent/用户显式调用；
+  补偿日志只在有 BuildSession 批次上下文时记录，手工无批次写入不记。
+
+
+### 12.14 剩余风险处置记录（2026-11-04）
+
+**1）跨 surface 半批 → 批次补偿日志 + 回滚工具**
+
+- 新增 `neurova/build_mode/batch_journal.py`：按 `batch_id` 记录 undo，
+  `dedupe_key` 保证同一 surface 只存批次前快照（画布）或首次旧版本（工作流）；
+  默认落数据根 `build_batches/`，可用 `NEUROVA_BUILD_BATCH_JOURNAL_DIR` 覆盖；
+- 新增 `neurova/build_mode/batch_compensate.py`：按逆序执行 undo，
+  已补偿条目不重放，逐面失败即停并如实返回；
+- undo 动作：`restore_canvas`（版本前进、内容回退）、`delete_canvas`、
+  `deactivate_node`（active→draft 并退出注册表）、`rollback_workflow`
+  （回滚到批次前版本）；
+- 记录点收口在工具咽喉：
+  - `_canvas_call` 对所有画布写方法先存批次前快照；`create_canvas` 成功后记删除；
+  - `custom_node_activate` 首次激活记 `deactivate_node`；
+  - `workflow_definition_update` 记批次前版本；
+- 新工具 `build_batch_compensate(batch_id?)`：构建写门 + 非可复现，
+  缺省取当前 BuildSession 批次。
+
+**2）换节点候选语义不等价 → 默认审批，显式放行**
+
+- `WorkflowRepairSupervisor` 新增 `allowReplacements`（默认 False）；
+  `replace_node` 候选默认返回 `needs_approval`，不再仅凭
+  `NEUROVA_NODE_REPAIR=1` 自动执行；
+- 工具 `workflow_repair` 新增 `allow_replacements` 参数；只有显式 true
+  才应用换节点候选并重新评估；
+- `set_config` 仍按武装自动执行（值来自 schema/报错，不猜）。
+
+**验证**
+
+- 补偿判据：`7 passed`（三类 undo 逆序回滚、删除画布、未知动作保持待补偿、
+  日志去重、工具注册/门禁/非可复现、画布/节点/定义工具记录点）；
+- N5 判据：`19 passed`（含换节点默认 needs_approval 与显式放行两条路径）；
+- 全量 `tests/unit/neurflow` 818 passed；协作/构建/工具 658 passed；
+- 活体（真 `create_app` + 真 JWT + 真 BuildSession/存储/日志，10 个断言全 PASS）：
+  同批次写画布 → 激活自定义节点 → 改工作流 → 补偿日志覆盖三面 →
+  `build_batch_compensate` 一次回滚（画布空、节点 draft、工作流原内容）→
+  重复补偿 0 条 → 仓内 `data/` 指纹未变。
+
+**边界**
+
+- 自动补偿未做：失败瞬间不自动触发，需 Agent/用户调用工具；
+- 补偿日志只在有 BuildSession 批次上下文时记录；手工/无批次写入不记；
+- 跨存储 2PC 仍不做（§12.13）；补偿是逐面 undo，不是原子事务；
+- B10 真实账号、真实 LLM 供应商与浏览器 UI 仍未实测（外部条件）。

@@ -185,6 +185,7 @@ def _supervisor(
     candidateGenerator=None,
     armed=True,
     allowCommit=True,
+    allowReplacements=False,
     maxRounds=5,
     canvasStore=None,
     canvasOpService=None,
@@ -198,6 +199,7 @@ def _supervisor(
         candidateGenerator=candidateGenerator,
         armed=armed,
         allowCommit=allowCommit,
+        allowReplacements=allowReplacements,
         maxRounds=maxRounds,
         timeBudgetSeconds=30,
         canvasStore=canvasStore,
@@ -605,8 +607,25 @@ class TestWorkflowRepairSupervisor:
                 draft = storage.get_workflow(workflowId)
                 assert draft.nodes[1].type == "custom:swap_new"
 
+        gated = await _supervisor(
+            storage,
+            custom_service,
+            ekb,
+            _ScriptedExecute([_failure("swap required")]),
+        ).repair(workflowId="wf_swap", actorId="u1")
+        assert gated["success"] is False
+        assert gated["status"] == "needs_approval"
+        assert gated["reason"] == "replacement_requires_approval"
+        assert storage.get_workflow("wf_swap").nodes[1].type == "custom:swap_old"
+
         execute = _ScriptedExecute([_failure("swap required"), _success()], onCall=onCall)
-        supervisor = _supervisor(storage, custom_service, ekb, execute)
+        supervisor = _supervisor(
+            storage,
+            custom_service,
+            ekb,
+            execute,
+            allowReplacements=True,
+        )
         result = await supervisor.repair(workflowId="wf_swap", actorId="u1")
 
         assert result["success"] is True, result

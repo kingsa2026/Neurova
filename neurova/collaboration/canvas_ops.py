@@ -720,6 +720,44 @@ class CanvasOpService:
         )
         return positions
 
+    async def restore_snapshot(
+        self,
+        canvas_id: str,
+        nodes: List[Dict[str, Any]],
+        edges: List[Dict[str, Any]],
+        *,
+        base_version: Optional[int] = None,
+        session_id: Optional[str] = None,
+        actor: str = "agent",
+        requester_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """把 nodes/edges 恢复到给定快照（版本继续前进，不倒退）。"""
+        def _mut(record: Dict[str, Any]) -> Dict[str, Any]:
+            record["nodes"] = [dict(node) for node in (nodes or [])]
+            record["edges"] = [dict(edge) for edge in (edges or [])]
+            return record
+
+        record = self._store.mutate(
+            canvas_id,
+            _mut,
+            base_version=base_version,
+            requester_id=requester_id,
+        )
+        self._require_record(record, canvas_id)
+        payload = {
+            "version": int(record["version"]),
+            "nodes": list(record.get("nodes") or []),
+            "edges": list(record.get("edges") or []),
+        }
+        await self._broadcast(
+            session_id, "batch", canvas_id, int(record["version"]), payload, actor
+        )
+        return {
+            "version": int(record["version"]),
+            "node_count": len(payload["nodes"]),
+            "edge_count": len(payload["edges"]),
+        }
+
     async def apply_batch(
         self,
         canvas_id: str,

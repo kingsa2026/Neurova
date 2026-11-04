@@ -1033,7 +1033,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     },
     "workflow_repair": {
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
-        "description": "【工作流自愈】对失败的工作流/画布做最多 5 轮修复：在 DRAFT 副本上执行、读取 failed 节点、查 EKB 修复经验、生成配置补丁并重跑评估，通过后才提交目标。缺环境会停在预检并列出缺失变量，不烧轮次。需 NEUROVA_NODE_REPAIR=1 武装；提交已发布工作流/画布需批次审批。workflow_id 与 canvas_id 二选一。",
+        "description": "【工作流自愈】对失败的工作流/画布做最多 5 轮修复：在 DRAFT 副本上执行、读取 failed 节点、查 EKB 修复经验、生成配置补丁并重跑评估，通过后才提交目标。缺环境会停在预检并列出缺失变量，不烧轮次。需 NEUROVA_NODE_REPAIR=1 武装；提交已发布工作流/画布需批次审批。换节点候选按同类别+标签近似生成，默认只返回候选并要求显式 allow_replacements=true。workflow_id 与 canvas_id 二选一。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -1042,7 +1042,19 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                 "inputs": {"type": "object", "description": "每次试跑的输入（可选）"},
                 "max_rounds": {"type": "integer", "description": "最大修复轮次（1-5，默认 5）"},
                 "commit": {"type": "boolean", "description": "草稿通过后是否提交目标（默认 true）"},
+                "allow_replacements": {"type": "boolean", "description": "显式批准换节点候选（语义不保证等价；默认 false）"},
                 "batch_id": {"type": "string", "description": "构建批次 ID（可选，构建会话内缺省取会话批次）"},
+            },
+            "required": [],
+        },
+    },
+    "build_batch_compensate": {
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【批次补偿】按构建批次补偿日志逆序回滚画布快照/新建画布/自定义节点激活/工作流定义版本。用于一次任务里后一个 surface 失败、需要回收前面已提交变更的场景；已补偿条目不重放。缺省使用当前构建会话的 batch_id。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "batch_id": {"type": "string", "description": "构建批次 ID；缺省取当前构建会话批次"},
             },
             "required": [],
         },
@@ -1647,6 +1659,8 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     "workflow_rollback", "workflow_publish", "workflow_execute",
     # 自愈会执行草稿并可能提交目标，重放制造新版本/新画布状态
     "workflow_repair",
+    # 批次补偿会回滚多个 surface，重放制造新的版本/删除
+    "build_batch_compensate",
     # 产物件：落产物目录并注册 artifact（重放登记出第二份产物与下载口）
     "write_pdf",
     "canvas_add_node", "canvas_connect", "canvas_create", "canvas_remove_node",

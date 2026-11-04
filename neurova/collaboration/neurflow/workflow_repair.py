@@ -138,6 +138,7 @@ class WorkflowRepairSupervisor:
         auditor: Optional[Callable[[Dict[str, Any]], None]] = None,
         armed: Optional[bool] = None,
         allowCommit: Optional[bool] = None,
+        allowReplacements: bool = False,
         maxRounds: int = MAX_ROUNDS,
         timeBudgetSeconds: Optional[float] = None,
     ) -> None:
@@ -161,6 +162,9 @@ class WorkflowRepairSupervisor:
             if allowCommit is not None
             else os.environ.get("NEUROVA_NODE_REPAIR_COMMIT") == "1"
         )
+        # 换节点候选按同类别+标签近似生成，不保证语义等价：默认只出候选，
+        # 必须显式批准（allow_replacements=true）才自动执行。
+        self._allowReplacements = bool(allowReplacements)
         self._maxRounds = max(1, min(int(maxRounds or MAX_ROUNDS), MAX_ROUNDS))
         budget = timeBudgetSeconds
         if budget is None:
@@ -1109,6 +1113,11 @@ class WorkflowRepairSupervisor:
                 result["error"] = "存在必填配置缺失且无默认值，需要用户提供"
                 return pubResult()
 
+            if any(item.get("action") == "replace_node" for item in candidates) and not self._allowReplacements:
+                result["status"] = "needs_approval"
+                result["reason"] = "replacement_requires_approval"
+                result["error"] = "换节点候选按同类别+标签近似生成，语义不保证等价；需显式 allow_replacements=true 才执行"
+                return pubResult()
             if any(item.get("action") != "set_config" and item.get("action") != "replace_node" for item in candidates):
                 result["status"] = "needs_approval"
                 result["reason"] = "candidate_requires_approval"

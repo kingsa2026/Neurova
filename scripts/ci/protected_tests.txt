@@ -4262,6 +4262,8 @@ tests/unit/neurflow/test_api.py
 tests/unit/collaboration/test_canvas_batch_atomic.py
 # §12.4：交互回答后服务端自动拉起 Agent 回合。逐文件单跑 4 passed
 tests/unit/build_mode/test_build_resume.py
+# §12.13：跨 surface 批次补偿日志与回滚工具。逐文件单跑 7 passed
+tests/unit/build_mode/test_batch_compensation.py
 # Amazon 广告自动调优：策略上限/幂等账本/商务节点。逐文件单跑 22／26 passed
 tests/unit/neurflow/test_ad_auto_apply.py
 tests/unit/neurflow/test_ad_commerce_nodes.py

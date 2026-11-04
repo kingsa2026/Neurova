@@ -360,6 +360,8 @@ class ToolExecutor:
         # N5：环境预检 + 工作流自愈（DRAFT 试跑、EKB、5 轮预算）
         "node_env_preflight": "_execute_node_env_preflight",
         "workflow_repair": "_execute_workflow_repair",
+        # §12.13：构建批次跨 surface 补偿（画布/节点/定义）
+        "build_batch_compensate": "_execute_build_batch_compensate",
         # 定时任务：Agent 自建 cron/间隔任务，落平台调度器（重启由启动装配恢复）
         "schedule_task": "_execute_schedule_task",
         # 画布交互工具（Phase 1）：语义操作层薄封装，见 _execute_canvas_* 注释
@@ -2011,6 +2013,7 @@ class ToolExecutor:
             "workflow_publish",
             "workflow_execute",
             "workflow_repair",
+            "build_batch_compensate",
         }
     )
 
@@ -2608,7 +2611,10 @@ class ToolExecutor:
                 return {"success": False, "error": f"节点不存在: {node_type}"}
             if existing.batch_id != session.batch_id:
                 return {"success": False, "error": "只能激活本构建批次的 draft 节点"}
+            wasActive = existing.status == "active"
             node = service.activate_node(node_type)
+            if not wasActive:
+                self._journalNodeActivation(node_type)
             return {"success": True, "node": self._customNodeSummary(node)}
         except CustomNodeError as exc:
             return {"success": False, "code": exc.code, "error": str(exc)}
@@ -2695,10 +2701,13 @@ class ToolExecutor:
         user_id, _ = self._agent_identity()
         try:
             from neurova.collaboration.neurflow.workflow_definition_editor import (
+                getWorkflowDefinitionStorage,
                 updateWorkflowDefinition,
             )
 
-            return updateWorkflowDefinition(
+            storage = getWorkflowDefinitionStorage()
+            oldVersion = storage.get_workflow_version_number(workflow_id)
+            result = updateWorkflowDefinition(
                 workflow_id,
                 nodes=params.get("nodes"),
                 edges=params.get("edges"),
@@ -2706,7 +2715,11 @@ class ToolExecutor:
                 actorId=str(user_id or ""),
                 batchId=batch_id,
                 note=str(params.get("note") or ""),
+                storage=storage,
             )
+            if result.get("success"):
+                self._journalWorkflowUpdate(workflow_id, oldVersion)
+            return result
         except Exception as exc:  # noqa: BLE001
             return {"success": False, "error": f"修改工作流定义失败: {exc}"}
 
@@ -2866,6 +2879,7 @@ class ToolExecutor:
 
             supervisor = WorkflowRepairSupervisor(
                 allowCommit=self._repairCommitAllowed(),
+                allowReplacements=bool(params.get("allow_replacements")),
                 maxRounds=max_rounds,
             )
             return await supervisor.repair(
@@ -2880,6 +2894,26 @@ class ToolExecutor:
             )
         except Exception as exc:  # noqa: BLE001
             return {"success": False, "error": f"工作流自愈失败: {exc}"}
+
+    async def _execute_build_batch_compensate(self, params: Dict) -> Dict:
+        batch_id = str(params.get("batch_id") or "").strip() or self._journalBatchId()
+        if not batch_id:
+            return {
+                "success": False,
+                "code": "invalid_params",
+                "error": "缺少 batch_id，且当前没有构建会话批次",
+            }
+        user_id, _ = self._agent_identity()
+        try:
+            from neurova.build_mode.batch_compensate import compensateBuildBatch
+
+            return await compensateBuildBatch(
+                batch_id,
+                actorId=str(user_id or ""),
+                sessionId=self._canvas_session_id() or "",
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "error": f"批次补偿失败: {exc}"}
 
     async def _execute_sync_nodes(self, params: Dict) -> Dict:
         """把节点适配器同步进当前进程注册表（幂等）。"""
@@ -3099,12 +3133,130 @@ class ToolExecutor:
             return {"success": False, "code": e.code, "error": str(e)}
         return {"success": False, "code": "canvas_error", "error": str(e)}
 
+    _CANVAS_WRITE_METHODS = frozenset(
+        {
+            "add_node",
+            "connect",
+            "set_config",
+            "move_node",
+            "remove_node",
+            "remove_edge",
+            "apply_layout",
+            "apply_batch",
+        }
+    )
+
+    def _journalBatchId(self) -> str:
+        """当前构建批次的 batch_id；无构建会话返回空（不写补偿日志）。"""
+        try:
+            from neurova.core.build_context import getCurrentBuildSessionId
+
+            session_id = str(getCurrentBuildSessionId() or "").strip()
+            if not session_id:
+                return ""
+            from neurova.build_mode import get_build_session_manager
+
+            session = get_build_session_manager().get(session_id)
+            return str(getattr(session, "batch_id", "") or "") if session else ""
+        except Exception:  # noqa: BLE001 - 日志缺失不阻断画布写入
+            return ""
+
+    def _journalCanvasUndo(self, canvas_id: str) -> None:
+        batch_id = self._journalBatchId()
+        if not batch_id or not canvas_id:
+            return
+        try:
+            from neurova.build_mode.batch_journal import recordCompensation
+            from neurova.collaboration.canvas_store import get_canvas_store
+
+            record = get_canvas_store().get(canvas_id)
+            if record is None:
+                return
+            user_id, _ = self._agent_identity()
+            recordCompensation(
+                batch_id,
+                surface="canvas",
+                action="restore_canvas",
+                payload={
+                    "canvas_id": canvas_id,
+                    "nodes": record.get("nodes") or [],
+                    "edges": record.get("edges") or [],
+                },
+                actor=str(user_id or ""),
+            )
+        except Exception as exc:  # noqa: BLE001 - 补偿不可得要不阻断主写入
+            logger.warning("画布批次补偿日志写入失败 %s: %s", canvas_id, exc)
+
+    def _journalCanvasCreated(self, canvas_id: str) -> None:
+        batch_id = self._journalBatchId()
+        if not batch_id or not canvas_id:
+            return
+        try:
+            from neurova.build_mode.batch_journal import recordCompensation
+
+            user_id, _ = self._agent_identity()
+            recordCompensation(
+                batch_id,
+                surface="canvas",
+                action="delete_canvas",
+                payload={"canvas_id": canvas_id},
+                actor=str(user_id or ""),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("画布创建补偿日志写入失败 %s: %s", canvas_id, exc)
+
+    def _journalNodeActivation(self, node_type: str) -> None:
+        batch_id = self._journalBatchId()
+        if not batch_id or not node_type:
+            return
+        try:
+            from neurova.build_mode.batch_journal import recordCompensation
+
+            user_id, _ = self._agent_identity()
+            recordCompensation(
+                batch_id,
+                surface="node",
+                action="deactivate_node",
+                payload={"node_type": node_type},
+                actor=str(user_id or ""),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("节点激活补偿日志写入失败 %s: %s", node_type, exc)
+
+    def _journalWorkflowUpdate(self, workflow_id: str, oldVersion: int) -> None:
+        batch_id = self._journalBatchId()
+        if not batch_id or not workflow_id or int(oldVersion or 0) <= 0:
+            return
+        try:
+            from neurova.build_mode.batch_journal import recordCompensation
+
+            user_id, _ = self._agent_identity()
+            recordCompensation(
+                batch_id,
+                surface="workflow",
+                action="rollback_workflow",
+                payload={
+                    "workflow_id": workflow_id,
+                    "target_version": int(oldVersion),
+                    "batch_id": batch_id,
+                },
+                actor=str(user_id or ""),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("工作流更新补偿日志写入失败 %s: %s", workflow_id, exc)
+
     async def _canvas_call(self, method: str, **kwargs) -> Dict:
         """调用 CanvasOpService；业务异常统一转为结构化错误 dict"""
+        canvas_id = str(kwargs.get("canvas_id") or "")
+        if method in self._CANVAS_WRITE_METHODS and canvas_id:
+            self._journalCanvasUndo(canvas_id)
         try:
-            return await getattr(get_canvas_op_service(), method)(**kwargs)
+            result = await getattr(get_canvas_op_service(), method)(**kwargs)
         except (CanvasOpError, CanvasVersionConflict) as e:
             return self._canvas_error_result(e)
+        if method == "create_canvas" and isinstance(result, dict) and result.get("id"):
+            self._journalCanvasCreated(str(result["id"]))
+        return result
 
     @staticmethod
     def _is_canvas_error(result: Any) -> bool:
