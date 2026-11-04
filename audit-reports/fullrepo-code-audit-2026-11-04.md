@@ -344,4 +344,28 @@ association_cues 三件、evolution 七新件（blind_selection/deterministic_ju
 
 ---
 
+## 11. P1 处置进度与核验记录（2026-11-04）
+
+> P1×8 已按 §10 处置序①-④修复落库（`31560d222` fix(security)＝批①②、`333a0e5b1` fix(desktop)＝P1-6，前端死码批 P1-7/P1-8 随前端提交收口）。
+> 本节为**独立核验记录**：逐项 HEAD 现读原文 + 重跑测试门 + 真实链路活体。结论：**8/8 修复并核验通过**。
+
+| 项 | 修复实状（HEAD 现读） | 测试门 | 活体 / 实测 |
+|----|------|------|------|
+| P1-1 鉴权收紧 | ✅ model.py 9 个非 GET 端点全挂 `get_current_user`，5 个 GET 保持 `get_optional_user`（读面不变） | ✅ `test_model_write_auth_gate` 11 用例；受影响既有 4 套件（capability/outputProbe）带 token 跟随改造 | ✅ 真后端 9527 非变更探针：匿名 check-connection → 401、匿名 DELETE（不存在 id）→ 401、GET /models → 200 |
+| P1-2 首号 fail-closed | ✅ `_isServerFacingDeployment`（NEUROVA_HOST 非环回＝服务端形态）缺令牌 403；桌面形态行为钉住不变 | ✅ `test_s04_bootstrap_admin_token_gate` 11 用例 | ✅ 隔离实例 `0.0.0.0:19527` + 全新数据目录：无令牌注册 → **403**（诚实 detail 点名配置方法） |
+| P1-3 SSRF 逐跳 | ✅ http_fetch 双引擎禁自动跟随（curl `allow_redirects=False` / urllib `_NoRedirectHandler`）+ 显式逐跳循环 + `url_validator` 注入口；reach 两咽喉点接线 `_validateHopUrl` | ✅ `test_http_fetch_redirect_guard` 5 用例；既有 urllib 打桩三处随实现缝迁移 | ✅ 真 curl_cffi + 真本地 302 跳环回：守卫链 `ValueError` 拒（127.0.0.0/8），无守卫链到终址（跟随能力本身实证存在） |
+| P1-4 TB 补 reindex | ✅ `repository.py:957` 起 TB 分支登记 `_record_index_op("reindex", ...)`，与创建路径同口径 | ✅ `test_sourceTimeAwareness::TestSameSourceReingestReindexesIndex` + 增量索引套件 | ⚫ 存储内部态；以真管线 E2E 为证（`test_sourceTimestampImportE2E` 真 docx → 真端点，绿） |
+| P1-5 企微源时间 | ✅ `resolveSourceDates` 单源迁 `document_pipeline.py`；`knowledge_ingestion`/`ingest_bridge` 双边界同源消费（教义 6 收口） | ✅ `test_wecomIngestSourceDates` 2 用例 + `test_sourceTimestampContract` 迁移 | ⚫ 同上，真管线 E2E 绿 |
+| P1-6 下载完整性 | ✅ `models/MANIFEST.json` 双归档钉 sha256；`lib.rs` `sha256_file`/`verify_sha256`（sha2 0.10，锁文件内既有），摘要不符诚实报错不进解压 | ✅ `test_route_b_runtime_download` 扩守卫（钉值格式 + 校验调用序源级咬合） | ✅ **两份钉值经真下载实测吻合**（npmmirror 现取：python `e90c1b64…` / node `edaca9bd…`） |
+| P1-7 前端双死码 | ✅ `collaboration.optimized.ts` / `chat.optimized.ts` 删净（全仓零引用复核） | ✅ vitest 285 文件 / **2313 用例全绿** | — |
+| P1-8 SSE 死链 | ✅ `getConsoleChatSSEUrl` 删净，新增退役守卫 `retiredArtifacts.test.ts` 咬合 | ✅ 同上 + `vue-tsc --noEmit` 过 | — |
+
+**核验遗留（如实登记，不属 P1 未竟）**：
+- `lib.rs` 未编译验证：本机无 cargo（PATH/cmd/用户目录均查证无）；sha2 为锁内既有依赖且源级守卫已咬合校验调用序，`cargo check` 待有 Rust 工具链的环境补跑。
+- P1-1 的角色级收口（写面 `require_admin`）与 §10 批④⑤⑥（P2×15 / P3×9 / 待拍板）仍待点单。
+
+*核验方式：HEAD 现读原文 + 222 项后端用例（含 P1 全修复面）+ 前端两道门 + 9527 真后端非变更探针 + 真下载哈希核对。临时验证实例与端口已全部清理。*
+
+---
+
 *本文件为只读审计产物，未改动任何代码；归置 audit-reports/ 与旧台账同目录。*
