@@ -47,6 +47,17 @@ def _redact_params(params: Any) -> Any:
     return params
 
 
+def redactSensitiveValueByKey(key: str, value: Any) -> Any:
+    """按键名判定脱敏（键驱动出口脱敏的公共入口，候选 C2）。
+
+    trace 落盘等结构化出口按键取值时复用本判定与打码形状——键模式
+    （``_SENSITIVE_KEY``）与打码形状都只有这一份定义，不另起炉灶。
+    键不敏感时原样返回。"""
+    if _SENSITIVE_KEY.search(str(key)):
+        return _redact_value(value)
+    return value
+
+
 def _redact_payload(value: Any) -> Tuple[Any, bool]:
     """按载荷自身形态脱敏；返回 (脱敏值, 是否应丢弃该键)。
 

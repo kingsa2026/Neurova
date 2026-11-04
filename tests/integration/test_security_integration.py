@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from neurova.core.event_bus import EventBus
 from neurova.core.config import ConfigManager
 from neurova.security.rbac import RBACManager, Permission
-from neurova.security.data_masking import DataMasking
+from neurova.security.sensitive_info import sanitizeSensitive
 from neurova.auth.password_hasher import PasswordHasher
 
 
@@ -45,7 +45,6 @@ class TestSecurityIntegration(unittest.TestCase):
         # 生产侧没有 reset 钩子，这一处不是绕过装配点造假状态。
         RBACManager._instance = None
         self.rbac_manager = RBACManager(self.rbacDbPath)
-        self.data_masker = DataMasking()
         self.password_hasher = PasswordHasher()
 
     def tearDown(self):
@@ -102,7 +101,10 @@ class TestSecurityIntegration(unittest.TestCase):
         def view(uid: str):
             if self.rbac_manager.has_permission(uid, Permission.USER_READ.value):
                 return sensitive_data
-            return self.data_masker.mask_dict(sensitive_data)
+            # masked view（候选 C2 改造）：data_masking 已退役（与单源规则表
+            # 同契约重复、生产零消费），文本卫生统一走 sensitive_info 单源——
+            # 逐值打码、键名保留
+            return {k: sanitizeSensitive(str(v)) for k, v in sensitive_data.items()}
 
         data_for_admin = view("user1")
         data_for_user = view("user2")

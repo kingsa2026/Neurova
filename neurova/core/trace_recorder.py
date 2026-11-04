@@ -27,6 +27,41 @@ logger = get_logger(__name__)
 _UNSAFE_PATH_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
+def _maskPayloadStrings(value: Any) -> Any:
+    """轨迹工件出口脱敏（候选 C2）：键驱动 + 内容驱动组合，两个单源各管一半——
+
+    - 键驱动：键名命中敏感模式（password/token/secret/api_key…）的值走
+      privacy_gate 的 ``redactSensitiveValueByKey``（键模式与打码形状唯一出处）；
+    - 内容驱动：字符串值走 sensitive_info ``sanitizeSensitive``（keyValue/PII 规则）。
+
+    不能在 json.dumps 后对整串替换——单源打码会吃掉 JSON 值的引号
+    （实测 `"password": "x"` → `"password": ***`），产出不可解析文件；
+    也不能只做内容驱动——孤立值（无键值相邻）规则不命中。
+    卫生面故障放行原文（fail-open，不阻断轨迹落盘）。
+    """
+    try:
+        from neurova.security.privacy_gate import redactSensitiveValueByKey
+        from neurova.security.sensitive_info import sanitizeSensitive
+    except Exception:  # noqa: BLE001
+        return value
+
+    def _walk(node: Any, key: Any = None) -> Any:
+        if key is not None:
+            node = redactSensitiveValueByKey(str(key), node)
+        if isinstance(node, str):
+            return sanitizeSensitive(node)
+        if isinstance(node, dict):
+            return {k: _walk(v, key=k) for k, v in node.items()}
+        if isinstance(node, list):
+            return [_walk(v) for v in node]
+        return node
+
+    try:
+        return _walk(value)
+    except Exception:  # noqa: BLE001 - 卫生面故障放行原文
+        return value
+
+
 def _safe_path_seg(value: str) -> str:
     """把 user_id/agent_id/session_id/trace_id 变成可作目录/文件名的安全段。"""
     s = _UNSAFE_PATH_CHARS.sub("_", str(value or ""))
@@ -344,7 +379,8 @@ class TrajectoryRecorder:
         try:
             # 先序列化再原子写：序列化异常绝不截断已有旧文件
             # （原实现 open(path,'w') 在 json.dump 抛错后留下 0 字节残档）。
-            payload = json.dumps(trace.to_dict(), indent=2, ensure_ascii=False)
+            # 序列化前逐字符串值脱敏（候选 C2）——整串替换会产出非法 JSON。
+            payload = json.dumps(_maskPayloadStrings(trace.to_dict()), indent=2, ensure_ascii=False)
             tmp_path = save_path.with_name(save_path.name + ".tmp")
             with open(tmp_path, "w", encoding="utf-8") as f:
                 f.write(payload)
