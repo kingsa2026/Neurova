@@ -194,6 +194,17 @@ class AppContainerSandbox:
             None, 0, ctypes.byref(psid),
         )
         if hr != 0:
+            # ERROR_ALREADY_EXISTS：上一次清理失败留下了同名 profile。
+            # 不把它当创建失败——派生旧 profile 的 SID 直接复用，避免
+            # 「清理失败 → 创建失败」连锁（P3-6）。
+            if (hr & 0xFFFFFFFF) == 0x800700B7:
+                existing = ctypes.c_void_p()
+                hrDerive = userenv.DeriveAppContainerSidFromAppContainerName(
+                    name, ctypes.byref(existing)
+                )
+                if hrDerive == 0:
+                    logger.debug("复用已存在的 AppContainer profile: %s", name)
+                    return name, existing.value
             raise OSError(f"CreateAppContainerProfile hr=0x{hr & 0xFFFFFFFF:x}")
         logger.debug("AppContainer profile 创建: %s", name)
         return name, psid.value
