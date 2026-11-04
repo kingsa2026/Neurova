@@ -68,7 +68,7 @@ function handleClick(e: MouseEvent) {
 <style scoped>
 .canvas-minimap {
   position: absolute;
-  right: 12px;
+  left: 12px;
   bottom: 12px;
   width: 180px;
   height: 120px;
@@ -77,7 +77,8 @@ function handleClick(e: MouseEvent) {
   border-radius: 8px;
   overflow: hidden;
   cursor: pointer;
-  z-index: 50;
+  /* 辅助视图，不得盖住 AI 设计对话框（.nl-designer z-index: 30） */
+  z-index: 20;
 }
 .mini-node {
   fill: var(--nr-primary-light, #818cf8);

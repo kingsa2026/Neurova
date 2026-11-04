@@ -159,6 +159,18 @@ describe('GlassNavGroup 可折叠分组', () => {
     expect(wrapper.find('.child').exists()).toBe(false)
   })
 
+  it('defaultOpen=true 首次展开；用户手动折叠后以持久化状态为准', async () => {
+    const wrapper = mountGroup({ defaultOpen: true })
+    expect(wrapper.find('.child').exists()).toBe(true)
+
+    await wrapper.find('.nr-nav-group-head').trigger('click')
+    expect(wrapper.find('.child').exists()).toBe(false)
+    expect(localStorage.getItem('nr-nav-group-test-group')).toBe('false')
+
+    const remounted = mountGroup({ defaultOpen: true })
+    expect(remounted.find('.child').exists()).toBe(false)
+  })
+
   it('展开状态持久化到 localStorage，重挂载后保持展开', async () => {
     const wrapper = mountGroup()
     await wrapper.find('.nr-nav-group-head').trigger('click')

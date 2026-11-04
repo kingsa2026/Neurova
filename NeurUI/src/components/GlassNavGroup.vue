@@ -52,11 +52,14 @@ const props = withDefaults(defineProps<{
   activePathPrefix?: string
   /** 子项数（折叠徽标展示） */
   count?: number
+  /** 首次访问（无持久化状态）时是否展开；用户手动折叠后以持久化状态为准 */
+  defaultOpen?: boolean
 }>(), {
   collapsed: false,
   firstItemTo: '',
   activePathPrefix: '',
   count: 0,
+  defaultOpen: false,
 })
 
 const route = useRoute()
@@ -64,8 +67,9 @@ const { t } = useI18n()
 
 const STORAGE_PREFIX = 'nr-nav-group-'
 
-const initial = secureStorage.getObject<boolean>(STORAGE_PREFIX + props.storageKey, false)
-const open = ref(initial)
+// 三态读取：null = 从未操作过（用 defaultOpen），true/false = 用户显式选择
+const initial = secureStorage.getObject<boolean | null>(STORAGE_PREFIX + props.storageKey, null)
+const open = ref(initial === null ? props.defaultOpen : initial)
 
 function toggle() {
   open.value = !open.value
