@@ -49,12 +49,15 @@ class AmazonAdsClient:
             raise api.ExternalAPIError(f"Amazon Ads LWA 令牌交换失败: {data}")
         return str(token)
 
-    def _ads_headers(self, token: str, client_id: str, profile_id: str) -> Dict[str, str]:
+    def _ads_headers(
+        self, token: str, client_id: str, profile_id: str, content_type: str = "application/json"
+    ) -> Dict[str, str]:
         return {
             "Authorization": f"Bearer {token}",
             "Amazon-Advertising-API-ClientId": str(client_id),
             "Amazon-Advertising-API-Scope": str(profile_id),
-            "Content-Type": "application/json",
+            "Accept": content_type,
+            "Content-Type": content_type,
             "user-agent": "Neurova/1.0 (Language=Python)",
         }
 
@@ -168,6 +171,149 @@ class AmazonAdsClient:
                     entry[key] = round(float(entry.get(key, 0)) + float(value), 4)
         return list(aggregated.values())
 
+    @staticmethod
+    def _writeResult(rows: Any) -> Dict[str, Any]:
+        """把 Ads 写接口的逐条结果归一：有错误就如实 failed，不把部分失败画成成功。"""
+        items = rows if isinstance(rows, list) else []
+        errors = [
+            item
+            for item in items
+            if isinstance(item, dict)
+            and (item.get("errors") or str(item.get("code") or "SUCCESS").upper() != "SUCCESS")
+        ]
+        if errors:
+            return {
+                "status": "failed",
+                "output": {"items": items},
+                "error": str(errors)[:800],
+                "provider": "amazon-ads",
+            }
+        return api._ok({"items": items}, "amazon-ads")
+
+    async def list_campaigns(
+        self,
+        campaign_ids: List[str],
+        profile_id: str,
+        region: str = "na",
+        client_id: str = "",
+        client_secret: str = "",
+    ) -> Dict[str, Any]:
+        """读取 Sponsored Products 活动（预算/状态），供写前比对与闸门判定。"""
+        cid, cs = self._resolve_credentials(client_id, client_secret)
+        if not (cid and cs):
+            return api._fail("Amazon Ads API 未配置（需 client_id/client_secret）", "amazon-ads")
+        if not str(profile_id or "").strip():
+            return api._fail("Amazon Ads API 需要 profileId（GET /v2/profiles 获取）", "amazon-ads")
+        try:
+            token = await self.get_access_token(client_id, client_secret)
+            headers = self._ads_headers(
+                token, cid, profile_id, "application/vnd.spCampaign.v3+json"
+            )
+            body: Dict[str, Any] = {}
+            ids = [str(c).strip() for c in campaign_ids if str(c).strip()]
+            if ids:
+                body["campaignIdFilter"] = {"include": ids}
+            data = await api._http_post(
+                f"{self._region_base(region)}/sp/campaigns/list", headers=headers, json=body
+            )
+            campaigns = data.get("campaigns") if isinstance(data, dict) else None
+            return api._ok({"campaigns": campaigns or [], "raw": data}, "amazon-ads")
+        except api.ExternalAPIError as exc:
+            api.logger.warning("Amazon Ads 活动读取失败: %s", exc)
+            return api._fail(str(exc), "amazon-ads")
+
+    async def list_keywords(
+        self,
+        keyword_ids: List[str],
+        profile_id: str,
+        region: str = "na",
+        client_id: str = "",
+        client_secret: str = "",
+    ) -> Dict[str, Any]:
+        """读取 Sponsored Products 关键词（出价/状态），供写前比对与闸门判定。"""
+        cid, cs = self._resolve_credentials(client_id, client_secret)
+        if not (cid and cs):
+            return api._fail("Amazon Ads API 未配置（需 client_id/client_secret）", "amazon-ads")
+        if not str(profile_id or "").strip():
+            return api._fail("Amazon Ads API 需要 profileId（GET /v2/profiles 获取）", "amazon-ads")
+        try:
+            token = await self.get_access_token(client_id, client_secret)
+            headers = self._ads_headers(
+                token, cid, profile_id, "application/vnd.spKeyword.v3+json"
+            )
+            body: Dict[str, Any] = {}
+            ids = [str(k).strip() for k in keyword_ids if str(k).strip()]
+            if ids:
+                body["keywordIdFilter"] = {"include": ids}
+            data = await api._http_post(
+                f"{self._region_base(region)}/sp/keywords/list", headers=headers, json=body
+            )
+            keywords = data.get("keywords") if isinstance(data, dict) else None
+            return api._ok({"keywords": keywords or [], "raw": data}, "amazon-ads")
+        except api.ExternalAPIError as exc:
+            api.logger.warning("Amazon Ads 关键词读取失败: %s", exc)
+            return api._fail(str(exc), "amazon-ads")
+
+    async def update_campaigns(
+        self,
+        campaigns: List[Dict[str, Any]],
+        profile_id: str,
+        region: str = "na",
+        client_id: str = "",
+        client_secret: str = "",
+    ) -> Dict[str, Any]:
+        """更新 Sponsored Products 活动（预算/状态），走 v3 campaign management 写接口。"""
+        cid, cs = self._resolve_credentials(client_id, client_secret)
+        if not (cid and cs):
+            return api._fail("Amazon Ads API 未配置（需 client_id/client_secret）", "amazon-ads")
+        if not str(profile_id or "").strip():
+            return api._fail("Amazon Ads API 需要 profileId（GET /v2/profiles 获取）", "amazon-ads")
+        try:
+            token = await self.get_access_token(client_id, client_secret)
+            headers = self._ads_headers(
+                token, cid, profile_id, "application/vnd.spCampaign.v3+json"
+            )
+            data = await api._http_put(
+                f"{self._region_base(region)}/sp/campaigns",
+                headers=headers,
+                json={"campaigns": list(campaigns)},
+            )
+            rows = data.get("campaigns") if isinstance(data, dict) else data
+            return self._writeResult(rows)
+        except api.ExternalAPIError as exc:
+            api.logger.warning("Amazon Ads 活动更新失败: %s", exc)
+            return api._fail(str(exc), "amazon-ads")
+
+    async def update_keywords(
+        self,
+        keywords: List[Dict[str, Any]],
+        profile_id: str,
+        region: str = "na",
+        client_id: str = "",
+        client_secret: str = "",
+    ) -> Dict[str, Any]:
+        """更新 Sponsored Products 关键词出价/状态，走 v3 keyword management 写接口。"""
+        cid, cs = self._resolve_credentials(client_id, client_secret)
+        if not (cid and cs):
+            return api._fail("Amazon Ads API 未配置（需 client_id/client_secret）", "amazon-ads")
+        if not str(profile_id or "").strip():
+            return api._fail("Amazon Ads API 需要 profileId（GET /v2/profiles 获取）", "amazon-ads")
+        try:
+            token = await self.get_access_token(client_id, client_secret)
+            headers = self._ads_headers(
+                token, cid, profile_id, "application/vnd.spKeyword.v3+json"
+            )
+            data = await api._http_put(
+                f"{self._region_base(region)}/sp/keywords",
+                headers=headers,
+                json={"keywords": list(keywords)},
+            )
+            rows = data.get("keywords") if isinstance(data, dict) else data
+            return self._writeResult(rows)
+        except api.ExternalAPIError as exc:
+            api.logger.warning("Amazon Ads 关键词更新失败: %s", exc)
+            return api._fail(str(exc), "amazon-ads")
+
 
 AmazonAdsClient.__module__ = api.__name__
 AmazonAdsClient.__init__.__module__ = api.__name__
@@ -179,3 +325,8 @@ AmazonAdsClient._region_base.__module__ = api.__name__
 AmazonAdsClient.fetch_campaign_metrics.__module__ = api.__name__
 AmazonAdsClient._download_rows.__module__ = api.__name__
 AmazonAdsClient._aggregate_rows.__module__ = api.__name__
+AmazonAdsClient._writeResult.__module__ = api.__name__
+AmazonAdsClient.list_campaigns.__module__ = api.__name__
+AmazonAdsClient.list_keywords.__module__ = api.__name__
+AmazonAdsClient.update_campaigns.__module__ = api.__name__
+AmazonAdsClient.update_keywords.__module__ = api.__name__

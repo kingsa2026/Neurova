@@ -33,10 +33,15 @@ _LLM_PROMPT = """你是一个工作流设计助手。根据用户描述，设计
 可用节点类型（只允许用这些）:
 - builtin:start, builtin:end, builtin:llm, builtin:agent, builtin:condition,
   builtin:memory-load, builtin:memory-save, builtin:text_input, builtin:media_input,
-  builtin:output, builtin:knowledge_base, builtin:remote_api
+  builtin:output, builtin:knowledge_base, builtin:remote_api, builtin:approval,
+  builtin:ad-monitor, builtin:ad-strategy, builtin:ad-streaming
 LLM 节点 config 示例: {{"prompt": "任务提示", "model_name": "auto", "model_provider": "auto", "temperature": 0.7, "max_tokens": 2048}}
 Agent 节点 config 示例: {{"agent_id": "default", "task": "任务描述"}}
 知识库节点 config 示例: {{"kb_type": "iflow", "query": "检索词", "limit": 5}}
+广告监控 config 示例: {{"platform": "amazon", "ad_ids": "活动ID，逗号分隔", "profile_id": "Amazon Ads profileId", "metrics": "impressions,clicks,conversions,spend"}}
+广告策略 config 示例: {{"platform": "amazon", "goal": "increase_sales", "target_acos": "0.3"}}
+广告投放 config 示例: {{"platform": "amazon", "apply": "true", "campaign_id": "活动ID", "profile_id": "profileId", "auto_apply": "env"}}（放在广告策略之后，上游 proposal 会自动成为目标值；未配置真实写权限时 apply 保持 "false"）
+审批节点 config 示例: {{"approver": "审批人", "channel": "feishu", "message": "请确认本次广告调整"}}
 
 节点位置请横向排列（x 递增 220），首节点为 builtin:start、末节点为 builtin:end，
 边用源节点 outputs 与目标节点 inputs 的端口 id 连接。

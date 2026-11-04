@@ -19,6 +19,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -354,6 +355,25 @@ async def _http_get(
         raise ExternalAPIError(f"HTTP GET 失败: {exc}") from exc
 
 
+async def _http_put(
+    url: str,
+    headers: Optional[Dict[str, str]] = None,
+    json: Optional[Dict[str, Any]] = None,
+    timeout: float = 30.0,
+) -> Dict[str, Any]:
+    if not _HTTPX_AVAILABLE:
+        raise ExternalAPIError("httpx 未安装，无法调用外部 API")
+    try:
+        async with _http_client(timeout) as client:
+            resp = await client.put(url, headers=headers, json=json)
+            resp.raise_for_status()
+            return resp.json()
+    except ExternalAPIError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise ExternalAPIError(f"HTTP PUT 失败: {exc}") from exc
+
+
 async def _http_get_text(
     url: str,
     headers: Optional[Dict[str, str]] = None,
@@ -487,12 +507,22 @@ def get_secret_store():
 
 
 def get_api_key(key_name: str) -> Optional[str]:
+    """SecretStore 优先，其次环境变量。
+
+    错误文案一直让用户设 `NEUROVA_AMAZON_ADS_CLIENT_ID` 这类环境变量，
+    但此前只读 SecretStore，按提示配置的人永远拿到"未配置"——环境变量
+    是部署侧唯一不用起服务的配置入口，必须接上。
+    """
     try:
         value = get_secret_store().get(key_name)
-        return str(value) if value else None
+        if value:
+            return str(value)
     except Exception as exc:  # noqa: BLE001
         logger.warning("读取 SecretStore key %s 失败: %s", key_name, exc)
-        return None
+    envValue = os.environ.get(key_name)
+    if envValue is not None and str(envValue).strip():
+        return str(envValue).strip()
+    return None
 
 
 def resolve_api_key(key_names: List[str], explicit: str = "") -> Optional[str]:
