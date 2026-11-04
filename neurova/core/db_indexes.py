@@ -198,7 +198,8 @@ def collect_index_snapshot(db_path: str) -> Dict[str, Any]:
                         for info in conn.execute(f"PRAGMA index_info('{name}')").fetchall()
                     ]
                 except sqlite3.DatabaseError:
-                    pass
+                    logger.debug("PRAGMA index_info 失败，索引 %s 的 columns 按空处理",
+                                 name, exc_info=True)
                 entries.append({"name": name, "unique": unique, "columns": columns})
                 index_count += 1
             if entries:

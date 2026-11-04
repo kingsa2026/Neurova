@@ -219,7 +219,7 @@ class ExecutionMonitor:
             try:
                 handler(record)
             except Exception:
-                pass
+                logger.debug("指标处理器异常（指标 %s）: %r", name, handler, exc_info=True)
 
     def create_alert(self, level: AlertLevel, title: str, message: str, source: str = "") -> AlertRecord:
         """创建告警"""
@@ -235,7 +235,7 @@ class ExecutionMonitor:
             try:
                 handler(alert)
             except Exception:
-                pass
+                logger.debug("告警处理器异常（告警 %s）: %r", title, handler, exc_info=True)
 
         return alert
 
@@ -459,7 +459,7 @@ class ExecutionMonitor:
                     logger.debug("加载执行日志: %s", fname)
                     loaded += 1
                 except Exception:
-                    pass
+                    logger.debug("执行日志加载失败（已跳过）: %s", fname, exc_info=True)
         return loaded
 
     def generate_statistics_report(self) -> str:

@@ -17,7 +17,7 @@ import uuid
 from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 logger = None  # 本模块不自持 logger（避免与聚合器的 logger 语义混淆）
 
@@ -95,6 +95,27 @@ class KnowledgeSearchRequest(BaseModel):
     updated_after: Optional[float] = None
     source_modified_after: Optional[str] = None
     source_modified_before: Optional[str] = None
+
+    @field_validator("source_modified_after", "source_modified_before")
+    @classmethod
+    def _rejectUnparseableSourceDate(cls, value):
+        """非法过滤值在请求边界 422，不许静默跳过。
+
+        `_parseSourceDate` 对不可考值返回 None；若在 repository 里静默跳过，
+        请求会得到 200＋被收窄（或未收窄）的结果集，排障时看不出参数写错了。
+        """
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        from neurova.knowledge.repository import _parseSourceDate
+
+        if _parseSourceDate(text) is None:
+            raise ValueError(
+                "源时间过滤值不可解析（支持 ISO 8601、epoch 秒、PDF D: 形）"
+            )
+        return text
     geo_radius: Optional[Dict[str, float]] = Field(
         default=None, description="半径过滤 {lat, lon, radius_km}")
     geo_bbox: Optional[Dict[str, float]] = Field(

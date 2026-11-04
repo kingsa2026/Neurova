@@ -507,7 +507,9 @@ class ToolEngine:
                 )
                 parameters.append(p)
         except Exception:
-            pass
+            # 反射失败（动态构造/C 扩展/半初始化 callable）会让暴露给 LLM 的
+            # 参数表退化成空列表；留痕但不改控制流（空列表语义本身保留）。
+            logger.warning("工具参数反射失败，schema 将退化为空: %r", func, exc_info=True)
         return parameters
 
     def _is_skill_tool(self, tool_name: str) -> bool:

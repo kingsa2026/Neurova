@@ -44,6 +44,10 @@ class SupervisorTaskLedger:
         self._conn.row_factory = sqlite3.Row
         applyMigrations(self._conn, _DOMAIN)
 
+    @property
+    def path(self) -> str:
+        return str(self._path)
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()
@@ -80,14 +84,33 @@ class SupervisorTaskLedger:
 
 
 _ledger: Optional[SupervisorTaskLedger] = None
-_ledger_lock = threading.Lock()
+_ledger_lock = threading.RLock()
 
 
 def get_supervisor_ledger(dbPath: Optional[str] = None) -> SupervisorTaskLedger:
+    """取进程级账本单例（DCL）。
+
+    带参只允许在**首次创建**时指定路径；实例已存在且路径不同必须显式
+    `reset_supervisor_ledger()`——旧实现 `if _ledger is None or dbPath:`
+    会静默覆盖全局实例，旧连接不关、已持引用的调用方与后续取到的不是
+    同一份，账本的幂等目的直接失效。
+    """
     global _ledger
+    if _ledger is not None:
+        if dbPath and str(dbPath) != _ledger.path:
+            raise ValueError(
+                "SupervisorTaskLedger 已绑定 %s，拒绝改绑 %s；"
+                "换库请先 reset_supervisor_ledger()" % (_ledger.path, dbPath)
+            )
+        return _ledger
     with _ledger_lock:
-        if _ledger is None or dbPath:
+        if _ledger is None:
             _ledger = SupervisorTaskLedger(dbPath)
+        elif dbPath and str(dbPath) != _ledger.path:
+            raise ValueError(
+                "SupervisorTaskLedger 已绑定 %s，拒绝改绑 %s；"
+                "换库请先 reset_supervisor_ledger()" % (_ledger.path, dbPath)
+            )
         return _ledger
 
 

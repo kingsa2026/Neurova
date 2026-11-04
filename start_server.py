@@ -137,9 +137,10 @@ def main():
         print(f"Version: {app.version}")
 
         # 启动服务器
-        # host/port 已在上方预检处读出（默认 0.0.0.0:9527，与 Dockerfile EXPOSE /
-        # compose 映射 / Helm service 同源；跨文件一致性见
-        # scripts/ci/deploy_config_consistency_check.py 的 R1）。
+        # host/port 已在上方预检处读出。缺省 127.0.0.1:9527（本地单机）；
+        # 容器部署由 compose / Helm 显式设 NEUROVA_HOST=0.0.0.0，端口与
+        # Dockerfile EXPOSE / compose 映射 / Helm service 同源；跨文件一致性见
+        # scripts/ci/deploy_config_consistency_check.py 的 R1。
         print(f"Health: http://{host}:{port}/health")
         print("=" * 60)
         uvicorn.run(

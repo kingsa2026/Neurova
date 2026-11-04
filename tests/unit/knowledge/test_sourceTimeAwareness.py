@@ -10,9 +10,40 @@
   "新旧两版谁是新说法"全靠审阅人自己猜。裁定：冲突行加 time_context
   （哪边源修改时间更新），只出建议不改判。
 """
+import datetime
+
 import pytest
 
 from neurova.knowledge.repository import KnowledgeRepository, _parseSourceDate
+
+
+class TestSearchRequestDateValidation:
+    """P3-1（审计 2026-11-04）：非法源时间过滤值必须在请求边界 422，不许静默跳过。"""
+
+    def test_invalid_source_modified_after_rejected(self):
+        from pydantic import ValidationError
+        from neurova.api.endpoints.knowledge_common import KnowledgeSearchRequest
+
+        with pytest.raises(ValidationError):
+            KnowledgeSearchRequest(query="x", source_modified_after="garbage")
+
+    def test_invalid_source_modified_before_rejected(self):
+        from pydantic import ValidationError
+        from neurova.api.endpoints.knowledge_common import KnowledgeSearchRequest
+
+        with pytest.raises(ValidationError):
+            KnowledgeSearchRequest(query="x", source_modified_before="2024-13-99")
+
+    def test_valid_forms_still_accepted(self):
+        from neurova.api.endpoints.knowledge_common import KnowledgeSearchRequest
+
+        body = KnowledgeSearchRequest(
+            query="x",
+            source_modified_after="2025-01-01T00:00:00+00:00",
+            source_modified_before="D:20261231235959+08'00'",
+        )
+        assert body.source_modified_after.startswith("2025-01-01")
+        assert body.source_modified_before.startswith("D:2026")
 
 
 @pytest.fixture()
@@ -25,6 +56,23 @@ class TestParseSourceDate:
         """PDF 元数据形 D:20240301120000+08'00' 必须能比较——不然重导入判不了新旧。"""
         dt = _parseSourceDate("D:20240301120000")
         assert dt is not None and dt.year == 2024 and dt.month == 3
+
+    def test_pdfMetaDateKeepsPositiveOffset(self):
+        """P3-2（审计 2026-11-04）：PDF 的时区偏移必须参与换算，不能被硬贴 UTC。"""
+        dt = _parseSourceDate("D:20240301120000+08'00'")
+        assert dt is not None
+        assert dt.utcoffset() == datetime.timedelta(hours=8)
+        assert dt.astimezone(datetime.timezone.utc).hour == 4
+
+    def test_pdfMetaDateKeepsNegativeOffset(self):
+        dt = _parseSourceDate("D:20240301120000-05'30'")
+        assert dt is not None
+        assert dt.utcoffset() == -datetime.timedelta(hours=5, minutes=30)
+        assert dt.astimezone(datetime.timezone.utc).hour == 17
+
+    def test_pdfMetaDateZuluStaysUtc(self):
+        dt = _parseSourceDate("D:20240301120000Z")
+        assert dt is not None and dt.utcoffset() == datetime.timedelta(0)
 
     def test_isoAndFloatFormsParse(self):
         assert _parseSourceDate("2026-01-02T10:00:00+00:00") is not None

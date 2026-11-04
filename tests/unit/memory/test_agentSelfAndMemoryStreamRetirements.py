@@ -63,6 +63,24 @@ def test_facadeNoLongerExports():
     assert not leaked, f"neurova.memory 仍在导出：{leaked}"
 
 
+def test_facadeModuleMapHasNoDeadKeys():
+    """门面 `_MODULE_MAP` 的每个 target 都必须能导入。
+
+    死键会把必然失败的 ImportError 降成 debug 噪音：每次 import neurova.memory
+    都白付两次失败 import_module，且读门面的人看不出这两条映射已经指向退役模块。
+    """
+    import importlib
+    from neurova.memory import _MODULE_MAP
+
+    dead = {}
+    for alias, target in _MODULE_MAP.items():
+        try:
+            importlib.import_module(target)
+        except ImportError as exc:
+            dead[alias] = f"{target}: {exc}"
+    assert not dead, f"memory 门面存在指向不存在模块的死键：{dead}"
+
+
 def test_liveEventAndAgentSurfacesRemain():
     from neurova.core.event_bus import EventBus
     from neurova.cognitive_layers.memory_layer.manager import MemoryManager
