@@ -57,6 +57,9 @@ ADVANCED_DEFAULTS: Dict[str, Any] = {
     # 目录常驻+tool_search/tool_describe/tool_call 三控制工具）。
     # NEUROVA_TOOL_SEARCH 环境变量显式值最优先。
     "tool_search_enabled": True,
+    # C5：lost-in-the-middle 位置缓解（检索证据两端发牌，最优置首次优置尾）。
+    # 默认关＝现网语义（工单 015 口径）；env NEUROVA_LOST_IN_MIDDLE 显式 0/1 最优先。
+    "lost_in_middle_enabled": False,
 }
 
 # LLM 路由设置分区（actionability 门控等路由期决策）——默认全关，零行为漂移。
