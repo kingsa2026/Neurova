@@ -42,6 +42,15 @@ import time
 import webbrowser
 from pathlib import Path
 
+# 本启动器全程往终端念中文（进度条、[OK]/[ERROR] 行）。Windows 默认 cp936 控制台上
+# 不钉这一行，任何一句 print 都会抛 UnicodeEncodeError 把启动流程自己打断——
+# 报错指向输出编码而不是被诊断的行为，且下面 import 的 `scripts/*` 显示面也一起遭殃。
+# 被 import 的模块不自己钉（那会劫持导入方的流），钉 stdout 是**进程所有者**的责任。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.resolve()))
 
