@@ -204,6 +204,15 @@ async def get_approval_detail(request: Request, request_id: str, _admin: Any = D
     return {"code": 0, "data": {"request": req.to_dict()}}
 
 
+def _outcomeSuccess(executor: Any, result: Any) -> bool:
+    """带外执行终态的成败读数——判据**不自持**，走 `ToolExecutor._result_is_success`
+    （全仓唯一判据）；判据缺席时的降级读数与投递侧同形。"""
+    judge = getattr(executor, "_result_is_success", None)
+    return bool(judge(result)) if callable(judge) else bool(
+        isinstance(result, dict) and result.get("success")
+    )
+
+
 def _deliverApprovalOutcome(agent: Any, metadata: Dict[str, Any], tool_name: str,
                             result: Any) -> bool:
     """把带外批准的执行终态投进会话的晚到通路；返回是否真的投出去了。
@@ -223,10 +232,7 @@ def _deliverApprovalOutcome(agent: Any, metadata: Dict[str, Any], tool_name: str
         return False
 
     executor = getattr(agent, "tool_executor", None)
-    judge = getattr(executor, "_result_is_success", None)
-    success = bool(judge(result)) if callable(judge) else bool(
-        isinstance(result, dict) and result.get("success")
-    )
+    success = _outcomeSuccess(executor, result)
     error = None
     if not success and isinstance(result, dict):
         error = str(result.get("error") or result.get("message") or "")[:400] or "执行失败"
@@ -319,6 +325,28 @@ async def approve_and_execute(request: Request, request_id: str,
     # 带外批准（原轮次早已收尾）→ 终态必须回到会话，否则模型那次调用永远停在
     # 「待用户确认」而工具其实已经跑完。走的是与"超时转后台"同一条晚到通路。
     _deliverApprovalOutcome(agent, metadata, tool_name, result)
+
+    # C3 批次 1：带外重放完成后自动拉起续跑轮——否则晚到终态只沉在
+    # _pending_hints（下一轮才被读到），用户批准后拿不到任何主动汇报。
+    # 默认关（governance_settings.approval_continuation_enabled），失败仅日志不阻断应答。
+    _contSession = str(metadata.get("session_id") or "")
+    if _contSession:
+        try:
+            from neurova.security.approval_continuation import startApprovalContinuation
+
+            _contStarted = startApprovalContinuation(
+                request_id=request_id,
+                agent_id=str(req.agent_id or ""),
+                user_id=str(req.user_id or ""),
+                session_id=_contSession,
+                tool_name=str(tool_name),
+                success=_outcomeSuccess(executor, result),
+                error=str((result or {}).get("error") or "") if isinstance(result, dict) else "",
+            )
+            if _contStarted:
+                logger.info("审批 %s 续跑轮已拉起（会话 %s）", request_id, _contSession)
+        except Exception:  # noqa: BLE001 - 续跑拉起失败不影响批准应答本身
+            logger.warning("审批 %s 续跑轮拉起失败（忽略）", request_id, exc_info=True)
 
     # E3（P2）：MCP 工具 + remember 批准 → 铸造 (server, tool) 粒度持久授权，
     # 后续同名调用免审批直达（命令级 remember 由 ApprovalManager 负责，二者互补）
@@ -859,12 +887,15 @@ class GovernanceSettingsUpdate(BaseModel):
     trace_persistence_enabled: 每轮推理链是否存成记忆（默认关——零消费方 + 检索不带
     category 过滤会形成回声污染，2026-09-05 事故根修；§6-206 前只有裸 env 能拨）；
     consolidation_auto_commit_enabled: 技能整合是否全自动提交（关=回退人工审批面）；
-    consolidation_semantic_plans_enabled: 语义族第二计划源是否产出（关=只跑结构族源）"""
+    consolidation_semantic_plans_enabled: 语义族第二计划源是否产出（关=只跑结构族源）；
+    approval_continuation_enabled: 带外批准重放执行后是否自动拉起续跑轮（关=结果只
+    进晚到队列等下一轮；C3 批次 1，默认关＝现网语义）"""
 
     conversation_rules_enabled: Optional[bool] = None
     rsi_phase: Optional[int] = Field(None, ge=0, le=4)
     metacog_gate_enabled: Optional[bool] = None
     crystallization_llm_gate_enabled: Optional[bool] = None
+    approval_continuation_enabled: Optional[bool] = None
     skill_auto_retire_enabled: Optional[bool] = None
     compression_economics_enabled: Optional[bool] = None
     trace_persistence_enabled: Optional[bool] = None
