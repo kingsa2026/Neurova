@@ -213,10 +213,12 @@ class TestDiscoverEndpointCandidateOnly:
 
 class TestProbeForceContract:
     def test_probe_endpoint_accepts_force(self, mgr):
+        from neurova.api.auth import get_current_user
         from neurova.api.endpoints import model as model_ep
 
         app = FastAPI()
         app.include_router(model_ep.router, prefix="/api/v1/models")
+        app.dependency_overrides[get_current_user] = lambda: {"user_id": "test", "role": "admin"}
         original = model_ep._get_provider_manager
         model_ep._get_provider_manager = lambda current_user=None: mgr
 

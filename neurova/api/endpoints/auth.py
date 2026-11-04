@@ -205,6 +205,40 @@ def _resolve_bootstrap_admin_token() -> str:
     return ""
 
 
+def _serverBindHost() -> str:
+    """显式绑定的监听地址（P1-2 部署形态判定输入）。
+
+    部署面三条通道最终都落在进程环境变量：docker-compose/helm 直接注 env，
+    .env 经 dotenv 在进程启动时并入；config 层兜底读同一变量，此处不另立
+    第二个读法。未设置返回空串（桌面首启形态）。
+    """
+    host = (os.environ.get("NEUROVA_HOST") or "").strip()
+    if host:
+        return host
+    try:
+        from neurova.core.config import config as app_config
+
+        return str(app_config.get("NEUROVA_HOST") or "").strip()
+    except Exception:  # noqa: BLE001 - config 未初始化时按未绑定处理
+        return ""
+
+
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "[::1]"}
+
+
+def _isServerFacingDeployment() -> bool:
+    """服务端部署形态判定（审计 2026-11-04 P1-2）：显式绑非环回地址。
+
+    docker-compose.yml 与 helm configmap 均设 NEUROVA_HOST=0.0.0.0；
+    桌面首启不设该变量（start_server.py 缺省 127.0.0.1）。未显式绑定时
+    按桌面形态处理——fail-closed 只收窄显式对外的部署，不改变桌面默认。
+    """
+    host = _serverBindHost()
+    if not host:
+        return False
+    return host.lower() not in _LOOPBACK_HOSTS
+
+
 def _get_token_manager():
     """获取 Token 管理器"""
     from neurova.api.endpoints import get_app_state
@@ -553,6 +587,23 @@ async def register(request: Request, body: RegisterRequest):
                     verification_model.record_register_attempt(ip_address, success=False)
                     raise HTTPException(status_code=403, detail="Invalid bootstrap token")
             else:
+                # P1-2（审计 2026-11-04）：服务端部署形态缺令牌 fail-closed。
+                # compose/helm 绑 0.0.0.0，此前的 warning 放行等于部署即裸奔
+                # （公网首访注册者即管理员）；桌面单机（环回/未显式绑定）保持现状。
+                if _isServerFacingDeployment():
+                    logger.warning(
+                        "服务端部署（NEUROVA_HOST=%s）未配置引导令牌，拒绝首账号注册",
+                        _serverBindHost(),
+                    )
+                    raise HTTPException(
+                        status_code=403,
+                        detail=(
+                            "服务端部署必须先配置引导令牌再注册首账号：设置 "
+                            "NEUROVA_BOOTSTRAP_ADMIN_TOKEN，或写入 "
+                            "data/bootstrap_admin.ini [bootstrap] token；"
+                            "桌面单机不受此门约束"
+                        ),
+                    )
                 logger.warning(
                     "首账号注册未配置引导令牌（NEUROVA_BOOTSTRAP_ADMIN_TOKEN / "
                     "bootstrap_admin.ini）: 服务端部署存在管理员抢注风险"

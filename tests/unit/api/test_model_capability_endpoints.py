@@ -13,17 +13,29 @@
 kilo-code/github-models/sensetime），测试一律用 fixture 返回的 provider.id 定位，
 绝不假设 list_providers()[0] 是测试商。
 """
+import os
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from neurova.api.endpoints import model as model_ep
-from neurova.llm import llm_router
-from neurova.llm.llm_router import (
+os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_for_model_gate_0123456789abcdef")
+
+from neurova.api.auth import create_access_token  # noqa: E402
+from neurova.api.endpoints import model as model_ep  # noqa: E402
+from neurova.llm import llm_router  # noqa: E402
+from neurova.llm.llm_router import (  # noqa: E402
     RequestType,
     select_model_for_request,
 )
-from neurova.llm.provider_manager import LLMProviderManager, reset_provider_manager
+from neurova.llm.provider_manager import LLMProviderManager, reset_provider_manager  # noqa: E402
+
+
+def _authHeaders():
+    """P1-1 后写/探测面挂 get_current_user——测试用真实 JWT 走真鉴权链。"""
+    return {"Authorization": "Bearer " + create_access_token({
+        "sub": "tester", "username": "tester", "role": "admin", "tenant_id": "default",
+    })}
 
 
 def _reset_router_singleton() -> None:
@@ -102,7 +114,7 @@ class TestDetectCapabilitiesEndpoint:
     """POST /models/detect-capabilities：批量检测 + 持久化。"""
 
     def test_detect_and_persist(self, client, mgr):
-        resp = client.post("/api/v1/models/detect-capabilities", json={"provider_id": None})
+        resp = client.post("/api/v1/models/detect-capabilities", json={"provider_id": None}, headers=_authHeaders())
         assert resp.status_code == 200
         data = resp.json().get("data", {})
         assert data.get("detected", 0) >= 5
@@ -121,13 +133,15 @@ class TestDetectCapabilitiesEndpoint:
         resp = client.post(
             "/api/v1/models/detect-capabilities",
             json={"provider_id": mgr._test_provider.id},
+            headers=_authHeaders(),
         )
         assert resp.status_code == 200
         assert resp.json()["data"]["detected"] >= 5
 
     def test_detect_unknown_provider_404(self, client):
         resp = client.post(
-            "/api/v1/models/detect-capabilities", json={"provider_id": "nope"}
+            "/api/v1/models/detect-capabilities", json={"provider_id": "nope"},
+            headers=_authHeaders(),
         )
         assert resp.status_code == 404
 

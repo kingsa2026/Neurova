@@ -45,12 +45,12 @@ def app_client(mock_manager):
     from unittest.mock import patch
 
     from neurova.api.endpoints import model as model_mod
-    from neurova.api.auth import get_optional_user
+    from neurova.api.auth import get_current_user
 
     app = FastAPI()
     with patch.object(model_mod, "_get_provider_manager", return_value=mock_manager):
         app.include_router(model_mod.router, prefix="/models")
-        app.dependency_overrides[get_optional_user] = _mock_current_user
+        app.dependency_overrides[get_current_user] = _mock_current_user
         client = TestClient(app)
         yield client
 
@@ -79,12 +79,12 @@ def slash_client(slash_manager):
     from unittest.mock import patch
 
     from neurova.api.endpoints import model as model_mod
-    from neurova.api.auth import get_optional_user
+    from neurova.api.auth import get_current_user
 
     app = FastAPI()
     with patch.object(model_mod, "_get_provider_manager", return_value=slash_manager):
         app.include_router(model_mod.router, prefix="/models")
-        app.dependency_overrides[get_optional_user] = _mock_current_user
+        app.dependency_overrides[get_current_user] = _mock_current_user
         client = TestClient(app)
         yield client
 

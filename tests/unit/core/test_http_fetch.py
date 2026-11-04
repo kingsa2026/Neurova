@@ -27,6 +27,31 @@ class _FakeResp:
         self.status_code = status_code
 
 
+class _SharedCtx:
+    def __init__(self, payload: bytes):
+        self._payload = payload
+
+    def read(self):
+        return self._payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class _FakeOpener:
+    """urllib 兜底引擎替身：P1-3 后禁跟随重定向走 build_opener().open，
+    不再经模块级 urlopen——打桩点随实现缝迁移，断言语义不变。"""
+
+    def __init__(self, payload: bytes):
+        self._payload = payload
+
+    def open(self, req, timeout=None):
+        return _SharedCtx(self._payload)
+
+
 def _install_fake_curl(monkeypatch, calls, resp=None):
     """注入假 curl_cffi 模块，记录 requests.get 的 kwargs（CA 探测不打真环境）。"""
     curl = types.ModuleType("curl_cffi")
@@ -73,19 +98,9 @@ def test_falls_back_to_urllib_when_curl_cffi_missing(monkeypatch):
     # sys.modules 置 None → from curl_cffi import ... 抛 ImportError
     monkeypatch.setitem(sys.modules, "curl_cffi", None)
 
-    class _Ctx:
-        def read(self):
-            return "fb".encode("utf-8")
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-    with patch("urllib.request.urlopen", return_value=_Ctx()) as m:
+    with patch("urllib.request.build_opener", return_value=_FakeOpener(b"fb")) as m:
         assert http_fetch.fetch_text("https://example.com/b", "Mozilla/5.0", 5) == "fb"
-        assert m.called
+        assert m.called, "urllib 兜底经禁跟随 opener（P1-3：重定向逐跳处理）"
 
 
 def test_http_error_status_raises(monkeypatch):
@@ -115,17 +130,7 @@ def test_curl_network_error_falls_back_to_urllib(monkeypatch):
     monkeypatch.setitem(sys.modules, "curl_cffi.requests", requests_mod)
     monkeypatch.setattr(http_fetch, "_ascii_ca", lambda: None)
 
-    class _Ctx:
-        def read(self):
-            return b"from-urllib"
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-    with patch("urllib.request.urlopen", return_value=_Ctx()):
+    with patch("urllib.request.build_opener", return_value=_FakeOpener(b"from-urllib")):
         assert http_fetch.fetch_text("https://flaky.example", "curl/8.5.0", 10) == "from-urllib"
 
 
@@ -211,17 +216,7 @@ def test_fetch_bytes_network_error_falls_back_to_urllib(monkeypatch):
     monkeypatch.setitem(sys.modules, "curl_cffi.requests", requests_mod)
     monkeypatch.setattr(http_fetch, "_ascii_ca", lambda: None)
 
-    class _Ctx:
-        def read(self):
-            return b"raw-urllib"
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-    with patch("urllib.request.urlopen", return_value=_Ctx()):
+    with patch("urllib.request.build_opener", return_value=_FakeOpener(b"raw-urllib")):
         assert http_fetch.fetch_bytes("https://flaky.example/feed", "Mozilla/5.0", 10) == b"raw-urllib"
 
 

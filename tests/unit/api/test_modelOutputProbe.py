@@ -1,12 +1,23 @@
 # -*- coding: utf-8 -*-
 """模型管理：输出上限探测端点与 /models 持久化字段透出（2026-10-21）。"""
 
+import os
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
-from neurova.api.app import create_app
-from neurova.api.endpoints import model as modelMod
+os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_for_model_gate_0123456789abcdef")
+
+from neurova.api.app import create_app  # noqa: E402
+from neurova.api.auth import create_access_token  # noqa: E402
+from neurova.api.endpoints import model as modelMod  # noqa: E402
+
+
+def _authHeaders():
+    """P1-1 后写/探测面挂 get_current_user——测试用真实 JWT 走真鉴权链。"""
+    return {"Authorization": "Bearer " + create_access_token({
+        "sub": "tester", "username": "tester", "role": "admin", "tenant_id": "default",
+    })}
 
 
 class FakeProviderManager:
@@ -61,6 +72,7 @@ def testProbeOutputLimitEndpointPersistsThroughManager(monkeypatch):
     resp = client.post(
         "/api/v1/models/probe-output-limit",
         json={"provider_id": "amd", "model_id": "GLM-5.3-Flash", "candidate": 65536},
+        headers=_authHeaders(),
     )
 
     assert resp.status_code == 200
@@ -76,6 +88,7 @@ def testUnknownProviderIs404(monkeypatch):
     resp = client.post(
         "/api/v1/models/probe-output-limit",
         json={"provider_id": "nope", "model_id": "m"},
+        headers=_authHeaders(),
     )
 
     assert resp.status_code == 404

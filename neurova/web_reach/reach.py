@@ -69,16 +69,26 @@ def _assert_public_host(url: str) -> None:
     _url_guard_assert_public(url)
 
 
+def _validateHopUrl(url: str) -> None:
+    """逐跳 SSRF 复核（P1-3）：重定向每一跳都过与首跳同一道门。"""
+    scheme_err = _check_scheme(url)
+    if scheme_err:
+        raise ValueError(scheme_err)
+    _assert_public_host(url)
+
+
 def _http_get_text(url: str, timeout: float) -> str:
     """GET 请求并返回 UTF-8 文本（请求前做 SSRF 主机边界校验）。
 
     TLS 指纹走共享层 neurova.http_fetch（curl_cffi 浏览器指纹优先，urllib 兜底）。
+    重定向不交引擎自动跟随：每一跳都过 _validateHopUrl 同一道门（P1-3）——
+    只守首跳时，公网 URL 可 302 跳进环回/云元数据。
     """
     scheme_err = _check_scheme(url)
     if scheme_err:
         raise ValueError(scheme_err)
     _assert_public_host(url)
-    return http_fetch.fetch_text(url, _USER_AGENT, timeout)
+    return http_fetch.fetch_text(url, _USER_AGENT, timeout, url_validator=_validateHopUrl)
 
 
 def _error(msg: str, **extra) -> Dict[str, Any]:
@@ -147,7 +157,7 @@ def rss_read(url: str, limit: int = 10, timeout: float = _DEFAULT_TIMEOUT) -> Di
         # 且连接错误被其 bozo 吞成空结果）。传原始字节保留其编码自动探测。
         _check_scheme(url)
         _assert_public_host(url)
-        raw = http_fetch.fetch_bytes(url, _USER_AGENT, timeout)
+        raw = http_fetch.fetch_bytes(url, _USER_AGENT, timeout, url_validator=_validateHopUrl)
         parsed = feedparser.parse(raw)
         if parsed.get("bozo") and not parsed.get("entries"):
             return _error(f"RSS 解析失败: {parsed.get('bozo_exception')}")

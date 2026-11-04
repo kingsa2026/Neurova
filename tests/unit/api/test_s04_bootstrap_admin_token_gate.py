@@ -142,6 +142,31 @@ class TestDesktopDefaultUnchanged:
         assert resp.status_code == 200, resp.text
         assert fake_models[0].created_kwargs[0]["role"] == "admin"
 
+
+class TestServerFacingDeploymentGate:
+    """P1-2（审计 2026-11-04）：显式绑非环回地址（0.0.0.0/公网 IP）＝服务端
+    部署形态（docker-compose 与 helm 均设 NEUROVA_HOST=0.0.0.0）——引导令牌
+    两处均未配置时必须 fail-closed（403），不再 warning 放行；
+    显式绑环回（桌面）保持现状。"""
+
+    def test_server_form_missing_token_403(self, client, fake_models, monkeypatch):
+        monkeypatch.setenv("NEUROVA_HOST", "0.0.0.0")
+        resp = _register(client)
+        assert resp.status_code == 403, resp.text
+        assert fake_models[0].created_kwargs == [], "被拒注册不得创建用户"
+
+    def test_server_form_matching_token_200(self, client, fake_models, monkeypatch):
+        monkeypatch.setenv("NEUROVA_HOST", "0.0.0.0")
+        monkeypatch.setenv(TOKEN_ENV, "tok-123")
+        resp = _register(client, token="tok-123")
+        assert resp.status_code == 200, resp.text
+        assert fake_models[0].created_kwargs[0]["role"] == "admin"
+
+    def test_explicit_loopback_keeps_desktop_open(self, client, fake_models, monkeypatch):
+        monkeypatch.setenv("NEUROVA_HOST", "127.0.0.1")
+        resp = _register(client)
+        assert resp.status_code == 200, resp.text
+
     def test_env_token_ignored_when_users_exist(self, client, fake_models, monkeypatch):
         """非首启注册（已有用户）不受门控影响"""
         monkeypatch.setenv(TOKEN_ENV, "tok-123")
