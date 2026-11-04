@@ -11,12 +11,54 @@ sync=true。
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
+from neurova.knowledge.repository import get_knowledge_repository
 
 logger = get_logger(__name__)
+
+#: 异步摄取抽取补偿的门控（SAG 对比候选 C2）：此前异步路径恒 skipped_async；
+#: 默认 off＝旧行为（结果仍如实标 skipped），开闸后 ack 补跑抽取。
+ENV_EXTRACT_ASYNC = "NEUROVA_KB_EXTRACT_ASYNC"
+
+
+def extract_after_ingest(event: Dict[str, Any], item_ids: List[str]) -> str:
+    """异步摄取完成后的图谱抽取补偿（SAG 对比候选 C2，2026-11-05）。
+
+    此前异步路径恒 `skipped_async`（_try_extract_to_graph 依赖 Request/app
+    state）——实际上 `_default_llm_call` 经 `get_app_state()` 生产可解析，
+    request=None 即可走同一条管线。NEUROVA_KB_EXTRACT_ASYNC 门控（默认
+    off＝旧行为）；条目从权威仓库取回（find_item），失败 fail-soft 返回
+    状态串，绝不影响摄取 ack。
+    """
+    raw = str(os.environ.get(ENV_EXTRACT_ASYNC) or "").strip().lower()
+    if raw not in ("1", "true", "on", "yes"):
+        return "skipped_disabled"
+    ids = [str(i) for i in (item_ids or []) if i]
+    if not ids:
+        return "skipped_empty"
+    try:
+        from neurova.api.endpoints.knowledge_ingestion import _try_extract_to_graph
+
+        items: List[Dict[str, Any]] = []
+        for kid in ids:
+            found = get_knowledge_repository().find_item(kid)
+            if found:
+                items.append(dict(found[1]))
+        if not items:
+            return "skipped_missing_items"
+        _try_extract_to_graph(
+            items, None,
+            agent_id=str(event.get("agent_id") or "default"),
+            tenant_id=str(event.get("tenant_id") or "default"),
+        )
+        return "extracted"
+    except Exception as exc:  # noqa: BLE001 - 补偿失败不影响摄取主流程
+        logger.warning("异步图谱抽取补偿失败（摄取已完成）: %s", exc)
+        return "extract_error"
 
 
 def process_ingress_event(
@@ -99,8 +141,19 @@ async def run_ingress_drain(poll_interval: float = 1.0) -> None:
             queue.record_span(tid, "index", "running")
             await asyncio.to_thread(queue.ack, tid, result.get("item_ids") or [])
             # ack 后 is_cancelled 仍可能为真（在飞时用户取消）——span 如实反映
-            queue.record_span(tid, "parse", "done" if not queue.is_cancelled(tid) else "cancelled")
-            queue.record_span(tid, "index", "done" if not queue.is_cancelled(tid) else "cancelled")
+            cancelled = queue.is_cancelled(tid)
+            queue.record_span(tid, "parse", "done" if not cancelled else "cancelled")
+            queue.record_span(tid, "index", "done" if not cancelled else "cancelled")
+            # C2 补偿：异步路径的图谱抽取（此前恒 skipped_async）。
+            # NEUROVA_KB_EXTRACT_ASYNC 门控默认 off；span 如实记录补偿态。
+            state = await asyncio.to_thread(
+                extract_after_ingest, ev, result.get("item_ids") or []
+            )
+            queue.record_span(
+                tid, "extract",
+                "done" if state == "extracted" else "failed",
+                error=None if state == "extracted" else state,
+            )
         elif result.get("retry", True):
             await asyncio.to_thread(queue.nack, tid, str(result.get("error") or result["status"]))
             queue.record_span(tid, "parse", "failed", error=str(result.get("error") or result["status"]))

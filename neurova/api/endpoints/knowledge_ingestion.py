@@ -29,6 +29,38 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 
+#: 条目更新后 facts 重抽的门控（SAG 对比候选 C2）：LLM 成本随更新量走，
+#: 默认 off＝旧行为；开闸时复用导入抽取同一条管线，增量 admit 不删旧 facts。
+ENV_EXTRACT_ON_UPDATE = "NEUROVA_KB_EXTRACT_ON_UPDATE"
+
+
+def extract_after_update(
+    item: Dict[str, Any], request: Optional[Request], agent_id: str,
+    tenant_id: str = "default",
+) -> str:
+    """条目内容更新后的 facts 重抽（SAG 对比候选 C2，2026-11-05）。
+
+    更新路径此前不重抽实体关系——旧 facts 与新正文漂移只能靠 drift 读数
+    被动发现（SAG 对比 §4 实测的增量更新缺口）。本函数复用导入抽取同一条
+    管线（_try_extract_to_graph → extract_knowledge_to_graph →
+    admitExtractedFacts），增量 admit；漂移治理仍走既有 supersede/conflict
+    机制，不在本函数职责内。
+
+    NEUROVA_KB_EXTRACT_ON_UPDATE 门控（默认 off＝旧行为）；抽取失败
+    fail-soft 返回状态串，绝不打断更新主流程。
+    """
+    raw = str(os.environ.get(ENV_EXTRACT_ON_UPDATE) or "").strip().lower()
+    if raw not in ("1", "true", "on", "yes"):
+        return "skipped_disabled"
+    try:
+        _try_extract_to_graph(
+            [dict(item)], request, agent_id=agent_id, tenant_id=tenant_id
+        )
+        return "extracted"
+    except Exception as exc:  # noqa: BLE001 - 重抽失败不影响更新返回
+        logger.warning("更新后 facts 重抽失败（更新已生效）: %s", exc)
+        return "extract_error"
+
 
 def _build_item_dict(item: Dict[str, Any]) -> Dict[str, Any]:
     """导入响应投影：剔 chunks 正文冗余（块已含于 content），附 chunk_count。"""
@@ -138,6 +170,24 @@ def _try_extract_to_graph(
     )
     for entry in items:
         try:
+            # C3（SAG 对比候选）：待抽条目先过认知安全门——复用既有三态配置
+            # （observe 默认只记读数；enforce 且不安全才跳过该条目，其余照常）。
+            # 门故障 fail-open：读不到读数就按安全处理，不阻断导入。
+            try:
+                from neurova.security.cognitive_security_gate import runInputSafetyGate
+
+                guardReading = runInputSafetyGate("%s\n%s" % (
+                    str(entry.get("title") or ""), str(entry.get("content") or ""),
+                ))
+                if (guardReading and not guardReading.get("is_safe", True)
+                        and guardReading.get("mode") == "enforce"):
+                    logger.warning(
+                        "[知识导入] 条目 %s 命中注入嫌疑且为 enforce 态，跳过抽取",
+                        entry.get("knowledge_id"),
+                    )
+                    continue
+            except Exception as guardExc:  # noqa: BLE001 - 安全门故障不阻断导入
+                logger.debug("[知识导入] 安全门读数失败（fail-open）: %s", guardExc)
             # agentId 必须传：抽取产物要落进被检索的那张图，落错域等于把条目的事实
             # 写进别人的库；factStore 同理——不传底座就只剩 JSON 投影。
             extract_knowledge_to_graph(
