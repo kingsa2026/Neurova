@@ -194,6 +194,17 @@ class ChunkRevisionConflict(Exception):
     时不静默覆盖，调用方须重读最新块后重试。"""
 
 
+def _sourcePathIsStable(source_path: str) -> bool:
+    """同源更新只认真实路径/URL 锚点，裸文件名不算。
+
+    上传端点只拿得到 filename（同名不同文无法区分）；把它当 source_path 会让
+    后导入的同名文件凭"钟更晚"覆盖先导入的正文。真实路径/URL/渠道消息号
+    （wecom:room:msg）才具备稳定身份。
+    """
+    p = str(source_path or "")
+    return p.startswith(("http://", "https://")) or "/" in p or "\\" in p or ":" in p
+
+
 def _parseSourceDate(value: Any) -> Optional[datetime.datetime]:
     """源时间解析（批 TB/TC）：三形——epoch 秒（条目入库钟）、ISO 串、
     PDF 元数据形 `D:YYYYMMDDHHMMSS+zz'zz'`。不可考一律 None（调用方不猜）。"""
@@ -863,15 +874,44 @@ class KnowledgeRepository:
         geo: Optional[Dict[str, Any]] = None,
         source_created_at: str = "",
         source_modified_at: str = "",
+        source_modified_estimated: bool = False,
     ) -> Dict[str, Any]:
         status = normalizeLifecycleStatus(lifecycle_status)
         now = datetime.datetime.now(datetime.timezone.utc).timestamp()
         tenant = str(tenant_id or "default")
         fingerprint = _contentFingerprint(tenant, content)
+        # P2-5：指纹去重先于 TB 覆盖。同一份内容再次导入不是"更新"——即使
+        # 源修改时间更晚（回退钟/同名文件尤其如此），也不该追加一条 old==new
+        # 的 source_update_reingest 修订、刷新入库时间。
+        if dedupe:
+            with self._lock:
+                for existing in self._items.get(agent_id, []):
+                    if (
+                        str(existing.get("tenant_id") or "default") == tenant
+                        and str(existing.get("content_fingerprint") or "") == fingerprint
+                    ):
+                        evidence = _sourceEvidence({
+                            "source": source, "source_type": source_type,
+                            "source_path": source_path, "ingest_time": ingest_time,
+                        })
+                        sources = existing.setdefault("sources", [])
+                        if evidence.get("source") and evidence not in sources:
+                            sources.append(evidence)
+                            self._save()
+                        duplicate = dict(existing)
+                        duplicate["duplicate"] = True
+                        return duplicate
         # 批 TB（T-E 已裁）：同源更新重入库——同 source_path 且源修改时间
         # 明确更晚 ⇒ 覆盖既有条目（旧值进 revisions、刷新入库时间、保留
         # knowledge_id），不并存两代。更早/相同/不可考 ⇒ 维持现状不猜。
-        if dedupe and str(source_path or "") and str(source_modified_at or ""):
+        # P2-5：回退钟（元数据缺失时用入库时刻顶替）不是"源修改时间"，
+        # 裸文件名也不是稳定锚点——两者都不触发覆盖。
+        if (
+            dedupe
+            and not source_modified_estimated
+            and _sourcePathIsStable(source_path)
+            and str(source_modified_at or "")
+        ):
             newSourceT = _parseSourceDate(source_modified_at)
             if newSourceT is not None:
                 with self._lock:
@@ -900,6 +940,8 @@ class KnowledgeRepository:
                         existing["parents"] = list(parents or [])
                         existing["content_fingerprint"] = fingerprint
                         existing["source_modified_at"] = str(source_modified_at)
+                        # 本次是真实源修改时间触发的覆盖，旧的回退钟标记随之失效
+                        existing.pop("source_modified_estimated", None)
                         if str(source_created_at or ""):
                             existing["source_created_at"] = str(source_created_at)
                         existing["created_at"] = now
@@ -919,24 +961,6 @@ class KnowledgeRepository:
                         updated = dict(existing)
                         updated["source_updated"] = True
                         return updated
-        if dedupe:
-            with self._lock:
-                for existing in self._items.get(agent_id, []):
-                    if (
-                        str(existing.get("tenant_id") or "default") == tenant
-                        and str(existing.get("content_fingerprint") or "") == fingerprint
-                    ):
-                        evidence = _sourceEvidence({
-                            "source": source, "source_type": source_type,
-                            "source_path": source_path, "ingest_time": ingest_time,
-                        })
-                        sources = existing.setdefault("sources", [])
-                        if evidence.get("source") and evidence not in sources:
-                            sources.append(evidence)
-                            self._save()
-                        duplicate = dict(existing)
-                        duplicate["duplicate"] = True
-                        return duplicate
         item: Dict[str, Any] = {
             "knowledge_id": knowledge_id or str(uuid.uuid4()),
             "title": title,
@@ -951,6 +975,7 @@ class KnowledgeRepository:
             # created_at/updated_at 语义不变＝入库/条目更新时刻
             "source_created_at": str(source_created_at or ""),
             "source_modified_at": str(source_modified_at or ""),
+            **({"source_modified_estimated": True} if source_modified_estimated else {}),
             "visibility": visibility if visibility in (VISIBILITY_PUBLIC, VISIBILITY_PRIVATE) else VISIBILITY_PRIVATE,
             "owner_user_id": str(owner_user_id or "default"),
             "tenant_id": tenant,

@@ -223,6 +223,8 @@ class KnowledgeIngestBridge:
             #（批 TA 只接了 knowledge_ingestion 一条边界，这里是同一根因的第二命中点）。
             srcCreated, srcModified = resolveSourceDates(
                 dict(parsed.metadata or {}), ingest_time=str(parsed.ingest_time or ""))
+            srcModifiedEstimated = not str(
+                (parsed.metadata or {}).get("modified_at") or "").strip()
             item = repo.create_knowledge(
                 agent_id=agent,
                 title=str(parsed.metadata.get("title") or filename),
@@ -242,6 +244,7 @@ class KnowledgeIngestBridge:
                 ingest_time=parsed.ingest_time,
                 source_created_at=srcCreated,
                 source_modified_at=srcModified,
+                source_modified_estimated=srcModifiedEstimated,
                 page_count=parsed.metadata.get("page_count"),
                 ocr_used=bool(parsed.metadata.get("ocr_used")),
                 ocr_engine=str(parsed.metadata.get("ocr_engine") or ""),

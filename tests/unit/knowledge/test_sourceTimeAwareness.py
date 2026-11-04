@@ -199,6 +199,47 @@ class TestConflictTimeContext:
         assert ctx["newer_side"] == "new", "后入库的条目 ingested_at 更晚，应建议 new"
 
 
+class TestFingerprintGuardAndStablePath:
+    """P2-5（审计 2026-11-04）：TB 覆盖不得绕过指纹去重，也不得凭回退钟/裸文件名覆盖。"""
+
+    def _create(self, repo, content, source_path, modified, estimated=False):
+        return repo.create_knowledge(
+            agent_id="a1", title="课件", content=content,
+            source="import:课件.pdf", source_type="pdf",
+            source_path=source_path, dedupe=True,
+            source_modified_at=modified,
+            source_modified_estimated=estimated,
+        )
+
+    def test_sameContentReingestDoesNotAppendRevision(self, repo):
+        first = self._create(repo, "同一正文", "docs/a.pdf", "2024-03-01T08:00:00+00:00")
+        second = self._create(repo, "同一正文", "docs/a.pdf", "2026-01-02T10:00:00+00:00")
+        assert second.get("duplicate") is True, "同内容重导应走指纹去重，不是 TB 覆盖"
+        item = repo.find_item(first["knowledge_id"])[1]
+        assert not item.get("revisions"), "同内容重导被记成 source_update_reingest"
+        assert item.get("created_at") == first.get("created_at"), "入库时间被无谓刷新"
+
+    def test_estimatedFallbackClockDoesNotTriggerOverwrite(self, repo):
+        first = self._create(
+            repo, "回退钟正文一", "docs/a.pdf",
+            "2026-11-04T01:00:00+00:00", estimated=True)
+        second = self._create(
+            repo, "回退钟正文二", "docs/a.pdf",
+            "2026-11-04T02:00:00+00:00", estimated=True)
+        assert second.get("knowledge_id") != first["knowledge_id"], (
+            "回退钟（元数据缺失时用入库时刻顶替）被当成源修改时间触发了 TB 覆盖"
+        )
+        assert len(repo._items["a1"]) == 2
+
+    def test_bareFilenameDoesNotOverwriteSameNameDifferentContent(self, repo):
+        first = self._create(repo, "同名甲", "report.docx", "2024-03-01T08:00:00+00:00")
+        second = self._create(repo, "同名乙", "report.docx", "2026-01-02T10:00:00+00:00")
+        assert second.get("knowledge_id") != first["knowledge_id"], (
+            "裸文件名被当稳定锚点：同名不同文的后导入者覆盖了先导入者"
+        )
+        assert len(repo._items["a1"]) == 2
+
+
 class TestSearchTimeRangeFilter:
     """批 TD①（T-C 已裁先过滤）：按源文档修改时间的范围检索。
 
