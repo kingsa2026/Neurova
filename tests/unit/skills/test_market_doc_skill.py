@@ -40,7 +40,7 @@ def fake_importer(monkeypatch, tmp_path):
     """get_market_importer 返回指向 tmp 安装目录的 fake"""
     skills_dir = tmp_path / "market-skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
-    fake = SimpleNamespace(_skills_dir=skills_dir)
+    fake = SimpleNamespace(_skills_dir=skills_dir, marketSkillsDir=lambda: skills_dir)
     monkeypatch.setattr("neurova.skills.market_importer.get_market_importer", lambda: fake)
     return skills_dir
 

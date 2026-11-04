@@ -410,7 +410,7 @@ async def install_skill(
                     service=agentLibrary(body.agent_id or "default"),
                     registry=_default_skill_registry(),
                     extra_registries=_running_agent_registries(),
-                    market_skills_dir=importer._skills_dir,
+                    market_skills_dir=importer.marketSkillsDir(),
                     bundle_name=importer.builtinBundleName(target_skill.skill_id),
                 )
                 # 咽喉拒装不得报成"已安装"（§6-186：真字节接进安装门后第一次真的会拒）
@@ -468,7 +468,7 @@ async def install_skill(
             service=agentLibrary(body.agent_id or "default"),
             registry=_default_skill_registry(),
             extra_registries=_running_agent_registries(),
-            market_skills_dir=importer._skills_dir,
+            market_skills_dir=importer.marketSkillsDir(),
             bundle_name=importer.builtinBundleName(target_skill.skill_id),
         )
         _refuseIfBlocked(link, skill_id)

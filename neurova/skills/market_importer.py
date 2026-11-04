@@ -469,6 +469,15 @@ class MarketImporter:
         name = str(entry.get("bundle_zip") or "")
         return Path(name).name if name and Path(name).name == name else ""
 
+    def marketSkillsDir(self) -> Path:
+        """市场安装根目录的**唯一公开读口**。
+
+        此前三个跨模块消费方（安装端点两处、`market_registry` 缺省取法一处）直取
+        `_skills_dir`，而 `market_registry` 那条还另抄了一份 `get_data_root()/\"skills\"`
+        兜底——同一件事两处推导，改一处就漂一处（教义第 6 条）。
+        """
+        return self._skills_dir
+
     def get_import_status(self, skill_id: str) -> Optional[ImportTask]:
         """获取导入状态"""
         with self._lock:
