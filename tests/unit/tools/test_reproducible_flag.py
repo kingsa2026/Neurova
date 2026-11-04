@@ -28,6 +28,7 @@ EXPECTED_NON_REPRODUCIBLE = {
     "write_pdf",
     "canvas_add_node", "canvas_connect", "canvas_create", "canvas_remove_node",
     "canvas_move_node", "canvas_set_config", "canvas_layout", "canvas_run",
+    "canvas_apply_batch",
     "computer_click", "computer_click_element", "computer_click_mark",
     "computer_type", "computer_scroll", "computer_set_value",
     "computer_shell", "computer_ssh_exec", "computer_screenshot",

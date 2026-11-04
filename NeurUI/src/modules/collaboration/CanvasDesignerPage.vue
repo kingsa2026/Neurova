@@ -2362,6 +2362,11 @@ function applyRemoteCanvasOp(p: CanvasOpPayload) {
       }
       break
     }
+    case 'batch': {
+      // 服务端整批原子提交：payload 带完整 nodes/edges，直接重载快照最稳
+      void loadFromRoute(canvasId.value ?? undefined)
+      break
+    }
     case 'set_config': {
       const node = canvasNodes.value.find(n => n.id === data.node_id)
       if (node) {

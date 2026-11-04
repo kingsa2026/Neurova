@@ -167,6 +167,227 @@ class CanvasOpService:
             code="unknown_node_type",
         )
 
+    # ── 单 op 变更（单条 op 与批量事务共用同一份实现）────────────
+
+    def _applyAddNode(
+        self,
+        record: Dict[str, Any],
+        *,
+        node_type: str,
+        config: Optional[Dict[str, Any]] = None,
+        position: Optional[Dict[str, float]] = None,
+        label: Optional[str] = None,
+        node_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        definition = self._get_definition(node_type)
+        inputs = [_port_ref(p) for p in definition.inputs]
+        outputs = [_port_ref(p) for p in definition.outputs]
+        default_config: Dict[str, Any] = {}
+        for sb in definition.sub_blocks or []:
+            sb_id = sb.get("id") if isinstance(sb, dict) else getattr(sb, "id", None)
+            sb_default = (
+                sb.get("default_value")
+                if isinstance(sb, dict)
+                else getattr(sb, "default_value", None)
+            )
+            if sb_id and sb_default is not None:
+                default_config[sb_id] = sb_default
+        explicit_id = str(node_id or "").strip()
+        if explicit_id:
+            if any(str(n.get("id") or "") == explicit_id for n in record.get("nodes", [])):
+                raise CanvasOpError(f"节点 id 重复: {explicit_id}", code="duplicate_node")
+        node = {
+            "id": explicit_id or f"node_{uuid.uuid4().hex[:8]}",
+            "type": node_type,
+            "label": label or definition.label,
+            "icon": definition.icon or "📦",
+            "position": dict(position) if position else self._auto_position(record.get("nodes", [])),
+            "inputs": inputs,
+            "outputs": outputs,
+            "config": {**default_config, **(config or {})},
+        }
+        record.setdefault("nodes", []).append(node)
+        return node
+
+    def _applyConnect(
+        self,
+        record: Dict[str, Any],
+        *,
+        source_node: str,
+        target_node: str,
+        source_port: Optional[str] = None,
+        target_port: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        nodes = record.get("nodes", [])
+        by_id = {str(n.get("id", "")): n for n in nodes}
+        if source_node not in by_id:
+            raise CanvasOpError(f"连线源节点不存在: {source_node}", code="unknown_node")
+        if target_node not in by_id:
+            raise CanvasOpError(f"连线目标节点不存在: {target_node}", code="unknown_node")
+
+        src_outputs = [p.get("id") for p in by_id[source_node].get("outputs", []) or []]
+        tgt_inputs = [p.get("id") for p in by_id[target_node].get("inputs", []) or []]
+        if source_port and src_outputs and source_port not in src_outputs:
+            raise CanvasOpError(
+                f"节点 {source_node} 没有输出端口: {source_port}（可用: {', '.join(src_outputs)}）",
+                code="unknown_port",
+            )
+        if target_port and tgt_inputs and target_port not in tgt_inputs:
+            raise CanvasOpError(
+                f"节点 {target_node} 没有输入端口: {target_port}（可用: {', '.join(tgt_inputs)}）",
+                code="unknown_port",
+            )
+
+        def _sig(e: Dict[str, Any]) -> tuple:
+            s = e.get("source") or {}
+            t = e.get("target") or {}
+            return (
+                s.get("nodeId") if isinstance(s, dict) else s,
+                (s.get("portId") if isinstance(s, dict) else None) or None,
+                t.get("nodeId") if isinstance(t, dict) else t,
+                (t.get("portId") if isinstance(t, dict) else None) or None,
+            )
+
+        new_sig = (source_node, source_port, target_node, target_port)
+        for e in record.get("edges", []):
+            if _sig(e) == new_sig:
+                raise CanvasOpError(
+                    f"重复连线: {source_node} → {target_node}", code="duplicate_edge"
+                )
+
+        edge = {
+            "id": f"edge_{uuid.uuid4().hex[:8]}",
+            "source": {"nodeId": source_node, "portId": source_port},
+            "target": {"nodeId": target_node, "portId": target_port},
+        }
+        record.setdefault("edges", []).append(edge)
+        return edge
+
+    def _applySetConfig(
+        self,
+        record: Dict[str, Any],
+        *,
+        node_id: str,
+        values: Dict[str, Any],
+        replace: bool = False,
+    ) -> Dict[str, Any]:
+        for n in record.get("nodes", []):
+            if n.get("id") == node_id:
+                merged = (
+                    dict(values or {})
+                    if replace
+                    else {**(n.get("config") or {}), **(values or {})}
+                )
+                n["config"] = merged
+                return n
+        raise CanvasOpError(f"节点不存在: {node_id}", code="unknown_node")
+
+    def _applyMoveNode(
+        self, record: Dict[str, Any], *, node_id: str, x: float, y: float
+    ) -> Dict[str, Any]:
+        for n in record.get("nodes", []):
+            if n.get("id") == node_id:
+                n["position"] = {"x": float(x), "y": float(y)}
+                return n
+        raise CanvasOpError(f"节点不存在: {node_id}", code="unknown_node")
+
+    def _applyRemoveNode(self, record: Dict[str, Any], *, node_id: str) -> Dict[str, Any]:
+        nodes = record.get("nodes", [])
+        if not any(n.get("id") == node_id for n in nodes):
+            raise CanvasOpError(f"节点不存在: {node_id}", code="unknown_node")
+        record["nodes"] = [n for n in nodes if n.get("id") != node_id]
+        edges = record.get("edges", [])
+        kept = [
+            e
+            for e in edges
+            if _edge_endpoint(e, "source") != node_id
+            and _edge_endpoint(e, "target") != node_id
+        ]
+        record["edges"] = kept
+        return {"node_id": node_id, "removed_edges": len(edges) - len(kept)}
+
+    def _applyRemoveEdge(self, record: Dict[str, Any], *, edge_id: str) -> Dict[str, Any]:
+        edges = record.get("edges", [])
+        kept = [e for e in edges if e.get("id") != edge_id]
+        if len(kept) == len(edges):
+            raise CanvasOpError(f"连线不存在: {edge_id}", code="unknown_edge")
+        record["edges"] = kept
+        return {"edge_id": edge_id}
+
+    def _applyLayout(self, record: Dict[str, Any]) -> Dict[str, Dict[str, float]]:
+        positions = compute_layout(record.get("nodes", []), record.get("edges", []))
+        for n in record.get("nodes", []):
+            pos = positions.get(str(n.get("id", "")))
+            if pos:
+                n["position"] = dict(pos)
+        return positions
+
+    def _applyOp(self, record: Dict[str, Any], operation: Dict[str, Any]) -> Dict[str, Any]:
+        """把一条批量 op 应用到记录上；未知 op 显式拒绝（不静默跳过）。"""
+        if not isinstance(operation, dict):
+            raise CanvasOpError("operations 元素必须是对象", code="invalid_batch")
+        op = str(operation.get("op") or "").strip()
+        if op == "add_node":
+            return {
+                "op": op,
+                "node": self._applyAddNode(
+                    record,
+                    node_type=str(operation.get("node_type") or ""),
+                    config=operation.get("config"),
+                    position=operation.get("position"),
+                    label=operation.get("label"),
+                    node_id=operation.get("id"),
+                ),
+            }
+        if op == "connect":
+            return {
+                "op": op,
+                "edge": self._applyConnect(
+                    record,
+                    source_node=str(operation.get("source_node") or ""),
+                    target_node=str(operation.get("target_node") or ""),
+                    source_port=operation.get("source_port"),
+                    target_port=operation.get("target_port"),
+                ),
+            }
+        if op == "set_config":
+            return {
+                "op": op,
+                "node": self._applySetConfig(
+                    record,
+                    node_id=str(operation.get("node_id") or ""),
+                    values=operation.get("values") or {},
+                    replace=bool(operation.get("replace")),
+                ),
+            }
+        if op == "move_node":
+            return {
+                "op": op,
+                "node": self._applyMoveNode(
+                    record,
+                    node_id=str(operation.get("node_id") or ""),
+                    x=float(operation.get("x", 0) or 0),
+                    y=float(operation.get("y", 0) or 0),
+                ),
+            }
+        if op == "remove_node":
+            return {
+                "op": op,
+                "result": self._applyRemoveNode(
+                    record, node_id=str(operation.get("node_id") or "")
+                ),
+            }
+        if op == "remove_edge":
+            return {
+                "op": op,
+                "result": self._applyRemoveEdge(
+                    record, edge_id=str(operation.get("edge_id") or "")
+                ),
+            }
+        if op == "layout":
+            return {"op": op, "positions": self._applyLayout(record)}
+        raise CanvasOpError(f"未知批量 op: {op}", code="invalid_batch")
+
     async def _broadcast(
         self,
         session_id: Optional[str],
@@ -322,32 +543,16 @@ class CanvasOpService:
         session_id: Optional[str] = None,
         actor: str = "agent",
     ) -> Dict[str, Any]:
-        definition = self._get_definition(node_type)
-        inputs = [_port_ref(p) for p in definition.inputs]
-        outputs = [_port_ref(p) for p in definition.outputs]
-        # sub_block 默认值作为初始 config（表单字段有默认选中项）
-        default_config: Dict[str, Any] = {}
-        for sb in definition.sub_blocks or []:
-            sb_id = sb.get("id") if isinstance(sb, dict) else getattr(sb, "id", None)
-            sb_default = sb.get("default_value") if isinstance(sb, dict) else getattr(sb, "default_value", None)
-            if sb_id and sb_default is not None:
-                default_config[sb_id] = sb_default
-
         holder: Dict[str, Any] = {}
 
         def _mut(record: Dict[str, Any]) -> Dict[str, Any]:
-            node = {
-                "id": f"node_{uuid.uuid4().hex[:8]}",
-                "type": node_type,
-                "label": label or definition.label,
-                "icon": definition.icon or "📦",
-                "position": dict(position) if position else self._auto_position(record.get("nodes", [])),
-                "inputs": inputs,
-                "outputs": outputs,
-                "config": {**default_config, **(config or {})},
-            }
-            record.setdefault("nodes", []).append(node)
-            holder["node"] = node
+            holder["node"] = self._applyAddNode(
+                record,
+                node_type=node_type,
+                config=config,
+                position=position,
+                label=label,
+            )
             return record
 
         record = self._store.mutate(canvas_id, _mut, base_version=base_version)
@@ -374,52 +579,13 @@ class CanvasOpService:
         holder: Dict[str, Any] = {}
 
         def _mut(record: Dict[str, Any]) -> Dict[str, Any]:
-            nodes = record.get("nodes", [])
-            by_id = {str(n.get("id", "")): n for n in nodes}
-            if source_node not in by_id:
-                raise CanvasOpError(f"连线源节点不存在: {source_node}", code="unknown_node")
-            if target_node not in by_id:
-                raise CanvasOpError(f"连线目标节点不存在: {target_node}", code="unknown_node")
-
-            # 端口校验（节点快照带端口列表时才校验，兼容旧数据）
-            src_outputs = [p.get("id") for p in by_id[source_node].get("outputs", []) or []]
-            tgt_inputs = [p.get("id") for p in by_id[target_node].get("inputs", []) or []]
-            if source_port and src_outputs and source_port not in src_outputs:
-                raise CanvasOpError(
-                    f"节点 {source_node} 没有输出端口: {source_port}（可用: {', '.join(src_outputs)}）",
-                    code="unknown_port",
-                )
-            if target_port and tgt_inputs and target_port not in tgt_inputs:
-                raise CanvasOpError(
-                    f"节点 {target_node} 没有输入端口: {target_port}（可用: {', '.join(tgt_inputs)}）",
-                    code="unknown_port",
-                )
-
-            # 重复连线校验（端点四元组相同即重复）
-            def _sig(e: Dict[str, Any]) -> tuple:
-                s = e.get("source") or {}
-                t = e.get("target") or {}
-                return (
-                    s.get("nodeId") if isinstance(s, dict) else s,
-                    (s.get("portId") if isinstance(s, dict) else None) or None,
-                    t.get("nodeId") if isinstance(t, dict) else t,
-                    (t.get("portId") if isinstance(t, dict) else None) or None,
-                )
-
-            new_sig = (source_node, source_port, target_node, target_port)
-            for e in record.get("edges", []):
-                if _sig(e) == new_sig:
-                    raise CanvasOpError(
-                        f"重复连线: {source_node} → {target_node}", code="duplicate_edge"
-                    )
-
-            edge = {
-                "id": f"edge_{uuid.uuid4().hex[:8]}",
-                "source": {"nodeId": source_node, "portId": source_port},
-                "target": {"nodeId": target_node, "portId": target_port},
-            }
-            record.setdefault("edges", []).append(edge)
-            holder["edge"] = edge
+            holder["edge"] = self._applyConnect(
+                record,
+                source_node=source_node,
+                target_node=target_node,
+                source_port=source_port,
+                target_port=target_port,
+            )
             return record
 
         record = self._store.mutate(canvas_id, _mut, base_version=base_version)
@@ -445,17 +611,10 @@ class CanvasOpService:
         holder: Dict[str, Any] = {}
 
         def _mut(record: Dict[str, Any]) -> Dict[str, Any]:
-            for n in record.get("nodes", []):
-                if n.get("id") == node_id:
-                    merged = (
-                        dict(values or {})
-                        if replace
-                        else {**(n.get("config") or {}), **(values or {})}
-                    )
-                    n["config"] = merged
-                    holder["node"] = n
-                    return record
-            raise CanvasOpError(f"节点不存在: {node_id}", code="unknown_node")
+            holder["node"] = self._applySetConfig(
+                record, node_id=node_id, values=values, replace=replace
+            )
+            return record
 
         record = self._store.mutate(canvas_id, _mut, base_version=base_version)
         self._require_record(record, canvas_id)
@@ -480,12 +639,10 @@ class CanvasOpService:
         holder: Dict[str, Any] = {}
 
         def _mut(record: Dict[str, Any]) -> Dict[str, Any]:
-            for n in record.get("nodes", []):
-                if n.get("id") == node_id:
-                    n["position"] = {"x": float(x), "y": float(y)}
-                    holder["node"] = n
-                    return record
-            raise CanvasOpError(f"节点不存在: {node_id}", code="unknown_node")
+            holder["node"] = self._applyMoveNode(
+                record, node_id=node_id, x=x, y=y
+            )
+            return record
 
         record = self._store.mutate(canvas_id, _mut, base_version=base_version)
         self._require_record(record, canvas_id)
@@ -508,17 +665,7 @@ class CanvasOpService:
         holder: Dict[str, Any] = {}
 
         def _mut(record: Dict[str, Any]) -> Dict[str, Any]:
-            nodes = record.get("nodes", [])
-            if not any(n.get("id") == node_id for n in nodes):
-                raise CanvasOpError(f"节点不存在: {node_id}", code="unknown_node")
-            record["nodes"] = [n for n in nodes if n.get("id") != node_id]
-            edges = record.get("edges", [])
-            kept = [
-                e for e in edges
-                if _edge_endpoint(e, "source") != node_id and _edge_endpoint(e, "target") != node_id
-            ]
-            record["edges"] = kept
-            holder["removed_edges"] = len(edges) - len(kept)
+            holder.update(self._applyRemoveNode(record, node_id=node_id))
             return record
 
         record = self._store.mutate(canvas_id, _mut, base_version=base_version)
@@ -539,11 +686,7 @@ class CanvasOpService:
         actor: str = "agent",
     ) -> Dict[str, Any]:
         def _mut(record: Dict[str, Any]) -> Dict[str, Any]:
-            edges = record.get("edges", [])
-            kept = [e for e in edges if e.get("id") != edge_id]
-            if len(kept) == len(edges):
-                raise CanvasOpError(f"连线不存在: {edge_id}", code="unknown_edge")
-            record["edges"] = kept
+            self._applyRemoveEdge(record, edge_id=edge_id)
             return record
 
         record = self._store.mutate(canvas_id, _mut, base_version=base_version)
@@ -565,12 +708,7 @@ class CanvasOpService:
         holder: Dict[str, Any] = {}
 
         def _mut(record: Dict[str, Any]) -> Dict[str, Any]:
-            positions = compute_layout(record.get("nodes", []), record.get("edges", []))
-            for n in record.get("nodes", []):
-                pos = positions.get(str(n.get("id", "")))
-                if pos:
-                    n["position"] = dict(pos)
-            holder["positions"] = positions
+            holder["positions"] = self._applyLayout(record)
             return record
 
         record = self._store.mutate(canvas_id, _mut, base_version=base_version)
@@ -581,6 +719,59 @@ class CanvasOpService:
             {"positions": positions}, actor,
         )
         return positions
+
+    async def apply_batch(
+        self,
+        canvas_id: str,
+        operations: List[Dict[str, Any]],
+        *,
+        base_version: Optional[int] = None,
+        session_id: Optional[str] = None,
+        actor: str = "agent",
+    ) -> Dict[str, Any]:
+        """把多条画布 op 放进**一个** read-modify-write 事务。
+
+        任一步失败 → 整批不落盘、版本不变；成功只产生一个新版本、只广播一条
+        `batch` 事件。构建批次用它替代逐条写，避免「审批后写一半失败」。
+        """
+        if not isinstance(operations, list) or not operations:
+            raise CanvasOpError("operations 必须是非空列表", code="invalid_batch")
+        normalized = [dict(op) if isinstance(op, dict) else op for op in operations]
+        holder: Dict[str, Any] = {}
+
+        def _mut(record: Dict[str, Any]) -> Dict[str, Any]:
+            results: List[Dict[str, Any]] = []
+            for index, operation in enumerate(normalized):
+                try:
+                    results.append(self._applyOp(record, operation))
+                except CanvasOpError as exc:
+                    label = operation.get("op") if isinstance(operation, dict) else type(operation).__name__
+                    raise CanvasOpError(
+                        f"批次第 {index + 1} 步失败（{label}）: {exc}", code=exc.code
+                    ) from exc
+            holder["results"] = results
+            holder["nodes"] = list(record.get("nodes", []))
+            holder["edges"] = list(record.get("edges", []))
+            return record
+
+        record = self._store.mutate(canvas_id, _mut, base_version=base_version)
+        self._require_record(record, canvas_id)
+        payload = {
+            "version": int(record["version"]),
+            "operations": normalized,
+            "results": holder["results"],
+            "nodes": holder["nodes"],
+            "edges": holder["edges"],
+        }
+        await self._broadcast(
+            session_id, "batch", canvas_id, int(record["version"]), payload, actor
+        )
+        return {
+            "version": int(record["version"]),
+            "results": holder["results"],
+            "node_count": len(holder["nodes"]),
+            "edge_count": len(holder["edges"]),
+        }
 
 
 # ── 默认 broadcaster：SessionSyncManager 的 canvas_op 事件 ──────

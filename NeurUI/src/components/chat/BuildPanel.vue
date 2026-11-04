@@ -143,6 +143,7 @@ const emit = defineEmits<{
   (e: 'close'): void
   (e: 'approved', payload: { sessionId: string; request: string; batchId: string; prompt: string }): void
   (e: 'resumed', payload: { sessionId: string; request: string; prompt: string }): void
+  (e: 'autoResumed', payload: { sessionId: string; chatSessionId: string }): void
 }>()
 
 const { t } = useI18n()
@@ -337,13 +338,24 @@ async function submitInteraction() {
       activeInteraction.value.interaction_id,
       payload,
     )
-    const updated = res?.data?.session ?? res?.session ?? session.value
+    const data = res?.data ?? res ?? {}
+    const updated = data.session ?? session.value
     session.value = updated
-    if (updated) emit('resumed', {
-      sessionId: updated.session_id,
-      request: updated.request,
-      prompt: `构建会话 ${updated.session_id} 的交互已回答，请继续构建。回答：${payload.custom || payload.selected.join(', ') || (payload.secret_value ? '（凭据已配置）' : '')}`,
-    })
+    if (updated) {
+      if (data.resume_started) {
+        // 服务端已自动拉起 Agent 回合；不要再发客户端续跑消息
+        emit('autoResumed', {
+          sessionId: updated.session_id,
+          chatSessionId: data.chat_session_id || '',
+        })
+      } else {
+        emit('resumed', {
+          sessionId: updated.session_id,
+          request: updated.request,
+          prompt: data.resume_prompt || `构建会话 ${updated.session_id} 的交互已回答，请继续构建。回答：${payload.custom || payload.selected.join(', ') || (payload.secret_value ? '（凭据已配置）' : '')}`,
+        })
+      }
+    }
     close()
   } catch (err: any) {
     error.value = err?.response?.data?.detail || err?.message || t('build.answerFailed')

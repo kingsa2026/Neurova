@@ -1476,6 +1476,46 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["canvas_id"],
         },
     },
+    "canvas_apply_batch": {
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【批量画布操作·原子提交】把多条画布操作放进一个事务：任一步失败整批不落盘、版本不变；成功只产生一个新版本。构建批次内优先用它替代逐条 canvas_add_node/connect/set_config，审批后一次提交。operations 支持 add_node（可带 id 供后续 op 引用）/connect/set_config/move_node/remove_node/remove_edge/layout。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "canvas_id": {"type": "string", "description": "画布 ID"},
+                "operations": {
+                    "type": "array",
+                    "description": "按顺序执行的 op 列表；元素含 op 及该 op 的参数（add_node 可带 id，后续 connect/set_config 可直接引用）",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "op": {
+                                "type": "string",
+                                "enum": ["add_node", "connect", "set_config", "move_node", "remove_node", "remove_edge", "layout"],
+                            },
+                            "id": {"type": "string", "description": "add_node：可选节点 id，供同批后续 op 引用"},
+                            "node_type": {"type": "string"},
+                            "config": {"type": "object"},
+                            "position": {"type": "object"},
+                            "label": {"type": "string"},
+                            "source_node": {"type": "string"},
+                            "target_node": {"type": "string"},
+                            "source_port": {"type": "string"},
+                            "target_port": {"type": "string"},
+                            "node_id": {"type": "string"},
+                            "values": {"type": "object"},
+                            "replace": {"type": "boolean"},
+                            "x": {"type": "number"},
+                            "y": {"type": "number"},
+                            "edge_id": {"type": "string"},
+                        },
+                    },
+                },
+                "base_version": {"type": "integer", "description": "读取画布时的版本号（乐观锁）"},
+            },
+            "required": ["canvas_id", "operations"],
+        },
+    },
     "canvas_list_nodes": {
         # 并行能力声明：只读但作用域为共享（读共享节点库快照）⇒ 推导判为不可并行。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
@@ -1611,6 +1651,7 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     "write_pdf",
     "canvas_add_node", "canvas_connect", "canvas_create", "canvas_remove_node",
     "canvas_move_node", "canvas_set_config", "canvas_layout", "canvas_run",
+    "canvas_apply_batch",
     # 桌面/浏览器操作：突变或瞬时快照（截图重放不回当时画面）
     "computer_click", "computer_click_element", "computer_click_mark",
     "computer_type", "computer_scroll", "computer_set_value",

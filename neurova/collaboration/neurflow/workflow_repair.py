@@ -686,53 +686,106 @@ class WorkflowRepairSupervisor:
             return {"success": False, "code": "not_found", "error": "画布不存在或无权访问"}
 
         originalNodes = {node.get("id"): node for node in original.get("nodes") or []}
+        originalEdges = list(original.get("edges") or [])
         draftNodes = {node.id: node for node in draft.nodes}
-        configChanges = []
-        structural = []
-        for nodeId, node in draftNodes.items():
-            if nodeId not in originalNodes:
-                structural.append({"kind": "added_node", "node_id": nodeId})
-                continue
-            if dict(node.config or {}) != dict(originalNodes[nodeId].get("config") or {}):
-                configChanges.append(nodeId)
+
+        def _canvasEdgeSig(edge: Dict[str, Any]) -> tuple:
+            source = edge.get("source") or {}
+            target = edge.get("target") or {}
+            return (
+                source.get("nodeId") if isinstance(source, dict) else source,
+                (source.get("portId") if isinstance(source, dict) else None) or None,
+                target.get("nodeId") if isinstance(target, dict) else target,
+                (target.get("portId") if isinstance(target, dict) else None) or None,
+            )
+
+        def _draftEdgeSig(edge) -> tuple:
+            return (
+                edge.source,
+                edge.source_handle or None,
+                edge.target,
+                edge.target_handle or None,
+            )
+
+        originalSignatures = {_canvasEdgeSig(edge) for edge in originalEdges}
+        draftSignatures = {_draftEdgeSig(edge) for edge in draft.edges}
+        operations: List[Dict[str, Any]] = []
+
+        for edge in originalEdges:
+            if _canvasEdgeSig(edge) not in draftSignatures:
+                operations.append({"op": "remove_edge", "edge_id": edge.get("id")})
         for nodeId in originalNodes:
             if nodeId not in draftNodes:
-                structural.append({"kind": "removed_node", "node_id": nodeId})
-        originalEdgeIds = {edge.get("id") for edge in original.get("edges") or []}
-        draftEdgeIds = {edge.id for edge in draft.edges}
-        if originalEdgeIds != draftEdgeIds:
-            structural.append({"kind": "edges_changed"})
+                operations.append({"op": "remove_node", "node_id": nodeId})
+        for nodeId, node in draftNodes.items():
+            if nodeId not in originalNodes:
+                operations.append(
+                    {
+                        "op": "add_node",
+                        "id": nodeId,
+                        "node_type": node.type,
+                        "config": dict(node.config or {}),
+                        "label": node.label,
+                        "position": dict(node.position or {}),
+                    }
+                )
+            elif dict(node.config or {}) != dict(originalNodes[nodeId].get("config") or {}):
+                operations.append(
+                    {
+                        "op": "set_config",
+                        "node_id": nodeId,
+                        "values": dict(node.config or {}),
+                        "replace": True,
+                    }
+                )
+        for edge in draft.edges:
+            if _draftEdgeSig(edge) not in originalSignatures:
+                operations.append(
+                    {
+                        "op": "connect",
+                        "source_node": edge.source,
+                        "target_node": edge.target,
+                        "source_port": edge.source_handle,
+                        "target_port": edge.target_handle,
+                    }
+                )
+
+        if not operations:
+            return {
+                "success": True,
+                "kind": "canvas",
+                "canvas_id": targetId,
+                "version": int(original.get("version") or 0),
+                "applied_operations": 0,
+                "deferred_changes": [],
+            }
 
         service = self._getCanvasOpService()
-        applied = []
+        baseVersion = (
+            int(original["version"]) if original.get("version") is not None else None
+        )
         try:
-            for nodeId in configChanges:
-                current = store.get(targetId, requester_id=actorId or None)
-                if current is None:
-                    return {"success": False, "code": "not_found", "error": "画布读取失败"}
-                await service.set_config(
-                    targetId,
-                    nodeId,
-                    dict(draftNodes[nodeId].config or {}),
-                    base_version=int(current["version"]),
-                    session_id=sessionId or None,
-                    actor=actorId or "agent",
-                    replace=True,
-                )
-                applied.append(nodeId)
+            applied = await service.apply_batch(
+                targetId,
+                operations,
+                base_version=baseVersion,
+                session_id=sessionId or None,
+                actor=actorId or "agent",
+            )
         except Exception as exc:  # noqa: BLE001 - 版本冲突等转结构化失败
             return {
                 "success": False,
                 "code": "commit_failed",
                 "error": f"画布提交失败: {exc}",
-                "applied_nodes": applied,
+                "applied_operations": 0,
             }
         return {
             "success": True,
             "kind": "canvas",
             "canvas_id": targetId,
-            "applied_config_nodes": applied,
-            "deferred_changes": structural,
+            "version": applied.get("version"),
+            "applied_operations": len(operations),
+            "deferred_changes": [],
         }
 
     # ==================== 主循环 ====================

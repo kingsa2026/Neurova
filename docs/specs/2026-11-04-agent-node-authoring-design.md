@@ -847,7 +847,7 @@ CRUD 与安全版本；N5 接草稿版本修复循环与 5 轮预算。
 | B2 | 面板长等待 vs 工具超时 | 工具默认超时 60s（`tool_coordinator.py:62`）；审批已有 pending/续跑模式（`tool_executor.py:1716`）；PlanSession 是独立 REST 会话 | `ask_user` 若阻塞等待，会被 60s 超时掐断或转后台 | 采用 pending/resume：`ask_user` 返回 `paused + interaction_id`，回答后由 BuildSession 恢复，不在工具调用里死等 |
 | B3 | 画布工具写 CanvasStore，草稿却定为工作流 DRAFT | `canvas_*` 写 `CanvasStore`；工作流 DRAFT 有独立存储/duplicate（`neurflow_api.py:898-922`） | 两者不是同一写入面，直接混用会出现「草稿在画布、提交在工作流」两套状态 | **N4 已结**：选「新增 workflow 定义编辑工具」——`workflow_definition_update` 直接改定义，`workflow_definition_duplicate` 产 DRAFT 副本；画布工具继续只写 CanvasStore，两类写入面不混用 |
 | B4 | 草稿工作流没有 Agent 执行工具 | REST `POST /workflows/{id}/execute` 不校验 PUBLISHED（`neurflow_api.py:358`）；`workflow:<id>` 工具只暴露已发布（`workflow_as_tool.py` 文档） | 修复循环无法用现有 Agent 工具执行 DRAFT 版本做评估 | **N4 已结**：新增 `workflow_execute(workflow_id, allow_draft=true)`；默认仍只允许已发布 |
-| B5 | 批次审批与写入原子性 | 当前 canvas 工具逐次立即写；批次审批未来才加 | 审批前就落盘 = 先斩后奏；审批后逐条写失败会留下半批 | 先落 staging（草稿画布/DRAFT），审批后一次提交；失败整体回滚 |
+| B5 | 批次审批与写入原子性 | 当前 canvas 工具逐次立即写；批次审批未来才加 | 审批前就落盘 = 先斩后奏；审批后逐条写失败会留下半批 | **B5 已结（2026-11-04）**：构建门挡住审批前写入；审批后 `canvas_apply_batch` 单事务提交（任一步失败整批不落盘、版本不变）；工作流定义更新本身是单次原子保存；跨工具（画布+custom 节点）仍非单事务 |
 | B6 | `safe_version` 迁移与回填 | `workflows` 表无该列；历史版本表有快照但无安全标记 | 存量已发布工作流无安全版本，首次修改会被门挡住 | **N4 已结**：幂等补 4 列 + 启动时为已发布存量补基线（无快照先补当前内容快照） |
 | B7 | 前端面板抽离与 secret 输入 | `PlanPanel` 是计划模式 modal；无 secret 字段；11 语言词条需补齐 | 直接复用会耦合计划文档；secret 输入涉及安全渲染 | 抽 `QuestionRoundView` + 新 `BuildPanel`；secret 字段只提交不回显；补齐 11 语言 |
 | B8 | 权限/归属/凭据边界 | BuildSession、批次、草稿、interaction 都新增对象 | 跨用户/跨 Agent 可能越权；secret 可能落错库 | 所有对象带 `user_id/agent_id/build_session_id`；secret 只写 SecretStore，审计只记 key 名 |
@@ -944,7 +944,8 @@ rg -n "workflows/.*/definition|writebackDefinition" \
 
 - **B3/B4 仍在**：画布工具目前直接写 CanvasStore；把草稿提交为 workflow DRAFT、以及草稿执行工具（`workflow_execute(draft=true)`）属于 N3/N4；
 - 门禁只覆盖画布写工具与 `schedule_task`；`custom_node_*` / `workflow_definition_*` 尚未实现，因而未纳入；
-- 构建中的 `ask_user` 需要用户回答后由前端发一条续跑消息；尚未做服务端自动拉起 Agent 回合；
+- **已结（2026-11-04，§12.10）**：回答后服务端自动拉起 Agent 回合；
+  无 `chat_session_id` 时降级返回续跑提示，由前端原链路继续；
 - N0 没有实现 RSI/EKB 修复循环（N5）。
 
 
@@ -1110,8 +1111,8 @@ rg -n "workflows/.*/definition|writebackDefinition" \
   默认时间预算 300 秒（`NEUROVA_NODE_REPAIR_TIME_BUDGET_S`）；
 - 通过后提交：工作流走 `workflow_definition_update` 乐观锁；
   已发布目标提交成功后 `safe_version = repair_verified`；
-  画布只提交配置差异（`CanvasOpService.set_config(replace=True)`），
-  结构化差异进 `deferred_changes`，不静默改画布；
+  画布差异（增删节点/边/配置）走 B5 `apply_batch` 一次事务提交，
+  失败整批不落盘；
 - EKB：成功/失败/阻断/回滚/提交失败都写；`success=True` 只在真实
   `node_results` 给出成功回执时落；`skill_name=workflow_node_repair`，
   tags 带 `node:<type>` 与 `outcome:<...>`；
@@ -1134,7 +1135,8 @@ rg -n "workflows/.*/definition|writebackDefinition" \
 - `CanvasOpService.set_config` 新增 `replace=False`（默认仍为浅合并）；
   N5 配置提交用 `replace=True` 原子替换整份 config；
 - 前端 `canvas_op` 的 `set_config` 支持 `data.replace`，按替换应用；
-- 增删节点/边等结构化差异不在本轮自动写画布，返回 `deferred_changes`。
+- 增删节点/边等结构化差异随 B5 `apply_batch` 一次提交；修复循环
+  `_commitCanvas` 已改走同一 batch，不再返回 `deferred_changes`。
 
 **工具**
 
@@ -1158,7 +1160,118 @@ rg -n "workflows/.*/definition|writebackDefinition" \
 
 **仍在 / 已知边界**
 
-- B5 跨工具原子提交未做：修复循环以 DRAFT 隔离生产，提交是单次定义更新；
-- `create_node` 候选仍不自动执行（需审批）；画布结构化差异只返回清单；
+- B5 已结（见 §12.9）：画布批量一次事务提交；跨工具（画布+定义+custom 节点）
+  仍不是单事务，按批次逐条审计；
+- `create_node` 候选仍不自动执行（需审批）；画布结构化差异已随 B5 batch 提交；
 - 「换节点」候选按同类别 + 标签近似生成，不保证语义等价，交给审批确认；
 - 真实 Amazon Ads 账号/凭据仍未验证（与 B10 一致）。
+
+
+### 12.9 B5 实施记录（2026-11-04）
+
+**目标**：审批后不再「逐条写、失败留半批」。构建门已挡住审批前写入；本批
+把审批后的多步画布写入收成一个事务。
+
+**落点**
+
+- `CanvasOpService` 抽出单 op 变更 helper（add/connect/set_config/move/remove/
+  remove_edge/layout），单条 op 与批量事务共用同一份实现；
+- 新增 `CanvasOpService.apply_batch(canvas_id, operations, base_version=...)`：
+  - 在 `CanvasStore.mutate` 的一个 read-modify-write 事务里顺序应用；
+  - 任一步抛 `CanvasOpError` → 整批不写、版本不变；
+  - 成功只产生一个新版本、只广播一条 `batch` 事件（payload 带完整 nodes/edges）；
+  - `add_node` 支持显式 `id`，同批后续 `connect`/`set_config` 可直接引用；
+- 新工具 `canvas_apply_batch`：纳入构建写门、声明非可复现；
+- 前端 `canvas_op` 增加 `batch` 分支：收到整批事件后重载画布快照。
+
+**边界（如实保留）**
+
+- 跨工具仍非单事务：画布 `apply_batch`、`custom_node_activate`、
+  `workflow_definition_update` 各是各自面的事务，一次任务的多工具变更仍逐条审计；
+- 画布 batch 已支持增删节点/边；修复循环 `_commitCanvas` 走同一 batch，
+  失败整批不落盘；
+- 单条 `canvas_*` 工具仍可用（人工/增量），Agent 构建批次应优先用
+  `canvas_apply_batch`。
+
+**验证**
+
+- B5 判据：`9 passed`（一次提交、未知类型整批回滚、后续步骤失败回滚、
+  删除级联后引用失败回滚、版本冲突不写、空批拒绝、工具注册/门禁/非可复现、
+  构建门禁、工具分派）；
+- 画布回归：`test_canvas_ops.py` + `test_canvas_store_ownership.py` 同步全绿；
+- 前端：`vue-tsc --noEmit` exit 0；`src/modules/collaboration` vitest 95 passed；
+- 活体（真 `create_app` + 真 JWT + 隔离数据根，6 个断言全 PASS）：
+  REST 建画布 → 7 个 op 一次提交（v2/3 节点/2 边）→ 中途未知类型整批不落盘、
+  v 仍为 2 → 落后 base_version 返回 version_conflict 且不写 → 仓内 `data/` 指纹未变。
+
+
+### 12.10 §12.4 服务端自动续跑实施记录（2026-11-04）
+
+**目标**：回答 `ask_user` 面板后由服务端自动拉起 Agent 回合，前端不再必须
+再发一条续跑消息；无聊天会话（旧交互/渠道）时保留前端降级路径。
+
+**落点**
+
+- 交互记录新增 `chat_session_id`：`BuildSession.ask` 接收并持久化，
+  `_execute_ask_user` 从 `agent.current_session_id` 取当前聊天会话写入；
+- 新增 `neurova/build_mode/resume.py`：
+  - `buildResumePrompt`：由服务端生成续跑提示（需求/计划/问题/回答）；
+    secret 答案只写「凭据已配置」，不读取、不拼接凭据值；
+  - `resumeBuildInteraction`：设置构建/请求身份 ContextVar 后调用
+    `agent.chat(user_input, session_id=chat_session_id, metadata={...})`，
+    与普通回合同一管线（消息落盘、AGENT_REPLY 广播）；
+  - 回合结束后检查 BuildSession 是否有新的 `pending` 交互，有则广播
+    `build_interaction_required`（携带 question/kind/options/secret_key 等）；
+  - Agent 回合异常广播 `build_resume_failed`（带 `resume_prompt` 供前端降级），
+    不伪造完成；
+  - `startBuildResume`：请求事件循环内后台任务 + 强引用集合，防 GC 半路夭折；
+- `POST /sessions/{id}/interactions/{iid}/answer` 返回
+  `resume_started / resume_prompt / chat_session_id`；`chat_session_id` 非空时
+  启动后台续跑，空时明确返回 false 由前端原链路继续；
+- `SessionSyncManager.EventType` 新增 `build_interaction_required` /
+  `build_resume_failed`；
+- 前端：
+  - `BuildPanel` 收到 `resume_started=true` 发 `autoResumed`，不再发客户端续跑消息；
+  - `ChatPage` 收到 `agent_reply` 且 `metadata.build_resume=true` → 重载当前会话；
+    收到 `build_interaction_required` → 打开交互面板；收到 `build_resume_failed`
+    → 用 `resume_prompt` 回退到原发送链路，或如实报错。
+
+**边界（如实保留）**
+
+- 活体只验证到「后台回合被拉起 + 下一次提问广播 + 元数据」；真实 LLM 供应商
+  那一刻用替身（无凭据），WebSocket 前端事件处理为静态类型检查，未做浏览器实测；
+- 服务端续跑回合的用户消息是内部续跑提示，会作为一条 user 消息落进聊天历史；
+- 跨渠道（Feishu/WeCom）的构建交互仍走渠道自己的回复链路，不在本批改动面。
+
+**验证**
+
+- 服务端续跑判据：`4 passed`（正常续跑并广播下一次提问、无聊天会话降级、
+  Agent 异常广播失败、secret 不进提示）；
+- Build API：`5 passed`（含 `resume_started/chat_session_id/resume_prompt`
+  与无会话降级两条）；
+- 前端 `vue-tsc --noEmit` exit 0；
+- 活体（真 `create_app` + 真 JWT + 真 BuildSession + 真后台任务 +
+  真 SessionSyncManager + 隔离数据根，6 个断言全 PASS）：
+  回答接口声明启动 → 后台回合真被拉起并产生下一次提问 → 续跑元数据
+  `build_session_id/build_resume` 正确 → `build_interaction_required` 进会话总线
+  → 无聊天会话降级返回 resume_prompt → 仓内 `data/` 指纹未变。
+
+
+### 12.11 B10 外部账号验收项（未执行，缺凭据）
+
+B10 不是代码缺口，而是**必须真实账号才能证明**的外部验收。当前无
+Amazon Ads 凭据，**不得声称已通过**；以下清单供有凭据的环境逐条取证：
+
+1. `node_env_preflight(["builtin:ad-streaming"])` 返回 `ready=true`，
+   `sources` 为 `env` 或 `secret_store`，且响应不含任何值；
+2. 用只读广告节点（`builtin:ad-monitor`）建一条最小工作流并 `canvas_run`，
+   读 `node_results` 的真实 impressions/clicks/spend，确认不是模拟数据；
+3. 用有上限的策略节点生成提案，确认 `AdActionPolicy` 的预算/出价/日动作上限
+   生效，审计 JSONL 有对应记录；
+4. 用相同幂等键重放一次写操作，确认账本去重只落地一次；
+5. 吊销/轮换令牌后重跑，确认节点如实 `failed`、自愈预检 `blocked`、
+   EKB 记录失败而不是成功；
+6. 在 Amazon Ads 控制台核对实际预算/出价变化与工作流提交一致。
+
+在此之前，广告写操作批（`ad_action_policy` / Amazon Ads 外部客户端）仍是
+工作树未提交内容；本设计文档不把它写成已验收。

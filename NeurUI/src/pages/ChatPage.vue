@@ -435,6 +435,7 @@
       @close="onBuildPanelClose"
       @approved="onBuildApproved"
       @resumed="onBuildResumed"
+      @autoResumed="onBuildAutoResumed"
     />
 
     <!-- 流式实时语音：常驻隐藏 live 播放器。src 逐句切换，播完自动推进下一句 -->
@@ -617,6 +618,32 @@ const { effort: thinkingEffort, setEffort: setThinkingEffort } = useThinkingEffo
 const { handleSubAgentSyncEvent, clearSubAgentWindows } = useSubAgentWindows()
 
 function onSessionSyncEvent(event: { event_type: string; payload: Record<string, unknown> }) {
+  const payload = (event.payload || {}) as Record<string, any>
+  // 构建交互回答后服务端自动拉起的 Agent 回合：消息已落盘并广播 AGENT_REPLY，
+  // 按 build_resume 标记重载当前会话（不重复发客户端续跑消息）。
+  if (event.event_type === 'agent_reply') {
+    if (payload.metadata?.build_resume && currentSessionId.value) {
+      void _switchSession(currentSessionId.value)
+    }
+    return
+  }
+  if (event.event_type === 'build_interaction_required') {
+    buildSessionId.value = payload.build_session_id || buildSessionId.value
+    onBuildInteraction(payload)
+    return
+  }
+  if (event.event_type === 'build_resume_failed') {
+    if (payload.resume_prompt) {
+      onBuildResumed({
+        sessionId: buildSessionId.value,
+        request: '',
+        prompt: String(payload.resume_prompt),
+      })
+    } else {
+      uiMessage.error(String(payload.error || t('build.answerFailed')))
+    }
+    return
+  }
   // 电脑操作实时事件 → 分屏面板（不携带 subagent_id，先于子 Agent 分支处理）
   if (event.event_type === 'computer_action') {
     computerPanel.handleComputerAction(event.payload)
@@ -688,12 +715,19 @@ function onBuildApproved(payload: { sessionId: string; request: string; batchId:
   void sendMessage()
 }
 
-function onBuildResumed(payload: { sessionId: string; request: string }): void {
+function onBuildResumed(payload: { sessionId: string; request: string; prompt?: string }): void {
   buildSessionId.value = payload.sessionId
   buildPanelOpen.value = false
   buildInteraction.value = null
-  chatStore.setInputText(t('build.resumePrompt'))
+  chatStore.setInputText(payload.prompt || t('build.resumePrompt'))
   void sendMessage()
+}
+
+/** 服务端已自动拉起续跑回合：只收口面板，结果由 session sync 的 AGENT_REPLY 送回 */
+function onBuildAutoResumed(payload: { sessionId: string; chatSessionId: string }): void {
+  buildSessionId.value = payload.sessionId
+  buildPanelOpen.value = false
+  buildInteraction.value = null
 }
 
 function onBuildInteraction(event: any): void {

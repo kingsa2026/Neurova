@@ -515,6 +515,7 @@ class BuildSessionManager:
         impact: str = "",
         secret_key: str = "",
         timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+        chat_session_id: str = "",
     ) -> Dict[str, Any]:
         session = self._require(session_id)
         if session.status not in (STATUS_APPROVED, STATUS_BUILDING, STATUS_BLOCKED):
@@ -543,6 +544,7 @@ class BuildSessionManager:
             "answer": None,
             "created_at": time.time(),
             "answered_at": 0.0,
+            "chat_session_id": str(chat_session_id or "").strip(),
         }
         with self._lock:
             session.interactions.append(interaction)

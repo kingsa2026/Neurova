@@ -213,10 +213,28 @@ async def answer_build_interaction(
         session = manager.answerInteraction(session_id, interaction_id, body.model_dump())
     except BuildSessionError as exc:
         raise _error(exc)
+    interaction = next(
+        (
+            item
+            for item in session.interactions
+            if item.get("interaction_id") == interaction_id
+        ),
+        None,
+    )
+    from neurova.build_mode.resume import buildResumePrompt, startBuildResume
+
+    resumePrompt = buildResumePrompt(session, interaction or {})
+    chatSessionId = str((interaction or {}).get("chat_session_id") or "")
+    resumeStarted = bool(chatSessionId) and startBuildResume(
+        session_id, interaction_id
+    )
     return _envelope(
         {
             "session": session.toDict(),
             "interaction_id": interaction_id,
+            "resume_started": resumeStarted,
+            "resume_prompt": resumePrompt,
+            "chat_session_id": chatSessionId,
         },
         http_request,
     )
