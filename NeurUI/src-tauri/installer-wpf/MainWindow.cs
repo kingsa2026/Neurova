@@ -1165,6 +1165,9 @@ namespace Neurova.Installer
                 string dir = Path.Combine(targetDir, "backend", "data");
                 Directory.CreateDirectory(dir);
                 string path = Path.Combine(dir, "bootstrap_admin.ini");
+                // 唯一权威写入点是 NSIS 安装段（静默路径读 credential 文件后写）。
+                // WPF 只在 NSIS 没产出时兜底，避免同一份凭据被两处各写一次。
+                if (File.Exists(path)) return;
                 string content = "[bootstrap]\r\nusername=" + adminUser
                     + "\r\npassword=" + adminPass + "\r\n";
                 File.WriteAllText(path, content, new System.Text.UTF8Encoding(true));

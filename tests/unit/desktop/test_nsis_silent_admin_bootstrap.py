@@ -93,6 +93,14 @@ def testWpfNeverPutsCredentialsOnCommandLine():
         assert f'"{opt}"' not in src, f"WPF 仍把 {opt} 拼进命令行"
 
 
+def testWpfIniWriteIsFallbackOnly():
+    """§5 #17：NSIS 是 bootstrap_admin.ini 的权威写入点，WPF 只兜底。"""
+    src = _WPF.read_text(encoding="utf-8")
+    assert re.search(r"if \(File\.Exists\(path\)\) return;", src), (
+        "WPF 未在 NSIS 已产出 ini 时跳过——同一凭据会被两处各写一次"
+    )
+
+
 def testSilentPathMarksAdminWrittenWithoutPageCallback():
     """静默分支必须自己置 $AdminWritten——不得依赖页面回调链。"""
     body = _function_body(_source(), ".onInit")
