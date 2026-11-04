@@ -863,7 +863,7 @@ class ChatPipeline:
     # ══════════════════════════════════════════════════════════════
 
     async def _step_pre_llm_checks(self, ctx: ChatContext):
-        """命令分发（B4）、/compact 压缩命令、/review 评审命令、ToolMemory 检查、技能获取、NL 合成、可行动性门控"""
+        """命令分发（B4）、/compact 压缩命令、/review 评审命令、ToolMemory 检查、技能获取、NL 合成、可行动性门控、认知安全门"""
         await self._check_compact_command(ctx)
         await self._check_review_command(ctx)
         await self._check_command_dispatch(ctx)
@@ -871,6 +871,7 @@ class ChatPipeline:
         await self._check_skill_acquisition(ctx)
         await self._check_nl_synthesis(ctx)
         await self._check_actionability(ctx)
+        await self._check_cognitive_security(ctx)
 
     async def _check_actionability(self, ctx: ChatContext):
         """任务2 可行动性门控：仅当"门控开启 + 明确机器源 + 近期无人类"时置不可行标记，
@@ -910,6 +911,24 @@ class ChatPipeline:
             if not is_machine_origin_value(o):
                 return True
         return False
+
+    async def _check_cognitive_security(self, ctx: ChatContext):
+        """认知安全门（C1 接线）：输入面注入/敏感信息读数。默认观察态——只记
+        读数进 ctx.metadata，不阻断；enforce 态对不安全输入置
+        cognitive_security_blocked，交 _step_llm_call 早退诚实拒答。
+        fail-open：门自身故障放行，绝不因安全面异常吞掉对话轮。"""
+        try:
+            from neurova.security.cognitive_security_gate import runInputSafetyGate
+
+            reading = runInputSafetyGate(ctx.user_input or "")
+            if reading is None:
+                return
+            ctx.metadata = dict(ctx.metadata or {})
+            ctx.metadata["cognitive_security"] = reading
+            if reading.get("mode") == "enforce" and not reading.get("is_safe", True):
+                ctx.metadata["cognitive_security_blocked"] = True
+        except Exception:  # noqa: BLE001 - 安全面读数失败不阻断对话（fail-open）
+            logger.debug("认知安全门检查失败（放行）", exc_info=True)
 
     async def _check_review_command(self, ctx: ChatContext):
         """/review 受限评审子会话命令（P1-8 命令面，交互契约与 /compact 同构）。
@@ -2494,6 +2513,20 @@ class ChatPipeline:
                 ctx.metadata.get("actionable_reason"),
             )
             ctx.reply = ""
+            return
+        # 认知安全门（C1）enforce：输入判不安全 → 早退诚实拒答（不走 LLM、不进工具链）。
+        # 拒答点名原因与回退路径，不静默吞轮（修复教义第 2 条：报错以诚实形态暴露）。
+        if isinstance(ctx.metadata, dict) and ctx.metadata.get("cognitive_security_blocked"):
+            _cs = ctx.metadata.get("cognitive_security") or {}
+            logger.warning(
+                "认知安全门 enforce 拦截本轮输入（findings=%s highest=%s）",
+                _cs.get("finding_count"),
+                _cs.get("highest_severity"),
+            )
+            ctx.reply = (
+                "该消息触发了安全防护：检测到疑似提示注入或敏感信息，本轮未处理。"
+                "如属误拦，可在系统设置 security 分区将 cognitive_security_mode 调回 observe。"
+            )
             return
         self._apply_thinking_effort(ctx)
         tools_for_llm = await self.context_orchestrator.build_tools_for_llm()

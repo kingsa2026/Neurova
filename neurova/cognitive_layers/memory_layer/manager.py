@@ -1612,6 +1612,15 @@ class MemoryManager:
         默认 False：既有调用方（管线/睡眠写回等，自己标好类型）行为不变，
         API 侧 `AddMemoryRequest.auto_classify` 默认 True 显式传入。
         """
+        # 认知安全门（C1 接线）：记忆写入咽喉单点——remember_with_trace 委托到此，
+        # 全部生产方一轮覆盖。观察态记读数不改内容；enforce 态 sanitize 后落库；
+        # 门故障放行原文（fail-open，绝不因安全面异常丢记忆）。
+        try:
+            from neurova.security.cognitive_security_gate import runMemoryWriteGuard
+
+            content, _sec_reading = runMemoryWriteGuard(content)
+        except Exception:  # noqa: BLE001 - 安全面故障不阻断记忆写入
+            logger.debug("记忆安全门检查失败（放行原文）", exc_info=True)
         # 配置化默认值（memory-settings 配置页）: manager.new_memory_temperature /
         # new_memory_importance。默认 65（温度死锁修复：原 100 ≥ 高温不衰减
         # 阈值 80，新记忆从未真正参与衰减）；
