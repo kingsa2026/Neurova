@@ -1,7 +1,10 @@
 # target 目录放 E 盘，避免 C 盘空间不足
 target-dir = "E:/rust-target-neurova"
 
-# MSVC link.exe 全路径钉死：Git Bash 的 /usr/bin/link.exe（coreutils）会抢 PATH
-# 且不支持 MSVC 语义（"extra operand" 错误根因）；vswhere 定位 BuildTools 实装路径
-[target.x86_64-pc-windows-msvc]
-linker = "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.exe"
+# MSVC link.exe 不再钉全路径（2026-11-04 根治）：原钉值写死
+# C:/Program Files (x86)/.../BuildTools/.../link.exe，VS2022 实装现已迁至
+# E:\neurova-build-tools\VS2022——死路径让任何 cargo 调用必败
+# （"linker not found"，与代码无关）。rustc 原生 MSVC 探测走 vswhere，
+# 已实测能定位 E 盘实装；Git Bash 的 /usr/bin/link.exe（coreutils）抢 PATH
+# 由探测顺序规避（探测失败才回退 PATH）。若在无 vswhere 的环境打包，
+# 先跑 vcvars64 让 PATH 带上 MSVC bin 即可。
