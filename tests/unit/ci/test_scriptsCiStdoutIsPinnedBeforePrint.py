@@ -24,6 +24,7 @@ utf-8，就会在一句 `print` 上抛 `UnicodeEncodeError` ⇒ 退出码 1，�
 """
 
 import ast
+from pathlib import Path
 
 import pytest
 
@@ -43,6 +44,77 @@ CLOSED_IN_THIS_BATCH = (
     "scripts/ci/coverage_report.py",
     "scripts/ci/protected_subset_nightly.py",
 )
+
+
+def _nonCanonicalPins(root="scripts", baseDir=None) -> list:
+    """钉 stdout 只许一种行内写法：`if hasattr(<stream>, "reconfigure")` 守卫 ＋ `errors="replace"`。
+
+    为什么单独一格：`pinsStdoutStream()` 判的是"有没有钉"，为不误伤既有 44 档，它把直写、
+    `hasattr` 守卫、助手形（`_reconfigureStdout()` 里 for stream 循环）三种都算通过——
+    于是"三种并存"这件事在闸里合法。本格按用户裁定（收成一种行内写法＋判据只认它）把口径收成
+    **唯一形**：直写少 `hasattr` 会在 stdout 被换成无 reconfigure 的对象时抛 AttributeError，
+    助手形则是第四种"看着也是钉"的车辆；两者都点名。
+    """
+    offenders = []
+    scanRoot = Path(baseDir) if baseDir is not None else REPO_ROOT / root
+    for path in sorted(scanRoot.rglob("*.py")):
+        source = path.read_text(encoding="utf-8", errors="replace")
+        try:
+            tree = parseSource(source)
+        except SyntaxError:
+            continue
+        guarded = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.If):
+                continue
+            test = node.test if isinstance(node.test, ast.Call) else None
+            if (test is not None and getattr(test.func, "id", None) == "hasattr"
+                    and isinstance(test.args[0], (ast.Attribute, ast.Name))
+                    and len(test.args) > 1 and getattr(test.args[1], "value", None) == "reconfigure"):
+                guarded.update(id(ch) for ch in ast.walk(node))
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "reconfigure"):
+                continue
+            stream = node.func.value
+            isNamedStream = (isinstance(stream, ast.Attribute)
+                             and getattr(stream.value, "id", None) == "sys"
+                             and stream.attr in ("stdout", "stderr"))
+            hasReplace = any(k.arg == "errors" and getattr(k.value, "value", None) == "replace"
+                             for k in node.keywords)
+            inGuard = any(id(ch) in guarded for ch in ast.walk(node))
+            if not (isNamedStream and hasReplace and inGuard):
+                rel = path.relative_to(scanRoot).as_posix()
+                offenders.append("%s:%d" % (rel, node.lineno))
+    return sorted(offenders)
+
+
+def test_stdoutPinIsTheOneCanonicalShape():
+    """单源：`scripts/` 里每一处 stdout 钉法都必须是那一形（现算非规范形必须为空）。"""
+    offenders = _nonCanonicalPins()
+    assert offenders == [], (
+        "这些落点的 stdout 钉法不是唯一规范形（应为 `if hasattr(sys.stdout/stderr, \"reconfigure\")` "
+        "守卫＋errors=\"replace\"）：\n  %s" % "\n  ".join(offenders))
+
+
+def test_pinShapePredicateRejectsBareLoopAndMissingReplace(tmp_path):
+    """反证格：三种旧形必须各被点名，规范形必须不被冤枉——否则上一格"零 offender"是假绿。"""
+    NL = chr(10)
+    cases = {
+        "canonical.py": ("import sys" + NL +                        "if hasattr(sys.stdout, \"reconfigure\"):" + NL +                        "    sys.stdout.reconfigure(encoding=\"utf-8\", errors=\"replace\")" + NL),
+        "bare.py": "import sys" + NL + "sys.stdout.reconfigure(encoding=\"utf-8\", errors=\"replace\")" + NL,
+        "no_replace.py": ("import sys" + NL +
+                          "if hasattr(sys.stdout, \"reconfigure\"):" + NL +
+                          "    sys.stdout.reconfigure(encoding=\"utf-8\")" + NL),
+        "loop_helper.py": ("import sys" + NL + "def _pin():" + NL +                           "    for stream in (sys.stdout, sys.stderr):" + NL +
+                           "        stream.reconfigure(encoding=\"utf-8\", errors=\"replace\")" + NL),
+    }
+    for name, source in cases.items():
+        (tmp_path / name).write_text(source, encoding="utf-8", newline="")
+
+    offenders = _nonCanonicalPins(baseDir=tmp_path)
+    named = {o.split(":")[0] for o in offenders}
+    assert named == {"bare.py", "no_replace.py", "loop_helper.py"}, offenders
+    assert not any(o.startswith("canonical.py") for o in offenders), offenders
 
 
 def _nonAsciiPrintLines(source: str) -> list:

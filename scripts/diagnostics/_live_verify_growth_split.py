@@ -65,8 +65,10 @@ def http(method: str, url: str, token: str, body=None):
 def main() -> int:
     logging.disable(logging.CRITICAL)
     try:
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
     os.environ.setdefault("NEUROVA_RSI_RECEIPTS", str(resolveDataPath("evolution/rsi_receipts.jsonl")))
