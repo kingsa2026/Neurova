@@ -1,6 +1,6 @@
 # G1 修正方案 —— 工具循环迭代化与轮次态归属
 
-> ## 状态更新（2026-09-30 对齐至 `da843611` + `189fc321`）
+> ## 状态更新（2026-09-30 对齐至 5e54ead6 + a7ef5d52）
 >
 > **本文是立项目击与判据来源，不是现状描述。** 正文中"仍开放/待落地"的判定已被实现取代：
 >
@@ -10,14 +10,14 @@
 > | G2 出口验收 | 已闭合，且形状优于本文方案：**GoalGate 进默认装配**（`openai_loop.py:212-222`），出口求值点 `evaluateLoopExit`（`base.py:71`，ctx 带 `isLoopExit`）流式与非流式两路都接；续跑预算绑**独立配置键** `goal_max_continuations`——正是本文 §4.4 要求的单源约束。故 `set_goal_gate` 无生产调用方是设计结果，不是断点 |
 > | G3 并发 | M1–M4 与逐工具裁决已落地（71/71）；收益判据仍 `no_data`（未否证） |
 > | G4 超时即取消 | 已闭合：`TimeoutDisposition.ABORT`（`tool_coordinator.py:245`）返回 cancelled 形态并被 `is_policy_denial` 认作决策 |
-> | G5 审批闭环 | 本文四断点链已由 `189fc321` / MR #339 落地；HTTP 活体三条未验 |
+> | G5 审批闭环 | 本文四断点链已由 a7ef5d52 / MR #339 落地；HTTP 活体三条未验 |
 > | G7 缓存 | 重排已停；主动 cache marker 仍缺 |
 > | G8 台账 | 15 条已处置，1 条为反向控制条目（标签口径 nit） |
 >
-> 引用本文行号前请对准当前 `HEAD` 复核——正文写于 `c55e1f37`，此后 loop/tool 轴有 138 个提交。
+> 引用本文行号前请对准当前 `HEAD` 复核——正文写于 94e16d50，此后 loop/tool 轴有 138 个提交。
 
 
-> 立项时间：2026-09-26 · 取证基线：`c55e1f37` · 关联缺口：对标文档 §5 G1
+> 立项时间：2026-09-26 · 取证基线：94e16d50 · 关联缺口：对标文档 §5 G1
 > 关联方案：[`2026-09-26-goal-gate-wiring-repair-plan.md`](2026-09-26-goal-gate-wiring-repair-plan.md)（G2）
 > 关联台账：`scripts/ci/toolLoopDeadlines.txt`（`IterationGate` 等条目）
 
@@ -374,7 +374,7 @@ if parentState.nestingDepth >= MAX_SUBAGENT_DEPTH:      # 建议 1（与参照�
 
 ---
 
-*本文 §1 的实测数字可用内联探针在任何 Python 3.12 环境复现；其余结论逐行对准 `c55e1f37`，
+*本文 §1 的实测数字可用内联探针在任何 Python 3.12 环境复现；其余结论逐行对准 94e16d50，
 复验命令：`grep -n "_tool_rounds\|_stagnation_count\|_gate_runner" neurova/agent/loops/*.py`、
 `grep -n "MAX_ACTIVE_CHILDREN\|agent.chat(" neurova/agent/swarm.py`、
 `grep -n "_top_level" neurova/agent/loops/anthropic_loop.py`。*

@@ -30,7 +30,7 @@
   （`:359/:404`）；树形可视化（`:444/:479`）；计数清理（`:518`，年龄上限只进统计 `:195`）；
   统计与 JSON 导入导出（`:544/:561/:581`）；DCL 单例（`:617`）。
 - **关键入口**：`ExplainabilityManager:158`、`get_explainability_manager():617`。
-- **来历**：`7835c367`(06-04) 骨架、`806c7047`(06-06) 补实装；`-S ExplainabilityManager -- neurova/`
+- **来历**：7835c367(06-04) 骨架、806c7047(06-06) 补实装；`-S ExplainabilityManager -- neurova/`
   全史仅这两笔 ⇒ **引入即未接线**。
 - **现役替代**：**部分缺**。`modules/explainability_module.py` 只做扁平 Explanation
   （`:99/:157`），没有 DAG／记忆关联／根路径／导入导出／树可视化；且它自己的三个写入口
@@ -44,9 +44,9 @@
   过期（`:183/:203/:248/:351`）；好奇心强度（`:413`）、探索史与统计（`:479/:502/:582`）、
   模板提问（`:532/:561`）、质量/有用性（`:695/:857`）、会话回调（`:903-918`）。
 - **关键入口**：`ProactiveQuestionManager:614`、`QuestionQueueManager:183`、`CuriosityDrive:399`。
-- **来历**：`7835c367` 骨架 → `65309f6b`(06-05) 扩写 → `33b71a25`；无真实消费者。
+- **来历**：7835c367 骨架 → 65309f6b(06-05) 扩写 → 31be70ff；无真实消费者。
   旧门面曾按不存在的 `ProactiveQuestion` 名称导入（恒 None，教义第 2 条的形态），
-  `b2d7acf9`(10-14) 把这类 None 兜底拆掉时一并摘除。⇒ **引入即未接线**。
+  4ea8bf91(10-14) 把这类 None 兜底拆掉时一并摘除。⇒ **引入即未接线**。
 - **现役替代**：**部分缺**。队列部分有活替代：`meta_cognition_layer/question_queue.py:97`
   经 `mem_core.py:661`、`post_chat_pipeline.py:2659/:2672`、`orchestrator.py:1047`、`growth.py:489` 在役；
   **好奇心驱动、探索史、提问质量分零替代**（`intrinsic_motivation.py:427` 只调整机、不产问题）。
@@ -60,7 +60,7 @@
   （`:78/:90`）；DFS 多层（`:135/:159`）；增改删清（`:195/:229/:260/:387`）；BFS 最短路（`:286`）；
   图统计（`:335`）。
 - **关键入口**：`RelationMixin:15`。
-- **来历**：`7835c367` 一行桩 → `65309f6b` 补 392 行 → `33b71a25` 重排；全史无 import
+- **来历**：7835c367 一行桩 → 65309f6b 补 392 行 → 31be70ff 重排；全史无 import
   ⇒ **引入即未接线**。
 - **现役替代**：**部分缺**。`relation_module.py:52` 覆盖 CRUD/深度 1/BFS（`:90/:168/:215`），
   经 `manager.py:3905/:4475`、`memory/crud.py:287→:4160` 在役；`graph_traversal.py:72` 有 BFS/DFS
@@ -76,8 +76,8 @@
   `search_archived_memories:234`；`get_forgetting_statistics:261`（原因分布＋恢复率 `:297`）；
   `cleanup_old_archives:300`；`clear_all:326`。
 - **关键入口**：`ForgettingRecoveryStorageMixin:15`（无工厂、无 `__init_subclass__`/`type()` 装配）。
-- **来历**：`7835c367` 引入；`-S` 全史仅此一笔 ⇒ **引入即未接线**。同能力的
-  `forgetting_recovery.py`(346) 在 `0c333a76`(09-21) 被删，本件未随批清退——属"删主体留副本"；
+- **来历**：7835c367 引入；`-S` 全史仅此一笔 ⇒ **引入即未接线**。同能力的
+  `forgetting_recovery.py`(346) 在 807ca120(09-21) 被删，本件未随批清退——属"删主体留副本"；
   但主体是独立实现的 `ForgettingRecoveryManager`（删除前无 import 本 mixin），不是"删父类留 mixin"。
 - **现役替代**：**部分缺**。`manager.py:4394 archive_memory`／`:4409 delete_memory_soft`／
   `:4418 recover_from_archive`／`:4430/:4440` 用 `LifecycleStage` 落盘，覆盖归档/恢复/列举；
@@ -92,7 +92,7 @@
   八个方法 1:1 转发；`_create_simple_analyzer:47` 在 ImportError 时恒返 neutral/0.0（`:53`，
   教义第 2 条点名的假成功）。
 - **关键入口**：`EmotionAnalyzerAdapter:14`、`get_emotion_analyzer():231`（lazySingleton）。
-- **来历**：`7835c367` 骨架、`65309f6b`(06-05) 补齐转发面与工厂；`-S EmotionAnalyzerAdapter`
+- **来历**：7835c367 骨架、65309f6b(06-05) 补齐转发面与工厂；`-S EmotionAnalyzerAdapter`
   全史仅这两笔、且都只改本文件 ⇒ **引入即未接线**。旧卷 A10 的"向后兼容门面、从无人迁入"
   **成立**（方法数校正为 8 转发＋1 分支）。
 - **现役替代**：**全量**。转发目标 `memory_layer/emotion.py:101 EmotionAnalyzer` 活着且被直连
@@ -108,10 +108,10 @@
   `aggregate_emotion:156` 极端值加权平均；`get_positive/negative/neutral_memories:182/:189/:196`；
   `remove_memory:202`；`get_stats:213`。
 - **关键入口**：`EmotionConductionModule:16`，`name="emotion_conduction_module":51`，`init/shutdown:56/:62`。
-- **来历**：`7835c367` 引入、`806c7047`(06-06) 补 name/init/shutdown；两笔均只改本文件
+- **来历**：7835c367 引入、806c7047(06-06) 补 name/init/shutdown；两笔均只改本文件
   ⇒ **引入即未接线**。装配面：`modules/__init__.py` 仅 6 行、零导出（docstring 仍写"集中导出"）；
   `manager.py` 对 `modules/` 的 21 处 `_ensure_*` 懒导入**不含本件**；唯一能按字符串装载的
-  `memory_bus.py` 已随 `0c333a76` 删除。
+  `memory_bus.py` 已随 807ca120 删除。
 - **现役替代**：**部分缺**。`emotion_context_layer/emotion_conduction.py:28` 是 **agent 级心情**
   （`update_emotional_state:65`），与"记忆间 BFS 传导"不同物；`modules/emotion_module.py` 只做
   单记忆存值，没有传导/聚合/极性列举（`aggregate_emotion:156` 全仓唯一）。

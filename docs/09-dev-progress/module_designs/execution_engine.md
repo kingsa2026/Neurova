@@ -419,8 +419,8 @@ async def call_tool(self, server_name: str, tool_name: str, arguments: Dict) -> 
 | 2026-05-12 22:00 | 完成PlanOrchestrator实现 | 设计文档要求 | `plan_orchestrator.py` |
 | 2026-05-12 22:00 | 完成MCPManager实现 | 设计文档要求 | `mcp_manager.py` |
 | 2026-05-12 22:06 | 完成任务，更新文档 | 任务完成 | `docs/` |
-| 2026-08-31 | `fa335b27` 按死码删除 mcp_manager | 零生产消费方 | `mcp_manager.py` |
-| 2026-09-02 | `34b0678b` 又整档落回（420 行，全仓零引用） | 落回时未接任何消费方 | `mcp_manager.py` |
+| 2026-08-31 | 9873424e 按死码删除 mcp_manager | 零生产消费方 | `mcp_manager.py` |
+| 2026-09-02 | 8ff7491d 又整档落回（420 行，全仓零引用） | 落回时未接任何消费方 | `mcp_manager.py` |
 | 2026-10-20 | 随 §6-334 的 D 票整档退役（§6-349） | 溯源复算：零消费者＋现役替代为超集＋票面前提被否证 | `mcp_manager.py`、门面 docstring、CI 基线、t09 判据 |
 
 ---

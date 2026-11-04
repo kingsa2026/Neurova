@@ -49,7 +49,7 @@
   `timeout_seconds`/`required_capabilities`/`input_requirements`/`output_produces`/`optional` 等字段位）、
   `WorkflowDefinition`:71（步骤表＋`validate()`：重复 step_id／未知依赖检测在 `:113` 起）。
 - 关键入口：`TemplateType`、`AgentRole`、`TaskStep`、`WorkflowDefinition`（无工厂函数）。
-- 来历：`1832a12b`(2026-06-03) **一笔建整个 `neurova/collaborate/` 包**（`--stat` 实测 7 档 ＋1434 行）
+- 来历：1832a12b(2026-06-03) **一笔建整个 `neurova/collaborate/` 包**（`--stat` 实测 7 档 ＋1434 行）
   ⇒ **引入即未接线**；此后无接线、也无"接入后被摘除"的提交可寻。
 - 现役替代：同名四件套在 `neurova/agent/templates/collaboration_template.py:21,31,46,79` 各有一份，
   **且那一份被真消费**（`agent/team.py:25` 取 `AgentRole`）；neurflow 另有一套语义不同的
@@ -64,7 +64,7 @@
   能力汇总 `get_required_capabilities`:72、结构校验 `validate`:79、序列化 to_dict/to_json/from_dict/from_json）；
   `TemplateManager`:201（注册/注销/取/列（按类型与标签双索引）/搜索/克隆）；`get_template_manager`:362（懒建单例）。
 - 关键入口：`TemplateManager`、`get_template_manager()`。
-- 来历：同 `1832a12b`，引入即未接线。
+- 来历：同 1832a12b，引入即未接线。
 - 现役替代：**不是"另一份实现"，是同一份的双胞胎**——与 `agent/templates/collaboration_template.py`
   的 `CollaborationTemplate`＋`TemplateManager` 段逐行比对：**350 行里 346 行相同**，`difflib` 相似度 95.7%，
   差异全是文件头与活支多出的预设模板（活支相对死支 ＋146/−9）。
@@ -110,10 +110,10 @@
 
 ## 四、事件分组
 
-整座包只有**一次出生事件**：`1832a12b`(2026-06-03「feat: 完善项目结构，确保所有功能模块完整提交」)
+整座包只有**一次出生事件**：1832a12b(2026-06-03「feat: 完善项目结构，确保所有功能模块完整提交」)
 一笔 ＋1434 行、7 档同时创建，门面再导出**同笔写进**——即"门面把死岛挂上启动路径"不是后来漂变的，是出生时就这样。
-此后本包只被机械扫过：`7835c367`(06-04 pyc 骨架恢复，与 §6-308 那座岛、core 那份编排器同号)、
-`7f8c7660`(06-25)、`d63b3c66`(2026-10-07 懒建单例双检锁收口——**又给死码修了一遍**)。
+此后本包只被机械扫过：7835c367(06-04 pyc 骨架恢复，与 §6-308 那座岛、core 那份编排器同号)、
+7012ae5f(06-25)、6b9bc3df(2026-10-07 懒建单例双检锁收口——**又给死码修了一遍**)。
 
 **未完成事件的指纹**：同一批里 scheduler 一支后来被接进端点（活了），orchestrator/template/models 一支
 从没接上（死了）——所以"整包收干净"不能一刀切，必须按符号切（C4/C5 就是这条线)。

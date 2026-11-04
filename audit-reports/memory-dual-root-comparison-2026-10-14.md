@@ -36,14 +36,14 @@
 ### A（`agent_workspaces/<agent>/memory/`）
 - **原功能**：按 agent 的记忆正文库 + 情绪 + 附件；`agent_id` 既是目录层级、也是库内列（`manager.py:364` `agent_id TEXT NOT NULL DEFAULT 'default'`），物理分库与逻辑列双层隔离（`isolation.py:23-118`）。
 - **关键入口**：见 §1 A 侧各行。API 门面不取工厂，直接返回 `agent.memory_manager`（`memory/base.py:216`、`deps.py:77`、`base.py:180`、`knowledge_common.py:103`）。
-- **来历**：`neurova_memories_persist` 首现 `693fa21b`（2026-06-07）[实]；`_default_db_path_for` 入 `e0519c94`（2026-09-02）[实]，动机是灭掉 CWD 相对默认值 `neurova_memory.db`；此后 `dc7e6419`(09-12)→`626e2e88`(09-20)→`619796b8`(09-28) 持续维护 [码]。
+- **来历**：`neurova_memories_persist` 首现 693fa21b（2026-06-07）[实]；`_default_db_path_for` 入 8de9775c（2026-09-02）[实]，动机是灭掉 CWD 相对默认值 `neurova_memory.db`；此后 40c256ac(09-12)→da9d0c9d(09-20)→64ab282a(09-28) 持续维护 [码]。
 - **现役替代**：无替代——它就是现役本体。
 - **判定**：**留，作选定那份**。
 
 ### B（`data/<agent>/memory.db`）
 - **原功能**：`CognitiveStorageEngine` 的 LSM 五层热存储（L0 内存缓冲 + `wal.jsonl` 崩溃恢复 + L1 SQLite + FTS5 + 内存向量索引），意图成为统一记忆层。
 - **关键入口**：`agent_core.py:1422`；消费方 4 个（`pattern_crystallizer.py:388/592`、`reasoning_trace_manager.py:174/188`、`sleep_adapter.py:100/159/163/167`、`unified_retriever.py:77`），前三个断点见 §4。
-- **来历**：`class CognitiveStorageEngine` 建文件 `33c352b1`（2026-06-04）[实]，**早于 A 侧落点收口（09-02）与 `get_agent_data_dir` 归一（`6fc0fb88`，2026-09-21）**[实]。
+- **来历**：`class CognitiveStorageEngine` 建文件 33c352b1（2026-06-04）[实]，**早于 A 侧落点收口（09-02）与 `get_agent_data_dir` 归一（f93e49de，2026-09-21）**[实]。
   → 定性：不是「新引擎引入后旧路径没退役」，而是**旧引擎的落点被归一进了数据根、却从未承载写入**——落点收编走了形式，功能没接上。
 - **现役替代**：**部分替代成立**——持久化与召回两职都已被 A1 承担（A1 有 12/4 条真行、读写双向 `manager.py:493` vs `:780`，且是每轮 `/v1/chat` 实际取用的实例）。B 的 `retrieve()` 那一路（`unified_retriever.py:77`）有 A 侧对应物（同文件 `:81-108` 的 MoE/Recall/Hebb 就是 A 侧 MemCore），且实测 A 侧在 B 为空时照常供数，不构成能力缺口。**唯 FTS5/向量/温度分层无替代**（§5）。
 - **判定**：**需人裁**（因 §5 全仓唯一实装，不得进可删清单）。
@@ -124,7 +124,7 @@
 
 ## 9 落批结果与两处勘误（同日，用户裁「三层能力保」后按推荐档执行）
 
-落地：`4172d3cc`（生产 + 判据 + 活体）、`1ab1691f`（四档入受保护子集，561→565）、本笔
+落地：db2ecedd（生产 + 判据 + 活体）、defbf0aa（四档入受保护子集，561→565）、本笔
 档案与台账 §6-202。
 
 形态按推荐档执行「只收落点、不动两根」：FTS5(trigram) 与 `embedding` 并到 A1 的

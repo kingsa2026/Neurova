@@ -1,6 +1,6 @@
 # G2 修正方案 —— 目标达成验收链（GoalGate 接线）
 
-> ## 状态更新（2026-09-30 对齐至 `da843611` + `189fc321`）
+> ## 状态更新（2026-09-30 对齐至 5e54ead6 + a7ef5d52）
 >
 > **本文是立项目击与判据来源，不是现状描述。** 正文中"仍开放/待落地"的判定已被实现取代：
 >
@@ -10,13 +10,13 @@
 > | G2 出口验收 | 已闭合，且形状优于本文方案：**GoalGate 进默认装配**（`openai_loop.py:212-222`），出口求值点 `evaluateLoopExit`（`base.py:71`，ctx 带 `isLoopExit`）流式与非流式两路都接；续跑预算绑**独立配置键** `goal_max_continuations`——正是本文 §4.4 要求的单源约束。故 `set_goal_gate` 无生产调用方是设计结果，不是断点 |
 > | G3 并发 | M1–M4 与逐工具裁决已落地（71/71）；收益判据仍 `no_data`（未否证） |
 > | G4 超时即取消 | 已闭合：`TimeoutDisposition.ABORT`（`tool_coordinator.py:245`）返回 cancelled 形态并被 `is_policy_denial` 认作决策 |
-> | G5 审批闭环 | 本文四断点链已由 `189fc321` / MR #339 落地；HTTP 活体三条未验 |
+> | G5 审批闭环 | 本文四断点链已由 a7ef5d52 / MR #339 落地；HTTP 活体三条未验 |
 > | G7 缓存 | 重排已停；主动 cache marker 仍缺 |
 > | G8 台账 | 15 条已处置，1 条为反向控制条目（标签口径 nit） |
 >
-> 引用本文行号前请对准当前 `HEAD` 复核——正文写于 `c55e1f37`，此后 loop/tool 轴有 138 个提交。
+> 引用本文行号前请对准当前 `HEAD` 复核——正文写于 94e16d50，此后 loop/tool 轴有 138 个提交。
 >
-> **上表未覆盖的三处（2026-09-30 对 `008a3e2a` 复验时补，均为本文的真实不足）**：
+> **上表未覆盖的三处（2026-09-30 对 008a3e2a 复验时补，均为本文的真实不足）**：
 >
 > 1. **本文 §4.4 会留下一个洞，实现时被发现并修掉**。§4.4 只要求"`maxContinuations` 与
 >    `max_rounds` 绑两个不同配置键"——照做会把 `GoalGate.max_rounds` 的**类字面量 15**
@@ -36,7 +36,7 @@
 >    **决策点 D-1（仅会话态不建表）、D-2（`ctx.metadata["goal"]` 入口）、D-4、D-5（上限 2）均按本文采纳。**
 
 
-> 立项时间：2026-09-26 · 取证基线：`c55e1f37` · 关联缺口：对标文档 §5 G2
+> 立项时间：2026-09-26 · 取证基线：94e16d50 · 关联缺口：对标文档 §5 G2
 > 关联台账：`scripts/ci/toolLoopDeadlines.txt` 中 `set_goal_gate`(`no_consumer`)、
 > `GoalGate` 相关条目 · 上游审计：Issue #175（工具/loop 死线台账 T-01）
 >
@@ -410,6 +410,6 @@ verdict 三处落地，缺一即验收不通过：
 
 ---
 
-*本文取证逐行对准 `c55e1f37`。§1 四条根因均可用 §10 之外的命令独立复验：*
+*本文取证逐行对准 94e16d50。§1 四条根因均可用 §10 之外的命令独立复验：*
 *`grep -n "if tool_calls:" -A 3 neurova/agent/loops/openai_loop.py`、*
 *`grep -rn "_goal" --include=*.py neurova/`、`grep -n "GateRunner(\[" neurova/agent/loops/openai_loop.py`。*

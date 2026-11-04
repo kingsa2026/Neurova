@@ -5,7 +5,7 @@
 > 落地任何一条时，须按 [`AGENTS.md`](../../AGENTS.md) 协作红线"原创性与自主性"独立设计：
 > **不得**在本仓代码注释、技术文档、提交记录中出现"对齐/参照 ZCode"一类表述。
 >
-> ## ⚠️ 状态更新（2026-09-30 对齐至 `da843611` + `189fc321`）—— 本文 §5/§8 的"仍开放"判定已过期
+> ## ⚠️ 状态更新（2026-09-30 对齐至 5e54ead6 + a7ef5d52）—— 本文 §5/§8 的"仍开放"判定已过期
 >
 > 本文是**取证与判据**，不是现状。当初列的 8 条缺口，到此已基本清偿：
 >
@@ -15,16 +15,16 @@
 > | G2 出口验收 | 已闭合，且优于本文方案：`evaluateLoopExit`(`base.py:71`, `isLoopExit`) 两路都接 + **GoalGate 进默认装配** + 续跑预算绑独立键 `goal_max_continuations` |
 > | G3 并发 | M1–M4 + 逐工具裁决(71/71) 已落地；**收益判据仍 `no_data`（未否证，别当否证）** |
 > | G4 取消 | 已闭合（`TimeoutDisposition.ABORT`） |
-> | G5 审批 | `189fc321` / MR #339 落地；HTTP 活体三条未验 |
+> | G5 审批 | a7ef5d52 / MR #339 落地；HTTP 活体三条未验 |
 > | G6 / G7 / G8 | 如本文所记（G7 剩"主动 cache marker"半条；G8 剩一条反向控制的标签口径） |
 >
 > **净结论：原 8 条里只剩 G7 半条与一条台账标签 nit。** 保留正文原文是为了留判断轨迹，引用其行号前须知
-> 正文取证于 `69d7f0dc`/`c55e1f37`，此后 loop/tool 轴有 138 个提交。本文 §9 的更正值仍低于正文可信度：
+> 正文取证于 3757636c/94e16d50，此后 loop/tool 轴有 138 个提交。本文 §9 的更正值仍低于正文可信度：
 > 它记的是"我判断错过什么"，不是"现在是什么"。
 
 >
-> 生成时间：2026-09-26 · Neurova 取证基线：`c55e1f37` · 参照侧取证基线：`zai-org/ZCode` `872ad96`（v3.14.0）
-> 本文取代同日会话中依据旧基线 `69d7f0dc` 得出的判定，差异见 §5 与 §9。
+> 生成时间：2026-09-26 · Neurova 取证基线：94e16d50 · 参照侧取证基线：`zai-org/ZCode` `872ad96`（v3.14.0）
+> 本文取代同日会话中依据旧基线 3757636c 得出的判定，差异见 §5 与 §9。
 
 ---
 
@@ -70,7 +70,7 @@ cd <工作区父目录> && git clone --depth 1 https://github.com/zai-org/ZCode.
 
 大致分界：循环主体、调度、收口/续跑、缓存排序 = 【一手】；工具声明与校验层、权限/Hooks/子代理层 = 【转述】。
 
-Neurova 侧全部为【一手】，且逐条对准 `c55e1f37` 复验过——第一轮曾依据子代理报告下的结论，本次发现**两处判断有误**，见 §9。
+Neurova 侧全部为【一手】，且逐条对准 94e16d50 复验过——第一轮曾依据子代理报告下的结论，本次发现**两处判断有误**，见 §9。
 
 ---
 
@@ -210,7 +210,7 @@ Provider 差异整个外包给 Vercel AI SDK（`adapters/src/model/model-executi
 
 ---
 
-## 3. Neurova 侧现状（`c55e1f37`）
+## 3. Neurova 侧现状（94e16d50）
 
 ### 3.1 循环：递归，无相位状态机
 
@@ -306,7 +306,7 @@ Python 侧无任何 await 原语（`approval_manager.py` 里两串 `await fetch(
 
 ## 4. 逐维比对矩阵
 
-| 维度 | Neurova `c55e1f37` | 参照侧 | 判定 |
+| 维度 | Neurova 94e16d50 | 参照侧 | 判定 |
 |------|--------------------|--------|------|
 | 循环形态 | 递归 `openai_loop.py:432/:741`，无相位机 | 迭代 + `TurnMachine` 相位守卫 | **落后** |
 | 收口判据 | "模型不调工具即完成"，硬顶 10 轮 | 四把权柄（工具停/hook 续/goal 验收/异常告警） | **落后（但骨架已在）** |
@@ -328,14 +328,14 @@ Python 侧无任何 await 原语（`approval_manager.py` 里两串 `await fetch(
 
 ## 5. 缺口台账 G1–G8 复验状态
 
-| 编号 | 缺口 | 第一版判定 | `c55e1f37` 复验 | 证据 |
+| 编号 | 缺口 | 第一版判定 | 94e16d50 复验 | 证据 |
 |------|------|-----------|----------------|------|
 | **G1** | 递归 → 迭代 + 相位守卫 | 开放（栈深风险） | **仍开放，但风险理由已更换** | 实测每轮约 2.03 帧、`recursionlimit=1000` 下可撑 **493 轮**，而合法配置上限 100 轮 ⇒ **栈深非风险**（全仓亦无 `RecursionError`/`setrecursionlimit` 痕迹）。真实缺陷在同一位置：轮次态挂 loop 实例（per-agent 单例）⇒ 并发会话互相清零预算；子代理嵌套**无深度上限**。见 §9 更正 #7 与 [`../04-plans/2026-09-26-tool-loop-iteration-repair-plan.md`](../04-plans/2026-09-26-tool-loop-iteration-repair-plan.md) |
 | **G2** | 完成性验收缺失 | 开放（需造能力） | **仍开放，且根因不在缺 caller** | 见 §9 更正 #6。`GoalGate`(`gates.py:149`) 代码完整，但门控只在**工具轮**求值，主出口（模型不再调工具）不受任何守卫；`agent._goal` 全仓仅 1 个读取点、0 个写入点。→ 修正方案另见 [`../04-plans/2026-09-26-goal-gate-wiring-repair-plan.md`](../04-plans/2026-09-26-goal-gate-wiring-repair-plan.md) |
 | **G3** | 并发 all-or-nothing | 开放 | **仍开放，量化后比原描述更糟** | `base.py:142-146` 未变；白名单 10/71 = **14%**、`file_read` 缺席、MCP/Skill/workflow 恒不可并行。→ 修正方案 [`../04-plans/2026-09-26-tool-batch-parallelism-repair-plan.md`](../04-plans/2026-09-26-tool-batch-parallelism-repair-plan.md) |
 | **G4** | 超时不取消 | 开放（需新造底层能力） | **仍开放，但成本被我低估两次** | 三个原语**都已存在**：跨平台进程树杀灭 `exec_sandbox._kill_process_tree:157`（POSIX 进程组 SIGKILL / Windows `taskkill /T /F`）、会话终止 `shell_sessions.terminate:142`+`kill_all:300`、取消意图持久化 `agent_run_store.request_cancel:187`。缺的是接线与一处协作协议：① 主路 `run_code`/`git`/`exec_command`/`computer_shell` 不吃该原语；② `kill_all` **生产零调用方**（仅测试）；③ **`to_thread` 从外部不可取消**（`tool_executor.py:2604` 的既定规矩带来此后果），故必须下沉协作令牌；④ `is_policy_denial` 不认 `cancelled` ⇒ 用户取消被计为工具失败并经 `MIN(success)` 永久粘死；⑤ 取消的后台任务不投 `_pending_hints` ⇒ 终态进了台账没进反馈环。→ 方案 [`../04-plans/2026-09-26-tool-cancellation-repair-plan.md`](../04-plans/2026-09-26-tool-cancellation-repair-plan.md) |
 | **G5** | 审批不阻塞 | 开放 | **仍开放** | `tool_executor.py:1648-1660` 未变 |
-| **G6** | 原生协议工具静默失效 | 开放（3 子项） | **已闭合** | `tool_transport.py`(新) + `anthropic_client.py:96-101` + `llm_client.py:259-260` + `base.py` assistant 块；提交 `2028e43d`（Issue #177） |
+| **G6** | 原生协议工具静默失效 | 开放（3 子项） | **已闭合** | `tool_transport.py`(新) + `anthropic_client.py:96-101` + `llm_client.py:259-260` + `base.py` assistant 块；提交 713dc124（Issue #177） |
 | **G7** | 每轮重排 tools 打爆缓存 | 开放（一行止血） | **半闭合** | `orchestrator.py:1024` 重排已删、权重降为会话内冻结的裁剪优先级（`_toolClipOrder`）；主动 cache marker 仍 0 |
 | **G8** | 死码与双源 | 开放（无台账） | **已被机器接管** | 新增 `scripts/ci/toolLoopDeadlines.txt` + `tool_loop_deadline_ledger.py`（T-01，Issue #175），并多出"阈值可达性"判据轴；条目均 `待处置` |
 
@@ -352,7 +352,7 @@ Python 侧无任何 await 原语（`approval_manager.py` 里两串 `await fetch(
 
 ---
 
-## 5.1 第三次复验（基线 `008a3e2a`，距 §5 又 179 提交 / `neurova/` +6603 −3142）
+## 5.1 第三次复验（基线 008a3e2a，距 §5 又 179 提交 / `neurova/` +6603 −3142）
 
 **结论：G1–G5 全部闭合，G8 处置过半。§5 的"真实剩余 5 条"已失效，以下为当前事实。**
 按本仓惯例保留 §5 原文不改写，本节为增量。
@@ -368,12 +368,12 @@ Python 侧无任何 await 原语（`approval_manager.py` 里两串 `await fetch(
 | **G5** | 仍开放 | **已闭合，且比方案更完整** | `security/approval_relay.py`(144) 补上跨请求通路——其文档串记下根因：`register_notification_callback` 生产侧零注册方，`_send_approval_result` 广播的是空列表。咽喉 `tool_executor.py:1726-1756` 真阻塞：**有界** `wait_for(waiter, budget)`（正是方案对参照侧"无限阻塞"硬伤的防範），超时/中断**均注销登记**并给出理由（陈旧登记会让两边都不执行，"比不阻塞更糟的静默丢单"），批准则由本调用在完整管线内执行（`return None` 续跑），拒绝回 `approval_denied` 结构化裁决 |
 | **G8** | 已被机器接管 | **处置过半** | 台账 28 条：**11 已删除 / 13 已接线 / 4 待处置**。物理删除 `cli_tool.py` −414、`tool_logger.py` −286、`unified_registry.py` −238 及其 3 个测试文件。`IterationGate` 双尺度经 `T-04`（Issue #310）收口，`openai_loop.py:196-201` 注释点名"同键两尺度正是被判 `scaled_sparse` 的成因"，GoalGate 改绑独立键 `goal_max_continuations` |
 
-### 仍然开放的（截至 `008a3e2a`）
+### 仍然开放的（截至 008a3e2a）
 
 1. **G7 后半**：主动打 cache marker 仍 **0 命中**（`cache_control`/`prompt_cache`）。前半（停止重排）早已闭合。
 2. **崩溃恢复**：三态 tool part / `declarationIndex` / recovery anchor 形态 **0 命中**（方案优先级表第 8 项，尚未立项）。
 3. **台账 4 条待处置**：`TokenBudgetGate`(consumed/single_source)、`notify_tool_result`、`get_pipeline_observers`(均 consumed)、`ctx_snapshot`(self_loop)——**四条都是存活符号，等的是裁定而非清理**。
-4. **G4 方案文档未入库**：`docs/04-plans/2026-09-26-tool-cancellation-repair-plan.md` 仍是未跟踪状态（`4865e8c6` 只带了 G1–G3 + 本文）。代码里已出现 `G4-RC6` 这样的引用，**文档不在库里会让这个引用悬空**。
+4. **G4 方案文档未入库**：`docs/04-plans/2026-09-26-tool-cancellation-repair-plan.md` 仍是未跟踪状态（d0499b1b 只带了 G1–G3 + 本文）。代码里已出现 `G4-RC6` 这样的引用，**文档不在库里会让这个引用悬空**。
 
 ### 实现优于本目录方案的两处（引用方案前必读，否则会照做过期建议）
 
@@ -458,7 +458,7 @@ Python 侧无任何 await 原语（`approval_manager.py` 里两串 `await fetch(
 
 保留错误以约束后续判断，均已在正文按更正后结论书写：
 
-| # | 第一版结论（依据 `69d7f0dc`） | 更正 | 错因 |
+| # | 第一版结论（依据 3757636c） | 更正 | 错因 |
 |---|---|---|---|
 | 1 | "`tool_layers/openai_schema.py` 整文件死码" | 其 `ToolSchemaConverter` / `ToolCallParser` 现被 `tool_transport.py`、`protocol_thinking.py` 消费 | 把**预置但未接线的正确抽象**当成死码。这类落点的正确处置是接线，而本仓正是这么做的。 |
 | 2 | "`IterationGate` 对任意配置都不可达" | 机器复算为 `scaled_sparse`（合法域内极少数可达） | 只做了 `n//2 < n` 的算术推断，未穷举合法配置域，也未看流式路径的门控检查次序。**可达性判断应交给台账器械，不应由人算。** |

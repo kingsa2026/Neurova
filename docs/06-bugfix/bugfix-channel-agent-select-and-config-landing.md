@@ -41,14 +41,14 @@ agentStore.agentOptions.map((o: any) => ({ value: o.id, label: o.name }))
 
 同一份契约在仓内已有 3 处正确消费方（`AgentSchedulerPage` / `CollaborationPage` /
 `CanvasDesignerPage`），只有渠道两页各写了一份错映射。归属**消费端**：
-引入点 `7846d74f` 当时生产端契约就已经是 `{label, value}`。
+引入点 92ac26ef 当时生产端契约就已经是 `{label, value}`。
 
 **为什么守卫全绿**：`AgentChannelPage.layout.test.ts` 把 store mock 成
 `agentOptions: []` —— `.map()` 对空数组恒等，错键名永远不可能显形。
 
 ### Bug B —— 数据根换锚时存量配置没跟着搬
 
-`721ef038`（2026-09-22）把渠道配置的锚点从包内 `<仓库>/neurova/data` 换到数据根
+d565b013（2026-09-22）把渠道配置的锚点从包内 `<仓库>/neurova/data` 换到数据根
 `<仓库>/data`，**没有带存量搬迁**：
 
 ```python

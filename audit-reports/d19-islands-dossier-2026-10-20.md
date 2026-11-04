@@ -1,4 +1,4 @@
-# D19 死岛逐档档案（`ede49184` 那一族 6 档）——2026-10-20
+# D19 死岛逐档档案（ede49184 那一族 6 档）——2026-10-20
 
 > 只读档案，未动一行代码。判定三态：**删 / 接线 / 需人裁**。铁律：无现役替代不判删；
 > 全仓唯一实装且无替代 ⇒ 一律需人裁，并写明"删即永久失去该能力"。
@@ -28,14 +28,14 @@
   （入边同式衰减）`:129-176`；④因果链中文渲染，25 项关系译名表 + 单步/链式两种文本 `:178-251`；
   ⑤因果图摘要（前后各截 10、直连因果计数）`:253-280`；⑥全图 DFS 因果环检测 + 规范化去重 `:282-337`。
 - **关键入口**：`CausalReasoningEngine:20`、`get_causal_reasoning_engine():340`。
-- **来历**：`ede49184`(2026-06-11「更新 .gitignore…优化项目结构」批量 add) 首入库；规格出自
+- **来历**：ede49184(2026-06-11「更新 .gitignore…优化项目结构」批量 add) 首入库；规格出自
   `docs/01-architecture/memory/upgrade-plan-detailed.md:48` 任务 1.2（验收 4 条）。
   符号级 `git log -S "CausalReasoningEngine" -- neurova/` ＝ **1 笔**（✅ 主会话与子代理各自独立算得同数）
   ⇒ **引入即未接线**。
 - **读面的数据生产者核查**（✅ 这条决定"接线"那一支的代价）：它读的内存图**确有生产者**
   （`manager.py:4126 _ensure_graph_traversal` 自 `relation_module.get_all()` 灌入）；但它反向推理依赖的
   `caused_by / enabled_by / prevented_by` 三类关系在生产写侧**无来源**——
-  `git log -S 'caused_by' -- neurova/` 全史 2 笔（引入 + `62b084e7` 建表 CHECK 白名单），
+  `git log -S 'caused_by' -- neurova/` 全史 2 笔（引入 + 62b084e7 建表 CHECK 白名单），
   三处关系枚举权威源（`knowledge_graph/manager.py:50`、`temporal_knowledge_graph.py:45`、
   `graph_traversal.py:87-99`）只出正向形态。⇒ 接线的真代价是**补生产写侧**，不是补一个调用。
 - **现役替代**：**零替代**（◑）。`graph_traversal` 只有 BFS/DFS 可达遍历，其因果类型表 `:87-99`
@@ -58,7 +58,7 @@
   ③意图→检索策略字典，携 `max_depth/min_score/diversity/serendipity/time_decay/limit` 六参数
   `:234-280`；④子问题策略聚合与序号编排 `:116-141`。
 - **关键入口**：`QuestionDecomposer:41`、`QuestionType:19`、`get_question_decomposer():302`。
-- **来历**：`ede49184` 首入库；规格 `upgrade-plan-detailed.md:66` 任务 1.3。符号
+- **来历**：ede49184 首入库；规格 `upgrade-plan-detailed.md:66` 任务 1.3。符号
   `-S QuestionDecomposer -- neurova/` ＝ 1 笔（✅）⇒ **引入即未接线**。
 - **同文件内的死半区（✅ 主会话读码复算）**：`_determine_order():282-299` 先构造
   `type_priority`（`:288-296`）再原序返回 `order`，注释自承"这里可以添加更复杂的排序逻辑"
@@ -84,14 +84,14 @@
   `:54-65`；③逐条 `TemporalDecay.compute(timestamp)` 衰减乘分 `:67-72`；④全管道串"去重→加权→
   衰减→排序→冲突检测" `:74-107`；⑤`ProcessOutput` 计数台账（total/deduped/conflicts）`:22-29`。
 - **关键入口**：`UnifiedResultProcessor:32`、`ProcessOutput:22`（无工厂函数）。
-- **来历**：`ede49184` 首入库；规格 `docs/04-plans/iteration-plan-channel-plugin-moe.md:122` 任务 3.1。
-  `--follow` 另三笔里最末 `e30f81c9`(09-02「三冲突检测器正名」) 只改它的 import 别名 ⇒ **被改动 ≠ 被消费**。
+- **来历**：ede49184 首入库；规格 `docs/04-plans/iteration-plan-channel-plugin-moe.md:122` 任务 3.1。
+  `--follow` 另三笔里最末 5c32bab0(09-02「三冲突检测器正名」) 只改它的 import 别名 ⇒ **被改动 ≠ 被消费**。
   符号 `-S UnifiedResultProcessor -- neurova/` ＝ 1 笔（✅）。**引入即未接线**。
 - **现役替代**：①②③有实质替代（`neurova_recall.py:1586 _deduplicate_results` 同语义、
   `:1443-1466 _fusion_score` 同式 `base × channel_weight × time_decay`）；**④⑤零替代**：
   live 召回链里没有"管道内语义冲突检测"这一步（`neurova_recall.py` 内零 `conflict` 引用），
   且 `activations` 乘子**没有生产者**（`WeightAdjuster` 在 `neurova/` 只命中自身与门面，全史 1 笔）。
-  `memory_layer/result_processor.py` 已于 `0c333a76`(09-21) 退役，不是替代。
+  `memory_layer/result_processor.py` 已于 807ca120(09-21) 退役，不是替代。
 - **判定**：**需人裁**——④⑤两处子能力全仓唯一，且 activation 反馈回路从未接线；
   删即永久失去"检索管道内联冲突检测"与"通道权重反馈乘子"。
   > 2026-10-21（§6-374）：processor 的冲突段已改调单源 `judgeClauseConflict`（含英文词级否定）；
@@ -103,7 +103,7 @@
 - **原功能**：①遍历通道注册表、跳过已有质心 `:38-42`；②空描述告警跳过 `:44-46`；
   ③把 description 编码成质心 `:48`；④写回 `register_centroid` `:49`；⑤返回新生成条数 `:53`。
 - **关键入口**：`CentroidInitializer.__init__(vector_store)` `:16/:19`；`generate_centroids:26`。
-- **来历**：`ede49184` 首入库，规格 `iteration-plan-channel-plugin-moe.md:96`（Phase2 任务 2.2，
+- **来历**：ede49184 首入库，规格 `iteration-plan-channel-plugin-moe.md:96`（Phase2 任务 2.2，
   其集成项 2.5 从未落地）；`-S CentroidInitializer -- neurova/` ＝ 1 笔（✅）。**引入即未接线**。
 - **现役替代**：**部分缺**——活腿 `unified_vector_store.py:616 initialize_centroids`
   （唯一生产者 `memory_layer/moe_router.py:349`，经 `mem_core.py:824` 装配）只按 Expert 定义表建质心，
@@ -115,7 +115,7 @@
 - **原功能**：①默认阈值 `:16-17`；②按通道名读 `:20-22`；③按通道名写 `:24-26`；④改默认 `:28-30`；
   ⑤导出 flat dict `:32-36`；⑥`from_dict` 装载 `:38-46`。
 - **关键入口**：`ThresholdConfig:13`、`from_dict:38`。
-- **来历**：`ede49184`，plan 任务 2.3；`-S ThresholdConfig -- neurova/` ＝ 1 笔（✅）。**引入即未接线**。
+- **来历**：ede49184，plan 任务 2.3；`-S ThresholdConfig -- neurova/` ＝ 1 笔（✅）。**引入即未接线**。
 - **现役替代**：**部分缺**——`settings_config.py:105` 有同口径 `threshold.default`（一个全局 float），
   `mem_core.py:828` 读它并传进 `memory_layer/moe_router.py:65,88`，但**只作用于 expert 门控**；
   per-channel 覆盖表、`to_dict/from_dict` 序列化零替代，settings 里也没有 per-channel 键位。
@@ -125,7 +125,7 @@
 - **原功能**：①六通道默认权重表 `:16-23`；②读归一化权重 `:37-39`；③正/负反馈 ±learning_rate
   `:41-52`；④未知名补 0.1 `:48-49`；⑤min/max 夹紧 `:55`；⑥总和归一 `:57-62`。
 - **关键入口**：`WeightAdjuster:13`、`adjust:41`。
-- **来历**：`ede49184`，plan 任务 3.4（集成项 3.5 未落地）；`-S WeightAdjuster -- neurova/` ＝ 1 笔（✅）。
+- **来历**：ede49184，plan 任务 3.4（集成项 3.5 未落地）；`-S WeightAdjuster -- neurova/` ＝ 1 笔（✅）。
   **引入即未接线**。
 - **现役替代**：**部分缺**——静态表被抄了两份（`neurova_recall.py:644-651` 逐值重复、
   `enhanced_memory_search_api.py:477` 又硬编码第三份；**这条本身是双源缺陷，单列见 §3**）；
@@ -136,7 +136,7 @@
 
 ## 2. 事件分组（这一批为什么长成这样）
 
-六个模块同出一次事件：`ede49184`(2026-06-11)「更新 .gitignore：排除临时目录，优化项目结构」——
+六个模块同出一次事件：ede49184(2026-06-11)「更新 .gitignore：排除临时目录，优化项目结构」——
 那一次把整棵 `memory_layer` 子树**升格为跟踪面**，规格来自 `upgrade-plan-detailed.md`（任务 1.2/1.3）
 与 `iteration-plan-channel-plugin-moe.md`（Phase2/3 的 2.2/2.3/3.1/3.4）。
 **计划里的集成项（2.5、3.5）从未落地**，所以这不是渐进腐烂，是"按计划引入了实现、计划后半段没执行"。
@@ -165,7 +165,7 @@
    不是对 v2 的取用；`neurova/memory/__init__.py:19` ＋ `__all__:127` 是**聚合门面的再导出**，
    而 `from neurova.memory import ConflictDetector` 在全仓**零消费者**（✅ grep 复算）。
    两条判活证据同时是伪命中（同名不同物 ×2、门面再导出 ≠ 消费者 ×1）⇒ `conflict_detector_v2`
-   从"活"回到"待档"，其死列归属另批补档案（它的来历含 `e30f81c9`/`3f1edd57` 两次正名，
+   从"活"回到"待档"，其死列归属另批补档案（它的来历含 5c32bab0/238cb32c 两次正名，
    不能按"引入即未接线"一句带过）。
 2. **11 档是下限，不是全量**。候选谓词写的是"闭包内的 importers 全是门面"，于是
    **被死岛读**的下游模块直接掉出候选面：`channels/temporal.py` 与 `channels/conflict.py` 的读者是

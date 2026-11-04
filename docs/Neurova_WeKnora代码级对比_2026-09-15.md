@@ -83,7 +83,7 @@ Neurova = 单进程桌面个人智能体。结论：**只抄机制、不抄架�
 **遗留观察**：块编辑对父子模式的 parent 叠加重建（WeKnora rebuildParentContent）未做——子块 content 已是权威副本，父上下文暂为原文；如需编辑可见于父回传，另立需求。`/knowledge-integration/*` 前端旧模块路径与后端仍不一致（零消费者死码），删除或重写待拍板。
 **纪律**：新测试文件与本报告均须 `git add -f`（tests 目录 gitignore），随本轮改动提交以免共享区 clean 事故三度吞档。
 
-## 10.1 提交与核验记录（同日，commit `4448c54a`，54 文件 +5349/-458）
+## 10.1 提交与核验记录（同日，commit 5f273344，54 文件 +5349/-458）
 
 - **共享区安全**：提交前 `git diff --cached` 发现并行会话暂存 46 文件（docs 比对批删除）——用 `git commit --only <paths>` 精确提交，对方暂存原样保留；提交范围复核零并行域文件（前端死模块 `knowledge-integration.ts` 已删除并摘 index.ts 导出）。
 - **HTTP 层闭环冒烟**：真实 `create_app()` + TestClient，11 个新/改端点（preview-chunking / chunks GET·PUT·revisions / configs sync / ingress-tasks cancel / integration rag·sync·501 / semantic hybrid）全部 401 鉴权生效、**零 404 零装配异常**。
@@ -98,7 +98,7 @@ Neurova = 单进程桌面个人智能体。结论：**只抄机制、不抄架�
 
 至此报告 §7/§8 全部借鉴项与遗留候选均已闭环。
 
-## 10.3 仓库自洽审计批（commit `2a5f79b8`）
+## 10.3 仓库自洽审计批（commit 3d5d3b46）
 
 用户"无断点"要求的收口批：HEAD 干净 worktree **全量收集演练**（tests/unit+api，14860 项）发现 8 处收集错误，全部同根——`.gitignore:282` 的 `credentials*`（防密钥入库规则）**误杀凭据分桶存储模块源码** `neurova/web_reach/credentials.py`：其余 web_reach 四文件与全部消费测试早已入库，唯独它被吞，fresh clone 下 `skills/builtin` 包 import 即崩（test_pending_memory / web_reach 全链 / skills 执行器 / ssh_credentials 等 8 文件）。
 - 修复：内容扫描零密钥命中（凭据值走 SecretStore 加密落盘，本文件纯逻辑）后 `git add -f` 入库（tracked 后忽略规则失效）；主树受影响 4 套件 109 绿；**提交后快照复验：收集 14860 项零错误 + create_app HTTP 冒烟 11 端点全 401 零断点**。

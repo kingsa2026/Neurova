@@ -139,7 +139,7 @@ live-verify（真 Agent + 真 ToolExecutor + 真 SkillService）：端点经咽�
   两个键都经它们出哈希，差异只在有没有把意图并进载荷。AST 守卫钉住单源。
 - 覆盖：`tests/unit/evolution/experience/test_structure_identity_param_shape.py`（9 条），
   含端到端负向（换参数的两次调用必须落两个 `structure_key`）与隐私锁（不落明文）。
-- 实测澄清：复核发现 `structure_key` 在 `1e1341b0` 上**已**吃参数（`{"city":"x"}` 与
+- 实测澄清：复核发现 `structure_key` 在 1cd1f559 上**已**吃参数（`{"city":"x"}` 与
   `{"city":"y"}` 本就不同哈希），上一轮"参数塌成同一身份"的读数有误。本条的净改动是
   **消除第二份实现**，不是"补上参数"——报告原文与订正一并留在 PR 描述里。
 
@@ -502,15 +502,15 @@ FAILED tests/unit/test_dev_path_and_runtime_dep_guards.py::TestProtectedGuardsUs
 1 failed, 2368 passed, 12 skipped
 ```
 
-红点在上一提交（`7b2c9c84`，PR #155）新入受保护子集的
+红点在上一提交（116f5118，PR #155）新入受保护子集的
 `test_node_call_form_reaches_the_same_reading`：它为复现平台调用形态写下字面量
 `subprocess.run(["sh", "-c", ...])`。`sh` 缺席时不是断言失败而是 `FileNotFoundError`，
 整个文件（含同文件其余判据）**静默不跑** —— 正是该守卫存在的理由。
 
 根因与处置（**以主线提交为准，本节不复制第二份**）：
 
-该红点由主线提交 `e4b1c5c6`（与同文件 `node` 同口径：`shutil.which("sh")` 先证后用，
-缺席即 `pytest.skip`，不再写死字面量）与 `d0cd61fd`（守卫补命令头变量解析、调用点
+该红点由主线提交 d70c7f74（与同文件 `node` 同口径：`shutil.which("sh")` 先证后用，
+缺席即 `pytest.skip`，不再写死字面量）与 30cc0d02（守卫补命令头变量解析、调用点
 词法路径判定与反向自证，堵住同类逃逸形态）收口。两提交各自的红→绿实测见其提交说明。
 
 **一处口径必须点明**：`sh` **不得**登记进 `ALLOWED` 白名单。白名单的语义是

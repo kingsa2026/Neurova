@@ -623,7 +623,7 @@ baseline: recall_at_k=0.971296, mrr=0.916667, unhit_rate=0.0, top_k=5
 
 ## 十三、实施终态（2026-10-23）
 
-> 全部批次已提交并推送（渠道/ANN 收尾 `92da4050`、采纳/entry 闭环 `1ede2302`）。
+> 全部批次已提交并推送（渠道/ANN 收尾 ca968572、采纳/entry 闭环 8c3086de）。
 > 产品语义采用保守口径：自动反馈只消费服务端血缘、TTL 只归档不删除、未接指标只点名不伪造。
 
 ### 13.1 已落
@@ -746,7 +746,7 @@ baseline: recall_at_k=0.971296, mrr=0.916667, unhit_rate=0.0, top_k=5
   提交前以 `git status` 与 hunk 归属重新点数。
 - 建议 8–9 笔：检索三票、生命周期/TTL、采纳/自动反馈、评估/指标、token/拒答、周期维护/规模、质量事件、FTS5、审计/设计文档；共享文件（`chat_pipeline.py`、`post_chat_pipeline.py`、`app.py`、`console.py`、`api/endpoints/__init__.py`）提交前按 hunk 核对归属。
 - 工作树仍含并发会话在途改动；本批只对上述知识域/血缘/质量链路负责。
-- 渠道原生接管/ANN 基础依赖收尾：`92da4050`（已推 CNB）。
+- 渠道原生接管/ANN 基础依赖收尾：ca968572（已推 CNB）。
 - **D5–D10 追加落点**：`neurova/quality/*`、`neurova/api/endpoints/quality.py`、
   `neurova/knowledge/vector_ann.py`、`neurova/knowledge/token_count.py`、
   基础 `requirements.txt` 的 hnswlib；前端 `NeurUI/src/api/modules/quality.ts`、

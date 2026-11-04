@@ -293,7 +293,7 @@
    **同批连带修掉一处自相矛盾的测试装配**：`tests/unit/memory/test_emotion_semantic_tagging.py::_remember` 一边传 `auto_analyze_emotion=False` 一边断言"内容情感明确应写入 emotion 行"——它一直靠这个 bug 才绿；修法取删掉自相矛盾的参数，不动断言强度。
    仍开放：`/memory-enhancement/export` 的 `format` 未校验；`/import` overwrite/merge 传入的 `memory_type`/`origin` 被 `update_memory` 静默丢弃。
 9. **P2（假成功/文案不符）**：`POST /decay` 节流跳过与无改动都报 `updated_count=0`（`manager.py:2610-2618`）；`DELETE /memory/{id}` 软删却回"记忆已删除"（`crud.py:361/369`）；`PUT /memory/{id}` 回显可能 `data:null` 仍报"更新成功"（`crud.py:331-337`）；`memory-enhancement` 的 forget/strengthen 把越权与不存在压成同一个 404（`:175-178`、`:213-215`）；`memory_enhancement.py:106` 自陈的 `request.state.user` 恒 None（本轮亲验全仓零写入点）→ 该面作用域实际固定在 `default`。
-10. **P2（死层/未接线，删除需人裁）**：`MemoryStorage` JSON 层（`storage.py:270-282`，实测目录空）、`memory_record_store.py` 无实例化点、`memory_versions`/`entities`/`edges`/`temporal_facts` 生产不落盘、`init_db.py` 的 19 表与 `yi_ling_memory.db`（实测文件不存在）、`vector_index_manager.py` 未接线、`memory/core/cache.py` 不在读写路径、`memory_layer/cache.py` 已废弃、`search/enhancement/decay.enabled` 等配置项无消费者。按本仓纪律，这些**不能按冗余直接删**——`docs`/审计报告记载过 `7835c367`、`33b71a25` 两刀把活链路摘掉造成"今天没人用"的历史。
+10. **P2（死层/未接线，删除需人裁）**：`MemoryStorage` JSON 层（`storage.py:270-282`，实测目录空）、`memory_record_store.py` 无实例化点、`memory_versions`/`entities`/`edges`/`temporal_facts` 生产不落盘、`init_db.py` 的 19 表与 `yi_ling_memory.db`（实测文件不存在）、`vector_index_manager.py` 未接线、`memory/core/cache.py` 不在读写路径、`memory_layer/cache.py` 已废弃、`search/enhancement/decay.enabled` 等配置项无消费者。按本仓纪律，这些**不能按冗余直接删**——`docs`/审计报告记载过 7835c367、31be70ff 两刀把活链路摘掉造成"今天没人用"的历史。
 
 ---
 
@@ -335,12 +335,12 @@
 
 | 提交 | 生产码 | 净 |
 |---|---|---|
-| `bc9f8993` pending 错误码 | +2/−2 | 0 |
-| `1e4cc835` settings 路由序 | +17/−14 | +3 |
-| `0c305b0b` 情绪阈值 + 开关 | emotion +3/−1、manager +13/−5 | **+10** |
-| `2f670878` 五端点退役 | memory.ts −55、questions.py −149、metacognition −33、eki −29、`__init__` −1 | **−267** |
+| 9b426f9a pending 错误码 | +2/−2 | 0 |
+| 01c0a0f9 settings 路由序 | +17/−14 | +3 |
+| 5afc2bd6 情绪阈值 + 开关 | emotion +3/−1、manager +13/−5 | **+10** |
+| df22cacf 五端点退役 | memory.ts −55、questions.py −149、metacognition −33、eki −29、`__init__` −1 | **−267** |
 
-**勘误**：`0c305b0b` 提交说明写"+21/-9"、`2f670878` 写"净减约 92 行"，均与 numstat 不符
+**勘误**：5afc2bd6 提交说明写"+21/-9"、df22cacf 写"净减约 92 行"，均与 numstat 不符
 （前者的 21/9 含已拆分掉的合并态测试文件，后者是我按"删除文件行数≈端点体量"估的，
 没走 numstat 复核）。提交说明不可改写，**以本表为准**；教训同 §11.2 的 commit 号一条：
 凡是写进交付物的数字，落笔前先按同口径重算一遍。
