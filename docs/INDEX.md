@@ -149,6 +149,7 @@
 [`08-research/modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md`](08-research/modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md)（ModularRSI 论文与 Neurova harness 层自改进对照：可演化面覆盖面 M-A、联合轮归因 M-B、跨基座迁移 M-C、难度维只写不读 M-D、环节归因 M-E，只记两篇 RSI 前作未覆盖的增量，研究参考）
 [`08-research/harness2_vs_neurova_recursive_harness_comparison_2026-10-21.md`](08-research/harness2_vs_neurova_recursive_harness_comparison_2026-10-21.md)（google-research/harness2 与 Neurova 递归 harness 优化代码级对比：十维加权（权重 100% 归一）当前评估 7.8 vs 8.1、生产就绪度单列、本仓断点 N1–N8 与候选 C1–C8，N1–N8 已落地/部分落地、闭环 A–D 与 N6/C6/N8、完整工具 trace、跨域 UI、产物二进制证据与独立采纳流已落，研究参考）
 [`08-research/tmem_paper_vs_neurova_associative_memory_comparison_2026-10-21.md`](08-research/tmem_paper_vs_neurova_associative_memory_comparison_2026-10-21.md)（T-Mem 论文与 Neurova 记忆系统代码级对比：无表面重合联想召回的可达性上界、写入侧预演成本复算、本仓断点 D1–D7 与候选 TM-1..TM-6、不照搬清单，研究参考）
+[`08-research/kweaver_vs_neurova_ontology_knowledge_base_comparison_2026-11-05.md`](08-research/kweaver_vs_neurova_ontology_knowledge_base_comparison_2026-11-05.md)（爱数 KWeaver DIP 公开生态与 Neurova ontology 知识库代码级对比：主仓 kweaver/kweaver-core 均 404、公开五仓快照（decision-agent 已弃用/dolphin/dsg/studio/旧文档归档）；十维加权 7.5 vs 4.4（公开可得性折扣声明）；本仓新断点 N1–N2（cognitive_security/data_masking 零生产消费，主代理亲验）与候选 C1–C6（净接线二＋新能力四）＋不采纳两条，研究参考）
 
 ### 2.5 审计报告 / 验证（历史留痕）
 
