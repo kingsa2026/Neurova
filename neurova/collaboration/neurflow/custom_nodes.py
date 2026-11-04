@@ -170,6 +170,19 @@ class CustomNodeService:
         logger.info("自定义节点已激活: %s", node_type)
         return existing
 
+    def deactivate_node(self, node_type: str) -> NodeDefinition:
+        """active → draft（补偿/撤回用）；draft 幂等返回，unknown 抛错。"""
+        existing = self._storage.get_node_definition(node_type)
+        if existing is None:
+            raise CustomNodeError(f"节点不存在: {node_type}", code="not_found")
+        if existing.status == "draft":
+            return existing
+        existing.status = "draft"
+        self._storage.save_node_definition(existing)
+        self._registry.unregister(node_type)
+        logger.info("自定义节点已撤回为 draft: %s", node_type)
+        return existing
+
     def update_node(
         self, node_type: str, spec: Dict[str, Any], *, created_by: Optional[str] = None
     ) -> NodeDefinition:

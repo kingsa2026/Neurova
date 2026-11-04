@@ -24,6 +24,7 @@ EXPECTED_NON_REPRODUCIBLE = {
     # 工作流定义：get 可能补安全版本基线（写共享库），其余为重放制造新版本的动作
     "workflow_definition_get", "workflow_definition_update", "workflow_definition_duplicate",
     "workflow_rollback", "workflow_publish", "workflow_execute", "workflow_repair",
+    "build_batch_compensate",
     # 产物件：落产物目录并注册 artifact（重放登记出第二份产物与下载口）
     "write_pdf",
     "canvas_add_node", "canvas_connect", "canvas_create", "canvas_remove_node",
