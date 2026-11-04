@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 from datetime import datetime
+import hashlib
 
 from neurova.core.logger import get_logger
 from neurova.collaboration.glance_yield_rules import (
@@ -29,22 +30,85 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/coordination", tags=["coordination"])
 
 
-# ========== Seen Boundary Endpoints（未实现，已摘除）==========
+# ========== Seen Boundary Endpoints ==========
 #
-# 原 3 个 seen-boundary 端点依赖 `neurova.agents.seen_boundary`
-# （get_seen_boundary / reset_seen_boundary）——该模块在本仓不存在，
-# 导致整份 coordination_api 无法导入（25 个端点全部 404）。
-# 只有测试 tests/integration/test_multi_agent_coordination.py 引用过它。
-# 未实现的模块不保留影子端点：要实现请连带实现模块并配可运行测试，
-# 而不是留一份 import 即炸的 API 面。
-#
-#   GET  /seen-boundary/stats
-#   POST /seen-boundary/reset
-#   POST /seen-boundary/check-freshness
-#
-# 同类新鲜度能力由 neurova/collaboration/seen_cursor.py
-# （SeenCursorManager.check_freshness）与 glance_yield_rules 的
-# freshness preflight 承担，已由下面的 yield-checker 端点对外服务。
+# 原 3 个 seen-boundary 端点依赖 `neurova.agents.seen_boundary`（本仓不存在），
+# 整份 coordination_api 曾因此无法导入。现在该面由
+# `neurova/collaboration/seen_cursor.py` 的 SeenCursorManager 承担：
+# SHA256 操作去重 + 落 data_root 持久化（跨重启不丢）。check-freshness 只读，
+# record 在操作执行后记账，stats/reset 为运维面。
+# 注意：逐字重复的**执法点**仍在 SeenCursor；yield-checker 闸不另立第二套判据
+# （见 tests/integration/collaboration/test_coordination_layer.py 的反向格）。
+
+class SeenBoundaryCheckRequest(BaseModel):
+    agent_id: str = Field(..., description="Agent ID")
+    operations: list[str] = Field(..., description="拟执行操作原文；服务端做 SHA256")
+
+
+class SeenBoundaryRecordRequest(SeenBoundaryCheckRequest):
+    session_id: str = ""
+    turn_id: str = ""
+
+
+def _hashOperation(operation: str) -> str:
+    return hashlib.sha256(str(operation).encode("utf-8")).hexdigest()
+
+
+@router.post("/seen-boundary/check-freshness")
+async def seenBoundaryCheckFreshness(body: SeenBoundaryCheckRequest):
+    """操作是否新鲜（未被该 agent 最新游标记过）。"""
+    from neurova.collaboration.seen_cursor import get_seen_cursor_manager
+
+    manager = get_seen_cursor_manager()
+    hashes = [_hashOperation(op) for op in body.operations]
+    fresh, reason = manager.check_freshness(body.agent_id, hashes)
+    return {
+        "fresh": fresh,
+        "reason": reason,
+        "agent_id": body.agent_id,
+        "operation_count": len(hashes),
+    }
+
+
+@router.post("/seen-boundary/record")
+async def seenBoundaryRecord(body: SeenBoundaryRecordRequest):
+    """操作执行后记账：写入该 agent 的最新游标（持久化到 data_root）。"""
+    from neurova.collaboration.seen_cursor import get_seen_cursor_manager
+
+    manager = get_seen_cursor_manager()
+    cursor = manager.record_operations(
+        agent_id=body.agent_id,
+        session_id=body.session_id,
+        turn_id=body.turn_id,
+        operation_hashes=[_hashOperation(op) for op in body.operations],
+    )
+    return {
+        "recorded": True,
+        "agent_id": body.agent_id,
+        "cursor_id": cursor.cursor_id,
+        "operation_count": len(cursor.op_hashes),
+    }
+
+
+@router.get("/seen-boundary/stats")
+async def seenBoundaryStats():
+    from neurova.collaboration.seen_cursor import get_seen_cursor_manager
+
+    return {"seen_boundary": get_seen_cursor_manager().stats()}
+
+
+@router.post("/seen-boundary/reset")
+async def seenBoundaryReset():
+    from neurova.collaboration.seen_cursor import (
+        get_seen_cursor_manager,
+        reset_seen_cursor_manager,
+    )
+
+    manager = get_seen_cursor_manager()
+    manager.reset()
+    reset_seen_cursor_manager()
+    return {"status": "reset"}
+
 
 # ========== Yield Checker Endpoints ==========
 
