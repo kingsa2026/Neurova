@@ -63,6 +63,8 @@ ENDPOINTS_ROOT = REPO_ROOT / "neurova" / "api" / "endpoints"
 SCAN_DIRS = ("unit", "integration", "api", "test_api", "media", "cognitive_layers", "core")
 #: 取装配后 app 路由表的合法出口——只此一家
 SINGLE_SOURCE_IMPORT = "tests.route_table"
+#: 本档自己——它是探测器，源码里全是它要抓的形状；与取数口同侧排除（不得混进取数方名单）
+SELF_FILE = Path(__file__).resolve()
 
 pytestmark = pytest.mark.timeout(120)
 
@@ -100,6 +102,28 @@ def _aggregatorModules() -> set:
                 out.add(_dottedModuleName(ref.path))
                 break
     return out
+
+
+def test_引过单源不是整档豁免的通行证():
+    """钉代码形态：本档不得再有「按文件里有没有单源 import 就整档跳过」的短路。
+
+    今天没有真被 exploit 的档（唯一同时具备两种形状的是本档样本行），所以这格守的是**潜伏面**：
+    那种豁免让"这档大体合规"替"这一处违规"作保。把形态改回来，本格当场红——这就是它的反证。
+    """
+    NL = chr(10)
+    probeName = "SINGLE_" + "SOURCE_IMPORT"   # 拼出来，免得本格扫到自己这行
+    tree = parseSource(Path(__file__).read_text(encoding="utf-8"), "self")
+    shortCircuits = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.If) and isinstance(node.test, ast.Compare)):
+            continue
+        if probeName not in ast.unparse(node.test):
+            continue
+        if any(isinstance(stmt, ast.Continue) for stmt in node.body):
+            shortCircuits.append(ast.unparse(node).split(NL)[0].strip())
+    assert shortCircuits == [], (
+        "又出现整档豁免的短路（按「文件里有没有单源 import」判，而不是按这一处读数判）：\n  "
+        + NL.join(shortCircuits))
 
 
 def _importedModules(tree: ast.AST) -> dict:
@@ -141,11 +165,10 @@ def test_取数口径只有一份():
         # （写窄成 `.routes` 会漏掉 `app . routes` 这类跨行/带空格的写法）。
         for ref in ast_scan.sourceRefsUnder(root, ".py", hints=("routes",)):
             path = ref.path
-            if path == ROUTE_TABLE:
+            if path == ROUTE_TABLE or path == SELF_FILE:
+                # 只排除「取数口本身」与「本探测器」；不按"这档引过单源"整档免检——
+                # 那是一处直读被另一处合规掩盖的**短路**（采纳单源之后再新增直读会静默过关）。
                 continue
-            source = ref.code
-            if SINGLE_SOURCE_IMPORT in source:
-                continue          # 已在用单源的档，不重复数
             hits = _readsMountedAppRoutes(ast_scan.transientTree(path))
             if hits:
                 offenders.append(f"{path.relative_to(REPO_ROOT).as_posix()}:{hits}")
@@ -234,7 +257,7 @@ def test_聚合器模块的裸读同样失明():
         if not root.is_dir():
             continue
         for ref in ast_scan.sourceRefsUnder(root, ".py", hints=("routes",)):
-            if ref.path == ROUTE_TABLE or SINGLE_SOURCE_IMPORT in ref.code:
+            if ref.path == ROUTE_TABLE or ref.path == SELF_FILE:
                 continue
             scanned += 1
             tree = ast_scan.transientTree(ref.path)
