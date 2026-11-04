@@ -89,8 +89,9 @@
 - 认证：路由级 `Depends(get_current_user)`，**无凭证即 401**（实测于 §6-158 的活体第 [8] 项，附录那张表的旧值见其脚注）
 - 字面段（`/trash`、`/list`、`/config`、`/batch-delete`…）必须注册在 `GET /{media_id}` 之前，守卫见 `tests/unit/api/test_media_route_order_guard.py`
 
-### 19. `/api/v1/knowledge` — `knowledge.py`
+### 19. `/api/v1/knowledge` — `knowledge.py`（聚合器；实现拆 knowledge_common/core/sharing/remote/ingestion）
 - CRUD: `GET` | `POST` | `GET/PUT/DELETE /{id}` | `POST /search`
+- `POST /search`（2026-11-04）：请求体可选 `source_modified_after`/`source_modified_before`（源文档修改时间范围；设置后无源时间条目如实排除）；条目含 `source_created_at`/`source_modified_at`（缺失空串），`created_at`＝入库时间
 
 ### 20. `/api/v1/growth` — `growth.py`
 - `GET /logs` | `GET /reports` | `GET /metrics` | `POST /events`

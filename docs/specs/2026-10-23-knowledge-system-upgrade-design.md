@@ -291,6 +291,12 @@ class OcrEngine(Protocol):
 **存储边界**：正文/页码/标题存条目与块元数据；向量不塞进 JSON 正文，统一由向量索引按
 `chunk_id` 管理，避免第二份向量事实源。
 
+> **注（2026-11-04，三时间戳接线）**：条目顶层已增 `source_created_at`/`source_modified_at`
+> （契约只增）；本 schema `metadata.created_at/modified_at`（管线抽取口径）即顶层两字段的
+> 取材来源，经摄取边界透传（缺失回退 `ingest_time`，"缺失不猜"）；顶层 `created_at` 语义
+> ＝入库时间。冲突治理侧 supersede 分支已附 `time_context`（新者胜建议＋basis，不改判）。
+> 见 [三时间戳设计](2026-11-04-知识库三时间戳与时间感知消费面设计.md)（含实施终态 §5）。
+
 #### 6.1.6 与当前代码的接入方式
 
 - 把 `attachment_parser` 升级为“结构化解析 + 兼容文本包装”：
