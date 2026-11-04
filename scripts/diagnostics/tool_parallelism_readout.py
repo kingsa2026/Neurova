@@ -72,6 +72,10 @@ DURATION_METRIC = "neurova_tool_execution_seconds"
 #: 不认识的标签被跳过，读数照着一个不完整的分母给出 `sparse`（拿失明当结论）。
 from neurova.core.tool_capability import ToolBatchShape  # noqa: E402
 
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 SHAPE_LABELS = tuple(shape.value for shape in ToolBatchShape)
 
 #: 形态仪表在**抓取文本里的家族名**：`prometheus_client` 暴露 counter 时族名去

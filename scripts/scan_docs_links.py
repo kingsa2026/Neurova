@@ -1,6 +1,11 @@
 """扫描 docs/ 所有相对链接，报告断链（docs/ 前缀链接按仓库根解析）。"""
 import os
 import re
+import sys
+
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

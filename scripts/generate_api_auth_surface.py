@@ -31,6 +31,10 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))

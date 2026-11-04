@@ -26,6 +26,10 @@ from neurova.memory_ingest.intake import (  # noqa: E402
     apply_bundle, plan_bundle, session_manager_for, undo_run)
 from neurova.memory_ingest.probe import probe_store  # noqa: E402
 
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 _VERDICT_LABEL = {"unique": "唯一命中", "conflict": "多指纹冲突", "unknown": "未识别"}
 
 

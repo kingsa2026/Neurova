@@ -12,6 +12,10 @@ if str(ROOT) not in sys.path:
 
 from neurova.core.data_root import resolveDataPath  # noqa: E402
 
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 db_path = str(resolveDataPath("users.db"))
 if not os.path.exists(db_path):

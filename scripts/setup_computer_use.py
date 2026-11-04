@@ -24,6 +24,10 @@ import sys
 import typing
 from pathlib import Path
 
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # pip 包名（带版本约束）→ 导入名映射
 PYTHON_PACKAGES: typing.Dict[str, str] = {
     "pillow": "Pillow>=10.0.0",

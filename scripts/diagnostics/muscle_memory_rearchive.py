@@ -25,6 +25,10 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 ROOT = Path(__file__).resolve().parents[2]
 # 留底目录必须**在版本库内**：`agent_workspaces/` 被 .gitignore 整目录忽略，
 # 归档副本落在源文件旁边等于只活在磁盘上——一次 `git clean -xfd` 或换台机器，

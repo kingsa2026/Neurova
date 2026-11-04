@@ -34,6 +34,10 @@ from neurova.skills.skill_name_domain import (  # noqa: E402
     recountManifestCollisions,
 )
 
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 def recount_name_collisions(manifest_path: Path) -> Dict[str, Any]:
     """按 name 复算一份 manifest 上的同名覆盖（委托唯一判据实现）。

@@ -33,6 +33,10 @@ from neurova.cognitive_layers.memory_layer.pollution_purge import (  # noqa: E40
     MemoryPollutionPurge,
 )
 
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 def _printPlan(report: dict) -> None:
     print("扫描根：%s" % ", ".join(report["roots"]))

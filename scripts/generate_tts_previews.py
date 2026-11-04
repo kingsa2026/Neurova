@@ -15,6 +15,10 @@ import argparse
 import sys
 from pathlib import Path
 
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 PREVIEW_TEXT = "你好，我是Neurova，您的专属人工智能助手！"

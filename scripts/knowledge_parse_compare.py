@@ -18,6 +18,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from neurova.knowledge.document_pipeline import DocumentParseError, parse_document
 
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 def _collect(paths: List[str]) -> List[Path]:
     files: List[Path] = []

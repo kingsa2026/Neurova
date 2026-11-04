@@ -26,6 +26,10 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 THIS_FILE = Path(__file__).resolve()
 
 # 保留期内不动。依据（2026-10-08）：9-05 那批 dump 在 Temp 里躺了 33 天无人取用，

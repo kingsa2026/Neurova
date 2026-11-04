@@ -14,6 +14,10 @@ if str(ROOT) not in sys.path:
 
 from neurova.context.token_estimator import estimate_tokens as estimate_text_tokens
 
+# 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 def count_tokens_injector(text: str) -> int:
     """
