@@ -759,8 +759,8 @@ interface KnowledgeItem {
   category: string
   content: string
   tags?: string[]
-  created_at?: string
-  updated_at?: string
+  created_at?: number
+  updated_at?: number
   source_created_at?: string
   source_modified_at?: string
   visibility?: 'public' | 'private'

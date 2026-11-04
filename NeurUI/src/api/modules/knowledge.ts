@@ -16,8 +16,8 @@ export interface KnowledgeNode {
   source?: string
   embedding?: number[]
   metadata?: Record<string, unknown>
-  created_at: string
-  updated_at?: string
+  created_at: number
+  updated_at?: number
   // 隔离与共享（批次 1）
   visibility?: 'public' | 'private'
   owner_user_id?: string
