@@ -1438,3 +1438,8 @@ tests/unit/knowledge/test_querySideNormalization.py
 #   判据四格：同 source 改动须重写行／按新来源过滤须命中且旧来源不再命中（端到端跨重启）、
 #   反向格钉住「未变条目不许重写」（增量不许退化成全量）。
 tests/unit/knowledge/test_ftsFingerprintCoversIndexedColumns.py
+# §6-521/§6-523：模型写面必须过真身份、重定向每一跳都过 SSRF 守卫。逐文件单跑 11／5 passed
+tests/unit/api/test_model_write_auth_gate.py
+tests/unit/web_reach/test_http_fetch_redirect_guard.py
+# §6-525：企微入站与文件导入同口径透传源时间（缺失回退入库时刻，不许恒空）。逐文件单跑 2 passed
+tests/unit/knowledge/test_wecomIngestSourceDates.py
