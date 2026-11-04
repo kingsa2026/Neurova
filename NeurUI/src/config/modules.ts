@@ -74,6 +74,7 @@ const AGENT_MODULES: ModuleItem[] = [
 const USER_MODULES: ModuleItem[] = [
   { key: '/agents', labelKey: 'agents' },
   { key: '/knowledge', labelKey: 'knowledge' },
+  { key: '/knowledge-eval', labelKey: 'knowledgeEval' },
   { key: '/skill-pool', labelKey: 'skillPool' },
   { key: '/marketplace/skills', labelKey: 'skillMarket' },
   // /aigc 已迁至「模型与工具」区 /aigc/* 五个二级页（2026-09-14 用户决策）；

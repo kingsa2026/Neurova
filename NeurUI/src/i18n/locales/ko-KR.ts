@@ -1,5 +1,6 @@
 import { STORE_CANVAS } from './_canvasStores'
 
+import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSection'
 export default {
   common: {
     markAllRead: '모두 읽음으로 표시',
@@ -81,6 +82,7 @@ export default {
     chat: '채팅',
     memory: '메모리',
     knowledge: '지식 베이스',
+    knowledgeEval: '평가 콘솔',
     skills: '스킬',
     models: '모델',
     tools: '도구',
@@ -797,6 +799,9 @@ export default {
     keepBoth: '양쪽 유지',
     manual: '사람 판단',
   },
+
+
+  knowledgeEval: knowledgeEvalSection('ko-KR'),
 
 
   knowledge: {

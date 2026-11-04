@@ -1,5 +1,6 @@
 import { STORE_CANVAS } from './_canvasStores'
 
+import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSection'
 export default {
   common: {
     markAllRead: '全部标记已读',
@@ -81,6 +82,7 @@ export default {
     chat: '对话',
     memory: '记忆',
     knowledge: '知识库',
+    knowledgeEval: '评测控制台',
     skills: '技能',
     models: '模型',
     tools: '工具',
@@ -808,6 +810,7 @@ export default {
     keepBoth: '保留双方',
     manual: '转人工',
   },
+  knowledgeEval: knowledgeEvalSection('zh-CN'),
   knowledge: {
     mcpArgsInvalid: '工具参数必须是合法 JSON',
     mcpArgsJson: '工具参数 JSON',

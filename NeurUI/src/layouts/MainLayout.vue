@@ -181,6 +181,10 @@
         <template #icon><BookOutlined /></template>
       </GlassNavItem>
 
+      <GlassNavItem to="/knowledge-eval" :label="t('nav.knowledgeEval')" :collapsed="appStore.sidebarCollapsed" v-if="can('/knowledge-eval')">
+        <template #icon><ExperimentOutlined /></template>
+      </GlassNavItem>
+
       <GlassNavItem to="/skill-pool" :label="t('nav.skillPool')" :collapsed="appStore.sidebarCollapsed" v-if="can('/skill-pool')">
         <template #icon><AppstoreOutlined /></template>
       </GlassNavItem>
