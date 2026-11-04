@@ -60,6 +60,17 @@ def _artifactRefs(tool: str, result: Any) -> List[dict]:
         return []
 
 
+def _maskText(text: str) -> str:
+    """trace 出口文本卫生（候选 C2）：走 sensitive_info 单源，不打第二份规则；
+    卫生面故障不阻断 trace（fail-open）。"""
+    try:
+        from neurova.security.sensitive_info import sanitizeSensitive
+
+        return sanitizeSensitive(text)
+    except Exception:  # noqa: BLE001 - 卫生面故障放行原文
+        return text
+
+
 def recordToolTrace(
     tool: str,
     params: Any = None,
@@ -76,9 +87,9 @@ def recordToolTrace(
     entry = {
         "tool": str(tool or ""),
         "layer": str(layer or ""),
-        "params": _summarizeParams(params),
+        "params": _maskText(_summarizeParams(params)),
         "success": None if success is None else bool(success),
-        "error": str(error or "")[:300],
+        "error": _maskText(str(error or ""))[:300],
         "duration_ms": round(float(duration_ms), 2),
     }
     refs = _artifactRefs(tool, result)
