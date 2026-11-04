@@ -187,3 +187,62 @@ class BrowserBackendCapability:
     def __repr__(self) -> str:
         """字符串表示"""
         return f"BrowserBackendCapability(backend_name='{self.backend_name}')"
+
+
+#: 真实后端的描述表（按 BrowserManager.availableBackendNames 的名字索引）。
+#: 只声明本仓实装支持的能力；后端不在表里就不注入，避免给模型编造能力。
+_BACKEND_DESCRIPTORS: typing.Dict[str, BrowserBackendCapability] = {
+    "playwright": BrowserBackendCapability(
+        backend_name="playwright",
+        capabilities=["navigate", "click", "type", "screenshot", "dom_snapshot", "execute_js"],
+        limitations=["单活动页面（max_pages=1）", "依赖本机 Playwright 浏览器内核"],
+        best_for=["动态网页", "登录态操作", "表单交互"],
+        max_pages=1,
+        supports_geolocation=True,
+    ),
+    "scrapling": BrowserBackendCapability(
+        backend_name="scrapling",
+        capabilities=["static_fetch", "extract_text", "extract_links"],
+        limitations=["不执行 JavaScript", "无页面交互"],
+        best_for=["静态页面", "批量抓取"],
+        max_pages=1,
+    ),
+    "camofox": BrowserBackendCapability(
+        backend_name="camofox",
+        capabilities=["navigate", "click", "type", "screenshot", "anti_detection"],
+        limitations=["依赖外部 camofox 服务", "按用户池化，跨用户不共享"],
+        best_for=["反检测站点", "高风控页面"],
+        max_pages=1,
+    ),
+}
+
+
+def buildBrowserCapabilityContext(
+    backendNames: typing.Optional[typing.Iterable[str]] = None,
+) -> str:
+    """把当前真可用后端的描述渲染成 system prompt 段。
+
+    消费方：context/orchestrator.get_tools_description（仅在工具面含浏览器/电脑
+    工具时调用）。不传 backendNames 时经 BrowserManager.availableBackendNames()
+    读运行时实装；取不到或没有已知后端返回空串（不注入编造的能力）。
+    """
+    if backendNames is None:
+        try:
+            from neurova.computer_use.browser_manager import get_browser_manager
+
+            backendNames = get_browser_manager().availableBackendNames()
+        except Exception as exc:  # noqa: BLE001 - 能力描述不可用不阻断 prompt
+            logger.debug("浏览器后端能力读取失败（跳过注入）: %s", exc)
+            return ""
+    present = {str(name) for name in backendNames}
+    capabilities = [
+        capability for name, capability in _BACKEND_DESCRIPTORS.items() if name in present
+    ]
+    if not capabilities:
+        return ""
+    lines = [
+        "## 浏览器后端能力",
+        "工具会自动路由到可用后端；以下只说明各自的能力边界，供选择操作方式。",
+    ]
+    lines.extend(capability.to_llm_context() for capability in capabilities)
+    return "\n\n".join(lines)

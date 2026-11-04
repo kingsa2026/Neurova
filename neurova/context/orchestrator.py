@@ -2986,9 +2986,33 @@ class ContextOrchestrator:
             tools = await self.build_tools_for_llm()
             if not tools:
                 return ""
-            return render_tools_description(tools)
+            description = render_tools_description(tools)
+            browserSection = self._browserCapabilitySection(tools)
+            return description + ("\n\n" + browserSection if browserSection else "")
         except Exception as e:
             logger.warning("构建工具描述失败: %s", e)
+            return ""
+
+    @staticmethod
+    def _browserCapabilitySection(tools: List[Dict]) -> str:
+        """浏览器/电脑工具在工具面出现时，追加真后端的能力描述段。
+
+        能力描述以 BrowserManager.availableBackendNames() 的运行时实装为准，
+        不把配置声明当成可用能力；没有已知后端时返回空串。
+        """
+        names = {
+            str((tool.get("function") or {}).get("name") or "")
+            for tool in tools
+            if isinstance(tool, dict)
+        }
+        if not any(name.startswith(("browser_", "computer_")) for name in names):
+            return ""
+        try:
+            from neurova.tool_layers.browser_capability import buildBrowserCapabilityContext
+
+            return buildBrowserCapabilityContext()
+        except Exception as exc:  # noqa: BLE001 - 能力段失败不阻断工具清单
+            logger.debug("浏览器能力段注入失败（跳过）: %s", exc)
             return ""
 
     async def _apply_visibility_gate(self, tools: Optional[List[Dict]]) -> Optional[List[Dict]]:
