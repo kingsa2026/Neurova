@@ -368,4 +368,26 @@ association_cues 三件、evolution 七新件（blind_selection/deterministic_ju
 
 ---
 
+## 12. 遗留处置记录（2026-11-04，§11 之后）
+
+> 范围：§11 两项核验遗留 + §10 批⑥待拍板项 + 存疑区 8/9。裁定项经交互选项提交，用户未作答，
+> **按推荐项执行（均可逆，随时可推翻）**；裁定结论逐条在此留档。
+
+| 项 | 裁定与结论 | 落库/证据 |
+|----|------|------|
+| P1-1 角色级收口 | **分级收口**：DELETE/PUT/download-source/download → `deps.require_admin()`（现役角色门，audit.py 同源）；/switch、/probe-*、/check-connection 保持登录（探针读型、切模型是 agent 工作面） | `efd1dd3f`；TestRoleGate 6 用例红→绿；test_model_download_api 假身份补 role 键跟随 |
+| P2-1 运维指标暴露 | **限环回**：/metrics、/health/detailed 移入 `LOOPBACK_ONLY_PUBLIC_PATHS`，中间件按 client 判环回；/health 保持全公开（healthcheck 面不回退）；持凭证外部读不受影响 | `efd1dd3f`；7 用例纯 ASGI 直驱；live-verify 隔离实例 0.0.0.0:19527＋enforce：非环回 /metrics **401**、环回 200、非环回 /health 200 |
+| P2-2 凭据 keyfile | **延后登记**（威胁模型弱：仅同机文件读权限；桌面单机形态收益有限）：尾巴＝「接 OS 级保护（DPAPI/Keychain），触发条件：多端同步或凭据面扩大」 | 零改动，本格即登记 |
+| cargo check 遗留 | **根因不在代码**：仓级 `.cargo/config.toml` 把 link.exe 钉死在 C:/Program Files (x86)/.../BuildTools/ 标准位，VS2022 实装已迁 `E:\neurova-build-tools\VS2022`（P2-14 同类硬编码路径病）。去钉后 rustc 原生 vswhere 探测可用：`--config` 覆盖真路径 50.58s Finished（lib.rs P1-6 校验代码可编实证）→ 零注入干净环境 52.05s Finished | `680e0ea8`；cargo check 全绿 |
+| P2-9 seen_cursor | **已接线**（另一会话批）：`coordination_api.py` / `agent_workspaces.py` / `agent_layout_migration.py` 有生产消费方——479 行不再是孤儿 | HEAD 现读 |
+| P2-10 browser_capability | **已接线**（另一会话批）：`context/orchestrator.py` 消费 | HEAD 现读 |
+| P2-8 time_context | **已接 UI**（另一会话批）：KnowledgePage.vue 冲突队列已渲染 time_context | HEAD 现读（3 处命中） |
+| 存疑8 tts/asr downloader | **判定不并**（非教义 6 双源）：同壳但机制实质不同——tts 走 HF hub snapshot，asr 走 whisper.load_model 官方通道（HF 镜像不了 whisper 格式，asr 头注释已互认）；同形态不同功能不构成双实现 | HEAD 现读定性 |
+| 存疑9 根 package.json | **判定为工作区占位**：`private:true` 的 cost-guard 脚本壳（guard:*/cost:* 五个脚本），version 1.0.0 无产品消费方；桌面版本守卫只咬 NeurUI 侧两份＋lock（现 1.0.0-beta7）。非第二版本源 | HEAD 现读定性 |
+| P2-13 后端半边 | **已收**：authorize 端点 `@router.post`（neurflow_stores.py:230），前端 POST body 直传（CanvasStoreDrawer.vue 注释自陈不再走 query）；window.open 带 noopener | HEAD 现读 |
+
+**处置余量清零**：P1×8（§11）＋P2×15＋P3×9 全部修复在案（P2/P3 主体由并行会话补修，本批 sweep 逐项 HEAD 现读复核：CSP、口令传递、TB 指纹短路、tool_engine、ledger、nsi 路径、端口守卫、422、PDF 时区、前端时区、memory 死键、监控留痕、appcontainer、start_server 注释、2>nul、stores/utils 删除、色守卫 rgba/hsl 扩展——P3-7 落成「存量基线棘轮＋禁新增」形态，强于原建议）；批⑥待拍板项全部落定。台账落格自 §6-517 起待点单。
+
+---
+
 *本文件为只读审计产物，未改动任何代码；归置 audit-reports/ 与旧台账同目录。*
