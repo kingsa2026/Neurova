@@ -61,7 +61,7 @@
 | LLM Router（多模态选择） | ✅ | `llm/llm_router.py` | [23-llm-provider-management](../01-architecture/23-llm-provider-management.md) |
 | Computer Use（视觉理解） | ✅ | `computer_use/`（vision.py + vision_lite） | [01-core-architecture](../01-architecture/01-core-architecture.md) |
 | 浏览器自动化（Camofox） | ✅ | `computer_use/browser_manager.py` | [CUA 能力台账](../CUA能力台账.md)（投递路径与拒绝码登记） |
-| web_reach 网络工具 | ✅ | `web_reach/`（reach.py + 5 工具） | `agent-reach-integration.md` 已随第三方痕迹清除波（`663faa5d`）退役 |
+| web_reach 网络工具 | ✅ | `web_reach/`（reach.py + 5 工具） | `agent-reach-integration.md` 已随第三方痕迹清除波（685e40a3）退役 |
 | 插件系统 | ✅ | `plugins/` | [06-plugin-cli-system](../01-architecture/06-plugin-cli-system.md) |
 | 工具编排（Tool Orchestrator） | ✅ | `tool_layers/tool_orchestrator.py` | [07-implementation-plan](../01-architecture/07-implementation-plan.md) |
 
@@ -123,7 +123,7 @@
 | 文档 | 主题 |
 |------|------|
 | [living_context_pool_design.md](../01-architecture/living_context_pool_design.md) | 活水上下文池设计（五大活水特性） |
-| `agent-reach-integration.md`（已退役） | Agent-Reach 整合——该文档随 `663faa5d` 退役，现行能力登记见 [CUA 能力台账](../CUA能力台账.md) |
+| `agent-reach-integration.md`（已退役） | Agent-Reach 整合——该文档随 685e40a3 退役，现行能力登记见 [CUA 能力台账](../CUA能力台账.md) |
 | [agent-swarm-orchestration.md](../01-architecture/agent-swarm-orchestration.md) | Agent 集群编排 |
 | [cross-channel-session-sync-design.md](../01-architecture/cross-channel-session-sync-design.md) | 跨渠道会话同步 |
 | [channels.md](../01-architecture/channels.md) | 渠道适配说明 |
@@ -261,7 +261,7 @@
 - [modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md](../08-research/modularrsi_paper_vs_neurova_harness_rsi_comparison_2026-10-15.md) — 与 ModularRSI 论文（arXiv:2609.14857）的 harness 递归自我改进对照，只记 RSIAgent／Designer-RSI 两篇前作未覆盖的增量项 M-A..M-E（竞品/外部对标，研究参考）
 - [harness2_vs_neurova_recursive_harness_comparison_2026-10-21.md](../08-research/harness2_vs_neurova_recursive_harness_comparison_2026-10-21.md) — 与 google-research/harness2 的递归 harness 优化代码级对比：十维加权（权重 100% 归一）当前评估 7.8 vs 8.1、生产就绪度单列读数、本仓断点 N1–N8 与候选 C1–C8（N1–N8 已落地/部分落地，闭环 A–D、N6/C6/N8、完整工具 trace、跨域 UI、产物二进制证据与独立采纳流已落，竞品/外部对标，研究参考）
 - [tmem_paper_vs_neurova_associative_memory_comparison_2026-10-21.md](../08-research/tmem_paper_vs_neurova_associative_memory_comparison_2026-10-21.md) — 与 T-Mem 论文（arXiv:2606.15405，EMNLP 2026，MIT，commit `dd9e152`）的记忆系统代码级对比：无表面重合「联想召回」可达性议题、写入侧预演的 800–900 次调用/构建成本复算、消融读数指向前瞻族独大、用户所述八步流程的四处更正、本仓自有断点 D1–D7 与候选 TM-1..TM-6（含不照搬清单与未验证项，竞品/外部对标，研究参考）
-- [dsh_superagent_vs_neurova_attention_and_authorization_comparison_2026-10-31.md](../08-research/dsh_superagent_vs_neurova_attention_and_authorization_comparison_2026-10-31.md) — 与外部编码代理研究原型（deepseek-ai/dsh-superagent-prototype，浅克隆 @ `6337fc82`，README 自述非官方产品/非生产级）的「注意力预算 / 授权门 / 工单模型」代码级对比：**外部侧未实跑**（依赖整套私有包，绿灯不可复现），作者另抽验 6 条关键断言原文；本仓自有断点 N-1..N-5（出口无注意力预算、台账 status 可漂移、"需要人"只有台账筛选非队列、审批可堆叠无一次一问、授权面两处不同源）与候选 D-1..D-6，含 11 条不照搬清单（JSON 列塞聚合、YAML 执行 JS、danger-full-access 与无 token 面板、无界增长、await 后重读式并发约定、交集扩权与默认监听、正则改写历史、私有依赖无 CI 等）与未验证项（竞品/外部对标，研究参考）
+- [dsh_superagent_vs_neurova_attention_and_authorization_comparison_2026-10-31.md](../08-research/dsh_superagent_vs_neurova_attention_and_authorization_comparison_2026-10-31.md) — 与外部编码代理研究原型（deepseek-ai/dsh-superagent-prototype，浅克隆 @ 6337fc82，README 自述非官方产品/非生产级）的「注意力预算 / 授权门 / 工单模型」代码级对比：**外部侧未实跑**（依赖整套私有包，绿灯不可复现），作者另抽验 6 条关键断言原文；本仓自有断点 N-1..N-5（出口无注意力预算、台账 status 可漂移、"需要人"只有台账筛选非队列、审批可堆叠无一次一问、授权面两处不同源）与候选 D-1..D-6，含 11 条不照搬清单（JSON 列塞聚合、YAML 执行 JS、danger-full-access 与无 token 面板、无界增长、await 后重读式并发约定、交集扩权与默认监听、正则改写历史、私有依赖无 CI 等）与未验证项（竞品/外部对标，研究参考）
 
 ### 09-dev-progress 开发进展
 

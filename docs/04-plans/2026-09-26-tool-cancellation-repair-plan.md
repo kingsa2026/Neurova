@@ -1,6 +1,6 @@
 # G4 修正方案 —— 工具取消、超时处置与进程生命周期
 
-> ## ⚠️ 状态更新（2026-09-30 补入仓库 · 状态逐条核实至 `008a3e2a`）
+> ## ⚠️ 状态更新（2026-09-30 补入仓库 · 状态逐条核实至 008a3e2a）
 >
 > **本文是 G4 的立项与判据来源，并非现状描述。** 此前只以 Issue #288 附件形态存在；
 > 本次补入仓库，闭合「对标文档 §5 G4 行 → 本文」的引用（补入前该引用悬空，
@@ -18,7 +18,7 @@
 > | RC-5 取消计为工具失败 | 已闭合：单源判定 `is_policy_denial` 认 `cancelled`（`security/governance.py:64-76`），注明"与上述六键完全同构的**决策**" |
 > | RC-6 取消终态不回反馈环 | 已闭合：`_observe_background` 取消分支补投 `_pending_hints`（`tool_coordinator.py:341` 起），注释标 **"断链修复（G4-RC6）"** |
 >
-> 落地提交 `e1959626`（Issue #288 / MR #291），另含两处本文未提的同类根修
+> 落地提交 e334c68a（Issue #288 / MR #291），另含两处本文未提的同类根修
 > （N-1 `LocalExecutor.exec` 阻塞事件循环；N-2 进程未自成团时按组杀灭会命中宿主）。
 >
 > **决策点裁决**：D-1 引入令牌 ✅；D-2 默认保守 ✅；D-3 恰好四类 ✅；**D-4 用户停止也杀进程 ✅**；D-6 hint ✅。
@@ -43,9 +43,9 @@
 > 未观测到证据。单测覆盖已有（`tests/unit/tools/test_tool_cancellation.py` 447 行），
 > **但教义第 4 条不接受"单测全绿"替代活体**。
 >
-> 正文行号对准 `c55e1f37`，引用前请对准当前 `HEAD` 复核。
+> 正文行号对准 94e16d50，引用前请对准当前 `HEAD` 复核。
 
-> 立项时间：2026-09-26 · 取证基线：`c55e1f37` · 关联缺口：对标文档 §5 G4
+> 立项时间：2026-09-26 · 取证基线：94e16d50 · 关联缺口：对标文档 §5 G4
 > 关联方案：G1 [`2026-09-26-tool-loop-iteration-repair-plan.md`](2026-09-26-tool-loop-iteration-repair-plan.md)、
 > G3 [`2026-09-26-tool-batch-parallelism-repair-plan.md`](2026-09-26-tool-batch-parallelism-repair-plan.md)
 > 关联台账：`scripts/ci/toolLoopDeadlines.txt`
@@ -385,7 +385,7 @@ except asyncio.CancelledError:
 
 ---
 
-*本文所有行号对准 `c55e1f37`，复验命令：*
+*本文所有行号对准 94e16d50，复验命令：*
 *`sed -n '131,204p' neurova/agent/tool_coordinator.py`、*
 *`grep -n "_kill_process_tree" -A 12 neurova/sandbox/exec_sandbox.py`、*
 *`grep -rn "kill_all" --include=*.py neurova/ tests/`、*

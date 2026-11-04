@@ -560,7 +560,7 @@ _open_chat_browser → webbrowser.open`（该函数在别的用例里被 patch �
 
 **收集口径更新**：`tests/benchmarks/test_multi_agent_coordination.py` 的
 `NameError: name 'Optional' is not defined`（模块级注解用到的 `Optional` 没进第 10 行的 typing 导入）
-已在本批补上该导入——它自 `626e2e88` 起入库即坏，与 §11.5 早期"未跟踪的在途件"登记是同一处。
+已在本批补上该导入——它自 da9d0c9d 起入库即坏，与 §11.5 早期"未跟踪的在途件"登记是同一处。
 现在全量收集只需 `--ignore=tests/unit/neurflow`：`pytest tests/ --collect-only` 17616 项 / 0 错。
 
 ### 11.6 实施进度快照（E0/E1 完成、E2 判据改序、E3 提前落刀）
@@ -608,7 +608,7 @@ _open_chat_browser → webbrowser.open`（该函数在别的用例里被 patch �
 迁移链守卫 `test_everyTableExistsAfterMigrationChain` 随 v4 一并抬到 `user_version == 4`，
 并把 `knowledge_narratives` 纳入必查表集。新增 §5 第四条硬约束（咽喉必须是唯一装配点）与
 常驻判据 `test_gate_wiring_parity.py`（6 例）。生产回填产物已在统一装配下重跑并留档
-`.pre-20260920-gateparity`；`data/knowledge/knowledge.json` 哈希 `e0ea2a4524e7` 全程未变。
+`.pre-20260920-gateparity`；`data/knowledge/knowledge.json` 哈希 e0ea2a4524e7 全程未变。
 
 ### 11.7 本批自伤事故登记（019b-4b，2026-09-20 晚，本批引起）
 
@@ -625,7 +625,7 @@ _open_chat_browser → webbrowser.open`（该函数在别的用例里被 patch �
 - 治理面同步长成 93 事实 / 88 主体，比 015 基线 92 / 87 各多 1，多的正是探针那一行。
 
 **处置**：污染库改名留证未删；`knowledge.json` 与 `knowledge_conflicts.json` 从归档改回，
-哈希回到登记值 `e0ea2a4524e7`（130 条）；生产库删除后按设计重放一次搬家；
+哈希回到登记值 e0ea2a4524e7（130 条）；生产库删除后按设计重放一次搬家；
 用例改成指向 `tmp_path` 下的假生产目录，证明力不减。
 
 **根因不在"忘了加守卫"，在守卫的边界与权威的位置不再重合**：围栏是 pytest-only 的，

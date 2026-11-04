@@ -59,7 +59,7 @@
 | 测试文件 | 错误引用 | 真实存在物 | 处理 |
 |---|---|---|---|
 | `tests/execution_engine/test_tool_closed_loop.py` | `neurova.agent.tool_executor` | `neurova.tool_executor`（顶层） | 重写时改 import 路径 |
-| `tests/integration/test_full_chain.py` | `create_default_skills` from `neurova.skill` | 待定位（`neurova.skills` 门面） | 🗑️ REMOVED（§6-391，`b5484380`）——四代前的形状，逐格修＝给不存在的链补形状；分流指针与本档「不许复活」四格见 `tests/integration/test_fullChainRetired.py` |
+| `tests/integration/test_full_chain.py` | `create_default_skills` from `neurova.skill` | 待定位（`neurova.skills` 门面） | 🗑️ REMOVED（§6-391，cfa07145）——四代前的形状，逐格修＝给不存在的链补形状；分流指针与本档「不许复活」四格见 `tests/integration/test_fullChainRetired.py` |
 | `tests/integration/test_memory_system.py` | `Memory` from `neurova.mem_core` | `MemCore`（类） | 重写时对齐类名 |
 | `tests/unit/test_coverage_fast.py` / `test_coverage_simple.py` / `test_plugin_api.py` | `UPLOAD_DIR` from `...console` | `_CONSOLE_UPLOAD_DIR`（私有） | 重写时对齐或改测公共接口 |
 

@@ -29,11 +29,11 @@
   5. 冲突组带组级读数 `entity_overlap` / `semantic_similarity`（`ConflictGroup:19-27`），组按 `mem_a` 归属合并（`:235-252`）；
   6. 构造参数 `sim_threshold=0.8`、`entity_threshold=0.5`（`:39-48`）。
 - **关键入口**：`ConflictGroup:19`、`ConflictDetector:30`、`detect:50`、`_is_contradictory:169`、`_extract_attributes:198`。
-- **来历**：`2482c042`（2026-06-03「添加完整的项目核心文件」）批量引入——`git log --diff-filter=A` 唯一添加笔。
+- **来历**：2482c042（2026-06-03「添加完整的项目核心文件」）批量引入——`git log --diff-filter=A` 唯一添加笔。
   **生产侧从未接线**：全史唯一消费者 `result_processor.py`（`:17` import、`:63` 实例化、`:100` 调 `detect`）本身
   只有测试 import；`git grep result_processor 0c333a76^ -- neurova/` 只命中它自己的定义与 `__main__` 演示（`:235`），
   `git log -S "from neurova.cognitive_layers.memory_layer.result_processor" --all -- neurova/` **零命中**。
-  `0c333a76`（2026-09-21「温度衰减双实现收敛…清退 5 组死码」）删掉 `result_processor.py`，
+  807ca120（2026-09-21「温度衰减双实现收敛…清退 5 组死码」）删掉 `result_processor.py`，
   退役报告记「生产 0，逐个按类名复核」并把 MoE 检索面的真实消费方改指 `MoERetrieverAdapter`
   （`docs/05-reports/memory-temperature-convergence-2026-09-21.md:78,92`；后者现役于
   `neurova/agent/chat_pipeline.py:254`、`neurova/agent/memory_retrieval_chain.py:158`，不使用 v2）。
@@ -71,7 +71,7 @@
    （`grep -n version` 只有 `:25` 那一行）；probe 也确认 `version` 从不出现。
 2. **测试自称「活跃版本」，断言只有形状**：`tests/unit/memory/test_memory_safety_net.py:22`
    写「活跃版本」，实际只断 import／初始化字段；同档 `:49-50` 的「死代码不被导入」断言以 `or True` 结尾＝恒真。
-   该档来历是 `4a3c9380`（2026-09-04「移除 .gitignore 的 /tests/ 整目录忽略 — 809 个正式测试文件入库」）
+   该档来历是 6bff43f2（2026-09-04「移除 .gitignore 的 /tests/ 整目录忽略 — 809 个正式测试文件入库」）
    整批入库，不是一次评审过的保留决定——按死码口径不得当活证据。
 3. **同域三份检测器并存**（`docs/specs/2026-09-21-memory-knowledge-foundation-audit.md:209` 已点名）：
    `LegacyConflictDetector`（在役、观测）、`conflict_detector_v2`（未接线）、`channels/conflict.py`（死岛内）。

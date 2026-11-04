@@ -164,7 +164,7 @@ profile 4 / tkg 4 / working_memory 8）。
 
 ---
 
-## 六、落地情况（第四节那一批已实施，commit `63e8ae8e`）
+## 六、落地情况（第四节那一批已实施，commit 5d019f96）
 
 修法五项全部落地，生产净 **−64**：旁路 `_get_user_ids_from_token` 与死码 `resolve_user`
 删除，29 处调用点改为端点既有的 `user`（`profile.py` 两处三位置参 TypeError 同批消失），
@@ -206,7 +206,7 @@ GET/PUT 读回改走 `manager.get_memory`，DELETE 不再传 `agent_wide=True`�
 
 ---
 
-## 七、同根因第二命中点：外部 Agent 通信域（已扫荡，commit `806c6f38`）
+## 七、同根因第二命中点：外部 Agent 通信域（已扫荡，commit 055e8f07）
 
 教义第 5 条要求点名一条断链后扫同契约的全部落点。本域原登记的说法是
 "`agent_communication_api.py` Bearer 解析异常被 `pass` 吞掉后一路落到 default 放行"——
@@ -236,7 +236,7 @@ A/B `tests/unit/api`+`tests/integration` 失败集合 137↔137 逐行一致。
 
 ---
 
-## 八、凭证合一与密钥真相源收口（教义第 7 条流程记录，commit `c1c6c221`）
+## 八、凭证合一与密钥真相源收口（教义第 7 条流程记录，commit aafb9058）
 
 用户拍板：门改为 JWT 与密钥合一，真相源 = `APIKeyManager`。第 7 条要求"先比后合"，
 按固定顺序留证。
@@ -256,7 +256,7 @@ A/B `tests/unit/api`+`tests/integration` 失败集合 137↔137 逐行一致。
 `(3)` **当时不动**：它带着 `(2)` 没有的三项能力（原子写 / 创建幂等 / 撤销 tombstone），
 按第 7 条"不许不比较就删掉弱者"，它不是弱者；要三合一必须先把这三项补进选定的那份。
 此前提当日登记在此。**该前提已在同日下班前完成——三项机制并入 `(2)`、`(3)` 的私有存储
-退役，见 §九（commit `94af885f`）。**
+退役，见 §九（commit 71696315）。**
 
 **③ 接通**：门 `get_current_user_or_api_key`（`auth.py`，与
 `get_current_user_or_service` 同族同规则：先 JWT，其次 `validate_key`，两者都不成立才
@@ -297,10 +297,10 @@ A/B（stash 集 = 本批全部改动面）：`tests/unit/api` + `tests/integrati
 
 | commit | 内容 | 现行缺陷面 |
 |---|---|---|
-| `cf684596` | `firewall.update_global_rules` / `update_user_rules` 未知键先验后写、点名拒绝；配置装载遇未知键改 WARNING 留痕；合法键名单源取 dataclass 字段 | §八末尾那条 |
-| `7842ecb9` | 开放平台密钥归属改取路由级门的返回值——`request.state.user_id` **全仓无人写入**，导致所有用户的密钥同落 `anonymous` 桶：互相可见、按他人 key_id 即可撤销 | 与 `get_memory_manager` 身份旁落同根因 |
-| `94af885f` | 开放平台私有密钥存储并入 `APIKeyManager`：原子写、创建幂等 + 意图指纹、撤销 tombstone 三项机制并入选定实现，七端点改指它，私有存储与三份辅助函数退役 | §八"三合一前提"闭环 |
-| `04c4a42e` | 记忆增强端点身份改取路由级门的返回值，7 处变更调用收回归属校验，既有测试伪造 `request.state.user` 的中间件同批去除 | 本域同根因第三命中点（详见 §十） |
+| 0bbb29ae | `firewall.update_global_rules` / `update_user_rules` 未知键先验后写、点名拒绝；配置装载遇未知键改 WARNING 留痕；合法键名单源取 dataclass 字段 | §八末尾那条 |
+| 27230a54 | 开放平台密钥归属改取路由级门的返回值——`request.state.user_id` **全仓无人写入**，导致所有用户的密钥同落 `anonymous` 桶：互相可见、按他人 key_id 即可撤销 | 与 `get_memory_manager` 身份旁落同根因 |
+| 71696315 | 开放平台私有密钥存储并入 `APIKeyManager`：原子写、创建幂等 + 意图指纹、撤销 tombstone 三项机制并入选定实现，七端点改指它，私有存储与三份辅助函数退役 | §八"三合一前提"闭环 |
+| 30bcf335 | 记忆增强端点身份改取路由级门的返回值，7 处变更调用收回归属校验，既有测试伪造 `request.state.user` 的中间件同批去除 | 本域同根因第三命中点（详见 §十） |
 
 三处判据值得留字：
 
@@ -317,7 +317,7 @@ A/B（stash 集 = 本批全部改动面）：`tests/unit/api` + `tests/integrati
 `getattr(request.state, "user", None)`（同样无人写入），故该模块作用域恒 default、
 其 get/forget 一直是 agent-wide 口径。把身份接上去会让这些端点立刻开始拒绝跨用户操作，
 属功能语义变更，需单独判定后再改（改法与 §九第 2 行同型）。
-**→ 已于同日落地，见 §十（commit `04c4a42e`）；本段留作当时的判断记录。**
+**→ 已于同日落地，见 §十（commit 30bcf335）；本段留作当时的判断记录。**
 
 复验口径：开放平台两套 + 外部 Agent 两套 + 管理器 S-19 防抖回归 **37 passed**；
 真 app 活体九步全绿（`nrv_` 前缀、幂等重放不再吐明文、两条账各自独立、
@@ -326,7 +326,7 @@ A/B（stash 集 = 本批全部改动面）：`tests/unit/api` + `tests/integrati
 
 ---
 
-## 十、同根因第三命中点收口：记忆增强端点（commit `04c4a42e`）
+## 十、同根因第三命中点收口：记忆增强端点（commit 30bcf335）
 
 §九 末段留档的那条"同族未收紧"已在本批落地，同根因链至此三命中点全部闭环
 （`memory/` 域 → `agent_communication_api.py` → `openplatform_keys.py` → `memory_enhancement.py`）。

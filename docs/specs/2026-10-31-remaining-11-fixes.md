@@ -11,18 +11,18 @@
 
 | # | 条目 | 状态 | 提交 | 现读证据 |
 |---|---|---|---|---|
-| 1 | C1 · TurnRunState 迁移 | ✅ | `7f0e20ae` | `turn_run_state.py` 三件齐备：`toolRounds`／`gateRunner`（必填，`_buildGateRunner` 单点装配）／`roundUsage` |
-| 2 | R5 · OutboxHandler 四件 | ✅ | `f391bda3` | 失败态／退避／死信／清理四处持久化 |
-| 3 | 治理端点租户过滤 | ✅ | `39296e3a` | 裁决／复活／待审／墓碑／事实冲突五腿按租户闭环 |
-| 4 | EntryLedger 无 tenantId | ✅ | `2890ae66` | 条目投影的治理行随条目租户分区 |
-| 5 | 守卫多主体完整实现 | ✅ | `bb9fe887` | `guards/answer_fact_guard.py:180-192` 取「持有冲突数值」的主体 key；判据 `test_answerFactGuard.py:195-196` 双向断言（＝B 且 ≠A） |
-| 6 | EventBus 无循环场景 | ✅ | `48be5b7d` | 队列在而归属 loop 未知时不再静默直投 |
-| 7 | HealthCheck 周期调度 | ✅ | `098fe4c6` | 按 `interval` 周期调度，`/health/detailed` 读缓存 |
-| 8 | 前端主题守卫盲区 | ✅ | `bfb176f9` | 全站 `.vue` 硬编码色改令牌 ＋ 全量扫描守卫 |
-| 9 | 结晶器双写已修确认 | ✅ | `2ab14586`·`956f2f1a` | 确认档，本批未再动 |
+| 1 | C1 · TurnRunState 迁移 | ✅ | b44e5e9a | `turn_run_state.py` 三件齐备：`toolRounds`／`gateRunner`（必填，`_buildGateRunner` 单点装配）／`roundUsage` |
+| 2 | R5 · OutboxHandler 四件 | ✅ | 3b072085 | 失败态／退避／死信／清理四处持久化 |
+| 3 | 治理端点租户过滤 | ✅ | bd4a5145 | 裁决／复活／待审／墓碑／事实冲突五腿按租户闭环 |
+| 4 | EntryLedger 无 tenantId | ✅ | 10e014c1 | 条目投影的治理行随条目租户分区 |
+| 5 | 守卫多主体完整实现 | ✅ | b87f21a3 | `guards/answer_fact_guard.py:180-192` 取「持有冲突数值」的主体 key；判据 `test_answerFactGuard.py:195-196` 双向断言（＝B 且 ≠A） |
+| 6 | EventBus 无循环场景 | ✅ | 6011d72f | 队列在而归属 loop 未知时不再静默直投 |
+| 7 | HealthCheck 周期调度 | ✅ | 1f31fe9c | 按 `interval` 周期调度，`/health/detailed` 读缓存 |
+| 8 | 前端主题守卫盲区 | ✅ | f91a34c0 | 全站 `.vue` 硬编码色改令牌 ＋ 全量扫描守卫 |
+| 9 | 结晶器双写已修确认 | ✅ | dbc64346·38e38b30 | 确认档，本批未再动 |
 | 10 | C1 附注 · `_round_usage` 原子性 | ✅ | 随 #1 | `base.py:648` `_accumulateRoundUsage(usage, state)` 写 `state.roundUsage`——调用链局部对象，读-改-写窗口随载体一起消失，无需加锁 |
-| 11 | safe_paths O_NOFOLLOW 已修确认 | ✅ | `5c61fd41` | 确认档 |
-| 12 | 上传上限已修确认 | ✅ | `956f2f1a` | 确认档 |
+| 11 | safe_paths O_NOFOLLOW 已修确认 | ✅ | 2eb9a973 | 确认档 |
+| 12 | 上传上限已修确认 | ✅ | 38e38b30 | 确认档 |
 
 ---
 
@@ -271,7 +271,7 @@ resolve/restore 路由与 repository 层的三个方法不过滤：
 
 ## 9. 结晶器 confirm_pending + _store_candidate 双写已修确认
 
-✅ 已修（`2ab14586`）：
+✅ 已修（dbc64346）：
 - `_enqueue_candidate` 同 key 去重（合并 sample_count）；
 - `_store_candidate` 补 pattern_key 查重（遍历 `engine.iter_nodes()`）。
 
@@ -295,14 +295,14 @@ self.agent._round_usage = { ... }
 
 ## 11. safe_paths O_NOFOLLOW 已修确认
 
-✅ 已修（`5c61fd41`）：读分支和写分支都有 O_NOFOLLOW。
+✅ 已修（2eb9a973）：读分支和写分支都有 O_NOFOLLOW。
 原报告"只堵了读一半"已过时。
 
 ---
 
 ## 12. 上传上限已修确认
 
-✅ 已修（`956f2f1a`）：console_files.py:43 + skill_pool_api.py:956
+✅ 已修（38e38b30）：console_files.py:43 + skill_pool_api.py:956
 两处均加 100MB 钳制。
 
 ---

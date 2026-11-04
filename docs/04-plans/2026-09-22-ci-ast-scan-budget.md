@@ -22,7 +22,7 @@ FAILED tests/unit/test_api_inventory_guard.py::TestSnapshotDiscipline::test_inje
 同一提交上的 `unit-tests-py311`（`protected subset with coverage gate`）**是绿的**。
 即：**同一份代码、同一条用例，311 绿、312 红**。
 
-`git log -1` 为 `49b4a906`，因此不是「某次提交引入的缺陷」——是**判据与机器速度捆绑**。
+`git log -1` 为 12d523f7，因此不是「某次提交引入的缺陷」——是**判据与机器速度捆绑**。
 
 ## 2. 根因
 

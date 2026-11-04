@@ -1,7 +1,7 @@
 # 多格式文档知识库升级计划（对照 2026-10 设计文档）
 
 > 对照来源：`F:\User Files\xwechat_files\shangdu_ab02\msg\file\2026-10\多格式文档处理与知识库构建系统.md`
-> 基线：本仓 2026-10-24 `a5455024` 之后的实现（doc pipeline / WeCom / hybrid / Supervisor / tenant / eval）。
+> 基线：本仓 2026-10-24 d98f56c8 之后的实现（doc pipeline / WeCom / hybrid / Supervisor / tenant / eval）。
 > 本文是**升级计划**，不是实施授权；落地仍按 `AGENTS.md` 的先红后绿、A/B、live-verify、单任务单提交。
 
 ## 1. 结论

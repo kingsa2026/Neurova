@@ -17,7 +17,7 @@
 `_init_components`／工厂 `get_execution_engine()`，然后跑真 `create_app()` + lifespan + 真 HTTP 栈
 （5 个 monitor 端点、工具列表面、`POST /tool-layers/tools/execute`、neurflow 执行端点）。
 身份用生产签 token 函数 `create_access_token({'sub':…, 'role':'admin'})`（monitor 那三条要 `require_admin()`）。
-数据根走 `isolatedDataRoot()` 单点；探针落仓库根 `.tmp_*`，跑完即删，仓内 `data/` md5 复证不变（`d1ef4e99bd9f`）。
+数据根走 `isolatedDataRoot()` 单点；探针落仓库根 `.tmp_*`，跑完即删，仓内 `data/` md5 复证不变（d1ef4e99bd9f）。
 
 读数（原文）：
 
@@ -55,7 +55,7 @@ READOUT {'constructs': {'ExecutionEngine.__new__': 1, 'ExecutionEngine._init_com
   认 `execution_order` 或顺序跑 → `_execute_simple_plan`(:182) → `_execute_node`(:187) 分 `tool`/`workflow`/`condition`
   三种节点；`_evaluate_condition`(:225) 判条件；`_get_next_node`(:215) 取下一节点。
 - 关键入口：`ExecutionEngine.execute_plan:136`（全仓无第二处入口）。
-- 来历：`7835c367`(2026-06-04「pyc骨架恢复 - 全量导入修复」) 引入骨架，`806c7047`(2026-06-06「145 个文件」批量) 补体。
+- 来历：7835c367(2026-06-04「pyc骨架恢复 - 全量导入修复」) 引入骨架，806c7047(2026-06-06「145 个文件」批量) 补体。
   **形态＝引入即未接线**：`git grep "\.execute_plan(" 65309f6b -- 'neurova/*.py'` 只命中
   `multi_agent_manager.py:220` 的 `self._plan_orchestrator.execute_plan(...)`，那是**另一个类**（PlanOrchestrator），
   历史里从来没有一把经 `shared_core.ExecutionEngine` 调它。
@@ -84,7 +84,7 @@ READOUT {'constructs': {'ExecutionEngine.__new__': 1, 'ExecutionEngine._init_com
   取不到则回退实例内的 legacy `WorkflowEngine`（:341-372，meta `source="legacy"`），两边都没有 ⇒ `ValueError`（:343）。
   `_load_neurflow_workflow`(:426) 是那个"storage 可注入"的取数口。
 - 关键入口：`ExecutionEngine.execute_workflow:291`。
-- 来历：`53875590`(2026-09-04「并行批次落库 — OpenOcta/Utopia 启发落地一批」) **同一笔**里同时引入这段转发与
+- 来历：8cdbd34f(2026-09-04「并行批次落库 — OpenOcta/Utopia 启发落地一批」) **同一笔**里同时引入这段转发与
   它自己的契约测试 `tests/unit/workflow/test_engine_consolidation.py`（`git log --diff-filter=A` 复算同一 hash）。
   形态＝**自产自销**：`git grep "\.execute_workflow(" 806c7047 -- 'neurova/*.py'` 只命中本文件 :207 的**内部**调用
   （`_execute_node`，而它属 A1 死路）；生产侧从来没有外部调用者，探针读数 `execute_workflow: 0` 亦同向。
@@ -108,8 +108,8 @@ READOUT {'constructs': {'ExecutionEngine.__new__': 1, 'ExecutionEngine._init_com
 - 原功能：`ExecutionResult` dataclass（:32-77，含 `to_dict`/`from_dict`）＋ `_executions` 字典 ＋
   `get_execution_result`(:374)/`list_executions`(:378)/`cancel_execution`(:390) 三个读口。
 - 关键入口：写侧只有 A1/A2/A3 三处；读侧就是这三个。
-- 来历：同 A1。`get_execution_result` 的字符串在历史里变过号：`66cfa0fb`(2026-09-29 T-09 死码处置批) 与
-  `1a5ea211`(2026-09-23 T-01 判据基础设施) ——那是**别模块同名符号**的变动，本类的读口从未被外部取用。
+- 来历：同 A1。`get_execution_result` 的字符串在历史里变过号：4561fbd1(2026-09-29 T-09 死码处置批) 与
+  b52acab5(2026-09-23 T-01 判据基础设施) ——那是**别模块同名符号**的变动，本类的读口从未被外部取用。
 - 现役替代：执行记录这件事在本仓的真落点是 `core/agent_run_ledger`（运行台账）与 neurflow 的 `event_recorder`／
   `checkpoint`；这份进程内 dict 既非单源也不落盘。三个读口 import 通道复算全 0。
   **同名陷阱**：`ExecutionResult` 在 `neurova/execution_layers/__init__.py:96` 有**另一个类**，
@@ -134,11 +134,11 @@ READOUT {'constructs': {'ExecutionEngine.__new__': 1, 'ExecutionEngine._init_com
 
 | 事件 | 形态 | 本档案里落在哪 |
 |---|---|---|
-| `7835c367`(2026-06-04) pyc 骨架恢复 | 从 .pyc 反推全量导入，骨架即未接线 | A1/A2/A4/A5 的出生 |
-| `806c7047`(2026-06-06) 145 文件批量更新 | 批量补体，从不接消费方 | A1/A2 补全 |
-| `53875590`(2026-09-04) 并行批次落库 | 转发 shim 与它自己的契约测试**同笔**入库 | A3 自产自销 |
-| `4a3c9380`(2026-09-04) 解除 `tests/` 整目录忽略、809 测试入库 | 私人笔记形状升格为"看起来有覆盖" | `shared_brainstem` 那类 test-only 面（见 D3） |
-| `efa1bae0`(2026-10-12) 三套零接线编排器退役（§6-157/§6-166） | **只删了消费方，留下被孤立的实现** | D3：`multi_agent_manager` 仍留注入参数与 docstring 宣称 |
+| 7835c367(2026-06-04) pyc 骨架恢复 | 从 .pyc 反推全量导入，骨架即未接线 | A1/A2/A4/A5 的出生 |
+| 806c7047(2026-06-06) 145 文件批量更新 | 批量补体，从不接消费方 | A1/A2 补全 |
+| 8cdbd34f(2026-09-04) 并行批次落库 | 转发 shim 与它自己的契约测试**同笔**入库 | A3 自产自销 |
+| 6bff43f2(2026-09-04) 解除 `tests/` 整目录忽略、809 测试入库 | 私人笔记形状升格为"看起来有覆盖" | `shared_brainstem` 那类 test-only 面（见 D3） |
+| 2a50f542(2026-10-12) 三套零接线编排器退役（§6-157/§6-166） | **只删了消费方，留下被孤立的实现** | D3：`multi_agent_manager` 仍留注入参数与 docstring 宣称 |
 
 清退顺序建议按事件反向：先收 shared_core（A1-A5），再收它牵出的 legacy 模块（A3 乙），最后收
 `multi_agent_manager` 那条恒不命中支路（D3，独立一批）。
@@ -153,7 +153,7 @@ READOUT {'constructs': {'ExecutionEngine.__new__': 1, 'ExecutionEngine._init_com
 - **D3 · `MultiAgentManager` 是一个没有调用方的共享组件壳**。`initialize_shared_components`(:97) 全仓零调用
   （只有测试类名 `TestInitializeSharedComponents` 提到）；`_plan_orchestrator` 恒 None ⇒ `:221-223` 那条
   "共享小脑执行"支路恒不命中；而 `:6` 的 docstring 仍宣称"所有 Agent 共用 PlanOrchestrator（小脑）、
-  ExecutionEngine（脑干）和 Infrastructure（脊髓）"。`shared_brainstem` 只存在于 `4a3c9380` 那次批量入库的测试里。
+  ExecutionEngine（脑干）和 Infrastructure（脊髓）"。`shared_brainstem` 只存在于 6bff43f2 那次批量入库的测试里。
   ⇒ 散文陈述与实状不符 ＋ 恒不命中支路，另批处理。
 - **D4 · `neurova/tool_executor.py:5602` docstring 与代码不符**（批 73 已登记，此处只作同族互引）。
 - **D5 · `neurova/core/flow_orchestrator.py` 在 `neurova/` 内零引用**（**未深扫**，见第 7 节）。
