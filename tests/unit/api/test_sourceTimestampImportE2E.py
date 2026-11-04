@@ -62,7 +62,7 @@ async def test_importCarriesSourceDatesFromDocxMetadata(repo):
     )
     result = await kb.import_knowledge_file(
         _FakeUpload("活体报告.docx", data), request=None,
-        current_user={"user_id": "u1"}, agent_id="a1")
+        current_user={"user_id": "u1"}, agent_id="a1", source_path="docs/活体报告.docx")
     items = result["data"]["items"]
 
     assert items, "导入失败"
@@ -92,11 +92,11 @@ async def test_reimportWithLaterModifiedUpdatesInPlace(repo):
     )
     first = await kb.import_knowledge_file(
         _FakeUpload("活体报告.docx", v1), request=None,
-        current_user={"user_id": "u1"}, agent_id="a1")
+        current_user={"user_id": "u1"}, agent_id="a1", source_path="docs/活体报告.docx")
     first = first["data"]["items"]
     second = await kb.import_knowledge_file(
         _FakeUpload("活体报告.docx", v2), request=None,
-        current_user={"user_id": "u1"}, agent_id="a1")
+        current_user={"user_id": "u1"}, agent_id="a1", source_path="docs/活体报告.docx")
     second = second["data"]["items"]
 
     assert second[0].get("source_updated") is True, "改时间重导未走更新重入库"

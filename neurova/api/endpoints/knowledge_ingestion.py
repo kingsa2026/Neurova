@@ -158,6 +158,7 @@ async def import_knowledge_file(
     ocr: str = Query(default="auto", description="auto=仅对无文字层页面 OCR；on=强制 OCR；off=禁用"),
     engine: str = Query(default="", pattern="^(structured|legacy)?$",
                         description="structured=页码/标题/OCR 流水线；legacy=旧单段抽取（回退）；空=读 NEUROVA_KB_DOC_PIPELINE"),
+    source_path: str = Query(default="", description="客户端可提供的真实路径；缺省用文件名（裸文件名不触发同源更新）"),
 ):
     """导入知识文件（txt/md/docx/xlsx/pptx/pdf/html/csv）。
 
@@ -167,6 +168,8 @@ async def import_knowledge_file(
     异步路径不做图谱抽取，结果标 skipped_async）。
     """
     filename = file.filename or "imported"
+    # 直接调用（测试/内部）时未传该参会是 FastAPI Query 默认对象，不能当字符串用。
+    sourcePath = source_path if isinstance(source_path, str) else ""
     data = await file.read()
     if not sync:
         from neurova.knowledge.ingest_queue import get_ingress_queue
@@ -178,7 +181,7 @@ async def import_knowledge_file(
         return {"code": 0, "message": "Queued", "data": {"task_id": task["task_id"], "status": task.get("status"), "replayed": task.get("replayed", False)}}
     items, extract_status = _import_file_data(
         data, filename, agent_id, current_user, ocr_mode=ocr,
-        engine_mode=engine,
+        engine_mode=engine, source_path=sourcePath,
     )
     if not items:
         # 2026-09-06 修复：抽取失败显式化——此前以成功语义静默返回空列表，
@@ -198,7 +201,7 @@ async def import_knowledge_file(
 
 def _import_file_data(
     data: bytes, filename: str, agent_id: str, user: Dict[str, Any],
-    ocr_mode: str = "auto", engine_mode: str = "",
+    ocr_mode: str = "auto", engine_mode: str = "", source_path: str = "",
 ) -> Tuple[List[Dict[str, Any]], str]:
     engine_mode = engine_mode or os.environ.get(
         "NEUROVA_KB_DOC_PIPELINE", "structured"
@@ -207,7 +210,7 @@ def _import_file_data(
 
     try:
         parsed = parse_document(
-            data, filename, source_path=filename, ocr_mode=ocr_mode,
+            data, filename, source_path=source_path or filename, ocr_mode=ocr_mode,
             engine_mode=engine_mode,
         )
     except DocumentParseError as exc:
@@ -220,6 +223,9 @@ def _import_file_data(
     repo = get_repository()
     srcCreated, srcModified = resolveSourceDates(
         parsed.metadata, ingest_time=str(parsed.ingest_time or ""))
+    # 元数据缺失时 modified 是用入库时刻顶替的回退钟，不能当"源修改时间"
+    # 去触发 TB 覆盖（P2-5）。
+    srcModifiedEstimated = not str(parsed.metadata.get("modified_at") or "").strip()
     title = str(parsed.metadata.get("title") or _title_from_filename(filename))
     item = repo.create_knowledge(
         agent_id=agent_id,
@@ -250,6 +256,7 @@ def _import_file_data(
         dedupe=True,
         source_created_at=srcCreated,
         source_modified_at=srcModified,
+        source_modified_estimated=srcModifiedEstimated,
     )
     return [_build_item_dict(item)], parsed.source_type
 
@@ -264,6 +271,20 @@ def _title_from_url(url: str) -> str:
     path = parsed.path.rstrip("/") or "root"
     name = path.rsplit("/", 1)[-1]
     return name[:64] or parsed.netloc or "Web Page"
+
+
+def _filename_for_url(url: str) -> str:
+    """网页抓取的解析文件名：真实扩展名优先，无扩展名补 .html。
+
+    parse_document 按文件名扩展分派；URL 末段常是 `article` 这种无扩展名形态，
+    直接用标题（无扩展）会判 unsupported_format——线上 /import-url 因此对
+    大多数网页恒失败。source_path 仍用真实 URL（P2-5）。
+    """
+    parsed = urllib.parse.urlparse(url)
+    name = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+    if name and "." in name:
+        return name
+    return _title_from_url(url) + ".html"
 
 
 def _fetch_url(url: str) -> bytes:
@@ -306,7 +327,9 @@ async def import_knowledge_url(
     # items 实为 (list, status) 元组——抽取失败仍返回 code=0 谎报成功，且
     # data.items 形状是 [条目列表, 状态串]（前端消费 items[0] 才碰巧对）。
     # 与 /import 对齐：解包 + 失败显式 code=1。
-    items, extract_status = _import_file_data(data, _title_from_url(url), agent_id, current_user)
+    items, extract_status = _import_file_data(
+        data, _filename_for_url(url), agent_id, current_user, source_path=url,
+    )
     if not items:
         return {
             "code": 1,

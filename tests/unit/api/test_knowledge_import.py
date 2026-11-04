@@ -276,6 +276,33 @@ class TestImportUrl:
         assert len(items) == 1
         assert "Remote body content" in items[0]["content"]
 
+    @pytest.mark.asyncio
+    async def test_import_url_uses_real_url_as_source_path(self, monkeypatch, tmp_path):
+        """P2-5：URL 导入的 source_path 必须是真实 URL，不能是页面标题。
+
+        用标题当锚点会让两个同标题网页互相覆盖（TB 凭钟更晚覆盖对方正文）。
+        """
+        from neurova.knowledge.repository import KnowledgeRepository
+
+        repo = KnowledgeRepository(str(tmp_path / "kb"))
+        repo._items.clear()
+        monkeypatch.setattr(kb_ingestion, "get_repository", lambda agent_id="default": repo)
+        monkeypatch.setattr(kb_core, "get_repository", lambda agent_id="default": repo)
+        monkeypatch.setattr(kb_ingestion, "validate_public_http_url", lambda url: True)
+        html = b"<html><body><h1>Remote Title</h1><p>Remote body content</p></body></html>"
+        monkeypatch.setattr(kb_ingestion, "_fetch_url", lambda url: html)
+        monkeypatch.setattr(kb_ingestion, "_try_extract_to_graph", lambda *a, **k: None)
+
+        result = await kb_ingestion.import_knowledge_url(
+            request=None, current_user={"user_id": "u1"}, agent_id="default",
+            url="https://example.com/article", sync=True,
+        )
+        assert result["code"] == 0, result
+        item = repo._items["default"][0]
+        assert item["source_path"] == "https://example.com/article", (
+            f"URL 导入用标题当了 source_path：{item['source_path']!r}"
+        )
+
 
 class TestListPaginationContract:
     """2026-09-06 分页契约修复：GET /knowledge 此前只认 limit/offset，
