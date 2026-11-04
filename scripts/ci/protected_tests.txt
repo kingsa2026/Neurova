@@ -4228,3 +4228,6 @@ tests/unit/knowledge/test_shardRevisionInvalidatesOtherProcessCache.py
 # 与"两个落点根都要量"（只量最终根＝放行后照样炸），另带不误伤的正对照。
 # 逐文件单跑 5 passed
 tests/unit/skills/test_pathBudgetAdmitsTheDirectoryRoute.py
+# §6-519：内置包的池内缓存先与随包 zip 对表才准当安装源——五格钉"取源层不查 catalog"、
+# "一致时不许重解"、"非内置条目一字不动"，反向各钉自己的失效态。逐文件单跑 5 passed
+tests/unit/skills/test_builtinCacheIsCheckedAgainstItsBundle.py
