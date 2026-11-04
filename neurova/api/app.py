@@ -69,6 +69,8 @@ class AppState:
         # 入站持久队列常驻消费者：与 kb_index_task 同一启停纪律。
         self.kb_ingest_task = None
         self.kb_ingest_mqtt_task = None
+        # 协作 Outbox 排空循环：与上面两条同一启停纪律（关停时 cancel 并等待）。
+        self.outbox_drain_task = None
         self.start_time: float = time.time()
         self.config: Dict[str, Any] = {}
         self._lock = threading.RLock()
@@ -1007,6 +1009,27 @@ async def _on_startup(app_state: AppState) -> None:
         except Exception as _kbIndexErr:  # noqa: BLE001
             logger.warning("知识索引周期维护启动失败（忽略）: %s", _kbIndexErr)
 
+    # 协作 Outbox 出件口接线：注册投递器 + 排空循环。
+    # 此前 `_handlers` 全仓零生产注册方（只有 register_handler 一处写），于是任何生命周期
+    # 事件唯一的结局是按退避重试到过期、落进 dead-letter/——"重投"其实从不发生。
+    # 注册这一步先做且独立于循环开关：它让人手调 `/outbox/process-pending` 那条腿也真投得出去。
+    try:
+        from neurova.collaboration.outbox_delivery import (
+            drainIntervalSeconds,
+            registerOutboxHandlers,
+            runOutboxDrainLoop,
+        )
+
+        registerOutboxHandlers()
+        if (os.environ.get("NEUROVA_OUTBOX_DRAIN") or "on").strip().lower() != "off":
+            app_state.outbox_drain_task = asyncio.create_task(runOutboxDrainLoop())
+            app_state.outbox_drain_task.add_done_callback(
+                lambda t: t.exception() if not t.cancelled() else None
+            )
+            logger.info("协作 Outbox 排空循环已启动（间隔 %ss）", drainIntervalSeconds())
+    except Exception as _outboxErr:  # noqa: BLE001 - 出件口故障不阻断启动，但必须留痕
+        logger.warning("协作 Outbox 出件口接线失败（忽略）: %s", _outboxErr)
+
     # 知识入站队列常驻消费者（默认 5s；NEUROVA_KB_INGEST_WORKER=off 停用）。
     if (os.environ.get("NEUROVA_KB_INGEST_WORKER") or "on").strip().lower() != "off":
         try:
@@ -1461,6 +1484,22 @@ async def _on_shutdown(app_state: AppState) -> None:
         except Exception as e:  # noqa: BLE001 - 任务内部已 fail-soft，此处只收结果
             logger.debug("知识索引周期维护任务收尾异常: %s", e)
     app_state.kb_index_task = None
+
+    # 收敛协作 Outbox 排空循环：与知识索引同一启停纪律，不留没人等待的常驻 task。
+    outboxDrainTask = app_state.outbox_drain_task
+    if outboxDrainTask is not None and not outboxDrainTask.done():
+        outboxDrainTask.cancel()
+        try:
+            await asyncio.wait_for(outboxDrainTask, timeout=AGENT_SHUTDOWN_TIMEOUT)
+        except asyncio.CancelledError:
+            logger.info("协作 Outbox 排空循环已取消（进入关停）")
+        except asyncio.TimeoutError:
+            logger.warning(
+                "协作 Outbox 排空循环取消超时（%.1fs），跳过", AGENT_SHUTDOWN_TIMEOUT
+            )
+        except Exception as e:  # noqa: BLE001 - 循环内部已 fail-soft，此处只收结果
+            logger.debug("协作 Outbox 排空循环收尾异常: %s", e)
+    app_state.outbox_drain_task = None
 
     kbIngestTask = app_state.kb_ingest_task
     if kbIngestTask is not None and not kbIngestTask.done():
