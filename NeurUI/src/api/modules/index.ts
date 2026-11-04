@@ -9,6 +9,7 @@
 export * as skillPool from './skill-pool'
 export * as experience from './experience'
 export * as knowledge from './knowledge'
+export * as knowledgeEval from './knowledgeEval'
 export * as generation from './generation'
 export * as sharedConfig from './shared-config'
 export * as plugins from './plugins'

@@ -1,5 +1,6 @@
 import { STORE_CANVAS } from './_canvasStores'
 
+import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSection'
 export default {
   common: {
     markAllRead: 'Tout marquer comme lu',
@@ -81,6 +82,7 @@ export default {
     chat: 'Discussion',
     memory: 'Mémoire',
     knowledge: 'Base de connaissances',
+    knowledgeEval: "Console d'évaluation",
     skills: 'Compétences',
     models: 'Modèles',
     tools: 'Outils',
@@ -797,6 +799,9 @@ export default {
     keepBoth: 'Garder les deux',
     manual: 'Appel humain',
   },
+
+
+  knowledgeEval: knowledgeEvalSection('fr-FR'),
 
 
   knowledge: {

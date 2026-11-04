@@ -333,6 +333,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/KnowledgePage.vue'),
       },
       {
+        path: 'knowledge-eval',
+        name: 'KnowledgeEval',
+        component: () => import('@/pages/KnowledgeEvalPage.vue'),
+      },
+      {
         path: 'memory/search-settings',
         name: 'MemorySearchSettings',
         component: () => import('@/pages/MemorySearchSettingsPage.vue'),

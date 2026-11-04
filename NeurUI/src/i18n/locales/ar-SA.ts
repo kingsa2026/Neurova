@@ -1,5 +1,6 @@
 import { STORE_CANVAS } from './_canvasStores'
 
+import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSection'
 export default {
   common: {
     markAllRead: 'وضع علامة مقروء على الكل',
@@ -81,6 +82,7 @@ export default {
     chat: 'المحادثة',
     memory: 'الذاكرة',
     knowledge: 'قاعدة المعرفة',
+    knowledgeEval: 'وحدة التقييم',
     skills: 'المهارات',
     models: 'النماذج',
     tools: 'الأدوات',
@@ -797,6 +799,9 @@ export default {
     keepBoth: 'إبقاء الاثنين',
     manual: 'يحتاج قرارًا بشريًا',
   },
+
+
+  knowledgeEval: knowledgeEvalSection('ar-SA'),
 
 
   knowledge: {

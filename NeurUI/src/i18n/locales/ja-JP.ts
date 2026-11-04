@@ -1,5 +1,6 @@
 import { STORE_CANVAS } from './_canvasStores'
 
+import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSection'
 export default {
   common: {
     markAllRead: 'すべて既読にする',
@@ -81,6 +82,7 @@ export default {
     chat: 'チャット',
     memory: 'メモリ',
     knowledge: 'ナレッジベース',
+    knowledgeEval: '評価コンソール',
     skills: 'スキル',
     models: 'モデル',
     tools: 'ツール',
@@ -797,6 +799,9 @@ export default {
     keepBoth: '双方維持',
     manual: '人間判断',
   },
+
+
+  knowledgeEval: knowledgeEvalSection('ja-JP'),
 
 
   knowledge: {

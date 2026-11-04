@@ -1,5 +1,6 @@
 import { STORE_CANVAS } from './_canvasStores'
 
+import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSection'
 export default {
   common: {
     markAllRead: 'सभी को पढ़ा हुआ चिह्नित करें',
@@ -81,6 +82,7 @@ export default {
     chat: 'चैट',
     memory: 'मेमोरी',
     knowledge: 'ज्ञान आधार',
+    knowledgeEval: 'मूल्यांकन कंसोल',
     skills: 'कौशल',
     models: 'मॉडल',
     tools: 'उपकरण',
@@ -797,6 +799,9 @@ export default {
     keepBoth: 'दोनों रखें',
     manual: 'मानव निर्णय',
   },
+
+
+  knowledgeEval: knowledgeEvalSection('hi-IN'),
 
 
   knowledge: {

@@ -1,5 +1,6 @@
 import { STORE_CANVAS } from './_canvasStores'
 
+import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSection'
 export default {
   common: {
     markAllRead: 'Mark all read',
@@ -81,6 +82,7 @@ export default {
     chat: 'Chat',
     memory: 'Memory',
     knowledge: 'Knowledge',
+    knowledgeEval: 'Eval Console',
     skills: 'Skills',
     models: 'Models',
     tools: 'Tools',
@@ -799,6 +801,7 @@ export default {
     keepBoth: 'Keep both',
     manual: 'Needs a human',
   },
+  knowledgeEval: knowledgeEvalSection('en-US'),
   knowledge: {
     mcpArgsInvalid: 'Tool args must be valid JSON',
     mcpArgsJson: 'Tool args JSON',

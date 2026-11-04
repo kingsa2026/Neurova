@@ -1,5 +1,6 @@
 import { STORE_CANVAS } from './_canvasStores'
 
+import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSection'
 export default {
   common: {
     markAllRead: 'Отметить все как прочитанные',
@@ -81,6 +82,7 @@ export default {
     chat: 'Чат',
     memory: 'Память',
     knowledge: 'База знаний',
+    knowledgeEval: 'Консоль оценки',
     skills: 'Навыки',
     models: 'Модели',
     tools: 'Инструменты',
@@ -797,6 +799,9 @@ export default {
     keepBoth: 'Оставить обе',
     manual: 'Нужен человек',
   },
+
+
+  knowledgeEval: knowledgeEvalSection('ru-RU'),
 
 
   knowledge: {
