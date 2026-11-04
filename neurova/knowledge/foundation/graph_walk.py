@@ -30,6 +30,8 @@ from .temporal_facts import subjectsMentionedIn
 GRAPH_RETRIEVER_ENV = "NEUROVA_KB_GRAPH_RETRIEVER"
 _OFF_VALUES = ("0", "false", "off", "no")
 _MAX_HOPS_CEILING = 4
+#: 零子串锚点时的种子锚点上限（N3 接线）：兜底召回不放开到全图
+SEED_ANCHOR_CAP = 3
 
 
 @dataclass
@@ -78,6 +80,8 @@ class GraphFactWalker:
             self._store, query or "", self._agentId, tenantId
         )
         if not anchors:
+            anchors = self._seedAnchors(query or "", tenantId)
+        if not anchors:
             return []
         moment = (now or datetime.datetime.now(datetime.timezone.utc)).astimezone(
             datetime.timezone.utc)
@@ -87,6 +91,32 @@ class GraphFactWalker:
         ]
 
     # ── 内部 ──────────────────────────────────────────────────
+
+    def _seedAnchors(self, query: str, tenantId: Optional[str]) -> List[str]:
+        """零子串锚点时的 BM25 事实种子兜底（SAG 对比 N3 接线，2026-11-05）。
+
+        subjectsMentionedIn 是「这条查询在问谁」的强判据（时效读面与走查共用，
+        不动）；但换说法/未登记别名的查询会零锚点，多跳走查整路空转。事实池
+        BM25（FactSurface.search）在词法不精确时仍能召回相关事实行，其主体即
+        种子锚点。受 NEUROVA_KB_FACT_SURFACE 闸门控：闸关返回空列表，行为逐位
+        等于旧行为；仅在强判据零命中时调用，强判据优先地位不变。
+        """
+        try:
+            from .read_surface import FactSurface
+
+            surface = FactSurface(self._store)
+            hits = surface.search(
+                query, limit=SEED_ANCHOR_CAP, agentId=self._agentId,
+                tenantId=tenantId,
+            )
+        except Exception:  # noqa: BLE001 - 种子失败让路，走查空手而归（旧行为）
+            return []
+        keys: List[str] = []
+        for hit in hits:
+            key = str(hit.get("subject_key") or "")
+            if key and key not in keys:
+                keys.append(key)
+        return keys[:SEED_ANCHOR_CAP]
 
     def _walk(self, anchors: List[str], maxHops: int, limit: int,
               now: datetime.datetime, tenantId: Optional[str] = None) -> List[Any]:

@@ -42,9 +42,15 @@ class FactSurfaceConfig:
 
 
 def factToItem(fact: Dict[str, Any], canonicalLabel: str) -> Dict[str, Any]:
-    """事实 → 检索条目形状（同一形状的 id 才能与叙述命中一起排序）。"""
+    """事实 → 检索条目形状（同一形状的 id 才能与叙述命中一起排序）。
+
+    `subject_key`/`subject_label` 供图走查种子锚点使用（N3 接线）：
+    命中事实行的主体即「这条查询在问谁」的兜底候选。
+    """
     return {
         "knowledge_id": fact["fact_id"],
+        "subject_key": str(fact.get("subject_key") or ""),
+        "subject_label": str(canonicalLabel or ""),
         "title": "%s · %s" % (canonicalLabel, fact["object_term"]),
         "content": fact.get("content") or "%s %s %s" % (
             canonicalLabel, fact["predicate_term_id"], fact["object_term"]),
