@@ -46,6 +46,13 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+# 与 start.py 同一条：安装器全程念中文进度，cp936 控制台上一句 print 就能把它自己打断。
+# 钉 stdout 归进程所有者（这两个入口档），被 import 的 `scripts/*` 显示面不各自钉。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # 项目根（本脚本可能被任意解释器等 cwd 调用，一切相对路径都锚在它上面）
 PROJECT_ROOT = Path(__file__).parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
