@@ -157,6 +157,22 @@ def isBlocking(finding: "Finding", policy: ScanPolicy = ScanPolicy.DENY) -> bool
     return isDenyBearing(finding) and finding.severity in BLOCKING_SEVERITIES[policy]
 
 
+def findingLocator(finding: Dict[str, Any]) -> str:
+    """一条命中的人读定位：`包内路径:行号`；只有路径就给路径，两者都缺给空串。
+
+    拒因与拦截文本**只经这一个函数**取定位（§6-511 的下游缺口）：字段一直在 `Finding` 里
+    （内容扫描两处都填 `file_path`＋`line_number`），丢在出口——出口各处自己拼文本时只念
+    `rule_id`，于是「到底哪一行触发」追不到，只能回头怪自己 grep 口径窄。
+    路径按本模块口径是**相对技能根**的：绝对路径换台机器就换值，不是产物的身份，
+    也不该念进面向用户的文本。
+    """
+    path = str(finding.get("file_path") or "")
+    if not path:
+        return ""
+    line = finding.get("line_number")
+    return "%s:%s" % (path, line) if line is not None else path
+
+
 def blockingFindings(result: "ScanResult") -> List["Finding"]:
     """这次扫描里实际决定结果的条目——**拒因文本只能由它生成**（§6-259）。
 
@@ -741,7 +757,9 @@ class SkillScanner:
             try:
                 content = file_path.read_text(encoding="utf-8", errors="ignore")
                 sf = SkillFile(
-                    path=str(file_path),
+                    # 定位口径＝相对技能根 posix（单源）：`SkillFile.path` 在仓内从不被当文件系统
+                    # 路径打开，它是「包内哪个文件」——绝对路径换台机器就换值，念进拒因还泄机器目录。
+                    path=file_path.relative_to(root).as_posix(),
                     content=content,
                     file_type=file_path.suffix,
                 )
@@ -778,10 +796,13 @@ class SkillScanner:
 
         for file_path in allPaths:
             rel = file_path.relative_to(root)
+            relPosix = rel.as_posix()
             name = file_path.name.lower()
             suffix = file_path.suffix.lower()
-            if str(file_path) not in scannedPaths:
-                unscanned.append(rel.as_posix())
+            # 对账两侧同一个口径（都是相对技能根 posix）——一面绝对一面相对时，
+            # 「没被读过」会把读过的文件一起报进来（§6-495 那族「先怀疑自己的量法」）。
+            if relPosix not in scannedPaths:
+                unscanned.append(relPosix)
 
             if suffix in EXECUTABLE_SUFFIXES:
                 findings.append(Finding(
@@ -789,7 +810,7 @@ class SkillScanner:
                     severity="high",
                     category=ARTIFACT_NAME_CATEGORY,
                     message=f"技能包含可执行产物: {rel.as_posix()}",
-                    file_path=str(file_path),
+                    file_path=relPosix,
                     suggestion="技能包只应携带源码与资产，二进制产物无法审计",
                 ))
                 continue
@@ -807,7 +828,7 @@ class SkillScanner:
                     severity="high",
                     category=ARTIFACT_NAME_CATEGORY,
                     message=f"技能包含{reason}: {rel.as_posix()}",
-                    file_path=str(file_path),
+                    file_path=relPosix,
                     suggestion="安装前移除凭据与私钥文件（技能包不得携带用户密钥）",
                 ))
 

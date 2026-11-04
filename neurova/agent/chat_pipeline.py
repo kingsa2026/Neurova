@@ -1380,16 +1380,22 @@ class ChatPipeline:
                         # P1-6：合成产物注册前过提示注入扫描（用户输入即描述，
                         # 注入内容可借 NL 合成进入工具清单——fail-closed）
                         from neurova.skills.skill_install_gate import scan_text_for_injection
+                        from neurova.security.skill_scanner import findingLocator
 
                         _scan = scan_text_for_injection(
                             f"{getattr(tool, 'name', '')} {getattr(tool, 'description', '')}",
                             source=f"nl_synthesis:{getattr(tool, 'name', '')}",
                         )
                         if _scan["blocked"]:
+                            blockedHits = []
+                            for hit in _scan["findings"][:3]:
+                                locator = findingLocator(hit)
+                                blockedHits.append(
+                                    hit.get("rule_id", "") + ("@" + locator if locator else ""))
                             logger.warning(
                                 "NL工具合成被注入扫描拦截: %s (%s)",
                                 getattr(tool, 'name', ''),
-                                "; ".join(f.get("rule_id", "") for f in _scan["findings"][:3]),
+                                "; ".join(blockedHits),
                             )
                             return
                         logger.info(

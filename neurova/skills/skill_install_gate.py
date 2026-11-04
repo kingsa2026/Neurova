@@ -154,15 +154,21 @@ def scan_skill_for_install(skill_id: str, skill_path: str) -> Dict[str, Any]:
     if not result.passed:
         # 拒因只念**实际决定这次拒绝**的条目（口径在 `blockingFindings` 一处，本函数不再自写阈值）。
         # 旧版取 `findings[:5]`，于是"拒因"里混着不参与裁决的读数——读的人会照着去改资产文档。
-        from neurova.security.skill_scanner import blockingFindings
+        from neurova.security.skill_scanner import blockingFindings, findingLocator
 
         blocking = [f.to_dict() for f in blockingFindings(result)]
         blocked_by = [f.get("rule_id") for f in blocking]
         logger.warning("技能 %s 安装被安全门拦截: %s", skill_id, blocked_by)
-        reasons = "; ".join(
-            "{}({}): {}".format(f.get("severity") or "?", f.get("rule_id") or "?",
-                                 f.get("message") or f.get("rule_id") or "")
-            for f in blocking) or "无参与裁决的条目（读数与裁决口径不一致，按严拒绝）"
+        # 每条都带定位（`包内路径:行号`，格式化单点在 `findingLocator`）：字段一直在 Finding 里，
+        # 旧出口只念 severity/rule_id/message ⇒「哪一行触发 dangerous_exec」从拒因追不到（§6-511）。
+        parts = []
+        for f in blocking:
+            locator = findingLocator(f)
+            parts.append("{}({}){}: {}".format(
+                f.get("severity") or "?", f.get("rule_id") or "?",
+                "@" + locator if locator else "",
+                f.get("message") or f.get("rule_id") or ""))
+        reasons = "; ".join(parts) or "无参与裁决的条目（读数与裁决口径不一致，按严拒绝）"
         return {
             "passed": False,
             "blocked": True,
