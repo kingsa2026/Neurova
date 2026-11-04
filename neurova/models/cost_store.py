@@ -244,6 +244,7 @@ class LlmCostStore:
                 ).fetchall()
             return [dict(r) for r in rows]
         except Exception:
+            logger.debug("成本 rollup 区间查询失败（返回空）", exc_info=True)
             return []
 
     def query_hourly_trend(self, hours: int = 24) -> List[Dict[str, Any]]:
@@ -267,6 +268,7 @@ class LlmCostStore:
                 ).fetchall()
             return [dict(r) for r in rows]
         except Exception:
+            logger.debug("成本小时趋势查询失败（返回空）", exc_info=True)
             return []
 
     def query_daily_cost(self, days: int = 30) -> List[Dict[str, Any]]:
@@ -290,6 +292,7 @@ class LlmCostStore:
                 ).fetchall()
             return [dict(r) for r in rows]
         except Exception:
+            logger.debug("成本日汇总查询失败（返回空）", exc_info=True)
             return []
 
     def current_hour_summary(self) -> Dict[str, Any]:
@@ -311,6 +314,7 @@ class LlmCostStore:
                 ).fetchone()
             return dict(row) if row else {}
         except Exception:
+            logger.debug("当前小时成本概览查询失败（返回空）", exc_info=True)
             return {}
 
     def get_agent_cost(
@@ -339,6 +343,7 @@ class LlmCostStore:
                 "total_cost": sum(float(s["total_cost"] or 0) for s in summary),
             }
         except Exception:
+            logger.debug("agent 成本查询失败（返回空）", exc_info=True)
             return {"agent_id": agent_id, "summary": [], "total_cost": 0.0}
 
 
