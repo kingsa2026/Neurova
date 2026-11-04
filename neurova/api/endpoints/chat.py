@@ -303,9 +303,11 @@ async def chat(
         # 通道，于是渠道路径里"会话属主"（router 写的 owner）在回合内被换成"发送者"——
         # `mem_core.save_to_session` 只读这条通道，渠道会话因此不再落进属主的控制台。
         # 两边取的是同一个 `user_id`（上面那行），同源、单点、无第二写方。
+        from neurova.core.build_context import setCurrentBuildSessionId
         from neurova.core.identity_context import set_request_user_id
 
         set_request_user_id(user_id)
+        setCurrentBuildSessionId((getattr(body, "metadata", None) or {}).get("build_session_id"))
         # 角色透传：知识库检索链的 admin 全可见依赖 role（隔离语义与 API 层一致）
         call_metadata["role"] = role
         call_metadata["tenant_id"] = str(current_user.get("tenant_id") or "default")
@@ -479,9 +481,11 @@ async def chat_stream(
         # task 在创建时复制当前上下文，放在端点顶部反而不保证被 `run_chat` 那条 task 看到。
         call_metadata["user_id"] = user_id
         call_metadata["tenant_id"] = str(current_user.get("tenant_id") or "default")
+        from neurova.core.build_context import setCurrentBuildSessionId
         from neurova.core.identity_context import set_request_user_id
 
         set_request_user_id(user_id)
+        setCurrentBuildSessionId((getattr(body, "metadata", None) or {}).get("build_session_id"))
 
         async def _gateWaitNotice(*, attempt: int, waitSeconds: float, reason: str) -> None:
             # 等待预算（默认 10×20s）远超租约 90s：每次入睡前强制续租，并把进度

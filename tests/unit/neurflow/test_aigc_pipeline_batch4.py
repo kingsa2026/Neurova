@@ -131,7 +131,7 @@ class TestCanvasBridgeSyncAdapters:
 
         reset_node_registry()
         try:
-            known = canvas_bridge._known_node_types()
+            known = canvas_bridge.known_node_types()
             assert "builtin:storyboard" in known
             assert "builtin:short-drama-script" in known
         finally:

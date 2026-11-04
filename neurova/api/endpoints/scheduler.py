@@ -193,6 +193,12 @@ async def create_task(
         # 设置描述
         task.description = body.description
 
+        # 新任务落库后立即拉起调度线程（空载不占轮询；此前只落库不 start，
+        # 定时任务永远等不到自己的 next_run_at）
+        from neurova.collaborate.workflow.scheduler import ensure_scheduler_running
+
+        ensure_scheduler_running(scheduler)
+
         return ScheduledTaskResponse(
             task_id=task.task_id,
             name=task.name,

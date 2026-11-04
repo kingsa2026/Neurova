@@ -338,6 +338,8 @@ const emit = defineEmits<{
   sendQueuedNow: [id: string]
   /** /plan 斜杠命令（页面持有 planPanelOpen/planRequestSeed） */
   slashPlan: [seed: string]
+  /** /build 斜杠命令（打开构建就绪门面板） */
+  slashBuild: [seed: string]
   /** /compact 斜杠命令（页面经 sendMessage 原链路发往后端命令分发） */
   slashCompact: []
 }>()
@@ -405,7 +407,11 @@ function onToggleAutoVoice(): void {
 
 
 // ── 斜杠命令面板（共享单例；命令注册表在本组件 setup 内组装）────
-setupSlashCommands((seed) => emit('slashPlan', seed), () => emit('slashCompact'))
+setupSlashCommands(
+  (seed) => emit('slashPlan', seed),
+  () => emit('slashCompact'),
+  (seed) => emit('slashBuild', seed),
+)
 const { slashOpen, slashIndex, slashFiltered, runSlashCommand, onSlashKeydown, onSlashInput, closeSlashPanel } =
   useSlashCommands()
 

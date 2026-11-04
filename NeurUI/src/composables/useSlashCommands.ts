@@ -91,6 +91,7 @@ function onSlashKeydown(e: KeyboardEvent): boolean {
 export function setupSlashCommands(
   openPlanPanel: (seed: string) => void,
   onCompact?: () => void,
+  openBuildPanel?: (seed: string) => void,
 ): void {
   const { t } = useI18n()
   const chatStore = useChatStore()
@@ -107,6 +108,14 @@ export function setupSlashCommands(
         // /plan 后的剩余文本作为初始需求（可空，面板内可再补）
         const seed = rawInput.replace(/^\/plan\b\s*/i, '').trim()
         openPlanPanel(seed)
+      },
+    },
+    {
+      name: '/build',
+      descKey: 'chat.slashBuild',
+      run: (rawInput: string) => {
+        const seed = rawInput.replace(/^\/build\b\s*/i, '').trim()
+        openBuildPanel?.(seed)
       },
     },
     {

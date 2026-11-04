@@ -121,6 +121,10 @@ class NodeDefinition:
     # 该节点类型能否被重复执行而不产生额外副作用（发消息/写文件/扣款类一律 False）。
     # 引擎的节点级重试只在这个标志为 True 时才发生——默认拒绝，安全侧不靠调用方记得声明。
     idempotent: bool = False
+    # 该节点执行所需的环境变量名（只存名字，不存值；随节点版本走）
+    env_requirements: List[str] = field(default_factory=list)
+    # 创建该自定义节点时的构建批次（BuildSession.batch_id）；激活按批次校验
+    batch_id: Optional[str] = None
     # ── 自定义节点（source="custom"）扩展字段 ──
     tier: Optional[str] = None  # declarative(L1) | composite(L2) | code(L3)
     executor_body: Optional[Dict[str, Any]] = None  # L1: {template,...} L2: {steps}

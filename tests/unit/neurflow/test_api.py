@@ -329,6 +329,18 @@ class TestWorkflowDefinitionAPI:
         assert response.status_code == 200
         mock_storage.save_workflow.assert_called()
 
+    def test_update_published_definition_creates_safe_baseline(self, client, mock_storage):
+        """N4：REST 回写已发布定义前必须先钉安全版本。"""
+        mock_storage.get_workflow.return_value = _make_workflow(status=WorkflowStatus.PUBLISHED)
+        response = client.put(
+            "/api/v1/neurflow/workflows/wf_001/definition",
+            json={"nodes": [], "edges": [], "variables": []},
+        )
+        assert response.status_code == 200
+        mock_storage.ensureSafeVersion.assert_called_once()
+        assert mock_storage.ensureSafeVersion.call_args.args[0] == "wf_001"
+        mock_storage.save_workflow.assert_called()
+
 
 # ==================== 执行 API ====================
 
@@ -596,9 +608,13 @@ class TestAPILifecycle:
             )
             mock_dag.return_value = validator
 
+            mock_storage.get_workflow_version_number.return_value = 3
             response = client.post("/api/v1/neurflow/workflows/wf_001/publish")
             assert response.status_code == 200
             mock_storage.save_workflow.assert_called()
+            # N4：发布动作把当前版本设为安全基线
+            mock_storage.setSafeVersion.assert_called_once()
+            assert mock_storage.setSafeVersion.call_args.args[:2] == ("wf_001", 3)
 
     def test_validate_workflow_success(self, client, mock_storage):
         with patch('neurova.api.endpoints.neurflow_api.get_dag_validator') as mock_dag:

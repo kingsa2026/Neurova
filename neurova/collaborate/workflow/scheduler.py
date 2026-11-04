@@ -144,6 +144,18 @@ class AgentScheduler:
             self._persist()
             return True
 
+    def cancel_task(self, task_id: str) -> Optional[ScheduledTask]:
+        """取消任务但保留记录（审计与"谁取消了什么"可回溯）。"""
+        with self._task_lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return None
+            task.cancel()
+            logger.info("Task cancelled: %s (%s)", task_id, task.name)
+            self._emit_event("task_cancelled", task)
+            self._persist()
+            return task
+
     def get_task(self, task_id: str) -> Optional[ScheduledTask]:
         """获取任务"""
         return self._tasks.get(task_id)
@@ -352,6 +364,21 @@ def get_scheduler() -> AgentScheduler:
     return scheduler
 
 
+def ensure_scheduler_running(scheduler: Optional[AgentScheduler] = None) -> bool:
+    """有持久化待跑任务才起调度线程——空载与测试环境不占 1s 轮询线程。
+
+    - 应用启动：重启后把上个进程留下的 pending 任务接上；
+    - 新建任务：REST 与 Agent 工具两条入口都在落库后调用本函数。
+    """
+    target = scheduler or get_scheduler()
+    if target.get_statistics().get("is_running"):
+        return True
+    if not target.list_tasks("pending"):
+        return False
+    target.start()
+    return True
+
+
 def register_action_handlers(scheduler: "AgentScheduler", agent_resolver=None) -> None:
     """注册调度动作处理器(断点修复: 此前全仓零注册, 任务触发即失败)。
 
@@ -420,7 +447,55 @@ def register_action_handlers(scheduler: "AgentScheduler", agent_resolver=None) -
 
         return asyncio.run(deps["run_workflow"](workflow, inputs))
 
+    def _run_canvas(task, ctx):
+        """定时执行一张已保存的画布：编译成 neurflow 工作流后走同一执行引擎。
+
+        这是「Agent 自建工作流 → 定时跑」的闭环入口：画布由 canvas_* 工具创建并持久化，
+        这里按 id 取快照、编译、执行；每次触发都用当时的画布版本。
+        """
+        canvas_id = (task.parameters or {}).get("canvas_id", "") or ""
+        if not canvas_id:
+            raise RuntimeError("run_canvas requires parameters.canvas_id")
+        from neurova.collaboration.canvas_bridge import canvas_to_workflow
+        from neurova.collaboration.canvas_store import get_canvas_store
+        from neurova.collaboration.neurflow.execution_engine import get_workflow_executor
+
+        user_id = (task.parameters or {}).get("user_id") or None
+        # 系统派发按任务属主身份执行（与 NeurFlow cron 同口径）：读取不做
+        # 交互式属主校验，否则工具建的画布（属主 default）在真实用户下永远读不到。
+        record = get_canvas_store().get(canvas_id, requester_id=None)
+        if record is None:
+            raise RuntimeError(f"canvas not found: {canvas_id}")
+        workflow = canvas_to_workflow(record, name=record.get("name") or canvas_id)
+        inputs = (task.parameters or {}).get("inputs") or {}
+        executor = get_workflow_executor()
+
+        async def _execute():
+            instance = executor.create_instance(
+                workflow, inputs=inputs, user_id=user_id or "default"
+            )
+            return await executor.execute(
+                workflow,
+                inputs=inputs,
+                user_id=user_id or "default",
+                instance=instance,
+            )
+
+        import asyncio
+
+        instance = asyncio.run(_execute())
+        status = getattr(instance.status, "value", instance.status)
+        return {
+            "success": str(status) in ("completed", "succeeded", "success"),
+            "status": str(status),
+            "outputs": getattr(instance, "outputs", None) or {},
+            "error": getattr(instance, "error", None),
+        }
+
     scheduler.register_handler("send_message", _send_message)
     scheduler.register_handler("execute_skill", _execute_skill)
     scheduler.register_handler("run_workflow", _run_workflow)
-    logger.info("registered scheduler action handlers: send_message / execute_skill / run_workflow")
+    scheduler.register_handler("run_canvas", _run_canvas)
+    logger.info(
+        "registered scheduler action handlers: send_message / execute_skill / run_workflow / run_canvas"
+    )

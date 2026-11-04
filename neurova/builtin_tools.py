@@ -850,6 +850,265 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["name", "description", "steps"],
         },
     },
+    "ask_user": {
+        # 并行能力声明：写构建会话的交互记录并暂停当前步，属共享状态。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【向用户提问】在构建/修复工作流时，遇到不明确、需要用户选择、需要补充参数或凭据，调用本工具向用户弹出交互面板并暂停当前步。回答后构建恢复（pending/resume），不要在工具里死等。凭据必须用 kind=secret + secret_key，用户输入只写 SecretStore，禁止要求用户在聊天正文粘贴。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "build_session_id": {
+                    "type": "string",
+                    "description": "构建会话 ID；缺省读当前请求的构建上下文（通常不用手填）",
+                },
+                "question": {"type": "string", "description": "问题文本；必须写清楚要用户决定什么"},
+                "kind": {
+                    "type": "string",
+                    "enum": ["choice", "multi", "text", "secret", "confirm"],
+                    "description": "choice 单选 / multi 多选 / text 文本 / secret 凭据 / confirm 确认",
+                },
+                "options": {
+                    "type": "array",
+                    "description": "选项列表；元素为字符串或 {label, description, recommended}",
+                    "items": {},
+                },
+                "multi": {"type": "boolean", "description": "是否多选（kind=multi 时自动为真）"},
+                "allow_custom": {"type": "boolean", "description": "是否允许自由补充"},
+                "why": {"type": "string", "description": "为什么问（给用户看）"},
+                "impact": {"type": "string", "description": "回答会影响什么（给用户看）"},
+                "secret_key": {"type": "string", "description": "kind=secret 时必填：写入 SecretStore 的键名"},
+                "timeout_seconds": {"type": "integer", "description": "面板等待超时；超时只暂停不失败"},
+            },
+            "required": ["question"],
+        },
+    },
+    "custom_node_create": {
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【创建自定义节点·草稿】在已批准的构建批次内创建 L1/L2 自定义节点，默认 draft（不可被画布引用）；创建后需 custom_node_activate 激活。tier=declarative 需要 executor_body.template；tier=composite 需要 executor_body.steps。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "spec": {"type": "object", "description": "节点 spec：type/label/description/tier/executor_body/form_schema/inputs/outputs/env_requirements"},
+            },
+            "required": ["spec"],
+        },
+    },
+    "custom_node_update": {
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【更新自定义节点·草稿】只允许更新 draft 节点；active 节点需新批次/审批，本工具拒绝。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "node_type": {"type": "string", "description": "自定义节点类型，如 custom:campaign_audit"},
+                "spec": {"type": "object", "description": "要更新的字段（label/description/tier/executor_body/form_schema/inputs/outputs/env_requirements）"},
+            },
+            "required": ["node_type", "spec"],
+        },
+    },
+    "custom_node_activate": {
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【激活自定义节点】把本构建批次内创建的 draft 节点提升为 active；节点 batch_id 必须与当前 BuildSession 批次一致。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "node_type": {"type": "string", "description": "自定义节点类型"},
+            },
+            "required": ["node_type"],
+        },
+    },
+    "custom_node_delete": {
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【删除自定义节点·草稿】只允许删除 draft 节点；active 节点需先停用/新批次处理，本工具拒绝。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "node_type": {"type": "string", "description": "自定义节点类型"},
+            },
+            "required": ["node_type"],
+        },
+    },
+    "workflow_definition_get": {
+        # 并行能力声明：只读定义，但已发布工作流可能补安全版本基线（写共享库）⇒ 不可并行。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【读取工作流定义】返回节点/边/变量、当前版本、状态与安全版本。修改已发布工作流前先用本工具拿 base_version；已发布但无有效安全版本时会先为当前内容建立基线。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "workflow_id": {"type": "string", "description": "工作流 ID"},
+            },
+            "required": ["workflow_id"],
+        },
+    },
+    "workflow_definition_update": {
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【修改工作流定义】直接修改已发布或草稿工作流（无需先复制）。必须带 base_version 乐观锁；已发布会先确保安全版本；DAG/节点类型/端口/草稿自定义节点校验失败时不写入。整个任务批次一次审批、逐条审计。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "workflow_id": {"type": "string", "description": "工作流 ID"},
+                "nodes": {
+                    "type": "array",
+                    "description": "完整节点列表；元素含 id/type/position/config/label。缺省表示不改节点。",
+                    "items": {"type": "object"},
+                },
+                "edges": {
+                    "type": "array",
+                    "description": "完整边列表；元素含 id/source/target/source_handle/target_handle。缺省表示不改边。",
+                    "items": {"type": "object"},
+                },
+                "base_version": {"type": "integer", "description": "读取到的当前定义版本（乐观锁）"},
+                "batch_id": {"type": "string", "description": "构建批次 ID；构建会话内缺省取会话批次"},
+                "note": {"type": "string", "description": "本次变更摘要（写入审计）"},
+            },
+            "required": ["workflow_id", "base_version"],
+        },
+    },
+    "workflow_definition_duplicate": {
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【复制为草稿】把工作流复制成 DRAFT 草稿副本（修复循环的暂存落点）。草稿试跑通过后再发布或回滚，避免直接打断正在运行的已发布流程。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "workflow_id": {"type": "string", "description": "源工作流 ID"},
+                "name": {"type": "string", "description": "草稿名称（可选）"},
+                "batch_id": {"type": "string", "description": "构建批次 ID（可选，写入草稿元数据）"},
+            },
+            "required": ["workflow_id"],
+        },
+    },
+    "workflow_rollback": {
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【回滚工作流】回滚到指定版本；不传 target_version 时回到安全版本。回滚本身产生新版本（undo-friendly），安全版本标记不变。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "workflow_id": {"type": "string", "description": "工作流 ID"},
+                "target_version": {"type": "integer", "description": "目标版本号（可选，缺省用安全版本）"},
+                "batch_id": {"type": "string", "description": "构建批次 ID（可选，写入审计）"},
+            },
+            "required": ["workflow_id"],
+        },
+    },
+    "workflow_publish": {
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【发布工作流】校验并发布（DRAFT→PUBLISHED），同时编译工作流 Agent。发布动作把当前版本设为安全基线；校验或编译失败不改变状态。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "workflow_id": {"type": "string", "description": "工作流 ID"},
+                "note": {"type": "string", "description": "发布说明（可选）"},
+                "batch_id": {"type": "string", "description": "构建批次 ID（可选，写入审计）"},
+            },
+            "required": ["workflow_id"],
+        },
+    },
+    "workflow_execute": {
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【执行工作流定义】执行并返回节点级结果；默认只允许已发布工作流，草稿试跑需 allow_draft=true。已发布执行成功会把当前版本提升为安全版本（执行校验凭据）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "workflow_id": {"type": "string", "description": "工作流 ID"},
+                "inputs": {"type": "object", "description": "工作流输入（可选）"},
+                "allow_draft": {"type": "boolean", "description": "允许执行 DRAFT 草稿（修复试跑用，默认 false）"},
+            },
+            "required": ["workflow_id"],
+        },
+    },
+    "node_env_preflight": {
+        # 并行能力声明：只读环境变量名与 SecretStore 键名，不读取凭据值。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
+        "description": "【环境预检】检查节点类型声明的环境变量/凭据是否可用，返回缺失变量名与配置来源提示。只读键名，不读取、不回显任何凭据值。缺凭据时先用本工具确认缺哪些，再用 ask_user(kind=secret) 向用户索取。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "types": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "节点类型列表，如 builtin:ad-streaming、custom:campaign_audit",
+                },
+            },
+            "required": ["types"],
+        },
+    },
+    "workflow_repair": {
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【工作流自愈】对失败的工作流/画布做最多 5 轮修复：在 DRAFT 副本上执行、读取 failed 节点、查 EKB 修复经验、生成配置补丁并重跑评估，通过后才提交目标。缺环境会停在预检并列出缺失变量，不烧轮次。需 NEUROVA_NODE_REPAIR=1 武装；提交已发布工作流/画布需批次审批。workflow_id 与 canvas_id 二选一。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "workflow_id": {"type": "string", "description": "要修复的工作流 ID"},
+                "canvas_id": {"type": "string", "description": "要修复的画布 ID（先编译为工作流草稿）"},
+                "inputs": {"type": "object", "description": "每次试跑的输入（可选）"},
+                "max_rounds": {"type": "integer", "description": "最大修复轮次（1-5，默认 5）"},
+                "commit": {"type": "boolean", "description": "草稿通过后是否提交目标（默认 true）"},
+                "batch_id": {"type": "string", "description": "构建批次 ID（可选，构建会话内缺省取会话批次）"},
+            },
+            "required": [],
+        },
+    },
+    "sync_nodes": {
+        # 并行能力声明：写进程内共享节点注册表。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【同步节点库】把工具、技能、MCP、电商、短剧、ComfyUI、自定义节点重新注册进当前进程的节点注册表，让刚创建的技能/自定义节点马上能被 canvas_add_node 使用。幂等；不写持久化数据。add_node 报未知类型但确认能力已存在时先调用本工具。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "scope": {
+                    "type": "string",
+                    "enum": ["all", "tools", "skills", "mcp", "custom", "commerce", "drama", "comfyui"],
+                    "description": "同步范围，默认 all",
+                }
+            },
+        },
+    },
+    "schedule_task": {
+        # 并行能力声明：调度任务落共享存储，建/取消都会改共享态。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【定时任务】创建、查看或取消平台定时任务：到点让指定 Agent 执行一条消息，或运行已发布工作流 / 已保存画布。支持 cron（5 段：分 时 日 月 周，0=周一）或固定间隔。创建后立即生效，进程重启后由启动装配恢复。用于「每 2 小时检查一次广告数据」「每天 9 点生成日报」这类持续任务。【何时不用】只跑一次用普通工具；需要人盯着的多步流程用审批节点。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["create", "list", "cancel"],
+                    "description": "create 新建；list 查看自己 Agent 的任务；cancel 取消自己的任务",
+                },
+                "task_id": {"type": "string", "description": "cancel 时必填：任务 ID"},
+                "name": {"type": "string", "description": "任务名称（create 时建议填写）"},
+                "description": {"type": "string", "description": "任务说明（create 时可选）"},
+                "agent_id": {
+                    "type": "string",
+                    "description": "执行任务的 Agent；缺省=当前 Agent。只能给自己建任务",
+                },
+                "cron_expression": {
+                    "type": "string",
+                    "description": "5 段 cron（分 时 日 月 周，0=周一）。与 interval_seconds 二选一",
+                },
+                "interval_seconds": {
+                    "type": "integer",
+                    "description": "重复间隔（秒）。与 cron_expression 二选一",
+                },
+                "message": {
+                    "type": "string",
+                    "description": "到点让 Agent 执行的提示词；没有 workflow_id / canvas_id 时必填",
+                },
+                "workflow_id": {
+                    "type": "string",
+                    "description": "改为运行已发布工作流（NeurFlow workflow id）",
+                },
+                "canvas_id": {
+                    "type": "string",
+                    "description": "改为运行已保存画布（canvas_* 创建），每次触发按当时版本编译执行",
+                },
+                "max_runs": {
+                    "type": "integer",
+                    "description": "最多执行次数；缺省不限",
+                },
+            },
+            "required": ["action"],
+        },
+    },
     # ── 常规 Agent 工具（2026-08 扩充，run_code ↔ DeepSeek code_interpreter
     # （run_code 执行体早已存在于 tool_executor
     "file_list": {
@@ -1220,7 +1479,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "canvas_list_nodes": {
         # 并行能力声明：只读但作用域为共享（读共享节点库快照）⇒ 推导判为不可并行。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
-        "description": "【查询节点库】列出/搜索可用节点类型（含 type、名称、分类、来源）。添加节点前如不确定 node_type，先用本工具查询；搜索无果说明节点库缺少该能力，可考虑建议用户创建自定义节点。",
+        "description": "【查询节点库】列出/搜索可用节点类型，返回参数表单（sub_blocks/默认值/必填）、输入输出端口、环境变量需求与来源。添加节点前先查本工具；搜索无果说明节点库缺少该能力，可考虑建自定义节点（draft）或先调 sync_nodes。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -1229,6 +1488,18 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                 "limit": {"type": "integer", "description": "最多返回条数（默认 20）"},
             },
             "required": [],
+        },
+    },
+    "node_schema": {
+        # 并行能力声明：只读节点库，作用域共享（读进程内注册表快照）。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
+        "description": "【节点完整契约】按精确 type 查询一个节点的参数表单、默认值、必填项、输入/输出端口、环境变量需求与版本。添加节点前用它确认要填哪些参数；找不到时返回候选类型。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "node_type": {"type": "string", "description": "精确节点类型，如 builtin:ad-streaming、tool:web_search"},
+            },
+            "required": ["node_type"],
         },
     },
     "orchestrate_tools": {
@@ -1324,6 +1595,18 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     # 文件/画布/技能写操作：结果即回执，重放制造新变更
     "file_write", "file_create", "file_edit", "file_delete",
     "create_skill", "planning",
+    # 调度任务是写共享调度面：重放会建出第二份定时任务
+    "schedule_task",
+    # 提问会写构建会话交互并暂停当前步，重放会重复打扰用户
+    "ask_user",
+    # 同步会改进程内共享注册表，重放会重复注册
+    "sync_nodes",
+    "custom_node_create", "custom_node_update", "custom_node_activate", "custom_node_delete",
+    # 工作流定义写操作：重放会再落一版/再回滚一次/重复发布
+    "workflow_definition_get", "workflow_definition_update", "workflow_definition_duplicate",
+    "workflow_rollback", "workflow_publish", "workflow_execute",
+    # 自愈会执行草稿并可能提交目标，重放制造新版本/新画布状态
+    "workflow_repair",
     # 产物件：落产物目录并注册 artifact（重放登记出第二份产物与下载口）
     "write_pdf",
     "canvas_add_node", "canvas_connect", "canvas_create", "canvas_remove_node",

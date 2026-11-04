@@ -25,6 +25,7 @@ from __future__ import annotations
 import difflib
 import threading
 import uuid
+from dataclasses import asdict, is_dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from neurova.core.logger import get_logger
@@ -239,17 +240,49 @@ class CanvasOpService:
         if category:
             definitions = [d for d in definitions if d.category == category]
 
-        return [
-            {
-                "type": d.type,
-                "label": d.label,
-                "icon": d.icon,
-                "category": d.category,
-                "description": d.description,
-                "source": d.source,
+        def _fields(value: Any) -> Dict[str, Any]:
+            if is_dataclass(value):
+                return asdict(value)
+            if isinstance(value, dict):
+                return dict(value)
+            return {}
+
+        result: List[Dict[str, Any]] = []
+        for d in definitions[: max(1, int(limit))]:
+            sub_blocks = [_fields(item) for item in (d.sub_blocks or [])]
+            inputs = [_fields(item) for item in (d.inputs or [])]
+            outputs = [_fields(item) for item in (d.outputs or [])]
+            default_config = {
+                str(item.get("id") or item.get("name")): item.get("default_value")
+                for item in sub_blocks
+                if (item.get("id") or item.get("name")) and item.get("default_value") is not None
             }
-            for d in definitions[: max(1, int(limit))]
-        ]
+            required = [
+                str(item.get("id") or item.get("name"))
+                for item in sub_blocks
+                if item.get("required") and (item.get("id") or item.get("name"))
+            ]
+            result.append(
+                {
+                    "type": d.type,
+                    "label": d.label,
+                    "icon": d.icon,
+                    "category": d.category,
+                    "description": d.description,
+                    "source": d.source,
+                    "version": d.version,
+                    "tier": d.tier,
+                    "status": d.status,
+                    "idempotent": bool(d.idempotent),
+                    "env_requirements": list(getattr(d, "env_requirements", []) or []),
+                    "sub_blocks": sub_blocks,
+                    "inputs": inputs,
+                    "outputs": outputs,
+                    "default_config": default_config,
+                    "required": required,
+                }
+            )
+        return result
 
     # ── 变更 op（每个 = 校验 → 原子 mutate → 广播） ─────────────
 
@@ -407,13 +440,18 @@ class CanvasOpService:
         base_version: Optional[int] = None,
         session_id: Optional[str] = None,
         actor: str = "agent",
+        replace: bool = False,
     ) -> Dict[str, Any]:
         holder: Dict[str, Any] = {}
 
         def _mut(record: Dict[str, Any]) -> Dict[str, Any]:
             for n in record.get("nodes", []):
                 if n.get("id") == node_id:
-                    merged = {**(n.get("config") or {}), **(values or {})}
+                    merged = (
+                        dict(values or {})
+                        if replace
+                        else {**(n.get("config") or {}), **(values or {})}
+                    )
                     n["config"] = merged
                     holder["node"] = n
                     return record
@@ -424,7 +462,7 @@ class CanvasOpService:
         node = holder["node"]
         await self._broadcast(
             session_id, "set_config", canvas_id, int(record["version"]),
-            {"node_id": node_id, "config": node["config"]}, actor,
+            {"node_id": node_id, "config": node["config"], "replace": bool(replace)}, actor,
         )
         return node
 

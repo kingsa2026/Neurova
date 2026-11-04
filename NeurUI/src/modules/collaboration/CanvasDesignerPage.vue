@@ -2364,7 +2364,11 @@ function applyRemoteCanvasOp(p: CanvasOpPayload) {
     }
     case 'set_config': {
       const node = canvasNodes.value.find(n => n.id === data.node_id)
-      if (node) node.config = { ...(node.config ?? {}), ...(data.config ?? {}) }
+      if (node) {
+        node.config = data.replace
+          ? { ...(data.config ?? {}) }
+          : { ...(node.config ?? {}), ...(data.config ?? {}) }
+      }
       break
     }
     case 'move_node': {

@@ -266,6 +266,16 @@ async def update_workflow(
     旧前端全量 PUT 不得抹除 project_id/agent_id/origin）"""
     storage = _get_storage()
     existing = _owned_workflow_or_404(storage, workflow_id, current_user, writable=True)
+    if (existing.status == WorkflowStatus.PUBLISHED):
+        # N4 §5.4：直接改已发布定义前必须有可回滚的安全版本
+        try:
+            storage.ensureSafeVersion(
+                workflow_id,
+                reason="before_definition_update",
+                evidence={"actor": str(current_user.get("user_id") or ""), "source": "rest_full_update"},
+            )
+        except Exception as exc:  # noqa: BLE001 - 建基线失败则拒绝改写
+            raise HTTPException(status_code=400, detail=f"无法建立安全版本基线，拒绝修改已发布工作流: {exc}")
     try:
         workflow = WorkflowDefinition.from_dict(data)
         workflow.id = workflow_id
@@ -977,6 +987,16 @@ async def update_workflow_definition(
     """
     storage = _get_storage()
     existing = _owned_workflow_or_404(storage, workflow_id, current_user, writable=True)
+    if (existing.status == WorkflowStatus.PUBLISHED):
+        # N4 §5.4：画布回写已发布定义前，先钉住可回滚的安全版本
+        try:
+            storage.ensureSafeVersion(
+                workflow_id,
+                reason="before_definition_update",
+                evidence={"actor": str(current_user.get("user_id") or ""), "source": "rest_definition_update"},
+            )
+        except Exception as exc:  # noqa: BLE001 - 建基线失败则拒绝改写
+            raise HTTPException(status_code=400, detail=f"无法建立安全版本基线，拒绝修改已发布工作流: {exc}")
 
     if base_version is not None:
         current = storage.get_workflow_version_number(workflow_id)
@@ -1074,6 +1094,21 @@ async def publish_workflow(
         existing.status = WorkflowStatus.PUBLISHED
         existing.updated_at = time.time()
         storage.save_workflow(existing)
+        # N4 §5.4：发布动作本身是显式确认，当前版本成为安全基线
+        current_version = storage.get_workflow_version_number(workflow_id)
+        try:
+            storage.setSafeVersion(
+                workflow_id,
+                current_version,
+                reason="publish",
+                evidence={"actor": str(current_user.get("user_id") or ""), "source": "rest_publish"},
+            )
+        except ValueError:
+            storage.ensureSafeVersion(
+                workflow_id,
+                reason="publish",
+                evidence={"actor": str(current_user.get("user_id") or ""), "source": "rest_publish"},
+            )
         return {
             "code": 0,
             "message": "工作流发布成功",

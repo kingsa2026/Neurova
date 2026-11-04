@@ -802,6 +802,13 @@ class WorkflowExecutor:
             # 没批下来的节点画成 success。resume 恢复集同步扩（见 Resume 分支）：
             # 这两类节点有终态输出、重跑会二次打扰审批人，照 success 一样恢复。
             inner_status = str(result.get("status") or "")
+            # 节点执行器以返回值报失败（status=failed/error）时，必须走与异常同一条
+            # 失败路径：改前这里只外显 timeout/pending，其余一律记 success——自愈
+            # 与画布读面因此把「节点失败」读成「流程跑通」。
+            if inner_status in ("failed", "error"):
+                raise RuntimeError(
+                    str(result.get("error") or f"节点执行器返回 {inner_status}")
+                )
             outer_status = inner_status if inner_status in ("timeout", "pending") else "success"
             instance.node_results[node_id] = NodeExecutionResult(
                 node_id=node_id,

@@ -341,6 +341,27 @@ class ToolExecutor:
         "subagent_status": "_execute_subagent_status",
         "list_agents": "_execute_list_agents",
         "create_skill": "_execute_create_skill",
+        # 构建问询：写 BuildSession 交互并返回 paused，回答后由面板恢复
+        "ask_user": "_execute_ask_user",
+        # 节点库同步：技能/自定义/MCP 节点注册后立即对 canvas_add_node 可见
+        "sync_nodes": "_execute_sync_nodes",
+        # 自定义节点：默认 draft，按 BuildSession 批次激活
+        "custom_node_create": "_execute_custom_node_create",
+        "custom_node_update": "_execute_custom_node_update",
+        "custom_node_activate": "_execute_custom_node_activate",
+        "custom_node_delete": "_execute_custom_node_delete",
+        # 工作流定义：读取/修改/复制草稿/回滚/发布/执行（N4）
+        "workflow_definition_get": "_execute_workflow_definition_get",
+        "workflow_definition_update": "_execute_workflow_definition_update",
+        "workflow_definition_duplicate": "_execute_workflow_definition_duplicate",
+        "workflow_rollback": "_execute_workflow_rollback",
+        "workflow_publish": "_execute_workflow_publish",
+        "workflow_execute": "_execute_workflow_execute",
+        # N5：环境预检 + 工作流自愈（DRAFT 试跑、EKB、5 轮预算）
+        "node_env_preflight": "_execute_node_env_preflight",
+        "workflow_repair": "_execute_workflow_repair",
+        # 定时任务：Agent 自建 cron/间隔任务，落平台调度器（重启由启动装配恢复）
+        "schedule_task": "_execute_schedule_task",
         # 画布交互工具（Phase 1）：语义操作层薄封装，见 _execute_canvas_* 注释
         "canvas_create": "_execute_canvas_create",
         "canvas_read": "_execute_canvas_read",
@@ -352,6 +373,8 @@ class ToolExecutor:
         "canvas_layout": "_execute_canvas_layout",
         "canvas_run": "_execute_canvas_run",
         "canvas_list_nodes": "_execute_canvas_list_nodes",
+        # 单节点精确契约（N1）：添加节点前查参数/端口/环境
+        "node_schema": "_execute_node_schema",
         # 多步编排入口（DAG 工具编排器的生产消费方）：整条链的每一步都经咽喉，
         # 票据 / on_tool_executed / 治理预检 / hooks / per-tool 超时全链生效。
         "orchestrate_tools": "_execute_orchestrate_tools",
@@ -1962,11 +1985,81 @@ class ToolExecutor:
             }
         return {"error": outcome.get("error") or "WORKFLOW_AGENT_EXECUTION_FAILED"}
 
+    #: 构建会话内的写工具：ready/approved 之前必须被服务端拒绝。
+    #: 手动编辑画布（无 build_session 上下文）不受影响。
+    _BUILD_GATED_TOOLS = frozenset(
+        {
+            "canvas_create",
+            "canvas_add_node",
+            "canvas_connect",
+            "canvas_set_config",
+            "canvas_move_node",
+            "canvas_remove_node",
+            "canvas_layout",
+            "canvas_run",
+            "schedule_task",
+            "custom_node_create",
+            "custom_node_update",
+            "custom_node_activate",
+            "custom_node_delete",
+            "workflow_definition_update",
+            "workflow_definition_duplicate",
+            "workflow_rollback",
+            "workflow_publish",
+            "workflow_execute",
+            "workflow_repair",
+        }
+    )
+
+    def _buildGateGuard(self, tool_name: str, params: Dict) -> Optional[Dict]:
+        if tool_name not in self._BUILD_GATED_TOOLS:
+            return None
+        try:
+            from neurova.core.build_context import getCurrentBuildSessionId
+
+            session_id = str(
+                (params or {}).get("build_session_id") or getCurrentBuildSessionId() or ""
+            ).strip()
+            if not session_id:
+                return None
+            from neurova.build_mode import get_build_session_manager
+
+            session = get_build_session_manager().get(session_id)
+            if session is None:
+                return {
+                    "success": False,
+                    "status": "clarification_required",
+                    "build_session_id": session_id,
+                    "error": "构建会话不存在，不能写画布",
+                }
+            if session.status in ("approved", "building"):
+                return None
+            return {
+                "success": False,
+                "status": "clarification_required",
+                "build_session_id": session_id,
+                "checklist": dict(session.checklist),
+                "error": (
+                    f"构建条件未就绪（{session.status}）：先完成面板问答并批准构建计划，"
+                    "再创建/修改画布"
+                ),
+            }
+        except Exception as exc:  # noqa: BLE001 - 门禁故障按拒绝处理（fail-closed）
+            logger.warning("构建门禁检查失败（fail-closed）: %s", exc)
+            return {
+                "success": False,
+                "status": "clarification_required",
+                "error": f"构建门禁不可用，已拒绝写入: {exc}",
+            }
+
     async def _execute_builtin_tool(self, tool_name: str, params: Dict) -> Dict:
         """执行内置工具(分派表驱动,见 _builtin_dispatch 注释)"""
         method_name = self._builtin_dispatch.get(tool_name)
         if method_name is None:
             return {"error": f"未知内置工具: {tool_name}"}
+        _build_gate = self._buildGateGuard(tool_name, params)
+        if _build_gate is not None:
+            return _build_gate
         # 三层隔离:browser_* 路径注入请求级 userId 到 ContextVar,
         # 让 BrowserManager(单例)能按 user 池化 camofox 后端,避免 _tabs/_active_target_id 跨用户污染。
         if tool_name.startswith("browser_"):
@@ -2365,6 +2458,617 @@ class ToolExecutor:
         ), registry, manifest)
         return {**result, "step_count": len(tool_sequence)}
 
+    async def _execute_ask_user(self, params: Dict) -> Dict:
+        """向用户弹出构建交互面板并暂停当前步（pending/resume）。
+
+        不在工具调用里死等：返回 `status=paused + interaction_id`，用户回答后
+        由 BuildSession 恢复；工具默认 60s 超时不会掐断一次真实等待。
+        """
+        try:
+            from neurova.build_mode import BuildSessionError, get_build_session_manager
+            from neurova.core.build_context import getCurrentBuildSessionId
+
+            session_id = str(
+                (params or {}).get("build_session_id") or getCurrentBuildSessionId() or ""
+            ).strip()
+            if not session_id:
+                return {
+                    "success": False,
+                    "error": "ask_user 只在构建会话内可用：缺少 build_session_id",
+                }
+            manager = get_build_session_manager()
+            interaction = manager.ask(
+                session_id,
+                str(params.get("question") or "").strip(),
+                options=params.get("options") or [],
+                kind=str(params.get("kind") or "choice"),
+                multi=bool(params.get("multi")),
+                allow_custom=bool(params.get("allow_custom")),
+                why=str(params.get("why") or ""),
+                impact=str(params.get("impact") or ""),
+                secret_key=str(params.get("secret_key") or ""),
+                timeout_seconds=int(params.get("timeout_seconds") or 600),
+            )
+            return {
+                "success": True,
+                "status": "paused",
+                "build_session_id": session_id,
+                "interaction_id": interaction["interaction_id"],
+                "interaction": interaction,
+            }
+        except BuildSessionError as exc:
+            return {"success": False, "error": str(exc), "code": exc.code}
+        except Exception as exc:  # noqa: BLE001 - 提问失败要如实返回，不假暂停
+            logger.warning("ask_user 创建交互失败: %s", exc)
+            return {"success": False, "error": f"ask_user 失败: {exc}"}
+
+    @staticmethod
+    def _customNodeSummary(node: Any) -> Dict:
+        return {
+            "type": node.type,
+            "label": node.label,
+            "description": node.description,
+            "category": node.category,
+            "tier": node.tier,
+            "status": node.status,
+            "batch_id": getattr(node, "batch_id", None),
+            "env_requirements": list(getattr(node, "env_requirements", []) or []),
+            "version": node.version,
+        }
+
+    def _currentBuildSession(self):
+        from neurova.build_mode import get_build_session_manager
+        from neurova.core.build_context import getCurrentBuildSessionId
+
+        session_id = str(getCurrentBuildSessionId() or "").strip()
+        if not session_id:
+            return None, {"success": False, "error": "自定义节点工具只在构建会话内可用：缺少 build_session_id"}
+        session = get_build_session_manager().get(session_id)
+        if session is None:
+            return None, {"success": False, "error": "构建会话不存在"}
+        if not session.batch_id:
+            return None, {"success": False, "error": "构建会话尚未批准，没有批次 ID"}
+        return session, None
+
+    async def _execute_custom_node_create(self, params: Dict) -> Dict:
+        spec = params.get("spec")
+        if not isinstance(spec, dict):
+            return {"success": False, "error": "spec 必须是对象"}
+        session, error = self._currentBuildSession()
+        if error is not None:
+            return error
+        try:
+            from neurova.collaboration.neurflow.custom_nodes import (
+                CustomNodeError,
+                get_custom_node_service,
+            )
+
+            user_id, _ = self._agent_identity()
+            node = get_custom_node_service().create_node(
+                spec,
+                created_by=str(user_id or ""),
+                status="draft",
+                batch_id=session.batch_id,
+            )
+            return {"success": True, "node": self._customNodeSummary(node)}
+        except CustomNodeError as exc:
+            return {"success": False, "code": exc.code, "error": str(exc)}
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "error": f"创建自定义节点失败: {exc}"}
+
+    async def _execute_custom_node_update(self, params: Dict) -> Dict:
+        node_type = str(params.get("node_type") or "").strip()
+        spec = params.get("spec")
+        if not node_type or not isinstance(spec, dict):
+            return {"success": False, "error": "需要 node_type 与 spec 对象"}
+        session, error = self._currentBuildSession()
+        if error is not None:
+            return error
+        try:
+            from neurova.collaboration.neurflow.custom_nodes import (
+                CustomNodeError,
+                get_custom_node_service,
+            )
+
+            service = get_custom_node_service()
+            existing = service.get_node(node_type)
+            if existing is None:
+                return {"success": False, "error": f"节点不存在: {node_type}"}
+            if existing.status != "draft":
+                return {"success": False, "error": "只允许更新 draft 节点；active 节点需新批次/审批"}
+            if existing.batch_id != session.batch_id:
+                return {"success": False, "error": "只能更新本构建批次的 draft 节点"}
+            node = service.update_node(node_type, spec)
+            return {"success": True, "node": self._customNodeSummary(node)}
+        except CustomNodeError as exc:
+            return {"success": False, "code": exc.code, "error": str(exc)}
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "error": f"更新自定义节点失败: {exc}"}
+
+    async def _execute_custom_node_activate(self, params: Dict) -> Dict:
+        node_type = str(params.get("node_type") or "").strip()
+        if not node_type:
+            return {"success": False, "error": "需要 node_type"}
+        session, error = self._currentBuildSession()
+        if error is not None:
+            return error
+        try:
+            from neurova.collaboration.neurflow.custom_nodes import (
+                CustomNodeError,
+                get_custom_node_service,
+            )
+
+            service = get_custom_node_service()
+            existing = service.get_node(node_type)
+            if existing is None:
+                return {"success": False, "error": f"节点不存在: {node_type}"}
+            if existing.batch_id != session.batch_id:
+                return {"success": False, "error": "只能激活本构建批次的 draft 节点"}
+            node = service.activate_node(node_type)
+            return {"success": True, "node": self._customNodeSummary(node)}
+        except CustomNodeError as exc:
+            return {"success": False, "code": exc.code, "error": str(exc)}
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "error": f"激活自定义节点失败: {exc}"}
+
+    async def _execute_custom_node_delete(self, params: Dict) -> Dict:
+        node_type = str(params.get("node_type") or "").strip()
+        if not node_type:
+            return {"success": False, "error": "需要 node_type"}
+        session, error = self._currentBuildSession()
+        if error is not None:
+            return error
+        try:
+            from neurova.collaboration.neurflow.custom_nodes import (
+                CustomNodeError,
+                get_custom_node_service,
+            )
+
+            service = get_custom_node_service()
+            existing = service.get_node(node_type)
+            if existing is None:
+                return {"success": False, "error": f"节点不存在: {node_type}"}
+            if existing.status != "draft":
+                return {"success": False, "error": "只允许删除 draft 节点；active 节点先停用/新批次处理"}
+            if existing.batch_id != session.batch_id:
+                return {"success": False, "error": "只能删除本构建批次的 draft 节点"}
+            if not service.delete_node(node_type):
+                return {"success": False, "error": f"删除失败: {node_type}"}
+            return {"success": True, "node_type": node_type}
+        except CustomNodeError as exc:
+            return {"success": False, "code": exc.code, "error": str(exc)}
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "error": f"删除自定义节点失败: {exc}"}
+
+    def _workflowBatchId(self, params: Dict) -> tuple:
+        """解析构建批次：有构建会话时必须与会话批次一致，无会话时用显式参数。"""
+        requested = str((params or {}).get("batch_id") or "").strip()
+        try:
+            from neurova.core.build_context import getCurrentBuildSessionId
+
+            session_id = str(getCurrentBuildSessionId() or "").strip()
+        except Exception:  # noqa: BLE001
+            session_id = ""
+        if not session_id:
+            return requested, None
+        try:
+            from neurova.build_mode import get_build_session_manager
+
+            session = get_build_session_manager().get(session_id)
+        except Exception as exc:  # noqa: BLE001
+            return "", {"success": False, "error": f"构建会话不可用: {exc}"}
+        if session is None or not session.batch_id:
+            return "", {"success": False, "error": "构建会话不存在或尚未批准，没有批次 ID"}
+        if requested and requested != session.batch_id:
+            return "", {
+                "success": False,
+                "code": "batch_mismatch",
+                "error": f"批次 ID 不匹配：会话批次为 {session.batch_id}，收到 {requested}",
+            }
+        return session.batch_id, None
+
+    async def _execute_workflow_definition_get(self, params: Dict) -> Dict:
+        workflow_id = str(params.get("workflow_id") or "").strip()
+        if not workflow_id:
+            return {"success": False, "code": "invalid_params", "error": "缺少 workflow_id"}
+        user_id, _ = self._agent_identity()
+        try:
+            from neurova.collaboration.neurflow.workflow_definition_editor import (
+                getWorkflowDefinition,
+            )
+
+            return getWorkflowDefinition(workflow_id, actorId=str(user_id or ""))
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "error": f"读取工作流定义失败: {exc}"}
+
+    async def _execute_workflow_definition_update(self, params: Dict) -> Dict:
+        workflow_id = str(params.get("workflow_id") or "").strip()
+        if not workflow_id:
+            return {"success": False, "code": "invalid_params", "error": "缺少 workflow_id"}
+        batch_id, error = self._workflowBatchId(params)
+        if error is not None:
+            return error
+        user_id, _ = self._agent_identity()
+        try:
+            from neurova.collaboration.neurflow.workflow_definition_editor import (
+                updateWorkflowDefinition,
+            )
+
+            return updateWorkflowDefinition(
+                workflow_id,
+                nodes=params.get("nodes"),
+                edges=params.get("edges"),
+                baseVersion=params.get("base_version"),
+                actorId=str(user_id or ""),
+                batchId=batch_id,
+                note=str(params.get("note") or ""),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "error": f"修改工作流定义失败: {exc}"}
+
+    async def _execute_workflow_definition_duplicate(self, params: Dict) -> Dict:
+        workflow_id = str(params.get("workflow_id") or "").strip()
+        if not workflow_id:
+            return {"success": False, "code": "invalid_params", "error": "缺少 workflow_id"}
+        batch_id, error = self._workflowBatchId(params)
+        if error is not None:
+            return error
+        user_id, _ = self._agent_identity()
+        try:
+            from neurova.collaboration.neurflow.workflow_definition_editor import (
+                duplicateWorkflowDefinition,
+            )
+
+            return duplicateWorkflowDefinition(
+                workflow_id,
+                name=str(params.get("name") or ""),
+                actorId=str(user_id or ""),
+                batchId=batch_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "error": f"复制工作流草稿失败: {exc}"}
+
+    async def _execute_workflow_rollback(self, params: Dict) -> Dict:
+        workflow_id = str(params.get("workflow_id") or "").strip()
+        if not workflow_id:
+            return {"success": False, "code": "invalid_params", "error": "缺少 workflow_id"}
+        batch_id, error = self._workflowBatchId(params)
+        if error is not None:
+            return error
+        user_id, _ = self._agent_identity()
+        try:
+            from neurova.collaboration.neurflow.workflow_definition_editor import (
+                rollbackWorkflowDefinition,
+            )
+
+            return rollbackWorkflowDefinition(
+                workflow_id,
+                targetVersion=params.get("target_version"),
+                actorId=str(user_id or ""),
+                batchId=batch_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "error": f"回滚工作流失败: {exc}"}
+
+    async def _execute_workflow_publish(self, params: Dict) -> Dict:
+        workflow_id = str(params.get("workflow_id") or "").strip()
+        if not workflow_id:
+            return {"success": False, "code": "invalid_params", "error": "缺少 workflow_id"}
+        batch_id, error = self._workflowBatchId(params)
+        if error is not None:
+            return error
+        user_id, _ = self._agent_identity()
+        try:
+            from neurova.collaboration.neurflow.workflow_definition_editor import (
+                publishWorkflowDefinition,
+            )
+
+            return publishWorkflowDefinition(
+                workflow_id,
+                actorId=str(user_id or ""),
+                batchId=batch_id,
+                note=str(params.get("note") or ""),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "error": f"发布工作流失败: {exc}"}
+
+    async def _execute_workflow_execute(self, params: Dict) -> Dict:
+        workflow_id = str(params.get("workflow_id") or "").strip()
+        if not workflow_id:
+            return {"success": False, "code": "invalid_params", "error": "缺少 workflow_id"}
+        inputs = params.get("inputs")
+        if inputs is not None and not isinstance(inputs, dict):
+            return {"success": False, "code": "invalid_params", "error": "inputs 必须是对象"}
+        user_id, agent_id = self._agent_identity()
+        try:
+            from neurova.collaboration.neurflow.workflow_definition_editor import (
+                executeWorkflowDefinition,
+            )
+
+            return await executeWorkflowDefinition(
+                workflow_id,
+                inputs=inputs or {},
+                allowDraft=bool(params.get("allow_draft")),
+                actorId=str(user_id or ""),
+                actorAgentId=str(agent_id or "") or None,
+                sessionId=self._canvas_session_id() or "",
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "error": f"执行工作流失败: {exc}"}
+
+    def _repairCommitAllowed(self) -> bool:
+        """提交已发布目标需要已批准构建会话或显式环境武装。"""
+        import os
+
+        if os.environ.get("NEUROVA_NODE_REPAIR_COMMIT") == "1":
+            return True
+        try:
+            from neurova.core.build_context import getCurrentBuildSessionId
+
+            session_id = str(getCurrentBuildSessionId() or "").strip()
+            if not session_id:
+                return False
+            from neurova.build_mode import get_build_session_manager
+
+            session = get_build_session_manager().get(session_id)
+            return bool(
+                session
+                and session.status in ("approved", "building")
+                and session.batch_id
+            )
+        except Exception:  # noqa: BLE001 - 解析失败按未授权处理
+            return False
+
+    async def _execute_node_env_preflight(self, params: Dict) -> Dict:
+        types = params.get("types")
+        if isinstance(types, str):
+            types = [types]
+        if not isinstance(types, list) or not [item for item in types if str(item).strip()]:
+            return {"success": False, "code": "invalid_params", "error": "需要非空的 types 列表"}
+        try:
+            from neurova.collaboration.neurflow.env_preflight import preflightNodeEnv
+
+            return preflightNodeEnv(types)
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "error": f"环境预检失败: {exc}"}
+
+    async def _execute_workflow_repair(self, params: Dict) -> Dict:
+        workflow_id = str(params.get("workflow_id") or "").strip()
+        canvas_id = str(params.get("canvas_id") or "").strip()
+        if bool(workflow_id) == bool(canvas_id):
+            return {
+                "success": False,
+                "code": "invalid_params",
+                "error": "workflow_id 与 canvas_id 必须且只能提供一个",
+            }
+        inputs = params.get("inputs")
+        if inputs is not None and not isinstance(inputs, dict):
+            return {"success": False, "code": "invalid_params", "error": "inputs 必须是对象"}
+        max_rounds = params.get("max_rounds", 5)
+        try:
+            max_rounds = int(max_rounds)
+        except (TypeError, ValueError):
+            return {"success": False, "code": "invalid_params", "error": "max_rounds 必须是 1-5"}
+        if not 1 <= max_rounds <= 5:
+            return {"success": False, "code": "invalid_params", "error": "max_rounds 必须是 1-5"}
+        batch_id, error = self._workflowBatchId(params)
+        if error is not None:
+            return error
+        user_id, agent_id = self._agent_identity()
+        try:
+            from neurova.collaboration.neurflow.workflow_repair import (
+                WorkflowRepairSupervisor,
+            )
+
+            supervisor = WorkflowRepairSupervisor(
+                allowCommit=self._repairCommitAllowed(),
+                maxRounds=max_rounds,
+            )
+            return await supervisor.repair(
+                workflowId=workflow_id or None,
+                canvasId=canvas_id or None,
+                inputs=inputs or {},
+                commit=bool(params.get("commit", True)),
+                actorId=str(user_id or ""),
+                actorAgentId=str(agent_id or "") or None,
+                sessionId=self._canvas_session_id() or "",
+                batchId=batch_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"success": False, "error": f"工作流自愈失败: {exc}"}
+
+    async def _execute_sync_nodes(self, params: Dict) -> Dict:
+        """把节点适配器同步进当前进程注册表（幂等）。"""
+        scope = str(params.get("scope") or "all").strip().lower()
+        try:
+            from neurova.collaboration.neurflow.adapters import (
+                sync_mcp,
+                sync_skills,
+                sync_tools,
+            )
+            from neurova.collaboration.neurflow.node_registry import get_node_registry
+
+            registry = get_node_registry()
+            if scope == "all":
+                counts = registry.sync_all()
+            elif scope == "tools":
+                counts = {"tools": sync_tools(registry)}
+            elif scope == "skills":
+                counts = {"skills": sync_skills(registry)}
+            elif scope == "mcp":
+                counts = {"mcp": sync_mcp(registry)}
+            elif scope == "custom":
+                from neurova.collaboration.neurflow.custom_nodes import get_custom_node_service
+
+                counts = {"custom": get_custom_node_service().load_into_registry(registry)}
+            elif scope in ("commerce", "drama", "comfyui"):
+                if scope == "commerce":
+                    from neurova.collaboration.neurflow.commerce_nodes import register_commerce_nodes
+
+                    counts = {"commerce": register_commerce_nodes(registry)}
+                elif scope == "drama":
+                    from neurova.collaboration.neurflow.drama_nodes import register_drama_nodes
+
+                    counts = {"drama": register_drama_nodes(registry)}
+                else:
+                    from neurova.collaboration.neurflow.comfyui_nodes import register_comfyui_nodes
+
+                    counts = {"comfyui": register_comfyui_nodes(registry)}
+            else:
+                return {"success": False, "error": f"未知同步范围: {scope}"}
+            return {
+                "success": True,
+                "scope": scope,
+                "counts": counts,
+                "registered": len(registry.list_all()),
+            }
+        except Exception as exc:  # noqa: BLE001 - 同步失败如实返回
+            logger.warning("sync_nodes 失败: %s", exc)
+            return {"success": False, "error": f"sync_nodes 失败: {exc}"}
+
+    async def _execute_schedule_task(self, params: Dict) -> Dict:
+        """创建/查看/取消平台定时任务（Agent 自建持续任务）。
+
+        只允许操作当前 Agent 自己的任务；有任务落库后拉起调度线程，
+        进程重启则由启动装配按 pending 任务恢复。
+        """
+        action = str(params.get("action") or "").strip().lower()
+        try:
+            from neurova.collaborate.workflow.models import ScheduledTask, compute_next_run
+            from neurova.collaborate.workflow.scheduler import (
+                ensure_scheduler_running,
+                get_scheduler,
+                register_action_handlers,
+            )
+        except Exception as e:  # noqa: BLE001 - 调度器不可用要如实报错
+            return {"success": False, "error": f"调度器不可用: {e}"}
+
+        scheduler = get_scheduler()
+        try:
+            register_action_handlers(scheduler)
+        except Exception as e:  # noqa: BLE001 - 注册失败不得让工具看起来可用
+            return {"success": False, "error": f"调度处理器注册失败: {e}"}
+
+        user_id, agent_id = self._agent_identity()
+        current_agent = str(agent_id or "default")
+
+        if action == "create":
+            requested = str(params.get("agent_id") or "").strip()
+            if requested and requested != current_agent:
+                return {
+                    "success": False,
+                    "error": f"只能给自己创建定时任务（当前 {current_agent}，收到 {requested}）",
+                }
+
+            cron = str(params.get("cron_expression") or "").strip()
+            interval_raw = params.get("interval_seconds")
+            interval = None
+            if interval_raw not in (None, ""):
+                try:
+                    interval = int(interval_raw)
+                except (TypeError, ValueError):
+                    return {"success": False, "error": "interval_seconds 必须是整数秒"}
+                if interval <= 0:
+                    return {"success": False, "error": "interval_seconds 必须大于 0"}
+            if not cron and interval is None:
+                return {"success": False, "error": "create 需要 cron_expression 或 interval_seconds"}
+
+            workflow_id = str(params.get("workflow_id") or "").strip()
+            canvas_id = str(params.get("canvas_id") or "").strip()
+            message = str(params.get("message") or "").strip()
+            if canvas_id:
+                # 定时执行会以系统身份读画布；建任务时先按属主校验，
+                # 防知道 id 就能把别人的画布挂上定时器。
+                try:
+                    from neurova.collaboration.canvas_store import get_canvas_store
+
+                    record = get_canvas_store().get(canvas_id, requester_id=None)
+                except Exception as e:  # noqa: BLE001 - 读取失败按不可用处理
+                    return {"success": False, "error": f"画布读取失败: {e}"}
+                if record is None:
+                    return {"success": False, "error": f"画布不存在: {canvas_id}"}
+                owner = str(record.get("user_id") or "default")
+                if owner not in ("default", str(user_id or "")):
+                    return {
+                        "success": False,
+                        "error": "只能给自己的画布创建定时任务",
+                    }
+                targetAction = "run_canvas"
+                taskParams = {"canvas_id": canvas_id, "user_id": user_id}
+            elif workflow_id:
+                targetAction = "run_workflow"
+                taskParams = {"workflow_id": workflow_id, "user_id": user_id}
+            elif message:
+                targetAction = "send_message"
+                taskParams = {"message": message}
+            else:
+                return {
+                    "success": False,
+                    "error": "create 需要 message / workflow_id / canvas_id 之一",
+                }
+
+            max_runs = params.get("max_runs")
+            if max_runs not in (None, ""):
+                try:
+                    max_runs = int(max_runs)
+                except (TypeError, ValueError):
+                    return {"success": False, "error": "max_runs 必须是整数"}
+
+            task = ScheduledTask(
+                name=str(params.get("name") or "定时任务").strip() or "定时任务",
+                description=str(params.get("description") or ""),
+                interval_seconds=interval,
+                cron_expression=cron or None,
+                agent_id=current_agent,
+                action=targetAction,
+                parameters=taskParams,
+                max_runs=max_runs if max_runs not in (None, "") else None,
+            )
+            if cron:
+                task.next_run_at = compute_next_run(cron_expression=cron)
+                if task.next_run_at is None:
+                    return {
+                        "success": False,
+                        "error": f"cron 表达式无法解析（需要 5 段：分 时 日 月 周）: {cron!r}",
+                    }
+            else:
+                task.next_run_at = compute_next_run(interval_seconds=interval)
+            if not scheduler.add_task(task):
+                return {"success": False, "error": "任务添加失败（ID 冲突）"}
+            ensure_scheduler_running(scheduler)
+            logger.info(
+                "schedule_task created: %s (%s, %s)", task.task_id, task.name, targetAction
+            )
+            return {"success": True, "task": task.to_dict()}
+
+        if action == "list":
+            tasks = [
+                task.to_dict()
+                for task in scheduler.list_tasks()
+                if (task.agent_id or current_agent) == current_agent
+            ]
+            return {"success": True, "tasks": tasks, "count": len(tasks)}
+
+        if action == "cancel":
+            task_id = str(params.get("task_id") or "").strip()
+            if not task_id:
+                return {"success": False, "error": "cancel 需要 task_id"}
+            task = scheduler.get_task(task_id)
+            if task is None:
+                return {"success": False, "error": f"任务不存在: {task_id}"}
+            if task.agent_id and task.agent_id != current_agent:
+                return {
+                    "success": False,
+                    "error": "只能取消自己 Agent 的定时任务",
+                    "task": task.to_dict(),
+                }
+            cancelled = scheduler.cancel_task(task_id)
+            if cancelled is None:
+                return {"success": False, "error": f"任务取消失败: {task_id}"}
+            return {"success": True, "task": cancelled.to_dict()}
+
+        return {"success": False, "error": f"未知 action: {action!r}（create / list / cancel）"}
+
     # ── 画布工具（CanvasOpService 语义操作层的薄封装） ───────────
     # 所有写操作经 canvas_ops（与 HTTP 端点 /canvas/{id}/ops 共用同一层，
     # 乐观锁 + 事件广播）。错误统一转为 {"success": False, "code": ...}
@@ -2597,6 +3301,23 @@ class ToolExecutor:
         if self._is_canvas_error(nodes):
             return nodes
         return {"success": True, "nodes": nodes, "count": len(nodes)}
+
+    async def _execute_node_schema(self, params: Dict) -> Dict:
+        node_type = str(params.get("node_type") or "").strip()
+        if not node_type:
+            return {"success": False, "code": "invalid_params", "error": "缺少 node_type"}
+        nodes = await self._canvas_call("list_nodes", query=node_type, limit=20)
+        if self._is_canvas_error(nodes):
+            return nodes
+        exact = next((item for item in nodes or [] if item.get("type") == node_type), None)
+        if exact is None:
+            return {
+                "success": False,
+                "code": "unknown_node_type",
+                "error": f"节点类型不存在: {node_type}",
+                "candidates": [item.get("type") for item in nodes or []][:10],
+            }
+        return {"success": True, "node": exact}
 
     async def _execute_canvas_run(self, params: Dict) -> Dict:
         """编译画布 → neurflow 同步执行 → 返回节点级结果摘要"""
