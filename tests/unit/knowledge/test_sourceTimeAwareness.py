@@ -88,6 +88,39 @@ class TestSameSourceReingest:
         assert all(i.get("source_updated") is not True for i in items)
 
 
+class TestSameSourceReingestReindexesIndex:
+    """P1-4（审计 2026-11-04）：TB 覆盖必须登记索引重排。
+
+    缺陷：TB 分支覆写 chunks/parents/content_fingerprint 并落盘后直接
+    return，未像其余全部内容变更点那样登记 `_record_index_op("reindex", ...)`
+    ——向量索引仍持旧代分片，覆盖后检索照旧命中旧文本与旧块级明细。
+    """
+
+    def test_tbCoverRecordsReindexOp(self, repo):
+        first = repo.create_knowledge(
+            agent_id="a1", title="课件", content="旧版正文",
+            source="import:课件.pdf", source_type="pdf",
+            source_path="docs/课件.pdf", dedupe=True,
+            source_modified_at="2024-03-01T08:00:00+00:00",
+        )
+        # 索引置于"已建立、干净"态（增量路径生效的前提，沿
+        # test_knowledge_index_incremental._built 同形态）
+        repo._rebuild_vector_index_for_agent("a1")
+        assert repo._index_dirty is False
+
+        second = repo.create_knowledge(
+            agent_id="a1", title="课件", content="新版正文",
+            source="import:课件.pdf", source_type="pdf",
+            source_path="docs/课件.pdf", dedupe=True,
+            source_modified_at="2026-01-02T10:00:00+00:00",
+        )
+        assert second["source_updated"] is True, "前置：必须确实走 TB 覆盖分支"
+        assert any(
+            kind == "reindex" and str(kid) == str(first["knowledge_id"])
+            for kind, kid in repo._pending_ops
+        ), "TB 覆盖后未登记 reindex——向量索引仍持旧代分片，检索会回旧文本"
+
+
 class TestConflictTimeContext:
     def test_conflictRecordCarriesTimeContext(self, repo):
         repo.create_knowledge(

@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from neurova.core.lazy_singleton import lazySingleton
 from neurova.core.logger import get_logger
-from neurova.knowledge.document_pipeline import DocumentParseError, parse_document
+from neurova.knowledge.document_pipeline import DocumentParseError, parse_document, resolveSourceDates
 from neurova.knowledge.ingest_bus import (
     KB_INGEST_RESULT_TOPIC,
     KB_INGEST_WECOM_TOPIC,
@@ -219,6 +219,10 @@ class KnowledgeIngestBridge:
                 parse_document, documentBytes, filename,
                 source_path=source, source_type=sourceType, ocr_mode="auto",
             )
+            # P1-5（审计 2026-11-04）：企微边界与文件导入同口径透传源时间
+            #（批 TA 只接了 knowledge_ingestion 一条边界，这里是同一根因的第二命中点）。
+            srcCreated, srcModified = resolveSourceDates(
+                dict(parsed.metadata or {}), ingest_time=str(parsed.ingest_time or ""))
             item = repo.create_knowledge(
                 agent_id=agent,
                 title=str(parsed.metadata.get("title") or filename),
@@ -236,6 +240,8 @@ class KnowledgeIngestBridge:
                 source_type=sourceType,
                 source_path=source,
                 ingest_time=parsed.ingest_time,
+                source_created_at=srcCreated,
+                source_modified_at=srcModified,
                 page_count=parsed.metadata.get("page_count"),
                 ocr_used=bool(parsed.metadata.get("ocr_used")),
                 ocr_engine=str(parsed.metadata.get("ocr_engine") or ""),

@@ -21,24 +21,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 
 from neurova.api.auth import get_current_user_or_service
 from neurova.core.logger import get_logger
+from neurova.knowledge.document_pipeline import resolveSourceDates
 from neurova.knowledge.url_guard import validate_public_http_url
 from neurova.api.endpoints.knowledge_common import get_repository
 
 logger = get_logger(__name__)
 
 router = APIRouter()
-
-
-def _resolveSourceDates(metadata: Dict[str, Any], *, ingest_time: str) -> tuple:
-    """源文档自身时间（批 TA）：管线元数据优先；缺失回退抓取（入库）时刻——
-    诚实记"我知道的最早时间"，不编造更早的历史；两者皆缺留空。"""
-    created = str(metadata.get("created_at") or "")
-    modified = str(metadata.get("modified_at") or "")
-    if not created:
-        created = ingest_time
-    if not modified:
-        modified = ingest_time or created
-    return created, modified
 
 
 def _build_item_dict(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -229,7 +218,7 @@ def _import_file_data(
         return [], "parse_failed:%s" % type(exc).__name__
 
     repo = get_repository()
-    srcCreated, srcModified = _resolveSourceDates(
+    srcCreated, srcModified = resolveSourceDates(
         parsed.metadata, ingest_time=str(parsed.ingest_time or ""))
     title = str(parsed.metadata.get("title") or _title_from_filename(filename))
     item = repo.create_knowledge(

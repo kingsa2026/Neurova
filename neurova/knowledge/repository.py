@@ -894,6 +894,10 @@ class KnowledgeRepository:
                         if evidence.get("source") and evidence not in sources:
                             sources.append(evidence)
                         self._save()
+                        # P1-4（审计 2026-11-04）：TB 覆盖同样是内容变更点，
+                        # 必须登记分片级重排——缺了它向量索引仍持旧代分片，
+                        # 检索照旧命中旧文本与旧块级明细。与创建路径同口径。
+                        self._record_index_op("reindex", str(existing.get("knowledge_id") or ""))
                         updated = dict(existing)
                         updated["source_updated"] = True
                         return updated

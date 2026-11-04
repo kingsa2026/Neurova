@@ -49,6 +49,25 @@ _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 _PAGE_NO_RE = re.compile(r"^\s*(?:第\s*)?\d+\s*(?:页|/\s*\d+)?\s*$")
 
 
+def resolveSourceDates(metadata: Dict[str, Any], *, ingest_time: str) -> tuple:
+    """源文档自身时间（批 TA，P1-5 起为全仓唯一事实源）。
+
+    管线元数据优先（created_at/modified_at）；缺失回退抓取（入库）时刻——
+    诚实记"我知道的最早时间"，不编造更早的历史；两者皆缺留空。
+
+    消费方：knowledge_ingestion._import_file_data（文件/网页导入）与
+    knowledge.ingest_bridge._ingestPayload（企微入站）。两边界消费同一
+    parse_document 产物，口径必须同源——第二份定义即漂移温床。
+    """
+    created = str(metadata.get("created_at") or "")
+    modified = str(metadata.get("modified_at") or "")
+    if not created:
+        created = ingest_time
+    if not modified:
+        modified = ingest_time or created
+    return created, modified
+
+
 class DocumentParseError(RuntimeError):
     """带可读原因的解析失败；调用方把 reason 原样报给用户。"""
 
