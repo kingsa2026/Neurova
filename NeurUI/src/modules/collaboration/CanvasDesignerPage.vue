@@ -244,7 +244,7 @@
           {{ t('canvas.canvasHint') }}
         </p>
 
-        <!-- 小地图（遗留 F）：固定右下角，不随画布平移缩放 -->
+        <!-- 小地图（遗留 F）：固定左下角，不随画布平移缩放；右下角留给 AI 设计对话框 -->
         <MiniMap
           :nodes="canvasNodes"
           :viewport="viewport"
@@ -2722,7 +2722,7 @@ onBeforeUnmount(() => {
 
 .connect-hint {
   position: absolute;
-  bottom: 10px;
+  bottom: 186px; /* 小地图（12+120）+ 缩放栏（144+34）+ 间隔；三者都走左侧同列 */
   left: 14px;
   font-size: 12px;
   color: var(--nr-text-tertiary);
@@ -2748,8 +2748,8 @@ onBeforeUnmount(() => {
 /* 缩放控制栏 */
 .canvas-zoombar {
   position: absolute;
-  right: 14px;
-  bottom: 144px; /* mini 地图上方（mini 120px + 12px 间隔），避免右下角重叠 */
+  left: 14px;
+  bottom: 144px; /* 位于左下小地图上方（mini 120px + 底距 12px + 间隔 12px），同列堆叠 */
   display: flex;
   align-items: center;
   gap: 4px;

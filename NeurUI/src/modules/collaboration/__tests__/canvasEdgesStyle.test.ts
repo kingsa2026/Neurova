@@ -57,8 +57,24 @@ describe('canvas-edges overflow contract', () => {
     const minimapIdx = vueSrc.indexOf('<MiniMap')
     expect(zoombarIdx).toBeGreaterThan(graphClose)
     expect(minimapIdx).toBeGreaterThan(graphClose)
-    // 缩放栏让位小地图：bottom 需 >= 130px（mini 120 + 间隔）
+    // 缩放栏跟随小地图走左下同列：底部抬高到小地图上方（mini 120 + 间隔）
     const zoombarCss = vueSrc.match(/\.canvas-zoombar\s*\{[^}]*\}/)![0]
+    expect(zoombarCss).toMatch(/left:\s*14px/)
+    expect(zoombarCss).not.toMatch(/right:/)
     expect(zoombarCss).toMatch(/bottom:\s*(1[3-9]\d|\d{3,})px/)
+  })
+
+  it('小地图固定左下角，右下角让给 AI 设计对话框', () => {
+    const miniSrc = readFileSync(
+      resolve(process.cwd(), 'src/modules/collaboration/MiniMap.vue'),
+      'utf-8',
+    ).replace(/\r\n/g, '\n')
+    const miniCss = miniSrc.match(/\.canvas-minimap\s*\{[^}]*\}/)
+    expect(miniCss, '未找到 .canvas-minimap 样式块').not.toBeNull()
+    expect(miniCss![0]).toMatch(/left:\s*12px/)
+    expect(miniCss![0]).toMatch(/bottom:\s*12px/)
+    expect(miniCss![0]).not.toMatch(/right:/)
+    // 辅助视图的层级必须低于 AI 设计对话框（.nl-designer z-index: 30）
+    expect(miniCss![0]).toMatch(/z-index:\s*20/)
   })
 })

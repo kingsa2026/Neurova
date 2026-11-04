@@ -129,12 +129,58 @@
       <GlassNavItem to="/dashboard" :label="t('nav.dashboard')" :collapsed="appStore.sidebarCollapsed">
         <template #icon><DashboardOutlined /></template>
       </GlassNavItem>
+
       <GlassNavItem to="/agents" :label="t('nav.agents')" :collapsed="appStore.sidebarCollapsed" v-if="can('/agents')">
         <template #icon><RobotOutlined /></template>
       </GlassNavItem>
+      <!-- 用户: 协作（默认展开，首次访问即可见；用户手动折叠后以持久化为准） -->
+      <GlassNavGroup
+        v-if="can('/collaboration')"
+        :label-key="'nav.collaboration'"
+        storage-key="user-collaboration"
+        :collapsed="appStore.sidebarCollapsed"
+        :default-open="true"
+        first-item-to="/collaboration/hub"
+        active-path-prefix="/collaboration/"
+        :count="10"
+      >
+        <template #icon><TeamOutlined /></template>
+        <GlassNavItem to="/collaboration/hub" :label="t('nav.collabHub')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
+          <template #icon><DashboardOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/collaboration/canvas" :label="t('nav.collabCanvas')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
+          <template #icon><BgColorsOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/collaboration/projects" :label="t('nav.projects')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
+          <template #icon><ProjectOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/collaboration/sessions" :label="t('nav.collabSessions')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
+          <template #icon><TeamOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/collaboration/workflows" :label="t('nav.workflows')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
+          <template #icon><RocketOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/collaboration/templates" :label="t('nav.collaborationtemplates')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
+          <template #icon><NodeIndexOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/collaboration/teams" :label="t('nav.teams')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
+          <template #icon><TeamOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/collaboration/tasks" :label="t('nav.tasks')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
+          <template #icon><ClockCircleOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/collaboration/webhooks" :label="t('nav.webhooks')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
+          <template #icon><BranchesOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/collaboration/session-sync" :label="t('nav.sessionsync')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
+          <template #icon><ApiOutlined /></template>
+        </GlassNavItem>
+      </GlassNavGroup>
+
       <GlassNavItem to="/knowledge" :label="t('nav.knowledge')" :collapsed="appStore.sidebarCollapsed" v-if="can('/knowledge')">
         <template #icon><BookOutlined /></template>
       </GlassNavItem>
+
       <GlassNavItem to="/skill-pool" :label="t('nav.skillPool')" :collapsed="appStore.sidebarCollapsed" v-if="can('/skill-pool')">
         <template #icon><AppstoreOutlined /></template>
       </GlassNavItem>
@@ -151,49 +197,6 @@
       <GlassNavItem to="/my-credentials" :label="t('nav.myCredentials')" :collapsed="appStore.sidebarCollapsed" v-if="can('/my-credentials')">
         <template #icon><SafetyOutlined /></template>
       </GlassNavItem>
-
-      <!-- 用户: 协作（低频折叠） -->
-      <GlassNavGroup
-        v-if="can('/collaboration')"
-        :label-key="'nav.collaboration'"
-        storage-key="user-collaboration"
-        :collapsed="appStore.sidebarCollapsed"
-        first-item-to="/collaboration/hub"
-        active-path-prefix="/collaboration/"
-        :count="10"
-      >
-        <template #icon><TeamOutlined /></template>
-        <GlassNavItem to="/collaboration/hub" :label="t('nav.collabHub')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
-          <template #icon><DashboardOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem to="/collaboration/sessions" :label="t('nav.collabSessions')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
-          <template #icon><TeamOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem to="/collaboration/workflows" :label="t('nav.workflows')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
-          <template #icon><RocketOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem to="/collaboration/canvas" :label="t('nav.collabCanvas')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
-          <template #icon><BgColorsOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem to="/collaboration/templates" :label="t('nav.collaborationtemplates')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
-          <template #icon><NodeIndexOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem to="/collaboration/projects" :label="t('nav.projects')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
-          <template #icon><ProjectOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem to="/collaboration/teams" :label="t('nav.teams')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
-          <template #icon><TeamOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem to="/collaboration/tasks" :label="t('nav.tasks')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
-          <template #icon><ClockCircleOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem to="/collaboration/webhooks" :label="t('nav.webhooks')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
-          <template #icon><BranchesOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem to="/collaboration/session-sync" :label="t('nav.sessionsync')" :collapsed="appStore.sidebarCollapsed" v-if="can('/collaboration')">
-          <template #icon><ApiOutlined /></template>
-        </GlassNavItem>
-      </GlassNavGroup>
 
       <!-- 渠道接入：全局功能，不归属协作域计数 -->
       <GlassNavItem to="/channels" :label="t('nav.channels')" :collapsed="appStore.sidebarCollapsed" v-if="can('/channels')">
