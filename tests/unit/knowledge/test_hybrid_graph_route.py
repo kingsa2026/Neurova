@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""图谱条目影子路由：默认不改序，开启后计分并附 graph_support。"""
+"""图谱条目路由：shadow 态不改序，on 态计分并附 graph_support。
+
+C1 转正（2026-11-05）：adapter 默认态由 shadow 改 on（真管线实测 NDCGΔ=+0.0615、
+零回归）；本文件的 shadow 断言显式设 env 钉住「shadow 态权重 0」语义。
+"""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -45,7 +49,9 @@ def testGraphShadowDoesNotChangeOrderButAttachesEvidence(tmp_path):
     assert boosted[0]["knowledge_id"] == k2["knowledge_id"]
 
 
-def testAdapterMapsGraphHopsToEntryRanks():
+def testAdapterMapsGraphHopsToEntryRanks(monkeypatch):
+    # 默认态已转正 on（test_graphRouteDefaultOn）；本例显式 shadow 钉旧语义。
+    monkeypatch.setenv("NEUROVA_KB_GRAPH_ROUTE", "shadow")
     adapter = KnowledgeRetrieverAdapter(repo=None, graphWalker=_Walker())
     context = SimpleNamespace(query="甲方", limit=5, metadata={"tenant_id": "t1"})
 
