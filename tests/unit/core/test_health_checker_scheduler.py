@@ -44,7 +44,9 @@ def _client(checker):
     state = AppState()
     state.health_checker = checker
     _add_health_routes(app, state)
-    return TestClient(app)
+    # /health/detailed 默认只允许回环（NEUROVA_HEALTH_ACCESS=local）；
+    # 这里用真回环 client 身份走默认策略，而不是给测试开 public 后门。
+    return TestClient(app, client=("127.0.0.1", 50000))
 
 
 def test_detailed_reads_cache_and_reports_freshness():
@@ -71,6 +73,6 @@ def test_detailed_reads_cache_and_reports_freshness():
 def test_detailed_without_checker_is_explicit():
     app = FastAPI()
     _add_health_routes(app, AppState())
-    body = TestClient(app).get("/health/detailed").json()
+    body = TestClient(app, client=("127.0.0.1", 50000)).get("/health/detailed").json()
     assert body["status"] == "unknown"
     assert body["cached"] is False
