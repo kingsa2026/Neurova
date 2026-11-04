@@ -11796,3 +11796,54 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **两处过程自报**：① 回写脚本首版拿 `git ls-files` 的默认转义输出对表中文路径，把 13 档**已跟踪**文档误判成未跟踪（`core.quotepath` 把名字打成八进制转义串），改 `-z` 取数后真未跟踪只剩 1 档——判据前提错了，整批回写就会漏掉大半；② 首版长度对表按「每号一处」算，同档多次命中当场自曝（断言在写盘之前，未落坏字节，但那一版会在第一个多次命中的档上停下）。
     - **仍开**：① **已双推的 HEAD 在受保护子集内有 12 条在册红**：`test_api_inventory_guard`／`test_api_inventory_freshness_guard`／`test_archive_nav_impact_guard`／`test_deploy_config_guard`／`test_legacy_ref_ledger_guard`／`test_docs_name_collision_guard`／`test_ci_ast_scan_budget_guard`／`test_tool_loop_ticket_set_guard` 一族，全是「文档机器块 vs 生成器」形状；仓外纯 HEAD 树复跑逐条同号 ⇒ 预存红、非本批引入，但 CI 此刻是红的，需单开一批重生成；② 并发「广告调优＋Agent 节点编排」两批的代提交按实测**否决**：HEAD＋其 5 件未跟踪＝**30 红**，叠 8 件配套在途件＝**36 绿**，全子集 A/B 差集＝该批引入 **5 条新红**（提示面让位基线 3／工具声明证据行 1／reproducible 覆盖 1），且这 5 条在**其自己的工作树里现跑仍红** ⇒ 该批未完备，不由我落笔；③ 扫描面读磁盘而非索引，本地与 CI 的读数会差在未跟踪件上（本批现差 5 枚），要收口得让 `markdownFiles()` 走 `git ls-files -z`；④ 沿 532／531／530／529／528／527／526／525／524／522／521／520／518／515／514／513／512／511／510／509／508／507／506／505／504／500／499／497 不变。
     - **下一枚空号现查**：本格取 533，后继从 534 起。推送态不在此预填数字。
+534. **全库审计批重放①：模型写面匿名可写、服务端首号 fail-open、SSRF 302 绕过（P1-1/P1-2/P1-3）** ✅🟢 —— 2026-11-04 全库代码审计（六批次并行只读＋主会话复算，24 项实证缺陷＝P1×8/P2×15/P3×9；全字段与活体证据见 audit-reports/fullrepo-code-audit-2026-11-04.md，下称详录）的台账欠账，本批 534..542 九格重放。此前并发会话曾以一笔八格落过 P1（旧号段 521..528），被并发重写历史整段撤账（撤账现场有专格在案，号在例外清单署名组；525 格仍开⑥「是否重放，需人裁」）——用户点单「处理台账欠账」即重放裁定；旧号段现已被规范批占用，不复用。
+    - **缺陷与根因（详录 §4.1，主会话复算 ✅）**：①model.py 九个非 GET 端点挂 get_optional_user（未认证返回 None 不拒），NEUROVA_GLOBAL_AUTH 默认 off 无兜底 ⇒ 0.0.0.0 部署下匿名删改模型配置，/check-connection 兼作匿名 SSRF 探测原语；②首账号注册缺引导令牌仅 warning 放行，而 compose/helm 均不配令牌 ⇒ 公网首访注册即管理员；③web_reach 只守首跳，http_fetch 双引擎默认跟随重定向 ⇒ 公网 URL 一跳进环回/云元数据的可读型 SSRF。三条在容器部署形态可串联成全站接管链。
+    - **修复**：实施笔 31560d222——非 GET 全落 get_current_user；服务端形态（NEUROVA_HOST 非环回）缺令牌 403 fail-closed（桌面行为钉住不变）；http_fetch 双引擎禁自动跟随＋显式逐跳循环＋url_validator 注入口，reach 两咽喉点接线 _validateHopUrl。
+    - **红绿灯与活体**：test_model_write_auth_gate 11 用例（匿名 DELETE 修前 200 实证红灯）＋test_http_fetch_redirect_guard 5 用例；既有 4 套件契约跟随。live-verify 9527 真后端：匿名 check-connection／DELETE → 401、GET → 200；真 curl_cffi＋真本地 302 跳环回：守卫链 ValueError 拒、无守卫链到终址（跟随能力本身实证）。
+    - **仍开**：无（角色级收口后续见 542 裁定格）。
+    - **下一枚空号现查**：本格取 534，后继从 535 起。
+535. **全库审计批重放②：TB 覆盖绕过索引重排、企微边界丢源时间、TB 闸门绕指纹去重（P1-4/P1-5/P2-5）** ✅🟢
+    - **缺陷（详录 §4.1/4.2）**：①TB 更新重入库分支覆写 chunks/parents/content_fingerprint 后直接 return，独缺 _record_index_op("reindex")（其余全部内容变更点均有，grep 全分布复算）⇒ 覆盖后向量索引仍持旧代分片，检索照旧回旧文本；②批 TA 只接 knowledge_ingestion 一条摄取边界，ingest_bridge 消费同一 parse_document 产物却未透传源时间 ⇒ wecom 条目三时间戳恒空：TB 对它永不触发、TD① 按源时间过滤全排除、前端列恒空；③TB 判据只看源修改钟且回退钟（入库时刻）恒更晚、不比内容 ⇒ 未改动文件重复导入追加空修订，同名不同文被后导者静默覆盖。
+    - **修复**：1e0922aa2（TB 补 reindex 登记；resolveSourceDates 单源迁 document_pipeline，ingest_bridge 同口径透传——教义 6 收口）；1a1b45648（TB 先过 content_fingerprint 去重短路，回退钟与裸文件名不再当稳定锚点）。
+    - **红绿灯**：test_sourceTimeAwareness 补 TestSameSourceReingestReindexesIndex＋test_wecomIngestSourceDates 两用例；真管线 E2E（test_sourceTimestampImportE2E，真 docx→真端点）绿。
+    - **仍开**：TD② 打分衰减与 facts 层钟细化（设计文档在册尾巴，非缺陷）。
+    - **下一枚空号现查**：本格取 535，后继从 536 起。
+536. **全库审计批重放③：桌面运行时下载链零完整性校验（P1-6）** ✅🟢
+    - **缺陷（详录 §4.1，grep 复算 sha256/digest 零命中）**：MANIFEST 只写 version＋urls，lib.rs 下载完直接解压为后端解释器/Node，候选源含两个第三方镜像 ⇒ 镜像投毒即任意代码执行；守卫只钉路由不钉完整性；本通道未在任何台账登记（与已修的技能/插件通道同类不同命）。
+    - **修复**：实施笔 333a0e5b1——MANIFEST 双归档钉 sha256；lib.rs sha2 0.10（锁内既有依赖）sha256_file/verify_sha256，逐候选下载先校验再解压，摘要不符诚实报期望/实际不进解压；test_route_b_runtime_download 扩守卫（钉值格式＋校验调用序源级咬合）。
+    - **实测**：两份钉值经真下载现算吻合（npmmirror 现取，记录见详录 §11）；cargo check 52.05s Finished（编译验证；曾因 .cargo 死 linker 钉值必败，根治见 542）。
+    - **仍开**：pip 侧 --require-hashes（依赖面全量钉哈希，独立批）。
+    - **下一枚空号现查**：本格取 536，后继从 537 起。
+537. **全库审计批重放④：前端双死码与 SSE 死链（P1-7/P1-8/P2-11/P2-12）** ✅🟢
+    - **缺陷（详录 §4.1/4.2，grep 排除自身零引用复算）**：①stores/collaboration.optimized.ts 与 chat.optimized.ts 全仓零引用，且与活实现同名导出、同 Pinia store id——IDE 补全一建议即互踩（教义 6/7 第二份定义）；②getConsoleChatSSEUrl 指向后端不存在的 /console/chat/stream 且自身零调用；③stores/utils.ts 七个导出零消费；④知识条目 created_at 类型声明 string 实发 epoch 秒，同文件 revisions 的同名 updated_at 又真是 ISO——同名字段两量纲全靠声明区分，声明错一处即复现 1970/Invalid Date 回归。
+    - **修复**：实施笔 dfd73a254——双 optimized store 与 stores/utils 删净、SSE 死函数删＋注释指回真端点、created_at/updated_at 改 number；新增退役守卫 retiredArtifacts.test.ts 咬合。
+    - **红绿灯**：vitest 285 文件 2313 用例全绿＋vue-tsc 过。
+    - **下一枚空号现查**：本格取 537，后继从 538 起。
+538. **全库审计批重放⑤：Tauri CSP 缺失、安装器口令进命令行、AppContainer 清理静默失败（P2-3/P2-4/P3-6）** ✅🟢
+    - **缺陷（详录 §4.2/4.3）**：①tauri.conf.json csp:null＋withGlobalTauri——主窗渲染 LLM 生成内容，一旦前端有注入点无 CSP 兜底可直调自定义命令（capability 面已收窄故非 P1）；②管理员明文口令拼进 NSIS 进程命令行，同机低权进程经 WMI 可读（ini 落盘侧原有「首启即删」补偿，命令行这半无）；③Windows AppContainer profile 删除失败静默吞，残留 profile 致下次同名创建报错，连锁无痕。
+    - **修复**：38b1a30a8（显式 CSP，connect-src 白名单 9527/8100）；a371fb146（口令改临时凭据文件传递，不再拼命令行）；9a8ead1f8（命中已存在 profile 复用；WPF bootstrap ini 降纯兜底）。
+    - **红绿灯**：前端两道门＋桌面套件绿；cargo check 见 536/542。
+    - **下一枚空号现查**：本格取 538，后继从 539 起。
+539. **全库审计批重放⑥：无痕吞异常五处、账本单例改绑、硬编码本机路径、端口无守卫、非法日期静默收窄、memory 死键、注释漂移、2>nul（P2-6/P2-7/P2-14/P2-15/P3-1/P3-4/P3-5/P3-8/P3-9）** ✅🟢
+    - **缺陷（详录 §4.2/4.3）**：tool_engine 参数反射失败 except:pass 无痕（LLM 工具 schema 静默退化，同函数唯一静默点）；supervisor 账本单例带参无条件覆盖（连接泄漏＋账本分裂＋未 DCL）；expand_nsi_template 硬编码 C 盘他人主目录（他人环境必挂，docstring 还自称 /tmp）；scripts/config 端口常量不在部署一致性比对面；source_modified_after/before 非法格式静默收窄结果集；memory 门面两个 _MODULE_MAP 死键指向已删模块每次 import 必败吞 debug（旧账 §6-372 处置残留）；观测链路四处无痕 except（execution_monitor 三处＋db_indexes）；start_server 注释称默认 0.0.0.0 实为 127.0.0.1；cnb_release_assets 用 Windows 专用 2>nul 重定向。
+    - **修复**：实施笔 c6583b158 一批（各点 debug/warning 留痕、单例拒绝静默改绑、tempfile 化、端口纳入 deploy_config_consistency_check、422 校验、死键删、注释纠正、跨平台取 remote）。
+    - **红绿灯**：222 项后端套件绿，受影响既有用例零回归。
+    - **仍开**：cost_store.py 五处 except 深查（存疑 11，预算所限未逐一看护，另批）。
+    - **下一枚空号现查**：本格取 539，后继从 540 起。
+540. **全库审计批重放⑦：冲突时间建议零消费、OAuth secret 进 URL、日期过滤时区错位、色守卫 rgba 绕过（P2-8/P2-13/P3-3/P3-7）** ✅🟢
+    - **缺陷（详录 §4.2/4.3）**：①批 TC 的 time_context/newer_side 已随冲突接口发出但前端冲突队列不渲染——「给裁决者时间信号」的设计目的到不了人；②OAuth app_secret 拼进 URL query 后 window.open（secret 进浏览器历史/访问日志/Referer，后端同病）且无 noopener；③前端日期过滤按本地日期拼裸串、后端 naive 贴 UTC——UTC+8 当天上午修改的文档被误排；④硬编码色守卫正则只认 #hex，rgba()/hsl() 裸值绕过契约。
+    - **修复**：89deadfbd（凭据走 POST body 不进 URL＋noopener＋后端 authorize 已 POST 化；冲突队列接 time_context；日期过滤带时区）；b0387590b（色守卫扩 rgba/hsl，落成「存量基线棘轮＋禁新增」形态，强于原建议）。
+    - **红绿灯**：vitest 2313 用例＋vue-tsc 过。
+    - **下一枚空号现查**：本格取 540，后继从 541 起。
+541. **全库审计批重放⑧：seen_cursor 孤儿与 browser_capability 未接线（P2-9/P2-10，裁定＝接线）** ✅🟢
+    - **缺陷（详录 §4.2）**：①seen_cursor 479 行在让位执行体收编批删掉其最后调用方后成纯孤儿，与 glance_yield_rules 内存版构成同功能双实现（旧账 §3-B7 已收项的实证恶化）；②tool_layers/browser_capability 189 行宣称「注入 LLM prompt 的浏览器能力描述」从未建成接线（旧账漏网实证项）。
+    - **修复（二选一裁定取接线）**：01a36ea37（SeenCursorManager 接回 /coordination/seen-boundary 端点，持久化新鲜度游标回到服务）；40ac52616（浏览器后端能力描述注入 system prompt）。
+    - **红绿灯**：接线面套件绿；HEAD 现读生产消费方在案（coordination_api/agent_workspaces／orchestrator）。
+    - **下一枚空号现查**：本格取 541，后继从 542 起。
+542. **全库审计批收尾：裁定批（P1-1 角色级分级收口／P2-1 限环回／P2-2 延后）＋新缺陷 .cargo 死 linker 钉值** ✅🟢
+    - **裁定背景**：三项裁定经交互选项提交，用户未作答，按推荐项执行（均可逆可推翻），结论详录 §12 留档。
+    - **分级收口（P1-1 后续）**：model.py DELETE/PUT/download-source/download → deps.require_admin()（现役角色门，audit.py 同源，不新造）；/switch、probe、check-connection 保持登录（探针读型、切模型是 agent 工作面）。efd1dd3f；TestRoleGate 6 用例红→绿（role=user 删模型 200→403），test_model_download_api 假身份补 role 键跟随。
+    - **限环回（P2-1）**：/metrics、/health/detailed 移出全公开白名单入 LOOPBACK_ONLY_PUBLIC_PATHS，中间件按 client 判环回；/health 保持全公开；持凭证外部读不受影响。efd1dd3f；7 用例纯 ASGI 直驱真中间件；live-verify 隔离实例 0.0.0.0:19527＋enforce——非环回 /metrics 401、环回 200、非环回 /health 200。
+    - **P2-2 延后**：web_reach 凭据 keyfile 接 OS 级保护（DPAPI/Keychain），触发条件＝多端同步或凭据面扩大；零改动，本格即登记。
+    - **新缺陷（审计收尾现抓，P2-14 同类硬编码路径病）**：仓级 NeurUI/src-tauri/.cargo/config.toml 把 link.exe 钉死在 C 盘标准安装位，VS2022 实装已迁 E 盘 neurova-build-tools——任何 cargo 调用必败且报错与代码无关（"linker not found"）。680e0ea8 去钉：rustc 原生 vswhere 探测可用，钉值态以 --config 覆盖真路径 50.58s Finished（lib.rs P1-6 校验代码可编实证）→ 去钉后零注入干净环境 52.05s Finished。P1-6 编译验证遗留至此闭环。
+    - **下一枚空号现查**：本格取 542，后继从 543 起。推送态不在此预填数字。
