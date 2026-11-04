@@ -890,7 +890,7 @@ defineExpose({ closeSlashPanel, autoResize })
   cursor: pointer;
 }
 .nr-slash-item.is-active {
-  background: rgba(74, 158, 255, 0.15);
+  background: var(--nr-primary-soft);
 }
 .nr-slash-name {
   font-family: var(--nr-font-mono, monospace);
@@ -1051,7 +1051,7 @@ defineExpose({ closeSlashPanel, autoResize })
   background: rgba(255, 255, 255, 0.05);
 }
 .nr-model-provider.is-active {
-  background: rgba(74, 158, 255, 0.14);
+  background: var(--nr-primary-soft);
   color: var(--nr-text-primary);
 }
 .nr-model-provider-name {

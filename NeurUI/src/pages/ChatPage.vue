@@ -3461,8 +3461,8 @@ onBeforeUnmount(() => {
   gap: 4px;
   font-size: 11px;
   color: var(--nr-primary, #4a9eff);
-  background: rgba(74, 158, 255, 0.12);
-  border: 1px solid rgba(74, 158, 255, 0.35);
+  background: var(--nr-primary-soft);
+  border: 1px solid var(--nr-primary-soft-strong);
   border-radius: 10px;
   padding: 1px 8px;
   margin-bottom: 4px;
@@ -3470,7 +3470,7 @@ onBeforeUnmount(() => {
 }
 
 .nr-msg--checkpoint .nr-msg-body {
-  border-left: 2px solid rgba(74, 158, 255, 0.45);
+  border-left: 2px solid var(--nr-primary-soft-strong-border);
   padding-left: 6px;
 }
 

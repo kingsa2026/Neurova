@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve, relative } from 'node:path'
+import { LEGACY_BARE_COLOR_BASELINE } from './legacyBareColorBaseline'
 
 const ROOT = resolve(process.cwd(), 'src')
 
@@ -40,10 +41,9 @@ for (const rule of variablesCss.matchAll(/--nr-[\w-]+\s*:\s*([^;]+);/g)) {
 
 const STYLE_BLOCK = /<style[^>]*>([\s\S]*?)<\/style>/g
 const HEX = /#[0-9a-fA-F]{3,8}\b/g
+const COLOR_FN = /(?:rgba?|hsla?)\([^)]*\)/gi
 
-/** 收集一段 CSS 中位于 `var(...)` 之外的裸色值（注释先剥离）。 */
-export function findBareHexLiterals(css: string): string[] {
-  const body = css.replace(/\/\*[\s\S]*?\*\//g, '')
+function _varSpans(body: string): Array<[number, number]> {
   const varSpans: Array<[number, number]> = []
   for (const match of body.matchAll(/var\(/g)) {
     let depth = 1
@@ -55,9 +55,40 @@ export function findBareHexLiterals(css: string): string[] {
     }
     varSpans.push([match.index!, cursor])
   }
+  return varSpans
+}
+
+/** 收集一段 CSS 中位于 `var(...)` 之外的裸色值（注释先剥离）。 */
+export function findBareHexLiterals(css: string): string[] {
+  const body = css.replace(/\/\*[\s\S]*?\*\//g, '')
+  const varSpans = _varSpans(body)
   return [...body.matchAll(HEX)]
     .filter((hex) => !varSpans.some(([start, end]) => hex.index! >= start && hex.index! < end))
     .map((hex) => hex[0])
+}
+
+/** 收集裸 rgba()/hsl()（不含 var() 的写法；P3-7）。 */
+export function findBareColorLiterals(css: string): string[] {
+  const body = css.replace(/\/\*[\s\S]*?\*\//g, '')
+  const varSpans = _varSpans(body)
+  return [...body.matchAll(COLOR_FN)]
+    .filter((match) => !varSpans.some(([start, end]) => match.index! >= start && match.index! < end))
+    .map((match) => match[0])
+    .filter((value) => !value.includes('var('))
+    .map((value) => value.toLowerCase().replace(/\s+/g, ''))
+}
+
+function scanBareColorCounts(files: string[]): Record<string, number> {
+  const counts: Record<string, number> = {}
+  for (const file of files) {
+    const text = readFileSync(file, 'utf-8')
+    for (const block of text.matchAll(STYLE_BLOCK)) {
+      for (const value of findBareColorLiterals(block[1])) {
+        counts[value] = (counts[value] || 0) + 1
+      }
+    }
+  }
+  return counts
 }
 
 function scanFiles(files: string[]): string[] {
@@ -86,6 +117,20 @@ describe('硬编码色守卫', () => {
     expect(findBareHexLiterals('<style>.a { color: #123456; }</style>'.replace(/<\/?style[^>]*>/g, '')))
       .toEqual(['#123456'])
     expect(findBareHexLiterals('/* #abcdef */ .a { color: var(--nr-text-primary, #8a8a92); }')).toEqual([])
+    expect(findBareColorLiterals('.a { background: rgba(1, 2, 3, 0.4); }')).toEqual(['rgba(1,2,3,0.4)'])
+    expect(findBareColorLiterals('.a { background: rgba(var(--nr-glass-rgb), 0.2); }')).toEqual([])
+  })
+
+  it('rgba/hsl 裸值不得新增（存量按基线冻结，P3-7）', () => {
+    const actual = scanBareColorCounts(walkVue(ROOT))
+    const over = Object.entries(actual)
+      .filter(([value, count]) => count > (LEGACY_BARE_COLOR_BASELINE[value] ?? 0))
+      .map(([value, count]) => `${value}: ${count} > 基线 ${LEGACY_BARE_COLOR_BASELINE[value] ?? 0}`)
+    expect(over, `发现新增的裸 rgba/hsl，请改用主题令牌:\n${over.join('\n')}`).toEqual([])
+  })
+
+  it('基线面自证：存量清单不能是空表', () => {
+    expect(Object.keys(LEGACY_BARE_COLOR_BASELINE).length).toBeGreaterThan(100)
   })
 
   it('全部 .vue 的 style 块内无令牌之外的硬编码色值', () => {
