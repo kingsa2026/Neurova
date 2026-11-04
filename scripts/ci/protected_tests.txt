@@ -4244,3 +4244,6 @@ tests/unit/security/test_refusalTextLocatesTheTriggeringLine.py
 tests/unit/collaboration/test_outboxDeliveredIntoNotificationFace.py
 # 市场安装根目录只留一个公开读口：三格钉「跨模块不再直取私有字段／取不到来源要如实抛出／端点两处都经公开口」，两格钉恒等不变量（定义方内部读取数只降不升、缺省取法与单例同目录）。逐文件单跑 5 passed
 tests/unit/skills/test_marketSkillsDirHasOnePublicFace.py
+# §6-532：后端不可得时交回信封 success=False 并点名不可得，社交出口据此引导「先启用后端」，
+# 不再把「没装」说成「没配登录态」；后端在但渠道未配登录态那条腿一字未动。逐文件单跑 5 passed
+tests/unit/web_reach/test_unavailableBackendIsNamedNotSilentEmpty.py
