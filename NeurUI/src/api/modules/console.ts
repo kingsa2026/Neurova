@@ -92,16 +92,10 @@ export function sendConsoleMessage(agentId: string, message: string, sessionId?:
   })
 }
 
-/**
- * Stream a chat response via SSE.
- * Returns the EventSource URL and headers for the caller to manage.
- */
-export function getConsoleChatSSEUrl(agentId: string, message: string, sessionId?: string) {
-  const base = import.meta.env.VITE_API_BASE_URL || '/api/v1'
-  const params = new URLSearchParams({ agent_id: agentId, message })
-  if (sessionId) params.set('session_id', sessionId)
-  return `${base}${BASE}/chat/stream?${params.toString()}`
-}
+// 流式入口不在 console 域：真实 SSE 端点在 chat 域
+//（`neurova/api/endpoints/chat.py` 的流式对话路由）。此前的
+// getConsoleChatSSEUrl 拼的是本域不存在的流式路径，自身也零调用
+//（审计 2026-11-04 P1-8），已退役。
 
 /** Upload a file to the console context. */
 export function uploadConsoleFile(file: File, agentId?: string) {
