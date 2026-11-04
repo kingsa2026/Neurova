@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import json
-import os
 import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -21,6 +20,7 @@ from typing import Any, Dict, Optional
 from neurova.core.data_root import callerPath
 from neurova.core.logger import get_logger
 from neurova.llm.providers.secret_store_clean import SecretStore
+from neurova.security.local_key_protection import loadOrCreateKeyfile
 
 logger = get_logger(__name__)
 
@@ -68,22 +68,11 @@ class UserCredentialStore:
         self._stores: Dict[str, SecretStore] = {}
 
     def _load_or_create_keyfile(self) -> str:
-        """部署级 keyfile：首次生成随机密钥并持久，重启/迁移随文件走"""
-        keyfile = self.base_dir / "_keyfile"
-        if keyfile.exists():
-            return keyfile.read_text(encoding="utf-8").strip()
-        import secrets as _secrets
+        """部署级 keyfile：Windows 走 DPAPI（密钥密文只属当前用户/机器）。
 
-        key = _secrets.token_hex(32)
-        keyfile.write_text(key, encoding="utf-8")
-        try:
-            import stat as _stat
-
-            os.chmod(keyfile, _stat.S_IRUSR | _stat.S_IWUSR)
-        except Exception:  # noqa: BLE001 - Windows 无 POSIX 权限位
-            pass
-        logger.info("Generated credential keyfile: %s", keyfile)
-        return key
+        旧明文 hex keyfile 在该入口就地迁移；解不开按错误抛出，不静默降级回明文。
+        """
+        return loadOrCreateKeyfile(self.base_dir / "_keyfile", purpose="web_reach credentials")
 
     def _store_for(self, user_id: str) -> SecretStore:
         uid = user_id or "default"
