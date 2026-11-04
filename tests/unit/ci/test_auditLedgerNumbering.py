@@ -228,3 +228,41 @@ def testDanglingCitationDetectorSeparatesRecordsFromCitations(body, expected):
     """反空转：记账句与续格不得误报，真正悬空必须点名——两者都要有样本。"""
     assert _danglingCitations(body) == expected
 
+
+def _droppedCells(headText, workText):
+    """HEAD 里有、工作树副本查不到的条目号。
+
+    并发会话把更早的整份缓冲区写回磁盘时，盘上副本会比 HEAD 少格——三把尺都看不见这件事：
+    尾号那条尺读的是盘上副本（少一格照样单调前进），引用面那条读的是别的号（盘上仍在）。
+    """
+    def nums(t):
+        return {m.group(1) for m in re.finditer(r'(?m)^(\d{2,3})\. ', t)}
+    return sorted(nums(headText) - nums(workText), key=int)
+
+
+def testWorktreeCopyKeepsEveryCommittedCell():
+    """工作树副本不得比 HEAD 少格（2026-11-04 实测两次被并发撤格，三把尺全静默）。"""
+    import subprocess
+
+    assert LEDGER.is_file(), "台账路径变了——这条守卫已经在扫不存在的文件"
+    root = LEDGER.parents[1]
+    rel = LEDGER.relative_to(root).as_posix()
+    shown = subprocess.run(['git', 'show', 'HEAD:' + rel], capture_output=True, cwd=str(root))
+    if shown.returncode != 0:
+        pytest.skip('拿不到 HEAD 版台账（浅克隆或无 git），本格不适用')
+    headText = shown.stdout.decode('utf-8', 'replace')
+    dropped = _droppedCells(headText, LEDGER.read_text(encoding='utf-8'))
+    assert dropped == [], (
+        '这些台账格在 HEAD 里有、在工作树副本里查不到：%s。多半是并发会话把更早的整份缓冲区'
+        '写回了磁盘。处置只有一件事：按盘上行尾把那一格**原文**接回去，'
+        '不要整份改写别人在途的字节。' % dropped)
+
+
+def testDroppedCellDetectorNamesOnlyHeadOnlyCells():
+    """反证格：探测器只点「HEAD 有、盘上没有」；同号不报，盘上多出的格也不报。"""
+    NL = chr(10)
+    head = '110. **甲**' + NL + '111. **乙**' + NL
+    assert _droppedCells(head, head) == []
+    assert _droppedCells(head, '110. **甲**' + NL) == ['111']
+    assert _droppedCells('110. **甲**' + NL, head) == [], '盘上多出的格不该被报成撤账'
+
