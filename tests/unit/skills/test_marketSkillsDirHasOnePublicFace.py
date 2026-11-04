@@ -17,6 +17,8 @@ from neurova.skills.market_registry import _default_market_skills_dir, _marketSo
 from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+#: 扫描根提到模块级（`test_scanCriterionMustProveItsOwnSurfaceRatchet` 只认模块级常量解根）
+NEUROVA_ROOT = REPO_ROOT / "neurova"
 # 私有字段的合法读者：定义它自己的两个类所在文件（skill_packager 有自己的同名字段）。
 # 这两个数是本轮 AST 现量的（8／7），不是抄来的——只降不升，扩散即红。
 ALLOWED_OWNERS = {
@@ -28,7 +30,7 @@ ALLOWED_OWNERS = {
 def _attrReadSites():
     """现算全仓 `X._skills_dir` 属性读的文件→次数表（AST，不按字面子串猜）。"""
     hits = {}
-    for path in sorted((REPO_ROOT / "neurova").rglob("*.py")):
+    for path in sorted(NEUROVA_ROOT.rglob("*.py")):
         rel = path.relative_to(REPO_ROOT).as_posix()
         tree = parseSource(path.read_text(encoding="utf-8", errors="replace"), rel)
         count = sum(1 for n in ast.walk(tree)
@@ -71,6 +73,8 @@ def test_取不到来源时如实抛出而不是交出借路目录(monkeypatch):
 
 
 def test_私有字段只剩定义方自己读():
+    scanned = len(list(NEUROVA_ROOT.rglob("*.py")))
+    assert scanned > 500, "扫描面现算 %d 档——面缩了，零 offender 就是假绿" % scanned
     hits = _attrReadSites()
     strangers = {rel: n for rel, n in hits.items() if rel not in ALLOWED_OWNERS}
     assert strangers == {}, "又出现跨模块直取私有安装根：{}".format(strangers)

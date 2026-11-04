@@ -4,6 +4,12 @@
 """
 
 import sys
+# 本档全程往终端念中文；cp936 控制台上不钉这一行，一句 print 就能把流程自己打断。
+# 钉 stdout 是进程所有者的责任——被 import 的模块不各自钉（那会劫持导入方的流）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 import os
 import logging
 
