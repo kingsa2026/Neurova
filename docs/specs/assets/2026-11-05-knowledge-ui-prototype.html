@@ -1,0 +1,1159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Neurova 知识库 UI 重构原型</title>
+<style>
+  .nvp {
+    --bg: #070b14;
+    --bg-2: #0b1220;
+    --panel: rgba(15, 23, 42, .74);
+    --panel-2: rgba(17, 24, 39, .86);
+    --panel-3: rgba(30, 41, 59, .55);
+    --line: rgba(148, 163, 184, .16);
+    --line-strong: rgba(148, 163, 184, .28);
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --faint: #64748b;
+    --cyan: #22d3ee;
+    --violet: #a78bfa;
+    --blue: #60a5fa;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #fb7185;
+    --radius: 14px;
+    --shadow: 0 18px 50px rgba(0, 0, 0, .32);
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    --sans: "Inter", "SF Pro Display", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    min-height: 100vh;
+    color: var(--text);
+    background:
+      radial-gradient(900px 520px at 12% -8%, rgba(34, 211, 238, .13), transparent 60%),
+      radial-gradient(820px 520px at 88% 4%, rgba(167, 139, 250, .12), transparent 62%),
+      linear-gradient(180deg, var(--bg), var(--bg-2));
+    font-family: var(--sans);
+    font-size: 13px;
+    line-height: 1.55;
+    color-scheme: dark;
+  }
+  .nvp[data-theme="light"] {
+    --bg: #f3f6fb;
+    --bg-2: #eef3f9;
+    --panel: rgba(255, 255, 255, .88);
+    --panel-2: #ffffff;
+    --panel-3: rgba(241, 245, 249, .92);
+    --line: rgba(15, 23, 42, .1);
+    --line-strong: rgba(15, 23, 42, .18);
+    --text: #0f172a;
+    --muted: #475569;
+    --faint: #64748b;
+    --cyan: #0891b2;
+    --violet: #7c3aed;
+    --blue: #2563eb;
+    --green: #059669;
+    --amber: #b45309;
+    --red: #e11d48;
+    --shadow: 0 18px 45px rgba(15, 23, 42, .1);
+    color-scheme: light;
+  }
+  .nvp * { box-sizing: border-box; }
+  .nvp button, .nvp input, .nvp select, .nvp textarea { font: inherit; }
+  .nvp button { cursor: pointer; }
+  .nvp-shell { display: grid; grid-template-columns: 238px minmax(0, 1fr); min-height: 100vh; }
+  .nvp-side {
+    position: sticky; top: 0; height: 100vh; overflow: auto;
+    padding: 18px 14px 20px;
+    border-right: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(8, 13, 24, .82), rgba(8, 13, 24, .48));
+    backdrop-filter: blur(18px);
+  }
+  .nvp[data-theme="light"] .nvp-side { background: linear-gradient(180deg, rgba(255,255,255,.92), rgba(255,255,255,.7)); }
+  .nvp-brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 18px; }
+  .nvp-logo {
+    width: 34px; height: 34px; border-radius: 11px;
+    display: grid; place-items: center;
+    background: linear-gradient(135deg, rgba(34,211,238,.9), rgba(167,139,250,.9));
+    color: #06121c; font-weight: 800; font-size: 15px;
+    box-shadow: 0 8px 24px rgba(34,211,238,.2);
+  }
+  .nvp-brand strong { display: block; font-size: 14px; letter-spacing: .02em; }
+  .nvp-brand span { display: block; color: var(--faint); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; }
+  .nvp-nav-group { margin: 12px 0 4px; padding: 0 8px; color: var(--faint); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; }
+  .nvp-nav-item {
+    width: 100%; display: flex; align-items: center; gap: 10px;
+    padding: 9px 10px; margin: 2px 0;
+    border: 1px solid transparent; border-radius: 10px;
+    background: transparent; color: var(--muted); text-align: left;
+    transition: .18s ease;
+  }
+  .nvp-nav-item:hover { color: var(--text); background: rgba(148,163,184,.08); }
+  .nvp-nav-item.active {
+    color: var(--text);
+    border-color: rgba(34,211,238,.24);
+    background: linear-gradient(90deg, rgba(34,211,238,.14), rgba(167,139,250,.08));
+    box-shadow: inset 3px 0 0 var(--cyan);
+  }
+  .nvp-nav-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: .8; flex: 0 0 auto; }
+  .nvp-nav-item.active .nvp-nav-dot { background: var(--cyan); box-shadow: 0 0 10px var(--cyan); }
+  .nvp-side-foot { margin-top: 18px; padding: 10px 8px 0; border-top: 1px solid var(--line); color: var(--faint); font-size: 10.5px; display: grid; gap: 4px; }
+  .nvp-main { min-width: 0; }
+  .nvp-top {
+    position: sticky; top: 0; z-index: 20; height: 62px;
+    display: flex; align-items: center; gap: 14px; padding: 0 26px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(7, 11, 20, .72); backdrop-filter: blur(18px);
+  }
+  .nvp[data-theme="light"] .nvp-top { background: rgba(255,255,255,.82); }
+  .nvp-crumb { display: flex; align-items: center; gap: 8px; color: var(--faint); white-space: nowrap; }
+  .nvp-crumb b { color: var(--text); font-weight: 600; }
+  .nvp-search { flex: 1; max-width: 380px; position: relative; }
+  .nvp-search input {
+    width: 100%; height: 34px; padding: 0 12px;
+    border: 1px solid var(--line); border-radius: 10px;
+    background: rgba(15,23,42,.55); color: var(--text); outline: none;
+  }
+  .nvp-search input:focus { border-color: rgba(34,211,238,.5); box-shadow: 0 0 0 3px rgba(34,211,238,.1); }
+  .nvp-top-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .nvp-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px;
+    color: var(--muted); background: rgba(15,23,42,.35); font-size: 11px; white-space: nowrap;
+  }
+  .nvp-pill b { color: var(--text); font-weight: 600; }
+  .nvp-pill.cyan { border-color: rgba(34,211,238,.24); color: var(--cyan); }
+  .nvp-pill.violet { border-color: rgba(167,139,250,.24); color: var(--violet); }
+  .nvp-pill.green { border-color: rgba(52,211,153,.24); color: var(--green); }
+  .nvp-pill.amber { border-color: rgba(251,191,36,.24); color: var(--amber); }
+  .nvp-pill.red { border-color: rgba(251,113,133,.24); color: var(--red); }
+  .nvp-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: 32px; padding: 0 12px;
+    border: 1px solid var(--line-strong); border-radius: 9px;
+    background: rgba(15,23,42,.5); color: var(--text);
+    transition: .16s ease; white-space: nowrap;
+  }
+  .nvp-btn:hover { border-color: rgba(34,211,238,.45); background: rgba(34,211,238,.08); }
+  .nvp-btn.primary {
+    border-color: rgba(34,211,238,.45); color: #041018;
+    background: linear-gradient(135deg, #22d3ee, #67e8f9);
+    font-weight: 700;
+  }
+  .nvp-btn.primary:hover { filter: brightness(1.06); }
+  .nvp-btn.violet { border-color: rgba(167,139,250,.45); color: #0b0618; background: linear-gradient(135deg, #a78bfa, #c4b5fd); font-weight: 700; }
+  .nvp-btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+  .nvp-btn.ghost:hover { color: var(--text); background: rgba(148,163,184,.08); }
+  .nvp-btn.danger { border-color: rgba(251,113,133,.35); color: var(--red); }
+  .nvp-btn.sm { height: 27px; padding: 0 9px; font-size: 11.5px; }
+  .nvp-btn:disabled { opacity: .42; cursor: not-allowed; }
+  .nvp-content { padding: 24px 26px 64px; max-width: 1680px; margin: 0 auto; }
+  .nvp-page { display: none; animation: nvpFade .22s ease; }
+  .nvp-page.active { display: block; }
+  @keyframes nvpFade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  .nvp-page-head { display: flex; align-items: flex-start; gap: 18px; margin-bottom: 18px; }
+  .nvp-eyebrow { color: var(--cyan); font-size: 10px; letter-spacing: .16em; text-transform: uppercase; margin-bottom: 5px; }
+  .nvp-page-head h1 { margin: 0; font-size: 23px; letter-spacing: -.02em; font-weight: 700; }
+  .nvp-page-head p { margin: 5px 0 0; color: var(--muted); max-width: 780px; }
+  .nvp-head-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  .nvp-card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 16px; min-width: 0;
+  }
+  .nvp-card.tight { padding: 13px; }
+  .nvp-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .nvp-card-title { font-size: 13px; font-weight: 650; letter-spacing: .01em; }
+  .nvp-card-sub { color: var(--faint); font-size: 11.5px; }
+  .nvp-card-head .nvp-pill { margin-left: auto; }
+  .nvp-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .nvp-stat { padding: 13px 14px; border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(160deg, rgba(30,41,59,.52), rgba(15,23,42,.35)); }
+  .nvp-stat .k { color: var(--faint); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; }
+  .nvp-stat .v { font-size: 21px; font-weight: 700; margin-top: 3px; letter-spacing: -.02em; }
+  .nvp-stat .d { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .nvp-grid { display: grid; gap: 14px; }
+  .nvp-grid-2-1 { grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); }
+  .nvp-grid-1-2 { grid-template-columns: minmax(300px, 1fr) minmax(0, 2fr); }
+  .nvp-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .nvp-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .nvp-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .nvp-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .nvp-toolbar .nvp-input, .nvp-toolbar .nvp-select { height: 31px; }
+  .nvp-input, .nvp-select, .nvp-textarea {
+    border: 1px solid var(--line); border-radius: 9px;
+    background: rgba(15,23,42,.42); color: var(--text); outline: none;
+    padding: 6px 9px; min-width: 0;
+  }
+  .nvp-input:focus, .nvp-select:focus, .nvp-textarea:focus { border-color: rgba(34,211,238,.5); box-shadow: 0 0 0 3px rgba(34,211,238,.08); }
+  .nvp-textarea { width: 100%; min-height: 64px; font-family: var(--mono); font-size: 11.5px; resize: vertical; }
+  .nvp-field { display: grid; gap: 4px; }
+  .nvp-field label { color: var(--faint); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; }
+  .nvp-field .nvp-input, .nvp-field .nvp-select { width: 100%; }
+  .nvp-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  .nvp-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .nvp-table th {
+    text-align: left; color: var(--faint); font-size: 10px; letter-spacing: .09em; text-transform: uppercase;
+    font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap;
+  }
+  .nvp-table td { padding: 9px 10px; border-bottom: 1px solid rgba(148,163,184,.08); vertical-align: middle; }
+  .nvp-table tbody tr:hover { background: rgba(148,163,184,.045); }
+  .nvp-table tbody tr.selected { background: rgba(34,211,238,.075); box-shadow: inset 2px 0 0 var(--cyan); }
+  .nvp-table .mono { font-family: var(--mono); font-size: 11.3px; }
+  .nvp-mono { font-family: var(--mono); font-size: 11.4px; }
+  .nvp-muted { color: var(--muted); }
+  .nvp-faint { color: var(--faint); }
+  .nvp-tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 1px 7px; border-radius: 999px; font-size: 10.5px;
+    border: 1px solid var(--line); color: var(--muted); background: rgba(15,23,42,.35);
+    white-space: nowrap;
+  }
+  .nvp-tag.cyan { color: var(--cyan); border-color: rgba(34,211,238,.24); background: rgba(34,211,238,.06); }
+  .nvp-tag.violet { color: var(--violet); border-color: rgba(167,139,250,.24); background: rgba(167,139,250,.07); }
+  .nvp-tag.green { color: var(--green); border-color: rgba(52,211,153,.24); background: rgba(52,211,153,.06); }
+  .nvp-tag.amber { color: var(--amber); border-color: rgba(251,191,36,.24); background: rgba(251,191,36,.06); }
+  .nvp-tag.red { color: var(--red); border-color: rgba(251,113,133,.24); background: rgba(251,113,133,.06); }
+  .nvp-tag.off { color: var(--faint); border-style: dashed; }
+  .nvp-ann {
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 0 6px; height: 18px; border-radius: 5px;
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .02em;
+    color: var(--cyan); border: 1px dashed rgba(34,211,238,.34); background: rgba(34,211,238,.045);
+    white-space: nowrap;
+  }
+  .nvp[data-ann="off"] .nvp-ann { display: none; }
+  .nvp-badge-derived {
+    display: inline-flex; align-items: center; gap: 3px;
+    height: 18px; padding: 0 6px; border-radius: 5px;
+    font-size: 9.5px; color: var(--violet); border: 1px solid rgba(167,139,250,.3); background: rgba(167,139,250,.08);
+  }
+  .nvp-sev { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; }
+  .nvp-sev::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .nvp-sev.violation { color: var(--red); }
+  .nvp-sev.warning { color: var(--amber); }
+  .nvp-sev.info { color: var(--faint); }
+  .nvp-progress { height: 6px; border-radius: 999px; background: rgba(148,163,184,.12); overflow: hidden; }
+  .nvp-progress > i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--cyan), var(--violet)); }
+  .nvp-kv { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 7px 10px; font-size: 11.8px; }
+  .nvp-kv dt { color: var(--faint); font-size: 10.5px; }
+  .nvp-kv dd { margin: 0; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+  .nvp-split { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .nvp-divider { height: 1px; background: var(--line); margin: 12px 0; }
+  .nvp-list { display: grid; gap: 7px; }
+  .nvp-list-row { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 9px; background: rgba(15,23,42,.28); }
+  .nvp-list-row:hover { border-color: var(--line-strong); }
+  .nvp-banner {
+    display: flex; align-items: flex-start; gap: 10px; padding: 11px 13px;
+    border: 1px solid rgba(251,191,36,.26); border-radius: 11px;
+    background: rgba(251,191,36,.06); color: var(--amber); margin-bottom: 14px;
+  }
+  .nvp-banner.cyan { border-color: rgba(34,211,238,.25); background: rgba(34,211,238,.055); color: var(--cyan); }
+  .nvp-banner.violet { border-color: rgba(167,139,250,.26); background: rgba(167,139,250,.06); color: var(--violet); }
+  .nvp-banner b { color: var(--text); }
+  .nvp-hidden { display: none; }
+  .nvp-show { display: block; }
+  .nvp-empty { padding: 26px 10px; text-align: center; color: var(--faint); }
+  .nvp-time-badge { font-family: var(--mono); font-size: 10.5px; color: var(--cyan); }
+  .nvp-toggle { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11.5px; }
+  .nvp-toggle input { appearance: none; width: 28px; height: 16px; border-radius: 999px; background: rgba(148,163,184,.22); position: relative; transition: .18s; outline: none; }
+  .nvp-toggle input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #cbd5e1; transition: .18s; }
+  .nvp-toggle input:checked { background: rgba(34,211,238,.55); }
+  .nvp-toggle input:checked::after { transform: translateX(12px); background: #fff; }
+  .nvp-tabs { display: inline-flex; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: rgba(15,23,42,.35); gap: 2px; flex-wrap: wrap; }
+  .nvp-tab { border: 0; background: transparent; color: var(--faint); height: 25px; padding: 0 9px; border-radius: 7px; font-size: 11px; }
+  .nvp-tab.active { color: var(--text); background: rgba(34,211,238,.12); box-shadow: inset 0 0 0 1px rgba(34,211,238,.22); }
+  .nvp-studio { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(500px, 1fr); gap: 14px; align-items: start; }
+  .nvp-canvas { min-height: 610px; padding: 0; overflow: hidden; }
+  .nvp-canvas-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .nvp-canvas-body { position: relative; height: 550px; background:
+      radial-gradient(600px 300px at 40% 35%, rgba(34,211,238,.06), transparent 65%),
+      radial-gradient(520px 280px at 70% 70%, rgba(167,139,250,.06), transparent 65%); }
+  .nvp-graph { width: 100%; height: 100%; }
+  .nvp-graph .edge-line { stroke: rgba(148,163,184,.42); stroke-width: 1.4; fill: none; }
+  .nvp-graph .edge-line.derived { stroke: rgba(167,139,250,.65); stroke-dasharray: 5 4; }
+  .nvp-graph .edge-label { fill: #7c8da6; font-size: 9px; font-family: var(--mono); }
+  .nvp-graph .node-box { fill: rgba(15,23,42,.94); stroke: rgba(148,163,184,.35); stroke-width: 1; }
+  .nvp-graph .node-box.highlight { stroke: rgba(34,211,238,.8); fill: rgba(34,211,238,.1); }
+  .nvp-graph .node-box.derived { stroke: rgba(167,139,250,.8); fill: rgba(167,139,250,.09); }
+  .nvp-graph .node-title { fill: #e2e8f0; font-size: 11px; font-weight: 600; }
+  .nvp-graph .node-sub { fill: #8ea1b8; font-size: 8.5px; font-family: var(--mono); }
+  .nvp-graph .node-kind { fill: #63748a; font-size: 8px; font-family: var(--mono); }
+  .nvp-canvas-legend { position: absolute; left: 12px; bottom: 12px; display: flex; gap: 10px; color: var(--faint); font-size: 10px; flex-wrap: wrap; }
+  .nvp-canvas-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+  .nvp-studio-panel { padding: 0; overflow: hidden; min-height: 610px; }
+  .nvp-studio-nav { display: flex; gap: 3px; padding: 9px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+  .nvp-studio-nav button { border: 0; background: transparent; color: var(--faint); padding: 6px 9px; border-radius: 8px; white-space: nowrap; font-size: 11.5px; }
+  .nvp-studio-nav button.active { color: var(--text); background: rgba(34,211,238,.1); box-shadow: inset 0 0 0 1px rgba(34,211,238,.2); }
+  .nvp-studio-body { padding: 14px; max-height: 580px; overflow: auto; }
+  .nvp-studio-view { display: none; }
+  .nvp-studio-view.active { display: block; }
+  .nvp-mini-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .nvp-mini { border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; background: rgba(15,23,42,.3); }
+  .nvp-mini .k { color: var(--faint); font-size: 9.5px; letter-spacing: .06em; text-transform: uppercase; }
+  .nvp-mini .v { font-size: 17px; font-weight: 700; margin-top: 2px; }
+  .nvp-tree { display: grid; gap: 2px; font-size: 11.5px; }
+  .nvp-tree-row { display: flex; align-items: center; gap: 7px; padding: 4px 6px; border-radius: 6px; color: var(--muted); }
+  .nvp-tree-row:hover { background: rgba(148,163,184,.06); color: var(--text); }
+  .nvp-tree-row.lv1 { padding-left: 18px; }
+  .nvp-tree-row.lv2 { padding-left: 34px; }
+  .nvp-tree-row.lv3 { padding-left: 50px; }
+  .nvp-tree-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--cyan); opacity: .8; }
+  .nvp-term-layout { display: grid; grid-template-columns: minmax(260px, .95fr) minmax(320px, 1.05fr); gap: 11px; }
+  .nvp-term-list { max-height: 530px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+  .nvp-term-row { display: flex; align-items: center; gap: 7px; padding: 7px 8px; border-bottom: 1px solid rgba(148,163,184,.07); cursor: pointer; }
+  .nvp-term-row:hover { background: rgba(148,163,184,.05); }
+  .nvp-term-row.selected { background: rgba(34,211,238,.08); box-shadow: inset 2px 0 0 var(--cyan); }
+  .nvp-term-row .id { font-family: var(--mono); font-size: 10.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nvp-term-row .meta { margin-left: auto; display: flex; gap: 4px; align-items: center; }
+  .nvp-editor { border: 1px solid var(--line); border-radius: 10px; padding: 11px; background: rgba(15,23,42,.26); max-height: 530px; overflow: auto; }
+  .nvp-editor h4 { margin: 0 0 3px; font-size: 12.5px; }
+  .nvp-editor .hint { color: var(--faint); font-size: 10.5px; margin-bottom: 9px; }
+  .nvp-editor-section { border-top: 1px solid var(--line); padding-top: 9px; margin-top: 9px; }
+  .nvp-editor-section .st { color: var(--faint); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 6px; }
+  .nvp-chip-row { display: flex; gap: 5px; flex-wrap: wrap; }
+  .nvp-fact-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(340px, 1fr); gap: 14px; align-items: start; }
+  .nvp-querybar { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: end; }
+  .nvp-querybar .nvp-input { height: 35px; }
+  .nvp-time-axis { display: grid; gap: 5px; margin-top: 8px; }
+  .nvp-time-track { position: relative; height: 7px; border-radius: 999px; background: rgba(148,163,184,.12); overflow: hidden; }
+  .nvp-time-track i { position: absolute; top: 0; bottom: 0; border-radius: inherit; background: linear-gradient(90deg, var(--cyan), var(--violet)); }
+  .nvp-time-labels { display: flex; justify-content: space-between; color: var(--faint); font-size: 9.5px; font-family: var(--mono); }
+  .nvp-detail-box { border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: rgba(15,23,42,.28); }
+  .nvp-chain { display: grid; gap: 6px; }
+  .nvp-chain-node { display: flex; gap: 8px; align-items: flex-start; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: rgba(15,23,42,.24); }
+  .nvp-chain-node .idx { width: 18px; height: 18px; border-radius: 6px; display: grid; place-items: center; font-family: var(--mono); font-size: 9px; color: var(--cyan); border: 1px solid rgba(34,211,238,.28); flex: 0 0 auto; }
+  .nvp-chain-node .body { min-width: 0; }
+  .nvp-chain-node .body b { font-size: 11px; display: block; }
+  .nvp-chain-node .body span { color: var(--faint); font-size: 10px; font-family: var(--mono); overflow-wrap: anywhere; }
+  .nvp-export-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }
+  .nvp-format { border: 1px solid var(--line); border-radius: 11px; padding: 12px; background: linear-gradient(160deg, rgba(30,41,59,.4), rgba(15,23,42,.28)); }
+  .nvp-format h4 { margin: 0 0 3px; font-size: 12.5px; }
+  .nvp-format p { margin: 0 0 8px; color: var(--faint); font-size: 10.5px; min-height: 30px; }
+  .nvp-format.disabled { opacity: .5; }
+  .nvp-bar { height: 8px; border-radius: 999px; background: rgba(148,163,184,.12); overflow: hidden; }
+  .nvp-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--cyan), var(--blue)); }
+  .nvp-bar.violet i { background: linear-gradient(90deg, var(--violet), #f0abfc); }
+  .nvp-bar-row { display: grid; grid-template-columns: 66px minmax(0,1fr) 44px; gap: 8px; align-items: center; font-size: 10.5px; color: var(--muted); margin: 7px 0; }
+  .nvp-stepper { display: flex; gap: 0; align-items: flex-start; overflow-x: auto; padding: 4px 0 10px; }
+  .nvp-step { min-width: 90px; display: grid; gap: 4px; justify-items: center; text-align: center; position: relative; color: var(--faint); font-size: 10px; }
+  .nvp-step::before { content: ""; position: absolute; top: 10px; left: calc(-50% + 10px); right: calc(50% + 10px); height: 1px; background: var(--line); }
+  .nvp-step:first-child::before { display: none; }
+  .nvp-step i { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-family: var(--mono); font-size: 9px; border: 1px solid var(--line-strong); background: var(--panel-2); }
+  .nvp-step.done { color: var(--green); }
+  .nvp-step.done i { border-color: rgba(52,211,153,.5); color: var(--green); }
+  .nvp-step.current { color: var(--cyan); }
+  .nvp-step.current i { border-color: rgba(34,211,238,.6); color: var(--cyan); box-shadow: 0 0 0 4px rgba(34,211,238,.08); }
+  .nvp-code { font-family: var(--mono); font-size: 10.7px; color: #b9c7d8; background: rgba(2,6,23,.55); border: 1px solid var(--line); border-radius: 9px; padding: 9px; overflow: auto; max-height: 190px; white-space: pre; }
+  .nvp-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+  .nvp-toast {
+    position: fixed; right: 20px; bottom: 20px; z-index: 100;
+    max-width: 380px; padding: 10px 13px; border-radius: 10px;
+    border: 1px solid rgba(34,211,238,.35); background: rgba(8,15,28,.94);
+    color: var(--text); box-shadow: 0 18px 50px rgba(0,0,0,.45);
+    opacity: 0; transform: translateY(8px); pointer-events: none; transition: .2s;
+  }
+  .nvp-toast.show { opacity: 1; transform: none; }
+  .nvp-toast b { color: var(--cyan); }
+  .nvp-toast .sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  @media (max-width: 1240px) {
+    .nvp-studio { grid-template-columns: 1fr; }
+    .nvp-canvas-body { height: 430px; }
+    .nvp-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 1050px) {
+    .nvp-shell { grid-template-columns: 1fr; }
+    .nvp-side { position: static; height: auto; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; border-right: 0; border-bottom: 1px solid var(--line); padding: 10px 14px; }
+    .nvp-brand { padding: 0 10px 0 0; }
+    .nvp-nav-group { display: none; }
+    .nvp-nav-item { width: auto; padding: 7px 9px; }
+    .nvp-side-foot { display: none; }
+    .nvp-top { padding: 0 16px; }
+    .nvp-content { padding: 18px 16px 50px; }
+    .nvp-grid-2-1, .nvp-grid-1-2, .nvp-fact-grid, .nvp-grid-2, .nvp-grid-3, .nvp-export-grid { grid-template-columns: 1fr; }
+    .nvp-term-layout { grid-template-columns: 1fr; }
+    .nvp-page-head { flex-direction: column; }
+    .nvp-head-actions { margin-left: 0; justify-content: flex-start; }
+    .nvp-search { max-width: none; }
+  }
+  @media (max-width: 720px) {
+    .nvp-stats, .nvp-grid-4 { grid-template-columns: 1fr 1fr; }
+    .nvp-querybar { grid-template-columns: 1fr; }
+    .nvp-top-actions .nvp-pill { display: none; }
+    .nvp-term-layout { gap: 8px; }
+    .nvp-page-head h1 { font-size: 20px; }
+  }
+</style>
+</head>
+<body>
+
+
+<div class="nvp" id="nvp" data-theme="dark" data-ann="on">
+  <div class="nvp-shell">
+    <aside class="nvp-side" aria-label="知识库导航">
+      <div class="nvp-brand">
+        <div class="nvp-logo">N</div>
+        <div><strong>Neurova</strong><span>Knowledge UI Prototype</span></div>
+      </div>
+      <div class="nvp-nav-group">数据层</div>
+      <button class="nvp-nav-item" data-page="knowledge" data-label="知识库"><span class="nvp-nav-dot"></span>知识库<span class="nvp-pill" style="margin-left:auto;padding:1px 6px;font-size:9px">L3/L6</span></button>
+      <div class="nvp-nav-group">本体 / 事实</div>
+      <button class="nvp-nav-item active" data-page="studio" data-label="本体工作台"><span class="nvp-nav-dot"></span>本体工作台<span class="nvp-pill" style="margin-left:auto;padding:1px 6px;font-size:9px">TBox</span></button>
+      <button class="nvp-nav-item" data-page="facts" data-label="事实浏览"><span class="nvp-nav-dot"></span>事实浏览<span class="nvp-pill" style="margin-left:auto;padding:1px 6px;font-size:9px">ABox</span></button>
+      <div class="nvp-nav-group">治理与质量</div>
+      <button class="nvp-nav-item" data-page="interop" data-label="互操作 / 导出"><span class="nvp-nav-dot"></span>互操作 / 导出</button>
+      <button class="nvp-nav-item" data-page="eval" data-label="评测与质量"><span class="nvp-nav-dot"></span>评测与质量</button>
+      <button class="nvp-nav-item" data-page="enterprise" data-label="企业数据源"><span class="nvp-nav-dot"></span>企业数据源<span class="nvp-pill amber" style="margin-left:auto;padding:1px 6px;font-size:9px">预留</span></button>
+      <div class="nvp-nav-group">系统</div>
+      <button class="nvp-nav-item" data-page="flags" data-label="观测与开关"><span class="nvp-nav-dot"></span>观测与开关</button>
+      <div class="nvp-side-foot">
+        <span>原型 UI-0 – UI-4 · 非生产页面</span>
+        <span>对齐 B1–B14 / L0–L9</span>
+        <span>tenant: <b>default</b> · agent: <b>assistant</b></span>
+      </div>
+    </aside>
+
+    <div class="nvp-main">
+      <header class="nvp-top">
+        <div class="nvp-crumb">知识与认知 <span>/</span> <b id="nvpCrumb">本体工作台</b></div>
+        <label class="nvp-search">
+          <input aria-label="搜索" placeholder="搜索术语、事实、CQ、IRI…" />
+        </label>
+        <div class="nvp-top-actions">
+          <button class="nvp-btn sm ghost" data-action="toggleAnn" id="annBtn">标注：开</button>
+          <button class="nvp-btn sm ghost" data-action="toggleTheme" id="themeBtn">明暗</button>
+          <span class="nvp-pill cyan">tenant <b>default</b></span>
+          <span class="nvp-pill violet">UI 原型</span>
+        </div>
+      </header>
+
+      <main class="nvp-content">
+        <!-- ================= 知识库 ================= -->
+        <section class="nvp-page" data-page="knowledge">
+          <div class="nvp-page-head">
+            <div>
+              <div class="nvp-eyebrow">DATA LAYER · L3 / L6 · 条目与来源</div>
+              <h1>知识库</h1>
+              <p>条目、来源、冲突与语义深链。数据管理页不承担本体编辑；点击「查看语义」进入事实浏览或本体工作台。</p>
+            </div>
+            <div class="nvp-head-actions">
+              <span class="nvp-ann">K-08 外部契约</span>
+              <button class="nvp-btn" data-action="toast" data-msg="导入面板：PDF / DOCX / URL / MCP 源">导入</button>
+              <button class="nvp-btn" data-action="toast" data-msg="新建条目：标题、正文、分类、标签">新建条目</button>
+              <button class="nvp-btn primary" data-action="toast" data-msg="远程知识库配置：飞书 / iFlow / IMA（仅飞书支持同步）">远程配置</button>
+            </div>
+          </div>
+
+          <div class="nvp-stats">
+            <div class="nvp-stat"><div class="k">条目总数</div><div class="v">1,284</div><div class="d">今日 +36 · 索引健康</div></div>
+            <div class="nvp-stat"><div class="k">待审冲突</div><div class="v" style="color:var(--amber)">7</div><div class="d">按 recorded_at 新近裁决</div></div>
+            <div class="nvp-stat"><div class="k">检索脱靶</div><div class="v" style="color:var(--violet)">12</div><div class="d">候选别名只进审批面</div></div>
+            <div class="nvp-stat"><div class="k">来源时间过滤</div><div class="v" style="font-size:15px;margin-top:7px">TD① 已接</div><div class="d">POST /knowledge/search</div></div>
+          </div>
+
+          <div class="nvp-card" style="margin-bottom:14px">
+            <div class="nvp-toolbar">
+              <input class="nvp-input" style="flex:1;min-width:220px" placeholder="搜索标题、正文、chunk…" />
+              <select class="nvp-select"><option>全部分类</option><option>订单</option><option>客户</option><option>产品</option></select>
+              <input class="nvp-input" style="width:190px" placeholder="来源修改时间范围" />
+              <select class="nvp-select"><option>全部范围</option><option>public</option><option>private</option><option>shared</option></select>
+              <label class="nvp-toggle"><input type="checkbox" /> OCR 已用</label>
+              <button class="nvp-btn sm" data-action="toast" data-msg="筛选：source_modified_after / source_modified_before（TD①）">应用筛选</button>
+            </div>
+          </div>
+
+          <div class="nvp-grid nvp-grid-2-1" style="margin-bottom:14px">
+            <div class="nvp-card tight">
+              <div class="nvp-card-head">
+                <div><div class="nvp-card-title">条目列表</div><div class="nvp-card-sub">分页 / 投影 / 来源时间 / 语义徽标</div></div>
+                <span class="nvp-ann">L6/B12</span>
+                <span class="nvp-pill">1,284 条</span>
+              </div>
+              <table class="nvp-table">
+                <thead><tr><th>标题</th><th>分类</th><th>来源时间</th><th>块 / 置信</th><th>语义</th><th></th></tr></thead>
+                <tbody>
+                  <tr class="selected">
+                    <td><b>2026-Q3 高风险订单复盘</b><div class="nvp-faint nvp-mono">entry:doc-42 · 3 chunks</div></td>
+                    <td><span class="nvp-tag">订单</span></td>
+                    <td class="nvp-mono">2026-11-04 14:02</td>
+                    <td>3 · <span style="color:var(--violet)">0.92</span></td>
+                    <td><span class="nvp-badge-derived">派生 2</span></td>
+                    <td><button class="nvp-btn sm ghost" data-action="toast" data-msg="打开事实浏览：entry:doc-42 的语义视图">查看语义</button></td>
+                  </tr>
+                  <tr>
+                    <td><b>客户投诉处理 SOP</b><div class="nvp-faint nvp-mono">entry:doc-18 · 5 chunks</div></td>
+                    <td><span class="nvp-tag">客户</span></td>
+                    <td class="nvp-mono">2026-10-30 09:17</td>
+                    <td>5 · <span style="color:var(--violet)">0.88</span></td>
+                    <td><span class="nvp-tag cyan">显式</span></td>
+                    <td><button class="nvp-btn sm ghost" data-action="toast" data-msg="打开事实浏览：entry:doc-18 的语义视图">查看语义</button></td>
+                  </tr>
+                  <tr>
+                    <td><b>产品变更影响分析</b><div class="nvp-faint nvp-mono">entry:doc-27 · 2 chunks</div></td>
+                    <td><span class="nvp-tag">产品</span></td>
+                    <td class="nvp-mono">2026-10-28 17:45</td>
+                    <td>2 · <span style="color:var(--violet)">0.81</span></td>
+                    <td><span class="nvp-tag amber">观察态</span></td>
+                    <td><button class="nvp-btn sm ghost" data-action="toast" data-msg="打开事实浏览：entry:doc-27 的语义视图">查看语义</button></td>
+                  </tr>
+                  <tr>
+                    <td><b>风险等级定义与口径</b><div class="nvp-faint nvp-mono">entry:doc-09 · 1 chunk</div></td>
+                    <td><span class="nvp-tag">本体</span></td>
+                    <td class="nvp-mono">2026-10-21 11:08</td>
+                    <td>1 · <span style="color:var(--violet)">0.76</span></td>
+                    <td><span class="nvp-tag cyan">显式</span></td>
+                    <td><button class="nvp-btn sm ghost" data-action="toast" data-msg="打开事实浏览：entry:doc-09 的语义视图">查看语义</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="nvp-card tight">
+              <div class="nvp-card-head">
+                <div><div class="nvp-card-title">语义视图</div><div class="nvp-card-sub">选中条目的术语 / 事实 / 血缘</div></div>
+                <span class="nvp-ann">L3/B11</span>
+              </div>
+              <div style="font-size:12px;font-weight:650;margin-bottom:3px">2026-Q3 高风险订单复盘</div>
+              <div class="nvp-faint nvp-mono" style="font-size:10.5px;margin-bottom:10px">entry:doc-42 · source_modified_at 2026-11-04</div>
+              <div class="nvp-divider"></div>
+              <div class="nvp-faint" style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">关联术语</div>
+              <div class="nvp-chip-row" style="margin-bottom:10px">
+                <span class="nvp-tag cyan">Order</span><span class="nvp-tag violet">HighRiskOrder</span><span class="nvp-tag">has_status</span><span class="nvp-tag">part_of</span>
+              </div>
+              <div class="nvp-faint" style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px">抽取事实</div>
+              <div class="nvp-list" style="margin-bottom:10px">
+                <div class="nvp-list-row"><span class="nvp-tag violet">派生</span><span class="nvp-mono" style="font-size:10.5px">D01 is_a HighRiskOrder</span><span class="nvp-pill" style="margin-left:auto">0.92</span></div>
+                <div class="nvp-list-row"><span class="nvp-tag cyan">显式</span><span class="nvp-mono" style="font-size:10.5px">D01 has_status High</span><span class="nvp-pill" style="margin-left:auto">0.98</span></div>
+                <div class="nvp-list-row"><span class="nvp-tag">来源</span><span class="nvp-mono" style="font-size:10.5px">C01 filed_by Complaint</span><span class="nvp-pill" style="margin-left:auto">0.88</span></div>
+              </div>
+              <div class="nvp-banner cyan" style="margin-bottom:10px;font-size:11px"><b>i</b><div>派生事实默认观察态；翻主路前只在事实浏览中可见，不进入普通检索。</div></div>
+              <button class="nvp-btn primary" style="width:100%" data-action="toast" data-msg="跳转事实浏览：entry:doc-42 / D01">查看完整语义与解释链</button>
+            </div>
+          </div>
+
+          <div class="nvp-card tight">
+            <div class="nvp-card-head">
+              <div><div class="nvp-card-title">冲突队列</div><div class="nvp-card-sub">按业务时间 / 记录时间双轴裁决；无据不自动通过</div></div>
+              <span class="nvp-ann">L3/B11 · K-05 反例</span>
+              <span class="nvp-pill amber">7 pending</span>
+            </div>
+            <div class="nvp-grid nvp-grid-2">
+              <div class="nvp-list-row" style="align-items:flex-start">
+                <span class="nvp-tag red">entry</span>
+                <div style="min-width:0;flex:1">
+                  <b style="font-size:11.5px">订单 D01 · 风险等级</b>
+                  <div class="nvp-faint" style="font-size:10.5px;margin-top:2px">旧：High（源时间 10-28） · 新：Medium（源时间 11-02）</div>
+                  <div class="nvp-mono" style="font-size:10px;color:var(--amber);margin-top:4px">basis: source_modified_at · 新侧优先</div>
+                </div>
+                <button class="nvp-btn sm" data-action="toast" data-msg="裁决：supersede_old（新侧优先）">裁决</button>
+              </div>
+              <div class="nvp-list-row" style="align-items:flex-start">
+                <span class="nvp-tag violet">fact</span>
+                <div style="min-width:0;flex:1">
+                  <b style="font-size:11.5px">客户 C01 · 所属区域</b>
+                  <div class="nvp-faint" style="font-size:10.5px;margin-top:2px">华东 / East China · 无源时间，仅 recorded_at</div>
+                  <div class="nvp-mono" style="font-size:10px;color:var(--amber);margin-top:4px">basis: recorded_at · 需人工</div>
+                </div>
+                <button class="nvp-btn sm" data-action="toast" data-msg="打开血缘抽屉：查看断言与活动">血缘</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================= 本体工作台 ================= -->
+        <section class="nvp-page active" data-page="studio">
+          <div class="nvp-page-head">
+            <div>
+              <div class="nvp-eyebrow">TBOX · L0–L5 / L8 · ONTOLOGY STUDIO</div>
+              <h1>本体工作台</h1>
+              <p>类型、关系、形状、推理与发布。左侧保留图画布；右侧按任务分区，不再用 7 个横排 tab 挤压画布。</p>
+            </div>
+            <div class="nvp-head-actions">
+              <span class="nvp-pill cyan">schema v1.8.0</span>
+              <span class="nvp-pill">tenant default</span>
+              <button class="nvp-btn" data-action="toast" data-msg="校验：调用 POST /knowledge/ontology/validate">校验</button>
+              <button class="nvp-btn" data-action="toast" data-msg="导出：Turtle / JSON-LD / OWL / SHACL / PROV">导出</button>
+              <button class="nvp-btn primary" data-action="toast" data-msg="发布：提案 → dry-run → 基线 → 发布">发布</button>
+            </div>
+          </div>
+
+          <div class="nvp-studio">
+            <div class="nvp-card nvp-canvas">
+              <div class="nvp-canvas-head">
+                <div class="nvp-tabs">
+                  <button class="nvp-tab active">类型图</button><button class="nvp-tab">实例图</button>
+                </div>
+                <div class="nvp-tabs" style="margin-left:6px">
+                  <button class="nvp-tab active">2D</button><button class="nvp-tab">3D</button><button class="nvp-tab">空间</button>
+                </div>
+                <span class="nvp-pill" style="margin-left:auto">42 terms · 14 relations</span>
+              </div>
+              <div class="nvp-canvas-body">
+                <svg class="nvp-graph" viewBox="0 0 720 500" role="img" aria-label="本体类型图">
+                  <defs>
+                    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(148,163,184,.55)"/></marker>
+                    <marker id="arrowV" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(167,139,250,.8)"/></marker>
+                  </defs>
+                  <g>
+                    <line class="edge-line" x1="150" y1="230" x2="318" y2="230" marker-end="url(#arrow)"/><text class="edge-label" x="198" y="221">places</text>
+                    <line class="edge-line" x1="414" y1="230" x2="548" y2="230" marker-end="url(#arrow)"/><text class="edge-label" x="452" y="221">contains</text>
+                    <line class="edge-line derived" x1="366" y1="200" x2="366" y2="112" marker-end="url(#arrowV)"/><text class="edge-label" x="376" y="156">is_a · derived</text>
+                    <line class="edge-line" x1="150" y1="262" x2="494" y2="342" marker-end="url(#arrow)"/><text class="edge-label" x="286" y="314">filed_by</text>
+                    <line class="edge-line" x1="414" y1="262" x2="510" y2="330" marker-end="url(#arrow)"/><text class="edge-label" x="470" y="300">has_complaint</text>
+                  </g>
+                  <g>
+                    <rect class="node-box" x="60" y="200" width="92" height="56" rx="10"/><text class="node-title" x="76" y="224">Customer</text><text class="node-sub" x="76" y="238">concept</text><text class="node-kind" x="76" y="250">C-01</text>
+                    <rect class="node-box highlight" x="318" y="200" width="96" height="56" rx="10"/><text class="node-title" x="336" y="224">Order</text><text class="node-sub" x="336" y="238">concept</text><text class="node-kind" x="336" y="250">C-02</text>
+                    <rect class="node-box" x="548" y="200" width="92" height="56" rx="10"/><text class="node-title" x="564" y="224">Product</text><text class="node-sub" x="564" y="238">concept</text><text class="node-kind" x="564" y="250">C-03</text>
+                    <rect class="node-box derived" x="312" y="58" width="112" height="54" rx="10"/><text class="node-title" x="326" y="80">HighRiskOrder</text><text class="node-sub" x="326" y="94">condition class</text><text class="node-kind" x="326" y="106">C-07</text>
+                    <rect class="node-box" x="494" y="342" width="96" height="56" rx="10"/><text class="node-title" x="510" y="366">Complaint</text><text class="node-sub" x="510" y="380">concept</text><text class="node-kind" x="510" y="392">C-04</text>
+                    <rect class="node-box" x="72" y="366" width="96" height="56" rx="10"/><text class="node-title" x="88" y="390">Event</text><text class="node-sub" x="88" y="404">occurrent</text><text class="node-kind" x="88" y="416">C-11</text>
+                  </g>
+                </svg>
+                <div class="nvp-canvas-legend">
+                  <span><i style="background:var(--cyan)"></i>概念</span>
+                  <span><i style="background:var(--violet)"></i>条件类 / 派生</span>
+                  <span><i style="background:var(--faint)"></i>关系</span>
+                  <span>拖拽 / 缩放 / 聚焦节点</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="nvp-card nvp-studio-panel">
+              <div class="nvp-studio-nav" role="tablist" aria-label="本体工作台分区">
+                <button class="active" data-studio="overview">概览</button>
+                <button data-studio="cq">CQ</button>
+                <button data-studio="terms">术语</button>
+                <button data-studio="relations">关系</button>
+                <button data-studio="shapes">形状</button>
+                <button data-studio="reasoning">推理</button>
+                <button data-studio="release">发布</button>
+              </div>
+              <div class="nvp-studio-body">
+                <div class="nvp-studio-view active" data-studio-panel="overview">
+                  <div class="nvp-split" style="margin-bottom:10px">
+                    <div><div class="nvp-card-title">upper-lite 与 schema</div><div class="nvp-card-sub">Entity / Continuant / Occurrent；类型与实例分离</div></div>
+                    <span class="nvp-ann">L1/B9</span>
+                  </div>
+                  <div class="nvp-mini-grid" style="margin-bottom:10px">
+                    <div class="nvp-mini"><div class="k">术语</div><div class="v">42</div><div class="nvp-faint" style="font-size:10px">core 8 · domain 34</div></div>
+                    <div class="nvp-mini"><div class="k">关系</div><div class="v">14</div><div class="nvp-faint" style="font-size:10px">候选 5 · 弃用 1</div></div>
+                    <div class="nvp-mini"><div class="k">CQ 健康</div><div class="v" style="color:var(--green)">8/10</div><div class="nvp-faint" style="font-size:10px">P1 2 条待跑</div></div>
+                    <div class="nvp-mini"><div class="k">发布</div><div class="v" style="color:var(--cyan)">v1.8.0</div><div class="nvp-faint" style="font-size:10px">基线 kb_20261105</div></div>
+                  </div>
+                  <div class="nvp-card tight" style="background:rgba(15,23,42,.2);margin-bottom:10px">
+                    <div class="nvp-split" style="margin-bottom:5px"><span class="nvp-card-title">upper-lite 树</span><span class="nvp-faint nvp-mono" style="font-size:10px">module=core</span></div>
+                    <div class="nvp-tree">
+                      <div class="nvp-tree-row"><span class="nvp-tree-dot"></span><b>Entity</b><span class="nvp-tag cyan">root</span></div>
+                      <div class="nvp-tree-row lv1"><span class="nvp-tree-dot"></span>Continuant</div>
+                      <div class="nvp-tree-row lv2"><span class="nvp-tree-dot"></span>Agent <span class="nvp-faint">· 身份: external_id + canonical_label</span></div>
+                      <div class="nvp-tree-row lv2"><span class="nvp-tree-dot"></span>Document</div>
+                      <div class="nvp-tree-row lv2"><span class="nvp-tree-dot"></span>Concept</div>
+                      <div class="nvp-tree-row lv1"><span class="nvp-tree-dot" style="background:var(--violet)"></span>Occurrent</div>
+                      <div class="nvp-tree-row lv2"><span class="nvp-tree-dot" style="background:var(--violet)"></span>Event <span class="nvp-tag violet" style="font-size:9px">时间/参与者</span></div>
+                    </div>
+                  </div>
+                  <div class="nvp-card tight" style="background:rgba(15,23,42,.2)">
+                    <div class="nvp-split" style="margin-bottom:5px"><span class="nvp-card-title">待处理</span><span class="nvp-pill amber">5 候选</span></div>
+                    <div class="nvp-list">
+                      <div class="nvp-list-row"><span class="nvp-tag">关系</span><span style="font-size:11px">“隶属于” → part_of</span><span class="nvp-pill" style="margin-left:auto">0.86</span></div>
+                      <div class="nvp-list-row"><span class="nvp-tag off">CQ</span><span style="font-size:11px">CQ-05 事件时间先后待跑</span><span class="nvp-pill" style="margin-left:auto">P3</span></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="nvp-studio-view" data-studio-panel="cq">
+                  <div class="nvp-split" style="margin-bottom:8px"><div><div class="nvp-card-title">能力问题（CQ）</div><div class="nvp-card-sub">每条 CQ 必须映射查询与测试；P1 不得无测试</div></div><span class="nvp-ann">L0/B9</span></div>
+                  <div class="nvp-toolbar" style="margin-bottom:8px"><button class="nvp-btn sm primary" data-action="toast" data-msg="运行全部 P1 CQ：TestClient 冒烟">运行 P1</button><button class="nvp-btn sm" data-action="toast" data-msg="新增 CQ：问题、范围、查询、预期、测试 ID">新增 CQ</button><span class="nvp-pill green" style="margin-left:auto">覆盖 8/10</span></div>
+                  <table class="nvp-table">
+                    <thead><tr><th>ID</th><th>问题</th><th>查询 / 测试</th><th>状态</th></tr></thead>
+                    <tbody>
+                      <tr><td class="mono">CQ-01</td><td>最近30天高风险订单及其客户投诉</td><td class="mono">/access/query · test_cq01</td><td><span class="nvp-tag green">pass</span></td></tr>
+                      <tr><td class="mono">CQ-02</td><td>每个客户的有效订单数</td><td class="mono">/access/query · test_cq02</td><td><span class="nvp-tag green">pass</span></td></tr>
+                      <tr><td class="mono">CQ-03</td><td>产品变更影响哪些订单</td><td class="mono">/access/analyze · test_cq03</td><td><span class="nvp-tag amber">warning</span></td></tr>
+                      <tr><td class="mono">CQ-04</td><td>哪些文档引用了高风险订单</td><td class="mono">/access/query · test_cq04</td><td><span class="nvp-tag green">pass</span></td></tr>
+                      <tr><td class="mono">CQ-05</td><td>事件之间的时间先后</td><td class="mono">test_cq05 · 待补</td><td><span class="nvp-tag off">pending</span></td></tr>
+                    </tbody>
+                  </table>
+                  <div class="nvp-divider"></div>
+                  <div class="nvp-bar-row"><span>P1 覆盖</span><div class="nvp-bar"><i style="width:100%"></i></div><span class="mono">2/2</span></div>
+                  <div class="nvp-bar-row"><span>P2 覆盖</span><div class="nvp-bar violet"><i style="width:67%"></i></div><span class="mono">2/3</span></div>
+                  <div class="nvp-bar-row"><span>P3 覆盖</span><div class="nvp-bar"><i style="width:33%"></i></div><span class="mono">1/3</span></div>
+                </div>
+
+                <div class="nvp-studio-view" data-studio-panel="terms">
+                  <div class="nvp-split" style="margin-bottom:8px"><div><div class="nvp-card-title">术语（TBox）</div><div class="nvp-card-sub">类层次 / 约束 / 关系特征 / 多语言 / 版本</div></div><span class="nvp-ann">L2/B8/B10</span></div>
+                  <div class="nvp-toolbar" style="margin-bottom:8px"><input class="nvp-input sm" placeholder="搜索术语…" style="height:29px;flex:1;min-width:100px" /><select class="nvp-select" style="height:29px"><option>全部 kind</option><option>concept</option><option>relation</option><option>property</option></select><select class="nvp-select" style="height:29px"><option>全部模块</option><option>core</option><option>domain</option></select><button class="nvp-btn sm" data-action="toast" data-msg="新建术语：结构化编辑器">新建</button></div>
+                  <div class="nvp-term-layout">
+                    <div class="nvp-term-list">
+                      <div class="nvp-term-row selected"><span class="nvp-tag violet">concept</span><span class="id">HighRiskOrder</span><span class="meta"><span class="nvp-tag" style="font-size:9px">domain</span><span class="nvp-faint mono" style="font-size:9px">v1.2.0</span></span></div>
+                      <div class="nvp-term-row"><span class="nvp-tag violet">concept</span><span class="id">Order</span><span class="meta"><span class="nvp-tag" style="font-size:9px">domain</span></span></div>
+                      <div class="nvp-term-row"><span class="nvp-tag violet">concept</span><span class="id">Customer</span><span class="meta"><span class="nvp-tag" style="font-size:9px">domain</span></span></div>
+                      <div class="nvp-term-row"><span class="nvp-tag cyan">relation</span><span class="id">part_of</span><span class="meta"><span class="nvp-tag green" style="font-size:9px">transitive</span></span></div>
+                      <div class="nvp-term-row"><span class="nvp-tag cyan">relation</span><span class="id">depends_on</span><span class="meta"><span class="nvp-tag green" style="font-size:9px">inverse</span></span></div>
+                      <div class="nvp-term-row"><span class="nvp-tag cyan">relation</span><span class="id">similar_to</span><span class="meta"><span class="nvp-tag green" style="font-size:9px">symmetric</span></span></div>
+                      <div class="nvp-term-row"><span class="nvp-tag off">property</span><span class="id">risk_level</span><span class="meta"><span class="nvp-tag off" style="font-size:9px">deprecated</span></span></div>
+                    </div>
+                    <div class="nvp-editor">
+                      <div class="nvp-split"><div><h4>HighRiskOrder</h4><div class="hint">condition class · domain · v1.2.0</div></div><span class="nvp-tag violet">派生类</span></div>
+                      <div class="nvp-editor-section"><div class="st">基本信息</div><div class="nvp-field-grid"><div class="nvp-field"><label>term_id</label><input class="nvp-input" value="HighRiskOrder" /></div><div class="nvp-field"><label>kind</label><select class="nvp-select"><option>concept</option><option>relation</option><option>property</option></select></div><div class="nvp-field"><label>parent</label><input class="nvp-input" value="Order" /></div><div class="nvp-field"><label>module</label><select class="nvp-select"><option>domain</option><option>core</option></select></div></div></div>
+                      <div class="nvp-editor-section"><div class="st">约束与特征</div><div class="nvp-field-grid"><div class="nvp-field"><label>domain</label><input class="nvp-input" value="Order" /></div><div class="nvp-field"><label>range</label><input class="nvp-input" value="concept" /></div><div class="nvp-field"><label>cardinality</label><input class="nvp-input" value="1" /></div><div class="nvp-field"><label>required</label><input class="nvp-input" value="status" /></div></div><div class="nvp-chip-row" style="margin-top:7px"><span class="nvp-tag green">transitive</span><span class="nvp-tag green">inverse</span><span class="nvp-tag off">symmetric</span><span class="nvp-tag off">functional=cardinality 1</span></div></div>
+                      <div class="nvp-editor-section"><div class="st">标签 / 别名</div><div class="nvp-field-grid"><div class="nvp-field"><label>labels.zh-CN</label><input class="nvp-input" value="高风险订单" /></div><div class="nvp-field"><label>labels.en-US</label><input class="nvp-input" value="High-risk order" /></div></div><div class="nvp-field" style="margin-top:7px"><label>aliases</label><input class="nvp-input" value="高风险单 · high risk order" /></div></div>
+                      <div class="nvp-editor-section"><div class="st">版本 / 弃用 / 外部 IRI</div><div class="nvp-field-grid"><div class="nvp-field"><label>version</label><input class="nvp-input" value="1.2.0" /></div><div class="nvp-field"><label>replaced_by</label><input class="nvp-input" value="" placeholder="—" /></div></div><div class="nvp-chip-row" style="margin-top:7px"><span class="nvp-tag">rdfs:subClassOf</span><span class="nvp-tag">owl:Class</span><span class="nvp-tag">skos:prefLabel@zh</span></div></div>
+                      <div class="nvp-split" style="margin-top:10px"><button class="nvp-btn sm" data-action="dryRun">校验</button><button class="nvp-btn sm primary" data-action="toast" data-msg="保存术语：经注册表写口；版本/弃用字段可回滚">保存</button></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="nvp-studio-view" data-studio-panel="relations">
+                  <div class="nvp-split" style="margin-bottom:8px"><div><div class="nvp-card-title">关系映射</div><div class="nvp-card-sub">层级 / 逆 / 对称 / 传递 / 函数（cardinality=1）</div></div><span class="nvp-ann">B8</span></div>
+                  <div class="nvp-card tight" style="background:rgba(15,23,42,.2);margin-bottom:9px">
+                    <div class="nvp-split" style="margin-bottom:7px"><b style="font-size:12px">part_of</b><span class="nvp-tag green">transitive</span></div>
+                    <div class="nvp-field-grid"><div class="nvp-field"><label>parent</label><input class="nvp-input" value="related_to" /></div><div class="nvp-field"><label>inverse_of</label><input class="nvp-input" value="contains" /></div></div>
+                    <div class="nvp-chip-row" style="margin-top:7px"><span class="nvp-tag green">transitive</span><span class="nvp-tag off">symmetric</span><span class="nvp-tag off">functional</span><span class="nvp-tag">external: skos:broader</span></div>
+                    <div class="nvp-split" style="margin-top:8px"><span class="nvp-faint" style="font-size:10.5px">候选：<b style="color:var(--amber)">“隶属于” → part_of（0.86）</b></span><button class="nvp-btn sm" data-action="toast" data-msg="批准候选：写入 aliases_json，不改事实">审批</button></div>
+                  </div>
+                  <div class="nvp-faint" style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:5px">候选队列</div>
+                  <table class="nvp-table"><thead><tr><th>surface</th><th>来源</th><th>置信</th><th></th></tr></thead><tbody>
+                    <tr><td class="mono">隶属于</td><td class="mono">entry:doc-42</td><td>0.86</td><td><button class="nvp-btn sm" data-action="toast" data-msg="批准：隶属 → part_of">批准</button></td></tr>
+                    <tr><td class="mono">telepathizes</td><td class="mono">entry:doc-71</td><td>0.31</td><td><button class="nvp-btn sm danger" data-action="toast" data-msg="拒绝候选：保留审计，不写术语">拒绝</button></td></tr>
+                  </tbody></table>
+                </div>
+
+                <div class="nvp-studio-view" data-studio-panel="shapes">
+                  <div class="nvp-split" style="margin-bottom:8px"><div><div class="nvp-card-title">形状与校验</div><div class="nvp-card-sub">target / path / severity / message；写入前与 dry-run 同求值器</div></div><span class="nvp-ann">L4/B10</span></div>
+                  <div class="nvp-grid nvp-grid-2" style="margin-bottom:9px">
+                    <div class="nvp-card tight" style="background:rgba(15,23,42,.2)">
+                      <div class="nvp-split" style="margin-bottom:6px"><b style="font-size:11.5px">Order.status required</b><span class="nvp-sev violation">violation</span></div>
+                      <div class="nvp-faint nvp-mono" style="font-size:10px">target: Order · path: has_status · minCount 1</div>
+                    </div>
+                    <div class="nvp-card tight" style="background:rgba(15,23,42,.2)">
+                      <div class="nvp-split" style="margin-bottom:6px"><b style="font-size:11.5px">Order.customer cardinality</b><span class="nvp-sev warning">warning</span></div>
+                      <div class="nvp-faint nvp-mono" style="font-size:10px">target: Order · path: placed_by · maxCount 1</div>
+                    </div>
+                  </div>
+                  <div class="nvp-card tight" style="background:rgba(15,23,42,.2)">
+                    <div class="st" style="color:var(--faint);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px">Dry-run findings</div>
+                    <div class="nvp-list">
+                      <div class="nvp-list-row"><span class="nvp-sev violation">violation</span><span class="nvp-mono" style="font-size:10.5px">D03 缺 has_status（Order.status required）</span></div>
+                      <div class="nvp-list-row"><span class="nvp-sev warning">warning</span><span class="nvp-mono" style="font-size:10.5px">D04 有两个 placed_by（maxCount 1）</span></div>
+                      <div class="nvp-list-row"><span class="nvp-sev info">info</span><span class="nvp-mono" style="font-size:10.5px">shape 覆盖：Order / Event / Complaint</span></div>
+                    </div>
+                    <div class="nvp-split" style="margin-top:8px"><span class="nvp-faint" style="font-size:10.5px">violation 阻断写入；warning 记账；info 遥测</span><button class="nvp-btn sm" data-action="dryRun">重跑 dry-run</button></div>
+                  </div>
+                </div>
+
+                <div class="nvp-studio-view" data-studio-panel="reasoning">
+                  <div class="nvp-split" style="margin-bottom:8px"><div><div class="nvp-card-title">推理与解释</div><div class="nvp-card-sub">条件类 / 规则 / 物化 / 账本 / 精确撤销</div></div><span class="nvp-ann">L5/B11</span></div>
+                  <div class="nvp-card tight" style="background:rgba(15,23,42,.2);margin-bottom:9px">
+                    <div class="nvp-split"><b style="font-size:11.5px">HighRiskOrder</b><span class="nvp-tag violet">condition class</span></div>
+                    <div class="nvp-mono" style="font-size:10.5px;color:var(--muted);margin-top:4px">X is_a HighRiskOrder :- X is_a Order, X has_status "High"</div>
+                    <div class="nvp-split" style="margin-top:7px"><span class="nvp-faint" style="font-size:10.5px">物化模式：观察态（记帐，不进检索主路）</span><label class="nvp-toggle"><input type="checkbox" /> enforce</label></div>
+                  </div>
+                  <div class="nvp-faint" style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:5px">规则 / 账本</div>
+                  <table class="nvp-table"><thead><tr><th>规则</th><th>形状</th><th>触发</th><th>状态</th></tr></thead><tbody>
+                    <tr><td class="mono">is_a_transitive</td><td>relay</td><td>12</td><td><span class="nvp-tag green">on</span></td></tr>
+                    <tr><td class="mono">auto_transitive:part_of</td><td>relay</td><td>4</td><td><span class="nvp-tag green">on</span></td></tr>
+                    <tr><td class="mono">auto_inverse:depends_on</td><td>inverse</td><td>2</td><td><span class="nvp-tag green">on</span></td></tr>
+                  </tbody></table>
+                  <div class="nvp-divider"></div>
+                  <div class="nvp-split" style="margin-bottom:5px"><b style="font-size:11.5px">解释链</b><button class="nvp-btn sm" data-action="toast" data-msg="打开 GET /knowledge/ontology/derivations/{fact_id}">API</button></div>
+                  <div class="nvp-chain">
+                    <div class="nvp-chain-node"><span class="idx">1</span><div class="body"><b>D01 is_a HighRiskOrder</b><span>derived · rule=condition:HighRiskOrder v1.2</span></div></div>
+                    <div class="nvp-chain-node"><span class="idx">2</span><div class="body"><b>D01 has_status "High"</b><span>premise · fact f_102 · confidence 0.98</span></div></div>
+                    <div class="nvp-chain-node"><span class="idx">3</span><div class="body"><b>entry:doc-42</b><span>provenance · activity extract · medium_ref</span></div></div>
+                  </div>
+                </div>
+
+                <div class="nvp-studio-view" data-studio-panel="release">
+                  <div class="nvp-split" style="margin-bottom:8px"><div><div class="nvp-card-title">发布与治理</div><div class="nvp-card-sub">提案 → dry-run → 基线 → 发布 → diff → 回滚</div></div><span class="nvp-ann">L8/B12</span></div>
+                  <div class="nvp-stepper">
+                    <div class="nvp-step done"><i>1</i><span>提案</span></div>
+                    <div class="nvp-step done"><i>2</i><span>dry-run</span></div>
+                    <div class="nvp-step done"><i>3</i><span>基线</span></div>
+                    <div class="nvp-step current"><i>4</i><span>发布</span></div>
+                    <div class="nvp-step"><i>5</i><span>diff</span></div>
+                    <div class="nvp-step"><i>6</i><span>回滚</span></div>
+                  </div>
+                  <div class="nvp-card tight" style="background:rgba(15,23,42,.2);margin-bottom:8px">
+                    <div class="nvp-split" style="margin-bottom:4px"><b style="font-size:11.5px">变更集</b><span class="nvp-pill amber">待发布</span></div>
+                    <div class="nvp-mono" style="font-size:10.5px;color:var(--muted)">+ HighRiskOrder (condition) · + part_of.transitive · ~ Order.version 1.1→1.2</div>
+                  </div>
+                  <div class="nvp-split"><button class="nvp-btn sm" data-action="toast" data-msg="Diff：对比 kb_20261105 基线">查看 diff</button><button class="nvp-btn sm primary" data-action="toast" data-msg="发布：写基线并置 active；失败整批回滚">确认发布</button></div>
+                  <div class="nvp-faint" style="font-size:10px;margin-top:7px">发布记录只追加；回滚同时按 derivation_ledger 撤销受影响推导。</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================= 事实浏览 ================= -->
+        <section class="nvp-page" data-page="facts">
+          <div class="nvp-page-head">
+            <div>
+              <div class="nvp-eyebrow">ABOX · L3 / L5 / L6 · FACT EXPLORER</div>
+              <h1>事实浏览</h1>
+              <p>四动词查询、业务时间/记录时间双轴、限定关系、来源与解释链。这里是 B3 四动词门面的首个仓内消费者。</p>
+            </div>
+            <div class="nvp-head-actions">
+              <span class="nvp-pill cyan">tenant default</span>
+              <span class="nvp-pill green">四动词 · B3</span>
+              <button class="nvp-btn" data-action="toast" data-msg="导出当前结果：Turtle / JSON-LD / OWL / SHACL / PROV">导出结果</button>
+            </div>
+          </div>
+
+          <div class="nvp-card" style="margin-bottom:14px">
+            <div class="nvp-querybar">
+              <div>
+                <div class="nvp-tabs" style="margin-bottom:7px">
+                  <button class="nvp-tab active" data-verb="query">query</button>
+                  <button class="nvp-tab" data-verb="analyze">analyze</button>
+                  <button class="nvp-tab" data-verb="validate">validate</button>
+                  <button class="nvp-tab" data-verb="use">use</button>
+                </div>
+                <input class="nvp-input" id="factQuery" value="高风险订单 最近30天" style="width:100%" />
+              </div>
+              <div class="nvp-field"><label>asOf · 业务时间</label><input class="nvp-input" value="2026-11-01" style="width:120px" /></div>
+              <div class="nvp-field"><label>knownAt · 记录时间</label><input class="nvp-input" value="2026-11-05" style="width:120px" /></div>
+              <button class="nvp-btn primary" style="height:35px" data-action="toast" data-msg="POST /knowledge/access/query：八字段时间 + fields + cursor">查询</button>
+            </div>
+            <div class="nvp-toolbar" style="margin-top:8px">
+              <span class="nvp-time-badge" id="timeBadge">双轴：asOf 2026-11-01 · knownAt 2026-11-05</span>
+              <label class="nvp-toggle"><input type="checkbox" id="timeToggle" checked /> 显示双时态</label>
+              <span class="nvp-pill" style="margin-left:auto">fields: subject / predicate / object / confidence / valid / transaction</span>
+            </div>
+          </div>
+
+          <div class="nvp-fact-grid">
+            <div class="nvp-card tight">
+              <div class="nvp-card-head"><div><div class="nvp-card-title">查询结果</div><div class="nvp-card-sub">本地条目优先；远程补位；事实带派生/观察态标记</div></div><span class="nvp-ann">L3/B11</span><span class="nvp-pill">4 facts · 2 derived</span></div>
+              <table class="nvp-table">
+                <thead><tr><th>subject</th><th>predicate</th><th>object</th><th>置信</th><th>valid time</th><th>transaction</th><th>标记</th></tr></thead>
+                <tbody>
+                  <tr class="selected"><td class="mono">D01</td><td class="mono">is_a</td><td><span class="nvp-tag violet">HighRiskOrder</span></td><td>0.92</td><td class="mono">10-28 →</td><td class="mono">11-05</td><td><span class="nvp-badge-derived">派生</span></td></tr>
+                  <tr><td class="mono">D01</td><td class="mono">has_status</td><td><span class="nvp-tag">High</span></td><td>0.98</td><td class="mono">10-28 →</td><td class="mono">10-28</td><td><span class="nvp-tag cyan">显式</span></td></tr>
+                  <tr><td class="mono">C01</td><td class="mono">filed_by</td><td><span class="nvp-tag">Complaint</span></td><td>0.88</td><td class="mono">10-30 →</td><td class="mono">10-30</td><td><span class="nvp-tag">来源</span></td></tr>
+                  <tr><td class="mono">D02</td><td class="mono">is_a</td><td><span class="nvp-tag violet">HighRiskOrder</span></td><td>0.87</td><td class="mono">10-29 →</td><td class="mono">11-05</td><td><span class="nvp-badge-derived">派生</span></td></tr>
+                </tbody>
+              </table>
+              <div class="nvp-toolbar" style="margin-top:9px"><span class="nvp-faint" style="font-size:10.5px">cursor: eyJvZmZzZXQiOjR9 · 2/6 页</span><button class="nvp-btn sm ghost" style="margin-left:auto" data-action="toast" data-msg="下一页：cursor 分页，租户隔离">下一页</button></div>
+            </div>
+
+            <div class="nvp-card tight">
+              <div class="nvp-card-head"><div><div class="nvp-card-title">事实详情</div><div class="nvp-card-sub">D01 is_a HighRiskOrder</div></div><span class="nvp-badge-derived">派生</span></div>
+              <dl class="nvp-kv">
+                <dt>confidence</dt><dd><span style="color:var(--violet)">0.92</span> · derived_by rule:condition:HighRiskOrder</dd>
+                <dt>qualifiers</dt><dd><span class="nvp-tag">status=High</span> <span class="nvp-tag">channel=web</span></dd>
+                <dt>valid time</dt><dd class="mono">2026-10-28 → 未结束</dd>
+                <dt>transaction</dt><dd class="mono">recorded 2026-11-05 · retracted —</dd>
+                <dt>来源</dt><dd class="mono">entry:doc-42 · activity extract</dd>
+                <dt>冲突</dt><dd><span class="nvp-tag green">无活动冲突</span></dd>
+              </dl>
+              <div class="nvp-time-axis">
+                <div class="nvp-time-labels"><span>valid time</span><span>10-28 → now</span></div>
+                <div class="nvp-time-track"><i style="left:8%;width:78%"></i></div>
+                <div class="nvp-time-labels"><span>transaction time</span><span>11-05 → now</span></div>
+                <div class="nvp-time-track"><i style="left:62%;width:24%;background:linear-gradient(90deg,var(--violet),#f0abfc)"></i></div>
+              </div>
+              <div class="nvp-divider"></div>
+              <div class="nvp-split" style="margin-bottom:5px"><b style="font-size:11.5px">解释链</b><button class="nvp-btn sm" data-action="toast" data-msg="原始解释链 API：规则/前提/activity">复制 API</button></div>
+              <div class="nvp-chain">
+                <div class="nvp-chain-node"><span class="idx">1</span><div class="body"><b>condition:HighRiskOrder</b><span>rule v1.2 · Order ∩ has_status=High</span></div></div>
+                <div class="nvp-chain-node"><span class="idx">2</span><div class="body"><b>f_102 has_status High</b><span>premise · entry:doc-42 · 0.98</span></div></div>
+              </div>
+              <div class="nvp-split" style="margin-top:9px"><button class="nvp-btn sm" data-action="toast" data-msg="打开完整血缘抽屉">血缘</button><button class="nvp-btn sm primary" data-action="toast" data-msg="use：采纳该事实；记录 adoption_outcome">采纳 / 使用</button></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================= 互操作 / 导出 ================= -->
+        <section class="nvp-page" data-page="interop">
+          <div class="nvp-page-head">
+            <div>
+              <div class="nvp-eyebrow">INTEROP · L7 / B12 · RDF 1.1 基线</div>
+              <h1>互操作 / 导出</h1>
+              <p>五格式导出与确定性预览。RDF 1.2 只观察；导出是互操作声明，不承诺运行时完整 OWL 2 RL 语义。</p>
+            </div>
+            <div class="nvp-head-actions"><span class="nvp-pill cyan">tenant default</span><span class="nvp-pill">module core + domain</span></div>
+          </div>
+          <div class="nvp-card" style="margin-bottom:14px">
+            <div class="nvp-toolbar">
+              <span class="nvp-faint" style="font-size:10.5px">导出范围</span>
+              <select class="nvp-select"><option>tenant default</option><option>agent assistant</option></select>
+              <select class="nvp-select"><option>core + domain</option><option>core</option><option>domain</option></select>
+              <label class="nvp-toggle"><input type="checkbox" /> 含推导事实</label>
+              <label class="nvp-toggle"><input type="checkbox" checked /> 仅 active facts</label>
+              <button class="nvp-btn sm" style="margin-left:auto" data-action="toast" data-msg="预览：同一库内容两次导出逐字节一致">生成预览</button>
+            </div>
+          </div>
+          <div class="nvp-export-grid" style="margin-bottom:14px">
+            <div class="nvp-format"><h4>Turtle</h4><p>kbg: 前缀；概念父类 → rdfs:subClassOf；is_a → rdf:type。</p><span class="nvp-tag green">稳定</span><button class="nvp-btn sm" style="margin-top:8px" data-action="toast" data-msg="下载 ontology.ttl">下载 .ttl</button></div>
+            <div class="nvp-format"><h4>JSON-LD</h4><p>@context 固定；term IRI 与 kbg: 双映射。</p><span class="nvp-ann">L7/B12</span><button class="nvp-btn sm" style="margin-top:8px" data-action="toast" data-msg="下载 ontology.jsonld">下载 .jsonld</button></div>
+            <div class="nvp-format"><h4>OWL 2 RL 公理</h4><p>subClass / subProperty / inverse / transitive / symmetric / functional。</p><span class="nvp-ann">L5/B11</span><button class="nvp-btn sm" style="margin-top:8px" data-action="toast" data-msg="下载 ontology.owl.ttl">下载公理</button></div>
+            <div class="nvp-format"><h4>SHACL shapes</h4><p>target / path / severity / message 形状导出。</p><span class="nvp-ann">L4/B10</span><button class="nvp-btn sm" style="margin-top:8px" data-action="toast" data-msg="下载 shapes.ttl">下载 shapes</button></div>
+            <div class="nvp-format"><h4>PROV-O</h4><p>assertions / activities / derivations 导出。</p><span class="nvp-ann">L3/B11</span><button class="nvp-btn sm" style="margin-top:8px" data-action="toast" data-msg="下载 provenance.ttl">下载 PROV</button></div>
+            <div class="nvp-format disabled"><h4>RDF 1.2</h4><p>W3C CR 快照；只观察，不提供生产开关。</p><span class="nvp-tag off">observe only</span><button class="nvp-btn sm" style="margin-top:8px" disabled>不可导出</button></div>
+          </div>
+          <div class="nvp-card tight">
+            <div class="nvp-card-head"><div><div class="nvp-card-title">确定性预览</div><div class="nvp-card-sub">字符级 golden；排序固定；两次导出逐字节一致</div></div><span class="nvp-ann">B5/B12</span></div>
+            <pre class="nvp-code">@prefix kbg: &lt;https://neurova.local/knowledge/&gt; .
+@prefix rdfs: &lt;http://www.w3.org/2000/01/rdf-schema#&gt; .
+
+kbg:HighRiskOrder a owl:Class ;
+    rdfs:subClassOf kbg:Order ;
+    rdfs:label "高风险订单"@zh .
+
+kbg:D01 a kbg:HighRiskOrder ;
+    kbg:has_status "High" ;
+    kbg:filed_by kbg:C01 .</pre>
+          </div>
+        </section>
+
+        <!-- ================= 评测与质量 ================= -->
+        <section class="nvp-page" data-page="eval">
+          <div class="nvp-page-head">
+            <div>
+              <div class="nvp-eyebrow">EVALUATION · L9 / B13 · CQ + QUALITY + A/B</div>
+              <h1>评测与质量</h1>
+              <p>CQ 覆盖、负例、golden、OOPS!/OntoClean 子集、OQuaRE 风格指标、NDCG/A-B 与默认关矩阵。</p>
+            </div>
+            <div class="nvp-head-actions"><span class="nvp-pill green">CQ 92%</span><span class="nvp-pill">NDCG 0.84</span><button class="nvp-btn" data-action="toast" data-msg="高级：原始 JSON 抽屉（baseline / compare / snapshot）">高级 JSON</button></div>
+          </div>
+          <div class="nvp-stats">
+            <div class="nvp-stat"><div class="k">CQ 通过率</div><div class="v" style="color:var(--green)">92%</div><div class="d">P1 2/2 · P2 2/3</div></div>
+            <div class="nvp-stat"><div class="k">OOPS! 高危</div><div class="v" style="color:var(--green)">0</div><div class="d">2 warning · 1 info</div></div>
+            <div class="nvp-stat"><div class="k">OntoClean 覆盖</div><div class="v" style="color:var(--violet)">78%</div><div class="d">核心类 7/9 已标注</div></div>
+            <div class="nvp-stat"><div class="k">默认关</div><div class="v" style="color:var(--amber)">9</div><div class="d">D-01…D-19 逐项</div></div>
+          </div>
+          <div class="nvp-grid nvp-grid-2" style="margin-bottom:14px">
+            <div class="nvp-card tight">
+              <div class="nvp-card-head"><div><div class="nvp-card-title">CQ 测试</div><div class="nvp-card-sub">每条 CQ 映射查询与测试</div></div><span class="nvp-ann">L0/B9 · L9/B13</span></div>
+              <table class="nvp-table"><thead><tr><th>ID</th><th>问题</th><th>状态</th><th>最近运行</th></tr></thead><tbody>
+                <tr><td class="mono">CQ-01</td><td>最近30天高风险订单及投诉</td><td><span class="nvp-tag green">pass</span></td><td class="mono">11-05 21:40</td></tr>
+                <tr><td class="mono">CQ-02</td><td>每个客户有效订单数</td><td><span class="nvp-tag green">pass</span></td><td class="mono">11-05 21:40</td></tr>
+                <tr><td class="mono">CQ-03</td><td>产品变更影响订单</td><td><span class="nvp-tag amber">warning</span></td><td class="mono">11-05 21:41</td></tr>
+                <tr><td class="mono">CQ-04</td><td>文档引用高风险订单</td><td><span class="nvp-tag green">pass</span></td><td class="mono">11-05 21:41</td></tr>
+                <tr><td class="mono">CQ-05</td><td>事件时间先后</td><td><span class="nvp-tag off">pending</span></td><td class="mono">—</td></tr>
+              </tbody></table>
+            </div>
+            <div class="nvp-card tight">
+              <div class="nvp-card-head"><div><div class="nvp-card-title">质量与 A/B</div><div class="nvp-card-sub">OOPS! 结构子集 + NDCG</div></div><span class="nvp-ann">B13</span></div>
+              <div class="nvp-bar-row"><span>baseline</span><div class="nvp-bar"><i style="width:79%"></i></div><span class="mono">0.79</span></div>
+              <div class="nvp-bar-row"><span>candidate</span><div class="nvp-bar violet"><i style="width:84%"></i></div><span class="mono">0.84</span></div>
+              <div class="nvp-divider"></div>
+              <div class="nvp-list">
+                <div class="nvp-list-row"><span class="nvp-sev warning">warning</span><span style="font-size:11px">2 个类缺 definition</span><span class="nvp-pill" style="margin-left:auto">OOPS!</span></div>
+                <div class="nvp-list-row"><span class="nvp-sev warning">warning</span><span style="font-size:11px">1 处 domain/range 不匹配</span><span class="nvp-pill" style="margin-left:auto">OOPS!</span></div>
+                <div class="nvp-list-row"><span class="nvp-sev info">info</span><span style="font-size:11px">1 个冗余子类</span><span class="nvp-pill" style="margin-left:auto">OOPS!</span></div>
+              </div>
+              <div class="nvp-faint" style="font-size:10.5px;margin-top:8px">NDCG 变化 +0.05；未超阈值，不阻断发布。</div>
+            </div>
+          </div>
+          <div class="nvp-card tight">
+            <div class="nvp-card-head"><div><div class="nvp-card-title">默认关矩阵</div><div class="nvp-card-sub">默认关是产品/成本/安全决定，不是断点；逐项 shadow/on</div></div><span class="nvp-ann">§13 · D 组</span></div>
+            <table class="nvp-table"><thead><tr><th>开关</th><th>状态</th><th>shadow 读数</th><th>动作</th></tr></thead><tbody>
+              <tr><td class="mono">D-01 QUERY_NORMALIZE</td><td><span class="nvp-tag off">off</span></td><td class="nvp-mono">matched_subjects 0.71</td><td><button class="nvp-btn sm" data-action="toast" data-msg="切 shadow：只落载荷，不改回复">shadow</button></td></tr>
+              <tr><td class="mono">D-02 AMBIGUITY_CLARIFY</td><td><span class="nvp-tag off">off</span></td><td class="nvp-mono">multi_subject 12%</td><td><button class="nvp-btn sm" data-action="toast" data-msg="切 shadow：不静默择一">shadow</button></td></tr>
+              <tr><td class="mono">D-04 FACT_SURFACE</td><td><span class="nvp-tag off">off</span></td><td class="nvp-mono">零锚点率 8.4%</td><td><button class="nvp-btn sm" data-action="toast" data-msg="评估：只做零锚点种子，不重开两池">评估</button></td></tr>
+              <tr><td class="mono">D-06 CONDITION_CLASSES_ROUTE</td><td><span class="nvp-tag off">观察态</span></td><td class="nvp-mono">derived 12 · retracted 1</td><td><button class="nvp-btn sm" data-action="toast" data-msg="转正前须 L9 CQ/检索 A-B 读数">待评估</button></td></tr>
+              <tr><td class="mono">D-08 DUAL_VECTOR</td><td><span class="nvp-tag off">off</span></td><td class="nvp-mono">—</td><td><button class="nvp-btn sm" data-action="toast" data-msg="单独立项：embedding 成本与 ANN 旁路">立项</button></td></tr>
+              <tr><td class="mono">D-19 PARSER</td><td><span class="nvp-tag off">legacy</span></td><td class="nvp-mono">shadow 页数差异 0.8%</td><td><button class="nvp-btn sm" data-action="toast" data-msg="shadow 先行：四项对比">shadow</button></td></tr>
+            </tbody></table>
+          </div>
+        </section>
+
+        <!-- ================= 企业数据源 ================= -->
+        <section class="nvp-page" data-page="enterprise">
+          <div class="nvp-page-head">
+            <div>
+              <div class="nvp-eyebrow">ENTERPRISE · B14 · INTERFACE RESERVED</div>
+              <h1>企业数据源</h1>
+              <p>只预留接口：适配器 Protocol、JSON 映射描述符、fake adapter 与 admission 接线；不接真实 DB/ERP/事件流。</p>
+            </div>
+            <div class="nvp-head-actions"><span class="nvp-pill amber">接口预留 · 未接入真实源</span></div>
+          </div>
+          <div class="nvp-banner"><b>!</b><div><b>本页不是“已接入”状态。</b>真实 DB/ERP/事件流连接器、全量 R2RML 解析、CDC 游标另批；当前只能编辑描述符与运行测试替身。</div></div>
+          <div class="nvp-grid nvp-grid-1-2">
+            <div class="nvp-card tight">
+              <div class="nvp-card-head"><div><div class="nvp-card-title">源列表</div><div class="nvp-card-sub">sourceType 白名单</div></div><span class="nvp-ann">B14</span></div>
+              <div class="nvp-list">
+                <div class="nvp-list-row"><span class="nvp-tag cyan">sql</span><div style="min-width:0;flex:1"><b style="font-size:11.5px">ERP Orders</b><div class="nvp-faint nvp-mono" style="font-size:10px">descriptor ready · adapter: none</div></div><span class="nvp-tag off">未接入</span></div>
+                <div class="nvp-list-row"><span class="nvp-tag">erp_api</span><div style="min-width:0;flex:1"><b style="font-size:11.5px">CRM Customers</b><div class="nvp-faint nvp-mono" style="font-size:10px">draft · 缺少 identityKeys</div></div><span class="nvp-tag off">draft</span></div>
+                <div class="nvp-list-row"><span class="nvp-tag violet">event_stream</span><div style="min-width:0;flex:1"><b style="font-size:11.5px">Order Events</b><div class="nvp-faint nvp-mono" style="font-size:10px">reserved · 无 cursor contract</div></div><span class="nvp-tag off">预留</span></div>
+              </div>
+              <div class="nvp-divider"></div>
+              <button class="nvp-btn" style="width:100%" disabled data-action="toast" data-msg="真实连接器未接入；禁用连接">连接真实源（未实现）</button>
+              <div class="nvp-faint" style="font-size:10px;margin-top:6px">真实驱动/CDC/凭据接入另批；本批不引 DB 驱动与消息中间件。</div>
+            </div>
+            <div class="nvp-card tight">
+              <div class="nvp-card-head"><div><div class="nvp-card-title">映射描述符</div><div class="nvp-card-sub">R2RML 风格 JSON 子集 · v1 单逻辑表</div></div><span class="nvp-ann">B14</span></div>
+              <div class="nvp-field-grid">
+                <div class="nvp-field"><label>sourceId</label><input class="nvp-input" value="erp_prod" /></div>
+                <div class="nvp-field"><label>sourceType</label><select class="nvp-select"><option>sql</option><option>erp_api</option><option>event_stream</option></select></div>
+                <div class="nvp-field"><label>logicalTable</label><input class="nvp-input" value="orders" /></div>
+                <div class="nvp-field"><label>subject.template</label><input class="nvp-input" value="order:{order_id}" /></div>
+                <div class="nvp-field"><label>predicate</label><input class="nvp-input" value="has_status" /></div>
+                <div class="nvp-field"><label>object.column</label><input class="nvp-input" value="status" /></div>
+                <div class="nvp-field"><label>validFrom</label><input class="nvp-input" value="valid_from" /></div>
+                <div class="nvp-field"><label>cursorColumn</label><input class="nvp-input" value="updated_at" /></div>
+              </div>
+              <div class="nvp-chip-row" style="margin-top:8px"><span class="nvp-tag">qualifiers: channel</span><span class="nvp-tag">idempotency: order_id + updated_at</span><span class="nvp-tag off">enabled=false</span></div>
+              <div class="nvp-split" style="margin-top:9px"><button class="nvp-btn sm" data-action="toast" data-msg="编译期校验：模板列、predicate 登记、object kind">校验描述符</button><button class="nvp-btn sm primary" data-action="runFake">运行 fake adapter</button></div>
+              <div class="nvp-hidden" id="fakeResult" style="margin-top:10px">
+                <div class="nvp-card tight" style="background:rgba(34,211,238,.04);border-color:rgba(34,211,238,.2)">
+                  <div class="nvp-split" style="margin-bottom:5px"><b style="font-size:11.5px">fake adapter 结果</b><span class="nvp-tag green">仅测试替身</span></div>
+                  <div class="nvp-mono" style="font-size:10.5px;color:var(--muted)">rows_fetched 3 · facts_admitted 2 · rejected 1 · cursor advanced</div>
+                  <div class="nvp-faint" style="font-size:10px;margin-top:4px">rejected: order D03 缺 status（shape violation）；不阻塞游标</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================= 观测与开关 ================= -->
+        <section class="nvp-page" data-page="flags">
+          <div class="nvp-page-head">
+            <div>
+              <div class="nvp-eyebrow">OBSERVABILITY · §13 · DEFAULT-OFF / OBSERVE</div>
+              <h1>观测与开关</h1>
+              <p>默认关与观察态必须可见。这里只做读数与回退，不做“一键全开”；普通用户不可见。</p>
+            </div>
+            <div class="nvp-head-actions"><span class="nvp-pill amber">管理员</span><button class="nvp-btn" data-action="toast" data-msg="全部回退到 off：逐项独立，不打包">全部回退</button></div>
+          </div>
+          <div class="nvp-banner"><b>!</b><div><b>默认关不是断点。</b>D-05/D-12/D-13/D-14/D-15/D-17/D-18 是产品/成本/安全决定；D-01/D-02/D-03/D-04/D-06/D-08/D-11/D-16/D-19 逐项 shadow/on，不打包全开。</div></div>
+          <div class="nvp-grid nvp-grid-2">
+            <div class="nvp-card tight">
+              <div class="nvp-card-head"><div><div class="nvp-card-title">默认关矩阵</div><div class="nvp-card-sub">状态 / shadow 读数 / 回退</div></div><span class="nvp-ann">§13</span></div>
+              <table class="nvp-table"><thead><tr><th>开关</th><th>状态</th><th>读数</th><th></th></tr></thead><tbody>
+                <tr><td class="mono">D-01 query_normalize</td><td><span class="nvp-tag off">off</span></td><td class="mono">0.71</td><td><button class="nvp-btn sm ghost" data-action="toast" data-msg="回退 D-01 到 off">回退</button></td></tr>
+                <tr><td class="mono">D-02 ambiguity_clarify</td><td><span class="nvp-tag off">off</span></td><td class="mono">12%</td><td><button class="nvp-btn sm ghost" data-action="toast" data-msg="回退 D-02 到 off">回退</button></td></tr>
+                <tr><td class="mono">D-03 miss_capture</td><td><span class="nvp-tag off">off</span></td><td class="mono">日增 0</td><td><button class="nvp-btn sm ghost" data-action="toast" data-msg="加日上限/去重后再开">回退</button></td></tr>
+                <tr><td class="mono">D-04 fact_surface</td><td><span class="nvp-tag off">off</span></td><td class="mono">8.4%</td><td><button class="nvp-btn sm ghost" data-action="toast" data-msg="保持窄接线，不重开两池">回退</button></td></tr>
+                <tr><td class="mono">D-06 condition_route</td><td><span class="nvp-tag off">观察态</span></td><td class="mono">derived 12</td><td><button class="nvp-btn sm ghost" data-action="toast" data-msg="转正须 L9 评估">回退</button></td></tr>
+                <tr><td class="mono">D-08 dual_vector</td><td><span class="nvp-tag off">off</span></td><td class="mono">—</td><td><button class="nvp-btn sm ghost" data-action="toast" data-msg="单独立项">回退</button></td></tr>
+                <tr><td class="mono">D-19 parser</td><td><span class="nvp-tag off">legacy</span></td><td class="mono">0.8%</td><td><button class="nvp-btn sm ghost" data-action="toast" data-msg="shadow 先行">回退</button></td></tr>
+              </tbody></table>
+            </div>
+            <div class="nvp-card tight">
+              <div class="nvp-card-head"><div><div class="nvp-card-title">消费者与接线</div><div class="nvp-card-sub">测试绿 ≠ 生产接线</div></div><span class="nvp-ann">K-08</span></div>
+              <div class="nvp-list">
+                <div class="nvp-list-row"><span class="nvp-tag amber">B3</span><div style="min-width:0;flex:1"><b style="font-size:11.5px">四动词门面</b><div class="nvp-faint" style="font-size:10.5px">当前仓内零消费者；UI-2 计划成为首个消费者</div></div><span class="nvp-tag off">待接</span></div>
+                <div class="nvp-list-row"><span class="nvp-tag violet">B4</span><div style="min-width:0;flex:1"><b style="font-size:11.5px">推导标注</b><div class="nvp-faint" style="font-size:10.5px">后端已到回合元数据；UI 详情页展示解释链</div></div><span class="nvp-tag green">已通</span></div>
+                <div class="nvp-list-row"><span class="nvp-tag">B14</span><div style="min-width:0;flex:1"><b style="font-size:11.5px">企业源</b><div class="nvp-faint" style="font-size:10.5px">接口预留；真实连接器另批</div></div><span class="nvp-tag off">未接入</span></div>
+                <div class="nvp-list-row"><span class="nvp-tag amber">K-05</span><div style="min-width:0;flex:1"><b style="font-size:11.5px">memory_links</b><div class="nvp-faint" style="font-size:10.5px">跨用户读取面；归 KB 计划 D-3</div></div><span class="nvp-tag red">安全</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+  <div class="nvp-toast" id="nvpToast"><b>原型交互</b><div class="sub" id="nvpToastSub"></div></div>
+</div>
+
+<script>
+(function () {
+  const root = document.getElementById('nvp');
+  const crumb = document.getElementById('nvpCrumb');
+  const toast = document.getElementById('nvpToast');
+  const toastSub = document.getElementById('nvpToastSub');
+  let toastTimer = null;
+
+  function showToast(msg) {
+    toastSub.textContent = msg || '该按钮为原型交互，不写真实数据。';
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 2600);
+  }
+
+  function showPage(page) {
+    root.querySelectorAll('.nvp-page').forEach((el) => {
+      el.classList.toggle('active', el.dataset.page === page);
+    });
+    root.querySelectorAll('.nvp-nav-item[data-page]').forEach((el) => {
+      el.classList.toggle('active', el.dataset.page === page);
+    });
+    const item = root.querySelector('.nvp-nav-item[data-page="' + page + '"]');
+    if (item && crumb) crumb.textContent = item.dataset.label || page;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function showStudio(panel) {
+    root.querySelectorAll('[data-studio-panel]').forEach((el) => {
+      el.classList.toggle('active', el.dataset.studioPanel === panel);
+    });
+    root.querySelectorAll('[data-studio]').forEach((el) => {
+      el.classList.toggle('active', el.dataset.studio === panel);
+    });
+  }
+
+  function toggleAnn() {
+    root.dataset.ann = root.dataset.ann === 'off' ? 'on' : 'off';
+    const btn = document.getElementById('annBtn');
+    if (btn) btn.textContent = '标注：' + (root.dataset.ann === 'on' ? '开' : '关');
+  }
+
+  function toggleTheme() {
+    root.dataset.theme = root.dataset.theme === 'light' ? 'dark' : 'light';
+  }
+
+  root.addEventListener('click', (event) => {
+    const pageBtn = event.target.closest('[data-page]');
+    if (pageBtn) {
+      showPage(pageBtn.dataset.page);
+      return;
+    }
+    const studioBtn = event.target.closest('[data-studio]');
+    if (studioBtn) {
+      showStudio(studioBtn.dataset.studio);
+      return;
+    }
+    const verbBtn = event.target.closest('[data-verb]');
+    if (verbBtn) {
+      root.querySelectorAll('[data-verb]').forEach((el) => el.classList.remove('active'));
+      verbBtn.classList.add('active');
+      const input = document.getElementById('factQuery');
+      if (input) {
+        input.placeholder = {
+          query: '查询事实：高风险订单 最近30天',
+          analyze: '分析：图谱指标 / 连通性 / 影响面',
+          validate: '校验候选三元组：subject predicate object',
+          use: '采纳：fact_id'
+        }[verbBtn.dataset.verb] || '';
+      }
+      showToast('四动词：' + verbBtn.dataset.verb + '（B3 门面，UI 为首个仓内消费者）');
+      return;
+    }
+    const actionEl = event.target.closest('[data-action]');
+    if (!actionEl) return;
+    const action = actionEl.dataset.action;
+    if (action === 'toggleAnn') { toggleAnn(); return; }
+    if (action === 'toggleTheme') { toggleTheme(); return; }
+    if (action === 'runFake') {
+      const box = document.getElementById('fakeResult');
+      if (box) box.classList.remove('nvp-hidden');
+      showToast('fake adapter：3 行 → 2 facts 入 admission，1 行被 shape 拒；不联网、不接真实源。');
+      return;
+    }
+    if (action === 'dryRun') {
+      showToast('dry-run：与写入同一求值器；violation 阻断、warning 记账、info 遥测。');
+      return;
+    }
+    if (action === 'toast') {
+      showToast(actionEl.dataset.msg);
+      return;
+    }
+  });
+
+  const timeToggle = document.getElementById('timeToggle');
+  if (timeToggle) {
+    timeToggle.addEventListener('change', function () {
+      const badge = document.getElementById('timeBadge');
+      if (!badge) return;
+      badge.textContent = this.checked
+        ? '双轴：asOf 2026-11-01 · knownAt 2026-11-05'
+        : '单轴：仅业务时间 asOf 2026-11-01（记录时间隐藏）';
+    });
+  }
+})();
+</script>
+
+</body>
+</html>
