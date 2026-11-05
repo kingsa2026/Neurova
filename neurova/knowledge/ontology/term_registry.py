@@ -53,6 +53,19 @@ _SCHEMA_V12 = """
 ALTER TABLE ontology_terms ADD COLUMN range_kinds TEXT NOT NULL DEFAULT '[]';
 """
 
+# v29：关系映射层（specs/2026-11-05 B8）——关系特征/别名/外部 IRI/退役语义加列。
+# 函数属性不新增列：`cardinality=1` 即同一语义，导出时映射 owl:FunctionalProperty；
+# 逆函数属性由逆关系的 cardinality=1 表达。加列不删列，可回滚。
+_SCHEMA_V29_TERMS = """
+ALTER TABLE ontology_terms ADD COLUMN inverse_of TEXT NOT NULL DEFAULT '';
+ALTER TABLE ontology_terms ADD COLUMN symmetric INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE ontology_terms ADD COLUMN transitive INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE ontology_terms ADD COLUMN aliases_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE ontology_terms ADD COLUMN external_iris_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE ontology_terms ADD COLUMN deprecated INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE ontology_terms ADD COLUMN replaced_by TEXT NOT NULL DEFAULT '';
+"""
+
 # 两个由结构层固定的谓词：
 # - `documented_as`：条目叙述（019b-1），基数天然不限——同一主体可以有很多份文档；
 # - `is_a`：类型断言（工单 020），客体是**已登记的 concept 术语**。
@@ -62,8 +75,10 @@ ALTER TABLE ontology_terms ADD COLUMN range_kinds TEXT NOT NULL DEFAULT '[]';
 # 不登记它们就等于让走咽喉的谓词处在"未登记"态，读数说不清是漏检还是免检。
 _SEED_TERMS: List[Dict[str, Any]] = [
     {"termId": "documented_as", "kind": "relation", "label": "被记载为", "cardinality": None},
+    # is_a 的结构性传递性收口到术语属性（B8）：引擎的 ensureAutoRules 由此生成
+    # 同 `is_a_transitive` 规则行，手工种子规则退役（同 id 单行，教义第 6 条）。
     {"termId": IS_A_PREDICATE, "kind": "relation", "label": "是一个", "cardinality": None,
-     "rangeKinds": ["concept"]},
+     "rangeKinds": ["concept"], "transitive": 1},
 ]
 
 # 值域可以按**类别**声明：`range_kinds` 里的每一类都展开成"当前表里该类的全部术语"。
@@ -102,6 +117,10 @@ class OntologyTermRegistry:
                  cardinality: Optional[int] = None,
                  disjointWith: Optional[List[str]] = None,
                  requiredProps: Optional[List[str]] = None,
+                 inverseOf: Optional[str] = None, symmetric: bool = False,
+                 transitive: bool = False, aliases: Optional[List[str]] = None,
+                 externalIris: Optional[Dict[str, str]] = None,
+                 deprecated: bool = False, replacedBy: str = "",
                  version: str = "v1",
                  tenantId: str = "default") -> Dict[str, Any]:
         """登记/更新一个术语。非法结构在**写入处**就拒，不留到查询时才炸。
@@ -109,6 +128,12 @@ class OntologyTermRegistry:
         `rangeKinds` 按类别声明值域（如 `["concept"]` = 客体必须是已登记的概念术语）；
         `rangeTerms` 逐个点名。两者并存时取并集——它们说的是同一件事的两种粒度。
         父类必须在**同一租户**内登记：类型系统不跨租户引用。
+
+        B8 关系映射：concept/relation 都可有父类（relation 父属性即
+        `rdfs:subPropertyOf`，父子 kind 必须一致、登记处判环）；关系特征
+        （inverse_of/symmetric/transitive）只允许 relation 声明；`inverse_of`
+        登记时双向补齐；别名按租户唯一，冲突拒绝不覆盖；`cardinality=1` 即
+        函数属性（不新增列）。
         """
         termId = str(termId or "").strip()
         tenant = str(tenantId or "default")
@@ -124,10 +149,41 @@ class OntologyTermRegistry:
             raise ValueError("术语不能是自己的父类: %s" % termId)
         if cardinality is not None and int(cardinality) < 1:
             raise ValueError("cardinality 至少为 1（不限请传 None），收到 %r" % cardinality)
-        if parentTermId and kind != "concept":
-            raise ValueError("只有 concept 能有父类，%s 是 %s" % (termId, kind))
-        if parentTermId and not self.term(parentTermId, tenantId=tenant):
+        if parentTermId and kind not in ("concept", "relation"):
+            raise ValueError("只有 concept/relation 能有父类，%s 是 %s" % (termId, kind))
+        parentTerm = self.term(parentTermId, tenantId=tenant) if parentTermId else None
+        if parentTermId and parentTerm is None:
             raise ValueError("父类未登记: %s（先登记父类，别留悬空边）" % parentTermId)
+        if parentTerm is not None and parentTerm.get("kind") != kind:
+            raise ValueError(
+                "父子 kind 必须一致：%s 是 %s，%s 是 %s"
+                % (parentTermId, parentTerm.get("kind"), termId, kind))
+        if parentTermId:
+            self._ensureNoParentCycle(termId, parentTermId, tenantId=tenant)
+
+        inverseOf = str(inverseOf or "").strip()
+        aliasList = [str(a or "").strip() for a in (aliases or []) if str(a or "").strip()]
+        if inverseOf or symmetric or transitive:
+            if kind != "relation":
+                raise ValueError(
+                    "关系特征（inverse_of/symmetric/transitive）只允许 relation 声明，"
+                    "%s 是 %s" % (termId, kind))
+        if inverseOf:
+            target = self.term(inverseOf, tenantId=tenant)
+            if target is None or target.get("kind") != "relation":
+                raise ValueError(
+                    "逆关系目标必须为已登记的 relation，收到 %r" % inverseOf)
+            if inverseOf == termId and not symmetric:
+                raise ValueError(
+                    "%s 的 inverse_of 指向自身却未声明 symmetric——单边自逆不成立" % termId)
+
+        # 别名按租户唯一：同一 surface 已归属其他术语时拒绝，不覆盖（B8 ⑥）。
+        for alias in aliasList:
+            owner = self._aliasOwner(alias, tenantId=tenant, excludeTermId=termId)
+            if owner is not None:
+                raise ValueError(
+                    "别名 %r 已归属术语 %s（租户 %s），冲突不覆盖" % (alias, owner, tenant))
+
         stamp = _now()
         with self._store._lock, self._store._conn:
             existing = self._store._conn.execute(
@@ -136,8 +192,10 @@ class OntologyTermRegistry:
             self._store._conn.execute(
                 "INSERT OR REPLACE INTO ontology_terms (tenant_id, term_id, kind, label,"
                 " parent_term_id, domain_terms, range_terms, range_kinds, cardinality,"
-                " disjoint_with, required_props, version, created_at, updated_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " disjoint_with, required_props, version, created_at, updated_at,"
+                " inverse_of, symmetric, transitive, aliases_json, external_iris_json,"
+                " deprecated, replaced_by)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (tenant, termId, kind, label or termId, parentTermId,
                  json.dumps(list(domain or []), ensure_ascii=False),
                  json.dumps(list(rangeTerms or []), ensure_ascii=False),
@@ -145,9 +203,78 @@ class OntologyTermRegistry:
                  cardinality,
                  json.dumps(sorted({str(d) for d in (disjointWith or [])}), ensure_ascii=False),
                  json.dumps(list(requiredProps or []), ensure_ascii=False),
-                 version, existing["created_at"] if existing else stamp, stamp),
+                 version, existing["created_at"] if existing else stamp, stamp,
+                 inverseOf, 1 if symmetric else 0, 1 if transitive else 0,
+                 json.dumps(aliasList, ensure_ascii=False),
+                 json.dumps({str(k): str(v) for k, v in (externalIris or {}).items()},
+                            ensure_ascii=False),
+                 1 if deprecated else 0, str(replacedBy or "")),
             )
+        # inverse_of 双向补齐：A inverse_of B ⇒ B inverse_of A（登记处收口，
+        # 单边态在存储层不存在；目标行其他字段不动，只补这一列）。
+        if inverseOf and inverseOf != termId:
+            with self._store._lock, self._store._conn:
+                self._store._conn.execute(
+                    "UPDATE ontology_terms SET inverse_of = ?, updated_at = ?"
+                    " WHERE tenant_id = ? AND term_id = ?",
+                    (termId, _now(), tenant, inverseOf))
         return self.term(termId, tenantId=tenant) or {}
+
+    def _ensureNoParentCycle(self, termId: str, parentTermId: str,
+                             tenantId: str = "default") -> None:
+        """父子链成环在登记处拒：环会让 subproperty/域继承的沿链读取无限绕。
+
+        判的是"加上这条新边后是否成环"——沿 parentTermId 的既有祖先链走，
+        链上任何一点回到 termId 即环（新边 termId→parentTermId 由本路径闭合）。
+        """
+        seen: set = set()
+        cursorId = str(parentTermId)
+        while cursorId and cursorId not in seen:
+            if cursorId == termId:
+                raise ValueError(
+                    "父子链成环：%s → %s 经既有链回到 %s"
+                    % (termId, parentTermId, " → ".join(sorted(seen) or {parentTermId})))
+            seen.add(cursorId)
+            cursor = self.term(cursorId, tenantId=tenantId)
+            cursorId = str(cursor.get("parent_term_id") or "") if cursor else ""
+
+    def _aliasOwner(self, alias: str, tenantId: str = "default",
+                    excludeTermId: str = "") -> Optional[str]:
+        """别名现属的术语 id；未归属返回 None。"""
+        for term in self.terms("relation", tenantId=tenantId):
+            if str(term["term_id"]) == str(excludeTermId):
+                continue
+            if alias in (term.get("aliases") or []):
+                return str(term["term_id"])
+        return None
+
+    @staticmethod
+    def _normalizeSurface(text: str) -> str:
+        """词形归一口径：小写、去空白/标点/下划线。CJK 是词字符，不删。"""
+        import re as _re
+
+        return _re.sub(r"[\s\W_]+", "", str(text or "").lower())
+
+    def resolveRelationAlias(self, surface: str, tenantId: str = "default") -> Optional[str]:
+        """关系词形归一（B8 ③）：精确 term_id → 别名精确 → 规范化 surface → 规范 label。
+
+        未命中返回 None，交由抽取侧落未知关系候选——这里不猜、不造新术语。
+        """
+        text = str(surface or "").strip()
+        if not text:
+            return None
+        if self.term(text, tenantId=tenantId) is not None:
+            return text
+        normalized = self._normalizeSurface(text)
+        relations = self.terms("relation", tenantId=tenantId)
+        for term in relations:
+            aliases = [str(a) for a in (term.get("aliases") or [])]
+            if text in aliases or normalized in {self._normalizeSurface(a) for a in aliases}:
+                return str(term["term_id"])
+        for term in relations:
+            if self._normalizeSurface(term.get("label") or "") == normalized:
+                return str(term["term_id"])
+        return None
 
     def registerMany(self, terms: List[Dict[str, Any]], tenantId: str = "default") -> int:
         """批量登记（018 收编枚举值、以及"加类型不改 .py"的入口都是这里）。"""
@@ -159,6 +286,11 @@ class OntologyTermRegistry:
                 rangeKinds=spec.get("rangeKinds"),
                 cardinality=spec.get("cardinality"), disjointWith=spec.get("disjointWith"),
                 requiredProps=spec.get("requiredProps"), version=spec.get("version", "v1"),
+                inverseOf=spec.get("inverseOf"), symmetric=spec.get("symmetric", False),
+                transitive=spec.get("transitive", False), aliases=spec.get("aliases"),
+                externalIris=spec.get("externalIris"),
+                deprecated=spec.get("deprecated", False),
+                replacedBy=spec.get("replacedBy", ""),
                 tenantId=tenantId,
             )
         return len(terms)
@@ -184,6 +316,11 @@ class OntologyTermRegistry:
                 rangeKinds=spec.get("rangeKinds"),
                 cardinality=spec.get("cardinality"), disjointWith=spec.get("disjointWith"),
                 requiredProps=spec.get("requiredProps"), version=spec.get("version", "v1"),
+                inverseOf=spec.get("inverseOf"), symmetric=spec.get("symmetric", False),
+                transitive=spec.get("transitive", False), aliases=spec.get("aliases"),
+                externalIris=spec.get("externalIris"),
+                deprecated=spec.get("deprecated", False),
+                replacedBy=spec.get("replacedBy", ""),
                 tenantId=tenantId,
             )
             added += 1
@@ -213,8 +350,13 @@ class OntologyTermRegistry:
         if row is None:
             return None
         d = dict(row)
-        for key in ("domain_terms", "range_terms", "range_kinds", "disjoint_with", "required_props"):
+        for key in ("domain_terms", "range_terms", "range_kinds", "disjoint_with",
+                    "required_props", "aliases_json"):
             d[key] = json.loads(d[key] or "[]")
+        d["aliases"] = d.pop("aliases_json")
+        d["external_iris"] = json.loads(d.pop("external_iris_json") or "{}")
+        for flag in ("symmetric", "transitive", "deprecated"):
+            d[flag] = bool(d.get(flag))
         return d
 
     def terms(self, kind: Optional[str] = None, tenantId: str = "default") -> List[Dict[str, Any]]:
@@ -297,20 +439,46 @@ class OntologyTermRegistry:
         term = self.term(termId, tenantId=tenantId)
         return term.get("cardinality") if term else None
 
-    def domainOf(self, termId: str, tenantId: str = "default") -> List[str]:
-        term = self.term(termId, tenantId=tenantId) or {}
-        return list(term.get("domain_terms") or [])
+    def domainOf(self, termId: str, tenantId: str = "default",
+                 _seen: Optional[set] = None) -> List[str]:
+        """谓词定义域：本行声明 + 沿关系父属性（subproperty）继承的有效定义域。
 
-    def rangeOf(self, termId: str, tenantId: str = "default") -> List[str]:
-        """谓词的值域：点名的那几个 + 按类别展开出来的那一批。
+        子属性继承了父属性的合法主语——父属性能接的主语，子属性写在哪儿都该能接。
+        环由登记处拒，这里只留 _seen 兜底（防存量脏数据无限绕）。
+        """
+        seen = _seen or set()
+        if termId in seen:
+            return []
+        seen.add(termId)
+        term = self.term(termId, tenantId=tenantId) or {}
+        own = list(term.get("domain_terms") or [])
+        parent = str(term.get("parent_term_id") or "")
+        if parent:
+            for value in self.domainOf(parent, tenantId=tenantId, _seen=seen):
+                if value not in own:
+                    own.append(value)
+        return own
+
+    def rangeOf(self, termId: str, tenantId: str = "default",
+                _seen: Optional[set] = None) -> List[str]:
+        """谓词的值域：点名的那几个 + 按类别展开出来的那一批 + 沿父属性继承。
 
         `is_a` 只声明 `rangeKinds: ["concept"]`，于是加一种概念类型不需要动 `is_a` 一行；
         展开在读取时做，表里那一行保持声明形状。
         """
+        seen = _seen or set()
+        if termId in seen:
+            return []
+        seen.add(termId)
         term = self.term(termId, tenantId=tenantId) or {}
         declared = list(term.get("range_terms") or [])
         for kind in term.get("range_kinds") or []:
             declared.extend(t["term_id"] for t in self.terms(kind, tenantId=tenantId))
+        parent = str(term.get("parent_term_id") or "")
+        if parent:
+            for value in self.rangeOf(parent, tenantId=tenantId, _seen=seen):
+                if value not in declared:
+                    declared.append(value)
         return sorted(set(declared))
 
     def disjointWith(self, termId: str, tenantId: str = "default") -> List[str]:
@@ -365,6 +533,7 @@ class OntologyTermRegistry:
                 termId, spec["kind"], label=spec.get("label", ""),
                 rangeKinds=spec.get("rangeKinds"),
                 cardinality=spec.get("cardinality"),
+                transitive=spec.get("transitive", False),
                 tenantId=tenantId)
             added += 1
         return added

@@ -96,7 +96,16 @@
   - `POST /ontology/validate`（只读）：入参 `{tenantId?, agentId?, triples:[{subjectLabel, subjectKey?, predicateTermId, objectTerm, qualifier?}]}`；逐条回 `{index, subjectKey, findings, violations, verdict}`＋`summary`。violation 不抛异常进 verdict；不落库、不建主体。校验路径与流水线共用一份
   - `POST /ontology/pipeline/run`（管理员）：入参 `{agentId?, tenantId?, termUpserts[], ruleRegistrations[], factCandidates[], reason?}`；候选先全部 dry-run，任一 violation 整批拒绝（400 带 `rejections`，零落盘）；应用术语/规则（只登记不触发求值）后写 `knowledge_baselines` 快照（scope=`ontology_pipeline`）；返回 `{baselineId, applied, summary}`
   - `GET /ontology/pipeline/diff?fromBaseline=..&toBaseline=..`（只读）：两基线（`toBaseline` 缺省对比当前实况）间 terms/rules 差异 `{added, removed, changed}`
-  - `GET /ontology/export.ttl?agent_id=`（只读，**仅管理员**）：本租户全库 Turtle 导出，`text/turtle; charset=utf-8`，文本出自 `ontology/turtle.py::serializeAll`（端点不另拼第二份序列化）。**语法子集边界**：固定 `@prefix kbg: <https://neurova.local/knowledge/>`；主语＝`kbg:<subject_key>`（不用中文标签，避免 IRI 收字形时不同主体互相吞并）；谓词＝`kbg:<数据里的术语名>`；客体一律字符串字面量——不出 IRI 客体、不出集合/匿名节点、不出 xsd 数据类型标记、不出 owl/rdf 模式词汇；事实段只收 `status='active' AND record_kind='triple'`；排序只来自固定 ORDER BY ⇒ 同一库内容两次导出逐字节一致。rdflib 互操作对拍是可选测试（产品零第三方依赖）
+  - `GET /ontology/export.ttl?agent_id=`（只读，**仅管理员**）：本租户全库 Turtle 导出，`text/turtle; charset=utf-8`，文本出自 `ontology/turtle.py::serializeAll`（端点不另拼第二份序列化）。**语法子集边界**：固定 `@prefix kbg: <https://neurova.local/knowledge/>`；主语＝`kbg:<subject_key>`（不用中文标签，避免 IRI 收字形时不同主体互相吞并）；谓词＝`kbg:<数据里的术语名>`；客体一律字符串字面量——不出 IRI 客体、不出集合/匿名节点、不出 xsd 数据类型标记、不出 owl/rdf 模式词汇；事实段只收 `status='active' AND record_kind='triple'`；排序只来自固定 ORDER BY ⇒ 同一库内容两次导出逐字节一致。rdflib 互操作对拍是可选测试（产品零第三方依赖）。**B8 扩展（2026-11-05）**：文档头增 `rdf:`/`rdfs:`/`owl:` 三个固定前缀；新增"标准槽位语义行"——概念父类 `rdfs:subClassOf`、关系父属性 `rdfs:subPropertyOf`、逆关系 `owl:inverseOf`（全 IRI 独立三元组行）；`is_a` 事实导出为 `rdf:type`（客体＝概念术语 IRI）；术语 IRI 有 `external_iris_json.skos_exactMatch` 外部映射时用外部 IRI，否则 `kbg:`；读侧前缀名从只认 `kbg:` 放宽到任意 `prefix:local`
+- 本体关系映射（2026-11-05，升级计划 B8，实现 `term_registry.py`＋`rule_engine.py`＋`relation_candidates.py`）：
+  - 术语写面（`POST|PUT /ontology/terms`）新增字段：`inverse_of`/`symmetric`/`transitive`/`aliases`/`external_iris`/`deprecated`/`replaced_by`（None＝PUT 保留现值）；relation 可挂 relation 父属性（`rdfs:subPropertyOf`，父子 kind 必须一致、登记处判环）；`inverse_of` 登记时双向补齐；别名按租户唯一；`cardinality=1` 即函数属性（不新增列）
+  - 规则写面（`POST|PUT /ontology/rules`）新增字段：`shape`（relay/conjunction/inverse；缺省按 `head_object_const` 推断）；inverse 要求 head 主语变元＝正原子客体变元
+  - 关系特征由 `ForwardChainingEngine.ensureAutoRules` 幂等对齐为 `auto_subproperty:*`/`auto_transitive:*`/`auto_inverse:*`/`auto_symmetric:*` 规则行（术语写面与批准动作后自动触发）；`is_a` 的传递规则沿用历史 id `is_a_transitive`（同 id 单行，旧手工种子退役）
+  - 未知关系候选（抽取侧 `graph_bridge` 落候选，不再两层静默消失）：
+    - `GET /ontology/relation-candidates?status=pending|approved|rejected&limit=`（登录可读）
+    - `POST /ontology/relation-candidates/{candidate_id}/approve`（**仅管理员**）：登记术语（term_id＝规范化词形）并回填 `promoted_term_id`
+    - `POST /ontology/relation-candidates/{candidate_id}/reject`（**仅管理员**）：保留审计行不删除
+    - 去重口径 `(tenant_id, normalized_surface, source_entry_id)`；批准/拒绝二态互斥（重复审批 409）
 - 四动词统一门面（2026-11-05，升级计划 B3，实现 `knowledge_access_facade.py`，纯转发零新逻辑）：
   - `POST /access/query` → 同 `POST /search`（入参与响应形状一致）
   - `POST /access/analyze` → 同 `POST /v1/semantic-search/analyze`

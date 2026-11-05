@@ -80,7 +80,9 @@ class TestRegistryIsData:
         with pytest.raises(ValueError, match="cardinality"):
             registry.register("z", "relation", cardinality=0)
         registry.register("person", "concept")
-        with pytest.raises(ValueError, match="只有 concept"):
+        with pytest.raises(ValueError, match="kind 必须一致"):
+            # B8 改判：relation 可有父属性（subproperty），但父子 kind 必须一致——
+            # 旧判据"只有 concept 能有父类"随关系映射层退役，拒绝的是跨 kind 挂父。
             registry.register("r", "relation", parentTermId="person")
         with pytest.raises(ValueError, match="类型未登记"):
             registry.assignSubjectType("subj_x", "ghost")
