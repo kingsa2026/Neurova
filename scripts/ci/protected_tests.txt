@@ -4276,3 +4276,7 @@ tests/unit/knowledge/test_admissionBatchCommit.py
 tests/unit/knowledge/ontology/test_turtleExport.py
 # B1 条件类推导：登记即归入、撤规则只撤结论、形状四道写入口拒、relay 存量零回归
 tests/unit/knowledge/ontology/test_conditionClassDerivation.py
+# B4 二次改判：观察态灰度必须落在图谱走查（推导当跳板也能把条目顶进排序），翻主路态 via_derived 随叶子走
+tests/unit/knowledge/test_graphWalkDerivationGovernance.py
+# 对话链路取数口径：真走查→真支撑→真 memories→真回合 metadata，四段不许各写一套
+tests/unit/agent/test_derivationReachesTurnMetadata.py

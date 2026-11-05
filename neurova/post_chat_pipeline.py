@@ -1132,6 +1132,10 @@ class PostChatPipeline:
             _lineage = (metadata or {}).get("knowledge_lineage_ids")
             if _lineage:
                 assistant_meta["knowledge_lineage_ids"] = list(_lineage)
+            # 本轮引用的溯源态随血缘一起落盘：历史回放才知道哪条是推出来的
+            _derivation = (metadata or {}).get("knowledge_derivation")
+            if isinstance(_derivation, dict) and _derivation:
+                assistant_meta["knowledge_derivation"] = dict(_derivation)
             _citations = (metadata or {}).get("knowledge_citation_ids")
             if _citations:
                 assistant_meta["knowledge_citation_ids"] = list(_citations)

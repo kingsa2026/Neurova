@@ -70,6 +70,22 @@ def filterConditionClassFacts(items: List[Dict[str, Any]],
     return kept, len(items) - len(kept)
 
 
+def derivationInfo(edges: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """由推导边生成标注形状（规则号＋前提数）——这个形状只在这里定义一次。
+
+    读面条目与图谱走查的跳都吃它：两处各拼一份 `{ruleId, premiseCount}` 就是
+    第二个事实源，哪天一边改字段名，对话里的溯源会静默变成读不出来源的空壳。
+    """
+    if not edges:
+        return dict(NOT_DERIVED)
+    ruleIds = sorted({str(e["rule_id"]) for e in edges})
+    return {
+        "derived": True,
+        "ruleId": ruleIds[0] if ruleIds else "",
+        "premiseCount": len({str(e["premise_fact_id"]) for e in edges}),
+    }
+
+
 def annotateDerivations(items: List[Dict[str, Any]],
                         store: Any) -> List[Dict[str, Any]]:
     """给每条命中挂 `derivation`：推导的带规则号与前提数，显式的带 `{"derived": False}`。
@@ -93,15 +109,7 @@ def annotateDerivations(items: List[Dict[str, Any]],
         return items
     for item in items:
         edges = edgesById.get(str(item.get("lineage_id") or ""))
-        if not edges:
-            item["derivation"] = dict(NOT_DERIVED)
-            continue
-        ruleIds = sorted({str(e["rule_id"]) for e in edges})
-        item["derivation"] = {
-            "derived": True,
-            "ruleId": ruleIds[0] if ruleIds else "",
-            "premiseCount": len({str(e["premise_fact_id"]) for e in edges}),
-        }
+        item["derivation"] = derivationInfo(edges or [])
     return items
 
 

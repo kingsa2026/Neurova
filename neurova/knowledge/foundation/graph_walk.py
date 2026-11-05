@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from .temporal_facts import subjectsMentionedIn
+from ..derivation_citation import conditionClassRouteOn, derivationInfo
 
 GRAPH_RETRIEVER_ENV = "NEUROVA_KB_GRAPH_RETRIEVER"
 _OFF_VALUES = ("0", "false", "off", "no")
@@ -79,15 +80,34 @@ class GraphFactWalker:
         anchors = subjectsMentionedIn(
             self._store, query or "", self._agentId, tenantId
         )
+        seeded = False
         if not anchors:
             anchors = self._seedAnchors(query or "", tenantId)
+            seeded = bool(anchors)
         if not anchors:
             return []
         moment = (now or datetime.datetime.now(datetime.timezone.utc)).astimezone(
             datetime.timezone.utc)
+        rows = self._walk(anchors, hops, cap, moment, tenantId)
+        # 翻主路态才给跳板挂溯源标注：观察态下推导行根本进不了 CTE（_walk 里排除），
+        # 去查一遍账本只是白花一次 IO，还会让人以为过滤与标注是两套判据。
+        derivedIds: set = set()
+        if conditionClassRouteOn():
+            try:
+                derivedIds = set(self._store._derivationLedger.derivedFactIds())
+            except Exception:  # noqa: BLE001 - 标注失败只丢标注，走查照旧返回
+                derivedIds = set()
+        if seeded:
+            # 收益记账：种子驱动的走查实际返回行数（SAG 对比 C1 观测项）。
+            try:
+                from ..retrieval_metrics import get_retrieval_metrics
+
+                get_retrieval_metrics().recordSeedWalkHits(walkHits=len(rows))
+            except Exception:  # noqa: BLE001 - 观测面故障绝不影响走查
+                pass
         return [
-            self._asHopDict(row)
-            for row in self._walk(anchors, hops, cap, moment, tenantId)
+            self._asHopDict(row, derivedIds)
+            for row in rows
         ]
 
     # ── 内部 ──────────────────────────────────────────────────
@@ -100,15 +120,23 @@ class GraphFactWalker:
         BM25（FactSurface.search）在词法不精确时仍能召回相关事实行，其主体即
         种子锚点。受 NEUROVA_KB_FACT_SURFACE 闸门控：闸关返回空列表，行为逐位
         等于旧行为；仅在强判据零命中时调用，强判据优先地位不变。
+        观测跟闸走（SAG 对比 C1 观测项）：闸关零记录；扫描只记
+        latency/pool/anchors，收益（walk_hits）由 walkFromQuery 种子路径记账。
         """
         try:
+            import time
+
             from .read_surface import FactSurface
 
             surface = FactSurface(self._store)
+            if not surface.enabled:
+                return []  # 闸关：零扫描、零观测
+            started = time.monotonic()
             hits = surface.search(
                 query, limit=SEED_ANCHOR_CAP, agentId=self._agentId,
                 tenantId=tenantId,
             )
+            elapsedMs = (time.monotonic() - started) * 1000.0
         except Exception:  # noqa: BLE001 - 种子失败让路，走查空手而归（旧行为）
             return []
         keys: List[str] = []
@@ -116,7 +144,16 @@ class GraphFactWalker:
             key = str(hit.get("subject_key") or "")
             if key and key not in keys:
                 keys.append(key)
-        return keys[:SEED_ANCHOR_CAP]
+        keys = keys[:SEED_ANCHOR_CAP]
+        try:
+            from ..retrieval_metrics import get_retrieval_metrics
+
+            get_retrieval_metrics().recordSeedScan(
+                latencyMs=elapsedMs, poolSize=len(hits), anchors=len(keys)
+            )
+        except Exception:  # noqa: BLE001 - 观测面故障绝不影响走查
+            pass
+        return keys
 
     def _walk(self, anchors: List[str], maxHops: int, limit: int,
               now: datetime.datetime, tenantId: Optional[str] = None) -> List[Any]:
@@ -132,6 +169,14 @@ class GraphFactWalker:
         if tenantId is not None:
             anchorClauses.append("f.tenant_id = ?")
             anchorValues.append(str(tenantId or "default"))
+        # 观察态灰度（升级计划 B1 拍板项 2）落在这里，不只落在读面：递归段里
+        # 一条推导行可以当**跳板**——自己不带条目，却把挂在条目上的显式事实接进
+        # 排序，那是推导进对话的真实路径。只在 FactSurface 摘条目管不到这一层。
+        # 判据与读面共用同一处（conditionClassRouteOn），不各写一份 env 解析。
+
+        ledger = getattr(self._store, "_derivationLedger", None)
+        if not conditionClassRouteOn() and ledger is not None:
+            anchorClauses.append(ledger.derivedExclusionClause("f"))
         # 递归段不再按 agent 过滤事实本身：域已经由 s2.agent_id = w.agent_id 与
         # f2.agent_id = s2.agent_id 两道锁住；多写一遍只会让"谁约束谁"看不清。
         headClause = ("f2.status = 'active' AND f2.record_kind = 'triple'"
@@ -139,18 +184,22 @@ class GraphFactWalker:
                       " OR f2.valid_until > ?) AND f2.agent_id = s2.agent_id")
         if tenantId is not None:
             headClause += " AND f2.tenant_id = ?"
+        if not conditionClassRouteOn() and ledger is not None:
+            headClause += " AND " + ledger.derivedExclusionClause("f2")
         #  visited 只记**经过的主体**（不含当前客体）：把客体也记进去，下一跳的起点
         #  永远被判成"重复经过"，整条链一步都走不动（本票第一版就是这么红的）。
         #  路径分隔符一律 ASCII：这条串会进日志与提示词，而 Windows 控制台默认码页
         #  不是 UTF-8，一个"⇒"就够把打印打成 UnicodeEncodeError。
         sql = (
             "WITH RECURSIVE walk(fact_id, agent_id, subject_key, predicate_term_id,"
-            " object_term, confidence, recorded_at, hop, visited, path) AS ("
+            " object_term, confidence, recorded_at, hop, visited, path, via_derived) AS ("
             "  SELECT f.fact_id, f.agent_id, f.subject_key, f.predicate_term_id,"
             "         f.object_term, f.confidence, f.recorded_at, 1,"
             "         '|' || lower(s0.canonical_label) || '|',"
             "         s0.canonical_label || ' -' || f.predicate_term_id || '-> '"
-            "         || f.object_term"
+            "         || f.object_term,"
+            "         EXISTS (SELECT 1 FROM knowledge_derivation_edges e"
+            "                 WHERE e.derived_fact_id = f.fact_id)"
             "  FROM knowledge_facts f"
             "  JOIN knowledge_subjects s0 ON s0.subject_key = f.subject_key"
             "  WHERE %s AND f.subject_key IN (%s)"
@@ -159,7 +208,10 @@ class GraphFactWalker:
             "         f2.object_term, f2.confidence, f2.recorded_at, w.hop + 1,"
             "         w.visited || lower(s2.canonical_label) || '|',"
             "         w.path || ' ; ' || s2.canonical_label || ' -' || f2.predicate_term_id"
-            "         || '-> ' || f2.object_term"
+            "         || '-> ' || f2.object_term,"
+            "         (w.via_derived OR EXISTS (SELECT 1"
+            "             FROM knowledge_derivation_edges e2"
+            "             WHERE e2.derived_fact_id = f2.fact_id))"
             "  FROM walk w"
             "  JOIN knowledge_subjects s2 ON s2.agent_id = w.agent_id"
             "       AND s2.normalized_label = lower(trim(w.object_term))"
@@ -179,11 +231,11 @@ class GraphFactWalker:
         with self._store._lock:
             return self._store._conn.execute(sql, params).fetchall()
 
-    def _asHopDict(self, row: Any) -> Dict[str, Any]:
+    def _asHopDict(self, row: Any, derivedIds: Optional[set] = None) -> Dict[str, Any]:
         fact = dict(row)
         subject = self._store.subjectFor(fact["subject_key"]) or {}
         assertions = self._store.assertions(fact["fact_id"])
-        return {
+        hop = {
             "id": fact["fact_id"],
             "subject": str(subject.get("canonical_label", "") or ""),
             "predicate": fact["predicate_term_id"],
@@ -199,4 +251,15 @@ class GraphFactWalker:
                 else ""
             ),
             "tenant_id": str(fact.get("tenant_id") or "default"),
+            # 整条路径有没有经过推导行：跳板本身不在返回里（只回 hop>=2 的叶子），
+            # 标志不随叶子走，图谱路由就不知道自己顶上来的是推导还是观察
+            "via_derived": bool(fact.get("via_derived")),
         }
+        if derivedIds and fact["fact_id"] in derivedIds:
+            # 这条跳是推出来的：对话侧的引用标注据它挂「推导」，不伪装成观察事实
+            try:
+                edges = self._store._derivationLedger.premisesOf(fact["fact_id"])
+            except Exception:  # noqa: BLE001 - 读不到就不挂键（缺席＝没溯过源）
+                return hop
+            hop["derivation"] = derivationInfo(edges)
+        return hop

@@ -121,6 +121,9 @@ class KnowledgeRetrieverAdapter:
                     "fact_id": hop.get("id"),
                     "hops": hop.get("hop"),
                     "path": hop.get("path"),
+                    # 这一跳整条路径有没有经过推导行：条目能进排序的原因要可辨，
+                    # 否则"被推出来的东西顶上来"在下游读起来和普通命中一模一样。
+                    "derived": bool(hop.get("via_derived")),
                 })
             graphWeight = 0.0
             if mode in ("on", "1", "true", "yes"):
@@ -503,6 +506,17 @@ class KnowledgeRetrieverAdapter:
             return "agent"
         return "untrusted"
 
+    @staticmethod
+    def _derivationOf(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """取用条目的溯源标注：自带优先，其次看图谱支撑里有没有推导跳。"""
+        own = item.get("derivation")
+        if isinstance(own, dict) and own:
+            return own
+        support = item.get("graph_support") or []
+        if any((hop or {}).get("derived") for hop in support):
+            return {"derived": False, "viaDerived": True}
+        return None
+
     @classmethod
     def _normalize_item(cls, item: Dict[str, Any]) -> Dict[str, Any]:
         """单条知识条目 → 检索链 memories 载荷（含 origin 信任级）。
@@ -516,7 +530,7 @@ class KnowledgeRetrieverAdapter:
             content = "\n".join(passages)
         else:
             content = item.get("content") or item.get("title") or ""
-        return {
+        payload = {
             "memory_id": item.get("knowledge_id"),
             "content": content,
             "title": item.get("title", ""),
@@ -536,3 +550,10 @@ class KnowledgeRetrieverAdapter:
             "score": float(item.get("score", 0.0) or 0.0),
             "origin": cls._map_origin(item.get("source", "")),
         }
+        # 溯源标注：读面条目自带（derivation_citation 的单源形状）；条目被图谱支撑
+        # 带上来时退化成「排序依据里含推导跳」。两者都没有就**不挂键**——缺席是
+        # 没查过，挂个 {"derived": false} 就是替账本作伪证。
+        derivation = cls._derivationOf(item)
+        if derivation is not None:
+            payload["derivation"] = derivation
+        return payload
