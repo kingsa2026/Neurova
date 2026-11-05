@@ -4267,3 +4267,12 @@ tests/unit/build_mode/test_batch_compensation.py
 # Amazon 广告自动调优：策略上限/幂等账本/商务节点。逐文件单跑 22／26 passed
 tests/unit/neurflow/test_ad_auto_apply.py
 tests/unit/neurflow/test_ad_commerce_nodes.py
+# 本体栈升级计划 B1–B7：推导事实读侧治理单源（观察态过滤落 FactSurface，翻开关双向可回滚）
+tests/unit/knowledge/test_derivationCitation.py
+tests/unit/knowledge/test_factSurfaceDerivationGovernance.py
+# B7 批量准入语义：单条失败连半条一起退、finding 逐条留名、单条路径落盘时机不改
+tests/unit/knowledge/test_admissionBatchCommit.py
+# B5 Turtle 全库导出：serializeAll 确定性/转义/租户隔离＋export.ttl 端点治理门
+tests/unit/knowledge/ontology/test_turtleExport.py
+# B1 条件类推导：登记即归入、撤规则只撤结论、形状四道写入口拒、relay 存量零回归
+tests/unit/knowledge/ontology/test_conditionClassDerivation.py

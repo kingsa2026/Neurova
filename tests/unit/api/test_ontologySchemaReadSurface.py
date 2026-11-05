@@ -98,11 +98,28 @@ class TestSchemaReadSurface:
 
         rule = rules["report-inherits-document"]
         assert rule["head_predicate"] == "is_a"
+        # B1 起原子形状多一栏 `objectConst`（relay 恒空串）：条件类的常量客体落在
+        # 这一栏，读面必须把它带出来，否则工作台分不清"接力"与"∩ 条件类"。
         assert rule["body"] == [{"kind": "atom", "predicate": "type_of",
-                                 "subject": "X", "object": "Y"}]
+                                 "subject": "X", "object": "Y", "objectConst": ""}]
         assert rule["depends_on"] == ["type_of"]
         assert rule["enabled"] is True
         assert rule["version"] == "v3"
+        assert rule["shape"] == "relay", "存量规则在读面上仍读作 relay（零漂移）"
+        assert rule["head_object_const"] == ""
+
+    def testConditionClassRuleReadsBackWithItsHeadConst(self, api):
+        """条件类规则必须在读面上认得出来——工作台只有先读得到，才谈得上编辑它。"""
+        api.engine.registerRule(
+            "high_risk_report", "is_a",
+            [{"atom": "mentions", "subject": "X", "objectConst": "report"}],
+            headObjectConst="report")
+
+        rule = {r["rule_id"]: r for r in _schemaData(api)["rules"]}["high_risk_report"]
+
+        assert rule["shape"] == "conjunction"
+        assert rule["head_object_const"] == "report"
+        assert [a["objectConst"] for a in rule["body"]] == ["report"]
 
     def testSchemaVersionComesFromTheSingleMigrationSource(self, api):
         assert _schemaData(api)["schema_version"] == latest_version("knowledge_foundation")

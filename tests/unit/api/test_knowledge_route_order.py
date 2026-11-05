@@ -19,6 +19,7 @@ from tests.route_table import registeredPathMethods
 # 此前快照停在拆分时的 34 条+评测路由，10-24 批次的 /ontology/* /mcp/sources*
 # /geo /graph/instances 等一直未登记（守护带病漂红）；本次以 kb.router 实测
 # 84 条收口，此后新增路由必须随批更新本清单（多重集相等，不锁注册顺序）。
+# 2026-11-05 升级计划随批补登记 B2/B5/B6 四条（validate / pipeline 两条 / export.ttl）。
 _KB_ROUTES = [
     ("", "GET"), ("", "POST"),
     ("/search", "POST"),
@@ -81,6 +82,10 @@ _KB_ROUTES = [
     ("/annotations/export", "GET"),
     # 2026-10-24 批次：本体/实例编辑/租户化（S1–S3）+ GIS + MCP 信息源
     ("/ontology/schema", "GET"),
+    ("/ontology/export.ttl", "GET"),
+    ("/ontology/validate", "POST"),
+    ("/ontology/pipeline/run", "POST"),
+    ("/ontology/pipeline/diff", "GET"),
     ("/ontology/impact", "GET"),
     ("/ontology/terms", "POST"),
     ("/ontology/terms/{term_id}", "PUT"),
