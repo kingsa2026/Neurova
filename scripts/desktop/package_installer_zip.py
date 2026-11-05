@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -380,6 +381,32 @@ def validate_lean_backend() -> None:
         )
 
 
+def validate_staged_backend_version(expected: str,
+                                    initPath: Path | None = None) -> None:
+    """内嵌后端的自陈版本必须等于即将写进产物名的版本，不符即拒出包。
+
+    成因（beta8 出包实测）：包名里的版本取自 NSIS 内核文件名（源头是 tauri.conf.json），
+    而 `resources/backend/` 那份是 `bundle_backend.py` 单独一步灌进去的副本——
+    两步之间没有任何咬合。第一次出包时源码已经 beta8、staged 仍是 beta7，
+    产物照样叫 `Neurova_Setup_1.0.0-beta8_*.exe`，装上后 /health 自报 beta7。
+    "构建成功"对这个错一字不报，判据只能长在出包这一步。
+    """
+    init = initPath or (REPO / "NeurUI" / "src-tauri" / "resources" / "backend"
+                        / "neurova" / "__init__.py")
+    if not init.exists():
+        raise RuntimeError(
+            f"内嵌后端缺席：{init}——先跑 scripts/desktop/bundle_backend.py 再打包")
+    found = re.search(r'^__version__\s*=\s*"([^"]+)"',
+                      init.read_text(encoding="utf-8"), re.M)
+    if found is None:
+        raise RuntimeError(f"{init} 里读不到 __version__，无法核对内嵌后端版本")
+    if found.group(1) != expected:
+        raise RuntimeError(
+            "内嵌后端版本与包名不符：staged=%s / 包名将=%s —— staged 那份还是旧后端，"
+            "跑 `python scripts/desktop/bundle_backend.py --force` 重灌后重打包"
+            % (found.group(1), expected))
+
+
 def version_of(kernel: Path) -> str:
     stem = kernel.name[len(KERNEL_PREFIX):-len(KERNEL_SUFFIX)]
     return stem.split("_")[0]
@@ -399,6 +426,7 @@ def package(skip_tauri: bool, legacy_zip: bool, open_dir: bool) -> int:
     validate_lean_backend()
 
     ver = version_of(kernel)
+    validate_staged_backend_version(ver)
     stamp = datetime.now().strftime("%Y%m%d")
     # 不签名的产物必须在**文件名**上被点名：悄悄少签名是表面抹除（教义第 2 条），
     # 而名字是分发链上唯一跟着包走、人一眼能看到的标记。
