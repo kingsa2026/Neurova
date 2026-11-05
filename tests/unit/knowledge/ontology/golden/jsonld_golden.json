@@ -1,0 +1,250 @@
+{
+ "@context": {
+  "kbg": "https://neurova.local/knowledge/",
+  "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+ },
+ "@graph": [
+  {
+   "@id": "kbg:Agent",
+   "@type": "kbg:Term",
+   "kind": "concept",
+   "label": "代理",
+   "parent_term_id": "kbg:Continuant",
+   "term_id": "Agent"
+  },
+  {
+   "@id": "kbg:Concept",
+   "@type": "kbg:Term",
+   "kind": "concept",
+   "label": "概念（类型根）",
+   "parent_term_id": "kbg:Continuant",
+   "term_id": "Concept"
+  },
+  {
+   "@id": "kbg:Continuant",
+   "@type": "kbg:Term",
+   "kind": "concept",
+   "label": "连续体",
+   "parent_term_id": "kbg:Entity",
+   "term_id": "Continuant"
+  },
+  {
+   "@id": "kbg:Document",
+   "@type": "kbg:Term",
+   "kind": "concept",
+   "label": "文档",
+   "parent_term_id": "kbg:Continuant",
+   "term_id": "Document"
+  },
+  {
+   "@id": "kbg:Entity",
+   "@type": "kbg:Term",
+   "kind": "concept",
+   "label": "实体",
+   "term_id": "Entity"
+  },
+  {
+   "@id": "kbg:Event",
+   "@type": "kbg:Term",
+   "kind": "concept",
+   "label": "事件",
+   "parent_term_id": "kbg:Occurrent",
+   "term_id": "Event"
+  },
+  {
+   "@id": "kbg:HighRiskOrder",
+   "@type": "kbg:Term",
+   "kind": "concept",
+   "label": "高风险订单",
+   "parent_term_id": "kbg:Order",
+   "term_id": "HighRiskOrder"
+  },
+  {
+   "@id": "kbg:Occurrent",
+   "@type": "kbg:Term",
+   "kind": "concept",
+   "label": "发生体",
+   "parent_term_id": "kbg:Entity",
+   "term_id": "Occurrent"
+  },
+  {
+   "@id": "kbg:Order",
+   "@type": "kbg:Term",
+   "kind": "concept",
+   "label": "订单",
+   "term_id": "Order"
+  },
+  {
+   "@id": "kbg:causal",
+   "@type": "kbg:Term",
+   "kind": "relation",
+   "label": "causal",
+   "term_id": "causal"
+  },
+  {
+   "@id": "kbg:causes",
+   "@type": "kbg:Term",
+   "kind": "relation",
+   "label": "causes",
+   "term_id": "causes"
+  },
+  {
+   "@id": "kbg:concept",
+   "@type": "kbg:Term",
+   "kind": "concept",
+   "label": "concept",
+   "term_id": "concept"
+  },
+  {
+   "@id": "kbg:contains",
+   "@type": "kbg:Term",
+   "kind": "relation",
+   "label": "contains",
+   "term_id": "contains"
+  },
+  {
+   "@id": "kbg:depends_on",
+   "@type": "kbg:Term",
+   "kind": "relation",
+   "label": "depends_on",
+   "term_id": "depends_on"
+  },
+  {
+   "@id": "kbg:documented_as",
+   "@type": "kbg:Term",
+   "kind": "relation",
+   "label": "被记载为",
+   "term_id": "documented_as"
+  },
+  {
+   "@id": "kbg:entity",
+   "@type": "kbg:Term",
+   "kind": "concept",
+   "label": "entity",
+   "term_id": "entity"
+  },
+  {
+   "@id": "kbg:event",
+   "@type": "kbg:Term",
+   "kind": "concept",
+   "label": "event",
+   "term_id": "event"
+  },
+  {
+   "@id": "kbg:hasRiskLevel",
+   "@type": "kbg:Term",
+   "kind": "relation",
+   "label": "hasRiskLevel",
+   "term_id": "hasRiskLevel"
+  },
+  {
+   "@id": "kbg:has_a",
+   "@type": "kbg:Term",
+   "kind": "relation",
+   "label": "has_a",
+   "term_id": "has_a"
+  },
+  {
+   "@id": "kbg:is_a",
+   "@type": "kbg:Term",
+   "kind": "relation",
+   "label": "是一个",
+   "term_id": "is_a"
+  },
+  {
+   "@id": "kbg:location",
+   "@type": "kbg:Term",
+   "kind": "concept",
+   "label": "location",
+   "term_id": "location"
+  },
+  {
+   "@id": "kbg:memory",
+   "@type": "kbg:Term",
+   "kind": "concept",
+   "label": "memory",
+   "term_id": "memory"
+  },
+  {
+   "@id": "kbg:opposite_of",
+   "@type": "kbg:Term",
+   "kind": "relation",
+   "label": "opposite_of",
+   "term_id": "opposite_of"
+  },
+  {
+   "@id": "kbg:part_of",
+   "@type": "kbg:Term",
+   "kind": "relation",
+   "label": "part_of",
+   "term_id": "part_of"
+  },
+  {
+   "@id": "kbg:person",
+   "@type": "kbg:Term",
+   "kind": "concept",
+   "label": "person",
+   "term_id": "person"
+  },
+  {
+   "@id": "kbg:related_to",
+   "@type": "kbg:Term",
+   "kind": "relation",
+   "label": "related_to",
+   "term_id": "related_to"
+  },
+  {
+   "@id": "kbg:similar_to",
+   "@type": "kbg:Term",
+   "kind": "relation",
+   "label": "similar_to",
+   "term_id": "similar_to"
+  },
+  {
+   "@id": "kbg:skill",
+   "@type": "kbg:Term",
+   "kind": "concept",
+   "label": "skill",
+   "term_id": "skill"
+  },
+  {
+   "@id": "kbg:spatial",
+   "@type": "kbg:Term",
+   "kind": "relation",
+   "label": "spatial",
+   "term_id": "spatial"
+  },
+  {
+   "@id": "kbg:temporal",
+   "@type": "kbg:Term",
+   "kind": "relation",
+   "label": "temporal",
+   "term_id": "temporal"
+  },
+  {
+   "@id": "kbg:time",
+   "@type": "kbg:Term",
+   "kind": "concept",
+   "label": "time",
+   "term_id": "time"
+  },
+  {
+   "@id": "kbg:tool",
+   "@type": "kbg:Term",
+   "kind": "concept",
+   "label": "tool",
+   "term_id": "tool"
+  },
+  {
+   "@id": "kbg:used_by",
+   "@type": "kbg:Term",
+   "kind": "relation",
+   "label": "used_by",
+   "term_id": "used_by"
+  },
+  {
+   "@id": "kbg:subj_e41bf987b39ffa88",
+   "kbg:is_a": "HighRiskOrder"
+  }
+ ]
+}
