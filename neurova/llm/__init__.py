@@ -13,7 +13,6 @@ from .llm_router import (
     ModelCapability,
     ModelSelectionResult,
     RequestType,
-    detect_request_type,
     select_model_for_request,
 )
 
@@ -23,5 +22,4 @@ __all__ = [
     "ModelSelectionResult",
     "LLMRouter",
     "select_model_for_request",
-    "detect_request_type",
 ]

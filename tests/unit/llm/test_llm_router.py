@@ -6,7 +6,6 @@ LLM Router 单元测试
 2. ModelCapability 枚举
 3. LLMRouter 单例类
 4. select_model_for_request() 函数
-5. detect_request_type() 函数
 """
 
 import pytest
@@ -17,7 +16,6 @@ from neurova.llm.llm_router import (
     ModelSelectionResult,
     LLMRouter,
     select_model_for_request,
-    detect_request_type,
 )
 
 
@@ -321,41 +319,3 @@ class TestSelectModelForRequest:
         assert result.model == "gpt-4o"
         assert ModelCapability.VISION in result.capabilities
 
-
-class TestDetectRequestType:
-    """detect_request_type() 函数测试"""
-    
-    def test_detect_text_only(self):
-        """检测纯文本"""
-        result = detect_request_type("Hello, how are you?")
-        assert result == RequestType.CHAT
-    
-    def test_detect_image_description(self):
-        """检测图像描述"""
-        result = detect_request_type("[用户发送了一张图片: test.jpg] 告诉我这是什么")
-        assert result == RequestType.IMAGE_UNDERSTANDING
-    
-    def test_detect_audio_description(self):
-        """检测音频描述"""
-        result = detect_request_type("[用户发送了一段语音消息] 请转录这段语音")
-        assert result == RequestType.AUDIO_UNDERSTANDING
-    
-    def test_detect_video_description(self):
-        """检测视频描述"""
-        result = detect_request_type("[用户发送了一个视频] 分析这个视频内容")
-        assert result == RequestType.VIDEO_UNDERSTANDING
-    
-    def test_detect_image_generation_request(self):
-        """检测图像生成请求"""
-        result = detect_request_type("生成一张猫的图片")
-        assert result == RequestType.TEXT_TO_IMAGE
-    
-    def test_detect_video_generation_request(self):
-        """检测视频生成请求"""
-        result = detect_request_type("制作一个关于海洋的视频")
-        assert result == RequestType.TEXT_TO_VIDEO
-    
-    def test_detect_speech_request(self):
-        """检测语音合成请求"""
-        result = detect_request_type("请用语音读出这段文字")
-        assert result == RequestType.TEXT_TO_SPEECH

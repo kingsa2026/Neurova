@@ -18,7 +18,6 @@ LLM Router - 多模态自适应路由器
 """
 
 from neurova.core.logger import get_logger
-import re
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
@@ -246,21 +245,10 @@ class LLMRouter:
         Returns:
             是否匹配
         """
-        # 请求类型到必需能力的映射
-        capability_requirements = {
-            RequestType.CHAT: [ModelCapability.TEXT],
-            RequestType.IMAGE_UNDERSTANDING: [ModelCapability.VISION],
-            RequestType.AUDIO_UNDERSTANDING: [ModelCapability.AUDIO],
-            RequestType.VIDEO_UNDERSTANDING: [ModelCapability.VIDEO],
-            RequestType.TEXT_TO_IMAGE: [ModelCapability.IMAGE_GENERATION],
-            RequestType.IMAGE_TO_IMAGE: [ModelCapability.IMAGE_GENERATION],
-            RequestType.TEXT_TO_VIDEO: [ModelCapability.VIDEO_GENERATION],
-            RequestType.IMAGE_TO_VIDEO: [ModelCapability.VIDEO_GENERATION],
-            RequestType.TEXT_TO_SPEECH: [ModelCapability.TTS],
-            RequestType.SPEECH_TO_TEXT: [ModelCapability.STT],
-        }
-
-        required = capability_requirements.get(request_type, [ModelCapability.TEXT])
+        # 必需能力只认模块级那份 `REQUEST_TYPE_CAPABILITIES`。此前这里内联着一份逐字
+        # 相同的 dict、而模块级那份全仓零消费者——两份并存就是"改了读得到的、忘了写不到的"
+        # 那类漂移的温床（教义第 6 条），故收口成一处并被消费方读取。
+        required = REQUEST_TYPE_CAPABILITIES.get(request_type, [ModelCapability.TEXT])
 
         # 检查是否满足所有必需能力
         return all(cap in capabilities for cap in required)
@@ -443,57 +431,6 @@ def select_model_for_request(
     if not router._providers:
         sync_llm_router()
     return router.select_model(request_type, required_capabilities)
-
-
-def detect_request_type(content: str) -> RequestType:
-    """
-    自动检测请求类型
-
-    根据输入内容自动判断应该使用哪种请求类型。
-
-    Args:
-        content: 用户输入内容
-
-    Returns:
-        检测到的请求类型
-    """
-    content_lower = content.lower()
-
-    # 优先检测发送文件标记（最精确）
-    if "[用户发送了一张图片" in content:
-        return RequestType.IMAGE_UNDERSTANDING
-
-    if "[用户发送了一段语音" in content:
-        return RequestType.AUDIO_UNDERSTANDING
-
-    if "[用户发送了一个视频" in content:
-        return RequestType.VIDEO_UNDERSTANDING
-
-    # 检测生成请求（需在通用关键词之前）
-    # 文生图：生成/画/创建/绘制 + 图片/图像/图画/照片
-    if re.search(r"(生成|画|创建|绘制|制作|搞|弄|来).{0,10}(图片|图像|图画|照片)", content_lower):
-        return RequestType.TEXT_TO_IMAGE
-
-    # 文生视频：制作/生成/创建 + 视频/影片/录像
-    if re.search(r"(制作|生成|创建|制作|搞|弄|来).{0,10}(视频|影片|录像)", content_lower):
-        return RequestType.TEXT_TO_VIDEO
-
-    # 语音合成：用语音读出/朗读/语音播放/读出来/念出来
-    if any(keyword in content_lower for keyword in ["用语音读出", "朗读", "语音播放", "读出来", "念出来", "语音读"]):
-        return RequestType.TEXT_TO_SPEECH
-
-    # 检测多模态理解请求（通用关键词，仅在非生成场景时匹配）
-    if "图片" in content_lower or "图像" in content_lower or "照片" in content_lower:
-        return RequestType.IMAGE_UNDERSTANDING
-
-    if "语音" in content_lower or "音频" in content_lower or "声音" in content_lower:
-        return RequestType.AUDIO_UNDERSTANDING
-
-    if "视频" in content_lower or "录像" in content_lower or "影片" in content_lower:
-        return RequestType.VIDEO_UNDERSTANDING
-
-    # 默认为文本聊天
-    return RequestType.CHAT
 
 
 # 请求类型到能力的映射

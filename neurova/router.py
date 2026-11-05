@@ -25,7 +25,6 @@ from typing import Any, Callable, Dict, Optional
 # 留着就是 §2 说的"只写不读的配置"——它承诺了一个没人查的状态。
 from neurova.llm.llm_router import (
     RequestType,
-    detect_request_type,
     get_llm_router,
     select_model_for_request,
 )
