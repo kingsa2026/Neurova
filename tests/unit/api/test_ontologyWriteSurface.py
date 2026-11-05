@@ -65,9 +65,13 @@ def _termsById(api):
 
 
 def _ruleIds(api):
+    return {r["rule_id"] for r in _schemaRules(api)}
+
+
+def _schemaRules(api):
     resp = api.client.get(PREFIX + "/ontology/schema")
     assert resp.status_code == 200, resp.text
-    return {r["rule_id"] for r in resp.json()["data"]["rules"]}
+    return resp.json()["data"]["rules"]
 
 
 class TestWriteAuthorization:
@@ -197,6 +201,46 @@ class TestRuleCrud:
             "rule_id": "r-doc", "head_predicate": "is_a", "body": self.BODY})
 
         assert resp.status_code == 409, resp.text
+
+    def testConditionClassRuleSurvivesTheWriteSurface(self, api):
+        """条件类规则必须能从 HTTP 写面登记并原样读回——形状参数不许只长在引擎侧。
+
+        活体（§8.2）第一版正是在这里失配的：写面模型没有 `head_object_const`，
+        条件类经 REST 登记不出来，只有直连引擎的单测才成立（票面 B1 的
+        live-verify 因此从未真的成立过）。
+        """
+        api.client.post(PREFIX + "/ontology/terms", json={
+            "term_id": "riskLevel", "kind": "relation", "label": "风险等级",
+            "basis": "条件类写面回归"})
+        api.client.post(PREFIX + "/ontology/terms", json={
+            "term_id": "HighRiskDoc", "kind": "concept", "label": "高风险文档",
+            "basis": "条件类写面回归"})
+        resp = api.client.post(PREFIX + "/ontology/rules", json={
+            "rule_id": "r-cond", "head_predicate": "is_a",
+            "body": [{"atom": "riskLevel", "subject": "X", "objectConst": "High"}],
+            "head_object_const": "HighRiskDoc",
+            "basis": "条件类写面回归",
+        })
+
+        assert resp.status_code == 200, resp.text
+        rules = {r["rule_id"]: r for r in _schemaRules(api)}
+        assert rules["r-cond"]["shape"] == "conjunction"
+        assert rules["r-cond"]["head_object_const"] == "HighRiskDoc"
+
+        # PUT 的"未提供即保留现值"契约对新增一栏同样成立：不改形状才谈得上改版本
+        # 改版照旧带上正文（PUT 省略 body 走"保留现值"那条支路今天仍是坏的，
+        # 已登记台账另批修；本格只咬合条件类这一栏的保留契约）
+        resp = api.client.put(PREFIX + "/ontology/rules/r-cond", json={
+            "head_predicate": "is_a", "version": "v2", "basis": "只改版不改形状",
+            "body": [{"atom": "riskLevel", "subject": "X", "objectConst": "High"}],
+        })
+
+        assert resp.status_code == 200, resp.text
+        updated = {r["rule_id"]: r for r in _schemaRules(api)}["r-cond"]
+        assert updated["version"] == "v2"
+        assert updated["head_object_const"] == "HighRiskDoc", \
+            "PUT 把条件类擦成了 relay——保留现值契约破了"
+        assert updated["shape"] == "conjunction"
 
     def testInvalidRuleBodyIs400(self, api):
         resp = api.client.post(PREFIX + "/ontology/rules", json={

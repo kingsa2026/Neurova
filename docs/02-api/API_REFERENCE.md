@@ -92,6 +92,17 @@
 ### 19. `/api/v1/knowledge` — `knowledge.py`（聚合器；实现拆 knowledge_common/core/sharing/remote/ingestion）
 - CRUD: `GET` | `POST` | `GET/PUT/DELETE /{id}` | `POST /search`
 - `POST /search`（2026-11-04）：请求体可选 `source_modified_after`/`source_modified_before`（源文档修改时间范围；设置后无源时间条目如实排除）；条目含 `source_created_at`/`source_modified_at`（缺失空串），`created_at`＝入库时间
+- 本体 dry-run 与流水线（2026-11-05，升级计划 B2/B6，实现 `knowledge_ontology.py`＋`knowledge/ontology/pipeline.py`）：
+  - `POST /ontology/validate`（只读）：入参 `{tenantId?, agentId?, triples:[{subjectLabel, subjectKey?, predicateTermId, objectTerm, qualifier?}]}`；逐条回 `{index, subjectKey, findings, violations, verdict}`＋`summary`。violation 不抛异常进 verdict；不落库、不建主体。校验路径与流水线共用一份
+  - `POST /ontology/pipeline/run`（管理员）：入参 `{agentId?, tenantId?, termUpserts[], ruleRegistrations[], factCandidates[], reason?}`；候选先全部 dry-run，任一 violation 整批拒绝（400 带 `rejections`，零落盘）；应用术语/规则（只登记不触发求值）后写 `knowledge_baselines` 快照（scope=`ontology_pipeline`）；返回 `{baselineId, applied, summary}`
+  - `GET /ontology/pipeline/diff?fromBaseline=..&toBaseline=..`（只读）：两基线（`toBaseline` 缺省对比当前实况）间 terms/rules 差异 `{added, removed, changed}`
+  - `GET /ontology/export.ttl?agent_id=`（只读，**仅管理员**）：本租户全库 Turtle 导出，`text/turtle; charset=utf-8`，文本出自 `ontology/turtle.py::serializeAll`（端点不另拼第二份序列化）。**语法子集边界**：固定 `@prefix kbg: <https://neurova.local/knowledge/>`；主语＝`kbg:<subject_key>`（不用中文标签，避免 IRI 收字形时不同主体互相吞并）；谓词＝`kbg:<数据里的术语名>`；客体一律字符串字面量——不出 IRI 客体、不出集合/匿名节点、不出 xsd 数据类型标记、不出 owl/rdf 模式词汇；事实段只收 `status='active' AND record_kind='triple'`；排序只来自固定 ORDER BY ⇒ 同一库内容两次导出逐字节一致。rdflib 互操作对拍是可选测试（产品零第三方依赖）
+- 四动词统一门面（2026-11-05，升级计划 B3，实现 `knowledge_access_facade.py`，纯转发零新逻辑）：
+  - `POST /access/query` → 同 `POST /search`（入参与响应形状一致）
+  - `POST /access/analyze` → 同 `POST /v1/semantic-search/analyze`
+  - `POST /access/validate` → 同 `POST /ontology/validate`
+  - `POST /access/use/{fact_id}` → 同 `POST /facts/{fact_id}/adoption`（治理门同源：仅管理员）
+  - 未声明动词无处理面，天然 404；旧路由保持直接入口
 
 ### 20. `/api/v1/growth` — `growth.py`
 - `GET /logs` | `GET /reports` | `GET /metrics` | `POST /events`
@@ -334,7 +345,7 @@
 > 守卫 `tests/unit/api/test_authSurfaceFreshness.py` 逐字比对，漂移即红。
 > 口径：只认**路由依赖图**里的身份/角色门；在 handler 体内自验 token 的那一类**未覆盖**，要确认它只能真打请求。404/405 不算门。
 
-**汇总**：路由 971 条（含方法展开）——需认证 **864**、公开 **107**。
+**汇总**：路由 985 条（含方法展开）——需认证 **873**、公开 **112**。
 
 | 模块前缀 | 路由 | 需认证 | 公开 |
 |----------|------|--------|------|
@@ -342,7 +353,7 @@
 | `agent-enhancement` | 4 | 4 | 0 |
 | `agents` | 15 | 12 | 3 |
 | `analytics` | 4 | 4 | 0 |
-| `api` | 33 | 16 | 17 |
+| `api` | 37 | 16 | 21 |
 | `artifacts` | 2 | 2 | 0 |
 | `audio` | 7 | 2 | 5 |
 | `audit` | 4 | 4 | 0 |
@@ -350,6 +361,7 @@
 | `backups` | 3 | 3 | 0 |
 | `benchmark` | 14 | 14 | 0 |
 | `budgets` | 7 | 0 | 7 |
+| `build` | 6 | 6 | 0 |
 | `builder` | 5 | 5 | 0 |
 | `channel-adapters` | 11 | 8 | 3 |
 | `channel-configs` | 16 | 16 | 0 |
@@ -374,7 +386,7 @@
 | `health` | 6 | 0 | 6 |
 | `home` | 2 | 2 | 0 |
 | `image` | 5 | 5 | 0 |
-| `knowledge` | 2 | 2 | 0 |
+| `knowledge` | 6 | 5 | 1 |
 | `knowledge-graph` | 11 | 11 | 0 |
 | `knowledge-integration` | 10 | 10 | 0 |
 | `language` | 6 | 6 | 0 |
@@ -434,6 +446,10 @@
 - `POST /api/coordination/ab-tests/reset`
 - `GET /api/coordination/ab-tests/results/{experiment_name}`
 - `POST /api/coordination/ab-tests/start`
+- `POST /api/coordination/seen-boundary/check-freshness`
+- `POST /api/coordination/seen-boundary/record`
+- `POST /api/coordination/seen-boundary/reset`
+- `GET /api/coordination/seen-boundary/stats`
 - `GET /api/coordination/summary`
 - `POST /api/coordination/triage/check`
 - `POST /api/coordination/triage/clear-cache`
@@ -508,6 +524,7 @@
 - `POST /api/v1/health/checks/{name}/run`
 - `POST /api/v1/health/recover`
 - `GET /api/v1/health/report`
+- `POST /api/v1/knowledge/access/analyze`
 - `POST /api/v1/mobile/pairing/confirm`
 - `POST /api/v1/mobile/pairing/refresh`
 - `POST /api/v1/mobile/pairing/resolve`

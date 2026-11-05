@@ -11887,3 +11887,16 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **生成物重生成**：同名函数盘点台账（守卫自述命令 --write-ledger），scannedFiles 340→343 零重名组新增，纯计数更新。
     - **KWeaver 对比候选终态**：C1-C5 已实施（§6-543..547），C6 本格收口——对比报告 §5 候选清单全部处置完毕。
     - **下一枚空号现查**：本格取 549，后继自 550 起。
+
+
+550. **本体语义栈升级计划 B1–B7 收尾批（B4 溯源读侧单源＋B5 导出口＋B7 批量档＋两处票面改判）** ✅🟢
+    - **票面改判（实测推翻，不是臆断）**：① B1 观察态过滤原写"落 `knowledge_retriever_adapter`"，实测 chat 主路只出条目（`hybrid`→`search_visible_items`；`mergeIntoLegacy` 生产零调用；推导行 `record_kind='triple'` 永不成条目治理行）⇒ 全仓唯一"事实→检索条目形状"出口是 `read_surface.FactSurface.search`，过滤落那儿，落别处就是永不触发的分支；② B7 摊薄收益初测 +0.3% 是**假结论**——探针只覆写 `commit()`，而 CPython `Connection.__exit__` 走 C 层提交，两侧跑同一条路；反证格（批前另一连接读到 0 行）抓到后改判，实测 **+329%** 过 30% 门槛 ⇒ `admitBatch` 按票面立项并交付。
+    - **落点**：新模块 `neurova/knowledge/derivation_citation.py`（判"是否推导"只此一处，依据推导账本边而非 `qualifier.derived_by` 抄送字段；观察态过滤＋溯源标注＋占比读数；读账失败放行且不挂标注键）＋ `DerivationLedger.derivedFactIds()` 单点取数；`read_surface.FactSurface.search` 排序前过滤、出口前标注；`KnowledgeFactStore.batchScope()`＋`_ScopeAwareConnection`（默认态 depth=0 逐字等于原生）；`admission.admitBatch`（每条自包 SAVEPOINT，逐条 finding 留名）；消费者 `graph_bridge.admitExtractedFacts`（实体批＋关系批，失败仍逐条点名）。
+    - **B5 补上的一半**：`GET /v1/knowledge/ontology/export.ttl`（仅管理员，文本出自 `serializeAll`，端点不拼第二份序列化），语法子集边界进 `docs/02-api/API_REFERENCE.md`；rdflib 对拍本机未装 ⇒ 该格 skip，"roundtrip 通过"沿用上一会话读数并已注明。
+    - **B6/B1 集成缺口（活体抓出）**：`RuleWriteRequest` 与 `PipelineRuleRegistration` 都缺 `head_object_const` ⇒ 条件类规则经 REST 登记不出来（活体第一版 400 在此）；补栏＋PUT"未提供即保留现值"＋流水线 diff 字段同步。
+    - **红绿灯**：`test_derivationCitation.py` 7 格（纯新单元 ImportError 红，单独汇报）＋ `test_factSurfaceDerivationGovernance.py` 5 格（行为红 3 failed→5 passed，档内不 import 待建模块）＋ `test_admissionBatchCommit.py` 6 格＋ `test_turtleExport.py` 新增 3 格（红形态 404）＋ `test_ontologyWriteSurface.py`/`test_ontologySchemaReadSurface.py` 条件类两格；性能判据改向为"admitBatch 实测增益须站得住 30% 门槛"。
+    - **活体（§8.2 全链 19 格全绿）**：真 `create_app()`＋`TestClient`＋生产签 token，pipeline/run 建条件类规则→graph/instances 两笔实例→export.ttl 内推导命中 4→撤规则 4→3（原始主体键仍在）→validate 报 violation 不抛异常→四动词逐个转发＋未声明动词 404→diff 可读→admitBatch 30 条全落；数据根走 `tests/manual/_liveVerifyIsolation.isolatedDataRoot()`，仓内 `data/` 内容指纹跨两次活体一致（595dbb4e3a79446bce6f4ae088920bfd）。
+    - **A/B（`scripts/ab_compare.sh -k HEAD`）**：知识＋代理＋API 三域合跑 8 failed/1 error，逐条回基线复跑定性——本批新引入的两格（route_order 漏登记 4 条新路由／schema 读面原子多 `objectConst` 一栏）**已随批修绿**；其余 4 格为 HEAD 自带（§11 第 1、3 条），非本批回归。
+    - **仍开**：① endpoints 同层交叉常驻红（`knowledge_core.py:1136`→`knowledge_ingestion`，`6632c6560` 带入，修法要连依赖一起下沉并改 6 个测试档的 patch 目标，等点单）；② PUT 规则省略 body 是坏支路（`_hydrate` 形状回灌 `_parseBody`），现役测试从不省略 body 故从没踩过；③ B4 对话内引用徽标不接（对话引用面只挂条目 id，接上即"永不点亮的灯"），前置是"事实进主路"这个被 011 用真数据否证过的排序问题；④ 图谱影子转正由 `0416a9031` 闭环，本批不复算。
+    - **留案（提交正文数字对表）**：分层下沉笔 ea6836db 正文把生产池删除行数写成 −214，逐文件 numstat 真值 −215（knowledge_common 2／knowledge_ingestion 207／knowledge.py 3／其余三处各 1）；插入行数与净增不变。笔已入库不改写，随本格留案。
+    - **下一枚空号现查**：本格取 550，后继从 551 起。推送态一律现查（`git rev-list --count origin/main..HEAD`），推送需点单。

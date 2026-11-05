@@ -177,8 +177,18 @@ class TestMigrationVersions:
         # v25：本体按租户分区（两表重建为 (tenant_id, id) 复合主键）。
         # v26：MCP 信息源配置表（B 方案）。
         # v27：检索脱靶登记（specs/2026-10-30 W2，候选别名审批面）。
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 27
+        # v28：条件类规则（specs/2026-11-05 B1）——ontology_rules 带形状与 head 客体常量。
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 28
         assert {'knowledge_mcp_sources', 'knowledge_alias_candidates'} <= names
+        # v28 存量行零漂移：缺省必须是旧语义 relay（head 客体常量空＝不搬移客体）
+        rule_columns = {
+            r[1]: (r[2], r[4]) for r in store._conn.execute(
+                "PRAGMA table_info(ontology_rules)"
+            ).fetchall()
+        }
+        assert rule_columns.get("shape") == ("TEXT", "'relay'"), rule_columns.get("shape")
+        assert rule_columns.get("head_object_const") == ("TEXT", "''"), rule_columns.get(
+            "head_object_const")
         # v14-v18（token 归因精度）：事实/轮级/entry 用量表 + 未归因列。
         assert {'knowledge_fact_usage', 'knowledge_turn_usage',
                 'knowledge_entry_usage'} <= names
