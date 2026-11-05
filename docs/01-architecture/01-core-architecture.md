@@ -153,7 +153,6 @@ class LLMRouter:
         - LiteLLM (统一接口)
     """
     
-    def detect_request_type(message: str) -> RequestType
     def select_model(request_type: RequestType, capabilities: List[ModelCapability]) -> str
     def route_request(message: str, **kwargs) -> LLMResponse
 ```

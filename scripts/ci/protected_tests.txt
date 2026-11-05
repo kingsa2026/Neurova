@@ -4284,3 +4284,5 @@ tests/unit/agent/test_derivationReachesTurnMetadata.py
 tests/unit/agent/test_videoAttachmentReachesTheTurn.py
 # 音频附件接线：真上传→真 ASR 边界→转写进既有 VOICE_CONTEXT_KEY 读侧；转写不到要留原因不谎报
 tests/unit/agent/test_audioAttachmentTranscriptReachesTheTurn.py
+# 自动路由收口：RequestType→必需能力只一处定义且被读；按用户文本猜类型已退役（显式 file_type/载荷才是来源）
+tests/unit/llm/test_requestTypeCapabilityMappingSingleSource.py

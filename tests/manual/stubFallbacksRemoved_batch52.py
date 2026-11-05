@@ -95,13 +95,15 @@ def _presetRegistryIsReal() -> str:
 def _routerLegsAreReal() -> str:
     router = importlib.import_module("neurova.router")
     real = importlib.import_module("neurova.llm.llm_router")
-    wrong = [n for n in ("RequestType", "detect_request_type", "get_llm_router",
+    wrong = [n for n in ("RequestType", "get_llm_router",
                          "select_model_for_request") if getattr(router, n) is not getattr(real, n)]
     assert not wrong, f"router 给的不是 llm_router 真身：{wrong}"
     assert not hasattr(router, "LLM_ROUTER_AVAILABLE"), "只写不读的可用性开关还挂着"
-    got = router.detect_request_type("随便一段文本")
-    assert got is real.RequestType.CHAT, f"detect_request_type 读数异常：{got!r}"
-    return "四名 is 真身，LLM_ROUTER_AVAILABLE 已摘，detect('…')=%s" % got.value
+    # `detect_request_type`（按用户文本猜请求类型）已退役：两处都不该再挂这个名字。
+    # 它猜的那件事已有显式事实源——附件 file_type 与本轮真塞进请求的媒体载荷。
+    assert not hasattr(real, "detect_request_type"), "llm_router 还挂着已退役的文本猜测器"
+    assert not hasattr(router, "detect_request_type"), "router 还在再导出已退役符号"
+    return "三名 is 真身，LLM_ROUTER_AVAILABLE 与 detect_request_type 均已摘"
 
 
 def _reflectionTypeIsOneSource() -> str:
