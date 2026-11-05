@@ -308,7 +308,8 @@ def build_tauri() -> Path:
     if run("npm run build:desktop", shell=True, cwd=REPO / "NeurUI") != 0:
         raise RuntimeError("前端构建失败（npm run build:desktop）")
     extra, signed = tauri_signing_args()
-    build_tauri.last_signed = signed  # 交回调用点：不签名的产物要点名
+    log(f"tauri 签名参数：{'带证书' if signed else '无证书（内核不会签）'}；"
+        "交付件的 _unsigned 标记不在此决定，由 mark_for() 实测外壳后定")
     # 种子 NSIS 缓存必须在 tauri build **之前**：tauri 对缓存只查存在性/哈希，
     # 我们种进去的可用副本会被它直接用（不再下载、不再解压自带的坏副本）。
     seed_tauri_nsis_cache()
@@ -320,9 +321,6 @@ def build_tauri() -> Path:
            env=tauri_build_env()) != 0:
         raise RuntimeError("tauri build 失败")
     return find_kernel()
-
-
-build_tauri.last_signed = False
 
 
 def find_kernel() -> Path:
@@ -365,6 +363,40 @@ def build_shell(kernel: Path | None) -> Path:
     if not shell.exists():
         raise RuntimeError(f"壳产物缺失：{shell}")
     return shell
+
+
+def artifactSignatureState(path: Path) -> str:
+    """实测一个 exe 的 Authenticode 态，只回 'Signed' 或 'NotSigned'。
+
+    读不出、超时、非 Windows —— 一律按 'NotSigned'：这个名字是要跟着包分发出去
+    给人看的，任何"不确定"都不能被写成"已签名"。
+    """
+    # Status 的取值是 NotSigned / Valid / HashMismatch / NotTrusted / UnknownError，
+    # **没有 "Signed" 这一档**——按 "Signed" 比会永远判成未签名，把真签了的包也误标。
+    if os.name != "nt":
+        return "NotSigned"
+    try:
+        env = dict(os.environ, NEUROVA_SIGN_PROBE=str(path))
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "(Get-AuthenticodeSignature -LiteralPath $env:NEUROVA_SIGN_PROBE).Status"],
+            capture_output=True, text=True, timeout=120, env=env)
+    except Exception:  # noqa: BLE001 - 探测失败按未签名处理，不影响出包
+        return "ProbeFailed"
+    return (r.stdout or "").strip().splitlines()[-1].strip() or "Empty"
+
+
+def mark_for(shellPath: Path) -> str:
+    """交付件的文件名标记，只看它自己的签名实测态。"""
+    # 只有 Valid（签名在且信任链过）才算签过；NotTrusted/HashMismatch/读不出
+    # 一律点名——名字是给人下载时看的，宁可多标注也不能少标注。
+    state = artifactSignatureState(shellPath)
+    mark = "" if state == "Valid" else "_unsigned"
+    log(f"交付件签名实测：{state} → 文件名标记 {mark!r}")
+    if mark:
+        log("未签名的包必须在名字上被点名；带证书出全签名包请跑 "
+            "scripts/desktop/sign-installer.ps1 后重新打包")
+    return mark
 
 
 def validate_lean_backend() -> None:
@@ -428,16 +460,19 @@ def package(skip_tauri: bool, legacy_zip: bool, open_dir: bool) -> int:
     ver = version_of(kernel)
     validate_staged_backend_version(ver)
     stamp = datetime.now().strftime("%Y%m%d")
-    # 不签名的产物必须在**文件名**上被点名：悄悄少签名是表面抹除（教义第 2 条），
-    # 而名字是分发链上唯一跟着包走、人一眼能看到的标记。
-    signed = getattr(build_tauri, "last_signed", False) if not skip_tauri else None
-    mark = "" if signed is not False else "_unsigned"
-    if signed is False:
-        log("产物未签名（证书不在本机证书库）—— 文件名带 _unsigned 标记，分发时如实告知")
+    # 标记延后到壳编出来之后再定：见 mark_for()。
+    # 旧写法 `getattr(build_tauri, "last_signed", False) if not skip_tauri else None`
+    # 有两重错：① --skip-tauri 时 signed=None，`None is not False` ⇒ 不加标记
+    # （实测 beta7 就是 NotSigned 却顶着干净名分发）；② 更根本的是交付件是 WPF 壳
+    # （下面 copy2 的就是它），tauri 签的是壳里嵌的 NSIS 内核，壳本身没有签名步骤
+    # （installer-wpf/build.cmd 里 grep 不到 sign）——按"内核签了没"给外壳命名，
+    # 量的不是同一个对象。文件名是分发链上唯一跟着包走、人一眼能看到的标记，
+    # 它必须回答"这个人下载到的这个 exe 签没签"。
 
     if legacy_zip:
         # legacy：三文件 zip，内核可独立双击安装
         shell = build_shell(None)
+        mark = mark_for(shell)
         if not LOGO_SRC.exists():
             raise RuntimeError(f"Logo 缺失：{LOGO_SRC}")
         out_path = OUT_DIR / f"Neurova_Installer_{ver}_{stamp}_x64{mark}.zip"
@@ -451,6 +486,7 @@ def package(skip_tauri: bool, legacy_zip: bool, open_dir: bool) -> int:
     else:
         # 默认：单文件 exe（QQ 式向导，内核内嵌）
         shell = build_shell(kernel)
+        mark = mark_for(shell)
         out_path = OUT_DIR / f"Neurova_Setup_{ver}_{stamp}_x64{mark}.exe"
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         shutil.copy2(shell, out_path)
