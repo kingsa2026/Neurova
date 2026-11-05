@@ -17,27 +17,24 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Callable, Dict, Optional
 
-from neurova.channels.voice_ingress import AUDIO_BYTES_KEY, INBOUND_VOICE_TYPES
+from neurova.channels.voice_ingress import (
+    AUDIO_BYTES_KEY,
+    INBOUND_VOICE_TYPES,
+    TRANSCRIBE_TIMEOUT_SECONDS,
+    getAsrTranscriber,
+)
 from neurova.core.logger import get_logger
 from neurova.voice_context_module import VOICE_CONTEXT_KEY
 
 logger = get_logger(__name__)
 
-# 预转写超时（秒）：群语音通常 <60s，本地 funasr 推理秒级；超时即降级占位
-_TRANSCRIBE_TIMEOUT_SECONDS = 20.0
-
 
 def _get_asr_transcriber() -> Callable[..., Any]:
-    """返回 ASR 转写协程函数（延迟导入，测试可 patch 此函数替换依赖）。
+    """渠道侧的 patch 点：口径本体在 `voice_ingress.getAsrTranscriber`（单一事实源）。
 
     与 /audio/transcribe 端点同口径：VoiceEngine 优先，降级 ASRManager。
     """
-    from neurova.api.endpoints.audio import _get_asr_manager
-
-    manager = _get_asr_manager()
-    if manager is None or not hasattr(manager, "transcribe"):
-        raise RuntimeError("ASR 不可用")
-    return manager.transcribe
+    return getAsrTranscriber()
 
 
 async def transcribe_voice_message(message):
@@ -60,7 +57,7 @@ async def transcribe_voice_message(message):
     try:
         transcriber = _get_asr_transcriber()
         result = await asyncio.wait_for(
-            transcriber(audio_bytes), timeout=_TRANSCRIBE_TIMEOUT_SECONDS
+            transcriber(audio_bytes), timeout=TRANSCRIBE_TIMEOUT_SECONDS
         )
         text = ""
         if isinstance(result, dict):
@@ -79,7 +76,7 @@ async def transcribe_voice_message(message):
             logger.warning("渠道语音预转写空结果，保留占位: channel=%s", message.channel_type)
     except asyncio.TimeoutError:
         metadata["voice_transcribe_failed"] = "timeout"
-        logger.warning("渠道语音预转写超时（%ss），保留占位", _TRANSCRIBE_TIMEOUT_SECONDS)
+        logger.warning("渠道语音预转写超时（%ss），保留占位", TRANSCRIBE_TIMEOUT_SECONDS)
     except Exception as e:  # noqa: BLE001 - 预检故障绝不阻断消息链
         metadata["voice_transcribe_failed"] = str(e)[:200]
         logger.warning("渠道语音预转写失败，保留占位: %s", e)

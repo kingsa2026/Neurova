@@ -1482,6 +1482,10 @@ tests/unit/ci/test_imaginedApiSuitesRetired.py
 # 活体侧走真 `create_app()` + 真 `/api/v1/chat/stream`（按生产分支条件摘掉 `agent.loop`），
 # 反证＝把进料那一行退回旧形态，退化臂当场读回 300 片全消费＋正文空。逐文件单跑 6 passed。
 tests/unit/agent/test_legacyStreamCutsDegenerateThinking.py
+# 视频附件接线：真上传→真 attach_files→真管线，帧必须进模型请求体；抽不到帧要留原因不谎报
+tests/unit/agent/test_videoAttachmentReachesTheTurn.py
+# 音频附件接线：真上传→真 ASR 边界→转写进既有 VOICE_CONTEXT_KEY 读侧；转写不到要留原因不谎报
+tests/unit/agent/test_audioAttachmentTranscriptReachesTheTurn.py
 # §6-408 其一（批 O-2b）：体检探针的子进程预算收成单源常量，用例父墙由它导出。
 # 2026-10-24 整场 `pytest tests/unit` 在 33% 处消失，MainThread 停在 `check_dependencies` 的
 # `subprocess.run → communicate`——子墙 120s、全局墙 30s，Windows 侧 thread 法超时即终止整个进程。

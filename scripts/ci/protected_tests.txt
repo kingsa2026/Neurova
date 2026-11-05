@@ -4280,3 +4280,7 @@ tests/unit/knowledge/ontology/test_conditionClassDerivation.py
 tests/unit/knowledge/test_graphWalkDerivationGovernance.py
 # 对话链路取数口径：真走查→真支撑→真 memories→真回合 metadata，四段不许各写一套
 tests/unit/agent/test_derivationReachesTurnMetadata.py
+# 视频附件接线：真上传→真 attach_files→真管线，帧必须进模型请求体；抽不到帧要留原因不谎报
+tests/unit/agent/test_videoAttachmentReachesTheTurn.py
+# 音频附件接线：真上传→真 ASR 边界→转写进既有 VOICE_CONTEXT_KEY 读侧；转写不到要留原因不谎报
+tests/unit/agent/test_audioAttachmentTranscriptReachesTheTurn.py

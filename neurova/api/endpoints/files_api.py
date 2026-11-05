@@ -253,11 +253,14 @@ def get_attachment_info(file_id: str, user_id: str) -> Optional[Dict[str, Any]]:
     return dict(info)
 
 
-def get_attachment_bytes(file_id: str) -> Optional[bytes]:
-    """按 file_id 从磁盘读取文件内容；文件不存在返回 None。
+def resolveAttachmentPath(file_id: str) -> Optional[Path]:
+    """按 file_id 解析**服务端记账的**附件路径，取第一个真存在的候选。
 
     R-3 加固: info["path"] 是相对路径（相对进程 CWD），但守护进程 CWD
-    可能与项目根不一致。依次尝试：原始路径 → STORAGE_ROOT 相对 → 项目根。
+    可能与项目根不一致。依次尝试：原始路径 → 当前目录相对 → 项目根。
+
+    需要真实文件路径的消费方（如视频抽帧）一律走这里，不自己拼 `attachment["path"]`：
+    候选顺序只允许一份定义，且客户端带过来的 path 字段是路径穿越面，不可采信。
     """
     info = _files_store.get(file_id)
     if not info:
@@ -279,10 +282,21 @@ def get_attachment_bytes(file_id: str) -> Optional[bytes]:
     for cand in candidates:
         try:
             if cand.exists():
-                return cand.read_bytes()
-        except Exception:
+                return cand
+        except OSError:
             continue
     return None
+
+
+def get_attachment_bytes(file_id: str) -> Optional[bytes]:
+    """按 file_id 从磁盘读取文件内容；文件不存在返回 None。"""
+    resolved = resolveAttachmentPath(file_id)
+    if resolved is None:
+        return None
+    try:
+        return resolved.read_bytes()
+    except OSError:
+        return None
 
 
 @router.post("/upload", response_model=FileInfo)

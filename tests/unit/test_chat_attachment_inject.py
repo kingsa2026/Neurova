@@ -6,8 +6,10 @@
      模型可感知附件内容
   2. 图像附件 → 生成 vision content list（OpenAI 多模态格式），
      供多模态 LLM 直接接收（若模型无 vision 能力则降级为提示文本）
-  3. 音频/视频/过大的附件 → 不抛异常，降级为文件名提示
-  4. 无附件时用户输入不变
+  3. 视频附件 → 抽出的帧走图像同一条 vision 通道（帧由 `_resolveAttachmentFrames` 解析后传入）；
+     一帧都没取到时本轮文本留下原因，不伪装成"文件读不出来"
+  4. 音频/过大的附件 → 不抛异常，降级为文件名提示
+  5. 无附件时用户输入不变
 """
 
 import io
@@ -23,6 +25,17 @@ def _docx_bytes():
     buf = io.BytesIO()
     d.save(buf)
     return buf.getvalue()
+
+
+def _tinyJpegFrames():
+    """真 JPEG 字节一帧（视频抽帧的产物形态，不用替身冒充媒体数据）。"""
+    from io import BytesIO
+
+    from PIL import Image
+
+    buf = BytesIO()
+    Image.new("RGB", (16, 16), (10, 120, 200)).save(buf, format="JPEG")
+    return [buf.getvalue()]
 
 
 def make_pipeline():
@@ -89,10 +102,14 @@ def test_inject_attachments_mixed(monkeypatch):
         {"file_id": "f4", "filename": "a.md", "file_type": "text", "mime_type": "text/markdown", "size": 12, "path": "/tmp/a.md"},
         {"file_id": "f5", "filename": "video.mp4", "file_type": "video", "mime_type": "video/mp4", "size": 999, "path": "/tmp/v.mp4"},
     ]
-    user_input, vision_parts = p._inject_attachments_into_input("说明", attachments)
-    assert "a.md" in user_input  # 视频降级为提示
+    user_input, vision_parts = p._inject_attachments_into_input(
+        "说明", attachments, {"f5": (_tinyJpegFrames(), "")}
+    )
+    assert "a.md" in user_input
     assert "video.mp4" in user_input
-    assert vision_parts == []
+    # 视频帧与图片同一条通道：不再因为"抽不出文本"就假装文件坏了
+    assert len(vision_parts) == 1
+    assert vision_parts[0]["type"] == "image_url"
 
 
 def test_inject_attachments_none_keeps_input(monkeypatch):
