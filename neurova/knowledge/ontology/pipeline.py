@@ -234,9 +234,13 @@ class OntologyPipeline:
 
         # ③ 基线快照：应用后的 terms/rules 全量声明（回滚点即发布点）
         baselineId = "kb_%s" % uuid.uuid4().hex[:12]
+        from .shapes import ShapeRegistry
+
         snapshot = {
             "terms": self._registry.terms(tenantId=tenant),
             "rules": self._engine.rules(tenantId=tenant),
+            # B12 L8：shapes 入快照——回滚才能逐字恢复三者
+            "shapes": ShapeRegistry(self._store).list(tenantId=tenant),
             "agentId": str(agentId or ""),
             "applied": applied,
         }
@@ -332,3 +336,115 @@ class OntologyPipeline:
             "rules": delta(fromSnapshot.get("rules") or [], toRules,
                            "rule_id", self._RULE_DIFF_FIELDS),
         }
+
+    def rollback(self, toBaselineId: str, tenantId: str = "default",
+                 actor: str = "") -> Dict[str, Any]:
+        """回滚到基线（B12 L8）：terms/rules/shapes 逐字恢复＋变更审计＋账本撤销。
+
+        快照里有的行恢复（register/INSERT OR REPLACE），快照里没有而现在有的行
+        删除；删除术语前过 impactOf 影响（被引用的不删，记录进审计账 reasons）。
+        恢复后的规则重推一轮（fireAll），受影响的旧推导经账本精确撤销。
+        """
+        from .shapes import ShapeRegistry
+        from .change_log import ChangeLog
+
+        row = self._store.baseline(str(toBaselineId or "").strip())
+        if row is None:
+            raise LookupError("基线不存在: %s" % toBaselineId)
+        snapshot = row.get("snapshot") or {}
+        tenant = str(tenantId or "default")
+        shapesRegistry = ShapeRegistry(self._store)
+        log = ChangeLog(self._store)
+        restored = {"terms": 0, "rules": 0, "shapes": 0}
+
+        snapTerms = {t["term_id"]: t for t in (snapshot.get("terms") or [])}
+        for currentId in [t["term_id"] for t in self._registry.terms(tenantId=tenant)]:
+            if currentId not in snapTerms:
+                impact = self._registry.impactOf(currentId, tenantId=tenant)
+                # 与 API 删除面同一判据（knowledge_ontology._impactBlocksDelete 同源）：
+                # 被事实/主体类型/子术语引用的不删，进审计账 reasons
+                blocked = (impact.get("fact_count") or impact.get("typed_subject_count")
+                           or impact.get("child_terms"))
+                if not blocked:
+                    try:
+                        self._registry.dropTerm(currentId, tenantId=tenant)
+                        log.append(tenantId=tenant, actor=actor, action="rollback_delete",
+                                   targetType="term", targetId=currentId,
+                                   reason="回滚到 %s" % toBaselineId, baselineId=toBaselineId)
+                    except (LookupError, ValueError):
+                        pass
+        for termId, spec in sorted(snapTerms.items()):
+            current = self._registry.term(termId, tenantId=tenant)
+            if current != spec:
+                self._registry.register(
+                    termId, spec["kind"], label=spec.get("label", ""),
+                    parentTermId=spec.get("parent_term_id"),
+                    domain=spec.get("domain_terms"), rangeTerms=spec.get("range_terms"),
+                    rangeKinds=spec.get("range_kinds"),
+                    cardinality=spec.get("cardinality"),
+                    disjointWith=spec.get("disjoint_with"),
+                    requiredProps=spec.get("required_props"),
+                    inverseOf=spec.get("inverse_of"), symmetric=spec.get("symmetric", False),
+                    transitive=spec.get("transitive", False),
+                    aliases=spec.get("aliases"), externalIris=spec.get("external_iris"),
+                    deprecated=spec.get("deprecated", False),
+                    replacedBy=spec.get("replaced_by", ""),
+                    identityKeys=spec.get("identity_keys"),
+                    labels=spec.get("labels"), altLabels=spec.get("alt_labels"),
+                    module=spec.get("module", ""), qualifierSchema=spec.get("qualifier_schema"),
+                    version=spec.get("version", "v1"), tenantId=tenant)
+                log.append(tenantId=tenant, actor=actor, action="rollback_restore",
+                           targetType="term", targetId=termId,
+                           beforeJson=current, afterJson=spec,
+                           reason="回滚到 %s" % toBaselineId, baselineId=toBaselineId)
+                restored["terms"] += 1
+
+        snapRules = {r["rule_id"]: r for r in (snapshot.get("rules") or [])}
+        for currentId in [r["rule_id"] for r in self._engine.rules(tenantId=tenant)]:
+            if currentId not in snapRules:
+                self._engine.dropRule(currentId, reason="回滚到 %s" % toBaselineId,
+                                      tenantId=tenant)
+                log.append(tenantId=tenant, actor=actor, action="rollback_delete",
+                           targetType="rule", targetId=currentId,
+                           reason="回滚到 %s" % toBaselineId, baselineId=toBaselineId)
+        for ruleId, spec in snapRules.items():
+            current = self._engine.rule(ruleId, tenantId=tenant)
+            if current is None or current.get("body") != spec.get("body"):
+                self._engine.registerRule(
+                    ruleId, spec["head_predicate"], spec.get("body") or [],
+                    headSubjectVar=spec.get("head_subject_var", "X"),
+                    enabled=spec.get("enabled", True),
+                    version=spec.get("version", "v1"),
+                    headObjectConst=spec.get("head_object_const", ""),
+                    shape=spec.get("shape", ""), tenantId=tenant)
+                log.append(tenantId=tenant, actor=actor, action="rollback_restore",
+                           targetType="rule", targetId=ruleId,
+                           reason="回滚到 %s" % toBaselineId, baselineId=toBaselineId)
+                restored["rules"] += 1
+
+        snapShapes = {s["shape_id"]: s for s in (snapshot.get("shapes") or [])}
+        for currentId in [s["shape_id"] for s in shapesRegistry.list(tenantId=tenant)]:
+            if currentId not in snapShapes:
+                shapesRegistry.delete(currentId, tenantId=tenant)
+                log.append(tenantId=tenant, actor=actor, action="rollback_delete",
+                           targetType="shape", targetId=currentId,
+                           reason="回滚到 %s" % toBaselineId, baselineId=toBaselineId)
+        for shapeId, spec in snapShapes.items():
+            current = shapesRegistry.get(shapeId, tenantId=tenant)
+            if current is None or current.get("constraint") != spec.get("constraint"):
+                shapesRegistry.register(
+                    tenantId=tenant, shapeId=shapeId,
+                    targetKind=spec.get("target_kind", "relation"),
+                    targetTermId=spec.get("target_term_id", ""),
+                    pathJson=spec.get("path"), constraintKind=spec.get("constraint_kind"),
+                    constraintJson=spec.get("constraint"), severity=spec.get("severity"),
+                    message=spec.get("message", ""), enabled=spec.get("enabled", True),
+                    version=spec.get("version", "v1"))
+                log.append(tenantId=tenant, actor=actor, action="rollback_restore",
+                           targetType="shape", targetId=shapeId,
+                           reason="回滚到 %s" % toBaselineId, baselineId=toBaselineId)
+                restored["shapes"] += 1
+
+        self._engine.ensureAutoRules(tenantId=tenant)
+        self._engine.fireAll(tenantId=tenant)
+        return {"accepted": True, "baselineId": toBaselineId, "restored": restored}
