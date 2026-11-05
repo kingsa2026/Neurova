@@ -187,6 +187,8 @@
 `jianying_comfyui_cli_integration.md`、`stub-cleanup-plan.md`、
 `token-estimation-inconsistency-analysis.md`、`_git_automation.py`（脚本，非文档）
 
+`specs/2026-11-05-ontology-cq.md`（本体能力问题目录（CQ）与需求追溯：P1×9 全部带查询与测试（追溯守卫 `test_cqTraceability.py` 零孤儿/状态闭集/P1 完整性）、P2×2 随 B10/B11 落；领域边界＋术语表随附；CQ 驱动是 L0 的立身判据）
+
 `specs/2026-10-23-knowledge-governance-remaining-design.md`（知识治理四项缺口：人工接管／一般拒答／token 归因／大语料索引；设计、拍板与实施终态，含飞书服务台/微信客服/MQTT producer 与 ANN 1M 实测）
 
 `specs/2026-10-23-knowledge-system-upgrade-design.md`（知识库系统升级：对照目标架构的差距矩阵、文档标准化/OCR、企微入站、冲突矩阵/精排/版本、存储与多 Agent 分期、验收与待拍板项）

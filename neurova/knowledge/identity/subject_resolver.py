@@ -72,8 +72,42 @@ class SubjectResolver:
         return sorted(scored, key=lambda row: (-row[1], row[0]))[0]
 
     def resolve(
-        self, label: str, subjects: Sequence[Dict[str, Any]], aliases: Optional[List[str]] = None
+        self, label: str, subjects: Sequence[Dict[str, Any]],
+        aliases: Optional[List[str]] = None,
+        identityKeys: Optional[Sequence[str]] = None,
+        identityValues: Optional[Dict[str, Any]] = None,
     ) -> SubjectResolution:
+        """身份消解（B9 L1 增量）：声明了身份判据时先走判据精确命中。
+
+        `identityKeys` 是类型级判据键（来自 `ontology_terms.identity_keys_json`），
+        `identityValues` 是来路主体携带的判据值。判据命中即合并（exact == exact），
+        不走相似度——身份判据的意义就是"相等即同一"，阈值只管没有判据的兜底路。
+        支持的键：`canonical_label` / `aliases`（读主体行）/ 其余键读
+        `attributes`（如 external_id）；主体上无该属性的判据跳过。
+        未声明判据（缺省）回退既有口径：exact 名＋别名 → 相似度阈值。
+        """
+        if identityKeys:
+            values = dict(identityValues or {})
+            values.setdefault("canonical_label", label)
+            values.setdefault("aliases", label)
+            for row in subjects:
+                attributes = row.get("attributes") or {}
+                for key in identityKeys:
+                    probe = values.get(key)
+                    if probe is None:
+                        continue
+                    if key == "canonical_label" and _same(row.get("canonical_label"), probe):
+                        return SubjectResolution(str(row["subject_key"]),
+                                                 createdNew=False, needsHumanReview=False)
+                    if key == "aliases" and any(
+                            _same(alias, probe) for alias in (row.get("aliases") or [])):
+                        return SubjectResolution(str(row["subject_key"]),
+                                                 createdNew=False, needsHumanReview=False)
+                    if key not in ("canonical_label", "aliases") and _same(
+                            attributes.get(key), probe):
+                        return SubjectResolution(str(row["subject_key"]),
+                                                 createdNew=False, needsHumanReview=False)
+
         for row in subjects:
             names = [row.get("canonical_label", "")] + list(row.get("aliases") or [])
             if any(_same(name, candidate) for name in names for candidate in [label, *(aliases or [])]):

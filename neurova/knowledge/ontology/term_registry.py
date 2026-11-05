@@ -66,6 +66,13 @@ ALTER TABLE ontology_terms ADD COLUMN deprecated INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE ontology_terms ADD COLUMN replaced_by TEXT NOT NULL DEFAULT '';
 """
 
+# v30：身份判据（specs/2026-11-05 B9 L1）——类型级身份键（canonical_label/aliases/
+# attributes 键名如 external_id）。SubjectResolver 按类型读判据，缺省回退
+# canonical label＋aliases；不支持的键忽略。
+_SCHEMA_V30_TERMS = """
+ALTER TABLE ontology_terms ADD COLUMN identity_keys_json TEXT NOT NULL DEFAULT '[]';
+"""
+
 # 两个由结构层固定的谓词：
 # - `documented_as`：条目叙述（019b-1），基数天然不限——同一主体可以有很多份文档；
 # - `is_a`：类型断言（工单 020），客体是**已登记的 concept 术语**。
@@ -97,6 +104,10 @@ class OntologyTermRegistry:
         self._store = store
         self._ensureTable()
         seedBuiltinTerms(self)
+        # B9 L1：upper-lite 构造期播种（default 租户；幂等只补缺）。
+        from .upper_lite import seedUpperLite
+
+        seedUpperLite(self)
 
     # ── 结构 ──────────────────────────────────────────────────
 
@@ -121,6 +132,7 @@ class OntologyTermRegistry:
                  transitive: bool = False, aliases: Optional[List[str]] = None,
                  externalIris: Optional[Dict[str, str]] = None,
                  deprecated: bool = False, replacedBy: str = "",
+                 identityKeys: Optional[List[str]] = None,
                  version: str = "v1",
                  tenantId: str = "default") -> Dict[str, Any]:
         """登记/更新一个术语。非法结构在**写入处**就拒，不留到查询时才炸。
@@ -194,8 +206,8 @@ class OntologyTermRegistry:
                 " parent_term_id, domain_terms, range_terms, range_kinds, cardinality,"
                 " disjoint_with, required_props, version, created_at, updated_at,"
                 " inverse_of, symmetric, transitive, aliases_json, external_iris_json,"
-                " deprecated, replaced_by)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " deprecated, replaced_by, identity_keys_json)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (tenant, termId, kind, label or termId, parentTermId,
                  json.dumps(list(domain or []), ensure_ascii=False),
                  json.dumps(list(rangeTerms or []), ensure_ascii=False),
@@ -208,7 +220,8 @@ class OntologyTermRegistry:
                  json.dumps(aliasList, ensure_ascii=False),
                  json.dumps({str(k): str(v) for k, v in (externalIris or {}).items()},
                             ensure_ascii=False),
-                 1 if deprecated else 0, str(replacedBy or "")),
+                 1 if deprecated else 0, str(replacedBy or ""),
+                 json.dumps([str(k) for k in (identityKeys or [])], ensure_ascii=False)),
             )
         # inverse_of 双向补齐：A inverse_of B ⇒ B inverse_of A（登记处收口，
         # 单边态在存储层不存在；目标行其他字段不动，只补这一列）。
@@ -291,6 +304,7 @@ class OntologyTermRegistry:
                 externalIris=spec.get("externalIris"),
                 deprecated=spec.get("deprecated", False),
                 replacedBy=spec.get("replacedBy", ""),
+                identityKeys=spec.get("identityKeys"),
                 tenantId=tenantId,
             )
         return len(terms)
@@ -321,6 +335,7 @@ class OntologyTermRegistry:
                 externalIris=spec.get("externalIris"),
                 deprecated=spec.get("deprecated", False),
                 replacedBy=spec.get("replacedBy", ""),
+                identityKeys=spec.get("identityKeys"),
                 tenantId=tenantId,
             )
             added += 1
@@ -355,6 +370,7 @@ class OntologyTermRegistry:
             d[key] = json.loads(d[key] or "[]")
         d["aliases"] = d.pop("aliases_json")
         d["external_iris"] = json.loads(d.pop("external_iris_json") or "{}")
+        d["identity_keys"] = json.loads(d.pop("identity_keys_json") or "[]")
         for flag in ("symmetric", "transitive", "deprecated"):
             d[flag] = bool(d.get(flag))
         return d

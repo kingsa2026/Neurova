@@ -179,7 +179,8 @@ class TestMigrationVersions:
         # v27：检索脱靶登记（specs/2026-10-30 W2，候选别名审批面）。
         # v28：条件类规则（specs/2026-11-05 B1）——ontology_rules 带形状与 head 客体常量。
         # v29：关系映射层（specs/2026-11-05 B8）——术语特征/别名/外部 IRI 列＋未知关系候选表。
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 29
+        # v30：身份判据（specs/2026-11-05 B9 L1）——类型级 identity_keys。
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 30
         assert {'knowledge_mcp_sources', 'knowledge_alias_candidates',
                 'ontology_relation_candidates'} <= names
         # v28 存量行零漂移：缺省必须是旧语义 relay（head 客体常量空＝不搬移客体）

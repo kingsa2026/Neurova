@@ -125,6 +125,15 @@ class OntologyValidationReport:
                     "violation", "cardinality",
                     "%s 基数为 1，主体已有另一说法（fact_id=%s）"
                     % (predicate, rivals[0]["fact_id"]), predicate, subjectKey=subjectKey))
+
+        # B9 punning 守卫：term_id 当 subject_key 用（类型与实例混用）——本体腐化
+        # 的起点。记 warning 不阻断：存量同名共存是显式选择，写面硬拒会把迁移卡死。
+        # violations() 只收 violation，warning 进巡检读数。
+        if subjectKey and registry.term(subjectKey, tenantId=tenantId) is not None:
+            out.append(self._finding(
+                "warning", "punning",
+                "主体 %s 与已登记术语同名（term/instance 混用）" % subjectKey,
+                predicate, subjectKey=subjectKey))
         return out
 
     @staticmethod
