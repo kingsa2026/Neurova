@@ -358,10 +358,24 @@ def newest_installer(repo: Path) -> Path:
     return cands[0]
 
 
+# 产物体积下限（路线 B 现实）。定数依据，不拍脑袋：
+#   合法形态 = WPF 壳 + 内嵌 NSIS 内核，内核装后端代码与资源，
+#   **不含 Python/Node 运行时**（路线 B 首启按需下载；package_installer_zip.py 的
+#   validate_lean_backend 明确禁止 backend/ 下出现 python/、node/——两条不变量必须同向）。
+#   实测：beta6 138.9 MiB、beta8 139.0 MiB（内核单独 139.0 MiB）。
+#   故障形态：内核没被内嵌时只剩 WPF 壳，数 MB 量级。
+#   取 100 MiB：在合法读数下方留足余量，又远高于壳的尺寸。
+# 旧值 300 MiB 沿的是 beta4 内嵌运行时时代（477 MB 量级）的读数，与路线 B 直接矛盾：
+# 它把每一个合法包都判成"内核未内嵌"，于是这条链下面那步 SHA256SUMS.txt
+# 从 93b437bd1（2026-09-30）落地起对路线 B 包一次都没成功产出过——
+# beta6 那份附件的格式是"单空格"，而本函数写的是双空格，即它另有手工来源；
+# beta7 干脆没有校验和附件。发布物缺哈希，用户无从核对下载到的包是不是同一个。
+ARTIFACT_MIN_BYTES = 100 * 1024 * 1024
+
+
 def report_artifact(exe: Path, ver: str) -> int:
     size_mb = exe.stat().st_size / 1048576
-    # 体积红线：beta4 自定义界面版 477MB 量级；内核内嵌后不得塌成空壳。
-    if exe.stat().st_size < 300 * 1024 * 1024:
+    if exe.stat().st_size < ARTIFACT_MIN_BYTES:
         raise RuntimeError(f"产物体积异常偏小（{size_mb:.1f} MB）—— 内核可能未内嵌")
     sha = hashlib.sha256(exe.read_bytes()).hexdigest()
     sums = exe.parent / "SHA256SUMS.txt"
