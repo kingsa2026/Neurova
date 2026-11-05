@@ -41,7 +41,7 @@ def extract_after_ingest(event: Dict[str, Any], item_ids: List[str]) -> str:
     if not ids:
         return "skipped_empty"
     try:
-        from neurova.api.endpoints.knowledge_ingestion import _try_extract_to_graph
+        from neurova.api.endpoints.knowledge_common import _try_extract_to_graph
 
         items: List[Dict[str, Any]] = []
         for kid in ids:

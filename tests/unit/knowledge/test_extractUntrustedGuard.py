@@ -19,7 +19,7 @@ import pytest
 
 from neurova.knowledge.graph_bridge import extractionPrompt
 
-MODULE_INGESTION = "neurova.api.endpoints.knowledge_ingestion"
+MODULE_INGESTION = "neurova.api.endpoints.knowledge_common"
 MODULE_GATE = "neurova.security.cognitive_security_gate"
 MODULE_BRIDGE = "neurova.knowledge.graph_bridge"
 
@@ -95,7 +95,7 @@ def wiredExtraction(monkeypatch, tmp_path):
 
 def test_tryExtract_runsInputSafetyGate_perEntry(wiredExtraction):
     """摄取口逐条目过认知安全门（observe 默认：记读数、照常抽取）。"""
-    from neurova.api.endpoints.knowledge_ingestion import _try_extract_to_graph
+    from neurova.api.endpoints.knowledge_common import _try_extract_to_graph
 
     gateCalls, extractCalls = wiredExtraction
     items = [
@@ -109,7 +109,7 @@ def test_tryExtract_runsInputSafetyGate_perEntry(wiredExtraction):
 
 def test_tryExtract_enforceSkipsSuspiciousEntry(wiredExtraction, monkeypatch):
     """enforce 态命中注入嫌疑：该条目跳过抽取（诚实暴露），其余照常。"""
-    from neurova.api.endpoints.knowledge_ingestion import _try_extract_to_graph
+    from neurova.api.endpoints.knowledge_common import _try_extract_to_graph
 
     gateCalls, extractCalls = wiredExtraction
     monkeypatch.setattr(
@@ -130,7 +130,7 @@ def test_tryExtract_enforceSkipsSuspiciousEntry(wiredExtraction, monkeypatch):
 
 def test_tryExtract_observeSuspiciousStillExtracts(wiredExtraction, monkeypatch):
     """observe 态命中注入嫌疑：只记读数，抽取照常（默认零行为漂移）。"""
-    from neurova.api.endpoints.knowledge_ingestion import _try_extract_to_graph
+    from neurova.api.endpoints.knowledge_common import _try_extract_to_graph
 
     gateCalls, extractCalls = wiredExtraction
     monkeypatch.setattr(

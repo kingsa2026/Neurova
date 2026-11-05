@@ -23,7 +23,7 @@ import pytest
 from neurova.knowledge.repository import KnowledgeRepository
 
 AGENT = "c2-test"
-MODULE_INGESTION = "neurova.api.endpoints.knowledge_ingestion"
+MODULE_INGESTION = "neurova.api.endpoints.knowledge_common"
 MODULE_WORKER = "neurova.knowledge.ingest_worker"
 
 
@@ -40,7 +40,7 @@ def repo(tmp_path):
 
 def test_extractAfterUpdate_disabledByDefault(monkeypatch):
     """默认态＝旧行为：env 不设时不触发任何抽取调用。"""
-    from neurova.api.endpoints.knowledge_ingestion import extract_after_update
+    from neurova.api.endpoints.knowledge_common import extract_after_update
 
     monkeypatch.delenv("NEUROVA_KB_EXTRACT_ON_UPDATE", raising=False)
     called = []
@@ -55,7 +55,7 @@ def test_extractAfterUpdate_disabledByDefault(monkeypatch):
 
 def test_extractAfterUpdate_runs_whenEnabled(monkeypatch):
     """开闸：抽取被触发，条目与域参数如实传递。"""
-    from neurova.api.endpoints.knowledge_ingestion import extract_after_update
+    from neurova.api.endpoints.knowledge_common import extract_after_update
 
     monkeypatch.setenv("NEUROVA_KB_EXTRACT_ON_UPDATE", "on")
     captured = {}
@@ -75,7 +75,7 @@ def test_extractAfterUpdate_runs_whenEnabled(monkeypatch):
 
 def test_extractAfterUpdate_failSoft(monkeypatch):
     """抽取异常 fail-soft：返回 extract_error，不上抛打断更新返回。"""
-    from neurova.api.endpoints.knowledge_ingestion import extract_after_update
+    from neurova.api.endpoints.knowledge_common import extract_after_update
 
     monkeypatch.setenv("NEUROVA_KB_EXTRACT_ON_UPDATE", "on")
     def boom(items, request, agent_id=None, tenant_id="default"):

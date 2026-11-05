@@ -159,15 +159,19 @@ from neurova.api.endpoints.knowledge_core import (  # noqa: E402,F401
 )
 from neurova.api.endpoints.knowledge_ingestion import (  # noqa: E402,F401
     _build_item_dict,
-    _default_llm_call,
     _fetch_url,
     _import_file_data,
-    _resolve_runtime_agents,
     _title_from_filename,
     _title_from_url,
-    _try_extract_to_graph,
     import_knowledge_file,
     import_knowledge_url,
+)
+# 抽取三件套 2026-11-05 下沉 knowledge_common（分层守卫不变量 2：叶子之间零交叉）。
+# 兼容名一个不摘——knowledge_graph_api 与 ingest_worker 仍经聚合器取用。
+from neurova.api.endpoints.knowledge_common import (  # noqa: E402,F401
+    _default_llm_call,
+    _resolve_runtime_agents,
+    _try_extract_to_graph,
 )
 from neurova.knowledge.url_guard import (
     validate_public_http_url as _validate_import_url,  # noqa: E402,F401 兼容旧名
