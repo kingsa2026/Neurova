@@ -147,6 +147,14 @@ class DerivationLedger:
 
     # ── 撤销 ──────────────────────────────────────────────────
 
+    def derivedExclusionClause(self, alias: str) -> str:
+        """「排除推导行」的 SQL 片段——这张表只有账本知道怎么读，别处不另抄一份。
+
+        子查询不带参数，接进递归 CTE 的 WHERE 里不会打乱外层占位符次序。
+        """
+        return ("%s.fact_id NOT IN (SELECT derived_fact_id"
+                " FROM knowledge_derivation_edges)" % alias)
+
     def retractAllDerivedFrom(self, premiseFactId: str, reason: str = "") -> int:
         """前提退场 ⇒ 依赖它的一切推导逐层退场；原始事实一律不碰。
 

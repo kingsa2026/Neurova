@@ -2112,6 +2112,15 @@ class ChatPipeline:
         metadata = getattr(ctx, "metadata", None)
         if not isinstance(metadata, dict):
             return
+        # 溯源随**最终注入**的命中一起记：与血缘同一取数口径（被 scope 过滤掉的条目
+        # 不算本轮引用），不另开一条从 result.metadata 反查的路。
+        derivationById = {
+            str(memory.get("lineage_id") or memory.get("knowledge_id") or ""):
+                memory["derivation"]
+            for memory in memories if isinstance(memory.get("derivation"), dict)
+        }
+        if derivationById:
+            metadata["knowledge_derivation"] = derivationById
         if lineage_ids:
             metadata["knowledge_lineage_ids"] = list(dict.fromkeys(lineage_ids))
         if entry_ids:
