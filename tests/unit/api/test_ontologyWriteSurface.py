@@ -249,6 +249,27 @@ class TestRuleCrud:
 
         assert resp.status_code == 400, resp.text
 
+    def testUpdateRuleWithoutBodyKeepsExistingBody(self, api):
+        """改版只写版本号：body 省略即保留现值——此前这条支路是坏的。
+
+        现役用例从不省略 body，所以"保留现值"那半句一直没被执行过：它把读面形状
+        （kind/predicate）直接回灌写面解析器（只认 atom/not），改版当场 400，
+        而 400 的文本读起来像"调用方传了坏 body"。本格把这条支路钉成会红的判据。
+        """
+        api.client.post(PREFIX + "/ontology/rules", json={
+            "rule_id": "r-keep", "head_predicate": "is_a", "body": self.BODY,
+            "basis": "保留现值回归",
+        })
+
+        resp = api.client.put(PREFIX + "/ontology/rules/r-keep", json={
+            "head_predicate": "is_a", "version": "v9", "basis": "只改版不重传正文",
+        })
+
+        assert resp.status_code == 200, resp.text
+        rule = {r["rule_id"]: r for r in _schemaRules(api)}["r-keep"]
+        assert rule["version"] == "v9"
+        assert [a["predicate"] for a in rule["body"]] == ["type_of"],             "省略 body 把正文换了或清空了——保留现值不是嘴上说的"
+
     def testUpdateMissingRuleIs404(self, api):
         resp = api.client.put(PREFIX + "/ontology/rules/ghost", json={
             "head_predicate": "is_a", "body": self.BODY,
