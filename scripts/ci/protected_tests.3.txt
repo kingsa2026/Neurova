@@ -1443,6 +1443,8 @@ tests/unit/api/test_model_write_auth_gate.py
 tests/unit/web_reach/test_http_fetch_redirect_guard.py
 # §6-525：企微入站与文件导入同口径透传源时间（缺失回退入库时刻，不许恒空）。逐文件单跑 2 passed
 tests/unit/knowledge/test_wecomIngestSourceDates.py
+# 种子锚点观测面：观测跟闸走（关闸零记录）、快照经既有审计端点真读得回，转正判定据读数不据合成读数
+tests/unit/knowledge/test_seedAnchorTelemetry.py
 # 协作 Outbox 的投递器与排空：结构三格钉「装配面注册唯一落点／排空启停成对／间隔读数写坏不回落成立刻停」，
 # 两格反向各钉自己的失效态（没注册不得报成已投递、真投递必须落到站内通知面）。逐文件单跑 5 passed
 tests/unit/collaboration/test_outboxDeliveredIntoNotificationFace.py
