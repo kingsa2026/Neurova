@@ -38,8 +38,9 @@ from .knowledge_facts import (
 )
 from .digest_chain import _SCHEMA_V11
 from ..ontology.derivation_ledger import _SCHEMA_V10
+from ..ontology.relation_candidates import _SCHEMA_V29_CANDIDATES
 from ..ontology.rule_engine import _SCHEMA_V28, _SCHEMA_V9
-from ..ontology.term_registry import _SCHEMA_V8, _SCHEMA_V12
+from ..ontology.term_registry import _SCHEMA_V29_TERMS, _SCHEMA_V8, _SCHEMA_V12
 from .narratives import NARRATIVE_DOMAIN, _SCHEMA_V4, _SCHEMA_V6, _SCHEMA_V7
 
 _STEPS: List[tuple] = [
@@ -89,6 +90,9 @@ _STEPS: List[tuple] = [
     # v28：条件类规则（specs/2026-11-05 B1）——ontology_rules 带形状（relay/conjunction）
     #      与 head 客体常量；relay 为缺省，存量行零漂移
     (28, _SCHEMA_V28),
+    # v29：关系映射层（specs/2026-11-05 B8）——术语表加关系特征/别名/外部 IRI 列
+    #      ＋未知关系候选表；加列不删列，可回滚
+    (29, _SCHEMA_V29_TERMS + "\n" + _SCHEMA_V29_CANDIDATES),
 ]
 
 _registered = False

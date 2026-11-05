@@ -275,10 +275,36 @@ def admitExtractedFacts(
         target = str(rel.get("target", "")).strip()
         if not source or not target or source == target:
             continue
-        relation = _typeFromRegistry(termRegistry, rel.get("type"))
+        relation = ""
+        if termRegistry is not None:
+            # B8 ③：抽取关系先过词形归一（精确 term_id → 别名 → 规范 label），
+            # 命中即用规范谓词；未命中再走 custom 判定落候选。
+            relation = str(termRegistry.resolveRelationAlias(
+                rel.get("type"), tenantId=tenantId) or "")
+        if not relation:
+            relation = _typeFromRegistry(termRegistry, rel.get("type"))
         # 底座侧只收登记过的关系：`custom` 是兜底标记不是一种类型，拿它当谓词
         # 只会造出一批读不出来源的无义事实（实体类型那条 `is_a` 路由上面专管）。
         if relation == "custom":
+            # B8 ⑦：未登记关系不再两层静默消失——落候选审批面（同条目同词形幂等），
+            # 批准后成术语，事实仍由后续抽取经唯一咽喉落库。
+            if termRegistry is not None:
+                try:
+                    from neurova.knowledge.ontology.relation_candidates import (
+                        RelationCandidateStore,
+                    )
+
+                    RelationCandidateStore(factStore).record(
+                        tenantId=tenantId,
+                        surface=str(rel.get("type", "")).strip(),
+                        sourceEntryId=str(item.get("knowledge_id", "") or ""),
+                        sourceText=_statementOf(source, str(rel.get("type", "")).strip(),
+                                                target),
+                        confidence=None,
+                    )
+                except Exception as exc:  # noqa: BLE001 - 候选登记失败不影响主抽取
+                    logger.warning("graph_bridge: 未知关系候选登记失败（%s）: %s",
+                                   rel.get("type"), exc)
             continue
         relationRequests.append(_requestFor(source, relation, target))
         relationLabels.append((source, relation, target))

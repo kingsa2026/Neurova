@@ -178,8 +178,10 @@ class TestMigrationVersions:
         # v26：MCP 信息源配置表（B 方案）。
         # v27：检索脱靶登记（specs/2026-10-30 W2，候选别名审批面）。
         # v28：条件类规则（specs/2026-11-05 B1）——ontology_rules 带形状与 head 客体常量。
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 28
-        assert {'knowledge_mcp_sources', 'knowledge_alias_candidates'} <= names
+        # v29：关系映射层（specs/2026-11-05 B8）——术语特征/别名/外部 IRI 列＋未知关系候选表。
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 29
+        assert {'knowledge_mcp_sources', 'knowledge_alias_candidates',
+                'ontology_relation_candidates'} <= names
         # v28 存量行零漂移：缺省必须是旧语义 relay（head 客体常量空＝不搬移客体）
         rule_columns = {
             r[1]: (r[2], r[4]) for r in store._conn.execute(
@@ -189,6 +191,20 @@ class TestMigrationVersions:
         assert rule_columns.get("shape") == ("TEXT", "'relay'"), rule_columns.get("shape")
         assert rule_columns.get("head_object_const") == ("TEXT", "''"), rule_columns.get(
             "head_object_const")
+        # v29 存量行零漂移：术语特征列缺省全关（领域假设不写进默认数据）；
+        # 候选表状态闭集与去重键见 relation_candidates 模块。
+        term_columns = {
+            r[1]: (r[2], r[4]) for r in store._conn.execute(
+                "PRAGMA table_info(ontology_terms)"
+            ).fetchall()
+        }
+        assert term_columns.get("inverse_of") == ("TEXT", "''"), term_columns.get("inverse_of")
+        assert term_columns.get("symmetric") == ("INTEGER", "0"), term_columns.get("symmetric")
+        assert term_columns.get("transitive") == ("INTEGER", "0"), term_columns.get("transitive")
+        assert term_columns.get("aliases_json") == ("TEXT", "'[]'"), term_columns.get(
+            "aliases_json")
+        assert term_columns.get("external_iris_json") == ("TEXT", "'{}'"), term_columns.get(
+            "external_iris_json")
         # v14-v18（token 归因精度）：事实/轮级/entry 用量表 + 未归因列。
         assert {'knowledge_fact_usage', 'knowledge_turn_usage',
                 'knowledge_entry_usage'} <= names

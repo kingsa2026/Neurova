@@ -137,6 +137,14 @@ class TermWriteRequest(BaseModel):
     cardinality: Optional[int] = None
     disjoint_with: Optional[List[str]] = None
     required_props: Optional[List[str]] = None
+    # B8 关系映射：关系特征/别名/外部 IRI/退役语义。None = PUT 保留现值。
+    inverse_of: Optional[str] = None
+    symmetric: Optional[bool] = None
+    transitive: Optional[bool] = None
+    aliases: Optional[List[str]] = None
+    external_iris: Optional[Dict[str, str]] = None
+    deprecated: Optional[bool] = None
+    replaced_by: Optional[str] = None
     version: Optional[str] = None
     basis: str = ""
 
@@ -148,6 +156,9 @@ class RuleWriteRequest(BaseModel):
     # 条件类（升级计划 B1）：head 客体常量非空 ⇒ 形状是 conjunction（X is_a 该类）。
     # 留空 = 既有 relay 语义，存量调用方一位不改。
     head_object_const: Optional[str] = None
+    # B8：显式形状（relay/conjunction/inverse）；缺省按 head_object_const 推断。
+    # inverse 要求 head 主语变元 = 正原子客体变元（X A Y ⇒ Y <head> X）。
+    shape: Optional[str] = None
     body: Optional[List[Dict[str, Any]]] = None
     enabled: Optional[bool] = None
     version: Optional[str] = None
@@ -193,6 +204,10 @@ def _registerTerm(registry: Any, termId: str, body: TermWriteRequest,
         domain=body.domain, rangeTerms=body.range_terms, rangeKinds=body.range_kinds,
         cardinality=body.cardinality, disjointWith=body.disjoint_with,
         requiredProps=body.required_props, version=body.version or "v1",
+        inverseOf=body.inverse_of, symmetric=bool(body.symmetric),
+        transitive=bool(body.transitive), aliases=body.aliases,
+        externalIris=body.external_iris, deprecated=bool(body.deprecated),
+        replacedBy=body.replaced_by or "",
         tenantId=tenantId)
 
 
@@ -216,6 +231,20 @@ def _updateTermPayload(registry: Any, termId: str,
                          else existing.get("disjoint_with") or []),
         "requiredProps": (body.required_props if body.required_props is not None
                           else existing.get("required_props") or []),
+        "inverseOf": (body.inverse_of if body.inverse_of is not None
+                      else existing.get("inverse_of") or ""),
+        "symmetric": (body.symmetric if body.symmetric is not None
+                      else bool(existing.get("symmetric"))),
+        "transitive": (body.transitive if body.transitive is not None
+                       else bool(existing.get("transitive"))),
+        "aliases": (body.aliases if body.aliases is not None
+                    else existing.get("aliases") or []),
+        "externalIris": (body.external_iris if body.external_iris is not None
+                         else existing.get("external_iris") or {}),
+        "deprecated": (body.deprecated if body.deprecated is not None
+                       else bool(existing.get("deprecated"))),
+        "replacedBy": (body.replaced_by if body.replaced_by is not None
+                       else existing.get("replaced_by") or ""),
         "version": body.version or existing.get("version") or "v1",
     }
 
@@ -251,6 +280,8 @@ async def create_ontology_term(
         term = _registerTerm(registry, termId, body, tenant)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    # B8：关系特征声明即推理——术语落定后把 auto_* 规则幂等对齐（含撤声明退场）。
+    engine.ensureAutoRules(tenantId=tenant)
     activityId = _landActivity(store, "ontology_term_write", current_user,
                                "create", {"term_id": termId}, body.basis)
     return {"code": 0, "message": "success",
@@ -264,16 +295,18 @@ async def update_ontology_term(
 ):
     """更新术语（S2 写面）。不存在即 404——新建走 POST，PUT 不做静默新建。"""
     _requireAdmin(current_user)
-    store, registry, _engine = _ontologyParts()
+    store, registry, engine = _ontologyParts()
     tenant = _tenantOf(current_user)
     termId = str(term_id or "").strip()
     if not registry.term(termId, tenantId=tenant):
-        raise HTTPException(status_code=404, detail="术语未登记: %s" % termId)
+        raise HTTPException(status_code=404, detail="术语未登记: %s" % term_id)
     try:
         payload = _updateTermPayload(registry, termId, body, tenant)
         term = registry.register(termId, body.kind, tenantId=tenant, **payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    # B8：特征翻转/撤除在这里生效——auto 规则随之重建或退场（结论经账本精确撤销）。
+    engine.ensureAutoRules(tenantId=tenant)
     activityId = _landActivity(store, "ontology_term_write", current_user,
                                "update", {"term_id": termId}, body.basis)
     return {"code": 0, "message": "success",
@@ -303,10 +336,88 @@ async def delete_ontology_term(
         registry.dropTerm(termId, tenantId=tenant)
     except (LookupError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+    # B8：术语删了，它的 auto_* 规则不能还在对外推理（结论经账本精确撤销）。
+    engine.ensureAutoRules(tenantId=tenant)
     activityId = _landActivity(store, "ontology_term_write", current_user,
                                "delete", {"term_id": termId}, basis)
     return {"code": 0, "message": "success",
             "data": {"term_id": termId, "activity_id": activityId}}
+
+
+# ── B8：未知关系候选审核面 ──────────────────────────────────────────
+
+@router.get("/ontology/relation-candidates")
+async def list_relation_candidates(
+    status: str = Query("pending"),
+    limit: int = Query(100, ge=1, le=500),
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """候选列表（读面，登录即可见）：pending/approved/rejected 三态。"""
+    store, _registry, _engine = _ontologyParts()
+    from neurova.knowledge.ontology.relation_candidates import RelationCandidateStore
+
+    try:
+        items = RelationCandidateStore(store).list(
+            tenantId=_tenantOf(current_user), status=status, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"code": 0, "message": "success", "data": {"items": items}}
+
+
+@router.post("/ontology/relation-candidates/{candidate_id}/approve")
+async def approve_relation_candidate(
+    candidate_id: str, request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+    basis: str = Query(""),
+):
+    """批准候选：登记术语并回填 promoted_term_id（审批流走注册表，不另造登记路径）。"""
+    _requireAdmin(current_user)
+    store, registry, engine = _ontologyParts()
+    from neurova.knowledge.ontology.relation_candidates import RelationCandidateStore
+
+    try:
+        candidate = RelationCandidateStore(store).approve(
+            str(candidate_id or "").strip(), tenantId=_tenantOf(current_user),
+            reviewedBy=str(current_user.get("username") or current_user.get("user_id") or ""),
+            termRegistry=registry)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    # 批准即登记术语：特征对齐一次（新术语此刻特征全关，登记面可再声明）。
+    engine.ensureAutoRules(tenantId=_tenantOf(current_user))
+    activityId = _landActivity(store, "ontology_candidate_review", current_user,
+                               "approve", {"candidate_id": str(candidate_id).strip(),
+                                           "promoted_term_id": candidate.get("promoted_term_id")},
+                               basis)
+    return {"code": 0, "message": "success",
+            "data": {"candidate": candidate, "activity_id": activityId}}
+
+
+@router.post("/ontology/relation-candidates/{candidate_id}/reject")
+async def reject_relation_candidate(
+    candidate_id: str, request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+    basis: str = Query(""),
+):
+    """拒绝候选：保留审计行不删除（拒绝过什么与批准过什么是同一本账的两面）。"""
+    _requireAdmin(current_user)
+    store, _registry, _engine = _ontologyParts()
+    from neurova.knowledge.ontology.relation_candidates import RelationCandidateStore
+
+    try:
+        candidate = RelationCandidateStore(store).reject(
+            str(candidate_id or "").strip(), tenantId=_tenantOf(current_user),
+            reviewedBy=str(current_user.get("username") or current_user.get("user_id") or ""))
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    activityId = _landActivity(store, "ontology_candidate_review", current_user,
+                               "reject", {"candidate_id": str(candidate_id).strip()},
+                               basis)
+    return {"code": 0, "message": "success",
+            "data": {"candidate": candidate, "activity_id": activityId}}
 
 
 @router.post("/ontology/rules")
@@ -328,6 +439,7 @@ async def create_ontology_rule(
             ruleId, body.head_predicate, body.body or [],
             headSubjectVar=body.head_subject_var or "X",
             headObjectConst=body.head_object_const or "",
+            shape=body.shape or "",
             enabled=True if body.enabled is None else body.enabled,
             version=body.version or "v1", tenantId=tenant)
     except (ValueError,) as exc:
@@ -362,6 +474,8 @@ async def update_ontology_rule(
             headObjectConst=(body.head_object_const
                              if body.head_object_const is not None
                              else existing.get("head_object_const") or ""),
+            shape=(body.shape if body.shape is not None
+                   else existing.get("shape") or ""),
             enabled=(body.enabled if body.enabled is not None
                      else bool(existing.get("enabled", True))),
             version=body.version or existing.get("version") or "v1",

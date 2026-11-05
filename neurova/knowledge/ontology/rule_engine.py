@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -134,7 +135,8 @@ class ForwardChainingEngine:
                     headSubjectVar: str = "X", enabled: bool = True,
                     version: str = "v1",
                     tenantId: str = "default",
-                    headObjectConst: str = "") -> Dict[str, Any]:
+                    headObjectConst: str = "",
+                    shape: str = "") -> Dict[str, Any]:
         """登记一条规则。形状、变量、层序在这里一次判完——坏规则进不了表。
 
         body 元素：`{"atom": predicate, "subject": var, "object": var}` 或
@@ -142,16 +144,30 @@ class ForwardChainingEngine:
         常量：`{"atom": predicate, "subject": "X", "objectConst": "Order"}`。
         规则归属租户，分层/引用/撤回都只在同租户内计算。
 
-        条件类（`headObjectConst` 非空）：head 必须是类型断言 `is_a`，head 客体是
-        常量 concept 术语；正文 1–2 个正原子全部共享 head 主语变元、客体全为常量。
-        语义 = 同主体合取 ⇒ `X is_a 条件类`（specs/2026-11-05 §5 B1）。登记即对
-        存量事实触发一次推导——条件类建在事实之后是常态，等下一跳就漏掉现存的归入。
+        形状（`shape`，缺省按入参推断：`headObjectConst` 非空即 conjunction）：
+        - relay：正原子按"上一跳客体 = 下一跳主体"接力，head 客体取末原子客体；
+        - conjunction：正原子共享 head 主语变元、客体全为常量，head 客体是常量
+          concept 术语（语义 = 同主体合取 ⇒ `X is_a 条件类`，§5 B1）；登记即对
+          存量事实触发一次推导；
+        - inverse（B8）：恰好 1 个正原子，head 主语变元 = 正原子**客体**变元、
+          head 客体 = 正原子主语变元——`X A Y ⇒ Y <head> X` 的变元映射由求值器
+          显式落 head，反向补边不散落到消费方。
+
+        规则归属租户，分层/引用/撤回都只在同租户内计算。
         """
         ruleId = str(ruleId or "").strip()
         tenant = str(tenantId or "default")
         if not ruleId or not headPredicate:
             raise RuleError("rule_id 与 head 谓词都不能为空")
         headConst = str(headObjectConst or "").strip()
+        shape = str(shape or "").strip() or ("conjunction" if headConst else "relay")
+        if shape not in ("relay", "conjunction", "inverse"):
+            raise RuleError("未知规则形状 %r（有效值: relay / conjunction / inverse）" % shape)
+        if shape == "conjunction" and not headConst:
+            raise RuleError("规则 %s 的 conjunction 形状缺 headObjectConst" % ruleId)
+        if shape != "conjunction" and headConst:
+            raise RuleError(
+                "规则 %s 的 headObjectConst 只属于 conjunction 形状，收到 %s" % (ruleId, shape))
         atoms = self._parseBody(ruleId, body)
         positive = [a for a in atoms if a["kind"] == "atom"]
         negated = [a for a in atoms if a["kind"] == "not"]
@@ -160,7 +176,15 @@ class ForwardChainingEngine:
         if len(positive) > 2:
             raise RuleError("规则 %s 正文超过 2 个原子；本引擎是三元组接力片段，"
                             "更长链条请写成多条规则逐层推" % ruleId)
-        if headConst:
+        if shape == "inverse":
+            if len(positive) != 1:
+                raise RuleError("规则 %s 的 inverse 形状恰好 1 个正原子，收到 %d"
+                                % (ruleId, len(positive)))
+            if headSubjectVar != positive[0]["object"]:
+                raise RuleError(
+                    "规则 %s 的 inverse 形状要求 head 主语变元 = 正原子客体变元"
+                    "（%r），收到 %r" % (ruleId, positive[0]["object"], headSubjectVar))
+        elif shape == "conjunction":
             self._validateConditionClass(ruleId, headPredicate, headConst,
                                          positive, negated, headSubjectVar, tenantId=tenant)
         else:
@@ -179,7 +203,6 @@ class ForwardChainingEngine:
                                         [a["predicate"] for a in positive],
                                         tenantId=tenant)
         stamp = _now()
-        shape = "conjunction" if headConst else "relay"
         with self._store._lock, self._store._conn:
             existing = self._store._conn.execute(
                 "SELECT created_at, version FROM ontology_rules"
@@ -454,6 +477,8 @@ class ForwardChainingEngine:
                 tenantId: str = "default") -> Dict[str, Any]:
         """按层号升序反复求值到不动点。返回每轮新增，0 新增即停。"""
         tenant = str(tenantId or "default")
+        # B8：每轮求值前把术语表上的关系特征幂等对齐成 auto_* 规则（声明即推理）。
+        self.ensureAutoRules(tenantId=tenant)
         rounds: List[int] = []
         derived: List[str] = []
         for _ in range(max(int(maxIterations), 1)):
@@ -489,6 +514,8 @@ class ForwardChainingEngine:
                   tenantId: str = "default") -> List[str]:
         if rule.get("shape") == "conjunction":
             return self._fireConjunction(rule, agentId, tenantId=tenantId)
+        if rule.get("shape") == "inverse":
+            return self._fireInverse(rule, agentId, tenantId=tenantId)
         atoms = [a for a in rule["body"]]
         positive = [a for a in atoms if a["kind"] == "atom"]
         negated = [a for a in atoms if a["kind"] == "not"]
@@ -627,6 +654,111 @@ class ForwardChainingEngine:
                 return True
         return False
 
+    def _fireInverse(self, rule: Dict[str, Any], agentId: Optional[str],
+                     tenantId: str = "default") -> List[str]:
+        """反向补边求值（B8）：`X A Y ⇒ Y <head> X`。
+
+        head 主语 = 前提的**客体词形**——不要求 Y 已登记主体：推导走咽喉，
+        消解段会按标签落主体/复用既存主体，这正是"经咽喉"的意义。head 客体取
+        X 的规范标签。变元映射在求值器里显式落 head：反向补边是关系特征的一部分，
+        不散落到任何消费方。
+        """
+        positive = [a for a in rule["body"] if a["kind"] == "atom"]
+        negated = [a for a in rule["body"] if a["kind"] == "not"]
+        a0 = positive[0]
+        inner = ("SELECT a.subject_key AS x_key, MIN(s1.canonical_label) AS x_label,"
+                 " a.object_term AS y_label,"
+                 " GROUP_CONCAT(DISTINCT a.fact_id) AS pairs"
+                 " FROM knowledge_facts a"
+                 " JOIN knowledge_subjects s1 ON s1.subject_key = a.subject_key"
+                 " WHERE a.predicate_term_id = ? AND a.tenant_id = ?"
+                 "  AND a.status = 'active' AND a.record_kind = 'triple'")
+        params: List[Any] = [a0["predicate"], tenantId]
+        if agentId:
+            inner += " AND a.agent_id = ?"
+            params.append(agentId)
+        inner += " GROUP BY a.subject_key, a.object_term ORDER BY a.subject_key, y_label"
+        with self._store._lock:
+            rows = self._store._conn.execute(inner, params).fetchall()
+
+        head = rule["head_predicate"]
+        written: List[str] = []
+        for row in rows:
+            if self._negatedHolds(agentId, negated, row["x_key"], row["y_label"]):
+                continue
+            factId = self._admitDerivedFact(rule, agentId, row["y_label"], head,
+                                            row["x_label"], "",
+                                            _premiseIds(row["pairs"]),
+                                            tenantId=tenantId)
+            if factId:
+                written.append(factId)
+        return written
+
+    def ensureAutoRules(self, tenantId: str = "default") -> Dict[str, int]:
+        """把术语表上的关系特征对齐成 auto_* 规则行（B8）：幂等，声明消失即退场。
+
+        与 `seedBuiltinRules` 同一 owner 纪律：auto 规则的唯一生成点在这里，
+        `term_registry` 不反向依赖引擎。声明翻转/撤除时，旧 auto 行删除并经账本
+        精确撤销其结论——特征不再是声明的事实，它的推导不能还在对外检索。
+        `is_a` 的传递规则沿用历史 id `is_a_transitive`（同 id 单行，结论与
+        旧手工种子逐条一致，A/B 对拍判据在 test_relationMapping）。
+        """
+        registry = self._conditionRegistry()
+        stats = {"created": 0, "retired": 0}
+        desired: Dict[str, Dict[str, Any]] = {}
+        for term in registry.terms("relation", tenantId=tenantId):
+            termId = str(term["term_id"])
+            parent = str(term.get("parent_term_id") or "")
+            if parent:
+                desired["auto_subproperty:%s" % termId] = {
+                    "headPredicate": parent,
+                    "body": [{"atom": termId, "subject": "X", "object": "Y"}],
+                    "shape": "relay"}
+            if term.get("transitive"):
+                transitiveId = ("is_a_transitive" if termId == IS_A_PREDICATE
+                                else "auto_transitive:%s" % termId)
+                desired[transitiveId] = {
+                    "headPredicate": termId,
+                    "body": [{"atom": termId, "subject": "X", "object": "Y"},
+                             {"atom": termId, "subject": "Y", "object": "Z"}],
+                    "shape": "relay"}
+            inverse = str(term.get("inverse_of") or "")
+            if inverse:
+                desired["auto_inverse:%s" % termId] = {
+                    "headPredicate": inverse,
+                    "body": [{"atom": termId, "subject": "X", "object": "Y"}],
+                    "shape": "inverse",
+                    "headSubjectVar": "Y"}
+            if term.get("symmetric"):
+                desired["auto_symmetric:%s" % termId] = {
+                    "headPredicate": termId,
+                    "body": [{"atom": termId, "subject": "X", "object": "Y"}],
+                    "shape": "inverse",
+                    "headSubjectVar": "Y"}
+        existing = {r["rule_id"]: r for r in
+                    self.rules(includeDisabled=True, tenantId=tenantId)
+                    if str(r["rule_id"]).startswith("auto_")
+                    or r["rule_id"] == "is_a_transitive"}
+        for ruleId, spec in desired.items():
+            current = existing.get(ruleId)
+            if current and current.get("enabled") \
+                    and current.get("shape") == spec["shape"] \
+                    and current.get("head_predicate") == spec["headPredicate"] \
+                    and current.get("depends_on") == sorted(
+                        {a.get("atom") or a.get("not") for a in spec["body"]}):
+                continue
+            self.registerRule(ruleId, spec["headPredicate"], spec["body"],
+                              shape=spec["shape"],
+                              headSubjectVar=spec.get("headSubjectVar", "X"),
+                              tenantId=tenantId)
+            stats["created"] += 1
+        for ruleId, row in existing.items():
+            if ruleId not in desired and row.get("enabled"):
+                self.dropRule(ruleId, reason="关系声明已撤，auto 规则退场",
+                              tenantId=tenantId)
+                stats["retired"] += 1
+        return stats
+
     def _admitDerivedFact(self, rule: Dict[str, Any], agentId: Optional[str], label: str,
                           predicate: str, objectTerm: str, subjectKey: str,
                           premiseIds: List[str],
@@ -711,4 +843,10 @@ class ForwardChainingEngine:
         )
         with self._store._lock:
             rows = self._store._conn.execute(sql, (agentId, predicate, predicate)).fetchall()
+        # B8：传递闭包上限——超限显式报错，不静默截断（截断的闭包是错的语义）。
+        maxClosureRows = int(os.environ.get("NEUROVA_TRANSITIVE_CLOSURE_MAX", "200000") or 200000)
+        if len(rows) > maxClosureRows:
+            raise RuntimeError(
+                "传递闭包行数 %d 超过上限 %d（谓词 %s）：请收窄数据面或调高"
+                " NEUROVA_TRANSITIVE_CLOSURE_MAX" % (len(rows), maxClosureRows, predicate))
         return [(r["subject_key"], r["object_term"]) for r in rows]

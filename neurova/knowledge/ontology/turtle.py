@@ -29,7 +29,10 @@ LANG = "zh"
 
 _TOKEN = re.compile(r"\s+")
 _IRI = re.compile(r"^<[^<>]+>$")
-_PREFIZED = re.compile(r"^kbg:([A-Za-z0-9_][A-Za-z0-9_.-]*)$")
+# B8 ⑧：前缀名从只认 kbg: 放宽到任意 prefix:local——导出层的标准槽位
+# （rdf:type/rdfs:subClassOf/owl:inverseOf）必须能被自家解析器读回。
+# 仍然拒裸词与引号形：谓词永远是 IRI，不是字符串。
+_PREFIZED = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*:([A-Za-z0-9_][A-Za-z0-9_.-]*)$")
 _LITERAL = re.compile(r'^"((?:[^"\\]|\\.)*)"(?:@([A-Za-z0-9-]+))?$')
 _ESCAPES = {"\\": "\\", '"': '"', "n": "\n", "t": "\t", "r": "\r"}
 
@@ -181,6 +184,12 @@ def serializeAll(store: Any, tenantId: str = "default",
 
     lines: List[str] = [PREFIX_LINE % NAMESPACE]
 
+    # 标准槽位前缀（B8 ⑧）：rdf/rdfs/owl 固定进文档头——导出层有标准形状的
+    # 语义行（subClassOf/subPropertyOf/inverseOf/rdf:type）从这里取词表。
+    lines.append("@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .")
+    lines.append("@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .")
+    lines.append("@prefix owl: <http://www.w3.org/2002/07/owl#> .")
+
     lines.append(_SECTION_TERMS % tenant)
     for row in termRows:
         rows: List[Tuple[str, str]] = [
@@ -197,8 +206,41 @@ def serializeAll(store: Any, tenantId: str = "default",
                 ("range_kinds", "rangeKinds"), ("disjoint_with", "disjointWith"),
                 ("required_props", "requiredProps")):
             rows.append((predicate, literal(_canonicalJson(row[column]))))
+        if "aliases_json" in row.keys():
+            rows.append(("aliases", literal(_canonicalJson(row["aliases_json"]))))
+        if "external_iris_json" in row.keys():
+            rows.append(("externalIris", literal(_canonicalJson(row["external_iris_json"]))))
         rows.append(("version", literal(row["version"])))
         lines.append(_subjectBlock(row["term_id"], rows))
+
+    # B8 ⑧：标准槽位语义行——概念父类 rdfs:subClassOf、关系父属性
+    # rdfs:subPropertyOf、逆关系 owl:inverseOf。术语 IRI 有外部映射
+    # （external_iris_json 的 skos_exactMatch 槽）用外部 IRI，否则 kbg:。
+    # 全 IRI 独立三元组行，逐字节确定，不进 kbg: 块（块实现是 B5 的既有判据面）。
+    externalByTerm: Dict[str, str] = {}
+    for row in termRows:
+        if "external_iris_json" in row.keys():
+            mapping = json.loads(row["external_iris_json"] or "{}")
+            match = str(mapping.get("skos_exactMatch") or "")
+            if match:
+                externalByTerm[str(row["term_id"])] = match
+
+    def _termIri(termId: str) -> str:
+        external = externalByTerm.get(str(termId) or "")
+        return "<%s>" % external if external else iri(termId)
+
+    lines.append("# standards")
+    termsById = {str(r["term_id"]): r for r in termRows}
+    for row in termRows:
+        parent = str(row["parent_term_id"] or "")
+        if parent and parent in termsById:
+            slot = "rdfs:subClassOf" if row["kind"] == "concept" else "rdfs:subPropertyOf"
+            lines.append("%s %s %s ." % (_termIri(row["term_id"]), slot,
+                                         _termIri(parent)))
+        inverse = str(row["inverse_of"] or "") if "inverse_of" in row.keys() else ""
+        if inverse and inverse in termsById:
+            lines.append("%s owl:inverseOf %s ." % (_termIri(row["term_id"]),
+                                                    _termIri(inverse)))
 
     lines.append(_SECTION_RULES % tenant)
     for row in ruleRows:
@@ -215,6 +257,12 @@ def serializeAll(store: Any, tenantId: str = "default",
 
     lines.append(_SECTION_FACTS)
     for row in factRows:
+        if row["predicate_term_id"] == "is_a":
+            # B8 ⑧：is_a 事实在导出层只对应实例类型（rdf:type），客体是概念术语
+            # 的 IRI（有外部映射用外部）；其余关系保持 kbg: 块形状（B5 判据面）。
+            lines.append("%s rdf:type %s ." % (iri(row["subject_key"]),
+                                               _termIri(row["object_term"])))
+            continue
         lines.append(_subjectBlock(row["subject_key"], [
             (_safePredicate(row["predicate_term_id"]), literal(row["object_term"])),
         ]))
