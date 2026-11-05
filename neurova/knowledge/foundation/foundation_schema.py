@@ -37,6 +37,7 @@ from .knowledge_facts import (
     _SCHEMA_V27,
 )
 from .digest_chain import _SCHEMA_V11
+from ..ontology.change_log import _SCHEMA_V33
 from ..ontology.derivation_ledger import _SCHEMA_V10
 from ..ontology.relation_candidates import _SCHEMA_V29_CANDIDATES
 from ..ontology.rule_engine import _SCHEMA_V28, _SCHEMA_V9
@@ -108,6 +109,8 @@ _STEPS: List[tuple] = [
     (31, _SCHEMA_V31_TERMS + "\n" + _SCHEMA_V31_SHAPES),
     # v32：限定关系 schema（specs/2026-11-05 B11 L3）——qualifier 键/类型/必填
     (32, _SCHEMA_V32_TERMS),
+    # v33：本体变更审计账（specs/2026-11-05 B12 L8）——只追加，不删除
+    (33, _SCHEMA_V33),
 ]
 
 _registered = False
