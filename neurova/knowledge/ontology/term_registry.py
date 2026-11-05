@@ -691,3 +691,11 @@ def qualifierSchemaOf(registry: Any, predicate: str, tenantId: str = "default") 
     """谓词的限定关系 schema（B11）：未声明返回 {}（qualifier 自由 JSON，存量零漂移）。"""
     term = registry.term(predicate, tenantId=tenantId)
     return dict(term.get("qualifier_schema") or {}) if term else {}
+
+
+def tenantScopedIri(tenantId: str, termId: str) -> str:
+    """跨租户导出的 IRI：带租户段 `kbg:<tenant>_<id>`，同 id 跨租户不互撞
+    （升级计划 §12.7 设计 2）。单租户导出不带段。"""
+    safeTenant = re.sub(r"[^A-Za-z0-9_.-]", "_", str(tenantId or "default"))
+    safeTerm = re.sub(r"[^A-Za-z0-9_.-]", "_", str(termId or "_"))
+    return "kbg:%s_%s" % (safeTenant, safeTerm)

@@ -27,6 +27,8 @@ from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter()
+from neurova.api.endpoints.knowledge_ontology_iri import router as _iriRouter
+router.include_router(_iriRouter)
 
 
 def _tenantOf(current_user: Dict[str, Any]) -> str:
@@ -74,6 +76,28 @@ def _termsView(registry: Any) -> List[Dict[str, Any]]:
         row["range_terms_effective"] = registry.rangeOf(row["term_id"])
         terms.append(row)
     return terms
+
+
+@router.get("/ontology/terms")
+async def list_ontology_terms(
+    limit: int = Query(100, ge=1, le=500),
+    cursor: str = Query(""),
+    fields: str = Query(""),
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """术语列表（B12 L6）：cursor 键集分页 + fields 投影（缺省全字段兼容旧读数）。"""
+    store, registry, _engine = _ontologyParts()
+    tenant = _tenantOf(current_user)
+    terms = sorted(registry.terms(tenantId=tenant), key=lambda t: t["term_id"])
+    if cursor:
+        terms = [t for t in terms if t["term_id"] > cursor]
+    page = terms[:limit]
+    nextCursor = page[-1]["term_id"] if len(terms) > limit else ""
+    fieldsSet = {f.strip() for f in fields.split(",") if f.strip()} if fields else None
+    if fieldsSet:
+        page = [{k: v for k, v in t.items() if k in fieldsSet} for t in page]
+    return {"code": 0, "message": "success",
+            "data": {"items": page, "total": len(terms), "next_cursor": nextCursor}}
 
 
 @router.get("/ontology/schema")
