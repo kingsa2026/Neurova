@@ -151,6 +151,7 @@
 [`08-research/tmem_paper_vs_neurova_associative_memory_comparison_2026-10-21.md`](08-research/tmem_paper_vs_neurova_associative_memory_comparison_2026-10-21.md)（T-Mem 论文与 Neurova 记忆系统代码级对比：无表面重合联想召回的可达性上界、写入侧预演成本复算、本仓断点 D1–D7 与候选 TM-1..TM-6、不照搬清单，研究参考）
 [`08-research/kweaver_vs_neurova_ontology_knowledge_base_comparison_2026-11-05.md`](08-research/kweaver_vs_neurova_ontology_knowledge_base_comparison_2026-11-05.md)（爱数 KWeaver DIP 公开生态与 Neurova ontology 知识库代码级对比：主仓 kweaver/kweaver-core 均 404、公开五仓快照（decision-agent 已弃用/dolphin/dsg/studio/旧文档归档）；十维加权 7.5 vs 4.4（公开可得性折扣声明）；本仓新断点 N1–N2（cognitive_security/data_masking 零生产消费，主代理亲验）与候选 C1–C6（净接线二＋新能力四）＋不采纳两条，研究参考）
 [`08-research/sag_vs_neurova_event_graph_retrieval_comparison_2026-11-05.md`](08-research/sag_vs_neurova_event_graph_retrieval_comparison_2026-11-05.md)（Zleap-AI SAG（SQL-Retrieval Augmented Generation，事件-实体索引＋查询时 SQL JOIN 动态超边）与 Neurova 知识检索代码级对比：应用壳 MIT 开源（v1.9.2/1030 后端测试）但论文核心引擎闭源（zleap-sag==0.15.0 PyPI wheel）；宣传数字对账——Recall@2 79.30/68.14 出自 v1 表 2 的相对提升换算、「数亿级生产验证」双零命中；检索子域八维加权 8.3 vs 6.6（黑盒折扣声明）；断点 N3（FactSurface.search 零调用，接 N1/N2 序号）与候选 C1–C5（净接线三＋新能力二）＋不采纳三条，研究参考）
+[`08-research/ontology_landing_video_vs_neurova_knowledge_semantic_stack_comparison_2026-11-05.md`](08-research/ontology_landing_video_vs_neurova_knowledge_semantic_stack_comparison_2026-11-05.md)（视频号知识视频《Ontology 本体落地》参考架构与 Neurova 知识语义栈框架适配评测：对象为教学参考架构非产品，只评本方十维加权实现度 6.8/10（适用域折扣声明）——本体语义层与入库纪律超出参考架构（9 档），短板集中于 OWL 式条件类自动归入、标准栈互通、访问层统一四动词；候选 V1–V4＋缓办 V5＋不采纳三条，无新增断点，研究参考）
 
 ### 2.5 审计报告 / 验证（历史留痕）
 
@@ -200,7 +201,11 @@
 
 `specs/2026-11-04-知识库三时间戳与时间感知消费面设计.md`（知识库条目三时间戳细分（源创建/源修改/入库）与时间感知消费面：契约只增（`source_created_at/source_modified_at`，`created_at` 语义钉死＝入库时间）、同源更新重入库（覆盖＋revisions＋保留 knowledge_id）、冲突「新者胜」建议读数（不改判）、搜索时间范围过滤（repository 内存层，无源时间条目如实排除）；三拍板已裁（T-C/T-D/T-E）；TA/TB/TC/TD① 已实施，实施终态与设计偏差见文内 §5；TD② recency 打分可配默认关、FTS 源时间列、facts 层源钟为在册尾巴）
 
+`specs/2026-11-05-ontology-capability-upgrade-plan.md`（本体语义栈能力升级计划：依据 08-research《Ontology 本体落地》评测（6.8/10）的七批改进方案——B1 条件类推导模板（新规则形状不破 Datalog 片段边界、观察态灰度、走 admission 咽喉与推导账本）/B2 validate dry-run 出口/B3 四动词统一门面 `/v1/knowledge/access/*` 纯转发/B4 推理结论溯源进对话/B5 Turtle 全库导出＋rdflib 可选对拍/B6 本体构建流水线（挂 knowledge_baselines）/B7 效率可用性实测先行＋图谱影子转正执行；分数投影 6.8→≈7.8（逐维明细）；四项拍板已裁（2026-11-05 全按推荐：条件类走 ontology_rules 形状枚举扩展、推导默认观察态灰度、四动词门面立项、溯源后端契约先行＋行内徽标）；不纳入 Planner 抽象、企业数据源、OWL DL/SPARQL/SHACL；每批红灯判据、live-verify 9527 验收门与台账落格约定）
+
 `specs/2026-11-04-agent-node-authoring-design.md`（Agent 自主节点编排与工作流修改能力设计：区分节点类型/节点实例/画布/工作流定义四层写入面；现状 10 个 canvas 工具、注册表 `sync_all` 缺口、`list_nodes` 缺参数契约、自定义节点仅 HTTP、已发布定义无 Agent 写口；拟新增 `canvas_list_nodes` 扩展/`node_schema`、`sync_nodes`、`custom_node_*`（L1/L2）、`workflow_definition_*`、环境预检与自愈闭环；含 RSI 复用边界（复用提案/回滚/评测与 EKB，不把 RSIOrchestrator 当节点修复调度器）、安全闸门、N0–N5 分期与每批红灯判据；**六项已拍板**：custom 默认 draft／已发布可直接改但先有安全版本可回滚／`env_requirements` 随 NodeDefinition／Agent 轮次编排／按任务批次一次审批／复用 RSI 基础设施与 EKB；**N0 交互门**：一句话需求先经 BuildSession 就绪门，缺信息/凭据走面板（secret 只写 SecretStore），构建中疑问/选择同样面板，未 ready 服务端拒绝写入；**N0/N1/N2/N3/N4/N5 已实施（2026-11-04：BuildSession/ask_user/构建门/面板/secret；节点参数与环境自描述；sync_nodes；node_schema；custom draft/批次激活；`workflows.safe_version` 基线/回填、`workflow_definition_get/update/duplicate`、`workflow_rollback/publish/execute`、定义校验与审计、DRAFT 草稿试跑；`node_env_preflight`、`workflow_repair` 自愈循环（DRAFT 隔离/RSI 快照与提案/EKB/5 轮/画布配置提交）、引擎内层 failed 不再假成功；B5 画布批量一次事务提交 `canvas_apply_batch`（失败整批不落盘/版本不变）；§12.4 交互回答后服务端自动拉起 Agent 回合（无聊天会话时降级前端提示）；批次补偿日志 + `build_batch_compensate`（跨 surface 半批可显式回滚）；换节点候选默认审批（`allow_replacements`））**；§9.1 实现细节已定（`safe_version` 走 workflows 加列／批次由 Agent 轮次创建／草稿用工作流 DRAFT 副本／自愈最多 5 轮／EKB 统一 `workflow_node_repair`）；§9.2 列 B1–B11 实施前阻塞点（BuildSession 触发、长等待 pending/resume、画布 staging、DRAFT 执行工具、批次原子性、迁移、前端 secret、权限、RSI 接线、真账号、分段提交））
+
+
 
 > 说明：`04-plans/` 的逐条登记在 [`docs/0-index/README.md`](0-index/README.md) 的「04-plans 实施计划」节，本节只收录跨领域入口与本目录内已归集条目。
 
