@@ -81,6 +81,10 @@ DOMAINS = (
             "knowledge_graph_api",
             # 同包另一套端点（Memory↔Knowledge 集成），与本域模块零依赖
             "knowledge_integration",
+            # 四动词统一门面（升级计划 B3）：独立 ENDPOINT_MODULES 行，纯转发
+            # knowledge_core / knowledge_ontology / semantic_search_api 的既有
+            # 处理函数，零业务逻辑；不是 knowledge.py 聚合器的叶子
+            "knowledge_access_facade",
         ),
         glob_patterns=("knowledge.py", "knowledge_*.py"),
     ),

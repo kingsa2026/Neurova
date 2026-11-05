@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user_or_service
@@ -91,6 +91,37 @@ async def get_ontology_schema(
     }
 
 
+@router.get("/ontology/export.ttl")
+async def export_ontology_turtle(
+    request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+    agent_id: Optional[str] = Query(
+        default=None, description="只导该 agent 的事实段；缺省导本租户全部"),
+):
+    """全库 Turtle 导出（升级计划 B5，A4 标准栈互通面）：只读、按租户分区、治理面。
+
+    导出的是 `ontology/turtle.py::serializeAll` 那一份文本，端点不自己拼第三份
+    序列化（教义第 6 条）。**语法子集边界**（对外承诺面，与 docs/02-api 同条）：
+
+    - 文档头固定 `@prefix kbg: <https://neurova.local/knowledge/>`；
+    - 主语＝`kbg:<subject_key>`（IRI 安全的 ASCII 唯一键，不用中文标签，
+      否则不同主体在 `iri()` 收字形时互相吞并）；
+    - 谓词＝`kbg:<数据里的术语名>`，客体一律字符串字面量（**不出 IRI 客体、
+      不出集合/匿名节点、不出 xsd 数据类型标记、不出 owl/rdf 模式词汇**）；
+    - 事实段只收 `status='active' AND record_kind='triple'`：撤回态与叙述行不进导出；
+    - 排序只来自固定 ORDER BY，时间戳与写入次序不进文本 ⇒ 同一库内容两次导出逐字节一致。
+
+    互操作对拍（rdflib round-trip）是**可选测试**，产品侧零第三方依赖不变。
+    """
+    _requireAdmin(current_user)
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.turtle import serializeAll
+
+    text = serializeAll(get_knowledge_fact_store(), tenantId=_tenantOf(current_user),
+                        agentId=agent_id)
+    return Response(content=text, media_type="text/turtle; charset=utf-8")
+
+
 # ── S2 写面 ──────────────────────────────────────────────────
 
 
@@ -114,6 +145,9 @@ class RuleWriteRequest(BaseModel):
     rule_id: str = ""
     head_predicate: str
     head_subject_var: Optional[str] = None
+    # 条件类（升级计划 B1）：head 客体常量非空 ⇒ 形状是 conjunction（X is_a 该类）。
+    # 留空 = 既有 relay 语义，存量调用方一位不改。
+    head_object_const: Optional[str] = None
     body: Optional[List[Dict[str, Any]]] = None
     enabled: Optional[bool] = None
     version: Optional[str] = None
@@ -293,6 +327,7 @@ async def create_ontology_rule(
         rule = engine.registerRule(
             ruleId, body.head_predicate, body.body or [],
             headSubjectVar=body.head_subject_var or "X",
+            headObjectConst=body.head_object_const or "",
             enabled=True if body.enabled is None else body.enabled,
             version=body.version or "v1", tenantId=tenant)
     except (ValueError,) as exc:
@@ -321,6 +356,9 @@ async def update_ontology_rule(
             body.body if body.body is not None else existing.get("body") or [],
             headSubjectVar=(body.head_subject_var
                             or existing.get("head_subject_var") or "X"),
+            headObjectConst=(body.head_object_const
+                             if body.head_object_const is not None
+                             else existing.get("head_object_const") or ""),
             enabled=(body.enabled if body.enabled is not None
                      else bool(existing.get("enabled", True))),
             version=body.version or existing.get("version") or "v1",
@@ -375,7 +413,179 @@ async def get_ontology_impact(
     return {"code": 0, "message": "success", "data": impact}
 
 
+# ── B2 dry-run 只读出口 ──────────────────────────────────────
+
+
+class OntologyValidateCandidate(BaseModel):
+    subjectLabel: str
+    subjectKey: str = ""
+    predicateTermId: str
+    objectTerm: str
+    qualifier: Dict[str, Any] = Field(default_factory=dict)
+
+
+class OntologyValidateRequest(BaseModel):
+    tenantId: str = ""
+    agentId: str = ""
+    triples: List[OntologyValidateCandidate] = Field(default_factory=list)
+
+
+@router.post("/ontology/validate")
+async def validateOntologyCandidates(
+    body: OntologyValidateRequest,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """候选三元组 dry-run（B2，纯只读）：入库前试算五条校验，不落任何库。
+
+    逐条回 `{index, subjectKey, findings, violations, verdict}` ＋ summary。
+    violation 不抛异常——dry-run 只报告，拒写是唯一写咽喉（admission）的职责；
+    unregistered 沿用校验器的保守原则：判不了 ≠ 不合法。校验路径与 B6 流水线
+    共用同一份（`ontology/pipeline.dryRunFactCandidates`），无第二实现。
+    """
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.pipeline import dryRunFactCandidates
+
+    for index, candidate in enumerate(body.triples):
+        if not str(candidate.subjectLabel or "").strip():
+            raise HTTPException(
+                status_code=400, detail="triples[%d].subjectLabel 不能为空" % index)
+        if not str(candidate.predicateTermId or "").strip():
+            raise HTTPException(
+                status_code=400, detail="triples[%d].predicateTermId 不能为空" % index)
+    store = get_knowledge_fact_store()
+    try:
+        results = dryRunFactCandidates(
+            store,
+            agentId=str(body.agentId or ""),
+            tenantId=str(body.tenantId or "").strip() or _tenantOf(current_user),
+            factCandidates=[candidate.model_dump() for candidate in body.triples],
+        )
+    except Exception as exc:  # noqa: BLE001 — 校验器故障显式 5xx 带原因，不吞不降级
+        raise HTTPException(status_code=500, detail="validate 校验器异常: %s" % exc)
+    summary = {
+        "total": len(results),
+        "passed": sum(1 for row in results if row["verdict"] == "pass"),
+        "violated": sum(1 for row in results if row["verdict"] == "violation"),
+        "unregistered": sum(
+            1 for row in results
+            if any(f.get("kind") == "unregistered" for f in row["findings"])),
+    }
+    return {"code": 0, "message": "success",
+            "data": {"results": results, "summary": summary}}
+
+
+# ── B6 本体构建流水线 ────────────────────────────────────────
+
+
+class PipelineTermUpsert(BaseModel):
+    termId: str
+    kind: str
+    label: str = ""
+    parentTermId: Optional[str] = None
+    domain: Optional[List[str]] = None
+    rangeTerms: Optional[List[str]] = None
+    rangeKinds: Optional[List[str]] = None
+    cardinality: Optional[int] = None
+    disjointWith: Optional[List[str]] = None
+    requiredProps: Optional[List[str]] = None
+    version: str = "v1"
+
+
+class PipelineRuleRegistration(BaseModel):
+    ruleId: str
+    headPredicate: str
+    body: List[Dict[str, Any]] = Field(default_factory=list)
+    headSubjectVar: str = "X"
+    # 条件类规则（B1）也要能进流水线——写面两条路径的形状参数不许只有一半
+    headObjectConst: str = ""
+    enabled: bool = True
+    version: str = "v1"
+
+
+class PipelineFactCandidate(BaseModel):
+    subjectLabel: str
+    subjectKey: str = ""
+    predicateTermId: str
+    objectTerm: str
+    qualifier: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PipelineRunRequest(BaseModel):
+    agentId: str = ""
+    tenantId: str = ""
+    termUpserts: List[PipelineTermUpsert] = Field(default_factory=list)
+    ruleRegistrations: List[PipelineRuleRegistration] = Field(default_factory=list)
+    factCandidates: List[PipelineFactCandidate] = Field(default_factory=list)
+    reason: str = ""
+
+
+@router.post("/ontology/pipeline/run")
+async def runOntologyPipeline(
+    body: PipelineRunRequest, request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """本体构建流水线（B6，管理员）：一批变更单事务式成版。
+
+    ① 候选事实先全部 dry-run（复用 B2 校验路径），任一 violation 整批拒绝、
+    零落盘（400 带 rejections）；② 依次应用术语 upsert 与规则登记（只登记不
+    触发求值，应用中途失败整批回滚）；③ 写一行 `knowledge_baselines` 快照
+    （scope=ontology_pipeline，复用既有表）作为发布点。返回
+    `{baselineId, applied, summary}`。
+    """
+    _requireAdmin(current_user)
+    from neurova.knowledge.ontology.pipeline import OntologyPipeline
+
+    store, registry, engine = _ontologyParts()
+    pipeline = OntologyPipeline(store, registry=registry, engine=engine)
+    try:
+        result = pipeline.run(
+            agentId=str(body.agentId or "").strip(),
+            tenantId=str(body.tenantId or "").strip() or _tenantOf(current_user),
+            termUpserts=[spec.model_dump() for spec in body.termUpserts],
+            ruleRegistrations=[spec.model_dump() for spec in body.ruleRegistrations],
+            factCandidates=[spec.model_dump() for spec in body.factCandidates],
+            createdBy=str(current_user.get("user_id") or ""),
+            reason=str(body.reason or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not result.get("accepted"):
+        raise HTTPException(
+            status_code=400,
+            detail={"message": str(result.get("summary") or "本体流水线整批拒绝"),
+                    "rejections": result.get("rejections") or []})
+    activityId = _landActivity(
+        store, "ontology_pipeline_run", current_user, "run",
+        {"baseline_id": result["baselineId"], **result["applied"]}, body.reason)
+    return {"code": 0, "message": "success",
+            "data": {**result, "activity_id": activityId}}
+
+
+@router.get("/ontology/pipeline/diff")
+async def getOntologyPipelineDiff(
+    request: Request,
+    fromBaseline: str = Query(..., description="起始基线 id（ontology_pipeline）"),
+    toBaseline: str = Query("", description="目标基线 id；缺省对比当前实况"),
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """两基线（或基线↔当前实况）之间 terms/rules 差异（B6，只读）。"""
+    from neurova.knowledge.ontology.pipeline import OntologyPipeline
+
+    store, registry, engine = _ontologyParts()
+    pipeline = OntologyPipeline(store, registry=registry, engine=engine)
+    try:
+        report = pipeline.diff(
+            fromBaselineId=fromBaseline,
+            toBaselineId=str(toBaseline or "").strip() or None)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"code": 0, "message": "success", "data": report}
+
+
 # ── S3 实例编辑写面 ──────────────────────────────────────────
+
 
 
 class InstanceWriteRequest(BaseModel):

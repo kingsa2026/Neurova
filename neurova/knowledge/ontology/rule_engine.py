@@ -42,6 +42,15 @@ CREATE TABLE IF NOT EXISTS ontology_rules (
 CREATE INDEX IF NOT EXISTS idx_rule_head ON ontology_rules(head_predicate, enabled);
 """
 
+# v28：条件类（specs/2026-11-05 B1）——规则行带形状与 head 客体常量。
+# relay（既有接力形状）为缺省值；conjunction 是"同主体合取"：全部正原子共享 head
+# 主语变元、客体钉死为常量（body 原子里的 objectConst），head 客体也是常量
+# （head_object_const）。语义即 `X is_a 条件类 :- X is_a Base, X <谓词> <常量>`。
+_SCHEMA_V28 = """
+ALTER TABLE ontology_rules ADD COLUMN shape TEXT NOT NULL DEFAULT 'relay';
+ALTER TABLE ontology_rules ADD COLUMN head_object_const TEXT NOT NULL DEFAULT '';
+"""
+
 _VAR = re.compile(r"^[A-Z]$")
 _TERM_KINDS_IN_BODY = ("atom", "not")
 
@@ -124,19 +133,26 @@ class ForwardChainingEngine:
     def registerRule(self, ruleId: str, headPredicate: str, body: List[Dict[str, Any]], *,
                     headSubjectVar: str = "X", enabled: bool = True,
                     version: str = "v1",
-                    tenantId: str = "default") -> Dict[str, Any]:
+                    tenantId: str = "default",
+                    headObjectConst: str = "") -> Dict[str, Any]:
         """登记一条规则。形状、变量、层序在这里一次判完——坏规则进不了表。
 
         body 元素：`{"atom": predicate, "subject": var, "object": var}` 或
-        `{"not": predicate, "subject": var, "object": var}`。规则归属租户，
-        分层/引用/撤回都只在同租户内计算。
+        `{"not": predicate, "subject": var, "object": var}`；条件类原子把客体钉成
+        常量：`{"atom": predicate, "subject": "X", "objectConst": "Order"}`。
+        规则归属租户，分层/引用/撤回都只在同租户内计算。
+
+        条件类（`headObjectConst` 非空）：head 必须是类型断言 `is_a`，head 客体是
+        常量 concept 术语；正文 1–2 个正原子全部共享 head 主语变元、客体全为常量。
+        语义 = 同主体合取 ⇒ `X is_a 条件类`（specs/2026-11-05 §5 B1）。登记即对
+        存量事实触发一次推导——条件类建在事实之后是常态，等下一跳就漏掉现存的归入。
         """
         ruleId = str(ruleId or "").strip()
         tenant = str(tenantId or "default")
         if not ruleId or not headPredicate:
             raise RuleError("rule_id 与 head 谓词都不能为空")
+        headConst = str(headObjectConst or "").strip()
         atoms = self._parseBody(ruleId, body)
-        headVars = {headSubjectVar}
         positive = [a for a in atoms if a["kind"] == "atom"]
         negated = [a for a in atoms if a["kind"] == "not"]
         if not positive:
@@ -144,21 +160,26 @@ class ForwardChainingEngine:
         if len(positive) > 2:
             raise RuleError("规则 %s 正文超过 2 个原子；本引擎是三元组接力片段，"
                             "更长链条请写成多条规则逐层推" % ruleId)
-        if len(positive) == 2 and positive[0]["object"] != positive[1]["subject"]:
-            raise RuleError("规则 %s 的两个原子接不上（%s 与 %s 不是同一个变元）"
-                            % (ruleId, positive[0]["object"], positive[1]["subject"]))
-        if positive[-1]["object"] not in headVars | {a["object"] for a in positive}:
-            raise RuleError("规则 %s 的 head 客体未在正文中出现" % ruleId)
-        for atom in atoms:
-            if not _VAR.match(atom["subject"]) or not _VAR.match(atom["object"]):
-                raise RuleError("规则 %s 的变元必须是单个大写字母，收到 %s"
-                                % (ruleId, (atom["subject"], atom["object"])))
+        if headConst:
+            self._validateConditionClass(ruleId, headPredicate, headConst,
+                                         positive, negated, headSubjectVar, tenantId=tenant)
+        else:
+            if len(positive) == 2 and positive[0]["object"] != positive[1]["subject"]:
+                raise RuleError("规则 %s 的两个原子接不上（%s 与 %s 不是同一个变元）"
+                                % (ruleId, positive[0]["object"], positive[1]["subject"]))
+            if positive[-1]["object"] not in {headSubjectVar} | {a["object"] for a in positive}:
+                raise RuleError("规则 %s 的 head 客体未在正文中出现" % ruleId)
+            for atom in atoms:
+                if not _VAR.match(atom["subject"]) or not _VAR.match(atom["object"]):
+                    raise RuleError("规则 %s 的变元必须是单个大写字母，收到 %s"
+                                    % (ruleId, (atom["subject"], atom["object"])))
 
         stratum, cycles = self._stratify(ruleId, headPredicate,
                                         [a["predicate"] for a in negated],
                                         [a["predicate"] for a in positive],
                                         tenantId=tenant)
         stamp = _now()
+        shape = "conjunction" if headConst else "relay"
         with self._store._lock, self._store._conn:
             existing = self._store._conn.execute(
                 "SELECT created_at, version FROM ontology_rules"
@@ -166,11 +187,12 @@ class ForwardChainingEngine:
             self._store._conn.execute(
                 "INSERT OR REPLACE INTO ontology_rules (tenant_id, rule_id, head_predicate,"
                 " head_subject_var, body_json, negated_predicates, stratification_level,"
-                " enabled, version, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                " enabled, version, created_at, updated_at, shape, head_object_const)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (tenant, ruleId, headPredicate, headSubjectVar, json.dumps(body, ensure_ascii=False),
                  json.dumps(sorted({a["predicate"] for a in negated}), ensure_ascii=False),
                  stratum, 1 if enabled else 0, version,
-                 existing["created_at"] if existing else stamp, stamp),
+                 existing["created_at"] if existing else stamp, stamp, shape, headConst),
             )
             if cycles:
                 self._dropRule(ruleId, tenantId=tenant)
@@ -180,7 +202,77 @@ class ForwardChainingEngine:
             # 改版即旧版结论作废：留着就是两版规则各推一套、同时对外检索。
             self._store._derivationLedger.retractRuleVersion(
                 ruleId, keepVersion=version, tenantId=tenant)
+        if headConst and enabled:
+            # 事务外触发：推导照旧走咽喉，观察态过滤在检索读侧（不在写入侧拦）。
+            self._fireConditionClassAcrossAgents(ruleId, tenantId=tenant)
         return self.rule(ruleId, tenantId=tenant) or {}
+
+    def _validateConditionClass(self, ruleId: str, headPredicate: str, headConst: str,
+                                positive: List[Dict[str, str]],
+                                negated: List[Dict[str, str]],
+                                headSubjectVar: str, tenantId: str = "default") -> None:
+        """条件类的 authoring 闸：形状与术语登记在这里一次判完。
+
+        术语必须已登记才许建规则——规则是作者刻意写下的工件，不是待收编的枚举；
+        这与事实校验的"未登记≠违规"保守原则分工不同（`validation.py` 面向事实，
+        规则面向作者）。
+        """
+        if headPredicate != IS_A_PREDICATE:
+            raise RuleError(
+                "规则 %s 的条件类 head 必须是类型断言 %r，收到 %r"
+                % (ruleId, IS_A_PREDICATE, headPredicate))
+        for atom in positive:
+            if not _VAR.match(atom["subject"]) or atom["subject"] != headSubjectVar:
+                raise RuleError(
+                    "规则 %s 条件类正原子的主语必须是 head 变元 %r，收到 %s"
+                    % (ruleId, headSubjectVar, atom["subject"]))
+            if atom["object"]:
+                raise RuleError(
+                    "规则 %s 条件类正原子的客体必须是常量（objectConst），不许变元" % ruleId)
+            if not atom["objectConst"]:
+                raise RuleError("规则 %s 条件类正原子缺 objectConst" % ruleId)
+        for atom in negated:
+            if atom["subject"] != headSubjectVar or not atom["objectConst"]:
+                raise RuleError(
+                    "规则 %s 条件类的否定原子也必须钉在同主体与常量客体上" % ruleId)
+        registry = self._conditionRegistry()
+        headTerm = registry.term(headConst, tenantId=tenantId)
+        if headTerm is None or headTerm.get("kind") != "concept":
+            raise RuleError(
+                "条件类 %s 未登记为 concept 术语（先登记类型，再建规则）" % headConst)
+        for atom in list(positive) + list(negated):
+            if registry.term(atom["predicate"], tenantId=tenantId) is None:
+                raise RuleError("规则 %s 的正文谓词 %s 未登记" % (ruleId, atom["predicate"]))
+            if atom["predicate"] == IS_A_PREDICATE and \
+                    registry.term(atom["objectConst"], tenantId=tenantId) is None:
+                raise RuleError("规则 %s 的基类 %s 未登记" % (ruleId, atom["objectConst"]))
+
+    def _conditionRegistry(self):
+        """术语注册表的惰性缓存（规则登记期检查用；构造幂等补种，无副作用）。"""
+        cached = getattr(self, "_registryCache", None)
+        if cached is None:
+            from .term_registry import OntologyTermRegistry
+
+            cached = OntologyTermRegistry(self._store)
+            self._registryCache = cached
+        return cached
+
+    def _fireConditionClassAcrossAgents(self, ruleId: str,
+                                        tenantId: str = "default") -> None:
+        """登记后对存量事实逐 agent 触发一次。推导按 agent 隔离（admit 的 agentId
+        是事实属主），跨 agent 的合取不许折进一个 default 里。"""
+        rule = self.rule(ruleId, tenantId=tenantId)
+        if not rule or not rule.get("enabled"):
+            return
+        preds = sorted({a["predicate"] for a in rule["body"] if a["predicate"]})
+        with self._store._lock:
+            agents = [r["agent_id"] for r in self._store._conn.execute(
+                "SELECT DISTINCT agent_id FROM knowledge_facts"
+                " WHERE tenant_id = ? AND predicate_term_id IN (%s)"
+                " AND status = 'active'" % ",".join("?" * len(preds)),
+                [tenantId] + preds).fetchall()]
+        for agentId in agents:
+            self._fireRule(rule, agentId, tenantId=tenantId)
 
     def _dropRule(self, ruleId: str, tenantId: str = "default") -> None:
         with self._store._lock, self._store._conn:
@@ -192,7 +284,7 @@ class ForwardChainingEngine:
     def _parseBody(ruleId: str, body: List[Dict[str, Any]]) -> List[Dict[str, str]]:
         atoms: List[Dict[str, str]] = []
         for item in body or []:
-            keys = set(item) - {"subject", "object"}
+            keys = set(item) - {"subject", "object", "objectConst"}
             if keys != {"atom"} and keys != {"not"}:
                 raise RuleError("规则 %s 的正文元素必须是 atom 或 not 之一，收到 %s"
                                 % (ruleId, sorted(keys)))
@@ -202,7 +294,8 @@ class ForwardChainingEngine:
             atoms.append({"kind": "atom" if "atom" in item else "not",
                           "predicate": predicate,
                           "subject": str(item.get("subject", "")),
-                          "object": str(item.get("object", ""))})
+                          "object": str(item.get("object", "")),
+                          "objectConst": str(item.get("objectConst", ""))})
         return atoms
 
     def _stratify(self, ruleId: str, headPredicate: str, negated: List[str],
@@ -321,13 +414,18 @@ class ForwardChainingEngine:
         raw = json.loads(d.pop("body_json") or "[]")
         # 存的是用户写的形状，读出来统一成判定用的形状（kind + predicate）——
         # 两处各认各的键，就会一个能注册、另一个永远匹配不上。
+        # objectConst 是条件类（v28）的常量客体：relay 原子里恒为空串。
         d["body"] = [{"kind": "atom" if "atom" in a else "not",
                       "predicate": str(a.get("atom") or a.get("not") or ""),
                       "subject": str(a.get("subject", "")),
-                      "object": str(a.get("object", ""))} for a in raw]
+                      "object": str(a.get("object", "")),
+                      "objectConst": str(a.get("objectConst", ""))} for a in raw]
         d["negated_predicates"] = json.loads(d.get("negated_predicates") or "[]")
         d["depends_on"] = sorted({a["predicate"] for a in d["body"] if a["predicate"]})
         d["enabled"] = bool(d.get("enabled"))
+        # v28 之前落库的行没有这两列：缺省回 relay 形状，存量语义零漂移。
+        d["shape"] = str(d.get("shape") or "relay")
+        d["head_object_const"] = str(d.get("head_object_const") or "")
         return d
 
     # ── 求值 ──────────────────────────────────────────────────
@@ -369,6 +467,8 @@ class ForwardChainingEngine:
 
     def _fireRule(self, rule: Dict[str, Any], agentId: Optional[str],
                   tenantId: str = "default") -> List[str]:
+        if rule.get("shape") == "conjunction":
+            return self._fireConjunction(rule, agentId, tenantId=tenantId)
         atoms = [a for a in rule["body"]]
         positive = [a for a in atoms if a["kind"] == "atom"]
         negated = [a for a in atoms if a["kind"] == "not"]
@@ -431,6 +531,82 @@ class ForwardChainingEngine:
                 return True
         return False
 
+    def _fireConjunction(self, rule: Dict[str, Any], agentId: Optional[str],
+                         tenantId: str = "default") -> List[str]:
+        """同主体合取求值（条件类）：全部正原子钉在同一 subject_key 上、客体为常量。
+
+        与 relay 的分野在接法——relay 靠"上一跳客体 = 下一跳主体"接力，合取靠
+        subject_key 直接对齐；前提账记合取到的每一行，撤销沿账本精确走。
+        合取 SQL 全程带 tenant_id（v25 本体分区语义在推理层同样成立）。
+        """
+        positive = [a for a in rule["body"] if a["kind"] == "atom"]
+        negated = [a for a in rule["body"] if a["kind"] == "not"]
+        if len(positive) == 1:
+            a0 = positive[0]
+            inner = ("SELECT subject_key, fact_id AS pair FROM knowledge_facts"
+                     " WHERE predicate_term_id = ? AND object_term = ?"
+                     " AND tenant_id = ? AND status = 'active' AND record_kind = 'triple'")
+            params: List[Any] = [a0["predicate"], a0["objectConst"], tenantId]
+            if agentId:
+                inner += " AND agent_id = ?"
+                params.append(agentId)
+        else:
+            a0, a1 = positive[0], positive[1]
+            inner = ("SELECT a.subject_key AS subject_key,"
+                     " a.fact_id || '+' || b.fact_id AS pair"
+                     " FROM knowledge_facts a"
+                     " JOIN knowledge_facts b ON b.subject_key = a.subject_key"
+                     "  AND b.agent_id = a.agent_id AND b.tenant_id = a.tenant_id"
+                     " WHERE a.predicate_term_id = ? AND a.object_term = ?"
+                     "  AND a.tenant_id = ? AND a.status = 'active'"
+                     "  AND a.record_kind = 'triple'"
+                     "  AND b.predicate_term_id = ? AND b.object_term = ?"
+                     "  AND b.tenant_id = ? AND b.status = 'active'"
+                     "  AND b.record_kind = 'triple'")
+            params = [a0["predicate"], a0["objectConst"], tenantId,
+                      a1["predicate"], a1["objectConst"], tenantId]
+            if agentId:
+                inner += " AND a.agent_id = ?"
+                params.append(agentId)
+        sql = ("SELECT t.subject_key, MIN(s.canonical_label) AS label,"
+               " GROUP_CONCAT(DISTINCT t.pair) AS pairs"
+               " FROM (%s) t JOIN knowledge_subjects s ON s.subject_key = t.subject_key"
+               " GROUP BY t.subject_key"
+               " ORDER BY t.subject_key" % inner)
+        with self._store._lock:
+            rows = self._store._conn.execute(sql, params).fetchall()
+
+        head = rule["head_predicate"]
+        headConst = str(rule.get("head_object_const") or "")
+        written: List[str] = []
+        for row in rows:
+            subjectKey, label = row["subject_key"], row["label"]
+            if self._negatedConstHolds(agentId, negated, subjectKey, tenantId=tenantId):
+                continue
+            factId = self._admitDerivedFact(rule, agentId, label, head, headConst,
+                                            subjectKey, _premiseIds(row["pairs"]),
+                                            tenantId=tenantId)
+            if factId:
+                written.append(factId)
+        return written
+
+    def _negatedConstHolds(self, agentId: Optional[str], negated: List[Dict[str, str]],
+                           subjectKey: str, tenantId: str = "default") -> bool:
+        """条件类的否定判定：每个否定原子自带常量客体，逐原子查活事实。"""
+        for atom in negated:
+            sql = ("SELECT 1 FROM knowledge_facts WHERE subject_key = ?"
+                   " AND predicate_term_id = ? AND object_term = ?"
+                   " AND tenant_id = ? AND status = 'active'")
+            params: List[Any] = [subjectKey, atom["predicate"], atom["objectConst"], tenantId]
+            if agentId:
+                sql += " AND agent_id = ?"
+                params.append(agentId)
+            with self._store._lock:
+                row = self._store._conn.execute(sql, params).fetchone()
+            if row:
+                return True
+        return False
+
     def _admitDerivedFact(self, rule: Dict[str, Any], agentId: Optional[str], label: str,
                           predicate: str, objectTerm: str, subjectKey: str,
                           premiseIds: List[str],
@@ -448,7 +624,8 @@ class ForwardChainingEngine:
                 subjectLabel=label, predicateTermId=predicate,
                 objectTerm=objectTerm, content=content,
                 qualifier={"derived_by": rule["rule_id"],
-                           "stratum": rule["stratification_level"]},
+                           "stratum": rule["stratification_level"],
+                           "shape": str(rule.get("shape") or "relay")},
                 assertions=[{"actorType": "pipeline", "actorId": "rule:%s" % rule["rule_id"],
                              "mediumRef": "rule:%s" % rule["rule_id"],
                              "statementText": content}],

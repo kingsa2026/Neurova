@@ -38,7 +38,7 @@ from .knowledge_facts import (
 )
 from .digest_chain import _SCHEMA_V11
 from ..ontology.derivation_ledger import _SCHEMA_V10
-from ..ontology.rule_engine import _SCHEMA_V9
+from ..ontology.rule_engine import _SCHEMA_V28, _SCHEMA_V9
 from ..ontology.term_registry import _SCHEMA_V8, _SCHEMA_V12
 from .narratives import NARRATIVE_DOMAIN, _SCHEMA_V4, _SCHEMA_V6, _SCHEMA_V7
 
@@ -86,6 +86,9 @@ _STEPS: List[tuple] = [
     (26, _SCHEMA_V26),
     # v27：检索脱靶登记（specs/2026-10-30 W2）——候选别名只进人工审批面
     (27, _SCHEMA_V27),
+    # v28：条件类规则（specs/2026-11-05 B1）——ontology_rules 带形状（relay/conjunction）
+    #      与 head 客体常量；relay 为缺省，存量行零漂移
+    (28, _SCHEMA_V28),
 ]
 
 _registered = False
