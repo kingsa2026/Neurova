@@ -4278,6 +4278,8 @@ tests/unit/knowledge/ontology/test_turtleExport.py
 tests/unit/knowledge/ontology/test_conditionClassDerivation.py
 # B4 二次改判：观察态灰度必须落在图谱走查（推导当跳板也能把条目顶进排序），翻主路态 via_derived 随叶子走
 tests/unit/knowledge/test_graphWalkDerivationGovernance.py
+# 仓根 .tmp_* 探针遗留存量棘轮：基线只降不升；autouse 污染守卫只管跑测期间，看不见被 gitignore 豁免的历史积累
+tests/unit/test_repoRootScratchLeftoverRatchet.py
 # 种子锚点观测面：观测跟闸走（关闸零记录）、快照经既有审计端点真读得回，转正判定据读数不据合成读数
 tests/unit/knowledge/test_seedAnchorTelemetry.py
 # 对话链路取数口径：真走查→真支撑→真 memories→真回合 metadata，四段不许各写一套
