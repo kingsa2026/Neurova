@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional
 from neurova.knowledge.foundation.admission import AdmissionRequest
 
 from .rule_engine import ForwardChainingEngine
+from .shapes import ShapeRegistry
 from .term_registry import OntologyTermRegistry
 from .validation import OntologyValidationReport
 
@@ -82,7 +83,9 @@ def dryRunFactCandidates(
     """
     tenant = str(tenantId or "default")
     registry = registry if registry is not None else OntologyTermRegistry(store)
-    report = report if report is not None else OntologyValidationReport(registry)
+    if report is None:
+        from .shapes import ShapeRegistry
+        report = OntologyValidationReport(registry, shapes=ShapeRegistry(store)) if store is not None else OntologyValidationReport(registry)
     rows: List[Dict[str, Any]] = []
     for index, candidate in enumerate(factCandidates or []):
         subjectLabel = str(candidate.get("subjectLabel") or "").strip()
@@ -145,7 +148,10 @@ class OntologyPipeline:
         self._registry = registry if registry is not None else OntologyTermRegistry(store)
         self._engine = engine if engine is not None else ForwardChainingEngine(store)
         self._validator = validator if validator is not None \
-            else OntologyValidationReport(self._registry)
+            else OntologyValidationReport(
+                self._registry,
+                shapes=(ShapeRegistry(self._store)
+                        if getattr(self, "_store", None) is not None else None))
 
     def run(
         self,

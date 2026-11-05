@@ -178,7 +178,8 @@ class TestValidateEndpoint:
 
         monkeypatch.setattr(
             "neurova.knowledge.ontology.pipeline.OntologyValidationReport",
-            lambda registry: ExplodingReport())
+            # B10 起构造契约带 shapes（None=只有内置 6 项）——替身签名随契约走（§6-55 同族）
+            lambda registry, shapes=None: ExplodingReport())
 
         resp = _post(client, [{"subjectLabel": "甲", "predicateTermId": "lives_in",
                                "objectTerm": "city"}])

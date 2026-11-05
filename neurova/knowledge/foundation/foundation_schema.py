@@ -40,9 +40,11 @@ from .digest_chain import _SCHEMA_V11
 from ..ontology.derivation_ledger import _SCHEMA_V10
 from ..ontology.relation_candidates import _SCHEMA_V29_CANDIDATES
 from ..ontology.rule_engine import _SCHEMA_V28, _SCHEMA_V9
+from ..ontology.shapes import _SCHEMA_V31_SHAPES
 from ..ontology.term_registry import (
     _SCHEMA_V29_TERMS,
     _SCHEMA_V30_TERMS,
+    _SCHEMA_V31_TERMS,
     _SCHEMA_V8,
     _SCHEMA_V12,
 )
@@ -100,6 +102,9 @@ _STEPS: List[tuple] = [
     (29, _SCHEMA_V29_TERMS + "\n" + _SCHEMA_V29_CANDIDATES),
     # v30：身份判据（specs/2026-11-05 B9 L1）——类型级 identity_keys
     (30, _SCHEMA_V30_TERMS),
+    # v31：SKOS 多语言/模块化（specs/2026-11-05 B10 L2）——labels/alt_labels/module/
+    #      namespace/iri_base ＋形状注册表 ontology_shapes（L4，写入前/dry-run 同求值器）
+    (31, _SCHEMA_V31_TERMS + "\n" + _SCHEMA_V31_SHAPES),
 ]
 
 _registered = False

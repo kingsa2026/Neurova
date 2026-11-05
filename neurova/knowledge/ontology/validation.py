@@ -17,10 +17,16 @@ RULES = ("domain", "range", "parentConsistency", "disjoint", "cardinality", "req
 
 
 class OntologyValidationReport:
-    """咽喉段3 前半：写入前的结构校验。`violations` 非空即不得入库。"""
+    """咽喉段3 前半：写入前的结构校验。`violations` 非空即不得入库。
 
-    def __init__(self, registry: Any) -> None:
+    B10：构造时可注入 `ShapeRegistry`——用户 shape 的 findings 经同一求值器
+    追加进本报告（violation 阻断 / warning 记账 / info 遥测）；不注入则只有
+    内置 6 项（裸门与既有调用方零漂移）。
+    """
+
+    def __init__(self, registry: Any, shapes: Any = None) -> None:
         self._registry = registry
+        self._shapes = shapes
 
     def ensureTenantSeeds(self, tenantId: str) -> None:
         """非 default 租户的种子谓词在写入首跳补齐（闸的调用点，不暴露注册表内部）。"""
@@ -134,6 +140,11 @@ class OntologyValidationReport:
                 "warning", "punning",
                 "主体 %s 与已登记术语同名（term/instance 混用）" % subjectKey,
                 predicate, subjectKey=subjectKey))
+
+        # B10 L4：用户 shape 与内置 6 项共用同一 findings 流（violation 阻断/
+        # warning 记账/info 遥测）；shape 只判数据，不触发推导。
+        if self._shapes is not None:
+            out.extend(self._shapes.evaluateForRequest(request, subjectKey, registry))
         return out
 
     @staticmethod
