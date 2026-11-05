@@ -306,3 +306,28 @@
   （v1.9.0 CHANGELOG 转述）；对方引擎内部是否做实体归一（不可见）；2608.12129 的
   withdrawn 标记仅见 abs 页转述（arxiv API feed 无状态字段，该号实测存在且内容为
   SAG v2）。
+
+## 9. 观测项实施与种子转正判定（C1 后续观测，2026-11-05 收口）
+
+候选落地后唯一悬置项是「种子闸（NEUROVA_KB_FACT_SURFACE）默认态待大库成本读数」。
+本节把「待观测」收成机制：**采集 → 存储 → 出口 → 判定**。
+
+- **采集**：`GraphFactWalker._seedAnchors` 埋点（延迟/池规模/锚点数）＋
+  `walkFromQuery` 种子路径记账（walk_hits 收益行数）；观测跟闸走——闸关零记录，
+  不制造无信息量噪声。观测面故障 fail-soft 绝不影响走查。
+- **存储**：进程内 `RetrievalMetrics`（`seed_anchors` 段，仿 queryNorm/graphShadow
+  先例；重启清零）。
+- **出口**：既有审计端点零新增——`GET /v1/knowledge/audit/retrieval-metrics`
+  的 `retrieval.seed_anchors` 段自动可见。
+- **压测基线（合成语料，20 查询/档）**：池 1k 行 avg=101.6ms（首查询 jieba
+  预热 max=610ms）、1w 行 avg=76.5ms（p95=79.0）、5w 行 avg=78.9ms
+  （p95=94.0）——**延迟与池规模基本无关**（瓶颈是固定开销而非行数）。
+  注意：合成语料为短文本（~15 字/行）；真实长文本（数百字/行）的分词成本
+  随长度线性涨，此基线**不可直接外推**。
+- **转正判定规则**（据生产 `seed_anchors` 读数，非合成读数）：
+  1. `latency_ms.avg` ≤ 200ms 且 `pool_size.max` 达真实库量级 → 成本达标；
+  2. `walk_hits_total` > 0 且 `anchors_total`/`triggers` 占比可观 → 收益真实；
+  3. 两条同时成立 → 闸默认开（NEUROVA_KB_FACT_SURFACE 默认态翻转）；
+     只满足 1 → 加池上限（FactSurfaceConfig.maxPoolRows，届时立项）；
+     只满足 2 → 保持关闸（人工开闸用），读数继续累计。
+  收益基准：合成语料词法全脱靶场景 recallΔ=+0.3333（C1 实测）。
