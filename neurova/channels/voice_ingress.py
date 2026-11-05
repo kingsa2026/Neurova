@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""渠道入站语音的口径唯一定义处（教义第 6 条）。
+"""入站语音的口径唯一定义处（教义第 6 条）。
 
-出站侧的口径在 `voice_egress.py`；这里只管"用户发来的语音"进入统一消息之后，
-下游按什么读它。三个量此前各有一份：
+原本只管"渠道用户发来的语音"进入统一消息之后下游按什么读它；转写超时与转写引擎
+取法两项被网页音频附件复用后，一并收在这里——同一件事两处定义就是两个事实源。
+出站侧的口径在 `voice_egress.py`。三个量此前各有一份：
 
 - metadata 键名 `"audio_bytes"`：写在 `feishu.py`、`wechat_ilink.py`，读在
   `voice_precheck.py`——三处字面量，第四处（Telegram）一加就是第四份；
@@ -28,3 +29,23 @@ INBOUND_VOICE_PLACEHOLDER = "[语音]"
 
 #: 单次入站语音的下载上限（声明长度与实际字节两道都按它判）。
 VOICE_DOWNLOAD_MAX_BYTES = 10 * 1024 * 1024
+
+#: 一次语音转写的等待上限（秒）：群语音通常 <60s，本地 funasr 推理秒级；超时即降级。
+#: 渠道预转写与网页音频附件转写共用这一个口径——两处各写一个 20 就是两个事实源，
+#: 改一处另一处静默不一致（超时表现会因入口不同而莫名差别二十秒）。
+TRANSCRIBE_TIMEOUT_SECONDS = 20.0
+
+
+def getAsrTranscriber():
+    """返回 ASR 转写协程函数：VoiceEngine 优先，降级 ASRManager（与 /audio/transcribe 同口径）。
+
+    入站语音的两个转写者（渠道预检 `voice_precheck`、网页附件
+    `agent/chat_pipeline`）都从这里取引擎，避免各接一份 ASR 装配。
+    延迟导入，测试可 patch 本函数替换依赖。
+    """
+    from neurova.api.endpoints.audio import _get_asr_manager
+
+    manager = _get_asr_manager()
+    if manager is None or not hasattr(manager, "transcribe"):
+        raise RuntimeError("ASR 不可用")
+    return manager.transcribe

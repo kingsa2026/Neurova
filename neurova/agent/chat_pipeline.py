@@ -96,6 +96,28 @@ def _thinking_directive(effort: Optional[str]) -> str:
 # 非流式"输出截断"根因之一）。对齐流式侧 openai_loop.py 的判定集合。
 _TRUNCATED_FINISH_REASONS = frozenset({"length", "max_tokens"})
 
+# 按「抽帧进模型」处理的附件类型。
+MEDIA_ATTACHMENT_FILE_TYPES = frozenset({"video"})
+
+# 按「转写进语音上下文」处理的附件类型——转写文本走 `VOICE_CONTEXT_KEY` 那份既有读侧，
+# 不在管线里另开第二条语音注入路。
+AUDIO_ATTACHMENT_FILE_TYPES = frozenset({"audio"})
+
+
+def _visionImagePart(data: bytes, mimeType: str) -> Dict[str, Any]:
+    """把一张静图装成 OpenAI image_url 切片（真图片与视频抽出的帧共用这一份拼法）。
+
+    归一化 → base64 → data URL 三步只允许一处定义：视频帧若另拼一份，尺寸闸门与
+    编码口径就有了第二事实源，大图撑爆请求（413）这类防线会只在图片轮生效。
+    """
+    import base64
+
+    from neurova.attachment_parser import normalize_image_for_llm
+
+    normalized, mime = normalize_image_for_llm(data, mimeType)
+    encoded = base64.b64encode(normalized).decode("ascii")
+    return {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}}
+
 
 def _is_length_truncated(finish_reason: Any) -> bool:
     return str(finish_reason or "").strip().lower() in _TRUNCATED_FINISH_REASONS
@@ -1525,7 +1547,10 @@ class ChatPipeline:
         - 文本/文档（txt/md/rst/code/docx/xlsx/pptx/pdf/csv）抽取文本并入
           ctx.user_input（"用户上传了文件 X 内容如下"段落）
         - 图像 → 转为 OpenAI content list（多模态 LLM 直接接收）
-        - 音频/视频/解析失败 → 降级为文件名提示，不中断对话
+        - 视频 → 抽关键帧，走**同一条**图像通道；一帧都没取到就把原因如实写进本轮文本
+        - 音频 → 转写成 ASR 原产物，写进 `VOICE_CONTEXT_KEY`（与渠道预检同一个键、同一个读侧）；
+          转写不到则把原因写进本轮文本
+        - 解析失败 → 降级为文件名提示，不中断对话
 
         无 attachments 时零副作用；文件读取失败不抛异常（附件问题不拖垮聊天）。
         """
@@ -1559,8 +1584,10 @@ class ChatPipeline:
         if not isinstance(attachments, list) or not attachments:
             return
 
+        framesByFileId = await self._resolveAttachmentFrames(attachments)
+        transcripts = await self._resolveAttachmentTranscripts(attachments)
         enriched, vision_parts = self._inject_attachments_into_input(
-            ctx.user_input or "", attachments
+            ctx.user_input or "", attachments, framesByFileId, transcripts
         )
         ctx.user_input = enriched
         # 附件注入在 build_context 之前：文本已进入 user_input，构建上下文时
@@ -1570,11 +1597,123 @@ class ChatPipeline:
         # 并发请求图片互串/异常残留泄漏到下个请求；改挂 ctx 随请求生命周期走
         ctx._pending_vision_parts = vision_parts
 
+        # 音频附件的转写产物接进**既有读侧**：`chat_pipeline` 之后那一步取
+        # `ctx.metadata[VOICE_CONTEXT_KEY]`，由 `orchestrator.voiceContextLines()` 渲进 prompt，
+        # 渠道预检写的就是这个键、就是这个 ASR 原产物形态。这里再拼一份注入文本就是第二条通道。
+        for transcript, _reason in transcripts.values():
+            if transcript:
+                ctx.metadata[VOICE_CONTEXT_KEY] = transcript
+                break
+
         logger.info(
             "[附件注入] %d 个附件处理完成, vision_parts=%d",
             len(attachments),
             len(vision_parts),
         )
+
+    def _extractAttachmentFrames(self, attachment: Dict) -> Tuple[List[bytes], str]:
+        """把一个视频附件抽成帧字节：路径解析与抽帧各走自己的单点。
+
+        路径只认 `file_id` 经服务端记账解析出来的落点——附件字典里那个客户端传来的 `path`
+        是路径穿越面，不采信。抽帧走 `neurova.media.keyframes`（ffmpeg 路径解析复用
+        `core.ffmpeg` 单点），本方法不重复实现任何一层的解析口径。
+        """
+        file_id = str(attachment.get("file_id") or "")
+        if not file_id:
+            return [], "附件缺少 file_id，无法定位磁盘上的视频"
+        try:
+            from neurova.api.endpoints import files_api
+
+            resolved = files_api.resolveAttachmentPath(file_id)
+        except (OSError, ImportError, RuntimeError) as exc:
+            return [], f"附件路径解析失败：{exc}"
+        if resolved is None:
+            return [], f"视频不在盘上（file_id={file_id}）"
+        from neurova.media.keyframes import extractKeyframes
+
+        return extractKeyframes(str(resolved))
+
+    async def _resolveAttachmentFrames(self, attachments: List[Dict]) -> Dict[str, Tuple[List[bytes], str]]:
+        """对每个媒体附件抽帧，阻塞子进程放别的线程（同 aigc_studio 的合片口径）。
+
+        无媒体附件时**零副作用**：不 import ffmpeg、不起进程，普通文本轮一分成本都不多付。
+        """
+        media = [
+            att
+            for att in attachments
+            if isinstance(att, dict)
+            and att.get("file_type") in MEDIA_ATTACHMENT_FILE_TYPES
+        ]
+        if not media:
+            return {}
+
+        import asyncio
+
+        results = await asyncio.gather(
+            *(asyncio.to_thread(self._extractAttachmentFrames, att) for att in media),
+            return_exceptions=True,
+        )
+        resolved: Dict[str, Tuple[List[bytes], str]] = {}
+        for att, result in zip(media, results):
+            fileId = str(att.get("file_id") or "")
+            if isinstance(result, tuple):
+                resolved[fileId] = result
+            else:
+                resolved[fileId] = ([], f"抽帧异常：{result}")
+        return resolved
+
+    async def _transcribeAttachmentAudio(self, attachment: Dict) -> Tuple[Dict[str, Any], str]:
+        """把音频附件转写成 ASR 原产物 dict（引擎取法与超时口径都在 `voice_ingress`）。
+
+        返回 `(转写产物, 失败原因)`：成功时原因为空串，失败时产物为空 dict——两侧都不许
+        空手，静默失败会让这一轮看起来"用户什么都没说"。
+        """
+        import asyncio
+
+        file_id = str(attachment.get("file_id") or "")
+        if not file_id:
+            return {}, "附件缺少 file_id，无法定位磁盘上的音频"
+        data = self._read_attachment_bytes(file_id)
+        if not data:
+            return {}, "音频字节不在盘上"
+
+        from neurova.channels.voice_ingress import TRANSCRIBE_TIMEOUT_SECONDS
+
+        try:
+            from neurova.channels.voice_ingress import getAsrTranscriber
+
+            transcriber = getAsrTranscriber()
+            result = await asyncio.wait_for(
+                transcriber(data), timeout=TRANSCRIBE_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError:
+            return {}, f"转写超时（>{TRANSCRIBE_TIMEOUT_SECONDS} 秒）"
+        except (OSError, RuntimeError, ValueError) as exc:
+            return {}, f"转写失败：{exc}"
+
+        text = str(result.get("text") or "").strip() if isinstance(result, dict) else ""
+        if not text:
+            return {}, "ASR 返回空文本"
+        return result, ""
+
+    async def _resolveAttachmentTranscripts(
+        self, attachments: List[Dict]
+    ) -> Dict[str, Tuple[Dict[str, Any], str]]:
+        """逐个音频附件转写。
+
+        无音频附件时**零副作用**：不 import 语音入口、不取 ASR 引擎，普通文本轮一分成本都不多付。
+        顺序转写而不是并发：本地 ASR 多为单实例，并发只会排队并放大超时面。
+        """
+        audio = [
+            att
+            for att in attachments
+            if isinstance(att, dict)
+            and att.get("file_type") in AUDIO_ATTACHMENT_FILE_TYPES
+        ]
+        transcripts: Dict[str, Tuple[Dict[str, Any], str]] = {}
+        for att in audio:
+            transcripts[str(att.get("file_id") or "")] = await self._transcribeAttachmentAudio(att)
+        return transcripts
 
     def _flush_vision_attachments(self, ctx: ChatContext):
         """build_context 之后调用：把保存的图像切片挂到 context 最后一条 user 消息。"""
@@ -1662,9 +1801,11 @@ class ChatPipeline:
             return None
 
     def _inject_attachments_into_input(
-        self, user_input: str, attachments: List[Dict]
+        self, user_input: str, attachments: List[Dict],
+        mediaFrames: Optional[Dict[str, Tuple[List[bytes], str]]] = None,
+        audioTranscripts: Optional[Dict[str, Tuple[Dict[str, Any], str]]] = None,
     ) -> Tuple[str, List[Dict]]:
-        """把附件并入用户文本；图像切片单独收集为 vision content parts。"""
+        """把附件并入用户文本；图像与视频帧单独收集为 vision content parts。"""
         from neurova.attachment_parser import extract_attachment_text
 
         parts: List[str] = []
@@ -1678,22 +1819,47 @@ class ChatPipeline:
             mime = att.get("mime_type") or "application/octet-stream"
             file_id = att.get("file_id") or ""
 
+            if file_type in MEDIA_ATTACHMENT_FILE_TYPES:
+                # 视频在抽帧之前不进文本抽取分支：`extract_attachment_text` 对 video 恒返回
+                # None（attachment_parser 规格明写不抽取），于是本轮只剩一句"未能抽取文本"——
+                # 那是"模型没看到视频"被伪装成"文件读不出来"的根因处。
+                frames, reason = (mediaFrames or {}).get(str(file_id)) or ([], "本轮未执行抽帧")
+                if frames:
+                    parts.append(
+                        f"[用户上传了视频: {filename}（已抽取 {len(frames)} 帧随本轮请求附上）]"
+                    )
+                    vision_parts.extend(
+                        _visionImagePart(frame, "image/jpeg") for frame in frames
+                    )
+                else:
+                    parts.append(
+                        f"[用户上传了视频: {filename}（本轮未能看到画面） 原因: {reason}]"
+                    )
+                continue
+
+            if file_type in AUDIO_ATTACHMENT_FILE_TYPES:
+                # 与视频同一条道理：音频走文本抽取恒返回 None，于是"模型没听到"被写成"文件读不出来"。
+                transcript, reason = (audioTranscripts or {}).get(str(file_id)) or (
+                    {}, "本轮未执行转写"
+                )
+                if transcript:
+                    parts.append(
+                        f"[用户上传了音频: {filename}（已转写为文本，随本轮语音上下文附上）]"
+                    )
+                else:
+                    parts.append(
+                        f"[用户上传了音频: {filename}（本轮未能转写） 原因: {reason}]"
+                    )
+                continue
+
             try:
                 data = self._read_attachment_bytes(file_id)
             except Exception:
                 data = None
 
             if file_type == "image" and data:
-                import base64
-
-                from neurova.attachment_parser import normalize_image_for_llm
-
                 # 大图归一化：超闸门图片降采样重编码，防 413 request_too_large
-                data, mime = normalize_image_for_llm(data, mime)
-                b64 = base64.b64encode(data).decode("ascii")
-                vision_parts.append(
-                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
-                )
+                vision_parts.append(_visionImagePart(data, mime))
                 # 持久化通道只留中性标记：指令不能进历史（2026-09-09 串台事故——
                 # 图片 base64 只挂当轮请求，历史里的"请结合图片回答"对后续文本轮
                 # 是一条无图可依、无法履行的指令，弱模型被带偏去文件系统找图）；
