@@ -571,6 +571,7 @@ def productionAdmissionGate(store: Any, toolVersion: str = "foundation-gate") ->
     """
     from neurova.knowledge.identity.subject_resolver import SubjectResolver
 
+    from neurova.knowledge.ontology.shapes import ShapeRegistry
     from neurova.knowledge.ontology.term_registry import OntologyTermRegistry
     from neurova.knowledge.ontology.validation import OntologyValidationReport
 
@@ -586,12 +587,14 @@ def productionAdmissionGate(store: Any, toolVersion: str = "foundation-gate") ->
     # 规则也必须有人登记，否则前向链每轮空转（Issue #73：规则表 0 行 ⇒ 引擎白建）。
     # 落点只能是这里——造门是唯一的生产装配点，种子规则因此只有一份 owner。
     seedBuiltinRules(engine)
+    # B10 L4：用户 shape 与内置 6 项同一求值器（写前阻断走同一 findings 流）。
+    shapes = ShapeRegistry(store)
     return KnowledgeAdmissionGate(
         store,
         resolver=SubjectResolver(),
         conflictJudge=KnowledgeConflictJudge(store),
         lineageLedger=KnowledgeLineageLedger(store, toolVersion=toolVersion),
         credibility=ConfidenceAggregator(store),
-        ontology=OntologyValidationReport(registry),
+        ontology=OntologyValidationReport(registry, shapes=shapes),
         reasoning=engine,
     )

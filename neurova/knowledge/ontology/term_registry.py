@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import re
 from typing import Any, Dict, List, Optional
 
 _TERM_KINDS = ("concept", "relation", "property")
@@ -73,6 +74,16 @@ _SCHEMA_V30_TERMS = """
 ALTER TABLE ontology_terms ADD COLUMN identity_keys_json TEXT NOT NULL DEFAULT '[]';
 """
 
+# v31：SKOS 多语言/模块化（specs/2026-11-05 B10 L2）——prefLabel/altLabel 按 lang 存，
+# core/domain 模块分离（core 不被 domain 覆盖），namespace/iri_base 预留导出基座。
+_SCHEMA_V31_TERMS = """
+ALTER TABLE ontology_terms ADD COLUMN labels_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE ontology_terms ADD COLUMN alt_labels_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE ontology_terms ADD COLUMN module TEXT NOT NULL DEFAULT '';
+ALTER TABLE ontology_terms ADD COLUMN namespace TEXT NOT NULL DEFAULT '';
+ALTER TABLE ontology_terms ADD COLUMN iri_base TEXT NOT NULL DEFAULT '';
+"""
+
 # 两个由结构层固定的谓词：
 # - `documented_as`：条目叙述（019b-1），基数天然不限——同一主体可以有很多份文档；
 # - `is_a`：类型断言（工单 020），客体是**已登记的 concept 术语**。
@@ -81,11 +92,12 @@ ALTER TABLE ontology_terms ADD COLUMN identity_keys_json TEXT NOT NULL DEFAULT '
 #
 # 不登记它们就等于让走咽喉的谓词处在"未登记"态，读数说不清是漏检还是免检。
 _SEED_TERMS: List[Dict[str, Any]] = [
-    {"termId": "documented_as", "kind": "relation", "label": "被记载为", "cardinality": None},
+    {"termId": "documented_as", "kind": "relation", "label": "被记载为", "cardinality": None,
+     "module": "core"},
     # is_a 的结构性传递性收口到术语属性（B8）：引擎的 ensureAutoRules 由此生成
     # 同 `is_a_transitive` 规则行，手工种子规则退役（同 id 单行，教义第 6 条）。
     {"termId": IS_A_PREDICATE, "kind": "relation", "label": "是一个", "cardinality": None,
-     "rangeKinds": ["concept"], "transitive": 1},
+     "rangeKinds": ["concept"], "transitive": 1, "module": "core"},
 ]
 
 # 值域可以按**类别**声明：`range_kinds` 里的每一类都展开成"当前表里该类的全部术语"。
@@ -133,6 +145,11 @@ class OntologyTermRegistry:
                  externalIris: Optional[Dict[str, str]] = None,
                  deprecated: bool = False, replacedBy: str = "",
                  identityKeys: Optional[List[str]] = None,
+                 labels: Optional[Dict[str, str]] = None,
+                 altLabels: Optional[Dict[str, List[str]]] = None,
+                 module: str = "",
+                 namespace: str = "",
+                 iriBase: str = "",
                  version: str = "v1",
                  tenantId: str = "default") -> Dict[str, Any]:
         """登记/更新一个术语。非法结构在**写入处**就拒，不留到查询时才炸。
@@ -189,6 +206,33 @@ class OntologyTermRegistry:
                 raise ValueError(
                     "%s 的 inverse_of 指向自身却未声明 symmetric——单边自逆不成立" % termId)
 
+        # B10 L2：语言标记闭集（BCP47 形状）、模块闭集、版本形状。
+        langPattern = re.compile(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]+)*$")
+        labelMap = {str(k): str(v) for k, v in (labels or {}).items()}
+        for lang in labelMap:
+            if not langPattern.match(lang):
+                raise ValueError("语言标记 %r 不是 BCP47 形状，词表不收" % lang)
+        altMap = {str(k): [str(x) for x in v]
+                  for k, v in (altLabels or {}).items()}
+        for lang in altMap:
+            if not langPattern.match(lang):
+                raise ValueError("语言标记 %r 不是 BCP47 形状，词表不收" % lang)
+        moduleValue = str(module or "").strip()
+        if moduleValue and moduleValue not in ("core", "domain"):
+            raise ValueError("未知模块 %r（有效值: core / domain / 空）" % moduleValue)
+        versionText = str(version or "")
+        if versionText and not (re.match(r"^v\d+$", versionText)
+                                or re.match(r"^\d+\.\d+\.\d+$", versionText)):
+            raise ValueError(
+                "版本 %r 既不是 semver 也不是存量 vN 形状（新登记走 semver，存量 vN 只读）"
+                % versionText)
+        existingModule = str((self.term(termId, tenantId=tenant) or {}).get("module") or "")
+        moduleValue = moduleValue or existingModule
+        if existingModule == "core" and moduleValue == "domain":
+            raise ValueError("术语 %s 属 core 模块，domain 不得覆盖同 id" % termId)
+        if existingModule == "domain" and moduleValue == "core":
+            raise ValueError("术语 %s 属 domain 模块，不得翻转成 core" % termId)
+
         # 别名按租户唯一：同一 surface 已归属其他术语时拒绝，不覆盖（B8 ⑥）。
         for alias in aliasList:
             owner = self._aliasOwner(alias, tenantId=tenant, excludeTermId=termId)
@@ -206,8 +250,9 @@ class OntologyTermRegistry:
                 " parent_term_id, domain_terms, range_terms, range_kinds, cardinality,"
                 " disjoint_with, required_props, version, created_at, updated_at,"
                 " inverse_of, symmetric, transitive, aliases_json, external_iris_json,"
-                " deprecated, replaced_by, identity_keys_json)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " deprecated, replaced_by, identity_keys_json,"
+                " labels_json, alt_labels_json, module, namespace, iri_base)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (tenant, termId, kind, label or termId, parentTermId,
                  json.dumps(list(domain or []), ensure_ascii=False),
                  json.dumps(list(rangeTerms or []), ensure_ascii=False),
@@ -221,7 +266,11 @@ class OntologyTermRegistry:
                  json.dumps({str(k): str(v) for k, v in (externalIris or {}).items()},
                             ensure_ascii=False),
                  1 if deprecated else 0, str(replacedBy or ""),
-                 json.dumps([str(k) for k in (identityKeys or [])], ensure_ascii=False)),
+                 json.dumps([str(k) for k in (identityKeys or [])], ensure_ascii=False),
+                 json.dumps(labelMap, ensure_ascii=False),
+                 json.dumps({str(k): [str(x) for x in v] for k, v in altMap.items()},
+                            ensure_ascii=False),
+                 moduleValue, str(namespace or ""), str(iriBase or "")),
             )
         # inverse_of 双向补齐：A inverse_of B ⇒ B inverse_of A（登记处收口，
         # 单边态在存储层不存在；目标行其他字段不动，只补这一列）。
@@ -305,6 +354,8 @@ class OntologyTermRegistry:
                 deprecated=spec.get("deprecated", False),
                 replacedBy=spec.get("replacedBy", ""),
                 identityKeys=spec.get("identityKeys"),
+                labels=spec.get("labels"), altLabels=spec.get("altLabels"),
+                module=spec.get("module", ""),
                 tenantId=tenantId,
             )
         return len(terms)
@@ -336,6 +387,8 @@ class OntologyTermRegistry:
                 deprecated=spec.get("deprecated", False),
                 replacedBy=spec.get("replacedBy", ""),
                 identityKeys=spec.get("identityKeys"),
+                labels=spec.get("labels"), altLabels=spec.get("altLabels"),
+                module=spec.get("module", ""),
                 tenantId=tenantId,
             )
             added += 1
@@ -371,6 +424,12 @@ class OntologyTermRegistry:
         d["aliases"] = d.pop("aliases_json")
         d["external_iris"] = json.loads(d.pop("external_iris_json") or "{}")
         d["identity_keys"] = json.loads(d.pop("identity_keys_json") or "[]")
+        if "labels_json" in d:
+            d["labels"] = json.loads(d.pop("labels_json") or "{}")
+            d["alt_labels"] = json.loads(d.pop("alt_labels_json") or "{}")
+            d["module"] = str(d.pop("module") or "")
+            d["namespace"] = str(d.pop("namespace") or "")
+            d["iri_base"] = str(d.pop("iri_base") or "")
         for flag in ("symmetric", "transitive", "deprecated"):
             d[flag] = bool(d.get(flag))
         return d
@@ -550,6 +609,7 @@ class OntologyTermRegistry:
                 rangeKinds=spec.get("rangeKinds"),
                 cardinality=spec.get("cardinality"),
                 transitive=spec.get("transitive", False),
+                module=spec.get("module", ""),
                 tenantId=tenantId)
             added += 1
         return added
@@ -579,8 +639,8 @@ def legacyGraphTerms() -> List[Dict[str, Any]]:
     def _values(enumCls):
         return [t.value for t in enumCls if t.value != "custom"]
 
-    return ([{"termId": v, "kind": "concept", "label": v} for v in _values(NodeType)]
-            + [{"termId": v, "kind": "relation", "label": v} for v in _values(RelationType)])
+    return ([{"termId": v, "kind": "concept", "label": v, "module": "core"} for v in _values(NodeType)]
+            + [{"termId": v, "kind": "relation", "label": v, "module": "core"} for v in _values(RelationType)])
 
 
 def seedBuiltinTerms(registry: "OntologyTermRegistry", tenantId: str = "default") -> int:
@@ -601,3 +661,14 @@ def seedBuiltinTerms(registry: "OntologyTermRegistry", tenantId: str = "default"
     return registry.seedMissing(
         [t for t in legacyGraphTerms() if str(t["termId"]) not in declared] + _SEED_TERMS,
         tenantId=tenantId)
+
+
+def versionedIri(termId: str, version: str, namespace: str = "") -> str:
+    """冻结版本导出 IRI（B10 L2）：`<namespace>/<version>/<term>`；默认命名空间
+    与 turtle.NAMESPACE 同基座。默认导出仍走 `kbg:<term>`（不带版本段），
+    本 helper 只在需要冻结版本时使用。"""
+    from .turtle import NAMESPACE as _NS
+
+    base = (namespace or _NS).rstrip("/")
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", str(termId or "_"))
+    return "%s/%s/%s" % (base, str(version or ""), safe)
