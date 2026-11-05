@@ -131,7 +131,8 @@ class KnowledgeFtsIndex:
             return False
         values = self._rowValues(agentId, item)
         tokens = _tokens(build_index_content(
-            str(item.get("title") or ""), str(item.get("content") or "")
+            str(item.get("title") or ""), str(item.get("content") or ""),
+            event_summary=str(item.get("event_summary") or ""),
         ))
         fingerprint = self._fingerprint(agentId, item, tokens)
         row = self._conn.execute(

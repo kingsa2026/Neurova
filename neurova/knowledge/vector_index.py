@@ -139,8 +139,12 @@ def embeddingText(entry: Dict[str, Any]) -> str:
     "有没有人记得刷时间戳"不再是正确性的前提，也不再需要给它配豁免表。
     """
     title = str(entry.get("title", ""))
+    summary = str(entry.get("event_summary", ""))
     content = str(entry.get("content", ""))
-    return (title + "\n" + content) if title else content
+    # C5：事件摘要（缺省空＝逐位等于旧形状）拼在标题与正文之间——
+    # 摘要写入后指纹随之变化，向量按既有增量机制重算。
+    parts = [p for p in (title, summary, content) if p]
+    return "\n".join(parts)
 
 
 def _fingerprint(entry: Dict[str, Any]) -> str:
