@@ -111,6 +111,18 @@ class DerivationLedger:
                 (derivedFactId,)).fetchall()
         return [dict(r) for r in rows]
 
+    def derivedFactIds(self) -> List[str]:
+        """全库"被推导过"的事实 id，一条 DISTINCT 取完——读侧灰度的单点取数。
+
+        含已退档结论的边（边记的是"曾经怎么来的"，不是"现在还算不算数"）：
+        活动筛选由调用方那侧的 `status='active'` 负责，这里不替别人做决定。
+        """
+        with self._store._lock:
+            rows = self._store._conn.execute(
+                "SELECT DISTINCT derived_fact_id FROM knowledge_derivation_edges"
+                " ORDER BY derived_fact_id").fetchall()
+        return [r["derived_fact_id"] for r in rows]
+
     def fires(self, ruleId: Optional[str] = None) -> List[Dict[str, Any]]:
         sql = "SELECT * FROM ontology_rule_fires"
         params: List[Any] = []
