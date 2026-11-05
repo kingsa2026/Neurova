@@ -12,6 +12,7 @@ import json
 import sqlite3
 import threading
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -450,6 +451,26 @@ def normalizeLabel(label: str) -> str:
     return (label or "").strip().lower()
 
 
+class _ScopeAwareConnection(sqlite3.Connection):
+    """带事务作用域计数的连接：批量档的唯一机制落点。
+
+    `scopeDepth == 0` 时逐字等于原生连接——每段 `with conn` 结束即提交，与建店
+    以来的行为一模一样。这条改动只能是"批量档"，不能顺手改掉全局落盘时机。
+
+    `scopeDepth > 0` 时每段出口**既不提交也不回滚**：整批由作用域出口一次提交，
+    单条的退场交给那一条自己的 SAVEPOINT（见 `admission.admitBatch`）。
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.scopeDepth = 0
+
+    def __exit__(self, excType, excValue, excTb):
+        if self.scopeDepth > 0:
+            return False
+        return super().__exit__(excType, excValue, excTb)
+
+
 class KnowledgeFactStore:
     """SPO 事实 + 主体身份的唯一权威源。不持写权外的任何旁路。"""
 
@@ -464,7 +485,8 @@ class KnowledgeFactStore:
         self._db_path = db_path
         if db_path != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn = sqlite3.connect(db_path, factory=_ScopeAwareConnection,
+                                     check_same_thread=False)
         # 批 X6：WAL + busy_timeout——修前三套连接（facts/narratives/entry
         # ledger）同开 knowledge_facts.db 无 WAL，并发写即 SQLITE_BUSY 5s
         # 后抛错沿 _syncEntryGovernance 的不吞异常通道放大成写入失败
@@ -496,6 +518,38 @@ class KnowledgeFactStore:
     def close(self) -> None:
         with self._lock:
             self._conn.close()
+
+    @contextmanager
+    def batchScope(self):
+        """把作用域内的多笔写入折成**一次**提交，交给调用方（`admission.admitBatch`）。
+
+        为什么在 store：提交时机是这条连接的事，别的模块不该隔着两层去调
+        `sqlite3.Connection.commit`。这里只加一个计数和一次真提交，写入 SQL 一条不动。
+
+        锁沿整批持有：批内每段 `with self._lock, self._conn` 走的是同一把 RLock，
+        重入安全；代价是**批量期间其他写者等待**（读走 WAL 不受影响）。200 条实测
+        在 0.25s 量级（吞吐基线见 `tests/performance/knowledge/test_admissionThroughput.py`），
+        现役唯一批量消费者是抽取落库（后台增强任务），不在用户请求的响应路径上。
+        """
+        with self._lock:
+            self._conn.scopeDepth += 1
+            # 不在事务里时 SAVEPOINT 等效 BEGIN；已在事务里时它只是嵌套一层
+            self._conn.execute("SAVEPOINT store_batch_scope")
+            committed = False
+            try:
+                yield self._conn
+                self._conn.execute("RELEASE store_batch_scope")
+                sqlite3.Connection.commit(self._conn)
+                committed = True
+            finally:
+                self._conn.scopeDepth -= 1
+                if not committed:
+                    # 作用域自己炸了（或调用方抛出）：整批未提交的部分必须退干净，
+                    # 否则这条连接带着半个事务回到池子里，下一笔写会把它一起提交。
+                    try:
+                        sqlite3.Connection.rollback(self._conn)
+                    except Exception:  # noqa: BLE001 - 退不掉的连接由 close() 兜底
+                        pass
 
     # ── 身份层 ────────────────────────────────────────────────
 
