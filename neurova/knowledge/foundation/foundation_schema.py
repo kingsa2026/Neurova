@@ -37,6 +37,7 @@ from .knowledge_facts import (
     _SCHEMA_V27,
 )
 from .digest_chain import _SCHEMA_V11
+from ..enterprise.schema_mapping import SCHEMA_V34 as _SCHEMA_V34_ENTERPRISE
 from ..ontology.change_log import _SCHEMA_V33
 from ..ontology.derivation_ledger import _SCHEMA_V10
 from ..ontology.relation_candidates import _SCHEMA_V29_CANDIDATES
@@ -111,6 +112,8 @@ _STEPS: List[tuple] = [
     (32, _SCHEMA_V32_TERMS),
     # v33：本体变更审计账（specs/2026-11-05 B12 L8）——只追加，不删除
     (33, _SCHEMA_V33),
+    # v34：企业源配置表（specs/2026-11-05 B14）——接口预留，默认关
+    (34, _SCHEMA_V34_ENTERPRISE),
 ]
 
 _registered = False
