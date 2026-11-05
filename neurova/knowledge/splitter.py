@@ -54,13 +54,20 @@ class Chunk:
     context_header: str = ""
 
 
-def build_index_content(title: str, content: str, context_header: str = "") -> str:
-    """索引输入唯一组装函数：标题 + 上下文头 + 块正文（跳过空段）。
+def build_index_content(
+    title: str, content: str, context_header: str = "", event_summary: str = "",
+) -> str:
+    """索引输入唯一组装函数：标题 + 事件摘要 + 上下文头 + 块正文（跳过空段）。
 
     rebuild/增量索引、chunk 级 preview、向量索引拼接必须全部走本函数，
  否则重索引无法字节级复现索引输入。
+    event_summary（SAG 对比候选 C5，2026-11-05）：条目事件摘要（LLM 生成，
+    缺省空＝逐位等于旧三参行为），插在标题之后作索引文本的语义锚。
     """
-    parts = [p for p in (str(title or ""), str(context_header or ""), str(content or "")) if p]
+    parts = [
+        p for p in (str(title or ""), str(event_summary or ""),
+                    str(context_header or ""), str(content or "")) if p
+    ]
     return "\n".join(parts)
 
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import urllib.parse
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 
@@ -32,6 +32,56 @@ router = APIRouter()
 #: 条目更新后 facts 重抽的门控（SAG 对比候选 C2）：LLM 成本随更新量走，
 #: 默认 off＝旧行为；开闸时复用导入抽取同一条管线，增量 admit 不删旧 facts。
 ENV_EXTRACT_ON_UPDATE = "NEUROVA_KB_EXTRACT_ON_UPDATE"
+
+#: 事件摘要索引增强的门控（SAG 对比候选 C5）：LLM 成本 per 条目，默认 off＝
+#: 旧行为（索引输入不含摘要）；开闸后摘要写回条目并登记 reindex。
+ENV_EVENT_SUMMARY = "NEUROVA_KB_EVENT_SUMMARY"
+
+#: 事件摘要生成提示词（本仓自研措辞）：一句话、只输出摘要本身。
+_EVENT_SUMMARY_PROMPT = (
+    "把下面的知识条目压缩成一句事件摘要（谁/什么/结果或状态），"
+    "不超过 60 个字，直接输出摘要本身，不要解释：\n标题：{title}\n正文：{content}"
+)
+
+
+def extract_event_summary(
+    item: Dict[str, Any], request: Optional[Request], agent_id: str,
+    tenant_id: str = "default",
+    llm_call: Optional[Callable[[str], str]] = None,
+) -> str:
+    """条目事件摘要生成并写回（SAG 对比候选 C5，2026-11-05）。
+
+    摘要写回 `event_summary` 字段（update 白名单）并登记索引重排——摘要随后
+    进入全部索引输入单点（build_index_content 词法三路 + embeddingText 向量），
+    召回从字面重叠升到语义事件。NEUROVA_KB_EVENT_SUMMARY 门控（默认 off）；
+    无 LLM/空输出/写回失败均如实返回状态串，绝不打断导入主流程。
+    """
+    raw = str(os.environ.get(ENV_EVENT_SUMMARY) or "").strip().lower()
+    if raw not in ("1", "true", "on", "yes"):
+        return "skipped_disabled"
+    try:
+        if llm_call is None:
+            llm_call = _default_llm_call(request, prefer_agent_id=agent_id)
+        if llm_call is None:
+            return "skipped_no_llm"
+        prompt = _EVENT_SUMMARY_PROMPT.format(
+            title=str(item.get("title") or ""),
+            content=str(item.get("content") or "")[:2000],
+        )
+        text = str(llm_call(prompt) or "").strip()
+        summary = text.splitlines()[0].strip()[:120] if text else ""
+        if not summary:
+            return "skipped_empty_summary"
+        from neurova.knowledge.repository import get_knowledge_repository
+
+        ok = get_knowledge_repository().update_knowledge(
+            str(agent_id or "default"), str(item.get("knowledge_id") or ""),
+            {"event_summary": summary},
+        )
+        return "extracted" if ok else "skipped_update_failed"
+    except Exception as exc:  # noqa: BLE001 - 摘要失败不影响导入/更新主流程
+        logger.warning("事件摘要生成失败（不影响主流程）: %s", exc)
+        return "extract_error"
 
 
 def extract_after_update(
@@ -246,6 +296,10 @@ async def import_knowledge_file(
         items, request, agent_id=agent_id,
         tenant_id=str(current_user.get("tenant_id") or "default"),
     )
+    # C5：事件摘要生成（NEUROVA_KB_EVENT_SUMMARY 门控默认 off，关闸零开销）。
+    tenantId = str(current_user.get("tenant_id") or "default")
+    for entry in items:
+        extract_event_summary(entry, request, agent_id=agent_id, tenant_id=tenantId)
     return {"code": 0, "message": "Import completed", "data": {"items": items}}
 
 
@@ -390,4 +444,8 @@ async def import_knowledge_url(
         items, request, agent_id=agent_id,
         tenant_id=str(current_user.get("tenant_id") or "default"),
     )
+    # C5：事件摘要生成（门控同 /import；关闸零开销）。
+    urlTenantId = str(current_user.get("tenant_id") or "default")
+    for entry in items:
+        extract_event_summary(entry, request, agent_id=agent_id, tenant_id=urlTenantId)
     return {"code": 0, "message": "URL import completed", "data": {"items": items}}

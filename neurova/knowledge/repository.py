@@ -400,11 +400,15 @@ class KnowledgeRepository:
                 docs.append(
                     {
                         "id": f"{kid}#{ch.get('index', 0)}",
-                        "content": build_index_content(title, content, ch.get("context_header", "")),
+                        "content": build_index_content(
+                            title, content, ch.get("context_header", ""),
+                            event_summary=str(item.get("event_summary") or ""),
+                        ),
                     }
                 )
         else:
-            docs.append({"id": str(kid), "content": build_index_content(title, full)})
+            docs.append({"id": str(kid), "content": build_index_content(
+                title, full, event_summary=str(item.get("event_summary") or ""))})
         return docs
 
     def _rebuild_indexes(self, agent_id: str = "") -> None:
@@ -1540,6 +1544,7 @@ class KnowledgeRepository:
                         if k in (
                             "title", "content", "category", "tags", "confidence",
                             "source", "graph_node_ids", "valid_until", "lifecycle_status",
+                            "event_summary",
                         ):
                             item[k] = v
                     # P0#1：content 变更时同步重切 chunks——旧块正文/偏移会同时
@@ -1568,9 +1573,10 @@ class KnowledgeRepository:
                     item["updated_at"] = datetime.datetime.now(datetime.timezone.utc).timestamp()
                     self._syncEntryGovernance()
                     self._save()
-                    # 索引文本只含 title+chunks(+header)：graph_node_ids 等回写
-                    # （graph_bridge）不再触发任何索引操作
-                    if "title" in fields or "content" in fields:
+                    # 索引文本只含 title+event_summary+chunks(+header)：graph_node_ids
+                    # 等回写（graph_bridge）不再触发任何索引操作
+                    if "title" in fields or "content" in fields \
+                            or "event_summary" in fields:
                         self._record_index_op("reindex", knowledge_id)
                     return True
         return False

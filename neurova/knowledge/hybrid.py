@@ -255,7 +255,8 @@ def hybrid_search_knowledge(
                 {
                     "id": kid,
                     "content": build_index_content(
-                        str(it.get("title", "")), str(it.get("content", ""))
+                        str(it.get("title", "")), str(it.get("content", "")),
+                        event_summary=str(it.get("event_summary") or ""),
                     ),
                 }
             )
