@@ -33,6 +33,19 @@ class RetrievalMetrics:
                 "top5_reach": 0,
                 "top1_reach": 0,
             }
+            # 种子锚点观测（SAG 对比 C1 后续观测项，2026-11-05）：观测跟闸走
+            # （NEUROVA_KB_FACT_SURFACE 关闸零记录）。转正判定读这些数：
+            # 延迟 avg/max 达压测基线且 anchors/walk_hits 非零 → 闸默认开；
+            # 超限 → 池上限或保持关闸。
+            self._seedAnchors = {
+                "triggers": 0,
+                "latency_ms_sum": 0.0,
+                "latency_ms_max": 0.0,
+                "pool_size_total": 0,
+                "pool_size_max": 0,
+                "anchors_total": 0,
+                "walk_hits_total": 0,
+            }
 
     def recordQueryNormalization(self, *, matchedSubjects: int) -> None:
         """查询侧别名归一读数（specs/2026-10-30 W1）：只在 shadow/on 生效时被调。"""
@@ -76,6 +89,25 @@ class RetrievalMetrics:
                     if int(rank) == 1:
                         self._graphShadow["top1_reach"] += 1
 
+    def recordSeedScan(self, *, latencyMs: float, poolSize: int, anchors: int) -> None:
+        """种子锚点扫描读数（SAG 对比 C1 观测项）：只在种子闸实际执行扫描时被调。"""
+        with self._lock:
+            self._seedAnchors["triggers"] += 1
+            elapsed = max(0.0, float(latencyMs))
+            self._seedAnchors["latency_ms_sum"] += elapsed
+            self._seedAnchors["latency_ms_max"] = max(
+                self._seedAnchors["latency_ms_max"], elapsed)
+            pool = max(0, int(poolSize))
+            self._seedAnchors["pool_size_total"] += pool
+            self._seedAnchors["pool_size_max"] = max(
+                self._seedAnchors["pool_size_max"], pool)
+            self._seedAnchors["anchors_total"] += max(0, int(anchors))
+
+    def recordSeedWalkHits(self, *, walkHits: int) -> None:
+        """种子驱动的走查命中读数（收益面）：零锚点兜底路径实际返回的行数。"""
+        with self._lock:
+            self._seedAnchors["walk_hits_total"] += max(0, int(walkHits))
+
     def recordOutcome(self, kind: str, count: int = 1) -> None:
         """记录回答完成态的硬信号；只收本层真能识别的 kind。"""
         with self._lock:
@@ -105,6 +137,30 @@ class RetrievalMetrics:
                 **(
                     {"graph_shadow": dict(self._graphShadow)}
                     if self._graphShadow["retrievals_with_candidates"] > 0
+                    else {}
+                ),
+                **(
+                    {
+                        "seed_anchors": {
+                            "triggers": self._seedAnchors["triggers"],
+                            "latency_ms": {
+                                "avg": round(
+                                    self._seedAnchors["latency_ms_sum"]
+                                    / self._seedAnchors["triggers"], 3,
+                                ) if self._seedAnchors["triggers"] > 0 else None,
+                                "max": round(self._seedAnchors["latency_ms_max"], 3),
+                            },
+                            "pool_size": {
+                                "total": self._seedAnchors["pool_size_total"],
+                                "max": self._seedAnchors["pool_size_max"],
+                            },
+                            "anchors_total": self._seedAnchors["anchors_total"],
+                            "walk_hits_total": self._seedAnchors["walk_hits_total"],
+                            "note": "观测跟闸走（NEUROVA_KB_FACT_SURFACE 关闸零记录）；"
+                                    "转正判定＝延迟达压测基线且 anchors/walk_hits 非零",
+                        }
+                    }
+                    if self._seedAnchors["triggers"] > 0
                     else {}
                 ),
                 "uninstrumented": {
