@@ -23,7 +23,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
@@ -299,6 +299,127 @@ def get_attachment_bytes(file_id: str) -> Optional[bytes]:
         return None
 
 
+class FileRejection(ValueError):
+    """落盘规则拒绝（安全面）。端点按 `status`/`detail` 原样回 HTTP，渠道侧把原因如实记日志。
+
+    形态选 ValueError 而非 HTTPException：这套规则现在有两个调用方，一个是 HTTP 端点、
+    一个是渠道入站——后者没有 HTTP 语境，硬塞状态码就是把安全面口径搬到非 HTTP 路上。
+    """
+
+    def __init__(self, detail: str, status: int = 400):
+        super().__init__(detail)
+        self.detail = detail
+        self.status = status
+
+
+def _resolveTargetPath(
+    *, user_id: str, agent_id: str, session_id: str, rawFilename: str, fileType: str = ""
+) -> Tuple[str, Path, str]:
+    """净化 → 危险扩展名拒绝 → 落点与越根二次校验：**唯一一份**用户存储落点规则。
+
+    Returns:
+        `(safe_filename, file_path, file_type)`。调用方只负责写字节与登记，不再各自拼路径。
+    """
+    # P0 安全修复: agent_id/session_id 参与存储路径拼接，必须先净化防路径穿越
+    _validate_path_segment(agent_id, "agent_id")
+    _validate_path_segment(session_id, "session_id")
+    _validate_path_segment(user_id, "user_id")
+
+    # 净化文件名：只取 basename，防止路径遍历（../../etc/passwd 等）
+    safe_filename = Path(rawFilename or "unknown").name
+    if not safe_filename or safe_filename in (".", ".."):
+        safe_filename = "unknown"
+
+    # BUG AUDIT S-15: 危险可执行扩展名拒绝落盘（防落地即被 Shell 工具执行）
+    if Path(safe_filename).suffix.lower() in _DANGEROUS_EXTENSIONS:
+        raise FileRejection("File type not allowed")
+
+    file_type = fileType or _determine_file_type(safe_filename)
+    storage_dir = STORAGE_ROOT / user_id / "agents" / agent_id / "sessions" / session_id / file_type
+    # 根因防御: 净化后仍校验最终目录必须位于用户存储根内
+    try:
+        storage_dir.resolve().relative_to((STORAGE_ROOT / user_id).resolve())
+    except ValueError:
+        raise FileRejection("Invalid path segment")
+
+    file_path = storage_dir / f"{uuid.uuid4()}_{safe_filename}"
+    # 二次验证：最终路径必须在 storage_dir 内（防御性编程）
+    try:
+        file_path.resolve().relative_to(storage_dir.resolve())
+    except ValueError:
+        raise FileRejection("Invalid filename")
+
+    return safe_filename, file_path, file_type
+
+
+def _registerFileRecord(
+    *, user_id: str, agent_id: str, safe_filename: str, file_path: Path,
+    file_type: str, size: int, dbPath: str = "",
+) -> Dict[str, Any]:
+    """内存表 + 写穿的唯一登记处（端点与渠道入站同读一份）。"""
+    file_id = file_path.name.split("_", 1)[0]
+    now = time.time()
+    mime, _ = mimetypes.guess_type(safe_filename)
+    info = {
+        "file_id": file_id,
+        "filename": safe_filename,
+        "file_type": file_type,
+        "mime_type": mime or "application/octet-stream",
+        "size": size,
+        "version": "1.0.0",
+        "status": "active",
+        "user_id": user_id,
+        "agent_id": agent_id,
+        "path": str(file_path),
+        "created_at": now,
+        "updated_at": now,
+    }
+    with _files_store_lock:
+        _files_store[file_id] = info
+    persist_file(file_id, info, dbPath or None)
+    return info
+
+
+def persistBytes(
+    *, user_id: str, agent_id: str, session_id: str, filename: str,
+    data: bytes, fileType: str = "", dbPath: str = "", ownerId: str = "",
+) -> Dict[str, Any]:
+    """把一份已在内存的字节按**与上传端点同一份规则**登记成一条文件记录（渠道入站用）。
+
+    `user_id` 是**目录段**（必须过路径段校验），`ownerId` 是**记进记录的属主原值**，缺省二者
+    相同。渠道身份形如 `ch:{渠道}:{发送者}` 天然带 `:`，而 P0 那道校验拒的正是穿越字符——
+    原样拒住就等于渠道媒体永远落不了地，所以目录段取安全写法，属主比对读的仍是原值。
+
+    与端点的差别只在写入形态：端点分块流式（防一次性读满内存），这里收的已是
+    落好的素材字节。净化、危险扩展名拒绝、越根校验、大小上限与登记一律复用同一份实现——
+    抄第二份就是给同一个人算出两套落点口径。
+
+    Raises:
+        FileRejection: 被规则拒绝（扩展名危险、路径越界、超过上传上限）。
+    """
+    size = len(data or b"")
+    if size > _MAX_UPLOAD_BYTES:
+        raise FileRejection(
+            f"File too large (max {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB)", status=413
+        )
+
+    safe_filename, file_path, file_type = _resolveTargetPath(
+        user_id=user_id, agent_id=agent_id, session_id=session_id,
+        rawFilename=filename, fileType=fileType,
+    )
+    try:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(data)
+    except OSError as exc:
+        file_path.unlink(missing_ok=True)
+        raise FileRejection(f"落盘失败: {exc}") from exc
+
+    return _registerFileRecord(
+        user_id=ownerId or user_id, agent_id=agent_id, safe_filename=safe_filename,
+        file_path=file_path, file_type=file_type, size=size, dbPath=dbPath,
+    )
+
+
 @router.post("/upload", response_model=FileInfo)
 async def upload_file(
     file: UploadFile = File(...),
@@ -306,41 +427,18 @@ async def upload_file(
     session_id: str = Query(default="default"),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """上传文件"""
-    file_id = str(uuid.uuid4())
-    now = time.time()
-    user_id = current_user["user_id"]
-
-    # P0 安全修复: agent_id/session_id 参与存储路径拼接，必须先净化防路径穿越
-    _validate_path_segment(agent_id, "agent_id")
-    _validate_path_segment(session_id, "session_id")
-
-    # 净化文件名：只取 basename，防止路径遍历（../../etc/passwd 等）
-    raw_filename = file.filename or "unknown"
-    safe_filename = Path(raw_filename).name
-    if not safe_filename or safe_filename in (".", ".."):
-        safe_filename = "unknown"
-
-    # BUG AUDIT S-15: 危险可执行扩展名拒绝上传（防落地即被 Shell 工具执行）
-    if Path(safe_filename).suffix.lower() in _DANGEROUS_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="File type not allowed")
-
-    # 确定存储路径
-    file_type = _determine_file_type(safe_filename)
-    storage_dir = STORAGE_ROOT / user_id / "agents" / agent_id / "sessions" / session_id / file_type
-    # 根因防御: 净化后仍校验最终目录必须位于用户存储根内
+    """上传文件（净化与落点规则见 `_resolveTargetPath`，登记见 `_registerFileRecord`）"""
+    user_id = str(current_user["user_id"])
     try:
-        storage_dir.resolve().relative_to((STORAGE_ROOT / user_id).resolve())
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid path segment")
+        safe_filename, file_path, file_type = _resolveTargetPath(
+            user_id=user_id, agent_id=agent_id, session_id=session_id,
+            rawFilename=file.filename or "unknown",
+        )
+    except FileRejection as rej:
+        raise HTTPException(status_code=rej.status, detail=rej.detail)
+
+    storage_dir = file_path.parent
     storage_dir.mkdir(parents=True, exist_ok=True)
-
-    file_path = storage_dir / f"{file_id}_{safe_filename}"
-    # 二次验证：最终路径必须在 storage_dir 内（防御性编程）
-    try:
-        file_path.resolve().relative_to(storage_dir.resolve())
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid filename")
 
     # BUG AUDIT S-15: 分块流式落盘 + 大小上限（原 await file.read() 全量读内存，
     # 一次 2GB 上传即可打满进程内存）
@@ -353,35 +451,20 @@ async def upload_file(
                     break
                 total_size += len(chunk)
                 if total_size > _MAX_UPLOAD_BYTES:
-                    raise HTTPException(
-                        status_code=413,
-                        detail=f"File too large (max {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB)",
+                    raise FileRejection(
+                        f"File too large (max {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB)", status=413
                     )
                 out.write(chunk)
-    except HTTPException:
+    except FileRejection as rej:
         file_path.unlink(missing_ok=True)  # 超限即清残留，不留半截文件
-        raise
+        raise HTTPException(status_code=rej.status, detail=rej.detail)
     finally:
         await file.close()
 
-    mime, _ = mimetypes.guess_type(safe_filename)
-    info = {
-        "file_id": file_id,
-        "filename": safe_filename,
-        "file_type": file_type,
-        "mime_type": mime or "application/octet-stream",
-        "size": total_size,
-        "version": "1.0.0",
-        "status": "active",
-        "user_id": user_id,
-        "agent_id": agent_id,
-        "path": str(file_path),
-        "created_at": now,
-        "updated_at": now,
-    }
-    with _files_store_lock:
-        _files_store[file_id] = info
-    persist_file(file_id, info)
+    info = _registerFileRecord(
+        user_id=user_id, agent_id=agent_id, safe_filename=safe_filename,
+        file_path=file_path, file_type=file_type, size=total_size,
+    )
     return FileInfo(**info)
 
 

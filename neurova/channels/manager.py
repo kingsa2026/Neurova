@@ -544,6 +544,16 @@ class ChannelManager:
             except Exception as e:  # noqa: BLE001 - 预检故障不影响消息分发
                 logger.debug("语音预检跳过: %s", e)
 
+            # 入站媒体在这一步暂存成路径（唯一还在队前、字节仍完好的位置）：入站队列落库
+            # 按 `default=str` 序列化 metadata，字节键过队即变形；而属主要到 handler 那层
+            # 才算得出来，所以这里只挪位置、不定属主——属主那一半在 `landInboundMedia`。
+            try:
+                from neurova.channels.mediaIngress import stageInboundMedia
+
+                stageInboundMedia(message)
+            except Exception as e:  # noqa: BLE001 - 暂存故障不影响消息分发
+                logger.debug("渠道入站媒体暂存跳过: %s", e)
+
             # P0-5 入站持久化队列：先持久化再分发，重启不
             # 丢消息。enqueue 成功 → 立即同步排水该消息（await，时序与旧
             # 直发路径一致，分发结果经 ack/nack 落账）；队列不可用（DB 故障）

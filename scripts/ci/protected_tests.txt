@@ -4286,3 +4286,5 @@ tests/unit/agent/test_videoAttachmentReachesTheTurn.py
 tests/unit/agent/test_audioAttachmentTranscriptReachesTheTurn.py
 # 自动路由收口：RequestType→必需能力只一处定义且被读；按用户文本猜类型已退役（显式 file_type/载荷才是来源）
 tests/unit/llm/test_requestTypeCapabilityMappingSingleSource.py
+# 渠道入站媒体落地成附件：属主已知处登记、纯媒体轮不再被丢弃、语音刻意不合流、落点规则只一份
+tests/unit/channels/test_channelMediaLandsAsAttachments.py

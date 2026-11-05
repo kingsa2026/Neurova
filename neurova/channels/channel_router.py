@@ -26,6 +26,7 @@ from typing import Any, Callable, Dict, Optional
 from neurova.channels.base import ChannelMessage
 from neurova.channels.access_policy import chatAccessDecision
 from neurova.channels.voice_egress import turnAudioCandidate
+from neurova.channels.mediaIngress import hasInboundMedia, landInboundMedia
 from neurova.voice_context_module import VOICE_CONTEXT_KEY
 from neurova.channels.group_leadership import (
     get_group_leadership_arbiter,
@@ -129,7 +130,9 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
 
     async def _handler(message: ChannelMessage) -> Optional[str]:
         content = (message.content or "").strip()
-        if not content:
+        # 「正文为空即丢弃」原本是渠道总闸：ilink/企微解出的纯图片·视频·文件轮正文就是空的
+        # （适配器只往 metadata 挂素材路径），于是素材齐了却连回合都不进。有素材即放行。
+        if not content and not hasInboundMedia(message.metadata):
             return None
         agent_id = str(message.metadata.get("agent_id") or "default")
         cfg = _channel_cfg(manager, message.channel_type, agent_id)
@@ -209,6 +212,16 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
         # 按人类对待，门控永不抑制；仅当渠道侧显式标注发送者是 bot/对端 agent 才 bot_peer。
         sender_is_bot = _detect_sender_is_bot(message)
         meta["turn_origin"] = "bot_peer" if sender_is_bot else "human"
+
+        # 入站媒体在这一层登记成附件：属主是上一段才算出的 `meta["user_id"]`，再早没有归属可言。
+        # 交出去的形状与 `console.attach_files` 逐字一致，下游 `ChatPipeline` 的附件单点零改动。
+        # 字节不塞进 metadata——入站队列按 `default=str` 序列化会把它变形掉，登记后只剩 file_id。
+        attachments = landInboundMedia(
+            metadata=message.metadata, user_id=str(meta["user_id"]),
+            agent_id=agent_id, session_id=session_id,
+        )
+        if attachments:
+            meta["attachments"] = attachments
 
         # 群领导选举（spec 2026-09-19）：多我方 agent 同群仅 leader 应答，防重答/回声。
         # 默认关、仅群聊生效、fail-open（仲裁异常/缺 chat_id 一律放行，绝不吞人类）。
