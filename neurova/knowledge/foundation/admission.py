@@ -406,6 +406,45 @@ class KnowledgeAdmissionGate:
             verification=self._closeVerification(activityId),
         )
 
+    def admitBatch(self, requests: List[AdmissionRequest]) -> List[Dict[str, Any]]:
+        """同事务多笔准入：一次提交摊薄，逐条 finding 独立返回（升级计划 B7）。
+
+        契约（三条都是判据，不是承诺）：
+        - **单条失败不拖批**：每条包自己的 SAVEPOINT，被拒的那条退回到它进来之前的
+          状态（连它已经写下的半条一起退），其余各条照旧落定；
+        - **语义不打折**：批内每条仍走完整的 `admit`（消解→校验→冲突→血缘→置信），
+          批量只是提交次数之差，不开第二条写路径，也不绕过咽喉；
+        - **失败留名**：返回逐条 finding（fact_id 或 error 文本），空列表不等于成功。
+
+        收益判据见 `tests/performance/knowledge/test_admissionThroughput.py`
+        ——立项时实测同事务摊薄 +329%（门槛 30%），不是拍脑袋。
+        """
+        findings: List[Dict[str, Any]] = []
+        if not requests:
+            return findings
+        # 批量档长在 store 上（提交时机是那条连接的事）；咽喉只是叫它
+        with self._store.batchScope() as conn:
+            for index, request in enumerate(requests):
+                # 名字由自增下标拼出，不含任何外部输入——不存在拼接注入面
+                savepoint = "admit_batch_%d" % index
+                conn.execute("SAVEPOINT %s" % savepoint)
+                try:
+                    receipt = self.admit(request)
+                except Exception as exc:  # noqa: BLE001 - 逐条隔离：坏一条不退整批
+                    conn.execute("ROLLBACK TO %s" % savepoint)
+                    conn.execute("RELEASE %s" % savepoint)
+                    findings.append({
+                        "index": index, "ok": False, "fact_id": "",
+                        "finding": "%s: %s" % (type(exc).__name__, exc),
+                    })
+                    continue
+                conn.execute("RELEASE %s" % savepoint)
+                findings.append({
+                    "index": index, "ok": True, "fact_id": receipt.factId,
+                    "dedupedByContent": receipt.dedupedByContent, "finding": "",
+                })
+        return findings
+
     def _closeVerification(self, activityId: str) -> Dict[str, Any]:
         """本笔写入的收尾：裁决自己刚落的断言并**回写** `verification_state`。
 

@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
 from neurova.knowledge.ontology.term_registry import IS_A_PREDICATE
@@ -201,35 +201,53 @@ def admitExtractedFacts(
     gate = productionAdmissionGate(factStore, toolVersion="graph-bridge")
     agentId = str(item.get("agent_id", "") or "default")
     tenantId = str(item.get("tenant_id") or "default")
-    def _admitOne(subjectLabel: str, predicateTermId: str, objectTerm: str) -> Optional[str]:
+    def _requestFor(subjectLabel: str, predicateTermId: str, objectTerm: str) -> AdmissionRequest:
         statement = _statementOf(subjectLabel, predicateTermId, objectTerm)
-        try:
-            receipt = gate.admit(AdmissionRequest(
-                agentId=agentId,
-                tenantId=tenantId,
-                category=str(item.get("category") or ""),
-                subjectLabel=subjectLabel,
-                predicateTermId=predicateTermId,
-                objectTerm=objectTerm,
-                content=statement,
-                relationKind="entity",
-                assertions=[_assertionFor(item, statement)],
-                sourceTurnId="entry:%s" % str(item.get("knowledge_id", "") or ""),
-                # 工单 001：抽取产物是模型输出，引用到的路径/版本号必须能在被抽取的
-                # 条目原文里逐字找到。拒的是这条断言，不是整条条目的抽取——坏三元组
-                # 入底座后会被当事实读，降权没有意义（底座没有"权重"）。
-                evidenceText="%s\n%s" % (str(item.get("title", "") or ""),
-                                         str(item.get("content", "") or "")),
-                activityKind="extract",
-                activityBasis="graph_bridge.extract_knowledge_to_graph（LLM 抽取落底座）",
-            ))
-        except Exception as exc:  # noqa: BLE001 - 逐条隔离，坏条目不留名就不算失败
-            logger.warning("graph_bridge: 抽取事实入底座被拒（%s %s %s）: %s",
-                           subjectLabel, predicateTermId, objectTerm, exc)
-            return None
-        return receipt.factId
+        return AdmissionRequest(
+            agentId=agentId,
+            tenantId=tenantId,
+            category=str(item.get("category") or ""),
+            subjectLabel=subjectLabel,
+            predicateTermId=predicateTermId,
+            objectTerm=objectTerm,
+            content=statement,
+            relationKind="entity",
+            assertions=[_assertionFor(item, statement)],
+            sourceTurnId="entry:%s" % str(item.get("knowledge_id", "") or ""),
+            # 工单 001：抽取产物是模型输出，引用到的路径/版本号必须能在被抽取的
+            # 条目原文里逐字找到。拒的是这条断言，不是整条条目的抽取——坏三元组
+            # 入底座后会被当事实读，降权没有意义（底座没有"权重"）。
+            evidenceText="%s\n%s" % (str(item.get("title", "") or ""),
+                                     str(item.get("content", "") or "")),
+            activityKind="extract",
+            activityBasis="graph_bridge.extract_knowledge_to_graph（LLM 抽取落底座）",
+        )
+
+    def _admitBatch(requests: List[AdmissionRequest],
+                    labels: List[Tuple[str, str, str]]) -> List[Tuple[int, str]]:
+        """一批抽取产物走同一事务落底座，回 `(请求下标, fact_id)` 的成功项。
+
+        逐条 finding 仍独立留名：坏一条只退它自己（咽喉的 SAVEPOINT 契约），
+        日志里点名的还是那一条的三元组——批量改变的是提交次数，不是失败口径。
+        """
+        if not requests:
+            return []
+        succeeded: List[Tuple[int, str]] = []
+        for finding in gate.admitBatch(requests):
+            index = int(finding.get("index", -1))
+            factId = str(finding.get("fact_id") or "")
+            if not finding.get("ok") or not factId:
+                triple = labels[index] if 0 <= index < len(labels) else ("?", "?", "?")
+                logger.warning("graph_bridge: 抽取事实入底座被拒（%s %s %s）: %s",
+                               triple[0], triple[1], triple[2], finding.get("finding"))
+                continue
+            succeeded.append((index, factId))
+        return succeeded
 
     factIds: List[str] = []
+    entityRequests: List[AdmissionRequest] = []
+    entityLabels: List[Tuple[str, str, str]] = []
+    entityTypes: List[str] = []
     for ent in data.get("entities") or []:
         if not isinstance(ent, dict):
             continue
@@ -238,13 +256,18 @@ def admitExtractedFacts(
         if not label or not nodeType:
             continue
         decided = _typeFromRegistry(termRegistry, nodeType)
-        factId = _admitOne(label, "is_a", decided)
-        if factId:
-            factIds.append(factId)
-            # 主类型列在主体建出来之后才挂得上（此前主体还不存在）；
-            # 挂着它又是定义域校验唯一读处，所以顺序不能反。
-            _assignSubjectType(termRegistry, label, decided, agentId, tenantId)
+        entityRequests.append(_requestFor(label, "is_a", decided))
+        entityLabels.append((label, "is_a", decided))
+        entityTypes.append(decided)
+    for index, factId in _admitBatch(entityRequests, entityLabels):
+        factIds.append(factId)
+        # 主类型列在主体建出来之后才挂得上（此前主体还不存在）；
+        # 挂着它又是定义域校验唯一读处，所以顺序不能反——批量落定后再挂。
+        _assignSubjectType(termRegistry, entityLabels[index][0], entityTypes[index],
+                           agentId, tenantId)
 
+    relationRequests: List[AdmissionRequest] = []
+    relationLabels: List[Tuple[str, str, str]] = []
     for rel in data.get("relations") or []:
         if not isinstance(rel, dict):
             continue
@@ -257,8 +280,9 @@ def admitExtractedFacts(
         # 只会造出一批读不出来源的无义事实（实体类型那条 `is_a` 路由上面专管）。
         if relation == "custom":
             continue
-        factId = _admitOne(source, relation, target)
-        if factId:
+        relationRequests.append(_requestFor(source, relation, target))
+        relationLabels.append((source, relation, target))
+    for _index, factId in _admitBatch(relationRequests, relationLabels):
             factIds.append(factId)
     return factIds
 
