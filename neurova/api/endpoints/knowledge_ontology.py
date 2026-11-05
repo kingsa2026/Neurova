@@ -346,6 +346,32 @@ async def delete_ontology_term(
 
 # ── B8：未知关系候选审核面 ──────────────────────────────────────────
 
+@router.get("/ontology/derivations/{fact_id}")
+async def get_derivation_chain(
+    fact_id: str,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """解释链（B11 L5 设计 4）：推导结论回溯到规则与前提，账本单源。
+
+    derived=False 表示这是观察事实（无推导边）；不伪造解释。
+    """
+    store, _registry, _engine = _ontologyParts()
+    fact = store.fact(str(fact_id or "").strip())
+    if fact is None:
+        raise HTTPException(status_code=404, detail="事实不存在: %s" % fact_id)
+    ledger = getattr(store, "_derivationLedger", None)
+    premises = ledger.premisesOf(str(fact_id or "").strip()) if ledger else []
+    return {"code": 0, "message": "success",
+            "data": {"fact_id": str(fact_id or "").strip(),
+                     "derived": bool(premises),
+                     "rule_id": premises[0]["rule_id"] if premises else "",
+                     "rule_version": premises[0]["rule_version"] if premises else "",
+                     "premise_count": len(premises),
+                     "premises": premises,
+                     "confidence": fact.get("confidence"),
+                     "derivation_kind": (fact.get("qualifier") or {}).get("shape", "")}}
+
+
 @router.get("/ontology/relation-candidates")
 async def list_relation_candidates(
     status: str = Query("pending"),

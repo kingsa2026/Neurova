@@ -45,6 +45,7 @@ from ..ontology.term_registry import (
     _SCHEMA_V29_TERMS,
     _SCHEMA_V30_TERMS,
     _SCHEMA_V31_TERMS,
+    _SCHEMA_V32_TERMS,
     _SCHEMA_V8,
     _SCHEMA_V12,
 )
@@ -105,6 +106,8 @@ _STEPS: List[tuple] = [
     # v31：SKOS 多语言/模块化（specs/2026-11-05 B10 L2）——labels/alt_labels/module/
     #      namespace/iri_base ＋形状注册表 ontology_shapes（L4，写入前/dry-run 同求值器）
     (31, _SCHEMA_V31_TERMS + "\n" + _SCHEMA_V31_SHAPES),
+    # v32：限定关系 schema（specs/2026-11-05 B11 L3）——qualifier 键/类型/必填
+    (32, _SCHEMA_V32_TERMS),
 ]
 
 _registered = False

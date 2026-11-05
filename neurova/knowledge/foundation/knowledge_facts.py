@@ -949,6 +949,41 @@ class KnowledgeFactStore:
             ).fetchone()
         return self._hydrate(row) if row else None
 
+    def factsBitemporal(self, agentId: str, tenantId: str = "default",
+                        predicate: str = "", asOf: str = "",
+                        knownAt: str = "") -> List[Dict[str, Any]]:
+        """双时态查询（B11 L3）：asOf 裁 valid time，knownAt 裁 transaction time。
+
+        - asOf：`valid_from <= asOf < valid_until`（窗口含头不含尾）；
+        - knownAt：`recorded_at <= knownAt` 且 `retracted_at 为空或 > knownAt`
+          （当时真的知道才可见，撤销后回看不出现）。
+        两轴都缺省时不裁剪（= 当前全量 active triple）。ISO 字符串直接比字典序。
+        """
+        sql = ("SELECT * FROM knowledge_facts WHERE agent_id = ? AND tenant_id = ?"
+               " AND record_kind = 'triple'")
+        params: List[Any] = [agentId, str(tenantId or "default")]
+        if predicate:
+            sql += " AND predicate_term_id = ?"
+            params.append(predicate)
+        if asOf:
+            sql += (" AND (valid_from IS NULL OR valid_from <= ?)"
+                    " AND (valid_until IS NULL OR ? < valid_until)")
+            params.extend([asOf, asOf])
+        if knownAt:
+            # 事务时间语义："当时知道就在"——被取代/被撤销的行按各自时间点裁决可见性，
+            # 不按当前 status 过滤（status 是现在的快照，不是历史）。
+            sql += (" AND (recorded_at IS NULL OR recorded_at <= ?)"
+                    " AND (retracted_at IS NULL OR ? < retracted_at)")
+            params.extend([knownAt, knownAt])
+        elif not asOf:
+            # 双轴都未声明＝当前快照（只看 active）；任一轴声明即放开 status——
+            # valid/transaction 轴自己裁决可见性，superseded 行也有历史位置。
+            sql += " AND status = 'active'"
+        sql += " ORDER BY subject_key, predicate_term_id, object_term"
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [self._hydrate(r) for r in rows]
+
     def factsForSubject(self, subjectKey: str, includeInactive: bool = False) -> List[Dict[str, Any]]:
         sql = "SELECT * FROM knowledge_facts WHERE subject_key = ?"
         if not includeInactive:

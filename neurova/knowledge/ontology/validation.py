@@ -132,6 +132,28 @@ class OntologyValidationReport:
                     "%s 基数为 1，主体已有另一说法（fact_id=%s）"
                     % (predicate, rivals[0]["fact_id"]), predicate, subjectKey=subjectKey))
 
+        # B11 L3：限定关系 schema——必填缺失=violation（写前阻断），
+        # 未知键=warning（不阻断）；未声明 schema 的关系 qualifier 自由 JSON
+        # （存量零漂移）。schema 读术语行的 qualifier_schema 列（v32），
+        # 门是 schema 本身非空——不是 term 存在（否则全谓词误报未知键）。
+        if term:
+            schema = term.get("qualifier_schema") or {}
+            if schema:
+                allowed = schema.get("allowed") or {}
+                required = schema.get("required") or []
+                missing = [k for k in required if not str(qualifier.get(k, "") or "").strip()]
+                if missing:
+                    out.append(self._finding(
+                        "violation", "qualifierSchema",
+                        "%s 缺必填限定 %s" % (predicate, missing), predicate,
+                        subjectKey=subjectKey))
+                unknown = [k for k in qualifier if k not in allowed and k not in required]
+                if unknown:
+                    out.append(self._finding(
+                        "warning", "qualifierSchema",
+                        "%s 的限定键 %s 未在 schema 内" % (predicate, unknown), predicate,
+                        subjectKey=subjectKey))
+
         # B9 punning 守卫：term_id 当 subject_key 用（类型与实例混用）——本体腐化
         # 的起点。记 warning 不阻断：存量同名共存是显式选择，写面硬拒会把迁移卡死。
         # violations() 只收 violation，warning 进巡检读数。
