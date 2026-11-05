@@ -281,6 +281,26 @@ class ForwardChainingEngine:
                 (str(tenantId or "default"), ruleId))
 
     @staticmethod
+    def toAuthoringBody(hydratedBody: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """把读面形状（`_hydrate` 出的 kind/predicate）换回写面形状（atom/not）。
+
+        PUT 改版"未提供 body 就保留现值"取的是读面那一份，直接回灌 `_parseBody`
+        会被判成"原子必须是 atom 或 not"——同一条规则改版即 400，而这 400 长得像
+        "调用方传了坏 body"，看不出来是读写两套形状在互相咬。
+        """
+        authoring: List[Dict[str, Any]] = []
+        for atom in hydratedBody or []:
+            key = "not" if str(atom.get("kind") or "") == "not" else "atom"
+            entry: Dict[str, Any] = {key: atom.get("predicate", ""),
+                                     "subject": atom.get("subject", "")}
+            if atom.get("object"):
+                entry["object"] = atom["object"]
+            if atom.get("objectConst"):
+                entry["objectConst"] = atom["objectConst"]
+            authoring.append(entry)
+        return authoring
+
+    @staticmethod
     def _parseBody(ruleId: str, body: List[Dict[str, Any]]) -> List[Dict[str, str]]:
         atoms: List[Dict[str, str]] = []
         for item in body or []:

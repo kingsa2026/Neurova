@@ -86,9 +86,10 @@ def test_import_sync_default_unchanged(env, monkeypatch):
     # 拆分后真身在 knowledge_ingestion（2026-09-16 模块化），patch 聚合器无效
     monkeypatch.setattr(
         kn_ingestion, "_import_file_data",
-        lambda data, fn, ag, user, ocr_mode="auto", engine_mode="structured": (
-            [{"knowledge_id": "k1", "content": "x"}], "ok"
-        ),
+        # 桩按生产签名逐参数镜像过一次就烂过一次（1a1b45648 加 source_path 时
+        # 没人回头改这里，测试红了才暴露这是假装配）；本格只验"走没走这条管线"
+        # 与返回形状，故收 *args/**kwargs，不再靠抄签名。
+        lambda *args, **kwargs: ([{"knowledge_id": "k1", "content": "x"}], "ok"),
     )
     r = client.post("/api/v1/knowledge/import?agent_id=ag", files={"file": ("a.txt", b"x", "text/plain")})
     assert r.status_code == 200

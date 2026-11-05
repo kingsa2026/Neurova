@@ -353,7 +353,10 @@ async def update_ontology_rule(
     try:
         rule = engine.registerRule(
             str(rule_id).strip(), body.head_predicate,
-            body.body if body.body is not None else existing.get("body") or [],
+            # 未提供 body 时保留现值，但现值是读面形状，必须先换回写面形状——
+            # 两套形状互咬报出来的 400 长得像"调用方传了坏 body"（见 toAuthoringBody）
+            body.body if body.body is not None
+            else engine.toAuthoringBody(existing.get("body") or []),
             headSubjectVar=(body.head_subject_var
                             or existing.get("head_subject_var") or "X"),
             headObjectConst=(body.head_object_const
