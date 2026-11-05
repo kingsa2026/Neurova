@@ -1132,7 +1132,7 @@ async def update_knowledge(
     # 不再只靠 drift 读数被动发现。NEUROVA_KB_EXTRACT_ON_UPDATE 门控默认 off；
     # 重抽失败 fail-soft（extract_after_update 内部吞），更新照常返回。
     if "content" in updatedBody:
-        from neurova.api.endpoints.knowledge_ingestion import (
+        from neurova.api.endpoints.knowledge_common import (
             extract_after_update, extract_event_summary,
         )
 

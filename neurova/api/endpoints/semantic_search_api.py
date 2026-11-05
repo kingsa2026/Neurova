@@ -359,7 +359,7 @@ async def hybrid_search(
                     if str(cfg.get("rerank_provider_kind") or "").lower() == "llm" and not callable(
                         cfg.get("llm_call")
                     ):
-                        from neurova.api.endpoints.knowledge_ingestion import _default_llm_call
+                        from neurova.api.endpoints.knowledge_common import _default_llm_call
 
                         cfg["llm_call"] = _default_llm_call(
                             request, prefer_agent_id=str(getattr(body, "agent_id", "") or "")

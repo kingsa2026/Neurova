@@ -18,7 +18,7 @@ import pytest
 from neurova.knowledge.splitter import build_index_content
 from neurova.knowledge.vector_index import embeddingText
 
-MODULE_INGESTION = "neurova.api.endpoints.knowledge_ingestion"
+MODULE_INGESTION = "neurova.api.endpoints.knowledge_common"
 AGENT = "c5-test"
 ALICE = {"user_id": "u1", "tenant_id": "default"}
 
@@ -78,7 +78,7 @@ def test_updateWhitelist_carriesEventSummary(tmp_path):
 
 
 def test_extractEventSummary_disabledByDefault(monkeypatch, tmp_path):
-    from neurova.api.endpoints.knowledge_ingestion import extract_event_summary
+    from neurova.api.endpoints.knowledge_common import extract_event_summary
 
     monkeypatch.delenv("NEUROVA_KB_EVENT_SUMMARY", raising=False)
     assert extract_event_summary(
@@ -89,7 +89,7 @@ def test_extractEventSummary_disabledByDefault(monkeypatch, tmp_path):
 
 def test_extractEventSummary_extractsAndWrites(monkeypatch, tmp_path):
     """开闸＋LLM：摘要写回条目（走 update 白名单与 reindex 登记同一管线）。"""
-    from neurova.api.endpoints.knowledge_ingestion import extract_event_summary
+    from neurova.api.endpoints.knowledge_common import extract_event_summary
     from neurova.knowledge.repository import KnowledgeRepository
 
     monkeypatch.setenv("NEUROVA_KB_EVENT_SUMMARY", "on")
@@ -110,7 +110,7 @@ def test_extractEventSummary_extractsAndWrites(monkeypatch, tmp_path):
 
 
 def test_extractEventSummary_noLlmSkips(monkeypatch):
-    from neurova.api.endpoints.knowledge_ingestion import extract_event_summary
+    from neurova.api.endpoints.knowledge_common import extract_event_summary
 
     monkeypatch.setenv("NEUROVA_KB_EVENT_SUMMARY", "on")
     assert extract_event_summary(
