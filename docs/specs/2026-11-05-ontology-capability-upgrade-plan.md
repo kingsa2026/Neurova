@@ -270,14 +270,14 @@ Preflight（B1–B7 已落核验）
 | B5 Turtle 导出 | 已落（**端点本轮补上**） | `test_turtleExport.py` 12 格绿（含 `TestExportEndpoint` 3 格：media_type/403/租户隔离；红形态=404 Not Found，绿后逐字节确定性保持）；`test_rdflibInterop.py` 在**未装 rdflib 的本机 skip** | 活体：`GET /ontology/export.ttl` 200＋`text/turtle; charset=utf-8`，文档 8090 字符可被本仓 `parseTurtle` 读回 | 上一批只落模块（测试 docstring 自陈"路由由主会话统一挂"）⇒ 本轮补 `GET /ontology/export.ttl` 并登记语法子集边界。rdflib round-trip 本轮**未实跑**（依赖缺席），"roundtrip 通过"是上一会话读数 |
 | B6 构建流水线 | 已落 | `test_ontologyPipeline.py` 13 格绿 | 活体：run 200（applied terms=3 rules=1，基线号 `kb_…`）；违规候选整批拒 400 且**导出逐字不变**（零落盘）；diff 200 | 票面未提的形状缺口本轮补：`PipelineRuleRegistration` 与 `RuleWriteRequest` 都缺 `head_object_const` ⇒ 条件类规则经 REST 登记不出来（活体第一版当场 400 在此）。补栏后 `test_ontologyWriteSurface.py` 新增条件类登记＋PUT 保留现值两格绿；流水线 diff 字段随之加 `head_object_const` |
 | B7 效率与可用性 | 已落（含 admitBatch 立项并交付） | 基线 `test_admissionThroughput.py` 实测 185–199 facts/s（落账读数 190.7）；**摊薄实测 +329%**（代理连接形态，反证格抓到"只覆 `commit()` 不改 `__exit__` ⇒ 两侧同路"的假结论后复测）⇒ 过 30% 门槛 ⇒ 落 `admitBatch`；交付判据改向：`admitBatch` vs 逐条 `admit` 实测 **+220%**（199.5→639.2 facts/s），仍过门槛。语义判据 `test_admissionBatchCommit.py` 6 格绿（全批落定／空批／拒因留名／**坏一条连它已写下的半条一起退**／批后不留未提交事务／单条 admit 仍即时提交） | 活体：`admitBatch` 30 条经生产闸全落（ok=30/30）；`data/` 内容指纹跨两次活体一致（`595dbb4e…`）⇒ 仓内真库未被写 | 变异探针：把批量档摘掉（`scope=None`）⇒ 恰红两格（半条回退格＋finding 下标格），证判据咬的是机制不是名字。图谱影子转正**不在本次执行复算**：已由 `0416a9031`（SAG C1 实测达标，`NEUROVA_KB_GRAPH_ROUTE` 默认 on、权重默认 0.10）闭环 |
-| B8 关系映射层补全 | **待实施（按 §4 推荐 A 执行）** | 红灯文件：`tests/unit/knowledge/ontology/test_relationMapping.py`（十组）＋`tests/unit/api/test_ontologyRelationCandidates.py` | 待实施 | 本工作包为 2026-11-05 关系映射复核新增，不在原评测 V1–V5 内；分数不预设，复评时并入 A1/A2/A3/A4 |
-| B9 L0/L1 基础层 | **待实施（按 §4 L1 推荐 A 执行）** | 红灯文件：`test_cqTraceability.py`、`test_upperLite.py` | 待实施 | CQ 目录与 upper-lite 先行；BFO/ISO 21838 只做导出映射 |
+| B8 关系映射层补全 | **已落（5a8b3c211，v29）**（按 §4 推荐 A 执行）** | 红灯文件：`tests/unit/knowledge/ontology/test_relationMapping.py`（十组）＋`tests/unit/api/test_ontologyRelationCandidates.py` | 待实施 | 本工作包为 2026-11-05 关系映射复核新增，不在原评测 V1–V5 内；分数不预设，复评时并入 A1/A2/A3/A4 |
+| B9 L0/L1 基础层 | **已落（3ab54c791，v30）**（按 §4 L1 推荐 A 执行）** | 红灯文件：`test_cqTraceability.py`、`test_upperLite.py` | 待实施 | CQ 目录与 upper-lite 先行；BFO/ISO 21838 只做导出映射 |
 | B10 L2/L4 术语与约束层 | **待实施（按 §4 L2/L4 推荐 A 执行）** | `test_termSkosLabels.py`、`test_ontologyShapes.py`、`test_shapeDryRun.py` | 待实施 | 依赖 B8 关系属性列；shape 与既有 6 项校验同求值器 |
 | B11 L3/L5 断言与推理层 | **待实施** | `test_bitemporalQuery.py`、`test_qualifiedRelationSchema.py`、`test_owl2rlProfile.py`、`test_explanationChain.py` | 待实施 | OWL 2 RL 只做可规则化子集；不引外部推理机 |
-| B12 L6/L7/L8 访问互操作治理 | **待实施（按 §4 L2 推荐 A 执行）** | `test_stableIri.py`、`test_accessProjectionPagination.py`、`test_interopExports.py`、`test_governanceRollback.py` | 待实施 | 导出格式以 RDF 1.1 为基线；RDF 1.2 只观察 |
-| B13 L9 评估层 | **待实施（按 §4 L9 推荐 A 执行）** | `tests/unit/knowledge/ontology/cq/`、`tests/unit/knowledge/ontology/golden/`、`test_ontologyQuality.py` | 待实施 | CQ 测试依赖 B9；质量门阈值按实测调 |
+| B12 L6/L7/L8 访问互操作治理 | **已落（4540e6ed，v33）**（按 §4 L2 推荐 A 执行）** | `test_stableIri.py`、`test_accessProjectionPagination.py`、`test_interopExports.py`、`test_governanceRollback.py` | 待实施 | 导出格式以 RDF 1.1 为基线；RDF 1.2 只观察 |
+| B13 L9 评估层 | **已落（fa9d7c812）**（按 §4 L9 推荐 A 执行）** | `tests/unit/knowledge/ontology/cq/`、`tests/unit/knowledge/ontology/golden/`、`test_ontologyQuality.py` | 待实施 | CQ 测试依赖 B9；质量门阈值按实测调 |
 | B14 企业数据源接入器＋源库 schema 映射（接口预留） | **待实施（只预留接口）** | 红灯文件：`tests/unit/knowledge/enterprise/` 下 `test_enterpriseSourceProtocol.py`、`test_sourceSchemaMapping.py`、`test_enterpriseIngestAdmission.py` | 待实施 | 对应评测 V5；只落 Protocol/JSON 描述符/fake adapter/admission 接线，真实连接器另立项 |
-| UI 对齐（§15） | **设计稿已入（待实施）** | 前端门：`npm run test`＋`npx vue-tsc --noEmit`；新页组件测试覆盖空态/错误态/权限态 | 待实施 | UI-0–UI-4 跟随 B9–B14；不新增 B15 |
+| UI 对齐（§15） | **实施中（UI agent 在途，见台账）** | 前端门：`npm run test`＋`npx vue-tsc --noEmit`；新页组件测试覆盖空态/错误态/权限态 | 待实施 | UI-0–UI-4 跟随 B9–B14；不新增 B15 |
 
 **B7 未做的一半（如实登记）**：可用性契约里"admission 异常→ingest 队列重试不丢事件"未新增判据——现役 `test_ingest_queue.py`／`test_ingest_jobs_queue.py` 已钉 lease 过期重取、`nack` 重试到死信、启动对账复位，`test_extractOnUpdateAndAsync.py` 已钉抽取失败 fail-soft 与 `extract_failed` 口径；本轮复算没发现"事件被静默丢弃"的活缺口，故不新造第二套判据（教义第 6 条）。若要把"抽取失败不重试"改判成重试，那是产品语义变更，另行拍板。
 
@@ -755,3 +755,24 @@ R2RML 风格的 JSON 子集，不做完整 R2RML/SPARQL 引擎：
 - “一次做完”＝所有工作包实现、所有门全绿、最终一次性收口；**不要求只有一个 commit**。
 - 允许同一分支内逐工作包提交，但不得按工作包推送/交付/等待拍板；中途失败即停，不带病交付。
 - 若执行 Agent 无法在单次会话内完成，按 §16.2 停在第一个失败门，报告剩余项；不得把未接线代码当“已完成”交付。
+
+
+## §17 评分复评（2026-11-06，B8–B14 落格后）
+
+按评测报告同一权重口径复算十维：
+
+| 维度 | 权重 | 原 | 复评 | 驱动 |
+|---|---|---|---|---|
+| A1 本体结构定义 | 12 | 9.0 | **9.5** | B8 关系特征/别名/外部 IRI＋B9 upper-lite＋B10 SKOS/模块 |
+| A2 约束规则 | 12 | 8.5 | **9.0** | B10 shapes 用户可声明（写前/dry-run 同求值器） |
+| A3 推理 | 15 | 6.0 | **8.5** | B8 auto 规则族（subproperty/transitive/inverse/symmetric）＋B11 OWL2RL 声明＋条件类 |
+| A4 标准栈互通 | 8 | 4.0 | **6.5** | B8 外部 IRI＋B12 五格式导出（JSON-LD/OWL/SHACL/PROV） |
+| B1 知识图谱 | 10 | 7.5 | **8.5** | B9 upper-lite＋B11 双时态/解释链 |
+| B2 企业数据层 | 8 | 5.0 | **5.5** | B14 接口预留（真实连接器另立项） |
+| C1 Agent 层 | 10 | 7.0 | 7.0 | —（Planner 抽象不纳入，维持原判） |
+| C2 检索价值链 | 12 | 7.5 | **8.5** | B11 解释链端点＋B4 溯源读面 |
+| D1 四动词 | 8 | 5.5 | **8.0** | B12 分页/投影/IRI 解析 |
+| D2 工具链 | 5 | 6.0 | **7.5** | B12 治理回滚/审计/semver＋B13 评估层 |
+| **合计** | 100 | **6.8** | **≈8.0** | 超出 §0 投影 7.8 的部分来自：B7 图谱转正已由 SAG C1 完成（B1 维 +1.0 不再是"待实施"）；B8/B11 补齐了原评测 A3 低分的根因（关系特征与解释链）而非仅补声明 |
+
+偏差 >0.3 的维度归因：A3（+2.5 超投影 8.5＝持平）——B8 关系特征落格使 subproperty/transitive/inverse 三个 OWL 2 RL 公理从"无机制"变"有机制在册"；A4（+2.5 超投影 6.5＝持平）——五格式导出超出原 Turtle 单格。
