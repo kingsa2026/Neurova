@@ -16,6 +16,10 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
+from neurova.knowledge.derivation_citation import (
+    annotateDerivations,
+    filterConditionClassFacts,
+)
 from neurova.knowledge.hybrid import bm25_rank
 
 from .knowledge_facts import KnowledgeFactStore, normalizeLabel
@@ -85,6 +89,11 @@ class FactSurface:
         if not corpus:
             return []
         items = [factToItem(f, f["canonical_label"]) for f in corpus]
+        # 观察态灰度（B1 拍板项 2 ＋ B4 单源）在**排序前**摘推导事实：排在截断后再摘，
+        # 推导占掉的那一格就空了——显式事实本该顶上来，却被一条看不见的名额限制挤掉。
+        items, _filtered = filterConditionClassFacts(items, self._store)
+        if not items:
+            return []
         ranked = bm25_rank(query, [{"id": it["knowledge_id"],
                                     "content": it["title"] + " " + it["content"]} for it in items],
                            top_k=limit)
@@ -98,7 +107,8 @@ class FactSurface:
             item["freshness_term"] = self._freshness(item.get("recorded_at"))
             item["confidence_term"] = self._confidence(item)
             hits.append(item)
-        return hits
+        # 溯源标注只给真出去的这几条（翻主路态下推导条目也在这里被认出来）
+        return annotateDerivations(hits, self._store)
 
     def rankHits(self, hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """修正项只在开闸态生效；权重全为 0 时必须与纯 BM25 序一致。"""
