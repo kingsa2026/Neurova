@@ -112,68 +112,19 @@
       <GlassCard class="panel-card">
         <a-tabs v-model:active-key="activeTab">
           <a-tab-pane key="ontology" :tab="t('knowledge.workbenchOntology')">
+            <!-- 术语 CRUD 不在这里做：声明字段的唯一写面是本体工作台的术语分区（21 栏结构化），
+                 本页只保留画布/检索/实例建边/规则登记——旧的那份窄口径（id/kind/label/basis）已退役。 -->
             <div class="panel-toolbar">
-              <a-input-search
-                v-model:value="termFilter"
-                :placeholder="t('knowledge.workbenchFilterTerms')"
-                allow-clear
-                size="sm"
-                style="max-width: 200px"
-              />
-              <GlassButton
-                v-if="isAdmin"
-                size="sm"
-                @click="termFormVisible = !termFormVisible"
-              >
-                {{ t('knowledge.workbenchNewTerm') }}
-              </GlassButton>
+              <router-link
+                class="studio-link"
+                data-testid="workbench-studio-link"
+                :to="`/agent/${agentId}/ontology-studio`"
+              >{{ t('nav.knowledgeGraph') }}</router-link>
             </div>
 
-            <div v-if="isAdmin && termFormVisible" class="term-form">
-              <a-input v-model:value="termForm.term_id" size="sm" :disabled="!!editingTermId"
-                       :placeholder="t('knowledge.workbenchTermId')" />
-              <a-select v-model:value="termForm.kind" size="sm"
-                        :placeholder="t('knowledge.workbenchTermKind')">
-                <a-select-option value="concept">concept</a-select-option>
-                <a-select-option value="relation">relation</a-select-option>
-                <a-select-option value="property">property</a-select-option>
-              </a-select>
-              <a-input v-model:value="termForm.label" size="sm"
-                       :placeholder="t('knowledge.workbenchTermLabel')" />
-              <a-input v-model:value="termForm.basis" size="sm"
-                       :placeholder="t('knowledge.workbenchBasis')" />
-              <div class="term-form-actions">
-                <GlassButton size="sm" :loading="termSaving" @click="saveTerm">
-                  {{ editingTermId ? t('knowledge.workbenchUpdate') : t('common.confirm') }}
-                </GlassButton>
-                <GlassButton v-if="editingTermId" size="sm" variant="secondary" @click="cancelEditTerm">
-                  {{ t('common.cancel') }}
-                </GlassButton>
-              </div>
-            </div>
-
-            <div class="term-list">
-              <div v-for="term in filteredTerms" :key="term.term_id" class="term-row">
-                <a-tag :color="kindColor(term.kind)" class="kind-tag">{{ term.kind }}</a-tag>
-                <span class="term-id" :title="term.label">{{ term.term_id }}</span>
-                <span class="term-version">v·{{ term.version }}</span>
-                <a-button v-if="isAdmin" type="text" size="sm" class="term-edit"
-                          @click="startEditTerm(term)">
-                  ✎
-                </a-button>
-                <a-popconfirm
-                  v-if="isAdmin"
-                  :title="t('knowledge.workbenchConfirmDeleteTerm')"
-                  @confirm="deleteTerm(term)"
-                >
-                  <a-button type="text" size="sm" danger>✕</a-button>
-                </a-popconfirm>
-              </div>
-              <a-empty v-if="!filteredTerms.length && !loading"
-                       :description="t('knowledge.workbenchEmptyTerms')" />
-            </div>
-
-            <!-- S2 规则面：列表 + 新建/删除（与术语同一写面纪律） -->
+            <!-- S2 规则面：列表 + 新建/删除。规则 REST CRUD 的应用内唯一写面就在这一格
+                 （本体工作台的推理分区只读列表），删它等于把规则登记退回「只能写库」；
+                 术语面已收进本体工作台，见上方链接。 -->
             <div class="rules-section">
               <div class="panel-toolbar">
                 <h4 class="rules-title">{{ t('knowledge.workbenchRules') }}</h4>
@@ -336,7 +287,6 @@ const studio = ref<StudioData | null>(null)
 const activeTab = ref<'ontology' | 'instance' | 'spatial'>('ontology')
 const viewMode = ref<'2d' | '3d'>('2d')
 const selectedNodeId = ref('')
-const termFilter = ref('')
 const nodeFilter = ref('')
 // 按图谱检索：输入走后端 search_nodes 全图索引（不是前端过滤当前渲染集——
 // 邻域模式只加载了枢纽 2 跳，画布外的节点前端过滤永远搜不到）；
@@ -347,17 +297,13 @@ const searchBusy = ref(false)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 const localRender = ref<StudioData | null>(null)
 const displayData = computed(() => localRender.value ?? studio.value)
-const termFormVisible = ref(false)
-const termSaving = ref(false)
 const edgeSaving = ref(false)
 const ruleFormVisible = ref(false)
 const ruleSaving = ref(false)
-const editingTermId = ref('')
 const editingRuleId = ref('')
 
 const isAdmin = computed(() => authStore.currentUser?.role === 'admin')
 
-const termForm = reactive({ term_id: '', kind: 'concept', label: '', basis: '' })
 const ruleForm = reactive({ rule_id: '', head_predicate: '', body: '', basis: '' })
 const instanceForm = reactive({
   subject_label: '', predicate_term_id: '', object_term: '',
@@ -488,15 +434,6 @@ const focusFirstMatch = () => {
   const hit = filteredNodes.value[0]
   if (hit) selectedNodeId.value = hit.id
 }
-const filteredTerms = computed(() => {
-  const needle = termFilter.value.trim().toLowerCase()
-  const terms = studio.value?.schema?.terms ?? []
-  if (!needle) return terms
-  return terms.filter((term) =>
-    term.term_id.toLowerCase().includes(needle)
-    || (term.label || '').toLowerCase().includes(needle))
-})
-
 const kindColor = (kind: string) =>
   kind === 'concept' ? 'blue' : kind === 'relation' ? 'purple' : 'green'
 
@@ -514,74 +451,6 @@ const fetchStudio = async () => {
   } finally {
     loading.value = false
   }
-}
-
-const createTerm = async () => {
-  if (!termForm.term_id.trim()) {
-    message.warning(t('knowledge.workbenchTermIdRequired'))
-    return
-  }
-  termSaving.value = true
-  try {
-    await request.post('/knowledge/ontology/terms', { ...termForm })
-    message.success(t('knowledge.workbenchTermCreated'))
-    termForm.term_id = ''
-    termForm.label = ''
-    termForm.basis = ''
-    termFormVisible.value = false
-    await fetchStudio()
-  } catch (e: any) {
-    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
-  } finally {
-    termSaving.value = false
-  }
-}
-
-const saveTerm = async () => {
-  if (!termForm.term_id.trim()) {
-    message.warning(t('knowledge.workbenchTermIdRequired'))
-    return
-  }
-  termSaving.value = true
-  try {
-    if (editingTermId.value) {
-      // PUT 部分更新：未填字段（label 空串、version 缺省）由后端保留现值。
-      await request.put(
-        `/knowledge/ontology/terms/${encodeURIComponent(editingTermId.value)}`,
-        { kind: termForm.kind, label: termForm.label, basis: termForm.basis })
-      message.success(t('knowledge.workbenchTermUpdated'))
-    } else {
-      await request.post('/knowledge/ontology/terms', { ...termForm })
-      message.success(t('knowledge.workbenchTermCreated'))
-    }
-    termForm.term_id = ''
-    termForm.label = ''
-    termForm.basis = ''
-    termFormVisible.value = false
-    editingTermId.value = ''
-    await fetchStudio()
-  } catch (e: any) {
-    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
-  } finally {
-    termSaving.value = false
-  }
-}
-
-const startEditTerm = (term: OntologyTerm) => {
-  editingTermId.value = term.term_id
-  termForm.term_id = term.term_id
-  termForm.kind = term.kind
-  termForm.label = term.label || ''
-  termForm.basis = ''
-  termFormVisible.value = true
-}
-
-const cancelEditTerm = () => {
-  editingTermId.value = ''
-  termForm.term_id = ''
-  termForm.label = ''
-  termForm.basis = ''
-  termFormVisible.value = false
 }
 
 const parseRuleBody = (): Array<Record<string, unknown>> | null => {
@@ -660,22 +529,6 @@ const deleteRule = async (rule: OntologyRule) => {
     await fetchStudio()
   } catch (e: any) {
     message.error(e?.response?.data?.detail || e?.message || t('common.error'))
-  }
-}
-
-const deleteTerm = async (term: OntologyTerm) => {
-  try {
-    await request.delete(
-      `/knowledge/ontology/terms/${encodeURIComponent(term.term_id)}`,
-      { params: { basis: t('knowledge.workbenchDeleteBasis') } })
-    message.success(t('knowledge.workbenchTermDeleted'))
-    await fetchStudio()
-  } catch (e: any) {
-    const detail = e?.response?.data?.detail
-    message.warning(
-      typeof detail === 'object' && detail?.impact
-        ? `${t('knowledge.workbenchTermInUse')} (${detail.impact.fact_count}/${detail.impact.typed_subject_count}/${detail.impact.child_terms?.length ?? 0})`
-        : detail || e?.message || t('common.error'))
   }
 }
 
@@ -920,6 +773,10 @@ onMounted(() => {
   justify-content: space-between;
   gap: var(--nr-space-sm);
   margin-bottom: var(--nr-space-sm);
+}
+.studio-link {
+  font-size: 13px;
+  color: var(--nr-accent, inherit);
 }
 
 .term-form,
