@@ -11986,3 +11986,21 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **全套验收**：本体域 293 passed；knowledge 全目录 1304+ passed；前端 vue-tsc 零错误＋vitest 2371 passed；活体 15/15 PASS（隔离数据根）；评分复评 6.8→8.0。
     - **仍开项**：K-09 时间面四项（§6-568 已登记，待立项）；前批三条照旧。
     - **下一枚空号现查：本格取 569，后继从 570 起。**
+
+570. **检索精准度第三批 B-4 latestFactsByPredicate 落格**（升级方案 §3.2 L-B B-4）：
+    `KnowledgeFactStore.latestFactsByPredicate(agentId, predicate, tenantId)` —
+    按 (subject_key, predicate) 取 MAX(recorded_at) 的 active triple。
+    冲突裁决（admission 内建 supersede）已保证同 (subject, predicate) 只有一个
+    active 行——latestFactsByPredicate 的"最新"语义与咽喉的"最新覆盖"语义天然一致，
+    不需要额外去重。测试 3 passed（含新购买 supersede 旧购买 + 跨主体独立）。
+    **发现并修正测试前提**：原测试假设 retract 后可回退到次新 active 行——
+    实际上 admission 的冲突裁决在写入时就已 supersede 了旧行，
+    两条同 (subject, predicate) 不同 object 的事实不可能同时 active。
+    修正为验证"新 admit 自动 supersede 旧行 → latest 反映最新状态"。
+    commit：最新。
+570. **K-09 源钟（facts 侧）设计决策登记（待点单）**：`conflict_judge.py:117`
+    `most_recent` 按 recorded_at 排序——K-09 要求改读源时间。
+    需要裁定：① 源时间列在 facts 表还是 qualifier（TD① 只加在条目表）；②
+    无源时间的事实回退 recorded_at 还是排除；③ 与 valid_from 的优先级。
+    三项设计决策需人裁，不适合无人值守。下一步：点单后按 §4 L3 详设实施。
+    **下一枚空号现查：本格取 570，后继从 571 起。**
