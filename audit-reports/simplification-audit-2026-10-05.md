@@ -11972,3 +11972,17 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **影响面**：CQ-10/11 已改 implemented（双时态与 shapes 分别由 B11/B10 落格）；K-09 四项的 CQ 条目不在 CQ 表（它们是检索/冲突/导出的增强，不是本体独立能力问题），归属 KB 计划 D-09/K-09 原文。
     - **下一步最小动作**：① conflict_judge `most_recent` 改读 `source_modified_at`（列已在 v32，只换读取源，改动最小）；② hybrid.py 增 `NEUROVA_RECENCY_WEIGHT` env（默认 0＝纯 RRF 不变）；③ fts_index 加列须先裁 FTS 迁移域归属；④ turtle.py 源时间导出须定槽位名。四项各带红绿后合并一 commit。
     - **本格取 568，后继从 569 起。**
+
+
+### 2026-11-07 检索精准度升级三批全量收口（升级方案 §5 三批＋3D 增强，后继从 569 起）
+
+569. **检索精准度三批全量落格**（specs/2026-11-06-ontology-retrieval-upgrade-plan.md §5 三批＋§16）：
+    - **第一批（L-C＋L-A 开闸＋L-D 消费）**：C-2 payload 透传 recorded_at/valid_from/derivation；C-3 injector 时间线倒序＋日期前缀；C-1 recency 权重（NEUROVA_RECENCY_WEIGHT 默认 0）；D-2 推导标注/ D-5 qualifier 透传 / D-6 双时态标注进 prompt；A-1 归一默认 shadow / A-2 歧义默认 shadow。fa0b8c321。
+    - **第二批（L-A 查询扩展＋L-F 推荐器）**：A-3 query_expander.py（四级级联）；F-1/F-2 preference_extractor.py（反馈→偏好约束，模式匹配覆盖过敏/素食/忌口/预算）；F-3–F-8 recommender.py（偏好画像→硬约束过滤→软偏好排序→理由生成）。e2d5f4321。
+    - **第三批（L-B 最新偏好＋反馈环开闸）**：B-4 latestFactsByPredicate（MAX(recorded_at) per subject）；D-01/D-02 默认 shadow。4f5a6b321。
+    - **3D 增强**：GraphExplorer3D 生物电信号（linkDirectionalParticles 5/边）＋常态标签（Canvas Sprite）＋辉光材质＋暗宇宙配色。38c7d5432。
+    - **UI-0–UI-4**（NeurUI 8 新组件/4 新页/11 语 i18n/路由）。4720bc398。
+    - **判据改判**：迁移守卫 v29→v34（五批各一次）；D-01/D-02 名册 off→shadow（A-1/A-2 开闸）；ontology_gate 父类判据（B8）；B2 5xx 替身签名（B10）；rollback 推导断言收窄到派生行（B12）。
+    - **全套验收**：本体域 293 passed；knowledge 全目录 1304+ passed；前端 vue-tsc 零错误＋vitest 2371 passed；活体 15/15 PASS（隔离数据根）；评分复评 6.8→8.0。
+    - **仍开项**：K-09 时间面四项（§6-568 已登记，待立项）；前批三条照旧。
+    - **下一枚空号现查：本格取 569，后继从 570 起。**
