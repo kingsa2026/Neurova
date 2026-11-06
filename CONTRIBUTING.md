@@ -20,6 +20,11 @@ python start.py --check
 
 环境要求：Python >= 3.10（`scripts/config.py` 强制）、Node.js 18+、`.env` 从 `.env.example` 复制。
 
+> 重启**已在跑**的常驻服务（不是首次搭建）时先读 [AGENTS.md](AGENTS.md) §0 末尾两条：
+> 解释器必须用项目 `.venv`，且不要把自动化会话（AI 终端 / CI runner）的
+> `HTTP_PROXY`/`NO_PROXY` 原样带进子进程。两处都挡住不了启动，只会把端点掉线与
+> 鉴权/LLM 降级留给运行时。
+
 ## 核心原则（动手与作答基线）
 
 条款出处见 [AGENTS.md](AGENTS.md)「核心原则」节；此处按 `AGENTS.md` §0 三落点同步纪律镜像一份，问答与改动一律适用：

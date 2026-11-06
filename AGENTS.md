@@ -57,6 +57,21 @@
   私自定义上限即红——因为"配置在推送分支的那一刻非法，与任务无关"这类故障，
   只有把前置条件钉成红/绿才拦得住。
 
+**重启常驻服务（9527 后端 / 8100 前端）时，解释器与代理环境两件事必须先做对。**
+两处形态相同：都不挡住启动，只把故障留给运行时，事后看日志极易归因给「本项目坏了」。
+
+- **解释器只用项目 `.venv`**（Windows `.venv\Scripts\python.exe`，与第 4 节跑测试同一份）。
+  换成系统 Python 时缺 `prometheus-client`（它在 `requirements.txt` 里是登记过的运行依赖）
+  会让 `neurova.api.endpoints.provider` 在 import 期整块掉线——日志读数
+  「端点注册表未全量装载：93/94 成功」，`Registered router: /v1/providers` 那行随之缺席，
+  LLM 客户端同时退化成模拟模式（`openai 库未安装`）；缺 `jwt` 时鉴权面也一样静默降级。
+- **不要把自动化会话的代理变量原样带进子进程**（AI 终端、CI runner 常带形如
+  `NO_PROXY=localhost,127.0.0.1,127.0.0.0/8,[::1],::1` 的值）。httpx 解析不了 CIDR 与
+  方括号 IPv6，会抛 `InvalidURL: Invalid port: ':1]'`——那是**宿主代理写法**的故障，
+  报出来却像本项目的端点故障。起后端前清掉 `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY`
+  （含小写形态），或改成 httpx 能吃的 `localhost,127.0.0.1`。
+  复算判据：启动日志 `[ERROR]` 计数为 0，且注册行里能看到 `/v1/providers`。
+
 ---
 
 ## 1. 修复教义（Repair Doctrine）
