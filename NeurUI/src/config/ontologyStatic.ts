@@ -106,9 +106,9 @@ export const CQ_ROWS: CqRow[] = [
     question: '写入前能否按自定义形状（SHACL 语义）做完整性校验？',
     actor: '本体管理员',
     priority: 'P2',
-    query: 'shapes 注册表＋dry-run（B10 落地，REST 端点未开放）',
+    query: 'shapes 注册表＋dry-run（B10 落地，POST /ontology/validate）',
     testId: 'tests/unit/knowledge/ontology/test_ontologyShapes.py',
-    status: 'planned',
+    status: 'implemented',
   },
 ]
 
