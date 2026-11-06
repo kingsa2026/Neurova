@@ -37,9 +37,13 @@ _MERGE_CHAIN_MAX_HOPS = 16
 
 
 def normalizeMode() -> str:
-    # A-1（升级计划第一批）：默认 shadow——归一读数始终在，on 才改写查询词
-    raw = (os.environ.get(QUERY_NORMALIZE_ENV) or "shadow").strip().lower()
-    return raw if raw in _NORMALIZE_MODES else "shadow"
+    # A-1（升级计划第一批）：缺省 shadow——归一读数始终在，on 才改写查询词。
+    # 非法值安全回退 off（不猜档）。
+    raw = os.environ.get(QUERY_NORMALIZE_ENV)
+    if raw is None:
+        return "shadow"
+    raw = raw.strip().lower()
+    return raw if raw in _NORMALIZE_MODES else "off"
 
 
 def _normText(text: Any) -> str:
