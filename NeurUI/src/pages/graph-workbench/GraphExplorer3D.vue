@@ -42,8 +42,12 @@
 
 <script setup lang="ts">
 /**
- * 3D 探索器（升级计划 S4）：`3d-force-graph` 动态 import 懒加载——
- * WebGL 与 three 系依赖不进主包，2D 视图不因此变重。
+ * 3D 探索器（升级计划 S4 → B12 UI 增强）：
+ * - 生物电信号动画：linkDirectionalParticles 沿边流动 + 脉冲色 + 曲率
+ * - 节点常态标签：nodeThreeObject 自定义 Group（球体 + Canvas Sprite 文字贴图）
+ * - 科技感氛围：暗底 + 辉光材质 + 点光源 + 节点脉冲
+ *
+ * `3d-force-graph` 动态 import 懒加载不变——WebGL 与 three 系依赖不进主包。
  * 子图由服务端裁剪（focus/hops/limit），客户端不养一张大图；
  * 节点点击 emit('select')，与 2D 画布选中同步。
  */
@@ -80,12 +84,125 @@ let disposed = false
 
 const currentNodeId = ref('')
 
+// ── B12 UI：生物电信号配色 ────────────────────────────────────────
+/** 节点类型 → 辉光色（生物荧光盘：靛/青/翠/琥珀/洋红/冰蓝） */
+const NEURON_PALETTE: Record<string, string> = {
+  concept: '#00e5ff',
+  person: '#7c4dff',
+  organization: '#00c853',
+  location: '#ffab00',
+  event: '#f50057',
+  document: '#40c4ff',
+  product: '#76ff03',
+  custom: '#b388ff',
+}
+const FALLBACK_NEURON = '#6366f1'
+/** 连接线基准色（亮青高饱）与信号粒子色（亮白闪） */
+const LINK_BASE = '#00fff2'
+const LINK_PARTICLE = '#ffffff'
+const LINK_HIGHLIGHT = '#ffab40'
+const SELECT_NEURON = '#f59e0b'
+
+const neuronColor = (node: any) =>
+  node?.id === currentNodeId.value
+    ? SELECT_NEURON
+    : NEURON_PALETTE[node?.type] ?? FALLBACK_NEURON
+
 const typeOptions = computed(() => {
   const kinds = new Set(rawNodes.map((n) => n.type).filter(Boolean))
   return Array.from(kinds).sort().map((k) => ({ value: k, label: k }))
 })
 
-// 渲染集按类型过滤：边只保留两端都可见的——带半截边就是"看不见的节点还在拉线"。
+// ── Canvas 文字 Sprite 工厂 ──────────────────────────────────────
+// 每个节点一张离屏 canvas → CanvasTexture → THREE.Sprite（始终面向相机）。
+// 字号 64px 保证缩放后清晰；透明底 + 发光描边，暗底上一目了然。
+const labelTextureCache = new Map<string, { texture: any; canvas: any }>()
+
+const makeLabelSprite = (text: string, three: any, color: string) => {
+  const cached = labelTextureCache.get(text)
+  if (cached) return cached
+
+  const canvas = document.createElement('canvas')
+  const ctx = canvas.getContext('2d')!
+  const fontSize = 64
+  ctx.font = `${fontSize}px "PingFang SC", "Microsoft YaHei", sans-serif`
+  const metrics = ctx.measureText(text)
+  canvas.width = Math.ceil(metrics.width + 24)
+  canvas.height = fontSize + 20
+
+  const ctx2 = canvas.getContext('2d')!
+  ctx2.font = `${fontSize}px "PingFang SC", "Microsoft YaHei", sans-serif`
+  ctx2.textBaseline = 'middle'
+  // 发光描边（暗底衬托）
+  ctx2.shadowColor = color
+  ctx2.shadowBlur = 12
+  ctx2.fillStyle = '#e0f7fa'
+  ctx2.fillText(text, 12, canvas.height / 2)
+  // 再画一遍去阴影纯色填充（清晰主体）
+  ctx2.shadowColor = 'transparent'
+  ctx2.fillStyle = '#e0f7fa'
+  ctx2.fillText(text, 12, canvas.height / 2)
+
+  const texture = new three.CanvasTexture(canvas)
+  texture.needsUpdate = true
+  const entry = { texture, canvas }
+  labelTextureCache.set(text, entry)
+  return entry
+}
+
+// ── 自定义节点对象：球体（辉光材质）+ 文字 Sprite ────────────────
+// nodeThreeObject 每个节点调用一次；返回 THREE.Group 代替默认球体。
+// selected 节点额外放大＋琥珀色；标签用节点类型对应辉光色。
+const makeNodeObject = (node: any, three: any) => {
+  const group = new three.Group()
+  const color = neuronColor(node)
+  const isSelected = node?.id === currentNodeId.value
+  const radius = isSelected ? 6 : 4
+
+  // 核心球体：MeshStandardMaterial 带自发光（暗场中发亮）
+  const sphereGeo = new three.SphereGeometry(radius, 16, 16)
+  const sphereMat = new three.MeshStandardMaterial({
+    color,
+    emissive: color,
+    emissiveIntensity: isSelected ? 0.8 : 0.4,
+    roughness: 0.3,
+    metalness: 0.1,
+  })
+  const sphere = new three.Mesh(sphereGeo, sphereMat)
+  group.add(sphere)
+
+  // 外圈辉光：半透明放大球壳（呼吸感）
+  const glowGeo = new three.SphereGeometry(radius * 1.6, 12, 12)
+  const glowMat = new three.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: isSelected ? 0.15 : 0.08,
+    side: three.BackSide,
+  })
+  const glow = new three.Mesh(glowGeo, glowMat)
+  group.add(glow)
+
+  // 常态标签 Sprite
+  const label = String(node?.name ?? node?.id ?? '')
+  if (label) {
+    const { texture, canvas } = makeLabelSprite(label, three, color)
+    const spriteMat = new three.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+    })
+    const sprite = new three.Sprite(spriteMat)
+    // 缩放比 = canvas 宽高比 × 全局因子（确保文字不压缩变形）
+    const scaleFactor = 0.08
+    sprite.scale.set(canvas.width * scaleFactor, canvas.height * scaleFactor, 1)
+    sprite.position.set(0, radius + canvas.height * scaleFactor * 0.5 + 2, 0)
+    group.add(sprite)
+  }
+
+  return group
+}
+
+// ── 渲染集按类型过滤：边只保留两端都可见的 ────────────────────────
 const applyRender = () => {
   const nodes = visibleTypes.value.length
     ? rawNodes.filter((n) => visibleTypes.value.includes(n.type))
@@ -152,22 +269,56 @@ const _createGraph = async () => {
     // ForceGraph3D()(el) 会把 class 当普通函数调，TypeError 后静默空白。
     const ForceGraph3D = (mod as any).default ?? mod
     if (!containerRef.value || disposed) return
+
+    // 动态 import three（3d-force-graph 的 peer dependency，不进主包）
+    const threeMod = await import('three')
+    const three = threeMod
+
     try {
       graph = new ForceGraph3D(containerRef.value)
-        .backgroundColor('rgba(0,0,0,0)')
+        // 暗宇宙底色（生物电信号在暗场中最醒目）
+        .backgroundColor('rgba(4, 8, 18, 0.92)')
+        // ── 节点：自定义 Group（辉光球体＋常态标签 Sprite） ──
+        .nodeThreeObject((node: any) => makeNodeObject(node, three))
+        .nodeThreeObjectExtend(false)
         .nodeLabel((node: any) => String(node?.name ?? node?.id ?? ''))
-        .nodeColor((node: any) =>
-          node?.id === currentNodeId.value ? '#f59e0b' : '#6366f1')
         .onNodeClick((node: any) => {
           currentNodeId.value = String(node?.id ?? '')
           emit('select', currentNodeId.value, String(node?.name ?? ''))
-          if (graph) graph.nodeColor(graph.nodeColor())
+          if (graph) graph.nodeThreeObject(graph.nodeThreeObject())
         })
         // 点空白处回全图：聚焦视图的退出路径不能只靠找工具条按钮。
         .onBackgroundClick(() => resetToFull())
+        // ── 连接线：生物电信号 ──
+        // 暗青色基线（低透明度作底），选中节点的关联边亮琥珀
+        .linkColor((link: any) => {
+          const sid = typeof link.source === 'object' ? link.source?.id : link.source
+          const tid = typeof link.target === 'object' ? link.target?.id : link.target
+          return sid === currentNodeId.value || tid === currentNodeId.value
+            ? LINK_HIGHLIGHT : LINK_BASE
+        })
+        .linkWidth(4)
+        .linkOpacity(0.85)
+        // 微曲率——有机感，不是 CAD 直线
+        .linkCurvature(0.18)
+        // ── 生物电粒子：沿线流动的信号脉冲 ──
+        .linkDirectionalParticles(5)
+        .linkDirectionalParticleSpeed(0.015)
+        .linkDirectionalParticleWidth(4.5)
+        .linkDirectionalParticleColor(LINK_PARTICLE)
+        // ── 灯光：暗场点光＋环境光（辉光材质需要） ──
+        .lights([
+          new three.AmbientLight(0x1a1a2e, Math.PI * 0.5),
+          new three.DirectionalLight(0x00e5ff, 0.4 * Math.PI),
+          new three.PointLight(0x7c4dff, Math.PI * 0.3, 500),
+        ])
       if (containerRef.value.clientWidth) {
         graph.width(containerRef.value.clientWidth)
         graph.height(containerRef.value.clientHeight)
+      }
+      // 相机初始距离拉远（大图不挤）
+      if (graph.cameraPosition) {
+        graph.cameraPosition({ z: 320 })
       }
     } catch (e: any) {
       // 渲染器初始化失败（WebGL 缺席/依赖形状变化）落可见提示，不静默空白。
@@ -213,6 +364,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   disposed = true
+  labelTextureCache.clear()
   window.removeEventListener('resize', handleResize)
   try {
     graph?._destructor?.()
@@ -256,6 +408,7 @@ onBeforeUnmount(() => {
   min-height: 420px;
   border: 1px solid var(--nr-glass-border);
   border-radius: var(--nr-radius-md, 12px);
+  /* 暗宇宙底色：与生物电信号配色一体化 */
   background: var(--nr-bg-inset);
   overflow: hidden;
 }
