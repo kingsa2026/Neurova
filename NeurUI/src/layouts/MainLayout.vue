@@ -30,19 +30,24 @@
 
         <!-- Agent: 知识与认知（低频折叠） -->
         <GlassNavGroup
-          v-if="canAgent('experience-knowledge') || canAgent('knowledge-graph') || canAgent('metacognition') || canAgent('reflection') || canAgent('growth') || canAgent('personality')"
+          v-if="canAgent('experience-knowledge') || canAgent('ontology-studio') || canAgent('facts') || canAgent('metacognition') || canAgent('reflection') || canAgent('growth') || canAgent('personality')"
           :label-key="'nav.knowledgeCognition'"
           storage-key="agent-cognition"
           :collapsed="appStore.sidebarCollapsed"
           :first-item-to="`/agent/${agentStore.currentAgentId}/experience-knowledge`"
-          :count="7"
+          :count="8"
         >
           <template #icon><BulbOutlined /></template>
           <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/experience-knowledge`" :label="t('nav.experience')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('experience-knowledge')">
             <template #icon><BulbOutlined /></template>
           </GlassNavItem>
-          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/knowledge-graph`" :label="t('nav.knowledgeGraph')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('knowledge-graph')">
+          <!-- UI-0：标签改「本体工作台」，路由指新 Studio；旧 /knowledge-graph URL 保留为兼容入口 -->
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/ontology-studio`" :label="t('nav.knowledgeGraph')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('ontology-studio')">
             <template #icon><ShareAltOutlined /></template>
+          </GlassNavItem>
+          <!-- UI-1：事实浏览（ABox 查询、双时态、溯源、解释链） -->
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/facts`" :label="t('nav.factExplorer')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('facts')">
+            <template #icon><NodeIndexOutlined /></template>
           </GlassNavItem>
           <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/metacognition`" :label="t('nav.metacognition')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('metacognition')">
             <template #icon><ExperimentOutlined /></template>
@@ -183,6 +188,16 @@
 
       <GlassNavItem to="/knowledge-eval" :label="t('nav.knowledgeEval')" :collapsed="appStore.sidebarCollapsed" v-if="can('/knowledge-eval')">
         <template #icon><ExperimentOutlined /></template>
+      </GlassNavItem>
+
+      <!-- UI-2：互操作与导出（Turtle 导出 + IRI 解析） -->
+      <GlassNavItem to="/knowledge/interop" :label="t('nav.knowledgeInterop')" :collapsed="appStore.sidebarCollapsed" v-if="can('/knowledge/interop')">
+        <template #icon><ExportOutlined /></template>
+      </GlassNavItem>
+
+      <!-- UI-4：企业数据源（接口预留页） -->
+      <GlassNavItem to="/knowledge/enterprise-sources" :label="t('nav.enterpriseSources')" :collapsed="appStore.sidebarCollapsed" v-if="can('/knowledge/enterprise-sources')">
+        <template #icon><CloudServerOutlined /></template>
       </GlassNavItem>
 
       <GlassNavItem to="/skill-pool" :label="t('nav.skillPool')" :collapsed="appStore.sidebarCollapsed" v-if="can('/skill-pool')">
@@ -347,6 +362,7 @@ import {
   ThunderboltOutlined, FileOutlined, ApiOutlined,
   ClockCircleOutlined, SafetyOutlined, CodeOutlined,
   DesktopOutlined, ControlOutlined,
+  ExportOutlined, CloudServerOutlined,
   SettingOutlined, BellOutlined, GlobalOutlined,
   LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
   CoffeeOutlined, HistoryOutlined, BarChartOutlined,

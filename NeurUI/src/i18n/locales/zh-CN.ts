@@ -1,6 +1,7 @@
 import { STORE_CANVAS } from './_canvasStores'
 
 import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSection'
+import { ontologySection } from './_ontologySection'
 export default {
   common: {
     markAllRead: '全部标记已读',
@@ -139,7 +140,11 @@ export default {
     metacognition: '元认知',
     reflection: '反思',
     experience: '经验知识',
-    knowledgeGraph: '知识图谱',
+    knowledgeGraph: '本体工作台',
+    ontologyStudio: '本体工作台',
+    factExplorer: '事实浏览',
+    knowledgeInterop: '互操作与导出',
+    enterpriseSources: '企业数据源',
     knowledgegraph: '知识图谱',
     skillPool: '技能池',
     skillpool: '技能池',
@@ -811,6 +816,7 @@ export default {
     manual: '转人工',
   },
   knowledgeEval: knowledgeEvalSection('zh-CN'),
+  ontology: ontologySection('zh-CN'),
   knowledge: {
     mcpArgsInvalid: '工具参数必须是合法 JSON',
     mcpArgsJson: '工具参数 JSON',

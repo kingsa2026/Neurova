@@ -1,6 +1,7 @@
 import { STORE_CANVAS } from './_canvasStores'
 
 import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSection'
+import { ontologySection } from './_ontologySection'
 export default {
   common: {
     markAllRead: 'وضع علامة مقروء على الكل',
@@ -138,7 +139,11 @@ export default {
     metacognition: 'ما وراء المعرفة',
     reflection: 'التأمل',
     experience: 'الخبرة',
-    knowledgeGraph: 'رسم المعرفة البياني',
+    knowledgeGraph: 'مساحة عمل الأنطولوجيا',
+    ontologyStudio: 'مساحة عمل الأنطولوجيا',
+    factExplorer: 'مستعرض الوقائع',
+    knowledgeInterop: 'القابلية للتشغيل البيني والتصدير',
+    enterpriseSources: 'مصادر المؤسسات',
     knowledgegraph: 'رسم المعرفة البياني',
     skillPool: 'مخزن المهارات',
     skillpool: 'مخزن المهارات',
@@ -802,6 +807,7 @@ export default {
 
 
   knowledgeEval: knowledgeEvalSection('ar-SA'),
+  ontology: ontologySection('ar-SA'),
 
 
   knowledge: {

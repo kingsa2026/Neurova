@@ -1,6 +1,7 @@
 import { STORE_CANVAS } from './_canvasStores'
 
 import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSection'
+import { ontologySection } from './_ontologySection'
 export default {
   common: {
     markAllRead: '모두 읽음으로 표시',
@@ -138,7 +139,11 @@ export default {
     metacognition: '메타인지',
     reflection: '성찰',
     experience: '경험 지식',
-    knowledgeGraph: '지식 그래프',
+    knowledgeGraph: '온톨로지 워크벤치',
+    ontologyStudio: '온톨로지 워크벤치',
+    factExplorer: '팩트 브라우저',
+    knowledgeInterop: '상호운용과 내보내기',
+    enterpriseSources: '기업 데이터 소스',
     knowledgegraph: '지식 그래프',
     skillPool: '스킬 풀',
     skillpool: '스킬 풀',
@@ -802,6 +807,7 @@ export default {
 
 
   knowledgeEval: knowledgeEvalSection('ko-KR'),
+  ontology: ontologySection('ko-KR'),
 
 
   knowledge: {
