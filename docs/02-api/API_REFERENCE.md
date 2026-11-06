@@ -92,22 +92,54 @@
 ### 19. `/api/v1/knowledge` — `knowledge.py`（聚合器；实现拆 knowledge_common/core/sharing/remote/ingestion）
 - CRUD: `GET` | `POST` | `GET/PUT/DELETE /{id}` | `POST /search`
 - `POST /search`（2026-11-04）：请求体可选 `source_modified_after`/`source_modified_before`（源文档修改时间范围；设置后无源时间条目如实排除）；条目含 `source_created_at`/`source_modified_at`（缺失空串），`created_at`＝入库时间
+- `POST /search` / `POST /access/query` 双时态（2026-11-06，B11 L3）：请求体可选 `asOf`/`knownAt`；任一给出时走事实层 `factsBitemporal`（`asOf` 裁 valid time，`knownAt` 裁 transaction time），返回事实项（`knowledge_id`＝fact_id，`metadata` 带 confidence/qualifier/valid/transaction）；两轴都空保持条目检索旧行为
 - 本体 dry-run 与流水线（2026-11-05，升级计划 B2/B6，实现 `knowledge_ontology.py`＋`knowledge/ontology/pipeline.py`）：
   - `POST /ontology/validate`（只读）：入参 `{tenantId?, agentId?, triples:[{subjectLabel, subjectKey?, predicateTermId, objectTerm, qualifier?}]}`；逐条回 `{index, subjectKey, findings, violations, verdict}`＋`summary`。violation 不抛异常进 verdict；不落库、不建主体。校验路径与流水线共用一份
   - `POST /ontology/pipeline/run`（管理员）：入参 `{agentId?, tenantId?, termUpserts[], ruleRegistrations[], factCandidates[], reason?}`；候选先全部 dry-run，任一 violation 整批拒绝（400 带 `rejections`，零落盘）；应用术语/规则（只登记不触发求值）后写 `knowledge_baselines` 快照（scope=`ontology_pipeline`）；返回 `{baselineId, applied, summary}`
   - `GET /ontology/pipeline/diff?fromBaseline=..&toBaseline=..`（只读）：两基线（`toBaseline` 缺省对比当前实况）间 terms/rules 差异 `{added, removed, changed}`
+  - `POST /ontology/pipeline/rollback`（管理员）：入参 `{toBaselineId, reason?}`；按基线快照逐字恢复 terms/rules/shapes，追加变更审计并按推导账本撤销受影响推导；返回 `{restored, audit, activity_id}`
   - `GET /ontology/export.ttl?agent_id=`（只读，**仅管理员**）：本租户全库 Turtle 导出，`text/turtle; charset=utf-8`，文本出自 `ontology/turtle.py::serializeAll`（端点不另拼第二份序列化）。**语法子集边界**：固定 `@prefix kbg: <https://neurova.local/knowledge/>`；主语＝`kbg:<subject_key>`（不用中文标签，避免 IRI 收字形时不同主体互相吞并）；谓词＝`kbg:<数据里的术语名>`；客体一律字符串字面量——不出 IRI 客体、不出集合/匿名节点、不出 xsd 数据类型标记、不出 owl/rdf 模式词汇；事实段只收 `status='active' AND record_kind='triple'`；排序只来自固定 ORDER BY ⇒ 同一库内容两次导出逐字节一致。rdflib 互操作对拍是可选测试（产品零第三方依赖）。**B8 扩展（2026-11-05）**：文档头增 `rdf:`/`rdfs:`/`owl:` 三个固定前缀；新增"标准槽位语义行"——概念父类 `rdfs:subClassOf`、关系父属性 `rdfs:subPropertyOf`、逆关系 `owl:inverseOf`（全 IRI 独立三元组行）；`is_a` 事实导出为 `rdf:type`（客体＝概念术语 IRI）；术语 IRI 有 `external_iris_json.skos_exactMatch` 外部映射时用外部 IRI，否则 `kbg:`；读侧前缀名从只认 `kbg:` 放宽到任意 `prefix:local`
+  - `GET /ontology/export.jsonld?agent_id=`（管理员）：`application/ld+json; charset=utf-8`，`@context` + `@graph`，逐字节确定
+  - `GET /ontology/export.owl?version=`（管理员）：OWL 2 RL 可规则化公理（subClass/subProperty/inverse/symmetric/transitive/functional），`text/turtle`
+  - `GET /ontology/export.shacl`（管理员）：形状注册表 → `sh:` 形状，`text/turtle`
+  - `GET /ontology/export.prov`（管理员）：activities/derivations → PROV-O，`text/turtle`
 - 本体关系映射（2026-11-05，升级计划 B8，实现 `term_registry.py`＋`rule_engine.py`＋`relation_candidates.py`）：
   - 术语写面（`POST|PUT /ontology/terms`）新增字段：`inverse_of`/`symmetric`/`transitive`/`aliases`/`external_iris`/`deprecated`/`replaced_by`（None＝PUT 保留现值）；relation 可挂 relation 父属性（`rdfs:subPropertyOf`，父子 kind 必须一致、登记处判环）；`inverse_of` 登记时双向补齐；别名按租户唯一；`cardinality=1` 即函数属性（不新增列）
   - 规则写面（`POST|PUT /ontology/rules`）新增字段：`shape`（relay/conjunction/inverse；缺省按 `head_object_const` 推断）；inverse 要求 head 主语变元＝正原子客体变元
+  - **物化档位（2026-11-06，v35，§12.6 设计 3）**：规则新增 `materialization` ∈ `observe`/`enforce`（缺省 `observe`，未知值写入处拒 400）。语义：全局灰度 `NEUROVA_CONDITION_CLASSES_ROUTE` 仍为 off 时，`observe` 规则的推导结论只作解释链/审计可见，`enforce` 规则的结论**进检索主路**并带 `via_derived`；一行结论留在主路的条件是它的每条推导边都来自 enforce 规则（口径单点在 `derivation_ledger.derivedExclusionClause`，读面 `hiddenDerivedFactIds` 与图谱走查共用同一段 SQL 片段）。PUT 省略即保留现值；`pipeline/run` 的 `ruleRegistrations[].materialization` 同步支持，基线 diff 的规则投影含该栏
+  - **条件类规则经 REST 登记现在会真推导**：端点装配此前裸造引擎（未接咽喉），登记一条能匹配到存量事实的条件类规则会当场 400「推理未接咽喉写入口」；现 `_ontologyParts()` 与生产装配同形态注入 `productionAdmissionGate`，推导结论统一走 `admit` 唯一写口
   - 关系特征由 `ForwardChainingEngine.ensureAutoRules` 幂等对齐为 `auto_subproperty:*`/`auto_transitive:*`/`auto_inverse:*`/`auto_symmetric:*` 规则行（术语写面与批准动作后自动触发）；`is_a` 的传递规则沿用历史 id `is_a_transitive`（同 id 单行，旧手工种子退役）
   - 未知关系候选（抽取侧 `graph_bridge` 落候选，不再两层静默消失）：
     - `GET /ontology/relation-candidates?status=pending|approved|rejected&limit=`（登录可读）
     - `POST /ontology/relation-candidates/{candidate_id}/approve`（**仅管理员**）：登记术语（term_id＝规范化词形）并回填 `promoted_term_id`
     - `POST /ontology/relation-candidates/{candidate_id}/reject`（**仅管理员**）：保留审计行不删除
     - 去重口径 `(tenant_id, normalized_surface, source_entry_id)`；批准/拒绝二态互斥（重复审批 409）
+- 形状注册表（2026-11-06，B10 L4，实现 `knowledge/ontology/shapes.py`）：
+  - `GET /ontology/shapes?enabled_only=`（登录可读）：本租户形状列表
+  - `POST /ontology/shapes`（管理员）：`{shape_id, target_kind, target_term_id?, path?, constraint_kind, constraint, severity?, message?, enabled?, version?}`；与内置 6 项校验撞车 400
+  - `PUT /ontology/shapes/{shape_id}`（管理员）：更新；不存在 404，不静默新建
+  - `DELETE /ontology/shapes/{shape_id}`（管理员）：删除；不存在 404
+  - 形状与内置 6 项校验共用同一求值器（写入前/dry-run 同 findings 流）
+- 事件/时间受控词汇（2026-11-06，B11 L3，§12.4 设计 3；实现 `ontology/upper_lite.py` 种子）：
+  - `hasParticipant`/`hasTime` 与 Allen 四条 `before`/`after`/`overlaps`/`during` 随上层术语播种，定义域统一 `Event`，四条区间关系挂既有 `temporal` 父属性（`rdfs:subPropertyOf`）
+  - OWL-Time 仅走 `external_iris.skos_exactMatch` 导出槽（Turtle/JSON-LD 里术语 IRI 直接换成 `<https://www.w3.org/2006/time#before>` 之类）；**不做运行时时间推理**，这四条不生成传递/组合规则（反面判据 `test_eventTimePattern.py`）
+  - 读面可见：`GET /ontology/terms` 逐行带出 `domain_terms`/`parent_term_id`/`external_iris`，`GET /ontology/impact?term=before` 给引用面
+- 术语声明字段写面（2026-11-06，B10 L2／B11 L3，实现 `term_registry.py`＋`knowledge_ontology.py`）：
+  - `POST|PUT /ontology/terms` 新增 `labels`（lang→文本）/`alt_labels`（lang→文本数组）/`module`（`core`|`domain`|空）/`identity_keys`（类型级身份判据键名）/`qualifier_schema`（限定关系三判：键/类型/必填）；口径与既有字段一致——None＝PUT 保留现值，显式空容器才是清空声明
+  - **「保留现值」只有一个属主**：合并逻辑住在 `OntologyTermRegistry.declarePartial()`（字段表 `_DECLARE_COLUMNS` 单点），REST PUT 与 `POST /ontology/pipeline/run` 的 `termUpserts[]` 都走它；端点里不留第二份清单（反向判据 `test_pipelineTermUpsertPartial.TestMergeSingleSource` 按 AST 咬）。`PipelineTermUpsert` 随之补齐 B8 关系特征（`inverseOf/symmetric/transitive/aliases/externalIris/deprecated/replacedBy`）与 `version: null`（不带 version 的批次不重置现版本）
+  - 写入处即判：语言标记必须 BCP47 形状（否则 400）；`module` 闭集且 core↔domain 不许翻转；`identity_keys` 由 `SubjectResolver` 按类型读取（缺省回退 canonical label＋aliases）；`qualifier_schema` 由 admission/validate 侧 `qualifierSchemaOf` 读取
+  - 流水线基线 diff 的术语投影覆盖全部声明字段（B8/B10/B11 一视同仁），批次改 labels 不再对 diff 隐身
+- 本体质量报告（2026-11-06，B13 L9，实现 `knowledge/ontology/quality.py`）：
+  - `GET /ontology/quality`（登录可读）：`{tenant_id, term_count, findings:[{kind,severity,target,message}], metrics:{consistency,conciseness}}`
+  - 只覆盖**可计算**子集：`missingLabel`/`orphanClass`/`inverseOneSided`/`duplicateLabel`；同一库两次读数逐字一致
+  - 完整 OOPS!/OntoClean/OQuaRE 认证与检索 NDCG/A-B 不在本端点承诺面（前者 §6 不纳入项，后者走 `/evaluation/*` 与 `/audit/*`）
+- 企业源描述符提交（2026-11-06，B14 §14.3，实现 `knowledge_enterprise.py`＋`knowledge/enterprise/registry.py`）：
+  - `GET /enterprise/sources`（登录可读）：本租户已提交源 `{items:[{source_id, descriptor, cursor, enabled, adapter_registered}], total}`
+  - `GET /enterprise/sources/{source_id}`（登录可读）：单源回显；未提交过 404
+  - `POST /enterprise/sources`（**仅管理员**）：入参 `{source_id, descriptor, enabled?}`；`validateDescriptor` 编译期先判（sourceType 白名单 sql/erp_api/event_stream、模板占位符须是已声明列、predicate/object.term 须已登记、object.kind 闭集、qualifier/validFrom/validUntil 列须已声明、描述符任何字段含 SQL 形状片段即拒），非法整条拒 400 带定位且**零落库**
+  - 两态分开：`enabled` 默认 False（关闸＝摄取路径零调用零网络）；`adapter_registered` 读进程内唯一适配器注册表 `getSourceRegistry()`，默认 False——真实 DB/ERP API/事件流连接器另立项，本端点不提供任何「已连接」调用
 - 四动词统一门面（2026-11-05，升级计划 B3，实现 `knowledge_access_facade.py`，纯转发零新逻辑）：
-  - `POST /access/query` → 同 `POST /search`（入参与响应形状一致）
+  - `POST /access/query` → 同 `POST /search`（入参与响应形状一致；支持 `asOf`/`knownAt` 双时态，任一给出时返回事实视图）
   - `POST /access/analyze` → 同 `POST /v1/semantic-search/analyze`
   - `POST /access/validate` → 同 `POST /ontology/validate`
   - `POST /access/use/{fact_id}` → 同 `POST /facts/{fact_id}/adoption`（治理门同源：仅管理员）

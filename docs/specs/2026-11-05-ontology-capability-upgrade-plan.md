@@ -261,8 +261,6 @@ Preflight（B1–B7 已落核验）
 
 | 工作包 | 状态 | 红灯→绿灯证据 | live-verify | 与票面的偏差 |
 |---|---|---|---|---|
-
-> B8–B14＋UI 按 §16 一次完成；“待实施”不代表分批交付；待拍板项按 §4 推荐 A 执行，现场证据冲突时停止并报告。
 | B1 条件类推导 | 已落（引擎/写面/读面） | `test_conditionClassDerivation.py` 11 格全绿（登记即推导、低风险不归入、不动点、撤规则只撤结论、形状四道写入口拒） | 活体：`POST /ontology/pipeline/run` 建条件类规则 → `/graph/instances` 两笔实例 → `export.ttl` 内 `HighRiskOrder` 命中 4；撤规则后 4→3（差恰为那条推导），原始主体键仍在 | **观察态落点改判**：票面写"检索主路在 `knowledge_retriever_adapter` 过滤"，实测该处今天到不了推导事实（chat 主路只出条目，`mergeIntoLegacy` 生产零调用，推导行是 `record_kind='triple'` 永不成条目的治理行）。唯一"事实→检索条目形状"出口是 `read_surface.FactSurface.search` ⇒ 过滤落在那儿（见 B4 行） |
 | B2 validate dry-run | 已落 | `test_ontologyValidateEndpoint.py` 9 格绿（domain 违规/未登记/干净/性能冒烟＋校验器异常显式 500） | 活体 `POST /ontology/validate` status=200 verdict=violation（不抛异常） | — |
 | B3 四动词门面 | 已落 | `test_knowledgeAccessFacade.py` 7 格绿 | 活体：query/analyze/validate 各 200、`use/{fact_id}` 200 且回执带 fact_id、未声明动词 404 | 仓内零消费者（K-08）：按对外契约保留；L6 补 OpenAPI/SDK 契约测试，不宣称已闭环 |
@@ -270,21 +268,29 @@ Preflight（B1–B7 已落核验）
 | B5 Turtle 导出 | 已落（**端点本轮补上**） | `test_turtleExport.py` 12 格绿（含 `TestExportEndpoint` 3 格：media_type/403/租户隔离；红形态=404 Not Found，绿后逐字节确定性保持）；`test_rdflibInterop.py` 在**未装 rdflib 的本机 skip** | 活体：`GET /ontology/export.ttl` 200＋`text/turtle; charset=utf-8`，文档 8090 字符可被本仓 `parseTurtle` 读回 | 上一批只落模块（测试 docstring 自陈"路由由主会话统一挂"）⇒ 本轮补 `GET /ontology/export.ttl` 并登记语法子集边界。rdflib round-trip 本轮**未实跑**（依赖缺席），"roundtrip 通过"是上一会话读数 |
 | B6 构建流水线 | 已落 | `test_ontologyPipeline.py` 13 格绿 | 活体：run 200（applied terms=3 rules=1，基线号 `kb_…`）；违规候选整批拒 400 且**导出逐字不变**（零落盘）；diff 200 | 票面未提的形状缺口本轮补：`PipelineRuleRegistration` 与 `RuleWriteRequest` 都缺 `head_object_const` ⇒ 条件类规则经 REST 登记不出来（活体第一版当场 400 在此）。补栏后 `test_ontologyWriteSurface.py` 新增条件类登记＋PUT 保留现值两格绿；流水线 diff 字段随之加 `head_object_const` |
 | B7 效率与可用性 | 已落（含 admitBatch 立项并交付） | 基线 `test_admissionThroughput.py` 实测 185–199 facts/s（落账读数 190.7）；**摊薄实测 +329%**（代理连接形态，反证格抓到"只覆 `commit()` 不改 `__exit__` ⇒ 两侧同路"的假结论后复测）⇒ 过 30% 门槛 ⇒ 落 `admitBatch`；交付判据改向：`admitBatch` vs 逐条 `admit` 实测 **+220%**（199.5→639.2 facts/s），仍过门槛。语义判据 `test_admissionBatchCommit.py` 6 格绿（全批落定／空批／拒因留名／**坏一条连它已写下的半条一起退**／批后不留未提交事务／单条 admit 仍即时提交） | 活体：`admitBatch` 30 条经生产闸全落（ok=30/30）；`data/` 内容指纹跨两次活体一致（`595dbb4e…`）⇒ 仓内真库未被写 | 变异探针：把批量档摘掉（`scope=None`）⇒ 恰红两格（半条回退格＋finding 下标格），证判据咬的是机制不是名字。图谱影子转正**不在本次执行复算**：已由 `0416a9031`（SAG C1 实测达标，`NEUROVA_KB_GRAPH_ROUTE` 默认 on、权重默认 0.10）闭环 |
-| B8 关系映射层补全 | **已落（5a8b3c211，v29）**（按 §4 推荐 A 执行）** | 红灯文件：`tests/unit/knowledge/ontology/test_relationMapping.py`（十组）＋`tests/unit/api/test_ontologyRelationCandidates.py` | 待实施 | 本工作包为 2026-11-05 关系映射复核新增，不在原评测 V1–V5 内；分数不预设，复评时并入 A1/A2/A3/A4 |
-| B9 L0/L1 基础层 | **已落（3ab54c791，v30）**（按 §4 L1 推荐 A 执行）** | 红灯文件：`test_cqTraceability.py`、`test_upperLite.py` | 待实施 | CQ 目录与 upper-lite 先行；BFO/ISO 21838 只做导出映射 |
-| B10 L2/L4 术语与约束层 | **待实施（按 §4 L2/L4 推荐 A 执行）** | `test_termSkosLabels.py`、`test_ontologyShapes.py`、`test_shapeDryRun.py` | 待实施 | 依赖 B8 关系属性列；shape 与既有 6 项校验同求值器 |
-| B11 L3/L5 断言与推理层 | **待实施** | `test_bitemporalQuery.py`、`test_qualifiedRelationSchema.py`、`test_owl2rlProfile.py`、`test_explanationChain.py` | 待实施 | OWL 2 RL 只做可规则化子集；不引外部推理机 |
-| B12 L6/L7/L8 访问互操作治理 | **已落（4540e6ed，v33）**（按 §4 L2 推荐 A 执行）** | `test_stableIri.py`、`test_accessProjectionPagination.py`、`test_interopExports.py`、`test_governanceRollback.py` | 待实施 | 导出格式以 RDF 1.1 为基线；RDF 1.2 只观察 |
-| B13 L9 评估层 | **已落（fa9d7c812）**（按 §4 L9 推荐 A 执行）** | `tests/unit/knowledge/ontology/cq/`、`tests/unit/knowledge/ontology/golden/`、`test_ontologyQuality.py` | 待实施 | CQ 测试依赖 B9；质量门阈值按实测调 |
-| B14 企业数据源接入器＋源库 schema 映射（接口预留） | **待实施（只预留接口）** | 红灯文件：`tests/unit/knowledge/enterprise/` 下 `test_enterpriseSourceProtocol.py`、`test_sourceSchemaMapping.py`、`test_enterpriseIngestAdmission.py` | 待实施 | 对应评测 V5；只落 Protocol/JSON 描述符/fake adapter/admission 接线，真实连接器另立项 |
-| UI 对齐（§15） | **实施中（UI agent 在途，见台账）** | 前端门：`npm run test`＋`npx vue-tsc --noEmit`；新页组件测试覆盖空态/错误态/权限态 | 待实施 | UI-0–UI-4 跟随 B9–B14；不新增 B15 |
+| B8 关系映射层补全 | **已落（e0be91459，v29）** | 红灯文件：`tests/unit/knowledge/ontology/test_relationMapping.py`（十组）＋`tests/unit/api/test_ontologyRelationCandidates.py` | 活体 15/15（`_liveVerifyOntologyStack.py`） | 本工作包为 2026-11-05 关系映射复核新增，不在原评测 V1–V5 内；分数不预设，复评时并入 A1/A2/A3/A4 |
+| B9 L0/L1 基础层 | **已落（9d3cc59ba，v30）** | 红灯文件：`test_cqTraceability.py`、`test_upperLite.py` | 活体 15/15（`_liveVerifyOntologyStack.py`） | CQ 目录与 upper-lite 先行；BFO/ISO 21838 只做导出映射 |
+| B10 L2/L4 术语与约束层 | **已落（18fc92165，v31）** | `test_termSkosLabels.py`、`test_ontologyShapes.py`、`test_shapeDryRun.py` | 活体 15/15（`_liveVerifyOntologyStack.py`，内置 shape 同流） | 依赖 B8 关系属性列；shape 与既有 6 项校验同求值器；**shapes CRUD REST 已开放**（`/ontology/shapes` 四动词，`test_ontologyRestCompletion.py`；StudioShapesSection 真调用） |
+| B11 L3/L5 断言与推理层 | **已落（b3467a955，v32 ＋ v35 档位 ＋ 事件时间词汇）** | `test_bitemporalQuery.py`、`test_qualifiedRelationSchema.py`、`test_owl2rlProfile.py`、`test_explanationChain.py`、**`test_eventTimePattern.py`（10 格）**、**`test_materializationModes.py`（10 格）** | 活体 56/56（解释链 404／双时态命中越界／observe 不进主路、enforce 进／time#before 进导出） | OWL 2 RL 只做可规则化子集；不引外部推理机；`asOf/knownAt` REST 已接线；**本批补上原先悬空的两项**：§12.4 事件/时间受控词汇（hasParticipant/hasTime＋Allen 四条挂 temporal 父属性，OWL-Time 只做 skos_exactMatch 导出，反面判据钉住不生成时间推理规则）与 §12.6 按规则类物化档位（v35 `materialization`，observe/enforce，缺省 observe ⇒ 存量零漂移）。**顺带修一处真缺陷**：`_ontologyParts()` 裸造引擎未接咽喉 ⇒ 条件类规则一经 REST/流水线登记且真匹配到事实就 400（“推理未接咽喉写入口”），现役判据因库内无匹配事实而从未踩过 |
+| B12 L6/L7/L8 访问互操作治理 | **已落（8e4b2f7a9，v33）** | `test_stableIri.py`、`test_accessProjectionPagination.py`、`test_interopExports.py`、`test_governanceRollback.py` | 活体 15/15（IRI 404/Turtle/分页） | 导出格式以 RDF 1.1 为基线；RDF 1.2 只观察；**rollback 与 JSON-LD/OWL/SHACL/PROV REST 已开放** |
+| B13 L9 评估层 | **已落（e4249bd19）** | `tests/unit/knowledge/ontology/cq/`、`tests/unit/knowledge/ontology/golden/`、`test_ontologyQuality.py` | 测试 + golden（CI）；未单列活体 | CQ 测试依赖 B9；质量门阈值按实测调；**质量报告 REST 已开放**（`GET /ontology/quality`，`ontologyQualityReport` 从此有生产消费者，UI-3 真调用） |
+| B14 企业数据源接入器＋源库 schema 映射（接口预留） | **已落（efd7fed79，v34）** | 红灯文件：`tests/unit/knowledge/enterprise/` 下 `test_enterpriseSourceProtocol.py`、`test_sourceSchemaMapping.py`、`test_enterpriseIngestAdmission.py` | 活体 15/15（fake adapter 路径） | 对应评测 V5；只落 Protocol/JSON 描述符/fake adapter/admission 接线，真实连接器另立项；**描述符提交/列表/单源回显 REST 已开放**（`/enterprise/sources`，`enabled` 与 `adapter_registered` 两态分开回显） |
+| UI 对齐（§15） | **已落（UI-0–UI-4，工作树未提交）** | 前端门：`npm run test -- --run` 291 文件/2353 passed；`npx vue-tsc --noEmit` clean；`npm run build` 通过；5 档新页测试覆盖空态/错误态/权限态/诚实占位 | 后端活体 43/43（含 shapes/四导出/rollback/双时态/质量报告/企业源描述符/术语声明写面/批次部分声明）；前端组件+build；**浏览器三条链已实跑（隔离栈，台账 §6-563）** | UI-0–UI-4 跟随 B9–B14；不新增 B15；**全部已列缺口收口：shapes、双时态、rollback、四导出、质量报告 REST、企业源描述符提交、术语 labels/module/identityKeys/qualifier_schema 写面、批次部分声明合并单点**；余下只有企业源真连接器（另立项）与「关系候选批准」那一腿需要真抽取流，不在浏览器里用假数据凑 |
+
+> **2026-11-06 收口状态**：B8–B14 后端已落；UI-0–UI-4 已落并过 2353 前端用例＋`vue-tsc`＋`vite build`。
+> **补口两轮已全部落地**：第一轮 shapes CRUD、`asOf/knownAt` REST、pipeline rollback REST、JSON-LD/OWL/SHACL/PROV 导出（`test_ontologyRestCompletion.py` 7 格绿）；第二轮质量报告 REST（`GET /ontology/quality`，`ontologyQualityReport` 从此有生产消费者）、企业源描述符提交 REST（`/enterprise/sources` 三面，`EnterpriseIngestor.saveConfig/loadConfig/listConfigs` 与 `EnterpriseSourceRegistry` 从此有生产入口）、术语声明写面（`labels/alt_labels/module/identity_keys/qualifier_schema` 经 `POST|PUT /ontology/terms` 与 `pipeline/run` 双入口写得出来，`test_ontologyGapClosureRest.py` 14 格绿）；第三轮**把票面两处从未实施的悬空项补齐**（事件/时间受控词汇＋按规则类物化档位 v35，`test_eventTimePattern.py`/`test_materializationModes.py` 共 20 格）并把 §8 第 5 条点名的两条 B8 链接进活体。顺带修掉三处随批漂移的常驻守卫与一处真缺陷（路由清单缺 19 条、模块分层未登记两份、台账 §6-552..561 表格形态让引用号查不到格、端点装配未接咽喉）。
+> S13 浏览器三条链**已实跑**（隔离栈：临时数据根＋9528 真 uvicorn＋真 JWT＋8101 Vite；台账 §6-563）——链一术语→批次成版→回滚→关系→查询/双时态→校验→导出→IRI 全通，链二 CQ/质量报告/基线诚实态全通，链三描述符提交与拒因回显全通。企业源真实连接器（DB/ERP API/事件流 fetchBatch）仍另立项：REST 面只提供描述符校验/落库/两态回显，UI 不提供任何「已连接」调用。「关系候选批准」那一腿需要真抽取流注候选，未用假数据在浏览器里凑。
+> 评分复评：**已按 §3 同一权重口径复算，十维加权 8.32 ≈ 8.3**（见 §17 第二次复评表）。原句「剩余缺口未计，待补齐后复算」作废——票面列出的缺口（三项 REST ＋ 批次部分声明 ＋ 事件时间 ＋ 物化档位）已全部落格，未落的只剩 §6 登记的另立项项。
+
+> 活体验证（单一现值，行内旧读数只作历史）：`_liveVerifyOntologyStack.py` 现值 **56/56 PASS**，数据根指纹跨多次复跑不变。扩展链：15/15（B8–B14 首批）→ 27/27（shapes/四导出/rollback/双时态）→ 39/39（质量报告/企业源/术语声明写面）→ 43/43（批次部分声明）→ **56/56**（别名归一链、候选审批链、observe/enforce 两档、time#before 导出）。表中各行写的 15/15 是首批读数。
 
 **B7 未做的一半（如实登记）**：可用性契约里"admission 异常→ingest 队列重试不丢事件"未新增判据——现役 `test_ingest_queue.py`／`test_ingest_jobs_queue.py` 已钉 lease 过期重取、`nack` 重试到死信、启动对账复位，`test_extractOnUpdateAndAsync.py` 已钉抽取失败 fail-soft 与 `extract_failed` 口径；本轮复算没发现"事件被静默丢弃"的活缺口，故不新造第二套判据（教义第 6 条）。若要把"抽取失败不重试"改判成重试，那是产品语义变更，另行拍板。
 
 ## §11 本次执行扫荡出的三处仍开（2026-11-05 现测）
 
-1. **endpoints 同层交叉常驻红**：`knowledge_core.py:1136` 函数内 import `knowledge_ingestion`（`extract_after_update`/`extract_event_summary`），由 `6632c6560`（SAG C2+C3）带入，守卫 `test_endpoints_module_layering.py[knowledge]` 自此一直红。修法按守卫原话"共享需求下沉共享层"，但要连依赖一起搬（`_try_extract_to_graph`／`_default_llm_call`／`_resolve_runtime_agents`）并改 6 个测试档的 monkeypatch 目标与 `test_knowledge_reexport_contract.py` 的归属表——属另一批的根因，本轮未动，等点单。
-2. **PUT 规则省略 body 是坏支路**：`update_ontology_rule` 用 `existing.get("body")` 兜现值，而 `_hydrate` 出来的是 `{kind,predicate,…}` 作者态之外的形状，`_parseBody` 只认 `atom`/`not` ⇒ 省略 body 的改版当场 400。现役测试一律显式带 body，所以从没踩过。本轮只在判据里按实况注明，未修。
+1. ~~**endpoints 同层交叉常驻红**~~ **已闭合（非本批所做，2026-11-06 现测改判）**：
+   `grep -n knowledge_ingestion neurova/api/endpoints/knowledge_core.py` 现值 **0 命中**，`test_endpoints_module_layering.py` 复跑 **10 passed**（本批只补登记了 `knowledge_enterprise`/`knowledge_ontology_iri` 两个漏网模块）。原句留痕：（`extract_after_update`/`extract_event_summary`），由 `6632c6560`（SAG C2+C3）带入，守卫 `test_endpoints_module_layering.py[knowledge]` 自此一直红。修法按守卫原话"共享需求下沉共享层"，但要连依赖一起搬（`_try_extract_to_graph`／`_default_llm_call`／`_resolve_runtime_agents`）并改 6 个测试档的 monkeypatch 目标与 `test_knowledge_reexport_contract.py` 的归属表——属另一批的根因，本轮未动，等点单。
+2. ~~**PUT 规则省略 body 是坏支路**~~ **已闭合（§6-551）**：`engine.toAuthoringBody` 单点把读面形状换回作者态形状，判据 `testUpdateRuleWithoutBodyKeepsExistingBody` 钉住「省略 body 即保留现值」。本行原文停在 §11 写作时的状态，留痕不删。
 3. **身份面两格常驻红**（`test_requestUserIdEntryConsistency`／`test_turnIdentitySingleSource`）：登记表白名单与实装写者不一致，A/B 复算为 HEAD 自带，与本体栈无关。
 
 ## §12 L0–L9 分层目标架构与 B9–B13 工作包（2026-11-05）
@@ -349,6 +355,7 @@ Preflight（B1–B7 已落核验）
 
 - **目标**：规范化主体＋限定三元组（N 元关系）＋双时态（valid time/transaction time）＋置信＋来源＋冲突＋租户。
 - **现状**：`knowledge_facts.py:58` 已有 subject_key/predicate_term_id/object_term/qualifier_json/confidence/evidence_state/valid_from/valid_until/recorded_at/retracted_at；`knowledge_subjects` 有 canonical/aliases/merged_into；`knowledge_conflicts`、`knowledge_assertions/activities`、tenant v20 在册。`qualifier_json` 是自由 JSON；无 `asOf/knownAt` 查询参数。
+  - **2026-11-06 更新**：`qualifier_schema_json`（v32）与 `asOf/knownAt` 双轴（REST 已接）在册；事件/时间那一腿本批补齐——`hasParticipant`/`hasTime` 与 Allen 四条（before/after/overlaps/during）随 `upper_lite` 播种、定义域统一钉 `Event`、四条挂既有 `temporal` 父属性，OWL-Time 只落 `external_iris.skos_exactMatch` 导出槽；**不做运行时时间推理**由反面判据钉住。
 - **设计**：
   1. 限定关系 schema：关系术语增 `qualifier_schema_json`（v32，allowed keys/types/required）；admission 校验，未知键记 finding；N 元关系继续用限定三元组，不新造 reification 表。
   2. 双时态查询：`asOf`（valid time）与 `knownAt`（transaction time）参数；valid 过滤 `valid_from/valid_until`，transaction 过滤 `recorded_at/retracted_at`；API 在 facts/query 面暴露。
@@ -374,6 +381,7 @@ Preflight（B1–B7 已落核验）
 
 - **目标**：OWL 2 RL 可规则化子集＋分层否定＋传递闭包＋条件类＋物化＋推导账本＋精确撤销＋解释链。
 - **现状**：`rule_engine.py:3` 固定 Datalog 片段；B1 条件类；`transitiveClosure`；`derivation_ledger`；B4 引用；B8 **计划**补 inverse/subproperty/transitive 自动规则（待实施）；无 profile 声明、无完整解释链、无按规则类的物化模式。
+  - **2026-11-06 更新**：B8 自动规则族已落（v29）；profile 声明在册（`2026-11-05-ontology-owl2rl-profile.md`，逐条标注 物化/校验/仅导出）；解释链端点在册；**按规则类的物化档位本批补齐**（v35 `ontology_rules.materialization` ∈ observe/enforce，缺省 observe ⇒ 存量零漂移；口径单点在 `derivation_ledger.derivedExclusionClause`，读面 `hiddenDerivedFactIds` 与走查共用同一段片段）。
 - **设计**：
   1. `docs/specs/2026-11-05-ontology-owl2rl-profile.md` 明确子集：subClass/subProperty/domain/range/inverse/symmetric/transitive/functional（`cardinality=1`）/受限 hasValue（条件类）；本实现不支持 unionOf/complementOf/oneOf/等价类/`sameAs`，登记即拒。
   2. 规则形状：relay（含单原子直接搬移、双原子接力、分层否定）/conjunction（条件类）/inverse（B8 新增）；传递闭包；全部落 `ontology_rules`，由 `ensureAutoRules` 与手工规则同引擎；不新增任意嵌套/聚合。
@@ -658,7 +666,8 @@ R2RML 风格的 JSON 子集，不做完整 R2RML/SPARQL 引擎：
 ### §15.5 API 契约与缺口
 
 - 现有可复用：`GET /knowledge-graph/{agentId}/studio`、`/knowledge/ontology/terms|rules`、`/knowledge/graph/instances`、`/knowledge/conflicts`、`/knowledge/facts/{factId}/lineage`、`/knowledge/facts/{factId}/turtle`、`/knowledge/evaluation/baseline|audit/evaluation/compare|audit/retrieval-metrics`。
-- 随 B 批新增的 UI 契约：B2 `POST /knowledge/ontology/validate`；B3 `/knowledge/access/{query|analyze|validate|use}`；B8 关系候选列表/审批；B9 CQ 目录与运行；B10 shapes CRUD/dry-run；B11 `asOf/knownAt` 与 `GET /knowledge/ontology/derivations/{fact_id}`；B12 稳定 IRI 解析、五格式导出、发布/diff/回滚/审计；B13 CQ/质量/NDCG；B14 企业源描述符与 fake adapter。
+- 随 B 批新增的 UI 契约：B2 `POST /knowledge/ontology/validate`；B3 `/knowledge/access/{query|analyze|validate|use}`；B8 关系候选列表/审批；B9 CQ 目录与运行；B10 shapes CRUD/dry-run；B11 `asOf/knownAt` 与 `GET /knowledge/ontology/derivations/{fact_id}`；B12 稳定 IRI 解析、五格式导出、发布/diff/回滚/审计；B13 `GET /knowledge/ontology/quality`；B14 `/knowledge/enterprise/sources`（列表/单源/提交）。
+- **2026-11-06 缺口收口后的剩余面**：CQ 目录与运行结果仍以静态追溯表＋CI 读数呈现（`ontologyStatic.ts` 的 CQ_ROWS，仓内无 CQ 运行端点）；D 组默认关矩阵是静态表（前端读不到服务端 env）；企业源只有描述符提交与两态回显，`fetchBatch` 真连接器另立项。这三处按 §15.4 以诚实态呈现，不造假调用。
 - **B3 消费面**：UI-2 起以 `/knowledge/access/*` 作为四动词主入口（UI 成为首个仓内消费者）；在 UI 落地前，K-08「仓内零消费者」仍成立，落地后同步更新 §13.4 与 KB 计划。
 - 类型与信封：新增 `ontology.ts`/`knowledgeInterop.ts`/`knowledgeGovernance.ts` 等模块，禁止 `any` 直塞；统一 `{items,total,next_cursor}`、severity、derivation、bitemporal 类型；API 文档同步 `docs/02-api/API_REFERENCE.md`。
 
@@ -693,6 +702,18 @@ R2RML 风格的 JSON 子集，不做完整 R2RML/SPARQL 引擎：
 - 不隐藏默认关/观察态，不以 UI 动画或文案掩盖后端未接线。
 - 原型文件不是生产页面，不进入前端构建；不得以原型演示替代真实页面验收。
 
+### §15.9 实施状态（2026-11-06）
+
+| UI 步骤 | 状态 | 证据 | 诚实缺口 |
+|---|---|---|---|
+| UI-0 Studio | 已落 | 7 分区页＋upper-lite 树＋术语/关系/CQ/Shapes 组件；shapes CRUD 已接 REST；术语 labels/alt_labels/module/identity_keys/qualifier_schema 改可编辑（原只读块撤除）；`OntologyStudioPage.test.ts` | —（声明写面已开放，浏览器链一实测过） |
+| UI-1 Fact Explorer | 已落 | 四动词查询、双时态控件随 query 发送、事实详情/解释链；`FactExplorerPage.test.ts` | —（双时态已接线） |
+| UI-2 访问/互操作/发布 | 已落 | Query Workbench、IRI 解析、五格式下载、Release 流水线/diff/rollback；`KnowledgeInteropPage.test.ts` | —（rollback 与四导出已接线） |
+| UI-3 Evaluation | 已落 | CQ 卡＋质量卡真调用 `GET /ontology/quality`（缺陷表/两指标/空态/错误态四态齐）、默认关矩阵；`KnowledgeEvalPage.ontology.test.ts` | CQ 运行结果与 NDCG 仍以静态追溯表＋CI 读数呈现（仓内无 CQ 运行端点，§6 已登记） |
+| UI-4 Enterprise Sources | 已落 | 描述符表单按后端形状重建（sourceType/columns/subject/predicate/object/qualifiers/validFrom/validUntil）＋提交真调用＋列表两态回显＋拒因显式；连接按钮仍禁用；`EnterpriseSourcesPage.test.ts` | 真实连接器（fetchBatch）另立项——UI 不提供任何「已连接」调用 |
+
+> 前端门：291 文件 / 2353 passed；`vue-tsc` clean；`vite build` 通过；后端活体 43/43。真实浏览器三条链已在隔离栈上实跑（台账 §6-563）；三项剩余缺口（质量报告 REST／企业源描述符提交／术语声明写面）与批次部分声明合并全部落格，不再有以「规划中」占位的已列缺口。
+
 ## §16 一次性执行 Runbook（给执行 Agent，2026-11-05）
 
 > 本文不再按 B1–B14 分批交付。B1–B14 是工作包编号；所有工作包在同一次执行内按本节顺序完成，最后统一收口。每个工作包的门是继续条件，不是交付节点；门失败就在原地修复，不带病进入下一步。
@@ -724,7 +745,15 @@ R2RML 风格的 JSON 子集，不做完整 R2RML/SPARQL 引擎：
 | S10 | UI-2 访问/互操作/发布 | — | B12 | Query Workbench、IRI 解析、五格式导出、Release/diff/rollback；UI 成为 B3 首个仓内消费者 |
 | S11 | UI-3 Evaluation | — | B13 | CQ/质量/NDCG A-B 仪表盘、默认关矩阵 |
 | S12 | UI-4 Enterprise Sources | — | B14 | 「接口预留/未接入」页、描述符编辑器、fake adapter 演示；真实连接按钮禁用 |
-| S13 | Final gates | — | S1–S12 | §8 第 1–13 条、§15.7、浏览器三条链、i18n/主题、API 文档、台账、评分复评；全绿后一次性收口 |
+| S13 | Final gates | — | S1–S12 | §8 第 1–13 条、§15.7、**浏览器三条链已实跑（§6-563，隔离栈）**、i18n/主题、API 文档、台账（至 §6-563）、评分复评；代码与文档全部落格，推送/交付仍等授权 |
+
+> **判据文件落点对表（2026-11-06 现测）**：S3/S5 门点名的六档判据没有独立成档，"
+     "覆盖落在别处——`termModules`/`versionedIri`/`semver` 三组落在 "
+     "`test_termSkosLabels.py`（＋`test_governanceRollback.py` 的 semver 面），"
+     "`shapeSeverity` 落在 `test_ontologyShapes.py`。这不是漏做，但**票面写的文件名查不到就是"
+     "悬空引用**，所以在此登记落点；另两份确曾缺失、本批补齐：`test_facadeTenantIsolation.py`"
+     "（§8 第 9 条的租户隔离面，2 格）与 §12.4/§12.6 点名的 `test_eventTimePattern.py`"
+     "（10 格）/`test_materializationModes.py`（10 格）。
 
 ### §16.2 停止条件
 
@@ -776,3 +805,30 @@ R2RML 风格的 JSON 子集，不做完整 R2RML/SPARQL 引擎：
 | **合计** | 100 | **6.8** | **≈8.0** | 超出 §0 投影 7.8 的部分来自：B7 图谱转正已由 SAG C1 完成（B1 维 +1.0 不再是"待实施"）；B8/B11 补齐了原评测 A3 低分的根因（关系特征与解释链）而非仅补声明 |
 
 偏差 >0.3 的维度归因：A3（+2.5 超投影 8.5＝持平）——B8 关系特征落格使 subproperty/transitive/inverse 三个 OWL 2 RL 公理从"无机制"变"有机制在册"；A4（+2.5 超投影 6.5＝持平）——五格式导出超出原 Turtle 单格。
+
+### §17.1 第二次复评（2026-11-06，票面缺口全部落格后；同一权重口径）
+
+第一次复评（§17）写在「B8–B14 模块落格、REST 面尚未开放」的时点上，把**模块在册**与
+**端点可被消费**混为一谈了。本轮两件事都真落了（含浏览器三条链实跑），故按同一权重
+重算一次，并把每次变动的驱动写清——这不是提分，是把上一次多计与少计的两头都校正：
+
+| 维度 | 权重 | 原评测 | §17 复评 | 本次 | 驱动（只写增量） |
+|---|---|---|---|---|---|
+| A1 本体结构定义 | 12 | 9.0 | 9.5 | 9.5 | 无增量（SKOS/模块/upper-lite 已在上一版计过） |
+| A2 约束规则 | 12 | 8.5 | 9.0 | 9.0 | 无增量（shapes CRUD 属互通面，计到 A4/D1 更准） |
+| A3 推理 | 15 | 6.0 | 8.5 | **9.0** | **物化档位**：转正机制从「一条全局 env 管所有推导」变成「按规则类 observe/enforce」，缺省 observe 保住存量零漂移，口径单点在账本片段 |
+| A4 标准栈互通 | 8 | 4.0 | 6.5 | **7.0** | 五格式**端点**在册（上一版只有模块）＋ OWL-Time `skos_exactMatch` 进 Turtle 导出 |
+| B1 知识图谱 | 10 | 7.5 | 8.5 | 8.5 | 无增量（图谱转正由 SAG C1 计过） |
+| B2 企业数据层 | 8 | 5.0 | 5.5 | **6.0** | 描述符提交/列表/单源回显 REST 在册，`enabled` 与 `adapter_registered` 两态分开；**真实连接器仍无**，故不上更高 |
+| C1 Agent 层 | 10 | 7.0 | 7.0 | 7.0 | 无增量（Planner 抽象 §6 不纳入） |
+| C2 检索价值链 | 12 | 7.5 | 8.5 | **9.0** | 双时态 REST 接线＋enforce 档结论进主路仍带 `via_derived`（放数据也放出处） |
+| D1 四动词 | 8 | 5.5 | 8.0 | **8.5** | 质量报告 REST 在册（`ontologyQualityReport` 有了生产消费者），UI-3 真调用 |
+| D2 工具链 | 5 | 6.0 | 7.5 | **8.0** | rollback 端点在册＋批次/PUT「未声明即保留现值」收成注册表单点（发布不再抹声明） |
+| **合计** | 100 | **6.8** | **≈8.0** | **8.32 ≈ 8.3** | 相对 §0 投影 ≈7.8 偏 **+0.52** |
+
+偏差 >0.3 的归因（§8 第 4 条要求）：
+
+1. **+0.5 里最大的两块是 A3 与 C2**：原评测给 A3 打 6.0 的根因是「关系特征与解释链只有声明没有机制」，B8 补机制、B11 补解释链、本批补按规则类档位——三次都在同一维度上累加，所以这一维从 6.0 走到 9.0 不是本轮一次跳上来的。
+2. **A4/B2/D1 的增量含一次口径校正**：上一版把「模块在册」按「端点可消费」计了分（当时 shapes/四导出/rollback/quality 都没有 REST）。本轮端点真落了，分数才与证据对齐——**如果按上一版口径本轮就该是持平**，写在这里避免被读成连续提分。
+3. **没动的三处仍然压着上限**：C1（Planner 抽象 §6 不纳入）、B2 的真实连接器（另立项）、完整 OOPS!/OntoClean/OQuaRE 认证与 OWL 2 RL 完备性（§6 不纳入）。要再往上走必须动这三块之一，而不是给已落的能力重复计分。
+4. **可复核性**：本次每一格的证据都在 `audit-reports/simplification-audit-2026-10-05.md` §6-560..564，且活体 56/56、前端 2353、后端 1439＋20 可复跑；评分不引入任何未验证读数。
