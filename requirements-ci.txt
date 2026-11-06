@@ -141,3 +141,12 @@ rich>=13.0
 
 # 本地嵌入引擎（ONNX）的三件运行时声明在上文「稠密向量原语」那一节，
 # 不在此处再写一份（第二份下界就是第二个事实源）。两者的取舍与理由同处。
+
+# RDF 互操作对拍（`tests/unit/knowledge/ontology/test_rdflibInterop.py`）。
+# 该档用 `pytest.importorskip("rdflib")`：缺席时整档 skip，读数从"三方解析器认不认我们的
+# Turtle 子集"变成"环境里没装东西"——两者在 CI 里同形，正是本清单开头那条纪律要消除的形态
+# （向量四件 / rich 同一根因，同处补齐）。
+# **只进 CI 清单，不进 requirements.txt**：产品运行时零 RDF 依赖是 2026-09-20 六项决策之一，
+# 装了 rdflib 也不允许 `neurova/` 里出现它的 import（由 test_rdflibInterop 的对照格与
+# tests/unit/test_dev_path_and_runtime_dep_guards.py 的运行时面比对共同钉住）。
+rdflib>=7.0

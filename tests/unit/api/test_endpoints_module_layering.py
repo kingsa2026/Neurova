@@ -76,6 +76,7 @@ DOMAINS = (
                 "knowledge_mcp_source",   # c3efc886
                 "knowledge_ontology",     # 9aeff802
                 "knowledge_enterprise",   # specs/2026-11-05 B14（聚合器直接挂载）
+                "knowledge_observability",  # specs/2026-11-06 默认关读数面（同走聚合器）
             ),
         ),
         delegated_prefixes=None,

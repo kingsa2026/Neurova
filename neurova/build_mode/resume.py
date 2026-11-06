@@ -148,10 +148,14 @@ async def resumeBuildInteraction(
         resetCurrentBuildSessionId,
         setCurrentBuildSessionId,
     )
-    from neurova.core.identity_context import set_request_user_id
+    from neurova.core.identity_context import clear_request_user_id, set_request_user_id
 
+    # 通道与载体同取一个变量：原先这里写 `session.user_id or None`，而 metadata 里写
+    # `session.user_id`——同一个人在两条面上落成两种值，正是判据②b 要拦的分叉。
+    # 消费侧一律 falsy 兜底（`or "default"` / `or "anonymous"`），空串与 None 同形。
+    owner = session.user_id
     setCurrentBuildSessionId(sessionId)
-    set_request_user_id(session.user_id or None)
+    set_request_user_id(owner)
     try:
         response = await agent.chat(
             user_input=resumePrompt,
@@ -159,7 +163,7 @@ async def resumeBuildInteraction(
             metadata={
                 "build_session_id": sessionId,
                 "build_resume": True,
-                "user_id": session.user_id,
+                "user_id": owner,
                 "agent_id": session.agent_id,
             },
         )
@@ -189,7 +193,7 @@ async def resumeBuildInteraction(
         }
     finally:
         resetCurrentBuildSessionId()
-        set_request_user_id(None)
+        clear_request_user_id()
 
     refreshed = manager.get(sessionId) or session
     pending = [item for item in refreshed.interactions if item.get("status") == "pending"]

@@ -123,6 +123,17 @@ class CompareRequest(BaseModel):
     top_k: int = Field(default=10, ge=1, le=50)
 
 
+class AnalyzeQueryRequest(BaseModel):
+    """`/semantic-search/analyze` 与门面 `/access/analyze` 共用的请求形状。
+
+    原先这里收裸 dict（`body.get("query")`）：OpenAPI 只能广告成没有字段的自由对象，
+    对外等于说"参数随便发"，而实际只有一个键起作用。契约声明落在被转交方（门面 import），
+    行为不变——缺省仍是空串。
+    """
+
+    query: str = ""
+
+
 def _analyze_query_features(query: str) -> dict:
     """分析查询特征"""
     words = query.split()
@@ -547,9 +558,9 @@ async def compare_search(
 
 
 @router.post("/analyze")
-async def analyze_query(body: dict):
+async def analyze_query(body: AnalyzeQueryRequest):
     """分析查询特征 - 评估三种搜索方式的预期表现"""
-    query = body.get("query", "")
+    query = body.query
     features = _analyze_query_features(query)
     weights = _recommend_weights(features)
     suggestion = _get_suggestion(features)

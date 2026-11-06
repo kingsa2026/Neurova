@@ -9,7 +9,7 @@
 过期判据不是日历而是**双向差集**：代码树增删一个模块，本表与代码树的差集即非空，守卫 `tests/unit/test_api_inventory_freshness_guard.py` 立刻报红并给出差集两侧的名单。
 
 <!-- API-INVENTORY:BEGIN -->
-## 一、前端 API 模块（61 个）
+## 一、前端 API 模块（64 个）
 
 | 模块文件 | 消费的后端前缀 | barrel 导出 | 仓内引用处 |
 |------|------|------|------|
@@ -19,9 +19,10 @@
 | `NeurUI/src/api/modules/agent-package.ts` | `/agents` | 是 | 1 |
 | `NeurUI/src/api/modules/analytics.ts` | `/analytics` | 是 | 3 |
 | `NeurUI/src/api/modules/audit.ts` | `/audit` | 是 | 1 |
+| `NeurUI/src/api/modules/build.ts` | `/build` | **否** | 3 |
 | `NeurUI/src/api/modules/builder.ts` | `/builder` | 是 | 1 |
 | `NeurUI/src/api/modules/channel-configs.ts` | `/channel-adapters`, `/channel-configs` | 是 | 17 |
-| `NeurUI/src/api/modules/collaboration.ts` | `/collaboration`, `/neurflow` | 是 | 23 |
+| `NeurUI/src/api/modules/collaboration.ts` | `/collaboration`, `/neurflow` | 是 | 20 |
 | `NeurUI/src/api/modules/collaborationRoom.ts` | `/collaboration` | **否** | 2 |
 | `NeurUI/src/api/modules/computer.ts` | `/computer` | 是 | 3 |
 | `NeurUI/src/api/modules/console.ts` | `/console` | 是 | 8 |
@@ -32,13 +33,14 @@
 | `NeurUI/src/api/modules/files.ts` | `/files` | 是 | 7 |
 | `NeurUI/src/api/modules/firewall.ts` | `/firewall` | 是 | 2 |
 | `NeurUI/src/api/modules/generation.ts` | `/generation` | 是 | 6 |
-| `NeurUI/src/api/modules/governance.ts` | `/governance` | **否** | 4 |
+| `NeurUI/src/api/modules/governance.ts` | `/channel-adapters`, `/governance` | **否** | 4 |
 | `NeurUI/src/api/modules/groups.ts` | `/groups` | 是 | 2 |
 | `NeurUI/src/api/modules/growth.ts` | `/growth` | 是 | 5 |
 | `NeurUI/src/api/modules/health.ts` | `/health` | 是 | 5 |
 | `NeurUI/src/api/modules/home.ts` | `/home` | 是 | 3 |
 | `NeurUI/src/api/modules/image.ts` | `/image` | 是 | 1 |
 | `NeurUI/src/api/modules/knowledge.ts` | `/knowledge`, `/knowledge-graph`, `/semantic-search` | 是 | 9 |
+| `NeurUI/src/api/modules/knowledgeEval.ts` | `/knowledge` | 是 | 3 |
 | `NeurUI/src/api/modules/language.ts` | `/language` | 是 | 4 |
 | `NeurUI/src/api/modules/logs-api.ts` | `/logs-api` | 是 | 1 |
 | `NeurUI/src/api/modules/media.ts` | `/media` | 是 | 1 |
@@ -50,6 +52,7 @@
 | `NeurUI/src/api/modules/negative-screen.ts` | `/negative-screen`, `/notifications` | 是 | 6 |
 | `NeurUI/src/api/modules/neurflow.ts` | `/neurflow` | 是 | 8 |
 | `NeurUI/src/api/modules/notifications.ts` | `/notifications` | 是 | 6 |
+| `NeurUI/src/api/modules/ontology.ts` | `/knowledge` | **否** | 14 |
 | `NeurUI/src/api/modules/plans.ts` | `/plans` | 是 | 3 |
 | `NeurUI/src/api/modules/plugins.ts` | `/plugins` | 是 | 0 |
 | `NeurUI/src/api/modules/projects.ts` | `/projects` | 是 | 5 |
@@ -77,7 +80,7 @@
 
 > `NeurUI/src/api/index.ts` 是 axios 实例与鉴权拦截器，`NeurUI/src/api/auth.ts` / `NeurUI/src/api/neuron.ts` 是模块目录之外的单文件客户端，三者不属本表模块口径。
 
-## 二、后端挂载前缀（92 条）
+## 二、后端挂载前缀（94 条）
 
 | 端点模块 | 挂载前缀 |
 |------|------|
@@ -98,6 +101,7 @@
 | `neurova/api/endpoints/backup_api.py` | `/api/v1/backups` |
 | `neurova/api/endpoints/benchmark.py` | `/api/v1/benchmark` |
 | `neurova/api/endpoints/budget_api.py` | `/api/v1/budgets` |
+| `neurova/api/endpoints/build_mode.py` | `/api/v1/build` |
 | `neurova/api/endpoints/builder.py` | `/api/v1/builder` |
 | `neurova/api/endpoints/channels.py` | `/api/v1/channel-adapters` |
 | `neurova/api/endpoints/channel_config.py` | `/api/v1/channel-configs` |
@@ -122,6 +126,7 @@
 | `neurova/api/endpoints/growth.py` | `/api/v1/growth` |
 | `neurova/api/endpoints/health.py` | `/api/v1/health` |
 | `neurova/api/endpoints/image.py` | `/api/v1/image` |
+| `neurova/api/endpoints/knowledge_access_facade.py` | `/api/v1/knowledge` |
 | `neurova/api/endpoints/knowledge_core.py` | `/api/v1/knowledge` |
 | `neurova/api/endpoints/knowledge_graph_api.py` | `/api/v1/knowledge-graph` |
 | `neurova/api/endpoints/knowledge_integration.py` | `/api/v1/knowledge-integration` |
@@ -176,7 +181,7 @@
 
 ## 三、差集（断点以显式名单暴露，不用「大致一致」带过）
 
-**barrel 未导出的模块**：`NeurUI/src/api/modules/agent-migration.ts`, `NeurUI/src/api/modules/collaborationRoom.ts`, `NeurUI/src/api/modules/cost.ts`, `NeurUI/src/api/modules/governance.ts`, `NeurUI/src/api/modules/quality.ts`, `NeurUI/src/api/modules/rsiGovernance.ts`, `NeurUI/src/api/modules/studio.ts`, `NeurUI/src/api/modules/text-evolution.ts`
+**barrel 未导出的模块**：`NeurUI/src/api/modules/agent-migration.ts`, `NeurUI/src/api/modules/build.ts`, `NeurUI/src/api/modules/collaborationRoom.ts`, `NeurUI/src/api/modules/cost.ts`, `NeurUI/src/api/modules/governance.ts`, `NeurUI/src/api/modules/ontology.ts`, `NeurUI/src/api/modules/quality.ts`, `NeurUI/src/api/modules/rsiGovernance.ts`, `NeurUI/src/api/modules/studio.ts`, `NeurUI/src/api/modules/text-evolution.ts`
 
 **前后端前缀契约断点**（前端按 `baseURL=/api/v1` 请求，后端无对应挂载点 → 404）：无
 

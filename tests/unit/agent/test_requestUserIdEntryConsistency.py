@@ -106,6 +106,24 @@ ENTRY_POINTS: Dict[str, Dict[str, object]] = {
         "carrierSource": "同一个 user_id 进 turnMetadata['user_id']，与管线其余入口同形",
         "feedsVia": "user_id",
     },
+    "neurova/build_mode/resume.py": {
+        "kind": "boundaryFeedsMetadata",
+        "requestSource": "owner = session.user_id —— 构建模式续跑轮自己起轮（回合创建不在任何 "
+                         "HTTP 入口里），必须在拉起 `agent.chat` 前把**会话记录里的属主**交给"
+                         "唯一通道；槽位由 `clear_request_user_id()` 在 finally 清（清槽不带值，"
+                         "不算第二处身份来源）",
+        "carrierSource": "同一个 owner 进 metadata['user_id']（dict 字面量），与 build_session_id 同批内联",
+        "feedsVia": "owner",
+    },
+    "neurova/security/approval_continuation.py": {
+        "kind": "boundaryFeedsMetadata",
+        "requestSource": "owner = str(user_id or '') —— 审批带外执行完成后的续跑轮由审批记录显式"
+                         "带入身份，同样在自己那条链上写唯一通道（原形态通道取 "
+                         "`str(user_id) if user_id else None`、载体取 `str(user_id or '')`，"
+                         "同一轮两个读数，正是 ②b 要拦的分叉）",
+        "carrierSource": "同一个 owner 进 metadata['user_id']（dict 字面量）",
+        "feedsVia": "owner",
+    },
     "neurova/tool_executor.py": {
         "kind": "derivedFromFacadeRead",
         "requestSource": "self._agent_identity()[0]",

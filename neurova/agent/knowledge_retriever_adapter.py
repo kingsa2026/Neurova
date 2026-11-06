@@ -30,10 +30,18 @@ ADOPTION_CANDIDATE_MAX = 100
 MISS_CAPTURE_ENV = "NEUROVA_KB_MISS_CAPTURE"
 
 
-def _missCaptureEnabled() -> bool:
+def missCaptureEnabled() -> bool:
     return str(os.environ.get(MISS_CAPTURE_ENV) or "").strip().lower() in (
         "on", "1", "true", "yes",
     )
+
+
+def missCaptureMode() -> str:
+    """D-03 的现值形读数（供默认关注册表面委托）。
+
+    env 仍只在上头那一个函数里解一次；这里再读就是第二个事实源。
+    """
+    return "on" if missCaptureEnabled() else "off"
 
 
 def _isCapturableMissQuery(query: str) -> bool:
@@ -372,7 +380,7 @@ class KnowledgeRetrieverAdapter:
 
             if not knowledge_items:
                 if (
-                    agent_id and _missCaptureEnabled()
+                    agent_id and missCaptureEnabled()
                     and _isCapturableMissQuery(searchQuery)
                     and not (normMetadata and normMetadata.get("matched_subjects"))
                 ):

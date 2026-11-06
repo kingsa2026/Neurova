@@ -72,3 +72,8 @@ def fusionEnabled() -> bool:
     return str(os.environ.get(FUSION_ENV) or "off").strip().lower() in (
         "rrf", "on", "1", "true", "yes"
     )
+
+
+def fusionMode() -> str:
+    """D-11 的现值形读数（供默认关注册表面委托）；env 只由 fusionEnabled 解一次。"""
+    return "on" if fusionEnabled() else "off"

@@ -45,6 +45,11 @@ class FactSurfaceConfig:
         return cls(enabled=enabled)
 
 
+def factSurfaceMode() -> str:
+    """D-04 的现值形读数（供默认关注册表面委托）；env 只由 `fromEnv()` 解一次。"""
+    return "on" if FactSurfaceConfig.fromEnv().enabled else "off"
+
+
 def factToItem(fact: Dict[str, Any], canonicalLabel: str) -> Dict[str, Any]:
     """事实 → 检索条目形状（同一形状的 id 才能与叙述命中一起排序）。
 

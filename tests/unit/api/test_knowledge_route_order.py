@@ -122,6 +122,8 @@ _KB_ROUTES = [
     ("/alias-candidates", "GET"),
     ("/alias-candidates/{candidate_id}/approve", "POST"),
     ("/alias-candidates/{candidate_id}/reject", "POST"),
+    # specs/2026-11-06 默认关能力读数面（§15.1「观测与开关」的服务端面，两段字面路径）
+    ("/observability/default-off", "GET"),
 ]
 
 

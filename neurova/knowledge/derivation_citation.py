@@ -37,6 +37,11 @@ def conditionClassRouteOn() -> bool:
     return str(os.environ.get(CONDITION_CLASS_ROUTE_ENV) or "").strip().lower() in _ROUTE_ON
 
 
+def conditionClassRouteMode() -> str:
+    """D-06 的现值形读数（供默认关注册表面委托）；env 只由 conditionClassRouteOn 现读。"""
+    return "on" if conditionClassRouteOn() else "off"
+
+
 def _derivedFactIds(store: Any, tenantId: str = "default") -> set:
     """本租户「按观察态处理」的推导行 id，一条查询取完。
 

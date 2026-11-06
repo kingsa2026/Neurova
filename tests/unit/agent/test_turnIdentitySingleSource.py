@@ -102,6 +102,10 @@ DECLARED_IN: Dict[str, str] = {
     "neurova_turn_user_input": "neurova/core/turn_context.py",
     "neurova_turn_session_id": "neurova/core/turn_context.py",
     "neurova_request_user_id": "neurova/core/identity_context.py",
+    # 构建模式的作用域通道：装的是"这一轮在续跑哪个 build 会话"，既不装 user_id 也不装
+    # 轮次内容，与上面三条正交。检测器按身份词根（user/session/identity/tenant）把它扫出来
+    # 有意的——新增一条就得在此挂号，否则⑦ 的"清单＝台账"退化成"台账只覆盖旧三条"。
+    "neurova_build_session_id": "neurova/core/build_context.py",
 }
 
 #: 轮身份唯一入口在生产侧的唯一调用方。

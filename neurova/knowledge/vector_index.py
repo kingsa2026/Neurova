@@ -52,9 +52,14 @@ _HEADING_WEIGHT = 1.0
 _CONTENT_WEIGHT = 0.95
 
 
-def _dualVectorOn() -> bool:
+def dualVectorOn() -> bool:
     raw = str(os.environ.get(ENV_DUAL_VECTOR) or "").strip().lower()
     return raw in ("1", "true", "on", "yes")
+
+
+def dualVectorMode() -> str:
+    """D-08 的现值形读数（供默认关注册表面委托）；env 只在 dualVectorOn 里解一次。"""
+    return "on" if dualVectorOn() else "off"
 
 
 def revisionPathFor(shardPath: Path) -> Path:
@@ -380,7 +385,7 @@ class KnowledgeVectorIndex:
             # （to_compute 为空）会以 `computed` 未定义收场——UnboundLocalError 被下面的
             # `except` 吞成一条 errors，读数看上去是「0 条目」。
             computed = 0
-            dualOn = _dualVectorOn()
+            dualOn = dualVectorOn()
             to_compute: List[Tuple[str, Dict[str, Any]]] = []
             for kid, entry in desired.items():
                 fp = _fingerprint(entry)
@@ -531,7 +536,7 @@ class KnowledgeVectorIndex:
             return []
 
         annHits: Optional[List[Dict[str, Any]]] = None
-        if not _dualVectorOn():
+        if not dualVectorOn():
             annHits = self._searchAnn(
                 str((user or {}).get("user_id") or "default"),
                 dict(items),
@@ -541,7 +546,7 @@ class KnowledgeVectorIndex:
         if annHits is not None:
             return annHits
 
-        dualOn = _dualVectorOn()
+        dualOn = dualVectorOn()
         scored: List[Tuple[str, float, Dict[str, Any]]] = []
         for kid, rec in items:
             scoreMain = vector_math.cosineSimilarity(qv, rec.get("vector") or [])
