@@ -625,27 +625,41 @@ R2RML 风格的 JSON 子集，不做完整 R2RML/SPARQL 引擎：
 
 ### §15.2 信息架构（导航）
 
+> 2026-11-06 复订：原设计把六页平铺在「知识与认知」分组里，实测同一批能力散在**用户区平铺 4 项＋Agent 区 2 项**，
+> 找齐要跨两个区；且 UI-0 把 GraphWorkbench 唯一菜单项的路径与标签一起改指 ontology-studio，
+> 使 `/agent/:id/graph-workbench` 沦为「只有记住 URL 才能到达」的孤儿页，也从未进过权限目录。
+> 现收成一个「数据中台」分组，图谱工作台补回一级入口。
+
 ```
-知识与认知
-├─ 知识库            /knowledge                     条目、导入、来源、冲突、MCP
-├─ 本体工作台        /agent/:id/ontology-studio     概览/CQ、术语、关系、形状、推理、发布
-├─ 事实浏览          /agent/:id/facts               ABox 查询、双时态、溯源、解释链
-├─ 互操作与导出      /knowledge/interop             Turtle/JSON-LD/OWL/SHACL/PROV
-├─ 评测与质量        /knowledge-eval                 CQ、质量、NDCG、A-B、默认关矩阵
-└─ 企业数据源        /knowledge/enterprise-sources  接口预留、描述符、假适配器
+数据中台（侧栏用户区分组，storage-key="data-platform"，8 项）
+├─ 中台总览        /data-hub                        入口聚合与逐模块可见性概览（不新造第二套数据页）
+├─ 知识库          /knowledge                       条目、导入、来源、冲突、MCP
+├─ 本体工作台      /agent/:id/ontology-studio       概览/CQ、术语、关系、形状、推理、发布
+├─ 图谱工作台      /agent/:id/graph-workbench       2D/3D 图画布＋空间图层（旧 URL /knowledge-graph 兼容保留；
+│                                                  术语 CRUD 已收进本体工作台，本页保留画布/检索/实例建边/规则登记）
+├─ 事实浏览        /agent/:id/facts                 ABox 查询、双时态、溯源、解释链
+├─ 互操作与导出    /knowledge/interop               Turtle/JSON-LD/OWL/SHACL/PROV
+├─ 企业数据源      /knowledge/enterprise-sources    接口预留、描述符、假适配器
+└─ 评测控制台      /knowledge-eval                  CQ、质量、NDCG、A-B、默认关矩阵
 ```
 
-- `/agent/:id/knowledge-graph` 保留为 `ontology-studio` 的兼容入口（书签不失效）；旧页签内容迁入 Studio 的 Terms/Relations/Reasoning。
+- `/agent/:id/knowledge-graph` 保留为 **graph-workbench 的兼容 URL**（同一组件两条路由，书签不失效）；
+  旧页签内容迁入 Studio 的 Terms/Relations/Reasoning。
 - `KnowledgePage` 不改成图编辑器；通过「查看语义」跳到 Fact Explorer / Ontology Studio。
-- 导航沿用 `MainLayout.vue` 与 `config/modules.ts`；「知识图谱」标签改为「本体工作台」（旧 URL 不变），新增「事实浏览」「互操作/导出」「企业数据源」，同步 11 语言 i18n。
+- 导航沿用 `MainLayout.vue` 与 `config/modules.ts`：分组项与 `/data-hub` 卡片**逐字同源**（卡片按 `moduleKey` 逐张判可见性，
+  无权项不渲染而非渲染成禁用卡）；「知识图谱」标签改为「本体工作台」（旧 URL 不变），
+  新增「事实浏览」「互操作/导出」「企业数据源」「图谱工作台」，同步 11 语言 i18n。
+- Ontology Studio 画布区只渲染静态 upper-lite 树，其副标题直接给 `/agent/:id/graph-workbench` 真链接
+  （文案许诺的入口必须是可点的，不能只在文字里"见某处"）。
 
 ### §15.3 页面设计
 
 - **KnowledgePage（保留）**：条目表格继续承担导入/搜索/分享/冲突/墓碑；补派生/观察态徽标（有则显示），保留既有源时间列与 `source_modified_after/before` 过滤（TD① 已有）、「查看语义」深链；冲突队列直接打开 Fact Explorer 的解释链。
 - **Ontology Studio（由 GraphWorkbench 重做）**：
-  - 左：图画布（类型图/实例图切换，2D/3D/空间保留）。
-  - 右：纵向分区导航（概览/CQ/术语/关系/形状/推理/发布），避免 7 个横排 tab 挤压画布。`概览`（upper 树、术语/规则计数、schema 版本、CQ 健康、候选/发布状态）、`术语`（树/表、搜索、模块/弃用过滤、结构化编辑器）、`关系`（profile＋候选审批）、`形状`（构建器＋dry-run）、`推理`（规则/条件类、observe/enforce、账本、解释链）、`发布`（提案→dry-run→基线→发布→diff→回滚、审计）、`CQ`（表＋运行＋追溯）。
+  - 左：图画布——实装为静态 upper-lite 树（2D/3D 交互画布不在本页重做，副标题给 `/agent/:id/graph-workbench` 真链接）。
+  - 右：纵向分区导航（概览/CQ/术语/关系/形状/推理/发布），避免 7 个横排 tab 挤压画布。`概览`（upper 树、术语/规则计数、schema 版本、CQ 健康、候选/发布状态）、`术语`（树/表、搜索、模块/弃用过滤、结构化编辑器——**术语写面的唯一属主**，21 栏声明字段全在此，后端 400/409 拒因原话回显、被引用时带 impact 四计数）、`关系`（profile＋候选审批）、`形状`（构建器＋dry-run）、`推理`（规则/条件类、observe/enforce、账本、解释链——规则只读列表）、`发布`（提案→dry-run→基线→发布→diff→回滚、审计）、`CQ`（表＋运行＋追溯）。
   - 所有写操作前提供「校验」按钮；校验结果与写入路径同一 finding 形态。
+- **GraphWorkbenchPage（保留不可替代的四件，退役术语 CRUD）**：2D/3D 画布与放射布局、按图谱检索（后端全图索引，画布外节点也搜得到）、实例建边（`/knowledge/graph/instances` 的应用内唯一写面）、规则登记（`POST/PUT/DELETE /ontology/rules` 的应用内唯一写面，Studio 推理分区只读）。原来自带的术语 CRUD（只有 id/kind/label/basis 四栏，与 Studio 双口径）已退役，`本体` 页签改给 Studio 的真链接。
 - **Fact Explorer（新增）**：四动词查询条（query/analyze/validate/use）＋`asOf`/`knownAt`＋tenant＋`fields`/cursor；结果表格＋图视图；事实详情展示 qualifiers、confidence、evidence、provenance/assertions、conflict、derivation；动作：采纳/使用、查看血缘、导出、打开解释链；时间轴明确区分「业务时间」与「记录时间」。
 - **互操作/导出（新增）**：Turtle/JSON-LD/OWL/SHACL/PROV 格式卡；租户/模块范围；确定性预览与下载；RDF 1.2 仅显示「观察」不提供生产开关。
 - **Evaluation（由 KnowledgeEval 重做）**：CQ 覆盖率/通过率、负例结果、golden diff、OOPS!/OntoClean 子集、OQuaRE 风格指标、NDCG/A-B；原始 JSON 收进「高级」抽屉，不再作为主界面。
@@ -711,6 +725,8 @@ R2RML 风格的 JSON 子集，不做完整 R2RML/SPARQL 引擎：
 | UI-2 访问/互操作/发布 | 已落 | Query Workbench、IRI 解析、五格式下载、Release 流水线/diff/rollback；`KnowledgeInteropPage.test.ts` | —（rollback 与四导出已接线） |
 | UI-3 Evaluation | 已落 | CQ 卡＋质量卡真调用 `GET /ontology/quality`（缺陷表/两指标/空态/错误态四态齐）、默认关矩阵；`KnowledgeEvalPage.ontology.test.ts` | CQ 运行结果与 NDCG 仍以静态追溯表＋CI 读数呈现（仓内无 CQ 运行端点，§6 已登记） |
 | UI-4 Enterprise Sources | 已落 | 描述符表单按后端形状重建（sourceType/columns/subject/predicate/object/qualifiers/validFrom/validUntil）＋提交真调用＋列表两态回显＋拒因显式；连接按钮仍禁用；`EnterpriseSourcesPage.test.ts` | 真实连接器（fetchBatch）另立项——UI 不提供任何「已连接」调用 |
+| UI-5 数据中台 IA（2026-11-06 追加，非原计划步骤） | 已落 | 侧栏「数据中台」分组 8 项＋`/data-hub` 总览页（卡片逐张按 `modules.ts` 的 key 判可见性）；图谱工作台补回一级入口并进权限目录；判据 `NavigationZones.test.ts`（分组与目录逐字同源）＋`DataHubPage.test.ts`（六格）＋`OntologyStudioPage.test.ts`（画布链接格）；隔离栈实跑：侧栏 8 条链接 href 逐条在、`/data-hub` 渲染 7 张卡（含图谱卡）、真加载 `/agent/default/graph-workbench` 出画布与术语表 | 嵌入浏览器页签处于 hidden 时，`<transition mode="out-in">` 的 SPA 视图切换被后台节流卡住（URL 已变、旧视图未卸），**属工具环境形态，不是页面缺陷**——前台可见时按常规渲染；本条以「硬加载逐页渲染」为实证口径 |
+| UI-6 术语写面单一属主（2026-11-06 追加，教义第 7 条） | 已落 | GraphWorkbenchPage 自带的术语 CRUD（四栏）退役，声明写面只剩 Studio 一处；取长补短把「后端拒因回显」并进 Studio（保存 400 原话逐字、删除 409 原话＋impact 四计数含 `referencing_rules`）；判据 `StudioTermsSection.test.ts` 三格＋`TermWriteSurfaceSingleOwner.test.ts` 三格（含规则写面唯一实装的正检）；活体隔离栈回显逐字为「术语被引用，先清引用再删（事实 0／类型主体 0／子术语 1／引用规则 0）」 | 规则登记仍只在图谱工作台（Studio 推理分区只读）——比后合的结论是它无平行实现，属唯一实装；`detail` 取法全仓另有 60+ 处页面内联（KnowledgePage/AgentSkillPage 等），本批只收口本体域，其余另拍 |
 
 > 前端门：291 文件 / 2353 passed；`vue-tsc` clean；`vite build` 通过；后端活体 43/43。真实浏览器三条链已在隔离栈上实跑（台账 §6-563）；三项剩余缺口（质量报告 REST／企业源描述符提交／术语声明写面）与批次部分声明合并全部落格，不再有以「规划中」占位的已列缺口。
 
