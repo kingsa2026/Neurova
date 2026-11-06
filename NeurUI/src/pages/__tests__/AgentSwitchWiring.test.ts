@@ -128,6 +128,7 @@ const globalStubs = {
   'a-row': { template: '<div><slot/></div>' },
   'a-col': { props: ['span'], template: '<div><slot/></div>' },
   'a-textarea': { props: ['value'], template: '<textarea/>' },
+  'router-link': { props: ['to'], template: '<a :data-to="to"><slot /></a>' },
 }
 
 function mountPage(component: any) {

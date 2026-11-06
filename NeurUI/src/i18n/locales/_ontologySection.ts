@@ -2,8 +2,8 @@
  * 本体语义栈 i18n 段（升级计划 UI-0–UI-4，§15.4 诚实性文案）。
  *
  * 11 语言各自成段，键集合严格一致（locale-consistency 守卫：缺键多键都红、
- * 占位符逐键一致、非 zh/ja 语言不得残留中文值）。本段无占位符插值——
- * 计数一律由调用方拼接数字，避免各语言复数规则分叉。
+ * 占位符逐键一致、非 zh/ja 语言不得残留中文值）。插值只用于 termImpactCounters
+ * 一处（删除被拒时回显后端 impact 四计数）；其余键仍不带占位符。
  *
  * 诚实性键：
  * - 历史占位键（REST 已接线，UI 不再渲染；保留键集合兼容）：
@@ -75,6 +75,7 @@ const zhCN: Record<string, string> = {
   termsLoadFailed: '术语读取失败',
   termSaveFailed: '术语保存失败',
   termDeleteFailed: '术语删除失败（被引用时后端会拒绝）',
+  termImpactCounters: '（事实 {facts}／类型主体 {typed}／子术语 {children}／引用规则 {rules}）',
   kindConcept: 'concept',
   kindRelation: 'relation',
   kindProperty: 'property',
@@ -318,6 +319,7 @@ const enUS: Record<string, string> = {
   termsLoadFailed: 'Failed to load terms',
   termSaveFailed: 'Failed to save term',
   termDeleteFailed: 'Failed to delete term (backend rejects referenced terms)',
+  termImpactCounters: ' (facts {facts}, typed subjects {typed}, child terms {children}, referencing rules {rules})',
   kindConcept: 'concept',
   kindRelation: 'relation',
   kindProperty: 'property',
@@ -561,6 +563,7 @@ const jaJP: Record<string, string> = {
   termsLoadFailed: '用語の読み込みに失敗しました',
   termSaveFailed: '用語の保存に失敗しました',
   termDeleteFailed: '用語の削除に失敗しました（参照がある場合バックエンドが拒否します）',
+  termImpactCounters: '（事実 {facts}／型主体 {typed}／子用語 {children}／参照ルール {rules}）',
   kindConcept: 'concept',
   kindRelation: 'relation',
   kindProperty: 'property',
@@ -804,6 +807,7 @@ const koKR: Record<string, string> = {
   termsLoadFailed: '용어 읽기에 실패했습니다',
   termSaveFailed: '용어 저장에 실패했습니다',
   termDeleteFailed: '용어 삭제에 실패했습니다(참조가 있으면 백엔드가 거부합니다)',
+  termImpactCounters: ' (팩트 {facts}／타입 주체 {typed}／하위 용어 {children}／참조 규칙 {rules})',
   kindConcept: 'concept',
   kindRelation: 'relation',
   kindProperty: 'property',
@@ -1047,6 +1051,7 @@ const frFR: Record<string, string> = {
   termsLoadFailed: 'Échec du chargement des termes',
   termSaveFailed: 'Échec de l\u2019enregistrement du terme',
   termDeleteFailed: 'Échec de la suppression (le backend refuse les termes référencés)',
+  termImpactCounters: ' (faits {facts}, sujets typés {typed}, termes fils {children}, règles de référence {rules})',
   kindConcept: 'concept',
   kindRelation: 'relation',
   kindProperty: 'property',
@@ -1290,6 +1295,7 @@ const deDE: Record<string, string> = {
   termsLoadFailed: 'Laden der Terme fehlgeschlagen',
   termSaveFailed: 'Speichern des Terms fehlgeschlagen',
   termDeleteFailed: 'Löschen fehlgeschlagen (Backend verweist referenzierte Terme ab)',
+  termImpactCounters: ' (Fakten {facts}, typisierte Subjekte {typed}, Unterbegriffe {children}, verweisende Regeln {rules})',
   kindConcept: 'concept',
   kindRelation: 'relation',
   kindProperty: 'property',
@@ -1533,6 +1539,7 @@ const esES: Record<string, string> = {
   termsLoadFailed: 'Error al cargar los términos',
   termSaveFailed: 'Error al guardar el término',
   termDeleteFailed: 'Error al eliminar (el backend rechaza términos referenciados)',
+  termImpactCounters: ' (hechos {facts}, sujetos tipados {typed}, términos hijos {children}, reglas que lo referencian {rules})',
   kindConcept: 'concept',
   kindRelation: 'relation',
   kindProperty: 'property',
@@ -1776,6 +1783,7 @@ const itIT: Record<string, string> = {
   termsLoadFailed: 'Caricamento dei termini non riuscito',
   termSaveFailed: 'Salvataggio del termine non riuscito',
   termDeleteFailed: 'Eliminazione non riuscita (il backend rifiuta i termini referenziati)',
+  termImpactCounters: ' (fatti {facts}, soggetti tipizzati {typed}, termini figli {children}, regole che lo referenziano {rules})',
   kindConcept: 'concept',
   kindRelation: 'relation',
   kindProperty: 'property',
@@ -2019,6 +2027,7 @@ const ruRU: Record<string, string> = {
   termsLoadFailed: 'Не удалось загрузить термины',
   termSaveFailed: 'Не удалось сохранить термин',
   termDeleteFailed: 'Не удалось удалить (бэкенд отклоняет упоминаемые термины)',
+  termImpactCounters: ' (факты {facts}, типизированные субъекты {typed}, дочерние термины {children}, ссылающиеся правила {rules})',
   kindConcept: 'concept',
   kindRelation: 'relation',
   kindProperty: 'property',
@@ -2262,6 +2271,7 @@ const arSA: Record<string, string> = {
   termsLoadFailed: 'فشل تحميل المصطلحات',
   termSaveFailed: 'فشل حفظ المصطلح',
   termDeleteFailed: 'فشل الحذف (ترفض الواجهة الخلفية المصطلحات المُشار إليها)',
+  termImpactCounters: ' (حقائق {facts}، مواضيع مصنفة {typed}، مصطلحات فرعية {children}، قواعد مُشيرة {rules})',
   kindConcept: 'concept',
   kindRelation: 'relation',
   kindProperty: 'property',
@@ -2505,6 +2515,7 @@ const hiIN: Record<string, string> = {
   termsLoadFailed: 'शब्द लोड करने में विफल',
   termSaveFailed: 'शब्द सहेजने में विफल',
   termDeleteFailed: 'हटाने में विफल (संदर्भित शब्दों को बैकएंड अस्वीकार करता है)',
+  termImpactCounters: ' (तथ्य {facts}／प्रकार विषय {typed}／उप शब्द {children}／संदर्भ नियम {rules})',
   kindConcept: 'concept',
   kindRelation: 'relation',
   kindProperty: 'property',

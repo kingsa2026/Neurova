@@ -61,7 +61,7 @@
               <td v-if="isAdmin">
                 <a-button type="text" size="sm" @click.stop="openEdit(term)">✎</a-button>
                 <a-popconfirm :title="t('ontology.termDeleteConfirm')" @confirm="deleteTerm(term)">
-                  <a-button type="text" size="sm" danger>✕</a-button>
+                  <a-button type="text" size="sm" danger data-testid="term-delete">✕</a-button>
                 </a-popconfirm>
               </td>
             </tr>
@@ -221,7 +221,7 @@ import {
   updateOntologyTerm,
 } from '@/api/modules/ontology'
 import type { OntologyTerm, OntologyTermWrite } from '@/types/ontology'
-import { splitList } from '@/utils/ontologyFormat'
+import { impactCount, ontologyErrorDetail, splitList } from '@/utils/ontologyFormat'
 
 const props = defineProps<{ isAdmin: boolean }>()
 
@@ -426,9 +426,10 @@ async function saveTerm() {
     message.success(t('ontology.termSaved'))
     closeEditor()
     await loadTerms()
-  } catch {
-    // 400/409 的逐条原因由后端 detail 带回；这里显式报错不吞
-    message.error(t('ontology.termSaveFailed'))
+  } catch (error) {
+    // 400/409 的逐条原因由后端 detail 带回，原话显式露出；取不到才落通用文案
+    const { message: reject } = ontologyErrorDetail(error)
+    message.error(reject || t('ontology.termSaveFailed'))
   } finally {
     saving.value = false
   }
@@ -440,8 +441,19 @@ async function deleteTerm(term: OntologyTerm) {
     message.success(t('ontology.termDeleted'))
     if (selectedId.value === term.term_id) selectedId.value = ''
     await loadTerms()
-  } catch {
-    message.error(t('ontology.termDeleteFailed'))
+  } catch (error) {
+    const { message: reject, impact } = ontologyErrorDetail(error)
+    if (impact) {
+      // 被谁引用是「删不掉的唯一理由」，四计数逐条显出（含 referencing_rules，缺一即口径不全）
+      message.error(`${reject || t('ontology.termDeleteFailed')}${t('ontology.termImpactCounters', {
+        facts: impactCount(impact, 'fact_count'),
+        typed: impactCount(impact, 'typed_subject_count'),
+        children: impactCount(impact, 'child_terms'),
+        rules: impactCount(impact, 'referencing_rules'),
+      })}`)
+      return
+    }
+    message.error(reject || t('ontology.termDeleteFailed'))
   }
 }
 
