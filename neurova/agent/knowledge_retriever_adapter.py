@@ -199,6 +199,19 @@ class KnowledgeRetrieverAdapter:
             )
         except Exception as exc:  # noqa: BLE001 - 增强面失败不得影响主检索
             logger.debug("知识血缘富化失败（检索继续，无采纳回写）: %s", exc)
+        # C-2（升级计划第一批）：为有 lineage 的命中补充事实行时间戳——
+        # LLM 收到 `[2026-09-20] …` 时间前缀才能做时序推理（假发推荐场景）。
+        if store is not None:
+            try:
+                for hit in hits:
+                    lineageId = hit.get("lineage_id")
+                    if lineageId and not hit.get("recorded_at"):
+                        factRow = store.fact(str(lineageId))
+                        if factRow:
+                            hit.setdefault("recorded_at", factRow.get("recorded_at"))
+                            hit.setdefault("valid_from", factRow.get("valid_from"))
+            except Exception as exc:  # noqa: BLE001 - 时间戳补充失败不影响检索
+                logger.debug("事实时间戳补充跳过: %s", exc)
         # 无 fact lineage 的文档条目走 entry 级反馈；有 fact 的以 fact 三态为准。
         entryIds = [
             str(hit["knowledge_id"])
@@ -317,6 +330,30 @@ class KnowledgeRetrieverAdapter:
                 factStore,
                 recordInjection,
             ) = self._enrich(knowledge_items)
+
+            # C-1（升级计划第一批）：recency 权重——时间衰减让新事实排名靠前。
+            # NEUROVA_RECENCY_WEIGHT 默认 0（纯 RRF 不变），env 翻转后生效。
+            recencyWeight = float(os.environ.get("NEUROVA_RECENCY_WEIGHT", "0") or 0)
+            if recencyWeight > 0 and knowledge_items:
+                import math as _math
+                from datetime import datetime as _dt, timezone as _tz
+
+                halfLifeDays = float(
+                    os.environ.get("NEUROVA_RECENCY_HALF_LIFE_DAYS", "30") or 30)
+                now = _dt.now(_tz.utc)
+                for hit in knowledge_items:
+                    recordedAt = str(hit.get("recorded_at") or "")
+                    if not recordedAt:
+                        continue
+                    try:
+                        recorded = _dt.fromisoformat(recordedAt)
+                        daysSince = abs((now - recorded).total_seconds()) / 86400
+                        boost = 1.0 + recencyWeight * _math.exp(
+                            -daysSince / max(halfLifeDays, 1))
+                        hit["score"] = float(hit.get("score", 0) or 0) * boost
+                    except (ValueError, TypeError):
+                        pass
+
             # 采纳先验在最终截断前生效；候选窗由上面的 oversample 提供替补位。
             knowledge_items = rerankByAdoption(knowledge_items)[:requested]
             selectedLineage = list(dict.fromkeys(
@@ -552,6 +589,11 @@ class KnowledgeRetrieverAdapter:
             "fact_id": item.get("lineage_id"),
             "adoption_outcome": item.get("adoption_outcome"),
             "adoption_prior": float(item.get("adoption_prior", 1.0) or 1.0),
+            # C-2：时间戳透传（LLM 时间线推理 + recency 排序的数据源）
+            "recorded_at": item.get("recorded_at"),
+            "valid_from": item.get("valid_from"),
+            # B4/D-2：推导标注透传（LLM 可引用"这是推出来的"）
+            "derivation": item.get("derivation"),
             "base_score": float(
                 item.get("base_score", item.get("score", 0.0)) or 0.0
             ),
