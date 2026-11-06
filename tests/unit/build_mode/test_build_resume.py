@@ -8,6 +8,7 @@ import pytest
 
 from neurova.build_mode import build_session as bs
 from neurova.build_mode.resume import buildResumePrompt, resumeBuildInteraction
+from neurova.core.identity_context import get_request_user_id
 from neurova.sync.session_sync_manager import EventType
 
 
@@ -131,6 +132,37 @@ class TestBuildResume:
         )
         assert interactionEvent.payload["build_session_id"] == session.session_id
         assert interactionEvent.payload["question"] == "预算上限？"
+
+    @pytest.mark.asyncio
+    async def testResumeTurnCarriesTheSessionOwnerOnTheSingleChannel(self, manager):
+        """续跑轮自己起轮 ⇒ 它必须自己设人：回合进行中读唯一通道，拿到的就是会话属主。
+
+        与登记表那一格的分工：`test_requestUserIdEntryConsistency` 审形状（通道与载体
+        同取一个变量），本格审**真跑起来那一刻通道里是谁**。原形态是通道取
+        `session.user_id or None`、载体取 `session.user_id`——同一个人落成两种值，
+        用量入账与会话可见性会各按一种算。回合收尾必须清槽：续跑跑在常驻事件循环上，
+        留着就是把上一个人的身份交给下一个人。
+        """
+        session = await _building_session(manager)
+        ask = _ask(manager, session.session_id)
+        manager.answerInteraction(
+            session.session_id, ask["interaction_id"], {"selected": ["店铺 A"]}
+        )
+        seen: dict = {}
+        agent = _FakeAgent(onChat=lambda: seen.update(channel=get_request_user_id()))
+        await resumeBuildInteraction(
+            session.session_id,
+            ask["interaction_id"],
+            agentProvider=lambda agent_id: agent,
+            sessionSyncManager=_FakeSync(),
+            manager=manager,
+        )
+
+        assert seen["channel"] == "u1", "续跑轮没把会话属主交给唯一通道"
+        assert agent.calls[0]["metadata"]["user_id"] == seen["channel"], (
+            "通道与载体不同源：同一个人被两条面读出两种值"
+        )
+        assert get_request_user_id() in (None, ""), "回合结束后槽位未清，身份串到下一轮"
 
     @pytest.mark.asyncio
     async def testNoChatSessionFallsBackToFrontendPrompt(self, manager):

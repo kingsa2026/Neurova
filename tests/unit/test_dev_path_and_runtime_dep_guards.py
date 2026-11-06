@@ -51,7 +51,13 @@ GIT_WALL_S = 20
 
 # 开发机仓库根路径特征：盘符 + 仓库目录名（Neurova / 项目）。
 # 只匹配"指向本项目"的形态，不误伤 C:\Windows 这类真实平台常量。
-_DEV_PATH = re.compile(r"[A-Za-z]:[\\/][\\/]?\s*(?:项目|neurova\b)", re.IGNORECASE)
+# 盘符路径的靶形：单个字母 + 冒号 + 分隔符 + `项目`/`neurova`。
+# 两处排除不是修饰，是防把合法数据读成违规：
+#   `(?<![A-Za-z0-9])` —— `https://neurova.local` 里冒号前是 scheme 末字母 `s`，
+#                        那不是盘符（本守卫此前正是这样把 B10/B12 两档里的 IRI 常量判红的）；
+#   `(?!//)`           —— 冒号后紧跟双斜线的都是 URL，不是 `E://` 式路径。
+_DEV_PATH = re.compile(
+    r"(?<![A-Za-z0-9])[A-Za-z]:(?!//)[\\/][\\/]?\s*(?:项目|neurova\b)", re.IGNORECASE)
 
 # 允许清单：写死盘符路径是**被测数据**而非"找仓库"的地方。
 # 每条必须说明为什么不能改成 REPO_ROOT 推导。
@@ -86,6 +92,25 @@ class TestNoHardcodedDevMachinePaths:
             "FileNotFoundError，守卫测试静默不跑）：\n  " + "\n  ".join(offenders) +
             "\n修复：改用 tests/repo_paths.py 的 REPO_ROOT / repo_path() / repo_str()。"
         )
+
+    def test_devPathMatcherFlagsDrivePathsButNotUrlShapes(self):
+        """反向自证：改排除项之后，靶形必须还在——不然这一格就把守卫改成了恒不咬。
+
+        真盘符写法两种（反斜杠/正斜杠）都要抓到；`https://neurova.local` 这种 IRI 常量
+        是**被测数据**（本体导出命名空间），把它判红等于用守卫逼生产改命名空间。
+
+        样本一律**拼出来而不是写出来**：本守卫按行扫 `tests/`，样本行里只要出现
+        「盘符字母＋冒号＋分隔符」的连续字面，就会被自己抓成违规
+        （第一版就栽在这一格的注释上——注释里写了那个连续形态，红在注释那一行）。
+        """
+        driveBackslash = ("E:" + "\\项目\\Neurova\\data.json")
+        driveSlash = ("C:" + "/neurova/data")
+        assert _DEV_PATH.search(driveBackslash), "反斜杠盘符漏检"
+        assert _DEV_PATH.search(driveSlash), "正斜杠盘符漏检"
+        assert not _DEV_PATH.search(
+            'assert doc["@context"]["kbg"] = "https:' + '//neurova.local/knowledge/"'), \
+            "IRI 常量又被当成开发机路径了（本守卫的历史假红形态）"
+        assert not _DEV_PATH.search("iri = \"https:" + "//neurova.local/knowledge/1.0.0/part_of\"")
 
     def test_repo_paths_helper_exists_and_points_at_repo(self):
         """共享助手必须存在且解析到真实仓库根（否则上面那条只是换了个写法）。"""

@@ -82,9 +82,13 @@ async def runApprovalContinuation(
     if agent is None:
         return {"started": False, "reason": "agent_not_ready", "agent_id": agent_id}
 
-    from neurova.core.identity_context import set_request_user_id
+    from neurova.core.identity_context import clear_request_user_id, set_request_user_id
 
-    set_request_user_id(str(user_id) if user_id else None)
+    # 通道与载体同取一个变量：原先通道写 `str(user_id) if user_id else None`、
+    # metadata 写 `str(user_id or "")`——同一轮在两条面上落成两种值。消费侧一律
+    # falsy 兜底（`or "default"` / `or "anonymous"`），空串与 None 同形。
+    owner = str(user_id or "")
+    set_request_user_id(owner)
     try:
         await agent.chat(
             user_input=buildContinuationPrompt(request_id, tool_name, success, error),
@@ -92,7 +96,7 @@ async def runApprovalContinuation(
             metadata={
                 "approval_continuation": True,
                 "approval_request_id": request_id,
-                "user_id": str(user_id or ""),
+                "user_id": owner,
                 "agent_id": str(agent_id or ""),
             },
         )
@@ -100,7 +104,7 @@ async def runApprovalContinuation(
         logger.warning("审批续跑轮失败: %s (request=%s)", exc, request_id)
         return {"started": True, "status": "failed", "error": str(exc)}
     finally:
-        set_request_user_id(None)
+        clear_request_user_id()
     return {"started": True, "status": "completed"}
 
 

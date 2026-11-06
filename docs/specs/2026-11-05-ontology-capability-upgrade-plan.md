@@ -281,6 +281,7 @@ Preflight（B1–B7 已落核验）
 > **补口两轮已全部落地**：第一轮 shapes CRUD、`asOf/knownAt` REST、pipeline rollback REST、JSON-LD/OWL/SHACL/PROV 导出（`test_ontologyRestCompletion.py` 7 格绿）；第二轮质量报告 REST（`GET /ontology/quality`，`ontologyQualityReport` 从此有生产消费者）、企业源描述符提交 REST（`/enterprise/sources` 三面，`EnterpriseIngestor.saveConfig/loadConfig/listConfigs` 与 `EnterpriseSourceRegistry` 从此有生产入口）、术语声明写面（`labels/alt_labels/module/identity_keys/qualifier_schema` 经 `POST|PUT /ontology/terms` 与 `pipeline/run` 双入口写得出来，`test_ontologyGapClosureRest.py` 14 格绿）；第三轮**把票面两处从未实施的悬空项补齐**（事件/时间受控词汇＋按规则类物化档位 v35，`test_eventTimePattern.py`/`test_materializationModes.py` 共 20 格）并把 §8 第 5 条点名的两条 B8 链接进活体。顺带修掉三处随批漂移的常驻守卫与一处真缺陷（路由清单缺 19 条、模块分层未登记两份、台账 §6-552..561 表格形态让引用号查不到格、端点装配未接咽喉）。
 > S13 浏览器三条链**已实跑**（隔离栈：临时数据根＋9528 真 uvicorn＋真 JWT＋8101 Vite；台账 §6-563）——链一术语→批次成版→回滚→关系→查询/双时态→校验→导出→IRI 全通，链二 CQ/质量报告/基线诚实态全通，链三描述符提交与拒因回显全通。企业源真实连接器（DB/ERP API/事件流 fetchBatch）仍另立项：REST 面只提供描述符校验/落库/两态回显，UI 不提供任何「已连接」调用。「关系候选批准」那一腿需要真抽取流注候选，未用假数据在浏览器里凑。
 > 评分复评：**已按 §3 同一权重口径复算，十维加权 8.32 ≈ 8.3**（见 §17 第二次复评表）。原句「剩余缺口未计，待补齐后复算」作废——票面列出的缺口（三项 REST ＋ 批次部分声明 ＋ 事件时间 ＋ 物化档位）已全部落格，未落的只剩 §6 登记的另立项项。
+> **2026-11-06 六项真欠账复算与收口（台账 §6-567）**：① 身份面两格常驻红（§11.3）已闭——根因是两条续跑入口各自把身份写成两个表达式，改在通道与载体同取一个变量处；② §10 B3／§13.2 K-08 欠的 access 契约测试已立（10 格，连带把门面三个动词的裸 dict 请求体收成被转交方的模型声明）；③ rdflib round-trip 首次本机实跑（1 passed，rdflib 进 CI 清单与锁，产品零依赖不动）；④⑤ D 组九项默认关有了一份名册与读数面，前端那张漏了 D-03 的静态抄表退役；⑥ **K-09 时间面四项仍未做**（TD② recency／FTS `source_modified_at`／facts 源钟／导出带源时间，零判据，要过 v36 迁移）——这是本计划唯一尚未开工的票面项，不随本轮收口。
 
 > 活体验证（单一现值，行内旧读数只作历史）：`_liveVerifyOntologyStack.py` 现值 **56/56 PASS**，数据根指纹跨多次复跑不变。扩展链：15/15（B8–B14 首批）→ 27/27（shapes/四导出/rollback/双时态）→ 39/39（质量报告/企业源/术语声明写面）→ 43/43（批次部分声明）→ **56/56**（别名归一链、候选审批链、observe/enforce 两档、time#before 导出）。表中各行写的 15/15 是首批读数。
 
@@ -484,7 +485,7 @@ Preflight（B1–B7 已落核验）
 | K-06 | 非飞书远程源同步被 400 拒绝 | **属实** | `knowledge_remote.py:146-147` 仅 `source_type=="feishu"` 放行 | 非本体项；不并入 |
 | K-07 | gaps/learn 恒 501/空 | **属实** | `knowledge_integration.py:219-264`：`/gaps/analyze`、`/learn` 501；`/gaps`、`/learning-records` 空；`evolution/progress` 计数 0 | 非本体项；不并入；L9 不把 501 当成功 |
 | K-08 | `access`/`integration` HTTP 面仓内零消费者 | **属实（保留为对外契约）** | 生产代码仅 `api/endpoints/__init__.py:302` 注册；`NeurUI/src`、`neurova/agent`、`context`、`post_chat_pipeline` 无调用 | **并入 L6**：B3 四动词门面按对外契约管理，补 OpenAPI/SDK 契约测试；不宣称"已闭环" |
-| K-09 | TD② recency／FTS 源时间／facts 源钟未实现 | **属实** | `hybrid.py` 无时间因子；`fts_index.py` 表无 `source_modified_at`；`conflict_judge.py:118` 按 `recorded_at` 选 most_recent；TD① 仅在 `POST /knowledge/search` 接 `source_modified_after/before`（`knowledge_core.py:199`），GET 列表未接 | **并入 L3/L7**：B11 补时间因子/FTS 源时间/facts 源钟，默认关；B12 导出带源时间 |
+| K-09 | TD② recency／FTS 源时间／facts 源钟未实现 | **属实** | `hybrid.py` 无时间因子；`fts_index.py` 表无 `source_modified_at`；`conflict_judge.py:118` 按 `recorded_at` 选 most_recent；TD① 仅在 `POST /knowledge/search` 接 `source_modified_after/before`（`knowledge_core.py:199`），GET 列表未接 | **并入 L3/L7**：B11 补时间因子/FTS 源时间/facts 源钟，默认关；B12 导出带源时间。**2026-11-06 复算：这四项仍未落且零判据**（`rrf_fusion` 纯秩倒数、FTS 建表无该列、facts 表也无该列、五格式导出只出 `recordedAt`）——本计划唯一尚未开工的票面项，做的话要过 v36 迁移，见台账 §6-567 仍开① |
 | K-10 | `FactSurface` 窄接线，不是死码；011 已否证两池交织 | **属实** | `read_surface.py:29` 默认 off；`graph_walk.py:115` 只在强判据零锚点时调用；`read_surface.py:172` 注释记 011 实测 recall@5 0.8555→0.7604 | **并入 L3/L5**：FactSurface 只做零锚点种子与治理富化；不重开两池交织；不新增事实池 |
 | D-01/D-02/D-03/D-04/D-06/D-08/D-11/D-16/D-19 | 默认关/legacy；shadow 先行 | **抽查属实** | `query_normalization.py:40` off、`ambiguity_clarification.py:39` off、`knowledge_retriever_adapter.py:33` off、`read_surface.py:36` False、`derivation_citation.py:37` off、`vector_index.py:57` off、`retrieval_fusion.py:1` 默认关、`knowledge_common.py:275` off、`parser_shadow.py:51` legacy | **并入 L9**：默认关矩阵与 shadow/on 评估门；D-06 条件类仍 off，B1 已落≠已转正 |
 
@@ -621,7 +622,7 @@ R2RML 风格的 JSON 子集，不做完整 R2RML/SPARQL 引擎：
 | L8/B12 提案→dry-run→基线→发布→diff→回滚；审计；语义版本 | 无 | Release 页：步骤时间线、diff 视图、回滚、审计、弃用策略 | 新增 |
 | L9/B13 CQ/负例/golden/OOPS!/OntoClean/OQuaRE/NDCG A-B | 基线/快照/对比原始 JSON | Evaluation 页：CQ 通过率、质量卡、golden diff、NDCG/A-B、默认关矩阵 | 重做 |
 | B14 企业源接口预留 | 无 | Enterprise Sources：源列表、描述符编辑器、fake adapter 演示、「接口预留/未接入真实源」 | 新增 |
-| D 组默认关/观察态 | 无 | 观测与开关面板：D-01/D-02/D-04/D-06/D-08/D-11/D-16/D-19 状态与 shadow 读数；不做一键不安全开启 | 新增 |
+| D 组默认关/观察态 | 无 → 评测页八行静态抄表（**漏 D-03**） | 观测与开关面板：九项状态与 shadow 读数；不做一键不安全开启 | **已落（§6-567 W4/W5）**：项名与现值取自 `GET /knowledge/observability/default-off`，名册在 `neurova/knowledge/defaultOffFlags.py`（九项，含本行原先漏写的 D-03）；面板并入评测页管理员区，不新开一页 |
 
 ### §15.2 信息架构（导航）
 
@@ -664,7 +665,11 @@ R2RML 风格的 JSON 子集，不做完整 R2RML/SPARQL 引擎：
 - **互操作/导出（新增）**：Turtle/JSON-LD/OWL/SHACL/PROV 格式卡；租户/模块范围；确定性预览与下载；RDF 1.2 仅显示「观察」不提供生产开关。
 - **Evaluation（由 KnowledgeEval 重做）**：CQ 覆盖率/通过率、负例结果、golden diff、OOPS!/OntoClean 子集、OQuaRE 风格指标、NDCG/A-B；原始 JSON 收进「高级」抽屉，不再作为主界面。
 - **Enterprise Sources（新增，B14）**：源列表显示「接口预留/未接入真实源」；描述符编辑器（subject/predicate/object/qualifiers/cursor/idempotency）；fake adapter 演示；不提供假装已连接的真实源按钮。
-- **观测与开关（新增，管理员）**：D 组默认关/观察态、shadow 读数、一键回退；不在普通用户面暴露写入开关。
+- **观测与开关（管理员）**：实装为评测页内的「默认关读数」面板——列 编号／环境变量／声明默认／现值／是否偏离默认，数据一律来自
+  `GET /knowledge/observability/default-off`（治理门：非管理员 403，前端也不发这一枪）。**不新开一页**：同一批能力两套入口正是 §15.2
+  这次要治的病。**shadow 读数**目前只在检索指标的原始 JSON 抽屉里整坨回显（`graph_shadow`），未做专项呈现——登记为仍开。
+  **一键回退按决定不做**：九项的态来自进程环境，做成写入开关即撞 §6「默认关是产品/成本/安全决定，不打包全开」；
+  要开这个口子得先裁定"运行时覆盖 env"本身，而不是先在 UI 上放一个按钮。
 
 ### §15.4 交互与诚实性规则
 
@@ -680,9 +685,9 @@ R2RML 风格的 JSON 子集，不做完整 R2RML/SPARQL 引擎：
 ### §15.5 API 契约与缺口
 
 - 现有可复用：`GET /knowledge-graph/{agentId}/studio`、`/knowledge/ontology/terms|rules`、`/knowledge/graph/instances`、`/knowledge/conflicts`、`/knowledge/facts/{factId}/lineage`、`/knowledge/facts/{factId}/turtle`、`/knowledge/evaluation/baseline|audit/evaluation/compare|audit/retrieval-metrics`。
-- 随 B 批新增的 UI 契约：B2 `POST /knowledge/ontology/validate`；B3 `/knowledge/access/{query|analyze|validate|use}`；B8 关系候选列表/审批；B9 CQ 目录与运行；B10 shapes CRUD/dry-run；B11 `asOf/knownAt` 与 `GET /knowledge/ontology/derivations/{fact_id}`；B12 稳定 IRI 解析、五格式导出、发布/diff/回滚/审计；B13 `GET /knowledge/ontology/quality`；B14 `/knowledge/enterprise/sources`（列表/单源/提交）。
-- **2026-11-06 缺口收口后的剩余面**：CQ 目录与运行结果仍以静态追溯表＋CI 读数呈现（`ontologyStatic.ts` 的 CQ_ROWS，仓内无 CQ 运行端点）；D 组默认关矩阵是静态表（前端读不到服务端 env）；企业源只有描述符提交与两态回显，`fetchBatch` 真连接器另立项。这三处按 §15.4 以诚实态呈现，不造假调用。
-- **B3 消费面**：UI-2 起以 `/knowledge/access/*` 作为四动词主入口（UI 成为首个仓内消费者）；在 UI 落地前，K-08「仓内零消费者」仍成立，落地后同步更新 §13.4 与 KB 计划。
+- 随 B 批新增的 UI 契约：B2 `POST /knowledge/ontology/validate`；B3 `/knowledge/access/{query|analyze|validate|use}`；B8 关系候选列表/审批；B9 CQ 目录与运行；B10 shapes CRUD/dry-run；B11 `asOf/knownAt` 与 `GET /knowledge/ontology/derivations/{fact_id}`；B12 稳定 IRI 解析、五格式导出、发布/diff/回滚/审计；B13 `GET /knowledge/ontology/quality`；B14 `/knowledge/enterprise/sources`（列表/单源/提交）；默认关读数面 `GET /knowledge/observability/default-off`（管理员，九项现值）。
+- **2026-11-06 缺口收口后的剩余面**：CQ 目录与运行结果仍以静态追溯表＋CI 读数呈现（`ontologyStatic.ts` 的 CQ_ROWS，仓内无 CQ 运行端点）；D 组默认关矩阵已改由 `GET /knowledge/observability/default-off` 供数（静态抄表退役，见 §6-567 W4/W5）；企业源只有描述符提交与两态回显，`fetchBatch` 真连接器另立项。这三处按 §15.4 以诚实态呈现，不造假调用。
+- **B3 消费面（2026-11-06 复算改判）**：UI-2 起以 `/knowledge/access/*` 作为四动词主入口；K-08「仓内零消费者」现只对一半——`query`/`use` 已有前端真调用并被 `FactExplorerPage.test.ts` 断言，`analyze`/`validate` 仍无仓内消费者。票面欠的「OpenAPI/SDK 契约测试」本轮补上（`test_accessFacadeOpenApiContract.py` 10 格，含跨语言字段同名格与「门面不许再用裸 dict 收请求体」结构格）；`/openapi.json` 仍按既有决定不对外，契约取法是进程内 spec。
 - 类型与信封：新增 `ontology.ts`/`knowledgeInterop.ts`/`knowledgeGovernance.ts` 等模块，禁止 `any` 直塞；统一 `{items,total,next_cursor}`、severity、derivation、bitemporal 类型；API 文档同步 `docs/02-api/API_REFERENCE.md`。
 
 ### §15.6 UI 实施顺序（同一次执行内完成）
@@ -727,6 +732,7 @@ R2RML 风格的 JSON 子集，不做完整 R2RML/SPARQL 引擎：
 | UI-4 Enterprise Sources | 已落 | 描述符表单按后端形状重建（sourceType/columns/subject/predicate/object/qualifiers/validFrom/validUntil）＋提交真调用＋列表两态回显＋拒因显式；连接按钮仍禁用；`EnterpriseSourcesPage.test.ts` | 真实连接器（fetchBatch）另立项——UI 不提供任何「已连接」调用 |
 | UI-5 数据中台 IA（2026-11-06 追加，非原计划步骤） | 已落 | 侧栏「数据中台」分组 8 项＋`/data-hub` 总览页（卡片逐张按 `modules.ts` 的 key 判可见性）；图谱工作台补回一级入口并进权限目录；判据 `NavigationZones.test.ts`（分组与目录逐字同源）＋`DataHubPage.test.ts`（六格）＋`OntologyStudioPage.test.ts`（画布链接格）；隔离栈实跑：侧栏 8 条链接 href 逐条在、`/data-hub` 渲染 7 张卡（含图谱卡）、真加载 `/agent/default/graph-workbench` 出画布与术语表 | 嵌入浏览器页签处于 hidden 时，`<transition mode="out-in">` 的 SPA 视图切换被后台节流卡住（URL 已变、旧视图未卸），**属工具环境形态，不是页面缺陷**——前台可见时按常规渲染；本条以「硬加载逐页渲染」为实证口径 |
 | UI-6 术语写面单一属主（2026-11-06 追加，教义第 7 条） | 已落 | GraphWorkbenchPage 自带的术语 CRUD（四栏）退役，声明写面只剩 Studio 一处；取长补短把「后端拒因回显」并进 Studio（保存 400 原话逐字、删除 409 原话＋impact 四计数含 `referencing_rules`）；判据 `StudioTermsSection.test.ts` 三格＋`TermWriteSurfaceSingleOwner.test.ts` 三格（含规则写面唯一实装的正检）；活体隔离栈回显逐字为「术语被引用，先清引用再删（事实 0／类型主体 0／子术语 1／引用规则 0）」 | 规则登记仍只在图谱工作台（Studio 推理分区只读）——比后合的结论是它无平行实现，属唯一实装；`detail` 取法全仓另有 60+ 处页面内联（KnowledgePage/AgentSkillPage 等），本批只收口本体域，其余另拍 |
+| UI-7 默认关读数面板（2026-11-06 追加，教义第 6 条收口） | 已落 | 静态抄表（`ontologyStatic.ts` 的 `DEFAULT_OFF_ROWS`，八行漏 D-03）退役，改读 `GET /knowledge/observability/default-off`；名册 `neurova/knowledge/defaultOffFlags.py` 九项且**自己不读 env**（AST 格钉住），现值委托各项归属模块既有谓词；判据 `test_defaultOffFlagRegistry.py` 15 格＋`KnowledgeEvalPage.ontology.test.ts` 五格（含"旧断言用长度相等故漏项恒绿"的反证、失败态不许留旧行数、非管理员不发请求、`ontologyStatic.ts` 里不许再出现 `DEFAULT_OFF_ROWS`）；活体真 uvicorn：九行 ids 逐字对、`isDefault` 全真、匿名 401 | shadow 读数未做专项呈现（`graph_shadow` 只在检索指标原始 JSON 抽屉里）；一键回退按 §6 决定不做（写入开关＝打包全开的入口） |
 
 > 前端门：291 文件 / 2353 passed；`vue-tsc` clean；`vite build` 通过；后端活体 43/43。真实浏览器三条链已在隔离栈上实跑（台账 §6-563）；三项剩余缺口（质量报告 REST／企业源描述符提交／术语声明写面）与批次部分声明合并全部落格，不再有以「规划中」占位的已列缺口。
 
@@ -761,7 +767,7 @@ R2RML 风格的 JSON 子集，不做完整 R2RML/SPARQL 引擎：
 | S10 | UI-2 访问/互操作/发布 | — | B12 | Query Workbench、IRI 解析、五格式导出、Release/diff/rollback；UI 成为 B3 首个仓内消费者 |
 | S11 | UI-3 Evaluation | — | B13 | CQ/质量/NDCG A-B 仪表盘、默认关矩阵 |
 | S12 | UI-4 Enterprise Sources | — | B14 | 「接口预留/未接入」页、描述符编辑器、fake adapter 演示；真实连接按钮禁用 |
-| S13 | Final gates | — | S1–S12 | §8 第 1–13 条、§15.7、**浏览器三条链已实跑（§6-563，隔离栈）**、i18n/主题、API 文档、台账（至 §6-563）、评分复评；代码与文档全部落格，推送/交付仍等授权 |
+| S13 | Final gates | — | S1–S12 | §8 第 1–13 条、§15.7、**浏览器三条链已实跑（§6-563，隔离栈）**、i18n/主题、API 文档、台账（至 §6-567）、评分复评；代码与文档全部落格，推送/交付仍等授权 |
 
 > **判据文件落点对表（2026-11-06 现测）**：S3/S5 门点名的六档判据没有独立成档，"
      "覆盖落在别处——`termModules`/`versionedIri`/`semver` 三组落在 "

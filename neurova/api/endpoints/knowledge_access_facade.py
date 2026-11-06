@@ -21,7 +21,12 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, Query, Request
 
 from neurova.api.auth import get_current_user_or_service
+# 请求形状一律**在被转交方声明**，门面只 import：门面自己长出一套 schema 就是第二份定义，
+# 而收裸 dict 则等于对外广告"参数随便发"（见 tests/unit/api/test_accessFacadeOpenApiContract.py）。
 from neurova.api.endpoints.knowledge_common import KnowledgeSearchRequest
+from neurova.api.endpoints.knowledge_core import FactAdoptionRequest
+from neurova.api.endpoints.knowledge_ontology import OntologyValidateRequest
+from neurova.api.endpoints.semantic_search_api import AnalyzeQueryRequest
 
 router = APIRouter()
 
@@ -43,7 +48,7 @@ async def accessQuery(
 
 
 @router.post("/access/analyze")
-async def accessAnalyze(body: Dict[str, Any]):
+async def accessAnalyze(body: AnalyzeQueryRequest):
     """analyze 动词：转发 `/v1/semantic-search/analyze` 的查询特征分析。"""
     from neurova.api.endpoints.semantic_search_api import analyze_query
 
@@ -52,32 +57,24 @@ async def accessAnalyze(body: Dict[str, Any]):
 
 @router.post("/access/validate")
 async def accessValidate(
-    body: Dict[str, Any],
+    body: OntologyValidateRequest,
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
     """validate 动词：转发 B2 本体 dry-run（纯只读，violation 不抛异常）。"""
-    from neurova.api.endpoints.knowledge_ontology import (
-        OntologyValidateRequest,
-        validateOntologyCandidates,
-    )
+    from neurova.api.endpoints.knowledge_ontology import validateOntologyCandidates
 
-    return await validateOntologyCandidates(
-        body=OntologyValidateRequest.model_validate(body), current_user=current_user)
+    return await validateOntologyCandidates(body=body, current_user=current_user)
 
 
 @router.post("/access/use/{fact_id}")
 async def accessUse(
     request: Request,
     fact_id: str,
-    body: Dict[str, Any],
+    body: FactAdoptionRequest,
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
     """use 动词：转发事实采纳写回（治理门由被转交方自带，仅管理员）。"""
-    from neurova.api.endpoints.knowledge_core import (
-        FactAdoptionRequest,
-        record_fact_adoption,
-    )
+    from neurova.api.endpoints.knowledge_core import record_fact_adoption
 
     return await record_fact_adoption(
-        request=request, fact_id=fact_id,
-        body=FactAdoptionRequest.model_validate(body), current_user=current_user)
+        request=request, fact_id=fact_id, body=body, current_user=current_user)

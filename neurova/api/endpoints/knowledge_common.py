@@ -269,6 +269,15 @@ _EVENT_SUMMARY_PROMPT = (
 )
 
 
+def eventSummaryMode() -> str:
+    """D-16 的现值形读数：注册表与本文件的门控共用这一个解点。
+
+    env 在这里解一次；`extract_event_summary` 过去自己读，读的就是这条串。
+    """
+    raw = str(os.environ.get(ENV_EVENT_SUMMARY) or "").strip().lower()
+    return "on" if raw in ("1", "true", "on", "yes") else "off"
+
+
 def extract_event_summary(
     item: Dict[str, Any], request: Optional[Request], agent_id: str,
     tenant_id: str = "default",
@@ -281,8 +290,7 @@ def extract_event_summary(
     召回从字面重叠升到语义事件。NEUROVA_KB_EVENT_SUMMARY 门控（默认 off）；
     无 LLM/空输出/写回失败均如实返回状态串，绝不打断导入主流程。
     """
-    raw = str(os.environ.get(ENV_EVENT_SUMMARY) or "").strip().lower()
-    if raw not in ("1", "true", "on", "yes"):
+    if eventSummaryMode() != "on":
         return "skipped_disabled"
     try:
         if llm_call is None:
