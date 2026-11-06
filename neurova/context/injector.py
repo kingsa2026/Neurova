@@ -580,6 +580,14 @@ class UnifiedContextInjector(BaseModule):
         # 排序
         scored_memories.sort(key=lambda x: x[0], reverse=True)
 
+        # C-3（升级计划第一批）：知识条目有 recorded_at 时按时间倒序排列——
+        # LLM 收到倒序时间线后可推理"最新的代表当前偏好"（假发推荐场景）。
+        hasTimestamps = any(m.get("recorded_at") for _, m in scored_memories)
+        if hasTimestamps:
+            scored_memories.sort(
+                key=lambda x: (x[1].get("recorded_at") or "", x[0]),
+                reverse=True)
+
         # 构建上下文
         lines = []
         total_tokens = 0
@@ -602,6 +610,30 @@ class UnifiedContextInjector(BaseModule):
 
             # 构建记忆行
             line = f"- {content}"
+
+            # C-3：时间前缀——LLM 收到 `[2026-09-20] …` 才能做时序推理
+            recordedAt = str(mem.get("recorded_at") or "")
+            if recordedAt:
+                datePrefix = recordedAt[:10]
+                line = f"[{datePrefix}] {line}"
+
+            # D-2：推导标注——LLM 可引用"这是系统推导的"
+            derivation = mem.get("derivation")
+            if isinstance(derivation, dict) and derivation.get("derived"):
+                ruleId = derivation.get("ruleId", "")
+                line += f" [推导:规则 {ruleId}]"
+
+            # D-5：qualifier 业务限定透传
+            qualifier = mem.get("qualifier")
+            if isinstance(qualifier, dict) and qualifier:
+                qualParts = [f"{k}={v}" for k, v in qualifier.items() if k not in ("derived_by", "stratum", "shape")]
+                if qualParts:
+                    line += f" [{'; '.join(qualParts)}]"
+
+            # D-6：双时态标注
+            validFrom = str(mem.get("valid_from") or "")
+            if validFrom:
+                line += f" [有效期: {validFrom[:10]}]"
 
             # 添加标记
             if self._show_temperature:
