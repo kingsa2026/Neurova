@@ -29,6 +29,7 @@ vi.mock('vue-router', async (importOriginal) => {
 })
 
 import { TOP_NAV_CATEGORIES, type TopNavItem } from '@/config/navigation'
+import { MODULE_SECTIONS } from '@/config/modules'
 import GlassNavGroup from '../GlassNavGroup.vue'
 import AgentPageTabs from '../AgentPageTabs.vue'
 import router from '@/router'
@@ -55,7 +56,32 @@ describe('侧栏导航 i18n 完整性', () => {
   const NAV_KEYS_IN_MAINLAYOUT = [
     'knowledgeCognition', 'agentCapabilities', 'agentRuntime',
     'userZone', 'collaboration', 'skillMarket', 'skillPool',
+    // 2026-11-06 数据中台分组（组名 + 总览页项）
+    'dataPlatform', 'dataHub',
   ]
+
+  it('数据中台分组收纳的 8 项与模块目录逐字同源（防菜单与权限目录分叉）', () => {
+    const userItems = MODULE_SECTIONS.find((s) => s.zone === 'userZone')!.items
+    const agentKeys = MODULE_SECTIONS.find((s) => s.zone === 'agentZone')!.items
+      .map((i) => i.key)
+    const hubKeys = userItems.slice(1, 9).map((item) => item.key)
+    expect(hubKeys).toEqual([
+      '/data-hub',
+      '/knowledge',
+      '/agent/:id/ontology-studio',
+      '/agent/:id/graph-workbench',
+      '/agent/:id/facts',
+      '/knowledge/interop',
+      '/knowledge/enterprise-sources',
+      '/knowledge-eval',
+    ])
+    // 迁来的两条 key 字符串必须与迁移前一致，否则存量用户组勾的授权静默失效
+    expect(hubKeys).toContain('/agent/:id/ontology-studio')
+    expect(hubKeys).toContain('/agent/:id/facts')
+    // Agent 区不得再留本体/事实（双入口即红）
+    expect(agentKeys).not.toContain('/agent/:id/ontology-studio')
+    expect(agentKeys).not.toContain('/agent/:id/facts')
+  })
 
   it('nav 分组键在全部 11 个语言包存在（缺失即渲染原始键名回归）', () => {
     for (const [locale, msgs] of Object.entries(ALL_LOCALES)) {

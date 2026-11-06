@@ -6,7 +6,8 @@
  * - 形状分区读 shapes REST 列表（空态不造假行）；
  * - CQ 分区为静态追溯表（implemented/planned 闭集）；
  * - 权限态：非管理员看不到术语编辑入口；
- * - 关系候选审批（管理员）：approve 动作调用候选 API 并刷新 pending 计数。
+ * - 关系候选审批（管理员）：approve 动作调用候选 API 并刷新 pending 计数；
+ * - 画布副标题指向的「图谱工作台」是带 agentId 的真链接（文案不许许诺不存在的入口）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -27,13 +28,18 @@ vi.mock('@/stores/auth', () => ({
   }),
 }))
 
-vi.mock('@/composables/useAgentPage', () => ({
-  useAgentPage: () => ({
-    agentId: { value: 'a1' },
-    currentAgent: { value: { name: 'AgentX' } },
-    agentLoading: { value: false },
-  }),
-}))
+vi.mock('@/composables/useAgentPage', async () => {
+  // 真实 composable 返回 Ref——mock 也给 Ref，否则模板里 `agentId` 不会解包，
+  // 链接会渲染成 /agent/[object Object]/...（假 mock 掩盖真接线问题）
+  const { ref } = await import('vue')
+  return {
+    useAgentPage: () => ({
+      agentId: ref('a1'),
+      currentAgent: ref({ name: 'AgentX' }),
+      agentLoading: ref(false),
+    }),
+  }
+})
 
 vi.mock('ant-design-vue', () => ({
   message: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
@@ -154,6 +160,7 @@ const mountPage = () =>
         'a-tabs': { props: ['activeKey'], emits: ['update:activeKey'], template: '<div class="stub-tabs"><slot /></div>' },
         'a-tab-pane': { props: ['tab'], template: '<div class="stub-tab-pane"><slot /></div>' },
         'a-drawer': { props: ['open'], emits: ['update:open'], template: '<div v-if="open" class="stub-drawer"><slot /></div>' },
+        'router-link': { props: ['to'], template: '<a :data-to="to"><slot /></a>' },
       },
     },
   })
@@ -230,6 +237,15 @@ describe('OntologyStudioPage（UI-0）', () => {
     expect(wrapper.find('[data-testid="studio-upper-tree"]').text()).toContain('Entity')
     expect(wrapper.find('[data-testid="studio-upper-tree"]').text()).toContain('Continuant')
     expect(wrapper.find('[data-testid="studio-upper-tree"]').text()).toContain('Occurrent')
+  })
+
+  it('画布副标题许诺的「图谱工作台」是真链接（不是只写在文案里的空头入口）', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="canvas-note"]').text()).toContain('图谱工作台')
+    const link = wrapper.find('[data-testid="studio-graph-workbench-link"]')
+    expect(link.exists()).toBe(true)
+    expect(link.attributes('data-to')).toBe('/agent/a1/graph-workbench')
   })
 
   it('形状分区：REST 列表与新建入口可用，空态不渲染假行', async () => {

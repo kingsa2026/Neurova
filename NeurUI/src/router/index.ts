@@ -103,8 +103,9 @@ const routes: RouteRecordRaw[] = [
         props: true,
       },
       {
-        // S5 旧页退役：URL 不变（书签/菜单可回退语义），页面换成工作台。
-        // UI-0 后本 URL 是 ontology-studio 的兼容入口（§15.2：书签不失效）。
+        // S5 旧页退役：URL 不变（书签/历史链接不失效），页面换成图谱工作台。
+        // 与下面 `graph-workbench` 是同一组件的两条 URL；一级入口走 graph-workbench，
+        // 本条只作兼容保留（2026-11-06 复订：此前注释把它说成本体工作台的兼容入口，与 component 不符）。
         path: 'agent/:agentId/knowledge-graph',
         name: 'AgentKnowledgeGraph',
         component: () => import('@/pages/GraphWorkbenchPage.vue'),
@@ -341,6 +342,13 @@ const routes: RouteRecordRaw[] = [
         path: 'channels',
         name: 'Channels',
         component: () => import('@/pages/ChannelIntegrationPage.vue'),
+      },
+      {
+        // 数据中台总览：知识库/图谱/本体/事实/互操作/企业源/评测的统一入口。
+        // 只做入口聚合与可见性概览，不新造第二套数据页（页面仍归各域）。
+        path: 'data-hub',
+        name: 'DataHub',
+        component: () => import('@/pages/DataHubPage.vue'),
       },
       {
         path: 'knowledge',

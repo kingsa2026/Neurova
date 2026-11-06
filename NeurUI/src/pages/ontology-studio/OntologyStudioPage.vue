@@ -28,7 +28,7 @@
     />
 
     <div class="studio-layout">
-      <!-- 左：画布占位（简化静态 upper-lite 树；2D/3D 交互画布留在旧工作台兼容入口） -->
+      <!-- 左：画布占位（简化静态 upper-lite 树；2D/3D 交互画布在图谱工作台，此处给真链接） -->
       <GlassCard class="canvas-card">
         <div class="canvas-head">
           <span class="canvas-title">{{ t('ontology.canvasTitle') }}</span>
@@ -46,7 +46,12 @@
             </div>
           </div>
         </div>
-        <p class="canvas-note">{{ t('ontology.canvasNote') }}</p>
+        <p class="canvas-note" data-testid="canvas-note">{{ t('ontology.canvasNote') }}</p>
+        <router-link
+          class="canvas-link"
+          data-testid="studio-graph-workbench-link"
+          :to="`/agent/${agentId}/graph-workbench`"
+        >{{ t('nav.graphWorkbench') }}</router-link>
       </GlassCard>
 
       <!-- 右：纵向分区导航（§15.3：避免 7 个横排 tab 挤压画布） -->
@@ -129,8 +134,6 @@ const loadError = ref(false)
 const schema = ref<OntologySchemaData | null>(null)
 const pendingCount = ref(0)
 const activeSection = ref<SectionKey>('overview')
-
-void agentId
 
 async function loadAll() {
   loading.value = true
@@ -251,6 +254,12 @@ onMounted(loadAll)
   margin-top: 12px;
   font-size: 12px;
   color: var(--nr-text-secondary, inherit);
+}
+.canvas-link {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--nr-accent, inherit);
 }
 .sections-nav {
   display: flex;

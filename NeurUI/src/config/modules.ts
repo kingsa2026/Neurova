@@ -55,10 +55,9 @@ const AGENT_MODULES: ModuleItem[] = [
   { key: '/agent/:id/memory', labelKey: 'memory' },
   { key: '/agent/:id/files', labelKey: 'agentfiles' },
   { key: '/agent/:id/experience-knowledge', labelKey: 'experience' },
-  // UI-0：知识图谱标签改「本体工作台」（nav.knowledgeGraph 值随 i18n 更新），路由指到新 Studio；
-  // 旧 URL /agent/:id/knowledge-graph 保留为兼容入口（书签不失效），模块 key 随标签走新路径。
-  { key: '/agent/:id/ontology-studio', labelKey: 'knowledgeGraph' },
-  { key: '/agent/:id/facts', labelKey: 'factExplorer' },
+  // 本体工作台与事实浏览已迁到「数据中台」分组（2026-11-06 导航重构）：
+  // 目录条目随之移到 USER_MODULES，但 **key 字符串一字不改**——
+  // 存量用户组勾的就是这两个 path，换 key 等于把已发的授权静默作废。
   { key: '/agent/:id/metacognition', labelKey: 'metacognition' },
   { key: '/agent/:id/reflection', labelKey: 'reflection' },
   { key: '/agent/:id/growth', labelKey: 'growth' },
@@ -76,10 +75,18 @@ const AGENT_MODULES: ModuleItem[] = [
 /** 侧栏用户区（协作组内为该组的一级模块，覆盖其子路由） */
 const USER_MODULES: ModuleItem[] = [
   { key: '/agents', labelKey: 'agents' },
+  // ── 数据中台分组（2026-11-06 IA 重构）：知识库/图谱/本体/事实的入口聚合 ──
+  // /agent/:id/* 两条是从 Agent 区迁来的原 key（字符串未变，授权继续命中）。
+  { key: '/data-hub', labelKey: 'dataHub' },
   { key: '/knowledge', labelKey: 'knowledge' },
-  { key: '/knowledge-eval', labelKey: 'knowledgeEval' },
+  { key: '/agent/:id/ontology-studio', labelKey: 'knowledgeGraph' },
+  // 图谱工作台：此前**从未进过权限目录**（受限用户组勾不到，等同于隐性 admin-only，
+  // 与 /cost 那条是同一形态的缺口），本次随一级入口一起登记。
+  { key: '/agent/:id/graph-workbench', labelKey: 'graphWorkbench' },
+  { key: '/agent/:id/facts', labelKey: 'factExplorer' },
   { key: '/knowledge/interop', labelKey: 'knowledgeInterop' },
   { key: '/knowledge/enterprise-sources', labelKey: 'enterpriseSources' },
+  { key: '/knowledge-eval', labelKey: 'knowledgeEval' },
   { key: '/skill-pool', labelKey: 'skillPool' },
   { key: '/marketplace/skills', labelKey: 'skillMarket' },
   // /aigc 已迁至「模型与工具」区 /aigc/* 五个二级页（2026-09-14 用户决策）；

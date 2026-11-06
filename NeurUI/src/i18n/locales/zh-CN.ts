@@ -74,6 +74,17 @@ export default {
     updated: '已更新',
     filter: '筛选',
   },
+  dataHub: {
+    title: "数据中台",
+    subtitle: "知识库·图谱·本体·事实的统一入口",
+    hint: "本页只做入口聚合与可见性概览，不新造第二套数据页；各能力仍在原页面，权限沿用功能模块目录逐页判定。",
+    groupKnowledge: "知识资产",
+    groupSemantic: "语义与推理",
+    groupInterop: "互通与治理",
+    enter: "进入",
+    descGraph: "图谱可视化工作台（2D/3D 画布与地理图层）",
+    emptyHint: "当前账号没有中台内任何模块的授权，下面不会渲染空卡片"
+  },
   nav: {
     myCredentials: '我的凭据',
     home: '首页',
@@ -141,6 +152,7 @@ export default {
     reflection: '反思',
     experience: '经验知识',
     knowledgeGraph: '本体工作台',
+    graphWorkbench: "图谱工作台",
     ontologyStudio: '本体工作台',
     factExplorer: '事实浏览',
     knowledgeInterop: '互操作与导出',
@@ -177,7 +189,9 @@ export default {
     searchSettings: '搜索设置',
     agentCore: '核心',
     agentCognition: '认知',
-    knowledgeCognition: "知识与认知",
+    knowledgeCognition: "认知与自省",
+    dataPlatform: "数据中台",
+    dataHub: "中台总览",
     agentCapabilities: '能力',
     agentRuntime: '运行',
     // 三区导航（Agent 区/用户区/系统配置区）

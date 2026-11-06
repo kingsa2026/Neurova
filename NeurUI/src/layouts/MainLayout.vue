@@ -28,26 +28,18 @@
           <template #icon><FileOutlined /></template>
         </GlassNavItem>
 
-        <!-- Agent: 知识与认知（低频折叠） -->
+        <!-- Agent: 认知与自省（低频折叠）——本体工作台/事实浏览已迁「数据中台」 -->
         <GlassNavGroup
-          v-if="canAgent('experience-knowledge') || canAgent('ontology-studio') || canAgent('facts') || canAgent('metacognition') || canAgent('reflection') || canAgent('growth') || canAgent('personality')"
+          v-if="canAgent('experience-knowledge') || canAgent('metacognition') || canAgent('reflection') || canAgent('growth') || canAgent('personality')"
           :label-key="'nav.knowledgeCognition'"
           storage-key="agent-cognition"
           :collapsed="appStore.sidebarCollapsed"
           :first-item-to="`/agent/${agentStore.currentAgentId}/experience-knowledge`"
-          :count="8"
+          :count="5"
         >
           <template #icon><BulbOutlined /></template>
           <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/experience-knowledge`" :label="t('nav.experience')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('experience-knowledge')">
             <template #icon><BulbOutlined /></template>
-          </GlassNavItem>
-          <!-- UI-0：标签改「本体工作台」，路由指新 Studio；旧 /knowledge-graph URL 保留为兼容入口 -->
-          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/ontology-studio`" :label="t('nav.knowledgeGraph')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('ontology-studio')">
-            <template #icon><ShareAltOutlined /></template>
-          </GlassNavItem>
-          <!-- UI-1：事实浏览（ABox 查询、双时态、溯源、解释链） -->
-          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/facts`" :label="t('nav.factExplorer')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('facts')">
-            <template #icon><NodeIndexOutlined /></template>
           </GlassNavItem>
           <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/metacognition`" :label="t('nav.metacognition')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('metacognition')">
             <template #icon><ExperimentOutlined /></template>
@@ -182,23 +174,44 @@
         </GlassNavItem>
       </GlassNavGroup>
 
-      <GlassNavItem to="/knowledge" :label="t('nav.knowledge')" :collapsed="appStore.sidebarCollapsed" v-if="can('/knowledge')">
-        <template #icon><BookOutlined /></template>
-      </GlassNavItem>
-
-      <GlassNavItem to="/knowledge-eval" :label="t('nav.knowledgeEval')" :collapsed="appStore.sidebarCollapsed" v-if="can('/knowledge-eval')">
-        <template #icon><ExperimentOutlined /></template>
-      </GlassNavItem>
-
-      <!-- UI-2：互操作与导出（Turtle 导出 + IRI 解析） -->
-      <GlassNavItem to="/knowledge/interop" :label="t('nav.knowledgeInterop')" :collapsed="appStore.sidebarCollapsed" v-if="can('/knowledge/interop')">
-        <template #icon><ExportOutlined /></template>
-      </GlassNavItem>
-
-      <!-- UI-4：企业数据源（接口预留页） -->
-      <GlassNavItem to="/knowledge/enterprise-sources" :label="t('nav.enterpriseSources')" :collapsed="appStore.sidebarCollapsed" v-if="can('/knowledge/enterprise-sources')">
-        <template #icon><CloudServerOutlined /></template>
-      </GlassNavItem>
+      <!-- 数据中台（2026-11-06 IA 重构）：知识库/本体/图谱/事实/互操作/企业源/评测
+           原散在「用户区平铺 4 项 ＋ Agent 区 2 项」，同一批能力两套入口、找齐要跨两个区。
+           组内 Agent 级页面按 currentAgentId 生成链接，权限仍逐模块判定（key 未变）。 -->
+      <GlassNavGroup
+        v-if="can('/data-hub') || can('/knowledge') || canAgent('ontology-studio') || canAgent('graph-workbench') || canAgent('facts') || can('/knowledge/interop') || can('/knowledge/enterprise-sources') || can('/knowledge-eval')"
+        :label-key="'nav.dataPlatform'"
+        storage-key="data-platform"
+        :collapsed="appStore.sidebarCollapsed"
+        :first-item-to="'/data-hub'"
+        :count="8"
+      >
+        <template #icon><DatabaseOutlined /></template>
+        <GlassNavItem to="/data-hub" :label="t('nav.dataHub')" :collapsed="appStore.sidebarCollapsed" v-if="can('/data-hub')">
+          <template #icon><DatabaseOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/knowledge" :label="t('nav.knowledge')" :collapsed="appStore.sidebarCollapsed" v-if="can('/knowledge')">
+          <template #icon><BookOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/ontology-studio`" :label="t('nav.knowledgeGraph')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('ontology-studio')">
+          <template #icon><ShareAltOutlined /></template>
+        </GlassNavItem>
+        <!-- 图谱工作台（2D/3D 画布＋地理图层）：一级入口，旧 /knowledge-graph URL 继续可用 -->
+        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/graph-workbench`" :label="t('nav.graphWorkbench')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('graph-workbench')">
+          <template #icon><DeploymentUnitOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/facts`" :label="t('nav.factExplorer')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('facts')">
+          <template #icon><NodeIndexOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/knowledge/interop" :label="t('nav.knowledgeInterop')" :collapsed="appStore.sidebarCollapsed" v-if="can('/knowledge/interop')">
+          <template #icon><ExportOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/knowledge/enterprise-sources" :label="t('nav.enterpriseSources')" :collapsed="appStore.sidebarCollapsed" v-if="can('/knowledge/enterprise-sources')">
+          <template #icon><CloudServerOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/knowledge-eval" :label="t('nav.knowledgeEval')" :collapsed="appStore.sidebarCollapsed" v-if="can('/knowledge-eval')">
+          <template #icon><ExperimentOutlined /></template>
+        </GlassNavItem>
+      </GlassNavGroup>
 
       <GlassNavItem to="/skill-pool" :label="t('nav.skillPool')" :collapsed="appStore.sidebarCollapsed" v-if="can('/skill-pool')">
         <template #icon><AppstoreOutlined /></template>
@@ -369,7 +382,7 @@ import {
   UserOutlined, PlayCircleOutlined, SmileOutlined, IdcardOutlined,
   BookOutlined, AppstoreOutlined, RocketOutlined, NodeIndexOutlined,
   TeamOutlined, ProjectOutlined, BranchesOutlined, BgColorsOutlined,
-  ShopOutlined,
+  ShopOutlined, DeploymentUnitOutlined,
 } from '@ant-design/icons-vue'
 
 const router = useRouter()
