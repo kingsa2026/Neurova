@@ -204,13 +204,13 @@ def test_cache_reusesUntilInvalidated_andOffNeverTouchesStore(store, monkeypatch
     assert calls["list"] == 2, "失效后必须立即重查"
 
 
-def test_normalizeMode_invalidFallsBackToOff(monkeypatch):
-    monkeypatch.setenv("NEUROVA_KB_QUERY_NORMALIZE", "随便")
+def test_normalizeMode_invalidFallsBackToOffAndMissingDefaultsToShadow(monkeypatch):
+    monkeypatch.setenv("NEUROVA_KB_QUERY_NORMALIZE", "invalid_mode")
     assert normalizeMode() == "off"
     monkeypatch.setenv("NEUROVA_KB_QUERY_NORMALIZE", "shadow")
     assert normalizeMode() == "shadow"
     monkeypatch.delenv("NEUROVA_KB_QUERY_NORMALIZE", raising=False)
-    assert normalizeMode() == "off"
+    assert normalizeMode() == "shadow", "缺省 shadow（A-1 开闸，升级计划第一批）"
 
 
 # ── B1 落点：retrieval_metrics 记录归一读数（shadow/on 才记，off 不记）──
