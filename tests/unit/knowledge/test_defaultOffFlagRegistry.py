@@ -82,7 +82,7 @@ def testEveryRowDelegatesToARealCallableInItsHomeModule():
 
 @pytest.mark.parametrize(
     "flagId,defaultToken",
-    [("D-01", "off"), ("D-02", "off"), ("D-03", "off"), ("D-04", "off"),
+    [("D-01", "shadow"), ("D-02", "shadow"), ("D-03", "off"), ("D-04", "off"),
      ("D-06", "off"), ("D-08", "off"), ("D-11", "off"), ("D-16", "off"), ("D-19", "legacy")],
 )
 def testFreshProcessDefaultStateMatchesTheTicket(monkeypatch, flagId, defaultToken):

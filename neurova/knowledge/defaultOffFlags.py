@@ -56,11 +56,11 @@ class DefaultOffFlag:
 #: 顺序即面板顺序；与 §13.1 票面九项逐字对齐（少一项或多一项都由判据①当场红）。
 DEFAULT_OFF_FLAGS: tuple = (
     DefaultOffFlag(
-        flagId="D-01", envKey="NEUROVA_KB_QUERY_NORMALIZE", declaredDefault="off",
+        flagId="D-01", envKey="NEUROVA_KB_QUERY_NORMALIZE", declaredDefault="shadow",
         homeModule="neurova.knowledge.query_normalization", readoutRef="normalizeMode",
         note="检索侧查询归一（别名/量词/单位），非法值回落 off"),
     DefaultOffFlag(
-        flagId="D-02", envKey="NEUROVA_KB_AMBIGUITY_CLARIFY", declaredDefault="off",
+        flagId="D-02", envKey="NEUROVA_KB_AMBIGUITY_CLARIFY", declaredDefault="shadow",
         homeModule="neurova.knowledge.ambiguity_clarification", readoutRef="ambiguityMode",
         note="歧义澄清块注入"),
     DefaultOffFlag(
