@@ -36,9 +36,13 @@ _ENTRY_REF_PREFIXES = ("entry:", "legacy:")
 
 
 def ambiguityMode() -> str:
-    # A-2（升级计划第一批）：默认 shadow——歧义读数在，不阻断用户流
-    raw = (os.environ.get(AMBIGUITY_ENV) or "shadow").strip().lower()
-    return raw if raw in _MODES else "shadow"
+    # A-2（升级计划第一批）：缺省 shadow——歧义读数在，不阻断用户流。
+    # 非法值安全回退 off（不猜档）。
+    raw = os.environ.get(AMBIGUITY_ENV)
+    if raw is None:
+        return "shadow"
+    raw = raw.strip().lower()
+    return raw if raw in _MODES else "off"
 
 
 @dataclass
