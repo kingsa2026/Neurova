@@ -180,7 +180,9 @@ class TestMigrationVersions:
         # v28：条件类规则（specs/2026-11-05 B1）——ontology_rules 带形状与 head 客体常量。
         # v29：关系映射层（specs/2026-11-05 B8）——术语特征/别名/外部 IRI 列＋未知关系候选表。
         # v30：身份判据（specs/2026-11-05 B9 L1）——类型级 identity_keys。
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 34
+        # v31–v34：SKOS/形状（B10）、限定关系 schema（B11）、变更审计账（B12）、企业源配置（B14）。
+        # v35：物化档位（specs/2026-11-05 B11 §12.6）——ontology_rules.materialization。
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 35
         assert {'knowledge_mcp_sources', 'knowledge_alias_candidates',
                 'ontology_relation_candidates', 'ontology_shapes',
                 'ontology_change_log', 'enterprise_source_configs'} <= names

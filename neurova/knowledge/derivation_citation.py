@@ -37,28 +37,33 @@ def conditionClassRouteOn() -> bool:
     return str(os.environ.get(CONDITION_CLASS_ROUTE_ENV) or "").strip().lower() in _ROUTE_ON
 
 
-def _derivedFactIds(store: Any) -> set:
-    """全库"被推导过"的事实 id，一条 DISTINCT 取完。
+def _derivedFactIds(store: Any, tenantId: str = "default") -> set:
+    """本租户「按观察态处理」的推导行 id，一条查询取完。
 
     刻意不按命中集拼 `IN (…)`：读面的候选池可达全库活动事实，参数个数能顶穿
     SQLite 的变量上限，而这条表只有推导事实，本来比候选池小得多。
+    档位口径住在账本（`hiddenDerivedFactIds`），这里不重述一遍 enforce 判据。
     """
-    return set(store._derivationLedger.derivedFactIds())
+    return set(store._derivationLedger.hiddenDerivedFactIds(tenantId))
 
 
 def filterConditionClassFacts(items: List[Dict[str, Any]],
-                              store: Any) -> Tuple[List[Dict[str, Any]], int]:
+                              store: Any,
+                              tenantId: str = "default",
+                              ) -> Tuple[List[Dict[str, Any]], int]:
     """观察态下把推导事实从检索池里摘掉，返回 `(留下的条目, 摘掉条数)`。
 
-    翻主路时无条件放行；读账失败时**放行**并记 0 摘除——读侧治理故障不该让
-    检索主路陪葬，宁可多放一条推导，也不静默少放一片显式事实。
+    翻主路时无条件放行；灰度 off 时也只摘 **observe 档**的推导行——`enforce` 档
+    的结论按 §12.6 设计 3 进主路，但仍由标注面说清自己是推出来的。
+    读账失败时**放行**并记 0 摘除——读侧治理故障不该让检索主路陪葬，宁可多放
+    一条推导，也不静默少放一片显式事实。
     """
     if conditionClassRouteOn() or not items:
         return items, 0
     if not any(item.get("lineage_id") for item in items):
         return items, 0
     try:
-        derived = _derivedFactIds(store)
+        derived = _derivedFactIds(store, tenantId)
     except Exception:  # noqa: BLE001 - 读账失败让路，检索主路不陪葬
         return items, 0
     if not derived:

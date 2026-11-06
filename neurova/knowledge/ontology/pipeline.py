@@ -135,12 +135,17 @@ class OntologyPipeline:
 
     _TERM_DIFF_FIELDS = ("kind", "label", "parent_term_id", "domain_terms",
                          "range_terms", "range_kinds", "cardinality",
-                         "disjoint_with", "required_props", "version")
+                         "disjoint_with", "required_props",
+                         "inverse_of", "symmetric", "transitive", "aliases",
+                         "external_iris", "deprecated", "replaced_by",
+                         "identity_keys", "labels", "alt_labels", "module",
+                         "qualifier_schema", "version")
     # 规则的 diff 只看**声明**字段。stratification_level / depends_on 是引擎按
     # 当前规则图派生的记账值（重登记时会把自身旧行计入 producer，层号随之
     # 0→1）——同声明重放被它们判成"变更"，幂等 rerun 的 diff 就永远不空。
     _RULE_DIFF_FIELDS = ("head_predicate", "head_subject_var", "head_object_const",
-                         "body", "negated_predicates", "enabled", "version")
+                         "body", "negated_predicates", "enabled", "version",
+                         "materialization")
 
     def __init__(self, store: Any, registry: Any = None, engine: Any = None,
                  validator: Any = None) -> None:
@@ -201,17 +206,12 @@ class OntologyPipeline:
         appliedRuleIds: List[str] = []
         try:
             for spec in termUpserts:
-                term = self._registry.register(
+                # 部分声明合并走注册表单点（declarePartial）：批次没写的栏保留现值，
+                # 与 REST PUT 同一口径，不在这里抄第二份字段清单。
+                term = self._registry.declarePartial(
                     str(spec.get("termId") or "").strip(),
                     str(spec.get("kind") or "").strip(),
-                    label=str(spec.get("label") or ""),
-                    parentTermId=spec.get("parentTermId"),
-                    domain=spec.get("domain"), rangeTerms=spec.get("rangeTerms"),
-                    rangeKinds=spec.get("rangeKinds"),
-                    cardinality=spec.get("cardinality"),
-                    disjointWith=spec.get("disjointWith"),
-                    requiredProps=spec.get("requiredProps"),
-                    version=str(spec.get("version") or "v1"), tenantId=tenant)
+                    dict(spec), tenantId=tenant)
                 appliedTermIds.append(term["term_id"])
             for spec in ruleRegistrations:
                 rule = self._engine.registerRule(
@@ -220,6 +220,7 @@ class OntologyPipeline:
                     list(spec.get("body") or []),
                     headSubjectVar=str(spec.get("headSubjectVar") or "X"),
                     headObjectConst=str(spec.get("headObjectConst") or ""),
+                    materialization=str(spec.get("materialization") or "observe"),
                     enabled=bool(spec.get("enabled", True)),
                     version=str(spec.get("version") or "v1"), tenantId=tenant)
                 appliedRuleIds.append(rule["rule_id"])
@@ -416,7 +417,9 @@ class OntologyPipeline:
                     enabled=spec.get("enabled", True),
                     version=spec.get("version", "v1"),
                     headObjectConst=spec.get("head_object_const", ""),
-                    shape=spec.get("shape", ""), tenantId=tenant)
+                    shape=spec.get("shape", ""),
+                    materialization=spec.get("materialization", "observe"),
+                    tenantId=tenant)
                 log.append(tenantId=tenant, actor=actor, action="rollback_restore",
                            targetType="rule", targetId=ruleId,
                            reason="回滚到 %s" % toBaselineId, baselineId=toBaselineId)

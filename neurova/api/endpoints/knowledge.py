@@ -60,6 +60,7 @@ from neurova.core.logger import get_logger
 
 from neurova.api.endpoints.knowledge_core import router as _core_router
 from neurova.api.endpoints.knowledge_core import detail_router as _core_detail_router
+from neurova.api.endpoints.knowledge_enterprise import router as _enterprise_router
 from neurova.api.endpoints.knowledge_ingestion import router as _ingestion_router
 from neurova.api.endpoints.knowledge_mcp_source import router as _mcp_source_router
 from neurova.api.endpoints.knowledge_ontology import router as _ontology_router
@@ -104,6 +105,8 @@ router.include_router(_ingestion_router)
 # 本体类型系统（`/ontology*`）：知识域自己的读面，与被后面 detail_router 的
 # 单段参数 `/{knowledge_id}` 遮蔽无关——它是两段字面路径，仍先于 detail include。
 router.include_router(_ontology_router)
+# 企业源描述符提交面（`/enterprise/sources*`，B14）：两段字面路径，同样先于 detail。
+router.include_router(_enterprise_router)
 # MCP 信息源（`/mcp/sources*`）：外部 MCP server 作为知识库信息源的登记/拉取面。
 router.include_router(_mcp_source_router)
 

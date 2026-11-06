@@ -65,6 +65,9 @@ DOMAINS = (
         aggregator="knowledge",
         layers=(
             ("knowledge_common",),
+            # B12 稳定 IRI 子路由：由 knowledge_ontology include，故必须排在它下面一层
+            # （同层零交叉——两边互指即红灯）。
+            ("knowledge_ontology_iri",),
             (
                 "knowledge_core",
                 "knowledge_sharing",
@@ -72,6 +75,7 @@ DOMAINS = (
                 "knowledge_ingestion",
                 "knowledge_mcp_source",   # c3efc886
                 "knowledge_ontology",     # 9aeff802
+                "knowledge_enterprise",   # specs/2026-11-05 B14（聚合器直接挂载）
             ),
         ),
         delegated_prefixes=None,

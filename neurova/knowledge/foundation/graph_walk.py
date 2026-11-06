@@ -91,10 +91,15 @@ class GraphFactWalker:
         rows = self._walk(anchors, hops, cap, moment, tenantId)
         # 翻主路态才给跳板挂溯源标注：观察态下推导行根本进不了 CTE（_walk 里排除），
         # 去查一遍账本只是白花一次 IO，还会让人以为过滤与标注是两套判据。
+        # v35 加了按规则类的物化档位：灰度 off 但本租户有 enforce 规则时，推导行
+        # 也进得来（且混合推导仍被排除），所以那种场合标注照取。
         derivedIds: set = set()
-        if conditionClassRouteOn():
+        ledgerForIds = getattr(self._store, "_derivationLedger", None)
+        routeOn = conditionClassRouteOn()
+        if routeOn or (ledgerForIds is not None
+                       and ledgerForIds.hasEnforceRules(tenantId)):
             try:
-                derivedIds = set(self._store._derivationLedger.derivedFactIds())
+                derivedIds = set(ledgerForIds.derivedFactIds())
             except Exception:  # noqa: BLE001 - 标注失败只丢标注，走查照旧返回
                 derivedIds = set()
         if seeded:
