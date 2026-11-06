@@ -180,7 +180,62 @@ async def search_knowledge(
     agent_id: Optional[str] = Query(default=None, description="来源 agent 过滤"),
     scope: str = Query(default="all", description="范围：all/public/private/shared"),
 ):
-    """在当前用户可见范围内搜索知识（标题+内容包含匹配）"""
+    """在当前用户可见范围内搜索知识（标题+内容包含匹配）。
+
+    B11 双时态：`asOf`/`knownAt` 任一给出时走事实层 `factsBitemporal`，
+    按业务时间/记录时间裁剪；两轴都空保持原条目检索行为（零漂移）。
+    """
+    if body.as_of or body.known_at:
+        from datetime import datetime
+
+        from neurova.knowledge.foundation import get_knowledge_fact_store
+
+        store = get_knowledge_fact_store()
+        tenant = str(current_user.get("tenant_id") or "default")
+        facts = store.factsBitemporal(
+            agent_id or "default", tenantId=tenant,
+            asOf=body.as_of or "", knownAt=body.known_at or "")
+        needle = str(body.query or "").strip().lower()
+        items: List[Dict[str, Any]] = []
+        for fact in facts:
+            content = str(fact.get("content") or "")
+            haystack = " ".join([
+                content, str(fact.get("subject_key") or ""),
+                str(fact.get("predicate_term_id") or ""),
+                str(fact.get("object_term") or ""),
+            ]).lower()
+            if needle and needle not in haystack:
+                continue
+            recorded = str(fact.get("recorded_at") or "")
+            try:
+                created = datetime.fromisoformat(recorded.replace("Z", "+00:00")).timestamp()
+            except (TypeError, ValueError):
+                created = 0.0
+            items.append({
+                "knowledge_id": str(fact.get("fact_id") or ""),
+                "title": "%s · %s" % (
+                    str(fact.get("subject_key") or ""), str(fact.get("object_term") or "")),
+                "content": content,
+                "category": "fact",
+                "tags": ["fact"],
+                "source": str(fact.get("source_turn_id") or "knowledge_foundation"),
+                "confidence": float(fact.get("confidence") or 0.0),
+                "created_at": created,
+                "updated_at": created,
+                "metadata": {
+                    "confidence": fact.get("confidence"),
+                    "qualifier": fact.get("qualifier") or {},
+                    "valid_from": fact.get("valid_from"),
+                    "valid_until": fact.get("valid_until"),
+                    "recorded_at": fact.get("recorded_at"),
+                    "retracted_at": fact.get("retracted_at"),
+                    "subject_key": fact.get("subject_key"),
+                    "predicate_term_id": fact.get("predicate_term_id"),
+                    "object_term": fact.get("object_term"),
+                },
+            })
+        return items[: max(1, int(body.limit or 20))]
+
     repo = get_repository()
     results = repo.search_visible_items(
         current_user,

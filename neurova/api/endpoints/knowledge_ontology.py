@@ -115,6 +115,24 @@ async def get_ontology_schema(
     }
 
 
+@router.get("/ontology/quality")
+async def getOntologyQualityReport(
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """本体质量报告（B13 L9，只读）：OOPS! 结构子集＋可计算指标。
+
+    事实源是 `ontology/quality.py::ontologyQualityReport` 那一份计算，端点不自己
+    数第二本账（教义第 6 条）。报告只覆盖**可计算**的形状缺陷（缺 label、孤儿类、
+    逆关系单边、label 重复）；完整 OOPS!/OntoClean/OQuaRE 认证不在本仓承诺面
+    （升级计划 §6 不纳入项），检索侧 NDCG/A-B 走 `/evaluation/*` 与 `/audit/*`。
+    """
+    from neurova.knowledge.ontology.quality import ontologyQualityReport
+
+    store, _registry, _engine = _ontologyParts()
+    return {"code": 0, "message": "success",
+            "data": ontologyQualityReport(store, tenantId=_tenantOf(current_user))}
+
+
 @router.get("/ontology/export.ttl")
 async def export_ontology_turtle(
     request: Request,
@@ -146,6 +164,172 @@ async def export_ontology_turtle(
     return Response(content=text, media_type="text/turtle; charset=utf-8")
 
 
+@router.get("/ontology/export.jsonld")
+async def export_ontology_jsonld(
+    request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+    agent_id: Optional[str] = Query(default=None),
+):
+    """JSON-LD 导出（B12 L7）：@context + @graph，逐字节确定。"""
+    _requireAdmin(current_user)
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.export.jsonld import exportJsonLd
+
+    text = exportJsonLd(get_knowledge_fact_store(), tenantId=_tenantOf(current_user),
+                        agentId=agent_id or "")
+    return Response(content=text, media_type="application/ld+json; charset=utf-8")
+
+
+@router.get("/ontology/export.owl")
+async def export_ontology_owl(
+    request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+    version: str = Query(default=""),
+):
+    """OWL 2 RL 可规则化公理导出（B12 L7）：互操作声明，不是运行时承诺。"""
+    _requireAdmin(current_user)
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.export.owl import exportOwlAxioms
+
+    text = exportOwlAxioms(get_knowledge_fact_store(), tenantId=_tenantOf(current_user),
+                           version=version)
+    return Response(content=text, media_type="text/turtle; charset=utf-8")
+
+
+@router.get("/ontology/export.shacl")
+async def export_ontology_shacl(
+    request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """SHACL shapes 导出（B12 L7）：形状注册表镜像。"""
+    _requireAdmin(current_user)
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.export.shacl import exportShaclShapes
+
+    text = exportShaclShapes(get_knowledge_fact_store(), tenantId=_tenantOf(current_user))
+    return Response(content=text, media_type="text/turtle; charset=utf-8")
+
+
+@router.get("/ontology/export.prov")
+async def export_ontology_prov(
+    request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """PROV-O 导出（B12 L7）：assertions/activities/derivations。"""
+    _requireAdmin(current_user)
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.export.prov import exportProv
+
+    text = exportProv(get_knowledge_fact_store(), tenantId=_tenantOf(current_user))
+    return Response(content=text, media_type="text/turtle; charset=utf-8")
+
+
+# ── 形状注册表（B10 L4）──────────────────────────────────────
+
+class ShapeWriteRequest(BaseModel):
+    shape_id: str = ""
+    target_kind: str
+    target_term_id: str = ""
+    path: Dict[str, Any] = Field(default_factory=dict)
+    constraint_kind: str
+    constraint: Dict[str, Any] = Field(default_factory=dict)
+    severity: str = "violation"
+    message: str = ""
+    enabled: bool = True
+    version: str = "v1"
+
+
+def _shapeRegistry(store: Any):
+    from neurova.knowledge.ontology.shapes import ShapeRegistry
+
+    return ShapeRegistry(store)
+
+
+@router.get("/ontology/shapes")
+async def list_ontology_shapes(
+    request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+    enabled_only: bool = Query(default=False),
+):
+    """形状列表（B10 L4）：只读，按租户分区。"""
+    store, _, _ = _ontologyParts()
+    shapes = _shapeRegistry(store).list(
+        tenantId=_tenantOf(current_user), enabledOnly=bool(enabled_only))
+    return {"code": 0, "message": "success",
+            "data": {"items": shapes, "total": len(shapes)}}
+
+
+@router.post("/ontology/shapes")
+async def create_ontology_shape(
+    body: ShapeWriteRequest, request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """登记形状（B10 L4）：与内置 6 项校验撞车即拒；写前/dry-run 同求值器。"""
+    _requireAdmin(current_user)
+    store, _, _ = _ontologyParts()
+    shapeId = str(body.shape_id or "").strip()
+    if not shapeId:
+        raise HTTPException(status_code=400, detail="shape_id 不能为空")
+    try:
+        shape = _shapeRegistry(store).register(
+            _tenantOf(current_user), shapeId, body.target_kind, body.constraint_kind,
+            body.constraint, pathJson=body.path, targetTermId=body.target_term_id,
+            severity=body.severity, message=body.message, enabled=body.enabled,
+            version=body.version)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    activityId = _landActivity(store, "ontology_shape_write", current_user, "create",
+                               {"shape_id": shapeId}, body.message)
+    return {"code": 0, "message": "success",
+            "data": {"shape": shape, "activity_id": activityId}}
+
+
+@router.put("/ontology/shapes/{shape_id}")
+async def update_ontology_shape(
+    shape_id: str, body: ShapeWriteRequest, request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """更新形状（B10 L4）：不存在 404；不允许 PUT 静默新建。"""
+    _requireAdmin(current_user)
+    store, _, _ = _ontologyParts()
+    tenant = _tenantOf(current_user)
+    registry = _shapeRegistry(store)
+    shapeId = str(shape_id or "").strip()
+    if not registry.get(shapeId, tenantId=tenant):
+        raise HTTPException(status_code=404, detail="形状不存在: %s" % shapeId)
+    try:
+        shape = registry.register(
+            tenant, shapeId, body.target_kind, body.constraint_kind,
+            body.constraint, pathJson=body.path, targetTermId=body.target_term_id,
+            severity=body.severity, message=body.message, enabled=body.enabled,
+            version=body.version)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    activityId = _landActivity(store, "ontology_shape_write", current_user, "update",
+                               {"shape_id": shapeId}, body.message)
+    return {"code": 0, "message": "success",
+            "data": {"shape": shape, "activity_id": activityId}}
+
+
+@router.delete("/ontology/shapes/{shape_id}")
+async def delete_ontology_shape(
+    shape_id: str, request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+    basis: str = Query(default=""),
+):
+    """删除形状（B10 L4）：不存在 404。"""
+    _requireAdmin(current_user)
+    store, _, _ = _ontologyParts()
+    registry = _shapeRegistry(store)
+    shapeId = str(shape_id or "").strip()
+    if not registry.get(shapeId, tenantId=_tenantOf(current_user)):
+        raise HTTPException(status_code=404, detail="形状不存在: %s" % shapeId)
+    registry.delete(shapeId, tenantId=_tenantOf(current_user))
+    activityId = _landActivity(store, "ontology_shape_write", current_user, "delete",
+                               {"shape_id": shapeId}, basis)
+    return {"code": 0, "message": "success", "data": {"activity_id": activityId}}
+
+
 # ── S2 写面 ──────────────────────────────────────────────────
 
 
@@ -169,6 +353,13 @@ class TermWriteRequest(BaseModel):
     external_iris: Optional[Dict[str, str]] = None
     deprecated: Optional[bool] = None
     replaced_by: Optional[str] = None
+    # B10 L2 / B11 L3：SKOS 多语言标签、模块归属、身份判据、限定关系 schema。
+    # 与上面同一口径：None = PUT 保留现值，显式空容器才是清空声明。
+    labels: Optional[Dict[str, str]] = None
+    alt_labels: Optional[Dict[str, list]] = None
+    module: Optional[str] = None
+    identity_keys: Optional[List[str]] = None
+    qualifier_schema: Optional[Dict[str, Any]] = None
     version: Optional[str] = None
     basis: str = ""
 
@@ -186,6 +377,8 @@ class RuleWriteRequest(BaseModel):
     body: Optional[List[Dict[str, Any]]] = None
     enabled: Optional[bool] = None
     version: Optional[str] = None
+    # v35 物化档位：observe（缺省，不进主路）/ enforce（灰度 off 也进主路）
+    materialization: Optional[str] = None
     basis: str = ""
 
 
@@ -196,13 +389,21 @@ def _requireAdmin(current_user: Dict[str, Any]) -> None:
 
 
 def _ontologyParts():
-    """写面装配：与读面同款三件套，一次拿齐不留第二套装配点。"""
+    """写面装配：与读面同款三件套，一次拿齐不留第二套装配点。
+
+    引擎必须带**咽喉工厂**：条件类规则登记即求值，推导结论要落库只能走 admit——
+    裸造引擎时这条路径当场 400（"推理未接咽喉写入口"），于是"REST 能登记条件类规则"
+    只在库里没有匹配事实时成立，一旦有匹配就坏。与生产装配（`admission.py` 里
+    种子规则那一处）同形态，不另造第二条推导写入口。
+    """
     from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.foundation.admission import productionAdmissionGate
     from neurova.knowledge.ontology.rule_engine import ForwardChainingEngine
     from neurova.knowledge.ontology.term_registry import OntologyTermRegistry
 
     store = get_knowledge_fact_store()
-    return store, OntologyTermRegistry(store), ForwardChainingEngine(store)
+    return (store, OntologyTermRegistry(store),
+            ForwardChainingEngine(store, gateFactory=lambda st: productionAdmissionGate(st)))
 
 
 def _landActivity(store: Any, kind: str, actor: Dict[str, Any], action: str,
@@ -232,44 +433,30 @@ def _registerTerm(registry: Any, termId: str, body: TermWriteRequest,
         transitive=bool(body.transitive), aliases=body.aliases,
         externalIris=body.external_iris, deprecated=bool(body.deprecated),
         replacedBy=body.replaced_by or "",
+        labels=body.labels, altLabels=body.alt_labels,
+        module=body.module or "", identityKeys=body.identity_keys,
+        qualifierSchema=body.qualifier_schema,
         tenantId=tenantId)
 
 
-def _updateTermPayload(registry: Any, termId: str,
-                       body: TermWriteRequest, tenantId: str) -> Dict[str, Any]:
-    """PUT 是部分更新：未提供的字段保留现值，只把显式声明交回注册表。
-    全量替换会把只改一个 label 的请求顺手清掉父子/值域声明。"""
-    existing = registry.term(termId, tenantId=tenantId) or {}
+def _putDeclaration(body: TermWriteRequest) -> Dict[str, Any]:
+    """PUT 的请求体 → 注册表 `declarePartial` 的声明字典。
+
+    这里**只投影不合并**：None 意为「这一栏没写」，补齐现值由 `declarePartial` 单点做
+    （REST PUT 与流水线 termUpserts 共用同一份合并口径，端点不再抄第二份字段清单）。
+    """
     return {
-        "label": body.label or existing.get("label") or "",
-        "parentTermId": (body.parent_term_id if body.parent_term_id is not None
-                         else existing.get("parent_term_id")),
-        "domain": body.domain if body.domain is not None else existing.get("domain_terms") or [],
-        "rangeTerms": (body.range_terms if body.range_terms is not None
-                       else existing.get("range_terms") or []),
-        "rangeKinds": (body.range_kinds if body.range_kinds is not None
-                       else existing.get("range_kinds") or []),
-        "cardinality": (body.cardinality if body.cardinality is not None
-                        else existing.get("cardinality")),
-        "disjointWith": (body.disjoint_with if body.disjoint_with is not None
-                         else existing.get("disjoint_with") or []),
-        "requiredProps": (body.required_props if body.required_props is not None
-                          else existing.get("required_props") or []),
-        "inverseOf": (body.inverse_of if body.inverse_of is not None
-                      else existing.get("inverse_of") or ""),
-        "symmetric": (body.symmetric if body.symmetric is not None
-                      else bool(existing.get("symmetric"))),
-        "transitive": (body.transitive if body.transitive is not None
-                       else bool(existing.get("transitive"))),
-        "aliases": (body.aliases if body.aliases is not None
-                    else existing.get("aliases") or []),
-        "externalIris": (body.external_iris if body.external_iris is not None
-                         else existing.get("external_iris") or {}),
-        "deprecated": (body.deprecated if body.deprecated is not None
-                       else bool(existing.get("deprecated"))),
-        "replacedBy": (body.replaced_by if body.replaced_by is not None
-                       else existing.get("replaced_by") or ""),
-        "version": body.version or existing.get("version") or "v1",
+        "label": body.label, "parentTermId": body.parent_term_id,
+        "domain": body.domain, "rangeTerms": body.range_terms,
+        "rangeKinds": body.range_kinds, "cardinality": body.cardinality,
+        "disjointWith": body.disjoint_with, "requiredProps": body.required_props,
+        "inverseOf": body.inverse_of, "symmetric": body.symmetric,
+        "transitive": body.transitive, "aliases": body.aliases,
+        "externalIris": body.external_iris, "deprecated": body.deprecated,
+        "replacedBy": body.replaced_by, "identityKeys": body.identity_keys,
+        "labels": body.labels, "altLabels": body.alt_labels,
+        "module": body.module, "qualifierSchema": body.qualifier_schema,
+        "version": body.version,
     }
 
 
@@ -325,8 +512,7 @@ async def update_ontology_term(
     if not registry.term(termId, tenantId=tenant):
         raise HTTPException(status_code=404, detail="术语未登记: %s" % term_id)
     try:
-        payload = _updateTermPayload(registry, termId, body, tenant)
-        term = registry.register(termId, body.kind, tenantId=tenant, **payload)
+        term = registry.declarePartial(termId, body.kind, _putDeclaration(body), tenant)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     # B8：特征翻转/撤除在这里生效——auto 规则随之重建或退场（结论经账本精确撤销）。
@@ -490,6 +676,7 @@ async def create_ontology_rule(
             headSubjectVar=body.head_subject_var or "X",
             headObjectConst=body.head_object_const or "",
             shape=body.shape or "",
+            materialization=body.materialization or "observe",
             enabled=True if body.enabled is None else body.enabled,
             version=body.version or "v1", tenantId=tenant)
     except (ValueError,) as exc:
@@ -526,6 +713,8 @@ async def update_ontology_rule(
                              else existing.get("head_object_const") or ""),
             shape=(body.shape if body.shape is not None
                    else existing.get("shape") or ""),
+            materialization=(body.materialization if body.materialization is not None
+                             else existing.get("materialization") or "observe"),
             enabled=(body.enabled if body.enabled is not None
                      else bool(existing.get("enabled", True))),
             version=body.version or existing.get("version") or "v1",
@@ -655,7 +844,22 @@ class PipelineTermUpsert(BaseModel):
     cardinality: Optional[int] = None
     disjointWith: Optional[List[str]] = None
     requiredProps: Optional[List[str]] = None
-    version: str = "v1"
+    # B8 关系特征：批次面与单条写面对称——这里写不出来的字段等于没有写面。
+    inverseOf: Optional[str] = None
+    symmetric: Optional[bool] = None
+    transitive: Optional[bool] = None
+    aliases: Optional[List[str]] = None
+    externalIris: Optional[Dict[str, str]] = None
+    deprecated: Optional[bool] = None
+    replacedBy: Optional[str] = None
+    # B10 L2 / B11 L3 声明字段：批次里写不出来的字段等于没有写面——发布路径与单条写面对齐。
+    labels: Optional[Dict[str, str]] = None
+    altLabels: Optional[Dict[str, list]] = None
+    module: Optional[str] = None
+    identityKeys: Optional[List[str]] = None
+    qualifierSchema: Optional[Dict[str, Any]] = None
+    # None = 保留现值（版本推进是治理动作，不该由不带 version 的批次顺手重置）
+    version: Optional[str] = None
 
 
 class PipelineRuleRegistration(BaseModel):
@@ -667,6 +871,8 @@ class PipelineRuleRegistration(BaseModel):
     headObjectConst: str = ""
     enabled: bool = True
     version: str = "v1"
+    # 发布批次也要能声明档位：写面两条路径的形状参数不许只有一半
+    materialization: str = "observe"
 
 
 class PipelineFactCandidate(BaseModel):
@@ -749,6 +955,38 @@ async def getOntologyPipelineDiff(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"code": 0, "message": "success", "data": report}
+
+
+class PipelineRollbackRequest(BaseModel):
+    toBaselineId: str
+    reason: str = ""
+
+
+@router.post("/ontology/pipeline/rollback")
+async def rollbackOntologyPipeline(
+    body: PipelineRollbackRequest, request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """回滚到基线（B12 L8，管理员）：terms/rules/shapes 逐字恢复＋审计＋推导撤销。"""
+    _requireAdmin(current_user)
+    from neurova.knowledge.ontology.pipeline import OntologyPipeline
+
+    store, registry, engine = _ontologyParts()
+    pipeline = OntologyPipeline(store, registry=registry, engine=engine)
+    try:
+        result = pipeline.rollback(
+            toBaselineId=str(body.toBaselineId or "").strip(),
+            tenantId=_tenantOf(current_user),
+            actor=str(current_user.get("user_id") or ""))
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    activityId = _landActivity(
+        store, "ontology_pipeline_rollback", current_user, "rollback",
+        {"baseline_id": body.toBaselineId, **result}, body.reason)
+    return {"code": 0, "message": "success",
+            "data": {**result, "activity_id": activityId}}
 
 
 # ── S3 实例编辑写面 ──────────────────────────────────────────

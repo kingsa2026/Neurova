@@ -55,6 +55,16 @@ ALTER TABLE ontology_rules ADD COLUMN head_object_const TEXT NOT NULL DEFAULT ''
 _VAR = re.compile(r"^[A-Z]$")
 _TERM_KINDS_IN_BODY = ("atom", "not")
 
+# v35：物化档位（specs/2026-11-05 B11 §12.6 设计 3）——按**规则类**决定推导结论
+# 是否进检索主路：observe（缺省，登记即推导但只作解释链/审计可见）/
+# enforce（灰度 off 时也进主路）。缺省值取 observe ⇒ 存量行一行行为不变。
+_SCHEMA_V35 = """
+ALTER TABLE ontology_rules ADD COLUMN materialization TEXT NOT NULL DEFAULT 'observe';
+"""
+
+#: 档位闭集：写错一个字母就当没写过，等于偷偷把一条规则转正——所以在写入处拒。
+MATERIALIZATION_MODES = ("observe", "enforce")
+
 
 def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -136,7 +146,8 @@ class ForwardChainingEngine:
                     version: str = "v1",
                     tenantId: str = "default",
                     headObjectConst: str = "",
-                    shape: str = "") -> Dict[str, Any]:
+                    shape: str = "",
+                    materialization: str = "observe") -> Dict[str, Any]:
         """登记一条规则。形状、变量、层序在这里一次判完——坏规则进不了表。
 
         body 元素：`{"atom": predicate, "subject": var, "object": var}` 或
@@ -154,11 +165,23 @@ class ForwardChainingEngine:
           显式落 head，反向补边不散落到消费方。
 
         规则归属租户，分层/引用/撤回都只在同租户内计算。
+
+        物化档位（`materialization`，v35）：`observe` 的结论只在解释链/审计里看得见，
+        检索主路按观察态排除；`enforce` 的结论即便全局灰度 `NEUROVA_CONDITION_CLASSES_ROUTE`
+        仍为 off 也进主路（并照旧带 `via_derived`）。一条结论被多条规则共同推出时按
+        保守侧处理——只要有任一来源是 observe 就不进（见 `test_materializationModes`）。
         """
         ruleId = str(ruleId or "").strip()
         tenant = str(tenantId or "default")
         if not ruleId or not headPredicate:
             raise RuleError("rule_id 与 head 谓词都不能为空")
+        # 物化档位闭集（v35，§12.6 设计 3）：拼错一个字母就当没写过，等于把一条
+        # 规则偷偷转正进检索主路——这种"默认放行"的方向性错误必须在写入处挡。
+        mode = str(materialization or "observe").strip() or "observe"
+        if mode not in MATERIALIZATION_MODES:
+            raise RuleError(
+                "规则 %s 的物化档位 %r 不在闭集（%s）"
+                % (ruleId, mode, " / ".join(MATERIALIZATION_MODES)))
         headConst = str(headObjectConst or "").strip()
         shape = str(shape or "").strip() or ("conjunction" if headConst else "relay")
         if shape not in ("relay", "conjunction", "inverse"):
@@ -210,12 +233,14 @@ class ForwardChainingEngine:
             self._store._conn.execute(
                 "INSERT OR REPLACE INTO ontology_rules (tenant_id, rule_id, head_predicate,"
                 " head_subject_var, body_json, negated_predicates, stratification_level,"
-                " enabled, version, created_at, updated_at, shape, head_object_const)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " enabled, version, created_at, updated_at, shape, head_object_const,"
+                " materialization)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (tenant, ruleId, headPredicate, headSubjectVar, json.dumps(body, ensure_ascii=False),
                  json.dumps(sorted({a["predicate"] for a in negated}), ensure_ascii=False),
                  stratum, 1 if enabled else 0, version,
-                 existing["created_at"] if existing else stamp, stamp, shape, headConst),
+                 existing["created_at"] if existing else stamp, stamp, shape, headConst,
+                 mode),
             )
             if cycles:
                 self._dropRule(ruleId, tenantId=tenant)
@@ -469,6 +494,8 @@ class ForwardChainingEngine:
         # v28 之前落库的行没有这两列：缺省回 relay 形状，存量语义零漂移。
         d["shape"] = str(d.get("shape") or "relay")
         d["head_object_const"] = str(d.get("head_object_const") or "")
+        # v35 之前落库的行同理：缺省 observe ⇒ 存量规则一律留在观察态。
+        d["materialization"] = str(d.get("materialization") or "observe")
         return d
 
     # ── 求值 ──────────────────────────────────────────────────

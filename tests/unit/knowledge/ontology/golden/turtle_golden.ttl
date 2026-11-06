@@ -109,6 +109,30 @@ kbg:Order kbg:termId "Order"@zh ;
   kbg:aliases "[]"@zh ;
   kbg:externalIris "{}"@zh ;
   kbg:version "v1"@zh .
+kbg:after kbg:termId "after"@zh ;
+  kbg:kind "relation"@zh ;
+  kbg:label "在…之后"@zh ;
+  kbg:parentTermId kbg:temporal ;
+  kbg:domainTerms "[\"Event\"]"@zh ;
+  kbg:rangeTerms "[\"Event\"]"@zh ;
+  kbg:rangeKinds "[]"@zh ;
+  kbg:disjointWith "[]"@zh ;
+  kbg:requiredProps "[]"@zh ;
+  kbg:aliases "[]"@zh ;
+  kbg:externalIris "{\"skos_exactMatch\": \"https://www.w3.org/2006/time#after\"}"@zh ;
+  kbg:version "v1"@zh .
+kbg:before kbg:termId "before"@zh ;
+  kbg:kind "relation"@zh ;
+  kbg:label "在…之前"@zh ;
+  kbg:parentTermId kbg:temporal ;
+  kbg:domainTerms "[\"Event\"]"@zh ;
+  kbg:rangeTerms "[\"Event\"]"@zh ;
+  kbg:rangeKinds "[]"@zh ;
+  kbg:disjointWith "[]"@zh ;
+  kbg:requiredProps "[]"@zh ;
+  kbg:aliases "[]"@zh ;
+  kbg:externalIris "{\"skos_exactMatch\": \"https://www.w3.org/2006/time#before\"}"@zh ;
+  kbg:version "v1"@zh .
 kbg:causal kbg:termId "causal"@zh ;
   kbg:kind "relation"@zh ;
   kbg:label "causal"@zh ;
@@ -175,6 +199,18 @@ kbg:documented_as kbg:termId "documented_as"@zh ;
   kbg:aliases "[]"@zh ;
   kbg:externalIris "{}"@zh ;
   kbg:version "v1"@zh .
+kbg:during kbg:termId "during"@zh ;
+  kbg:kind "relation"@zh ;
+  kbg:label "在…期间"@zh ;
+  kbg:parentTermId kbg:temporal ;
+  kbg:domainTerms "[\"Event\"]"@zh ;
+  kbg:rangeTerms "[\"Event\"]"@zh ;
+  kbg:rangeKinds "[]"@zh ;
+  kbg:disjointWith "[]"@zh ;
+  kbg:requiredProps "[]"@zh ;
+  kbg:aliases "[]"@zh ;
+  kbg:externalIris "{\"skos_exactMatch\": \"https://www.w3.org/2006/time#during\"}"@zh ;
+  kbg:version "v1"@zh .
 kbg:entity kbg:termId "entity"@zh ;
   kbg:kind "concept"@zh ;
   kbg:label "entity"@zh ;
@@ -197,6 +233,17 @@ kbg:event kbg:termId "event"@zh ;
   kbg:aliases "[]"@zh ;
   kbg:externalIris "{}"@zh ;
   kbg:version "v1"@zh .
+kbg:hasParticipant kbg:termId "hasParticipant"@zh ;
+  kbg:kind "relation"@zh ;
+  kbg:label "有参与者"@zh ;
+  kbg:domainTerms "[\"Event\"]"@zh ;
+  kbg:rangeTerms "[]"@zh ;
+  kbg:rangeKinds "[]"@zh ;
+  kbg:disjointWith "[]"@zh ;
+  kbg:requiredProps "[]"@zh ;
+  kbg:aliases "[]"@zh ;
+  kbg:externalIris "{}"@zh ;
+  kbg:version "v1"@zh .
 kbg:hasRiskLevel kbg:termId "hasRiskLevel"@zh ;
   kbg:kind "relation"@zh ;
   kbg:label "hasRiskLevel"@zh ;
@@ -208,6 +255,17 @@ kbg:hasRiskLevel kbg:termId "hasRiskLevel"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
   kbg:externalIris "{}"@zh ;
+  kbg:version "v1"@zh .
+kbg:hasTime kbg:termId "hasTime"@zh ;
+  kbg:kind "relation"@zh ;
+  kbg:label "有时间"@zh ;
+  kbg:domainTerms "[\"Event\"]"@zh ;
+  kbg:rangeTerms "[]"@zh ;
+  kbg:rangeKinds "[]"@zh ;
+  kbg:disjointWith "[]"@zh ;
+  kbg:requiredProps "[]"@zh ;
+  kbg:aliases "[]"@zh ;
+  kbg:externalIris "{\"skos_exactMatch\": \"https://www.w3.org/2006/time#hasTime\"}"@zh ;
   kbg:version "v1"@zh .
 kbg:has_a kbg:termId "has_a"@zh ;
   kbg:kind "relation"@zh ;
@@ -263,6 +321,18 @@ kbg:opposite_of kbg:termId "opposite_of"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
   kbg:externalIris "{}"@zh ;
+  kbg:version "v1"@zh .
+kbg:overlaps kbg:termId "overlaps"@zh ;
+  kbg:kind "relation"@zh ;
+  kbg:label "与…重叠"@zh ;
+  kbg:parentTermId kbg:temporal ;
+  kbg:domainTerms "[\"Event\"]"@zh ;
+  kbg:rangeTerms "[\"Event\"]"@zh ;
+  kbg:rangeKinds "[]"@zh ;
+  kbg:disjointWith "[]"@zh ;
+  kbg:requiredProps "[]"@zh ;
+  kbg:aliases "[]"@zh ;
+  kbg:externalIris "{\"skos_exactMatch\": \"https://www.w3.org/2006/time#overlaps\"}"@zh ;
   kbg:version "v1"@zh .
 kbg:part_of kbg:termId "part_of"@zh ;
   kbg:kind "relation"@zh ;
@@ -382,6 +452,10 @@ kbg:Document rdfs:subClassOf kbg:Continuant .
 kbg:Event rdfs:subClassOf kbg:Occurrent .
 kbg:HighRiskOrder rdfs:subClassOf kbg:Order .
 kbg:Occurrent rdfs:subClassOf kbg:Entity .
+<https://www.w3.org/2006/time#after> rdfs:subPropertyOf kbg:temporal .
+<https://www.w3.org/2006/time#before> rdfs:subPropertyOf kbg:temporal .
+<https://www.w3.org/2006/time#during> rdfs:subPropertyOf kbg:temporal .
+<https://www.w3.org/2006/time#overlaps> rdfs:subPropertyOf kbg:temporal .
 # rules: ontology_rules (tenant=default)
 kbg:is_a_transitive kbg:ruleId "is_a_transitive"@zh ;
   kbg:headPredicate "is_a"@zh ;

@@ -1,4 +1,4 @@
-"""upper-lite 最小上层本体（B9 L1，升级计划 §12.2）。
+"""upper-lite 最小上层本体（B9 L1，升级计划 §12.2）＋事件/时间受控词汇（B11 L3，§12.4）。
 
 Entity→Continuant(Agent/Document/Concept)＋Occurrent(Event) 七类；
 对齐 BFO/ISO 21838 只做 `external_iris_json` 导出映射，不整包引入、
@@ -6,6 +6,8 @@ Entity→Continuant(Agent/Document/Concept)＋Occurrent(Event) 七类；
 `ontology_terms.kind='concept'` 的字段值混同；`Relation` 不建成 concept 类
 （避免把关系实例化），仍是 term kind，导出为 `owl:ObjectProperty`（B12）。
 不新增 Role/Situation 等未点单类。
+事件/时间那一组（hasParticipant/hasTime＋Allen 四条）同属这一张种子表：
+词汇是数据，但「哪些关系算时间关系」由这里单点定义，别处不再抄一份清单。
 
 播种走 `seedMissing`（只补缺）：已登记的行一行不动——上层术语同样允许
 写入方覆盖声明（label/外部映射以登记者为准）。
@@ -16,6 +18,8 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 _BFO = "http://purl.obolibrary.org/obo/"
+#: OWL-Time 只做导出映射（`external_iris_json.skos_exactMatch`），不引运行时时间推理。
+_OWL_TIME = "https://www.w3.org/2006/time#"
 
 UPPER_LITE_TERMS: List[Dict[str, Any]] = [
     {"termId": "Entity", "kind": "concept", "label": "实体",
@@ -36,6 +40,29 @@ UPPER_LITE_TERMS: List[Dict[str, Any]] = [
     {"termId": "Event", "kind": "concept", "label": "事件",
      "parentTermId": "Occurrent",
      "externalIris": {"bfo": _BFO + "BFO_0000015"}},
+    # ── 事件/时间模式（B11 L3，§12.4 设计 3）────────────────────────
+    # 受控关系词汇：事件的参与者/时间，以及四条 Allen 区间关系挂在既有 `temporal`
+    # 父属性之下（不另造第二组时间词汇）。OWL-Time 只作 `skos_exactMatch` 导出映射
+    # ——本仓不做运行时时间推理（不引区间代数），所以这四条**不得**生成传递规则；
+    # 反面判据钉在 test_eventTimePattern.py。`hasParticipant` 不声明值域：
+    # 参与者可以是任何 continuant，钉死值域只会把未登记主体一律判成违规。
+    {"termId": "hasParticipant", "kind": "relation", "label": "有参与者",
+     "domain": ["Event"]},
+    {"termId": "hasTime", "kind": "relation", "label": "有时间",
+     "domain": ["Event"],
+     "externalIris": {"skos_exactMatch": _OWL_TIME + "hasTime"}},
+    {"termId": "before", "kind": "relation", "label": "在…之前",
+     "parentTermId": "temporal", "domain": ["Event"], "rangeTerms": ["Event"],
+     "externalIris": {"skos_exactMatch": _OWL_TIME + "before"}},
+    {"termId": "after", "kind": "relation", "label": "在…之后",
+     "parentTermId": "temporal", "domain": ["Event"], "rangeTerms": ["Event"],
+     "externalIris": {"skos_exactMatch": _OWL_TIME + "after"}},
+    {"termId": "overlaps", "kind": "relation", "label": "与…重叠",
+     "parentTermId": "temporal", "domain": ["Event"], "rangeTerms": ["Event"],
+     "externalIris": {"skos_exactMatch": _OWL_TIME + "overlaps"}},
+    {"termId": "during", "kind": "relation", "label": "在…期间",
+     "parentTermId": "temporal", "domain": ["Event"], "rangeTerms": ["Event"],
+     "externalIris": {"skos_exactMatch": _OWL_TIME + "during"}},
 ]
 
 

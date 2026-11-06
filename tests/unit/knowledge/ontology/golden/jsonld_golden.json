@@ -75,6 +75,22 @@
    "term_id": "Order"
   },
   {
+   "@id": "kbg:after",
+   "@type": "kbg:Term",
+   "kind": "relation",
+   "label": "在…之后",
+   "parent_term_id": "kbg:temporal",
+   "term_id": "after"
+  },
+  {
+   "@id": "kbg:before",
+   "@type": "kbg:Term",
+   "kind": "relation",
+   "label": "在…之前",
+   "parent_term_id": "kbg:temporal",
+   "term_id": "before"
+  },
+  {
    "@id": "kbg:causal",
    "@type": "kbg:Term",
    "kind": "relation",
@@ -117,6 +133,14 @@
    "term_id": "documented_as"
   },
   {
+   "@id": "kbg:during",
+   "@type": "kbg:Term",
+   "kind": "relation",
+   "label": "在…期间",
+   "parent_term_id": "kbg:temporal",
+   "term_id": "during"
+  },
+  {
    "@id": "kbg:entity",
    "@type": "kbg:Term",
    "kind": "concept",
@@ -131,11 +155,25 @@
    "term_id": "event"
   },
   {
+   "@id": "kbg:hasParticipant",
+   "@type": "kbg:Term",
+   "kind": "relation",
+   "label": "有参与者",
+   "term_id": "hasParticipant"
+  },
+  {
    "@id": "kbg:hasRiskLevel",
    "@type": "kbg:Term",
    "kind": "relation",
    "label": "hasRiskLevel",
    "term_id": "hasRiskLevel"
+  },
+  {
+   "@id": "kbg:hasTime",
+   "@type": "kbg:Term",
+   "kind": "relation",
+   "label": "有时间",
+   "term_id": "hasTime"
   },
   {
    "@id": "kbg:has_a",
@@ -171,6 +209,14 @@
    "kind": "relation",
    "label": "opposite_of",
    "term_id": "opposite_of"
+  },
+  {
+   "@id": "kbg:overlaps",
+   "@type": "kbg:Term",
+   "kind": "relation",
+   "label": "与…重叠",
+   "parent_term_id": "kbg:temporal",
+   "term_id": "overlaps"
   },
   {
    "@id": "kbg:part_of",

@@ -18,7 +18,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Literal, Optional
 
 from fastapi import HTTPException, Request
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from neurova.core.logger import get_logger
 
@@ -54,6 +54,9 @@ class KnowledgeItem(BaseModel):
     # P0-2 分块契约：块数 + 检索命中的块级溯源（[{chunk_index, content, score}]）
     chunk_count: int = 1
     chunk_hits: List[Dict[str, Any]] = []
+    # B11 双时态事实视图：confidence/qualifier/valid/transaction 随条目带出；
+    # 条目检索旧行为不填（空字典），不改变既有响应形状。
+    metadata: Dict[str, Any] = {}
 
 
 class KnowledgeCreate(BaseModel):
@@ -87,6 +90,8 @@ class KnowledgeUpdate(BaseModel):
 class KnowledgeSearchRequest(BaseModel):
     """搜索知识请求"""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     query: str = Field(..., description="搜索查询")
     category: Optional[str] = None
     tags: List[str] = []
@@ -98,6 +103,10 @@ class KnowledgeSearchRequest(BaseModel):
     updated_after: Optional[float] = None
     source_modified_after: Optional[str] = None
     source_modified_before: Optional[str] = None
+    # B11 L3 双时态：asOf 裁 valid time，knownAt 裁 transaction time。
+    # 任一轴给出时 query 走事实层（factsBitemporal）；两轴都空保持条目检索旧行为。
+    as_of: Optional[str] = Field(default=None, alias="asOf")
+    known_at: Optional[str] = Field(default=None, alias="knownAt")
 
     @field_validator("source_modified_after", "source_modified_before")
     @classmethod

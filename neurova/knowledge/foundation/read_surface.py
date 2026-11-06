@@ -91,7 +91,7 @@ class FactSurface:
         items = [factToItem(f, f["canonical_label"]) for f in corpus]
         # 观察态灰度（B1 拍板项 2 ＋ B4 单源）在**排序前**摘推导事实：排在截断后再摘，
         # 推导占掉的那一格就空了——显式事实本该顶上来，却被一条看不见的名额限制挤掉。
-        items, _filtered = filterConditionClassFacts(items, self._store)
+        items, _filtered = filterConditionClassFacts(items, self._store, tenantId)
         if not items:
             return []
         ranked = bm25_rank(query, [{"id": it["knowledge_id"],

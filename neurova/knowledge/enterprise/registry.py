@@ -39,6 +39,25 @@ class EnterpriseSourceRegistry:
         return sorted(self._adapters)
 
 
+_sourceRegistry: Optional[EnterpriseSourceRegistry] = None
+_sourceRegistryLock = threading.RLock()
+
+
+def getSourceRegistry() -> EnterpriseSourceRegistry:
+    """进程内唯一适配器注册表（DCL 单例）。
+
+    默认空表——真实连接器（DB/ERP API/事件流）另立项，只有实现 Protocol 后经
+    `register` 进来才算「已接入」。REST 面读这一张表回显 `adapter_registered`，
+    于是「配置存了」与「源能连了」是两个不相冒充的读数。
+    """
+    global _sourceRegistry
+    if _sourceRegistry is None:
+        with _sourceRegistryLock:
+            if _sourceRegistry is None:
+                _sourceRegistry = EnterpriseSourceRegistry()
+    return _sourceRegistry
+
+
 class EnterpriseIngestor:
     """fake adapter → mapping → admission 的接线面（同步写，调用方放 worker 线程）。"""
 
@@ -118,6 +137,22 @@ class EnterpriseIngestor:
                  "", 1 if enabled else 0,
                  existing["created_at"] if existing else stamp, stamp),
             )
+
+    def listConfigs(self, tenantId: str = "default") -> List[Dict[str, Any]]:
+        """本租户已提交过的源配置（描述符 + 游标 + 启用态）——读面，不触发任何网络。"""
+        tenant = str(tenantId or "default")
+        with self._store._lock:
+            ids = [str(r["source_id"]) for r in self._store._conn.execute(
+                "SELECT source_id FROM enterprise_source_configs WHERE tenant_id = ?"
+                " ORDER BY source_id", (tenant,)).fetchall()]
+        rows: List[Dict[str, Any]] = []
+        for sourceId in ids:
+            config = self.loadConfig(tenant, sourceId) or {}
+            rows.append({"source_id": sourceId,
+                         "descriptor": config.get("descriptor") or {},
+                         "cursor": config.get("cursor") or "",
+                         "enabled": bool(config.get("enabled"))})
+        return rows
 
     def loadConfig(self, tenantId: str, sourceId: str) -> Optional[Dict[str, Any]]:
         row = self._store._conn.execute(

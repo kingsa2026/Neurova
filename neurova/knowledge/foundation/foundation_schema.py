@@ -41,7 +41,7 @@ from ..enterprise.schema_mapping import SCHEMA_V34 as _SCHEMA_V34_ENTERPRISE
 from ..ontology.change_log import _SCHEMA_V33
 from ..ontology.derivation_ledger import _SCHEMA_V10
 from ..ontology.relation_candidates import _SCHEMA_V29_CANDIDATES
-from ..ontology.rule_engine import _SCHEMA_V28, _SCHEMA_V9
+from ..ontology.rule_engine import _SCHEMA_V28, _SCHEMA_V35, _SCHEMA_V9
 from ..ontology.shapes import _SCHEMA_V31_SHAPES
 from ..ontology.term_registry import (
     _SCHEMA_V29_TERMS,
@@ -114,6 +114,9 @@ _STEPS: List[tuple] = [
     (33, _SCHEMA_V33),
     # v34：企业源配置表（specs/2026-11-05 B14）——接口预留，默认关
     (34, _SCHEMA_V34_ENTERPRISE),
+    # v35：物化档位（specs/2026-11-05 B11 §12.6 设计 3）——ontology_rules 加
+    #      materialization（observe/enforce）；缺省 observe，存量行零行为漂移
+    (35, _SCHEMA_V35),
 ]
 
 _registered = False

@@ -148,12 +148,58 @@ class DerivationLedger:
     # ── 撤销 ──────────────────────────────────────────────────
 
     def derivedExclusionClause(self, alias: str) -> str:
-        """「排除推导行」的 SQL 片段——这张表只有账本知道怎么读，别处不另抄一份。
+        """「排除该按观察态处理的推导行」的 SQL 片段——这张表只有账本知道怎么读。
 
-        子查询不带参数，接进递归 CTE 的 WHERE 里不会打乱外层占位符次序。
+        档位口径（v35，§12.6 设计 3）写在这**一处**：一条推导行只有在它的每一条
+        推导边都来自 `materialization='enforce'` 的规则时才留在主路；有任何一条
+        observe 边（或规则行已不在 enforce 名下）就按观察态排除——保守侧宁可少放
+        一条，也不把没转正的推导混进检索。图谱走查把它接进递归 CTE 的 WHERE，
+        检索读面经 `hiddenDerivedFactIds()` 取同一张片段的结果，两侧不各写一套判据。
+
+        实测（2026-11-06 探针）：同一 statement 被两条规则各推一次会留下**两行**
+        结论（推导写入的内容键带来源），所以"一行挂两种档位"今天不可达；片段仍按
+        "全部边都 enforce 才放行"写——日后内容键若改并，这里不会静默变宽松。
+
+        子查询用相关引用（`<alias>.tenant_id`）而不是占位符：接进 CTE 不会打乱
+        外层 `?` 的次序。
         """
-        return ("%s.fact_id NOT IN (SELECT derived_fact_id"
-                " FROM knowledge_derivation_edges)" % alias)
+        return ("%s.fact_id NOT IN (%s)"
+                % (alias, self._observeSideSubquery("%s.tenant_id" % alias)))
+
+    @staticmethod
+    def _observeSideSubquery(tenantRef: str) -> str:
+        """「档位不足以进主路」的推导结论 id 子查询；`tenantRef` 是租户取值写法。"""
+        return ("SELECT e.derived_fact_id FROM knowledge_derivation_edges e"
+                " LEFT JOIN ontology_rules r"
+                " ON r.rule_id = e.rule_id AND r.tenant_id = %s"
+                " WHERE COALESCE(r.materialization, 'observe') <> 'enforce'" % tenantRef)
+
+    def hiddenDerivedFactIds(self, tenantId: str = "default") -> List[str]:
+        """读面要摘掉的推导行 id——与 `derivedExclusionClause` 同一段判据。
+
+        比原来的「全部推导行」窄：enforce 档的结论不该被摘。原始事实没有推导边，
+        天然不在这个集合里（子查询只从账本取数），不需要额外保护。
+        """
+        tenant = str(tenantId or "default")
+        sql = ("SELECT f.fact_id FROM knowledge_facts f"
+               " WHERE f.tenant_id = ? AND f.fact_id IN (%s)"
+               % self._observeSideSubquery("?"))
+        with self._store._lock:
+            rows = self._store._conn.execute(sql, (tenant, tenant)).fetchall()
+        return [str(row["fact_id"]) for row in rows]
+
+    def hasEnforceRules(self, tenantId: str = "default") -> bool:
+        """本租户有没有把任何规则转正——决定走查要不要去账本取溯源标注。
+
+        灰度 off 且全表 observe 时推导行根本进不了 CTE，取标注就是白花一次 IO；
+        一旦出现 enforce 档，标注就得照取，否则放进来的推导行没了 `via_derived`。
+        """
+        with self._store._lock:
+            row = self._store._conn.execute(
+                "SELECT 1 FROM ontology_rules WHERE tenant_id = ?"
+                " AND materialization = 'enforce' LIMIT 1",
+                (str(tenantId or "default"),)).fetchone()
+        return row is not None
 
     def retractAllDerivedFrom(self, premiseFactId: str, reason: str = "") -> int:
         """前提退场 ⇒ 依赖它的一切推导逐层退场；原始事实一律不碰。

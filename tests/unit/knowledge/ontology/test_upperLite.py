@@ -40,7 +40,10 @@ class TestUpperLiteSeeds:
 
         assert planted == 0, "构造期已种，首调只补缺＝0"
         assert again == 0, "重复播种零新增（只补缺语义）"
-        assert len(UPPER_LITE_TERMS) == 7
+        # 完整性按 kind 分开钉：类只许七个（整包引入 BFO/SUMO 会把这条顶红），
+        # 事件/时间那一组是关系词汇（§12.4 设计 3），不与类数混计。
+        assert len([t for t in UPPER_LITE_TERMS if t["kind"] == "concept"]) == 7
+        assert len([t for t in UPPER_LITE_TERMS if t["kind"] == "relation"]) == 6
         for termId in ("Entity", "Continuant", "Occurrent", "Agent", "Document",
                        "Concept", "Event"):
             assert registry.term(termId) is not None, "%s 该在表里" % termId

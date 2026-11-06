@@ -111,6 +111,41 @@ _SEED_TERMS: List[Dict[str, Any]] = [
 _RANGE_KINDS = ("concept", "relation", "property")
 
 
+# 声明字段的唯一映射表：写面参数名 → 读面列名。两个写面（REST PUT、流水线 termUpserts）
+# 都靠它补齐现值，新增一栏只改这里——端点里再抄一份清单就是第二个事实源。
+_DECLARE_COLUMNS: tuple = (
+    ("label", "label"),
+    ("parentTermId", "parent_term_id"),
+    ("domain", "domain_terms"),
+    ("rangeTerms", "range_terms"),
+    ("rangeKinds", "range_kinds"),
+    ("cardinality", "cardinality"),
+    ("disjointWith", "disjoint_with"),
+    ("requiredProps", "required_props"),
+    ("inverseOf", "inverse_of"),
+    ("symmetric", "symmetric"),
+    ("transitive", "transitive"),
+    ("aliases", "aliases"),
+    ("externalIris", "external_iris"),
+    ("deprecated", "deprecated"),
+    ("replacedBy", "replaced_by"),
+    ("identityKeys", "identity_keys"),
+    ("labels", "labels"),
+    ("altLabels", "alt_labels"),
+    ("module", "module"),
+    ("namespace", "namespace"),
+    ("iriBase", "iri_base"),
+    ("qualifierSchema", "qualifier_schema"),
+    ("version", "version"),
+)
+
+_LIST_COLUMNS = ("domain_terms", "range_terms", "range_kinds", "disjoint_with",
+                 "required_props", "aliases", "identity_keys")
+_MAP_COLUMNS = ("external_iris", "labels", "alt_labels", "qualifier_schema")
+_FLAG_COLUMNS = ("symmetric", "transitive", "deprecated")
+_PASSTHROUGH_COLUMNS = ("cardinality", "parent_term_id")
+
+
 def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -290,6 +325,41 @@ class OntologyTermRegistry:
                     " WHERE tenant_id = ? AND term_id = ?",
                     (termId, _now(), tenant, inverseOf))
         return self.term(termId, tenantId=tenant) or {}
+
+    def declarePartial(self, termId: str, kind: str, declared: Dict[str, Any],
+                       tenantId: str = "default") -> Dict[str, Any]:
+        """**部分声明**的登记：没给出（None）的栏从现值补齐，再交回 `register`。
+
+        `register()` 是 INSERT OR REPLACE——批次或 PUT 只带一两栏时，其余声明会被写回
+        默认值（实测：跑一次只改 label 的批次，aliases/labels/module/identity_keys/
+        qualifier_schema 全空了）。显式空容器（`[]`/`{}`）才是清空声明；`label` 与
+        `version` 传空串按"没写"处理，免得改别的栏时顺手把名字抹掉。
+        """
+        existing = self.term(termId, tenantId=tenantId) or {}
+        merged: Dict[str, Any] = {}
+        for param, column in _DECLARE_COLUMNS:
+            value = declared.get(param)
+            if value is not None:
+                merged[param] = value
+                continue
+            present = existing.get(column)
+            if column in _MAP_COLUMNS:
+                merged[param] = present or {}
+            elif column in _LIST_COLUMNS:
+                merged[param] = present or []
+            elif column in _FLAG_COLUMNS:
+                merged[param] = bool(present)
+            elif column in _PASSTHROUGH_COLUMNS:
+                merged[param] = present
+            elif column == "version":
+                merged[param] = str(present or "v1")
+            else:
+                merged[param] = str(present or "")
+        for param, fallback in (("label", str(existing.get("label") or "")),
+                                ("version", str(existing.get("version") or "v1"))):
+            if declared.get(param) is not None and not str(merged[param]).strip():
+                merged[param] = fallback
+        return self.register(termId, kind, tenantId=tenantId, **merged)
 
     def _ensureNoParentCycle(self, termId: str, parentTermId: str,
                              tenantId: str = "default") -> None:

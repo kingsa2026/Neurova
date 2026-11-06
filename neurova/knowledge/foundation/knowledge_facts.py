@@ -959,6 +959,15 @@ class KnowledgeFactStore:
           （当时真的知道才可见，撤销后回看不出现）。
         两轴都缺省时不裁剪（= 当前全量 active triple）。ISO 字符串直接比字典序。
         """
+        def _axis(value: str) -> str:
+            """日期输入补到当日末尾：`2026-11-06` 与同日 `T08:..` 的 fact 不能按字典序排除。"""
+            text = str(value or "").strip()
+            if len(text) == 10 and text[4] == "-" and text[7] == "-":
+                return text + "T23:59:59.999999+00:00"
+            return text
+
+        asOf = _axis(asOf)
+        knownAt = _axis(knownAt)
         sql = ("SELECT * FROM knowledge_facts WHERE agent_id = ? AND tenant_id = ?"
                " AND record_kind = 'triple'")
         params: List[Any] = [agentId, str(tenantId or "default")]
