@@ -104,9 +104,24 @@ const routes: RouteRecordRaw[] = [
       },
       {
         // S5 旧页退役：URL 不变（书签/菜单可回退语义），页面换成工作台。
+        // UI-0 后本 URL 是 ontology-studio 的兼容入口（§15.2：书签不失效）。
         path: 'agent/:agentId/knowledge-graph',
         name: 'AgentKnowledgeGraph',
         component: () => import('@/pages/GraphWorkbenchPage.vue'),
+        props: true,
+      },
+      {
+        // 本体工作台（UI-0）：TBox 任务面——概览/CQ/术语/关系/形状/推理/发布。
+        path: 'agent/:agentId/ontology-studio',
+        name: 'AgentOntologyStudio',
+        component: () => import('@/pages/ontology-studio/OntologyStudioPage.vue'),
+        props: true,
+      },
+      {
+        // 事实浏览（UI-1）：ABox 四动词查询、双时态、溯源、解释链。
+        path: 'agent/:agentId/facts',
+        name: 'AgentFactExplorer',
+        component: () => import('@/pages/FactExplorerPage.vue'),
         props: true,
       },
       {
@@ -336,6 +351,18 @@ const routes: RouteRecordRaw[] = [
         path: 'knowledge-eval',
         name: 'KnowledgeEval',
         component: () => import('@/pages/KnowledgeEvalPage.vue'),
+      },
+      {
+        // 互操作与导出（UI-2）：Turtle 导出 + 稳定 IRI 解析（其余格式「规划中」）。
+        path: 'knowledge/interop',
+        name: 'KnowledgeInterop',
+        component: () => import('@/pages/KnowledgeInteropPage.vue'),
+      },
+      {
+        // 企业数据源（UI-4）：接口预留页，无真实连接。
+        path: 'knowledge/enterprise-sources',
+        name: 'EnterpriseSources',
+        component: () => import('@/pages/EnterpriseSourcesPage.vue'),
       },
       {
         path: 'memory/search-settings',

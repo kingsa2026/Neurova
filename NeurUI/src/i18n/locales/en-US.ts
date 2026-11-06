@@ -1,6 +1,7 @@
 import { STORE_CANVAS } from './_canvasStores'
 
 import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSection'
+import { ontologySection } from './_ontologySection'
 export default {
   common: {
     markAllRead: 'Mark all read',
@@ -139,7 +140,11 @@ export default {
     metacognition: 'Metacognition',
     reflection: 'Reflection',
     experience: 'Experience',
-    knowledgeGraph: 'Knowledge Graph',
+    knowledgeGraph: 'Ontology Studio',
+    ontologyStudio: 'Ontology Studio',
+    factExplorer: 'Fact Explorer',
+    knowledgeInterop: 'Interop & Export',
+    enterpriseSources: 'Enterprise Sources',
     knowledgegraph: 'Knowledge Graph',
     skillPool: 'Skill Pool',
     skillpool: 'Skill Pool',
@@ -802,6 +807,7 @@ export default {
     manual: 'Needs a human',
   },
   knowledgeEval: knowledgeEvalSection('en-US'),
+  ontology: ontologySection('en-US'),
   knowledge: {
     mcpArgsInvalid: 'Tool args must be valid JSON',
     mcpArgsJson: 'Tool args JSON',

@@ -1,6 +1,7 @@
 import { STORE_CANVAS } from './_canvasStores'
 
 import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSection'
+import { ontologySection } from './_ontologySection'
 export default {
   common: {
     markAllRead: 'Segna tutto come letto',
@@ -138,7 +139,11 @@ export default {
     metacognition: 'Metacognizione',
     reflection: 'Riflessione',
     experience: 'Conoscenza esperienziale',
-    knowledgeGraph: 'Grafo della conoscenza',
+    knowledgeGraph: 'Studio ontologia',
+    ontologyStudio: 'Studio ontologia',
+    factExplorer: 'Explorer dei fatti',
+    knowledgeInterop: 'Interoperabilità ed export',
+    enterpriseSources: 'Fonti aziendali',
     knowledgegraph: 'Grafo della conoscenza',
     skillPool: 'Pool di competenze',
     skillpool: 'Pool di competenze',
@@ -802,6 +807,7 @@ export default {
 
 
   knowledgeEval: knowledgeEvalSection('it-IT'),
+  ontology: ontologySection('it-IT'),
 
 
   knowledge: {

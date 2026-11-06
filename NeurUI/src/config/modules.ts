@@ -55,7 +55,10 @@ const AGENT_MODULES: ModuleItem[] = [
   { key: '/agent/:id/memory', labelKey: 'memory' },
   { key: '/agent/:id/files', labelKey: 'agentfiles' },
   { key: '/agent/:id/experience-knowledge', labelKey: 'experience' },
-  { key: '/agent/:id/knowledge-graph', labelKey: 'knowledgeGraph' },
+  // UI-0：知识图谱标签改「本体工作台」（nav.knowledgeGraph 值随 i18n 更新），路由指到新 Studio；
+  // 旧 URL /agent/:id/knowledge-graph 保留为兼容入口（书签不失效），模块 key 随标签走新路径。
+  { key: '/agent/:id/ontology-studio', labelKey: 'knowledgeGraph' },
+  { key: '/agent/:id/facts', labelKey: 'factExplorer' },
   { key: '/agent/:id/metacognition', labelKey: 'metacognition' },
   { key: '/agent/:id/reflection', labelKey: 'reflection' },
   { key: '/agent/:id/growth', labelKey: 'growth' },
@@ -75,6 +78,8 @@ const USER_MODULES: ModuleItem[] = [
   { key: '/agents', labelKey: 'agents' },
   { key: '/knowledge', labelKey: 'knowledge' },
   { key: '/knowledge-eval', labelKey: 'knowledgeEval' },
+  { key: '/knowledge/interop', labelKey: 'knowledgeInterop' },
+  { key: '/knowledge/enterprise-sources', labelKey: 'enterpriseSources' },
   { key: '/skill-pool', labelKey: 'skillPool' },
   { key: '/marketplace/skills', labelKey: 'skillMarket' },
   // /aigc 已迁至「模型与工具」区 /aigc/* 五个二级页（2026-09-14 用户决策）；

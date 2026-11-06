@@ -1,6 +1,7 @@
 import { STORE_CANVAS } from './_canvasStores'
 
 import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSection'
+import { ontologySection } from './_ontologySection'
 export default {
   common: {
     markAllRead: 'सभी को पढ़ा हुआ चिह्नित करें',
@@ -138,7 +139,11 @@ export default {
     metacognition: 'मेटाकॉग्निशन',
     reflection: 'आत्मचिंतन',
     experience: 'अनुभव',
-    knowledgeGraph: 'ज्ञान ग्राफ़',
+    knowledgeGraph: 'ऑन्टोलॉजी स्टूडियो',
+    ontologyStudio: 'ऑन्टोलॉजी स्टूडियो',
+    factExplorer: 'तथ्य अन्वेषक',
+    knowledgeInterop: 'अंतरसंचालन और निर्यात',
+    enterpriseSources: 'उद्यम स्रोत',
     knowledgegraph: 'ज्ञान ग्राफ़',
     skillPool: 'कौशल पूल',
     skillpool: 'कौशल पूल',
@@ -802,6 +807,7 @@ export default {
 
 
   knowledgeEval: knowledgeEvalSection('hi-IN'),
+  ontology: ontologySection('hi-IN'),
 
 
   knowledge: {
