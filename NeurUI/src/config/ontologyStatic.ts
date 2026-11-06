@@ -3,13 +3,12 @@
  *
  * - CQ 追溯矩阵逐行照抄唯一事实源 docs/specs/2026-11-05-ontology-cq.md（§CQ 追溯矩阵）；
  *   该表增删改时本文件必须同步，显示处标注「静态表」。
- * - D 组默认关矩阵来自升级计划 §13（D-01/D-02/D-04/D-06/D-08/D-11/D-16/D-19），
- *   env 变量名逐一取自源码常量（query_normalization.py / ambiguity_clarification.py /
- *   foundation/read_surface.py / derivation_citation.py / vector_index.py /
- *   agent/retrieval_fusion.py / knowledge_common.py / parser_shadow.py）。
- *   前端读不到服务端 env——UI 只显示设计默认值，实际状态以服务端为准。
+ * - **D 组默认关矩阵不在本文件**：项名与现值一律取
+ *   `GET /knowledge/observability/default-off`（服务端名册 `neurova/knowledge/defaultOffFlags.py`）。
+ *   这里曾抄过一张八行静态表，票面是九项——漏的那一项是 D-03，而抄表那侧的守卫用
+ *   `rows.length` 相等自证，漏一行照样绿（2026-11-06 撤表，改由读数面供数）。
  */
-import type { CqRow, DefaultOffRow } from '@/types/ontology'
+import type { CqRow } from '@/types/ontology'
 
 export const CQ_ROWS: CqRow[] = [
   {
@@ -111,17 +110,6 @@ export const CQ_ROWS: CqRow[] = [
     testId: 'tests/unit/knowledge/ontology/test_ontologyShapes.py',
     status: 'planned',
   },
-]
-
-export const DEFAULT_OFF_ROWS: DefaultOffRow[] = [
-  { id: 'D-01', name: 'd01Name', env: 'NEUROVA_KB_QUERY_NORMALIZE', defaultValue: 'off', note: 'query_normalization.py' },
-  { id: 'D-02', name: 'd02Name', env: 'NEUROVA_KB_AMBIGUITY_CLARIFY', defaultValue: 'off', note: 'ambiguity_clarification.py' },
-  { id: 'D-04', name: 'd04Name', env: 'NEUROVA_KB_FACT_SURFACE', defaultValue: 'off', note: 'foundation/read_surface.py' },
-  { id: 'D-06', name: 'd06Name', env: 'NEUROVA_CONDITION_CLASSES_ROUTE', defaultValue: 'off', note: 'condition_classes（B1 已落 ≠ 转正）' },
-  { id: 'D-08', name: 'd08Name', env: 'NEUROVA_KB_DUAL_VECTOR', defaultValue: 'off', note: 'vector_index.py' },
-  { id: 'D-11', name: 'd11Name', env: 'NEUROVA_RETRIEVAL_FUSION', defaultValue: 'off', note: 'agent/retrieval_fusion.py' },
-  { id: 'D-16', name: 'd16Name', env: 'NEUROVA_KB_EVENT_SUMMARY', defaultValue: 'off', note: 'knowledge_common.py' },
-  { id: 'D-19', name: 'd19Name', env: 'NEUROVA_KB_PARSER', defaultValue: 'legacy', note: 'parser_shadow.py' },
 ]
 
 /** upper-lite 静态树（与 neurova/knowledge/ontology/upper_lite.py 七类一致；仅展示用）。 */

@@ -17,6 +17,7 @@ import api from '@/api'
 import type { ApiResponse } from '@/types/response'
 import type {
   DerivationChain,
+  DefaultOffReadingsResponse,
   EnterpriseDescriptor,
   EnterpriseSourceConfig,
   FactQueryBody,
@@ -233,6 +234,18 @@ export function exportOntologyProv() {
 /** GET /ontology/quality：OOPS! 结构子集＋两个可计算指标；事实源在 ontology/quality.py。 */
 export function getOntologyQuality() {
   return api.get<ApiResponse<OntologyQualityReport>>(`${BASE}/ontology/quality`)
+}
+
+// ---------------------------------------------------------------------------
+// 默认关能力读数面（§15.1「观测与开关」；只读，不提供写入开关）
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /observability/default-off：九项 D 组开关的现值形读数（治理门＝管理员）。
+ * 现值由各项归属模块的谓词给出，服务端名册不第二次读 env，这里也不抄一份表。
+ */
+export function listDefaultOffFlags() {
+  return api.get<ApiResponse<DefaultOffReadingsResponse>>(`${BASE}/observability/default-off`)
 }
 
 // ---------------------------------------------------------------------------
