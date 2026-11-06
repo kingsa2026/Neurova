@@ -347,11 +347,23 @@ export interface CqRow {
   status: 'implemented' | 'planned'
 }
 
-/** D 组默认关矩阵行（§13；前端只读静态表，不提供写入开关）。 */
-export interface DefaultOffRow {
-  id: string
-  name: string
-  env: string
-  defaultValue: 'off' | 'legacy'
-  note: string
+/**
+ * D 组默认关读数行（§13 / §15.1「观测与开关」）。
+ *
+ * 形状来自服务端名册（`neurova/knowledge/defaultOffFlags.py`）经
+ * `GET /knowledge/observability/default-off` 回显——不是前端抄的静态表：
+ * 抄表那一份漏过 D-03，而它的守卫用长度相等自证，漏一项照样绿。
+ */
+export interface DefaultOffReading {
+  flagId: string
+  envKey: string
+  declaredDefault: string
+  mode: string
+  isDefault: boolean
+  homeModule: string
+  readoutRef: string
+}
+
+export interface DefaultOffReadingsResponse {
+  items: DefaultOffReading[]
 }

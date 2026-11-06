@@ -5,8 +5,9 @@
  * - CQ 通过率卡：静态读数（9/11 implemented），标注以 CI 为准；
  * - 质量卡：真调用 GET /ontology/quality，逐条渲染缺陷＋两个可计算指标；
  *   零缺陷与读面失败两态分开（失败不降级成「零缺陷」）；
- * - 默认关矩阵：D-01/D-02/D-04/D-06/D-08/D-11/D-16/D-19 静态表，
- *   仅管理员可见，无写入开关，注明前端读不到服务端 env。
+ * - 默认关矩阵：九项现值取自 `GET /knowledge/observability/default-off`（静态抄表已退役——
+ *   那张表漏了 D-03，且旧断言用本地表长度自证，漏一项照样绿）；仅管理员可见，
+ *   非管理员连请求都不发；读面失败显式报错，不留下旧行数冒充「全是默认态」。
  *
  * 与既有 KnowledgeEvalPage.test.ts 分文件（A/B 纪律：不动既有断言）。
  */
@@ -37,21 +38,39 @@ vi.mock('@/api/modules/knowledgeEval', () => ({
 
 vi.mock('@/api/modules/ontology', () => ({
   getOntologyQuality: vi.fn(),
+  listDefaultOffFlags: vi.fn(),
 }))
 
 vi.mock('ant-design-vue', () => ({
   message: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }))
 
+import { existsSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { getEvaluationBaseline } from '@/api/modules/knowledgeEval'
-import { getOntologyQuality } from '@/api/modules/ontology'
+import { getOntologyQuality, listDefaultOffFlags } from '@/api/modules/ontology'
 import KnowledgeEvalPage from '@/pages/KnowledgeEvalPage.vue'
 import { knowledgeEvalSection } from '@/i18n/locales/_knowledgeEvalSection'
 import { ontologySection } from '@/i18n/locales/_ontologySection'
-import { CQ_ROWS, DEFAULT_OFF_ROWS } from '@/config/ontologyStatic'
+import { CQ_ROWS } from '@/config/ontologyStatic'
 
 const baselineMock = getEvaluationBaseline as unknown as ReturnType<typeof vi.fn>
 const qualityMock = getOntologyQuality as unknown as ReturnType<typeof vi.fn>
+const matrixMock = listDefaultOffFlags as unknown as ReturnType<typeof vi.fn>
+
+/** 服务端名册的九行（含 D-03——前端那张抄来的表漏的正是这一行）。 */
+const MATRIX_ROWS = [
+  { flagId: 'D-01', envKey: 'NEUROVA_KB_QUERY_NORMALIZE', declaredDefault: 'off', mode: 'off', isDefault: true, homeModule: 'neurova.knowledge.query_normalization', readoutRef: 'normalizeMode' },
+  { flagId: 'D-02', envKey: 'NEUROVA_KB_AMBIGUITY_CLARIFY', declaredDefault: 'off', mode: 'off', isDefault: true, homeModule: 'neurova.knowledge.ambiguity_clarification', readoutRef: 'ambiguityMode' },
+  { flagId: 'D-03', envKey: 'NEUROVA_KB_MISS_CAPTURE', declaredDefault: 'off', mode: 'off', isDefault: true, homeModule: 'neurova.agent.knowledge_retriever_adapter', readoutRef: 'missCaptureMode' },
+  { flagId: 'D-04', envKey: 'NEUROVA_KB_FACT_SURFACE', declaredDefault: 'off', mode: 'off', isDefault: true, homeModule: 'neurova.knowledge.foundation.read_surface', readoutRef: 'factSurfaceMode' },
+  { flagId: 'D-06', envKey: 'NEUROVA_CONDITION_CLASSES_ROUTE', declaredDefault: 'off', mode: 'on', isDefault: false, homeModule: 'neurova.knowledge.derivation_citation', readoutRef: 'conditionClassRouteMode' },
+  { flagId: 'D-08', envKey: 'NEUROVA_KB_DUAL_VECTOR', declaredDefault: 'off', mode: 'off', isDefault: true, homeModule: 'neurova.knowledge.vector_index', readoutRef: 'dualVectorMode' },
+  { flagId: 'D-11', envKey: 'NEUROVA_RETRIEVAL_FUSION', declaredDefault: 'off', mode: 'off', isDefault: true, homeModule: 'neurova.agent.retrieval_fusion', readoutRef: 'fusionMode' },
+  { flagId: 'D-16', envKey: 'NEUROVA_KB_EVENT_SUMMARY', declaredDefault: 'off', mode: 'off', isDefault: true, homeModule: 'neurova.api.endpoints.knowledge_common', readoutRef: 'eventSummaryMode' },
+  { flagId: 'D-19', envKey: 'NEUROVA_KB_PARSER', declaredDefault: 'legacy', mode: 'legacy', isDefault: true, homeModule: 'neurova.knowledge.parser_shadow', readoutRef: 'parserMode' },
+]
 
 const i18n = createI18n({
   legacy: false,
@@ -118,6 +137,8 @@ beforeEach(() => {
       metrics: { consistency: 1, conciseness: 1 },
     },
   })
+  matrixMock.mockReset()
+  matrixMock.mockResolvedValue({ code: 0, message: 'ok', data: { items: MATRIX_ROWS } })
   authUser.role = 'admin'
 })
 
@@ -167,24 +188,48 @@ describe('KnowledgeEvalPage（UI-3 本体升级段）', () => {
     expect(wrapper.find('[data-testid="eval-quality-empty"]').exists()).toBe(false)
   })
 
-  it('默认关矩阵（管理员）：D 组 8 行静态表，注明前端读不到 env、无写入开关', async () => {
+  it('默认关矩阵（管理员）：九行取自读数面，D-03 必须在场', async () => {
     const wrapper = mountPage()
     await flushPromises()
-    const table = wrapper.find('[data-testid="eval-matrix-table"]')
-    expect(table.exists()).toBe(true)
-    const rows = wrapper.findAll('[data-testid="matrix-default"]')
-    expect(rows.length).toBe(DEFAULT_OFF_ROWS.length)
-    for (const row of DEFAULT_OFF_ROWS) {
-      expect(wrapper.find(`[data-testid="matrix-row-${row.id}"]`).exists()).toBe(true)
-      expect(wrapper.text()).toContain(row.env)
-    }
-    expect(wrapper.find('[data-testid="eval-env-note"]').text()).toContain('不提供写入开关')
+    expect(matrixMock).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-testid="eval-matrix-table"]').exists()).toBe(true)
+    // 行数比的是**服务端给的那九行**，不是本地表的长度——旧断言写成
+    // `rows.length == DEFAULT_OFF_ROWS.length`，抄表漏一项时它跟着漏，恒绿
+    const ids = wrapper.findAll('[data-testid^="matrix-row-"]').map((n) => n.attributes('data-testid'))
+    expect(ids.length).toBe(MATRIX_ROWS.length)
+    expect(wrapper.find('[data-testid="matrix-row-D-03"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="matrix-row-D-19"]').text()).toContain('legacy')
+    expect(wrapper.text()).toContain('NEUROVA_CONDITION_CLASSES_ROUTE')
   })
 
-  it('权限态：非管理员看不到默认关矩阵面板（§15.3 观测与开关为管理员面）', async () => {
+  it('偏离默认态的那一项显式标出，不冒充「全是默认」', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const deviated = wrapper.find('[data-testid="matrix-state-D-06"]')
+    expect(deviated.text()).toContain('已偏离默认')
+    expect(wrapper.find('[data-testid="matrix-state-D-01"]').text()).toContain('默认态')
+  })
+
+  it('读数面失败：显式报错，不留下上一次的行数冒充可观测', async () => {
+    matrixMock.mockRejectedValue(new Error('503'))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="matrix-error"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="eval-matrix-table"]').exists()).toBe(false)
+  })
+
+  it('权限态：非管理员既看不见面板，也不发这一枪（后端本就 403）', async () => {
     authUser.role = 'user'
     const wrapper = mountPage()
     await flushPromises()
     expect(wrapper.find('[data-testid="eval-matrix-table"]').exists()).toBe(false)
+    expect(matrixMock).not.toHaveBeenCalled()
+  })
+
+  it('反向守卫：前端不许再抄一张 D 组静态表（项名与行数只许来自读数面）', () => {
+    const staticSource = resolve(process.cwd(), 'src/config/ontologyStatic.ts')
+    const text = readFileSync(staticSource, 'utf-8')
+    expect(text).not.toContain('DEFAULT_OFF_ROWS')
+    expect(existsSync(resolve(process.cwd(), 'src/config/defaultOffRows.ts'))).toBe(false)
   })
 })

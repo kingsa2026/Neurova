@@ -116,42 +116,50 @@
         <p class="admin-only">{{ t('knowledgeEval.adminOnly') }}</p>
       </GlassPanel>
 
-      <!-- UI-3：默认关矩阵（D 组，§13）。管理员面板：只读静态表，不提供写入开关 -->
+      <!-- §15.1「观测与开关」：D 组九项现值读数（管理员只读面，不提供任何写入开关）。
+           行数与项名一律来自服务端名册——前端抄表那一份漏过 D-03。 -->
       <GlassPanel v-if="isAdmin" class="panel">
         <div class="panel-head">
           <span class="panel-title" data-testid="eval-matrix-title">{{ t('ontology.evalMatrixTitle') }}</span>
+          <GlassButton variant="secondary" size="sm" :loading="matrixLoading" data-testid="matrix-refresh" @click="loadDefaultOffMatrix">
+            {{ t('common.refresh') }}
+          </GlassButton>
         </div>
         <p class="honest-note" data-testid="eval-matrix-note">{{ t('ontology.evalMatrixNote') }}</p>
-        <table class="matrix-table" data-testid="eval-matrix-table">
+        <p v-if="matrixError" class="honest-note honest-note--error" data-testid="matrix-error">
+          {{ t('ontology.matrixLoadFailed') }}
+        </p>
+        <table v-else class="matrix-table" data-testid="eval-matrix-table">
           <thead>
             <tr>
               <th>{{ t('ontology.matrixId') }}</th>
-              <th>{{ t('ontology.matrixName') }}</th>
               <th>{{ t('ontology.matrixEnv') }}</th>
               <th>{{ t('ontology.matrixDefault') }}</th>
+              <th>{{ t('ontology.matrixCurrent') }}</th>
+              <th>{{ t('ontology.matrixState') }}</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in DEFAULT_OFF_ROWS" :key="row.id" :data-testid="`matrix-row-${row.id}`">
-              <td class="matrix-id">{{ row.id }}</td>
-              <td>{{ t(`ontology.${row.name}`) }}</td>
-              <td class="matrix-env mono">{{ row.env }}</td>
+            <tr v-for="row in matrixRows" :key="row.flagId" :data-testid="`matrix-row-${row.flagId}`">
+              <td class="matrix-id">{{ row.flagId }}</td>
+              <td class="matrix-env mono">{{ row.envKey }}</td>
+              <td class="mono">{{ row.declaredDefault }}</td>
+              <td class="mono">{{ row.mode }}</td>
               <td>
-                <a-tag :color="row.defaultValue === 'legacy' ? 'default' : 'warning'" data-testid="matrix-default">
-                  {{ row.defaultValue }}
+                <a-tag :color="row.isDefault ? 'default' : 'warning'" :data-testid="`matrix-state-${row.flagId}`">
+                  {{ row.isDefault ? t('ontology.matrixStateDefault') : t('ontology.matrixStateDeviation') }}
                 </a-tag>
               </td>
             </tr>
           </tbody>
         </table>
-        <p class="honest-note" data-testid="eval-env-note">{{ t('ontology.envNotReadable') }}</p>
       </GlassPanel>
     </a-spin>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import GlassPanel from '@/components/GlassPanel.vue'
@@ -163,10 +171,10 @@ import {
   getRetrievalMetricsSnapshot,
   type EvaluationBaseline,
 } from '@/api/modules/knowledgeEval'
-import { CQ_ROWS, DEFAULT_OFF_ROWS } from '@/config/ontologyStatic'
-import { getOntologyQuality } from '@/api/modules/ontology'
+import { CQ_ROWS } from '@/config/ontologyStatic'
+import { getOntologyQuality, listDefaultOffFlags } from '@/api/modules/ontology'
 import { severityColor } from '@/utils/ontologyFormat'
-import type { OntologyQualityReport } from '@/types/ontology'
+import type { DefaultOffReading, OntologyQualityReport } from '@/types/ontology'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -197,6 +205,25 @@ async function loadQuality() {
     qualityError.value = true
   } finally {
     qualityLoading.value = false
+  }
+}
+
+const matrixRows = ref<DefaultOffReading[]>([])
+const matrixLoading = ref(false)
+const matrixError = ref(false)
+
+/** 默认关读数面：项名与行数都来自服务端名册，前端不补一行也不删一行。 */
+async function loadDefaultOffMatrix() {
+  matrixLoading.value = true
+  matrixError.value = false
+  try {
+    const res = await listDefaultOffFlags()
+    matrixRows.value = res.data?.items ?? []
+  } catch {
+    // 读不到就显式报错——保留上一次行数或空表会冒充「九项全是默认态」
+    matrixError.value = true
+  } finally {
+    matrixLoading.value = false
   }
 }
 
@@ -268,6 +295,9 @@ onMounted(() => {
   loadSnapshot()
   loadQuality()
 })
+
+// 读数面是管理员面（后端 403 治理门）——非管理员不发这一枪，避免一条注定被拒的请求
+watch(isAdmin, (allowed) => { if (allowed) void loadDefaultOffMatrix() }, { immediate: true })
 </script>
 
 <style scoped>
