@@ -949,6 +949,35 @@ class KnowledgeFactStore:
             ).fetchone()
         return self._hydrate(row) if row else None
 
+    def latestFactsByPredicate(self, agentId: str, predicate: str,
+                               tenantId: str = "default") -> List[Dict[str, Any]]:
+        """按 (subject_key, predicate) 取最新一条 active 事实（B-4 最新偏好语义）。
+
+        同主体同谓词多条时取 recorded_at 最大的一条——"最新的购买＝当前偏好"。
+        只返回 status='active' 且 record_kind='triple' 的事实。
+        """
+        sql = (
+            "SELECT f.*, s.canonical_label FROM knowledge_facts f"
+            " INNER JOIN (SELECT subject_key, MAX(recorded_at) AS max_ts"
+            "   FROM knowledge_facts"
+            "   WHERE agent_id = ? AND predicate_term_id = ? AND tenant_id = ?"
+            "     AND status = 'active' AND record_kind = 'triple'"
+            "   GROUP BY subject_key) latest"
+            " ON f.subject_key = latest.subject_key"
+            "  AND f.recorded_at = latest.max_ts"
+            " LEFT JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
+            "  AND s.agent_id = f.agent_id"
+            " WHERE f.agent_id = ? AND f.predicate_term_id = ? AND f.tenant_id = ?"
+            "  AND f.status = 'active' AND f.record_kind = 'triple'"
+            " ORDER BY f.subject_key"
+        )
+        # ↑ MAX 子查询也过滤 status='active'——撤最新后 MAX 自然回退到次新，
+        #   无需单独处理撤销逻辑（零停机撤销的 SQL 形态）。
+        params: list = [agentId, predicate, tenantId, agentId, predicate, tenantId]
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [self._hydrate(r) for r in rows]
+
     def factsBitemporal(self, agentId: str, tenantId: str = "default",
                         predicate: str = "", asOf: str = "",
                         knownAt: str = "") -> List[Dict[str, Any]]:
