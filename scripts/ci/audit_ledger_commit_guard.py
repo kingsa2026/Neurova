@@ -70,6 +70,13 @@ def _git(*args: str) -> str:
                           timeout=GIT_WALL_S).stdout
 
 
+def _objectType(token: str) -> str:
+    """对象类型（`commit` / `tree` / `blob` / 空串=本仓没有这个对象）。"""
+    if token not in _objectTypeCache:
+        _objectTypeCache[token] = _git("cat-file", "-t", token).strip()
+    return _objectTypeCache[token]
+
+
 def isCommit(token: str) -> bool:
     if token not in _objectTypeCache:
         _objectTypeCache[token] = _git("cat-file", "-t", token).strip()
@@ -292,9 +299,17 @@ def main(argv=None) -> int:
                     print("    失效 %s%s" % (bad, "  → 可回写为 " + repl if repl
                                              else "  （无可安全回写的替代号）"))
 
-    # 例外清单的第二个方向：署过名不等于永远成立。号若已回到主线（或被 gc 到连对象都不剩，
-    # 不再是一枚 commit），这一行就是过期署名——留着它，下次真有号失联也没人能看出来。
-    retired = sorted(t for t in signed if not (isCommit(t) and not isReachable(t)))
+    # 例外清单的第二个方向：署过名不等于永远成立。号若**已回到主线**，这一行就是过期
+    # 署名——留着它，下次真有号失联也没人能看出来。
+    #
+    # 但「本机压根没有这个对象」是另一件事，不能读成「署名过期」：例外清单署名的号
+    # 本就是被并发重写带走的对象，CI 检出的是**远端当前历史**——那批对象在远端早已被
+    # gc，本机一个字节都取不到。旧写法把这种"取不到"判成"过期"，于是同一条清单
+    # 本机（对象还在 .git 里）绿、CI 红，而 CI 给的修法是"把这行删了"——那是拿
+    # 抹掉证据换绿，正是教义第 2 条禁止的形态。
+    # 判据改为：**对象存在**且（不是 commit 或已可达）才算过期署名；对象不存在时
+    # 本仓对这件事没有发言权，如实不计。
+    retired = sorted(t for t in signed if _objectType(t) and (not isCommit(t) or isReachable(t)))
     if args.porcelain:
         for row in staleRows:
             print("|".join(row))

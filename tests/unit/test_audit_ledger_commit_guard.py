@@ -285,3 +285,28 @@ def test_signedExceptionsReleaseOnlyWhatTheyName(tmp_path, monkeypatch, dangling
     rc, out = run()
     assert rc == 1, "清单里过期的署名行不会被点名——下次真有号失联就没人发现：%s" % out
 
+
+
+def test_signedExceptionWhoseObjectIsAbsentIsNotReadAsExpired(tmp_path, monkeypatch):
+    """例外的第二向必须区分「号已回到主线」与「本仓根本没有这个对象」。
+
+    实测现场（PR #374 的 unit-tests 腿）：CI 检出的是**远端当前历史**，例外清单署名
+    的那批号早已被并发重写从远端带走、连对象都被 gc 掉了。旧口径把"取不到对象"
+    读成"署名已过期"，于是同一条清单**本机绿、CI 红**——而 CI 给出的修法是
+    「把这行删了」，那是拿抹掉证据换绿（教义第 2 条）。
+
+    本格合成一枚**语法合法但本仓不存在**的号：清单里署名它，判定必须仍是放行。
+    反向那一半（号已可达 ⇒ 过期 ⇒ 红）已由上一格 ③ 钉住，两向都在。
+    """
+    (tmp_path / "audit-reports").mkdir()
+    (tmp_path / "scripts" / "ci").mkdir(parents=True)
+    (tmp_path / "audit-reports" / "probe.md").write_text("`deadbeef`\n", encoding="utf-8")
+    (tmp_path / "scripts" / "ci" / "audit_ledger_unreachable_refs.txt").write_text(
+        "deadbeef  本格自证用：本仓没有这个对象\n", encoding="utf-8")
+    monkeypatch.setattr(ledger, "PROJECT_ROOT", tmp_path)
+
+    rc, out = _runMain([])
+    assert rc == 0, (
+        "本仓取不到对象的署名行被读成了「署名过期」——CI 检出的是远端当前历史，"
+        "那批号的对象在远端早已被 gc，这条判据会永远红，且修法指向「删掉证据」：%s" % out
+    )
