@@ -12189,3 +12189,23 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **同根因的第二份实现在收口时合并（教义第 7 条）**：另有一版并行修复落在这个号之前，两版对「取不到对象」的判法一致，差别在两处——① 那一版留着 `isCommit()` 自己那趟 `cat-file`，与 `_objectType()` 成了同一件事的两份取数；② 它把"今天有几行真核不了"这条读数丢了。合并后取长补短：`isCommit()` 收成 `_objectType()` 的谓词（对象类型取数单源），三态判定抽成 `signatureExpired()`，并新增一行 `例外清单里另有 N 行在本克隆不可核验` 把第三态如实报出（原来这 5 行连一句读数都没有，静默略过）。反向钉也补齐：`test_signedExceptionWhoseObjectIsNotACommitIsExpired` 要求树号误署进清单必须红——没有它，「取不到不判过期」可以被"一律不判过期"错误地满足，清单就成了一键静音。
     - **live-verify 补记（平台配额复测，2026-11-07 21:50）**：本条修完后 PR 侧连续三轮全腿红在 `Prepare`，日志原文是 `Root Group's events CPU core-hours are insufficient for pre-freezing`——**平台配额不足，与代码无关**（`static-gate` 另有一轮在配额恢复窗口里跑成 success）。故另起一条 `api_trigger` 验证构建（`cnb-icr-1k6r4ftor`，2 核，只跑本档两件事）取现场读数：`scan ledger refs` → `commit 号全部可达（共 1384 条引用，扫描面 audit-reports + docs，例外清单署名 5 条）`；`guard tests` → `16 passed in 3.48s`。即本次改动在真容器、真干净克隆上的读数与说明一致。另记一条过程中踩到的：第一次验证构建（`cnb-o5u-1k6r4crog`）只装了 pytest，16 格全 `ModuleNotFoundError: No module named 'pydantic'`——那是 `tests/conftest.py` 的装配依赖，不是判据坏，补装后即绿。
     - **下一枚空号现查：条目行尾号现算 584 ⇒ 本格取 585，后继从 586 起。**
+
+586. **PR #374 第六轮：版本副本收敛——`deploy-config` 的 R4 与两档桌面守卫咬的是同一件事，第四份副本（构建输出）此前无人咬** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **先分清哪条腿是代码红**：本轮九条腿里八条红在 `Prepare`，日志原文 `Root Group's events CPU-core hours are insufficient for pre-freezing`——平台配额不足，与提交无关；`pipeline-7`（`deploy-config`）是唯一真跑起来的那条，只报一行 ERROR：`[R4-images] Chart appVersion=1.0.0-beta8 与 neurova.__version__=1.0.0-beta9 不一致`。
+    - **根因不在 Chart 这一格，在「升版只改源侧、副本各自留在 beta8」**：`98b0fa42` 只升 `tauri.conf.json` 与后端五处字面量，桌面侧另有四份副本：`NeurUI/package.json`、`NeurUI/package-lock.json`（顶层与 `packages[""]`）、`installer-wpf/bin/version.txt`、`helm/neurova/Chart.yaml`。前两条各有一格既有判据咬住（`testVersionFactsAgreeAcrossSources` / `testLockfileCarriesSameVersionAsPackageJson`）＋`win_installer_kit.py::product_version()` 那条运行时断言；第三条是 R4 本行；**第四条无任何判据**。
+    - **分工与归属如实记账**：前三处已由并发的 `595216d3`（「版本事实源三处对齐 beta9」，同分支另一会话）落库，本格不重复计入。本条只补它没覆盖的那一份：`bin/version.txt` 是 `build.cmd` 每次本地打包时从 `tauri.conf.json` 重写、却被 git 跟踪的构建输出副本（先例 `d080d7d9`/`6d0220ae`/`57735195`/`04fc63c8` 四次同名升级笔都带它）。本地不重打包它就永久留旧值，而装上后 WPF 欢迎页读的正是它——「装出来的包自报旧版本」这一形态该档开头就在防，却漏了第三份副本。
+    - **修法是给这一份上守卫，不是再手改一次**：`tests/unit/desktop/test_installer_version_single_source.py` 补 `testBuildOutputVersionCopyFollowsProductVersion`，把四态（`tauri.conf.json` / `package.json` / `package-lock.json` / `bin/version.txt`）咬到同一事实源；副本一并跟到 beta9。
+    - **红→绿（本机同一份树）**：
+      ```
+      （副本留 beta8、守卫已加）
+      FAILED testBuildOutputVersionCopyFollowsProductVersion
+        构建输出副本与版本事实源分叉：tauri.conf.json=1.0.0-beta9 / bin/version.txt=1.0.0-beta8
+      （副本跟到 beta9）
+      test_installer_version_single_source.py                    5 passed
+      desktop 版本/NSIS/签名/win_installer_kit/deploy_config 五档  59 passed
+      deploy_config_consistency_check.py   EXIT=0   ERROR 0 / WARN 1（既有 R7 存量）
+      ruff check neurova tests --no-cache   All checks passed
+      ci_static_gate.py --skip-import       三格全过
+      ```
+    - **A/B 自证（预存红不算回归，AGENTS.md §4）**：`tests/unit/desktop` 整目录修前 5 failed → 修后 3 failed，差额恰是本单与并发那笔一起修掉的版本分叉格；余下 `test_bundle_runtime_dirs.py` ×2 与 `test_stagedBackendAgreesWithDeclaredVersion`（`resources/backend/` 缺席，本机未打包）两侧同集合，属预存红。
+    - **净 LOC**：生产池 +0；配置池 `bin/version.txt` +1/−1（一行版本串）；判据 +19/−0、台账 +21 均不计入。**下一枚空号现查：本格取 586，后继从 587 起。**
