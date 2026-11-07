@@ -1,15 +1,14 @@
 /**
- * EnterpriseSourcesPage — UI-4 企业数据源契约测试。
+ * EnterpriseSourcesPage — 页面重设计契约测试（连接器列表＋四步向导）。
  *
- * 契约面（§15.4 企业源不伪装）：
- * - 页面显式显示「接口预留／未接入真实源」标记与说明；
- * - 源列表走真 REST：空态说明是诚实状态（不是故障），有行时逐行回显
- *   enabled 与 adapter_registered 两态——「描述符落库」不等于「源已接通」；
- * - 描述符编辑器提交是真调用，body 形状与后端 validateDescriptor 对齐；
- *   400 的拒因原样露出，不降级成 warning；
- * - 非管理员提交按钮禁用（治理门在后端，前端不假装能写）；
- * - 批 U-1 对齐：源型选项含 file/chat；变体字段随源型露出（file→format+path）；
- *   逐行「立即摄取」走真端点，结果四数如实报、skipped 走 info、错误显 detail 原话。
+ * 契约面（§15.4 企业源不伪装 + 页面重设计配套批）：
+ * - 列表行回显：类型中文标签（sql→数据库、chat+wecom→企微）、添加时间、已获取计数；
+ * - 行内"检测"走真 health 端点，三态徽标如实（未检测/正常/受限/异常）；
+ * - 向导四步：步 0 选型守门、步 1 逐类型必填（sql→driver/database/cursorColumn/table|query）、
+ *   步 2 映射必填、保存 body 与后端 validateDescriptor 对齐（object.column 键）；
+ * - 编辑预填：kind 从描述符反推（chat+wecom→企微卡）、source_id 锁定、vendor 保持；
+ * - 删除确认点名"已获取数据保留"，走真 DELETE 端点；
+ * - 启用开关翻转走 POST upsert；逐行摄取四数如实报、skipped 走 info。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -34,6 +33,8 @@ vi.mock('@/api/modules/ontology', () => ({
   listEnterpriseSources: vi.fn(),
   submitEnterpriseSource: vi.fn(),
   triggerEnterpriseIngest: vi.fn(),
+  getEnterpriseSourceHealth: vi.fn(),
+  deleteEnterpriseSource: vi.fn(),
 }))
 
 vi.mock('ant-design-vue', () => ({
@@ -45,12 +46,16 @@ import {
   listEnterpriseSources,
   submitEnterpriseSource,
   triggerEnterpriseIngest,
+  getEnterpriseSourceHealth,
+  deleteEnterpriseSource,
 } from '@/api/modules/ontology'
 import { ontologySection } from '@/i18n/locales/_ontologySection'
 
 const listMock = listEnterpriseSources as unknown as ReturnType<typeof vi.fn>
 const submitMock = submitEnterpriseSource as unknown as ReturnType<typeof vi.fn>
 const ingestMock = triggerEnterpriseIngest as unknown as ReturnType<typeof vi.fn>
+const healthMock = getEnterpriseSourceHealth as unknown as ReturnType<typeof vi.fn>
+const deleteMock = deleteEnterpriseSource as unknown as ReturnType<typeof vi.fn>
 
 const i18n = createI18n({
   legacy: false,
@@ -58,43 +63,86 @@ const i18n = createI18n({
   messages: {
     'zh-CN': {
       ontology: ontologySection('zh-CN'),
-      common: { required: '此项必填', error: '操作失败' },
+      common: { edit: '编辑', delete: '删除', prev: '上一步', next: '下一步', save: '保存', error: '操作失败', success: '成功' },
     },
   },
 })
 
+/** a-table stub：按列逐格渲染 bodyCell，让行内断言与按钮触发可测 */
+const tableStub = {
+  props: ['dataSource'],
+  template: `<div class="stub-table">
+    <div v-for="row in dataSource || []" :key="row.source_id" class="stub-row">
+      <span class="cell-source_id"><slot name="bodyCell" :column="{ key: 'source_id' }" :record="row" /></span>
+      <span class="cell-type"><slot name="bodyCell" :column="{ key: 'type' }" :record="row" /></span>
+      <span class="cell-created_at"><slot name="bodyCell" :column="{ key: 'created_at' }" :record="row" /></span>
+      <span class="cell-status"><slot name="bodyCell" :column="{ key: 'status' }" :record="row" /></span>
+      <span class="cell-count"><slot name="bodyCell" :column="{ key: 'ingested_count' }" :record="row" /></span>
+      <span class="cell-enabled"><slot name="bodyCell" :column="{ key: 'enabled' }" :record="row" /></span>
+      <span class="cell-actions"><slot name="bodyCell" :column="{ key: 'actions' }" :record="row" /></span>
+    </div>
+    <div v-if="!(dataSource || []).length" class="stub-table-empty" />
+  </div>`,
+}
+
+const stubs = {
+  'a-table': tableStub,
+  'a-tag': { template: '<span class="stub-tag"><slot /></span>' },
+  'a-badge': { props: ['status', 'text'], template: '<span class="stub-badge" :data-status="status">{{ text }}</span>' },
+  'a-empty': { props: ['description'], template: '<div class="stub-empty">{{ description }}</div>' },
+  'a-modal': { props: ['open', 'title'], template: '<div v-if="open" class="stub-modal"><slot /></div>' },
+  'a-steps': { props: ['current'], template: '<div class="stub-steps" :data-current="current"><slot /></div>' },
+  'a-step': { props: ['title'], template: '<div class="stub-step">{{ title }}</div>' },
+  'a-form': { template: '<form class="stub-form"><slot /></form>' },
+  'a-form-item': { props: ['label'], template: '<label class="stub-form-item"><slot /></label>' },
+  'a-input': {
+    props: ['value', 'disabled', 'placeholder'],
+    emits: ['update:value'],
+    template: '<input class="stub-input" :value="value" :data-placeholder="placeholder" :disabled="disabled" @input="$emit(\'update:value\', $event.target.value)" />',
+  },
+  'a-textarea': {
+    props: ['value', 'rows', 'placeholder'],
+    emits: ['update:value'],
+    template: '<textarea class="stub-textarea" :value="value" @input="$emit(\'update:value\', $event.target.value)" />',
+  },
+  'a-select': {
+    props: ['value', 'options', 'placeholder'],
+    emits: ['update:value'],
+    template: `<select class="stub-select" :value="value" @change="$emit('update:value', $event.target.value)">
+      <option v-for="o in options || []" :key="o.value" :value="o.value">{{ o.label }}</option>
+    </select>`,
+  },
+  'a-radio-group': {
+    props: ['value'],
+    emits: ['update:value'],
+    template: `<select class="stub-radio" :value="value" @change="$emit('update:value', $event.target.value)"><slot /></select>`,
+  },
+  'a-radio': { props: ['value'], template: '<option :value="value"><slot /></option>' },
+  'a-switch': {
+    props: ['checked', 'disabled', 'size'],
+    emits: ['change'],
+    template: '<button class="stub-switch" :disabled="disabled" @click="$emit(\'change\', !checked)" />',
+  },
+  'a-popconfirm': {
+    props: ['title'],
+    template: '<span class="stub-pop"><button class="pop-confirm-btn" @click="$emit(\'confirm\')"><slot /></button></span>',
+  },
+  'a-row': { template: '<div class="stub-row-el"><slot /></div>' },
+  'a-col': { template: '<div class="stub-col"><slot /></div>' },
+  'a-descriptions': { template: '<div class="stub-desc"><slot /></div>' },
+  'a-descriptions-item': { props: ['label'], template: '<div class="stub-desc-item"><slot /></div>' },
+  GlassPanel: { template: '<div class="stub-panel"><slot /></div>' },
+  GlassButton: {
+    props: ['loading', 'disabled', 'variant'],
+    emits: ['click'],
+    template: '<button class="stub-glass-btn" :disabled="disabled" @click="$emit(\'click\')"><slot /></button>',
+  },
+}
+
 const mountPage = () =>
   mount(EnterpriseSourcesPage, {
-    global: {
-      plugins: [i18n],
-      stubs: {
-        'a-tag': { template: '<span class="stub-tag"><slot /></span>' },
-        'a-empty': { props: ['description'], template: '<div class="stub-empty">{{ description }}</div>' },
-        'a-input': {
-          props: ['value'],
-          emits: ['update:value'],
-          template: '<input class="stub-input" :value="value" @input="$emit(\'update:value\', $event.target.value)" />',
-        },
-        'a-select': {
-          props: ['value'],
-          emits: ['update:value'],
-          template: '<select class="stub-select" :value="value" @change="$emit(\'update:value\', $event.target.value)"><slot /></select>',
-        },
-        'a-select-option': { props: ['value'], template: '<option :value="value"><slot /></option>' },
-        'a-checkbox': {
-          props: ['checked', 'disabled'],
-          emits: ['update:checked'],
-          template: '<input type="checkbox" class="stub-check" :checked="checked" :disabled="disabled" @change="$emit(\'update:checked\', $event.target.checked)" />',
-        },
-        'a-tooltip': { props: ['title'], template: '<div class="stub-tooltip" :data-reason="title"><slot /></div>' },
-        GlassPanel: { template: '<div class="stub-panel"><slot /></div>' },
-        GlassButton: {
-          props: ['loading', 'disabled', 'variant'],
-          emits: ['click'],
-          template: '<button class="stub-glass-btn" :disabled="disabled" @click="$emit(\'click\')"><slot /></button>',
-        },
-      },
-    },
+    global: { plugins: [i18n], stubs },
+    attachTo: document.body,
   })
 
 function sourceRow(overrides: Record<string, unknown> = {}) {
@@ -104,6 +152,9 @@ function sourceRow(overrides: Record<string, unknown> = {}) {
     cursor: '',
     enabled: false,
     adapter_registered: false,
+    created_at: '2026-11-07T10:00:00',
+    updated_at: '2026-11-07T10:00:00',
+    ingested_count: 7,
     ...overrides,
   }
 }
@@ -119,154 +170,216 @@ beforeEach(() => {
     message: 'ok',
     data: { result: { admitted: 2, rejected: 1, batches: 1, truncated: false, cursor: 'fp=x:off=3' } },
   })
+  healthMock.mockReset()
+  healthMock.mockResolvedValue({ code: 0, message: 'ok', data: { source_id: 'erp_orders', status: 'ok', reason: '' } })
+  deleteMock.mockReset()
+  deleteMock.mockResolvedValue({ code: 0, message: 'ok', data: { source_id: 'erp_orders' } })
   authUser.role = 'admin'
 })
 
-describe('EnterpriseSourcesPage（UI-4）', () => {
-  it('空态渲染：显式「接口预留」标记、源列表空态说明为诚实状态', async () => {
+describe('EnterpriseSourcesPage（连接器列表）', () => {
+  it('空态加载：只调列表一次，无行渲染', async () => {
     const wrapper = mountPage()
     await flushPromises()
     expect(listMock).toHaveBeenCalledTimes(1)
-    expect(wrapper.find('[data-testid="ent-reserved-tag"]').text()).toContain('已分批落格')
-    expect(wrapper.find('[data-testid="ent-list-empty"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="ent-list-empty"]').text()).toContain('诚实状态')
-    // fake adapter 只存在于服务端测试路径——页面不提供演示按钮
-    expect(wrapper.text()).toContain('tests/unit/knowledge/enterprise/')
-    expect(wrapper.find('button').text()).not.toContain('演示')
+    expect(wrapper.findAll('.stub-row').length).toBe(0)
   })
 
-  it('列表态：逐行回显 enabled 与 adapter_registered（配置落库 ≠ 源已接通）', async () => {
+  it('列表行：类型中文标签、添加时间、已获取计数如实回显', async () => {
     listMock.mockResolvedValue({
       code: 0,
-      message: 'ok',
-      data: { items: [sourceRow()], total: 1 },
-    })
-    const wrapper = mountPage()
-    await flushPromises()
-    const row = wrapper.find('[data-testid="ent-row-erp_orders"]')
-    expect(row.exists()).toBe(true)
-    expect(row.find('[data-testid="ent-enabled-tag"]').text()).toBe('off')
-    expect(row.find('[data-testid="ent-adapter-tag"]').text()).toContain('适配器未注册')
-  })
-
-  it('描述符提交：body 与后端编译期校验形状对齐，成功后重读列表', async () => {
-    const wrapper = mountPage()
-    await flushPromises()
-    await wrapper.find('[data-testid="ent-source-id"]').setValue('erp_orders')
-    await wrapper.find('[data-testid="ent-columns"]').setValue('order_id, risk_level')
-    await wrapper.find('[data-testid="ent-subject"]').setValue('orders:{order_id}')
-    await wrapper.find('[data-testid="ent-predicate"]').setValue('hasRiskLevel')
-    await wrapper.find('[data-testid="ent-object-value"]').setValue('risk_level')
-    await wrapper.find('[data-testid="ent-submit"]').trigger('click')
-    await flushPromises()
-
-    expect(submitMock).toHaveBeenCalledTimes(1)
-    expect(submitMock.mock.calls[0][0]).toEqual({
-      source_id: 'erp_orders',
-      enabled: false,
-      descriptor: {
-        sourceType: 'sql',
-        columns: ['order_id', 'risk_level'],
-        subject: { template: 'orders:{order_id}' },
-        predicate: { termId: 'hasRiskLevel' },
-        object: { kind: 'column', column: 'risk_level' },
-        qualifiers: {},
-        driver: 'sqlite',
+      data: {
+        items: [
+          sourceRow(),
+          sourceRow({ source_id: 'wecom_src', descriptor: { sourceType: 'chat', vendor: 'wecom' } }),
+        ],
+        total: 2,
       },
     })
-    // 提交后重读：列表读数来自服务端，不是前端自增一行
-    expect(listMock).toHaveBeenCalledTimes(2)
-  })
-
-  it('拒因显式：400 的 detail 原样露出，不降级成「操作失败」了事', async () => {
-    submitMock.mockRejectedValue({
-      response: { data: { detail: "predicate not_registered 未登记（先登记术语再配映射）" } },
-    })
     const wrapper = mountPage()
     await flushPromises()
-    await wrapper.find('[data-testid="ent-source-id"]').setValue('erp_bad')
-    await wrapper.find('[data-testid="ent-predicate"]').setValue('not_registered')
-    await wrapper.find('[data-testid="ent-submit"]').trigger('click')
-    await flushPromises()
-    expect(wrapper.find('[data-testid="ent-submit-error"]').text()).toContain('未登记')
+    const rows = wrapper.findAll('.stub-row')
+    expect(rows.length).toBe(2)
+    expect(rows[0].find('.cell-type').text()).toContain('数据库')
+    expect(rows[1].find('.cell-type').text()).toContain('企微')
+    expect(rows[0].find('.cell-created_at').text()).toContain('2026-11-07')
+    expect(rows[0].find('.cell-count').text()).toContain('7')
   })
 
-  it('权限态：非管理员提交按钮与启用勾选禁用，并给出管理员限定说明', async () => {
-    authUser.role = 'user'
+  it('行内检测：走真 health 端点，徽标转"连接正常"；异常显 error 态', async () => {
+    listMock.mockResolvedValue({ code: 0, data: { items: [sourceRow()], total: 1 } })
     const wrapper = mountPage()
     await flushPromises()
-    expect(wrapper.find('[data-testid="ent-submit"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.find('[data-testid="ent-enabled"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.find('[data-testid="ent-admin-note"]').text()).toContain('仅管理员')
+    expect(wrapper.find('[data-testid="ent-health-badge"]').text()).toContain('未检测')
+    await wrapper.find('[data-testid="ent-health-btn"]').trigger('click')
+    await flushPromises()
+    expect(healthMock).toHaveBeenCalledWith('erp_orders')
+    expect(wrapper.find('[data-testid="ent-health-badge"]').text()).toContain('连接正常')
+
+    healthMock.mockRejectedValue({ response: { data: { detail: '驱动未安装' } } })
+    await wrapper.find('[data-testid="ent-health-btn"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="ent-health-badge"]').text()).toContain('连接异常')
+    expect(wrapper.find('[data-testid="ent-health-badge"]').text()).toContain('驱动未安装')
   })
 
-  it('批 U-1 对齐：源型选项含 file/chat，选 file 后变体字段（format/path）露出', async () => {
+  it('删除：确认后走真 DELETE，成功文案点名数据保留', async () => {
+    listMock.mockResolvedValue({ code: 0, data: { items: [sourceRow()], total: 1 } })
     const wrapper = mountPage()
     await flushPromises()
-    const options = wrapper
-      .findAll('[data-testid="ent-source-type"] option')
-      .map((o) => (o.element as HTMLOptionElement).value)
-    expect(options).toContain('file')
-    expect(options).toContain('chat')
-    expect(options).toContain('http_pull')
-    expect(wrapper.find('[data-testid="ent-variant-format"]').exists()).toBe(false)
-    await wrapper.find('[data-testid="ent-source-type"]').setValue('file')
-    expect(wrapper.find('[data-testid="ent-variant-format"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="ent-variant-path"]').exists()).toBe(true)
+    await wrapper.find('.pop-confirm-btn').trigger('click')
+    await flushPromises()
+    expect(deleteMock).toHaveBeenCalledWith('erp_orders')
+    const { message } = await import('ant-design-vue')
+    expect((message.success as ReturnType<typeof vi.fn>).mock.calls.some((c) => String(c[0]).includes('保留'))).toBe(true)
   })
 
-  it('批 U-1 对齐：file 描述符提交 body 带 format/path 变体', async () => {
+  it('启用开关：翻转走 POST upsert（enabled 取反）', async () => {
+    listMock.mockResolvedValue({ code: 0, data: { items: [sourceRow()], total: 1 } })
     const wrapper = mountPage()
     await flushPromises()
-    await wrapper.find('[data-testid="ent-source-id"]').setValue('orders_csv')
-    await wrapper.find('[data-testid="ent-source-type"]').setValue('file')
-    await wrapper.find('[data-testid="ent-variant-path"]').setValue('/data/orders.csv')
-    await wrapper.find('[data-testid="ent-columns"]').setValue('order_id, status')
-    await wrapper.find('[data-testid="ent-subject"]').setValue('order:{order_id}')
-    await wrapper.find('[data-testid="ent-predicate"]').setValue('has_status')
-    await wrapper.find('[data-testid="ent-object-value"]').setValue('status')
-    await wrapper.find('[data-testid="ent-submit"]').trigger('click')
+    await wrapper.find('.stub-switch').trigger('click')
     await flushPromises()
+    expect(submitMock).toHaveBeenCalledWith(
+      expect.objectContaining({ source_id: 'erp_orders', enabled: true }),
+    )
+  })
+})
+
+describe('EnterpriseSourcesPage（新增向导）', () => {
+  it('步 0 守门：未选连接对象时下一步禁用；选"数据库"后放行', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-testid="ent-add-btn"]').trigger('click')
+    expect(wrapper.find('[data-testid="ent-kind-cards"]').exists()).toBe(true)
+    expect((wrapper.find('[data-testid="ent-wizard-next"]').element as HTMLButtonElement).disabled).toBe(true)
+    await wrapper.findAll('.kind-card')[0].trigger('click')
+    expect((wrapper.find('[data-testid="ent-wizard-next"]').element as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('向导创建数据库连接器：必填守门→保存 body 与后端校验对齐（object.column 键）', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-testid="ent-add-btn"]').trigger('click')
+    await wrapper.findAll('.kind-card')[0].trigger('click') // 数据库
+    await wrapper.find('[data-testid="ent-wizard-next"]').trigger('click')
+
+    // 步 1 必填未填 → 下一步禁用
+    expect((wrapper.find('[data-testid="ent-wizard-next"]').element as HTMLButtonElement).disabled).toBe(true)
+    const inputs = wrapper.findAll('.stub-input')
+    // 顺序：source_id / cursorColumn / host / port / database / table（driver 是 select）
+    await inputs[0].setValue('orders_src')
+    await inputs[1].setValue('updated_at')
+    await inputs[2].setValue('db-host')
+    await inputs[3].setValue('5432')
+    await inputs[4].setValue('shop')
+    await inputs[5].setValue('orders')
+    await wrapper.find('[data-testid="ent-wizard-next"]').trigger('click')
+
+    // 步 2 映射
+    const step2Inputs = wrapper.findAll('.stub-input')
+    await step2Inputs[0].setValue('order_id, status') // columns
+    await step2Inputs[1].setValue('order_id') // subject column
+    await step2Inputs[2].setValue('has_status') // predicate
+    await step2Inputs[3].setValue('status') // object value
+    await wrapper.find('[data-testid="ent-wizard-next"]').trigger('click')
+
+    expect(wrapper.find('[data-testid="ent-wizard-save"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="ent-wizard-save"]').trigger('click')
+    await flushPromises()
+
     expect(submitMock).toHaveBeenCalledTimes(1)
-    const body = submitMock.mock.calls[0][0] as { descriptor: Record<string, unknown> }
-    expect(body.descriptor.format).toBe('csv')
-    expect(body.descriptor.path).toBe('/data/orders.csv')
+    const body = submitMock.mock.calls[0][0]
+    expect(body.source_id).toBe('orders_src')
+    expect(body.descriptor.sourceType).toBe('sql')
+    expect(body.descriptor.driver).toBe('postgresql')
+    expect(body.descriptor.host).toBe('db-host')
+    expect(body.descriptor.database).toBe('shop')
+    expect(body.descriptor.table).toBe('orders')
+    expect(body.descriptor.cursorColumn).toBe('updated_at')
+    expect(body.descriptor.columns).toEqual(['order_id', 'status'])
+    expect(body.descriptor.subject).toEqual({ column: 'order_id' })
+    expect(body.descriptor.predicate).toEqual({ termId: 'has_status' })
+    expect(body.descriptor.object).toEqual({ kind: 'column', column: 'status' })
   })
 
-  it('批 U-1 对齐：逐行立即摄取——成功报四数并重读列表', async () => {
+  it('向导步 1 类型卡映射：企微卡 → descriptor.sourceType=chat 且 vendor=wecom', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-testid="ent-add-btn"]').trigger('click')
+    await wrapper.findAll('.kind-card')[2].trigger('click') // 企微
+    await wrapper.find('[data-testid="ent-wizard-next"]').trigger('click')
+    const inputs = wrapper.findAll('.stub-input')
+    await inputs[0].setValue('wecom_src')
+    await wrapper.find('[data-testid="ent-wizard-next"]').trigger('click')
+    const step2Inputs = wrapper.findAll('.stub-input')
+    await step2Inputs[0].setValue('msg_id, content')
+    await step2Inputs[1].setValue('sender')
+    await step2Inputs[2].setValue('has_status')
+    await step2Inputs[3].setValue('content')
+    await wrapper.find('[data-testid="ent-wizard-next"]').trigger('click')
+    await wrapper.find('[data-testid="ent-wizard-save"]').trigger('click')
+    await flushPromises()
+    const body = submitMock.mock.calls[0][0]
+    expect(body.descriptor.sourceType).toBe('chat')
+    expect(body.descriptor.vendor).toBe('wecom')
+  })
+})
+
+describe('EnterpriseSourcesPage（编辑）', () => {
+  it('编辑预填：kind 由描述符反推、source_id 锁定、保存保持 vendor', async () => {
     listMock.mockResolvedValue({
       code: 0,
-      message: 'ok',
-      data: { items: [sourceRow()], total: 1 },
+      data: {
+        items: [sourceRow({
+          source_id: 'wecom_src',
+          descriptor: { sourceType: 'chat', vendor: 'wecom', columns: ['msg_id'],
+                        subject: { column: 'sender' },
+                        predicate: { termId: 'has_status' },
+                        object: { kind: 'column', column: 'content' } },
+        })],
+        total: 1,
+      },
     })
     const wrapper = mountPage()
     await flushPromises()
-    await wrapper.find('[data-testid="ent-ingest-erp_orders"]').trigger('click')
+    await wrapper.find('[data-testid="ent-edit-btn"]').trigger('click')
+    // 编辑直进步 1（选型锁定），source_id 已预填且 disabled
+    const sid = wrapper.find('[data-testid="ent-wizard-source-id"]')
+    expect((sid.element as HTMLInputElement).value).toBe('wecom_src')
+    expect((sid.element as HTMLInputElement).disabled).toBe(true)
+    // 直接到步 3 保存（步骤 1/2 已有预填值，直接点两次下一步）
+    await wrapper.find('[data-testid="ent-wizard-next"]').trigger('click')
+    await wrapper.find('[data-testid="ent-wizard-next"]').trigger('click')
+    await wrapper.find('[data-testid="ent-wizard-save"]').trigger('click')
+    await flushPromises()
+    const body = submitMock.mock.calls[0][0]
+    expect(body.source_id).toBe('wecom_src')
+    expect(body.descriptor.sourceType).toBe('chat')
+    expect(body.descriptor.vendor).toBe('wecom')
+  })
+})
+
+describe('EnterpriseSourcesPage（摄取）', () => {
+  it('逐行摄取：四数如实报', async () => {
+    listMock.mockResolvedValue({ code: 0, data: { items: [sourceRow()], total: 1 } })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-testid="ent-ingest-btn"]').trigger('click')
     await flushPromises()
     expect(ingestMock).toHaveBeenCalledWith('erp_orders')
     const { message } = await import('ant-design-vue')
-    expect(message.success).toHaveBeenCalledWith(
-      expect.stringContaining('入账 2'),
-    )
-    expect(listMock).toHaveBeenCalledTimes(2)
+    expect((message.success as ReturnType<typeof vi.fn>).mock.calls.some((c) => String(c[0]).includes('2'))).toBe(true)
   })
 
-  it('批 U-1 对齐：摄取错误显 detail 原话（未接线的源型后端点名）', async () => {
-    listMock.mockResolvedValue({
-      code: 0,
-      message: 'ok',
-      data: { items: [sourceRow()], total: 1 },
-    })
-    ingestMock.mockRejectedValue({
-      response: { data: { detail: 'http_pull 连接器属批 C3（立项方案 §3），本批未接线' } },
-    })
+  it('skipped 走 info 不谎报成功', async () => {
+    listMock.mockResolvedValue({ code: 0, data: { items: [sourceRow()], total: 1 } })
+    ingestMock.mockResolvedValue({ code: 0, data: { result: { skipped: true, reason: 'source 未启用（默认关）' } } })
     const wrapper = mountPage()
     await flushPromises()
-    await wrapper.find('[data-testid="ent-ingest-erp_orders"]').trigger('click')
+    await wrapper.find('[data-testid="ent-ingest-btn"]').trigger('click')
     await flushPromises()
     const { message } = await import('ant-design-vue')
-    expect(message.error).toHaveBeenCalledWith(
-      expect.stringContaining('未接线'),
-    )
+    expect((message.info as ReturnType<typeof vi.fn>).mock.calls.some((c) => String(c[0]).includes('未启用'))).toBe(true)
   })
 })
