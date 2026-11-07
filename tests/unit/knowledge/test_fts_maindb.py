@@ -57,7 +57,7 @@ class TestV37Migration:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(knowledge_fts_docs)")}
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         conn.close()
-        assert version == 37, "v37 后 FTS 两表归 foundation 迁移域"
+        assert version >= 37, "v37 后 FTS 两表归 foundation 迁移域（后续链版本递增不算违例）"
         assert {"knowledge_fts_docs", "knowledge_fts"} <= names, "FTS 两表在主库"
         assert "source_modified_at" in cols, "docs 表带源钟列"
 
@@ -69,7 +69,7 @@ class TestV37Migration:
         conn = sqlite3.connect(dbPath)
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         conn.close()
-        assert version == 37
+        assert version >= 37
 
     def test_noSeparateDbFileIsCreated(self, dbPath, tmp_path):
         from neurova.knowledge.fts_index import KnowledgeFtsIndex

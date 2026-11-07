@@ -35,6 +35,29 @@ def _actor(current_user: dict) -> str:
     return str((current_user or {}).get("username") or "")
 
 
+def _visibleForUser(current_user: dict, items: list) -> list:
+    """按请求身份过滤分类清单（specs/2026-11-07 §3：受限部门只见白名单内分类）。
+
+    admin / 无部门组 / 未配置白名单 → 全量；受限部门 → 白名单内（解析失败
+    回落全量，与服务端"不猜部门"的缺省语义一致）。
+    """
+    if str((current_user or {}).get("role") or "") == "admin":
+        return items
+    username = str((current_user or {}).get("username") or "")
+    if not username:
+        return items
+    try:
+        from neurova.auth.user_group_model import resolveUserDepartment
+
+        dept = resolveUserDepartment(username)
+    except Exception:  # noqa: BLE001 - 解析失败回落全量
+        return items
+    if not dept.get("restricted"):
+        return items
+    allowed = set(dept.get("allowed_categories") or [])
+    return [c for c in items if c.get("category_id") in allowed]
+
+
 class CategoryCreate(BaseModel):
     """注册分类请求"""
 
@@ -57,10 +80,12 @@ async def list_categories(
     include_inactive: bool = False,
     current_user: dict = Depends(get_current_user),
 ):
-    """分类列表 — 登录可读（活跃分类）；停用清单仅 admin 可看"""
+    """分类列表 — 登录可读（活跃分类，按请求身份过滤：受限部门只见白名单内）；
+    停用清单仅 admin 可看"""
     if include_inactive and str((current_user or {}).get("role") or "") != "admin":
         raise HTTPException(status_code=403, detail="停用分类清单仅管理员可查看")
     items = _registry().list(activeOnly=not include_inactive)
+    items = _visibleForUser(current_user, items)
     return {"code": 0, "data": items, "request_id": getattr(request.state, "request_id", "")}
 
 

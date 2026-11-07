@@ -252,6 +252,10 @@ ENDPOINT_MODULES = [
     ("neurova.api.endpoints.studio_api", "/v1/studio", "Studio API"),
     ("neurova.api.endpoints.image", "/v1/image", "Image API"),
     ("neurova.api.endpoints.media", "/v1/media", "Media API"),
+    # 分类注册表必须先于 knowledge 本体挂载：knowledge 的 `GET /{knowledge_id}`
+    # 参数路由会遮蔽字面段 `/knowledge/categories`（live-verify 实测 404，
+    # 2026-11-07）——字面段先于参数段注册，与 media.py 的路由序纪律同款。
+    ("neurova.api.endpoints.knowledge_categories_api", "/v1/knowledge/categories", "Knowledge Categories API"),
     ("neurova.api.endpoints.knowledge", "/v1/knowledge", "Knowledge API"),
     ("neurova.api.endpoints.knowledge_access_facade", "/v1/knowledge", "Knowledge Access Facade API"),
     ("neurova.api.endpoints.quality", "/v1/quality", "Quality API"),
@@ -277,7 +281,6 @@ ENDPOINT_MODULES = [
     ("neurova.api.endpoints.rules_api", "/v1/rules", "Rules API"),
     ("neurova.api.endpoints.webhooks", "/v1/webhooks", "Webhooks API"),
     ("neurova.api.endpoints.enhanced_users_api", "/v1/enhanced-users", "Enhanced Users API"),
-    ("neurova.api.endpoints.knowledge_categories_api", "/v1/knowledge/categories", "Knowledge Categories API"),
     ("neurova.api.endpoints.files_api", "/v1/files", "Files API"),
     ("neurova.api.endpoints.artifacts_api", "/v1/artifacts", "Artifacts API"),
     ("neurova.api.endpoints.tool_schema", "/v1/tools", "Tool Schema API"),
