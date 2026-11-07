@@ -1,5 +1,5 @@
 """
-Computer Use API 端点 v1.0.0-beta8 - 浏览器自动化增强版
+Computer Use API 端点 v1.0.0-beta9 - 浏览器自动化增强版
 
 隔离层级: 全局共享 + L1/L2 防火墙
 """
