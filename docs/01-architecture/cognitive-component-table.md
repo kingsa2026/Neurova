@@ -22,14 +22,14 @@
 ## 摘要
 
 <!-- COGNITIVE:SUMMARY:BEGIN -->
-共 **93** 个模块 / **43240** 行。按状态：**在役 52** · **仅层内 34** · **仅测试 2** · **零读者 5**。
+共 **93** 个模块 / **43252** 行。按状态：**在役 52** · **仅层内 34** · **仅测试 2** · **零读者 5**。
 
 | 子层 | 模块数 | 行数 |
 |---|---|---|
 | `emotion_context_layer` | 4 | 2300 |
 | `growth_layer` | 1 | 813 |
 | `knowledge_graph` | 1 | 1269 |
-| `memory_layer` | 82 | 36586 |
+| `memory_layer` | 82 | 36598 |
 | `meta_cognition_layer` | 5 | 2272 |
 <!-- COGNITIVE:SUMMARY:END -->
 
@@ -56,7 +56,7 @@
 
 | 模块 | 行数 | 层外读者 | 层内读者 | 测试读者 | 状态 |
 |---|---|---|---|---|---|
-| `neurova/cognitive_layers/knowledge_graph/manager.py` | 1269 | 5 | 1 | 21 | 在役 |
+| `neurova/cognitive_layers/knowledge_graph/manager.py` | 1269 | 5 | 1 | 22 | 在役 |
 
 ### `memory_layer`
 
@@ -80,7 +80,7 @@
 | `neurova/cognitive_layers/memory_layer/channels/builtin/text.py` | 61 | 0 | 1 | 0 | 仅层内 |
 | `neurova/cognitive_layers/memory_layer/channels/builtin/voice.py` | 66 | 0 | 1 | 1 | 仅层内 |
 | `neurova/cognitive_layers/memory_layer/channels/registry.py` | 91 | 0 | 2 | 2 | 仅层内 |
-| `neurova/cognitive_layers/memory_layer/cognitive_storage_engine.py` | 532 | 2 | 4 | 23 | 在役 |
+| `neurova/cognitive_layers/memory_layer/cognitive_storage_engine.py` | 532 | 2 | 4 | 24 | 在役 |
 | `neurova/cognitive_layers/memory_layer/compression.py` | 1039 | 1 | 1 | 2 | 在役 |
 | `neurova/cognitive_layers/memory_layer/conflict.py` | 352 | 1 | 1 | 6 | 在役 |
 | `neurova/cognitive_layers/memory_layer/conversation_buffer.py` | 434 | 2 | 2 | 13 | 在役 |
@@ -92,7 +92,7 @@
 | `neurova/cognitive_layers/memory_layer/forgetting_recovery_storage_mixin.py` | 347 | 0 | 0 | 0 | 零读者 |
 | `neurova/cognitive_layers/memory_layer/graph_traversal.py` | 587 | 1 | 2 | 6 | 在役 |
 | `neurova/cognitive_layers/memory_layer/isolation.py` | 204 | 0 | 3 | 7 | 仅层内 |
-| `neurova/cognitive_layers/memory_layer/manager.py` | 5176 | 14 | 0 | 104 | 在役 |
+| `neurova/cognitive_layers/memory_layer/manager.py` | 5185 | 14 | 0 | 105 | 在役 |
 | `neurova/cognitive_layers/memory_layer/memory_exporter.py` | 271 | 1 | 0 | 1 | 在役 |
 | `neurova/cognitive_layers/memory_layer/meta_cognition.py` | 633 | 1 | 0 | 2 | 在役 |
 | `neurova/cognitive_layers/memory_layer/models.py` | 522 | 6 | 10 | 39 | 在役 |
@@ -120,7 +120,7 @@
 | `neurova/cognitive_layers/memory_layer/neuHebb_manager.py` | 242 | 1 | 0 | 3 | 在役 |
 | `neurova/cognitive_layers/memory_layer/neurova_hebb.py` | 228 | 1 | 3 | 6 | 在役 |
 | `neurova/cognitive_layers/memory_layer/neurova_recall.py` | 2049 | 2 | 1 | 16 | 在役 |
-| `neurova/cognitive_layers/memory_layer/pattern_crystallizer.py` | 681 | 3 | 1 | 16 | 在役 |
+| `neurova/cognitive_layers/memory_layer/pattern_crystallizer.py` | 684 | 3 | 1 | 16 | 在役 |
 | `neurova/cognitive_layers/memory_layer/persist_landing.py` | 28 | 1 | 1 | 5 | 在役 |
 | `neurova/cognitive_layers/memory_layer/pollution_purge.py` | 355 | 0 | 0 | 2 | 仅测试 |
 | `neurova/cognitive_layers/memory_layer/positional_encoding.py` | 291 | 0 | 1 | 3 | 仅层内 |

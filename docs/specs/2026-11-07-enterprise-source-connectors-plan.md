@@ -170,7 +170,7 @@ grep 复算（2026-11-07 现场）：`ingestBatch` / `ingestIfEnabled` 的调用
      若指腾讯小微独立产品，`chat.vendor` 字段留扩展位，接入面不变。
 3. **行级源时间（`source_modified_at`）落 facts 源钟**。
    - **（2026-11-07 更新：本项已随 K-09 源钟批落定，不再是待拍板项。）** facts 源钟已按
-     台账 §6-570 三裁定落格（v36 迁移：`knowledge_facts.source_created_at/source_modified_at`；
+     台账 §6-584 三裁定落格（v36 迁移：`knowledge_facts.source_created_at/source_modified_at`；
      `conflict_judge.most_recent` 改读 `COALESCE(source_modified_at, recorded_at)`），
      且 B14 映射 DSL 已同批补 `sourceCreatedAt/sourceModifiedAt` 两个描述符键（同
      `validFrom` 模式）＋`registry` 透传。本方案三批的连接器只需在描述符里声明源时间列，

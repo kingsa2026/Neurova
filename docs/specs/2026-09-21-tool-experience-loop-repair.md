@@ -159,7 +159,7 @@ live-verify（真 Agent + 真 ToolExecutor + 真 SkillService）：端点经咽�
 - **身份显式化**：`MuscleMemory.__init__` 原用 `**kwargs` 静默吞掉 `agent_id`
   （实测 `hasattr(m, "_agent_id") == False`）⇒ 收口为显式参数并落成可读属性
   `memory.agent_id`，未知 kwarg 直接 `TypeError`，不再静默吞。
-- **现网脏条目作废重攒**：`agent_workspaces/kai/.../muscle_l2.json` 的 2 条 `_raw`
+- **现网脏条目作废重攒**：agent `kai` 记忆目录下的 `muscle_l2.json` 里 2 条 `_raw`
   条目已归档重攒。**归档落点同时修正**：原实现把副本写在源文件旁边，而
   `agent_workspaces/` 被 `.gitignore` 整目录忽略——一次 `git clean -xfd` 或换机器，
   "可回退"就没了。现落 `docs/05-reports/muscle-memory-ledger/`（仓内、随提交入库）。

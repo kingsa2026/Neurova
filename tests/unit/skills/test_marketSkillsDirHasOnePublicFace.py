@@ -14,7 +14,7 @@ import pytest
 
 from neurova.skills.market_importer import MarketImporter
 from neurova.skills.market_registry import _default_market_skills_dir, _marketSourceDir
-from tests.ast_scan import parseSource
+from tests import ast_scan
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 #: 扫描根提到模块级（`test_scanCriterionMustProveItsOwnSurfaceRatchet` 只认模块级常量解根）
@@ -28,15 +28,19 @@ ALLOWED_OWNERS = {
 
 
 def _attrReadSites():
-    """现算全仓 `X._skills_dir` 属性读的文件→次数表（AST，不按字面子串猜）。"""
-    hits = {}
-    for path in sorted(NEUROVA_ROOT.rglob("*.py")):
-        rel = path.relative_to(REPO_ROOT).as_posix()
-        tree = parseSource(path.read_text(encoding="utf-8", errors="replace"), rel)
-        count = sum(1 for n in ast.walk(tree)
-                    if isinstance(n, ast.Attribute) and n.attr == "_skills_dir")
-        if count:
-            hits[rel] = count
+    """现算全仓 `X._skills_dir` 属性读的文件→次数表（AST，不按字面子串猜）。
+
+    枚举与解析都走共享预算（`tests/ast_scan` 的 `nodeScan`）：判据谓词是
+    `<属性>.attr == "_skills_dir"`，连这串字都没出现的文件不可能命中，故 `hints`
+    是**充分条件**而不是放宽——它把解析量从「代码总量」降到「命中面」。
+    私有 `rglob + parseSource` 会把代码总量编码成墙钟上界
+    （`tests/unit/test_ci_ast_scan_budget_guard.py` 的根因）。
+    """
+    hits: dict = {}
+    for path, node in ast_scan.nodeScan(NEUROVA_ROOT, ".py", hints=("_skills_dir",)):
+        if isinstance(node, ast.Attribute) and node.attr == "_skills_dir":
+            rel = path.relative_to(REPO_ROOT).as_posix()
+            hits[rel] = hits.get(rel, 0) + 1
     return hits
 
 
@@ -73,7 +77,7 @@ def test_取不到来源时如实抛出而不是交出借路目录(monkeypatch):
 
 
 def test_私有字段只剩定义方自己读():
-    scanned = len(list(NEUROVA_ROOT.rglob("*.py")))
+    scanned = len(ast_scan.filesUnder(NEUROVA_ROOT, ".py"))
     assert scanned > 500, "扫描面现算 %d 档——面缩了，零 offender 就是假绿" % scanned
     hits = _attrReadSites()
     strangers = {rel: n for rel, n in hits.items() if rel not in ALLOWED_OWNERS}

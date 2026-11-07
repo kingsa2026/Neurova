@@ -59,6 +59,34 @@ _KNOWN_FLOORS = {
         "CVE-2026-116689 / GHSA-mrwp-f3q8-3g9p",
         "跨 realm 的 sensitiveHeaders 被当成非法值丢弃，自定义凭证头随跨域重定向外泄",
     ),
+    # vue-i18n 与它自己的三个子包同一条公告面（escapeParameter 未转义具名值 /
+    # 未拦住 srcdoc 注入）。修复点落在 11.4.14 起的 11.x 线上——**10.x 整个分支
+    # 已 EOL**，上游 `legacy10` tag 停在 10.0.8，没有任何 10.x 修复版可落。
+    # 故这条不是"抬个补丁位"，而是**跨大版本线**：11.x 的 `engines.node` 要 >= 22，
+    # 与之配套的四份声明（CI `node-version`、compose 前端镜像、`.ide/Dockerfile`
+    # 的 NodeSource 源、`.cnb.yml` 的 frontend 镜像）同批抬到 22，
+    # 否则 `npm ci` 会在 engine 校验上先红。
+    "vue-i18n": (
+        "11.4.14",
+        "GHSA-8rc2-428q-7ww3 / GHSA-83rm-6c8r-g728",
+        "escapeParameter 未转义具名值 / 未拦住 srcdoc 注入 ⇒ 翻译消息可注入标记；"
+        "10.x 分支已 EOL，修复只在 11.4.14+ ",
+    ),
+    "@intlify/core-base": (
+        "11.4.14",
+        "GHSA-8rc2-428q-7ww3 / GHSA-83rm-6c8r-g728",
+        "同上（vue-i18n 的编译核心，公告面与主包同一份）",
+    ),
+    "@intlify/shared": (
+        "11.4.14",
+        "GHSA-83rm-6c8r-g728",
+        "同上（srcdoc 注入那条公告直接落在 shared）",
+    ),
+    "@intlify/message-compiler": (
+        "11.4.14",
+        "GHSA-8rc2-428q-7ww3",
+        "同上（具名值转义那条公告落在编译器）",
+    ),
 }
 
 #: 必须在 `overrides` 里被顶替的包（父包声明区间顶不到修复版，靠 install 抬不动）。
@@ -197,6 +225,30 @@ def rangeAdmitsVersion(spec: str, version: str) -> bool:
     return False
 
 
+def rangeReachesFloor(spec: str, floor: str) -> bool:
+    """引入声明能否把**不低于下界**的版本带进树里。
+
+    与 `rangeAdmitsVersion` 的分工：后者答"这个区间容不容得下**这一个**版本"，
+    用于复算"重解析能不能落到修复版"；本函数答"按这条声明，树里的版本会不会
+    低于下界"——**精确 pin 要单独判**：`11.4.18` 这个写法不容得下 `11.4.14`
+    （`rangeAdmitsVersion` 为假），但它把树钉在 11.4.18，而 11.4.18 ≥ 下界，
+    要求已经满足。把两者混成一个式子会把「上游自己把子包钉在修复版之后」判红，
+    那是假阳性，会训练人忽略这道门禁。
+    """
+    spec = (spec or "").strip()
+    if not spec:
+        return True
+    if spec[:1].isdigit():
+        return releaseTuple(spec) >= releaseTuple(floor)
+    body = spec.lstrip("^~=").lstrip(">=").strip()
+    base = body.split(" ")[0]
+    if base[:1].isdigit() and releaseTuple(base) >= releaseTuple(floor):
+        # 声明的**下界本身**已在修复版之上（如 `^11.4.18` 对下界 11.4.14）：
+        # 无论解析到区间里哪一个版本都满足要求，无需重解析、也无需顶替。
+        return True
+    return rangeAdmitsVersion(spec, floor)
+
+
 class TestFloorsAreReachableFromDeclaredRanges:
     """没写 `overrides` 的登记项，必须真的能被引入区间解析到修复版。
 
@@ -217,7 +269,7 @@ class TestFloorsAreReachableFromDeclaredRanges:
                 continue
             bad = {
                 who: spec for who, spec in ranges.items()
-                if not rangeAdmitsVersion(spec, floor)
+                if not rangeReachesFloor(spec, floor)
             }
             if bad:
                 problems.append(
@@ -249,3 +301,26 @@ class TestFloorsAreReachableFromDeclaredRanges:
     def test_rangeMatcherIsNotVacuous(self, spec, version, expected):
         """反空转：认不出的写法必须判「容不下」，否则上面那条恒绿。"""
         assert rangeAdmitsVersion(spec, version) is expected
+
+    @pytest.mark.parametrize(
+        "spec, floor, expected",
+        [
+            # 精确 pin 到修复版之后：不容得下**下界那个版本**，但树里的版本已达标。
+            ("11.4.18", "11.4.14", True),
+            # 精确 pin 在修复版之前：这是真的顶不到，必须判红。
+            ("11.4.10", "11.4.14", False),
+            # 声明的下界本身已在修复版之上：区间里任何版本都达标。
+            ("^11.4.18", "11.4.14", True),
+            # 声明的下界低于修复版但区间容得下它：重解析可落位。
+            ("^11.4.0", "11.4.14", True),
+            # 主版本卡在修复版之前（本单的真实形态：原声明 `^10.0.7` 顶不到 11.x）：
+            # 重解析落不到位，只能跨大版本线改声明。
+            ("^10.0.7", "11.4.14", False),
+        ],
+    )
+    def test_floorReachabilityHandlesExactPins(self, spec, floor, expected):
+        """`rangeReachesFloor` 必须把精确 pin 与区间分开判（本单的假阳性来源）。"""
+        assert rangeReachesFloor(spec, floor) is expected, (
+            f"引入声明 {spec!r} 对修复下界 {floor} 的判定错了——"
+            "精确 pin 与区间混用一个式子会把「上游已钉在修复版之后」判红"
+        )

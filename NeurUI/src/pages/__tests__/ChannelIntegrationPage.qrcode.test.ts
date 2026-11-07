@@ -54,7 +54,7 @@ const messages = {
   ui: { chXiaoyi: '小艺', chFeishu: '飞书', chDingtalk: '钉钉', chWechat: '微信', chWecom: '企业微信' },
   nav: {
     showToolMessages: '工具', showThinking: '思考', streamMode: '流式', privateChatStrategy: '私聊',
-    groupChatStrategy: '群聊', requireMention: '@', region: '区域', feishuChina: '飞书',
+    groupChatStrategy: '群聊', requireMention: "需要 {'@'}提及", region: '区域', feishuChina: '飞书',
     larkInternational: 'Lark', groupShareSession: '共享会话', tokenFile: 'Token 文件',
     messageMerge: '合并', dingtalkAppKey: 'key', dingtalkAppSecret: 'sec',
   },

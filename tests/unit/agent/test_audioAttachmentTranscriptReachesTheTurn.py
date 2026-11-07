@@ -31,6 +31,7 @@ from types import SimpleNamespace
 
 from neurova.agent.chat_pipeline import ChatPipeline
 from neurova.voice_context_module import VOICE_CONTEXT_KEY
+from tests.ast_scan import parseSource
 
 
 def _audioAttachment() -> list:
@@ -118,7 +119,7 @@ def test_audioIsNotReadThroughTextExtractor(monkeypatch):
 def test_transcriptWriterUsesTheSingleKeyNotALiteral():
     """写侧必须引 `VOICE_CONTEXT_KEY` 常量，不重拼字面量（重拼就是第三份词汇）。"""
     source = pathlib.Path("neurova/agent/chat_pipeline.py").read_text(encoding="utf-8")
-    tree = ast.parse(source)
+    tree = parseSource(source)
     literals: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):

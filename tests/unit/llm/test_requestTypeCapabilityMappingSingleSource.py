@@ -28,6 +28,7 @@ from neurova.llm.llm_router import (
     ModelCapability,
     RequestType,
 )
+from tests.ast_scan import parseSource
 
 ROUTER_SRC = pathlib.Path("neurova/llm/llm_router.py")
 
@@ -47,7 +48,7 @@ def _assignedNames(node) -> list:
 
 def test_capabilityMappingIsDefinedOnceAndActuallyRead():
     """映射只留一处定义，且被 `_matches_request_type` 读——补齐"只写不读"的断点。"""
-    tree = ast.parse(ROUTER_SRC.read_text(encoding="utf-8"))
+    tree = parseSource(ROUTER_SRC.read_text(encoding="utf-8"), str(ROUTER_SRC))
 
     inlineDicts = [
         node for node in ast.walk(tree) if "capability_requirements" in _assignedNames(node)
@@ -97,7 +98,8 @@ def test_textBasedRequestTypeGuesserRetiredEverywhere():
 
 def test_mediaTurnRoutingCapabilityComesFromPayloadNotFromText():
     """反向守卫（今天就该绿）：媒体轮换模型的依据是本轮真塞进去的载荷，不是猜文本。"""
-    tree = ast.parse(pathlib.Path("neurova/agent/chat_pipeline.py").read_text(encoding="utf-8"))
+    tree = parseSource(pathlib.Path("neurova/agent/chat_pipeline.py").read_text(encoding="utf-8"),
+                       "neurova/agent/chat_pipeline.py")
     body = next(
         f for f in ast.walk(tree)
         if isinstance(f, ast.FunctionDef) and f.name == "_maybe_activate_vision_routing"

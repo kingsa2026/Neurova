@@ -9,7 +9,7 @@ HighRiskOrder 实例、"order"能命中 Order、"状态"能命中 has_status。
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 MAX_EXPANSION_TERMS = 8
 

@@ -281,8 +281,8 @@ def test_聚合器模块的裸读同样失明():
 def test_聚合器判据按挂载调用现算():
     """第 5 格：反向控制——聚合形必点名、真叶子不误报，且集合本身有读数。"""
     aggregators = _aggregatorModules()
-    leaves = [m for m in (_dottedModuleName(p)
-                          for p in (REPO_ROOT / "neurova" / "api" / "endpoints").glob("*.py"))
+    leaves = [m for m in (_dottedModuleName(ref.path)
+                          for ref in ast_scan.sourceRefsUnder(ENDPOINTS_ROOT, ".py"))
               if m not in aggregators]
     assert aggregators and leaves, (
         f"聚合器 {len(aggregators)} 个／叶子 {len(leaves)} 个——一侧为空说明现算失效，"
