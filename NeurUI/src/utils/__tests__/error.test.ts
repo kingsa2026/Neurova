@@ -9,7 +9,7 @@
  * 5. withErrorBoundary(fn) 包装函数，捕获异常并处理
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { AppError, handleError, withErrorBoundary } from '../error'
+import { AppError, extractApiDetail, handleError, withErrorBoundary } from '../error'
 import logger from '../logger'
 import bus from '@/bus'
 
@@ -196,5 +196,30 @@ describe('withErrorBoundary - 函数包装', () => {
     }
     const logs = logger.getLogs()
     expect(logs.length).toBeGreaterThan(0)
+  })
+})
+
+describe('extractApiDetail - 后端 detail 原话抽取（§6-566 收口批）', () => {
+  it('字符串 detail 原样返回并去首尾空白', () => {
+    const err = { response: { data: { detail: '  未找到主机凭据: web-01  ' } } }
+    expect(extractApiDetail(err)).toBe('未找到主机凭据: web-01')
+  })
+
+  it('对象 detail 取 message 分量', () => {
+    const err = {
+      response: {
+        data: { detail: { message: '术语被引用，先清引用再删', impact: { fact_count: 3 } } },
+      },
+    }
+    expect(extractApiDetail(err)).toBe('术语被引用，先清引用再删')
+  })
+
+  it('数组形 422 与缺失与网络错误一律空串（兜底决定权留给调用方）', () => {
+    const validation = { response: { data: { detail: [{ msg: 'Field required' }] } } }
+    const missing = { response: { data: {} } }
+    expect(extractApiDetail(validation)).toBe('')
+    expect(extractApiDetail(missing)).toBe('')
+    expect(extractApiDetail(new Error('网络断开'))).toBe('')
+    expect(extractApiDetail(null)).toBe('')
   })
 })
