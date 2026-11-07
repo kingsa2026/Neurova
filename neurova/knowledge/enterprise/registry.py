@@ -40,20 +40,43 @@ def buildAdapter(descriptor: Dict[str, Any], sourceId: str,
     """
     sourceType = str(descriptor.get("sourceType") or "")
     if sourceType == "file":
-        field, _closed = VARIANT_CLOSED_SETS["file"]
-        if not str(descriptor.get(field) or ""):
-            raise MappingError("file 源缺 %s（csv/tsv/json/jsonl）" % field)
-        from .connectors_file import FileRowAdapter
-
-        return FileRowAdapter(descriptor, sourceId, tenantId)
-    if sourceType in ("sql", "erp_api", "http_pull", "chat"):
-        field, closed = VARIANT_CLOSED_SETS.get(
-            sourceType, ("variant", ()))
-        raise MappingError(
-            "%s 连接器尚未接线：本批只落 file（缺 %s 分派或等后续批次）" % (sourceType, field))
+        return _requireVariant(descriptor, sourceId, tenantId, "file",
+                               "FileRowAdapter", "connectors_file")
+    if sourceType == "sql":
+        return _requireVariant(descriptor, sourceId, tenantId, "sql",
+                               "SqlDirectAdapter", "connectors_sql")
+    if sourceType == "erp_api":
+        return _requireVariant(descriptor, sourceId, tenantId, "erp_api",
+                               "ErpRestAdapter", "connectors_erp")
+    if sourceType == "chat":
+        return _requireVariant(descriptor, sourceId, tenantId, "chat",
+                               "ChatChannelAdapter", "connectors_chat")
+    if sourceType == "http_pull":
+        raise MappingError("http_pull 连接器属批 C3（立项方案 §3），本批未接线")
     if sourceType == "event_stream":
         raise MappingError("event_stream 连接器缓办（立项方案 §2.2 候选 6 原判有效）")
     raise MappingError("sourceType %r 不在白名单" % sourceType)
+
+
+def _requireVariant(descriptor: Dict[str, Any], sourceId: str, tenantId: str,
+                    sourceType: str, adapterName: str,
+                    moduleName: str) -> EnterpriseSourceAdapter:
+    """变体强制＋适配器类惰性分派的共用半边。
+
+    适配器类名一律惰性 import（可选驱动 fail-soft 纪律——SQL 驱动缺失
+    不挡工厂构造，health 时点名；本批只落 file，其余三族由各自批次落模块）。
+    """
+    if sourceType not in VARIANT_CLOSED_SETS:
+        raise MappingError("sourceType %r 未声明变体闭集" % sourceType)
+    field, _closed = VARIANT_CLOSED_SETS[sourceType]
+    if not str(descriptor.get(field) or ""):
+        raise MappingError("%s 源缺 %s（闭集：%s）"
+                           % (sourceType, field, " / ".join(_closed)))
+    import importlib
+
+    module = importlib.import_module("neurova.knowledge.enterprise.%s" % moduleName)
+    adapterClass = getattr(module, adapterName)
+    return adapterClass(descriptor, sourceId, tenantId)
 
 
 class EnterpriseSourceRegistry:
