@@ -1548,3 +1548,5 @@ tests/unit/api/test_mobileDeviceRegistryPersistence.py
 tests/unit/api/test_mobilePairingStateClosure.py
 tests/unit/api/test_mobilePairingAdvertisedBaseUrlSingleSource.py
 tests/unit/tunnel/test_tunnelAdmissionAndChannelState.py
+# 企微会话存档凭据面（批 C7a 甲案）：配置只收三枚指针、明文进配置在写入口 400 且盘上零改动、就绪读数逐档具名（缺库/文件不在/不可加载/Secret 未设/私钥位数与权限位），凭据齐备仍不冒充读取面已实现
+tests/unit/channels/test_wecomArchiveReadiness.py

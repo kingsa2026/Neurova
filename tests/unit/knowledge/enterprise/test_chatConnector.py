@@ -273,3 +273,66 @@ class TestHealth:
             _descriptor(tmp_path / "missing.db"), "ghost", "default")
         health = _run(adapter.health())
         assert health.status == "error"
+
+
+class TestArchiveReadinessComesFromChannelLayer:
+    """批 C7a（方案 §6.1/§11 第二行）：历史缺口读数改接通道层单点。
+
+    企业源适配器仍零凭据——它只向通道层要一个 reason，自己不探测原生库、不碰私钥路径。
+    夹具＝真 ChannelConfig＋真 WeComAdapter 注册进渠道管理器（生产装配点），用完摘除。
+    """
+
+    @staticmethod
+    def _installWecom(extra):
+        from neurova.channels.base import ChannelConfig
+        from neurova.channels.manager import get_channel_manager
+        from neurova.channels.wecom import WeComAdapter
+
+        manager = get_channel_manager()
+        manager.register_adapter(WeComAdapter(ChannelConfig(
+            channel_type="wecom", enabled=True, app_id="ww_unit_corp",
+            app_secret="unit-app-secret", extra=dict(extra),
+        )), agent_id="default")
+        return manager
+
+    def test_healthReasonCarriesChannelLayerReadingVerbatim(self, tmp_path):
+        db = _seed(tmp_path, [_msg()])
+        ghost = tmp_path / "absent-archive-sdk.so"
+        manager = self._installWecom({"corpid": "ww_unit_corp",
+                                      "archiveSdkPath": str(ghost)})
+        try:
+            adapter = ChatChannelAdapter(_descriptor(db), "wecom_chat", "default")
+            health = _run(adapter.health())
+            assert str(ghost) in health.reason, (
+                "历史缺口文案必须来自通道层同一读数——适配器自己不知道渠道配置里的库路径，"
+                "reason 里出现它才证明真改接了单点；实得 %r" % health.reason)
+            assert health.status == "error", "原生库路径在场但文件不存在＝配置错，须如实 error"
+        finally:
+            manager.unregister_adapter("wecom", agent_id="default")
+
+    def test_unconfiguredArchiveStillDegradesAndNamesCaptureFace(self, tmp_path):
+        db = _seed(tmp_path, [_msg()])
+        manager = self._installWecom({"corpid": "ww_unit_corp"})
+        try:
+            adapter = ChatChannelAdapter(_descriptor(db), "wecom_chat", "default")
+            health = _run(adapter.health())
+            assert health.status == "degraded"
+            assert "会话存档" in health.reason
+            assert "既有捕获面" in health.reason
+            assert "archiveSdkPath" in health.reason, "缺哪一项须点名去哪配，不笼统说「未接入」"
+        finally:
+            manager.unregister_adapter("wecom", agent_id="default")
+
+    def test_wechatVendorNeverConsultsWecomArchiveFace(self, tmp_path):
+        db = _seed(tmp_path, [_msg(channel_type="wechat")], name="wechat.db")
+        manager = self._installWecom({"corpid": "ww_unit_corp",
+                                      "archiveSdkPath": str(tmp_path / "absent.so")})
+        try:
+            adapter = ChatChannelAdapter(
+                _descriptor(db, vendor="wechat"), "wechat_chat", "default")
+            health = _run(adapter.health())
+            assert health.status == "degraded", "微信侧不受企微存档配置错牵连"
+            assert "历史" in health.reason
+            assert "archiveSdkPath" not in health.reason
+        finally:
+            manager.unregister_adapter("wecom", agent_id="default")

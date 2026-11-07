@@ -4292,3 +4292,5 @@ tests/unit/agent/test_audioAttachmentTranscriptReachesTheTurn.py
 tests/unit/llm/test_requestTypeCapabilityMappingSingleSource.py
 # 渠道入站媒体落地成附件：属主已知处登记、纯媒体轮不再被丢弃、语音刻意不合流、落点规则只一份
 tests/unit/channels/test_channelMediaLandsAsAttachments.py
+# 企微会话存档凭据面（批 C7a 甲案）：配置只收三枚指针、明文进配置在写入口 400 且盘上零改动、就绪读数逐档具名（缺库/文件不在/不可加载/Secret 未设/私钥位数与权限位），凭据齐备仍不冒充读取面已实现
+tests/unit/channels/test_wecomArchiveReadiness.py

@@ -12,8 +12,9 @@
 - 附件（图片/文档）：本批只把 media_ref 如实放进行里，并在 describeSchema/health
   点名附件能力；**不主动调用** ingest_bridge 媒体下载/解析/OCR 管线——触发面归属
   C6 报告裁定项（ingest_bridge 是既有「消息→条目」桥，复用它不算第二写路径）；
-- 历史消息拉取：企微官方通道是「会话存档」原生 SDK（腾讯 C 库，第三方二进制）——
-  本批未接入，health() 显式 degraded 点名「会话存档 SDK 未接入，仅既有捕获面可达」，
+- 历史消息拉取：官方只分发会话存档 C 动态库（无 Python 包），读取面属批 C7b 未实现；
+  health() 的历史缺口读数改向通道层存档凭据面单点（channels/wecom_archive.py）取，
+  本适配器仍零凭据：凭据齐备也只报 degraded（读取面未实现），配置自身错则如实 error，
   不静默冒充全量；微信侧无官方历史通道，同以 degraded 如实点名；
 - 游标按捕获面自增 id 推进（单调、无时钟回拨面），token 风格沿用 connectors_file
   （key=value 以冒号连接）；捕获面是 append-only 表，无 connectors_file 的指纹重置面；
@@ -35,10 +36,6 @@ from .schema_mapping import VARIANT_CLOSED_SETS, MappingError
 ROW_COLUMNS: Tuple[str, ...] = ("msg_id", "chat_id", "chat_type", "sender", "sent_at", "text")
 #: 附件透传列：可空；描述符可把它声明进 columns 供 qualifier/源钟之外的消费用
 MEDIA_REF_COLUMN = "media_ref"
-
-#: 会话存档适配槽探测名：腾讯官方 C 库的 Python 包装（第三方二进制，
-#: 未入依赖清单——惰性 import 探测，未装即 degraded，不崩进程）
-_WECOM_ARCHIVE_SDK_MODULE = "WeWorkFinanceSdk"
 
 #: 只读连接超时（秒）：捕获面 WAL 库，读不应久等
 _RO_TIMEOUT_SECONDS = 5.0
@@ -103,9 +100,13 @@ class ChatChannelAdapter:
         except sqlite3.Error as exc:
             return SourceHealth(status="error",
                                 reason="既有通道捕获面不可读: %s" % exc)
-        # 捕获面可达即如实 degraded（历史拉取缺口具名）＋附件能力点名，不冒充全量
-        reason = "%s；附件能力：media_ref 列透传图片/文档引用，复用既有媒体管线" \
-                 "（mediaIngress/ingest_bridge），本批不主动触发" % self._historyGapReason()
+        # 捕获面可达即如实 degraded（历史拉取缺口具名）＋附件能力点名，不冒充全量；
+        # 存档凭据面自身配置错（库文件不在/私钥不合口径）则如实 error，不掩盖成 degraded
+        reading = self._archiveReading()
+        if reading.status == "error":
+            return SourceHealth(status="error", reason=reading.reason)
+        reason = "%s，仅既有捕获面可达；附件能力：media_ref 列透传图片/文档引用，" \
+                 "复用既有媒体管线（mediaIngress/ingest_bridge），本批不主动触发" % reading.reason
         return SourceHealth(status="degraded", reason=reason)
 
     async def close(self) -> None:
@@ -204,21 +205,18 @@ class ChatChannelAdapter:
 
     # ── 历史拉取缺口（如实点名，不冒充全量）─────────────────
 
-    def _historyGapReason(self) -> str:
-        if self._vendor == "wechat":
-            return "微信侧无官方历史消息拉取通道（会话存档仅企微提供），仅既有捕获面可达"
-        sdkInstalled = False
-        try:
-            import importlib
+    def _archiveReading(self) -> Any:
+        """历史缺口读数＝通道层存档凭据面的同一份判断（批 C7a，方案 §6.1/§16-1）。
 
-            importlib.import_module(_WECOM_ARCHIVE_SDK_MODULE)
-            sdkInstalled = True
-        except ImportError:
-            sdkInstalled = False
-        if not sdkInstalled:
-            return "会话存档 SDK 未接入，仅既有捕获面可达"
-        chatArchive = self._descriptor.get("chatArchive")
-        if not isinstance(chatArchive, dict) or not chatArchive:
-            return "会话存档 SDK 已装但凭据未配置（描述符 chatArchive 段），" \
-                   "仅既有捕获面可达"
-        return "会话存档读取面未实现，仅既有捕获面可达"
+        本适配器仍零凭据：只向通道层要一个 status＋reason，自己不探测原生库、
+        不碰私钥路径与 Secret。旧实现那份 `importlib` 模块名探测已退役——官方只分发
+        C 动态库、无官方 Python 包，那个探测名不对应任何可安装件（恒 ImportError＝假判据）。
+        """
+        from neurova.channels.wecom_archive import ArchiveReadiness, wecomArchiveReadiness
+
+        if self._vendor == "wechat":
+            return ArchiveReadiness(
+                status="degraded",
+                reason="微信侧无官方历史消息拉取通道（会话存档仅企微提供）")
+        return wecomArchiveReadiness(
+            agentId=str(self._descriptor.get("agentId") or "default"))
