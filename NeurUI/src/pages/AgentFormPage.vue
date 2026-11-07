@@ -48,11 +48,13 @@
             </a-col>
             <a-col :span="12">
               <a-form-item :label="t('agent.group')">
-                <a-select
+                <a-tree-select
                   v-model:value="formState.group_id"
-                  :options="deptGroupOptions"
+                  :tree-data="agentGroupTree"
                   :placeholder="t('agent.groupDefaultHint')"
                   allow-clear
+                  tree-default-expand-all
+                  style="width: 100%"
                 />
               </a-form-item>
             </a-col>
@@ -185,7 +187,8 @@ import GlassButton from '@/components/GlassButton.vue'
 import { useAgentStore } from '@/stores/agents'
 import { listProviders } from '@/api/modules/providers'
 import { listModels } from '@/api/modules/models'
-import { listGroups } from '@/api/modules/groups'
+import { listGroups, type Group } from '@/api/modules/groups'
+import { buildDeptTreeData } from '@/utils/deptTree'
 import { normalizeModel } from '@/types/model'
 
 const { t } = useI18n()
@@ -275,13 +278,12 @@ const formState = ref({
   ttsPitch: 1.0,
 })
 
-// ── 部门分组（specs/2026-11-07 批 D/F2）：所属分组选择器 ──────────
-const deptGroups = ref<{ group_id: string; name: string }[]>([])
-const deptGroupOptions = computed(() => deptGroups.value.map((g) => ({ label: g.name, value: g.group_id })))
+// ── 部门分组（specs/2026-11-07 批 D/F2）：所属分组树选 ──────────
+const deptGroups = ref<Group[]>([])
+const agentGroupTree = computed(() => buildDeptTreeData(deptGroups.value))
 const fetchDeptGroups = async () => {
   try {
-    const res: any = await listGroups()
-    deptGroups.value = (res ?? []).filter((g: any) => !g.is_system)
+    deptGroups.value = (await listGroups()) ?? []
   } catch {
     deptGroups.value = []
   }

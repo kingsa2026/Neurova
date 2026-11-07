@@ -13,6 +13,19 @@
       <div class="admin-gate">{{ t('common.adminOnlyHint') }}</div>
     </template>
     <template v-else>
+    <!-- 部门层级树（specs/2026-11-07 §3：parent_group_id 驱动；点选节点过滤卡片到该子树） -->
+    <GlassCard v-if="groups.length" style="margin-bottom: 16px">
+      <div class="tree-toolbar">
+        <span class="tree-title">{{ t('system.groups') }}</span>
+        <GlassButton v-if="treeSelected" variant="ghost" size="sm" @click="clearTreeFilter">{{ t('common.all') }}</GlassButton>
+      </div>
+      <a-tree
+        :tree-data="groupTreeData"
+        :selected-keys="treeSelected ? [treeSelected] : []"
+        default-expand-all
+        @select="onTreeSelect"
+      />
+    </GlassCard>
     <!-- Group list -->
     <a-spin :spinning="loading">
       <div class="groups-grid">
@@ -48,7 +61,7 @@
           </template>
         </GlassCard>
       </div>
-      <a-pagination v-if="groups.length > pageSize" v-model:current="currentPage" :pageSize="pageSize" :total="groups.length" size="small" style="margin-top: 16px; text-align: center" />
+      <a-pagination v-if="visibleGroups.length > pageSize" v-model:current="currentPage" :pageSize="pageSize" :total="visibleGroups.length" size="small" style="margin-top: 16px; text-align: center" />
       <a-empty v-if="!groups.length && !loading" :description="t('common.noData')" />
     </a-spin>
 
@@ -63,11 +76,13 @@
         </a-form-item>
         <a-form-item :label="t('system.parentGroup')">
           <p class="modules-hint">{{ t('system.parentGroupHint') }}</p>
-          <a-select
+          <a-tree-select
             v-model:value="groupForm.parent_group_id"
-            :options="parentOptions"
+            :tree-data="parentTreeData"
             allow-clear
+            tree-default-expand-all
             :placeholder="t('system.parentGroupNone')"
+            style="width: 100%"
           />
         </a-form-item>
         <a-form-item :label="t('system.allowedCategories')">
@@ -160,6 +175,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { listGroups, updateGroup, createGroup, deleteGroup as deleteGroupApi, listGroupMembers, addGroupMember, removeGroupMember, type Group } from '@/api/modules/groups'
+import { buildDeptTreeData } from '@/utils/deptTree'
 import { listKnowledgeCategories, type KnowledgeCategory } from '@/api/modules/knowledge'
 import { listUsers } from '@/api/modules/enhanced-users'
 import { MODULE_SECTIONS, ALL_MODULE_KEYS } from '@/config/modules'
@@ -201,12 +217,44 @@ const categoryName = (id: string) => categoryLabelMap.value[id] || id
 const formatCategories = (ids: string[]) => ids.map(categoryName).join('、')
 const groupNameById = (id: string) => groups.value.find(g => g.group_id === id)?.name || id
 
-/** 父组候选：自定义组（部门组），编辑时排除自己（禁自指；环由后端 400 兜底） */
-const parentOptions = computed(() =>
-  groups.value
-    .filter(g => !g.is_system && g.group_id !== editingGroup.value?.group_id)
-    .map(g => ({ label: g.name, value: g.group_id })),
+/** 父组候选：部门层级树（编辑时排除自身整棵子树，防自指/防环；环由后端 400 兜底） */
+const parentTreeData = computed(() =>
+  buildDeptTreeData(groups.value, { excludeId: editingGroup.value?.group_id }),
 )
+
+// ── 部门层级树视图（specs/2026-11-07 §3：树形展示＋子树过滤）──────────
+const treeSelected = ref<string>('')
+const groupTreeData = computed(() => buildDeptTreeData(groups.value))
+
+const onTreeSelect = (keys: (string | number)[]) => {
+  // 点击已选节点 → keys 为空 = 取消过滤
+  treeSelected.value = (keys[0] as string) || ''
+  currentPage.value = 1
+}
+const clearTreeFilter = () => {
+  treeSelected.value = ''
+}
+
+/** 选中节点的整棵子树（含自身与全部后代；孤儿父链由后端禁环兜底） */
+const subtreeIds = computed<Set<string> | null>(() => {
+  if (!treeSelected.value) return null
+  const ids = new Set<string>([treeSelected.value])
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const g of groups.value) {
+      if (g.parent_group_id && ids.has(g.parent_group_id) && !ids.has(g.group_id)) {
+        ids.add(g.group_id)
+        grew = true
+      }
+    }
+  }
+  return ids
+})
+const visibleGroups = computed(() => {
+  const ids = subtreeIds.value
+  return ids ? groups.value.filter((g) => ids.has(g.group_id)) : groups.value
+})
 
 /** 缺省分类候选：本组已勾选的白名单分类 */
 const defaultCategoryOptions = computed(() =>
@@ -249,7 +297,7 @@ const fetchUsers = async () => {
 }
 
 const pagedGroups = computed(() =>
-  groups.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value),
+  visibleGroups.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value),
 )
 
 /** 模块 key → 已翻译菜单名（卡片摘要展示用） */
@@ -442,4 +490,7 @@ onMounted(() => {
 .module-section-title :deep(.ant-checkbox + span) { font-weight: 600; color: var(--nr-text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
 .module-section-items { display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .modules-toolbar { display: flex; gap: 8px; margin-top: 8px; }
+/* 部门层级树 */
+.tree-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.tree-title { font-weight: 600; color: var(--nr-text-primary); font-size: 13px; }
 </style>
