@@ -168,6 +168,20 @@ class TestNoKnownVulnerableRuntimePackages:
     # 包名 → (修复下界, 允许的引入链, CVE, 说明)
     _KNOWN_FLOORS = {
         "yaml": ("2.8.3", ("node_modules/swagger-jsdoc",), "CVE-2026-33532", "CVE-2026-33532"),
+        # 2026-11 公告（用户通告，未附 GHSA/CVE 编号）：minimatch 10.2.6 第一阶段
+        # 预处理（firstPhasePreProcess）在 **/../ 转换里向 globParts 克隆追加条目
+        # （do...while 不动点循环内可再被处理），第二阶段成对比较 O(n²)——攻击者
+        # 可控的模式放大 ⇒ CPU/内存耗尽 DoS。修复线 11.0.1；三条引入链
+        # （@modelcontextprotocol/server-filesystem、glob、swagger-jsdoc/glob）
+        # 都声明 `^10` 顶不到，由 tools/npx-runtime/package.json 顶层 overrides
+        # 抬到 `^11.0.1`（实解 11.0.5）。
+        "minimatch": (
+            "11.0.1",
+            ("node_modules/@modelcontextprotocol/server-filesystem", "node_modules/glob",
+             "node_modules/swagger-jsdoc/node_modules/glob"),
+            "公告未附编号（ReDoS：firstPhasePreProcess 模式放大 → secondPhasePreProcess 二次方）",
+            "glob 模式预处理模式放大致二次方开销（DoS）",
+        ),
         # 2026-10 公告批：MCP TS server SDK 2.0.0（`@modelcontextprotocol/server-filesystem`
         # 的传递依赖）落在三条公告的区间内，修复版自 2.3.0 起；`ip-address` 10.7.2 的
         # Address6 区号二次复杂度 DoS（GHSA-rxp7-6hxx-x8q5）修复版自 10.7.4 起。
