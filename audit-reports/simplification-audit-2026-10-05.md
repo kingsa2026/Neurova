@@ -12348,3 +12348,53 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
       依赖审计：`osv_audit.py` → 447 + 365 包、无未允许漏洞；`pip-audit`（`--no-deps --disable-pip`，因本容器无 `python3-venv` 无法建 venv）→ `No known vulnerabilities found`。
     - **如实登记两处**：① shard 1 / shard 3 各剩 1 条 `error`，两条都在 teardown 被 `_guardRepoRootAgainstPollution` 点名新增 `.pytest_cache`——**成因是我同一时间另开了一个 shell pytest 会话**（`python -m pytest tests/unit/test_ci_parity_guard.py`），它启动即在仓库根建该目录，而 CI 是串行跑、不存在第二个会话；两者单文件重跑均 `1 passed`，且 shard 2（全程无并发）零 error。② 本轮另起了 2 条配额探针（`cnb-s7k` / `cnb-15m`）与 1 条无 runner 探针（`cnb-6nt`），均止步 Prepare，`metricCoreHours` = 0，未额外消耗额度。
     - **净 LOC**：文档 +本格，生产代码 +0、配置 +0。**下一枚空号现查：本格取 590，后继从 591 起。**
+
+591. **PR #374 第十一轮：九腿首次全部真跑到——第 2 片三格红的根因是 CI 检出没有主线 ref，修法在判据上游物化基线** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **本轮第一次拿到「门禁真跑到」的读数**（前十轮全部止步 `Prepare`）。关键发现：**配额分两个池**——普通触发的构建连 1 核（0.17 核时）都拒，而 `--npc-name CodeBuddy` 触发的构建 `Prepare` 成功、stage 真跑、`metricCoreHours` 正常记账。探针对照：`cnb-c87-1k6rqtvrg`（普通，1 核，`Prepare` error，`insufficient … 0.17 core-hours`）vs `cnb-np4-1k6rph98e`（NPC，1 核，**success**，`probe up` 真打印）。据此改用 NPC 通道把九条腿跑起来（`cnb-98o-1k6rpqmf9` 起）。
+    - **九腿逐条读数（`cnb-98o-1k6rpqmf9`）**：`static-gate` / `import-and-regression` / `e2e-backend-boot` / `frontend` / `perf-gate` / `deploy-config` / `dependency-audit` / `experience-quality` 八条 **success**；`unit-tests` 第 2 片 **1 failed, 2773 passed**，失败三格逐字同一句：
+      ```
+      test_npc_branch_cleanup.py::…::testRealRepoMergeRecordYieldsNonAutoPrefixedSourceBranch
+        RuntimeError: 读取主线合并记录失败：fatal: ambiguous argument 'origin/main':
+        unknown revision or path not in the working tree.
+      test_commitLocClaimMatchesOwnNumstat.py::…::testUnpushedCommitsClaimsAllReconcile
+        Failed: origin/main 解析不到——区间取不到基线就等于「无声明」，本格不许据此判绿
+      test_commitLocClaimMatchesOwnNumstat.py::…::testRealBodyWithOneWrongDigitIsCaught
+      ```
+    - **根因（探针 `cnb-thk-1k6rrue9d` 在同类检出里逐条取数）**：平台检出**只建被检出分支的 ref**——
+      ```
+      git branch -a                          → 只有 auto/<PR 分支>
+      git rev-parse origin/main              → fatal: Needed a single revision
+      git rev-parse refs/remotes/origin/main → fatal
+      git rev-parse main / refs/heads/main   → fatal
+      git cat-file -t 98b0fa42…              → commit            ← 对象在，ref 不在
+      git log --merges --format=%P 98b0fa42… → 非空              ← 历史在
+      ```
+      即**对象齐全、历史齐全，缺的只是那一条 ref**。GitHub 侧 `actions/checkout` 带 `fetch-depth: 0` 自带 `origin/main`，同一条判据因此在一侧绿、在另一侧红——这是**环境前提分叉**，不是契约缺陷。
+    - **修法（教义第 1 条：在判据上游物化前提，不给判据加兜底）**：`unit-tests` 新增 `materialize main baseline ref` stage，排在驱动受保护子集之前：
+      ```
+      set -e
+      git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
+      git rev-parse --verify refs/remotes/origin/main
+      ```
+      为什么必须**显式 refspec**：`git fetch origin main` 只写 `FETCH_HEAD`、不建 `origin/main`——那是「看起来取了、其实没建 ref」的最常见写法。为何不给判据加兜底：让消费方去猜「哪条 ref 能当基线」是下游补丁，第二个消费方进来还要再猜一次。
+    - **红→绿实测（同一份单分支克隆 `--single-branch`，CI 同形态）**：
+      ```
+      修前  3 failed, 28 passed
+      修后  30 passed, 1 skipped
+      ```
+      新守卫 `tests/unit/ci/test_mainBaselineRefIsMaterialized.py` 先红后绿：修前 3 failed（物化 stage 不存在 / 位置不对 / 无 `set -e`）+ 7 条反向控制绿；修后 10 passed。反向控制逐条咬住 `git fetch origin main`（无 refspec）、`--depth=1`（浅取拿不到合并记录）、取了别的分支、压根没取——四种都必须判成「未物化」。
+    - **首轮 CI 反馈后补的面自证**：新档的受治面自证格扫了整份清单却没把「这次真扫到多少条」当断言比，`test_scanCriterionMustProveItsOwnSurfaceRatchet` 当场点名（`cnb-k6f-1k6rsu6ns` 第 2 片 `1 failed, 2773 passed`）。**不改基线表**（那等于把棘轮拆回各档各判），补法两行：`scanned` 逐条累加，先 `assert scanned > 500` 验面、再谈零命中。
+    - **修后全腿 live-verify（构建 `cnb-okj-1k6rv36db`，九条腿全部 success，聚合 `status: success`）**：
+      ```
+      static-gate / import-and-regression / e2e-backend-boot / frontend /
+      perf-gate / deploy-config / dependency-audit / experience-quality  → success
+      unit-tests  materialize main baseline ref → success
+                  shard 1  3125 passed, 9 skipped, 1 xfailed   rc=0
+                  shard 2  2774 passed, 16 skipped, 2 xfailed  rc=0   ← 本单三格已转绿
+                  shard 3  2987 passed, 5 skipped              rc=0
+                  coverage gate  Total coverage: 88.18% ≥ 60     rc=0
+      unit-tests metricCoreHours 5.43（真跑满，不是 Prepare 段的 0）
+      ```
+    - **本机连带复算**：`tests/unit/ci/` 全目录 + `ci_parity_guard` → **645 passed, 4 skipped**；`ruff check neurova tests` → All checks passed；`ci_static_gate.py --skip-import` 三格全过；`deploy_config_consistency_check` ERROR 0 / WARN 1（既有 R7）；`perf_gate.py` 通过；`experience_quality_gate.py` 通过；`osv_audit.py` → 无未允许漏洞；`npm ci` 后 `npx vue-tsc --noEmit` 零错误、`npx vitest run` → 294 files / 2382 passed、`npm audit --audit-level=high` → EXIT=0。
+    - **如实登记三处**：① 本机 shard 1 首轮曾出现 1 条 teardown `error`（`_guardRepoRootAgainstPollution` 点名新增 `data`），成因是我同一时间并发跑了 `npm ci` 与 vitest；单独重跑同一片 **3125 passed, rc=0**，与本轮 CI 读数一致。② 三次探针配置曾把 YAML 块标量折叠成一行（`api_trigger` 的 `--config` 传参形态所致），当场出现 `no such option: -m` 与 `Syntax error … done` 两条**属探针污染、不属仓内缺陷**的假红；改用保留块标量的 dumper 后九腿一次全绿，故不据此改任何仓库文件。③ 推送后 PR 的自动 `pull_request` 构建（`cnb-b92` / 后续）**仍九条全红在 `Prepare`**——普通触发池配额未恢复，本单的绿读数一律出自 NPC 通道，与「额度归零」这一既有事实不矛盾。
+    - **净 LOC**：`.cnb.yml` **+23/−0**（新增一格与逐条依据注释）；测试/基建池 +225（新档）+4/+4（两份清单的登记与依据行），不计入生产池。**下一枚空号现查：本格取 591，后继从 592 起。**
