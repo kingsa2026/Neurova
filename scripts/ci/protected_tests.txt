@@ -4292,3 +4292,7 @@ tests/unit/agent/test_audioAttachmentTranscriptReachesTheTurn.py
 tests/unit/llm/test_requestTypeCapabilityMappingSingleSource.py
 # 渠道入站媒体落地成附件：属主已知处登记、纯媒体轮不再被丢弃、语音刻意不合流、落点规则只一份
 tests/unit/channels/test_channelMediaLandsAsAttachments.py
+# 受保护子集里的主线基线（origin/main）必须是 CI 物化出来的前提：平台检出只建被检出
+#   分支的 ref，靠「检出附带」就红在「解析不到」上（构建 cnb-98o-1k6rpqmf9#003 三格）。
+#   判据咬四件：物化 stage 在、排在跑子集之前、取不到就响应、受治面非空。
+tests/unit/ci/test_mainBaselineRefIsMaterialized.py
