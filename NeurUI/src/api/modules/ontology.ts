@@ -264,6 +264,16 @@ export function getEnterpriseSource(sourceId: string) {
   )
 }
 
+/** 手动触发一轮摄取（批 C1，仅管理员）：enabled=False 零读取；400 带定位拒因。 */
+export function triggerEnterpriseIngest(sourceId: string) {
+  return api.post<
+    ApiResponse<{
+      result: { admitted: number; rejected: number; batches: number; truncated: boolean; cursor: string } | { skipped: boolean; reason: string }
+      source: EnterpriseSourceConfig
+    }>
+  >(`${BASE}/enterprise/sources/${encodeURIComponent(sourceId)}/ingest`)
+}
+
 /** 提交映射描述符（仅管理员）：非法描述符 400 带定位拒因且零落库。 */
 export function submitEnterpriseSource(body: {
   source_id: string

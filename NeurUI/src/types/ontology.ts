@@ -322,7 +322,7 @@ export interface EnterpriseSourceConfig {
 
 /** 描述符写面形状（与后端 schema_mapping.validateDescriptor 同口径）。 */
 export interface EnterpriseDescriptor {
-  sourceType: 'sql' | 'erp_api' | 'event_stream' | string
+  sourceType: 'sql' | 'erp_api' | 'event_stream' | 'file' | 'http_pull' | 'chat' | string
   columns: string[]
   subject: { template?: string; column?: string }
   predicate: { termId: string }
@@ -330,6 +330,11 @@ export interface EnterpriseDescriptor {
   qualifiers?: Record<string, string>
   validFrom?: string
   validUntil?: string
+  /** 变体字段（VARIANT_CLOSED_SETS 单点）：file→format+path；sql→driver；erp_api/chat→vendor。 */
+  format?: string
+  path?: string
+  driver?: string
+  vendor?: string
 }
 
 // ---------------------------------------------------------------------------
