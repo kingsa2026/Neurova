@@ -12398,3 +12398,29 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **本机连带复算**：`tests/unit/ci/` 全目录 + `ci_parity_guard` → **645 passed, 4 skipped**；`ruff check neurova tests` → All checks passed；`ci_static_gate.py --skip-import` 三格全过；`deploy_config_consistency_check` ERROR 0 / WARN 1（既有 R7）；`perf_gate.py` 通过；`experience_quality_gate.py` 通过；`osv_audit.py` → 无未允许漏洞；`npm ci` 后 `npx vue-tsc --noEmit` 零错误、`npx vitest run` → 294 files / 2382 passed、`npm audit --audit-level=high` → EXIT=0。
     - **如实登记三处**：① 本机 shard 1 首轮曾出现 1 条 teardown `error`（`_guardRepoRootAgainstPollution` 点名新增 `data`），成因是我同一时间并发跑了 `npm ci` 与 vitest；单独重跑同一片 **3125 passed, rc=0**，与本轮 CI 读数一致。② 三次探针配置曾把 YAML 块标量折叠成一行（`api_trigger` 的 `--config` 传参形态所致），当场出现 `no such option: -m` 与 `Syntax error … done` 两条**属探针污染、不属仓内缺陷**的假红；改用保留块标量的 dumper 后九腿一次全绿，故不据此改任何仓库文件。③ 推送后 PR 的自动 `pull_request` 构建（`cnb-b92` / 后续）**仍九条全红在 `Prepare`**——普通触发池配额未恢复，本单的绿读数一律出自 NPC 通道，与「额度归零」这一既有事实不矛盾。
     - **净 LOC**：`.cnb.yml` **+23/−0**（新增一格与逐条依据注释）；测试/基建池 +225（新档）+4/+4（两份清单的登记与依据行），不计入生产池。**下一枚空号现查：本格取 591，后继从 592 起。**
+
+592. **PR #374 第十二轮：九腿在 NPC 通道全绿、普通通道连 1 核都被拒——同一句话量出来的两个配额池** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **结论先行**：本轮没有任何可提交的代码修复。PR 头 `fca46bbd` 的九条门禁**全部真跑到并全绿**（走 NPC 通道，构建 `cnb-n6l-1k6s1qsq0`）；同 sha 的普通 `pull_request` 构建 `cnb-knp-1k6s1qpkh` 九条腿**全部停在 `Prepare`**，一条 stage 都没进。两者差的只有触发来源。
+    - **九腿逐条读数（`cnb-n6l-1k6s1qsq0`，聚合 `status: success`）**：
+      ```
+      static-gate             success  25s   unit-tests  materialize main baseline ref  success
+      import-and-regression   success  1m22s             shard 1  3125 passed, 9 skipped, 1 xfailed  rc=0
+      e2e-backend-boot        success  2m29s             shard 2  2774 passed, 16 skipped, 2 xfailed rc=0
+      frontend                success  4m50s             shard 3  2987 passed, 5 skipped           rc=0
+      perf-gate               success  1m00s             coverage gate  Total coverage: 88.18% ≥ 60
+      deploy-config           success  14s     unit-tests 5.44 核时（真跑满，不是 Prepare 段的 0）
+      dependency-audit        success  2m27s
+      experience-quality      success  1m00s
+      ```
+      第 2 片那三格（`test_npc_branch_cleanup` / `test_commitLocClaimMatchesOwnNumstat` 两格）在基线 ref 物化后已转绿——上一轮 §6-591 的修法在本轮复现成立。
+    - **本轮新增的可复算事实：配额分两个池，普通池连 1 核都拒、NPC 命名池能起来**。三条探针同一时段、同一分支、同一份 `$` 配置：
+      ```
+      cnb-lrh-1k6s4hkc4  普通池  8 核  Prepare error  1.33 核时被判不足
+      cnb-ppv-1k6s4jgpo  普通池  1 核  Prepare error  0.33 核时被判不足   ← 1 核也起不来
+      cnb-46q-1k6s4q825  NPC 命名 1 核  success（Prepare 4.8s，probe up 真打印）
+      ```
+      即「配额不足」这句话的粒度是**池**，不是核数：普通 `pull_request` 触发的那一份已耗尽，`--npc-name` 触发的那一份仍可用。这也解释了前十轮「九腿全红在 Prepare、同时段 NPC 会话却在正常跑」的读数。
+    - **为什么不动 `.cnb.yml`**：能改的只有三种，各自代价写在格内——① 降 `unit-tests` 的 `cpus`（8→2）换普通池能起来：与 `tests/unit/ci/test_unit_tests_runner_has_headroom.py` 的按条目数算出来的需求直接冲突，且 §6-421 实测过 4 核＝8GiB 在 82% 处被 SIGKILL，属拿判据换绿（教义第 2 条）；② 给 `pull_request` 九条腿挂 `allowFailure: true`：那是把门禁失败改写成不上报，正是「提交状态通道＝门禁专用」契约要挡的形态（教义第 2/3 条）；③ 把 PR 触发改成串行少量腿：改的是放行标准，不是修缺陷。故本轮仍只报读数、不擅自动配置（教义第 4 条：改不动就等于验不了，不拿未验证改动当「已修」）。
+    - **本机连带复算**（同一份树 @ `fca46bbd`，本轮实际执行过的）：`ci_static_gate.py --skip-import` 三格全过；`ruff check neurova tests --no-cache` → All checks passed；`deploy_config_consistency_check.py` → ERROR 0 / WARN 1（既有 R7）；台账四档（`test_mainBaselineRefIsMaterialized` / `test_auditLedgerNumbering` / `test_audit_ledger_commit_guard` / `test_auditLedgerReachabilitySingleProbe`）→ **48 passed**。
+    - **如实登记**：① 本轮三条探针均止步 `Prepare`（两条）或 5s 内收尾（一条），`metricCoreHours` 合计 0，未额外消耗额度；探针配置经 `$` 挂载点 + `--config` 传入，未改动仓内任何文件。② 首两次探针尝试因把事件写在分支名下而撞 `CONFIG_EVENT_EMPTY`（`api_trigger*` 只认 `$` 挂载点），属探针形态错误、不属仓内缺陷，改挂载点后一次成功。
+    - **净 LOC**：文档 +本格，生产代码 +0、配置 +0。**下一枚空号现查：本格取 592，后继从 593 起。**
