@@ -245,12 +245,14 @@ class EnterpriseIngestor:
             deleted = cursor.rowcount > 0
         return deleted
 
-    def probeHealth(self, tenantId: str, sourceId: str) -> Optional[Dict[str, Any]]:
+    async def probeHealth(self, tenantId: str, sourceId: str) -> Optional[Dict[str, Any]]:
         """连接健康探测（页面"连接状态"列与向导"测试连接"的数据源）。
 
         loadConfig → buildAdapter（**不注册**——探测是只读动作，不改变
-        "适配器已注册"读数的语义）→ health() 三态。配置不存在返回 None；
-        工厂错（缺变体/未接线）与探测异常统一归一为 status=error＋reason 原话。
+        "适配器已注册"读数的语义）→ await health()（**协程**——health 是
+        async 契约，不 await 会把协程对象读成 error/空 reason，live-verify
+        实测踩过）。配置不存在返回 None；工厂错（缺变体/未接线）与探测
+        异常统一归一为 status=error＋reason 原话。
         """
         config = self.loadConfig(tenantId, sourceId)
         if config is None:
@@ -260,7 +262,7 @@ class EnterpriseIngestor:
         descriptor["sourceId"] = sourceId
         try:
             adapter = buildAdapter(descriptor, sourceId, tenantId)
-            health = adapter.health()
+            health = await adapter.health()
             return {"status": str(getattr(health, "status", "error") or "error"),
                     "reason": str(getattr(health, "reason", "") or "")}
         except Exception as exc:  # noqa: BLE001 - 探测失败如实归一为 error＋原话

@@ -116,3 +116,28 @@ def testUnregisterRemovesAdapterFromProcessRegistry():
     # 重复 unregister 幂等
     reg.unregister("a1")
     assert reg.get("a1") is None
+
+
+def testProbeHealthAwaitsAdapterHealth(store, ingestor, tmp_path):
+    """health() 是 async 契约——probeHealth 必须 await（live-verify 抓过：不 await
+    会把协程对象读成 status=error 且 reason 空）。真文件两态：可读→ok；不存在→
+    error 且 reason 原话非空。"""
+    import asyncio
+
+    good = tmp_path / "orders.csv"
+    good.write_text("order_id,status\no1,open\n", encoding="utf-8")
+    desc = {"sourceId": "f_src", "tenantId": "default", "sourceType": "file",
+            "format": "csv", "path": str(good),
+            "columns": ["order_id", "status"],
+            "subject": {"template": "order:{order_id}"},
+            "predicate": {"termId": "has_status"},
+            "object": {"kind": "column", "column": "status"}}
+    ingestor.saveConfig("default", "f_src", desc, enabled=False)
+    probe = asyncio.run(ingestor.probeHealth("default", "f_src"))
+    assert probe == {"status": "ok", "reason": ""}
+
+    desc_bad = dict(desc, path=str(tmp_path / "missing.csv"))
+    ingestor.saveConfig("default", "f_bad", desc_bad, enabled=False)
+    probe_bad = asyncio.run(ingestor.probeHealth("default", "f_bad"))
+    assert probe_bad["status"] == "error"
+    assert probe_bad["reason"], "探测失败的 reason 必须有原话，不许空串"
