@@ -1019,3 +1019,68 @@ def reset_user_group_manager():
     if _user_group_manager is not None:
         _user_group_manager._save_groups()
         _user_group_manager = None
+
+
+def resolveUserDepartment(
+    username: str,
+    *,
+    manager: Optional[UserGroupManager] = None,
+    registry: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """部门归属解析单源（specs/2026-11-07 §2.3，批 B）。
+
+    归属组（custom，T-A 单主组）→ 沿 parent_group_id 上溯部门根 → 路径并集白名单
+    → 与分类注册表对表（停用/已删 id 如实剔除）。
+
+    Returns:
+        {
+          "tenant_id": 部门根 group_id（无部门组 → "default"），
+          "group_id": 所属部门组 id（无 → None），
+          "allowed_categories": 生效白名单（活跃 id 并集，排序去重），
+          "restricted": True=路径上有组配置了白名单（此时空列表 = 全不可见）；
+                        False=未配置任何白名单 = 不受限
+        }
+
+    语义钉死：**解析异常一律回落 default/不受限**（与今天行为一致，不猜部门）；
+    但"配置过白名单而引用全部失效"**不是**解析失败——restricted 保持 True，
+    不许静默 fail-open 成"什么都能看"。
+    """
+    empty = {"tenant_id": "default", "group_id": None, "allowed_categories": [], "restricted": False}
+    try:
+        mgr = manager or get_user_group_manager()
+        groups = [
+            g for g in mgr.get_groups_for_user(str(username or ""))
+            if g.group_type == UserGroupType.CUSTOM
+        ]
+        if not groups:
+            return dict(empty)
+        group = groups[0]  # T-A 单主组保证至多一个；存量多取第一个
+        chain: List[UserGroup] = []
+        seen: set = set()
+        cursor: Optional[UserGroup] = group
+        while cursor is not None and cursor.group_id not in seen:
+            seen.add(cursor.group_id)
+            chain.append(cursor)
+            cursor = mgr.get_group(cursor.parent_group_id) if cursor.parent_group_id else None
+        union: List[str] = []
+        for g in chain:
+            for cid in g.allowed_categories or []:
+                if cid not in union:
+                    union.append(cid)
+        restricted = any(g.allowed_categories for g in chain)
+        if registry is None:
+            from neurova.knowledge.categories_registry import CategoryRegistry
+            from neurova.knowledge.foundation import get_knowledge_fact_store
+
+            registry = CategoryRegistry(get_knowledge_fact_store())
+        active = {c["category_id"] for c in registry.list(activeOnly=True)}
+        union = sorted(cid for cid in union if cid in active)
+        return {
+            "tenant_id": chain[-1].group_id,
+            "group_id": group.group_id,
+            "allowed_categories": union,
+            "restricted": restricted,
+        }
+    except Exception as e:  # noqa: BLE001 - 解析失败回落 default，不猜部门（设计 §2.3）
+        logger.warning("resolveUserDepartment fallback to default for %s: %s", username, e)
+        return dict(empty)
