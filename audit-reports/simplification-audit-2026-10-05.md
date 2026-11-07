@@ -12251,3 +12251,25 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
       ```
       另在本机按 CI 命令逐条补齐：`ci_static_gate.py`（导入巡检 1105 模块全过）、`perf_gate.py`（通过）、`experience_quality_gate.py`（门禁通过）、`tests/e2e/test_backend_boot.py`（5 passed）、`npm audit --audit-level=high`（EXIT=0，仅 6 条 moderate 存量）、`vue-tsc --noEmit`（EXIT=0 / 零错误）、`vitest run`（2382 passed / 1 skipped / EXIT=0）。
     - **不改代码的一轮，如实说清改了什么**：本轮零生产代码改动，只为把「红在平台配额」与「红在代码」分开而取读数与留痕。**净 LOC**：文档 +本格，代码 +0。**下一枚空号现查：本格取 587，后继从 588 起。**
+
+588. **PR #374 第八轮：九条腿全红逐条归因——按核数的配额门槛（1 核起得来、2 核起不来）＋本机与真容器两路读数复核** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **先分清红在谁身上，不猜**：本轮 PR 构建 `cnb-cdp-1k6rcviqp`（sha `dbeeb611`）九条腿**全部**止步 `Prepare`，日志原文一律 `Root Group's events CPU-core hours are insufficient for pre-freezing`，折合 0.33 / 0.67 / 1.33 三种规格；每个 stage 状态都是 `skipped`——**一条门禁脚本都没跑到**，不存在"代码判据红"这个读数。
+    - **配额门槛按核数折，今天实测到小数点后两位**：同一天同一分支上，`cpus: 1` 的探针两次全绿（`cnb-lve-1k6re3pc3` Prepare 15.1s、`cnb-f8u-1k6rg8lbd`），`cpus: 2` 的探针两次全红在同一句（`cnb-uop-1k6re9hcr` / `cnb-pbo-1k6reo4k9`，折合 0.17~0.34 核时被判不足）。即**当前额度窗只容得下 1 核**，与「哪条腿、改了什么」无关。这条读数也解释了为什么本会话自己的 8 核 NPC 接力构建（`cnb-vkg-1k6rcvmlq`）能起来——它抢在额度耗尽前完成了 Prepare。
+    - **本机按 CI 同款跑法复算三片受保护子集**（`--timeout 300`，逐片各起一个进程、串行，与 CI 分片同形态）：
+      ```
+      shard 1   3125 passed, 9 skipped, 1 xfailed   (8m32s)
+      shard 2   2781 passed, 9 skipped, 2 xfailed   (7m37s)
+      shard 3   2978 passed, 4 skipped              (8m52s)
+      ```
+      三片合计 8884 条判据零失败；`static-gate --skip-import` 三格全过；`ci_static_gate.py` 全模块导入巡检 1105 模块全过；`ruff check neurova tests scripts cli.py` → All checks passed；`deploy_config_consistency_check.py` → ERROR 0 / WARN 1（既有 R7 存量）；`perf_gate.py` → 通过（`post_chat_pipeline` 184811B、`chat_pipeline` 163796B，均在棘轮线下）；`experience_quality_gate.py` → 门禁通过；`audit_ledger_commit_guard.py` → EXIT=0（1387 条引用全可达，例外清单 5 行如实报「本克隆不可核验」）。
+    - **前端在本机与真容器各取一路**：本机（`npm ci` 真装 426 包后）`npm audit --audit-level=high` EXIT=0（仅 6 条 moderate 存量）、`npx vue-tsc --noEmit` 零错误、`npx vitest run` 294 文件 / 2382 passed / EXIT=0。真容器 `api_trigger_verify` 的 1 核构建在 `vue-tsc` 一格被 V8 掐断（`FATAL ERROR: Reached heap limit`，1 核 = 2GiB），2 核构建连 `Prepare` 都起不来——**两者都是环境读数不是代码读数**：`node:22` 下 `vue-tsc` 内存峰值约 1GB 量级，CI 那一格 4 核 = 8GiB，配额恢复窗口里的历史构建（`cnb-jmd-1k6r0cigb` / `cnb-3c6-1k6qvvfr7` / `cnb-srf-1k6qu7mv5` / `cnb-fhs-1k6qtu0h3`）四次全部 success（`type check` 25~27s、`vitest` 165~188s）。
+    - **真容器取现场读数（1 核 / 各腿同镜像同命令，逐条 success）**：
+      ```
+      cnb-oie-1k6reat1g  e2e-backend-boot          装最小依赖 51.6s → boot smoke 12.9s  success
+      cnb-1vo-1k6rf7l9r  py 五档  static gate(19.8s) / ruff(1.1s) / deploy(0.9s)
+                                  / 台账(1.4s) / 七档判据(14.8s)  全 success
+      cnb-m0j-1k6rffuq1  py3.11  装锁 38.0s → 全模块导入巡检 23.7s → 审计回归 9.9s  success
+      ```
+    - **一处必须写明的偏差**：`api_trigger_verify` 的依赖审计两条腿在 1 核上反复被 `Prepare` 掐（`cnb-r04-1k6rflu2q` / `cnb-67m-1k6rfs059` 都是同一句配额），故 `pip-audit` / OSV 两路改在本机按同一份锁复算：`pip-audit` 对已装树报 `No known vulnerabilities found`；`tools/npx-runtime` 真 `npm ci` 后 `npm ls glob minimatch --all` 读数 `glob@14.0.4` / `minimatch@11.0.5`（单一版本、无嵌套副本），`npm audit` → `found 0 vulnerabilities`。与本单 `4d3f2a6c` 的 overrides 口径一致。
+    - **结论与需要人裁决的那一件事**：代码侧本轮**零可修项**——八轮下来九条腿的每一条都在本机与真容器上过了，剩下的唯一阻塞是根组织的「云原生构建-CPU」160 核时/月免费额度已耗尽（平台侧 `组织 → 设置 → 用量管理` 绑腾讯云预算可提额，超额 ¥0.125/核时）。我不动 `.cnb.yml` 的 `cpus`：把 8 核的 `unit-tests` 降到 1~2 核会当场装不下受保护子集（`code 137` 的成因已写在文件头），那是拿降判据换绿（教义第 2 条）。
+    - **净 LOC**：文档 +本格，生产代码 +0、配置 +0。**下一枚空号现查：本格取 588，后继从 589 起。**
