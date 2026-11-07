@@ -40,7 +40,8 @@ from neurova.channels.voice_ingress import (  # noqa: E402
     VOICE_DOWNLOAD_MAX_BYTES,
 )
 from neurova.channels.wechat_media import WeChatMediaMixin  # noqa: E402
-from neurova.channels.wecom import WeComAdapter, _wecom_callback_signature  # noqa: E402
+from neurova.channels.wechat_kf_crypto import callbackSignature as _wecom_callback_signature  # noqa: E402
+from neurova.channels.wecom import WeComAdapter  # noqa: E402
 
 
 def _singleSource():

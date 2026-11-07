@@ -29,6 +29,7 @@ from neurova.channels.base import (
 )
 from neurova.channels.models import ContentType, UnifiedMessage
 from neurova.channels.wechat_kf import WeChatKfEventsMixin
+from neurova.channels.wecom_token import WECOM_API_BASE as WECOM_API_BASE_CONST
 
 from neurova.channels.wechat_auth import WeChatAuthMixin
 from neurova.channels.wechat_parsing import WeChatParsingMixin
@@ -68,8 +69,8 @@ class WeChatAdapter(
     - WeChatAIHandlerMixin: AI 生成请求处理
     """
 
-    # 企业微信 API
-    WECOM_API_BASE = "https://qyapi.weixin.qq.com"
+    # 企业微信 API（常量单源：neurova.channels.wecom_token）
+    WECOM_API_BASE = WECOM_API_BASE_CONST
 
     # 微信公众号 API
     WECHAT_OA_API_BASE = "https://api.weixin.qq.com"

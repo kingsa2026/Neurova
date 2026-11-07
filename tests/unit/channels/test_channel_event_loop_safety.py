@@ -194,7 +194,7 @@ class TestWeComEventLoopSafety:
         """RED: wecom 同步回调应将事件调度到主 loop"""
         # BUG AUDIT C-09: 验签已改 fail-closed，无 token 一律拒绝。
         # 测试须配置 token 并附合法签名（明文模式无 Encrypt 字段，第 4 元为空串）。
-        from neurova.channels.wecom import _wecom_callback_signature
+        from neurova.channels.wechat_kf_crypto import callbackSignature as _wecom_callback_signature
 
         callback_token = "test_callback_token"
         adapter = WeComAdapter(
