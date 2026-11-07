@@ -98,6 +98,8 @@ class EnterpriseIngestor:
                 qualifier=mapped["qualifier"],
                 validFrom=mapped["validFrom"],
                 validUntil=mapped["validUntil"],
+                sourceCreatedAt=mapped.get("sourceCreatedAt"),
+                sourceModifiedAt=mapped.get("sourceModifiedAt"),
                 assertions=[{"actorType": "importer",
                              "actorId": "source:%s" % sourceId,
                              "mediumRef": "source:%s:%s" % (sourceId, cursorToken),

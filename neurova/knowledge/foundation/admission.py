@@ -100,6 +100,11 @@ class AdmissionRequest:
     assertions: List[Dict[str, Any]] = field(default_factory=list)
     validFrom: Optional[str] = None
     validUntil: Optional[str] = None
+    # 源钟（K-09，台账 §6-570 裁定 2026-11-07）：源文档的创建/修改时间，与入库钟
+    # 分离。调用方知道就声明（条目投影/企业源映射/文档入站），不知道就留空——
+    # 留空时冲突裁决回退 recorded_at，不猜。
+    sourceCreatedAt: Optional[str] = None
+    sourceModifiedAt: Optional[str] = None
     # 来路声明（工单 005 的"经哪条管线进来"）：调用方自陈它的活动种类与依据。
     # 不声明时由咽喉兜底开一条 `admit`，但 basis 会写明是兜底——生产读数里
     # 92/92 条活动都等于咽喉自己，正是因为这一栏此前不存在。
@@ -336,6 +341,10 @@ class KnowledgeAdmissionGate:
         if dupe:
             # 折回旧行也要补窗口：同一句话第一次带窗口、第二次不带，行为不该随调用顺序漂移
             self._store.fillValidityWindow(dupe["fact_id"], request.validFrom, request.validUntil)
+            # 源钟同理（K-09）：重放带源时间就补齐旧行，只前移不倒拨
+            if request.sourceCreatedAt or request.sourceModifiedAt:
+                self._store.backfillSourceClock(dupe["fact_id"], request.sourceCreatedAt,
+                                                request.sourceModifiedAt)
             applied = ["content_identity"]
             activityId = ""
             if lineage is not None:
@@ -382,6 +391,9 @@ class KnowledgeAdmissionGate:
             # 时效窗口是调用方声明的，咽喉原样落到两列上——收了不落库等于断点
             validFrom=request.validFrom,
             validUntil=request.validUntil,
+            # 源钟同理：调用方声明就落列，缺省 NULL 由裁决侧回退入库钟
+            sourceCreatedAt=request.sourceCreatedAt,
+            sourceModifiedAt=request.sourceModifiedAt,
             tenantId=request.tenantId,
             category=request.category,
             # confidence 留 None：G11 规定它只能由断言聚合得出，咽喉不代填

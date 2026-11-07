@@ -182,7 +182,9 @@ class TestMigrationVersions:
         # v30：身份判据（specs/2026-11-05 B9 L1）——类型级 identity_keys。
         # v31–v34：SKOS/形状（B10）、限定关系 schema（B11）、变更审计账（B12）、企业源配置（B14）。
         # v35：物化档位（specs/2026-11-05 B11 §12.6）——ontology_rules.materialization。
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 35
+        # v36：facts 侧源钟（K-09，台账 §6-570 裁定）——knowledge_facts 加
+        #       source_created_at/source_modified_at 两列。
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 36
         assert {'knowledge_mcp_sources', 'knowledge_alias_candidates',
                 'ontology_relation_candidates', 'ontology_shapes',
                 'ontology_change_log', 'enterprise_source_configs'} <= names

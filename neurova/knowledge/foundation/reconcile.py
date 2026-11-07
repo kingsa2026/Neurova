@@ -77,6 +77,9 @@ def _requestsFromRepository(repo: Any, *, activityKind: str, activityBasis: str,
                 content=str(item.get("content", "") or ""),
                 assertions=[_assertionFor(agentId, item)],
                 sourceTurnId="legacy:%s" % knowledgeId,
+                # 源钟随条目回填/重演进治理行（K-09），与 entry_ledger 投影同一口径
+                sourceCreatedAt=str(item.get("source_created_at", "") or "") or None,
+                sourceModifiedAt=str(item.get("source_modified_at", "") or "") or None,
                 activityKind=activityKind,
                 activityBasis=activityBasis,
             ))

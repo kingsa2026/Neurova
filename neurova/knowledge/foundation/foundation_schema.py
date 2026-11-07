@@ -51,6 +51,7 @@ from ..ontology.term_registry import (
     _SCHEMA_V8,
     _SCHEMA_V12,
 )
+from .knowledge_facts import _SCHEMA_V36
 from .narratives import NARRATIVE_DOMAIN, _SCHEMA_V4, _SCHEMA_V6, _SCHEMA_V7
 
 _STEPS: List[tuple] = [
@@ -117,6 +118,10 @@ _STEPS: List[tuple] = [
     # v35：物化档位（specs/2026-11-05 B11 §12.6 设计 3）——ontology_rules 加
     #      materialization（observe/enforce）；缺省 observe，存量行零行为漂移
     (35, _SCHEMA_V35),
+    # v36：facts 侧源钟（K-09，台账 §6-570 裁定 2026-11-07）——knowledge_facts 加
+    #      source_created_at/source_modified_at 两列；无源时间回退 recorded_at，
+    #      valid_from 职责不动（temporal 分类与窗口判定照旧）
+    (36, _SCHEMA_V36),
 ]
 
 _registered = False

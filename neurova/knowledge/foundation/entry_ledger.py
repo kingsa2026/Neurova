@@ -61,6 +61,13 @@ class EntryLedger:
                 held = self._store.activeNarrativeFact(agentId, kid, key, tenantId=tenantId)
                 if held:
                     claims.add(held["fact_id"])
+                    # 源钟跟随（K-09）：条目重入库前移了源钟，治理行补齐（只前移不倒拨，
+                    # 见 backfillSourceClock）——否则 held 早领分支永远停在首投时的钟。
+                    self._store.backfillSourceClock(
+                        held["fact_id"],
+                        str(item.get("source_created_at") or "") or None,
+                        str(item.get("source_modified_at") or "") or None,
+                    )
                     confidences[kid] = held.get("confidence")
                     mediums[kid] = self._mediumOf(held["fact_id"])
                     continue
@@ -74,6 +81,9 @@ class EntryLedger:
                         assertions=[_assertionFor(agentId, item,
                                                   mediumFallback="entry:%s" % kid)],
                         sourceTurnId="entry:%s" % kid,
+                        # 源钟随条目投影进治理行（K-09）：条目有就带，没有留空回退入库钟
+                        sourceCreatedAt=str(item.get("source_created_at") or "") or None,
+                        sourceModifiedAt=str(item.get("source_modified_at") or "") or None,
                         validUntil=str(item.get("valid_until") or "") or None,
                         activityKind="import",
                         activityBasis="EntryLedger.syncFromEntries（条目投影）",
