@@ -519,7 +519,10 @@ class KnowledgeRepository:
             if self._fts is None:
                 from neurova.knowledge.fts_index import KnowledgeFtsIndex
 
-                self._fts = KnowledgeFtsIndex(str(self._dir / "knowledge_fts.db"))
+                # K-09 裁定（2026-11-07）：FTS 表搬进 foundation 主库，schema 走
+                # v37 迁移——不再另立 knowledge_fts.db（第二份 schema 已退役）
+                self._fts = KnowledgeFtsIndex(str(self._dir / FOUNDATION_DB_NAME))
+                self._retireLegacyFtsFile()
             if not self._ftsDirty:
                 return self._fts
             snapshot = {
@@ -529,6 +532,21 @@ class KnowledgeRepository:
             self._ftsDirty = False
         self._fts.reconcile(snapshot)
         return self._fts
+
+    def _retireLegacyFtsFile(self) -> None:
+        """旧独立索引库一次性退役：派生索引可由 reconcile 全量重建，删了不丢数据。
+
+        best-effort：Windows 下旧进程还开着文件时删除会失败，留待下次——
+        它已无人读，多留一轮只是多占一个文件。
+        """
+        legacy = self._dir / "knowledge_fts.db"
+        if not legacy.exists():
+            return
+        try:
+            legacy.unlink()
+            logger.info("旧 FTS 独立库已退役（索引随 v37 迁移进主库）: %s", legacy)
+        except OSError as exc:
+            logger.warning("旧 FTS 独立库删除失败（不阻断，下次再试）: %s (%s)", legacy, exc)
 
     def ftsSearch(
         self,

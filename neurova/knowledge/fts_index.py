@@ -4,6 +4,10 @@ doc 粒度 = 知识条目（与 BM25/FTS 辅助路同粒度）；中文先走仓
 （jieba 可选、缺席 n-gram）再写入 FTS，查询侧同样预分词，避免依赖 FTS5 对中文
 分词的未验证假设。可见性、agent、category、tags、source、时间与生命周期过滤
 都在 SQL 里完成；FTS 命中仍要经调用方可见集回映。
+
+schema 归属（K-09，2026-11-07 裁定）：本索引的库文件就是 foundation 主库
+（knowledge_facts.db），两表 DDL 由 v37 迁移持有（foundation_schema 注册）——
+独立 knowledge_fts.db 与本文件自建 DDL 已退役，派生索引可由 reconcile 全量重建。
 """
 from __future__ import annotations
 
@@ -22,7 +26,10 @@ from neurova.knowledge.splitter import build_index_content
 
 logger = get_logger(__name__)
 
-_SCHEMA = """
+# v37：FTS 两表进 foundation 主库（K-09 裁定 2026-11-07）。SQL 由本模块持有、
+# foundation_schema 注册；source_modified_at 是条目源钟进倒排面——消费方是
+# search() 的确定性同分 tie-break（同分命中里源文档更新者排前）。
+_SCHEMA_V37_FTS = """
 CREATE TABLE IF NOT EXISTS knowledge_fts_docs (
     rowid INTEGER PRIMARY KEY AUTOINCREMENT,
     doc_id TEXT NOT NULL UNIQUE,
@@ -38,6 +45,7 @@ CREATE TABLE IF NOT EXISTS knowledge_fts_docs (
     updated_at REAL NOT NULL DEFAULT 0,
     lifecycle_status TEXT NOT NULL DEFAULT 'active',
     valid_until TEXT NOT NULL DEFAULT '',
+    source_modified_at TEXT NOT NULL DEFAULT '',
     fingerprint TEXT NOT NULL DEFAULT ''
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(content);
@@ -59,17 +67,15 @@ class KnowledgeFtsIndex:
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(self._path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
-        with self._lock, self._conn:
-            self._conn.executescript(_SCHEMA)
-            # 旧库补列：executescript 的 CREATE IF NOT EXISTS 不会给已存在的表加列
-            columns = {
-                row[1]
-                for row in self._conn.execute("PRAGMA table_info(knowledge_fts_docs)").fetchall()
-            }
-            if "tenant_id" not in columns:
-                self._conn.execute(
-                    "ALTER TABLE knowledge_fts_docs ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'"
-                )
+        # 与 facts/narratives/entry ledger 同开一个文件：busy_timeout 必须有，
+        # 否则并发写即 SQLITE_BUSY 沿 ftsSearch 的不吞异常通道放大
+        self._conn.execute("PRAGMA busy_timeout=5000")
+        with self._lock:
+            # schema 单一事实源在 v37 迁移链；这里只保证"先于任何写入就位"
+            # （幂等：迁移器按 user_version 跳过已应用步骤）
+            from .foundation.foundation_schema import applyTo
+
+            applyTo(self._conn)
 
     def close(self) -> None:
         with self._lock:
@@ -83,7 +89,7 @@ class KnowledgeFtsIndex:
     _ROW_VALUE_KEYS = (
         "knowledge_id", "agent_id", "visibility", "owner_user_id", "tenant_id",
         "shared_with_json", "category", "tags_json", "source", "updated_at",
-        "lifecycle_status", "valid_until",
+        "lifecycle_status", "valid_until", "source_modified_at",
     )
 
     @classmethod
@@ -102,6 +108,7 @@ class KnowledgeFtsIndex:
             float(item.get("updated_at") or 0),
             str(item.get("lifecycle_status") or "active"),
             str(item.get("valid_until") or ""),
+            str(item.get("source_modified_at") or ""),
         )
 
     @classmethod
@@ -259,7 +266,9 @@ class KnowledgeFtsIndex:
             " -bm25(knowledge_fts) AS score"
             " FROM knowledge_fts JOIN knowledge_fts_docs d ON d.rowid = knowledge_fts.rowid"
             " WHERE " + " AND ".join(clauses)
-            + " ORDER BY bm25(knowledge_fts) LIMIT ?"
+            # K-09 源钟消费方：bm25 同分的命中按源文档时间倒序排——确定性 tie-break，
+            # 源文档更新者排前；无源钟（空串）排最后，不改变有钟命中的相对序
+            + " ORDER BY bm25(knowledge_fts), d.source_modified_at DESC LIMIT ?"
         )
         params.append(max(1, int(limit)))
         with self._lock:
