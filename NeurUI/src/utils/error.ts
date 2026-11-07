@@ -32,6 +32,28 @@ export class AppError extends Error {
 }
 
 /**
+ * 抽取后端错误的用户可读 detail 原话（§6-566 detail 收口批的通用半边）。
+ *
+ * 后端 4xx/5xx 的 detail 有两种真实形状（与 ontologyErrorDetail 同一口径）：
+ * - 字符串：校验原话/失败原因，直接可用；
+ * - 对象：`{message, impact?}`，取 message 分量（impact 面本体域专用，仍走
+ *   `ontologyErrorDetail`）；
+ * 其余形状（数组形 FastAPI 422、缺失、网络错误）返回空串——兜底文案的决定权
+ * 留给调用方：`message.error(extractApiDetail(err) || t('common.error'))`，
+ * 通用文案从「一律降级」退化为「仅取不到 detail 原话时」的兜底。
+ */
+export function extractApiDetail(error: unknown): string {
+  const detail = (error as { response?: { data?: { detail?: unknown } } } | null)?.response
+    ?.data?.detail
+  if (typeof detail === 'string') return detail.trim()
+  if (detail && typeof detail === 'object') {
+    const message = (detail as { message?: unknown }).message
+    if (typeof message === 'string') return message.trim()
+  }
+  return ''
+}
+
+/**
  * 将任意错误归一化为 AppError：
  * - 已是 AppError：原样返回（保留 code/severity/context）
  * - Error 实例：包装为 UNEXPECTED
