@@ -44,6 +44,10 @@ class GroupInfo(BaseModel):
     is_system: bool = False
     created_at: float = 0
     updated_at: float = 0
+    # 部门化字段（specs/2026-11-07 批 A）
+    parent_group_id: Optional[str] = None
+    allowed_categories: List[str] = []
+    default_category: Optional[str] = None
 
 
 class GroupCreate(BaseModel):
@@ -53,6 +57,9 @@ class GroupCreate(BaseModel):
     description: str = Field(default="", description="群组描述")
     members: List[str] = Field(default_factory=list, description="初始成员（用户名）")
     allowed_modules: Optional[List[str]] = Field(default=None, description="可用功能模块（菜单路由 key）")
+    parent_group_id: Optional[str] = Field(default=None, description="父部门组（层级只挂 custom 组之间）")
+    allowed_categories: Optional[List[str]] = Field(default=None, description="知识库分类白名单（空 = 不限制）")
+    default_category: Optional[str] = Field(default=None, description="缺省业务分类")
 
 
 class GroupUpdate(BaseModel):
@@ -61,6 +68,9 @@ class GroupUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     allowed_modules: Optional[List[str]] = None
+    parent_group_id: Optional[str] = None
+    allowed_categories: Optional[List[str]] = None
+    default_category: Optional[str] = None
 
 
 class GroupMemberAdd(BaseModel):
@@ -88,6 +98,9 @@ def _group_to_info(group: UserGroup) -> GroupInfo:
         is_system=bool(group.is_system),
         created_at=group.created_at or 0,
         updated_at=group.updated_at or 0,
+        parent_group_id=group.parent_group_id,
+        allowed_categories=list(group.allowed_categories or []),
+        default_category=group.default_category,
     )
 
 
@@ -127,9 +140,14 @@ async def create_group(
     try:
         manager = _require_manager()
 
-        # 创建用户组
+        # 创建用户组（含部门化字段：父组/分类白名单/缺省分类）
         group = manager.create_group(
-            name=body.name, description=body.description, group_type="custom"  # 默认为自定义类型
+            name=body.name,
+            description=body.description,
+            group_type="custom",  # 默认为自定义类型
+            parent_group_id=body.parent_group_id,
+            allowed_categories=body.allowed_categories,
+            default_category=body.default_category,
         )
 
         if group is None:
@@ -139,9 +157,12 @@ async def create_group(
         if body.allowed_modules is not None:
             manager.set_allowed_modules(group.group_id, body.allowed_modules)
 
-        # 添加初始成员（用户名）
+        # 添加初始成员（用户名）——单主组冲突映射 400（点名已属部门）
         for member_name in body.members:
-            manager.add_user_to_group(member_name, group.group_id)
+            try:
+                manager.add_user_to_group(member_name, group.group_id)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
 
         return _group_to_info(manager.get_group(group.group_id))
     except HTTPException:
@@ -208,6 +229,25 @@ async def update_group(
         # 功能模块白名单（系统组也可设置）
         if body.allowed_modules is not None:
             updated = manager.set_allowed_modules(group_id, body.allowed_modules)
+            if updated is not None:
+                group = updated
+
+        # 部门化字段（specs/2026-11-07 批 A）
+        if body.parent_group_id is not None:
+            # 空串 = 解除父组；非空走禁环校验，违规映射 400
+            try:
+                updated = manager.set_parent_group(group_id, body.parent_group_id or None)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            if updated is None:
+                raise HTTPException(status_code=404, detail=f"Group '{group_id}' not found")
+            group = updated
+        if body.allowed_categories is not None:
+            updated = manager.set_allowed_categories(group_id, body.allowed_categories)
+            if updated is not None:
+                group = updated
+        if body.default_category is not None:
+            updated = manager.set_default_category(group_id, body.default_category or None)
             if updated is not None:
                 group = updated
 
@@ -290,8 +330,11 @@ async def add_group_member(
         if group is None:
             raise HTTPException(status_code=404, detail=f"Group '{group_id}' not found")
 
-        # 添加成员
-        success = manager.add_user_to_group(body.username, group_id)
+        # 添加成员（单主组冲突映射 409：先从原部门移除再加入）
+        try:
+            success = manager.add_user_to_group(body.username, group_id)
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e))
 
         if not success:
             raise HTTPException(status_code=400, detail=f"Failed to add user '{body.username}' to group '{group_id}'")

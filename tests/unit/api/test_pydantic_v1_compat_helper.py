@@ -95,7 +95,7 @@ def test_safe_model_dump_v2_compatible():
         "neurova.api.endpoints.skill_pool_api",
         "neurova.api.endpoints.skill_version_api",
         "neurova.api.endpoints.tasks_api",
-        "neurova.api.endpoints.user_group_api",
+        # user_group_api 已按 specs/2026-11-07 批 A 退役删除（死端点零消费方），不再是本契约的被检面。
         "neurova.api.endpoints.webhooks",
     ],
 )

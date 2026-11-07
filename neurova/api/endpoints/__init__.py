@@ -277,7 +277,7 @@ ENDPOINT_MODULES = [
     ("neurova.api.endpoints.rules_api", "/v1/rules", "Rules API"),
     ("neurova.api.endpoints.webhooks", "/v1/webhooks", "Webhooks API"),
     ("neurova.api.endpoints.enhanced_users_api", "/v1/enhanced-users", "Enhanced Users API"),
-    ("neurova.api.endpoints.user_group_api", "/v1/user-groups", "User Groups API"),
+    ("neurova.api.endpoints.knowledge_categories_api", "/v1/knowledge/categories", "Knowledge Categories API"),
     ("neurova.api.endpoints.files_api", "/v1/files", "Files API"),
     ("neurova.api.endpoints.artifacts_api", "/v1/artifacts", "Artifacts API"),
     ("neurova.api.endpoints.tool_schema", "/v1/tools", "Tool Schema API"),
