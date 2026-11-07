@@ -88,11 +88,13 @@
         </a-form-item>
         <a-form-item :label="t('system.userGroup')">
           <p class="modules-hint">{{ t('system.reloginHint') }}</p>
-          <a-select
+          <a-tree-select
             v-model:value="userForm.group_id"
-            :options="deptGroupOptions"
+            :tree-data="userGroupTree"
             allow-clear
+            tree-default-expand-all
             :placeholder="t('system.parentGroupNone')"
+            style="width: 100%"
           />
         </a-form-item>
       </a-form>
@@ -118,6 +120,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { enhancedUsersApi } from '@/api/modules'
 import { listGroups, addGroupMember, removeGroupMember, type Group } from '@/api/modules/groups'
+import { buildDeptTreeData } from '@/utils/deptTree'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message, Modal } from 'ant-design-vue'
@@ -147,7 +150,7 @@ const userForm = ref<{ username: string; email: string; password: string; role: 
 // 部门分组（specs/2026-11-07 批 F1）：归属按 username 记账（groups members）
 const groups = ref<Group[]>([])
 const deptGroups = computed(() => groups.value.filter(g => !g.is_system))
-const deptGroupOptions = computed(() => deptGroups.value.map(g => ({ label: g.name, value: g.group_id })))
+const userGroupTree = computed(() => buildDeptTreeData(groups.value))
 const deptGroupOf = (username?: string) =>
   deptGroups.value.find(g => (g.members || []).includes(username || '')) || null
 

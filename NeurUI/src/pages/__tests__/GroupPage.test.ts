@@ -102,7 +102,8 @@ describe('GroupPage 用户组管理', () => {
   it('按 group_id 契约渲染组卡片', async () => {
     const wrapper = mountPage()
     await flushPromises()
-    const cards = wrapper.findAll('.glass-card')
+    // 组卡片收口在 .groups-grid（页面另有部门层级树面板的 GlassCard，不计入组卡片）
+    const cards = wrapper.findAll('.groups-grid .glass-card')
     expect(cards.length).toBe(2)
     expect(cards[0].text()).toContain('市场组')
   })
