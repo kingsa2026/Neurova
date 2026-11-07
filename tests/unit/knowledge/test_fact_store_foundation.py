@@ -184,10 +184,12 @@ class TestMigrationVersions:
         # v35：物化档位（specs/2026-11-05 B11 §12.6）——ontology_rules.materialization。
         # v36：facts 侧源钟（K-09，台账 §6-570 裁定）——knowledge_facts 加
         #       source_created_at/source_modified_at 两列。
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 36
+        # v37：FTS 搬主库（K-09 裁定）——knowledge_fts_docs/knowledge_fts 归本版本域。
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 37
         assert {'knowledge_mcp_sources', 'knowledge_alias_candidates',
                 'ontology_relation_candidates', 'ontology_shapes',
-                'ontology_change_log', 'enterprise_source_configs'} <= names
+                'ontology_change_log', 'enterprise_source_configs',
+                'knowledge_fts_docs', 'knowledge_fts'} <= names
         # v28 存量行零漂移：缺省必须是旧语义 relay（head 客体常量空＝不搬移客体）
         rule_columns = {
             r[1]: (r[2], r[4]) for r in store._conn.execute(

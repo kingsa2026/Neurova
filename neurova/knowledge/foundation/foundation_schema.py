@@ -38,6 +38,7 @@ from .knowledge_facts import (
 )
 from .digest_chain import _SCHEMA_V11
 from ..enterprise.schema_mapping import SCHEMA_V34 as _SCHEMA_V34_ENTERPRISE
+from ..fts_index import _SCHEMA_V37_FTS
 from ..ontology.change_log import _SCHEMA_V33
 from ..ontology.derivation_ledger import _SCHEMA_V10
 from ..ontology.relation_candidates import _SCHEMA_V29_CANDIDATES
@@ -122,6 +123,10 @@ _STEPS: List[tuple] = [
     #      source_created_at/source_modified_at 两列；无源时间回退 recorded_at，
     #      valid_from 职责不动（temporal 分类与窗口判定照旧）
     (36, _SCHEMA_V36),
+    # v37：FTS 搬主库（K-09，2026-11-07 裁定：FTS 搬进主库）——knowledge_fts_docs/
+    #      knowledge_fts 虚表归 foundation 版本域，独立 knowledge_fts.db 与
+    #      fts_index 自建 DDL 退役；docs 表带 source_modified_at（同分 tie-break 消费）
+    (37, _SCHEMA_V37_FTS),
 ]
 
 _registered = False
