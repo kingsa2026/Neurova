@@ -211,7 +211,7 @@
 
 `specs/2026-11-07-enterprise-source-connectors-plan.md`（企业源真连接器立项方案：兑现台账 §6-561/§6-564「另立项」——现状走查（REST 提交面→编译期校验→v34 配置表→映射→admission 唯一咽喉链路全景；`ingestBatch` 生产调用面为零、适配器注册表生产恒空，今天唯一喂行方式是 `FakeEnterpriseAdapter` 测试桩）；零第三方依赖约束下的候选取舍（以 `requirements.txt` 现值为准：CSV/TSV/JSON/JSONL 文件行源、目录轮询、SQLite 旁库只读挂接、HTTP 拉取（httpx 已在依赖清单且生产在用）进三批计划，Oracle/MSSQL/PG 直连、ERP SDK、Kafka/CDC 因驱动/外部服务违反六决策缓办并给未来放开约束的接法）；三批实施每批验收判据＋红绿落点 `tests/unit/knowledge/enterprise/`＋真后端 9527 活体验证路径；风险与回退（fail-soft 让路/大文件限流/编码方言不猜/增量重入幂等/与三时间戳 facts 源钟尾巴的对齐裁量）；三项待拍板各带影响面）
 
-`specs/2026-11-07-用户分组部门化与知识库分类隔离设计.md`（用户分组（`/v1/groups` 正主）部门化＋知识库自定义分类隔离：分类注册表 `knowledge_categories`、分组模型加 `allowed_categories/default_category/parent_group_id`（单亲树禁环）、分区停在部门根而子部门用分类路径并集收窄、登录签发 tenant claim 打通休眠的 tenant 分区键、执行点收在 `visible_items`/`can_view` 服务端单点（聊天召回与用户 API 双通道自动覆盖）、agent 绑组＋chat 部门根对账 403＋kb_builder 补 tenant 修断点、死端点 `/v1/user-groups` 退役、本体零 schema 改动＋三处既有 tenant 缺口顺手修、前端四页逐一对齐（GroupPage 树形＋分类绑定/EnhancedUserPage 所属分组/AgentFormPage 分组选择/KnowledgePage 分类源与导入分类）；六项拍板已裁（T-A..T-F，2026-11-07 全按推荐）；分批 A/B/C/D/E/F1/F2 待实施）
+`specs/2026-11-07-用户分组部门化与知识库分类隔离设计.md`（用户分组（`/v1/groups` 正主）部门化＋知识库自定义分类隔离：分类注册表 `knowledge_categories`、分组模型加 `allowed_categories/default_category/parent_group_id`（单亲树禁环）、分区停在部门根而子部门用分类路径并集收窄、登录签发 tenant claim 打通休眠的 tenant 分区键、执行点收在 `visible_items`/`can_view` 服务端单点（聊天召回与用户 API 双通道自动覆盖）、agent 绑组＋chat 部门根对账 403＋kb_builder 补 tenant 修断点、死端点 `/v1/user-groups` 退役、本体零 schema 改动＋三处既有 tenant 缺口顺手修、前端四页逐一对齐（GroupPage 树形＋分类绑定/EnhancedUserPage 所属分组/AgentFormPage 分组选择/KnowledgePage 分类源与导入分类）；六项拍板已裁（T-A..T-F，2026-11-07 全按推荐）；**A/B/C/D/E/F1/F2 七批已全部实施（2026-11-07），live-verify 发现并修复路由遮蔽与分类清单过滤两缺口，实施终态见文内 §7**）
 
 
 
