@@ -709,6 +709,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { formatEpochSecondDate, formatEpochSecondText, formatTimestampText, localDayEndIso, localDayStartIso } from '@/utils/displayText'
+import { extractApiDetail } from '@/utils/error'
 import { useI18n } from 'vue-i18n'
 import { useEnumLabel } from '@/composables/useEnumLabel'
 import { message, Modal } from 'ant-design-vue'
@@ -920,7 +921,7 @@ const fetchMcpSources = async () => {
     const data = res?.data ?? res
     mcpSources.value = data?.items ?? []
   } catch (e: any) {
-    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
+    message.error(extractApiDetail(e) || e?.message || t('common.error'))
   } finally {
     mcpLoading.value = false
   }
@@ -951,7 +952,7 @@ const probeMcpTools = async () => {
     mcpTools.value = (res?.data ?? res)?.tools ?? []
     if (!mcpTools.value.length) message.info(t('knowledge.mcpToolsEmpty'))
   } catch (e: any) {
-    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
+    message.error(extractApiDetail(e) || e?.message || t('common.error'))
   } finally {
     mcpProbing.value = false
   }
@@ -986,7 +987,7 @@ const saveMcpSource = async () => {
     mcpFormVisible.value = false
     await fetchMcpSources()
   } catch (e: any) {
-    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
+    message.error(extractApiDetail(e) || e?.message || t('common.error'))
   } finally {
     mcpSaving.value = false
   }
@@ -1005,7 +1006,7 @@ const pullMcpSource = async (item: any) => {
     await fetchMcpSources()
     await fetchKnowledge()
   } catch (e: any) {
-    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
+    message.error(extractApiDetail(e) || e?.message || t('common.error'))
   } finally {
     pullingId.value = ''
   }
@@ -1017,7 +1018,7 @@ const deleteMcpSource = async (item: any) => {
     message.success(t('knowledge.mcpDeleted'))
     await fetchMcpSources()
   } catch (e: any) {
-    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
+    message.error(extractApiDetail(e) || e?.message || t('common.error'))
   }
 }
 const configSaving = ref(false)
@@ -1126,7 +1127,7 @@ async function refreshIngress() {
     ingressTasks.value = res?.data?.tasks || []
     ingressStats.value = res?.data?.stats || {}
   } catch (e: any) {
-    message.error(e?.message || String(e))
+    message.error(extractApiDetail(e) || e?.message || String(e))
   } finally {
     ingressLoading.value = false
   }
@@ -1144,7 +1145,7 @@ async function handleIngressExpand(record: IngressTask) {
     const res: any = await getIngressTask(record.task_id)
     spanMap.value = { ...spanMap.value, [record.task_id]: res?.data?.spans || [] }
   } catch (e: any) {
-    message.error(e?.message || String(e))
+    message.error(extractApiDetail(e) || e?.message || String(e))
   } finally {
     const next = { ...spanLoading.value }
     delete next[record.task_id]
@@ -1158,7 +1159,7 @@ async function handleCancelIngress(record: IngressTask) {
     message.success(t('knowledge.ingressCancelled'))
     await refreshIngress()
   } catch (e: any) {
-    message.error(e?.response?.data?.detail || e?.message || String(e))
+    message.error(extractApiDetail(e) || e?.message || String(e))
   }
 }
 
@@ -1180,7 +1181,7 @@ async function handlePreviewChunking() {
     const res: any = await previewChunking({ content })
     previewResult.value = res?.data || null
   } catch (e: any) {
-    message.error(e?.message || String(e))
+    message.error(extractApiDetail(e) || e?.message || String(e))
   } finally {
     previewLoading.value = false
   }
@@ -1199,7 +1200,7 @@ async function handleSyncConfig(record: KbConfig) {
       }),
     )
   } catch (e: any) {
-    message.error(e?.response?.data?.detail || e?.message || String(e))
+    message.error(extractApiDetail(e) || e?.message || String(e))
   } finally {
     syncingConfigId.value = null
   }
@@ -1221,7 +1222,7 @@ async function openChunks(record: KnowledgeNode) {
     const res: any = await listKnowledgeChunks(chunkKid.value)
     chunkRows.value = (res?.data || []).map((c: any) => ({ ...c }))
   } catch (e: any) {
-    message.error(e?.message || String(e))
+    message.error(extractApiDetail(e) || e?.message || String(e))
     chunkRows.value = []
   } finally {
     chunksLoading.value = false
@@ -1244,7 +1245,7 @@ async function handleSaveChunk(ch: KnowledgeChunkRow) {
       message.warning(t('knowledge.chunkConflict'))
       await openChunks({ knowledge_id: chunkKid.value } as KnowledgeNode)
     } else {
-      message.error(e?.message || String(e))
+      message.error(extractApiDetail(e) || e?.message || String(e))
     }
   } finally {
     savingChunkIndex.value = null
@@ -1256,7 +1257,7 @@ async function showChunkHistory(index: number) {
     const res: any = await listKnowledgeChunkRevisions(chunkKid.value, index)
     chunkHistory.value = res?.data || []
   } catch (e: any) {
-    message.error(e?.message || String(e))
+    message.error(extractApiDetail(e) || e?.message || String(e))
   }
 }
 
@@ -1380,8 +1381,8 @@ async function fetchKnowledge() {
     if (cats.size && !categoryOptions.value.length) {
       categoryOptions.value = [...cats].map((c) => ({ label: c, value: c }))
     }
-  } catch {
-    message.error(t('knowledge.loadError'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('knowledge.loadError'))
   } finally {
     loading.value = false
   }
@@ -1407,8 +1408,8 @@ async function semanticSearchFn() {
     )
     totalItems.value = results.length
     if (!results.length) message.info(t('knowledge.searchError'))
-  } catch {
-    message.error(t('knowledge.searchError'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('knowledge.searchError'))
   } finally {
     loading.value = false
   }
@@ -1445,8 +1446,7 @@ async function handleShare() {
     shareVisible.value = false
     fetchKnowledge()
   } catch (err: any) {
-    const detail = err?.response?.data?.detail
-    message.error(typeof detail === 'string' ? detail : t('knowledge.shareError'))
+    message.error(extractApiDetail(err) || t('knowledge.shareError'))
   } finally {
     sharing.value = false
   }
@@ -1464,8 +1464,7 @@ function handleSubmitPublic(record: KnowledgeItem) {
         message.success(t('knowledge.submitSuccess'))
         fetchKnowledge()
       } catch (err: any) {
-        const detail = err?.response?.data?.detail
-        message.error(typeof detail === 'string' ? detail : t('knowledge.submitError'))
+        message.error(extractApiDetail(err) || t('knowledge.submitError'))
       }
     },
   })
@@ -1478,8 +1477,8 @@ async function fetchSubmissions() {
     const data = res?.data ?? res
     const rawItems: any[] = Array.isArray(data) ? data : data?.items ?? []
     publicSubmissions.value = rawItems.map(normalizeItem)
-  } catch {
-    message.error(t('knowledge.loadSubmissionsError'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('knowledge.loadSubmissionsError'))
   }
 }
 
@@ -1490,8 +1489,7 @@ async function handleReview(item: KnowledgeItem, approve: boolean) {
     await fetchSubmissions()
     fetchKnowledge()
   } catch (err: any) {
-    const detail = err?.response?.data?.detail
-    message.error(typeof detail === 'string' ? detail : t('knowledge.reviewError'))
+    message.error(extractApiDetail(err) || t('knowledge.reviewError'))
   }
 }
 
@@ -1596,8 +1594,7 @@ async function handleResolveConflict(item: KnowledgeConflict, resolution: Confli
     fetchKnowledge()
     if (isAdmin.value) fetchTombstones()
   } catch (err: any) {
-    const detail = err?.response?.data?.detail
-    message.error(typeof detail === 'string' ? detail : t('knowledge.reviewError'))
+    message.error(extractApiDetail(err) || t('knowledge.reviewError'))
   }
 }
 
@@ -1618,8 +1615,7 @@ async function handleRestore(item: DeletedKnowledge) {
     await fetchTombstones()
     fetchKnowledge()
   } catch (err: any) {
-    const detail = err?.response?.data?.detail
-    message.error(typeof detail === 'string' ? detail : t('knowledge.tombstoneRestoreError'))
+    message.error(extractApiDetail(err) || t('knowledge.tombstoneRestoreError'))
   }
 }
 
@@ -1628,8 +1624,8 @@ async function openRevisions(item: KnowledgeItem) {
     const res: any = await listKnowledgeRevisions(item.id)
     revisions.value = Array.isArray(res) ? res : (res?.data ?? [])
     revisionsOpen.value = true
-  } catch {
-    message.error(t('knowledge.revisionsError'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('knowledge.revisionsError'))
   }
 }
 
@@ -1650,8 +1646,7 @@ async function handleRunResolution() {
     message.success(t('knowledge.resolutionRan'))
     await fetchResolutionReviews()
   } catch (err: any) {
-    const detail = err?.response?.data?.detail
-    message.error(typeof detail === 'string' ? detail : t('knowledge.resolutionRunError'))
+    message.error(extractApiDetail(err) || t('knowledge.resolutionRunError'))
   } finally {
     resolutionRunning.value = false
   }
@@ -1663,8 +1658,7 @@ async function handleResolveReview(item: GraphResolutionReview, decision: 'merge
     message.success(t('knowledge.resolutionResolved'))
     await fetchResolutionReviews()
   } catch (err: any) {
-    const detail = err?.response?.data?.detail
-    message.error(typeof detail === 'string' ? detail : t('knowledge.resolutionRunError'))
+    message.error(extractApiDetail(err) || t('knowledge.resolutionRunError'))
   }
 }
 
@@ -1708,8 +1702,8 @@ async function saveItem() {
     }
     modalVisible.value = false
     fetchKnowledge()
-  } catch {
-    message.error(t('knowledge.saveError'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('knowledge.saveError'))
   } finally {
     saving.value = false
   }
@@ -1726,8 +1720,8 @@ function confirmDelete(item: KnowledgeItem) {
         await deleteKnowledgeNode(item.id, { agent_id: agentId.value })
         knowledgeItems.value = knowledgeItems.value.filter((k) => k.id !== item.id)
         message.success(t('knowledge.deleteSuccess'))
-      } catch {
-        message.error(t('knowledge.deleteError'))
+      } catch (err) {
+        message.error(extractApiDetail(err) || t('knowledge.deleteError'))
       }
     },
   })
@@ -1825,8 +1819,7 @@ async function handleImportUrl() {
     importUrlValue.value = ''
     fetchKnowledge()
   } catch (err: any) {
-    const detail = err?.response?.data?.detail
-    message.error(typeof detail === 'string' ? detail : t('knowledge.importError'))
+    message.error(extractApiDetail(err) || t('knowledge.importError'))
   } finally {
     importingUrl.value = false
   }
@@ -1838,8 +1831,8 @@ async function fetchKbConfigs() {
     const res: any = await listKbConfigs()
     const data = res?.data ?? {}
     kbConfigs.value = data?.configs ?? []
-  } catch {
-    message.error(t('knowledge.importError'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('knowledge.importError'))
   }
 }
 
@@ -1875,8 +1868,8 @@ async function handleCreateConfig() {
     message.success(t('knowledge.importSuccess'))
     resetConfigForm(false)
     await fetchKbConfigs()
-  } catch {
-    message.error(t('knowledge.importError'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('knowledge.importError'))
   } finally {
     configSaving.value = false
   }
@@ -1887,8 +1880,8 @@ async function handleDeleteConfig(record: KbConfig) {
     await deleteKbConfig(record.id)
     message.success(t('knowledge.importSuccess'))
     await fetchKbConfigs()
-  } catch {
-    message.error(t('knowledge.importError'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('knowledge.importError'))
   }
 }
 
@@ -1906,8 +1899,8 @@ async function fetchKbCollections() {
     const res: any = await listKbCollections()
     const data = res?.data ?? {}
     kbCollections.value = data?.collections ?? []
-  } catch {
-    message.error(t('knowledge.importError'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('knowledge.importError'))
   }
 }
 
@@ -1922,8 +1915,8 @@ async function handleCreateCollection() {
     message.success(t('knowledge.importSuccess'))
     collectionForm.value = { config_id: '', collection_name: '' }
     await fetchKbCollections()
-  } catch {
-    message.error(t('knowledge.importError'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('knowledge.importError'))
   } finally {
     collectionSaving.value = false
   }
@@ -1934,8 +1927,8 @@ async function handleDeleteCollection(record: KbCollection) {
     await deleteKbCollection(record.id)
     message.success(t('knowledge.importSuccess'))
     await fetchKbCollections()
-  } catch {
-    message.error(t('knowledge.importError'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('knowledge.importError'))
   }
 }
 

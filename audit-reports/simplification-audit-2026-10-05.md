@@ -12048,3 +12048,14 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     三批路线＋风险回退。INDEX.md §2.10 登记。拍板项三（facts 源钟）随 571
     落地同步改为已落定。纯文档零代码。
     **下一枚空号现查：本格取 573，后继从 574 起。**
+574. **detail 收口批 0 三页试点落格（承 §6-566，仓库级收口第一刀）**：
+    extractApiDetail helper（utils/error.ts，+3 判据格 22 passed）先行，
+    KnowledgePage 33 处（B 类 15＋A 类 12＋第三形状 6：`e?.message || String(e)`
+    形同根因扫荡）、ModelPage 22 处、SettingPage 10 处——共 65 处接上
+    `extractApiDetail(e) || 原兜底`，通用文案退化为「取不到 detail 原话时」兜底。
+    逐处甄别排除：剪贴板/JSON.parse 等本地 catch（盘点报告误计 1 处已现场
+    纠正）、F-11/F-12 静默守卫 catch。每页补 1 条「mock 409 → toast 显 detail
+    原话」最小回显格。
+    判据：四文件 vitest 47 passed（复核实测）；vue-tsc --noEmit 零错误。
+    净 +179/−117。余量面：A 类全仓约 137 处待批 1-6 按业务域推进（盘点
+    §四/§六清单为工单）。

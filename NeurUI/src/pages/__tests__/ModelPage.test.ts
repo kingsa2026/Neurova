@@ -43,6 +43,7 @@ vi.mock('ant-design-vue', () => ({
 
 import ModelPage from '../ModelPage.vue'
 import { testConnection } from '@/api/modules/providers'
+import { listModels } from '@/api/modules/models'
 import { message } from 'ant-design-vue'
 
 const messages = {
@@ -199,5 +200,29 @@ describe('ModelPage — 默认 LLM 下拉弹层挂载契约（回归 2026-09-09�
         '弹层容器必须脱离玻璃卡片（挂 body），否则被 overflow:hidden 截断',
       ).toBe('body')
     }
+  })
+})
+
+// detail 收口批 0：后端错误 detail 原话直达用户（防回归）。
+// 契约：请求 reject 带 axios 形 detail 时，toast 收到 detail 原话；
+// 通用文案只在取不到 detail 时兜底（抽取单源见 @/utils/error 的 extractApiDetail）。
+describe('ModelPage — 后端错误 detail 回显（批 0）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  it('模型列表接口 reject 带 axios detail 时，toast 显原话而非通用 common.error', async () => {
+    ;(listModels as ReturnType<typeof vi.fn>).mockRejectedValueOnce({
+      response: { status: 409, data: { detail: '测试原话' } },
+    })
+
+    mountPage()
+    await flushPromises()
+
+    expect(message.error).toHaveBeenCalledWith('测试原话')
   })
 })

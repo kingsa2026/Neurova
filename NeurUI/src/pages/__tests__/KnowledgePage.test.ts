@@ -518,3 +518,23 @@ describe('KnowledgePage 文件导入（批量契约）', () => {
     wrapper.unmount()
   })
 })
+
+// ══════════════════════════════════════════════════════════════
+// detail 收口批 0：后端错误 detail 原话直达用户（防回归）
+//
+// 契约：请求 reject 带 axios 形 detail 时，toast 收到 detail 原话；
+// 通用文案只在取不到 detail 时兜底（抽取单源见 @/utils/error 的 extractApiDetail）。
+// ══════════════════════════════════════════════════════════════
+describe('KnowledgePage 后端错误 detail 回显（批 0）', () => {
+  it('列表接口 reject 带 axios detail 时，toast 显原话而非通用 loadError', async () => {
+    vi.mocked(getKnowledgeNodes).mockRejectedValueOnce({
+      response: { status: 409, data: { detail: '测试原话' } },
+    } as any)
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(message.error).toHaveBeenCalledWith('测试原话')
+    wrapper.unmount()
+  })
+})
