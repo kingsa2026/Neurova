@@ -662,6 +662,15 @@ async def create_or_update_config(
     """
 # 钉钉 client_id/client_secret 提升为规范 app_id/app_secret
     _promote_credential_aliases(request.channel_type, request)
+    # 会话存档只收指针（库路径／环境变量名／私钥文件路径）：明文密钥在写入口就拒，
+    # 不等到读取面才炸。extra 由 GET 原样回显，明文进来即等于对外泄露。
+    if request.channel_type == "wecom":
+        from neurova.channels.wecom_archive import ArchiveConfigError, validateArchiveExtra
+
+        try:
+            validateArchiveExtra(request.extra)
+        except ArchiveConfigError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
     store = _load_store()
     config_data = safe_model_dump(request)  # s9: pydantic v1 兼容
 
