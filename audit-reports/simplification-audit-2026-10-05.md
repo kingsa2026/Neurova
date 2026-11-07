@@ -12004,3 +12004,47 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     无源时间的事实回退 recorded_at 还是排除；③ 与 valid_from 的优先级。
     三项设计决策需人裁，不适合无人值守。下一步：点单后按 §4 L3 详设实施。
     **下一枚空号现查：本格取 570，后继从 571 起。**
+
+### 2026-11-07 下午 K-09 双批＋企业源立项＋detail 收口启动（后继从 574 起）
+
+571. **K-09 facts 侧源钟 v36 落格（§6-570 三裁定兑现）**：
+    - 裁定（点单 2026-11-07）：① 源钟落 facts 表两列（v36 迁移）；② 无源时间
+      回退 recorded_at（逐行 COALESCE，存量行为零漂移）；③ valid_from 职责不动
+      （temporal 分类与窗口判定照旧，不进排序）。
+    - 落点：`knowledge_facts._SCHEMA_V36` 两列；AdmissionRequest 加
+      sourceCreatedAt/sourceModifiedAt；admit 落列；咽喉 dupe 折回路径与
+      upsertFact 两个去重早退路径都补 backfillSourceClock（只前移不倒拨）；
+      conflict_judge.decide 排序键换源钟、依据文案按行写明钟名。命中点扫荡：
+      entry_ledger 投影（含 held 早领分支跟随前移）、reconcile 回填、
+      企业源映射 DSL 补 sourceCreatedAt/sourceModifiedAt 两键＋registry 透传。
+    - 附带修正：test_tenantOntology v25 夹具补 v1 DDL（真实 v24 库必有
+      knowledge_facts，链式迁移下不可能缺 v1 表；夹具欠模拟被我批暴露，
+      A/B stash 自证定责后照实态补齐）。
+    - 判据：test_fact_source_clock 11 passed（红灯 8 failed 实证在案）；
+      knowledge 全目录 1419 passed。活体：全新库 user_version=36；
+      POST /knowledge/import 真实导入 → 治理行带源钟两列。
+    - commit：feat(knowledge) K-09 facts 侧源钟 v36。
+572. **K-09 FTS 搬主库 v37 落格（裁定：FTS 搬进主库，非推荐项 B/C 之外的
+    用户拍板）**：FTS 两表自建独立 knowledge_fts.db 是第二份 schema，foundation
+    user_version 链物理够不着（一库一版本域）。落点：v37 迁移收编两表
+    （SQL 仍由 fts_index 持有）；删自建 _SCHEMA 与 tenant_id 手抄补列；
+    busy_timeout=5000（多连接同文件）；docs 表补 source_modified_at 列，
+    消费方＝search() 确定性同分 tie-break（ORDER BY bm25, source_modified_at
+    DESC——同分命中源文档更新者排前，零配置零漂移）；repository 指向主库＋
+    _retireLegacyFtsFile best-effort 退役旧库文件（派生索引可重建）。
+    判据：test_fts_maindb 7 passed（红灯 6 failed 在案）；knowledge 全目录
+    1426 passed 零失败。活体：v36 根重启升 37；真实根 ftsSearch 命中导入条目、
+    health docs=1、旧 knowledge_fts.db 已删。
+    **旁观察（新登记）**：`GET /knowledge/audit/index-health` 处理函数
+    get_knowledge_index_health 全仓零注册（孤儿路由）——FTS 健康读数因此
+    无 REST 面。待裁定：注册挂载（影响面小，knowledge.py 聚合器加一条）或
+    删函数（连带 ftsHealth 死码面裁定）。本格不动它。
+    commit：feat(knowledge) K-09 FTS 搬主库 v37。
+573. **企业源真连接器立项方案落格（§6-561/§6-564「另立项」兑现）**：
+    docs/specs/2026-11-07-enterprise-source-connectors-plan.md——现状走查
+    （链路全段在位；断点定性：ingestBatch 生产零调用＋注册表恒空＋无触发
+    摄取端点）、候选取舍（CSV/TSV/JSON 行文件、目录轮询、SQLite 旁库只读、
+    HTTP 拉取零新增依赖进三批；数据库直连/ERP SDK/CDC 违反六决策缓办）、
+    三批路线＋风险回退。INDEX.md §2.10 登记。拍板项三（facts 源钟）随 571
+    落地同步改为已落定。纯文档零代码。
+    **下一枚空号现查：本格取 573，后继从 574 起。**
