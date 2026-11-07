@@ -12254,7 +12254,7 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
 
 588. **PR #374 第八轮：九条腿全红逐条归因——按核数的配额门槛（1 核起得来、2 核起不来）＋本机与真容器两路读数复核** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
     - **先分清红在谁身上，不猜**：本轮 PR 构建 `cnb-cdp-1k6rcviqp`（sha `dbeeb611`）九条腿**全部**止步 `Prepare`，日志原文一律 `Root Group's events CPU-core hours are insufficient for pre-freezing`，折合 0.33 / 0.67 / 1.33 三种规格；每个 stage 状态都是 `skipped`——**一条门禁脚本都没跑到**，不存在"代码判据红"这个读数。
-    - **配额门槛按核数折，今天实测到小数点后两位**：同一天同一分支上，`cpus: 1` 的探针两次全绿（`cnb-lve-1k6re3pc3` Prepare 15.1s、`cnb-f8u-1k6rg8lbd`），`cpus: 2` 的探针两次全红在同一句（`cnb-uop-1k6re9hcr` / `cnb-pbo-1k6reo4k9`，折合 0.17~0.34 核时被判不足）。即**当前额度窗只容得下 1 核**，与「哪条腿、改了什么」无关。这条读数也解释了为什么本会话自己的 8 核 NPC 接力构建（`cnb-vkg-1k6rcvmlq`）能起来——它抢在额度耗尽前完成了 Prepare。
+    - **配额门槛按核数折，今天实测读数（本格写后随即修订，见下条）**：同一天同一分支上，`cpus: 1` 的探针 `cnb-lve-1k6re3pc3` Prepare 15.1s **真 success**；`cpus: 2` 的两次探针 `cnb-uop-1k6re9hcr` / `cnb-pbo-1k6reo4k9` 红在同一句（各折合 0.33 核时被判不足）。
     - **本机按 CI 同款跑法复算三片受保护子集**（`--timeout 300`，逐片各起一个进程、串行，与 CI 分片同形态）：
       ```
       shard 1   3125 passed, 9 skipped, 1 xfailed   (8m32s)
@@ -12273,3 +12273,37 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **一处必须写明的偏差**：`api_trigger_verify` 的依赖审计两条腿在 1 核上反复被 `Prepare` 掐（`cnb-r04-1k6rflu2q` / `cnb-67m-1k6rfs059` 都是同一句配额），故 `pip-audit` / OSV 两路改在本机按同一份锁复算：`pip-audit` 对已装树报 `No known vulnerabilities found`；`tools/npx-runtime` 真 `npm ci` 后 `npm ls glob minimatch --all` 读数 `glob@14.0.4` / `minimatch@11.0.5`（单一版本、无嵌套副本），`npm audit` → `found 0 vulnerabilities`。与本单 `4d3f2a6c` 的 overrides 口径一致。
     - **结论与需要人裁决的那一件事**：代码侧本轮**零可修项**——八轮下来九条腿的每一条都在本机与真容器上过了，剩下的唯一阻塞是根组织的「云原生构建-CPU」160 核时/月免费额度已耗尽（平台侧 `组织 → 设置 → 用量管理` 绑腾讯云预算可提额，超额 ¥0.125/核时）。我不动 `.cnb.yml` 的 `cpus`：把 8 核的 `unit-tests` 降到 1~2 核会当场装不下受保护子集（`code 137` 的成因已写在文件头），那是拿降判据换绿（教义第 2 条）。
     - **净 LOC**：文档 +本格，生产代码 +0、配置 +0。**下一枚空号现查：本格取 588，后继从 589 起。**
+
+589. **PR #374 第九轮：配额窗口复测到「8 核能起」＋上一格两处读数订正** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **先订正上一格的两处读错**（同一事实源、同一批构建号，重取一遍即见，不改判据只改读数）：
+      - §6-588 写「`cpus: 1` 的探针两次全绿（`cnb-lve-1k6re3pc3`、`cnb-f8u-1k6rg8lbd`）」——**后一个不是绿**。`cnb-f8u-1k6rg8lbd`（标题 `quota probe 1core c`）的 `Prepare` 状态是 `error`，日志原文 `insufficient for pre-freezing(... equivalent to 0.17 core-hours)`；它在构建列表里显示 `status: success` 是因为该探针声明了 `allowFailure: true`（流水线级状态被改写，stage 级读数仍是 error）。拿它当「1 核能起来」的第二个样本，等于让一条 `allowFailure` 替配额不足背书——这正是本仓反复在防的「绿了但没跑」形态。
+      - §6-588 写「当前额度窗**只容得下 1 核**」——**已被同分支后续读数推翻**。本轮派发单触发的 NPC 构建 `cnb-l1t-1k6rgdjk0` 是 `cpus: 8`，`Prepare` 状态 `success`，日志 `Pipeline actual limit cpus: 8, memory: 16`、`runs on cnb:arch:default`，跑满 4.2s 正常收尾。即 8 核那一条在 **2026-11-07T17:20:39Z** 起得来。
+    - **真正稳定的规律是「同一时刻并发申请的总量」，不是「单条核数」**：把两个数的**时间轴对齐**就看得见——
+      - `2026-11-07T17:20:36Z` 的 PR 构建 `cnb-e3s-1k6rgdgar`：九条腿**同时**申请（2/2/8/2/4/2/4/2/2 核），**九条全红**在 Prepare 配额句（0.33/0.67/1.33 三种规格）；
+      - `3 秒后` 的 `17:20:39Z` 单条 NPC 构建：**8 核，Prepare 成功**。
+      同一额度窗、相差 3 秒，单条 8 核能起、九条并发起不来——被拒的是**并发申请的总核时**，不是「8 > 1」这种单条门槛。故 §6-588 那句「只容得下 1 核」把「并发总量不足」误读成了「核数上限」，两个含义的修法不同（前者是别并九条同时抢/等窗口，后者才是降 cpus），必须分开写。
+    - **本轮代码侧按 CI 同款复算，全部绿**（本机，同一份树 @ `4c5cf610`，`requirements-ci.lock` 装齐后）：
+      ```
+      shard 1   3125 passed, 9 skipped, 1 xfailed   (10m52s)
+      shard 2   2785 passed, 5 skipped, 2 xfailed   (11m16s)
+      shard 3   2978 passed, 4 skipped              (11m32s)
+      合计 8888 条，零失败
+      coverage_report.py --fail-under 60  → Total coverage: 88.13%（88% 汇总行）
+      ci_static_gate.py --skip-import     → 三格全过（语法 / 未定义名 / 导入巡检）
+      ruff check neurova tests            → All checks passed
+      deploy_config_consistency_check.py  → ERROR 0 / WARN 1（既有 R7 存量）
+      perf_gate.py                        → 性能门禁通过
+      experience_quality_gate.py          → 门禁通过
+      audit_ledger_commit_guard.py        → EXIT=0（1389 条引用全可达，例外清单 5 行报「本克隆不可核验」）
+      tests/e2e/test_backend_boot.py      → 5 passed
+      ```
+    - **前端两道路（本机真装 `npm ci` 后）**：
+      ```
+      npx vitest run          → 294 files passed / 2 skipped；2382 passed / 1 skipped，EXIT=0
+      npx vue-tsc --noEmit    → 零错误，EXIT=0
+      npm audit --audit-level=high → EXIT=0（6 条 moderate 存量，无 high）
+      npm ls follow-redirects --all → axios@1.20.0 → follow-redirects@1.16.2（单一版本，$ 修复已落位）
+      ```
+    - **已确认的一处「真红」与本单无关且已修**：主线 `push` 构建 `cnb-830-1k6r4h6lj`（`98b0fa42`）的 `static-gate` 是**真跑到并真红**（不是配额），三处 `undefined name`：`neurova/channels/manager.py:166 channel_type`、`neurova/collaboration/neurflow/storage.py:885 logger`、`neurova/knowledge/ontology/query_expander.py:116 Dict`。PR 分支 `4d3f2a6c` 已修，本机同上门禁复算三格全过——即该红已在本单闭环。
+    - **结论**：代码侧零可修项（九轮读数一致）。九条腿的红全部发生在 `Prepare`，一条门禁脚本都没跑到；能否起来取决于「同时刻并发申请的总核时」，当前额度窗（160 核时/月免费额度已耗尽）容不下九条并发。需要人裁决的仍是同一件事：绑腾讯云预算提额，或把 PR 触发改为串行少量腿，而不是降 cpus 换绿（8 核 `unit-tests` 降到 1~2 核会当场 `code 137`，教义第 2 条）。
+    - **净 LOC**：文档 +本格（含 §6-588 两处读数订正 −2/+2 行），生产代码 +0、配置 +0。**下一枚空号现查：本格取 589，后继从 590 起。**
