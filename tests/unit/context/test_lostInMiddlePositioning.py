@@ -12,6 +12,7 @@ import pathlib
 from unittest import mock
 
 import pytest
+from tests.ast_scan import parseSource
 
 ORCH_PY = (
     pathlib.Path(__file__).resolve().parents[3] / "neurova" / "context" / "orchestrator.py"
@@ -82,7 +83,7 @@ def test_no_second_ranking_definition():
 
 def test_orchestrator_draw_path_calls_mitigation():
     """AST 接线守卫：draw 召回装配路径必须调用 applyLostInMiddleMitigation。"""
-    tree = ast.parse(ORCH_PY.read_text(encoding="utf-8"))
+    tree = parseSource(ORCH_PY.read_text(encoding="utf-8"), str(ORCH_PY))
     calls = [
         node
         for node in ast.walk(tree)

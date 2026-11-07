@@ -1451,3 +1451,13 @@ tests/unit/collaboration/test_outboxDeliveredIntoNotificationFace.py
 # §6-532：后端不可得时交回信封 success=False 并点名不可得，社交出口据此引导「先启用后端」，
 # 不再把「没装」说成「没配登录态」；后端在但渠道未配登录态那条腿一字未动。逐文件单跑 5 passed
 tests/unit/web_reach/test_unavailableBackendIsNamedNotSilentEmpty.py
+# 本体栈升级计划 B1–B7：推导事实读侧治理单源（观察态过滤落 FactSurface，翻开关双向可回滚）
+# —— 与四条 B 系列判据同批入索引，本轮补进本片（索引与各片并集须逐条相等的守卫抓到漏登）
+tests/unit/knowledge/test_derivationCitation.py
+tests/unit/knowledge/test_factSurfaceDerivationGovernance.py
+tests/unit/knowledge/test_admissionBatchCommit.py
+tests/unit/knowledge/ontology/test_turtleExport.py
+tests/unit/knowledge/ontology/test_conditionClassDerivation.py
+tests/unit/knowledge/test_graphWalkDerivationGovernance.py
+# 对话链路取数口径：真走查→真支撑→真 memories→真回合 metadata，四段不许各写一套
+tests/unit/agent/test_derivationReachesTurnMetadata.py

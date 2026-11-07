@@ -325,7 +325,7 @@ main:
         tags: cnb:arch:amd64
         cpus: 4
       docker:
-        image: node:20
+        image: node:22
         volumes:
           - /root/.npm
       env:

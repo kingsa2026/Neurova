@@ -115,7 +115,7 @@ const messages = {
     configSpaceId: '知识空间 ID',
     configSpaceIdPh: '可选，限定单一知识空间',
     configApiUrl: 'API URL',
-    configApiUrlPh: 'POST 端点，请求体 {query, dataset_id, top_k}',
+    configApiUrlPh: 'POST 端点，请求体含 query 与 top_k 字段',
     configKbId: '知识库 ID',
     configKbIdPh: '可选，ima 知识库 ID',
     configAllowLocal: '允许本地地址',

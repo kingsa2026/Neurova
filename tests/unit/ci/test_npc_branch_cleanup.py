@@ -252,20 +252,24 @@ class TestCriterionIsMergeFactNotBranchName:
     def testRealRepoMergeRecordYieldsNonAutoPrefixedSourceBranch(self):
         """语义红灯：直接对本仓**真实 git 历史**取数，钉住那次漏判的形态。
 
-        本仓主线里存在这样一个合并提交 —— `0cc0719a`（`合并来自
-        fix-caliber-generated 的合并请求 #217`），其第二父 `bdda0ba1` 就是
-        `fix-caliber-generated` 的分支头。这是**已写进主线历史的事实**，
-        不随该分支后来是否被删除而改变，所以这条用例只用本地 git 取数（不碰网络）。
+        判据要证的是「分支头是否落进主线合并记录」这个**事实**，不是某一枚具体 sha。
+        故 tip 从现读的历史里取，不钉字面量号：钉号会让这条用例随一次并发重写历史
+        当场变红，而它要守的语义一个字都没变（现场：`0cc0719a` 那笔被重写成
+        `b04d92fd` 同标题笔，钉号的版本因此报「本地 git 历史里找不到第二父」）。
 
-        旧口径按名字前缀判定，对这一形态给 `keep`；`bdda0ba1` 落进合并记录
-        却不带 `auto/` 前缀，正是它漏判的那一类。判据改为「读合并事实」后，
-        同样的输入必须判 `stale`。
+        旧口径按名字前缀判定，对非 `auto/` 前缀的源分支给 `keep`；而源分支名字是平台
+        产物（`fix-caliber-generated` 这类就是 NPC 建的），正是它漏判的那一类。
+        判据改为「读合并事实」后，同样的输入必须判 `stale`。
         """
-        tips = cleanup.mergedSourceTips()
-        assert "bdda0ba19933b07935adaf8f40bcbcd04201fd21" in tips, (
-            "本地 git 历史里找不到 0cc0719a 的第二父 —— 取数口径与主线历史不符"
+        tips = sorted(cleanup.mergedSourceTips())
+        assert tips, (
+            "本地 git 历史里一枚合并提交的第二父都没取到 —— 取数口径与主线历史不符"
+            "（`git log --merges --format=%P origin/main` 应当非空）"
         )
-        heads = {"fix-caliber-generated": "bdda0ba19933b07935adaf8f40bcbcd04201fd21"}
+        # 取一枚真实存在的第二父，配一个**不带 `auto/` 前缀**的分支名：
+        # 名字不参与判定，事实才是判据。
+        tip = tips[0]
+        heads = {"fix-caliber-generated": tip}
         verdicts = cleanup.classifyBranches(
             heads, tips, ancestorOfMain={"fix-caliber-generated": True}
         )

@@ -380,7 +380,8 @@ def artifactSignatureState(path: Path) -> str:
         r = subprocess.run(
             ["powershell", "-NoProfile", "-Command",
              "(Get-AuthenticodeSignature -LiteralPath $env:NEUROVA_SIGN_PROBE).Status"],
-            capture_output=True, text=True, timeout=120, env=env)
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=120, env=env)
     except Exception:  # noqa: BLE001 - 探测失败按未签名处理，不影响出包
         return "ProbeFailed"
     return (r.stdout or "").strip().splitlines()[-1].strip() or "Empty"

@@ -595,8 +595,10 @@ class KnowledgeRetrieverAdapter:
             # C-2：时间戳透传（LLM 时间线推理 + recency 排序的数据源）
             "recorded_at": item.get("recorded_at"),
             "valid_from": item.get("valid_from"),
-            # B4/D-2：推导标注透传（LLM 可引用"这是推出来的"）
-            "derivation": item.get("derivation"),
+            # B4/D-2 的推导标注**不在这里挂**：挂不挂由下面 `_derivationOf()` 一处判定。
+            # 此前这里先无条件写了一次 `item.get("derivation")`（值常是 None），
+            # 于是"没有推导参与"的条目也带着一个 `derivation: None` 的键——
+            # 判据按「键是否存在」读，那种形态等价于替账本作伪证（同函数末尾那段注释）。
             "base_score": float(
                 item.get("base_score", item.get("score", 0.0)) or 0.0
             ),

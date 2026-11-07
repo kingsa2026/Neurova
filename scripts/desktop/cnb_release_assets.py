@@ -44,7 +44,10 @@ def cnb_token() -> str:
     # 不用 os.popen 的 `2>nul`：那是 Windows 专用重定向，非 Windows 下会静默取不到。
     proc = subprocess.run(
         ["git", "remote", "get-url", "cnb"],
-        capture_output=True, text=True, check=False,
+        # 显式钉 UTF-8：默认走宿主 locale（Windows 上是 cp936），remote URL 里
+        # 一旦混进非 ASCII（含中文的仓库路径）这里就会把 stdout 读成 None 或替换成
+        # U+FFFD，报错落点会指向"解析失败"而不是编码。
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
     )
     out = (proc.stdout or "").strip()
     m = re.search(r"https://[^:]+:([^@]+)@cnb\.cool", out)

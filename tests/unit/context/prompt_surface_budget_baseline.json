@@ -11,6 +11,15 @@
       "rules_sections": 1439,
       "tools_description": 13252,
       "total_always_on_chars": 14691
+    },
+    {
+      "phase": "CI-收口-2026-11-07",
+      "date": "2026-11-07",
+      "description": "工具清单从 72 件涨到 91 件（十九个批次各自新增内置工具，逐批都没人在这一格留痕，于是基线与实测脱节 2553 字符）。本批只做如实登记：实测值写进 history，不删旧条目；等量旧文案的清理**未做**，作为开项登记在台账（净预算未降这一点不含糊过去）。",
+      "rules_sections": 1435,
+      "tools_description": 15805,
+      "total_always_on_chars": 17240,
+      "waiver": "CI-收口-2026-11-07"
     }
   ]
 }

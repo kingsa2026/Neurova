@@ -144,6 +144,7 @@ def test_audioAndVideoShareTheMediaBranchNotTheTextBranch(file_type):
 
     assert file_type in MEDIA_ATTACHMENT_FILE_TYPES
 
+@pytest.mark.timeout(120)   # 父墙 120 > 子墙 60：先后关系钉住，别让全局 30s 先到点把整场打死
 def test_extractKeyframesOnRealVideoOrHonestReason(tmp_path):
     """抽帧判据咬真视频真 ffmpeg；本宿主没有 ffmpeg 时改咬"诚实原因"。
 
