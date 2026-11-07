@@ -15,6 +15,16 @@ from .protocols import SOURCE_TYPES
 #: object kind 闭集：column（列值）/template（模板拼出）/term（常量术语）/literal（常量字面量）
 OBJECT_KINDS = ("column", "template", "term", "literal")
 
+#: 变体闭集（2026-11-07 裁定 §2.3-1A）：单类型＋变体字段。编译期「给了就收口、
+#: 不给不拒」——B14 时代 sql/erp_api 描述符没有变体字段，存量判据不破；
+#: 工厂（registry.buildAdapter）按需强制要求。闭集随适配器批次只增不改。
+VARIANT_CLOSED_SETS: Dict[str, tuple] = {
+    "file": ("format", ("csv", "tsv", "json", "jsonl")),
+    "sql": ("driver", ("postgresql", "mysql", "mssql", "oracle", "sqlite")),
+    "erp_api": ("vendor", ("kingdee", "yongyou")),
+    "chat": ("vendor", ("wecom", "wechat")),
+}
+
 _TEMPLATE_SLOT = re.compile(r"\{([A-Za-z0-9_]+)\}")
 
 #: v34 迁移：企业源配置表（描述符/游标/启用开关）。凭据不在此表（复用 NEUROVA_KB_SECRET）。
@@ -43,6 +53,12 @@ def validateDescriptor(descriptor: Dict[str, Any], registry: Any,
     if sourceType not in SOURCE_TYPES:
         raise MappingError(
             "sourceType %r 不在白名单（%s）" % (sourceType, " / ".join(SOURCE_TYPES)))
+    if sourceType in VARIANT_CLOSED_SETS:
+        field, closed = VARIANT_CLOSED_SETS[sourceType]
+        variant = str(descriptor.get(field) or "")
+        if variant and variant not in closed:
+            raise MappingError("%s 的 %s %r 不在闭集（%s）"
+                               % (sourceType, field, variant, " / ".join(closed)))
     columns = set(descriptor.get("columns") or [])
     if not columns:
         raise MappingError("映射描述符缺 columns 声明（logical table 列集）")

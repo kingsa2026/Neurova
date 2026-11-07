@@ -146,3 +146,12 @@ comtypes; sys_platform == "win32"
 
 # CLI 呈现层（`cli.py` 模块级 `from rich import box`）——直接依赖，显式声明。
 rich>=13.0
+
+# ── 企业源数据库直连驱动（可选段，2026-11-07 裁定 §2.4-1）────────────────
+# 六决策第 4 项的有边界豁免（specs/2026-09-20-knowledge-foundation-design.md §0 补记）。
+# 只在需要对应数据库连接器时装；适配器惰性 import＋fail-soft——未装时 health
+# 显式 "driver not installed"，进程不崩。CI 薄环境（requirements-ci.txt）不收本段。
+# psycopg2-binary>=2.9     # PostgreSQL（sql.driver=postgresql）
+# PyMySQL>=1.1             # MySQL（sql.driver=mysql）
+# pymssql>=2.2             # MSSQL（sql.driver=mssql）
+# oracledb>=2.0            # Oracle（sql.driver=oracle）
