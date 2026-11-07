@@ -12208,4 +12208,11 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
       ci_static_gate.py --skip-import       三格全过
       ```
     - **A/B 自证（预存红不算回归，AGENTS.md §4）**：`tests/unit/desktop` 整目录修前 5 failed → 修后 3 failed，差额恰是本单与并发那笔一起修掉的版本分叉格；余下 `test_bundle_runtime_dirs.py` ×2 与 `test_stagedBackendAgreesWithDeclaredVersion`（`resources/backend/` 缺席，本机未打包）两侧同集合，属预存红。
-    - **净 LOC**：生产池 +0；配置池 `bin/version.txt` +1/−1（一行版本串）；判据 +19/−0、台账 +21 均不计入。**下一枚空号现查：本格取 586，后继从 587 起。**
+    - **live-verify（真容器，`api_trigger` 构建 `cnb-nqb-1k6r7tbh9`，1 核 / python:3.12）**：PR 侧本轮九条腿全红在 `Prepare` 配额（`Root Group's events CPU-core hours are insufficient for pre-freezing`，`cnb-edu-1k6r7le3i` / `cnb-6cs-1k6r7ongp` 两次都是这句，2 核规格也起不来），与代码无关，故另起一条 1 核验证构建取现场读数：
+      ```
+      deploy config gate             EXIT=0   ERROR 0 / WARN 1（既有 R7 存量）
+      version single source guard    41 passed in 16.15s（py3.12.16 / pytest-9.2.0）
+        test_installer_version_single_source.py  .....          5
+        test_deploy_config_guard.py              ............... 36
+      ```
+    - **净 LOC**：生产池 +0；配置池 `bin/version.txt` +1/−1（一行版本串）；判据 +19/−0、台账 +23 均不计入。**下一枚空号现查：本格取 586，后继从 587 起。**
