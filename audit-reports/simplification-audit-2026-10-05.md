@@ -12137,3 +12137,10 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **判据**：EnterpriseSourcesPage 9 passed（死格改判＋4 新格）；
       locale-consistency 41 passed；vue-tsc 零错误；前端全量 2380 passed。
     - **下一枚空号现查：本格取 578，后继从 579 起。**
+
+579. **设计落格：用户分组部门化（含子部门）＋知识库自定义分类隔离（六拍板全按推荐裁，分批待实施）** —— 用户点单三问：①知识库分类可自定义、在用户分组绑定、分组可否实现部门划分；②子部门怎么设计；③前端 UI 随变化做功能对齐。
+    - **现状走查（三轮盘点＋亲核双源）**：tenant 分区键全链已铺（条目 `can_view`/`visible_items` 租户先行 `repository.py:1086-1097/1138`、FTS `fts_index.py:224-226`、facts/subjects 唯一索引 v20/v23、本体 v25 主键、JSON 图谱 per-(agent,tenant)）但**无签发链**（登录不签 tenant claim `api/endpoints/auth.py:289-298`、users 表无列、AgentConfig 无字段）⇒ 真实请求恒 default，分区休眠；category 是自由字符串标注非边界（无注册表、`repository.py:1156-1157` 仅显式传参等值过滤）；**两套"用户分组"并存**——`user_group_api.py`（`/v1/user-groups`）内存 dict 死端点零消费方 vs `auth/user_group_model.py`（`/v1/groups`）正主（JSON 落盘、成员管理、`allowed_modules` 白名单先例、admin 门、前端 GroupPage）；聊天召回与用户 API 已收敛到 `visible_items` 单点（agent 隔离可服务端生效不依赖传参）；kb_builder 落库不传 tenant（`kb_builder_executor.py:127/147`）为既有断点；term_registry 三查询/`/ontology/validate` 任意 tenantId/`rebuildProjectionFromAuthority` 两处共三处既有 tenant 缺口。
+    - **设计要点**：分组即部门（正主扩展，不新造租户实体、不引入第四套组分类学）；**分区停在部门根，子部门用分类收窄**——`parent_group_id` 单亲树禁环，用户 tenant claim＝沿链上溯的部门根 id（四存储层 `tenant_id=?` 零改动），子组绑专属分类、部门根绑共享分类，生效白名单＝路径并集（空=不限制跳过）；分类注册表 `knowledge_categories` 单源；执行点收 `visible_items`/`can_view`/`can_modify`＋FTS `category IN`（default 部门与 admin 行为不变＝反向钉）；agent 绑组＋chat 部门根对账 403＋kb_builder 补 tenant/category；本体零 schema 改动＋三缺口顺手修；死端点退役；前端四页逐一对齐（GroupPage 树形＋分类绑定/EnhancedUserPage 所属分组/AgentFormPage 分组选择/KnowledgePage 分类源改注册表＋导入分类，顺带消除"分类下拉反推＋仅首填"缺陷）。
+    - **六拍板（2026-11-07 全按推荐裁，备选影响面存档于设计 §5）**：T-A 单主组；T-B JWT 登录签发 tenant claim（改组重登生效）；T-C 白名单外严格不可见＋导入配套；T-D agent 跨部门严格绑定 403；T-E 死端点退役删除；T-F 子部门白名单路径并集。
+    - **交付物**：`docs/specs/2026-11-07-用户分组部门化与知识库分类隔离设计.md`（§0 摘要/§1 现状事实带 file:line/§2 后端骨架/§3 前端逐页对齐/§4 分批 A/B/C/D/E/F1/F2 与红灯判据/§5 拍板记录/§6 明确不做）＋INDEX §2.10 登记。纯设计批，代码 0/0；实施按 §4 分批另行点单。
+    - **下一枚空号现查：条目行尾号现算 578 ⇒ 本格取 579，后继从 580 起。**
