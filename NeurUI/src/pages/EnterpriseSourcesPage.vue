@@ -27,6 +27,7 @@
             <th>{{ t('ontology.entEnabled') }}</th>
             <th>{{ t('ontology.entCursorField') }}</th>
             <th>adapter</th>
+            <th v-if="isAdmin">{{ t('ontology.entIngestBtn') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -48,6 +49,16 @@
                   ? t('ontology.entAdapterRegistered')
                   : t('ontology.entAdapterReserved') }}
               </a-tag>
+            </td>
+            <td v-if="isAdmin">
+              <GlassButton
+                size="sm"
+                :loading="ingestingId === row.source_id"
+                :data-testid="`ent-ingest-${row.source_id}`"
+                @click="triggerIngest(row.source_id)"
+              >
+                {{ t('ontology.entIngestBtn') }}
+              </GlassButton>
             </td>
           </tr>
         </tbody>
@@ -79,7 +90,47 @@
           <a-select v-model:value="form.sourceType" size="sm" data-testid="ent-source-type">
             <a-select-option value="sql">sql</a-select-option>
             <a-select-option value="erp_api">erp_api</a-select-option>
+            <a-select-option value="file">file</a-select-option>
+            <a-select-option value="chat">chat</a-select-option>
+            <a-select-option value="http_pull">http_pull</a-select-option>
             <a-select-option value="event_stream">event_stream</a-select-option>
+          </a-select>
+        </label>
+        <!-- 变体字段（VARIANT_CLOSED_SETS 单点在服务器，前端只按源型露出输入面） -->
+        <label v-if="form.sourceType === 'file'" class="field">
+          <span>{{ t('ontology.entVariantFormat') }}</span>
+          <a-select v-model:value="form.format" size="sm" data-testid="ent-variant-format">
+            <a-select-option value="csv">csv</a-select-option>
+            <a-select-option value="tsv">tsv</a-select-option>
+            <a-select-option value="json">json</a-select-option>
+            <a-select-option value="jsonl">jsonl</a-select-option>
+          </a-select>
+        </label>
+        <label v-if="form.sourceType === 'file'" class="field">
+          <span>{{ t('ontology.entVariantPath') }}</span>
+          <a-input v-model:value="form.path" size="sm" data-testid="ent-variant-path" />
+        </label>
+        <label v-if="form.sourceType === 'sql'" class="field">
+          <span>{{ t('ontology.entVariantDriver') }}</span>
+          <a-select v-model:value="form.driver" size="sm" data-testid="ent-variant-driver">
+            <a-select-option value="sqlite">sqlite</a-select-option>
+            <a-select-option value="postgresql">postgresql</a-select-option>
+            <a-select-option value="mysql">mysql</a-select-option>
+            <a-select-option value="mssql">mssql</a-select-option>
+            <a-select-option value="oracle">oracle</a-select-option>
+          </a-select>
+        </label>
+        <label v-if="form.sourceType === 'erp_api' || form.sourceType === 'chat'" class="field">
+          <span>{{ t('ontology.entVariantVendor') }}</span>
+          <a-select v-model:value="form.vendor" size="sm" data-testid="ent-variant-vendor">
+            <template v-if="form.sourceType === 'erp_api'">
+              <a-select-option value="kingdee">kingdee</a-select-option>
+              <a-select-option value="yongyou">yongyou</a-select-option>
+            </template>
+            <template v-else>
+              <a-select-option value="wecom">wecom</a-select-option>
+              <a-select-option value="wechat">wechat</a-select-option>
+            </template>
           </a-select>
         </label>
         <label class="field">
@@ -158,12 +209,6 @@
         >
           {{ t('ontology.entSubmitBtn') }}
         </GlassButton>
-        <!-- 真实连接按钮：禁用并给出原因（描述符落库 ≠ 源已接通） -->
-        <a-tooltip :title="t('ontology.entConnectDisabled')">
-          <GlassButton size="sm" disabled data-testid="ent-connect-disabled">
-            {{ t('ontology.entConnectBtn') }}
-          </GlassButton>
-        </a-tooltip>
       </div>
     </GlassPanel>
   </div>
@@ -176,8 +221,13 @@ import { message } from 'ant-design-vue'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAuthStore } from '@/stores/auth'
-import { listEnterpriseSources, submitEnterpriseSource } from '@/api/modules/ontology'
+import {
+  listEnterpriseSources,
+  submitEnterpriseSource,
+  triggerEnterpriseIngest,
+} from '@/api/modules/ontology'
 import type { EnterpriseDescriptor, EnterpriseSourceConfig } from '@/types/ontology'
+import { extractApiDetail } from '@/utils/error'
 import { splitList } from '@/utils/ontologyFormat'
 
 const { t } = useI18n()
@@ -193,9 +243,15 @@ const listError = ref(false)
 const submitting = ref(false)
 const submitError = ref('')
 
+const ingestingId = ref('')
+
 const form = reactive({
   sourceId: '',
   sourceType: 'sql',
+  format: 'csv',
+  path: '',
+  driver: 'sqlite',
+  vendor: 'kingdee',
   columns: '',
   subject: '',
   predicate: '',
@@ -227,6 +283,15 @@ function buildDescriptor(): EnterpriseDescriptor {
   }
   if (form.validFrom.trim()) body.validFrom = form.validFrom.trim()
   if (form.validUntil.trim()) body.validUntil = form.validUntil.trim()
+  // 变体字段按源型随描述符上交（闭集校验在服务器单点，前端不抄第二套规则）
+  if (form.sourceType === 'file') {
+    body.format = form.format
+    if (form.path.trim()) body.path = form.path.trim()
+  } else if (form.sourceType === 'sql') {
+    body.driver = form.driver
+  } else if (form.sourceType === 'erp_api' || form.sourceType === 'chat') {
+    body.vendor = form.vendor
+  }
   return body
 }
 
@@ -264,8 +329,35 @@ async function submitDescriptor() {
 }
 
 function rejectReason(error: unknown): string {
-  const detail = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
-  return typeof detail === 'string' && detail ? detail : t('common.error')
+  return extractApiDetail(error) || t('common.error')
+}
+
+/** 手动触发一轮摄取（批 C1）：结果四数如实报，skipped/拒因以 detail 原话露出。 */
+async function triggerIngest(sourceId: string) {
+  ingestingId.value = sourceId
+  try {
+    const res = await triggerEnterpriseIngest(sourceId)
+    const result = res.data?.result as
+      | { admitted?: number; rejected?: number; batches?: number; truncated?: boolean; skipped?: boolean; reason?: string }
+      | undefined
+    if (result && 'skipped' in result && result.skipped) {
+      message.info(result.reason || t('ontology.entIngestSkipped'))
+      return
+    }
+    const done = result as { admitted?: number; rejected?: number; batches?: number; truncated?: boolean }
+    message.success(
+      t('ontology.entIngestResult', {
+        admitted: done.admitted ?? 0,
+        rejected: done.rejected ?? 0,
+        batches: done.batches ?? 0,
+      }) + (done.truncated ? t('ontology.entIngestTruncated') : ''),
+    )
+    await loadSources()
+  } catch (error) {
+    message.error(extractApiDetail(error) || t('common.error'))
+  } finally {
+    ingestingId.value = ''
+  }
 }
 
 onMounted(loadSources)

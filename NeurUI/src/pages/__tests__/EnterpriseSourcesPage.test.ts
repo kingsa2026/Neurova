@@ -8,7 +8,8 @@
  * - 描述符编辑器提交是真调用，body 形状与后端 validateDescriptor 对齐；
  *   400 的拒因原样露出，不降级成 warning；
  * - 非管理员提交按钮禁用（治理门在后端，前端不假装能写）；
- * - 「连接/同步」按钮禁用并给出原因（真实连接器另立项）。
+ * - 批 U-1 对齐：源型选项含 file/chat；变体字段随源型露出（file→format+path）；
+ *   逐行「立即摄取」走真端点，结果四数如实报、skipped 走 info、错误显 detail 原话。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -32,6 +33,7 @@ vi.mock('@/stores/auth', () => ({
 vi.mock('@/api/modules/ontology', () => ({
   listEnterpriseSources: vi.fn(),
   submitEnterpriseSource: vi.fn(),
+  triggerEnterpriseIngest: vi.fn(),
 }))
 
 vi.mock('ant-design-vue', () => ({
@@ -39,11 +41,16 @@ vi.mock('ant-design-vue', () => ({
 }))
 
 import EnterpriseSourcesPage from '@/pages/EnterpriseSourcesPage.vue'
-import { listEnterpriseSources, submitEnterpriseSource } from '@/api/modules/ontology'
+import {
+  listEnterpriseSources,
+  submitEnterpriseSource,
+  triggerEnterpriseIngest,
+} from '@/api/modules/ontology'
 import { ontologySection } from '@/i18n/locales/_ontologySection'
 
 const listMock = listEnterpriseSources as unknown as ReturnType<typeof vi.fn>
 const submitMock = submitEnterpriseSource as unknown as ReturnType<typeof vi.fn>
+const ingestMock = triggerEnterpriseIngest as unknown as ReturnType<typeof vi.fn>
 
 const i18n = createI18n({
   legacy: false,
@@ -106,6 +113,12 @@ beforeEach(() => {
   listMock.mockResolvedValue({ code: 0, message: 'ok', data: { items: [], total: 0 } })
   submitMock.mockReset()
   submitMock.mockResolvedValue({ code: 0, message: 'ok', data: sourceRow() })
+  ingestMock.mockReset()
+  ingestMock.mockResolvedValue({
+    code: 0,
+    message: 'ok',
+    data: { result: { admitted: 2, rejected: 1, batches: 1, truncated: false, cursor: 'fp=x:off=3' } },
+  })
   authUser.role = 'admin'
 })
 
@@ -114,7 +127,7 @@ describe('EnterpriseSourcesPage（UI-4）', () => {
     const wrapper = mountPage()
     await flushPromises()
     expect(listMock).toHaveBeenCalledTimes(1)
-    expect(wrapper.find('[data-testid="ent-reserved-tag"]').text()).toContain('接口预留')
+    expect(wrapper.find('[data-testid="ent-reserved-tag"]').text()).toContain('已分批落格')
     expect(wrapper.find('[data-testid="ent-list-empty"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="ent-list-empty"]').text()).toContain('诚实状态')
     // fake adapter 只存在于服务端测试路径——页面不提供演示按钮
@@ -158,6 +171,7 @@ describe('EnterpriseSourcesPage（UI-4）', () => {
         predicate: { termId: 'hasRiskLevel' },
         object: { kind: 'column', column: 'risk_level' },
         qualifiers: {},
+        driver: 'sqlite',
       },
     })
     // 提交后重读：列表读数来自服务端，不是前端自增一行
@@ -186,13 +200,73 @@ describe('EnterpriseSourcesPage（UI-4）', () => {
     expect(wrapper.find('[data-testid="ent-admin-note"]').text()).toContain('仅管理员')
   })
 
-  it('连接态诚实：连接按钮禁用并给出「另立项」原因', async () => {
+  it('批 U-1 对齐：源型选项含 file/chat，选 file 后变体字段（format/path）露出', async () => {
     const wrapper = mountPage()
     await flushPromises()
-    const connect = wrapper.find('[data-testid="ent-connect-disabled"]')
-    expect(connect.exists()).toBe(true)
-    expect(connect.attributes('disabled')).toBeDefined()
-    const tooltip = wrapper.find('.stub-tooltip')
-    expect(tooltip.attributes('data-reason')).toContain('另立项')
+    const options = wrapper
+      .findAll('[data-testid="ent-source-type"] option')
+      .map((o) => (o.element as HTMLOptionElement).value)
+    expect(options).toContain('file')
+    expect(options).toContain('chat')
+    expect(options).toContain('http_pull')
+    expect(wrapper.find('[data-testid="ent-variant-format"]').exists()).toBe(false)
+    await wrapper.find('[data-testid="ent-source-type"]').setValue('file')
+    expect(wrapper.find('[data-testid="ent-variant-format"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ent-variant-path"]').exists()).toBe(true)
+  })
+
+  it('批 U-1 对齐：file 描述符提交 body 带 format/path 变体', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-testid="ent-source-id"]').setValue('orders_csv')
+    await wrapper.find('[data-testid="ent-source-type"]').setValue('file')
+    await wrapper.find('[data-testid="ent-variant-path"]').setValue('/data/orders.csv')
+    await wrapper.find('[data-testid="ent-columns"]').setValue('order_id, status')
+    await wrapper.find('[data-testid="ent-subject"]').setValue('order:{order_id}')
+    await wrapper.find('[data-testid="ent-predicate"]').setValue('has_status')
+    await wrapper.find('[data-testid="ent-object-value"]').setValue('status')
+    await wrapper.find('[data-testid="ent-submit"]').trigger('click')
+    await flushPromises()
+    expect(submitMock).toHaveBeenCalledTimes(1)
+    const body = submitMock.mock.calls[0][0] as { descriptor: Record<string, unknown> }
+    expect(body.descriptor.format).toBe('csv')
+    expect(body.descriptor.path).toBe('/data/orders.csv')
+  })
+
+  it('批 U-1 对齐：逐行立即摄取——成功报四数并重读列表', async () => {
+    listMock.mockResolvedValue({
+      code: 0,
+      message: 'ok',
+      data: { items: [sourceRow()], total: 1 },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-testid="ent-ingest-erp_orders"]').trigger('click')
+    await flushPromises()
+    expect(ingestMock).toHaveBeenCalledWith('erp_orders')
+    const { message } = await import('ant-design-vue')
+    expect(message.success).toHaveBeenCalledWith(
+      expect.stringContaining('入账 2'),
+    )
+    expect(listMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('批 U-1 对齐：摄取错误显 detail 原话（未接线的源型后端点名）', async () => {
+    listMock.mockResolvedValue({
+      code: 0,
+      message: 'ok',
+      data: { items: [sourceRow()], total: 1 },
+    })
+    ingestMock.mockRejectedValue({
+      response: { data: { detail: 'http_pull 连接器属批 C3（立项方案 §3），本批未接线' } },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-testid="ent-ingest-erp_orders"]').trigger('click')
+    await flushPromises()
+    const { message } = await import('ant-design-vue')
+    expect(message.error).toHaveBeenCalledWith(
+      expect.stringContaining('未接线'),
+    )
   })
 })
