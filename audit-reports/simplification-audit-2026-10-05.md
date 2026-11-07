@@ -12059,3 +12059,24 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     判据：四文件 vitest 47 passed（复核实测）；vue-tsc --noEmit 零错误。
     净 +179/−117。余量面：A 类全仓约 137 处待批 1-6 按业务域推进（盘点
     §四/§六清单为工单）。
+575. **连接器方案 2026-11-07 用户裁定落格＋批 C1 文件行源＋生产触发面**：
+    - **裁定（§2.4 全文登记于 spec）**：① 数据库直连直接做——六决策第 4 项开
+      有边界豁免（四驱动可选段注释态入 requirements.txt，CI 薄环境不收；
+      惰性 import＋fail-soft；假夹具测试；凭据解密），补偿四条照登；
+      ② ERP 先金蝶云星空 WebAPI＋用友（httpx REST，不引厂商 SDK）；③ 新增
+      批 C6 聊天信息源（企微＋微信/小微：桥接既有通道层，附件复用媒体/OCR
+      管线，会话存档 SDK 留槽不静默）；④ §2.3 两项按推荐（1A 单类型＋变体
+      字段；2A 先手动触发端点）。
+    - **批 C1 落格**：SOURCE_TYPES 扩 (file/http_pull/chat)＋VARIANT_CLOSED_SETS
+      （编译期给了就收口、不给不拒，工厂按需强制）；connectors_file.py 四格式
+      一份类；游标＝文件指纹＋行偏移；registry.buildAdapter 唯一工厂（后收成
+      _requireVariant 共用半边，三族工厂位预接）；runOnceAsync 拉取循环＋runOnce
+      同步壳；REST 触发端点 POST /enterprise/sources/{id}/ingest（管理员）。
+    - **活体抓真 bug**：async 端点内嵌套 run_until_complete → Internal Server
+      Error，修死为 runOnceAsync 拆分（同步壳在事件循环内显式报错指路）。
+    - **判据**：test_fileConnector 12 passed（红灯 ImportError 在案）；
+      enterprise 全目录 35 passed。活体：提交 CSV 描述符→触发→admitted=2、
+      游标持久化→重放 admitted=0（幂等）→facts 两条 active。
+    - **进行中**：批 C4（SQL 直连）/C5（金蝶用友）/C6（聊天源）三路并行
+      （各自只写自己的模块＋测试，工厂位已接）。
+    - **下一枚空号现查：本格取 575，后继从 576 起。**
