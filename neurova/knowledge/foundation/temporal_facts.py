@@ -80,23 +80,28 @@ class TemporalFactReader:
 
     def forQuery(self, query: str, maxFacts: int = 10, windowDays: int = 30,
                  now: Optional[datetime.datetime] = None,
-                 tenantId: Optional[str] = None) -> List[Dict[str, Any]]:
+                 tenantId: Optional[str] = None,
+                 allowedCategories: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         text = (query or "").strip()
         if not text or maxFacts <= 0:
+            return []
+        if allowedCategories is not None and not [c for c in allowedCategories if str(c)]:
             return []
         moment = (now or datetime.datetime.now(_UTC)).astimezone(_UTC)
         windowStart = moment - datetime.timedelta(days=max(int(windowDays or 0), 0))
         keys = subjectsMentionedIn(self._store, text, self._agentId, tenantId)
         if not keys:
             return []
-        rows = self._effectiveFacts(keys, windowStart, moment, maxFacts, tenantId)
+        rows = self._effectiveFacts(keys, windowStart, moment, maxFacts, tenantId,
+                                    allowedCategories=allowedCategories)
         return [self._asFactDict(row) for row in rows]
 
     # ── 内部 ──────────────────────────────────────────────────
 
     def _effectiveFacts(self, keys: List[str], windowStart: datetime.datetime,
                         now: datetime.datetime, limit: int,
-                        tenantId: Optional[str] = None) -> List[Any]:
+                        tenantId: Optional[str] = None,
+                        allowedCategories: Optional[List[str]] = None) -> List[Any]:
         placeholders = ",".join("?" * len(keys))
         # 生效时刻既要有下界也要有上界：只判"不早于窗口起点"的话，一条还没到生效
         # 时刻的说法照样此刻进上下文——`valid_from` 此前恒 NULL 所以这条上界一直空转，
@@ -118,6 +123,14 @@ class TemporalFactReader:
         if tenantId is not None:
             clauses.insert(0, "tenant_id = ?")
             params = [str(tenantId or "default")] + params
+        # 部门分类白名单（specs/2026-11-07 批 E）：时效读面与条目/走查同口径
+        if allowedCategories is not None:
+            catValues = [str(c) for c in allowedCategories if str(c)]
+            if catValues:
+                clauses.insert(0, "category IN (%s)" % ",".join("?" * len(catValues)))
+                params = catValues + params
+            else:
+                clauses.insert(0, "1 = 0")
         with self._store._lock:
             return self._store._conn.execute(
                 "SELECT * FROM knowledge_facts WHERE %s"

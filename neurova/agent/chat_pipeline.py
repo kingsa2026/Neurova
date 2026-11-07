@@ -421,6 +421,11 @@ class ChatPipeline:
             "tenant_id": str((ctx.metadata or {}).get("tenant_id") or "default"),
             "agent_id": self._factDomain(),
         }
+        # 部门分类白名单（specs/2026-11-07 批 E）：请求边界注入则透传三条读面；
+        # 键不存在 = 未启用白名单，行为不变
+        allowedCats = (ctx.metadata or {}).get("allowed_categories")
+        if allowedCats is not None:
+            metadata["allowed_categories"] = list(allowedCats)
         metadata.update(extra)
         return metadata
 

@@ -34,12 +34,13 @@ class GraphRetrieverAdapter:
         from neurova.agent.memory_retrieval_chain import RetrievalQuality, RetrievalResult
 
         start = time.monotonic()
-        tenantId = str(
-            (getattr(context, "metadata", None) or {}).get("tenant_id")
-            or "default"
-        )
+        metadata = getattr(context, "metadata", None) or {}
+        tenantId = str(metadata.get("tenant_id") or "default")
+        # 部门分类白名单（specs/2026-11-07 批 E）：请求边界注入，走查同口径收口
+        allowedCats = metadata.get("allowed_categories")
         hops = self._walker.walkFromQuery(
-            context.query, limit=context.limit, tenantId=tenantId
+            context.query, limit=context.limit, tenantId=tenantId,
+            allowedCategories=list(allowedCats) if allowedCats is not None else None,
         )
         elapsed = time.monotonic() - start
         if not hops:

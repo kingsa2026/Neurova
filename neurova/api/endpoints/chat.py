@@ -135,6 +135,26 @@ def _user_can_access_agent(user_id: str, agent_id: str, role: str = "user") -> b
     return can_access_agent(user_id, role, resolve_agent_owner(agent_id, state_agent=agent))
 
 
+def _speakerAllowedCategories(current_user: Dict[str, Any]) -> Optional[list]:
+    """说话人部门分类白名单（specs/2026-11-07 批 E）：受限部门才返回列表。
+
+    无部门/未配置白名单 → None（调用方不注键，读面行为与今天逐字一致）；
+    解析异常同 None——与服务端"不猜部门"的缺省语义一致。
+    """
+    try:
+        username = str((current_user or {}).get("username") or "")
+        if not username:
+            return None
+        from neurova.auth.user_group_model import resolveUserDepartment
+
+        dept = resolveUserDepartment(username)
+        if dept.get("restricted"):
+            return list(dept.get("allowed_categories") or [])
+    except Exception:  # noqa: BLE001 - 白名单解析失败按未启用处理
+        return None
+    return None
+
+
 def _deptGate(agent_id: str, current_user: Dict[str, Any]) -> Optional[str]:
     """部门根对账门（specs/2026-11-07 批 D，T-D 严格绑定已裁）。
 
@@ -339,6 +359,10 @@ async def chat(
         # 角色透传：知识库检索链的 admin 全可见依赖 role（隔离语义与 API 层一致）
         call_metadata["role"] = role
         call_metadata["tenant_id"] = str(current_user.get("tenant_id") or "default")
+        # 部门分类白名单（specs/2026-11-07 批 E）：受限部门才注键，三条事实读面同口径收口
+        speakerCats = _speakerAllowedCategories(current_user)
+        if speakerCats is not None:
+            call_metadata["allowed_categories"] = speakerCats
 
         # P2-8 §6-46：这条公开 API 与网页面共用同一份模型额度，也就必须问同一道闸
         admission = await requestTurnAdmission(
@@ -516,6 +540,10 @@ async def chat_stream(
         # task 在创建时复制当前上下文，放在端点顶部反而不保证被 `run_chat` 那条 task 看到。
         call_metadata["user_id"] = user_id
         call_metadata["tenant_id"] = str(current_user.get("tenant_id") or "default")
+        # 部门分类白名单（specs/2026-11-07 批 E）：受限部门才注键，三条事实读面同口径收口
+        speakerCats = _speakerAllowedCategories(current_user)
+        if speakerCats is not None:
+            call_metadata["allowed_categories"] = speakerCats
         from neurova.core.build_context import setCurrentBuildSessionId
         from neurova.core.identity_context import set_request_user_id
 

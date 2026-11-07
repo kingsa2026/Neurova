@@ -72,8 +72,16 @@ class GraphFactWalker:
     def walkFromQuery(self, query: str, maxHops: Optional[int] = None,
                       limit: Optional[int] = None,
                       now: Optional[datetime.datetime] = None,
-                      tenantId: Optional[str] = None) -> List[Dict[str, Any]]:
-        """返回 hop ≥ 2 的终点事实，按跳数由近及远、同跳内按置信与新近。"""
+                      tenantId: Optional[str] = None,
+                      allowedCategories: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """返回 hop ≥ 2 的终点事实，按跳数由近及远、同跳内按置信与新近。
+
+        allowedCategories（specs/2026-11-07 批 E）：部门分类白名单下推——
+        锚点段与递归段都只走白名单内 category 的事实；空列表 = 受限且无可见
+        分类 → 零命中；None = 未启用白名单，行为不变。
+        """
+        if allowedCategories is not None and not [c for c in allowedCategories if str(c)]:
+            return []
         hops = min(max(int(maxHops if maxHops is not None else self._config.maxHops), 2),
                    _MAX_HOPS_CEILING)
         cap = max(int(limit if limit is not None else self._config.limit), 1)
@@ -88,7 +96,8 @@ class GraphFactWalker:
             return []
         moment = (now or datetime.datetime.now(datetime.timezone.utc)).astimezone(
             datetime.timezone.utc)
-        rows = self._walk(anchors, hops, cap, moment, tenantId)
+        rows = self._walk(anchors, hops, cap, moment, tenantId,
+                          allowedCategories=allowedCategories)
         # 翻主路态才给跳板挂溯源标注：观察态下推导行根本进不了 CTE（_walk 里排除），
         # 去查一遍账本只是白花一次 IO，还会让人以为过滤与标注是两套判据。
         # v35 加了按规则类的物化档位：灰度 off 但本租户有 enforce 规则时，推导行
@@ -161,13 +170,23 @@ class GraphFactWalker:
         return keys
 
     def _walk(self, anchors: List[str], maxHops: int, limit: int,
-              now: datetime.datetime, tenantId: Optional[str] = None) -> List[Any]:
+              now: datetime.datetime, tenantId: Optional[str] = None,
+              allowedCategories: Optional[List[str]] = None) -> List[Any]:
         placeholders = ",".join("?" * len(anchors))
         stamp = now.isoformat()
+        # 部门分类白名单（specs/2026-11-07 批 E）：锚点段 f 与递归段 f2 同口径——
+        # 走查不得"绕道"白名单外事实接出白名单内事实
+        catValues: List[Any] = []
+        if allowedCategories is not None:
+            catValues = [str(c) for c in allowedCategories if str(c)]
+            catClause = "category IN (%s)" % ",".join("?" * len(catValues)) if catValues else "1 = 0"
         anchorClauses = ["f.status = 'active'", "f.record_kind = 'triple'",
                          "(f.valid_until IS NULL OR f.valid_until = ''"
                          " OR f.valid_until > ?)"]
         anchorValues: List[Any] = [stamp]
+        if allowedCategories is not None:
+            anchorClauses.append("f.%s" % catClause)
+            anchorValues.extend(catValues)
         if self._agentId:
             anchorClauses.append("f.agent_id = ?")
             anchorValues.append(self._agentId)
@@ -189,6 +208,8 @@ class GraphFactWalker:
                       " OR f2.valid_until > ?) AND f2.agent_id = s2.agent_id")
         if tenantId is not None:
             headClause += " AND f2.tenant_id = ?"
+        if allowedCategories is not None:
+            headClause += " AND f2.%s" % catClause
         if not conditionClassRouteOn() and ledger is not None:
             headClause += " AND " + ledger.derivedExclusionClause("f2")
         #  visited 只记**经过的主体**（不含当前客体）：把客体也记进去，下一跳的起点
@@ -232,6 +253,9 @@ class GraphFactWalker:
         params = anchorValues + anchors + [maxHops, stamp]
         if tenantId is not None:
             params.append(str(tenantId or "default"))
+        if allowedCategories is not None:
+            # f2 的白名单占位在 headClause 里，参数序在 tenant 之后、limit 之前
+            params.extend(catValues)
         params.append(limit)
         with self._store._lock:
             return self._store._conn.execute(sql, params).fetchall()
