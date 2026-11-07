@@ -61,6 +61,7 @@ async def import_knowledge_file(
     engine: str = Query(default="", pattern="^(structured|legacy)?$",
                         description="structured=页码/标题/OCR 流水线；legacy=旧单段抽取（回退）；空=读 NEUROVA_KB_DOC_PIPELINE"),
     source_path: str = Query(default="", description="客户端可提供的真实路径；缺省用文件名（裸文件名不触发同源更新）"),
+    category: str = Query(default="", description="业务分类（specs/2026-11-07 导入配套）；缺省=部门缺省分类 > import"),
 ):
     """导入知识文件（txt/md/docx/xlsx/pptx/pdf/html/csv）。
 
@@ -72,6 +73,7 @@ async def import_knowledge_file(
     filename = file.filename or "imported"
     # 直接调用（测试/内部）时未传该参会是 FastAPI Query 默认对象，不能当字符串用。
     sourcePath = source_path if isinstance(source_path, str) else ""
+    categoryParam = category if isinstance(category, str) else ""
     data = await file.read()
     if not sync:
         from neurova.knowledge.ingest_queue import get_ingress_queue
@@ -83,7 +85,7 @@ async def import_knowledge_file(
         return {"code": 0, "message": "Queued", "data": {"task_id": task["task_id"], "status": task.get("status"), "replayed": task.get("replayed", False)}}
     items, extract_status = _import_file_data(
         data, filename, agent_id, current_user, ocr_mode=ocr,
-        engine_mode=engine, source_path=sourcePath,
+        engine_mode=engine, source_path=sourcePath, category=categoryParam,
     )
     if not items:
         # 2026-09-06 修复：抽取失败显式化——此前以成功语义静默返回空列表，
@@ -105,9 +107,32 @@ async def import_knowledge_file(
     return {"code": 0, "message": "Import completed", "data": {"items": items}}
 
 
+def _resolveImportCategory(user: Dict[str, Any], explicit: str = "") -> str:
+    """导入分类解析（specs/2026-11-07 批 C 导入配套）：显式指定 > 部门缺省分类 > "import"。
+
+    部门缺省分类取自解析单源的 default_category（说话人部门）；解析失败/无部门
+    回落既有 "import"（行为不变）。严格白名单（T-C）下这一步保证"导入者本人可见
+    自己导入的条目"。
+    """
+    if str(explicit or "").strip():
+        return str(explicit).strip()
+    try:
+        username = str((user or {}).get("username") or "")
+        if username:
+            from neurova.auth.user_group_model import resolveUserDepartment
+
+            dept = resolveUserDepartment(username)
+            if dept.get("default_category"):
+                return str(dept["default_category"])
+    except Exception:  # noqa: BLE001 - 缺省分类解析失败回落 "import"
+        pass
+    return "import"
+
+
 def _import_file_data(
     data: bytes, filename: str, agent_id: str, user: Dict[str, Any],
     ocr_mode: str = "auto", engine_mode: str = "", source_path: str = "",
+    category: str = "",
 ) -> Tuple[List[Dict[str, Any]], str]:
     engine_mode = engine_mode or os.environ.get(
         "NEUROVA_KB_DOC_PIPELINE", "structured"
@@ -137,7 +162,7 @@ def _import_file_data(
         agent_id=agent_id,
         title=title,
         content=parsed.content,
-        category="import",
+        category=_resolveImportCategory(user, category),
         tags=[],
         source="import:" + filename,
         confidence=0.7,
@@ -209,6 +234,7 @@ async def import_knowledge_url(
     agent_id: str = Query(default="default", description="Agent ID"),
     url: str = Query(..., description="远程网页 URL"),
     sync: bool = Query(default=True, description="true=同步导入；false=入队后台处理（P1-#9）"),
+    category: str = Query(default="", description="业务分类（specs/2026-11-07 导入配套）；缺省=部门缺省分类 > import"),
 ):
     """导入远程网页（抽取正文存为知识条目，归属当前用户、默认私有）"""
     if not validate_public_http_url(url):
@@ -235,6 +261,7 @@ async def import_knowledge_url(
     # 与 /import 对齐：解包 + 失败显式 code=1。
     items, extract_status = _import_file_data(
         data, _filename_for_url(url), agent_id, current_user, source_path=url,
+        category=category if isinstance(category, str) else "",
     )
     if not items:
         return {

@@ -561,10 +561,20 @@ class KnowledgeRepository:
         updated_after: Optional[float] = None,
         limit: int = 20,
     ) -> List[Dict[str, Any]]:
-        """FTS5 倒排检索；索引按需 reconcile，失败交给调用方降级。"""
+        """FTS5 倒排检索；索引按需 reconcile，失败交给调用方降级。
+
+        部门分类白名单（specs/2026-11-07 批 C）在 repository 层解析并下推为
+        `categories` 集合——FTS 是独立 SQL 读面，必须与 visible_items 同口径收口。
+        """
+        deptScope = self._departmentScope(user)
+        categories: Optional[List[str]] = None
+        if deptScope is not None:
+            categories = list(deptScope["allowed_categories"])
+            if category is not None and str(category) not in categories:
+                categories = []  # 请求的分类不在白名单内 → 语义上零命中
         return self._ensureFts().search(
             query, user, scope=scope, agent_id=agent_id, category=category,
-            tags=tags, source=source, updated_after=updated_after, limit=limit,
+            categories=categories, tags=tags, source=source, updated_after=updated_after, limit=limit,
         )
 
     def ftsHealth(self) -> Dict[str, Any]:
@@ -1083,12 +1093,36 @@ class KnowledgeRepository:
     def _is_admin(user: Optional[Dict[str, Any]]) -> bool:
         return str((user or {}).get("role") or "") == "admin"
 
+    def _departmentScope(self, user: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """部门分类作用域（specs/2026-11-07 批 C）。
+
+        返回 restricted 部门作用域（含 allowed_categories 白名单），None = 不受限。
+        触发条件三方齐：user 带 username（手搓 dict/内部调用不触发）、解析出部门、
+        路径上确有组配置了白名单（restricted=True）。解析失败回落不受限——
+        与今天行为一致（设计 §2.3 fail-closed 到缺省语义，不猜部门）。
+        """
+        username = str((user or {}).get("username") or "")
+        if not username:
+            return None
+        try:
+            from neurova.auth.user_group_model import resolveUserDepartment
+
+            dept = resolveUserDepartment(username)
+        except Exception:  # noqa: BLE001 - 依赖面不可用即按不受限（不猜部门）
+            return None
+        return dept if dept.get("restricted") else None
+
     def can_view(self, user: Optional[Dict[str, Any]], item: Dict[str, Any]) -> bool:
         # 租户先于角色：管理员只在自己租户内全可见，不是跨租户穿透。
         if str(item.get("tenant_id") or "default") != self._tenant(user):
             return False
         if self._is_admin(user):
             return True
+        # 部门分类白名单（specs/2026-11-07 批 C）：非 admin 且部门受限时，
+        # 白名单外分类不可见——隔离先于归属（属主本人也受约束）。
+        deptScope = self._departmentScope(user)
+        if deptScope is not None and str(item.get("category") or "") not in deptScope["allowed_categories"]:
+            return False
         if item.get("visibility") == VISIBILITY_PUBLIC:
             return True
         uid = self._user_id(user)
@@ -1099,6 +1133,9 @@ class KnowledgeRepository:
     def can_modify(self, user: Optional[Dict[str, Any]], item: Dict[str, Any]) -> bool:
         if self._is_admin(user):
             return True
+        deptScope = self._departmentScope(user)
+        if deptScope is not None and str(item.get("category") or "") not in deptScope["allowed_categories"]:
+            return False
         return self._user_id(user) != "" and item.get("owner_user_id") == self._user_id(user)
 
     def visible_items(
@@ -1127,6 +1164,7 @@ class KnowledgeRepository:
         标签/来源/时间窗外的内容挤进 top-k。
         """
         uid = self._user_id(user)
+        deptScope = None if self._is_admin(user) else self._departmentScope(user)
         with self._lock:
             groups = self._items.items() if not agent_id else [(agent_id, self._items.get(agent_id, []))]
             snapshot = [(aid, [dict(i) for i in items]) for aid, items in groups]
@@ -1136,6 +1174,10 @@ class KnowledgeRepository:
                 if agent_id and aid != agent_id:
                     continue
                 if str(item.get("tenant_id") or "default") != self._tenant(user):
+                    continue
+                # 部门分类白名单（specs/2026-11-07 批 C）：admin 不受限（上面已排除），
+                # 非 admin 且部门受限 → 白名单外条目先于一切检索被剔除（先筛后检）
+                if deptScope is not None and str(item.get("category") or "") not in deptScope["allowed_categories"]:
                     continue
                 if not isRetrievable(item):
                     continue

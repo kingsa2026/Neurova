@@ -1045,7 +1045,13 @@ def resolveUserDepartment(
     但"配置过白名单而引用全部失效"**不是**解析失败——restricted 保持 True，
     不许静默 fail-open 成"什么都能看"。
     """
-    empty = {"tenant_id": "default", "group_id": None, "allowed_categories": [], "restricted": False}
+    empty = {
+        "tenant_id": "default",
+        "group_id": None,
+        "allowed_categories": [],
+        "restricted": False,
+        "default_category": None,
+    }
     try:
         mgr = manager or get_user_group_manager()
         groups = [
@@ -1063,10 +1069,14 @@ def resolveUserDepartment(
             chain.append(cursor)
             cursor = mgr.get_group(cursor.parent_group_id) if cursor.parent_group_id else None
         union: List[str] = []
+        default_category: Optional[str] = None
         for g in chain:
             for cid in g.allowed_categories or []:
                 if cid not in union:
                     union.append(cid)
+            # 缺省业务分类：本组优先，未配置沿链继承父组（批 C 导入/构建用）
+            if default_category is None and g.default_category:
+                default_category = str(g.default_category)
         restricted = any(g.allowed_categories for g in chain)
         if registry is None:
             from neurova.knowledge.categories_registry import CategoryRegistry
@@ -1080,6 +1090,7 @@ def resolveUserDepartment(
             "group_id": group.group_id,
             "allowed_categories": union,
             "restricted": restricted,
+            "default_category": default_category,
         }
     except Exception as e:  # noqa: BLE001 - 解析失败回落 default，不猜部门（设计 §2.3）
         logger.warning("resolveUserDepartment fallback to default for %s: %s", username, e)
