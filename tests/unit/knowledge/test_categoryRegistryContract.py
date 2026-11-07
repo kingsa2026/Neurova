@@ -69,3 +69,28 @@ def testCategoryIdNormalization():
         reg.create(categoryId="  ", name="空标识", actor="admin")
     with pytest.raises(ValueError):
         reg.create(categoryId="ok", name=" ", actor="admin")
+
+
+def testCategoryListVisibleFilteredByDeptWhitelist(monkeypatch):
+    """§3：受限部门的分类下拉只见白名单内分类（前端单源依赖）。"""
+    from neurova.api.endpoints.knowledge_categories_api import _visibleForUser
+
+    items = [{"category_id": "rnd"}, {"category_id": "support"}]
+    admin = {"role": "admin", "username": "root"}
+    monkeypatch.setattr(
+        "neurova.auth.user_group_model.resolveUserDepartment",
+        lambda username, **kw: {"tenant_id": "default", "group_id": None,
+                                "allowed_categories": [], "restricted": False,
+                                "default_category": None},
+    )
+    # admin 与无部门用户全量
+    assert _visibleForUser(admin, items) == items
+    assert _visibleForUser({"role": "user", "username": "bob"}, items) == items
+    # 受限部门只见白名单内
+    monkeypatch.setattr(
+        "neurova.auth.user_group_model.resolveUserDepartment",
+        lambda username, **kw: {"tenant_id": "g1", "group_id": "g1",
+                                "allowed_categories": ["rnd"], "restricted": True,
+                                "default_category": None},
+    )
+    assert _visibleForUser({"role": "user", "username": "alice"}, items) == [{"category_id": "rnd"}]

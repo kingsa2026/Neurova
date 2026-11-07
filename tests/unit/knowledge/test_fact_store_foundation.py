@@ -185,11 +185,12 @@ class TestMigrationVersions:
         # v36：facts 侧源钟（K-09，台账 §6-570 裁定）——knowledge_facts 加
         #       source_created_at/source_modified_at 两列。
         # v37：FTS 搬主库（K-09 裁定）——knowledge_fts_docs/knowledge_fts 归本版本域。
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 37
+        # v38：知识库自定义分类注册表（specs/2026-11-07 批 A）——knowledge_categories。
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 38
         assert {'knowledge_mcp_sources', 'knowledge_alias_candidates',
                 'ontology_relation_candidates', 'ontology_shapes',
                 'ontology_change_log', 'enterprise_source_configs',
-                'knowledge_fts_docs', 'knowledge_fts'} <= names
+                'knowledge_fts_docs', 'knowledge_fts', 'knowledge_categories'} <= names
         # v28 存量行零漂移：缺省必须是旧语义 relay（head 客体常量空＝不搬移客体）
         rule_columns = {
             r[1]: (r[2], r[4]) for r in store._conn.execute(
