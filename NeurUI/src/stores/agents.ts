@@ -193,6 +193,8 @@ export const useAgentStore = defineStore('agents', () => {
     description?: string
     model?: string
     provider?: string
+    /** 所属部门组（specs/2026-11-07 批 D）；缺省由后端绑创建者部门组 */
+    group_id?: string | null
     config?: Partial<AgentConfig>
   }): Promise<Agent | null> {
     loading.value = true
@@ -206,6 +208,9 @@ export const useAgentStore = defineStore('agents', () => {
       }
       if (payload.agent_id) {
         body.agent_id = payload.agent_id
+      }
+      if (payload.group_id) {
+        body.group_id = payload.group_id
       }
       if (payload.config) {
         body.config = mapConfigToApi(payload.config)
@@ -234,6 +239,8 @@ export const useAgentStore = defineStore('agents', () => {
       description?: string
       model?: string
       provider?: string
+      /** 所属部门组（specs/2026-11-07 批 D）；空串 = 解除绑定 */
+      group_id?: string | null
       config?: Partial<AgentConfig>
     },
   ): Promise<Agent | null> {

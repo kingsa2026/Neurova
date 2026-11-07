@@ -14,6 +14,12 @@ export interface Group {
   /** 可用功能模块（菜单路由 key）；空数组 = 不限制 */
   allowed_modules?: string[]
   is_system?: boolean
+  /** 父部门组（specs/2026-11-07 部门化）；null = 部门根 */
+  parent_group_id?: string | null
+  /** 知识库分类白名单（分类注册表 category_id）；空数组 = 不限制 */
+  allowed_categories?: string[]
+  /** 缺省业务分类（导入/构建条目缺省） */
+  default_category?: string | null
 }
 
 export interface GroupMember {
@@ -39,14 +45,28 @@ export function getGroup(groupId: string) {
 }
 
 /** Create a new group. */
-export function createGroup(data: { name: string; description?: string; allowed_modules?: string[] }) {
+export function createGroup(data: {
+  name: string
+  description?: string
+  allowed_modules?: string[]
+  parent_group_id?: string | null
+  allowed_categories?: string[]
+  default_category?: string | null
+}) {
   return api.post<Group>(BASE, data)
 }
 
 /** Update a group. */
 export function updateGroup(
   groupId: string,
-  data: { name?: string; description?: string; allowed_modules?: string[] },
+  data: {
+    name?: string
+    description?: string
+    allowed_modules?: string[]
+    parent_group_id?: string | null
+    allowed_categories?: string[]
+    default_category?: string | null
+  },
 ) {
   return api.put<Group>(`${BASE}/${groupId}`, data)
 }
