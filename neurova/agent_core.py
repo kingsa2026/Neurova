@@ -271,10 +271,12 @@ class AgentConfig:
         enable_auto_tagging: bool = False,  # 是否启用自动标签生成
         # 所有权配置
         owner_user_id: Optional[str] = None,  # 创建者用户 ID
+        group_id: Optional[str] = None,  # 所属部门组（specs/2026-11-07 批 D；None = 未绑部门）
     ):
         self.name = name
         self.agent_id = agent_id
         self.owner_user_id = owner_user_id
+        self.group_id = group_id
 
         # 工作目录路径 - 必须由调用者提供，不使用硬编码
         if not workspace_path:

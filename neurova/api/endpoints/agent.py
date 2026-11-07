@@ -117,6 +117,8 @@ def _save_agent_config(agent) -> None:
         "constitution": getattr(cfg, "constitution", ""),
         # 归属持久化：重启后 _user_can_access_agent 依赖此字段判定属主
         "owner_user_id": str(getattr(cfg, "owner_user_id", "") or ""),
+        # 部门绑定持久化（specs/2026-11-07 批 D）：重启后 agentDeptRootById 依赖此字段
+        "group_id": str(getattr(cfg, "group_id", "") or ""),
         # TTS 配置持久化：否则前端表单"改了→保存→重开全回默认"
         "enable_tts": bool(getattr(cfg, "enable_tts", False)),
         "tts_engine": getattr(cfg, "tts_engine", "auto"),
@@ -133,6 +135,16 @@ def _save_agent_config(agent) -> None:
     with open(config_path, "w", encoding="utf-8") as f:
         _json.dump(config_data, f, ensure_ascii=False, indent=2)
     logger.debug("Saved agent config to %s", config_path)
+
+
+def _creatorDeptGroupId(current_user: Dict[str, Any]) -> Optional[str]:
+    """创建者所在部门组 id（specs/2026-11-07 批 D）：agent 缺省绑定创建者的部门组。"""
+    try:
+        from neurova.auth.user_group_model import resolveUserDepartment
+
+        return resolveUserDepartment(str((current_user or {}).get("username") or "")).get("group_id")
+    except Exception:  # noqa: BLE001 - 部门解析失败 → 不绑定（None）
+        return None
 
 
 def _tts_fields_from_body_config(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -192,6 +204,8 @@ class AgentInfo(BaseModel):
     tools_count: int = 0
     # Wave H-W0：属主回传（前端属主徽标/编辑权限判定数据源）
     owner_user_id: Optional[str] = None
+    # 部门绑定回传（specs/2026-11-07 批 D）：前端分组选择器回显数据源
+    group_id: Optional[str] = None
     # 回显 config（TTS 等）：编辑表单重开后从响应恢复已保存参数
     config: Dict[str, Any] = Field(default_factory=dict)
 
@@ -205,6 +219,7 @@ class CreateAgentRequest(BaseModel):
     model: Optional[str] = Field(default=None, description="LLM 模型")
     provider: Optional[str] = Field(default=None, description="LLM 提供商")
     enable_memory: bool = Field(default=True, description="启用记忆")
+    group_id: Optional[str] = Field(default=None, description="所属部门组（缺省=创建者所在部门组）")
     config: Dict[str, Any] = Field(default_factory=dict, description="额外配置")
 
 
@@ -213,6 +228,7 @@ class UpdateAgentRequest(BaseModel):
 
     name: Optional[str] = Field(default=None, description="Agent 名称")
     description: Optional[str] = Field(default=None, description="Agent 描述")
+    group_id: Optional[str] = Field(default=None, description="所属部门组（空串=解除绑定）")
     model: Optional[str] = Field(default=None, description="LLM 模型")
     provider: Optional[str] = Field(default=None, description="LLM 提供商")
     config: Dict[str, Any] = Field(default_factory=dict, description="额外配置")
@@ -280,6 +296,7 @@ def agent_to_info(agent) -> Dict[str, Any]:
         "memory_enabled": enable_memory,
         "tools_count": 0,
         "owner_user_id": getattr(getattr(agent, "config", None), "owner_user_id", None),
+        "group_id": getattr(getattr(agent, "config", None), "group_id", None),
     }
 
     # 获取模型和提供商信息
@@ -440,6 +457,8 @@ async def create_agent(
             enable_memory=body.enable_memory,
             workspace_path=workspace_path,
             owner_user_id=current_user.get("user_id"),
+            # 部门绑定（specs/2026-11-07 批 D）：显式指定 > 创建者所在部门组
+            group_id=body.group_id or _creatorDeptGroupId(current_user),
             llm_model=body.model or "gpt-4",
             llm_provider=body.provider or body.config.get("provider", "") if body.config else "",
             description=body.description or "",
@@ -469,7 +488,8 @@ async def create_agent(
                 agent_id=agent_id,
                 name=body.name,
                 description=body.description or "",
-                config={"model": body.model or "", "provider": body.provider or ""},
+                config={"model": body.model or "", "provider": body.provider or "",
+                        "group_id": getattr(config, "group_id", None) or ""},
                 # Wave H-W0：中枢登记面带 owner（未启动实例的属主可见性依据）
                 owner_user_id=str(current_user.get("user_id") or "") or None,
             )
@@ -516,6 +536,10 @@ async def update_agent(
         agent.config.llm_config.model = body.model
     if body.provider is not None and hasattr(agent, "config"):
         agent.config.llm_provider = body.provider
+
+    # 部门绑定更新（specs/2026-11-07 批 D）：空串 = 解除绑定
+    if body.group_id is not None and hasattr(agent, "config") and hasattr(agent.config, "group_id"):
+        agent.config.group_id = str(body.group_id).strip() or None
 
     # TTS 配置更新（局部：仅覆盖请求中出现的键）
     tts_fields = _tts_fields_from_body_config(body.config)
@@ -576,6 +600,12 @@ async def update_agent(
             updates["name"] = body.name
         if body.description is not None:
             updates["description"] = body.description
+        if body.group_id is not None:
+            # config 字典合并写：整键替换会丢 model/provider（specs/2026-11-07 批 D）
+            rec = get_agent_config_manager().get_agent(agent_id) or {}
+            merged_cfg = dict(rec.get("config") or {})
+            merged_cfg["group_id"] = str(body.group_id).strip() or ""
+            updates["config"] = merged_cfg
         get_agent_config_manager().update_agent(agent_id, updates)
     except Exception as e:
         logger.warning("AgentConfigManager.update_agent 失败: %s", e)

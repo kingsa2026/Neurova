@@ -153,6 +153,19 @@ class ChannelManager:
                         extra = getattr(getattr(adapter, "config", None), "extra", None) or {}
                         tenant = str(extra.get("tenant_id") or "")
                         if tenant:
+                            # 部门租户对账（specs/2026-11-07 批 D）：配置租户须等于
+                            # 渠道 agent 属主部门根，不等告警并按属主部门根落库——
+                            # 数据落对租户，配置错不落错库。属主无部门（default）
+                            # 时无从对账，保留渠道配置（行为不变）。
+                            from neurova.api.agent_access import agentOwnerDeptRootById
+
+                            owner_dept = agentOwnerDeptRootById(agent_id)
+                            if owner_dept and owner_dept != "default" and owner_dept != tenant:
+                                logger.warning(
+                                    "渠道 %s(agent=%s) 配置 tenant_id=%s 与属主部门根 %s 不一致，按属主部门根落库",
+                                    channel_type, agent_id, tenant, owner_dept,
+                                )
+                                tenant = owner_dept
                             message.metadata["tenant_id"] = tenant
                 except Exception as exc:  # noqa: BLE001 - 入站开关失败不影响聊天
                     logger.debug("知识入站开关读取失败: %s", exc)
