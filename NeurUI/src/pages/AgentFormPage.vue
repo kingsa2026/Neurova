@@ -46,6 +46,16 @@
                 />
               </a-form-item>
             </a-col>
+            <a-col :span="12">
+              <a-form-item :label="t('agent.group')">
+                <a-select
+                  v-model:value="formState.group_id"
+                  :options="deptGroupOptions"
+                  :placeholder="t('agent.groupDefaultHint')"
+                  allow-clear
+                />
+              </a-form-item>
+            </a-col>
           </a-row>
 
           <a-form-item :label="t('agent.description')">
@@ -175,6 +185,7 @@ import GlassButton from '@/components/GlassButton.vue'
 import { useAgentStore } from '@/stores/agents'
 import { listProviders } from '@/api/modules/providers'
 import { listModels } from '@/api/modules/models'
+import { listGroups } from '@/api/modules/groups'
 import { normalizeModel } from '@/types/model'
 
 const { t } = useI18n()
@@ -252,6 +263,7 @@ const formState = ref({
   description: '',
   model: '',
   provider: '',
+  group_id: '',
   systemPrompt: '',
   temperature: 0.7,
   maxTokens: 4096,
@@ -262,6 +274,18 @@ const formState = ref({
   ttsSpeed: 1.0,
   ttsPitch: 1.0,
 })
+
+// ── 部门分组（specs/2026-11-07 批 D/F2）：所属分组选择器 ──────────
+const deptGroups = ref<{ group_id: string; name: string }[]>([])
+const deptGroupOptions = computed(() => deptGroups.value.map((g) => ({ label: g.name, value: g.group_id })))
+const fetchDeptGroups = async () => {
+  try {
+    const res: any = await listGroups()
+    deptGroups.value = (res ?? []).filter((g: any) => !g.is_system)
+  } catch {
+    deptGroups.value = []
+  }
+}
 
 // ── 音色选项与试听（预制静态文件 /tts-preview/，scripts/generate_tts_previews.py 生成）──
 interface VoiceOption {
@@ -321,6 +345,7 @@ const loadAgent = async () => {
         description: agent.description || '',
         model: agent.model || '',
         provider: agent.provider || '',
+        group_id: (agent as any).group_id || '',
         systemPrompt: agent.config?.systemPrompt || '',
         temperature: agent.config?.temperature ?? 0.7,
         maxTokens: agent.config?.maxTokens ?? 4096,
@@ -347,6 +372,7 @@ const handleSave = async () => {
       description: formState.value.description,
       model: formState.value.model,
       provider: formState.value.provider,
+      group_id: formState.value.group_id || undefined,
       config: {
         systemPrompt: formState.value.systemPrompt,
         temperature: formState.value.temperature,
@@ -389,7 +415,7 @@ const handleSave = async () => {
 onMounted(async () => {
   // Fetch provider/model options first (parallel with agents)
   const agentsPromise = agentStore.agents.length === 0 ? agentStore.loadAgents() : Promise.resolve()
-  await Promise.all([fetchProvidersAndModels(), agentsPromise])
+  await Promise.all([fetchProvidersAndModels(), agentsPromise, fetchDeptGroups()])
   if (isEditing.value) {
     await loadAgent()
   }

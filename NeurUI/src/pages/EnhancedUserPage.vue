@@ -43,6 +43,10 @@
           <template v-if="column.key === 'role'">
             <a-tag :color="record.role === 'admin' ? 'purple' : record.role === 'editor' ? 'blue' : 'default'">{{ record.role }}</a-tag>
           </template>
+          <template v-if="column.key === 'group'">
+            <a-tag v-if="deptGroupOf(record.username)" color="geekblue">{{ deptGroupOf(record.username)?.name }}</a-tag>
+            <span v-else class="mono">—</span>
+          </template>
           <template v-if="column.key === 'status'">
             <a-badge :status="record.active ? 'success' : 'default'" :text="record.active ? t('common.active') : t('common.inactive')" />
           </template>
@@ -82,6 +86,15 @@
         <a-form-item :label="t('auth.active')">
           <a-switch v-model:checked="userForm.active" />
         </a-form-item>
+        <a-form-item :label="t('system.userGroup')">
+          <p class="modules-hint">{{ t('system.reloginHint') }}</p>
+          <a-select
+            v-model:value="userForm.group_id"
+            :options="deptGroupOptions"
+            allow-clear
+            :placeholder="t('system.parentGroupNone')"
+          />
+        </a-form-item>
       </a-form>
     </a-modal>
 
@@ -104,6 +117,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { enhancedUsersApi } from '@/api/modules'
+import { listGroups, addGroupMember, removeGroupMember, type Group } from '@/api/modules/groups'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message, Modal } from 'ant-design-vue'
@@ -128,11 +142,27 @@ const selectedUserId = ref<string>('')
 const newPassword = ref('')
 const confirmPassword = ref('')
 
-const userForm = ref({ username: '', email: '', password: '', role: 'user', active: true })
+const userForm = ref<{ username: string; email: string; password: string; role: string; active: boolean; group_id: string }>({ username: '', email: '', password: '', role: 'user', active: true, group_id: '' })
+
+// 部门分组（specs/2026-11-07 批 F1）：归属按 username 记账（groups members）
+const groups = ref<Group[]>([])
+const deptGroups = computed(() => groups.value.filter(g => !g.is_system))
+const deptGroupOptions = computed(() => deptGroups.value.map(g => ({ label: g.name, value: g.group_id })))
+const deptGroupOf = (username?: string) =>
+  deptGroups.value.find(g => (g.members || []).includes(username || '')) || null
+
+const fetchGroups = async () => {
+  try {
+    groups.value = (await listGroups()) ?? []
+  } catch {
+    groups.value = []
+  }
+}
 
 const columns = computed(() => [
   { title: t('auth.username'), key: 'username' },
   { title: t('auth.email'), dataIndex: 'email', key: 'email' },
+  { title: t('system.userGroup'), key: 'group', width: 140 },
   { title: t('auth.role'), key: 'role', width: 100 },
   { title: t('common.status'), key: 'status', width: 100 },
   { title: t('auth.quota'), key: 'quota', width: 120 },
@@ -154,21 +184,39 @@ const fetchUsers = async () => {
   }
 }
 
+onMounted(fetchGroups)
+
 const saveUser = async () => {
   saving.value = true
   try {
     if (editingUser.value) {
       await enhancedUsersApi.updateUser(editingUser.value.id, { email: userForm.value.email, role: userForm.value.role, active: userForm.value.active })
+      // 部门归属变更（单主组）：先出旧部门再入新部门（后端 409 文案透出）
+      const previous = deptGroupOf(userForm.value.username)
+      const target = userForm.value.group_id || ''
+      if ((previous?.group_id || '') !== target) {
+        if (previous?.group_id) {
+          await removeGroupMember(previous.group_id, userForm.value.username)
+        }
+        if (target) {
+          await addGroupMember(target, { username: userForm.value.username })
+        }
+      }
     } else {
       await enhancedUsersApi.createUser(userForm.value)
+      if (userForm.value.group_id) {
+        await addGroupMember(userForm.value.group_id, { username: userForm.value.username })
+      }
     }
     message.success(t('common.success'))
     showCreate.value = false
     editingUser.value = null
-    userForm.value = { username: '', email: '', password: '', role: 'user', active: true }
+    userForm.value = { username: '', email: '', password: '', role: 'user', active: true, group_id: '' }
     await fetchUsers()
-  } catch {
-    message.error(t('common.error'))
+    await fetchGroups()
+  } catch (err) {
+    const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+    message.error(detail || t('common.error'))
   } finally {
     saving.value = false
   }
@@ -176,7 +224,14 @@ const saveUser = async () => {
 
 const editUser = (user: enhancedUsersApi.User) => {
   editingUser.value = user
-  userForm.value = { username: user.username, email: user.email ?? '', password: '', role: user.role ?? 'user', active: user.active ?? true }
+  userForm.value = {
+    username: user.username,
+    email: user.email ?? '',
+    password: '',
+    role: user.role ?? 'user',
+    active: user.active ?? true,
+    group_id: deptGroupOf(user.username)?.group_id || '',
+  }
   showCreate.value = true
 }
 

@@ -5,6 +5,18 @@ import type { ApiResponse, PaginatedData, PageParams } from '@/types/response'
 // Types
 // ---------------------------------------------------------------------------
 
+/** 知识库自定义分类（分类注册表，specs/2026-11-07 批 A） */
+export interface KnowledgeCategory {
+  category_id: string
+  name: string
+  description?: string
+  is_active?: boolean
+  created_by?: string
+  created_at?: string
+  updated_by?: string
+  updated_at?: string
+}
+
 export interface KnowledgeNode {
   id: string
   knowledge_id?: string
@@ -618,4 +630,39 @@ export function getIngressTask(taskId: string) {
 /** 取消待处理/处理中的摄取任务（已终结 → 409）。 */
 export function cancelIngressTask(taskId: string) {
   return api.post<ApiResponse<{ task_id: string }>>(`${BASE}/ingress-tasks/${taskId}/cancel`)
+}
+
+// ---------------------------------------------------------------------------
+// 分类注册表（specs/2026-11-07 批 A：自定义分类的受控清单，单一事实源）
+// ---------------------------------------------------------------------------
+
+/** 分类列表（登录可读；include_inactive 仅 admin，停用分类清单）。 */
+export function listKnowledgeCategories(includeInactive = false) {
+  return api.get<ApiResponse<KnowledgeCategory[]>>(`${BASE}/categories`, {
+    params: includeInactive ? { include_inactive: true } : {},
+  })
+}
+
+/** 注册分类（仅管理员）。 */
+export function createKnowledgeCategory(data: {
+  category_id: string
+  name: string
+  description?: string
+}) {
+  return api.post<ApiResponse<KnowledgeCategory>>(`${BASE}/categories`, data)
+}
+
+/** 更新/停用/复用分类（仅管理员；字段缺省 = 不动）。 */
+export function updateKnowledgeCategory(
+  categoryId: string,
+  data: { name?: string; description?: string; is_active?: boolean },
+) {
+  return api.put<ApiResponse<KnowledgeCategory>>(`${BASE}/categories/${encodeURIComponent(categoryId)}`, data)
+}
+
+/** 删除分类（仅管理员；引用它的分组白名单解析时如实剔除）。 */
+export function deleteKnowledgeCategory(categoryId: string) {
+  return api.delete<ApiResponse<{ category_id: string }>>(
+    `${BASE}/categories/${encodeURIComponent(categoryId)}`,
+  )
 }

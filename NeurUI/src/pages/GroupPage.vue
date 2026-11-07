@@ -27,6 +27,18 @@
           <p class="group-modules" v-if="group.allowed_modules?.length">
             {{ t('system.allowedModules') }}: {{ formatModules(group.allowed_modules) }}
           </p>
+          <p class="group-modules" v-if="group.parent_group_id">
+            {{ t('system.parentGroup') }}: {{ groupNameById(group.parent_group_id) }}
+          </p>
+          <p class="group-modules" v-if="group.allowed_categories?.length">
+            {{ t('system.allowedCategories') }}: {{ formatCategories(group.allowed_categories) }}
+          </p>
+          <p class="group-modules" v-else-if="group.allowed_categories">
+            {{ t('system.allowedCategories') }}: {{ t('system.categoriesUnrestricted') }}
+          </p>
+          <p class="group-modules" v-if="group.default_category">
+            {{ t('system.defaultCategory') }}: {{ categoryName(group.default_category) }}
+          </p>
           <template #footer>
             <div class="group-actions">
               <GlassButton variant="ghost" size="sm" @click="viewMembers(group)">{{ t('collab.members') }}</GlassButton>
@@ -48,6 +60,40 @@
         </a-form-item>
         <a-form-item :label="t('common.description')">
           <a-textarea v-model:value="groupForm.description" :rows="3" />
+        </a-form-item>
+        <a-form-item :label="t('system.parentGroup')">
+          <p class="modules-hint">{{ t('system.parentGroupHint') }}</p>
+          <a-select
+            v-model:value="groupForm.parent_group_id"
+            :options="parentOptions"
+            allow-clear
+            :placeholder="t('system.parentGroupNone')"
+          />
+        </a-form-item>
+        <a-form-item :label="t('system.allowedCategories')">
+          <p class="modules-hint">{{ t('system.allowedCategoriesHint') }}</p>
+          <div class="modules-checklist">
+            <a-checkbox
+              v-for="cat in categories"
+              :key="cat.category_id"
+              :checked="selectedCategories.includes(cat.category_id)"
+              @change="toggleCategory(cat.category_id)"
+            >{{ cat.name }}（{{ cat.category_id }}）</a-checkbox>
+            <a-empty v-if="!categories.length" :description="t('common.noData')" />
+          </div>
+          <div class="modules-toolbar">
+            <GlassButton variant="ghost" size="sm" @click="selectedCategories = categories.map(c => c.category_id)">{{ t('common.all') }}</GlassButton>
+            <GlassButton variant="ghost" size="sm" @click="selectedCategories = []">{{ t('common.none') }}</GlassButton>
+          </div>
+        </a-form-item>
+        <a-form-item :label="t('system.defaultCategory')">
+          <p class="modules-hint">{{ t('system.defaultCategoryHint') }}</p>
+          <a-select
+            v-model:value="groupForm.default_category"
+            :options="defaultCategoryOptions"
+            allow-clear
+            :placeholder="t('common.none')"
+          />
         </a-form-item>
         <a-form-item :label="t('system.allowedModules')">
           <p class="modules-hint">{{ t('system.allowedModulesHint') }}</p>
@@ -82,8 +128,14 @@
 
     <!-- Members modal -->
     <a-modal v-model:open="showMembers" :title="t('collab.members')" :footer="null" width="560px">
+      <p class="modules-hint">{{ t('system.reloginHint') }}</p>
       <div class="members-header">
-        <a-input v-model:value="newMemberName" :placeholder="t('collab.addMember')" style="width: 200px" />
+        <a-auto-complete
+          v-model:value="newMemberName"
+          :options="memberNameOptions"
+          :placeholder="t('collab.addMember')"
+          style="width: 200px"
+        />
         <GlassButton variant="primary" size="sm" @click="addMember">{{ t('collab.addMember') }}</GlassButton>
       </div>
       <a-list :data-source="members" size="small" style="margin-top: 12px">
@@ -108,6 +160,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { listGroups, updateGroup, createGroup, deleteGroup as deleteGroupApi, listGroupMembers, addGroupMember, removeGroupMember, type Group } from '@/api/modules/groups'
+import { listKnowledgeCategories, type KnowledgeCategory } from '@/api/modules/knowledge'
+import { listUsers } from '@/api/modules/enhanced-users'
 import { MODULE_SECTIONS, ALL_MODULE_KEYS } from '@/config/modules'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -131,8 +185,68 @@ const newMemberName = ref('')
 const currentPage = ref(1)
 const pageSize = ref(12)
 
-const groupForm = ref({ name: '', description: '' })
+const groupForm = ref<{ name: string; description: string; parent_group_id: string; default_category: string }>({ name: '', description: '', parent_group_id: '', default_category: '' })
 const selectedModules = ref<string[]>([])
+// 部门化（specs/2026-11-07 批 F1）：分类注册表与父组选择
+const categories = ref<KnowledgeCategory[]>([])
+const selectedCategories = ref<string[]>([])
+const users = ref<{ id: string; username?: string }[]>([])
+
+const categoryLabelMap = computed<Record<string, string>>(() => {
+  const map: Record<string, string> = {}
+  for (const cat of categories.value) map[cat.category_id] = cat.name
+  return map
+})
+const categoryName = (id: string) => categoryLabelMap.value[id] || id
+const formatCategories = (ids: string[]) => ids.map(categoryName).join('、')
+const groupNameById = (id: string) => groups.value.find(g => g.group_id === id)?.name || id
+
+/** 父组候选：自定义组（部门组），编辑时排除自己（禁自指；环由后端 400 兜底） */
+const parentOptions = computed(() =>
+  groups.value
+    .filter(g => !g.is_system && g.group_id !== editingGroup.value?.group_id)
+    .map(g => ({ label: g.name, value: g.group_id })),
+)
+
+/** 缺省分类候选：本组已勾选的白名单分类 */
+const defaultCategoryOptions = computed(() =>
+  selectedCategories.value.map(id => ({ label: categoryName(id), value: id })),
+)
+
+/** 成员候选（用户选择器数据源） */
+const memberNameOptions = computed(() =>
+  users.value
+    .map(u => ({ value: u.username || '' }))
+    .filter(o => o.value),
+)
+
+const toggleCategory = (id: string) => {
+  const idx = selectedCategories.value.indexOf(id)
+  if (idx >= 0) selectedCategories.value.splice(idx, 1)
+  else selectedCategories.value.push(id)
+  // 缺省分类若被移出白名单，随勾选失效
+  if (groupForm.value.default_category && !selectedCategories.value.includes(groupForm.value.default_category)) {
+    groupForm.value.default_category = ''
+  }
+}
+
+const fetchCategories = async () => {
+  try {
+    const res: any = await listKnowledgeCategories()
+    categories.value = res?.data ?? res ?? []
+  } catch {
+    categories.value = []
+  }
+}
+
+const fetchUsers = async () => {
+  try {
+    const res = await listUsers({ page: 1, page_size: 500 })
+    users.value = [...(res?.items ?? []), ...(res?.users ?? [])]
+  } catch {
+    users.value = []
+  }
+}
 
 const pagedGroups = computed(() =>
   groups.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value),
@@ -195,15 +309,22 @@ const fetchGroups = async () => {
 
 const openCreate = () => {
   editingGroup.value = null
-  groupForm.value = { name: '', description: '' }
+  groupForm.value = { name: '', description: '', parent_group_id: '', default_category: '' }
   selectedModules.value = []
+  selectedCategories.value = []
   showForm.value = true
 }
 
 const editGroup = (group: Group) => {
   editingGroup.value = group
-  groupForm.value = { name: group.name, description: group.description || '' }
+  groupForm.value = {
+    name: group.name,
+    description: group.description || '',
+    parent_group_id: group.parent_group_id || '',
+    default_category: group.default_category || '',
+  }
   selectedModules.value = [...(group.allowed_modules || [])]
+  selectedCategories.value = [...(group.allowed_categories || [])]
   showForm.value = true
 }
 
@@ -213,7 +334,10 @@ const saveGroup = async () => {
     // 全不勾 = 不限制（后端契约：空数组 = 未配置）
     const payload = {
       ...groupForm.value,
+      parent_group_id: groupForm.value.parent_group_id || null,
+      default_category: groupForm.value.default_category || null,
       allowed_modules: [...selectedModules.value],
+      allowed_categories: [...selectedCategories.value],
     }
     if (editingGroup.value) {
       await updateGroup(editingGroup.value.group_id, payload)
@@ -223,11 +347,17 @@ const saveGroup = async () => {
     message.success(t('common.success'))
     showForm.value = false
     await fetchGroups()
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractDetail(err))
   } finally {
     saving.value = false
   }
+}
+
+/** 后端业务错误原文（环校验 400/单主组 409 的 detail 优先于通用文案） */
+const extractDetail = (err: unknown) => {
+  const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+  return detail || t('common.error')
 }
 
 const deleteGroup = (id: string) => {
@@ -265,8 +395,8 @@ const addMember = async () => {
     newMemberName.value = ''
     await viewMembers({ group_id: selectedGroupId.value } as Group)
     await fetchGroups()
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractDetail(err))
   }
 }
 
@@ -276,12 +406,16 @@ const removeMember = async (username: string) => {
     message.success(t('common.success'))
     await viewMembers({ group_id: selectedGroupId.value } as Group)
     await fetchGroups()
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractDetail(err))
   }
 }
 
-onMounted(fetchGroups)
+onMounted(() => {
+  fetchGroups()
+  fetchCategories()
+  fetchUsers()
+})
 </script>
 
 <style scoped>

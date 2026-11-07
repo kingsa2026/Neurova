@@ -384,7 +384,12 @@
           <a-input v-model:value="form.title" :placeholder="t('knowledge.titlePlaceholder')" />
         </a-form-item>
         <a-form-item :label="t('knowledge.itemCategory')">
-          <a-input v-model:value="form.category" :placeholder="t('knowledge.categoryPlaceholder')" />
+          <a-select
+            v-model:value="form.category"
+            :options="categoryOptions"
+            allow-clear
+            :placeholder="t('knowledge.categoryPlaceholder')"
+          />
         </a-form-item>
         <a-form-item :label="t('knowledge.itemContent')">
           <a-textarea v-model:value="form.content" :rows="10" :placeholder="t('knowledge.contentPlaceholder')" />
@@ -434,6 +439,15 @@
       @ok="handleImport"
       :confirm-loading="importing"
     >
+      <a-form-item :label="t('knowledge.importCategory')" style="margin-bottom: 12px">
+        <p class="modules-hint">{{ t('knowledge.importCategoryHint') }}</p>
+        <a-select
+          v-model:value="importCategory"
+          :options="categoryOptions"
+          allow-clear
+          :placeholder="t('knowledge.importCategoryPlaceholder')"
+        />
+      </a-form-item>
       <a-upload-dragger
         :file-list="importFiles"
         :before-upload="beforeImportUpload"
@@ -751,6 +765,7 @@ import {
   runEntityResolution,
 } from '@/api/modules/knowledge'
 import type { KbConfig, KbCollection, KnowledgeNode, KnowledgeScope, KnowledgeConflict, ConflictTimeContext, DeletedKnowledge, GraphResolutionReview, KnowledgeChunkRow, IngressTask, IngressSpan } from '@/api/modules/knowledge'
+import { listKnowledgeCategories } from '@/api/modules/knowledge'
 import { request } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import GlassPanel from '@/components/GlassPanel.vue'
@@ -846,6 +861,21 @@ function onScopeChange() {
 }
 
 const categoryOptions = ref<{ label: string; value: string }[]>([])
+
+// 分类注册表（specs/2026-11-07 批 F2）：分类下拉的单源；服务端已按请求身份过滤
+const importCategory = ref('')
+
+async function fetchCategories() {
+  try {
+    const res: any = await listKnowledgeCategories()
+    const items: any[] = res?.data ?? res ?? []
+    categoryOptions.value = items
+      .filter((c) => c.is_active !== false)
+      .map((c) => ({ label: c.name, value: c.category_id }))
+  } catch {
+    categoryOptions.value = []
+  }
+}
 
 // Modal
 const modalVisible = ref(false)
@@ -1376,11 +1406,8 @@ async function fetchKnowledge() {
       totalItems.value = data?.total ?? knowledgeItems.value.length
     }
 
-    // Extract categories from results
-    const cats = new Set(knowledgeItems.value.map((i: KnowledgeItem) => i.category).filter(Boolean))
-    if (cats.size && !categoryOptions.value.length) {
-      categoryOptions.value = [...cats].map((c) => ({ label: c, value: c }))
-    }
+    // 分类下拉单源＝分类注册表（specs/2026-11-07 批 F2）：服务端按身份过滤，
+    // 受限部门只见白名单内分类；不再从当前页结果反推（反推会漏掉本页没出现的分类）
   } catch (err) {
     message.error(extractApiDetail(err) || t('knowledge.loadError'))
   } finally {
@@ -1771,7 +1798,10 @@ async function handleImport() {
         // 不再以成功语义静默返回空列表——按文件聚合失败原因
         const res: any = await request.post('/knowledge/import', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
-          params: { agent_id: agentId.value },
+          params: {
+            agent_id: agentId.value,
+            ...(importCategory.value ? { category: importCategory.value } : {}),
+          },
         })
         const status: string = res?.data?.status || ''
         if (res?.code !== 0 || !res?.data?.items?.length) {
@@ -1813,7 +1843,11 @@ async function handleImportUrl() {
   importingUrl.value = true
   try {
     await request.post('/knowledge/import-url', null, {
-      params: { agent_id: agentId.value, url },
+      params: {
+        agent_id: agentId.value,
+        url,
+        ...(importCategory.value ? { category: importCategory.value } : {}),
+      },
     })
     message.success(t('knowledge.importSuccess'))
     importUrlValue.value = ''
@@ -1934,6 +1968,7 @@ async function handleDeleteCollection(record: KbCollection) {
 
 onMounted(() => {
   fetchKnowledge()
+  fetchCategories()
   fetchKbConfigs()
   fetchKbCollections()
   fetchSubmissions()
