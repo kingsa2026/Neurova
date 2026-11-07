@@ -12171,3 +12171,19 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     无源时间的事实回退 recorded_at 还是排除；③ 与 valid_from 的优先级。
     三项设计决策需人裁，不适合无人值守。下一步：点单后按 §4 L3 详设实施。
     **下一枚空号现查：本格取 584，后继从 585 起。**
+
+585. **PR #374 CI 收口四轮：静态门禁两层（pyflakes 3 处＋ruff 4 处 F821）、npx 运行时树 glob/minimatch、锁的 py 版本标记、台账例外署名判据** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **根因归因一律按日志原文，不猜**：① `static-gate` 是**两层**——`--skip-import` 下先跑 pyflakes，`ruff check` 紧随其后；第一轮只修了 pyflakes 那 3 处，ruff 那 4 处一直被前一道的红挡着没跑到（`test_batchCR_debtFixes.py` 缺 `import asyncio`、`test_wecomProtocolCompliance.py` 两处字符串前向引用 `WeComAdapter` 缺 `TYPE_CHECKING`、`test_owl2rlProfile.py` 直接调 `productionAdmissionGate` 而未 import——单源在 `foundation` 包门面 `__all__` 里已导出）。② `osv_audit.py` 扫 npx 树命中 `glob`（GHSA-3g3m-2fjr-6pw4，修复点 14.0.2）与 `minimatch`（GHSA-g3hv-75wg-m249，修复点 11.0.1）；`swagger-jsdoc` 用**精确版本** `glob: "11.1.0"` 声明子依赖，重解析原地复刻 ⇒ 只能 overrides 顶替（与 `undici` / `@azure/msal-node` 同一根因同一处置）。③ 锁里 `numpy==2.5.4` 缺 `python_full_version` 标记，而三条腿跑 py3.11 ⇒ 解析必败。④ 台账例外清单 5 行署名在 CI 上被判「已不成立」。
+    - **第 ④ 条才是这轮唯一需要改判据的**：本机绿、CI 红，根因不在署名行而在判据第二向的式子 `not (isCommit(t) and not isReachable(t))`——它把「本仓取不到这个对象」与「号已回到主线」算成同一件事。CI 检出远端当前历史，那批对象在远端早被 gc，于是 5 行全被判过期，而给出的修法还是「把这行删了」：那是拿抹掉证据换绿（教义第 2 条明令禁止）。故 3 行证据**留在清单里**，改判据只认本仓真能作证的两种形态（对象存在∧非 commit∨已可达），并加一格反向控制（合成一枚语法合法但本仓不存在的号）钉住「无发言权时如实不计」。**过程自报**：本会话先按旧判据删掉了那 5 行，随后被这条更正确的处置覆盖——删证据的修法已撤回，清单恢复原样。
+    - **红→绿（本机同一份树）**：
+      ```
+      ruff check neurova tests --no-cache    4 errors → All checks passed!
+      test_npx_runtime_pinning                            20 passed
+      test_wecomProtocolCompliance + test_owl2rlProfile    15 passed
+      test_batchCR_debtFixes                                4 passed
+      test_audit_ledger_commit_guard                       10 passed
+      audit_ledger_commit_guard.py      rc=0（1376 条引用 / 署名 5 条可达）
+      ```
+    - **live-verify（真链路）**：`npm audit --json` 在 `tools/npx-runtime` 现读 `{"total":0}`（修前 3 条）；CI 侧 `static-gate` / `dependency-audit` / `frontend` / `perf-gate` / `deploy-config` / `experience-quality` 逐条由 error 转 success（`cnb-srf-1k6qu7mv5`）。glob 13.0.6→**14.0.4**、minimatch 10.2.6→**11.0.5**，`swagger-jsdoc/node_modules/glob` 那份嵌套副本随顶替消失，连带少 94 行。
+    - **如实记录的偏差**：`npm audit` 里 `@askjo/camofox-browser` / `camoufox-js` / `swagger-jsdoc` 三条 **moderate** 仍在（`via` 链经 glob 计数），不属本单面、也不因本单变绿而消失；OSV 侧 `tools/npx-runtime` 已 0 命中。
+    - **下一枚空号现查：条目行尾号现算 584 ⇒ 本格取 585，后继从 586 起。**
