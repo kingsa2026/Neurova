@@ -181,7 +181,7 @@ async def getEnterpriseSourceHealth(
     if not sourceId:
         raise HTTPException(status_code=400, detail="source_id 不能为空")
     ingestor, _adapters, _store = _parts()
-    probe = ingestor.probeHealth(_tenantOf(current_user), sourceId)
+    probe = await ingestor.probeHealth(_tenantOf(current_user), sourceId)
     if probe is None:
         raise HTTPException(status_code=404, detail="企业源未提交: %s" % source_id)
     return {"code": 0, "message": "success", "data": {"source_id": sourceId, **probe}}
