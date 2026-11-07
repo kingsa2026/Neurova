@@ -38,6 +38,7 @@ def testNoDeptFallsBackToDefault(tmp_path):
         "group_id": None,
         "allowed_categories": [],
         "restricted": False,
+        "default_category": None,
     }
 
 

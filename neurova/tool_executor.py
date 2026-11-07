@@ -508,6 +508,33 @@ class ToolExecutor:
         agent_id = getattr(agent, "agent_id", None) or getattr(config, "agent_id", None)
         return user_id, agent_id
 
+    def _callerDepartment(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """说话人部门作用域（specs/2026-11-07 批 C）：user_id → username → 部门解析。
+
+        群成员关系按 username 记账，技能注入点只有 user_id——这里补一次
+        id→username 查表；任一步失败返回 None（技能回落既有缺省语义，不猜部门）。
+        """
+        try:
+            uid = str(user_id or "").strip()
+            if not uid or uid == "default":
+                return None
+            from neurova.auth.user_model import UserModel
+
+            row = UserModel().get_user_by_id(int(uid))
+            username = ""
+            if row is not None:
+                username = str(getattr(row, "username", "") or "")
+                if not username and isinstance(row, dict):
+                    username = str(row.get("username") or "")
+            if not username:
+                return None
+            from neurova.auth.user_group_model import resolveUserDepartment
+
+            return resolveUserDepartment(username)
+        except Exception as e:  # noqa: BLE001 - 部门解析失败回落缺省语义
+            logger.debug("caller department resolve failed for %s: %s", user_id, e)
+            return None
+
     def _ensure_messages_list(self, messages: Optional[List[Dict]] = None) -> List[Dict]:
         """确保消息列表存在"""
         if messages is None:
@@ -1484,9 +1511,17 @@ class ToolExecutor:
             tool_source = "skill_system"
             # 隔离注入：身份并入 params（服务端赋值优先，防 LLM 参数伪造）
             _caller_id = str(self._agent_identity()[0] or "")
+            identity_params = {"_caller_user_id": _caller_id}
+            # 部门上下文（specs/2026-11-07 批 C）：说话人部门根/缺省分类随身份注入，
+            # kb_builder 等落库技能据此把条目落对租户与业务分类
+            dept = self._callerDepartment(_caller_id)
+            if dept:
+                identity_params["_caller_tenant_id"] = str(dept.get("tenant_id") or "default")
+                if dept.get("default_category"):
+                    identity_params["_caller_default_category"] = str(dept["default_category"])
             result = await self.execute_skill_tool(
                 tool_name,
-                {**(params or {}), "_caller_user_id": _caller_id},
+                {**(params or {}), **identity_params},
                 {"user_id": _caller_id},
             )
             success = self._result_is_success(result)

@@ -105,6 +105,23 @@ class KbBuilderSkillExecutor(BaseSkillExecutor):
     # 对该名字字面形式的 SQL 误报（语义等价），详见测试文件头注释。
     execute = _run
 
+    # ── 部门上下文（specs/2026-11-07 批 C）────────────────────
+
+    @staticmethod
+    def _deptContext(params: Dict[str, Any]) -> Tuple[str, str]:
+        """落库部门上下文：租户＝说话人部门根；分类＝显式 > 部门缺省 > "kb_builder"。
+
+        `_caller_tenant_id`/`_caller_default_category` 由 ToolExecutor 服务端注入
+        （与 `_caller_user_id` 同通道，LLM 不可伪造）；缺省回落 = 既有行为不变。
+        """
+        tenant_id = str(params.get("_caller_tenant_id") or "default")
+        category = (
+            str(params.get("category") or "").strip()
+            or str(params.get("_caller_default_category") or "").strip()
+            or "kb_builder"
+        )
+        return tenant_id, category
+
     # ── record_summary：沉淀心智模型综述 ─────────────────────
 
     def _record_summary(self, params: Dict[str, Any]) -> SkillResult:
@@ -116,15 +133,17 @@ class KbBuilderSkillExecutor(BaseSkillExecutor):
             return SkillResult(
                 success=False, error="record_summary 缺少 content（心智模型综述正文）"
             )
+        tenant_id, category = self._deptContext(params)
         item = self._get_repository().create_knowledge(
             agent_id=params.get("agent_id") or "default",
             title="[KB] %s · 心智模型综述" % topic,
             content=content,
-            category="kb_builder",
+            category=category,
             tags=[topic, "kb_summary"],
             source="kb_builder",
             confidence=0.8,
             owner_user_id=str(params.get("_caller_user_id") or "default"),
+            tenant_id=tenant_id,
         )
         return SkillResult(
             success=True,
@@ -145,6 +164,8 @@ class KbBuilderSkillExecutor(BaseSkillExecutor):
         agent_id = params.get("agent_id") or "default"
         # 隔离归属：条目属主=聊天请求用户（调用方服务端注入，不可由 LLM 伪造）
         owner_user_id = str(params.get("_caller_user_id") or "default")
+        # 部门上下文（specs/2026-11-07 批 C）：租户/缺省分类随说话人部门走
+        tenant_id, category = self._deptContext(params)
 
         seeds = [
             u.strip() for u in (params.get("urls") or []) if isinstance(u, str) and u.strip()
@@ -203,11 +224,12 @@ class KbBuilderSkillExecutor(BaseSkillExecutor):
                 agent_id=agent_id,
                 title=title,
                 content=content,
-                category="kb_builder",
+                category=category,
                 tags=[topic, "kb_source"],
                 source=f["url"],
                 confidence=0.6,
                 owner_user_id=owner_user_id,
+                tenant_id=tenant_id,
             )
             source_entries.append(
                 {"url": f["url"], "title": title, "knowledge_id": item["knowledge_id"]}
@@ -226,10 +248,11 @@ class KbBuilderSkillExecutor(BaseSkillExecutor):
                 ensure_ascii=False,
                 indent=2,
             ),
-            category="kb_builder",
+            category=category,
             tags=[topic, "kb_sources"],
             source="kb_builder",
             owner_user_id=owner_user_id,
+            tenant_id=tenant_id,
         )
 
         # 索引与概念地图（供 agent 合成综述，不是摘要堆）
@@ -268,10 +291,11 @@ class KbBuilderSkillExecutor(BaseSkillExecutor):
             agent_id=agent_id,
             title="[KB] %s · 索引与概念地图" % topic,
             content="\n".join(index_lines),
-            category="kb_builder",
+            category=category,
             tags=[topic, "kb_index"],
             source="kb_builder",
             owner_user_id=owner_user_id,
+            tenant_id=tenant_id,
         )
 
         # 抓取审计
@@ -292,10 +316,11 @@ class KbBuilderSkillExecutor(BaseSkillExecutor):
             agent_id=agent_id,
             title="[KB] %s · 抓取审计" % topic,
             content="\n".join(audit_lines),
-            category="kb_builder",
+            category=category,
             tags=[topic, "kb_audit"],
             source="kb_builder",
             owner_user_id=owner_user_id,
+            tenant_id=tenant_id,
         )
 
         # 运行清单
@@ -319,10 +344,11 @@ class KbBuilderSkillExecutor(BaseSkillExecutor):
             agent_id=agent_id,
             title="[KB] %s · 运行清单" % topic,
             content=json.dumps(manifest, ensure_ascii=False, indent=2),
-            category="kb_builder",
+            category=category,
             tags=[topic, "kb_manifest"],
             source="kb_builder",
             owner_user_id=owner_user_id,
+            tenant_id=tenant_id,
         )
 
         return SkillResult(

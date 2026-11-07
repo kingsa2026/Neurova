@@ -204,6 +204,7 @@ class KnowledgeFtsIndex:
         scope: str = "all",
         agent_id: Optional[str] = None,
         category: Optional[str] = None,
+        categories: Optional[Iterable[str]] = None,
         tags: Optional[Iterable[str]] = None,
         source: Optional[str] = None,
         updated_after: Optional[float] = None,
@@ -250,6 +251,16 @@ class KnowledgeFtsIndex:
         if category:
             clauses.append("d.category = ?")
             params.append(str(category))
+        # 部门分类白名单（specs/2026-11-07 批 C）：repository 层解析后下推；
+        # 空列表 = 受限且无可见分类 → 显式零命中（1=0），不是"不过滤"
+        if categories is not None:
+            cat_list = [str(c) for c in categories if str(c)]
+            if not cat_list:
+                clauses.append("1 = 0")
+            else:
+                placeholders = ", ".join("?" for _ in cat_list)
+                clauses.append(f"d.category IN ({placeholders})")
+                params.extend(cat_list)
         if source:
             clauses.append("d.source = ?")
             params.append(str(source))
