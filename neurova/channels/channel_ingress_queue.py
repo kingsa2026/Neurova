@@ -36,6 +36,10 @@ logger = get_logger(__name__)
 #: 缺 agent 上下文时的归属（与 `ChannelManager` / `channel_router` 同一口径）
 _DEFAULT_AGENT_ID = "default"
 
+#: 入站持久库路径的环境注入面（单一事实源）：manager.py 落库与
+#: enterprise/connectors_chat.py 只读拉取共读这一处 env 名，不再各自手抄字面量。
+CHANNEL_INGRESS_DB_ENV = "NEUROVA_CHANNEL_INGRESS_DB"
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS channel_ingress_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
