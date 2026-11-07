@@ -12163,3 +12163,11 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **live-verify（隔离子环境真后端）抓出并修一处真 bug**：`probeHealth` 漏 `await`——`health()` 是 async 契约，协程对象被 getattr 读成 `status=error 且 reason 空串`（`a1f39894`，补单元钉"探测失败 reason 不许空串"）。修后全链读数：注册谓词术语→建 file 连接器（真 CSV）→health **200 ok**→摄取 **admitted=2/rejected=0**（两行真准入）→列表 **ingested_count=2** 实时反映＋created_at 回显→DELETE 200→列表消失＋单查 **404**。
     - **门**：enterprise 套件 113 passed（生命周期 8 格新增）；vitest 2382 passed（页面测试重写 11 格＋locale-key-reference 抓出漏插 entTestBtn 已补＋hardcodedColors 裸色清零＋duplicate 台账按处方重生成）；vue-tsc 0 错。端口偏离如实记录：live 用 9530 隔离子环境（9527 被既有后端占用）。
     - **下一枚空号现查：条目行尾号现算 581 ⇒ 本格取 582，后继从 583 起。**
+
+583. **企微回调协议合规收口：审计四项不符合＋缺口全修（对照官方 91144/90236）** ✅🟢 —— 用户点单「处理不符合项补全缺口」（承接同日审计格的判定）。
+    - **四项不符合（红→绿）**：① URL 验证原返回密文原文（真平台验证必失败，代码自注承认）→ 现验签后解密 echostr 原样返回明文，未配 token/aes_key 双 fail-closed（收紧原无 token 放行的旁路语义）；② 加密模式回调体只有 <Encrypt> 原样读不到 Content → 现验签后经协议单源解密取真实消息（receiveId=corpid 校验防跨企业重放），明文模式兼容保留；③ 被动回复原恒明文固定文案 → 加密会话按官方密文包装（Encrypt/MsgSignature/TimeStamp/Nonce，可解回原文），明文会话仍明文；④ message/send 的 text 原带 mentioned_list（属群机器人 webhook 契约，应用消息群 @ 实际不生效）→ 移除，text 只留官方契约的 content。
+    - **缺口补全**：token 失效（40014/42001）强制刷新后重试一次（send 主写路；媒体面由提前 300s 刷新兜住，如实登记不加）；gettoken URL/提前失效秒数/失效码收口新模块 `channels/wecom_token.py`——wecom.py 与 wechat_auth.py 两处第二事实源、wechat.py 的第三份 WECOM_API_BASE 常量同批收口（wechat_auth 的提前失效 -60s 统一为 -300s，更早刷新更安全）；签名公式与 AES 加解密收口 `channels/wechat_kf_crypto.py`（新增 callbackSignature 计算、错误文案去 kf 前缀面中立），wecom 主面全量消费单源；WeComGroupBot（零调用方）按教义第 6/7 条退役删除。**未动项**：会话存档 SDK（在册裁定项，health 诚实 degraded）、通讯录 API（功能范围不需要）、渠道凭据存储加密面（另立项）。
+    - **红→绿**：新增 `tests/unit/channels/test_wecomProtocolCompliance.py` 10 格（ImportError 红灯实证→绿）；既有 8 档按新契约演进——verify_url 两格重写为官方解密契约、群解析/loop 安全/凭据路由/voice 两档改指协议单源、官方规范两格从假密文常量换真实加解密向量（假密文在新契约下被诚实拒绝正是修复生效的证据）、AST 守卫 testFormulaHasOneDefinition 改钉 kf_crypto 单源定义＋wecom.py 无 sha1 拼接。**门**：channels 全目录 **769 passed**（含本批全部演进）。修复提交 `612caf93`。
+    - **口径（numstat 实抄）**：13 文件 +529/−211（wecom.py 协议面重构、wecom_token.py 新档、kf_crypto 单源化、测试演进为主）。
+    - **落笔手误如实记录**：首版内联脚本被 bash 反引号吞了模块名且 rfind 错插到 582 之前，本格以脚本文件方式剪出重写归位（本行为该手误的留痕）。
+    - **下一枚空号现查：条目行尾号现算 582 ⇒ 本格取 583，后继从 584 起。**
