@@ -363,6 +363,7 @@ import {
   getOutOfBoxLanguageDefault,
   setOutOfBoxLanguageDefault,
 } from '@/api/modules/language'
+import { extractApiDetail } from '@/utils/error'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import CredentialManager from '@/components/settings/CredentialManager.vue'
@@ -524,8 +525,8 @@ const saveLlmRetry = async () => {
   try {
     await updateLlmRetrySettings({ ...llmRetry.value })
     message.success(t('common.success'))
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   } finally {
     savingLlmRetry.value = false
   }
@@ -562,8 +563,8 @@ const saveAgentLimits = async () => {
   try {
     await updateAgentLimits({ ...agentLimits.value })
     message.success(t('common.success'))
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   } finally {
     savingAgentLimits.value = false
   }
@@ -593,8 +594,8 @@ const saveToolOffload = async () => {
   try {
     await updateToolOffloadSettings({ threshold_kb: toolOffload.value.threshold_kb })
     message.success(t('common.success'))
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   } finally {
     savingToolOffload.value = false
   }
@@ -625,8 +626,8 @@ const saveGovernance = async () => {
   try {
     await updateGovernanceSettings({ ...governance.value })
     message.success(t('common.success'))
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   } finally {
     savingGovernance.value = false
   }
@@ -649,8 +650,8 @@ const fetchSettings = async () => {
     if (data?.storage) storage.value = { ...storage.value, ...data.storage }
     if (data?.advanced) advanced.value = { ...advanced.value, ...data.advanced }
     if (data?.routing) routing.value = { ...routing.value, ...data.routing }
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   }
 }
 
@@ -665,8 +666,8 @@ const saveSection = async (section: string) => {
     // （`appStore.setLocale`：i18n 实例 + 方向 + 覆盖层 + per-user 落盘），
     // 而管理员替**所有人**定的起点不该顺手变成替**他自己**做的决定。
     message.success(t('common.success'))
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   } finally {
     saving.value = false
   }
@@ -697,8 +698,8 @@ const saveLanguageDefault = async () => {
       auto_detect: false,
     })
     message.success(t('common.success'))
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   } finally {
     savingDefault.value = false
   }
@@ -711,8 +712,8 @@ const saveDesktopProvider = async () => {
   try {
     await updateSettings('advanced', { desktop_provider: advanced.value.desktop_provider })
     message.success(t('common.success'))
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   } finally {
     saving.value = false
   }
@@ -730,8 +731,8 @@ const saveSkillRecall = async () => {
       tool_search_enabled: advanced.value.tool_search_enabled,
     })
     message.success(t('common.success'))
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   } finally {
     savingRecall.value = false
   }
@@ -742,8 +743,8 @@ const clearCache = async () => {
   try {
     await clearCacheApi()
     message.success(t('common.success'))
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   } finally {
     clearingCache.value = false
   }

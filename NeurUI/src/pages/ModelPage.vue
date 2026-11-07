@@ -499,6 +499,7 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
 import type { Provider, ModelItem, DefaultLLMConfig, GenerationParams } from '@/types/model'
+import { extractApiDetail } from '@/utils/error'
 import { overlayContainerToBody } from '@/utils/overlay'
 
 const { t } = useI18n()
@@ -748,9 +749,9 @@ async function fetchModels() {
       const models = allModels.value.filter((m) => m.provider_id === p.id || m.provider_id === p.name)
       return { ...p, models, model_count: models.length }
     })
-  } catch {
+  } catch (err) {
     // F-11：卸载后不再弹 toast（错误会出现在别的页面）
-    if (!isDisposed) message.error(t('common.error'))
+    if (!isDisposed) message.error(extractApiDetail(err) || t('common.error'))
     allModels.value = []
   } finally {
     loadingModels.value = false
@@ -773,9 +774,9 @@ async function fetchActiveModel() {
         }
       }
     }
-  } catch {
+  } catch (err) {
     // F-11：卸载后不再弹 toast（错误会出现在别的页面）
-    if (!isDisposed) message.error(t('common.error'))
+    if (!isDisposed) message.error(extractApiDetail(err) || t('common.error'))
   }
 }
 
@@ -893,8 +894,8 @@ async function saveDefaultLLM() {
       }
     }
     message.success(t('common.success'))
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   } finally {
     savingDefault.value = false
   }
@@ -909,8 +910,8 @@ async function saveInlineKey(p: Provider) {
     p.api_key = key
     p.api_key_configured = true
     message.success(t('common.success'))
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   }
 }
 
@@ -953,8 +954,8 @@ async function saveProviderKey(p: Provider) {
     await ensureProvider(p)
     await updateProvider(p.id, { api_key: p.api_key })
     message.success(t('common.success'))
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   }
 }
 
@@ -975,8 +976,8 @@ async function createProvider() {
     addForm.base_url = ''
     addForm.api_key = ''
     await fetchProviders()
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   } finally {
     savingProvider.value = false
   }
@@ -987,8 +988,8 @@ async function deleteProvider(p: Provider) {
     await apiDeleteProvider(p.id)
     providers.value = providers.value.filter((pp) => pp.id !== p.id)
     message.success(t('common.success'))
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   }
 }
 
@@ -1022,8 +1023,8 @@ async function discoverModels(providerId: string) {
       return
     }
     message.success(t('model.modelsDiscovered', { n: candidates.length }))
-  } catch {
-    message.error(t('model.discoverFailed'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('model.discoverFailed'))
   } finally {
     discoveringId.value = null
   }
@@ -1056,8 +1057,8 @@ async function addDiscoveredModel(dm: any) {
     discoveredCandidates.value = discoveredCandidates.value.filter((x) => candidateId(x) !== id)
     mergeCandidateIntoLocal(dm, modelTarget.value.id)
     message.success(t('common.success'))
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   } finally {
     addingCandidateId.value = null
   }
@@ -1072,8 +1073,8 @@ async function addAllDiscoveredModels() {
     for (const dm of discoveredCandidates.value) mergeCandidateIntoLocal(dm, modelTarget.value.id)
     discoveredCandidates.value = []
     message.success(t('common.success'))
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   } finally {
     addingAllCandidates.value = false
   }
@@ -1146,8 +1147,8 @@ async function testModelConnection(m: ModelItem) {
     const res: any = await checkModelConnection(m.id) as any
     const data: ModelConnectionResult = res?.data ?? res ?? {}
     modelTestResults.value[m.id] = modelTestResultMessage(data)
-  } catch {
-    modelTestResults.value[m.id] = { type: 'error', text: t('model.connectionFailed') }
+  } catch (err) {
+    modelTestResults.value[m.id] = { type: 'error', text: extractApiDetail(err) || t('model.connectionFailed') }
   } finally {
     testingModelId.value = null
   }
@@ -1169,8 +1170,8 @@ async function probeModel(m: ModelItem) {
     } else {
       message.warning(t('model.probeInconclusive'))
     }
-  } catch {
-    message.error(t('model.probeFailed'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('model.probeFailed'))
   } finally {
     probingModelId.value = null
   }
@@ -1196,8 +1197,8 @@ async function probeOutputLimitForModel(m: ModelItem) {
     } else {
       message.warning(t('model.probeOutputInconclusive'))
     }
-  } catch {
-    message.error(t('model.probeOutputFailed'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('model.probeOutputFailed'))
   } finally {
     probingOutputModelId.value = null
   }
@@ -1215,8 +1216,8 @@ async function detectCapabilities(providerId: string) {
     } else {
       message.info(t('model.noModels'))
     }
-  } catch {
-    message.error(t('model.detectCapsFailed'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('model.detectCapsFailed'))
   } finally {
     detectingCaps.value = false
   }
@@ -1239,8 +1240,8 @@ async function activateModel(m: ModelItem) {
     defaultConfig.provider_id = m.provider_id
     defaultConfig.model_id = m.id
     message.success(t('model.modelActivated'))
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   }
 }
 
@@ -1274,8 +1275,8 @@ async function testProviderConnection() {
       // error_hint（五类归一错误的可行动提示）优先，原始错误信息次之
       message.warning(data.error_hint || data.error || data.message || t('model.connectionFailed'))
     }
-  } catch {
-    message.error(t('model.connectionFailed'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('model.connectionFailed'))
   } finally {
     testingProvider.value = false
   }
@@ -1311,8 +1312,8 @@ async function saveConfiguration() {
     configureTarget.value.config = genParams
     message.success(t('common.success'))
     showConfigure.value = false
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   } finally {
     savingConfig.value = false
   }
@@ -1382,10 +1383,10 @@ async function applyProviderFilter() {
     if (filteredResultModels.value.length === 0 && res?.data?.message) {
       message.info(res.data.message)
     }
-  } catch {
+  } catch (err) {
     filteredResultModels.value = []
     filterApplied.value = true
-    message.error(t('model.discoverFailed'))
+    message.error(extractApiDetail(err) || t('model.discoverFailed'))
   } finally {
     filteringModels.value = false
   }
@@ -1426,8 +1427,8 @@ async function addFilteredModel(m: FilteredProviderModel) {
       live.models.push(mapped)
       live.model_count = live.models.length
     }
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   }
 }
 
@@ -1443,8 +1444,8 @@ async function deleteModel(m: ModelItem) {
       }
     }
     allModels.value = allModels.value.filter((mm) => mm.id !== m.id)
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   }
 }
 
@@ -1489,8 +1490,8 @@ async function saveEditedModel() {
     const allIdx = allModels.value.findIndex((mm) => mm.id === oldId && mm.provider_id === target.provider_id)
     if (allIdx >= 0) allModels.value[allIdx] = { ...target }
     cancelEditModel()
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   } finally {
     savingEdit.value = false
   }
@@ -1536,8 +1537,8 @@ async function addNewModel() {
     newModelId.value = ''
     newModelName.value = ''
     addModelExpanded.value = false
-  } catch {
-    message.error(t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   } finally {
     addingModel.value = false
   }
