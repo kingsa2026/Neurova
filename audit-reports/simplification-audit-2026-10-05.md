@@ -12119,3 +12119,21 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **留裁定三项（承 §6-576）**：会话存档 SDK 接入时机＋凭据面；附件触发
       归属；其余见 §6-576。
     - **下一枚空号现查：本格取 577，后继从 578 起。**
+578. **前端 UI 对齐审计＋批 U-1 落格（企业源页）**：
+    - **审计（后台提问「前端 UI 功能对齐没有」）**：实测三缺口——①源型表单
+      只有 B14 预留三项（sql/erp_api/event_stream），后端已扩六类；②变体字段
+      （file.format+path/sql.driver/vendor）无输入面而工厂已强制；③批 C1 触发
+      端点零前端调用，页面挂着 B14 禁用「连接/同步」占位按钮。K-09 源钟与
+      FTS 搬主库无 UI 面（读面字段透传已过 C-2，检索同分 tie-break 服务端
+      生效，无需新组件）——不属缺口。
+    - **批 U-1 落格**：triggerEnterpriseIngest api＋描述符变体字段类型；页面
+      源型六类齐、变体字段按源型动态露出（闭集校验留服务器单点）、逐行
+      「立即摄取」（成功报三计数/truncated、skipped info、错误 detail 原话）、
+      禁用占位按钮退役、rejectReason 收口 extractApiDetail；i18n 8 键过时
+      事实 11 语更新＋8 新键 ×11＋死键 entConnectBtn/entConnectDisabled
+      退役。
+    - **附带抓修**：extractApiDetail 误从 ontologyFormat 导入（detail 批 0 时
+      本页漏改 import 面，调用即 TypeError）——页测未处理拒绝暴露，修死。
+    - **判据**：EnterpriseSourcesPage 9 passed（死格改判＋4 新格）；
+      locale-consistency 41 passed；vue-tsc 零错误；前端全量 2380 passed。
+    - **下一枚空号现查：本格取 578，后继从 579 起。**
