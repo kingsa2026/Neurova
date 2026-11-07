@@ -12080,3 +12080,22 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **进行中**：批 C4（SQL 直连）/C5（金蝶用友）/C6（聊天源）三路并行
       （各自只写自己的模块＋测试，工厂位已接）。
     - **下一枚空号现查：本格取 575，后继从 576 起。**
+576. **批 C5 ERP REST＋批 C6 聊天信息源落格（C4/C1 见 §6-577）**：
+    - **C5（裁定「ERP 先做金蝶与用友」）**：connectors_erp.py——金蝶云星空
+      WebAPI（登录换会话＋ExecuteBillQuery 按 StartRow 分页）＋用友（token
+      换取＋页码分页），httpx REST 不引厂商 SDK（依赖面零新增）；端点路径
+      全描述符可配（默认值待真租户核）；凭据 env 名进描述符、值不落日志
+      （_log 单点）；会话过期重登一次、429 具名退避；health 轻量登录探测。
+      判据 11 passed（红在案：ModuleNotFoundError）。live-verify 双态登记：
+      真租户凭据待配。C5 原派 agent 因并发配额失败，本格改为主会话亲手实现。
+    - **C6（裁定「企微＋微信小微聊天信息源」）**：connectors_chat.py——桥接
+      既有通道持久面（channel_ingress_events 只读拉取，mode=ro 短连接，自增
+      id 游标），六列行集＋media_ref 经 mediaIngress.mediaCandidates 单点
+      透传；历史拉取缺口三态显式 degraded（SDK 未装/凭据未配/微信无官方
+      通道），会话存档 SDK 留槽（WeWorkFinanceSdk 惰性探测）；附件触发面
+      归属留裁定。判据 15 passed（红在案）；enterprise 全目录 61 passed。
+    - **留裁定项（三项，均有影响面）**：① 会话存档 SDK 何时接＋凭据面放哪；
+      ② 附件（图片/文档）摄取触发归属（chat 适配器调 ingest_bridge 还是
+      独立触发端点）；③ NEUROVA_CHANNEL_INGRESS_DB env 名从 manager.py
+      内联字面量提为模块常量收口。
+    - **下一枚空号现查：本格取 576，后继从 577 起。**
