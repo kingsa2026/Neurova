@@ -12099,3 +12099,23 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
       独立触发端点）；③ NEUROVA_CHANNEL_INGRESS_DB env 名从 manager.py
       内联字面量提为模块常量收口。
     - **下一枚空号现查：本格取 576，后继从 577 起。**
+577. **批 C4 数据库直连落格（裁定「直接做」兑现）＋ C4 agent 共享文件两点收口**：
+    - connectors_sql.py：五驱动惰性分派（pg/mysql/mssql/oracle/sqlite），
+      paramstyle 与分页方言按驱动；水位增量（wm=<json> 可逆 token）；只读
+      边界双层（query 模板槽位强制＋标识符白名单＋参数化；table+columns
+      路由）；明文凭据构造期即拒；sqlite mode=ro 短连接。判据 44 passed
+      （含 sqlite 真旁库端到端：runOnce→admission→facts 全链＋幂等收束）；
+      四网络驱动按「假连接全格＋真凭据待配」双态登记。
+    - **共享文件收口两点（C4 agent 登记后主会话落）**：① validateDescriptor
+      SQL 形状守卫豁免 sql 源 query 字段（只读形状适配器构造期自守；其余
+      字段照旧全禁）——query 路由从「只能直构」开放到「可存库」，守卫语义
+      不变，判据 2 格；② storage.decryptSecret() 公开名（解密设施跨模块
+      收编口，connectors_sql 不再 import 私有名）。
+    - **knowledge 全目录 1508 passed 零失败**（1426→1508：本会话 C1/C4/C5/C6
+      新增 82 格）。
+    - **六批连接器状态**：C1 文件行源（已活体）、C4 SQL 直连（sqlite 端到端）、
+      C5 金蝶/用友（真租户凭据待配）、C6 企微/微信聊天（真应用凭据待配）；
+      C2 目录轮询/SQLite 旁库常驻、C3 HTTP 拉取未开工（按 §3 顺序待点单）。
+    - **留裁定三项（承 §6-576）**：会话存档 SDK 接入时机＋凭据面；附件触发
+      归属；其余见 §6-576。
+    - **下一枚空号现查：本格取 577，后继从 578 起。**
