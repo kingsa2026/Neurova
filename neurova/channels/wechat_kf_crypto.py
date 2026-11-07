@@ -1,4 +1,8 @@
-"""企业微信客服回调的签名与 AES 加解密（EncodingAESKey 协议）。"""
+"""企业微信回调协议加解密单源（EncodingAESKey 协议）。
+
+微信客服（kf）面与自建应用回调面（wecom.py）共用本模块——签名公式、AES-CBC
+加解密、PKCS7、receiveId（corpid）校验只此一份，两处各写一遍必然在某处放宽。
+"""
 from __future__ import annotations
 
 import base64
@@ -11,17 +15,25 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 _BLOCK_SIZE = 32
 
 
+def callbackSignature(token: str, timestamp: str, nonce: str, encrypt: str) -> str:
+    """官方签名公式（文档 91144）：SHA1(sort(token, timestamp, nonce, encrypt))。
+
+    SHA1 为平台强制互操作算法（非本实现的安全选择）；
+    明文模式回调体无 Encrypt 字段时，encrypt 传空串。
+    """
+    raw = "".join(sorted([token, timestamp, nonce, encrypt]))
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
 def verifyKfSignature(
     token: str, timestamp: str, nonce: str, encrypt: str, msgSignature: str
 ) -> None:
     """SHA1(sort(token,timestamp,nonce,encrypt))；不匹配抛 ValueError。"""
     if not token or not msgSignature:
-        raise ValueError("WeCom kf callback rejected: callback token/signature missing")
-    expected = hashlib.sha1(
-        "".join(sorted([token, timestamp, nonce, encrypt])).encode("utf-8")
-    ).hexdigest()
+        raise ValueError("WeCom callback rejected: callback token/signature missing")
+    expected = callbackSignature(token, timestamp, nonce, encrypt)
     if not hmac.compare_digest(expected, msgSignature):
-        raise ValueError("WeCom kf callback rejected: msg_signature mismatch")
+        raise ValueError("WeCom callback rejected: msg_signature mismatch")
 
 
 def _aesKey(encodingAesKey: str) -> bytes:
@@ -30,9 +42,9 @@ def _aesKey(encodingAesKey: str) -> bytes:
     try:
         key = base64.b64decode(raw, validate=True)
     except Exception as exc:  # noqa: BLE001
-        raise ValueError("WeCom kf callback rejected: invalid EncodingAESKey") from exc
+        raise ValueError("WeCom callback rejected: invalid EncodingAESKey") from exc
     if len(key) != _BLOCK_SIZE:
-        raise ValueError("WeCom kf callback rejected: EncodingAESKey must decode to 32 bytes")
+        raise ValueError("WeCom callback rejected: EncodingAESKey must decode to 32 bytes")
     return key
 
 
@@ -43,10 +55,10 @@ def _pad(data: bytes) -> bytes:
 
 def _unpad(data: bytes) -> bytes:
     if not data:
-        raise ValueError("WeCom kf callback rejected: empty plaintext")
+        raise ValueError("WeCom callback rejected: empty plaintext")
     pad = data[-1]
     if pad < 1 or pad > _BLOCK_SIZE or data[-pad:] != bytes([pad]) * pad:
-        raise ValueError("WeCom kf callback rejected: invalid PKCS7 padding")
+        raise ValueError("WeCom callback rejected: invalid PKCS7 padding")
     return data[:-pad]
 
 
@@ -56,18 +68,18 @@ def decryptKfPayload(encodingAesKey: str, encrypt: str, receiveId: str = "") -> 
     try:
         cipherText = base64.b64decode(encrypt or "", validate=True)
     except Exception as exc:  # noqa: BLE001
-        raise ValueError("WeCom kf callback rejected: invalid base64 payload") from exc
+        raise ValueError("WeCom callback rejected: invalid base64 payload") from exc
     decryptor = Cipher(algorithms.AES(key), modes.CBC(key[:16])).decryptor()
     plain = _unpad(decryptor.update(cipherText) + decryptor.finalize())
     if len(plain) < 20:
-        raise ValueError("WeCom kf callback rejected: plaintext too short")
+        raise ValueError("WeCom callback rejected: plaintext too short")
     msgLen = struct.unpack(">I", plain[16:20])[0]
     if 20 + msgLen > len(plain):
-        raise ValueError("WeCom kf callback rejected: invalid message length")
+        raise ValueError("WeCom callback rejected: invalid message length")
     message = plain[20:20 + msgLen].decode("utf-8", errors="replace")
     actualReceiveId = plain[20 + msgLen:].decode("utf-8", errors="replace")
     if receiveId and actualReceiveId and not hmac.compare_digest(receiveId, actualReceiveId):
-        raise ValueError("WeCom kf callback rejected: receiveId mismatch")
+        raise ValueError("WeCom callback rejected: receiveId mismatch")
     return message
 
 

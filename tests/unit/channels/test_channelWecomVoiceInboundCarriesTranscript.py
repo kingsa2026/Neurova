@@ -39,7 +39,8 @@ from neurova.channels.voice_ingress import (  # noqa: E402
     AUDIO_BYTES_KEY,
     INBOUND_VOICE_PLACEHOLDER,
 )
-from neurova.channels.wecom import WeComAdapter, _wecom_callback_signature  # noqa: E402
+from neurova.channels.wechat_kf_crypto import callbackSignature as _wecom_callback_signature  # noqa: E402
+from neurova.channels.wecom import WeComAdapter  # noqa: E402
 from tests.ast_scan import parseSource
 
 CALLBACK_TOKEN = "wecom-callback-token-for-tests"

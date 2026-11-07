@@ -15,8 +15,6 @@ API 参考:
 """
 
 import asyncio
-import hashlib
-import hmac
 from neurova.core.logger import get_logger
 import time
 import xml.etree.ElementTree as ET
@@ -34,13 +32,25 @@ from neurova.channels.voice_ingress import (
     INBOUND_VOICE_TYPES,
     VOICE_DOWNLOAD_MAX_BYTES,
 )
+# 企微回调协议加解密单源（签名/验签/AES 加解密与 kf 面共用一份，教义第 6 条）
+from neurova.channels.wechat_kf_crypto import (
+    callbackSignature,
+    decryptKfPayload,
+    encryptKfPayload,
+    verifyKfSignature,
+)
+from neurova.channels.wecom_token import (
+    INVALID_TOKEN_ERRCODES,
+    WECOM_API_BASE,
+    buildTokenUrl,
+    parseTokenPayload,
+)
 
 logger = get_logger(__name__)
 
 # 回调 XML 请求体大小上限（防实体扩展/资源耗尽；企微消息体远小于此值）
 _MAX_XML_BODY_SIZE = 64 * 1024
 
-WECOM_API_BASE = "https://qyapi.weixin.qq.com"
 #: 素材取回接口——全仓唯一实装在那份 `fetchWecomMediaBytes` 里（教义第 6 条）。
 MEDIA_GET_PATH = "/cgi-bin/media/get"
 
@@ -100,18 +110,6 @@ def fetchWecomMediaBytes(accessToken: str, mediaId: str, *,
         logger.warning("企业微信素材下载异常: media_id=%s err=%s", mediaId, e)
         return None
 
-
-
-def _wecom_callback_signature(token: str, timestamp: str, nonce: str, encrypt: str) -> str:
-    """企业微信官方回调签名公式（文档 90968 加解密方案）:
-
-        msg_signature = SHA1(sort(token, timestamp, nonce, msg_encrypt))
-
-    SHA1 为平台强制互操作算法（非本实现的安全选择）；
-    明文模式回调体无 Encrypt 字段时，encrypt 传空串（等价于三元组拼接结果）。
-    """
-    raw = "".join(sorted([token, timestamp, nonce, encrypt]))
-    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
 class WeComAdapter(ChannelAdapter):
@@ -235,15 +233,15 @@ class WeComAdapter(ChannelAdapter):
             str: 被动回复的 XML（可选）
         """
         try:
-            # 解析 XML: 回调 URL 公网可达，需防实体扩展攻击（拒绝 DOCTYPE/ENTITY 并限制大小）
+            # 解析外层 XML: 回调 URL 公网可达，需防实体扩展攻击（拒绝 DOCTYPE/ENTITY 并限制大小）
             if len(xml_data) > _MAX_XML_BODY_SIZE:
                 logger.warning("WeCom callback rejected: body too large (%d bytes)", len(xml_data))
                 return None
             if "<!doctype" in xml_data[:1024].lower() or "<!entity" in xml_data[:1024].lower():
                 logger.warning("WeCom callback rejected: DOCTYPE/ENTITY not allowed")
                 return None
-            root = ET.fromstring(xml_data)
-            encrypt = root.findtext("Encrypt", "") or ""
+            outer = ET.fromstring(xml_data)
+            encrypt = outer.findtext("Encrypt", "") or ""
 
             # 签名核对只在 `verifyCallbackSignature` 一处（含"无回调密钥即拒"那条 fail-closed，
             # BUG AUDIT C-09）——这里只决定"拒了之后回什么"，不重复判一次。
@@ -252,6 +250,24 @@ class WeComAdapter(ChannelAdapter):
             except ValueError as e:
                 logger.warning("%s", e)
                 return None
+
+            # 加密模式（官方默认）：body 只有 <Encrypt>，真实消息在密文里——
+            # 解密得明文 XML 再解析（审计 2026-11-07 判定的不符合项 ②）。
+            # 明文模式（无 Encrypt）保持直接解析的兼容路径。
+            encrypted = bool(encrypt)
+            if encrypted:
+                if not self._encoding_aes_key:
+                    logger.warning("WeCom callback rejected: encrypted callback but encoding_aes_key not configured")
+                    return None
+                # receiveId 段是 corpid，由协议单源校验（不匹配即拒，防跨企业重放）；
+                # 解密结果用独立变量——raw_event 保留原始请求体
+                innerXml = decryptKfPayload(self._encoding_aes_key, encrypt, receiveId=self._corpid or "")
+                if "<!doctype" in innerXml[:1024].lower() or "<!entity" in innerXml[:1024].lower():
+                    logger.warning("WeCom callback rejected: DOCTYPE/ENTITY not allowed (decrypted)")
+                    return None
+                root = ET.fromstring(innerXml)
+            else:
+                root = outer
 
             to_user_name = root.findtext("ToUserName", "")
             from_user = root.findtext("FromUserName", "")
@@ -306,8 +322,11 @@ class WeComAdapter(ChannelAdapter):
             else:
                 logger.warning("WeCom: 主事件循环未运行，丢弃消息")
 
-            # 被动回复（示例: 回复文本）
-            return self._build_reply_xml(from_user, to_user_name, "收到您的消息，正在处理中...")
+            # 被动回复（示例: 回复文本）；加密会话按官方要求回密文包装（不符合项 ③）
+            reply = self._build_reply_xml(from_user, to_user_name, "收到您的消息，正在处理中...")
+            if encrypted:
+                reply = self._encryptReply(reply, timestamp, nonce)
+            return reply
 
         except Exception as e:
             logger.exception("WeCom callback error: %s", e)
@@ -334,7 +353,7 @@ class WeComAdapter(ChannelAdapter):
         await self._emit_event(ChannelEventType.MESSAGE_RECEIVED, message)
 
     def _build_reply_xml(self, to_user: str, from_user: str, content: str, msg_type: str = "text") -> str:
-        """构造被动回复 XML"""
+        """构造被动回复 XML（明文内层；加密会话经 `_encryptReply` 包装后返回）"""
         timestamp = str(int(time.time()))
         xml_template = f"""<xml>
 <ToUserName><![CDATA[{to_user}]]></ToUserName>
@@ -345,6 +364,23 @@ class WeComAdapter(ChannelAdapter):
 </xml>"""
         return xml_template
 
+    def _encryptReply(self, innerXml: str, timestamp: str, nonce: str) -> str:
+        """加密会话的被动回复 = 官方密文包装（Encrypt/MsgSignature/TimeStamp/Nonce）。
+
+        官方要求加密模式的回复也是密文（文档 91144）；签名第 2 元复用回调请求的
+        timestamp，与官方示例库同形。
+        """
+        enc = encryptKfPayload(self._encoding_aes_key, innerXml, receiveId=self._corpid or "")
+        sig = callbackSignature(self._callback_token, timestamp, nonce, enc)
+        return (
+            "<xml>\n"
+            f"<Encrypt><![CDATA[{enc}]]></Encrypt>\n"
+            f"<MsgSignature><![CDATA[{sig}]]></MsgSignature>\n"
+            f"<TimeStamp>{timestamp}</TimeStamp>\n"
+            f"<Nonce><![CDATA[{nonce}]]></Nonce>\n"
+            "</xml>"
+        )
+
     def verifyCallbackSignature(self, msg_signature: str, timestamp: str, nonce: str,
                                encrypt: str) -> None:
         """企业微信回调签名的**唯一核对处**：不通过就抛 ValueError，未配密钥一律拒（fail-closed）。
@@ -352,28 +388,44 @@ class WeComAdapter(ChannelAdapter):
         分成一个方法而不是埋在 `handle_callback` 里，是因为入站回调现在要拿它**选实例**
         （§6-197：同类型多只实例时，逐只问"这条回调在你自己的凭据下验得通吗"）——
         选实例与投递必须过同一道门，两处各写一遍公式就会在其中一处放宽。
+        签名公式与加解密消费协议单源 `wechat_kf_crypto`（原第二份实现已退役）。
         """
         if not self._callback_token:
             raise ValueError("WeCom callback rejected: callback token not configured (fail-closed)")
-        expected = _wecom_callback_signature(self._callback_token, timestamp, nonce, encrypt)
-        if not msg_signature or not hmac.compare_digest(expected, msg_signature):
-            raise ValueError("WeCom callback rejected: msg_signature mismatch")
+        verifyKfSignature(self._callback_token, timestamp, nonce, encrypt, msg_signature)
 
     def verify_url(self, msg_signature: str, timestamp: str, nonce: str, echostr: str) -> str:
         """
-        URL 验证（企业微信回调配置时使用）
+        URL 验证（企业微信回调配置时使用）——官方契约（文档 91144）：
 
-        官方规范（文档 90968）: GET 验证请求的 msg_signature 为
-        SHA1(sort(token, timestamp, nonce, echostr))，第 4 元为 URL 上
-        的加密 echostr 密文。验证通过后完整实现应解密 echostr 并返回
-        明文（需 EncodingAESKey 的 AES-CBC 解密）；当前返回密文原文。
+        校验 msg_signature（SHA1 四元组，第 4 元为 URL 上的加密 echostr）→
+        **解密 echostr → 1 秒内原样返回明文**（不能带引号/BOM）。
 
-        这一支在**未配 token 时按既有语义放行**（握手只把对方给的 echostr 原样回给它自己，
-        不产生投递）——与事件回调那支的 fail-closed 不同，属另一次收紧的范围，记在 §6-197 本格。
+        fail-closed：未配 callback_token 或 encoding_aes_key 一律拒——官方管理端
+        "设置 API 接收"两者必填，缺配就是接不通，如实报错而非放行（审计 2026-11-07
+        判定的不符合项 ①：此前返回密文原文，真实平台验证必失败）。
         """
-        if self._callback_token:
-            self.verifyCallbackSignature(msg_signature, timestamp, nonce, echostr)
-        return echostr
+        self.verifyCallbackSignature(msg_signature, timestamp, nonce, echostr)
+        if not self._encoding_aes_key:
+            raise ValueError("WeCom URL verify rejected: encoding_aes_key not configured (官方要求解密 echostr)")
+        # receiveId 段为 corpid；企业 id 缺配时不校验（无 receiveId 可对）
+        return decryptKfPayload(self._encoding_aes_key, echostr, receiveId=self._corpid or "")
+
+    async def _getJson(self, url: str) -> Dict[str, Any]:
+        """GET 并解析 JSON（可注入点：单测经实例属性覆写，不走真网络）。"""
+        import aiohttp
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                return await resp.json()
+
+    async def _postJson(self, url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """POST JSON 并解析响应（可注入点，同上）。"""
+        import aiohttp
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                return await resp.json()
 
     async def send_message(
         self,
@@ -382,7 +434,12 @@ class WeComAdapter(ChannelAdapter):
         message_type: str = "text",
         **kwargs,
     ) -> Optional[str]:
-        """发送消息到企业微信"""
+        """发送消息到企业微信（message/send，文档 90236）。
+
+        应用消息 text 官方契约只有 `content`——群机器人 webhook 的
+        `mentioned_list` 不属于本接口（审计 2026-11-07 判定的不符合项 ④，
+        此前带上该字段群 @ 实际不生效）。token 失效（40014/42001）刷新后重试一次。
+        """
         try:
             if not self._access_token or time.time() > self._token_expires_at:
                 await self._refresh_access_token()
@@ -391,76 +448,61 @@ class WeComAdapter(ChannelAdapter):
                 logger.error("Failed to get WeCom access token")
                 return None
 
-            import aiohttp
-
-            # 发送应用消息
-            url = f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={self._access_token}"
-
-            if message_type == "text":
-                payload = {
-                    "touser": chat_id,
-                    "msgtype": "text",
-                    "agentid": int(self._agentid) if self._agentid else 0,
-                    "text": {"content": content},
-                }
-                # 群回复@提问者：官方 text.mentioned_list（成员 userid 列表，"@all" 全员）。
-                # at_user_id/chat_type 由 manager._dispatch_message 回发注入。
-                at_uid = kwargs.get("at_user_id") or ""
-                if kwargs.get("chat_type") == "group" and at_uid:
-                    payload["text"]["mentioned_list"] = [str(at_uid)]
-            elif message_type == "markdown":
-                payload = {
-                    "touser": chat_id,
-                    "msgtype": "markdown",
-                    "agentid": int(self._agentid) if self._agentid else 0,
-                    "markdown": {"content": content},
-                }
+            if message_type == "markdown":
+                body = {"content": content}
+                msgtype = "markdown"
             else:
-                payload = {
-                    "touser": chat_id,
-                    "msgtype": "text",
-                    "agentid": int(self._agentid) if self._agentid else 0,
-                    "text": {"content": content},
-                }
+                body = {"content": content}
+                msgtype = "text"
+            payload = {
+                "touser": chat_id,
+                "msgtype": msgtype,
+                "agentid": int(self._agentid) if self._agentid else 0,
+                msgtype: body,
+            }
 
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    result = await resp.json()
-                    if result.get("errcode") == 0:
-                        msg_id = result.get("msgid", "")
-                        logger.info("WeCom message sent: %s", msg_id)
-                        return str(msg_id)
-                    else:
-                        logger.error("WeCom send failed: %s", result)
-                        return None
+            url = f"{WECOM_API_BASE}/cgi-bin/message/send?access_token={self._access_token}"
+            result = await self._postJson(url, payload)
+            if result.get("errcode") in INVALID_TOKEN_ERRCODES:
+                # token 失效（40014 invalid / 42001 expired）：强制刷新后重试一次
+                logger.warning(
+                    "WeCom send hit invalid token (errcode=%s), refreshing and retrying once",
+                    result.get("errcode"),
+                )
+                self._access_token = None
+                self._token_expires_at = 0
+                await self._refresh_access_token()
+                if not self._access_token:
+                    logger.error("WeCom send failed: token refresh after invalid-token did not yield a token")
+                    return None
+                url = f"{WECOM_API_BASE}/cgi-bin/message/send?access_token={self._access_token}"
+                result = await self._postJson(url, payload)
+
+            if result.get("errcode") == 0:
+                msg_id = result.get("msgid", "")
+                logger.info("WeCom message sent: %s", msg_id)
+                return str(msg_id)
+            logger.error("WeCom send failed: %s", result)
+            return None
 
         except Exception as e:
             logger.exception("WeCom send error: %s", e)
             return None
 
     async def _refresh_access_token(self):
-        """刷新企业微信 Access Token"""
-        import aiohttp
-
+        """刷新企业微信 Access Token（URL/解析/提前失效秒数消费 `wecom_token` 单源）"""
         if not self._corpid or not self.config.app_secret:
             logger.error("WeCom corpid or app_secret not configured")
             return
 
-        url = (
-            f"https://qyapi.weixin.qq.com/cgi-bin/gettoken"
-            f"?corpid={self._corpid}&corpsecret={self.config.app_secret}"
-        )
-
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                result = await resp.json()
-                if result.get("errcode") == 0:
-                    self._access_token = result["access_token"]
-                    expire_in = result.get("expires_in", 7200)
-                    self._token_expires_at = time.time() + expire_in - 300
-                    logger.info("WeCom access token refreshed")
-                else:
-                    logger.error("WeCom token refresh failed: %s", result)
+        try:
+            result = await self._getJson(buildTokenUrl(self._corpid, self.config.app_secret))
+            self._access_token, self._token_expires_at = parseTokenPayload(result)
+            logger.info("WeCom access token refreshed")
+        except ValueError as e:
+            logger.error("%s", e)
+        except Exception as e:  # noqa: BLE001 - 网络异常按刷新失败记账，下次惰性重试
+            logger.error("WeCom token refresh error: %s", e)
 
     async def disconnect(self):
         """断开企业微信连接"""
@@ -479,55 +521,6 @@ class WeComAdapter(ChannelAdapter):
             }
         )
         return base
-
-
-# ============================================================
-# 群机器人 Webhook（轻量级，仅发送）
-# ============================================================
-
-
-class WeComGroupBot:
-    """
-    企业微信群机器人 Webhook
-
-    仅支持发送消息到群聊，不支持接收。
-    适用于告警通知、日报推送等单向场景。
-    """
-
-    def __init__(self, webhook_url: str):
-        self.webhook_url = webhook_url
-
-    async def send_text(self, content: str, mentioned_list: list = None, mentioned_mobile_list: list = None) -> bool:
-        """发送文本消息"""
-        import aiohttp
-
-        payload = {
-            "msgtype": "text",
-            "text": {
-                "content": content,
-                "mentioned_list": mentioned_list or [],
-                "mentioned_mobile_list": mentioned_mobile_list or [],
-            },
-        }
-
-        async with aiohttp.ClientSession() as session:
-            async with session.post(self.webhook_url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                result = await resp.json()
-                return result.get("errcode") == 0
-
-    async def send_markdown(self, content: str) -> bool:
-        """发送 Markdown 消息"""
-        import aiohttp
-
-        payload = {
-            "msgtype": "markdown",
-            "markdown": {"content": content},
-        }
-
-        async with aiohttp.ClientSession() as session:
-            async with session.post(self.webhook_url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                result = await resp.json()
-                return result.get("errcode") == 0
 
 
 def create_wecom_adapter(

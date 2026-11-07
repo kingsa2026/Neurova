@@ -12,6 +12,8 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
+from neurova.channels.wecom_token import buildTokenUrl, parseTokenPayload
+
 try:
     import requests
     REQUESTS_AVAILABLE = True
@@ -58,30 +60,24 @@ class WeChatAuthMixin:
         return self._refresh_wecom_token()
 
     def _refresh_wecom_token(self) -> bool:
-        """刷新企业微信 access_token"""
+        """刷新企业微信 access_token（URL/解析/提前失效消费 `wecom_token` 单源）"""
         a = self.adapter
         if not REQUESTS_AVAILABLE:
             logger.warning("企业微信无法刷新 access_token: requests 未安装")
             return False
 
         try:
-            url = f"{a.WECOM_API_BASE}/cgi-bin/gettoken"
-            params = {
-                "corpid": a.corpid,
-                "corpsecret": a.corpsecret,
-            }
-            resp = requests.get(url, params=params, timeout=10)
-            data = resp.json()
+            resp = requests.get(buildTokenUrl(a.corpid, a.corpsecret), timeout=10)
+            token, expiresAt = parseTokenPayload(resp.json())
 
-            if data.get("errcode") == 0:
-                a.access_token = data["access_token"]
-                a.token_expire_time = int(time.time()) + data.get("expires_in", 7200) - 60
-                a._wecom_initialized = True
-                logger.info("企业微信认证成功")
-                return True
-            else:
-                logger.error("企业微信认证失败: %s", data)
-                return False
+            a.access_token = token
+            a.token_expire_time = int(expiresAt)
+            a._wecom_initialized = True
+            logger.info("企业微信认证成功")
+            return True
+        except ValueError as e:
+            logger.error("%s", e)
+            return False
         except (requests.RequestException, json.JSONDecodeError) as e:
             logger.error("企业微信认证异常: %s", e)
             return False

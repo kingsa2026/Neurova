@@ -489,6 +489,11 @@ _WECOM_SIG_ECHOSTR_BAD = "f468e26aca7748dc6ed307d6f77c219baa9e6a43"
 _WECOM_SIG_PLAINTEXT = "2fd73c7161f72dd11a4dc7c323d95f9add1ec994"
 
 
+import base64 as _base64
+
+_AES_KEY = _base64.b64encode(bytes(range(32))).decode()[:43]
+
+
 def _make_wecom_adapter():
     from neurova.channels.base import ChannelConfig
     from neurova.channels.wecom import WeComAdapter
@@ -496,6 +501,9 @@ def _make_wecom_adapter():
     config = ChannelConfig(channel_type="wecom", app_id="corp1", app_secret="sec1", use_stream=False)
     adapter = WeComAdapter(config)
     adapter._callback_token = "callback_token"
+    # 官方契约（91144）：加密回调/URL 验证都要求解密——适配器必须持有 EncodingAESKey
+    # （官方文档示例钥）
+    adapter._encoding_aes_key = _AES_KEY
     return adapter
 
 
@@ -503,6 +511,16 @@ class TestWeComCallbackSignature:
     """官方公式: msg_signature = sha1(sort(token, timestamp, nonce, msg_encrypt))"""
 
     ENCRYPT = "RypEvHKD8QQKFhvQ6Qle3c795XQrM3klTQVh2knRGwEw="
+
+    def _plainXml(self):
+        return (
+            "<xml><ToUserName><![CDATA[corp1]]></ToUserName>"
+            "<FromUserName><![CDATA[fromUser]]></FromUserName>"
+            "<CreateTime>1756400000</CreateTime>"
+            "<MsgType><![CDATA[text]]></MsgType>"
+            "<Content><![CDATA[hi]]></Content>"
+            "</xml>"
+        )
 
     def _xml(self):
         return (
@@ -516,11 +534,19 @@ class TestWeComCallbackSignature:
         )
 
     def test_callback_accepts_official_four_element_signature(self):
+        # 官方契约（91144）：加密回调 = 验签 → 解密 → 取真消息 → 密文回复；
+        # 测试向量用协议单源真实加解密构造（原假密文在解密契约下必被诚实拒绝）
+        from neurova.channels.wechat_kf_crypto import callbackSignature, encryptKfPayload
+
         adapter = _make_wecom_adapter()
+        enc = encryptKfPayload(_AES_KEY, self._plainXml(), "corp1")
+        outer = f"<xml><Encrypt><![CDATA[{enc}]]></Encrypt></xml>"
+        sig = callbackSignature("callback_token", "1756400000", "nonce1", enc)
 
-        reply = adapter.handle_callback(_WECOM_SIG_ENCRYPTED, "1756400000", "nonce1", self._xml())
+        reply = adapter.handle_callback(sig, "1756400000", "nonce1", outer)
 
-        assert reply is not None, "官方四元组签名（含 Encrypt）必须验签通过"
+        assert reply is not None, "官方四元组签名（含 Encrypt）必须验签通过且解密成功"
+        assert "<Encrypt>" in reply, "加密会话的被动回复必须是官方密文包装"
 
     def test_callback_rejects_bad_signature(self):
         adapter = _make_wecom_adapter()
@@ -531,16 +557,21 @@ class TestWeComCallbackSignature:
 
         assert reply is None, "签名不匹配必须拒绝回调"
 
-    def test_verify_url_includes_encrypted_echostr(self):
+    def test_verify_url_decrypts_echostr_to_plaintext(self):
+        # 官方契约（91144）：URL 验证 = 验签 → 解密 echostr → 原样返回明文（不是回密文）
+        from neurova.channels.wechat_kf_crypto import callbackSignature, encryptKfPayload
+
         adapter = _make_wecom_adapter()
-        echostr = "ENCRYPTED_ECHOSTR_B64"
+        echoPlain = "1428358092760283746unit-echo"
+        echostr = encryptKfPayload(_AES_KEY, echoPlain, "corp1")
+        sig = callbackSignature("callback_token", "1756400000", "nonce1", echostr)
 
-        assert (
-            adapter.verify_url(_WECOM_SIG_ECHOSTR_OK, "1756400000", "nonce1", echostr) == echostr
-        )
+        assert adapter.verify_url(sig, "1756400000", "nonce1", echostr) == echoPlain
 
+        # 第 4 元被篡改 → 拒
+        badSig = callbackSignature("callback_token", "1756400000", "nonce1", "TAMPERED")
         with pytest.raises(ValueError):
-            adapter.verify_url(_WECOM_SIG_ECHOSTR_BAD, "1756400000", "nonce1", echostr)
+            adapter.verify_url(badSig, "1756400000", "nonce1", echostr)
 
     def test_callback_plaintext_mode_without_encrypt(self):
         """明文模式（无 Encrypt 字段）签名保持兼容"""

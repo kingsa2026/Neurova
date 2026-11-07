@@ -497,30 +497,35 @@ class TestWeComAdapter:
         assert result is True
         assert adapter.is_connected is True
 
-    def test_verify_url_without_token(self):
+    def test_verify_url_fail_closed_without_token(self):
         adapter = create_wecom_adapter(
             corpid="ww_test123",
             app_secret="secret123",
         )
-        # 无 token 时直接返回 echostr
-        result = adapter.verify_url("", "", "", "echo_str")
-        assert result == "echo_str"
+        # 官方要求解密 echostr 返回明文：无 token 无法验签，fail-closed（2026-11-07 审计收紧）
+        with pytest.raises(ValueError):
+            adapter.verify_url("", "", "", "echo_str")
 
-    def test_verify_url_with_correct_signature(self):
-        from neurova.channels.wecom import _wecom_callback_signature
+    def test_verify_url_returns_decrypted_echostr(self):
+        import base64 as _b64
 
+        from neurova.channels.wechat_kf_crypto import callbackSignature, encryptKfPayload
+
+        aes_key = _b64.b64encode(bytes(range(32))).decode()[:43]
         adapter = create_wecom_adapter(
             corpid="ww_test123",
             app_secret="secret123",
             callback_token="test_token",
+            encoding_aes_key=aes_key,
         )
-        # 官方规范（文档 90968）: 签名含第 4 元加密 echostr
+        # 官方规范（文档 91144）: 签名含第 4 元加密 echostr；验证通过后解密返回明文
         timestamp = "1234567890"
         nonce = "nonce123"
-        echostr = "echo_str"
-        signature = _wecom_callback_signature("test_token", timestamp, nonce, echostr)
+        echo_plain = "1428358092760283746unit-echo"
+        echostr = encryptKfPayload(aes_key, echo_plain, "ww_test123")
+        signature = callbackSignature("test_token", timestamp, nonce, echostr)
         result = adapter.verify_url(signature, timestamp, nonce, echostr)
-        assert result == echostr
+        assert result == echo_plain
 
     def test_build_reply_xml(self):
         adapter = create_wecom_adapter(

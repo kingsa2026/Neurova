@@ -310,7 +310,8 @@ class TestEndpointKnowsHowToAskEachPlatform:
     def testWecomPredicateUsesTheCallbackTokenTriple(self):
         """真 `WeComAdapter` + 仓内那条官方公式自己算签名（不开外网、不连平台）。"""
         from neurova.channels.base import ChannelConfig
-        from neurova.channels.wecom import WeComAdapter, _wecom_callback_signature
+        from neurova.channels.wechat_kf_crypto import callbackSignature as _wecom_callback_signature
+        from neurova.channels.wecom import WeComAdapter
 
         make = self._factory()
         query = {"msg_signature": "", "timestamp": "1756400000", "nonce": "n1"}
@@ -367,7 +368,7 @@ class TestWecomVerifyFaceIsOneImplementation:
         assert hasattr(__import__("neurova.channels.wecom", fromlist=["WeComAdapter"]).WeComAdapter,
                        "verifyCallbackSignature"), "企微没有独立的验签面 ⇒ 谓词只能靠复制公式"
         hits = _callsInWecom()
-        assert len(hits) >= 2, f"签名公式的调用点只有 {hits}——抽取没做到（还是各写各的）"
+        assert len(hits) >= 2, f"协议单源的调用点只有 {hits}——收口没做到（还是各写各的）"
         tree = parseSource(WECOM_SRC)
         bodies = {n.name: n for n in ast.walk(tree)
                   if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
@@ -380,11 +381,16 @@ class TestWecomVerifyFaceIsOneImplementation:
         assert {"verify_url", "handle_callback"} <= called, f"没共用到新面：{sorted(called)}"
 
     def testFormulaHasOneDefinition(self):
-        defs = _callsInWecom(onlyDefinition=True)
-        assert len(defs) == 1, f"签名公式定义了 {len(defs)} 次：{defs}"
+        # 2026-11-07 收口：签名公式定义全仓只此一份（wechat_kf_crypto.callbackSignature，
+        # 与 kf 面共用）；wecom.py 不得再定义同名公式或自带 sha1 拼接
+        kf_src = (REPO / "neurova" / "channels" / "wechat_kf_crypto.py").read_text(encoding="utf-8")
+        assert kf_src.count("def callbackSignature") == 1
+        assert "hashlib.sha1" not in WECOM_SRC, "wecom.py 不得自带签名公式（收口到协议单源）"
+        assert "_wecom_callback_signature" not in WECOM_SRC
 
 
 def _callsInWecom(onlyDefinition: bool = False) -> list:
-    needle = "def _wecom_callback_signature" if onlyDefinition else "_wecom_callback_signature("
+    # 2026-11-07 收口后：wecom 面消费协议单源的两个调用动词（验签 + 回复签名）
+    needles = ("def callbackSignature",) if onlyDefinition else ("verifyKfSignature(", "callbackSignature(")
     return [i for i, line in enumerate(WECOM_SRC.splitlines(), 1)
-            if needle in line and not line.strip().startswith("#")]
+            if any(n in line for n in needles) and not line.strip().startswith("#")]
