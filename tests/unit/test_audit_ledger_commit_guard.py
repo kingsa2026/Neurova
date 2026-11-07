@@ -321,7 +321,8 @@ def test_signedExceptionWhoseObjectIsNotACommitIsExpired(tmp_path, monkeypatch):
     (tmp_path / "audit-reports").mkdir()
     (tmp_path / "scripts" / "ci").mkdir(parents=True)
     treeToken = _git("rev-parse", "HEAD^{tree}").strip()[:8]
-    assert ledger._objectType(treeToken) == "tree", "探针选中的不是树号，本格前提不成立"
+    assert _git("cat-file", "-t", treeToken).strip() == "tree", (
+        "探针选中的不是树号，本格前提不成立")
     (tmp_path / "audit-reports" / "probe.md").write_text("`%s`\n" % treeToken, encoding="utf-8")
     (tmp_path / "scripts" / "ci" / "audit_ledger_unreachable_refs.txt").write_text(
         "%s  树号被误署成提交\n" % treeToken, encoding="utf-8")
