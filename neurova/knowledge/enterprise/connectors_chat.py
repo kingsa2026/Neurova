@@ -124,7 +124,9 @@ class ChatChannelAdapter:
             return Path(explicit)
         from neurova.core.data_root import callerPath
 
-        return callerPath(os.environ.get("NEUROVA_CHANNEL_INGRESS_DB"),
+        from neurova.channels.channel_ingress_queue import CHANNEL_INGRESS_DB_ENV
+
+        return callerPath(os.environ.get(CHANNEL_INGRESS_DB_ENV),
                           "channel_ingress.db")
 
     def _roUri(self) -> str:

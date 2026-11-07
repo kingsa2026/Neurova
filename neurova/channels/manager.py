@@ -612,11 +612,14 @@ class ChannelManager:
         if getattr(self, "_ingress_queue_failed", False):
             return None
         try:
-            from neurova.channels.channel_ingress_queue import ChannelIngressQueue
+            from neurova.channels.channel_ingress_queue import (
+                CHANNEL_INGRESS_DB_ENV,
+                ChannelIngressQueue,
+            )
 
             import os
 
-            db_path = callerPath(os.environ.get("NEUROVA_CHANNEL_INGRESS_DB"), "channel_ingress.db")
+            db_path = callerPath(os.environ.get(CHANNEL_INGRESS_DB_ENV), "channel_ingress.db")
             queue = ChannelIngressQueue(db_path=db_path)
             self.ingress_queue = queue
             return queue
