@@ -18,6 +18,16 @@
 
 命名约定沿用仓库现状：文件名 snake_case，类名 PascalCase，函数与变量 camelCase，模块目录以 `neurova/<域>/` 组织。
 
+> **补记（2026-11-07）：依赖策略第 4 项开一次有边界的豁免口。**
+> 用户裁定企业源数据库直连（Oracle/MSSQL/PostgreSQL/MySQL）直接做——四个驱动
+> （oracledb / pymssql / PyMySQL / psycopg2-binary）按**可选依赖**纪律引入：
+> ① 只进 `requirements.txt` 可选段，CI 薄环境（`requirements-ci.txt`）不加；
+> ② 适配器惰性 import＋fail-soft，驱动未安装时 health 显式点名
+> `driver not installed`，进程不崩；③ 测试全走假 cursor/连接夹具，CI 零驱动依赖；
+> ④ 凭据只从 `NEUROVA_KB_SECRET` 解密。豁免范围仅此四驱动＋其替代品评审时
+> 逐个另批；「不外接服务」「RDF/Turtle 自拼」「不做 SPARQL」三项不受影响。
+> 依据：`specs/2026-11-07-enterprise-source-connectors-plan.md` §2.4。
+
 ---
 
 ## 1. 现状基线（实测）

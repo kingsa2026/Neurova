@@ -23,9 +23,11 @@
   下游（admission 唯一写咽喉→facts→查询面）全部已接线、有判据、有守卫；
 - 断点不在「死码」，在「差最后一公里」：`EnterpriseIngestor.ingestBatch` 生产调用面为零，
   适配器注册表生产恒空，REST 无任何触发摄取端点——今天唯一喂行方式是测试桩直调（§1.2 给影响面）；
-- 选型按依赖现值裁定：**CSV/TSV/JSON 行文件、目录轮询、SQLite 旁库只读挂接、HTTP 拉取**
-  四类零新增依赖，进三批计划；**数据库直连、ERP SDK、事件流/CDC** 需要驱动或外部服务，
-  违反六决策，缓办（§2 逐项给证据）；
+- ~~选型按依赖现值裁定~~ → **2026-11-07 用户裁定改判（见 §2.4）**：数据库直连
+  **直接做**（四驱动按可选依赖纪律引入，六决策第 4 项豁免登记）；ERP **先做金蝶与用友**
+  （httpx REST 对接，不引 SDK）；新增 **企微＋微信（小微）聊天信息源**批（聊天/群聊
+  ＋聊天记录中的图片与文档）；§2.3 两项均按推荐（1A 单类型＋变体字段、2A 先手动触发
+  端点后轮询）；
 - 全部新连接器走同一 Protocol、输出同一 `ChangeBatch`、经同一 admission 写口——
   不新造第二套摄取路径（教义第 6 条）；全部默认 `enabled=False` 关闸，配置存了≠源连上了。
 
@@ -124,23 +126,48 @@ grep 复算（2026-11-07 现场）：`ingestBatch` / `ingestIfEnabled` 的调用
 | 5 | Oracle/MSSQL/PostgreSQL/MySQL 直连 | 企业数据库 | **缓** | 驱动（oracledb/pymssql/pyodbc/psycopg 类）全是第三方包——**每引一个即破六决策第 4 项**；且企业库直连引入网络可达性、凭据、防火墙审批一整面。**未来若放开约束的接法**：实现 `EnterpriseSourceAdapter` 四动词（describeSchema/fetchBatch/health/close）→ 经 `getSourceRegistry().register()` 进白名单 → 输出同一 `ChangeBatch` → 经同一咽喉——协议已在位，核心零改动。**过渡路径（今天就能到）**：企业侧 ETL 把库表落成 CSV/SQLite 旁库，走候选 1/3 |
 | 6 | ERP API（SAP/金蝶/用友类 SDK）与事件流（Kafka/CDC/MQTT） | ERP 厂商 SDK / 消息中间件 / 变更数据捕获 | **缓** | SDK 与消费端框架均第三方依赖；CDC 需外部进程/服务，违反「不引外部服务」。仓内 `ingest_mqtt.py` 已有的 MQTT 属**入站消息传输**（企微/飞书入站队列的可选跨进程通道），与「结构化行摄取连接器」功能不同——不并（教义第 7 条比较后不合并），也不是本方案的搭车口 |
 
-### §2.3 待拍板项（各选项影响面与推荐）
+### §2.3 待拍板项（2026-11-07 已全部拍板，均按推荐）
 
-1. **`SOURCE_TYPES` 扩展粒度**。
-   - A（推荐）：单类型 `"file"` + 描述符 `format` 字段细分（csv/tsv/json/jsonl）——白名单
-     改一行（`protocols.py:15` 单点，`validateDescriptor` 同源引用自动跟随），一份适配器类
-     分派读取器，注册面不翻倍。
-   - B：每格式一类型（`csv`/`json`/`http_pull`/`sqlite_ro` 各占白名单项）——类型语义更准、
-     `sourceType` 一眼可读，但白名单、描述符校验测试、注册表项数量翻倍。
-   - 影响面：两案都只动 `neurova/knowledge/enterprise/` 包内 + 测试；守卫面为
-     `test_enterpriseSourceProtocol.py` 的白名单判据扩格。
-2. **生产触发面形态**。
-   - A（推荐）：批 C1 先做 REST 手动触发端点（管理员，`POST …/{source_id}/ingest`），
-     批 C2 补目录轮询常驻线程（默认关）。复用现有 admin 鉴权与两态回显，C1 验收面最小，
-     不引入任何后台常驻。
-   - B：一步到位常驻调度器——C1 就带生命周期管理（线程/优雅停机/多源公平调度），
-     验收面与回归面同步变重。
-   - 影响面：A 案轮询上线后与手动触发并存（手动触发即「现在跑一轮」，语义不冲突）。
+1. **`SOURCE_TYPES` 扩展粒度**——**拍 1A**：单类型＋变体字段。
+   - `SOURCE_TYPES` 扩为 `("sql", "erp_api", "event_stream", "file", "http_pull", "chat")`；
+   - 变体细分走描述符字段：`file.format`（csv/tsv/json/jsonl）、`sql.driver`
+     （postgresql/mysql/mssql/oracle/sqlite）、`erp_api.vendor`（kingdee/yongyou）、
+     `chat.vendor`（wecom/wechat）——白名单与变体闭集都在 `validateDescriptor`
+     单点校验，注册面不翻倍；
+   - 适配器类按 (sourceType, 变体) 分派，一份族一份读取器。
+2. **生产触发面形态**——**拍 2A**：批 C1 先做 REST 手动触发端点
+   （管理员，`POST /api/v1/knowledge/enterprise/sources/{source_id}/ingest`），
+   批 C2 补目录轮询常驻线程（默认关，env 门控）。手动触发语义＝「现在跑一轮」，
+   与后续轮询并存不冲突。
+3. **行级源时间落 facts 源钟**——已随 K-09 源钟批落定（见上）。
+
+### §2.4 2026-11-07 用户裁定（对本方案原取舍的改判，逐条登记）
+
+1. **数据库直连（Oracle/MSSQL/PostgreSQL/MySQL）直接做**——推翻原「缓」判。
+   - 代价照登：四个驱动（oracledb / pymssql / PyMySQL / psycopg2-binary）全是
+     第三方包，**六决策第 4 项（零新增第三方依赖）就此开豁免口**——豁免登记见
+     `specs/2026-09-20-knowledge-foundation-design.md` §0 补记（2026-11-07）。
+   - 补偿措施（不可省）：① 驱动只进 `requirements.txt` 可选段，**不进 CI 薄环境**
+     （`requirements-ci.txt` 不加）；② 适配器惰性 import＋fail-soft——驱动未安装时
+     `health()` 显式 `error: driver not installed`，`adapter_registered=False`，
+     进程不崩、注册表不半死；③ 测试全走假 cursor/连接夹具，CI 零驱动依赖；
+     ④ 凭据仍只从 `NEUROVA_KB_SECRET` 解密，日志不落凭据与原始行全文。
+2. **ERP API 先做金蝶与用友**——推翻原「SDK 类全缓」判的一半：金蝶云星空 WebAPI
+   与用友（U8C/YonSuite）开放 API 均为 HTTP REST，**经已在依赖清单的 httpx 对接
+   （候选 4 同款），不引厂商 SDK**——依赖面零新增，原判 SDK 的理由对 REST 化
+   对接不成立。
+3. **新增聊天信息源批（企微＋微信/小微）**——采集聊天、群聊信息，含聊天记录中的
+   图片与各种文档。
+   - 仓内现状（现场核实）：企微/微信通道层已厚（`channels/wecom.py`、`wechat*.py`
+     七个 mixin、`mediaIngress.py`），**消息入站→知识条目的桥已在**
+     （`ingest_bridge.py` category="wecom"，语音转写/媒体下载/OCR 元数据字段在位）；
+   - 缺口＝①B14 协议化接入（chat 源与行源同走 admission 咽喉）；②**历史消息拉取**：
+     企微侧官方通道是「会话存档」SDK（腾讯原生 C 库，第三方二进制）——按第 2 条
+     同一原则先走 REST/既有通道可达面，会话存档 SDK 留适配槽：凭据未配时
+     `adapter_registered=False`＋finding 点名，不静默空转；③附件（图片/文档）复用
+     既有媒体下载＋解析＋OCR 管线，不重写第二套。
+   - 「微信小微」按微信端助手通道（既有 WeChatAdapter/微信客服面）接入解释；
+     若指腾讯小微独立产品，`chat.vendor` 字段留扩展位，接入面不变。
 3. **行级源时间（`source_modified_at`）落 facts 源钟**。
    - **（2026-11-07 更新：本项已随 K-09 源钟批落定，不再是待拍板项。）** facts 源钟已按
      台账 §6-570 三裁定落格（v36 迁移：`knowledge_facts.source_created_at/source_modified_at`；
@@ -192,11 +219,55 @@ grep 复算（2026-11-07 现场）：`ingestBatch` / `ingestIfEnabled` 的调用
 
 - **改动点**：`connectors_http.py`（httpx 异步客户端；超时/重试上限/单批行数上限具名常量；
   凭据从 `NEUROVA_KB_SECRET` 解密；响应分页 token → `SourceCursor`）。白名单扩 `"http_pull"`
-  （或按拍板项 1 裁定）。
+  （拍板项 1A）。
 - **红绿测试落点**：`test_httpPullConnector.py`。夹具用标准库 `http.server` 起本机回环端口
   （不外网、不引新依赖）。绿灯判据：分页游标按响应 next-token 推进；超时→`health()` 显式
   error→游标不推进；重试上限到达后显式失败（不吞成空批）。
 - **活体验证路径**：9527 对本机回环夹具端点拉真批 → facts 读回；日志面复算不含凭据与原始行全文。
+
+### 批 C4 · 数据库直连（2026-11-07 裁定：直接做，依赖豁免见 §2.4-1）
+
+- **改动点**：`connectors_sql.py`——`sql.driver` ∈ (postgresql/mysql/mssql/oracle/sqlite)
+  分派驱动模块（全部惰性 import＋fail-soft）；`describeSchema` 走 information_schema
+  等价查询（每驱动一小段、假 cursor 可测）；`fetchBatch` 按 `cursorColumn` 水位增量；
+  sqlite 驱动复用 C2 旁库的只读 URI 纪律（同一份代码两个入口时不并两套——教义第 7 条
+  比较：sqlite 作 sql.driver 的实现即 C2 connectors_sqlite 的收编方向，落地时对比后合）。
+- **红绿测试落点**：`test_sqlDirectConnector.py`——全部假 connection/cursor 夹具，
+  CI 零驱动依赖；判据：驱动缺失→`health()` 显式 error 点名（不半死）、游标水位推进、
+  写意图（任何非 SELECT 形状）显式拒绝、凭据不落日志。
+- **活体验证路径**：sqlite 驱动用真实旁库文件端到端（零网络）；四网络驱动按
+  「假连接全格＋真凭据待配」双态如实登记（无内网库时 live-verify 到注册与
+  health 面）。
+
+### 批 C5 · ERP REST 连接器（2026-11-07 裁定：先做金蝶与用友）
+
+- **改动点**：`connectors_erp.py`——`erp_api.vendor` ∈ (kingdee/yongyou) 分派两族
+  REST 客户端（httpx；金蝶云星空 WebAPI：登录态＋ExecuteBillQuery 分页；用友
+  U8C/YonSuite：token 换取＋单据列表分页；凭据 `NEUROVA_KB_SECRET`）。
+  **不引厂商 SDK**（裁定依据 §2.4-2：REST 化对接经 httpx 零新增依赖）。
+- **红绿测试落点**：`test_erpConnectors.py`——httpx MockTransport 夹具（登录/过期
+  重登/分页推进/限频 429 退避）；判据：会话过期自动重登一次再失败才报错、
+  游标按单据号/时间戳推进、凭据与原始报文不落日志。
+- **活体验证路径**：真租户凭据待配——live-verify 到「注册成功＋health 显式
+  auth_required」双态；真账套拉数留凭据到位后补记。
+
+### 批 C6 · 聊天信息源（2026-11-07 裁定：企微＋微信/小微）
+
+- **改动点**：`connectors_chat.py`——`chat.vendor` ∈ (wecom/wechat)；桥接既有通道层
+  （`channels/wecom.py`、`wechat*.py`、`mediaIngress.py`）而非另起凭据面：
+  消息/群聊经既有入站捕获 → 本适配器把会话流按 B14 协议送 admission
+  （谁/哪个群/何时/说了什么 → SPO＋narrative）；**附件（图片与文档）复用既有
+  媒体下载＋解析＋OCR 管线**；历史消息拉取：企微侧官方通道为「会话存档」原生
+  SDK（腾讯 C 库，第三方二进制）——适配槽留出，凭据未配时
+  `adapter_registered=False`＋finding 点名「会话存档 SDK 未接入」，不静默空转；
+  REST 可达面（回调补拉）先落。
+- **红绿测试落点**：`test_chatConnector.py`——假通道事件夹具；判据：私聊/群聊
+  都成账（群聊 subject＝群 id＋消息 id）、附件消息产条目且源钟＝消息时间、
+  历史拉取未配凭据显式 finding、聊天原文不整段进 facts（narrative 承正文，
+  facts 承结构化字段）。
+- **活体验证路径**：9527 真后端＋企微测试应用凭据（既有通道凭据面）——
+  发一条群消息 → 触发 → facts/条目读回；附件消息走媒体下载→条目→OCR 元数据。
+  微信侧按既有凭据面同法。
 
 ---
 
