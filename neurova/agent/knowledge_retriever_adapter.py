@@ -114,8 +114,11 @@ class KnowledgeRetrieverAdapter:
                 (getattr(context, "metadata", None) or {}).get("tenant_id")
                 or "default"
             )
+            # 部门分类白名单（specs/2026-11-07 批 E）：请求边界注入，走查同口径收口
+            allowedCats = (getattr(context, "metadata", None) or {}).get("allowed_categories")
             hops = walker.walkFromQuery(
-                context.query, limit=max(limit * 2, 10), tenantId=tenantId
+                context.query, limit=max(limit * 2, 10), tenantId=tenantId,
+                allowedCategories=list(allowedCats) if allowedCats is not None else None,
             )
             ranks = []
             support = {}

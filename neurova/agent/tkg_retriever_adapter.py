@@ -47,13 +47,15 @@ class TKGRetrieverAdapter:
         try:
             # query_tkg_for_context：关键词抽取 + 时效窗口 + 置信度排序，
             # 直接返回 dict 列表（query_current 只按 S/P/O 精确匹配，不适合文本查询）
-            tenantId = str(
-                (getattr(context, "metadata", None) or {}).get("tenant_id")
-                or "default"
-            )
+            metadata = getattr(context, "metadata", None) or {}
+            tenantId = str(metadata.get("tenant_id") or "default")
+            # 部门分类白名单（specs/2026-11-07 批 E）：时效读面同口径收口
+            allowedCats = metadata.get("allowed_categories")
+            allowedArg = list(allowedCats) if allowedCats is not None else None
             if hasattr(self._tkg, "forQuery"):
                 result = self._tkg.forQuery(
-                    context.query, maxFacts=context.limit, tenantId=tenantId
+                    context.query, maxFacts=context.limit, tenantId=tenantId,
+                    allowedCategories=allowedArg,
                 )
             else:
                 result = self._tkg.query_tkg_for_context(
