@@ -12307,3 +12307,44 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **已确认的一处「真红」与本单无关且已修**：主线 `push` 构建 `cnb-830-1k6r4h6lj`（`98b0fa42`）的 `static-gate` 是**真跑到并真红**（不是配额），三处 `undefined name`：`neurova/channels/manager.py:166 channel_type`、`neurova/collaboration/neurflow/storage.py:885 logger`、`neurova/knowledge/ontology/query_expander.py:116 Dict`。PR 分支 `4d3f2a6c` 已修，本机同上门禁复算三格全过——即该红已在本单闭环。
     - **结论**：代码侧零可修项（九轮读数一致）。九条腿的红全部发生在 `Prepare`，一条门禁脚本都没跑到；能否起来取决于「同时刻并发申请的总核时」，当前额度窗（160 核时/月免费额度已耗尽）容不下九条并发。需要人裁决的仍是同一件事：绑腾讯云预算提额，或把 PR 触发改为串行少量腿，而不是降 cpus 换绿（8 核 `unit-tests` 降到 1~2 核会当场 `code 137`，教义第 2 条）。
     - **净 LOC**：文档 +本格（含 §6-588 两处读数订正 −2/+2 行），生产代码 +0、配置 +0。**下一枚空号现查：本格取 589，后继从 590 起。**
+
+590. **PR #374 第十轮：配额被谁吃掉的定量归因——NPC 会话吃的是平台默认 8 核，12 条会话 = 160 核时月额度的 78%** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **红仍在 Prepare，本轮再确认一次（带新的读数维度）**：PR 头 `54151a26` 对应构建 `cnb-kgm-1k6rj88sj` 九条腿逐条 `error` 在 `Prepare`，全部 stage `skipped`；本轮新起两条配额探针同句——`cnb-s7k-1k6rk0ej3`（2 核，`equivalent to 0.33 core-hours`）、`cnb-15m-1k6rk2oen`（1 核，`equivalent to 0.17 core-hours`）。**1 核也起不来了**，比 §6-588/§6-589 那两轮的窗口更紧：那时 1 核尚能起来（`cnb-lve-1k6re3pc3`），今天连 0.17 都判不足。
+    - **本轮新增的可复算事实：NPC 流水线自身没声明 `runner`，落到平台默认 8 核。** 同一份探针（`cnb-6nt-1k6rmu6qo`，不写 `runner`）的 Prepare 日志逐字给出 `Pipeline yaml cpus: -1` → `Pipeline actual limit cpus: 8, memory: 16` → `equivalent to 1.33 core-hours`。`.cnb.yml` 的 `&npc-dscoder-job`（第 1095 行起）与 `api_trigger_npc_handoff` 载体（第 1331 行起）都只有 `docker.image` + `envScript`，**没有 `runner` 两行**——历史上也没声明过（`git log -S` 追到 90c40e2a 起的每一版都是同样的形状）。于是每一次 `@` 会话都以 8 核预算预冻结 1.33 核时。
+    - **把两条读数乘起来就是额度去哪了**（`metricCoreHours` 逐条取，全部为真跑过的会话，不含失败在 Prepare 的 0）：
+      ```
+      cnb-ihe-1k6ql1g05  26.82    cnb-vkg-1k6rcvmlq  8.14
+      cnb-ghr-1k6qv480i  18.81    cnb-go0-1k6r7lhtq  7.60
+      cnb-538-1k6qtun28  14.00    cnb-l1t-1k6rgdjk0  6.63
+      cnb-5er-1k6r2u0rk  12.83    cnb-e8u-1k6r6emrn  6.61
+      cnb-cun-1k6r82p1b  11.72    cnb-4af-1k6r0p75n  4.53
+                                 cnb-v10-1k6r68sn6  4.25
+                                 cnb-m5e-1k6r1mi4d  3.38
+      合计 125.32 核时 / 12 条 ＝ 月度免费额度 160 的 78%（单条 3.4~26.8，按 8 核 × 25~50 分钟折算齐平）
+      ```
+      对照口径：一轮**完整**九腿门禁实测只吃 **2.50 核时**（`cnb-jmd-1k6r0cigb` 九条腿 `metricCoreHours` 求和，含 8 核那条腿跑满 904s）。即**今天 12 条 NPC 会话相当于 50 轮全量门禁**——额度不是被门禁吃掉的，是被会话本身吃掉的。
+    - **为什么本轮不动 `.cnb.yml` 的 `runner`**（按教义第 2 条与 §8 摆影响面，不擅自改）：给 NPC Job 补 `runner.cpus` 是**真根修方向**（把「落到平台默认 8 核」变成一处显式、可评审的申请），但它换来的是 NPC 会话自身可用内存下降（平台口径 内存＝核数×2GiB），而会话长的恰恰是「在本机复跑受保护子集」这类活——§6-421 的实测是 4 核＝8GiB 在 82% 处被 SIGKILL。两个值各的代价：
+      - `cpus: 4`（8GiB）：单条会话成本降到 1/2、预冻结 0.67，代价是会话内跑整套受保护子集会复现 `code 137`；
+      - `cpus: 2`（4GiB）：成本降到 1/4、预冻结 0.33，代价是连分片也装不下，NPC 只能做定点验证；
+      - 不动：会话能跑重活，但一个月只够 12~45 条会话，且**当前额度已归零，任何值都起不来**（本轮 1 核探针同句）。
+      这属于「拿会话能力换额度」的资源口径决策，不是缺陷（NPC 不是门禁，不裁决任何合并契约），故留给人拍板；且当前额度为 0 ⇒ 改了也**无法 live-verify**，按教义第 4 条不能拿未验证的改动当「已修」上报。
+    - **代码侧本轮按 CI 同款复算，全部绿**（树 @ `ee81577b`，`requirements-ci.lock` 装齐；串行跑，无并发会话干扰）：
+      ```
+      shard 2        2785 passed, 5 skipped, 2 xfailed   (11m29s)
+      coverage       Total coverage: 88.18% ≥ 60
+      ci_static_gate.py --skip-import   三格全过
+      ci_static_gate.py（含全模块导入巡检） 全部通过
+      ruff check neurova tests --no-cache   All checks passed
+      deploy_config_consistency_check       ERROR 0 / WARN 1（既有 R7）
+      perf_gate.py                          性能门禁通过
+      experience_quality_gate.py            门禁通过
+      audit_ledger_commit_guard.py          EXIT=0（1395 条引用全可达）
+      tests/e2e/test_backend_boot.py        5 passed
+      本 PR 改动的 29 个测试文件            305 passed, 2 skipped
+      台账三档守卫                           38 passed
+      生成器三跑（api_inventory / api_auth_surface / cognitive_component_table）工作区零漂移
+      ```
+      前端（真 `npm ci` 后）：`npx vitest run` → 294 files / 2382 passed、`npx vue-tsc --noEmit` 零错误、`npm audit --audit-level=high` → EXIT=0（仅 6 条 moderate 存量）。
+      依赖审计：`osv_audit.py` → 447 + 365 包、无未允许漏洞；`pip-audit`（`--no-deps --disable-pip`，因本容器无 `python3-venv` 无法建 venv）→ `No known vulnerabilities found`。
+    - **如实登记两处**：① shard 1 / shard 3 各剩 1 条 `error`，两条都在 teardown 被 `_guardRepoRootAgainstPollution` 点名新增 `.pytest_cache`——**成因是我同一时间另开了一个 shell pytest 会话**（`python -m pytest tests/unit/test_ci_parity_guard.py`），它启动即在仓库根建该目录，而 CI 是串行跑、不存在第二个会话；两者单文件重跑均 `1 passed`，且 shard 2（全程无并发）零 error。② 本轮另起了 2 条配额探针（`cnb-s7k` / `cnb-15m`）与 1 条无 runner 探针（`cnb-6nt`），均止步 Prepare，`metricCoreHours` = 0，未额外消耗额度。
+    - **净 LOC**：文档 +本格，生产代码 +0、配置 +0。**下一枚空号现查：本格取 590，后继从 591 起。**
