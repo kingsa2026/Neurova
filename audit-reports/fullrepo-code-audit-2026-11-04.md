@@ -14,7 +14,7 @@
 |----|------|
 | 任务性质 | 只读盘点，**先出报告等点单，零点单不动码**（既定任务分发口径） |
 | 范围 | 全库 5862 个跟踪文件（`git ls-files | wc -l` 现算） |
-| 基准 | main @ 2026c7f4（知识库三时间戳台账落格），工作树 clean |
+| 基准 | main @ 196e14a4（知识库三时间戳台账落格），工作树 clean |
 | 方法 | 主会话侦察定界 → 六个互不重叠批次并行只读子代理 → 主会话对 P1 头部断言逐条复算 → 汇总分级 |
 | 去重纪律 | 每报一条先 grep 旧台账 `audit-reports/simplification-audit-2026-10-05.md`（1.1 万行），已收且无恶化不重报 |
 | 预算纪律 | 吸取旧台账执行事故教训（150 次工具调用截断、maxTurns 空手），**每批显式封顶 40 次工具调用，先广 grep 后精读，宁可少而实** |
@@ -31,7 +31,7 @@
 
 - 规模现算：`git ls-files | wc -l` = **5862**；顶层分布 neurova 1074 / tests 2667 / NeurUI 839 / docs 491 / NeurovaHarmony 260 / scripts 103 / audit-reports 39 / models 32 / helm 21 / embedding 13，余为散件。
 - 二级分布：neurova/api 140、cognitive_layers 103、knowledge 81、core 78、agent 76、collaboration 65、evolution 61、channels 61、llm 55、skills 54、security 37、context 31（其余见 §3 批次表）；NeurUI/src 630、src-tauri 168。
-- 台账定位：最近一笔 docs(audit) 提交（2026c7f4）改动 `audit-reports/simplification-audit-2026-10-05.md` ⇒ **该文件即现役台账**；读其头部（v2 三态口径 A 可删/B 需人裁/C 该接线）与 §6 缺陷格格式（一档逐项档案、file:line + 来历 + 影响面 + 判定），本批产出格式与之对齐。
+- 台账定位：最近一笔 docs(audit) 提交（196e14a4）改动 `audit-reports/simplification-audit-2026-10-05.md` ⇒ **该文件即现役台账**；读其头部（v2 三态口径 A 可删/B 需人裁/C 该接线）与 §6 缺陷格格式（一档逐项档案、file:line + 来历 + 影响面 + 判定），本批产出格式与之对齐。
 - 尾号现算：`grep "§6-516"` 落在该台账 ⇒ 后继自 §6-517 起。
 
 ### T1 · 六批次并行派发
@@ -83,7 +83,7 @@
 
 ### 批 C · 业务服务面（重点：三时间戳新批接线完整性）
 - 范围：`neurova/knowledge/`、`neurova/llm/`、`neurova/memory/`、`neurova/memory_ingest/`、`neurova/channels/`、`neurova/api/endpoints/` 与路由装配、`neurova/models/`、`neurova/embedding/`。
-- 背景：15d23a09 / c2ed2966 / 2026c7f4 三笔（三时间戳批）刚落地；已登记尾巴 TD② 不算新发现。审的是入库写入→存储→查询过滤→消费方的闭环，及 epoch 秒/毫秒/ISO 双轨混用、新端点三处登记、输入校验。
+- 背景：3985d934 / d3ab8f4e / 196e14a4 三笔（三时间戳批）刚落地；已登记尾巴 TD② 不算新发现。审的是入库写入→存储→查询过滤→消费方的闭环，及 epoch 秒/毫秒/ISO 双轨混用、新端点三处登记、输入校验。
 
 ### 批 D · 其余子系统死码/双源
 - 范围：`neurova/skills/`、`evolution/`、`collaboration/`、`cognitive_layers/`、`tool_layers/`、`plugins/`、`computer_use/`、`tts/`、`asr/`、`aigc_studio/`、包根 `__init__` 链。
@@ -195,7 +195,7 @@
 `NeurUI/src/stores/utils.ts:16-130`（handleStoreError/logStoreOperation/mapApiResponse/snakeToCamel/camelToSnake/safeGet/deepMerge 七个导出，`from '@/stores/utils'` 全仓 0 引用）。store 各自已在别处实现错误处理/字段名转换，留着即第二个候选事实源。处置：确认无动态引用后整文件删。
 
 **P2-12 ◑ 知识条目时间戳类型声明与运行时口径相反**
-`NeurUI/src/api/modules/knowledge.ts:19-20/:762` 声明 `created_at?: string`；后端实发 epoch 秒（`repository.py:850/:887` `...timestamp()`；旁证 `fts_index.py:102` 对 updated_at 做 float()）；页面用 `formatEpochSecondDate`（秒口径）渲染是对的，TS 层靠 antd 宽类型穿透才没红。同文件 revisions 的 `updated_at` 又真是 ISO（`repository.py:875-876`）——同名字段两种量纲全靠声明区分。影响面：三时间批（c2ed2966）刚落地，`source_created_at/source_modified_at`（ISO）与 `created_at`（秒）双轨并存，下一个消费方若信类型声明按 ISO 处理 created_at，即复现 `displayText.ts:39` 钉过的"全表 1970/Invalid Date"回归。处置：主条目 created_at/updated_at 改 `number`，与 `AnnotationItem:250-251` 对齐。
+`NeurUI/src/api/modules/knowledge.ts:19-20/:762` 声明 `created_at?: string`；后端实发 epoch 秒（`repository.py:850/:887` `...timestamp()`；旁证 `fts_index.py:102` 对 updated_at 做 float()）；页面用 `formatEpochSecondDate`（秒口径）渲染是对的，TS 层靠 antd 宽类型穿透才没红。同文件 revisions 的 `updated_at` 又真是 ISO（`repository.py:875-876`）——同名字段两种量纲全靠声明区分。影响面：三时间批（d3ab8f4e）刚落地，`source_created_at/source_modified_at`（ISO）与 `created_at`（秒）双轨并存，下一个消费方若信类型声明按 ISO 处理 created_at，即复现 `displayText.ts:39` 钉过的"全表 1970/Invalid Date"回归。处置：主条目 created_at/updated_at 改 `number`，与 `AnnotationItem:250-251` 对齐。
 
 **P2-13 ◑ OAuth 把 app_secret 拼进 URL query 后 window.open 无 noopener**
 `NeurUI/src/modules/collaboration/CanvasStoreDrawer.vue:194-200`：URLSearchParams 含 app_secret 直接拼进 GET authorize URL；secret 进浏览器历史、可能进服务端 access log 与 Referer。后端 `neurflow_stores.py:230` 确以 query 收参（双端同病，前端可先自救）。同文件 window.open 未带 'noopener'（对照 `MdPreviewPanel.vue:61` 已带，同仓两种口径）。影响面：多平台店铺 OAuth 接入链路（taobao/jd/pdd/douyin 等 8 个 Tier 2 平台）。处置：改 POST 表单或一次性 code；window.open 补 'noopener'。
@@ -325,7 +325,7 @@ association_cues 三件、evolution 七新件（blind_selection/deterministic_ju
 - **◑ 项未经主会话逐条二次复核**：P1 头部断言已复算（§8），P2/P3 依赖子代理取证；点单落格前建议按台账惯例对将落格条目逐条复算（✅ 化）。
 - **预算内未深查的点名**：cost_store.py 五处 except、mermaid securityLevel、channel-configs conflicts 前缀、hooks_engine shell=True 威胁模型（均在存疑区）。
 - **并发事故**：首波 6 并发超本机并发上限三批未启动（§2-T1），已重派补齐；该上限值本身未探明，后续大批次建议 ≤3 并发。
-- **时间快照**：结论基于 main @ 2026c7f4 与当日工作树；三时间戳批后续若有新提交，P1-4/P1-5/P2-5/P2-8/P2-12 需对最新基线重核。
+- **时间快照**：结论基于 main @ 196e14a4 与当日工作树；三时间戳批后续若有新提交，P1-4/P1-5/P2-5/P2-8/P2-12 需对最新基线重核。
 
 ---
 
