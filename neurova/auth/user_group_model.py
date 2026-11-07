@@ -138,6 +138,12 @@ class UserGroup:
     created_at: Optional[float] = None
     updated_at: Optional[float] = None
     metadata: Optional[Dict[str, Any]] = None
+    # 部门化字段（specs/2026-11-07 批 A）：层级只允许挂在 custom（部门）组之间；
+    # 分类白名单引用分类注册表 category_id（空 = 不限制，与 allowed_modules 同语义）；
+    # default_category 为本组成员导入/构建知识条目的缺省业务分类。
+    parent_group_id: Optional[str] = None
+    allowed_categories: List[str] = None
+    default_category: Optional[str] = None
 
     def __post_init__(self):
         if self.created_at is None:
@@ -149,6 +155,8 @@ class UserGroup:
             self.allowed_modules = []
         if self.members is None:
             self.members = []
+        if self.allowed_categories is None:
+            self.allowed_categories = []
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -169,6 +177,9 @@ class UserGroup:
         # 旧 JSON 无新字段 → 归一为空列表
         data["allowed_modules"] = list(data.get("allowed_modules") or [])
         data["members"] = list(data.get("members") or [])
+        data["allowed_categories"] = list(data.get("allowed_categories") or [])
+        data["parent_group_id"] = data.get("parent_group_id") or None
+        data["default_category"] = data.get("default_category") or None
         return cls(**data)
 
     def has_permission(self, permission: Permission) -> bool:
@@ -547,6 +558,9 @@ class UserGroupManager:
         permissions: Optional[List[Permission]] = None,
         resource_quota: Optional[ResourceQuota] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        parent_group_id: Optional[str] = None,
+        allowed_categories: Optional[List[str]] = None,
+        default_category: Optional[str] = None,
     ) -> UserGroup:
         """
         创建用户组
@@ -558,6 +572,9 @@ class UserGroupManager:
             permissions: 权限列表
             resource_quota: 资源配额
             metadata: 元数据
+            parent_group_id: 父部门组（层级只允许挂在 custom 组之间）
+            allowed_categories: 知识库分类白名单（引用分类注册表，空 = 不限制）
+            default_category: 本组成员导入/构建条目的缺省业务分类
 
         Returns:
             创建的用户组
@@ -567,6 +584,9 @@ class UserGroupManager:
             # 否则 to_dict 的 group_type.value 在保存时 AttributeError → 持久化静默失败
             if isinstance(group_type, str):
                 group_type = UserGroupType(group_type)
+
+            if parent_group_id:
+                self._validateParentTarget(parent_group_id)
 
             # 生成用户组ID
             group_id = f"group_{secrets.token_hex(8)}"
@@ -582,6 +602,9 @@ class UserGroupManager:
                 is_system=False,
                 is_active=True,
                 metadata=metadata,
+                parent_group_id=str(parent_group_id) if parent_group_id else None,
+                allowed_categories=self._normalizeCategoryIds(allowed_categories),
+                default_category=str(default_category).strip().lower() if default_category else None,
             )
 
             # 保存用户组
@@ -616,6 +639,11 @@ class UserGroupManager:
             return None
 
         try:
+            # parent_group_id 走专门校验（存在性/custom 限定/禁环），不随 setattr 盲写
+            parent_kw = kwargs.pop("parent_group_id", None)
+            if parent_kw is not None:
+                group = self.set_parent_group(group_id, parent_kw) or group
+
             # 更新字段
             for key, value in kwargs.items():
                 if hasattr(group, key):
@@ -670,6 +698,97 @@ class UserGroupManager:
     # 功能模块白名单（allowed_modules）
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # 部门化（specs/2026-11-07 批 A/B）：层级校验与分类白名单
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalizeCategoryIds(categories: Optional[List[str]]) -> List[str]:
+        """分类白名单规范化：与分类注册表同规（去空白、小写、去空）。"""
+        from neurova.knowledge.categories_registry import normalizeCategoryId
+
+        return [normalizeCategoryId(c) for c in (categories or []) if normalizeCategoryId(c)]
+
+    def _validateParentTarget(self, parent_group_id: str, *, self_id: Optional[str] = None) -> None:
+        """父分组合法性：必须存在、必须是 custom（部门）组、不能是自己。"""
+        parent = self.get_group(str(parent_group_id))
+        if parent is None:
+            raise ValueError(f"父分组 '{parent_group_id}' 不存在")
+        if parent.group_type != UserGroupType.CUSTOM:
+            raise ValueError(f"部门层级只允许挂在自定义（部门）分组之间，'{parent.name}' 是系统组")
+        if self_id is not None and str(parent_group_id) == str(self_id):
+            raise ValueError("分组不能以自己为父")
+
+    def set_parent_group(self, group_id: str, parent_group_id: Optional[str]) -> Optional[UserGroup]:
+        """设置/解除父部门组（单亲树；沿链查环，禁自指与系统组挂接）。
+
+        Returns:
+            更新后的组；组不存在返回 None
+        """
+        group = self.get_group(group_id)
+        if group is None:
+            logger.warning("User group not found: %s", group_id)
+            return None
+        if group.is_system:
+            raise ValueError(f"系统组 '{group.name}' 不参与部门层级")
+        if not parent_group_id:
+            group.parent_group_id = None
+            group.updated_at = time.time()
+            self._save_groups()
+            return group
+        self._validateParentTarget(parent_group_id, self_id=group_id)
+        # 禁环：从新父沿链上溯，撞到自己即环
+        seen = {str(group_id)}
+        cursor = self.get_group(str(parent_group_id))
+        while cursor is not None:
+            if cursor.group_id in seen:
+                raise ValueError(f"设置父分组 '{parent_group_id}' 会构成层级环")
+            seen.add(cursor.group_id)
+            cursor = self.get_group(cursor.parent_group_id) if cursor.parent_group_id else None
+        group.parent_group_id = str(parent_group_id)
+        group.updated_at = time.time()
+        self._save_groups()
+        logger.info("Set parent of user group %s -> %s", group_id, parent_group_id)
+        return group
+
+    def set_allowed_categories(self, group_id: str, categories: List[str]) -> Optional[UserGroup]:
+        """设置分组知识库分类白名单（引用分类注册表 category_id；空 = 不限制）。
+
+        运营配置语义同 allowed_modules：系统组也可设置（admin 本就不受白名单约束）。
+        """
+        group = self.get_group(group_id)
+        if group is None:
+            logger.warning("User group not found: %s", group_id)
+            return None
+        try:
+            group.allowed_categories = self._normalizeCategoryIds(categories)
+            group.updated_at = time.time()
+            self._save_groups()
+            logger.info("Set allowed_categories for user group %s: %s", group_id, group.allowed_categories)
+            return group
+        except Exception as e:
+            logger.error("Failed to set allowed_categories for user group %s: %s", group_id, e)
+            return None
+
+    def set_default_category(self, group_id: str, category_id: Optional[str]) -> Optional[UserGroup]:
+        """设置分组缺省业务分类（导入/构建条目缺省；None = 未配置）。"""
+        group = self.get_group(group_id)
+        if group is None:
+            logger.warning("User group not found: %s", group_id)
+            return None
+        try:
+            group.default_category = str(category_id).strip().lower() if category_id else None
+            group.updated_at = time.time()
+            self._save_groups()
+            return group
+        except Exception as e:
+            logger.error("Failed to set default_category for user group %s: %s", group_id, e)
+            return None
+
+    # ------------------------------------------------------------------
+    # 功能模块白名单（allowed_modules）
+    # ------------------------------------------------------------------
+
     def set_allowed_modules(self, group_id: str, modules: List[str]) -> Optional[UserGroup]:
         """
         设置用户组可用功能模块（菜单路由 key 列表）。
@@ -716,11 +835,23 @@ class UserGroupManager:
 
         Returns:
             是否成功
+
+        Raises:
+            ValueError: 目标是 custom（部门）组且用户已属于另一个部门组（T-A 单主组）
         """
         group = self.get_group(group_id)
         if group is None:
             logger.warning("User group not found: %s", group_id)
             return False
+
+        # T-A 单主组：一个用户至多属于一个 custom（部门）分组——已在其他部门组即拒。
+        # 系统组（admin/developer/user/guest...）不受此限。
+        if group.group_type == UserGroupType.CUSTOM and username not in group.members:
+            for other in self.get_groups_for_user(username):
+                if other.group_type == UserGroupType.CUSTOM and other.group_id != group_id:
+                    raise ValueError(
+                        f"用户 '{username}' 已属于部门分组 '{other.name}'（单主组：先从原部门移除再加入）"
+                    )
 
         try:
             if username not in group.members:

@@ -71,16 +71,16 @@ class TestUserGroupModel:
         assert manager.add_user_to_group("alice", "group_missing") is False
 
     def test_get_groups_for_user_union(self, manager):
+        # T-A 单主组后，多组并集由"系统组 + 至多一个部门组"承载（两个部门组会被拒绝）
         g1 = manager.create_group(name="a", description="")
-        g2 = manager.create_group(name="b", description="")
         manager.set_allowed_modules(g1.group_id, ["/chat"])
-        manager.set_allowed_modules(g2.group_id, ["/chat", "/agents"])
+        manager.set_allowed_modules("user", ["/chat", "/agents"])
         manager.add_user_to_group("bob", g1.group_id)
-        manager.add_user_to_group("bob", g2.group_id)
+        manager.add_user_to_group("bob", "user")
 
         assert {g.group_id for g in manager.get_groups_for_user("bob")} == {
             g1.group_id,
-            g2.group_id,
+            "user",
         }
         assert manager.get_allowed_modules_for_user("bob") == ["/agents", "/chat"]
 

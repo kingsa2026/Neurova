@@ -37,6 +37,7 @@ from .knowledge_facts import (
     _SCHEMA_V27,
 )
 from .digest_chain import _SCHEMA_V11
+from ..categories_registry import _SCHEMA_V38_CATEGORIES
 from ..enterprise.schema_mapping import SCHEMA_V34 as _SCHEMA_V34_ENTERPRISE
 from ..fts_index import _SCHEMA_V37_FTS
 from ..ontology.change_log import _SCHEMA_V33
@@ -127,6 +128,9 @@ _STEPS: List[tuple] = [
     #      knowledge_fts 虚表归 foundation 版本域，独立 knowledge_fts.db 与
     #      fts_index 自建 DDL 退役；docs 表带 source_modified_at（同分 tie-break 消费）
     (37, _SCHEMA_V37_FTS),
+    # v38：知识库自定义分类注册表（specs/2026-11-07 批 A）——受控分类清单单一事实源，
+    #      分组白名单/前端下拉/导入选择全部引用；不做租户切分（部门开放由分组白名单表达）
+    (38, _SCHEMA_V38_CATEGORIES),
 ]
 
 _registered = False
