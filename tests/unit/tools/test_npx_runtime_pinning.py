@@ -182,6 +182,22 @@ class TestNoKnownVulnerableRuntimePackages:
             "公告未附编号（ReDoS：firstPhasePreProcess 模式放大 → secondPhasePreProcess 二次方）",
             "glob 模式预处理模式放大致二次方开销（DoS）",
         ),
+        # 2026-11 公告（用户通告，未附 GHSA/CVE 编号）：glob 的 walker 四个中止分支
+        # （walkCB / walkCB2 / walkCBSync / walkCB2Sync）写成 `if (this.signal?.aborted)
+        # cb()`——调了 cb() 却不 `return`，执行流继续走到 processPatterns / readdirCB /
+        # 递归 walkCB2：signal / AbortSignal.timeout() 被当遍历预算用时，Promise 已拒绝
+        # 后 readdir 仍在后台递归（公告实测拒绝后 1360 次 readdir；v9.0.0–13.0.6 同型，
+        # glob() 与 globStream() 都中）。修复线 14.0.2；三条引入链
+        # （@modelcontextprotocol/server-filesystem 声明 ^13.0.6、camoufox-js 声明
+        # ^13.0.0、swagger-jsdoc 精确钉 11.1.0）都顶不到 14，由
+        # tools/npx-runtime/package.json 顶层 overrides 抬到 `^14.0.2`（实解 14.0.4）。
+        "glob": (
+            "14.0.2",
+            ("node_modules/@modelcontextprotocol/server-filesystem", "node_modules/camoufox-js",
+             "node_modules/swagger-jsdoc"),
+            "公告未附编号（遍历中止失效：中止分支 cb() 缺 return）",
+            "glob 遍历被 abort 后仍在后台 readdir（取消预算失效 ⇒ 重复超时请求累积后台遍历，DoS）",
+        ),
         # 2026-10 公告批：MCP TS server SDK 2.0.0（`@modelcontextprotocol/server-filesystem`
         # 的传递依赖）落在三条公告的区间内，修复版自 2.3.0 起；`ip-address` 10.7.2 的
         # Address6 区号二次复杂度 DoS（GHSA-rxp7-6hxx-x8q5）修复版自 10.7.4 起。
@@ -254,6 +270,11 @@ class TestNoKnownVulnerableRuntimePackages:
         "body-parser": (
             "node_modules/body-parser",
             "node_modules/@bytebase/dbhub/node_modules/body-parser",
+        ),
+        # 根条目 + swagger-jsdoc 精确钉 11.1.0 顶出的嵌套条目——两条载体各自过下界。
+        "glob": (
+            "node_modules/glob",
+            "node_modules/swagger-jsdoc/node_modules/glob",
         ),
     }
 
