@@ -12186,4 +12186,5 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
       ```
     - **live-verify（真链路）**：`npm audit --json` 在 `tools/npx-runtime` 现读 `{"total":0}`（修前 3 条）；CI 侧 `static-gate` / `dependency-audit` / `frontend` / `perf-gate` / `deploy-config` / `experience-quality` 逐条由 error 转 success（`cnb-srf-1k6qu7mv5`）。glob 13.0.6→**14.0.4**、minimatch 10.2.6→**11.0.5**，`swagger-jsdoc/node_modules/glob` 那份嵌套副本随顶替消失，连带少 94 行。
     - **如实记录的偏差**：`npm audit` 里 `@askjo/camofox-browser` / `camoufox-js` / `swagger-jsdoc` 三条 **moderate** 仍在（`via` 链经 glob 计数），不属本单面、也不因本单变绿而消失；OSV 侧 `tools/npx-runtime` 已 0 命中。
+    - **同根因的第二份实现在收口时合并（教义第 7 条）**：另有一版并行修复落在这个号之前，两版对「取不到对象」的判法一致，差别在两处——① 那一版留着 `isCommit()` 自己那趟 `cat-file`，与 `_objectType()` 成了同一件事的两份取数；② 它把"今天有几行真核不了"这条读数丢了。合并后取长补短：`isCommit()` 收成 `_objectType()` 的谓词（对象类型取数单源），三态判定抽成 `signatureExpired()`，并新增一行 `例外清单里另有 N 行在本克隆不可核验` 把第三态如实报出（原来这 5 行连一句读数都没有，静默略过）。反向钉也补齐：`test_signedExceptionWhoseObjectIsNotACommitIsExpired` 要求树号误署进清单必须红——没有它，「取不到不判过期」可以被"一律不判过期"错误地满足，清单就成了一键静音。
     - **下一枚空号现查：条目行尾号现算 584 ⇒ 本格取 585，后继从 586 起。**
