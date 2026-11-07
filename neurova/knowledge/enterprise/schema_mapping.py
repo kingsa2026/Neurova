@@ -133,4 +133,10 @@ def applyMapping(descriptor: Dict[str, Any], row: Dict[str, Any],
         if descriptor.get("validFrom") else None,
         "validUntil": str(row.get(str(descriptor.get("validUntil") or ""), "")) or None
         if descriptor.get("validUntil") else None,
+        # 源钟列映射（K-09，台账 §6-570 裁定 2026-11-07）：与 validFrom 同一模式——
+        # 描述符声明源行里哪一列是文档创建/修改时间，不声明就是 None（裁决回退入库钟）
+        "sourceCreatedAt": str(row.get(str(descriptor.get("sourceCreatedAt") or ""), "")) or None
+        if descriptor.get("sourceCreatedAt") else None,
+        "sourceModifiedAt": str(row.get(str(descriptor.get("sourceModifiedAt") or ""), "")) or None
+        if descriptor.get("sourceModifiedAt") else None,
     }

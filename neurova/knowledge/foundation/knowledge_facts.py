@@ -420,6 +420,15 @@ CREATE INDEX IF NOT EXISTS idx_alias_candidate_status
     ON knowledge_alias_candidates(tenant_id, status, last_seen_at);
 """
 
+# v36：facts 侧源钟（K-09，台账 §6-570 三项裁定 2026-11-07）。源文档时间与入库钟
+# 分离：回填一份"昨天修改的旧文档"，most_recent 裁决读源钟而不是入库钟。
+# 无源时间回退 recorded_at（COALESCE 语义在读取侧，列保持可空）；valid_from
+# 是业务生效窗，不参与排序。qualifier 是冲突分组键，源钟不进 qualifier。
+_SCHEMA_V36 = """
+ALTER TABLE knowledge_facts ADD COLUMN source_created_at TEXT;
+ALTER TABLE knowledge_facts ADD COLUMN source_modified_at TEXT;
+"""
+
 
 MANUAL_RESOLUTIONS: tuple = ("keep_both", "supersede_old", "dismiss")
 
@@ -866,6 +875,8 @@ class KnowledgeFactStore:
         validUntil: Optional[str] = None,
         tenantId: str = "default",
         category: str = "",
+        sourceCreatedAt: Optional[str] = None,
+        sourceModifiedAt: Optional[str] = None,
     ) -> str:
         """同 (主体, 谓词, 客体, 限定) 或同 content_key 重放返回同一 fact_id。
 
@@ -883,6 +894,8 @@ class KnowledgeFactStore:
         if contentKey:
             existing = self.findFactByContentKey(agentId, contentKey, tenant)
             if existing:
+                self.backfillSourceClock(existing["fact_id"], sourceCreatedAt,
+                                          sourceModifiedAt)
                 self.fillValidityWindow(existing["fact_id"], windowFrom, windowUntil)
                 return existing["fact_id"]
         qualifier = qualifier or {}
@@ -911,6 +924,7 @@ class KnowledgeFactStore:
                         " WHERE fact_id = ? AND (category IS NULL OR category = '')",
                         (str(category).strip(), row["fact_id"]),
                     )
+                self.backfillSourceClock(row["fact_id"], sourceCreatedAt, sourceModifiedAt)
                 self.fillValidityWindow(row["fact_id"], windowFrom, windowUntil)
                 return row["fact_id"]
             factId = "fact_%s" % uuid.uuid4().hex[:12]
@@ -919,13 +933,16 @@ class KnowledgeFactStore:
                     "INSERT INTO knowledge_facts (fact_id, agent_id, tenant_id, subject_key,"
                     " predicate_term_id, object_term, relation_kind, content, content_key,"
                     " qualifier_hash, qualifier_json, confidence, source_turn_id, recorded_at,"
-                    " record_kind, valid_from, valid_until, category)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " record_kind, valid_from, valid_until, category,"
+                    " source_created_at, source_modified_at)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (factId, agentId, tenant, subjectKey, predicateTermId, objectTerm, relationKind,
                      content, contentKey, qualifierHash,
                      json.dumps(qualifier, ensure_ascii=False), confidence, sourceTurnId,
                      _instant(recordedAt) if recordedAt else _now(), recordKind,
-                     windowFrom, windowUntil, str(category or "").strip()),
+                     windowFrom, windowUntil, str(category or "").strip(),
+                     _instant(sourceCreatedAt) if sourceCreatedAt else None,
+                     _instant(sourceModifiedAt) if sourceModifiedAt else None),
                 )
             except sqlite3.IntegrityError:
                 # 唯一索引挡住竞态双写：改读先到的那一行，而不是让写入方看到崩
@@ -941,6 +958,39 @@ class KnowledgeFactStore:
                 return winner["fact_id"]
             self._recordVersionLocked(factId, "create", operator=sourceTurnId)
             return factId
+
+    def backfillSourceClock(self, factId: str,
+                             sourceCreatedAt: Optional[str],
+                             sourceModifiedAt: Optional[str]) -> None:
+        """同内容重放时把源钟补进已存在的行（只补齐不回退）。
+
+        与 fillValidityWindow 同一纪律：调用方声明过的就落，缺失不猜。
+        source_modified_at 允许前移（源文档改了重入库），绝不倒拨——
+        倒拨等于让旧说法冒充新钟。
+        """
+        created = _instant(sourceCreatedAt) if sourceCreatedAt else ""
+        modified = _instant(sourceModifiedAt) if sourceModifiedAt else ""
+        if not created and not modified:
+            return
+        row = self._conn.execute(
+            "SELECT source_created_at, source_modified_at FROM knowledge_facts"
+            " WHERE fact_id = ?",
+            (factId,),
+        ).fetchone()
+        if row is None:
+            return
+        if created and not row["source_created_at"]:
+            self._conn.execute(
+                "UPDATE knowledge_facts SET source_created_at = ? WHERE fact_id = ?",
+                (created, factId),
+            )
+        if modified:
+            stored = str(row["source_modified_at"] or "")
+            if not stored or str(modified) > stored:
+                self._conn.execute(
+                    "UPDATE knowledge_facts SET source_modified_at = ? WHERE fact_id = ?",
+                    (modified, factId),
+                )
 
     def fact(self, factId: str) -> Optional[Dict[str, Any]]:
         with self._lock:

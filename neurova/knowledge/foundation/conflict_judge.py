@@ -114,12 +114,28 @@ class KnowledgeConflictJudge:
             return {"policy": "manual", "winner": None,
                     "basis": "成员无据可依，不得按通过处理: %s" % names}
 
-        ordered = sorted(members, key=lambda m: (str(m.get("recorded_at") or ""), m["fact_id"]))
-        if len({str(m.get("recorded_at") or "") for m in ordered}) > 1:
+        # K-09 源钟（台账 §6-570 裁定 2026-11-07）：排序键＝逐行 COALESCE
+        # (source_modified_at, recorded_at)——源文档更新的一方赢，回填旧文档不再
+        # 被"今天才入库"冒充成最新；无源时间的行回退入库钟（存量行为零漂移）。
+        # valid_from 是业务生效窗，只归 temporal 分类管，不进这个排序。
+        def _recencyClock(member: Dict[str, Any]) -> tuple:
+            source = str(member.get("source_modified_at") or "")
+            if source:
+                return source, "source_modified_at"
+            return str(member.get("recorded_at") or ""), "recorded_at"
+
+        ordered = sorted(members, key=lambda m: (_recencyClock(m)[0], m["fact_id"]))
+        if len({_recencyClock(m)[0] for m in ordered}) > 1:
             winner = ordered[-1]
+            winnerClockName = _recencyClock(winner)[1]
+            clocks = ", ".join(
+                "%s(%s=%s)" % (m["fact_id"], _recencyClock(m)[1], _recencyClock(m)[0])
+                for m in ordered
+            )
             return {"policy": "most_recent", "winner": winner["fact_id"],
-                    "basis": "按新近裁决：%s（recorded_at=%s）晚于其余成员"
-                             % (winner["fact_id"], winner.get("recorded_at"))}
+                    "basis": "按源钟裁决：%s（%s=%s）晚于其余成员 [%s]"
+                             % (winner["fact_id"], winnerClockName,
+                                _recencyClock(winner)[0], clocks)}
 
         supports = {int(m.get("assertion_count") or 0) for m in members}
         if len(supports) > 1:

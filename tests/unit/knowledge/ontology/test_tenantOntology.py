@@ -40,6 +40,11 @@ class TestV25Migration:
     def testLegacyTablesRebuiltWithTenantKey(self, tmp_path):
         db = tmp_path / "facts.db"
         conn = sqlite3.connect(str(db))
+        # v36 起迁移链会 ALTER knowledge_facts（K-09 源钟两列）：真实 v24 库必有 v1 建的
+        # 这张表（链式迁移下 user_version 只在成功后前移，不可能有"24 版却缺 v1 表"的库），
+        # 夹具照真实状态补 v1 DDL，不再依赖"v25–v35 恰好不碰它"的巧合。
+        from neurova.knowledge.foundation.knowledge_facts import _SCHEMA as _FACTS_SCHEMA_V1
+        conn.executescript(_FACTS_SCHEMA_V1)
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS ontology_terms (
                 term_id TEXT PRIMARY KEY, kind TEXT NOT NULL,
