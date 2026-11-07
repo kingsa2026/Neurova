@@ -189,6 +189,29 @@ main:
           - /root/.cache/pip
           - /root/.cache/uv
       stages:
+        # 受保护子集里有判据按**主线基线**取数（`test_npc_branch_cleanup.py` 读合并记录、
+        # `test_commitLocClaimMatchesOwnNumstat.py` 取未推送窗口），而平台检出**只建被检出
+        # 分支的 ref**。探针构建 `cnb-thk-1k6rrue9d` 逐条读数为：
+        #   git rev-parse origin/main / refs/remotes/origin/main / main / refs/heads/main
+        #   → 四条全部 `fatal: Needed a single revision`
+        # 而对象是齐的（`git cat-file -t 98b0fa42…` 回 `commit`）、历史也在——缺的只是
+        # **那一条 ref**。GitHub 侧 `actions/checkout` 带 `fetch-depth: 0` 自带 `origin/main`，
+        # 同一批判据因此在一侧绿、在另一侧红（构建 `cnb-98o-1k6rpqmf9#003` 第 2 片的三格）。
+        #
+        # 修法是把前提在**判据的上游**物化，不给判据加兜底：让消费方去猜「哪条 ref 能当
+        # 基线」是下游补丁，第二个消费方进来还要再猜一次（教义第 1 条）。
+        #
+        # refspec 必须**显式**：`git fetch origin main` 只写 `FETCH_HEAD`、不建
+        # `origin/main`——那正是「看起来取了、其实没建 ref」的最常见写法。故这里逐字钉
+        # `refs/heads/main:refs/remotes/origin/main`，末尾再 `rev-parse --verify` 自证；
+        # `set -e` 让取不到时当场响，不把失败留给后面的判据去误报成「判据坏了」。
+        # 判据见 tests/unit/ci/test_mainBaselineRefIsMaterialized.py。
+        - name: materialize main baseline ref
+          script: |
+            set -e
+            git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
+            git rev-parse --verify refs/remotes/origin/main
+          timeout: 5m
         - name: install uv + locked dependencies
           script: |
             python -m pip install uv
