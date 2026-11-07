@@ -12216,3 +12216,38 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
         test_deploy_config_guard.py              ............... 36
       ```
     - **净 LOC**：生产池 +0；配置池 `bin/version.txt` +1/−1（一行版本串）；判据 +19/−0、台账 +23 均不计入。**下一枚空号现查：本格取 586，后继从 587 起。**
+
+587. **PR #374 第七轮：本机三片受保护子集全绿与 CI 侧唯一真红（台账可达性）的归因复算** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **先分清红在谁身上**：PR 侧本轮九条腿全红，日志原文一律 `Root Group's events CPU-core hours are insufficient for pre-freezing`（`cnb-jve-1k6r82m9g` 九条逐条如此，折合 0.33 / 0.67 / 1.33 核时三种规格），含 2 核规格同样起不来（`cnb-edu-1k6r7le3i` / `cnb-6cs-1k6r7ongp`）——**平台配额，与提交内容无关**。1 核探针 `cnb-83c-1k6r87m1l` 起得来（Prepare 3.9s），2 核探针 `cnb-i9b-1k6r86qce` / `cnb-e98-1k6r8b9vc` / `cnb-cnl-1k6rb3bjh` 三次全红在同一句：配额按核数折，不是按流水线。
+    - **本机按 CI 同款跑法复算三片受保护子集**（`COVERAGE_FILE=data/coverage/.coverage.<N>`、`--timeout 300`、`--cov --cov-report= --cov-fail-under=0`，逐片各起一个进程、串行）：
+      ```
+      shard 1   3125 passed, 9 skipped, 1 xfailed      (19m28s)
+      shard 2   2785 passed, 5 skipped, 2 xfailed      (16m52s)
+      shard 3   2978 passed, 4 skipped                 (12m22s)
+      coverage  88.17%  ≥ 60  Required reached
+      ```
+      三片合计 8888 条判据零失败，覆盖率 88.17%——**本机这一份树上没有任何一条钉住本单的判据是红的**。
+    - **一次差点被记成红的假象，如实记下**：首轮不带 `--cov` 跑时三片各报一条 `ERROR at teardown`，点名 `['data']` 是仓库根新增条目（`_guardRepoRootAgainstPollution`）。根因不在被测代码：CI 那一格带 `--cov` 且 `COVERAGE_FILE` 指进 `data/coverage/`，**这个目录在跑测前就被建出来**，于是 `data` 早于逐用例快照存在、守卫不会把它读成「新增」；本机不带 `--cov` 时 `data/` 不存在，而 `console.py:106` 的模块级 `_CONSOLE_UPLOAD_DIR.mkdir()` 在 import 期就建 `data/uploads/console`，第一个 import 它的用例即被点名。即**复验方式与 CI 不一致**造出来的红，不是本单引入。第二处偏差同源：分片 2/3 并行跑时报 `FileNotFoundError: test_tmpSessionLandingTripProbe.py`——`test_session_landing_guard.py` 会在 `tests/unit/` 下写临时探针文件而被另一片正在做 AST 收集的 `test_pytest_collection_hygiene.py` 看见；CI 是三片**串行**的，故不受影响，重跑即绿。
+    - **CI 侧唯一一条与代码有关的红，已由本单 `c52ccf2a`+`e0931bb0` 修掉，现场复算通过**：`cnb-3c6-1k6qvvfr7` / `cnb-srf-1k6qu7mv5` 的 `protected subset shards` 都只剩 `test_auditLedger_hasNoUnreachableReference`。在**真干净克隆**（`git clone --no-local`，CI 同形态，起点 `98b0fa42`，合入本分支后 `bc23ac33`）实跑：
+      ```
+      scripts/ci/audit_ledger_commit_guard.py   EXIT=0
+        commit 号全部可达（共 1384 条引用，扫描面 audit-reports + docs，例外清单署名 5 条）
+        例外清单里另有 5 行在本克隆不可核验（对象不在，含并发重写撤账的笔）
+      tests/unit/test_audit_ledger_commit_guard.py   11 passed
+      ```
+      即「取不到对象不再被判成署名过期」这条改判，在 CI 那种远端历史检出面上的读数与说明一致。
+    - **live-verify（真容器，`api_trigger_verify` 构建 `cnb-n1q-1k6rcm2df`，1 核 / python:3.12，整条 success）**：
+      ```
+      ruff check neurova tests --no-cache        success（1.0s）
+      deploy_config_consistency_check.py         success（0.8s）ERROR 0 / WARN 1（既有 R7 存量）
+      audit_ledger_commit_guard.py               success（1.3s）
+      repaired guards（6 档 / 52 格）             success（25.4s）
+        test_audit_ledger_commit_guard            11
+        test_installer_version_single_source       5
+        test_win_installer_kit                     8
+        test_frontend_audit_floor_guard           20
+        test_npx_runtime_pinning                  20
+        test_deploy_config_guard                  36
+      ```
+      另在本机按 CI 命令逐条补齐：`ci_static_gate.py`（导入巡检 1105 模块全过）、`perf_gate.py`（通过）、`experience_quality_gate.py`（门禁通过）、`tests/e2e/test_backend_boot.py`（5 passed）、`npm audit --audit-level=high`（EXIT=0，仅 6 条 moderate 存量）、`vue-tsc --noEmit`（EXIT=0 / 零错误）、`vitest run`（2382 passed / 1 skipped / EXIT=0）。
+    - **不改代码的一轮，如实说清改了什么**：本轮零生产代码改动，只为把「红在平台配额」与「红在代码」分开而取读数与留痕。**净 LOC**：文档 +本格，代码 +0。**下一枚空号现查：本格取 587，后继从 588 起。**
