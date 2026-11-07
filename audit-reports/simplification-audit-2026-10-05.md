@@ -12151,3 +12151,8 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **红→绿汇总**：新增测试档 8 个 50 格（categoryRegistry 7/deptGroupModel 8/deptScope 7/deptWhitelist 10/deptGate 5/walkWhitelist 7/categoryFilter 1＋迁移钉 3）；批内每格红灯实证后转绿。**门**：vitest 2380 passed（locale-consistency 41＋duplicate 守卫）；vue-tsc 0 错；后端宽域 knowledge/auth/security **2798 passed**，9 失败逐一定责——6 个 auth client 级为并发认证门改造预存红（批 A 时 stash 对拍坐实），3 个为本批 v38 使链尾钉 `==37` 过时（fact_store 全表存在性＋fts_maindb 两格）——按新链现实修钉（链尾 `==38`＋knowledge_categories 入表清单；FTS 两格改 `>= 37` 还原其"v37 已应用"本意），修后 25 passed。
     - **口径（numstat 实抄，六笔实施提交合计）**：后端 +1747/−150（A 646/138、B 211/13、C 354/12、D 304/2、E 197/18）；前端 +552/−39；本笔（路由序修复＋分类过滤＋迁移钉＋文档）见 numstat。测试代码不计入生产 LOC 上限口径。
     - **下一枚空号现查：条目行尾号现算 579 ⇒ 本格取 580，后继从 581 起。**
+
+581. **F 批字面收尾：设计 §3 三处「树形」补齐（a-tree 层级视图＋两处树选）** ✅🟢 —— 用户复查「前端功能对齐（逐页：现状→变更→验收）进行完没有」，逐行比对坐实 F1/F2 首轮功能面齐但三处字面未落地（三页 a-tree 命中 0：GroupPage 仍是卡片网格＋父组文字标注、两处分组选择是平铺 a-select）。
+    - **补齐**：新增 `NeurUI/src/utils/deptTree.ts` 共享树构建器（buildDeptTreeData：parent_group_id 单亲树、孤儿组如实归根层不丢不炸、excludeId 收编整棵子树防自指）——单源落地防三页复制触发 duplicate 守卫新增组；GroupPage 增 `a-tree` 层级视图（节点带成员数、default-expand-all、点选节点过滤卡片到该子树＋「全部」复位、分页随过滤复位）＋父组选择改 `a-tree-select`；EnhancedUserPage/AgentFormPage 所属分组改 `a-tree-select`（computed 取页内专名 userGroupTree/agentGroupTree，不新增同名组）；GroupPage 组件测试「按 group_id 契约渲染组卡片」断言收口 `.groups-grid`（树面板 GlassCard 不计入组卡片，测试意图不变）。
+    - **并发在途干扰如实记录**：duplicate 台账按处方重生成（快照含并发会话未提交的 EnterpriseSourcesPage 改动）；vue-tsc 全项目错误全部位于并发在途的 EnterpriseSourcesPage.vue（非本批文件 0 错）；全量 vitest 的红（EnterpriseSourcesPage 运行时/`ontology.entTestBtn` 缺键/硬编码色快照——色值在复验时已被对方改掉）全部归属并发在途面。**本批面**：vue-tsc 本批文件 0 错、GroupPage 5 格＋duplicate 守卫 3 格＋locale-consistency 41 格全绿。
+    - **下一枚空号现查：条目行尾号现算 580 ⇒ 本格取 581，后继从 582 起。**
