@@ -101,8 +101,14 @@ def validateDescriptor(descriptor: Dict[str, Any], registry: Any,
         if column and column not in columns:
             raise MappingError("%s 的列 %r 不是已声明列" % (timeKey, column))
 
-    # SQL 注入面守卫：描述符任何字段不允许 SQL 关键字形状（映射里不写 SQL）
+    # SQL 注入面守卫：描述符任何字段不允许 SQL 关键字形状（映射里不写 SQL）。
+    # 例外（C4 SQL 直连）：sourceType="sql" 的 descriptor["query"] 本来就是
+    # 只读 SQL 模板，其形状由适配器构造期自守（首词白名单＋写关键词边界
+    # ＋槽位强制），守卫对它豁免；其余字段（含非 sql 源的 query 字段）照旧全禁。
     blob = str(descriptor)
+    if sourceType == "sql" and "query" in descriptor:
+        guarded = {k: v for k, v in descriptor.items() if k != "query"}
+        blob = str(guarded)
     for banned in ("SELECT ", "INSERT ", "DROP ", "DELETE ", "UPDATE ", "--", ";"):
         if banned.lower() in blob.lower():
             raise MappingError("描述符含 SQL 形状片段 %r——映射里不写 SQL" % banned.strip())

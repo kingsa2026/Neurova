@@ -55,6 +55,15 @@ def _decrypt_secret(token: str) -> Optional[str]:
         return None
 
 
+def decryptSecret(token: str) -> Optional[str]:
+    """`NEUROVA_KB_SECRET` 解密的公开访问名（Fernet）。
+
+    `_decrypt_secret` 的跨模块收编口：企业源连接器（C4 SQL 直连的
+    passwordEncrypted 路由）经此取值，不再 import 私有名。
+    """
+    return _decrypt_secret(token)
+
+
 class KnowledgeStorage:
     """知识库配置与 API Key 的本地存储。"""
 
