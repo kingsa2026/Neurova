@@ -95,6 +95,10 @@ class EnterpriseSourceRegistry:
     def get(self, sourceId: str) -> Optional[EnterpriseSourceAdapter]:
         return self._adapters.get(str(sourceId or "").strip())
 
+    def unregister(self, sourceId: str) -> None:
+        """进程内适配器摘除（DELETE 配置后的配套动作；幂等）。"""
+        self._adapters.pop(str(sourceId or "").strip(), None)
+
     def sources(self) -> List[str]:
         return sorted(self._adapters)
 
@@ -209,22 +213,58 @@ class EnterpriseIngestor:
                 " ORDER BY source_id", (tenant,)).fetchall()]
         rows: List[Dict[str, Any]] = []
         for sourceId in ids:
-            config = self.loadConfig(tenant, sourceId) or {}
+            config = self.loadConfig(tenantId, sourceId) or {}
             rows.append({"source_id": sourceId,
                          "descriptor": config.get("descriptor") or {},
                          "cursor": config.get("cursor") or "",
-                         "enabled": bool(config.get("enabled"))})
+                         "enabled": bool(config.get("enabled")),
+                         "created_at": config.get("created_at") or "",
+                         "updated_at": config.get("updated_at") or ""})
         return rows
 
     def loadConfig(self, tenantId: str, sourceId: str) -> Optional[Dict[str, Any]]:
         row = self._store._conn.execute(
-            "SELECT descriptor_json, cursor, enabled FROM enterprise_source_configs"
+            "SELECT descriptor_json, cursor, enabled, created_at, updated_at"
+            " FROM enterprise_source_configs"
             " WHERE tenant_id = ? AND source_id = ?",
             (str(tenantId or "default"), str(sourceId or ""))).fetchone()
         if row is None:
             return None
         return {"descriptor": json.loads(row["descriptor_json"] or "{}"),
-                "cursor": row["cursor"], "enabled": bool(row["enabled"])}
+                "cursor": row["cursor"], "enabled": bool(row["enabled"]),
+                "created_at": row["created_at"] or "",
+                "updated_at": row["updated_at"] or ""}
+
+    def deleteConfig(self, tenantId: str, sourceId: str) -> bool:
+        """删除连接器配置行（页面重设计配套批）：只删配置，不碰已摄取事实/断言
+        ——擦除设施闭集不含 `source:` 前缀，级联清除是另一个立项；调用方如实回显。"""
+        with self._store._lock, self._store._conn:
+            cursor = self._store._conn.execute(
+                "DELETE FROM enterprise_source_configs WHERE tenant_id = ? AND source_id = ?",
+                (str(tenantId or "default"), str(sourceId or "")))
+            deleted = cursor.rowcount > 0
+        return deleted
+
+    def probeHealth(self, tenantId: str, sourceId: str) -> Optional[Dict[str, Any]]:
+        """连接健康探测（页面"连接状态"列与向导"测试连接"的数据源）。
+
+        loadConfig → buildAdapter（**不注册**——探测是只读动作，不改变
+        "适配器已注册"读数的语义）→ health() 三态。配置不存在返回 None；
+        工厂错（缺变体/未接线）与探测异常统一归一为 status=error＋reason 原话。
+        """
+        config = self.loadConfig(tenantId, sourceId)
+        if config is None:
+            return None
+        descriptor = dict(config["descriptor"])
+        descriptor["tenantId"] = tenantId
+        descriptor["sourceId"] = sourceId
+        try:
+            adapter = buildAdapter(descriptor, sourceId, tenantId)
+            health = adapter.health()
+            return {"status": str(getattr(health, "status", "error") or "error"),
+                    "reason": str(getattr(health, "reason", "") or "")}
+        except Exception as exc:  # noqa: BLE001 - 探测失败如实归一为 error＋原话
+            return {"status": "error", "reason": str(exc)}
 
     def saveCursor(self, tenantId: str, sourceId: str, token: str) -> None:
         """游标单列持久化（不碰描述符与 enabled；失败由调用方决定重试）。"""
