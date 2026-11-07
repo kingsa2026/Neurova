@@ -5,212 +5,314 @@
         <h2 class="page-title">{{ t('ontology.entTitle') }}</h2>
         <p class="page-subtitle">{{ t('ontology.entSubtitle') }}</p>
       </div>
+      <GlassButton v-if="isAdmin" variant="primary" size="sm" data-testid="ent-add-btn" @click="openCreate">
+        {{ t('ontology.entAddBtn') }}
+      </GlassButton>
     </div>
 
-    <!-- 诚实性（§15.4）：描述符提交是真调用；「能不能连」仍由后端两态如实回显 -->
-    <GlassPanel class="panel">
-      <div class="panel-head">
-        <span class="panel-title" data-testid="ent-list-title">{{ t('ontology.entListTitle') }}</span>
-        <a-tag color="warning" data-testid="ent-reserved-tag">{{ t('ontology.entReservedTitle') }}</a-tag>
-      </div>
-      <p class="honest-note" data-testid="ent-reserved-note">{{ t('ontology.entReservedNote') }}</p>
-
-      <p v-if="listError" class="honest-note honest-note--error" data-testid="ent-list-error">
+    <!-- 连接器列表 -->
+    <GlassPanel :title="t('ontology.entListTitle')">
+      <div v-if="listError" class="honest-note honest-note--error" data-testid="ent-list-error">
         {{ t('ontology.entListFailed') }}
-      </p>
-      <a-empty v-else-if="!sources.length" :description="t('ontology.entListEmpty')" data-testid="ent-list-empty" />
-      <table v-else class="source-table" data-testid="ent-list">
-        <thead>
-          <tr>
-            <th>{{ t('ontology.entSourceId') }}</th>
-            <th>{{ t('ontology.entSourceType') }}</th>
-            <th>{{ t('ontology.entEnabled') }}</th>
-            <th>{{ t('ontology.entCursorField') }}</th>
-            <th>adapter</th>
-            <th v-if="isAdmin">{{ t('ontology.entIngestBtn') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in sources" :key="row.source_id" :data-testid="`ent-row-${row.source_id}`">
-            <td class="mono">{{ row.source_id }}</td>
-            <td class="mono">{{ row.descriptor.sourceType || '-' }}</td>
-            <td>
-              <a-tag :color="row.enabled ? 'success' : 'default'" data-testid="ent-enabled-tag">
-                {{ row.enabled ? 'on' : 'off' }}
-              </a-tag>
-            </td>
-            <td class="mono">{{ row.cursor || '-' }}</td>
-            <td>
-              <a-tag
-                :color="row.adapter_registered ? 'success' : 'warning'"
-                data-testid="ent-adapter-tag"
-              >
-                {{ row.adapter_registered
-                  ? t('ontology.entAdapterRegistered')
-                  : t('ontology.entAdapterReserved') }}
-              </a-tag>
-            </td>
-            <td v-if="isAdmin">
+      </div>
+      <a-table
+        :columns="columns"
+        :data-source="sources"
+        :loading="loading"
+        row-key="source_id"
+        :pagination="sources.length > 10 ? { pageSize: 10 } : false"
+        size="small"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'source_id'">
+            <span class="mono source-id">{{ record.source_id }}</span>
+          </template>
+          <template v-else-if="column.key === 'type'">
+            <a-tag color="geekblue" data-testid="ent-type-tag">{{ typeLabel(record) }}</a-tag>
+            <a-tag v-if="vendorLabel(record)" color="blue">{{ vendorLabel(record) }}</a-tag>
+          </template>
+          <template v-else-if="column.key === 'created_at'">
+            <span class="mono">{{ formatTime(record.created_at) }}</span>
+          </template>
+          <template v-else-if="column.key === 'status'">
+            <a-badge
+              :status="statusBadge(record.source_id).status"
+              :text="statusBadge(record.source_id).text"
+              data-testid="ent-health-badge"
+            />
+            <GlassButton
+              v-if="isAdmin"
+              variant="ghost"
+              size="sm"
+              class="status-check-btn"
+              :loading="healthMap[record.source_id] === 'checking'"
+              data-testid="ent-health-btn"
+              @click="checkHealth(record.source_id)"
+            >{{ t('ontology.entTestBtn') }}</GlassButton>
+          </template>
+          <template v-else-if="column.key === 'ingested_count'">
+            <span class="mono" data-testid="ent-count">{{ record.ingested_count ?? 0 }}</span>
+          </template>
+          <template v-else-if="column.key === 'enabled'">
+            <a-switch
+              :checked="record.enabled"
+              :disabled="!isAdmin || togglingId === record.source_id"
+              size="small"
+              data-testid="ent-enabled-tag"
+              @change="() => toggleEnabled(record)"
+            />
+          </template>
+          <template v-else-if="column.key === 'actions'">
+            <div v-if="isAdmin" class="action-btns">
               <GlassButton
-                size="sm"
-                :loading="ingestingId === row.source_id"
-                :data-testid="`ent-ingest-${row.source_id}`"
-                @click="triggerIngest(row.source_id)"
-              >
-                {{ t('ontology.entIngestBtn') }}
+                variant="ghost" size="sm"
+                :loading="ingestingId === record.source_id"
+                data-testid="ent-ingest-btn"
+                @click="triggerIngest(record.source_id)"
+              >{{ t('ontology.entIngestBtn') }}</GlassButton>
+              <GlassButton variant="ghost" size="sm" data-testid="ent-edit-btn" @click="openEdit(record)">
+                {{ t('common.edit') }}
               </GlassButton>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+              <a-popconfirm :title="t('ontology.entDeleteConfirm')" @confirm="removeSource(record.source_id)">
+                <GlassButton variant="danger" size="sm" data-testid="ent-delete-btn">
+                  {{ t('common.delete') }}
+                </GlassButton>
+              </a-popconfirm>
+            </div>
+            <span v-else class="mono">—</span>
+          </template>
+        </template>
+        <template #empty><a-empty :description="t('ontology.entListEmpty')" /></template>
+      </a-table>
     </GlassPanel>
 
-    <GlassPanel class="panel">
-      <div class="panel-head">
-        <span class="panel-title">{{ t('ontology.entFakeAdapterTitle') }}</span>
-      </div>
-      <p class="honest-note" data-testid="ent-fake-adapter-note">{{ t('ontology.entFakeAdapterNote') }}</p>
+    <!-- 诚实态说明：配置落库 ≠ 适配器已接通 -->
+    <GlassPanel :title="t('ontology.entFakeAdapterTitle')">
+      <p class="honest-note">{{ t('ontology.entFakeAdapterNote') }}</p>
     </GlassPanel>
 
-    <!-- 描述符编辑器：提交走真 REST（编译期校验在服务器单点），非法描述符整条拒并显式回因 -->
-    <GlassPanel class="panel">
-      <div class="panel-head">
-        <span class="panel-title" data-testid="ent-descriptor-title">{{ t('ontology.entDescriptorTitle') }}</span>
-        <span v-if="!isAdmin" class="admin-note" data-testid="ent-admin-note">
-          {{ t('ontology.entAdminOnly') }}
-        </span>
-      </div>
-      <div class="descriptor-grid">
-        <label class="field">
-          <span>{{ t('ontology.entSourceId') }}</span>
-          <a-input v-model:value="form.sourceId" size="sm" data-testid="ent-source-id" />
-        </label>
-        <label class="field">
-          <span>{{ t('ontology.entSourceType') }}</span>
-          <a-select v-model:value="form.sourceType" size="sm" data-testid="ent-source-type">
-            <a-select-option value="sql">sql</a-select-option>
-            <a-select-option value="erp_api">erp_api</a-select-option>
-            <a-select-option value="file">file</a-select-option>
-            <a-select-option value="chat">chat</a-select-option>
-            <a-select-option value="http_pull">http_pull</a-select-option>
-            <a-select-option value="event_stream">event_stream</a-select-option>
-          </a-select>
-        </label>
-        <!-- 变体字段（VARIANT_CLOSED_SETS 单点在服务器，前端只按源型露出输入面） -->
-        <label v-if="form.sourceType === 'file'" class="field">
-          <span>{{ t('ontology.entVariantFormat') }}</span>
-          <a-select v-model:value="form.format" size="sm" data-testid="ent-variant-format">
-            <a-select-option value="csv">csv</a-select-option>
-            <a-select-option value="tsv">tsv</a-select-option>
-            <a-select-option value="json">json</a-select-option>
-            <a-select-option value="jsonl">jsonl</a-select-option>
-          </a-select>
-        </label>
-        <label v-if="form.sourceType === 'file'" class="field">
-          <span>{{ t('ontology.entVariantPath') }}</span>
-          <a-input v-model:value="form.path" size="sm" data-testid="ent-variant-path" />
-        </label>
-        <label v-if="form.sourceType === 'sql'" class="field">
-          <span>{{ t('ontology.entVariantDriver') }}</span>
-          <a-select v-model:value="form.driver" size="sm" data-testid="ent-variant-driver">
-            <a-select-option value="sqlite">sqlite</a-select-option>
-            <a-select-option value="postgresql">postgresql</a-select-option>
-            <a-select-option value="mysql">mysql</a-select-option>
-            <a-select-option value="mssql">mssql</a-select-option>
-            <a-select-option value="oracle">oracle</a-select-option>
-          </a-select>
-        </label>
-        <label v-if="form.sourceType === 'erp_api' || form.sourceType === 'chat'" class="field">
-          <span>{{ t('ontology.entVariantVendor') }}</span>
-          <a-select v-model:value="form.vendor" size="sm" data-testid="ent-variant-vendor">
-            <template v-if="form.sourceType === 'erp_api'">
-              <a-select-option value="kingdee">kingdee</a-select-option>
-              <a-select-option value="yongyou">yongyou</a-select-option>
-            </template>
-            <template v-else>
-              <a-select-option value="wecom">wecom</a-select-option>
-              <a-select-option value="wechat">wechat</a-select-option>
-            </template>
-          </a-select>
-        </label>
-        <label class="field">
-          <span>{{ t('ontology.entColumns') }}</span>
-          <a-input
-            v-model:value="form.columns"
-            size="sm"
-            data-testid="ent-columns"
-            placeholder="order_id, risk_level"
-          />
-        </label>
-        <label class="field">
-          <span>{{ t('ontology.entSubject') }}</span>
-          <a-input
-            v-model:value="form.subject"
-            size="sm"
-            data-testid="ent-subject"
-            placeholder="orders:{order_id}"
-          />
-        </label>
-        <label class="field">
-          <span>{{ t('ontology.entPredicate') }}</span>
-          <a-input
-            v-model:value="form.predicate"
-            size="sm"
-            data-testid="ent-predicate"
-            placeholder="hasRiskLevel"
-          />
-        </label>
-        <label class="field">
-          <span>{{ t('ontology.entObjectKind') }}</span>
-          <a-select v-model:value="form.objectKind" size="sm" data-testid="ent-object-kind">
-            <a-select-option value="column">column</a-select-option>
-            <a-select-option value="template">template</a-select-option>
-            <a-select-option value="term">term</a-select-option>
-            <a-select-option value="literal">literal</a-select-option>
-          </a-select>
-        </label>
-        <label class="field">
-          <span>{{ t('ontology.entObjectValue') }}</span>
-          <a-input v-model:value="form.objectValue" size="sm" data-testid="ent-object-value" />
-        </label>
-        <label class="field">
-          <span>{{ t('ontology.entQualifiers') }}</span>
-          <a-input v-model:value="form.qualifiers" size="sm" data-testid="ent-qualifiers" placeholder="{}" />
-        </label>
-        <label class="field">
-          <span>{{ t('ontology.entValidFrom') }}</span>
-          <a-input
-            v-model:value="form.validFrom"
-            size="sm"
-            data-testid="ent-valid-from"
-            placeholder="updated_at"
-          />
-        </label>
-        <label class="field">
-          <span>{{ t('ontology.entValidUntil') }}</span>
-          <a-input v-model:value="form.validUntil" size="sm" data-testid="ent-valid-until" />
-        </label>
-        <label class="field field--check">
-          <a-checkbox v-model:checked="form.enabled" :disabled="!isAdmin" data-testid="ent-enabled">
-            {{ t('ontology.entEnabled') }}
-          </a-checkbox>
-        </label>
-      </div>
-      <p v-if="submitError" class="honest-note honest-note--error" data-testid="ent-submit-error">
-        {{ submitError }}
-      </p>
-      <div class="form-actions">
-        <GlassButton
-          size="sm"
-          :loading="submitting"
-          :disabled="!isAdmin"
-          data-testid="ent-submit"
-          @click="submitDescriptor"
+    <!-- 新增/编辑向导（分步弹层） -->
+    <a-modal
+      v-model:open="showWizard"
+      :title="wizardTitle"
+      width="680px"
+      :footer="null"
+      :mask-closable="false"
+    >
+      <a-steps :current="wizardStep" size="small" class="wizard-steps" data-testid="ent-wizard-steps">
+        <a-step :title="t('ontology.entStepKind')" />
+        <a-step :title="t('ontology.entStepConnection')" />
+        <a-step :title="t('ontology.entStepMapping')" />
+        <a-step :title="t('ontology.entStepConfirm')" />
+      </a-steps>
+
+      <!-- 步 0：选连接对象 -->
+      <div v-if="wizardStep === 0" class="kind-cards" data-testid="ent-kind-cards">
+        <div
+          v-for="card in KIND_CARDS"
+          :key="card.kind"
+          class="kind-card"
+          :class="{ active: wizardForm.kind === card.kind }"
+          @click="wizardForm.kind = card.kind"
         >
-          {{ t('ontology.entSubmitBtn') }}
-        </GlassButton>
+          <div class="kind-name">{{ t(card.labelKey) }}</div>
+          <div class="kind-desc">{{ t(card.descKey) }}</div>
+        </div>
       </div>
-    </GlassPanel>
+
+      <!-- 步 1：连接参数 -->
+      <div v-else-if="wizardStep === 1" class="wizard-form">
+        <a-form layout="vertical">
+          <a-form-item :label="t('ontology.entSourceId')" required>
+            <a-input
+              v-model:value="wizardForm.source_id"
+              :disabled="!!editingSource"
+              data-testid="ent-wizard-source-id"
+            />
+          </a-form-item>
+
+          <!-- 数据库（sql） -->
+          <template v-if="wizardForm.kind === 'sql'">
+            <a-row :gutter="12">
+              <a-col :span="12">
+                <a-form-item :label="t('ontology.entVariantDriver')" required>
+                  <a-select v-model:value="wizardForm.driver" :options="SQL_DRIVERS" />
+                </a-form-item>
+              </a-col>
+              <a-col :span="12">
+                <a-form-item :label="t('ontology.entKindCursorColumn')" required>
+                  <a-input v-model:value="wizardForm.cursorColumn" />
+                </a-form-item>
+              </a-col>
+            </a-row>
+            <a-row :gutter="12">
+              <a-col v-if="wizardForm.driver !== 'sqlite'" :span="12">
+                <a-form-item :label="t('ontology.entKindHost')" required>
+                  <a-input v-model:value="wizardForm.host" />
+                </a-form-item>
+              </a-col>
+              <a-col v-if="wizardForm.driver !== 'sqlite'" :span="12">
+                <a-form-item :label="t('ontology.entKindPort')">
+                  <a-input v-model:value="wizardForm.port" />
+                </a-form-item>
+              </a-col>
+            </a-row>
+            <a-form-item :label="t('ontology.entKindDatabase')" required>
+              <a-input v-model:value="wizardForm.database" :placeholder="t('ontology.entKindDatabaseHint')" />
+            </a-form-item>
+            <a-form-item :label="t('ontology.entKindTableOrQuery')" required>
+              <a-radio-group v-model:value="wizardForm.sqlMode">
+                <a-radio value="table">{{ t('ontology.entKindTable') }}</a-radio>
+                <a-radio value="query">{{ t('ontology.entKindQuery') }}</a-radio>
+              </a-radio-group>
+              <a-input v-if="wizardForm.sqlMode === 'table'" v-model:value="wizardForm.table" />
+              <a-textarea v-else v-model:value="wizardForm.query" :rows="3" :placeholder="t('ontology.entKindQueryHint')" />
+            </a-form-item>
+            <a-form-item :label="t('ontology.entKindCredentialEnv')">
+              <p class="field-hint">{{ t('ontology.entKindCredentialEnvHint') }}</p>
+              <a-textarea v-model:value="wizardForm.credentialEnv" :rows="2" />
+            </a-form-item>
+          </template>
+
+          <!-- ERP（erp_api） -->
+          <template v-else-if="wizardForm.kind === 'erp'">
+            <a-form-item :label="t('ontology.entVariantVendor')" required>
+              <a-radio-group v-model:value="wizardForm.vendor">
+                <a-radio value="kingdee">{{ t('ontology.entVendorKingdee') }}</a-radio>
+                <a-radio value="yongyou">{{ t('ontology.entVendorYongyou') }}</a-radio>
+              </a-radio-group>
+            </a-form-item>
+            <a-form-item :label="t('ontology.entKindBaseUrl')" required>
+              <a-input v-model:value="wizardForm.baseUrl" />
+            </a-form-item>
+            <a-form-item v-if="wizardForm.vendor === 'kingdee'" :label="t('ontology.entKindFormId')" required>
+              <a-input v-model:value="wizardForm.formId" />
+            </a-form-item>
+            <a-form-item v-if="wizardForm.vendor === 'yongyou'" :label="t('ontology.entKindTokenPath')">
+              <a-input v-model:value="wizardForm.tokenPath" :placeholder="t('ontology.entKindPathOptional')" />
+            </a-form-item>
+            <a-form-item :label="t('ontology.entKindCredentialEnv')" required>
+              <p class="field-hint">{{ t('ontology.entKindCredentialEnvErpHint') }}</p>
+              <a-textarea v-model:value="wizardForm.credentialEnv" :rows="2" />
+            </a-form-item>
+          </template>
+
+          <!-- 企微 / 微信小微（chat） -->
+          <template v-else-if="wizardForm.kind === 'wecom' || wizardForm.kind === 'wechat'">
+            <a-form-item :label="t('ontology.entKindIngressDb')">
+              <p class="field-hint">{{ t('ontology.entKindIngressDbHint') }}</p>
+              <a-input v-model:value="wizardForm.ingressDb" :placeholder="t('ontology.entKindPathOptional')" />
+            </a-form-item>
+          </template>
+
+          <!-- 文件（file） -->
+          <template v-else-if="wizardForm.kind === 'file'">
+            <a-form-item :label="t('ontology.entVariantFormat')" required>
+              <a-select v-model:value="wizardForm.format" :options="FILE_FORMATS" />
+            </a-form-item>
+            <a-form-item :label="t('ontology.entVariantPath')" required>
+              <a-input v-model:value="wizardForm.path" />
+            </a-form-item>
+          </template>
+        </a-form>
+      </div>
+
+      <!-- 步 2：字段映射 -->
+      <div v-else-if="wizardStep === 2" class="wizard-form">
+        <a-form layout="vertical">
+          <a-form-item :label="t('ontology.entColumns')" required>
+            <a-input v-model:value="wizardForm.columns" :placeholder="t('ontology.entColumnsHint')" />
+          </a-form-item>
+          <a-form-item :label="t('ontology.entSubject')" required>
+            <a-radio-group v-model:value="wizardForm.subjectMode">
+              <a-radio value="column">{{ t('ontology.entSubjectColumn') }}</a-radio>
+              <a-radio value="template">{{ t('ontology.entSubjectTemplate') }}</a-radio>
+            </a-radio-group>
+            <a-input v-if="wizardForm.subjectMode === 'column'" v-model:value="wizardForm.subjectColumn" />
+            <a-input v-else v-model:value="wizardForm.subjectTemplate" placeholder="order:{order_id}" />
+          </a-form-item>
+          <a-form-item :label="t('ontology.entPredicate')" required>
+            <a-input v-model:value="wizardForm.predicateTermId" :placeholder="t('ontology.entPredicateHint')" />
+          </a-form-item>
+          <a-form-item :label="t('ontology.entObject')" required>
+            <a-select v-model:value="wizardForm.objectKind" :options="OBJECT_KINDS" />
+            <a-input v-model:value="wizardForm.objectValue" class="object-value" />
+          </a-form-item>
+          <a-form-item :label="t('ontology.entQualifiers')">
+            <a-input v-model:value="wizardForm.qualifiers" placeholder="name=column" />
+          </a-form-item>
+          <a-row :gutter="12">
+            <a-col :span="12">
+              <a-form-item :label="t('ontology.entValidFrom')">
+                <a-input v-model:value="wizardForm.validFrom" />
+              </a-form-item>
+            </a-col>
+            <a-col :span="12">
+              <a-form-item :label="t('ontology.entValidUntil')">
+                <a-input v-model:value="wizardForm.validUntil" />
+              </a-form-item>
+            </a-col>
+          </a-row>
+        </a-form>
+      </div>
+
+      <!-- 步 3：确认与测试 -->
+      <div v-else class="wizard-confirm">
+        <a-descriptions size="small" :column="1" bordered>
+          <a-descriptions-item :label="t('ontology.entSourceId')">
+            <span class="mono">{{ wizardForm.source_id }}</span>
+          </a-descriptions-item>
+          <a-descriptions-item :label="t('ontology.entSourceType')">
+            {{ t(typeCardOf(wizardForm.kind).labelKey) }}
+          </a-descriptions-item>
+          <a-descriptions-item :label="t('ontology.entColumns')">
+            <span class="mono">{{ wizardForm.columns }}</span>
+          </a-descriptions-item>
+          <a-descriptions-item :label="t('ontology.entPredicate')">
+            <span class="mono">{{ wizardForm.predicateTermId }}</span>
+          </a-descriptions-item>
+        </a-descriptions>
+        <a-form-item :label="t('ontology.entEnabled')" class="confirm-enabled">
+          <a-switch v-model:checked="wizardForm.enabled" />
+        </a-form-item>
+        <div class="test-row">
+          <GlassButton
+            variant="secondary"
+            size="sm"
+            :disabled="!editingSource"
+            :loading="testingConnection"
+            data-testid="ent-wizard-test-btn"
+            @click="testConnectionInWizard"
+          >{{ t('ontology.entTestBtn') }}</GlassButton>
+          <span v-if="!editingSource" class="field-hint">{{ t('ontology.entTestOnlySaved') }}</span>
+          <span v-else-if="wizardTestResult" class="mono test-result" :class="'test-' + wizardTestResult.status">
+            {{ wizardTestResult.status }}{{ wizardTestResult.reason ? ' — ' + wizardTestResult.reason : '' }}
+          </span>
+        </div>
+      </div>
+
+      <!-- 向导底部按钮 -->
+      <div class="wizard-footer">
+        <GlassButton v-if="wizardStep > 0" variant="secondary" size="sm" @click="wizardStep--">
+          {{ t('common.prev') }}
+        </GlassButton>
+        <GlassButton
+          v-if="wizardStep < 3"
+          variant="primary" size="sm"
+          :disabled="!canProceed"
+          data-testid="ent-wizard-next"
+          @click="wizardStep++"
+        >{{ t('common.next') }}</GlassButton>
+        <GlassButton
+          v-else
+          variant="primary" size="sm"
+          :loading="saving"
+          :disabled="!isAdmin"
+          data-testid="ent-wizard-save"
+          @click="saveWizard"
+        >{{ t('common.save') }}</GlassButton>
+      </div>
+    </a-modal>
   </div>
 </template>
 
@@ -222,6 +324,8 @@ import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAuthStore } from '@/stores/auth'
 import {
+  deleteEnterpriseSource,
+  getEnterpriseSourceHealth,
   listEnterpriseSources,
   submitEnterpriseSource,
   triggerEnterpriseIngest,
@@ -238,125 +342,361 @@ const isAdmin = computed(() => {
   return user?.role === 'admin'
 })
 
+// ── 列表 ────────────────────────────────────────────────────
+
 const sources = ref<EnterpriseSourceConfig[]>([])
+const loading = ref(false)
 const listError = ref(false)
-const submitting = ref(false)
-const submitError = ref('')
-
 const ingestingId = ref('')
+const togglingId = ref('')
 
-const form = reactive({
-  sourceId: '',
-  sourceType: 'sql',
-  format: 'csv',
-  path: '',
-  driver: 'sqlite',
-  vendor: 'kingdee',
-  columns: '',
-  subject: '',
-  predicate: '',
-  objectKind: 'column',
-  objectValue: '',
-  qualifiers: '{}',
-  validFrom: '',
-  validUntil: '',
-  enabled: false,
-})
+/** 连接状态探测读数（行内"检测"按钮拉取；不自动全量探测——sql 连接可能挂起） */
+const healthMap = ref<Record<string, { status: string; reason: string } | 'checking'>>({})
 
-/** 表单项 → 后端描述符形状：编译期判据住在 validateDescriptor 单点，前端不抄第二套规则。 */
-function buildDescriptor(): EnterpriseDescriptor {
-  const kind = form.objectKind as EnterpriseDescriptor['object']['kind']
-  const value = form.objectValue.trim()
-  const object: EnterpriseDescriptor['object'] = { kind }
-  if (kind === 'column') object.column = value
-  else if (kind === 'template') object.template = value
-  else if (kind === 'term') object.termId = value
-  else object.value = value
+const columns = computed(() => [
+  { title: t('ontology.entColConnector'), key: 'source_id' },
+  { title: t('ontology.entColType'), key: 'type', width: 170 },
+  { title: t('ontology.entColCreatedAt'), key: 'created_at', width: 170 },
+  { title: t('ontology.entColStatus'), key: 'status', width: 220 },
+  { title: t('ontology.entColCount'), key: 'ingested_count', width: 110 },
+  { title: t('ontology.entColEnabled'), key: 'enabled', width: 80 },
+  { title: t('ontology.entColActions'), key: 'actions', width: 250 },
+])
 
-  const body: EnterpriseDescriptor = {
-    sourceType: form.sourceType,
-    columns: splitList(form.columns),
-    subject: { template: form.subject.trim() },
-    predicate: { termId: form.predicate.trim() },
-    object,
-    qualifiers: JSON.parse(form.qualifiers.trim() || '{}') as Record<string, string>,
-  }
-  if (form.validFrom.trim()) body.validFrom = form.validFrom.trim()
-  if (form.validUntil.trim()) body.validUntil = form.validUntil.trim()
-  // 变体字段按源型随描述符上交（闭集校验在服务器单点，前端不抄第二套规则）
-  if (form.sourceType === 'file') {
-    body.format = form.format
-    if (form.path.trim()) body.path = form.path.trim()
-  } else if (form.sourceType === 'sql') {
-    body.driver = form.driver
-  } else if (form.sourceType === 'erp_api' || form.sourceType === 'chat') {
-    body.vendor = form.vendor
-  }
-  return body
+const formatTime = (iso?: string) => (iso ? String(iso).replace('T', ' ').slice(0, 19) : '—')
+
+const typeLabel = (row: EnterpriseSourceConfig) => {
+  const d = row.descriptor as Record<string, string>
+  if (d.sourceType === 'sql') return t('ontology.entTypeDatabase')
+  if (d.sourceType === 'erp_api') return t('ontology.entTypeErp')
+  if (d.sourceType === 'file') return t('ontology.entTypeFile')
+  if (d.sourceType === 'chat') return d.vendor === 'wecom' ? t('ontology.entTypeWecom') : t('ontology.entTypeWechat')
+  return String(d.sourceType || '—')
 }
 
-async function loadSources() {
+const vendorLabel = (row: EnterpriseSourceConfig) => {
+  const d = row.descriptor as Record<string, string>
+  if (d.sourceType === 'erp_api') return d.vendor === 'kingdee' ? t('ontology.entVendorKingdee') : t('ontology.entVendorYongyou')
+  if (d.sourceType === 'chat') return d.vendor === 'wecom' ? t('ontology.entVendorWecom') : t('ontology.entVendorWechat')
+  return ''
+}
+
+const statusBadge = (sourceId: string): { status: 'success' | 'warning' | 'error' | 'default'; text: string } => {
+  const h = healthMap.value[sourceId]
+  if (h === 'checking' || !h) return { status: 'default', text: t('ontology.entTestNotChecked') }
+  const label = h.status === 'ok' ? t('ontology.entTestOk')
+    : h.status === 'degraded' ? t('ontology.entTestDegraded')
+    : t('ontology.entTestError')
+  // 异常/受限时 reason 原话随徽标露出（不降级成笼统"异常"）
+  return { status: h.status === 'ok' ? 'success' : h.status === 'degraded' ? 'warning' : 'error',
+           text: h.reason ? `${label} — ${h.reason}` : label }
+}
+
+const loadSources = async () => {
+  loading.value = true
   listError.value = false
   try {
     const res = await listEnterpriseSources()
     sources.value = res.data?.items ?? []
   } catch {
     listError.value = true
+  } finally {
+    loading.value = false
   }
 }
 
-async function submitDescriptor() {
-  if (!form.sourceId.trim()) {
-    submitError.value = t('common.required')
-    return
+const checkHealth = async (sourceId: string) => {
+  healthMap.value[sourceId] = 'checking'
+  try {
+    const res = await getEnterpriseSourceHealth(sourceId)
+    healthMap.value[sourceId] = {
+      status: res.data?.status ?? 'error',
+      reason: res.data?.reason ?? '',
+    }
+  } catch (err) {
+    healthMap.value[sourceId] = { status: 'error', reason: extractApiDetail(err) || '' }
   }
-  submitting.value = true
-  submitError.value = ''
+}
+
+const toggleEnabled = async (row: EnterpriseSourceConfig) => {
+  togglingId.value = row.source_id
   try {
     await submitEnterpriseSource({
-      source_id: form.sourceId.trim(),
-      descriptor: buildDescriptor(),
-      enabled: form.enabled,
+      source_id: row.source_id,
+      descriptor: row.descriptor as unknown as EnterpriseDescriptor,
+      enabled: !row.enabled,
     })
-    message.success(t('ontology.entSubmitted'))
     await loadSources()
-  } catch (error) {
-    // 400 的拒因是后端编译期校验原话（带定位），显式露出不降级成 warning
-    submitError.value = rejectReason(error)
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   } finally {
-    submitting.value = false
+    togglingId.value = ''
   }
 }
 
-function rejectReason(error: unknown): string {
-  return extractApiDetail(error) || t('common.error')
-}
-
-/** 手动触发一轮摄取（批 C1）：结果四数如实报，skipped/拒因以 detail 原话露出。 */
-async function triggerIngest(sourceId: string) {
+const triggerIngest = async (sourceId: string) => {
   ingestingId.value = sourceId
   try {
     const res = await triggerEnterpriseIngest(sourceId)
-    const result = res.data?.result as
-      | { admitted?: number; rejected?: number; batches?: number; truncated?: boolean; skipped?: boolean; reason?: string }
-      | undefined
-    if (result && 'skipped' in result && result.skipped) {
-      message.info(result.reason || t('ontology.entIngestSkipped'))
-      return
+    const result = res.data?.result as { admitted?: number; rejected?: number; truncated?: boolean; skipped?: boolean; reason?: string }
+    if (result?.skipped) {
+      message.info(`${t('ontology.entIngestSkipped')}: ${result.reason ?? ''}`)
+    } else {
+      message.success(
+        `${t('ontology.entIngestResult')}: ${result?.admitted ?? 0} / ${result?.rejected ?? 0}` +
+        (result?.truncated ? ` (${t('ontology.entIngestTruncated')})` : ''),
+      )
     }
-    const done = result as { admitted?: number; rejected?: number; batches?: number; truncated?: boolean }
-    message.success(
-      t('ontology.entIngestResult', {
-        admitted: done.admitted ?? 0,
-        rejected: done.rejected ?? 0,
-        batches: done.batches ?? 0,
-      }) + (done.truncated ? t('ontology.entIngestTruncated') : ''),
-    )
     await loadSources()
-  } catch (error) {
-    message.error(extractApiDetail(error) || t('common.error'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
   } finally {
     ingestingId.value = ''
+  }
+}
+
+const removeSource = async (sourceId: string) => {
+  try {
+    await deleteEnterpriseSource(sourceId)
+    message.success(t('ontology.entDeleteDone'))
+    await loadSources()
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
+  }
+}
+
+// ── 向导（新增/编辑共用，四步） ──────────────────────────────
+
+type ConnectKind = 'sql' | 'erp' | 'wecom' | 'wechat' | 'file'
+
+const KIND_CARDS: { kind: ConnectKind; labelKey: string; descKey: string }[] = [
+  { kind: 'sql', labelKey: 'ontology.entTypeDatabase', descKey: 'ontology.entKindDatabaseDesc' },
+  { kind: 'erp', labelKey: 'ontology.entTypeErp', descKey: 'ontology.entKindErpDesc' },
+  { kind: 'wecom', labelKey: 'ontology.entTypeWecom', descKey: 'ontology.entKindWecomDesc' },
+  { kind: 'wechat', labelKey: 'ontology.entTypeWechat', descKey: 'ontology.entKindWechatDesc' },
+  { kind: 'file', labelKey: 'ontology.entTypeFile', descKey: 'ontology.entKindFileDesc' },
+]
+
+const SQL_DRIVERS = ['postgresql', 'mysql', 'mssql', 'oracle', 'sqlite'].map((d) => ({ label: d, value: d }))
+const FILE_FORMATS = ['csv', 'tsv', 'json', 'jsonl'].map((f) => ({ label: f, value: f }))
+const OBJECT_KINDS = ['column', 'template', 'term', 'literal'].map((k) => ({
+  label: t('ontology.entObjectKind') + ': ' + k, value: k,
+}))
+
+const typeCardOf = (kind: string) => KIND_CARDS.find((c) => c.kind === kind) ?? KIND_CARDS[0]
+
+const showWizard = ref(false)
+const wizardStep = ref(0)
+const editingSource = ref<EnterpriseSourceConfig | null>(null)
+const saving = ref(false)
+const testingConnection = ref(false)
+const wizardTestResult = ref<{ status: string; reason: string } | null>(null)
+
+const emptyForm = () => ({
+  source_id: '',
+  kind: '' as ConnectKind | '',
+  driver: 'postgresql',
+  cursorColumn: '',
+  host: '',
+  port: '',
+  database: '',
+  sqlMode: 'table' as 'table' | 'query',
+  table: '',
+  query: '',
+  credentialEnv: '',
+  vendor: 'kingdee',
+  baseUrl: '',
+  formId: '',
+  tokenPath: '',
+  ingressDb: '',
+  format: 'csv',
+  path: '',
+  columns: '',
+  subjectMode: 'column' as 'column' | 'template',
+  subjectColumn: '',
+  subjectTemplate: '',
+  predicateTermId: '',
+  objectKind: 'column' as 'column' | 'template' | 'term' | 'literal',
+  objectValue: '',
+  qualifiers: '',
+  validFrom: '',
+  validUntil: '',
+  enabled: false,
+})
+
+const wizardForm = reactive(emptyForm())
+
+const wizardTitle = computed(() =>
+  editingSource.value ? t('ontology.entEditTitle') : t('ontology.entWizardTitle'),
+)
+
+/** 步进守门：步 0 选型；步 1 逐类型必填；步 2 映射必填 */
+const canProceed = computed(() => {
+  if (wizardStep.value === 0) return !!wizardForm.kind
+  if (wizardStep.value === 1) {
+    if (!wizardForm.source_id.trim()) return false
+    if (wizardForm.kind === 'sql') {
+      return !!wizardForm.driver && !!wizardForm.database && !!wizardForm.cursorColumn
+        && (wizardForm.sqlMode === 'table' ? !!wizardForm.table : !!wizardForm.query)
+        && (wizardForm.driver === 'sqlite' || !!wizardForm.host)
+    }
+    if (wizardForm.kind === 'erp') {
+      return !!wizardForm.baseUrl && !!wizardForm.credentialEnv.trim()
+        && (wizardForm.vendor === 'yongyou' || !!wizardForm.formId)
+    }
+    if (wizardForm.kind === 'wecom' || wizardForm.kind === 'wechat') return true
+    if (wizardForm.kind === 'file') return !!wizardForm.format && !!wizardForm.path
+    return false
+  }
+  if (wizardStep.value === 2) {
+    return !!wizardForm.columns.trim() && !!wizardForm.predicateTermId.trim()
+      && !!wizardForm.objectValue.trim()
+      && (wizardForm.subjectMode === 'column' ? !!wizardForm.subjectColumn.trim() : !!wizardForm.subjectTemplate.trim())
+  }
+  return true
+})
+
+const parsePairs = (text: string): Record<string, string> => {
+  const out: Record<string, string> = {}
+  for (const line of String(text || '').split('\n')) {
+    const idx = line.indexOf('=')
+    if (idx > 0) out[line.slice(0, idx).trim()] = line.slice(idx + 1).trim()
+  }
+  return out
+}
+
+const buildDescriptor = (): EnterpriseDescriptor => {
+  // 向导 kind → 后端 sourceType：erp→erp_api、wecom/wechat→chat（vendor=kind）
+  const sourceType = wizardForm.kind === 'erp' ? 'erp_api'
+    : (wizardForm.kind === 'wecom' || wizardForm.kind === 'wechat') ? 'chat'
+    : String(wizardForm.kind)
+  const d: EnterpriseDescriptor = {
+    sourceType,
+    columns: splitList(wizardForm.columns),
+    subject: wizardForm.subjectMode === 'column'
+      ? { column: wizardForm.subjectColumn }
+      : { template: wizardForm.subjectTemplate },
+    predicate: { termId: wizardForm.predicateTermId },
+    object: { kind: wizardForm.objectKind },
+    validFrom: wizardForm.validFrom || undefined,
+    validUntil: wizardForm.validUntil || undefined,
+  }
+  if (wizardForm.objectKind === 'column') d.object.column = wizardForm.objectValue
+  else if (wizardForm.objectKind === 'template') d.object.template = wizardForm.objectValue
+  else if (wizardForm.objectKind === 'term') d.object.termId = wizardForm.objectValue
+  else d.object.value = wizardForm.objectValue
+  const qualifiers = parsePairs(wizardForm.qualifiers)
+  if (Object.keys(qualifiers).length) d.qualifiers = qualifiers
+
+  if (wizardForm.kind === 'sql') {
+    d.driver = wizardForm.driver
+    d.database = wizardForm.database
+    d.cursorColumn = wizardForm.cursorColumn
+    if (wizardForm.driver !== 'sqlite') {
+      d.host = wizardForm.host
+      if (wizardForm.port) d.port = wizardForm.port
+    }
+    if (wizardForm.sqlMode === 'table') d.table = wizardForm.table
+    else d.query = wizardForm.query
+    const env = parsePairs(wizardForm.credentialEnv)
+    if (Object.keys(env).length) d.credentialEnv = env
+  } else if (wizardForm.kind === 'erp') {
+    d.vendor = wizardForm.vendor
+    d.baseUrl = wizardForm.baseUrl
+    if (wizardForm.vendor === 'kingdee') d.formId = wizardForm.formId
+    if (wizardForm.vendor === 'yongyou' && wizardForm.tokenPath) d.tokenPath = wizardForm.tokenPath
+    d.credentialEnv = parsePairs(wizardForm.credentialEnv)
+  } else if (wizardForm.kind === 'wecom' || wizardForm.kind === 'wechat') {
+    d.vendor = wizardForm.kind
+    if (wizardForm.ingressDb) d.ingressDb = wizardForm.ingressDb
+  } else if (wizardForm.kind === 'file') {
+    d.format = wizardForm.format
+    d.path = wizardForm.path
+  }
+  return d
+}
+
+const openCreate = () => {
+  editingSource.value = null
+  Object.assign(wizardForm, emptyForm())
+  wizardStep.value = 0
+  wizardTestResult.value = null
+  showWizard.value = true
+}
+
+/** 编辑预填：从已落库描述符反填向导表单；步 0 选型锁定（契约只读） */
+const openEdit = (row: EnterpriseSourceConfig) => {
+  editingSource.value = row
+  const d = row.descriptor as Record<string, any>
+  const kind: ConnectKind = d.sourceType === 'sql' ? 'sql'
+    : d.sourceType === 'erp_api' ? 'erp'
+    : d.sourceType === 'chat' ? (d.vendor === 'wecom' ? 'wecom' : 'wechat')
+    : d.sourceType === 'file' ? 'file' : 'sql'
+  Object.assign(wizardForm, emptyForm(), {
+    source_id: row.source_id,
+    kind,
+    driver: d.driver || 'postgresql',
+    cursorColumn: d.cursorColumn || '',
+    host: d.host || '',
+    port: d.port ? String(d.port) : '',
+    database: d.database || '',
+    sqlMode: d.query ? 'query' : 'table',
+    table: d.table || '',
+    query: d.query || '',
+    credentialEnv: Object.entries(d.credentialEnv || {}).map(([k, v]) => `${k}=${v}`).join('\n'),
+    vendor: d.vendor === 'yongyou' ? 'yongyou' : 'kingdee',
+    baseUrl: d.baseUrl || '',
+    formId: d.formId || '',
+    tokenPath: d.tokenPath || '',
+    ingressDb: d.ingressDb || '',
+    format: d.format || 'csv',
+    path: d.path || '',
+    columns: Array.isArray(d.columns) ? d.columns.join(', ') : '',
+    subjectMode: d.subject?.template ? 'template' : 'column',
+    subjectColumn: d.subject?.column || '',
+    subjectTemplate: d.subject?.template || '',
+    predicateTermId: d.predicate?.termId || '',
+    objectKind: d.object?.kind || 'column',
+    objectValue: d.object?.column || d.object?.template || d.object?.termId || d.object?.value || '',
+    qualifiers: Object.entries(d.qualifiers || {}).map(([k, v]) => `${k}=${v}`).join('\n'),
+    validFrom: d.validFrom || '',
+    validUntil: d.validUntil || '',
+    enabled: row.enabled,
+  })
+  wizardStep.value = 1 // 选型步对编辑锁定：直接进连接参数
+  wizardTestResult.value = null
+  showWizard.value = true
+}
+
+const testConnectionInWizard = async () => {
+  if (!editingSource.value) return
+  testingConnection.value = true
+  wizardTestResult.value = null
+  try {
+    const res = await getEnterpriseSourceHealth(editingSource.value.source_id)
+    wizardTestResult.value = { status: res.data?.status ?? 'error', reason: res.data?.reason ?? '' }
+  } catch (err) {
+    wizardTestResult.value = { status: 'error', reason: extractApiDetail(err) || '' }
+  } finally {
+    testingConnection.value = false
+  }
+}
+
+const saveWizard = async () => {
+  saving.value = true
+  try {
+    await submitEnterpriseSource({
+      source_id: wizardForm.source_id.trim(),
+      descriptor: buildDescriptor(),
+      enabled: wizardForm.enabled,
+    })
+    message.success(t('ontology.entSubmitted'))
+    showWizard.value = false
+    await loadSources()
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
+  } finally {
+    saving.value = false
   }
 }
 
@@ -364,81 +704,32 @@ onMounted(loadSources)
 </script>
 
 <style scoped>
-.enterprise-sources-page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 16px;
-}
-.page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-}
-.page-title {
-  margin: 0;
-  font-size: 20px;
-  color: var(--nr-text-primary, inherit);
-}
-.page-subtitle {
-  margin: 4px 0 0;
-  color: var(--nr-text-secondary, inherit);
-}
-.panel-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.panel-title {
-  font-weight: 600;
-  font-size: 14px;
-}
-.honest-note {
-  margin: 0 0 12px;
-  font-size: 12px;
-  color: var(--nr-text-secondary, inherit);
-}
-.honest-note--error {
-  color: var(--nr-error);
-}
-.admin-note {
-  font-size: 12px;
-  color: var(--nr-text-secondary, inherit);
-}
-.source-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-.source-table th,
-.source-table td {
-  text-align: left;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--nr-border, rgba(128, 128, 128, 0.2));
-}
-.mono {
-  font-family: var(--nr-font-mono, monospace);
-}
-.descriptor-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 8px 12px;
-  margin-bottom: 12px;
-}
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
-}
-.field--check {
-  justify-content: flex-end;
-}
-.form-actions {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
+.enterprise-sources-page { display: flex; flex-direction: column; gap: 16px; }
+.page-title { font-family: var(--nr-font-display); font-size: 22px; font-weight: 700; color: var(--nr-text-primary); margin: 0; }
+.page-subtitle { margin: 4px 0 0; font-size: 12px; color: var(--nr-text-secondary); }
+.page-header { display: flex; justify-content: space-between; align-items: center; }
+.mono { font-family: var(--nr-font-mono, monospace); font-size: 12px; }
+.source-id { color: var(--nr-text-primary); }
+.honest-note { font-size: 12px; color: var(--nr-text-secondary); margin: 0; }
+.honest-note--error { color: var(--nr-error); }
+.action-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.status-check-btn { margin-left: 8px; }
+/* 向导 */
+.wizard-steps { margin-bottom: 18px; }
+.kind-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+.kind-card { border: 1px solid var(--nr-glass-border); border-radius: 10px; padding: 14px 12px; cursor: pointer; text-align: center; transition: border-color .15s; }
+.kind-card:hover { border-color: var(--nr-primary); }
+.kind-card.active { border-color: var(--nr-primary); background: var(--nr-primary-soft); }
+.kind-name { font-weight: 600; color: var(--nr-text-primary); }
+.kind-desc { font-size: 11px; color: var(--nr-text-muted); margin-top: 4px; }
+.wizard-form { margin-top: 4px; }
+.field-hint { font-size: 11px; color: var(--nr-text-secondary); margin: 0 0 6px; }
+.object-value { margin-top: 8px; }
+.wizard-confirm .confirm-enabled { margin-top: 14px; }
+.test-row { display: flex; align-items: center; gap: 10px; }
+.test-result { font-size: 12px; }
+.test-ok { color: var(--nr-success); }
+.test-degraded { color: var(--nr-warning); }
+.test-error { color: var(--nr-error); }
+.wizard-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 </style>

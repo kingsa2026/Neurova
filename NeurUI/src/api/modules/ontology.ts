@@ -20,6 +20,7 @@ import type {
   DefaultOffReadingsResponse,
   EnterpriseDescriptor,
   EnterpriseSourceConfig,
+  EnterpriseSourceHealth,
   FactQueryBody,
   FactQueryItem,
   IriResolution,
@@ -281,4 +282,18 @@ export function submitEnterpriseSource(body: {
   enabled?: boolean
 }) {
   return api.post<ApiResponse<EnterpriseSourceConfig>>(`${BASE}/enterprise/sources`, body)
+}
+
+/** 连接健康探测（仅管理员）：适配器 health() 三态，探测不改变"已注册"语义。 */
+export function getEnterpriseSourceHealth(sourceId: string) {
+  return api.get<ApiResponse<EnterpriseSourceHealth>>(
+    `${BASE}/enterprise/sources/${encodeURIComponent(sourceId)}/health`,
+  )
+}
+
+/** 删除连接器（仅管理员）：只删配置，已摄取事实/断言保留（响应 message 点名）。 */
+export function deleteEnterpriseSource(sourceId: string) {
+  return api.delete<ApiResponse<{ source_id: string }>>(
+    `${BASE}/enterprise/sources/${encodeURIComponent(sourceId)}`,
+  )
 }

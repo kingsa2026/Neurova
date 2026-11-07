@@ -318,6 +318,18 @@ export interface EnterpriseSourceConfig {
   enabled: boolean
   /** 适配器是否真注册进进程内单表——与「描述符已落库」两态互不冒充。 */
   adapter_registered: boolean
+  /** 页面重设计配套批：添加/更新时间（ISO 串，落库时间戳）。 */
+  created_at?: string
+  updated_at?: string
+  /** 已获取数据量＝knowledge_assertions.actor_id='source:<id>' 计数。 */
+  ingested_count?: number
+}
+
+/** GET /enterprise/sources/{id}/health 探测结果（三态＋原话）。 */
+export interface EnterpriseSourceHealth {
+  source_id: string
+  status: 'ok' | 'degraded' | 'error' | string
+  reason: string
 }
 
 /** 描述符写面形状（与后端 schema_mapping.validateDescriptor 同口径）。 */
@@ -335,6 +347,21 @@ export interface EnterpriseDescriptor {
   path?: string
   driver?: string
   vendor?: string
+  // 连接扩展字段（registry.buildAdapter 逐类型消费；specs/2026-11-07 页面重设计配套批）
+  /** sql：游标列（标识符白名单）/网络地址/库表查询/凭据→环境变量名映射 */
+  cursorColumn?: string
+  host?: string
+  port?: string | number
+  database?: string
+  table?: string
+  query?: string
+  credentialEnv?: Record<string, string>
+  /** erp_api：基地址/金蝶 formId/用友 tokenPath */
+  baseUrl?: string
+  formId?: string
+  tokenPath?: string
+  /** chat：捕获面数据库路径（缺省走数据根 channel_ingress.db） */
+  ingressDb?: string
 }
 
 // ---------------------------------------------------------------------------
