@@ -111,3 +111,31 @@ async def submitEnterpriseSource(
         raise HTTPException(status_code=400, detail=str(exc))
     config = ingestor.loadConfig(tenant, sourceId) or {}
     return {"code": 0, "message": "success", "data": _view(sourceId, config, adapters)}
+
+
+@router.post("/enterprise/sources/{source_id}/ingest")
+async def triggerEnterpriseIngest(
+    source_id: str,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """手动触发一轮拉取（批 C1，拍板项 2A，仅管理员）：enabled=False 零读取。
+
+    语义＝「现在跑一轮」：loadConfig → 适配器（未注册经唯一工厂构造）→
+    fetchBatch 循环 → ingestBatch 唯一咽喉 → 游标逐批持久化。工厂抛错 400
+    带定位（缺变体/未接线族）；拉取/写账异常如实 500，不吞成空轮。
+    """
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(
+            status_code=403, detail="企业源触发摄取是治理动作，仅管理员可执行")
+    sourceId = str(source_id or "").strip()
+    if not sourceId:
+        raise HTTPException(status_code=400, detail="source_id 不能为空")
+    ingestor, adapters = _parts()
+    tenant = _tenantOf(current_user)
+    try:
+        result = await ingestor.runOnceAsync(tenant, sourceId)
+    except ValueError as exc:  # MappingError 是 ValueError 子类：带定位的拒因原样出去
+        raise HTTPException(status_code=400, detail=str(exc))
+    config = ingestor.loadConfig(tenant, sourceId) or {}
+    return {"code": 0, "message": "success",
+            "data": {"result": result, "source": _view(sourceId, config, adapters)}}
