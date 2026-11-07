@@ -135,6 +135,27 @@ def _user_can_access_agent(user_id: str, agent_id: str, role: str = "user") -> b
     return can_access_agent(user_id, role, resolve_agent_owner(agent_id, state_agent=agent))
 
 
+def _deptGate(agent_id: str, current_user: Dict[str, Any]) -> Optional[str]:
+    """部门根对账门（specs/2026-11-07 批 D，T-D 严格绑定已裁）。
+
+    - admin 不设门（管理面全量语义）；
+    - agent 未绑定部门组（或绑定组已删/非部门组）不设门——缺配不锁人；
+    - 说话人部门根 ≠ agent 部门根（含无部门用户使用部门 agent）→ 拒绝文案。
+    存量行为反向钉：未绑部门的 agent（全部存量）与 admin 的对话零变化。
+    """
+    if str((current_user or {}).get("role") or "") == "admin":
+        return None
+    from neurova.api.agent_access import agentDeptRootById
+
+    agent_dept = agentDeptRootById(agent_id)
+    if not agent_dept:
+        return None
+    speaker_dept = str((current_user or {}).get("tenant_id") or "default")
+    if speaker_dept != agent_dept:
+        return f"跨部门使用智能体被拒绝（说话人部门 ≠ 智能体部门 '{agent_dept}'）"
+    return None
+
+
 # F-4 根修（台账 2026-09-11）：TTS 产物文件名白名单——tts_{session}_{ts}.wav
 # 平名文件；拒路径分隔符/`..`/非 TTS 命名，内容端点据此防路径穿越。
 _TTS_FILENAME_RE = re.compile(r"^tts_[A-Za-z0-9._-]+\.wav$")
@@ -254,6 +275,13 @@ async def chat(
                 "message": "Permission denied: you don't have access to this Agent",
                 "request_id": request_id,
             },
+        )
+    # 部门根对账门（specs/2026-11-07 批 D，T-D 严格绑定）
+    deptDenial = _deptGate(body.agent_id, current_user)
+    if deptDenial:
+        return JSONResponse(
+            status_code=403,
+            content={"code": 4004, "message": deptDenial, "request_id": request_id},
         )
 
     agent = _get_agent(body.agent_id)
@@ -413,6 +441,13 @@ async def chat_stream(
                 "message": "Permission denied: you don't have access to this Agent",
                 "request_id": request_id,
             },
+        )
+    # 部门根对账门（specs/2026-11-07 批 D，T-D 严格绑定）
+    deptDenial = _deptGate(body.agent_id, current_user)
+    if deptDenial:
+        return JSONResponse(
+            status_code=403,
+            content={"code": 4004, "message": deptDenial, "request_id": request_id},
         )
 
     agent = _get_agent(body.agent_id)

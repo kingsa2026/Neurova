@@ -22,7 +22,15 @@ from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-__all__ = ["agentOwnerById", "can_access_agent", "requireAgentOwner", "resolve_agent_owner"]
+__all__ = [
+    "agentOwnerById",
+    "agentGroupById",
+    "agentDeptRootById",
+    "agentOwnerDeptRootById",
+    "can_access_agent",
+    "requireAgentOwner",
+    "resolve_agent_owner",
+]
 
 
 def can_access_agent(user_id: str, role: str, owner: Optional[str]) -> bool:
@@ -73,6 +81,88 @@ def agentOwnerById(agent_id: str) -> Optional[str]:
         except Exception as exc:  # noqa: BLE001 - 登记面不可用即按"无登记"走
             logger.debug("agent 登记查询失败 %s: %s", agent_id, exc)
     return resolve_agent_owner(agent_id, state_agent=state_agent, registered_cfg=registered_cfg)
+
+
+def agentGroupById(agent_id: str) -> Optional[str]:
+    """agent 绑定的部门组 id（specs/2026-11-07 批 D）：运行实例 config 优先，
+    中枢登记（agents.json 的 config.group_id）回退；取数链与 agentOwnerById 同形。"""
+    state_agent = None
+    try:
+        from neurova.api.endpoints import get_agent_instance
+
+        state_agent = get_agent_instance(agent_id)
+    except Exception as exc:  # noqa: BLE001 - 状态面不可用即走登记回退
+        logger.debug("agent 实例查询失败 %s: %s", agent_id, exc)
+    if state_agent is not None:
+        cfg = getattr(state_agent, "config", None)
+        gid = getattr(cfg, "group_id", None) if cfg is not None else None
+        if gid:
+            return str(gid)
+    if state_agent is None:
+        try:
+            from neurova.api.endpoints.agent import get_agent_config_manager
+
+            registered_cfg = get_agent_config_manager().get_agent(agent_id)
+        except Exception as exc:  # noqa: BLE001 - 登记面不可用即按"无登记"走
+            logger.debug("agent 登记查询失败 %s: %s", agent_id, exc)
+        if isinstance(registered_cfg, dict):
+            gid = registered_cfg.get("group_id") or (registered_cfg.get("config") or {}).get("group_id")
+            if gid:
+                return str(gid)
+    return None
+
+
+def agentDeptRootById(agent_id: str) -> Optional[str]:
+    """agent 的部门根（specs/2026-11-07 批 D）：沿绑定部门组的 parent 链上溯。
+
+    绑定组缺失/非 custom（部门）组/解析异常 → None——**缺配不锁人**：
+    部门门只对明确绑定到部门组的 agent 生效。
+    """
+    gid = agentGroupById(agent_id)
+    if not gid:
+        return None
+    try:
+        from neurova.auth.user_group_model import UserGroupType, get_user_group_manager
+
+        mgr = get_user_group_manager()
+        group = mgr.get_group(gid)
+        if group is None or group.group_type != UserGroupType.CUSTOM:
+            return None
+        seen: set = set()
+        while group.parent_group_id and group.parent_group_id not in seen:
+            seen.add(group.group_id)
+            parent = mgr.get_group(group.parent_group_id)
+            if parent is None:
+                break
+            group = parent
+        return group.group_id
+    except Exception as exc:  # noqa: BLE001 - 分组面不可用即不设门
+        logger.debug("agent 部门根解析失败 %s: %s", agent_id, exc)
+        return None
+
+
+def agentOwnerDeptRootById(agent_id: str) -> Optional[str]:
+    """渠道 agent 属主的部门根（渠道租户对账用，specs/2026-11-07 批 D）。
+
+    owner 是 user_id，群成员按 username 记账——补一次 id→username 查表；
+    无属主/查表失败 → None；属主无部门 → "default"（对账侧据此保留渠道配置）。
+    """
+    owner = agentOwnerById(agent_id)
+    if not owner:
+        return None
+    try:
+        from neurova.auth.user_model import UserModel
+
+        row = UserModel().get_user_by_id(int(owner))
+        username = str(getattr(row, "username", "") or "")
+        if not username:
+            return None
+        from neurova.auth.user_group_model import resolveUserDepartment
+
+        return str(resolveUserDepartment(username).get("tenant_id") or "default")
+    except Exception as exc:  # noqa: BLE001 - 对账依赖面不可用即不设门
+        logger.debug("agent 属主部门根解析失败 %s: %s", agent_id, exc)
+        return None
 
 
 def requireAgentOwner(agent_id: str, current_user: Any, *, action: str = "访问") -> None:
