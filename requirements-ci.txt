@@ -106,7 +106,7 @@ prometheus_client>=0.20
 # ModuleNotFoundError: No module named 'pypdf'）。
 # 两者都只在 requirements.txt / requirements-full.lock 声明、CI 薄环境没有 ——
 # 同一根因（"只在生产清单声明、不在 CI 清单声明"），故同处补齐。
-reportlab>=4.0
+reportlab>=5.1.0
 # 下界 6.21.2：6.19.0 在 2026-10 公告批里有 11 条，修复版散落 6.21.1/6.21.2，
 # 取能覆盖全部的 6.21.2；与 requirements.txt 同一口径。
 pypdf>=6.21.2
