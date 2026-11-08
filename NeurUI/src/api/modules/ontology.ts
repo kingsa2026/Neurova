@@ -291,6 +291,13 @@ export function getEnterpriseSourceHealth(sourceId: string) {
   )
 }
 
+/** 手动触发单条附件取回（批 C7c 第三块，仅管理员）：存档源逐条可控、引用过期 502 原话。 */
+export function triggerEnterpriseMedia(sourceId: string, msgId: string) {
+  return api.post<
+    ApiResponse<{ status: string; msgid?: string; path?: string; size?: number; media_name?: string }>
+  >(`${BASE}/enterprise/sources/${encodeURIComponent(sourceId)}/media`, { msg_id: msgId })
+}
+
 /** 删除连接器（仅管理员）：只删配置，已摄取事实/断言保留（响应 message 点名）。 */
 export function deleteEnterpriseSource(sourceId: string) {
   return api.delete<ApiResponse<{ source_id: string }>>(

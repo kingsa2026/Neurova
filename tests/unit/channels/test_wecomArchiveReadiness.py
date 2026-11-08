@@ -166,6 +166,38 @@ def _configured(libFile, keyPath, **overrides):
 
 
 # ---------------------------------------------------------------------------
+# 判据 0b：统一私钥约定目录（批 C7c 对齐批）——裸文件名在约定目录解析；
+# 绝对/带目录路径原样承载；缺文件理由点名约定目录（部署侧照目录放文件即可）
+# ---------------------------------------------------------------------------
+
+
+class TestUnifiedKeyDirectory:
+    def test_bare_filename_resolves_in_convention_dir(
+            self, tmp_path, monkeypatch, loadableSdk, rsaKeys):
+        monkeypatch.setenv("NEUROVA_WECOM_ARCHIVE_KEYDIR", str(tmp_path / "keydir"))
+        from neurova.channels.wecom_archive import archiveKeyDir, resolveArchiveKeyPath
+
+        keyDir = archiveKeyDir()
+        assert keyDir == tmp_path / "keydir", "env 覆盖约定目录落点"
+        bare = resolveArchiveKeyPath("private_v1.pem")
+        assert bare == keyDir / "private_v1.pem", "裸文件名 → 约定目录下解析"
+        absolute = resolveArchiveKeyPath(str(rsaKeys[2048]))
+        assert absolute == rsaKeys[2048], "绝对路径原样承载（部署侧显式路径不劫持）"
+        nested = resolveArchiveKeyPath("sub/dir/key.pem")
+        assert nested.parent.name == "dir", "带目录路径原样承载"
+
+    def test_missing_bare_filename_reason_names_convention_dir(
+            self, tmp_path, monkeypatch, loadableSdk, rsaKeys):
+        libFile, _loaded = loadableSdk
+        monkeypatch.setenv(SECRET_ENV_NAME, SECRET_VALUE)
+        monkeypatch.setenv("NEUROVA_WECOM_ARCHIVE_KEYDIR", str(tmp_path / "keydir"))
+        health = _healthWith(tmp_path, _configured(libFile, "private_v1.pem"))
+        assert health.status == "error"
+        assert "约定目录" in health.reason, "缺文件理由必须点名统一目录（部署照目录放文件即可）"
+        assert str(tmp_path / "keydir") in health.reason
+
+
+# ---------------------------------------------------------------------------
 # 判据 1：恒假探测退役＋凭据面单点在通道层（结构反证，不 import 新模块）
 # ---------------------------------------------------------------------------
 

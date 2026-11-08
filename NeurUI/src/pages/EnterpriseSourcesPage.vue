@@ -70,6 +70,12 @@
                 data-testid="ent-ingest-btn"
                 @click="triggerIngest(record.source_id)"
               >{{ t('ontology.entIngestBtn') }}</GlassButton>
+              <GlassButton
+                v-if="record.descriptor?.chatSource === 'archive'"
+                variant="ghost" size="sm"
+                data-testid="ent-media-btn"
+                @click="openMediaFetch(record)"
+              >{{ t('ontology.entMediaBtn') }}</GlassButton>
               <GlassButton variant="ghost" size="sm" data-testid="ent-edit-btn" @click="openEdit(record)">
                 {{ t('common.edit') }}
               </GlassButton>
@@ -90,6 +96,30 @@
     <GlassPanel :title="t('ontology.entFakeAdapterTitle')">
       <p class="honest-note">{{ t('ontology.entFakeAdapterNote') }}</p>
     </GlassPanel>
+
+    <!-- 媒体取回弹层（存档源逐条触发） -->
+    <a-modal
+      v-model:open="showMediaModal"
+      :title="t('ontology.entMediaBtn')"
+      width="480px"
+    >
+      <a-form layout="vertical">
+        <a-form-item :label="t('ontology.entMediaMsgId')" required>
+          <p class="field-hint">{{ t('ontology.entMediaMsgIdHint') }}</p>
+          <a-input v-model:value="mediaMsgId" data-testid="ent-media-msgid" />
+        </a-form-item>
+        <p v-if="mediaOutcome" class="honest-note" data-testid="ent-media-outcome">{{ mediaOutcome }}</p>
+      </a-form>
+      <template #footer>
+        <GlassButton variant="secondary" size="sm" @click="showMediaModal = false">
+          {{ t('common.cancel') }}
+        </GlassButton>
+        <GlassButton variant="primary" size="sm" :loading="mediaBusy" data-testid="ent-media-confirm"
+          @click="runMediaFetch">
+          {{ t('ontology.entMediaBtn') }}
+        </GlassButton>
+      </template>
+    </a-modal>
 
     <!-- 新增/编辑向导（分步弹层） -->
     <a-modal
@@ -197,12 +227,42 @@
             </a-form-item>
           </template>
 
-          <!-- 企微 / 微信小微（chat） -->
+          <!-- 企微 / 微信小微（chat）：来源两态（批 C7c 甲案） -->
           <template v-else-if="wizardForm.kind === 'wecom' || wizardForm.kind === 'wechat'">
-            <a-form-item :label="t('ontology.entKindIngressDb')">
+            <a-form-item :label="t('ontology.entChatSource')" required>
+              <a-radio-group v-model:value="wizardForm.chatSource" data-testid="ent-chat-source">
+                <a-radio value="capture">{{ t('ontology.entChatSourceCapture') }}</a-radio>
+                <a-radio value="archive" :disabled="wizardForm.kind === 'wechat'">
+                  {{ t('ontology.entChatSourceArchive') }}
+                </a-radio>
+              </a-radio-group>
+              <p class="field-hint">{{ t('ontology.entChatSourceHint') }}</p>
+            </a-form-item>
+            <a-form-item v-if="wizardForm.chatSource === 'capture'" :label="t('ontology.entKindIngressDb')">
               <p class="field-hint">{{ t('ontology.entKindIngressDbHint') }}</p>
               <a-input v-model:value="wizardForm.ingressDb" :placeholder="t('ontology.entKindPathOptional')" />
             </a-form-item>
+            <template v-if="wizardForm.chatSource === 'archive'">
+              <a-form-item :label="t('ontology.entArchiveSdkPath')" required>
+                <p class="field-hint">{{ t('ontology.entArchiveSdkPathHint') }}</p>
+                <a-input v-model:value="wizardForm.archiveSdkPath" data-testid="ent-archive-sdk" />
+              </a-form-item>
+              <a-form-item :label="t('ontology.entArchiveSecretEnv')" required>
+                <p class="field-hint">{{ t('ontology.entArchiveSecretEnvHint') }}</p>
+                <a-input v-model:value="wizardForm.archiveSecretEnv" data-testid="ent-archive-secret" />
+              </a-form-item>
+              <a-form-item :label="t('ontology.entArchivePrivateKeys')" required>
+                <p class="field-hint">{{ t('ontology.entArchivePrivateKeysHint') }}</p>
+                <a-textarea v-model:value="wizardForm.archivePrivateKeys" :rows="2" data-testid="ent-archive-keys" />
+              </a-form-item>
+              <a-form-item :label="t('ontology.entArchiveRoomAllowlist')">
+                <p class="field-hint">{{ t('ontology.entArchiveAllowlistHint') }}</p>
+                <a-textarea v-model:value="wizardForm.archiveRoomAllowlist" :rows="2" />
+              </a-form-item>
+              <a-form-item :label="t('ontology.entArchiveUserAllowlist')">
+                <a-textarea v-model:value="wizardForm.archiveUserAllowlist" :rows="2" />
+              </a-form-item>
+            </template>
           </template>
 
           <!-- 文件（file） -->
@@ -329,6 +389,7 @@ import {
   listEnterpriseSources,
   submitEnterpriseSource,
   triggerEnterpriseIngest,
+  triggerEnterpriseMedia,
 } from '@/api/modules/ontology'
 import type { EnterpriseDescriptor, EnterpriseSourceConfig } from '@/types/ontology'
 import { extractApiDetail } from '@/utils/error'
@@ -509,6 +570,12 @@ const emptyForm = () => ({
   formId: '',
   tokenPath: '',
   ingressDb: '',
+  chatSource: 'capture' as 'capture' | 'archive',
+  archiveSdkPath: '',
+  archiveSecretEnv: '',
+  archivePrivateKeys: '',
+  archiveRoomAllowlist: '',
+  archiveUserAllowlist: '',
   format: 'csv',
   path: '',
   columns: '',
@@ -525,6 +592,44 @@ const emptyForm = () => ({
 })
 
 const wizardForm = reactive(emptyForm())
+
+// 媒体取回弹层（批 C7c 第三块：存档源逐条可控触发，方案 §10-甲）
+const showMediaModal = ref(false)
+const mediaSourceId = ref('')
+const mediaMsgId = ref('')
+const mediaOutcome = ref('')
+const mediaBusy = ref(false)
+
+const openMediaFetch = (row: EnterpriseSourceConfig) => {
+  mediaSourceId.value = row.source_id
+  mediaMsgId.value = ''
+  mediaOutcome.value = ''
+  showMediaModal.value = true
+}
+
+const runMediaFetch = async () => {
+  if (!mediaMsgId.value.trim()) return
+  mediaBusy.value = true
+  mediaOutcome.value = ''
+  try {
+    const resp = await triggerEnterpriseMedia(mediaSourceId.value, mediaMsgId.value.trim())
+    const data = resp.data as { status?: string; path?: string; size?: number } | undefined
+    if (data?.status === 'staged') {
+      mediaOutcome.value = t('ontology.entMediaStaged', { size: data.size ?? 0, path: data.path ?? '' })
+      message.success(t('ontology.entMediaStaged', { size: data.size ?? 0, path: data.path ?? '' }))
+    } else if (data?.status === 'already_staged') {
+      mediaOutcome.value = t('ontology.entMediaAlready', { path: data.path ?? '' })
+    } else {
+      mediaOutcome.value = t('ontology.entMediaNoMedia')
+    }
+  } catch (err) {
+    const detail = extractApiDetail(err) || t('common.error')
+    mediaOutcome.value = detail
+    message.error(detail)
+  } finally {
+    mediaBusy.value = false
+  }
+}
 
 const wizardTitle = computed(() =>
   editingSource.value ? t('ontology.entEditTitle') : t('ontology.entWizardTitle'),
@@ -544,7 +649,11 @@ const canProceed = computed(() => {
       return !!wizardForm.baseUrl && !!wizardForm.credentialEnv.trim()
         && (wizardForm.vendor === 'yongyou' || !!wizardForm.formId)
     }
-    if (wizardForm.kind === 'wecom' || wizardForm.kind === 'wechat') return true
+    if (wizardForm.kind === 'wecom' || wizardForm.kind === 'wechat') {
+      if (wizardForm.chatSource !== 'archive') return true
+      return !!wizardForm.archiveSdkPath.trim() && !!wizardForm.archiveSecretEnv.trim()
+        && !!wizardForm.archivePrivateKeys.trim()
+    }
     if (wizardForm.kind === 'file') return !!wizardForm.format && !!wizardForm.path
     return false
   }
@@ -608,7 +717,19 @@ const buildDescriptor = (): EnterpriseDescriptor => {
     d.credentialEnv = parsePairs(wizardForm.credentialEnv)
   } else if (wizardForm.kind === 'wecom' || wizardForm.kind === 'wechat') {
     d.vendor = wizardForm.kind
-    if (wizardForm.ingressDb) d.ingressDb = wizardForm.ingressDb
+    if (wizardForm.chatSource === 'archive' && wizardForm.kind === 'wecom') {
+      d.chatSource = 'archive'
+      d.archiveSdkPath = wizardForm.archiveSdkPath
+      d.archiveSecretEnv = wizardForm.archiveSecretEnv
+      const keys = parsePairs(wizardForm.archivePrivateKeys)
+      if (Object.keys(keys).length) d.archivePrivateKeys = keys
+      const rooms = splitList(wizardForm.archiveRoomAllowlist)
+      if (rooms.length) d.archiveRoomAllowlist = rooms
+      const users = splitList(wizardForm.archiveUserAllowlist)
+      if (users.length) d.archiveUserAllowlist = users
+    } else {
+      if (wizardForm.ingressDb) d.ingressDb = wizardForm.ingressDb
+    }
   } else if (wizardForm.kind === 'file') {
     d.format = wizardForm.format
     d.path = wizardForm.path
@@ -649,6 +770,12 @@ const openEdit = (row: EnterpriseSourceConfig) => {
     formId: d.formId || '',
     tokenPath: d.tokenPath || '',
     ingressDb: d.ingressDb || '',
+    chatSource: d.chatSource === 'archive' ? 'archive' : 'capture',
+    archiveSdkPath: d.archiveSdkPath || '',
+    archiveSecretEnv: d.archiveSecretEnv || '',
+    archivePrivateKeys: Object.entries(d.archivePrivateKeys || {}).map(([k, v]) => `${k}=${v}`).join('\n'),
+    archiveRoomAllowlist: Array.isArray(d.archiveRoomAllowlist) ? d.archiveRoomAllowlist.join(', ') : '',
+    archiveUserAllowlist: Array.isArray(d.archiveUserAllowlist) ? d.archiveUserAllowlist.join(', ') : '',
     format: d.format || 'csv',
     path: d.path || '',
     columns: Array.isArray(d.columns) ? d.columns.join(', ') : '',

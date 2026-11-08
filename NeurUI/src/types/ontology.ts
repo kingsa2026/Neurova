@@ -362,6 +362,17 @@ export interface EnterpriseDescriptor {
   tokenPath?: string
   /** chat：捕获面数据库路径（缺省走数据根 channel_ingress.db） */
   ingressDb?: string
+  /** chat：来源两态（批 C7c 甲案）——capture 缺省 / archive 会话存档投影面（仅 wecom） */
+  chatSource?: 'capture' | 'archive'
+  /** chat archive：官方 C 动态库路径（部署侧显式给，不猜官方件名） */
+  archiveSdkPath?: string
+  /** chat archive：存档专用 Secret 的环境变量名（指针，值不进配置） */
+  archiveSecretEnv?: string
+  /** chat archive：publickey_ver → 私钥路径；裸文件名在约定目录解析（统一存放路径口径） */
+  archivePrivateKeys?: Record<string, string>
+  /** chat archive：隐私白名单（通道层落库前过滤） */
+  archiveRoomAllowlist?: string[]
+  archiveUserAllowlist?: string[]
 }
 
 // ---------------------------------------------------------------------------

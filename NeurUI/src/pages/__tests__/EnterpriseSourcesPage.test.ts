@@ -35,6 +35,7 @@ vi.mock('@/api/modules/ontology', () => ({
   triggerEnterpriseIngest: vi.fn(),
   getEnterpriseSourceHealth: vi.fn(),
   deleteEnterpriseSource: vi.fn(),
+  triggerEnterpriseMedia: vi.fn(),
 }))
 
 vi.mock('ant-design-vue', () => ({
@@ -48,6 +49,7 @@ import {
   triggerEnterpriseIngest,
   getEnterpriseSourceHealth,
   deleteEnterpriseSource,
+  triggerEnterpriseMedia,
 } from '@/api/modules/ontology'
 import { ontologySection } from '@/i18n/locales/_ontologySection'
 
@@ -56,6 +58,7 @@ const submitMock = submitEnterpriseSource as unknown as ReturnType<typeof vi.fn>
 const ingestMock = triggerEnterpriseIngest as unknown as ReturnType<typeof vi.fn>
 const healthMock = getEnterpriseSourceHealth as unknown as ReturnType<typeof vi.fn>
 const deleteMock = deleteEnterpriseSource as unknown as ReturnType<typeof vi.fn>
+const mediaMock = triggerEnterpriseMedia as unknown as ReturnType<typeof vi.fn>
 
 const i18n = createI18n({
   legacy: false,
@@ -90,7 +93,7 @@ const stubs = {
   'a-tag': { template: '<span class="stub-tag"><slot /></span>' },
   'a-badge': { props: ['status', 'text'], template: '<span class="stub-badge" :data-status="status">{{ text }}</span>' },
   'a-empty': { props: ['description'], template: '<div class="stub-empty">{{ description }}</div>' },
-  'a-modal': { props: ['open', 'title'], template: '<div v-if="open" class="stub-modal"><slot /></div>' },
+  'a-modal': { props: ['open', 'title'], template: '<div v-if="open" class="stub-modal"><slot /><slot name="footer" /></div>' },
   'a-steps': { props: ['current'], template: '<div class="stub-steps" :data-current="current"><slot /></div>' },
   'a-step': { props: ['title'], template: '<div class="stub-step">{{ title }}</div>' },
   'a-form': { template: '<form class="stub-form"><slot /></form>' },
@@ -174,6 +177,12 @@ beforeEach(() => {
   healthMock.mockResolvedValue({ code: 0, message: 'ok', data: { source_id: 'erp_orders', status: 'ok', reason: '' } })
   deleteMock.mockReset()
   deleteMock.mockResolvedValue({ code: 0, message: 'ok', data: { source_id: 'erp_orders' } })
+  mediaMock.mockReset()
+  mediaMock.mockResolvedValue({
+    code: 0,
+    message: 'ok',
+    data: { status: 'staged', msgid: 'm1', path: 'staged/m1.pdf', size: 9 },
+  })
   authUser.role = 'admin'
 })
 
@@ -323,6 +332,102 @@ describe('EnterpriseSourcesPage（新增向导）', () => {
     const body = submitMock.mock.calls[0][0]
     expect(body.descriptor.sourceType).toBe('chat')
     expect(body.descriptor.vendor).toBe('wecom')
+    expect(body.descriptor.chatSource).toBeUndefined() // capture 面缺省不落键（存量行为不破）
+  })
+
+  it('存档源向导：chatSource=archive 必填守门→保存 body 携带存档配置（批 C7c 对齐）', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-testid="ent-add-btn"]').trigger('click')
+    await wrapper.findAll('.kind-card')[2].trigger('click') // 企微
+    await wrapper.find('[data-testid="ent-wizard-next"]').trigger('click')
+
+    // 步 1 缺省 capture：source_id 填完即可过
+    const inputs = wrapper.findAll('.stub-input')
+    await inputs[0].setValue('archive_src')
+    // 切存档面：未填存档字段 → 守门禁用
+    await wrapper.find('.stub-radio').setValue('archive')
+    expect((wrapper.find('[data-testid="ent-wizard-next"]').element as HTMLButtonElement).disabled).toBe(true)
+    // 存档字段：sdk / secretEnv 为 stub-input，私钥映射为 stub-textarea
+    const archiveInputs = wrapper.findAll('.stub-input')
+    await archiveInputs[1].setValue('C:/sdk/libweworkarchive.dll')
+    await archiveInputs[2].setValue('NEUROVA_ARCHIVE_SECRET')
+    await wrapper.findAll('.stub-textarea')[0].setValue('v1=private_v1.pem')
+    expect((wrapper.find('[data-testid="ent-wizard-next"]').element as HTMLButtonElement).disabled).toBe(false)
+    await wrapper.find('[data-testid="ent-wizard-next"]').trigger('click')
+
+    // 步 2 映射：object 取结构化列 sender（text 已被编译期守卫拒）
+    const step2Inputs = wrapper.findAll('.stub-input')
+    await step2Inputs[0].setValue('msg_id, sender')
+    await step2Inputs[1].setValue('chat_id')
+    await step2Inputs[2].setValue('spoke_in')
+    await step2Inputs[3].setValue('sender')
+    await wrapper.find('[data-testid="ent-wizard-next"]').trigger('click')
+    await wrapper.find('[data-testid="ent-wizard-save"]').trigger('click')
+    await flushPromises()
+
+    const body = submitMock.mock.calls[0][0]
+    expect(body.descriptor.chatSource).toBe('archive')
+    expect(body.descriptor.archiveSdkPath).toBe('C:/sdk/libweworkarchive.dll')
+    expect(body.descriptor.archiveSecretEnv).toBe('NEUROVA_ARCHIVE_SECRET')
+    expect(body.descriptor.archivePrivateKeys).toEqual({ v1: 'private_v1.pem' })
+    expect(body.descriptor.object).toEqual({ kind: 'column', column: 'sender' })
+  })
+})
+
+describe('EnterpriseSourcesPage（存档源媒体触发）', () => {
+  it('媒体按钮仅存档行渲染：触发走真 media 端点，staged 读数回显', async () => {
+    listMock.mockResolvedValue({
+      code: 0,
+      message: 'ok',
+      data: {
+        items: [
+          sourceRow({
+            source_id: 'archive_src',
+            descriptor: { sourceType: 'chat', vendor: 'wecom', chatSource: 'archive' },
+          }),
+          sourceRow({ source_id: 'capture_src', descriptor: { sourceType: 'chat', vendor: 'wecom' } }),
+        ],
+        total: 2,
+      },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    const rows = wrapper.findAll('.stub-row')
+    expect(rows[0].find('[data-testid="ent-media-btn"]').exists()).toBe(true)
+    expect(rows[1].find('[data-testid="ent-media-btn"]').exists()).toBe(false), (
+      'capture 面无媒体触发按钮（不摆假能力）')
+    await rows[0].find('[data-testid="ent-media-btn"]').trigger('click')
+    expect(wrapper.find('[data-testid="ent-media-msgid"]').exists()).toBe(true)
+    await wrapper.find('[data-testid="ent-media-msgid"]').setValue('m1')
+    await wrapper.find('[data-testid="ent-media-confirm"]').trigger('click')
+    await flushPromises()
+    expect(mediaMock).toHaveBeenCalledWith('archive_src', 'm1')
+    expect((wrapper.find('[data-testid="ent-media-outcome"]').element as HTMLElement).textContent)
+      .toContain('staged/m1.pdf')
+  })
+
+  it('媒体引用过期：502 原话进错误读数（有引用不冒充可检索）', async () => {
+    listMock.mockResolvedValue({
+      code: 0,
+      message: 'ok',
+      data: {
+        items: [sourceRow({
+          source_id: 'archive_src',
+          descriptor: { sourceType: 'chat', vendor: 'wecom', chatSource: 'archive' },
+        })],
+        total: 1,
+      },
+    })
+    mediaMock.mockRejectedValue({ response: { status: 502, data: { detail: 'GetMediaData 失败 ret=3——引用过期' } } })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-testid="ent-media-btn"]').trigger('click')
+    await wrapper.find('[data-testid="ent-media-msgid"]').setValue('m1')
+    await wrapper.find('[data-testid="ent-media-confirm"]').trigger('click')
+    await flushPromises()
+    expect((wrapper.find('[data-testid="ent-media-outcome"]').element as HTMLElement).textContent)
+      .toContain('引用过期')
   })
 })
 
