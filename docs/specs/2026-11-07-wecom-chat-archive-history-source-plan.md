@@ -412,7 +412,7 @@ corpid 复用既有 `extra.corpid`/`app_id`，**不新造第二个 corpid 字段
   `wechat_kf_crypto` 加 RSA 半边（含错钥垃圾挡判据）；建 `channel_archive_messages` 投影表＋`channel_archive_state`
   水印表（迁移域 `channel_archive` v1）；`connectors_chat` 来源参数化（`chatSource` 两态）、游标换 seq；
   判据 §11 C7b 三行 28 格全绿（本批改动：白名单落库前过滤移 C7c，与 §14-C 的裁定归属一致）。
-- **C7c 消费面与量控（第一块已落格，台账 §6-586：白名单落库前过滤＋常驻 worker env 门控默认关＋水位落后读数＋backfill 默认开＝水位 0 起；第二块未开工）**：首次装配即从 `seq=0` 拉（§8 更正后的 backfill 语义）、
+- **C7c 消费面与量控（两块已落格，台账 §6-586/§6-587：白名单落库前过滤＋常驻 worker env 门控默认关＋水位落后读数＋backfill 默认开＝水位 0 起；正文分档最小版＝编译期拒 text 进 facts object＋writeArchiveEntries 条目链；页面读数缓办——i18n 与并发会话撞车，解除后小批补）**：首次装配即从 `seq=0` 拉（§8 更正后的 backfill 语义）、
   roomid/成员白名单落库前过滤、常驻增量 worker（与 C2 轮询同节拍，周期远小于 5 天）、
   水位落后超窗即 health 点名、正文分档落点（承 §14-C）、页面读数（连接器列表的
   「数据量」列与存档范围对齐，见 `NeurUI/src/pages/EnterpriseSourcesPage.vue:201/609` 的 chat 向导段）。

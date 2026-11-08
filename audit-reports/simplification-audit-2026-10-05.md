@@ -12210,3 +12210,13 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **仍开**：C7c 第二块（正文分档——条目链承正文、facts 承结构化，§14-C；页面「数据量」读数与存档范围对齐）；媒体触发面另批；真 SDK 部署 live-verify 待真库件（双态登记）。
     - **口径（numstat 实抄）**：生产面 `wecom_archive.py` +225/−6（C7c 块：白名单/worker/水位读数）、`app.py` +30/−0（接线与启停）、`connectors_chat.py` +12/−5（health 水位读数）；测试 330 行不计入；protected_tests +4/−0。
     - **下一枚空号现查：本格取 586，后继从 587 起。**
+587. **批 C7c 第二块落格：正文分档（条目链承正文、facts 承结构化，§14-C 裁定最小版）** ✅🟢 —— 承 §6-586；页面读数缓办（理由见末）。
+    - **facts 侧编译期拒正文**：`validateDescriptor` 新增分档守卫——`chatSource=archive` 的描述符把 `text` 配进 object（column 或模板 {text}）即 MappingError（理由点名改配结构化列＋writeArchiveEntries 承接）；**capture 面 text object 照旧合法**（存量行为不破，判据钉住）。十万级行灌 facts 不可逆（§14-C），编译期拦是最早咬合点。
+    - **条目链承正文**：`ChatChannelAdapter.writeArchiveEntries`（能力面，registry 不感知 chat 细节）——条目＝knowledge 仓既有面（category=wecom 与入站同栏），幂等键 `source=wecom_archive:<msgid>`（前缀与入站 `wecom:{chat}:{msg}` 不同源，重放/两面不撞）；源钟 `source_created_at`＝sent_at（K-09 语义：按业务时间可查；modified 无独立事实如实 estimated=True）；**非文本行不建空条目**（media_ref/群/成员/时间由 facts 承）；repo 走 DI 形参（测试注 tmp 库，生产缺省单例）。
+    - **registry 能力钩子**：`runOnceAsync` 在 facts 摄取后 `getattr(adapter, "writeArchiveEntries", None)` 命中即调，结果计入返回值新增 `entries` 键（additive，API 回显多一键无害）。**测试咬出一处契约 bug 当场修**：面守卫旗标与「非文本行计数」同用 `skipped` 一键两义——registry 把计数 1 误当守卫真值、整轮聚合被跳过（written 落 0）；改「守卫用 `applied` 旗标、`skipped` 专做计数」，判据钉住两义不再合并。
+    - **判据**：新增 `tests/unit/knowledge/enterprise/test_chatArchiveTiering.py` 7 格（编译期拒 3＋条目链 3＋e2e 1）。**测试侧三处笔误如实记**：①夹具喂 querySendRows 投影行（键 msgid）而钩子契约是 fetchBatch 六列行（msg_id）——空 msgid 让幂等键退化成同一串、恰好把 replay 断言假绿，改喂真契约后暴露；②e2e 重放轮断言 duplicated==2，实际游标已推进无行可取（钩子不空转），条目幂等归单测档钉；③源钟断言差 1ms（msgtime_ms=base+seq）。
+    - **门**：新档 7 格＋受影响面合跑 **66 passed**；knowledge＋channels 两族全量 **2388 passed／2 skipped**（POSIX 权限两档 Windows skip）。
+    - **页面读数缓办（不冒充完成）**：连接器列表「数据量」与存档范围对齐需新增 i18n 键——11 语言 locale 文件有并发会话在途改动（工作树在册），`git commit --only` locale 会把对方半成品一并扫入；待该会话落格后另小批补（页面文件 EnterpriseSourcesPage.vue 本身无碰撞）。
+    - **仍开**：媒体触发面另批（GetMediaData 分片续传＋独立端点＋引用过期读数裁定）；页面读数小批（i18n 撞车解除后）；真 SDK 部署 live-verify（双态登记）。
+    - **口径（numstat 实抄）**：生产面 `connectors_chat.py` +63/−0（writeArchiveEntries＋sourceFace 位＋docstring）、`registry.py` +11/−0（能力钩子＋entries 计数）、`schema_mapping.py` +14/−0（分档编译守卫）＝净 +88；测试 208 行不计入。
+    - **下一枚空号现查：本格取 587，后继从 588 起。**
