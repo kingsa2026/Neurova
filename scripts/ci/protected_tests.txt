@@ -4294,3 +4294,7 @@ tests/unit/llm/test_requestTypeCapabilityMappingSingleSource.py
 tests/unit/channels/test_channelMediaLandsAsAttachments.py
 # 企微会话存档凭据面（批 C7a 甲案）：配置只收三枚指针、明文进配置在写入口 400 且盘上零改动、就绪读数逐档具名（缺库/文件不在/不可加载/Secret 未设/私钥位数与权限位），凭据齐备仍不冒充读取面已实现
 tests/unit/channels/test_wecomArchiveReadiness.py
+# 企微会话存档读取面（批 C7b）：假 SDK 从 seq+1 起拉取、水位事务推进且重放幂等、未知 publickey_ver 跳过计数、RSA 失败显式抛不落密文、action=recall/switch 落档不入账、msgtime 毫秒转 ISO、limit 钳官方上限 1000
+tests/unit/channels/test_wecomChatArchiveReader.py
+# 解密单源扩展（批 C7b）：RSA PKCS1 半边定义在 wechat_kf_crypto、存档模块 AST 反证无 AES/Cipher（AES 在官方 DecryptData 内）、RSA 失败显式抛且文案不回显密文
+tests/unit/channels/test_wecomCryptoSingleSource.py

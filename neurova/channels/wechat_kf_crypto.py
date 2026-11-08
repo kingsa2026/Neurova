@@ -1,7 +1,13 @@
-"""企业微信回调协议加解密单源（EncodingAESKey 协议）。
+"""企业微信回调协议加解密单源（EncodingAESKey 协议）＋会话存档 RSA 半边。
 
 微信客服（kf）面与自建应用回调面（wecom.py）共用本模块——签名公式、AES-CBC
 加解密、PKCS7、receiveId（corpid）校验只此一份，两处各写一遍必然在某处放宽。
+
+会话存档（批 C7b，方案 §5/§16-1）的解密链是「RSA 本仓半边＋官方 SDK 内 AES」：
+`encrypt_random_key` base64 → RSA PKCS1 私钥解密 → `encrypt_key`，随后连同
+`encrypt_chat_msg` 交官方 `DecryptData` 出明文。AES-CBC 由 SDK 内部完成，
+本仓不实现也不该实现（存档模块再写一份即第二套实装，test_wecomCryptoSingleSource
+以 AST 反证钉住）——故 RSA 是本模块新增的唯一形状。
 """
 from __future__ import annotations
 
@@ -92,3 +98,40 @@ def encryptKfPayload(
     plain = _pad(randomPrefix[:16] + struct.pack(">I", len(body)) + body + receiveId.encode("utf-8"))
     encryptor = Cipher(algorithms.AES(key), modes.CBC(key[:16])).encryptor()
     return base64.b64encode(encryptor.update(plain) + encryptor.finalize()).decode("ascii")
+
+
+def decryptArchiveRandomKey(encryptRandomKeyB64: str, privateKeyPem: bytes) -> bytes:
+    """会话存档解密链的 RSA 半边（批 C7b，方案 §5/§16-1）。
+
+    `encrypt_random_key`（base64）→ RSA PKCS1 私钥解密 → `encrypt_key`（官方
+    `DecryptData` 的 AES 密钥）。失败一律显式抛 ValueError，**不静默返回密文**；
+    异常文案不回显密文/私钥内容。
+    """
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
+
+    try:
+        sealed = base64.b64decode(encryptRandomKeyB64 or "", validate=True)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(
+            "WeCom archive rejected: encrypt_random_key 不是合法 base64（内容不回显）") from exc
+    try:
+        key = serialization.load_pem_private_key(privateKeyPem or b"", password=None)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(
+            "WeCom archive rejected: 私钥不可解析（publickey_ver 映射错误？内容不回显）") from exc
+    try:
+        recovered = key.decrypt(sealed, padding.PKCS1v15())
+    except ValueError as exc:
+        raise ValueError(
+            "WeCom archive rejected: RSA 解密失败——密文与该版本私钥不匹配或已损坏"
+            "（内容不回显）") from exc
+    # 错钥/损坏密文下 cryptography 的 PKCS1v15 解密**可能不抛而返回垃圾**（实测），
+    # 而 encrypt_key 是给官方 DecryptData 做 AES 的密钥——长度只可能是 16/24/32
+    # （AES 全部合法钥长）。链的数学必然：越界长度必不是 encrypt_key，当场显式抛，
+    # 不让垃圾流进 SDK（方案 §5：RSA 失败即显式抛，不静默）。
+    if len(recovered) not in (16, 24, 32):
+        raise ValueError(
+            "WeCom archive rejected: RSA 解出长度 %d 不是合法 AES 密钥长度——"
+            "密文与该版本私钥不匹配或已损坏（内容不回显）" % len(recovered))
+    return recovered
