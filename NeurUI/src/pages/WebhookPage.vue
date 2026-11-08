@@ -76,7 +76,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
@@ -126,23 +126,23 @@ const logColumns = [
   { title: t('system.duration'), dataIndex: 'duration', key: 'duration' },
 ]
 
-const form = reactive({ url: '', events: [] as string[], secret: '', description: '' })
+const form = ref({ url: '', events: [] as string[], secret: '', description: '' })
 
 function resetForm() {
-  form.url = ''
-  form.events = []
-  form.secret = ''
-  form.description = ''
+  form.value.url = ''
+  form.value.events = []
+  form.value.secret = ''
+  form.value.description = ''
   editingId.value = null
 }
 
 function openCreate() { resetForm(); showModal.value = true }
 function openEdit(wh: Webhook) {
   editingId.value = wh.id
-  form.url = wh.url
-  form.events = wh.events ? [...wh.events] : []
-  form.secret = wh.secret ?? ''
-  form.description = wh.description ?? ''
+  form.value.url = wh.url
+  form.value.events = wh.events ? [...wh.events] : []
+  form.value.secret = wh.secret ?? ''
+  form.value.description = wh.description ?? ''
   showModal.value = true
 }
 
@@ -167,7 +167,7 @@ async function fetchWebhooks() {
 async function handleSave() {
   saving.value = true
   try {
-    const payload = { name: form.url, url: form.url, events: form.events, secret: form.secret || undefined }
+    const payload = { name: form.value.url, url: form.value.url, events: form.value.events, secret: form.value.secret || undefined }
     if (editingId.value) {
       await webhookApi.updateWebhook(editingId.value, payload)
     } else {
