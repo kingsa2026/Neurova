@@ -3,7 +3,12 @@
 > **状态：四项待拍板已全部裁定（2026-11-08，用户「选择甲案 其余的需要拍板的按推荐走」）——
 > 架构取甲案，A/B/C/D 各按本文推荐项。**C7a（前置核查＋凭据面＋health 文案）已落格**
 > （台账 §6-584：`channels/wecom_archive.py`＋写入口 400＋health 改接单点，判据 31 格、
-> 六发变异探针各只红该红、live-verify 四判据 exit 0）；C7b/C7c 未开工。
+> 六发变异探针各只红该红、live-verify 四判据 exit 0）；**C7b（读取面＋投影表＋RSA 半边）
+> 已落格**（台账 §6-585：ctypes 薄包装＋`pullArchiveBatch` 按 seq 增量拉＋归一＋
+> `channel_archive_messages` 投影表＋`wechat_kf_crypto` RSA 半边＋`connectors_chat`
+> `chatSource` 两态与存档只读面，新增判据 28 格；实测 cryptography 错钥 PKCS1v15
+> 可能不抛返垃圾，已补 AES 合法钥长判据挡在半边）；**C7c 未开工**（backfill 默认开、
+> 白名单落库前过滤、常驻 worker、水位落后读数、正文分档、页面读数）；媒体触发面另批。
 > C7a 的官方文档核查结论见 §16，它推翻了本文初稿的**四条**前提，
 > 相关各节已就地更正并标注「C7a 核查更正」。**
 > 关联：连接器立项方案 [`2026-11-07-enterprise-source-connectors-plan.md`](2026-11-07-enterprise-source-connectors-plan.md) §2.4-3/§3-C6（本方案是 C6 留下的「历史消息拉取」那一格的兑现路径）；
@@ -402,10 +407,11 @@ corpid 复用既有 `extra.corpid`/`app_id`，**不新造第二个 corpid 字段
     私钥版本→路径映射＋权限位、明文进配置即拒、reason 脱敏）；
   - `connectors_chat._historyGapReason` 改接同一单点，退役恒假的 `WeWorkFinanceSdk` 模块探测；
   - health 三态文案定稿。**不含任何拉取逻辑，不建投影表。**
-- **C7b 读取面与投影表**：在同一个 `channels/wecom_archive.py` 里加 ctypes 薄包装
-  （`NewSdk`/`Init`/`GetChatData`/`DecryptData`）、按 seq 增量拉、归一、落库前过滤；
-  `wechat_kf_crypto` 加 RSA 半边；建 `channel_archive_messages` 投影表；
-  `connectors_chat` 来源参数化、游标换 seq；判据见 §11 的 C7b 三行。
+- **C7b 读取面与投影表（已落格，台账 §6-585）**：在同一个 `channels/wecom_archive.py` 里加 ctypes 薄包装
+  （`NewSdk`/`Init`/`GetChatData`/`DecryptData`＋资源半边 `FreeChatData`/`DestroySdk`）、按 seq 增量拉、归一；
+  `wechat_kf_crypto` 加 RSA 半边（含错钥垃圾挡判据）；建 `channel_archive_messages` 投影表＋`channel_archive_state`
+  水印表（迁移域 `channel_archive` v1）；`connectors_chat` 来源参数化（`chatSource` 两态）、游标换 seq；
+  判据 §11 C7b 三行 28 格全绿（本批改动：白名单落库前过滤移 C7c，与 §14-C 的裁定归属一致）。
 - **C7c 消费面与量控**：首次装配即从 `seq=0` 拉（§8 更正后的 backfill 语义）、
   roomid/成员白名单落库前过滤、常驻增量 worker（与 C2 轮询同节拍，周期远小于 5 天）、
   水位落后超窗即 health 点名、正文分档落点（承 §14-C）、页面读数（连接器列表的
