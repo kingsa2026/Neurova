@@ -35,7 +35,7 @@ anthropic>=0.8.0
 langchain-openai>=1.0
 langchain-anthropic>=1.0
 langchain-ollama>=1.0
-langchain-google-genai>=4.0
+langchain-google-genai>=4.4.3
 
 # 中文分词（知识库 FTS/BM25 通道真分词，缺席自动回退 n-gram）
 jieba>=0.42.1
