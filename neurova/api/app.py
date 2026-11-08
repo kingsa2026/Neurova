@@ -69,6 +69,9 @@ class AppState:
         # 入站持久队列常驻消费者：与 kb_index_task 同一启停纪律。
         self.kb_ingest_task = None
         self.kb_ingest_mqtt_task = None
+        # 企微会话存档常驻拉取（批 C7c，方案 §8：默认关、NEUROVA_WECOM_ARCHIVE_WORKER=on
+        # 启用）：同一启停纪律，关停时 cancel 并等待。
+        self.wecom_archive_task = None
         # 协作 Outbox 排空循环：与上面两条同一启停纪律（关停时 cancel 并等待）。
         self.outbox_drain_task = None
         self.start_time: float = time.time()
@@ -1058,6 +1061,20 @@ async def _on_startup(app_state: AppState) -> None:
     except Exception as _kbMqttErr:  # noqa: BLE001
         logger.warning("知识入站 MQTT 订阅端启动失败（忽略）: %s", _kbMqttErr)
 
+    # 企微会话存档常驻拉取（批 C7c，方案 §8：默认关、NEUROVA_WECOM_ARCHIVE_WORKER=on
+    # 启用；节拍 NEUROVA_WECOM_ARCHIVE_INTERVAL_SECONDS 缺省 300s，须远小于 5 天窗口）。
+    if (os.environ.get("NEUROVA_WECOM_ARCHIVE_WORKER") or "").strip().lower() == "on":
+        try:
+            from neurova.channels.wecom_archive import runArchiveWorkerLoop
+
+            app_state.wecom_archive_task = asyncio.create_task(runArchiveWorkerLoop())
+            app_state.wecom_archive_task.add_done_callback(
+                lambda t: t.exception() if not t.cancelled() else None
+            )
+            logger.info("企微会话存档常驻拉取已启动")
+        except Exception as _archiveWorkerErr:  # noqa: BLE001 - 存档面故障不阻断启动
+            logger.warning("会话存档常驻拉取启动失败（忽略）: %s", _archiveWorkerErr)
+
     # 飞书远程 KB 定时同步循环（P1#11③；NEUROVA_KB_SYNC=off 停用）。fail-open；
     # 仅对 settings.sync_interval_minutes>0 的 active 飞书配置触发，未配置=空转
     if (os.environ.get("NEUROVA_KB_SYNC") or "on").strip().lower() != "off":
@@ -1552,6 +1569,19 @@ async def _on_shutdown(app_state: AppState) -> None:
         except Exception as e:  # noqa: BLE001
             logger.debug("知识入站 MQTT 订阅端收尾异常: %s", e)
     app_state.kb_ingest_mqtt_task = None
+
+    wecomArchiveTask = app_state.wecom_archive_task
+    if wecomArchiveTask is not None and not wecomArchiveTask.done():
+        wecomArchiveTask.cancel()
+        try:
+            await asyncio.wait_for(wecomArchiveTask, timeout=AGENT_SHUTDOWN_TIMEOUT)
+        except asyncio.CancelledError:
+            logger.info("企微会话存档常驻拉取已取消（进入关停）")
+        except asyncio.TimeoutError:
+            logger.warning("会话存档常驻拉取取消超时，跳过")
+        except Exception as e:  # noqa: BLE001
+            logger.debug("会话存档常驻拉取收尾异常: %s", e)
+    app_state.wecom_archive_task = None
 
     # 关停 MCP 会话（stdio 子进程 + AsyncExitStack）。此前生产侧**零调用方**：
     # 会话只能靠 anyio 在 portal 退出时取消，而 stdio reader 阻塞在子进程管道上、

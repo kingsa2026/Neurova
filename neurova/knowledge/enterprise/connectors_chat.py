@@ -309,7 +309,10 @@ class ChatChannelAdapter:
                 status="degraded",
                 reason="%s；会话存档投影面尚未落库: %s（常驻增量拉取属批 C7c 未启动）"
                        % (reading.reason, self._archiveDb))
-        from neurova.channels.wecom_archive import SEND_ROWS_SQL
+        from neurova.channels.wecom_archive import (
+            SEND_ROWS_SQL,
+            watermarkLagReading,
+        )
 
         try:
             conn = sqlite3.connect(self._roUriFor(self._archiveDb), uri=True,
@@ -320,15 +323,19 @@ class ChatChannelAdapter:
                 row = conn.execute(
                     "SELECT COUNT(*) FROM channel_archive_messages"
                     " WHERE action = 'send'").fetchone()
+                state = conn.execute(
+                    "SELECT value, updated_at FROM channel_archive_state"
+                    " WHERE key = 'watermark_seq'").fetchone()
             finally:
                 conn.close()
         except sqlite3.Error as exc:
             return SourceHealth(status="error",
                                 reason="会话存档投影面不可读: %s" % exc)
-        return SourceHealth(
-            status="degraded",
-            reason="%s；存档投影面可达（send 行已落 %d），常驻增量拉取属批 C7c 未启动"
-                   % (reading.reason, row[0]))
+        reason = "%s；存档投影面可达（send 行已落 %d）" % (reading.reason, row[0])
+        lagNote = watermarkLagReading(state[1]) if state else ""
+        if lagNote:
+            reason += "；" + lagNote
+        return SourceHealth(status="degraded", reason=reason)
 
     # ── 游标（token 风格沿用 connectors_file）────────────────
 

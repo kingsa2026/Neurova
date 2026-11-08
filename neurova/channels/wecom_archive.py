@@ -39,6 +39,10 @@ from neurova.core.db_migration import register_migration
 ARCHIVE_SDK_PATH_FIELD = "archiveSdkPath"
 ARCHIVE_SECRET_ENV_FIELD = "archiveSecretEnv"
 ARCHIVE_PRIVATE_KEYS_FIELD = "archivePrivateKeys"
+#: 隐私白名单（批 C7c，方案 §13-1：落库前过滤，不是摄取后再删）。值是 id 列表，
+#: 不是凭据——roomid 全量在存档里，白名单只决定**本系统保留哪些**。
+ARCHIVE_ROOM_ALLOWLIST_FIELD = "archiveRoomAllowlist"
+ARCHIVE_USER_ALLOWLIST_FIELD = "archiveUserAllowlist"
 
 #: 原生库路径的环境注入面（与 `extra.archiveSdkPath` 二选一，extra 优先）
 ARCHIVE_SDK_PATH_ENV = "NEUROVA_WECOM_ARCHIVE_SDK"
@@ -60,14 +64,16 @@ class ArchiveConfigError(ValueError):
 
 @dataclass(frozen=True)
 class ArchiveReadiness:
-    """就绪读数：只有 status 与 reason 两个字段，两者都有生产消费方。
+    """就绪读数：status/reason 是对外文案面，ready 是机器可判的拉取前提位。
 
-    status ∈ ok/degraded/error；C7a 不产 ok（读取面未实现，报 ok 即冒充全量可达）。
+    status ∈ degraded/error（C7a 起不产 ok：覆盖范围由席位与成员同意决定，
+    代码验不到；ready=True 只表示「凭据面全就位、可以去拉」，不代表全量可达）。
     reason 一律不含密钥值、私钥内容与消息正文。
     """
 
     status: str
     reason: str
+    ready: bool = False
 
 
 def validateArchiveExtra(extra: Any) -> None:
@@ -94,6 +100,14 @@ def validateArchiveExtra(extra: Any) -> None:
     elif keyMap is not None and _PEM_MARKER in str(keyMap):
         raise ArchiveConfigError(
             "%s 只放私钥文件路径，不放 PEM 内容" % ARCHIVE_PRIVATE_KEYS_FIELD)
+    for field_ in (ARCHIVE_ROOM_ALLOWLIST_FIELD, ARCHIVE_USER_ALLOWLIST_FIELD):
+        allowlist = extra.get(field_)
+        if allowlist is None:
+            continue
+        if not isinstance(allowlist, list) or any(
+                not isinstance(item, str) for item in allowlist):
+            raise ArchiveConfigError(
+                "%s 必须是字符串 id 列表（roomid/userid），当前形状不合" % field_)
 
 
 def archiveReadiness(extra: Optional[Mapping[str, Any]] = None) -> ArchiveReadiness:
@@ -177,11 +191,10 @@ def archiveReadiness(extra: Optional[Mapping[str, Any]] = None) -> ArchiveReadin
     if problems:
         return ArchiveReadiness(status="error",
                                 reason="会话存档凭据面不合口径：" + "；".join(problems))
-    reason = ("会话存档原生库与凭据就绪（读取面批 C7b 已实现）；常驻增量拉取与"
-              "水位读数属批 C7c 未启动，投影面暂无自动落库")
+    reason = "会话存档原生库与凭据就绪（读取面批 C7b 已实现）"
     if notes:
         reason += "；" + "；".join(dict.fromkeys(notes))
-    return ArchiveReadiness(status="degraded", reason=reason)
+    return ArchiveReadiness(status="degraded", reason=reason, ready=True)
 
 
 def wecomArchiveReadiness(agentId: str = "default") -> ArchiveReadiness:
@@ -617,3 +630,209 @@ class ArchiveProjectionStore:
     def close(self) -> None:
         with self._lock:
             self._conn.close()
+
+
+# ══ 批 C7c：落库前白名单过滤＋常驻增量拉取（worker）══
+
+#: 常驻拉取节拍（秒）：默认 5 分钟，须**远小于**官方 5 天窗口（方案 §8——
+#: 停拉超过 5 天那段历史永久取不回，节拍与水位落后读数共同防静默丢历史）。
+ARCHIVE_WORKER_DEFAULT_INTERVAL_SECONDS = 300
+ARCHIVE_WORKER_INTERVAL_ENV = "NEUROVA_WECOM_ARCHIVE_INTERVAL_SECONDS"
+#: 常驻开关 env（方案 §8：通道层定时任务默认关、env 门控）
+ARCHIVE_WORKER_ENV = "NEUROVA_WECOM_ARCHIVE_WORKER"
+#: 每轮最大批数×批大小＝单轮自我节流上限（对齐 registry 的 20×200=4000 行/轮口径；
+#: 与官方 4000 次/分钟速率限制不是一回事，方案 §8）
+ARCHIVE_WORKER_BATCHES_PER_CYCLE = 20
+ARCHIVE_WORKER_BATCH_LIMIT = 200
+#: 官方硬窗口（天）：水位落后超过它＝那段历史永久取不回（方案 §3/§8/§16-1）
+ARCHIVE_WINDOW_DAYS = 5
+
+
+def applyArchiveAllowlist(rows: List[Dict[str, Any]],
+                          roomAllowlist: Sequence[str],
+                          userAllowlist: Sequence[str]) -> Tuple[List[Dict[str, Any]], int]:
+    """隐私白名单**落库前**过滤（方案 §13-1：不是摄取后再删）。
+
+    - `archiveRoomAllowlist` 非空 → 群聊行只保留 roomid 在名单内的；
+    - `archiveUserAllowlist` 非空 → 行的参与者（from/tolist）须与名单有交集；
+    - 两者都给＝同时满足（AND）；都空＝不过滤（白名单是隐私缓解手段，
+      不是功能开关——没有名单时如实全量落投影，靠部署侧配置约束范围）。
+    返回 (保留行, 过滤掉的数量)——过滤数进 health/读数，不许静默丢。
+    """
+    rooms = {str(r) for r in (roomAllowlist or [])}
+    users = {str(u) for u in (userAllowlist or [])}
+    if not rooms and not users:
+        return list(rows), 0
+    kept: List[Dict[str, Any]] = []
+    filtered = 0
+    for row in rows:
+        if rooms and (not row.get("roomid") or row["roomid"] not in rooms):
+            filtered += 1
+            continue
+        if users:
+            try:
+                tolist = json.loads(row.get("tolist") or "[]")
+            except (TypeError, ValueError):
+                tolist = []
+            participants = {str(row.get("from_id") or "")} | {str(t) for t in tolist}
+            if not (participants & users):
+                filtered += 1
+                continue
+        kept.append(row)
+    return kept, filtered
+
+
+def _archiveWorkerContexts(agentId: str) -> List[Dict[str, Any]]:
+    """装配好的企微渠道 → 存档拉取上下文（凭据在此解引用，不过企业源的手）。"""
+    from neurova.channels.manager import get_channel_manager
+
+    contexts: List[Dict[str, Any]] = []
+    adapter = get_channel_manager().get_adapter("wecom", agent_id=str(agentId or "default"))
+    if adapter is None:
+        return contexts
+    extra = adapter.config.extra or {}
+    reading = archiveReadiness(extra)
+    if not reading.ready:
+        contexts.append({"agentId": str(agentId or "default"), "ready": False,
+                         "reason": reading.reason})
+        return contexts
+    secretEnv = str(extra.get(ARCHIVE_SECRET_ENV_FIELD) or "").strip()
+    keyMap: Dict[str, bytes] = {}
+    for version, rawPath in (extra.get(ARCHIVE_PRIVATE_KEYS_FIELD) or {}).items():
+        keyMap[str(version)] = Path(str(rawPath)).read_bytes()
+    contexts.append({
+        "agentId": str(agentId or "default"),
+        "ready": True,
+        "sdkPath": (str(extra.get(ARCHIVE_SDK_PATH_FIELD) or "").strip()
+                    or os.environ.get(ARCHIVE_SDK_PATH_ENV, "").strip()),
+        "corpid": str(extra.get("corpid") or extra.get("app_id") or ""),
+        "secret": os.environ.get(secretEnv, ""),
+        "keyMap": keyMap,
+        "roomAllowlist": list(extra.get(ARCHIVE_ROOM_ALLOWLIST_FIELD) or []),
+        "userAllowlist": list(extra.get(ARCHIVE_USER_ALLOWLIST_FIELD) or []),
+    })
+    return contexts
+
+
+def runArchiveWorkerCycle(agentId: str = "default", *,
+                          sdkFactory: Any = None,
+                          storeFactory: Any = None,
+                          batchesPerCycle: int = ARCHIVE_WORKER_BATCHES_PER_CYCLE,
+                          batchLimit: int = ARCHIVE_WORKER_BATCH_LIMIT) -> Dict[str, Any]:
+    """常驻拉取的单轮：凭据就绪则从**已存水位**增量拉到当前水位，落库前过白名单。
+
+    - **backfill 默认开（方案 §8 更正后语义）**：水位初始 0＝首轮即从 seq=0 拉到
+      当前水位——5 天窗口下不拉就永久丢，不存在「要不要回溯」的开关可关；
+    - 单轮批量上限＝batchesPerCycle×batchLimit（自我节流，与官方速率上限两回事）；
+    - 每批「拉取→过滤→落库＋推水印」事务收口，任一批失败整轮抛出（下轮从水位续拉）；
+    - sdkFactory/storeFactory 是测试注入口（假 SDK／临时库），生产缺省走真件。
+    """
+    from neurova.core.data_root import callerPath
+
+    contexts = _archiveWorkerContexts(agentId)
+    if not contexts:
+        return {"status": "skipped", "reason": "企微通道未装配（agent=%s）" % agentId}
+    context = contexts[0]
+    if not context.get("ready"):
+        return {"status": "skipped", "reason": str(context.get("reason") or "")}
+    dbPath = callerPath(os.environ.get(CHANNEL_ARCHIVE_DB_ENV), "channel_archive.db")
+    store = storeFactory(dbPath) if storeFactory else ArchiveProjectionStore(dbPath)
+    sdk = None
+    try:
+        if sdkFactory is not None:
+            sdk = sdkFactory()
+        else:
+            secret = str(context.get("secret") or "")
+            sdk = ArchiveSdkHandle(str(context["sdkPath"]),
+                                   str(context.get("corpid") or ""), secret)
+        watermark = store.watermark()
+        writtenTotal = 0
+        counts: Dict[str, int] = {}
+        filteredTotal = 0
+        for _ in range(max(1, int(batchesPerCycle))):
+            result = pullArchiveBatch(sdk, watermark, batchLimit, context["keyMap"])
+            kept, filtered = applyArchiveAllowlist(
+                result.rows,
+                context.get("roomAllowlist") or [],
+                context.get("userAllowlist") or [])
+            filteredTotal += filtered
+            for name, value in result.counts.items():
+                counts[name] = counts.get(name, 0) + value
+            store.appendBatch(kept, result.nextSeq)
+            writtenTotal += len(kept)
+            watermark = result.nextSeq
+            if not result.hasMore:
+                break
+        return {"status": "ok", "written": writtenTotal, "filtered": filteredTotal,
+                "watermark": int(watermark), "counts": counts}
+    finally:
+        if sdk is not None and hasattr(sdk, "close"):
+            sdk.close()
+        store.close()
+
+
+async def runArchiveWorkerLoop(intervalSeconds: Optional[float] = None,
+                               stopEvent: Any = None) -> None:
+    """常驻轮询环：周期跑 runArchiveWorkerCycle（ctypes 阻塞调用进线程池）。
+
+    单轮失败下轮再试（对齐 ingest_bridge.runIngestWorker 的容错口径）；
+    间隔取 `NEUROVA_WECOM_ARCHIVE_INTERVAL_SECONDS`，缺省 300s。"""
+    import asyncio
+
+    from neurova.core.logger import get_logger
+
+    logger = get_logger(__name__)
+    rawInterval = (intervalSeconds
+                   or os.environ.get(ARCHIVE_WORKER_INTERVAL_ENV)
+                   or ARCHIVE_WORKER_DEFAULT_INTERVAL_SECONDS)
+    interval = max(5.0, float(rawInterval))
+    while True:
+        if stopEvent is not None and stopEvent.is_set():
+            return
+        try:
+            outcome = await asyncio.to_thread(runArchiveWorkerCycle)
+            if outcome.get("status") != "ok":
+                logger.info("会话存档拉取轮跳过: %s", outcome.get("reason") or "")
+            else:
+                logger.info("会话存档拉取轮完成: written=%s watermark=%s",
+                            outcome.get("written"), outcome.get("watermark"))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - 单轮失败下轮再试，不打死进程
+            logger.warning("会话存档拉取单轮失败: %s", exc)
+        try:
+            if stopEvent is not None:
+                await asyncio.wait_for(stopEvent.wait(), timeout=interval)
+            else:
+                await asyncio.sleep(interval)
+        except asyncio.TimeoutError:
+            continue
+
+
+def watermarkLagDays(updatedAtIso: str) -> Optional[int]:
+    """水位落后天数（now − updated_at 向下取整）；无时间戳返回 None。"""
+    if not updatedAtIso:
+        return None
+    try:
+        stamp = _dt.datetime.fromisoformat(str(updatedAtIso))
+    except ValueError:
+        return None
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=_dt.timezone.utc)
+    return int((_dt.datetime.now(_dt.timezone.utc) - stamp).total_seconds() // 86400)
+
+
+def watermarkLagReading(updatedAtIso: str) -> str:
+    """水位落后读数（方案 §8：health 须能报「水位落后多久」，否则静默丢历史）。
+
+    落后 ≥ 官方 5 天窗口 → 点名「落后的历史已不可取回」；窗口内 → 只报天数。
+    """
+    lag = watermarkLagDays(updatedAtIso)
+    if lag is None:
+        return ""
+    if lag >= ARCHIVE_WINDOW_DAYS:
+        return "水位落后 %d 天——已超过官方 %d 天窗口，落后的历史**不可取回**" % (
+            lag, ARCHIVE_WINDOW_DAYS)
+    if lag >= 1:
+        return "水位落后 %d 天" % lag
+    return ""

@@ -1554,3 +1554,5 @@ tests/unit/channels/test_wecomArchiveReadiness.py
 tests/unit/channels/test_wecomChatArchiveReader.py
 # 解密单源扩展（批 C7b）：RSA PKCS1 半边定义在 wechat_kf_crypto、存档模块 AST 反证无 AES/Cipher（AES 在官方 DecryptData 内）、RSA 失败显式抛且文案不回显密文
 tests/unit/channels/test_wecomCryptoSingleSource.py
+# 企微会话存档常驻 worker（批 C7c）：白名单落库前过滤（AND 语义、过滤数可读不静默丢）、backfill 默认开水位 0 起、批量失败整轮抛不落半行、凭据未就绪轮跳过、水位落后超 5 天 health 点名不可取回、worker env 门控默认关
+tests/unit/channels/test_wecomArchiveWorker.py
