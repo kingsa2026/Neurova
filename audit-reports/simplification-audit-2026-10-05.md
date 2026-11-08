@@ -12200,3 +12200,13 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **仍开**：C7c（backfill 默认开、roomid/成员白名单落库前过滤、常驻 worker、水位落后读数、正文分档、页面读数）；媒体触发面另批（GetMediaData 分片续传）；真 SDK 部署 live-verify 待真库件（假夹具全链绿＋真租户待配在册，双态登记不冒充，§12-2）。
     - **口径（numstat 实抄）**：生产面 `wecom_archive.py` +413/−21（413＝C7b 读取面与投影表本体，含原 C7a docstring 同步）、`wechat_kf_crypto.py` +44/−1（RSA 半边＋docstring）、`connectors_chat.py` +147/−9（两态参数化＋存档只读面）；requirements 零新增（ctypes 标准库＋cryptography 已在生产依赖）。测试不计入：三档判据 593 行；`scripts/ci/protected_tests*` +8/−0。工作树并发会话在途件（NeurUI i18n 等）不归本笔。
     - **下一枚空号现查：本格取 585，后继从 586 起。**
+586. **批 C7c 第一块落格：白名单落库前过滤＋常驻增量 worker（env 门控默认关）＋水位落后读数** ✅🟢 —— 承 §6-585 的 C7c 分批（用户「请继续」）；正文分档与页面读数仍开。
+    - **隐私白名单（§13-1 的兑现）**：`extra.archiveRoomAllowlist`／`archiveUserAllowlist`＝字符串 id 列表（形状校验进 `validateArchiveExtra`，非列表/含非串即 400＋读边界 error）；`applyArchiveAllowlist` 在**通道层落库前**过滤（不是摄取后再删）——群名单非空只留名单内 roomid、参与者名单非空要求 from/tolist 有交集、同给＝AND、都空＝不过滤（白名单是隐私缓解手段不是功能开关）；过滤数随轮次返回，**不静默丢**；被过滤的行也推进水位（不重拉）。
+    - **常驻 worker**：`runArchiveWorkerCycle`（凭据解引用在通道层——`_archiveWorkerContexts` 走真 `archiveReadiness` 判据，ready 位新增＝机器可判「凭据全就位」，status/reason 文案面不变）→ 按**已存水位**增量拉（**backfill 默认开＝水位初始 0 即从 seq=0 拉到当前水位，§8 更正后语义：不存在「要不要回溯」的开关，5 天窗口下不拉就永久丢**）→ 白名单过滤 → 事务落库推水印；单轮自我节流 20×200＝4000 行（与官方 4000 次/分钟两回事）；任一批失败整轮抛、下轮从水位续拉（实测断言：成功批推进水位、失败批零落库）；`runArchiveWorkerLoop`＝asyncio 轮询环，ctypes 阻塞调用进 `asyncio.to_thread`，间隔 `NEUROVA_WECOM_ARCHIVE_INTERVAL_SECONDS` 缺省 300s（远小于 5 天窗口），单轮失败下轮再试（ingest_bridge 容错口径）。
+    - **接线（启停成对）**：`app.py` lifespan 增 env 门控块（`NEUROVA_WECOM_ARCHIVE_WORKER=on` 启用，**缺省空串＝默认关**）＋`AppState.wecom_archive_task` 字段＋关停 cancel 块——同一启停纪律，不留只写不读的 task。判据钉住「门控缺省空串」，防接线块被改成默认 on。
+    - **水位落后读数（§8 静默丢历史防线）**：`watermarkLagReading`＝now−updated_at 取整；≥`ARCHIVE_WINDOW_DAYS`(5) 点名「落后的历史**不可取回**」、窗口内报天数、无/坏时间戳不编数；`connectors_chat._archiveHealth` 读 state 表水位时间戳并拼进 reason。
+    - **判据**：新增 `tests/unit/channels/test_wecomArchiveWorker.py` 13 格（白名单 5＋worker 6＋水位读数 2）——渠道装配面用假适配器替身（config.extra 真字典走**真** archiveReadiness 校验）、真 RSA-2048、真投影库（env 注入 tmp），SDK 面仍假（同 C7b 双态登记口径）。**门**：C7 存档面全族合跑 **85 passed／2 skipped**；`test_protected_subset_shards` 2 failed 与登记前同形（7 条 derivation 缺片预存红，§6-584 在册），本批登记走索引＋分片 2 两处（+2/−0 逐处），未新增漂移。`neurova.api.app` 导入自证 ok。
+    - **在册**：`test_wecomArchiveWorker.py` 单跑全绿登记进 protected_tests 索引与分片 2（逐处 +2/−0）。
+    - **仍开**：C7c 第二块（正文分档——条目链承正文、facts 承结构化，§14-C；页面「数据量」读数与存档范围对齐）；媒体触发面另批；真 SDK 部署 live-verify 待真库件（双态登记）。
+    - **口径（numstat 实抄）**：生产面 `wecom_archive.py` +225/−6（C7c 块：白名单/worker/水位读数）、`app.py` +30/−0（接线与启停）、`connectors_chat.py` +12/−5（health 水位读数）；测试 330 行不计入；protected_tests +4/−0。
+    - **下一枚空号现查：本格取 586，后继从 587 起。**
