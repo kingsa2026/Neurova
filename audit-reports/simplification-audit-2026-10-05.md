@@ -12609,3 +12609,14 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **本轮另一处如实登记**：第一次起第 3 片时把 `COVERAGE_FILE=...` 写在 pytest 参数位后面，pytest 把它当成「文件或目录」收下，以 `ERROR: file or directory not found` 收场、返回码 4——**属我的命令行写错，不属仓内缺陷**；改成环境变量前缀后同一份清单 `2992 passed / RC=0`。
     - **需要你在组织侧做的一件事**：`组织 → 设置 → 用量管理` 给「云原生构建-CPU」提额（或绑腾讯云 CNB 预算，超额 ¥0.125/核时）。普通池连 1 核（0.17 核时）都拒，`pull_request` 那条腿在提额前无法变绿；这不是代码能修的项。
     - **净 LOC**：文档本格追加，生产代码 +0、配置 +0、测试 +0。**下一枚空号现查：本格取 596，后继从 597 起。**
+    - **补记（PR 头 `46749151` 的活体验证，NPC 通道）**：本格落定后新起两条探针，验「文档笔有没有把判据带红」：
+      ```
+      cnb-1bi-1k6skebeu   ledger + numbering + reachability guards   success  11.4s
+                          （audit_ledger_commit_guard.py → 1398 条引用全可达，例外清单署名 5 条；
+                            台账三档 + 净 LOC 复算一档全绿）
+                          shipped artifacts drift                      success  31.0s  → docs/ 零漂移
+      cnb-m7q-1k6skk3kh   protected subset budget and parity guards   success  11.8s
+                          （预算 / 父墙 / 分片 / 基线物化 / 对齐五档全绿）
+      ```
+      两条 stage 红同样**红在我的探针路径写错**、不在仓里：`test_auditLedgerReachabilitySingleProbe.py` 与 `test_ci_parity_guard.py` 我按 `tests/unit/ci/` 写，实际都在 `tests/unit/`，pytest 以 `ERROR: file or directory not found` 收场、返回码 4（与 §6-594/§6-595 同一形态，第三次踩）。改正路径后同一批全绿。
+    - **净 LOC（本格补记这笔）**：生产池 +0/−0；测试/基建池 +11/−0（只动 `audit-reports/` 台账）。
