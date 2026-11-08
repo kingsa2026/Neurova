@@ -31,6 +31,10 @@ class EnterpriseSourceWriteRequest(BaseModel):
     enabled: bool = False
 
 
+class EnterpriseMediaTriggerRequest(BaseModel):
+    msg_id: str = ""
+
+
 def _tenantOf(current_user: Dict[str, Any]) -> str:
     return str(current_user.get("tenant_id") or "default")
 
@@ -161,6 +165,64 @@ async def triggerEnterpriseIngest(
     config = ingestor.loadConfig(tenant, sourceId) or {}
     return {"code": 0, "message": "success",
             "data": {"result": result, "source": _view(sourceId, config, adapters, store)}}
+
+
+@router.post("/enterprise/sources/{source_id}/media")
+async def triggerEnterpriseMediaFetch(
+    source_id: str,
+    body: EnterpriseMediaTriggerRequest,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """手动触发单条附件取回（批 C7c 第三块，方案 §10-甲裁定，仅管理员）。
+
+    语义＝「取回这一条」：存档面源＋消息体携带 sdkfileid → 通道层
+    GetMediaData 分片续传取字节 → 暂存 dataLanding(tmp, archive-media) →
+    投影回写 media_staged_path（「已采集」机器可判，与「有引用」不互冒充）。
+
+    - 非存档源 400（媒体触发面仅 chatSource=archive）；
+    - 凭据未就绪 409（配置面/原生库/Secret/私钥哪档缺点名）；
+    - 无记录或无附件引用 404（诚实读数，不假装有附件）；
+    - 引用过期/取回失败 502 原话（ArchiveMediaUnavailable 与一般失败分开读数，
+      方案 §10 附带约束：引用有效期与存档窗口同族，「有引用」≠「可检索」）。
+    """
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(
+            status_code=403, detail="企业源附件取回是治理动作，仅管理员可执行")
+    sourceId = str(source_id or "").strip()
+    msgId = str(body.msg_id or "").strip()
+    if not sourceId or not msgId:
+        raise HTTPException(status_code=400, detail="source_id 与 msg_id 不能为空")
+    ingestor, _adapters, _store = _parts()
+    tenant = _tenantOf(current_user)
+    config = ingestor.loadConfig(tenant, sourceId)
+    if config is None:
+        raise HTTPException(status_code=404, detail="source 配置不存在")
+    descriptor = dict(config["descriptor"])
+    if (str(descriptor.get("sourceType") or "") != "chat"
+            or str(descriptor.get("chatSource") or "") != "archive"):
+        raise HTTPException(
+            status_code=400, detail="媒体触发面仅存档源可用（chatSource=archive）")
+    from neurova.channels import wecom_archive
+
+    agentId = str(descriptor.get("agentId") or "default")
+    contexts = wecom_archive._archiveWorkerContexts(agentId)
+    context = contexts[0] if contexts else None
+    if not context or not context.get("ready"):
+        reason = str((context or {}).get("reason") or "企微通道未装配")
+        raise HTTPException(status_code=409, detail="存档凭据未就绪：%s" % reason)
+    archiveDb = wecom_archive.resolveArchiveDbPath(descriptor)
+    sdk = wecom_archive.buildArchiveSdkForContext(context)
+    try:
+        outcome = wecom_archive.stageArchiveMedia(archiveDb, msgId, sdk)
+    except wecom_archive.ArchiveMediaUnavailable as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    except wecom_archive.ArchiveSdkError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    finally:
+        sdk.close()
+    if outcome.get("status") == "no_media":
+        raise HTTPException(status_code=404, detail="该消息无附件引用（msg_id=%s）" % msgId)
+    return {"code": 0, "message": "success", "data": outcome}
 
 
 @router.get("/enterprise/sources/{source_id}/health")

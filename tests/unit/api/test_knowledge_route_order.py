@@ -105,6 +105,11 @@ _KB_ROUTES = [
     # B14 企业源描述符提交面（两段字面路径，注册先于 GET /{knowledge_id}）。
     ("/enterprise/sources", "GET"), ("/enterprise/sources", "POST"),
     ("/enterprise/sources/{source_id}", "GET"),
+    ("/enterprise/sources/{source_id}/media", "POST"),
+    # §6-582 页面重设计批的三条生命周期面（真实路由对账补登，2026-11-09 媒体面批顺手收正）
+    ("/enterprise/sources/{source_id}", "DELETE"),
+    ("/enterprise/sources/{source_id}/health", "GET"),
+    ("/enterprise/sources/{source_id}/ingest", "POST"),
     ("/ontology/impact", "GET"),
     ("/ontology/terms", "POST"),
     ("/ontology/terms/{term_id}", "PUT"),

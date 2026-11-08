@@ -4300,3 +4300,5 @@ tests/unit/channels/test_wecomChatArchiveReader.py
 tests/unit/channels/test_wecomCryptoSingleSource.py
 # 企微会话存档常驻 worker（批 C7c）：白名单落库前过滤（AND 语义、过滤数可读不静默丢）、backfill 默认开水位 0 起、批量失败整轮抛不落半行、凭据未就绪轮跳过、水位落后超 5 天 health 点名不可取回、worker env 门控默认关
 tests/unit/channels/test_wecomArchiveWorker.py
+# 企微会话存档媒体触发面（批 C7c 第三块）：GetMediaData 续传环 indexbuf 首空后续喂 outindex、分片拼接完成即止、引用过期 ArchiveMediaUnavailable 独立读数、未完成无索引与超上限异常、缺导出点名、暂存回写 media_staged_path 幂等、端点 admin 门与非存档源 400/凭据未就绪 409/无引用 404/过期 502
+tests/unit/channels/test_wecomArchiveMedia.py

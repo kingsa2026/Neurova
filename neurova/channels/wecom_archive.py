@@ -301,8 +301,29 @@ SEND_ROWS_SQL = (
 register_migration(1, _ARCHIVE_SCHEMA, domain="channel_archive")
 
 
+def _migrateArchiveV2MediaColumns(conn) -> None:
+    """v2（媒体触发面批）：附件落盘读数两列——原始文件名（file 消息体携带）
+    与暂存路径（触发取回后回写；空＝「有引用未采集」）。"""
+    existing = [row[1] for row in
+                conn.execute("PRAGMA table_info(channel_archive_messages)").fetchall()]
+    for column in ("media_name", "media_staged_path"):
+        if column not in existing:
+            conn.execute("ALTER TABLE channel_archive_messages"
+                         " ADD COLUMN %s TEXT NOT NULL DEFAULT ''" % column)
+
+
+register_migration(2, _migrateArchiveV2MediaColumns, domain="channel_archive")
+
+
 class ArchiveSdkError(RuntimeError):
     """官方 C 动态库调用失败（加载缺导出/句柄失败/接口非零返回/JSON 形状不合）。"""
+
+
+class ArchiveMediaUnavailable(ArchiveSdkError):
+    """媒体引用取不回字节：引用过期（与存档窗口同族）/网络不可达/权限缺失。
+
+    独立具名类型——端点把「引用过期」与一般失败分开读数（方案 §10 附带约束：
+    不许把「有引用」报成「附件可检索」）。"""
 
 
 def _nowIso() -> str:
@@ -350,7 +371,12 @@ class ArchiveSdkHandle:
     """
 
     _EXPORTS = ("NewSdk", "Init", "GetChatData", "DecryptData",
-                "FreeChatData", "DestroySdk")
+                "FreeChatData", "DestroySdk",
+                # 媒体面（官方文档 91774 实证，2026-11-09 浏览器渲染取全文）：
+                # GetMediaData(sdk, indexbuf, sdkfileid, proxy, passwd, int timeout,
+                # MediaData_t*) ＋ 结构体工具五件
+                "GetMediaData", "NewMediaData", "FreeMediaData",
+                "GetOutIndexBuf", "GetData", "IsMediaDataFinish")
 
     def __init__(self, libraryPath: str, corpid: str, secret: str) -> None:
         lib = ctypes.CDLL(str(libraryPath))
@@ -374,6 +400,23 @@ class ArchiveSdkHandle:
         lib.DecryptData.restype = ctypes.c_int
         lib.DestroySdk.argtypes = [ctypes.c_void_p]
         lib.DestroySdk.restype = None
+        # 媒体面：GetMediaData 第 6 参 timeout 是 int（非 unsigned），
+        # 输出是 MediaData_t* 结构体句柄（先 NewMediaData 建，工具函数访问内容）
+        lib.GetMediaData.argtypes = [
+            ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p,
+            ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_void_p,
+        ]
+        lib.GetMediaData.restype = ctypes.c_int
+        lib.NewMediaData.argtypes = []
+        lib.NewMediaData.restype = ctypes.c_void_p
+        lib.FreeMediaData.argtypes = [ctypes.c_void_p]
+        lib.FreeMediaData.restype = None
+        lib.GetOutIndexBuf.argtypes = [ctypes.c_void_p]
+        lib.GetOutIndexBuf.restype = ctypes.c_char_p
+        lib.GetData.argtypes = [ctypes.c_void_p]
+        lib.GetData.restype = ctypes.c_char_p
+        lib.IsMediaDataFinish.argtypes = [ctypes.c_void_p]
+        lib.IsMediaDataFinish.restype = ctypes.c_int
 
         handle = lib.NewSdk()
         if not handle:
@@ -412,6 +455,42 @@ class ArchiveSdkHandle:
             raise ArchiveSdkError("DecryptData 失败 ret=%d" % ret)
         return bytes(out.value or b"")
 
+    def getMediaData(self, sdkfileid: str, timeout: int = 30) -> bytes:
+        """sdkfileid → 媒体字节（解密后内容；index_buf 分片续传，方案 §16-1）。
+
+        官方口径（文档 91774 实证）：首次 indexbuf 空、后续填上次 GetOutIndexBuf
+        的返回；分片单次最大 512K；IsMediaDataFinish=1 为完成。ret≠0 视为
+        **引用过期或网络不可达**（ArchiveMediaUnavailable，端点分开读数）。
+        ⚠ live-verify 必核（双态登记）：GetData 返回 char* 无显式长度工具——
+        媒体分片若含 \\0 存在 ctypes 截断风险，须以真库分片验证（必要时换
+        POINTER(c_char)＋长度面）。
+        """
+        media = self._lib.NewMediaData()
+        if not media:
+            raise ArchiveSdkError("NewMediaData() 返回空句柄")
+        try:
+            indexBuf = b""
+            chunks: List[bytes] = []
+            for _ in range(ARCHIVE_MEDIA_MAX_CHUNKS):
+                ret = self._lib.GetMediaData(
+                    self._handle, indexBuf, str(sdkfileid or "").encode("utf-8"),
+                    b"", b"", ctypes.c_int(int(timeout)), ctypes.c_void_p(media))
+                if ret != 0:
+                    raise ArchiveMediaUnavailable(
+                        "GetMediaData 失败 ret=%d——媒体引用已过期（与存档窗口同族）"
+                        "或网络/权限不可达" % ret)
+                chunks.append(bytes(self._lib.GetData(media) or b""))
+                if self._lib.IsMediaDataFinish(media) == 1:
+                    return b"".join(chunks)
+                indexBuf = self._lib.GetOutIndexBuf(media) or b""
+                if not indexBuf:
+                    raise ArchiveSdkError(
+                        "媒体分片未完成但续传索引为空——分片状态异常（sdkfileid 尾段）")
+            raise ArchiveSdkError(
+                "媒体分片数超上限 %d（单分片 512K）——媒体尺寸异常" % ARCHIVE_MEDIA_MAX_CHUNKS)
+        finally:
+            self._lib.FreeMediaData(ctypes.c_void_p(media))
+
     def close(self) -> None:
         handle = getattr(self, "_handle", None)
         if handle:
@@ -435,9 +514,11 @@ def _archiveRowFromPlain(seq: int, msgid: str, plain: Dict[str, Any]) -> Dict[st
     body = plain.get(msgtype) if isinstance(plain.get(msgtype), dict) else {}
     text = ""
     mediaRef = ""
+    mediaName = ""
     if msgtype == "text":
         text = str(body.get("content") or "")
     elif msgtype in _MEDIA_MSGTYPES:
+        mediaName = str(body.get("file_name") or "")
         if msgtype == "mixed":
             items = body.get("content") if isinstance(body.get("content"), list) else []
             for item in items:
@@ -463,6 +544,7 @@ def _archiveRowFromPlain(seq: int, msgid: str, plain: Dict[str, Any]) -> Dict[st
         "msgtime_ms": int(plain.get("msgtime") or 0),
         "text": text,
         "media_ref": mediaRef,
+        "media_name": mediaName,
     }
 
 
@@ -576,8 +658,9 @@ class ArchiveProjectionStore:
                     cur.execute(
                         "INSERT OR IGNORE INTO channel_archive_messages ("
                         " seq, msgid, publickey_ver, action, msgtype, from_id,"
-                        " tolist, roomid, msgtime_ms, text, media_ref, fetched_at"
-                        ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                        " tolist, roomid, msgtime_ms, text, media_ref, fetched_at,"
+                        " media_name, media_staged_path"
+                        ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (int(row["seq"]), str(row.get("msgid") or ""),
                          str(row.get("publickey_ver") or ""),
                          str(row.get("action") or "send"),
@@ -587,7 +670,8 @@ class ArchiveProjectionStore:
                          str(row.get("roomid") or ""),
                          int(row.get("msgtime_ms") or 0),
                          str(row.get("text") or ""),
-                         str(row.get("media_ref") or ""), stamped))
+                         str(row.get("media_ref") or ""), stamped,
+                         str(row.get("media_name") or ""), ""))
                     written += max(0, cur.rowcount)
                 cur.execute(
                     "INSERT INTO channel_archive_state (key, value, updated_at)"
@@ -646,6 +730,8 @@ ARCHIVE_WORKER_BATCHES_PER_CYCLE = 20
 ARCHIVE_WORKER_BATCH_LIMIT = 200
 #: 官方硬窗口（天）：水位落后超过它＝那段历史永久取不回（方案 §3/§8/§16-1）
 ARCHIVE_WINDOW_DAYS = 5
+#: 媒体分片上限：单分片 512K（官方口径）× 4096 ＝ 2GB 封顶，防续传环失控
+ARCHIVE_MEDIA_MAX_CHUNKS = 4096
 
 
 def applyArchiveAllowlist(rows: List[Dict[str, Any]],
@@ -712,6 +798,25 @@ def _archiveWorkerContexts(agentId: str) -> List[Dict[str, Any]]:
         "userAllowlist": list(extra.get(ARCHIVE_USER_ALLOWLIST_FIELD) or []),
     })
     return contexts
+
+
+def resolveArchiveDbPath(descriptor: Mapping[str, Any]) -> Path:
+    """投影库落点（描述符显式 archiveDb 优先，缺省 NEUROVA_CHANNEL_ARCHIVE_DB
+    注入、数据根 channel_archive.db）——端点与适配器共用同一注入口径。"""
+    from neurova.core.data_root import callerPath
+
+    explicit = str((descriptor or {}).get("archiveDb") or "").strip()
+    if explicit:
+        return Path(explicit)
+    return callerPath(os.environ.get(CHANNEL_ARCHIVE_DB_ENV), "channel_archive.db")
+
+
+def buildArchiveSdkForContext(context: Mapping[str, Any]) -> "ArchiveSdkHandle":
+    """按 worker 上下文建 SDK 句柄（进程级句柄的短生命周期形态：单次触发用完即关；
+    常驻 worker 的长句柄由循环持有）。测试经 monkeypatch 此函数注入假 SDK。"""
+    return ArchiveSdkHandle(str(context["sdkPath"]),
+                            str(context.get("corpid") or ""),
+                            str(context.get("secret") or ""))
 
 
 def runArchiveWorkerCycle(agentId: str = "default", *,
@@ -836,3 +941,77 @@ def watermarkLagReading(updatedAtIso: str) -> str:
     if lag >= 1:
         return "水位落后 %d 天" % lag
     return ""
+
+
+# ══ 批 C7c 第三块：媒体触发面（裁定 §10-甲：企业源侧独立触发，逐条可控）══
+
+
+def readArchiveMediaRecord(dbPath: Any, msgId: str) -> Optional[Dict[str, Any]]:
+    """读单条消息的媒体记录（ro 短连接；端点唯一消费点，六列消费契约不掺这些列）。"""
+    if not Path(dbPath).exists():
+        return None
+    conn = sqlite3.connect("file:%s?mode=ro" % Path(dbPath).as_posix(), uri=True,
+                           timeout=5.0)
+    try:
+        row = conn.execute(
+            "SELECT msgid, msgtype, media_ref, media_name, media_staged_path"
+            " FROM channel_archive_messages WHERE msgid = ?",
+            (str(msgId or ""),)).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    return {"msgid": row[0], "msgtype": row[1], "media_ref": row[2],
+            "media_name": row[3], "media_staged_path": row[4]}
+
+
+def stageArchiveMedia(dbPath: Any, msgId: str, sdk: Any,
+                      stagingRoot: Any = None) -> Dict[str, Any]:
+    """触发单条媒体取回并暂存（方案 §10-甲：独立触发、逐条可控、可限流）。
+
+    - 无记录 → no_media；非媒体/无引用 → no_media（「附件已采集」与「有引用」
+      两种读数由 media_staged_path 机器可判，不互冒充）；
+    - 已暂存（media_staged_path 非空且文件在）→ already_staged 幂等；
+    - 取回 → 写 dataLanding("tmp", "archive-media")，文件名＝msgid＋原始扩展名
+      （media_name 只 file 类消息体携带；无名字段如实 .bin），回写投影后返回；
+    - 引用过期/网络不可达 → ArchiveMediaUnavailable 原样上抛（端点分开读数）。
+    """
+    record = readArchiveMediaRecord(dbPath, msgId)
+    if record is None or not str(record.get("media_ref") or "").strip():
+        return {"status": "no_media", "msgid": str(msgId or "")}
+    stagedPath = str(record.get("media_staged_path") or "").strip()
+    if stagedPath and Path(stagedPath).is_file():
+        return {"status": "already_staged", "msgid": record["msgid"],
+                "path": stagedPath,
+                "size": Path(stagedPath).stat().st_size}
+    data = sdk.getMediaData(str(record["media_ref"]))
+    from neurova.core.data_root import dataLanding
+
+    root = Path(stagingRoot) if stagingRoot else dataLanding("tmp", "archive-media")
+    root.mkdir(parents=True, exist_ok=True)
+    name = str(record.get("media_name") or "").strip()
+    suffix = Path(name).suffix if name else ".bin"
+    target = root / ("%s%s" % (_pathSegmentForMedia(record["msgid"]), suffix))
+    target.write_bytes(data)
+    finalPath = str(target)
+    conn = sqlite3.connect(str(dbPath), timeout=5.0)
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE channel_archive_messages SET media_staged_path = ?"
+                " WHERE msgid = ?",
+                (finalPath, str(record["msgid"])))
+    finally:
+        conn.close()
+    return {"status": "staged", "msgid": record["msgid"], "path": finalPath,
+            "size": len(data), "media_name": name}
+
+
+def _pathSegmentForMedia(value: str) -> str:
+    """msgid 压成安全路径段（照 mediaIngress._pathSegment 同规：穿越字符不放宽）。"""
+    import re
+
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]", "_", str(value or ""))
+    cleaned = re.sub(r"\.{2,}", "_", cleaned)
+    cleaned = cleaned.strip("._-")
+    return cleaned or "unknown"
