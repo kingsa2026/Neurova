@@ -12229,3 +12229,12 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **顺手对账（非代领，登记进判据）**：`test_knowledge_route_order._KB_ROUTES` 补 §6-582 已落格的三条生命周期路由（DELETE source／GET health／POST ingest）——真实路由对账补登；`console_split_routes.json` 与 API_REFERENCE 机器段经 regen 收正到当前真实路由表（HEAD 基线四守卫 5 failed 实证预存漂移，regen 后 5→2，余 2 红均预存归属别批）。
     - **口径（numstat 实抄）**：生产面 `wecom_archive.py` +184/−5（GetMediaData＋归一 media_name＋迁移 v2＋staging）、`knowledge_enterprise.py` +62/−0（端点）、`API_REFERENCE.md` 2/3（regen 收正）＝净 +243；测试 308 行、protected_tests +2/−0、console 快照 regen（2515/2503）、`test_knowledge_route_order.py` +5/−0 不计入生产。
     - **下一枚空号现查：本格取 588，后继从 589 起。**
+589. **页面读数与向导对齐落格＋统一私钥约定目录（用户拍板：私钥约定目录口径）** ✅🟢 —— C7c 收尾批；原「i18n 撞车」前置解除：ent\* 键全在共享档 `_ontologySection.ts`（11 语言共同引入、不在并发会话在途集合），主 locale 文件零触碰。
+    - **向导对齐（四步向导 chat 步，方案 §15 页面读数项）**：来源两态 radio（capture 缺省／archive 仅企微可選——wechat+archive 前端即禁）；archive 步骤五字段（原生库路径／Secret 环境变量名／私钥版本映射 textarea／群白名单／参与者白名单）＋提示文案点名统一目录与「有引用≠可检索」；canProceed 存档档必填守门；buildDescriptor 携带 chatSource＋五字段（私钥 parsePairs、白名单 splitList）；openEdit 反填（privateKeys 反序列化为 行=值）。
+    - **统一私钥约定目录（用户拍板口径）**：`archiveKeyDir()`＝dataLanding(connectors, wecom-archive)（NEUROVA_WECOM_ARCHIVE_KEYDIR 可覆盖）；`resolveArchiveKeyPath`＝裸文件名→约定目录、绝对/带目录路径原样承载；readiness 私钥检查与 worker 读字节同走单点；缺文件理由点名「裸文件名请在约定目录 X 放置」。SDK 库件仍显式路径（官方分发件名不猜——C7a 纪律不破）。
+    - **媒体触发按钮**：动作列仅存档行渲染（capture 面不摆假能力）；弹层 msg_id 输入→真 media 端点→四态读数（staged 带字节与路径／already／no_media 404／过期 502 原话进错误读数）。
+    - **判据**：页面档 +4 格（存档向导必填与 body 对齐、媒体按钮仅存档行、触发调用与 staged 回显、过期 502 错误读数）；readiness 档 +2 格（裸文件名解析/绝对承载/带目录承载、缺文件理由点名约定目录）。**门**：vitest 全量 **2404 passed**（页面档＋locale-consistency 同跑绿）；vue-tsc **exit 0（实测）**；channels＋knowledge 全族 **2402 passed／2 skipped**。
+    - **测试侧三处笔误如实记**：loadableSdk 夹具返回元组被整塞 SDK 字段（`(path, [])` 字符串化进路由报错文案）；readiness 漏设 Secret env（停在更早档报 degraded）；i18n 插键补 jsonQuote（撇号转义，memory 纪律的程序化落地）。
+    - **口径（numstat 实抄）**：前端 `_ontologySection.ts` +209/−0（19 键×11 语言）、`EnterpriseSourcesPage.vue` +131/−4、页面测试 +106/−1、`ontology.ts` api +7/−0、类型 +11/−0；后端 `wecom_archive.py` +26/−3、readiness 判据 +32/−0。主 locale 11 文件**零改动**（并发会话在途件不受扰）。
+    - **仍开**：真部署 live-verify（双态登记：真 SDK 库件＋真租户凭据；GetData char\* 二进制截断风险必核）。
+    - **下一枚空号现查：本格取 589，后继从 590 起。**

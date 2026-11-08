@@ -46,6 +46,28 @@ ARCHIVE_USER_ALLOWLIST_FIELD = "archiveUserAllowlist"
 
 #: 原生库路径的环境注入面（与 `extra.archiveSdkPath` 二选一，extra 优先）
 ARCHIVE_SDK_PATH_ENV = "NEUROVA_WECOM_ARCHIVE_SDK"
+#: 私钥约定目录（批 C7c 对齐批，统一存放路径口径）：`extra.archivePrivateKeys`
+#: 的值写**裸文件名**时在该目录解析（NEUROVA_WECOM_ARCHIVE_KEYDIR 可覆盖落点）；
+#: 写绝对/带目录路径则原样承载。部署侧把 private_v<版本>.pem 放进目录即可，
+#: 向导占位符与 health 点名该目录。SDK 库件仍显式路径（官方分发件名不猜，C7a 纪律）。
+ARCHIVE_KEY_DIR_ENV = "NEUROVA_WECOM_ARCHIVE_KEYDIR"
+
+
+def archiveKeyDir() -> Path:
+    from neurova.core.data_root import dataLanding
+
+    override = os.environ.get(ARCHIVE_KEY_DIR_ENV, "").strip()
+    root = Path(override) if override else dataLanding("connectors", "wecom-archive")
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def resolveArchiveKeyPath(value: str) -> Path:
+    """私钥路径解析：裸文件名 → 约定目录下；带目录/绝对路径 → 原样承载。"""
+    candidate = Path(str(value or "").strip())
+    if candidate.is_absolute() or str(candidate.parent) != ".":
+        return candidate
+    return archiveKeyDir() / candidate
 
 #: 官方口径：RSA 2048 位模数（方案 §16-1 解密链）
 ARCHIVE_RSA_KEY_BITS = 2048
@@ -166,9 +188,10 @@ def archiveReadiness(extra: Optional[Mapping[str, Any]] = None) -> ArchiveReadin
     problems = []
     notes = []
     for version, rawPath in sorted(keyMap.items(), key=lambda item: str(item[0])):
-        keyPath = Path(str(rawPath))
+        keyPath = resolveArchiveKeyPath(str(rawPath))
         if not keyPath.is_file():
-            problems.append("私钥文件不存在（publickey_ver=%s）: %s" % (version, keyPath))
+            problems.append("私钥文件不存在（publickey_ver=%s）: %s——裸文件名请在约定目录"
+                            " %s 放置（或写完整路径）" % (version, keyPath, archiveKeyDir()))
             continue
         try:
             material = keyPath.read_bytes()
@@ -785,7 +808,7 @@ def _archiveWorkerContexts(agentId: str) -> List[Dict[str, Any]]:
     secretEnv = str(extra.get(ARCHIVE_SECRET_ENV_FIELD) or "").strip()
     keyMap: Dict[str, bytes] = {}
     for version, rawPath in (extra.get(ARCHIVE_PRIVATE_KEYS_FIELD) or {}).items():
-        keyMap[str(version)] = Path(str(rawPath)).read_bytes()
+        keyMap[str(version)] = resolveArchiveKeyPath(str(rawPath)).read_bytes()
     contexts.append({
         "agentId": str(agentId or "default"),
         "ready": True,
