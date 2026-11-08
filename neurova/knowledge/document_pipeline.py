@@ -138,18 +138,18 @@ def _documentMetadata(data: bytes, ext: str) -> Dict[str, str]:
                 "modified_at": _iso(props.modified),
             }
         if ext == ".pdf":
-            import fitz
+            import pypdfium2 as pdfium
 
-            doc = fitz.open(stream=data, filetype="pdf")
+            doc = pdfium.PdfDocument(data)
             try:
-                meta = doc.metadata or {}
+                meta = doc.get_metadata_dict() or {}
             finally:
                 doc.close()
             return {
-                "title": str(meta.get("title") or ""),
-                "author": str(meta.get("author") or ""),
-                "created_at": str(meta.get("creationDate") or ""),
-                "modified_at": str(meta.get("modDate") or ""),
+                "title": str(meta.get("Title") or ""),
+                "author": str(meta.get("Author") or ""),
+                "created_at": str(meta.get("CreationDate") or ""),
+                "modified_at": str(meta.get("ModDate") or ""),
             }
     except Exception:  # noqa: BLE001 - 元数据缺失不影响正文解析
         return {}
@@ -163,14 +163,16 @@ def _documentMetadata(data: bytes, ext: str) -> Dict[str, str]:
 
 def _render_pdf_page(data: bytes, page_index: int) -> bytes:
     try:
-        import fitz  # PyMuPDF
+        import pypdfium2 as pdfium
     except Exception as exc:  # noqa: BLE001
-        raise DocumentParseError("ocr_render_unavailable", "PyMuPDF 未安装") from exc
-    doc = fitz.open(stream=data, filetype="pdf")
+        raise DocumentParseError("ocr_render_unavailable", "pypdfium2 未安装") from exc
+    doc = pdfium.PdfDocument(data)
     try:
-        page = doc.load_page(page_index)
-        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
-        return pix.tobytes("png")
+        # v5 默认 fill_color 白底不透明、自动选 BGR，与旧 fitz get_pixmap(alpha=False) 等价
+        bitmap = doc[page_index].render(scale=2)
+        buf = io.BytesIO()
+        bitmap.to_pil().save(buf, format="PNG")
+        return buf.getvalue()
     finally:
         doc.close()
 
