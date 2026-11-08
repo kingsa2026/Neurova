@@ -12562,3 +12562,50 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
       本机同一份树（`/tmp` 里的 3.11 venv + `requirements-ci.lock`）：`tests/unit/ci` 整目录 → **616 passed, 3 skipped**；`ci_static_gate.py --skip-import` 三格全过；`ruff check neurova tests --no-cache` → All checks passed；`deploy_config_consistency_check.py` → ERROR 0 / WARN 1（既有 R7）；三个生成器跑完 `git diff --stat -- docs/` 为空。
     - **如实登记三处**：① 本轮第一次九腿探针（`cnb-fk6-1k6sg3608`）有两条腿红，红在**我的探针配置**而不是仓里：`--config` 传多行 `script` 时换行被压平，`regenerate shipped artifacts` 的 `for … done` 与 `e2e` 的 `pip install -r` 都被拼成一行，分别报 `sh: Syntax error: end of file unexpected` 与 `no such option: -m`。**同一份 `.cnb.yml` 在 `push`/`pull_request` 事件下逐字正常**（`cnb-6hu-1k6scutmg` 九腿全绿），故是探针写法的坑，不是配置缺陷。② 该探针其余七腿在同一批次里 success，包括 `frontend`（`npm ci` + `npm audit` + `vue-tsc` + vitest 全过）。③ 本轮未动任何生产代码、配置与测试，故没有红→绿可报。
     - **净 LOC**：文档 +本格，生产代码 +0、配置 +0、测试 +0。**下一枚空号现查：本格取 595，后继从 596 起。**
+
+596. **PR #374 第十六轮：九腿仍全红在 `Prepare`，本轮量出「同一句话、两个池」的第三日复现——代码侧按 CI 同款逐条复算全绿** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **结论先行**：本轮**零代码改动**。`pull_request` 触发的九条腿依然是同一句 `Prepare` 配额不足，九个 stage 全 `skipped`，一条门禁脚本都没跑到；同一分支的 NPC 通道构建照常起得来、照常全绿。代码侧九条门禁我在本机按 CI 同款逐条复算，无一红。
+    - **PR 状态面逐字（`cnb-n0h-1k6sggab7`，sha `9d25dc54`，`state: failure`）**：
+      ```
+      pipeline-1(static-gate)            error [3.7s]   equivalent to 0.33 core-hours
+      pipeline-2(import-and-regression)  error [4.2s]   equivalent to 0.33 core-hours
+      pipeline-3(unit-tests)             error [4.3s]   equivalent to 1.33 core-hours
+      pipeline-4(e2e-backend-boot)       error [3.6s]   equivalent to 0.33 core-hours
+      pipeline-5(frontend)               error [4.4s]   equivalent to 0.67 core-hours
+      pipeline-6(perf-gate)              error [13.3s]  equivalent to 0.33 core-hours
+      pipeline-7(deploy-config)          error [3.6s]   equivalent to 0.33 core-hours
+      pipeline-8(dependency-audit)       error [4.3s]   equivalent to 0.67 core-hours
+      pipeline-9(experience-quality)     error [4s]     equivalent to 0.33 core-hours
+      ```
+      `get-build-status` 逐条印证：九条腿的 `Prepare` 全 `error`，其后每个 stage 皆 `skipped`，`0ms`。**这不是哪条判据红，是九个容器一个都没起来。**
+    - **同一时刻两个池的第三次分叉（本轮新起的两条探针，配置逐字相同、只差 `--npc-name`）**：
+      ```
+      cnb-fqg-1k6shtevf  普通池  1 核  Prepare error 4158ms  → probe stage skipped
+      cnb-k2r-1k6sj9eht  NPC 池  1 核  Prepare success 16676ms → probe 真打印 `probe up`
+      ```
+      与 §6-592/§6-594 同一口径：**粒度是池，不是核数**。故本轮同样不动 `.cnb.yml`——降 `cpus` 撞按条目数算出的内存需求（8 核降到 2 核当场 `code 137`）、给门禁挂 `allowFailure` 是把失败改写成不上报、把九腿改串行是改放行标准，三条都是拿判据换绿（教义第 2 条）。
+    - **代码侧按 CI 同款逐条复算（本机，`requirements-ci.lock` 装齐，串行无并发会话）**：
+      ```
+      protected_tests.1.txt   3125 passed,  9 skipped, 1 xfailed   (10m40s)  RC=0
+      protected_tests.2.txt   2785 passed,  5 skipped, 2 xfailed   (11m09s)  RC=0
+      protected_tests.3.txt   2992 passed,  4 skipped              (10m40s)  RC=0
+      coverage（三片合并，--fail-under 60）  Total coverage: 85.65%  → 门禁通过
+      ci_static_gate.py --skip-import        语法 / 未定义名 / 导入巡检 三格全过
+      ci_static_gate.py（含全模块导入巡检）  全部通过
+      ruff check neurova tests --no-cache    All checks passed
+      tests/unit/test_audit_regressions.py   15 passed
+      tests/e2e/test_backend_boot.py         5 passed
+      perf_gate.py                           性能门禁通过
+      deploy_config_consistency_check.py     ERROR 0 / WARN 1（既有 R7-auth）
+      experience_quality_gate.py             门禁通过
+      audit_ledger_commit_guard.py           rc=0（1397 条引用全可达，例外清单署名 5 条）
+      生成器三跑（api_inventory / api_auth_surface / cognitive_component_table）
+                                             跑完 git status -- docs/ 为空 → 零漂移
+      tests/unit/ci 整目录 + test_audit_ledger_commit_guard.py   627 passed, 3 skipped
+      ```
+      前端（真 `npm ci` 后）：`npx vitest run` → **294 files / 2382 passed**、`npx vue-tsc --noEmit` 零错误、`npm audit --audit-level=high` → RC=0（仅 6 条 moderate 存量）。依赖审计：`pip_audit_gate.py` 两把锁 → `No known vulnerabilities found`；`osv_audit.py` → 447 + 365 包、✅ 无未允许的已知漏洞。
+    - **PR 头这份树的活体验证（`cnb-cs1-1k6sgi6p4`，sha `9d25dc54`，NPC 通道，整条 `success`）**：`materialize main baseline ref` 259ms → `install uv + locked dependencies` 34.5s → `regenerate shipped artifacts drift gate` 34.6s（docs/ 零漂移）→ `ledger guards` 10.3s → `budget baseline and parity guards` 8.2s。
+    - **本轮一次无关红复现，已定性为「并发跑测」而非仓内缺陷**：第一次跑第 1 片时末尾 `1 error`，是 `_guardRepoRootAgainstPollution` 点名 `.pytest_cache`——同一时间我在另一个 shell 里跑过 `python3 -m pytest tests/unit/ci`，那个会话启动即在仓库根建该目录。清掉后原样重跑第 1 片：**3125 passed / RC=0**，与 §6-590 记的同一形态。
+    - **本轮另一处如实登记**：第一次起第 3 片时把 `COVERAGE_FILE=...` 写在 pytest 参数位后面，pytest 把它当成「文件或目录」收下，以 `ERROR: file or directory not found` 收场、返回码 4——**属我的命令行写错，不属仓内缺陷**；改成环境变量前缀后同一份清单 `2992 passed / RC=0`。
+    - **需要你在组织侧做的一件事**：`组织 → 设置 → 用量管理` 给「云原生构建-CPU」提额（或绑腾讯云 CNB 预算，超额 ¥0.125/核时）。普通池连 1 核（0.17 核时）都拒，`pull_request` 那条腿在提额前无法变绿；这不是代码能修的项。
+    - **净 LOC**：文档本格追加，生产代码 +0、配置 +0、测试 +0。**下一枚空号现查：本格取 596，后继从 597 起。**
