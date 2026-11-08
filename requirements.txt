@@ -32,7 +32,7 @@ anthropic>=0.8.0
 # 版本下限按本仓已锁的 openai==3.14.1 / anthropic==1.6.0 / pydantic==2.13.5 实测可
 # 共解（langchain-openai 1.x 要 openai>=2.45,<4；langchain-anthropic 1.x 要
 # anthropic<2），不会把 multi_model_client 的现役原生通道拽回旧主版本。
-langchain-openai>=1.0
+langchain-openai>=1.7.4
 langchain-anthropic>=1.0
 langchain-ollama>=1.0
 langchain-google-genai>=4.0

@@ -51,7 +51,7 @@ anthropic>=0.8.0
 # （tests/unit/api/test_model_connection_contract.py::TestProviderChatModelChainIntact）
 # 走真实 provider 工厂与真实 langchain 类，缺席即红——不是"跳过"。
 # 四件均为纯 Python、不拉 torch，不属本文件刻意排除的重依赖之列。
-langchain-openai>=1.0
+langchain-openai>=1.7.4
 langchain-anthropic>=1.0
 langchain-ollama>=1.0
 langchain-google-genai>=4.0
