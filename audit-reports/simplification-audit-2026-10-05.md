@@ -12518,3 +12518,47 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
       本机同一份树：`tests/unit/ci` 整目录 + `test_ci_parity_guard.py` → **649 passed, 4 skipped**；`ci_static_gate.py --skip-import` 三格全过；`ruff check neurova tests --no-cache` → All checks passed；`deploy_config_consistency_check.py` → ERROR 0 / WARN 1（既有 R7）；三个生成器跑完 `git diff --stat -- docs/` 为空。
     - **如实登记两处**：① 我第一版活体验证探针把 `test_auditLedgerReachabilitySingleProbe.py` 写成 `tests/unit/ci/` 下的路径（它实际在 `tests/unit/`），pytest 以 `ERROR: file or directory not found` 收场、返回码 4——**属探针写错，不属仓内缺陷**；改正路径后同一格 `38 passed`。② 前半程我建的 `.venv` 是半成品（`ensurepip` 缺失、`No module named pip`），改在系统解释器上按 `requirements-ci.lock` 装齐依赖再复算；那份半成品 venv 已删除。
     - **净 LOC**：文档 +本格，生产代码 +0、配置 +0、测试 +0。**下一枚空号现查：本格取 594，后继从 595 起。**
+
+595. **PR #374 第十五轮：九腿在 NPC 通道全绿，`pull_request` 侧九腿仍一律卡在 `Prepare` 的配额上** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **结论先行**：本轮**零代码改动**。派发单点的是 `cnb-nh3-1k6se3ck8`（sha `ff65baf9`）九条腿全红，逐条读下来九条都是同一句——`Prepare` 阶段配额不足，九个 stage 全 `skipped`，一条门禁脚本都没跑到。同日同一分支的九腿真门禁（NPC 通道）**九条全 success**。
+    - **报错原文与归属（`cnb-nh3-1k6se3ck8`，九条腿逐字同句）**：
+      ```
+      ▸ 失败 Stage: Prepare (status: error)
+      根组织的云原生构建-CPU配额已不够预冻结(冻结时间：10.00 min，折合 0.33/0.67/1.33 核时)，
+      请联系根组织管理员提升配额。
+      ```
+      `get-ci-timing` 逐条印证：九条腿的耗时全部落在 `Prepare`（2.6~2.8s）与收尾 `End`，中间每个 stage 都是 `0ms`。这不是「哪条判据红」，是九个容器一个都没起来。
+    - **九腿真门禁读数（`cnb-6hu-1k6scutmg`，sha `d627e2d2`，NPC 通道，聚合 `status: success`，核时合计 6.48）**：
+      ```
+      static-gate             success   21.5s   cpus 2   核时 0.01
+      import-and-regression   success  114.9s   cpus 2   核时 0.06
+      unit-tests              success 2601.2s   cpus 8   核时 5.78
+      e2e-backend-boot        success  149.0s   cpus 2   核时 0.08
+      frontend                success  319.9s   cpus 4   核时 0.35
+      perf-gate               success   90.3s   cpus 2   核时 0.05
+      deploy-config           success    7.8s   cpus 2   核时 0
+      dependency-audit        success  105.6s   cpus 4   核时 0.12
+      experience-quality      success   49.2s   cpus 2   核时 0.03
+      ```
+      `unit-tests` 逐 stage：`materialize main baseline ref` 261ms → `install uv + locked dependencies` 3.0s → `regenerate shipped artifacts` 34.8s → `protected subset shards` **2555151ms（42.6m）success** → `coverage gate` 1.4s。三片 **3125 / 2774 / 2991 passed，逐片 `pytest 退出码: 0`**（817.46s / 749.25s / 826.83s）。§6-593 那笔 75m 的墙在同一格上再次成立，余量 32.4m。
+    - **同一时刻两个池仍在分叉（本轮新起的探针）**：
+      ```
+      cnb-89g-1k6sfv9el  普通池（不带 --npc-name）  九腿全 error 于 Prepare，stage 全 skipped
+      cnb-fk6-1k6sg3608  NPC 命名池                九腿全部起得来（见下方「如实登记」）
+      cnb-vu2-1k6sfr6k4  普通池 1 核                Prepare error（0.17 核时被判不足）
+      ```
+      即 §6-592/§6-594 记的「粒度是池不是核数」在本日第三次复现。**不为此改 `.cnb.yml`**，理由与 §6-592 逐条同一口径（降 `cpus` 撞内存需求、`allowFailure` 是把失败改写成不上报、改串行是改放行标准），不重复记账。
+    - **PR 头这一份树的活体验证（`cnb-7rl-1k6sga4se`，sha `ff65baf9`，NPC 通道，整条 `success`）**：本轮唯一新增的改动是 §6-594 那一格文档，故验的是「文档笔是否把判据带红」：
+      ```
+      materialize main baseline ref        success   261ms
+      install uv + locked dependencies     success  34.7s
+      regenerate shipped artifacts         success  33.5s  → docs/ 零漂移
+      ledger guards                        success  10.6s
+        audit_ledger_commit_guard.py       → commit 号全部可达（共 1401 条引用，例外清单署名 5 条）
+        台账三档（commit_guard / numbering / reachability 单点） → 38 passed
+      budget baseline and parity guards    success   8.5s
+        预算 / 父墙 / 基线物化 / 对齐 / 净 LOC 复算五档          → 54 passed, 1 skipped
+      ```
+      本机同一份树（`/tmp` 里的 3.11 venv + `requirements-ci.lock`）：`tests/unit/ci` 整目录 → **616 passed, 3 skipped**；`ci_static_gate.py --skip-import` 三格全过；`ruff check neurova tests --no-cache` → All checks passed；`deploy_config_consistency_check.py` → ERROR 0 / WARN 1（既有 R7）；三个生成器跑完 `git diff --stat -- docs/` 为空。
+    - **如实登记三处**：① 本轮第一次九腿探针（`cnb-fk6-1k6sg3608`）有两条腿红，红在**我的探针配置**而不是仓里：`--config` 传多行 `script` 时换行被压平，`regenerate shipped artifacts` 的 `for … done` 与 `e2e` 的 `pip install -r` 都被拼成一行，分别报 `sh: Syntax error: end of file unexpected` 与 `no such option: -m`。**同一份 `.cnb.yml` 在 `push`/`pull_request` 事件下逐字正常**（`cnb-6hu-1k6scutmg` 九腿全绿），故是探针写法的坑，不是配置缺陷。② 该探针其余七腿在同一批次里 success，包括 `frontend`（`npm ci` + `npm audit` + `vue-tsc` + vitest 全过）。③ 本轮未动任何生产代码、配置与测试，故没有红→绿可报。
+    - **净 LOC**：文档 +本格，生产代码 +0、配置 +0、测试 +0。**下一枚空号现查：本格取 595，后继从 596 起。**
