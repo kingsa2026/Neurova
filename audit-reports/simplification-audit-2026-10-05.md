@@ -12459,4 +12459,21 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
       新增的四格判据各自带反证：片数从目录现读（临时目录造两片 → 预算自动按 2 片算）、下界必须严格低于上界（否则这一档自相矛盾）、把墙写成 `5m` 时下界格必须咬得住。
     - **回归面**：`tests/unit/ci` 整目录 + `test_ci_parity_guard` → **649 passed, 4 skipped**；`test_protected_subset_shards` + 登记历史 + 扫描面棘轮 → 78 passed；`ruff check neurova tests scripts` → All checks passed；`ci_static_gate.py --skip-import` → 三格全过；`deploy_config_consistency_check.py` → ERROR 0 / WARN 1（既有 R7）；`test_pytest_collection_hygiene` 9 passed（新模块不以 `test_` 前缀命名，不进收集面）。
     - **如实登记两处**：① 本机 `pytest-asyncio` 起初缺席，`tests/unit/ci/test_optionalImportWallOwedByLivePath.py` 两条 `async def` 用例报 `async def functions are not natively supported`——那是**本机环境缺件**（CI 的 `requirements-ci.lock` 里有它），装回后该档 3 passed 1 skipped，非本单回归。② 本轮未再起任何配额探针；构建 `cnb-h8j-1k6s4v3g1` 是本轮唯一一次门禁真跑，`unit-tests` 已实跑 5.4+ 核时。
+    - **live-verify（修后的真跑读数，构建 `cnb-oc4-1k6s9bjqn`，NPC 通道，整条 `status: success`）**：九条腿全绿——`unit-tests` 是唯一曾红的那条，这条真跑到底了：
+      ```
+      unit-tests  duration 2743326ms（45.7m）  metricCoreHours 6.1   status success
+        Prepare                             success    6.6s
+        materialize main baseline ref       success   255ms
+        install uv + locked dependencies    success     2.7s
+        regenerate shipped artifacts        success    35.1s
+        protected subset shards             success 2696564ms（44.9m）   rc=0
+            shard 1  3125 passed, 9 skipped, 1 xfailed … in 822.49s   rc=0
+            shard 2  2774 passed, 16 skipped, 2 xfailed … in 827.05s   rc=0
+            shard 3  2991 passed, 5 skipped            … in 877.91s   rc=0
+        coverage gate                       success    1.5s
+        （其余八腿 static-gate / import-and-regression / e2e-backend-boot / frontend /
+          perf-gate / deploy-config / dependency-audit / experience-quality 全 success）
+      ```
+      **这条读数本身就是修法的证词**：三片实测 822.49 + 827.05 + 877.91 = 2527.45s，加上装依赖 2.7s 与漂移闸 35.1s，整格 44.9m——**距旧墙 45m 只差 4 秒**。即旧墙不是"差得远"，是"差一点点"：上一轮 `cnb-n6l-1k6s1qsq0` 三片 37.4m 压线通过纯属侥幸，这一轮负载稍高（第 3 片 877.91s vs 上轮 750.25s，慢 17%）就穿了。故 75m（63.9m 下界 × 1.17）的余量不是"给多了"，而是同一格在共享 runner 上的正常抖动就该被容下。
+      **另一个必须记的读数**：第 3 片本轮 `2991 passed`（上轮 `2987`）、片 1/2 与上轮逐条相同——即本单与并发会话的判据改动（`tests/subsetWallclockBudget.py` 新增 + 两档重写，共 4 格新增判据）**在 CI 上真的跑到了**，不是只在本机绿。
     - **净 LOC**：`.cnb.yml` +10/−7（墙改为按结构算的那段，旧注释里"stage 墙 45m"两处同步）；新增 `tests/subsetWallclockBudget.py` +~170（测试基建池，不计入生产池）；两档判据 ±重写；生产代码 +0。**下一枚空号现查：本格取 593，后继从 594 起。**
