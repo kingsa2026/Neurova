@@ -12477,3 +12477,44 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
       **这条读数本身就是修法的证词**：三片实测 822.49 + 827.05 + 877.91 = 2527.45s，加上装依赖 2.7s 与漂移闸 35.1s，整格 44.9m——**距旧墙 45m 只差 4 秒**。即旧墙不是"差得远"，是"差一点点"：上一轮 `cnb-n6l-1k6s1qsq0` 三片 37.4m 压线通过纯属侥幸，这一轮负载稍高（第 3 片 877.91s vs 上轮 750.25s，慢 17%）就穿了。故 75m（63.9m 下界 × 1.17）的余量不是"给多了"，而是同一格在共享 runner 上的正常抖动就该被容下。
       **另一个必须记的读数**：第 3 片本轮 `2991 passed`（上轮 `2987`）、片 1/2 与上轮逐条相同——即本单与并发会话的判据改动（`tests/subsetWallclockBudget.py` 新增 + 两档重写，共 4 格新增判据）**在 CI 上真的跑到了**，不是只在本机绿。
     - **净 LOC**：`.cnb.yml` +10/−7（墙改为按结构算的那段，旧注释里"stage 墙 45m"两处同步）；新增 `tests/subsetWallclockBudget.py` +~170（测试基建池，不计入生产池）；两档判据 ±重写；生产代码 +0。**下一枚空号现查：本格取 593，后继从 594 起。**
+
+594. **PR #374 第十四轮：真红已在上一轮闭环，本轮拿到九腿全绿与「普通池连 0.17 核时都拒」的同日对照** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **结论先行**：本轮无新增代码修复——上一轮（§6-593）那笔墙钟算式收口之后，真 CI 上九条腿**全部 success**（构建 `cnb-oc4-1k6s9bjqn`，sha `62766599`，聚合 `status: success`，`metricCoreHours` 合计 6.56）。PR 状态面仍是 `failure`，那是**普通触发池**的配额，不是代码：同一天同一分支的三条探针把两个池再量了一次。
+    - **九腿逐条读数（`cnb-oc4-1k6s9bjqn`，九条全 success）**：
+      ```
+      static-gate             success   22.0s   cpus 2   核时 0.01
+      import-and-regression   success  73.2s    cpus 2   核时 0.04
+      unit-tests              success  2743.3s  cpus 8   核时 6.10  ← 含 stage-3 2696.6s
+      e2e-backend-boot        success  144.4s   cpus 2   核时 0.08
+      frontend                success  245.4s   cpus 4   核时 0.27
+      perf-gate               success  49.1s    cpus 2   核时 0.03
+      deploy-config           success   9.2s    cpus 2   核时 0
+      dependency-audit        success  98.4s    cpus 4   核时 0.11
+      experience-quality      success  60.0s    cpus 2   核时 0.03
+      ```
+      `unit-tests` 逐 stage：`materialize main baseline ref` 255ms → `install uv + locked dependencies` 2.7s → `regenerate shipped artifacts` 35.1s → **`protected subset shards` 2696564ms（44.9m）success** → `coverage gate` 1.5s。三片 **3125 / 2774 / 2991 passed，逐片 rc=0**；`Total coverage: 88.18%` ≥ 60。这是 §6-593 那笔 75m 墙的 live-verify：整格 44.9m 落在 63.9m 下界与 95.8m 上界之间，不再压线。
+    - **同日对照：配额的两个池仍在分叉**（本轮新起的两条探针，同一分支、同一份内联配置，只差 `--npc-name`）：
+      ```
+      cnb-jb6-1k6sctcds  普通池  1 核  Prepare error  0.17 核时被判不足
+      cnb-del-1k6sdadq3  NPC 命名 1 核  success（Prepare 4.4s，probe up 真打印）
+      ```
+      即 §6-592 记的「粒度是池不是核数」在本日仍然成立：普通池连一格 1 核（0.17 核时）都拒。故 `pull_request` 触发的 `cnb-r1j-1k6sc6ulh`（sha `d627e2d2`）九腿一律 `error` 在 `Prepare`、九个 stage 全 `skipped`——一条门禁脚本都没跑到。
+    - **为什么不为此改 `.cnb.yml`**（与 §6-592/§6-593 同一口径，不重复记账）：降 `cpus` 与 `tests/unit/ci/test_unit_tests_runner_has_headroom.py` 按条目数算出的需求冲突；挂 `allowFailure` 是把失败改写成不上报；改串行是改放行标准。三条都是拿判据换绿（教义第 2 条）。
+    - **活体验证（`cnb-946-1k6sdmvdm`，sha `d627e2d2`，NPC 通道，整条 success）**——PR 头这一份树在**装齐锁的真容器**里复算：
+      ```
+      materialize main baseline ref  success  286ms
+      install uv + locked deps       success  34.4s
+      ledger + budget guards         success  19.5s
+        audit_ledger_commit_guard.py  →  rc=0（1399 条引用全可达，例外清单署名 5 条）
+        tests/unit/test_audit_ledger_commit_guard.py +
+        tests/unit/ci/test_auditLedgerNumbering.py +
+        tests/unit/test_auditLedgerReachabilitySingleProbe.py       →  38 passed
+        test_protectedSubsetBudgetCoversItsRealCost.py +
+        test_unit_tests_runner_has_headroom.py +
+        test_mainBaselineRefIsMaterialized.py +
+        test_ci_parity_guard.py                                     →  54 passed
+      shipped artifacts drift        success  30.5s   → docs/ 零漂移（三个生成器幂等）
+      ```
+      本机同一份树：`tests/unit/ci` 整目录 + `test_ci_parity_guard.py` → **649 passed, 4 skipped**；`ci_static_gate.py --skip-import` 三格全过；`ruff check neurova tests --no-cache` → All checks passed；`deploy_config_consistency_check.py` → ERROR 0 / WARN 1（既有 R7）；三个生成器跑完 `git diff --stat -- docs/` 为空。
+    - **如实登记两处**：① 我第一版活体验证探针把 `test_auditLedgerReachabilitySingleProbe.py` 写成 `tests/unit/ci/` 下的路径（它实际在 `tests/unit/`），pytest 以 `ERROR: file or directory not found` 收场、返回码 4——**属探针写错，不属仓内缺陷**；改正路径后同一格 `38 passed`。② 前半程我建的 `.venv` 是半成品（`ensurepip` 缺失、`No module named pip`），改在系统解释器上按 `requirements-ci.lock` 装齐依赖再复算；那份半成品 venv 已删除。
+    - **净 LOC**：文档 +本格，生产代码 +0、配置 +0、测试 +0。**下一枚空号现查：本格取 594，后继从 595 起。**
