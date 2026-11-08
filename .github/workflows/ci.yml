@@ -98,8 +98,12 @@ jobs:
   unit-tests:
     name: Unit tests (protected subset + coverage)
     runs-on: ubuntu-latest
-    # 本 job 的墙：整段上限。它与下面的单档墙（`--timeout 1500`）必须严格有序，
-    # 与 .cnb.yml 那道 stage 的 `timeout: 90m` 同值同源。
+    # 本 job 的墙：整段上限。它与下面的单档墙（`--timeout 1500`）必须严格有序。
+    # `timeout-minutes` 是**矩阵里每个 job 各一份**，每 job 只跑一片（实测最慢
+    # 1022.53s ≈ 17m，含检出与装锁约 20m 量级），与 cnb 侧「几片串行共用一道墙」
+    # 不是同一个量——两侧的墙因此不同值，那是排布差异，不是第二份事实源。
+    # 两侧都从同一算式取数：`tests/subsetWallclockBudget.py`（本侧比「每片预算」，
+    # cnb 侧比「片数 × 每片预算」，判据见 test_protectedSubsetBudgetCoversItsRealCost.py）。
     timeout-minutes: 90
     # 分片矩阵：与 cnb 侧同片数（片号的事实源是 `scripts/ci/protected_tests.*.txt` 有几个文件）。
     # 为什么分片：单进程跑整份清单的峰值 RSS 实测 2.74~2.78 GiB 且仍在爬升，
