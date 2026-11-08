@@ -65,7 +65,7 @@ tiktoken>=0.5.0
 # 注意：这些不得进 ci_static_gate.KNOWN_OPTIONAL_DEPS——该表仅收"缺失可优雅降级"项
 APScheduler>=3.10
 feedparser>=6.0
-segno>=1.6
+segno>=1.6.6
 
 # MCP SDK（P0-6：MCP 受保护测试子集在 CI 运行必需）
 # 与 requirements.txt 同一条范围，且必须逐字同值——两份各写一个下界，
