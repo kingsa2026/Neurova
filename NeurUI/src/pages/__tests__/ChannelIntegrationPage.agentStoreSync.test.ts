@@ -81,9 +81,9 @@ const messages = {
     },
     ui: { chXiaoyi: '小艺', chDingtalk: '钉钉', chFeishu: '飞书', chWechat: '微信', chWecom: '企业微信', chYuanbao: '元宝' },
     nav: { showToolMessages: '工具', showThinking: '思考', streamMode: '流式', privateChatStrategy: '私',
-      groupChatStrategy: '群', requireMention: '@', region: '区域', groupShareSession: '共享',
+      groupChatStrategy: '群', requireMention: "{'@'}", region: '区域', groupShareSession: '共享',
       tokenFile: 'Token', messageMerge: '合并', dingtalkAppKey: 'k', dingtalkAppSecret: 's',
-      mediaDirectory: '媒体', replyAtSender: '@', instantConfirm: '即时', disableDm: '', disableGroup: '',
+      mediaDirectory: '媒体', replyAtSender: "{'@'}", instantConfirm: '即时', disableDm: '', disableGroup: '',
       receiveBotMessages: '' },
   },
 }
