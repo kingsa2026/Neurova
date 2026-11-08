@@ -15,8 +15,15 @@
    顶替就自我失效（本单的形态）——区间不报错的唯一写法是让下界高于现值，
    而那是「把锁里的值抄进 overrides」，下次公告一来又原地不动。
 
-新公告仍由 `npm audit` 实扫发现，发现后在 `_KNOWN_FLOORS` 与 `_OVERRIDE_FLOORS`
-各追加一条；本类只防回退（与 `test_npx_runtime_pinning` 的同名类同口径）。
+新公告仍由 `npm audit` 实扫发现，发现后在 `_KNOWN_FLOORS` 追加一条并按形态归口：
+父包区间顶不到修复版的进 `_REQUIRED_OVERRIDES`（overrides 必填、精确版本）；
+区间可达、刷锁即修的进 `_OVERRIDE_OPTIONAL_FLOORS`（只钉锁内下界——CI 的
+`npm audit --audit-level=high` 对 moderate 公告不红，这类下界只能靠本守卫钉住）。
+本类只防回退（与 `test_npx_runtime_pinning` 的同名类同口径）。
+
+2026-11-08 批（vue-i18n 11.4.18 升级后 audit 清零）：`minimatch`/`glob` 为顶替型，
+`follow-redirects` 为区间可达型。同公告在 tools/npx-runtime 侧已由 6c388949a /
+a7af01451 以同一手法收口，两片依赖面同根因同处置。
 """
 
 from __future__ import annotations
@@ -48,10 +55,33 @@ _KNOWN_FLOORS = {
         "EventSource 解析器无界内存 DoS / 非小写算法 token 绕过 SRI / "
         "过量 content-encoding 未捕获异常 DoS",
     ),
+    "minimatch": (
+        "11.0.1",
+        "GHSA-g3hv-75wg-m249",
+        "globparts 放大 DoS——三父包（@vue/language-core 2.x / editorconfig 1.x / "
+        "glob 10.x）全声明 ^9 顶不到修复版，overrides 顶替（与 tools/npx-runtime "
+        "侧 6c388949a 同公告同处置）",
+    ),
+    "glob": (
+        "14.0.2",
+        "GHSA-3g3m-2fjr-6pw4",
+        "AbortSignal 取消绕过，超时后仍遍历文件系统——唯一父包 js-beautify "
+        "^10.4.2 顶不到修复版，overrides 顶替（与 tools/npx-runtime 侧 "
+        "a7af01451 同公告同处置）",
+    ),
+    "follow-redirects": (
+        "1.16.2",
+        "GHSA-mrwp-f3q8-3g9p",
+        "跨域 sensitiveHeaders 数组被丢弃、自定义凭据可跟随重定向——唯一父包 "
+        "axios ^1.16.0 区间可达修复版，刷锁即修，无需顶替",
+    ),
 }
 
+#: 修复版落在父包声明区间内、靠刷锁即可到达的登记——只钉锁内下界，**不**要求 overrides。
+_OVERRIDE_OPTIONAL_FLOORS = {"follow-redirects"}
+
 #: 必须在 `overrides` 里被顶替的包（父包声明区间顶不到修复版，靠 install 抬不动）。
-_REQUIRED_OVERRIDES = set(_KNOWN_FLOORS)
+_REQUIRED_OVERRIDES = set(_KNOWN_FLOORS) - _OVERRIDE_OPTIONAL_FLOORS
 
 
 def _carriers(packages: dict, name: str) -> dict:
