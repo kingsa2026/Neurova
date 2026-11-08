@@ -306,6 +306,7 @@ class EnterpriseIngestor:
         cursor = SourceCursor(str(config.get("cursor") or ""))
         admitted = 0
         rejected = 0
+        entries = {"written": 0, "duplicated": 0, "skipped": 0}
         batches = 0
         truncated = False
         while batches < _RUN_ONCE_MAX_BATCHES:
@@ -316,6 +317,15 @@ class EnterpriseIngestor:
                     descriptor, change.rows, cursorToken=str(cursor.token or ""))
                 admitted += int(result.get("admitted") or 0)
                 rejected += int(result.get("rejected") or 0)
+                # 正文分档能力钩子（批 C7c，§14-C）：适配器若提供 writeArchiveEntries
+                # （现仅存档面聊天源），行集在 facts 之外另承正文进条目链——
+                # registry 不感知 chat 细节，只认能力面。
+                entryWriter = getattr(adapter, "writeArchiveEntries", None)
+                if entryWriter is not None:
+                    entryOutcome = await entryWriter(change.rows, tenantId=tenantId)
+                    if entryOutcome.get("applied", True):
+                        for key in ("written", "duplicated", "skipped"):
+                            entries[key] += int(entryOutcome.get(key) or 0)
             if change.nextCursor is not None and not change.nextCursor.isEmpty():
                 cursor = change.nextCursor
                 self.saveCursor(tenantId, sourceId, str(cursor.token))
@@ -325,6 +335,7 @@ class EnterpriseIngestor:
         else:
             truncated = True
         return {"admitted": admitted, "rejected": rejected,
+                "entries": entries,
                 "batches": batches, "truncated": truncated,
                 "cursor": str(cursor.token or "")}
 

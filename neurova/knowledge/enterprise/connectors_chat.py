@@ -348,6 +348,69 @@ class ChatChannelAdapter:
         except (IndexError, ValueError):
             return 0  # 游标不可解析＝从 0 重读（幂等由咽喉内容键兜底）
 
+    # ── 正文分档（批 C7c，§14-C：条目链承正文、facts 承结构化）──
+
+    @property
+    def sourceFace(self) -> str:
+        """来源两态读数（registry 的能力钩子据此决定是否调条目写入）。"""
+        return self._sourceFace
+
+    async def writeArchiveEntries(self, rows: List[Dict[str, Any]],
+                                  tenantId: str = "default",
+                                  repo: Any = None) -> Dict[str, Any]:
+        """存档文本行 → knowledge 条目链（分档最小版，方案 §9/§14-C）。
+
+        - 条目＝knowledge 仓既有面（与入站消息同 category=wecom），幂等键
+          `source=wecom_archive:<msgid>`（重放/与捕获面同消息不撞——前缀不同源）；
+        - 源钟：`source_created_at`＝sent_at（K-09 语义：按业务时间可查）；
+          modified 无独立事实，如实 estimated=True；
+        - **非文本行不建空条目**（media_ref/群/成员/时间由 facts 承，正文为空即跳过）；
+        - facts 侧编译期已拒 text 进 object（validateDescriptor），两侧不重复承正文。
+        返回契约：`applied`＝能力是否生效（registry 聚合判据）；`skipped`＝
+        **非文本行计数**（不是布尔——一键两义曾让 registry 把计数误当守卫旗标）。
+        """
+        if self._sourceFace != ARCHIVE_FACE:
+            return {"applied": False, "reason": "仅存档面提供条目写入",
+                    "written": 0, "duplicated": 0, "skipped": 0}
+        from neurova.knowledge.repository import get_knowledge_repository
+
+        repo = repo or get_knowledge_repository()
+        agent = str(self._descriptor.get("agentId") or "default")
+        written = duplicated = skipped = 0
+        for row in rows:
+            text = str(row.get("text") or "").strip()
+            if not text:
+                skipped += 1
+                continue
+            source = "wecom_archive:%s" % (row.get("msg_id") or "")
+            if repo.findBySource(agent, source, tenantId):
+                duplicated += 1
+                continue
+            sentAt = str(row.get("sent_at") or "")
+            repo.create_knowledge(
+                agent_id=agent,
+                title="企微会话 %s @ %s" % (row.get("chat_id") or "私聊",
+                                            (sentAt or "")[:19]),
+                content=text,
+                category="wecom",
+                tags=[],
+                source=source,
+                confidence=0.6,
+                visibility="private",
+                owner_user_id=str(row.get("sender") or "default"),
+                tenant_id=tenantId,
+                source_type="wecom_archive",
+                source_path=source,
+                source_created_at=sentAt,
+                source_modified_at=sentAt,
+                source_modified_estimated=True,
+                detect_conflict=False,
+                dedupe=True,
+            )
+            written += 1
+        return {"applied": True,
+                "written": written, "duplicated": duplicated, "skipped": skipped}
+
     # ── 历史拉取缺口（如实点名，不冒充全量）─────────────────
 
     def _archiveReading(self) -> Any:

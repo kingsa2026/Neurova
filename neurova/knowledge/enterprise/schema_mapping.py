@@ -93,6 +93,20 @@ def validateDescriptor(descriptor: Dict[str, Any], registry: Any,
         if registry is not None and registry.term(termId, tenantId=tenantId) is None:
             raise MappingError("object.term %s 未登记" % termId)
 
+    # 正文分档（批 C7c，方案 §14-C 裁定）：存档面聊天正文进条目链
+    # （ChatChannelAdapter.writeArchiveEntries），facts 只承结构化断言——
+    # text 列配进 object（column 或模板）即十万级行灌 facts，不可逆，编译期就拒。
+    if (str(descriptor.get("sourceType") or "") == "chat"
+            and str(descriptor.get("chatSource") or "") == "archive"):
+        if objKind == "column" and str(obj.get("column") or "") == "text":
+            raise MappingError(
+                "存档面聊天正文按分档裁定进条目链，不得配进 facts object——"
+                "object 请配 chat_id/sender/sent_at/media_ref 类结构化列"
+                "（正文由 writeArchiveEntries 承接）")
+        if "text" in _TEMPLATE_SLOT.findall(str(obj.get("template") or "")):
+            raise MappingError(
+                "存档面 object 模板不得引用 {text}（正文分档进条目链，方案 §14-C）")
+
     for key, column in (descriptor.get("qualifiers") or {}).items():
         if str(column) not in columns:
             raise MappingError("qualifier %r 的列 %r 不是已声明列" % (key, column))
