@@ -326,8 +326,11 @@ corpid 复用既有 `extra.corpid`/`app_id`，**不新造第二个 corpid 字段
     但单轮摄取耗时被媒体下载/OCR 主导，`truncated` 读数会失真。
   - 丙：**先只落 `sdkfileid` 引用，媒体面另批**（现状延续）——最小开工面，代价是「附件已采集」这句
     话只能停在 health 文案里，页面「数据量」列与实际可检索附件不一致。
-  **✅ 已裁：丙→甲分两步**——C7 各批只做引用与诚实读数；媒体触发面单独一批（因为它还要裁
-  「存档侧 `GetMediaData` 分片续传取字节」这条与 `fetchWecomMediaBytes` 不同的路径）。
+  **✅ 已裁：丙→甲分两步，两步均已落格**——引用与诚实读数＝C7b/C7c（台账 §6-585..587）；
+  媒体触发面＝台账 §6-588：`GetMediaData` 分片续传（官方文档 91774 实证：indexbuf 在
+  sdkfileid 之前、MediaData_t 句柄＋工具五件）＋`POST /enterprise/sources/{id}/media`
+  独立触发端点＋`media_staged_path`「已采集」机器可判＋`ArchiveMediaUnavailable`
+  引用过期独立读数；live-verify 必核：GetData char* 二进制截断风险待真库验证（双态登记）。
   **附带约束（C7a 核查得出）**：`sdkfileid` 的有效期与存档窗口同族，引用落库不等于字节永久可取——
   媒体批必须裁「引用过期后怎么读数」，不许把「有引用」报成「附件可检索」。
 
