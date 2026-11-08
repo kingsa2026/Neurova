@@ -272,12 +272,11 @@ main:
               rm -f "$MARK"
               # `{ ...; echo $? > "$MARK"; }` 里的 `$?` 是 **pytest** 的退出码（它紧跟 pytest，
               # 中间没有别的命令），`tee` 只负责转发与落盘。
-              # 单档墙 `--timeout 300`（5m）压的是**墙钟余量，不是判据**：三片各起一个进程后
-              # 实测 473s / 664s / 472s（= 11m，含进程启动与收集期），最慢一片若把整段压在一格
-              # 死循环上，留给它的余量只有 5 分钟量级，1500s 那条墙（25m）到点时 stage 墙
-              # 早已先说话——**余量对不上的时候，先说真话的是整段强杀**，读的人只能猜
-              # （同一形态见台账 §6-418）。故单档墙取 300s：仍严格窄于 stage 墙 45m，
-              # 且窄于分片后单片实测耗时的 1.5 倍——真慢一格由它诚实地记 `Timeout`。
+              # 单档墙 `--timeout 300`（5m）压的是**墙钟余量，不是判据**：分片后每片各起一个
+              # 进程，最慢一片实测 1022s，单格若把整段压在一个死循环上，300s 会先于整段被杀
+              # 说话——**余量对不上的时候，先说真话的是整段强杀**，读的人只能猜
+              # （同一形态见台账 §6-418）。故单档墙取 300s：它严格窄于下面的 stage 墙，
+              # 真慢一格由它诚实地记 `Timeout`；整段那道墙按「片数 × 每片预算」算，见本 stage 末。
               # 片号进文件名，免得几片写同一份 `./.coverage` 互相覆盖。
               # `COVERAGE_FILE` 指进 `data/coverage/`：coverage 的缺省落点是 `./.coverage`，
               # 而合并那一步（`scripts/ci/coverage_report.py --data-dir data/coverage`）只认那个目录。
@@ -296,7 +295,19 @@ main:
             # `test_protectedSubsetBudgetCoversItsRealCost.py` 都按这一行认出本格；
             # 读法不另抄一份清单（重定向到 /dev/null，只留这条结构特征）。
             echo "受保护子集索引：scripts/ci/protected_tests.txt（入口 $(wc -l < scripts/ci/protected_tests.txt) 行）"
-          timeout: 45m
+          # 这道墙是**按结构算出来的**，不是按一次读数钉的：片数取自 `scripts/ci/`
+          # 目录里有几个 `protected_tests.<N>.txt`，每片预算取单片最慢实测 × 抖动余量，
+          # 三片串行就得乘 3。算式只有一处：`tests/subsetWallclockBudget.py`。
+          #
+          # 45m 是分片**之前**按"一整场"定的，分片落地后活变成"三场之和"而预算没跟：
+          # 构建 `cnb-h8j-1k6s4v3g1#003` 实读 shard 1 `1022s`、shard 2 `811s`，
+          # shard 3 跑到 [87%] 时撞 `任务超过最大执行时间而被强制关闭：45m0s`，
+          # 连汇总行都没来得及打。上一轮 `cnb-n6l-1k6s1qsq0` 三片共 37.4m 只是侥幸压线。
+          # 现取 75m（= 3832s 下界 + 约 17% 余量），仍严格低于单片的窗口上界口径判断，
+          # 也仍远宽于单档父墙 300s——真慢一格由单档诚实地记 `Timeout`。
+          # 判据：`test_protectedSubsetBudgetCoversItsRealCost.py` 判这条串行腿，
+          # `test_unit_tests_runner_has_headroom.py` 判 GitHub 矩阵里每 job 一片。
+          timeout: 75m
 
 
         # 合并判阈值：与上面那一批同属这条腿，红了一样拦合并。

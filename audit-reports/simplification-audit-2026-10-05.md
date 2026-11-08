@@ -12424,3 +12424,39 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **本机连带复算**（同一份树 @ `fca46bbd`，本轮实际执行过的）：`ci_static_gate.py --skip-import` 三格全过；`ruff check neurova tests --no-cache` → All checks passed；`deploy_config_consistency_check.py` → ERROR 0 / WARN 1（既有 R7）；台账四档（`test_mainBaselineRefIsMaterialized` / `test_auditLedgerNumbering` / `test_audit_ledger_commit_guard` / `test_auditLedgerReachabilitySingleProbe`）→ **48 passed**。
     - **如实登记**：① 本轮三条探针均止步 `Prepare`（两条）或 5s 内收尾（一条），`metricCoreHours` 合计 0，未额外消耗额度；探针配置经 `$` 挂载点 + `--config` 传入，未改动仓内任何文件。② 首两次探针尝试因把事件写在分支名下而撞 `CONFIG_EVENT_EMPTY`（`api_trigger*` 只认 `$` 挂载点），属探针形态错误、不属仓内缺陷，改挂载点后一次成功。
     - **净 LOC**：文档 +本格，生产代码 +0、配置 +0。**下一枚空号现查：本格取 592，后继从 593 起。**
+
+593. **PR #374 第十三轮：真红终于到手——受保护子集那格的 45m 墙按「一场」定的，而它早已跑三场串行** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **结论先行**：这一轮的红**不是配额**，是判据本身的缺陷，已根修。构建 `cnb-h8j-1k6s4v3g1`（sha `a8404c32`，走 NPC 通道所以 `Prepare` 起得来）九腿里八条 `success`，`unit-tests` 的 `protected subset shards` 被平台强杀：
+      ```
+      shard 1  3125 passed, 9 skipped, 1 xfailed … in 1022.53s (0:17:02)   rc=0
+      shard 2  2774 passed, 16 skipped, 2 xfailed … in  810.70s (0:13:30)   rc=0
+      shard 3  ……打到 [ 87%] 时 stage 到点，连汇总行都没来得及打
+      error:   任务超过最大执行时间而被强制关闭：45m0s
+      ```
+      上一轮 `cnb-n6l-1k6s1qsq0` 三片共 37.4m（785.81 + 708.65 + 750.25 + 进程启动）**压线通过**——那不是"余量充足"，是侥幸。
+    - **根因（教义第 1 条：在上游生产该状态的地方修）**：这格的 `timeout` 由**两个文件各答一次**，且两个数都是分片**之前**按「一整场」定出来的：
+      - `test_unit_tests_runner_has_headroom.py`：下界 = `MEASURED_WALLCLOCK_SECONDS(1333) × 1.1`，那个 1333 是 `cnb-rja-1k5pv9gbl#003` 单进程跑整份清单被 SIGKILL 时的读数；
+      - `test_protectedSubsetBudgetCoversItsRealCost.py`：上界 = 常量 `SUBSET_STAGE_TIMEOUT_CAP_MIN = 45`。
+      分片落地那天这一格从「一场」变成「三场串行」，**结构变了、预算没跟**：活是 3 个进程之和，预算仍是 1 场加 10%。于是任何一侧都不回答「45m 装不装得下三片」——它连问都没问。
+    - **修法：算式收口到一处，涨落由结构驱动**。新增 `tests/subsetWallclockBudget.py` 作为唯一算式（教义第 6 条），原先两处各写一份的口径全部改指它：
+      ```
+      每片预算      = 单片最慢实测(1022s，取自上面 shard 1) × 抖动余量(1.25) = 1277.5s
+      一格预算下界  = 片数(现读 3) × 每片预算 = 3832.5s = 63.9m      ← 串行就得乘
+      一格预算上界  = 下界 × 窗口倍数(1.5)   = 95.8m
+      ```
+      片数**不手抄**：事实源是 `scripts/ci/` 目录里有几个 `protected_tests.<N>.txt`（与 `.cnb.yml` 的 `ls … | sort -V`、GitHub 侧矩阵同一口径）。加一片预算自动涨，减一片自动降，不需要谁去改常量。
+    - **两个消费方各判自己那种排布，算式只此一份**：`.cnb.yml` 的 `unit-tests` 是**三片串行共用一道墙** ⇒ 比「片数 × 每片预算」；GitHub 的 `unit-tests` job 是**矩阵里每 job 一片** ⇒ 比「每片预算」。同一事实两种排布，不各写一份算式。
+    - **配置改动**：`.cnb.yml` 那格 `timeout: 45m → 75m`（= 3832s 下界 + 约 17% 余量，仍严格低于 95.8m 的上界）。单档父墙 `--timeout 300` 一字不动，它仍严格窄于整段墙——真慢一格由单格诚实地记 `Timeout`，不是整段被强杀。
+    - **红→绿实测**：
+      ```
+      （红灯，改配置前）test_protectedSubsetBudgetCoversItsRealCost.py
+        testDriverStageBudgetCoversTheShardsItRunsSerially  FAILED
+        AssertionError: 现读 3 片串行 × 每片 1278s = 3832s（63.9m），
+                        'unit-tests': timeout='45m'（2700s < 3832s）        1 failed, 6 passed
+      （绿灯，改配置后）上述文件                                                    7 passed
+      tests/unit/ci/test_unit_tests_runner_has_headroom.py                        4 passed
+    ```
+      新增的四格判据各自带反证：片数从目录现读（临时目录造两片 → 预算自动按 2 片算）、下界必须严格低于上界（否则这一档自相矛盾）、把墙写成 `5m` 时下界格必须咬得住。
+    - **回归面**：`tests/unit/ci` 整目录 + `test_ci_parity_guard` → **649 passed, 4 skipped**；`test_protected_subset_shards` + 登记历史 + 扫描面棘轮 → 78 passed；`ruff check neurova tests scripts` → All checks passed；`ci_static_gate.py --skip-import` → 三格全过；`deploy_config_consistency_check.py` → ERROR 0 / WARN 1（既有 R7）；`test_pytest_collection_hygiene` 9 passed（新模块不以 `test_` 前缀命名，不进收集面）。
+    - **如实登记两处**：① 本机 `pytest-asyncio` 起初缺席，`tests/unit/ci/test_optionalImportWallOwedByLivePath.py` 两条 `async def` 用例报 `async def functions are not natively supported`——那是**本机环境缺件**（CI 的 `requirements-ci.lock` 里有它），装回后该档 3 passed 1 skipped，非本单回归。② 本轮未再起任何配额探针；构建 `cnb-h8j-1k6s4v3g1` 是本轮唯一一次门禁真跑，`unit-tests` 已实跑 5.4+ 核时。
+    - **净 LOC**：`.cnb.yml` +10/−7（墙改为按结构算的那段，旧注释里"stage 墙 45m"两处同步）；新增 `tests/subsetWallclockBudget.py` +~170（测试基建池，不计入生产池）；两档判据 ±重写；生产代码 +0。**下一枚空号现查：本格取 593，后继从 594 起。**
