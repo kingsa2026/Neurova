@@ -12,13 +12,15 @@
 - 附件（图片/文档）：本批只把 media_ref 如实放进行里，并在 describeSchema/health
   点名附件能力；**不主动调用** ingest_bridge 媒体下载/解析/OCR 管线——触发面归属
   C6 报告裁定项（ingest_bridge 是既有「消息→条目」桥，复用它不算第二写路径）；
-- 历史消息拉取：官方只分发会话存档 C 动态库（无 Python 包），读取面属批 C7b 未实现；
-  health() 的历史缺口读数改向通道层存档凭据面单点（channels/wecom_archive.py）取，
-  本适配器仍零凭据：凭据齐备也只报 degraded（读取面未实现），配置自身错则如实 error，
-  不静默冒充全量；微信侧无官方历史通道，同以 degraded 如实点名；
-- 游标按捕获面自增 id 推进（单调、无时钟回拨面），token 风格沿用 connectors_file
-  （key=value 以冒号连接）；捕获面是 append-only 表，无 connectors_file 的指纹重置面；
-- 聊天原文不整段进 facts（那是映射层/narrative 的事）——本适配器只负责行集。
+- **来源两态（批 C7b，甲案 §4）**：描述符 `chatSource`＝`capture`（缺省，既有行为）或
+  `archive`（会话存档投影面 `channel_archive_messages`，通道层拉取落库、本适配器只读
+  `mode=ro` 短连接）。存档面行集与捕获面**同一六列＋media_ref**；media_ref 值形态是
+  **sdkfileid**（存档侧引用，与捕获面 media_id 不同源，取字节路径属媒体触发面批次）；
+  历史拉取的凭据/拉取逻辑全在通道层单点（channels/wecom_archive.py），本适配器仍零凭据；
+- 游标 token 风格沿用 connectors_file（key=value 以冒号连接）；`since=` 承载的值按面
+  语义切换——捕获面＝自增 id、存档面＝存档 seq（都是单调、无时钟回拨面）；
+  两面都是 append-only 表，无 connectors_file 的指纹重置面；
+- 聊天原文不整段进 facts（那是映射层/narrative 的事，C7c 承 §14-C 分档）——本适配器只负责行集。
 """
 
 from __future__ import annotations
@@ -36,6 +38,12 @@ from .schema_mapping import VARIANT_CLOSED_SETS, MappingError
 ROW_COLUMNS: Tuple[str, ...] = ("msg_id", "chat_id", "chat_type", "sender", "sent_at", "text")
 #: 附件透传列：可空；描述符可把它声明进 columns 供 qualifier/源钟之外的消费用
 MEDIA_REF_COLUMN = "media_ref"
+
+#: 来源两态闭集（批 C7b，方案 §4/§11）：capture=既有入站捕获面；archive=会话存档投影面。
+#: wechat 无存档面（§1 表），chatSource=archive＋vendor=wechat 构造期即拒。
+SOURCE_FACES: Tuple[str, ...] = ("capture", "archive")
+ARCHIVE_FACE = "archive"
+CAPTURE_FACE = "capture"
 
 #: 只读连接超时（秒）：捕获面 WAL 库，读不应久等
 _RO_TIMEOUT_SECONDS = 5.0
@@ -58,11 +66,37 @@ class ChatChannelAdapter:
                                % (self._vendor or "<空>", " / ".join(closed)))
         # wecom/wechat 与通道层 MessageChannel 枚举值同名，直接作 channel_type 过滤
         self._channelType = self._vendor
-        self._ingressDb = self._resolveIngressDb()
+        # 来源两态（批 C7b）：capture（缺省，存量描述符行为不变）/ archive。
+        self._sourceFace = str(self._descriptor.get("chatSource") or CAPTURE_FACE)
+        if self._sourceFace not in SOURCE_FACES:
+            raise MappingError("chat.chatSource %r 不在闭集（%s）"
+                               % (self._sourceFace or "<空>", " / ".join(SOURCE_FACES)))
+        if self._sourceFace == ARCHIVE_FACE and self._vendor == "wechat":
+            raise MappingError("微信侧无会话存档面（chatSource=archive 仅 wecom 可用）")
+        self._ingressDb = (None if self._sourceFace == ARCHIVE_FACE
+                           else self._resolveIngressDb())
+        self._archiveDb = (self._resolveArchiveDb()
+                           if self._sourceFace == ARCHIVE_FACE else None)
 
     # ── Protocol 四动词 ──────────────────────────────────────
 
     async def describeSchema(self) -> SourceSchema:
+        if self._sourceFace == ARCHIVE_FACE:
+            return SourceSchema(
+                sourceId=self._sourceId, sourceType="chat",
+                tables=[{
+                    "name": "channel_archive_messages（会话存档投影面，vendor=%s；"
+                            "甲案：通道层拉取落库、本源只读）" % self._vendor,
+                    "columns": list(ROW_COLUMNS) + [MEDIA_REF_COLUMN],
+                    "chat_type": "p2p=私聊（chat_id＝双方排序对，同会话双向同键）/ "
+                                 "group=群聊（chat_id＝roomid，subject 语义＝群 id）",
+                    "media_ref": "附件透传列（可空）：值形态＝**sdkfileid**（会话存档侧"
+                                 "引用，与捕获面 media_id **不是同一种引用**——取字节路径"
+                                 "＝存档 GetMediaData 分片续传，属媒体触发面批次，本批"
+                                 "只落引用不主动触发；引用有效期与存档窗口同族，"
+                                 "「有引用」不等于「附件可检索」）",
+                }],
+            )
         return SourceSchema(
             sourceId=self._sourceId, sourceType="chat",
             tables=[{
@@ -80,13 +114,18 @@ class ChatChannelAdapter:
         since = 0
         if cursor is not None and not cursor.isEmpty():
             since = self._parseSince(str(cursor.token))
-        rows, lastId, hasMore = self._readRows(since, max(1, int(limit)))
+        if self._sourceFace == ARCHIVE_FACE:
+            rows, lastId, hasMore = self._readArchiveRows(since, max(1, int(limit)))
+        else:
+            rows, lastId, hasMore = self._readRows(since, max(1, int(limit)))
         nextCursor = None
         if rows or hasMore:
             nextCursor = SourceCursor(self._cursorToken(lastId))
         return ChangeBatch(rows=rows, nextCursor=nextCursor, hasMore=hasMore, fetchedAt="")
 
     async def health(self) -> SourceHealth:
+        if self._sourceFace == ARCHIVE_FACE:
+            return self._archiveHealth()
         if not self._ingressDb.exists():
             return SourceHealth(status="error",
                                 reason="既有通道捕获面 DB 不存在: %s" % self._ingressDb)
@@ -191,6 +230,105 @@ class ChatChannelAdapter:
 
         candidates = mediaCandidates(metadata)
         return str(candidates[0][0]) if candidates else ""
+
+    # ── 存档投影面（批 C7b，甲案：通道层写、本源只读 ro 短连接）──
+
+    def _resolveArchiveDb(self) -> Path:
+        """存档投影库落点：描述符显式 archiveDb 优先；缺省与通道层写入口同一
+        注入口径（`NEUROVA_CHANNEL_ARCHIVE_DB`，未注入落数据根 channel_archive.db，
+        env 名单点在 channels/wecom_archive.py，与捕获面同款纪律）。"""
+        explicit = str(self._descriptor.get("archiveDb") or "").strip()
+        if explicit:
+            return Path(explicit)
+        from neurova.core.data_root import callerPath
+
+        from neurova.channels.wecom_archive import CHANNEL_ARCHIVE_DB_ENV
+
+        return callerPath(os.environ.get(CHANNEL_ARCHIVE_DB_ENV),
+                          "channel_archive.db")
+
+    def _readArchiveRows(self, since: int, limit: int) -> Tuple[List[Dict[str, Any]], int, bool]:
+        """只读拉一批存档投影行：按 seq 扫描、send 过滤在 Python 侧（recall/switch
+        留档不入账但**游标推进过它们**——否则水位卡死、扫描窗无限增长，§5 同规）。
+
+        投影库尚未落盘（worker 未拉过）→ 空批诚实返回，不炸、不冒充有数；
+        mode=ro 短连接，不写通道库、不留常驻连接。"""
+        from neurova.channels.wecom_archive import SEND_ROWS_SQL
+
+        if not self._archiveDb.exists():
+            return [], int(since), False
+        conn = sqlite3.connect(self._roUriFor(self._archiveDb), uri=True,
+                               timeout=_RO_TIMEOUT_SECONDS)
+        try:
+            fetched = conn.execute(SEND_ROWS_SQL,
+                                   (int(since), int(limit) + 1)).fetchall()
+        finally:
+            conn.close()
+        hasMore = len(fetched) > limit
+        scanned = fetched[:limit]
+        lastSeq = max((int(r[0]) for r in scanned), default=int(since))
+        rows = [self._rowFromArchive(dbRow) for dbRow in scanned if dbRow[2] == "send"]
+        return rows, lastSeq, hasMore
+
+    def _rowFromArchive(self, dbRow: tuple) -> Dict[str, Any]:
+        """投影行 → 六列行集（与捕获面同体形状；chat_id 按面语义：群＝roomid、
+        p2p＝双方排序对——同会话双向同键，不随消息方向漂）。"""
+        from neurova.channels.wecom_archive import msgtimeMillisToIso
+
+        (_seq, msgid, _action, _msgtype, fromId, tolistJson, roomid,
+         msgtimeMs, text, mediaRef) = dbRow
+        try:
+            tolist = json.loads(tolistJson) if tolistJson else []
+        except (TypeError, ValueError):
+            tolist = []
+        participants = sorted({str(p) for p in ([fromId] + list(tolist or [])) if p})
+        chatId = roomid or ("p2p:%s" % ":".join(participants) if participants else msgid)
+        return {
+            "msg_id": str(msgid),
+            "chat_id": chatId,
+            "chat_type": "group" if roomid else "p2p",
+            "sender": str(fromId),
+            "sent_at": msgtimeMillisToIso(int(msgtimeMs)),
+            "text": str(text),
+            MEDIA_REF_COLUMN: str(mediaRef),
+        }
+
+    def _roUriFor(self, dbPath: Path) -> str:
+        return "file:%s?mode=ro" % dbPath.as_posix()
+
+    def _archiveHealth(self) -> SourceHealth:
+        """存档源健康读数：凭据面 error 照搬；投影面可达性另探，不冒充 ok。
+
+        C7b 阶段常驻拉取未启动（C7c），投影面要么空要么无自动落库——degraded
+        是诚实形态；凭据齐备也不报 ok（覆盖范围由席位与成员同意决定，§3）。"""
+        reading = self._archiveReading()
+        if reading.status == "error":
+            return SourceHealth(status="error", reason=reading.reason)
+        if not self._archiveDb.exists():
+            return SourceHealth(
+                status="degraded",
+                reason="%s；会话存档投影面尚未落库: %s（常驻增量拉取属批 C7c 未启动）"
+                       % (reading.reason, self._archiveDb))
+        from neurova.channels.wecom_archive import SEND_ROWS_SQL
+
+        try:
+            conn = sqlite3.connect(self._roUriFor(self._archiveDb), uri=True,
+                                   timeout=_RO_TIMEOUT_SECONDS)
+            try:
+                conn.execute("SELECT 1 FROM (" + SEND_ROWS_SQL + ") LIMIT 1",
+                             (0, 1)).fetchone()
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM channel_archive_messages"
+                    " WHERE action = 'send'").fetchone()
+            finally:
+                conn.close()
+        except sqlite3.Error as exc:
+            return SourceHealth(status="error",
+                                reason="会话存档投影面不可读: %s" % exc)
+        return SourceHealth(
+            status="degraded",
+            reason="%s；存档投影面可达（send 行已落 %d），常驻增量拉取属批 C7c 未启动"
+                   % (reading.reason, row[0]))
 
     # ── 游标（token 风格沿用 connectors_file）────────────────
 
