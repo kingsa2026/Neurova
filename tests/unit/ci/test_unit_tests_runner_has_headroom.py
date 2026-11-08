@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import io
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -41,7 +42,12 @@ import pytest
 yaml = pytest.importorskip("yaml")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from tests import subsetWallclockBudget as wallclock  # noqa: E402  墙钟预算的唯一算式
 CNB = PROJECT_ROOT / ".cnb.yml"
+GITHUB_CI = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
 PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
 
 #: 平台口径（官方《自定义云原生开发流水线》）：内存 GiB = cpus × 2。
@@ -59,9 +65,9 @@ BASE_GIB = 1.5
 #: 内存余量倍数：低于它就算"刚好装下"，而"刚好装下"在共享 runner 上等于会 OOM。
 MEMORY_HEADROOM = 1.25
 
-#: 整场墙钟的最新实测（秒）。取构建 `cnb-rja-1k5pv9gbl#003` 被 SIGKILL 时的读数
-#: ——那一场还没跑完，故它是**下界**，判据只拿它算"至少需要多少"。
-MEASURED_WALLCLOCK_SECONDS = 1333
+#: 整场墙钟口径**不在这里**：`1333s` 那种"一整场"的读数在分片落地后不再成立
+#: （见 `tests/subsetWallclockBudget.py` 的头注与构建 `cnb-h8j-1k6s4v3g1#003`）。
+#: 本档只留一个读数用于**反证**（把墙写成 5m 时必须被认成装不下），故取单片预算的零头。
 
 
 def _pipelines() -> dict:
@@ -175,39 +181,54 @@ class TestUnitTestLegContainerFitsItsOwnSubset:
         )
 
 
-class TestUnitTestLegWallclockIsABudgetNotAWindow:
-    """墙钟这一维的口径**只有一条**：上限要么是预算、要么不是上限。
+def _githubJobWallSeconds(jobName: str) -> float:
+    """GitHub 侧 job 的墙（`timeout-minutes`），缺省即无界——无界不许当成"合规"。"""
+    doc = yaml.safe_load(io.open(GITHUB_CI, encoding="utf-8").read())
+    job = (doc.get("jobs") or {}).get(jobName)
+    assert job, f".github/workflows/ci.yml 缺 job {jobName!r}——墙这一维无从作答"
+    minutes = job.get("timeout-minutes")
+    assert isinstance(minutes, int) and minutes > 0, (
+        f"GitHub 的 {jobName!r} job 未声明 `timeout-minutes`——落到无界，"
+        "而它的同龄人（cnb 那条串行腿）是有墙的：一侧无界一侧有界即放行标准分叉"
+    )
+    return minutes * 60.0
 
-    本档原先钉的是"余量 ≥ 实测 3×"（`MEASURED_WALLCLOCK_SECONDS * 3`），而 3× 那条与
-    同一次现场的另一条判据方向相反：`test_protectedSubsetBudgetCoversItsRealCost.py`
-    要求驱动受保护子集那一格的 `timeout ≤ 45m`——理由正是"上限远比实测宽时，
-    『真撞墙』与『被资源杀掉』在日志里长得一模一样，读的人只能猜"。
-    两条判据同时在场时，任何取值都只能满足其中一条（2700s < 1333×3，而 90m > 45m），
-    那不是"两道门都要过"，是两套口径各自定义了一次"墙钟该多宽"。
-    故这里收口到预算口径，把 3× 那一条退役——不是把门槛改软：判据仍然逐字读活配置，
-    只是"该多宽"只由一处作答（教条第 6 条，同一事实只许一处定义）。
+
+class TestUnitTestLegWallclockIsABudgetNotAWindow:
+    """墙钟这一维的算式**只有一处**：`tests/subsetWallclockBudget.py`。
+
+    本档此前钉的是"余量 ≥ 实测 3×"（`MEASURED_WALLCLOCK_SECONDS * 3`），与同一次现场
+    `test_protectedSubsetBudgetCoversItsRealCost.py` 的"≤ 45m"方向相反；两条同时在场时，
+    任何取值都只能满足其中一条——那不是"两道门都要过"，是两套口径各自定义了一次
+    "墙钟该多宽"。上一轮收口成"只留预算口径"是对的，但留下的两个数（`45m` 与 `1333s`）
+    都是**分片之前**按"一整场"定的，而这一格早已是三片串行。构建
+    `cnb-h8j-1k6s4v3g1#003` 的 `45m0s` 强杀就是这么来的。
+
+    故算式收口到 `tests/subsetWallclockBudget.py` 一处，两个消费方各判自己那种排布：
+
+    - **本档**：GitHub 矩阵每 job 一片 ⇒ 比「每片预算」（下界）与「单档父墙 1500s」
+      （本 job 的上界纪律，见 `.github/workflows/ci.yml` 那条注释）；
+    - **`test_protectedSubsetBudgetCoversItsRealCost.py`**：cnb 那条三片串行共用一道墙
+      ⇒ 比「片数 × 每片预算」与它的窗口倍数。
+
+    GitHub job 的**上界**不在此判：那个 `timeout-minutes` 连 checkout、装锁一起盖住，
+    装锁要几秒不在仓内，拿它当"预算"会得到一条只能靠猜的判据。它真正可作答的是
+    「装得下一片」这条下界。
     """
 
-    def testStageBudgetCoversTheMeasuredRun(self):
-        """预算必须覆盖实测——下界是"跑得完"，上界由预算判据那一档管。"""
-        pipe = _unitTestPipeline()
-        budget = _coverageStageTimeoutSeconds(pipe)
-        assert budget >= MEASURED_WALLCLOCK_SECONDS * 1.1, (
-            f"受保护子集那一段给 {budget}s，而最新实测单场已 {MEASURED_WALLCLOCK_SECONDS}s"
-            f"（构建 cnb-rja-1k5pv9gbl#003，被 SIGKILL 时读数，仍是下界）——"
-            "预算装不下一场真实的跑测。墙钟撞墙的日志形态与失败墙一模一样"
-            "（整段被掐断、一条红都没有），故这条下界必须守住。"
-            "上界（别把上限当窗口）由 test_protectedSubsetBudgetCoversItsRealCost.py 判。"
+    def testEveryMatrixJobBudgetCoversOneShard(self):
+        """GitHub 侧每 job 只跑一片：job 墙必须装得下这一片。"""
+        job_wall = _githubJobWallSeconds("unit-tests")
+        per_shard = wallclock.perShardBudgetSeconds()
+        assert job_wall >= per_shard, (
+            f"GitHub 的 `unit-tests` job 给 {job_wall:.0f}s，而单片预算已 {per_shard:.0f}s"
+            f"（单片最慢实测 {wallclock.PER_SHARD_MEASURED_SECONDS}s × "
+            f"{wallclock.SHARD_JITTER_HEADROOM} 余量）——矩阵里每个 job 只跑一片，"
+            "这道墙却装不下它。算式见 `tests/subsetWallclockBudget.py`。"
         )
 
-    def testDetectorIsNotVacuous(self, tmp_path):
-        """反向控制：把 timeout 写成 5m 时必须读得出是个装不下一场的数。"""
-        pipes = _pipelines()
-        name = [n for n in pipes if n.startswith("unit-tests")][0]
-        pipe = pipes[name]
-        stages = [
-            dict(stage, timeout="5m") if _isSubsetStage(stage) else stage
-            for stage in pipe["stages"]
-        ]
-        assert _coverageStageTimeoutSeconds(dict(pipe, stages=stages)) == 300
-        assert 300 < MEASURED_WALLCLOCK_SECONDS * 1.1
+    def testDetectorIsNotVacuous(self):
+        """反向控制：把墙写成 5m 时必须读得出是个装不下这一片的数。"""
+        assert wallclock.parseTimeoutSeconds("5m") < wallclock.perShardBudgetSeconds(), (
+            "5m 竟被判成装得下一片——判据写坏了，上面那条会恒绿"
+        )
