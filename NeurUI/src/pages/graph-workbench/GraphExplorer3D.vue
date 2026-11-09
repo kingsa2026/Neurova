@@ -81,6 +81,15 @@ let rawLinks: Array<{ source: string; target: string; relation: string }> = []
 
 let graph: any = null
 let disposed = false
+// 一次性 fit 标记：每次 graphData 后置位，引擎冷却消费一次——避免用户拖拽/ reheats
+// 后的每次冷却都把相机抢回全图。
+let fitPending = false
+
+// 全节点入视：把力导布局的包围盒框进当前视口（修「固定相机裁掉边缘节点」）。
+// 空集不 fit（无包围盒可框）。resize/全屏后视口变了也走这里重框。
+const fitToView = (durationMs = 400) => {
+  if (graph && rawNodes.length) graph.zoomToFit(durationMs, 40)
+}
 
 const currentNodeId = ref('')
 
@@ -260,6 +269,7 @@ const render = async (data: { nodes: Array<{ id: string; name: string; type: str
     await initPromise
   }
   graph.graphData({ nodes, links })
+  fitPending = nodes.length > 0
 }
 
 let initPromise: Promise<void> | null = null
@@ -289,6 +299,13 @@ const _createGraph = async () => {
         })
         // 点空白处回全图：聚焦视图的退出路径不能只靠找工具条按钮。
         .onBackgroundClick(() => resetToFull())
+        // 力导冷却后框全图：布局 settled 的包围盒才真实，此时 fit 才能把全部节点入视。
+        .onEngineStop(() => {
+          if (fitPending) {
+            fitPending = false
+            fitToView()
+          }
+        })
         // ── 连接线：生物电信号 ──
         // 暗青色基线（低透明度作底），选中节点的关联边亮琥珀
         .linkColor((link: any) => {
@@ -315,10 +332,6 @@ const _createGraph = async () => {
       if (containerRef.value.clientWidth) {
         graph.width(containerRef.value.clientWidth)
         graph.height(containerRef.value.clientHeight)
-      }
-      // 相机初始距离拉远（大图不挤）
-      if (graph.cameraPosition) {
-        graph.cameraPosition({ z: 320 })
       }
     } catch (e: any) {
       // 渲染器初始化失败（WebGL 缺席/依赖形状变化）落可见提示，不静默空白。
@@ -353,6 +366,8 @@ const handleResize = () => {
   if (graph && containerRef.value) {
     graph.width(containerRef.value.clientWidth)
     graph.height(containerRef.value.clientHeight)
+    // 视口尺寸变了（含全屏切换派发的 resize）：重框全图，否则仍按旧包围盒裁节点。
+    fitToView(200)
   }
 }
 
@@ -388,6 +403,9 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: var(--nr-space-sm);
+  /* 不随父级伸缩：高度自留，剩余全给画布；窄屏换行不挤压画布宽度。 */
+  flex: none;
+  flex-wrap: wrap;
 }
 
 .focus-input {
@@ -405,7 +423,11 @@ onBeforeUnmount(() => {
 
 .explorer3d-canvas {
   position: relative;
-  min-height: 420px;
+  /* 撑满 flex 父级剩余高度：全屏时父级长高画布跟随（修「只有上半屏」）；
+     高度交给 flex 而非库内联内容，handleResize 才能量到真实新尺寸。 */
+  flex: 1;
+  width: 100%;
+  min-height: 0;
   border: 1px solid var(--nr-glass-border);
   border-radius: var(--nr-radius-md, 12px);
   /* 暗宇宙底色：与生物电信号配色一体化 */

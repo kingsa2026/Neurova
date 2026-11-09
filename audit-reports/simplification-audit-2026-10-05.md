@@ -12243,3 +12243,10 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **实测**：本机无凭据 → exit 2＋runbook 六行读数（双态诚实路径活体验证）；env 改写全收 main()（manual env 棘轮守卫同跑绿）。
     - **仍开（外部依赖，代码侧无剩余）**：真部署时以真凭据跑本脚本取 §12 判据全过读数；GetData char\* 二进制截断风险以脚本内 PIL verify 实测收口。
     - **下一枚空号现查：本格取 590，后继从 591 起。**
+591. **ua-parser-js 2.0.10 AGPL 审计高风险摘除——overrides 钉 MIT 线 0.7.39＋npm 锁许可守卫落格** ✅🟢 —— 许可审计报 ua-parser-js:2.0.10 高风险（AGPL-3.0-or-later，归并口径 AGPL-3.0-PLUS），归属面＝tools/npx-runtime（**非 NeurUI**：NeurUI 锁零命中、src 零 import、git log -S 全史零引入——审计报告把组件挂到 53090e8f 是扫描时点产物）。
+    - **链条与用途实证**：@askjo/camofox-browser@1.16.0 → camoufox-js（MPL-2.0）声明 ^2.0.2 → 2.0.10（npm license 字段实证 AGPL-3.0-or-later）；**camoufox-js 源码零处调用 ua-parser-js**（dist 无 import、无 UAParser/getUA 等 token——死依赖），降级兼容风险为零。
+    - **修法（与 CVE「只抬不降」口径相反，属许可合规方向）**：tools/npx-runtime/package.json 顶层 overrides 钉 `ua-parser-js: 0.7.39`（MIT，npm license 字段实证）；npm install 后载体嵌套为 camoufox-js/node_modules/ua-parser-js@0.7.39、顶层 AGPL 载体消失；overridesNote 增补许可驱动降级的理由与出处（与 CVE 抬升口径的方向差异写明）。
+    - **判据**：`test_licenseSurfaceGuard.py` 新增 `TestNpmLocksNoHighRiskCopyleft`——NeurUI 与 tools/npx-runtime 两把 package-lock.json 的 license 字段扫描（AGPL/SSPL 全拒、GPL 全拒、LGPL 豁免登记关注制；双许可串仍拒——pymupdf 保守先例）＋**反空账**（license 字段覆盖率过半，NeurUI 458/460、npx-runtime 全量实测）——防止下一个 copyleft npm 依赖混进来。**门**：许可守卫＋pinning 守卫合跑 **25 passed**（npx 锁 regen 后 TestManifestMatchesLockfiles 等全绿）。
+    - **范围反证**：NeurUI 锁 copyleft 载体零（扫描实证）；Python venv 侧 copyleft 余量（edge-tts LGPL／MouseInfo GPLv3＋／odfpy 多许可）在 §6-588 前的许可批已登记关注，不属 npm 锁守卫域。
+    - **口径（numstat 实抄）**：`tools/npx-runtime/package.json` +3/−2（overrides＋note）、锁 +26/−91（AGPL 载体消失＋嵌套重排）、守卫 +53/−1。
+    - **下一枚空号现查：本格取 591，后继从 592 起。**

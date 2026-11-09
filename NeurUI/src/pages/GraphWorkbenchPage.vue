@@ -32,6 +32,7 @@
     <div class="workbench-layout">
       <GlassCard class="canvas-card">
         <a-spin :spinning="loading">
+          <div ref="canvasStageRef" data-testid="workbench-canvas-stage" class="canvas-stage">
           <div class="canvas-toolbar">
             <div class="node-search">
               <a-input-search
@@ -72,6 +73,38 @@
             <a-checkbox v-model:checked="showIsolated" class="isolated-toggle">
               {{ t('knowledge.workbenchShowIsolated') }}
             </a-checkbox>
+            <GlassButton
+              v-if="viewMode === '2d'"
+              size="sm"
+              variant="secondary"
+              data-testid="workbench-save-layout"
+              :disabled="!filteredNodes.length"
+              @click="saveLayout"
+            >
+              {{ t('knowledge.workbenchSaveLayout') }}
+            </GlassButton>
+            <GlassButton
+              v-if="viewMode === '2d'"
+              size="sm"
+              variant="ghost"
+              data-testid="workbench-reset-layout"
+              :disabled="!filteredNodes.length"
+              @click="resetLayout"
+            >
+              {{ t('knowledge.workbenchResetLayout') }}
+            </GlassButton>
+            <GlassButton
+              size="sm"
+              variant="secondary"
+              data-testid="workbench-fullscreen"
+              :disabled="!fullscreenSupported"
+              :aria-pressed="isCanvasFullscreen"
+              :title="isCanvasFullscreen ? t('canvas.fullscreenExit') : t('canvas.fullscreenEnter')"
+              @click="toggleFullscreen"
+            >
+              <FullscreenExitOutlined v-if="isCanvasFullscreen" />
+              <FullscreenOutlined v-else />
+            </GlassButton>
             <span class="canvas-count">{{ filteredNodes.length }}/{{ studio?.nodes?.length ?? 0 }}</span>
           </div>
           <div ref="canvasWrapRef" class="canvas-wrap">
@@ -94,6 +127,7 @@
               :max-zoom="2"
               class="workbench-flow"
               @node-click="onFlowNodeClick"
+              @node-drag-stop="onFlowNodeDragStop"
             >
               <Background />
               <MiniMap pannable zoomable />
@@ -105,6 +139,7 @@
             <div v-else-if="!loading" class="canvas-empty">
               <a-empty :description="t('common.noData')" />
             </div>
+          </div>
           </div>
         </a-spin>
       </GlassCard>
@@ -220,7 +255,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import { VueFlow } from '@vue-flow/core'
@@ -240,6 +275,16 @@ import { useAuthStore } from '@/stores/auth'
 import { request } from '@/api'
 import { radialLayout } from '@/pages/graph-workbench/radial'
 import FlowEdge from '@/pages/graph-workbench/FlowEdge.vue'
+import { FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons-vue'
+// 全屏助手与协作画布共用同一份（标准 API 优先、webkit 前缀回退），不另造平行实装。
+import {
+  canFullscreen,
+  exitFullscreenCompat,
+  isFullscreen as docIsFullscreen,
+  requestFullscreenCompat,
+  type FullscreenDoc,
+  type FullscreenEl,
+} from '@/modules/collaboration/canvasFullscreen'
 
 // 3D/地图都是重依赖（WebGL/three、maplibre），defineAsyncComponent 懒加载：
 // 不切到对应视图就不下载，2D 主路径的包体不受影响。
@@ -256,6 +301,7 @@ const { agentId, currentAgent } = useAgentPage({
     localRender.value = null
     focusNodeId.value = ''
     selectedNodeId.value = ''
+    dragOverrides.value = {}
     fetchStudio()
   },
 })
@@ -283,6 +329,18 @@ interface StudioData {
 
 const loading = ref(false)
 const canvasWrapRef = ref<HTMLElement | null>(null)
+// 全屏根：包住 toolbar＋画布，退出按钮在全屏里仍可见（只全屏 canvas-wrap 会把按钮留在屏外）。
+const canvasStageRef = ref<HTMLElement | null>(null)
+const isCanvasFullscreen = ref(false)
+const fullscreenSupported = computed(() =>
+  Boolean(canvasStageRef.value
+    && canFullscreen(document as unknown as FullscreenDoc, canvasStageRef.value as unknown as FullscreenEl)),
+)
+// 2D 布局持久化：savedLayout 来自 localStorage（按 agent 隔离），dragOverrides 是本会话
+// 尚未保存的拖拽落点。位置解析优先级 dragOverrides > savedLayout > 放射布局。
+const LAYOUT_STORAGE_PREFIX = 'nr-graph-layout:'
+const savedLayout = ref<Record<string, { x: number; y: number }>>({})
+const dragOverrides = ref<Record<string, { x: number; y: number }>>({})
 const studio = ref<StudioData | null>(null)
 const activeTab = ref<'ontology' | 'instance' | 'spatial'>('ontology')
 const viewMode = ref<'2d' | '3d'>('2d')
@@ -313,22 +371,28 @@ const instanceForm = reactive({
 const flowNodes = computed(() => {
   const nodes = filteredNodes.value
   // 放射布局：以选中节点为根（聚焦后以其为圆心重铺），无选中取度数枢纽——
-  // 子树扇区不相交，树边互不交叉。
-  const positions = radialLayout(
+  // 子树扇区不相交，树边互不交叉。用户拖拽/已保存布局优先于放射位置。
+  const radialPositions = radialLayout(
     nodes, (displayData.value?.edges ?? []) as never, selectedNodeId.value || focusNodeId.value || undefined)
-  // 自算包围盒（视口居中的唯一依据，不依赖 vue-flow 的节点测量）。
-  if (positions.size) {
-    const xs = Array.from(positions.values()).map((p) => p.x)
-    const ys = Array.from(positions.values()).map((p) => p.y)
+  const resolved = nodes.map((n) => ({
+    id: n.id,
+    label: n.label,
+    type: n.type,
+    position: dragOverrides.value[n.id] ?? savedLayout.value[n.id] ?? radialPositions.get(n.id) ?? { x: 0, y: 0 },
+  }))
+  // 自算包围盒（视口居中的唯一依据）：按解析后的真实位置算，保存的布局才能居中。
+  if (resolved.length) {
+    const xs = resolved.map((n) => n.position.x)
+    const ys = resolved.map((n) => n.position.y)
     layoutBounds = {
       minX: Math.min(...xs), maxX: Math.max(...xs),
       minY: Math.min(...ys), maxY: Math.max(...ys),
     }
   }
-  return nodes.map((n) => ({
+  return resolved.map((n) => ({
     id: n.id,
     label: n.label,
-    position: positions.get(n.id) ?? { x: 0, y: 0 },
+    position: n.position,
     data: { label: n.label, type: n.type },
     type: 'default',
     class: n.id === selectedNodeId.value ? 'wb-node-selected' : '',
@@ -442,6 +506,7 @@ const fetchStudio = async () => {
   try {
     const res: any = await request.get(`/knowledge-graph/${agentId.value}/studio`)
     studio.value = res?.data ?? res
+    loadSavedLayout()
     // 强制求值 flowNodes：layoutBounds 在 computed 内更新，随后算初始视口。
     void flowNodes.value
     computeInitialViewport()
@@ -640,12 +705,80 @@ const onFlowNodeClick = (mouseEvent: { node: { id: string } }) => {
   selectedNodeId.value = mouseEvent.node.id
 }
 
+// 拖拽落点先记进本会话覆盖层（未保存）；「保存布局」才落 localStorage。
+const onFlowNodeDragStop = (dragEvent: { node: { id: string; position: { x: number; y: number } } }) => {
+  const { id, position } = dragEvent.node
+  dragOverrides.value = { ...dragOverrides.value, [id]: { x: position.x, y: position.y } }
+}
+
+const layoutStorageKey = () => `${LAYOUT_STORAGE_PREFIX}${agentId.value}`
+
+const loadSavedLayout = () => {
+  try {
+    const raw = localStorage.getItem(layoutStorageKey())
+    const parsed = raw ? JSON.parse(raw) : null
+    savedLayout.value = parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    // localStorage 是外部输入边界：损坏 JSON 回退空布局，不阻断画布渲染。
+    savedLayout.value = {}
+  }
+}
+
+const saveLayout = () => {
+  const layout: Record<string, { x: number; y: number }> = {}
+  for (const n of flowNodes.value) layout[n.id] = { x: n.position.x, y: n.position.y }
+  savedLayout.value = layout
+  dragOverrides.value = {}
+  try {
+    localStorage.setItem(layoutStorageKey(), JSON.stringify(layout))
+    message.success(t('knowledge.workbenchLayoutSaved'))
+  } catch (e: any) {
+    message.error(e?.message || t('common.error'))
+  }
+}
+
+const resetLayout = () => {
+  savedLayout.value = {}
+  dragOverrides.value = {}
+  localStorage.removeItem(layoutStorageKey())
+  void flowNodes.value
+  computeInitialViewport()
+  dataVersion.value++
+  message.info(t('knowledge.workbenchLayoutReset'))
+}
+
+function onFullscreenChange(): void {
+  isCanvasFullscreen.value = docIsFullscreen(document as unknown as FullscreenDoc)
+  // 全屏切换改变画布尺寸但未必触发 window resize：主动派发让 3D 图重测量。
+  nextTick(() => window.dispatchEvent(new Event('resize')))
+}
+
+function toggleFullscreen(): void {
+  const el = canvasStageRef.value
+  if (!el || !canFullscreen(document as unknown as FullscreenDoc, el as unknown as FullscreenEl)) return
+  if (docIsFullscreen(document as unknown as FullscreenDoc)) {
+    exitFullscreenCompat(document as unknown as FullscreenDoc)
+  } else {
+    requestFullscreenCompat(el as unknown as FullscreenEl, document as unknown as FullscreenDoc)
+  }
+}
+
 const onNodeSelected = (nodeId: string) => {
   selectedNodeId.value = nodeId
 }
 
 onMounted(() => {
+  document.addEventListener('fullscreenchange', onFullscreenChange)
+  document.addEventListener('webkitfullscreenchange', onFullscreenChange)
   fetchStudio()
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('fullscreenchange', onFullscreenChange)
+  document.removeEventListener('webkitfullscreenchange', onFullscreenChange)
+  if (docIsFullscreen(document as unknown as FullscreenDoc)) {
+    exitFullscreenCompat(document as unknown as FullscreenDoc)
+  }
 })
 </script>
 
@@ -695,6 +828,25 @@ onMounted(() => {
 
 .canvas-wrap {
   height: 560px;
+}
+
+/* 全屏舞台：toolbar＋画布一起进全屏，退出按钮仍可见；画布占满剩余高度。 */
+.canvas-stage {
+  display: flex;
+  flex-direction: column;
+}
+
+.canvas-stage:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  padding: var(--nr-space-md);
+  background: var(--nr-bg-base);
+}
+
+.canvas-stage:fullscreen .canvas-wrap {
+  flex: 1;
+  height: auto;
+  min-height: 0;
 }
 
 .canvas-empty {
