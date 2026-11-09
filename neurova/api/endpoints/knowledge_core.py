@@ -29,6 +29,7 @@ from neurova.api.endpoints.knowledge_common import (
     KnowledgeUpdate,
     entry_or_403,
     entry_or_404,
+    entry_for_update,
     get_repository,
     item_response,
 )
@@ -1176,10 +1177,11 @@ async def update_knowledge(
     body: KnowledgeUpdate = KnowledgeUpdate(),
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
-    """更新知识（属主/管理员；被共享者只读）"""
+    """更新知识（属主/管理员；被共享者只读——分类字段例外：私有条目可见即可改，
+    公共条目分类仍归属主/管理员，见 entry_for_update）"""
     repo = get_repository()
-    agent_id, _item = entry_or_403(repo, knowledge_id, current_user)
     updatedBody = body.dict(exclude_unset=True)
+    agent_id, _item = entry_for_update(repo, knowledge_id, current_user, updatedBody)
     if not repo.update_knowledge(agent_id, knowledge_id, updatedBody):
         raise HTTPException(status_code=404, detail="Knowledge '%s' not found" % knowledge_id)
 

@@ -1,11 +1,14 @@
 /**
- * KnowledgePage — 列表批量分类 TDD 判据（先红后绿）
+ * KnowledgePage — 分类写权限判据（用户裁定 2026-11-09：分类仅对公共库设归属门）
  *
- * 背景：列表页只有单条编辑改分类（编辑弹窗 → PUT /knowledge/{id}），
- * 多选归类无处发生。本批判据钉住批量分类的完整交互契约：
+ * 背景：批量分类最初按「属主/管理员」锁勾选；裁定后私有条目（私人库＋共享给我）
+ * 已由可见性按用户隔离，分类不再另设归属门——公共库条目改分类影响全员可见面
+ * （部门白名单按分类收口），才保留属主/管理员门。与后端 entry_for_update 的
+ * 按字段选门同口径（只写 category 才放行），不造平行口径。
  *
- * 1. 表格提供行多选（rowSelection）；不可管理行（非属主且非 admin）
- *    勾选禁用——与后端 PUT 的属主/管理员权限面一致，不造平行口径。
+ * 契约：
+ * 1. 批量勾选按 canCategorize 放行：公共库非属主行禁用；私有行（含共享给我）
+ *    可勾选。
  * 2. 有选中即出现批量操作条：已选计数 + 批量分类入口 + 取消选择。
  * 3. 批量分类弹窗的分类下拉复用分类注册表单源（categoryOptions）。
  * 4. 应用时逐条走既有 updateKnowledgeNode（PUT），payload 只带 category
@@ -14,6 +17,8 @@
  *    全败 → error（detail 原话优先）+ 保留选择供重试。
  * 5. 未选目标分类不得发请求。
  * 6. 结果集口径变化（切 scope）清空选择，防对不可见条目静默动手。
+ * 7. 编辑弹窗只发变更字段：未改动的正文不进 payload；「只改分类」的编辑因此
+ *    落到与批量同一条按字段选门口径上。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -89,13 +94,24 @@ const OWNED_B = {
   id: 'kid-b', knowledge_id: 'kid-b', title: '条目B', category: 'general',
   content: '乙', visibility: 'private', owner_user_id: 'u-1',
 }
+const SHARED_TO_ME = {
+  id: 'kid-s', knowledge_id: 'kid-s', title: '共享条目', category: 'general',
+  content: '丁', visibility: 'private', owner_user_id: 'u-2', shared_with: ['u-1'],
+}
 const FOREIGN = {
   id: 'kid-c', knowledge_id: 'kid-c', title: '他人条目', category: 'general',
   content: '丙', visibility: 'public', owner_user_id: 'u-2',
 }
-const ITEMS = [OWNED_A, OWNED_B, FOREIGN]
+const ITEMS = [OWNED_A, OWNED_B, SHARED_TO_ME, FOREIGN]
 
 const messages = {
+  common: {
+    edit: '编辑',
+    cancel: '取消',
+    save: '保存',
+    required: '必填',
+    error: '出错了',
+  },
   knowledge: {
     title: '知识库',
     batchSelected: '已选 {n} 项',
@@ -106,6 +122,8 @@ const messages = {
     batchCategorizePartial: '分类更新：成功 {success} 条，失败 {fail} 条',
     batchCategorizeFailed: '分类更新失败',
     batchCategorizeNoCategory: '请选择目标分类',
+    editItem: '编辑知识项',
+    updateSuccess: '更新成功',
   },
 }
 
@@ -135,6 +153,8 @@ const stubs = {
   },
   'a-select': { props: ['value', 'options', 'placeholder'], emits: ['update:value'], template: '<select class="ant-select" :value="value" @change="$emit(\'update:value\', $event.target.value)"><option v-for="o in options" :key="o.value" :value="o.value">{{ o.label }}</option></select>' },
   'a-input': { props: ['value', 'placeholder'], emits: ['update:value'], template: '<input class="ant-input" :value="value" @input="$emit(\'update:value\', $event.target.value)" />' },
+  'a-textarea': { props: ['value', 'rows', 'placeholder'], emits: ['update:value'], template: '<textarea class="ant-textarea" :value="value" @input="$emit(\'update:value\', $event.target.value)" />' },
+  'a-input-number': { props: ['value', 'min', 'max', 'placeholder'], emits: ['update:value'], template: '<input class="ant-input-number" :value="value" @input="$emit(\'update:value\', $event.target.value)" />' },
   'a-input-search': { props: ['value', 'placeholder'], emits: ['update:value', 'search'], template: '<input class="ant-input-search" :value="value" @input="$emit(\'update:value\', $event.target.value)" @keyup.enter="$emit(\'search\', value)" />' },
   'a-checkbox': { template: '<div />' },
   'a-radio-button': { template: '<div />' },
@@ -187,13 +207,37 @@ beforeEach(() => {
 })
 
 describe('KnowledgePage 批量分类', () => {
-  it('行多选：属主行可勾选，非属主行勾选禁用（与 PUT 权限面同口径）', async () => {
+  it('行多选：私有行（含共享给我）可勾选，公共库非属主行禁用（分类仅对公共库设归属门）', async () => {
     const wrapper = await mountWithItems()
     const boxes = wrapper.findAll('input.row-select')
-    expect(boxes.length, '每行须有勾选框').toBe(3)
+    expect(boxes.length, '每行须有勾选框').toBe(4)
     expect(wrapper.find('input.row-select[data-id="kid-a"]').attributes('disabled')).toBeUndefined()
     expect(wrapper.find('input.row-select[data-id="kid-b"]').attributes('disabled')).toBeUndefined()
-    expect(wrapper.find('input.row-select[data-id="kid-c"]').attributes('disabled'), '他人条目不得勾选').toBeDefined()
+    expect(
+      wrapper.find('input.row-select[data-id="kid-s"]').attributes('disabled'),
+      '共享给我的私有行：可见性已隔离，分类不再设归属门',
+    ).toBeUndefined()
+    expect(
+      wrapper.find('input.row-select[data-id="kid-c"]').attributes('disabled'),
+      '公共库他人条目仍禁用（改分类影响全员可见面）',
+    ).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('共享给我的行可进批量分类并逐条 PUT', async () => {
+    const wrapper = await mountWithItems()
+    await wrapper.find('input.row-select[data-id="kid-s"]').setValue(true)
+    await flushPromises()
+    vi.mocked(getKnowledgeNodes).mockClear()
+    const modal = await openBatchModal(wrapper)
+
+    await modal.find('select.ant-select').setValue('tech')
+    await modal.find('button.modal-ok').trigger('click')
+    await flushPromises()
+
+    expect(updateKnowledgeNode).toHaveBeenCalledTimes(1)
+    expect(updateKnowledgeNode).toHaveBeenCalledWith('kid-s', { category: 'tech' }, { agent_id: 'default' })
+    expect(message.success).toHaveBeenCalledTimes(1)
     wrapper.unmount()
   })
 
@@ -290,6 +334,67 @@ describe('KnowledgePage 批量分类', () => {
     ;(wrapper.vm as any).onScopeChange()
     await flushPromises()
     expect((wrapper.vm as any).selectedRowKeys, '切 scope 后不得残留选择').toHaveLength(0)
+    wrapper.unmount()
+  })
+})
+
+describe('KnowledgePage 编辑弹窗只发变更字段（与分类按字段选门同链）', () => {
+  async function openEditModal(wrapper: ReturnType<typeof mountPage>) {
+    const row = wrapper.find('.ant-table-row[data-id="kid-a"]')
+    expect(row.exists()).toBe(true)
+    const editBtn = row.findAll('button').find((b) => b.text() === '编辑')
+    expect(editBtn, '操作列须有编辑入口').toBeTruthy()
+    await editBtn!.trigger('click')
+    await flushPromises()
+    const modal = wrapper
+      .findAll('.ant-modal')
+      .find((m) => m.attributes('data-title') === '编辑知识项')
+    expect(modal, '须打开编辑弹窗').toBeTruthy()
+    return modal!
+  }
+
+  it('只改分类：payload 只带 category（未改动的正文/标题/标签不进请求）', async () => {
+    const wrapper = await mountWithItems()
+    vi.mocked(getKnowledgeNodes).mockClear()
+    const modal = await openEditModal(wrapper)
+
+    await modal.find('select.ant-select').setValue('tech')
+    await modal.find('button.modal-ok').trigger('click')
+    await flushPromises()
+
+    expect(updateKnowledgeNode).toHaveBeenCalledTimes(1)
+    expect(updateKnowledgeNode).toHaveBeenCalledWith('kid-a', { category: 'tech' }, { agent_id: 'default' })
+    expect(message.success).toHaveBeenCalledWith('更新成功')
+    expect(getKnowledgeNodes, '保存后刷新列表').toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('标题与分类都改：payload 带两字段，缺一不可', async () => {
+    const wrapper = await mountWithItems()
+    const modal = await openEditModal(wrapper)
+
+    await modal.find('input.ant-input').setValue('改过的标题')
+    await modal.find('select.ant-select').setValue('tech')
+    await modal.find('button.modal-ok').trigger('click')
+    await flushPromises()
+
+    expect(updateKnowledgeNode).toHaveBeenCalledWith(
+      'kid-a',
+      { title: '改过的标题', category: 'tech' },
+      { agent_id: 'default' },
+    )
+    wrapper.unmount()
+  })
+
+  it('无任何改动：不发请求，弹窗照常关闭', async () => {
+    const wrapper = await mountWithItems()
+    const modal = await openEditModal(wrapper)
+
+    await modal.find('button.modal-ok').trigger('click')
+    await flushPromises()
+
+    expect(updateKnowledgeNode, '空改动不得发 PUT').not.toHaveBeenCalled()
+    expect(wrapper.findAll('.ant-modal').find((m) => m.attributes('data-title') === '编辑知识项')).toBeUndefined()
     wrapper.unmount()
   })
 })

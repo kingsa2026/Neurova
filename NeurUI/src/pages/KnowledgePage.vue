@@ -892,6 +892,13 @@ function canManage(record: KnowledgeItem): boolean {
   return isAdmin.value || record.owner_user_id === currentUserId.value
 }
 
+// 分类写权限（用户裁定 2026-11-09）：仅公共库设归属门；私有条目（私人库＋共享
+// 给我）已由可见性按用户隔离，可见即可改分类。与后端 entry_for_update 的
+// 按字段选门同口径（只写 category 才放行）。
+function canCategorize(record: KnowledgeItem): boolean {
+  return record.visibility !== 'public' || canManage(record)
+}
+
 function onScopeChange() {
   currentPage.value = 1
   clearSelection()
@@ -971,9 +978,9 @@ const configVisible = ref(false)
 // 分类管理弹窗（admin）：注册/编辑/停用/删除分类注册表，变更后刷新分类下拉
 const catMgmtOpen = ref(false)
 
-// 批量分类：多选仅放行与 PUT 同权限口径的行（属主/admin）；应用时逐条走
-// 既有 updateKnowledgeNode 单更新链（payload 只带 category，不触正文重抽），
-// 聚合成功/失败——不新造平行批量端点。
+// 批量分类：多选按分类写权限放行（公共库归属主/admin，私有可见即可，见
+// canCategorize）；应用时逐条走既有 updateKnowledgeNode 单更新链（payload 只带
+// category，不触正文重抽），聚合成功/失败——不新造平行批量端点。
 const selectedRowKeys = ref<string[]>([])
 const batchCategoryOpen = ref(false)
 const batchCategorizing = ref(false)
@@ -983,7 +990,7 @@ const rowSelection = computed(() => ({
   selectedRowKeys: selectedRowKeys.value,
   preserveSelectedRowKeys: true,
   onChange: (keys: string[]) => { selectedRowKeys.value = keys },
-  getCheckboxProps: (record: KnowledgeItem) => ({ disabled: !canManage(record) }),
+  getCheckboxProps: (record: KnowledgeItem) => ({ disabled: !canCategorize(record) }),
 }))
 
 function clearSelection() {
@@ -1815,7 +1822,21 @@ async function saveItem() {
   saving.value = true
   try {
     if (editingItem.value) {
-      await updateKnowledgeNode(editingItem.value.id, form.value, { agent_id: agentId.value })
+      // 只发变更字段：未改动的正文不再进 payload（后端 exclude_unset 语义），
+      // 也让「只改分类」的编辑走与批量一致的按字段选门口径。
+      const before = editingItem.value
+      const changed: Record<string, unknown> = {}
+      if (form.value.title !== before.title) changed.title = form.value.title
+      if (form.value.category !== before.category) changed.category = form.value.category
+      if (form.value.content !== before.content) changed.content = form.value.content
+      if (JSON.stringify(form.value.tags ?? []) !== JSON.stringify(before.tags ?? [])) {
+        changed.tags = form.value.tags
+      }
+      if (!Object.keys(changed).length) {
+        modalVisible.value = false
+        return
+      }
+      await updateKnowledgeNode(before.id, changed, { agent_id: agentId.value })
       message.success(t('knowledge.updateSuccess'))
     } else {
       const raw: Record<string, any> = { ...form.value, agent_id: agentId.value }

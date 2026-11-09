@@ -1138,6 +1138,14 @@ class KnowledgeRepository:
             return False
         return self._user_id(user) != "" and item.get("owner_user_id") == self._user_id(user)
 
+    def can_categorize(self, user: Optional[Dict[str, Any]], item: Dict[str, Any]) -> bool:
+        """分类字段的写权限（用户裁定 2026-11-09）：公共库归属主/管理员，
+        私有条目（含被共享）已由可见性按用户隔离——可见即可改分类。
+        部门白名单由 can_view/can_modify 原样继承，不在此重复。"""
+        if item.get("visibility") == VISIBILITY_PUBLIC:
+            return self.can_modify(user, item)
+        return self.can_view(user, item)
+
     def visible_items(
         self,
         user: Optional[Dict[str, Any]],
