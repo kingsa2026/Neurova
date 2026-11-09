@@ -75,6 +75,8 @@ export interface OntologyTerm {
   aliases: string[]
   // G1：定义描述项（GB/T 48000.3 表 1/表 2 第 4 项；空 = 这一维没依据）
   definition: string
+  // G2：数据属性基本类型（5.5 表 3 闭集，仅 property；空 = 未约束）
+  datatype: string
   // G3 结构化列表：外部 IRI 映射（kind 闭集：skos_exactMatch/skos_closeMatch/
   // skos_relatedMatch/equivalentClass，校验在注册表）
   external_iris: Array<{ kind: string; iri: string }>
@@ -111,6 +113,7 @@ export interface OntologyTermWrite {
   transitive?: boolean | null
   aliases?: string[] | null
   definition?: string | null
+  datatype?: string | null
   external_iris?: Array<{ kind: string; iri: string }> | null
   deprecated?: boolean | null
   replaced_by?: string | null

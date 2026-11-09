@@ -97,6 +97,16 @@
               <span>{{ t('ontology.termDefinition') }}</span>
               <a-textarea v-model:value="form.definition" size="sm" :rows="2" />
             </label>
+            <label v-if="form.kind === 'property'" class="field">
+              <span>{{ t('ontology.termDatatype') }}</span>
+              <a-select v-model:value="form.datatype" size="sm" allow-clear>
+                <a-select-option value="boolean">boolean</a-select-option>
+                <a-select-option value="date">date</a-select-option>
+                <a-select-option value="number">number</a-select-option>
+                <a-select-option value="text">text</a-select-option>
+                <a-select-option value="url">url</a-select-option>
+              </a-select>
+            </label>
             <label class="field">
               <span>{{ t('ontology.termParent') }}</span>
               <a-select v-model:value="form.parent_term_id" size="sm" allow-clear>
@@ -245,6 +255,7 @@ interface TermForm {
   kind: 'concept' | 'relation' | 'property'
   label: string
   definition: string
+  datatype: string
   parent_term_id: string
   domain_text: string
   range_terms_text: string
@@ -279,6 +290,7 @@ function emptyForm(): TermForm {
     required_props_text: '',
     aliases_text: '',
     definition: '',
+    datatype: '',
     external_iris_text: '',
     replaced_by: '',
     module: '',
@@ -383,6 +395,7 @@ function openEdit(term: OntologyTerm) {
   form.kind = (term.kind as TermForm['kind']) ?? 'concept'
   form.label = term.label ?? ''
   form.definition = term.definition ?? ''
+  form.datatype = term.datatype ?? ''
   form.parent_term_id = term.parent_term_id ?? ''
   form.domain_text = (term.domain_terms ?? []).join(', ')
   form.range_terms_text = (term.range_terms ?? []).join(', ')
@@ -417,6 +430,7 @@ function buildPayload(): OntologyTermWrite {
     kind: form.kind,
     label: form.label.trim(),
     definition: form.definition.trim() || null,
+    datatype: form.kind === 'property' ? form.datatype || null : null,
     parent_term_id: form.parent_term_id || null,
     domain: splitList(form.domain_text),
     range_terms: splitList(form.range_terms_text),

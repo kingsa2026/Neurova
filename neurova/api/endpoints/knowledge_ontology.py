@@ -354,6 +354,8 @@ class TermWriteRequest(BaseModel):
     external_iris: Optional[List[Dict[str, str]]] = None
     # G1：定义描述项（表 1/表 2 第 4 项）；None = PUT 保留现值
     definition: Optional[str] = None
+    # G2：数据属性基本类型（5.5 表 3 闭集，仅 property 可声明）；None = PUT 保留现值
+    datatype: Optional[str] = None
     deprecated: Optional[bool] = None
     replaced_by: Optional[str] = None
     # B10 L2 / B11 L3：SKOS 多语言标签、模块归属、身份判据、限定关系 schema。
@@ -435,7 +437,7 @@ def _registerTerm(registry: Any, termId: str, body: TermWriteRequest,
         inverseOf=body.inverse_of, symmetric=bool(body.symmetric),
         transitive=bool(body.transitive), aliases=body.aliases,
         externalIris=body.external_iris, definition=body.definition or "",
-        deprecated=bool(body.deprecated),
+        datatype=body.datatype or "", deprecated=bool(body.deprecated),
         replacedBy=body.replaced_by or "",
         labels=body.labels, altLabels=body.alt_labels,
         module=body.module or "", identityKeys=body.identity_keys,
@@ -457,7 +459,7 @@ def _putDeclaration(body: TermWriteRequest) -> Dict[str, Any]:
         "inverseOf": body.inverse_of, "symmetric": body.symmetric,
         "transitive": body.transitive, "aliases": body.aliases,
         "externalIris": body.external_iris, "definition": body.definition,
-        "deprecated": body.deprecated,
+        "datatype": body.datatype, "deprecated": body.deprecated,
         "replacedBy": body.replaced_by, "identityKeys": body.identity_keys,
         "labels": body.labels, "altLabels": body.alt_labels,
         "module": body.module, "qualifierSchema": body.qualifier_schema,
@@ -855,6 +857,7 @@ class PipelineTermUpsert(BaseModel):
     transitive: Optional[bool] = None
     aliases: Optional[List[str]] = None
     externalIris: Optional[List[Dict[str, str]]] = None
+    datatype: Optional[str] = None
     deprecated: Optional[bool] = None
     replacedBy: Optional[str] = None
     # B10 L2 / B11 L3 声明字段：批次里写不出来的字段等于没有写面——发布路径与单条写面对齐。
