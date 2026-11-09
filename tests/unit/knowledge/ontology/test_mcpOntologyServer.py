@@ -143,3 +143,65 @@ class TestA2FactSubmit:
             r2 = json.loads((await session.call_tool("fact_submit", body)).content[0].text)
             # 二次提交要么同 fact（去重）要么如实报状态——不得产生孤儿第二行
             assert r1.get("fact_id") == r2.get("fact_id") or r2.get("deduplicated")
+
+
+class TestA3Derive:
+    @pytest.mark.asyncio
+    async def test_deriveReturnsConclusionsWithProvenance(self, asgi_app, store):
+        """enforce 规则结论可查带溯源（规则/前提/materialization）。"""
+        # 登记 enforce 规则：is_a(订单X, Order) ⇒ high_value(订单X, Order)
+        from neurova.knowledge.ontology.rule_engine import ForwardChainingEngine
+        engine = ForwardChainingEngine(store)
+        engine.registerRule(
+            "order_high_value", "high_value",
+            body=[{"atom": "is_a", "subject": "S", "object": "O"}],
+            headSubjectVar="S",
+            materialization="enforce", tenantId="default")
+        headers = {"X-Service-Token": _SERVICE_TOKEN}
+        async with asgi_app["lifespan"](asgi_app["asgi"]), _session(asgi_app["asgi"], headers) as (session, _):
+            # 先写一条事实（订单D01 is_a Order）
+            await session.call_tool(
+                "fact_submit",
+                {"subject_label": "订单D01", "predicate_term_id": "is_a",
+                 "object_term": "Order", "evidence_text": "订单D01 is_a Order"})
+            # 求值查询
+            res = await session.call_tool(
+                "ontology_derive", {"subject_label": "订单D01"})
+            payload = json.loads(res.content[0].text)
+            assert payload["count"] >= 1, payload
+            derived = [c for c in payload["conclusions"] if c["derived"]]
+            assert derived, "至少一条推导结论"
+            assert derived[0]["materialization"] == "enforce"
+            assert derived[0]["rule_id"] == "order_high_value"
+            assert derived[0]["premises"], "推导结论带前提溯源"
+
+
+class TestA4Actions:
+    @pytest.mark.asyncio
+    async def test_queryActionsViaOntologyQuery(self, asgi_app, store):
+        """ontology_query(kind='action') 查动作清单与风险档。"""
+        from neurova.knowledge.ontology.action_registry import getActionRegistry
+        getActionRegistry(store).upsert(
+            "cancel_order", label="取消订单",
+            boundTool="builtin:exec", riskTier="high")
+        headers = {"X-Service-Token": _SERVICE_TOKEN}
+        async with asgi_app["lifespan"](asgi_app["asgi"]), _session(asgi_app["asgi"], headers) as (session, _):
+            res = await session.call_tool(
+                "ontology_query", {"query": "取消", "kind": "action"})
+            payload = json.loads(res.content[0].text)
+            assert payload["count"] == 1
+            assert payload["matches"][0]["risk_tier"] == "high"
+            assert payload["matches"][0]["bound_tool"] == "builtin:exec"
+
+    @pytest.mark.asyncio
+    async def test_actionCrudGuardsViaRest(self, asgi_app, store):
+        """REST 面：bound_tool 悬空拒、risk_tier 闭集拒（注册表写入处硬拒）。"""
+        from neurova.knowledge.ontology.action_registry import getActionRegistry
+        with pytest.raises(ValueError, match="悬空动作拒绝"):
+            getActionRegistry(store).upsert(
+                "ghost_action", label="幽灵", boundTool="no_such_tool",
+                riskTier="low", registeredTools=["real_tool"])
+        with pytest.raises(ValueError, match="未知风险档"):
+            getActionRegistry(store).upsert(
+                "a1", label="A", boundTool="real_tool", riskTier="critical",
+                registeredTools=["real_tool"])

@@ -40,6 +40,7 @@ from .digest_chain import _SCHEMA_V11
 from ..categories_registry import _SCHEMA_V38_CATEGORIES
 from ..enterprise.schema_mapping import SCHEMA_V34 as _SCHEMA_V34_ENTERPRISE
 from ..fts_index import _SCHEMA_V37_FTS
+from ..ontology.action_registry import _SCHEMA_V42_ACTIONS
 from ..ontology.change_log import _SCHEMA_V33
 from ..ontology.derivation_ledger import _SCHEMA_V10
 from ..ontology.relation_candidates import _SCHEMA_V29_CANDIDATES
@@ -144,6 +145,9 @@ _STEPS: List[tuple] = [
     # v41：数据属性基本数据类型（GB/T 48000.3 评估档 G2，5.5 表 3）——
     #      仅 kind='property' 有意义；xsd 映射在 export/owl.py
     (41, _SCHEMA_V41_TERMS),
+    # v42：本体动作注册表（Ontology 接入 Agent 评估档 A4）——动作声明表
+    #      （绑工具/参数模板/风险档），治理侧元数据读数，不改判定逻辑
+    (42, _SCHEMA_V42_ACTIONS),
 ]
 
 _registered = False
