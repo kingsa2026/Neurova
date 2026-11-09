@@ -8,6 +8,9 @@
  *  2. 没有展示全部节点：相机固定 z:320、无 zoomToFit，力导布局铺开后的包围盒超出
  *     视口 ⇒ 节点细小且边缘被裁。行为判据＝数据到位引擎冷却后必须 zoomToFit，
  *     且 resize（全屏切换会派发）后必须重新 fit。
+ *  3. 点画布空白＝刷新图谱：onBackgroundClick 无条件 resetToFull→refetch，全图态
+ *     点空白也重拉整图；且经 prop 聚焦时退出请求读到陈旧 focusId，连「回到全图」
+ *     都退不出去。行为判据＝全图态点空白零请求；聚焦视图退出请求不带 focus。
  *
  * 重依赖（3d-force-graph/three/WebGL）以桩隔离；红须落在行为断言（zoomToFit 零调用），
  * 非 import/collection error。
@@ -22,8 +25,8 @@ const { graphState } = vi.hoisted(() => ({
 
 vi.mock('3d-force-graph', () => {
   const chainOnly = [
-    'backgroundColor', 'nodeThreeObjectExtend', 'nodeLabel', 'onNodeClick',
-    'onBackgroundClick', 'linkColor', 'linkWidth', 'linkOpacity', 'linkCurvature',
+    'backgroundColor', 'nodeThreeObjectExtend', 'nodeLabel',
+    'linkColor', 'linkWidth', 'linkOpacity', 'linkCurvature',
     'linkDirectionalParticles', 'linkDirectionalParticleSpeed',
     'linkDirectionalParticleWidth', 'linkDirectionalParticleColor', 'lights',
   ]
@@ -32,6 +35,8 @@ vi.mock('3d-force-graph', () => {
     calls: Record<string, any[]>
     _nodeThreeObjectCb: any
     _onEngineStopCb: any
+    _onNodeClickCb: any
+    _onBackgroundClickCb: any
     constructor(el: any) {
       this.el = el
       this.calls = {
@@ -44,6 +49,16 @@ vi.mock('3d-force-graph', () => {
         return this
       }
       ;(this as any).onEngineStop = (cb: any) => { this._onEngineStopCb = cb; return this }
+      ;(this as any).onNodeClick = (cb?: any) => {
+        if (cb === undefined) return this._onNodeClickCb
+        this._onNodeClickCb = cb
+        return this
+      }
+      ;(this as any).onBackgroundClick = (cb?: any) => {
+        if (cb === undefined) return this._onBackgroundClickCb
+        this._onBackgroundClickCb = cb
+        return this
+      }
       ;(this as any).width = (v: number) => { this.calls.width.push(v); return this }
       ;(this as any).height = (v: number) => { this.calls.height.push(v); return this }
       ;(this as any).graphData = (d: any) => { this.calls.graphData.push(d); return this }
@@ -121,10 +136,13 @@ const subgraphFixture = {
   truncated: false,
 }
 
-async function mountExplorer(fixture: any = subgraphFixture) {
+async function mountExplorer(
+  fixture: any = subgraphFixture,
+  extraProps: Record<string, unknown> = {},
+) {
   requestGet.mockResolvedValue(fixture)
   const wrapper = mount(GraphExplorer3D, {
-    props: { agentId: 'agent-1' },
+    props: { agentId: 'agent-1', ...extraProps },
     global: {
       plugins: [i18n],
       stubs: {
@@ -196,5 +214,68 @@ describe('GraphExplorer3D resize 重测量＋重 fit', () => {
       g.calls.zoomToFit.length,
       'resize 改变视口后必须重新 fit，否则全屏长高的画布仍按旧包围盒裁节点',
     ).toBeGreaterThan(0)
+  })
+})
+
+describe('GraphExplorer3D 渲染上限单源', () => {
+  beforeEach(() => {
+    graphState.instances.length = 0
+    vi.clearAllMocks()
+  })
+
+  it('subgraph 请求不再自带第二份 limit（缺省跟全局设置，由服务端解析）', async () => {
+    await mountExplorer()
+    expect(requestGet).toHaveBeenCalledWith(
+      '/knowledge-graph/agent-1/subgraph',
+      { params: { hops: 2 } },
+    )
+  })
+})
+
+describe('GraphExplorer3D 画布空白点击', () => {
+  beforeEach(() => {
+    graphState.instances.length = 0
+    vi.clearAllMocks()
+  })
+
+  it('全图态点空白不发请求（此前点空白＝重拉整图，用户实测 bug）', async () => {
+    await mountExplorer()
+    expect(requestGet).toHaveBeenCalledTimes(1)
+    lastGraph()._onBackgroundClickCb?.()
+    await flushPromises()
+    expect(
+      requestGet,
+      '全图态没有焦点可退，点空白发第二次请求就是把画布点击变成刷新',
+    ).toHaveBeenCalledTimes(1)
+  })
+
+  it('聚焦视图点空白真正退回全图：退出请求不带 focus（prop 陈旧曾致退不出去）', async () => {
+    await mountExplorer(subgraphFixture, { focusId: 'n2' })
+    // 进入请求带 focus（prop 聚焦视图）
+    expect(requestGet).toHaveBeenLastCalledWith(
+      '/knowledge-graph/agent-1/subgraph',
+      { params: { hops: 2, focus: 'n2' } },
+    )
+    lastGraph()._onBackgroundClickCb?.()
+    await flushPromises()
+    // 退出请求必须不带 focus：emit('clear') 后父级 prop 同步晚于本次请求，
+    // 退出请求若读 props.focusId 会把原聚焦视图原样拉回来（回到全图按钮同一根因）。
+    expect(requestGet).toHaveBeenLastCalledWith(
+      '/knowledge-graph/agent-1/subgraph',
+      { params: { hops: 2 } },
+    )
+  })
+
+  it('全图态点节点再点空白：清高亮并通知父级，但不发请求', async () => {
+    const wrapper = await mountExplorer()
+    const g = lastGraph()
+    g._onNodeClickCb?.({ id: 'n1', name: 'Alpha' })
+    g._onBackgroundClickCb?.()
+    await flushPromises()
+    expect(wrapper.emitted('clear')).toBeTruthy()
+    expect(
+      requestGet,
+      '取消高亮不是换数据：清选中不得触发 refetch',
+    ).toHaveBeenCalledTimes(1)
   })
 })
