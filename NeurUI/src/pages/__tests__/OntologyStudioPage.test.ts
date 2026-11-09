@@ -47,6 +47,9 @@ vi.mock('ant-design-vue', () => ({
 
 vi.mock('@/api/modules/ontology', () => ({
   getOntologySchema: vi.fn(),
+  listOntologyNamespaces: vi.fn().mockResolvedValue({ data: {} }),
+  listDomainPacks: vi.fn().mockResolvedValue({ data: [] }),
+  importDomainPack: vi.fn(),
   listRelationCandidates: vi.fn(),
   listOntologyTerms: vi.fn(),
   createOntologyTerm: vi.fn(),

@@ -55,6 +55,16 @@ export function getOntologySchema() {
   return api.get<ApiResponse<OntologySchemaData>>(`${BASE}/ontology/schema`)
 }
 
+/** G5：可用领域包清单（概要：packId/namespace/basedOn/note/termCount）。 */
+export function listDomainPacks() {
+  return api.get<ApiResponse<Array<{ packId: string; namespace: string; basedOn: string; note: string; termCount: number }>>>(`${BASE}/domain-packs`)
+}
+
+/** G5：导入领域包（admin，只补缺幂等；返回补上条数）。 */
+export function importDomainPack(packId: string) {
+  return api.post<ApiResponse<{ pack_id: string; added: number }>>(`${BASE}/domain-packs/${encodeURIComponent(packId)}/import`)
+}
+
 /** G4：可用 IRI 命名空间注册表（前缀 → 基座；空 namespace 语义 = 缺省 kbg:）。 */
 export function listOntologyNamespaces() {
   return api.get<ApiResponse<Record<string, string>>>(`${BASE}/namespaces`)

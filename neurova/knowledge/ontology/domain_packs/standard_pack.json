@@ -1,0 +1,790 @@
+{
+ "packId": "standard",
+ "namespace": "so",
+ "basedOn": "GB/T 48000.3-2026 征求意见稿（2025-04-29）6.2.1-6.2.13 与第 8 章",
+ "note": "词汇以征求意见稿为底本；正式版（2026-01-28 发布）核对约定见评估档 §5.4——正式 IRI 归口未定，术语 IRI 以 so: 前缀占位，待正式发布后经 external_iris 等价机制挂接。",
+ "terms": [
+  {
+   "termId": "Standard",
+   "kind": "concept",
+   "label": "标准实体",
+   "definition": "标准化文件的核心根节点，包含标准元数据和技术要素的完整描述",
+   "namespace": "so"
+  },
+  {
+   "termId": "TerminologyStandard",
+   "kind": "concept",
+   "label": "术语标准",
+   "definition": "以术语为其主要功能要素的标准",
+   "namespace": "so",
+   "parentTermId": "Standard"
+  },
+  {
+   "termId": "SymbolStandard",
+   "kind": "concept",
+   "label": "符号标准",
+   "definition": "以符号为其主要功能要素的标准",
+   "namespace": "so",
+   "parentTermId": "Standard"
+  },
+  {
+   "termId": "ClassificationStandard",
+   "kind": "concept",
+   "label": "分类标准",
+   "definition": "以分类为其主要功能要素的标准",
+   "namespace": "so",
+   "parentTermId": "Standard"
+  },
+  {
+   "termId": "TestStandard",
+   "kind": "concept",
+   "label": "试验标准",
+   "definition": "以试验方法为其主要功能要素的标准",
+   "namespace": "so",
+   "parentTermId": "Standard"
+  },
+  {
+   "termId": "SpecificationStandard",
+   "kind": "concept",
+   "label": "规范标准",
+   "definition": "以规范要求为其主要功能要素的标准",
+   "namespace": "so",
+   "parentTermId": "Standard"
+  },
+  {
+   "termId": "ProcedureStandard",
+   "kind": "concept",
+   "label": "规程标准",
+   "definition": "以规程为其主要功能要素的标准",
+   "namespace": "so",
+   "parentTermId": "Standard"
+  },
+  {
+   "termId": "GuideStandard",
+   "kind": "concept",
+   "label": "指南标准",
+   "definition": "以指南为其主要功能要素的标准",
+   "namespace": "so",
+   "parentTermId": "Standard"
+  },
+  {
+   "termId": "Stakeholder",
+   "kind": "concept",
+   "label": "相关方",
+   "definition": "描述与标准化活动有关的角色实体",
+   "namespace": "so"
+  },
+  {
+   "termId": "Organization",
+   "kind": "concept",
+   "label": "机构",
+   "definition": "参与标准制定或管理的组织实体",
+   "namespace": "so",
+   "parentTermId": "Stakeholder"
+  },
+  {
+   "termId": "Individual",
+   "kind": "concept",
+   "label": "个人",
+   "definition": "参与标准制定或管理的个人实体",
+   "namespace": "so",
+   "parentTermId": "Stakeholder"
+  },
+  {
+   "termId": "IssuingBody",
+   "kind": "concept",
+   "label": "发布机构",
+   "definition": "发布标准的机构",
+   "namespace": "so",
+   "parentTermId": "Organization"
+  },
+  {
+   "termId": "ProposingBody",
+   "kind": "concept",
+   "label": "提出单位",
+   "definition": "提出标准的机构",
+   "namespace": "so",
+   "parentTermId": "Organization"
+  },
+  {
+   "termId": "AdministeringBody",
+   "kind": "concept",
+   "label": "归口单位",
+   "definition": "归口管理标准的机构",
+   "namespace": "so",
+   "parentTermId": "Organization"
+  },
+  {
+   "termId": "ImplementingBody",
+   "kind": "concept",
+   "label": "组织实施单位",
+   "definition": "组织实施标准的机构",
+   "namespace": "so",
+   "parentTermId": "Organization"
+  },
+  {
+   "termId": "DraftingBody",
+   "kind": "concept",
+   "label": "起草单位",
+   "definition": "起草标准的机构",
+   "namespace": "so",
+   "parentTermId": "Organization"
+  },
+  {
+   "termId": "Drafter",
+   "kind": "concept",
+   "label": "起草人",
+   "definition": "起草标准的个人",
+   "namespace": "so",
+   "parentTermId": "Individual"
+  },
+  {
+   "termId": "ReviewExpert",
+   "kind": "concept",
+   "label": "评审专家",
+   "definition": "参与标准评审的个人",
+   "namespace": "so",
+   "parentTermId": "Individual"
+  },
+  {
+   "termId": "DomainCategory",
+   "kind": "concept",
+   "label": "领域类别",
+   "definition": "按标准化领域划分的标准分类",
+   "namespace": "so"
+  },
+  {
+   "termId": "InternationalClassification",
+   "kind": "concept",
+   "label": "国际标准分类",
+   "definition": "国际标准分类体系中的分类",
+   "namespace": "so",
+   "parentTermId": "DomainCategory"
+  },
+  {
+   "termId": "ChinaClassification",
+   "kind": "concept",
+   "label": "中国标准文献分类",
+   "definition": "中国标准文献分类体系中的分类",
+   "namespace": "so",
+   "parentTermId": "DomainCategory"
+  },
+  {
+   "termId": "ContentElement",
+   "kind": "concept",
+   "label": "内容要素",
+   "definition": "标准内容的作用性要素分类",
+   "namespace": "so"
+  },
+  {
+   "termId": "NormativeElement",
+   "kind": "concept",
+   "label": "规范性要素",
+   "definition": "声明符合标准需要满足的可测试的确定性要求的要素",
+   "namespace": "so",
+   "parentTermId": "ContentElement"
+  },
+  {
+   "termId": "InformativeElement",
+   "kind": "concept",
+   "label": "资料性要素",
+   "definition": "提供附加信息以帮助理解或使用标准的要素",
+   "namespace": "so",
+   "parentTermId": "ContentElement"
+  },
+  {
+   "termId": "ScopeElement",
+   "kind": "concept",
+   "label": "范围",
+   "definition": "界定标准化文件所覆盖的边界与适用领域的规范性要素",
+   "namespace": "so",
+   "parentTermId": "NormativeElement"
+  },
+  {
+   "termId": "TermsAndDefinitionsElement",
+   "kind": "concept",
+   "label": "术语和定义要素",
+   "definition": "确立术语与对应定义的规范性要素",
+   "namespace": "so",
+   "parentTermId": "NormativeElement"
+  },
+  {
+   "termId": "SymbolsAndAbbreviationsElement",
+   "kind": "concept",
+   "label": "符号和缩略语要素",
+   "definition": "确立符号与缩略语的规范性要素",
+   "namespace": "so",
+   "parentTermId": "NormativeElement"
+  },
+  {
+   "termId": "CoreTechnicalElement",
+   "kind": "concept",
+   "label": "核心技术要素",
+   "definition": "标准的核心技术内容要素",
+   "namespace": "so",
+   "parentTermId": "NormativeElement"
+  },
+  {
+   "termId": "OtherTechnicalElement",
+   "kind": "concept",
+   "label": "其他技术要素",
+   "definition": "核心技术要素之外的技术内容要素",
+   "namespace": "so",
+   "parentTermId": "NormativeElement"
+  },
+  {
+   "termId": "NormativeReferencesElement",
+   "kind": "concept",
+   "label": "规范性引用文件要素",
+   "definition": "列出规范性引用文件的要素",
+   "namespace": "so",
+   "parentTermId": "NormativeElement"
+  },
+  {
+   "termId": "BibliographyElement",
+   "kind": "concept",
+   "label": "参考文献要素",
+   "definition": "列出参考文献的资料性要素",
+   "namespace": "so",
+   "parentTermId": "InformativeElement"
+  },
+  {
+   "termId": "IndexElement",
+   "kind": "concept",
+   "label": "索引要素",
+   "definition": "提供检索入口的资料性要素",
+   "namespace": "so",
+   "parentTermId": "InformativeElement"
+  },
+  {
+   "termId": "StructuralElement",
+   "kind": "concept",
+   "label": "层次",
+   "definition": "标准文本的层级结构实体",
+   "namespace": "so"
+  },
+  {
+   "termId": "Chapter",
+   "kind": "concept",
+   "label": "章",
+   "definition": "逻辑划分文本的实体",
+   "namespace": "so",
+   "parentTermId": "StructuralElement"
+  },
+  {
+   "termId": "Clause",
+   "kind": "concept",
+   "label": "条",
+   "definition": "章内逻辑划分文本的实体",
+   "namespace": "so",
+   "parentTermId": "StructuralElement"
+  },
+  {
+   "termId": "TitledClause",
+   "kind": "concept",
+   "label": "有标题条",
+   "definition": "带标题的条",
+   "namespace": "so",
+   "parentTermId": "Clause"
+  },
+  {
+   "termId": "UntitledClause",
+   "kind": "concept",
+   "label": "无标题条",
+   "definition": "不带标题的条",
+   "namespace": "so",
+   "parentTermId": "Clause"
+  },
+  {
+   "termId": "Paragraph",
+   "kind": "concept",
+   "label": "段",
+   "definition": "由连续文本内容组成的文本实体",
+   "namespace": "so",
+   "parentTermId": "StructuralElement"
+  },
+  {
+   "termId": "ListItem",
+   "kind": "concept",
+   "label": "列项",
+   "definition": "列表型文本的逻辑项",
+   "namespace": "so",
+   "parentTermId": "StructuralElement"
+  },
+  {
+   "termId": "UnnumberedListItem",
+   "kind": "concept",
+   "label": "无编号列项",
+   "definition": "不带编号的列项",
+   "namespace": "so",
+   "parentTermId": "ListItem"
+  },
+  {
+   "termId": "NumberedListItem",
+   "kind": "concept",
+   "label": "有编号列项",
+   "definition": "带编号的列项",
+   "namespace": "so",
+   "parentTermId": "ListItem"
+  },
+  {
+   "termId": "InformationUnit",
+   "kind": "concept",
+   "label": "信息单元",
+   "definition": "经过有意义的模块化处理且在句法和语义上自包含的信息片段",
+   "namespace": "so"
+  },
+  {
+   "termId": "Provision",
+   "kind": "concept",
+   "label": "条款",
+   "definition": "表达要求或指引的信息单元",
+   "namespace": "so",
+   "parentTermId": "InformationUnit"
+  },
+  {
+   "termId": "AdditionalInfo",
+   "kind": "concept",
+   "label": "附加信息",
+   "definition": "条款之外的补充信息单元",
+   "namespace": "so",
+   "parentTermId": "InformationUnit"
+  },
+  {
+   "termId": "Example",
+   "kind": "concept",
+   "label": "示例",
+   "definition": "以示例形式表达的附加信息",
+   "namespace": "so",
+   "parentTermId": "AdditionalInfo"
+  },
+  {
+   "termId": "Note",
+   "kind": "concept",
+   "label": "注",
+   "definition": "以注形式表达的附加信息",
+   "namespace": "so",
+   "parentTermId": "AdditionalInfo"
+  },
+  {
+   "termId": "Footnote",
+   "kind": "concept",
+   "label": "脚注",
+   "definition": "以脚注形式表达的附加信息",
+   "namespace": "so",
+   "parentTermId": "AdditionalInfo"
+  },
+  {
+   "termId": "ListInfo",
+   "kind": "concept",
+   "label": "清单",
+   "definition": "以清单形式表达的附加信息",
+   "namespace": "so",
+   "parentTermId": "AdditionalInfo"
+  },
+  {
+   "termId": "InformationForm",
+   "kind": "concept",
+   "label": "信息单元内容形式",
+   "definition": "信息单元的表现形式分类",
+   "namespace": "so"
+  },
+  {
+   "termId": "TextForm",
+   "kind": "concept",
+   "label": "条文",
+   "definition": "以文本条文表达的内容形式",
+   "namespace": "so",
+   "parentTermId": "InformationForm"
+  },
+  {
+   "termId": "FigureForm",
+   "kind": "concept",
+   "label": "图",
+   "definition": "以图形表达的内容形式",
+   "namespace": "so",
+   "parentTermId": "InformationForm"
+  },
+  {
+   "termId": "TableForm",
+   "kind": "concept",
+   "label": "表",
+   "definition": "以表格表达的内容形式",
+   "namespace": "so",
+   "parentTermId": "InformationForm"
+  },
+  {
+   "termId": "FormulaForm",
+   "kind": "concept",
+   "label": "数学公式",
+   "definition": "以数学公式表达的内容形式",
+   "namespace": "so",
+   "parentTermId": "InformationForm"
+  },
+  {
+   "termId": "AnnexForm",
+   "kind": "concept",
+   "label": "附录",
+   "definition": "以附录表达的内容形式",
+   "namespace": "so",
+   "parentTermId": "InformationForm"
+  },
+  {
+   "termId": "CitationForm",
+   "kind": "concept",
+   "label": "引用",
+   "definition": "以引用表达的内容形式",
+   "namespace": "so",
+   "parentTermId": "InformationForm"
+  },
+  {
+   "termId": "TipForm",
+   "kind": "concept",
+   "label": "提示",
+   "definition": "以提示表达的内容形式",
+   "namespace": "so",
+   "parentTermId": "InformationForm"
+  },
+  {
+   "termId": "Object",
+   "kind": "concept",
+   "label": "对象",
+   "definition": "条款中涉及的实体对象",
+   "namespace": "so"
+  },
+  {
+   "termId": "StandardizedObject",
+   "kind": "concept",
+   "label": "标准化对象",
+   "definition": "被标准化的产品/服务/过程等对象",
+   "namespace": "so",
+   "parentTermId": "Object"
+  },
+  {
+   "termId": "IndicatorObject",
+   "kind": "concept",
+   "label": "指标对象",
+   "definition": "以指标刻画的对象",
+   "namespace": "so",
+   "parentTermId": "Object"
+  },
+  {
+   "termId": "ObjectPropertyClass",
+   "kind": "concept",
+   "label": "特性类",
+   "definition": "描述对象的属性特征",
+   "namespace": "so"
+  },
+  {
+   "termId": "Constraint",
+   "kind": "concept",
+   "label": "约束逻辑类",
+   "definition": "描述条款对对象特性施加的限定条件，支持数值范围、枚举值、逻辑表达式等约束形式",
+   "namespace": "so"
+  },
+  {
+   "termId": "NumericRangeConstraint",
+   "kind": "concept",
+   "label": "数值区间约束",
+   "definition": "以数值区间表达的约束",
+   "namespace": "so",
+   "parentTermId": "Constraint"
+  },
+  {
+   "termId": "EnumConstraint",
+   "kind": "concept",
+   "label": "枚举值约束",
+   "definition": "以枚举值表达的约束",
+   "namespace": "so",
+   "parentTermId": "Constraint"
+  },
+  {
+   "termId": "ActionClass",
+   "kind": "concept",
+   "label": "行动类",
+   "definition": "描述可执行模块的程序要素",
+   "namespace": "so"
+  },
+  {
+   "termId": "Action",
+   "kind": "concept",
+   "label": "动作",
+   "definition": "最小可执行动作",
+   "namespace": "so",
+   "parentTermId": "ActionClass"
+  },
+  {
+   "termId": "Path",
+   "kind": "concept",
+   "label": "路径",
+   "definition": "执行的路径",
+   "namespace": "so",
+   "parentTermId": "ActionClass"
+  },
+  {
+   "termId": "JudgementCondition",
+   "kind": "concept",
+   "label": "判断条件",
+   "definition": "行动的判断条件",
+   "namespace": "so",
+   "parentTermId": "ActionClass"
+  },
+  {
+   "termId": "ExternalResource",
+   "kind": "concept",
+   "label": "外部资源类",
+   "definition": "与标准有关的其他文件资源",
+   "namespace": "so"
+  },
+  {
+   "termId": "Regulation",
+   "kind": "concept",
+   "label": "法规",
+   "definition": "法律法规类外部资源",
+   "namespace": "so",
+   "parentTermId": "ExternalResource"
+  },
+  {
+   "termId": "Patent",
+   "kind": "concept",
+   "label": "专利",
+   "definition": "专利类外部资源",
+   "namespace": "so",
+   "parentTermId": "ExternalResource"
+  },
+  {
+   "termId": "Literature",
+   "kind": "concept",
+   "label": "文献",
+   "definition": "文献类外部资源",
+   "namespace": "so",
+   "parentTermId": "ExternalResource"
+  },
+  {
+   "termId": "PublicDatabase",
+   "kind": "concept",
+   "label": "公共数据库",
+   "definition": "公共/行业数据库类外部资源",
+   "namespace": "so",
+   "parentTermId": "ExternalResource"
+  },
+  {
+   "termId": "Version",
+   "kind": "concept",
+   "label": "版本",
+   "definition": "支持复杂版本管理（版本树、差异分析）的版本实体",
+   "namespace": "so"
+  },
+  {
+   "termId": "StandardNumber",
+   "kind": "concept",
+   "label": "文件编号",
+   "definition": "支持版本追踪、迭代场景的文件编号实体",
+   "namespace": "so"
+  },
+  {
+   "termId": "hasPart",
+   "kind": "relation",
+   "label": "包含",
+   "definition": "整体-部分关系：一个实体由其他实体组成",
+   "namespace": "so"
+  },
+  {
+   "termId": "composedOf",
+   "kind": "relation",
+   "label": "组成",
+   "definition": "整体-部分关系：由其他实体组成",
+   "namespace": "so"
+  },
+  {
+   "termId": "defines",
+   "kind": "relation",
+   "label": "定义",
+   "definition": "界定关系：术语与其术语定义之间的权威对应",
+   "namespace": "so"
+  },
+  {
+   "termId": "isDefinedBy",
+   "kind": "relation",
+   "label": "被定义",
+   "definition": "界定关系：被术语定义所界定",
+   "namespace": "so"
+  },
+  {
+   "termId": "hasPredecessor",
+   "kind": "relation",
+   "label": "前序",
+   "definition": "顺序关系：与另一实体具有逻辑先后的前序",
+   "namespace": "so"
+  },
+  {
+   "termId": "hasSuccessor",
+   "kind": "relation",
+   "label": "后序",
+   "definition": "顺序关系：与另一实体具有逻辑先后的后序",
+   "namespace": "so"
+  },
+  {
+   "termId": "hasPrecondition",
+   "kind": "relation",
+   "label": "前提条件",
+   "definition": "条件关系：存在前提和结果的逻辑依赖",
+   "namespace": "so"
+  },
+  {
+   "termId": "hasException",
+   "kind": "relation",
+   "label": "例外条件",
+   "definition": "条件关系：例外情形的逻辑依赖",
+   "namespace": "so"
+  },
+  {
+   "termId": "equivalentAdoption",
+   "kind": "relation",
+   "label": "等同采用",
+   "definition": "采用关系：以另一标准为基础等同起草",
+   "namespace": "so"
+  },
+  {
+   "termId": "modifiedAdoption",
+   "kind": "relation",
+   "label": "修改采用",
+   "definition": "采用关系：以另一标准为基础修改起草",
+   "namespace": "so"
+  },
+  {
+   "termId": "sharesFramework",
+   "kind": "relation",
+   "label": "有共同架构",
+   "definition": "兼容关系：在共享技术框架下协同应用",
+   "namespace": "so"
+  },
+  {
+   "termId": "allowsVariance",
+   "kind": "relation",
+   "label": "允许差异",
+   "definition": "兼容关系：允许非技术性差异",
+   "namespace": "so"
+  },
+  {
+   "termId": "implementationGuide",
+   "kind": "relation",
+   "label": "是实施指南",
+   "definition": "配套关系：构成技术实施体系的实施指南",
+   "namespace": "so"
+  },
+  {
+   "termId": "testingSpecification",
+   "kind": "relation",
+   "label": "是测试规范",
+   "definition": "配套关系：构成技术实施体系的测试规范",
+   "namespace": "so"
+  },
+  {
+   "termId": "normativeReference",
+   "kind": "relation",
+   "label": "规范性引用",
+   "definition": "引用关系：通过规范性引用将其他标准作为技术依据",
+   "namespace": "so"
+  },
+  {
+   "termId": "informativeReference",
+   "kind": "relation",
+   "label": "资料性引用",
+   "definition": "引用关系：通过资料性引用将其他标准作为信息依据",
+   "namespace": "so"
+  },
+  {
+   "termId": "replacedBy",
+   "kind": "relation",
+   "label": "被代替",
+   "definition": "代替关系：新版标准完全或部分替代旧版标准的继承",
+   "namespace": "so"
+  },
+  {
+   "termId": "corrects",
+   "kind": "relation",
+   "label": "修正",
+   "definition": "修正关系：标准修改单对关联标准特定条款进行技术修正",
+   "namespace": "so"
+  },
+  {
+   "termId": "discloses",
+   "kind": "relation",
+   "label": "披露",
+   "definition": "披露关系：与标准中正式声明的专利信息关联",
+   "namespace": "so"
+  },
+  {
+   "termId": "refersTo",
+   "kind": "relation",
+   "label": "参考",
+   "definition": "参考关系：资料性引用的非规范性关联",
+   "namespace": "so"
+  },
+  {
+   "termId": "issuedBy",
+   "kind": "relation",
+   "label": "发布于",
+   "definition": "元数据关系：标准与机构之间的发布关系",
+   "namespace": "so",
+   "domain": [
+    "Standard"
+   ]
+  },
+  {
+   "termId": "proposedBy",
+   "kind": "relation",
+   "label": "提出于",
+   "definition": "元数据关系：标准与机构之间的提出关系",
+   "namespace": "so",
+   "domain": [
+    "Standard"
+   ]
+  },
+  {
+   "termId": "administeredBy",
+   "kind": "relation",
+   "label": "归口于",
+   "definition": "元数据关系：标准与机构之间的归口关系",
+   "namespace": "so",
+   "domain": [
+    "Standard"
+   ]
+  },
+  {
+   "termId": "implementedBy",
+   "kind": "relation",
+   "label": "由…组织实施",
+   "definition": "元数据关系：标准与机构的组织实施关系",
+   "namespace": "so",
+   "domain": [
+    "Standard"
+   ]
+  },
+  {
+   "termId": "draftedBy",
+   "kind": "relation",
+   "label": "起草于",
+   "definition": "元数据关系：标准与机构/个人的起草关系",
+   "namespace": "so",
+   "domain": [
+    "Standard"
+   ]
+  },
+  {
+   "termId": "triggersAction",
+   "kind": "relation",
+   "label": "触发行动",
+   "definition": "条款内关系：条款触发行动类",
+   "namespace": "so"
+  },
+  {
+   "termId": "excludesOption",
+   "kind": "relation",
+   "label": "排除选项",
+   "definition": "条款内关系：条款排除约束条件",
+   "namespace": "so"
+  }
+ ]
+}

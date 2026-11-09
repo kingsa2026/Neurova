@@ -524,6 +524,9 @@ class OntologyTermRegistry:
                 identityKeys=spec.get("identityKeys"),
                 labels=spec.get("labels"), altLabels=spec.get("altLabels"),
                 module=spec.get("module", ""),
+                definition=spec.get("definition") or "",
+                datatype=spec.get("datatype") or "",
+                namespace=spec.get("namespace") or "",
                 qualifierSchema=spec.get("qualifierSchema"),
                 tenantId=tenantId,
             )
@@ -558,6 +561,9 @@ class OntologyTermRegistry:
                 identityKeys=spec.get("identityKeys"),
                 labels=spec.get("labels"), altLabels=spec.get("altLabels"),
                 module=spec.get("module", ""),
+                definition=spec.get("definition") or "",
+                datatype=spec.get("datatype") or "",
+                namespace=spec.get("namespace") or "",
                 qualifierSchema=spec.get("qualifierSchema"),
                 tenantId=tenantId,
             )

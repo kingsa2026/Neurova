@@ -37,14 +37,36 @@
         <p class="block-note">{{ t('ontology.releaseAdminOnly') }}</p>
       </div>
     </div>
+
+    <!-- G5 领域包：可选领域词汇的导入入口（admin）；导入只补缺幂等 -->
+    <div class="panel-row">
+      <div class="panel-block" data-testid="overview-domain-packs">
+        <h4 class="block-title">{{ t('ontology.domainPackTitle') }}</h4>
+        <p v-for="pack in packs" :key="pack.packId" class="block-line">
+          {{ pack.packId }}（{{ pack.termCount }}）— {{ pack.basedOn }}
+          <a-button
+            v-if="isAdmin"
+            size="sm"
+            :loading="importing === pack.packId"
+            data-testid="domain-pack-import"
+            @click="importPack(pack.packId)"
+          >{{ t('ontology.domainPackImport') }}</a-button>
+        </p>
+        <p class="block-note">{{ t('ontology.domainPackNote') }}</p>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { message } from 'ant-design-vue'
 import type { OntologySchemaData } from '@/types/ontology'
 import { CQ_ROWS } from '@/config/ontologyStatic'
+import { importDomainPack, listDomainPacks } from '@/api/modules/ontology'
+import { ontologyErrorDetail } from '@/utils/ontologyFormat'
+import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{
   schema: OntologySchemaData | null
@@ -63,6 +85,37 @@ const deprecatedCount = computed(
   () => (props.schema?.terms ?? []).filter((term) => term.deprecated).length,
 )
 const cqImplemented = computed(() => CQ_ROWS.filter((row) => row.status === 'implemented').length)
+
+// G5 领域包：清单拉取 + admin 导入（只补缺幂等，导入计数如实回显）
+const authStore = useAuthStore()
+const isAdmin = computed(() => authStore.currentUser?.role === 'admin')
+const packs = ref<Array<{ packId: string; namespace: string; basedOn: string; termCount: number }>>([])
+const importing = ref('')
+
+async function loadPacks() {
+  try {
+    const res: any = await listDomainPacks()
+    packs.value = res?.data ?? res ?? []
+  } catch {
+    packs.value = []
+  }
+}
+
+async function importPack(packId: string) {
+  importing.value = packId
+  try {
+    const res: any = await importDomainPack(packId)
+    message.success(t('ontology.domainPackImported', { count: res?.data?.added ?? 0 }))
+    void loadPacks()
+  } catch (e) {
+    const detail = ontologyErrorDetail(e)
+    message.error(detail.message || t('common.error'))
+  } finally {
+    importing.value = ''
+  }
+}
+
+onMounted(loadPacks)
 </script>
 
 <style scoped>
