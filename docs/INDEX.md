@@ -215,6 +215,8 @@
 
 `specs/2026-11-07-用户分组部门化与知识库分类隔离设计.md`（用户分组（`/v1/groups` 正主）部门化＋知识库自定义分类隔离：分类注册表 `knowledge_categories`、分组模型加 `allowed_categories/default_category/parent_group_id`（单亲树禁环）、分区停在部门根而子部门用分类路径并集收窄、登录签发 tenant claim 打通休眠的 tenant 分区键、执行点收在 `visible_items`/`can_view` 服务端单点（聊天召回与用户 API 双通道自动覆盖）、agent 绑组＋chat 部门根对账 403＋kb_builder 补 tenant 修断点、死端点 `/v1/user-groups` 退役、本体零 schema 改动＋三处既有 tenant 缺口顺手修、前端四页逐一对齐（GroupPage 树形＋分类绑定/EnhancedUserPage 所属分组/AgentFormPage 分组选择/KnowledgePage 分类源与导入分类）；六项拍板已裁（T-A..T-F，2026-11-07 全按推荐）；**A/B/C/D/E/F1/F2 七批已全部实施（2026-11-07），live-verify 发现并修复路由遮蔽与分类清单过滤两缺口，实施终态见文内 §7**）
 
+`specs/2026-11-10-GB48000-3-本体建模符合性评估与补齐设计.md`（GB/T 48000.3-2026《标准数字化 第 3 部分：本体建模要求》符合性评估：适用性判定（标准管"标准本体"内容建模，通用平台不在强制范围，合规命题不成立）＋14 项机制对照（8 符合/4 部分/2 差距，逐项带文件:行号）＋五项补齐设计 G1–G5（Definition 描述项/数据属性五类型枚举/等价类语义/IRI 命名空间/标准本体领域包）＋G6 待核（OWL 导出 property 分支缺失）；P1–P3 三批切分共 ≈4.5 人日、每批红绿判据与验收口径；四项待拍板（external_iris 键语义、导出替换改附加的行为变更、明确不做清单、正式版文本核对约定）；设计先行未实施，按批点单）
+
 
 
 > 说明：`04-plans/` 的逐条登记在 [`docs/0-index/README.md`](0-index/README.md) 的「04-plans 实施计划」节，本节只收录跨领域入口与本目录内已归集条目。
