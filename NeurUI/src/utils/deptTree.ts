@@ -21,6 +21,9 @@ export interface DeptTreeNode {
   key: string
   /** 成员数（members_count 缺省时为 undefined）；树视图插槽据此渲染徽章 */
   membersCount?: number
+  /** 组节点 id；行内操作（成员/改名/编辑/删除）据此渲染与定位 */
+  groupId?: string
+  isSystem?: boolean
   children?: DeptTreeNode[]
 }
 
@@ -61,6 +64,8 @@ export function buildDeptTreeData(
       value: g.group_id,
       key: g.group_id,
       membersCount: g.members_count,
+      groupId: g.group_id,
+      isSystem: !!g.is_system,
       children: build(g.group_id),
     }))
   }
@@ -77,7 +82,7 @@ export function buildDeptTreeData(
   walk(tree)
   for (const g of deptGroups) {
     if (!reachable.has(g.group_id)) {
-      tree.push({ title: g.name, value: g.group_id, key: g.group_id, membersCount: g.members_count })
+      tree.push({ title: g.name, value: g.group_id, key: g.group_id, membersCount: g.members_count, groupId: g.group_id, isSystem: !!g.is_system })
     }
   }
   return tree

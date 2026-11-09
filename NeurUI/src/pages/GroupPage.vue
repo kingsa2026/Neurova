@@ -13,77 +13,96 @@
       <div class="admin-gate">{{ t('common.adminOnlyHint') }}</div>
     </template>
     <template v-else>
-    <!-- 部门层级树（specs/2026-11-07 §3：parent_group_id 驱动；点选节点过滤卡片到该子树） -->
-    <GlassCard v-if="groups.length" style="margin-bottom: 16px">
-      <div class="tree-toolbar">
-        <span class="tree-title">{{ t('system.groups') }}</span>
-        <GlassButton v-if="treeSelected" variant="ghost" size="sm" @click="clearTreeFilter">{{ t('common.all') }}</GlassButton>
-      </div>
-      <div class="tree-body">
-        <a-tree
-          :tree-data="groupTreeData"
-          :selected-keys="treeSelected ? [treeSelected] : []"
-          default-expand-all
-          block-node
-          @select="onTreeSelect"
-        >
-          <template #title="{ data }">
-            <span class="dept-node">
-              <ApartmentOutlined class="dept-node-icon" />
-              <span class="dept-node-name">{{ data.title }}</span>
-              <span v-if="data.membersCount != null" class="dept-node-badge">{{ data.membersCount }}</span>
-            </span>
-          </template>
-        </a-tree>
-      </div>
-    </GlassCard>
-    <!-- Group list -->
+    <!-- 双栏：左分组树（系统分组/自定义分组两段）× 右成员面板（未选中=未分组用户） -->
     <a-spin :spinning="loading">
-      <div class="groups-grid">
-        <GlassCard v-for="group in pagedGroups" :key="group.group_id" :title="group.name" variant="default">
+      <div class="layout-two-col">
+        <GlassCard class="panel-tree">
           <template #header>
-            <div class="group-header">
-              <span class="group-name">{{ group.name }}</span>
-              <a-tag>{{ group.members_count ?? 0 }} {{ t('collab.members') }}</a-tag>
+            <div class="panel-head">
+              <span class="panel-title">{{ t('system.groups') }}</span>
+              <GlassButton v-if="treeSelected" variant="ghost" size="sm" @click="clearTreeFilter">{{ t('common.all') }}</GlassButton>
             </div>
           </template>
-          <p class="group-desc">{{ group.description || '-' }}</p>
-          <p class="group-modules" v-if="group.allowed_modules?.length">
-            {{ t('system.allowedModules') }}: {{ formatModules(group.allowed_modules) }}
-          </p>
-          <p class="group-modules" v-if="group.parent_group_id">
-            {{ t('system.parentGroup') }}: {{ groupNameById(group.parent_group_id) }}
-          </p>
-          <p class="group-modules" v-if="group.allowed_categories?.length">
-            {{ t('system.allowedCategories') }}: {{ formatCategories(group.allowed_categories) }}
-          </p>
-          <p class="group-modules" v-else-if="group.allowed_categories">
-            {{ t('system.allowedCategories') }}: {{ t('system.categoriesUnrestricted') }}
-          </p>
-          <p class="group-modules" v-if="group.default_category">
-            {{ t('system.defaultCategory') }}: {{ categoryName(group.default_category) }}
-          </p>
-          <template #footer>
-            <div class="group-actions">
-              <GlassButton variant="ghost" size="sm" @click="viewMembers(group)">{{ t('collab.members') }}</GlassButton>
-              <GlassButton variant="ghost" size="sm" @click="editGroup(group)">{{ t('common.edit') }}</GlassButton>
-              <GlassButton variant="danger" size="sm" @click="deleteGroup(group.group_id)">{{ t('common.delete') }}</GlassButton>
+          <div class="tree-body">
+            <a-tree
+              :tree-data="groupTreeData"
+              :selected-keys="treeSelected ? [treeSelected] : []"
+              default-expand-all
+              block-node
+              @select="onTreeSelect"
+            >
+              <template #title="{ data }">
+                <span class="dept-node">
+                  <ApartmentOutlined class="dept-node-icon" />
+                  <span class="dept-node-name">{{ data.title }}</span>
+                  <span v-if="data.membersCount != null" class="dept-node-badge">{{ data.membersCount }}</span>
+                  <span v-if="data.groupId" class="node-actions">
+                    <button class="node-action" @click.stop="selectGroup(data.groupId)">{{ t('collab.members') }}</button>
+                    <button v-if="!data.isSystem" class="node-action" @click.stop="openRename(data.groupId)">{{ t('common.rename') }}</button>
+                    <button class="node-action" @click.stop="editGroupById(data.groupId)">{{ t('common.edit') }}</button>
+                    <button v-if="!data.isSystem" class="node-action node-action--danger" @click.stop="deleteGroupById(data.groupId)">{{ t('common.delete') }}</button>
+                  </span>
+                </span>
+              </template>
+            </a-tree>
+            <a-empty v-if="!groups.length && !loading" :description="t('common.noData')" />
+          </div>
+        </GlassCard>
+
+        <GlassCard class="panel-members">
+          <template #header>
+            <div class="panel-head">
+              <span class="panel-title">{{ treeSelected && selectedGroup ? selectedGroup.name : t('system.ungroupedUsers') }}</span>
+              <a-tag>{{ treeSelected ? selectedMembers.length : ungroupedUsernames.length }}</a-tag>
             </div>
+          </template>
+          <p class="panel-hint">{{ treeSelected ? t('system.reloginHint') : t('system.ungroupedHint') }}</p>
+          <template v-if="treeSelected && selectedGroup">
+            <div class="members-header">
+              <a-auto-complete
+                v-model:value="newMemberName"
+                :options="memberNameOptions"
+                :placeholder="t('collab.addMember')"
+                style="width: 200px"
+              />
+              <GlassButton variant="primary" size="sm" @click="addMember">{{ t('collab.addMember') }}</GlassButton>
+            </div>
+            <a-list :data-source="selectedMembers" size="small" style="margin-top: 12px">
+              <template #renderItem="{ item }">
+                <a-list-item>
+                  <div class="member-item">
+                    <span>{{ item }}</span>
+                    <a-popconfirm :title="t('common.confirm') + '?'" @confirm="removeMember(item)">
+                      <GlassButton variant="ghost" size="sm">{{ t('common.delete') }}</GlassButton>
+                    </a-popconfirm>
+                  </div>
+                </a-list-item>
+              </template>
+              <template #empty><a-empty :description="t('common.noData')" /></template>
+            </a-list>
+          </template>
+          <template v-else>
+            <a-list :data-source="ungroupedUsernames" size="small">
+              <template #renderItem="{ item }">
+                <a-list-item>
+                  <div class="member-item"><span>{{ item }}</span></div>
+                </a-list-item>
+              </template>
+              <template #empty><a-empty :description="t('common.noData')" /></template>
+            </a-list>
           </template>
         </GlassCard>
       </div>
-      <a-pagination v-if="visibleGroups.length > pageSize" v-model:current="currentPage" :pageSize="pageSize" :total="visibleGroups.length" size="small" style="margin-top: 16px; text-align: center" />
-      <a-empty v-if="!groups.length && !loading" :description="t('common.noData')" />
     </a-spin>
 
     <!-- Create/Edit group modal -->
     <a-modal v-model:open="showForm" :title="editingGroup ? t('common.edit') : t('common.create')" @ok="saveGroup" :confirm-loading="saving">
       <a-form layout="vertical" :model="groupForm" :rules="{ name: [{ required: true, message: t('common.required') }] }">
         <a-form-item :label="t('common.name')">
-          <a-input v-model:value="groupForm.name" />
+          <a-input v-model:value="groupForm.name" :disabled="editingIsSystem" />
         </a-form-item>
         <a-form-item :label="t('common.description')">
-          <a-textarea v-model:value="groupForm.description" :rows="3" />
+          <a-textarea v-model:value="groupForm.description" :rows="3" :disabled="editingIsSystem" />
         </a-form-item>
         <a-form-item :label="t('system.parentGroup')">
           <p class="modules-hint">{{ t('system.parentGroupHint') }}</p>
@@ -93,6 +112,7 @@
             allow-clear
             tree-default-expand-all
             :placeholder="t('system.parentGroupNone')"
+            :disabled="editingIsSystem"
             style="width: 100%"
           />
         </a-form-item>
@@ -152,31 +172,13 @@
       </a-form>
     </a-modal>
 
-    <!-- Members modal -->
-    <a-modal v-model:open="showMembers" :title="t('collab.members')" :footer="null" width="560px">
-      <p class="modules-hint">{{ t('system.reloginHint') }}</p>
-      <div class="members-header">
-        <a-auto-complete
-          v-model:value="newMemberName"
-          :options="memberNameOptions"
-          :placeholder="t('collab.addMember')"
-          style="width: 200px"
-        />
-        <GlassButton variant="primary" size="sm" @click="addMember">{{ t('collab.addMember') }}</GlassButton>
-      </div>
-      <a-list :data-source="members" size="small" style="margin-top: 12px">
-        <template #renderItem="{ item }">
-          <a-list-item>
-            <div class="member-item">
-              <span>{{ item.username }}</span>
-              <a-popconfirm :title="t('common.confirm') + '?'" @confirm="removeMember(item.username)">
-                <GlassButton variant="ghost" size="sm">{{ t('common.delete') }}</GlassButton>
-              </a-popconfirm>
-            </div>
-          </a-list-item>
-        </template>
-        <template #empty><a-empty :description="t('common.noData')" /></template>
-      </a-list>
+    <!-- Rename modal（快捷改名：仅自定义组；系统组名称由后端保护） -->
+    <a-modal v-model:open="showRename" :title="t('common.rename')" @ok="saveRename" :confirm-loading="renaming">
+      <a-form layout="vertical">
+        <a-form-item :label="t('common.name')">
+          <a-input v-model:value="renameName" />
+        </a-form-item>
+      </a-form>
     </a-modal>
     </template>
   </div>
@@ -185,7 +187,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { listGroups, updateGroup, createGroup, deleteGroup as deleteGroupApi, listGroupMembers, addGroupMember, removeGroupMember, type Group } from '@/api/modules/groups'
+import { listGroups, updateGroup, createGroup, deleteGroup as deleteGroupApi, addGroupMember, removeGroupMember, type Group } from '@/api/modules/groups'
 import { buildDeptTreeData } from '@/utils/deptTree'
 import { listKnowledgeCategories, type KnowledgeCategory } from '@/api/modules/knowledge'
 import { listUsers } from '@/api/modules/enhanced-users'
@@ -204,14 +206,15 @@ const isAdmin = computed(() => authStore.user?.role === 'admin')
 const loading = ref(false)
 const saving = ref(false)
 const groups = ref<Group[]>([])
-const members = ref<any[]>([])
 const showForm = ref(false)
-const showMembers = ref(false)
 const editingGroup = ref<Group | null>(null)
-const selectedGroupId = ref<string>('')
 const newMemberName = ref('')
-const currentPage = ref(1)
-const pageSize = ref(12)
+
+// 快捷改名（仅自定义组；系统组名称/描述由后端 update_group 保护）
+const showRename = ref(false)
+const renaming = ref(false)
+const renameGroupId = ref('')
+const renameName = ref('')
 
 const groupForm = ref<{ name: string; description: string; parent_group_id: string; default_category: string }>({ name: '', description: '', parent_group_id: '', default_category: '' })
 const selectedModules = ref<string[]>([])
@@ -226,47 +229,75 @@ const categoryLabelMap = computed<Record<string, string>>(() => {
   return map
 })
 const categoryName = (id: string) => categoryLabelMap.value[id] || id
-const formatCategories = (ids: string[]) => ids.map(categoryName).join('、')
-const groupNameById = (id: string) => groups.value.find(g => g.group_id === id)?.name || id
 
 /** 父组候选：部门层级树（编辑时排除自身整棵子树，防自指/防环；环由后端 400 兜底） */
 const parentTreeData = computed(() =>
   buildDeptTreeData(groups.value, { excludeId: editingGroup.value?.group_id }),
 )
 
-// ── 部门层级树视图（specs/2026-11-07 §3：树形展示＋子树过滤）──────────
+// ── 分组树视图（用户示意图 2026-11-09：系统分组/自定义分组两段；点选组 → 右面板显示成员）──
 const treeSelected = ref<string>('')
-const groupTreeData = computed(() => buildDeptTreeData(groups.value))
+
+/** 两段小节的 key（组 id 是 UUID，冒号前缀保证不与其冲突） */
+const SECTION_SYSTEM_KEY = 'section:system'
+const SECTION_CUSTOM_KEY = 'section:custom'
+
+const systemGroups = computed(() => groups.value.filter(g => g.is_system))
+const customGroups = computed(() => groups.value.filter(g => !g.is_system))
+
+const groupNode = (g: Group) => ({
+  title: g.name,
+  value: g.group_id,
+  key: g.group_id,
+  membersCount: g.members_count,
+  groupId: g.group_id,
+  isSystem: !!g.is_system,
+})
+
+const groupTreeData = computed(() => [
+  {
+    key: SECTION_SYSTEM_KEY,
+    title: t('system.builtinGroups'),
+    value: SECTION_SYSTEM_KEY,
+    membersCount: systemGroups.value.length,
+    selectable: false,
+    children: systemGroups.value.map(groupNode),
+  },
+  {
+    key: SECTION_CUSTOM_KEY,
+    title: t('system.customGroups'),
+    value: SECTION_CUSTOM_KEY,
+    membersCount: customGroups.value.length,
+    selectable: false,
+    children: buildDeptTreeData(customGroups.value),
+  },
+])
 
 const onTreeSelect = (keys: (string | number)[]) => {
-  // 点击已选节点 → keys 为空 = 取消过滤
-  treeSelected.value = (keys[0] as string) || ''
-  currentPage.value = 1
+  // 点击已选节点 → keys 为空 = 回到未分组视图；小节 key 非组 id，同样视为未选中
+  const key = (keys[0] as string) || ''
+  treeSelected.value = key && groups.value.some(g => g.group_id === key) ? key : ''
 }
 const clearTreeFilter = () => {
   treeSelected.value = ''
 }
+const selectGroup = (groupId: string) => {
+  treeSelected.value = groupId
+}
 
-/** 选中节点的整棵子树（含自身与全部后代；孤儿父链由后端禁环兜底） */
-const subtreeIds = computed<Set<string> | null>(() => {
-  if (!treeSelected.value) return null
-  const ids = new Set<string>([treeSelected.value])
-  let grew = true
-  while (grew) {
-    grew = false
-    for (const g of groups.value) {
-      if (g.parent_group_id && ids.has(g.parent_group_id) && !ids.has(g.group_id)) {
-        ids.add(g.group_id)
-        grew = true
-      }
-    }
+/** 右面板（选中组）：成员名直接取 listGroups 契约里的 members（单一事实源），不二次拉成员端点 */
+const selectedGroup = computed(() => groups.value.find(g => g.group_id === treeSelected.value) || null)
+const selectedMembers = computed(() => selectedGroup.value?.members ?? [])
+
+/** 未分组用户：全部用户 − 各组成员并集 */
+const ungroupedUsers = computed(() => {
+  const grouped = new Set<string>()
+  for (const g of groups.value) {
+    for (const m of g.members ?? []) grouped.add(m)
   }
-  return ids
+  return users.value.filter(u => u.username && !grouped.has(u.username))
 })
-const visibleGroups = computed(() => {
-  const ids = subtreeIds.value
-  return ids ? groups.value.filter((g) => ids.has(g.group_id)) : groups.value
-})
+const ungroupedUsernames = computed(() => ungroupedUsers.value.map(u => u.username!))
 
 /** 缺省分类候选：本组已勾选的白名单分类 */
 const defaultCategoryOptions = computed(() =>
@@ -307,24 +338,6 @@ const fetchUsers = async () => {
     users.value = []
   }
 }
-
-const pagedGroups = computed(() =>
-  visibleGroups.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value),
-)
-
-/** 模块 key → 已翻译菜单名（卡片摘要展示用） */
-const moduleLabelMap = computed<Record<string, string>>(() => {
-  const map: Record<string, string> = {}
-  for (const section of MODULE_SECTIONS) {
-    for (const item of section.items) {
-      map[item.key] = t(`nav.${item.labelKey}`)
-    }
-  }
-  return map
-})
-
-const formatModules = (keys: string[]) =>
-  keys.map(k => moduleLabelMap.value[k] || k).join('、')
 
 const toggleModule = (key: string) => {
   const idx = selectedModules.value.indexOf(key)
@@ -375,6 +388,9 @@ const openCreate = () => {
   showForm.value = true
 }
 
+/** 系统组名称/描述/父组由后端保护，编辑弹窗内禁用（权限面 allowed_modules/分类仍可改） */
+const editingIsSystem = computed(() => !!editingGroup.value?.is_system)
+
 const editGroup = (group: Group) => {
   editingGroup.value = group
   groupForm.value = {
@@ -386,6 +402,37 @@ const editGroup = (group: Group) => {
   selectedModules.value = [...(group.allowed_modules || [])]
   selectedCategories.value = [...(group.allowed_categories || [])]
   showForm.value = true
+}
+
+const editGroupById = (groupId: string) => {
+  const group = groups.value.find(g => g.group_id === groupId)
+  if (group) editGroup(group)
+}
+
+const openRename = (groupId: string) => {
+  const group = groups.value.find(g => g.group_id === groupId)
+  if (!group) return
+  renameGroupId.value = groupId
+  renameName.value = group.name
+  showRename.value = true
+}
+
+const saveRename = async () => {
+  if (!renameName.value.trim()) {
+    message.error(t('common.required'))
+    return
+  }
+  renaming.value = true
+  try {
+    await updateGroup(renameGroupId.value, { name: renameName.value.trim() })
+    message.success(t('common.success'))
+    showRename.value = false
+    await fetchGroups()
+  } catch (err) {
+    message.error(extractDetail(err))
+  } finally {
+    renaming.value = false
+  }
 }
 
 const saveGroup = async () => {
@@ -420,14 +467,15 @@ const extractDetail = (err: unknown) => {
   return detail || t('common.error')
 }
 
-const deleteGroup = (id: string) => {
+const deleteGroupById = (groupId: string) => {
   Modal.confirm({
     title: t('common.confirm'),
     content: t('agent.deleteConfirm'),
     onOk: async () => {
       try {
-        await deleteGroupApi(id)
+        await deleteGroupApi(groupId)
         message.success(t('common.success'))
+        if (treeSelected.value === groupId) treeSelected.value = ''
         await fetchGroups()
       } catch {
         message.error(t('common.error'))
@@ -436,24 +484,12 @@ const deleteGroup = (id: string) => {
   })
 }
 
-const viewMembers = async (group: Group) => {
-  selectedGroupId.value = group.group_id
-  showMembers.value = true
-  try {
-    const res = await listGroupMembers(group.group_id)
-    members.value = res ?? []
-  } catch {
-    members.value = []
-  }
-}
-
 const addMember = async () => {
-  if (!newMemberName.value) return
+  if (!treeSelected.value || !newMemberName.value) return
   try {
-    await addGroupMember(selectedGroupId.value, { username: newMemberName.value })
+    await addGroupMember(treeSelected.value, { username: newMemberName.value })
     message.success(t('common.success'))
     newMemberName.value = ''
-    await viewMembers({ group_id: selectedGroupId.value } as Group)
     await fetchGroups()
   } catch (err) {
     message.error(extractDetail(err))
@@ -461,10 +497,10 @@ const addMember = async () => {
 }
 
 const removeMember = async (username: string) => {
+  if (!treeSelected.value) return
   try {
-    await removeGroupMember(selectedGroupId.value, username)
+    await removeGroupMember(treeSelected.value, username)
     message.success(t('common.success'))
-    await viewMembers({ group_id: selectedGroupId.value } as Group)
     await fetchGroups()
   } catch (err) {
     message.error(extractDetail(err))
@@ -485,14 +521,15 @@ onMounted(() => {
 .admin-gate { margin: 24px auto; max-width: 480px; padding: 16px; border: 1px dashed var(--nr-border, rgba(255, 255, 255, 0.12)); border-radius: 10px; text-align: center; font-size: 13px; color: var(--nr-text-secondary, #8a8a92); }
 .page-title { font-family: var(--nr-font-display); font-size: 22px; font-weight: 700; color: var(--nr-text-primary); margin: 0; }
 .page-header { display: flex; justify-content: space-between; align-items: center; }
-.groups-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
-.group-header { display: flex; justify-content: space-between; align-items: center; }
-.group-name { font-weight: 600; color: var(--nr-text-primary); }
-.group-desc { font-size: 13px; color: var(--nr-text-secondary); }
-.group-modules { font-size: 12px; color: var(--nr-text-muted); margin-top: 6px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.group-actions { display: flex; gap: 6px; }
+/* 双栏布局：左分组树 × 右成员面板（窄屏折叠单栏） */
+.layout-two-col { display: grid; grid-template-columns: minmax(380px, 2fr) 3fr; gap: 16px; }
+@media (max-width: 1024px) { .layout-two-col { grid-template-columns: 1fr; } }
+.panel-tree, .panel-members { min-height: 480px; }
+.panel-head { display: flex; justify-content: space-between; align-items: center; width: 100%; }
+.panel-title { font-weight: 600; color: var(--nr-text-primary); font-size: 13px; }
+.panel-hint { font-size: 12px; color: var(--nr-text-secondary); margin: 0 0 10px; }
 .members-header { display: flex; gap: 8px; align-items: center; }
-.member-item { display: flex; align-items: center; gap: 8px; width: 100%; }
+.member-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; }
 /* 功能模块勾选清单 */
 .modules-hint { font-size: 12px; color: var(--nr-text-secondary); margin: 0 0 8px; }
 .modules-checklist { max-height: 260px; overflow-y: auto; border: 1px solid var(--nr-glass-border, rgba(255,255,255,0.12)); border-radius: 10px; padding: 10px 12px; }
@@ -503,8 +540,6 @@ onMounted(() => {
 .module-section-items { display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .modules-toolbar { display: flex; gap: 8px; margin-top: 8px; }
 /* 部门层级树（玻璃拟态贴合：圆角行、悬停/选中主色化、缩进引导线） */
-.tree-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.tree-title { font-weight: 600; color: var(--nr-text-primary); font-size: 13px; }
 .tree-body :deep(.ant-tree) { background: transparent; }
 .tree-body :deep(.ant-tree-treenode) {
   padding: 2px 4px;
@@ -543,8 +578,8 @@ onMounted(() => {
   color: var(--nr-primary);
   box-shadow: inset 0 0 0 1px var(--nr-primary-soft-border);
 }
-/* 节点内容：图标 + 名称 + 成员数徽章 */
-.dept-node { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
+/* 节点内容：图标 + 名称 + 成员数徽章 + 行内操作（占满整行，操作推到最右） */
+.dept-node { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; }
 .dept-node-icon { flex: none; font-size: 12px; color: var(--nr-text-tertiary); transition: color var(--nr-transition-fast); }
 .dept-node-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--nr-text-primary); transition: color var(--nr-transition-fast); }
 .dept-node-badge {
@@ -570,4 +605,20 @@ onMounted(() => {
 }
 /* 选中行悬停不再叠加玻璃底，保持选中面纯净 */
 .tree-body :deep(.ant-tree-treenode:has(.ant-tree-node-selected):hover) { background: transparent; }
+/* 行内操作：纯文本小按钮，悬停提亮（危险项悬停转红） */
+.node-actions { display: inline-flex; gap: 12px; margin-left: auto; flex: none; }
+.node-action {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  color: var(--nr-text-secondary);
+  transition: color var(--nr-transition-fast);
+}
+.node-action:hover { color: var(--nr-primary); }
+.node-action--danger:hover { color: var(--nr-error); }
 </style>
