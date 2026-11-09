@@ -137,7 +137,8 @@ class OntologyPipeline:
                          "range_terms", "range_kinds", "cardinality",
                          "disjoint_with", "required_props",
                          "inverse_of", "symmetric", "transitive", "aliases",
-                         "external_iris", "deprecated", "replaced_by",
+                         "external_iris", "definition", "datatype",
+                         "deprecated", "replaced_by",
                          "identity_keys", "labels", "alt_labels", "module",
                          "qualifier_schema", "version")
     # 规则的 diff 只看**声明**字段。stratification_level / depends_on 是引擎按
@@ -388,6 +389,7 @@ class OntologyPipeline:
                     inverseOf=spec.get("inverse_of"), symmetric=spec.get("symmetric", False),
                     transitive=spec.get("transitive", False),
                     aliases=spec.get("aliases"), externalIris=spec.get("external_iris"),
+                    definition=spec.get("definition") or "", datatype=spec.get("datatype") or "",
                     deprecated=spec.get("deprecated", False),
                     replacedBy=spec.get("replaced_by", ""),
                     identityKeys=spec.get("identity_keys"),

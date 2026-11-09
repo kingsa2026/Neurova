@@ -32,6 +32,11 @@ _TERM_KINDS = ("concept", "relation", "property")
 EXTERNAL_IRI_KINDS = ("skos_exactMatch", "skos_closeMatch", "skos_relatedMatch",
                       "equivalentClass")
 
+# 数据属性基本数据类型闭集（GB/T 48000.3 评估档 G2，5.5 表 3）——仅 kind='property'
+# 可声明；xsd 映射在 export/owl.py（boolean→xsd:boolean、date→xsd:date、
+# number→xsd:decimal、text→xsd:string、url→xsd:anyURI）。
+DATA_TYPES = ("boolean", "date", "number", "text", "url")
+
 # 类型断言的固定谓词：`is_a` 是"这条主体是什么"的写法，与 `documented_as` 一样
 # 由结构层固定，不让每个写入方自造一个"属于类型"谓词。
 IS_A_PREDICATE = "is_a"
@@ -115,6 +120,12 @@ _SCHEMA_V40_TERMS = """
 ALTER TABLE ontology_terms ADD COLUMN definition TEXT NOT NULL DEFAULT '';
 """
 
+# v41：数据属性基本数据类型（GB/T 48000.3 评估档 G2，5.5 表 3）——仅 kind='property'
+# 有意义；空 = 未约束态（不算违规），校验在 register 写入处硬拒。
+_SCHEMA_V41_TERMS = """
+ALTER TABLE ontology_terms ADD COLUMN datatype TEXT NOT NULL DEFAULT '';
+"""
+
 # v32：限定关系 schema（specs/2026-11-05 B11 L3）——qualifier 的键/类型/必填三判。
 # N 元关系继续用限定三元组，不新造 reification 表。
 _SCHEMA_V32_TERMS = """
@@ -159,6 +170,7 @@ _DECLARE_COLUMNS: tuple = (
     ("aliases", "aliases"),
     ("externalIris", "external_iris"),
     ("definition", "definition"),
+    ("datatype", "datatype"),
     ("deprecated", "deprecated"),
     ("replacedBy", "replaced_by"),
     ("identityKeys", "identity_keys"),
@@ -217,6 +229,7 @@ class OntologyTermRegistry:
                  transitive: bool = False, aliases: Optional[List[str]] = None,
                  externalIris: Optional[List[Dict[str, str]]] = None,
                  definition: str = "",
+                 datatype: str = "",
                  deprecated: bool = False, replacedBy: str = "",
                  identityKeys: Optional[List[str]] = None,
                  labels: Optional[Dict[str, str]] = None,
@@ -280,6 +293,18 @@ class OntologyTermRegistry:
             if not entryIri:
                 raise ValueError("外部 IRI 映射的 iri 不能为空（kind=%s）" % entryKind)
             externalIriList.append({"kind": entryKind, "iri": entryIri})
+        # G2：数据属性基本类型——闭集校验＋kind 限定＋7.2.2 d) 三性质禁用。
+        datatypeValue = str(datatype or "").strip()
+        if datatypeValue:
+            if kind != "property":
+                raise ValueError(
+                    "datatype 只有 property 术语可声明：%s 是 %s" % (termId, kind))
+            if datatypeValue not in DATA_TYPES:
+                raise ValueError(
+                    "未知数据类型 %r（有效值: %s）" % (datatypeValue, "/".join(DATA_TYPES)))
+        if kind == "property" and (symmetric or transitive or inverseOf):
+            raise ValueError(
+                "数据属性不应具传递/对称/互逆性（7.2.2 d)）：%s 是 property" % termId)
         if inverseOf or symmetric or transitive:
             if kind != "relation":
                 raise ValueError(
@@ -340,8 +365,8 @@ class OntologyTermRegistry:
                 " inverse_of, symmetric, transitive, aliases_json, external_iris_json,"
                 " deprecated, replaced_by, identity_keys_json,"
                 " labels_json, alt_labels_json, module, namespace, iri_base,"
-                " qualifier_schema_json, definition)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " qualifier_schema_json, definition, datatype)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (tenant, termId, kind, label or termId, parentTermId,
                  json.dumps(list(domain or []), ensure_ascii=False),
                  json.dumps(list(rangeTerms or []), ensure_ascii=False),
@@ -360,7 +385,7 @@ class OntologyTermRegistry:
                             ensure_ascii=False),
                  moduleValue, str(namespace or ""), str(iriBase or ""),
                  json.dumps(qualifierSchema or {}, ensure_ascii=False),
-                 str(definition or "")),
+                 str(definition or ""), datatypeValue),
             )
         # inverse_of 双向补齐：A inverse_of B ⇒ B inverse_of A（登记处收口，
         # 单边态在存储层不存在；目标行其他字段不动，只补这一列）。
@@ -563,6 +588,8 @@ class OntologyTermRegistry:
             d["qualifier_schema"] = json.loads(d.pop("qualifier_schema_json") or "{}")
         if "definition" in d:
             d["definition"] = str(d.get("definition") or "")
+        if "datatype" in d:
+            d["datatype"] = str(d.get("datatype") or "")
         for flag in ("symmetric", "transitive", "deprecated"):
             d[flag] = bool(d.get(flag))
         return d

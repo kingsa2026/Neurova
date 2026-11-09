@@ -51,6 +51,7 @@ def exportOwlAxioms(store: Any, tenantId: str = "default",
         "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .",
         "@prefix owl: <http://www.w3.org/2002/07/owl#> .",
         "@prefix skos: <http://www.w3.org/2004/02/skos/core#> .",
+        "@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .",
         "@prefix kbg: <https://neurova.local/knowledge/> .",
     ]
     if version:
@@ -73,6 +74,15 @@ def exportOwlAxioms(store: Any, tenantId: str = "default",
         kind = row["kind"]
         if kind == "concept":
             lines.append("%s rdf:type owl:Class ." % _iri(termId))
+        elif kind == "property":
+            # G2/G6：数据属性声明——此前声明循环缺 property 分支，property 术语
+            # 在 export.owl 不可见；datatype 非空出 rdfs:range xsd:*。
+            lines.append("%s rdf:type owl:DatatypeProperty ." % _iri(termId))
+            xsd = {"boolean": "xsd:boolean", "date": "xsd:date",
+                   "number": "xsd:decimal", "text": "xsd:string",
+                   "url": "xsd:anyURI"}.get(str(row["datatype"] or ""))
+            if xsd:
+                lines.append("%s rdfs:range %s ." % (_iri(termId), xsd))
         elif kind == "relation":
             lines.append("%s rdf:type owl:ObjectProperty ." % _iri(termId))
             if row["cardinality"] is not None and int(row["cardinality"]) == 1:

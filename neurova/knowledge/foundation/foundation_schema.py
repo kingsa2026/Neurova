@@ -52,6 +52,7 @@ from ..ontology.term_registry import (
     _SCHEMA_V32_TERMS,
     _SCHEMA_V39_EXTERNAL_IRI,
     _SCHEMA_V40_TERMS,
+    _SCHEMA_V41_TERMS,
     _SCHEMA_V8,
     _SCHEMA_V12,
 )
@@ -140,6 +141,9 @@ _STEPS: List[tuple] = [
     # v40：术语 Definition 描述项（GB/T 48000.3 评估档 G1）——表 1/表 2 必要项，
     #      quality「缺定义」判据的消费源；导出面非空才出断言
     (40, _SCHEMA_V40_TERMS),
+    # v41：数据属性基本数据类型（GB/T 48000.3 评估档 G2，5.5 表 3）——
+    #      仅 kind='property' 有意义；xsd 映射在 export/owl.py
+    (41, _SCHEMA_V41_TERMS),
 ]
 
 _registered = False
