@@ -14,7 +14,7 @@
 - **第 4 步 封装成工具交给 Agent ❌ 核心缺失**：内置工具注册表 **91 个工具中知识/本体相关为 0**（实测 `get_registered_tool_names()`）；四动词门面 `/v1/knowledge/access/{query|analyze|validate|use}` 是 REST——Agent 不能调用；Agent 对本体的唯一接触是 chat 管线的知识检索注入（被动 RAG）；规则推理结论不进 Agent 运行时。
 - **第 5 步 运行反馈 ⚠️ 部分**：工具链的治理预检/审批重放/审计/指挥资格判定成熟；admission 唯一写咽喉逐字可核；但 Agent **没有本体写回通道**（事实写入的生产调用面＝kb_builder/抽取链，不经交互式写入），"Agent 处理任务 → 关键变更走权限与人工审核"在本体侧不闭环。
 
-**总读数：2 符合 / 2 半缺 / 1 缺失。断点不在建模面，在"最后一公里"——本体能力全部长成 REST 形态，没有一件被封装成 Agent 工具。** 补全方案 A1–A5（§3）按三批切分：P1 工具化（A1 三只读/写工具＋A2 受咽喉的事实写入）、P2 推理与动作（A3 推理查询＋A4 动作建模最小面）、P3 反馈闭环确认（A5，大部分是既有组件的接线确认）。
+**总读数：2 符合 / 2 半缺 / 1 缺失。断点不在建模面，在"最后一公里"——本体能力全部长成 REST 形态，没有一件被封装成 Agent 可调用的工具（2026-11-10 拍板：以 **MCP server 形态**开放，详见 §3 设计通则）。** 补全方案 A1–A5（§3）按三批切分：P1 基座＋只读三工具＋事实写入（A1＋A2）、P2 推理与动作（A3＋A4）、P3 反馈闭环确认（A5，大部分是既有组件的接线确认）。
 
 ## 1. 五步框架与对照口径
 
@@ -67,47 +67,82 @@
 
 ## 3. 补全设计（A1–A5）
 
-设计通则：
+### 3.0 设计通则——以 MCP server 形态开放（2026-11-10 拍板）
 
-- **接线不是第二实现**（B3 门面先例）：Agent 工具是四动词既有处理函数的封装，零业务逻辑复制；治理/审批/审计由 ToolExecutor 既有链自带；
-- 工具经 **A6 tool_search 目录**（延迟加载，非 direct 工具 schema 不进 prompt）暴露，`tool_call` 经 ToolExecutor 正常执行——治理预检/审批全链生效；
-- 只读工具进 `_GOVERNANCE_FAILOPEN_READONLY_TOOLS`（`tool_executor.py:1836`）免审批档；写工具默认走治理策略（白名单/审批按既有配置）。
+工具化的承载形态从「内置工具注册」改为 **MCP server**（用户裁定）：Neurova 内嵌一个
+MCP server（`mcp` SDK 已在依赖，`requirements.txt:92-95` 四处声明纪律；client 侧
+stdio/sse/streamable-http 三 transport 全备，`tool_layers/mcp_client.py`），本体四动词
+作为 **MCP tools** 暴露。一次封装，两面受益：
+
+- **内部 Agent**：`mcp_servers` 共享配置加一条 loopback 指向自身（streamable-http），
+  `mcp_bootstrap` 启动自动连接 → 工具挂载进各 agent 的 ToolRouter → 经 A6 tool_search
+  目录延迟暴露 → `tool_call`（`mcp.` 前缀）执行——**治理预检/审批/审计/mcp_grants
+  （(server, tool) 粒度授权铸造，`security/mcp_grants.py`）全链复用，零新权限机制**；
+- **外部 MCP 宿主**（Claude Desktop/Cursor 等任意 MCP client）：同一端点可连（鉴权边界
+  见 §5.4），本体能力成为对外标准协议面。
+
+通则各条：
+
+- **接线不是第二实现**（B3 门面先例）：MCP tool handler 是四动词既有处理函数的封装，
+  零业务逻辑复制；治理/审批/审计由既有链自带；
+- **鉴权与租户**：MCP 端点复用服务令牌/API key 鉴权（`get_current_user_or_service` 同款
+  身份解析），租户按凭据——不设无鉴权口；
+- 只读工具（query/analyze/validate/derive）默认免审批档；写工具（fact_submit）走治理
+  策略＋mcp_grants 授权铸造（既有机制，按需收紧）。
+
+### M0 内嵌 MCP server 基座（P1，A1–A4 的共同前置）
+
+- **动机**：Agent 侧既有 MCP client 链（bootstrap→ToolRouter→tool_search→tool_call，
+  治理/授权全链）只认 MCP server——本体能力上 MCP 协议的最短路径是自建 server 端点。
+- **设计**：
+  - 主 app 挂 **streamable-http** MCP 端点（如 `/v1/mcp`，mcp SDK server 面）；鉴权复用
+    服务令牌/API key；租户按凭据解析（与 REST 同源）；
+  - server 内工具按 §3.1–§3.4 注册（A1–A4），handler 转交既有处理函数；
+  - 内部 Agent 接入：`mcp_servers` 共享配置加 loopback 条目（url=
+    `http://127.0.0.1:9527/v1/mcp`＋服务令牌 header）——bootstrap 自动连接，工具经
+    `mcp.ontology_*` 名进目录；**不新造权限机制**；
+  - 进程内 ASGI 直连可作优化（免网络环回），首版走标准 HTTP 环回（与外部宿主同一协议面，
+    自测即互操作测试）。
+- **测试口径**：红——端点不存在；绿——MCP client（项目自有的 `MCPToolClient`）连
+  loopback → list_tools 见 A1 工具 → call 一只读工具返回与 REST 同源数据；鉴权失败 401。
+- **影响面**：`neurova/api/app.py`（挂载）、新 `neurova/mcp_ontology_server.py`（server
+  面，约 150 行）、`shared_config` 示例配置。工作量 ≈ 0.5–1 人日。
 
 ### A1 本体查询/校验工具化（只读，P1）
 
 - **动机**：§2.4 核心缺失的最小闭合——Agent 获得"有业务语境的模型"的第一步是能**问**。
-- **设计**：
+- **设计**（MCP tools，挂 M0 server）：
   - `ontology_query`（只读）：参数 `query`（term_id/label/别名模糊）、`kind`（可选过滤）、`namespace`（可选）；实现转 `OntologyTermRegistry.term()/listOntologyTerms`（按租户），返回术语行（含 definition/datatype/关系类型声明）＋按 identity_keys 命中的主体摘要；
   - `ontology_validate`（只读 dry-run）：参数 `subjectLabel/predicateTermId/objectTerm`（＋可选 qualifier）；实现转 `validateOntologyCandidates`（B2 dry-run 路径，`pipeline.py dryRunFactCandidates`）——Agent 写入前自查"这条断言合不合法、为什么"，判据五条唯一事实源仍是 validation.py；
-  - 两个工具标注 `parallel_safe` 只读；注册进 BuiltinToolRegistry（schema 声明位＋执行转交），description 按 builtin_tools 既有格式（何时用/何时不用）。
-- **测试口径**：红——工具未注册；绿——注册在册＋执行转交正确（mock 断言转交函数被调）＋只读标记进 fail-open 集合＋租户隔离（跨租户术语查不到）。
-- **影响面**：`builtin_tools.py`（＋两个 schema/执行函数，约 120 行）、`tool_executor.py`（fail-open 只读集合两行）。工作量 ≈ 0.5 人日。
+  - 工具 description 按 MCP 规范写清何时用/何时不用（既有 builtin description 的格式纪律平移）。
+- **测试口径**：红——MCP list_tools 未见工具；绿——M0 client list_tools 在册＋call 返回与 REST 同源数据＋租户隔离（跨租户术语查不到）。
+- **影响面**：`neurova/mcp_ontology_server.py`（handler 转交，约 80 行）。工作量 ≈ 0.25 人日（M0 之外）。
 
 ### A2 事实写入工具化（受咽喉＋治理链，P1）
 
 - **动机**：第 5 步的通道前提——Agent 处理任务产生的业务断言（"客户 X 升级为 VIP"）应有本体侧表达通道，且天然走权限/审核。
-- **设计**：
+- **设计**（MCP tool，挂 M0 server）：
   - `fact_submit`（写）：参数 `subjectLabel/predicateTermId/objectTerm（＋qualifier/evidenceText）`；实现转 **admission 咽喉**（`productionAdmissionGate.admit`）——逐字可核闸、主体消解、未知谓词落候选审批面（relation_candidates）全部既有；
-  - **审批咬合**（不新造）：fact_submit 是普通工具，治理策略默认可配白名单/审批（运维按需把 `fact_submit` 挂审批——2026-11-03 档的审批等待/重放全链直接生效）；admission 侧的候选审批（新谓词）与冲突审批（conflicts 三态票）是第二道异步人审，双层互不替代；
+  - **审批咬合（不新造，且 MCP 化后更顺）**：工具名 `mcp.ontology.fact_submit` 走 ToolExecutor 既有治理策略；用户审批时经 **mcp_grants** 铸造 (server, tool) 粒度持久授权——后续同名调用免审批直达（`security/mcp_grants.py` 既有机制）；admission 侧的候选审批（新谓词）与冲突审批（conflicts 三态票）是第二道异步人审，双层互不替代；
   - 回执：写入成功返回 fact_id＋溯源（lineage/derivation 钩子），Agent 可在对话里引用（第 5 步反馈）。
-- **测试口径**：红——工具未注册；绿——注册在册＋转交 admission（mock）＋evidenceText 缺失被 `_checkVerifiability` 拒（契约继承）＋未知谓词落候选（不消失）。
-- **影响面**：`builtin_tools.py`（约 100 行）。工作量 ≈ 0.5 人日。
+- **测试口径**：红——list_tools 未见；绿——call 转交 admission（mock）＋evidenceText 缺失被 `_checkVerifiability` 拒（契约继承）＋未知谓词落候选（不消失）＋审批 remember 后 grants 命中。
+- **影响面**：`neurova/mcp_ontology_server.py`（约 80 行）。工作量 ≈ 0.25 人日（M0 之外）。
 
 ### A3 规则推理查询工具化（P2）
 
 - **动机**：第 2 步的产出（规则/推理）目前到 API 为止——Agent 判断时用不上 enforce 级结论（如"高风险订单必须人工审核"这类业务规则的可推导结论）。
-- **设计**：
+- **设计**（MCP tool，挂 M0 server）：
   - `ontology_derive`（只读）：参数 `subjectLabel`（＋可选 `predicateTermId`）；实现转 ForwardChainingEngine 的结论查询（materialization=**enforce** 的规则结论直接可用；observe 态结论标注"观察态"防误导）＋`derivation_ledger` 溯源（结论由哪条规则/哪些事实推出）；
   - 输出带 `materialization` 标记与溯源链——Agent 引用结论时可给用户"为什么"。
-- **测试口径**：红——工具未注册；绿——enforce 结论返回＋observe 标注＋溯源链非空＋无规则时空结果不炸。
-- **影响面**：`builtin_tools.py`（约 80 行）＋ForwardChainingEngine 只查询口（若缺，加一个只读查询函数）。工作量 ≈ 0.5 人日。
+- **测试口径**：红——list_tools 未见；绿——enforce 结论返回＋observe 标注＋溯源链非空＋无规则时空结果不炸。
+- **影响面**：`neurova/mcp_ontology_server.py`（约 60 行）＋ForwardChainingEngine 只查询口（若缺，加一个只读查询函数）。工作量 ≈ 0.25 人日（M0 之外）。
 
 ### A4 动作建模最小面（P2）
 
 - **动机**：第 3 步的动作建模缺——把"业务动作"从工具名粒度升到本体面表达，同时**不推翻**既有权限设施。
 - **设计（最小面，克制版）**：
-  - 新表 `ontology_actions`（v42，迁移注册表）：`action_id/tenant_id/label/definition/param_schema_json/bound_tool/risk_tier(low|medium|high)/enabled`——动作＝**声明**：它绑定一个既有工具（bound_tool）与参数模板，风险档由登记者声明；
-  - 联动：`resolveCommandAuthority`/`evaluate_tool_call` **不改判定逻辑**——动作声明作为治理侧的**元数据读数**（治理中心可按 risk_tier 过滤展示、按动作名配白名单/审批），Agent 侧经 `ontology_query(kind='action')` 可查动作清单与风险档（决策时知道哪些动作要审批）；
+  - 新表 `ontology_actions`（v42，迁移注册表）：`action_id/tenant_id/label/definition/param_schema_json/bound_tool/risk_tier(low|medium|high)/enabled`——动作＝**声明**：它绑定一个既有工具（bound_tool；G4/M0 后可为 `mcp.ontology.*` 本体工具或任意内置/MCP 工具名）与参数模板，风险档由登记者声明；
+  - 联动：`resolveCommandAuthority`/`evaluate_tool_call` **不改判定逻辑**——动作声明作为治理侧的**元数据读数**（治理中心可按 risk_tier 过滤展示、按动作名配白名单/审批），Agent 侧经 `ontology_query(kind='action')`（MCP tool）可查动作清单与风险档（决策时知道哪些动作要审批）；
   - **刻意不做**（本轮）：动作编排/回滚/事务——那是工作流引擎的领地（NeurFlow），越界即平行体系；动作运行时执行仍走既有 tool_call 单工具边界。
 - **测试口径**：红——表/端点缺；绿——CRUD＋risk_tier 闭集校验＋bound_tool 必须是已注册工具名（防悬空动作）＋ontology_query 可查。
 - **影响面**：`knowledge_facts.py`（v42 迁移）＋`term_registry.py` 或独立 `action_registry.py`（读写面）＋`knowledge_ontology.py`（CRUD 端点，admin）＋前端（本体工作台动作分区或治理中心展示，最小＝只读列表）。工作量 ≈ 1 人日。
@@ -125,16 +160,17 @@
 
 | 批次 | 内容 | 依赖 | 工作量 | 验收 |
 |------|------|------|--------|------|
-| P1 | A1 查询/校验工具化 ＋ A2 事实写入工具化 | 无 | 1 人日 | 工具注册在册；tool_search 可检索到；fact_submit 经咽喉写入（活体：真后端 Agent 会话或直接 tool_call 路径取证）|
-| P2 | A3 推理查询 ＋ A4 动作建模最小面 | P1（工具注册机制复用） | 1.5 人日 | enforce 结论可查带溯源；动作 CRUD＋risk_tier 闭集＋bound_tool 悬空拒 |
+| P1 | **M0 内嵌 MCP server 基座** ＋ A1 查询/校验 ＋ A2 事实写入 | 无（MCP SDK 已在依赖） | 1–1.5 人日 | 项目自有 MCPToolClient 连 loopback：list_tools 见三工具、call 与 REST 同源、鉴权 401；fact_submit 经咽喉写入（活体取证）|
+| P2 | A3 推理查询 ＋ A4 动作建模最小面 | P1（M0 server 已挂） | 1.5 人日 | enforce 结论可查带溯源；动作 CRUD＋risk_tier 闭集＋bound_tool 悬空拒 |
 | P3 | A5 反馈闭环走查＋采纳建议读数 | A2 | 0.5 人日 | 闭环走查脚本取证；采纳建议只读不放宽 |
 
-总工作量 ≈ 3 人日。每批独立提交（`feat(ontology): ...` / `feat(tools): ...`），红绿实测随提交说明。
+总工作量 ≈ 3–3.5 人日。每批独立提交（`feat(ontology): ...`），红绿实测随提交说明。
 
 ## 5. 待拍板项与不做什么
 
 1. **A2 fact_submit 的默认审批档**：默认直写（admission 逐字可核＋候选/冲突异步人审兜底，**推荐**——写入面已有三层异步闸，再加同步审批会让 Agent 每次写断言都卡人）、默认全审批（严，交互卡顿）、按谓词风险级（中，需先给谓词加风险列）。推荐第一项，运维可经治理白名单随时收紧。
 2. **A4 动作的 bound_tool 粒度**：绑定到既有内置工具（推荐，最小面）vs 引入"动作执行引擎"（新平行体系，不做）。推荐前者。
-3. **A1–A3 工具的启用范围**：全部 Agent 默认可用（推荐——只读三件无风险，fact_submit 有治理门）vs 按 agent 配置启用。推荐前者。
-4. **不做的事**：不做动作编排/回滚/事务（NeurFlow 领地）；不做本体工具的 MCP 化（既有 tool 链够用，MCP 是对外协议面）；不做"Agent 自主改术语/规则"（术语/规则登记仍是 admin REST——类型系统的变更权限不随 Agent 开放）；不在本档实施。
+3. **A1–A3 工具的启用范围**：MCP server 层全部开放＋Agent 侧按 mcp_servers 配置选择性挂载（推荐——server 层不做 per-agent 裁剪，挂载面即开关；治理/授权在调用链按既有机制生效）。
+4. **MCP 端点鉴权边界**：服务令牌/API key（推荐，与 REST 同源）vs 公开无鉴权（不做）。外部宿主接入时按此边界发放凭据。
+5. **不做的事**：不做动作编排/回滚/事务（NeurFlow 领地）；**不做对外公网无鉴权开放**（MCP 端点先内网/loopback＋令牌，公网暴露须先过反代鉴权评审）；不做"Agent 自主改术语/规则"（术语/规则登记仍是 admin REST——类型系统的变更权限不随 Agent 开放）；MCP server 首版不做 resources/prompts 面（只做 tools，增量按需）；不在本档实施。
 5. **与 GB/T 48000.3 评估档的关系**：那边管"建模元数据/流程标准"（已全落地），本档管"运行时接入"——两档正交，A1–A5 不依赖那边任何未落项。
