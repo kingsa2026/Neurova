@@ -273,7 +273,7 @@ import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { useAuthStore } from '@/stores/auth'
 import { request } from '@/api'
-import { radialLayout } from '@/pages/graph-workbench/radial'
+import { forceLayout } from '@/pages/graph-workbench/forceLayout'
 import FlowEdge from '@/pages/graph-workbench/FlowEdge.vue'
 import { FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons-vue'
 // 全屏助手与协作画布共用同一份（标准 API 优先、webkit 前缀回退），不另造平行实装。
@@ -370,15 +370,16 @@ const instanceForm = reactive({
 
 const flowNodes = computed(() => {
   const nodes = filteredNodes.value
-  // 放射布局：以选中节点为根（聚焦后以其为圆心重铺），无选中取度数枢纽——
-  // 子树扇区不相交，树边互不交叉。用户拖拽/已保存布局优先于放射位置。
-  const radialPositions = radialLayout(
+  // 力导向布局：以选中节点为根（聚焦后硬锚定原点重收敛），无选中取度数
+  // 枢纽——collide 硬防重叠、弹簧边短而匀，交叉局部最小化（放射只对树边
+  // 承诺零交叉，多父稠密图的非树边大量交错）。用户拖拽/已保存布局优先。
+  const layoutPositions = forceLayout(
     nodes, (displayData.value?.edges ?? []) as never, selectedNodeId.value || focusNodeId.value || undefined)
   const resolved = nodes.map((n) => ({
     id: n.id,
     label: n.label,
     type: n.type,
-    position: dragOverrides.value[n.id] ?? savedLayout.value[n.id] ?? radialPositions.get(n.id) ?? { x: 0, y: 0 },
+    position: dragOverrides.value[n.id] ?? savedLayout.value[n.id] ?? layoutPositions.get(n.id) ?? { x: 0, y: 0 },
   }))
   // 自算包围盒（视口居中的唯一依据）：按解析后的真实位置算，保存的布局才能居中。
   if (resolved.length) {
