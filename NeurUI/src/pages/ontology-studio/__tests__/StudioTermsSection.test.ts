@@ -25,6 +25,7 @@ const updateTermMock = vi.fn()
 const deleteTermMock = vi.fn()
 
 vi.mock('@/api/modules/ontology', () => ({
+  listOntologyNamespaces: vi.fn().mockResolvedValue({ data: {} }),
   listOntologyTerms: (...args: unknown[]) => listTermsMock(...args),
   createOntologyTerm: (...args: unknown[]) => createTermMock(...args),
   updateOntologyTerm: (...args: unknown[]) => updateTermMock(...args),

@@ -19,10 +19,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, Path
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user_or_service
+from neurova.api.deps import require_admin
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -243,6 +244,39 @@ def _shapeRegistry(store: Any):
     from neurova.knowledge.ontology.shapes import ShapeRegistry
 
     return ShapeRegistry(store)
+
+
+@router.get("/ontology/domain-packs")
+async def list_domain_packs(
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """G5：可用领域包清单（概要）——前端概览卡片的选项源。"""
+    from neurova.knowledge.ontology.domain_pack import availablePacks
+
+    return {"code": 0, "data": availablePacks(), "request_id": ""}
+
+
+@router.post("/ontology/domain-packs/{pack_id}/import")
+async def import_domain_pack(
+    request: Request,
+    pack_id: str = Path(..., description="领域包标识"),
+    current_user: Dict = Depends(require_admin()),
+):
+    """G5：导入领域包（仅管理员）——seedMissing 只补缺幂等；返回补上条数。"""
+    from neurova.knowledge.ontology.domain_pack import importDomainPack
+
+    store, registry, _engine = _ontologyParts()
+    tenant = _tenantOf(current_user)
+    try:
+        added = importDomainPack(registry, pack_id, tenantId=tenant)
+    except ValueError as exc:
+        raise HTTPException(status_code=404 if "未注册领域包" in str(exc) else 400,
+                            detail=str(exc))
+    _landActivity(store, "ontology_domain_pack_import", current_user, "import",
+                  {"pack_id": pack_id, "added": added}, "")
+    return {"code": 0, "message": "success",
+            "data": {"pack_id": pack_id, "added": added},
+            "request_id": getattr(request.state, "request_id", "")}
 
 
 @router.get("/ontology/namespaces")
