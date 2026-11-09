@@ -16,7 +16,7 @@ def exportJsonLd(store: Any, tenantId: str = "default", agentId: str = "") -> st
     tenant = str(tenantId or "default")
     with store._lock:
         termRows = store._conn.execute(
-            "SELECT term_id, kind, label, parent_term_id FROM ontology_terms"
+            "SELECT term_id, kind, label, parent_term_id, definition FROM ontology_terms"
             " WHERE tenant_id = ? ORDER BY term_id", (tenant,)).fetchall()
         factSql = ("SELECT subject_key, predicate_term_id, object_term"
                    " FROM knowledge_facts WHERE tenant_id = ?"
@@ -33,6 +33,9 @@ def exportJsonLd(store: Any, tenantId: str = "default", agentId: str = "") -> st
         node: dict = {"@id": "kbg:%s" % row["term_id"], "@type": "kbg:Term",
                       "term_id": row["term_id"], "kind": row["kind"],
                       "label": row["label"] or row["term_id"]}
+        # G1：定义描述项——非空才出（空值零漂移）
+        if str(row["definition"] or "").strip() if "definition" in row.keys() else False:
+            node["definition"] = str(row["definition"])
         if row["parent_term_id"]:
             node["parent_term_id"] = "kbg:%s" % row["parent_term_id"]
         graph.append(node)

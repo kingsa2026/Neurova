@@ -188,7 +188,8 @@ class TestMigrationVersions:
         # v38：知识库自定义分类注册表（specs/2026-11-07 批 A）——knowledge_categories。
         # v39：外部 IRI 映射结构化（GB/T 48000.3 评估档 G3 拍板）——存量 dict 行
         #       统一转 [{"kind": 闭集, "iri": IRI}] 列表，导出从替换改附加断言。
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 39
+        # v40：术语 Definition 描述项（GB/T 48000.3 评估档 G1）——表 1/表 2 必要项。
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 40
         assert {'knowledge_mcp_sources', 'knowledge_alias_candidates',
                 'ontology_relation_candidates', 'ontology_shapes',
                 'ontology_change_log', 'enterprise_source_configs',

@@ -94,6 +94,10 @@
               <a-input v-model:value="form.label" size="sm" />
             </label>
             <label class="field">
+              <span>{{ t('ontology.termDefinition') }}</span>
+              <a-textarea v-model:value="form.definition" size="sm" :rows="2" />
+            </label>
+            <label class="field">
               <span>{{ t('ontology.termParent') }}</span>
               <a-select v-model:value="form.parent_term_id" size="sm" allow-clear>
                 <a-select-option v-for="concept in conceptTerms" :key="concept.term_id" :value="concept.term_id">
@@ -240,6 +244,7 @@ interface TermForm {
   term_id: string
   kind: 'concept' | 'relation' | 'property'
   label: string
+  definition: string
   parent_term_id: string
   domain_text: string
   range_terms_text: string
@@ -273,6 +278,7 @@ function emptyForm(): TermForm {
     disjoint_text: '',
     required_props_text: '',
     aliases_text: '',
+    definition: '',
     external_iris_text: '',
     replaced_by: '',
     module: '',
@@ -376,6 +382,7 @@ function openEdit(term: OntologyTerm) {
   form.term_id = term.term_id
   form.kind = (term.kind as TermForm['kind']) ?? 'concept'
   form.label = term.label ?? ''
+  form.definition = term.definition ?? ''
   form.parent_term_id = term.parent_term_id ?? ''
   form.domain_text = (term.domain_terms ?? []).join(', ')
   form.range_terms_text = (term.range_terms ?? []).join(', ')
@@ -409,6 +416,7 @@ function buildPayload(): OntologyTermWrite {
     term_id: form.term_id.trim(),
     kind: form.kind,
     label: form.label.trim(),
+    definition: form.definition.trim() || null,
     parent_term_id: form.parent_term_id || null,
     domain: splitList(form.domain_text),
     range_terms: splitList(form.range_terms_text),

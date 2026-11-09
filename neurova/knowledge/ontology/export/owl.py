@@ -18,6 +18,16 @@ from typing import Any
 
 from ..term_registry import versionedIri
 
+
+def _literal(text: str) -> str:
+    """Turtle 字面量：反斜杠/引号/换行转义（与 turtle.py `_escape` 同形）。"""
+    return '"%s"' % (str(text or "")
+                     .replace("\\", "\\\\")
+                     .replace('"', '\\"')
+                     .replace("\n", "\\n")
+                     .replace("\r", "\\r")
+                     .replace("\t", "\\t"))
+
 #: 外部映射 kind → 断言谓词（类与属性分形：equivalentClass/equivalentProperty）。
 _KIND_PREDICATES = {
     "skos_exactMatch": ("skos:exactMatch", "skos:exactMatch"),
@@ -81,6 +91,11 @@ def exportOwlAxioms(store: Any, tenantId: str = "default",
         inverse = str(row["inverse_of"]) if "inverse_of" in row.keys() else ""
         if inverse and inverse in termsById:
             lines.append("%s owl:inverseOf %s ." % (_iri(termId), _iri(inverse)))
+        # G1：定义描述项——非空才出 rdfs:comment（空值零漂移，golden 稳定）
+        definition = str(row["definition"] or "") if "definition" in row.keys() else ""
+        if definition.strip():
+            lines.append("%s rdfs:comment %s@zh ." % (_iri(termId),
+                                                      _literal(definition)))
         # G3 附加断言：等价/对齐独立成行，谓词按映射 kind 与本体侧 kind 选形
         for entry in _mappings(row):
             predicate = _KIND_PREDICATES.get(str(entry.get("kind") or ""))

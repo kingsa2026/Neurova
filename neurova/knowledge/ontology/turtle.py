@@ -212,6 +212,9 @@ def serializeAll(store: Any, tenantId: str = "default",
             rows.append(("aliases", literal(_canonicalJson(row["aliases_json"]))))
         if "external_iris_json" in row.keys():
             rows.append(("externalIris", literal(_canonicalJson(row["external_iris_json"]))))
+        # G1：定义描述项——非空才出（空值零漂移，golden 稳定）
+        if "definition" in row.keys() and str(row["definition"] or "").strip():
+            rows.append(("definition", literal(row["definition"])))
         rows.append(("version", literal(row["version"])))
         lines.append(_subjectBlock(row["term_id"], rows))
 

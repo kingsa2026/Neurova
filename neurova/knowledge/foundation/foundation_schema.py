@@ -51,6 +51,7 @@ from ..ontology.term_registry import (
     _SCHEMA_V31_TERMS,
     _SCHEMA_V32_TERMS,
     _SCHEMA_V39_EXTERNAL_IRI,
+    _SCHEMA_V40_TERMS,
     _SCHEMA_V8,
     _SCHEMA_V12,
 )
@@ -136,6 +137,9 @@ _STEPS: List[tuple] = [
     #      external_iris_json 从 dict 整体重构为 [{"kind": 闭集, "iri": IRI}] 列表；
     #      存量 dict 行统一转 skos_exactMatch（导出同步从替换改附加断言）
     (39, _SCHEMA_V39_EXTERNAL_IRI),
+    # v40：术语 Definition 描述项（GB/T 48000.3 评估档 G1）——表 1/表 2 必要项，
+    #      quality「缺定义」判据的消费源；导出面非空才出断言
+    (40, _SCHEMA_V40_TERMS),
 ]
 
 _registered = False
