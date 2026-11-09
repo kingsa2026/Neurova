@@ -111,8 +111,8 @@ const antStubs = Object.fromEntries(
 
 const LAYOUT_KEY = 'nr-graph-layout:agent-1'
 
-async function mountPage() {
-  requestGet.mockResolvedValue(studioFixture)
+async function mountPage(fixture = studioFixture) {
+  requestGet.mockResolvedValue(fixture)
   const wrapper = mount(GraphWorkbenchPage, {
     global: {
       plugins: [i18n],
@@ -131,6 +131,11 @@ async function mountPage() {
 function flowNodesOf(wrapper: ReturnType<typeof mount>) {
   const flow = wrapper.findComponent(VueFlow)
   return (flow.props('nodes') ?? []) as Array<{ id: string; position: { x: number; y: number } }>
+}
+
+function flowEdgesOf(wrapper: ReturnType<typeof mount>) {
+  const flow = wrapper.findComponent(VueFlow)
+  return (flow.props('edges') ?? []) as Array<{ id: string; source: string; target: string }>
 }
 
 describe('GraphWorkbenchPage 全屏模式', () => {
@@ -215,5 +220,38 @@ describe('GraphWorkbenchPage 2D 保存布局', () => {
     expect(localStorage.getItem(LAYOUT_KEY)).toBeNull()
     const n1 = flowNodesOf(wrapper).find((n) => n.id === 'n1')
     expect(n1?.position).not.toEqual({ x: 50, y: 60 })
+  })
+})
+
+describe('GraphWorkbenchPage 2D 边渲染集契约', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.clearAllMocks()
+  })
+
+  // 根因钉子（用户报障：全图态刷新后关系线显示不全，切 3D 回 2D 才全）：
+  // vue-flow 挂载时丢弃端点未注册的边，且节点后续加入不回扫——端点悬空的边
+  // 留在 props 里就是丢边隐患。契约：传给画布的边必须是节点集的导出子图。
+  it('端点不在节点渲染集的边不得进入画布 props', async () => {
+    const fixture = {
+      ...studioFixture,
+      edges: [
+        ...studioFixture.edges,
+        { source: 'n2', target: 'ghost', relation: 'dangling' },
+      ],
+    }
+    const wrapper = await mountPage(fixture)
+    const nodeIds = new Set(flowNodesOf(wrapper).map((n) => n.id))
+    expect(nodeIds.has('ghost')).toBe(false)
+    for (const e of flowEdgesOf(wrapper)) {
+      expect(nodeIds.has(e.source), `边 ${e.id}(${e.source}->${e.target}) 端点不在节点集`).toBe(true)
+      expect(nodeIds.has(e.target), `边 ${e.id}(${e.source}->${e.target}) 端点不在节点集`).toBe(true)
+    }
+  })
+
+  it('两端都在渲染集内的边全部保留（不过度过滤）', async () => {
+    const wrapper = await mountPage()
+    const edges = flowEdgesOf(wrapper)
+    expect(edges.map((e) => `${e.source}->${e.target}`).sort()).toEqual(['n1->n2', 'n2->n3'])
   })
 })
