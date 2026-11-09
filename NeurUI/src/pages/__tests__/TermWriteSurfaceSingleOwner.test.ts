@@ -62,8 +62,8 @@ describe('术语写面单一属主', () => {
       expect(page, `图谱工作台仍带术语写面痕迹：${banned}`).not.toContain(banned)
     }
     expect(page, '图谱工作台应给本体工作台真链接（术语声明编辑的唯一入口）').toContain('/ontology-studio')
-    // 不可替代的部分不能被一起带走
-    for (const kept of ['GraphExplorer3D', 'radialLayout', '/knowledge/graph/instances', 'GeoMapPanel']) {
+    // 不可替代的部分不能被一起带走（布局已是力导向：radialLayout 退役）
+    for (const kept of ['GraphExplorer3D', 'forceLayout', '/knowledge/graph/instances', 'GeoMapPanel']) {
       expect(page, `图谱工作台丢了它唯一实装的能力：${kept}`).toContain(kept)
     }
   })
