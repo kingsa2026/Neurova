@@ -11,6 +11,7 @@ is_demo:false + 引导提示（hint），图谱 manager 是唯一数据源。
 """
 
 from neurova.api.auth import get_current_user_or_default
+from neurova.core import app_settings
 from neurova.core.logger import get_logger
 import typing
 from typing import Dict
@@ -19,6 +20,22 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 logger = get_logger(__name__)
 router = APIRouter()
+
+
+def _effectiveSubgraphLimit(explicit: typing.Optional[int]) -> int:
+    """渲染上限的单一读法：显式查询参数 > 全局设置 advanced.graph_studio_limit > 200。
+
+    设置面无 le 校验，这里按查询参数同一合法域（1..2000）钳住——
+    设置不能成为绕过端点上限的旁路。
+    """
+    if explicit is not None:
+        return int(explicit)
+    configured = (app_settings.get_advanced_settings() or {}).get("graph_studio_limit")
+    try:
+        value = int(configured)
+    except (TypeError, ValueError):
+        value = 200
+    return max(1, min(value, 2000))
 
 
 def _get_request_id(request) -> str:
@@ -435,11 +452,12 @@ async def get_knowledge_graph_studio(
     agent_id: str,
     request: Request,
     current_user: Dict = Depends(get_current_user_or_service),
-    limit: int = Query(200, ge=1, le=2000),
+    limit: typing.Optional[int] = Query(None, ge=1, le=2000),
 ):
     """工作台首屏聚合读面（S0/S1）：子图 + schema + 统计一次拿齐。
 
     子图与统计同图谱读面口径（manager 单源，limit 裁剪与真总量分开报）；
+    limit 缺省跟全局设置 advanced.graph_studio_limit（高级设置卡），显式参数最优先。
     schema 是本体类型系统的同一份投影（`ontologySchemaData` 单源），不在此处
     重抄一份类型清单。写操作不在此面——实例编辑走 /knowledge/graph/instances。
     """
@@ -448,7 +466,7 @@ async def get_knowledge_graph_studio(
     tenant = _tenant_of(current_user)
     manager = _get_kg_manager(agent_id, tenant)
     try:
-        data = _graph_payload(manager, limit) if manager else {}
+        data = _graph_payload(manager, _effectiveSubgraphLimit(limit)) if manager else {}
     except Exception as e:  # noqa: BLE001
         logger.warning("读取工作台子图失败，返回空图谱: %s", e)
         manager, data = None, {}
@@ -547,19 +565,22 @@ async def get_knowledge_graph_subgraph(
     current_user: Dict = Depends(get_current_user_or_service),
     focus: str = Query("", description="中心节点 id；空=按 limit 取全图子集（3D 首屏）"),
     hops: int = Query(2, ge=0, le=12),
-    limit: int = Query(200, ge=1, le=2000),
+    limit: typing.Optional[int] = Query(None, ge=1, le=2000),
     types: str = Query("", description="逗号分隔的节点类型过滤，空=不过滤"),
 ):
     """3D/2D 探索的按需子图（S4）：focus + 跳数 + 类型 + 上限，服务端裁剪。
 
     全量图在大语料下不可整幅渲染；探索器只拉以焦点为中心的邻域，
     扩展（换焦点/加跳数）是下一次请求，不是客户端养一张大图。
+    limit 缺省跟全局设置 advanced.graph_studio_limit（高级设置卡），显式参数最优先。
     """
     tenant = _tenant_of(current_user)
     manager = _get_kg_manager(agent_id, tenant)
     typeSet = {t.strip() for t in str(types or "").split(",") if t.strip()}
     try:
-        data = _subgraphPayload(manager, focus, hops, typeSet, limit) if manager else {}
+        data = (_subgraphPayload(manager, focus, hops, typeSet,
+                                 _effectiveSubgraphLimit(limit))
+                if manager else {})
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as e:  # noqa: BLE001
