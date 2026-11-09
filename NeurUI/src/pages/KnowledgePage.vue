@@ -48,8 +48,12 @@
             :placeholder="t('knowledge.filterCategory')"
             allow-clear
             style="min-width: 160px"
-            @change="fetchKnowledge"
+            @change="onCategoryFilterChange"
           />
+          <!-- 分类管理入口（admin）：分类注册表的管理面接线，变更后刷新分类下拉 -->
+          <GlassButton v-if="isAdmin" variant="ghost" size="sm" @click="catMgmtOpen = true">
+            {{ t('knowledge.catMgmtTitle') }}
+          </GlassButton>
           <GlassButton variant="secondary" size="sm" @click="exportKnowledge">
             {{ t('knowledge.export') }}
           </GlassButton>
@@ -77,12 +81,22 @@
 
     <!-- Knowledge Table -->
     <GlassPanel v-if="knowledgeItems.length > 0 || loading">
+      <div v-if="selectedRowKeys.length > 0" class="kb-batch-bar">
+        <span class="kb-batch-count">{{ t('knowledge.batchSelected', { n: selectedRowKeys.length }) }}</span>
+        <GlassButton variant="primary" size="sm" @click="openBatchCategory">
+          {{ t('knowledge.batchCategorize') }}
+        </GlassButton>
+        <GlassButton variant="ghost" size="sm" @click="clearSelection">
+          {{ t('knowledge.batchClearSelection') }}
+        </GlassButton>
+      </div>
       <a-table
         :columns="columns"
         :data-source="knowledgeItems"
         :loading="loading"
         :locale="{ emptyText: '' }"
         :pagination="pagination"
+        :row-selection="rowSelection"
         row-key="id"
         @change="onTableChange"
       >
@@ -717,6 +731,27 @@
       :fact-id="lineageFactId"
       @open-fact="openLineage"
     />
+
+    <!-- 分类管理（admin）：变更后刷新分类下拉与过滤选项 -->
+    <CategoryManagerModal v-model:open="catMgmtOpen" @changed="fetchCategories" />
+
+    <!-- 批量分类：选中条目统一归入目标分类（逐条复用单条更新链） -->
+    <a-modal
+      v-model:open="batchCategoryOpen"
+      :title="t('knowledge.batchCategorizeTitle')"
+      :confirm-loading="batchCategorizing"
+      @ok="applyBatchCategory"
+      @cancel="batchCategoryOpen = false"
+    >
+      <p class="modules-hint">{{ t('knowledge.batchSelected', { n: selectedRowKeys.length }) }}</p>
+      <a-form-item :label="t('knowledge.itemCategory')">
+        <a-select
+          v-model:value="batchCategory"
+          :options="categoryOptions"
+          :placeholder="t('knowledge.categoryPlaceholder')"
+        />
+      </a-form-item>
+    </a-modal>
   </div>
 </template>
 
@@ -771,6 +806,7 @@ import { useAuthStore } from '@/stores/auth'
 import GlassPanel from '@/components/GlassPanel.vue'
 import AnnotationDrawer from '@/modules/collaboration/AnnotationDrawer.vue'
 import KnowledgeLineageDrawer from '@/components/KnowledgeLineageDrawer.vue'
+import CategoryManagerModal from '@/components/CategoryManagerModal.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 
@@ -800,6 +836,7 @@ const { enumLabel } = useEnumLabel()
 const { agentId } = useAgentPage({
   onAgentChange: () => {
     currentPage.value = 1
+    clearSelection()
     fetchKnowledge()
   },
 })
@@ -857,6 +894,7 @@ function canManage(record: KnowledgeItem): boolean {
 
 function onScopeChange() {
   currentPage.value = 1
+  clearSelection()
   fetchKnowledge()
 }
 
@@ -893,10 +931,12 @@ const activeFilterCount = computed(() =>
   + (metaFilters.value.page_min !== undefined && metaFilters.value.page_min !== null ? 1 : 0))
 const applyMetaFilters = () => {
   filterOpen.value = false
+  clearSelection()
   void fetchKnowledge()
 }
 const clearMetaFilters = () => {
   metaFilters.value = { author: '', source_type: '', ocr_used: undefined, page_min: undefined, source: '', modifiedRange: undefined }
+  clearSelection()
   void fetchKnowledge()
 }
 
@@ -927,6 +967,73 @@ const importingUrl = ref(false)
 //        走顶层 api_key 加密通道
 //   custom: api_url(必填) + api_key(可选) + dataset_id
 const configVisible = ref(false)
+
+// 分类管理弹窗（admin）：注册/编辑/停用/删除分类注册表，变更后刷新分类下拉
+const catMgmtOpen = ref(false)
+
+// 批量分类：多选仅放行与 PUT 同权限口径的行（属主/admin）；应用时逐条走
+// 既有 updateKnowledgeNode 单更新链（payload 只带 category，不触正文重抽），
+// 聚合成功/失败——不新造平行批量端点。
+const selectedRowKeys = ref<string[]>([])
+const batchCategoryOpen = ref(false)
+const batchCategorizing = ref(false)
+const batchCategory = ref<string | undefined>(undefined)
+
+const rowSelection = computed(() => ({
+  selectedRowKeys: selectedRowKeys.value,
+  preserveSelectedRowKeys: true,
+  onChange: (keys: string[]) => { selectedRowKeys.value = keys },
+  getCheckboxProps: (record: KnowledgeItem) => ({ disabled: !canManage(record) }),
+}))
+
+function clearSelection() {
+  selectedRowKeys.value = []
+}
+
+function onCategoryFilterChange() {
+  clearSelection()
+  fetchKnowledge()
+}
+
+function openBatchCategory() {
+  batchCategory.value = undefined
+  batchCategoryOpen.value = true
+}
+
+async function applyBatchCategory() {
+  if (!batchCategory.value) {
+    message.error(t('knowledge.batchCategorizeNoCategory'))
+    return
+  }
+  batchCategorizing.value = true
+  const category = batchCategory.value
+  const ids = [...selectedRowKeys.value]
+  let success = 0
+  let firstError: unknown = null
+  try {
+    for (const id of ids) {
+      try {
+        await updateKnowledgeNode(id, { category }, { agent_id: agentId.value })
+        success++
+      } catch (err) {
+        if (firstError === null) firstError = err
+      }
+    }
+  } finally {
+    batchCategorizing.value = false
+  }
+  batchCategoryOpen.value = false
+  const fail = ids.length - success
+  if (success > 0) {
+    if (fail === 0) message.success(t('knowledge.batchCategorizeSuccess', { n: success }))
+    else message.warning(t('knowledge.batchCategorizePartial', { success, fail }))
+    clearSelection()
+    fetchKnowledge()
+  } else {
+    // 全败保留选择供重试；detail 原话优先
+    message.error(extractApiDetail(firstError) || t('knowledge.batchCategorizeFailed'))
+  }
+}
 
 // MCP 信息源（B 方案）：外部 MCP server 作为知识库信息源。拉取直接入知识库
 // （dedupe/租户全链），token 只登记不回显（列表脱敏）。
@@ -1356,6 +1463,7 @@ function onTableChange(pag: any) {
 }
 
 async function handleSearch() {
+  clearSelection()
   if (semanticSearch.value && searchQuery.value.trim()) {
     await semanticSearchFn()
   } else {
@@ -1746,6 +1854,7 @@ function confirmDelete(item: KnowledgeItem) {
       try {
         await deleteKnowledgeNode(item.id, { agent_id: agentId.value })
         knowledgeItems.value = knowledgeItems.value.filter((k) => k.id !== item.id)
+        selectedRowKeys.value = selectedRowKeys.value.filter((k) => k !== item.id)
         message.success(t('knowledge.deleteSuccess'))
       } catch (err) {
         message.error(extractApiDetail(err) || t('knowledge.deleteError'))
@@ -1989,6 +2098,22 @@ watch(agentId, () => {
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+
+.kb-batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--nr-glass-border);
+  border-radius: var(--nr-radius-md);
+  background: var(--nr-glass-bg);
+}
+
+.kb-batch-count {
+  font-size: 13px;
+  color: var(--nr-text-secondary);
 }
 
 /* 远程配置创建表单：名称 + 类型 一行 */
