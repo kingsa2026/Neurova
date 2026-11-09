@@ -1,7 +1,7 @@
 """upper-lite 最小上层本体（B9 L1，升级计划 §12.2）＋事件/时间受控词汇（B11 L3，§12.4）。
 
 Entity→Continuant(Agent/Document/Concept)＋Occurrent(Event) 七类；
-对齐 BFO/ISO 21838 只做 `external_iris_json` 导出映射，不整包引入、
+对齐 BFO/ISO 21838 只做 external_iris_json 导出映射（G3 结构化列表，bfo 前缀别名按 v39 迁移规则归 skos_exactMatch），不整包引入、
 不做运行时推理。`Concept` 是类型根（一个 concept 术语），不与
 `ontology_terms.kind='concept'` 的字段值混同；`Relation` 不建成 concept 类
 （避免把关系实例化），仍是 term kind，导出为 `owl:ObjectProperty`（B12）。
@@ -18,19 +18,19 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 _BFO = "http://purl.obolibrary.org/obo/"
-#: OWL-Time 只做导出映射（`external_iris_json.skos_exactMatch`），不引运行时时间推理。
+#: OWL-Time 只做导出映射（external_iris 列表，kind=skos_exactMatch），不引运行时时间推理。
 _OWL_TIME = "https://www.w3.org/2006/time#"
 
 UPPER_LITE_TERMS: List[Dict[str, Any]] = [
     {"termId": "Entity", "kind": "concept", "label": "实体",
-     "externalIris": {"bfo": _BFO + "BFO_0000001"},
+     "externalIris": [{"kind": "skos_exactMatch", "iri": _BFO + "BFO_0000001"}],
      "identityKeys": ["canonical_label"]},
     {"termId": "Continuant", "kind": "concept", "label": "连续体",
      "parentTermId": "Entity",
-     "externalIris": {"bfo": _BFO + "BFO_0000002"}},
+     "externalIris": [{"kind": "skos_exactMatch", "iri": _BFO + "BFO_0000002"}]},
     {"termId": "Occurrent", "kind": "concept", "label": "发生体",
      "parentTermId": "Entity",
-     "externalIris": {"bfo": _BFO + "BFO_0000003"}},
+     "externalIris": [{"kind": "skos_exactMatch", "iri": _BFO + "BFO_0000003"}]},
     {"termId": "Agent", "kind": "concept", "label": "代理",
      "parentTermId": "Continuant"},
     {"termId": "Document", "kind": "concept", "label": "文档",
@@ -39,7 +39,7 @@ UPPER_LITE_TERMS: List[Dict[str, Any]] = [
      "parentTermId": "Continuant"},
     {"termId": "Event", "kind": "concept", "label": "事件",
      "parentTermId": "Occurrent",
-     "externalIris": {"bfo": _BFO + "BFO_0000015"}},
+     "externalIris": [{"kind": "skos_exactMatch", "iri": _BFO + "BFO_0000015"}]},
     # ── 事件/时间模式（B11 L3，§12.4 设计 3）────────────────────────
     # 受控关系词汇：事件的参与者/时间，以及四条 Allen 区间关系挂在既有 `temporal`
     # 父属性之下（不另造第二组时间词汇）。OWL-Time 只作 `skos_exactMatch` 导出映射
@@ -50,19 +50,19 @@ UPPER_LITE_TERMS: List[Dict[str, Any]] = [
      "domain": ["Event"]},
     {"termId": "hasTime", "kind": "relation", "label": "有时间",
      "domain": ["Event"],
-     "externalIris": {"skos_exactMatch": _OWL_TIME + "hasTime"}},
+     "externalIris": [{"kind": "skos_exactMatch", "iri": _OWL_TIME + "hasTime"}]},
     {"termId": "before", "kind": "relation", "label": "在…之前",
      "parentTermId": "temporal", "domain": ["Event"], "rangeTerms": ["Event"],
-     "externalIris": {"skos_exactMatch": _OWL_TIME + "before"}},
+     "externalIris": [{"kind": "skos_exactMatch", "iri": _OWL_TIME + "before"}]},
     {"termId": "after", "kind": "relation", "label": "在…之后",
      "parentTermId": "temporal", "domain": ["Event"], "rangeTerms": ["Event"],
-     "externalIris": {"skos_exactMatch": _OWL_TIME + "after"}},
+     "externalIris": [{"kind": "skos_exactMatch", "iri": _OWL_TIME + "after"}]},
     {"termId": "overlaps", "kind": "relation", "label": "与…重叠",
      "parentTermId": "temporal", "domain": ["Event"], "rangeTerms": ["Event"],
-     "externalIris": {"skos_exactMatch": _OWL_TIME + "overlaps"}},
+     "externalIris": [{"kind": "skos_exactMatch", "iri": _OWL_TIME + "overlaps"}]},
     {"termId": "during", "kind": "relation", "label": "在…期间",
      "parentTermId": "temporal", "domain": ["Event"], "rangeTerms": ["Event"],
-     "externalIris": {"skos_exactMatch": _OWL_TIME + "during"}},
+     "externalIris": [{"kind": "skos_exactMatch", "iri": _OWL_TIME + "during"}]},
 ]
 
 

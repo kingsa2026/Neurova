@@ -63,7 +63,9 @@ class TestUpperLiteSeeds:
         entity = registry.term("Entity")
         assert "BFO_0000001" in str(entity.get("external_iris")), \
             "BFO 对齐只进导出映射"
-        assert registry.term("Event")["external_iris"].get("bfo"), "Event 有 BFO 映射"
+        event_iris = registry.term("Event")["external_iris"]
+        seed_iri = next(t for t in UPPER_LITE_TERMS if t["termId"] == "Event")["externalIris"][0]["iri"]
+        assert {"kind": "skos_exactMatch", "iri": seed_iri} in event_iris,             "Event 有 BFO 对齐条目（G3 结构化列表，bfo 前缀别名归 skos_exactMatch）"
 
     def test_exportCarriesBfoIri(self, store, registry):
         seedUpperLite(registry)

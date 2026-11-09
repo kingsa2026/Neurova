@@ -73,7 +73,9 @@ export interface OntologyTerm {
   symmetric: boolean
   transitive: boolean
   aliases: string[]
-  external_iris: Record<string, string>
+  // G3 结构化列表：外部 IRI 映射（kind 闭集：skos_exactMatch/skos_closeMatch/
+  // skos_relatedMatch/equivalentClass，校验在注册表）
+  external_iris: Array<{ kind: string; iri: string }>
   deprecated: boolean
   replaced_by: string
   identity_keys: string[]
@@ -106,7 +108,7 @@ export interface OntologyTermWrite {
   symmetric?: boolean | null
   transitive?: boolean | null
   aliases?: string[] | null
-  external_iris?: Record<string, string> | null
+  external_iris?: Array<{ kind: string; iri: string }> | null
   deprecated?: boolean | null
   replaced_by?: string | null
   // B10 L2 / B11 L3 声明字段：与后端 TermWriteRequest 逐字段对齐（None＝PUT 保留现值）。

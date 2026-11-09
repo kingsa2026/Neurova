@@ -29,8 +29,10 @@ def _resolveIri(store: Any, iri: str, tenantId: str) -> Dict[str, Any]:
             break
         import json as _json
 
-        mapping = _json.loads(row["external_iris_json"] or "{}")
-        if str(iri) in {str(v) for v in mapping.values()}:
+        raw = _json.loads(row["external_iris_json"] or "[]")
+        # G3 结构化列表：[{"kind": ..., "iri": ...}]；未迁移 dict 行如实读空
+        mapped = {str(e.get("iri") or "") for e in raw} if isinstance(raw, list) else set()
+        if str(iri) in mapped:
             return {"kind": "term", "term_id": str(row["term_id"]),
                     "term": _termOf(store, str(row["term_id"]), tenantId)}
     raise LookupError(iri)

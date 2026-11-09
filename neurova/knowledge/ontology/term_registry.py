@@ -24,6 +24,14 @@ from typing import Any, Dict, List, Optional
 
 _TERM_KINDS = ("concept", "relation", "property")
 
+# 外部 IRI 映射类型闭集（G3 拍板 2026-11-10：external_iris_json 整体重构为
+# 结构化列表 [{"kind": <本闭集>, "iri": <IRI>}]，废弃旧 dict——旧键语义混用
+# （'bfo' 是前缀别名、'skos_exactMatch' 才是映射类型），结构化后由 kind 承载
+# 映射语义：SKOS 映射家族三档 ＋ 类级等价。配 v39 迁移（存量 dict 行统一转
+# skos_exactMatch），导出面相应从「外部名替换」改「附加断言」（owl.py/turtle.py）。
+EXTERNAL_IRI_KINDS = ("skos_exactMatch", "skos_closeMatch", "skos_relatedMatch",
+                      "equivalentClass")
+
 # 类型断言的固定谓词：`is_a` 是"这条主体是什么"的写法，与 `documented_as` 一样
 # 由结构层固定，不让每个写入方自造一个"属于类型"谓词。
 IS_A_PREDICATE = "is_a"
@@ -84,6 +92,22 @@ ALTER TABLE ontology_terms ADD COLUMN namespace TEXT NOT NULL DEFAULT '';
 ALTER TABLE ontology_terms ADD COLUMN iri_base TEXT NOT NULL DEFAULT '';
 """
 
+# v39：外部 IRI 映射结构化（GB/T 48000.3 评估档 G3 拍板 2026-11-10）——列不动
+# （仍 TEXT），内容从 dict {"键": IRI} 整体重构为列表 [{"kind": 闭集, "iri": IRI}]。
+# 存量 dict 行按 json_each 逐键转换：键值即外部 IRI；键名只承担「哪条映射」，
+# 语义由 kind 承载——非闭集键（历史遗留的前缀别名如 'bfo'）统一归
+# skos_exactMatch（导出已从替换改附加断言，多一条对齐断言是纯增益）。
+# WHERE LIKE '{%}' 保证幂等：列表行与空串不再命中；空 '{}' 转 '[]' 后同理。
+_SCHEMA_V39_EXTERNAL_IRI = """
+UPDATE ontology_terms
+SET external_iris_json = (
+  SELECT COALESCE(json_group_array(
+           json_object('kind', 'skos_exactMatch', 'iri', e.value)), '[]')
+  FROM json_each(ontology_terms.external_iris_json) e
+)
+WHERE external_iris_json LIKE '{%}';
+"""
+
 # v32：限定关系 schema（specs/2026-11-05 B11 L3）——qualifier 的键/类型/必填三判。
 # N 元关系继续用限定三元组，不新造 reification 表。
 _SCHEMA_V32_TERMS = """
@@ -140,8 +164,8 @@ _DECLARE_COLUMNS: tuple = (
 )
 
 _LIST_COLUMNS = ("domain_terms", "range_terms", "range_kinds", "disjoint_with",
-                 "required_props", "aliases", "identity_keys")
-_MAP_COLUMNS = ("external_iris", "labels", "alt_labels", "qualifier_schema")
+                 "required_props", "aliases", "identity_keys", "external_iris")
+_MAP_COLUMNS = ("labels", "alt_labels", "qualifier_schema")
 _FLAG_COLUMNS = ("symmetric", "transitive", "deprecated")
 _PASSTHROUGH_COLUMNS = ("cardinality", "parent_term_id")
 
@@ -183,7 +207,7 @@ class OntologyTermRegistry:
                  requiredProps: Optional[List[str]] = None,
                  inverseOf: Optional[str] = None, symmetric: bool = False,
                  transitive: bool = False, aliases: Optional[List[str]] = None,
-                 externalIris: Optional[Dict[str, str]] = None,
+                 externalIris: Optional[List[Dict[str, str]]] = None,
                  deprecated: bool = False, replacedBy: str = "",
                  identityKeys: Optional[List[str]] = None,
                  labels: Optional[Dict[str, str]] = None,
@@ -234,6 +258,19 @@ class OntologyTermRegistry:
 
         inverseOf = str(inverseOf or "").strip()
         aliasList = [str(a or "").strip() for a in (aliases or []) if str(a or "").strip()]
+        # 外部映射（G3 结构化列表）：kind 必须在闭集内、iri 必须非空——
+        # 写入处就拒，不留到导出/反查时才炸。
+        externalIriList: List[Dict[str, str]] = []
+        for entry in (externalIris or []):
+            entryKind = str((entry or {}).get("kind") or "").strip()
+            entryIri = str((entry or {}).get("iri") or "").strip()
+            if entryKind not in EXTERNAL_IRI_KINDS:
+                raise ValueError(
+                    "未知外部 IRI 映射类型 %r（有效值: %s）"
+                    % (entryKind, "/".join(EXTERNAL_IRI_KINDS)))
+            if not entryIri:
+                raise ValueError("外部 IRI 映射的 iri 不能为空（kind=%s）" % entryKind)
+            externalIriList.append({"kind": entryKind, "iri": entryIri})
         if inverseOf or symmetric or transitive:
             if kind != "relation":
                 raise ValueError(
@@ -306,8 +343,7 @@ class OntologyTermRegistry:
                  version, existing["created_at"] if existing else stamp, stamp,
                  inverseOf, 1 if symmetric else 0, 1 if transitive else 0,
                  json.dumps(aliasList, ensure_ascii=False),
-                 json.dumps({str(k): str(v) for k, v in (externalIris or {}).items()},
-                            ensure_ascii=False),
+                 json.dumps(externalIriList, ensure_ascii=False),
                  1 if deprecated else 0, str(replacedBy or ""),
                  json.dumps([str(k) for k in (identityKeys or [])], ensure_ascii=False),
                  json.dumps(labelMap, ensure_ascii=False),
@@ -503,7 +539,9 @@ class OntologyTermRegistry:
                     "required_props", "aliases_json"):
             d[key] = json.loads(d[key] or "[]")
         d["aliases"] = d.pop("aliases_json")
-        d["external_iris"] = json.loads(d.pop("external_iris_json") or "{}")
+        # G3 结构化列表：读侧只认列表形态（存量 dict 行由 v39 迁移统一转换）
+        rawExternal = json.loads(d.pop("external_iris_json") or "[]")
+        d["external_iris"] = rawExternal if isinstance(rawExternal, list) else []
         d["identity_keys"] = json.loads(d.pop("identity_keys_json") or "[]")
         if "labels_json" in d:
             d["labels"] = json.loads(d.pop("labels_json") or "{}")

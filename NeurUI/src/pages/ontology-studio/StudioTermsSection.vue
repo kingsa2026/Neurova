@@ -131,7 +131,7 @@
             </label>
             <label class="field">
               <span>{{ t('ontology.termExternalIris') }}</span>
-              <a-input v-model:value="form.external_iris_text" size="sm" placeholder='{"bfo": "http://…"}' />
+              <a-input v-model:value="form.external_iris_text" size="sm" placeholder='[{"kind": "skos_exactMatch", "iri": "http://…"}]' />
             </label>
             <label class="field">
               <span>{{ t('ontology.termReplacedBy') }}</span>
@@ -328,6 +328,27 @@ function parseJsonMap(text: string): Record<string, never> | null {
   return trimmed ? (JSON.parse(trimmed) as Record<string, never>) : null
 }
 
+// G3 结构化列表：外部 IRI 映射的客户端解析——格式（数组元素 kind/iri）客户端预检，
+// kind 闭集的权威校验在注册表（EXTERNAL_IRI_KINDS），这里只挡明显笔误。
+const EXTERNAL_IRI_KINDS = ['skos_exactMatch', 'skos_closeMatch', 'skos_relatedMatch', 'equivalentClass']
+
+function parseExternalIris(text: string): Array<{ kind: string; iri: string }> | null {
+  const trimmed = text.trim()
+  if (!trimmed) return null
+  const parsed = JSON.parse(trimmed) as Array<{ kind?: string; iri?: string }>
+  if (!Array.isArray(parsed)) {
+    throw new Error('external_iris 必须是 [{"kind": "...", "iri": "..."}] 数组')
+  }
+  for (const entry of parsed) {
+    const kind = String(entry.kind ?? '').trim()
+    const iri = String(entry.iri ?? '').trim()
+    if (!EXTERNAL_IRI_KINDS.includes(kind) || !iri) {
+      throw new Error('external_iris 条目非法：kind 须在闭集内且 iri 非空')
+    }
+  }
+  return parsed.map((e) => ({ kind: String(e.kind ?? '').trim(), iri: String(e.iri ?? '').trim() }))
+}
+
 function selectTerm(term: OntologyTerm) {
   selectedId.value = term.term_id
 }
@@ -363,7 +384,7 @@ function openEdit(term: OntologyTerm) {
   form.disjoint_text = (term.disjoint_with ?? []).join(', ')
   form.required_props_text = (term.required_props ?? []).join(', ')
   form.aliases_text = (term.aliases ?? []).join(', ')
-  form.external_iris_text = term.external_iris && Object.keys(term.external_iris).length
+  form.external_iris_text = term.external_iris && term.external_iris.length
     ? JSON.stringify(term.external_iris)
     : ''
   form.replaced_by = term.replaced_by ?? ''
@@ -396,7 +417,7 @@ function buildPayload(): OntologyTermWrite {
     disjoint_with: splitList(form.disjoint_text),
     required_props: splitList(form.required_props_text),
     aliases: splitList(form.aliases_text),
-    external_iris: parseJsonMap(form.external_iris_text),
+    external_iris: parseExternalIris(form.external_iris_text),
     deprecated: form.deprecated,
     replaced_by: form.replaced_by.trim() || null,
     // 空文本 → null（PUT 语义「保留现值」）；写 {} 才是显式清空声明

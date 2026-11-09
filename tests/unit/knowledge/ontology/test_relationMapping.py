@@ -278,9 +278,9 @@ class TestExternalIriExport:
 
         registry = OntologyTermRegistry(store)
         registry.register("related_to", "relation",
-                          externalIris={"skos_exactMatch": "http://example.org/vocab#relatedTo"})
+                          externalIris=[{"kind": "skos_exactMatch", "iri": "http://example.org/vocab#relatedTo"}])
         registry.register("part_of", "relation", parentTermId="related_to",
-                          externalIris={"skos_exactMatch": "http://example.org/vocab#partOf"})
+                          externalIris=[{"kind": "skos_exactMatch", "iri": "http://example.org/vocab#partOf"}])
         registry.register("depends_on", "relation", inverseOf="used_by")
         registry.register("used_by", "relation")
 

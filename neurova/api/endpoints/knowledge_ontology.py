@@ -350,7 +350,8 @@ class TermWriteRequest(BaseModel):
     symmetric: Optional[bool] = None
     transitive: Optional[bool] = None
     aliases: Optional[List[str]] = None
-    external_iris: Optional[Dict[str, str]] = None
+    # G3 结构化列表：[{"kind": EXTERNAL_IRI_KINDS 闭集, "iri": IRI}]（校验在注册表）
+    external_iris: Optional[List[Dict[str, str]]] = None
     deprecated: Optional[bool] = None
     replaced_by: Optional[str] = None
     # B10 L2 / B11 L3：SKOS 多语言标签、模块归属、身份判据、限定关系 schema。
@@ -849,7 +850,7 @@ class PipelineTermUpsert(BaseModel):
     symmetric: Optional[bool] = None
     transitive: Optional[bool] = None
     aliases: Optional[List[str]] = None
-    externalIris: Optional[Dict[str, str]] = None
+    externalIris: Optional[List[Dict[str, str]]] = None
     deprecated: Optional[bool] = None
     replacedBy: Optional[str] = None
     # B10 L2 / B11 L3 声明字段：批次里写不出来的字段等于没有写面——发布路径与单条写面对齐。

@@ -61,7 +61,7 @@ def _declared(registry: OntologyTermRegistry) -> None:
     """一条把声明栏全填满的术语：任何一栏被写回默认值都看得见。"""
     registry.register(
         "RiskOrder", "concept", label="风险订单",
-        aliases=["高危单"], externalIris={"skos_exactMatch": "http://example.org/RiskOrder"},
+        aliases=["高危单"], externalIris=[{"kind": "skos_exactMatch", "iri": "http://example.org/RiskOrder"}],
         identityKeys=["external_id"], labels={"zh": "风险订单", "en": "Risk Order"},
         altLabels={"zh": ["高危单"]}, module="domain",
         namespace="https://example.org/ns/", iriBase="https://example.org/base/",
@@ -92,7 +92,7 @@ class TestPipelinePartialUpsert:
         assert term["label"] == "风险订单改名"
         for column, expected in (
                 ("aliases", ["高危单"]),
-                ("external_iris", {"skos_exactMatch": "http://example.org/RiskOrder"}),
+                ("external_iris", [{"kind": "skos_exactMatch", "iri": "http://example.org/RiskOrder"}]),
                 ("identity_keys", ["external_id"]),
                 ("labels", {"zh": "风险订单", "en": "Risk Order"}),
                 ("alt_labels", {"zh": ["高危单"]}),
@@ -111,7 +111,7 @@ class TestPipelinePartialUpsert:
         assert term["identity_keys"] == []
         # 只清这三栏，其余声明仍在
         assert term["module"] == "domain"
-        assert term["external_iris"]["skos_exactMatch"]
+        assert term["external_iris"][0]["iri"] == "http://example.org/RiskOrder"
 
     def testBatchStillCreatesFreshTerm(self, seeded):
         result = _runPipeline(seeded, [{
@@ -126,7 +126,7 @@ class TestPipelinePartialUpsert:
         result = _runPipeline(seeded, [
             {"termId": "batches_with", "kind": "relation", "label": "批次于",
              "aliases": ["批次关联"], "transitive": True, "cardinality": 1,
-             "externalIris": {"skos_exactMatch": "http://example.org/bw"},
+             "externalIris": [{"kind": "skos_exactMatch", "iri": "http://example.org/bw"}],
              "deprecated": True, "replacedBy": "RiskOrder"},
         ])
         assert result["accepted"], result["summary"]
@@ -134,7 +134,7 @@ class TestPipelinePartialUpsert:
         assert term["transitive"] is True and term["cardinality"] == 1
         assert term["aliases"] == ["批次关联"]
         assert term["deprecated"] is True and term["replaced_by"] == "RiskOrder"
-        assert term["external_iris"]["skos_exactMatch"] == "http://example.org/bw"
+        assert term["external_iris"][0]["iri"] == "http://example.org/bw"
 
 
 class TestRestPutKeepsHiddenColumns:
