@@ -58,7 +58,7 @@ def test_turtleEmitsAssertionLinesAndKeepsKbgSubject(store):
     # 主体槽位（父类等）恒 kbg:，不被外部名替换
     assert "kbg:part_of" in text
     # 独立断言行（不进 kbg: 块，与 B8⑧ 标准槽位行同惯例）
-    assert "<kbg:spatial_thing> skos:exactMatch <http://example.org/vocab#Thing> ." in text
+    assert "kbg:spatial_thing skos:exactMatch <http://example.org/vocab#Thing> ." in text
     # 等价断言是 OWL 公理面职责，Turtle 互操作面只出 SKOS 同形——
     # part_of 的 equivalentClass 条目在 Turtle 面不产生任何断言行
     assert "owl:equivalentClass" not in text

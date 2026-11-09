@@ -24,6 +24,16 @@ def _resolveIri(store: Any, iri: str, tenantId: str) -> Dict[str, Any]:
         if term is not None:
             return {"kind": "term", "term_id": termId, "term": term}
         raise LookupError(iri)
+    # G4：多前缀解析——{ns}:{termId}（ns 命中注册表闭集）→ 术语行
+    if ":" in iri and not iri.startswith("http"):
+        ns, _, termId = iri.partition(":")
+        from neurova.knowledge.ontology.term_registry import NAMESPACE_REGISTRY
+
+        if ns in NAMESPACE_REGISTRY and termId:
+            term = _termOf(store, termId, tenantId)
+            if term is not None and str(term.get("namespace") or "") == ns:
+                return {"kind": "term", "term_id": termId, "term": term}
+        raise LookupError(iri)
     for row in _termRows(store, tenantId):
         if "external_iris_json" not in row.keys():
             break

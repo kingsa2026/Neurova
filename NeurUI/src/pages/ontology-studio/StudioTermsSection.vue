@@ -108,6 +108,14 @@
               </a-select>
             </label>
             <label class="field">
+              <span>{{ t('ontology.termNamespace') }}</span>
+              <a-select v-model:value="form.namespace" size="sm" allow-clear>
+                <a-select-option v-for="(base, prefix) in namespaceOptions" :key="prefix" :value="prefix">
+                  {{ prefix }}（{{ base }}）
+                </a-select-option>
+              </a-select>
+            </label>
+            <label class="field">
               <span>{{ t('ontology.termParent') }}</span>
               <a-select v-model:value="form.parent_term_id" size="sm" allow-clear>
                 <a-select-option v-for="concept in conceptTerms" :key="concept.term_id" :value="concept.term_id">
@@ -231,6 +239,7 @@ import GlassButton from '@/components/GlassButton.vue'
 import {
   createOntologyTerm,
   deleteOntologyTerm,
+  listOntologyNamespaces,
   listOntologyTerms,
   updateOntologyTerm,
 } from '@/api/modules/ontology'
@@ -256,6 +265,7 @@ interface TermForm {
   label: string
   definition: string
   datatype: string
+  namespace: string
   parent_term_id: string
   domain_text: string
   range_terms_text: string
@@ -291,6 +301,7 @@ function emptyForm(): TermForm {
     aliases_text: '',
     definition: '',
     datatype: '',
+    namespace: '',
     external_iris_text: '',
     replaced_by: '',
     module: '',
@@ -350,6 +361,14 @@ function parseJsonMap(text: string): Record<string, never> | null {
 // kind 闭集的权威校验在注册表（EXTERNAL_IRI_KINDS），这里只挡明显笔误。
 const EXTERNAL_IRI_KINDS = ['skos_exactMatch', 'skos_closeMatch', 'skos_relatedMatch', 'equivalentClass']
 
+// G4：可用命名空间（GET /ontology/namespaces，空项 = 缺省 kbg: 由下拉 allow-clear 表达）
+const namespaceOptions = ref<Record<string, string>>({})
+onMounted(() => {
+  void listOntologyNamespaces().then((res: any) => {
+    namespaceOptions.value = res?.data ?? res ?? {}
+  }).catch(() => { namespaceOptions.value = {} })
+})
+
 function parseExternalIris(text: string): Array<{ kind: string; iri: string }> | null {
   const trimmed = text.trim()
   if (!trimmed) return null
@@ -396,6 +415,7 @@ function openEdit(term: OntologyTerm) {
   form.label = term.label ?? ''
   form.definition = term.definition ?? ''
   form.datatype = term.datatype ?? ''
+  form.namespace = term.namespace ?? ''
   form.parent_term_id = term.parent_term_id ?? ''
   form.domain_text = (term.domain_terms ?? []).join(', ')
   form.range_terms_text = (term.range_terms ?? []).join(', ')
@@ -431,6 +451,7 @@ function buildPayload(): OntologyTermWrite {
     label: form.label.trim(),
     definition: form.definition.trim() || null,
     datatype: form.kind === 'property' ? form.datatype || null : null,
+    namespace: form.namespace || null,
     parent_term_id: form.parent_term_id || null,
     domain: splitList(form.domain_text),
     range_terms: splitList(form.range_terms_text),

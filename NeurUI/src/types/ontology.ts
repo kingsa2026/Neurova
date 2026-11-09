@@ -114,6 +114,7 @@ export interface OntologyTermWrite {
   aliases?: string[] | null
   definition?: string | null
   datatype?: string | null
+  namespace?: string | null
   external_iris?: Array<{ kind: string; iri: string }> | null
   deprecated?: boolean | null
   replaced_by?: string | null

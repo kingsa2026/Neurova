@@ -37,6 +37,14 @@ EXTERNAL_IRI_KINDS = ("skos_exactMatch", "skos_closeMatch", "skos_relatedMatch",
 # number→xsd:decimal、text→xsd:string、url→xsd:anyURI）。
 DATA_TYPES = ("boolean", "date", "number", "text", "url")
 
+# IRI 命名空间注册表（GB/T 48000.3 评估档 G4，第 9 章 a)）——术语 namespace 列
+# （v31 预留）的非空取值闭集：前缀 → IRI 基座。空 namespace = 缺省 kbg:（本体
+# 自身词汇）；领域扩展词汇按扩展原则用新命名空间（'so' = 标准本体领域包，
+# G5 的词汇落点）。导出面按术语 namespace 取前缀多行 @prefix，解析面反查。
+NAMESPACE_REGISTRY = {
+    "so": "https://neurova.local/ontology/standard/",
+}
+
 # 类型断言的固定谓词：`is_a` 是"这条主体是什么"的写法，与 `documented_as` 一样
 # 由结构层固定，不让每个写入方自造一个"属于类型"谓词。
 IS_A_PREDICATE = "is_a"
@@ -305,6 +313,16 @@ class OntologyTermRegistry:
         if kind == "property" and (symmetric or transitive or inverseOf):
             raise ValueError(
                 "数据属性不应具传递/对称/互逆性（7.2.2 d)）：%s 是 property" % termId)
+        # G4：命名空间闭集——非空必须命中注册表；iri_base 空时按注册表自动补
+        #（显式非空尊重写入方——它知道自己的基座；防错配留给导出侧按需加严）。
+        namespaceValue = str(namespace or "").strip()
+        if namespaceValue:
+            if namespaceValue not in NAMESPACE_REGISTRY:
+                raise ValueError(
+                    "未注册命名空间 %r（有效值: %s）"
+                    % (namespaceValue, "/".join(sorted(NAMESPACE_REGISTRY))))
+            if not str(iriBase or "").strip():
+                iriBase = NAMESPACE_REGISTRY[namespaceValue]
         if inverseOf or symmetric or transitive:
             if kind != "relation":
                 raise ValueError(
@@ -383,7 +401,7 @@ class OntologyTermRegistry:
                  json.dumps(labelMap, ensure_ascii=False),
                  json.dumps({str(k): [str(x) for x in v] for k, v in altMap.items()},
                             ensure_ascii=False),
-                 moduleValue, str(namespace or ""), str(iriBase or ""),
+                 moduleValue, namespaceValue, str(iriBase or ""),
                  json.dumps(qualifierSchema or {}, ensure_ascii=False),
                  str(definition or ""), datatypeValue),
             )

@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ..term_registry import versionedIri
+from ..term_registry import NAMESPACE_REGISTRY, versionedIri
 
 
 def _literal(text: str) -> str:
@@ -54,14 +54,20 @@ def exportOwlAxioms(store: Any, tenantId: str = "default",
         "@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .",
         "@prefix kbg: <https://neurova.local/knowledge/> .",
     ]
+    # G4：术语 namespace 非空的多前缀声明（第 9 章 a)——前缀/基座来自注册表闭集
+    usedNamespaces = sorted({str(r["namespace"]) for r in termRows
+                             if "namespace" in r.keys() and str(r["namespace"] or "")})
+    for ns in usedNamespaces:
+        lines.append("@prefix %s: <%s> ." % (ns, NAMESPACE_REGISTRY[ns]))
     if version:
         lines.append("kbg: ontology:versionInfo \"%s\" ; owl:versionIRI <%s> ."
                      % (version, versionedIri("ontology", version)))
     termsById = {str(r["term_id"]): r for r in termRows}
 
-    # G3：本体 IRI 恒为 kbg:——外部名只出现在附加断言的宾语位。
-    def _iri(termId: str) -> str:
-        return "kbg:%s" % termId
+    # G3：本体 IRI 恒为本体侧前缀（kbg: 或术语自身 namespace）——外部名只在
+    # 附加断言的宾语位。G4：namespace 非空的术语用自身前缀。
+    def _iri(termId: str, namespace: str = "") -> str:
+        return ("%s:%s" % (namespace, termId)) if namespace else ("kbg:%s" % termId)
 
     def _mappings(row: Any) -> list:
         if "external_iris_json" not in row.keys():
@@ -72,39 +78,40 @@ def exportOwlAxioms(store: Any, tenantId: str = "default",
     for row in termRows:
         termId = str(row["term_id"])
         kind = row["kind"]
+        ns = str(row["namespace"] or "") if "namespace" in row.keys() else ""
         if kind == "concept":
-            lines.append("%s rdf:type owl:Class ." % _iri(termId))
+            lines.append("%s rdf:type owl:Class ." % _iri(termId, ns))
         elif kind == "property":
             # G2/G6：数据属性声明——此前声明循环缺 property 分支，property 术语
             # 在 export.owl 不可见；datatype 非空出 rdfs:range xsd:*。
-            lines.append("%s rdf:type owl:DatatypeProperty ." % _iri(termId))
+            lines.append("%s rdf:type owl:DatatypeProperty ." % _iri(termId, ns))
             xsd = {"boolean": "xsd:boolean", "date": "xsd:date",
                    "number": "xsd:decimal", "text": "xsd:string",
                    "url": "xsd:anyURI"}.get(str(row["datatype"] or ""))
             if xsd:
-                lines.append("%s rdfs:range %s ." % (_iri(termId), xsd))
+                lines.append("%s rdfs:range %s ." % (_iri(termId, ns), xsd))
         elif kind == "relation":
-            lines.append("%s rdf:type owl:ObjectProperty ." % _iri(termId))
+            lines.append("%s rdf:type owl:ObjectProperty ." % _iri(termId, ns))
             if row["cardinality"] is not None and int(row["cardinality"]) == 1:
-                lines.append("%s rdf:type owl:FunctionalProperty ." % _iri(termId))
+                lines.append("%s rdf:type owl:FunctionalProperty ." % _iri(termId, ns))
             symmetric = bool(row["symmetric"]) if "symmetric" in row.keys() else False
             if symmetric:
-                lines.append("%s rdf:type owl:SymmetricProperty ." % _iri(termId))
+                lines.append("%s rdf:type owl:SymmetricProperty ." % _iri(termId, ns))
             transitive = bool(row["transitive"]) if "transitive" in row.keys() else False
             if transitive:
-                lines.append("%s rdf:type owl:TransitiveProperty ." % _iri(termId))
+                lines.append("%s rdf:type owl:TransitiveProperty ." % _iri(termId, ns))
         parent = str(row["parent_term_id"] or "")
         if parent and parent in termsById:
             slot = ("rdfs:subClassOf" if kind == "concept"
                     else "rdfs:subPropertyOf")
-            lines.append("%s %s %s ." % (_iri(termId), slot, _iri(parent)))
+            lines.append("%s %s %s ." % (_iri(termId, ns), slot, _iri(parent)))
         inverse = str(row["inverse_of"]) if "inverse_of" in row.keys() else ""
         if inverse and inverse in termsById:
-            lines.append("%s owl:inverseOf %s ." % (_iri(termId), _iri(inverse)))
+            lines.append("%s owl:inverseOf %s ." % (_iri(termId, ns), _iri(inverse)))
         # G1：定义描述项——非空才出 rdfs:comment（空值零漂移，golden 稳定）
         definition = str(row["definition"] or "") if "definition" in row.keys() else ""
         if definition.strip():
-            lines.append("%s rdfs:comment %s@zh ." % (_iri(termId),
+            lines.append("%s rdfs:comment %s@zh ." % (_iri(termId, ns),
                                                       _literal(definition)))
         # G3 附加断言：等价/对齐独立成行，谓词按映射 kind 与本体侧 kind 选形
         for entry in _mappings(row):
@@ -113,6 +120,6 @@ def exportOwlAxioms(store: Any, tenantId: str = "default",
             if not predicate or not iri:
                 continue
             slot = predicate[0] if kind == "concept" else predicate[1]
-            lines.append("%s %s <%s> ." % (_iri(termId), slot, iri))
+            lines.append("%s %s <%s> ." % (_iri(termId, ns), slot, iri))
 
     return "\n".join(lines) + "\n"
