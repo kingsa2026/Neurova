@@ -19,6 +19,8 @@ export interface DeptTreeNode {
   /** a-tree-select 的取值；a-tree 忽略该字段无副作用 */
   value: string
   key: string
+  /** 成员数（members_count 缺省时为 undefined）；树视图插槽据此渲染徽章 */
+  membersCount?: number
   children?: DeptTreeNode[]
 }
 
@@ -55,9 +57,10 @@ export function buildDeptTreeData(
       (g) => (g.parent_group_id && known.has(g.parent_group_id) ? g.parent_group_id : null) === parentId,
     )
     return children.map((g) => ({
-      title: g.members_count != null ? `${g.name} (${g.members_count})` : g.name,
+      title: g.name,
       value: g.group_id,
       key: g.group_id,
+      membersCount: g.members_count,
       children: build(g.group_id),
     }))
   }
@@ -74,7 +77,7 @@ export function buildDeptTreeData(
   walk(tree)
   for (const g of deptGroups) {
     if (!reachable.has(g.group_id)) {
-      tree.push({ title: g.members_count != null ? `${g.name} (${g.members_count})` : g.name, value: g.group_id, key: g.group_id })
+      tree.push({ title: g.name, value: g.group_id, key: g.group_id, membersCount: g.members_count })
     }
   }
   return tree

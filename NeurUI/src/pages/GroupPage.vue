@@ -19,12 +19,23 @@
         <span class="tree-title">{{ t('system.groups') }}</span>
         <GlassButton v-if="treeSelected" variant="ghost" size="sm" @click="clearTreeFilter">{{ t('common.all') }}</GlassButton>
       </div>
-      <a-tree
-        :tree-data="groupTreeData"
-        :selected-keys="treeSelected ? [treeSelected] : []"
-        default-expand-all
-        @select="onTreeSelect"
-      />
+      <div class="tree-body">
+        <a-tree
+          :tree-data="groupTreeData"
+          :selected-keys="treeSelected ? [treeSelected] : []"
+          default-expand-all
+          block-node
+          @select="onTreeSelect"
+        >
+          <template #title="{ data }">
+            <span class="dept-node">
+              <ApartmentOutlined class="dept-node-icon" />
+              <span class="dept-node-name">{{ data.title }}</span>
+              <span v-if="data.membersCount != null" class="dept-node-badge">{{ data.membersCount }}</span>
+            </span>
+          </template>
+        </a-tree>
+      </div>
     </GlassCard>
     <!-- Group list -->
     <a-spin :spinning="loading">
@@ -179,6 +190,7 @@ import { buildDeptTreeData } from '@/utils/deptTree'
 import { listKnowledgeCategories, type KnowledgeCategory } from '@/api/modules/knowledge'
 import { listUsers } from '@/api/modules/enhanced-users'
 import { MODULE_SECTIONS, ALL_MODULE_KEYS } from '@/config/modules'
+import { ApartmentOutlined } from '@ant-design/icons-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message, Modal } from 'ant-design-vue'
@@ -490,7 +502,72 @@ onMounted(() => {
 .module-section-title :deep(.ant-checkbox + span) { font-weight: 600; color: var(--nr-text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
 .module-section-items { display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .modules-toolbar { display: flex; gap: 8px; margin-top: 8px; }
-/* 部门层级树 */
+/* 部门层级树（玻璃拟态贴合：圆角行、悬停/选中主色化、缩进引导线） */
 .tree-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .tree-title { font-weight: 600; color: var(--nr-text-primary); font-size: 13px; }
+.tree-body :deep(.ant-tree) { background: transparent; }
+.tree-body :deep(.ant-tree-treenode) {
+  padding: 2px 4px;
+  border-radius: var(--nr-radius-sm);
+  transition: background-color var(--nr-transition-fast);
+}
+/* 悬停整行亮起节点背景（含缩进区），圆角与卡片语言一致 */
+.tree-body :deep(.ant-tree-treenode:hover) { background: var(--nr-glass-bg-hover); }
+/* 缩进引导线：虚线垂直线贯穿每层缩进单元 */
+.tree-body :deep(.ant-tree-indent-unit) { position: relative; }
+.tree-body :deep(.ant-tree-indent-unit::before) {
+  content: '';
+  position: absolute;
+  inset-block: -4px;
+  inset-inline-end: 8px;
+  border-inline-end: 1px dashed var(--nr-border);
+}
+/* 切换箭头：弱化静态色，悬停提亮 */
+.tree-body :deep(.ant-tree-switcher) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--nr-text-tertiary);
+  transition: color var(--nr-transition-fast);
+}
+.tree-body :deep(.ant-tree-switcher:hover) { color: var(--nr-text-secondary); }
+.tree-body :deep(.ant-tree-node-content-wrapper) {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 8px;
+  border-radius: var(--nr-radius-sm);
+  transition: background-color var(--nr-transition-fast), color var(--nr-transition-fast), box-shadow var(--nr-transition-fast);
+}
+.tree-body :deep(.ant-tree-node-content-wrapper.ant-tree-node-selected) {
+  background: var(--nr-primary-soft);
+  color: var(--nr-primary);
+  box-shadow: inset 0 0 0 1px var(--nr-primary-soft-border);
+}
+/* 节点内容：图标 + 名称 + 成员数徽章 */
+.dept-node { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
+.dept-node-icon { flex: none; font-size: 12px; color: var(--nr-text-tertiary); transition: color var(--nr-transition-fast); }
+.dept-node-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--nr-text-primary); transition: color var(--nr-transition-fast); }
+.dept-node-badge {
+  flex: none;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  background: var(--nr-glass-bg-active);
+  color: var(--nr-text-tertiary);
+  transition: background-color var(--nr-transition-fast), color var(--nr-transition-fast), box-shadow var(--nr-transition-fast);
+}
+/* 选中态：图标/名称转主色，徽章随选中面浮一层主色描边 */
+.tree-body :deep(.ant-tree-node-selected) .dept-node-icon { color: var(--nr-primary); }
+.tree-body :deep(.ant-tree-node-selected) .dept-node-name { color: var(--nr-primary); font-weight: 600; }
+.tree-body :deep(.ant-tree-node-selected) .dept-node-badge {
+  background: var(--nr-primary-soft);
+  color: var(--nr-primary);
+  box-shadow: inset 0 0 0 1px var(--nr-primary-soft-border);
+}
+/* 选中行悬停不再叠加玻璃底，保持选中面纯净 */
+.tree-body :deep(.ant-tree-treenode:has(.ant-tree-node-selected):hover) { background: transparent; }
 </style>
