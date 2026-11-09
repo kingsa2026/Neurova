@@ -10,7 +10,7 @@
              时有 truncated 提示兜底；后端收录满 limit 即提前终止 BFS。 -->
         <a-select-option v-for="h in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]" :key="h" :value="h">{{ h }}</a-select-option>
       </a-select>
-      <GlassButton size="sm" :loading="loading" @click="refetch">
+      <GlassButton size="sm" :loading="loading" @click="refetch()">
         {{ t('common.refresh') }}
       </GlassButton>
       <GlassButton
@@ -227,13 +227,16 @@ watch(visibleTypes, () => {
   applyRender()
 })
 
-const refetch = async () => {
+const refetch = async (opts?: { forceFull?: boolean }) => {
   if (!containerRef.value) return
   loading.value = true
   try {
-    const params: Record<string, unknown> = { hops: hops.value, limit: 500 }
-    if (currentNodeId.value || props.focusId || focusInput.value.trim()) {
-      params.focus = currentNodeId.value || props.focusId || focusInput.value.trim()
+    // limit 不在客户端定值：缺省跟全局设置 advanced.graph_studio_limit（高级设置卡），
+    // 服务端单点解析（显式参数 > 设置 > 200）；这里带 limit 会造出第二份口径。
+    const params: Record<string, unknown> = { hops: hops.value }
+    if (!opts?.forceFull) {
+      const focus = currentNodeId.value || props.focusId || focusInput.value.trim()
+      if (focus) params.focus = focus
     }
     const res: any = await request.get(
       `/knowledge-graph/${props.agentId}/subgraph`, { params })
@@ -297,8 +300,19 @@ const _createGraph = async () => {
           emit('select', currentNodeId.value, String(node?.name ?? ''))
           if (graph) graph.nodeThreeObject(graph.nodeThreeObject())
         })
-        // 点空白处回全图：聚焦视图的退出路径不能只靠找工具条按钮。
-        .onBackgroundClick(() => resetToFull())
+        // 点空白两态：聚焦视图里退回全图；全图态至多清节点高亮。
+        // 此前无条件 resetToFull——全图态点空白＝刷新图谱（实测 bug）。
+        .onBackgroundClick(() => {
+          if (props.focusId || focusInput.value.trim()) {
+            resetToFull()
+            return
+          }
+          if (currentNodeId.value) {
+            currentNodeId.value = ''
+            emit('clear')
+            if (graph) graph.nodeThreeObject(graph.nodeThreeObject())
+          }
+        })
         // 力导冷却后框全图：布局 settled 的包围盒才真实，此时 fit 才能把全部节点入视。
         .onEngineStop(() => {
           if (fitPending) {
@@ -359,7 +373,9 @@ const resetToFull = () => {
   currentNodeId.value = ''
   focusInput.value = ''
   emit('clear')
-  void refetch()
+  // forceFull：emit('clear') 后父级 prop 同步晚于本次请求，若读 props.focusId
+  // 会把原聚焦视图原样拉回来——「回到全图」按钮与点空白退出同根因。
+  void refetch({ forceFull: true })
 }
 
 const handleResize = () => {
