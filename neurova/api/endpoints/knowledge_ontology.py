@@ -352,6 +352,8 @@ class TermWriteRequest(BaseModel):
     aliases: Optional[List[str]] = None
     # G3 结构化列表：[{"kind": EXTERNAL_IRI_KINDS 闭集, "iri": IRI}]（校验在注册表）
     external_iris: Optional[List[Dict[str, str]]] = None
+    # G1：定义描述项（表 1/表 2 第 4 项）；None = PUT 保留现值
+    definition: Optional[str] = None
     deprecated: Optional[bool] = None
     replaced_by: Optional[str] = None
     # B10 L2 / B11 L3：SKOS 多语言标签、模块归属、身份判据、限定关系 schema。
@@ -432,7 +434,8 @@ def _registerTerm(registry: Any, termId: str, body: TermWriteRequest,
         requiredProps=body.required_props, version=body.version or "v1",
         inverseOf=body.inverse_of, symmetric=bool(body.symmetric),
         transitive=bool(body.transitive), aliases=body.aliases,
-        externalIris=body.external_iris, deprecated=bool(body.deprecated),
+        externalIris=body.external_iris, definition=body.definition or "",
+        deprecated=bool(body.deprecated),
         replacedBy=body.replaced_by or "",
         labels=body.labels, altLabels=body.alt_labels,
         module=body.module or "", identityKeys=body.identity_keys,
@@ -453,7 +456,8 @@ def _putDeclaration(body: TermWriteRequest) -> Dict[str, Any]:
         "disjointWith": body.disjoint_with, "requiredProps": body.required_props,
         "inverseOf": body.inverse_of, "symmetric": body.symmetric,
         "transitive": body.transitive, "aliases": body.aliases,
-        "externalIris": body.external_iris, "deprecated": body.deprecated,
+        "externalIris": body.external_iris, "definition": body.definition,
+        "deprecated": body.deprecated,
         "replacedBy": body.replaced_by, "identityKeys": body.identity_keys,
         "labels": body.labels, "altLabels": body.alt_labels,
         "module": body.module, "qualifierSchema": body.qualifier_schema,

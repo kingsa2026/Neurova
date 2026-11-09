@@ -108,6 +108,13 @@ SET external_iris_json = (
 WHERE external_iris_json LIKE '{%}';
 """
 
+# v40：术语 Definition（定义）描述项（GB/T 48000.3 评估档 G1，表 1/表 2 第 4 项）——
+# 表 1/表 2 的必要描述项此前缺失；空 = 「这一维没依据」（quality.py「缺定义」
+# 判据的消费源），导出面非空才出断言，golden 零漂移。
+_SCHEMA_V40_TERMS = """
+ALTER TABLE ontology_terms ADD COLUMN definition TEXT NOT NULL DEFAULT '';
+"""
+
 # v32：限定关系 schema（specs/2026-11-05 B11 L3）——qualifier 的键/类型/必填三判。
 # N 元关系继续用限定三元组，不新造 reification 表。
 _SCHEMA_V32_TERMS = """
@@ -151,6 +158,7 @@ _DECLARE_COLUMNS: tuple = (
     ("transitive", "transitive"),
     ("aliases", "aliases"),
     ("externalIris", "external_iris"),
+    ("definition", "definition"),
     ("deprecated", "deprecated"),
     ("replacedBy", "replaced_by"),
     ("identityKeys", "identity_keys"),
@@ -208,6 +216,7 @@ class OntologyTermRegistry:
                  inverseOf: Optional[str] = None, symmetric: bool = False,
                  transitive: bool = False, aliases: Optional[List[str]] = None,
                  externalIris: Optional[List[Dict[str, str]]] = None,
+                 definition: str = "",
                  deprecated: bool = False, replacedBy: str = "",
                  identityKeys: Optional[List[str]] = None,
                  labels: Optional[Dict[str, str]] = None,
@@ -331,8 +340,8 @@ class OntologyTermRegistry:
                 " inverse_of, symmetric, transitive, aliases_json, external_iris_json,"
                 " deprecated, replaced_by, identity_keys_json,"
                 " labels_json, alt_labels_json, module, namespace, iri_base,"
-                " qualifier_schema_json)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " qualifier_schema_json, definition)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (tenant, termId, kind, label or termId, parentTermId,
                  json.dumps(list(domain or []), ensure_ascii=False),
                  json.dumps(list(rangeTerms or []), ensure_ascii=False),
@@ -350,7 +359,8 @@ class OntologyTermRegistry:
                  json.dumps({str(k): [str(x) for x in v] for k, v in altMap.items()},
                             ensure_ascii=False),
                  moduleValue, str(namespace or ""), str(iriBase or ""),
-                 json.dumps(qualifierSchema or {}, ensure_ascii=False)),
+                 json.dumps(qualifierSchema or {}, ensure_ascii=False),
+                 str(definition or "")),
             )
         # inverse_of 双向补齐：A inverse_of B ⇒ B inverse_of A（登记处收口，
         # 单边态在存储层不存在；目标行其他字段不动，只补这一列）。
@@ -551,6 +561,8 @@ class OntologyTermRegistry:
             d["iri_base"] = str(d.pop("iri_base") or "")
         if "qualifier_schema_json" in d:
             d["qualifier_schema"] = json.loads(d.pop("qualifier_schema_json") or "{}")
+        if "definition" in d:
+            d["definition"] = str(d.get("definition") or "")
         for flag in ("symmetric", "transitive", "deprecated"):
             d[flag] = bool(d.get(flag))
         return d
