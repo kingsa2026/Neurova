@@ -153,8 +153,13 @@ async def ontology_query(
     needle = str(query or "").strip().lower()
 
     if kind == "action":
-        # A4 批次扩展点：动作清单（ontology_actions 表）。
-        return {"tenant_id": tenant, "matches": [], "count": 0}
+        from neurova.knowledge.ontology.action_registry import getActionRegistry
+
+        rows = getActionRegistry(_store()).list(tenantId=tenant)
+        hits = [r for r in rows
+                if not needle or needle in str(r["action_id"]).lower()
+                or needle in str(r["label"]).lower()]
+        return {"tenant_id": tenant, "matches": hits, "count": len(hits)}
 
     matches: List[Dict[str, Any]] = []
     for term in registry.terms(kind=kind or None, tenantId=tenant):
@@ -251,6 +256,77 @@ async def fact_submit(
         # A5 采纳建议读数：采纳是 admin 治理动作（record_fact_adoption），
         # Agent 只获得表达通道——回执说明引用方式，不放宽权限。
         "adoption_hint": f"fact_id={factId} 可被管理员经 /access/use/{factId} 采纳" if factId else "",
+    }
+
+
+# ── A3：ontology_derive（推理查询）────────────────────────────────────────────
+
+@_SERVER.tool()
+async def ontology_derive(
+    ctx: Context,
+    subject_label: str,
+    agent_id: str = "",
+) -> dict:
+    """对本体的派生结论做一次求值查询：规则引擎求值到不动点（enforce 级规则
+    结论经咽喉入库后直接可用；observe 态结论标注「观察态」防误导），返回该主体的
+    活动事实与推导溯源（结论由哪条规则/哪些前提推出）。"""
+    from neurova.knowledge.foundation.knowledge_facts import normalizeLabel
+    from neurova.knowledge.foundation.admission import productionAdmissionGate
+    from neurova.knowledge.ontology.derivation_ledger import DerivationLedger
+    from neurova.knowledge.ontology.rule_engine import ForwardChainingEngine
+
+    user = _currentUserFromContext(ctx)
+    agentId = _agentIdOf(user, agent_id)
+    tenant = _tenantOf(user)
+    store = _store()
+    # 推理未接咽喉写入口是硬拒（RuleError）——与 REST 面同款装配
+    engine = ForwardChainingEngine(store, gateFactory=lambda st: productionAdmissionGate(st))
+    fire = engine.fireAll(agentId=agentId, tenantId=tenant)
+
+    # 主体定位：身份归一（大小写/空白不敏感）→ subject_key
+    normalized = normalizeLabel(subject_label)
+    subjectKey = ""
+    row = store._conn.execute(
+        "SELECT subject_key FROM knowledge_subjects"
+        " WHERE agent_id = ? AND tenant_id = ? AND normalized_label = ?",
+        (agentId, tenant, normalized)).fetchone()
+    if row is not None:
+        subjectKey = str(row["subject_key"])
+
+    ledger = DerivationLedger(store)
+    derivedIds = set(ledger.derivedFactIds())
+    ruleById = {str(r["rule_id"]): r for r in engine.rules(tenantId=tenant)}
+
+    conclusions: List[Dict[str, Any]] = []
+    if subjectKey:
+        factRows = store._conn.execute(
+            "SELECT fact_id, subject_key, predicate_term_id, object_term"
+            " FROM knowledge_facts WHERE tenant_id = ? AND agent_id = ?"
+            " AND subject_key = ? AND status = 'active' AND record_kind = 'triple'"
+            " ORDER BY predicate_term_id",
+            (tenant, agentId, subjectKey)).fetchall()
+        for factRow in factRows:
+            factId = str(factRow["fact_id"])
+            premises = ledger.premisesOf(factId)
+            entry: Dict[str, Any] = {
+                "fact_id": factId,
+                "predicate": str(factRow["predicate_term_id"]),
+                "object": str(factRow["object_term"]),
+                "derived": factId in derivedIds,
+                "premises": premises,
+            }
+            if premises:
+                rule = ruleById.get(str(premises[0]["rule_id"]))
+                entry["materialization"] = str((rule or {}).get("materialization") or "observe")
+                entry["rule_id"] = str(premises[0]["rule_id"])
+            conclusions.append(entry)
+
+    return {
+        "subject_label": subject_label,
+        "subject_key": subjectKey,
+        "fire_rounds": fire.get("rounds", []),
+        "conclusions": conclusions,
+        "count": len(conclusions),
     }
 
 

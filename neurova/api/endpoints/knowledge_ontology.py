@@ -279,6 +279,62 @@ async def import_domain_pack(
             "request_id": getattr(request.state, "request_id", "")}
 
 
+@router.get("/ontology/actions")
+async def list_ontology_actions(
+    risk_tier: Optional[str] = Query(default=None),
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """A4：动作清单（登录可读）——Agent/前端查动作声明与风险档。"""
+    from neurova.knowledge.ontology.action_registry import getActionRegistry
+
+    store, _registry, _engine = _ontologyParts()
+    tenant = _tenantOf(current_user)
+    rows = getActionRegistry(store).list(tenantId=tenant, riskTier=risk_tier)
+    return {"code": 0, "data": rows, "request_id": ""}
+
+
+@router.post("/ontology/actions")
+async def create_ontology_action(
+    request: Request,
+    body: Dict[str, Any],
+    admin: Dict = Depends(require_admin()),
+):
+    """A4：登记动作（仅管理员）——bound_tool 悬空拒、risk_tier 闭集。"""
+    from neurova.builtin_tools import get_registered_tool_names
+
+    from neurova.knowledge.ontology.action_registry import getActionRegistry
+
+    store, _registry, _engine = _ontologyParts()
+    tenant = _tenantOf(admin)
+    try:
+        item = getActionRegistry(store).upsert(
+            str(body.get("action_id") or ""), label=str(body.get("label") or ""),
+            definition=str(body.get("definition") or ""),
+            paramSchema=body.get("param_schema") or {},
+            boundTool=str(body.get("bound_tool") or ""),
+            riskTier=str(body.get("risk_tier") or "low"),
+            enabled=bool(body.get("enabled", True)), tenantId=tenant,
+            registeredTools=list(get_registered_tool_names()))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"code": 0, "data": item, "request_id": ""}
+
+
+@router.delete("/ontology/actions/{action_id}")
+async def delete_ontology_action(
+    action_id: str = Path(...),
+    admin: Dict = Depends(require_admin()),
+):
+    """A4：删除动作（仅管理员）。"""
+    from neurova.knowledge.ontology.action_registry import getActionRegistry
+
+    store, _registry, _engine = _ontologyParts()
+    tenant = _tenantOf(admin)
+    if not getActionRegistry(store).drop(action_id, tenantId=tenant):
+        raise HTTPException(status_code=404, detail=f"动作未登记: {action_id}")
+    return {"code": 0, "data": {"action_id": action_id}, "request_id": ""}
+
+
 @router.get("/ontology/namespaces")
 async def list_ontology_namespaces(
     current_user: Dict = Depends(get_current_user_or_service),
