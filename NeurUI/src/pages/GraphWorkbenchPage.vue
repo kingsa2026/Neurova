@@ -418,16 +418,23 @@ const computeInitialViewport = () => {
   const cy = (layoutBounds.minY + layoutBounds.maxY) / 2
   initialViewport.value = { x: vw / 2 - cx * zoom, y: vh / 2 - cy * zoom, zoom }
 }
-const flowEdges = computed(() =>
-  (displayData.value?.edges ?? []).map((e, index) => ({
-    id: `e-${index}`,
-    source: e.source,
-    target: e.target,
-    label: e.relation,
-    // 流光动效：自定义 flow 边（双层 path——底层实线 + 上层循环流光），
-    // 默认边只有一条 path，animated 虚线会整体覆盖底色做不出双层。
-    type: 'flow',
-  })))
+const flowEdges = computed(() => {
+  // 渲染集收口为节点集的导出子图：vue-flow 挂载时丢弃端点未注册的边，且节点
+  // 后续加入不回扫（全图态勾选/刷新后关系线缺、切 3D 回 2D 才全的真身）。
+  // 数据契约自洽后任何挂载时序下都不存在会被丢的边。
+  const nodeIds = new Set(filteredNodes.value.map((n) => n.id))
+  return (displayData.value?.edges ?? [])
+    .filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
+    .map((e, index) => ({
+      id: `e-${index}`,
+      source: e.source,
+      target: e.target,
+      label: e.relation,
+      // 流光动效：自定义 flow 边（双层 path——底层实线 + 上层循环流光），
+      // 默认边只有一条 path，animated 虚线会整体覆盖底色做不出双层。
+      type: 'flow',
+    }))
+})
 
 const relationTerms = computed(() =>
   (studio.value?.schema?.terms ?? []).filter((term) => term.kind === 'relation'))
