@@ -241,6 +241,23 @@ def entry_or_403(repo, knowledge_id: str, current_user: Dict[str, Any]):
     return agent_id, item
 
 
+def entry_for_update(repo, knowledge_id: str, current_user: Dict[str, Any], fields: Dict[str, Any]):
+    """按本次要写的字段选门（用户裁定 2026-11-09）：只写分类 → 私有条目
+    （含被共享）可见即可写、公共条目仍归属主/管理员；其余字段一律属主/管理员。
+    可见性与归属谓词都取自仓库单源（can_view/can_categorize/can_modify），
+    本函数只决定用哪一扇门，不另立权限口径。"""
+    from neurova.knowledge.repository import VISIBILITY_PUBLIC
+
+    agent_id, item = entry_or_404(repo, knowledge_id, current_user)
+    if set(fields) == {"category"}:
+        if not repo.can_categorize(current_user, item):
+            raise HTTPException(status_code=403, detail="公共条目分类仅属主或管理员可修改")
+        return agent_id, item
+    if not repo.can_modify(current_user, item):
+        raise HTTPException(status_code=403, detail="仅条目属主或管理员可执行此操作")
+    return agent_id, item
+
+
 def guard(exc: Exception) -> HTTPException:
     """仓库层领域异常 → HTTP 语义。（原 _guard）"""
     if isinstance(exc, PermissionError):
