@@ -184,11 +184,13 @@ def serializeAll(store: Any, tenantId: str = "default",
 
     lines: List[str] = [PREFIX_LINE % NAMESPACE]
 
-    # 标准槽位前缀（B8 ⑧）：rdf/rdfs/owl 固定进文档头——导出层有标准形状的
-    # 语义行（subClassOf/subPropertyOf/inverseOf/rdf:type）从这里取词表。
+    # 标准槽位前缀（B8 ⑧）：rdf/rdfs/owl/skos 固定进文档头——导出层有标准形状的
+    # 语义行（subClassOf/subPropertyOf/inverseOf/rdf:type）从这里取词表；
+    # skos 供外部映射断言行（G3，替换改附加）取词表。
     lines.append("@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .")
     lines.append("@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .")
     lines.append("@prefix owl: <http://www.w3.org/2002/07/owl#> .")
+    lines.append("@prefix skos: <http://www.w3.org/2004/02/skos/core#> .")
 
     lines.append(_SECTION_TERMS % tenant)
     for row in termRows:
@@ -214,20 +216,24 @@ def serializeAll(store: Any, tenantId: str = "default",
         lines.append(_subjectBlock(row["term_id"], rows))
 
     # B8 ⑧：标准槽位语义行——概念父类 rdfs:subClassOf、关系父属性
-    # rdfs:subPropertyOf、逆关系 owl:inverseOf。术语 IRI 有外部映射
-    # （external_iris_json 的 skos_exactMatch 槽）用外部 IRI，否则 kbg:。
+    # rdfs:subPropertyOf、逆关系 owl:inverseOf。G3（拍板 2026-11-10）：
+    # 术语 IRI 恒为 kbg:——外部映射不再替换主体 IRI（丢本体自身标识），
+    # 等价/对齐改为独立断言行（skos:exactMatch 等，宾语位才出现外部 IRI）。
     # 全 IRI 独立三元组行，逐字节确定，不进 kbg: 块（块实现是 B5 的既有判据面）。
-    externalByTerm: Dict[str, str] = {}
-    for row in termRows:
-        if "external_iris_json" in row.keys():
-            mapping = json.loads(row["external_iris_json"] or "{}")
-            match = str(mapping.get("skos_exactMatch") or "")
-            if match:
-                externalByTerm[str(row["term_id"])] = match
-
     def _termIri(termId: str) -> str:
-        external = externalByTerm.get(str(termId) or "")
-        return "<%s>" % external if external else iri(termId)
+        return iri(termId)
+
+    def _externalMappings(row: Any) -> list:
+        if "external_iris_json" not in row.keys():
+            return []
+        raw = json.loads(row["external_iris_json"] or "[]")
+        return raw if isinstance(raw, list) else []
+
+    _SKOS_PREDICATES = {
+        "skos_exactMatch": "skos:exactMatch",
+        "skos_closeMatch": "skos:closeMatch",
+        "skos_relatedMatch": "skos:relatedMatch",
+    }
 
     lines.append("# standards")
     termsById = {str(r["term_id"]): r for r in termRows}
@@ -241,6 +247,15 @@ def serializeAll(store: Any, tenantId: str = "default",
         if inverse and inverse in termsById:
             lines.append("%s owl:inverseOf %s ." % (_termIri(row["term_id"]),
                                                     _termIri(inverse)))
+        # G3 附加断言：外部映射独立成行（kind 闭集内 SKOS 三档；equivalentClass
+        # 的类/属性分形谓词是 OWL 公理面职责，Turtle 互操作面只出 SKOS 同形）。
+        for entry in _externalMappings(row):
+            predicate = _SKOS_PREDICATES.get(str(entry.get("kind") or ""))
+            iriValue = str(entry.get("iri") or "")
+            if not predicate or not iriValue:
+                continue
+            lines.append("<%s> %s <%s> ." % (_termIri(row["term_id"]),
+                                             predicate, iriValue))
 
     lines.append(_SECTION_RULES % tenant)
     for row in ruleRows:
@@ -259,7 +274,8 @@ def serializeAll(store: Any, tenantId: str = "default",
     for row in factRows:
         if row["predicate_term_id"] == "is_a":
             # B8 ⑧：is_a 事实在导出层只对应实例类型（rdf:type），客体是概念术语
-            # 的 IRI（有外部映射用外部）；其余关系保持 kbg: 块形状（B5 判据面）。
+            # 的 kbg: IRI（G3 后外部名只出现在映射断言的宾语位）；其余关系保持
+            # kbg: 块形状（B5 判据面）。
             lines.append("%s rdf:type %s ." % (iri(row["subject_key"]),
                                                _termIri(row["object_term"])))
             continue

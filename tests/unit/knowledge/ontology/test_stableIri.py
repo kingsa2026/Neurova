@@ -52,7 +52,7 @@ class TestStableIri:
 
         registry = OntologyTermRegistry(store)
         registry.register("part_of", "relation",
-                          externalIris={"skos_exactMatch": "http://example.org/vocab#partOf"})
+                          externalIris=[{"kind": "skos_exactMatch", "iri": "http://example.org/vocab#partOf"}])
 
         # `#` 是 URI fragment 分隔符，调用方必须编码后传入（服务端解码回原形）
         resp = client.get(PREFIX + "/ontology/iri/"

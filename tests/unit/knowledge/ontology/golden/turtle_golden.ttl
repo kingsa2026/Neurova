@@ -2,6 +2,7 @@
 @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
 # terms: ontology_terms (tenant=default)
 kbg:Agent kbg:termId "Agent"@zh ;
   kbg:kind "concept"@zh ;
@@ -13,7 +14,7 @@ kbg:Agent kbg:termId "Agent"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:Concept kbg:termId "Concept"@zh ;
   kbg:kind "concept"@zh ;
@@ -25,7 +26,7 @@ kbg:Concept kbg:termId "Concept"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:Continuant kbg:termId "Continuant"@zh ;
   kbg:kind "concept"@zh ;
@@ -37,7 +38,7 @@ kbg:Continuant kbg:termId "Continuant"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{\"bfo\": \"http://purl.obolibrary.org/obo/BFO_0000002\"}"@zh ;
+  kbg:externalIris "[{\"iri\": \"http://purl.obolibrary.org/obo/BFO_0000002\", \"kind\": \"skos_exactMatch\"}]"@zh ;
   kbg:version "v1"@zh .
 kbg:Document kbg:termId "Document"@zh ;
   kbg:kind "concept"@zh ;
@@ -49,7 +50,7 @@ kbg:Document kbg:termId "Document"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:Entity kbg:termId "Entity"@zh ;
   kbg:kind "concept"@zh ;
@@ -60,7 +61,7 @@ kbg:Entity kbg:termId "Entity"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{\"bfo\": \"http://purl.obolibrary.org/obo/BFO_0000001\"}"@zh ;
+  kbg:externalIris "[{\"iri\": \"http://purl.obolibrary.org/obo/BFO_0000001\", \"kind\": \"skos_exactMatch\"}]"@zh ;
   kbg:version "v1"@zh .
 kbg:Event kbg:termId "Event"@zh ;
   kbg:kind "concept"@zh ;
@@ -72,7 +73,7 @@ kbg:Event kbg:termId "Event"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{\"bfo\": \"http://purl.obolibrary.org/obo/BFO_0000015\"}"@zh ;
+  kbg:externalIris "[{\"iri\": \"http://purl.obolibrary.org/obo/BFO_0000015\", \"kind\": \"skos_exactMatch\"}]"@zh ;
   kbg:version "v1"@zh .
 kbg:HighRiskOrder kbg:termId "HighRiskOrder"@zh ;
   kbg:kind "concept"@zh ;
@@ -84,7 +85,7 @@ kbg:HighRiskOrder kbg:termId "HighRiskOrder"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:Occurrent kbg:termId "Occurrent"@zh ;
   kbg:kind "concept"@zh ;
@@ -96,7 +97,7 @@ kbg:Occurrent kbg:termId "Occurrent"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{\"bfo\": \"http://purl.obolibrary.org/obo/BFO_0000003\"}"@zh ;
+  kbg:externalIris "[{\"iri\": \"http://purl.obolibrary.org/obo/BFO_0000003\", \"kind\": \"skos_exactMatch\"}]"@zh ;
   kbg:version "v1"@zh .
 kbg:Order kbg:termId "Order"@zh ;
   kbg:kind "concept"@zh ;
@@ -107,7 +108,7 @@ kbg:Order kbg:termId "Order"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:after kbg:termId "after"@zh ;
   kbg:kind "relation"@zh ;
@@ -119,7 +120,7 @@ kbg:after kbg:termId "after"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{\"skos_exactMatch\": \"https://www.w3.org/2006/time#after\"}"@zh ;
+  kbg:externalIris "[{\"iri\": \"https://www.w3.org/2006/time#after\", \"kind\": \"skos_exactMatch\"}]"@zh ;
   kbg:version "v1"@zh .
 kbg:before kbg:termId "before"@zh ;
   kbg:kind "relation"@zh ;
@@ -131,7 +132,7 @@ kbg:before kbg:termId "before"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{\"skos_exactMatch\": \"https://www.w3.org/2006/time#before\"}"@zh ;
+  kbg:externalIris "[{\"iri\": \"https://www.w3.org/2006/time#before\", \"kind\": \"skos_exactMatch\"}]"@zh ;
   kbg:version "v1"@zh .
 kbg:causal kbg:termId "causal"@zh ;
   kbg:kind "relation"@zh ;
@@ -142,7 +143,7 @@ kbg:causal kbg:termId "causal"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:causes kbg:termId "causes"@zh ;
   kbg:kind "relation"@zh ;
@@ -153,7 +154,7 @@ kbg:causes kbg:termId "causes"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:concept kbg:termId "concept"@zh ;
   kbg:kind "concept"@zh ;
@@ -164,7 +165,7 @@ kbg:concept kbg:termId "concept"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:contains kbg:termId "contains"@zh ;
   kbg:kind "relation"@zh ;
@@ -175,7 +176,7 @@ kbg:contains kbg:termId "contains"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:depends_on kbg:termId "depends_on"@zh ;
   kbg:kind "relation"@zh ;
@@ -186,7 +187,7 @@ kbg:depends_on kbg:termId "depends_on"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:documented_as kbg:termId "documented_as"@zh ;
   kbg:kind "relation"@zh ;
@@ -197,7 +198,7 @@ kbg:documented_as kbg:termId "documented_as"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:during kbg:termId "during"@zh ;
   kbg:kind "relation"@zh ;
@@ -209,7 +210,7 @@ kbg:during kbg:termId "during"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{\"skos_exactMatch\": \"https://www.w3.org/2006/time#during\"}"@zh ;
+  kbg:externalIris "[{\"iri\": \"https://www.w3.org/2006/time#during\", \"kind\": \"skos_exactMatch\"}]"@zh ;
   kbg:version "v1"@zh .
 kbg:entity kbg:termId "entity"@zh ;
   kbg:kind "concept"@zh ;
@@ -220,7 +221,7 @@ kbg:entity kbg:termId "entity"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:event kbg:termId "event"@zh ;
   kbg:kind "concept"@zh ;
@@ -231,7 +232,7 @@ kbg:event kbg:termId "event"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:hasParticipant kbg:termId "hasParticipant"@zh ;
   kbg:kind "relation"@zh ;
@@ -242,7 +243,7 @@ kbg:hasParticipant kbg:termId "hasParticipant"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:hasRiskLevel kbg:termId "hasRiskLevel"@zh ;
   kbg:kind "relation"@zh ;
@@ -254,7 +255,7 @@ kbg:hasRiskLevel kbg:termId "hasRiskLevel"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:hasTime kbg:termId "hasTime"@zh ;
   kbg:kind "relation"@zh ;
@@ -265,7 +266,7 @@ kbg:hasTime kbg:termId "hasTime"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{\"skos_exactMatch\": \"https://www.w3.org/2006/time#hasTime\"}"@zh ;
+  kbg:externalIris "[{\"iri\": \"https://www.w3.org/2006/time#hasTime\", \"kind\": \"skos_exactMatch\"}]"@zh ;
   kbg:version "v1"@zh .
 kbg:has_a kbg:termId "has_a"@zh ;
   kbg:kind "relation"@zh ;
@@ -276,7 +277,7 @@ kbg:has_a kbg:termId "has_a"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:is_a kbg:termId "is_a"@zh ;
   kbg:kind "relation"@zh ;
@@ -287,7 +288,7 @@ kbg:is_a kbg:termId "is_a"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:location kbg:termId "location"@zh ;
   kbg:kind "concept"@zh ;
@@ -298,7 +299,7 @@ kbg:location kbg:termId "location"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:memory kbg:termId "memory"@zh ;
   kbg:kind "concept"@zh ;
@@ -309,7 +310,7 @@ kbg:memory kbg:termId "memory"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:opposite_of kbg:termId "opposite_of"@zh ;
   kbg:kind "relation"@zh ;
@@ -320,7 +321,7 @@ kbg:opposite_of kbg:termId "opposite_of"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:overlaps kbg:termId "overlaps"@zh ;
   kbg:kind "relation"@zh ;
@@ -332,7 +333,7 @@ kbg:overlaps kbg:termId "overlaps"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{\"skos_exactMatch\": \"https://www.w3.org/2006/time#overlaps\"}"@zh ;
+  kbg:externalIris "[{\"iri\": \"https://www.w3.org/2006/time#overlaps\", \"kind\": \"skos_exactMatch\"}]"@zh ;
   kbg:version "v1"@zh .
 kbg:part_of kbg:termId "part_of"@zh ;
   kbg:kind "relation"@zh ;
@@ -343,7 +344,7 @@ kbg:part_of kbg:termId "part_of"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:person kbg:termId "person"@zh ;
   kbg:kind "concept"@zh ;
@@ -354,7 +355,7 @@ kbg:person kbg:termId "person"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:related_to kbg:termId "related_to"@zh ;
   kbg:kind "relation"@zh ;
@@ -365,7 +366,7 @@ kbg:related_to kbg:termId "related_to"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:similar_to kbg:termId "similar_to"@zh ;
   kbg:kind "relation"@zh ;
@@ -376,7 +377,7 @@ kbg:similar_to kbg:termId "similar_to"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:skill kbg:termId "skill"@zh ;
   kbg:kind "concept"@zh ;
@@ -387,7 +388,7 @@ kbg:skill kbg:termId "skill"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:spatial kbg:termId "spatial"@zh ;
   kbg:kind "relation"@zh ;
@@ -398,7 +399,7 @@ kbg:spatial kbg:termId "spatial"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:temporal kbg:termId "temporal"@zh ;
   kbg:kind "relation"@zh ;
@@ -409,7 +410,7 @@ kbg:temporal kbg:termId "temporal"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:time kbg:termId "time"@zh ;
   kbg:kind "concept"@zh ;
@@ -420,7 +421,7 @@ kbg:time kbg:termId "time"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:tool kbg:termId "tool"@zh ;
   kbg:kind "concept"@zh ;
@@ -431,7 +432,7 @@ kbg:tool kbg:termId "tool"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 kbg:used_by kbg:termId "used_by"@zh ;
   kbg:kind "relation"@zh ;
@@ -442,20 +443,29 @@ kbg:used_by kbg:termId "used_by"@zh ;
   kbg:disjointWith "[]"@zh ;
   kbg:requiredProps "[]"@zh ;
   kbg:aliases "[]"@zh ;
-  kbg:externalIris "{}"@zh ;
+  kbg:externalIris "[]"@zh ;
   kbg:version "v1"@zh .
 # standards
 kbg:Agent rdfs:subClassOf kbg:Continuant .
 kbg:Concept rdfs:subClassOf kbg:Continuant .
 kbg:Continuant rdfs:subClassOf kbg:Entity .
+<kbg:Continuant> skos:exactMatch <http://purl.obolibrary.org/obo/BFO_0000002> .
 kbg:Document rdfs:subClassOf kbg:Continuant .
+<kbg:Entity> skos:exactMatch <http://purl.obolibrary.org/obo/BFO_0000001> .
 kbg:Event rdfs:subClassOf kbg:Occurrent .
+<kbg:Event> skos:exactMatch <http://purl.obolibrary.org/obo/BFO_0000015> .
 kbg:HighRiskOrder rdfs:subClassOf kbg:Order .
 kbg:Occurrent rdfs:subClassOf kbg:Entity .
-<https://www.w3.org/2006/time#after> rdfs:subPropertyOf kbg:temporal .
-<https://www.w3.org/2006/time#before> rdfs:subPropertyOf kbg:temporal .
-<https://www.w3.org/2006/time#during> rdfs:subPropertyOf kbg:temporal .
-<https://www.w3.org/2006/time#overlaps> rdfs:subPropertyOf kbg:temporal .
+<kbg:Occurrent> skos:exactMatch <http://purl.obolibrary.org/obo/BFO_0000003> .
+kbg:after rdfs:subPropertyOf kbg:temporal .
+<kbg:after> skos:exactMatch <https://www.w3.org/2006/time#after> .
+kbg:before rdfs:subPropertyOf kbg:temporal .
+<kbg:before> skos:exactMatch <https://www.w3.org/2006/time#before> .
+kbg:during rdfs:subPropertyOf kbg:temporal .
+<kbg:during> skos:exactMatch <https://www.w3.org/2006/time#during> .
+<kbg:hasTime> skos:exactMatch <https://www.w3.org/2006/time#hasTime> .
+kbg:overlaps rdfs:subPropertyOf kbg:temporal .
+<kbg:overlaps> skos:exactMatch <https://www.w3.org/2006/time#overlaps> .
 # rules: ontology_rules (tenant=default)
 kbg:is_a_transitive kbg:ruleId "is_a_transitive"@zh ;
   kbg:headPredicate "is_a"@zh ;

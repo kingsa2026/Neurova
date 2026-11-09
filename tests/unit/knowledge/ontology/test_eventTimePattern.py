@@ -85,8 +85,8 @@ class TestOwlTimeExportMappingOnly:
     def testAllenRelationsCarryOwlTimeIri(self, registry):
         for termId in ALLEN_TERMS:
             mapping = registry.term(termId, tenantId="default")["external_iris"]
-            assert mapping.get("skos_exactMatch") == OWL_TIME + termId, (
-                "%s 缺 OWL-Time 精确匹配槽——导出映射没落在唯一那个槽位上" % termId)
+            assert {"kind": "skos_exactMatch", "iri": OWL_TIME + termId} in mapping, (
+                "%s 缺 OWL-Time 精确匹配条目——导出映射没落在结构化列表上" % termId)
 
     def testExportedTurtleUsesTheExternalIri(self, store, registry):
         text = serializeAll(store, tenantId="default")

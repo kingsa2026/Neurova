@@ -50,6 +50,7 @@ from ..ontology.term_registry import (
     _SCHEMA_V30_TERMS,
     _SCHEMA_V31_TERMS,
     _SCHEMA_V32_TERMS,
+    _SCHEMA_V39_EXTERNAL_IRI,
     _SCHEMA_V8,
     _SCHEMA_V12,
 )
@@ -131,6 +132,10 @@ _STEPS: List[tuple] = [
     # v38：知识库自定义分类注册表（specs/2026-11-07 批 A）——受控分类清单单一事实源，
     #      分组白名单/前端下拉/导入选择全部引用；不做租户切分（部门开放由分组白名单表达）
     (38, _SCHEMA_V38_CATEGORIES),
+    # v39：外部 IRI 映射结构化（GB/T 48000.3 评估档 G3 拍板 2026-11-10）——
+    #      external_iris_json 从 dict 整体重构为 [{"kind": 闭集, "iri": IRI}] 列表；
+    #      存量 dict 行统一转 skos_exactMatch（导出同步从替换改附加断言）
+    (39, _SCHEMA_V39_EXTERNAL_IRI),
 ]
 
 _registered = False
