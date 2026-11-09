@@ -64,7 +64,7 @@ def _declared(registry: OntologyTermRegistry) -> None:
         aliases=["高危单"], externalIris=[{"kind": "skos_exactMatch", "iri": "http://example.org/RiskOrder"}],
         identityKeys=["external_id"], labels={"zh": "风险订单", "en": "Risk Order"},
         altLabels={"zh": ["高危单"]}, module="domain",
-        namespace="https://example.org/ns/", iriBase="https://example.org/base/",
+        namespace="so", iriBase="https://example.org/base/",
         qualifierSchema={"level": {"required": True}}, version="v1")
 
 
@@ -97,7 +97,7 @@ class TestPipelinePartialUpsert:
                 ("labels", {"zh": "风险订单", "en": "Risk Order"}),
                 ("alt_labels", {"zh": ["高危单"]}),
                 ("module", "domain"),
-                ("namespace", "https://example.org/ns/"),
+                ("namespace", "so"),
                 ("iri_base", "https://example.org/base/"),
                 ("qualifier_schema", {"level": {"required": True}})):
             assert term[column] == expected, "%s 被批次写回默认值了" % column
@@ -144,7 +144,7 @@ class TestRestPutKeepsHiddenColumns:
         assert resp.status_code == 200, resp.text
         term = OntologyTermRegistry(seeded).term("RiskOrder", tenantId="default")
         assert term["label"] == "改名"
-        assert term["namespace"] == "https://example.org/ns/"
+        assert term["namespace"] == "so"
         assert term["iri_base"] == "https://example.org/base/"
 
     def testPostStillWritesFreshRowWithoutPreexistingValues(self, seeded, client):

@@ -55,6 +55,11 @@ export function getOntologySchema() {
   return api.get<ApiResponse<OntologySchemaData>>(`${BASE}/ontology/schema`)
 }
 
+/** G4：可用 IRI 命名空间注册表（前缀 → 基座；空 namespace 语义 = 缺省 kbg:）。 */
+export function listOntologyNamespaces() {
+  return api.get<ApiResponse<Record<string, string>>>(`${BASE}/namespaces`)
+}
+
 export function createOntologyTerm(body: OntologyTermWrite) {
   return api.post<ApiResponse<OntologyTerm>>(`${BASE}/ontology/terms`, body)
 }

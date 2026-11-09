@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from ..term_registry import NAMESPACE_REGISTRY
+
 NAMESPACE = "https://neurova.local/knowledge/"
 
 
@@ -16,7 +18,7 @@ def exportJsonLd(store: Any, tenantId: str = "default", agentId: str = "") -> st
     tenant = str(tenantId or "default")
     with store._lock:
         termRows = store._conn.execute(
-            "SELECT term_id, kind, label, parent_term_id, definition FROM ontology_terms"
+            "SELECT term_id, kind, label, parent_term_id, definition, namespace FROM ontology_terms"
             " WHERE tenant_id = ? ORDER BY term_id", (tenant,)).fetchall()
         factSql = ("SELECT subject_key, predicate_term_id, object_term"
                    " FROM knowledge_facts WHERE tenant_id = ?"
@@ -30,7 +32,10 @@ def exportJsonLd(store: Any, tenantId: str = "default", agentId: str = "") -> st
 
     graph = []
     for row in termRows:
-        node: dict = {"@id": "kbg:%s" % row["term_id"], "@type": "kbg:Term",
+        # G4：namespace 非空的术语用自身前缀（空 = 缺省 kbg:）
+        ns = str(row["namespace"] or "") if "namespace" in row.keys() else ""
+        termIri = ("%s:%s" % (ns, row["term_id"])) if ns else ("kbg:%s" % row["term_id"])
+        node: dict = {"@id": termIri, "@type": "kbg:Term",
                       "term_id": row["term_id"], "kind": row["kind"],
                       "label": row["label"] or row["term_id"]}
         # G1：定义描述项——非空才出（空值零漂移）
@@ -43,6 +48,7 @@ def exportJsonLd(store: Any, tenantId: str = "default", agentId: str = "") -> st
         graph.append({"@id": "kbg:%s" % row["subject_key"],
                       "kbg:%s" % row["predicate_term_id"]: row["object_term"]})
 
-    doc = {"@context": {"kbg": NAMESPACE, "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#"},
+    doc = {"@context": {"kbg": NAMESPACE, "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+                   "so": NAMESPACE_REGISTRY["so"]},
            "@graph": graph}
     return json.dumps(doc, ensure_ascii=False, sort_keys=True, indent=1)

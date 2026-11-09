@@ -245,6 +245,17 @@ def _shapeRegistry(store: Any):
     return ShapeRegistry(store)
 
 
+@router.get("/ontology/namespaces")
+async def list_ontology_namespaces(
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """G4：可用 IRI 命名空间注册表（前缀 → 基座）——术语表单下拉与领域包导入的
+    选项源；空 namespace 语义（缺省 kbg:）由前端固定项表达，不进注册表。"""
+    from neurova.knowledge.ontology.term_registry import NAMESPACE_REGISTRY
+
+    return {"code": 0, "data": dict(NAMESPACE_REGISTRY), "request_id": ""}
+
+
 @router.get("/ontology/shapes")
 async def list_ontology_shapes(
     request: Request,
@@ -356,6 +367,8 @@ class TermWriteRequest(BaseModel):
     definition: Optional[str] = None
     # G2：数据属性基本类型（5.5 表 3 闭集，仅 property 可声明）；None = PUT 保留现值
     datatype: Optional[str] = None
+    # G4：IRI 命名空间（NAMESPACE_REGISTRY 闭集；空 = 缺省 kbg:）；None = PUT 保留现值
+    namespace: Optional[str] = None
     deprecated: Optional[bool] = None
     replaced_by: Optional[str] = None
     # B10 L2 / B11 L3：SKOS 多语言标签、模块归属、身份判据、限定关系 schema。
@@ -437,7 +450,8 @@ def _registerTerm(registry: Any, termId: str, body: TermWriteRequest,
         inverseOf=body.inverse_of, symmetric=bool(body.symmetric),
         transitive=bool(body.transitive), aliases=body.aliases,
         externalIris=body.external_iris, definition=body.definition or "",
-        datatype=body.datatype or "", deprecated=bool(body.deprecated),
+        datatype=body.datatype or "", namespace=body.namespace or "",
+        deprecated=bool(body.deprecated),
         replacedBy=body.replaced_by or "",
         labels=body.labels, altLabels=body.alt_labels,
         module=body.module or "", identityKeys=body.identity_keys,
@@ -459,7 +473,8 @@ def _putDeclaration(body: TermWriteRequest) -> Dict[str, Any]:
         "inverseOf": body.inverse_of, "symmetric": body.symmetric,
         "transitive": body.transitive, "aliases": body.aliases,
         "externalIris": body.external_iris, "definition": body.definition,
-        "datatype": body.datatype, "deprecated": body.deprecated,
+        "datatype": body.datatype, "namespace": body.namespace,
+        "deprecated": body.deprecated,
         "replacedBy": body.replaced_by, "identityKeys": body.identity_keys,
         "labels": body.labels, "altLabels": body.alt_labels,
         "module": body.module, "qualifierSchema": body.qualifier_schema,

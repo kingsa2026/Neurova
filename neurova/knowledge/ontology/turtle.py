@@ -76,14 +76,16 @@ def literal(text: Any) -> str:
     return '"%s"@%s' % (_escape(text), LANG)
 
 
-def _subjectBlock(subject: str, rows: List[Tuple[str, str]]) -> str:
+def _subjectBlock(subject: str, rows: List[Tuple[str, str]],
+                  subjectPrefix: str = "kbg") -> str:
     """一个主语块：主语与首跳同行，其余逐行；以单个 ` .` 收尾（Turtle 的谓语列表形）。
 
     块形状只有这一份实现——`serialize` 与 `serializeAll` 各自拼自己的文档头，
     但块都从这里出，两套写法迟早分叉的病不给它发芽。
+    G4：subjectPrefix 支持术语自身命名空间前缀（缺省 kbg:）。
     """
     body = ["  kbg:%s %s" % (_safePredicate(predicate), value) for predicate, value in rows]
-    body[0] = "%s %s" % (iri(subject), body[0].strip())
+    body[0] = "%s:%s %s" % (subjectPrefix, subject, body[0].strip())
     return "\n".join(line + (" ;" if index < len(body) - 1 else " .")
                      for index, line in enumerate(body))
 
@@ -192,8 +194,18 @@ def serializeAll(store: Any, tenantId: str = "default",
     lines.append("@prefix owl: <http://www.w3.org/2002/07/owl#> .")
     lines.append("@prefix skos: <http://www.w3.org/2004/02/skos/core#> .")
 
+    # G4：术语 namespace 非空的多前缀声明（前缀/基座来自注册表闭集）
+    from neurova.knowledge.ontology.term_registry import NAMESPACE_REGISTRY
+
+    usedNamespaces = sorted({str(r["namespace"]) for r in termRows
+                             if "namespace" in r.keys() and str(r["namespace"] or "")})
+    for ns in usedNamespaces:
+        lines.append("@prefix %s: <%s> ." % (ns, NAMESPACE_REGISTRY[ns]))
+
     lines.append(_SECTION_TERMS % tenant)
     for row in termRows:
+        termNs = (str(row["namespace"]) if "namespace" in row.keys()
+                  and str(row["namespace"] or "") else "kbg")
         rows: List[Tuple[str, str]] = [
             ("termId", literal(row["term_id"])),
             ("kind", literal(row["kind"])),
@@ -216,15 +228,19 @@ def serializeAll(store: Any, tenantId: str = "default",
         if "definition" in row.keys() and str(row["definition"] or "").strip():
             rows.append(("definition", literal(row["definition"])))
         rows.append(("version", literal(row["version"])))
-        lines.append(_subjectBlock(row["term_id"], rows))
+        lines.append(_subjectBlock(row["term_id"], rows, subjectPrefix=termNs))
 
     # B8 ⑧：标准槽位语义行——概念父类 rdfs:subClassOf、关系父属性
     # rdfs:subPropertyOf、逆关系 owl:inverseOf。G3（拍板 2026-11-10）：
-    # 术语 IRI 恒为 kbg:——外部映射不再替换主体 IRI（丢本体自身标识），
+    # 术语 IRI 恒为本体侧前缀——外部映射不再替换主体 IRI（丢本体自身标识），
     # 等价/对齐改为独立断言行（skos:exactMatch 等，宾语位才出现外部 IRI）。
+    # G4：本体侧前缀按术语 namespace（空 = kbg:）。
     # 全 IRI 独立三元组行，逐字节确定，不进 kbg: 块（块实现是 B5 的既有判据面）。
     def _termIri(termId: str) -> str:
-        return iri(termId)
+        row = termsById.get(str(termId) or "")
+        ns = (str(row["namespace"]) if "namespace" in row.keys()
+              and str(row["namespace"] or "") else "") if row is not None else ""
+        return ("%s:%s" % (ns, termId)) if ns else iri(termId)
 
     def _externalMappings(row: Any) -> list:
         if "external_iris_json" not in row.keys():
@@ -257,7 +273,7 @@ def serializeAll(store: Any, tenantId: str = "default",
             iriValue = str(entry.get("iri") or "")
             if not predicate or not iriValue:
                 continue
-            lines.append("<%s> %s <%s> ." % (_termIri(row["term_id"]),
+            lines.append("%s %s <%s> ." % (_termIri(row["term_id"]),
                                              predicate, iriValue))
 
     lines.append(_SECTION_RULES % tenant)
