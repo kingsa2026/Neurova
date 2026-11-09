@@ -222,6 +222,15 @@
                 style="width: 100%"
               />
             </a-form-item>
+            <a-form-item :label="t('settings.graphStudioLimit')" :extra="t('settings.graphStudioLimitHint')">
+              <a-input-number
+                v-model:value="advanced.graph_studio_limit"
+                :min="1"
+                :max="2000"
+                :step="50"
+                style="width: 100%"
+              />
+            </a-form-item>
             <a-form-item :label="t('settings.desktopRuntimeMode')" :extra="t('settings.desktopRuntimeModeHint')">
               <a-select v-model:value="advanced.desktop_runtime_mode" style="width: 100%">
                 <a-select-option value="full">{{ t('settings.runtimeFull') }}</a-select-option>
@@ -390,7 +399,7 @@ const outOfBoxLanguage = ref('')
 const savingDefault = ref(false)
 const security = ref({ jwt_secret: '', jwt_expiry_hours: 24, min_password_length: 8, require_special: true })
 const storage = ref({ media_path: '/data/media', max_upload_mb: 50, cache_ttl_minutes: 60 })
-const advanced = ref({ debug_mode: false, log_level: 'info', telemetry: false, max_output_tokens: 131072, desktop_runtime_mode: 'full', desktop_provider: '', skill_catalog_enabled: true, skill_schema_budget_enabled: true, evolution_queue_enabled: true, skill_semantic_recall_enabled: true, tool_search_enabled: true })
+const advanced = ref({ debug_mode: false, log_level: 'info', telemetry: false, max_output_tokens: 131072, graph_studio_limit: 200, desktop_runtime_mode: 'full', desktop_provider: '', skill_catalog_enabled: true, skill_schema_budget_enabled: true, evolution_queue_enabled: true, skill_semantic_recall_enabled: true, tool_search_enabled: true })
 const savingRecall = ref(false)
 
 /** LLM 路由设置：actionability 门控 + 群领导选举（均默认关，仅机器源/群聊生效） */

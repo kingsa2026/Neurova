@@ -60,6 +60,9 @@ ADVANCED_DEFAULTS: Dict[str, Any] = {
     # C5：lost-in-the-middle 位置缓解（检索证据两端发牌，最优置首次优置尾）。
     # 默认关＝现网语义（工单 015 口径）；env NEUROVA_LOST_IN_MIDDLE 显式 0/1 最优先。
     "lost_in_middle_enabled": False,
+    # 图谱读面（studio 首屏 / subgraph 探索）缺省渲染上限：显式查询参数最优先，
+    # 缺省跟本值；设置面无 le 校验，端点按 2000 钳（与查询参数 le 同一合法域）。
+    "graph_studio_limit": 200,
 }
 
 # LLM 路由设置分区（actionability 门控等路由期决策）——默认全关，零行为漂移。

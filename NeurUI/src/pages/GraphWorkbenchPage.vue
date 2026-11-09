@@ -663,9 +663,10 @@ watch(nodeFilter, (next: string) => {
 const loadFocusNeighborhood = async (id: string) => {
   loading.value = true
   try {
+    // limit 缺省跟全局设置 advanced.graph_studio_limit（服务端单点解析），客户端不定值
     const res: any = await request.get(
       `/knowledge-graph/${agentId.value}/subgraph`,
-      { params: { focus: id, hops: 2, limit: 200 } })
+      { params: { focus: id, hops: 2 } })
     const data = res?.data ?? res
     localRender.value = {
       nodes: data?.nodes ?? [],
