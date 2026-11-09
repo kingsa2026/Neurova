@@ -48,6 +48,10 @@ class AppState:
         self.llm_client = None
         self.provider_manager = None
         self.llm_router = None
+        # G4/M0：本体 MCP server 的 lifespan 上下文与驱动栈（挂载失败为 None）
+        self.ontology_mcp_lifespan = None
+        self.ontology_mcp_asgi = None
+        self.ontology_mcp_stack = None
         self.channel_manager = None
         self.admin_service = None
         self.resource_quota_manager = None
@@ -1686,6 +1690,20 @@ def create_app(
         # 注册路由
         _register_routes(app, _app_state)
 
+        # G4/M0：本体 MCP server（streamable-http，双鉴权 fail-closed）——
+        # 本体四动词/事实写入以 MCP tools 开放（补全设计 §3.0）；挂载失败不阻断
+        # 启动但必须出声（静默跳过等于静撤开放面）。
+        try:
+            from neurova.mcp_ontology_server import build_ontology_mcp_asgi
+
+            _mcp_asgi, _mcp_lifespan = build_ontology_mcp_asgi()
+            app.mount("/v1/mcp", _mcp_asgi)
+            _app_state.ontology_mcp_lifespan = _mcp_lifespan
+            logger.info("Ontology MCP server mounted at /v1/mcp")
+        except Exception as _mcpMountErr:  # noqa: BLE001
+            logger.error("本体 MCP server 挂载异常（MCP 面将不可用）: %s", _mcpMountErr)
+            _app_state.ontology_mcp_lifespan = None
+
         # 注册健康检查路由
         _add_health_routes(app, _app_state)
 
@@ -1713,6 +1731,18 @@ def create_app(
         @app.on_event("startup")
         async def startup_event():
             try:
+                # G4/M0：本体 MCP server 的 session_manager task group（mount 的
+                # 子 Starlette lifespan 不自动跑，手动驱动）。
+                lifespan_cm = getattr(_app_state, "ontology_mcp_lifespan", None)
+                if lifespan_cm is not None:
+                    from contextlib import AsyncExitStack
+
+                    _app_state.ontology_mcp_stack = AsyncExitStack()
+                    await _app_state.ontology_mcp_stack.enter_async_context(
+                        lifespan_cm(_app_state.ontology_mcp_asgi))
+            except Exception as e:
+                logger.error("本体 MCP server lifespan 启动异常（MCP 面将不可用）: %s", e)
+            try:
                 await _on_startup(_app_state)
             except Exception as e:
                 # lifespan 内的启动崩溃 uvicorn 会静默退出，start_server 的
@@ -1734,6 +1764,12 @@ def create_app(
 
         @app.on_event("shutdown")
         async def shutdown_event():
+            try:
+                stack = getattr(_app_state, "ontology_mcp_stack", None)
+                if stack is not None:
+                    await stack.aclose()
+            except Exception as e:  # noqa: BLE001
+                logger.error("本体 MCP server lifespan 关闭异常: %s", e)
             await _on_shutdown(_app_state)
 
         _app_instance = app
