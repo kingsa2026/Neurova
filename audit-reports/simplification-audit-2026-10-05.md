@@ -12238,3 +12238,8 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **口径（numstat 实抄）**：前端 `_ontologySection.ts` +209/−0（19 键×11 语言）、`EnterpriseSourcesPage.vue` +131/−4、页面测试 +106/−1、`ontology.ts` api +7/−0、类型 +11/−0；后端 `wecom_archive.py` +26/−3、readiness 判据 +32/−0。主 locale 11 文件**零改动**（并发会话在途件不受扰）。
     - **仍开**：真部署 live-verify（双态登记：真 SDK 库件＋真租户凭据；GetData char\* 二进制截断风险必核）。
     - **下一枚空号现查：本格取 589，后继从 590 起。**
+590. **C7 活体取证脚本落格＋真部署 runbook（双态登记收口）** ✅🟢 —— 用户「处理剩余项」；真租户凭据与官方库件不在本机，能落地的是 C7a 先例形态：把活体取证 harness 建好，真部署时一键跑全链。
+    - **新增 `tests/manual/wecomArchiveChainC7bc_live.py`**（双态）：**真租户态**（env 给齐官方库件/corpid/存档 Secret，私钥从约定目录 `private_v<版本>.pem` 自动发现——统一存放路径口径的活体验证）跑真链五判据：①Init/GetChatData 按水位拉取（空区间＝PASS 但点名「检查席位/成员同意」——§3 前置是客户侧动作，代码只如实读数）；②RSA→DecryptData 全量（未知 key_ver 计数如实）；③投影与消费同体（appendBatch 水位推进＋适配器六列读回＋sent_at ISO 带时区）；④媒体 GetMediaData 分片续传＋**GetData 截断必核**（image 走 PIL open+verify，截断当场暴露；其余类型如实登记人工核对项）＋stageArchiveMedia 暂存回写；⑤自我节流口径（3×200＝600 行取证上限，超窗多轮收敛属正常）。**无凭据态**：preflight 缺任一件 → runbook（哪里下载库件/取 Secret/放私钥/§3 前置清单）+ **exit 2**，不冒充跑通。
+    - **实测**：本机无凭据 → exit 2＋runbook 六行读数（双态诚实路径活体验证）；env 改写全收 main()（manual env 棘轮守卫同跑绿）。
+    - **仍开（外部依赖，代码侧无剩余）**：真部署时以真凭据跑本脚本取 §12 判据全过读数；GetData char\* 二进制截断风险以脚本内 PIL verify 实测收口。
+    - **下一枚空号现查：本格取 590，后继从 591 起。**

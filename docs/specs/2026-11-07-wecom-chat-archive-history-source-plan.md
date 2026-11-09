@@ -360,8 +360,10 @@ corpid 复用既有 `extra.corpid`/`app_id`，**不新造第二个 corpid 字段
 1. **有真企微测试企业＋存档席位**：提交 `chat.vendor=wecom` 描述符（存档面）→ 触发 ingest →
    读回 facts/条目，逐条核对 `sent_at` 落进 facts 源钟、群聊 subject＝群 id；
    再拉一段含图片的时间窗，核对 `media_ref` 引用形态与 health 点名一致。
-2. **无席位（大概率是开工当场的状态）**：按 §6-577 的**双态登记**口径——假夹具全链绿＋
-   「真租户凭据待配」进台账，**不得**用假夹具冒充活体跑通。
+2. **无席位（开工当场的状态，活体 harness 已落格）**：按 §6-577 的**双态登记**口径——
+   假夹具全链绿＋真取证脚本 `tests/manual/wecomArchiveChainC7bc_live.py`（台账 §6-590）：
+   env 给齐官方库件/corpid/存档 Secret 即一键跑 §12 全链判据（含 GetData 截断必核的
+   PIL verify）；无凭据时 runbook＋exit 2，**不得**用假夹具冒充活体跑通。
 3. `python start.py --check` 与前后端两道门（`npm run test`／`npx vue-tsc --noEmit`）随批执行；
    受保护子集在册数现场复算，不手抄。
 
