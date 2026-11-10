@@ -2,6 +2,7 @@
 
 - **来源**：用户点单——按"Ontology 作为企业业务语义层与操作约束层接入 AI Agent"的五步接入框架（对象建模 → 关系与逻辑建模 → 动作与权限建模 → 封装成工具交给 Agent → 运行反馈）评估 Neurova 是否符合，缺失处形成详细补全设计。
 - **纪律**：本档评估与设计，**不实施**；补全项（A1–A5）按批点单，每批独立红绿＋提交。引用外部框架仅为评估依据（评估对象即该五步框架），不构成对任何第三方项目的对齐表述。
+- **实施台账**（落格即更）：评估与设计落格 `6632117d1`；开放形态改 MCP server（拍板落格 `be27f7baa`）；**P1 落地 `440c51e06`**（M0 基座＋A1 查询/校验＋A2 事实写入——streamable-http stateless＋json_response，鉴权三段 fail-closed，app.py 挂 /v1/mcp＋on_event 钩子手动驱动子 Starlette lifespan，transport run() 一次不可复用 ⇒ build 返回 (asgi, lifespan) 二元组）；**P2 落地 `5e007b947`**（A3 ontology_derive 求值＋溯源＋materialization 标注；A4 ontology_actions v42 声明表＋ActionRegistry 悬空拒/风险档闭集＋REST CRUD＋MCP 查询分支）；**P3-A5 活体闭环走查**（真后端 /v1/mcp/ 完整序列：initialize 200 / tools 四件 / validate pass / fact_submit 落库＋采纳建议读数；JWT 段修复——_identityFromCredentialsOr401 是同步函数，await dict 被 except 吞成 401 的坑实证修入）。回归：本体 MCP 契约测试 10 格全绿；全族 351 passed（双时态 1 格预存）。
 - **关联**：`docs/specs/2026-11-10-GB48000-3-本体建模符合性评估与补齐设计.md`（建模元数据/流程标准面，五项差距已全部关闭）；`docs/specs/2026-11-05-ontology-capability-upgrade-plan.md`（B1–B7 语义栈）；`docs/specs/2026-11-03-提示面资产化与出口审批收口升级设计.md`（审批收口/指挥资格）。
 
 ## 0. 结论摘要
