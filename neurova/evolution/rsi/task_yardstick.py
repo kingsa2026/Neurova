@@ -12,10 +12,13 @@
 
 诚实边界:
   - 这是重放评估(offline evaluation):假设历史成败可预测后续成败(平稳性);
+    B1 起该边界配"分布漂移告警读数"(stationarity_drift,窗口时间分半的
+    成功率差)——假设破裂时读数自己说,不静默;
   - decay_rate 在快重放中不可观测(重放无闲置间隔),其遗忘带宽由
     eval_harness 的专用用例把守;
-  - 与 gain 的关系:**并列呈报,不参与 gain 判定与回滚** —— 它是观测面,
-    不是判据(判据仍归 eval_harness 与 rollback_manager)。
+  - 与 gain 的关系:B1 起**升半判据**——对齐差分进回滚判据(e2e_gain 轴,
+    只否决不奖励:行为分涨而结局对齐崩必判否;对齐涨不单凭它接受),
+    接受判据仍归 eval_harness(行为地板)与 B3 置信区间。
 
 数据面:窗口本就随 tool_weights.json 持久化(单一事实源,不新增文件);
 本模块零 LLM、纯内存、确定性(同输入同读数)。
@@ -80,11 +83,27 @@ def replay_alignment_score(
         weights.update_weight(tool, ok)
 
     score = sum(scores) / len(scores)
+
+    # B1 前置处置：平稳性边界的告警读数——窗口时间分半的成功率差。
+    # 重放假设"历史成败预测后续成败"：前半与后半的分布漂移大时该假设失真，
+    # 对齐分的稳定性随之存疑。|drift| ≥ 0.2 点名 suspect（阈值暂定值，
+    # 有校准数据后另调）；这是**读数不是判据**——告警不改判分、不阻断。
+    half = len(entries) // 2
+    older_rate = (sum(1 for _ts, _t, ok in entries[:half] if ok) / half) if half else 0.0
+    recent_rate = (sum(1 for _ts, _t, ok in entries[half:] if ok)
+                   / (len(entries) - half)) if len(entries) > half else 0.0
+    drift_value = round(recent_rate - older_rate, 4)
+
     return {
         "state": "measured",
         "score": round(score, 6),
         "entries": len(entries),
         "tools": n,
+        "stationarity_drift": {
+            "value": drift_value,
+            "suspect": abs(drift_value) >= 0.2,
+            "detail": f"窗口后半成功率 {recent_rate:.2f} − 前半 {older_rate:.2f}",
+        },
         "detail": f"重放 {len(entries)} 条结局 / {n} 工具",
     }
 
