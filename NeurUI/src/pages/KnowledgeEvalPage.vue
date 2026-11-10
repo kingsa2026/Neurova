@@ -6,13 +6,16 @@
     </div>
 
     <a-spin :spinning="loading">
-      <!-- UI-3：CQ 通过率卡（静态读数，唯一事实源是 CQ 追溯表；运行状态以 CI 为准） -->
+      <!-- UI-3：CQ 通过率卡（读 cq-matrix 读数面：元数据照 specs，status 为服务端探针现值） -->
       <GlassPanel class="panel">
         <div class="panel-head">
           <span class="panel-title" data-testid="eval-cq-card-title">{{ t('ontology.evalCqCardTitle') }}</span>
         </div>
-        <p class="cq-rate" data-testid="eval-cq-rate">
-          {{ t('ontology.evalCqRate') }}（{{ cqImplemented }} / {{ CQ_ROWS.length }}）
+        <p v-if="cqRows === null" class="honest-note honest-note--error" data-testid="eval-cq-error">
+          {{ t('ontology.cqLoadFailed') }}
+        </p>
+        <p v-else class="cq-rate" data-testid="eval-cq-rate">
+          {{ t('ontology.evalCqRate') }}（{{ cqImplemented }} / {{ cqRows.length }}）
         </p>
         <p class="honest-note">{{ t('ontology.evalCqP1Note') }}</p>
       </GlassPanel>
@@ -171,10 +174,9 @@ import {
   getRetrievalMetricsSnapshot,
   type EvaluationBaseline,
 } from '@/api/modules/knowledgeEval'
-import { CQ_ROWS } from '@/config/ontologyStatic'
-import { getOntologyQuality, listDefaultOffFlags } from '@/api/modules/ontology'
+import { getOntologyQuality, listCqMatrix, listDefaultOffFlags } from '@/api/modules/ontology'
 import { severityColor } from '@/utils/ontologyFormat'
-import type { DefaultOffReading, OntologyQualityReport } from '@/types/ontology'
+import type { CqRow, DefaultOffReading, OntologyQualityReport } from '@/types/ontology'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -187,8 +189,21 @@ const isAdmin = computed(() => {
   return user?.role === 'admin'
 })
 
-/** CQ 通过率卡读数：静态追溯表里 implemented 行数（运行状态以 CI 为准）。 */
-const cqImplemented = computed(() => CQ_ROWS.filter((row) => row.status === 'implemented').length)
+/** CQ 通过率卡读数：行来自 cq-matrix 读数面（探针现值）；null = 读面失败显式报错。 */
+const cqRows = ref<CqRow[] | null>(null)
+const cqImplemented = computed(
+  () => (cqRows.value ?? []).filter((row) => row.status === 'implemented').length,
+)
+
+async function loadCqMatrix() {
+  try {
+    const res = await listCqMatrix()
+    cqRows.value = res.data?.items ?? []
+  } catch {
+    // 读不到就显式报错——保留空表/旧行数会冒充读数
+    cqRows.value = null
+  }
+}
 
 const quality = ref<OntologyQualityReport | null>(null)
 const qualityLoading = ref(false)
@@ -294,6 +309,7 @@ onMounted(() => {
   loadBaseline()
   loadSnapshot()
   loadQuality()
+  loadCqMatrix()
 })
 
 // 读数面是管理员面（后端 403 治理门）——非管理员不发这一枪，避免一条注定被拒的请求

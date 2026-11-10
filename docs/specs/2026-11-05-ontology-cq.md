@@ -49,3 +49,9 @@
 1. P1 CQ 的 `query` 与 `test_id` 不得为空；`test_id` 指向的文件必须真实存在（守卫：`test_referencedTestFilesExistZeroOrphan`）。
 2. 新增能力必须先在此表补 CQ（或确认既有 CQ 覆盖），再落码——CQ 驱动、先红后绿。
 3. `status` 闭集：`implemented`（查询与测试均已落）/ `partial`（部分落，注明缺口）/ `planned`（工作包待实施）。
+4. **本表的 `status` 列是计划态（人管）**；产品页面的 CQ 表与通过率卡不再抄本表——
+   元数据（问题/角色/优先级/查询/测试）由服务端名册
+   `neurova/knowledge/ontology/cq_matrix.py` 照抄本票面（对拍守卫
+   `test_cqMatrixReadout.py::test_registryMetadataMatchesSpecDocRowByRow` 钉漂移），
+   `status` 由探针查产品面符号给**现值**（`GET /v1/knowledge/ontology/cq-matrix`，
+   登录可读）：能力接线/退役自动翻转，不靠人改表。本表 status 变更时探针判据须同步对齐。

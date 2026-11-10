@@ -26,10 +26,13 @@
     <div class="panel-row">
       <div class="panel-block">
         <h4 class="block-title">{{ t('ontology.overviewCqHealth') }}</h4>
-        <p class="block-line" data-testid="overview-cq-rate">
-          {{ t('ontology.cqPassRate') }}: {{ cqImplemented }} / {{ CQ_ROWS.length }}
+        <p v-if="cqRows === null" class="block-note" data-testid="overview-cq-error">
+          {{ t('ontology.cqLoadFailed') }}
         </p>
-        <p class="block-note">{{ t('ontology.cqStaticSource') }}</p>
+        <p v-else class="block-line" data-testid="overview-cq-rate">
+          {{ t('ontology.cqPassRate') }}: {{ cqImplemented }} / {{ cqRows.length }}
+        </p>
+        <p class="block-note">{{ t('ontology.cqReadoutNote') }}</p>
       </div>
       <div class="panel-block">
         <h4 class="block-title">{{ t('ontology.releaseStatus') }}</h4>
@@ -62,8 +65,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
-import type { OntologySchemaData } from '@/types/ontology'
-import { CQ_ROWS } from '@/config/ontologyStatic'
+import type { CqRow, OntologySchemaData } from '@/types/ontology'
 import { importDomainPack, listDomainPacks } from '@/api/modules/ontology'
 import { ontologyErrorDetail } from '@/utils/ontologyFormat'
 import { useAuthStore } from '@/stores/auth'
@@ -72,6 +74,8 @@ const props = defineProps<{
   schema: OntologySchemaData | null
   pendingCandidates: number
   loading: boolean
+  /** cq-matrix 读数行；null = 读面失败（显式报错，不冒充「零实现」）。 */
+  cqRows: CqRow[] | null
 }>()
 
 const { t } = useI18n()
@@ -84,7 +88,9 @@ const relationCount = computed(
 const deprecatedCount = computed(
   () => (props.schema?.terms ?? []).filter((term) => term.deprecated).length,
 )
-const cqImplemented = computed(() => CQ_ROWS.filter((row) => row.status === 'implemented').length)
+const cqImplemented = computed(
+  () => (props.cqRows ?? []).filter((row) => row.status === 'implemented').length,
+)
 
 // G5 领域包：清单拉取 + admin 导入（只补缺幂等，导入计数如实回显）
 const authStore = useAuthStore()

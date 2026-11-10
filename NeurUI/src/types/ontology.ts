@@ -388,7 +388,8 @@ export interface EnterpriseDescriptor {
 // 静态目录（CQ 追溯矩阵 / D 组默认关矩阵）
 // ---------------------------------------------------------------------------
 
-/** CQ 行（docs/specs/2026-11-05-ontology-cq.md 追溯矩阵；status 闭集）。 */
+/** CQ 追溯读数行（服务端名册 GET /knowledge/ontology/cq-matrix 回显：元数据照
+ *  specs 票面，status 为服务端探针现值——不是前端抄的静态表）。 */
 export interface CqRow {
   cqId: string
   question: string
@@ -396,7 +397,7 @@ export interface CqRow {
   priority: 'P1' | 'P2'
   query: string
   testId: string
-  status: 'implemented' | 'planned'
+  status: 'implemented' | 'planned' | 'partial'
 }
 
 /**
