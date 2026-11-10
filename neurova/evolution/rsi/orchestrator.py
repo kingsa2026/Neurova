@@ -412,6 +412,30 @@ class RSIOrchestrator:
             logger.debug("gain 配对 CI 现算失败: %s", e)
             return None
 
+    def _pairedE2EGain(self, eval_before: Any, eval_after: Any) -> Optional[float]:
+        """真实结局对齐差分（B1）：前后两次 yardstick 读数的差。
+
+        双方都 measured ⇒ after − before（带符号，确定性重放无采样噪声）；
+        任一侧缺席（insufficient_data/未暴露窗口）⇒ None（读数缺省不参与判据）。
+        """
+        try:
+            if not isinstance(eval_before, dict) or not isinstance(eval_after, dict):
+                return None
+            e2e_before = eval_before.get("e2e")
+            e2e_after = eval_after.get("e2e")
+            if not isinstance(e2e_before, dict) or not isinstance(e2e_after, dict):
+                return None
+            if e2e_before.get("state") != "measured" or e2e_after.get("state") != "measured":
+                return None
+            before_score = e2e_before.get("score")
+            after_score = e2e_after.get("score")
+            if not isinstance(before_score, (int, float)) or not isinstance(after_score, (int, float)):
+                return None
+            return round(float(after_score) - float(before_score), 6)
+        except Exception as e:  # noqa: BLE001 - 差分失败＝缺席，不阻断主链
+            logger.debug("e2e 对齐差分现算失败: %s", e)
+            return None
+
     def _probeOutcome(self, state: Dict[str, Any], candidate: Any) -> Optional[float]:
         """Eq8 配对探针的下游结局评估（观测档）：候选值代入活值快照推演决策档。
 
@@ -728,6 +752,11 @@ class RSIOrchestrator:
                 gain_ci = self._pairedGainCI(eval_before, eval_after)
                 if isinstance(eval_after, dict) and gain_ci is not None:
                     eval_after["gain_ci"] = gain_ci
+                # B1 真实结局对齐差分：行为分涨而结局对齐崩必判否（e2e 轴
+                # 只否决不奖励），随 eval_after 出街。
+                e2e_gain = self._pairedE2EGain(eval_before, eval_after)
+                if isinstance(eval_after, dict) and e2e_gain is not None:
+                    eval_after["e2e_gain"] = e2e_gain
                 # 回滚判据的单一事实源是 `rollback_manager.should_rollback`：
                 # 编排器只负责把本轮读数喂进去，不自己另写一套比较。
                 if self.rollback_manager.should_rollback({
@@ -735,6 +764,7 @@ class RSIOrchestrator:
                     "roi": roi_before_apply,
                     "gain": gain,
                     "gain_ci": gain_ci,
+                    "e2e_gain": e2e_gain,
                 }):
                     # 有害调整：回滚到应用前快照（失控漂移的本质防护）。
                     # 工单 004：回滚必须同时**留痕到 rollback_manager** ——

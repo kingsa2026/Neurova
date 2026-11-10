@@ -144,14 +144,18 @@ class RSIRollbackManager(PersistedStateMixin):
 
         # B3（survey §10.2）：gain 判据读**配对置信区间**而非点值——单点噪声
         # 不得触发拒绝。CI 三态：上界 < 0 = 确证危害（回滚）；下界 > 0 = 确证
-        # 改进；横跨零 = 带内噪声（gain 单轴不出判据，收敛/ROI 轴照常）。
+        # 改进；横跨零 = 带内噪声（gain 单轴不出判据）。
         # CI 缺席（例级读数不可用/旧形态喂入）回退点判据——保守兜底，
         # 缺席形态在 eval_outcome.gain_ci 可读，不冒充有带。
+        # 注意轴间独立：gain 轴"不出判据"（确证改进/带内）**不是放行**——
+        # 后续 e2e 轴照常查（B1：代理分涨而结局对齐崩必判否）。
         gain_ci = metrics.get("gain_ci")
+        gain_axis_decided = False
         if isinstance(gain_ci, dict):
             lower = gain_ci.get("lower")
             upper = gain_ci.get("upper")
             if isinstance(lower, (int, float)) and isinstance(upper, (int, float)):
+                gain_axis_decided = True
                 if upper < 0:
                     logger.warning(
                         "Confident harm (gain CI upper %.4f < 0), should rollback", upper)
@@ -162,11 +166,23 @@ class RSIRollbackManager(PersistedStateMixin):
                     logger.info(
                         "Gain CI straddles zero (%.4f..%.4f) — noise band, no gain-axis verdict",
                         lower, upper)
-                return False
 
-        gain = metrics.get("gain")
-        if isinstance(gain, (int, float)) and gain < 0:
-            logger.warning("Negative gain detected: %s, should rollback", gain)
+        if not gain_axis_decided:
+            gain = metrics.get("gain")
+            if isinstance(gain, (int, float)) and gain < 0:
+                logger.warning("Negative gain detected: %s, should rollback", gain)
+                return True
+
+        # B1（survey §10.2）：真实结局对齐轴（e2e_gain）——**只否决不奖励**。
+        # 重放是确定性的（同一结局流、只换参数），负差分＝参数变化确实伤了
+        # 真实结局对齐，无采样噪声可容。行为分涨而结局对齐崩 = 代理说谎，
+        # 必须判否；对齐涨不单凭它接受（接受仍归行为地板 + 置信区间）。
+        # 缺席（insufficient_data/未暴露窗口）不参与判据——读数缺省不参与。
+        e2e_gain = metrics.get("e2e_gain")
+        if isinstance(e2e_gain, (int, float)) and e2e_gain < 0:
+            logger.warning(
+                "Real-outcome alignment regressed (e2e_gain %.4f < 0), should rollback",
+                e2e_gain)
             return True
 
         return False
