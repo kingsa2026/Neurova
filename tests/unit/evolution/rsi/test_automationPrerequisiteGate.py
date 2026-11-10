@@ -160,6 +160,116 @@ def test_flagTurnsTrueOnlyWhenTheSeamYieldsARealTrajectoryExecutor(monkeypatch):
         "真轨迹执行器接上了却量不到——前置 2 就永远关不上")
 
 
+# ── G4：前置探针防摘除变异守卫（四发，各只红该红）──────────────────────
+# 模块头自认的风险："写死的旗标会说谎——实装被摘掉之后旗标仍然写着真"。
+# 探针今天全是结构推导（自测式），但没有在册判据钉住这一点：谁把探针改写成
+# 常量旗标、或把探针读的实装摘掉，无人报警。四发变异格把自述变成判据——
+# 每发只摘一条实装，被点名的探针必须当场翻 False，其余三格相对基线纹丝不动。
+# 判定用**差分**（相对变异前基线的变化）：离线测试进程里 realTrajectoryExecutor
+# 基线本就 False（A1 反向格的诚实态），绝对值断言会把诚实态误读成误伤。
+
+
+def _assertOnlyTargetFlips(mutate, target):
+    """差分变异判据：只有 target 的满足态相对基线变化，且变异后为 False。"""
+    before = {k: v["satisfied"] for k, v in automationPrerequisites().items()}
+    mutate()
+    after = {k: v["satisfied"] for k, v in automationPrerequisites().items()}
+    changed = {k for k in before if before[k] != after[k]}
+    assert changed == {target}, (
+        f"变异应当只打掉 {target}，实际相对基线变化的格：{changed or '无'}——"
+        "探针没跟着实装走（旗标说谎形态），或变异误伤了他格")
+    assert after[target] is False, "被摘实装的探针必须当场红"
+
+
+def test_mutation_caseLevelGate_readout_removed_flips_only_itself(monkeypatch):
+    """发 1：摘掉例级读数函数 → 前置 1 当场红，其余三格相对基线不动。"""
+    from neurova.evolution.eval import runner as evalRunner
+
+    def _mutate():
+        monkeypatch.setattr(evalRunner, "_caseRegressionReadout", None)
+
+    _assertOnlyTargetFlips(_mutate, "caseLevelGate")
+
+
+def test_mutation_realTrajectory_seam_rewired_to_simulated_flips_only_itself(monkeypatch):
+    """发 2：接缝被改回恒模拟面（A1 的接线被摘） → 前置 2 当场红。
+
+    这一发钉住 A1 的成果不许被悄悄改回去。基线先建立在线态（在线 agent 在位，
+    探针读 True），再摘接缝接线——差分 True→False 才是"摘除实装"的变异读数
+    （离线态基线本就是 False，直接变异无差分可看）。其余三格不读接缝，纹丝不动。
+    """
+    from neurova.api.endpoints import set_app_state
+    from neurova.evolution.eval import service as evalService
+
+    class _OnlineAgent:
+        async def chat(self, *args, **kwargs):
+            return "ok"
+
+    set_app_state({"agents": {"default": _OnlineAgent()}})
+    try:
+        assert automationPrerequisites()["realTrajectoryExecutor"]["satisfied"] is True, (
+            "测试基线未建立：在线 agent 在位时探针应读 True（A1 契约）")
+
+        def _mutate():
+            monkeypatch.setattr(
+                evalService, "resolveEvolutionExecutor",
+                lambda agent=None, *, config=None, skill_name="", agent_id="":
+                evalService.SimulatedAgent(
+                    model=(config or evalService.EvolutionConfig()).judge_model),
+                raising=False)
+
+        _assertOnlyTargetFlips(_mutate, "realTrajectoryExecutor")
+    finally:
+        set_app_state(None)
+
+
+def test_mutation_presentationLedger_attribution_removed_flips_only_itself(monkeypatch):
+    """发 3：摘掉呈现归因函数 → 前置 3 当场红，其余三格相对基线不动。"""
+    from neurova.skills import skill_service as skillService
+
+    def _mutate():
+        monkeypatch.setattr(skillService, "compute_skill_funnel_update", None)
+
+    _assertOnlyTargetFlips(_mutate, "presentationLedger")
+
+
+def test_mutation_failClosed_min_improvement_zeroed_flips_only_itself(monkeypatch):
+    """发 4：min_improvement 有效默认退回 0（当年浮点相等放行零增益的那个洞） → 前置 4 当场红。
+
+    dataclass 的 __init__ 默认在类定义期烘焙，patch 类属性不进入新实例——
+    变异因此替换 config 模块属性为"有效默认 0"的子类，等价于真实回归形态
+    （有人把出厂默认改回 0）。其余三格只读字段名/其他模块，纹丝不动。
+    连带验第二半：判分可用性探针整个被摘，同样必须红——缺一半就不许说满足。
+    """
+    from neurova.evolution.eval import config as evalConfig
+    from neurova.evolution.eval import runner as evalRunner
+    from neurova.evolution.eval.config import EvolutionConfig
+
+    class _ZeroMinImprovement(EvolutionConfig):
+        """有效默认 min_improvement=0 的回归形态（历史洞的重现模拟）。"""
+
+        def __init__(self, **kwargs):
+            kwargs.setdefault("min_improvement", 0.0)
+            super().__init__(**kwargs)
+
+    with monkeypatch.context() as m:
+        # 基线必须先于补丁读取——context 内先打补丁会把基线污染成已变异态。
+        baseline = {k: v["satisfied"] for k, v in automationPrerequisites().items()}
+        assert baseline["failClosedOnMissingEvidence"] is True, "测试基线未建立"
+        m.setattr(evalConfig, "EvolutionConfig", _ZeroMinImprovement)
+        after = {k: v["satisfied"] for k, v in automationPrerequisites().items()}
+        changed = {k for k in baseline if baseline[k] != after[k]}
+        assert changed == {"failClosedOnMissingEvidence"}, (
+            f"min_improvement 归零应当只打掉前置 4，实际变化：{changed}")
+        assert after["failClosedOnMissingEvidence"] is False, (
+            "min_improvement=0 的历史洞重现，前置 4 却仍写满足")
+
+    def _mutate_delattr():
+        monkeypatch.delattr(evalRunner.SkillEvolutionRunner, "_judge_available")
+
+    _assertOnlyTargetFlips(_mutate_delattr, "failClosedOnMissingEvidence")
+
+
 def test_unmetPrerequisiteIsNamedNotSilent():
     """未满足 ⇒ failed 且点名是哪一条（不折叠成"没证据"）。"""
     verdict = automationPrerequisiteVerdict()
