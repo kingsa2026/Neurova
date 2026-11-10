@@ -32,7 +32,7 @@ from .debt_ledger import DebtVerdict, resolve_debt_ledger
 from .rollback_manager import create_rollback_manager, resolve_rollback_state_path
 from .self_improvement_proposer import SelfImprovementProposer, ProposalType
 from .system_performance import get_setpoint
-from neurova.security.governance_settings import save_governance_settings
+from neurova.security.governance_settings import rsiPhaseSourceFor
 
 logger = get_logger(__name__)
 
@@ -222,6 +222,9 @@ class RSIOrchestrator:
             experience_system: 经验闭环系统
             tool_memory_system: 工具记忆闭环系统
         """
+        # 归属先定（G2）：部署控制器按本 agent 的相位解析装配，agent_id 必须
+        # 先于控制器存在——覆写条目按 agent_id 命中，顺序颠倒就是全员吃全局。
+        self.agent_id = str(agent_id or "default")
         # 创建集成管理器
         # 上下文经济性宿主（004 M2）：预算对象在生产由 `TokenBudget()` 默认构造
         # （`context/orchestrator.py` 两处装配点亦如此），故此处同源取默认构造；
@@ -269,8 +272,9 @@ class RSIOrchestrator:
         try:
             from neurova.security.governance_settings import load_governance_settings
 
+            # G2 覆写路线：相位按本 agent 解析（overrides 命中即覆写值，否则全局）
             self.deployment_controller = create_deployment_controller_with_settings(
-                load_governance_settings()
+                load_governance_settings(), agent_id=self.agent_id
             )
         except Exception as e:  # noqa: BLE001 - 设置不可用时维持默认观察期
             logger.warning("部署控制器按治理设置初始化失败，回退默认: %s", e)
@@ -296,8 +300,8 @@ class RSIOrchestrator:
         # 工单 005：阶段与回滚历史必须与编排器同一份。此前这里裸构造，proposer 自带
         # 一个 phase=0 的控制器 ⇒ medium/high 提案的门禁看的是那个私有阶段，
         # 管理员在前端调 `rsi_phase` 对这条通道完全无效。
-        # 归属先定：proposer 的台账与"批准即生效"都按它落到正确的技能库（工单 010）
-        self.agent_id = str(agent_id or "default")
+        # 归属先定：proposer 的台账与"批准即生效"都按它落到正确的技能库（工单 010）；
+        # agent_id 已在装配最前定好（G2 相位覆写按它命中）。
         self.self_improvement_proposer = SelfImprovementProposer(
             agent_id=self.agent_id,
             deployment_controller=self.deployment_controller,
@@ -761,7 +765,7 @@ class RSIOrchestrator:
             logger.debug("指标快照落盘失败: %s", e)
 
     def _persist_rsi_phase(self, new_phase: int) -> bool:
-        """把自动晋升的结论写回治理设置（工单 005）。
+        """把自动晋升的结论写回治理设置（工单 005；G2 升级为按 agent 分域）。
 
         不回写 ⇒ 重启即归零，而编排器每次都以盘上值重建 ⇒ 阶段永远停在人工设定的那个，
         "自动晋升"在跨重启的部署里从未真的发生过。
@@ -769,11 +773,13 @@ class RSIOrchestrator:
         写失败不推翻本轮判据（判据吃的是已发生的证据），但 `False` 必须一路带到观测面：
         "内存已晋升、盘上没晋升"是一等读数，不是静默两态。
 
-        治理设置是**进程级单文件、多 agent 共享一个 phase**（口径见
-        `neurova/security/governance_settings.py` 模块文档串）：多个 agent 的编排器
-        各自晋升时按后写者胜，多 agent 隔离属本单"明确不做"的范围。
+        G2 覆写路线：写回分域收口到 `persistRsiPhaseFor` 单源——本 agent 有覆写
+        条目时写覆写条目（a 晋升不许拖着 b 走），无覆写时沿旧语义写全局。
+        旧注记"多 agent 共享一个 phase、按后写者胜"随覆写域生效而退役。
         """
-        if save_governance_settings({"rsi_phase": new_phase}):
+        from neurova.security.governance_settings import persistRsiPhaseFor
+
+        if persistRsiPhaseFor(self.agent_id, new_phase):
             return True
         logger.warning(
             "阶段晋升未落盘：rsi_phase=%s 只在内存生效，重启将归零"
@@ -1450,6 +1456,9 @@ class RSIOrchestrator:
             "convergence_status": convergence.get("status", "unknown"),
             "agent_id": self.agent_id,
             "deployment_phase": self.deployment_controller.get_current_phase(),
+            # 相位来源（G2）：管理员看得见这 agent 在吃覆写还是全局——
+            # 有效性判定与解析同源（governance_settings.rsiPhaseSourceFor）。
+            "phase_source": rsiPhaseSourceFor(self.agent_id),
             "phase_advanced": bool(self._last_phase_outcome.get("phase_advanced")),
             "phase_persisted": bool(self._last_phase_outcome.get("phase_persisted")),
             "phase_verdict": self._last_phase_outcome.get("phase_verdict") or {},

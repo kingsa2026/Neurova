@@ -294,19 +294,17 @@ def create_deployment_controller(initial_phase: int = 0) -> RSIDeploymentControl
     return RSIDeploymentController(initial_phase)
 
 
-def create_deployment_controller_with_settings(settings) -> RSIDeploymentController:
+def create_deployment_controller_with_settings(
+    settings, agent_id: str = ""
+) -> RSIDeploymentController:
     """按治理设置创建部署控制器（治理遗留收口 2026-09-05）。
 
-    settings 里带 rsi_phase（0..4）则以之为初始阶段（管理员在设置页配置的
-    部署阶段），否则维持 phase=0 观察期。非法值回退 0。
+    G2 覆写路线：`agent_id` 非空时相位按 `resolveRsiPhaseFor` 解析——
+    overrides 命中该 agent 即用覆写值（最小灰度维度），否则全局 rsi_phase；
+    agent_id 为空（旧调用方/探针）维持全局语义。解析规则（含非法值回落 0）
+    单源在 governance_settings，本工厂不再自带第二份 0..4 判定。
     """
-    phase = 0
-    try:
-        raw = (settings or {}).get("rsi_phase")
-        if raw is not None:
-            phase = int(raw)
-    except (TypeError, ValueError):
-        phase = 0
-    if phase < 0 or phase > 4:
-        phase = 0
+    from neurova.security.governance_settings import resolveRsiPhaseFor
+
+    phase = resolveRsiPhaseFor(agent_id, settings)
     return RSIDeploymentController(initial_phase=phase)

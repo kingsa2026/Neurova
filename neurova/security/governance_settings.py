@@ -32,7 +32,9 @@ from neurova.core.data_root import resolveDataPath
 
 logger = get_logger(__name__)
 
-_LOCK = threading.Lock()
+# RLock 而非 Lock：persistRsiPhaseFor 的读改写要在持锁下嵌套调 save_governance_settings
+# （save 内部也取同一把锁），非重入锁会自锁死。
+_LOCK = threading.RLock()
 
 DEFAULTS: Dict[str, Any] = {
     "conversation_rules_enabled": False,  # Step9.96 LLM 成本门控，默认关
@@ -68,6 +70,11 @@ DEFAULTS: Dict[str, Any] = {
     # 与 `工单 015` 立的口径同形："默认值＝收口前的现网默认，不顺手改口径"。
     # 阻塞会把每个 ASK 变成最长 budget 的停顿，属于必须由运维显式开启的行为变更。
     "approval_wait_seconds": 0.0,
+    # G2（survey §10.2，拍板：覆写路线）agent 级相位覆写：{agent_id: phase(0..4)}。
+    # 命中条目的 agent 按覆写值读相位（最小灰度维度），未命中读全局 rsi_phase；
+    # 有覆写条目的 agent 自动晋升写回覆写条目，不污染全局。解析/写回唯一出处
+    # 在本模块（resolveRsiPhaseFor / persistRsiPhaseFor），编排器只搬运不重算。
+    "rsi_phase_overrides": {},
 }
 
 #: `approval_wait_seconds` 的合法域。夹紧而非报错：配置写歪不该让整轮失败。
@@ -86,6 +93,9 @@ def load_governance_settings(path: Optional[Path] = None) -> Dict[str, Any]:
     """加载治理设置（文件不存在/损坏 → 内置默认）"""
     p = Path(path) if path else settings_path()
     merged = dict(DEFAULTS)
+    # 嵌套映射浅拷贝：dict(DEFAULTS) 只复制顶层，覆写表若与 DEFAULTS 共享对象，
+    # 调用方的就地修改会腐蚀内置默认——每次 load 给一份独立副本。
+    merged["rsi_phase_overrides"] = dict(DEFAULTS.get("rsi_phase_overrides") or {})
     try:
         if p.exists():
             data = json.loads(p.read_text(encoding="utf-8"))
@@ -93,6 +103,7 @@ def load_governance_settings(path: Optional[Path] = None) -> Dict[str, Any]:
                 for key in DEFAULTS:
                     if key in data:
                         merged[key] = data[key]
+                merged["rsi_phase_overrides"] = dict(merged.get("rsi_phase_overrides") or {})
     except Exception as e:  # noqa: BLE001 - 读取失败回退默认，不阻断
         logger.warning("治理设置加载失败，使用默认: %s", e)
     return merged
@@ -116,6 +127,62 @@ def save_governance_settings(data: Dict[str, Any], path: Optional[Path] = None) 
         except Exception as e:  # noqa: BLE001
             logger.error("治理设置保存失败: %s", e)
             return False
+
+
+def _coercePhase(raw: Any) -> Optional[int]:
+    """相位词值收敛（0..4）：越界/非整数一律 None（调用方回落全局）。"""
+    try:
+        phase = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return phase if 0 <= phase <= 4 else None
+
+
+def resolveRsiPhaseFor(agent_id: str, settings: Optional[Dict[str, Any]] = None) -> int:
+    """agent 级相位解析的**唯一出处**（G2 覆写路线）。
+
+    overrides 命中该 agent（且条目合法）⇒ 覆写值；否则全局 rsi_phase。
+    编排器装配与相位写回都走这里/`persistRsiPhaseFor`，不各写一份解析规则。
+    非法条目（越界/非整数）不炸装配：该 agent 回落全局相位。
+    """
+    data = settings if settings is not None else load_governance_settings()
+    overrides = data.get("rsi_phase_overrides")
+    if isinstance(overrides, dict):
+        override = _coercePhase(overrides.get(str(agent_id or "")))
+        if override is not None:
+            return override
+    phase = _coercePhase(data.get("rsi_phase"))
+    return 0 if phase is None else phase
+
+
+def rsiPhaseSourceFor(agent_id: str, settings: Optional[Dict[str, Any]] = None) -> str:
+    """相位来源词值（override/global）——状态面呈报"这 agent 在吃哪份相位"。
+
+    有效性判定与 `resolveRsiPhaseFor` 同源（同一个 _coercePhase），不另立第二份规则。
+    """
+    data = settings if settings is not None else load_governance_settings()
+    overrides = data.get("rsi_phase_overrides")
+    if isinstance(overrides, dict) and _coercePhase(overrides.get(str(agent_id or ""))) is not None:
+        return "override"
+    return "global"
+
+
+def persistRsiPhaseFor(agent_id: str, new_phase: int,
+                       path: Optional[Path] = None) -> bool:
+    """相位写回的唯一出处（G2）：有覆写条目的 agent 写覆写条目，否则写全局。
+
+    旧语义（按后写者胜共享全局）对覆写域失效——a 晋升不许把 b 拖着走；
+    无覆写 agent 沿旧语义写全局，现网单 agent 行为零漂移。读改写在同一把
+    RLock 下完成（save 内部再取同锁，重入安全）。
+    """
+    with _LOCK:
+        current = load_governance_settings(path)
+        overrides = dict(current.get("rsi_phase_overrides") or {})
+        agent_key = str(agent_id or "")
+        if agent_key in overrides:
+            overrides[agent_key] = int(new_phase)
+            return save_governance_settings({"rsi_phase_overrides": overrides}, path)
+        return save_governance_settings({"rsi_phase": int(new_phase)}, path)
 
 
 def resolve_flag(key: str, env_var: str) -> bool:
