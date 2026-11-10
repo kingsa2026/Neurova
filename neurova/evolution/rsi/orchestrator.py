@@ -1138,7 +1138,7 @@ class RSIOrchestrator:
             expected_improvement = (1.0 - perf) * adjustment * 10
             return expected_improvement - candidate.complexity * 0.5
 
-        # 验证函数：基于调整方向是否正确
+        # 验证函数：方向校验 + D1 密封档实跑（G1 补实装）
         def validation_fn(candidate: Candidate) -> Dict[str, Any]:
             opt = candidate.metadata.get("optimization", {})
             new_value = opt.get("new_value", 0)
@@ -1158,10 +1158,45 @@ class RSIOrchestrator:
             ):
                 toward = abs(float(setpoint) - float(new_value)) < abs(float(setpoint) - float(current))
                 direction_ok = toward
+            if not direction_ok:
+                return {
+                    "valid": False,
+                    "score": 0.0,
+                    "details": f"current={current}, new={new_value}, setpoint={setpoint}",
+                }
+            # G1 补实装：细筛的"完整验证"接 D1 密封档实跑——候选值代入活值快照
+            # 推演（真实系统只读），塌方例（低于当前态）即 fail-closed 拒绝；
+            # 密封档量不出时诚实降级为方向单源，原因随 details 出街。
+            # 这是 A5 元优化候选在应用前的最后一道网：非数值等病值能漏过方向校验
+            # （isinstance 门跳过 toward 检查），密封档实跑当场抓住。
+            sealed = self._sealedCandidateValidation(opt)
+            if sealed.get("state") == "measured":
+                if sealed.get("regressions"):
+                    return {
+                        "valid": False,
+                        "score": 0.0,
+                        "sealed": sealed,
+                        "details": (
+                            "direction ok but sealed regressions="
+                            f"{sealed.get('regressions')} (score={sealed.get('score')}, "
+                            f"baseline={sealed.get('baseline')})"
+                        ),
+                    }
+                return {
+                    "valid": True,
+                    "score": 1.0,
+                    "sealed": sealed,
+                    "details": f"direction ok, sealed score={sealed.get('score')}，无塌方例",
+                }
+            reason = sealed.get("reason") or ""
             return {
-                "valid": direction_ok,
-                "score": 1.0 if direction_ok else 0.0,
-                "details": f"current={current}, new={new_value}, setpoint={setpoint}",
+                "valid": True,
+                "score": 1.0,
+                "sealed": sealed,
+                "details": (
+                    f"direction ok, sealed={sealed.get('state')}（密封档量不出，"
+                    "降级方向单源）" + (f": {reason}" if reason else "")
+                ),
             }
 
         try:
@@ -1174,6 +1209,65 @@ class RSIOrchestrator:
         except Exception as e:
             logger.warning("RecursiveRatchetPruner 剪枝失败: %s，回退到首个候选", e)
             return candidates[0] if candidates else None
+
+    def _substituteCandidateValue(self, live_params: Dict[str, Dict[str, Any]],
+                                  optimization: Dict[str, Any]) -> Optional[Dict[str, Dict[str, Any]]]:
+        """把候选步进值代入活值快照的**深拷贝**（`system.parameter` 形态与候选生成同源）。
+
+        返回 None = 候选缺 system/parameter/new_value 任一关键项（校验按 unevidenced 处理）。
+        """
+        import copy as _copy
+
+        system = str(optimization.get("system") or "")
+        parameter = str(optimization.get("parameter") or "")
+        new_value = optimization.get("new_value")
+        if not system or not parameter or new_value is None:
+            return None
+        param_name = parameter.split(".", 1)[1] if "." in parameter else parameter
+        if not param_name:
+            return None
+        snapshot = _copy.deepcopy(live_params)
+        snapshot.setdefault(system, {})[param_name] = new_value
+        return snapshot
+
+    def _sealedCandidateValidation(self, optimization: Dict[str, Any]) -> Dict[str, Any]:
+        """G1 细筛校验步的密封档实跑：候选步进值代入**活值快照副本**推演。
+
+        复用 D1 密封机器（splitSealedCases + run_sealed），不新建第二套校验面；
+        例级对照当前态密封读数出 regressions——候选把某个密封用例撞到低于当前态
+        即塌方（fail-closed）。真实系统全程只读，校验不改任何活值。
+        """
+        try:
+            harness = self._eval_harness
+            if harness is None:
+                from .eval_harness import RSIEvalHarness
+
+                harness = RSIEvalHarness()
+                self._eval_harness = harness
+            live_params = self._current_live_params()
+            baseline = harness.run_sealed(live_params)
+            candidate_params = self._substituteCandidateValue(live_params, optimization)
+            if candidate_params is None:
+                return {"state": "unevidenced", "score": None, "baseline": None,
+                        "regressions": [],
+                        "reason": "候选优化缺 system/parameter/new_value 任一关键项"}
+            candidate_readout = harness.run_sealed(candidate_params)
+            base_by_id = {c.get("id"): c.get("score")
+                          for c in (baseline.get("cases") or [])}
+            regressions = [
+                c.get("id") for c in (candidate_readout.get("cases") or [])
+                if c.get("id") in base_by_id and c.get("score", 1.0) < base_by_id[c.get("id")]
+            ]
+            return {
+                "state": candidate_readout.get("state"),
+                "score": candidate_readout.get("score"),
+                "baseline": baseline.get("score"),
+                "regressions": regressions,
+            }
+        except Exception as e:  # noqa: BLE001 - 校验故障不阻断剪枝主链，读数如实 unevidenced
+            logger.debug("细筛密封档校验失败: %s", e)
+            return {"state": "unevidenced", "score": None, "baseline": None,
+                    "regressions": [], "reason": str(e)}
 
     def _extract_performance(self, signals: Dict[str, Any]) -> Optional[float]:
         """从反馈信号中提取性能指标（0.0-1.0）
