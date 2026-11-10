@@ -57,6 +57,36 @@ class ImproverPairedProbe:
         self._startingStatesFn = starting_states
         self._outcomeEvaluator = outcome_evaluator
 
+    #: E4 共同里程碑轴（评估序位）：两臂在同一序位上比质量。
+    MILESTONES = (5, 10)
+
+    def _qualityAtMilestones(self, pairs: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """共同里程碑轴上的质量读数（逐臂；缺臂点名，不空线冒充）。
+
+        第 k 个里程碑 = 前 k 个配对的逐臂质量均值（评估按配对序累积，
+        三臂各自 realized cost 即其里程碑轴）。
+        """
+        readout: Dict[str, Any] = {"axis": list(self.MILESTONES)}
+        for name, keys in (("full", "quality_t"), ("frozen_I_0", "quality_0"),
+                           ("no_update", "quality_no_update")):
+            series = [p.get(keys) for p in pairs]
+            at = {}
+            for milestone in self.MILESTONES:
+                prefix = [v for v in series[:milestone] if v is not None]
+                if len(prefix) < milestone:
+                    at[str(milestone)] = {
+                        "state": "unevidenced",
+                        "reason": f"{name} 臂在里程碑 {milestone} 缺样本"
+                                  f"（有证据 {len(prefix)}/{milestone}）——不空线冒充",
+                    }
+                else:
+                    at[str(milestone)] = {
+                        "state": "measured",
+                        "quality_mean": round(sum(prefix) / len(prefix), 6),
+                    }
+            readout[name] = at
+        return readout
+
     def _startingStates(self) -> List[Dict[str, Any]]:
         return list(self._startingStatesFn() or [])
 
@@ -190,6 +220,10 @@ class ImproverPairedProbe:
         )
         arms["full"]["improved"] = classification["improved"]
         arms["full"]["regressed"] = classification["regressed"]
+        # E4 质量@成本里程碑：共同里程碑轴（评估序位 5/10）上的逐臂质量均值——
+        # 替代"只看终点分"；里程碑超出容量时点名缺哪个臂（不得空线冒充）。
+        # 同级读数（非臂键——A4 的 arms 键集语义不变）。
+        milestones = self._qualityAtMilestones(pairs)
 
         if not gammas:
             return {
@@ -199,6 +233,7 @@ class ImproverPairedProbe:
                 "detail": "全部配对无下游证据（候选缺席或结局量不出），不产出 Γ",
                 "pairs": pairs,
                 "arms": arms,
+                "quality_at_milestones": milestones,
                 "realized_evaluations": evaluations,
                 "policy_versions": {
                     "t": self._policyT.version, "baseline": self._policy0.version},
@@ -212,6 +247,7 @@ class ImproverPairedProbe:
             "evidenced_pairs": len(gammas),
             "pairs": pairs,
             "arms": arms,
+            "quality_at_milestones": milestones,
             "realized_evaluations": evaluations,
             "policy_versions": {
                 "t": self._policyT.version, "baseline": self._policy0.version},
