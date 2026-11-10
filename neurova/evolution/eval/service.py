@@ -395,7 +395,9 @@ def planRealArmTurns(dataset: EvalDataset, config: EvolutionConfig,
     对 `val or tune` 的重新评测；`candidateEvaluations`=每轮每候选对 tune 各一遍；
     `finalHoldout`=胜者终审；`anchor`=锚定地板的无技能臂一遍；
     `heldoutEvidence`=真留出两侧各一遍（只作证据，永不做判据）；
-    `noiseCalibration`=service 侧的重复基线评测。
+    `noiseCalibration`=service 侧的重复基线评测 **＋1 发判分可用性探针**——
+    校准前 `service._noise_band_for` 会真跑 `_judge_available`（对第一例真发
+    一个 agent 回合，镜像盲点修复：台账 §6-593 登记的 used>planned +1 即此）。
     """
     from neurova.evolution.eval.dataset import evaluation_split
 
@@ -415,7 +417,7 @@ def planRealArmTurns(dataset: EvalDataset, config: EvolutionConfig,
         "finalHoldout": len(holdout),
         "anchor": len(holdout) if config.anchor_floor_enabled else 0,
         "heldoutEvidence": 2 * len(dataset.heldout),
-        "noiseCalibration": (int(config.noise_repeats) * len(holdout)
+        "noiseCalibration": (int(config.noise_repeats) * len(holdout) + 1
                              if config.noise_repeats > 1 else 0),
     })
 
