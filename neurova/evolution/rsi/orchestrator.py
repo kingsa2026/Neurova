@@ -38,17 +38,11 @@ logger = get_logger(__name__)
 
 
 def usageTokensDelta(before: int, after: int) -> int:
-    """E1：usage 单源的 token 差分（iterative 期间的真实消耗）。
+    """E1：usage 单源的 token 差分（单源在 core.usage_accounting.tokensDelta，
+    本包装保留既有调用点名——第二定义已收口）。"""
+    from neurova.core.usage_accounting import tokensDelta
 
-    负差分（记账面被清/换进程）不出负数——按 0 处理，不产假成本；
-    计数取自 `usage_accounting.snapshot()`（身份上下文按 sender 计的那套），
-    不新建第二套 token 计数（教义第 6 条）。
-    """
-    try:
-        delta = int(after) - int(before)
-    except (TypeError, ValueError):
-        return 0
-    return delta if delta > 0 else 0
+    return tokensDelta(before, after)
 
 #: 一次参数动作的代价（与 `convergence_analyzer.record_iteration(cost=1.0)`
 #: 同一计量单位，单源引用，不新造第二个尺度）。
