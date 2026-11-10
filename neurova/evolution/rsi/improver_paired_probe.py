@@ -179,6 +179,17 @@ class ImproverPairedProbe:
             }
             for name, qs in arm_qualities.items()
         }
+        # C3 净接线：逐对分类走 ab_library 共享聚合（improved/regressed 与
+        # 冷热 A/B 的 fixed/broken 同判据同机器，不自带第二套）。
+        from neurova.evolution.eval.ab_library import classifyPairwise
+
+        classification = classifyPairwise(
+            [p["quality_0"] for p in pairs],
+            [p["quality_t"] for p in pairs],
+            [p["state"] for p in pairs],
+        )
+        arms["full"]["improved"] = classification["improved"]
+        arms["full"]["regressed"] = classification["regressed"]
 
         if not gammas:
             return {

@@ -205,6 +205,30 @@ def make_agent_ab_executor(agent, *, sender: str = "ab-eval"):
     return _run
 
 
+def classifyPairwise(baseline: List[Any], candidate: List[Any],
+                     keys: List[Any]) -> Dict[str, List[Any]]:
+    """成对比较聚合的**唯一出口**（C3 净接线，教义第 7 条比后合）。
+
+    冷热 A/B 的 fixed/broken 与配对探针的 improved/regressed 是同一判据的
+    两种命名——candidate 严格优于 baseline 记改善、反之记退化、相等记持平
+    （None/缺失不计入任何一侧：没量到不是通过也不是退化）。布尔 pass 形态
+    与浮点质量形态同规则。
+    """
+    improved: List[Any] = []
+    regressed: List[Any] = []
+    unchanged: List[Any] = []
+    for key, base, cand in zip(keys or [], baseline or [], candidate or []):
+        if base is None or cand is None:
+            continue
+        if cand > base:
+            improved.append(key)
+        elif cand < base:
+            regressed.append(key)
+        else:
+            unchanged.append(key)
+    return {"improved": improved, "regressed": regressed, "unchanged": unchanged}
+
+
 async def run_cold_warm_ab(
     cases: List[Dict[str, Any]],
     executor: Callable[..., Awaitable[str]],
@@ -235,13 +259,14 @@ async def run_cold_warm_ab(
     cold = await _arm(False)
     warm = await _arm(True)
     n = len(cases)
-    fixed = [c.get("task_input") for c, cc, wc in zip(cases, cold, warm) if wc and not cc]
-    broken = [c.get("task_input") for c, cc, wc in zip(cases, cold, warm) if cc and not wc]
+    # C3 净接线：fixed/broken 分类走共享聚合（配对探针同机器，双源并存即红）
+    classification = classifyPairwise(
+        cold, warm, [c.get("task_input") for c in cases])
     return {
         "cold_pass_rate": sum(cold) / n,
         "warm_pass_rate": sum(warm) / n,
         "delta": (sum(warm) - sum(cold)) / n,
-        "fixed": fixed,
-        "broken": broken,
+        "fixed": classification["improved"],
+        "broken": classification["regressed"],
         "n": n,
     }
