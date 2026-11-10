@@ -91,14 +91,37 @@ def test_realTrajectoryFlagFollowsTheProductionAssemblyPoint():
     （`service.evolve`/`ab_compare` 走 `resolveEvolutionExecutor`）。台账 §6-97 记过这一点：
     口径错位时，换个桩就能把旗标刷真，而评测照旧不同域。
     """
+    from neurova.api.endpoints import set_app_state
     from neurova.evolution.eval.service import (
         isRealAgentTrajectoryExecutor, resolveEvolutionExecutor,
     )
 
+    set_app_state(None)  # 显式离线态：无在线 agent ⇒ 默认装配回落隔离替身
     executor = resolveEvolutionExecutor(None)
     assert isRealAgentTrajectoryExecutor(executor) is False
     assert automationPrerequisites()["realTrajectoryExecutor"]["satisfied"] is False, (
         "生产回落仍是单轮模拟面，前置 2 却写了满足")
+
+
+def test_probeFlipsTrueWhenDefaultAgentIsOnline():
+    """A1 红灯：默认 agent 在位时探针必须翻真——前置 2 闭环的探针侧半张。
+
+    探针仍然无副作用且便宜：它只走接缝**构造**一次装配（不 run 执行器、不发 LLM），
+    能力由结构推导（agent_ref + 真回合声明），摘掉接缝接线或摘掉在线 agent 都会红。
+    """
+    from neurova.api.endpoints import set_app_state
+    from neurova.evolution.rsi.automation_prerequisites import probeRealTrajectoryExecutor
+
+    class _OnlineAgent:
+        async def chat(self, *args, **kwargs):
+            return "ok"
+
+    set_app_state({"agents": {"default": _OnlineAgent()}})
+    try:
+        assert probeRealTrajectoryExecutor() is True, (
+            "在线 agent 在位，前置 2 探针仍量不到——1→2 晋升继续被逐字点名否决")
+    finally:
+        set_app_state(None)
 
 
 def test_swappingTheOfflineFallbackDoesNotFlipTheFlag(monkeypatch):
@@ -131,7 +154,8 @@ def test_flagTurnsTrueOnlyWhenTheSeamYieldsARealTrajectoryExecutor(monkeypatch):
             return True
 
     monkeypatch.setattr(evalService, "resolveEvolutionExecutor",
-                        lambda agent=None, *, config=None: _RealExecutor(), raising=False)
+                        lambda agent=None, *, config=None, skill_name="": _RealExecutor(),
+                        raising=False)
     assert automationPrerequisites()["realTrajectoryExecutor"]["satisfied"] is True, (
         "真轨迹执行器接上了却量不到——前置 2 就永远关不上")
 

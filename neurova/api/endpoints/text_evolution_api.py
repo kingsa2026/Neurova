@@ -216,7 +216,9 @@ async def evolve_skill(body: EvolveRequest, agent_id: str,
             if body.real_trajectory is True:
                 raise HTTPException(status_code=422, detail=verdict.reason)
             executor = None
-            fallback_reason = "budget_exceeded"
+            from neurova.evolution.eval.service import REAL_ARM_FALLBACK_BUDGET_EXCEEDED
+
+            fallback_reason = REAL_ARM_FALLBACK_BUDGET_EXCEEDED
     extra_failures = []
     try:
         from neurova.evolution.skill_evidence import failureJudgeFailures
@@ -321,7 +323,9 @@ async def ab_compare_texts(body: ABRequest, agent_id: str,
             if body.real_trajectory is True:
                 raise HTTPException(status_code=422, detail=verdict.reason)
             executor = None
-            fallback_reason = "budget_exceeded"
+            from neurova.evolution.eval.service import REAL_ARM_FALLBACK_BUDGET_EXCEEDED
+
+            fallback_reason = REAL_ARM_FALLBACK_BUDGET_EXCEEDED
     report = await service.ab_compare(
         baseline_text=skill_text, candidate_text=body.candidate_text,
         dataset=dataset, config=config, agent=executor,
