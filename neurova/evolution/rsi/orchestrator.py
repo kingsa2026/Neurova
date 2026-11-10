@@ -388,6 +388,10 @@ class RSIOrchestrator:
         self._last_debt_gate: Dict[str, Any] = {}
         # E1/E2：最近一轮的资源向量（None=本轮未进应用段，无成本可记）
         self._last_cost_vector: Optional[Dict[str, Any]] = None
+        # C5 纵报四格：最近一次回滚的恢复成本（None=无回滚）＋滚动接受统计
+        self._last_recovery: Optional[Dict[str, Any]] = None
+        self._attempts_total = 0
+        self._applied_total = 0
         # F1 外部对照：逐轮成对采集（代理分, e2e 参考分）——setpoint 贴近度
         # 代理的滚动相关性呈报（观测档：参考=e2e 对齐；golden 臂评分属升判据档）
         self._proxyReferencePairs: List[Dict[str, Any]] = []
@@ -527,6 +531,29 @@ class RSIOrchestrator:
         readout = rollingCorrelation(proxy_series, reference_series)
         readout["channel"] = "e2e_alignment（观测档）"
         return readout
+
+    def _checkpointColumns(self) -> Dict[str, Any]:
+        """C5 纵报四格：接受率/新成功/回归/恢复成本（D2 预定时刻进台账）。
+
+        缺格如实点名（recovery None = 无回滚发生，不是 0 成本）。
+        """
+        case_metrics = (self._last_eval_outcome or {}) if isinstance(
+            self._last_eval_outcome, dict) else {}
+        regressions = case_metrics.get("case_regressions")
+        new_successes = case_metrics.get("case_unevidenced")
+        acceptance_rate = (self._applied_total / self._attempts_total
+                           if self._attempts_total else None)
+        return {
+            "acceptance_rate": (round(acceptance_rate, 4)
+                                if acceptance_rate is not None else None),
+            "new_successes": new_successes,
+            "regressions": regressions,
+            "recovery_cost": self._last_recovery,
+            "missing": [k for k, v in {
+                "acceptance_rate": acceptance_rate,
+                "recovery_cost": self._last_recovery,
+            }.items() if v is None],
+        }
 
     def _iterationCostVector(self, *, wall_ms: int, tokens_delta: int) -> Dict[str, Any]:
         """E2 每轮资源向量：{turns, tokens, wall_ms}——逐维呈报不相加（Eq10 口径）。
@@ -826,6 +853,7 @@ class RSIOrchestrator:
             }
 
         if optimizations and self.deployment_controller.can_auto_execute("low"):
+            self._attempts_total += 1
             # E1/E2 成本计量起点：usage 单源快照＋墙钟（应用/度量段的真实消耗）
             import time as _time
 
@@ -841,6 +869,7 @@ class RSIOrchestrator:
             applied_results = self.apply_optimizations(optimizations)
             assertRsiRoundIdentity(optimizations, applied_results)
             applied_count = sum(1 for r in applied_results if r.get("applied"))
+            self._applied_total += applied_count
 
             if applied_count:
                 perf_after = self._measure_performance()
@@ -870,6 +899,7 @@ class RSIOrchestrator:
                     eval_after.update(case_metrics)
                 # 回滚判据的单一事实源是 `rollback_manager.should_rollback`：
                 # 编排器只负责把本轮读数喂进去，不自己另写一套比较。
+                _rollback_t0 = _time.monotonic()
                 if self.rollback_manager.should_rollback({
                     "convergence_status": convergence.get("status", ""),
                     "roi": roi_before_apply,
@@ -895,6 +925,12 @@ class RSIOrchestrator:
                         self.debt_ledger.settle_on_rollback(reason="rollback_restored_snapshot")
                     applied_count = 0
                     gain = 0.0
+                    # C5 恢复成本：回滚耗时（重测成本＝决策落定后的密封档重读，
+                    # 与下方 _run_sealed_evidence 同一次调用，此处记时间与次数）。
+                    self._last_recovery = {
+                        "rollback_ms": int((_time.monotonic() - _rollback_t0) * 1000),
+                        "remeasure_evals": 1,
+                    }
                 # 密封档验收证据（D1）：决策（保留/回滚）落定后对最终参数态读一次——
                 # 密封用例从不进 gain/收敛史/候选生成（切分单源 eval_harness.splitSealedCases），
                 # 只作验收证据随状态面呈报。
@@ -947,6 +983,9 @@ class RSIOrchestrator:
                     "eval_outcome": self._last_eval_outcome,
                     "cost_vector": self._last_cost_vector,
                     "deployment_phase": self.deployment_controller.get_current_phase(),
+                    # C5 纵报四格：接受率/新成功/回归/恢复成本（缺格在
+                    # checkpointColumnsReadout 点名，不冒充）。
+                    "checkpoint_columns": self._checkpointColumns(),
                 })
                 # C2 质量三曲线：deployed=现值（决策落定后的状态）、final=本轮
                 # 结束读数、archive_best 由流内历史现算（互斥守卫在 record 侧）。
@@ -1722,6 +1761,8 @@ class RSIOrchestrator:
             # C2 质量三曲线读数（archive-best/deployed/final 逐 checkpoint 分列，
             # 语义互斥守卫在 record 侧——"历史最好冒充现值"构造态被拒）。
             "quality_curves": _qualityCurvesReadout(self.agent_id),
+            # C5 纵报四格滚动读数（缺格点名）。
+            "checkpoint_columns": self._checkpointColumns(),
             "audit_schedule": {
                 "stride": self._audit_schedule._stride,
                 "scheduled_points": self._audit_schedule.scheduledPoints()[:10],
