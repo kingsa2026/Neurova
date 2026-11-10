@@ -76,8 +76,10 @@ class TestPlanCoversCountedSchedule:
 
     @pytest.mark.asyncio
     async def testSingleVariantRoundWithAnchor(self):
+        # runner 级镜像：校准是 service 级成本（B3 起默认开），显式 0 隔离
         config = EvolutionConfig(iterations=2, variants_per_round=1,
-                                 anchor_floor_enabled=True, cost_rule_enabled=False)
+                                 anchor_floor_enabled=True, cost_rule_enabled=False,
+                                 noise_repeats=0)
         ds = _dataset()
         agent = _CountingAgent()
         await _runner(config, agent).run(
@@ -91,9 +93,9 @@ class TestPlanCoversCountedSchedule:
     @pytest.mark.asyncio
     async def testAnchorDisabledCostsExactlyTheAnchorAway(self):
         configOn = EvolutionConfig(iterations=1, anchor_floor_enabled=True,
-                                   cost_rule_enabled=False)
+                                   cost_rule_enabled=False, noise_repeats=0)
         configOff = EvolutionConfig(iterations=1, anchor_floor_enabled=False,
-                                    cost_rule_enabled=False)
+                                    cost_rule_enabled=False, noise_repeats=0)
         ds = _dataset()
         onAgent, offAgent = _CountingAgent(), _CountingAgent()
         for cfg, agent in ((configOn, onAgent), (configOff, offAgent)):
@@ -107,7 +109,7 @@ class TestPlanCoversCountedSchedule:
     @pytest.mark.asyncio
     async def testHeldoutEvidenceIsCharged(self):
         config = EvolutionConfig(iterations=1, anchor_floor_enabled=False,
-                                 cost_rule_enabled=False)
+                                 cost_rule_enabled=False, noise_repeats=0)
         ds = _dataset(heldout=2)
         agent = _CountingAgent()
         await _runner(config, agent).run(baseline_text=BASELINE, artifact_type="skill",
@@ -119,7 +121,8 @@ class TestPlanCoversCountedSchedule:
     @pytest.mark.asyncio
     async def testMultiVariantRoundChargesEverySurvivor(self):
         config = EvolutionConfig(iterations=2, variants_per_round=3,
-                                 anchor_floor_enabled=False, cost_rule_enabled=False)
+                                 anchor_floor_enabled=False, cost_rule_enabled=False,
+                                 noise_repeats=0)  # runner 级镜像：隔离 service 级校准项
         ds = _dataset()
         agent = _CountingAgent()
         await _runner(config, agent).run(baseline_text=BASELINE, artifact_type="skill",
@@ -150,8 +153,10 @@ class TestPlanCoversCountedSchedule:
             ds, EvolutionConfig(iterations=1, noise_repeats=3, anchor_floor_enabled=False),
             iterations=1)
         assert withCal["breakdown"]["noiseCalibration"] == 3 * len(evaluation_split(ds)), withCal
+        # B3 默认翻转后「不校准」须显式 0（出厂即校准档）
         without = service.planRealArmTurns(
-            ds, EvolutionConfig(iterations=1, anchor_floor_enabled=False), iterations=1)
+            ds, EvolutionConfig(iterations=1, anchor_floor_enabled=False, noise_repeats=0),
+            iterations=1)
         assert without["breakdown"]["noiseCalibration"] == 0, without
 
 
@@ -170,7 +175,8 @@ class TestBudgetGate:
         )
         config = EvolutionConfig()
         plan = service.planRealArmTurns(ds, config, iterations=None)
-        assert plan["planned"] == 231, plan
+        # B3 起默认校准档：planned 231 + 3×holdout(5) = 246（校准计入上界）
+        assert plan["planned"] == 246, plan
         verdict = service.checkRealArmBudget(plan, EvolutionSettings().real_arm_max_agent_turns)
         assert verdict.allowed is False, verdict
         assert str(plan["planned"]) in verdict.reason, verdict.reason

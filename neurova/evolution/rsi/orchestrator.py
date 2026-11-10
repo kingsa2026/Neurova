@@ -364,6 +364,54 @@ class RSIOrchestrator:
 
         logger.info("RSIOrchestrator initialized")
 
+    #: RSI gain 置信区间的 z 值（B3）：≈97.5% 单侧置信，口径镜像
+    #: eval/config.EvolutionConfig.noise_z 的出厂值（两侧机器各自独立调参，
+    #: 不互相引用——文本侧校准带与 RSI 例级 CI 是两种噪声形态）。
+    RSI_GAIN_CI_Z = 2.0
+
+    def _pairedGainCI(self, eval_before: Any, eval_after: Any) -> Optional[Dict[str, Any]]:
+        """应用前后决策档的**配对例级 CI**（B3）：gain 的抽样不确定度。
+
+        决策档 6 例是行为空间的样本——例级差分（after−before 逐例配对）的
+        均值±z·se 就是本轮 gain 的置信区间。确定性 harness 的诚实退化：
+        无差异 ⇒ sd=0 ⇒ 带宽 0（CI 退化为点值，如实报窄带）。
+        任一侧非 measured 或用例失配 ⇒ None（CI 缺席，回滚判据回退点规则）。
+        """
+        import statistics as _st
+
+        try:
+            if not isinstance(eval_before, dict) or not isinstance(eval_after, dict):
+                return None
+            if eval_before.get("state") != "measured" or eval_after.get("state") != "measured":
+                return None
+            before_by_id = {c.get("id"): c.get("score")
+                            for c in (eval_before.get("cases") or [])}
+            deltas: List[float] = []
+            for c in (eval_after.get("cases") or []):
+                base = before_by_id.get(c.get("id"))
+                score = c.get("score")
+                if base is None or score is None:
+                    continue
+                deltas.append(float(score) - float(base))
+            if not deltas:
+                return None
+            n = len(deltas)
+            mean = sum(deltas) / n
+            sd = _st.stdev(deltas) if n > 1 else 0.0
+            se = sd / (n ** 0.5) if n > 1 else 0.0
+            half = self.RSI_GAIN_CI_Z * se
+            return {
+                "mean": round(mean, 6),
+                "sd": round(sd, 6),
+                "n": n,
+                "lower": round(mean - half, 6),
+                "upper": round(mean + half, 6),
+                "z": self.RSI_GAIN_CI_Z,
+            }
+        except Exception as e:  # noqa: BLE001 - CI 现算失败＝缺席，不阻断主链
+            logger.debug("gain 配对 CI 现算失败: %s", e)
+            return None
+
     def _probeOutcome(self, state: Dict[str, Any], candidate: Any) -> Optional[float]:
         """Eq8 配对探针的下游结局评估（观测档）：候选值代入活值快照推演决策档。
 
@@ -674,12 +722,19 @@ class RSIOrchestrator:
                     isinstance(eval_before, dict) and eval_before.get("state") == "measured"
                     and isinstance(eval_after, dict) and eval_after.get("state") == "measured"
                 )
+                # B3 配对置信区间：例级差分的抽样不确定度，喂给回滚判据
+                # （上界<0 确证危害才回滚；带内噪声不出 gain 轴判据）并随
+                # eval_after 出街。CI 缺席（失明/用例失配）时判据回退点规则。
+                gain_ci = self._pairedGainCI(eval_before, eval_after)
+                if isinstance(eval_after, dict) and gain_ci is not None:
+                    eval_after["gain_ci"] = gain_ci
                 # 回滚判据的单一事实源是 `rollback_manager.should_rollback`：
                 # 编排器只负责把本轮读数喂进去，不自己另写一套比较。
                 if self.rollback_manager.should_rollback({
                     "convergence_status": convergence.get("status", ""),
                     "roi": roi_before_apply,
                     "gain": gain,
+                    "gain_ci": gain_ci,
                 }):
                     # 有害调整：回滚到应用前快照（失控漂移的本质防护）。
                     # 工单 004：回滚必须同时**留痕到 rollback_manager** ——

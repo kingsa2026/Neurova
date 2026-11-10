@@ -142,6 +142,28 @@ class RSIRollbackManager(PersistedStateMixin):
             logger.warning("Negative ROI detected: %s, should rollback", roi)
             return True
 
+        # B3（survey §10.2）：gain 判据读**配对置信区间**而非点值——单点噪声
+        # 不得触发拒绝。CI 三态：上界 < 0 = 确证危害（回滚）；下界 > 0 = 确证
+        # 改进；横跨零 = 带内噪声（gain 单轴不出判据，收敛/ROI 轴照常）。
+        # CI 缺席（例级读数不可用/旧形态喂入）回退点判据——保守兜底，
+        # 缺席形态在 eval_outcome.gain_ci 可读，不冒充有带。
+        gain_ci = metrics.get("gain_ci")
+        if isinstance(gain_ci, dict):
+            lower = gain_ci.get("lower")
+            upper = gain_ci.get("upper")
+            if isinstance(lower, (int, float)) and isinstance(upper, (int, float)):
+                if upper < 0:
+                    logger.warning(
+                        "Confident harm (gain CI upper %.4f < 0), should rollback", upper)
+                    return True
+                if lower >= 0:
+                    logger.info("Confident improvement (gain CI lower %.4f >= 0)", lower)
+                else:
+                    logger.info(
+                        "Gain CI straddles zero (%.4f..%.4f) — noise band, no gain-axis verdict",
+                        lower, upper)
+                return False
+
         gain = metrics.get("gain")
         if isinstance(gain, (int, float)) and gain < 0:
             logger.warning("Negative gain detected: %s, should rollback", gain)
