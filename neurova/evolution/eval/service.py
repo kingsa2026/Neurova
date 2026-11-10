@@ -617,6 +617,30 @@ class SkillEvolutionService:
                 issues.append(self._sourceIssue("mined", e))
                 ds = None
             if ds is not None and ds.all_examples:
+                # B2 供值接线（T3）：mined 出处与任务流种子不相交守卫——
+                # 重叠＝生成器偏好污染（§7.1），fail-closed 弃级记名；甲案种子
+                # 空集时恒过（真语料回填后即生效）。带记名的**空集**出街而非
+                # None——_attachSourceIssues(None, …) 会把记名丢掉（无处可挂），
+                # 弃级是数据事实问题不是基础设施故障，记名必须可达。
+                try:
+                    from neurova.evolution.eval.miner import minedSessionIds
+                    from neurova.evolution.rsi.task_stream import (
+                        taskStreamOverlapGuard,
+                        taskStreamSessionIds,
+                    )
+
+                    taskStreamOverlapGuard(
+                        minedSessionIds(self.agent_id),
+                        fixture_session_ids=taskStreamSessionIds(),
+                    )
+                except ValueError as overlap_err:
+                    logger.warning("mined 级弃用（任务流重叠守卫）: %s", overlap_err)
+                    issues.append({
+                        "source": "mined",
+                        "reason": "task_stream_overlap_violation",
+                        "detail": str(overlap_err),
+                    })
+                    return self._builtDataset(EvalDataset(), issues, requested=source)
                 return self._builtDataset(ds, issues, requested=source)
             if source == "mined":
                 return self._attachSourceIssues(None, issues, requested=source)
