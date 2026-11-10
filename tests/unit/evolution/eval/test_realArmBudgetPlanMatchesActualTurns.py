@@ -152,7 +152,8 @@ class TestPlanCoversCountedSchedule:
         withCal = service.planRealArmTurns(
             ds, EvolutionConfig(iterations=1, noise_repeats=3, anchor_floor_enabled=False),
             iterations=1)
-        assert withCal["breakdown"]["noiseCalibration"] == 3 * len(evaluation_split(ds)), withCal
+        # +1 = service 侧校准前的判分可用性探针（_judge_available 真跑一例）
+        assert withCal["breakdown"]["noiseCalibration"] == 3 * len(evaluation_split(ds)) + 1, withCal
         # B3 默认翻转后「不校准」须显式 0（出厂即校准档）
         without = service.planRealArmTurns(
             ds, EvolutionConfig(iterations=1, anchor_floor_enabled=False, noise_repeats=0),
@@ -175,8 +176,8 @@ class TestBudgetGate:
         )
         config = EvolutionConfig()
         plan = service.planRealArmTurns(ds, config, iterations=None)
-        # B3 起默认校准档：planned 231 + 3×holdout(5) = 246（校准计入上界）
-        assert plan["planned"] == 246, plan
+        # B3 起默认校准档：planned 231 + 3×holdout(5) + 1 探针 = 247（校准计入上界）
+        assert plan["planned"] == 247, plan
         verdict = service.checkRealArmBudget(plan, EvolutionSettings().real_arm_max_agent_turns)
         assert verdict.allowed is False, verdict
         assert str(plan["planned"]) in verdict.reason, verdict.reason

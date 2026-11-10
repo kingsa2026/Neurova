@@ -223,14 +223,11 @@ class TestEvolveArmSwitch:
         assert r.status_code == 200, r.text
         data = r.json()["data"]
         assert data["executor_kind"] == "real_agent", data
-        # 计划镜像契约：planned 确定性、used ≥1（真臂真跑了）、
-        # budget_plan_exceeded == (used > planned)——漂移必须被外露而不是
-        # 被断言掩盖。已知 +1 盲点（D1 carve＋B3 校准组合下计划漏计一轮，
-        # 台账 §6-593 登记，修复另票）：本格钉"漂移如实出街"，不钉无漂移。
-        assert data["planned_agent_turns"] == 15, data
-        assert data["agent_turns_used"] >= 1, data
-        assert data["budget_plan_exceeded"] == (
-            data["agent_turns_used"] > data["planned_agent_turns"]), data
+        # 计划镜像契约（盲点已修：noiseCalibration 计入 +1 探针）：
+        # planned 确定性、used ≥1 且 ≤ planned（计划回归真上界）、不超帽。
+        assert data["planned_agent_turns"] == 16, data
+        assert 1 <= data["agent_turns_used"] <= data["planned_agent_turns"], data
+        assert data["budget_plan_exceeded"] is False, data
         assert agent.calls, "真臂根本没跑 agent 回合"
         assert {c.get("save_memory") for c in agent.calls} == {False}, agent.calls
 
@@ -265,9 +262,9 @@ class TestBudgetGateBeforeSpending:
         assert r.status_code == 422, r.text
         assert agent.calls == [], "闸在花钱之后才判，那就不是预算闸"
         detail = r.json()["detail"]
-        # 固定数据集确定性值：55（B3 校准 6 项计入；D1 heldoutEvidence 于
-        # service 侧 carve 后才出现，API 计划点为 0——见末格漂移说明）
-        assert "55" in detail and "40" in detail, detail
+        # 固定数据集确定性值：56（B3 校准 3×2+1 探针=7 项计入；D1 heldoutEvidence
+        # 于 service 侧 carve 后才出现，API 计划点为 0）
+        assert "56" in detail and "40" in detail, detail
         assert "candidateEvaluations" in detail, detail
 
     def testRaisedBudgetLetsTheSameRequestThrough(self, env, offline, monkeypatch, fixedDataset):
@@ -283,8 +280,8 @@ class TestBudgetGateBeforeSpending:
         r = _postEvolve(client, "a1",
                         {"skill_id": SKILL_ID, "iterations": 10, "real_trajectory": True})
         assert r.status_code == 200, r.text
-        # 固定数据集确定性值：51（55 − API 422 前置项差；见漂移说明）
-        assert r.json()["data"]["planned_agent_turns"] == 51, r.json()["data"]
+        # 固定数据集确定性值：52（镜像含校准 +1 探针）
+        assert r.json()["data"]["planned_agent_turns"] == 52, r.json()["data"]
 
     def testSimulatedArmIsNeverBoundedByTheRealArmBudget(self, env, offline, monkeypatch):
         """预算只管真臂：把键压到 1，模拟面照跑（闸不得变成第二套降级路径）。"""
@@ -366,13 +363,12 @@ class TestArmKindReachesTheApproverFace:
         assert run["executor_kind"] == "real_agent", run
         assert run["model_under_test"] == "agent_routed", run
         # 计划与真实花费同时出街：审批人看得见这条证据花了多少回合、上限算的是多少。
-        # 两面必须给同一个数——运行审计与响应各算一遍就是第二份口径（固定数据集
-        # 确定性值 15；见 testRealArmFlagReachesTheAgentAndReportsTurns 的漂移说明）。
-        assert run["planned_agent_turns"] == 15, run
+        # 两面必须给同一个数——运行审计与响应各算一遍就是第二份口径
+        # （固定数据集确定性值 16，镜像含校准 +1 探针）。
+        assert run["planned_agent_turns"] == 16, run
         assert run["planned_agent_turns"] == posted.json()["data"]["planned_agent_turns"], run
-        assert run["agent_turns_used"] >= 1, run
-        assert run["budget_plan_exceeded"] == (
-            run["agent_turns_used"] > run["planned_agent_turns"]), run
+        assert 1 <= run["agent_turns_used"] <= run["planned_agent_turns"], run
+        assert run["budget_plan_exceeded"] is False, run
 
 
     def testPutReachesTheNewKeyAndTheThreeLaggingRsiKnobs(self, env, monkeypatch):
