@@ -83,14 +83,15 @@ def _resolveIdentityFromHeaders(headers: Dict[str, str]) -> Optional[Dict[str, A
     return None
 
 
-async def _identityFromJwt(token: str) -> Optional[Dict[str, Any]]:
-    """JWT 段：复用 REST 的 `_identityFromCredentialsOr401`（同一校验实现）。"""
+def _identityFromJwt(token: str) -> Optional[Dict[str, Any]]:
+    """JWT 段：复用 REST 的 `_identityFromCredentialsOr401`（同一校验实现，
+    同步函数——唯一事实源不因 MCP 面改 async）。"""
     from fastapi.security.http import HTTPAuthorizationCredentials
     from neurova.api.auth import _identityFromCredentialsOr401
 
     try:
         creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-        return await _identityFromCredentialsOr401(creds)
+        return _identityFromCredentialsOr401(creds)
     except Exception:  # noqa: BLE001 - JWT 无效即 401，不降级
         return None
 
@@ -102,7 +103,7 @@ async def _resolveIdentity(scope: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return user
     bearer = (headers.get("authorization") or "").strip()
     if bearer.lower().startswith("bearer "):
-        return await _identityFromJwt(bearer[7:].strip())
+        return _identityFromJwt(bearer[7:].strip())
     return None
 
 
