@@ -412,6 +412,39 @@ class RSIOrchestrator:
             logger.debug("gain 配对 CI 现算失败: %s", e)
             return None
 
+    def _caseRegressionMetrics(self, eval_before: Any, eval_after: Any) -> Dict[str, Any]:
+        """跨轮回放门的例级读数（C1）：经文本侧共享判据机器出退化清单。
+
+        判据机器**接线不并造**（教义第 6 条）：`eval.runner._caseRegressionReadout`
+        是 P1-A 成果、probeCaseLevelGate 的同一判据形态——RSI 侧只做形状适配
+        （决策档 {id, score} → 判据机器的 {baseline, candidate, failed} 形状）。
+        任一侧非 measured ⇒ 空清单（例级门无量不出形态，不冒充通过）。
+        """
+        try:
+            from neurova.evolution.eval.runner import _caseRegressionReadout
+
+            if (not isinstance(eval_before, dict) or not isinstance(eval_after, dict)
+                    or eval_before.get("state") != "measured"
+                    or eval_after.get("state") != "measured"):
+                return {"case_regressions": [], "case_unevidenced": []}
+            before_by_id = {c.get("id"): c.get("score")
+                            for c in (eval_before.get("cases") or [])}
+            case_scores = {}
+            for c in (eval_after.get("cases") or []):
+                base = before_by_id.get(c.get("id"))
+                score = c.get("score")
+                if base is None or score is None:
+                    continue
+                case_scores[c["id"]] = {
+                    "baseline": base, "candidate": score,
+                    "baseline_failed": False, "candidate_failed": False,
+                }
+            regressions, unevidenced = _caseRegressionReadout(case_scores)
+            return {"case_regressions": regressions, "case_unevidenced": unevidenced}
+        except Exception as e:  # noqa: BLE001 - 例级门故障＝缺席，不阻断主链
+            logger.debug("跨轮回放门例级读数失败: %s", e)
+            return {"case_regressions": [], "case_unevidenced": []}
+
     def _pairedE2EGain(self, eval_before: Any, eval_after: Any) -> Optional[float]:
         """真实结局对齐差分（B1）：前后两次 yardstick 读数的差。
 
@@ -757,6 +790,10 @@ class RSIOrchestrator:
                 e2e_gain = self._pairedE2EGain(eval_before, eval_after)
                 if isinstance(eval_after, dict) and e2e_gain is not None:
                     eval_after["e2e_gain"] = e2e_gain
+                # C1 跨轮回放门：例级退化清单（共享判据机器出），喂回滚判据。
+                case_metrics = self._caseRegressionMetrics(eval_before, eval_after)
+                if isinstance(eval_after, dict):
+                    eval_after.update(case_metrics)
                 # 回滚判据的单一事实源是 `rollback_manager.should_rollback`：
                 # 编排器只负责把本轮读数喂进去，不自己另写一套比较。
                 if self.rollback_manager.should_rollback({
@@ -765,6 +802,7 @@ class RSIOrchestrator:
                     "gain": gain,
                     "gain_ci": gain_ci,
                     "e2e_gain": e2e_gain,
+                    "case_regressions": case_metrics.get("case_regressions"),
                 }):
                     # 有害调整：回滚到应用前快照（失控漂移的本质防护）。
                     # 工单 004：回滚必须同时**留痕到 rollback_manager** ——

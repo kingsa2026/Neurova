@@ -185,6 +185,17 @@ class RSIRollbackManager(PersistedStateMixin):
                 e2e_gain)
             return True
 
+        # C1（survey §10.2）：跨轮回放门——例级退化即回滚（allowance=0，安全地板
+        # 最严档）。均值/CI 都好看但单例被撞坏 = 组合读数说谎，必须判否。
+        # 判据机器与文本侧共用 `_caseRegressionReadout`（P1-A 成果，教义第 6 条
+        # 接线不并造）；清单由编排器经共享机器算出喂入。缺席不参与判据。
+        case_regressions = metrics.get("case_regressions")
+        if isinstance(case_regressions, list) and case_regressions:
+            logger.warning(
+                "Case-level regressions detected: %s — should rollback",
+                case_regressions)
+            return True
+
         return False
 
     def execute_rollback(self, snapshot_id: str) -> bool:
