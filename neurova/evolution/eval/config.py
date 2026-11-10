@@ -86,9 +86,11 @@ class EvolutionConfig:
     # δ>0 表示已校准（历史校准产物回填或注入 NoiseBand 时的兜底来源）。
     # 0 = 未校准，判据回退 min_improvement——默认行为与旧版逐字节一致。
     noise_band_delta: float = 0.0
-    # service 侧自动校准：对同一基线重复评测的次数。默认 0 = 不自动校准
-    # （评测预算不变）；生产可显式调高（≥2 才会触发校准）。
-    noise_repeats: int = 0
+    # service 侧自动校准：对同一基线重复评测的次数。B3（survey §10.2）默认
+    # 0→3：校准算式早已在（δ=z·sd），只差默认开——接受判据从此读
+    # max(min_improvement, δ) 而非点值，单点噪声不再触发接受/拒绝。
+    # 真臂预算已按 repeats×判据集计上（planRealArmTurns.noiseCalibration）。
+    noise_repeats: int = 3
     # 校准置信系数：δ = noise_z × sd(重复评测得分)，z=2 ≈ 97.5% 单侧置信。
     noise_z: float = 2.0
 

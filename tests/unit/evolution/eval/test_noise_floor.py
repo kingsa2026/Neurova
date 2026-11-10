@@ -221,8 +221,8 @@ class TestServiceWiring:
         assert result.noise_band.get("method") == "repeated_baseline_evals"
 
     @pytest.mark.asyncio
-    async def test_service_default_skips_calibration(self, tmp_path, monkeypatch, offlineAgent):
-        """默认 noise_repeats=0：不花校准预算，无缓存文件，行为与旧版一致。"""
+    async def test_service_default_calibrates(self, tmp_path, monkeypatch, offlineAgent):
+        """B3 默认翻转：出厂即校准档（noise_repeats=3）——δ 带随运行产出并缓存。"""
         from neurova.evolution.eval.service import SkillEvolutionService
 
         monkeypatch.setenv("NEUROVA_TEXT_EVOLUTION", "1")
@@ -230,6 +230,22 @@ class TestServiceWiring:
         result, _ = await svc.evolve(
             skill_id="s1", skill_text=BASELINE, dataset=_ds(),
             agent=offlineAgent, judge=self._judge, mutate=_mutate_appends_improved,
+        )
+        assert not result.rejected
+        assert (tmp_path / "evo" / "calibration.json").exists()
+        assert result.noise_band.get("method") == "repeated_baseline_evals"
+
+    @pytest.mark.asyncio
+    async def test_service_explicit_zero_skips_calibration(self, tmp_path, monkeypatch, offlineAgent):
+        """显式 0：不花校准预算，无缓存文件（关闸语义保留）。"""
+        from neurova.evolution.eval.service import SkillEvolutionService
+
+        monkeypatch.setenv("NEUROVA_TEXT_EVOLUTION", "1")
+        svc = SkillEvolutionService("agent-z", base_dir=tmp_path / "evo")
+        result, _ = await svc.evolve(
+            skill_id="s1", skill_text=BASELINE, dataset=_ds(),
+            agent=offlineAgent, judge=self._judge, mutate=_mutate_appends_improved,
+            config=EvolutionConfig(noise_repeats=0),
         )
         assert not result.rejected
         assert not (tmp_path / "evo" / "calibration.json").exists()
