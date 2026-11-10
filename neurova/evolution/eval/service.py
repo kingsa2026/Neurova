@@ -204,23 +204,75 @@ def sourceCoverageReadout(proposals: list) -> dict:
         "by_source")
 
 
-def resolveEvolutionExecutor(agent: Any = None, *, config: Optional[EvolutionConfig] = None) -> Any:
+#: 真臂超预算回落的原因词值（API 端点与 service 内闸共用一份，不各写字面量）。
+REAL_ARM_FALLBACK_BUDGET_EXCEEDED = "budget_exceeded"
+
+
+def realArmMaxTurns() -> int:
+    """真臂一次运行的回合上限——进化设置的单点读数（API 预算闸与 service 内闸共用）。
+
+    读设置失败不崩进化链路：回默认档 40（与 `EvolutionSettings` 初值一致），
+    闸的语义由 `checkRealArmBudget` 承担，这里只负责把数拿出来。
+    """
+    try:
+        from neurova.evolution.evolution_settings import load_settings
+
+        return max(1, int(load_settings().real_arm_max_agent_turns))
+    except Exception as e:  # noqa: BLE001 - 设置读取失败回默认档，不阻断装配
+        logger.debug("真臂回合上限读取失败, 回默认 40: %s", e)
+        return 40
+
+
+def _onlineAgentFor(agent_id: str = "") -> Any:
+    """默认装配路径的在线 agent 解析（照抄 `_textArmExecutor` auto 的取法）。
+
+    `agent_id` 空按"当前默认 agent"解析（`get_agent_instance` 同款语义）；
+    `_app_state` 缺席（离线/测试进程）或指名 agent 不在位 ⇒ None。
+    """
+    try:
+        from neurova.api.endpoints import get_agent_instance
+
+        return get_agent_instance(agent_id or "")
+    except Exception as e:  # noqa: BLE001 - 装配读不到在线位就按离线走，不崩装配
+        logger.debug("在线 agent 解析失败, 按离线装配: %s", e)
+        return None
+
+
+def resolveEvolutionExecutor(agent: Any = None, *, config: Optional[EvolutionConfig] = None,
+                             skill_name: str = "", agent_id: str = "") -> Any:
     """生产装配路径的执行器**唯一出处**。
 
     为什么要收成一处：`evolve()` 与 `ab_compare()` 过去各写一遍
     `agent or SimulatedAgent(model=...)`——同一条回落存在两份定义（教义第 6 条）。
     后果不是难看，是**改不动**：接真轨迹时只会改到其中一条，另一条静默留在旧语义上，
-    而两条路径都自称"评测"。历史代价本仓已实测过一次：`agent=None` 的回落会接上
-    **真**多模型客户端，三个用例因此真花 LLM 配额并把整目录跑测挂死
-    （来历见 `tests/unit/evolution/eval/conftest.py` 首段）。
+    而两条路径都自称"评测"。
 
-    本函数只回答"装配时用什么执行器"。`SkillEvolutionRunner` 自己的离线兜底
-    （`runner._DefaultAgent`）不动——那是直接构造对象时的库层默认，不是装配路径；
-    §8 前置 2 的探针问的必须是这里，不是那里。
+    `agent=None`（auto）的语义（A1，§8 前置 2 的落地面）：
+
+    · 在线 agent 在位（生产进程）＋技能名可 mention ⇒ `TextArmAgentExecutor` 真臂，
+      评测执行面与线上行为同域；mention 校验收口在执行器构造器里，这里不复制第二份。
+    · 离线/无在线 agent/技能名不可 mention ⇒ `SimulatedAgent` **隔离替身**——
+      这是反向格不是缺陷：`agent=None` 的回落历史上接过**真**多模型客户端，
+      三个用例真花 LLM 配额并把整目录跑测挂死（`tests/unit/evolution/eval/conftest.py`
+      首段）。测试进程没有在线位，替身语义原样成立；真臂代价由预算闸管
+      （`checkRealArmBudget`），不在这层管。
+
+    本函数只回答"装配时用什么执行器"，构造真臂不 run、不发请求——探针
+    （`automation_prerequisites.probeRealTrajectoryExecutor`）因此可以便宜地问这里。
+    `SkillEvolutionRunner` 自己的离线兜底（`runner._DefaultAgent`）不动——
+    那是直接构造对象时的库层默认，不是装配路径。
     """
     if agent is not None:
         return agent
     cfg = config or EvolutionConfig()
+    online = _onlineAgentFor(agent_id)
+    if online is not None:
+        try:
+            from neurova.evolution.eval.ab_library import TextArmAgentExecutor
+
+            return TextArmAgentExecutor(online, skill_name=str(skill_name or ""))
+        except ValueError as e:  # noqa: BLE001 - 技能名不可 mention ⇒ 本轮退模拟面
+            logger.debug("真臂装配退回模拟面: %s", e)
     return SimulatedAgent(model=cfg.judge_model)
 
 
@@ -645,7 +697,21 @@ class SkillEvolutionService:
 
         # 执行器在此**一次** resolve（装配单点不变），基座读数由**真正拿去执行的那个对象**
         # 推导——手工传一个模型名就是伪造证据。
-        executor = resolveEvolutionExecutor(agent, config=cfg)
+        # skill_name 用 skill_id 兜底（与 API 侧 _textArmExecutor 的 `name or skill_id`
+        # 同款口径）；agent_id 用本服务的归属 agent——真臂回合必须跑在证据声明的那个
+        # agent 上，跑在默认 agent 上就是跨域证据。
+        executor = resolveEvolutionExecutor(agent, config=cfg,
+                                            skill_name=skill_id, agent_id=self.agent_id)
+        # service 内预算闸（A1 新暴露面）：接缝给真臂后，后台 evolve(agent=None) 与
+        # API auto 回落（executor=None ⇒ 接缝重解析）都会在这里重新过闸——没有这道闸，
+        # 接缝接真轨迹就打穿了 API 侧的预算门。超帽回落带原因出街，不静默降级。
+        realArmFallback = ""
+        if executorKind(executor) == EXECUTOR_KIND_REAL:
+            verdict = checkRealArmBudget(
+                planRealArmTurns(dataset, cfg, iterations=iterations), realArmMaxTurns())
+            if not verdict.allowed:
+                executor = SimulatedAgent(model=cfg.judge_model)
+                realArmFallback = REAL_ARM_FALLBACK_BUDGET_EXCEEDED
         modelUnderTest = resolveModelUnderTest(executor)
         runner = make_skill_evolution_runner(
             cfg,
@@ -703,6 +769,7 @@ class SkillEvolutionService:
                 if kind == EXECUTOR_KIND_REAL else None)
         result.experiment_fingerprint = experimentFp
         result.executorKind = kind
+        result.real_arm_fallback = realArmFallback
         result.plannedAgentTurns = None if plan is None else plan["planned"]
         result.agentTurnsUsed = realArmTurnsUsed(executor, kind)
         result.budgetPlanExceeded = (None if plan is None or result.agentTurnsUsed is None

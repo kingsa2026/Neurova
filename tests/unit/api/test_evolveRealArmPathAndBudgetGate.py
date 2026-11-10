@@ -165,8 +165,10 @@ class TestEvolveArmSwitch:
         assert data["executor_requested"] == "auto", data
         assert data.get("real_trajectory_fallback", "") == "", data
         assert agent.calls, "默认 auto 在 agent 在线时必须跑真回合"
-        # 默认 auto 只改请求面；RSI 自动晋升的第四条前置仍按生产装配点推导，不因本端点翻真。
-        assert probeRealTrajectoryExecutor() is False
+        # A1 之后探针与接缝同源：本用例已把生产装配位（get_agent_instance）指到在线
+        # stub，探针问同一装配点即如实翻真——离线态仍 False 的反向格由
+        # test_evolutionExecutorSingleSource / test_automationPrerequisiteGate 钉住。
+        assert probeRealTrajectoryExecutor() is True
 
     def testDefaultAutoFallsBackWhenBudgetExceeded(self, env, offline, monkeypatch):
         """auto 档遇预算不足：不花回合，回落到模拟面并标注 budget_exceeded。"""

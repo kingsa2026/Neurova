@@ -89,6 +89,12 @@ def probeFailClosedOnMissingEvidence() -> bool:
         return False
 
 
+#: 前置 2 探针自有的技能名（mention-safe）。探针要问的是接缝的**装配能力**：
+# "给定可 mention 的技能名时能不能产出真臂执行器"——名字本身不对应任何真实技能，
+# 执行器只被构造、从不被 run，因此探针无副作用且便宜。
+PROBE_SKILL_NAME = "rsi_executor_probe"
+
+
 def probeRealTrajectoryExecutor() -> bool:
     """前置 2：判据执行面与线上行为同域（真 agent 轨迹）。
 
@@ -97,16 +103,19 @@ def probeRealTrajectoryExecutor() -> bool:
     兜底改得不回显"就能把旗标刷真，而两条评测路径用的仍是单轮模拟面——弱保护，
     台账 §6-97 记的就是这一处。改问接缝之后，兜底怎么动都不影响读数。
 
-    能力本身也不许写成旗标：由 `isRealAgentTrajectoryExecutor` 从结构推导
-    （持有 `agent_ref` + 显式声明跑真回合，缺一即 False）。探针因此是同步的，
-    不再需要"事件循环已在跑"的回落分支。
+    探针带 `PROBE_SKILL_NAME` 走一遍真实装配：在线 agent 在位 ⇒ 接缝产出真臂执行器
+    （结构翻真）；离线/无在线 agent ⇒ 接缝回落隔离替身（读数如实 False）。
+    接缝接线被摘掉或在线位清空都会当场红——能力由结构推导
+    （`isRealAgentTrajectoryExecutor`：持有 `agent_ref` + 显式声明跑真回合，缺一即 False），
+    不写常量旗标。探针是同步的、无副作用的：构造不 run，不发任何请求。
     """
     try:
         from neurova.evolution.eval.service import (
             isRealAgentTrajectoryExecutor, resolveEvolutionExecutor,
         )
 
-        return isRealAgentTrajectoryExecutor(resolveEvolutionExecutor(None))
+        return isRealAgentTrajectoryExecutor(
+            resolveEvolutionExecutor(None, skill_name=PROBE_SKILL_NAME))
     except Exception:  # noqa: BLE001 - 量不到就按未满足，宁可挡住晋升不假装量到
         return False
 

@@ -47,6 +47,141 @@ async def _markerMutate(*, artifact_text, artifact_type, failures, **kw):
     return artifact_text + "\nIMPROVED"
 
 
+class _OnlineAgent:
+    """在线 agent 替身：接缝 auto 语义下应被包成真轨迹执行器去跑真回合。
+
+    `chat` 与生产 agent 同名同形（TextArmAgentExecutor.run 调的就是它），
+    返回恒为标记串，判分器据此认出"被执行的是谁"。不触任何 LLM 客户端，
+    本目录出站闸的语义（离线测试不发真请求）原样成立。
+    """
+
+    def __init__(self):
+        self.chatCalls = 0
+
+    async def chat(self, message, **kwargs):
+        self.chatCalls += 1
+        return MARK
+
+
+@pytest.fixture
+def onlineDefaultAgent():
+    """把替身挂进生产装配位的默认 agent 槽；teardown 还原，防串味到后续用例。"""
+    from neurova.api.endpoints import set_app_state
+
+    agent = _OnlineAgent()
+    set_app_state({"agents": {"default": agent}})
+    yield agent
+    set_app_state(None)
+
+
+def test_defaultAssemblyResolvesOnlineAgentIntoRealTrajectoryExecutor(onlineDefaultAgent):
+    """A1 红灯：默认装配路径拿到在线 agent 时必须产出真轨迹执行器（不再回落模拟面）。
+
+    这格翻绿 ⇒ `probeRealTrajectoryExecutor` 结构翻真 ⇒ §8 前置 2 闭环，
+    phase 1→2 晋升不再被逐字点名否决。
+    """
+    from neurova.evolution.eval.service import (
+        EXECUTOR_KIND_REAL,
+        executorKind,
+        isRealAgentTrajectoryExecutor,
+        resolveEvolutionExecutor,
+    )
+
+    executor = resolveEvolutionExecutor(None, skill_name="probe_skill")
+    assert isRealAgentTrajectoryExecutor(executor) is True, (
+        "在线 agent 在位，默认装配路径却仍回落模拟面——前置 2 永远关不上")
+    assert executor.agent_ref is onlineDefaultAgent, "真臂执行器没绑到装配位那个 agent"
+    assert executorKind(executor) == EXECUTOR_KIND_REAL
+
+
+def test_offlineAssemblyStillFallsBackToIsolatedStub():
+    """反向格（历史病）：离线/无在线 agent 的装配必须仍走隔离替身。
+
+    `agent=None` 的回落一旦接上真多模型客户端，三个用例真花配额并把整目录跑测挂死
+    （conftest 首段的实测代价）。改回落语义时这一格不许翻。
+    """
+    from neurova.api.endpoints import set_app_state
+    from neurova.evolution.eval.service import (
+        SimulatedAgent,
+        isRealAgentTrajectoryExecutor,
+        resolveEvolutionExecutor,
+    )
+
+    set_app_state(None)  # 显式离线态，不依赖用例顺序
+    executor = resolveEvolutionExecutor(None, skill_name="probe_skill")
+    assert isinstance(executor, SimulatedAgent), (
+        "离线测试态必须仍走隔离替身——接真轨迹的历史病就是从这里烧配额的")
+    assert isRealAgentTrajectoryExecutor(executor) is False
+
+
+def test_unmentionableSkillNameFallsBackToSimulated(onlineDefaultAgent):
+    """技能名组不出 $mention 时，本轮装配诚实退回模拟面（arm 读数照实记 simulated）。"""
+    from neurova.evolution.eval.service import SimulatedAgent, resolveEvolutionExecutor
+
+    executor = resolveEvolutionExecutor(None, skill_name="bad name!")
+    assert isinstance(executor, SimulatedAgent)
+
+
+@pytest.mark.asyncio
+async def test_evolveAutoArmRunsRealAgentTurnsWithinBudget(
+        tmp_path, monkeypatch, onlineDefaultAgent):
+    """行为格：evolve 的 auto 臂拿到在线 agent 后要真跑 agent 回合，臂来源读 real_agent。
+
+    预算帽 monkeypatch 成 40（默认档）——本用例数据集的计划回合 ≤40，闸放行。
+    """
+    from neurova.evolution.eval import service as evalService
+
+    monkeypatch.setenv("NEUROVA_TEXT_EVOLUTION", "1")
+    monkeypatch.setattr(evalService, "realArmMaxTurns", lambda: 40, raising=False)
+    svc = evalService.SkillEvolutionService("default", base_dir=tmp_path / "evo")
+    result, _ = await svc.evolve(
+        skill_id="s1", skill_text=BASELINE, dataset=_dataset(),
+        judge=_judgeKeyedOnOutput(), mutate=_markerMutate,
+        config=EvolutionConfig(iterations=1, min_improvement=0.0),
+    )
+
+    assert result.executorKind == "real_agent", (
+        "auto 臂拿到在线 agent 却仍走模拟面——台账臂来源会以模拟数字冒充线上证据")
+    assert (result.agentTurnsUsed or 0) >= 1, "真臂回合计数为空——计数器没装上"
+    assert result.real_arm_fallback == "", "预算内运行不该带回落标注"
+    assert onlineDefaultAgent.chatCalls >= 1, "执行器包了真臂却没真跑 agent 回合"
+
+
+@pytest.mark.asyncio
+async def test_evolveAutoArmOverBudgetFallsBackHonestly(
+        tmp_path, monkeypatch, onlineDefaultAgent):
+    """预算闸：超帽的 auto 臂必须诚实回落模拟面并标注原因，不许静默烧真回合。
+
+    这是接缝接真轨迹后的新暴露面：后台 evolve(agent=None) 在在线 agent 在位时会拿到
+    真臂，没有这道闸，后台路径就绕过了 API 侧的预算门（§8 前置 2 落地票面的教训延伸）。
+    """
+    from neurova.evolution.eval import service as evalService
+
+    monkeypatch.setenv("NEUROVA_TEXT_EVOLUTION", "1")
+    monkeypatch.setattr(evalService, "realArmMaxTurns", lambda: 1, raising=False)
+    # 回落臂是裸 SimulatedAgent（走 llm_router）——本目录出站闸拦真客户端，
+    # 这里换成本地假客户端只喂标记串，闸的语义（不发真请求）原样成立。
+    from neurova.llm import multi_model_client as mmc
+
+    class _FakeClient:
+        async def chat(self, messages, model=None):
+            return {"success": True, "response": MARK}
+
+    monkeypatch.setattr(mmc, "get_multi_model_client", lambda: _FakeClient())
+    svc = evalService.SkillEvolutionService("default", base_dir=tmp_path / "evo")
+    result, _ = await svc.evolve(
+        skill_id="s1", skill_text=BASELINE, dataset=_dataset(),
+        judge=_judgeKeyedOnOutput(), mutate=_markerMutate,
+        config=EvolutionConfig(iterations=1, min_improvement=0.0),
+    )
+
+    assert result.executorKind == "simulated", "超预算运行不该跑真臂"
+    assert result.real_arm_fallback == "budget_exceeded", (
+        "超预算回落必须带原因出街——静默降级就是教义第 2 条的表面抹除")
+    assert result.agentTurnsUsed is None, "回落成模拟臂后不该再报真臂回合数"
+    assert onlineDefaultAgent.chatCalls == 0, "超预算回落不能花真回合"
+
+
 def test_injectedExecutorPassesThroughUnchanged():
     from neurova.evolution.eval.service import resolveEvolutionExecutor
 
@@ -69,7 +204,8 @@ async def test_evolveTakesItsExecutorFromTheSeam(tmp_path, monkeypatch):
 
     monkeypatch.setenv("NEUROVA_TEXT_EVOLUTION", "1")
     monkeypatch.setattr(evalService, "resolveEvolutionExecutor",
-                        lambda agent=None, *, config=None: _SentinelAgent(), raising=False)
+                        lambda agent=None, *, config=None, skill_name="", agent_id="":
+                        _SentinelAgent(), raising=False)
 
     svc = evalService.SkillEvolutionService("agent-seam", base_dir=tmp_path / "evo")
     result, _ = await svc.evolve(
