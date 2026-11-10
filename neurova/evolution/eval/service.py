@@ -567,6 +567,10 @@ class SkillEvolutionService:
                 ds = await mine_dataset(
                     skill_name=skill_id, skill_text=skill_text, messages=msgs, seed=cfg.seed
                 )
+                # H3：miner 的 unevidenced 记名传导到门——挖掘面零票的原因
+                # （相关性判分缺位）随 sourceIssues 进 result，不折叠成"没语料"。
+                if ds is not None:
+                    issues.extend(ds.sourceIssues or [])
             except Exception as e:  # noqa: BLE001 - 挖掘不出来就交给下一级，但必须记名
                 issues.append(self._sourceIssue("mined", e))
                 ds = None
