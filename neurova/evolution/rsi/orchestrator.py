@@ -374,6 +374,10 @@ class RSIOrchestrator:
 
         # 迭代计数器
         self._iteration_count = 0
+        # D2 审计预定表：序列启动前预定（步长固定落盘），事后审计只读预定时刻
+        from .audit_schedule import resolve_audit_schedule
+
+        self._audit_schedule = resolve_audit_schedule()
         # 工单 012：`RSI_GATE_FAILURES` 吃的是"连续被硬否决"的轮数（通过即归零），
         # 而 `get_status()` 要能答"最近一轮晋升判据说了什么"，故把最近结论留在实例上。
         self._consecutive_gate_failures = 0
@@ -932,6 +936,20 @@ class RSIOrchestrator:
         # 而第 6 步就在对外报这份读数（工单 012 前它写在第 8 步，于是指标恒比
         # 实际轮次少 1，首轮读数报 0）。
         self._iteration_count += 1
+
+        # D2 审计预定表：命中预定时刻时封存时点快照（sealed evidence＋eval
+        # outcome＋cost vector）——事后审计只读预定时刻，表外请求被拒（§7.2
+        # 选点污染防线）。表由序列启动前预定（步长固定），运行中不改。
+        try:
+            if self._audit_schedule.isScheduled(self._iteration_count):
+                self._audit_schedule.recordSnapshot(self._iteration_count, {
+                    "sealed_evidence": self._last_sealed_evidence,
+                    "eval_outcome": self._last_eval_outcome,
+                    "cost_vector": self._last_cost_vector,
+                    "deployment_phase": self.deployment_controller.get_current_phase(),
+                })
+        except Exception as e:  # noqa: BLE001 - 审计封存故障不阻断迭代
+            logger.debug("审计预定表封存失败: %s", e)
 
         # 6. 规范指标供值（工单 012）：写了没人读与定义了没人写同罪，两套键不许并存。
         #    原先这里写的是临时键 `iteration_count/applied_count/…`，而 `RSIMetrics`
@@ -1687,6 +1705,14 @@ class RSIOrchestrator:
             "pruner_failed_cost": self.pruner.failedCostReadout(),
             # F1 外部对照：代理分×外部参考分的滚动相关性（代理独自粉饰在此现形）。
             "proxy_reference_correlation": self._proxyReferenceReadout(),
+            # D2 审计预定表读数：预定时刻清单（独立审计只读预定时刻——
+            # 表外请求在 readAuditSnapshot 被拒并点名理由）。
+            "audit_schedule": {
+                "stride": self._audit_schedule._stride,
+                "scheduled_points": self._audit_schedule.scheduledPoints()[:10],
+                "snapshots_recorded": sorted(
+                    self._audit_schedule._snapshots.keys())[-10:],
+            },
             # 参数活性读数（004 M3）：每个在表参数动过几次 / 从未出现，三态不折叠。
             "parameter_activity": _readParameterActivitySurface(),
             "escalation": self._last_escalation,
