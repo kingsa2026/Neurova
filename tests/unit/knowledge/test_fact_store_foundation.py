@@ -190,11 +190,13 @@ class TestMigrationVersions:
         #       统一转 [{"kind": 闭集, "iri": IRI}] 列表，导出从替换改附加断言。
         # v40：术语 Definition 描述项（GB/T 48000.3 评估档 G1）——表 1/表 2 必要项。
         # v41：数据属性基本数据类型（GB/T 48000.3 评估档 G2，5.5 表 3）。
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 41
+        # v42：本体动作注册表（Ontology 接入 Agent 评估档 A4）——ontology_actions。
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 42
         assert {'knowledge_mcp_sources', 'knowledge_alias_candidates',
                 'ontology_relation_candidates', 'ontology_shapes',
                 'ontology_change_log', 'enterprise_source_configs',
-                'knowledge_fts_docs', 'knowledge_fts', 'knowledge_categories'} <= names
+                'knowledge_fts_docs', 'knowledge_fts', 'knowledge_categories',
+                'ontology_actions'} <= names
         # v28 存量行零漂移：缺省必须是旧语义 relay（head 客体常量空＝不搬移客体）
         rule_columns = {
             r[1]: (r[2], r[4]) for r in store._conn.execute(
