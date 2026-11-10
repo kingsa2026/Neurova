@@ -521,6 +521,21 @@ class RSIOrchestrator:
         if len(self._proxyReferencePairs) > WINDOW:
             self._proxyReferencePairs = self._proxyReferencePairs[-WINDOW:]
 
+    def _coverageReadout(self) -> Dict[str, Any]:
+        """H1 覆盖矩阵：近期评测实际触达的族（eval outcome 的 case family 列）。"""
+        try:
+            from .coverage import coverageReadout
+
+            outcome = self._last_eval_outcome
+            families = []
+            if isinstance(outcome, dict):
+                families = [c.get("family") for c in (outcome.get("cases") or [])
+                            if c.get("family")]
+            return coverageReadout(families)
+        except Exception as e:  # noqa: BLE001 - 覆盖读侧故障不阻断状态面
+            logger.debug("覆盖读侧失败: %s", e)
+            return {"state": "unevidenced", "reason": str(e)}
+
     def _proxyReferenceReadout(self) -> Dict[str, Any]:
         """F1 读数：滚动相关性（代理独自粉饰在这里现形）。"""
         from .proxy_reference import rollingCorrelation
@@ -1756,6 +1771,8 @@ class RSIOrchestrator:
             "pruner_failed_cost": self.pruner.failedCostReadout(),
             # F1 外部对照：代理分×外部参考分的滚动相关性（代理独自粉饰在此现形）。
             "proxy_reference_correlation": self._proxyReferenceReadout(),
+            # H1 覆盖矩阵：期望族单源（harness 决策档∪任务流形态）×近期触达。
+            "coverage": self._coverageReadout(),
             # D2 审计预定表读数：预定时刻清单（独立审计只读预定时刻——
             # 表外请求在 readAuditSnapshot 被拒并点名理由）。
             # C2 质量三曲线读数（archive-best/deployed/final 逐 checkpoint 分列，
