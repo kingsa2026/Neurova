@@ -338,11 +338,39 @@ EVAL_CASES = [
 ]
 
 
-class RSIEvalHarness:
-    """端到端评测集：四族参数 × 9 用例，输出 0..1 统一分数。
+#: 密封档用例（D1）：**永不进 gain/收敛史/候选生成**，只作决策后的验收证据。
+#: 选**语义域校验型**用例（阈值/支持度落在合法语义域的检查）——漂移捕获以决策档
+#: 的行为敏感用例为主（回滚安全地板不缩水），密封档独立回答"决策后的参数态
+#: 在从未被优化过的用例上是否也站得住"。覆盖属性如实登记：密封档含 tm/em/ex
+#: 三族，sl 族不在内（9 例切 3 无解，四族全覆盖由决策档承担）。
+SEALED_CASE_IDS: tuple = ("tm_threshold_band", "em_threshold_band", "ex_pattern_support_band")
 
-    run() 完全确定性、零 LLM、零磁盘 IO、毫秒级——可在每次棘轮
-    应用前后各跑一次作为 gain 度量。
+
+def splitSealedCases() -> Tuple[List[Tuple], List[Tuple]]:
+    """决策档/密封档切分的**单一出处**（镜像文本侧 carve_heldout 的纪律）。
+
+    密封档按 `SEALED_CASE_IDS` 取，其余为决策档；守卫两条：
+    - 密封 id 必须都在 `EVAL_CASES` 内（import 期校验——用例改名/删例当场炸，
+      不许密封档静默缩水成空集）；
+    - 决策档至少保留 1 例（文本侧 carve_heldout"holdout 至少留 1"的镜像）。
+    """
+    sealed = [case for case in EVAL_CASES if case[0] in SEALED_CASE_IDS]
+    if len(sealed) != len(SEALED_CASE_IDS):
+        raise RuntimeError(
+            f"密封档 id 与用例注册表失配：SEALED_CASE_IDS={SEALED_CASE_IDS}，"
+            f"EVAL_CASES={[c[0] for c in EVAL_CASES]}——切分守卫咬合失败")
+    decision = [case for case in EVAL_CASES if case[0] not in SEALED_CASE_IDS]
+    if not decision:
+        raise RuntimeError("决策档被切空——密封档不得吞掉全部判据用例")
+    return decision, sealed
+
+
+class RSIEvalHarness:
+    """端到端评测集：四族参数 × 9 用例（决策档 6 + 密封档 3），输出 0..1 统一分数。
+
+    run()/run_sealed() 完全确定性、零 LLM、零磁盘 IO、毫秒级——run() 在每次棘轮
+    应用前后各跑一次作为 gain 度量（**只由决策档算分**，D1：密封用例不进 gain
+    分母）；run_sealed() 在决策（应用/回滚）落定后跑一次作验收证据。
 
     工单 007：分数只由**有证据的用例**算出。系统未暴露某参数时该用例回退到
     setpoint，等于"拿目标值验证是否达到目标值"，计入分母会把"没在测量"
@@ -353,16 +381,18 @@ class RSIEvalHarness:
     STATE_MEASURED = "measured"
     STATE_BLIND = "measurement_blind"
 
-    def run(self, live_params: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-        cases: List[Dict[str, Any]] = []
-        for case_id, family, fn in EVAL_CASES:
+    def _runCases(self, live_params: Dict[str, Dict[str, Any]],
+                  cases: List[Tuple]) -> Dict[str, Any]:
+        """跑给定用例集并出统一读数（run 与 run_sealed 共用同一份实现，教义第 6 条）。"""
+        results: List[Dict[str, Any]] = []
+        for case_id, family, fn in cases:
             try:
                 score, detail, evidenced = fn(live_params)
             except Exception as e:  # noqa: BLE001 - 坏参数可致子系统抛异常：该用例 0 分，评测不炸
                 # 抛异常说明真实参数把子系统打崩了 —— 这是**有证据的失分**，
                 # 不能归入"量不出来"，否则危害直接从分母里消失，比满分更糟。
                 score, detail, evidenced = 0.0, f"case error: {e}", True
-            cases.append(
+            results.append(
                 {
                     "id": case_id,
                     "family": family,
@@ -372,19 +402,29 @@ class RSIEvalHarness:
                 }
             )
 
-        evidenced_scores = [c["score"] for c in cases if c["evidenced"]]
+        evidenced_scores = [c["score"] for c in results if c["evidenced"]]
         if not evidenced_scores:
             return {
                 "score": None,
                 "state": self.STATE_BLIND,
                 "evidenced_cases": 0,
-                "blind_cases": len(cases),
-                "cases": cases,
+                "blind_cases": len(results),
+                "cases": results,
             }
         return {
             "score": round(sum(evidenced_scores) / len(evidenced_scores), 6),
             "state": self.STATE_MEASURED,
             "evidenced_cases": len(evidenced_scores),
-            "blind_cases": len(cases) - len(evidenced_scores),
-            "cases": cases,
+            "blind_cases": len(results) - len(evidenced_scores),
+            "cases": results,
         }
+
+    def run(self, live_params: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        """gain 度量：**只由决策档算分**（D1——密封用例永不进 gain/候选生成）。"""
+        decision, _ = splitSealedCases()
+        return self._runCases(live_params, decision)
+
+    def run_sealed(self, live_params: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        """密封档验收证据：决策（应用/回滚）落定后由编排器读取，不参与判定。"""
+        _, sealed = splitSealedCases()
+        return self._runCases(live_params, sealed)

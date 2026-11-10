@@ -99,7 +99,16 @@ class TestCompositionIsOverTheJudgedSplit:
 class TestProposalRecordCarriesIt:
     @pytest.mark.asyncio
     async def testEvolvedProposalRecordsTheMix(self, tmp_path, enabled):
-        svc, proposal = await _evolve(tmp_path, _dataset(golden=3, history=1, synthetic=0))
+        # 数据集自带 heldout（预切形态）——D1 的默认 carve 只在"数据集无 heldout"
+        # 时发生（carve_heldout 守卫），本格钉的是来源构成记录语义，与切分解耦；
+        # 默认划出对构成读数的影响由 test_service_default_carves_sealed_evidence 覆盖。
+        dataset = _dataset(golden=3, history=1, synthetic=0)
+        dataset = EvalDataset(
+            train=list(dataset.train), val=list(dataset.val),
+            holdout=list(dataset.holdout),
+            heldout=[EvalExample(task_input="HELD", expected_behavior="要点", source="golden")],
+        )
+        svc, proposal = await _evolve(tmp_path, dataset)
         assert proposal is not None, "这条链没出提案，来源构成无处可验"
         stored = svc.list_proposals()[0]
         assert stored.get("source_mix") == {"golden": 3, "history": 1}, stored

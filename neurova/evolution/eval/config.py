@@ -99,8 +99,13 @@ class EvolutionConfig:
     holdout_ratio: float = 0.25
     # 真留出报告集占比（P0-2 holdout 防污染）：>0 且数据集无 heldout 时，
     # service 从 holdout 尾部按此比例划出 heldout——只做验收证据，永不参与
-    # 接受/拒绝判定。默认 0 = 不划，行为与旧版一致；生产建议 0.15。
-    heldout_ratio: float = 0.0
+    # 接受/拒绝判定。D1（survey §10.2）默认 0.15 生产启用：机制与"永不参与判定"
+    # 纪律早已在（carve_heldout + 决策后只读附带），默认 0 等于密封证据从不划出。
+    # 判据侧守卫（holdout 至少留 1）由 carve_heldout 既有逻辑承担。
+    # 本旋钮与 anchor_floor_enabled/noise_repeats 同族：单一出处即本 dataclass
+    # 默认值，不走 evolution_settings（每条 EvolutionConfig 构造点各传一份设置值
+    # 会让 API 路径与后台路径读到两个来源——教义第 6 条的双源形态）。
+    heldout_ratio: float = 0.15
     seed: int = 42
 
     # ── 优化期间快速打分(省钱):judge 只对 val 集跑,训练集用重叠代理 ──
