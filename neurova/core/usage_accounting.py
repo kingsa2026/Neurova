@@ -23,6 +23,20 @@ from typing import Any, Dict, Optional
 _last_call_var: ContextVar = ContextVar("neurova_last_llm_call", default=None)
 
 
+def tokensDelta(before: int, after: int) -> int:
+    """usage 快照差分（E1 单源）：iterative 期间的真实 token 消耗。
+
+    负差分（记账面被清/换进程）不出负数——按 0 处理，不产假成本。
+    rsi/orchestrator 与 eval/service 共用本函数（教义第 6 条，
+    原先 rsi 侧自持一份是收口前的第二定义）。
+    """
+    try:
+        delta = int(after) - int(before)
+    except (TypeError, ValueError):
+        return 0
+    return delta if delta > 0 else 0
+
+
 def set_task_last_call(payload: Optional[Dict[str, Any]]) -> None:
     """在当前请求任务内回填任务级最近调用（P2-6，供 to_thread 调用方使用）。"""
     if payload:

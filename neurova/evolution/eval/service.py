@@ -823,6 +823,12 @@ class SkillEvolutionService:
             self.ledger.recent(skill_id), fingerprint=experimentFp
         ) if cfg.anchor_floor_enabled else None
 
+        # E1：真臂段 token 读数的差分起点（runner.run 之前——校准探针与
+        # 校准都在这段里，同属真臂花费）。模拟臂不取起点（差分为 None）。
+        from neurova.core.usage_accounting import get_usage_accounting
+
+        _tokens_before = (get_usage_accounting().snapshot()["total"]["total_tokens"]
+                          if executorKind(executor) == EXECUTOR_KIND_REAL else None)
         result = await runner.run(
             baseline_text=skill_text, artifact_type=artifact_type,
             dataset=dataset, iterations=iterations, noise_band=noise_band,
@@ -831,6 +837,13 @@ class SkillEvolutionService:
             experiment_fingerprint=experimentFp,
             domain_harnesses=domain_harnesses,
         )
+        if _tokens_before is not None:
+            from neurova.core.usage_accounting import tokensDelta
+
+            result.agent_turns_tokens = tokensDelta(
+                _tokens_before,
+                get_usage_accounting().snapshot()["total"]["total_tokens"],
+            )
         # 臂来源与花费外露到结果面：端点不再猜"这次是不是真臂"，台账读数也不再只有
         # 分数没有来历（同一份推导见 `executorKind`）。计划在此**重算**而不是由调用方
         # 传入：传进来就等于允许调用方替运行编一个预算数。

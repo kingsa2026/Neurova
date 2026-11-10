@@ -129,6 +129,11 @@ class EvolutionRunResult:
     # 真臂被闸拦下回落模拟面的原因（A1 service 内预算闸；空串 = 未回落）。
     # 超帽回落必须带原因出街——静默降级会让模拟分冒充线上证据（教义第 2 条）。
     real_arm_fallback: str = ""
+    # E1 真臂 token 读数：本次运行真臂段（校准探针+校准+主调度）的 usage
+    # 快照差分（单源 core.usage_accounting.tokensDelta）。模拟臂 ⇒ None
+    # （不冒领真 token 计数——0 会被读成"真臂跑了但没花 token"）。
+    # 进程级快照差分：并发 LLM 活动会并入（与 RSI 侧同口径，单机部署形态）。
+    agent_turns_tokens: Optional[int] = None
     # 计划上界与真实花费并排外露：两者一旦反向（用掉了比计划还多），就是调度与
     # 计划漂移的信号，不该等到配额账单上才发现。未跑真臂 ⇒ None（不是 0）。
     plannedAgentTurns: Optional[int] = None
@@ -223,6 +228,7 @@ class EvolutionRunResult:
             "constraint_failures": list(self.constraint_failures),
             "executor_kind": self.executorKind,
             "real_arm_fallback": self.real_arm_fallback,
+            "agent_turns_tokens": self.agent_turns_tokens,
             "planned_agent_turns": self.plannedAgentTurns,
             "agent_turns_used": self.agentTurnsUsed,
             "budget_plan_exceeded": self.budgetPlanExceeded,
