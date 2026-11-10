@@ -521,6 +521,29 @@ class RSIOrchestrator:
         if len(self._proxyReferencePairs) > WINDOW:
             self._proxyReferencePairs = self._proxyReferencePairs[-WINDOW:]
 
+    def _transferReadout(self) -> Dict[str, Any]:
+        """C4 迁移读数（观测档）：结局窗口时间分半当两域（旧域 vs 近域）重放差值。
+
+        golden 臂域待 B2 通道出真结局后接入（完整两轴随真臂机器挂载）。
+        """
+        try:
+            from .transfer_readout import splitWindowDomains, transferReadout
+
+            weights = self.integration_manager._systems.get("tool_memory")
+            inner = getattr(weights, "tool_weights", weights)
+            streams_fn = getattr(inner, "outcome_streams", None)
+            if not callable(streams_fn):
+                return {"state": "unevidenced", "reason": "权重对象未暴露结局窗口"}
+            split = splitWindowDomains(streams_fn())
+            if split is None:
+                return {"state": "insufficient_data", "score": None,
+                        "detail": "结局窗口不足以分半"}
+            return transferReadout(split["a"], split["b"],
+                                   label_a="older", label_b="recent")
+        except Exception as e:  # noqa: BLE001 - 迁移读侧故障不阻断状态面
+            logger.debug("迁移读侧失败: %s", e)
+            return {"state": "unevidenced", "reason": str(e)}
+
     def _coverageReadout(self) -> Dict[str, Any]:
         """H1 覆盖矩阵：近期评测实际触达的族（eval outcome 的 case family 列）。"""
         try:
@@ -1773,6 +1796,8 @@ class RSIOrchestrator:
             "proxy_reference_correlation": self._proxyReferenceReadout(),
             # H1 覆盖矩阵：期望族单源（harness 决策档∪任务流形态）×近期触达。
             "coverage": self._coverageReadout(),
+            # C4 迁移读数（观测档：窗口时间分半两域重放差值；同域恒等守卫）。
+            "transfer": self._transferReadout(),
             # D2 审计预定表读数：预定时刻清单（独立审计只读预定时刻——
             # 表外请求在 readAuditSnapshot 被拒并点名理由）。
             # C2 质量三曲线读数（archive-best/deployed/final 逐 checkpoint 分列，
