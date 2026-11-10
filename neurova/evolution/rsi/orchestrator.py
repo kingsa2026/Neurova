@@ -367,6 +367,9 @@ class RSIOrchestrator:
     def _probeOutcome(self, state: Dict[str, Any], candidate: Any) -> Optional[float]:
         """Eq8 配对探针的下游结局评估（观测档）：候选值代入活值快照推演决策档。
 
+        candidate=None（A4 无更新臂）＝**留在原地**的基线质量——活值快照原样
+        推演，不做任何替换；这不是"量不出"，把基线态读成 None 会把对照臂
+        记成零证据（活体实测抓到过：no_update 臂 evidenced=0 的误读）。
         密封档永不进本探针——探针读数经 A5 会变成升级证据链的一环，把密封喂进
         选择过程就是自适应污染（D1 纪律的探针侧延伸）。
         """
@@ -377,7 +380,11 @@ class RSIOrchestrator:
 
                 harness = RSIEvalHarness()
                 self._eval_harness = harness
-            live_params = self._substituteCandidateValue(self._current_live_params(), {
+            base_params = self._current_live_params()
+            if candidate is None:
+                outcome = harness.run(base_params)
+                return outcome.get("score")
+            live_params = self._substituteCandidateValue(base_params, {
                 "system": state["system"],
                 "parameter": f"{state['system']}.{state['param']}",
                 "new_value": candidate.metadata["optimization"]["new_value"],

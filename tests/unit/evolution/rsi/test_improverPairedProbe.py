@@ -73,7 +73,8 @@ class TestThreeStateDiscipline:
         assert readout["state"] == "measured"
         assert readout["score"] is not None
         assert len(readout["pairs"]) == len(_states())
-        assert readout["realized_evaluations"] == 2 * len(_states())
+        assert readout["realized_evaluations"] == 3 * len(_states()), (
+            "A4 起无更新臂每态 1 评——预算记账 3×起始态")
 
 
 class TestDirectionAndDeterminism:
@@ -101,6 +102,8 @@ class TestDirectionAndDeterminism:
         def outcome(state, candidate):
             # 合成可控结局流：策略信念的 setpoint=0.8，真目标=0.9——步进越大
             # 离真目标越远结局越差（步进永远朝信念目标，激进步进越过真目标）
+            if candidate is None:
+                return 1.0 - abs(state["current"] - 0.9)  # 无更新臂：留在原地的质量
             new_value = candidate.metadata["optimization"]["new_value"]
             return 1.0 - abs(new_value - 0.9)
 
@@ -109,8 +112,9 @@ class TestDirectionAndDeterminism:
         assert worse["score"] is not None and worse["score"] < 0
 
         # 反转结局流：步进越大越好 → Γ > 0
-        reversed_outcome = lambda state, candidate: abs(
-            candidate.metadata["optimization"]["new_value"] - 0.9)
+        reversed_outcome = lambda state, candidate: (
+            abs(state["current"] - 0.9) if candidate is None
+            else abs(candidate.metadata["optimization"]["new_value"] - 0.9))
         better = _probe(aggressive_t, policy_0, outcome=reversed_outcome).run()
         assert better["score"] is not None and better["score"] > 0
 
@@ -119,6 +123,8 @@ class TestDirectionAndDeterminism:
         policy_t, policy_0 = _policies()
 
         def outcome(state, candidate):
+            if candidate is None:
+                return 1.0  # 无更新臂基线
             return round(1.0 - abs(
                 candidate.metadata["optimization"]["new_value"] - state["setpoint"]), 6)
 
@@ -134,7 +140,7 @@ class TestDirectionAndDeterminism:
         calls = []
 
         def outcome(state, candidate):
-            calls.append(candidate.id)
+            calls.append(candidate.id if candidate is not None else None)
             return 0.5
 
         probe = _probe(policy_t, policy_0, outcome=outcome)
@@ -142,7 +148,7 @@ class TestDirectionAndDeterminism:
         probe.run()
         after_ids = [s["current"] for s in probe._startingStates()]
         assert before_ids == after_ids, "探针改动了起始态（隔离失守）"
-        assert len(calls) == 2 * len(_states()), "预算记账与实际评估数不符"
+        assert len(calls) == 3 * len(_states()), "预算记账与实际评估数不符"
 
 
 class TestGovernanceSurface:
@@ -161,3 +167,65 @@ class TestGovernanceSurface:
         assert isinstance(readout, dict), "配对探针读数未挂状态面"
         assert readout.get("state") in {"measured", "insufficient_data", "unevidenced"}, (
             f"三态词汇失守：{readout.get('state')}")
+
+
+class TestDualControlArms:
+    """A4 双对照臂：全循环（I_t 更新 S 与自身）vs 冻结 I_0（只更新 S）vs
+    无持久更新（推理时搜索不落盘）。三臂同起始态同预算同评估器——隔离的是
+    "改进器贡献"这一个变量。"""
+
+    def _aggressive_t(self):
+        class _AggressiveT(CandidatePolicy):
+            STEP_RATIOS = (0.10, 0.20, 0.30, 0.40)
+
+        return _AggressiveT(
+            version="I_test-aggressive", summary="synthetic variant",
+            setpoint_lookup=lambda s, n: 0.8,
+            performance_extractor=lambda signals: 0.5,
+            sealed_validator=None,
+        )
+
+    def test_three_arms_reported_with_realized_cost_within_cap(self):
+        """预算格：三臂各自 realized cost 报出且不超帽（帽＝起始态数）。"""
+        policy_t, policy_0 = _policies()
+        readout = _probe(policy_t, policy_0).run()
+        assert readout["state"] == "measured"
+        arms = readout["arms"]
+        assert set(arms.keys()) == {"full", "frozen_I_0", "no_update"}
+        cap = len(_states())
+        for name, arm in arms.items():
+            assert arm["realized"] <= cap, f"{name} 臂 realized 超帽：{arm['realized']}"
+        assert readout["realized_evaluations"] <= 3 * cap
+
+    def test_no_update_arm_invariant_under_policy_swap(self):
+        """变异格：把 I_t 换成激进变体 → 全循环臂读数变化，无更新臂纹丝不动。
+
+        无更新臂从不评估候选（每态固定 1 次基线评估）——双对照真的隔离了
+        "持久更新"这个变量。
+        """
+        def outcome(state, candidate):
+            if candidate is None:
+                return 0.5  # 无候选：基线质量恒定
+            return 1.0 - abs(candidate.metadata["optimization"]["new_value"] - 0.9)
+
+        baseline_probe = _probe(_policies()[0], _policies()[1], outcome=outcome)
+        swapped_probe = _probe(self._aggressive_t(), _policies()[1], outcome=outcome)
+
+        base = baseline_probe.run()
+        swapped = swapped_probe.run()
+        assert base["state"] == "measured" and swapped["state"] == "measured"
+        assert base["arms"]["no_update"] == swapped["arms"]["no_update"], (
+            "无更新臂跟着策略换动了——对照臂没有隔离住变量")
+        assert base["arms"]["full"] != swapped["arms"]["full"], (
+            "换 I_t 后全循环臂读数没变——臂读数没有跟着策略走")
+        assert base["arms"]["frozen_I_0"] == swapped["arms"]["frozen_I_0"], (
+            "冻结 I_0 臂不受 I_t 换版影响")
+
+    def test_no_update_arm_evaluates_without_candidates(self):
+        """无更新臂的评估形态：evaluator 收到 candidate=None（不落盘的基线质量）。"""
+        seen = []
+        policy_t, policy_0 = _policies()
+        _probe(policy_t, policy_0, outcome=lambda s, c: seen.append(c) or 0.5).run()
+        none_count = sum(1 for c in seen if c is None)
+        assert none_count == len(_states()), (
+            f"无更新臂评估次数 {none_count} ≠ 起始态数——基线臂没有按态各评一次")
