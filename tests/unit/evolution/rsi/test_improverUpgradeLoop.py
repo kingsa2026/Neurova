@@ -201,3 +201,82 @@ def test_upgrade_flow_end_to_end(tmp_path, monkeypatch):
     )
     entries = [e for e in ledger.readAll() if e["version"] == derived.version]
     assert entries and entries[0]["probe_gamma"] is not None
+
+
+def test_derived_version_is_content_addressed():
+    """版本命名内容式（T2）：同档数不同集合同名会碰撞——档位编进版本号。"""
+    p1 = CandidatePolicy.derived(base=CandidatePolicy.I_0(**DEPS),
+                                 excluded_ratios=[0.05],
+                                 failure_counts={"0.05": 4})
+    p2 = CandidatePolicy.derived(base=CandidatePolicy.I_0(**DEPS),
+                                 excluded_ratios=[0.10],
+                                 failure_counts={"0.10": 4})
+    assert p1.version != p2.version, (
+        f"同档数不同集合同版本号：{p1.version}——台账碰撞")
+    assert p1.version == "I_drop5" and p2.version == "I_drop10"
+
+
+def test_orchestrator_surfaces_upgrade_availability(tmp_path, monkeypatch):
+    """生产环读数面（T2）：被拒史攒出占多数档 → available 带派生信息。"""
+    from unittest.mock import MagicMock
+
+    from neurova.evolution.rsi.orchestrator import RSIOrchestrator
+    from neurova.evolution.rsi.recursive_ratchet_pruner import Candidate
+
+    monkeypatch.delenv("NEUROVA_RSI_IMPROVER_LEDGER", raising=False)
+    orch = RSIOrchestrator(
+        sleep_system=MagicMock(), emotion_system=MagicMock(),
+        experience_system=MagicMock(), tool_memory_system=MagicMock(),
+    )
+    readout = orch.get_status().get("improver_upgrade")
+    assert isinstance(readout, dict), "升级可用性读数未挂状态面"
+    assert readout["available"] is False, "空被拒史却报有升级候选"
+    assert readout.get("reason")
+
+    # 攒出占多数档的被拒史 → available 翻真并带派生与探针预演
+    for i in range(4):
+        orch.pruner.failed_candidates_history.append(Candidate(
+            id=f"f{i}", name=f"f{i}", parameters={"adjustment_ratio": 0.20},
+            heuristic_score=0.5, quick_evaluation_score=0.5, complexity=1.0,
+            metadata={"realized_cost": 2}))
+    readout = orch.get_status()["improver_upgrade"]
+    assert readout["available"] is True, f"占多数档在史却报无候选：{readout}"
+    assert readout["derived_version"].startswith("I_drop20")
+    assert readout["probe_state"] in {"measured", "insufficient_data", "unevidenced"}
+
+
+def test_approved_upgrade_swaps_policy_and_lands_gamma(tmp_path, monkeypatch):
+    """批准闭环（T2）：批准 → 探针重跑 → Γ 入账 → 内存策略即换 → 重复批准被拒。"""
+    from unittest.mock import MagicMock
+
+    from neurova.evolution.rsi.candidate_policy import resolve_improver_ledger
+    from neurova.evolution.rsi.orchestrator import RSIOrchestrator
+    from neurova.evolution.rsi.recursive_ratchet_pruner import Candidate
+
+    ledger_path = tmp_path / "ledger.json"
+    monkeypatch.setenv("NEUROVA_RSI_IMPROVER_LEDGER", str(ledger_path))
+    orch = RSIOrchestrator(
+        sleep_system=MagicMock(), emotion_system=MagicMock(),
+        experience_system=MagicMock(), tool_memory_system=MagicMock(),
+    )
+    for i in range(4):
+        orch.pruner.failed_candidates_history.append(Candidate(
+            id=f"f{i}", name=f"f{i}", parameters={"adjustment_ratio": 0.20},
+            heuristic_score=0.5, quick_evaluation_score=0.5, complexity=1.0,
+            metadata={"realized_cost": 2}))
+
+    old_version = orch._candidate_policy.version
+    result = orch._applyApprovedImproverUpgrade(approved_by="admin")
+    assert result["registered"] is True
+    assert orch._candidate_policy.version != old_version, "批准后内存策略没换版"
+    assert orch._candidate_policy.version.startswith("I_drop20")
+    assert result["probe_state"] == "measured" and result["probe_gamma"] is not None
+
+    entries = [e for e in resolve_improver_ledger().readAll()
+               if e["version"] == orch._candidate_policy.version]
+    assert entries and entries[0]["probe_gamma"] == result["probe_gamma"]
+    assert entries[0]["derived_from"] == old_version
+
+    # 重复批准同版本 → 拒（已在账，无新变更）
+    with pytest.raises(Exception):
+        orch._applyApprovedImproverUpgrade(approved_by="admin")

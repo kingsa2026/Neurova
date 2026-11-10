@@ -160,8 +160,11 @@ class CandidatePolicy:
                      if not any(abs(r - x) < 1e-9 for x in excluded_ratios))
         if not kept:
             raise ValueError("剔除后步进档位为空——不允许派生出无候选可产的策略")
+        # 版本号内容式命名（T2）：同档数不同集合会碰撞（剔 {0.05} 与剔 {0.10}
+        # 都曾是 "I_1drop"）——档位编进版本号，确定性且防伪（同号即同剔除集）。
+        tier_tag = "_".join(str(int(round(r * 100))) for r in sorted(excluded_ratios))
         derived = cls(
-            version=f"I_{len(excluded_ratios)}drop",
+            version=f"I_drop{tier_tag}",
             summary=(f"派生自 {base.version}：剔除淘汰占多数档 {excluded_ratios}"
                      f"（被拒分布 {failure_counts}）"),
             setpoint_lookup=base._setpointLookup,

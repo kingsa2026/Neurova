@@ -595,6 +595,99 @@ class RSIOrchestrator:
         readout["arm"] = self._experiment_arm
         return readout
 
+    def _improverUpgradeReadout(self) -> Dict[str, Any]:
+        """A5 升级可用性读数（T2 生产环面）：失败史派生＋探针预演。
+
+        available=True ⇒ 带派生信息与探针预演（state/Γ）；已在账/无候选
+        如实说原因。派生与探针都是确定性纯函数（与 A3 status 探针同成本口径）。
+        """
+        try:
+            from .candidate_policy import resolve_improver_ledger
+            from .improver_paired_probe import ImproverPairedProbe
+            from .improver_upgrade import deriveImproverUpgrade
+
+            derived = deriveImproverUpgrade(
+                self._candidate_policy, self.pruner.failed_candidates_history)
+            if derived is None:
+                return {"available": False,
+                        "reason": "被拒史无占多数淘汰档（或空史）——无升级候选"}
+            known = {e["version"] for e in resolve_improver_ledger().readAll()}
+            if derived.version in known:
+                return {"available": False,
+                        "reason": f"升级版本 {derived.version} 已在账（无新变更）"}
+            probe = ImproverPairedProbe(
+                policy_t=derived, policy_0=self._candidate_policy,
+                starting_states=self._probeStartingStates,
+                outcome_evaluator=self._probeOutcome,
+            )
+            preview = probe.run()
+            return {
+                "available": True,
+                "derived_version": derived.version,
+                "summary": derived.summary,
+                "excluded_ratios": derived.excludedRatios(),
+                "derived_from": self._candidate_policy.version,
+                "probe_state": preview.get("state"),
+                "probe_gamma": preview.get("score"),
+            }
+        except Exception as e:  # noqa: BLE001 - 读数故障不阻断状态面
+            logger.debug("升级可用性读数失败: %s", e)
+            return {"available": False, "reason": f"读数故障: {e}"}
+
+    def _applyApprovedImproverUpgrade(self, *, approved_by: str) -> Dict[str, Any]:
+        """A5 批准闭环（T2）：人工批准 → 探针重跑 → Γ 入账 → 内存策略即换。
+
+        提案 gate 的人工半——本方法只由治理端点在管理员显式批准后调用；
+        派生与探针在批准时刻现算（fresh），无探针 measured 证据的换版被
+        register_upgraded_version 拒（"升级了但没证据"不许入账）。
+        """
+        from .candidate_policy import resolve_improver_ledger
+        from .improver_paired_probe import ImproverPairedProbe
+        from .improver_upgrade import deriveImproverUpgrade
+
+        if not str(approved_by or "").strip():
+            raise ValueError("approved_by 必填——无人署名的换版不许入账")
+        current = self._candidate_policy
+        derived = deriveImproverUpgrade(current, self.pruner.failed_candidates_history)
+        if derived is None:
+            raise ValueError("无占多数淘汰档（或被拒史空）——无升级候选可批")
+        ledger = resolve_improver_ledger()
+        known = {e["version"] for e in ledger.readAll()}
+        if derived.version in known:
+            raise ValueError(f"升级版本 {derived.version} 已在账（无新变更）")
+        probe = ImproverPairedProbe(
+            policy_t=derived, policy_0=current,
+            starting_states=self._probeStartingStates,
+            outcome_evaluator=self._probeOutcome,
+        )
+        readout = probe.run()
+        ledger.register_upgraded_version(
+            version=derived.version, summary=derived.summary,
+            derived_from=current.version,
+            derivation={"ratios_excluded": derived.excludedRatios(),
+                        "failure_profile": "dominant_tier"},
+            probe_readout=readout,
+        )
+        # 换版即时生效（不等重启）：内存策略与配对探针双臂同步换。
+        self._candidate_policy = derived
+        self._paired_probe = ImproverPairedProbe(
+            policy_t=derived, policy_0=self._candidate_policy_i0_factory(),
+            starting_states=self._probeStartingStates,
+            outcome_evaluator=self._probeOutcome,
+        )
+        logger.info(
+            "I_t 换版生效：%s（derived_from=%s，probe_gamma=%s，approved_by=%s）",
+            derived.version, current.version, readout.get("score"), approved_by,
+        )
+        return {
+            "registered": True,
+            "version": derived.version,
+            "derived_from": current.version,
+            "probe_state": readout.get("state"),
+            "probe_gamma": readout.get("score"),
+            "approved_by": str(approved_by),
+        }
+
     def _checkpointColumns(self) -> Dict[str, Any]:
         """C5 纵报四格：接受率/新成功/回归/恢复成本（D2 预定时刻进台账）。
 
@@ -1835,6 +1928,8 @@ class RSIOrchestrator:
             "quality_curves": _qualityCurvesReadout(self.agent_id),
             # C5 纵报四格滚动读数（缺格点名）。
             "checkpoint_columns": self._checkpointColumns(),
+            # A5 升级可用性（T2 生产环面）：派生＋探针预演；批准走治理端点。
+            "improver_upgrade": self._improverUpgradeReadout(),
             "audit_schedule": {
                 "stride": self._audit_schedule._stride,
                 "scheduled_points": self._audit_schedule.scheduledPoints()[:10],

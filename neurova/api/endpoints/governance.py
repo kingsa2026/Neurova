@@ -546,6 +546,26 @@ async def list_rsi_proposals(
     }
 
 
+@router.post("/rsi/improver-upgrade/approve")
+async def approve_improver_upgrade(
+    body: RsiApproveRequest,
+    agent_id: Optional[str] = None,
+    _admin: Any = Depends(_governance_admin_dep),
+):
+    """人工批准 I_t 换版（A5 元优化闭环的人工半，T2 生产环通道）。
+
+    批准时现算：失败史派生（占多数淘汰档）＋配对探针重跑（fresh Γ）→
+    换版入台账（无探针 measured 证据即 409——"升级了但没证据"不许入账）→
+    内存策略即时换版。无候选/已在账同样 409 并点名理由。
+    """
+    rsi = _requireRsiOrchestrator(agent_id)
+    try:
+        result = rsi._applyApprovedImproverUpgrade(approved_by=body.approved_by)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    return {"code": 0, "data": result}
+
+
 @router.post("/rsi/proposals/{proposal_id}/approve")
 async def approve_rsi_proposal(
     proposal_id: str,
