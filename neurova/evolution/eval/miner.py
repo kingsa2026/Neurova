@@ -110,7 +110,11 @@ class RelevanceScorer:
     async def score(self, *, skill_name: str, skill_text: str,
                     task_input: str, assistant_response: str) -> Optional[dict]:
         if self._llm_call is None:
-            return {"relevant": True, "expected_behavior": "应正确完成该任务"}
+            # H3 无据不投票（全仓第四处）：无 judge 的相关性票不计数——
+            # 改前这里自动投票 relevant（"应正确完成该任务"），挖掘票零证据
+            # 计数。None 与 LLM 失败同形态：mine() 跳过并计数，unevidenced
+            # 形态经 build_dataset 的 sourceIssues 传导到门。
+            return None
         messages = [
             {"role": "system", "content":
              "判断用户消息是否与给定技能相关。只输出 JSON:{relevant:bool, "
@@ -283,4 +287,14 @@ async def build_dataset(
     """挖掘 + 切分,产出可直接跑进化的 EvalDataset。"""
     miner = HistoryMiner(scorer=scorer, max_examples=max_examples)
     examples = await miner.mine(skill_name=skill_name, skill_text=skill_text, messages=messages)
-    return EvalDataset.split(examples, seed=seed)
+    ds = EvalDataset.split(examples, seed=seed)
+    # H3 无据不投票：无 judge 的挖掘面把 unevidenced 形态记名到数据集——
+    # 调用方（service 三级回退）读 sourceIssues 把"确实没有语料"与
+    # "相关性判分缺位，挖掘面不投票"分开，门上看得见是哪一种。
+    if not examples and (scorer is None or scorer._llm_call is None):
+        from neurova.evolution.eval.dataset import withSourceIssues
+
+        ds = withSourceIssues(ds, [
+            {"source": "mined", "reason": "relevance_scorer_unevidenced"}
+        ])
+    return ds

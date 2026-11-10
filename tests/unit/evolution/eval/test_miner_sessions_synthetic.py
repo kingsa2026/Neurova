@@ -1,5 +1,7 @@
 """Wave 核验 — 会话挖掘真实数据源与合成评测集生成。"""
 
+import json
+
 import pytest
 
 from neurova.evolution.eval.config import EvolutionConfig
@@ -132,3 +134,50 @@ class TestSyntheticBuilder:
         b = SyntheticDatasetBuilder(EvolutionConfig(), llm_call=fake_call)
         ds = await b.generate("技能正文", "skill")
         assert len(ds.all_examples) == 1
+
+
+class TestRelevanceScorerUnevidenced:
+    """H3：miner 相关性无据不投票（全仓第四处，survey §10.2-H3）。
+
+    改前 `RelevanceScorer(llm_call=None)` 自动投票 relevant——挖掘票零证据
+    计数；改判 unevidenced 后：无 judge 挖掘票不计数，`judge_available=false`
+    形态经 sourceIssues 传导到门。
+    """
+
+    @pytest.mark.asyncio
+    async def test_scorer_without_judge_does_not_vote(self):
+        from neurova.evolution.eval.miner import RelevanceScorer
+
+        scorer = RelevanceScorer()  # llm_call=None：无 judge
+        scored = await scorer.score(
+            skill_name="s", skill_text="正文", task_input="任务", assistant_response="回复")
+        assert scored is None, (
+            "无 judge 的相关性票被自动投成 relevant——零证据挖票（无据不投票纪律）")
+
+    @pytest.mark.asyncio
+    async def test_miner_without_judge_yields_no_examples(self):
+        from neurova.evolution.eval.miner import HistoryMiner
+
+        messages = [
+            {"task_input": f"please help me reset password step {i}", "assistant_response": "回复",
+             "source": "history"} for i in range(3)
+        ]
+        examples = await HistoryMiner().mine(
+            skill_name="password-reset", skill_text="reset password workflow", messages=messages)
+        assert examples == [], "无 judge 时挖掘票计了数——自动通过仍在生效"
+
+    @pytest.mark.asyncio
+    async def test_unevidenced_state_propagates_to_gate_via_source_issues(self, tmp_path):
+        """judge_available=false 传导到门：build_dataset 的 sourceIssues 点名 unevidenced。"""
+        from neurova.evolution.eval.miner import build_dataset
+
+        messages = [
+            {"task_input": f"please help me reset password step {i}", "assistant_response": "回复",
+             "source": "history"} for i in range(3)
+        ]
+        ds = await build_dataset(
+            skill_name="password-reset", skill_text="reset password workflow", messages=messages)
+        reasons = json.dumps(ds.sourceIssues, ensure_ascii=False)
+        assert "relevance_scorer_unevidenced" in reasons, (
+            f"unevidenced 形态未传导到门（sourceIssues={ds.sourceIssues}）")
+        assert ds.all_examples == []
