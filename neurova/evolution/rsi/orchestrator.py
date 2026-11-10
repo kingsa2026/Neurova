@@ -384,6 +384,9 @@ class RSIOrchestrator:
         self._last_debt_gate: Dict[str, Any] = {}
         # E1/E2：最近一轮的资源向量（None=本轮未进应用段，无成本可记）
         self._last_cost_vector: Optional[Dict[str, Any]] = None
+        # F1 外部对照：逐轮成对采集（代理分, e2e 参考分）——setpoint 贴近度
+        # 代理的滚动相关性呈报（观测档：参考=e2e 对齐；golden 臂评分属升判据档）
+        self._proxyReferencePairs: List[Dict[str, Any]] = []
 
         # 端到端评测集（Auto Harness：gain 的统一度量，懒加载）
         self._eval_harness: Optional[Any] = None
@@ -497,6 +500,29 @@ class RSIOrchestrator:
         except Exception as e:  # noqa: BLE001 - 差分失败＝缺席，不阻断主链
             logger.debug("e2e 对齐差分现算失败: %s", e)
             return None
+
+    def _recordProxyReferencePair(self, proxy: float, reference: float) -> None:
+        """F1 成对采集：代理分 × 外部参考分（观测档参考=e2e 对齐分）。
+
+        窗口封顶（rollingCorrelation.WINDOW）——相关性是滚动读数不是全史账。
+        """
+        from .proxy_reference import WINDOW
+
+        self._proxyReferencePairs.append(
+            {"proxy": float(proxy), "reference": float(reference)})
+        if len(self._proxyReferencePairs) > WINDOW:
+            self._proxyReferencePairs = self._proxyReferencePairs[-WINDOW:]
+
+    def _proxyReferenceReadout(self) -> Dict[str, Any]:
+        """F1 读数：滚动相关性（代理独自粉饰在这里现形）。"""
+        from .proxy_reference import rollingCorrelation
+
+        pairs = self._proxyReferencePairs
+        proxy_series = [p["proxy"] for p in pairs]
+        reference_series = [p["reference"] for p in pairs]
+        readout = rollingCorrelation(proxy_series, reference_series)
+        readout["channel"] = "e2e_alignment（观测档）"
+        return readout
 
     def _iterationCostVector(self, *, wall_ms: int, tokens_delta: int) -> Dict[str, Any]:
         """E2 每轮资源向量：{turns, tokens, wall_ms}——逐维呈报不相加（Eq10 口径）。
@@ -931,6 +957,21 @@ class RSIOrchestrator:
         # §6-4(2026-10-06):规范指标快照追加进观测审计流(时序留痕;
         # 未挂载零 IO,失败只记日志——观测面故障不阻断迭代)
         self._persist_metrics_snapshot()
+
+        # F1 外部对照成对采集：代理分（setpoint 梯度估算，自指面）×外部参考分
+        # （e2e 真实结局对齐，观测档）——每轮采集一次，滚动相关性随状态面出街。
+        try:
+            from .task_yardstick import measure_tool_selection
+
+            proxy_score = self._measure_performance_from_signals()
+            e2e_readout = measure_tool_selection(
+                self.integration_manager._systems.get("tool_memory"))
+            reference_score = (e2e_readout.get("score")
+                               if isinstance(e2e_readout, dict) else None)
+            if isinstance(proxy_score, (int, float)) and isinstance(reference_score, (int, float)):
+                self._recordProxyReferencePair(float(proxy_score), float(reference_score))
+        except Exception as e:  # noqa: BLE001 - 对照采集故障不阻断迭代
+            logger.debug("F1 外部对照采集失败: %s", e)
 
         # 7. P0-A3 + 工单 009：自动通道失效（失明/发散/振荡下行/真 ROI 非正）时
         # 升级给 SelfImprovementProposer。roi 一并进判据，否则"花了成本零产出"
@@ -1644,6 +1685,8 @@ class RSIOrchestrator:
                 "totals": self.convergence_analyzer.costVectorReadout()["totals"],
             },
             "pruner_failed_cost": self.pruner.failedCostReadout(),
+            # F1 外部对照：代理分×外部参考分的滚动相关性（代理独自粉饰在此现形）。
+            "proxy_reference_correlation": self._proxyReferenceReadout(),
             # 参数活性读数（004 M3）：每个在表参数动过几次 / 从未出现，三态不折叠。
             "parameter_activity": _readParameterActivitySurface(),
             "escalation": self._last_escalation,
