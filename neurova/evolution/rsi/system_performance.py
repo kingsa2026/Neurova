@@ -7,7 +7,7 @@ setpoint（设计最优点），性能分 = 基础反馈信号 + 参数贴近度
 性能键，参数怎么调都测不到差别——没有梯度就没有改进方向。
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 # 各系统可优化参数的设计最优点（setpoint）
 # 对齐治理（2026-09-12）：原表从 Agent 镜像属性抄写，与真实消费方的设计
@@ -96,4 +96,53 @@ def estimate_system_performance(
 
     param_score = 1.0 - (sum(distances) / len(distances))
     score = 0.3 * base + 0.7 * param_score
+    # F4（拍板：明示降权路线的分解半）逐项分解快照：代理分不再是黑箱
+    # 标量——base/param 两构成与权重随值出街（estimate 无处挂分解体，
+    # 由 setpointDecomposition 供读取口径，单一算式两处共用）。
     return max(0.0, min(1.0, score))
+
+
+def setpointDecomposition(system_name: str, feedback: Dict[str, Any],
+                          params: Dict[str, Any]) -> Dict[str, Any]:
+    """F4 逐项分解：performance_score 的 base/param 两构成与权重明示。
+
+    明示降权路线的可观测半：0.3/0.7 权重、两构成分、逐参数距离——
+    "代理分由什么组成"从此可审计。校准记录字段（calibration）为
+    F4 提案 gate 的登记位（无校准记录 = 出厂默认档，如实标注）。
+    """
+    base_raw = feedback.get("performance_score")
+    if not isinstance(base_raw, (int, float)):
+        base_raw = feedback.get("success_rate")
+    if not isinstance(base_raw, (int, float)):
+        base_raw = 0.5
+    base = max(0.0, min(1.0, float(base_raw)))
+    setpoints = SYSTEM_SETPOINTS.get(system_name, {})
+    per_param: Dict[str, Any] = {}
+    distances: List[float] = []
+    for param_name, sp in setpoints.items():
+        val = params.get(param_name)
+        if val is None or not isinstance(val, (int, float)):
+            continue
+        try:
+            val_f, sp_f = float(val), float(sp)
+        except (TypeError, ValueError):
+            continue
+        tol = max(abs(sp_f), 1e-6)
+        distance = min(1.0, abs(val_f - sp_f) / tol)
+        distances.append(distance)
+        per_param[param_name] = {
+            "current": val_f, "setpoint": sp_f,
+            "distance": round(distance, 4),
+        }
+    param_score = (1.0 - (sum(distances) / len(distances))) if distances else None
+    score = (0.3 * base + 0.7 * param_score) if param_score is not None else base
+    return {
+        "system": system_name,
+        "score": round(max(0.0, min(1.0, score)), 6),
+        "weights": {"base": 0.3, "param_proximity": 0.7},
+        "base_component": round(base, 6),
+        "param_component": (round(param_score, 6)
+                            if param_score is not None else None),
+        "per_param": per_param,
+        "calibration": None,  # F4 提案 gate 登记位：无校准记录＝出厂默认档
+    }
