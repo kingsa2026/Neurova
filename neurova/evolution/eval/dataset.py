@@ -24,7 +24,7 @@ class EvalExample:
 
     task_input: str
     expected_behavior: str
-    source: str = "synthetic"  # synthetic|history|golden
+    source: str = "synthetic"  # synthetic|history|golden|task_stream（B2）
 
     def to_dict(self) -> dict:
         return {
