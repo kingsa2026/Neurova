@@ -56,12 +56,15 @@ class CandidatePolicy:
         setpoint_lookup: Callable[[str, str], Any],
         performance_extractor: Callable[[Dict[str, Any]], Optional[float]],
         sealed_validator: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]],
+        excluded_ratios: Optional[List[float]] = None,
     ):
         self.version = str(version)
         self.summary = str(summary)
         self._setpointLookup = setpoint_lookup
         self._performanceExtractor = performance_extractor
         self._sealedValidator = sealed_validator
+        # A5：本策略相对 I_0 剔除的步进档位（派生画像的证据随台账条目走）
+        self._excludedRatios: List[float] = list(excluded_ratios or [])
 
     @classmethod
     def I_0(
@@ -148,6 +151,49 @@ class CandidatePolicy:
 
     #: 步进档位（I_0 冻结）：5/10/15/20%。I_t 升级时这里是第一个自由度。
     STEP_RATIOS: Tuple[float, ...] = (0.05, 0.10, 0.15, 0.20)
+
+    @classmethod
+    def derived(cls, *, base: "CandidatePolicy", excluded_ratios: List[float],
+                failure_counts: Dict[str, int]) -> "CandidatePolicy":
+        """A5 派生策略：I_{t+1}＝基线剔除占多数淘汰档（依赖注入同基线）。"""
+        kept = tuple(r for r in base.STEP_RATIOS
+                     if not any(abs(r - x) < 1e-9 for x in excluded_ratios))
+        if not kept:
+            raise ValueError("剔除后步进档位为空——不允许派生出无候选可产的策略")
+        derived = cls(
+            version=f"I_{len(excluded_ratios)}drop",
+            summary=(f"派生自 {base.version}：剔除淘汰占多数档 {excluded_ratios}"
+                     f"（被拒分布 {failure_counts}）"),
+            setpoint_lookup=base._setpointLookup,
+            performance_extractor=base._performanceExtractor,
+            sealed_validator=base._sealedValidator,
+            excluded_ratios=list(excluded_ratios),
+        )
+        derived.STEP_RATIOS = kept  # 实例级覆盖：派生档位随画像走
+        return derived
+
+    def excludedRatios(self) -> List[float]:
+        """本策略相对 I_0 剔除的档位（派生证据，随台账条目落账）。"""
+        return list(self._excludedRatios)
+
+    @classmethod
+    def fromLedgerEntry(cls, entry: Dict[str, Any],
+                        deps: Dict[str, Any]) -> "CandidatePolicy":
+        """A5：按台账换版条目重建 I_t（台账即 policy_t 的事实源）。"""
+        derivation = entry.get("derivation") or {}
+        excluded = [float(r) for r in (derivation.get("ratios_excluded") or [])]
+        policy = cls(
+            version=str(entry["version"]),
+            summary=str(entry.get("summary") or ""),
+            setpoint_lookup=deps["setpoint_lookup"],
+            performance_extractor=deps["performance_extractor"],
+            sealed_validator=deps.get("sealed_validator"),
+            excluded_ratios=excluded,
+        )
+        policy.STEP_RATIOS = tuple(
+            r for r in cls.STEP_RATIOS
+            if not any(abs(r - x) < 1e-9 for x in excluded)) or cls.STEP_RATIOS
+        return policy
 
     # ── 自由度二＋三：剪枝次序与打分公式 ──
 
@@ -291,6 +337,52 @@ class ImproverVersionLedger:
             raise KeyError(
                 f"改进器版本 {version!r} 未在台账注册——伪造版本号不许入账"
                 f"（已注册：{sorted(known) or '无'}）")
+
+    def register_upgraded_version(self, *, version: str, summary: str,
+                                  derived_from: str, derivation: Dict[str, Any],
+                                  probe_readout: Optional[Dict[str, Any]]) -> None:
+        """A5 换版入账（提案 gate 的登记半）：无探针读数的换版**被拒**。
+
+        - derived_from 必须是已注册版本（伪造派生来源被拒）；
+        - probe_readout 必须是 measured 且带数值 Γ（insufficient_data/缺席
+          ＝"升级了但没证据"，不许入账）；
+        - 入账条目带 derived_from/derivation/probe_gamma/probe_state/approved_at
+          ——"改进器变强"从此有据可查，构造期按最新条目重建 policy_t。
+        """
+        self.requireKnown(derived_from)
+        if not isinstance(probe_readout, dict) or probe_readout.get("state") != "measured":
+            raise ValueError(
+                f"换版 {version!r} 无配对探针证据（probe_readout={probe_readout!r}）"
+                "——'升级了但没证据'不许入账")
+        gamma = probe_readout.get("score")
+        if not isinstance(gamma, (int, float)):
+            raise ValueError(f"配对探针 Γ 非数值（{gamma!r}）——无证据不许入账")
+        with _LEDGER_LOCK:
+            entry = {
+                "version": str(version),
+                "summary": str(summary),
+                "registered_at": datetime.now(UTC).isoformat(),
+                "derived_from": str(derived_from),
+                "derivation": dict(derivation or {}),
+                "probe_gamma": float(gamma),
+                "probe_state": str(probe_readout.get("state")),
+            }
+            existing = {e["version"] for e in self.readAll()}
+            self._memory = [e for e in self.readAll() if e["version"] != str(version)]
+            self._memory.append(entry)
+            if str(version) in existing:
+                # 同版本重入账（重放形态）：覆盖旧条目，证据以最新一次为准
+                pass
+            if self._path is None:
+                return
+            self._write(self._memory)
+
+    def latestUpgradedEntry(self) -> Optional[Dict[str, Any]]:
+        """最新一条换版条目（构造期重建 policy_t 的事实源）；无则 None。"""
+        upgraded = [e for e in self.readAll() if e.get("derived_from")]
+        if not upgraded:
+            return None
+        return sorted(upgraded, key=lambda e: e.get("registered_at") or "")[-1]
 
     def _write(self, entries: List[Dict[str, Any]]) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)

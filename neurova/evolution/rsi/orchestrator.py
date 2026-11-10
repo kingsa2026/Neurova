@@ -265,20 +265,33 @@ class RSIOrchestrator:
         # 候选生成策略（A2）：三个自由度（步进/剪枝次序/打分）收进 CandidatePolicy，
         # I_0＝内联行为冻结复刻（同输入逐值相等）；构造即注册进版本台账——
         # "改进器"从此是可版本化对象，A5 换版与 A3 配对探针的地基。
+        # A5：台账即 policy_t 的事实源——最新已批准+有证据的换版条目在构造期
+        # 重建 I_t（步进档位剔除形），无换版条目回退 I_0。
         from .candidate_policy import I_0_SUMMARY, I_0_VERSION, CandidatePolicy
         from .system_performance import get_setpoint
 
-        self._candidate_policy = CandidatePolicy.I_0(
+        _policy_deps = dict(
             setpoint_lookup=get_setpoint,
             performance_extractor=self._extract_performance,
             sealed_validator=self._sealedCandidateValidation,
         )
+        self._candidate_policy = CandidatePolicy.I_0(**_policy_deps)
         try:
             from .candidate_policy import resolve_improver_ledger
 
-            resolve_improver_ledger().register(I_0_VERSION, I_0_SUMMARY)
+            _ledger = resolve_improver_ledger()
+            _ledger.register(I_0_VERSION, I_0_SUMMARY)
+            _upgraded = _ledger.latestUpgradedEntry()
+            if _upgraded is not None:
+                self._candidate_policy = CandidatePolicy.fromLedgerEntry(
+                    _upgraded, _policy_deps)
+                logger.info(
+                    "I_t 按台账重建：%s（derived_from=%s，probe_gamma=%s）",
+                    _upgraded["version"], _upgraded.get("derived_from"),
+                    _upgraded.get("probe_gamma"),
+                )
         except Exception as e:  # noqa: BLE001 - 台账故障不阻断装配，读数如实告警
-            logger.warning("改进器版本台账注册 I_0 失败: %s", e)
+            logger.warning("改进器版本台账装配失败（回退 I_0）: %s", e)
 
         # Eq8 配对探针（A3）：I_t 与 I_0 同起始态同预算配对比较，纯读数与主轨迹隔离。
         # policy_0 恒为独立 I_0 复刻（A5 换版后它是冻结对照臂）；policy_t 即当前策略。
