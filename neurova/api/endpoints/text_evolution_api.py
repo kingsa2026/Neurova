@@ -451,12 +451,16 @@ async def list_evolution_proposals(
 
     # 形状纪律：`data` 是前端已在消费的列表，改成 dict 会打破既有契约——
     # 覆盖读数作**同级新增键**，老调用者读 data 不受影响。
+    from neurova.evolution.eval.judge_human_agreement import judgeHumanAgreement
+
     return {
         "code": 0,
         "data": rows,
         "model_coverage": modelCoverageReadout(items),
         # 同级新键：按用例来源的覆盖面（一条提案可同时进多个来源组，混合构成的证据集）
         "source_coverage": sourceCoverageReadout(items),
+        # F2 judge-人工相关性（审批动作即标签）：一致率滚动读数＋塌陷告警
+        "judge_human_agreement": judgeHumanAgreement(items),
     }
 
 
