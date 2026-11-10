@@ -365,13 +365,16 @@ class RecursiveRatchetPruner:
     def _fine_prune(
         self, candidates: List[Candidate], keep_count: int, validation_fn: Callable[[Candidate], Dict[str, Any]] = None
     ) -> List[Candidate]:
-        """第3轮：细筛 - 完整验证
+        """第3轮：细筛 - 完整验证（G1 补实装后的诚实形态）
 
-        使用完整的验证函数，成本高但精度高：
-        1. 运行完整测试套件
-        2. 性能基准测试
-        3. 安全审计
-        4. 语义对齐检查
+        生产装配由 `orchestrator._prune_candidates` 传入校验函数，其实际执行的
+        校验步（与 docstring 逐条一致，不再声称未实装的东西）：
+        1. 方向校验——候选必须朝 setpoint 步进（排除反向调整）；
+        2. D1 密封档实跑——候选步进值代入活值快照推演，密封用例（永不进 gain）
+           例级对照当前态，塌方即 fail-closed 拒绝。
+        未提供 validation_fn 时回退快速评估分数（离线库层用法，如实自称回退，
+        不冒充完整验证）；"性能基准/安全审计/语义对齐"不在本层实现，
+        也不在此声称。
         """
         if not validation_fn:
             # 如果没有验证函数，使用快速评估分数
