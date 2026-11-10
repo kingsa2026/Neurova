@@ -1,7 +1,10 @@
 <template>
   <div class="cq-section" data-testid="studio-cq">
     <p class="cq-note" data-testid="cq-note">{{ t('ontology.cqNote') }}</p>
-    <table class="cq-table" data-testid="cq-table">
+    <p v-if="cqRows === null" class="cq-error" data-testid="cq-load-error">
+      {{ t('ontology.cqLoadFailed') }}
+    </p>
+    <table v-else class="cq-table" data-testid="cq-table">
       <thead>
         <tr>
           <th>{{ t('ontology.cqId') }}</th>
@@ -14,7 +17,7 @@
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in CQ_ROWS" :key="row.cqId" :data-testid="`cq-row-${row.cqId}`">
+        <tr v-for="row in cqRows" :key="row.cqId" :data-testid="`cq-row-${row.cqId}`">
           <td class="mono">{{ row.cqId }}</td>
           <td>{{ row.question }}</td>
           <td>{{ row.actor }}</td>
@@ -22,8 +25,8 @@
           <td class="mono query-cell">{{ row.query }}</td>
           <td class="mono query-cell">{{ row.testId }}</td>
           <td>
-            <a-tag :color="row.status === 'implemented' ? 'green' : 'default'" data-testid="cq-status">
-              {{ row.status === 'implemented' ? t('ontology.cqStatusImplemented') : t('ontology.cqStatusPlanned') }}
+            <a-tag :color="statusColor(row.status)" data-testid="cq-status">
+              {{ statusLabel(row.status) }}
             </a-tag>
           </td>
         </tr>
@@ -34,9 +37,24 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { CQ_ROWS } from '@/config/ontologyStatic'
+import type { CqRow } from '@/types/ontology'
+
+/** 行只来自服务端 cq-matrix 读数面；null = 读面失败（显式报错，不渲染假表）。 */
+defineProps<{ cqRows: CqRow[] | null }>()
 
 const { t } = useI18n()
+
+function statusColor(status: CqRow['status']): string {
+  if (status === 'implemented') return 'green'
+  if (status === 'partial') return 'orange'
+  return 'default'
+}
+
+function statusLabel(status: CqRow['status']): string {
+  if (status === 'implemented') return t('ontology.cqStatusImplemented')
+  if (status === 'partial') return t('ontology.cqStatusPartial')
+  return t('ontology.cqStatusPlanned')
+}
 </script>
 
 <style scoped>
@@ -44,6 +62,11 @@ const { t } = useI18n()
   margin: 0 0 10px;
   font-size: 12px;
   color: var(--nr-text-secondary, inherit);
+}
+.cq-error {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--nr-danger, #d4380d);
 }
 .cq-table {
   width: 100%;

@@ -2,7 +2,8 @@
  * KnowledgeEvalPage 本体升级段（UI-3）契约测试。
  *
  * 契约面（§15.4 诚实性）：
- * - CQ 通过率卡：静态读数（9/11 implemented），标注以 CI 为准；
+ * - CQ 通过率卡：读 GET /ontology/cq-matrix 读数面（元数据照 specs，status 为
+ *   服务端探针现值），计数来自读数行，不抄前端静态表；
  * - 质量卡：真调用 GET /ontology/quality，逐条渲染缺陷＋两个可计算指标；
  *   零缺陷与读面失败两态分开（失败不降级成「零缺陷」）；
  * - 默认关矩阵：九项现值取自 `GET /knowledge/observability/default-off`（静态抄表已退役——
@@ -39,6 +40,7 @@ vi.mock('@/api/modules/knowledgeEval', () => ({
 vi.mock('@/api/modules/ontology', () => ({
   getOntologyQuality: vi.fn(),
   listDefaultOffFlags: vi.fn(),
+  listCqMatrix: vi.fn(),
 }))
 
 vi.mock('ant-design-vue', () => ({
@@ -49,15 +51,30 @@ import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { getEvaluationBaseline } from '@/api/modules/knowledgeEval'
-import { getOntologyQuality, listDefaultOffFlags } from '@/api/modules/ontology'
+import { getOntologyQuality, listCqMatrix, listDefaultOffFlags } from '@/api/modules/ontology'
 import KnowledgeEvalPage from '@/pages/KnowledgeEvalPage.vue'
 import { knowledgeEvalSection } from '@/i18n/locales/_knowledgeEvalSection'
 import { ontologySection } from '@/i18n/locales/_ontologySection'
-import { CQ_ROWS } from '@/config/ontologyStatic'
 
 const baselineMock = getEvaluationBaseline as unknown as ReturnType<typeof vi.fn>
 const qualityMock = getOntologyQuality as unknown as ReturnType<typeof vi.fn>
 const matrixMock = listDefaultOffFlags as unknown as ReturnType<typeof vi.fn>
+
+/** 服务端 cq-matrix 读数面的 11 行（10 implemented + CQ-10 planned——探针现值）。 */
+const CQ_READOUT_ROWS = [
+  { cqId: 'CQ-01', status: 'implemented' },
+  { cqId: 'CQ-02', status: 'implemented' },
+  { cqId: 'CQ-03', status: 'implemented' },
+  { cqId: 'CQ-04', status: 'implemented' },
+  { cqId: 'CQ-05', status: 'implemented' },
+  { cqId: 'CQ-06', status: 'implemented' },
+  { cqId: 'CQ-07', status: 'implemented' },
+  { cqId: 'CQ-08', status: 'implemented' },
+  { cqId: 'CQ-09', status: 'implemented' },
+  { cqId: 'CQ-10', status: 'planned' },
+  { cqId: 'CQ-11', status: 'implemented' },
+]
+const cqCardMock = listCqMatrix as unknown as ReturnType<typeof vi.fn>
 
 /** 服务端名册的九行（含 D-03——前端那张抄来的表漏的正是这一行）。 */
 const MATRIX_ROWS = [
@@ -139,18 +156,28 @@ beforeEach(() => {
   })
   matrixMock.mockReset()
   matrixMock.mockResolvedValue({ code: 0, message: 'ok', data: { items: MATRIX_ROWS } })
+  cqCardMock.mockReset()
+  cqCardMock.mockResolvedValue({ code: 0, message: 'ok', data: { items: CQ_READOUT_ROWS } })
   authUser.role = 'admin'
 })
 
 describe('KnowledgeEvalPage（UI-3 本体升级段）', () => {
-  it('CQ 通过率卡：静态读数 9/11，且标注运行状态以 CI 为准', async () => {
+  it('CQ 通过率卡：计数来自 cq-matrix 读数面（10/11 探针现值），不抄静态表', async () => {
     const wrapper = mountPage()
     await flushPromises()
-    const implemented = CQ_ROWS.filter((row) => row.status === 'implemented').length
+    expect(cqCardMock).toHaveBeenCalledTimes(1)
+    const implemented = CQ_READOUT_ROWS.filter((row) => row.status === 'implemented').length
     const rate = wrapper.find('[data-testid="eval-cq-rate"]')
     expect(rate.exists()).toBe(true)
-    expect(rate.text()).toContain(`${implemented} / ${CQ_ROWS.length}`)
-    expect(wrapper.text()).toContain('CI')
+    expect(rate.text()).toContain(`${implemented} / ${CQ_READOUT_ROWS.length}`)
+  })
+
+  it('CQ 通过率卡失败态：读面失败显式报错，不留下一个假计数', async () => {
+    cqCardMock.mockRejectedValue(new Error('503'))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="eval-cq-error"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="eval-cq-rate"]').exists()).toBe(false)
   })
 
   it('质量卡：真调用 GET /ontology/quality，逐条渲染缺陷与两个可计算指标', async () => {
@@ -231,5 +258,12 @@ describe('KnowledgeEvalPage（UI-3 本体升级段）', () => {
     const text = readFileSync(staticSource, 'utf-8')
     expect(text).not.toContain('DEFAULT_OFF_ROWS')
     expect(existsSync(resolve(process.cwd(), 'src/config/defaultOffRows.ts'))).toBe(false)
+  })
+
+  it('反向守卫：CQ 追溯表同样退役——行只许来自 cq-matrix 读数面', () => {
+    const staticSource = resolve(process.cwd(), 'src/config/ontologyStatic.ts')
+    const text = readFileSync(staticSource, 'utf-8')
+    expect(text).not.toContain('CQ_ROWS')
+    expect(existsSync(resolve(process.cwd(), 'src/config/cqRows.ts'))).toBe(false)
   })
 })

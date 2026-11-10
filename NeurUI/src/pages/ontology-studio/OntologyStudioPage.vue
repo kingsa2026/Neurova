@@ -77,8 +77,9 @@
             :schema="schema"
             :pending-candidates="pendingCount"
             :loading="loading"
+            :cq-rows="cqRows"
           />
-          <StudioCqSection v-else-if="activeSection === 'cq'" />
+          <StudioCqSection v-else-if="activeSection === 'cq'" :cq-rows="cqRows" />
           <StudioTermsSection v-else-if="activeSection === 'terms'" :is-admin="isAdmin" />
           <StudioRelationsSection v-else-if="activeSection === 'relations'" :schema="schema" :is-admin="isAdmin" @candidates-changed="onCandidatesChanged" />
           <StudioShapesSection v-else-if="activeSection === 'shapes'" :is-admin="isAdmin" />
@@ -97,8 +98,8 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { useAuthStore } from '@/stores/auth'
-import { getOntologySchema, listRelationCandidates } from '@/api/modules/ontology'
-import type { OntologySchemaData } from '@/types/ontology'
+import { getOntologySchema, listCqMatrix, listRelationCandidates } from '@/api/modules/ontology'
+import type { CqRow, OntologySchemaData } from '@/types/ontology'
 import { UPPER_LITE_TREE } from '@/config/ontologyStatic'
 import StudioOverviewSection from './StudioOverviewSection.vue'
 import StudioCqSection from './StudioCqSection.vue'
@@ -133,6 +134,7 @@ const loading = ref(false)
 const loadError = ref(false)
 const schema = ref<OntologySchemaData | null>(null)
 const pendingCount = ref(0)
+const cqRows = ref<CqRow[] | null>(null)
 const activeSection = ref<SectionKey>('overview')
 
 async function loadAll() {
@@ -147,6 +149,17 @@ async function loadAll() {
     loading.value = false
   }
   await reloadPending()
+  await reloadCqMatrix()
+}
+
+/** CQ 读数面：行只来自服务端探针现值；失败显式传 null，分区渲染错误态。 */
+async function reloadCqMatrix() {
+  try {
+    const res = await listCqMatrix()
+    cqRows.value = res.data?.items ?? []
+  } catch {
+    cqRows.value = null
+  }
 }
 
 async function reloadPending() {

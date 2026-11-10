@@ -16,6 +16,7 @@
 import api from '@/api'
 import type { ApiResponse } from '@/types/response'
 import type {
+  CqRow,
   DerivationChain,
   DefaultOffReadingsResponse,
   EnterpriseDescriptor,
@@ -262,6 +263,15 @@ export function getOntologyQuality() {
  */
 export function listDefaultOffFlags() {
   return api.get<ApiResponse<DefaultOffReadingsResponse>>(`${BASE}/observability/default-off`)
+}
+
+// ---------------------------------------------------------------------------
+// CQ 追溯现值读数面（登录可读；名册与探针在 neurova/knowledge/ontology/cq_matrix.py）
+// ---------------------------------------------------------------------------
+
+/** GET /ontology/cq-matrix：元数据照 specs 票面，status 为探针现值（非抄表）。 */
+export function listCqMatrix() {
+  return api.get<ApiResponse<{ items: CqRow[] }>>(`${BASE}/ontology/cq-matrix`)
 }
 
 // ---------------------------------------------------------------------------

@@ -35,3 +35,18 @@ async def getDefaultOffReadings(
     from neurova.knowledge.defaultOffFlags import defaultOffReadings
 
     return {"code": 0, "message": "success", "data": {"items": defaultOffReadings()}}
+
+
+@router.get("/ontology/cq-matrix")
+async def getCqMatrix(
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """CQ 追溯现值读数（登录可读）：元数据照 specs 票面，status 为探针现值。
+
+    与 default-off 不同门：能力现值不是服务器配置面（探针只查产品面符号，
+    不读任何开关），本体的 CQ 目录对全部登录使用者可见——知识使用者/审计员
+    也是票面里的角色。名册与探针在 `neurova/knowledge/ontology/cq_matrix.py`。
+    """
+    from neurova.knowledge.ontology.cq_matrix import cqTraceRows
+
+    return {"code": 0, "message": "success", "data": {"items": cqTraceRows()}}
