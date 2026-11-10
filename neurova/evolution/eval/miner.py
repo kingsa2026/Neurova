@@ -206,6 +206,29 @@ class HistoryMiner:
 # ── 数据源:会话历史(session_repository)──
 
 
+def minedSessionIds(agent_id: str, limit_sessions: int = 20, repo: Any = None) -> list[str]:
+    """mined 级读到的会话出处集合（B2 重叠守卫的供值侧，与 messages 同源）。
+
+    单一来源＝`session_repository.list_sessions`（与 messages_from_sessions
+    同一次调用形态）——两处各读一遍就是两份出处。失败尽力而为返回空表。
+    """
+    try:
+        if repo is None:
+            from neurova.session_repository import get_session_repository
+
+            repo = get_session_repository()
+        sessions = repo.list_sessions(agent_id=agent_id)[: max(0, limit_sessions)]
+    except Exception as e:  # noqa: BLE001
+        logger.debug("读取会话仓库失败: %s", e)
+        return []
+    ids: list[str] = []
+    for sess in sessions:
+        sid = str(sess.get("session_id") or sess.get("id") or "")
+        if sid:
+            ids.append(sid)
+    return ids
+
+
 def messages_from_sessions(
     agent_id: str, limit_sessions: int = 20, repo: Any = None
 ) -> list[dict[str, Any]]:
