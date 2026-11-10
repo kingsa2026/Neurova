@@ -248,6 +248,24 @@ class RSIOrchestrator:
         # 创建收敛性分析器
         self.convergence_analyzer = create_convergence_analyzer()
 
+        # 候选生成策略（A2）：三个自由度（步进/剪枝次序/打分）收进 CandidatePolicy，
+        # I_0＝内联行为冻结复刻（同输入逐值相等）；构造即注册进版本台账——
+        # "改进器"从此是可版本化对象，A5 换版与 A3 配对探针的地基。
+        from .candidate_policy import I_0_SUMMARY, I_0_VERSION, CandidatePolicy
+        from .system_performance import get_setpoint
+
+        self._candidate_policy = CandidatePolicy.I_0(
+            setpoint_lookup=get_setpoint,
+            performance_extractor=self._extract_performance,
+            sealed_validator=self._sealedCandidateValidation,
+        )
+        try:
+            from .candidate_policy import resolve_improver_ledger
+
+            resolve_improver_ledger().register(I_0_VERSION, I_0_SUMMARY)
+        except Exception as e:  # noqa: BLE001 - 台账故障不阻断装配，读数如实告警
+            logger.warning("改进器版本台账注册 I_0 失败: %s", e)
+
         # 创建监控指标管理器
         self.metrics = create_rsi_metrics()
 
@@ -1064,153 +1082,30 @@ class RSIOrchestrator:
     def _generate_candidates_for_param(
         self, system_name: str, param_info: Any, signals: Dict[str, Any]
     ) -> List[Candidate]:
-        """为单个参数生成候选方案（朝 setpoint 方向的分级步进）。
+        """为单个参数生成候选（A2 起纯委托：步进语义单源在 CandidatePolicy.I_0）。
 
-        真正闭环修复：此前按 performance 高低做无脑单调增减（失控漂移
-        的本质）。现改为以 setpoint 为目标，生成 5%/10%/15%/20% 步进
-        靠近的候选；已在 setpoint 的参数不产生候选。
+        真正闭环修复（历史）：此前按 performance 高低做无脑单调增减（失控漂移
+        的本质），后改为 setpoint 分级步进。A2 抽取：步进选择/打分公式/剪枝次序
+        三自由度收进策略对象，本方法只做形状适配——行为由 I_0 冻结复刻判据钉住。
         """
-        param_name = param_info.name
-        current_value = param_info.current_value
-        if current_value is None or not isinstance(current_value, (int, float)):
-            return []
-
-        setpoint = get_setpoint(system_name, param_name)
-        if setpoint is None or not isinstance(setpoint, (int, float)):
-            return []
-
-        try:
-            current_f = float(current_value)
-            setpoint_f = float(setpoint)
-        except (TypeError, ValueError):
-            return []
-
-        delta = setpoint_f - current_f
-        if abs(delta) < 1e-9:
-            return []  # 已在 setpoint
-
-        performance = self._extract_performance(signals)
-
-        candidates = []
-        for ratio in [0.05, 0.10, 0.15, 0.20]:
-            new_value = current_f + delta * ratio
-            # 整数型参数保持整数语义
-            if isinstance(current_value, int):
-                new_value = int(round(new_value))
-            if new_value == current_f:
-                continue
-
-            optimization = {
-                "system": system_name,
-                "parameter": f"{system_name}.{param_name}",
-                "current_value": current_value,
-                "new_value": new_value,
-                "performance": performance,
-                "setpoint": setpoint_f,
-                "reason": (
-                    f"{param_name} 偏离 setpoint {setpoint_f}，"
-                    f"调整 {current_f} → {new_value}（步进 {ratio*100:.0f}%）"
-                ),
-            }
-
-            candidate = Candidate(
-                id=f"{system_name}.{param_name}.{ratio}",
-                name=f"{param_name}_toward_setpoint_{int(ratio*100)}pct",
-                parameters={
-                    "parameter": f"{system_name}.{param_name}",
-                    "new_value": new_value,
-                    "adjustment_ratio": ratio,
-                },
-                complexity=abs(new_value - current_f) / max(abs(current_f), 0.001),
-                heuristic_score=1.0 - abs(ratio - 0.10) * 5,
-                metadata={"optimization": optimization, "performance": performance},
-            )
-            candidates.append(candidate)
-
-        return candidates
+        return self._candidate_policy.stepCandidates(
+            system_name, param_info.name, param_info.current_value, signals
+        )
 
     def _prune_candidates(self, candidates: List[Candidate], signals: Dict[str, Any]) -> Optional[Candidate]:
-        """用 RecursiveRatchetPruner 剪枝候选方案，选出最优"""
+        """用 RecursiveRatchetPruner 剪枝候选方案，选出最优（A2 起打分/校验单源在策略对象）。
 
-        # 启发式函数：基于参数复杂度和启发式分数
-        def heuristic_fn(candidate: Candidate) -> float:
-            return candidate.heuristic_score
-
-        # 快速评估函数：基于性能改善预期
-        def quick_eval_fn(candidate: Candidate) -> float:
-            perf = candidate.metadata.get("performance", 0.5)
-            # 性能越低，越需要激进调整（但激进调整复杂度高）
-            adjustment = candidate.parameters.get("adjustment_ratio", 0.1)
-            expected_improvement = (1.0 - perf) * adjustment * 10
-            return expected_improvement - candidate.complexity * 0.5
-
-        # 验证函数：方向校验 + D1 密封档实跑（G1 补实装）
-        def validation_fn(candidate: Candidate) -> Dict[str, Any]:
-            opt = candidate.metadata.get("optimization", {})
-            new_value = opt.get("new_value", 0)
-            current = opt.get("current_value", 0)
-            setpoint = opt.get("setpoint", None)
-            # 候选由 _generate_candidates_for_param 生成，已保证向 setpoint 方向步进。
-            # 验证语义：值确实改变，且若已知 setpoint，调整方向必须朝 setpoint 靠近。
-            # （此前用性能分 0.7/0.9 带宽做硬门，导致 0.7~0.9 死区里所有候选被拒，
-            #   表现为"该优化的参数永远不被优化"。真正的棘轮门是应用后的实测增益 +
-            #   回滚，此处的方向校验只负责排除反向调整。）
-            direction_ok = new_value != current
-            if (
-                direction_ok
-                and isinstance(setpoint, (int, float))
-                and isinstance(new_value, (int, float))
-                and isinstance(current, (int, float))
-            ):
-                toward = abs(float(setpoint) - float(new_value)) < abs(float(setpoint) - float(current))
-                direction_ok = toward
-            if not direction_ok:
-                return {
-                    "valid": False,
-                    "score": 0.0,
-                    "details": f"current={current}, new={new_value}, setpoint={setpoint}",
-                }
-            # G1 补实装：细筛的"完整验证"接 D1 密封档实跑——候选值代入活值快照
-            # 推演（真实系统只读），塌方例（低于当前态）即 fail-closed 拒绝；
-            # 密封档量不出时诚实降级为方向单源，原因随 details 出街。
-            # 这是 A5 元优化候选在应用前的最后一道网：非数值等病值能漏过方向校验
-            # （isinstance 门跳过 toward 检查），密封档实跑当场抓住。
-            sealed = self._sealedCandidateValidation(opt)
-            if sealed.get("state") == "measured":
-                if sealed.get("regressions"):
-                    return {
-                        "valid": False,
-                        "score": 0.0,
-                        "sealed": sealed,
-                        "details": (
-                            "direction ok but sealed regressions="
-                            f"{sealed.get('regressions')} (score={sealed.get('score')}, "
-                            f"baseline={sealed.get('baseline')})"
-                        ),
-                    }
-                return {
-                    "valid": True,
-                    "score": 1.0,
-                    "sealed": sealed,
-                    "details": f"direction ok, sealed score={sealed.get('score')}，无塌方例",
-                }
-            reason = sealed.get("reason") or ""
-            return {
-                "valid": True,
-                "score": 1.0,
-                "sealed": sealed,
-                "details": (
-                    f"direction ok, sealed={sealed.get('state')}（密封档量不出，"
-                    "降级方向单源）" + (f": {reason}" if reason else "")
-                ),
-            }
-
+        三回调全部委托 `self._candidate_policy`（I_0＝原内联公式冻结复刻）：
+        粗筛启发式 / 中筛快评 / 细筛方向+密封校验。策略未注入密封校验器时
+        诚实降级方向单源（形状与 G1 前一致），编排器装配恒注入。
+        """
+        policy = self._candidate_policy
         try:
             return self.pruner.recursive_prune(
                 candidates=candidates,
-                validation_fn=validation_fn,
-                quick_eval_fn=quick_eval_fn,
-                heuristic_fn=heuristic_fn,
+                validation_fn=policy.validationResult,
+                quick_eval_fn=policy.quickEvalScore,
+                heuristic_fn=policy.heuristicScore,
             )
         except Exception as e:
             logger.warning("RecursiveRatchetPruner 剪枝失败: %s，回退到首个候选", e)
