@@ -266,6 +266,25 @@ class RSIOrchestrator:
         except Exception as e:  # noqa: BLE001 - 台账故障不阻断装配，读数如实告警
             logger.warning("改进器版本台账注册 I_0 失败: %s", e)
 
+        # Eq8 配对探针（A3）：I_t 与 I_0 同起始态同预算配对比较，纯读数与主轨迹隔离。
+        # policy_0 恒为独立 I_0 复刻（A5 换版后它是冻结对照臂）；policy_t 即当前策略。
+        from .improver_paired_probe import ImproverPairedProbe
+
+        def _i0Replica() -> CandidatePolicy:
+            return CandidatePolicy.I_0(
+                setpoint_lookup=get_setpoint,
+                performance_extractor=self._extract_performance,
+                sealed_validator=self._sealedCandidateValidation,
+            )
+
+        self._candidate_policy_i0_factory = _i0Replica
+        self._paired_probe = ImproverPairedProbe(
+            policy_t=self._candidate_policy,
+            policy_0=_i0Replica(),
+            starting_states=self._probeStartingStates,
+            outcome_evaluator=self._probeOutcome,
+        )
+
         # 创建监控指标管理器
         self.metrics = create_rsi_metrics()
 
@@ -344,6 +363,67 @@ class RSIOrchestrator:
         self._last_sealed_evidence: Optional[Dict[str, Any]] = None
 
         logger.info("RSIOrchestrator initialized")
+
+    def _probeOutcome(self, state: Dict[str, Any], candidate: Any) -> Optional[float]:
+        """Eq8 配对探针的下游结局评估（观测档）：候选值代入活值快照推演决策档。
+
+        密封档永不进本探针——探针读数经 A5 会变成升级证据链的一环，把密封喂进
+        选择过程就是自适应污染（D1 纪律的探针侧延伸）。
+        """
+        try:
+            harness = self._eval_harness
+            if harness is None:
+                from .eval_harness import RSIEvalHarness
+
+                harness = RSIEvalHarness()
+                self._eval_harness = harness
+            live_params = self._substituteCandidateValue(self._current_live_params(), {
+                "system": state["system"],
+                "parameter": f"{state['system']}.{state['param']}",
+                "new_value": candidate.metadata["optimization"]["new_value"],
+            })
+            if live_params is None:
+                return None
+            outcome = harness.run(live_params)
+            return outcome.get("score")
+        except Exception as e:  # noqa: BLE001 - 探针故障＝该配对无证据，不阻断
+            logger.debug("配对探针下游评估失败: %s", e)
+            return None
+
+    def _probeStartingStates(self) -> List[Dict[str, Any]]:
+        """确定性起始态网格：可优化数值参数（排序固定）× 固定扰动档。
+
+        同输入同网格（重放纪律）；命中 setpoint 的组合剔除（无候选可产）；
+        封顶 MAX_STARTING_STATES（get_status 每次轮询都跑探针，成本钉在
+        几十次 harness 推演内）。
+        """
+        from .improver_paired_probe import MAX_STARTING_STATES, STARTING_STATE_OFFSETS
+
+        from .system_performance import get_setpoint as _get_setpoint
+
+        states: List[Dict[str, Any]] = []
+        params = self.integration_manager.get_optimizable_parameters()
+        for system_name in sorted(params.keys()):
+            for param_info in sorted(params[system_name], key=lambda p: p.name):
+                current = getattr(param_info, "current_value", None)
+                if current is None or not isinstance(current, (int, float)):
+                    continue
+                setpoint = _get_setpoint(system_name, param_info.name)
+                if setpoint is None or not isinstance(setpoint, (int, float)):
+                    continue
+                for offset in STARTING_STATE_OFFSETS:
+                    probed = round(float(current) * (1.0 + offset), 6)
+                    if abs(probed - float(setpoint)) < 1e-9:
+                        continue
+                    states.append({
+                        "system": system_name,
+                        "param": param_info.name,
+                        "current": probed,
+                        "setpoint": float(setpoint),
+                    })
+                    if len(states) >= MAX_STARTING_STATES:
+                        return states
+        return states
 
     def _current_live_params(self) -> Dict[str, Dict[str, Any]]:
         """当下可优化参数的活值快照（主度量与密封档证据共用同一份派生，教义第 6 条）。"""
@@ -1371,6 +1451,10 @@ class RSIOrchestrator:
             # 密封档验收证据（D1）：决策落定后的独立验收读数；
             # 密封用例永不进 gain/候选生成（切分单源 splitSealedCases）。
             "sealed_evidence": self._sealedEvidenceReadout(),
+            # Eq8 配对探针读数（A3）：I_t vs I_0 同起始态同预算配对比较——
+            # "改进器本身在变好"的直接证据（观测档：确定性 harness 推演，
+            # 与主轨迹完全隔离；三态纪律与 task_yardstick 同款）。
+            "improver_paired_probe": self._paired_probe.run(),
             # 参数活性读数（004 M3）：每个在表参数动过几次 / 从未出现，三态不折叠。
             "parameter_activity": _readParameterActivitySurface(),
             "escalation": self._last_escalation,
