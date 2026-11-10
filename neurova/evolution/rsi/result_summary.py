@@ -380,3 +380,86 @@ __all__ = [
     "default_rsi_summaries_path",
     "clear_rsi_summaries",
 ]
+
+
+# ── C2 质量三曲线（archive-best / deployed / final）─────────────────────
+# 论文 §7.5：三条曲线回答不同问题——archive-best 是"历史最好到过哪"，
+# deployed 是"现在线上是什么"，final 是"这轮结束时的读数"。三者分列，
+# 语义互斥由 record 侧守卫（archive_best < deployed = 冒充构造态，拒）。
+
+
+#: C2 三曲线的进程内态（未挂载持久流时的读侧；挂载后以文件为准）。
+_quality_curves_memory: List[Dict[str, Any]] = []
+
+
+def record_quality_curves(agent_id: Any, checkpoint: int, *,
+                          deployed: float, final: float,
+                          archive_best: Optional[float] = None) -> bool:
+    """按 checkpoint 追加质量三曲线读数（D2 预定时刻由编排器调用）。
+
+    archive_best 缺省由历史 deployed 最大值现算（运行中不许手填更低值
+    ——那会让"历史最好"冒充现值，或反之把现值藏进历史）。
+    """
+    if not isinstance(deployed, (int, float)) or not isinstance(final, (int, float)):
+        raise ValueError(f"质量曲线读数非数值（deployed={deployed!r}, final={final!r}）")
+    prior = readQualityCurves(agent_id)
+    running_best = max([e["deployed"] for e in prior["curve"]] or [float(deployed)])
+    if archive_best is None:
+        # 自动路径：历史最好吸收新高（真实改善 0.6→0.7 时 best 随之升，不是冒充）
+        effective_best = max(running_best, float(deployed))
+    else:
+        effective_best = float(archive_best)
+    if effective_best < float(deployed):
+        raise ValueError(
+            f"archive_best({effective_best}) < deployed({deployed})——"
+            "'历史最好冒充现值'的构造态被拒（三曲线语义互斥守卫）")
+    payload = {
+        "type": "quality_curves",
+        "agent_id": str(agent_id or "default"),
+        "checkpoint": int(checkpoint),
+        "deployed": round(float(deployed), 6),
+        "final": round(float(final), 6),
+        "archive_best": round(effective_best, 6),
+        "ts": round(time.time(), 3),
+    }
+    with _lock:
+        _quality_curves_memory.append(payload)
+    return _append_record(payload)
+
+
+def readQualityCurves(agent_id: Any) -> Dict[str, Any]:
+    """三曲线读数：逐 checkpoint 明细＋全局 archive_best（读侧单一出处）。
+
+    挂载持久流时扫文件（跨进程读回）；未挂载读进程内态（单测零 IO 约定）。
+    """
+    agent_key = str(agent_id or "default")
+    curve: List[Dict[str, Any]] = []
+    records: List[Dict[str, Any]] = []
+    if _persist_path is not None and _persist_path.exists():
+        for line in _persist_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(record, dict) and record.get("type") == "quality_curves":
+                records.append(record)
+    else:
+        records = list(_quality_curves_memory)
+    for record in records:
+        if record.get("agent_id") == agent_key:
+            curve.append({
+                "checkpoint": record.get("checkpoint"),
+                "deployed": record.get("deployed"),
+                "final": record.get("final"),
+                "archive_best": record.get("archive_best"),
+            })
+    deployed_values = [e["deployed"] for e in curve
+                       if isinstance(e.get("deployed"), (int, float))]
+    return {
+        "state": "measured" if curve else "insufficient_data",
+        "curve": curve,
+        "archive_best": max(deployed_values) if deployed_values else None,
+    }

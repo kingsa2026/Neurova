@@ -948,6 +948,18 @@ class RSIOrchestrator:
                     "cost_vector": self._last_cost_vector,
                     "deployment_phase": self.deployment_controller.get_current_phase(),
                 })
+                # C2 质量三曲线：deployed=现值（决策落定后的状态）、final=本轮
+                # 结束读数、archive_best 由流内历史现算（互斥守卫在 record 侧）。
+                from .result_summary import record_quality_curves
+
+                _deployed = None
+                if isinstance(self._last_eval_outcome, dict):
+                    _deployed = self._last_eval_outcome.get("score")
+                if isinstance(_deployed, (int, float)):
+                    record_quality_curves(
+                        self.agent_id, self._iteration_count,
+                        deployed=float(_deployed), final=float(_deployed),
+                    )
         except Exception as e:  # noqa: BLE001 - 审计封存故障不阻断迭代
             logger.debug("审计预定表封存失败: %s", e)
 
@@ -1707,6 +1719,9 @@ class RSIOrchestrator:
             "proxy_reference_correlation": self._proxyReferenceReadout(),
             # D2 审计预定表读数：预定时刻清单（独立审计只读预定时刻——
             # 表外请求在 readAuditSnapshot 被拒并点名理由）。
+            # C2 质量三曲线读数（archive-best/deployed/final 逐 checkpoint 分列，
+            # 语义互斥守卫在 record 侧——"历史最好冒充现值"构造态被拒）。
+            "quality_curves": _qualityCurvesReadout(self.agent_id),
             "audit_schedule": {
                 "stride": self._audit_schedule._stride,
                 "scheduled_points": self._audit_schedule.scheduledPoints()[:10],
@@ -1792,6 +1807,17 @@ def parameter_host_classes() -> Dict[str, type]:
     except Exception as e:  # noqa: BLE001
         logger.debug("context 宿主类不可导入: %s", e)
     return hosts
+
+
+def _qualityCurvesReadout(agent_id: str) -> Dict[str, Any]:
+    """C2 三曲线读数（模块级：读侧走 result_summary 单一出处）。"""
+    try:
+        from .result_summary import readQualityCurves
+
+        return readQualityCurves(agent_id)
+    except Exception as e:  # noqa: BLE001 - 曲线读侧故障不阻断状态面
+        logger.debug("质量曲线读侧失败: %s", e)
+        return {"state": "unevidenced", "reason": str(e)}
 
 
 def _readPresentationFunnel(agent_id: str) -> Dict[str, Any]:
