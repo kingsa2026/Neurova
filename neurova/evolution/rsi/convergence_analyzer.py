@@ -66,10 +66,14 @@ class ConvergenceAnalyzer:
         self.cost_history: List[float] = []
         # 每轮增益是否来自有效测量（工单 008）；与 gain_history 等长
         self.evidence_history: List[bool] = []
+        # E2 资源向量史（{turns,tokens,wall_ms}，逐维呈报不相加）；
+        # 标量 cost_history 仍是 ROI 分母（轮数），两本账各答各的问题。
+        self.cost_vectors: List[Dict[str, Any]] = []
 
         logger.info("ConvergenceAnalyzer initialized with window_size=%s", window_size)
 
-    def record_iteration(self, gain: float, cost: float, evidenced: bool = True) -> None:
+    def record_iteration(self, gain: float, cost: float, evidenced: bool = True,
+                         cost_vector: Optional[Dict[str, Any]] = None) -> None:
         """
         记录一轮 RSI 迭代的增益和成本
 
@@ -86,6 +90,8 @@ class ConvergenceAnalyzer:
             self.gain_history.append(gain)
         self.cost_history.append(cost)
         self.evidence_history.append(bool(evidenced))
+        if cost_vector is not None:
+            self.cost_vectors.append(dict(cost_vector))
         self._trim_history()
 
     def _trim_history(self) -> None:
@@ -97,6 +103,22 @@ class ConvergenceAnalyzer:
             self.cost_history = self.cost_history[-cap:]
         if len(self.evidence_history) > cap:
             self.evidence_history = self.evidence_history[-cap:]
+        if len(self.cost_vectors) > cap:
+            self.cost_vectors = self.cost_vectors[-cap:]
+
+    def costVectorReadout(self) -> Dict[str, Any]:
+        """E2 资源向量读数：逐维总额＋逐轮明细（向量不相加，Eq10 口径）。
+
+        ROI 标量的分母仍是 cost_history（轮数）——tokens/wall_ms 与增益
+        不同纲，硬折算就是编汇率；向量在这里逐维出街供预算复核。
+        """
+        totals = {"turns": 0, "tokens": 0, "wall_ms": 0}
+        for vector in self.cost_vectors:
+            for key in totals:
+                value = vector.get(key)
+                if isinstance(value, (int, float)):
+                    totals[key] += int(value)
+        return {"totals": totals, "iterations": list(self.cost_vectors)}
 
     def _roi_readout(self) -> Optional[float]:
         """成本核算读数（工单 006）。

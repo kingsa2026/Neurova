@@ -36,6 +36,20 @@ from neurova.security.governance_settings import rsiPhaseSourceFor
 
 logger = get_logger(__name__)
 
+
+def usageTokensDelta(before: int, after: int) -> int:
+    """E1：usage 单源的 token 差分（iterative 期间的真实消耗）。
+
+    负差分（记账面被清/换进程）不出负数——按 0 处理，不产假成本；
+    计数取自 `usage_accounting.snapshot()`（身份上下文按 sender 计的那套），
+    不新建第二套 token 计数（教义第 6 条）。
+    """
+    try:
+        delta = int(after) - int(before)
+    except (TypeError, ValueError):
+        return 0
+    return delta if delta > 0 else 0
+
 #: 一次参数动作的代价（与 `convergence_analyzer.record_iteration(cost=1.0)`
 #: 同一计量单位，单源引用，不新造第二个尺度）。
 _PARAM_ACTION_COST = 1
@@ -355,6 +369,8 @@ class RSIOrchestrator:
         self._last_escalation: Dict[str, Any] = {}
         # 003：反向闸最近一轮拦没拦、为什么拦（同一条"没做也要说得出为什么"的纪律）
         self._last_debt_gate: Dict[str, Any] = {}
+        # E1/E2：最近一轮的资源向量（None=本轮未进应用段，无成本可记）
+        self._last_cost_vector: Optional[Dict[str, Any]] = None
 
         # 端到端评测集（Auto Harness：gain 的统一度量，懒加载）
         self._eval_harness: Optional[Any] = None
@@ -468,6 +484,14 @@ class RSIOrchestrator:
         except Exception as e:  # noqa: BLE001 - 差分失败＝缺席，不阻断主链
             logger.debug("e2e 对齐差分现算失败: %s", e)
             return None
+
+    def _iterationCostVector(self, *, wall_ms: int, tokens_delta: int) -> Dict[str, Any]:
+        """E2 每轮资源向量：{turns, tokens, wall_ms}——逐维呈报不相加（Eq10 口径）。
+
+        turns=1（本轮迭代自身）；tokens=usage 单源差分（确定性 harness 不发
+        LLM ⇒ 诚实为 0，不冒领真 token 计数）；wall_ms=应用/度量段墙钟。
+        """
+        return {"turns": 1, "tokens": int(max(0, tokens_delta)), "wall_ms": int(wall_ms)}
 
     def _probeOutcome(self, state: Dict[str, Any], candidate: Any) -> Optional[float]:
         """Eq8 配对探针的下游结局评估（观测档）：候选值代入活值快照推演决策档。
@@ -759,6 +783,13 @@ class RSIOrchestrator:
             }
 
         if optimizations and self.deployment_controller.can_auto_execute("low"):
+            # E1/E2 成本计量起点：usage 单源快照＋墙钟（应用/度量段的真实消耗）
+            import time as _time
+
+            from neurova.core.usage_accounting import get_usage_accounting
+
+            _cost_t0 = _time.monotonic()
+            _tokens_before = get_usage_accounting().snapshot()["total"]["total_tokens"]
             perf_before = self._measure_performance()
             eval_before = self._last_eval_outcome
             snapshot = self._snapshot_optimizable()
@@ -825,6 +856,13 @@ class RSIOrchestrator:
                 # 密封用例从不进 gain/收敛史/候选生成（切分单源 eval_harness.splitSealedCases），
                 # 只作验收证据随状态面呈报。
                 self._last_sealed_evidence = self._run_sealed_evidence()
+                # E1/E2 资源向量：usage 单源差分＋墙钟（确定性 harness 不发 LLM
+                # ⇒ tokens 诚实为 0，不冒领真 token 计数）。
+                _tokens_after = get_usage_accounting().snapshot()["total"]["total_tokens"]
+                self._last_cost_vector = self._iterationCostVector(
+                    wall_ms=int((_time.monotonic() - _cost_t0) * 1000),
+                    tokens_delta=usageTokensDelta(_tokens_before, _tokens_after),
+                )
         else:
             eval_before = None
             eval_after = None
@@ -840,7 +878,8 @@ class RSIOrchestrator:
         # 不引入负增益语义，改用可证伪的零产出门槛）。
         if attempted:
             self.convergence_analyzer.record_iteration(
-                gain=gain, cost=1.0, evidenced=gain_evidenced
+                gain=gain, cost=1.0, evidenced=gain_evidenced,
+                cost_vector=self._last_cost_vector,
             )
 
         # roi 读数在喂数之后取，保证"本轮的增益/成本"已计入 ——
@@ -1585,6 +1624,13 @@ class RSIOrchestrator:
             # "改进器本身在变好"的直接证据（观测档：确定性 harness 推演，
             # 与主轨迹完全隔离；三态纪律与 task_yardstick 同款）。
             "improver_paired_probe": self._paired_probe.run(),
+            # E1/E2 资源向量读数（逐维呈报不相加）＋E3 被拒成本聚合——
+            # 成本链写了有人读（漏计费守卫的读侧）。
+            "cost_vector": {
+                "last": self._last_cost_vector,
+                "totals": self.convergence_analyzer.costVectorReadout()["totals"],
+            },
+            "pruner_failed_cost": self.pruner.failedCostReadout(),
             # 参数活性读数（004 M3）：每个在表参数动过几次 / 从未出现，三态不折叠。
             "parameter_activity": _readParameterActivitySurface(),
             "escalation": self._last_escalation,

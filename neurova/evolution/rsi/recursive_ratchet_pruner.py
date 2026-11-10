@@ -138,6 +138,8 @@ class RecursiveRatchetPruner:
 
         # 失败方案历史（用于粗筛阶段排除）
         self.failed_candidates_history: List[Candidate] = []
+        # E3：本轮剪枝为每个候选花掉的计分次数（按候选 id 计）
+        self._eval_costs: Dict[str, int] = {}
 
         # 最近一次 recursive_prune 的最终存活候选（按得分降序），
         # 供 EnhancedRatchetPruner 第一阶段复用剪枝成果（P1 修复配套）。
@@ -147,6 +149,21 @@ class RecursiveRatchetPruner:
             f"RecursiveRatchetPruner initialized with {rounds} rounds, "
             f"candidates_per_round={self.candidates_per_round}"
         )
+
+    def failedCostReadout(self) -> Dict[str, Any]:
+        """E3 被拒成本聚合：被拒总数与 realized cost 总额（漏计费守卫读侧）。
+
+        每条被拒的 realized_cost ≥ 1（粗筛至少计分一次）——零成本条目在
+        聚合时如实点名（不该出现，出现即计费链失守）。
+        """
+        entries = list(self.failed_candidates_history)
+        zero_cost = [e.id for e in entries if e.metadata.get("realized_cost", 0) < 1]
+        total = sum(int(e.metadata.get("realized_cost", 0)) for e in entries)
+        return {
+            "eliminated": len(entries),
+            "total_realized_cost": total,
+            "zero_cost_ids": zero_cost,
+        }
 
     def recursive_prune(
         self,
@@ -197,20 +214,35 @@ class RecursiveRatchetPruner:
             # 执行本轮筛选
             start_time = datetime.now()
 
+            # E3 计费：计分回调按候选 id 计次——被拒候选的 realized cost 就是
+            # 为它花掉的计分次数（漏计费守卫：被拒入账必须带 ≥1 的成本）。
+            # fn=None（离线形态：该轮回退内部默认分）原样透传，不包装。
+            def _counted(fn):
+                if fn is None:
+                    return None
+                def _wrapped(candidate):
+                    self._eval_costs[candidate.id] = self._eval_costs.get(candidate.id, 0) + 1
+                    return fn(candidate)
+                return _wrapped
+
             if round_num == 0:
                 # 第1轮：粗筛（启发式规则）
-                current_candidates = self._coarse_prune(current_candidates, keep_count, heuristic_fn)
+                current_candidates = self._coarse_prune(current_candidates, keep_count, _counted(heuristic_fn))
             elif round_num == 1:
                 # 第2轮：中筛（快速评估）
-                current_candidates = self._medium_prune(current_candidates, keep_count, quick_eval_fn)
+                current_candidates = self._medium_prune(current_candidates, keep_count, _counted(quick_eval_fn))
             else:
                 # 第3轮：细筛（完整验证）
-                current_candidates = self._fine_prune(current_candidates, keep_count, validation_fn)
+                current_candidates = self._fine_prune(current_candidates, keep_count, _counted(validation_fn))
 
             # R-3: 将被淘汰的候选写入 failed_candidates_history(最多保留 100 条)
+            # E3：被拒条目带 realized_cost（该候选被花掉的计分次数）——
+            # 零成本被拒不许静默入账（漏计费守卫）。
             if len(current_candidates) < input_count_before:
                 survived_ids = {c.id for c in current_candidates}
                 eliminated = [c for c in candidates if c.id not in survived_ids and c.id not in {f.id for f in self.failed_candidates_history}]
+                for e in eliminated:
+                    e.metadata["realized_cost"] = max(1, self._eval_costs.get(e.id, 0))
                 self.failed_candidates_history.extend(eliminated[-50:])  # 最多追加 50 条
                 if len(self.failed_candidates_history) > 100:
                     self.failed_candidates_history = self.failed_candidates_history[-100:]
