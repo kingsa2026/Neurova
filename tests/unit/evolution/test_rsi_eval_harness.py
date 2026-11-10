@@ -26,7 +26,7 @@ import datetime
 import unittest
 from unittest.mock import Mock, patch
 
-from neurova.evolution.rsi.eval_harness import RSIEvalHarness
+from neurova.evolution.rsi.eval_harness import RSIEvalHarness, splitSealedCases
 from neurova.evolution.rsi.system_performance import SYSTEM_SETPOINTS
 
 
@@ -42,10 +42,15 @@ class HarnessContractTest(unittest.TestCase):
         self.harness = RSIEvalHarness()
 
     def test_setpoint_params_score_full(self):
-        """核心契约：参数全在 setpoint → 全部用例满分。"""
+        """核心契约：参数全在 setpoint → 全部用例满分。
+
+        D1 起 run() 只由决策档算分（密封档 3 例走 run_sealed，永不进 gain）——
+        决策档 6 例。四族全覆盖断言见 test_all_four_families_covered。
+        """
         outcome = self.harness.run(_setpoint_params())
         self.assertAlmostEqual(outcome["score"], 1.0, places=6, msg=str(outcome["cases"]))
-        self.assertEqual(len(outcome["cases"]), 9)
+        decision, _ = splitSealedCases()
+        self.assertEqual(len(outcome["cases"]), len(decision))
 
     def test_deterministic_across_runs(self):
         first = self.harness.run(_setpoint_params())
@@ -73,8 +78,11 @@ class SensitivityTest(unittest.TestCase):
     def _score_with(self, system, param, value):
         params = _setpoint_params()
         params[system][param] = value
+        # D1 起用例分两档：目标用例落在密封档时漂移捕获读 run_sealed（验收证据
+        # 同样必须抓得住漂移），决策档照旧读 run()——两档同一份用例实现。
         outcome = self.harness.run(params)
-        case = next(c for c in outcome["cases"] if c["id"].startswith(_CASE_OF[(system, param)]))
+        cases = list(outcome["cases"]) + list(self.harness.run_sealed(params)["cases"])
+        case = next(c for c in cases if c["id"].startswith(_CASE_OF[(system, param)]))
         return case["score"]
 
     def test_bonus_penalty_zero_kills_differentiation(self):
@@ -158,11 +166,17 @@ class HarnessRobustnessTest(unittest.TestCase):
         self.assertAlmostEqual(outcome["score"], 1.0, places=6)
 
     def test_case_exception_scores_zero_not_raises(self):
-        """坏参数导致子系统抛异常 → 该用例 0 分，评测整体不炸。"""
+        """坏参数导致子系统抛异常 → 该用例 0 分，评测整体不炸。
+
+        D1：muscle_memory_threshold 的用例（tm_threshold_band）属密封档——
+        打崩读数走 run_sealed；run()（决策档）不受坏阈值影响、照常不抛。
+        """
         params = _setpoint_params()
         params["tool_memory"]["muscle_memory_threshold"] = "not-a-number"
         outcome = self.harness.run(params)  # 不抛
-        self.assertLess(outcome["score"], 1.0)
+        self.assertEqual(outcome["state"], "measured")
+        sealed = self.harness.run_sealed(params)  # 不抛
+        self.assertLess(sealed["score"], 1.0, "打崩密封档用例的坏参数不得得满分")
 
 
 class OrchestratorWiringTest(unittest.TestCase):

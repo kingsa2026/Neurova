@@ -11,7 +11,7 @@
 
 import pytest
 
-from neurova.evolution.rsi.eval_harness import EVAL_CASES, RSIEvalHarness
+from neurova.evolution.rsi.eval_harness import RSIEvalHarness, splitSealedCases
 
 
 def _live_params(**overrides):
@@ -42,25 +42,28 @@ def test_every_family_falling_back_to_setpoint_reports_measurement_blind():
     """
     result = RSIEvalHarness().run({})
 
+    decision, _ = splitSealedCases()
     assert result["state"] == "measurement_blind", (
         f"全族回退被报成了一次有效测量：score={result.get('score')} state={result.get('state')}")
     assert result["evidenced_cases"] == 0
-    assert result["blind_cases"] == len(EVAL_CASES)
+    assert result["blind_cases"] == len(decision), (
+        "D1 起 run() 只跑决策档（密封档走 run_sealed）——分母口径随切分走")
     assert result["score"] is None, "无有效用例时不得给出分数（0.0 与 1.0 都是假信号）"
 
 
 def test_blind_cases_are_excluded_from_the_denominator():
     """只有 tool_memory 暴露参数时，分数只由该族用例算出。
 
-    期望值独立可推：三族回退 → 9 个用例里 tool_memory 族 3 个有证据、6 个无证据；
-    有证据的三个在 setpoint 默认下均满分 → score=1.0，但 evidenced_cases 必须是 3。
+    期望值独立可推（D1 分母=决策档）：三族回退 → 决策档 6 例里 tool_memory 族
+    2 个有证据（tm_threshold_band 属密封档）、4 个无证据；
+    有证据的两个在 setpoint 默认下均满分 → score=1.0，但 evidenced_cases 必须是 2。
     """
     result = RSIEvalHarness().run(_live_params(tool_memory=TM_ALL))
 
     assert result["state"] == "measured"
-    assert result["evidenced_cases"] == 3, (
-        f"分母未剔除回退用例：{result['evidenced_cases']}/{len(EVAL_CASES)}")
-    assert result["blind_cases"] == 6
+    assert result["evidenced_cases"] == 2, (
+        f"分母未剔除回退用例：{result['evidenced_cases']}")
+    assert result["blind_cases"] == 4
     assert result["score"] == pytest.approx(1.0)
 
 
@@ -82,20 +85,23 @@ def test_blind_cases_do_not_inflate_score_above_evidenced_ones():
     """核心不变式：回退用例不得把分数抬到有效用例均值之上。
 
     构造：只暴露 tool_memory，且把肌肉阈值推到 5.0 越出 (0,1] 语义域。
-    该族 3 个用例全有证据（1.0 / 1.0 / 0.0），其余 6 个回退被剔除 →
-    score 必须恰等于有效用例均值 2/3；若回退用例仍计入分母则是 6/9 = 0.667→
-    与 1.0 分满分假象不可区分的另一种形态。
+    D1 分两档读数：决策档（run）里 tool_memory 2 个用例全有证据（1.0 / 1.0），
+    其余 4 个回退被剔除 → score 恰等于有效均值 1.0，分母不被回退用例污染；
+    越界本身由密封档（run_sealed）抓出——tm_threshold_band 判 0 分，
+    密封分 < 1.0，越界不得在两档任何一档被算成满分。
     """
     bad = dict(TM_ALL)
     bad["muscle_memory_threshold"] = 5.0  # 越出 (0,1] 语义域 → tm_threshold_band 判 0 分
     result = RSIEvalHarness().run(_live_params(tool_memory=bad))
 
     evidenced = [c["score"] for c in result["cases"] if c["evidenced"]]
-    assert len(evidenced) == 3, f"tool_memory 族应有 3 个有效用例，实际 {len(evidenced)}"
+    assert len(evidenced) == 2, f"决策档 tool_memory 应有 2 个有效用例，实际 {len(evidenced)}"
     assert result["score"] == pytest.approx(sum(evidenced) / len(evidenced)), (
         f"分数被无证据用例污染：{result['score']} vs 有效均值 {sum(evidenced)/len(evidenced)}")
-    assert result["score"] < 1.0, (
-        f"越界参数被算成满分：score={result['score']}")
+
+    sealed = RSIEvalHarness().run_sealed(_live_params(tool_memory=bad))
+    assert sealed["score"] < 1.0, (
+        f"越界参数在密封档被算成满分：score={sealed['score']}")
 
 
 def test_run_stays_deterministic_and_reports_per_case_provenance():
@@ -107,11 +113,11 @@ def test_run_stays_deterministic_and_reports_per_case_provenance():
 
     assert first == second, "评测集失去确定性"
     assert all("evidenced" in case for case in first["cases"]), "用例未自报证据来源"
-    # tool_memory 3 个用例 + sleep 2 个用例（同一对参数各测一种行为）共 5 个有效；
-    # emotion / experience 未暴露 → 4 个回退用例被剔出分母。
-    assert first["evidenced_cases"] == 5, (
-        f"tool_memory 3 + sleep 2 应有 5 个有效用例，实际 {first['evidenced_cases']}")
-    assert first["blind_cases"] == 4
+    # D1 决策档：tool_memory 2 例 + sleep 2 例（同一对参数各测一种行为）共 4 个有效；
+    # emotion / experience 未暴露（em_threshold/ex_crystallization 两例回退）被剔出分母。
+    assert first["evidenced_cases"] == 4, (
+        f"tool_memory 2 + sleep 2 应有 4 个有效用例，实际 {first['evidenced_cases']}")
+    assert first["blind_cases"] == 2
 
 
 def test_harmful_drift_is_still_caught_with_blind_families_excluded():

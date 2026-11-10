@@ -284,8 +284,11 @@ class TestCaseGateReadoutSurface:
         _result, proposal = await svc.evolve(
             skill_id="s1", skill_text=BASELINE, dataset=_dataset(["a", "b", "c"]),
             agent=_EchoAgent(),
+            # 显式关掉 D1 默认划出的 heldout：本格钉的是**例级门读数**语义，
+            # 判据集构成必须固定（默认 0.15 会把尾例切进密封档，'c' 的退化
+            # 就读不到了——密封档语义由 test_sealedCaseCarve 另行覆盖）。
             config=EvolutionConfig(iterations=1, min_improvement=0.0,
-                                   case_regression_allowance=1),
+                                   case_regression_allowance=1, heldout_ratio=0.0),
             judge=_ScoringJudge({"a": 0.4, "b": 0.4, "c": 0.4},
                                 {"a": 1.0, "b": 0.9, "c": 0.1}),
             mutate=_markerMutate,

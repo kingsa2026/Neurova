@@ -45,6 +45,17 @@ async def _mutate_appends_improved(*, artifact_text, artifact_type, failures):
     return artifact_text + "\nIMPROVED"
 
 
+def test_default_heldout_ratio_is_production_value():
+    """D1 红灯：密封报告集默认启用——heldout_ratio 出厂值 0→0.15（config 注释既定建议值）。
+
+    机制在、纪律成文（carve_heldout + "永不参与判定"），但默认 0 等于从不划出——
+    密封验收证据默认缺位。翻转默认即生产启用，判据侧守卫（holdout 至少留 1）
+    由 carve_heldout 既有逻辑承担。
+    """
+    assert EvolutionConfig().heldout_ratio == pytest.approx(0.15), (
+        "密封报告集默认仍关闭——heldout 机制守着一个从不启用的循环")
+
+
 class TestHeldoutIsolation:
     @pytest.mark.asyncio
     async def test_heldout_regression_does_not_reject(self):
@@ -212,7 +223,12 @@ class TestServiceHeldout:
         assert result.heldout_after == pytest.approx(0.9)
 
     @pytest.mark.asyncio
-    async def test_service_default_no_carve(self, tmp_path, monkeypatch, offlineAgent):
+    async def test_service_default_carves_sealed_evidence(self, tmp_path, monkeypatch, offlineAgent):
+        """D1 默认语义翻转：默认配置即生产启用——heldout 从 holdout 尾部自动划出并评测。
+
+        改前本格钉"默认 0 = 不划不测"（密封证据缺位）；翻转后默认 0.15，
+        holdout 2 条 → 划 1 条作密封验收证据（判据侧守卫：holdout 至少留 1）。
+        """
         from neurova.evolution.eval.service import SkillEvolutionService
 
         monkeypatch.setenv("NEUROVA_TEXT_EVOLUTION", "1")
@@ -225,4 +241,6 @@ class TestServiceHeldout:
             skill_id="s1", skill_text=BASELINE, dataset=three_way,
             agent=offlineAgent, judge=self._judge, mutate=_mutate_appends_improved,
         )
-        assert result.heldout_before == 0.0  # 默认 heldout_ratio=0，不划不测
+        assert result.heldout_before == pytest.approx(0.2), (
+            "默认配置下密封验收证据仍缺位——heldout 默认启用未生效")
+        assert result.heldout_after == pytest.approx(0.9)

@@ -42,7 +42,10 @@ class TestEvalHarnessGate:
 
         gate = make_eval_harness_gate(live_params_provider=provider, apply_fn=apply_fn)
         gain = gate("baseline", "bad-candidate")
-        assert gain == pytest.approx(-2.0 / 3.0), (
+        # D1 分母=决策档：劣化打崩 tm_multi 与 tm_decay 两例（基线均 1.0 → 劣化后
+        # 均 0.0），其余决策用例无证据被剔除 → gain = 0.0 - 1.0 = -1.0
+        # （改前分母含 tm_threshold 满分例，读数是 -2/3）。
+        assert gain == pytest.approx(-1.0), (
             "候选致参数劣化 → 门必须咬合(负 gain)；用实测值而非仅判符号，"
             "以免与「回滚判据单源」守卫(`test_rsi_rollback_evidence.py`"
             "::test_no_inline_second_rollback_decision)的 AST 走查口径混淆："

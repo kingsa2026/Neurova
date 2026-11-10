@@ -318,8 +318,57 @@ class RSIOrchestrator:
         # 端到端评测集（Auto Harness：gain 的统一度量，懒加载）
         self._eval_harness: Optional[Any] = None
         self._last_eval_outcome: Optional[Dict[str, Any]] = None
+        # 密封档验收证据（D1）：决策（应用/回滚）落定后读一次，随 get_status 呈报。
+        self._last_sealed_evidence: Optional[Dict[str, Any]] = None
 
         logger.info("RSIOrchestrator initialized")
+
+    def _current_live_params(self) -> Dict[str, Dict[str, Any]]:
+        """当下可优化参数的活值快照（主度量与密封档证据共用同一份派生，教义第 6 条）。"""
+        return {
+            system: {
+                p.name: p.current_value
+                for p in params
+                if p.current_value is not None
+            }
+            for system, params in self.integration_manager.get_optimizable_parameters().items()
+        }
+
+    def _evalOutcomeReadout(self) -> Dict[str, Any]:
+        """决策档评测读数（状态面呈报）：最近一次主度量的统一三态形态。"""
+        outcome = self._last_eval_outcome
+        if not isinstance(outcome, dict):
+            return {"state": "unevidenced",
+                    "reason": "本进程尚无评测读数（未跑过迭代或评测故障）"}
+        return outcome
+
+    def _sealedEvidenceReadout(self) -> Dict[str, Any]:
+        """密封档验收证据（状态面呈报）：缺席时按 unevidenced 说出为什么，不冒充证据。"""
+        evidence = self._last_sealed_evidence
+        if not isinstance(evidence, dict):
+            return {"state": "unevidenced",
+                    "reason": "尚无参数应用轮次——密封档只作决策后的验收证据，从不参与判定"}
+        families = sorted({c.get("family") for c in evidence.get("cases", []) if c.get("family")})
+        return {**evidence, "covered_families": families}
+
+    def _run_sealed_evidence(self) -> Optional[Dict[str, Any]]:
+        """密封档验收证据（D1）：决策落定后对**最终参数态**跑一次密封用例。
+
+        保留候选后的读数回答"从未被优化过的用例是否也站得住"；回滚后的读数
+        应≈基线（回滚把密封证据一并带回来的独立核对）。故障 fail-soft 返回 None，
+        状态面按 unevidenced 呈报，不冒充证据。
+        """
+        try:
+            harness = self._eval_harness
+            if harness is None:
+                from .eval_harness import RSIEvalHarness
+
+                harness = RSIEvalHarness()
+                self._eval_harness = harness
+            return harness.run_sealed(self._current_live_params())
+        except Exception as e:  # noqa: BLE001 - 密封证据故障不阻断迭代主链
+            logger.debug("密封档验收证据读取失败: %s", e)
+            return None
 
     def _measure_performance(self) -> float:
         """实测当前整体性能：端到端评测集优先（Auto Harness 统一度量），
@@ -337,15 +386,7 @@ class RSIOrchestrator:
 
                 harness = RSIEvalHarness()
                 self._eval_harness = harness
-            live_params = {
-                system: {
-                    p.name: p.current_value
-                    for p in params
-                    if p.current_value is not None
-                }
-                for system, params in self.integration_manager.get_optimizable_parameters().items()
-            }
-            outcome = harness.run(live_params)
+            outcome = harness.run(self._current_live_params())
         except Exception as e:  # noqa: BLE001 - 评测故障不阻断迭代
             logger.debug("端到端评测失败，回退信号估算: %s", e)
             self._last_eval_outcome = None
@@ -548,6 +589,10 @@ class RSIOrchestrator:
                         self.debt_ledger.settle_on_rollback(reason="rollback_restored_snapshot")
                     applied_count = 0
                     gain = 0.0
+                # 密封档验收证据（D1）：决策（保留/回滚）落定后对最终参数态读一次——
+                # 密封用例从不进 gain/收敛史/候选生成（切分单源 eval_harness.splitSealedCases），
+                # 只作验收证据随状态面呈报。
+                self._last_sealed_evidence = self._run_sealed_evidence()
         else:
             eval_before = None
             eval_after = None
@@ -1322,6 +1367,12 @@ class RSIOrchestrator:
             "rollback_history": self.rollback_manager.get_rollback_history(),
             # 负债读数（003 M3 的读侧）：只写不读的字段是 AGENTS.md §2 点名的断点。
             "debt": self._debt_readout(),
+            # 决策档评测读数（D1 的读侧）：`_last_eval_outcome` 此前只进 gain 内部
+            # 计算、状态面从不呈报（只写不读形态）——密封档上呈报面时同批接出。
+            "eval_outcome": self._evalOutcomeReadout(),
+            # 密封档验收证据（D1）：决策落定后的独立验收读数；
+            # 密封用例永不进 gain/候选生成（切分单源 splitSealedCases）。
+            "sealed_evidence": self._sealedEvidenceReadout(),
             # 参数活性读数（004 M3）：每个在表参数动过几次 / 从未出现，三态不折叠。
             "parameter_activity": _readParameterActivitySurface(),
             "escalation": self._last_escalation,
