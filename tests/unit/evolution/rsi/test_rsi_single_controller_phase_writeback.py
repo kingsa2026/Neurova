@@ -160,8 +160,10 @@ def test_unpersisted_promotion_is_reported_not_silent(
     """写盘失败必须显式可见 —— 不允许"内存已晋升、盘上没晋升"的静默两态。"""
     rollback_path = tmp_path / "rsi_rollback.json"
     monkeypatch.setenv("NEUROVA_EVOLUTION_ROLLBACK", str(rollback_path))
+    # G2 收口：写回单源迁到 governance_settings.persistRsiPhaseFor（编排器只搬运），
+    # 拦截点随迁——patch 语义不变：save 失败必须以一等读数出街。
     monkeypatch.setattr(
-        "neurova.evolution.rsi.orchestrator.save_governance_settings",
+        "neurova.security.governance_settings.save_governance_settings",
         lambda data, path=None: False,
         raising=False,
     )

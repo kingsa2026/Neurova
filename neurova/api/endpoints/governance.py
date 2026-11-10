@@ -893,6 +893,10 @@ class GovernanceSettingsUpdate(BaseModel):
 
     conversation_rules_enabled: Optional[bool] = None
     rsi_phase: Optional[int] = Field(None, ge=0, le=4)
+    # G2 agent 级相位覆写：{agent_id: phase(0..4)}。命中条目的 agent 按覆写值
+    # 读相位（最小灰度维度），未命中读全局。条目值域在端点显式校验（422 点名
+    # 越界条目），非法 agent_id（空串）同样 422——静默丢弃就是写了没人知道。
+    rsi_phase_overrides: Optional[Dict[str, int]] = None
     metacog_gate_enabled: Optional[bool] = None
     crystallization_llm_gate_enabled: Optional[bool] = None
     approval_continuation_enabled: Optional[bool] = None
@@ -916,6 +920,20 @@ async def update_governance_settings(body: GovernanceSettingsUpdate, admin=Depen
     payload = {k: v for k, v in body.model_dump().items() if v is not None}
     if not payload:
         raise HTTPException(status_code=422, detail="无有效更新字段")
+    # G2 覆写条目显式校验：值域 0..4、agent_id 非空。静默丢弃非法条目就是
+    # "写了没人知道"——管理员以为配了灰度，运行时却按全局走。
+    overrides = payload.get("rsi_phase_overrides")
+    if overrides is not None:
+        bad = {
+            str(agent): phase for agent, phase in overrides.items()
+            if not str(agent).strip() or not isinstance(phase, int)
+            or phase < 0 or phase > 4
+        }
+        if bad:
+            raise HTTPException(
+                status_code=422,
+                detail=f"rsi_phase_overrides 含非法条目（agent_id 须非空、phase 须 0..4）: {bad}",
+            )
     if not save_governance_settings(payload):
         raise HTTPException(status_code=500, detail="治理设置保存失败")
     return {"code": 0, "data": load_governance_settings()}
