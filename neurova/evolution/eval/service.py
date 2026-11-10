@@ -39,6 +39,44 @@ from neurova.evolution.proposal_lifecycle import (
 
 logger = get_logger(__name__)
 
+# B4 judge 独立校验：judge 选择面（holdout 增益）×密封面（heldout 增益）
+# 的逐轮监测——与 D4 自适应污染监测同一台机器（教义第 6 条：接线不并造）。
+# 审批人第一次同时看到"评审说好"与"结局好不好"：背离连续出现即 suspect。
+_judgeSealedMonitor = None
+
+
+def getJudgeSealedMonitor():
+    """B4 监测器单点（懒创建，进程内态；判定面读数走 proposal 侧出街）。"""
+    global _judgeSealedMonitor
+    if _judgeSealedMonitor is None:
+        from neurova.evolution.eval.adaptation_monitor import AdaptationMonitor
+
+        _judgeSealedMonitor = AdaptationMonitor()
+    return _judgeSealedMonitor
+
+
+def _judgeSealedColumns(result: Any) -> dict:
+    """B4 审批面两列：judge 选择面增益 × 密封面增益；缺列显式点名。"""
+    missing = []
+    selection = result.holdout_after - result.holdout_before
+    has_sealed = bool(result.heldout_before or result.heldout_after)
+    sealed = (result.heldout_after - result.heldout_before) if has_sealed else None
+    if not has_sealed:
+        missing.append("sealed")
+    readout = getJudgeSealedMonitor().readout()
+    return {
+        "judge_gain": round(float(selection), 6),
+        "sealed_gain": (round(float(sealed), 6) if sealed is not None else None),
+        "missing": missing,
+        "suspect_rounds": readout.get("suspect_rounds") or [],
+        "state": readout.get("state"),
+    }
+
+
+def judgeSealedReadout() -> dict:
+    """B4 读数：judge×密封逐轮曲线＋suspect 轮次（审批面消费）。"""
+    return getJudgeSealedMonitor().readout()
+
 # 状态字面量收口到提案生命周期契约（§6-2 阶段①，单一事实源）。
 # 历史行的 "approved"（批准即生效）在读路径归一为规范值 "applied"；
 # STATUS_APPROVED 随死状态退役——批准是原子决定，终态即 applied。
@@ -447,6 +485,8 @@ class EvolutionProposal:
     # 不必回查数据集。旧记录整键缺席 ⇒ 在来源覆盖里归"未记"，不读成默认值 synthetic；
     # 同样只作解释面，不参与 accept/reject（判据钉住"同分不同来源 ⇒ 判据数字不变"）。
     source_mix: dict = field(default_factory=dict)
+    # B4 judge 独立校验并列：judge 增益×密封增益两列＋缺列点名（审批面读）。
+    judge_vs_sealed: dict = field(default_factory=dict)
     holdout_before: float = 0.0
     holdout_after: float = 0.0
     # P0-2：真留出报告集证据（0.0 = 本轮无 heldout 集）。只供审批人参考，
@@ -781,6 +821,20 @@ class SkillEvolutionService:
         run_id = self._persist_run(skill_id, artifact_type, result,
                                    model_under_test=modelUnderTest)
 
+        # B4：judge 选择面 vs 密封面的逐轮记录（heldout 侧缺席时两列点名，
+        # 审批面显式看到缺哪列——不冒充两侧都在）。
+        try:
+            _selection_gain = result.holdout_after - result.holdout_before
+            _has_sealed = isinstance(getattr(result, "heldout_after", 0.0), (int, float)) and (
+                result.heldout_before or result.heldout_after)
+            if _has_sealed:
+                getJudgeSealedMonitor().record(
+                    selection_gain=_selection_gain,
+                    sealed_gain=result.heldout_after - result.heldout_before,
+                )
+        except Exception as monitor_err:  # noqa: BLE001 - 监测故障不阻断提案
+            logger.debug("judge×密封监测记录失败: %s", monitor_err)
+
         proposal: Optional[EvolutionProposal] = None
         if not result.rejected and result.changed:
             proposal = EvolutionProposal(
@@ -794,6 +848,9 @@ class SkillEvolutionService:
                 # 证据的来源构成在此现算（不是调用方传入）：传进来就等于允许别人替
                 # 这批证据编一个出处。
                 source_mix=sourceMixOfEvidence(dataset),
+                # B4 judge 独立校验并列：审批人同时看到"评审说好"与"结局好不好"；
+                # 两列缺一显式点名缺哪列（heldout 缺席＝密封列空，不冒充都在）。
+                judge_vs_sealed=_judgeSealedColumns(result),
                 baseline_text=skill_text,
                 improved_text=result.deployed_text,
                 holdout_before=round(result.holdout_before, 4),
