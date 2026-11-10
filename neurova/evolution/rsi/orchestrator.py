@@ -394,6 +394,15 @@ class RSIOrchestrator:
         self._applied_total = 0
         # F1 外部对照：逐轮成对采集（代理分, e2e 参考分）——setpoint 贴近度
         # 代理的滚动相关性呈报（观测档：参考=e2e 对齐；golden 臂评分属升判据档）
+        # F3 实验档：NEUROVA_RSI_F3_ARM=no_new_feedback 时切断外部参考采集
+        # （只留内部信号，量"自play 幻觉增益"）——实验档非常驻开关，读数以臂为键。
+        import os as _os
+
+        self._experiment_arm = _os.environ.get("NEUROVA_RSI_F3_ARM", "") or "main"
+        if self._experiment_arm not in ("main", "no_new_feedback"):
+            raise ValueError(
+                f"F3 实验档臂名非法：{self._experiment_arm!r}"
+                "（允许 main / no_new_feedback）")
         self._proxyReferencePairs: List[Dict[str, Any]] = []
 
         # 端到端评测集（Auto Harness：gain 的统一度量，懒加载）
@@ -509,15 +518,19 @@ class RSIOrchestrator:
             logger.debug("e2e 对齐差分现算失败: %s", e)
             return None
 
-    def _recordProxyReferencePair(self, proxy: float, reference: float) -> None:
+    def _recordProxyReferencePair(self, proxy: float, reference: Optional[float]) -> None:
         """F1 成对采集：代理分 × 外部参考分（观测档参考=e2e 对齐分）。
 
-        窗口封顶（rollingCorrelation.WINDOW）——相关性是滚动读数不是全史账。
+        reference=None（F3 实验档形态）＝该轮切断外部反馈——合法登记，
+        读侧按臂过滤。窗口封顶（rollingCorrelation.WINDOW）——相关性是
+        滚动读数不是全史账。
         """
         from .proxy_reference import WINDOW
 
         self._proxyReferencePairs.append(
-            {"proxy": float(proxy), "reference": float(reference)})
+            {"proxy": float(proxy),
+             "reference": None if reference is None else float(reference),
+             "arm": self._experiment_arm})
         if len(self._proxyReferencePairs) > WINDOW:
             self._proxyReferencePairs = self._proxyReferencePairs[-WINDOW:]
 
@@ -560,14 +573,26 @@ class RSIOrchestrator:
             return {"state": "unevidenced", "reason": str(e)}
 
     def _proxyReferenceReadout(self) -> Dict[str, Any]:
-        """F1 读数：滚动相关性（代理独自粉饰在这里现形）。"""
+        """F1 读数：滚动相关性（代理独自粉饰在这里现形）——按臂过滤。
+
+        F3 混臂即红：读数序列里混入无臂键/异臂条目 = 单源登记失守，当场炸
+        （读数以臂为键，不许主臂与实验臂的数字混成一栏）。
+        """
         from .proxy_reference import rollingCorrelation
 
         pairs = self._proxyReferencePairs
+        for pair in pairs:
+            if pair.get("arm") != self._experiment_arm:
+                raise ValueError(
+                    f"对照读数混臂：条目 arm={pair.get('arm')!r} "
+                    f"而当前臂={self._experiment_arm!r}——主臂与实验臂数字不许混栏")
         proxy_series = [p["proxy"] for p in pairs]
         reference_series = [p["reference"] for p in pairs]
         readout = rollingCorrelation(proxy_series, reference_series)
-        readout["channel"] = "e2e_alignment（观测档）"
+        readout["channel"] = ("e2e_alignment（观测档）"
+                              if self._experiment_arm == "main"
+                              else "no_new_feedback（F3 实验档，参考切断）")
+        readout["arm"] = self._experiment_arm
         return readout
 
     def _checkpointColumns(self) -> Dict[str, Any]:
@@ -1067,16 +1092,21 @@ class RSIOrchestrator:
 
         # F1 外部对照成对采集：代理分（setpoint 梯度估算，自指面）×外部参考分
         # （e2e 真实结局对齐，观测档）——每轮采集一次，滚动相关性随状态面出街。
+        # F3 实验档（no_new_feedback 臂）切断外部参考采集：只留内部信号跑，
+        # 量"自play 幻觉增益"——两臂读数分列，混臂在读侧当场红。
         try:
             from .task_yardstick import measure_tool_selection
 
             proxy_score = self._measure_performance_from_signals()
-            e2e_readout = measure_tool_selection(
-                self.integration_manager._systems.get("tool_memory"))
-            reference_score = (e2e_readout.get("score")
-                               if isinstance(e2e_readout, dict) else None)
-            if isinstance(proxy_score, (int, float)) and isinstance(reference_score, (int, float)):
-                self._recordProxyReferencePair(float(proxy_score), float(reference_score))
+            if self._experiment_arm == "no_new_feedback":
+                self._recordProxyReferencePair(float(proxy_score), None)
+            else:
+                e2e_readout = measure_tool_selection(
+                    self.integration_manager._systems.get("tool_memory"))
+                reference_score = (e2e_readout.get("score")
+                                   if isinstance(e2e_readout, dict) else None)
+                if isinstance(proxy_score, (int, float)) and isinstance(reference_score, (int, float)):
+                    self._recordProxyReferencePair(float(proxy_score), float(reference_score))
         except Exception as e:  # noqa: BLE001 - 对照采集故障不阻断迭代
             logger.debug("F1 外部对照采集失败: %s", e)
 
