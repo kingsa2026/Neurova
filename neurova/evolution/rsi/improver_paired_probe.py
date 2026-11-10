@@ -95,6 +95,7 @@ class ImproverPairedProbe:
                 "score": None,
                 "reason": f"配对双版本缺席：{'/'.join(missing)} 未装配——探针不空转",
                 "pairs": [],
+                "arms": {},
                 "realized_evaluations": 0,
             }
 
@@ -106,6 +107,7 @@ class ImproverPairedProbe:
                 "states": len(states),
                 "detail": f"起始态 {len(states)} < {MIN_ENTRIES}（task_yardstick 先例），不产出读数",
                 "pairs": [],
+                "arms": {},
                 "realized_evaluations": 0,
                 "policy_versions": {
                     "t": self._policyT.version, "baseline": self._policy0.version},
@@ -114,19 +116,46 @@ class ImproverPairedProbe:
         pairs: List[Dict[str, Any]] = []
         gammas: List[float] = []
         evaluations = 0
+        # A4 双对照臂的逐臂计账：全循环（I_t 候选）/ 冻结 I_0（基线候选）/
+        # 无持久更新（推理时搜索不落盘——基线质量，candidate=None 形态）。
+        # 三臂同起始态同评估器，帽＝起始态数，隔离的变量只有"改进器贡献"。
+        arm_counts = {"full": 0, "frozen_I_0": 0, "no_update": 0}
+        arm_qualities: Dict[str, List[float]] = {"full": [], "frozen_I_0": [], "no_update": []}
         for state in states:
             best_t = self._bestCandidate(self._policyT, state)
             best_0 = self._bestCandidate(self._policy0, state)
+            # 无更新臂恒评一次（candidate=None → 基线质量），与候选有无无关——
+            # 这是它作为对照的形态：策略怎么换它都不动（变异格钉住）。
+            evaluations += 1
+            arm_counts["no_update"] += 1
+            quality_none = self._outcomeEvaluator(state, None)
+            if quality_none is not None:
+                arm_qualities["no_update"].append(quality_none)
             if best_t is None and best_0 is None:
-                continue  # 双方都无候选：该态无比较意义，不计证据
+                pairs.append({
+                    "state": f"{state['system']}.{state['param']}@{state['current']}",
+                    "candidate_t": None,
+                    "candidate_0": None,
+                    "quality_t": None,
+                    "quality_0": None,
+                    "quality_no_update": quality_none,
+                    "gamma": None,
+                })
+                continue  # 双方都无候选：配对无比较意义，无更新臂已计账
             quality_t: Optional[float] = None
             quality_0: Optional[float] = None
             if best_t is not None:
                 evaluations += 1
+                arm_counts["full"] += 1
                 quality_t = self._outcomeEvaluator(state, best_t)
+                if quality_t is not None:
+                    arm_qualities["full"].append(quality_t)
             if best_0 is not None:
                 evaluations += 1
+                arm_counts["frozen_I_0"] += 1
                 quality_0 = self._outcomeEvaluator(state, best_0)
+                if quality_0 is not None:
+                    arm_qualities["frozen_I_0"].append(quality_0)
             pair_gamma: Optional[float] = None
             if quality_t is not None and quality_0 is not None:
                 pair_gamma = quality_t - quality_0
@@ -137,8 +166,19 @@ class ImproverPairedProbe:
                 "candidate_0": best_0.metadata["optimization"]["new_value"] if best_0 else None,
                 "quality_t": quality_t,
                 "quality_0": quality_0,
+                "quality_no_update": quality_none,
                 "gamma": pair_gamma,
             })
+
+        arms = {
+            name: {
+                "realized": arm_counts[name],
+                "quality_mean": (
+                    round(sum(qs) / len(qs), 6) if qs else None),
+                "evidenced": len(qs),
+            }
+            for name, qs in arm_qualities.items()
+        }
 
         if not gammas:
             return {
@@ -147,6 +187,7 @@ class ImproverPairedProbe:
                 "states": len(states),
                 "detail": "全部配对无下游证据（候选缺席或结局量不出），不产出 Γ",
                 "pairs": pairs,
+                "arms": arms,
                 "realized_evaluations": evaluations,
                 "policy_versions": {
                     "t": self._policyT.version, "baseline": self._policy0.version},
@@ -159,6 +200,7 @@ class ImproverPairedProbe:
             "states": len(states),
             "evidenced_pairs": len(gammas),
             "pairs": pairs,
+            "arms": arms,
             "realized_evaluations": evaluations,
             "policy_versions": {
                 "t": self._policyT.version, "baseline": self._policy0.version},
