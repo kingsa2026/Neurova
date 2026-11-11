@@ -185,7 +185,8 @@
   "agent_instance_fields_migrated": [
     "_tkg_instance",
     "model_adapter",
-    "evolution_engine"
+    "evolution_engine",
+    "experience_fusion"
   ],
   "patch_targets": {
     "module": [
