@@ -162,7 +162,10 @@ def resolve_ticket_evidence(agent: Any,
         return _unreadable("agent 无身份，票据库按 agent 分库定位不到", record, tuple(steps))
 
     try:
-        results = agentLibrary(agent_id).creation_evidence.task_results(steps)
+        # 形状粒度取证（尾2）：`sequence_results` 按「工具序列＋参数键名」聚合，
+        # 值无关——自由文本参数每轮不同的同形状任务也能继承历史票据。
+        # 技能封装/发布闸仍走细粒度 `task_results`（消费方各归各）。
+        results = agentLibrary(agent_id).creation_evidence.sequence_results(steps)
     except Exception as err:  # noqa: BLE001 - 查不了票必须出声，不许当成"没票"
         return _unreadable(f"证据库查询失败: {err}", record, tuple(steps))
 

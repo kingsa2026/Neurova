@@ -24,7 +24,6 @@ import {
   type RsiStatus,
   approveImproverUpgrade,
 } from '@/api/modules/rsiGovernance'
-import { getGovernanceSettings, updateGovernanceSettings } from '@/api/modules/settings'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -246,32 +245,6 @@ const evidenceRows = computed<EvidenceRow[]>(() => {
 const upgrade = computed(() => status.value?.improver_upgrade)
 const approvingUpgrade = ref(false)
 
-// ── G2 灰度写口：agent 相位覆写（后端 PUT /governance/settings 已支持
-//    rsi_phase_overrides 整键替换语义——必须先读现有条目合并后再提交，
-//    直接传单条会清掉别的 agent 的覆写）──
-const overridePhase = ref<number>(2)
-const applyingOverride = ref(false)
-
-async function applyPhaseOverride() {
-  const target = agentId.value
-  if (!target) {
-    message.warning(t('rsiGovernance.overrideNeedAgent'))
-    return
-  }
-  applyingOverride.value = true
-  try {
-    const current = await getGovernanceSettings()
-    const overrides = { ...((current?.data?.rsi_phase_overrides as Record<string, number>) || {}) }
-    overrides[target] = overridePhase.value
-    await updateGovernanceSettings({ rsi_phase_overrides: overrides })
-    message.success(t('rsiGovernance.overrideOk', { agent: target, phase: overridePhase.value }))
-    await load()
-  } catch (err) {
-    message.error(`${t('rsiGovernance.overrideFailed')}：${errorText(err)}`)
-  } finally {
-    applyingOverride.value = false
-  }
-}
 
 async function approveUpgrade() {
   approvingUpgrade.value = true
@@ -415,21 +388,6 @@ onMounted(load)
         </tbody>
       </table>
       <!-- A5 升级批准（人工 gate 的人工半）：available 才出按钮，理由随行 -->
-      <!-- G2 灰度写口：agent 相位覆写（先读现有条目合并写，不清别人的覆写） -->
-      <div class="rsi-upgrade" data-testid="rsi-phase-override">
-        <a-select v-model:value="overridePhase" data-testid="rsi-phase-override-phase" style="width: 120px">
-          <a-select-option v-for="p in [0, 1, 2, 3, 4]" :key="p" :value="p">{{ p }}</a-select-option>
-        </a-select>
-        <a-button
-          data-testid="rsi-phase-override-apply"
-          :loading="applyingOverride"
-          :disabled="!agentId"
-          @click="applyPhaseOverride"
-        >
-          {{ t('rsiGovernance.overrideApply') }}
-        </a-button>
-      </div>
-
       <div v-if="upgrade" class="rsi-upgrade" data-testid="rsi-upgrade">
         <a-tag :color="upgrade.available ? 'processing' : 'default'" data-testid="rsi-upgrade-state">
           {{ upgrade.available ? t('rsiGovernance.upgradeAvailable') : t('rsiGovernance.upgradeNone') }}

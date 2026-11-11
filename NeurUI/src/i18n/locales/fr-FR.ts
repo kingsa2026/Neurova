@@ -2578,10 +2578,6 @@ conflictTimeReadout: 'Lecture temporelle : {basis} (ancienne {old} → nouvelle 
     acceptanceLabel: "Taux d'acceptation",
     phaseSourceOverride: "prioritaire",
     phaseSourceGlobal: "global",
-    overrideApply: "Appliquer la priorité de phase",
-    overrideOk: "Priorité de phase appliquée : {agent} → {phase}",
-    overrideFailed: "Échec de la priorité de phase",
-    overrideNeedAgent: "Saisissez d'abord l'ID de l'agent à prioriser",
   },
 
   settings: {

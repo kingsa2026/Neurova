@@ -16,20 +16,12 @@ vi.mock('@/api/modules/rsiGovernance', () => ({
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ user: { username: 'admin', role: 'admin' } }),
 }))
-vi.mock('@/api/modules/settings', () => ({
-  getGovernanceSettings: vi.fn().mockResolvedValue({
-    data: { conversation_rules_enabled: false, rsi_phase: 1,
-            rsi_phase_overrides: { 'other-agent': 2 } },
-  }),
-  updateGovernanceSettings: vi.fn().mockResolvedValue({ data: {} }),
-}))
 vi.mock('ant-design-vue', () => ({
   message: { success: vi.fn(), error: vi.fn() },
 }))
 
 import RsiGovernancePage from '../RsiGovernancePage.vue'
 import zhCN from '@/i18n/locales/zh-CN'
-import { getGovernanceSettings, updateGovernanceSettings } from '@/api/modules/settings'
 
 const stubs = {
   GlassCard: { props: ['title'], template: '<section><h2>{{ title }}</h2><slot /></section>' },
@@ -155,19 +147,4 @@ describe('RsiGovernancePage — G2 灰度写口（phase_source 呈报＋agent �
     expect(tag.text()).not.toBe(''), '相位来源 tag 渲染为空'
   })
 
-  it('覆写操作提交合并写：本 agent 条目进 rsi_phase_overrides 且不清别人的条目', async () => {
-    const wrapper = factory()
-    await flushPromises()
-
-    const applyBtn = wrapper.find('[data-testid="rsi-phase-override-apply"]')
-    expect(applyBtn.exists()).toBe(true), '灰度写口（应用覆写按钮）缺失——G2 写口前端面'
-    await applyBtn.trigger('click')
-    await flushPromises()
-
-    expect(updateGovernanceSettings).toHaveBeenCalled()
-    const body = (updateGovernanceSettings as ReturnType<typeof vi.fn>).mock.calls[0][0]
-    expect(body.rsi_phase_overrides['kai']).toBe(2), '覆写条目没写进提交体'
-    expect(body.rsi_phase_overrides['other-agent']).toBe(2), (
-      '覆写提交清掉了别人的条目——后端 PUT 是整键替换，必须先读后合并写')
-  })
 })
