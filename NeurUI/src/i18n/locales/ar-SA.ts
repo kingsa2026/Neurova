@@ -2576,6 +2576,12 @@ conflictTimeReadout: 'قراءة الوقت: {basis} (القديم {old} → ا�
     pairsLabel: "عدد الأزواج",
     uncoveredLabel: "عائلات غير مغطاة",
     acceptanceLabel: "معدل القبول",
+    phaseSourceOverride: "متجاوزة",
+    phaseSourceGlobal: "عالمي",
+    overrideApply: "تطبيق تجاوز المرحلة",
+    overrideOk: "تم تطبيق تجاوز المرحلة: {agent} → {phase}",
+    overrideFailed: "فشل تجاوز المرحلة",
+    overrideNeedAgent: "أدخل أولاً معرّف الوكيل المطلوب تجاوزه",
   },
 
   settings: {

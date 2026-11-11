@@ -2586,6 +2586,12 @@ conflictTimeReadout: '时间读数：{basis}（旧 {old} → 新 {new}）',
     pairsLabel: "配对数",
     uncoveredLabel: "未覆盖族",
     acceptanceLabel: "接受率",
+    phaseSourceOverride: "覆写",
+    phaseSourceGlobal: "全局",
+    overrideApply: "应用相位覆写",
+    overrideOk: "相位覆写已生效：{agent} → {phase}",
+    overrideFailed: "相位覆写失败",
+    overrideNeedAgent: "请先在上方填入要覆写的 Agent ID",
   },
 
   settings: {

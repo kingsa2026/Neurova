@@ -2576,6 +2576,12 @@ conflictTimeReadout: '時刻の読み取り: {basis}（旧 {old} → 新 {new}�
     pairsLabel: "ペア数",
     uncoveredLabel: "未カバー族",
     acceptanceLabel: "採択率",
+    phaseSourceOverride: "上書き",
+    phaseSourceGlobal: "グローバル",
+    overrideApply: "フェーズ上書きを適用",
+    overrideOk: "フェーズ上書きが適用されました: {agent} → {phase}",
+    overrideFailed: "フェーズ上書きに失敗しました",
+    overrideNeedAgent: "上書きする Agent ID を先に入力してください",
   },
 
   settings: {

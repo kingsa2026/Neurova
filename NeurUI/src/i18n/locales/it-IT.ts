@@ -2576,6 +2576,12 @@ conflictTimeReadout: 'Lettura temporale: {basis} (vecchia {old} → nuova {new})
     pairsLabel: "Coppie",
     uncoveredLabel: "Famiglie non coperte",
     acceptanceLabel: "Tasso di accettazione",
+    phaseSourceOverride: "sostituita",
+    phaseSourceGlobal: "globale",
+    overrideApply: "Applica override di fase",
+    overrideOk: "Override di fase applicato: {agent} → {phase}",
+    overrideFailed: "Override di fase non riuscito",
+    overrideNeedAgent: "Inserisci prima l'ID dell'agente da sostituire",
   },
 
   settings: {

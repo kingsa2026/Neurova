@@ -2576,6 +2576,12 @@ conflictTimeReadout: 'Time readout: {basis} (old {old} → new {new})',
     pairsLabel: "Pairs",
     uncoveredLabel: "Uncovered families",
     acceptanceLabel: "Acceptance rate",
+    phaseSourceOverride: "override",
+    phaseSourceGlobal: "global",
+    overrideApply: "Apply phase override",
+    overrideOk: "Phase override applied: {agent} → {phase}",
+    overrideFailed: "Phase override failed",
+    overrideNeedAgent: "Fill in the Agent ID to override first",
   },
 
   settings: {

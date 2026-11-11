@@ -2576,6 +2576,12 @@ conflictTimeReadout: 'Zeitauswertung: {basis} (alt {old} → neu {new})',
     pairsLabel: "Paare",
     uncoveredLabel: "Nicht abgedeckte Familien",
     acceptanceLabel: "Annahmequote",
+    phaseSourceOverride: "Überschrieben",
+    phaseSourceGlobal: "Global",
+    overrideApply: "Phasen-Override anwenden",
+    overrideOk: "Phasen-Override angewendet: {agent} → {phase}",
+    overrideFailed: "Phasen-Override fehlgeschlagen",
+    overrideNeedAgent: "Zuerst die zu überschreibende Agent-ID eingeben",
   },
 
   settings: {
