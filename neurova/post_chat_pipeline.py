@@ -3821,30 +3821,11 @@ class PostChatPipeline:
             # 2. 关联经验记忆（这个对话用到了什么工具？）
             tools_used = self._agt._collect_tool_messages()
             tool_names = list(set(tm.get("tool_name", "unknown") for tm in tools_used))
-            
-            # 3. 更新经验记忆融合器
-            fusion = self._get_dependency("experience_fusion")
-            # 工单 002 同根因命中点：这里曾无条件写 `"success": True`，
-            # 等于给融合器与知识图谱投确证成功票。无客观回执时不投（宁缺毋伪）。
-            from neurova.agent.turn_state import resolve_tool_outcome
 
-            turn_outcome = resolve_tool_outcome(tools_used)
-            if fusion and tool_names and turn_outcome is None:
-                logger.debug("本轮无工具结果回执，跳过经验融合写入（不投成功票）")
-            elif fusion and tool_names:
-                for tool_name in tool_names:
-                    fusion.fuse(
-                        tool_result={
-                            "tool_name": tool_name,
-                            "success": turn_outcome,
-                            "problem_text": user_input[:100],
-                        },
-                        graph_context={
-                            "related_entities": [r.source_entity for r in rules],
-                            "causal_chains": [f"{r.source_entity}→{r.target_entity}" for r in rules],
-                        },
-                    )
-            
+            # （经验融合器的写入已于 2026-11-12 退役：只写不读的断点——融合产物
+            # 全仓零消费方，成败位的客观链由 EKB 沉淀承担。对照与案底见
+            # tests/unit/cognitive/test_experienceMemoryFusionRetired.py。）
+
             # 4. 更新模式挖掘器
             # 工单 013：同上，只记服务端票据的三态（本步骤的 `turn_outcome` 是给
             # 融合器的旁路证据，不得在这里升格成模式的客观成功票）。
