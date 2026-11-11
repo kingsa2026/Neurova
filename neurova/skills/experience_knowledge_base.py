@@ -529,6 +529,100 @@ class ExperienceKnowledgeBase:
                 updated, sanitized, "like" if success else "dislike")
         return updated
 
+    def mergeDuplicateRecords(self) -> Dict[str, int]:
+        """存量重复行一次性清理（去重门 NULL 失效期的遗产），幂等可复跑。
+
+        身份与合并语义**与写入门同一份**（教义第 6 条，不另写第二份口径）：
+        - 身份 = (agent_id, skill_name, success, content_key)；content_key 空串
+          不参与（与写入门同口径：算不出内容身份的行各自成行）；
+        - 保留组内最旧行，seen_count 取**和**（重复次数是事实，不许丢）；
+        - result/timestamp 刷新为最新一次（与 add_experience_record 的合并
+          UPDATE 同语义）；
+        - evidence_state 按 evidenced 优先、verifiability_state 按非 unchecked
+          优先（信息不回退）；
+        - adoption_outcome / operator_disposition：保留行非空则保留，否则从被
+          并行继承最新非空值（采纳结论与人工处置是资产，不许因合并蒸发）。
+
+        Returns:
+            `{"groups": 合并组数, "removed": 删除行数}`（幂等：无事发生时为 0）。
+        """
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(
+                """
+                SELECT min(id) AS keep_id, count(*) AS n,
+                       sum(seen_count) AS seen_sum
+                FROM experience_records
+                WHERE content_key != ''
+                GROUP BY agent_id, skill_name, success, content_key
+                HAVING count(*) > 1
+                """
+            )
+            groups = cur.fetchall()
+            removed = 0
+            merged_groups = 0
+            for g in groups:
+                keep_id = int(g["keep_id"])
+                cur.execute(
+                    "SELECT * FROM experience_records WHERE id = ?", (keep_id,))
+                kept = dict(cur.fetchone())
+                cur.execute(
+                    """
+                    SELECT * FROM experience_records
+                    WHERE agent_id IS ? AND skill_name = ? AND success IS ?
+                      AND content_key = ? AND id != ?
+                    ORDER BY created_at ASC, id ASC
+                    """,
+                    (kept["agent_id"], kept["skill_name"], kept["success"],
+                     kept["content_key"], keep_id))
+                others = [dict(r) for r in cur.fetchall()]
+                if not others:
+                    continue
+                latest = others[-1]
+                adoption = kept.get("adoption_outcome")
+                if adoption is None:
+                    adoption = next(
+                        (o["adoption_outcome"] for o in reversed(others)
+                         if o.get("adoption_outcome") is not None), None)
+                disposition = kept.get("operator_disposition")
+                if disposition is None:
+                    disposition = next(
+                        (o["operator_disposition"] for o in reversed(others)
+                         if o.get("operator_disposition") is not None), None)
+                evidence_state = kept.get("evidence_state")
+                if evidence_state != "evidenced":
+                    evidence_state = (
+                        "evidenced" if any(o.get("evidence_state") == "evidenced"
+                                           for o in others) else evidence_state)
+                verifiability = kept.get("verifiability_state")
+                if verifiability == "unchecked":
+                    verifiability = next(
+                        (o["verifiability_state"] for o in reversed(others)
+                         if o.get("verifiability_state") not in (None, "unchecked")),
+                        verifiability)
+                cur.execute(
+                    """
+                    UPDATE experience_records
+                    SET result = ?, timestamp = ?, created_at = ?,
+                        seen_count = ?, evidence_state = ?, verifiability_state = ?,
+                        adoption_outcome = ?, operator_disposition = ?
+                    WHERE id = ?
+                    """,
+                    (latest.get("result"), latest.get("timestamp"),
+                     latest.get("created_at"), int(g["seen_sum"] or kept["seen_count"]),
+                     evidence_state, verifiability, adoption, disposition, keep_id))
+                ids = [int(o["id"]) for o in others]
+                cur.execute(
+                    f"DELETE FROM experience_records WHERE id IN "
+                    f"({','.join('?' * len(ids))})", ids)
+                removed += len(ids)
+                merged_groups += 1
+            self._conn.commit()
+        if merged_groups:
+            logger.info(
+                "存量重复行清理: %d 组合并、删除 %d 行", merged_groups, removed)
+        return {"groups": merged_groups, "removed": removed}
+
     def record_injection_adoption(
         self, record_ids: Optional[List[int]], adopted: Optional[bool]
     ) -> int:
