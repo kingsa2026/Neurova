@@ -487,7 +487,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { request } from '@/api'
 import { listProviders, getActiveModel, activateModel as apiActivateModel, updateProvider, createProvider as apiCreateProvider, deleteProvider as apiDeleteProvider, discoverModelsStructured, mergeDiscoveredModels, filterProviderModels, getProviderSeries, testConnection } from '@/api/modules/providers'
@@ -1566,9 +1566,10 @@ onBeforeUnmount(() => {
   isDisposed = true
 })
 
-watch(() => defaultConfig.provider_id, () => {
-  defaultConfig.model_id = ''
-})
+// 「换 provider 时清 model」的语义只挂在用户交互上（模板 @change="onDefaultProviderChange"）。
+// 此前这里另有一份 watch 实现，口径过宽：fetchActiveModel 的程序化回填（同一 tick 先填
+// provider_id 再填 model_id）也会在 tick 末尾触发它，把刚回填的 model_id 清掉——刷新后
+// 提供商在、模型空（用户报障）。两份实现收口到 @change 一份（教义第 6 条）。
 </script>
 
 <style scoped>
