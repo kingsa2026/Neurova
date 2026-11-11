@@ -414,7 +414,6 @@ def wire_memory_guards(agent) -> None:
     - version_control: get_version_control()（内存态快照，会话内可回滚；
       跨进程持久化待 storage 接口统一后另接）
     - dependency_graph: get_dependency_graph() 模块单例
-    - experience_fusion: ExperienceMemoryFusion(dependency_graph)
     """
     try:
         from neurova.cognitive_layers.memory_layer.conflict import LegacyConflictDetector
@@ -439,19 +438,6 @@ def wire_memory_guards(agent) -> None:
             agent.dependency_graph = get_dependency_graph()
     except Exception as e:  # noqa: BLE001
         logger.warning("dependency_graph 装配失败: %s", e)
-
-    try:
-        from neurova.cognitive_layers.memory_layer.experience_memory_fusion import (
-            ExperienceMemoryFusion,
-        )
-
-        if getattr(agent, "experience_fusion", None) is None:
-            agent.experience_fusion = ExperienceMemoryFusion(
-                getattr(agent, "dependency_graph", None)
-            )
-    except Exception as e:  # noqa: BLE001
-        logger.warning("experience_fusion 装配失败: %s", e)
-
 
 class SubSystemContainer:
     """Agent 子系统容器 — 分组管理初始化逻辑
@@ -575,7 +561,6 @@ class SubSystemContainer:
         a.conflict_detector = None
         a.version_control = None
         a.dependency_graph = None
-        a.experience_fusion = None
 
         if c.enable_memory:
             a._init_memory_modules()
