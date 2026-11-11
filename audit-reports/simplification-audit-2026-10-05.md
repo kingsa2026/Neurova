@@ -12266,4 +12266,12 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **诚实尾巴（三处"机器在、首份实证待生产"）**：A5 首次真实换版需生产被拒画像攒够＋人批准（提案 gate 设计如此）；E1 token 维真实非零读数需真臂跑评测；C4 golden 臂域/F4 校准数据需 B2 真语料回填＋真臂。**不允许用"实装存在"冒充"证据存在"**（survey 同款尺子量自己）。
     - **质量面**：每单先红后绿（约 100 格新判据）；evolution 目录 1696→1832；全量复跑 evolution+skills 3082 passed；广域回归（evolution/skills/api/core/llm/security）终局轮见后台记录。7 项预存红 stash 定责与本批无关（§6-592 同款）。
     - **终局广域回归**：evolution/skills/api/core/llm/security 六目录——api 2795 passed（排除 6 预存红文件）；llm/core 6 红 A/B 定责（stash 前后同红）＝预存/环境态零关联。**盘中发现并登记：预算镜像 +1 盲点**（D1 carve＋B3 校准组合下计划漏计一轮，used 16>planned 15 固定数据集稳定复现，镜像机器如实外露 budget_plan_exceeded）——修复另票；API 测试数据集改注入固定化（原钉走真实库 mined 级，语料随运行漂移）。F4 生产文件漏提交于终局盘点抓到补交（15b97e3d0）。
-    - **下一枚空号现查：本格取 593，后继从 594 起。推送待用户授权（30 枚本地提交一次性）。**
+    - **下一枚空号现查：本格取 593，后继从 594 起。**
+594. **RSI 尾巴批次全闭——镜像盲点修复＋守卫供值＋升级通道生产环＋E1 真臂 token 读数＋活体实证** ✅🟢 —— 用户「继续处理全部尾巴」；§6-593 登记的尾巴逐项处置（5 枚提交 `217478b11..4b539034a`）。
+    - **T1 预算镜像 +1 盲点修复（`217478b11`）**：根因坐实＝`service._noise_band_for` 校准前真跑 `_judge_available`（runner.py:941 对第一例真发一个 agent 回合），planRealArmTurns 镜像漏计——noiseCalibration 计入 +1 探针（noise_repeats>1 时）；钉子随镜像更新（默认整轮 247、API 56/52/16），**严格 ≤ 断言恢复**（16==16 实证镜像回归真上界）。
+    - **T3 重叠守卫供值接线（`5c3a36a5d`）**：miner.minedSessionIds（与 messages_from_sessions 同源 list_sessions 单源）＋service mined 级出街前现算出处跑守卫——重叠 fail-closed **带记名的空集**出街（_attachSourceIssues(None,…) 会丢记名）；甲案种子空集恒过，真语料回填后即生效。**测试勘误**：T3 两格曾误建于 eval/ 目录（cat >> 对不存在路径会新建文件），已合并进 rsi/ 正式文件并删除误建件。
+    - **T2 A5 升级通道接生产环（`98fbcbb67`）**：版本命名内容式（I_drop{档位}，同档数不同集合碰撞前置修复）；编排器读数面（失败史派生＋探针预演，get_status 挂 improver_upgrade）；批准闭环 _applyApprovedImproverUpgrade（fresh derive＋fresh probe→Γ 入账→内存策略与配对探针双臂即时换，重复批准拒）；治理端点 POST /rsi/improver-upgrade/approve（ValueError 态 409 点名，成功 200 带证据）。首次真实换版现在只等生产被拒画像攒够＋管理员在端点批准。
+    - **T4 E1 真臂 token 读数（`4b539034a`）**：差分单源收口（tokensDelta 进 core/usage_accounting——eval 侧需要而 rsi import eval 会成环，rsi 自持第二定义收口）；EvolutionRunResult.agent_turns_tokens（真臂段＝校准探针+校准+主调度的 usage 快照差分；模拟臂 None 不冒领）。
+    - **T5 活体实证（即用即删探针两轮）**：①真臂整轮（真 Agent＋固定小数据集，used 9 ≤ planned 11——T1 修复活体旁证）；②1 回合最小探针——真 LLM（sensenna-6.8-flash-lite，免费端点 glm-5.3-flash-free 已 FreeUsageLimitError 429 限尽，判别过程在案）**usage.calls=1 / total_tokens=237 记账链非零** ＋ **E5 measured：c̄_task=237.0（真实 serving 事件）、C_total(1000)=237237、missing=[]**。E1「token 维真实非零读数」与 E5「c̄ 可回溯真实 serving 事件」两条尾巴**闭票**。
+    - **仍登记（数据形态尾巴，非工程缺口）**：C4 golden 臂域与 F4 校准数据需生产积累；A5 首次真实换版待生产被拒画像＋人批（通道已开）。
+    - **下一枚空号现查：本格取 594，后继从 595 起。**
