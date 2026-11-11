@@ -12275,3 +12275,9 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **T5 活体实证（即用即删探针两轮）**：①真臂整轮（真 Agent＋固定小数据集，used 9 ≤ planned 11——T1 修复活体旁证）；②1 回合最小探针——真 LLM（sensenna-6.8-flash-lite，免费端点 glm-5.3-flash-free 已 FreeUsageLimitError 429 限尽，判别过程在案）**usage.calls=1 / total_tokens=237 记账链非零** ＋ **E5 measured：c̄_task=237.0（真实 serving 事件）、C_total(1000)=237237、missing=[]**。E1「token 维真实非零读数」与 E5「c̄ 可回溯真实 serving 事件」两条尾巴**闭票**。
     - **仍登记（数据形态尾巴，非工程缺口）**：C4 golden 臂域与 F4 校准数据需生产积累；A5 首次真实换版待生产被拒画像＋人批（通道已开）。
     - **下一枚空号现查：本格取 594，后继从 595 起。**
+595. **RSI 尾巴批次二·前端呈报块＋G2 灰度写口闭环** ✅🟢 —— 承 §6-594（后端八格读数与批准端点已出街而治理页看不见＝呈报面半截）；用户「继续处理」。
+    - **前端呈报块（`274114d40`）**：治理页新增"证据机器读数"卡片——十行读数（标签＋三态 tag＋数值＋缺席原因随行，与后端三态纪律同形）＋质量三曲线明细表（checkpoint/deployed/final/archive-best 分列）＋A5 升级行（available 时出批准按钮，Γ 与派生来源随行，批准后刷新）；API 模块 RsiStatus 类型扩展八格＋approveImproverUpgrade；i18n 24 键×11 语言真翻译（CJK 未译基线全 0 不涨，locale-consistency 41 格全过）。**盘中事故与修复**：新卡片 testid 曾撞既有批准证据区（`rsi-evidence`），改名时 python 全文替换又把既有区一并改掉——测试 empty DOMWrapper 当场抓回，既有区恢复原名、新卡片用 `rsi-evidence-machine`。台账重生成：duplicate-function-inventory 随新增函数重跑（生成物纪律，配方在守卫 docstring）。
+    - **G2 灰度写口（`640a44ba5`）**：SettingPage 治理卡新增覆写编辑——textarea 逐行 `agent_id=phase`，load 时对象→文本（确定性排序防编辑抖动），save 时解析（非法行**点名且阻断保存**——静默丢弃是"写了没人知道"的镜像形态；后端 422 兜底值域）；保存 payload 显式三键（overridesText 编辑态不进 PUT 体）；i18n 4 键×11 语言。G2 写口至此闭环：设置页编辑→API 显式校验→解析/写回单源→控制器按 agent 装配→状态面 phase_source 呈报。
+    - **验收双门**：vitest 2445 passed / 0 failed；vue-tsc --noEmit exit 0（两批各跑一遍）。
+    - **剩余登记（纯数据形态，非工程缺口）**：C4 golden 臂域与 F4 校准数据待生产运行积累；A5 首次真实换版待生产被拒画像攒够＋管理员经治理端点批准（读数面/批准面/写回链全部就位）。
+    - **下一枚空号现查：本格取 595，后继从 596 起。**
