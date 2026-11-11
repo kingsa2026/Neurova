@@ -5,7 +5,9 @@
 Agent）都会遮蔽显式注入的 _current_user_id，导致 browser_* 身份注入
 与 supervisor.track_user_id 落错主体。
 
-规范契约（与 tool_executor.py social_search 读取点同源）：
+规范契约（tool_executor.py 身份读取点的统一顺序；原 social_search
+凭据分桶读取点已随 CLI 面收口退役，本契约仍管 browser_* 注入与
+supervisor.track_user_id 等其余读取点）：
 先 _current_user_id（显式注入名），后 public current_user_id（轮次级
 ContextVar property 别名），再 agent.user_id / config.user_id 兜底。
 

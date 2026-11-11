@@ -327,6 +327,7 @@ class ToolExecutor:
         "rss_read": "_execute_rss_read",
         "v2ex_hot": "_execute_v2ex_hot",
         "social_search": "_execute_social_search",
+        "agent_reach": "_execute_agent_reach",
         "emotion_analyze": "_execute_emotion_analyze",
         "asr_transcribe": "_execute_asr_transcribe",
         "tts_synthesize": "_execute_tts_synthesize",
@@ -6348,17 +6349,7 @@ class ToolExecutor:
                 query = str(params.get("query") or "").strip()
                 if not platform or not query:
                     return {"error": "缺少 platform 或 query 参数"}
-                # 三层隔离：请求级登录用户（_current_user_id）作为凭据分桶主体
-                # （与 :323 同契约——必须带 _current_user_id 回退，否则
-                # 无 public 别名的 Agent 凭据桶恒落 default 串桶）
-                user_id = (
-                    getattr(self._agent, "_current_user_id", None)
-                    or getattr(self._agent, "current_user_id", None)
-                    or "default"
-                )
-                return await _asyncio.to_thread(
-                    social_search, platform, query, user_id=user_id
-                )
+                return await _asyncio.to_thread(social_search, platform, query)
             return {"error": f"未知 web_reach 工具: {tool_name}"}
         except Exception as e:
             logger.error("web_reach 工具 %s 执行失败: %s", tool_name, e)
@@ -6381,6 +6372,54 @@ class ToolExecutor:
 
     async def _execute_social_search(self, params: Dict) -> Dict:
         return await self._web_reach_call("social_search", params)
+
+    async def _execute_agent_reach(self, params: Dict) -> Dict:
+        """agent-reach CLI 直达：渠道发现 / 链接读取 / 渠道动作（跨平台内容面）。
+
+        未安装 CLI 时桥接返回诚实安装指引（not_installed 形态）；登录态与
+        接入引导由上游错误码（NEED_SETUP/NEED_LOGIN）映射，本层不二次猜测。
+        """
+        import asyncio as _asyncio
+
+        params = params or {}
+        try:
+            from neurova.web_reach import agent_reach_cli
+
+            mode = str(params.get("mode") or "").strip()
+            if mode == "channels":
+                return await _asyncio.to_thread(agent_reach_cli.runChannels)
+            if mode == "read":
+                url = str(params.get("url") or "").strip()
+                if not url:
+                    return {"success": False, "error": "缺少 url 参数（mode=read 需完整链接）"}
+                return await _asyncio.to_thread(agent_reach_cli.runRead, url)
+            if mode == "action":
+                channel = str(params.get("channel") or "").strip()
+                action = str(params.get("action") or "").strip()
+                if not channel or not action:
+                    return {
+                        "success": False,
+                        "error": "mode=action 需要 channel 与 action（先用 mode=channels 查渠道语法）",
+                    }
+                target = params.get("target")
+                limit = params.get("limit")
+                extraArgs = params.get("extra_args")
+                try:
+                    limitVal = int(limit) if limit is not None else None
+                except (TypeError, ValueError):
+                    return {"success": False, "error": f"limit 需为整数（收到 {limit!r}）"}
+                return await _asyncio.to_thread(
+                    agent_reach_cli.runChannelAction,
+                    channel,
+                    action,
+                    str(target).strip() if target else None,
+                    limitVal,
+                    [str(flag) for flag in extraArgs] if extraArgs else None,
+                )
+            return {"success": False, "error": f"未知 mode: {mode}（可选 channels/read/action）"}
+        except Exception as e:  # noqa: BLE001 - 工具层兜底，失败以诚实形态上抛
+            logger.error("agent_reach 工具执行失败: %s", e)
+            return {"success": False, "error": f"agent_reach 执行失败: {e}"}
 
     async def _execute_emotion_analyze(self, params: Dict) -> Dict:
         """执行情感分析"""

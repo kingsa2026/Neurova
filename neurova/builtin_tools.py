@@ -605,6 +605,30 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["platform", "query"],
         },
     },
+    "agent_reach": {
+        # 并行能力声明：语义只读（不发帖不写用户工作区），但运行态归上游 CLI 的
+        # 共享状态目录（~/.agent-reach，含渠道浏览器会话）⇒ 作用域 shared，
+        # 合取判据自动串行，避免并发调用争用同一渠道会话。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
+        "description": "【跨平台内容直达】经本机 agent-reach CLI 搜索与读取各平台内容：GitHub 仓库/Issue/PR、雪球行情、Boss直聘与 LinkedIn 职位、小宇宙播客转写、B站/YouTube/V2EX、小红书/Reddit 等。三种用法：mode=channels 列出全部渠道与动作语法；mode=read 给一个链接自动选渠道读取（含视频字幕等富内容）；mode=action 调指定渠道动作（如 github search / xueqiu quote / xiaoyuzhou transcribe，语法先经 mode=channels 查询）。【何时不用】普通网页用 web_fetch（零依赖）；B站搜索用 bilibili_search；YouTube 字幕用 youtube_transcript；V2EX 热榜用 v2ex_hot；RSS 用 rss_read；通用搜索用 web_search。需本机已安装 agent-reach CLI，未安装时返回安装指引。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["channels", "read", "action"],
+                    "description": "channels=列渠道语法；read=读链接；action=调渠道动作",
+                },
+                "url": {"type": "string", "description": "mode=read：完整链接（http/https，自动选渠道）"},
+                "channel": {"type": "string", "description": "mode=action：渠道名（先用 mode=channels 查可用渠道）"},
+                "action": {"type": "string", "description": "mode=action：动作名（如 search/read/quote/transcribe/subtitle）"},
+                "target": {"type": "string", "description": "mode=action：位置参数（搜索词/仓库/股票代码/链接等，不能以 - 开头）"},
+                "limit": {"type": "integer", "description": "mode=action：返回条数上限 1..100（映射 --limit，部分动作支持）"},
+                "extra_args": {"type": "array", "items": {"type": "string"}, "description": "mode=action：额外 flags（如 [\"--lang\", \"zh\"]），逐元素原样直传"},
+            },
+            "required": ["mode"],
+        },
+    },
     "planning": {
         # 并行能力声明：计划存储的增删改（PlanStore 落盘）——存储是共享态；与 update_plan 的分工见其声明。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},

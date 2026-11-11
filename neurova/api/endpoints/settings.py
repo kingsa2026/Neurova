@@ -119,7 +119,7 @@ class SshCredentialRequest(BaseModel):
 
 
 class SocialCredentialRequest(BaseModel):
-    """社交平台凭据（web_reach social_exec 消费；键由该平台所需集决定）"""
+    """社交平台凭据（设置面读写；键由该平台所需集决定）"""
 
     platform: str = Field(..., description="平台：twitter/reddit/xiaohongshu/facebook/instagram/linkedin/github")
     credentials: Dict[str, str] = Field(default_factory=dict, description="凭据键值（仅接受该平台所需键）")
@@ -273,7 +273,7 @@ async def delete_ssh_credential(
     return {"code": 0, "data": {"host": host, "deleted": True}}
 
 
-# ─── 社交平台凭据（web_reach social_exec 消费；与 SSH 复用同一配置面/加密桶）───
+# ─── 社交平台凭据（设置面读写；与 SSH 复用同一配置面/加密桶）───
 
 
 @router.get("/social-credentials")
