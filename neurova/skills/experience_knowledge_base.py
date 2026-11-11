@@ -410,10 +410,13 @@ class ExperienceKnowledgeBase:
             # content_key 为空串表示"算不出内容身份"（无字符串叶子/纯标点），
             # 这类写入各自成行——空键共用一个桶会把它们全部吞没。
             if content_key:
+                # `success IS ?`（NULL 安全等值），与 agent_id 格同量纲：成败位
+                # 未测量（NULL，纯对话轮的常态）时 `= ?` 永不成立，生产库 300+
+                # 行同句 "hello" 各自成行（2026-11-12 活体验证现场抓获）。
                 cur.execute(
                     """
                     SELECT id FROM experience_records
-                    WHERE agent_id IS ? AND skill_name = ? AND success = ? AND content_key = ?
+                    WHERE agent_id IS ? AND skill_name = ? AND success IS ? AND content_key = ?
                     ORDER BY id LIMIT 1
                     """,
                     (agent_id, skill_name, success_flag, content_key),
@@ -469,6 +472,60 @@ class ExperienceKnowledgeBase:
 
         logger.debug("Added experience record id=%s for skill=%s", record_id, skill_name)
         return record_id
+
+    def attachUserOutcome(
+        self, agent_id: Optional[str], user_input: str, success: bool,
+        session_id: Optional[str] = None,
+    ) -> int:
+        """把用户赞踩回执补进该轮经验行的成败位（T1 证据供给增强）。
+
+        为什么需要它：纯对话轮没有工具回执，服务端票据又只认「同参数值结构的历史票」
+        （`creation_governance.structure_key` 连参数值一起进哈希），这两类行的 success
+        永远停在 NULL——质量评估面无料可评。用户赞踩是该轮唯一真实已知的结局信号，
+        与结晶器 `attachTurnOutcome`（§6-209 第四面扇出）同一先例。EKB 行是逐轮沉淀
+        不是结晶模式，故**不带裁定甲那条排除**：寒暄轮被赞在这里只把成败位从未测量
+        变成已测量，不成任何模式。
+
+        三条约束（与结晶器先例同形）：
+        - **只填 NULL**：工具回执（002）与服务端票据（010）的结论优先级更高，
+          主观回执无权改判客观结论（两个方向都不许翻）；
+        - **不碰 evidence_state / verifiability_state**——工单 010：证据只认服务端
+          票据，用户回执不是票据，「无证据占比」这个告警读数不许被赞踩洗绿；
+        - **按 agent 隔离、按 context.user_input 原文精确匹配**——对不上就不动，
+          错配的经验比没有经验更坏；空原文直接 0，不许全表命中。`session_id` 给出时
+          再收窄到该会话：赞的是**被点的那一轮**，同一句问候在别的会话里的重复行
+          没被测量，不该跟着沾光（生产库同句 300+ 行的教训）。
+
+        Returns:
+            实际补上的行数（0 = 没有可补的行）。
+        """
+        if success is None:
+            return 0
+        text = str(user_input or "").strip()
+        if not text:
+            return 0
+        sanitized = _sanitize_agent_id(agent_id)
+        session = str(session_id or "").strip() or None
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(
+                """
+                UPDATE experience_records
+                SET success = ?
+                WHERE success IS NULL
+                  AND agent_id IS ?
+                  AND json_extract(context, '$.user_input') = ?
+                  AND (? IS NULL OR session_id IS ?)
+                """,
+                (1 if success else 0, sanitized, text, session, session),
+            )
+            updated = cur.rowcount
+            self._conn.commit()
+        if updated:
+            logger.debug(
+                "用户回执补进 EKB 成败位 %d 行 (agent=%s, session=%s, feedback=%s)",
+                updated, sanitized, session, "like" if success else "dislike")
+        return updated
 
     def record_injection_adoption(
         self, record_ids: Optional[List[int]], adopted: Optional[bool]
