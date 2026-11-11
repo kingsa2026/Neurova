@@ -1,4 +1,4 @@
-"""凭据按用户分桶（SSH 主机 / RDP / 通用键值共用）。
+"""凭据按用户分桶（SSH 主机 / RDP 直连 / 通用键值共用）。
 
 设计：
 - 每用户一个凭据桶目录（base_dir/{user_id}/），凭据值经认证加密落盘
@@ -7,8 +7,9 @@
 - 与全局配置的关系：不做全局 fallback。凭据一律按归属桶存取，
   单用户部署在 default 桶配置即可。
 - 社交平台凭据段已退役（§6-591，2026-11-12）：social_search 登录态归上游
-  agent-reach CLI 浏览器会话，本仓不再存社交凭据；平台键集注册表现空，
-  rdp 键集随 §6-592 RDP 授权面回填。
+  agent-reach CLI 浏览器会话，本仓不再存社交凭据。平台键集注册表
+  （PLATFORM_REQUIRED_KEYS／platform_credentials 批量读）随 §6-592 退役——
+  RDP 换专用访问器（rdp::endpoint 单记录，同 SSH 形态）后注册表零消费者。
 """
 
 from __future__ import annotations
@@ -23,13 +24,6 @@ from neurova.llm.providers.secret_store_clean import SecretStore
 from neurova.security.local_key_protection import loadOrCreateKeyfile
 
 logger = get_logger(__name__)
-
-# 平台 → 所需凭据 keys（齐备才算"已配置"）。
-# 社交平台键集已随 §6-591 退役（social_search 登录态归上游 agent-reach CLI，
-# 本仓不再存社交凭据）；rdp 键集随 §6-592 RDP 授权面接通时回填
-# （platform_credentials("rdp") 现态因此恒空读——独立缺陷，见台账 §6-592）。
-PLATFORM_REQUIRED_KEYS: Dict[str, list] = {}
-
 
 class UserCredentialStore:
     """按用户分桶的凭据存储（加密落盘，跨重启稳定）"""
@@ -76,11 +70,6 @@ class UserCredentialStore:
 
     def delete_credential(self, user_id: str, key: str) -> bool:
         return self._store_for(user_id).delete_secret(key)
-
-    def platform_credentials(self, user_id: str, platform: str) -> Dict[str, str]:
-        """取某平台所需的全部凭据 keys（缺失项以 None 占位）"""
-        required = PLATFORM_REQUIRED_KEYS.get((platform or "").lower(), [])
-        return {k: self.get_credential(user_id, k) for k in required}
 
     # ── SSH 多主机凭据（按 host 分键，computer_ssh_exec 消费）──────────
     # 值以 JSON 存于加密桶：{"user","port","key_text","password"}；GET 永不回显密钥/密码。
@@ -136,6 +125,46 @@ class UserCredentialStore:
 
     def delete_ssh_host(self, user_id: str, host: str) -> bool:
         return self.delete_credential(user_id, self._SSH_PREFIX + (host or "").strip())
+
+    # ── RDP 直连凭据（单记录 rdp::endpoint，rdp_provider 消费；§6-592 接通）──
+    # 值以 JSON 存于加密桶：{"host","port","token"}；status/GET 永不回显 token。
+
+    _RDP_KEY = "rdp::endpoint"
+
+    def set_rdp_endpoint(self, user_id: str, *, host: str, port: int = 8765, token: str = "") -> bool:
+        """写入/更新 RDP 直连端点（host 必填；token 空值不覆盖已设值）。"""
+        host = (host or "").strip()
+        if not host:
+            return False
+        existing = self.get_rdp_endpoint(user_id)
+        payload = {
+            "host": host,
+            "port": int(port or 8765),
+            "token": token if token else (existing.get("token") or ""),
+        }
+        return self.set_credential(user_id, self._RDP_KEY, json.dumps(payload, ensure_ascii=False))
+
+    def get_rdp_endpoint(self, user_id: str) -> Dict[str, Any]:
+        raw = self.get_credential(user_id, self._RDP_KEY)
+        if not raw:
+            return {}
+        try:
+            return json.loads(raw)
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def rdp_status(self, user_id: str) -> Dict[str, Any]:
+        """脱敏读数：configured/host/port/token_set，永不回显 token。"""
+        ep = self.get_rdp_endpoint(user_id)
+        return {
+            "configured": bool(ep.get("host")),
+            "host": ep.get("host", ""),
+            "port": int(ep.get("port") or 8765),
+            "token_set": bool(ep.get("token")),
+        }
+
+    def delete_rdp_endpoint(self, user_id: str) -> bool:
+        return self.delete_credential(user_id, self._RDP_KEY)
 
 
 # 模块级单例工厂（SSH/RDP provider 与设置端点共用）

@@ -2,7 +2,8 @@
 
 把用户已授权、且已安装 neurova-guest-agent 的远程机器当作会话后端——**不造池、
 不 spawn**：agent 动作走该机器的 guest agent（控制面 HTTP），RDP 凭据只用于人工
-查看/接管。凭据走现有凭据分桶（platform="rdp"：host/port/token）。
+查看/接管。凭据走现有凭据分桶（rdp::endpoint 单记录：host/port/token，
+设置面 /v1/settings/rdp-credentials 写入）。
 
 fail-closed：无授权端点即拒（不凭空连机器）。destroy 是 no-op——绝不关停用户真机。
 """
@@ -15,8 +16,6 @@ from neurova.core.logger import get_logger
 from neurova.computer_use.session_pool import DesktopSession, SessionProvider
 
 logger = get_logger(__name__)
-
-_RDP_PLATFORM = "rdp"
 
 
 class RdpDirectProvider(SessionProvider):
@@ -34,12 +33,12 @@ class RdpDirectProvider(SessionProvider):
         try:
             from neurova.web_reach.credentials import get_credential_store
 
-            creds = get_credential_store().platform_credentials(user_id, _RDP_PLATFORM) or {}
-            if creds.get("host"):
+            ep = get_credential_store().get_rdp_endpoint(user_id) or {}
+            if ep.get("host"):
                 return {
-                    "host": creds["host"],
-                    "port": int(creds.get("port") or 8765),
-                    "token": creds.get("token") or "",
+                    "host": ep["host"],
+                    "port": int(ep.get("port") or 8765),
+                    "token": ep.get("token") or "",
                 }
         except Exception as e:  # noqa: BLE001
             logger.debug("RDP 凭据解析失败（user=%s）: %s", user_id, e)

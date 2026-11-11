@@ -122,6 +122,29 @@ export function deleteSSHCredential(host: string) {
 }
 
 // ---------------------------------------------------------------------------
+// RDP 直连凭据（rdp_provider 消费；单记录，token 加密落盘永不回显）
+// ---------------------------------------------------------------------------
+
+export interface RdpCredentialStatus {
+  configured: boolean
+  host: string
+  port: number
+  token_set: boolean
+}
+
+export function getRdpCredential() {
+  return api.get<ApiResponse<RdpCredentialStatus>>(`${BASE}/rdp-credentials`)
+}
+
+export function upsertRdpCredential(payload: { host: string; port?: number; token?: string }) {
+  return api.post<ApiResponse<{ host: string }>>(`${BASE}/rdp-credentials`, payload)
+}
+
+export function deleteRdpCredential() {
+  return api.delete<ApiResponse<{ deleted: boolean }>>(`${BASE}/rdp-credentials`)
+}
+
+// ---------------------------------------------------------------------------
 // Governance settings（进化治理：RSI 部署阶段 + 对话规则提取 LLM 成本门控）
 // ---------------------------------------------------------------------------
 

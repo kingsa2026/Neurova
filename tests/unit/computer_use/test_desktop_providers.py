@@ -31,8 +31,8 @@ class TestRdpDirectProvider:
 
     def test_default_resolver_reads_credentials(self, monkeypatch):
         class FakeStore:
-            def platform_credentials(self, user, platform):
-                return {"host": "192.168.1.9", "port": "8765", "token": "sec"}
+            def get_rdp_endpoint(self, uid):
+                return {"host": "192.168.1.9", "port": 8765, "token": "sec"}
 
         monkeypatch.setattr("neurova.web_reach.credentials.get_credential_store", lambda *a, **k: FakeStore())
         prov = RdpDirectProvider()

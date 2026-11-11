@@ -31,6 +31,9 @@ vi.mock('@/api/modules/settings', () => ({
   listSSHCredentials: vi.fn().mockResolvedValue({ data: { hosts: [] } }),
   upsertSSHCredential: vi.fn().mockResolvedValue({}),
   deleteSSHCredential: vi.fn().mockResolvedValue({}),
+  getRdpCredential: vi.fn().mockResolvedValue({ data: { configured: false, host: "", port: 8765, token_set: false } }),
+  upsertRdpCredential: vi.fn().mockResolvedValue({}),
+  deleteRdpCredential: vi.fn().mockResolvedValue({}),
 }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { username: 'admin', role: 'admin' } }) }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ isDark: true, toggleTheme: vi.fn(), setLocale: vi.fn() }) }))
@@ -64,6 +67,9 @@ const messages = {
     sshHostsTitle: 'SSH', sshHostsHint: 'h', sshHostsEmpty: '无', sshHost: 'h', sshUser: 'h', sshPort: 'h',
     sshAuthType: 'h', sshAuthPassword: 'h', sshAuthKey: 'h', sshAuthAgent: 'h', sshPrivateKey: 'h', sshPassword: 'h',
     sshAddHost: 'h', sshHostRequired: 'h', sshCredentialRequired: 'h',
+    rdpCredentialsTitle: 'RDP', rdpCredentialsHint: 'h', rdpHost: 'h', rdpPort: 'h', rdpToken: 'h',
+    rdpSave: 'h', rdpConfigured: '已配置', rdpNotConfigured: '未配置', rdpClear: 'h',
+    rdpHostRequired: 'h', rdpTokenRequired: 'h', rdpAlreadySet: 'h',
     negativeScreen: '负一屏', governanceTitle: '治理', governanceHint: 'h', governanceRsiPhase: 'RSI',
     agentLimitsTitle: '限制', agentLimitsHint: 'h', agentTokenBudget: 'b', agentTokenBudgetHint: 'h', agentMaxRounds: 'r', agentMaxRoundsHint: 'h',
     governancePhase0: '0', governancePhase1: '1', governancePhase2: '2', governancePhase3: '3', governancePhase4: '4', governanceConversationRules: '规则',

@@ -74,10 +74,18 @@ vitest 2449 passed＋vue-tsc exit 0；live-verify（9527 .venv 重启，[ERROR]=
 `agent_reach`/`social_search`。迁移口径：已录入社交凭据的读数改用 `agent-reach add/login`
 （登录态归上游 CLI 浏览器会话）。
 
-**§6-592 · RDP 直连凭据授权面从未接通（退役批盘点时发现的独立缺陷，待另批）**：
-`rdp_provider._resolve_from_credentials` 走 `platform_credentials(user_id, "rdp")`，
-但平台键集注册表**没有 `rdp` 项**且全仓无任何写入方 ⇒ 恒返回 `{}` ⇒
-`RdpDirectProvider.create` 恒抛「未授权 RDP 直连桌面端点」——RDP 直连桌面能力
-（session_pool 的 rdp 分支）今天不可用。修法＝授权写入面设计（`rdp` 键集回填＋设置端点
-或 channel-config 写口＋UI），另批实施；本批保留 `platform_credentials` 方法与该读线
-不动（行为与退役前逐字节一致），注册表清空后该读线恒空读的形态由缺席守卫记录在案。
+**§6-592 · RDP 直连凭据授权面——已接通（2026-11-12 接通批）**。面形态完全镜像 SSH：
+`credentials.py` 新增 `rdp::endpoint` 单记录专用访问器（`set/get_rdp_endpoint`/`rdp_status`
+脱敏/`delete_rdp_endpoint`，JSON 落加密桶）；`platform_credentials` 批量读与
+`PLATFORM_REQUIRED_KEYS` 注册表随批退役（换专用访问器后注册表零消费者，缺席守卫
+改钉）；`rdp_provider` 读线换 `get_rdp_endpoint`（旧 `platform_credentials("rdp")`
+恒空读随之消灭）；`settings.py` 新增 `GET/POST/DELETE /rdp-credentials`（脱敏读、
+host+首次 token 校验、空 token 不覆盖已设值、未配置 DELETE→404）；前端
+`CredentialManager.vue` RDP 卡＋`settings.ts` 三函数＋12 键 i18n×11（撇号全走
+U+2019 避插键坑）。验收：红灯 18（新面 404/缺方法/守卫未满足）→绿；后端
+computer_use＋web_reach＋工具面 663 passed；前端双门 vitest 2454 passed＋
+vue-tsc exit 0；live-verify（9527 .venv 重启，[ERROR]=0）：首次缺 token→422、
+完整写入→200、GET 脱敏 token_set=true 不回显、空 token 更新 host 改 token 留存、
+DELETE→200→再删 404、ssh-credentials 200／social 404／工具清单含 agent_reach。
+provider 侧 resolver 接通由 `test_default_resolver_reads_credentials`（真 store 形态）
+钉死——真机 guest-agent 连接须用户实际配置后使用。

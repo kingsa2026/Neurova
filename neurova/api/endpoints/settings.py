@@ -118,6 +118,14 @@ class SshCredentialRequest(BaseModel):
     password: str = Field("", description="密码（无密钥时用）")
 
 
+class RdpCredentialRequest(BaseModel):
+    """RDP 直连端点凭据（单记录；rdp_provider 消费，token 加密落盘读取永不回显）"""
+
+    host: str = Field(..., description="远程机器 IP/域名（预装 neurova-guest-agent）")
+    port: int = Field(8765, ge=1, le=65535, description="guest agent 控制面端口")
+    token: str = Field("", description="guest agent 访问令牌（首次必填；留空不覆盖已设值）")
+
+
 def _get_request_id(request: Request) -> str:
     """安全获取 request_id"""
     return getattr(request.state, "request_id", str(uuid.uuid4()))
@@ -264,6 +272,56 @@ async def delete_ssh_credential(
     if not get_credential_store().delete_ssh_host(uid, host):
         raise HTTPException(status_code=404, detail=f"未找到主机凭据: {host}")
     return {"code": 0, "data": {"host": host, "deleted": True}}
+
+
+# ─── RDP 直连凭据（rdp_provider 消费；单记录，登录用户自管）───
+
+
+@router.get("/rdp-credentials")
+async def get_rdp_credential(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """当前用户的 RDP 直连端点脱敏读数（host/port/token_set，永不回显 token）。"""
+    from neurova.web_reach.credentials import get_credential_store
+
+    uid = str(current_user.get("user_id") or "default")
+    return {"code": 0, "data": get_credential_store().rdp_status(uid)}
+
+
+@router.post("/rdp-credentials")
+async def upsert_rdp_credential(
+    request: Request,
+    body: RdpCredentialRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """写入/更新 RDP 直连端点（加密落盘）。host 必填；token 首次必填，留空不覆盖已设值。"""
+    host = (body.host or "").strip()
+    if not host:
+        raise HTTPException(status_code=422, detail="host 不能为空")
+    from neurova.web_reach.credentials import get_credential_store
+
+    uid = str(current_user.get("user_id") or "default")
+    if not body.token and not get_credential_store().rdp_status(uid).get("token_set"):
+        raise HTTPException(status_code=422, detail="首次配置需提供 guest agent 访问令牌")
+    ok = get_credential_store().set_rdp_endpoint(uid, host=host, port=body.port, token=body.token)
+    if not ok:
+        raise HTTPException(status_code=500, detail="RDP 凭据保存失败")
+    return {"code": 0, "data": {"host": host, "saved": True}}
+
+
+@router.delete("/rdp-credentials")
+async def delete_rdp_credential(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """清除当前用户的 RDP 直连端点凭据。"""
+    from neurova.web_reach.credentials import get_credential_store
+
+    uid = str(current_user.get("user_id") or "default")
+    if not get_credential_store().delete_rdp_endpoint(uid):
+        raise HTTPException(status_code=404, detail="未配置 RDP 直连凭据")
+    return {"code": 0, "data": {"deleted": True}}
 
 
 # ─── CORS 配置管理（必须在 /{key} 之前注册，避免被路径参数遮蔽）───
