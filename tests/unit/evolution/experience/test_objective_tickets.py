@@ -33,6 +33,8 @@ from __future__ import annotations
 
 import json
 import logging
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict, List, Tuple
 
@@ -518,3 +520,97 @@ class TestKeywordVotesAbstain:
             )
         assert receipted.experience_feedback.get_feedback()["crystallized_patterns"] == 1, (
             "反例失守：客观成功票也被门槛拒了（说明改动没落在分子上）")
+
+
+class TestSequenceShapeEvidence:
+    """粗粒度形状键（尾2）：票据臂按「工具序列＋参数键名」取证，值无关。
+
+    病灶（2026-11-12 生产读数）：`structure_key` 连参数值一起进哈希——自由文本
+    参数（搜索词/路径/正文）每轮都不同，同一串工具链的票据永远对不上号，
+    票据覆盖 ≈1/382。经验/结晶臂问的是"这类任务做过吗、成过吗"，值无关；
+    技能封装/发布闸问的是"这**批**参数下成过吗"——继续用细粒度
+    `structure_key`/`task_results`，本批不接管（消费方地图：skill_encapsulation/
+    skill_service.eligible/business_identities 全部留在细粒度）。
+    """
+
+    OTHER_VALUE_PARAMS = {"path": "/tmp/完全不同的另份文档.pdf", "pages": "7-9"}
+
+    def test_sequence_key_ignores_values_but_not_shape(self):
+        from neurova.skills.creation_governance import sequence_key
+
+        fine = [{"tool": PDF_TOOL, "params": PDF_PARAMS}]
+        other_value = [{"tool": PDF_TOOL, "params": self.OTHER_VALUE_PARAMS}]
+        other_keys = [{"tool": PDF_TOOL, "params": {"query": "x"}}]
+        longer = fine + [{"tool": "zip", "params": {}}]
+
+        assert sequence_key(fine) == sequence_key(other_value), (
+            "同形状异值的序列键不同＝票据覆盖缺口依旧")
+        assert sequence_key(fine) != sequence_key(other_keys), "参数键名集不同该分开"
+        assert sequence_key(fine) != sequence_key(longer), "序列长度不同该分开"
+        assert sequence_key([]) is None
+
+    def test_same_shape_different_values_now_finds_the_ticket(self, experience_probe,
+                                                              tool_records):
+        """值不同的同形状轮现在能查到历史票据（修复前 TICKET_ABSENT）。"""
+        _record_ticket([(PDF_TOOL, PDF_PARAMS)], success=True)
+
+        result = experience_probe.run_turn(
+            user_input=TASK,
+            tool_messages=[
+                tool_records.call(PDF_TOOL, params=json.dumps(
+                    self.OTHER_VALUE_PARAMS, ensure_ascii=False)),
+                tool_records.result(PDF_TOOL, True, result="已导出"),
+            ],
+        )
+
+        row = result["rows"][-1]
+        assert row["evidence_state"] == "evidenced", (
+            f"同形状异值查无票据＝形状键没接上：{row}")
+        ticket = resolve_ticket_evidence(_agent_stub(), [
+            tool_records.call(PDF_TOOL, params=json.dumps(
+                self.OTHER_VALUE_PARAMS, ensure_ascii=False)),
+        ])
+        assert ticket.lookup == TICKET_EVIDENCED, f"取证态 {ticket.lookup}"
+
+    def test_failure_stickiness_carries_across_values(self, experience_probe,
+                                                      tool_records):
+        """形状级失败粘性：该形状下任一任务失败，异值同形状轮取失败票。"""
+        _record_ticket([(PDF_TOOL, PDF_PARAMS)], success=False)
+
+        result = experience_probe.run_turn(
+            user_input=TASK,
+            tool_messages=[
+                tool_records.call(PDF_TOOL, params=json.dumps(
+                    self.OTHER_VALUE_PARAMS, ensure_ascii=False)),
+                tool_records.result(PDF_TOOL, True, result="这轮明明成功"),
+            ],
+        )
+
+        assert result["rows"][-1]["success"] == 0, "形状级失败被异值轮洗成成功"
+        assert result["rows"][-1]["evidence_state"] == "evidenced"
+
+    def test_fine_grained_gate_semantics_unchanged(self):
+        """技能闸的细粒度语义不许被本批波及：task_results 仍要求参数值全同。"""
+        from neurova.skills.creation_governance import EvidenceStore
+
+        steps = [{"tool": PDF_TOOL, "params": PDF_PARAMS}]
+        other_value = [{"tool": PDF_TOOL, "params": self.OTHER_VALUE_PARAMS}]
+        store = EvidenceStore(Path(tempfile.mkdtemp(prefix="evidence_shape_")), "probe")
+        store.record("t1", steps, TASK, True)
+
+        assert list(store.task_results(steps)) == ["t1"], "细粒度同值查询回归"
+        assert store.task_results(other_value) == {}, (
+            "细粒度查询开始匹配异值轮＝技能闸语义被本批改动波及")
+
+    def test_legacy_rows_without_sequence_never_match(self):
+        """迁移哨兵旧行不可反推形状，不得冒充任何序列的证据。"""
+        from neurova.skills.creation_governance import EvidenceStore
+
+        steps = [{"tool": PDF_TOOL, "params": PDF_PARAMS}]
+        store = EvidenceStore(Path(tempfile.mkdtemp(prefix="evidence_legacy_")), "probe")
+        store.record("t1", steps, TASK, True)
+        with store.transaction() as db:
+            db.execute("UPDATE evidence SET sequence='legacy' WHERE task='t1'")
+
+        assert store.sequence_results(steps) == {}, (
+            "哨兵行被当真证据＝伪造历史")

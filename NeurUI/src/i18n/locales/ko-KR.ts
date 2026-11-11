@@ -2578,10 +2578,6 @@ conflictTimeReadout: '시간 판독: {basis} (이전 {old} → 최신 {new})',
     acceptanceLabel: "채택률",
     phaseSourceOverride: "재정의",
     phaseSourceGlobal: "전역",
-    overrideApply: "단계 재정의 적용",
-    overrideOk: "단계 재정의가 적용되었습니다: {agent} → {phase}",
-    overrideFailed: "단계 재정의 실패",
-    overrideNeedAgent: "재정의할 Agent ID를 먼저 입력하세요",
   },
 
   settings: {

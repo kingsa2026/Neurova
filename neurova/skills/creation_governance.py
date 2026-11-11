@@ -113,6 +113,26 @@ def structure_key(steps):
     return _hash_identity({"steps": normalized})
 
 
+def sequence_key(steps):
+    """**粗粒度形状键**（经验/票据臂专用）：工具序列 + 每步参数键名集，值无关。
+
+    为什么需要第三把钥匙（2026-11-12 生产读数）：`structure_key` 连参数值一起进
+    哈希，自由文本参数（搜索词/路径/正文）每轮都不同——同一串工具链的票据永远
+    对不上号，服务端票据覆盖长期 ≈1/382。经验臂问的是"这类任务做过吗、成过吗"，
+    值无关；技能封装/发布闸问的是"这**批**参数下成过吗"——继续用细粒度
+    `structure_key`/`task_results`（本函数不接管它们，消费方各归各）。
+
+    形状 = 工具序列 + 每步**参数键名的排序集**：键名集区分"带了哪些输入位"，
+    值不进哈希（明文更不外泄）。
+    """
+    normalized = structural_identity(steps)
+    if not normalized:
+        return None
+    shape = [{"tool": s["tool"], "paramKeys": sorted(s["params"].keys())}
+             for s in normalized]
+    return _hash_identity({"steps": shape})
+
+
 def canonical_skill_id(steps, purpose="", prefix="skill"):
     """统一技能 ID 命名方案——三条写入臂（封装/遗传/NL 合成）共用。
 
@@ -138,7 +158,7 @@ class EvidenceStore:
         self.lock = shared_lock(directory)
 
     _SCHEMA = ("CREATE TABLE IF NOT EXISTS evidence (agent TEXT, fingerprint TEXT, structure TEXT, "
-               "task TEXT, success INTEGER NOT NULL, PRIMARY KEY(agent, fingerprint, task))")
+               "sequence TEXT, task TEXT, success INTEGER NOT NULL, PRIMARY KEY(agent, fingerprint, task))")
 
     @contextmanager
     def transaction(self):
@@ -156,9 +176,17 @@ class EvidenceStore:
                     # 之后的事务体内，否则 BEGIN IMMEDIATE 撞隐式事务必炸，
                     # 回填从未成功（本机最小复现实证）。
                     db.execute("ALTER TABLE evidence ADD COLUMN structure TEXT")
+                needs_sequence_column = "sequence" not in columns
+                if needs_sequence_column:
+                    db.execute("ALTER TABLE evidence ADD COLUMN sequence TEXT")
                 db.execute("BEGIN IMMEDIATE")
                 if needs_backfill:
                     db.execute("UPDATE evidence SET structure=? WHERE structure IS NULL",
+                               (self._legacy_structure_fill(),))
+                if needs_sequence_column:
+                    # sequence 旧行不可反推（哈希单向），哨兵与 structure 同法：
+                    # 保证列非空可查，且永不与真哈希撞（'legacy' 非 sha256 hex）。
+                    db.execute("UPDATE evidence SET sequence=? WHERE sequence IS NULL",
                                (self._legacy_structure_fill(),))
                 yield db
                 db.commit()
@@ -176,14 +204,16 @@ class EvidenceStore:
     def record(self, task_id, steps, purpose, success):
         key = fingerprint(steps, purpose)
         structure = structure_key(steps)
+        sequence = sequence_key(steps)
         if not isinstance(task_id, str) or not task_id or not key or not structure:
             return False
         with self.transaction() as db:
             # Failure is sticky: replay/retry cannot convert a failed task into a vote.
             db.execute(
-                "INSERT INTO evidence (agent, fingerprint, structure, task, success) VALUES (?, ?, ?, ?, ?) "
+                "INSERT INTO evidence (agent, fingerprint, structure, sequence, task, success) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(agent,fingerprint,task) DO UPDATE SET success=MIN(success,excluded.success)",
-                (self.agent_id, key, structure, task_id, int(success is True)))
+                (self.agent_id, key, structure, sequence, task_id, int(success is True)))
         return True
 
     def task_results(self, steps, purpose="", db=None):
@@ -210,6 +240,28 @@ class EvidenceStore:
 
     def success_tasks(self, steps, purpose="", db=None):
         return [task for task, success in self.task_results(steps, purpose, db).items() if success]
+
+    def sequence_results(self, steps, db=None):
+        """按**粗粒度形状键**聚合任务结果（经验/票据臂专用，值无关）。
+
+        与 `task_results` 的分工：技能封装/发布闸问"这**批**参数下成过吗"
+        （细粒度，本方法不接管）；票据臂问"这类任务做过吗、成过吗"（形状粒度，
+        见 `sequence_key`）。失败粘性同法：任一任务失败即失败。
+        旧行（sequence='legacy' 哨兵）永不命中真哈希——不可反推的证据不冒充。
+        """
+        if db is None:
+            with self.transaction() as connection:
+                return self.sequence_results(steps, connection)
+        key = sequence_key(steps)
+        if not key:
+            return {}
+        rows = db.execute(
+            "SELECT task, success FROM evidence WHERE agent=? AND sequence=?",
+            (self.agent_id, key)).fetchall()
+        results: Dict[str, int] = {}
+        for task, success in rows:
+            results[task] = min(results.get(task, 1), int(success))
+        return results
 
     def eligible(self, steps, purpose="", db=None):
         return len(self.success_tasks(steps, purpose, db)) >= MIN_SUCCESSES
