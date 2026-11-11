@@ -150,6 +150,8 @@ export function clearSocialCredential(platform: string) {
 export interface GovernanceSettings {
   conversation_rules_enabled: boolean
   rsi_phase: number
+  /** G2 agent 级相位覆写：命中条目的 agent 按覆写值读相位（最小灰度维度）。 */
+  rsi_phase_overrides: Record<string, number>
 }
 
 export function getGovernanceSettings() {
