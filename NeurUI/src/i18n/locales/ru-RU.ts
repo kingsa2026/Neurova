@@ -2576,6 +2576,12 @@ conflictTimeReadout: 'Временные показатели: {basis} (стар
     pairsLabel: "Пар",
     uncoveredLabel: "Непокрытые семейства",
     acceptanceLabel: "Доля принятия",
+    phaseSourceOverride: "переопределена",
+    phaseSourceGlobal: "глобально",
+    overrideApply: "Применить переопределение фазы",
+    overrideOk: "Переопределение фазы применено: {agent} → {phase}",
+    overrideFailed: "Ошибка переопределения фазы",
+    overrideNeedAgent: "Сначала введите ID агента для переопределения",
   },
 
   settings: {

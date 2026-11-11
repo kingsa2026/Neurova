@@ -37,6 +37,8 @@ export interface RsiStatus {
   iteration_count: number
   convergence_status: string
   deployment_phase: number
+  /** G2：相位来源（override=agent 级覆写命中 / global=全局设置） */
+  phase_source?: 'override' | 'global'
   phase_advanced: boolean
   phase_persisted: boolean
   phase_verdict: RsiVerdict

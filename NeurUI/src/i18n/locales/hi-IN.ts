@@ -2576,6 +2576,12 @@ conflictTimeReadout: 'समय रीडआउट: {basis} (पुराना 
     pairsLabel: "जोड़ियाँ",
     uncoveredLabel: "अनकवर परिवार",
     acceptanceLabel: "स्वीकृति दर",
+    phaseSourceOverride: "ओवरराइड",
+    phaseSourceGlobal: "ग्लोबल",
+    overrideApply: "फ़ेज़ ओवरराइड लागू करें",
+    overrideOk: "फ़ेज़ ओवरराइड लागू: {agent} → {phase}",
+    overrideFailed: "फ़ेज़ ओवरराइड विफल",
+    overrideNeedAgent: "पहले ओवरराइड करने के लिए Agent ID भरें",
   },
 
   settings: {

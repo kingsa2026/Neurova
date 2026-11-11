@@ -2576,6 +2576,12 @@ conflictTimeReadout: 'Lectura temporal: {basis} (antigua {old} → nueva {new})'
     pairsLabel: "Pares",
     uncoveredLabel: "Familias sin cubrir",
     acceptanceLabel: "Tasa de aceptación",
+    phaseSourceOverride: "prioritaria",
+    phaseSourceGlobal: "global",
+    overrideApply: "Aplicar anulación de fase",
+    overrideOk: "Anulación de fase aplicada: {agent} → {phase}",
+    overrideFailed: "Fallo en la anulación de fase",
+    overrideNeedAgent: "Introduzca primero el ID del agente a anular",
   },
 
   settings: {

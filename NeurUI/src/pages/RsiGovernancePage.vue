@@ -24,6 +24,7 @@ import {
   type RsiStatus,
   approveImproverUpgrade,
 } from '@/api/modules/rsiGovernance'
+import { getGovernanceSettings, updateGovernanceSettings } from '@/api/modules/settings'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -110,6 +111,11 @@ async function load() {
     ])
     status.value = unwrap<RsiStatus>(statusResp)
     proposals.value = unwrap<{ proposals: RsiProposal[] }>(listResp).proposals
+    // 覆写写口的目标回填：查看某 agent 状态后即可对其覆写（agent id 留空 = 默认 agent，
+    // 回填状态面报告的实际 agent_id——覆写键不许空串，后端 422 拒）。
+    if (!agentId.value && status.value?.agent_id) {
+      agentId.value = status.value.agent_id
+    }
   } catch (err) {
     status.value = null
     proposals.value = []
@@ -240,6 +246,33 @@ const evidenceRows = computed<EvidenceRow[]>(() => {
 const upgrade = computed(() => status.value?.improver_upgrade)
 const approvingUpgrade = ref(false)
 
+// ── G2 灰度写口：agent 相位覆写（后端 PUT /governance/settings 已支持
+//    rsi_phase_overrides 整键替换语义——必须先读现有条目合并后再提交，
+//    直接传单条会清掉别的 agent 的覆写）──
+const overridePhase = ref<number>(2)
+const applyingOverride = ref(false)
+
+async function applyPhaseOverride() {
+  const target = agentId.value
+  if (!target) {
+    message.warning(t('rsiGovernance.overrideNeedAgent'))
+    return
+  }
+  applyingOverride.value = true
+  try {
+    const current = await getGovernanceSettings()
+    const overrides = { ...((current?.data?.rsi_phase_overrides as Record<string, number>) || {}) }
+    overrides[target] = overridePhase.value
+    await updateGovernanceSettings({ rsi_phase_overrides: overrides })
+    message.success(t('rsiGovernance.overrideOk', { agent: target, phase: overridePhase.value }))
+    await load()
+  } catch (err) {
+    message.error(`${t('rsiGovernance.overrideFailed')}：${errorText(err)}`)
+  } finally {
+    applyingOverride.value = false
+  }
+}
+
 async function approveUpgrade() {
   approvingUpgrade.value = true
   try {
@@ -289,7 +322,11 @@ onMounted(load)
       </p>
 
       <div v-if="status" class="rsi-status" data-testid="rsi-status">
-        <span>{{ t('rsiGovernance.phaseLabel') }}:&nbsp;<a-tag data-testid="rsi-phase">{{ status.deployment_phase }}</a-tag></span>
+        <span>{{ t('rsiGovernance.phaseLabel') }}:&nbsp;<a-tag data-testid="rsi-phase">{{ status.deployment_phase }}</a-tag>
+          <a-tag v-if="status.phase_source" data-testid="rsi-phase-source" :color="status.phase_source === 'override' ? 'orange' : 'default'">
+            {{ status.phase_source === 'override' ? t('rsiGovernance.phaseSourceOverride') : t('rsiGovernance.phaseSourceGlobal') }}
+          </a-tag>
+        </span>
         <span>
           {{ t('rsiGovernance.verdictLabel') }}:
           <a-tag>{{ status.phase_verdict?.state || '—' }}</a-tag>
@@ -378,6 +415,21 @@ onMounted(load)
         </tbody>
       </table>
       <!-- A5 升级批准（人工 gate 的人工半）：available 才出按钮，理由随行 -->
+      <!-- G2 灰度写口：agent 相位覆写（先读现有条目合并写，不清别人的覆写） -->
+      <div class="rsi-upgrade" data-testid="rsi-phase-override">
+        <a-select v-model:value="overridePhase" data-testid="rsi-phase-override-phase" style="width: 120px">
+          <a-select-option v-for="p in [0, 1, 2, 3, 4]" :key="p" :value="p">{{ p }}</a-select-option>
+        </a-select>
+        <a-button
+          data-testid="rsi-phase-override-apply"
+          :loading="applyingOverride"
+          :disabled="!agentId"
+          @click="applyPhaseOverride"
+        >
+          {{ t('rsiGovernance.overrideApply') }}
+        </a-button>
+      </div>
+
       <div v-if="upgrade" class="rsi-upgrade" data-testid="rsi-upgrade">
         <a-tag :color="upgrade.available ? 'processing' : 'default'" data-testid="rsi-upgrade-state">
           {{ upgrade.available ? t('rsiGovernance.upgradeAvailable') : t('rsiGovernance.upgradeNone') }}
