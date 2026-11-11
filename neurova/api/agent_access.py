@@ -30,6 +30,7 @@ __all__ = [
     "can_access_agent",
     "requireAgentOwner",
     "resolve_agent_owner",
+    "migrateUserAgentsToDept",
 ]
 
 
@@ -181,3 +182,155 @@ def requireAgentOwner(agent_id: str, current_user: Any, *, action: str = "访问
         status_code=403,
         detail=f"无权{action}智能体『{agent_id}』（仅属主或管理员可操作）",
     )
+
+
+def migrateUserAgentsToDept(
+    username: str,
+    *,
+    manager: Optional[Any] = None,
+    registry: Optional[Any] = None,
+    state_agents: Optional[Mapping[str, Any]] = None,
+    dept_registry: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """用户换部门 → 名下 agent 的部门绑定迁移到新部门组（用户需求 2026-11-12）。
+
+    语义：组成员变更（加入/移出部门组）后，按 `resolveUserDepartment` 单源解析
+    该用户当下的部门组，名下（owner_user_id 匹配）全部 agent 的 group_id 跟随
+    迁移——绑定三处同步，与 update_agent 端点落盘形态同款：
+      1. 运行实例 `config.group_id`；
+      2. workspace 配置文件（`_save_agent_config`，与 update 端点同一落盘口）；
+      3. agents.json 登记的 config 子字典**合并写**（整键替换会丢 model/provider，
+         specs/2026-11-07 批 D 同款教训）。
+
+    幂等（已在新组的 agent 跳过）；解析不出部门组（None/default）不动任何
+    agent——解析不出就不猜；非该用户的 agent 不碰。成员变更端点在变更成功后
+    触发本函数，迁移失败不回滚成员变更（主操作优先），结果随响应外露。
+    """
+    readout: Dict[str, Any] = {
+        "username": str(username or ""),
+        "new_group_id": None,
+        "migrated": [],
+        "skipped": [],
+    }
+
+    try:
+        from neurova.auth.user_group_model import resolveUserDepartment
+
+        kwargs: Dict[str, Any] = {}
+        if manager is not None:
+            kwargs["manager"] = manager
+        if dept_registry is not None:
+            # 分类对表注册表透传（resolveUserDepartment 单源参数）；None=生产单源自取
+            kwargs["registry"] = dept_registry
+        dept = resolveUserDepartment(str(username or ""), **kwargs)
+    except Exception as exc:  # noqa: BLE001 - 解析失败不猜部门
+        logger.debug("迁移前置：部门解析失败 %s: %s", username, exc)
+        readout["reason"] = "dept_resolve_failed"
+        return readout
+
+    new_gid = dept.get("group_id")
+    readout["new_group_id"] = new_gid
+    if not new_gid:
+        readout["reason"] = "no_department"
+        return readout
+
+    try:
+        from neurova.auth.user_model import UserModel
+
+        row = UserModel().get_user_by_username(str(username or ""))
+        user_id = str(getattr(row, "id", "") or "") if row is not None else ""
+    except Exception as exc:  # noqa: BLE001 - 查表失败不迁移，如实点名
+        logger.warning("迁移前置：user_id 查表失败 %s: %s", username, exc)
+        readout["reason"] = "user_lookup_failed"
+        return readout
+    if not user_id:
+        readout["reason"] = "user_not_found"
+        return readout
+    readout["user_id"] = user_id
+
+    if registry is None:
+        try:
+            from neurova.api.endpoints.agent import get_agent_config_manager
+
+            registry = get_agent_config_manager()
+        except Exception as exc:  # noqa: BLE001 - 登记面不可用即无从枚举
+            logger.warning("迁移前置：agent 登记面不可用: %s", exc)
+            readout["reason"] = "registry_unavailable"
+            return readout
+    if state_agents is None:
+        try:
+            from neurova.api.endpoints import get_app_state
+
+            state = get_app_state() or {}
+            state_agents = state.get("agents") or {}
+        except Exception as exc:  # noqa: BLE001 - 状态面不可用即只走登记面
+            logger.debug("agent 运行状态面不可用: %s", exc)
+            state_agents = {}
+
+    def _ownedIds():
+        """该用户名下 agent id 并集：登记面（owner_user_id 顶层键）∪ 运行面。"""
+        ids: list[str] = []
+        try:
+            for rec in registry.list_agents():
+                aid = str((rec or {}).get("id") or "")
+                full = registry.get_agent(aid) or {}
+                if str(full.get("owner_user_id") or "") == user_id:
+                    ids.append(aid)
+        except Exception as exc:  # noqa: BLE001 - 登记面遍历失败不炸迁移
+            logger.debug("登记面枚举失败: %s", exc)
+        try:
+            for aid, agent in dict(state_agents or {}).items():
+                cfg = getattr(agent, "config", None)
+                if cfg is not None and str(getattr(cfg, "owner_user_id", "") or "") == user_id:
+                    if aid not in ids:
+                        ids.append(str(aid))
+        except Exception as exc:  # noqa: BLE001 - 状态面遍历失败不炸迁移
+            logger.debug("运行面枚举失败: %s", exc)
+        return ids
+
+    for agent_id in _ownedIds():
+        # 当前绑定：运行实例优先，登记回退（与 agentGroupById 同形）
+        current: Optional[str] = None
+        agent = (state_agents or {}).get(agent_id)
+        cfg = getattr(agent, "config", None) if agent is not None else None
+        if cfg is not None:
+            current = getattr(cfg, "group_id", None)
+        reg = registry.get_agent(agent_id) or {}
+        if current is None:
+            current = reg.get("group_id") or (reg.get("config") or {}).get("group_id")
+        current_str = str(current) if current else None
+
+        if current_str == new_gid:
+            readout["skipped"].append({"agent_id": agent_id, "reason": "already_on_target"})
+            continue
+
+        # 1) 运行实例
+        if cfg is not None:
+            try:
+                cfg.group_id = new_gid
+            except Exception as exc:  # noqa: BLE001 - 单 agent 失败不拖垮整批
+                logger.warning("agent %s 实例绑定更新失败: %s", agent_id, exc)
+        # 2) workspace 配置文件（与 update_agent 端点同一落盘口）
+        if agent is not None:
+            try:
+                from neurova.api.endpoints.agent import _save_agent_config
+
+                _save_agent_config(agent)
+            except Exception as exc:  # noqa: BLE001 - 落盘失败不拖垮整批，登记面仍会同步
+                logger.warning("agent %s 配置文件落盘失败: %s", agent_id, exc)
+        # 3) agents.json 登记（config 合并写防丢 model/provider）
+        try:
+            merged = dict(reg.get("config") or {})
+            merged["group_id"] = new_gid
+            registry.update_agent(agent_id, {"config": merged})
+        except Exception as exc:  # noqa: BLE001 - 登记写失败不拖垮整批
+            logger.warning("agent %s 登记面绑定更新失败: %s", agent_id, exc)
+
+        readout["migrated"].append(
+            {"agent_id": agent_id, "from": current_str, "to": new_gid})
+        logger.info(
+            "部门迁移：用户 %s 的 agent %s 绑定 %s → %s",
+            username, agent_id, current_str, new_gid,
+        )
+
+    return readout
