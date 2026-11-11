@@ -10,7 +10,6 @@ mem_core.py:376 的契约注释宣称 agent 拥有这些组件——装配缺失
      零模型依赖，确定性）
    - version_control = get_version_control()（内存态快照，会话内可回滚）
    - dependency_graph = get_dependency_graph()（模块单例）
-   - experience_fusion = ExperienceMemoryFusion(dependency_graph)
 2. Step9.95 调用契约对齐：create_snapshot 真实签名是 (memory_id, content,
    metadata, author, description)，原调用传不存在的 source/triggered_by——
    依赖一旦注入必 TypeError（依赖注入后的潜伏雷）。
@@ -27,7 +26,7 @@ from neurova.post_chat_pipeline import PostChatPipeline
 
 
 class TestWireMemoryGuards:
-    def test_wire_assigns_all_four_components(self):
+    def test_wire_assigns_all_components(self):
         import neurova.agent_core as ac
 
         agent = object.__new__(ac.Agent)
@@ -38,7 +37,6 @@ class TestWireMemoryGuards:
         assert agent.conflict_detector is not None, "Step9.9 依赖缺失——冲突检测恒 SKIPPED"
         assert agent.version_control is not None, "Step9.95 依赖缺失——版本快照恒 SKIPPED"
         assert agent.dependency_graph is not None, "Step9.96 依赖缺失——规则提取恒 SKIPPED"
-        assert agent.experience_fusion is not None
 
     def test_conflict_detector_uses_rule_mode(self):
         """规则模式（零模型依赖）：use_semantic=False"""
@@ -166,7 +164,6 @@ class TestStep996Gate:
         agent = MagicMock()
         agent._collect_tool_messages.return_value = []
         agent.rule_extractor = None  # 强制走懒创建分支（MagicMock 自动属性会遮蔽）
-        agent.experience_fusion = None
 
         pipeline = PostChatPipeline(agent)
         graph = MagicMock()

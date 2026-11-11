@@ -227,7 +227,6 @@ class TestStep996ConsumesGovernanceSetting:
         agent.config.agent_id = "default"
         agent._collect_tool_messages.return_value = []
         agent.rule_extractor = None
-        agent.experience_fusion = None
 
         pipeline = PostChatPipeline(agent)
         pipeline._dependency_graph = MagicMock()
