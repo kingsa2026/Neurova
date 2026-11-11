@@ -339,10 +339,23 @@ async def add_group_member(
         if not success:
             raise HTTPException(status_code=400, detail=f"Failed to add user '{body.username}' to group '{group_id}'")
 
+        # 用户换部门 → 名下 agent 迁移到新部门组（specs/2026-11-07 批 D 延伸，
+        # 用户需求 2026-11-12）：成员变更为主操作，迁移 fail-soft 不回滚，
+        # 读数随响应外露（迁移失败可见，不静默）。
+        migration = {}
+        try:
+            from neurova.api.agent_access import migrateUserAgentsToDept
+
+            migration = migrateUserAgentsToDept(body.username, manager=manager)
+        except Exception as e:
+            logger.warning("agent 部门迁移失败（成员变更已生效）: %s", e)
+            migration = {"error": str(e)}
+
         return {
             "code": 0,
             "message": f"User '{body.username}' added to group '{group_id}'",
-            "data": {"group_id": group_id, "username": body.username},
+            "data": {"group_id": group_id, "username": body.username,
+                     "agent_migration": migration},
             "request_id": request_id,
         }
     except HTTPException:
@@ -375,6 +388,17 @@ async def remove_group_member(
 
         if not success:
             raise HTTPException(status_code=400, detail=f"Failed to remove user '{username}' from group '{group_id}'")
+
+        # 移出部门组后同样触发迁移：用户若已加入新部门组则名下 agent 跟随；
+        # 无部门组（解析 None）迁移函数不动任何 agent（解析不出就不猜）。
+        migration = {}
+        try:
+            from neurova.api.agent_access import migrateUserAgentsToDept
+
+            migration = migrateUserAgentsToDept(username, manager=manager)
+        except Exception as e:
+            logger.warning("agent 部门迁移失败（成员变更已生效）: %s", e)
+            migration = {"error": str(e)}
 
         return {
             "code": 0,
