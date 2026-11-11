@@ -2098,6 +2098,34 @@ def _apply_feedback_to_crystallizer(
         return 0
 
 
+def _apply_feedback_to_ekb(repo, agent_id: str, session_id: str, timestamp: str, feedback: str) -> int:
+    """把用户回执补进 EKB 成败位（T1 证据供给增强，结晶器第四面扇出的同族第五面）。
+
+    缺口是实算出来的：EKB 382 条沉淀里 374 条纯对话轮的 success 恒 NULL——纯对话轮
+    没有工具回执，服务端票据只认「同参数值结构的历史票」，这些行永远无法被质量评估。
+    赞踩是该轮唯一真实已知的结局信号。只填 NULL（回执/票据结论优先）、不碰
+    evidence_state（工单 010：证据只认服务端票据）。best-effort：补不上票不让反馈失败。
+    """
+    try:
+        from neurova.skills.experience_knowledge_base import get_experience_knowledge_base
+
+        round_data = repo.get_round(agent_id=agent_id, session_id=session_id, timestamp=timestamp)
+        user = (round_data or {}).get("user") or {}
+        text = user.get("content", "") if isinstance(user, dict) else ""
+        if not text:
+            return 0
+        attached = get_experience_knowledge_base().attachUserOutcome(
+            agent_id or None, text, feedback == "like")
+        if attached:
+            logger.info(
+                "用户回执补进 EKB 成败位 %d 行 (session=%s, feedback=%s)",
+                attached, session_id[:8], feedback)
+        return attached
+    except Exception as e:  # noqa: BLE001
+        logger.warning("EKB 成败位补票失败 (session=%s): %s", session_id, e)
+        return 0
+
+
 async def _apply_feedback_to_reflections(agent, repo, session_id: str, timestamp: str, feedback: str) -> int:
     """反思效力反馈（P0b）：赞踩裁决该轮实际注入过的反思日志。
 
@@ -2216,6 +2244,9 @@ async def post_chat_feedback(
         _apply_feedback_to_channels(agent_id, body.session_id, body.feedback)
         # §6-209 第四面扇出：把该轮回执补进结晶器证据面（只补工具条目，寒暄轮不补）。
         _apply_feedback_to_crystallizer(
+            repo, agent_id, body.session_id, body.timestamp, body.feedback)
+        # 第五面扇出（T1 证据供给增强）：补进 EKB 成败位——只填 NULL，证据态不动。
+        _apply_feedback_to_ekb(
             repo, agent_id, body.session_id, body.timestamp, body.feedback)
         # 2026-09-15 P0b 反思效力反馈：赞/踩裁决该轮实际注入过的反思日志
         # （assistant metadata.injected_reflections 留痕，见 turn_context）。
