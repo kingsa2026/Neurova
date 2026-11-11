@@ -395,6 +395,50 @@ class FullChainEndToEndTest(unittest.TestCase):
         self.assertEqual(tracker.check_and_update_phase(), "light_sleep")
 
 
+class DreamHonestMergeCountTest(unittest.TestCase):
+    """梦境文案与 insights_generated 只认真实合并（≥2 源），不许拿簇数冒充。
+
+    病灶（2026-11-12 用户报障"睡眠洞察恒为 0"的伴生读数病）：
+    `merged_count` 是簇数、单例簇也算（该口径由 test_writeSideFillsEmbedding 钉着，
+    不改）；但休眠梦境文案与 start_sleep 把它直接当"合并 N 组"写、把簇数当
+    insights_generated 传——于是 kai"合并 1080 组、洞察 0 条"读起来自相矛盾，
+    default 梦境卡标"洞察 9 条"而洞察列表恒空。合并史/洞察派生只认 ≥2 源
+    （_record_merges_locked / _record_insights_locked 同判据），呈报面必须同口径。
+    """
+
+    def test_hibernate_dream_reports_real_merge_count(self):
+        memories = [
+            {"id": f"s{i}", "content": f"话题{i}各不相同", "embedding": [float(i), 1.0],
+             "temperature": 40.0, "importance": 0.3, "categories": ["misc"],
+             "agent_id": "default"}
+            for i in range(3)
+        ]
+        sc, mm = _make_consolidation(memories)
+        result = sc.run_sleep_cycle(
+            [MemoryRecord.from_dict(m) for m in memories], phase="hibernate")
+        self.assertEqual(result["merged_count"], 3, "前置：merged_count 是簇数（单例也算）")
+
+        dreams = sc.get_dream_logs(50)
+        self.assertEqual(len(dreams), 1)
+        content = dreams[0]["content"]
+        self.assertIn("真实合并 0 组", content, "零真实合并必须如实写 0")
+        self.assertNotIn("合并 3 组", content, "不许把 3 个单例簇虚报成『合并 3 组』")
+        self.assertEqual(dreams[0]["insights_generated"], 0)
+
+    def test_start_sleep_dream_insights_tag_is_real_insight_count(self):
+        sc, mm = _make_consolidation()  # m1/m2 可合并，m3 单例 → 簇数 2、真实合并 1
+        sc.start_sleep(duration_minutes=1)
+
+        dreams = sc.get_dream_logs(50)
+        self.assertEqual(len(dreams), 1)
+        dream = dreams[0]
+        self.assertEqual(
+            dream["insights_generated"], 0,
+            "deep_sleep 路径不派生洞察，洞察标签必须为 0（不许拿簇数 2 冒充）")
+        self.assertIn("真实合并 1 组", dream["content"])
+        self.assertNotIn("合并 2 组", dream["content"])
+
+
 class AutoWakeDeadlineTest(unittest.TestCase):
 
     def test_start_sleep_sets_deadline_and_check_wakes_at_time(self):
