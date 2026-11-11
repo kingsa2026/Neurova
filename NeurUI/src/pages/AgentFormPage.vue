@@ -47,25 +47,6 @@
               </a-form-item>
             </a-col>
             <a-col :span="12">
-              <a-form-item :label="t('agent.group')">
-                <a-tree-select
-                  v-model:value="formState.group_id"
-                  :tree-data="agentGroupTree"
-                  :placeholder="t('agent.groupDefaultHint')"
-                  allow-clear
-                  tree-default-expand-all
-                  style="width: 100%"
-                />
-              </a-form-item>
-            </a-col>
-          </a-row>
-
-          <a-form-item :label="t('agent.description')">
-            <a-textarea v-model:value="formState.description" :rows="2" :placeholder="t('agent.description')" />
-          </a-form-item>
-
-          <a-row :gutter="16">
-            <a-col :span="12">
               <a-form-item :label="t('agent.model')">
                 <a-select
                   v-model:value="formState.model"
@@ -79,6 +60,17 @@
               </a-form-item>
             </a-col>
           </a-row>
+
+          <!-- 所属分组：只读跟随创建者部门组（specs/2026-11-07 批 D 后端缺省绑定
+               `group_id=body.group_id or _creatorDeptGroupId(...)`；提交链空值即不传
+               → 缺省生效）。此前是让用户手动树选，与"跟随用户所属分组"语义相悖。 -->
+          <a-form-item :label="t('agent.group')">
+            <a-input :value="groupDisplay" readonly />
+          </a-form-item>
+
+          <a-form-item :label="t('agent.description')">
+            <a-textarea v-model:value="formState.description" :rows="2" :placeholder="t('agent.description')" />
+          </a-form-item>
         </GlassCard>
 
         <!-- System prompt & behavior -->
@@ -188,7 +180,6 @@ import { useAgentStore } from '@/stores/agents'
 import { listProviders } from '@/api/modules/providers'
 import { listModels } from '@/api/modules/models'
 import { listGroups, type Group } from '@/api/modules/groups'
-import { buildDeptTreeData } from '@/utils/deptTree'
 import { normalizeModel } from '@/types/model'
 
 const { t } = useI18n()
@@ -278,9 +269,19 @@ const formState = ref({
   ttsPitch: 1.0,
 })
 
-// ── 部门分组（specs/2026-11-07 批 D/F2）：所属分组树选 ──────────
+// ── 部门分组（specs/2026-11-07 批 D/F2）：只读跟随创建者部门组 ──────────
+// 「分组跟随用户所属分组」：分组不再树选——新建态不传 group_id（后端
+// `group_id=body.group_id or _creatorDeptGroupId(...)` 缺省绑定创建者部门组），
+// 编辑态只读展示 agent 当前绑定的组名。此处仅做 id→名映射，不做第二份解析。
 const deptGroups = ref<Group[]>([])
-const agentGroupTree = computed(() => buildDeptTreeData(deptGroups.value))
+const groupDisplay = computed(() => {
+  const gid = formState.value.group_id
+  if (gid) {
+    const g = deptGroups.value.find((item) => item.group_id === gid)
+    return g?.name || gid
+  }
+  return t('agent.groupDefaultHint')
+})
 const fetchDeptGroups = async () => {
   try {
     deptGroups.value = (await listGroups()) ?? []
