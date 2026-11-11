@@ -48,6 +48,14 @@ _DISCOUNT_FLOOR = 0.6   # 校准判据：折扣 < 0.6 触发告警
 _BUDGET_RATIO = 2.0     # 预算判据：近期耗时 > 基线 2 倍
 _LESSON_TTL_HOURS = 24  # 教训活跃期（调控门只看活跃教训）
 _REFLECT_INTERVAL = 600  # 反思间隔（秒）
+#: 反思的事件量通道：未编译事件攒够即到点（与轮次门并联）。洞察编译器的天然
+#: 触发信号是新证据，不是轮次——轮次计数是进程内存态，重启清零，开发机频繁
+#: 重启的形态下按轮次门等于永不编译（kai 71 条事件零次反思的根因）。
+_REFLECT_EVENT_THRESHOLD = 20
+#: sequence 算子的 per-tool 样本下限＝连败阈值本身（5）：足以容纳一次告警连败
+#: 的最小样本，连败判据自带样本量语义。**不许**借用 `_MIN_WINDOW`（那是 drift
+#: 滑窗常量，10 条的下限只会把天然告警往后拖——2026-11-12 元认知条数恒 0 诊断）。
+_SEQUENCE_MIN_EVENTS = 5
 
 _ENGINE_INSTANCES: Dict[str, "SelfModelEngine"] = {}
 _ENGINE_LOCK = threading.Lock()
@@ -197,6 +205,22 @@ class SelfModelEngine:
     def should_reflect(self) -> bool:
         return time.time() - self._last_reflect_at >= self._reflect_interval
 
+    def events_since_last_reflect(self) -> int:
+        """未编译事件数（台账持久判定，重启不丢）——见 `reflect_due`。"""
+        return self.ledger.events_since_last_reflect(self._agent_id)
+
+    def reflect_due(self, turn_count: int) -> bool:
+        """反思是否到点：轮次门与事件量门并联，600s 节流对两门同样生效。
+
+        - 轮次门（原行为）：每 10 轮一次——但轮次计数是进程内存态，重启清零，
+          单靠它会让事件账本厚的 agent（如 kai）在频繁重启下永不编译；
+        - 事件量门（新）：台账里未编译事件 ≥ `_REFLECT_EVENT_THRESHOLD`——
+          判定基准持久在台账，重启不丢，这才是"攒了新证据"的天然语义。
+        """
+        turn_gate = turn_count > 0 and turn_count % 10 == 0
+        event_gate = self.events_since_last_reflect() >= _REFLECT_EVENT_THRESHOLD
+        return (turn_gate or event_gate) and self.should_reflect()
+
     def reflect(self, trigger: str = "periodic") -> Dict[str, Any]:
         """跑五算子，教训落台账并随报告返回。空台账安全。"""
         with self._lock:
@@ -274,7 +298,14 @@ class SelfModelEngine:
                 type="monitoring",
                 content=summary,
                 confidence=report["confidence"],
-                metadata={"trigger": trigger, "lesson_count": len(lessons)},
+                metadata={
+                    "trigger": trigger,
+                    "lesson_count": len(lessons),
+                    # 事件游标：本轮编译到的事件 id 上界——事件量触发通道
+                    # （events_since_last_reflect）据此精确计数未编译事件，
+                    # created_at 微秒平局在紧循环里真实存在（实测同戳）。
+                    "last_event_id": max((int(e.get("id") or 0) for e in events), default=None),
+                },
             )
             self._last_reflect_at = time.time()
             return report
@@ -480,7 +511,7 @@ class SelfModelEngine:
     def _op_sequence(self, events: List[Dict[str, Any]], observations: List[str]) -> List[Dict[str, Any]]:
         lessons = []
         for tool, evts in self._tool_groups(events).items():
-            if len(evts) < _MIN_WINDOW:
+            if len(evts) < _SEQUENCE_MIN_EVENTS:
                 continue
             streak, max_streak = 0, 0
             for e in evts:

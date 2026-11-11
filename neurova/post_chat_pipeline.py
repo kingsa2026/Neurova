@@ -3473,15 +3473,18 @@ class PostChatPipeline:
                         "association_cue_generation", _generateAssociationCues()
                     )
 
-            # V3 自模型：反思门控触发（洞察编译器，全确定性零 LLM；教训落台账）
-            if turn_count > 0 and turn_count % 10 == 0:
+            # V3 自模型：反思门控触发（洞察编译器，全确定性零 LLM；教训落台账）。
+            # 到点判定收口在 engine.reflect_due（轮次门＋事件量门并联）——轮次计数
+            # 是进程内存态、重启清零，单靠它等于事件账本厚的 agent 在频繁重启下
+            # 永不编译（kai 71 条事件零次反思的根因，2026-11-12 诊断）。
+            if turn_count > 0:
                 try:
                     from neurova.cognitive_layers.meta_cognition_layer.self_model import (
                         get_self_model_engine,
                     )
 
                     engine = get_self_model_engine(agent_id)
-                    if engine.should_reflect():
+                    if engine.reflect_due(turn_count):
                         report = engine.reflect(trigger="periodic_turn")
                         if report.get("lessons"):
                             logger.info(

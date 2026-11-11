@@ -147,7 +147,7 @@ class MetaLedger:
     def list_events(self, agent_id: str, limit: int = 100) -> list:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT process_type, description, duration_ms, success, metadata, created_at"
+                "SELECT id, process_type, description, duration_ms, success, metadata, created_at"
                 " FROM meta_events WHERE agent_id=? ORDER BY created_at DESC, id DESC LIMIT ?",
                 (agent_id, int(limit)),
             ).fetchall()
@@ -155,12 +155,13 @@ class MetaLedger:
         for r in rows:
             out.append(
                 {
-                    "process_type": r[0],
-                    "description": r[1],
-                    "duration_ms": r[2],
-                    "success": bool(r[3]),
-                    "metadata": json.loads(r[4] or "{}"),
-                    "created_at": r[5],
+                    "id": int(r[0]),
+                    "process_type": r[1],
+                    "description": r[2],
+                    "duration_ms": r[3],
+                    "success": bool(r[4]),
+                    "metadata": json.loads(r[5] or "{}"),
+                    "created_at": r[6],
                 }
             )
         return out
@@ -175,6 +176,49 @@ class MetaLedger:
                 (agent_id, int(min_calls)),
             ).fetchall()
         return {r[0]: (r[2] / r[1]) if r[1] else 0.0 for r in rows}
+
+    def events_since_last_reflect(self, agent_id: str) -> int:
+        """最后一次反思之后落账的事件数（反思触发的事件量通道基准）。
+
+        为什么不用内存计数：反思引擎的 `_last_reflect_at` 与轮次计数都在进程里，
+        重启清零——开发机一天重启数次的形态下，"自上次反思以来攒了多少新证据"
+        只有台账这个持久层能回答。
+
+        游标取**事件 id**（反思记录的 `metadata.last_event_id`，由 reflect() 落
+        反思时写入）：created_at 是微秒级 ISO 串，紧循环里事件与反思记录会同
+        微秒（实测 3 条 u 事件与反思同戳），字符串比较对平局要么漏要么重。
+        旧 reflection 无标记（marker 缺失）时回退 created_at 严格大于——
+        保守方向（宁少计不重计）。
+        """
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT metadata FROM meta_records
+                WHERE agent_id = ? AND kind = 'reflection'
+                ORDER BY created_at DESC, id DESC LIMIT 1
+                """,
+                (agent_id,),
+            ).fetchone()
+            marker = json.loads(row[0] or "{}").get("last_event_id") if row else None
+            if marker is not None:
+                cnt = self._conn.execute(
+                    "SELECT COUNT(*) FROM meta_events WHERE agent_id = ? AND id > ?",
+                    (agent_id, int(marker)),
+                ).fetchone()
+            else:
+                cnt = self._conn.execute(
+                    """
+                    SELECT COUNT(*) FROM meta_events
+                    WHERE agent_id = ?
+                      AND created_at > (
+                          SELECT COALESCE(MAX(created_at), '')
+                          FROM meta_records
+                          WHERE agent_id = ? AND kind = 'reflection'
+                      )
+                    """,
+                    (agent_id, agent_id),
+                ).fetchone()
+        return int(cnt[0] or 0)
 
     # ────── records（前端可见记录：手动创建 + 反思报告） ──────
 
