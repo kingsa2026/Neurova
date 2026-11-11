@@ -48,6 +48,61 @@ export interface RsiStatus {
   debt?: RsiDebtReadout
   /** 参数活性读数（Issue #289 · 004 M3）：三态不折叠。 */
   parameter_activity?: RsiParameterActivity
+  /** 证据机器读数（survey §10.2 批次）：三态如实呈报，缺席说原因。 */
+  eval_outcome?: RsiThreeStateReadout
+  sealed_evidence?: RsiSealedEvidence
+  improver_paired_probe?: RsiPairedProbeReadout
+  quality_curves?: RsiQualityCurves
+  cost_vector?: { last?: Record<string, number> | null; totals?: Record<string, number> }
+  pruner_failed_cost?: { eliminated: number; total_realized_cost: number; zero_cost_ids?: string[] }
+  proxy_reference_correlation?: RsiThreeStateReadout & { pairs?: number; arm?: string; degenerate?: boolean }
+  transfer?: RsiThreeStateReadout
+  coverage?: { expected: string[]; covered: string[]; uncovered: string[]; alert: boolean }
+  checkpoint_columns?: Record<string, unknown> & { missing?: string[] }
+  audit_schedule?: { stride: number; scheduled_points: number[]; snapshots_recorded: number[] }
+  /** A5 升级可用性：available=true 时批准走 governance 端点。 */
+  improver_upgrade?: {
+    available: boolean
+    reason?: string
+    derived_version?: string
+    summary?: string
+    derived_from?: string
+    probe_state?: string
+    probe_gamma?: number | null
+  }
+}
+
+/** 三态读数通用形态（measured / insufficient_data / unevidenced——缺席必须说原因）。 */
+export interface RsiThreeStateReadout {
+  state: 'measured' | 'insufficient_data' | 'unevidenced' | string
+  score?: number | null
+  reason?: string
+  detail?: string
+}
+
+/** 密封档验收证据（D1）：决策落定后的独立验收读数。 */
+export interface RsiSealedEvidence extends RsiThreeStateReadout {
+  evidenced_cases?: number
+  blind_cases?: number
+  covered_families?: string[]
+  cases?: { id: string; family: string; score: number; detail: string }[]
+}
+
+/** Eq8 配对探针读数（A3/A4）：带符号 Γ＋逐臂计账＋共享分类。 */
+export interface RsiPairedProbeReadout extends RsiThreeStateReadout {
+  states?: number
+  evidenced_pairs?: number
+  realized_evaluations?: number
+  policy_versions?: { t?: string; baseline?: string }
+  arms?: Record<string, { realized: number; quality_mean?: number | null; evidenced: number; improved?: string[]; regressed?: string[] }>
+  quality_at_milestones?: Record<string, unknown>
+}
+
+/** 质量三曲线（C2）：archive-best / deployed / final 逐 checkpoint 分列。 */
+export interface RsiQualityCurves {
+  state: 'measured' | 'insufficient_data' | string
+  curve: { checkpoint: number; deployed?: number; final?: number; archive_best?: number }[]
+  archive_best?: number | null
 }
 
 /** 负债读数（`available: false` = 账本未开，**不是**"没有欠账"）。 */
@@ -88,6 +143,15 @@ function scopedParams(agentId?: string): { params: Record<string, string> } {
 }
 
 /** RSI 状态读数（阶段、晋升判据三态、候选统计、升级通道） */
+/** A5 改进器换版批准（人工 gate 的人工半；409 = 无候选/已在账/无证据）。 */
+export function approveImproverUpgrade(options: { agentId?: string; approvedBy: string }) {
+  return api.post<ApiResponse<Record<string, unknown>>>(
+    `${BASE}/improver-upgrade/approve`,
+    { approved_by: options.approvedBy },
+    scopedParams(options.agentId),
+  )
+}
+
 export function getRsiStatus(agentId?: string) {
   return api.get<ApiResponse<RsiStatus>>(`${BASE}/status`, scopedParams(agentId))
 }

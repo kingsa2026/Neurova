@@ -22,6 +22,7 @@ import {
   type RsiApproveEvidence,
   type RsiProposal,
   type RsiStatus,
+  approveImproverUpgrade,
 } from '@/api/modules/rsiGovernance'
 
 const { t } = useI18n()
@@ -155,6 +156,103 @@ async function reject(proposal: RsiProposal) {
   }
 }
 
+/** 三态读数的 tag 颜色与文案键（缺席必须说出原因——与后端三态纪律同形）。 */
+function stateTagColor(state: string | undefined): string {
+  if (state === 'measured') return 'success'
+  if (state === 'insufficient_data') return 'warning'
+  return 'default'
+}
+
+function stateText(state: string | undefined): string {
+  if (state === 'measured') return t('rsiGovernance.stateMeasured')
+  if (state === 'insufficient_data') return t('rsiGovernance.stateInsufficient')
+  return t('rsiGovernance.stateUnevidenced')
+}
+
+/** 证据机器读数行（survey §10.2 批次的状态面八格＋升级可用性）。 */
+interface EvidenceRow {
+  key: string
+  state?: string
+  value: string
+  reason?: string
+}
+
+const evidenceRows = computed<EvidenceRow[]>(() => {
+  if (!status.value) return []
+  const s = status.value
+  const rows: EvidenceRow[] = []
+  const push = (key: string, state: string | undefined, value: string, reason?: string) =>
+    rows.push({ key, state, value, reason })
+
+  const eo = s.eval_outcome
+  push('evalOutcome', eo?.state,
+    eo?.state === 'measured' ? String(eo.score ?? '—') : (eo?.reason || eo?.detail || '—'),
+    eo?.state !== 'measured' ? (eo?.reason || eo?.detail) : undefined)
+
+  const se = s.sealed_evidence
+  push('sealed', se?.state,
+    se?.state === 'measured'
+      ? `${se.score}·${(se.covered_families ?? []).length}`
+      : (se?.reason || '—'),
+    se?.state !== 'measured' ? se?.reason : undefined)
+
+  const pp = s.improver_paired_probe
+  push('probe', pp?.state,
+    pp?.state === 'measured'
+      ? `Γ=${pp.score}·${t('rsiGovernance.pairsLabel')}=${pp.evidenced_pairs ?? 0}`
+      : (pp?.reason || pp?.detail || '—'))
+
+  const qc = s.quality_curves
+  push('curves', qc?.state,
+    qc?.state === 'measured'
+      ? `${t('rsiGovernance.archiveBestLabel')}=${qc.archive_best}·${qc.curve.length}`
+      : (qc?.state || '—'))
+
+  const cv = s.cost_vector?.totals
+  push('cost', undefined,
+    cv ? `turns=${cv.turns ?? 0} / tokens=${cv.tokens ?? 0} / wall=${cv.wall_ms ?? 0}ms` : '—')
+
+  const fc = s.pruner_failed_cost
+  push('failedCost', undefined,
+    fc ? `${fc.eliminated} / ${fc.total_realized_cost}` : '—')
+
+  const cov = s.coverage
+  push('coverage', undefined,
+    cov ? `${cov.covered.length}/${cov.expected.length}${cov.alert ? ` · ${t('rsiGovernance.uncoveredLabel')}: ${cov.uncovered.join(', ')}` : ''}` : '—')
+
+  const pr = s.proxy_reference_correlation
+  push('correlation', pr?.state,
+    pr?.state === 'measured' ? String(pr.score) : (pr?.detail || pr?.reason || '—'))
+
+  const tr = s.transfer
+  push('transfer', tr?.state,
+    tr?.state === 'measured' ? `τ=${tr.score}` : (tr?.detail || tr?.reason || '—'))
+
+  const cc = s.checkpoint_columns
+  push('checkpoint', undefined,
+    cc && cc.acceptance_rate != null
+      ? `${t('rsiGovernance.acceptanceLabel')}=${cc.acceptance_rate}`
+      : (Array.isArray(cc?.missing) && cc.missing.length ? `missing: ${cc.missing.join(', ')}` : '—'))
+
+  return rows
+})
+
+const upgrade = computed(() => status.value?.improver_upgrade)
+const approvingUpgrade = ref(false)
+
+async function approveUpgrade() {
+  approvingUpgrade.value = true
+  try {
+    await approveImproverUpgrade({ agentId: agentId.value || undefined, approvedBy: approver.value })
+    message.success(t('rsiGovernance.upgradeApproveOk'))
+    await load()
+  } catch (err) {
+    message.error(`${t('rsiGovernance.upgradeApproveFailed')}：${errorText(err)}`)
+  } finally {
+    approvingUpgrade.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -237,6 +335,66 @@ onMounted(load)
             {{ activityLabel(status.parameter_activity.overall) }}
           </a-tag>
         </span>
+      </div>
+    </GlassCard>
+
+    <GlassCard v-if="status" :title="t('rsiGovernance.evidenceTitle')" data-testid="rsi-evidence-machine">
+      <p class="rsi-hint">{{ t('rsiGovernance.evidenceHint') }}</p>
+      <table class="rsi-table" data-testid="rsi-evidence-rows">
+        <tbody>
+          <tr v-for="row in evidenceRows" :key="row.key" class="rsi-row">
+            <td>{{ t(`rsiGovernance.${row.key === 'sealed' ? 'sealedEvidenceLabel' : row.key === 'probe' ? 'pairedProbeLabel' : row.key === 'curves' ? 'qualityCurvesLabel' : row.key === 'cost' ? 'costVectorLabel' : row.key === 'failedCost' ? 'failedCostLabel' : row.key === 'coverage' ? 'coverageLabel' : row.key === 'correlation' ? 'correlationLabel' : row.key === 'transfer' ? 'transferLabel' : row.key === 'checkpoint' ? 'checkpointLabel' : 'evalOutcomeLabel'}`) }}</td>
+            <td>
+              <a-tag v-if="row.state" :color="stateTagColor(row.state)" :data-testid="`rsi-ev-${row.key}-state`">
+                {{ stateText(row.state) }}
+              </a-tag>
+              <span :data-testid="`rsi-ev-${row.key}`">{{ row.value }}</span>
+              <em v-if="row.reason">{{ row.reason }}</em>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <!-- 质量三曲线明细（C2）：archive-best / deployed / final 逐 checkpoint 分列 -->
+      <table
+        v-if="status.quality_curves?.curve?.length"
+        class="rsi-table"
+        data-testid="rsi-curves"
+      >
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>deployed</th>
+            <th>final</th>
+            <th>{{ t('rsiGovernance.archiveBestLabel') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="pt in status.quality_curves.curve" :key="pt.checkpoint" class="rsi-row">
+            <td>{{ pt.checkpoint }}</td>
+            <td>{{ pt.deployed }}</td>
+            <td>{{ pt.final }}</td>
+            <td>{{ pt.archive_best }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <!-- A5 升级批准（人工 gate 的人工半）：available 才出按钮，理由随行 -->
+      <div v-if="upgrade" class="rsi-upgrade" data-testid="rsi-upgrade">
+        <a-tag :color="upgrade.available ? 'processing' : 'default'" data-testid="rsi-upgrade-state">
+          {{ upgrade.available ? t('rsiGovernance.upgradeAvailable') : t('rsiGovernance.upgradeNone') }}
+        </a-tag>
+        <em v-if="!upgrade.available">{{ upgrade.reason }}</em>
+        <template v-if="upgrade.available">
+          <span>{{ upgrade.derived_version }} ← {{ upgrade.derived_from }} · Γ={{ upgrade.probe_gamma }}</span>
+          <a-button
+            size="small"
+            type="primary"
+            :loading="approvingUpgrade"
+            data-testid="rsi-upgrade-approve"
+            @click="approveUpgrade"
+          >
+            {{ t('rsiGovernance.upgradeApprove') }}
+          </a-button>
+        </template>
       </div>
     </GlassCard>
 
