@@ -1032,7 +1032,15 @@ class LLMProviderManager(Module):
             return False
 
     def activate_model(self, provider_id: str, model_id: str) -> bool:
-        """激活模型"""
+        """激活模型为系统默认（读写对称：激活哪对 (provider, model)，读回就是哪对）。
+
+        读回 `get_active_model()` 走 `get_default_provider()`——激活若只改被指名
+        provider 的 `default_model` 而不动 `_default_provider_id`，默认 provider
+        指向别处（或未设回落第一个 enabled）时，读回的就是另一个 provider 的
+        模型：界面提示保存成功、刷新后显示却不是保存的结果（用户报障形态，
+        读/写各执一半）。故激活同时把默认 provider 切到该 provider，一次落盘；
+        `set_default_provider` 的显式设默认能力保持不变（之后显式切换仍生效）。
+        """
         if provider_id not in self._providers:
             logger.error("Provider %s not found", provider_id)
             return False
@@ -1048,11 +1056,13 @@ class LLMProviderManager(Module):
 
         provider.default_model = model_id
         provider.updated_at = datetime.now().isoformat()
+        self._default_provider_id = provider_id
 
         with self._config_lock:
             self._save_config()
 
-        logger.info("Activated model %s in provider %s", model_id, provider.name)
+        logger.info("Activated model %s in provider %s (default provider followed)",
+                    model_id, provider.name)
         self.maybe_probe_multimodal(provider_id, model_id)
         return True
 
