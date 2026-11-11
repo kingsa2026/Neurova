@@ -1,4 +1,4 @@
-"""凭据按用户分桶（SSH 主机 / RDP / 社交平台设置面共用）。
+"""凭据按用户分桶（SSH 主机 / RDP / 通用键值共用）。
 
 设计：
 - 每用户一个凭据桶目录（base_dir/{user_id}/），凭据值经认证加密落盘
@@ -6,9 +6,9 @@
   加密 keyfile 首次生成后持久（重启稳定）
 - 与全局配置的关系：不做全局 fallback。凭据一律按归属桶存取，
   单用户部署在 default 桶配置即可。
-- 社交平台段为遗留消费面：工具侧登录态已归上游 agent-reach CLI
-  （2026-11-12 agent_reach 收口批），本段现只剩设置面读写消费，
-  待随设置面一并退役。
+- 社交平台凭据段已退役（§6-591，2026-11-12）：social_search 登录态归上游
+  agent-reach CLI 浏览器会话，本仓不再存社交凭据；平台键集注册表现空，
+  rdp 键集随 §6-592 RDP 授权面回填。
 """
 
 from __future__ import annotations
@@ -24,28 +24,11 @@ from neurova.security.local_key_protection import loadOrCreateKeyfile
 
 logger = get_logger(__name__)
 
-# 凭据 key → 平台（list_platforms 聚合用）
-_KEY_TO_PLATFORM = {
-    "twitter_auth_token": "twitter",
-    "twitter_ct0": "twitter",
-    "reddit_session": "reddit",
-    "xiaohongshu_cookie": "xiaohongshu",
-    "facebook_cookie": "facebook",
-    "instagram_cookie": "instagram",
-    "linkedin_cookie": "linkedin",
-    "github_token": "github",
-}
-
-# 平台 → 所需凭据 keys（齐备才算"已配置"；设置面读写同源使用）
-PLATFORM_REQUIRED_KEYS = {
-    "twitter": ["twitter_auth_token", "twitter_ct0"],
-    "reddit": ["reddit_session"],
-    "xiaohongshu": ["xiaohongshu_cookie"],
-    "facebook": ["facebook_cookie"],
-    "instagram": ["instagram_cookie"],
-    "linkedin": ["linkedin_cookie"],
-    "github": ["github_token"],
-}
+# 平台 → 所需凭据 keys（齐备才算"已配置"）。
+# 社交平台键集已随 §6-591 退役（social_search 登录态归上游 agent-reach CLI，
+# 本仓不再存社交凭据）；rdp 键集随 §6-592 RDP 授权面接通时回填
+# （platform_credentials("rdp") 现态因此恒空读——独立缺陷，见台账 §6-592）。
+PLATFORM_REQUIRED_KEYS: Dict[str, list] = {}
 
 
 class UserCredentialStore:
@@ -98,16 +81,6 @@ class UserCredentialStore:
         """取某平台所需的全部凭据 keys（缺失项以 None 占位）"""
         required = PLATFORM_REQUIRED_KEYS.get((platform or "").lower(), [])
         return {k: self.get_credential(user_id, k) for k in required}
-
-    def list_platforms(self, user_id: str) -> Dict[str, bool]:
-        """按平台聚合配置状态（该平台所需凭据全部齐备 = True）"""
-        creds: Dict[str, Optional[str]] = {}
-        result: Dict[str, bool] = {}
-        for key, platform in _KEY_TO_PLATFORM.items():
-            creds[key] = self.get_credential(user_id, key)
-        for platform, required in PLATFORM_REQUIRED_KEYS.items():
-            result[platform] = all(creds.get(k) for k in required)
-        return result
 
     # ── SSH 多主机凭据（按 host 分键，computer_ssh_exec 消费）──────────
     # 值以 JSON 存于加密桶：{"user","port","key_text","password"}；GET 永不回显密钥/密码。
@@ -163,33 +136,6 @@ class UserCredentialStore:
 
     def delete_ssh_host(self, user_id: str, host: str) -> bool:
         return self.delete_credential(user_id, self._SSH_PREFIX + (host or "").strip())
-
-    # ── 社交平台凭据（设置面读写；工具侧登录态已归上游 CLI——遗留消费面待退役）──
-
-    def set_platform_credentials(self, user_id: str, platform: str, mapping: Dict[str, str]) -> bool:
-        """按平台批量存凭据（只接受该平台所需键，多余键忽略）。"""
-        required = PLATFORM_REQUIRED_KEYS.get((platform or "").strip().lower())
-        if not required:
-            return False
-        ok = True
-        for key in required:
-            val = (mapping or {}).get(key)
-            if val:  # 空值不覆盖已有（允许部分更新）
-                ok = self.set_credential(user_id, key, str(val)) and ok
-        return ok
-
-    def platform_status(self, user_id: str) -> list:
-        """各平台凭据配置状态（脱敏：只回键名 + 是否已配，不回值）。"""
-        out = []
-        for platform, required in PLATFORM_REQUIRED_KEYS.items():
-            keys = [{"key": k, "set": bool(self.get_credential(user_id, k))} for k in required]
-            out.append({"platform": platform, "keys": keys, "configured": all(k["set"] for k in keys)})
-        out.sort(key=lambda r: r["platform"])
-        return out
-
-    def clear_platform_credentials(self, user_id: str, platform: str) -> int:
-        required = PLATFORM_REQUIRED_KEYS.get((platform or "").strip().lower(), [])
-        return sum(1 for k in required if self.delete_credential(user_id, k))
 
 
 # 模块级单例工厂（SSH/RDP provider 与设置端点共用）

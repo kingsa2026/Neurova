@@ -118,13 +118,6 @@ class SshCredentialRequest(BaseModel):
     password: str = Field("", description="密码（无密钥时用）")
 
 
-class SocialCredentialRequest(BaseModel):
-    """社交平台凭据（设置面读写；键由该平台所需集决定）"""
-
-    platform: str = Field(..., description="平台：twitter/reddit/xiaohongshu/facebook/instagram/linkedin/github")
-    credentials: Dict[str, str] = Field(default_factory=dict, description="凭据键值（仅接受该平台所需键）")
-
-
 def _get_request_id(request: Request) -> str:
     """安全获取 request_id"""
     return getattr(request.state, "request_id", str(uuid.uuid4()))
@@ -271,59 +264,6 @@ async def delete_ssh_credential(
     if not get_credential_store().delete_ssh_host(uid, host):
         raise HTTPException(status_code=404, detail=f"未找到主机凭据: {host}")
     return {"code": 0, "data": {"host": host, "deleted": True}}
-
-
-# ─── 社交平台凭据（设置面读写；与 SSH 复用同一配置面/加密桶）───
-
-
-@router.get("/social-credentials")
-async def list_social_credentials(
-    request: Request,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """列出各社交平台凭据配置状态（脱敏：平台 + 所需键是否已配，不回显值）。"""
-    from neurova.web_reach.credentials import get_credential_store
-
-    uid = str(current_user.get("user_id") or "default")
-    return {"code": 0, "data": {"platforms": get_credential_store().platform_status(uid)}}
-
-
-@router.post("/social-credentials")
-async def set_social_credential(
-    request: Request,
-    body: SocialCredentialRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """保存某社交平台凭据（只接受该平台所需键；空值不覆盖）。"""
-    from neurova.web_reach.credentials import PLATFORM_REQUIRED_KEYS, get_credential_store
-
-    platform = (body.platform or "").strip().lower()
-    if platform not in PLATFORM_REQUIRED_KEYS:
-        raise HTTPException(status_code=422, detail=f"不支持的平台: {body.platform}")
-    if not any((body.credentials or {}).values()):
-        raise HTTPException(status_code=422, detail="未提供任何凭据值")
-    uid = str(current_user.get("user_id") or "default")
-    ok = get_credential_store().set_platform_credentials(uid, platform, body.credentials)
-    if not ok:
-        raise HTTPException(status_code=500, detail="凭据保存失败")
-    return {"code": 0, "data": {"platform": platform, "saved": True}}
-
-
-@router.delete("/social-credentials/{platform}")
-async def clear_social_credential(
-    request: Request,
-    platform: str = Path(...),
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """清除某社交平台的全部凭据。"""
-    from neurova.web_reach.credentials import PLATFORM_REQUIRED_KEYS, get_credential_store
-
-    platform = (platform or "").strip().lower()
-    if platform not in PLATFORM_REQUIRED_KEYS:
-        raise HTTPException(status_code=404, detail=f"不支持的平台: {platform}")
-    uid = str(current_user.get("user_id") or "default")
-    n = get_credential_store().clear_platform_credentials(uid, platform)
-    return {"code": 0, "data": {"platform": platform, "cleared": n}}
 
 
 # ─── CORS 配置管理（必须在 /{key} 之前注册，避免被路径参数遮蔽）───

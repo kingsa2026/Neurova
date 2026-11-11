@@ -122,28 +122,6 @@ export function deleteSSHCredential(host: string) {
 }
 
 // ---------------------------------------------------------------------------
-// 社交平台凭据（web_reach social_exec 消费；与 SSH 复用同一配置面/加密桶）
-// ---------------------------------------------------------------------------
-
-export interface SocialPlatformStatus {
-  platform: string
-  keys: { key: string; set: boolean }[]
-  configured: boolean
-}
-
-export function listSocialCredentials() {
-  return api.get<ApiResponse<{ platforms: SocialPlatformStatus[] }>>(`${BASE}/social-credentials`)
-}
-
-export function setSocialCredential(platform: string, credentials: Record<string, string>) {
-  return api.post<ApiResponse<{ platform: string }>>(`${BASE}/social-credentials`, { platform, credentials })
-}
-
-export function clearSocialCredential(platform: string) {
-  return api.delete<ApiResponse<{ platform: string }>>(`${BASE}/social-credentials/${encodeURIComponent(platform)}`)
-}
-
-// ---------------------------------------------------------------------------
 // Governance settings（进化治理：RSI 部署阶段 + 对话规则提取 LLM 成本门控）
 // ---------------------------------------------------------------------------
 
