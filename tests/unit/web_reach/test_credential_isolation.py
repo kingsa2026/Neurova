@@ -48,17 +48,6 @@ class TestUserCredentialStore:
         assert store.get_credential("user-7", "twitter_auth_token") is None
         assert store.get_credential("user-8", "twitter_auth_token") == "tok-b"
 
-    def test_list_platform_status(self, tmp_path):
-        from neurova.web_reach.credentials import UserCredentialStore
-
-        store = UserCredentialStore(base_dir=str(tmp_path))
-        store.set_credential("user-7", "twitter_auth_token", "t")
-        store.set_credential("user-7", "twitter_ct0", "c")
-
-        status = store.list_platforms("user-7")
-        assert "twitter" in status and status["twitter"] is True
-        assert "reddit" not in status or status.get("reddit") is False
-
 
 class TestSocialSearchCliFace:
     def test_social_search_detached_from_credential_store(self, monkeypatch):

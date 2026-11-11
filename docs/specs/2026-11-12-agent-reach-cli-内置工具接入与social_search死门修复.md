@@ -61,11 +61,23 @@ stdout 单行 JSON envelope、错误码 `{code,message,hint}`、doctor `channels
 
 ## 4. 尾巴格（不许静默遗留）
 
-**§6-591 · 社交平台凭据切片退役**：social_search 切 CLI 面后，`credentials.py` 社交平台段
-（`PLATFORM_REQUIRED_KEYS` 七平台键集／`set_platform_credentials`/`platform_status`/
-`clear_platform_credentials`）与 `api/endpoints/settings.py` 社交凭据三端点、
-前端 `CredentialManager.vue` 社交段＋`settings.ts` 对应 API、11 语言 i18n 键，
-失去唯一工具消费方（存储本体仍被 SSH 主机/RDP 凭据消费，**不可整删**）。
-退役须整段同步（后端端点＋前端段＋i18n＋`test_social_credentials.py` 的 API 面格），
-单独成批，勿与本类功能批混车。设置面在读用户若已录入社交凭据，迁移口径＝引导改用
-`agent-reach add/login`（登录态归上游 CLI 浏览器会话，机器级共享）。
+**§6-591 · 社交平台凭据切片退役——已闭环（2026-11-12 退役批）**。拆除面：后端
+`settings.py` 三端点（GET/POST/DELETE `/social-credentials`）＋`SocialCredentialRequest`
+模型、`credentials.py` 社交段（`set_platform_credentials`/`platform_status`/
+`clear_platform_credentials`/`list_platforms`/`_KEY_TO_PLATFORM`，平台键集注册表清空）、
+前端 `CredentialManager.vue` 社交卡＋`settings.ts` 三函数＋`SocialPlatformStatus`、
+11 语言 10 个 `social*` 键＋`myCredentialsHint` 文案去社交从句。缺席守卫
+`tests/unit/web_reach/test_social_credentials.py` 钉路由/符号/键集三缺席＋相邻活面
+（SSH/RDP/通用桶）不误伤。验收：守卫 4 红→绿；后端相关套件 173 passed；前端双门
+vitest 2449 passed＋vue-tsc exit 0；live-verify（9527 .venv 重启，[ERROR]=0）：
+`GET/DELETE /social-credentials` → 404、`/ssh-credentials` → 200 存活、工具清单 106 项含
+`agent_reach`/`social_search`。迁移口径：已录入社交凭据的读数改用 `agent-reach add/login`
+（登录态归上游 CLI 浏览器会话）。
+
+**§6-592 · RDP 直连凭据授权面从未接通（退役批盘点时发现的独立缺陷，待另批）**：
+`rdp_provider._resolve_from_credentials` 走 `platform_credentials(user_id, "rdp")`，
+但平台键集注册表**没有 `rdp` 项**且全仓无任何写入方 ⇒ 恒返回 `{}` ⇒
+`RdpDirectProvider.create` 恒抛「未授权 RDP 直连桌面端点」——RDP 直连桌面能力
+（session_pool 的 rdp 分支）今天不可用。修法＝授权写入面设计（`rdp` 键集回填＋设置端点
+或 channel-config 写口＋UI），另批实施；本批保留 `platform_credentials` 方法与该读线
+不动（行为与退役前逐字节一致），注册表清空后该读线恒空读的形态由缺席守卫记录在案。

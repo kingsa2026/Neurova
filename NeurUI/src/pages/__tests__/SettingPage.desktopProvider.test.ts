@@ -32,9 +32,6 @@ vi.mock('@/api/modules/settings', () => ({
   listSSHCredentials: vi.fn().mockResolvedValue({ data: { hosts: [] } }),
   upsertSSHCredential: vi.fn().mockResolvedValue({}),
   deleteSSHCredential: vi.fn().mockResolvedValue({}),
-  listSocialCredentials: vi.fn().mockResolvedValue({ data: { platforms: [] } }),
-  setSocialCredential: vi.fn().mockResolvedValue({}),
-  clearSocialCredential: vi.fn().mockResolvedValue({}),
 }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: { username: 'admin', role: 'admin' } }) }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ isDark: true, toggleTheme: vi.fn(), setLocale: vi.fn() }) }))
@@ -64,9 +61,6 @@ const messages = {
     sshHostsTitle: 'SSH 远程主机', sshHostsHint: 'h', sshHostsEmpty: '无主机', sshHost: '主机', sshUser: '用户', sshPort: '端口',
     sshAuthType: '认证', sshAuthPassword: '密码', sshAuthKey: '私钥', sshAuthAgent: '系统', sshPrivateKey: '私钥', sshPassword: '密码',
     sshAddHost: '添加主机', sshHostRequired: '请填写主机', sshCredentialRequired: '请填写凭据',
-    socialCredentialsTitle: '社交平台凭据', socialCredentialsHint: 'h', socialPlatform: '平台', socialSave: '保存',
-    socialConfigured: '已配置', socialNotConfigured: '未配置', socialClear: '清除', socialPlatformRequired: '请选择平台',
-    socialCredentialRequired: '请填写凭据值', socialAlreadySet: '已设置',
     negativeScreen: '负一屏', governanceTitle: '治理', governanceHint: 'h', governanceRsiPhase: 'RSI',
     agentLimitsTitle: '限制', agentLimitsHint: 'h', agentTokenBudget: 'b', agentTokenBudgetHint: 'h', agentMaxRounds: 'r', agentMaxRoundsHint: 'h',
     governancePhase0: '0', governancePhase1: '1', governancePhase2: '2', governancePhase3: '3', governancePhase4: '4', governanceConversationRules: '规则',
