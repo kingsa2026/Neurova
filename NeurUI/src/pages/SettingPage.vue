@@ -348,6 +348,15 @@
             <a-form-item :label="t('settings.governanceConversationRules')">
               <a-switch v-model:checked="governance.conversation_rules_enabled" />
             </a-form-item>
+            <a-form-item :label="t('settings.governanceOverridesLabel')">
+              <p class="governance-hint">{{ t('settings.governanceOverridesHint') }}</p>
+              <a-textarea
+                v-model:value="governance.overridesText"
+                :rows="3"
+                :placeholder="t('settings.governanceOverridesPlaceholder')"
+                data-testid="governance-phase-overrides"
+              />
+            </a-form-item>
           </a-form>
           <template #footer>
             <GlassButton variant="primary" size="sm" :loading="savingGovernance" @click="saveGovernance">{{ t('common.save') }}</GlassButton>
@@ -406,7 +415,13 @@ const savingRecall = ref(false)
 const routing = ref({ actionability_enabled: false, actionability_lookback: 20, group_leadership_enabled: false, group_lease_ttl_seconds: 90 })
 
 // 进化治理设置（独立于扁平 settings 的治理面）
-const governance = ref({ conversation_rules_enabled: false, rsi_phase: 0 })
+const governance = ref({
+  conversation_rules_enabled: false,
+  rsi_phase: 0,
+  /** G2 覆写编辑态：textarea 逐行 `agent_id=phase`，保存时解析（后端 422 兜底值域）。 */
+  rsi_phase_overrides: {} as Record<string, number>,
+  overridesText: '',
+})
 const savingGovernance = ref(false)
 
 /**
@@ -616,6 +631,11 @@ const fetchGovernance = async () => {
     const data = (res as any)?.data?.data ?? (res as any)?.data
     if (data) {
       governance.value = { ...governance.value, ...data }
+      // G2 覆写编辑态：对象 → 逐行 `agent_id=phase`（确定性排序，防编辑抖动）
+      governance.value.overridesText = Object.entries(data.rsi_phase_overrides ?? {})
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([agent, phase]) => `${agent}=${phase}`)
+        .join('\n')
       governanceLoaded.value = true
     }
   } catch (err) {
@@ -631,9 +651,32 @@ const saveGovernance = async () => {
     message.warning(t('settings.notLoadedSaveBlocked'))
     return
   }
+  // G2 覆写解析：逐行 `agent_id=phase`；非法行点名（后端 422 兜底值域 0..4）。
+  const overrides: Record<string, number> = {}
+  const badLines: string[] = []
+  for (const raw of governance.value.overridesText.split('\n')) {
+    const line = raw.trim()
+    if (!line) continue
+    const eq = line.lastIndexOf('=')
+    const agent = eq > 0 ? line.slice(0, eq).trim() : ''
+    const phase = eq > 0 ? Number(line.slice(eq + 1).trim()) : NaN
+    if (!agent || !Number.isInteger(phase) || phase < 0 || phase > 4) {
+      badLines.push(line)
+      continue
+    }
+    overrides[agent] = phase
+  }
+  if (badLines.length) {
+    message.warning(`${t('settings.governanceOverridesInvalid')}：${badLines.join('; ')}`)
+    return
+  }
   savingGovernance.value = true
   try {
-    await updateGovernanceSettings({ ...governance.value })
+    await updateGovernanceSettings({
+      conversation_rules_enabled: governance.value.conversation_rules_enabled,
+      rsi_phase: governance.value.rsi_phase,
+      rsi_phase_overrides: overrides,
+    })
     message.success(t('common.success'))
   } catch (err) {
     message.error(extractApiDetail(err) || t('common.error'))
