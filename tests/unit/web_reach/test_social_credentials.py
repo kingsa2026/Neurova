@@ -7,8 +7,9 @@ CredentialManager 社交段与 10 键 i18n 同批退役。本文件钉**缺席**
 批量读写符号，平台键集注册表须为空（rdp 键集随 §6-592 RDP 授权面回填）。
 
 仍活着的相邻面（不得误伤）：SSH 主机凭据（ssh_runner＋设置端点）、
-RDP 读取线（rdp_provider → platform_credentials，现态恒空读为 §6-592
-登记的独立缺陷）、通用桶 set/get/delete_credential。
+RDP 直连凭据（§6-592 接通：rdp_provider → get_rdp_endpoint 专用访问器）、
+通用桶 set/get/delete_credential。platform_credentials／PLATFORM_REQUIRED_KEYS
+注册表随 §6-592 一并退役（RDP 换专用访问器后注册表零消费者）。
 """
 
 import importlib
@@ -21,6 +22,8 @@ _RETIRED_SYMBOLS = (
     "clear_platform_credentials",
     "list_platforms",
     "_KEY_TO_PLATFORM",
+    "PLATFORM_REQUIRED_KEYS",
+    "platform_credentials",
 )
 
 _SOCIAL_PLATFORMS = ("twitter", "reddit", "xiaohongshu", "facebook", "instagram", "linkedin")
@@ -48,16 +51,19 @@ def test_credentials模块不得再暴露社交批量读写符号():
     assert leaked == [], f"社交凭据切片符号未退役干净: {leaked}"
 
 
-def test_平台键集注册表须为空():
-    """社交平台键集退役后注册表清空；rdp 键集随 §6-592 回填。"""
+def test_平台键集注册表整体退役():
+    """社交键集清空后注册表整体失去消费者（RDP 换专用访问器）⇒ 常量退役。"""
     creds = importlib.import_module("neurova.web_reach.credentials")
-    leaked = [p for p in _SOCIAL_PLATFORMS if p in creds.PLATFORM_REQUIRED_KEYS]
-    assert leaked == [], f"社交平台键集未清: {leaked}"
-    assert "github_token" not in creds.PLATFORM_REQUIRED_KEYS.get("github", [])
+    assert not hasattr(creds, "PLATFORM_REQUIRED_KEYS"), (
+        "PLATFORM_REQUIRED_KEYS 注册表在 RDP 换专用访问器后已零消费者，应随批退役"
+    )
+    assert not hasattr(creds, "platform_credentials"), (
+        "platform_credentials 批量读在 RDP 换专用访问器后已零消费者，应随批退役"
+    )
 
 
 def test_相邻活面不得误伤():
-    """SSH/RDP/通用桶三面仍在——退役刀口不得越过社交段。"""
+    """SSH/RDP/通用桶三面仍在——退役刀口不得越过。"""
     creds = importlib.import_module("neurova.web_reach.credentials")
     store = creds.UserCredentialStore
     for name in (
@@ -68,6 +74,9 @@ def test_相邻活面不得误伤():
         "get_ssh_host",
         "list_ssh_hosts",
         "delete_ssh_host",
-        "platform_credentials",
+        "set_rdp_endpoint",
+        "get_rdp_endpoint",
+        "rdp_status",
+        "delete_rdp_endpoint",
     ):
         assert hasattr(store, name), f"相邻活面被误删: UserCredentialStore.{name}"

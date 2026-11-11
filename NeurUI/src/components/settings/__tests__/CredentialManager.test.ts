@@ -1,8 +1,9 @@
 /**
- * CredentialManager —— SSH 多主机凭据管理（登录用户自管，按用户隔离）
+ * CredentialManager —— SSH 多主机 + RDP 直连端点凭据管理（登录用户自管，按用户隔离）
  *
- * 验收：挂载拉取列表并渲染；addSSHHost 密码/私钥模式提交正确字段、缺值警告；
- * removeSSHHost 删除。
+ * 验收：挂载拉取两列表并渲染；addSSHHost 密码/私钥模式提交正确字段、缺值警告；
+ * removeSSHHost 删除；saveRdpCredential 提交端点、缺 host/首次缺 token 警告、
+ * clearRdpCredential 删除。
  * 社交平台凭据段已退役（§6-591）：social_search 登录态归上游 agent-reach CLI，
  * 后端端点/存储社交方法/i18n 键均已拆除，缺席守卫见 tests/unit/web_reach/test_social_credentials.py。
  */
@@ -14,6 +15,9 @@ vi.mock('@/api/modules/settings', () => ({
   listSSHCredentials: vi.fn(),
   upsertSSHCredential: vi.fn().mockResolvedValue({}),
   deleteSSHCredential: vi.fn().mockResolvedValue({}),
+  getRdpCredential: vi.fn(),
+  upsertRdpCredential: vi.fn().mockResolvedValue({}),
+  deleteRdpCredential: vi.fn().mockResolvedValue({}),
 }))
 vi.mock('ant-design-vue', () => ({ message: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 
@@ -21,6 +25,7 @@ import CredentialManager from '../CredentialManager.vue'
 import { message } from 'ant-design-vue'
 import {
   listSSHCredentials, upsertSSHCredential, deleteSSHCredential,
+  getRdpCredential, upsertRdpCredential, deleteRdpCredential,
 } from '@/api/modules/settings'
 
 const messages = {
@@ -29,6 +34,9 @@ const messages = {
     sshHostsTitle: 'SSH 远程主机', sshHostsHint: 'h', sshHostsEmpty: '无主机', sshHost: '主机', sshUser: '用户',
     sshPort: '端口', sshAuthType: '认证', sshAuthPassword: '密码', sshAuthKey: '私钥', sshAuthAgent: '系统',
     sshPrivateKey: '私钥', sshPassword: '密码', sshAddHost: '添加主机', sshHostRequired: '请填写主机', sshCredentialRequired: '请填写凭据',
+    rdpCredentialsTitle: 'RDP 直连端点', rdpCredentialsHint: 'h', rdpHost: '主机', rdpPort: '端口', rdpToken: '访问令牌',
+    rdpSave: '保存', rdpConfigured: '已配置', rdpNotConfigured: '未配置', rdpClear: '清除',
+    rdpHostRequired: '请填写主机', rdpTokenRequired: '请填写访问令牌', rdpAlreadySet: '已设置',
   },
 }
 
@@ -57,6 +65,9 @@ describe('CredentialManager', () => {
     ;(listSSHCredentials as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { hosts: [{ host: '10.0.0.5', user: 'root', port: 22, auth: 'password' }] } })
     ;(upsertSSHCredential as ReturnType<typeof vi.fn>).mockResolvedValue({})
     ;(deleteSSHCredential as ReturnType<typeof vi.fn>).mockResolvedValue({})
+    ;(getRdpCredential as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { configured: true, host: '192.168.1.9', port: 8765, token_set: true } })
+    ;(upsertRdpCredential as ReturnType<typeof vi.fn>).mockResolvedValue({})
+    ;(deleteRdpCredential as ReturnType<typeof vi.fn>).mockResolvedValue({})
   })
 
   it('挂载拉取并渲染 SSH 主机列表', async () => {
@@ -65,6 +76,15 @@ describe('CredentialManager', () => {
     expect(listSSHCredentials).toHaveBeenCalled()
     expect(w.text()).toContain('10.0.0.5')
     expect(w.text()).toContain('root@')
+  })
+
+  it('挂载拉取并渲染 RDP 端点状态（token 不回显）', async () => {
+    const w = mountCM()
+    await flushPromises()
+    expect(getRdpCredential).toHaveBeenCalled()
+    expect(w.text()).toContain('192.168.1.9:8765')
+    expect(w.text()).toContain('已配置')
+    expect(w.text()).not.toContain('tk')
   })
 
   it('addSSHHost 密码模式提交 password', async () => {
@@ -100,5 +120,42 @@ describe('CredentialManager', () => {
     await flushPromises()
     await (w.vm as any).removeSSHHost('10.0.0.5')
     expect(deleteSSHCredential).toHaveBeenCalledWith('10.0.0.5')
+  })
+
+  it('saveRdpCredential 提交 host/port/token', async () => {
+    const w = mountCM()
+    await flushPromises()
+    const vm = w.vm as any
+    vm.rdpForm = { host: '10.0.0.5', port: 8765, token: 'tk-x' }
+    await vm.saveRdpCredential()
+    expect(upsertRdpCredential).toHaveBeenCalledWith({ host: '10.0.0.5', port: 8765, token: 'tk-x' })
+  })
+
+  it('saveRdpCredential 缺 host 警告不提交', async () => {
+    const w = mountCM()
+    await flushPromises()
+    const vm = w.vm as any
+    vm.rdpForm = { host: ' ', port: 8765, token: 't' }
+    await vm.saveRdpCredential()
+    expect(upsertRdpCredential).not.toHaveBeenCalled()
+    expect(message.warning).toHaveBeenCalled()
+  })
+
+  it('saveRdpCredential 首次缺 token 警告不提交', async () => {
+    const w = mountCM()
+    await flushPromises()
+    const vm = w.vm as any
+    vm.rdpStatus = { configured: false, host: '', port: 8765, token_set: false }
+    vm.rdpForm = { host: 'h', port: 8765, token: '' }
+    await vm.saveRdpCredential()
+    expect(upsertRdpCredential).not.toHaveBeenCalled()
+    expect(message.warning).toHaveBeenCalled()
+  })
+
+  it('clearRdpCredential 调删除', async () => {
+    const w = mountCM()
+    await flushPromises()
+    await (w.vm as any).clearRdpCredential()
+    expect(deleteRdpCredential).toHaveBeenCalled()
   })
 })
