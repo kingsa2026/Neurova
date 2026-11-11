@@ -684,8 +684,8 @@ class SleepConsolidation(StateValuesStore):
         # 阶段路径落盘：重启后 /dreams /insights /merges /conflicts 不再空
         self.persist_logs()
         logger.info(
-            "睡眠周期完成: 阶段=%s, 处理=%s 条, 合并=%s, 洞察=%s",
-            phase, result["total_processed"], result["merged_count"], len(new_insights),
+            "睡眠周期完成: 阶段=%s, 处理=%s 条, 真实合并=%s, 洞察=%s",
+            phase, result["total_processed"], self._realMergeCount(result), len(new_insights),
         )
         return result
 
@@ -720,6 +720,20 @@ class SleepConsolidation(StateValuesStore):
             self._record_merges_locked(merge_results, agent_id)
 
         return result
+
+    @staticmethod
+    def _realMergeCount(result: Dict[str, Any]) -> int:
+        """真实合并数（≥2 源的簇）——与合并史/洞察派生同一判据。
+
+        `result["merged_count"]` 是簇数、单例也算（该口径由
+        tests/unit/memory/test_writeSideFillsEmbedding.py 钉着，不改）；
+        呈报面（梦境文案/洞察标签/周期日志）必须用本读数，不许拿簇数冒充——
+        单例簇从未发生合并，把"合并 1080 组"写出去而洞察为 0，读数自相矛盾。
+        """
+        return sum(
+            1 for mr in (result.get("merge_results") or [])
+            if len(getattr(mr, "source_ids", ()) or ()) >= 2
+        )
 
     def _record_dream_locked(
         self, now: float, agent_id: str, involved: List[str], dream_type: str, content: str,
@@ -763,7 +777,7 @@ class SleepConsolidation(StateValuesStore):
         else:  # hibernate 全套
             content = (
                 f"整觉全套: 整理 {result['total_processed']} 条记忆, "
-                f"合并 {result['merged_count']} 组, 归档 {result['archived_count']} 条, "
+                f"真实合并 {self._realMergeCount(result)} 组, 归档 {result['archived_count']} 条, "
                 f"洞察 {insights_count} 条"
             )
         return self._record_dream_locked(now, agent_id, involved, dream_type, content, insights_count)
@@ -923,9 +937,12 @@ class SleepConsolidation(StateValuesStore):
                         "replay",
                         (
                             f"整理 {cycle['total_processed']} 条记忆，"
-                            f"合并 {cycle['merged_count']} 组，归档 {cycle['archived_count']} 条"
+                            f"真实合并 {self._realMergeCount(cycle)} 组，"
+                            f"归档 {cycle['archived_count']} 条"
                         ),
-                        cycle["merged_count"],
+                        # 深睡路径不派生洞察，标签只能写真实洞察数（run_sleep_cycle 产出），
+                        # 不许拿簇数 cycle["merged_count"] 冒充
+                        cycle.get("insights_generated", 0),
                     )
             except Exception as e:
                 logger.warning("主动睡眠整理失败: %s", e)
