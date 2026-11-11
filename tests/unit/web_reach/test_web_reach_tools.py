@@ -184,29 +184,55 @@ class TestBilibiliSearch:
 
 
 class TestSocialSearch:
-    def test_unconfigured_platform_returns_setup_guide(self):
-        """渐进式暴露：登录态平台未配置时返回配置引导，不报错、不自动登录"""
+    def test_not_added_channel_returns_setup_guide(self, monkeypatch):
+        """渐进式暴露：渠道未接入时返回接入引导，不报错、不自动登录"""
+        from neurova.web_reach import agent_reach_cli as cli
         from neurova.web_reach import social_search
 
-        fake_doctor = {"channels": {"twitter": {"active_backend": None}}}
-        with patch("neurova.web_reach.reach.run_doctor", return_value=fake_doctor):
-            result = social_search("twitter", "neurova")
+        monkeypatch.setattr(
+            cli,
+            "runDoctor",
+            lambda: {
+                "success": True,
+                "version": "1.6.0",
+                "data": {"channels": [{"channel": "twitter", "status": "not_added"}]},
+            },
+        )
+        result = social_search("twitter", "neurova")
 
         assert result["success"] is False
         assert result["needs_setup"] is True
         assert "twitter" in result["guide"].lower()
 
-    def test_active_backend_reported_when_configured(self):
-        """后端就绪 + 无凭据 → needs_setup 且带 missing_keys（新契约）"""
+    def test_ready_channel_executes_and_reports_backend(self, monkeypatch):
+        """渠道就绪 → 经 CLI 渠道动作真实执行，后端与结果原样透传"""
+        from neurova.web_reach import agent_reach_cli as cli
         from neurova.web_reach import social_search
 
-        fake_doctor = {"channels": {"twitter": {"active_backend": "twitter-cli"}}}
-        with patch("neurova.web_reach.reach.run_doctor", return_value=fake_doctor):
-            result = social_search("twitter", "neurova")
+        monkeypatch.setattr(
+            cli,
+            "runDoctor",
+            lambda: {
+                "success": True,
+                "version": "1.6.0",
+                "data": {"channels": [{"channel": "twitter", "status": "unverified"}]},
+            },
+        )
+        monkeypatch.setattr(
+            cli,
+            "runChannelAction",
+            lambda *a, **kw: {
+                "success": True,
+                "backend": "opencli",
+                "items": [{"title": "t1", "url": "https://x.com/1"}],
+            },
+        )
+        result = social_search("twitter", "neurova")
 
-        assert result["success"] is False
-        assert result["needs_setup"] is True
-        assert "twitter_auth_token" in result["missing_keys"]
+        assert result["success"] is True
+        assert result["backend"] == "opencli"
+        assert result["platform"] == "twitter"
+        assert result["query"] == "neurova"
 
     def test_unknown_platform_rejected(self):
         from neurova.web_reach import social_search

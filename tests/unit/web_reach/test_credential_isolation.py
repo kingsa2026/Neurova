@@ -1,20 +1,15 @@
-"""社交平台凭据按用户分桶测试（TDD 红绿）—— 遗留项：登录态凭据服务器全局共享
+"""凭据桶与 social_search 隔离面测试
 
-修复目标（遗留项）：
-1. UserCredentialStore：按 (user_id) 分桶的 agent-reach 凭据管理
-   - 每用户独立 config.yaml（经 agent-reach Config 的 config_path 指向用户桶）
-   - 凭据值经 Neurova SecretStore 加密落盘（明文不落磁盘）
-2. social_search 真实执行路径：后端就绪时用该用户桶注入凭据执行上游 CLI
-   （env 隔离：TWITTER_AUTH_TOKEN/TWITTER_CT0 仅存在于子进程环境）
-3. 隔离断言：用户 A 的凭据对 B 不可见；未配置用户仍走 needs_setup 引导
+现状（2026-11-12 agent_reach CLI 面收口后）：
+1. UserCredentialStore：按 (user_id) 分桶的凭据管理——凭据值经 Neurova
+   SecretStore 加密落盘（明文不落磁盘）。消费方：SSH 主机凭据（ssh_runner）、
+   RDP 凭据（rdp_provider）、设置面读写（settings 端点）。
+2. social_search 已切 CLI 面：登录态归上游 agent-reach 自己的浏览器会话，
+   reach 模块不再引用凭据桶（旧 per-user env 注入路径 social_exec 已退役）。
+   用户 A 的凭据对 B 不可见的桶级断言见 TestUserCredentialStore。
 """
 
-import json
-from unittest.mock import MagicMock, patch
-
 import pytest
-
-from neurova.web_reach.reach import _SOCIAL_CHANNELS
 
 
 class TestUserCredentialStore:
@@ -65,117 +60,36 @@ class TestUserCredentialStore:
         assert "reddit" not in status or status.get("reddit") is False
 
 
-class TestReachConfigPath:
-    def test_config_path_points_to_user_bucket(self, tmp_path):
-        """agent-reach Config 指向用户桶路径（上游 HOME 隔离姿势）"""
-        from neurova.web_reach.credentials import user_config_path
+class TestSocialSearchCliFace:
+    def test_social_search_detached_from_credential_store(self, monkeypatch):
+        """CLI 面集成（教义第 7 条收口）：social_search 不读凭据桶、不接 user_id。
 
-        p = user_config_path("user-7", base_dir=str(tmp_path))
-        assert str(tmp_path / "user-7" / "config.yaml") == str(p)
-
-    def test_config_loads_user_yaml(self, tmp_path):
-        """上游 `agent-reach` 的 Config 真按 config_path 读用户桶——那**不是本仓的实现**。
-
-        现查：`agent_reach` 不在本仓依赖清单里（requirements.txt 与两把锁 0 声明），
-        产品侧把它当可选外部集成（`neurova/web_reach/reach.py:348-356` 试导失败即降级）。
-        ⇒ 未安装时这一格**无从验证**，按宿主条件 skip 并写明缺什么：留一条永远红的格子
-        会被后来人读成"本仓有缺陷"（§6-490 就是被这么一条坑的），xfail 则把"上游契约
-        没验过"这件事藏起来——两者都比不上明写条件。
-        本仓那半条契约由上一格 `test_config_path_points_to_user_bucket` 钉，它不依赖上游包。
+        登录态归上游 agent-reach 的浏览器会话；渠道就绪即执行，无需任何
+        本仓凭据配置。旧路径（per-user env 注入）连同 social_exec 一并退役。
         """
-        configModule = pytest.importorskip(
-            "agent_reach.config",
-            reason="可选外部集成 agent-reach 未安装，且不在本仓依赖清单里（§6-494）",
+        from neurova.web_reach import agent_reach_cli as cli
+        from neurova.web_reach import reach
+
+        # 结构格：reach 不得再引用凭据桶读取口
+        assert not hasattr(reach, "get_credential_store"), (
+            "reach 又引用了凭据桶——CLI 面下登录态归上游，本仓凭据桶不进工具执行路径"
         )
-        Config = configModule.Config
 
-        from neurova.web_reach.credentials import user_config_path
-
-        p = user_config_path("user-7", base_dir=str(tmp_path))
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text("twitter_auth_token: from-yaml\n", encoding="utf-8")
-
-        cfg = Config(config_path=p, read_only=True)
-        assert cfg.get("twitter_auth_token") == "from-yaml"
-
-
-class TestSocialSearchRealExecution:
-    @pytest.mark.asyncio
-    async def test_executes_with_user_env_isolation(self, tmp_path):
-        """后端就绪 + 用户有凭据 → 经 env 注入执行上游 CLI，凭据不进返回值/日志"""
-        from neurova.web_reach import reach
-
-        store = reach.get_credential_store.__wrapped__() if hasattr(reach.get_credential_store, "__wrapped__") else None
-        # 直接构造独立 store 注入
-        from neurova.web_reach.credentials import UserCredentialStore
-
-        cred_store = UserCredentialStore(base_dir=str(tmp_path / "creds"))
-        cred_store.set_credential("user-7", "twitter_auth_token", "tok-secret")
-        cred_store.set_credential("user-7", "twitter_ct0", "ct0-secret")
-
-        fake_doctor = {"channels": {"twitter": {"active_backend": "twitter-cli"}}}
-        fake_run = MagicMock(returncode=0, stdout='[{"text": "tweet about agents"}]', stderr="")
-
-        with (
-            patch.object(reach, "run_doctor", return_value=fake_doctor),
-            patch.object(reach, "get_credential_store", return_value=cred_store),
-            patch("neurova.web_reach.social_exec.subprocess.run", return_value=fake_run) as run_mock,
-        ):
-            result = reach.social_search("twitter", "neurova", user_id="user-7")
+        monkeypatch.setattr(
+            cli,
+            "runDoctor",
+            lambda: {
+                "success": True,
+                "version": "1.6.0",
+                "data": {"channels": [{"channel": "twitter", "status": "unverified"}]},
+            },
+        )
+        monkeypatch.setattr(
+            cli,
+            "runChannelAction",
+            lambda *a, **kw: {"success": True, "backend": "opencli", "items": [{"title": "t1"}]},
+        )
+        result = reach.social_search("twitter", "neurova")  # 无任何凭据配置
 
         assert result["success"] is True
-        assert result["executed"] is True
-        assert "tweet about agents" in json.dumps(result["results"], ensure_ascii=False)
-        # 凭据只进子进程 env，不进返回值
-        assert "tok-secret" not in json.dumps(result, default=str)
-        env = run_mock.call_args.kwargs.get("env") or run_mock.call_args.kwargs["env"]
-        assert env["TWITTER_AUTH_TOKEN"] == "tok-secret"
-        assert env["TWITTER_CT0"] == "ct0-secret"
-
-    @pytest.mark.asyncio
-    async def test_no_credentials_still_setup_guide(self, tmp_path):
-        """后端就绪但该用户无凭据 → 仍走 needs_setup（不借用他人凭据）"""
-        from neurova.web_reach import reach
-        from neurova.web_reach.credentials import UserCredentialStore
-
-        cred_store = UserCredentialStore(base_dir=str(tmp_path / "creds"))
-        fake_doctor = {"channels": {"twitter": {"active_backend": "twitter-cli"}}}
-
-        with (
-            patch.object(reach, "run_doctor", return_value=fake_doctor),
-            patch.object(reach, "get_credential_store", return_value=cred_store),
-        ):
-            result = reach.social_search("twitter", "x", user_id="user-7")
-
-        assert result["success"] is False
-        assert result["needs_setup"] is True
-
-    @pytest.mark.asyncio
-    async def test_executor_passes_request_user(self, tmp_path):
-        """tool_executor 分发 social_search 时注入请求级用户身份（_current_user_id）"""
-        from neurova.tool_executor import ToolExecutor
-        from neurova.web_reach import reach as reach_mod
-
-        agent = MagicMock()
-        agent._current_user_id = "user-42"
-        exe = ToolExecutor(agent)
-
-        captured = {}
-
-        def fake_social_search(*args, **kwargs):
-            # 形参表不手抄：签名的事实源是生产对象（`social_search`）。
-            captured["user_id"] = kwargs.get("user_id", args[3] if len(args) > 3 else None)
-            return {"success": True, "data": {"results": []}}
-
-        with (
-            patch("neurova.web_reach.social_search", new=fake_social_search),
-            patch("neurova.web_reach.reach.run_doctor", return_value={}),
-        ):
-            result = await exe._execute_social_search({"platform": "twitter", "query": "x"})
-
-        assert result["success"] is True
-        assert captured["user_id"] == "user-42"
-
-
-class _AgentStub:
-    pass
+        assert result["platform"] == "twitter"

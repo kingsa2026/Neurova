@@ -1,20 +1,20 @@
-"""社交平台凭据按用户分桶（三层隔离遗留项修复）。
+"""凭据按用户分桶（SSH 主机 / RDP / 社交平台设置面共用）。
 
 设计：
 - 每用户一个凭据桶目录（base_dir/{user_id}/），凭据值经认证加密落盘
   （`secret_store_clean` 复用 `providers.secret_store` 的 AES-256-GCM 口径，明文不落磁盘）；
   加密 keyfile 首次生成后持久（重启稳定）
-- agent-reach Config 的 config_path 可指向用户桶（user_config_path）——
-  上游以 HOME/config_path 作为凭据隔离边界（官方姿势）
 - 与全局配置的关系：不做全局 fallback。凭据一律按归属桶存取，
   单用户部署在 default 桶配置即可。
+- 社交平台段为遗留消费面：工具侧登录态已归上游 agent-reach CLI
+  （2026-11-12 agent_reach 收口批），本段现只剩设置面读写消费，
+  待随设置面一并退役。
 """
 
 from __future__ import annotations
 
 import json
 import threading
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 from neurova.core.data_root import callerPath
@@ -36,7 +36,7 @@ _KEY_TO_PLATFORM = {
     "github_token": "github",
 }
 
-# 平台 → 所需凭据 keys（齐备才算"已配置"；social_exec 同源使用）
+# 平台 → 所需凭据 keys（齐备才算"已配置"；设置面读写同源使用）
 PLATFORM_REQUIRED_KEYS = {
     "twitter": ["twitter_auth_token", "twitter_ct0"],
     "reddit": ["reddit_session"],
@@ -46,14 +46,6 @@ PLATFORM_REQUIRED_KEYS = {
     "linkedin": ["linkedin_cookie"],
     "github": ["github_token"],
 }
-
-
-def user_config_path(user_id: str, base_dir: str = "") -> Path:
-    """用户桶内的 agent-reach config.yaml 路径（Config(config_path=...) 用）
-
-    缺省经数据根推导：裸 `Path("")` 会把凭据桶目录钉在进程 CWD 上。
-    """
-    return callerPath(base_dir, "web_reach_credentials") / (user_id or "default") / "config.yaml"
 
 
 class UserCredentialStore:
@@ -172,7 +164,7 @@ class UserCredentialStore:
     def delete_ssh_host(self, user_id: str, host: str) -> bool:
         return self.delete_credential(user_id, self._SSH_PREFIX + (host or "").strip())
 
-    # ── 社交平台凭据（web_reach social_exec 消费；与 SSH 复用同一加密桶/配置面）──
+    # ── 社交平台凭据（设置面读写；工具侧登录态已归上游 CLI——遗留消费面待退役）──
 
     def set_platform_credentials(self, user_id: str, platform: str, mapping: Dict[str, str]) -> bool:
         """按平台批量存凭据（只接受该平台所需键，多余键忽略）。"""
@@ -200,7 +192,7 @@ class UserCredentialStore:
         return sum(1 for k in required if self.delete_credential(user_id, k))
 
 
-# 模块级单例工厂（reach 与 executor 共用）
+# 模块级单例工厂（SSH/RDP provider 与设置端点共用）
 _credential_store_instance: Optional[UserCredentialStore] = None
 _credential_store_lock = threading.Lock()
 

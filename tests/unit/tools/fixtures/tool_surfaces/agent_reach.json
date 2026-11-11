@@ -1,0 +1,26 @@
+{
+  "surface": "agent_reach",
+  "description": "跨平台内容直达工具面（渠道发现/链接读取/渠道动作三用法）",
+  "records": [
+    {
+      "query": "列出 agent-reach 支持的渠道和动作语法",
+      "answers": [{"name": "agent_reach", "arguments": {"mode": "channels"}}]
+    },
+    {
+      "query": "在 GitHub 上搜 fastapi 相关仓库",
+      "answers": [{"name": "agent_reach", "arguments": {"mode": "action", "channel": "github", "action": "search", "target": "fastapi", "limit": 5}}]
+    },
+    {
+      "query": "读一下这个视频讲了什么 https://www.bilibili.com/video/BV1xx411c7mD",
+      "answers": [{"name": "agent_reach", "arguments": {"mode": "read", "url": "https://www.bilibili.com/video/BV1xx411c7mD"}}]
+    },
+    {
+      "query": "雪球上查一下茅台的最新股价",
+      "answers": [{"name": "agent_reach", "arguments": {"mode": "action", "channel": "xueqiu", "action": "quote", "target": "SH600519"}}]
+    },
+    {
+      "query": "把 https://www.xiaoyuzhoufm.com/episode/xxx 这期播客转成文字",
+      "answers": [{"name": "agent_reach", "arguments": {"mode": "action", "channel": "xiaoyuzhou", "action": "transcribe", "target": "https://www.xiaoyuzhoufm.com/episode/xxx"}}]
+    }
+  ]
+}

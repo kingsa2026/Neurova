@@ -23,7 +23,6 @@ import feedparser
 
 from neurova import http_fetch
 from neurova.core.logger import get_logger
-from neurova.web_reach.credentials import get_credential_store
 
 logger = get_logger(__name__)
 
@@ -354,106 +353,97 @@ def bilibili_search(query: str, limit: int = 5, timeout: float = _YTDLP_TIMEOUT)
 
 
 def run_doctor() -> Dict[str, Any]:
-    """运行 agent-reach 体检（渠道后端状态；只读配置，不执行渠道探测）。
+    """运行 agent-reach 体检（渠道状态；只读配置，不执行渠道探测）。
 
-    不可得时**如实报不可得**（旧形态交回 `{}`，调用方与"后端在但没配登录态"完全同形，
-    于是给用户念的是"去跑 agent-reach doctor --json 验证"——一个装不上的命令）。
-    现量依据：PyPI `agent-reach` 0.1.0 与上游仓 `jgalea/agent-reach`（main，src 布局）
-    都没有本集成要的 `agent_reach.core`／`agent_reach.config` 两个模块。
+    集成面收口（教义第 6/7 条）：旧实现 import agent_reach.core／
+    agent_reach.config——PyPI 0.1.0 与源码仓 main 都没有这两个模块，
+    该门今天必然落 except（死门）。现改走 CLI 面唯一集成点
+    ``agent_reach_cli.runDoctor``；成功**原样**交回上游体检读数（不污染
+    字段），失败点名原因（未装→安装指引；其余→CLI 错误码透传）——
+    「不可得」与「未接入」两种读数保持互不同形。
     """
-    try:
-        from agent_reach.core import AgentReach
-        from agent_reach.config import Config
+    from neurova.web_reach.agent_reach_cli import runDoctor
 
-        eyes = AgentReach(Config(read_only=True))
-        return eyes.doctor()
-    except Exception as e:  # noqa: BLE001 - 降级可以，但必须说得出降级成了什么
-        logger.debug("agent-reach doctor 不可用: %s", e)
-        return _error(
-            "agent-reach 后端不可得（未安装，或上游未提供 agent_reach.core／agent_reach.config）："
-            f"{type(e).__name__}: {e}"
-        )
+    result = runDoctor()
+    if not result.get("success"):
+        return {
+            "success": False,
+            "error": result.get("error") or "agent-reach doctor 不可得",
+            **({"not_installed": True} if result.get("not_installed") else {}),
+        }
+    return result.get("data") or {}
 
 
 def social_search(
     platform: str,
     query: str,
     limit: int = 10,
-    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """社交平台搜索（渐进式暴露 + 按用户凭据真实执行）。
+    """社交平台搜索（渐进式暴露 + CLI 渠道动作真实执行）。
 
-    隔离边界（凭据归上游库）：
-    - 凭据按 user_id 分桶（UserCredentialStore，加密落盘），不共享、
-      不自动登录、不碰用户浏览器
-    - 后端就绪且该用户凭据齐备 → 凭据经子进程 env 注入执行上游 CLI
-      （凭据只存在于子进程环境，不进返回值与日志）
-    - 后端就绪但凭据缺失 → needs_setup 引导（不借用他人凭据）
-    - 后端未激活 → needs_setup 引导
+    读数阶梯（三种失败形态互不同形，不自动登录、不碰用户浏览器）：
+    - CLI 不可得 → backend_unavailable 点名 + 安装指引
+    - 渠道未接入/待配置 → needs_setup 引导（agent-reach add …；带上游 problems/hint）
+    - 渠道就绪 → ``agent-reach <platform> search <query>`` 真实执行；
+      NEED_LOGIN → needs_login 引导（agent-reach login …）
+    登录态归上游 CLI 自己的浏览器会话管理；本模块不保存凭据、不读凭据桶。
     """
     platform_key = (platform or "").strip().lower()
     if platform_key not in _SOCIAL_CHANNELS:
         return _error(
             f"不支持的平台: {platform}（支持: {'/'.join(sorted(_SOCIAL_CHANNELS))}）"
         )
-    doctor = run_doctor()
-    if isinstance(doctor, dict) and doctor.get("success") is False:
-        # 「后端根本不可得」与「后端在但没配登录态」是两件事：
-        # 前者不能让用户去跑一个装不上的命令，也不能让他去配一个不存在的凭据。
+
+    from neurova.web_reach.agent_reach_cli import doctorChannels, runChannelAction, runDoctor
+
+    doctor = runDoctor()
+    if not doctor.get("success"):
         return {
             "success": False,
             "backend_unavailable": True,
-            "error": doctor.get("error") or "agent-reach 后端不可得",
-            "guide": (
-                f"{platform_key} 的社交平台后端目前不可得——这不是你没配登录态。"
-                "上游（PyPI 与源码仓 main）都未提供本集成所需的 agent_reach.core／agent_reach.config，"
-                "需先按仓库登记的依赖口径处理，再重试本功能。"
-            ),
+            "error": doctor.get("error") or "agent-reach CLI 不可得",
+            "guide": doctor.get("error") or "agent-reach CLI 不可得",
             "platform": platform_key,
         }
-    channels = doctor.get("channels") if isinstance(doctor, dict) else {}
-    channel = (channels or {}).get(_SOCIAL_CHANNELS[platform_key], {})
-    active = channel.get("active_backend") if isinstance(channel, dict) else None
-
-    if not active:
+    channel = doctorChannels(doctor.get("data")).get(platform_key) or {}
+    status = channel.get("status")
+    hint = channel.get("hint")
+    if status == "not_added":
+        guide = f"{platform_key} 渠道未接入：运行 agent-reach add {platform_key}"
         return {
             "success": False,
             "needs_setup": True,
-            "guide": (
-                f"{platform_key} 需要配置登录态后端。参考 Agent-Reach 引导："
-                f"安装 OpenCLI（桌面，复用 Chrome 会话）或对应 CLI/Cookie，"
-                f"配置后运行 agent-reach doctor --json 验证。"
-            ),
+            # error 键承载指引原文：咽喉/API 的成败映射只取 error，
+            # 缺了它指引会被塌缩成笼统「工具执行失败」
+            "error": guide,
+            "guide": guide,
+            "hint": hint,
             "platform": platform_key,
         }
-
-    # 后端就绪 → 按用户凭据执行（凭据分桶；缺失则引导）
-    uid = user_id or "default"
-    creds = get_credential_store().platform_credentials(uid, platform_key)
-    missing = [k for k, v in creds.items() if not v]
-
-    if missing:
+    if status == "needs_setup":
+        problems = "；".join(channel.get("problems") or [])
+        guide = (
+            f"{platform_key} 渠道待配置：{problems or f'运行 agent-reach add {platform_key}'}"
+        )
         return {
             "success": False,
             "needs_setup": True,
-            "missing_keys": missing,
-            "guide": (
-                f"{platform_key} 后端已就绪（{active}），但当前用户缺少凭据: "
-                f"{', '.join(missing)}。请在设置中提供对应 Cookie/Token，"
-                f"或运行 agent-reach configure。"
-            ),
+            "error": guide,
+            "guide": guide,
+            "hint": hint,
             "platform": platform_key,
         }
 
-    # 真实执行：上游 CLI + env 注入（凭据只在子进程环境中）
-    from neurova.web_reach.social_exec import execute_social_search
-
-    result = execute_social_search(
-        platform=platform_key,
-        query=query,
-        limit=limit,
-        credentials=creds,
-        active_backend=active,
-    )
-    result.setdefault("platform", platform_key)
-    return result
+    # 渠道就绪（或未验证）→ 真实执行；登录态缺失等由上游错误码引导
+    result = runChannelAction(platform_key, "search", target=query, limit=max(1, int(limit)))
+    if not result.get("success") and result.get("code") == "NEED_LOGIN":
+        guide = f"{platform_key} 渠道需要登录态：运行 agent-reach login {platform_key}"
+        return {
+            "success": False,
+            "needs_login": True,
+            "error": guide,
+            "guide": guide,
+            "hint": result.get("hint"),
+            "platform": platform_key,
+        }
+    return {**result, "platform": platform_key, "query": query}

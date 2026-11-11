@@ -57,6 +57,9 @@ TOOL_TIMEOUTS_S: Dict[str, float] = {
     # file_parse 大 PDF/Office 解析留线程池慢余量
     "file_parse": 120,
     "git": 120,
+    # agent_reach：上游 CLI 自带回退链（首选+备选逐后端尝试），读链接/字幕/转写类
+    # 动作慢（实测 doctor~1s、read~1.4s，转写类可达分钟级），放宽避免中途被掐
+    "agent_reach": 240,
 }
 
 TOOL_DEFAULT_TIMEOUT_S = 60.0
