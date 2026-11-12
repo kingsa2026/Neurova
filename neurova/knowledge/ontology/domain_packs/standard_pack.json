@@ -794,5 +794,8 @@
    "definition": "条款内关系：条款排除约束条件",
    "namespace": "so"
   }
- ]
+ ],
+ "license": "proprietary",
+ "upstream": "",
+ "version": "v1"
 }

@@ -52,3 +52,46 @@ def importDomainPack(registry: Any, packId: str, tenantId: str = "default") -> i
     """导入领域包（只补缺幂等）：返回真正补上的术语条数。未注册包 → ValueError。"""
     pack = loadDomainPack(packId)
     return registry.seedMissing(pack["terms"], tenantId=tenantId)
+
+
+def packChecksum(packId: str) -> str:
+    """领域包原始字节的 SHA-256 校验和（C2 工件级内容地址溯源）。"""
+    import hashlib
+
+    path = (_PACKS_DIR / ("%s_pack.json" % packId)).resolve()
+    if not path.is_file() or _PACKS_DIR.resolve() not in path.parents:
+        raise ValueError("未注册领域包: %r" % packId)
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def packAttribution(packId: str) -> Dict[str, Any]:
+    """领域包归属卡（C2）：license/upstream/version/termCount/SHA-256。"""
+    pack = loadDomainPack(packId)
+    return {
+        "packId": packId,
+        "namespace": pack.get("namespace", ""),
+        "basedOn": pack.get("basedOn", ""),
+        "note": pack.get("note", ""),
+        "termCount": len(pack.get("terms") or []),
+        "sha256": packChecksum(packId),
+        "license": pack.get("license", ""),
+        "upstream": pack.get("upstream", ""),
+        "version": pack.get("version", "v1"),
+    }
+
+
+def verifyPackIntegrity(packId: str, registeredChecksum: str = "") -> Dict[str, Any]:
+    """完整性校验：当前 SHA-256 vs 调用方传入的注册哈希（漂移显式报）。
+
+    哈希不能存在 pack 文件自身（自引用不可能）——registeredChecksum 由
+    调用方（导入端点/审批面/外部清单）传入注册时记录的值。"""
+    current = packChecksum(packId)
+    if not registeredChecksum:
+        return {"packId": packId, "status": "unverified", "sha256": current,
+                "detail": "无注册哈希可比对（首次导入时由调用方登记）"}
+    if current != registeredChecksum:
+        return {"packId": packId, "status": "drift", "sha256": current,
+                "detail": "SHA-256 漂移：registered=%s current=%s（版本漂移显式报，不静默换版）"
+                          % (registeredChecksum[:16], current[:16]),
+                "registered": registeredChecksum}
+    return {"packId": packId, "status": "ok", "sha256": current}
