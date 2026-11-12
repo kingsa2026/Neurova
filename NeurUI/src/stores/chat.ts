@@ -262,9 +262,6 @@ export const useChatStore = defineStore('chat', () => {
   function bumpEventsLost(count: number): void {
     eventsLostBanner.value = (eventsLostBanner.value ?? 0) + count
   }
-  function clearEventsLost(): void {
-    eventsLostBanner.value = null
-  }
 
   return {
     // state
@@ -304,7 +301,6 @@ export const useChatStore = defineStore('chat', () => {
     setSearchQuery,
     setRetrievalStatus,
     bumpEventsLost,
-    clearEventsLost,
     // usage
     applyTurnUsage,
     getSessionTokenUsage,
