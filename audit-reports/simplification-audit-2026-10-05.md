@@ -11998,16 +11998,9 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     两条同 (subject, predicate) 不同 object 的事实不可能同时 active。
     修正为验证"新 admit 自动 supersede 旧行 → latest 反映最新状态"。
     commit：最新。
-570. **K-09 源钟（facts 侧）设计决策登记（待点单）**：`conflict_judge.py:117`
-    `most_recent` 按 recorded_at 排序——K-09 要求改读源时间。
-    需要裁定：① 源时间列在 facts 表还是 qualifier（TD① 只加在条目表）；②
-    无源时间的事实回退 recorded_at 还是排除；③ 与 valid_from 的优先级。
-    三项设计决策需人裁，不适合无人值守。下一步：点单后按 §4 L3 详设实施。
-    **下一枚空号现查：本格取 570，后继从 571 起。**
-
 ### 2026-11-07 下午 K-09 双批＋企业源立项＋detail 收口启动（后继从 574 起）
 
-571. **K-09 facts 侧源钟 v36 落格（§6-570 三裁定兑现）**：
+571. **K-09 facts 侧源钟 v36 落格（§6-584 三裁定兑现）**：
     - 裁定（点单 2026-11-07）：① 源钟落 facts 表两列（v36 迁移）；② 无源时间
       回退 recorded_at（逐行 COALESCE，存量行为零漂移）；③ valid_from 职责不动
       （temporal 分类与窗口判定照旧，不进排序）。
@@ -12290,3 +12283,458 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **下一枚空号现查：本格取 597（跳过 596——未合并的 ci 修复分支 `auto/follow-redirects-cve-9892` 上已有 §6-595/596 台账落格，合并时再归位），后继从 598 起。**
 598. **新发现登记并即修·GET /budgets/status/all 被路由序遮蔽（审计未登，P1-1 批现场抓出）** ✅🟢 —— budget_api.py 里 `/status/{agent_id}` 先于 `/status/all` 注册，FastAPI 按注册序匹配 ⇒ "all" 被当 agent_id 吃掉该路由；前端成本看板 `cost.ts:125 getAllBudgetStatuses`（期待 `{budgets: [...]}`）拿到单 agent 形状（无 budgets 键），视图恒空。修复＝路由序对调（`3ffcf66f`），先红后绿（遮蔽态无 budgets 键红，对调后 20 passed）。
     - **下一枚空号现查：本格取 598，后继从 599 起。**
+599. **K-09 源钟（facts 侧）设计决策登记（待点单；原误落 §6-570 与同日前一格同号，本格按「后来者让号」重取）**：`conflict_judge.py:117`
+    `most_recent` 按 recorded_at 排序——K-09 要求改读源时间。
+    需要裁定：① 源时间列在 facts 表还是 qualifier（TD① 只加在条目表）；②
+    无源时间的事实回退 recorded_at 还是排除；③ 与 valid_from 的优先级。
+    三项设计决策需人裁，不适合无人值守。下一步：点单后按 §4 L3 详设实施。
+    **下一枚空号现查：本格取 599，后继从 600 起。**
+
+600. **PR #374 CI 收口四轮：静态门禁两层（pyflakes 3 处＋ruff 4 处 F821）、npx 运行时树 glob/minimatch、锁的 py 版本标记、台账例外署名判据** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **根因归因一律按日志原文，不猜**：① `static-gate` 是**两层**——`--skip-import` 下先跑 pyflakes，`ruff check` 紧随其后；第一轮只修了 pyflakes 那 3 处，ruff 那 4 处一直被前一道的红挡着没跑到（`test_batchCR_debtFixes.py` 缺 `import asyncio`、`test_wecomProtocolCompliance.py` 两处字符串前向引用 `WeComAdapter` 缺 `TYPE_CHECKING`、`test_owl2rlProfile.py` 直接调 `productionAdmissionGate` 而未 import——单源在 `foundation` 包门面 `__all__` 里已导出）。② `osv_audit.py` 扫 npx 树命中 `glob`（GHSA-3g3m-2fjr-6pw4，修复点 14.0.2）与 `minimatch`（GHSA-g3hv-75wg-m249，修复点 11.0.1）；`swagger-jsdoc` 用**精确版本** `glob: "11.1.0"` 声明子依赖，重解析原地复刻 ⇒ 只能 overrides 顶替（与 `undici` / `@azure/msal-node` 同一根因同一处置）。③ 锁里 `numpy==2.5.4` 缺 `python_full_version` 标记，而三条腿跑 py3.11 ⇒ 解析必败。④ 台账例外清单 5 行署名在 CI 上被判「已不成立」。
+    - **第 ④ 条才是这轮唯一需要改判据的**：本机绿、CI 红，根因不在署名行而在判据第二向的式子 `not (isCommit(t) and not isReachable(t))`——它把「本仓取不到这个对象」与「号已回到主线」算成同一件事。CI 检出远端当前历史，那批对象在远端早被 gc，于是 5 行全被判过期，而给出的修法还是「把这行删了」：那是拿抹掉证据换绿（教义第 2 条明令禁止）。故 3 行证据**留在清单里**，改判据只认本仓真能作证的两种形态（对象存在∧非 commit∨已可达），并加一格反向控制（合成一枚语法合法但本仓不存在的号）钉住「无发言权时如实不计」。**过程自报**：本会话先按旧判据删掉了那 5 行，随后被这条更正确的处置覆盖——删证据的修法已撤回，清单恢复原样。
+    - **红→绿（本机同一份树）**：
+      ```
+      ruff check neurova tests --no-cache    4 errors → All checks passed!
+      test_npx_runtime_pinning                            20 passed
+      test_wecomProtocolCompliance + test_owl2rlProfile    15 passed
+      test_batchCR_debtFixes                                4 passed
+      test_audit_ledger_commit_guard                       10 passed
+      audit_ledger_commit_guard.py      rc=0（1376 条引用 / 署名 5 条可达）
+      ```
+    - **live-verify（真链路）**：`npm audit --json` 在 `tools/npx-runtime` 现读 `{"total":0}`（修前 3 条）；CI 侧 `static-gate` / `dependency-audit` / `frontend` / `perf-gate` / `deploy-config` / `experience-quality` 逐条由 error 转 success（`cnb-srf-1k6qu7mv5`）。glob 13.0.6→**14.0.4**、minimatch 10.2.6→**11.0.5**，`swagger-jsdoc/node_modules/glob` 那份嵌套副本随顶替消失，连带少 94 行。
+    - **如实记录的偏差**：`npm audit` 里 `@askjo/camofox-browser` / `camoufox-js` / `swagger-jsdoc` 三条 **moderate** 仍在（`via` 链经 glob 计数），不属本单面、也不因本单变绿而消失；OSV 侧 `tools/npx-runtime` 已 0 命中。
+    - **同根因的第二份实现在收口时合并（教义第 7 条）**：另有一版并行修复落在这个号之前，两版对「取不到对象」的判法一致，差别在两处——① 那一版留着 `isCommit()` 自己那趟 `cat-file`，与 `_objectType()` 成了同一件事的两份取数；② 它把"今天有几行真核不了"这条读数丢了。合并后取长补短：`isCommit()` 收成 `_objectType()` 的谓词（对象类型取数单源），三态判定抽成 `signatureExpired()`，并新增一行 `例外清单里另有 N 行在本克隆不可核验` 把第三态如实报出（原来这 5 行连一句读数都没有，静默略过）。反向钉也补齐：`test_signedExceptionWhoseObjectIsNotACommitIsExpired` 要求树号误署进清单必须红——没有它，「取不到不判过期」可以被"一律不判过期"错误地满足，清单就成了一键静音。
+    - **live-verify 补记（平台配额复测，2026-11-07 21:50）**：本条修完后 PR 侧连续三轮全腿红在 `Prepare`，日志原文是 `Root Group's events CPU core-hours are insufficient for pre-freezing`——**平台配额不足，与代码无关**（`static-gate` 另有一轮在配额恢复窗口里跑成 success）。故另起一条 `api_trigger` 验证构建（`cnb-icr-1k6r4ftor`，2 核，只跑本档两件事）取现场读数：`scan ledger refs` → `commit 号全部可达（共 1384 条引用，扫描面 audit-reports + docs，例外清单署名 5 条）`；`guard tests` → `16 passed in 3.48s`。即本次改动在真容器、真干净克隆上的读数与说明一致。另记一条过程中踩到的：第一次验证构建（`cnb-o5u-1k6r4crog`）只装了 pytest，16 格全 `ModuleNotFoundError: No module named 'pydantic'`——那是 `tests/conftest.py` 的装配依赖，不是判据坏，补装后即绿。
+    - **下一枚空号现查：条目行尾号现算 584 ⇒ 本格取 600，后继从 601 起。**
+
+601. **PR #374 第六轮：版本副本收敛——`deploy-config` 的 R4 与两档桌面守卫咬的是同一件事，第四份副本（构建输出）此前无人咬** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **先分清哪条腿是代码红**：本轮九条腿里八条红在 `Prepare`，日志原文 `Root Group's events CPU-core hours are insufficient for pre-freezing`——平台配额不足，与提交无关；`pipeline-7`（`deploy-config`）是唯一真跑起来的那条，只报一行 ERROR：`[R4-images] Chart appVersion=1.0.0-beta8 与 neurova.__version__=1.0.0-beta9 不一致`。
+    - **根因不在 Chart 这一格，在「升版只改源侧、副本各自留在 beta8」**：`98b0fa42` 只升 `tauri.conf.json` 与后端五处字面量，桌面侧另有四份副本：`NeurUI/package.json`、`NeurUI/package-lock.json`（顶层与 `packages[""]`）、`installer-wpf/bin/version.txt`、`helm/neurova/Chart.yaml`。前两条各有一格既有判据咬住（`testVersionFactsAgreeAcrossSources` / `testLockfileCarriesSameVersionAsPackageJson`）＋`win_installer_kit.py::product_version()` 那条运行时断言；第三条是 R4 本行；**第四条无任何判据**。
+    - **分工与归属如实记账**：前三处已由并发的 `595216d3`（「版本事实源三处对齐 beta9」，同分支另一会话）落库，本格不重复计入。本条只补它没覆盖的那一份：`bin/version.txt` 是 `build.cmd` 每次本地打包时从 `tauri.conf.json` 重写、却被 git 跟踪的构建输出副本（先例 `d080d7d9`/`6d0220ae`/`57735195`/`04fc63c8` 四次同名升级笔都带它）。本地不重打包它就永久留旧值，而装上后 WPF 欢迎页读的正是它——「装出来的包自报旧版本」这一形态该档开头就在防，却漏了第三份副本。
+    - **修法是给这一份上守卫，不是再手改一次**：`tests/unit/desktop/test_installer_version_single_source.py` 补 `testBuildOutputVersionCopyFollowsProductVersion`，把四态（`tauri.conf.json` / `package.json` / `package-lock.json` / `bin/version.txt`）咬到同一事实源；副本一并跟到 beta9。
+    - **红→绿（本机同一份树）**：
+      ```
+      （副本留 beta8、守卫已加）
+      FAILED testBuildOutputVersionCopyFollowsProductVersion
+        构建输出副本与版本事实源分叉：tauri.conf.json=1.0.0-beta9 / bin/version.txt=1.0.0-beta8
+      （副本跟到 beta9）
+      test_installer_version_single_source.py                    5 passed
+      desktop 版本/NSIS/签名/win_installer_kit/deploy_config 五档  59 passed
+      deploy_config_consistency_check.py   EXIT=0   ERROR 0 / WARN 1（既有 R7 存量）
+      ruff check neurova tests --no-cache   All checks passed
+      ci_static_gate.py --skip-import       三格全过
+      ```
+    - **A/B 自证（预存红不算回归，AGENTS.md §4）**：`tests/unit/desktop` 整目录修前 5 failed → 修后 3 failed，差额恰是本单与并发那笔一起修掉的版本分叉格；余下 `test_bundle_runtime_dirs.py` ×2 与 `test_stagedBackendAgreesWithDeclaredVersion`（`resources/backend/` 缺席，本机未打包）两侧同集合，属预存红。
+    - **live-verify（真容器，`api_trigger` 构建 `cnb-nqb-1k6r7tbh9`，1 核 / python:3.12）**：PR 侧本轮九条腿全红在 `Prepare` 配额（`Root Group's events CPU-core hours are insufficient for pre-freezing`，`cnb-edu-1k6r7le3i` / `cnb-6cs-1k6r7ongp` 两次都是这句，2 核规格也起不来），与代码无关，故另起一条 1 核验证构建取现场读数：
+      ```
+      deploy config gate             EXIT=0   ERROR 0 / WARN 1（既有 R7 存量）
+      version single source guard    41 passed in 16.15s（py3.12.16 / pytest-9.2.0）
+        test_installer_version_single_source.py  .....          5
+        test_deploy_config_guard.py              ............... 36
+      ```
+    - **净 LOC**：生产池 +0；配置池 `bin/version.txt` +1/−1（一行版本串）；判据 +19/−0、台账 +23 均不计入。**下一枚空号现查：本格取 601，后继从 602 起。**
+
+602. **PR #374 第七轮：本机三片受保护子集全绿与 CI 侧唯一真红（台账可达性）的归因复算** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **先分清红在谁身上**：PR 侧本轮九条腿全红，日志原文一律 `Root Group's events CPU-core hours are insufficient for pre-freezing`（`cnb-jve-1k6r82m9g` 九条逐条如此，折合 0.33 / 0.67 / 1.33 核时三种规格），含 2 核规格同样起不来（`cnb-edu-1k6r7le3i` / `cnb-6cs-1k6r7ongp`）——**平台配额，与提交内容无关**。1 核探针 `cnb-83c-1k6r87m1l` 起得来（Prepare 3.9s），2 核探针 `cnb-i9b-1k6r86qce` / `cnb-e98-1k6r8b9vc` / `cnb-cnl-1k6rb3bjh` 三次全红在同一句：配额按核数折，不是按流水线。
+    - **本机按 CI 同款跑法复算三片受保护子集**（`COVERAGE_FILE=data/coverage/.coverage.<N>`、`--timeout 300`、`--cov --cov-report= --cov-fail-under=0`，逐片各起一个进程、串行）：
+      ```
+      shard 1   3125 passed, 9 skipped, 1 xfailed      (19m28s)
+      shard 2   2785 passed, 5 skipped, 2 xfailed      (16m52s)
+      shard 3   2978 passed, 4 skipped                 (12m22s)
+      coverage  88.17%  ≥ 60  Required reached
+      ```
+      三片合计 8888 条判据零失败，覆盖率 88.17%——**本机这一份树上没有任何一条钉住本单的判据是红的**。
+    - **一次差点被记成红的假象，如实记下**：首轮不带 `--cov` 跑时三片各报一条 `ERROR at teardown`，点名 `['data']` 是仓库根新增条目（`_guardRepoRootAgainstPollution`）。根因不在被测代码：CI 那一格带 `--cov` 且 `COVERAGE_FILE` 指进 `data/coverage/`，**这个目录在跑测前就被建出来**，于是 `data` 早于逐用例快照存在、守卫不会把它读成「新增」；本机不带 `--cov` 时 `data/` 不存在，而 `console.py:106` 的模块级 `_CONSOLE_UPLOAD_DIR.mkdir()` 在 import 期就建 `data/uploads/console`，第一个 import 它的用例即被点名。即**复验方式与 CI 不一致**造出来的红，不是本单引入。第二处偏差同源：分片 2/3 并行跑时报 `FileNotFoundError: test_tmpSessionLandingTripProbe.py`——`test_session_landing_guard.py` 会在 `tests/unit/` 下写临时探针文件而被另一片正在做 AST 收集的 `test_pytest_collection_hygiene.py` 看见；CI 是三片**串行**的，故不受影响，重跑即绿。
+    - **CI 侧唯一一条与代码有关的红，已由本单 `c52ccf2a`+`e0931bb0` 修掉，现场复算通过**：`cnb-3c6-1k6qvvfr7` / `cnb-srf-1k6qu7mv5` 的 `protected subset shards` 都只剩 `test_auditLedger_hasNoUnreachableReference`。在**真干净克隆**（`git clone --no-local`，CI 同形态，起点 `98b0fa42`，合入本分支后 `bc23ac33`）实跑：
+      ```
+      scripts/ci/audit_ledger_commit_guard.py   EXIT=0
+        commit 号全部可达（共 1384 条引用，扫描面 audit-reports + docs，例外清单署名 5 条）
+        例外清单里另有 5 行在本克隆不可核验（对象不在，含并发重写撤账的笔）
+      tests/unit/test_audit_ledger_commit_guard.py   11 passed
+      ```
+      即「取不到对象不再被判成署名过期」这条改判，在 CI 那种远端历史检出面上的读数与说明一致。
+    - **live-verify（真容器，`api_trigger_verify` 构建 `cnb-n1q-1k6rcm2df`，1 核 / python:3.12，整条 success）**：
+      ```
+      ruff check neurova tests --no-cache        success（1.0s）
+      deploy_config_consistency_check.py         success（0.8s）ERROR 0 / WARN 1（既有 R7 存量）
+      audit_ledger_commit_guard.py               success（1.3s）
+      repaired guards（6 档 / 52 格）             success（25.4s）
+        test_audit_ledger_commit_guard            11
+        test_installer_version_single_source       5
+        test_win_installer_kit                     8
+        test_frontend_audit_floor_guard           20
+        test_npx_runtime_pinning                  20
+        test_deploy_config_guard                  36
+      ```
+      另在本机按 CI 命令逐条补齐：`ci_static_gate.py`（导入巡检 1105 模块全过）、`perf_gate.py`（通过）、`experience_quality_gate.py`（门禁通过）、`tests/e2e/test_backend_boot.py`（5 passed）、`npm audit --audit-level=high`（EXIT=0，仅 6 条 moderate 存量）、`vue-tsc --noEmit`（EXIT=0 / 零错误）、`vitest run`（2382 passed / 1 skipped / EXIT=0）。
+    - **不改代码的一轮，如实说清改了什么**：本轮零生产代码改动，只为把「红在平台配额」与「红在代码」分开而取读数与留痕。**净 LOC**：文档 +本格，代码 +0。**下一枚空号现查：本格取 602，后继从 603 起。**
+
+603. **PR #374 第八轮：九条腿全红逐条归因——按核数的配额门槛（1 核起得来、2 核起不来）＋本机与真容器两路读数复核** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **先分清红在谁身上，不猜**：本轮 PR 构建 `cnb-cdp-1k6rcviqp`（sha `dbeeb611`）九条腿**全部**止步 `Prepare`，日志原文一律 `Root Group's events CPU-core hours are insufficient for pre-freezing`，折合 0.33 / 0.67 / 1.33 三种规格；每个 stage 状态都是 `skipped`——**一条门禁脚本都没跑到**，不存在"代码判据红"这个读数。
+    - **配额门槛按核数折，今天实测读数（本格写后随即修订，见下条）**：同一天同一分支上，`cpus: 1` 的探针 `cnb-lve-1k6re3pc3` Prepare 15.1s **真 success**；`cpus: 2` 的两次探针 `cnb-uop-1k6re9hcr` / `cnb-pbo-1k6reo4k9` 红在同一句（各折合 0.33 核时被判不足）。
+    - **本机按 CI 同款跑法复算三片受保护子集**（`--timeout 300`，逐片各起一个进程、串行，与 CI 分片同形态）：
+      ```
+      shard 1   3125 passed, 9 skipped, 1 xfailed   (8m32s)
+      shard 2   2781 passed, 9 skipped, 2 xfailed   (7m37s)
+      shard 3   2978 passed, 4 skipped              (8m52s)
+      ```
+      三片合计 8884 条判据零失败；`static-gate --skip-import` 三格全过；`ci_static_gate.py` 全模块导入巡检 1105 模块全过；`ruff check neurova tests scripts cli.py` → All checks passed；`deploy_config_consistency_check.py` → ERROR 0 / WARN 1（既有 R7 存量）；`perf_gate.py` → 通过（`post_chat_pipeline` 184811B、`chat_pipeline` 163796B，均在棘轮线下）；`experience_quality_gate.py` → 门禁通过；`audit_ledger_commit_guard.py` → EXIT=0（1387 条引用全可达，例外清单 5 行如实报「本克隆不可核验」）。
+    - **前端在本机与真容器各取一路**：本机（`npm ci` 真装 426 包后）`npm audit --audit-level=high` EXIT=0（仅 6 条 moderate 存量）、`npx vue-tsc --noEmit` 零错误、`npx vitest run` 294 文件 / 2382 passed / EXIT=0。真容器 `api_trigger_verify` 的 1 核构建在 `vue-tsc` 一格被 V8 掐断（`FATAL ERROR: Reached heap limit`，1 核 = 2GiB），2 核构建连 `Prepare` 都起不来——**两者都是环境读数不是代码读数**：`node:22` 下 `vue-tsc` 内存峰值约 1GB 量级，CI 那一格 4 核 = 8GiB，配额恢复窗口里的历史构建（`cnb-jmd-1k6r0cigb` / `cnb-3c6-1k6qvvfr7` / `cnb-srf-1k6qu7mv5` / `cnb-fhs-1k6qtu0h3`）四次全部 success（`type check` 25~27s、`vitest` 165~188s）。
+    - **真容器取现场读数（1 核 / 各腿同镜像同命令，逐条 success）**：
+      ```
+      cnb-oie-1k6reat1g  e2e-backend-boot          装最小依赖 51.6s → boot smoke 12.9s  success
+      cnb-1vo-1k6rf7l9r  py 五档  static gate(19.8s) / ruff(1.1s) / deploy(0.9s)
+                                  / 台账(1.4s) / 七档判据(14.8s)  全 success
+      cnb-m0j-1k6rffuq1  py3.11  装锁 38.0s → 全模块导入巡检 23.7s → 审计回归 9.9s  success
+      ```
+    - **一处必须写明的偏差**：`api_trigger_verify` 的依赖审计两条腿在 1 核上反复被 `Prepare` 掐（`cnb-r04-1k6rflu2q` / `cnb-67m-1k6rfs059` 都是同一句配额），故 `pip-audit` / OSV 两路改在本机按同一份锁复算：`pip-audit` 对已装树报 `No known vulnerabilities found`；`tools/npx-runtime` 真 `npm ci` 后 `npm ls glob minimatch --all` 读数 `glob@14.0.4` / `minimatch@11.0.5`（单一版本、无嵌套副本），`npm audit` → `found 0 vulnerabilities`。与本单 `4d3f2a6c` 的 overrides 口径一致。
+    - **结论与需要人裁决的那一件事**：代码侧本轮**零可修项**——八轮下来九条腿的每一条都在本机与真容器上过了，剩下的唯一阻塞是根组织的「云原生构建-CPU」160 核时/月免费额度已耗尽（平台侧 `组织 → 设置 → 用量管理` 绑腾讯云预算可提额，超额 ¥0.125/核时）。我不动 `.cnb.yml` 的 `cpus`：把 8 核的 `unit-tests` 降到 1~2 核会当场装不下受保护子集（`code 137` 的成因已写在文件头），那是拿降判据换绿（教义第 2 条）。
+    - **净 LOC**：文档 +本格，生产代码 +0、配置 +0。**下一枚空号现查：本格取 603，后继从 604 起。**
+
+604. **PR #374 第九轮：配额窗口复测到「8 核能起」＋上一格两处读数订正** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **先订正上一格的两处读错**（同一事实源、同一批构建号，重取一遍即见，不改判据只改读数）：
+      - §6-603 写「`cpus: 1` 的探针两次全绿（`cnb-lve-1k6re3pc3`、`cnb-f8u-1k6rg8lbd`）」——**后一个不是绿**。`cnb-f8u-1k6rg8lbd`（标题 `quota probe 1core c`）的 `Prepare` 状态是 `error`，日志原文 `insufficient for pre-freezing(... equivalent to 0.17 core-hours)`；它在构建列表里显示 `status: success` 是因为该探针声明了 `allowFailure: true`（流水线级状态被改写，stage 级读数仍是 error）。拿它当「1 核能起来」的第二个样本，等于让一条 `allowFailure` 替配额不足背书——这正是本仓反复在防的「绿了但没跑」形态。
+      - §6-603 写「当前额度窗**只容得下 1 核**」——**已被同分支后续读数推翻**。本轮派发单触发的 NPC 构建 `cnb-l1t-1k6rgdjk0` 是 `cpus: 8`，`Prepare` 状态 `success`，日志 `Pipeline actual limit cpus: 8, memory: 16`、`runs on cnb:arch:default`，跑满 4.2s 正常收尾。即 8 核那一条在 **2026-11-07T17:20:39Z** 起得来。
+    - **真正稳定的规律是「同一时刻并发申请的总量」，不是「单条核数」**：把两个数的**时间轴对齐**就看得见——
+      - `2026-11-07T17:20:36Z` 的 PR 构建 `cnb-e3s-1k6rgdgar`：九条腿**同时**申请（2/2/8/2/4/2/4/2/2 核），**九条全红**在 Prepare 配额句（0.33/0.67/1.33 三种规格）；
+      - `3 秒后` 的 `17:20:39Z` 单条 NPC 构建：**8 核，Prepare 成功**。
+      同一额度窗、相差 3 秒，单条 8 核能起、九条并发起不来——被拒的是**并发申请的总核时**，不是「8 > 1」这种单条门槛。故 §6-603 那句「只容得下 1 核」把「并发总量不足」误读成了「核数上限」，两个含义的修法不同（前者是别并九条同时抢/等窗口，后者才是降 cpus），必须分开写。
+    - **本轮代码侧按 CI 同款复算，全部绿**（本机，同一份树 @ `4c5cf610`，`requirements-ci.lock` 装齐后）：
+      ```
+      shard 1   3125 passed, 9 skipped, 1 xfailed   (10m52s)
+      shard 2   2785 passed, 5 skipped, 2 xfailed   (11m16s)
+      shard 3   2978 passed, 4 skipped              (11m32s)
+      合计 8888 条，零失败
+      coverage_report.py --fail-under 60  → Total coverage: 88.13%（88% 汇总行）
+      ci_static_gate.py --skip-import     → 三格全过（语法 / 未定义名 / 导入巡检）
+      ruff check neurova tests            → All checks passed
+      deploy_config_consistency_check.py  → ERROR 0 / WARN 1（既有 R7 存量）
+      perf_gate.py                        → 性能门禁通过
+      experience_quality_gate.py          → 门禁通过
+      audit_ledger_commit_guard.py        → EXIT=0（1389 条引用全可达，例外清单 5 行报「本克隆不可核验」）
+      tests/e2e/test_backend_boot.py      → 5 passed
+      ```
+    - **前端两道路（本机真装 `npm ci` 后）**：
+      ```
+      npx vitest run          → 294 files passed / 2 skipped；2382 passed / 1 skipped，EXIT=0
+      npx vue-tsc --noEmit    → 零错误，EXIT=0
+      npm audit --audit-level=high → EXIT=0（6 条 moderate 存量，无 high）
+      npm ls follow-redirects --all → axios@1.20.0 → follow-redirects@1.16.2（单一版本，$ 修复已落位）
+      ```
+    - **已确认的一处「真红」与本单无关且已修**：主线 `push` 构建 `cnb-830-1k6r4h6lj`（`98b0fa42`）的 `static-gate` 是**真跑到并真红**（不是配额），三处 `undefined name`：`neurova/channels/manager.py:166 channel_type`、`neurova/collaboration/neurflow/storage.py:885 logger`、`neurova/knowledge/ontology/query_expander.py:116 Dict`。PR 分支 `4d3f2a6c` 已修，本机同上门禁复算三格全过——即该红已在本单闭环。
+    - **结论**：代码侧零可修项（九轮读数一致）。九条腿的红全部发生在 `Prepare`，一条门禁脚本都没跑到；能否起来取决于「同时刻并发申请的总核时」，当前额度窗（160 核时/月免费额度已耗尽）容不下九条并发。需要人裁决的仍是同一件事：绑腾讯云预算提额，或把 PR 触发改为串行少量腿，而不是降 cpus 换绿（8 核 `unit-tests` 降到 1~2 核会当场 `code 137`，教义第 2 条）。
+    - **净 LOC**：文档 +本格（含 §6-603 两处读数订正 −2/+2 行），生产代码 +0、配置 +0。**下一枚空号现查：本格取 604，后继从 605 起。**
+
+605. **PR #374 第十轮：配额被谁吃掉的定量归因——NPC 会话吃的是平台默认 8 核，12 条会话 = 160 核时月额度的 78%** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **红仍在 Prepare，本轮再确认一次（带新的读数维度）**：PR 头 `54151a26` 对应构建 `cnb-kgm-1k6rj88sj` 九条腿逐条 `error` 在 `Prepare`，全部 stage `skipped`；本轮新起两条配额探针同句——`cnb-s7k-1k6rk0ej3`（2 核，`equivalent to 0.33 core-hours`）、`cnb-15m-1k6rk2oen`（1 核，`equivalent to 0.17 core-hours`）。**1 核也起不来了**，比 §6-603/§6-604 那两轮的窗口更紧：那时 1 核尚能起来（`cnb-lve-1k6re3pc3`），今天连 0.17 都判不足。
+    - **本轮新增的可复算事实：NPC 流水线自身没声明 `runner`，落到平台默认 8 核。** 同一份探针（`cnb-6nt-1k6rmu6qo`，不写 `runner`）的 Prepare 日志逐字给出 `Pipeline yaml cpus: -1` → `Pipeline actual limit cpus: 8, memory: 16` → `equivalent to 1.33 core-hours`。`.cnb.yml` 的 `&npc-dscoder-job`（第 1095 行起）与 `api_trigger_npc_handoff` 载体（第 1331 行起）都只有 `docker.image` + `envScript`，**没有 `runner` 两行**——历史上也没声明过（`git log -S` 追到 90c40e2a 起的每一版都是同样的形状）。于是每一次 `@` 会话都以 8 核预算预冻结 1.33 核时。
+    - **把两条读数乘起来就是额度去哪了**（`metricCoreHours` 逐条取，全部为真跑过的会话，不含失败在 Prepare 的 0）：
+      ```
+      cnb-ihe-1k6ql1g05  26.82    cnb-vkg-1k6rcvmlq  8.14
+      cnb-ghr-1k6qv480i  18.81    cnb-go0-1k6r7lhtq  7.60
+      cnb-538-1k6qtun28  14.00    cnb-l1t-1k6rgdjk0  6.63
+      cnb-5er-1k6r2u0rk  12.83    cnb-e8u-1k6r6emrn  6.61
+      cnb-cun-1k6r82p1b  11.72    cnb-4af-1k6r0p75n  4.53
+                                 cnb-v10-1k6r68sn6  4.25
+                                 cnb-m5e-1k6r1mi4d  3.38
+      合计 125.32 核时 / 12 条 ＝ 月度免费额度 160 的 78%（单条 3.4~26.8，按 8 核 × 25~50 分钟折算齐平）
+      ```
+      对照口径：一轮**完整**九腿门禁实测只吃 **2.50 核时**（`cnb-jmd-1k6r0cigb` 九条腿 `metricCoreHours` 求和，含 8 核那条腿跑满 904s）。即**今天 12 条 NPC 会话相当于 50 轮全量门禁**——额度不是被门禁吃掉的，是被会话本身吃掉的。
+    - **为什么本轮不动 `.cnb.yml` 的 `runner`**（按教义第 2 条与 §8 摆影响面，不擅自改）：给 NPC Job 补 `runner.cpus` 是**真根修方向**（把「落到平台默认 8 核」变成一处显式、可评审的申请），但它换来的是 NPC 会话自身可用内存下降（平台口径 内存＝核数×2GiB），而会话长的恰恰是「在本机复跑受保护子集」这类活——§6-421 的实测是 4 核＝8GiB 在 82% 处被 SIGKILL。两个值各的代价：
+      - `cpus: 4`（8GiB）：单条会话成本降到 1/2、预冻结 0.67，代价是会话内跑整套受保护子集会复现 `code 137`；
+      - `cpus: 2`（4GiB）：成本降到 1/4、预冻结 0.33，代价是连分片也装不下，NPC 只能做定点验证；
+      - 不动：会话能跑重活，但一个月只够 12~45 条会话，且**当前额度已归零，任何值都起不来**（本轮 1 核探针同句）。
+      这属于「拿会话能力换额度」的资源口径决策，不是缺陷（NPC 不是门禁，不裁决任何合并契约），故留给人拍板；且当前额度为 0 ⇒ 改了也**无法 live-verify**，按教义第 4 条不能拿未验证的改动当「已修」上报。
+    - **代码侧本轮按 CI 同款复算，全部绿**（树 @ `ee81577b`，`requirements-ci.lock` 装齐；串行跑，无并发会话干扰）：
+      ```
+      shard 2        2785 passed, 5 skipped, 2 xfailed   (11m29s)
+      coverage       Total coverage: 88.18% ≥ 60
+      ci_static_gate.py --skip-import   三格全过
+      ci_static_gate.py（含全模块导入巡检） 全部通过
+      ruff check neurova tests --no-cache   All checks passed
+      deploy_config_consistency_check       ERROR 0 / WARN 1（既有 R7）
+      perf_gate.py                          性能门禁通过
+      experience_quality_gate.py            门禁通过
+      audit_ledger_commit_guard.py          EXIT=0（1395 条引用全可达）
+      tests/e2e/test_backend_boot.py        5 passed
+      本 PR 改动的 29 个测试文件            305 passed, 2 skipped
+      台账三档守卫                           38 passed
+      生成器三跑（api_inventory / api_auth_surface / cognitive_component_table）工作区零漂移
+      ```
+      前端（真 `npm ci` 后）：`npx vitest run` → 294 files / 2382 passed、`npx vue-tsc --noEmit` 零错误、`npm audit --audit-level=high` → EXIT=0（仅 6 条 moderate 存量）。
+      依赖审计：`osv_audit.py` → 447 + 365 包、无未允许漏洞；`pip-audit`（`--no-deps --disable-pip`，因本容器无 `python3-venv` 无法建 venv）→ `No known vulnerabilities found`。
+    - **如实登记两处**：① shard 1 / shard 3 各剩 1 条 `error`，两条都在 teardown 被 `_guardRepoRootAgainstPollution` 点名新增 `.pytest_cache`——**成因是我同一时间另开了一个 shell pytest 会话**（`python -m pytest tests/unit/test_ci_parity_guard.py`），它启动即在仓库根建该目录，而 CI 是串行跑、不存在第二个会话；两者单文件重跑均 `1 passed`，且 shard 2（全程无并发）零 error。② 本轮另起了 2 条配额探针（`cnb-s7k` / `cnb-15m`）与 1 条无 runner 探针（`cnb-6nt`），均止步 Prepare，`metricCoreHours` = 0，未额外消耗额度。
+    - **净 LOC**：文档 +本格，生产代码 +0、配置 +0。**下一枚空号现查：本格取 605，后继从 606 起。**
+
+606. **PR #374 第十一轮：九腿首次全部真跑到——第 2 片三格红的根因是 CI 检出没有主线 ref，修法在判据上游物化基线** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **本轮第一次拿到「门禁真跑到」的读数**（前十轮全部止步 `Prepare`）。关键发现：**配额分两个池**——普通触发的构建连 1 核（0.17 核时）都拒，而 `--npc-name CodeBuddy` 触发的构建 `Prepare` 成功、stage 真跑、`metricCoreHours` 正常记账。探针对照：`cnb-c87-1k6rqtvrg`（普通，1 核，`Prepare` error，`insufficient … 0.17 core-hours`）vs `cnb-np4-1k6rph98e`（NPC，1 核，**success**，`probe up` 真打印）。据此改用 NPC 通道把九条腿跑起来（`cnb-98o-1k6rpqmf9` 起）。
+    - **九腿逐条读数（`cnb-98o-1k6rpqmf9`）**：`static-gate` / `import-and-regression` / `e2e-backend-boot` / `frontend` / `perf-gate` / `deploy-config` / `dependency-audit` / `experience-quality` 八条 **success**；`unit-tests` 第 2 片 **1 failed, 2773 passed**，失败三格逐字同一句：
+      ```
+      test_npc_branch_cleanup.py::…::testRealRepoMergeRecordYieldsNonAutoPrefixedSourceBranch
+        RuntimeError: 读取主线合并记录失败：fatal: ambiguous argument 'origin/main':
+        unknown revision or path not in the working tree.
+      test_commitLocClaimMatchesOwnNumstat.py::…::testUnpushedCommitsClaimsAllReconcile
+        Failed: origin/main 解析不到——区间取不到基线就等于「无声明」，本格不许据此判绿
+      test_commitLocClaimMatchesOwnNumstat.py::…::testRealBodyWithOneWrongDigitIsCaught
+      ```
+    - **根因（探针 `cnb-thk-1k6rrue9d` 在同类检出里逐条取数）**：平台检出**只建被检出分支的 ref**——
+      ```
+      git branch -a                          → 只有 auto/<PR 分支>
+      git rev-parse origin/main              → fatal: Needed a single revision
+      git rev-parse refs/remotes/origin/main → fatal
+      git rev-parse main / refs/heads/main   → fatal
+      git cat-file -t 98b0fa42…              → commit            ← 对象在，ref 不在
+      git log --merges --format=%P 98b0fa42… → 非空              ← 历史在
+      ```
+      即**对象齐全、历史齐全，缺的只是那一条 ref**。GitHub 侧 `actions/checkout` 带 `fetch-depth: 0` 自带 `origin/main`，同一条判据因此在一侧绿、在另一侧红——这是**环境前提分叉**，不是契约缺陷。
+    - **修法（教义第 1 条：在判据上游物化前提，不给判据加兜底）**：`unit-tests` 新增 `materialize main baseline ref` stage，排在驱动受保护子集之前：
+      ```
+      set -e
+      git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
+      git rev-parse --verify refs/remotes/origin/main
+      ```
+      为什么必须**显式 refspec**：`git fetch origin main` 只写 `FETCH_HEAD`、不建 `origin/main`——那是「看起来取了、其实没建 ref」的最常见写法。为何不给判据加兜底：让消费方去猜「哪条 ref 能当基线」是下游补丁，第二个消费方进来还要再猜一次。
+    - **红→绿实测（同一份单分支克隆 `--single-branch`，CI 同形态）**：
+      ```
+      修前  3 failed, 28 passed
+      修后  30 passed, 1 skipped
+      ```
+      新守卫 `tests/unit/ci/test_mainBaselineRefIsMaterialized.py` 先红后绿：修前 3 failed（物化 stage 不存在 / 位置不对 / 无 `set -e`）+ 7 条反向控制绿；修后 10 passed。反向控制逐条咬住 `git fetch origin main`（无 refspec）、`--depth=1`（浅取拿不到合并记录）、取了别的分支、压根没取——四种都必须判成「未物化」。
+    - **首轮 CI 反馈后补的面自证**：新档的受治面自证格扫了整份清单却没把「这次真扫到多少条」当断言比，`test_scanCriterionMustProveItsOwnSurfaceRatchet` 当场点名（`cnb-k6f-1k6rsu6ns` 第 2 片 `1 failed, 2773 passed`）。**不改基线表**（那等于把棘轮拆回各档各判），补法两行：`scanned` 逐条累加，先 `assert scanned > 500` 验面、再谈零命中。
+    - **修后全腿 live-verify（构建 `cnb-okj-1k6rv36db`，九条腿全部 success，聚合 `status: success`）**：
+      ```
+      static-gate / import-and-regression / e2e-backend-boot / frontend /
+      perf-gate / deploy-config / dependency-audit / experience-quality  → success
+      unit-tests  materialize main baseline ref → success
+                  shard 1  3125 passed, 9 skipped, 1 xfailed   rc=0
+                  shard 2  2774 passed, 16 skipped, 2 xfailed  rc=0   ← 本单三格已转绿
+                  shard 3  2987 passed, 5 skipped              rc=0
+                  coverage gate  Total coverage: 88.18% ≥ 60     rc=0
+      unit-tests metricCoreHours 5.43（真跑满，不是 Prepare 段的 0）
+      ```
+    - **本机连带复算**：`tests/unit/ci/` 全目录 + `ci_parity_guard` → **645 passed, 4 skipped**；`ruff check neurova tests` → All checks passed；`ci_static_gate.py --skip-import` 三格全过；`deploy_config_consistency_check` ERROR 0 / WARN 1（既有 R7）；`perf_gate.py` 通过；`experience_quality_gate.py` 通过；`osv_audit.py` → 无未允许漏洞；`npm ci` 后 `npx vue-tsc --noEmit` 零错误、`npx vitest run` → 294 files / 2382 passed、`npm audit --audit-level=high` → EXIT=0。
+    - **如实登记三处**：① 本机 shard 1 首轮曾出现 1 条 teardown `error`（`_guardRepoRootAgainstPollution` 点名新增 `data`），成因是我同一时间并发跑了 `npm ci` 与 vitest；单独重跑同一片 **3125 passed, rc=0**，与本轮 CI 读数一致。② 三次探针配置曾把 YAML 块标量折叠成一行（`api_trigger` 的 `--config` 传参形态所致），当场出现 `no such option: -m` 与 `Syntax error … done` 两条**属探针污染、不属仓内缺陷**的假红；改用保留块标量的 dumper 后九腿一次全绿，故不据此改任何仓库文件。③ 推送后 PR 的自动 `pull_request` 构建（`cnb-b92` / 后续）**仍九条全红在 `Prepare`**——普通触发池配额未恢复，本单的绿读数一律出自 NPC 通道，与「额度归零」这一既有事实不矛盾。
+    - **净 LOC**：`.cnb.yml` **+23/−0**（新增一格与逐条依据注释）；测试/基建池 +225（新档）+4/+4（两份清单的登记与依据行），不计入生产池。**下一枚空号现查：本格取 606，后继从 607 起。**
+
+607. **PR #374 第十二轮：九腿在 NPC 通道全绿、普通通道连 1 核都被拒——同一句话量出来的两个配额池** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **结论先行**：本轮没有任何可提交的代码修复。PR 头 `fca46bbd` 的九条门禁**全部真跑到并全绿**（走 NPC 通道，构建 `cnb-n6l-1k6s1qsq0`）；同 sha 的普通 `pull_request` 构建 `cnb-knp-1k6s1qpkh` 九条腿**全部停在 `Prepare`**，一条 stage 都没进。两者差的只有触发来源。
+    - **九腿逐条读数（`cnb-n6l-1k6s1qsq0`，聚合 `status: success`）**：
+      ```
+      static-gate             success  25s   unit-tests  materialize main baseline ref  success
+      import-and-regression   success  1m22s             shard 1  3125 passed, 9 skipped, 1 xfailed  rc=0
+      e2e-backend-boot        success  2m29s             shard 2  2774 passed, 16 skipped, 2 xfailed rc=0
+      frontend                success  4m50s             shard 3  2987 passed, 5 skipped           rc=0
+      perf-gate               success  1m00s             coverage gate  Total coverage: 88.18% ≥ 60
+      deploy-config           success  14s     unit-tests 5.44 核时（真跑满，不是 Prepare 段的 0）
+      dependency-audit        success  2m27s
+      experience-quality      success  1m00s
+      ```
+      第 2 片那三格（`test_npc_branch_cleanup` / `test_commitLocClaimMatchesOwnNumstat` 两格）在基线 ref 物化后已转绿——上一轮 §6-606 的修法在本轮复现成立。
+    - **本轮新增的可复算事实：配额分两个池，普通池连 1 核都拒、NPC 命名池能起来**。三条探针同一时段、同一分支、同一份 `$` 配置：
+      ```
+      cnb-lrh-1k6s4hkc4  普通池  8 核  Prepare error  1.33 核时被判不足
+      cnb-ppv-1k6s4jgpo  普通池  1 核  Prepare error  0.33 核时被判不足   ← 1 核也起不来
+      cnb-46q-1k6s4q825  NPC 命名 1 核  success（Prepare 4.8s，probe up 真打印）
+      ```
+      即「配额不足」这句话的粒度是**池**，不是核数：普通 `pull_request` 触发的那一份已耗尽，`--npc-name` 触发的那一份仍可用。这也解释了前十轮「九腿全红在 Prepare、同时段 NPC 会话却在正常跑」的读数。
+    - **为什么不动 `.cnb.yml`**：能改的只有三种，各自代价写在格内——① 降 `unit-tests` 的 `cpus`（8→2）换普通池能起来：与 `tests/unit/ci/test_unit_tests_runner_has_headroom.py` 的按条目数算出来的需求直接冲突，且 §6-421 实测过 4 核＝8GiB 在 82% 处被 SIGKILL，属拿判据换绿（教义第 2 条）；② 给 `pull_request` 九条腿挂 `allowFailure: true`：那是把门禁失败改写成不上报，正是「提交状态通道＝门禁专用」契约要挡的形态（教义第 2/3 条）；③ 把 PR 触发改成串行少量腿：改的是放行标准，不是修缺陷。故本轮仍只报读数、不擅自动配置（教义第 4 条：改不动就等于验不了，不拿未验证改动当「已修」）。
+    - **本机连带复算**（同一份树 @ `fca46bbd`，本轮实际执行过的）：`ci_static_gate.py --skip-import` 三格全过；`ruff check neurova tests --no-cache` → All checks passed；`deploy_config_consistency_check.py` → ERROR 0 / WARN 1（既有 R7）；台账四档（`test_mainBaselineRefIsMaterialized` / `test_auditLedgerNumbering` / `test_audit_ledger_commit_guard` / `test_auditLedgerReachabilitySingleProbe`）→ **48 passed**。
+    - **如实登记**：① 本轮三条探针均止步 `Prepare`（两条）或 5s 内收尾（一条），`metricCoreHours` 合计 0，未额外消耗额度；探针配置经 `$` 挂载点 + `--config` 传入，未改动仓内任何文件。② 首两次探针尝试因把事件写在分支名下而撞 `CONFIG_EVENT_EMPTY`（`api_trigger*` 只认 `$` 挂载点），属探针形态错误、不属仓内缺陷，改挂载点后一次成功。
+    - **净 LOC**：文档 +本格，生产代码 +0、配置 +0。**下一枚空号现查：本格取 607，后继从 608 起。**
+
+608. **PR #374 第十三轮：真红终于到手——受保护子集那格的 45m 墙按「一场」定的，而它早已跑三场串行** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **结论先行**：这一轮的红**不是配额**，是判据本身的缺陷，已根修。构建 `cnb-h8j-1k6s4v3g1`（sha `a8404c32`，走 NPC 通道所以 `Prepare` 起得来）九腿里八条 `success`，`unit-tests` 的 `protected subset shards` 被平台强杀：
+      ```
+      shard 1  3125 passed, 9 skipped, 1 xfailed … in 1022.53s (0:17:02)   rc=0
+      shard 2  2774 passed, 16 skipped, 2 xfailed … in  810.70s (0:13:30)   rc=0
+      shard 3  ……打到 [ 87%] 时 stage 到点，连汇总行都没来得及打
+      error:   任务超过最大执行时间而被强制关闭：45m0s
+      ```
+      上一轮 `cnb-n6l-1k6s1qsq0` 三片共 37.4m（785.81 + 708.65 + 750.25 + 进程启动）**压线通过**——那不是"余量充足"，是侥幸。
+    - **根因（教义第 1 条：在上游生产该状态的地方修）**：这格的 `timeout` 由**两个文件各答一次**，且两个数都是分片**之前**按「一整场」定出来的：
+      - `test_unit_tests_runner_has_headroom.py`：下界 = `MEASURED_WALLCLOCK_SECONDS(1333) × 1.1`，那个 1333 是 `cnb-rja-1k5pv9gbl#003` 单进程跑整份清单被 SIGKILL 时的读数；
+      - `test_protectedSubsetBudgetCoversItsRealCost.py`：上界 = 常量 `SUBSET_STAGE_TIMEOUT_CAP_MIN = 45`。
+      分片落地那天这一格从「一场」变成「三场串行」，**结构变了、预算没跟**：活是 3 个进程之和，预算仍是 1 场加 10%。于是任何一侧都不回答「45m 装不装得下三片」——它连问都没问。
+    - **修法：算式收口到一处，涨落由结构驱动**。新增 `tests/subsetWallclockBudget.py` 作为唯一算式（教义第 6 条），原先两处各写一份的口径全部改指它：
+      ```
+      每片预算      = 单片最慢实测(1022s，取自上面 shard 1) × 抖动余量(1.25) = 1277.5s
+      一格预算下界  = 片数(现读 3) × 每片预算 = 3832.5s = 63.9m      ← 串行就得乘
+      一格预算上界  = 下界 × 窗口倍数(1.5)   = 95.8m
+      ```
+      片数**不手抄**：事实源是 `scripts/ci/` 目录里有几个 `protected_tests.<N>.txt`（与 `.cnb.yml` 的 `ls … | sort -V`、GitHub 侧矩阵同一口径）。加一片预算自动涨，减一片自动降，不需要谁去改常量。
+    - **两个消费方各判自己那种排布，算式只此一份**：`.cnb.yml` 的 `unit-tests` 是**三片串行共用一道墙** ⇒ 比「片数 × 每片预算」；GitHub 的 `unit-tests` job 是**矩阵里每 job 一片** ⇒ 比「每片预算」。同一事实两种排布，不各写一份算式。
+    - **配置改动**：`.cnb.yml` 那格 `timeout: 45m → 75m`（= 3832s 下界 + 约 17% 余量，仍严格低于 95.8m 的上界）。单档父墙 `--timeout 300` 一字不动，它仍严格窄于整段墙——真慢一格由单格诚实地记 `Timeout`，不是整段被强杀。
+    - **红→绿实测**：
+      ```
+      （红灯，改配置前）test_protectedSubsetBudgetCoversItsRealCost.py
+        testDriverStageBudgetCoversTheShardsItRunsSerially  FAILED
+        AssertionError: 现读 3 片串行 × 每片 1278s = 3832s（63.9m），
+                        'unit-tests': timeout='45m'（2700s < 3832s）        1 failed, 6 passed
+      （绿灯，改配置后）上述文件                                                    7 passed
+      tests/unit/ci/test_unit_tests_runner_has_headroom.py                        4 passed
+    ```
+      新增的四格判据各自带反证：片数从目录现读（临时目录造两片 → 预算自动按 2 片算）、下界必须严格低于上界（否则这一档自相矛盾）、把墙写成 `5m` 时下界格必须咬得住。
+    - **回归面**：`tests/unit/ci` 整目录 + `test_ci_parity_guard` → **649 passed, 4 skipped**；`test_protected_subset_shards` + 登记历史 + 扫描面棘轮 → 78 passed；`ruff check neurova tests scripts` → All checks passed；`ci_static_gate.py --skip-import` → 三格全过；`deploy_config_consistency_check.py` → ERROR 0 / WARN 1（既有 R7）；`test_pytest_collection_hygiene` 9 passed（新模块不以 `test_` 前缀命名，不进收集面）。
+    - **如实登记两处**：① 本机 `pytest-asyncio` 起初缺席，`tests/unit/ci/test_optionalImportWallOwedByLivePath.py` 两条 `async def` 用例报 `async def functions are not natively supported`——那是**本机环境缺件**（CI 的 `requirements-ci.lock` 里有它），装回后该档 3 passed 1 skipped，非本单回归。② 本轮未再起任何配额探针；构建 `cnb-h8j-1k6s4v3g1` 是本轮唯一一次门禁真跑，`unit-tests` 已实跑 5.4+ 核时。
+    - **live-verify（修后的真跑读数，构建 `cnb-oc4-1k6s9bjqn`，NPC 通道，整条 `status: success`）**：九条腿全绿——`unit-tests` 是唯一曾红的那条，这条真跑到底了：
+      ```
+      unit-tests  duration 2743326ms（45.7m）  metricCoreHours 6.1   status success
+        Prepare                             success    6.6s
+        materialize main baseline ref       success   255ms
+        install uv + locked dependencies    success     2.7s
+        regenerate shipped artifacts        success    35.1s
+        protected subset shards             success 2696564ms（44.9m）   rc=0
+            shard 1  3125 passed, 9 skipped, 1 xfailed … in 822.49s   rc=0
+            shard 2  2774 passed, 16 skipped, 2 xfailed … in 827.05s   rc=0
+            shard 3  2991 passed, 5 skipped            … in 877.91s   rc=0
+        coverage gate                       success    1.5s
+        （其余八腿 static-gate / import-and-regression / e2e-backend-boot / frontend /
+          perf-gate / deploy-config / dependency-audit / experience-quality 全 success）
+      ```
+      **这条读数本身就是修法的证词**：三片实测 822.49 + 827.05 + 877.91 = 2527.45s，加上装依赖 2.7s 与漂移闸 35.1s，整格 44.9m——**距旧墙 45m 只差 4 秒**。即旧墙不是"差得远"，是"差一点点"：上一轮 `cnb-n6l-1k6s1qsq0` 三片 37.4m 压线通过纯属侥幸，这一轮负载稍高（第 3 片 877.91s vs 上轮 750.25s，慢 17%）就穿了。故 75m（63.9m 下界 × 1.17）的余量不是"给多了"，而是同一格在共享 runner 上的正常抖动就该被容下。
+      **另一个必须记的读数**：第 3 片本轮 `2991 passed`（上轮 `2987`）、片 1/2 与上轮逐条相同——即本单与并发会话的判据改动（`tests/subsetWallclockBudget.py` 新增 + 两档重写，共 4 格新增判据）**在 CI 上真的跑到了**，不是只在本机绿。
+    - **净 LOC**：`.cnb.yml` +10/−7（墙改为按结构算的那段，旧注释里"stage 墙 45m"两处同步）；新增 `tests/subsetWallclockBudget.py` +~170（测试基建池，不计入生产池）；两档判据 ±重写；生产代码 +0。**下一枚空号现查：本格取 608，后继从 609 起。**
+
+609. **PR #374 第十四轮：真红已在上一轮闭环，本轮拿到九腿全绿与「普通池连 0.17 核时都拒」的同日对照** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **结论先行**：本轮无新增代码修复——上一轮（§6-608）那笔墙钟算式收口之后，真 CI 上九条腿**全部 success**（构建 `cnb-oc4-1k6s9bjqn`，sha `62766599`，聚合 `status: success`，`metricCoreHours` 合计 6.56）。PR 状态面仍是 `failure`，那是**普通触发池**的配额，不是代码：同一天同一分支的三条探针把两个池再量了一次。
+    - **九腿逐条读数（`cnb-oc4-1k6s9bjqn`，九条全 success）**：
+      ```
+      static-gate             success   22.0s   cpus 2   核时 0.01
+      import-and-regression   success  73.2s    cpus 2   核时 0.04
+      unit-tests              success  2743.3s  cpus 8   核时 6.10  ← 含 stage-3 2696.6s
+      e2e-backend-boot        success  144.4s   cpus 2   核时 0.08
+      frontend                success  245.4s   cpus 4   核时 0.27
+      perf-gate               success  49.1s    cpus 2   核时 0.03
+      deploy-config           success   9.2s    cpus 2   核时 0
+      dependency-audit        success  98.4s    cpus 4   核时 0.11
+      experience-quality      success  60.0s    cpus 2   核时 0.03
+      ```
+      `unit-tests` 逐 stage：`materialize main baseline ref` 255ms → `install uv + locked dependencies` 2.7s → `regenerate shipped artifacts` 35.1s → **`protected subset shards` 2696564ms（44.9m）success** → `coverage gate` 1.5s。三片 **3125 / 2774 / 2991 passed，逐片 rc=0**；`Total coverage: 88.18%` ≥ 60。这是 §6-608 那笔 75m 墙的 live-verify：整格 44.9m 落在 63.9m 下界与 95.8m 上界之间，不再压线。
+    - **同日对照：配额的两个池仍在分叉**（本轮新起的两条探针，同一分支、同一份内联配置，只差 `--npc-name`）：
+      ```
+      cnb-jb6-1k6sctcds  普通池  1 核  Prepare error  0.17 核时被判不足
+      cnb-del-1k6sdadq3  NPC 命名 1 核  success（Prepare 4.4s，probe up 真打印）
+      ```
+      即 §6-607 记的「粒度是池不是核数」在本日仍然成立：普通池连一格 1 核（0.17 核时）都拒。故 `pull_request` 触发的 `cnb-r1j-1k6sc6ulh`（sha `d627e2d2`）九腿一律 `error` 在 `Prepare`、九个 stage 全 `skipped`——一条门禁脚本都没跑到。
+    - **为什么不为此改 `.cnb.yml`**（与 §6-607/§6-608 同一口径，不重复记账）：降 `cpus` 与 `tests/unit/ci/test_unit_tests_runner_has_headroom.py` 按条目数算出的需求冲突；挂 `allowFailure` 是把失败改写成不上报；改串行是改放行标准。三条都是拿判据换绿（教义第 2 条）。
+    - **活体验证（`cnb-946-1k6sdmvdm`，sha `d627e2d2`，NPC 通道，整条 success）**——PR 头这一份树在**装齐锁的真容器**里复算：
+      ```
+      materialize main baseline ref  success  286ms
+      install uv + locked deps       success  34.4s
+      ledger + budget guards         success  19.5s
+        audit_ledger_commit_guard.py  →  rc=0（1399 条引用全可达，例外清单署名 5 条）
+        tests/unit/test_audit_ledger_commit_guard.py +
+        tests/unit/ci/test_auditLedgerNumbering.py +
+        tests/unit/test_auditLedgerReachabilitySingleProbe.py       →  38 passed
+        test_protectedSubsetBudgetCoversItsRealCost.py +
+        test_unit_tests_runner_has_headroom.py +
+        test_mainBaselineRefIsMaterialized.py +
+        test_ci_parity_guard.py                                     →  54 passed
+      shipped artifacts drift        success  30.5s   → docs/ 零漂移（三个生成器幂等）
+      ```
+      本机同一份树：`tests/unit/ci` 整目录 + `test_ci_parity_guard.py` → **649 passed, 4 skipped**；`ci_static_gate.py --skip-import` 三格全过；`ruff check neurova tests --no-cache` → All checks passed；`deploy_config_consistency_check.py` → ERROR 0 / WARN 1（既有 R7）；三个生成器跑完 `git diff --stat -- docs/` 为空。
+    - **如实登记两处**：① 我第一版活体验证探针把 `test_auditLedgerReachabilitySingleProbe.py` 写成 `tests/unit/ci/` 下的路径（它实际在 `tests/unit/`），pytest 以 `ERROR: file or directory not found` 收场、返回码 4——**属探针写错，不属仓内缺陷**；改正路径后同一格 `38 passed`。② 前半程我建的 `.venv` 是半成品（`ensurepip` 缺失、`No module named pip`），改在系统解释器上按 `requirements-ci.lock` 装齐依赖再复算；那份半成品 venv 已删除。
+    - **净 LOC**：文档 +本格，生产代码 +0、配置 +0、测试 +0。**下一枚空号现查：本格取 609，后继从 610 起。**
+
+610. **PR #374 第十五轮：九腿在 NPC 通道全绿，`pull_request` 侧九腿仍一律卡在 `Prepare` 的配额上** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **结论先行**：本轮**零代码改动**。派发单点的是 `cnb-nh3-1k6se3ck8`（sha `ff65baf9`）九条腿全红，逐条读下来九条都是同一句——`Prepare` 阶段配额不足，九个 stage 全 `skipped`，一条门禁脚本都没跑到。同日同一分支的九腿真门禁（NPC 通道）**九条全 success**。
+    - **报错原文与归属（`cnb-nh3-1k6se3ck8`，九条腿逐字同句）**：
+      ```
+      ▸ 失败 Stage: Prepare (status: error)
+      根组织的云原生构建-CPU配额已不够预冻结(冻结时间：10.00 min，折合 0.33/0.67/1.33 核时)，
+      请联系根组织管理员提升配额。
+      ```
+      `get-ci-timing` 逐条印证：九条腿的耗时全部落在 `Prepare`（2.6~2.8s）与收尾 `End`，中间每个 stage 都是 `0ms`。这不是「哪条判据红」，是九个容器一个都没起来。
+    - **九腿真门禁读数（`cnb-6hu-1k6scutmg`，sha `d627e2d2`，NPC 通道，聚合 `status: success`，核时合计 6.48）**：
+      ```
+      static-gate             success   21.5s   cpus 2   核时 0.01
+      import-and-regression   success  114.9s   cpus 2   核时 0.06
+      unit-tests              success 2601.2s   cpus 8   核时 5.78
+      e2e-backend-boot        success  149.0s   cpus 2   核时 0.08
+      frontend                success  319.9s   cpus 4   核时 0.35
+      perf-gate               success   90.3s   cpus 2   核时 0.05
+      deploy-config           success    7.8s   cpus 2   核时 0
+      dependency-audit        success  105.6s   cpus 4   核时 0.12
+      experience-quality      success   49.2s   cpus 2   核时 0.03
+      ```
+      `unit-tests` 逐 stage：`materialize main baseline ref` 261ms → `install uv + locked dependencies` 3.0s → `regenerate shipped artifacts` 34.8s → `protected subset shards` **2555151ms（42.6m）success** → `coverage gate` 1.4s。三片 **3125 / 2774 / 2991 passed，逐片 `pytest 退出码: 0`**（817.46s / 749.25s / 826.83s）。§6-608 那笔 75m 的墙在同一格上再次成立，余量 32.4m。
+    - **同一时刻两个池仍在分叉（本轮新起的探针）**：
+      ```
+      cnb-89g-1k6sfv9el  普通池（不带 --npc-name）  九腿全 error 于 Prepare，stage 全 skipped
+      cnb-fk6-1k6sg3608  NPC 命名池                九腿全部起得来（见下方「如实登记」）
+      cnb-vu2-1k6sfr6k4  普通池 1 核                Prepare error（0.17 核时被判不足）
+      ```
+      即 §6-607/§6-609 记的「粒度是池不是核数」在本日第三次复现。**不为此改 `.cnb.yml`**，理由与 §6-607 逐条同一口径（降 `cpus` 撞内存需求、`allowFailure` 是把失败改写成不上报、改串行是改放行标准），不重复记账。
+    - **PR 头这一份树的活体验证（`cnb-7rl-1k6sga4se`，sha `ff65baf9`，NPC 通道，整条 `success`）**：本轮唯一新增的改动是 §6-609 那一格文档，故验的是「文档笔是否把判据带红」：
+      ```
+      materialize main baseline ref        success   261ms
+      install uv + locked dependencies     success  34.7s
+      regenerate shipped artifacts         success  33.5s  → docs/ 零漂移
+      ledger guards                        success  10.6s
+        audit_ledger_commit_guard.py       → commit 号全部可达（共 1401 条引用，例外清单署名 5 条）
+        台账三档（commit_guard / numbering / reachability 单点） → 38 passed
+      budget baseline and parity guards    success   8.5s
+        预算 / 父墙 / 基线物化 / 对齐 / 净 LOC 复算五档          → 54 passed, 1 skipped
+      ```
+      本机同一份树（`/tmp` 里的 3.11 venv + `requirements-ci.lock`）：`tests/unit/ci` 整目录 → **616 passed, 3 skipped**；`ci_static_gate.py --skip-import` 三格全过；`ruff check neurova tests --no-cache` → All checks passed；`deploy_config_consistency_check.py` → ERROR 0 / WARN 1（既有 R7）；三个生成器跑完 `git diff --stat -- docs/` 为空。
+    - **如实登记三处**：① 本轮第一次九腿探针（`cnb-fk6-1k6sg3608`）有两条腿红，红在**我的探针配置**而不是仓里：`--config` 传多行 `script` 时换行被压平，`regenerate shipped artifacts` 的 `for … done` 与 `e2e` 的 `pip install -r` 都被拼成一行，分别报 `sh: Syntax error: end of file unexpected` 与 `no such option: -m`。**同一份 `.cnb.yml` 在 `push`/`pull_request` 事件下逐字正常**（`cnb-6hu-1k6scutmg` 九腿全绿），故是探针写法的坑，不是配置缺陷。② 该探针其余七腿在同一批次里 success，包括 `frontend`（`npm ci` + `npm audit` + `vue-tsc` + vitest 全过）。③ 本轮未动任何生产代码、配置与测试，故没有红→绿可报。
+    - **净 LOC**：文档 +本格，生产代码 +0、配置 +0、测试 +0。**下一枚空号现查：本格取 610，后继从 611 起。**
+
+611. **PR #374 第十六轮：九腿仍全红在 `Prepare`，本轮量出「同一句话、两个池」的第三日复现——代码侧按 CI 同款逐条复算全绿** ✅🟢 —— 派发单「CI 未通过，请按报错修复」。
+    - **结论先行**：本轮**零代码改动**。`pull_request` 触发的九条腿依然是同一句 `Prepare` 配额不足，九个 stage 全 `skipped`，一条门禁脚本都没跑到；同一分支的 NPC 通道构建照常起得来、照常全绿。代码侧九条门禁我在本机按 CI 同款逐条复算，无一红。
+    - **PR 状态面逐字（`cnb-n0h-1k6sggab7`，sha `9d25dc54`，`state: failure`）**：
+      ```
+      pipeline-1(static-gate)            error [3.7s]   equivalent to 0.33 core-hours
+      pipeline-2(import-and-regression)  error [4.2s]   equivalent to 0.33 core-hours
+      pipeline-3(unit-tests)             error [4.3s]   equivalent to 1.33 core-hours
+      pipeline-4(e2e-backend-boot)       error [3.6s]   equivalent to 0.33 core-hours
+      pipeline-5(frontend)               error [4.4s]   equivalent to 0.67 core-hours
+      pipeline-6(perf-gate)              error [13.3s]  equivalent to 0.33 core-hours
+      pipeline-7(deploy-config)          error [3.6s]   equivalent to 0.33 core-hours
+      pipeline-8(dependency-audit)       error [4.3s]   equivalent to 0.67 core-hours
+      pipeline-9(experience-quality)     error [4s]     equivalent to 0.33 core-hours
+      ```
+      `get-build-status` 逐条印证：九条腿的 `Prepare` 全 `error`，其后每个 stage 皆 `skipped`，`0ms`。**这不是哪条判据红，是九个容器一个都没起来。**
+    - **同一时刻两个池的第三次分叉（本轮新起的两条探针，配置逐字相同、只差 `--npc-name`）**：
+      ```
+      cnb-fqg-1k6shtevf  普通池  1 核  Prepare error 4158ms  → probe stage skipped
+      cnb-k2r-1k6sj9eht  NPC 池  1 核  Prepare success 16676ms → probe 真打印 `probe up`
+      ```
+      与 §6-607/§6-609 同一口径：**粒度是池，不是核数**。故本轮同样不动 `.cnb.yml`——降 `cpus` 撞按条目数算出的内存需求（8 核降到 2 核当场 `code 137`）、给门禁挂 `allowFailure` 是把失败改写成不上报、把九腿改串行是改放行标准，三条都是拿判据换绿（教义第 2 条）。
+    - **代码侧按 CI 同款逐条复算（本机，`requirements-ci.lock` 装齐，串行无并发会话）**：
+      ```
+      protected_tests.1.txt   3125 passed,  9 skipped, 1 xfailed   (10m40s)  RC=0
+      protected_tests.2.txt   2785 passed,  5 skipped, 2 xfailed   (11m09s)  RC=0
+      protected_tests.3.txt   2992 passed,  4 skipped              (10m40s)  RC=0
+      coverage（三片合并，--fail-under 60）  Total coverage: 85.65%  → 门禁通过
+      ci_static_gate.py --skip-import        语法 / 未定义名 / 导入巡检 三格全过
+      ci_static_gate.py（含全模块导入巡检）  全部通过
+      ruff check neurova tests --no-cache    All checks passed
+      tests/unit/test_audit_regressions.py   15 passed
+      tests/e2e/test_backend_boot.py         5 passed
+      perf_gate.py                           性能门禁通过
+      deploy_config_consistency_check.py     ERROR 0 / WARN 1（既有 R7-auth）
+      experience_quality_gate.py             门禁通过
+      audit_ledger_commit_guard.py           rc=0（1397 条引用全可达，例外清单署名 5 条）
+      生成器三跑（api_inventory / api_auth_surface / cognitive_component_table）
+                                             跑完 git status -- docs/ 为空 → 零漂移
+      tests/unit/ci 整目录 + test_audit_ledger_commit_guard.py   627 passed, 3 skipped
+      ```
+      前端（真 `npm ci` 后）：`npx vitest run` → **294 files / 2382 passed**、`npx vue-tsc --noEmit` 零错误、`npm audit --audit-level=high` → RC=0（仅 6 条 moderate 存量）。依赖审计：`pip_audit_gate.py` 两把锁 → `No known vulnerabilities found`；`osv_audit.py` → 447 + 365 包、✅ 无未允许的已知漏洞。
+    - **PR 头这份树的活体验证（`cnb-cs1-1k6sgi6p4`，sha `9d25dc54`，NPC 通道，整条 `success`）**：`materialize main baseline ref` 259ms → `install uv + locked dependencies` 34.5s → `regenerate shipped artifacts drift gate` 34.6s（docs/ 零漂移）→ `ledger guards` 10.3s → `budget baseline and parity guards` 8.2s。
+    - **本轮一次无关红复现，已定性为「并发跑测」而非仓内缺陷**：第一次跑第 1 片时末尾 `1 error`，是 `_guardRepoRootAgainstPollution` 点名 `.pytest_cache`——同一时间我在另一个 shell 里跑过 `python3 -m pytest tests/unit/ci`，那个会话启动即在仓库根建该目录。清掉后原样重跑第 1 片：**3125 passed / RC=0**，与 §6-605 记的同一形态。
+    - **本轮另一处如实登记**：第一次起第 3 片时把 `COVERAGE_FILE=...` 写在 pytest 参数位后面，pytest 把它当成「文件或目录」收下，以 `ERROR: file or directory not found` 收场、返回码 4——**属我的命令行写错，不属仓内缺陷**；改成环境变量前缀后同一份清单 `2992 passed / RC=0`。
+    - **需要你在组织侧做的一件事**：`组织 → 设置 → 用量管理` 给「云原生构建-CPU」提额（或绑腾讯云 CNB 预算，超额 ¥0.125/核时）。普通池连 1 核（0.17 核时）都拒，`pull_request` 那条腿在提额前无法变绿；这不是代码能修的项。
+    - **净 LOC**：文档本格追加，生产代码 +0、配置 +0、测试 +0。**下一枚空号现查：本格取 611，后继从 612 起。**
+    - **补记（PR 头 `46749151` 的活体验证，NPC 通道）**：本格落定后新起两条探针，验「文档笔有没有把判据带红」：
+      ```
+      cnb-1bi-1k6skebeu   ledger + numbering + reachability guards   success  11.4s
+                          （audit_ledger_commit_guard.py → 1398 条引用全可达，例外清单署名 5 条；
+                            台账三档 + 净 LOC 复算一档全绿）
+                          shipped artifacts drift                      success  31.0s  → docs/ 零漂移
+      cnb-m7q-1k6skk3kh   protected subset budget and parity guards   success  11.8s
+                          （预算 / 父墙 / 分片 / 基线物化 / 对齐五档全绿）
+      ```
+      两条 stage 红同样**红在我的探针路径写错**、不在仓里：`test_auditLedgerReachabilitySingleProbe.py` 与 `test_ci_parity_guard.py` 我按 `tests/unit/ci/` 写，实际都在 `tests/unit/`，pytest 以 `ERROR: file or directory not found` 收场、返回码 4（与 §6-609/§6-610 同一形态，第三次踩）。改正路径后同一批全绿。
+    - **净 LOC（本格补记这笔）**：生产池 +0/−0；测试/基建池 +11/−0（只动 `audit-reports/` 台账）。

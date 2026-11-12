@@ -33,6 +33,19 @@ class _FakeEngine:
     def retrieve(self, query, limit=5, filters=None):
         return []
 
+    def iter_nodes(self, filters=None, limit=500):
+        """`_store_candidate` 的同 key 查重会读这一面（批 W4）。
+
+        替身必须跟随生产真实消费的 seam：缺它时替身不是"简化"，而是让判据在
+        属性访问上炸掉——那红指向替身而不是被测行为（同 §6-55 族的替身签名纪律）。
+        """
+        nodes = self.stored
+        if filters:
+            nodes = [n for n in nodes
+                     if all(getattr(n, "metadata", {}).get(k) == v
+                            for k, v in filters.items())]
+        return nodes[:limit]
+
 
 class CrystallizationGateGovernanceTest(unittest.TestCase):
     def setUp(self):

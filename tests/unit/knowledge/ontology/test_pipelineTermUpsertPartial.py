@@ -30,6 +30,7 @@ from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
 from neurova.knowledge.ontology.pipeline import OntologyPipeline
 from neurova.knowledge.ontology.rule_engine import ForwardChainingEngine
 from neurova.knowledge.ontology.term_registry import OntologyTermRegistry
+from tests.ast_scan import parseSource
 
 ADMIN = {"user_id": "9", "username": "admin", "role": "admin", "tenant_id": "default"}
 PREFIX = "/v1/knowledge"
@@ -161,7 +162,7 @@ class TestMergeSingleSource:
         """合并口径住在注册表；端点里再留一份 `_updateTermPayload` 就是双源。"""
         offenders = []
         for path in _ENDPOINTS.glob("knowledge_*.py"):
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            tree = parseSource(path.read_text(encoding="utf-8"), str(path))
             names = {node.name for node in ast.walk(tree)
                      if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
             if "_updateTermPayload" in names:

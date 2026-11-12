@@ -4302,3 +4302,7 @@ tests/unit/channels/test_wecomCryptoSingleSource.py
 tests/unit/channels/test_wecomArchiveWorker.py
 # 企微会话存档媒体触发面（批 C7c 第三块）：GetMediaData 续传环 indexbuf 首空后续喂 outindex、分片拼接完成即止、引用过期 ArchiveMediaUnavailable 独立读数、未完成无索引与超上限异常、缺导出点名、暂存回写 media_staged_path 幂等、端点 admin 门与非存档源 400/凭据未就绪 409/无引用 404/过期 502
 tests/unit/channels/test_wecomArchiveMedia.py
+# 受保护子集里的主线基线（origin/main）必须是 CI 物化出来的前提：平台检出只建被检出
+#   分支的 ref，靠「检出附带」就红在「解析不到」上（构建 cnb-98o-1k6rpqmf9#003 三格）。
+#   判据咬四件：物化 stage 在、排在跑子集之前、取不到就响应、受治面非空。
+tests/unit/ci/test_mainBaselineRefIsMaterialized.py

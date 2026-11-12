@@ -4,6 +4,7 @@ SQLite 持久化：工作流定义、节点定义、执行实例、Agent 信息
 """
 
 import json
+import logging
 import sqlite3
 import threading
 import time
@@ -27,6 +28,8 @@ from .models import (
     WorkflowTrigger,
     WorkflowVariable,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class NeurflowStorage:

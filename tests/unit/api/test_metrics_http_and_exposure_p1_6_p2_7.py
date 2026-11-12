@@ -208,11 +208,23 @@ class TestMetricsExposurePolicy:
         assert check_metrics_access("127.0.0.1", {})[0] is False
         assert check_metrics_access("203.0.113.9", {"x-metrics-token": "any"})[0] is False
 
-    def test_metrics_still_in_public_paths(self):
-        """本 PR 不改全局白名单（那是既有的鉴权设计，改动面另论）。
+    def test_metrics_sitsInTheLoopbackOnlyPublicSetNotTheWideOpenOne(self):
+        """判据按 P2-1（2026-11-04 裁定）的**现行**口径作答：`/metrics` 已从全公开
+        白名单移入「限环回」集。
 
-        /metrics 的抓取门是端点内的策略判定，与"是否需要登录"是两层门。
+        旧写法断的是 `"/metrics" in PUBLIC_EXACT_PATHS`——那是裁定前的形态，
+        裁定落地（`efd1dd3f`）后它必然红。这里改成断「在两处里的**正确那一处**」：
+        容器/本机 healthcheck（环回）照常匿名读，非环回匿名按未鉴权处理。
+        两层门的分工不变：抓取门在端点内做策略判定，是否需要登录在全局鉴权这一层。
         """
-        from neurova.api.global_auth import PUBLIC_EXACT_PATHS
+        from neurova.api.global_auth import (
+            LOOPBACK_ONLY_PUBLIC_PATHS,
+            PUBLIC_EXACT_PATHS,
+        )
 
-        assert "/metrics" in PUBLIC_EXACT_PATHS
+        assert "/metrics" in LOOPBACK_ONLY_PUBLIC_PATHS, (
+            "/metrics 掉出了限环回白名单——容器与本机 healthcheck 会抓不到"
+        )
+        assert "/metrics" not in PUBLIC_EXACT_PATHS, (
+            "/metrics 又回到了全公开白名单：非环回匿名请求可直读指标面（P2-1 已裁定不许）"
+        )

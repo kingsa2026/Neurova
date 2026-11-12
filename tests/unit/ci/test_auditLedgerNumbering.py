@@ -240,6 +240,7 @@ def _droppedCells(headText, workText):
     return sorted(nums(headText) - nums(workText), key=int)
 
 
+@pytest.mark.timeout(60)    # 本格要真起一次 `git show`：父墙必须严格高于子进程那条无界等待
 def testWorktreeCopyKeepsEveryCommittedCell():
     """工作树副本不得比 HEAD 少格（2026-11-04 实测两次被并发撤格，三把尺全静默）。"""
     import subprocess
@@ -247,7 +248,10 @@ def testWorktreeCopyKeepsEveryCommittedCell():
     assert LEDGER.is_file(), "台账路径变了——这条守卫已经在扫不存在的文件"
     root = LEDGER.parents[1]
     rel = LEDGER.relative_to(root).as_posix()
-    shown = subprocess.run(['git', 'show', 'HEAD:' + rel], capture_output=True, cwd=str(root))
+    # 子墙显式给：`git show` 在超大仓/慢盘上可能挂住，无界等待会把父墙变成唯一上界，
+    # 而父墙到点（thread 法）是**整场跑测被打死**，不是这一格红。
+    shown = subprocess.run(['git', 'show', 'HEAD:' + rel], capture_output=True,
+                           cwd=str(root), timeout=45)
     if shown.returncode != 0:
         pytest.skip('拿不到 HEAD 版台账（浅克隆或无 git），本格不适用')
     headText = shown.stdout.decode('utf-8', 'replace')

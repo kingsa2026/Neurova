@@ -189,6 +189,29 @@ main:
           - /root/.cache/pip
           - /root/.cache/uv
       stages:
+        # 受保护子集里有判据按**主线基线**取数（`test_npc_branch_cleanup.py` 读合并记录、
+        # `test_commitLocClaimMatchesOwnNumstat.py` 取未推送窗口），而平台检出**只建被检出
+        # 分支的 ref**。探针构建 `cnb-thk-1k6rrue9d` 逐条读数为：
+        #   git rev-parse origin/main / refs/remotes/origin/main / main / refs/heads/main
+        #   → 四条全部 `fatal: Needed a single revision`
+        # 而对象是齐的（`git cat-file -t 98b0fa42…` 回 `commit`）、历史也在——缺的只是
+        # **那一条 ref**。GitHub 侧 `actions/checkout` 带 `fetch-depth: 0` 自带 `origin/main`，
+        # 同一批判据因此在一侧绿、在另一侧红（构建 `cnb-98o-1k6rpqmf9#003` 第 2 片的三格）。
+        #
+        # 修法是把前提在**判据的上游**物化，不给判据加兜底：让消费方去猜「哪条 ref 能当
+        # 基线」是下游补丁，第二个消费方进来还要再猜一次（教义第 1 条）。
+        #
+        # refspec 必须**显式**：`git fetch origin main` 只写 `FETCH_HEAD`、不建
+        # `origin/main`——那正是「看起来取了、其实没建 ref」的最常见写法。故这里逐字钉
+        # `refs/heads/main:refs/remotes/origin/main`，末尾再 `rev-parse --verify` 自证；
+        # `set -e` 让取不到时当场响，不把失败留给后面的判据去误报成「判据坏了」。
+        # 判据见 tests/unit/ci/test_mainBaselineRefIsMaterialized.py。
+        - name: materialize main baseline ref
+          script: |
+            set -e
+            git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
+            git rev-parse --verify refs/remotes/origin/main
+          timeout: 5m
         - name: install uv + locked dependencies
           script: |
             python -m pip install uv
@@ -249,12 +272,11 @@ main:
               rm -f "$MARK"
               # `{ ...; echo $? > "$MARK"; }` 里的 `$?` 是 **pytest** 的退出码（它紧跟 pytest，
               # 中间没有别的命令），`tee` 只负责转发与落盘。
-              # 单档墙 `--timeout 300`（5m）压的是**墙钟余量，不是判据**：三片各起一个进程后
-              # 实测 473s / 664s / 472s（= 11m，含进程启动与收集期），最慢一片若把整段压在一格
-              # 死循环上，留给它的余量只有 5 分钟量级，1500s 那条墙（25m）到点时 stage 墙
-              # 早已先说话——**余量对不上的时候，先说真话的是整段强杀**，读的人只能猜
-              # （同一形态见台账 §6-418）。故单档墙取 300s：仍严格窄于 stage 墙 45m，
-              # 且窄于分片后单片实测耗时的 1.5 倍——真慢一格由它诚实地记 `Timeout`。
+              # 单档墙 `--timeout 300`（5m）压的是**墙钟余量，不是判据**：分片后每片各起一个
+              # 进程，最慢一片实测 1022s，单格若把整段压在一个死循环上，300s 会先于整段被杀
+              # 说话——**余量对不上的时候，先说真话的是整段强杀**，读的人只能猜
+              # （同一形态见台账 §6-418）。故单档墙取 300s：它严格窄于下面的 stage 墙，
+              # 真慢一格由它诚实地记 `Timeout`；整段那道墙按「片数 × 每片预算」算，见本 stage 末。
               # 片号进文件名，免得几片写同一份 `./.coverage` 互相覆盖。
               # `COVERAGE_FILE` 指进 `data/coverage/`：coverage 的缺省落点是 `./.coverage`，
               # 而合并那一步（`scripts/ci/coverage_report.py --data-dir data/coverage`）只认那个目录。
@@ -273,7 +295,19 @@ main:
             # `test_protectedSubsetBudgetCoversItsRealCost.py` 都按这一行认出本格；
             # 读法不另抄一份清单（重定向到 /dev/null，只留这条结构特征）。
             echo "受保护子集索引：scripts/ci/protected_tests.txt（入口 $(wc -l < scripts/ci/protected_tests.txt) 行）"
-          timeout: 45m
+          # 这道墙是**按结构算出来的**，不是按一次读数钉的：片数取自 `scripts/ci/`
+          # 目录里有几个 `protected_tests.<N>.txt`，每片预算取单片最慢实测 × 抖动余量，
+          # 三片串行就得乘 3。算式只有一处：`tests/subsetWallclockBudget.py`。
+          #
+          # 45m 是分片**之前**按"一整场"定的，分片落地后活变成"三场之和"而预算没跟：
+          # 构建 `cnb-h8j-1k6s4v3g1#003` 实读 shard 1 `1022s`、shard 2 `811s`，
+          # shard 3 跑到 [87%] 时撞 `任务超过最大执行时间而被强制关闭：45m0s`，
+          # 连汇总行都没来得及打。上一轮 `cnb-n6l-1k6s1qsq0` 三片共 37.4m 只是侥幸压线。
+          # 现取 75m（= 3832s 下界 + 约 17% 余量），仍严格低于单片的窗口上界口径判断，
+          # 也仍远宽于单档父墙 300s——真慢一格由单档诚实地记 `Timeout`。
+          # 判据：`test_protectedSubsetBudgetCoversItsRealCost.py` 判这条串行腿，
+          # `test_unit_tests_runner_has_headroom.py` 判 GitHub 矩阵里每 job 一片。
+          timeout: 75m
 
 
         # 合并判阈值：与上面那一批同属这条腿，红了一样拦合并。
@@ -325,7 +359,7 @@ main:
         tags: cnb:arch:amd64
         cpus: 4
       docker:
-        image: node:20
+        image: node:22
         volumes:
           - /root/.npm
       env:

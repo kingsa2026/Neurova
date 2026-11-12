@@ -20,6 +20,7 @@ import asyncio
 import base64
 import importlib
 import xml.etree.ElementTree as ET
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -29,6 +30,9 @@ from neurova.channels.wechat_kf_crypto import (
     decryptKfPayload,
     encryptKfPayload,
 )
+
+if TYPE_CHECKING:  # 类型注解面：运行期在函数内 import，注解里只作前向引用
+    from neurova.channels.wecom import WeComAdapter
 
 # 43 字符的合法 EncodingAESKey（base64 后恰为 32 字节）
 AES_KEY = base64.b64encode(bytes(range(32))).decode()[:43]

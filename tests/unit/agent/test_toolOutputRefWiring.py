@@ -20,13 +20,14 @@ import pathlib
 from unittest import mock
 
 import pytest
+from tests.ast_scan import parseSource
 
 APP_PY = pathlib.Path(__file__).resolve().parents[3] / "neurova" / "api" / "app.py"
 
 
 def test_app_lifespan_calls_output_ref_installer():
     """AST 接线守卫：app.py 必须调用 ensure_output_ref_installed_from_env。"""
-    tree = ast.parse(APP_PY.read_text(encoding="utf-8"))
+    tree = parseSource(APP_PY.read_text(encoding="utf-8"), str(APP_PY))
     calls = [
         node
         for node in ast.walk(tree)

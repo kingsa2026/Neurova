@@ -1451,10 +1451,17 @@ tests/unit/collaboration/test_outboxDeliveredIntoNotificationFace.py
 # §6-532：后端不可得时交回信封 success=False 并点名不可得，社交出口据此引导「先启用后端」，
 # 不再把「没装」说成「没配登录态」；后端在但渠道未配登录态那条腿一字未动。逐文件单跑 5 passed
 tests/unit/web_reach/test_unavailableBackendIsNamedNotSilentEmpty.py
+# 本体栈升级计划 B1–B7：推导事实读侧治理单源（观察态过滤落 FactSurface，翻开关双向可回滚）
+# —— 与四条 B 系列判据同批入索引，本轮补进本片（索引与各片并集须逐条相等的守卫抓到漏登）
 tests/unit/knowledge/test_derivationCitation.py
 tests/unit/knowledge/test_factSurfaceDerivationGovernance.py
 tests/unit/knowledge/test_admissionBatchCommit.py
 tests/unit/knowledge/ontology/test_turtleExport.py
 tests/unit/knowledge/ontology/test_conditionClassDerivation.py
 tests/unit/knowledge/test_graphWalkDerivationGovernance.py
+# 对话链路取数口径：真走查→真支撑→真 memories→真回合 metadata，四段不许各写一套
 tests/unit/agent/test_derivationReachesTurnMetadata.py
+# 受保护子集里的主线基线（origin/main）必须是 CI 物化出来的前提：平台检出只建被检出
+#   分支的 ref，靠「检出附带」就红在「解析不到」上（构建 cnb-98o-1k6rpqmf9#003 三格）。
+#   判据咬四件：物化 stage 在、排在跑子集之前、取不到就响应、受治面非空。
+tests/unit/ci/test_mainBaselineRefIsMaterialized.py
