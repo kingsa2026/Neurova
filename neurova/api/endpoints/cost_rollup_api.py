@@ -9,15 +9,24 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from typing import Any, Dict
 
+from neurova.api.auth import get_current_user
+from neurova.api.deps import require_admin
 from neurova.models.cost_rollup import (
     get_optimized_cost_queries,
     get_rollup_manager,
 )
 from neurova.models.cost_store import get_llm_cost_store
 
-router = APIRouter(prefix="/cost-rollup", tags=["cost-rollup"])
+# P1-1（全库断点审计 2026-11-12）：本 router 曾整面裸挂——匿名可读全部成本账本，
+# /rollup/now 可被匿名强制跑重聚合。读面收登录，两条聚合触发面收 admin。
+router = APIRouter(
+    prefix="/cost-rollup",
+    tags=["cost-rollup"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 def _require_store():
@@ -54,7 +63,7 @@ def get_dashboard_metrics_endpoint():
 
 
 @router.post("/rollup/now")
-def force_rollup_now():
+def force_rollup_now(_admin: Dict[str, Any] = Depends(require_admin())):
     """立即聚合上一小时。"""
     manager = get_rollup_manager()
     if not manager.status["store_ready"]:
@@ -64,7 +73,11 @@ def force_rollup_now():
 
 
 @router.post("/rollup/range")
-def force_rollup_range(start_time: datetime, end_time: datetime):
+def force_rollup_range(
+    start_time: datetime,
+    end_time: datetime,
+    _admin: Dict[str, Any] = Depends(require_admin()),
+):
     """回填指定时间范围（逐小时聚合）。"""
     if start_time >= end_time:
         raise HTTPException(status_code=400, detail="start_time 必须早于 end_time")
