@@ -232,8 +232,8 @@ const heatmapOption = computed(() => {
     return {
       tooltip: { trigger: 'axis' },
       grid: { left: 60, right: 24, top: 24, bottom: 28 },
-      xAxis: { type: 'category', data: labels, axisLabel: { color: '#94a3b8', interval: Math.max(1, Math.floor(labels.length / 10)) } },
-      yAxis: { type: 'value', axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } } },
+      xAxis: { type: 'category', data: labels, axisLabel: { color: 'var(--nr-neutral-500)', interval: Math.max(1, Math.floor(labels.length / 10)) } },
+      yAxis: { type: 'value', axisLabel: { color: 'var(--nr-neutral-500)' }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } } },
       series: [{ name: t('usageStats.totalTokens'), type: 'line', smooth: true, showSymbol: false, data, lineStyle: { color: '#a78bfa', width: 2 }, itemStyle: { color: '#a78bfa' }, areaStyle: { color: 'rgba(167,139,250,0.12)' } }],
     }
   }
@@ -259,8 +259,8 @@ const heatmapOption = computed(() => {
     // x 轴 = 周序，但**必须有日期刻度**：此前 axisLabel.show=false，
     // 365 天窗口渲染成一条没有任何日期参照的空白长条（截图里的灰带）。
     // 刻度取每周首日的 MM-DD，间隔抽稀到 ≤12 个，避免糊成一片。
-    xAxis: { type: 'category', data: heatWeekLabels(days, cells), axisLabel: { color: '#94a3b8', interval: Math.max(0, Math.ceil((Math.max(...cells.map((c) => c[0])) + 1) / 12) - 1), fontSize: 10 } },
-    yAxis: { type: 'category', data: yLabels, axisLabel: { color: '#94a3b8' } },
+    xAxis: { type: 'category', data: heatWeekLabels(days, cells), axisLabel: { color: 'var(--nr-neutral-500)', interval: Math.max(0, Math.ceil((Math.max(...cells.map((c) => c[0])) + 1) / 12) - 1), fontSize: 10 } },
+    yAxis: { type: 'category', data: yLabels, axisLabel: { color: 'var(--nr-neutral-500)' } },
     visualMap: {
       show: false,
       min: 0,
@@ -288,10 +288,10 @@ const trendOption = computed(() => {
   const palette = ['var(--nr-info)', 'var(--nr-success)', '#a78bfa', 'var(--nr-error)', 'var(--nr-warning)', '#22d3ee', '#f472b6']
   return {
     tooltip: { trigger: 'axis' },
-    legend: { top: 0, textStyle: { color: '#94a3b8' }, icon: 'circle' },
+    legend: { top: 0, textStyle: { color: 'var(--nr-neutral-500)' }, icon: 'circle' },
     grid: { left: 64, right: 24, top: 40, bottom: 28 },
-    xAxis: { type: 'category', data: labels, boundaryGap: false, axisLabel: { color: '#94a3b8' } },
-    yAxis: { type: 'value', axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } } },
+    xAxis: { type: 'category', data: labels, boundaryGap: false, axisLabel: { color: 'var(--nr-neutral-500)' } },
+    yAxis: { type: 'value', axisLabel: { color: 'var(--nr-neutral-500)' }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } } },
     series: models.map((model, i) => ({
       name: model,
       type: 'line',
@@ -454,11 +454,11 @@ onMounted(fetchData)
 
 .nr-latency-head {
   font-weight: 600;
-  color: var(--nr-text-primary, #e2e8f0);
+  color: var(--nr-text-primary, var(--nr-neutral-100));
 }
 
 .nr-latency-model {
-  color: var(--nr-text-primary, #e2e8f0);
+  color: var(--nr-text-primary, var(--nr-neutral-100));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -20,9 +20,9 @@ import { join } from 'node:path'
 const COLOR_RE = /#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)/g
 
 const BASELINES: Record<string, number> = {
-  'src/pages/ModelPage.vue': 102,  // 中性灰与供应商品牌色（品牌色是标识非主题色）
-  'src/pages/analytics/TokenActivitySection.vue': 27,  // 数据系列色（每系列一色是可视化合法形态）
-  'src/components/chat/ContextUsageIndicator.vue': 7,  // 精化口径后余 7（其余为 var 兜底）
+  'src/pages/ModelPage.vue': 86,  // 中性灰阶已入 ramp（#8a8a92/#d6d6de）；余为供应商品牌色与 alpha 淡色
+  'src/pages/analytics/TokenActivitySection.vue': 20,  // 轴标签灰阶已入 ramp；余为数据系列色与系列渐变（可视化合法形态）
+  'src/components/chat/ContextUsageIndicator.vue': 7,  // 图表段色（数据系列，合法字面量）
   'src/pages/graph-workbench/GraphExplorer3D.vue': 16,  // 3D 数据可视化色（Three.js 材质，不走 CSS 令牌）
   'src/modules/collaboration/CanvasDesignerPage.vue': 23,  // 白色 alpha 与靛蓝淡色待软底令牌
 }

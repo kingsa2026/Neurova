@@ -2273,7 +2273,7 @@ onBeforeUnmount(() => {
   gap: 6px;
   margin: 0 0 10px 4px;
   font-size: 12px;
-  color: var(--nr-text-secondary, #8a8a92);
+  color: var(--nr-text-secondary, var(--nr-neutral-500));
 }
 
 .nr-mm-search-clear:hover { color: var(--nr-text-primary); }
@@ -2289,7 +2289,7 @@ onBeforeUnmount(() => {
   gap: 5px;
   padding: 3px 10px;
   font-size: 12px;
-  color: var(--nr-text-secondary, #8a8a92);
+  color: var(--nr-text-secondary, var(--nr-neutral-500));
   background: transparent;
   border: 1px solid rgba(127, 127, 127, 0.25);
   border-radius: 6px;
@@ -2322,7 +2322,7 @@ onBeforeUnmount(() => {
 
 .nr-mm-filter-label {
   font-size: 12px;
-  color: var(--nr-text-secondary, #8a8a92);
+  color: var(--nr-text-secondary, var(--nr-neutral-500));
   white-space: nowrap;
   min-width: 88px;
 }
@@ -2337,7 +2337,7 @@ onBeforeUnmount(() => {
 .nr-mm-series-pill {
   padding: 2px 9px;
   font-size: 11px;
-  color: var(--nr-text-primary, #d6d6de);
+  color: var(--nr-text-primary, var(--nr-neutral-100));
   background: transparent;
   border: 1px solid rgba(127, 127, 127, 0.25);
   border-radius: 999px;
@@ -2360,7 +2360,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--nr-text-primary, #d6d6de);
+  color: var(--nr-text-primary, var(--nr-neutral-100));
   cursor: pointer;
 }
 
@@ -2379,7 +2379,7 @@ onBeforeUnmount(() => {
 
 .nr-mm-filter-results-title {
   font-size: 12px;
-  color: var(--nr-text-secondary, #8a8a92);
+  color: var(--nr-text-secondary, var(--nr-neutral-500));
 }
 
 /* 发现候选面板：获取模型只列出可添加项，手动"添加"才并入配置 */
@@ -2399,7 +2399,7 @@ onBeforeUnmount(() => {
 
 .nr-mm-candidates-title {
   font-size: 12px;
-  color: var(--nr-text-secondary, #8a8a92);
+  color: var(--nr-text-secondary, var(--nr-neutral-500));
 }
 
 /* 模型连接测试结果容器：紧贴模型行下方的内嵌条（成功绿/失败红/警示黄） */
