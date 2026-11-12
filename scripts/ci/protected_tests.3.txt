@@ -1451,3 +1451,10 @@ tests/unit/collaboration/test_outboxDeliveredIntoNotificationFace.py
 # §6-532：后端不可得时交回信封 success=False 并点名不可得，社交出口据此引导「先启用后端」，
 # 不再把「没装」说成「没配登录态」；后端在但渠道未配登录态那条腿一字未动。逐文件单跑 5 passed
 tests/unit/web_reach/test_unavailableBackendIsNamedNotSilentEmpty.py
+tests/unit/knowledge/test_derivationCitation.py
+tests/unit/knowledge/test_factSurfaceDerivationGovernance.py
+tests/unit/knowledge/test_admissionBatchCommit.py
+tests/unit/knowledge/ontology/test_turtleExport.py
+tests/unit/knowledge/ontology/test_conditionClassDerivation.py
+tests/unit/knowledge/test_graphWalkDerivationGovernance.py
+tests/unit/agent/test_derivationReachesTurnMetadata.py
