@@ -54,6 +54,7 @@
 | CQ-21 | 递归推理在增量下结论还一致吗？ | 知识管理员 | P2 | 推理广度（specs/2026-11-12 W9 落地：semi-naive 增量＋rete 策略槽） | tests/unit/knowledge/ontology/test_semiNaiveEquivalence.py | implemented |
 | CQ-22 | 能否用 SPARQL 查询/溯因解释一条事实？ | 集成方 | P2 | SPARQL/溯因（specs/2026-11-12 W9 落地：投影只读＋解释树） | tests/unit/knowledge/ontology/test_sparqlReadOnly.py | implemented |
 | CQ-23 | 湖仓/HTTP 推送源能否进同一摄取管道？ | 集成方 | P2 | 摄取广度（specs/2026-11-12 W10 落地：三连接器＋http_pull 接线＋webhook 幂等） | tests/unit/knowledge/enterprise/test_lakehouseConnectors.py | implemented |
+| CQ-24 | 全库能否导出为外部图库可消化的格式？ | 集成方 | P2 | 多格式导出（specs/2026-11-12 W11 落地：GraphML/GEXF/Cypher/CSV 确定性） | tests/unit/knowledge/ontology/test_exportFormats.py | implemented |
 | CQ-17 | 过去有没有同类场景的判例？ | 审计员 | P2 | 判例检索（specs/2026-11-12 W7 落地：词法混合计分，嵌入偏差登记） | tests/unit/knowledge/ontology/test_decisionPrecedents.py | implemented |
 
 ## 追溯规则

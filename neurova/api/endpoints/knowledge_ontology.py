@@ -615,6 +615,70 @@ async def delete_chunk_strategy(
     return {"code": 0, "data": {"strategy_id": strategy_id}, "request_id": ""}
 
 
+@router.get("/ontology/export.graphml")
+async def export_ontology_graphml(
+    request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+    agent_id: Optional[str] = Query(default=None),
+):
+    """W11：GraphML 导出（管理员）——与既有五格式同族，确定性序列化。"""
+    _requireAdmin(current_user)
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.export.graph_exchange import exportGraphML
+
+    text = exportGraphML(get_knowledge_fact_store(),
+                         tenantId=_tenantOf(current_user), agentId=agent_id)
+    return Response(content=text, media_type="application/graphml+xml; charset=utf-8")
+
+
+@router.get("/ontology/export.gexf")
+async def export_ontology_gexf(
+    request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+    agent_id: Optional[str] = Query(default=None),
+):
+    """W11：GEXF 导出（管理员）。"""
+    _requireAdmin(current_user)
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.export.graph_exchange import exportGexf
+
+    text = exportGexf(get_knowledge_fact_store(),
+                      tenantId=_tenantOf(current_user), agentId=agent_id)
+    return Response(content=text, media_type="application/gexf+xml; charset=utf-8")
+
+
+@router.get("/ontology/export.cypher")
+async def export_ontology_cypher(
+    request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+    agent_id: Optional[str] = Query(default=None),
+):
+    """W11：Cypher dump 导出（管理员，外部图库自行导入）。"""
+    _requireAdmin(current_user)
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.export.graph_exchange import exportCypher
+
+    text = exportCypher(get_knowledge_fact_store(),
+                        tenantId=_tenantOf(current_user), agentId=agent_id)
+    return Response(content=text, media_type="text/plain; charset=utf-8")
+
+
+@router.get("/ontology/export.csv")
+async def export_ontology_csv(
+    request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+    agent_id: Optional[str] = Query(default=None),
+):
+    """W11：CSV 节点/边导出（管理员）。"""
+    _requireAdmin(current_user)
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.export.graph_exchange import exportCsv
+
+    text = exportCsv(get_knowledge_fact_store(),
+                     tenantId=_tenantOf(current_user), agentId=agent_id)
+    return Response(content=text, media_type="text/csv; charset=utf-8")
+
+
 @router.post("/ontology/sparql")
 async def run_ontology_sparql(
     body: Dict[str, Any],
