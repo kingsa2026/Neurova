@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import difflib
+import re
 import hashlib
 import json
 import time
@@ -46,6 +47,55 @@ def _side_signature(node: Any) -> str:
     aliases = getattr(node, "aliases", None) or []
     alias_part = ",".join(sorted(str(a).strip().lower() for a in aliases if str(a).strip()))
     return f"{label}|{node_type}|{alias_part}|{description[:_DESCRIPTION_SLICE]}"
+
+
+def candidatePairsFullScan(nodes: List[Any]) -> List[tuple]:
+    """全对扫基线（既有灰区召回的对照形状——blocking 的子集判据上界）。"""
+    out: List[tuple] = []
+    for i, a in enumerate(nodes):
+        for b in nodes[i + 1:]:
+            out.append((a.node_id, b.node_id))
+    return out
+
+
+def candidatePairsBlocking(nodes: List[Any]) -> List[tuple]:
+    """blocking 候选召回（W8）：nodeType＋label 词倒排桶——共享任一词才成对；
+    同类型近形对（difflib ≥ 0.6）保留为候选（灰区判定的入口不漏）；跨类型对
+    不进候选。桶内仍走既有灰区判定（difflib/别名/语义并联在 find_candidates 不变）。"""
+    buckets: Dict[tuple, List[Any]] = {}
+    byType: Dict[str, List[Any]] = {}
+    for node in nodes:
+        label = str(getattr(node, "label", "") or "")
+        nodeType = str(getattr(node, "node_type", "") or "")
+        tokens = set(re.split(r"[\s\-_:，,。]+", label).casefold().split()) \
+            if False else set(w.casefold() for w in re.split(r"[\s\-_:，,。]+", label) if w)
+        for token in tokens:
+            buckets.setdefault((nodeType, token), []).append(node)
+        byType.setdefault(nodeType, []).append(node)
+    out: List[tuple] = []
+    seen: set = set()
+
+    def _add(a: Any, b: Any) -> None:
+        key = (a.node_id, b.node_id)
+        if key not in seen:
+            seen.add(key)
+            out.append(key)
+
+    for members in buckets.values():
+        for i, a in enumerate(members):
+            for b in members[i + 1:]:
+                _add(a, b)
+    # 同类型近形守卫：词面不共享但 difflib 相似的对不漏（类型内 O(n²) 有界）
+    for _type, members in byType.items():
+        for i, a in enumerate(members):
+            for b in members[i + 1:]:
+                if (a.node_id, b.node_id) in seen:
+                    continue
+                ratio = difflib.SequenceMatcher(
+                    None, str(a.label).lower(), str(b.label).lower()).ratio()
+                if ratio >= 0.6:
+                    _add(a, b)
+    return out
 
 
 def pair_key(left: Any, right: Any) -> str:

@@ -569,7 +569,7 @@ export function listKnowledgeChunkRevisions(knowledgeId: string, index: number) 
 }
 
 /** 切分 live-preview（只读，与生产单源）。 */
-export function previewChunking(data: { content: string; max_chars?: number; overlap?: number }) {
+export function previewChunking(data: { content: string; max_chars?: number; overlap?: number; strategy?: { kind: string; params?: Record<string, unknown> } | null }) {
   return api.post<ApiResponse<{
     chunks: Array<Record<string, unknown>>
     total: number

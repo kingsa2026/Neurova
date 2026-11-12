@@ -48,6 +48,9 @@
 | CQ-15 | 动作的前置条件不满足时是否拒绝执行？ | 运维员 | P2 | 动作语义（specs/2026-11-12 W4 落地：precondition 不触工具＋单管道转交） | tests/unit/knowledge/ontology/test_actionPrecondition.py | implemented |
 | CQ-14 | 假设某状态变化后下游会受什么影响？ | 运维员 | P2 | 推演（specs/2026-11-12 W5 落地：副本隔离零生产写＋diff 报告） | tests/unit/knowledge/ontology/test_simulationDiff.py | implemented |
 | CQ-16 | 这个决定依据什么、导致了什么下游后果？ | 审计员 | P2 | 决策因果（specs/2026-11-12 W7 落地：决策台账＋caused 闭包 trace） | tests/unit/knowledge/ontology/test_decisionCausalChain.py | implemented |
+| CQ-18 | 同一篇文档能否按声明的策略切块？ | 知识管理员 | P2 | 切块策略（specs/2026-11-12 W8 落地：十三 kind 注册表＋单点分派） | tests/unit/knowledge/test_chunkStrategyRegistry.py | implemented |
+| CQ-19 | 整个语料库的社区结构与摘要能否检索？ | 知识使用者 | P2 | 社区检索（specs/2026-11-12 W8 落地：标签传播＋global/drift） | tests/unit/knowledge/test_communityGraphRAG.py | implemented |
+| CQ-20 | 消解候选对是否被 blocking 收敛？ | 知识管理员 | P2 | 消解补强（specs/2026-11-12 W8 落地：倒排桶 blocking＋近形守卫） | tests/unit/knowledge/test_resolutionBlocking.py | implemented |
 | CQ-17 | 过去有没有同类场景的判例？ | 审计员 | P2 | 判例检索（specs/2026-11-12 W7 落地：词法混合计分，嵌入偏差登记） | tests/unit/knowledge/ontology/test_decisionPrecedents.py | implemented |
 
 ## 追溯规则

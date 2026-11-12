@@ -1093,6 +1093,7 @@ conflictTimeReadout: 'Временные показатели: {basis} (стар
     ingressStatusDead: 'Мертвый',
     ingressStatusCancelled: 'Отменено',
     previewBtn: 'Предпросмотр разбиения (как импорт)',
+    chunkStrategyPlaceholder: "Стратегия нарезки (по умолчанию = существующая структурная нарезка)",
     previewResult: 'чанков {children} · родительских {parents} (ширина {maxChars})',
     previewEmpty: 'Введите текст для предпросмотра',
     chunksBtn: 'Чанки',

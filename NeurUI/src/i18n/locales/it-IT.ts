@@ -1093,6 +1093,7 @@ conflictTimeReadout: 'Lettura temporale: {basis} (vecchia {old} → nuova {new})
     ingressStatusDead: 'Morto',
     ingressStatusCancelled: 'Annullato',
     previewBtn: 'Anteprima chunking (come import)',
+    chunkStrategyPlaceholder: "Strategia di chunking (predefinita = chunking strutturale esistente)",
     previewResult: '{children} chunk · {parents} padri (larghezza {maxChars})',
     previewEmpty: "Inserisci contenuto prima dell'anteprima",
     chunksBtn: 'Chunk',

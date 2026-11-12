@@ -124,6 +124,22 @@ def _probeShapeValidation() -> str:
     return "implemented" if hits == 2 else ("partial" if hits else "planned")
 
 
+def _probeGraphRag() -> str:
+    """CQ-18/19/20：GraphRAG 工艺（specs/2026-11-12 W8）——策略注册/社区/消解。"""
+    from neurova.knowledge import chunk_dispatch, community_graph, resolution
+    from neurova.mcp_ontology_server import ontology_community_search  # noqa: F401
+
+    hits = (
+        (len(chunk_dispatch.CHUNK_KINDS) == 13)
+        + hasattr(chunk_dispatch.ChunkStrategyRegistry, "register")
+        + hasattr(community_graph.CommunityGraphBuilder, "detect")
+        + (ontology_community_search is not None)
+        + hasattr(resolution, "candidatePairsBlocking")
+        + ("conflict_policy" in (community_graph._SCHEMA_V48_COMMUNITIES or ""))
+    )
+    return "implemented" if hits == 6 else ("partial" if hits else "planned")
+
+
 def _probeDecisions() -> str:
     """CQ-16/17：决策因果与判例（specs/2026-11-12 W7）——台账/链接/trace/检索。"""
     from neurova.knowledge.ontology import decision_ledger
@@ -303,6 +319,21 @@ CQ_TRACE_ROWS: tuple = (
         query="决策因果（specs/2026-11-12 W7 落地：决策台账＋caused 闭包 trace）",
         testId="tests/unit/knowledge/ontology/test_decisionCausalChain.py",
         probe=_probeDecisions),
+    CqTraceRow(
+        cqId="CQ-18", question="同一篇文档能否按声明的策略切块？", actor="知识管理员", priority="P2",
+        query="切块策略（specs/2026-11-12 W8 落地：十三 kind 注册表＋单点分派）",
+        testId="tests/unit/knowledge/test_chunkStrategyRegistry.py",
+        probe=_probeGraphRag),
+    CqTraceRow(
+        cqId="CQ-19", question="整个语料库的社区结构与摘要能否检索？", actor="知识使用者", priority="P2",
+        query="社区检索（specs/2026-11-12 W8 落地：标签传播＋global/drift）",
+        testId="tests/unit/knowledge/test_communityGraphRAG.py",
+        probe=_probeGraphRag),
+    CqTraceRow(
+        cqId="CQ-20", question="消解候选对是否被 blocking 收敛？", actor="知识管理员", priority="P2",
+        query="消解补强（specs/2026-11-12 W8 落地：倒排桶 blocking＋近形守卫）",
+        testId="tests/unit/knowledge/test_resolutionBlocking.py",
+        probe=_probeGraphRag),
     CqTraceRow(
         cqId="CQ-17", question="过去有没有同类场景的判例？", actor="审计员", priority="P2",
         query="判例检索（specs/2026-11-12 W7 落地：词法混合计分，嵌入偏差登记）",

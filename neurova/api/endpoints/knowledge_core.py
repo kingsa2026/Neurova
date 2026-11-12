@@ -299,6 +299,22 @@ async def preview_chunking(
     # 钳制与摄取端可接受域对齐
     max_chars = max(100, min(4000, max_chars))
     overlap = max(0, min(overlap, max_chars // 2))
+    # W8：声明了切块策略时经单点分派（策略是数据——十三 kind 闭集；缺省走既有
+    # split_with_meta 逐字零漂移）。策略产物形状与父子块视图同构（children 视图）。
+    strategy = (body or {}).get("strategy") or None
+    if strategy:
+        from neurova.knowledge.chunk_dispatch import dispatchChunk
+
+        pieces = dispatchChunk(None, content, strategy=strategy)
+        children = [{"index": i, "content": piece,
+                     "context_header": ""} for i, piece in enumerate(pieces)]
+        return {
+            "code": 0,
+            "message": "success",
+            "data": {"children": children, "parents": [],
+                     "max_chars": max_chars, "overlap": overlap,
+                     "strategy": strategy},
+        }
     chunks = split_with_meta(content, max_chars=max_chars, overlap=overlap)
     # P1#6：同时预览生产形态——子块进索引、父块作 LLM 上下文
     from neurova.knowledge.splitter import build_entry_chunks

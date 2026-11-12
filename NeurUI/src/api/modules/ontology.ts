@@ -460,3 +460,8 @@ export function searchDecisionPrecedents(q: string, limit = 5) {
   return api.get<ApiResponse<Array<Record<string, unknown>>>>(
     `/knowledge/ontology/decisions/precedents?q=${encodeURIComponent(q)}&limit=${limit}`)
 }
+
+export function listChunkStrategies() {
+  return api.get<ApiResponse<Array<{ strategy_id: string; kind: string; params: Record<string, unknown> }>>>(
+    '/knowledge/ontology/chunk-strategies')
+}

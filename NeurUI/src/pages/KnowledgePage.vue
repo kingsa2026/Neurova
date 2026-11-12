@@ -409,6 +409,16 @@
           <a-textarea v-model:value="form.content" :rows="10" :placeholder="t('knowledge.contentPlaceholder')" />
           <!-- P1#7 切分 live-preview：与生产单源（split_with_meta/build_entry_chunks） -->
           <div class="kb-preview-row">
+            <a-select
+              v-if="chunkStrategies.length"
+              v-model:value="chunkStrategyId"
+              size="small"
+              allow-clear
+              style="min-width: 180px"
+              :options="chunkStrategyOptions"
+              :placeholder="t('knowledge.chunkStrategyPlaceholder')"
+              data-testid="chunk-strategy-select"
+            />
             <a-button type="link" size="small" :loading="previewLoading" @click="handlePreviewChunking">
               {{ t('knowledge.previewBtn') }}
             </a-button>
@@ -802,6 +812,7 @@ import {
 import type { KbConfig, KbCollection, KnowledgeNode, KnowledgeScope, KnowledgeConflict, ConflictTimeContext, DeletedKnowledge, GraphResolutionReview, KnowledgeChunkRow, IngressTask, IngressSpan } from '@/api/modules/knowledge'
 import { listKnowledgeCategories } from '@/api/modules/knowledge'
 import { request } from '@/api'
+import { listChunkStrategies } from '@/api/modules/ontology'
 import { useAuthStore } from '@/stores/auth'
 import GlassPanel from '@/components/GlassPanel.vue'
 import AnnotationDrawer from '@/modules/collaboration/AnnotationDrawer.vue'
@@ -1308,6 +1319,25 @@ async function handleCancelIngress(record: IngressTask) {
 }
 
 const previewLoading = ref(false)
+const chunkStrategies = ref<Array<{ strategy_id: string; kind: string; params: Record<string, unknown> }>>([])
+const chunkStrategyId = ref<string>('')
+
+const chunkStrategyOptions = computed(() =>
+  chunkStrategies.value.map((s) => ({
+    value: s.strategy_id,
+    label: `${s.strategy_id} (${s.kind})`,
+  })))
+
+async function loadChunkStrategies() {
+  try {
+    const res = await listChunkStrategies()
+    chunkStrategies.value = res.data ?? []
+  } catch {
+    chunkStrategies.value = []  // 名册失败＝选择器缺席（缺省零漂移，诚实回退）
+  }
+}
+
+onMounted(loadChunkStrategies)
 const previewResult = ref<{
   children: Array<{ index?: number; context_header?: string; content?: string }>
   parents: Array<{ index?: number }>
@@ -1322,7 +1352,12 @@ async function handlePreviewChunking() {
   }
   previewLoading.value = true
   try {
-    const res: any = await previewChunking({ content })
+    const strategy = chunkStrategies.value.find(
+      (s) => s.strategy_id === chunkStrategyId.value)
+    const res: any = await previewChunking({
+      content,
+      strategy: strategy ? { kind: strategy.kind, params: strategy.params } : null,
+    })
     previewResult.value = res?.data || null
   } catch (e: any) {
     message.error(extractApiDetail(e) || e?.message || String(e))

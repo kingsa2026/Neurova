@@ -1093,6 +1093,7 @@ conflictTimeReadout: 'Lectura temporal: {basis} (antigua {old} → nueva {new})'
     ingressStatusDead: 'Muerta',
     ingressStatusCancelled: 'Cancelado',
     previewBtn: 'Vista de fragmentación (igual que importación)',
+    chunkStrategyPlaceholder: "Estrategia de fragmentación (predeterminada = fragmentación estructural existente)",
     previewResult: '{children} fragmentos · {parents} padres (ancho {maxChars})',
     previewEmpty: 'Escriba contenido antes de la vista',
     chunksBtn: 'Fragmentos',

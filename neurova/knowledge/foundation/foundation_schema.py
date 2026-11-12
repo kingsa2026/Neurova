@@ -43,6 +43,7 @@ from ..fts_index import _SCHEMA_V37_FTS
 from ..ontology.action_registry import _SCHEMA_V42_ACTIONS, _SCHEMA_V45_ACTION_SEMANTICS
 from ..ontology.change_log import _SCHEMA_V33
 from ..ontology.function_registry import _SCHEMA_V43_FUNCTIONS
+from ..community_graph import _SCHEMA_V48_COMMUNITIES
 from ..ontology.decision_ledger import _SCHEMA_V47_DECISIONS
 from ..ontology.simulation import _SCHEMA_V46_SIMULATIONS
 from ..ontology.state_machine_registry import _SCHEMA_V44_STATE_MACHINES
@@ -169,6 +170,9 @@ _STEPS: List[tuple] = [
     # v47：决策台账（specs/2026-11-12 §8 W7，D7 必选）——ontology_decisions
     #      ＋ontology_decision_links（决策一等对象；问责台账不经事实门）
     (47, _SCHEMA_V47_DECISIONS),
+    # v48：GraphRAG 工艺（specs/2026-11-12 §9 W8）——切块策略注册表
+    #      ＋社区表＋术语行 conflict_policy 列（冲突策略数据化）
+    (48, _SCHEMA_V48_COMMUNITIES),
 ]
 
 _registered = False

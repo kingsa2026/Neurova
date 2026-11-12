@@ -1093,6 +1093,7 @@ conflictTimeReadout: 'समय रीडआउट: {basis} (पुराना 
     ingressStatusDead: 'डेड',
     ingressStatusCancelled: 'रद्द',
     previewBtn: 'चंकिंग पूर्वावलोकन (इम्पोर्ट समान)',
+    chunkStrategyPlaceholder: "चंकिंग रणनीति (डिफ़ॉल्ट = मौजूदा संरचना-सजग चंकिंग)",
     previewResult: 'चंक {children} · पैरेंट {parents} (चौड़ाई {maxChars})',
     previewEmpty: 'पूर्वावलोकन हेतु सामग्री लिखें',
     chunksBtn: 'चंक',
