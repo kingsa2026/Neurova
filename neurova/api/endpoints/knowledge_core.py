@@ -193,9 +193,14 @@ async def search_knowledge(
 
         store = get_knowledge_fact_store()
         tenant = str(current_user.get("tenant_id") or "default")
-        facts = store.factsBitemporal(
-            agent_id or "default", tenantId=tenant,
-            asOf=body.as_of or "", knownAt=body.known_at or "")
+        try:
+            facts = store.factsBitemporal(
+                agent_id or "default", tenantId=tenant,
+                asOf=body.as_of or "", knownAt=body.known_at or "")
+        except ValueError as exc:
+            # W0-1：不可解析时间显式 4xx（判据单源在存储层 parseBitemporalStamp），
+            # 不静默当空轴。
+            raise HTTPException(status_code=400, detail=str(exc))
         needle = str(body.query or "").strip().lower()
         items: List[Dict[str, Any]] = []
         for fact in facts:

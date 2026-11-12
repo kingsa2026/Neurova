@@ -433,6 +433,24 @@ ALTER TABLE knowledge_facts ADD COLUMN source_modified_at TEXT;
 MANUAL_RESOLUTIONS: tuple = ("keep_both", "supersede_old", "dismiss")
 
 
+def parseBitemporalStamp(value: str, field: str) -> str:
+    """双时态入参单点校验（W0-1）：ISO 8601（含 Z 后缀与日期only）才放行。
+
+    不可解析显式 ValueError——诚实形态，不静默当空轴。factsBitemporal 入口
+    调用，REST（4xx）与 MCP（结构化拒绝）两侧消费同一判据，不各写一份。
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError(
+            "双时态参数 %s 不可解析：%r 不是 ISO 8601 时间（日期或完整时间戳）"
+            % (field, value))
+    return text
+
+
 def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -1045,8 +1063,9 @@ class KnowledgeFactStore:
                 return text + "T23:59:59.999999+00:00"
             return text
 
-        asOf = _axis(asOf)
-        knownAt = _axis(knownAt)
+        # W0-1 单点校验：不可解析时间显式 ValueError——诚实形态，不静默当空轴。
+        asOf = _axis(parseBitemporalStamp(asOf, "asOf"))
+        knownAt = _axis(parseBitemporalStamp(knownAt, "knownAt"))
         sql = ("SELECT * FROM knowledge_facts WHERE agent_id = ? AND tenant_id = ?"
                " AND record_kind = 'triple'")
         params: List[Any] = [agentId, str(tenantId or "default")]

@@ -104,7 +104,7 @@ def _probeUpperLiteSeeds() -> str:
 
 
 def _probeBitemporalRestParams() -> str:
-    """CQ-10：asOf/knownAt 是否已接进 access/query 的 REST 签名（现未接线）。"""
+    """CQ-10：asOf/knownAt 是否已接进 access/query 的 REST 签名（W0-1 已接线）。"""
     from neurova.api.endpoints import knowledge_access_facade
 
     params = inspect.signature(knowledge_access_facade.accessQuery).parameters
@@ -192,7 +192,7 @@ CQ_TRACE_ROWS: tuple = (
         probe=_probeUpperLiteSeeds),
     CqTraceRow(
         cqId="CQ-10", question="某类事实在历史某时点是否成立（双时态）？", actor="审计员", priority="P2",
-        query="asOf/knownAt 查询（B11 落地，REST 参数未接线）",
+        query="asOf/knownAt 查询（B11 落地；W0-1 补 accessQuery 显式签名＋MCP 透传＋非法 4xx）",
         testId="tests/unit/knowledge/ontology/test_bitemporalQuery.py",
         probe=_probeBitemporalRestParams),
     CqTraceRow(

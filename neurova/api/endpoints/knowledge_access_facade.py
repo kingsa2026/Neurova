@@ -38,10 +38,26 @@ async def accessQuery(
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
     agent_id: Optional[str] = Query(default=None, description="来源 agent 过滤"),
     scope: str = Query(default="all", description="范围：all/public/private/shared"),
+    asOf: Optional[str] = Query(default=None,
+                                description="业务时间点 asOf（ISO 8601，日期或完整时间戳）"),
+    knownAt: Optional[str] = Query(default=None,
+                                   description="记录时间点 knownAt（ISO 8601）"),
 ):
-    """query 动词：转发既有检索处理函数（同一可见域、同一响应形状）。"""
+    """query 动词：转发既有检索处理函数（同一可见域、同一响应形状）。
+
+    W0-1：asOf/knownAt 显式查询参数与 body 内 as_of/known_at 同义、显式参数
+    优先；透传存储层 factsBitemporal（CQ-10 探针判据＝签名含两参数）。
+    非法时间由存储层单点校验显式 4xx，不静默忽略。
+    """
     from neurova.api.endpoints.knowledge_core import search_knowledge
 
+    overrides: Dict[str, Optional[str]] = {}
+    if asOf is not None:
+        overrides["as_of"] = asOf
+    if knownAt is not None:
+        overrides["known_at"] = knownAt
+    if overrides:
+        body = body.model_copy(update=overrides)
     return await search_knowledge(
         request=request, body=body, current_user=current_user,
         agent_id=agent_id, scope=scope)
