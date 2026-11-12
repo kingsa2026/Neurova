@@ -40,7 +40,7 @@ from .digest_chain import _SCHEMA_V11
 from ..categories_registry import _SCHEMA_V38_CATEGORIES
 from ..enterprise.schema_mapping import SCHEMA_V34 as _SCHEMA_V34_ENTERPRISE
 from ..fts_index import _SCHEMA_V37_FTS
-from ..ontology.action_registry import _SCHEMA_V42_ACTIONS
+from ..ontology.action_registry import _SCHEMA_V42_ACTIONS, _SCHEMA_V45_ACTION_SEMANTICS
 from ..ontology.change_log import _SCHEMA_V33
 from ..ontology.function_registry import _SCHEMA_V43_FUNCTIONS
 from ..ontology.state_machine_registry import _SCHEMA_V44_STATE_MACHINES
@@ -158,6 +158,9 @@ _STEPS: List[tuple] = [
     #      （states/transitions/event_bindings 闭集登记）＋企业源
     #      sync_interval_seconds 列（interval 同步间隔，D3 最小闭合）
     (44, _SCHEMA_V44_STATE_MACHINES),
+    # v45：动作语义三列（specs/2026-11-12 §6 W4）——precondition/impact/
+    #      state_change（执行成功后经 admission 写 has_state）
+    (45, _SCHEMA_V45_ACTION_SEMANTICS),
 ]
 
 _registered = False

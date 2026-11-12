@@ -343,6 +343,21 @@ export interface EnterpriseSourceHealth {
 
 /** 描述符写面形状（与后端 schema_mapping.validateDescriptor 同口径）。 */
 
+/** W4 动作语义：ontology_actions 行（specs/2026-11-12 §6，v45 三列） */
+export interface OntologyActionRow {
+  tenant_id: string
+  action_id: string
+  label: string
+  definition: string
+  param_schema: Record<string, unknown>
+  bound_tool: string
+  risk_tier: 'low' | 'medium' | 'high'
+  precondition: Record<string, unknown>
+  impact: string[]
+  state_change: Record<string, unknown>
+  enabled: boolean
+}
+
 /** W2 函数层：ontology_functions 行（specs/2026-11-12 §4） */
 export interface OntologyFunctionRow {
   tenant_id: string

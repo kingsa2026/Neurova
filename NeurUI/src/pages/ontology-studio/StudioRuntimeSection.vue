@@ -78,6 +78,52 @@
         </div>
       </a-tab-pane>
 
+      <!-- 动作 tab（W4） -->
+      <a-tab-pane key="actions" :tab="t('ontology.runtimeActionsTitle')">
+        <table class="runtime-table" data-testid="actions-table">
+          <thead>
+            <tr>
+              <th>{{ t('ontology.runtimeActionId') }}</th>
+              <th>{{ t('ontology.runtimeActionTool') }}</th>
+              <th>{{ t('ontology.runtimeActionPre') }}</th>
+              <th>{{ t('ontology.runtimeActionImpact') }}</th>
+              <th>{{ t('ontology.runtimeActionState') }}</th>
+              <th>{{ t('ontology.runtimeFunctionMat') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="action in actions" :key="action.action_id">
+              <td class="mono">{{ action.action_id }}</td>
+              <td class="mono">{{ action.bound_tool }}</td>
+              <td class="mono expr">{{ preconditionText(action) }}</td>
+              <td class="mono">{{ action.impact.join(', ') || '-' }}</td>
+              <td class="mono expr">{{ stateChangeText(action) }}</td>
+              <td>
+                <a-tag :color="action.risk_tier === 'high' ? 'red' : action.risk_tier === 'medium' ? 'orange' : 'default'">
+                  {{ action.risk_tier }}
+                </a-tag>
+              </td>
+            </tr>
+            <tr v-if="!actions.length">
+              <td colspan="6"><a-empty :description="t('ontology.runtimeActionEmpty')" /></td>
+            </tr>
+          </tbody>
+        </table>
+        <template v-if="isAdmin">
+          <h4 class="section-title">{{ t('ontology.runtimeActionRegister') }}</h4>
+          <div class="register-form" data-testid="action-register">
+            <a-input v-model:value="actionForm.action_id" class="mono"
+                     :placeholder="t('ontology.runtimeActionId')" data-testid="action-id" />
+            <a-input v-model:value="actionForm.bound_tool" class="mono"
+                     :placeholder="t('ontology.runtimeActionTool')" data-testid="action-tool" />
+            <GlassButton size="sm" data-testid="action-submit" @click="submitAction">
+              {{ t('common.save') }}
+            </GlassButton>
+          </div>
+          <div v-if="actionError" class="inline-error" data-testid="action-error">{{ actionError }}</div>
+        </template>
+      </a-tab-pane>
+
       <!-- 状态机 tab（W3） -->
       <a-tab-pane key="states" :tab="t('ontology.runtimeStatesTitle')">
         <table class="runtime-table" data-testid="states-table">
@@ -146,7 +192,13 @@ import {
   listOntologyFunctions,
   listOntologyStateMachines,
 } from '@/api/modules/ontology'
-import type { OntologyComputeResult, OntologyFunctionRow, OntologyStateMachineRow } from '@/types/ontology'
+import type {
+  OntologyActionRow,
+  OntologyComputeResult,
+  OntologyFunctionRow,
+  OntologyStateMachineRow,
+} from '@/types/ontology'
+import { createOntologyAction, listOntologyActions } from '@/api/modules/ontology' 
 import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
@@ -157,9 +209,12 @@ const isAdmin = computed(() => {
   return user?.role === 'admin'
 })
 
-const activeTab = ref<'functions' | 'states'>('functions')
+const activeTab = ref<'functions' | 'actions' | 'states'>('functions')
 const functions = ref<OntologyFunctionRow[]>([])
 const machines = ref<OntologyStateMachineRow[]>([])
+const actions = ref<OntologyActionRow[]>([])
+const actionForm = ref({ action_id: '', bound_tool: '' })
+const actionError = ref('')
 
 const fnForm = ref({ function_id: '', expr_text: '', output_predicate: '' })
 const fnError = ref('')
@@ -191,6 +246,40 @@ async function reload() {
     machines.value = res.data ?? []
   } catch {
     machineError.value = t('ontology.runtimeLoadError')
+  }
+  try {
+    const res = await listOntologyActions()
+    actions.value = res.data ?? []
+  } catch {
+    actionError.value = t('ontology.runtimeLoadError')
+  }
+}
+
+function preconditionText(action: OntologyActionRow): string {
+  const facts = (action.precondition?.facts ?? []) as Array<Record<string, unknown>>
+  const parts = facts.map((f) => `${String(f.predicate)} ${String(f.op ?? 'exists')}`)
+  const expr = String(action.precondition?.expr ?? '')
+  if (expr) parts.push(`expr: ${expr}`)
+  return parts.join('; ') || '-'
+}
+
+function stateChangeText(action: OntologyActionRow): string {
+  const sc = action.state_change ?? {}
+  if (!sc.subjectParam && !sc.toState) return '-'
+  return `${String(sc.subjectParam)}→${String(sc.toState)}`
+}
+
+async function submitAction() {
+  actionError.value = ''
+  try {
+    await createOntologyAction({
+      action_id: actionForm.value.action_id.trim(),
+      bound_tool: actionForm.value.bound_tool.trim(),
+    })
+    actionForm.value = { action_id: '', bound_tool: '' }
+    await reload()
+  } catch (err) {
+    actionError.value = extractError(err) || t('ontology.runtimeLoadError')
   }
 }
 
