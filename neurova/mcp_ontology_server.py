@@ -303,6 +303,33 @@ async def fact_submit(
 # ── A3：ontology_derive（推理查询）────────────────────────────────────────────
 
 @_SERVER.tool()
+async def ontology_compute(
+    ctx: Context,
+    function_id: str,
+    subject: str = "",
+    agent_id: str = "",
+) -> dict:
+    """函数层只读 dry 求值（W2）：返回值＋输入快照＋表达式回显，**零落库**。
+    真正落结论走 admission 写入口（dispatch 点燃）；本工具只回答"这个函数
+    对这个主体现在算出多少"。selector 超行上限时结构化拒绝（D1 显式拒）。"""
+    from neurova.knowledge.ontology.function_engine import FunctionEngine
+
+    user = _currentUserFromContext(ctx)
+    agentId = _agentIdOf(user, agent_id)
+    tenant = _tenantOf(user)
+    engine = FunctionEngine(_store())
+    try:
+        result = engine.dryEval(str(function_id or "").strip(),
+                                subject=str(subject or ""), tenantId=tenant)
+    except LookupError as exc:
+        return {"rejected": True, "detail": str(exc)}
+    if result.get("rejected"):
+        return {"rejected": True, "detail": result.get("detail"),
+                "expr_text": result.get("expr_text")}
+    return result
+
+
+@_SERVER.tool()
 async def ontology_derive(
     ctx: Context,
     subject_label: str,

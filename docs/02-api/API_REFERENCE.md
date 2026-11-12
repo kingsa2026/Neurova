@@ -103,6 +103,17 @@
   - `GET /ontology/export.owl?version=`（管理员）：OWL 2 RL 可规则化公理（subClass/subProperty/inverse/symmetric/transitive/functional），`text/turtle`
   - `GET /ontology/export.shacl`（管理员）：形状注册表 → `sh:` 形状，`text/turtle`
   - `GET /ontology/export.prov`（管理员）：activities/derivations → PROV-O，`text/turtle`
+- **函数层（2026-11-13，specs/2026-11-12 §4 W2，v43）**：可计算业务语义登记——受限 AST 表达式
+  （算术/比较/布尔＋聚合 `sum/count/avg/min/max(facts(谓词, qualifierFilter?, asOf?))`），
+  登记即编译（白名单外节点/未知符号/越界谓词 400）；结论经咽喉入账，推导账本
+  `source_kind=function`（rule_id 位写 `function:<id>`），物化档 observe/enforce 复用 v35 语义。
+  - `GET /ontology/functions`（登录可读）｜`POST /ontology/functions`（管理员，登记即编译）｜
+    `DELETE /ontology/functions/{function_id}`（管理员，按源撤回其全部结论）
+  - MCP 新工具 `ontology_compute`（只读 dry 求值：值＋输入快照＋表达式回显，零落库；
+    selector 超行上限显式拒）——与 `ontology_derive`（函数结论带溯源）同源
+  - W1 配套：术语 qualifier_schema 声明 `type: number` 的键，写入时在咽喉单点归一成
+    canonical 量值（`quantity.py` 单源）；`POST /graph/instances` 可带 `qualifier`；
+    抽取 prompt 对数值谓词输出「数字＋单位」引导段（`graph_bridge`）
 - 本体关系映射（2026-11-05，升级计划 B8，实现 `term_registry.py`＋`rule_engine.py`＋`relation_candidates.py`）：
   - 术语写面（`POST|PUT /ontology/terms`）新增字段：`inverse_of`/`symmetric`/`transitive`/`aliases`/`external_iris`/`deprecated`/`replaced_by`（None＝PUT 保留现值）；relation 可挂 relation 父属性（`rdfs:subPropertyOf`，父子 kind 必须一致、登记处判环）；`inverse_of` 登记时双向补齐；别名按租户唯一；`cardinality=1` 即函数属性（不新增列）
   - 规则写面（`POST|PUT /ontology/rules`）新增字段：`shape`（relay/conjunction/inverse；缺省按 `head_object_const` 推断）；inverse 要求 head 主语变元＝正原子客体变元

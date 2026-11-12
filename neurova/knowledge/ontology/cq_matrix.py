@@ -124,6 +124,21 @@ def _probeShapeValidation() -> str:
     return "implemented" if hits == 2 else ("partial" if hits else "planned")
 
 
+def _probeFunctionLayer() -> str:
+    """CQ-12：数值计算层（specs/2026-11-12 W2）——登记面/引擎/MCP dry 工具。"""
+    from neurova.api.endpoints import knowledge_ontology
+    from neurova.knowledge.ontology import function_engine, function_registry
+    from neurova.mcp_ontology_server import ontology_compute  # noqa: F401
+
+    hits = (
+        hasattr(function_registry.FunctionRegistry, "register")
+        + hasattr(function_engine.FunctionEngine, "fireFor")
+        + (ontology_compute is not None)
+        + hasattr(knowledge_ontology, "create_ontology_function")
+    )
+    return "implemented" if hits == 4 else ("partial" if hits else "planned")
+
+
 # ---------------------------------------------------------------------------
 # 名册（元数据照抄 specs 票面；探针引用直挂本模块函数）
 # ---------------------------------------------------------------------------
@@ -200,6 +215,11 @@ CQ_TRACE_ROWS: tuple = (
         query="shapes 注册表＋dry-run（B10 落地，POST /ontology/validate）",
         testId="tests/unit/knowledge/ontology/test_ontologyShapes.py",
         probe=_probeShapeValidation),
+    CqTraceRow(
+        cqId="CQ-12", question="数值属性能否参与计算（聚合/比较出结论）？", actor="分析师", priority="P2",
+        query="函数层（specs/2026-11-12 W2 落地：受限 AST＋selector 聚合＋咽喉入账）",
+        testId="tests/unit/knowledge/ontology/test_functionDerivationGovernance.py",
+        probe=_probeFunctionLayer),
 )
 
 

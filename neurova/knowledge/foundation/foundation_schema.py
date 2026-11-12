@@ -42,6 +42,7 @@ from ..enterprise.schema_mapping import SCHEMA_V34 as _SCHEMA_V34_ENTERPRISE
 from ..fts_index import _SCHEMA_V37_FTS
 from ..ontology.action_registry import _SCHEMA_V42_ACTIONS
 from ..ontology.change_log import _SCHEMA_V33
+from ..ontology.function_registry import _SCHEMA_V43_FUNCTIONS
 from ..ontology.derivation_ledger import _SCHEMA_V10
 from ..ontology.relation_candidates import _SCHEMA_V29_CANDIDATES
 from ..ontology.rule_engine import _SCHEMA_V28, _SCHEMA_V35, _SCHEMA_V9
@@ -148,6 +149,10 @@ _STEPS: List[tuple] = [
     # v42：本体动作注册表（Ontology 接入 Agent 评估档 A4）——动作声明表
     #      （绑工具/参数模板/风险档），治理侧元数据读数，不改判定逻辑
     (42, _SCHEMA_V42_ACTIONS),
+    # v43：函数层（specs/2026-11-12 §4 W2）——ontology_functions 表（可计算业务
+    #      语义登记，受限 AST 表达式）＋推导账本加 source_kind 列（rule|function，
+    #      函数结论与规则结论同一张账本，不建第二账本）
+    (43, _SCHEMA_V43_FUNCTIONS),
 ]
 
 _registered = False

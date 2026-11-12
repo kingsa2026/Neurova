@@ -153,6 +153,35 @@ class OntologyValidationReport:
                         "warning", "qualifierSchema",
                         "%s 的限定键 %s 未在 schema 内" % (predicate, unknown), predicate,
                         subjectKey=subjectKey))
+                # W1 数值判：schema 声明 type=number 的键，值须可归一解析或已是
+                # canonical/纯数值，否则 violation。判据单源在 quantity
+                # （parseQuantity/canonicalQuantity），admission 写入口归一与本判
+                # 共用同一解析；未声明键不进此判（存量零漂移）。
+                from .quantity import canonicalQuantity, numericQualifierKeys
+
+                for key in numericQualifierKeys(term):
+                    if key not in qualifier:
+                        continue
+                    value = qualifier[key]
+                    if isinstance(value, dict):
+                        if "value" in value and "unit" in value:
+                            continue  # 已是 canonical 形（写入口归一的产物）
+                        out.append(self._finding(
+                            "violation", "qualifierSchema",
+                            "%s 的数值限定 %s 形状非法：%r" % (predicate, key, value),
+                            predicate, subjectKey=subjectKey))
+                        continue
+                    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+                        out.append(self._finding(
+                            "violation", "qualifierSchema",
+                            "%s 的数值限定 %s 不是可解析量值：%r" % (predicate, key, value),
+                            predicate, subjectKey=subjectKey))
+                        continue
+                    if canonicalQuantity(value) is None:
+                        out.append(self._finding(
+                            "violation", "qualifierSchema",
+                            "%s 的数值限定 %s 不可解析：%r" % (predicate, key, value),
+                            predicate, subjectKey=subjectKey))
 
         # B9 punning 守卫：term_id 当 subject_key 用（类型与实例混用）——本体腐化
         # 的起点。记 warning 不阻断：存量同名共存是显式选择，写面硬拒会把迁移卡死。

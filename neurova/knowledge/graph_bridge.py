@@ -46,9 +46,15 @@ ENV_EXTRACT_GUARD = "NEUROVA_KB_EXTRACT_GUARD"
 _PROMPT_TEMPLATE = """从下面的知识条目中抽取实体与关系，输出严格的 JSON（不要解释）：
 {{"entities": [{{"label": "...", "type": "{nodeTypes}"}}], "relations": [{{"source": "实体标签", "target": "实体标签", "type": "{relationTypes}"}}]}}
 约束：type 必须从给定候选里选；实体 2-6 个；关系基于实体标签。
+{qualifierGuide}
 {boundary}
 标题：{title}
 正文：{content}"""
+
+#: W1 数值 qualifier 引导段模板（仅对声明了数值键的谓词出现；无数值谓词时为空——
+#: 存量 prompt 语义零漂移）。输出形状仍是 SPO＋qualifier，不造第二抽取形状。
+_QUALIFIER_GUIDE_TEMPLATE = """数值限定：谓词 {predicates} 声明了数值型限定键。若正文给出对应数值，在该关系的 qualifier 对象里输出「数字＋单位」原文（如 "200MB"、"3亿"、"45%"、"12kg"）：
+{{"relations": [{{"source": "...", "target": "...", "type": "...", "qualifier": {{{keys}}}}}]}}；无数值就不写 qualifier 键。"""
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.S)
 
@@ -92,6 +98,10 @@ def extractionPrompt(registry: Any, *, title: str, content: str) -> str:
     硬编的清单与注册表是两份类型事实源，新登记的术语抽不出来——"加类型不改 .py"
     于是只在校验侧成立。注册表不可用时退回枚举读兼容层的那批值，只影响 prompt 文案：
     合法性判定照样以注册表为准，越界一律落 `custom`。
+
+    W1：声明了数值 qualifier 键的谓词（quantity.numericQualifierKeys 单点判据）
+    额外获得数值引导段——LLM 把属性值输出为「数字＋单位」，落库后经 admission
+    写入口归一成 canonical 量值；无数值谓词时引导段缺席，prompt 语义零漂移。
     """
     nodeTypes = registeredNodeTypes(registry) if registry is not None else []
     relationTypes = registeredRelationTypes(registry) if registry is not None else []
@@ -100,12 +110,37 @@ def extractionPrompt(registry: Any, *, title: str, content: str) -> str:
     guardOn = str(os.environ.get(ENV_EXTRACT_GUARD) or "").strip().lower() not in (
         "0", "false", "off", "no",
     )
+    qualifierGuide = _qualifierGuide(registry)
     return _PROMPT_TEMPLATE.format(
         title=title, content=content[:4000],
         nodeTypes="|".join(nodeTypes) or "|".join(_readCompatCandidates("concept")),
         relationTypes="|".join(relationTypes) or "|".join(_readCompatCandidates("relation")),
+        qualifierGuide=qualifierGuide,
         boundary=_UNTRUSTED_CONTENT_BOUNDARY if guardOn else "",
     )
+
+
+def _qualifierGuide(registry: Any) -> str:
+    """数值谓词引导段：候选谓词清单仍取注册表（B-10 纪律不动）。"""
+    if registry is None:
+        return ""
+    try:
+        from neurova.knowledge.ontology.quantity import numericQualifierKeys
+
+        lines = []
+        for term in registry.terms(kind="relation"):
+            keys = numericQualifierKeys(term)
+            if keys:
+                lines.append((str(term.get("term_id") or ""), keys))
+        if not lines:
+            return ""
+        predicates = "、".join(pid for pid, _keys in lines)
+        keys = "、".join(
+            '"%s": "%s 的数值+单位"' % (key, pid)
+            for pid, keyList in lines for key in keyList)
+        return _QUALIFIER_GUIDE_TEMPLATE.format(predicates=predicates, keys=keys)
+    except Exception:  # noqa: BLE001 - 引导段失败只影响 prompt 文案，不影响抽取
+        return ""
 
 
 def registeredRelationTypes(registry: Any) -> List[str]:
@@ -201,7 +236,8 @@ def admitExtractedFacts(
     gate = productionAdmissionGate(factStore, toolVersion="graph-bridge")
     agentId = str(item.get("agent_id", "") or "default")
     tenantId = str(item.get("tenant_id") or "default")
-    def _requestFor(subjectLabel: str, predicateTermId: str, objectTerm: str) -> AdmissionRequest:
+    def _requestFor(subjectLabel: str, predicateTermId: str, objectTerm: str,
+                    qualifier: Optional[Dict[str, Any]] = None) -> AdmissionRequest:
         statement = _statementOf(subjectLabel, predicateTermId, objectTerm)
         return AdmissionRequest(
             agentId=agentId,
@@ -211,6 +247,9 @@ def admitExtractedFacts(
             predicateTermId=predicateTermId,
             objectTerm=objectTerm,
             content=statement,
+            # W1：抽取产物可带 qualifier（数值键经 admission 写入口归一成 canonical）；
+            # 未声明数值 schema 的谓词 qualifier 仍自由 JSON（存量零漂移）。
+            qualifier=dict(qualifier or {}),
             relationKind="entity",
             assertions=[_assertionFor(item, statement)],
             sourceTurnId="entry:%s" % str(item.get("knowledge_id", "") or ""),
@@ -306,7 +345,10 @@ def admitExtractedFacts(
                     logger.warning("graph_bridge: 未知关系候选登记失败（%s）: %s",
                                    rel.get("type"), exc)
             continue
-        relationRequests.append(_requestFor(source, relation, target))
+        relationQualifier = rel.get("qualifier")
+        relationRequests.append(_requestFor(
+            source, relation, target,
+            qualifier=relationQualifier if isinstance(relationQualifier, dict) else None))
         relationLabels.append((source, relation, target))
     for _index, factId in _admitBatch(relationRequests, relationLabels):
             factIds.append(factId)
