@@ -200,6 +200,18 @@ class TestReadFacesAuthenticated:
     def test_user_read_budget_alerts_200(self, app):
         assert _client(app, "user").get("/budgets/alerts").status_code == 200
 
+    def test_budget_status_all_route_not_shadowed(self, app, fake_budget):
+        """P1-1 附带发现：/status/all 不得被 /status/{agent_id} 路由序遮蔽。"""
+        fake_budget.get_all_budget_statuses = lambda: {
+            "agent_x": {"scope": "agent", "identifier": "agent_x", "usage": 1.0,
+                        "remaining": 2.0, "percentage": 33.3, "is_over_budget": False}
+        }
+        resp = _client(app, "admin").get("/budgets/status/all")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "budgets" in body, f"/status/all 被参数段吃掉，实得单 agent 形状: {body}"
+        assert body["budgets"][0]["identifier"] == "agent_x"
+
     def test_user_read_rollup_queries_200(self, app):
         resp = _client(app, "user").get("/cost-rollup/queries/daily_cost_by_agent")
         assert resp.status_code == 200
