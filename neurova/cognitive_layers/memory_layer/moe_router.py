@@ -11,7 +11,7 @@ MoE Memory Router — 稀疏门控专家混合记忆路由器
 from neurova.core import vector_math
 from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from neurova.cognitive_layers.memory_layer.models import MemoryOrigin
 from neurova.cognitive_layers.memory_layer.unified_vector_store import UnifiedVectorStore
@@ -316,6 +316,7 @@ class MoEMemoryRouter:
         activation_threshold: float = 0.3,
         min_expert_results: int = 3,
         min_relevance: float = 0.4,
+        scope_resolver: Optional[Callable[[], Tuple[str, str]]] = None,
     ):
         """
         初始化 MoE 路由器
@@ -329,6 +330,9 @@ class MoEMemoryRouter:
             activation_threshold: 激活阈值
             min_expert_results: Expert 内部最少结果数
             min_relevance: 最低相关性分数
+            scope_resolver: 请求作用域解析器（P1-10 票 A：返回 (neuser_id,
+                user_id)；mem_core 装配时接 memory_manager.memoryScope 单源）。
+                提供后 retrieve 结果按生效作用域过滤，跨人串忆在 MoE 支路闭合。
         """
         self.experts = experts
         self.storage = storage
@@ -337,6 +341,7 @@ class MoEMemoryRouter:
         self.activation_threshold = activation_threshold
         self.min_expert_results = min_expert_results
         self.min_relevance = min_relevance
+        self._scope_resolver = scope_resolver
 
         # 初始化门控网络
         self.gating_network = VectorGatingNetwork(
@@ -401,6 +406,9 @@ class MoEMemoryRouter:
 
             all_results.extend(expert_results)
 
+        # P1-10 票 A：按请求作用域过滤（跨人串忆在 MoE 支路闭合）
+        all_results = self._scopeFilter(all_results)
+
         # Step 4: 结果评估
         if not self._should_fallback_to_full_db(all_results):
             # 按分数排序，返回 top-limit
@@ -410,7 +418,7 @@ class MoEMemoryRouter:
 
         # Step 5: 全数据库兜底
         logger.debug("Expert 内部结果不足，启动全数据库兜底")
-        full_db_results = self.vector_store.search(query, limit=limit * 2)
+        full_db_results = self._scopeFilter(self.vector_store.search(query, limit=limit * 2))
         if full_db_results:
             _emit({"stage": "moe_done", "count": len(full_db_results[:limit]), "fallback": True})
             return full_db_results[:limit]
@@ -419,6 +427,34 @@ class MoEMemoryRouter:
         logger.debug("全数据库兜底无结果，返回无记忆提示")
         _emit({"stage": "moe_done", "count": 0, "fallback": True})
         return [self.NO_MEMORY_HINT]
+
+    def _scopeFilter(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """按请求作用域过滤结果（P1-10 票 A）。
+
+        未装配 scope_resolver 时原样放行（存量装配不变）；结果行无任何身份
+        标记时按拒绝处理（fail-closed）——索引已带身份，缺列＝旧索引未重建。
+        """
+        if self._scope_resolver is None:
+            return results
+        try:
+            neuser, user = self._scope_resolver()
+        except Exception as e:  # noqa: BLE001 - 作用域解析失败按空桶裁决
+            logger.warning("MoE scope resolver 失败，按 default 桶裁决: %s", e)
+            neuser, user = "default", "default"
+
+        kept: List[Dict[str, Any]] = []
+        for r in results:
+            if not isinstance(r, dict):
+                continue
+            rn, ru = r.get("neuser_id"), r.get("user_id")
+            if rn is None and ru is None:
+                md = r.get("metadata") or {}
+                rn, ru = md.get("neuser_id"), md.get("user_id")
+            if rn is None and ru is None:
+                continue
+            if rn == neuser and ru == user:
+                kept.append(r)
+        return kept
 
     def _should_fallback_to_full_db(self, results: List[Dict]) -> bool:
         """判断是否需要全数据库兜底"""
