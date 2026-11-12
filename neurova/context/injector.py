@@ -750,6 +750,16 @@ class UnifiedContextInjector(BaseModule):
             if not similar:
                 return ""
 
+            # P2-23（全库断点审计 2026-11-12）：兜底路径同样走注入登记——
+            # 采纳回写（injected_count/adoption_outcome）只认
+            # set_turn_injected_experiences 登记的 id；不登记则兜底注入的
+            # 经验行永不更新（hit_rate/adoption 系统性偏低）。
+            from neurova.core.turn_context import set_turn_injected_experiences
+
+            set_turn_injected_experiences(
+                [exp.get("id") for exp in similar[:3] if exp.get("id") is not None]
+            )
+
             # F11 修复：不再自带 "
             # 相关经验" 段头——内容经信封 <experience> 块
             # 包装（旧实现段头+_build_system_prompt 段头叠加成双标题）

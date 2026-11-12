@@ -1105,7 +1105,9 @@ class Agent:
         """
         处理多模态消息（图片、音频、视频、文档）
 
-        由 Router 的 _route_multimedia_message 调用。
+        P2-22（全库断点审计 2026-11-12）：原 docstring 称"由 Router 的
+        _route_multimedia_message 调用"——该方法全仓不存在（幻影引用）。
+        实际调用面是 chat 入口按 media_type 分派的多模态轮。
         根据 media_type 使用 LLMRouter 选择合适的模型，
         然后将媒体信息注入上下文并调用 chat()。
 
