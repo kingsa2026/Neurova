@@ -246,6 +246,36 @@ def _shapeRegistry(store: Any):
     return ShapeRegistry(store)
 
 
+@router.get("/ontology/domain-packs/{pack_id}/attribution")
+async def get_domain_pack_attribution(
+    pack_id: str = Path(...),
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """C2：领域包归属卡（登录可读）——SHA-256/license/upstream/version/termCount。"""
+    from neurova.knowledge.ontology.domain_pack import packAttribution
+
+    try:
+        card = packAttribution(pack_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"code": 0, "data": card, "request_id": ""}
+
+
+@router.get("/ontology/domain-packs/{pack_id}/integrity")
+async def verify_domain_pack_integrity(
+    pack_id: str = Path(...),
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """C2：领域包完整性校验（登录可读）——SHA-256 漂移显式报。"""
+    from neurova.knowledge.ontology.domain_pack import verifyPackIntegrity
+
+    try:
+        result = verifyPackIntegrity(pack_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"code": 0, "data": result, "request_id": ""}
+
+
 @router.get("/ontology/domain-packs")
 async def list_domain_packs(
     current_user: Dict = Depends(get_current_user_or_service),
