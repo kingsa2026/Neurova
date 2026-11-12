@@ -124,6 +124,19 @@ def _probeShapeValidation() -> str:
     return "implemented" if hits == 2 else ("partial" if hits else "planned")
 
 
+def _probeAccountability() -> str:
+    """CQ-25：追责类（specs/2026-11-12 W12）——跨账聚合/防篡改/CSV。"""
+    from neurova.knowledge.ontology import accountability
+
+    hits = (
+        hasattr(accountability, "accountabilityQuery")
+        + ("_fromChangeLog" in str(getattr(accountability, "_fromChangeLog", "")))
+        + hasattr(accountability, "_fromAgentRunLedger")
+        + hasattr(accountability, "_fromDecisionLedger")
+    )
+    return "implemented" if hits == 4 else ("partial" if hits else "planned")
+
+
 def _probeExportBreadth() -> str:
     """CQ-24：多格式导出（specs/2026-11-12 W11）——GraphML/GEXF/Cypher/CSV 端点。"""
     from neurova.knowledge.ontology.export import graph_exchange
@@ -400,6 +413,11 @@ CQ_TRACE_ROWS: tuple = (
         query="多格式导出（specs/2026-11-12 W11 落地：GraphML/GEXF/Cypher/CSV 确定性）",
         testId="tests/unit/knowledge/ontology/test_exportFormats.py",
         probe=_probeExportBreadth),
+    CqTraceRow(
+        cqId="CQ-25", question="谁→依据什么→做了什么→改了什么？", actor="审计员", priority="P2",
+        query="追责审计（specs/2026-11-12 W12 落地：跨五账聚合＋防篡改验证＋CSV）",
+        testId="tests/unit/knowledge/ontology/test_accountabilityQuery.py",
+        probe=_probeAccountability),
     CqTraceRow(
         cqId="CQ-17", question="过去有没有同类场景的判例？", actor="审计员", priority="P2",
         query="判例检索（specs/2026-11-12 W7 落地：词法混合计分，嵌入偏差登记）",
