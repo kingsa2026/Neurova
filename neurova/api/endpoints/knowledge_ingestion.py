@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import urllib.parse
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -250,8 +251,12 @@ async def import_knowledge_url(
         )
         return {"code": 0, "message": "Queued", "data": {"task_id": task["task_id"], "status": task.get("status"), "replayed": task.get("replayed", False)}}
 
+    # P1-10b（全库断点审计 2026-11-12）：抓取与解析链是纯阻塞 IO/CPU
+    # （urllib timeout=15 + 文档解析），在 async 端点里裸跑会把整个事件循环
+    # 堵住——慢抓取期间全服请求（含 chat 流式、healthcheck）排队。移入
+    # 工作线程执行，sync 契约（响应仍带 items）不变。
     try:
-        data = _fetch_url(url)
+        data = await asyncio.to_thread(_fetch_url, url)
     except Exception as e:
         raise HTTPException(status_code=502, detail="Fetch failed: %s" % e)
 
@@ -259,7 +264,8 @@ async def import_knowledge_url(
     # items 实为 (list, status) 元组——抽取失败仍返回 code=0 谎报成功，且
     # data.items 形状是 [条目列表, 状态串]（前端消费 items[0] 才碰巧对）。
     # 与 /import 对齐：解包 + 失败显式 code=1。
-    items, extract_status = _import_file_data(
+    items, extract_status = await asyncio.to_thread(
+        _import_file_data,
         data, _filename_for_url(url), agent_id, current_user, source_path=url,
         category=category if isinstance(category, str) else "",
     )
