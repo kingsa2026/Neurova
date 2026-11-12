@@ -1448,6 +1448,13 @@ class ToolExecutor:
                 from neurova.skills.creation_governance import record_tool_execution
 
                 record_tool_execution(tool_name, params, success, result)
+            except Exception:
+                # P2-10（全库断点审计 2026-11-12）：证据落账与反馈链拆开兜——
+                # 原同一 try 包两件事，落账抛异常（如 deepcopy 失败）时
+                # on_tool_executed（进化权重/元认知事件/指标/能力缺口单一咽喉）
+                # 整体跳过，与 H5"所有路径统一触发"自相矛盾。各记各的堆栈。
+                logger.exception("record_tool_execution 证据落账失败: %s", tool_name)
+            try:
                 self.on_tool_executed(
                     tool_name=tool_name,
                     params=params,
