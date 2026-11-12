@@ -794,8 +794,11 @@ class MemCore:
             self._persist_db_store = store
             if store:
                 try:
+                    # P1-10 票 A：索引带上身份列——MoE 结果按请求作用域过滤的
+                    # 前提（无身份列的结果在 _scopeFilter 里按拒绝处理）。
                     rows = store.execute(
-                        "SELECT id, content, category, lifecycle_stage FROM memories "
+                        "SELECT id, content, category, lifecycle_stage, "
+                        "neuser_id, user_id FROM memories "
                         "ORDER BY temperature DESC LIMIT 500"
                     ).fetchall()
                     if rows:
@@ -806,6 +809,8 @@ class MemCore:
                                 "metadata": {
                                     "category": r.get("category", "general"),
                                     "lifecycle": r.get("lifecycle_stage", "active"),
+                                    "neuser_id": r.get("neuser_id", "default"),
+                                    "user_id": r.get("user_id", "default"),
                                 },
                             }
                             for r in rows
@@ -829,6 +834,11 @@ class MemCore:
                 vector_store=vector_store,
                 activation_threshold=float(
                     get_memory_settings().get("threshold.default", 0.3)
+                ),
+                # P1-10 票 A：作用域口径单源（memoryScope），MoE 支路按请求
+                # 作用域过滤，跨人串忆在 MoE 支路闭合。
+                scope_resolver=(
+                    self.memory_manager.memoryScope if self.memory_manager else None
                 ),
             )
             # 把 MoE 自建向量库登记进记忆写入链路：否则运行期新增/遗忘的记忆
