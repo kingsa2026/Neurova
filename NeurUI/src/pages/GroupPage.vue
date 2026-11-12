@@ -221,7 +221,7 @@ const selectedModules = ref<string[]>([])
 // 部门化（specs/2026-11-07 批 F1）：分类注册表与父组选择
 const categories = ref<KnowledgeCategory[]>([])
 const selectedCategories = ref<string[]>([])
-const users = ref<{ id: string; username?: string }[]>([])
+const users = ref<{ id: number; username?: string }[]>([])
 
 const categoryLabelMap = computed<Record<string, string>>(() => {
   const map: Record<string, string> = {}
@@ -333,7 +333,7 @@ const fetchCategories = async () => {
 const fetchUsers = async () => {
   try {
     const res = await listUsers({ page: 1, page_size: 500 })
-    users.value = [...(res?.items ?? []), ...(res?.users ?? [])]
+    users.value = res?.items ?? []
   } catch {
     users.value = []
   }

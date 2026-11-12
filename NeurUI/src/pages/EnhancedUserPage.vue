@@ -50,9 +50,6 @@
           <template v-if="column.key === 'status'">
             <a-badge :status="record.active ? 'success' : 'default'" :text="record.active ? t('common.active') : t('common.inactive')" />
           </template>
-          <template v-if="column.key === 'quota'">
-            <span class="mono">{{ record.quota_used ?? 0 }} / {{ record.quota_limit ?? '∞' }}</span>
-          </template>
           <template v-if="column.key === 'actions'">
             <div class="action-btns">
               <GlassButton variant="ghost" size="sm" @click="editUser(record)">{{ t('common.edit') }}</GlassButton>
@@ -141,7 +138,7 @@ const searchQuery = ref('')
 const showCreate = ref(false)
 const showPasswordModal = ref(false)
 const editingUser = ref<enhancedUsersApi.User | null>(null)
-const selectedUserId = ref<string>('')
+const selectedUserId = ref<number>(0)
 const newPassword = ref('')
 const confirmPassword = ref('')
 
@@ -168,7 +165,6 @@ const columns = computed(() => [
   { title: t('system.userGroup'), key: 'group', width: 140 },
   { title: t('auth.role'), key: 'role', width: 100 },
   { title: t('common.status'), key: 'status', width: 100 },
-  { title: t('auth.quota'), key: 'quota', width: 120 },
   { title: t('common.actions'), key: 'actions', width: 240 },
 ])
 
@@ -178,7 +174,7 @@ const fetchUsers = async () => {
     const params: enhancedUsersApi.UserListParams = { page: page.value, page_size: pageSize.value }
     if (searchQuery.value) params.search = searchQuery.value
     const res = await enhancedUsersApi.listUsers(params)
-    users.value = res?.items ?? res?.users ?? (Array.isArray(res) ? res : [])
+    users.value = res?.items ?? []
     total.value = res?.total ?? users.value.length
   } catch {
     message.error(t('common.error'))
@@ -262,7 +258,7 @@ const savePassword = async () => {
   }
 }
 
-const doDeleteUser = (id: string) => {
+const doDeleteUser = (id: number) => {
   Modal.confirm({
     title: t('common.confirm'),
     content: t('agent.deleteConfirm'),
