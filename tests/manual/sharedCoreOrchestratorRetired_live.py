@@ -85,7 +85,8 @@ def main() -> int:
     print(f"5 门面 docstring 是否仍声称小脑：{'SharedPlanOrchestrator' in doc}")
     if "SharedPlanOrchestrator" in doc:
         failures.append("门面仍在声称一个不存在的能力")
-    for live in ("neurova.shared_core.execution_engine", "neurova.shared_core.infrastructure"):
+    # P1-14：infrastructure 已退役，在役面只剩 execution_engine
+    for live in ("neurova.shared_core.execution_engine",):
         importlib.import_module(live)
 
     if failures:
