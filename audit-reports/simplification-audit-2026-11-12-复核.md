@@ -28,3 +28,7 @@
 - **验收**：隔离五格全过（B 不漏 A／本人不丢／缺省桶两用户行均不可见）；memory 全族 1212 passed（2 失败=crystallization_llm_gate 在册预存红）。
 - **share_group_ids（storage.py:378/395 只写不读）处置**：全仓无任何生产代码向 IsolationContext 填 share_group_ids（仅 isolation.py 自身 docstring 示例）——休眠特性，无数据带非空共享组，读侧忽略**当前无实际影响**。接线（共享组可见性）属新功能工程（需组员关系源＋可见性规则），按"待拍板"登记，不在本批盲做。
 - **票据文档缺失**：`docs/05-reports/三层隔离执行面审计_2026-09-24.md` 仓内与 git 全历史均不存在——本复核的黑盒验收即替代判据；后续如需 R1/R2/R3 原文，需从会话存档或原作者处找回。
+
+## 台账正文补登（simplification-audit-2026-10-05.md §6-612 摘要）
+
+612. **P1-10 三层隔离·票 A 召回面/MoE 支路作用域隔离闭合** ✅🟢 —— 修复详见本目录 `simplification-audit-2026-11-12-复核.md` 的"票 A 实施结果"。要点：`get_all_memories(scoped=)` 请求面/系统面分流；六召回通道＋recall 两处取数切 scoped；MoE 索引带身份列＋scope_resolver（memoryScope 单源）＋retrieve 双道过滤（无身份 fail-closed）。黑盒验收：B 作用域召回 A 私有记忆（红）→ 四读路全不漏（绿）；memory 全族 1212 passed。**另票登记**：share_group_ids 共享组可见性（休眠特性，无生产写入方，接线需组员关系源）；semantic_search_api 两处全量取数属 X-Service-Token 另一面（auth.py docstring 在案）。**下一枚空号现查：本格取 612，后继从 613 起。**
