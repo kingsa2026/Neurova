@@ -27,6 +27,8 @@ import type {
   IriResolution,
   OntologyActionRow,
   OntologyComputeResult,
+  OntologyDecisionChainNode,
+  OntologyDecisionRow,
   OntologySimulationReport,
   OntologySimulationRow,
   OntologyEnvelope,
@@ -422,4 +424,39 @@ export function runOntologySimulation(body: {
 export function listOntologySimulations(limit = 50) {
   return api.get<ApiResponse<OntologySimulationRow[]>>(
     `/knowledge/ontology/simulations?limit=${limit}`)
+}
+
+export function recordOntologyDecision(body: {
+  category: string
+  scenario: string
+  reasoning: string
+  outcome: string
+  confidence: number
+  owner_id?: string
+}) {
+  return api.post<ApiResponse<OntologyDecisionRow>>(
+    '/knowledge/ontology/decisions', body)
+}
+
+export function listOntologyDecisions(limit = 50) {
+  return api.get<ApiResponse<OntologyDecisionRow[]>>(
+    `/knowledge/ontology/decisions?limit=${limit}`)
+}
+
+export function linkOntologyDecisions(decisionId: string, body: {
+  target_decision_id: string
+  link_kind: 'caused' | 'influenced' | 'precedent'
+}) {
+  return api.post<ApiResponse<Record<string, unknown>>>(
+    `/knowledge/ontology/decisions/${encodeURIComponent(decisionId)}/links`, body)
+}
+
+export function traceOntologyDecision(decisionId: string, direction: string) {
+  return api.get<ApiResponse<{ decision_id: string; chain: OntologyDecisionChainNode[] }>>(
+    `/knowledge/ontology/decisions/${encodeURIComponent(decisionId)}/trace?direction=${direction}`)
+}
+
+export function searchDecisionPrecedents(q: string, limit = 5) {
+  return api.get<ApiResponse<Array<Record<string, unknown>>>>(
+    `/knowledge/ontology/decisions/precedents?q=${encodeURIComponent(q)}&limit=${limit}`)
 }

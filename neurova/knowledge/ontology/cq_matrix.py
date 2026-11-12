@@ -124,6 +124,25 @@ def _probeShapeValidation() -> str:
     return "implemented" if hits == 2 else ("partial" if hits else "planned")
 
 
+def _probeDecisions() -> str:
+    """CQ-16/17：决策因果与判例（specs/2026-11-12 W7）——台账/链接/trace/检索。"""
+    from neurova.knowledge.ontology import decision_ledger
+    from neurova.mcp_ontology_server import (ontology_decision_link,  # noqa: F401
+                                             ontology_decision_precedents,
+                                             ontology_decision_record,
+                                             ontology_decision_trace)
+
+    hits = (
+        hasattr(decision_ledger.DecisionLedger, "recordDecision")
+        + hasattr(decision_ledger.DecisionLedger, "linkDecisions")
+        + hasattr(decision_ledger.DecisionLedger, "traceDecisionChain")
+        + hasattr(decision_ledger.DecisionLedger, "findPrecedents")
+        + (ontology_decision_record is not None)
+        + (ontology_decision_trace is not None)
+    )
+    return "implemented" if hits == 6 else ("partial" if hits else "planned")
+
+
 def _probeSimulation() -> str:
     """CQ-14：推演类（specs/2026-11-12 W5）——副本隔离/台账/工具。"""
     from neurova.knowledge.ontology import simulation
@@ -279,6 +298,16 @@ CQ_TRACE_ROWS: tuple = (
         query="推演（specs/2026-11-12 W5 落地：副本隔离零生产写＋diff 报告）",
         testId="tests/unit/knowledge/ontology/test_simulationDiff.py",
         probe=_probeSimulation),
+    CqTraceRow(
+        cqId="CQ-16", question="这个决定依据什么、导致了什么下游后果？", actor="审计员", priority="P2",
+        query="决策因果（specs/2026-11-12 W7 落地：决策台账＋caused 闭包 trace）",
+        testId="tests/unit/knowledge/ontology/test_decisionCausalChain.py",
+        probe=_probeDecisions),
+    CqTraceRow(
+        cqId="CQ-17", question="过去有没有同类场景的判例？", actor="审计员", priority="P2",
+        query="判例检索（specs/2026-11-12 W7 落地：词法混合计分，嵌入偏差登记）",
+        testId="tests/unit/knowledge/ontology/test_decisionPrecedents.py",
+        probe=_probeDecisions),
 )
 
 
