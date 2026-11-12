@@ -202,17 +202,17 @@ async def get_alerts(
     budget_service: BudgetService = Depends(get_budget_service)
 ):
     """
-    Get recent alerts (implementation pending).
-
-    TODO: Implement alert history storage and retrieval.
-    Currently returns a placeholder response.
+    Get recent alerts (P2-8 实装：BudgetManager 告警历史，新→旧，有界 200)。
     """
-    # TODO: Query alerts from database
-    return {
-        "alerts": [],
-        "total": 0,
-        "limit": limit
-    }
+    try:
+        alerts = budget_service.manager.get_alert_history(limit=limit)
+        return {
+            "alerts": alerts,
+            "total": len(alerts),
+            "limit": limit,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to query alerts: {e}")
 
 
 @router.post("/alerts/config/update")
