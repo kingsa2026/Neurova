@@ -20,7 +20,9 @@ from .collaboration_template import (
     WorkflowDefinition,
     get_template_manager,
 )
-from .personality_templates import PersonalityTemplate
+# P1-11 退役：personality_templates（PersonalityTemplate）唯一消费方是已退役的
+# agent/builder.py（AgentBuilder），随同批删除；预设模板（preset_templates）仍被
+# collaboration_template 在用，保留。
 from .preset_templates import (
     CODE_REVIEW_TEMPLATE,
     DIAGNOSTIC_TEMPLATE,
@@ -44,6 +46,4 @@ __all__ = [
     "PAIR_PROGRAMMING_TEMPLATE",
     "DIAGNOSTIC_TEMPLATE",
     "KNOWLEDGE_SHARING_TEMPLATE",
-    # 人格模板
-    "PersonalityTemplate",
 ]
