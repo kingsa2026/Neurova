@@ -82,7 +82,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
+import {
+  getMonitorAlerts,
+  getMonitorConnections,
+  getMonitorResources,
+  resolveMonitorAlert,
+} from '@/api/modules/monitor'
 import { useAuthStore } from '@/stores/auth'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
@@ -113,9 +118,9 @@ const fetchAll = async () => {
   loading.value = true
   try {
     const [resRes, connRes, alertRes]: any[] = await Promise.all([
-      request.get('/monitor/resources'),
-      request.get('/monitor/connections'),
-      request.get('/monitor/alerts'),
+      getMonitorResources(),
+      getMonitorConnections(),
+      getMonitorAlerts(),
     ])
     resources.value = resRes?.data ?? resRes ?? {}
     connections.value = Array.isArray(connRes?.data) ? connRes.data : Array.isArray(connRes) ? connRes : []
@@ -129,7 +134,7 @@ const fetchAll = async () => {
 
 const resolveAlert = async (id: string) => {
   try {
-    await request.post(`/monitor/alerts/${id}/resolve`)
+    await resolveMonitorAlert(id)
     message.success(t('common.success'))
     await fetchAll()
   } catch {
