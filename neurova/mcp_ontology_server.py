@@ -303,6 +303,51 @@ async def fact_submit(
 # ── A3：ontology_derive（推理查询）────────────────────────────────────────────
 
 @_SERVER.tool()
+async def ontology_state(
+    ctx: Context,
+    subject_label: str,
+    agent_id: str = "",
+) -> dict:
+    """主体状态读数（W3，只读）：当前状态＋状态机声明（states/transitions 闭集）
+    ＋允许迁移列表。状态机未登记时如实回 has_machine=False。"""
+    from neurova.knowledge.foundation.knowledge_facts import normalizeLabel
+    from neurova.knowledge.ontology.state_machine_registry import StateMachineRegistry
+
+    user = _currentUserFromContext(ctx)
+    agentId = _agentIdOf(user, agent_id)
+    tenant = _tenantOf(user)
+    store = _store()
+    normalized = normalizeLabel(subject_label)
+    row = store._conn.execute(
+        "SELECT subject_key, type_term_id FROM knowledge_subjects"
+        " WHERE agent_id = ? AND tenant_id = ? AND normalized_label = ?"
+        " AND status = 'active'",
+        (agentId, tenant, normalized)).fetchone()
+    if row is None:
+        return {"rejected": True, "detail": "主体未登记: %s" % subject_label}
+    subjectKey = str(row["subject_key"])
+    typeTerm = str(row["type_term_id"] or "")
+    machine = StateMachineRegistry(store).get(typeTerm, tenantId=tenant) if typeTerm else None
+    registry = StateMachineRegistry(store)
+    current = registry.currentState(agentId, subjectKey, tenantId=tenant)
+    allowed: list = []
+    if machine is not None and current:
+        allowed = [t.get("to") for t in (machine.get("transitions") or [])
+                   if str(t.get("from")) == current]
+    return {
+        "subject_label": subject_label,
+        "subject_key": subjectKey,
+        "type_term_id": typeTerm,
+        "has_machine": machine is not None,
+        "machine": {"states": (machine or {}).get("states"),
+                    "transitions": (machine or {}).get("transitions"),
+                    "initial_state": (machine or {}).get("initial_state")},
+        "current_state": current,
+        "allowed_transitions": allowed,
+    }
+
+
+@_SERVER.tool()
 async def ontology_compute(
     ctx: Context,
     function_id: str,

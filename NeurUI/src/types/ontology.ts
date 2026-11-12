@@ -342,6 +342,44 @@ export interface EnterpriseSourceHealth {
 }
 
 /** 描述符写面形状（与后端 schema_mapping.validateDescriptor 同口径）。 */
+
+/** W2 函数层：ontology_functions 行（specs/2026-11-12 §4） */
+export interface OntologyFunctionRow {
+  tenant_id: string
+  function_id: string
+  label: string
+  definition: string
+  expr_text: string
+  input_bindings: Record<string, unknown>
+  output_predicate: string
+  scope: Record<string, unknown>
+  materialization: 'observe' | 'enforce'
+  enabled: boolean
+  version: string
+}
+
+/** W2 dry 求值读数（ontology_compute） */
+export interface OntologyComputeResult {
+  function_id: string
+  expr_text: string
+  value?: number | null
+  inputs?: Record<string, unknown>
+  materialization?: string
+  rejected?: boolean
+  detail?: string
+}
+
+/** W3 状态机：ontology_state_machines 行（specs/2026-11-12 §5） */
+export interface OntologyStateMachineRow {
+  tenant_id: string
+  term_id: string
+  states: string[]
+  transitions: Array<{ from: string; to: string; guardPredicate?: string }>
+  initial_state: string
+  event_bindings: Array<Record<string, unknown>>
+  enabled: boolean
+}
+
 export interface EnterpriseDescriptor {
   sourceType: 'sql' | 'erp_api' | 'event_stream' | 'file' | 'http_pull' | 'chat' | string
   columns: string[]

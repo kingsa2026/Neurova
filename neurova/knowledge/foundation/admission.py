@@ -411,6 +411,7 @@ class KnowledgeAdmissionGate:
             activityId = self._attachLineage(lineage, factId, request, deduped=False)
         applied += self._judgeConflicts(request)
         applied += self._applyCredibility(factId)
+        applied += self._supersedeStateTransition(request, subjectKey, factId)
         applied += self._derive(request, subjectKey)
         return AdmissionReceipt(
             factId=factId,
@@ -483,6 +484,40 @@ class KnowledgeAdmissionGate:
         from .digest_chain import ActivityDigestChain
 
         return ActivityDigestChain(self._store).closeWrite(activityId)
+
+    def _supersedeStateTransition(self, request: AdmissionRequest, subjectKey: str,
+                                  factId: str) -> List[str]:
+        """W3 状态迁移收尾：has_state 写入且主体挂状态机时，旧 active has_state
+        行经既有 supersede 语义退场（一主体一当前状态；旧值退场是迁移的本职，
+        不新造冲突机制——specs/2026-11-12 §5）。无状态机不碰（cardinality 判照旧）。"""
+        if str(request.predicateTermId) != "has_state":
+            return []
+        from neurova.knowledge.ontology.state_machine_registry import StateMachineRegistry
+
+        machineRegistry = StateMachineRegistry(self._store)
+        row = None
+        with self._store._lock:
+            row = self._store._conn.execute(
+                "SELECT type_term_id FROM knowledge_subjects WHERE subject_key = ?",
+                (subjectKey,)).fetchone()
+        typeTerm = str(row["type_term_id"] or "") if row is not None else ""
+        if not typeTerm:
+            return []
+        machine = machineRegistry.get(typeTerm, tenantId=request.tenantId)
+        if machine is None or not machine.get("enabled"):
+            return []
+        superseded: List[str] = []
+        for old in self._store.factsForSubject(subjectKey):
+            if str(old.get("predicate_term_id")) != "has_state" \
+                    or str(old.get("status")) != "active" \
+                    or str(old.get("fact_id")) == str(factId) \
+                    or str(old.get("agent_id")) != str(request.agentId):
+                continue
+            self._store.supersede(factId, old["fact_id"],
+                                  reason="状态迁移 has_state 旧值退场（W3 状态机 %s）"
+                                         % typeTerm)
+            superseded.append(str(old["fact_id"]))
+        return ["state_supersede"] if superseded else []
 
     def _derive(self, request: AdmissionRequest, subjectKey: str) -> List[str]:
         """段3 后半：按规则推导。嵌套写不再点燃规则——推导事实又触发推导，

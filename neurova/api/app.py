@@ -1763,6 +1763,31 @@ def create_app(
                 sync_llm_router()
             except Exception as e:  # noqa: BLE001
                 logger.warning("LLMRouter 同步失败（多模态路由将惰性初始化）: %s", e)
+            # W3：状态事件桥（缺省 off）＋企业源 interval 同步注册——启动钩子在此
+            # 一处装配，各自 fail-soft 不互相拖垮
+            try:
+                from neurova.knowledge.state_event_bridge import StateEventBridge
+
+                from neurova.knowledge.foundation import get_knowledge_fact_store
+
+                _bridge = StateEventBridge(get_knowledge_fact_store())
+                _app_state.state_event_bridge = _bridge
+                _bridge.start()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("状态事件桥启动失败（事件→状态写入将不可用）: %s", e)
+            try:
+                from neurova.agent.scheduler import get_scheduler
+
+                from neurova.knowledge.enterprise.registry import registerIntervalSyncs
+
+                from neurova.knowledge.foundation import get_knowledge_fact_store
+
+                registered = registerIntervalSyncs(get_scheduler(),
+                                                   store=get_knowledge_fact_store())
+                if registered:
+                    logger.info("企业源 interval 同步已注册 %d 个 job", registered)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("企业源 interval 同步注册失败（持续同步将不可用）: %s", e)
 
         @app.on_event("shutdown")
         async def shutdown_event():
