@@ -176,6 +176,63 @@
         </table>
       </a-tab-pane>
 
+      <!-- 决策 tab（W7） -->
+      <a-tab-pane key="decisions" :tab="t('ontology.runtimeDecisionTitle')">
+        <template v-if="isAdmin">
+          <h4 class="section-title">{{ t('ontology.runtimeDecisionRegister') }}</h4>
+          <div class="register-form" data-testid="decision-form">
+            <a-input v-model:value="decForm.category" class="mono"
+                     :placeholder="t('ontology.runtimeDecisionCategory')" data-testid="dec-category" />
+            <a-input v-model:value="decForm.scenario" class="mono wide"
+                     :placeholder="t('ontology.runtimeDecisionScenario')" data-testid="dec-scenario" />
+            <a-input v-model:value="decForm.reasoning" class="mono wide"
+                     :placeholder="t('ontology.runtimeDecisionReasoning')" data-testid="dec-reasoning" />
+            <a-input v-model:value="decForm.outcome" class="mono"
+                     :placeholder="t('ontology.runtimeDecisionOutcome')" data-testid="dec-outcome" />
+            <GlassButton size="sm" data-testid="dec-submit" @click="submitDecision">
+              {{ t('common.save') }}
+            </GlassButton>
+          </div>
+          <div v-if="decError" class="inline-error" data-testid="dec-error">{{ decError }}</div>
+        </template>
+        <table class="runtime-table" data-testid="decisions-table">
+          <thead>
+            <tr>
+              <th>{{ t('ontology.runtimeDecisionId') }}</th>
+              <th>{{ t('ontology.runtimeDecisionCategory') }}</th>
+              <th>{{ t('ontology.runtimeDecisionScenario') }}</th>
+              <th>{{ t('ontology.runtimeDecisionOutcome') }}</th>
+              <th>{{ t('ontology.runtimeDecisionMaker') }}</th>
+              <th v-if="isAdmin">{{ t('common.actions') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in decisions" :key="row.decision_id">
+              <td class="mono">{{ row.decision_id }}</td>
+              <td>{{ row.category }}</td>
+              <td class="expr">{{ row.scenario }}</td>
+              <td>{{ row.outcome }}</td>
+              <td>{{ row.decision_maker }}</td>
+              <td v-if="isAdmin">
+                <GlassButton size="sm" variant="secondary" data-testid="dec-link"
+                             @click="linkPrevious(row.decision_id)">
+                  {{ t('ontology.runtimeDecisionLink') }}
+                </GlassButton>
+              </td>
+            </tr>
+            <tr v-if="!decisions.length">
+              <td colspan="6"><a-empty :description="t('ontology.runtimeDecisionEmpty')" /></td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-if="decisionChain.length" class="compute-readout" data-testid="dec-chain">
+          <h4 class="section-title">{{ t('ontology.runtimeDecisionChain') }}</h4>
+          <div v-for="(node, i) in decisionChain" :key="i" class="mono">
+            {{ node.side === 'up' ? '↑' : '↓' }} {{ node.decision_id }} ({{ node.link_kind }})
+          </div>
+        </div>
+      </a-tab-pane>
+
       <!-- 状态机 tab（W3） -->
       <a-tab-pane key="states" :tab="t('ontology.runtimeStatesTitle')">
         <table class="runtime-table" data-testid="states-table">
@@ -246,6 +303,8 @@ import {
 } from '@/api/modules/ontology'
 import type {
   OntologyActionRow,
+  OntologyDecisionChainNode,
+  OntologyDecisionRow,
   OntologySimulationReport,
   OntologySimulationRow,
   OntologyComputeResult,
@@ -254,6 +313,9 @@ import type {
 } from '@/types/ontology'
 import {
   createOntologyAction,
+  listOntologyDecisions,
+  recordOntologyDecision,
+  traceOntologyDecision,
   listOntologyActions,
   listOntologySimulations,
   runOntologySimulation,
@@ -268,13 +330,17 @@ const isAdmin = computed(() => {
   return user?.role === 'admin'
 })
 
-const activeTab = ref<'functions' | 'actions' | 'simulations' | 'states'>('functions')
+const activeTab = ref<'functions' | 'actions' | 'simulations' | 'decisions' | 'states'>('functions')
 const functions = ref<OntologyFunctionRow[]>([])
 const machines = ref<OntologyStateMachineRow[]>([])
 const simForm = ref({ subject: '', predicate: '', object: '' })
 const simError = ref('')
 const simReport = ref<OntologySimulationReport | null>(null)
 const simLedger = ref<OntologySimulationRow[]>([])
+const decisions = ref<OntologyDecisionRow[]>([])
+const decForm = ref({ category: '', scenario: '', reasoning: '', outcome: '' })
+const decError = ref('')
+const decisionChain = ref<OntologyDecisionChainNode[]>([])
 const actions = ref<OntologyActionRow[]>([])
 const actionForm = ref({ action_id: '', bound_tool: '' })
 const actionError = ref('')
@@ -321,6 +387,50 @@ async function reload() {
     simLedger.value = res.data ?? []
   } catch {
     simError.value = t('ontology.runtimeLoadError')
+  }
+  try {
+    const res = await listOntologyDecisions(50)
+    decisions.value = res.data ?? []
+  } catch {
+    decError.value = t('ontology.runtimeLoadError')
+  }
+}
+
+async function submitDecision() {
+  decError.value = ''
+  try {
+    await recordOntologyDecision({
+      category: decForm.value.category.trim(),
+      scenario: decForm.value.scenario.trim(),
+      reasoning: decForm.value.reasoning.trim(),
+      outcome: decForm.value.outcome.trim(),
+      confidence: 0.8,
+    })
+    decForm.value = { category: '', scenario: '', reasoning: '', outcome: '' }
+    await reload()
+  } catch (err) {
+    decError.value = extractError(err) || t('ontology.runtimeLoadError')
+  }
+}
+
+async function linkPrevious(decisionId: string) {
+  decError.value = ''
+  decisionChain.value = []
+  try {
+    // 链回上一条既有决策（caused）：若已是首条则直接 trace 上溯读数
+    const others = decisions.value.filter((d) => d.decision_id !== decisionId)
+    if (others.length) {
+      await import('@/api/modules/ontology').then((m) =>
+        m.linkOntologyDecisions(others[0].decision_id, {
+          target_decision_id: decisionId,
+          link_kind: 'caused',
+        }))
+    }
+    const traced = await traceOntologyDecision(decisionId, 'both')
+    decisionChain.value = traced.data?.chain ?? []
+    await reload()
+  } catch (err) {
+    decError.value = extractError(err) || t('ontology.runtimeLoadError')
   }
 }
 

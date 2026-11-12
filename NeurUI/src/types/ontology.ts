@@ -358,6 +358,26 @@ export interface OntologyActionRow {
   enabled: boolean
 }
 
+/** W7 决策：台账行（specs/2026-11-12 §8，v47，D7 必选） */
+export interface OntologyDecisionRow {
+  tenant_id: string
+  decision_id: string
+  owner_id: string
+  category: string
+  scenario: string
+  reasoning: string
+  outcome: string
+  confidence: number
+  decision_maker: string
+  metadata: Record<string, unknown>
+}
+
+export interface OntologyDecisionChainNode {
+  decision_id: string
+  link_kind: 'caused' | 'influenced' | 'precedent'
+  side: 'up' | 'down'
+}
+
 /** W5 推演：diff 报告与台账行（specs/2026-11-12 §7，v46） */
 export interface OntologySimulationReport {
   simulation_id: string

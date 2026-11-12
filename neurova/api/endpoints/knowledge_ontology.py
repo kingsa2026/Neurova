@@ -455,6 +455,98 @@ async def create_state_machine(
     return {"code": 0, "data": item, "request_id": ""}
 
 
+@router.post("/ontology/decisions")
+async def create_ontology_decision(
+    body: Dict[str, Any],
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """W7：决策登记（登录可写，身份按请求边界 sender）。"""
+    from neurova.knowledge.ontology.decision_ledger import DecisionLedger
+
+    store, _registry, _engine = _ontologyParts()
+    try:
+        row = DecisionLedger(store).recordDecision(
+            tenantId=_tenantOf(current_user),
+            category=str(body.get("category") or ""),
+            scenario=str(body.get("scenario") or ""),
+            reasoning=str(body.get("reasoning") or ""),
+            outcome=str(body.get("outcome") or ""),
+            confidence=float(body.get("confidence", 0.5)),
+            decisionMaker=str(current_user.get("username") or ""),
+            ownerId=str(body.get("owner_id") or current_user.get("user_id") or ""),
+            metadata=body.get("metadata") or {})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"code": 0, "data": row, "request_id": ""}
+
+
+@router.get("/ontology/decisions")
+async def list_ontology_decisions(
+    limit: int = Query(default=50, le=200),
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """W7：决策清单（登录可读，租户隔离）。"""
+    from neurova.knowledge.ontology.decision_ledger import DecisionLedger
+
+    store, _registry, _engine = _ontologyParts()
+    rows = DecisionLedger(store).list(tenantId=_tenantOf(current_user), limit=limit)
+    return {"code": 0, "data": rows, "request_id": ""}
+
+
+@router.post("/ontology/decisions/{decision_id}/links")
+async def link_ontology_decisions(
+    decision_id: str = Path(...),
+    body: Dict[str, Any] = None,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """W7：决策链接（caused/influenced/precedent 闭集；无环硬校验）。"""
+    from neurova.knowledge.ontology.decision_ledger import DecisionLedger
+
+    store, _registry, _engine = _ontologyParts()
+    payload = body or {}
+    try:
+        row = DecisionLedger(store).linkDecisions(
+            decision_id, str(payload.get("target_decision_id") or ""),
+            str(payload.get("link_kind") or ""),
+            tenantId=_tenantOf(current_user),
+            createdBy=str(current_user.get("username") or ""))
+    except (ValueError, LookupError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"code": 0, "data": row, "request_id": ""}
+
+
+@router.get("/ontology/decisions/{decision_id}/trace")
+async def trace_ontology_decision(
+    decision_id: str = Path(...),
+    direction: str = Query(default="both"),
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """W7：因果链读数（影响图＝下游闭包，不建独立引擎）。"""
+    from neurova.knowledge.ontology.decision_ledger import DecisionLedger
+
+    store, _registry, _engine = _ontologyParts()
+    chain = DecisionLedger(store).traceDecisionChain(
+        decision_id, direction=direction, tenantId=_tenantOf(current_user))
+    return {"code": 0, "data": {"decision_id": decision_id,
+                                "direction": direction, "chain": chain},
+            "request_id": ""}
+
+
+@router.get("/ontology/decisions/precedents")
+async def search_decision_precedents(
+    q: str = Query(default=""),
+    limit: int = Query(default=5, le=50),
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """W7：判例检索（词法混合计分——嵌入接入前承载，偏差登记台账）。"""
+    from neurova.knowledge.ontology.decision_ledger import DecisionLedger
+
+    store, _registry, _engine = _ontologyParts()
+    hits = DecisionLedger(store).findPrecedents(
+        q, limit=limit, tenantId=_tenantOf(current_user))
+    return {"code": 0, "data": hits, "request_id": ""}
+
+
 @router.post("/ontology/simulations")
 async def run_ontology_simulation(
     body: Dict[str, Any],

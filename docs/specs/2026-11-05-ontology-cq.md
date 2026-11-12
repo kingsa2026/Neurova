@@ -47,6 +47,8 @@
 | CQ-13 | 对象当前处于什么状态、允许哪些迁移？ | 运维员 | P2 | 状态机（specs/2026-11-12 W3 落地：has_state＋迁移闭集＋事件桥） | tests/unit/knowledge/ontology/test_stateMachineValidation.py | implemented |
 | CQ-15 | 动作的前置条件不满足时是否拒绝执行？ | 运维员 | P2 | 动作语义（specs/2026-11-12 W4 落地：precondition 不触工具＋单管道转交） | tests/unit/knowledge/ontology/test_actionPrecondition.py | implemented |
 | CQ-14 | 假设某状态变化后下游会受什么影响？ | 运维员 | P2 | 推演（specs/2026-11-12 W5 落地：副本隔离零生产写＋diff 报告） | tests/unit/knowledge/ontology/test_simulationDiff.py | implemented |
+| CQ-16 | 这个决定依据什么、导致了什么下游后果？ | 审计员 | P2 | 决策因果（specs/2026-11-12 W7 落地：决策台账＋caused 闭包 trace） | tests/unit/knowledge/ontology/test_decisionCausalChain.py | implemented |
+| CQ-17 | 过去有没有同类场景的判例？ | 审计员 | P2 | 判例检索（specs/2026-11-12 W7 落地：词法混合计分，嵌入偏差登记） | tests/unit/knowledge/ontology/test_decisionPrecedents.py | implemented |
 
 ## 追溯规则
 

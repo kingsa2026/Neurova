@@ -319,6 +319,94 @@ def _resolveAgentForActions(agentId: str) -> Optional[Dict[str, Any]]:
 
 
 @_SERVER.tool()
+async def ontology_decision_record(
+    ctx: Context,
+    category: str,
+    scenario: str,
+    reasoning: str,
+    outcome: str,
+    confidence: float,
+    owner_id: str = "",
+    simulation_id: str = "",
+    action_id: str = "",
+) -> dict:
+    """决策登记（W7，D7 必选）：决策一等对象——decision_maker 取请求边界
+    sender（不从 ContextVar 猜）；可选 simulationId/actionId 审计互链
+    （metadata_json，D4 同款）。决策是问责台账，不经事实门。"""
+    user = _currentUserFromContext(ctx)
+    from neurova.knowledge.ontology.decision_ledger import DecisionLedger
+
+    metadata: dict = {}
+    if simulation_id:
+        metadata["simulation_id"] = simulation_id
+    if action_id:
+        metadata["action_id"] = action_id
+    try:
+        row = DecisionLedger(_store()).recordDecision(
+            tenantId=_tenantOf(user), category=category, scenario=scenario,
+            reasoning=reasoning, outcome=outcome, confidence=confidence,
+            decisionMaker=str(user.get("username") or ""),
+            ownerId=str(owner_id or user.get("user_id") or ""),
+            agentId=_agentIdOf(user, None), sessionId="",
+            metadata=metadata)
+    except ValueError as exc:
+        return {"rejected": True, "detail": str(exc)}
+    return row
+
+
+@_SERVER.tool()
+async def ontology_decision_link(
+    ctx: Context,
+    source_decision_id: str,
+    target_decision_id: str,
+    link_kind: str,
+) -> dict:
+    """决策链接（W7）：caused/precedent 无环硬校验、influenced 允许环；
+    跨租户拒/自环拒；因果边不进推导账本（另一域）。"""
+    user = _currentUserFromContext(ctx)
+    from neurova.knowledge.ontology.decision_ledger import DecisionLedger
+
+    try:
+        return DecisionLedger(_store()).linkDecisions(
+            source_decision_id, target_decision_id, link_kind,
+            tenantId=_tenantOf(user),
+            createdBy=str(user.get("username") or ""))
+    except (ValueError, LookupError) as exc:
+        return {"rejected": True, "detail": str(exc)}
+
+
+@_SERVER.tool()
+async def ontology_decision_trace(
+    ctx: Context,
+    decision_id: str,
+    direction: str = "both",
+) -> dict:
+    """决策因果链（W7）：上溯/下探/双向，深度上限具名常量。影响图＝下游闭包读数。"""
+    from neurova.knowledge.ontology.decision_ledger import DecisionLedger
+
+    user = _currentUserFromContext(ctx)
+    return {"decision_id": decision_id, "direction": direction,
+            "chain": DecisionLedger(_store()).traceDecisionChain(
+                decision_id, direction=direction, tenantId=_tenantOf(user))}
+
+
+@_SERVER.tool()
+async def ontology_decision_precedents(
+    ctx: Context,
+    query: str,
+    limit: int = 5,
+) -> dict:
+    """判例检索（W7）：词法混合计分（嵌入接入前承载，偏差登记台账）；
+    按租户过滤——跨租户零命中。"""
+    from neurova.knowledge.ontology.decision_ledger import DecisionLedger
+
+    user = _currentUserFromContext(ctx)
+    hits = DecisionLedger(_store()).findPrecedents(
+        query, limit=limit, tenantId=_tenantOf(user))
+    return {"query": query, "hits": hits, "count": len(hits)}
+
+
+@_SERVER.tool()
 async def ontology_simulate(
     ctx: Context,
     scope_json: str = "{}",

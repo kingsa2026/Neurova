@@ -43,6 +43,7 @@ from ..fts_index import _SCHEMA_V37_FTS
 from ..ontology.action_registry import _SCHEMA_V42_ACTIONS, _SCHEMA_V45_ACTION_SEMANTICS
 from ..ontology.change_log import _SCHEMA_V33
 from ..ontology.function_registry import _SCHEMA_V43_FUNCTIONS
+from ..ontology.decision_ledger import _SCHEMA_V47_DECISIONS
 from ..ontology.simulation import _SCHEMA_V46_SIMULATIONS
 from ..ontology.state_machine_registry import _SCHEMA_V44_STATE_MACHINES
 from ..ontology.derivation_ledger import _SCHEMA_V10
@@ -165,6 +166,9 @@ _STEPS: List[tuple] = [
     # v46：推演台账（specs/2026-11-12 §7 W5）——ontology_simulations 只追加
     #      （先演后决审计互链的台账本体；推演过程零生产写）
     (46, _SCHEMA_V46_SIMULATIONS),
+    # v47：决策台账（specs/2026-11-12 §8 W7，D7 必选）——ontology_decisions
+    #      ＋ontology_decision_links（决策一等对象；问责台账不经事实门）
+    (47, _SCHEMA_V47_DECISIONS),
 ]
 
 _registered = False
