@@ -326,6 +326,24 @@ def _migrateBodyCueAttempts(conn) -> None:
 register_migration(5, _migrateBodyCueAttempts, domain=MEMORY_BODY_DOMAIN)
 
 
+def _migrateBodyShareGroups(conn) -> None:
+    """memory 域 v6：`memories.share_group_ids` 列（P1-10 残留实装）。
+
+    共享组可见性的持久化列（JSON 数组文本）：写入侧 `remember(shared=,
+    share_group_ids=)` 落列；读侧仲裁器按"行共享组 ∩ 读者组"放行跨第 2/3 层
+    可见。旧行缺列由 DEFAULT '[]' 兜底（无共享组＝原三层语义不变）。
+    """
+    try:
+        conn.execute("ALTER TABLE memories ADD COLUMN share_group_ids TEXT NOT NULL DEFAULT '[]'")
+    except sqlite3.OperationalError as exc:
+        # 列已在（同批重跑/并发初始化）——幂等放行；其余错误如实上抛
+        if "duplicate column" not in str(exc).lower():
+            raise
+
+
+register_migration(6, _migrateBodyShareGroups, domain=MEMORY_BODY_DOMAIN)
+
+
 
 class MemoryManager:
     """记忆管理器 Facade — 通过 EventBus 路由到各子模块"""
@@ -356,6 +374,9 @@ class MemoryManager:
         # 这里只留本 manager 自己的发射计数，供 `get_stats()` 的 `bus_events` 读。
         self._memoryEventsPublished = 0
         self._started = False
+        # P1-10 残留实装：共享组可见性的读者组解析器（core 不 import auth，
+        # 由 API/agent 装配层注入；未接线＝无组＝共享组行不可见，fail-closed）
+        self._shared_group_resolver = None
 
         # 内部存储（简易实现，子模块可覆盖）
         self._memories: Dict[str, Memory] = {}
@@ -631,6 +652,7 @@ class MemoryManager:
             neuser_id=row["neuser_id"],
             user_id=row["user_id"],
             shared=bool(row["shared"]),
+            share_group_ids=json.loads(row["share_group_ids"]) if row["share_group_ids"] else [],
             # P1-9: origin 列旧库可能不存在（迁移前快照），按行键探测
             origin=_row_origin(row),
             created_at=datetime.fromisoformat(row["created_at"]),
@@ -689,12 +711,16 @@ class MemoryManager:
             cur = conn.cursor()
             cur.row_factory = sqlite3.Row
             rows: List[sqlite3.Row] = []
+            # P1-10 残留实装：取数含共享行（shared=1 或带共享组），跨第 2/3 层
+            # 的可见性由唯一仲裁器按组交集裁决——SQL 只负责把候选捞出来。
+            # 注意两查询的表别名不同（FTS 别名 m，LIKE 直查无别名），条件各自拼写。
             if sql_like.shouldMatch(text):
                 try:
                     rows = cur.execute(
                         "SELECT m.* FROM memories m JOIN memories_fts f ON m.rowid = f.rowid"
                         " WHERE memories_fts MATCH ?"
-                        " AND m.agent_id = ? AND m.neuser_id = ? AND m.user_id = ?"
+                        " AND ((m.agent_id = ? AND m.neuser_id = ? AND m.user_id = ?)"
+                        " OR m.shared = 1 OR m.share_group_ids != '[]')"
                         " ORDER BY rank LIMIT ?",
                         (sql_like.matchQuery(text), *scope, int(limit)),
                     ).fetchall()
@@ -703,12 +729,15 @@ class MemoryManager:
             if not rows:
                 rows = cur.execute(
                     "SELECT * FROM memories"
-                    " WHERE agent_id = ? AND neuser_id = ? AND user_id = ? AND "
+                    " WHERE ((agent_id = ? AND neuser_id = ? AND user_id = ?)"
+                    " OR shared = 1 OR share_group_ids != '[]') AND "
                     + sql_like.likePredicate("content")
                     + " ORDER BY temperature DESC LIMIT ?",
                     (*scope, sql_like.likePattern(text), int(limit)),
                 ).fetchall()
-            return [self._row_to_memory(row) for row in rows]
+            # 唯一仲裁器裁决：本作用域行照常放行，共享行按组交集放行
+            memories = [self._row_to_memory(row) for row in rows]
+            return [m for m in memories if self.isOwnedByRequestScope(m)]
 
     def _findBodyRow(self, memoryId: str):
         """按业务 id 找一行正文（作用域限定行带前缀也认）；找不到回 None。
@@ -1084,8 +1113,8 @@ class MemoryManager:
         """INSERT INTO memories
            (id, content, memory_type, category, lifecycle_stage, perspective, origin, emotion,
             temperature, importance, access_count, metadata, embedding, agent_id, neuser_id,
-            user_id, shared, created_at, updated_at, last_accessed_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            user_id, shared, share_group_ids, created_at, updated_at, last_accessed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              content=excluded.content, memory_type=excluded.memory_type,
              category=excluded.category, lifecycle_stage=excluded.lifecycle_stage,
@@ -1094,7 +1123,8 @@ class MemoryManager:
              access_count=excluded.access_count, metadata=excluded.metadata,
              embedding=excluded.embedding,
              agent_id=excluded.agent_id, neuser_id=excluded.neuser_id, user_id=excluded.user_id,
-             shared=excluded.shared, created_at=excluded.created_at,
+             shared=excluded.shared, share_group_ids=excluded.share_group_ids,
+             created_at=excluded.created_at,
              updated_at=excluded.updated_at, last_accessed_at=excluded.last_accessed_at
            WHERE memories.agent_id=excluded.agent_id
              AND memories.neuser_id=excluded.neuser_id
@@ -1152,6 +1182,7 @@ class MemoryManager:
             mem.neuser_id,
             mem.user_id,
             int(mem.shared),
+            json.dumps(list(mem.share_group_ids or []), ensure_ascii=False),
             mem.created_at.isoformat(),
             mem.updated_at.isoformat(),
             mem.last_accessed_at.isoformat() if mem.last_accessed_at else None,
@@ -1361,7 +1392,56 @@ class MemoryManager:
             return False
         if agentWide:
             return True
+
+        # P1-10 残留实装：共享组可见性——行标记 shared（旧模式：本 agent 全员
+        # 可见）或行共享组与读者组有交集时，跨第 2/3 层可见。判据在唯一仲裁器，
+        # 列表面与闸门不会分家。读者组由注入的 resolver 解析（fail-soft：未接
+        # 线＝无组，共享组行不可见，保持既有隔离语义）。
+        row_shared, row_groups = self._rowSharedFlags(mem)
+        if row_shared or row_groups:
+            reader_groups = self._readerGroupIds()
+            if row_shared and not row_groups:
+                return True
+            if row_groups and set(row_groups) & reader_groups:
+                return True
+
         return neuserId == self._eff_neuser_id() and userId == self._eff_user_id()
+
+    @staticmethod
+    def _rowSharedFlags(mem: Any) -> tuple:
+        """取行的 (shared, share_group_ids)——对象与字典两形。"""
+        if isinstance(mem, dict):
+            return bool(mem.get("shared")), list(mem.get("share_group_ids") or [])
+        return (
+            bool(getattr(mem, "shared", False)),
+            list(getattr(mem, "share_group_ids", None) or []),
+        )
+
+    def _readerGroupIds(self) -> set:
+        """当前请求读者的组 id 集（共享组可见性用）。
+
+        组员关系经注入的 resolver 解析（core 不 import auth，同
+        AgentFirewall.setRateQuotaResolver 的注入模式）；未接线或解析失败
+        一律视为无组——共享组行不可见（fail-closed）。
+        """
+        uid = self._eff_user_id()
+        if not uid or uid == "default":
+            return set()
+        resolver = self._shared_group_resolver
+        if resolver is None:
+            return set()
+        try:
+            return set(resolver(uid) or [])
+        except Exception as e:  # noqa: BLE001 - 组员关系不可达按无组处理
+            logger.debug("共享组 resolver 解析失败（按无组处理）: %s", e)
+            return set()
+
+    def set_shared_group_resolver(self, resolver) -> None:
+        """注入"读者 user_id → 组 id 集"解析器（共享组可见性，P1-10 残留实装）。
+
+        由 API/agent 装配层接线（组员关系源在 auth 域，core 不 import auth）。
+        """
+        self._shared_group_resolver = resolver
 
     def _scoped_memories(self) -> List[Any]:
         """按生效三元组过滤的内存记忆视图 (agent 恒取实例自身)"""
@@ -1594,6 +1674,11 @@ class MemoryManager:
         # （`api/endpoints/memory/base.py`），此前无人读取=声明与行为分叉。
         # 默认 True 与收口前的实际行为一致（自动标注一直在跑）。
         auto_analyze_emotion: bool = True,
+        # P1-10 残留实装：共享组写入——行标记 shared（旧模式，本 agent 全员
+        # 可见）或 share_group_ids（读者组有交集才可见），持久化进新列并由
+        # isOwnedByRequestScope 仲裁。
+        shared: bool = False,
+        share_group_ids: Optional[List[str]] = None,
         **kwargs,
     ) -> str:
         """存储一条记忆
@@ -1803,6 +1888,8 @@ class MemoryManager:
                 agent_id=self._agent_id,
                 neuser_id=self._eff_neuser_id(),
                 user_id=self._eff_user_id(),
+                shared=shared,
+                share_group_ids=list(share_group_ids or []),
                 embedding=self._embeddingForNewRow(content),
             )
             if final_metadata.get("type") == "question_queue":
