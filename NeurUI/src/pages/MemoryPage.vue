@@ -358,7 +358,17 @@
             <a-switch v-model:checked="editShared" />
           </a-form-item>
           <a-form-item v-if="editing" :label="t('memory.shareGroups')">
-            <a-select v-model:value="editShareGroups" mode="tags" />
+            <!-- 共享目标＝真实用户组（组员关系源与读者侧 resolver 同源），非自由文本 -->
+            <a-select
+              v-model:value="editShareGroups"
+              mode="multiple"
+              :options="groupOptions"
+              :placeholder="t('memory.shareGroups')"
+            />
+          </a-form-item>
+          <a-form-item v-if="!editing && selectedMemory.shared" :label="t('memory.shared')">
+            <a-tag color="green">{{ t('memory.shared') }}</a-tag>
+            <a-tag v-for="g in selectedMemory.share_group_ids" :key="g" color="blue">{{ g }}</a-tag>
           </a-form-item>
           <a-form-item v-if="selectedMemory.metadata" :label="t('memory.metadata')">
             <pre class="metadata-json">{{ JSON.stringify(selectedMemory.metadata, null, 2) }}</pre>
@@ -452,6 +462,7 @@ import { useAgentStore } from '@/stores/agents'
 import { useAuthStore } from '@/stores/auth'
 import * as memoryApi from '@/api/modules/memory'
 import type { MemoryEntry, MemorySearchResult, MemoryStats } from '@/api/modules/memory'
+import { listGroups } from '@/api/modules/groups'
 
 // 模板里直接读模块命名空间（memoryApi.X）会让渲染代理去 unref 命名空间对象，
 // 测试里被部分 mock 的模块会因此炸在 __v_isRef 上；在脚本里取一次即可。
@@ -515,6 +526,17 @@ const importing = ref(false)
 // P1-10 残留实装：编辑态的共享面控件（shared 开关＋共享组标签输入）
 const editShared = ref(false)
 const editShareGroups = ref<string[]>([])
+// 共享目标＝真实用户组（与读者侧 resolver 同源：组员关系按 group_id 匹配）
+const groupOptions = ref<{ label: string; value: string }[]>([])
+const fetchGroupOptions = async () => {
+  try {
+    const res: any = await listGroups()
+    const groups: any[] = res?.data ?? res ?? []
+    groupOptions.value = groups.map((g) => ({ label: g.name ?? g.group_id, value: g.group_id }))
+  } catch {
+    groupOptions.value = []
+  }
+}
 
 const memories = ref<MemoryEntry[]>([])
 const total = ref(0)
@@ -821,9 +843,10 @@ const viewMemory = async (record: MemoryEntry) => {
 
 const toggleEdit = () => {
   if (!editing.value) {
-    // 进入编辑态：共享面控件从当前行播种
+    // 进入编辑态：共享面控件从当前行播种，共享目标拉取真实用户组
     editShared.value = !!selectedMemory.value?.shared
     editShareGroups.value = [...(selectedMemory.value?.share_group_ids ?? [])]
+    void fetchGroupOptions()
   }
   editing.value = !editing.value
 }
