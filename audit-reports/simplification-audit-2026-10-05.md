@@ -12281,3 +12281,12 @@ ef326fc6/5c5ee304/7f30dff8 均已在远端），当前 `origin/main..HEAD` 只�
     - **验收双门**：vitest 2445 passed / 0 failed；vue-tsc --noEmit exit 0（两批各跑一遍）。
     - **剩余登记（纯数据形态，非工程缺口）**：C4 golden 臂域与 F4 校准数据待生产运行积累；A5 首次真实换版待生产被拒画像攒够＋管理员经治理端点批准（读数面/批准面/写回链全部就位）。
     - **下一枚空号现查：本格取 595，后继从 596 起。**
+597. **新发现登记·MCP「用户层防火墙」系虚构层（2026-11-12 全库断点审计未登，P2-6 批现场抓出）** 🟡待拍板 —— 三重死，从未运行过：
+    - `tool_layers/mcp_client.py:539` `from neurova.core.firewall import Firewall`——该模块实名 `AgentFirewall`/`get_firewall`，**没有 `Firewall` 这个名字**，ImportError 被 `except ImportError: return` 吞掉 → `_check_firewall` 恒跳过（fail-open，仅 debug 日志）；
+    - 即使名字对上：`AgentFirewall` **没有 `check_permission` 方法**（只有 rate/ip/file/agent 四族），调用必 AttributeError 落进 `except Exception` 同样跳过；
+    - 且规则集（GlobalRuleSet/UserRuleSet）**没有 per-user 工具许可字段**——判据无数据源。
+    - 影响：`call_tool` 的请求级 user_id 防火墙裁决从未生效；P2-6（aa642b9f）已在 REST 直调面（/tools/execute）按注册属主收口 stdio-MCP 的 admin 门，但聊天链的 MCP 工具仍无 per-user 裁决。
+    - **待拍板**：甲＝在 AgentFirewall 上真实现 per-user 工具许可模型（需先定许可数据源）；乙＝按教义第 7 条退役这层虚构防火墙（删 `_check_firewall` 与 user_id 透传死参），诚实暴露"工具面无 per-user 裁决"现状。测试替身对齐见 `76935bd5`。
+    - **下一枚空号现查：本格取 597（跳过 596——未合并的 ci 修复分支 `auto/follow-redirects-cve-9892` 上已有 §6-595/596 台账落格，合并时再归位），后继从 598 起。**
+598. **新发现登记并即修·GET /budgets/status/all 被路由序遮蔽（审计未登，P1-1 批现场抓出）** ✅🟢 —— budget_api.py 里 `/status/{agent_id}` 先于 `/status/all` 注册，FastAPI 按注册序匹配 ⇒ "all" 被当 agent_id 吃掉该路由；前端成本看板 `cost.ts:125 getAllBudgetStatuses`（期待 `{budgets: [...]}`）拿到单 agent 形状（无 budgets 键），视图恒空。修复＝路由序对调（`3ffcf66f`），先红后绿（遮蔽态无 budgets 键红，对调后 20 passed）。
+    - **下一枚空号现查：本格取 598，后继从 599 起。**
