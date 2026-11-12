@@ -3477,23 +3477,25 @@ class PostChatPipeline:
             # 到点判定收口在 engine.reflect_due（轮次门＋事件量门并联）——轮次计数
             # 是进程内存态、重启清零，单靠它等于事件账本厚的 agent 在频繁重启下
             # 永不编译（kai 71 条事件零次反思的根因，2026-11-12 诊断）。
-            if turn_count > 0:
-                try:
-                    from neurova.cognitive_layers.meta_cognition_layer.self_model import (
-                        get_self_model_engine,
-                    )
+            # P2-11（全库断点审计 2026-11-12）：外层 turn_count > 0 外壳摘除——
+            # reflect_due 内部已含轮次门，外壳使"重启后首轮带 20+ 未编译事件"
+            # 恰好被事件量门挡在一轮之外。
+            try:
+                from neurova.cognitive_layers.meta_cognition_layer.self_model import (
+                    get_self_model_engine,
+                )
 
-                    engine = get_self_model_engine(agent_id)
-                    if engine.reflect_due(turn_count):
-                        report = engine.reflect(trigger="periodic_turn")
-                        if report.get("lessons"):
-                            logger.info(
-                                "🪞 自模型反思产出 %d 条洞察: %s",
-                                len(report["lessons"]),
-                                report.get("summary", "")[:80],
-                            )
-                except Exception as re_err:
-                    logger.debug("自模型反思触发跳过: %s", re_err)
+                engine = get_self_model_engine(agent_id)
+                if engine.reflect_due(turn_count):
+                    report = engine.reflect(trigger="periodic_turn")
+                    if report.get("lessons"):
+                        logger.info(
+                            "🪞 自模型反思产出 %d 条洞察: %s",
+                            len(report["lessons"]),
+                            report.get("summary", "")[:80],
+                        )
+            except Exception as re_err:
+                logger.debug("自模型反思触发跳过: %s", re_err)
         except Exception as e:
             logger.debug("认知负荷监控跳过: %s", e)
 
