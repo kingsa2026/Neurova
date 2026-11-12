@@ -84,6 +84,34 @@ class ContextPreview(BaseModel):
     sources: List[str]
 
 
+# P2-1（全库断点审计 2026-11-12）：已构建上下文的进程内登记（有界，淘汰最旧）。
+# /{context_id}/preview 与 /{context_id}/compress 此前是 TODO 桩——根因是构建
+# 产物从未按 id 落册，两个端点无物可查。
+_BUILT_CONTEXTS_MAX = 50
+_built_contexts: Dict[str, Dict[str, Any]] = {}
+
+
+def _store_built_context(
+    context_id: str,
+    content: str,
+    token_count: int,
+    sources: List[str],
+    agent_id: str = "",
+    session_id: Optional[str] = None,
+) -> None:
+    _built_contexts[context_id] = {
+        "content": content,
+        "token_count": int(token_count),
+        "sources": list(sources or []),
+        "agent_id": agent_id,
+        "session_id": session_id,
+        "created_at": time.time(),
+    }
+    while len(_built_contexts) > _BUILT_CONTEXTS_MAX:
+        oldest = min(_built_contexts, key=lambda k: _built_contexts[k]["created_at"])
+        _built_contexts.pop(oldest, None)
+
+
 def _get_request_id(request: Request) -> str:
     """获取请求ID"""
     return getattr(request.state, "request_id", str(uuid.uuid4()))
@@ -225,13 +253,17 @@ async def build_context(
                 context_content = f"User: {body.user_input}\n\nSystem: Processing request..."
                 sources = ["user_input"]
 
+        token_count = _count_tokens(context_content)
+        # P2-1：构建产物按 id 落册——preview/compress 由此有物可查
+        _store_built_context(context_id, context_content, token_count, sources, agent_id, session_id)
+
         return BuildContextResponse(
             context_id=context_id,
             content=context_content,
             # 全仓唯一 token 尺子（T-01 契约）。改前这里是 `len(context_content.split())`
             # ——第二把尺子，且中文整句在空白分词下只算一个词（实测同一句 4 vs 15）。
             # 响应契约字段报假数不是"粗略"，而是与 composition 面板 / 判据不同源。
-            token_count=_count_tokens(context_content),
+            token_count=token_count,
             sources=sources,
             build_time=time.time() - start_time,
         )
@@ -335,11 +367,15 @@ async def build_context_v2(
                 context_content = f"User: {body.user_input}"
                 sources = ["user_input"]
 
+        token_count = _count_tokens(context_content)
+        # P2-1：同 /build，构建产物按 id 落册
+        _store_built_context(context_id, context_content, token_count, sources, agent_id, session_id)
+
         return BuildContextResponse(
             context_id=context_id,
             content=context_content,
             # 同 `/build`：唯一尺子（单源见 `_count_tokens`）。
-            token_count=_count_tokens(context_content),
+            token_count=token_count,
             sources=sources,
             build_time=time.time() - start_time,
         )
@@ -408,13 +444,18 @@ async def get_context_preview(
     request: Request,
     context_id: str = Path(..., description="上下文ID"),
 ):
-    """获取上下文预览"""
-    # TODO: 实现上下文缓存和预览
+    """获取上下文预览（P2-1 实装：读取 /build 登记的构建产物；未知 id 404）"""
+    entry = _built_contexts.get(context_id)
+    if not entry:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Context '{context_id}' not found（构建产物有界过期，请重新 /build 后再取）",
+        )
     return ContextPreview(
         context_id=context_id,
-        content="Context preview not available",
-        token_count=0,
-        sources=[],
+        content=entry["content"],
+        token_count=entry["token_count"],
+        sources=entry["sources"],
     )
 
 
@@ -424,20 +465,56 @@ async def compress_context(
     context_id: str = Path(..., description="上下文ID"),
     target_tokens: int = Query(default=4000, description="目标 token 数"),
 ):
-    """压缩上下文"""
+    """压缩上下文（P2-1 实装：保留最近段落在目标 token 预算内，淘汰最旧段；
+    压缩结果写回登记，后续 preview 读到的是压缩后版本）"""
     request_id = _get_request_id(request)
+    entry = _built_contexts.get(context_id)
+    if not entry:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Context '{context_id}' not found（构建产物有界过期，请重新 /build 后再压缩）",
+        )
+    if target_tokens <= 0:
+        raise HTTPException(status_code=400, detail="target_tokens 必须为正数")
 
     try:
-        # TODO: 实现上下文压缩
+        content = entry["content"]
+        original_tokens = entry["token_count"]
+        segments = content.split("\n")
+
+        # 保留最近的连续段落：从最新段向前累计，首个放不下的段起淘汰
+        kept: List[str] = []
+        used = 0
+        for seg in reversed(segments):
+            cost = _count_tokens(seg) + 1  # 换行符开销
+            if used + cost > target_tokens:
+                break
+            kept.append(seg)
+            used += cost
+        kept.reverse()
+        dropped = len(segments) - len(kept)
+
+        compressed_content = "\n".join(kept)
+        compressed_tokens = _count_tokens(compressed_content)
+
+        entry["content"] = compressed_content
+        entry["token_count"] = compressed_tokens
+
         return {
             "code": 0,
-            "message": "Context compression not implemented yet",
+            "message": "Context compressed",
             "data": {
                 "context_id": context_id,
                 "target_tokens": target_tokens,
+                "original_tokens": original_tokens,
+                "compressed_tokens": compressed_tokens,
+                "dropped_segments": dropped,
+                "content": compressed_content,
             },
             "request_id": request_id,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Compress context error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to compress context: {str(e)}")
