@@ -19,6 +19,9 @@ function mapAgentResponse(raw: Record<string, any>): Agent {
     // P1-6（全库断点审计 2026-11-12）：后端返回 group_id 但本归一化层不映射，
     // 编辑态「所属分组」恒显示缺省提示（fe67b863e 只改了展示层没动这里）。
     group_id: raw.group_id ?? config.group_id ?? '',
+    // P1-5b：性格/宪法回显（后端 agent_to_info 顶层字段）
+    personality: raw.personality ?? '',
+    constitution: raw.constitution ?? '',
     createdAt: raw.created_at ?? raw.createdAt ?? '',
     updatedAt: raw.updated_at ?? raw.updatedAt ?? '',
     config: {

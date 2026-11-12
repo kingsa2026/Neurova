@@ -346,11 +346,12 @@ const loadAgent = async () => {
         description: agent.description || '',
         model: agent.model || '',
         provider: agent.provider || '',
-        group_id: (agent as any).group_id || '',
+        group_id: agent.group_id || '',
         temperature: agent.config?.temperature ?? 0.7,
         maxTokens: agent.config?.maxTokens ?? 4096,
-        personality: '',
-        constitution: '',
+        // P1-5b：性格/宪法真实回填（后端 agent_to_info 顶层字段）
+        personality: agent.personality || '',
+        constitution: agent.constitution || '',
         ttsEnabled: agent.config?.ttsEnabled ?? false,
         ttsVoice: agent.config?.ttsVoice || '',
         ttsSpeed: agent.config?.ttsSpeed ?? 1.0,
@@ -373,6 +374,9 @@ const handleSave = async () => {
       model: formState.value.model,
       provider: formState.value.provider,
       group_id: formState.value.group_id || undefined,
+      // P1-5b：性格/宪法随表单提交（后端 create/update 消费，落 agent_config.json）
+      personality: formState.value.personality,
+      constitution: formState.value.constitution,
       config: {
         temperature: formState.value.temperature,
         maxTokens: formState.value.maxTokens,

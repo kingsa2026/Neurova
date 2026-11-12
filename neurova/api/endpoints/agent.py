@@ -228,6 +228,9 @@ class AgentInfo(BaseModel):
     owner_user_id: Optional[str] = None
     # 部门绑定回传（specs/2026-11-07 批 D）：前端分组选择器回显数据源
     group_id: Optional[str] = None
+    # P1-5b：性格/宪法回传（表单编辑态回填数据源）
+    personality: str = ""
+    constitution: str = ""
     # 回显 config（TTS 等）：编辑表单重开后从响应恢复已保存参数
     config: Dict[str, Any] = Field(default_factory=dict)
 
@@ -242,6 +245,9 @@ class CreateAgentRequest(BaseModel):
     provider: Optional[str] = Field(default=None, description="LLM 提供商")
     enable_memory: bool = Field(default=True, description="启用记忆")
     group_id: Optional[str] = Field(default=None, description="所属部门组（缺省=创建者所在部门组）")
+    # P1-5b：性格/宪法（AgentConfig 平铺字段，_save_agent_config 落盘）
+    personality: Optional[str] = Field(default=None, description="性格设定")
+    constitution: Optional[str] = Field(default=None, description="行为准则（宪法）")
     config: Dict[str, Any] = Field(default_factory=dict, description="额外配置")
 
 
@@ -251,6 +257,9 @@ class UpdateAgentRequest(BaseModel):
     name: Optional[str] = Field(default=None, description="Agent 名称")
     description: Optional[str] = Field(default=None, description="Agent 描述")
     group_id: Optional[str] = Field(default=None, description="所属部门组（空串=解除绑定）")
+    # P1-5b：性格/宪法局部更新（None=未提及不覆盖；空串=清空）
+    personality: Optional[str] = Field(default=None, description="性格设定")
+    constitution: Optional[str] = Field(default=None, description="行为准则（宪法）")
     model: Optional[str] = Field(default=None, description="LLM 模型")
     provider: Optional[str] = Field(default=None, description="LLM 提供商")
     config: Dict[str, Any] = Field(default_factory=dict, description="额外配置")
@@ -319,6 +328,10 @@ def agent_to_info(agent) -> Dict[str, Any]:
         "tools_count": 0,
         "owner_user_id": getattr(getattr(agent, "config", None), "owner_user_id", None),
         "group_id": getattr(getattr(agent, "config", None), "group_id", None),
+        # P1-5b：性格/宪法回显（AgentConfig 平铺字段，_save_agent_config 已落盘）——
+        # 表单编辑态此前硬编码空串，用户填过也看不出来
+        "personality": getattr(getattr(agent, "config", None), "personality", "") or "",
+        "constitution": getattr(getattr(agent, "config", None), "constitution", "") or "",
     }
 
     # 获取模型和提供商信息
@@ -487,6 +500,9 @@ async def create_agent(
             owner_user_id=current_user.get("user_id"),
             # 部门绑定（specs/2026-11-07 批 D）：显式指定 > 创建者所在部门组
             group_id=body.group_id or _creatorDeptGroupId(current_user),
+            # P1-5b：性格/宪法随表单创建落盘（AgentConfig 平铺字段）
+            personality=body.personality or "",
+            constitution=body.constitution or "",
             llm_model=body.model or "gpt-4",
             llm_provider=body.provider or body.config.get("provider", "") if body.config else "",
             description=body.description or "",
@@ -568,6 +584,12 @@ async def update_agent(
     # 部门绑定更新（specs/2026-11-07 批 D）：空串 = 解除绑定
     if body.group_id is not None and hasattr(agent, "config") and hasattr(agent.config, "group_id"):
         agent.config.group_id = str(body.group_id).strip() or None
+
+    # P1-5b：性格/宪法局部更新（None=未提及不覆盖；空串=清空）
+    if body.personality is not None and hasattr(agent.config, "personality"):
+        agent.config.personality = str(body.personality)
+    if body.constitution is not None and hasattr(agent.config, "constitution"):
+        agent.config.constitution = str(body.constitution)
 
     # TTS 配置更新（局部：仅覆盖请求中出现的键）
     tts_fields = _tts_fields_from_body_config(body.config)

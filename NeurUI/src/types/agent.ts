@@ -12,6 +12,10 @@ export interface Agent {
   role?: string
   /** 所属分组（后端 group_id；编辑态回显用，缺省串 = 未绑定） */
   group_id?: string
+  /** 性格设定（后端 AgentConfig.personality，表单编辑态回显） */
+  personality?: string
+  /** 行为准则/宪法（后端 AgentConfig.constitution，表单编辑态回显） */
+  constitution?: string
   createdAt: string
   updatedAt: string
   config?: AgentConfig
