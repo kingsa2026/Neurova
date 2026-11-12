@@ -100,6 +100,8 @@ class TestExecuteToolEndpoint:
             side_effect=ValueError("工具未注册: memory_search")
         )
         empty_engine.list_tools = Mock(return_value=[])
+        # 属主门（P2-6）经 get_tool 探测注册表：空引擎＝查无此工具
+        empty_engine.get_tool = Mock(return_value=None)
 
         # mock get_agent_instance 返回带真实 tool_executor 的 agent
         mock_agent_with_executor = Mock()
@@ -113,7 +115,11 @@ class TestExecuteToolEndpoint:
                 arguments={"query": "测试"},
                 timeout=5,
             )
-            response = await execute_tool(body)
+            # 直调形态随 P2-6 签名对齐：身份由请求边界注入，直调时显式给普通用户
+            response = await execute_tool(
+                body, current_user={"user_id": "u_test", "username": "tester",
+                                    "role": "user", "neuser_id": "ne_test"}
+            )
 
         # 断言：返回 code:0 且 result 不是 simulated 字符串
         assert response["code"] == 0, f"应成功，实际 code: {response['code']}"
@@ -159,6 +165,8 @@ class TestExecuteToolEndpointNoSimulatedFallback:
         empty_engine.execute_with_safeguards = AsyncMock(
             side_effect=ValueError("工具未注册: nonexistent_tool_xyz")
         )
+        # 属主门（P2-6）经 get_tool 探测注册表：未知工具＝查无此工具
+        empty_engine.get_tool = Mock(return_value=None)
 
         mock_agent_with_executor = Mock()
         mock_agent_with_executor.tool_executor = real_executor
@@ -171,7 +179,11 @@ class TestExecuteToolEndpointNoSimulatedFallback:
                 arguments={},
                 timeout=5,
             )
-            response = await execute_tool(body)
+            # 直调形态随 P2-6 签名对齐：身份由请求边界注入，直调时显式给普通用户
+            response = await execute_tool(
+                body, current_user={"user_id": "u_test", "username": "tester",
+                                    "role": "user", "neuser_id": "ne_test"}
+            )
 
         # 断言：不应返回 code:0 + simulated
         result_str = str(response.get("data", {}).get("result", "")).lower()

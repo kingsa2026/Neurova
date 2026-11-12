@@ -496,8 +496,56 @@ async def list_all_tools(source: Optional[str] = Query(default=None)):
     return tools
 
 
+def _executeOwnershipGate(tool_name: str, current_user: Dict[str, Any]) -> Optional[str]:
+    """执行面属主门（P2-6，全库断点审计 2026-11-12）。返回 None=放行，字符串=403 理由。
+
+    本端点此前只认登录不认属主：admin 注册的 stdio MCP 工具（本机进程派生面）
+    任何登录用户可点名执行，横向越权。归属判定**复用注册面派生单源
+    `_ownershipFromRegistration`**，不在执行面另立第二套口径：
+
+    - stdio MCP → 仅 admin（注册门 `_register_mcp_server` 已保证 stdio 只可能
+      出自 admin，执行面同口径收口；server 配置缺失按 fail-closed 拒非 admin）；
+    - 带 owner 的动态工具 → 属主本人或 admin；
+    - public / 无属主动态 / http(sse) MCP → 登录即可（与聊天链可见性一致）。
+
+    引擎查无此工具（builtin 等真内置来源）不在此判——与现状一致，由执行路径
+    如实报"未注册"。
+    """
+    tool_def = get_tool_engine().get_tool(tool_name)
+    if tool_def is None:
+        return None
+
+    role = str(current_user.get("role") or "user")
+    user_id = str(current_user.get("user_id") or "")
+    tool_source, tool_server_id = _ownershipFromRegistration(tool_def)
+
+    if tool_source == MCP_SOURCE:
+        if role == "admin":
+            return None
+        from neurova.shared_config import get_shared_config_manager
+
+        entry = get_shared_config_manager().get_mcp_server(tool_server_id or "")
+        transport = str((entry or {}).get("transport") or "")
+        if transport in ("http", "sse"):
+            return None
+        # stdio（admin 注册的本机进程派生面）与配置缺失（无法证实非本机面）
+        # 对非 admin 一律 fail-closed
+        return (
+            f"工具 {tool_name} 来自 stdio MCP server（本机进程派生面，admin 注册），"
+            "仅 admin 可直接执行"
+        )
+
+    if tool_source == "user" and role != "admin" and tool_def.owner != user_id:
+        return f"工具 {tool_name} 属于其他用户（owner={tool_def.owner}），仅属主或 admin 可执行"
+
+    return None
+
+
 @router.post("/tools/execute")
-async def execute_tool(body: ToolExecuteRequest):
+async def execute_tool(
+    body: ToolExecuteRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """执行工具调用。
 
     有 agent 时必须经**执行咽喉**（`agent.tool_executor`）：票据、轮级耗时、
@@ -507,6 +555,10 @@ async def execute_tool(body: ToolExecuteRequest):
     引擎直调，而那一支现在先经治理预检（§6-296）。
     """
     start = time.time()
+
+    gate_error = _executeOwnershipGate(body.tool_name, current_user)
+    if gate_error is not None:
+        raise HTTPException(status_code=403, detail=gate_error)
 
     from neurova.api.endpoints import get_agent_instance
 
