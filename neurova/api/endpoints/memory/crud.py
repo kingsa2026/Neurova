@@ -89,6 +89,13 @@ async def add_memory(
     try:
         manager = get_memory_manager(agent_id, user)
 
+        # P1-4（全库断点审计 2026-11-12）：importance/tags 此前在请求模型面
+        # 就被丢弃。tags 并入 metadata.tags（存储层单源形状）；importance
+        # 前端 0-1 → 存储 0-100 归一后透传。
+        merged_metadata = dict(request.metadata or {})
+        if request.tags:
+            merged_metadata["tags"] = list(request.tags)
+
         memory_id = manager.remember(
             content=request.content,
             memory_type=request.memory_type,
@@ -97,7 +104,8 @@ async def add_memory(
             is_crystallized=request.is_crystallized,
             emotion_score=request.emotion_score,
             perspective=request.perspective,
-            metadata=request.metadata,
+            importance=(request.importance * 100.0) if request.importance is not None else None,
+            metadata=merged_metadata or None,
             auto_analyze_emotion=request.auto_analyze_emotion,
             auto_classify=request.auto_classify,
             classification_context=request.classification_context,

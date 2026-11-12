@@ -7,7 +7,7 @@ from __future__ import annotations
 """
 
 from neurova.core.logger import get_logger
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
@@ -67,6 +67,11 @@ class AddMemoryRequest(BaseModel):
     auto_classify: bool = Field(default=True, description="是否自动分类推断 (默认开启；只补未声明的 category/memory_type/perspective，证据落 metadata._auto_classified)")
     classification_context: Optional[dict] = Field(default=None, description="分类上下文 (透传分类引擎，如 {\"emotion\": \"joy\"} 触发情感亲和增强)")
     auto_analyze_emotion: bool = Field(default=True, description="是否自动分析情绪 (默认开启)")
+    # P1-4（全库断点审计 2026-11-12）：前端提交的 importance/tags 此前被
+    # pydantic 静默丢弃。importance 契约量纲 0-1（页面 ×100 渲染），落库前
+    # ×100 对齐存储层 0-100 口径；tags 落 metadata.tags（存储层既有形状）。
+    importance: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="重要性 0-1（前端滑杆量纲）")
+    tags: Optional[List[str]] = Field(default=None, description="标签列表（落 metadata.tags）")
 
 
 class UpdateMemoryRequest(BaseModel):
@@ -144,6 +149,10 @@ def memory_to_dict(memory, *, owned: bool) -> dict:
                 # type: memory_type 的契约别名（前端类型列/页签过滤键）
                 "type": str(memory.get("memory_type", memory.get("type", "")) or ""),
                 "temperature": float(memory.get("temperature", 100.0) or 0.0),
+                # P1-4：读侧补 importance（0-100 → 0-1，页面 ×100 渲染）与
+                # tags（metadata.tags 提升为顶层）；此前页面重要性列恒 0%。
+                "importance": round(importance / 100.0, 4),
+                "tags": [str(t) for t in (metadata.get("tags") or [])],
                 "lifecycle_stage": str(memory.get("lifecycle_stage", "")),
                 # P1-9 来源信任级透传（缺失回退 agent，等价旧行为）
                 "origin": _origin_to_str(memory.get("origin")),
@@ -175,6 +184,11 @@ def memory_to_dict(memory, *, owned: bool) -> dict:
             # type: memory_type 的契约别名（前端类型列/页签过滤键）
             "type": str(getattr(memory, "memory_type", "") and getattr(memory, "memory_type").value),
             "temperature": float(getattr(memory, "temperature", 100.0)),
+            # P1-4：同 dict 分支，对象形态的 importance/tags 透出
+            "importance": round(float(getattr(memory, "importance", 0.0) or 0.0) / 100.0, 4),
+            "tags": [
+                str(t) for t in ((getattr(memory, "metadata", None) or {}).get("tags") or [])
+            ],
             "lifecycle_stage": str(getattr(memory, "lifecycle_stage", "")),
             "origin": _origin_to_str(getattr(memory, "origin", None)),
             "is_important": bool(getattr(memory, "is_important", False)),
