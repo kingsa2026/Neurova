@@ -76,6 +76,18 @@ class TestAddMemoryImportanceTags:
         kwargs = mock_manager.remember.call_args.kwargs
         assert not (kwargs["metadata"] or {}).get("tags")
 
+    def test_share_fields_reach_manager(self, app_client, mock_manager):
+        """P1-10 残留实装：共享组写入字段经 AddMemoryRequest 透传到 remember。"""
+        resp = app_client.post(
+            f"{BASE}",
+            json={"content": "测试内容", "shared": True, "share_group_ids": ["g1", "g2"]},
+            params={"agent_id": "default"},
+        )
+        assert resp.status_code == 200, resp.text
+        kwargs = mock_manager.remember.call_args.kwargs
+        assert kwargs["shared"] is True
+        assert kwargs["share_group_ids"] == ["g1", "g2"]
+
 
 class TestMemoryListContract:
     def test_list_outputs_importance_and_tags(self, app_client, mock_manager):

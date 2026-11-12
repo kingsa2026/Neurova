@@ -2826,6 +2826,12 @@ class MemoryManager:
                         mem.lifecycle_stage = LifecycleStage.ACTIVE
                 elif isinstance(stage_val, LifecycleStage):
                     mem.lifecycle_stage = stage_val
+            # P1-10 残留实装：共享面更新（shared＝旧模式全员可见；
+            # share_group_ids＝读者组交集可见，由唯一仲裁器裁决）
+            if "shared" in kwargs:
+                mem.shared = bool(kwargs["shared"])
+            if "share_group_ids" in kwargs:
+                mem.share_group_ids = list(kwargs["share_group_ids"] or [])
             mem.updated_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
             self._persist_memory(mem)  # 更新持久化
             self._memories[memory_id] = mem

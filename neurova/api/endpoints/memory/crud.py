@@ -109,6 +109,9 @@ async def add_memory(
             auto_analyze_emotion=request.auto_analyze_emotion,
             auto_classify=request.auto_classify,
             classification_context=request.classification_context,
+            # P1-10 残留实装：共享组写入（isolation.py 语义单源）
+            shared=bool(request.shared),
+            share_group_ids=list(request.share_group_ids or []),
         )
 
         return success_response(

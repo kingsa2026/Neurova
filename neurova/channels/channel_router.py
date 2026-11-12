@@ -290,6 +290,24 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
             if memoryManager is not None and hasattr(memoryManager, "set_request_scope"):
                 memoryManager.set_request_scope(
                     neuser_id=turnIdentity["neuser_id"], user_id=turnIdentity["user_id"])
+            # P1-10 残留实装：共享组可见性的读者组解析器接线（渠道路径）——
+            # 组员关系源是用户名清单，绑定账号 user_id → UserModel 取 username → 组集
+            if memoryManager is not None and hasattr(memoryManager, "set_shared_group_resolver"):
+                def _readerGroups(uid: str) -> tuple:
+                    try:
+                        from neurova.auth.user_group_model import get_user_group_manager
+                        from neurova.auth.user_model import UserModel
+
+                        row = UserModel().get_user_by_id(int(uid))
+                        username = row.username if row else ""
+                        return tuple(
+                            g.group_id
+                            for g in get_user_group_manager().get_groups_for_user(username)
+                        )
+                    except Exception:  # noqa: BLE001 - 组员关系不可达按无组处理
+                        return ()
+
+                memoryManager.set_shared_group_resolver(_readerGroups)
             preflight = await ledger.acquire()
             if ledger.rejected:
                 # 排队期被 /chat/stop 取消，或排队超时：如实回一句，不静默吞掉

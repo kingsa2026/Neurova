@@ -72,6 +72,10 @@ class AddMemoryRequest(BaseModel):
     # ×100 对齐存储层 0-100 口径；tags 落 metadata.tags（存储层既有形状）。
     importance: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="重要性 0-1（前端滑杆量纲）")
     tags: Optional[List[str]] = Field(default=None, description="标签列表（落 metadata.tags）")
+    # P1-10 残留实装：共享组写入（isolation.py 语义单源——shared＝本 agent
+    # 全员可见；share_group_ids＝读者组交集可见，由唯一仲裁器裁决）
+    shared: Optional[bool] = Field(default=None, description="跨 agent 共享开关（旧模式）")
+    share_group_ids: Optional[List[str]] = Field(default=None, description="共享组 ID 列表")
 
 
 class UpdateMemoryRequest(BaseModel):
@@ -88,6 +92,10 @@ class UpdateMemoryRequest(BaseModel):
     temperature: Optional[float] = Field(default=None, ge=0.0, le=100.0, description="记忆温度")
     metadata: Optional[dict] = Field(default=None, description="额外元数据 (合并，不替换)")
     lifecycle_stage: Optional[str] = Field(default=None, description="生命周期阶段")
+    # P1-10 残留实装：共享面更新（shared＝本 agent 全员可见；
+    # share_group_ids＝读者组交集可见，由唯一仲裁器裁决）
+    shared: Optional[bool] = Field(default=None, description="跨 agent 共享开关（旧模式）")
+    share_group_ids: Optional[List[str]] = Field(default=None, description="共享组 ID 列表")
 
 
 class MemoryItem(BaseModel):
@@ -275,5 +283,12 @@ def get_memory_manager(agent_id: Optional[str] = None, user: Optional[Dict[str, 
         agent.memory_manager.set_request_scope(neuser_id=neuser, user_id=uid)
     else:
         logger.debug("memory_manager 不支持 set_request_scope, 跳过隔离注入")
+    # P1-10 残留实装：共享组可见性的读者组解析器接线（组员关系源在 auth 域）
+    if hasattr(agent.memory_manager, "set_shared_group_resolver"):
+        from neurova.api.deps import _sharedGroupResolverFor
+
+        agent.memory_manager.set_shared_group_resolver(
+            _sharedGroupResolverFor((user or {}).get("username") or "")
+        )
 
     return agent.memory_manager
