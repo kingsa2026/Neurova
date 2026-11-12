@@ -103,8 +103,10 @@ describe('刷新后恢复挂起回合入口（P3-14）', () => {
 
   it('取回路径走共享 api 客户端打后端那条 run 读面', () => {
     expect(load).not.toBe('')
-    expect(load).toContain("api.get('/console/chat/runs'")
-    expect(load).toContain('session_id')
+    // P2-33：调用收编进 api/modules/console（getConsoleChatRuns 内部仍走
+    // 共享 api 客户端打 /console/chat/runs，session_id 由模块带参），
+    // 页面不再裸写 URL
+    expect(load).toContain('getConsoleChatRuns(sid)')
     // 不另造第二条请求链：裸 fetch 会绕过 401 单飞刷新与 Request-ID
     expect(load).not.toContain('fetch(')
   })

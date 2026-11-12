@@ -138,3 +138,30 @@ export interface FeedbackStats {
 export function getFeedbackStats(params?: { agent_id?: string; limit?: number }) {
   return api.get<ApiResponse<FeedbackStats>>(`${BASE}/chat/feedback/stats`, { params })
 }
+
+// ---------------------------------------------------------------------------
+// 运维/转向/音频面（P2-33：自 ChatPage 裸写 URL 收编进 api modules）
+// ---------------------------------------------------------------------------
+
+/** 音频合成流式端点路径（页面以 fetch 流式消费，路径单源在此）。 */
+export const AUDIO_SYNTHESIZE_STREAM_PATH = '/audio/synthesize-stream'
+
+/** 向正在运行的会话轮发送转向指令（steer）。 */
+export function steerConsoleChat(sessionId: string, message: string) {
+  return api.post<ApiResponse<null>>(`${BASE}/chat/steer`, { session_id: sessionId, message })
+}
+
+/** 取运行中任务列表（生成状态提示的数据源）。 */
+export function getConsoleTasks() {
+  return api.get<ApiResponse<{ tasks: unknown[] }>>(`${BASE}/tasks`)
+}
+
+/** 取某会话的停靠运行（parked runs）。 */
+export function getConsoleChatRuns(sessionId: string) {
+  return api.get<ApiResponse<{ runs: unknown[] }>>(`${BASE}/chat/runs`, { params: { session_id: sessionId } })
+}
+
+/** 音频（TTS/ASR）能力状态。 */
+export function getAudioStatus() {
+  return api.get<ApiResponse<Record<string, unknown>>>('/audio/status')
+}

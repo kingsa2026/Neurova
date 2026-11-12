@@ -479,6 +479,13 @@ import { reorderConsoleSessions } from '@/api/modules/console'
 import { useHumanTakeover } from '@/composables/useHumanTakeover'
 import type { ChatMessage, Session } from '@/types/chat'
 import { api } from '@/api'
+import {
+  AUDIO_SYNTHESIZE_STREAM_PATH,
+  getAudioStatus,
+  getConsoleChatRuns,
+  getConsoleTasks,
+  steerConsoleChat,
+} from '@/api/modules/console'
 import { extractUploadedFileId } from '@/api/modules/files'
 import { useGovernanceApproval } from '@/composables/useGovernanceApproval'
 import { readAccessToken } from '@/utils/authSession'
@@ -799,7 +806,7 @@ async function onSteer(text: string): Promise<void> {
   const sid = currentSessionId.value
   if (!sid || !text.trim()) return
   try {
-    await api.post('/console/chat/steer', { session_id: sid, message: text })
+    await steerConsoleChat(sid, text)
     uiMessage.success(t('chat.steerSent'))
   } catch {
     uiMessage.error(t('chat.steerFail'))
@@ -2077,7 +2084,7 @@ async function loadRunningTurn(sid: string): Promise<void> {
   runningTurn.value = null  // 会话级态：切换即清，跨会话不残留
   if (!sid) return
   try {
-    const res: any = await api.get('/console/tasks')
+    const res: any = await getConsoleTasks()
     if (currentSessionId.value !== sid) return  // 已切走：过期响应不写当前视图
     const tasks: any[] = res?.data?.tasks ?? res?.tasks ?? []
     const hit = tasks.find((t) => t?.session_id === sid && t?.kind === 'chat')
@@ -2104,7 +2111,7 @@ async function loadParkedRuns(sid: string): Promise<void> {
   parkedRuns.value = []  // 会话级态：切换即清，跨会话不残留
   if (!sid) return
   try {
-    const res: any = await api.get('/console/chat/runs', { params: { session_id: sid } })
+    const res: any = await getConsoleChatRuns(sid)
     if (currentSessionId.value !== sid) return  // 已切走：过期响应不写当前视图
     const runs: any[] = res?.data?.runs ?? res?.runs ?? []
     parkedRuns.value = runs
@@ -2218,7 +2225,7 @@ async function maybeAutoTitle(): Promise<void> {
 // ---------------------------------------------------------------------------
 async function checkTTSAvailability() {
   try {
-    const res: any = await api.get('/audio/status')
+    const res: any = await getAudioStatus()
     const data = res?.data ?? res
     const ttsInfo = data?.data?.tts || data?.tts
     ttsAvailable.value = ttsInfo?.initialized ?? false
@@ -2234,7 +2241,7 @@ async function synthesizeTTS(msg: ChatMessage) {
   try {
     const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
     const token = readAccessToken()
-    const response = await fetch(`${baseUrl}/audio/synthesize-stream`, {
+    const response = await fetch(`${baseUrl}${AUDIO_SYNTHESIZE_STREAM_PATH}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2575,7 +2582,7 @@ function startStreamTTS(): void {
     synthesize: async (text, signal) => {
       const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
       const token = readAccessToken()
-      const resp = await fetch(`${baseUrl}/audio/synthesize-stream`, {
+      const resp = await fetch(`${baseUrl}${AUDIO_SYNTHESIZE_STREAM_PATH}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -2627,7 +2634,7 @@ function getToolAnnouncer(): SpeechAnnouncer | null {
     toolAnnouncer = createSpeechAnnouncer(async (text) => {
       const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
       const token = readAccessToken()
-      const resp = await fetch(`${baseUrl}/audio/synthesize-stream`, {
+      const resp = await fetch(`${baseUrl}${AUDIO_SYNTHESIZE_STREAM_PATH}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
