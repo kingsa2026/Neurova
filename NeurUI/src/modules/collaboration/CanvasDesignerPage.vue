@@ -2610,7 +2610,7 @@ onBeforeUnmount(() => {
 
 /* 店铺下拉空态/降级提示（§6.1） */
 .store-connect-hint { margin: 4px 0 0; font-size: 12px; color: var(--nr-text-secondary, rgba(255,255,255,0.55)); }
-.json-field-error { margin: 4px 0 0; font-size: 11px; color: var(--nr-error, #ef4444); word-break: break-all; }
+.json-field-error { margin: 4px 0 0; font-size: 11px; color: var(--nr-error, var(--nr-error)); word-break: break-all; }
 .mono-input :deep(textarea) { font-family: monospace; }
 .store-connect-link { color: var(--nr-accent, #7c9eff); cursor: pointer; }
 
@@ -2674,10 +2674,10 @@ onBeforeUnmount(() => {
 
 /* 画布节点 */
 .graph-node { position: absolute; min-width: 140px; background: var(--nr-bg-elevated); border: 1px solid var(--nr-border, rgba(255, 255, 255, 0.1)); border-radius: 10px; cursor: move; user-select: none; transition: border-color 0.15s; }
-.graph-node.multi-selected { border-color: var(--nr-primary-light, #818cf8); box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.35); }
-.canvas-marquee { position: absolute; border: 1px dashed var(--nr-primary-light, #818cf8); background: rgba(129, 140, 248, 0.08); pointer-events: none; z-index: 40; }
+.graph-node.multi-selected { border-color: var(--nr-primary-light, var(--nr-primary-light)); box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.35); }
+.canvas-marquee { position: absolute; border: 1px dashed var(--nr-primary-light, var(--nr-primary-light)); background: rgba(129, 140, 248, 0.08); pointer-events: none; z-index: 40; }
 .graph-node:hover { border-color: rgba(99, 102, 241, 0.3); }
-.graph-node.selected { border-color: var(--nr-primary-light, #818cf8); box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2); }
+.graph-node.selected { border-color: var(--nr-primary-light, var(--nr-primary-light)); box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2); }
 /* 执行状态着色（蜂群编排可视化） */
 .graph-node.run-success { border-color: rgba(74, 222, 128, 0.7); box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.15); }
 .graph-node.run-failed { border-color: rgba(248, 113, 113, 0.7); box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.15); }
@@ -2696,7 +2696,7 @@ onBeforeUnmount(() => {
 .port-in { justify-content: flex-start; }
 .port-out { justify-content: flex-end; }
 /* 端口连接点：10px 可视 + 伪元素 16px 命中热区（对齐困难反馈） */
-.port-dot { position: relative; width: 10px; height: 10px; border-radius: 50%; background: var(--nr-primary-light, #818cf8); }
+.port-dot { position: relative; width: 10px; height: 10px; border-radius: 50%; background: var(--nr-primary-light, var(--nr-primary-light)); }
 .port-dot::before { content: ''; position: absolute; inset: -3px; border-radius: 50%; }
 /* 输出端口：拖出连线；扩大热区便于命中 */
 .port-dot-out {
@@ -2713,12 +2713,12 @@ onBeforeUnmount(() => {
    <path> 默认 fill 为黑色，必须显式 fill: none，否则贝塞尔曲线会以黑色填充
    曲线与首尾点连线围成的区域，看起来像曲线下有阴影；
    描边颜色必须完全不透明——半透明描边叠在网格底上会晕出暗色虚影，同样像阴影 */
-.edge-line { fill: none; filter: none; stroke: #6366f1; stroke-width: 2; marker-end: url(#edge-arrow); }
-.edge-line.selected { stroke: #f59e0b; stroke-width: 3; marker-end: url(#edge-arrow-selected); }
-.edge-arrow-fill { fill: #6366f1; }
-.edge-arrow-fill-selected { fill: #f59e0b; }
+.edge-line { fill: none; filter: none; stroke: var(--nr-primary); stroke-width: 2; marker-end: url(#edge-arrow); }
+.edge-line.selected { stroke: var(--nr-warning); stroke-width: 3; marker-end: url(#edge-arrow-selected); }
+.edge-arrow-fill { fill: var(--nr-primary); }
+.edge-arrow-fill-selected { fill: var(--nr-warning); }
 .edge-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
-.edge-preview { fill: none; filter: none; stroke: #818cf8; stroke-width: 2; stroke-dasharray: 6 4; }
+.edge-preview { fill: none; filter: none; stroke: var(--nr-primary-light); stroke-width: 2; stroke-dasharray: 6 4; }
 
 .connect-hint {
   position: absolute;
@@ -2743,7 +2743,7 @@ onBeforeUnmount(() => {
   font-size: 13px;
   cursor: pointer;
 }
-.node-delete:hover { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+.node-delete:hover { background: rgba(239, 68, 68, 0.2); color: var(--nr-error); }
 
 /* 缩放控制栏 */
 .canvas-zoombar {
