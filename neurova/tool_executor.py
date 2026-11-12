@@ -489,16 +489,17 @@ class ToolExecutor:
         原实现 getattr(self._agent, "user_id"/"agent_id") 恒为 None/""，
         导致 ToolEngine 安全防护、治理裁决、审批请求、审计日志全部丢失用户身份。
 
-        三层隔离贯通（§6-163）：请求级登录用户走唯一身份通道——
-        `agent.current_user_id` property（turn_state.current_user_id 直读转发，
-        由请求边界经 set_request_user_id 写入）优先于 config 层身份——config
-        是共享单例的静态配置，请求级登录用户才是归属主体。
+        三层隔离贯通（§6-163）：请求级登录用户走唯一身份通道——真实 Agent 经
+        `current_user_id` property（turn_state.current_user_id 直读转发）；
+        `_current_user_id` 私有形参是**显式身份位**（测试替身与显式写入方设置）。
+        私有位必须先读：反序会让测试替身的 MagicMock auto-attr 真值影子遮蔽
+        显式身份（test_camofox_isolation 两测试的根因，B5 契约锁定该顺序）。
         """
         agent = self._agent
-        # P2-22（全库断点审计 2026-11-12）：原首读的 agent._current_user_id
-        # 是死读层——全仓无任何写入方，恒 None。身份唯一通道是 public 别名
-        # （turn_state 直读转发），删去死读。
-        request_user = getattr(agent, "current_user_id", None)
+        # B5 契约（test_tool_executor_identity_contract 锁定）：私有显式位优先于
+        # public 别名——审计 P2-22 曾按"恒 None 死读层"删去过，被本契约打回
+        # （测试替身显式设置该位，删读即破坏替身身份注入）。
+        request_user = getattr(agent, "_current_user_id", None) or getattr(agent, "current_user_id", None)
         config = getattr(agent, "config", None)
         user_id = (
             request_user
