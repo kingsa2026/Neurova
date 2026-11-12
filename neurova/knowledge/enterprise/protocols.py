@@ -14,7 +14,8 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 #: 适配器 sourceType 白名单：注册表只收这些类型；默认不注册任何真实适配器。
 #: 变体细分走描述符字段（file.format / sql.driver / erp_api.vendor / chat.vendor），
 #: 闭集校验在 schema_mapping.VARIANT_CLOSED_SETS（2026-11-07 裁定 §2.3-1A）。
-SOURCE_TYPES = ("sql", "erp_api", "event_stream", "file", "http_pull", "chat")
+SOURCE_TYPES = ("sql", "erp_api", "event_stream", "file", "http_pull", "chat",
+                "unity_catalog", "snowflake", "sap_odata")
 
 
 @dataclass
