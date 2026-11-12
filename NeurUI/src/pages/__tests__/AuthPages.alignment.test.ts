@@ -35,7 +35,6 @@ import { useAppStore } from '@/stores/app'
 const stubs = {
   Galaxy: { name: 'Galaxy', template: '<div class="galaxy-stub" />' },
   GlassSurface: { name: 'GlassSurface', template: '<div class="glass-surface-stub"><slot /></div>' },
-  StarBackground: { template: '<div/>' },
   GlassPanel: { template: '<div><slot/></div>' },
   GlassButton: { template: '<button><slot/></button>' },
   GlassInput: { template: '<input />' },

@@ -306,40 +306,6 @@ export const useAgentStore = defineStore('agents', () => {
     isolationContext.value = { agent_id: agentId }
   }
 
-  /**
-   * Get the full config for an agent (from local state or fetch from API).
-   */
-  async function getAgentConfig(agentId: string): Promise<AgentConfig | null> {
-    // Try local state first
-    const local = agents.value.find((a) => a.id === agentId)
-    if (local?.config) return local.config
-
-    // Fetch from API
-    try {
-      const res: any = await api.get(`/agents/${agentId}/config`)
-      const data = res?.data ?? res
-      if (data && typeof data === 'object') {
-        return {
-          systemPrompt: data.system_prompt ?? data.systemPrompt ?? '',
-          temperature: data.temperature ?? 0.7,
-          maxTokens: data.max_tokens ?? data.maxTokens ?? 4096,
-          topP: data.top_p ?? data.topP ?? 1.0,
-          ttsEnabled: data.tts_enabled ?? data.ttsEnabled ?? false,
-          ttsVoice: data.tts_voice ?? data.ttsVoice ?? '',
-          ttsSpeed: data.tts_speed ?? data.ttsSpeed ?? 1.0,
-          ttsPitch: data.tts_pitch ?? data.ttsPitch ?? 1.0,
-          tools: data.tools ?? [],
-          skills: data.skills ?? [],
-        }
-      }
-      return null
-    } catch (err: any) {
-      error.value = err?.response?.data?.message || err?.message || 'Failed to get agent config.'
-      console.error('[AgentStore] getAgentConfig error:', err)
-      return null
-    }
-  }
-
   return {
     // state
     agents,
@@ -359,6 +325,5 @@ export const useAgentStore = defineStore('agents', () => {
     updateAgent,
     deleteAgent,
     setCurrentAgent,
-    getAgentConfig,
   }
 })
