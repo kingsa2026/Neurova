@@ -70,8 +70,8 @@ def _labelPropagation(nodes: List[str], edges: List[tuple]) -> List[List[str]]:
             for (a, b), w in weights.items():
                 if a == node:
                     tally[labels[b]] += w
-                elif b == node:
-                    tally[labels[a]] += w
+                # 无向边已双向记账（每条事实边 +1 两方向）——只取出向半边
+                # 计票，入向半边是同一邻居的重复计票（会把弱链翻倍成平票）
             if not tally:
                 continue
             majority = tally.most_common(1)[0][0]
@@ -106,7 +106,8 @@ class CommunityGraphBuilder:
         with self._store._lock:
             nodeRows = self._store._conn.execute(
                 "SELECT canonical_label FROM knowledge_subjects"
-                " WHERE agent_id = ? AND tenant_id = ? AND status = 'active'",
+                " WHERE agent_id = ? AND tenant_id = ? AND status = 'active'"
+                " ORDER BY canonical_label",
                 (self._agentId, self._tenantId)).fetchall()
             edgeRows = self._store._conn.execute(
                 "SELECT s.canonical_label AS src, f.object_term AS dst"
@@ -114,7 +115,7 @@ class CommunityGraphBuilder:
                 " ON s.subject_key = f.subject_key"
                 " WHERE f.agent_id = ? AND f.tenant_id = ? AND f.status = 'active'"
                 " AND f.record_kind = 'triple' AND s.canonical_label = s.canonical_label"
-                " ORDER BY f.fact_id",
+                " ORDER BY s.canonical_label, f.object_term, f.fact_id",
                 (self._agentId, self._tenantId)).fetchall()
         nodes = [str(r["canonical_label"]) for r in nodeRows]
         edges = [(str(r["src"]), str(r["dst"])) for r in edgeRows]

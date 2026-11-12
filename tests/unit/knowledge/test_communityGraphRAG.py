@@ -27,16 +27,21 @@ def _buildGraph(store):
     registry.register("cluster_a", "concept")
     registry.register("cluster_b", "concept")
     gate = productionAdmissionGate(store)
-    # 簇内每对两条事实（加权标签传播的强簇），簇间仅一条弱链
-    edges = [("A1", "A2"), ("A1", "A2"), ("A2", "A3"), ("A2", "A3"),
-             ("A3", "A1"), ("A3", "A1"),
-             ("B1", "B2"), ("B1", "B2"), ("B2", "B3"), ("B2", "B3"),
-             ("B3", "B1"), ("B3", "B1"),
-             ("A1", "B1")]
-    for src, dst in edges:
-        content = "%s linked %s" % (src, dst)
+    # 簇内多条边走不同谓词（冲突裁决按 (subject,predicate) 分组——同一谓词的
+    # 多条事实会被 most_recent 取代到一行）；社区图读面不滤谓词。簇间单条＝弱链。
+    registry.register("linked_a", "relation")
+    registry.register("linked_b", "relation")
+    edges = [("A1", "A2", "linked_a"), ("A2", "A1", "linked_a"),
+             ("A2", "A3", "linked_b"), ("A3", "A2", "linked_a"),
+             ("A3", "A1", "linked_b"), ("A1", "A3", "linked_a"),
+             ("B1", "B2", "linked_a"), ("B2", "B1", "linked_a"),
+             ("B2", "B3", "linked_b"), ("B3", "B2", "linked_a"),
+             ("B3", "B1", "linked_b"), ("B1", "B3", "linked_a"),
+             ("A1", "B1", "linked_b")]
+    for src, dst, pred in edges:
+        content = "%s %s %s" % (src, pred, dst)
         gate.admit(AdmissionRequest(
-            agentId="default", subjectLabel=src, predicateTermId="linked",
+            agentId="default", subjectLabel=src, predicateTermId=pred,
             objectTerm=dst, content=content,
             assertions=[{"actorType": "pipeline", "actorId": "unit",
                          "mediumRef": "unit:test", "statementText": content}]))
