@@ -314,7 +314,11 @@ async def create_ontology_action(
             boundTool=str(body.get("bound_tool") or ""),
             riskTier=str(body.get("risk_tier") or "low"),
             enabled=bool(body.get("enabled", True)), tenantId=tenant,
-            registeredTools=list(get_registered_tool_names()))
+            registeredTools=list(get_registered_tool_names()),
+            # W4：动作语义三段（v45）——登记即校验（谓词在册/形状闭集）
+            precondition=body.get("precondition") or {},
+            impact=body.get("impact") or [],
+            stateChange=body.get("state_change") or {})
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"code": 0, "data": item, "request_id": ""}

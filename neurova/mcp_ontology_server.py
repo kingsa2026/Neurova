@@ -302,6 +302,68 @@ async def fact_submit(
 
 # ── A3：ontology_derive（推理查询）────────────────────────────────────────────
 
+def _resolveAgentForActions(agentId: str) -> Optional[Dict[str, Any]]:
+    """动作执行载体解析（W4，D5 门面转交）：agent 单源取法与治理端点同源
+    （get_agent_instance），执行器 = ToolExecutor(agent)。None＝未就绪。"""
+    from neurova.api.endpoints import get_agent_instance
+
+    agent = get_agent_instance(agentId or "")
+    if agent is None:
+        return None
+    from neurova.tool_executor import ToolExecutor
+
+    return {"executor": ToolExecutor(agent), "agent": agent}
+
+
+@_SERVER.tool()
+async def ontology_act(
+    ctx: Context,
+    action_id: str,
+    params_json: str = "{}",
+    agent_id: str = "",
+    simulation_id: str = "",
+) -> dict:
+    """动作语义门面（W4，D5 已裁）：①precondition 求值（不满足显式拒，
+    **不触工具**）→ ②ToolExecutor.execute 单管道（治理预检/审批/审计/mcp_grants
+    全继承，本门面零复制判定）→ ③成功后 state_change 经 admission（W3 迁移约束
+    自动继承）→ ④回执含 impact 声明＋状态读数＋fact_id/溯源。simulation_id 为
+    先演后决互链（W5 落格后接台账，缺省 off）。"""
+    import json as _json
+
+    from neurova.knowledge.ontology.action_registry import ActionRegistry
+    from neurova.knowledge.ontology.action_runtime import (
+        ActionPreconditionError,
+        executeAction,
+    )
+
+    user = _currentUserFromContext(ctx)
+    tenant = _tenantOf(user)
+    try:
+        params = _json.loads(params_json or "{}")
+        if not isinstance(params, dict):
+            raise ValueError("params_json 须是 JSON 对象")
+    except ValueError as exc:
+        return {"rejected": True, "detail": "params_json 不可解析：%s" % exc}
+    action = ActionRegistry(_store()).action(str(action_id or "").strip(),
+                                             tenantId=tenant)
+    if action is None:
+        return {"rejected": True, "detail": "动作未登记: %s" % action_id}
+    if not action.get("enabled"):
+        return {"rejected": True, "detail": "动作已停用: %s" % action_id}
+    resolved = _resolveAgentForActions(_agentIdOf(user, agent_id))
+    if resolved is None:
+        return {"rejected": True,
+                "detail": "Agent 未就绪（动作执行载体不可用，稍后重试）"}
+    try:
+        return await executeAction(
+            action, params, resolved["executor"], _store(),
+            agentId=_agentIdOf(user, agent_id), tenantId=tenant,
+            machineRegistry=None)
+    except ActionPreconditionError as exc:
+        return {"rejected": True, "detail": str(exc),
+                "action_id": action.get("action_id")}
+
+
 @_SERVER.tool()
 async def ontology_state(
     ctx: Context,

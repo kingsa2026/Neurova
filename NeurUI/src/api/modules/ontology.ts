@@ -25,6 +25,7 @@ import type {
   FactQueryBody,
   FactQueryItem,
   IriResolution,
+  OntologyActionRow,
   OntologyComputeResult,
   OntologyEnvelope,
   OntologyFunctionRow,
@@ -387,4 +388,22 @@ export function createOntologyStateMachine(body: {
 export function deleteOntologyStateMachine(termId: string) {
   return api.delete<ApiResponse<{ term_id: string }>>(
     `/knowledge/ontology/state-machines/${encodeURIComponent(termId)}`)
+}
+
+export function listOntologyActions() {
+  return api.get<ApiResponse<OntologyActionRow[]>>('/knowledge/ontology/actions')
+}
+
+export function createOntologyAction(body: {
+  action_id: string
+  label?: string
+  bound_tool: string
+  risk_tier?: string
+  param_schema?: Record<string, unknown>
+  precondition?: Record<string, unknown>
+  impact?: string[]
+  state_change?: Record<string, unknown>
+  enabled?: boolean
+}) {
+  return api.post<ApiResponse<OntologyActionRow>>('/knowledge/ontology/actions', body)
 }

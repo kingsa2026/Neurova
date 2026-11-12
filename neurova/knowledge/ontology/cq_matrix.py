@@ -124,6 +124,20 @@ def _probeShapeValidation() -> str:
     return "implemented" if hits == 2 else ("partial" if hits else "planned")
 
 
+def _probeActionSemantics() -> str:
+    """CQ-15：动作前置拒（specs/2026-11-12 W4）——语义三列/运行时/MCP 门面。"""
+    from neurova.knowledge.ontology import action_registry, action_runtime
+    from neurova.mcp_ontology_server import ontology_act  # noqa: F401
+
+    hits = (
+        ("precondition_json" in (action_registry._SCHEMA_V45_ACTION_SEMANTICS or ""))
+        + hasattr(action_runtime, "executeAction")
+        + (ontology_act is not None)
+        + hasattr(action_registry.ActionRegistry, "upsert")
+    )
+    return "implemented" if hits == 4 else ("partial" if hits else "planned")
+
+
 def _probeStateMachines() -> str:
     """CQ-13：状态类（specs/2026-11-12 W3）——登记面/迁移判/事件桥/读数工具。"""
     from neurova.api.endpoints import knowledge_ontology
@@ -241,6 +255,11 @@ CQ_TRACE_ROWS: tuple = (
         query="状态机（specs/2026-11-12 W3 落地：has_state＋迁移闭集＋事件桥）",
         testId="tests/unit/knowledge/ontology/test_stateMachineValidation.py",
         probe=_probeStateMachines),
+    CqTraceRow(
+        cqId="CQ-15", question="动作的前置条件不满足时是否拒绝执行？", actor="运维员", priority="P2",
+        query="动作语义（specs/2026-11-12 W4 落地：precondition 不触工具＋单管道转交）",
+        testId="tests/unit/knowledge/ontology/test_actionPrecondition.py",
+        probe=_probeActionSemantics),
 )
 
 
