@@ -455,6 +455,24 @@ async def create_state_machine(
     return {"code": 0, "data": item, "request_id": ""}
 
 
+@router.get("/ontology/accountability")
+async def query_ontology_accountability(
+    subject: Optional[str] = Query(default=None),
+    actor: Optional[str] = Query(default=None),
+    start: Optional[str] = Query(default=None),
+    end: Optional[str] = Query(default=None),
+    current_user: Dict = Depends(require_admin()),
+):
+    """W12：跨五账聚合追责查询（仅管理员，只读）——两个记账主体如实标注。"""
+    from neurova.knowledge.ontology.accountability import accountabilityQuery
+
+    store, _registry, _engine = _ontologyParts()
+    result = accountabilityQuery(store, subject=subject, actor=actor,
+                                 timeWindowStart=start, timeWindowEnd=end,
+                                 tenantId=_tenantOf(current_user))
+    return {"code": 0, "data": result, "request_id": ""}
+
+
 @router.post("/ontology/decisions")
 async def create_ontology_decision(
     body: Dict[str, Any],
