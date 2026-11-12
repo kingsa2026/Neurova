@@ -209,3 +209,49 @@ class TestMergeDuplicateRecords:
             assert outcome == {"groups": 0, "removed": 0}, "写入门已合并的行被二次清理误伤"
         finally:
             ekb.close()
+
+
+class TestMergeWiringAndLatest:
+    def test_merge_wired_into_schema_migration(self, tmp_path):
+        """P1-3 接线：mergeDuplicateRecords 挂 _migrate_schema，初始化即清存量。
+
+        守卫判据：清理工具必有调用方——新进程首次连接同一库时，存量重复行
+        必须已被自动合并，不再依赖人工触发。
+        """
+        from neurova.skills.experience_knowledge_base import ExperienceKnowledgeBase
+
+        db = tmp_path / "ekb_wired.db"
+        first = ExperienceKnowledgeBase(db_path=str(db))
+        try:
+            _legacy_dup(first, QUESTION, structure="a", created="2026-11-01T00:00:00+00:00")
+            _legacy_dup(first, QUESTION, structure="b", created="2026-11-02T00:00:00+00:00")
+            # 直插助手不提交（与生产写入路径不同）——不提交 close 即回滚
+            first._conn.commit()
+        finally:
+            first.close()
+
+        second = ExperienceKnowledgeBase(db_path=str(db))
+        try:
+            with second._lock:
+                n = second._conn.execute(
+                    "SELECT count(*) FROM experience_records WHERE content_key LIKE ?",
+                    (f"%{QUESTION}%",),
+                ).fetchone()[0]
+            assert n == 1, "新进程初始化（_migrate_schema）应自动执行存量合并"
+        finally:
+            second.close()
+
+    def test_latest_considers_kept_row(self, tmp_path):
+        """P2-9：保留行（min id）created_at 比被并行新时，result/created_at 不得回退。"""
+        ekb = _ekb(tmp_path)
+        try:
+            first = _legacy_dup(ekb, QUESTION, structure="a", created="2026-11-05T00:00:00+00:00")
+            _legacy_dup(ekb, QUESTION, structure="b", created="2026-11-01T00:00:00+00:00")
+
+            ekb.mergeDuplicateRecords()
+
+            row = _row(ekb, first)
+            assert row["created_at"] == "2026-11-05T00:00:00+00:00", "最新一次须把保留行纳入比较"
+            assert json.loads(row["result"])["reply_excerpt"] == "r-a", "result 不回退到更旧一次"
+        finally:
+            ekb.close()

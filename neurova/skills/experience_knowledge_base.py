@@ -281,6 +281,12 @@ class ExperienceKnowledgeBase:
             )
         self._conn.commit()
 
+        # P1-3（全库断点审计 2026-11-12）：存量重复行清理接进迁移链——
+        # mergeDuplicateRecords 此前全仓零调用，去重门 NULL 失效期的存量重复行
+        # 永不清理（生产库曾 300+ 行同句）。幂等（同身份只剩一行后零删除），
+        # 每进程首次连接执行一次；与写入门同一份身份/合并语义（教义第 6 条）。
+        self.mergeDuplicateRecords()
+
     def publish_growth_lesson(self, lesson: Dict[str, Any]) -> bool:
         """Idempotent scoped index, separate from execution records and success metrics."""
         key = tuple(lesson[k] for k in ("agent_id", "answerer_id", "question_id"))
@@ -578,7 +584,13 @@ class ExperienceKnowledgeBase:
                 others = [dict(r) for r in cur.fetchall()]
                 if not others:
                     continue
-                latest = others[-1]
+                # P2-9：最新一次须把保留行纳入比较——id 与 created_at 不同序的
+                # 脏数据下，只看 others[-1] 会把 result/timestamp/created_at
+                # 回退到更旧一次。
+                latest = max(
+                    [kept] + others,
+                    key=lambda r: (str(r.get("created_at") or ""), int(r["id"])),
+                )
                 adoption = kept.get("adoption_outcome")
                 if adoption is None:
                     adoption = next(
