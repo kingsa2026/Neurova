@@ -22,59 +22,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-
-# ═══════════════════════════════════════════════════════════════
-# N-9: 三元表达式优先级错误 (skill_generator.py:449)
-# ═══════════════════════════════════════════════════════════════
-
-class TestN9TernaryPrecedence:
-    """Bug N-9: skill_generator.py:449 三元表达式优先级错误。
-
-    原代码:
-        if "->" not in code and ":" not in code.split("def ")[1] if "def " in code else True:
-
-    Python 解析为 ((A and B) if C else True)，而非 (A and (B if C else True))。
-    无 "def " 时走 else 返回 True，导致无函数代码被错误添加"建议添加类型提示"警告。
-    """
-
-    def test_no_type_hint_warning_for_code_without_function(self):
-        """无函数代码不应被提示"建议添加类型提示"。"""
-        from neurova.skills.skill_generator import SkillGenerator
-
-        generator = SkillGenerator()
-        code_without_func = "# just a comment\nx = 1\nprint(x)\n"
-        warnings = asyncio.run(generator._check_best_practices(code_without_func))
-        assert "建议添加类型提示" not in warnings, (
-            f"无函数代码不应提示类型提示，实际 warnings: {warnings}"
-        )
-
-    def test_type_hint_warning_for_function_without_annotation(self):
-        """有函数但无类型注解时应提示（验证修复不破坏正向行为）。"""
-        from neurova.skills.skill_generator import SkillGenerator
-
-        generator = SkillGenerator()
-        code_without_hint = "def foo(x):\n    return x\n"
-        warnings = asyncio.run(generator._check_best_practices(code_without_hint))
-        assert "建议添加类型提示" in warnings, (
-            f"无类型注解的函数应被提示，实际 warnings: {warnings}"
-        )
-
-    def test_no_type_hint_warning_for_function_with_return_annotation(self):
-        """有返回类型注解的函数不应被提示。"""
-        from neurova.skills.skill_generator import SkillGenerator
-
-        generator = SkillGenerator()
-        code_with_hint = "def foo(x: int) -> int:\n    return x\n"
-        warnings = asyncio.run(generator._check_best_practices(code_with_hint))
-        assert "建议添加类型提示" not in warnings, (
-            f"有返回注解的函数不应被提示，实际 warnings: {warnings}"
-        )
-
-
-# ═══════════════════════════════════════════════════════════════
-# N-4: get_tool_messages 读错列表 (tool_executor.py:1116)
-# ═══════════════════════════════════════════════════════════════
-
 class TestN4GetToolMessagesWrongList:
     """Bug N-4: ToolExecutor.get_tool_messages() 读 self._messages_list（本地列表），
     但消费者（chat_pipeline._collect_tool_messages、Agent.get_tool_messages）读

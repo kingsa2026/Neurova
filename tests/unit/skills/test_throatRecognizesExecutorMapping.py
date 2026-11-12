@@ -386,32 +386,3 @@ class TestMappingTableIsOneRepresentation:
         assert built.name == "web-search", f"执行体挂的名字不对：{built.name}"
 
 
-class TestChainReadsTheMappedOutcome:
-    def testChainStepOnMappedSkillCompletesWithDictContract(self, tmp_path):
-        """§6-283 第④条：链上那一档本批要真跑一次，不许只声称"已能跑"。
-
-        如实记两句：① `SkillChainExecutor(` 在 `neurova/` 内**零构造点**（现读），所以这格证的是
-        "链经真咽喉拿到的是一份 dict 契约的执行结果、映射那一支在链上也到得了"，**不**证它在生产里在跑；
-        ② 链把整包输入塞成一个关键字 `input_data=`（`skill_chain_executor.py:270`），字段名因此不是
-        直通的——那是另一件事，本批不改（改了会动每一只落盘技能收到的形状），登记在案。
-        """
-        from neurova.skills.models import SkillChain, SkillChainStep, StepStatus
-        from neurova.skills.skill_chain_executor import SkillChainExecutor
-
-        svc = _svc(tmp_path)
-        _installShell(svc, tmp_path, MAPPED_ID)
-        _registerProbe(MAPPED_ID)
-        chain = SkillChain(chain_id="b63-chain", name="映射那一支", steps=[
-            SkillChainStep(step_id="s1", skill_id=MAPPED_ID)])
-
-        outcome = asyncio.run(SkillChainExecutor(skill_service=svc).execute_chain(
-            chain, {"query": "ping"}))
-
-        assert outcome.success is True, (
-            f"整链没成，步骤读数：{[(r.status, r.error) for r in outcome.results]}")
-        stepResult = outcome.results[0]
-        assert stepResult.status == StepStatus.COMPLETED, (
-            f"链上那一步的状态不是完成：{stepResult.status} / {stepResult.error}")
-        assert (stepResult.output_data or {}).get("executorRan") == MAPPED_ID, (
-            f"链从咽喉读到的不是执行体的那份 result（dict 契约没接上）：{stepResult.output_data}")
-

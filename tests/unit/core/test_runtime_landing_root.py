@@ -480,11 +480,8 @@ class TestConstructorsDoNotTouchCwd:
         assert MediaStorageConfigManager().config_dir.is_absolute()
         assert self._leaked(elsewhere) == [], "媒体配置目录仍落在 CWD"
 
-    def test_projectToSkillLandsUnderDataRoot(self, elsewhere):
-        from neurova.skills.project_to_skill import ProjectToSkillConverter
-
-        assert ProjectToSkillConverter().output_dir.is_absolute()
-        assert self._leaked(elsewhere) == [], "技能产出目录仍落在 CWD"
+    # P1-13 退役：test_projectToSkillLandsUnderDataRoot 随 project_to_skill
+    # 退役摘除（数据根落点纪律由本类其余组件的同型格继续覆盖）。
 
     def test_healthCheckLandsUnderDataRoot(self, elsewhere):
         from neurova.api.app import _make_database_health_check
