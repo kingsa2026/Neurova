@@ -398,12 +398,17 @@ def register_provider_from_config(
     router.register_provider(provider_id, provider_name, models)
 
 
-def sync_llm_router() -> None:
-    """Best-effort：将 LLMProviderManager 单例的 providers 同步到全局 LLMRouter。"""
+def sync_llm_router(scope: Optional[str] = None) -> None:
+    """Best-effort：将 LLMProviderManager 的 providers 同步到全局 LLMRouter。
+
+    P1-15（全库断点审计 2026-11-12）：scope 缺省（None）＝全局 admin 注册表
+    （存量行为）；传入 scope_for_owner(owner) 等用户域时按该域注册表同步——
+    普通用户 agent 的多模态路由从此看得见自己的 provider。
+    """
     try:
         from neurova.llm.provider_manager import get_provider_manager
 
-        mgr = get_provider_manager()
+        mgr = get_provider_manager(scope=scope) if scope else get_provider_manager()
         if mgr is None:
             return
         for pid, pconf in mgr._providers.items():
@@ -412,9 +417,25 @@ def sync_llm_router() -> None:
         logger.warning("sync_llm_router 失败（多模态路由将惰性回退）: %s", e)
 
 
+# 已同步过的 scope（每域只全量同步一次；provider 增删走模型管理页的显式同步）
+_synced_scopes: set = {"admin"}
+
+
+def _sync_scope_once(scope: str) -> None:
+    if scope in _synced_scopes:
+        return
+    with _router_lock:
+        if scope in _synced_scopes:
+            return
+        sync_llm_router(scope)
+        _synced_scopes.add(scope)
+
+
 # 便捷函数
 def select_model_for_request(
-    request_type: RequestType, required_capabilities: Optional[List[ModelCapability]] = None
+    request_type: RequestType,
+    required_capabilities: Optional[List[ModelCapability]] = None,
+    scope: Optional[str] = None,
 ) -> Optional[ModelSelectionResult]:
     """
     为请求类型选择最佳模型的便捷函数
@@ -422,15 +443,25 @@ def select_model_for_request(
     Args:
         request_type: 请求类型
         required_capabilities: 必需的能力列表
+        scope: P1-15——provider 注册表作用域（scope_for_owner(owner)）。
+            缺省 None＝全局 admin 表（存量行为）。候选空时回全局兜底。
 
     Returns:
         最佳模型选择结果
     """
     router = get_llm_router()
-    # 惰性同步：首次调用且无 provider 时，尝试从 LLMProviderManager 拉取
-    if not router._providers:
+    # 惰性同步：首次调用且无 provider 时，尝试从 LLMProviderManager 拉取；
+    # 带 scope 时按该域注册表同步（普通用户 agent 看得见自己的 provider）
+    if scope:
+        _sync_scope_once(scope)
+    elif not router._providers:
         sync_llm_router()
-    return router.select_model(request_type, required_capabilities)
+    result = router.select_model(request_type, required_capabilities)
+    if result is None and scope:
+        # 候选空再回全局（审计口径）：用户域没配该能力时回落 admin 表
+        sync_llm_router()
+        result = router.select_model(request_type, required_capabilities)
+    return result
 
 
 # 请求类型到能力的映射

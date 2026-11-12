@@ -1140,7 +1140,14 @@ class Agent:
 
             # 使用 LLMRouter 选择最佳模型（如果未指定）
             if not model:
-                selection = select_model_for_request(request_type)
+                # P1-15（全库断点审计 2026-11-12）：按 agent 属主域同步/选型——
+                # 普通用户 agent 的多模态路由看得见自己的 provider（候选空回全局）
+                from neurova.llm.multi_model_client import scope_for_owner
+
+                selection = select_model_for_request(
+                    request_type,
+                    scope=scope_for_owner(getattr(self.config, "owner_user_id", None) or None),
+                )
                 if selection:
                     model = selection.model
                     logger.info("LLMRouter 为 %s 选择模型: " f"%s/%s", media_type, selection.provider_name, selection.model)
