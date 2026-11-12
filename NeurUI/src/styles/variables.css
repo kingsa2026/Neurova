@@ -85,6 +85,11 @@
   --nr-warning-soft-border: rgba(245, 158, 11, 0.35);
   --nr-error-soft-bg: rgba(239, 68, 68, 0.12);
   --nr-error-soft-border: rgba(239, 68, 68, 0.35);
+  /* 中性灰阶（P2-31：组件层灰阶统一走令牌；暗色皮肤浅灰在上，浅色反向） */
+  --nr-neutral-100: #e8eaf0;
+  --nr-neutral-300: #b0b6c0;
+  --nr-neutral-500: #8a8f99;
+  --nr-neutral-700: #3a3f4d;
 
   /* Borders & Shadows */
   --nr-border: rgba(255, 255, 255, 0.08);
@@ -181,6 +186,11 @@
   --nr-warning-soft-border: rgba(217, 119, 6, 0.35);
   --nr-error-soft-bg: rgba(220, 38, 38, 0.14);
   --nr-error-soft-border: rgba(220, 38, 38, 0.35);
+  /* 中性灰阶（P2-31：组件层灰阶统一走令牌；暗色皮肤浅灰在上，浅色反向） */
+  --nr-neutral-100: #3a3f4d;
+  --nr-neutral-300: #7a7f8a;
+  --nr-neutral-500: #9aa0ac;
+  --nr-neutral-700: #e8eaf0;
 
   /* Borders & Shadows（轻柔浅阴影） */
   --nr-border: rgba(31, 35, 41, 0.1);
@@ -256,6 +266,11 @@
   --nr-warning-soft-border: rgba(255, 159, 10, 0.35);
   --nr-error-soft-bg: rgba(255, 69, 58, 0.12);
   --nr-error-soft-border: rgba(255, 69, 58, 0.35);
+  /* 中性灰阶（P2-31：组件层灰阶统一走令牌；暗色皮肤浅灰在上，浅色反向） */
+  --nr-neutral-100: #e8eaf0;
+  --nr-neutral-300: #b0b6c0;
+  --nr-neutral-500: #8a8f99;
+  --nr-neutral-700: #3a3f4d;
 
   /* Borders & Shadows */
   --nr-border: rgba(255, 255, 255, 0.12);
@@ -352,6 +367,11 @@
   --nr-warning-soft-border: rgba(255, 149, 0, 0.35);
   --nr-error-soft-bg: rgba(255, 59, 48, 0.14);
   --nr-error-soft-border: rgba(255, 59, 48, 0.35);
+  /* 中性灰阶（P2-31：组件层灰阶统一走令牌；暗色皮肤浅灰在上，浅色反向） */
+  --nr-neutral-100: #3a3f4d;
+  --nr-neutral-300: #7a7f8a;
+  --nr-neutral-500: #9aa0ac;
+  --nr-neutral-700: #e8eaf0;
 
   /* Borders & Shadows */
   --nr-border: rgba(60, 60, 67, 0.18);
