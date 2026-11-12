@@ -702,16 +702,15 @@ async def send_verification_code(request: Request, email: str = Query(...)):
             length=6,  # 6位验证码
         )
 
-        # 实际发送验证码（这里只是模拟，实际应该调用邮件服务）
-        logger.info("Verification code generated for %s: %s", email, code)
-
-        # TODO: 实际发送邮件逻辑
-        # 例如：send_email(email, "Neurova 验证码", f"您的验证码是: {code}")
-
+        # P2-3（全库断点审计 2026-11-12）：桌面单机无 SMTP，此前的形态是验证码
+        # 明文落 INFO 日志（同机日志读取者＝免费拿码）＋谎报 "Verification code
+        # sent"（成功壳，修复教义第 2 条）。现诚实化：码不落日志，随响应直接
+        # 返回（data.dev_code），message 写明未发送邮件；服务端形态接 SMTP 时
+        # 收回 dev_code 只留 sent 回执。
         return {
             "code": 0,
-            "message": "Verification code sent",
-            "data": {"email": email},
+            "message": "Verification code generated (desktop mode: returned directly, email delivery not configured)",
+            "data": {"email": email, "dev_code": code},
         }
 
     except HTTPException:
