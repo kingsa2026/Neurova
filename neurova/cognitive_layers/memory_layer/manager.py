@@ -685,8 +685,14 @@ class MemoryManager:
         with self._persist_db_lock:
             return int(conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0])
 
-    def searchMemoriesFulltext(self, query: str, limit: int = 10) -> List[Memory]:
+    def searchMemoriesFulltext(
+        self, query: str, limit: int = 10, scope_override: Optional[Tuple[str, str, str]] = None
+    ) -> List[Memory]:
         """在正文库上按**生效三元组**做全文召回；**不做记账**（记账另有一句）。
+
+        `scope_override`（P1-10 残留实装：检索链身份形参透传）：调用方显式
+        传入 (agent_id, neuser_id, user_id) 时覆盖生效作用域——缺省仍走
+        ContextVar 唯一通道（显式形参是覆盖位，不是第二身份通道）。
 
         三条口径都是被动的，不能省：
 
@@ -706,7 +712,8 @@ class MemoryManager:
         text = (query or "").strip()
         if conn is None or not text:
             return []
-        scope = (self._agent_id, self._eff_neuser_id(), self._eff_user_id())
+        # P1-10 残留实装：显式作用域覆盖位（检索链身份透传；缺省走 ContextVar）
+        scope = scope_override or (self._agent_id, self._eff_neuser_id(), self._eff_user_id())
         with self._persist_db_lock:
             cur = conn.cursor()
             cur.row_factory = sqlite3.Row

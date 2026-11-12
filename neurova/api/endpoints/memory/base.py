@@ -181,7 +181,11 @@ def memory_to_dict(memory, *, owned: bool) -> dict:
                 ),
                 "access_count": int(memory.get("access_count", 0) or 0),
                 "created_at": str(memory.get("created_at", "") or ""),
-                "last_accessed_at": str(memory.get("last_accessed_at") or ""),
+                "last_accessed_at": str(memory.get("last_accessed_at", "") or ""),
+                # P1-10 残留实装：共享面读侧（shared＝旧模式开关；
+                # share_group_ids＝读者组交集可见，由唯一仲裁器裁决）
+                "shared": bool(memory.get("shared", False)),
+                "share_group_ids": [str(g) for g in (memory.get("share_group_ids") or [])],
             }
         return {
             "id": getattr(memory, "id", ""),
@@ -205,6 +209,11 @@ def memory_to_dict(memory, *, owned: bool) -> dict:
             "access_count": int(getattr(memory, "access_count", 0)),
             "created_at": str(getattr(memory, "created_at", "")),
             "last_accessed_at": str(getattr(memory, "last_accessed_at", "")),
+            # P1-10 残留实装：同 dict 分支，对象形态的共享面透出
+            "shared": bool(getattr(memory, "shared", False)),
+            "share_group_ids": [
+                str(g) for g in (getattr(memory, "share_group_ids", None) or [])
+            ],
         }
     except Exception:
         return {

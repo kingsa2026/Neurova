@@ -439,8 +439,19 @@ class CognitiveStorageEngine:
                     return True
         return False
 
-    def retrieve(self, query: str, limit: int = 10, filters: Dict = None) -> List[UnifiedMemoryNode]:
-        """跨层检索：L0 缓冲（内存子串）+ 正文库全文（作用域口径归 MemoryManager）。"""
+    def retrieve(
+        self,
+        query: str,
+        limit: int = 10,
+        filters: Dict = None,
+        scope_override: Optional[Tuple[str, str, str]] = None,
+    ) -> List[UnifiedMemoryNode]:
+        """跨层检索：L0 缓冲（内存子串）+ 正文库全文（作用域口径归 MemoryManager）。
+
+        `scope_override`（P1-10 残留实装：检索链身份透传）——调用方显式传入
+        (agent_id, neuser_id, user_id) 时覆盖生效作用域；缺省走 ContextVar
+        唯一通道（显式形参是覆盖位，不是第二身份通道）。
+        """
         with self._buffer_lock:
             l0Snapshot = list(self._l0_buffer)
 
@@ -454,7 +465,7 @@ class CognitiveStorageEngine:
             and not self._apply_filters(node, filters)
         ]
 
-        for mem in self._memory.searchMemoriesFulltext(query, limit=limit):
+        for mem in self._memory.searchMemoriesFulltext(query, limit=limit, scope_override=scope_override):
             node = UnifiedMemoryNode.from_memory(mem).withAgentScope(self.agent_id)
             if mayEnterContext(node.category) and not self._apply_filters(node, filters):
                 results.append(node)
