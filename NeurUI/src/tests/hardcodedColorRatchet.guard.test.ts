@@ -8,6 +8,10 @@
  *
  * 口径（唯一）：统计文件内 `#hex` 与 `rgb(a)(...)` 字面量出现次数（含 JS 侧
  * 品牌色——它们同属"绕过主题令牌"的形态）。基线＝2026-11-12 落格现量。
+ *
+ * 口径精化（2026-11-13 第二批）：`var(--token, fallback)` 里的兜底字面量
+ * **不算硬编码**——令牌缺省时才生效，兜底是本仓"皮带加背带"的防御形态
+ * （ContextUsageIndicator 全文即此形态，21 处里 14 处是兜底）。
  */
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -16,15 +20,19 @@ import { join } from 'node:path'
 const COLOR_RE = /#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)/g
 
 const BASELINES: Record<string, number> = {
-  'src/pages/ModelPage.vue': 114,  // 语义淡色已换令牌 20 处；余为中性灰与品牌色
-  'src/pages/analytics/TokenActivitySection.vue': 29,  // 状态色已换令牌；余为数据系列色
-  'src/components/chat/ContextUsageIndicator.vue': 21,  // 警告色已换令牌；余为中性灰阶
+  'src/pages/ModelPage.vue': 102,  // 中性灰与供应商品牌色（品牌色是标识非主题色）
+  'src/pages/analytics/TokenActivitySection.vue': 27,  // 数据系列色（每系列一色是可视化合法形态）
+  'src/components/chat/ContextUsageIndicator.vue': 7,  // 精化口径后余 7（其余为 var 兜底）
   'src/pages/graph-workbench/GraphExplorer3D.vue': 16,  // 3D 数据可视化色（Three.js 材质，不走 CSS 令牌）
-  'src/modules/collaboration/CanvasDesignerPage.vue': 35,  // 语义与主色已换令牌
+  'src/modules/collaboration/CanvasDesignerPage.vue': 23,  // 白色 alpha 与靛蓝淡色待软底令牌
 }
 
 function countHardcodedColors(relPath: string): number {
-  const src = readFileSync(join(process.cwd(), relPath), 'utf-8')
+  // 口径精化：先剥 var(..., fallback) 兜底字面量（随令牌缺省才生效，不算硬编码）
+  const src = readFileSync(join(process.cwd(), relPath), 'utf-8').replace(
+    /var\([^)]*\)/g,
+    'var()',
+  )
   return (src.match(COLOR_RE) ?? []).length
 }
 
