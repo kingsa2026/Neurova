@@ -68,6 +68,24 @@ class TestV25Migration:
                 created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
             INSERT INTO ontology_rules (rule_id, head_predicate, head_subject_var, created_at, updated_at)
                 VALUES ('legacy-rule', 'is_a', 'X', '2026-01-01', '2026-01-01');
+            -- v10 推导账本两表：真实 v24 库必有（v10 已落），v43 起迁移链
+            -- 会 ALTER knowledge_derivation_edges（W2 source_kind），夹具照真实
+            -- 状态补齐（与上面 v1 facts 表同一先例）。
+            CREATE TABLE IF NOT EXISTS knowledge_derivation_edges (
+                derived_fact_id TEXT NOT NULL,
+                premise_fact_id TEXT NOT NULL,
+                rule_id TEXT NOT NULL,
+                rule_version TEXT NOT NULL DEFAULT 'v1',
+                stratum INTEGER NOT NULL DEFAULT 0,
+                recorded_at TEXT NOT NULL,
+                PRIMARY KEY (derived_fact_id, premise_fact_id, rule_id, rule_version));
+            CREATE TABLE IF NOT EXISTS ontology_rule_fires (
+                fire_id TEXT PRIMARY KEY,
+                rule_id TEXT NOT NULL,
+                rule_version TEXT NOT NULL DEFAULT 'v1',
+                fired_at TEXT NOT NULL,
+                head_predicate TEXT NOT NULL,
+                derived_fact_ids_json TEXT NOT NULL DEFAULT '[]');
         """)
         conn.execute("PRAGMA user_version = 24")
         conn.commit()

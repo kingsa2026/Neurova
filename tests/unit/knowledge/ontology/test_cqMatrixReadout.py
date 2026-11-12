@@ -51,7 +51,7 @@ def test_registryMetadataMatchesSpecDocRowByRow():
     from neurova.knowledge.ontology.cq_matrix import CQ_TRACE_ROWS
 
     docRows = _docRows()
-    assert len(docRows) == 11, "specs 追溯矩阵应有 11 行"
+    assert len(docRows) == 12, "specs 追溯矩阵应有 12 行"
     assert {row.cqId for row in CQ_TRACE_ROWS} == set(docRows), "名册与 specs 的 CQ 全集不一致"
     for row in CQ_TRACE_ROWS:
         doc = docRows[row.cqId]
@@ -74,12 +74,13 @@ def test_probeStatusesMatchProductFace():
     rows = {r["cqId"]: r["status"] for r in cqTraceRows()}
     implemented = {
         "CQ-01", "CQ-02", "CQ-03", "CQ-04", "CQ-05",
-        "CQ-06", "CQ-07", "CQ-08", "CQ-09", "CQ-10", "CQ-11",
+        "CQ-06", "CQ-07", "CQ-08", "CQ-09", "CQ-10", "CQ-11", "CQ-12",
     }
     for cqId in sorted(implemented):
         assert rows[cqId] == "implemented", cqId
     # CQ-10 已随 W0-1 转正（specs/2026-11-12 §2）：accessQuery 签名含 asOf/knownAt，
     # MCP ontology_query 同名参数透传，非法时间显式 4xx——探针现值自动 implemented。
+    # CQ-12 随 W2 转正（specs/2026-11-12 §4）：函数层登记/引擎/MCP/REST 四符号在册。
 
 
 def test_statusVocabularyClosed():
@@ -110,7 +111,7 @@ def test_readoutRowsExposeDisplayFields():
     from neurova.knowledge.ontology.cq_matrix import cqTraceRows
 
     rows = cqTraceRows()
-    assert len(rows) == 11
+    assert len(rows) == 12
     for row in rows:
         assert set(row) == {"cqId", "question", "actor", "priority", "query", "testId", "status"}
         assert row["question"] and row["query"] and row["testId"]
@@ -123,5 +124,5 @@ def test_endpointReadingsShapeAndGate():
     result = asyncio.run(getCqMatrix({"role": "user", "tenant_id": "default"}))
     assert result["code"] == 0
     items = result["data"]["items"]
-    assert len(items) == 11
+    assert len(items) == 12
     assert {item["cqId"] for item in items} == set(_docRows())

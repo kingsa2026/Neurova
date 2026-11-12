@@ -206,6 +206,7 @@ class KnowledgeAdmissionGate:
         ontology: Any = None,
         credibility: Any = None,
         reasoning: Any = None,
+        functionEngine: Any = None,
     ) -> None:
         self._store = store
         self._collaborators = {
@@ -217,6 +218,9 @@ class KnowledgeAdmissionGate:
             # 推导属段3（类型与规则裁决）的后半，不另立一段：段序是设计定的，
             # 多一格就把"校验与推导是一件事的两面"拆成了两段。
             "forward_chaining": reasoning,
+            # W2：函数引擎与规则引擎同段点燃（dispatch 唯一接线点，§16 D7 外的
+            # 已裁设计）。未注入时 dispatch 跳过——裸门/测试装配零漂移。
+            "function_engine": functionEngine,
         }
 
     def pendingSegments(self) -> List[str]:
@@ -370,6 +374,10 @@ class KnowledgeAdmissionGate:
         # 放在写入之前——拒得越早，越少人读到过那条不存在的路径。
         self._checkVerifiability(request)
         applied.append("verifiability")
+        # W1 数值 qualifier 写入口归一（校验段前的单点）：声明 type=number 的键，
+        # 字符串值折成 canonical 量值 dict，读面不重复归一。归一失败不替校验做
+        # 决定——原样过段3，由数值判显式 violation。
+        request = self._normalizeNumericQualifiers(request)
         # 段3 前半：本体校验。放在消解之后、写入之前——校验要看的是"这条说法挂在谁身上"，
         # 而主体还没定就校验等于校验一个还不存在的落点。违规即拒（G08 的硬判据）。
         ontology = self._collaborators.get("ontology_adjudication")
@@ -478,16 +486,62 @@ class KnowledgeAdmissionGate:
 
     def _derive(self, request: AdmissionRequest, subjectKey: str) -> List[str]:
         """段3 后半：按规则推导。嵌套写不再点燃规则——推导事实又触发推导，
-        等于给自己造一个没有终点的循环（分层只管结论正确，不管重入）。"""
+        等于给自己造一个没有终点的循环（分层只管结论正确，不管重入）。
+
+        W2 dispatch 唯一接线点：规则引擎与函数引擎语言不同、非同一功能重复，
+        这里是两者被点燃的唯一位置（specs/2026-11-12 §4）。"""
         reasoning = self._collaborators.get("forward_chaining")
-        if reasoning is None or getattr(_deriveState, "inside", False):
+        functions = self._collaborators.get("function_engine")
+        if (reasoning is None and functions is None) or getattr(_deriveState, "inside", False):
             return []
         _deriveState.inside = True
+        applied: List[str] = []
         try:
-            reasoning.fireFor(request.agentId, request.predicateTermId)
+            if reasoning is not None:
+                reasoning.fireFor(request.agentId, request.predicateTermId)
+                applied.append("forward_chaining")
+            if functions is not None:
+                functions.fireFor(request.agentId, request.predicateTermId,
+                                  tenantId=request.tenantId)
+                applied.append("function_engine")
         finally:
             _deriveState.inside = False
-        return ["forward_chaining"]
+        return applied
+
+    def _normalizeNumericQualifiers(self, request: AdmissionRequest) -> AdmissionRequest:
+        """W1 写入口归一：声明 type=number 的 qualifier 键，字符串值折成 canonical
+        量值 dict。判据单源 quantity.numericQualifierKeys/canonicalQualifier；
+        归一失败原样过（校验段显式 violation），未声明谓词零改动（存量零漂移）。"""
+        qualifier = getattr(request, "qualifier", None)
+        if not qualifier or not isinstance(qualifier, dict):
+            return request
+        ontology = self._collaborators.get("ontology_adjudication")
+        registry = getattr(ontology, "_registry", None)
+        if registry is None:
+            return request
+        from neurova.knowledge.ontology.quantity import (
+            canonicalQualifier,
+            numericQualifierKeys,
+        )
+
+        term = registry.term(request.predicateTermId, tenantId=request.tenantId)
+        numericKeys = numericQualifierKeys(term)
+        if not numericKeys:
+            return request
+        updated = dict(qualifier)
+        changed = False
+        for key in numericKeys:
+            value = updated.get(key)
+            if isinstance(value, str) and value.strip():
+                canonical = canonicalQualifier(value)
+                if canonical is not None:
+                    updated[key] = canonical
+                    changed = True
+        if not changed:
+            return request
+        from dataclasses import replace
+
+        return replace(request, qualifier=updated)
 
     def _applyCredibility(self, factId: str) -> List[str]:
         """段5：置信度由断言聚合回写，读实况而非增量累加。"""
@@ -599,6 +653,11 @@ def productionAdmissionGate(store: Any, toolVersion: str = "foundation-gate") ->
     # 规则也必须有人登记，否则前向链每轮空转（Issue #73：规则表 0 行 ⇒ 引擎白建）。
     # 落点只能是这里——造门是唯一的生产装配点，种子规则因此只有一份 owner。
     seedBuiltinRules(engine)
+    # W2：函数引擎同一 gateFactory 走咽喉（推导事实不许绕 admit 直插 SQL）。
+    from neurova.knowledge.ontology.function_engine import FunctionEngine
+
+    functionEngine = FunctionEngine(store, gateFactory=lambda st: productionAdmissionGate(
+        st, toolVersion=toolVersion))
     # B10 L4：用户 shape 与内置 6 项同一求值器（写前阻断走同一 findings 流）。
     shapes = ShapeRegistry(store)
     return KnowledgeAdmissionGate(
@@ -609,4 +668,5 @@ def productionAdmissionGate(store: Any, toolVersion: str = "foundation-gate") ->
         credibility=ConfidenceAggregator(store),
         ontology=OntologyValidationReport(registry, shapes=shapes),
         reasoning=engine,
+        functionEngine=functionEngine,
     )

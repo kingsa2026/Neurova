@@ -335,6 +335,63 @@ async def delete_ontology_action(
     return {"code": 0, "data": {"action_id": action_id}, "request_id": ""}
 
 
+@router.get("/ontology/functions")
+async def list_ontology_functions(
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """W2：函数清单（登录可读）——表达式/物化档/启用态读数。"""
+    from neurova.knowledge.ontology.function_registry import FunctionRegistry
+
+    store, _registry, _engine = _ontologyParts()
+    tenant = _tenantOf(current_user)
+    rows = FunctionRegistry(store).list(tenantId=tenant, includeDisabled=True)
+    return {"code": 0, "data": rows, "request_id": ""}
+
+
+@router.post("/ontology/functions")
+async def create_ontology_function(
+    body: Dict[str, Any],
+    admin: Dict = Depends(require_admin()),
+):
+    """W2：登记函数（仅管理员）——登记即编译（白名单外节点/未知符号/越界谓词
+    400 原样回显），output_predicate 须在注册表（B-10）。"""
+    from neurova.knowledge.ontology.function_registry import FunctionRegistry
+
+    store, _registry, _engine = _ontologyParts()
+    tenant = _tenantOf(admin)
+    try:
+        item = FunctionRegistry(store).register(
+            functionId=str(body.get("function_id") or ""), tenantId=tenant,
+            exprText=str(body.get("expr_text") or ""),
+            outputPredicate=str(body.get("output_predicate") or ""),
+            inputBindings=body.get("input_bindings") or {},
+            scope=body.get("scope") or {},
+            materialization=str(body.get("materialization") or "observe"),
+            label=str(body.get("label") or ""),
+            definition=str(body.get("definition") or ""),
+            enabled=bool(body.get("enabled", True)))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"code": 0, "data": item, "request_id": ""}
+
+
+@router.delete("/ontology/functions/{function_id}")
+async def delete_ontology_function(
+    function_id: str = Path(...),
+    admin: Dict = Depends(require_admin()),
+):
+    """W2：删函数（仅管理员）——按源撤回其全部结论（derivation_ledger 单源）。"""
+    from neurova.knowledge.ontology.function_registry import FunctionRegistry
+
+    store, _registry, _engine = _ontologyParts()
+    tenant = _tenantOf(admin)
+    try:
+        FunctionRegistry(store).delete(function_id, tenantId=tenant)
+    except LookupError:
+        raise HTTPException(status_code=404, detail=f"函数未登记: {function_id}")
+    return {"code": 0, "data": {"function_id": function_id}, "request_id": ""}
+
+
 @router.get("/ontology/namespaces")
 async def list_ontology_namespaces(
     current_user: Dict = Depends(get_current_user_or_service),
@@ -1116,6 +1173,8 @@ class InstanceWriteRequest(BaseModel):
     evidence_text: str = ""
     valid_from: Optional[str] = None
     valid_until: Optional[str] = None
+    # W1：工作台建边可带 qualifier（数值键经咽喉写入口归一成 canonical 量值）
+    qualifier: Optional[Dict[str, Any]] = None
     basis: str = ""
 
 
@@ -1181,6 +1240,8 @@ async def create_graph_instance(
             predicateTermId=predicate,
             objectTerm=objTerm,
             content=statement,
+            # W1：声明数值 schema 的谓词，qualifier 在咽喉写入口单点归一
+            qualifier=dict(body.qualifier or {}),
             relationKind="entity",
             assertions=[assertion],
             sourceTurnId="entry:%s" % entryId if entryId else "",

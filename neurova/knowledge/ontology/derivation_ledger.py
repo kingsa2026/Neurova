@@ -70,16 +70,18 @@ class DerivationLedger:
     # ── 记 ────────────────────────────────────────────────────
 
     def recordDerivation(self, derivedFactId: str, premiseFactIds: List[str],
-                         rule: Dict[str, Any]) -> None:
+                         rule: Dict[str, Any], sourceKind: str = "rule") -> None:
+        """记一条推导边。`sourceKind`（W2，v43）：rule|function——函数结论与规则
+        结论同一张账本，不建第二账本；物化档读数（_observeSideSubquery）按它分支。"""
         stamp = _now()
         with self._store._lock, self._store._conn:
             for premise in dict.fromkeys(premiseFactIds):     # 同一前提记一次
                 self._store._conn.execute(
                     "INSERT OR IGNORE INTO knowledge_derivation_edges"
                     " (derived_fact_id, premise_fact_id, rule_id, rule_version, stratum,"
-                    "  recorded_at) VALUES (?,?,?,?,?,?)",
+                    "  recorded_at, source_kind) VALUES (?,?,?,?,?,?,?)",
                     (derivedFactId, premise, rule["rule_id"], rule.get("version", "v1"),
-                     int(rule.get("stratification_level") or 0), stamp),
+                     int(rule.get("stratification_level") or 0), stamp, str(sourceKind)),
                 )
 
     def recordFire(self, rule: Dict[str, Any], derivedFactIds: List[str]) -> str:
@@ -168,11 +170,20 @@ class DerivationLedger:
 
     @staticmethod
     def _observeSideSubquery(tenantRef: str) -> str:
-        """「档位不足以进主路」的推导结论 id 子查询；`tenantRef` 是租户取值写法。"""
+        """「档位不足以进主路」的推导结论 id 子查询；`tenantRef` 是租户取值写法。
+
+        W2：source_kind=function 的边查 ontology_functions 的物化档
+        （substr 剥 "function:" 前缀），规则边照旧查 ontology_rules——
+        两类结论同一判据形状（全部边 enforce 才放行），账本单源。"""
         return ("SELECT e.derived_fact_id FROM knowledge_derivation_edges e"
                 " LEFT JOIN ontology_rules r"
                 " ON r.rule_id = e.rule_id AND r.tenant_id = %s"
-                " WHERE COALESCE(r.materialization, 'observe') <> 'enforce'" % tenantRef)
+                " WHERE CASE WHEN COALESCE(e.source_kind, 'rule') = 'function'"
+                " THEN COALESCE((SELECT f2.materialization FROM ontology_functions f2"
+                "   WHERE f2.function_id = substr(e.rule_id, 10) AND f2.tenant_id = %s),"
+                "  'observe')"
+                " ELSE COALESCE(r.materialization, 'observe') END <> 'enforce'"
+                % (tenantRef, tenantRef))
 
     def hiddenDerivedFactIds(self, tenantId: str = "default") -> List[str]:
         """读面要摘掉的推导行 id——与 `derivedExclusionClause` 同一段判据。
@@ -184,8 +195,10 @@ class DerivationLedger:
         sql = ("SELECT f.fact_id FROM knowledge_facts f"
                " WHERE f.tenant_id = ? AND f.fact_id IN (%s)"
                % self._observeSideSubquery("?"))
+        # W2：子查询从 1 个占位涨到 2 个（规则边 join ＋函数边 CASE）——参数序
+        # 跟占位出现序走：外层 f.tenant_id → 子查询 r.tenant_id → 子查询 f2.tenant_id
         with self._store._lock:
-            rows = self._store._conn.execute(sql, (tenant, tenant)).fetchall()
+            rows = self._store._conn.execute(sql, (tenant, tenant, tenant)).fetchall()
         return [str(row["fact_id"]) for row in rows]
 
     def hasEnforceRules(self, tenantId: str = "default") -> bool:
