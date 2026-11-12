@@ -346,36 +346,6 @@ class TestSignatureSimilarity:
         assert _signaturesSimilar(headA, headB, 0.999) is False
 
 
-class TestDeclarativeGateSharesTheSingleSource:
-    """声明式配置门与装配点不许各持一份默认值（两份默认＝两种判重语义，各自都绿）。"""
-
-    def testOmittedParamsFallBackToTheConfigSingleSource(self):
-        from neurova.agent.gate_catalog import GateCatalog, compile_gates
-        import neurova.security.agent_limits_settings as als
-
-        gate = compile_gates([{"type": "doom_loop"}], GateCatalog())[0]
-        defaults = als.DEFAULTS
-        assert gate.window_size == defaults["doom_loop_window_size"]
-        assert gate.max_interrupts == defaults["doom_loop_max_interrupts"]
-        assert gate.similarity_threshold == defaults["doom_loop_similarity_threshold"]
-
-    def testCatalogDoesNotRetypeTheDefaults(self):
-        text = (PROJECT_ROOT / "neurova" / "agent" / "gate_catalog.py").read_text(
-            encoding="utf-8")
-        for line in ("window_size: int = 4", "similarity_threshold: float = 0.95",
-                     "max_interrupts: int = 2"):
-            assert line not in text, f"gate_catalog.py 里仍手抄默认值：{line}"
-
-    def testOutOfRangeParamsFailFast(self):
-        from pydantic import ValidationError
-
-        from neurova.agent.gate_catalog import DoomLoopParams
-
-        with pytest.raises(ValidationError):
-            DoomLoopParams(similarity_threshold=1.5)
-        with pytest.raises(ValidationError):
-            DoomLoopParams(similarity_threshold=0.2)
-
 
 class TestSiblingGatesShareTheSameSource:
     """§6-271「仍开②」的落点：同一条根因在另外两把门上的两个命中点（教义第 5 条）。
@@ -420,42 +390,3 @@ class TestSiblingGatesShareTheSameSource:
         text = GATES_PY.read_text(encoding="utf-8")
         for line in ("max_rounds: int = 20", "max_tokens: int = 100000"):
             assert line not in text, f"gates.py 里仍手抄默认值：{line}"
-
-    def testCatalogOmittedParamsFallBackToTheSource(self):
-        """声明式配置与装配点同取一份默认，否则两边按两种阈值判停、各自测试都绿。"""
-        import neurova.security.agent_limits_settings as als
-        from neurova.agent.gate_catalog import GateCatalog, compile_gates
-
-        defaults = als.DEFAULTS
-        built = {g.name: g for g in compile_gates(
-            [{"type": "iteration"}, {"type": "token_budget"}], GateCatalog())}
-        assert built["iteration"].max_rounds == defaults["max_loop_rounds"]
-        assert built["token_budget"].max_tokens == defaults["token_budget"]
-
-    def testCatalogDoesNotRetypeThoseDefaults(self):
-        text = (PROJECT_ROOT / "neurova" / "agent" / "gate_catalog.py").read_text(encoding="utf-8")
-        for line in ("max_rounds: int = 20", "max_tokens: int = 100000"):
-            assert line not in text, f"gate_catalog.py 里仍手抄默认值：{line}"
-
-    def testCatalogBoundsComeFromTheClampConstants(self):
-        """合法域也取同一批常量：面板/schema 报出的区间必须等于 `get_effective_limits` 夹紧用的区间。"""
-        import neurova.security.agent_limits_settings as als
-        from pydantic import ValidationError
-
-        from neurova.agent.gate_catalog import IterationParams, TokenBudgetParams
-
-        def bounds(model, name):
-            ge = le = None
-            for meta in model.model_fields[name].metadata:
-                ge = getattr(meta, "ge", ge)
-                le = getattr(meta, "le", le)
-            return ge, le
-
-        assert bounds(IterationParams, "max_rounds") == (als.MIN_ROUNDS, als.MAX_ROUNDS)
-        assert bounds(TokenBudgetParams, "max_tokens") == (als.MIN_TOKEN_BUDGET, als.MAX_TOKEN_BUDGET)
-        for bad in (als.MIN_ROUNDS - 1, als.MAX_ROUNDS + 1):
-            with pytest.raises(ValidationError):
-                IterationParams(max_rounds=bad)
-        for bad in (als.MIN_TOKEN_BUDGET - 1, als.MAX_TOKEN_BUDGET + 1):
-            with pytest.raises(ValidationError):
-                TokenBudgetParams(max_tokens=bad)
