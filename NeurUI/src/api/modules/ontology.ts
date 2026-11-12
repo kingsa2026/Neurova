@@ -465,3 +465,17 @@ export function listChunkStrategies() {
   return api.get<ApiResponse<Array<{ strategy_id: string; kind: string; params: Record<string, unknown> }>>>(
     '/knowledge/ontology/chunk-strategies')
 }
+
+export function runOntologySparql(query: string) {
+  return api.post<ApiResponse<Record<string, unknown>>>(
+    '/knowledge/ontology/sparql', { query })
+}
+
+export function runOntologyAbduce(body: {
+  subject_label: string
+  predicate: string
+  object_term: string
+}) {
+  return api.post<ApiResponse<Record<string, unknown>>>(
+    '/knowledge/ontology/abduce', body)
+}

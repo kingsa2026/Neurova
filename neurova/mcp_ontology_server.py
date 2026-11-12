@@ -319,6 +319,46 @@ def _resolveAgentForActions(agentId: str) -> Optional[Dict[str, Any]]:
 
 
 @_SERVER.tool()
+async def ontology_sparql(
+    ctx: Context,
+    query: str,
+) -> dict:
+    """SPARQL 只读查询（W9，D8 已裁）：RDF 投影（turtle 单源）→rdflib SELECT/ASK。
+    写形不支持；rdflib 未装显式 not_supported；行数上限/超时常量。"""
+    from neurova.knowledge.ontology.sparql_query import (
+        SparqlNotSupported,
+        runSparqlQuery,
+    )
+
+    user = _currentUserFromContext(ctx)
+    try:
+        return runSparqlQuery(_store(), query, agentId=_agentIdOf(user, None),
+                              tenantId=_tenantOf(user))
+    except SparqlNotSupported as exc:
+        return {"rejected": True, "not_supported": True, "detail": str(exc)}
+    except ValueError as exc:
+        return {"rejected": True, "detail": str(exc)}
+
+
+@_SERVER.tool()
+async def ontology_abduce(
+    ctx: Context,
+    subject_label: str,
+    predicate: str,
+    object_term: str,
+    agent_id: str = "",
+) -> dict:
+    """溯因反向搜索（W9，只读）：目标三元组→解释树（规则/事实引用＋缺失前提
+    清单）；深度/分支上限截断声明；解释是候选不是断言，零写。"""
+    from neurova.knowledge.ontology.abduction import explainGoal
+
+    user = _currentUserFromContext(ctx)
+    return explainGoal(_store(), subjectLabel=subject_label, predicate=predicate,
+                       objectTerm=object_term, agentId=_agentIdOf(user, agent_id),
+                       tenantId=_tenantOf(user))
+
+
+@_SERVER.tool()
 async def ontology_community_search(
     ctx: Context,
     query: str,

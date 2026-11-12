@@ -51,7 +51,7 @@ def test_registryMetadataMatchesSpecDocRowByRow():
     from neurova.knowledge.ontology.cq_matrix import CQ_TRACE_ROWS
 
     docRows = _docRows()
-    assert len(docRows) == 20, "specs 追溯矩阵应有 20 行"
+    assert len(docRows) == 22, "specs 追溯矩阵应有 22 行"
     assert {row.cqId for row in CQ_TRACE_ROWS} == set(docRows), "名册与 specs 的 CQ 全集不一致"
     for row in CQ_TRACE_ROWS:
         doc = docRows[row.cqId]
@@ -75,7 +75,7 @@ def test_probeStatusesMatchProductFace():
     implemented = {
         "CQ-01", "CQ-02", "CQ-03", "CQ-04", "CQ-05",
         "CQ-06", "CQ-07", "CQ-08", "CQ-09", "CQ-10", "CQ-11", "CQ-12",
-        "CQ-13", "CQ-14", "CQ-15", "CQ-16", "CQ-17", "CQ-18", "CQ-19", "CQ-20",
+        "CQ-13", "CQ-14", "CQ-15", "CQ-16", "CQ-17", "CQ-18", "CQ-19", "CQ-20", "CQ-21", "CQ-22",
     }
     for cqId in sorted(implemented):
         assert rows[cqId] == "implemented", cqId
@@ -112,7 +112,7 @@ def test_readoutRowsExposeDisplayFields():
     from neurova.knowledge.ontology.cq_matrix import cqTraceRows
 
     rows = cqTraceRows()
-    assert len(rows) == 20
+    assert len(rows) == 22
     for row in rows:
         assert set(row) == {"cqId", "question", "actor", "priority", "query", "testId", "status"}
         assert row["question"] and row["query"] and row["testId"]
@@ -125,5 +125,5 @@ def test_endpointReadingsShapeAndGate():
     result = asyncio.run(getCqMatrix({"role": "user", "tenant_id": "default"}))
     assert result["code"] == 0
     items = result["data"]["items"]
-    assert len(items) == 20
+    assert len(items) == 22
     assert {item["cqId"] for item in items} == set(_docRows())
