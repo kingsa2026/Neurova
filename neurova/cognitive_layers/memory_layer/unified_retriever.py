@@ -60,6 +60,8 @@ class UnifiedRetriever:
         limit: int = 10,
         include_patterns: bool = True,
         session_id: Optional[str] = None,
+        neuser_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         统一检索入口
@@ -68,6 +70,8 @@ class UnifiedRetriever:
             query: 查询文本
             limit: 返回数量限制
             include_patterns: 是否包含结晶经验
+            neuser_id/user_id: P1-10 残留实装——检索链身份形参透传（显式覆盖位；
+                缺省走 ContextVar 唯一通道）
 
         Returns:
             去重排序后的记忆列表
@@ -75,7 +79,10 @@ class UnifiedRetriever:
         results: List[Dict[str, Any]] = []
 
         # 方案A：直接用 CognitiveStorageEngine（新数据）
-        engine_results = self.engine.retrieve(query, limit=limit)
+        scope_override = (
+            (self.engine.agent_id, neuser_id, user_id) if neuser_id and user_id else None
+        )
+        engine_results = self.engine.retrieve(query, limit=limit, scope_override=scope_override)
         results.extend([self._node_to_dict(n) for n in engine_results])
 
         # 方案B：兼容旧检索器（迁移期间）

@@ -79,6 +79,9 @@ class RetrievalContext:
     query: str
     limit: int = 10
     user_id: Optional[str] = None
+    #: P1-10 残留实装：检索链身份形参透传（第 2 层）——显式覆盖位，缺省走
+    #: ContextVar 唯一通道
+    neuser_id: Optional[str] = None
     session_id: Optional[str] = None
     strategy: RetrievalStrategy = RetrievalStrategy.CHAIN
     min_quality: float = 0.3  # 最低质量要求

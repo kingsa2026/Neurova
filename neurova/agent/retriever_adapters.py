@@ -44,10 +44,13 @@ class UnifiedRetrieverAdapter:
 
         try:
             # 调用 UnifiedRetriever（兼容同步 / async 两种实现）
+            # P1-10 残留实装：检索链身份形参透传（显式覆盖位；缺省走 ContextVar）
             result = self._retriever.retrieve(
                 query=context.query,
                 limit=context.limit,
                 session_id=getattr(context, "session_id", None),
+                neuser_id=getattr(context, "neuser_id", None),
+                user_id=getattr(context, "user_id", None),
             )
             if asyncio.iscoroutine(result):
                 memories = await result
@@ -151,9 +154,12 @@ class MoERetrieverAdapter:
             # BUG#1: MoEMemoryRouter.retrieve 是 async,必须 await(否则返回 coroutine,len() 抛 TypeError)
             _cb = getattr(context, "progress_callback", None)
             _kwargs = {"progress_cb": _cb} if _cb is not None else {}
+            # P1-10 残留实装：检索链身份形参透传（显式覆盖位；缺省走 ContextVar）
             memories = await self._router.retrieve(
                 query=context.query,
                 limit=context.limit,
+                neuser_id=getattr(context, "neuser_id", None),
+                user_id=getattr(context, "user_id", None),
                 **_kwargs,
             )
 

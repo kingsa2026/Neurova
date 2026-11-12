@@ -356,7 +356,14 @@ class MoEMemoryRouter:
 
         logger.info("MoEMemoryRouter 初始化完成，%s 个专家，top_k=%s", len(experts), top_k)
 
-    async def retrieve(self, query: str, limit: int = 5, progress_cb=None) -> List[Dict[str, Any]]:
+    async def retrieve(
+        self,
+        query: str,
+        limit: int = 5,
+        progress_cb=None,
+        neuser_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """
         完整检索流程
 
@@ -406,8 +413,10 @@ class MoEMemoryRouter:
 
             all_results.extend(expert_results)
 
-        # P1-10 票 A：按请求作用域过滤（跨人串忆在 MoE 支路闭合）
-        all_results = self._scopeFilter(all_results)
+        # P1-10 票 A：按请求作用域过滤（跨人串忆在 MoE 支路闭合）——
+        # 显式身份（检索链透传）优先于 resolver（P1-10 残留实装）
+        explicit = (neuser_id, user_id) if neuser_id and user_id else None
+        all_results = self._scopeFilter(all_results, explicit=explicit)
 
         # Step 4: 结果评估
         if not self._should_fallback_to_full_db(all_results):
@@ -418,7 +427,9 @@ class MoEMemoryRouter:
 
         # Step 5: 全数据库兜底
         logger.debug("Expert 内部结果不足，启动全数据库兜底")
-        full_db_results = self._scopeFilter(self.vector_store.search(query, limit=limit * 2))
+        full_db_results = self._scopeFilter(
+            self.vector_store.search(query, limit=limit * 2), explicit=explicit
+        )
         if full_db_results:
             _emit({"stage": "moe_done", "count": len(full_db_results[:limit]), "fallback": True})
             return full_db_results[:limit]
@@ -428,19 +439,29 @@ class MoEMemoryRouter:
         _emit({"stage": "moe_done", "count": 0, "fallback": True})
         return [self.NO_MEMORY_HINT]
 
-    def _scopeFilter(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _scopeFilter(
+        self,
+        results: List[Dict[str, Any]],
+        explicit: Optional[Tuple[str, str]] = None,
+    ) -> List[Dict[str, Any]]:
         """按请求作用域过滤结果（P1-10 票 A）。
 
-        未装配 scope_resolver 时原样放行（存量装配不变）；结果行无任何身份
-        标记时按拒绝处理（fail-closed）——索引已带身份，缺列＝旧索引未重建。
+        `explicit`（P1-10 残留实装：检索链身份透传）——调用方显式传入
+        (neuser_id, user_id) 时优先于 resolver（显式形参是覆盖位，不是第二
+        身份通道）。未装配 resolver 且无显式身份时原样放行（存量装配不变）；
+        结果行无任何身份标记时按拒绝处理（fail-closed）——索引已带身份，
+        缺列＝旧索引未重建。
         """
-        if self._scope_resolver is None:
+        if explicit is not None:
+            neuser, user = explicit
+        elif self._scope_resolver is not None:
+            try:
+                neuser, user = self._scope_resolver()
+            except Exception as e:  # noqa: BLE001 - 作用域解析失败按空桶裁决
+                logger.warning("MoE scope resolver 失败，按 default 桶裁决: %s", e)
+                neuser, user = "default", "default"
+        else:
             return results
-        try:
-            neuser, user = self._scope_resolver()
-        except Exception as e:  # noqa: BLE001 - 作用域解析失败按空桶裁决
-            logger.warning("MoE scope resolver 失败，按 default 桶裁决: %s", e)
-            neuser, user = "default", "default"
 
         kept: List[Dict[str, Any]] = []
         for r in results:

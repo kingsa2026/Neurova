@@ -1911,6 +1911,9 @@ class ChatPipeline:
             query=ctx.user_input,
             limit=10,
             user_id=user_id,
+            # P1-10 残留实装：第 2 层身份形参透传（渠道路径的 memory_scope；
+            # API 路径缺省走 ContextVar 唯一通道）
+            neuser_id=((ctx.metadata or {}).get("memory_scope") or {}).get("neuser_id"),
             session_id=ctx.session_id,
             strategy=RetrievalStrategy.CHAIN,  # 责任链策略（按优先级降级）
             min_quality=0.3,  # 最低质量要求
