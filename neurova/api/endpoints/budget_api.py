@@ -36,7 +36,7 @@ class BudgetCreate(BaseModel):
     period_start: Optional[datetime] = None
     period_end: Optional[datetime] = None
     auto_reset: bool = True
-    
+
     class Config:
         json_encoders = {
             Decimal: lambda v: float(v)
@@ -55,7 +55,7 @@ class BudgetResponse(BaseModel):
     is_active: bool
     is_over_budget: bool
     created_at: Optional[datetime] = None
-    
+
     class Config:
         json_encoders = {
             Decimal: lambda v: float(v),
@@ -86,6 +86,26 @@ class AlertConfigUpdate(BaseModel):
 # API Endpoints
 # ============================================================================
 
+# P1-1 附带发现（审计未登）：/status/all 必须先于 /status/{agent_id} 注册——
+# FastAPI 按注册序匹配，参数段在前时 "all" 被当成 agent_id 吃掉这条路由，
+# 前端成本看板的"全部预算"视图（cost.ts getAllBudgetStatuses）拿到的是
+# 单 agent 形状的响应（无 budgets 键）。
+@router.get("/status/all")
+async def get_all_budget_statuses(
+    budget_service: BudgetService = Depends(get_budget_service)
+):
+    """
+    Get budget status for all registered budgets.
+
+    Useful for admin dashboard to show overview of all budgets.
+    """
+    try:
+        statuses = budget_service.get_all_budget_statuses()
+        return {"budgets": list(statuses.values())}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/status/{agent_id}")
 async def get_agent_budget_status(
     agent_id: str,
@@ -93,28 +113,12 @@ async def get_agent_budget_status(
 ):
     """
     Get budget status for a specific agent.
-    
+
     Returns current usage, remaining budget, and percentage for the agent's hourly budget.
     """
     try:
         status = budget_service.get_agent_budget_status(agent_id)
         return status
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/status/all")
-async def get_all_budget_statuses(
-    budget_service: BudgetService = Depends(get_budget_service)
-):
-    """
-    Get budget status for all registered budgets.
-    
-    Useful for admin dashboard to show overview of all budgets.
-    """
-    try:
-        statuses = budget_service.get_all_budget_statuses()
-        return {"budgets": list(statuses.values())}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -131,7 +135,7 @@ async def record_cost(
 ):
     """
     Record LLM call cost against budgets.
-    
+
     This endpoint can be called by @track_llm_call decorator or manually.
     Automatically checks all relevant budgets and triggers alerts if thresholds exceeded.
     """
@@ -143,7 +147,7 @@ async def record_cost(
             cost=cost,
             turn_id=turn_id
         )
-        
+
         return {
             "success": True,
             "cost_recorded": cost,
@@ -161,11 +165,11 @@ async def get_budget_status(
 ):
     """
     Get detailed status for a specific budget.
-    
+
     Includes usage, remaining, percentage, and triggered alerts.
     """
     from neurova.models.cost_budget import BudgetScope
-    
+
     try:
         budget_scope = BudgetScope(scope)
     except ValueError:
@@ -173,13 +177,13 @@ async def get_budget_status(
             status_code=400,
             detail=f"Invalid scope: {scope}. Must be one of: {[s.value for s in BudgetScope]}"
         )
-    
+
     try:
         usage = budget_service.manager.get_usage(budget_scope, identifier)
         remaining = budget_service.manager.get_remaining(budget_scope, identifier)
         percentage = budget_service.manager.get_usage_percentage(budget_scope, identifier)
         is_over_budget = budget_service.manager.is_over_budget(budget_scope, identifier)
-        
+
         return {
             "scope": scope,
             "identifier": identifier,
@@ -199,7 +203,7 @@ async def get_alerts(
 ):
     """
     Get recent alerts (implementation pending).
-    
+
     TODO: Implement alert history storage and retrieval.
     Currently returns a placeholder response.
     """
@@ -219,38 +223,38 @@ async def update_alert_config(
 ):
     """
     Update alert configuration.
-    
+
     Allows enabling/disabling alerts, changing notification channels,
     and customizing alert message templates.
     """
     from neurova.models.cost_budget import AlertLevel, AlertChannel
-    
+
     try:
         # Find and update alert config
         alert_level = AlertLevel(config.level)
         found = False
-        
+
         for alert_config in budget_service.manager._alert_configs:
             if alert_config.level == alert_level:
                 alert_config.enabled = config.enabled
-                
+
                 if config.channels:
                     alert_config.channels = [
                         AlertChannel(channel) for channel in config.channels
                     ]
-                    
+
                 if config.message_template:
                     alert_config.message_template = config.message_template
-                    
+
                 found = True
                 break
-                
+
         if not found:
             raise HTTPException(
                 status_code=404,
                 detail=f"Alert level not found: {config.level}"
             )
-            
+
         return {
             "success": True,
             "updated": {
@@ -260,7 +264,7 @@ async def update_alert_config(
                 "message_template": config.message_template
             }
         }
-        
+
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -273,7 +277,7 @@ async def budget_health_check(
 ):
     """
     Health check endpoint for budget system.
-    
+
     Verifies that budget service is initialized and operational.
     """
     return {
