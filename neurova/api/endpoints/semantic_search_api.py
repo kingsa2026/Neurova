@@ -112,7 +112,15 @@ def _load_corpus(body: "HybridSearchRequest", request: Request, current_user: Di
         return corpus
     try:
         mgr = _get_runtime_memory_manager(request)
-        return mgr.get_all_memories() or []
+        # P1-10 残留（全库断点审计 2026-11-12）：请求面按当前身份注入作用域后
+        # 再取数（与 deps.get_memory_manager 同口径）；服务令牌（无用户身份）
+        # 落 default 桶。
+        if hasattr(mgr, "set_request_scope"):
+            mgr.set_request_scope(
+                neuser_id=str(current_user.get("neuser_id") or "default"),
+                user_id=str(current_user.get("user_id") or "default"),
+            )
+        return mgr.get_all_memories(scoped=True) or []
     except Exception as e:
         logger.warning("hybrid_search: 获取记忆语料失败: %s", e)
         return []
@@ -514,7 +522,13 @@ async def compare_search(
     """对比三种搜索方式的结果"""
     try:
         mgr = _get_runtime_memory_manager(request)
-        all_memories = mgr.get_all_memories() or []
+        # P1-10 残留：同 _load_corpus——按当前身份注入作用域后再取数
+        if hasattr(mgr, "set_request_scope"):
+            mgr.set_request_scope(
+                neuser_id=str(current_user.get("neuser_id") or "default"),
+                user_id=str(current_user.get("user_id") or "default"),
+            )
+        all_memories = mgr.get_all_memories(scoped=True) or []
     except Exception as e:
         logger.warning("compare_search: 获取记忆失败: %s", e)
         all_memories = []
