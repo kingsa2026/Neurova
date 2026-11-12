@@ -262,13 +262,16 @@ async def delete_workflow_trigger(
     storage = api._get_storage()
     if not storage.get_trigger(trigger_id):
         raise HTTPException(status_code=404, detail="触发器不存在")
-    storage.delete_trigger(trigger_id)
+    # P2-5（全库断点审计 2026-11-12）：先 unregister 后删存储——注销失败＝
+    # 删除失败，保留触发器如实报错。原实现先删存储再吞 unregister 异常仍报
+    # deleted：已删触发器在重启前仍会触发。
     try:
         from neurova.collaboration.neurflow.triggers import get_trigger_manager
 
         await get_trigger_manager().unregister(trigger_id)
-    except Exception:
-        pass
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"触发器注销失败（保留存储记录）: {e}")
+    storage.delete_trigger(trigger_id)
     return {"code": 0, "message": "deleted"}
 
 

@@ -586,13 +586,16 @@ async def delete_file(
 ):
     """删除文件"""
     info = _get_owned_file(file_id, current_user)
+    # P2-4（全库断点审计 2026-11-12）：先 unlink 后删记录——unlink 失败＝删除
+    # 失败，保留记录如实报错。原实现先删记录再吞 unlink 异常仍报成功：
+    # 记录已删、字节残留，重启 hydrate 会"复活"无主文件。
+    try:
+        Path(info["path"]).unlink(missing_ok=True)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"文件删除失败（记录保留）: {e}")
     with _files_store_lock:
         _files_store.pop(file_id, None)
     delete_file_record(file_id)
-    try:
-        Path(info["path"]).unlink(missing_ok=True)
-    except Exception:
-        pass
     return {"code": 0, "message": "File deleted"}
 
 
