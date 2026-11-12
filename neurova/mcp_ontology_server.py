@@ -260,6 +260,7 @@ async def fact_submit(
     object_term: str,
     evidence_text: str = "",
     agent_id: str = "",
+    simulation_id: str = "",
 ) -> dict:
     """提交一条业务断言入库（写入，默认直写）：经 admission 唯一咽喉逐字可核闸；
     未知谓词落候选审批面、冲突落三态票（三层异步人审兜底）。evidence_text 是
@@ -273,6 +274,7 @@ async def fact_submit(
     agentId = _agentIdOf(user, agent_id)
     tenant = _tenantOf(user)
     content = f"{subject_label} {predicate_term_id} {object_term}".strip()
+    qualifier = {"simulation_id": simulation_id} if simulation_id else {}
     from neurova.knowledge.foundation.admission import AdmissionError
 
     gate = productionAdmissionGate(_store())
@@ -283,6 +285,7 @@ async def fact_submit(
             predicateTermId=str(predicate_term_id or "").strip(),
             objectTerm=str(object_term or "").strip(),
             content=content, evidenceText=str(evidence_text or ""),
+            qualifier=qualifier,
             assertions=[{"actorType": "agent", "actorId": str(user.get("username") or ""),
                          "mediumRef": "mcp:ontology",
                          "statementText": content}]))
@@ -313,6 +316,35 @@ def _resolveAgentForActions(agentId: str) -> Optional[Dict[str, Any]]:
     from neurova.tool_executor import ToolExecutor
 
     return {"executor": ToolExecutor(agent), "agent": agent}
+
+
+@_SERVER.tool()
+async def ontology_simulate(
+    ctx: Context,
+    scope_json: str = "{}",
+    hypotheses_json: str = "[]",
+) -> dict:
+    """克隆世界推演（W5，只读生产）：生产库 backup 副本→假设经同一咽喉注入副本
+    →规则/函数推演→diff 报告。生产唯一写＝台账追加一行（先演后决互链）。
+    scope 超行上限显式拒（不静默截断）。"""
+    import json as _json
+
+    from neurova.knowledge.ontology.simulation import ScopeTooLargeError, runSimulation
+
+    user = _currentUserFromContext(ctx)
+    try:
+        scope = _json.loads(scope_json or "{}")
+        hypotheses = _json.loads(hypotheses_json or "[]")
+        if not isinstance(scope, dict) or not isinstance(hypotheses, dict):
+            raise ValueError("scope_json/hypotheses_json 须是 JSON 对象")
+    except ValueError as exc:
+        return {"rejected": True, "detail": str(exc)}
+    scope.setdefault("agentId", _agentIdOf(user, None))
+    scope.setdefault("tenantId", _tenantOf(user))
+    try:
+        return runSimulation(_store(), scope=scope, hypotheses=hypotheses)
+    except ScopeTooLargeError as exc:
+        return {"rejected": True, "detail": str(exc)}
 
 
 @_SERVER.tool()
@@ -355,10 +387,13 @@ async def ontology_act(
         return {"rejected": True,
                 "detail": "Agent 未就绪（动作执行载体不可用，稍后重试）"}
     try:
-        return await executeAction(
+        receipt = await executeAction(
             action, params, resolved["executor"], _store(),
             agentId=_agentIdOf(user, agent_id), tenantId=tenant,
             machineRegistry=None)
+        if simulation_id:
+            receipt["simulation_id"] = simulation_id
+        return receipt
     except ActionPreconditionError as exc:
         return {"rejected": True, "detail": str(exc),
                 "action_id": action.get("action_id")}

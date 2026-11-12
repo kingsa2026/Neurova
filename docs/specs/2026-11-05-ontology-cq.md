@@ -46,6 +46,7 @@
 | CQ-12 | 数值属性能否参与计算（聚合/比较出结论）？ | 分析师 | P2 | 函数层（specs/2026-11-12 W2 落地：受限 AST＋selector 聚合＋咽喉入账） | tests/unit/knowledge/ontology/test_functionDerivationGovernance.py | implemented |
 | CQ-13 | 对象当前处于什么状态、允许哪些迁移？ | 运维员 | P2 | 状态机（specs/2026-11-12 W3 落地：has_state＋迁移闭集＋事件桥） | tests/unit/knowledge/ontology/test_stateMachineValidation.py | implemented |
 | CQ-15 | 动作的前置条件不满足时是否拒绝执行？ | 运维员 | P2 | 动作语义（specs/2026-11-12 W4 落地：precondition 不触工具＋单管道转交） | tests/unit/knowledge/ontology/test_actionPrecondition.py | implemented |
+| CQ-14 | 假设某状态变化后下游会受什么影响？ | 运维员 | P2 | 推演（specs/2026-11-12 W5 落地：副本隔离零生产写＋diff 报告） | tests/unit/knowledge/ontology/test_simulationDiff.py | implemented |
 
 ## 追溯规则
 

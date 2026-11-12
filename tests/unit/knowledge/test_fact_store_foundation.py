@@ -195,12 +195,14 @@ class TestMigrationVersions:
         #      source_kind 列。
         # v44：状态机（specs/2026-11-12 W3）——ontology_state_machines＋企业源
         #      sync_interval_seconds 列。
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 44
+        # v45：动作语义三列（specs/2026-11-12 W4）。
+        # v46：推演台账（specs/2026-11-12 W5）——ontology_simulations 只追加。
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 46
         assert {'knowledge_mcp_sources', 'knowledge_alias_candidates',
                 'ontology_relation_candidates', 'ontology_shapes',
                 'ontology_change_log', 'enterprise_source_configs',
                 'knowledge_fts_docs', 'knowledge_fts', 'knowledge_categories',
-                'ontology_actions', 'ontology_functions', 'ontology_state_machines'} <= names
+                'ontology_actions', 'ontology_functions', 'ontology_state_machines', 'ontology_simulations'} <= names
         # v28 存量行零漂移：缺省必须是旧语义 relay（head 客体常量空＝不搬移客体）
         rule_columns = {
             r[1]: (r[2], r[4]) for r in store._conn.execute(

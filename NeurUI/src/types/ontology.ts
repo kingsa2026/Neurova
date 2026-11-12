@@ -358,6 +358,27 @@ export interface OntologyActionRow {
   enabled: boolean
 }
 
+/** W5 推演：diff 报告与台账行（specs/2026-11-12 §7，v46） */
+export interface OntologySimulationReport {
+  simulation_id: string
+  diff: {
+    added: Array<Record<string, unknown>>
+    removed: Array<Record<string, unknown>>
+    affected_subjects: string[]
+    state_changes: Array<Record<string, unknown>>
+  }
+  scoped_facts: number
+}
+
+export interface OntologySimulationRow {
+  simulation_id: string
+  agent_id: string
+  scope: Record<string, unknown>
+  hypotheses: Array<Record<string, unknown>>
+  diff_summary: Record<string, unknown>
+  created_at: string
+}
+
 /** W2 函数层：ontology_functions 行（specs/2026-11-12 §4） */
 export interface OntologyFunctionRow {
   tenant_id: string

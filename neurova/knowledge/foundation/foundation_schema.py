@@ -43,6 +43,7 @@ from ..fts_index import _SCHEMA_V37_FTS
 from ..ontology.action_registry import _SCHEMA_V42_ACTIONS, _SCHEMA_V45_ACTION_SEMANTICS
 from ..ontology.change_log import _SCHEMA_V33
 from ..ontology.function_registry import _SCHEMA_V43_FUNCTIONS
+from ..ontology.simulation import _SCHEMA_V46_SIMULATIONS
 from ..ontology.state_machine_registry import _SCHEMA_V44_STATE_MACHINES
 from ..ontology.derivation_ledger import _SCHEMA_V10
 from ..ontology.relation_candidates import _SCHEMA_V29_CANDIDATES
@@ -161,6 +162,9 @@ _STEPS: List[tuple] = [
     # v45：动作语义三列（specs/2026-11-12 §6 W4）——precondition/impact/
     #      state_change（执行成功后经 admission 写 has_state）
     (45, _SCHEMA_V45_ACTION_SEMANTICS),
+    # v46：推演台账（specs/2026-11-12 §7 W5）——ontology_simulations 只追加
+    #      （先演后决审计互链的台账本体；推演过程零生产写）
+    (46, _SCHEMA_V46_SIMULATIONS),
 ]
 
 _registered = False

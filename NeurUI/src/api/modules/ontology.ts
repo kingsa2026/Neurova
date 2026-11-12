@@ -27,6 +27,8 @@ import type {
   IriResolution,
   OntologyActionRow,
   OntologyComputeResult,
+  OntologySimulationReport,
+  OntologySimulationRow,
   OntologyEnvelope,
   OntologyFunctionRow,
   OntologyQualityReport,
@@ -406,4 +408,18 @@ export function createOntologyAction(body: {
   enabled?: boolean
 }) {
   return api.post<ApiResponse<OntologyActionRow>>('/knowledge/ontology/actions', body)
+}
+
+export function runOntologySimulation(body: {
+  scope?: Record<string, unknown>
+  agent_id?: string
+  hypotheses?: { facts?: Array<Record<string, unknown>> }
+}) {
+  return api.post<ApiResponse<OntologySimulationReport>>(
+    '/knowledge/ontology/simulations', body)
+}
+
+export function listOntologySimulations(limit = 50) {
+  return api.get<ApiResponse<OntologySimulationRow[]>>(
+    `/knowledge/ontology/simulations?limit=${limit}`)
 }
