@@ -64,10 +64,15 @@ def _callEndpoint(tool_name: str, arguments: dict):
 
     engine = MagicMock()
     engine.execute_with_safeguards = AsyncMock(return_value={"ok": "ran"})
+    # 属主门（P2-6）经 get_tool 探测注册表：未注册工具＝None（faithful mock）
+    engine.get_tool = MagicMock(return_value=None)
     with patch.object(tool_layers, "get_tool_engine", return_value=engine), \
          patch("neurova.api.endpoints.get_agent_instance", return_value=None):
+        # 直调形态随 P2-6 签名对齐：身份由请求边界注入，直调时显式给普通用户
         response = asyncio.run(execute_tool(
-            ToolExecuteRequest(tool_name=tool_name, arguments=arguments, timeout=5)
+            ToolExecuteRequest(tool_name=tool_name, arguments=arguments, timeout=5),
+            current_user={"user_id": "u_test", "username": "tester",
+                          "role": "user", "neuser_id": "ne_test"},
         ))
     return response, engine
 
