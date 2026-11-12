@@ -2619,9 +2619,9 @@ onBeforeUnmount(() => {
 .store-auth-error { margin: 4px 0 0; font-size: 12px; color: var(--nr-error); word-break: break-all; }
 .store-auth-actions { display: flex; gap: 8px; }
 .store-badge { font-size: 12px; padding: 0 6px; border-radius: 8px; }
-.badge-active { background: rgba(82, 196, 26, 0.15); color: var(--nr-success); }
-.badge-error { background: rgba(255, 77, 79, 0.15); color: var(--nr-error); }
-.badge-expired, .badge-pending { background: rgba(250, 173, 20, 0.15); color: var(--nr-warning); }
+.badge-active { background: var(--nr-success-soft-bg); color: var(--nr-success); }
+.badge-error { background: var(--nr-error-soft-bg); color: var(--nr-error); }
+.badge-expired, .badge-pending { background: var(--nr-warning-soft-bg); color: var(--nr-warning); }
 
 /* 工具栏 */
 .canvas-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: var(--nr-glass-bg); border-bottom: 1px solid var(--nr-border, rgba(255, 255, 255, 0.08)); }
@@ -2649,7 +2649,7 @@ onBeforeUnmount(() => {
 .category-arrow.expanded { transform: rotate(180deg); }
 .category-items { display: flex; flex-direction: column; gap: 4px; padding: 4px 0 4px 12px; }
 .palette-node { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; background: var(--nr-glass-bg); cursor: grab; transition: all 0.15s; }
-.palette-node:hover { background: rgba(99, 102, 241, 0.1); }
+.palette-node:hover { background: var(--nr-primary-soft); }
 .palette-node:active { cursor: grabbing; }
 .node-icon { font-size: 14px; }
 .node-label { color: var(--nr-text-secondary); font-size: 12px; }
@@ -2674,12 +2674,12 @@ onBeforeUnmount(() => {
 
 /* 画布节点 */
 .graph-node { position: absolute; min-width: 140px; background: var(--nr-bg-elevated); border: 1px solid var(--nr-border, rgba(255, 255, 255, 0.1)); border-radius: 10px; cursor: move; user-select: none; transition: border-color 0.15s; }
-.graph-node.multi-selected { border-color: var(--nr-primary-light, var(--nr-primary-light)); box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.35); }
-.canvas-marquee { position: absolute; border: 1px dashed var(--nr-primary-light, var(--nr-primary-light)); background: rgba(129, 140, 248, 0.08); pointer-events: none; z-index: 40; }
-.graph-node:hover { border-color: rgba(99, 102, 241, 0.3); }
-.graph-node.selected { border-color: var(--nr-primary-light, var(--nr-primary-light)); box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2); }
+.graph-node.multi-selected { border-color: var(--nr-primary-light, var(--nr-primary-light)); box-shadow: 0 0 0 2px var(--nr-primary-soft-strong); }
+.canvas-marquee { position: absolute; border: 1px dashed var(--nr-primary-light, var(--nr-primary-light)); background: var(--nr-primary-soft); pointer-events: none; z-index: 40; }
+.graph-node:hover { border-color: var(--nr-primary-soft-strong); }
+.graph-node.selected { border-color: var(--nr-primary-light, var(--nr-primary-light)); box-shadow: 0 0 0 2px var(--nr-primary-soft-border); }
 /* 执行状态着色（蜂群编排可视化） */
-.graph-node.run-success { border-color: rgba(74, 222, 128, 0.7); box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.15); }
+.graph-node.run-success { border-color: var(--nr-success); box-shadow: 0 0 0 2px var(--nr-success-soft-bg); }
 .graph-node.run-failed { border-color: rgba(248, 113, 113, 0.7); box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.15); }
 .graph-node.run-skipped { border-color: rgba(148, 163, 184, 0.5); opacity: 0.55; }
 .graph-node.run-running { border-color: rgba(250, 204, 21, 0.8); box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.2); }
