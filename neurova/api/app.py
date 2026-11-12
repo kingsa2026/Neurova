@@ -248,6 +248,8 @@ def _agent_config_from_saved(cfg: dict, agent_id: str, workspace_path: str):
         llm_temperature=(
             float(cfg["temperature"]) if cfg.get("temperature") is not None else None
         ),
+        # 最大令牌回读（P1-5）：落盘值显式覆盖；未落盘（0）走模型自动适配
+        max_tokens=int(cfg.get("max_tokens") or 0),
         owner_user_id=cfg.get("owner_user_id") or None,
         description=cfg.get("description", "") or "",
         enable_tts=bool(cfg.get("enable_tts", False)),

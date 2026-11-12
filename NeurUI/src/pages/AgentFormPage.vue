@@ -73,12 +73,11 @@
           </a-form-item>
         </GlassCard>
 
-        <!-- System prompt & behavior -->
-        <GlassCard :title="t('agent.systemPrompt')" style="margin-bottom: 20px">
-          <a-form-item :label="t('agent.systemPrompt')">
-            <a-textarea v-model:value="formState.systemPrompt" :rows="6" :placeholder="t('agent.systemPromptPlaceholder')" />
-          </a-form-item>
-
+        <!-- Temperature & max tokens -->
+        <!-- P1-5（全库断点审计 2026-11-12）：系统提示词输入框删除——后端 AgentConfig
+             无 system_prompt 字段、全仓无消费方，表单收集即丢属谎报能力；max_tokens
+             已接通后端消费面，保留输入框。 -->
+        <GlassCard :title="`${t('agent.temperature')} / ${t('agent.maxTokens')}`" style="margin-bottom: 20px">
           <a-row :gutter="16">
             <a-col :span="12">
               <a-form-item :label="t('agent.temperature')">
@@ -258,7 +257,6 @@ const formState = ref({
   model: '',
   provider: '',
   group_id: '',
-  systemPrompt: '',
   temperature: 0.7,
   maxTokens: 4096,
   personality: '',
@@ -349,7 +347,6 @@ const loadAgent = async () => {
         model: agent.model || '',
         provider: agent.provider || '',
         group_id: (agent as any).group_id || '',
-        systemPrompt: agent.config?.systemPrompt || '',
         temperature: agent.config?.temperature ?? 0.7,
         maxTokens: agent.config?.maxTokens ?? 4096,
         personality: '',
@@ -377,7 +374,6 @@ const handleSave = async () => {
       provider: formState.value.provider,
       group_id: formState.value.group_id || undefined,
       config: {
-        systemPrompt: formState.value.systemPrompt,
         temperature: formState.value.temperature,
         maxTokens: formState.value.maxTokens,
         ttsEnabled: formState.value.ttsEnabled,
