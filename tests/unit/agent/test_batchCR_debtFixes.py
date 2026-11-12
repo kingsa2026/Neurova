@@ -8,6 +8,7 @@ R1 EvidenceStore 旧库迁移 ALTER+UPDATE 撞隐式事务（回填从未成功�
 """
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 import tempfile
 from pathlib import Path

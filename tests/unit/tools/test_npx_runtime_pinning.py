@@ -465,6 +465,21 @@ class TestNonPipAuditTreesStayAtTheAdvisoryFloors:
             "GHSA-rxp7-6hxx-x8q5",
             "Address6 区段标识二次扫描（O(N²)）",
         ),
+        # glob/minimatch 一对：glob 的 `AbortSignal` 取消被绕过，超时后仍会继续
+        # 遍历文件系统（拒绝服务面）；minimatch 的 globparts 放大同理。两者由
+        # `@modelcontextprotocol/server-filesystem`、`camoufox-js`、`swagger-jsdoc`
+        # 三处引入，其中 swagger-jsdoc 用**精确版本** `11.1.0` 声明子依赖，
+        # `npm install` 原地不动 ⇒ 只能 overrides 顶替（与本文件其余条同一根因）。
+        "glob": (
+            "14.0.2",
+            "GHSA-3g3m-2fjr-6pw4",
+            "AbortSignal 取消被绕过：超时后继续遍历文件系统",
+        ),
+        "minimatch": (
+            "11.0.1",
+            "GHSA-g3hv-75wg-m249",
+            "globparts 放大导致拒绝服务",
+        ),
     }
 
     #: crate 名 → 同上

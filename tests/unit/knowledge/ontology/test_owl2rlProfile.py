@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from neurova.knowledge.foundation import productionAdmissionGate
 from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
 from neurova.knowledge.ontology.rule_engine import ForwardChainingEngine, RuleError
 from neurova.knowledge.ontology.term_registry import IS_A_PREDICATE, OntologyTermRegistry

@@ -26,6 +26,7 @@ import re
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 REGISTRY_MODULE = "neurova/knowledge/defaultOffFlags.py"
@@ -55,7 +56,7 @@ def testRegistryNeverReadsEnvironmentItself():
     不允许的是在注册表里再解一次。
     """
     path = REPO_ROOT / REGISTRY_MODULE
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+    tree = parseSource(path.read_text(encoding="utf-8"), str(path))
     offenders = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute) and node.attr == "get":

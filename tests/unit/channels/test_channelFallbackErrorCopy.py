@@ -14,6 +14,7 @@ import pathlib
 
 import pytest
 
+from tests import ast_scan
 from tests.ast_scan import parseSource
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
@@ -28,7 +29,10 @@ def _channelSources() -> dict:
     会以零命中假绿——读数说"干净"，其实什么都没看（§6-491 由常驻棘轮
     `test_scanCriterionMustProveItsOwnSurfaceRatchet` 抓到这一形）。
     """
-    sources = {p.name: p.read_text(encoding="utf-8") for p in CHANNELS_DIR.glob("*.py")}
+    # 枚举走共享预算（`tests/ast_scan`）：私有 `glob + parseSource` 会把「代码总量」
+    # 编码成墙钟上界（`tests/unit/test_ci_ast_scan_budget_guard.py` 的根因）。
+    sources = {ref.path.name: ref.code
+               for ref in ast_scan.sourceRefsUnder(CHANNELS_DIR, ".py")}
     scanned = len(sources)
     assert scanned > 50, (
         f"扫描面现读 {scanned} 个文件（`neurova/channels/*.py` 本批实测 61）——"

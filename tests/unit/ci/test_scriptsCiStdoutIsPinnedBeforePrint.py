@@ -28,6 +28,7 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
 from tests.ast_scan import REPO_ROOT, parseSource, sourceCode, trackedPyPaths
 
 #: 只降不升基线（11-04 现算：30 档 → 补钉 28 档 → 余 3）。
@@ -57,8 +58,11 @@ def _nonCanonicalPins(root="scripts", baseDir=None) -> list:
     """
     offenders = []
     scanRoot = Path(baseDir) if baseDir is not None else REPO_ROOT / root
-    for path in sorted(scanRoot.rglob("*.py")):
-        source = path.read_text(encoding="utf-8", errors="replace")
+    # 枚举走共享预算（`tests/ast_scan.sourceRefsUnder`）：私有 `rglob` 会把「代码总量」
+    # 编码成墙钟上界（`tests/unit/test_ci_ast_scan_budget_guard.py` 的根因）。
+    # 解析仍走单源出口 `parseSource`——它是唯一编译入口，不是第二份实现。
+    for ref in ast_scan.sourceRefsUnder(scanRoot, ".py"):
+        path, source = ref.path, ref.code
         try:
             tree = parseSource(source)
         except SyntaxError:

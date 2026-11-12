@@ -8,7 +8,7 @@
 #   · 解释器 python:3.12 —— 事实源是仓库根 `Dockerfile` 的 `FROM python:`
 #     （生产镜像与受保护子集那一腿跑的就是它，见 Issue #301）。开发环境
 #     跑另一个版本，等于同一个 commit 在两处行为分叉，而故障只在其中一侧可见。
-#   · Node 20 —— 事实源是 `.github/workflows/ci.yml` 的 `node-version`
+#   · Node 22 —— 事实源是 `.github/workflows/ci.yml` 的 `node-version`
 #     （compose 前端镜像同源，见 scripts/ci/deploy_config_consistency_check.py 的 R4）。
 #
 # 三处口径由 tests/unit/ci/test_dev_environment_contract.py 常驻钉住：本文件
@@ -65,7 +65,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Node 20（大版本与 CI 同源）：用 NodeSource 官方源装，不用 `apt install nodejs`
 # —— 后者在 Debian 系给出的是旧大版本，与 CI 的 node-version 分叉。
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 

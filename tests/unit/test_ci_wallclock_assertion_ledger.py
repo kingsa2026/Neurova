@@ -678,6 +678,21 @@ OUTSIDE_SUBSET_LEDGER: Dict[str, int] = {
     "tests/unit/skills/test_skill_import_architecture.py": 1,
     "tests/unit/sync/test_slow_consumer_seq_policy.py": 1,
     "tests/unit/tools/test_tool_orchestrator.py": 2,
+    # 下面两处由本体栈 B7／B10 批次带进（本批实测分布比对抓出，此前未登记，
+    # 属"新增了却没人登记"的漏账，不是本表想放行的形态）。CI 不跑这两档
+    # （均不在 `scripts/ci/protected_tests*.txt`），故不阻塞；按教义第 5 条
+    # 先如实登记，逐条写明为何本轮不动。
+    #
+    # 前者是准入吞吐基线的**量级护栏**（60s 对 N=200），本意就是量真实机时；
+    # 它的判据主体是三条合理性断言（每条成功、fact_id 唯一、落库条数相等），
+    # 墙钟只兜"数量级退化"。改造它属于性能基准口径的另一票。
+    #
+    # 后者是 dry-run 出口的**冒烟预算**（10 条候选 < 50ms）。这一处确实是
+    # 「判据与机器速度捆绑」的形态，但它今天不进 CI 子集、也不在本单的
+    # 阻塞面上；把它改成结构不变量要动 B2 端点的可观测口径（得分段读数），
+    # 与「CI 转绿」不是同一件事，故本轮只登记、不擅改。
+    "tests/performance/knowledge/test_admissionThroughput.py": 1,
+    "tests/unit/knowledge/test_ontologyValidateEndpoint.py": 1,
 }
 
 

@@ -39,7 +39,10 @@ from tests.ast_scan import parseSource
 
 # 把仓库根放进 sys.path 的形态：层数反推（parents[N] / ".."*N）或根常量。
 _ROOT_TEXT_MARKERS = ("parents[", "REPO_ROOT", "PROJECT_ROOT", "dirname(__file__)")
-_ROOT_NAMES = {"ROOT", "PROJECT_ROOT", "REPO_ROOT", "_REPO_ROOT", "PROJECT_ROOT_PATH"}
+# 仓内既有的"仓库根"常量名。`REPO` 也在内：`scripts/diagnostics/` 那批脚本用的是它
+# （`REPO = Path(__file__).resolve().parents[2]`），按深度推出来的就是仓根，与
+# `REPO_ROOT` 同义——不收它就会把一批**真的能跑**的脚本记成"从未把仓库根放进 sys.path"。
+_ROOT_NAMES = {"ROOT", "REPO", "PROJECT_ROOT", "REPO_ROOT", "_REPO_ROOT", "PROJECT_ROOT_PATH"}
 
 
 def _isRepoRootBootstrap(node: ast.AST) -> bool:

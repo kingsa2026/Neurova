@@ -27,6 +27,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from tests.ast_scan import parseSource
 
 REPO = Path(__file__).resolve().parents[3]
 SCRIPT = REPO / "scripts" / "desktop" / "package_installer_zip.py"
@@ -49,7 +50,7 @@ def testMarkFollowsMeasuredStateNotProcessFlag():
     那句旧代码撞红——注释怎么改措辞都能把守卫弄红或放过，AST 不会。
     """
     pkg = _pkg()
-    tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
+    tree = parseSource(SCRIPT.read_text(encoding="utf-8"), str(SCRIPT))
     fn = next(n for n in tree.body
               if isinstance(n, ast.FunctionDef) and n.name == "package")
     marks = [n for n in ast.walk(fn)

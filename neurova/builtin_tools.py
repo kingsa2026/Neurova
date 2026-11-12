@@ -907,6 +907,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "custom_node_create": {
+        # 并行能力声明：写共享的自定义节点注册表——同批两个创建会撞同一份注册表与版本表。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【创建自定义节点·草稿】在已批准的构建批次内创建 L1/L2 自定义节点，默认 draft（不可被画布引用）；创建后需 custom_node_activate 激活。tier=declarative 需要 executor_body.template；tier=composite 需要 executor_body.steps。",
         "parameters": {
@@ -918,6 +919,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "custom_node_update": {
+        # 并行能力声明：改共享的节点定义（读-改-写）——并发改同一节点必丢更新。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【更新自定义节点·草稿】只允许更新 draft 节点；active 节点需新批次/审批，本工具拒绝。",
         "parameters": {
@@ -930,6 +932,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "custom_node_activate": {
+        # 并行能力声明：激活会动共享注册表与画布引用面，同批并发与写操作互踩。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【激活自定义节点】把本构建批次内创建的 draft 节点提升为 active；节点 batch_id 必须与当前 BuildSession 批次一致。",
         "parameters": {
@@ -941,6 +944,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "custom_node_delete": {
+        # 并行能力声明：删除共享注册表条目——并发下"先判引用再删"是 TOCTOU。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【删除自定义节点·草稿】只允许删除 draft 节点；active 节点需先停用/新批次处理，本工具拒绝。",
         "parameters": {
@@ -964,6 +968,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "workflow_definition_update": {
+        # 并行能力声明：写共享的工作流定义表（版本自增）——并发写同一定义必撞版本号。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【修改工作流定义】直接修改已发布或草稿工作流（无需先复制）。必须带 base_version 乐观锁；已发布会先确保安全版本；DAG/节点类型/端口/草稿自定义节点校验失败时不写入。整个任务批次一次审批、逐条审计。",
         "parameters": {
@@ -988,6 +993,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "workflow_definition_duplicate": {
+        # 并行能力声明：复制会往共享定义表插新行并读源定义，两端都是共享态。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【复制为草稿】把工作流复制成 DRAFT 草稿副本（修复循环的暂存落点）。草稿试跑通过后再发布或回滚，避免直接打断正在运行的已发布流程。",
         "parameters": {
@@ -1001,6 +1007,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "workflow_rollback": {
+        # 并行能力声明：回滚把共享定义表整体推回旧版本——与任何写同一定义的操作互斥。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【回滚工作流】回滚到指定版本；不传 target_version 时回到安全版本。回滚本身产生新版本（undo-friendly），安全版本标记不变。",
         "parameters": {
@@ -1014,6 +1021,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "workflow_publish": {
+        # 并行能力声明：发布改共享定义的发布态与安全版本基线，并发发布会双写基线。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【发布工作流】校验并发布（DRAFT→PUBLISHED），同时编译工作流 Agent。发布动作把当前版本设为安全基线；校验或编译失败不改变状态。",
         "parameters": {
@@ -1027,6 +1035,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "workflow_execute": {
+        # 并行能力声明：执行会落共享的执行实例与状态表；同批两路执行互相污染运行态。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【执行工作流定义】执行并返回节点级结果；默认只允许已发布工作流，草稿试跑需 allow_draft=true。已发布执行成功会把当前版本提升为安全版本（执行校验凭据）。",
         "parameters": {
@@ -1056,6 +1065,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "workflow_repair": {
+        # 并行能力声明：修复在草稿上多轮试跑并可能提交共享定义/画布——写入面是共享态。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【工作流自愈】对失败的工作流/画布做最多 5 轮修复：在 DRAFT 副本上执行、读取 failed 节点、查 EKB 修复经验、生成配置补丁并重跑评估，通过后才提交目标。缺环境会停在预检并列出缺失变量，不烧轮次。需 NEUROVA_NODE_REPAIR=1 武装；提交已发布工作流/画布需批次审批。换节点候选按同类别+标签近似生成，默认只返回候选并要求显式 allow_replacements=true。workflow_id 与 canvas_id 二选一。",
         "parameters": {
@@ -1073,6 +1083,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "build_batch_compensate": {
+        # 并行能力声明：按批次逆序回滚多个共享 surface（画布/节点/定义），同批并发会重放同一条补偿。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【批次补偿】按构建批次补偿日志逆序回滚画布快照/新建画布/自定义节点激活/工作流定义版本。用于一次任务里后一个 surface 失败、需要回收前面已提交变更的场景；已补偿条目不重放。缺省使用当前构建会话的 batch_id。",
         "parameters": {
@@ -1513,6 +1524,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "canvas_apply_batch": {
+        # 并行能力声明：整批画布操作在一个事务里提交——画布是共享对象，与任何画布写互斥。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
         "description": "【批量画布操作·原子提交】把多条画布操作放进一个事务：任一步失败整批不落盘、版本不变；成功只产生一个新版本。构建批次内优先用它替代逐条 canvas_add_node/connect/set_config，审批后一次提交。operations 支持 add_node（可带 id 供后续 op 引用）/connect/set_config/move_node/remove_node/remove_edge/layout。",
         "parameters": {

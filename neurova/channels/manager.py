@@ -163,7 +163,7 @@ class ChannelManager:
                             if owner_dept and owner_dept != "default" and owner_dept != tenant:
                                 logger.warning(
                                     "渠道 %s(agent=%s) 配置 tenant_id=%s 与属主部门根 %s 不一致，按属主部门根落库",
-                                    channel_type, agent_id, tenant, owner_dept,
+                                    adapter.channel_type, agent_id, tenant, owner_dept,
                                 )
                                 tenant = owner_dept
                             message.metadata["tenant_id"] = tenant

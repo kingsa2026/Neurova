@@ -285,3 +285,50 @@ def test_signedExceptionsReleaseOnlyWhatTheyName(tmp_path, monkeypatch, dangling
     rc, out = run()
     assert rc == 1, "清单里过期的署名行不会被点名——下次真有号失联就没人发现：%s" % out
 
+
+
+def test_signedExceptionWhoseObjectIsAbsentIsNotReadAsExpired(tmp_path, monkeypatch):
+    """例外的第二向必须区分「号已回到主线」与「本仓根本没有这个对象」。
+
+    实测现场（PR #374 的 unit-tests 腿）：CI 检出的是**远端当前历史**，例外清单署名
+    的那批号早已被并发重写从远端带走、连对象都被 gc 掉了。旧口径把"取不到对象"
+    读成"署名已过期"，于是同一条清单**本机绿、CI 红**——而 CI 给出的修法是
+    「把这行删了」，那是拿抹掉证据换绿（教义第 2 条）。
+
+    本格合成一枚**语法合法但本仓不存在**的号：清单里署名它，判定必须仍是放行。
+    反向那一半（号已可达 ⇒ 过期 ⇒ 红）已由上一格 ③ 钉住，两向都在。
+    """
+    (tmp_path / "audit-reports").mkdir()
+    (tmp_path / "scripts" / "ci").mkdir(parents=True)
+    (tmp_path / "audit-reports" / "probe.md").write_text("`deadbeef`\n", encoding="utf-8")
+    (tmp_path / "scripts" / "ci" / "audit_ledger_unreachable_refs.txt").write_text(
+        "deadbeef  本格自证用：本仓没有这个对象\n", encoding="utf-8")
+    monkeypatch.setattr(ledger, "PROJECT_ROOT", tmp_path)
+
+    rc, out = _runMain([])
+    assert rc == 0, (
+        "本仓取不到对象的署名行被读成了「署名过期」——CI 检出的是远端当前历史，"
+        "那批号的对象在远端早已被 gc，这条判据会永远红，且修法指向「删掉证据」：%s" % out
+    )
+
+
+def test_signedExceptionWhoseObjectIsNotACommitIsExpired(tmp_path, monkeypatch):
+    """反向钉：对象在、却不是 commit ⇒ 仍是过期署名（三态里"该号压根不是提交"那一态）。
+
+    没有这一格，「取不到对象不判过期」可以被"一律不判过期"错误地满足——清单从此谁写进去
+    就永久静音。前一格管放行，这一格管收口，两向都在。
+    """
+    (tmp_path / "audit-reports").mkdir()
+    (tmp_path / "scripts" / "ci").mkdir(parents=True)
+    treeToken = _git("rev-parse", "HEAD^{tree}").strip()[:8]
+    assert _git("cat-file", "-t", treeToken).strip() == "tree", (
+        "探针选中的不是树号，本格前提不成立")
+    (tmp_path / "audit-reports" / "probe.md").write_text("`%s`\n" % treeToken, encoding="utf-8")
+    (tmp_path / "scripts" / "ci" / "audit_ledger_unreachable_refs.txt").write_text(
+        "%s  树号被误署成提交\n" % treeToken, encoding="utf-8")
+    monkeypatch.setattr(ledger, "PROJECT_ROOT", tmp_path)
+
+    rc, out = _runMain([])
+
+    assert rc == 1, (
+        "把树号署进例外清单竟然全绿——清单成了一键静音：%s" % out)

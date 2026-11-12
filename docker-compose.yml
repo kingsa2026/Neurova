@@ -69,9 +69,9 @@ services:
 
   # 前端服务（可选，生产模式下不需要）
   frontend:
-    # Node 大版本与 CI（.github/workflows/ci.yml node-version: "20"）一致：
+    # Node 大版本与 CI（.github/workflows/ci.yml node-version: "22"）一致：
     # 此前是 node:18-alpine，本地 dev 与 CI 跑不同大版本，vitest/vite 行为会分叉
-    image: node:20-alpine
+    image: node:22-alpine
     container_name: neurova-frontend
     working_dir: /app
     volumes:

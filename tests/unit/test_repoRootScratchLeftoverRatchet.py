@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import os
 import pathlib
 
 # 本档在 tests/unit/ 下，仓根要上跳两级——按本档深度自己算，别抄别的档的基准
@@ -39,7 +40,11 @@ def scratchEntries(root: pathlib.Path) -> list[str]:
     按字母序会把新条目埋在中间，等于点名点了个错的。
     """
     entries = list(pathlib.Path(root).glob(".tmp_*"))
-    return [p.name for p in sorted(entries, key=lambda p: p.stat().st_mtime, reverse=True)]
+    # 排序键取 `st_mtime_ns` 而不是 `st_mtime`：后者是 float，纳秒级差落在同一
+    # float 上就会**并列**（同一用例里连续写两个文件，实测两件的 `st_mtime`
+    # 逐位相同、`st_mtime_ns` 差 1.4 万纳秒）。并列时 `sorted` 退回 `glob` 的
+    # 目录序，于是"新→旧"退化成"碰巧"，反证格在快的机器上红、慢的机器上绿。
+    return [p.name for p in sorted(entries, key=lambda p: p.stat().st_mtime_ns, reverse=True)]
 
 
 def test_repoRootAnchorResolvesToTheRealRepoRoot():
@@ -68,7 +73,13 @@ def test_counterReallyCountsAndOnlyCountsTheExemptPattern(tmp_path):
     assert scratchEntries(tmp_path) == [".tmp_probe.py"], "计数尺没数到 .tmp_*"
     (tmp_path / "probe.log").write_text("y", encoding="utf-8")
     (tmp_path / ".tmp_visible_if_removed").write_text("z", encoding="utf-8")
-    # 新→旧：后写的那件排前面
+    # 时间戳**显式**拉开，不靠"两次 write 自然有先后"：写盘间隔落在文件系统
+    # 时间戳粒度内时两件会并列（本机实测 `st_mtime` 逐位相同、`st_mtime_ns`
+    # 也相同），并列时任何排序都只能退回目录序——那让这一格在快的机器上红、
+    # 在慢的机器上绿，成了机器速度的函数（与它要防的那类判据同病）。
+    os.utime(tmp_path / ".tmp_probe.py", (1_700_000_000, 1_700_000_000))
+    os.utime(tmp_path / ".tmp_visible_if_removed", (1_700_000_100, 1_700_000_100))
+    # 新→旧：时间戳更晚的那件排前面
     assert scratchEntries(tmp_path) == [".tmp_visible_if_removed", ".tmp_probe.py"], (
         "尺子把非 .tmp_* 的条目也算进来了，或没按新→旧排"
     )

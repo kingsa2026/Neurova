@@ -25,6 +25,8 @@ _TAURI_CONF = _REPO / "NeurUI" / "src-tauri" / "tauri.conf.json"
 _PKG = _REPO / "NeurUI" / "package.json"
 _NSI = _REPO / "NeurUI" / "src-tauri" / "nsis" / "installer.nsi"
 _LOCK = _REPO / "NeurUI" / "package-lock.json"
+_BUILD_VERSION_TXT = (_REPO / "NeurUI" / "src-tauri" / "installer-wpf"
+                      / "bin" / "version.txt")
 
 # 形如 v1.0.0 / 1.0.0-beta5 的版本字面量
 _VERSION_LITERAL = re.compile(r'v?1\.0\.0(?:-[\w.]+)?')
@@ -90,4 +92,21 @@ def testNsiTemplateKeepsVersionPlaceholder():
     ]
     assert hardcoded == [], (
         "NSIS 模板写死了版本字面量：\n" + "\n".join(hardcoded)
+    )
+
+
+def testBuildOutputVersionCopyFollowsProductVersion():
+    """构建输出副本 `installer-wpf/bin/version.txt` 必须跟上事实源。
+
+    实测断裂（2026-11-07，PR #374）：`98b0fa42` 把 `tauri.conf.json` 升到
+    `1.0.0-beta9`，这份**被跟踪的**构建输出副本停在 beta8，没有任何红。
+    它是 `build.cmd` 每次构建从事实源重写的那份，本地不重打包就一直留旧值；
+    装上后欢迎页读到的版本于是与产品版本差一版，与本档开头那类「只写不读的
+    字面量」同一形态。前三态（tauri.conf / package.json / lock）无一覆盖它。
+    """
+    copy_version = _BUILD_VERSION_TXT.read_text(encoding="utf-8").strip()
+    product_version = _product_version()
+    assert copy_version == product_version, (
+        "构建输出副本与版本事实源分叉（升版时漏跟这份副本）："
+        f"tauri.conf.json={product_version} / bin/version.txt={copy_version}"
     )

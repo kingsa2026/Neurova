@@ -70,10 +70,36 @@ def _git(*args: str) -> str:
                           timeout=GIT_WALL_S).stdout
 
 
-def isCommit(token: str) -> bool:
+def _objectType(token: str) -> str:
+    """对象类型（`commit` / `tree` / `blob` / **空串＝本克隆没有这个对象**）。
+
+    「不存在」与「存在但不是 commit」必须分开：前者是**克隆之间不可核验**的事实
+    （并发重写带出历史的笔，对象只剩在写它的那台机器的 `.git` 里），后者才是
+    「这个号压根不是提交」。并成一态时，干净克隆（CI）会把例外清单的每一行读成
+    署名过期——构建 `cnb-srf-1k6qu7mv5#003` 的唯一红就是这么来的。
+    """
     if token not in _objectTypeCache:
         _objectTypeCache[token] = _git("cat-file", "-t", token).strip()
-    return _objectTypeCache[token] == "commit"
+    return _objectTypeCache[token]
+
+
+def isCommit(token: str) -> bool:
+    """谓词取自 `_objectType()`：对象类型的取数只有一处（教义第 6 条）。"""
+    return _objectType(token) == "commit"
+
+
+def signatureExpired(token: str) -> bool:
+    """例外清单里的署名行是否**已经不再成立**（须删）——三态各有归属。
+
+    - 本克隆没有这个对象 ⇒ **不算过期**。它正是清单要挡的那一态；判它过期，
+      红绿就成了本机 `.git` gc 状态的函数。
+    - 对象在、但不是 commit（树号/blob/色值残片）⇒ 过期，该号压根不是提交引用。
+    - 对象在且是 commit ⇒ 只看可达性：回到主线即过期（署名已失去对象）。
+    """
+    kind = _objectType(token)
+    if not kind:
+        return False
+    return kind != "commit" or isReachable(token)
 
 
 #: 一次性取数缓存（§6-495）。旧形态是**逐号**起 `git merge-base --is-ancestor`——扫描面里
@@ -292,9 +318,16 @@ def main(argv=None) -> int:
                     print("    失效 %s%s" % (bad, "  → 可回写为 " + repl if repl
                                              else "  （无可安全回写的替代号）"))
 
-    # 例外清单的第二个方向：署过名不等于永远成立。号若已回到主线（或被 gc 到连对象都不剩，
-    # 不再是一枚 commit），这一行就是过期署名——留着它，下次真有号失联也没人能看出来。
-    retired = sorted(t for t in signed if not (isCommit(t) and not isReachable(t)))
+    # 例外清单的第二个方向：署过名不等于永远成立。号若已回到主线、或压根不是 commit，
+    # 这一行就是过期署名——留着它，下次真有号失联也没人能看出来。
+    # ⚠ 三态口径见 `signatureExpired()`：「本克隆连对象都没有」不在此列。例外清单署名的号
+    # 本就是被并发重写带走的对象，CI 检出的是**远端当前历史**——那批对象在远端早已被 gc。
+    # 旧写法把这种"取不到"判成"过期"，于是同一条清单本机（对象还在 .git 里）绿、CI 红，
+    # 而 CI 给的修法是"把这行删了"——那是拿抹掉证据换绿（教义第 2 条）。
+    retired = sorted(t for t in signed if signatureExpired(t))
+    # 第三态如实报出来，不许静默：这些行在本克隆无法核验（对象不在），换一台留着载体的
+    # 机器才可能复算。报出来是为了让"清单还剩几行"与"其中几行今天真核不了"分得开。
+    unverifiable = sorted(t for t in signed if not _objectType(t))
     if args.porcelain:
         for row in staleRows:
             print("|".join(row))
@@ -303,6 +336,9 @@ def main(argv=None) -> int:
     if retired:
         print("例外清单里有 %d 行已不成立（号已可达或已不是 commit），该行须删除：%s"
               % (len(retired), " ".join(retired)), file=sys.stderr)
+    if unverifiable:
+        print("例外清单里另有 %d 行在本克隆不可核验（对象不在，含并发重写撤账的笔）：%s"
+              % (len(unverifiable), " ".join(unverifiable)), file=sys.stderr)
     if staleRows or retired:
         print("失效引用 %d 条 / 共 %d 条引用（扫描面 %s，例外清单署名 %d 条）"
               % (len(staleRows), totalRefs, " + ".join(SCAN_DIRS), len(signed)),
