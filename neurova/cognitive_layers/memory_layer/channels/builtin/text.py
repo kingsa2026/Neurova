@@ -27,7 +27,7 @@ class TextChannel(BaseChannel):
             return []
 
         try:
-            all_memories = memory_manager.get_all_memories()
+            all_memories = memory_manager.get_all_memories(scoped=True)
             query_lower = query.lower()
             query_words = set(query_lower.split())
             scored = []

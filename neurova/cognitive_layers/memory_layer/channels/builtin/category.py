@@ -27,7 +27,7 @@ class CategoryChannel(BaseChannel):
             return []
 
         try:
-            all_memories = memory_manager.get_all_memories()
+            all_memories = memory_manager.get_all_memories(scoped=True)
             scored = []
 
             for mem in all_memories:

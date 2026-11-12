@@ -258,7 +258,9 @@ class MockMemoryManager:
     def __init__(self):
         self._memories = {}
 
-    def get_all_memories(self):
+    def get_all_memories(self, scoped: bool = False):
+        # scoped 形参随 P1-10 对齐（真实管理器按请求作用域过滤）；
+        # 本 mock 只服务通道排序/过滤行为测试，隔离判据在 test_recall_scope_isolation。
         return list(self._memories.values())
 
 

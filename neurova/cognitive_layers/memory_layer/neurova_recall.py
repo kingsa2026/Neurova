@@ -1228,7 +1228,7 @@ class NeurovaRecallEngine:
             from neurova.cognitive_layers.memory_layer.semantic_search import get_semantic_search
             
             search = get_semantic_search()
-            all_memories = self.memory_manager.get_all_memories()
+            all_memories = self.memory_manager.get_all_memories(scoped=True)
             
             # 构建关键词索引
             memory_dicts = [m.to_dict() if hasattr(m, 'to_dict') else m for m in all_memories]
@@ -1283,7 +1283,7 @@ class NeurovaRecallEngine:
             category = self._infer_category(query)
             
             # 获取同类别记忆
-            all_memories = self.memory_manager.get_all_memories()
+            all_memories = self.memory_manager.get_all_memories(scoped=True)
             
             for mem in all_memories:
                 mem_category = mem.get("category", "")
@@ -1510,7 +1510,7 @@ class NeurovaRecallEngine:
 
         try:
             # 搜索语音转写记忆
-            all_memories = self.memory_manager.get_all_memories()
+            all_memories = self.memory_manager.get_all_memories(scoped=True)
             voice_memories = []
 
             for mem_dict in all_memories:
@@ -1844,7 +1844,7 @@ class NeurovaRecallEngine:
                     seed_categories.add(category)
             
             # 查找不同类别的记忆
-            all_memories = self.memory_manager.get_all_memories()
+            all_memories = self.memory_manager.get_all_memories(scoped=True)
             for mem in all_memories:
                 mem_category = mem.get("category", "")
                 mem_id = mem.get("id", "")
@@ -1883,7 +1883,7 @@ class NeurovaRecallEngine:
             seed_ids = {m.memory_id for m in seed_memories}
             
             # 查找与种子记忆有共同关键词的记忆
-            all_memories = self.memory_manager.get_all_memories()
+            all_memories = self.memory_manager.get_all_memories(scoped=True)
             
             for mem in all_memories:
                 mem_id = mem.get("id", "")
@@ -1934,7 +1934,7 @@ class NeurovaRecallEngine:
             seed1_words = set(seed1.content.split())
             seed2_words = set(seed2.content.split())
             
-            all_memories = self.memory_manager.get_all_memories()
+            all_memories = self.memory_manager.get_all_memories(scoped=True)
             seed_ids = {m.memory_id for m in seed_memories}
             
             for mem in all_memories:
@@ -1977,7 +1977,7 @@ class NeurovaRecallEngine:
             # 查找包含否定词或对比词的记忆
             contrast_keywords = ["不", "没有", "但是", "然而", "相反", "对比", "差异"]
             
-            all_memories = self.memory_manager.get_all_memories()
+            all_memories = self.memory_manager.get_all_memories(scoped=True)
             seed_ids = {m.memory_id for m in seed_memories}
             
             for mem in all_memories:
@@ -2018,7 +2018,7 @@ class NeurovaRecallEngine:
             # 查找包含验证关键词的记忆
             validate_keywords = ["验证", "确认", "测试", "检查", "证明", "证据"]
             
-            all_memories = self.memory_manager.get_all_memories()
+            all_memories = self.memory_manager.get_all_memories(scoped=True)
             seed_ids = {m.memory_id for m in seed_memories}
             
             for mem in all_memories:

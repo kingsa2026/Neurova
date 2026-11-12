@@ -27,7 +27,7 @@ class VoiceChannel(BaseChannel):
             return []
 
         try:
-            all_memories = memory_manager.get_all_memories()
+            all_memories = memory_manager.get_all_memories(scoped=True)
             voice_memories = []
 
             for mem in all_memories:

@@ -2873,10 +2873,25 @@ class MemoryManager:
 
                 release_short_connection(conn)
 
-    def get_all_memories(self) -> List[Dict[str, Any]]:
-        """获取所有记忆（用于睡眠整合）"""
+    def get_all_memories(self, scoped: bool = False) -> List[Dict[str, Any]]:
+        """获取记忆列表。
+
+        Args:
+            scoped: True＝**请求面**（召回通道等），按当前请求作用域过滤——
+                只回第 2/3 层（neuser/user）与生效作用域一致的行（P1-10 票 A；
+                跨人串忆的堵点就在这里）；False＝**系统面**（睡眠整合、关机
+                持久化、MoE 建索引等后台任务），全量，不受请求作用域约束。
+        """
         with self._lock:
-            return [m.to_dict() for m in self._memories.values()]
+            if not scoped:
+                return [m.to_dict() for m in self._memories.values()]
+            neuser, user = self._eff_neuser_id(), self._eff_user_id()
+            return [
+                m.to_dict()
+                for m in self._memories.values()
+                if getattr(m, "neuser_id", None) == neuser
+                and getattr(m, "user_id", None) == user
+            ]
 
     def get_average_temperature(self) -> float:
         """获取全库平均记忆温度（供睡眠阶段判定等使用；空库返回 0.0）"""
