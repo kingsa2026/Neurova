@@ -198,13 +198,16 @@ class TestMigrationVersions:
         # v45：动作语义三列（specs/2026-11-12 W4）。
         # v46：推演台账（specs/2026-11-12 W5）——ontology_simulations 只追加。
         # v47：决策台账（specs/2026-11-12 W7，D7）——ontology_decisions＋links。
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 47
+        # v48：GraphRAG 工艺（specs/2026-11-12 W8）——chunk_strategies＋communities
+        #      ＋术语行 conflict_policy 列。
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 48
         assert {'knowledge_mcp_sources', 'knowledge_alias_candidates',
                 'ontology_relation_candidates', 'ontology_shapes',
                 'ontology_change_log', 'enterprise_source_configs',
                 'knowledge_fts_docs', 'knowledge_fts', 'knowledge_categories',
                 'ontology_actions', 'ontology_functions', 'ontology_state_machines', 'ontology_simulations',
-                'ontology_decisions', 'ontology_decision_links'} <= names
+                'ontology_decisions', 'ontology_decision_links',
+                'ontology_chunk_strategies', 'ontology_communities'} <= names
         # v28 存量行零漂移：缺省必须是旧语义 relay（head 客体常量空＝不搬移客体）
         rule_columns = {
             r[1]: (r[2], r[4]) for r in store._conn.execute(

@@ -1093,6 +1093,7 @@ conflictTimeReadout: 'قراءة الوقت: {basis} (القديم {old} → ا�
     ingressStatusDead: 'ميت',
     ingressStatusCancelled: 'ملغى',
     previewBtn: 'معاينة التقسيم (كالاستيراد)',
+    chunkStrategyPlaceholder: "استراتيجية التقسيم (الافتراضي = التقسيم الهيكلي الحالي)",
     previewResult: 'مقاطع {children} · أصول {parents} (عرض {maxChars})',
     previewEmpty: 'أدخل نصًا للمعاينة أولاً',
     chunksBtn: 'المقاطع',

@@ -1093,6 +1093,7 @@ conflictTimeReadout: 'Lecture temporelle : {basis} (ancienne {old} → nouvelle 
     ingressStatusDead: 'Mort',
     ingressStatusCancelled: 'Annulé',
     previewBtn: 'Aperçu du découpage (comme import)',
+    chunkStrategyPlaceholder: "Stratégie de découpage (par défaut = découpage structurel existant)",
     previewResult: '{children} segments · {parents} parents (largeur {maxChars})',
     previewEmpty: "Saisissez du contenu avant l'aperçu",
     chunksBtn: 'Segments',

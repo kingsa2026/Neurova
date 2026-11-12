@@ -1093,6 +1093,7 @@ conflictTimeReadout: '時刻の読み取り: {basis}（旧 {old} → 新 {new}�
     ingressStatusDead: 'デッド',
     ingressStatusCancelled: 'キャンセル済み',
     previewBtn: '分割プレビュー（取込と同じ）',
+    chunkStrategyPlaceholder: "チャンキング戦略（既定＝既存の構造認識チャンキング）",
     previewResult: 'チャンク {children}・親 {parents}（幅 {maxChars}）',
     previewEmpty: '事前に入力するとプレビューできます',
     chunksBtn: 'チャンク',

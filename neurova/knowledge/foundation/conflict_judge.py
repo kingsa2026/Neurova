@@ -106,6 +106,16 @@ class KnowledgeConflictJudge:
         阶梯顺序刻意如此：confidence 自 009 起是断言聚合出来的**派生值**，
         再拿它排在原始支持数之前就是循环论证，故排在 credibility_weighted 之后。
         """
+        # W8 冲突策略数据化（specs/2026-11-12 §9）：谓词行声明了 conflict_policy
+        # （v48 列）时按声明直接裁决——四策略闭集，声明缺省走既有阶梯（零漂移）。
+        declared = ""
+        if self._registry is not None and members:
+            term = None
+            try:
+                term = self._registry.term(members[0].get("predicate_term_id") or "")
+            except Exception:  # noqa: BLE001 - 注册表故障回退阶梯
+                term = None
+            declared = str((term or {}).get("conflict_policy") or "").strip()
         blind = [m for m in members if m.get("evidence_state") != "evidenced"]
         if blind:
             names = ", ".join(
@@ -124,7 +134,22 @@ class KnowledgeConflictJudge:
                 return source, "source_modified_at"
             return str(member.get("recorded_at") or ""), "recorded_at"
 
+        if declared == "manual":
+            return {"policy": "manual", "winner": None,
+                    "basis": "谓词声明 manual（W8 conflict_policy 数据化）"}
         ordered = sorted(members, key=lambda m: (_recencyClock(m)[0], m["fact_id"]))
+        if declared == "most_recent":
+            winner = ordered[-1]
+            return {"policy": "most_recent", "winner": winner["fact_id"],
+                    "basis": "谓词声明 most_recent（W8 conflict_policy 数据化）"}
+        if declared == "credibility_weighted":
+            best = max(members, key=lambda m: float(m.get("credibility") or 0.0))
+            return {"policy": "credibility_weighted", "winner": best["fact_id"],
+                    "basis": "谓词声明 credibility_weighted（W8 conflict_policy 数据化）"}
+        if declared == "highest_confidence":
+            best = max(members, key=lambda m: float(m.get("confidence") or 0.0))
+            return {"policy": "highest_confidence", "winner": best["fact_id"],
+                    "basis": "谓词声明 highest_confidence（W8 conflict_policy 数据化）"}
         if len({_recencyClock(m)[0] for m in ordered}) > 1:
             winner = ordered[-1]
             winnerClockName = _recencyClock(winner)[1]

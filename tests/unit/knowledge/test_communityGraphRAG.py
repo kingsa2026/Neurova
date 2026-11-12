@@ -1,0 +1,91 @@
+# -*- coding: utf-8 -*-
+"""W8 社区检测与 global/drift 检索（specs/2026-11-12 §9）：标签传播（stdlib 纯
+Python）在既有图上迭代至稳定；层级＝对社区代表点图再检测；global/drift 命中断言；
+摘要生成经注入的摘要器（LLM 客户端惰性复用，缺省摘要空＝诚实形态）。
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from neurova.knowledge.community_graph import (
+    CommunityGraphBuilder,
+    communityGlobalSearch,
+    communityDriftSearch,
+)
+
+
+def _buildGraph(store):
+    """小图：两簇（A1-A2-A3 互连；B1-B2-B3 互连），簇间仅 A1-B1 一条弱边。"""
+    from neurova.knowledge.foundation.admission import (
+        AdmissionRequest,
+        productionAdmissionGate,
+    )
+    from neurova.knowledge.ontology.term_registry import OntologyTermRegistry
+
+    registry = OntologyTermRegistry(store)
+    registry.register("cluster_a", "concept")
+    registry.register("cluster_b", "concept")
+    gate = productionAdmissionGate(store)
+    # 簇内每对两条事实（加权标签传播的强簇），簇间仅一条弱链
+    edges = [("A1", "A2"), ("A1", "A2"), ("A2", "A3"), ("A2", "A3"),
+             ("A3", "A1"), ("A3", "A1"),
+             ("B1", "B2"), ("B1", "B2"), ("B2", "B3"), ("B2", "B3"),
+             ("B3", "B1"), ("B3", "B1"),
+             ("A1", "B1")]
+    for src, dst in edges:
+        content = "%s linked %s" % (src, dst)
+        gate.admit(AdmissionRequest(
+            agentId="default", subjectLabel=src, predicateTermId="linked",
+            objectTerm=dst, content=content,
+            assertions=[{"actorType": "pipeline", "actorId": "unit",
+                         "mediumRef": "unit:test", "statementText": content}]))
+    return registry
+
+
+@pytest.fixture
+def kb(tmp_path):
+    from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
+
+    s = KnowledgeFactStore(str(tmp_path / "kb.db"))
+    yield s
+    s.close()
+
+
+class TestLabelPropagation:
+    def test_twoClustersDetected(self, kb):
+        _buildGraph(kb)
+        builder = CommunityGraphBuilder(kb, agentId="default", tenantId="default")
+        communities = builder.detect()
+        assert len(communities) >= 2, "两簇应被分开"
+        members = {frozenset(c["member_labels"]) for c in communities}
+        assert any({"A1", "A2", "A3"} <= m for m in members), "A 簇完整"
+        assert any({"B1", "B2", "B3"} <= m for m in members), "B 簇完整"
+
+    def test_persistsAndReloads(self, kb):
+        _buildGraph(kb)
+        builder = CommunityGraphBuilder(kb, agentId="default", tenantId="default")
+        communities = builder.detect(summarizer=lambda labels: "摘要:" + ",".join(labels))
+        assert communities[0]["summary_text"].startswith("摘要"), "注入摘要器生成摘要"
+        # 重载读数（v48 表）
+        again = CommunityGraphBuilder(kb, agentId="default", tenantId="default")
+        loaded = again.loadCommunities()
+        assert len(loaded) == len(communities), "社区读数持久化"
+
+
+class TestCommunitySearch:
+    def test_globalSearchHitsSummary(self, kb):
+        _buildGraph(kb)
+        builder = CommunityGraphBuilder(kb, agentId="default", tenantId="default")
+        builder.detect(summarizer=lambda labels: "维护手册 齿轮箱 " + ",".join(labels))
+        hits = communityGlobalSearch(kb, "齿轮箱 维护", agentId="default",
+                                     tenantId="default")
+        assert hits, "global：查询→社区摘要 map 命中"
+
+    def test_driftSearchFollowsNeighborhood(self, kb):
+        _buildGraph(kb)
+        builder = CommunityGraphBuilder(kb, agentId="default", tenantId="default")
+        builder.detect()
+        hits = communityDriftSearch(kb, "A1", agentId="default", tenantId="default")
+        assert hits, "drift：实体邻域＋所属社区摘要"
+        assert any("A" in str(h.get("labels")) for h in hits)

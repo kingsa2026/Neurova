@@ -319,6 +319,35 @@ def _resolveAgentForActions(agentId: str) -> Optional[Dict[str, Any]]:
 
 
 @_SERVER.tool()
+async def ontology_community_search(
+    ctx: Context,
+    query: str,
+    mode: str = "global",
+    limit: int = 5,
+) -> dict:
+    """社区检索（W8）：mode=global（查询→社区摘要 map 命中）或 drift
+    （实体邻域＋所属社区摘要）。既有四路 RRF 缺省行为逐字不变——两模式是
+    独立只读检索面。"""
+    from neurova.knowledge.community_graph import (
+        communityDriftSearch,
+        communityGlobalSearch,
+    )
+
+    user = _currentUserFromContext(ctx)
+    agentId = _agentIdOf(user, None)
+    tenant = _tenantOf(user)
+    if mode == "global":
+        hits = communityGlobalSearch(_store(), query, agentId=agentId,
+                                     tenantId=tenant, limit=limit)
+    elif mode == "drift":
+        hits = communityDriftSearch(_store(), query, agentId=agentId,
+                                    tenantId=tenant, limit=limit)
+    else:
+        return {"rejected": True, "detail": "mode %r 只支持 global|drift" % mode}
+    return {"mode": mode, "hits": hits, "count": len(hits)}
+
+
+@_SERVER.tool()
 async def ontology_decision_record(
     ctx: Context,
     category: str,

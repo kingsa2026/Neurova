@@ -569,6 +569,65 @@ async def run_ontology_simulation(
     return {"code": 0, "data": report, "request_id": ""}
 
 
+@router.get("/ontology/chunk-strategies")
+async def list_chunk_strategies(
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """W8：切块策略清单（登录可读，preview 选择器的服务端名册）。"""
+    from neurova.knowledge.chunk_dispatch import ChunkStrategyRegistry
+
+    store, _registry, _engine = _ontologyParts()
+    rows = ChunkStrategyRegistry(store).list(tenantId=_tenantOf(current_user))
+    return {"code": 0, "data": rows, "request_id": ""}
+
+
+@router.post("/ontology/chunk-strategies")
+async def create_chunk_strategy(
+    body: Dict[str, Any],
+    admin: Dict = Depends(require_admin()),
+):
+    """W8：登记切块策略（仅管理员，十三 kind 闭集；非法参数 400）。"""
+    from neurova.knowledge.chunk_dispatch import ChunkStrategyRegistry
+
+    store, _registry, _engine = _ontologyParts()
+    try:
+        row = ChunkStrategyRegistry(store).register(
+            strategyId=str(body.get("strategy_id") or ""),
+            tenantId=_tenantOf(admin), kind=str(body.get("kind") or ""),
+            params=body.get("params") or {},
+            enabled=bool(body.get("enabled", True)))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"code": 0, "data": row, "request_id": ""}
+
+
+@router.delete("/ontology/chunk-strategies/{strategy_id}")
+async def delete_chunk_strategy(
+    strategy_id: str = Path(...),
+    admin: Dict = Depends(require_admin()),
+):
+    """W8：删切块策略（仅管理员）。"""
+    from neurova.knowledge.chunk_dispatch import ChunkStrategyRegistry
+
+    store, _registry, _engine = _ontologyParts()
+    if not ChunkStrategyRegistry(store).delete(strategy_id, tenantId=_tenantOf(admin)):
+        raise HTTPException(status_code=404, detail=f"策略未登记: {strategy_id}")
+    return {"code": 0, "data": {"strategy_id": strategy_id}, "request_id": ""}
+
+
+@router.get("/ontology/communities")
+async def list_ontology_communities(
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """W8：社区读数（登录可读；检测手动触发/摄取后增量，缺省 off）。"""
+    from neurova.knowledge.community_graph import CommunityGraphBuilder
+
+    store, _registry, _engine = _ontologyParts()
+    rows = CommunityGraphBuilder(store, agentId=str(current_user.get("agent_id") or "default"),
+                                 tenantId=_tenantOf(current_user)).loadCommunities()
+    return {"code": 0, "data": rows, "request_id": ""}
+
+
 @router.get("/ontology/simulations")
 async def list_ontology_simulations(
     limit: int = Query(default=50, le=200),
