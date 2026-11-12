@@ -46,7 +46,14 @@ class FakeBudgetService:
             },
         )()
         self.manager = type(
-            "Manager", (), {"_budgets": {}, "_alert_configs": [alert_config]}
+            "Manager",
+            (),
+            {
+                "_budgets": {},
+                "_alert_configs": [alert_config],
+                # P2-8：/alerts 改读真实告警历史，替身同步提供该读法
+                "get_alert_history": lambda self, limit=100: [],
+            },
         )()
 
     def get_agent_budget_status(self, agent_id):

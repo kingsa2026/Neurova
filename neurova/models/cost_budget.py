@@ -13,8 +13,9 @@ Components:
 from dataclasses import dataclass, field
 from decimal import Decimal, ROUND_HALF_UP
 from enum import Enum
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from datetime import datetime, timedelta
+from collections import deque
 import threading
 
 from neurova.core.lazy_singleton import lazySingleton
@@ -161,6 +162,8 @@ class BudgetManager:
         self._alert_configs: List[AlertConfig] = DEFAULT_ALERT_THRESHOLDS.copy()
         self._usage_cache: Dict[str, Decimal] = {}
         self._last_alerted: Dict[str, Dict[AlertLevel, datetime]] = {}
+        # P2-8（全库断点审计 2026-11-12）：告警历史（有界）——/alerts 的真数据源
+        self._alert_history: deque = deque(maxlen=200)
         
     def register_budget(self, config: BudgetConfig):
         """Register a new budget"""
@@ -266,11 +269,24 @@ class BudgetManager:
                         self._send_alert(alert_config, scope, identifier, percentage)
                         self._last_alerted[key][alert_config.level] = datetime.now()
 
-    def _send_alert(self, config: AlertConfig, scope: BudgetScope, 
+    def _send_alert(self, config: AlertConfig, scope: BudgetScope,
                    identifier: str, percentage: Decimal):
         """Send alert through configured channels"""
         message = config.message_template.format(percentage=percentage)
-        
+
+        # P2-8：告警落历史（有界）——/alerts 的真数据源（原实现触发后即丢，
+        # /alerts 恒空占位）
+        self._alert_history.append(
+            {
+                "timestamp": datetime.now().isoformat(),
+                "level": config.level.value if hasattr(config.level, "value") else str(config.level),
+                "scope": scope.value if hasattr(scope, "value") else str(scope),
+                "identifier": identifier,
+                "percentage": float(percentage),
+                "message": message,
+            }
+        )
+
         for channel in config.channels:
             try:
                 if channel == AlertChannel.LOG:
@@ -308,6 +324,12 @@ class BudgetManager:
         # TODO: Implement email notification
         pass
         
+    def get_alert_history(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """最近触发的告警（新→旧）——P2-8 实装：/alerts 的真数据源。"""
+        with self._lock:
+            history = list(self._alert_history)
+        return list(reversed(history))[: max(0, int(limit))]
+
     def is_over_budget(self, scope: BudgetScope, identifier: str) -> bool:
         """Check if budget is exceeded"""
         with self._lock:
