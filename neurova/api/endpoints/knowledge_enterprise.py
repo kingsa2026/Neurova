@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user_or_service

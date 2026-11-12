@@ -124,6 +124,23 @@ def _probeShapeValidation() -> str:
     return "implemented" if hits == 2 else ("partial" if hits else "planned")
 
 
+def _probeIngestBreadth() -> str:
+    """CQ-23：湖仓/推送摄取（specs/2026-11-12 W10）——三连接器/http_pull/webhook。"""
+    from neurova.knowledge.enterprise import connectors_lakehouse, protocols, webhook_receiver
+    from neurova.knowledge.enterprise.registry import buildAdapter
+
+    hits = (
+        hasattr(connectors_lakehouse.UnityCatalogAdapter, "fetchBatch")
+        + hasattr(connectors_lakehouse.HttpPullAdapter, "fetchBatch")
+        + ("unity_catalog" in protocols.SOURCE_TYPES)
+        + (buildAdapter({"sourceType": "http_pull", "url": "https://x"},
+                        "probe", "default") is not None)
+        + hasattr(webhook_receiver.WebhookReceiver, "handle")
+        + ("enterprise_webhook_dedup" in (webhook_receiver._SCHEMA_V49_WEBHOOK_DEDUP or ""))
+    )
+    return "implemented" if hits == 6 else ("partial" if hits else "planned")
+
+
 def _probeInferenceBreadth() -> str:
     """CQ-21/22：推理广度（specs/2026-11-12 W9）——semi-naive/rete/SPARQL/溯因。"""
     from neurova.knowledge.ontology import abduction, rule_engine, sparql_query
@@ -360,6 +377,11 @@ CQ_TRACE_ROWS: tuple = (
         query="SPARQL/溯因（specs/2026-11-12 W9 落地：投影只读＋解释树）",
         testId="tests/unit/knowledge/ontology/test_sparqlReadOnly.py",
         probe=_probeInferenceBreadth),
+    CqTraceRow(
+        cqId="CQ-23", question="湖仓/HTTP 推送源能否进同一摄取管道？", actor="集成方", priority="P2",
+        query="摄取广度（specs/2026-11-12 W10 落地：三连接器＋http_pull 接线＋webhook 幂等）",
+        testId="tests/unit/knowledge/enterprise/test_lakehouseConnectors.py",
+        probe=_probeIngestBreadth),
     CqTraceRow(
         cqId="CQ-17", question="过去有没有同类场景的判例？", actor="审计员", priority="P2",
         query="判例检索（specs/2026-11-12 W7 落地：词法混合计分，嵌入偏差登记）",

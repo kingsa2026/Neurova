@@ -161,6 +161,30 @@
             />
           </a-form-item>
 
+          <!-- 湖仓/HTTP（W10）：base_url＋credentialEnv 指针＋kind 专属字段 -->
+          <template v-if="isLakehouseKind(wizardForm.kind)">
+            <a-form-item :label="t('ontology.entKindBaseUrl')" required>
+              <a-input v-model:value="wizardForm.base_url" data-testid="ent-base-url" />
+            </a-form-item>
+            <a-form-item :label="t('ontology.entKindCredentialEnv')">
+              <a-input v-model:value="wizardForm.credentialEnv" data-testid="ent-cred-env" />
+            </a-form-item>
+            <a-form-item v-if="wizardForm.kind === 'unity_catalog'" :label="t('ontology.entKindUnityTable')" required>
+              <a-input v-model:value="wizardForm.table" data-testid="ent-uc-table" />
+            </a-form-item>
+            <a-form-item v-if="wizardForm.kind === 'snowflake'" :label="t('ontology.entKindSfQuery')" required>
+              <a-input v-model:value="wizardForm.sf_query" data-testid="ent-sf-query" />
+            </a-form-item>
+            <a-form-item v-if="wizardForm.kind === 'snowflake'" :label="t('ontology.entKindSfWatermark')">
+              <a-input v-model:value="wizardForm.watermark_column" data-testid="ent-sf-watermark" />
+            </a-form-item>
+            <a-form-item v-if="wizardForm.kind === 'sap_odata'" :label="t('ontology.entKindSapEntitySet')" required>
+              <a-input v-model:value="wizardForm.entity_set" data-testid="ent-sap-entity" />
+            </a-form-item>
+            <a-form-item v-if="wizardForm.kind === 'http_pull'" :label="t('ontology.entKindHttpUrl')" required>
+              <a-input v-model:value="wizardForm.url" data-testid="ent-http-url" />
+            </a-form-item>
+          </template>
           <!-- 数据库（sql） -->
           <template v-if="wizardForm.kind === 'sql'">
             <a-row :gutter="12">
@@ -528,7 +552,7 @@ const removeSource = async (sourceId: string) => {
 
 // ── 向导（新增/编辑共用，四步） ──────────────────────────────
 
-type ConnectKind = 'sql' | 'erp' | 'wecom' | 'wechat' | 'file'
+type ConnectKind = 'sql' | 'erp' | 'wecom' | 'wechat' | 'file' | 'unity_catalog' | 'snowflake' | 'sap_odata' | 'http_pull'
 
 const KIND_CARDS: { kind: ConnectKind; labelKey: string; descKey: string }[] = [
   { kind: 'sql', labelKey: 'ontology.entTypeDatabase', descKey: 'ontology.entKindDatabaseDesc' },
@@ -536,6 +560,11 @@ const KIND_CARDS: { kind: ConnectKind; labelKey: string; descKey: string }[] = [
   { kind: 'wecom', labelKey: 'ontology.entTypeWecom', descKey: 'ontology.entKindWecomDesc' },
   { kind: 'wechat', labelKey: 'ontology.entTypeWechat', descKey: 'ontology.entKindWechatDesc' },
   { kind: 'file', labelKey: 'ontology.entTypeFile', descKey: 'ontology.entKindFileDesc' },
+  // W10（specs/2026-11-12 §11）：湖仓三连接器＋http_pull（REST 面，零新增依赖）
+  { kind: 'unity_catalog', labelKey: 'ontology.entTypeUnityCatalog', descKey: 'ontology.entKindUnityCatalogDesc' },
+  { kind: 'snowflake', labelKey: 'ontology.entTypeSnowflake', descKey: 'ontology.entKindSnowflakeDesc' },
+  { kind: 'sap_odata', labelKey: 'ontology.entTypeSapOdata', descKey: 'ontology.entKindSapOdataDesc' },
+  { kind: 'http_pull', labelKey: 'ontology.entTypeHttpPull', descKey: 'ontology.entKindHttpPullDesc' },
 ]
 
 const SQL_DRIVERS = ['postgresql', 'mysql', 'mssql', 'oracle', 'sqlite'].map((d) => ({ label: d, value: d }))
@@ -545,6 +574,9 @@ const OBJECT_KINDS = ['column', 'template', 'term', 'literal'].map((k) => ({
 }))
 
 const typeCardOf = (kind: string) => KIND_CARDS.find((c) => c.kind === kind) ?? KIND_CARDS[0]
+
+const LAKEHOUSE_KINDS: ConnectKind[] = ['unity_catalog', 'snowflake', 'sap_odata', 'http_pull']
+const isLakehouseKind = (kind: ConnectKind | '') => LAKEHOUSE_KINDS.includes(kind as ConnectKind)
 
 const showWizard = ref(false)
 const wizardStep = ref(0)
@@ -558,6 +590,11 @@ const emptyForm = () => ({
   kind: '' as ConnectKind | '',
   driver: 'postgresql',
   cursorColumn: '',
+  base_url: '',
+  sf_query: '',
+  watermark_column: '',
+  entity_set: '',
+  url: '',
   host: '',
   port: '',
   database: '',

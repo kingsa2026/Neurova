@@ -52,7 +52,20 @@ def buildAdapter(descriptor: Dict[str, Any], sourceId: str,
         return _requireVariant(descriptor, sourceId, tenantId, "chat",
                                "ChatChannelAdapter", "connectors_chat")
     if sourceType == "http_pull":
-        raise MappingError("http_pull 连接器属批 C3（立项方案 §3），本批未接线")
+        # W10（specs/2026-11-12 §11）：通用 HTTP 拉取接线——批 C3 欠账同批清
+        import importlib
+
+        module = importlib.import_module("neurova.knowledge.enterprise.connectors_lakehouse")
+        return module.HttpPullAdapter(descriptor, sourceId, tenantId)
+    if sourceType in ("unity_catalog", "snowflake", "sap_odata"):
+        # W10 湖仓三连接器（REST 面，零新增依赖）
+        import importlib
+
+        module = importlib.import_module("neurova.knowledge.enterprise.connectors_lakehouse")
+        adapterClass = {"unity_catalog": module.UnityCatalogAdapter,
+                        "snowflake": module.SnowflakeAdapter,
+                        "sap_odata": module.SapOdataAdapter}[sourceType]
+        return adapterClass(descriptor, sourceId, tenantId)
     if sourceType == "event_stream":
         raise MappingError("event_stream 连接器缓办（立项方案 §2.2 候选 6 原判有效）")
     raise MappingError("sourceType %r 不在白名单" % sourceType)
