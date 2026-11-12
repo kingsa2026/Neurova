@@ -528,17 +528,23 @@ class MCPToolClient:
         return await self.call_tool(server_id, tool_name, params, user_id=user_id)
 
     async def _check_firewall(self, tool_name: str, user_id: typing.Optional[str] = None) -> None:
-        """防火墙用户层校验（不可用时跳过，不伪造放行对象）
+        """防火墙用户层校验（基础设施不可用时跳过；显式拒绝真抛，不伪造放行）
 
         P0-3：user_id 为请求级身份，优先于 client 构造身份——多用户共享
         同一 client 连接，防火墙必须按发起请求的用户裁决。
+
+        §6-597（全库断点审计追记，拍板：实现真实许可模型）：原实现 import 的
+        `Firewall` 类在 core/firewall.py 不存在（实名 AgentFirewall/get_firewall），
+        ImportError 被吞 → 校验自 P0-3 起从未运行；且 AgentFirewall 上本无
+        check_permission。现改用 get_firewall() 单源单例 + 真实
+        check_permission（黑名单制，GlobalRuleSet/UserRuleSet.blocked_tools）。
         """
         effective_user = user_id or self._user_id
         if self._firewall is None:
             try:
-                from neurova.core.firewall import Firewall
+                from neurova.core.firewall import get_firewall
 
-                self._firewall = Firewall()
+                self._firewall = get_firewall()
             except ImportError:
                 logger.debug("Firewall not available, skipping MCP permission check")
                 return

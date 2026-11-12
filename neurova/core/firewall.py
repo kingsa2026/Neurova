@@ -86,6 +86,9 @@ class GlobalRuleSet:
             "127.0.0.1",
         ]
     )
+    #: 工具级黑名单（§6-597 拍板：实现真实许可模型）——全局封禁的工具名，
+    #: 对所有用户生效（封禁是安全面，不做角色豁免）。
+    blocked_tools: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -100,6 +103,9 @@ class GlobalRuleSet:
             "blocked_paths": self.blocked_paths,
             "sensitive_output_patterns": self.sensitive_output_patterns,
             "llm_trust_domains": self.llm_trust_domains,
+            # 工具级黑名单（§6-597 拍板：实现真实许可模型）——全局封禁的工具名，
+            # 对所有用户生效（封禁是安全面，不做角色豁免）。
+            "blocked_tools": self.blocked_tools,
         }
 
 
@@ -113,6 +119,8 @@ class UserRuleSet:
     blocked_ips: List[str] = field(default_factory=list)
     extra_blocked_paths: List[str] = field(default_factory=list)
     agent_isolation: bool = True  # Agent 间隔离
+    # 用户级工具黑名单（§6-597）：与全局 blocked_tools 取并集后裁决
+    blocked_tools: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -122,6 +130,7 @@ class UserRuleSet:
             "blocked_ips": self.blocked_ips,
             "extra_blocked_paths": self.extra_blocked_paths,
             "agent_isolation": self.agent_isolation,
+            "blocked_tools": self.blocked_tools,
         }
 
 
@@ -273,9 +282,22 @@ class AgentFirewall:
             effective["blocked_ips"] = list(set(effective["blocked_ips"] + user_rules.blocked_ips))
             # 路径黑名单合并
             effective["blocked_paths"] = list(set(effective["blocked_paths"] + user_rules.extra_blocked_paths))
+            # 工具黑名单合并（§6-597：全局∪用户，任一命中即拒）
+            effective["blocked_tools"] = list(set(effective["blocked_tools"] + user_rules.blocked_tools))
             effective["agent_isolation"] = user_rules.agent_isolation
 
         return effective
+
+    def check_permission(self, user_id: str, resource_type: str, name: str) -> bool:
+        """工具级许可裁决（§6-597 拍板：实现真实许可模型）。
+
+        语义＝黑名单制（与 UserRuleSet「只能加严不能放松」同向）：全局与用户级
+        `blocked_tools` 取并集，命中即拒，其余放行。`resource_type` 预留分型位
+        （当前唯一在用 "mcp_tool"）。MCP 侧调用方＝`mcp_client._check_firewall`。
+        """
+        effective = self.get_effective_rules(user_id or "default")
+        blocked = set(effective.get("blocked_tools") or [])
+        return name not in blocked
 
     def is_agent_isolated(self, user_id: str) -> bool:
         """检查用户是否启用了 Agent 隔离"""
