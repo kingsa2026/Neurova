@@ -19,11 +19,11 @@ from tests.ast_scan import parseSource
 REPO_ROOT = Path(__file__).resolve().parents[3]
 #: 扫描根提到模块级（`test_scanCriterionMustProveItsOwnSurfaceRatchet` 只认模块级常量解根）
 NEUROVA_ROOT = REPO_ROOT / "neurova"
-# 私有字段的合法读者：定义它自己的两个类所在文件（skill_packager 有自己的同名字段）。
-# 这两个数是本轮 AST 现量的（8／7），不是抄来的——只降不升，扩散即红。
+# 私有字段的合法读者：定义它自己的类所在文件。
+# （P1-13 退役：skill_packager.py 连同其 7 处直取已随本批删除，条目摘除。
+#   这个数是本轮 AST 现量的，不是抄来的——只降不升，扩散即红。）
 ALLOWED_OWNERS = {
     "neurova/skills/market_importer.py": 8,
-    "neurova/skills/skill_packager.py": 7,
 }
 
 

@@ -27,21 +27,6 @@ def test_get_spm_is_not_defined_in_skill_pool_api():
     )
 
 
-def test_skill_generator_is_not_dead_code():
-    """s5 守护测试: SkillGenerator 不是死代码, 测试套件仍在使用它.
-
-    防止后续误删 skill_generator.py (此前的 audit 报告将其标为
-    "孤立死模块（待确认）", 实际有 23 个测试通过).
-    """
-    from neurova.skills.skill_generator import SkillGenerator
-
-    # 静态契约: SkillGenerator 是 class 且可实例化
-    assert inspect.isclass(SkillGenerator), "SkillGenerator 必须是 class"
-    instance = SkillGenerator()
-    assert instance is not None, "SkillGenerator 必须可无参实例化"
-
-    # 行为契约: SkillGenerator 暴露 generate_skill 协程
-    assert hasattr(instance, "generate_skill"), "SkillGenerator 必须暴露 generate_skill"
-    assert inspect.iscoroutinefunction(instance.generate_skill), (
-        "generate_skill 必须是 async 方法"
-    )
+# P1-13（全库断点审计 2026-11-12，拍板：退役）：原 test_skill_generator_is_not_dead_code
+# 随 skill_generator.py 退役摘除——"测试套件仍在使用它"不构成生产在役判据
+# （测试代码不计入消费方），与教义第 7 条的口径一致。

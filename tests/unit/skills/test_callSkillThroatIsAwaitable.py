@@ -169,32 +169,13 @@ class TestThroatActuallyAwaitsTheSkill:
 class TestContractIsConsistentAtEveryHit:
     """教义第 5 条：同一条契约的**所有**读法一起改对，不能只修被报告的那一条链。"""
 
-    def testChainStepReadsTheDictContractNotAttributes(self):
-        """链那侧直接调 `_execute_step`：await 之后必须按 dict 取，不许再摸 `.output` 属性。
-
-        打的是行为而不是符号名——给链塞一个**真契约**（async 返回咽喉那份 dict）的 service，
-        直接调那条执行步骤，要求步骤读数落对。
-        """
-        from neurova.skills.skill_chain_executor import SkillChainExecutor
-
-        class _ThroatShapedService:
-            async def call_skill(self, skill_id, **kwargs):     # 与真咽喉同形同契约
-                return {"success": True, "result": {"from": skill_id}}
-
-        chain = SkillChainExecutor(skill_service=_ThroatShapedService())
-        step = _makeStep("s1", "demo-skill")
-
-        outcome = asyncio.run(chain._execute_step(step, {"a": 1}, {}))
-
-        assert outcome.output_data == {"from": "demo-skill"}, (
-            f"链步骤按属性读咽喉的 dict 契约（.output/.success/.error），实得 {outcome}——"
-            "await 改对了但读法没跟上")
-        assert (getattr(outcome, "error", "") or "") == "", outcome
+    # P1-13 退役：testChainStepReadsTheDictContractNotAttributes 随
+    # skill_chain_executor 退役摘除（链执行器零生产构造点，咽喉的 dict 契约
+    # 由 TestThroatActuallyAwaitsTheSkill 与映射测试继续覆盖）。
 
     def testBothProductionCallSitesAwaitInsteadOfInline(self):
-        """两处生产调用点都必须 `await`：在 running loop 里包一层 `asyncio.run` 会当场报错。"""
-        sites = [("neurova/api/endpoints/skill_pool_api.py", "execute_private_skill"),
-                 ("neurova/skills/skill_chain_executor.py", "_execute_step")]
+        """生产调用点都必须 `await`：在 running loop 里包一层 `asyncio.run` 会当场报错。"""
+        sites = [("neurova/api/endpoints/skill_pool_api.py", "execute_private_skill")]
         offenders = []
         for rel, _fn in sites:
             tree = parseSource(io.open(REPO / rel, encoding="utf-8").read(), filename=rel)
