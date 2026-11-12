@@ -19,17 +19,9 @@ export interface HomeTrends {
   plugin_trend: number
 }
 
-export interface HomeActivity {
-  icon: string
-  text: string
-  color: string
-  created_at: string
-}
-
 export interface HomeData {
   stats: HomeStats
   trends: HomeTrends
-  recent_activities: HomeActivity[]
 }
 
 export interface TrendDataPoint {

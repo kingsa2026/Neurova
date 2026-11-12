@@ -49,7 +49,8 @@ export interface ExperienceCreatePayload {
 export interface ExperienceStats {
   total_experiences: number
   success_rate: number
-  avg_proficiency: number
+  /** 平均熟练度；null＝样本不足未测量（后端口径，勿折叠成 0） */
+  avg_proficiency: number | null
   top_categories: { category: string; count: number }[]
 }
 
@@ -90,14 +91,14 @@ export function setExperienceDisposition(id: string, disposition: ExperienceDisp
   return api.put<ApiResponse<ExperienceRecord>>(`${BASE}/${id}/disposition`, { disposition })
 }
 
-/** Search for similar experiences. */
+/** Search for similar experiences. 后端信封是 {results, total}（P2-26 类型对齐）。 */
 export function searchSimilar(agentId: string, query: string, limit = 5) {
-  return api.post<ApiResponse<ExperienceRecord[]>>(`${BASE}/similar`, { agent_id: agentId, query, limit })
+  return api.post<ApiResponse<{ results: ExperienceRecord[]; total: number }>>(`${BASE}/similar`, { agent_id: agentId, query, limit })
 }
 
-/** Get experience recommendations for a task (uses /ranking as fallback). */
+/** Get experience recommendations for a task (uses /ranking as fallback). 后端分页参数是 size（limit 会被静默忽略）。 */
 export function getRecommendations(agentId: string, taskType: string, limit = 5) {
-  return api.get<ApiResponse<PaginatedData<ExperienceRecord>>>(`${BASE}/ranking`, { params: { agent_id: agentId, task_type: taskType, limit } })
+  return api.get<ApiResponse<PaginatedData<ExperienceRecord>>>(`${BASE}/ranking`, { params: { agent_id: agentId, task_type: taskType, size: limit } })
 }
 
 /** Get experience statistics for an agent. */
