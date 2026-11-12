@@ -19,3 +19,12 @@
 ## 处置建议
 
 补建（或从 git 历史找回）三层隔离执行面审计文档，按上面已证/待证清单继续票 A：先做 MoE 与 recall_flat 两路的 SQL 级核验（有过滤即闭票，无过滤则把 `manager.memoryScope()` 透传进两路取数），共享组可见性另票。
+
+## 票 A 实施结果（2026-11-12 续，用户拍板"现在开工"后）
+
+- **黑盒验收红**：`tests/unit/memory/test_recall_scope_isolation.py` 实测泄漏读路=['recall_flat']——用户 B 作用域经 recall_flat 召回用户 A 私有记忆；manager.recall / storage_engine.retrieve / unified_retriever.retrieve 三路实测不漏。
+- **修复一（`fix(memory)` 召回面）**：`get_all_memories` 增 scoped 形参（True=请求面按生效 (neuser,user) 过滤；False=系统面全量，睡眠整合/关机持久化等缺省不变）；六个内建召回通道与 neurova_recall 两处召回取数切 scoped=True。通道单测 Mock 签名对齐。
+- **修复二（`fix(memory)` MoE 支路）**：mem_core 的 MoE 索引 SELECT 补 neuser_id/user_id 身份列；MoEMemoryRouter 增 scope_resolver（装配接 memory_manager.memoryScope 单源），retrieve 在专家下钻后与向量兜底后各过一道 _scopeFilter，无身份标记的结果按拒绝处理（fail-closed）。
+- **验收**：隔离五格全过（B 不漏 A／本人不丢／缺省桶两用户行均不可见）；memory 全族 1212 passed（2 失败=crystallization_llm_gate 在册预存红）。
+- **share_group_ids（storage.py:378/395 只写不读）处置**：全仓无任何生产代码向 IsolationContext 填 share_group_ids（仅 isolation.py 自身 docstring 示例）——休眠特性，无数据带非空共享组，读侧忽略**当前无实际影响**。接线（共享组可见性）属新功能工程（需组员关系源＋可见性规则），按"待拍板"登记，不在本批盲做。
+- **票据文档缺失**：`docs/05-reports/三层隔离执行面审计_2026-09-24.md` 仓内与 git 全历史均不存在——本复核的黑盒验收即替代判据；后续如需 R1/R2/R3 原文，需从会话存档或原作者处找回。
