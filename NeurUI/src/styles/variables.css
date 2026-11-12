@@ -78,6 +78,13 @@
   --nr-warning: #f59e0b;
   --nr-error: #ef4444;
   --nr-info: #3b82f6;
+  /* 状态软底/软边（P2-31：组件层淡色底与描边统一走令牌） */
+  --nr-success-soft-bg: rgba(16, 185, 129, 0.12);
+  --nr-success-soft-border: rgba(16, 185, 129, 0.35);
+  --nr-warning-soft-bg: rgba(245, 158, 11, 0.12);
+  --nr-warning-soft-border: rgba(245, 158, 11, 0.35);
+  --nr-error-soft-bg: rgba(239, 68, 68, 0.12);
+  --nr-error-soft-border: rgba(239, 68, 68, 0.35);
 
   /* Borders & Shadows */
   --nr-border: rgba(255, 255, 255, 0.08);
@@ -168,6 +175,12 @@
   --nr-warning: #d97706;
   --nr-error: #dc2626;
   --nr-info: #2563eb;
+  --nr-success-soft-bg: rgba(5, 150, 105, 0.14);
+  --nr-success-soft-border: rgba(5, 150, 105, 0.35);
+  --nr-warning-soft-bg: rgba(217, 119, 6, 0.14);
+  --nr-warning-soft-border: rgba(217, 119, 6, 0.35);
+  --nr-error-soft-bg: rgba(220, 38, 38, 0.14);
+  --nr-error-soft-border: rgba(220, 38, 38, 0.35);
 
   /* Borders & Shadows（轻柔浅阴影） */
   --nr-border: rgba(31, 35, 41, 0.1);
@@ -237,6 +250,12 @@
   --nr-warning: #ff9f0a;
   --nr-error: #ff453a;
   --nr-info: #0a84ff;
+  --nr-success-soft-bg: rgba(48, 209, 88, 0.12);
+  --nr-success-soft-border: rgba(48, 209, 88, 0.35);
+  --nr-warning-soft-bg: rgba(255, 159, 10, 0.12);
+  --nr-warning-soft-border: rgba(255, 159, 10, 0.35);
+  --nr-error-soft-bg: rgba(255, 69, 58, 0.12);
+  --nr-error-soft-border: rgba(255, 69, 58, 0.35);
 
   /* Borders & Shadows */
   --nr-border: rgba(255, 255, 255, 0.12);
@@ -327,6 +346,12 @@
   --nr-warning: #ff9500;
   --nr-error: #ff3b30;
   --nr-info: #007aff;
+  --nr-success-soft-bg: rgba(52, 199, 89, 0.14);
+  --nr-success-soft-border: rgba(52, 199, 89, 0.35);
+  --nr-warning-soft-bg: rgba(255, 149, 0, 0.14);
+  --nr-warning-soft-border: rgba(255, 149, 0, 0.35);
+  --nr-error-soft-bg: rgba(255, 59, 48, 0.14);
+  --nr-error-soft-border: rgba(255, 59, 48, 0.35);
 
   /* Borders & Shadows */
   --nr-border: rgba(60, 60, 67, 0.18);

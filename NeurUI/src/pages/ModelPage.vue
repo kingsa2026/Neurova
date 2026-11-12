@@ -1610,7 +1610,7 @@ onBeforeUnmount(() => {
   font-weight: 700;
   padding: 0 4px;
   border-radius: 3px;
-  background: rgba(34, 197, 94, 0.15);
+  background: var(--nr-success-soft-bg);
   color: var(--nr-success);
   text-transform: uppercase;
 }
@@ -1743,7 +1743,7 @@ onBeforeUnmount(() => {
   letter-spacing: 0.02em;
 }
 .nr-pv-badge.local { background: rgba(139, 92, 246, 0.12); color: var(--nr-accent-secondary); }
-.nr-pv-badge.free { background: rgba(34, 197, 94, 0.1); color: var(--nr-success); }
+.nr-pv-badge.free { background: var(--nr-success-soft-bg); color: var(--nr-success); }
 .nr-pv-badge.paid { background: rgba(99, 102, 241, 0.1); color: var(--nr-primary-light); }
 
 .nr-pv-dot {
@@ -1865,7 +1865,7 @@ onBeforeUnmount(() => {
 .nr-action-btn.primary { background: var(--nr-primary); color: white; border-color: var(--nr-primary); }
 .nr-action-btn.primary:hover { opacity: 0.9; }
 .nr-action-btn.danger { color: var(--nr-error); border-color: var(--nr-error); }
-.nr-action-btn.danger:hover { background: rgba(239, 68, 68, 0.12); }
+.nr-action-btn.danger:hover { background: var(--nr-error-soft-bg); }
 
 /* Loading state */
 .nr-loading {
@@ -2038,7 +2038,7 @@ onBeforeUnmount(() => {
   height: 28px;
   border: none;
   border-radius: 6px;
-  background: rgba(239, 68, 68, 0.12);
+  background: var(--nr-error-soft-bg);
   color: var(--nr-error);
   cursor: pointer;
   font-size: 16px;
@@ -2148,7 +2148,7 @@ onBeforeUnmount(() => {
   font-weight: 600;
   padding: 1px 6px;
   border-radius: 4px;
-  background: rgba(34, 197, 94, 0.12);
+  background: var(--nr-success-soft-bg);
   color: var(--nr-success);
 }
 .nr-mgmt-id {
@@ -2184,8 +2184,8 @@ onBeforeUnmount(() => {
   border-radius: 4px;
 }
 .nr-mgmt-tag.user-added { background: rgba(59, 130, 246, 0.12); color: #3b82f6; }
-.nr-mgmt-tag.free { background: rgba(34, 197, 94, 0.1); color: var(--nr-success); }
-.nr-mgmt-tag.builtin { background: rgba(34, 197, 94, 0.1); color: var(--nr-success); }
+.nr-mgmt-tag.free { background: var(--nr-success-soft-bg); color: var(--nr-success); }
+.nr-mgmt-tag.builtin { background: var(--nr-success-soft-bg); color: var(--nr-success); }
 .nr-mgmt-actions {
   display: flex;
   gap: 4px;
@@ -2204,8 +2204,8 @@ onBeforeUnmount(() => {
   transition: background 0.15s;
 }
 .nr-mgmt-act:hover { background: rgba(255, 255, 255, 0.08); }
-.nr-mgmt-act.is-active { color: var(--nr-success); background: rgba(34, 197, 94, 0.08); }
-.nr-mgmt-act.danger:hover { background: rgba(239, 68, 68, 0.12); }
+.nr-mgmt-act.is-active { color: var(--nr-success); background: var(--nr-success-soft-bg); }
+.nr-mgmt-act.danger:hover { background: var(--nr-error-soft-bg); }
 
 /* Add model row */
 .nr-mgmt-add {
@@ -2416,21 +2416,21 @@ onBeforeUnmount(() => {
 }
 
 .nr-mm-item-result.result-success {
-  background: rgba(34, 197, 94, 0.1);
-  border: 1px solid rgba(34, 197, 94, 0.35);
+  background: var(--nr-success-soft-bg);
+  border: 1px solid var(--nr-success-soft-border);
   color: var(--nr-success);
 }
 
 .nr-mm-item-result.result-warning {
-  background: rgba(245, 158, 11, 0.1);
-  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: var(--nr-warning-soft-bg);
+  border: 1px solid var(--nr-warning-soft-border);
   color: #d97706;
 }
 
 .nr-mm-item-result.result-error {
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.35);
-  color: #ef4444;
+  background: var(--nr-error-soft-bg);
+  border: 1px solid var(--nr-error-soft-border);
+  color: var(--nr-error);
 }
 
 .nr-mm-result-text {
@@ -2560,8 +2560,8 @@ onBeforeUnmount(() => {
 }
 .nr-mm-tag-text { background: rgba(148, 163, 184, 0.08); border-color: rgba(148, 163, 184, 0.1); color: var(--nr-text-tertiary); }
 .nr-mm-tag-user { background: rgba(59, 130, 246, 0.1); border-color: rgba(59, 130, 246, 0.12); color: var(--nr-info); }
-.nr-mm-tag-free { background: rgba(34, 197, 94, 0.08); border-color: rgba(34, 197, 94, 0.1); color: var(--nr-success); }
-.nr-mm-tag-builtin { background: rgba(34, 197, 94, 0.08); border-color: rgba(34, 197, 94, 0.1); color: var(--nr-success); }
+.nr-mm-tag-free { background: var(--nr-success-soft-bg); border-color: var(--nr-success-soft-bg); color: var(--nr-success); }
+.nr-mm-tag-builtin { background: var(--nr-success-soft-bg); border-color: var(--nr-success-soft-bg); color: var(--nr-success); }
 
 .nr-mm-item-actions {
   display: flex;
@@ -2588,7 +2588,7 @@ onBeforeUnmount(() => {
   color: var(--nr-text-primary);
 }
 .nr-mm-icon-danger:hover {
-  background: rgba(239, 68, 68, 0.1);
+  background: var(--nr-error-soft-bg);
   border-color: rgba(239, 68, 68, 0.15);
   color: var(--nr-error);
 }
