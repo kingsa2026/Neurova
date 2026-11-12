@@ -1378,14 +1378,10 @@ class PostChatPipeline:
             # A-03: Agent 无 agent_id 实例属性（在 config.agent_id，与
             # :1463/:1588/:1973 兄弟调用点一致）——原写法恒为空串
             agent_id = str(getattr(self._agt.config, "agent_id", "") or "")
-            # B-5 契约注释：身份读取序与 tool_executor._agent_identity 一致——
-            # 先读 _current_user_id（请求级显式身份），再回退 public 别名，
-            # 防真值影子（如 MagicMock auto-attr）遮蔽显式身份
-            user_id = str(
-                getattr(self._agt, "_current_user_id", None)
-                or getattr(self._agt, "current_user_id", None)
-                or ""
-            )
+            # B-5 契约注释：身份读取与 tool_executor._agent_identity 一致——
+            # P2-22：_current_user_id 死读层已删（全仓无写入方，恒 None），
+            # 直接读 public 别名（turn_state 直读转发，§6-163 唯一身份通道）
+            user_id = str(getattr(self._agt, "current_user_id", None) or "")
             for tm in tool_msgs or []:
                 if not isinstance(tm, dict) or tm.get("type") != "tool_result":
                     continue
