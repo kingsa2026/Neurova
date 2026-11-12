@@ -155,3 +155,6 @@ rich>=13.0
 # PyMySQL>=1.1             # MySQL（sql.driver=mysql）
 # pymssql>=2.2             # MSSQL（sql.driver=mssql）
 # oracledb>=2.0            # Oracle（sql.driver=oracle）
+# rdflib>=7.0             # SPARQL 只读面（specs/2026-11-12 W9，D8 已裁可选生产
+#                          依赖——sparql_query.py 惰性 import＋fail-soft，未装时
+#                          端点显式 501 not_supported；DB 驱动同款豁免形态）

@@ -124,6 +124,22 @@ def _probeShapeValidation() -> str:
     return "implemented" if hits == 2 else ("partial" if hits else "planned")
 
 
+def _probeInferenceBreadth() -> str:
+    """CQ-21/22：推理广度（specs/2026-11-12 W9）——semi-naive/rete/SPARQL/溯因。"""
+    from neurova.knowledge.ontology import abduction, rule_engine, sparql_query
+    from neurova.mcp_ontology_server import ontology_abduce, ontology_sparql  # noqa: F401
+
+    hits = (
+        hasattr(rule_engine, "EVALUATION_STRATEGIES")
+        + ("rete" in rule_engine.EVALUATION_STRATEGIES)
+        + hasattr(sparql_query, "runSparqlQuery")
+        + hasattr(abduction, "explainGoal")
+        + (ontology_sparql is not None)
+        + (ontology_abduce is not None)
+    )
+    return "implemented" if hits == 6 else ("partial" if hits else "planned")
+
+
 def _probeGraphRag() -> str:
     """CQ-18/19/20：GraphRAG 工艺（specs/2026-11-12 W8）——策略注册/社区/消解。"""
     from neurova.knowledge import chunk_dispatch, community_graph, resolution
@@ -334,6 +350,16 @@ CQ_TRACE_ROWS: tuple = (
         query="消解补强（specs/2026-11-12 W8 落地：倒排桶 blocking＋近形守卫）",
         testId="tests/unit/knowledge/test_resolutionBlocking.py",
         probe=_probeGraphRag),
+    CqTraceRow(
+        cqId="CQ-21", question="递归推理在增量下结论还一致吗？", actor="知识管理员", priority="P2",
+        query="推理广度（specs/2026-11-12 W9 落地：semi-naive 增量＋rete 策略槽）",
+        testId="tests/unit/knowledge/ontology/test_semiNaiveEquivalence.py",
+        probe=_probeInferenceBreadth),
+    CqTraceRow(
+        cqId="CQ-22", question="能否用 SPARQL 查询/溯因解释一条事实？", actor="集成方", priority="P2",
+        query="SPARQL/溯因（specs/2026-11-12 W9 落地：投影只读＋解释树）",
+        testId="tests/unit/knowledge/ontology/test_sparqlReadOnly.py",
+        probe=_probeInferenceBreadth),
     CqTraceRow(
         cqId="CQ-17", question="过去有没有同类场景的判例？", actor="审计员", priority="P2",
         query="判例检索（specs/2026-11-12 W7 落地：词法混合计分，嵌入偏差登记）",

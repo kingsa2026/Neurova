@@ -70,6 +70,13 @@ def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
+#: 求值策略闭集（specs/2026-11-12 §10 W9，D9：策略是数据不是第二引擎）——
+#: full_replay＝既有全量重放（缺省，存量零漂移）；rete＝alpha 预筛（单原子
+#: 命中缓存过滤，同一规则表同一账本同一 fireFor 契约）。NEUROVA_RULE_EVALUATION_STRATEGY
+#: 翻 rete 须等价性＋性能判据（不达标不翻）。
+EVALUATION_STRATEGIES = ("full_replay", "rete")
+
+
 class RuleError(ValueError):
     pass
 
@@ -131,6 +138,11 @@ class ForwardChainingEngine:
     def __init__(self, store: Any, gateFactory: Any = None) -> None:
         self._store = store
         self._gateFactory = gateFactory
+        import os
+
+        raw = str(os.environ.get("NEUROVA_RULE_EVALUATION_STRATEGY")
+                  or "full_replay").strip().lower()
+        self._evaluationStrategy = raw if raw in EVALUATION_STRATEGIES else "full_replay"
         self._ensureTable()
 
     def _ensureTable(self) -> None:
@@ -500,23 +512,49 @@ class ForwardChainingEngine:
 
     # ── 求值 ──────────────────────────────────────────────────
 
+    @property
+    def evaluationStrategy(self) -> str:
+        return self._evaluationStrategy
+
+    def setEvaluationStrategy(self, strategy: str) -> None:
+        """切换求值策略（闭集校验；同规则表同账本同契约——结论集等价性由
+        test_semiNaiveEquivalence 钉住）。"""
+        strategy = str(strategy or "").strip().lower()
+        if strategy not in EVALUATION_STRATEGIES:
+            raise ValueError(
+                "求值策略 %r 不在闭集 %s" % (strategy, "/".join(EVALUATION_STRATEGIES)))
+        self._evaluationStrategy = strategy
+
     def fireAll(self, agentId: Optional[str] = None, maxIterations: int = 10,
                 tenantId: str = "default") -> Dict[str, Any]:
-        """按层号升序反复求值到不动点。返回每轮新增，0 新增即停。"""
+        """按层号升序反复求值到不动点。返回每轮新增，0 新增即停。
+
+        W9 semi-naive 增量：首轮全量，此后每轮只点燃 body 依赖谓词与上一轮
+        delta 相交的规则（deltaPredicates 过滤）——结论集与全量重放逐字一致
+        （等价性判据 test_semiNaiveEquivalence 钉住）。rete 策略＝alpha 单原子
+        命中预筛（每轮先查各原子谓词有无事实，零命中的规则跳过）。"""
         tenant = str(tenantId or "default")
         # B8：每轮求值前把术语表上的关系特征幂等对齐成 auto_* 规则（声明即推理）。
         self.ensureAutoRules(tenantId=tenant)
         rounds: List[int] = []
         derived: List[str] = []
+        deltaPredicates: Optional[set] = None  # None＝首轮全量
         for _ in range(max(int(maxIterations), 1)):
-            produced = self._oneRound(agentId, tenantId=tenant)
+            produced = self._oneRound(agentId, tenantId=tenant,
+                                      deltaPredicates=deltaPredicates)
             rounds.append(len(produced))
             if not produced:
                 break
             derived.extend(produced)
+            deltaPredicates = set(
+                self.predicateOf(factId) for factId in produced)
         return {"derived": derived, "rounds": rounds,
                 "iterations": len(rounds),
                 "rules": [r["rule_id"] for r in self.rules(tenantId=tenant)]}
+
+    def predicateOf(self, factId: str) -> str:
+        fact = self._store.fact(factId)
+        return str((fact or {}).get("predicate_term_id") or "")
 
     def fireFor(self, agentId: str, predicate: str,
                 tenantId: str = "default") -> List[str]:
@@ -530,12 +568,48 @@ class ForwardChainingEngine:
             produced.extend(self._fireRule(rule, agentId, tenantId=tenantId))
         return produced
 
-    def _oneRound(self, agentId: Optional[str], tenantId: str = "default") -> List[str]:
+    def _oneRound(self, agentId: Optional[str], tenantId: str = "default",
+                  deltaPredicates: Optional[set] = None) -> List[str]:
         produced: List[str] = []
-        for rule in sorted(self.rules(includeDisabled=False, tenantId=tenantId),
-                           key=lambda r: (r["stratification_level"], r["rule_id"])):
+        allRules = sorted(self.rules(includeDisabled=False, tenantId=tenantId),
+                          key=lambda r: (r["stratification_level"], r["rule_id"]))
+        for rule in allRules:
+            # semi-naive：非首轮只点燃 body 依赖谓词与 delta 相交的规则
+            if deltaPredicates is not None and not (
+                    set(rule["depends_on"]) & deltaPredicates):
+                continue
+            # rete：alpha 单原子命中预筛（零命中规则跳过——SQL 一次 COUNT）
+            if self._evaluationStrategy == "rete" and not self._alphaHasMatches(
+                    rule, agentId, tenantId):
+                continue
             produced.extend(self._fireRule(rule, agentId, tenantId=tenantId))
         return produced
+
+    def _alphaHasMatches(self, rule: Dict[str, Any], agentId: Optional[str],
+                         tenantId: str) -> bool:
+        """rete alpha 节点：规则 body 各原子的谓词在域内是否有 active 事实
+        （单次 COUNT 命中即真——零命中规则跳过整轮求值）。"""
+        live = "status = 'active' AND record_kind = 'triple'"
+        for atom in rule.get("body") or []:
+            pred = str(atom.get("predicate") or atom.get("atom") or "")
+            if not pred:
+                continue
+            if str(atom.get("kind") or "atom") == "not":
+                continue  # 否定原子反向命中不做 alpha 预筛（保守全量）
+            sql = ("SELECT 1 FROM knowledge_facts WHERE predicate_term_id = ?"
+                   " AND %s" % live)
+            params: List[Any] = [pred]
+            if agentId:
+                sql += " AND agent_id = ?"
+                params.append(agentId)
+            if tenantId:
+                sql += " AND tenant_id = ?"
+                params.append(tenantId)
+            sql += " LIMIT 1"
+            with self._store._lock:
+                if self._store._conn.execute(sql, params).fetchone() is not None:
+                    return True
+        return False
 
     def _fireRule(self, rule: Dict[str, Any], agentId: Optional[str],
                   tenantId: str = "default") -> List[str]:

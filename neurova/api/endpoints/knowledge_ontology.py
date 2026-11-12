@@ -615,6 +615,47 @@ async def delete_chunk_strategy(
     return {"code": 0, "data": {"strategy_id": strategy_id}, "request_id": ""}
 
 
+@router.post("/ontology/sparql")
+async def run_ontology_sparql(
+    body: Dict[str, Any],
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """W9：SPARQL 只读查询（登录可读；rdflib 未装显式 501 not_supported）。"""
+    from neurova.knowledge.ontology.sparql_query import (
+        SparqlNotSupported,
+        runSparqlQuery,
+    )
+
+    store, _registry, _engine = _ontologyParts()
+    try:
+        result = runSparqlQuery(store, str(body.get("query") or ""),
+                                agentId=str(current_user.get("agent_id") or "default"),
+                                tenantId=_tenantOf(current_user))
+    except SparqlNotSupported as exc:
+        raise HTTPException(status_code=501, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"code": 0, "data": result, "request_id": ""}
+
+
+@router.post("/ontology/abduce")
+async def run_ontology_abduce(
+    body: Dict[str, Any],
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """W9：溯因反向搜索（登录可读，只读零写）。"""
+    from neurova.knowledge.ontology.abduction import explainGoal
+
+    store, _registry, _engine = _ontologyParts()
+    result = explainGoal(store,
+                         subjectLabel=str(body.get("subject_label") or ""),
+                         predicate=str(body.get("predicate") or ""),
+                         objectTerm=str(body.get("object_term") or ""),
+                         agentId=str(current_user.get("agent_id") or "default"),
+                         tenantId=_tenantOf(current_user))
+    return {"code": 0, "data": result, "request_id": ""}
+
+
 @router.get("/ontology/communities")
 async def list_ontology_communities(
     current_user: Dict = Depends(get_current_user_or_service),

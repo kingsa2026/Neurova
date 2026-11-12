@@ -51,6 +51,8 @@
 | CQ-18 | 同一篇文档能否按声明的策略切块？ | 知识管理员 | P2 | 切块策略（specs/2026-11-12 W8 落地：十三 kind 注册表＋单点分派） | tests/unit/knowledge/test_chunkStrategyRegistry.py | implemented |
 | CQ-19 | 整个语料库的社区结构与摘要能否检索？ | 知识使用者 | P2 | 社区检索（specs/2026-11-12 W8 落地：标签传播＋global/drift） | tests/unit/knowledge/test_communityGraphRAG.py | implemented |
 | CQ-20 | 消解候选对是否被 blocking 收敛？ | 知识管理员 | P2 | 消解补强（specs/2026-11-12 W8 落地：倒排桶 blocking＋近形守卫） | tests/unit/knowledge/test_resolutionBlocking.py | implemented |
+| CQ-21 | 递归推理在增量下结论还一致吗？ | 知识管理员 | P2 | 推理广度（specs/2026-11-12 W9 落地：semi-naive 增量＋rete 策略槽） | tests/unit/knowledge/ontology/test_semiNaiveEquivalence.py | implemented |
+| CQ-22 | 能否用 SPARQL 查询/溯因解释一条事实？ | 集成方 | P2 | SPARQL/溯因（specs/2026-11-12 W9 落地：投影只读＋解释树） | tests/unit/knowledge/ontology/test_sparqlReadOnly.py | implemented |
 | CQ-17 | 过去有没有同类场景的判例？ | 审计员 | P2 | 判例检索（specs/2026-11-12 W7 落地：词法混合计分，嵌入偏差登记） | tests/unit/knowledge/ontology/test_decisionPrecedents.py | implemented |
 
 ## 追溯规则

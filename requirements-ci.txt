@@ -146,7 +146,10 @@ rich>=13.0
 # 该档用 `pytest.importorskip("rdflib")`：缺席时整档 skip，读数从"三方解析器认不认我们的
 # Turtle 子集"变成"环境里没装东西"——两者在 CI 里同形，正是本清单开头那条纪律要消除的形态
 # （向量四件 / rich 同一根因，同处补齐）。
-# **只进 CI 清单，不进 requirements.txt**：产品运行时零 RDF 依赖是 2026-09-20 六项决策之一，
+# **只进 CI 清单，requirements.txt 注释态登记**（specs/2026-11-12 W9，D8 已裁：
+# rdflib 解禁为可选生产依赖——sparql_query.py 点名豁免，惰性 import＋fail-soft，
+# 未装时端点显式 501 not_supported；其余 neurova/ 仍禁 import）。原判：产品运行时
+# 零 RDF 依赖是 2026-09-20 六项决策之一，
 # 装了 rdflib 也不允许 `neurova/` 里出现它的 import（由 test_rdflibInterop 的对照格与
 # tests/unit/test_dev_path_and_runtime_dep_guards.py 的运行时面比对共同钉住）。
 rdflib>=7.0
