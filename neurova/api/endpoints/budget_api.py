@@ -6,13 +6,22 @@ Provides RESTful API for budget management, monitoring, and alerting.
 
 from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import Any, List, Optional, Dict
 from decimal import Decimal
 from datetime import datetime
 import time
+from neurova.api.auth import get_current_user
+from neurova.api.deps import require_admin
 from neurova.models.cost_budget import get_budget_service, BudgetService, AlertLevel
 
-router = APIRouter(prefix="/budgets", tags=["budgets"])
+# P1-1（全库断点审计 2026-11-12）：本 router 曾整面裸挂——15 端点里成本/预算读面
+# 匿名可读、/record 可被匿名伪造成本记录污染预算判定。读面收登录（get_current_user），
+# 伪造写面（/record）与告警配置面收 admin（require_admin），与 audit/backup 同一惯例。
+router = APIRouter(
+    prefix="/budgets",
+    tags=["budgets"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 # ============================================================================
@@ -117,7 +126,8 @@ async def record_cost(
     model: str,
     cost: float,
     turn_id: Optional[str] = None,
-    budget_service: BudgetService = Depends(get_budget_service)
+    budget_service: BudgetService = Depends(get_budget_service),
+    _admin: Dict[str, Any] = Depends(require_admin()),
 ):
     """
     Record LLM call cost against budgets.
@@ -204,7 +214,8 @@ async def get_alerts(
 @router.post("/alerts/config/update")
 async def update_alert_config(
     config: AlertConfigUpdate,
-    budget_service: BudgetService = Depends(get_budget_service)
+    budget_service: BudgetService = Depends(get_budget_service),
+    _admin: Dict[str, Any] = Depends(require_admin()),
 ):
     """
     Update alert configuration.
