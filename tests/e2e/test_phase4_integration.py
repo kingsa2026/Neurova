@@ -152,99 +152,6 @@ class TestTurnCoordination:
 
 
 # ============================================================================
-# Task 3: Smart Model Selection Tests
-# ============================================================================
-
-class TestSmartModelSelection:
-    """Test smart model selection"""
-    
-    @pytest.mark.asyncio
-    async def test_model_selector_singleton(self):
-        """Test SmartModelSelector is singleton"""
-        from neurova.agent.model_selector import get_smart_model_selector
-        
-        selector1 = get_smart_model_selector()
-        selector2 = get_smart_model_selector()
-        
-        assert selector2 is selector1
-    
-    @pytest.mark.asyncio
-    async def test_default_models_available(self):
-        """Test default models are available"""
-        from neurova.agent.model_selector import get_smart_model_selector
-        
-        selector = get_smart_model_selector()
-        
-        assert len(selector.default_models) > 0
-        assert "gpt-4o-mini" in selector.default_models
-        assert "gpt-3.5-turbo" in selector.default_models
-    
-    @pytest.mark.asyncio
-    async def test_model_selection_caching(self):
-        """Test model selection caching"""
-        from neurova.agent.model_selector import get_smart_model_selector
-        
-        selector = get_smart_model_selector()
-        query = "Simple question"
-        
-        # First selection
-        model1 = await selector.select_model(
-            agent_id="test_agent",
-            user_query=query,
-        )
-        
-        # Second selection (should use cache)
-        model2 = await selector.select_model(
-            agent_id="test_agent",
-            user_query=query,
-        )
-        
-        assert model1 == model2
-        assert len(selector._selection_cache) >= 1
-    
-    @pytest.mark.asyncio
-    async def test_model_selection_budget_constraint(self):
-        """Test model selection respects budget"""
-        from neurova.agent.model_selector import get_smart_model_selector
-        
-        selector = get_smart_model_selector()
-        query = "Generate code"
-        
-        # Very tight budget
-        model = await selector.select_model(
-            agent_id="test_agent",
-            user_query=query,
-            available_models=["gpt-4", "gpt-4o-mini"],
-            cost_budget=0.001,  # Very low budget
-        )
-        
-        # Should use cheapest available
-        assert model == "gpt-4o-mini"
-    
-    @pytest.mark.asyncio
-    async def test_model_selection_stats(self):
-        """Test model selection statistics"""
-        from neurova.agent.model_selector import get_smart_model_selector
-        
-        selector = get_smart_model_selector()
-        
-        # Make some selections
-        await selector.select_model(
-            agent_id="test_agent",
-            user_query="Query 1",
-        )
-        await selector.select_model(
-            agent_id="test_agent",
-            user_query="Query 2",
-        )
-        
-        stats = selector.get_selection_stats()
-        
-        assert stats["cache_size"] >= 2
-        assert "default_models" in stats
-
-
-# ============================================================================
 # Task 4: Full Workflow Integration Tests
 # ============================================================================
 
@@ -255,7 +162,6 @@ class TestFullWorkflow:
     async def test_complete_workflow_basic(self):
         """Test basic complete workflow"""
         from neurova.agent.turn_coordinator import requestYieldGate
-        from neurova.agent.model_selector import get_smart_model_selector
 
         # Step 1: 两个 Agent 各过一个真回合入口的让位闸
         for agentId, model in (("agent_1", "gpt-4"), ("agent_2", "gpt-3.5")):
@@ -263,24 +169,8 @@ class TestFullWorkflow:
                 agentId=agentId, modelName=model, sessionId="sess-wf", userInput="What is AI?"
             )
             assert outcome.proceeded is True
-        
-        # Step 3: Select models
-        selector = get_smart_model_selector()
-        
-        model1 = await selector.select_model(
-            agent_id="agent_1",
-            user_query="What is AI?",
-        )
-        
-        model2 = await selector.select_model(
-            agent_id="agent_2",
-            user_query="Write Python code",
-        )
-        
-        assert model1 in ["gpt-4", "gpt-4o-mini", "gpt-3.5-turbo"]
-        assert model2 in ["gpt-4", "gpt-4o-mini", "gpt-3.5-turbo"]
-        
-        # Step 2: Verify coordination works
+
+        # P2-18：SmartModelSelector 已退役（生产零消费方），选型段随之摘除
         logger.info(f"Complete workflow test passed!")
     
     @pytest.mark.asyncio
@@ -402,21 +292,6 @@ class TestErrorHandling:
         
         # Cost might be negative but shouldn't crash
         assert isinstance(cost, float)
-    
-    @pytest.mark.asyncio
-    async def test_empty_query_selection(self):
-        """Test model selection with empty query"""
-        from neurova.agent.model_selector import get_smart_model_selector
-        
-        selector = get_smart_model_selector()
-        model = await selector.select_model(
-            agent_id="test_agent",
-            user_query="",
-        )
-        
-        # Should return a valid model
-        assert model is not None
-        assert isinstance(model, str)
 
 
 # ============================================================================
