@@ -124,6 +124,20 @@ def _probeShapeValidation() -> str:
     return "implemented" if hits == 2 else ("partial" if hits else "planned")
 
 
+def _probeSimulation() -> str:
+    """CQ-14：推演类（specs/2026-11-12 W5）——副本隔离/台账/工具。"""
+    from neurova.knowledge.ontology import simulation
+    from neurova.mcp_ontology_server import ontology_simulate  # noqa: F401
+
+    hits = (
+        hasattr(simulation, "runSimulation")
+        + ("ontology_simulations" in (simulation._SCHEMA_V46_SIMULATIONS or ""))
+        + (ontology_simulate is not None)
+        + hasattr(simulation, "ScopeTooLargeError")
+    )
+    return "implemented" if hits == 4 else ("partial" if hits else "planned")
+
+
 def _probeActionSemantics() -> str:
     """CQ-15：动作前置拒（specs/2026-11-12 W4）——语义三列/运行时/MCP 门面。"""
     from neurova.knowledge.ontology import action_registry, action_runtime
@@ -260,6 +274,11 @@ CQ_TRACE_ROWS: tuple = (
         query="动作语义（specs/2026-11-12 W4 落地：precondition 不触工具＋单管道转交）",
         testId="tests/unit/knowledge/ontology/test_actionPrecondition.py",
         probe=_probeActionSemantics),
+    CqTraceRow(
+        cqId="CQ-14", question="假设某状态变化后下游会受什么影响？", actor="运维员", priority="P2",
+        query="推演（specs/2026-11-12 W5 落地：副本隔离零生产写＋diff 报告）",
+        testId="tests/unit/knowledge/ontology/test_simulationDiff.py",
+        probe=_probeSimulation),
 )
 
 

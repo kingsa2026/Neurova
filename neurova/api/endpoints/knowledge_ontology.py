@@ -455,6 +455,59 @@ async def create_state_machine(
     return {"code": 0, "data": item, "request_id": ""}
 
 
+@router.post("/ontology/simulations")
+async def run_ontology_simulation(
+    body: Dict[str, Any],
+    admin: Dict = Depends(require_admin()),
+):
+    """W5：运行推演（仅管理员）——生产零写（台账追加除外），diff 报告回执。"""
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.simulation import ScopeTooLargeError, runSimulation
+
+    store = get_knowledge_fact_store()
+    tenant = _tenantOf(admin)
+    scope = dict(body.get("scope") or {})
+    scope.setdefault("tenantId", tenant)
+    scope.setdefault("agentId", str(body.get("agent_id") or "default"))
+    try:
+        report = runSimulation(store, scope=scope,
+                               hypotheses=body.get("hypotheses") or {})
+    except ScopeTooLargeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"code": 0, "data": report, "request_id": ""}
+
+
+@router.get("/ontology/simulations")
+async def list_ontology_simulations(
+    limit: int = Query(default=50, le=200),
+    current_user: Dict = Depends(require_admin()),
+):
+    """W5：推演台账（仅管理员，只读）——scope/假设/diff 摘要读数。"""
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+
+    store = get_knowledge_fact_store()
+    tenant = _tenantOf(current_user)
+    with store._lock:
+        rows = store._conn.execute(
+            "SELECT simulation_id, agent_id, scope_json, hypothesis_json,"
+            " diff_summary_json, created_at FROM ontology_simulations"
+            " WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?",
+            (tenant, int(limit))).fetchall()
+    import json as _json
+
+    items = []
+    for row in rows:
+        items.append({
+            "simulation_id": str(row["simulation_id"]),
+            "agent_id": str(row["agent_id"]),
+            "scope": _json.loads(row["scope_json"] or "{}"),
+            "hypotheses": _json.loads(row["hypothesis_json"] or "[]"),
+            "diff_summary": _json.loads(row["diff_summary_json"] or "{}"),
+            "created_at": str(row["created_at"]),
+        })
+    return {"code": 0, "data": items, "request_id": ""}
+
+
 @router.delete("/ontology/state-machines/{term_id}")
 async def delete_state_machine(
     term_id: str = Path(...),

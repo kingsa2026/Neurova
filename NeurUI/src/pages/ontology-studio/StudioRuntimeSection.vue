@@ -124,6 +124,58 @@
         </template>
       </a-tab-pane>
 
+      <!-- 推演 tab（W5） -->
+      <a-tab-pane key="simulations" :tab="t('ontology.runtimeSimTitle')">
+        <a-alert type="info" show-icon data-testid="sim-note"
+                 :message="t('ontology.runtimeSimNoWrite')" />
+        <template v-if="isAdmin">
+          <h4 class="section-title">{{ t('ontology.runtimeSimRun') }}</h4>
+          <div class="register-form" data-testid="sim-form">
+            <a-input v-model:value="simForm.subject" class="mono"
+                     :placeholder="t('ontology.runtimeSimSubjectPh')" data-testid="sim-subject" />
+            <a-input v-model:value="simForm.predicate" class="mono"
+                     :placeholder="t('ontology.runtimeSimPredPh')" data-testid="sim-predicate" />
+            <a-input v-model:value="simForm.object" class="mono"
+                     :placeholder="t('ontology.runtimeSimObjectPh')" data-testid="sim-object" />
+            <GlassButton size="sm" data-testid="sim-run" @click="runSimulation">
+              {{ t('ontology.runtimeComputeRun') }}
+            </GlassButton>
+          </div>
+          <div v-if="simError" class="inline-error" data-testid="sim-error">{{ simError }}</div>
+        </template>
+        <div v-if="simReport" class="compute-readout" data-testid="sim-report">
+          <div class="mono">{{ t('ontology.runtimeSimId') }}: {{ simReport.simulation_id }}</div>
+          <div class="mono">{{ t('ontology.runtimeSimScoped') }}: {{ simReport.scoped_facts }}</div>
+          <h4 class="section-title">{{ t('ontology.runtimeSimAdded') }}</h4>
+          <div v-for="(row, i) in simReport.diff.added" :key="'a' + i" class="mono">
+            {{ row.subject_key }} {{ row.predicate_term_id }} {{ row.object_term }}
+          </div>
+          <div v-if="!simReport.diff.added.length" class="mono">-</div>
+          <h4 class="section-title">{{ t('ontology.runtimeSimAffected') }}</h4>
+          <div class="mono">{{ simReport.diff.affected_subjects.join(', ') || '-' }}</div>
+        </div>
+        <h4 class="section-title">{{ t('ontology.runtimeSimLedger') }}</h4>
+        <table class="runtime-table" data-testid="sim-ledger">
+          <thead>
+            <tr>
+              <th>{{ t('ontology.runtimeSimId') }}</th>
+              <th>{{ t('ontology.runtimeSimAdded') }}</th>
+              <th>{{ t('ontology.runtimeSimAffected') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in simLedger" :key="row.simulation_id">
+              <td class="mono">{{ row.simulation_id }}</td>
+              <td>{{ (row.diff_summary as any).added_count ?? 0 }}</td>
+              <td class="mono expr">{{ ((row.diff_summary as any).affected_subjects ?? []).join(', ') }}</td>
+            </tr>
+            <tr v-if="!simLedger.length">
+              <td colspan="3"><a-empty :description="t('ontology.runtimeSimEmpty')" /></td>
+            </tr>
+          </tbody>
+        </table>
+      </a-tab-pane>
+
       <!-- 状态机 tab（W3） -->
       <a-tab-pane key="states" :tab="t('ontology.runtimeStatesTitle')">
         <table class="runtime-table" data-testid="states-table">
@@ -194,11 +246,18 @@ import {
 } from '@/api/modules/ontology'
 import type {
   OntologyActionRow,
+  OntologySimulationReport,
+  OntologySimulationRow,
   OntologyComputeResult,
   OntologyFunctionRow,
   OntologyStateMachineRow,
 } from '@/types/ontology'
-import { createOntologyAction, listOntologyActions } from '@/api/modules/ontology' 
+import {
+  createOntologyAction,
+  listOntologyActions,
+  listOntologySimulations,
+  runOntologySimulation,
+} from '@/api/modules/ontology'
 import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
@@ -209,9 +268,13 @@ const isAdmin = computed(() => {
   return user?.role === 'admin'
 })
 
-const activeTab = ref<'functions' | 'actions' | 'states'>('functions')
+const activeTab = ref<'functions' | 'actions' | 'simulations' | 'states'>('functions')
 const functions = ref<OntologyFunctionRow[]>([])
 const machines = ref<OntologyStateMachineRow[]>([])
+const simForm = ref({ subject: '', predicate: '', object: '' })
+const simError = ref('')
+const simReport = ref<OntologySimulationReport | null>(null)
+const simLedger = ref<OntologySimulationRow[]>([])
 const actions = ref<OntologyActionRow[]>([])
 const actionForm = ref({ action_id: '', bound_tool: '' })
 const actionError = ref('')
@@ -252,6 +315,30 @@ async function reload() {
     actions.value = res.data ?? []
   } catch {
     actionError.value = t('ontology.runtimeLoadError')
+  }
+  try {
+    const res = await listOntologySimulations(20)
+    simLedger.value = res.data ?? []
+  } catch {
+    simError.value = t('ontology.runtimeLoadError')
+  }
+}
+
+async function runSimulation() {
+  simError.value = ''
+  simReport.value = null
+  try {
+    const res = await runOntologySimulation({
+      hypotheses: { facts: [{
+        subjectLabel: simForm.value.subject.trim(),
+        predicateTermId: simForm.value.predicate.trim(),
+        objectTerm: simForm.value.object.trim(),
+      }] },
+    })
+    simReport.value = res.data ?? null
+    await reload()
+  } catch (err) {
+    simError.value = extractError(err) || t('ontology.runtimeLoadError')
   }
 }
 
