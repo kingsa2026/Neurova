@@ -781,6 +781,24 @@ class TaskScheduler:
     # 任务管理
     # ============================================================
 
+    def addSystemJob(self, func, jobId: str, seconds: int) -> None:
+        """系统级周期 job 注册口（W3 知识源 interval 同步等内部维护面）。
+
+        任务体系的 TaskType/executor 是 Agent 任务语义；基础设施级周期调用
+        （外部系统拉取等）不塞进那套语义，直接挂本调度器的 APScheduler——
+        不新造第二台调度器（specs/2026-11-12 §5 通则）。调度器未启动时
+        APScheduler 会缓冲 job，start 后自动生效。"""
+        from apscheduler.triggers.interval import IntervalTrigger
+
+        with self._task_lock:
+            self._apscheduler.add_job(
+                func=func,
+                trigger=IntervalTrigger(seconds=max(1, int(seconds))),
+                id=str(jobId),
+                replace_existing=True,
+                misfire_grace_time=60,
+            )
+
     def add_task(self, task: AutomationTask) -> bool:
         """添加任务"""
         with self._task_lock:

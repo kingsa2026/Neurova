@@ -204,6 +204,15 @@ class EnterpriseIngestor:
                  existing["created_at"] if existing else stamp, stamp),
             )
 
+    def setSyncInterval(self, tenantId: str, sourceId: str, seconds: int) -> None:
+        """W3：声明源的 interval 同步间隔（v44 列；0＝不持续同步）。"""
+        with self._store._lock, self._store._conn:
+            self._store._conn.execute(
+                "UPDATE enterprise_source_configs SET sync_interval_seconds = ?,"
+                " updated_at = ? WHERE tenant_id = ? AND source_id = ?",
+                (max(0, int(seconds)), self._now(),
+                 str(tenantId or "default"), str(sourceId or "")))
+
     def listConfigs(self, tenantId: str = "default") -> List[Dict[str, Any]]:
         """本租户已提交过的源配置（描述符 + 游标 + 启用态）——读面，不触发任何网络。"""
         tenant = str(tenantId or "default")
@@ -218,13 +227,15 @@ class EnterpriseIngestor:
                          "descriptor": config.get("descriptor") or {},
                          "cursor": config.get("cursor") or "",
                          "enabled": bool(config.get("enabled")),
+                         "sync_interval_seconds": int(config.get("sync_interval_seconds") or 0),
                          "created_at": config.get("created_at") or "",
                          "updated_at": config.get("updated_at") or ""})
         return rows
 
     def loadConfig(self, tenantId: str, sourceId: str) -> Optional[Dict[str, Any]]:
         row = self._store._conn.execute(
-            "SELECT descriptor_json, cursor, enabled, created_at, updated_at"
+            "SELECT descriptor_json, cursor, enabled, created_at, updated_at,"
+            " sync_interval_seconds"
             " FROM enterprise_source_configs"
             " WHERE tenant_id = ? AND source_id = ?",
             (str(tenantId or "default"), str(sourceId or ""))).fetchone()
@@ -232,6 +243,7 @@ class EnterpriseIngestor:
             return None
         return {"descriptor": json.loads(row["descriptor_json"] or "{}"),
                 "cursor": row["cursor"], "enabled": bool(row["enabled"]),
+                "sync_interval_seconds": int(row["sync_interval_seconds"] or 0),
                 "created_at": row["created_at"] or "",
                 "updated_at": row["updated_at"] or ""}
 
@@ -371,3 +383,40 @@ class EnterpriseIngestor:
         descriptor["sourceId"] = sourceId
         return self.ingestBatch(descriptor, rows, cursorToken=cursorToken
                                 or config.get("cursor") or "")
+
+
+def registerIntervalSyncs(scheduler: Any, store: Any = None,
+                          tenantId: str = "default") -> int:
+    """W3 持续同步（specs/2026-11-12 §5；D3 interval 最小闭合）：为声明了
+    sync_interval_seconds>0 的启用源向既有调度器注册 interval job——job 触发
+    调既有 runOnceAsync 处理函数，零新同步逻辑；不新造调度器（scheduler 需带
+    addSystemJob 公开面）。返回注册条数。"""
+    if scheduler is None or not hasattr(scheduler, "addSystemJob"):
+        return 0
+    factStore = store
+    if factStore is None:
+        from ..foundation import get_knowledge_fact_store
+
+        factStore = get_knowledge_fact_store()
+    ingestor = EnterpriseIngestor(factStore)
+    registered = 0
+    for config in ingestor.listConfigs(tenantId=tenantId):
+        seconds = int(config.get("sync_interval_seconds") or 0)
+        if not config.get("enabled") or seconds <= 0:
+            continue
+        sourceId = str(config.get("source_id") or "")
+
+        def _job(sourceId=sourceId, tenantId=tenantId):
+            import asyncio
+
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(
+                    EnterpriseIngestor(factStore).runOnceAsync(tenantId, sourceId))
+            finally:
+                loop.close()
+
+        scheduler.addSystemJob(_job, jobId="kb_enterprise_sync_%s" % sourceId,
+                               seconds=seconds)
+        registered += 1
+    return registered

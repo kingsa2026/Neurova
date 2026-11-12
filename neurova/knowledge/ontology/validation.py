@@ -124,9 +124,15 @@ class OntologyValidationReport:
 
         limit = registry.maxCardinality(predicate, tenantId=tenantId) if term else None
         if limit == 1 and subjectKey:
+            # W3：has_state + 主体挂状态机 ⇒ 迁移合法性由下方 stateTransition 判
+            # 全权裁决（合法迁移写新值是状态机的本职，cardinality 判不重复设卡；
+            # 单值不变式由机器闭集＋admission 迁移 supersede 保证）。无状态机的
+            # has_state 与其余 cardinality=1 谓词照旧。
+            machineGoverned = predicate == "has_state" and self._subjectHasMachine(
+                subjectKey, registry, tenantId)
             rivals = [f for f in registry.activeFactsForPredicate(agentId, subjectKey, predicate)
                       if str(f.get("object_term")) != objectTerm]
-            if rivals:
+            if rivals and not machineGoverned:
                 out.append(self._finding(
                     "violation", "cardinality",
                     "%s 基数为 1，主体已有另一说法（fact_id=%s）"
@@ -192,11 +198,97 @@ class OntologyValidationReport:
                 "主体 %s 与已登记术语同名（term/instance 混用）" % subjectKey,
                 predicate, subjectKey=subjectKey))
 
+        # W3 状态机迁移约束（specs/2026-11-12 §5）：主体类型 term 有状态机时，
+        # 新 has_state 值的 from→to 须在 transitions 内（from 取该主体当前 active
+        # has_state 事实；无当前状态只许 initial_state）；guardPredicate 可选存在性
+        # 检查。判据单点在此，admission 校验段自动继承；无状态机 term 零漂移。
+        if subjectKey and predicate == "has_state" and registry is not None:
+            out.extend(self._stateTransitionFindings(
+                request, subjectKey, registry, tenantId))
+
         # B10 L4：用户 shape 与内置 6 项共用同一 findings 流（violation 阻断/
         # warning 记账/info 遥测）；shape 只判数据，不触发推导。
         if self._shapes is not None:
             out.extend(self._shapes.evaluateForRequest(request, subjectKey, registry))
         return out
+
+    def _subjectHasMachine(self, subjectKey: str, registry: Any, tenantId: str) -> bool:
+        """主体类型是否挂了状态机（cardinality 让位判的读数）。"""
+        store = getattr(registry, "_store", None)
+        if store is None:
+            return False
+        row = None
+        with store._lock:
+            row = store._conn.execute(
+                "SELECT type_term_id FROM knowledge_subjects WHERE subject_key = ?",
+                (subjectKey,)).fetchone()
+        typeTerm = str(row["type_term_id"] or "") if row is not None else ""
+        if not typeTerm:
+            return False
+        from .state_machine_registry import StateMachineRegistry
+
+        machine = StateMachineRegistry(store).get(typeTerm, tenantId=tenantId)
+        return machine is not None and bool(machine.get("enabled"))
+
+    def _stateTransitionFindings(self, request, subjectKey, registry, tenantId):
+        """状态机迁移约束求值（W3 判据单点）：无状态机 term 恒空（零漂移）。"""
+        store = getattr(registry, "_store", None)
+        if store is None:
+            return []
+        row = None
+        with store._lock:
+            row = store._conn.execute(
+                "SELECT type_term_id FROM knowledge_subjects WHERE subject_key = ?",
+                (subjectKey,)).fetchone()
+        typeTerm = str(row["type_term_id"] or "") if row is not None else ""
+        if not typeTerm:
+            return []
+        from .state_machine_registry import StateMachineRegistry
+
+        machine = StateMachineRegistry(store).get(typeTerm, tenantId=tenantId)
+        if machine is None or not machine.get("enabled"):
+            return []
+        newState = str(request.objectTerm or "").strip()
+        states = set(machine.get("states") or [])
+        if newState not in states:
+            return [self._finding(
+                "violation", "stateTransition",
+                "%r 不在状态机 %s 的 states 闭集内" % (newState, typeTerm),
+                request.predicateTermId, subjectKey=subjectKey)]
+        facts = [f for f in registry.activeFactsForPredicate(
+            request.agentId or "default", subjectKey, request.predicateTermId)
+            if f.get("subject_key") == subjectKey]
+        current = str(facts[0]["object_term"]) if facts else ""
+        transitions = machine.get("transitions") or []
+        if not current:
+            if newState != str(machine.get("initial_state") or ""):
+                return [self._finding(
+                    "violation", "stateTransition",
+                    "主体无当前状态：初始状态只许 %r（得到 %r）"
+                    % (machine.get("initial_state"), newState),
+                    request.predicateTermId, subjectKey=subjectKey)]
+            return []
+        legal = any(str(t.get("from")) == current and str(t.get("to")) == newState
+                    for t in transitions)
+        if not legal:
+            return [self._finding(
+                "violation", "stateTransition",
+                "非法迁移 %s→%s（状态机 %s 的 transitions 闭集内无此边）"
+                % (current, newState, typeTerm),
+                request.predicateTermId, subjectKey=subjectKey)]
+        # guardPredicate 可选：存在性检查（主体须有该谓词的 active 事实）
+        for t in transitions:
+            if str(t.get("from")) == current and str(t.get("to")) == newState:
+                guard = str(t.get("guardPredicate") or "").strip()
+                if guard and not registry.activeFactsForPredicate(
+                        request.agentId or "default", subjectKey, guard):
+                    return [self._finding(
+                        "violation", "stateTransition",
+                        "迁移 %s→%s 的 guard 谓词 %s 无 active 事实（存在性未满足）"
+                        % (current, newState, guard),
+                        request.predicateTermId, subjectKey=subjectKey)]
+                break
+        return []
 
     @staticmethod
     def _finding(kind: str, rule: str, message: str, term: str,

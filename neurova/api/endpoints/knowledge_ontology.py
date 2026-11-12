@@ -375,6 +375,29 @@ async def create_ontology_function(
     return {"code": 0, "data": item, "request_id": ""}
 
 
+@router.post("/ontology/functions/{function_id}/compute")
+async def compute_ontology_function(
+    function_id: str = Path(...),
+    body: Dict[str, Any] = None,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """W2：函数 dry 求值（登录可读，只读零落库）——与 MCP ontology_compute
+    同一 FunctionEngine.dryEval 单源；selector 超行上限结构化拒绝（D1）。"""
+    from neurova.knowledge.ontology.function_engine import FunctionEngine
+
+    store, _registry, _engine = _ontologyParts()
+    payload = body or {}
+    try:
+        result = FunctionEngine(store).dryEval(
+            function_id, subject=str(payload.get("subject") or ""),
+            tenantId=_tenantOf(current_user))
+    except LookupError:
+        raise HTTPException(status_code=404, detail=f"函数未登记: {function_id}")
+    if result.get("rejected"):
+        return {"code": 0, "data": result, "request_id": ""}
+    return {"code": 0, "data": result, "request_id": ""}
+
+
 @router.delete("/ontology/functions/{function_id}")
 async def delete_ontology_function(
     function_id: str = Path(...),
@@ -390,6 +413,57 @@ async def delete_ontology_function(
     except LookupError:
         raise HTTPException(status_code=404, detail=f"函数未登记: {function_id}")
     return {"code": 0, "data": {"function_id": function_id}, "request_id": ""}
+
+
+@router.get("/ontology/state-machines")
+async def list_state_machines(
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """W3：状态机清单（登录可读）——states/transitions/event_bindings 读数。"""
+    from neurova.knowledge.ontology.state_machine_registry import StateMachineRegistry
+
+    store, _registry, _engine = _ontologyParts()
+    tenant = _tenantOf(current_user)
+    rows = StateMachineRegistry(store).list(tenantId=tenant, includeDisabled=True)
+    return {"code": 0, "data": rows, "request_id": ""}
+
+
+@router.post("/ontology/state-machines")
+async def create_state_machine(
+    body: Dict[str, Any],
+    admin: Dict = Depends(require_admin()),
+):
+    """W3：登记状态机（仅管理员）——闭集校验（states 外名字登记即拒）。"""
+    from neurova.knowledge.ontology.state_machine_registry import StateMachineRegistry
+
+    store, _registry, _engine = _ontologyParts()
+    tenant = _tenantOf(admin)
+    try:
+        item = StateMachineRegistry(store).register(
+            termId=str(body.get("term_id") or ""), tenantId=tenant,
+            states=body.get("states") or [],
+            transitions=body.get("transitions") or [],
+            initialState=str(body.get("initial_state") or ""),
+            eventBindings=body.get("event_bindings") or [],
+            enabled=bool(body.get("enabled", True)))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"code": 0, "data": item, "request_id": ""}
+
+
+@router.delete("/ontology/state-machines/{term_id}")
+async def delete_state_machine(
+    term_id: str = Path(...),
+    admin: Dict = Depends(require_admin()),
+):
+    """W3：删状态机（仅管理员）；存量 has_state 事实不动（迁移约束随机器退场）。"""
+    from neurova.knowledge.ontology.state_machine_registry import StateMachineRegistry
+
+    store, _registry, _engine = _ontologyParts()
+    tenant = _tenantOf(admin)
+    if not StateMachineRegistry(store).delete(term_id, tenantId=tenant):
+        raise HTTPException(status_code=404, detail=f"状态机未登记: {term_id}")
+    return {"code": 0, "data": {"term_id": term_id}, "request_id": ""}
 
 
 @router.get("/ontology/namespaces")
@@ -1255,6 +1329,15 @@ async def create_graph_instance(
         raise HTTPException(status_code=400, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    # W3：is_a 建边后把主类型挂到主体列——与抽取路径（graph_bridge
+    # _assignSubjectType）同一语义；状态机迁移约束按主体类型 term 查找，
+    # 工作台建边不挂类型会让约束静默失明（就近裁定，待追认）。
+    if predicate == "is_a":
+        try:
+            OntologyTermRegistry(store).assignSubjectType(
+                receipt.subjectKey, objTerm, tenantId=instanceTenant)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
     return {
         "code": 0,
         "message": "success",

@@ -124,6 +124,22 @@ def _probeShapeValidation() -> str:
     return "implemented" if hits == 2 else ("partial" if hits else "planned")
 
 
+def _probeStateMachines() -> str:
+    """CQ-13：状态类（specs/2026-11-12 W3）——登记面/迁移判/事件桥/读数工具。"""
+    from neurova.api.endpoints import knowledge_ontology
+    from neurova.knowledge import state_event_bridge
+    from neurova.knowledge.ontology import state_machine_registry, validation
+
+    hits = (
+        hasattr(state_machine_registry.StateMachineRegistry, "register")
+        + (1 if callable(getattr(validation.OntologyValidationReport,
+                                 "_stateTransitionFindings", None)) else 0)
+        + hasattr(state_event_bridge, "StateEventBridge")
+        + hasattr(knowledge_ontology, "create_state_machine")
+    )
+    return "implemented" if hits == 4 else ("partial" if hits else "planned")
+
+
 def _probeFunctionLayer() -> str:
     """CQ-12：数值计算层（specs/2026-11-12 W2）——登记面/引擎/MCP dry 工具。"""
     from neurova.api.endpoints import knowledge_ontology
@@ -220,6 +236,11 @@ CQ_TRACE_ROWS: tuple = (
         query="函数层（specs/2026-11-12 W2 落地：受限 AST＋selector 聚合＋咽喉入账）",
         testId="tests/unit/knowledge/ontology/test_functionDerivationGovernance.py",
         probe=_probeFunctionLayer),
+    CqTraceRow(
+        cqId="CQ-13", question="对象当前处于什么状态、允许哪些迁移？", actor="运维员", priority="P2",
+        query="状态机（specs/2026-11-12 W3 落地：has_state＋迁移闭集＋事件桥）",
+        testId="tests/unit/knowledge/ontology/test_stateMachineValidation.py",
+        probe=_probeStateMachines),
 )
 
 

@@ -590,6 +590,14 @@
    "namespace": "so"
   },
   {
+   "termId": "has_state",
+   "kind": "relation",
+   "label": "当前状态",
+   "definition": "主体当前所处状态（状态机约束的迁移闭集，cardinality=1：一主体一当前状态，旧状态经 supersede 退场）",
+   "namespace": "so",
+   "cardinality": 1
+  },
+  {
    "termId": "composedOf",
    "kind": "relation",
    "label": "组成",

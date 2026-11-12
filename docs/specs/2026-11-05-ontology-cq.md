@@ -44,6 +44,7 @@
 | CQ-10 | 某类事实在历史某时点是否成立（双时态）？ | 审计员 | P2 | asOf/knownAt 查询（B11 落地；W0-1 补 accessQuery 显式签名＋MCP 透传＋非法 4xx） | tests/unit/knowledge/ontology/test_bitemporalQuery.py | implemented |
 | CQ-11 | 写入前能否按自定义形状（SHACL 语义）做完整性校验？ | 本体管理员 | P2 | shapes 注册表＋dry-run（B10 落地） | tests/unit/knowledge/ontology/test_ontologyShapes.py | implemented |
 | CQ-12 | 数值属性能否参与计算（聚合/比较出结论）？ | 分析师 | P2 | 函数层（specs/2026-11-12 W2 落地：受限 AST＋selector 聚合＋咽喉入账） | tests/unit/knowledge/ontology/test_functionDerivationGovernance.py | implemented |
+| CQ-13 | 对象当前处于什么状态、允许哪些迁移？ | 运维员 | P2 | 状态机（specs/2026-11-12 W3 落地：has_state＋迁移闭集＋事件桥） | tests/unit/knowledge/ontology/test_stateMachineValidation.py | implemented |
 
 ## 追溯规则
 

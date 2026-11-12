@@ -43,6 +43,7 @@ from ..fts_index import _SCHEMA_V37_FTS
 from ..ontology.action_registry import _SCHEMA_V42_ACTIONS
 from ..ontology.change_log import _SCHEMA_V33
 from ..ontology.function_registry import _SCHEMA_V43_FUNCTIONS
+from ..ontology.state_machine_registry import _SCHEMA_V44_STATE_MACHINES
 from ..ontology.derivation_ledger import _SCHEMA_V10
 from ..ontology.relation_candidates import _SCHEMA_V29_CANDIDATES
 from ..ontology.rule_engine import _SCHEMA_V28, _SCHEMA_V35, _SCHEMA_V9
@@ -153,6 +154,10 @@ _STEPS: List[tuple] = [
     #      语义登记，受限 AST 表达式）＋推导账本加 source_kind 列（rule|function，
     #      函数结论与规则结论同一张账本，不建第二账本）
     (43, _SCHEMA_V43_FUNCTIONS),
+    # v44：状态机（specs/2026-11-12 §5 W3）——ontology_state_machines 表
+    #      （states/transitions/event_bindings 闭集登记）＋企业源
+    #      sync_interval_seconds 列（interval 同步间隔，D3 最小闭合）
+    (44, _SCHEMA_V44_STATE_MACHINES),
 ]
 
 _registered = False

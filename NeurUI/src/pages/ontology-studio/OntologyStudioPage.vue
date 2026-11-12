@@ -85,6 +85,7 @@
           <StudioShapesSection v-else-if="activeSection === 'shapes'" :is-admin="isAdmin" />
           <StudioReasoningSection v-else-if="activeSection === 'reasoning'" :schema="schema" />
           <StudioReleaseSection v-else-if="activeSection === 'release'" :is-admin="isAdmin" />
+          <StudioRuntimeSection v-else-if="activeSection === 'runtime'" />
         </div>
       </GlassCard>
     </div>
@@ -108,8 +109,9 @@ import StudioRelationsSection from './StudioRelationsSection.vue'
 import StudioShapesSection from './StudioShapesSection.vue'
 import StudioReasoningSection from './StudioReasoningSection.vue'
 import StudioReleaseSection from './StudioReleaseSection.vue'
+import StudioRuntimeSection from './StudioRuntimeSection.vue'
 
-type SectionKey = 'overview' | 'cq' | 'terms' | 'relations' | 'shapes' | 'reasoning' | 'release'
+type SectionKey = 'overview' | 'cq' | 'terms' | 'relations' | 'shapes' | 'reasoning' | 'release' | 'runtime'
 
 const SECTIONS: Array<{ key: SectionKey; labelKey: string }> = [
   { key: 'overview', labelKey: 'navOverview' },
@@ -119,6 +121,7 @@ const SECTIONS: Array<{ key: SectionKey; labelKey: string }> = [
   { key: 'shapes', labelKey: 'navShapes' },
   { key: 'reasoning', labelKey: 'navReasoning' },
   { key: 'release', labelKey: 'navRelease' },
+  { key: 'runtime', labelKey: 'navRuntime' },
 ]
 
 const { t } = useI18n()

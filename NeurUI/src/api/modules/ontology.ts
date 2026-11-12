@@ -25,10 +25,13 @@ import type {
   FactQueryBody,
   FactQueryItem,
   IriResolution,
+  OntologyComputeResult,
   OntologyEnvelope,
+  OntologyFunctionRow,
   OntologyQualityReport,
   OntologySchemaData,
   OntologyShape,
+  OntologyStateMachineRow,
   OntologyShapeWrite,
   OntologyTerm,
   OntologyTermWrite,
@@ -330,4 +333,58 @@ export function deleteEnterpriseSource(sourceId: string) {
   return api.delete<ApiResponse<{ source_id: string }>>(
     `${BASE}/enterprise/sources/${encodeURIComponent(sourceId)}`,
   )
+}
+
+// ── W2/W3：函数层与状态机（specs/2026-11-12 §4/§5，runtime 分区）─────────────
+
+export function listOntologyFunctions() {
+  return api.get<ApiResponse<OntologyFunctionRow[]>>('/knowledge/ontology/functions')
+}
+
+export function createOntologyFunction(body: {
+  function_id: string
+  expr_text: string
+  output_predicate: string
+  input_bindings?: Record<string, unknown>
+  materialization?: 'observe' | 'enforce'
+  label?: string
+  definition?: string
+  enabled?: boolean
+}) {
+  return api.post<ApiResponse<OntologyFunctionRow>>('/knowledge/ontology/functions', body)
+}
+
+export function deleteOntologyFunction(functionId: string) {
+  return api.delete<ApiResponse<{ function_id: string }>>(
+    `/knowledge/ontology/functions/${encodeURIComponent(functionId)}`)
+}
+
+export function computeOntologyFunction(body: {
+  function_id: string
+  subject?: string
+}) {
+  return api.post<ApiResponse<OntologyComputeResult>>(
+    '/knowledge/ontology/functions/compute', body)
+}
+
+export function listOntologyStateMachines() {
+  return api.get<ApiResponse<OntologyStateMachineRow[]>>(
+    '/knowledge/ontology/state-machines')
+}
+
+export function createOntologyStateMachine(body: {
+  term_id: string
+  states: string[]
+  transitions: Array<{ from: string; to: string; guardPredicate?: string }>
+  initial_state: string
+  event_bindings?: Array<Record<string, unknown>>
+  enabled?: boolean
+}) {
+  return api.post<ApiResponse<OntologyStateMachineRow>>(
+    '/knowledge/ontology/state-machines', body)
+}
+
+export function deleteOntologyStateMachine(termId: string) {
+  return api.delete<ApiResponse<{ term_id: string }>>(
+    `/knowledge/ontology/state-machines/${encodeURIComponent(termId)}`)
 }
