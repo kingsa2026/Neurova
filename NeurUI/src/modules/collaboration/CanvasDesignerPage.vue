@@ -456,11 +456,12 @@
     <TriggerManagerDrawer v-model:open="triggersOpen" :workflow-id="canvasId" />
 
     <!-- 调试面板浮窗（P0 遗留⑤：断点列表 + Mock 列表 + 单步控制） -->
+    <!-- P2-32：toggle-breakpoint 空监听删除——面板内部已经过 props.controller
+         自行切换断点（DebugPanel.vue:43），emit 仅作父级通知，父级无额外动作 -->
     <DebugPanel
       v-if="showDebugPanel"
       :controller="debugController"
       :execution-id="lastRunId ?? ''"
-      @toggle-breakpoint="() => {}"
       @clear-mock="(nodeId: string) => setNodeMock(nodeId, null).catch(() => {})"
       @resume="handleDebugResume"
     />

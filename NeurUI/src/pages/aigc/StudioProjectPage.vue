@@ -143,6 +143,23 @@ async function saveEpisode(ep: StudioEpisode) {
   message.success(t('studio.saved'))
 }
 
+// P2-32（全库断点审计 2026-11-12）：剧集标题改动防抖落库——原 @change 显式
+// 空操作（改了不保存，标题改动只能靠手点保存按钮）
+const _episodeTitleTimers = new Map<string, ReturnType<typeof setTimeout>>()
+function onEpisodeTitleChange(ep: StudioEpisode) {
+  const prev = _episodeTitleTimers.get(ep.id)
+  if (prev) clearTimeout(prev)
+  _episodeTitleTimers.set(
+    ep.id,
+    setTimeout(() => {
+      _episodeTitleTimers.delete(ep.id)
+      updateEpisode(ep.id, { title: ep.title }).catch((e: any) => {
+        message.error(e?.response?.data?.detail || e?.message || t('common.error'))
+      })
+    }, 600),
+  )
+}
+
 // ── Phase02 场景角色 ─────────────────────────────────────────────────────
 async function extractAssets() {
   if (!currentEid.value) return
@@ -472,7 +489,7 @@ defineExpose({
             </GlassButton>
           </a-form>
           <div v-for="ep in episodes" :key="ep.id" class="studio-episode-block">
-            <a-input v-model:value="ep.title" class="studio-ep-title" @change="() => {}" />
+            <a-input v-model:value="ep.title" class="studio-ep-title" @change="onEpisodeTitleChange(ep)" />
             <a-textarea v-model:value="ep.content" :rows="4" />
             <GlassButton size="sm" @click="saveEpisode(ep)">{{ t('studio.save') }}</GlassButton>
           </div>
