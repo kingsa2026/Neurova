@@ -142,16 +142,56 @@ async def ontology_query(
     query: str = "",
     kind: str = "",
     namespace: str = "",
+    as_of: str = "",
+    known_at: str = "",
 ) -> dict:
     """查询本体术语（只读）：按 term_id/label/别名模糊匹配。query 传关键词；
     kind 可选 concept/relation/property；namespace 可选过滤（so = 标准本体
-    领域包；空 = 全部命名空间）。动作清单随 A4 批次扩展。"""
+    领域包；空 = 全部命名空间）。动作清单随 A4 批次扩展。
+    W0-1：as_of/known_at 任一给出时切换为双时态时点事实查询（透传存储层
+    factsBitemporal，CQ-10）；不可解析时间显式结构化拒绝，不静默忽略。"""
     from neurova.knowledge.ontology.term_registry import OntologyTermRegistry
 
     user = _currentUserFromContext(ctx)
     tenant = _tenantOf(user)
-    registry = OntologyTermRegistry(_store())
     needle = str(query or "").strip().lower()
+
+    if as_of or known_at:
+        # W0-1 双时态时点事实模式：与 REST /access/query 同一存储层查询、
+        # 同一 parseBitemporalStamp 判据（不各写一份校验）。
+        from neurova.knowledge.foundation.knowledge_facts import parseBitemporalStamp
+
+        try:
+            facts = _store().factsBitemporal(
+                _agentIdOf(user, None), tenantId=tenant,
+                asOf=parseBitemporalStamp(as_of, "as_of"),
+                knownAt=parseBitemporalStamp(known_at, "known_at"))
+        except ValueError as exc:
+            return {"rejected": True, "detail": str(exc)}
+        rows = []
+        for fact in facts:
+            haystack = " ".join([
+                str(fact.get("content") or ""), str(fact.get("subject_key") or ""),
+                str(fact.get("predicate_term_id") or ""),
+                str(fact.get("object_term") or "")]).lower()
+            if needle and needle not in haystack:
+                continue
+            rows.append({
+                "fact_id": str(fact.get("fact_id") or ""),
+                "subject_key": str(fact.get("subject_key") or ""),
+                "predicate_term_id": str(fact.get("predicate_term_id") or ""),
+                "object_term": str(fact.get("object_term") or ""),
+                "content": str(fact.get("content") or ""),
+                "confidence": fact.get("confidence"),
+                "valid_from": fact.get("valid_from"),
+                "valid_until": fact.get("valid_until"),
+                "recorded_at": fact.get("recorded_at"),
+                "retracted_at": fact.get("retracted_at"),
+            })
+        return {"tenant_id": tenant, "mode": "bitemporal", "facts": rows,
+                "count": len(rows)}
+
+    registry = OntologyTermRegistry(_store())
 
     if kind == "action":
         from neurova.knowledge.ontology.action_registry import getActionRegistry

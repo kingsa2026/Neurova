@@ -74,13 +74,12 @@ def test_probeStatusesMatchProductFace():
     rows = {r["cqId"]: r["status"] for r in cqTraceRows()}
     implemented = {
         "CQ-01", "CQ-02", "CQ-03", "CQ-04", "CQ-05",
-        "CQ-06", "CQ-07", "CQ-08", "CQ-09", "CQ-11",
+        "CQ-06", "CQ-07", "CQ-08", "CQ-09", "CQ-10", "CQ-11",
     }
     for cqId in sorted(implemented):
         assert rows[cqId] == "implemented", cqId
-    # CQ-10：asOf/knownAt 尚未接线进 accessQuery 的 REST 签名——现值 planned。
-    # REST 参数接线的那天，这条断言自动翻红，提醒把 specs 票面同步转正。
-    assert rows["CQ-10"] == "planned"
+    # CQ-10 已随 W0-1 转正（specs/2026-11-12 §2）：accessQuery 签名含 asOf/knownAt，
+    # MCP ontology_query 同名参数透传，非法时间显式 4xx——探针现值自动 implemented。
 
 
 def test_statusVocabularyClosed():

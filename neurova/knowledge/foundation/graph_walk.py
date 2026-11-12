@@ -33,6 +33,12 @@ _OFF_VALUES = ("0", "false", "off", "no")
 _MAX_HOPS_CEILING = 4
 #: 零子串锚点时的种子锚点上限（N3 接线）：兜底召回不放开到全图
 SEED_ANCHOR_CAP = 3
+#: 本体扩展锚点上限（W0-2 并入）：概念实例/关系主体增补锚点的封顶
+_EXPANSION_ANCHOR_CAP = 8
+#: 扩展词形最小长度（与 subjectsMentionedIn 的短标签口径一致：一个"的"字拽不动全图）
+_EXPANSION_MIN_WORD_CHARS = 2
+#: 命中术语上限：超长查询也不把术语表扫满
+_EXPANSION_TERM_MATCH_CAP = 8
 
 
 @dataclass
@@ -88,6 +94,12 @@ class GraphFactWalker:
         anchors = subjectsMentionedIn(
             self._store, query or "", self._agentId, tenantId
         )
+        # W0-2 本体扩展（query_expander 先比后合退役并入，D6）：强判据优先，
+        # 概念实例/关系主体只增补，不排挤既有锚。
+        expanded = self._expandedAnchors(query or "", tenantId)
+        if expanded:
+            existing = set(anchors)
+            anchors = anchors + [k for k in expanded if k not in existing]
         seeded = False
         if not anchors:
             anchors = self._seedAnchors(query or "", tenantId)
@@ -125,6 +137,100 @@ class GraphFactWalker:
         ]
 
     # ── 内部 ──────────────────────────────────────────────────
+
+    def _expandedAnchors(self, query: str, tenantId: Optional[str]) -> List[str]:
+        """本体级锚点扩展（W0-2：query_expander 先比后合退役，不可替代部分并入此处）。
+
+        查询文本包含注册术语词形（term_id/label/别名，casefold）时：
+        - concept → 该类型及**直接子类**的主体实例（子类实例展开）；
+        - relation → 断言该谓词的主体（关系邻域）。
+        「别名→扩展词」不并入：别名归一已有 query_normalization（检索侧）与
+        subjectsMentionedIn（锚点侧）两处既有面，再并就是第三份实现。
+        词形匹配先精确（整查询＝词形）后子串；子串态下若一词形是另一命中词形的
+        严格子串（层级命名如 Order ⊂ HighRiskOrder），长词形胜出、短词形不重复锚入。
+        强判据（subjectsMentionedIn）优先，本方法只增补；去重封顶；未命中零扩展；
+        术语表读取失败让路返回空（走查退回强判据，与种子兜底同款让路口径）。
+        """
+        haystack = (query or "").casefold()
+        if not haystack:
+            return []
+        try:
+            from ..ontology.term_registry import OntologyTermRegistry
+
+            registry = OntologyTermRegistry(self._store)
+            tenant = str(tenantId or "default")
+            exact: List[Any] = []
+            fuzzy: List[tuple] = []  # (term, 命中词形 casefold)
+            for term in registry.terms(tenantId=tenant):
+                words = [str(term.get("term_id") or ""), str(term.get("label") or "")]
+                words += [str(a) for a in (term.get("aliases") or [])]
+                words = [w for w in words
+                         if len(w.strip()) >= _EXPANSION_MIN_WORD_CHARS]
+                if not words:
+                    continue
+                hit = next((w for w in words if w.casefold() == haystack), None)
+                if hit is not None:
+                    exact.append(term)
+                    if len(exact) >= _EXPANSION_TERM_MATCH_CAP:
+                        break
+                    continue
+                hit = next((w.casefold() for w in words if w.casefold() in haystack), None)
+                if hit is not None:
+                    fuzzy.append((term, hit))
+                    if len(fuzzy) >= _EXPANSION_TERM_MATCH_CAP:
+                        break
+            if exact:
+                matched = exact
+            else:
+                # 层级命名去重：短词形是长词形严格子串时，长词形（更具体）胜出
+                folded = [w for _t, w in fuzzy]
+                matched = [t for t, w in fuzzy
+                           if not any(w != other and w in other for other in folded)]
+        except Exception:  # noqa: BLE001 - 扩展失败让路，走查退回强判据（旧行为）
+            return []
+        if not matched:
+            return []
+        keys: List[str] = []
+        seen: set = set()
+
+        def _collect(sql: str, params: List[Any]) -> None:
+            with self._store._lock:
+                for row in self._store._conn.execute(sql, params).fetchall():
+                    key = str(row["subject_key"] or "")
+                    if key and key not in seen:
+                        seen.add(key)
+                        keys.append(key)
+
+        for term in matched:
+            if len(keys) >= _EXPANSION_ANCHOR_CAP:
+                break
+            kind = str(term.get("kind") or "")
+            termId = str(term.get("term_id") or "")
+            if kind == "concept":
+                children = [termId] + [str(t["term_id"])
+                                       for t in registry.terms(tenantId=tenant)
+                                       if t.get("parent_term_id") == termId]
+                sql = ("SELECT subject_key FROM knowledge_subjects"
+                       " WHERE type_term_id IN (%s) AND status = 'active'"
+                       % ",".join("?" * len(children)))
+                params: List[Any] = list(children)
+            elif kind == "relation":
+                sql = ("SELECT DISTINCT subject_key FROM knowledge_facts"
+                       " WHERE predicate_term_id = ? AND status = 'active'"
+                       " AND record_kind = 'triple'")
+                params = [termId]
+            else:
+                continue
+            if self._agentId:
+                sql += " AND agent_id = ?"
+                params.append(self._agentId)
+            if tenantId is not None:
+                sql += " AND tenant_id = ?"
+                params.append(str(tenantId or "default"))
+            sql += " LIMIT ?"
+            params.append(_EXPANSION_ANCHOR_CAP - len(keys))
+            _collect(sql, params)
+        return keys[:_EXPANSION_ANCHOR_CAP]
 
     def _seedAnchors(self, query: str, tenantId: Optional[str]) -> List[str]:
         """零子串锚点时的 BM25 事实种子兜底（SAG 对比 N3 接线，2026-11-05）。

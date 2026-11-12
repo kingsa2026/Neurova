@@ -41,7 +41,7 @@
 | CQ-07 | 本体全库能否确定性交换导出、读回无损？ | 集成方 | P1 | `GET /v1/knowledge/ontology/export.ttl` | tests/unit/knowledge/ontology/test_turtleExport.py | implemented |
 | CQ-08 | 一条事实的说法来源与证据链是什么？ | 审计员 | P1 | `knowledge_assertions`/`knowledge_activities`（血缘段） | tests/unit/knowledge/test_digest_chain_integrity.py | implemented |
 | CQ-09 | 上层本体（实体/事件/代理）如何约束类型层级？ | 本体建模者 | P1 | upper-lite 种子（`seedUpperLite`）＋父链查询 | tests/unit/knowledge/ontology/test_upperLite.py::TestUpperLiteSeeds | implemented |
-| CQ-10 | 某类事实在历史某时点是否成立（双时态）？ | 审计员 | P2 | asOf/knownAt 查询（B11 落地） | tests/unit/knowledge/ontology/test_bitemporalQuery.py | planned |
+| CQ-10 | 某类事实在历史某时点是否成立（双时态）？ | 审计员 | P2 | asOf/knownAt 查询（B11 落地；W0-1 补 accessQuery 显式签名＋MCP 透传＋非法 4xx） | tests/unit/knowledge/ontology/test_bitemporalQuery.py | implemented |
 | CQ-11 | 写入前能否按自定义形状（SHACL 语义）做完整性校验？ | 本体管理员 | P2 | shapes 注册表＋dry-run（B10 落地） | tests/unit/knowledge/ontology/test_ontologyShapes.py | implemented |
 
 ## 追溯规则

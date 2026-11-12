@@ -92,7 +92,7 @@
 ### 19. `/api/v1/knowledge` — `knowledge.py`（聚合器；实现拆 knowledge_common/core/sharing/remote/ingestion）
 - CRUD: `GET` | `POST` | `GET/PUT/DELETE /{id}` | `POST /search`
 - `POST /search`（2026-11-04）：请求体可选 `source_modified_after`/`source_modified_before`（源文档修改时间范围；设置后无源时间条目如实排除）；条目含 `source_created_at`/`source_modified_at`（缺失空串），`created_at`＝入库时间
-- `POST /search` / `POST /access/query` 双时态（2026-11-06，B11 L3）：请求体可选 `asOf`/`knownAt`；任一给出时走事实层 `factsBitemporal`（`asOf` 裁 valid time，`knownAt` 裁 transaction time），返回事实项（`knowledge_id`＝fact_id，`metadata` 带 confidence/qualifier/valid/transaction）；两轴都空保持条目检索旧行为
+- `POST /search` / `POST /access/query` 双时态（2026-11-06，B11 L3）：请求体可选 `asOf`/`knownAt`；任一给出时走事实层 `factsBitemporal`（`asOf` 裁 valid time，`knownAt` 裁 transaction time），返回事实项（`knowledge_id`＝fact_id，`metadata` 带 confidence/qualifier/valid/transaction）；两轴都空保持条目检索旧行为。**W0-1（2026-11-13）**：`/access/query` 增显式查询参数 `?asOf=`/`?knownAt=`（与 body 同义、显式优先）；不可解析时间由存储层 `parseBitemporalStamp` 单点判，显式 **400**（REST）/结构化 `rejected`（MCP `ontology_query` 的 `as_of`/`known_at` 同款），不静默当空轴
 - 本体 dry-run 与流水线（2026-11-05，升级计划 B2/B6，实现 `knowledge_ontology.py`＋`knowledge/ontology/pipeline.py`）：
   - `POST /ontology/validate`（只读）：入参 `{tenantId?, agentId?, triples:[{subjectLabel, subjectKey?, predicateTermId, objectTerm, qualifier?}]}`；逐条回 `{index, subjectKey, findings, violations, verdict}`＋`summary`。violation 不抛异常进 verdict；不落库、不建主体。校验路径与流水线共用一份
   - `POST /ontology/pipeline/run`（管理员）：入参 `{agentId?, tenantId?, termUpserts[], ruleRegistrations[], factCandidates[], reason?}`；候选先全部 dry-run，任一 violation 整批拒绝（400 带 `rejections`，零落盘）；应用术语/规则（只登记不触发求值）后写 `knowledge_baselines` 快照（scope=`ontology_pipeline`）；返回 `{baselineId, applied, summary}`
@@ -139,7 +139,7 @@
   - `POST /enterprise/sources`（**仅管理员**）：入参 `{source_id, descriptor, enabled?}`；`validateDescriptor` 编译期先判（sourceType 白名单 sql/erp_api/event_stream、模板占位符须是已声明列、predicate/object.term 须已登记、object.kind 闭集、qualifier/validFrom/validUntil 列须已声明、描述符任何字段含 SQL 形状片段即拒），非法整条拒 400 带定位且**零落库**
   - 两态分开：`enabled` 默认 False（关闸＝摄取路径零调用零网络）；`adapter_registered` 读进程内唯一适配器注册表 `getSourceRegistry()`，默认 False——真实 DB/ERP API/事件流连接器另立项，本端点不提供任何「已连接」调用
 - 四动词统一门面（2026-11-05，升级计划 B3，实现 `knowledge_access_facade.py`，纯转发零新逻辑）：
-  - `POST /access/query` → 同 `POST /search`（入参与响应形状一致；支持 `asOf`/`knownAt` 双时态，任一给出时返回事实视图）
+  - `POST /access/query` → 同 `POST /search`（入参与响应形状一致；支持 `asOf`/`knownAt` 双时态——body 内 `as_of`/`known_at` 或显式查询参数 `?asOf=`/`?knownAt=`（W0-1，显式优先），任一给出时返回事实视图；非法时间 400）
   - `POST /access/analyze` → 同 `POST /v1/semantic-search/analyze`
   - `POST /access/validate` → 同 `POST /ontology/validate`
   - `POST /access/use/{fact_id}` → 同 `POST /facts/{fact_id}/adoption`（治理门同源：仅管理员）
