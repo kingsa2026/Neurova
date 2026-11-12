@@ -74,6 +74,28 @@ def get_agent_instance(agent_id: str = ""):
     return agent
 
 
+def _sharedGroupResolverFor(username: str):
+    """构建"读者组解析器"（P1-10 残留实装：共享组可见性）。
+
+    组员关系源在 auth 域——组员名单是**用户名**清单（users.username UNIQUE），
+    闭包捕获请求身份的 username；core 侧管理器按 reader user_id 调用时回
+    本请求的组 id 集。组员关系不可达＝无组（fail-closed，共享组行不可见）。
+    """
+
+    def _resolve(_uid: str) -> tuple:
+        try:
+            from neurova.auth.user_group_model import get_user_group_manager
+
+            model = get_user_group_manager()
+            return tuple(
+                g.group_id for g in model.get_groups_for_user(username)
+            )
+        except Exception:  # noqa: BLE001 - 组员关系不可达按无组处理
+            return ()
+
+    return _resolve
+
+
 def get_memory_manager(
     agent_id: Optional[str] = None,
     user: Optional[Dict[str, Any]] = None,
@@ -123,6 +145,12 @@ def get_memory_manager(
             uid = "default"
         if hasattr(agent.memory_manager, "set_request_scope"):
             agent.memory_manager.set_request_scope(neuser_id=neuser, user_id=uid)
+        # P1-10 残留实装：共享组可见性的读者组解析器接线（组员关系源在
+        # auth 域——组员名单是用户名清单，闭包捕获请求身份的 username）
+        if hasattr(agent.memory_manager, "set_shared_group_resolver"):
+            agent.memory_manager.set_shared_group_resolver(
+                _sharedGroupResolverFor((user or {}).get("username") or "")
+            )
 
         return agent.memory_manager
 
