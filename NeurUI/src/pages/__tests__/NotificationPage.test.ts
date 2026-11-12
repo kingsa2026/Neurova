@@ -131,6 +131,10 @@ beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
   vi.mocked(notifApi.getNotifications).mockResolvedValue(makeEnvelope() as any)
+  vi.mocked(notifApi.getUnreadCount).mockResolvedValue({
+    code: 0,
+    data: { total: 1, info: 1, warning: 0, error: 0, success: 0 },
+  } as any)
   vi.mocked(notifApi.markRead).mockResolvedValue({ code: 0 } as any)
   vi.mocked(notifApi.markAllRead).mockResolvedValue({ code: 0 } as any)
 })

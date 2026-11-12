@@ -36,6 +36,8 @@ export const useNotificationStore = defineStore('notifications', () => {
       const res = await getNotifications({ page: p, size: size.value })
       notifications.value = res.data.items
       total.value = res.data.total
+      // P2-29：列表拉取后同步未读徽标——页面与布局头同源联动
+      await fetchUnreadCount()
     } catch (e) {
       console.error('[NotificationStore] fetchNotifications failed', e)
     } finally {

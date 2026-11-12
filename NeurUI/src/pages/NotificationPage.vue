@@ -95,29 +95,54 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { storeToRefs } from 'pinia'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
 import { formatTimestampText } from '@/utils/displayText'
-import * as notifApi from '@/api/modules/notifications'
 import { reviewKnowledgePublic } from '@/api/modules/knowledge'
 import { reviewSkillSubmission } from '@/api/modules/skill-pool'
 import { acceptSkillTransfer, rejectSkillTransfer } from '@/api/modules/skill-pool'
 import { useAuthStore } from '@/stores/auth'
+import { useNotificationStore } from '@/stores/notifications'
 import type { Notification } from '@/api/modules/notifications'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
 const isAdmin = computed(() => authStore.user?.role === 'admin')
 
-const loading = ref(false)
-const markingAll = ref(false)
-const notifications = ref<Notification[]>([])
-const page = ref(1)
+// P2-29（全库断点审计 2026-11-12）：页面改走 notifications store（与布局头
+// 的徽标同源）——原实现绕开 store 直连 API 双轨并存，徽标不联动。
+const notificationStore = useNotificationStore()
+const { notifications, loading, total, page } = storeToRefs(notificationStore)
+const unreadCount = computed(() => notificationStore.unreadTotal)
 const pageSize = ref(20)
-const total = ref(0)
+const markingAll = ref(false)
 
-const unreadCount = computed(() => notifications.value.filter(n => !n.read).length)
+const fetchNotifications = async () => {
+  await notificationStore.fetchNotifications(page.value)
+}
+
+const markRead = async (id: string) => {
+  await notificationStore.markAsRead(id)
+}
+
+const markAllRead = async () => {
+  markingAll.value = true
+  try {
+    await notificationStore.markAllAsRead()
+    message.success(t('common.success'))
+  } catch {
+    message.error(t('common.error'))
+  } finally {
+    markingAll.value = false
+  }
+}
+
+const deleteNotif = async (id: string) => {
+  await notificationStore.remove(id)
+  message.success(t('common.success'))
+}
 
 const typeColor = (type: string) => {
   const map: Record<string, string> = {
@@ -138,55 +163,6 @@ const typeColor = (type: string) => {
     skill_transfer: 'purple',
   }
   return map[type] || 'default'
-}
-
-
-const fetchNotifications = async () => {
-  loading.value = true
-  try {
-    const res = await notifApi.getNotifications({ page: page.value, size: pageSize.value })
-    const data = res?.data
-    notifications.value = data?.items ?? (Array.isArray(data) ? data : [])
-    total.value = data?.total ?? notifications.value.length
-  } catch {
-    message.error(t('common.error'))
-  } finally {
-    loading.value = false
-  }
-}
-
-const markRead = async (id: string) => {
-  try {
-    await notifApi.markRead(id)
-    const notif = notifications.value.find(n => n.id === id)
-    if (notif) notif.read = true
-  } catch {
-    message.error(t('common.error'))
-  }
-}
-
-const markAllRead = async () => {
-  markingAll.value = true
-  try {
-    await notifApi.markAllRead()
-    notifications.value.forEach(n => { n.read = true })
-    message.success(t('common.success'))
-  } catch {
-    message.error(t('common.error'))
-  } finally {
-    markingAll.value = false
-  }
-}
-
-const deleteNotif = async (id: string) => {
-  try {
-    await notifApi.deleteNotification(id)
-    notifications.value = notifications.value.filter(n => n.id !== id)
-    total.value = Math.max(0, total.value - 1)
-    message.success(t('common.success'))
-  } catch {
-    message.error(t('common.error'))
-  }
 }
 
 const onPageChange = (p: number) => { page.value = p; fetchNotifications() }
@@ -226,12 +202,8 @@ async function openDetail(notif: Notification) {
   reviewNote.value = ''
   detailVisible.value = true
   if (!notif.read) {
-    try {
-      await notifApi.markRead(notif.id)
-      notif.read = true
-    } catch {
-      // 标记已读失败不阻断查看
-    }
+    // 徽标联动：走 store（顺带刷新未读计数）
+    await notificationStore.markAsRead(notif.id)
   }
 }
 
