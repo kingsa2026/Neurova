@@ -82,8 +82,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useAuthStore } from '@/stores/auth'
 import { message } from 'ant-design-vue'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -91,12 +92,18 @@ import {
   exportOntologyJsonLd,
   exportOntologyOwl,
   exportOntologyProv,
+  exportOntologyCsv,
+  exportOntologyCypher,
+  exportOntologyGexf,
+  exportOntologyGraphML,
   exportOntologyShacl,
   exportOntologyTtl,
   resolveOntologyIri,
 } from '@/api/modules/ontology'
 import type { IriResolution } from '@/types/ontology'
 import { jsonOrDash } from '@/utils/ontologyFormat'
+
+const authStore = useAuthStore()
 
 const { t } = useI18n()
 
@@ -115,6 +122,10 @@ const FORMATS: ExportFormat[] = [
   { key: 'owl', name: 'OWL 2 RL', desc: 'subClass / inverse / transitive axioms', filename: 'ontology-export.owl.ttl', mime: 'text/turtle', run: () => exportOntologyOwl() },
   { key: 'shacl', name: 'SHACL', desc: 'shape registry → sh: shapes', filename: 'ontology-shapes.ttl', mime: 'text/turtle', run: () => exportOntologyShacl() },
   { key: 'prov', name: 'PROV-O', desc: 'activities / derivations', filename: 'ontology-prov.ttl', mime: 'text/turtle', run: () => exportOntologyProv() },
+  { key: 'graphml', name: 'GraphML', desc: 'XML graph exchange', filename: 'ontology-export.graphml', mime: 'application/graphml+xml', run: () => exportOntologyGraphML() },
+  { key: 'gexf', name: 'GEXF', desc: 'GEXF 1.3 graph exchange', filename: 'ontology-export.gexf', mime: 'application/gexf+xml', run: () => exportOntologyGexf() },
+  { key: 'cypher', name: 'Cypher', desc: 'CREATE statements dump', filename: 'ontology-export.cypher', mime: 'text/plain', run: () => exportOntologyCypher() },
+  { key: 'csv', name: 'CSV', desc: 'nodes / edges dual file', filename: 'ontology-export.csv', mime: 'text/csv', run: () => exportOntologyCsv() },
 ]
 
 const exportingFormat = ref('')
@@ -172,6 +183,12 @@ async function copyIri() {
   }
 }
 
+/** W11（P9 拍板②）：admin 真门——页面与路由此前无角色门控，
+     仅 exportAdminOnly 文案提示（假门）。补真门与文案语义对齐。 */
+const isAdmin = computed(() => {
+  const user = authStore.user as { role?: string } | null | undefined
+  return user?.role === 'admin'
+})
 </script>
 
 <style scoped>

@@ -124,6 +124,19 @@ def _probeShapeValidation() -> str:
     return "implemented" if hits == 2 else ("partial" if hits else "planned")
 
 
+def _probeExportBreadth() -> str:
+    """CQ-24：多格式导出（specs/2026-11-12 W11）——GraphML/GEXF/Cypher/CSV 端点。"""
+    from neurova.knowledge.ontology.export import graph_exchange
+
+    hits = (
+        hasattr(graph_exchange, "exportGraphML")
+        + hasattr(graph_exchange, "exportGexf")
+        + hasattr(graph_exchange, "exportCypher")
+        + hasattr(graph_exchange, "exportCsv")
+    )
+    return "implemented" if hits == 4 else ("partial" if hits else "planned")
+
+
 def _probeIngestBreadth() -> str:
     """CQ-23：湖仓/推送摄取（specs/2026-11-12 W10）——三连接器/http_pull/webhook。"""
     from neurova.knowledge.enterprise import connectors_lakehouse, protocols, webhook_receiver
@@ -382,6 +395,11 @@ CQ_TRACE_ROWS: tuple = (
         query="摄取广度（specs/2026-11-12 W10 落地：三连接器＋http_pull 接线＋webhook 幂等）",
         testId="tests/unit/knowledge/enterprise/test_lakehouseConnectors.py",
         probe=_probeIngestBreadth),
+    CqTraceRow(
+        cqId="CQ-24", question="全库能否导出为外部图库可消化的格式？", actor="集成方", priority="P2",
+        query="多格式导出（specs/2026-11-12 W11 落地：GraphML/GEXF/Cypher/CSV 确定性）",
+        testId="tests/unit/knowledge/ontology/test_exportFormats.py",
+        probe=_probeExportBreadth),
     CqTraceRow(
         cqId="CQ-17", question="过去有没有同类场景的判例？", actor="审计员", priority="P2",
         query="判例检索（specs/2026-11-12 W7 落地：词法混合计分，嵌入偏差登记）",

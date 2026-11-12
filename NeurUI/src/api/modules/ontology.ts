@@ -479,3 +479,35 @@ export function runOntologyAbduce(body: {
   return api.post<ApiResponse<Record<string, unknown>>>(
     '/knowledge/ontology/abduce', body)
 }
+
+export function exportOntologyGraphML(agentId?: string) {
+  const q = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''
+  return api.get<string>(`${BASE}/ontology/export.graphml${q}`, {
+    responseType: 'text',
+    params: agentId ? { agent_id: agentId } : {},
+  })
+}
+
+export function exportOntologyGexf(agentId?: string) {
+  const q = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''
+  return api.get<string>(`${BASE}/ontology/export.gexf${q}`, {
+    responseType: 'text',
+    params: agentId ? { agent_id: agentId } : {},
+  })
+}
+
+export function exportOntologyCypher(agentId?: string) {
+  const q = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''
+  return api.get<string>(`${BASE}/ontology/export.cypher${q}`, {
+    responseType: 'text',
+    params: agentId ? { agent_id: agentId } : {},
+  })
+}
+
+export function exportOntologyCsv(agentId?: string) {
+  const q = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''
+  return api.get<string>(`${BASE}/ontology/export.csv${q}`, {
+    responseType: 'text',
+    params: agentId ? { agent_id: agentId } : {},
+  })
+}
