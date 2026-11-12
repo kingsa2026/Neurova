@@ -81,6 +81,9 @@ export interface MemoryEntry {
   perspective?: string
   tags?: string[]
   metadata?: Record<string, unknown>
+  /** P1-10 残留实装：共享面（shared＝本 agent 全员可见；share_group_ids＝读者组交集可见） */
+  shared?: boolean
+  share_group_ids?: string[]
   created_at: string
   updated_at?: string
   expires_at?: string
@@ -115,6 +118,9 @@ export interface MemoryCreatePayload {
   perspective?: string
   tags?: string[]
   metadata?: Record<string, unknown>
+  /** P1-10 残留实装：共享组写入面（AddMemoryRequest.shared/share_group_ids） */
+  shared?: boolean
+  share_group_ids?: string[]
   /** 是否自动分类推断（后端 AddMemoryRequest.auto_classify；只补未声明的分类维度） */
   auto_classify?: boolean
   /** 分类上下文（后端为 dict，如 { emotion: 'joy' 触发情感亲和增强 }；此前 TS 误标为 string） */

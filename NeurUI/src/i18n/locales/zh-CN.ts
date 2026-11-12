@@ -810,6 +810,7 @@ export default {
     semanticSearch: '语义搜索',
     tags: '标签',
     addTags: '添加标签',
+    shareGroups: '共享组',
     expires: '过期时间',
     metadata: '元数据',
   },

@@ -801,6 +801,7 @@ export default {
     semanticSearch: 'Semantic Search',
     tags: 'Tags',
     addTags: 'Add tags',
+    shareGroups: 'Share groups',
     expires: 'Expires',
     metadata: 'Metadata',
   },

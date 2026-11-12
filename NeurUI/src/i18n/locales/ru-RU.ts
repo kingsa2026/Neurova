@@ -799,6 +799,7 @@ export default {
     semanticSearch: 'Semantic Search',
     tags: 'Теги',
     addTags: 'Добавить теги',
+    shareGroups: 'Группы доступа',
     expires: 'Истекает',
     metadata: 'Метаданные',
   },
