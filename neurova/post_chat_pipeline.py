@@ -1379,9 +1379,14 @@ class PostChatPipeline:
             # :1463/:1588/:1973 兄弟调用点一致）——原写法恒为空串
             agent_id = str(getattr(self._agt.config, "agent_id", "") or "")
             # B-5 契约注释：身份读取与 tool_executor._agent_identity 一致——
-            # P2-22：_current_user_id 死读层已删（全仓无写入方，恒 None），
-            # 直接读 public 别名（turn_state 直读转发，§6-163 唯一身份通道）
-            user_id = str(getattr(self._agt, "current_user_id", None) or "")
+            # 私有显式位（测试替身/显式写入方）优先于 public 别名，防真值影子
+            # 遮蔽显式身份（B5 契约锁定该顺序；P2-22 的删除被该契约打回，
+            # 见 tool_executor._agent_identity 的同款注释）
+            user_id = str(
+                getattr(self._agt, "_current_user_id", None)
+                or getattr(self._agt, "current_user_id", None)
+                or ""
+            )
             for tm in tool_msgs or []:
                 if not isinstance(tm, dict) or tm.get("type") != "tool_result":
                     continue

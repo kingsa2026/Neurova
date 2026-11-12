@@ -37,7 +37,9 @@ class TestPayloadTimestampPassthrough:
         result = adapter._normalize_item({"knowledge_id": "k2", "content": "x"})
         assert result["recorded_at"] is None
         assert result["valid_from"] is None
-        assert result["derivation"] is None
+        # B4/D-2 契约（归档分支合并带入）：没有推导参与的条目**不挂** derivation
+        # 键——缺席是没查过，挂 None 键是替账本作伪证
+        assert "derivation" not in result
 
 
 class TestRecencyBoost:
