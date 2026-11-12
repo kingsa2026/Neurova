@@ -799,6 +799,7 @@ export default {
     semanticSearch: '意味検索',
     tags: 'タグ',
     addTags: 'タグを追加',
+    shareGroups: '共有グループ',
     expires: '有効期限',
     metadata: 'メタデータ',
   },

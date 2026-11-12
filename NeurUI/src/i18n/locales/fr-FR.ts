@@ -799,6 +799,7 @@ export default {
     semanticSearch: 'Recherche sémantique',
     tags: 'Étiquettes',
     addTags: 'Ajouter des étiquettes',
+    shareGroups: 'Groupes de partage',
     expires: 'Expire le',
     metadata: 'Métadonnées',
   },

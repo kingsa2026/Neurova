@@ -799,6 +799,7 @@ export default {
     semanticSearch: 'Semantic Search',
     tags: 'टैग',
     addTags: 'टैग जोड़ें',
+    shareGroups: 'साझा समूह',
     expires: 'समाप्ति',
     metadata: 'मेटाडेटा',
   },

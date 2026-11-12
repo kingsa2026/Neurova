@@ -799,6 +799,7 @@ export default {
     semanticSearch: '의미 검색',
     tags: '태그',
     addTags: '태그 추가',
+    shareGroups: '공유 그룹',
     expires: '만료 시간',
     metadata: '메타데이터',
   },

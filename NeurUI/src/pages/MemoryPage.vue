@@ -354,6 +354,12 @@
           <a-form-item v-if="selectedMemory.tags?.length" :label="t('memory.tags')">
             <a-tag v-for="tag in selectedMemory.tags" :key="tag" color="blue">{{ tag }}</a-tag>
           </a-form-item>
+          <a-form-item v-if="editing" :label="t('memory.shared')">
+            <a-switch v-model:checked="editShared" />
+          </a-form-item>
+          <a-form-item v-if="editing" :label="t('memory.shareGroups')">
+            <a-select v-model:value="editShareGroups" mode="tags" />
+          </a-form-item>
           <a-form-item v-if="selectedMemory.metadata" :label="t('memory.metadata')">
             <pre class="metadata-json">{{ JSON.stringify(selectedMemory.metadata, null, 2) }}</pre>
           </a-form-item>
@@ -365,7 +371,7 @@
           </a-form-item>
         </a-form>
         <div class="modal-actions">
-          <GlassButton variant="ghost" size="sm" @click="editing = !editing">
+          <GlassButton variant="ghost" size="sm" @click="toggleEdit">
             {{ editing ? t('common.cancel') : t('common.edit') }}
           </GlassButton>
           <GlassButton v-if="editing" variant="primary" size="sm" :loading="updating" @click="updateMemory">
@@ -506,6 +512,9 @@ const editing = ref(false)
 const decaying = ref(false)
 const reloading = ref(false)
 const importing = ref(false)
+// P1-10 残留实装：编辑态的共享面控件（shared 开关＋共享组标签输入）
+const editShared = ref(false)
+const editShareGroups = ref<string[]>([])
 
 const memories = ref<MemoryEntry[]>([])
 const total = ref(0)
@@ -810,13 +819,27 @@ const viewMemory = async (record: MemoryEntry) => {
   showDetailModal.value = true
 }
 
+const toggleEdit = () => {
+  if (!editing.value) {
+    // 进入编辑态：共享面控件从当前行播种
+    editShared.value = !!selectedMemory.value?.shared
+    editShareGroups.value = [...(selectedMemory.value?.share_group_ids ?? [])]
+  }
+  editing.value = !editing.value
+}
+
 const updateMemory = async () => {
   if (!selectedMemory.value) return
   updating.value = true
   try {
     await memoryApi.updateMemory(
       selectedMemory.value.id,
-      { content: selectedMemory.value.content },
+      {
+        content: selectedMemory.value.content,
+        // P1-10 残留实装：共享面随编辑保存
+        shared: editShared.value,
+        share_group_ids: editShareGroups.value,
+      },
       selectedMemory.value.agent_id,
       { management: isAdmin.value },
     )
