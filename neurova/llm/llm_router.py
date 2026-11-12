@@ -262,7 +262,7 @@ class LLMRouter:
 # 静默降级。改为共享单例 + 从 LLMProviderManager 单例惰性同步 provider。
 
 _router_instance: Optional["LLMRouter"] = None
-_router_lock = threading.Lock()
+_router_lock = threading.RLock()
 
 
 def get_llm_router() -> "LLMRouter":

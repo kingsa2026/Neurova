@@ -169,7 +169,7 @@ class UserCredentialStore:
 
 # 模块级单例工厂（SSH/RDP provider 与设置端点共用）
 _credential_store_instance: Optional[UserCredentialStore] = None
-_credential_store_lock = threading.Lock()
+_credential_store_lock = threading.RLock()
 
 
 def get_credential_store(base_dir: str = "") -> UserCredentialStore:

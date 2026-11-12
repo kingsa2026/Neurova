@@ -1636,7 +1636,7 @@ def _build_mock_response(messages: List[Dict[str, str]]) -> LLMResponse:
 
 
 _multi_model_clients: Dict[str, MultiModelLLMClient] = {}
-_multi_model_clients_lock = threading.Lock()
+_multi_model_clients_lock = threading.RLock()
 
 
 def get_multi_model_client(scope: Optional[str] = None) -> MultiModelLLMClient:

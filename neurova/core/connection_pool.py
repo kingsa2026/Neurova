@@ -344,7 +344,7 @@ class SQLiteConnectionPool:
 
 # 全局连接池管理
 _pools: dict = {}
-_pools_lock = threading.Lock()
+_pools_lock = threading.RLock()
 
 
 def _defaultPoolPath() -> str:

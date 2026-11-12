@@ -48,7 +48,7 @@ class ModelCapabilityCache:
     """线程安全、进程级模型能力缓存：``{model_key: {capability: entry}}``。"""
 
     _instance: Optional["ModelCapabilityCache"] = None
-    _lock = threading.Lock()
+    _lock = threading.RLock()
 
     def __init__(self) -> None:
         self._learned: dict = {}
