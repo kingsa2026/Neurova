@@ -16,15 +16,15 @@
       <!-- KPI cards（持久化口径：累计/单日峰值/最长会话时长/连续天数） -->
       <div class="nr-usage-kpis">
         <GlassStatCard :label="t('usageStats.totalTokens')" :value="formatTokenCount(summary.total_tokens)" emoji="📊" spark-color="#a78bfa" :spark-data="sparkDaily" />
-        <GlassStatCard :label="t('usageStats.cacheHitTokens')" :value="formatTokenCount(summary.cache_read_tokens)" emoji="⚡" spark-color="#34d399" :spark-data="sparkDaily" />
+        <GlassStatCard :label="t('usageStats.cacheHitTokens')" :value="formatTokenCount(summary.cache_read_tokens)" emoji="⚡" spark-color="var(--nr-success)" :spark-data="sparkDaily" />
         <GlassStatCard :label="t('usageStats.cacheHitRate')" :value="`${((summary.cache_hit_rate || 0) * 100).toFixed(1)}%`" emoji="🎯" spark-color="#22d3ee" :spark-data="sparkDaily" />
-        <GlassStatCard :label="t('usageStats.peakTokens')" :value="formatTokenCount(summary.peak_daily_tokens)" emoji="⚡" spark-color="#60a5fa" :spark-data="sparkDaily" />
-        <GlassStatCard :label="t('usageStats.longestSession')" :value="formatDuration(summary.longest_session_seconds)" emoji="⏱️" spark-color="#34d399" :spark-data="sparkCalls" />
-        <GlassStatCard :label="t('usageStats.currentStreak')" :value="`${summary.current_streak_days} ${t('usageStats.days')}`" emoji="🔥" spark-color="#fbbf24" :spark-data="sparkCalls" />
+        <GlassStatCard :label="t('usageStats.peakTokens')" :value="formatTokenCount(summary.peak_daily_tokens)" emoji="⚡" spark-color="var(--nr-info)" :spark-data="sparkDaily" />
+        <GlassStatCard :label="t('usageStats.longestSession')" :value="formatDuration(summary.longest_session_seconds)" emoji="⏱️" spark-color="var(--nr-success)" :spark-data="sparkCalls" />
+        <GlassStatCard :label="t('usageStats.currentStreak')" :value="`${summary.current_streak_days} ${t('usageStats.days')}`" emoji="🔥" spark-color="var(--nr-warning)" :spark-data="sparkCalls" />
         <GlassStatCard :label="t('usageStats.longestStreak')" :value="`${summary.longest_streak_days} ${t('usageStats.days')}`" emoji="🏆" spark-color="#f472b6" :spark-data="sparkCalls" />
-        <GlassStatCard :label="t('usageStats.aigcImages')" :value="aigcItems('image')" emoji="🖼️" spark-color="#60a5fa" :spark-data="aigcSpark('image')" />
+        <GlassStatCard :label="t('usageStats.aigcImages')" :value="aigcItems('image')" emoji="🖼️" spark-color="var(--nr-info)" :spark-data="aigcSpark('image')" />
         <GlassStatCard :label="t('usageStats.aigcVideos')" :value="aigcItems('video')" emoji="🎬" spark-color="#a78bfa" :spark-data="aigcSpark('video')" />
-        <GlassStatCard :label="t('usageStats.aigcAudios')" :value="aigcItems('audio')" emoji="🔊" spark-color="#34d399" :spark-data="aigcSpark('audio')" />
+        <GlassStatCard :label="t('usageStats.aigcAudios')" :value="aigcItems('audio')" emoji="🔊" spark-color="var(--nr-success)" :spark-data="aigcSpark('audio')" />
       </div>
 
       <!-- Token 活动热力图（每日网格 / 每周 / 累计） -->
@@ -285,7 +285,7 @@ const trendOption = computed(() => {
   const dates = [...new Set(pts.map((p) => p.date))].sort()
   const labels = dates.map((d) => d.slice(5))
   const models = (overview.value.by_model ?? []).map((m) => m.model)
-  const palette = ['#60a5fa', '#34d399', '#a78bfa', '#f87171', '#fbbf24', '#22d3ee', '#f472b6']
+  const palette = ['var(--nr-info)', 'var(--nr-success)', '#a78bfa', 'var(--nr-error)', 'var(--nr-warning)', '#22d3ee', '#f472b6']
   return {
     tooltip: { trigger: 'axis' },
     legend: { top: 0, textStyle: { color: '#94a3b8' }, icon: 'circle' },

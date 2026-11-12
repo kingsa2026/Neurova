@@ -153,7 +153,7 @@ const SECTION_COLORS: Record<string, string> = {
   McpTools: '#9f7fff',
   Other: '#b0b6c0',
   Skills: '#4fc3a1',
-  SystemPrompt: '#e6a23c',
+  SystemPrompt: 'var(--nr-warning)',
 }
 
 const panelRows = computed(() => {

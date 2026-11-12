@@ -16,11 +16,11 @@ import { join } from 'node:path'
 const COLOR_RE = /#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)/g
 
 const BASELINES: Record<string, number> = {
-  'src/pages/ModelPage.vue': 114,
-  'src/pages/analytics/TokenActivitySection.vue': 39,
-  'src/components/chat/ContextUsageIndicator.vue': 22,
-  'src/pages/graph-workbench/GraphExplorer3D.vue': 16,
-  'src/modules/collaboration/CanvasDesignerPage.vue': 46,
+  'src/pages/ModelPage.vue': 114,  // 语义淡色已换令牌 20 处；余为中性灰与品牌色
+  'src/pages/analytics/TokenActivitySection.vue': 29,  // 状态色已换令牌；余为数据系列色
+  'src/components/chat/ContextUsageIndicator.vue': 21,  // 警告色已换令牌；余为中性灰阶
+  'src/pages/graph-workbench/GraphExplorer3D.vue': 16,  // 3D 数据可视化色（Three.js 材质，不走 CSS 令牌）
+  'src/modules/collaboration/CanvasDesignerPage.vue': 35,  // 语义与主色已换令牌
 }
 
 function countHardcodedColors(relPath: string): number {
