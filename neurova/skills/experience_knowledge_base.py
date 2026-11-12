@@ -140,6 +140,11 @@ def _tokenize_for_match(text: str) -> List[str]:
     return out
 
 
+# P2-20（全库断点审计 2026-11-12）：本库 schema 演进的版本域名——注册进
+# core/db_migration（PRAGMA user_version 防降级），与 memory_layer 同机制。
+_EKB_SCHEMA_DOMAIN = "experience_records"
+
+
 class ExperienceKnowledgeBase:
     """经验知识库
 
@@ -188,6 +193,16 @@ class ExperienceKnowledgeBase:
                 agent_id TEXT NOT NULL, answerer_id TEXT NOT NULL, question_id TEXT NOT NULL,
                 lesson TEXT NOT NULL, PRIMARY KEY (agent_id, answerer_id, question_id))""")
             self._conn.commit()
+            # P2-20：schema 演进注册进版本域（防降级保护）。v2 步骤取无提交
+            # 变体（迁移事务由 db_migration 管）；重复注册幂等忽略。
+            from neurova.core.db_migration import (
+                migrate as _runMigrations,
+                register_migration as _registerMigration,
+            )
+
+            _registerMigration(1, "SELECT 1", domain=_EKB_SCHEMA_DOMAIN)
+            _registerMigration(2, self._migrate_schema_steps, domain=_EKB_SCHEMA_DOMAIN)
+            _runMigrations(self._conn, domain=_EKB_SCHEMA_DOMAIN)
             self._migrate_schema()
 
     def _migrate_schema(self) -> None:
@@ -197,7 +212,14 @@ class ExperienceKnowledgeBase:
         连接时按当前口径回填。`''` 表示"算不出身份"（不参与去重），
         `NULL` 只表示"尚未回填"——回填语句只扫 NULL 行，故不会每启动重扫一遍。
         """
-        cur = self._conn.cursor()
+        self._migrate_schema_steps(self._conn)
+        self._conn.commit()
+        # P1-3：存量重复行清理挂在迁移尾（幂等，见 mergeDuplicateRecords）。
+        self.mergeDuplicateRecords()
+
+    def _migrate_schema_steps(self, conn) -> None:
+        """_migrate_schema 的无提交变体（P2-20：供 db_migration 迁移事务调用）。"""
+        cur = conn.cursor()
         info = {row[1]: row for row in cur.execute("PRAGMA table_info(experience_records)")}
         # 幂等补列（011/006/008/015/001）。先补齐再谈重建：重建要逐列拷贝，
         # 列表必须以补完后的表为准。
@@ -279,13 +301,6 @@ class ExperienceKnowledgeBase:
                 "UPDATE experience_records SET content_key = ? WHERE id = ?",
                 (normalized_payload_key(payload), row["id"]),
             )
-        self._conn.commit()
-
-        # P1-3（全库断点审计 2026-11-12）：存量重复行清理接进迁移链——
-        # mergeDuplicateRecords 此前全仓零调用，去重门 NULL 失效期的存量重复行
-        # 永不清理（生产库曾 300+ 行同句）。幂等（同身份只剩一行后零删除），
-        # 每进程首次连接执行一次；与写入门同一份身份/合并语义（教义第 6 条）。
-        self.mergeDuplicateRecords()
 
     def publish_growth_lesson(self, lesson: Dict[str, Any]) -> bool:
         """Idempotent scoped index, separate from execution records and success metrics."""
