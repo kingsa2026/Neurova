@@ -28,6 +28,9 @@ FETCH_SECONDS = 1.0
 @pytest.fixture
 def app(monkeypatch, tmp_path):
     monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path / "data"))
+    # SSRF 守卫做真实 DNS 解析——沙箱 DNS 抖动会让用例红在环境上而非被测行为
+    # （本测试只判"事件循环不被同步抓取阻塞"），守卫恒真注入。
+    monkeypatch.setattr(ki, "validate_public_http_url", lambda url: True)
 
     def _slow_fetch(url):
         time.sleep(FETCH_SECONDS)
