@@ -16,6 +16,7 @@ import json
 import os
 import sqlite3
 import threading
+from typing import Optional
 
 from neurova.core.logger import get_logger
 from neurova.core.data_root import dataPath
@@ -144,13 +145,23 @@ class MetaLedger:
             self._prune("meta_events", agent_id, self._max_events)
             self._conn.commit()
 
-    def list_events(self, agent_id: str, limit: int = 100) -> list:
+    def list_events(self, agent_id: str, limit: int = 100, max_id: Optional[int] = None) -> list:
+        """列事件（新→旧）。`max_id` 供 reflect 分页向前翻取（P2-12：只取最近
+        一页会把更早的未编译事件静默越权）。"""
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT id, process_type, description, duration_ms, success, metadata, created_at"
-                " FROM meta_events WHERE agent_id=? ORDER BY created_at DESC, id DESC LIMIT ?",
-                (agent_id, int(limit)),
-            ).fetchall()
+            if max_id is not None:
+                rows = self._conn.execute(
+                    "SELECT id, process_type, description, duration_ms, success, metadata, created_at"
+                    " FROM meta_events WHERE agent_id=? AND id < ?"
+                    " ORDER BY created_at DESC, rowid DESC LIMIT ?",
+                    (agent_id, int(max_id), int(limit)),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT id, process_type, description, duration_ms, success, metadata, created_at"
+                    " FROM meta_events WHERE agent_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?",
+                    (agent_id, int(limit)),
+                ).fetchall()
         out = []
         for r in rows:
             out.append(
@@ -195,7 +206,7 @@ class MetaLedger:
                 """
                 SELECT metadata FROM meta_records
                 WHERE agent_id = ? AND kind = 'reflection'
-                ORDER BY created_at DESC, id DESC LIMIT 1
+                ORDER BY created_at DESC, rowid DESC LIMIT 1
                 """,
                 (agent_id,),
             ).fetchone()
@@ -272,7 +283,7 @@ class MetaLedger:
             ).fetchone()[0]
             rows = self._conn.execute(
                 f"SELECT id, kind, type, content, context, confidence, metadata, created_at"
-                f" FROM meta_records {where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+                f" FROM meta_records {where} ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",
                 args + [int(size), (int(page) - 1) * int(size)],
             ).fetchall()
         items = [
@@ -380,7 +391,7 @@ class MetaLedger:
             row = self._conn.execute(
                 "SELECT load_level, load_score, active_tasks, memory_usage, response_time_ms,"
                 " error_rate, metadata, created_at FROM meta_states WHERE agent_id=?"
-                " ORDER BY created_at DESC, id DESC LIMIT 1",
+                " ORDER BY created_at DESC, rowid DESC LIMIT 1",
                 (agent_id,),
             ).fetchone()
         if not row:
@@ -401,7 +412,7 @@ class MetaLedger:
             rows = self._conn.execute(
                 "SELECT load_level, load_score, active_tasks, memory_usage, response_time_ms,"
                 " error_rate, metadata, created_at FROM meta_states WHERE agent_id=?"
-                " ORDER BY created_at DESC, id DESC LIMIT ?",
+                " ORDER BY created_at DESC, rowid DESC LIMIT ?",
                 (agent_id, int(limit)),
             ).fetchall()
         return [
@@ -426,7 +437,7 @@ class MetaLedger:
             return
         self._conn.execute(
             f"DELETE FROM {table} WHERE agent_id=? AND id NOT IN ("
-            f"  SELECT id FROM {table} WHERE agent_id=? ORDER BY created_at DESC, id DESC LIMIT ?"
+            f"  SELECT id FROM {table} WHERE agent_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?"
             f")",
             (agent_id, agent_id, max_rows),
         )

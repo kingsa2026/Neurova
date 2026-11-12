@@ -224,7 +224,26 @@ class SelfModelEngine:
     def reflect(self, trigger: str = "periodic") -> Dict[str, Any]:
         """跑五算子，教训落台账并随报告返回。空台账安全。"""
         with self._lock:
-            events = list(reversed(self.ledger.list_events(agent_id=self._agent_id, limit=2000)))
+            # P2-12（全库断点审计 2026-11-12）：分页向前取尽全部事件——只取最近
+            # 2000 条时游标写 max(截断集) 会把更早的未编译事件静默标记为已编译
+            # （重启后台账厚的 agent 永不补课）。台账有 _max_events 剪枝上界，
+            # 翻页必然终止。
+            events: List[Dict[str, Any]] = []
+            upper: Optional[int] = None
+            while True:
+                batch = list(
+                    reversed(
+                        self.ledger.list_events(
+                            agent_id=self._agent_id, limit=2000, max_id=upper
+                        )
+                    )
+                )
+                if not batch:
+                    break
+                events = batch + events
+                if len(batch) < 2000:
+                    break
+                upper = min(int(e.get("id") or 0) for e in batch)
             lessons: List[Dict[str, Any]] = []
             # 被逐字可核闸拒掉的教训主体（读数面要看得见"拒过什么"，否则
             # 拒了等于静默消失——与本批一路在拆的"没测到当成没出问题"同形）。
