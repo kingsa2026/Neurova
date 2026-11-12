@@ -154,25 +154,43 @@ class SQLiteConnectionPool:
         except Empty:
             pass
         
-        # 创建新连接
-        with self._lock:
-            if self._created_count >= self.max_connections:
-                logger.warning("连接池已满，等待可用连接")
-                try:
-                    conn = self._pool.get(timeout=self.timeout)
-                    self._mark_checked_out(conn)
+        # 慢路径（P1-2 重构）：
+        # 1) 判额、建连、计数收进同一段临界区——原实现锁内判 `created_count >= max`、
+        #    锁外建连，check-then-act 非原子，并发首爆会集体通过检查各自建连越过上限；
+        #    且两线程同时切 journal_mode=WAL（独占切换）会撞 "database is locked"。
+        #    建连失败回滚预留（批 R3"计数只在成功后 +1"语义保持）。
+        # 2) 满池等待移出锁外——原实现在持锁状态下 `_pool.get(timeout=30)` 等归还，
+        #    而归还方需要同一把锁做归属校验/借出注销，于是"等归还"卡死所有归还路径，
+        #    整池级联停摆到超时。锁内只做判定与登记，等待在锁外完成。
+        # 3) 等待到手的连接与快路径同规：SELECT 1 校验＋PRAGMA 复原后再借出。
+        while True:
+            with self._lock:
+                if self._created_count < self.max_connections:
+                    self._created_count += 1  # 预留配额
+                    try:
+                        conn = self._create_connection()
+                    except BaseException:
+                        # 建连失败回滚预留——配额只反映成功建连，不因坏库泄漏
+                        self._created_count -= 1
+                        raise
+                    logger.debug("创建新连接: %s (总数: %d)", self.db_path, self._created_count)
+                    self._mark_checked_out(conn)  # RLock 可重入，锁内登记安全
                     return conn
-                except Empty:
-                    raise RuntimeError("无法获取数据库连接：连接池超时")
-            
-        logger.debug("创建新连接: %s (总数: %d)", self.db_path, self._created_count)
-        conn = self._create_connection()
-        # 批 R3：计数只在建连**成功**后 +1——放在 create 之前，坏库/占用等
-        # 建连失败会永久泄漏配额（累计 max 次失败后整池砖死到重启）
-        with self._lock:
-            self._created_count += 1
-        self._mark_checked_out(conn)
-        return conn
+
+            logger.warning("连接池已满，等待可用连接")
+            try:
+                conn = self._pool.get(timeout=self.timeout)
+            except Empty:
+                raise RuntimeError("无法获取数据库连接：连接池超时")
+            try:
+                conn.execute("SELECT 1")
+                self._restore_pragma_baseline(conn)
+                self._mark_checked_out(conn)
+                return conn
+            except Exception:
+                # 失效连接：注销（计数随 _discard_connection 回落）后重走预留/等待
+                self._discard_connection(conn)
+                continue
 
     def _mark_checked_out(self, conn: sqlite3.Connection) -> None:
         """登记"已借出"。"""
