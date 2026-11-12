@@ -334,6 +334,9 @@ ENDPOINT_MODULES = [
     # /api/v1 挂载层，旁路副本同步删除。
     ("neurova.api.endpoints.budget_api", "/v1", "Budget API"),
     ("neurova.api.endpoints.cost_rollup_api", "/v1", "Cost Rollup API"),
+    # P2-16：结晶经验管理器只读诊断面（admin 门）。文件名刻意不取
+    # diagnostics_api——.gitignore 的 diag*.py 规则会把它静默忽略。
+    ("neurova.api.endpoints.crystallized_health_api", "/v1", "Diagnostics API"),
     # 以下两行的接线属「未挂载端点模块」名单的收口（Issue #68）：
     #   computer_api ― `/computers/*` 计算节点管理面。此前未挂载的**根因是身份是假的**
     #     （8 处 `Depends(lambda: "current_user")` 硬编码身份）+ 唯一消费方
