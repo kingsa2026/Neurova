@@ -517,6 +517,9 @@ class ExperienceKnowledgeBase:
         sanitized = _sanitize_agent_id(agent_id)
         with self._lock:
             cur = self._conn.cursor()
+            # P2-24（全库断点审计 2026-11-12）：匹配侧与存储侧同口径——库里
+            # context.user_input 存的是**原始串**（写入侧不 strip），匹配若绑
+            # strip 后的串，含首尾空白的提问永远补不上票。绑原始串。
             cur.execute(
                 """
                 UPDATE experience_records
@@ -525,7 +528,7 @@ class ExperienceKnowledgeBase:
                   AND agent_id IS ?
                   AND json_extract(context, '$.user_input') = ?
                 """,
-                (1 if success else 0, sanitized, text),
+                (1 if success else 0, sanitized, str(user_input or "")),
             )
             updated = cur.rowcount
             self._conn.commit()

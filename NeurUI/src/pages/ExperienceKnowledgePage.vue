@@ -32,7 +32,7 @@
         </GlassCard>
         <GlassCard variant="subtle">
           <div class="stat-item">
-            <div class="stat-value">{{ formatPercentText(stats.avg_proficiency) }}</div>
+            <div class="stat-value">{{ stats.avg_proficiency === null ? t('experience.outcomeUnevidenced') : formatPercentText(stats.avg_proficiency) }}</div>
             <div class="stat-label">{{ t('experience.proficiency') }}</div>
           </div>
         </GlassCard>
@@ -332,7 +332,7 @@ const searchQuery = ref('')
 const taskTypeFilter = ref<string | undefined>(undefined)
 
 // Stats
-const stats = ref<ExperienceStats>({ total_experiences: 0, success_rate: 0, avg_proficiency: 0, top_categories: [] })
+const stats = ref<ExperienceStats>({ total_experiences: 0, success_rate: 0, avg_proficiency: null, top_categories: [] })
 
 // Ranking
 const ranking = ref<ExperienceRecord[]>([])
@@ -444,7 +444,7 @@ const fetchStats = async () => {
       stats.value = {
         total_experiences: data.total_experiences ?? 0,
         success_rate: data.success_rate ?? 0,
-        avg_proficiency: data.avg_proficiency ?? 0,
+        avg_proficiency: data.avg_proficiency ?? null,
         top_categories: data.top_categories ?? [],
       }
     }
