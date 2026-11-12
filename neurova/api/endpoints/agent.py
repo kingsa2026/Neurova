@@ -113,6 +113,12 @@ def _save_agent_config(agent) -> None:
             if hasattr(cfg, "llm_config") and getattr(cfg.llm_config, "temperature", None) is not None
             else {}
         ),
+        # 最大令牌落盘（P1-5）：同温度，改后重启不丢
+        **(
+            {"max_tokens": int(cfg.llm_config.max_tokens)}
+            if hasattr(cfg, "llm_config") and getattr(cfg.llm_config, "max_tokens", None) is not None
+            else {}
+        ),
         "personality": getattr(cfg, "personality", ""),
         "constitution": getattr(cfg, "constitution", ""),
         # 归属持久化：重启后 _user_can_access_agent 依赖此字段判定属主
@@ -187,6 +193,22 @@ def _temperature_from_body_config(config: Dict[str, Any]) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     return max(0.0, min(2.0, value))
+
+
+def _max_tokens_from_body_config(config: Dict[str, Any]) -> Optional[int]:
+    """从请求体 config 提取最大令牌（P1-5，全库断点审计 2026-11-12）：
+    前端"最大令牌"此前被静默丢弃，AgentConfig.max_tokens 恒 0（自动适配）。
+
+    仅在键实际出现时返回（update 路径局部更新不覆盖未提及字段）；
+    非法值/<=0 按未提及处理（回落自动适配语义），不做放大。
+    """
+    if not config or "max_tokens" not in config:
+        return None
+    try:
+        value = int(config["max_tokens"])
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
 
 
 class AgentInfo(BaseModel):
@@ -312,6 +334,10 @@ def agent_to_info(agent) -> Dict[str, Any]:
             "tts_voice": getattr(config, "tts_voice", ""),
             "tts_speed": float(getattr(config, "tts_speed", 1.0) or 1.0),
             "tts_pitch": float(getattr(config, "tts_pitch", 1.0) or 1.0),
+            # 最大令牌回显（P1-5）：编辑表单重开后能恢复已保存参数
+            "max_tokens": int(getattr(config.llm_config, "max_tokens", 0) or 0)
+            if hasattr(config, "llm_config")
+            else 0,
         }
 
     # 获取工具数量
@@ -450,10 +476,12 @@ async def create_agent(
         os.makedirs(workspace_path, exist_ok=True)
         tts_fields = _tts_fields_from_body_config(body.config)
         temperature = _temperature_from_body_config(body.config)
+        max_tokens = _max_tokens_from_body_config(body.config)
         config = AgentConfig(
             name=body.name,
             agent_id=agent_id,
             llm_temperature=temperature,
+            max_tokens=max_tokens or 0,
             enable_memory=body.enable_memory,
             workspace_path=workspace_path,
             owner_user_id=current_user.get("user_id"),
@@ -561,6 +589,12 @@ async def update_agent(
     if temperature is not None and hasattr(agent.config, "llm_config"):
         agent.config.llm_config.temperature = temperature
         logger.info("Updated agent temperature: %s -> %s", agent_id, temperature)
+
+    # 最大令牌更新（P1-5：局部覆盖请求中出现的键；None=未提及）
+    max_tokens = _max_tokens_from_body_config(body.config)
+    if max_tokens is not None and hasattr(agent.config, "llm_config"):
+        agent.config.llm_config.max_tokens = max_tokens
+        logger.info("Updated agent max_tokens: %s -> %s", agent_id, max_tokens)
 
     # 更新运行时的 AgentLLMClient（provider/model 变更后必须重建）
     if (body.model is not None or body.provider is not None) and hasattr(agent, "llm_client"):

@@ -16,6 +16,9 @@ function mapAgentResponse(raw: Record<string, any>): Agent {
     provider: raw.provider ?? config.provider ?? '',
     status: raw.status ?? 'inactive',
     avatar: raw.avatar ?? null,
+    // P1-6（全库断点审计 2026-11-12）：后端返回 group_id 但本归一化层不映射，
+    // 编辑态「所属分组」恒显示缺省提示（fe67b863e 只改了展示层没动这里）。
+    group_id: raw.group_id ?? config.group_id ?? '',
     createdAt: raw.created_at ?? raw.createdAt ?? '',
     updatedAt: raw.updated_at ?? raw.updatedAt ?? '',
     config: {
@@ -47,7 +50,6 @@ function mapAgentResponse(raw: Record<string, any>): Agent {
  */
 function mapConfigToApi(config: Partial<AgentConfig>): Record<string, any> {
   return {
-    system_prompt: config.systemPrompt,
     temperature: config.temperature,
     max_tokens: config.maxTokens,
     top_p: config.topP,

@@ -10,6 +10,8 @@ export interface Agent {
   system_prompt?: string
   /** Agent 角色（如 assistant/researcher，用于蜂群派生时挑选执行者） */
   role?: string
+  /** 所属分组（后端 group_id；编辑态回显用，缺省串 = 未绑定） */
+  group_id?: string
   createdAt: string
   updatedAt: string
   config?: AgentConfig
