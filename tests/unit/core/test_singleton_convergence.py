@@ -33,7 +33,8 @@ HIGH_RISK_SINGLETONS = [
     ("neurova/cognitive_layers/memory_layer/semantic_search.py", "get_semantic_search"),
     ("neurova/security/neu_token_manager.py", "get_neu_token_manager"),
     ("neurova/shared_core/execution_engine.py", "get_execution_engine"),
-    ("neurova/shared_core/infrastructure.py", "get_infrastructure_manager"),
+    # 2026-11-12 本清单少一项：`shared_core/infrastructure.py::get_infrastructure_manager`
+    # 已随 P1-14 退役（全仓零生产消费方，按 docstring 接线会造出第二个 EventBus）。
 ]
 
 # 良性批（P3-e 收尾）：无状态/幂等构造，但统一收敛到 DCL 模式，
@@ -124,10 +125,10 @@ class TestListsPointAtLiveImplementations:
         """反向对照：探测器对"文件不存在"与"符号不存在"两种形态都必须报警。"""
         assert _staleEntries([("neurova/no_such_module_zz.py", "get_x")]), \
             "探测器对不存在的文件不报警——它已经坏了"
-        assert _staleEntries([("neurova/shared_core/infrastructure.py", "get_no_such_factory_zz")]), \
+        assert _staleEntries([("neurova/shared_core/execution_engine.py", "get_no_such_factory_zz")]), \
             "探测器对文件里不存在的符号不报警——它已经坏了"
-        assert not _staleEntries([("neurova/shared_core/infrastructure.py",
-                                   "get_infrastructure_manager")]), \
+        assert not _staleEntries([("neurova/shared_core/execution_engine.py",
+                                   "get_execution_engine")]), \
             "探测器把在位条目判成陈旧——它会制造假红"
 
 

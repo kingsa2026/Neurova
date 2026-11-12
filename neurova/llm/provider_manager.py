@@ -45,7 +45,6 @@ reset 链路(与 MultiModelLLMClient 协同)
 - `neurova/llm/multi_model_client.py`: `__init__` 通过 `get_provider_manager()` 获取单例;
   `reset()` 调用 `reset_provider_manager()` 穿透 reset 链路
 - `neurova/agent_core.py:757`: `_load_api_keys` 延迟导入获取 provider 配置
-- `neurova/shared_core/infrastructure.py:26,126`: InfrastructureManager 持有 provider_manager
 - `neurova/api/app.py:217,219,271`: 启动时初始化并存入 app_state
 - `neurova/api/deps.py:184` + `neurova/api/endpoints/__init__.py:57`:
   FastAPI 依赖从 app_state 读取(同名 wrapper,不直接调本模块)
