@@ -68,7 +68,9 @@ export function importDomainPack(packId: string) {
 
 /** G4：可用 IRI 命名空间注册表（前缀 → 基座；空 namespace 语义 = 缺省 kbg:）。 */
 export function listOntologyNamespaces() {
-  return api.get<ApiResponse<Record<string, string>>>(`${BASE}/namespaces`)
+  // P1-8（全库断点审计 2026-11-12）：后端路径是 /ontology/namespaces；
+  // 少拼 ontology 段时请求被 knowledge 的 GET /{knowledge_id} 吃掉报 404。
+  return api.get<ApiResponse<Record<string, string>>>(`${BASE}/ontology/namespaces`)
 }
 
 export function createOntologyTerm(body: OntologyTermWrite) {

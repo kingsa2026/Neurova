@@ -129,7 +129,7 @@ const fetchAll = async () => {
 
 const resolveAlert = async (id: string) => {
   try {
-    await request.put(`/monitor/alerts/${id}/resolve`)
+    await request.post(`/monitor/alerts/${id}/resolve`)
     message.success(t('common.success'))
     await fetchAll()
   } catch {
