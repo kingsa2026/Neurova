@@ -284,14 +284,19 @@ class MemorySkill(Skill):
             )
 
     async def _search_memory(self, query: str, params: Dict) -> List[Dict]:
-        """搜索记忆"""
-        # 这里应该调用记忆管理器
-        return []
+        """搜索记忆（P2-15 实装：走注入的记忆管理器 recall——原恒空 stub 让
+        回退分支的失败形态变成"查无记忆"而非报错）"""
+        if self.memory_manager is None:
+            return []
+        limit = int(params.get("limit", 5) or 5)
+        return self.memory_manager.recall(query, limit=limit)
 
     async def _store_memory(self, content: str, params: Dict) -> Dict:
-        """存储记忆"""
-        # 这里应该调用记忆管理器
-        return {"stored": True}
+        """存储记忆（P2-15 实装：走注入的记忆管理器 remember）"""
+        if self.memory_manager is None:
+            return {"stored": False, "error": "memory_manager 未注入"}
+        memory_id = self.memory_manager.remember(content, auto_classify=False)
+        return {"stored": True, "memory_id": memory_id}
 
 
 class WebSearchSkill(Skill):
@@ -772,10 +777,16 @@ class SkillRegistry:
                     args=[
                         "-c",
                         (
+                            # P2-14（全库断点审计 2026-11-12）：子进程必须**重建**
+                            # 注册表——原代码 `SkillRegistry()` 是空表（builtin 技能
+                            # 只在父进程 create_default_skills 里注册），任何技能
+                            # 在子进程里都落"不存在"，外层再静默降级，隔离语义
+                            # 名存实亡。
                             "import asyncio, json, os; "
-                            f"from neurova.skill_system import SkillRegistry; "
+                            "from neurova.skill_system.core import create_default_skills; "
                             f"args = json.loads(os.environ.get('NEUROVA_SKILL_ARGS', '{{}}')); "
-                            f"result = asyncio.run(SkillRegistry().execute_skill('{skill_name}', args)); "
+                            f"registry = create_default_skills(); "
+                            f"result = asyncio.run(registry.execute_skill('{skill_name}', args)); "
                             "print(json.dumps({'success': result.success, 'data': result.data}))"
                         ),
                     ],
