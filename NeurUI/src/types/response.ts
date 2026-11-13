@@ -30,11 +30,15 @@ export interface LimitOffsetData<T> {
 }
 
 /**
- * Pagination query params (page/size).
+ * Pagination query params (limit/offset) — 与后端分页契约同源
+ * （如 notifications/scheduler 均为 `limit: Query(20)` + `offset: Query(0)`）。
+ * P1-13（审计 2026-11-14）：旧定义 {page,size} 是后端不认的参数，翻页被
+ * FastAPI 静默忽略成恒第一页；后端只认 page/size 的模块（plugins/experience）
+ * 在各自 module 内做 limit/offset → page/size 换算，调用方统一说 limit/offset。
  */
 export interface PageParams {
-  page?: number
-  size?: number
+  limit?: number
+  offset?: number
 }
 
 /**

@@ -457,9 +457,10 @@ const fetchStats = async () => {
 
 const fetchRanking = async () => {
   try {
+    // P1-13：统一分页词 limit/offset；page/size 换算在 experience 模块内做
     const res = await experienceApi.getExperienceRanking(agentId.value, {
-      page: rankingPage.value,
-      size: rankingSize.value,
+      limit: rankingSize.value,
+      offset: (rankingPage.value - 1) * rankingSize.value,
     })
     const data = res.data
     if (data && typeof data === 'object' && 'items' in data) {
@@ -477,9 +478,10 @@ const fetchRanking = async () => {
 const fetchExperiences = async () => {
   loading.value = true
   try {
+    // P1-13：统一分页词 limit/offset；page/size 换算在 experience 模块内做
     const params: Record<string, any> = {
-      page: recordsPage.value,
-      size: recordsSize.value,
+      limit: recordsSize.value,
+      offset: (recordsPage.value - 1) * recordsSize.value,
     }
     if (taskTypeFilter.value) params.task_type = taskTypeFilter.value
 

@@ -52,9 +52,12 @@ export function getSchedulerStatus() {
   return api.get<ApiResponse<SchedulerStatus>>(`${BASE}/status`)
 }
 
-/** List scheduled tasks. */
-export function getScheduledTasks(params?: PageParams & { agent_id?: string; status?: string }) {
-  return api.get<ApiResponse<ScheduledTask[]>>(`${BASE}/tasks`, { params })
+/** List scheduled tasks. 后端 /tasks 只收 limit（无 offset，P1-13 核对：
+ * scheduler.py get_tasks 仅 status/agent_id/limit 三个查询参数），故这里
+ * 只透传 limit，不假装支持 offset。 */
+export function getScheduledTasks(params?: Pick<PageParams, 'limit'> & { agent_id?: string; status?: string }) {
+  const { limit, agent_id, status } = params ?? {}
+  return api.get<ApiResponse<ScheduledTask[]>>(`${BASE}/tasks`, { params: { limit, agent_id, status } })
 }
 
 /** Get a single scheduled task. */

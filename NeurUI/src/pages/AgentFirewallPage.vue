@@ -60,27 +60,24 @@
             v-else
             :columns="l0Columns"
             :data-source="l0Rules"
-            row-key="id"
+            row-key="rule_id"
             :pagination="{ pageSize: 10 }"
             size="small"
           >
             <template #bodyCell="{ column, record }">
-              <template v-if="column.key === 'pattern'">
-                <code class="pattern-code">{{ record.pattern }}</code>
+              <template v-if="column.key === 'value'">
+                <code class="pattern-code">{{ record.value }}</code>
               </template>
               <template v-if="column.key === 'action'">
                 <a-tag :color="actionColor(record.action)">{{ record.action }}</a-tag>
               </template>
-              <template v-if="column.key === 'scope'">
-                <a-tag :color="record.scope === 'inbound' ? 'cyan' : record.scope === 'outbound' ? 'purple' : 'default'">{{ record.scope || 'both' }}</a-tag>
-              </template>
-              <template v-if="column.key === 'active'">
-                <a-switch :checked="record.active" size="small" @change="(val: boolean) => toggleRule(record.id, val)" />
+              <template v-if="column.key === 'enabled'">
+                <a-switch :checked="record.enabled" size="small" @change="(val: boolean) => toggleRule(record, val)" />
               </template>
               <template v-if="column.key === 'actions'">
                 <div class="rule-actions">
                   <GlassButton variant="ghost" size="sm" @click="editRule(record)">{{ t('common.edit') }}</GlassButton>
-                  <a-popconfirm :title="t('common.confirm') + '?'" @confirm="deleteRule(record.id)">
+                  <a-popconfirm :title="t('common.confirm') + '?'" @confirm="deleteRule(record.rule_id)">
                     <GlassButton variant="danger" size="sm">{{ t('common.delete') }}</GlassButton>
                   </a-popconfirm>
                 </div>
@@ -130,30 +127,24 @@
             v-else
             :columns="l1Columns"
             :data-source="l1Rules"
-            row-key="id"
+            row-key="rule_id"
             :pagination="{ pageSize: 10 }"
             size="small"
           >
             <template #bodyCell="{ column, record }">
-              <template v-if="column.key === 'pattern'">
-                <code class="pattern-code">{{ record.pattern }}</code>
+              <template v-if="column.key === 'value'">
+                <code class="pattern-code">{{ record.value }}</code>
               </template>
               <template v-if="column.key === 'action'">
                 <a-tag :color="actionColor(record.action)">{{ record.action }}</a-tag>
               </template>
-              <template v-if="column.key === 'source'">
-                <a-tag :color="record.source === 'global' ? 'default' : record.source === 'user' ? 'cyan' : 'purple'">{{ record.source || 'agent' }}</a-tag>
-              </template>
-              <template v-if="column.key === 'scope'">
-                <a-tag :color="record.scope === 'inbound' ? 'cyan' : record.scope === 'outbound' ? 'purple' : 'default'">{{ record.scope || 'both' }}</a-tag>
-              </template>
-              <template v-if="column.key === 'active'">
-                <a-switch :checked="record.active" size="small" @change="(val: boolean) => toggleRule(record.id, val)" />
+              <template v-if="column.key === 'enabled'">
+                <a-switch :checked="record.enabled" size="small" @change="(val: boolean) => toggleRule(record, val)" />
               </template>
               <template v-if="column.key === 'actions'">
                 <div class="rule-actions">
                   <GlassButton variant="ghost" size="sm" @click="editRule(record)">{{ t('common.edit') }}</GlassButton>
-                  <a-popconfirm :title="t('common.confirm') + '?'" @confirm="deleteRule(record.id)">
+                  <a-popconfirm :title="t('common.confirm') + '?'" @confirm="deleteRule(record.rule_id)">
                     <GlassButton variant="danger" size="sm">{{ t('common.delete') }}</GlassButton>
                   </a-popconfirm>
                 </div>
@@ -191,24 +182,24 @@
             v-else
             :columns="l2Columns"
             :data-source="l2Rules"
-            row-key="id"
+            row-key="rule_id"
             :pagination="{ pageSize: 10 }"
             size="small"
           >
             <template #bodyCell="{ column, record }">
-              <template v-if="column.key === 'pattern'">
-                <code class="pattern-code">{{ record.pattern }}</code>
+              <template v-if="column.key === 'value'">
+                <code class="pattern-code">{{ record.value }}</code>
               </template>
               <template v-if="column.key === 'action'">
                 <a-tag :color="actionColor(record.action)">{{ record.action }}</a-tag>
               </template>
-              <template v-if="column.key === 'active'">
-                <a-switch :checked="record.active" size="small" @change="(val: boolean) => toggleRule(record.id, val)" />
+              <template v-if="column.key === 'enabled'">
+                <a-switch :checked="record.enabled" size="small" @change="(val: boolean) => toggleRule(record, val)" />
               </template>
               <template v-if="column.key === 'actions'">
                 <div class="rule-actions">
                   <GlassButton variant="ghost" size="sm" @click="editRule(record)">{{ t('common.edit') }}</GlassButton>
-                  <a-popconfirm :title="t('common.confirm') + '?'" @confirm="deleteRule(record.id)">
+                  <a-popconfirm :title="t('common.confirm') + '?'" @confirm="deleteRule(record.rule_id)">
                     <GlassButton variant="danger" size="sm">{{ t('common.delete') }}</GlassButton>
                   </a-popconfirm>
                 </div>
@@ -226,22 +217,16 @@
             v-else
             :columns="blockedColumns"
             :data-source="blockedLogs"
-            row-key="id"
+            row-key="value"
             :pagination="{ pageSize: 20 }"
             size="small"
           >
             <template #bodyCell="{ column, record }">
-              <template v-if="column.key === 'timestamp'">
-                <span class="mono">{{ formatTimestampText(record.timestamp) }}</span>
+              <template v-if="column.key === 'type'">
+                <a-tag :color="record.type === 'ip' ? 'blue' : 'orange'">{{ record.type }}</a-tag>
               </template>
-              <template v-if="column.key === 'layer'">
-                <a-tag :color="layerColor(record.layer)">{{ record.layer || 'L0' }}</a-tag>
-              </template>
-              <template v-if="column.key === 'rule'">
-                <a-tag>{{ record.rule_name || record.rule_id }}</a-tag>
-              </template>
-              <template v-if="column.key === 'action'">
-                <a-tag :color="actionColor(record.action)">{{ record.action }}</a-tag>
+              <template v-if="column.key === 'value'">
+                <code class="pattern-code">{{ record.value }}</code>
               </template>
             </template>
           </a-table>
@@ -255,25 +240,25 @@
             <GlassPanel variant="subtle" padding="16px 20px">
               <div class="stat-item">
                 <span class="stat-label">{{ t('firewall.totalRules') }}</span>
-                <span class="stat-value">{{ stats.totalRules ?? 0 }}</span>
+                <span class="stat-value">{{ stats.total_rules ?? 0 }}</span>
               </div>
             </GlassPanel>
             <GlassPanel variant="subtle" padding="16px 20px">
               <div class="stat-item">
                 <span class="stat-label">{{ t('firewall.activeRules') }}</span>
-                <span class="stat-value">{{ stats.activeRules ?? 0 }}</span>
+                <span class="stat-value">{{ stats.active_rules ?? 0 }}</span>
               </div>
             </GlassPanel>
             <GlassPanel variant="subtle" padding="16px 20px">
               <div class="stat-item">
                 <span class="stat-label">{{ t('firewall.blockedToday') }}</span>
-                <span class="stat-value stat-danger">{{ stats.blockedToday ?? 0 }}</span>
+                <span class="stat-value stat-danger">{{ stats.blocked_ips ?? 0 }}</span>
               </div>
             </GlassPanel>
             <GlassPanel variant="subtle" padding="16px 20px">
               <div class="stat-item">
                 <span class="stat-label">{{ t('firewall.warningsToday') }}</span>
-                <span class="stat-value stat-warning">{{ stats.warningsToday ?? 0 }}</span>
+                <span class="stat-value stat-warning">{{ stats.blocked_paths ?? 0 }}</span>
               </div>
             </GlassPanel>
           </div>
@@ -293,29 +278,14 @@
         <a-form-item :label="t('firewall.ruleName')">
           <a-input v-model:value="ruleForm.name" :placeholder="t('firewall.ruleNamePlaceholder')" />
         </a-form-item>
-        <a-form-item :label="t('firewall.pattern')">
+        <a-form-item :label="t('firewall.value')">
           <a-input v-model:value="ruleForm.pattern" :placeholder="t('firewall.patternPlaceholder')" />
         </a-form-item>
         <a-form-item :label="t('firewall.action')">
           <a-select v-model:value="ruleForm.action" style="width: 100%">
             <a-select-option value="block">{{ t('firewall.block') }}</a-select-option>
             <a-select-option value="allow">{{ t('firewall.allow') }}</a-select-option>
-            <a-select-option value="warn">{{ t('firewall.warn') }}</a-select-option>
-            <a-select-option value="redact">{{ t('firewall.redact') }}</a-select-option>
           </a-select>
-        </a-form-item>
-        <a-form-item :label="t('firewall.scope')">
-          <a-select v-model:value="ruleForm.scope" style="width: 100%">
-            <a-select-option value="inbound">{{ t('firewall.inbound') }}</a-select-option>
-            <a-select-option value="outbound">{{ t('firewall.outbound') }}</a-select-option>
-            <a-select-option value="both">{{ t('firewall.both') }}</a-select-option>
-          </a-select>
-        </a-form-item>
-        <a-form-item :label="t('firewall.priority')">
-          <a-input-number v-model:value="ruleForm.priority" :min="0" :max="1000" style="width: 100%" />
-        </a-form-item>
-        <a-form-item :label="t('firewall.description')">
-          <a-input v-model:value="ruleForm.description" type="textarea" :rows="2" :placeholder="t('firewall.description')" />
         </a-form-item>
         <a-form-item :label="t('firewall.active')">
           <a-switch v-model:checked="ruleForm.active" />
@@ -323,7 +293,6 @@
         <a-form-item :label="t('firewall.firewallLayer')">
           <a-select v-model:value="ruleForm.layer" style="width: 100%">
             <a-select-option value="L0">{{ t('firewall.l0GatewayDesc') }}</a-select-option>
-            <a-select-option value="L1">{{ t('firewall.l1IsolationDesc') }}</a-select-option>
             <a-select-option value="L2">{{ t('firewall.l2FileProtectionDesc') }}</a-select-option>
           </a-select>
         </a-form-item>
@@ -335,18 +304,25 @@
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
 import { useAgentPage } from '@/composables/useAgentPage'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassPanel from '@/components/GlassPanel.vue'
 import { message } from 'ant-design-vue'
-import { formatTimestampText } from '@/utils/displayText'
+import {
+  getFirewallRules,
+  createFirewallRule,
+  updateFirewallRule,
+  deleteFirewallRule,
+  getBlockedEntries,
+  getFirewallStats,
+} from '@/api/modules/firewall'
+import type { FirewallRule, RuleCreatePayload, FirewallStats } from '@/api/modules/firewall'
 
 const { t } = useI18n()
 const { agentId } = useAgentPage()
-// 读侧端点是全局的（/firewall/*，无 agent 维度），无按 agent 重取的数据；
-// 身份跟随 store 只影响写侧目标（规则增删改走 /agents/{agentId}/firewall/*）
-// 与展示标签（T-21 同根因扫荡，工单集 §45.2）。
+// 读写两侧端点都是全局的（/firewall/*，无 agent 维度，P1-10 审计 2026-11-14：
+// 旧页面的 /agents/{id}/firewall/rules/* 路径后端不存在，改/停/删恒 404）。
+// 身份跟随 store 只影响展示标签（T-21 同根因扫荡，工单集 §45.2）。
 
 // --- State ---
 const activeTab = ref('l0_gateway')
@@ -356,13 +332,13 @@ const loadingL2 = ref(false)
 const loadingBlocked = ref(false)
 const loadingStats = ref(false)
 const saving = ref(false)
-const l0Rules = ref<any[]>([])
-const l1Rules = ref<any[]>([])
-const l2Rules = ref<any[]>([])
-const blockedLogs = ref<any[]>([])
+const l0Rules = ref<FirewallRule[]>([])
+const l1Rules = ref<FirewallRule[]>([])
+const l2Rules = ref<FirewallRule[]>([])
+const blockedLogs = ref<Array<{ type: string; value: string }>>([])
 const showForm = ref(false)
-const editingRule = ref<any>(null)
-const stats = ref<Record<string, number>>({})
+const editingRule = ref<FirewallRule | null>(null)
+const stats = ref<Partial<FirewallStats>>({})
 
 const gatewayConfig = reactive({
   rateLimit: '120/min',
@@ -385,10 +361,7 @@ const ruleForm = ref({
   name: '',
   pattern: '',
   action: 'block',
-  scope: 'both',
-  priority: 100,
   active: true,
-  description: '',
   layer: 'L0',
 })
 
@@ -404,56 +377,38 @@ const actionColor = (action: string) => {
   return map[action] || 'default'
 }
 
-const layerColor = (layer: string) => {
-  const map: Record<string, string> = {
-    L0: 'blue',
-    L1: 'green',
-    L2: 'orange',
-  }
-  return map[layer] || 'default'
-}
-
 const l0Columns = computed(() => [
   { title: t('common.name'), dataIndex: 'name', key: 'name' },
-  { title: t('firewall.pattern'), key: 'pattern' },
+  { title: t('firewall.value'), key: 'value' },
   { title: t('firewall.action'), key: 'action', width: 90 },
-  { title: t('firewall.scope'), key: 'scope', width: 100 },
-  { title: t('firewall.priority'), dataIndex: 'priority', key: 'priority', width: 80 },
-  { title: t('firewall.active'), key: 'active', width: 80 },
+  { title: t('firewall.active'), key: 'enabled', width: 80 },
   { title: t('common.actions'), key: 'actions', width: 160 },
 ])
 
 const l1Columns = computed(() => [
   { title: t('common.name'), dataIndex: 'name', key: 'name' },
-  { title: t('firewall.pattern'), key: 'pattern' },
+  { title: t('firewall.value'), key: 'value' },
   { title: t('firewall.action'), key: 'action', width: 90 },
-  { title: t('firewall.source'), key: 'source', width: 90 },
-  { title: t('firewall.scope'), key: 'scope', width: 100 },
-  { title: t('firewall.active'), key: 'active', width: 80 },
+  { title: t('firewall.active'), key: 'enabled', width: 80 },
   { title: t('common.actions'), key: 'actions', width: 160 },
 ])
 
 const l2Columns = computed(() => [
   { title: t('common.name'), dataIndex: 'name', key: 'name' },
-  { title: t('firewall.patternPath'), key: 'pattern' },
+  { title: t('firewall.value'), key: 'value' },
   { title: t('firewall.action'), key: 'action', width: 90 },
-  { title: t('firewall.priority'), dataIndex: 'priority', key: 'priority', width: 80 },
-  { title: t('firewall.active'), key: 'active', width: 80 },
+  { title: t('firewall.active'), key: 'enabled', width: 80 },
   { title: t('common.actions'), key: 'actions', width: 160 },
 ])
 
 const blockedColumns = computed(() => [
-  { title: t('firewall.time'), key: 'timestamp', width: 180 },
-  { title: t('firewall.layer'), key: 'layer', width: 70 },
-  { title: t('firewall.rule'), key: 'rule' },
-  { title: t('firewall.action'), key: 'action', width: 90 },
-  { title: t('firewall.source'), dataIndex: 'source', key: 'source' },
-  { title: t('firewall.content'), dataIndex: 'content', key: 'content', ellipsis: true },
+  { title: t('firewall.ruleType'), key: 'type', width: 100 },
+  { title: t('firewall.value'), key: 'value' },
 ])
 
 // --- CRUD ---
 const resetForm = () => {
-  ruleForm.value = { name: '', pattern: '', action: 'block', scope: 'both', priority: 100, active: true, description: '', layer: 'L0' }
+  ruleForm.value = { name: '', pattern: '', action: 'block', active: true, layer: 'L0' }
   editingRule.value = null
 }
 
@@ -461,97 +416,50 @@ const openCreate = () => {
   resetForm()
   // Pre-fill the layer based on the active tab
   if (activeTab.value === 'l0_gateway') ruleForm.value.layer = 'L0'
-  else if (activeTab.value === 'l1_isolation') ruleForm.value.layer = 'L1'
   else if (activeTab.value === 'l2_file') ruleForm.value.layer = 'L2'
   showForm.value = true
 }
 
-const editRule = (rule: any) => {
+const editRule = (rule: FirewallRule) => {
   editingRule.value = rule
   ruleForm.value = {
     name: rule.name,
-    pattern: rule.pattern,
+    pattern: rule.value,
     action: rule.action,
-    scope: rule.scope || 'both',
-    priority: rule.priority,
-    active: rule.active,
-    description: rule.description || '',
-    layer: rule.layer || 'L0',
+    active: rule.enabled,
+    layer: rule.rule_type === 'path' ? 'L2' : 'L0',
   }
   showForm.value = true
 }
 
-const fetchL0Rules = async () => {
-  loadingL0.value = true
-  try {
-    const res: any = await request.get(`/firewall/rules`, { params: { layer: 'L0' } })
-    const all = res?.data ?? res ?? []
-    l0Rules.value = Array.isArray(all) ? all.filter((r: any) => r.layer === 'L0' || !r.layer) : []
-  } catch {
-    message.error(t('common.error'))
-  } finally {
-    loadingL0.value = false
-  }
-}
-
-const fetchL1Rules = async () => {
-  loadingL1.value = true
-  try {
-    const res: any = await request.get(`/firewall/rules`, { params: { layer: 'L1' } })
-    const all = res?.data ?? res ?? []
-    l1Rules.value = Array.isArray(all) ? all.filter((r: any) => r.layer === 'L1' || r.source === 'global' || r.source === 'user') : []
-  } catch {
-    message.error(t('common.error'))
-  } finally {
-    loadingL1.value = false
-  }
-}
-
-const fetchL2Rules = async () => {
-  loadingL2.value = true
-  try {
-    const res: any = await request.get(`/firewall/rules`, { params: { layer: 'L2' } })
-    const all = res?.data ?? res ?? []
-    l2Rules.value = Array.isArray(all) ? all.filter((r: any) => r.layer === 'L2') : []
-  } catch {
-    message.error(t('common.error'))
-  } finally {
-    loadingL2.value = false
-  }
-}
-
 const fetchAllRules = async () => {
-  // Fetch once and distribute across layers
+  loadingL0.value = loadingL1.value = loadingL2.value = true
   try {
-    const res: any = await request.get(`/firewall/rules`)
-    // API may return {code,data:[...]} or direct array
-    const raw = res?.data ?? res ?? []
-    const all: any[] = Array.isArray(raw) ? raw : (raw?.data ?? [])
-    if (Array.isArray(all)) {
-      l0Rules.value = all.filter((r) => (r.layer === 'L0' || !r.layer) && (r.category === 'ip' || r.category === 'gateway' || !r.category || r.category === 'input' || r.category === 'output'))
-      l1Rules.value = all.filter((r) => r.layer === 'L1' || r.source === 'global' || r.source === 'user')
-      l2Rules.value = all.filter((r) => r.layer === 'L2' || r.category === 'file')
-      // If the API doesn't use layer tags yet, put everything in L0 as fallback
-      if (l0Rules.value.length === 0 && l1Rules.value.length === 0 && l2Rules.value.length === 0) {
-        l0Rules.value = all
-      }
-    }
+    const res = await getFirewallRules()
+    const all: FirewallRule[] = Array.isArray(res) ? res : []
+    // 后端规则无 layer 维度，按 rule_type 分层：path → L2 文件保护，
+    // 其余（ip/rate_limit）→ L0 网关；L1 隔离层后端无独立规则存储，
+    // 该页签保持空态，不造假数据。
+    l0Rules.value = all.filter((r) => r.rule_type !== 'path')
+    l1Rules.value = []
+    l2Rules.value = all.filter((r) => r.rule_type === 'path')
   } catch {
     message.error(t('common.error'))
+  } finally {
+    loadingL0.value = loadingL1.value = loadingL2.value = false
   }
 }
 
 const fetchBlocked = async () => {
   loadingBlocked.value = true
   try {
-    const res: any = await request.get(`/firewall/blocked`)
+    const res: any = await getBlockedEntries()
     // API returns {code,data:{blocked_ips:[],blocked_paths:[]}}
-    const raw = res?.data ?? res ?? {}
-    const data = raw?.data ?? raw ?? {}
-    // Flatten blocked_ips and blocked_paths into a single array
-    const ips = (data.blocked_ips ?? []).map((ip: string) => ({ type: 'ip', value: ip, blocked_at: '-' }))
-    const paths = (data.blocked_paths ?? []).map((p: string) => ({ type: 'path', value: p, blocked_at: '-' }))
-    blockedLogs.value = [...ips, ...paths]
+    const data = res?.data ?? res ?? {}
+    blockedLogs.value = [
+      ...(data.blocked_ips ?? []).map((ip: string) => ({ type: 'ip', value: ip })),
+      ...(data.blocked_paths ?? []).map((p: string) => ({ type: 'path', value: p })),
+    ]
   } catch {
     message.error(t('common.error'))
   } finally {
@@ -562,10 +470,10 @@ const fetchBlocked = async () => {
 const fetchStats = async () => {
   loadingStats.value = true
   try {
-    const res: any = await request.get(`/firewall/stats`)
+    const res: any = await getFirewallStats()
     stats.value = res?.data ?? res ?? {}
   } catch {
-    // silently ignore stats errors
+    // 统计读数失败不拦截主功能，保留空读数（不造假 0 假成功提示）
   } finally {
     loadingStats.value = false
   }
@@ -580,10 +488,21 @@ const saveRule = async () => {
   }
   saving.value = true
   try {
+    // 后端 PUT/POST 体是 FirewallRuleCreate(name, value, rule_type, action,
+    // enabled, window)（firewall.py，P1-10 核对）。表单的 pattern/active/layer
+    // 在这里映射为契约字段；L1 隔离层后端无独立规则型，落 ip 型。
+    const layerRuleType: Record<string, string> = { L0: 'ip', L1: 'ip', L2: 'path' }
+    const payload: RuleCreatePayload = {
+      name: ruleForm.value.name,
+      rule_type: layerRuleType[ruleForm.value.layer] ?? 'ip',
+      action: ruleForm.value.action,
+      value: ruleForm.value.pattern,
+      enabled: ruleForm.value.active,
+    }
     if (editingRule.value) {
-      await request.put(`/agents/${agentId.value}/firewall/rules/${editingRule.value.id}`, ruleForm.value)
+      await updateFirewallRule(editingRule.value.rule_id, payload)
     } else {
-      await request.post(`/firewall/rules`, ruleForm.value)
+      await createFirewallRule(payload)
     }
     message.success(t('common.success'))
     showForm.value = false
@@ -597,9 +516,17 @@ const saveRule = async () => {
   }
 }
 
-const toggleRule = async (id: string, active: boolean) => {
+const toggleRule = async (rule: FirewallRule, active: boolean) => {
   try {
-    await request.put(`/agents/${agentId.value}/firewall/rules/${id}`, { active })
+    // PUT 体必须满足 FirewallRuleCreate 必填的 name/value；规则身份
+    // （rule_type/action/旧值）由 rule_id 携带，这里带全量契约字段。
+    await updateFirewallRule(rule.rule_id, {
+      name: rule.name,
+      rule_type: rule.rule_type,
+      action: rule.action,
+      value: rule.value,
+      enabled: active,
+    })
     message.success(t('common.success'))
     await fetchAllRules()
     await fetchStats()
@@ -608,9 +535,9 @@ const toggleRule = async (id: string, active: boolean) => {
   }
 }
 
-const deleteRule = async (id: string) => {
+const deleteRule = async (ruleId: string) => {
   try {
-    await request.delete(`/agents/${agentId.value}/firewall/rules/${id}`)
+    await deleteFirewallRule(ruleId)
     message.success(t('common.success'))
     await fetchAllRules()
     await fetchStats()

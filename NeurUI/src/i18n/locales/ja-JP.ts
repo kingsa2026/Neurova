@@ -1713,6 +1713,11 @@ conflictTimeReadout: '時刻の読み取り: {basis}（旧 {old} → 新 {new}�
     ingressProcessed: 'Processed',
 
     disconnected: '切断済み',
+    restPolling: 'REST ポーリング中',
+    sessionLoadFailed: 'セッション一覧の読み込みに失敗しました',
+    sessionCreateFailed: 'セッションの作成に失敗しました',
+    sessionSendFailed: 'メッセージの送信に失敗しました',
+    sessionDeleteFailed: 'セッションの終了に失敗しました',
     title: 'チャンネル管理',
     create: 'チャンネル作成',
     test: '接続テスト',

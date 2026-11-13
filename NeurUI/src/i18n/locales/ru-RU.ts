@@ -1713,6 +1713,11 @@ conflictTimeReadout: 'Временные показатели: {basis} (стар
     ingressProcessed: 'Processed',
 
     disconnected: 'Отключено',
+    restPolling: 'Активный REST-опрос',
+    sessionLoadFailed: 'Не удалось загрузить сеансы',
+    sessionCreateFailed: 'Не удалось создать сеанс',
+    sessionSendFailed: 'Не удалось отправить сообщение',
+    sessionDeleteFailed: 'Не удалось завершить сеанс',
     title: 'Управление каналами',
     create: 'Создать канал',
     test: 'Тест подключения',

@@ -38,6 +38,19 @@ describe('useNotificationStore', () => {
     expect(store.loading).toBe(false)
   })
 
+  it('fetchNotifications 翻页发 limit/offset（P1-13：后端不认 page/size）', async () => {
+    vi.mocked(getNotifications).mockResolvedValue({
+      data: { items: [], total: 0 },
+    } as any)
+
+    const store = useNotificationStore()
+    await store.fetchNotifications(1)
+    expect(vi.mocked(getNotifications)).toHaveBeenLastCalledWith({ limit: 20, offset: 0 })
+
+    await store.fetchNotifications(3)
+    expect(vi.mocked(getNotifications)).toHaveBeenLastCalledWith({ limit: 20, offset: 40 })
+  })
+
   it('fetchUnreadCount updates badge', async () => {
     vi.mocked(getUnreadCount).mockResolvedValue({
       data: { total: 5, info: 2, warning: 1, error: 1, success: 1 },
