@@ -1674,13 +1674,25 @@ def _ownerUserModel():
     return UserModel()
 
 
-def _ownerIsAdmin(owner_user_id: str) -> bool:
-    """owner 是否 admin 角色（fail-soft：用户库不可达/查无此人按普通用户）。"""
+def _ownerLookupState(owner_user_id: str) -> str:
+    """owner 用户库探针 → "admin" | "normal" | "missing" | "unreachable"。
+
+    比 `_ownerIsAdmin` 多拆出"查无此人"：悬空引用（owner 用户已删）与
+    "库不可达"必须区别对待——前者的 user scope 是**恒空注册表**（该用户
+    不可能配过任何 key），只有全局表能救；后者是瞬时故障，按既有语义走窄。
+    """
     try:
         user = _ownerUserModel().get_user_by_id(int(str(owner_user_id).strip()))
-        return bool(user and getattr(user, "role", "") == "admin")
     except Exception:
-        return False
+        return "unreachable"
+    if not user:
+        return "missing"
+    return "admin" if getattr(user, "role", "") == "admin" else "normal"
+
+
+def _ownerIsAdmin(owner_user_id: str) -> bool:
+    """owner 是否 admin 角色（fail-soft：用户库不可达/查无此人按普通用户）。"""
+    return _ownerLookupState(owner_user_id) == "admin"
 
 
 def scope_for_owner(owner_user_id: Optional[str]) -> Optional[str]:
@@ -1694,10 +1706,23 @@ def scope_for_owner(owner_user_id: Optional[str]) -> Optional[str]:
     上海人工智能实验室/deepseek-v4-flash-vision 在全局表存在，user:1 表无此
     provider，注册表/懒加载/兜底三条路径全空）。角色判定 fail-soft：用户库
     不可达时按普通用户处理（保持既有隔离语义，宁可走窄不越权）。
+
+    悬空 owner（owner_user_id 指向已删除用户，2026-11-14 kai 二次断流实测：
+    owner="1" 用户行已删，providers.user-1.json 全部服务商无 key）同样回落
+    全局：该用户的 user scope **永远不可能**有 key，判成普通用户＝agent 恒
+    "No client available"。与"无 owner"同一落点——没有可归属的在册用户。
     """
     if not owner_user_id:
         return None
-    if _ownerIsAdmin(owner_user_id):
+    state = _ownerLookupState(owner_user_id)
+    if state == "admin":
+        return None
+    if state == "missing":
+        logger.warning(
+            "Agent owner_user_id=%s 在用户库不存在（悬空引用），"
+            "LLM 配置回落全局 scope（user scope 对已删用户恒为空注册表）",
+            owner_user_id,
+        )
         return None
     return f"user:{owner_user_id}"
 

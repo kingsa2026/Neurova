@@ -12,6 +12,13 @@
 映射应对齐该策略：admin 名下的 agent 用全局，普通用户名下保持 user 隔离。
 角色判定 fail-soft：用户库不可达时按普通用户处理（保持既有隔离语义，宁可
 走窄不越权）。
+
+2026-11-14 二次断流（同链新形态）：kai 的 owner_user_id="1" 指向的用户行已从
+users.db 删除（enhanced-users 迁移误删陈旧行），角色判定查无此人 → 按普通用户
+落 `user:1` scope → providers.user-1.json 十一个服务商**全无 key** → kai 每轮
+"No client available"，并把 nex-n2.6 的失败喂进让位闸自适应节流（成功率 0% →
+全部回合"并发额度让位中"重试 10 次后挂起）。根修：悬空 owner（查无此人）与
+空 owner 同落点——回落全局；"库不可达"维持走窄不变。
 """
 from __future__ import annotations
 
@@ -22,28 +29,33 @@ from neurova.llm import multi_model_client as mm
 
 @pytest.fixture()
 def owner_lookup(monkeypatch):
-    """替换 owner 角色判定（单元层面不摸真用户库）。"""
-    state = {"admin": False}
+    """替换 owner 探针（单元层面不摸真用户库），可钉 admin/normal/missing。"""
+    holder = {"state": "normal"}
 
-    def _set(is_admin: bool):
-        state["admin"] = is_admin
+    def _set(state: str):
+        holder["state"] = state
 
-    monkeypatch.setattr(mm, "_ownerIsAdmin", lambda uid: state["admin"])
+    monkeypatch.setattr(mm, "_ownerLookupState", lambda uid: holder["state"])
     return _set
 
 
 class TestScopeForOwnerAdminFallback:
     def test_admin_owner_uses_global_scope(self, owner_lookup):
-        owner_lookup(True)
+        owner_lookup("admin")
         assert mm.scope_for_owner("1") is None, (
             "admin 名下 agent 被切到 user scope＝拿不到管理员配置的服务商")
 
     def test_normal_owner_keeps_user_scope(self, owner_lookup):
-        owner_lookup(False)
+        owner_lookup("normal")
         assert mm.scope_for_owner("7") == "user:7", "普通用户的隔离语义被破坏"
 
+    def test_dangling_owner_uses_global_scope(self, owner_lookup):
+        owner_lookup("missing")
+        assert mm.scope_for_owner("1") is None, (
+            "悬空 owner 被切到 user scope＝恒空注册表，agent 永远 No client available")
+
     def test_empty_owner_still_global(self, owner_lookup):
-        owner_lookup(False)
+        owner_lookup("normal")
         assert mm.scope_for_owner("") is None
         assert mm.scope_for_owner(None) is None
 
@@ -55,6 +67,26 @@ class TestScopeForOwnerAdminFallback:
 
         monkeypatch.setattr(mm, "_ownerUserModel", _boom)
         assert mm.scope_for_owner("1") == "user:1"
+
+    def test_dangling_owner_falls_back_to_global(self, monkeypatch):
+        """owner 指向已删除用户（查无此人）→ 回落全局 scope。
+
+        user scope 对一个不存在的用户**永远是空注册表**（该用户不可能配过
+        key）——悬空引用判成普通用户＝agent 恒 "No client available"。
+        2026-11-14 kai 实测：owner_user_id="1" 的用户行已删，
+        providers.user-1.json 十一个服务商全无 key，kai 每轮 chat_error，
+        并把 nex-n2.6 的失败喂进让位闸自适应节流（成功率 0% → 全部回合
+        "并发额度让位中" 重试 10 次后挂起）。空 owner 本就回落全局
+        （scope_for_owner(None) → None），悬空 owner 与空 owner 同属
+        "没有可归属的在册用户"，同一落点。
+        """
+        class _Stub:
+            def get_user_by_id(self, uid):
+                return None
+
+        monkeypatch.setattr(mm, "_ownerUserModel", lambda: _Stub())
+        assert mm.scope_for_owner("1") is None, (
+            "悬空 owner 落 user scope＝恒空注册表，agent 永远 No client available")
 
 
 class TestOwnerIsAdminProbe:
