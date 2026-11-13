@@ -258,6 +258,61 @@ class UsageHistoryStore:
             return {"cache_read_tokens": 0, "cache_write_tokens": 0,
                     "prompt_tokens": 0, "cache_hit_rate": 0.0}
 
+    def per_user_cost_totals(self, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """R8/R9（2026-11-13）：按用户×模型聚合 token 并估成本（$），按量降序。
+
+        成本是**定价目录估算值**——与 `usage_accounting.total_cost` 同一张
+        目录、同一个口径（`estimate_cost_for` 单点）；未知模型计 0，不伪造。
+        任何失败回空表（与同文件聚合查询同纪律）。
+        """
+        try:
+            from neurova.core.usage_accounting import TokenUsageAccounting
+
+            where, params = self._where(user_id)
+            with self._lock:
+                with self._connect() as conn:
+                    rows = conn.execute(
+                        f"""
+                        SELECT user_id, model,
+                               SUM(prompt_tokens) AS prompt_tokens,
+                               SUM(completion_tokens) AS completion_tokens,
+                               SUM(total_tokens) AS tokens,
+                               COUNT(*) AS calls
+                        FROM llm_usage
+                        {where}
+                        GROUP BY user_id, model
+                        """,
+                        params,
+                    ).fetchall()
+            by_user: Dict[str, Dict[str, Any]] = {}
+            for row in rows:
+                entry = by_user.setdefault(str(row["user_id"]), {
+                    "user_id": str(row["user_id"]),
+                    "tokens": 0,
+                    "calls": 0,
+                    "cost_usd": 0.0,
+                    "by_model": [],
+                })
+                entry["tokens"] += int(row["tokens"] or 0)
+                entry["calls"] += int(row["calls"] or 0)
+                cost = TokenUsageAccounting.estimate_cost_for(
+                    str(row["model"]),
+                    int(row["prompt_tokens"] or 0),
+                    int(row["completion_tokens"] or 0))
+                entry["cost_usd"] += cost
+                entry["by_model"].append({
+                    "model": str(row["model"]),
+                    "tokens": int(row["tokens"] or 0),
+                    "calls": int(row["calls"] or 0),
+                    "cost_usd": round(cost, 6),
+                })
+            result = sorted(by_user.values(), key=lambda e: -e["tokens"])
+            for entry in result:
+                entry["cost_usd"] = round(entry["cost_usd"], 6)
+            return result
+        except Exception:
+            return []
+
     def daily_by_model(self, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """按天×模型聚合 [{usage_date, model, tokens}]，按日-模型升序。"""
         try:
