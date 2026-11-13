@@ -346,6 +346,26 @@
           </template>
         </GlassCard>
 
+        <!-- 评测集核选容量（R7/HC6：超容量按难度加权多样性收缩到 K 个再评） -->
+        <GlassCard :title="t('settings.evalCoresetTitle')">
+          <p class="governance-hint">{{ t('settings.evalCoresetHint') }}</p>
+          <a-form layout="vertical">
+            <a-form-item :label="t('settings.evalCoresetK')">
+              <a-input-number
+                v-model:value="evalCoreset.coreset_k"
+                :min="0"
+                :max="200"
+                :step="1"
+                style="width: 100%"
+              />
+              <p class="governance-hint">{{ t('settings.evalCoresetKHint') }}</p>
+            </a-form-item>
+          </a-form>
+          <template #footer>
+            <GlassButton variant="primary" size="sm" :loading="savingEvalCoreset" @click="saveEvalCoreset">{{ t('common.save') }}</GlassButton>
+          </template>
+        </GlassCard>
+
         <!-- per-agent 档位派发（R6：未设置的 Agent 跟随部署档位） -->
         <GlassCard :title="t('settings.agentProfilesTitle')">
           <p class="governance-hint">{{ t('settings.agentProfilesHint') }}</p>
@@ -408,7 +428,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getSettings, updateSettings, clearCache as clearCacheApi, getGovernanceSettings, updateGovernanceSettings, getAgentLimits, updateAgentLimits, getToolOffloadSettings, updateToolOffloadSettings, getLlmRetrySettings, updateLlmRetrySettings, getTaskProfileSettings, updateTaskProfileSettings, getAgentExecProfiles, updateAgentExecProfile } from '@/api/modules/settings'
+import { getSettings, updateSettings, clearCache as clearCacheApi, getGovernanceSettings, updateGovernanceSettings, getAgentLimits, updateAgentLimits, getToolOffloadSettings, updateToolOffloadSettings, getLlmRetrySettings, updateLlmRetrySettings, getTaskProfileSettings, updateTaskProfileSettings, getAgentExecProfiles, updateAgentExecProfile, getEvalCoresetSettings, updateEvalCoresetSettings } from '@/api/modules/settings'
 import type { AgentExecProfile } from '@/api/modules/settings'
 import api from '@/api'
 import type { AgentLimits, AgentLimitDomains, AgentLimitDomain } from '@/api/modules/settings'
@@ -698,6 +718,41 @@ const saveTaskProfile = async () => {
   }
 }
 
+/** 评测集核选容量（R7/HC6）：0 = 不核选（逐字旧行为） */
+const evalCoreset = ref({ coreset_k: 0 })
+const savingEvalCoreset = ref(false)
+const evalCoresetLoaded = ref(false)
+
+const fetchEvalCoreset = async () => {
+  try {
+    const res = await getEvalCoresetSettings()
+    const data = (res as any)?.data?.data ?? (res as any)?.data
+    if (data) {
+      evalCoreset.value = { ...evalCoreset.value, ...data }
+      evalCoresetLoaded.value = true
+    }
+  } catch (err) {
+    console.error('[Settings] fetchEvalCoreset failed:', err)
+    evalCoresetLoaded.value = false
+  }
+}
+
+const saveEvalCoreset = async () => {
+  if (!evalCoresetLoaded.value) {
+    message.warning(t('settings.notLoadedSaveBlocked'))
+    return
+  }
+  savingEvalCoreset.value = true
+  try {
+    await updateEvalCoresetSettings({ coreset_k: evalCoreset.value.coreset_k })
+    message.success(t('common.success'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
+  } finally {
+    savingEvalCoreset.value = false
+  }
+}
+
 /** per-agent 档位派发（R6）：未设置的 Agent 跟随部署档位（空串占位） */
 interface AgentProfileRow {
   agent_id: string
@@ -935,6 +990,7 @@ onMounted(() => {
   fetchToolOffload()
   fetchLlmRetry()
   fetchTaskProfile()
+  fetchEvalCoreset()
   fetchAgentProfiles()
 })
 </script>
