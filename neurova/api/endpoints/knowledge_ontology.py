@@ -750,7 +750,48 @@ async def run_ontology_sparql(
     return {"code": 0, "data": result, "request_id": ""}
 
 
-@router.post("/ontology/abduce")
+@router.post("/ontology/import-rdf")
+async def import_ontology_rdf(
+    request: Request,
+    current_user: Dict = Depends(require_admin()),
+):
+    """C1：RDF/XML 导入（管理员，inert 姿态——不执行 SHACL/OWL；原始字节保留）。
+    DOCTYPE/ENTITY 拒／资源上限超限拒／rdflib 未装 501。"""
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.rdf_import import (
+        RdfImportLimitError,
+        RdfImportNotSupported,
+        RdfImportSecurityError,
+        importRdfXml,
+    )
+
+    body = await request.body()
+    store = get_knowledge_fact_store()
+    try:
+        result = importRdfXml(body, agentId=str(current_user.get("agent_id") or "default"),
+                              tenantId=_tenantOf(current_user))
+    except RdfImportSecurityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RdfImportLimitError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RdfImportNotSupported as exc:
+        raise HTTPException(status_code=501, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {
+        "code": 0,
+        "data": {
+            "triple_count": result.triple_count,
+            "inert": result.inert,
+            "unsupported_count": len(result.unsupported),
+            "unsupported": result.unsupported[:20],
+            "original_bytes": len(result.original_bytes),
+        },
+        "request_id": "",
+    }
+
+
+@router.post("/ontology/abduce")@router.post("/ontology/abduce")
 async def run_ontology_abduce(
     body: Dict[str, Any],
     current_user: Dict = Depends(get_current_user_or_service),
