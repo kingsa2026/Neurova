@@ -531,3 +531,8 @@ export function searchCommunityGraph(query: string, mode: string, limit?: number
   return api.post<ApiResponse<Array<Record<string, unknown>>>>(
     '/knowledge/ontology/community-search', { query, mode, limit: limit ?? 5 })
 }
+
+export function listOntologyCommunities() {
+  return api.get<ApiResponse<Array<{ community_id: string; level: number; member_labels: string[]; summary_text: string }>>>(
+    '/knowledge/ontology/communities')
+}
