@@ -2493,12 +2493,16 @@ class ChatPipeline:
         confidence 供读数。fail-open：任何异常回落部署默认，不阻断对话。
         """
         try:
-            from neurova.agent.turn_profile import setTurnProfile
+            from neurova.agent.turn_profile import (
+                recordProfileUsage,
+                setTurnProfile,
+            )
 
             meta = ctx.metadata if isinstance(ctx.metadata, dict) else {}
             explicit = str(meta.get("task_profile") or "").strip().lower()
             if explicit:  # 调用方显式指定，绝不覆盖
                 setTurnProfile(explicit)
+                recordProfileUsage(explicit, "explicit")
                 return
             agent_id = str(getattr(self._agent, "agent_id", "") or "")
             if agent_id:
@@ -2507,6 +2511,7 @@ class ChatPipeline:
                 stored = get_agent_profile(agent_id)
                 if stored:  # R6：管理员为该 agent 派发的档位
                     setTurnProfile(stored)
+                    recordProfileUsage(stored, "agent_stored")
                     return
             from neurova.agent.turn_profile import (
                 classifyTaskProfile,
@@ -2517,6 +2522,7 @@ class ChatPipeline:
                 return
             profile, source, confidence = await classifyTaskProfile(ctx.user_input or "")
             setTurnProfile(profile)
+            recordProfileUsage(profile, source)
             ctx.metadata = dict(ctx.metadata or {})
             ctx.metadata["task_profile"] = profile
             ctx.metadata["task_profile_source"] = source

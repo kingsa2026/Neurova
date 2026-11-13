@@ -233,6 +233,8 @@ class AgentInfo(BaseModel):
     constitution: str = ""
     # 回显 config（TTS 等）：编辑表单重开后从响应恢复已保存参数
     config: Dict[str, Any] = Field(default_factory=dict)
+    # 执行档位回显（R6：lite/standard/heavy；None=未设置，跟随部署档位）
+    exec_profile: Optional[str] = None
 
 
 class CreateAgentRequest(BaseModel):
@@ -249,6 +251,8 @@ class CreateAgentRequest(BaseModel):
     personality: Optional[str] = Field(default=None, description="性格设定")
     constitution: Optional[str] = Field(default=None, description="行为准则（宪法）")
     config: Dict[str, Any] = Field(default_factory=dict, description="额外配置")
+    # 执行档位（R6：lite/standard/heavy；缺省=跟随部署档位）
+    exec_profile: Optional[str] = Field(default=None, description="执行档位（lite/standard/heavy；缺省=跟随部署档位）")
 
 
 class UpdateAgentRequest(BaseModel):
@@ -262,6 +266,8 @@ class UpdateAgentRequest(BaseModel):
     constitution: Optional[str] = Field(default=None, description="行为准则（宪法）")
     model: Optional[str] = Field(default=None, description="LLM 模型")
     provider: Optional[str] = Field(default=None, description="LLM 提供商")
+    # 执行档位局部更新（R6：None=未提及不覆盖；空串=清除回退部署档位）
+    exec_profile: Optional[str] = Field(default=None, description="执行档位（lite/standard/heavy；空串=清除）")
     config: Dict[str, Any] = Field(default_factory=dict, description="额外配置")
 
 
@@ -302,6 +308,23 @@ def get_agent_config_manager():
     return get_config_manager()
 
 
+def _applyExecProfile(agent_id: str, profile: str) -> None:
+    """校验并写 per-agent 执行档位（R6）；空串=清除回退部署档位，非法值 422。"""
+    from neurova.security.agent_profile_settings import (
+        clear_agent_profile,
+        set_agent_profile,
+    )
+
+    key = str(profile or "").strip().lower()
+    if not key:
+        clear_agent_profile(agent_id)
+        return
+    if not set_agent_profile(agent_id, key):
+        raise HTTPException(
+            status_code=422,
+            detail=f"非法执行档位: {profile!r}（可选 lite/standard/heavy）")
+
+
 def agent_to_info(agent) -> Dict[str, Any]:
     """将 Agent 对象转换为信息字典"""
     # 从 config 获取 agent_id
@@ -333,6 +356,15 @@ def agent_to_info(agent) -> Dict[str, Any]:
         "personality": getattr(getattr(agent, "config", None), "personality", "") or "",
         "constitution": getattr(getattr(agent, "config", None), "constitution", "") or "",
     }
+
+    # 执行档位回显（R6：per-agent 档位派发，编辑表单回填数据源）
+    try:
+        from neurova.security.agent_profile_settings import get_agent_profile
+
+        stored_profile = get_agent_profile(agent_id)
+        info["exec_profile"] = stored_profile or None
+    except Exception:  # noqa: BLE001 - 档位读数失败不阻断 agent 信息
+        info["exec_profile"] = None
 
     # 获取模型和提供商信息
     if hasattr(agent, "config"):
@@ -540,6 +572,10 @@ async def create_agent(
         except Exception as e:
             logger.error("AgentConfigManager.create_agent 失败: %s", e, exc_info=True)
 
+        # 执行档位派发（R6）：表单选择 lite/standard/heavy；缺省不设（跟随部署档位）
+        if body.exec_profile:
+            _applyExecProfile(agent_id, body.exec_profile)
+
         info = agent_to_info(agent)
         return AgentInfo(**info)
 
@@ -666,6 +702,10 @@ async def update_agent(
     except Exception as e:
         logger.warning("AgentConfigManager.update_agent 失败: %s", e)
 
+    # 执行档位局部更新（R6）：None=未提及不覆盖；空串=清除回退部署档位
+    if body.exec_profile is not None:
+        _applyExecProfile(agent_id, body.exec_profile)
+
     info = agent_to_info(agent)
     return AgentInfo(**info)
 
@@ -693,6 +733,14 @@ async def delete_agent(request: Request, agent_id: str = FastAPIPath(...), curre
     # 禁止删除系统默认 Agent（保护其工作目录与记忆数据）
     if agent_id == "default":
         raise HTTPException(status_code=400, detail="Cannot delete default agent")
+
+    # per-agent 档位随删除清理（R6：避免残留条目被同 id 重建的实例继承）
+    try:
+        from neurova.security.agent_profile_settings import clear_agent_profile
+
+        clear_agent_profile(agent_id)
+    except Exception as e:  # noqa: BLE001 - 清理失败不阻断删除
+        logger.warning("clear_agent_profile 失败(忽略): %s", e)
 
     # 关闭 Agent：Agent.shutdown 是协程，必须真正 await 执行。
     # 否则记忆库/引擎句柄不释放，后续文件清理在 Windows 上会因文件被锁而失败。

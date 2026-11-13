@@ -665,3 +665,39 @@ async def reject_evolution_proposal(agent_id: str, proposal_id: str,
     if not ok:
         raise HTTPException(status_code=404, detail="提案不存在或已处理")
     return {"code": 0, "data": {"rejected": True}}
+
+
+class AdoptVariantRequest(BaseModel):
+    variant_index: int = Field(ge=0, le=50, description="Pareto 非劣集变体下标")
+
+
+@router.get("/skills/{agent_id}/proposals/{proposal_id}/pareto", dependencies=[Depends(_admin_dep)])
+async def get_proposal_pareto(agent_id: str, proposal_id: str,
+                              user: Dict[str, Any] = Depends(get_current_user)):
+    """N5：读取提案关联运行的 Pareto 非劣集（含各档位变体文本/分数/成本）。"""
+    from neurova.evolution.eval.service import SkillEvolutionService
+
+    service = SkillEvolutionService(agent_id)
+    proposal = next((p for p in service.list_proposals()
+                     if p.get("proposal_id") == proposal_id), None)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="提案不存在")
+    state, run = service.runLookup(str(proposal.get("run_id") or ""))
+    if state != "attached" or run is None:
+        raise HTTPException(status_code=404, detail=f"运行审计不可读（{state}）")
+    return {"code": 0, "data": {"pareto_set": run.get("pareto_set") or {},
+                                "pareto_variants": run.get("pareto_variants") or []}}
+
+
+@router.post("/skills/{agent_id}/proposals/{proposal_id}/adopt-variant", dependencies=[Depends(_admin_dep)])
+async def adopt_pareto_variant(agent_id: str, proposal_id: str,
+                               body: AdoptVariantRequest,
+                               user: Dict[str, Any] = Depends(get_current_user)):
+    """N5：采纳指定档位变体（人工按预算选档终点；写回技能正文，提案转 applied）。"""
+    from neurova.evolution.eval.service import SkillEvolutionService
+
+    try:
+        data = SkillEvolutionService(agent_id).adoptVariant(proposal_id, body.variant_index)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"code": 0, "data": data}

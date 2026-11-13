@@ -449,6 +449,8 @@ export default {
     selectModel: 'Seleziona un modello',
     idHint: 'Lettere/cifre/underscore; lascia vuoto per generazione automatica',
     idReadonly: 'Non modificabile dopo la creazione',
+    execProfile: 'Profilo di esecuzione',
+    execProfileHint: 'Livello di budget di esecuzione di questo agente (lite = veloce, standard = bilanciato, heavy = alta qualità). Non impostato: segue il profilo di deployment.',
     idPlaceholder: 'es. kai, my-assistant',
     status: 'Stato',
     config: 'Configurazione',

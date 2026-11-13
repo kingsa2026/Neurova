@@ -449,6 +449,8 @@ export default {
     selectModel: 'モデルを選択してください',
     idHint: '英数字とアンダースコア。空欄の場合は自動生成',
     idReadonly: '作成後は変更できません',
+    execProfile: '実行プロファイル',
+    execProfileHint: 'この Agent の実行予算階層（lite=高速/standard=バランス/heavy=高品質）。未設定はデプロイ既定に従います。',
     idPlaceholder: '例: kai, my-assistant',
     status: 'ステータス',
     config: '設定',

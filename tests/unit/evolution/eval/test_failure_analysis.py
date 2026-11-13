@@ -231,3 +231,23 @@ class TestDiagnosisWiring:
         assert by_pattern["模式甲"]["sample_failures"] == 3
         assert by_pattern["模式乙"]["stability"] == "flaky"
         assert "stability" not in by_pattern["模式丙"]
+
+    def test_build_diagnosis_evidence_tools_from_tool_trace(self):
+        """N7：诊断条目带证据指针——失败工具名/失败次数/最大耗时（来自 tool_trace）。"""
+        failures = [
+            JudgeFailure(task_input="t1", output="o", feedback="模式甲", score=0.1,
+                         environments=[],
+                         tool_trace=[{"tool": "sql_query", "success": False,
+                                      "error": "boom", "duration_ms": 120},
+                                     {"tool": "file_read", "success": True,
+                                      "duration_ms": 10}]),
+            JudgeFailure(task_input="t2", output="o", feedback="模式甲", score=0.2,
+                         environments=[],
+                         tool_trace=[{"tool": "sql_query", "success": False,
+                                      "error": "boom2", "duration_ms": 300}]),
+        ]
+        entries = buildDiagnosis(failures)
+        tools = entries[0]["evidence_tools"]
+        assert tools[0]["tool"] == "sql_query"
+        assert tools[0]["fails"] == 2
+        assert tools[0]["max_duration_ms"] == 300

@@ -60,8 +60,10 @@ def buildDiagnosis(failures: List[Any], *, max_entries: int = _MAX_ENTRIES) -> L
             # N3：G-rollout 稳定性归因（sample_count>1 的用例才携带）
             "sample_failures": 0,
             "sample_total": 0,
+            "members": [],
         })
         group["count"] += 1
+        group["members"].append(failure)
         score = getattr(failure, "score", None)
         if isinstance(score, (int, float)) and (
                 group["worst_score"] is None or score < group["worst_score"]):
@@ -96,6 +98,31 @@ def buildDiagnosis(failures: List[Any], *, max_entries: int = _MAX_ENTRIES) -> L
             entry["sample_total"] = group["sample_total"]
             entry["stability"] = ("stable" if group["sample_failures"]
                                   >= group["sample_total"] else "flaky")
+        # N7 证据指针：失败工具聚合（工具名/失败次数/最大耗时）——定位到
+        # tool_trace 里该看哪几个调用。
+        tool_stats: Dict[str, Dict[str, Any]] = {}
+        for failure in groups[group["key"]]["members"]:
+            for trace in (getattr(failure, "tool_trace", None) or []):
+                if not isinstance(trace, dict):
+                    continue
+                name = str(trace.get("tool") or "")
+                if not name:
+                    continue
+                stat = tool_stats.setdefault(name, {"tool": name, "calls": 0,
+                                                    "fails": 0,
+                                                    "max_duration_ms": 0})
+                stat["calls"] += 1
+                if trace.get("success") is False:
+                    stat["fails"] += 1
+                duration = trace.get("duration_ms")
+                if isinstance(duration, (int, float)):
+                    stat["max_duration_ms"] = max(stat["max_duration_ms"],
+                                                  int(duration))
+        if tool_stats:
+            entry["evidence_tools"] = sorted(
+                ({**v, "max_duration_ms": v["max_duration_ms"]}
+                 for v in tool_stats.values()),
+                key=lambda s: (-s["fails"], s["tool"]))
         entries.append(entry)
     entries.sort(key=lambda e: (-e["count"], e["pattern"]))
     return entries[:max(1, int(max_entries))]
