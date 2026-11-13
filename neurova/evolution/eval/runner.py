@@ -689,6 +689,19 @@ class SkillEvolutionRunner:
             result.cost_summary = self._run_cost_ledger.summarize()
             return result
 
+        # ── HN6/HC6 评测集核选 ──
+        # 评测集超过核选容量时按「难度加权多样性」收缩到 K 个再走既有 split
+        # （train/val/holdout 从核选集重分）——判据集变小、评测成本不随语料
+        # 线性走。eval_coreset_k=0（默认）不核选，逐字旧行为。
+        _coresetK = int(getattr(self.config, "eval_coreset_k", 0) or 0)
+        if _coresetK > 0 and len(dataset.all_examples) > _coresetK:
+            from neurova.evolution.eval.coreset import selectCoreset
+
+            _selected = selectCoreset(list(dataset.all_examples), _coresetK)
+            logger.info("评测集核选: %s -> %s（难度加权多样性）",
+                        len(dataset.all_examples), len(_selected))
+            dataset = EvalDataset.split(_selected, seed=self.config.seed)
+
         holdout = evaluation_split(dataset)
         tune = dataset.train + dataset.val
         if not tune:
