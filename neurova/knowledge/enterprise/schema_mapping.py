@@ -18,9 +18,19 @@ OBJECT_KINDS = ("column", "template", "term", "literal")
 #: 变体闭集（2026-11-07 裁定 §2.3-1A）：单类型＋变体字段。编译期「给了就收口、
 #: 不给不拒」——B14 时代 sql/erp_api 描述符没有变体字段，存量判据不破；
 #: 工厂（registry.buildAdapter）按需强制要求。闭集随适配器批次只增不改。
+def _sqlDriverNames() -> tuple:
+    """从 connectors_sql._DRIVER_MODULES 派生驱动名闭集（dataification 单源）。"""
+    try:
+        from .connectors_sql import _DRIVER_MODULES
+        return tuple(_DRIVER_MODULES.keys())
+    except Exception:
+        return ("postgresql", "mysql", "mssql", "oracle", "sqlite")
+
+
 VARIANT_CLOSED_SETS: Dict[str, tuple] = {
     "file": ("format", ("csv", "tsv", "json", "jsonl")),
-    "sql": ("driver", ("postgresql", "mysql", "mssql", "oracle", "sqlite")),
+    # W11 dataification：driver 闭集从 connectors_sql._DRIVER_MODULES 派生（单源）
+    "sql": ("driver", tuple(_sqlDriverNames())),
     "erp_api": ("vendor", ("kingdee", "yongyou")),
     "chat": ("vendor", ("wecom", "wechat")),
 }

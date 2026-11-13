@@ -37,7 +37,7 @@ class RdfImportLimitError(ValueError):
 
 
 class RdfImportResult:
-    """导入结果：三元组＋原始字节＋不支持语句＋inert 声明。"""
+    """导入结果：三元组＋原始字节＋不支持语句＋inert 声明＋SHA-256 引用。"""
 
     def __init__(self) -> None:
         self.triples: List[Dict[str, str]] = []
@@ -45,6 +45,12 @@ class RdfImportResult:
         self.unsupported: List[str] = []
         self.inert = True
         self.triple_count = 0
+        self.sha256: str = ""
+
+    @property
+    def sha256(self) -> str:
+        import hashlib
+        return hashlib.sha256(self.original_bytes).hexdigest()
 
 
 def importRdfXml(data: bytes, agentId: str = "default",
