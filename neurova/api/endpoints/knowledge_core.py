@@ -1117,6 +1117,15 @@ async def list_knowledge_revisions(
     entry_or_404(repo, knowledge_id, current_user)
     return repo.list_revisions(knowledge_id)
 
+@router.get("/{knowledge_id}/versions")
+async def list_knowledge_versions(
+    knowledge_id: str = Path(..., description="知识ID"),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """版本快照链（最新在前）：回滚/同名重传/编辑留下的完整版本档。"""
+    repo = get_repository()
+    return {"code": 0, "message": "ok", "data": repo.list_versions(knowledge_id)}
+
 @router.post("/{knowledge_id}/revisions/{revision_index}/rollback")
 async def rollback_knowledge_revision(
     request: Request,
@@ -1130,11 +1139,39 @@ async def rollback_knowledge_revision(
     账本（reason=rollback）——回滚可再回滚。"""
     repo = get_repository()
     agent_id, _item = entry_for_update(repo, knowledge_id, current_user, {})
-    rolled = repo.rollback_revision(knowledge_id, int(revision_index))
+    rolled = repo.rollback_revision(knowledge_id, int(revision_index),
+                                    actor=str(current_user.get("username") or current_user.get("user_id") or ""))
     if rolled is None:
         raise HTTPException(
             status_code=404,
             detail="Revision '%s@%s' not found" % (knowledge_id, revision_index))
+    # Ontology 感知：回滚落活动台账（who/what 入知识活动账），正文变化时
+    # 触发 facts 重抽（与更新路径同款门控与 fail-soft）——图谱不与正文漂移。
+    try:
+        from neurova.knowledge.foundation import get_knowledge_fact_store
+
+        store = get_knowledge_fact_store()
+        tenant = str(current_user.get("tenant_id") or "default")
+        activityId = store.insertActivity(
+            "knowledge_revision_rollback",
+            inputs={"knowledge_id": knowledge_id, "revision_index": revision_index,
+                    "actor": current_user.get("username") or current_user.get("user_id")},
+            basis="属主/管理员回滚条目修订",
+            tenantId=tenant)
+        store.finishActivity(activityId, outputs={
+            "title": rolled.get("title"),
+            "content_chars": len(str(rolled.get("content") or "")),
+        })
+    except Exception as exc:  # noqa: BLE001 — 活动台账失败不阻断回滚，但必须留痕
+        logger.warning("回滚活动台账落账失败: %s", exc)
+    if "content" in (rolled.get("revisions") or [{}])[-1].get("changed_fields", []):
+        try:
+            from neurova.api.endpoints.knowledge_common import extract_after_update
+
+            updatedTenant = str(current_user.get("tenant_id") or "default")
+            extract_after_update(rolled, request, agent_id, tenant_id=updatedTenant)
+        except Exception as exc:  # noqa: BLE001 — 重抽失败不阻断回滚
+            logger.warning("回滚后 facts 重抽失败: %s", exc)
     return item_response(rolled)
 
 

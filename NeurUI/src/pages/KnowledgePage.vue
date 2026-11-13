@@ -347,7 +347,9 @@
     <!-- P0-2 revision 历史（属主/管理员）：update 前旧值快照 -->
     <a-drawer v-model:open="revisionsOpen" :title="t('knowledge.revisionsTitle')" width="480">
       <a-empty v-if="!revisions.length" :description="t('knowledge.revisionsEmpty')" />
-      <a-timeline v-else>
+      <template v-else>
+        <h4 class="rev-section">{{ t('knowledge.revisionsTimelineTitle') }}</h4>
+        <a-timeline>
         <a-timeline-item v-for="(rev, idx) in revisions" :key="idx">
           <p class="rev-time">
             {{ formatTimestampText(rev.updated_at) }}
@@ -376,7 +378,16 @@
             {{ t('knowledge.revisionsRollbackBtn') }}
           </GlassButton>
         </a-timeline-item>
-      </a-timeline>
+        </a-timeline>
+        <h4 class="rev-section">{{ t('knowledge.versionsTitle') }}</h4>
+        <a-empty v-if="!versions.length" :description="t('knowledge.revisionsEmpty')" />
+        <div v-for="ver in versions" :key="ver.version" class="version-row" data-testid="version-snapshot">
+          <span class="mono">v{{ ver.version }}</span>
+          <a-tag color="blue">{{ versionReasonLabel(ver.reason) }}</a-tag>
+          <span class="rev-time">{{ formatTimestampText(ver.time) }}</span>
+          <span class="rev-actor">{{ ver.actor }}</span>
+        </div>
+      </template>
     </a-drawer>
 
     <!-- P1-1 图谱实体消解队列（admin） -->
@@ -833,6 +844,7 @@ import {
   type ConflictResolution,
   listDeletedKnowledge,
   restoreKnowledgeNode,
+  listKnowledgeVersions,
   rollbackKnowledgeRevision,
   listKnowledgeRevisions,
   syncKbConfig,
@@ -926,6 +938,7 @@ const revisions = ref<{ old: Record<string, unknown>; changed_fields: string[]; 
 const revisionsEntryId = ref('')
 const revisionsEntry = ref<KnowledgeItem | null>(null)
 const rollbackPending = ref(-1)
+const versions = ref<Array<{ version: number; reason: string; actor: string; time: string; data: { title: string; content: string } }>>([])
 const diffOpen = ref<Record<number, boolean>>({})
 // 语义检索的可信度映射（id → rrf 归一化分）
 const confidenceMap = ref<Record<string, number>>({})
@@ -1863,6 +1876,12 @@ async function openRevisions(item: KnowledgeItem) {
   try {
     const res: any = await listKnowledgeRevisions(item.id)
     revisions.value = Array.isArray(res) ? res : (res?.data ?? [])
+    try {
+      const vres: any = await listKnowledgeVersions(item.id)
+      versions.value = vres?.data ?? []
+    } catch {
+      versions.value = []
+    }
     revisionsEntryId.value = item.id
     revisionsEntry.value = item
     diffOpen.value = {}
@@ -1896,6 +1915,12 @@ function revisionNewValue(idx: number, field: string): string {
   }
   const entry = revisionsEntry.value as unknown as Record<string, unknown> | null
   return String(entry?.[field] ?? '')
+}
+
+function versionReasonLabel(reason: string): string {
+  if (reason === 'rollback') return t('knowledge.revisionReasonRollback')
+  if (reason === 'source_update_reingest') return t('knowledge.revisionReasonReingest')
+  return t('knowledge.versionReasonUpdate')
 }
 
 function toggleRevisionDiff(idx: number) {
@@ -2437,6 +2462,24 @@ watch(agentId, () => {
 .rev-new {
   color: var(--nr-success, #10b981);
   word-break: break-all;
+}
+
+.rev-section {
+  margin: 4px 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.version-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.rev-actor {
+  color: var(--nr-text-secondary, rgba(128, 128, 128, 0.7));
 }
 
 .rev-field {
