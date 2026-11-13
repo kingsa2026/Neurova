@@ -48,10 +48,25 @@ def availablePacks() -> List[Dict[str, Any]]:
     return packs
 
 
+# C2 不可变锁定：已导入包的 SHA-256 注册表（进程内——首次导入登记，再导入比对）
+_importChecksums: Dict[str, str] = {}
+
+
 def importDomainPack(registry: Any, packId: str, tenantId: str = "default") -> int:
-    """导入领域包（只补缺幂等）：返回真正补上的术语条数。未注册包 → ValueError。"""
+    """导入领域包（只补缺幂等）：返回真正补上的术语条数。未注册包 → ValueError。
+
+    C2 不可变锁定：首次导入登记 SHA-256；再导入时比对——漂移显式拒（不静默换版）。
+    """
+    currentChecksum = packChecksum(packId)
+    registered = _importChecksums.get(packId)
+    if registered is not None and registered != currentChecksum:
+        raise ValueError(
+            "领域包 %r SHA-256 漂移：registered=%s current=%s（不可变锁定——"
+            "新版本须显式清除旧登记后重导）" % (packId, registered[:16], currentChecksum[:16]))
     pack = loadDomainPack(packId)
-    return registry.seedMissing(pack["terms"], tenantId=tenantId)
+    added = registry.seedMissing(pack["terms"], tenantId=tenantId)
+    _importChecksums[packId] = currentChecksum
+    return added
 
 
 def packChecksum(packId: str) -> str:
