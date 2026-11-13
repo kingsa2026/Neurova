@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional, Protocol
 
 from neurova.core.logger import get_logger
+from neurova.evolution.eval import cost_ledger as _cost_ledger
 from neurova.evolution.eval.calibration import NoiseBand
 from neurova.evolution.eval.config import EvolutionConfig
 from neurova.evolution.eval.dataset import EvalDataset, EvalExample, evaluation_split
@@ -139,6 +140,10 @@ class EvolutionRunResult:
     plannedAgentTurns: Optional[int] = None
     agentTurnsUsed: Optional[int] = None
     budgetPlanExceeded: Optional[bool] = None
+    # HN1/HC1 每任务成本账（eval/cost_ledger.py）：per-arm token/费用汇总 +
+    # CoP（Cost-of-Pass）+ 任务级明细（截断外露）。state=no_usage_events 表示
+    # 本轮没有任何 usage 事件——0 是「没量到」不是「免费」。
+    cost_summary: dict = field(default_factory=dict)
 
     @property
     def improvement(self) -> float:
@@ -232,6 +237,7 @@ class EvolutionRunResult:
             "planned_agent_turns": self.plannedAgentTurns,
             "agent_turns_used": self.agentTurnsUsed,
             "budget_plan_exceeded": self.budgetPlanExceeded,
+            "cost_summary": dict(self.cost_summary),
         }
 
 
@@ -300,6 +306,9 @@ class SkillEvolutionRunner:
         # 回喂变异器（已证伪假设禁止重画）。
         self._ledger = ledger
         self._run_eval_errors = 0  # P2-9：run() 开始时清零，全轮累加
+        # HN1/HC1 每任务成本账：run 作用域，每轮 run() 重建（pass_score 供给 CoP 分母）。
+        self._run_cost_ledger = _cost_ledger.EvalCostLedger(
+            pass_score=self.config.cop_pass_score)
 
     # ── 内部:变异 ──
 
@@ -394,7 +403,7 @@ class SkillEvolutionRunner:
         return await self.judge(**kwargs)
 
     async def _score_example(
-        self, skill_text: str, ex: EvalExample, artifact_type: str
+        self, skill_text: str, ex: EvalExample, artifact_type: str, arm: str = ""
     ) -> tuple[float, str, str, bool, list[str]]:
         """返回 (composite, agent 输出, judge 反馈文本, 是否单例失败, 本任务的环节证据)。
 
@@ -409,14 +418,26 @@ class SkillEvolutionRunner:
         不新造第二个清空口径；读用 `peekCapabilityGapKinds`（不消费、不写指标），因为
         本轮的消费点（`_check_nl_synthesis`，Step 0.5）在 `agent.run` **返回之前**就跑完了，
         这里再消费一次只是重复清空，按任务数累加指标倒会把「命中几类缺口」读成「被读几次」。
+
+        HN1/HC1：本任务的真实花费（执行+判分的 usage 快照差分）按臂落
+        `_run_cost_ledger`——三个返回路径（执行崩/判分崩/成功）都要结账，
+        崩掉的单例花掉的钱同样入账。
         """
         from neurova.agent.capability_gap import clearCapabilityGap, peekCapabilityGapKinds
 
         clearCapabilityGap("eval")
+        usage_before = _cost_ledger.usageSnapshot()
+
+        def _settle(score: float, failed: bool) -> None:
+            tokens, cost = _cost_ledger.usageDelta(usage_before, _cost_ledger.usageSnapshot())
+            self._run_cost_ledger.add(task_input=ex.task_input, arm=arm, tokens=tokens,
+                                      cost_usd=cost, score=score, failed=failed)
+
         try:
             output = await self.agent.run(skill_text=skill_text, task_input=ex.task_input)
         except Exception as e:  # noqa: BLE001 - 单例失败记 0（BaseException 不经此路）
             # 崩溃前的卡点仍是证据：环是在抛错之前停的，丢掉这一格就是假象
+            _settle(0.0, True)
             return 0.0, "", _redact_eval_error(e), True, peekCapabilityGapKinds()
         envKinds = peekCapabilityGapKinds()
         max_size = (
@@ -434,9 +455,12 @@ class SkillEvolutionRunner:
                 max_size=max_size,
             )
         except Exception as e:  # noqa: BLE001 - 单例判分失败记 0
+            _settle(0.0, True)
             return 0.0, str(output or ""), _redact_eval_error(e), True, envKinds
+        composite = float(getattr(score, "composite", score))
+        _settle(composite, False)
         return (
-            float(getattr(score, "composite", score)),
+            composite,
             output,
             str(getattr(score, "feedback", "") or ""),
             False,
@@ -444,7 +468,8 @@ class SkillEvolutionRunner:
         )
 
     async def _evaluate(
-        self, skill_text: str, examples: list[EvalExample], artifact_type: str
+        self, skill_text: str, examples: list[EvalExample], artifact_type: str,
+        arm: str = "",
     ) -> tuple[float, list[tuple[EvalExample, float, str, str, bool, list[str]]]]:
         """返回 (均分, 明细)。明细第 5 位 `failed` = 该单例执行或判分是否异常，
         第 6 位 = 该单例执行期间的环节证据（`capability_gap` 的 kind 清单）。
@@ -456,6 +481,9 @@ class SkillEvolutionRunner:
         环节证据走明细而不是走 runner 实例上的旁路表：旁路要按 `id(example)` 键存，
         P1-7a 的并行候选会对同一个 example 各写一份（串味），还得在 `run()` 收尾清账
         （不清就是跨轮残留）。证据跟着它描述的那条读数走，两样都不用。
+
+        `arm`：成本账的臂标签（baseline/candidate/probe/anchor/heldout），随
+        `_score_example` 落 `_run_cost_ledger`——"这批分是谁花的钱"必须能按臂分开读。
         """
         if not examples:
             return 0.0, []
@@ -463,7 +491,7 @@ class SkillEvolutionRunner:
         eval_errors = 0
         for ex in examples:
             score, output, feedback, failed, envKinds = await self._score_example(
-                skill_text, ex, artifact_type)
+                skill_text, ex, artifact_type, arm=arm)
             eval_errors += int(failed)
             details.append((ex, score, output, feedback, failed, envKinds))
         self._run_eval_errors += eval_errors
@@ -473,7 +501,7 @@ class SkillEvolutionRunner:
     async def _collect_failures_sorted(self, skill_text: str, examples: list[EvalExample],
                                        artifact_type: str) -> list[JudgeFailure]:
         """全量失败用例按得分升序（P1-7a 分片采样的数据源）。"""
-        _, details = await self._evaluate(skill_text, examples, artifact_type)
+        _, details = await self._evaluate(skill_text, examples, artifact_type, arm="probe")
         return [
             JudgeFailure(task_input=ex.task_input, output=output, feedback=feedback, score=score,
                          environments=list(env))
@@ -556,7 +584,7 @@ class SkillEvolutionRunner:
         result.candidates_evaluated += len(survivors)
         result.iterations_run += len(survivors)
         evaluated = await asyncio.gather(*[
-            self._evaluate(cand, tune, artifact_type) for cand, _ in survivors
+            self._evaluate(cand, tune, artifact_type, arm="candidate") for cand, _ in survivors
         ])
         # P2-10：并行路径同样携带 per-task 详情做归因
         survivors_scores = [
@@ -618,7 +646,7 @@ class SkillEvolutionRunner:
     async def _collect_failures(
         self, skill_text: str, examples: list[EvalExample], artifact_type: str
     ) -> list[JudgeFailure]:
-        _, details = await self._evaluate(skill_text, examples, artifact_type)
+        _, details = await self._evaluate(skill_text, examples, artifact_type, arm="probe")
         worst = sorted(details, key=lambda d: d[1])[:_MAX_FAILURES]
         return [
             JudgeFailure(task_input=ex.task_input, output=output, feedback=feedback, score=score,
@@ -645,10 +673,14 @@ class SkillEvolutionRunner:
         result = EvolutionRunResult(baseline_text=baseline_text, deployed_text=baseline_text)
         self._run_eval_errors = 0  # P2-9：本轮清零（探针路径有独立语义，不计入）
         self._experimentFingerprint = str(experiment_fingerprint or "")
+        # HN1/HC1：成本账随本轮重建（上一轮的记录不跨轮残留）
+        self._run_cost_ledger = _cost_ledger.EvalCostLedger(
+            pass_score=self.config.cop_pass_score)
 
         if not dataset or not dataset.all_examples:
             result.rejected = True
             result.reject_reason = "empty_dataset"
+            result.cost_summary = self._run_cost_ledger.summarize()
             return result
 
         holdout = evaluation_split(dataset)
@@ -685,16 +717,18 @@ class SkillEvolutionRunner:
             else:
                 result.rejected = True
                 result.reject_reason = "judge_unavailable"
+                result.cost_summary = self._run_cost_ledger.summarize()
                 return result
 
         holdoutBeforeAvg, holdoutBeforeDetails = await self._evaluate(
-            baseline_text, holdout, artifact_type)
+            baseline_text, holdout, artifact_type, arm="baseline")
         result.holdout_before = holdoutBeforeAvg
         holdoutBaseScores = {
             ex.task_input: (score, failed)
             for ex, score, _o, _f, failed, _env in holdoutBeforeDetails
         }
-        result.train_before, train_details = await self._evaluate(baseline_text, tune, artifact_type)
+        result.train_before, train_details = await self._evaluate(
+            baseline_text, tune, artifact_type, arm="baseline")
         # P2-10：原始基线的 per-task 分数——归因 hit_rate 的稳定参照面
         base_scores = {ex.task_input: score for ex, score, _o, _f, _failed, _env in train_details}
 
@@ -768,7 +802,8 @@ class SkillEvolutionRunner:
 
             result.iterations_run += 1
             result.candidates_evaluated += 1
-            score, cand_details = await self._evaluate(candidate, tune, artifact_type)
+            score, cand_details = await self._evaluate(
+                candidate, tune, artifact_type, arm="candidate")
             improved = score > best_score + _EPS
             seq = self._ledger_append(ledger_key, artifact_type, failures,
                                       accepted=improved,
@@ -779,8 +814,11 @@ class SkillEvolutionRunner:
                 best_seq = seq
 
         result.train_best = best_score
+        # 终审留出：胜者臂按正文身份标注——无候选胜出时 best_text 就是基线，
+        # 这一遍是基线的复测，记回基线臂（不冒充候选花费）。
+        holdoutAfterArm = "candidate" if best_text != baseline_text else "baseline"
         holdoutAfterAvg, holdoutAfterDetails = await self._evaluate(
-            best_text, holdout, artifact_type)
+            best_text, holdout, artifact_type, arm=holdoutAfterArm)
         result.holdout_after = holdoutAfterAvg
         holdoutCandScores = {
             ex.task_input: (score, failed)
@@ -828,6 +866,7 @@ class SkillEvolutionRunner:
                 except OSError as e:
                     logger.debug("运行终态回写台账失败: %s", e)
             await self._attach_heldout_evidence(result, dataset, artifact_type)
+            result.cost_summary = self._run_cost_ledger.summarize()
             result.assertCandidateIdentity()
             return result
 
@@ -859,7 +898,8 @@ class SkillEvolutionRunner:
         # 退化。无技能留出只在候选过基线门后评(成本有界:每通过轮 +1 次留出
         # 评测);本次额外评测不计入 iterations_run(它是度量不是候选)。
         if self.config.anchor_floor_enabled:
-            no_skill = await self._evaluate_avg(_NO_SKILL_TEXT, holdout, artifact_type)
+            no_skill = await self._evaluate_avg(_NO_SKILL_TEXT, holdout, artifact_type,
+                                                arm="anchor")
             result.anchor_no_skill = round(no_skill, 6)
             anchors = [v for v in (anchor_best, no_skill) if v is not None]
             if anchors:
@@ -903,6 +943,7 @@ class SkillEvolutionRunner:
                 return await rejectRun("bench_regression")
 
         await self._attach_heldout_evidence(result, dataset, artifact_type)
+        result.cost_summary = self._run_cost_ledger.summarize()
         result.assertCandidateIdentity()
         return result
 
@@ -917,13 +958,13 @@ class SkillEvolutionRunner:
         if not dataset.heldout:
             return
         result.heldout_before = await self._evaluate_avg(
-            result.baseline_text, dataset.heldout, artifact_type)
+            result.baseline_text, dataset.heldout, artifact_type, arm="heldout")
         result.heldout_after = await self._evaluate_avg(
-            result.deployed_text, dataset.heldout, artifact_type)
+            result.deployed_text, dataset.heldout, artifact_type, arm="heldout")
 
     async def _evaluate_avg(self, skill_text: str, examples: list[EvalExample],
-                            artifact_type: str) -> float:
-        avg, _ = await self._evaluate(skill_text, examples, artifact_type)
+                            artifact_type: str, arm: str = "") -> float:
+        avg, _ = await self._evaluate(skill_text, examples, artifact_type, arm=arm)
         return avg
 
     async def _judge_available(self, skill_text: str, examples: list[EvalExample],
