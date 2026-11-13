@@ -48,7 +48,7 @@
           </thead>
           <tbody>
             <tr
-              v-for="term in filteredTerms"
+              v-for="term in pagedTerms"
               :key="term.term_id"
               :class="{ 'is-selected': selectedId === term.term_id }"
               @click="selectTerm(term)"
@@ -72,6 +72,14 @@
             </tr>
           </tbody>
         </table>
+        <a-pagination
+          v-if="filteredTerms.length"
+          v-model:current="termsCurrentPage"
+          :page-size="20"
+          :total="filteredTerms.length"
+          :show-size-changer="false"
+          class="list-pagination"
+        />
 
         <!-- 详情/编辑器：结构化字段；labels/module/identityKeys 只读展示 -->
     <div v-if="editorVisible" class="term-editor-wrap" data-testid="term-editor">
@@ -237,7 +245,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -325,6 +333,7 @@ const form = reactive<TermForm>(emptyForm())
 const conceptTerms = computed(() => terms.value.filter((item) => item.kind === 'concept'))
 
 const filteredTerms = computed(() => {
+  /* 分页在模板层做切片 */
   const needle = filter.value.trim().toLowerCase()
   if (!needle) return terms.value
   return terms.value.filter((term) => {
@@ -332,6 +341,10 @@ const filteredTerms = computed(() => {
     return haystack.includes(needle)
   })
 })
+
+const termsCurrentPage = ref(1)
+const pagedTerms = computed(() => filteredTerms.value.slice((termsCurrentPage.value - 1) * 20, termsCurrentPage.value * 20))
+watch(() => filteredTerms.value.length, () => { termsCurrentPage.value = 1 })
 
 /** 树根 = 无父术语的 concept；子层挂各自 parent。悬空 parent 的术语按根显示。 */
 const rootTerms = computed(() =>
@@ -662,5 +675,10 @@ defineExpose({ loadTerms })
   display: flex;
   gap: 8px;
   margin-top: 12px;
+}
+.list-pagination {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
 }
 </style>
