@@ -1,8 +1,11 @@
 """console.py artifact SSE 事件提取 (extract_tool_artifacts / _extract_artifacts) 单元测试。
 
 锁定契约：
-- tool_result 完整文本中含 file_path/audio_path/output_ref.path 的 dict
+- tool_result 完整文本中含 file_path/audio_path 的 dict
   → 注册 artifact 并返回 {"type": "artifact", ...} 事件列表；
+- OutputRef 折叠引用（output_ref.path，tool_outputs/ 下的 ref_*.json）是
+  上下文减负的**内部机制**，不是产出物——不注册（2026-11-14 产品口径：
+  产出物面展示文档型成果，命名=任务内容+日期，而非工具内部引用）；
 - 纯文本/无路径 dict → 空列表；
 - env NEUROVA_ARTIFACT_EVENTS=0 → 空列表（逃生开关）；
 - file_operation 读形态（含 content）不提取；写形态才提取。
@@ -47,6 +50,41 @@ class TestExtractArtifacts(unittest.TestCase):
         self.assertEqual(ev["kind"], "markdown")
         self.assertEqual(ev["name"], "report.md")
         self.assertTrue(ev["artifact_id"])
+
+    def test_output_ref_folded_result_yields_no_artifact(self):
+        """OutputRef 折叠引用不进产出物面。
+
+        工具大输出折叠成 ref_*.json（tool_outputs/ 下）是上下文减负的内部
+        机制——把它的落盘路径注册成 artifact，会让"本轮产出物"里出现
+        ref_1794591986__file__read__e8ac.json 这类内部引用（2026-11-14
+        kai 实测的产出物面污染）。产出物面应展示文档型成果。
+        """
+        out_dir = self.ws / "tool_outputs"
+        out_dir.mkdir(exist_ok=True)
+        ref_file = out_dir / "ref_1794591986_file__read_e8ac.json"
+        ref_file.write_text("{}", encoding="utf-8")
+        raw = json.dumps(
+            {
+                "success": True,
+                "output_ref": {
+                    "path": str(ref_file),
+                    "size_bytes": 2,
+                    "truncated": True,
+                    "preview": "{}",
+                },
+                "note": "工具 file__read 输出超阈值，完整内容已落盘",
+            }
+        )
+        self.assertEqual(_extract_artifacts(raw, agent_id="ag1", user_id="u1"), [])
+
+    def test_tool_outputs_dir_file_path_yields_no_artifact(self):
+        """即便路径经 file_path 字段给出，tool_outputs/ 下的引用文件也不算产出。"""
+        out_dir = self.ws / "tool_outputs"
+        out_dir.mkdir(exist_ok=True)
+        ref_file = out_dir / "ref_123_file_read_abc.json"
+        ref_file.write_text("{}", encoding="utf-8")
+        raw = json.dumps({"success": True, "file_path": str(ref_file)})
+        self.assertEqual(_extract_artifacts(raw, agent_id="ag1", user_id="u1"), [])
 
     def test_plain_text_returns_empty(self):
         self.assertEqual(_extract_artifacts("just text", agent_id="ag1", user_id="u1"), [])

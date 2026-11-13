@@ -422,11 +422,28 @@ def extract_tool_artifacts(tool_name: str, result_text: str, agent_id: str = "",
     return _extract_artifacts(result_text, agent_id=agent_id, user_id=user_id)
 
 
+def _is_internal_output_ref(path_str: str) -> bool:
+    """是否 OutputRef 的内部落盘引用（不是产出物）。
+
+    `tool_outputs/` 目录与 `ref_*.json` 命名是 tool_output_ref.py 大输出
+    折叠机制的专属形态——把这类引用注册进产出物面，用户看到的就是
+    ref_1794591986__file__read__e8ac.json 这类内部文件（2026-11-14 kai
+    实测的产出物面污染）。产出物面应展示文档型成果，命名=任务内容+日期。
+    """
+    p = Path(path_str)
+    if "tool_outputs" in p.parts:
+        return True
+    name = p.name
+    return name.startswith("ref_") and name.endswith(".json")
+
+
 def _extract_artifacts(result_text: str, agent_id: str = "", user_id: str = "") -> List[Dict[str, Any]]:
     """工具结果完整文本 → artifact SSE 事件列表。
 
     在 console.py 的脱敏/截断前调用（截断文本里路径可能只剩半截，
     正则兜底就是为它准备的）。env NEUROVA_ARTIFACT_EVENTS=0 关闭。
+    OutputRef 折叠引用（tool_outputs/ 下的 ref_*.json）不注册——内部
+    机制不是产出物。
     """
     if os.environ.get("NEUROVA_ARTIFACT_EVENTS", "") == "0":
         return []
@@ -434,6 +451,9 @@ def _extract_artifacts(result_text: str, agent_id: str = "", user_id: str = "") 
         return []
     events: List[Dict[str, Any]] = []
     for cand in _iter_candidate_paths(result_text):
+        if _is_internal_output_ref(cand):
+            logger.debug("artifact 注册跳过（OutputRef 内部引用）: %s", cand)
+            continue
         try:
             info = register_artifact(cand, agent_id=agent_id, user_id=user_id)
         except ValueError as e:

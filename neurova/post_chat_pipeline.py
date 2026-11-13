@@ -1118,6 +1118,12 @@ class PostChatPipeline:
             # extract_tool_artifacts 同一判读：读形态不算产出）。注册失败
             # （路径越界/文件缺失）仅跳过该产物，不阻断会话保存。
             _artifacts = self._collect_round_artifacts(_tool_msgs)
+            # 文档型结论落成 md 工件（2026-11-14 产品口径：产出物面展示
+            # 文档型成果，命名=任务内容+日期；OutputRef 内部引用已从产物
+            # 提取中排除）。失败降级为 None，不阻断会话保存。
+            _doc_art = self._capture_round_document(user_input, reply)
+            if _doc_art:
+                _artifacts = list(_artifacts or []) + [_doc_art]
             if _artifacts:
                 assistant_meta["artifacts"] = _artifacts
             # P0a 注入留痕（效力闭环）：本轮进了 prompt 的反思日志 id 随消息
@@ -1363,6 +1369,43 @@ class PostChatPipeline:
             logger.debug("知识 token 归因跳过: %s", exc)
             return 0
 
+    def _round_identity(self) -> tuple:
+        """本轮 (agent_id, user_id)——产物两处提取（工具产物/文档工件）
+        共用的同一身份读法（单一事实源，教义第 6 条）。
+
+        B-5 契约注释：身份读取与 tool_executor._agent_identity 一致——
+        私有显式位（测试替身/显式写入方）优先于 public 别名，防真值影子
+        遮蔽显式身份（B5 契约锁定该顺序；P2-22 的删除被该契约打回，
+        见 tool_executor._agent_identity 的同款注释）
+        """
+        agent_id = str(getattr(self._agt.config, "agent_id", "") or "")
+        user_id = str(
+            getattr(self._agt, "_current_user_id", None)
+            or getattr(self._agt, "current_user_id", None)
+            or ""
+        )
+        return agent_id, user_id
+
+    def _capture_round_document(self, user_input: str, reply: str) -> Optional[Dict[str, Any]]:
+        """文档型回复落成 md 工件（命名=任务内容+日期），进产出物面。
+
+        判据与命名见 `neurova/agent/document_artifact.py`（独立深模块，
+        不回填本管线）。失败降级为 None：工件是增强能力，不阻断会话保存。
+        """
+        try:
+            from neurova.agent.document_artifact import capture_document_artifact
+
+            agent_id, user_id = self._round_identity()
+            return capture_document_artifact(
+                user_input=user_input,
+                reply=reply,
+                agent_id=agent_id,
+                user_id=user_id,
+            )
+        except Exception as e:  # noqa: BLE001 - 工件缺失不影响会话
+            logger.debug("文档工件捕获降级: %s", e)
+            return None
+
     def _collect_round_artifacts(self, tool_msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """从本轮 tool_result 列表提取产物（落盘到 assistant_metadata.artifacts）。
 
@@ -1375,18 +1418,9 @@ class PostChatPipeline:
         try:
             from neurova.api.endpoints.artifacts_api import extract_tool_artifacts
 
-            # A-03: Agent 无 agent_id 实例属性（在 config.agent_id，与
-            # :1463/:1588/:1973 兄弟调用点一致）——原写法恒为空串
-            agent_id = str(getattr(self._agt.config, "agent_id", "") or "")
-            # B-5 契约注释：身份读取与 tool_executor._agent_identity 一致——
-            # 私有显式位（测试替身/显式写入方）优先于 public 别名，防真值影子
-            # 遮蔽显式身份（B5 契约锁定该顺序；P2-22 的删除被该契约打回，
-            # 见 tool_executor._agent_identity 的同款注释）
-            user_id = str(
-                getattr(self._agt, "_current_user_id", None)
-                or getattr(self._agt, "current_user_id", None)
-                or ""
-            )
+            # A-03: Agent 的 agent_id 在 config.agent_id（与 :1463/:1588/:1973
+            # 兄弟调用点一致）——原写法恒为空串
+            agent_id, user_id = self._round_identity()
             for tm in tool_msgs or []:
                 if not isinstance(tm, dict) or tm.get("type") != "tool_result":
                     continue
