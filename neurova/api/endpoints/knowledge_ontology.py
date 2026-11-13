@@ -162,7 +162,14 @@ async def export_ontology_turtle(
 
     text = serializeAll(get_knowledge_fact_store(), tenantId=_tenantOf(current_user),
                         agentId=agent_id)
-    return Response(content=text, media_type="text/turtle; charset=utf-8")
+    # C1 字节级往返：响应头携带最近一次 RDF/XML 导入的 SHA-256 引用
+    import os
+    lastImportSha = os.environ.get("_LAST_RDF_IMPORT_SHA256", "")
+    headers = {}
+    if lastImportSha:
+        headers["X-Original-Import-Sha256"] = lastImportSha
+    return Response(content=text, media_type="text/turtle; charset=utf-8",
+                    headers=headers)
 
 
 @router.get("/ontology/export.jsonld")
@@ -485,7 +492,48 @@ async def create_state_machine(
     return {"code": 0, "data": item, "request_id": ""}
 
 
-@router.get("/ontology/accountability")
+@router.get("/ontology/blocking-stats")
+async def get_blocking_stats(
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """U3 消解队列 blocking 读数（登录可读）：候选对数/全对数对比。"""
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.resolution import candidatePairsBlocking, candidatePairsFullScan
+
+    store = get_knowledge_fact_store()
+    nodes = []
+    with store._lock:
+        rows = store._conn.execute(
+            "SELECT node_id, label, node_type FROM knowledge_graph_nodes"
+            " WHERE status = 'active' LIMIT 500").fetchall()
+    nodes = [type("N", (), {"node_id": r["node_id"], "label": r["label"],
+                            "node_type": r["node_type"]}) for r in rows]
+    full = candidatePairsFullScan(nodes)
+    blocked = candidatePairsBlocking(nodes)
+    return {"code": 0, "data": {"full_scan": len(full), "blocking": len(blocked),
+                                "reduction_pct": round((1 - len(blocked) / max(len(full), 1)) * 100)},
+            "request_id": ""}
+
+
+@router.get("/ontology/conflict-policy/{term_id}")
+async def get_conflict_policy(
+    term_id: str = Path(...),
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """U3 冲突队列 conflict_policy 声明读数（登录可读）。"""
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.term_registry import OntologyTermRegistry
+
+    store = get_knowledge_fact_store()
+    term = OntologyTermRegistry(store).term(term_id, tenantId=_tenantOf(current_user))
+    if term is None:
+        raise HTTPException(status_code=404, detail=f"术语未登记: {term_id}")
+    return {"code": 0, "data": {"term_id": term_id,
+                                "conflict_policy": term.get("conflict_policy") or "default"},
+            "request_id": ""}
+
+
+@router.get("/ontology/accountability")@router.get("/ontology/accountability")
 async def query_ontology_accountability(
     subject: Optional[str] = Query(default=None),
     actor: Optional[str] = Query(default=None),
