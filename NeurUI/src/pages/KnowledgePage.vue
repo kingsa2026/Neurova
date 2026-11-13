@@ -359,6 +359,17 @@
             <span class="rev-name">{{ field }}</span>
             <span class="rev-old">{{ truncate(String(rev.old?.[field] ?? ''), 120) }}</span>
           </p>
+          <GlassButton size="sm" variant="secondary" data-testid="revision-diff-btn"
+                       @click="toggleRevisionDiff(idx)">
+            {{ t('knowledge.revisionDiffBtn') }}
+          </GlassButton>
+          <div v-if="diffOpen[idx]" class="rev-diff" data-testid="revision-diff">
+            <p v-for="field in rev.changed_fields" :key="'diff-' + field" class="rev-diff-row">
+              <span class="rev-name">{{ field }}</span>
+              <span class="rev-old">{{ t('knowledge.revisionDiffOld') }}: {{ truncate(String(rev.old?.[field] ?? ''), 160) }}</span>
+              <span class="rev-new">{{ t('knowledge.revisionDiffNew') }}: {{ truncate(revisionNewValue(idx, field), 160) }}</span>
+            </p>
+          </div>
           <GlassButton v-if="isAdmin && revisionsEntry && canManage(revisionsEntry)"
                        size="sm" variant="secondary" data-testid="revision-rollback-btn"
                        :loading="rollbackPending === idx" @click="handleRevisionRollback(idx)">
@@ -915,6 +926,7 @@ const revisions = ref<{ old: Record<string, unknown>; changed_fields: string[]; 
 const revisionsEntryId = ref('')
 const revisionsEntry = ref<KnowledgeItem | null>(null)
 const rollbackPending = ref(-1)
+const diffOpen = ref<Record<number, boolean>>({})
 // 语义检索的可信度映射（id → rrf 归一化分）
 const confidenceMap = ref<Record<string, number>>({})
 
@@ -1853,6 +1865,7 @@ async function openRevisions(item: KnowledgeItem) {
     revisions.value = Array.isArray(res) ? res : (res?.data ?? [])
     revisionsEntryId.value = item.id
     revisionsEntry.value = item
+    diffOpen.value = {}
     revisionsOpen.value = true
   } catch (err) {
     message.error(extractApiDetail(err) || t('knowledge.revisionsError'))
@@ -1873,6 +1886,20 @@ async function handleRevisionRollback(idx: number) {
   } finally {
     rollbackPending.value = -1
   }
+}
+
+/** 较上一版本的新值：下一较新修订的 old 即本修订后的值；最新一条取条目现值。 */
+function revisionNewValue(idx: number, field: string): string {
+  if (idx > 0) {
+    const newer = revisions.value[idx - 1]
+    if (newer?.old && field in newer.old) return String(newer.old[field] ?? '')
+  }
+  const entry = revisionsEntry.value as unknown as Record<string, unknown> | null
+  return String(entry?.[field] ?? '')
+}
+
+function toggleRevisionDiff(idx: number) {
+  diffOpen.value = { ...diffOpen.value, [idx]: !diffOpen.value[idx] }
 }
 
 async function fetchResolutionReviews() {
@@ -2389,6 +2416,27 @@ watch(agentId, () => {
   margin: 0 0 4px;
   font-size: 12px;
   color: var(--nr-text-secondary);
+}
+
+.rev-diff {
+  margin: 6px 0 0;
+  padding: 8px;
+  border: 1px solid var(--nr-border, rgba(128, 128, 128, 0.2));
+  border-radius: 6px;
+  background: var(--nr-bg-inset, rgba(0, 0, 0, 0.15));
+}
+
+.rev-diff-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+.rev-new {
+  color: var(--nr-success, #10b981);
+  word-break: break-all;
 }
 
 .rev-field {
