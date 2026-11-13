@@ -2,7 +2,7 @@
   <div class="relations-section" data-testid="studio-relations">
     <h4 class="section-title" data-testid="relation-profile-title">{{ t('ontology.relationProfileTitle') }}</h4>
     <div v-if="relationTerms.length" class="profile-list">
-      <div v-for="term in relationTerms" :key="term.term_id" class="profile-row">
+      <div v-for="term in pagedRelationTerms" :key="term.term_id" class="profile-row">
         <span class="term-id mono">{{ term.term_id }}</span>
         <span class="profile-tags">
           <a-tag v-if="term.inverse_of" color="geekblue">
@@ -16,6 +16,14 @@
         </span>
       </div>
     </div>
+    <a-pagination
+      v-if="relationTerms.length"
+      v-model:current="profilePage"
+      :page-size="20"
+      :total="relationTerms.length"
+      :show-size-changer="false"
+      class="list-pagination"
+    />
     <a-empty v-else :description="t('ontology.noRelationTerms')" />
 
     <h4 class="section-title" data-testid="candidate-queue-title">{{ t('ontology.candidateQueueTitle') }}</h4>
@@ -28,7 +36,7 @@
       <span v-if="!isAdmin" class="admin-note">{{ t('ontology.candidateAdminOnly') }}</span>
     </div>
     <div class="candidate-list" data-testid="candidate-list">
-      <div v-for="candidate in candidates" :key="candidate.candidate_id" class="candidate-row">
+      <div v-for="candidate in pagedCandidates" :key="candidate.candidate_id" class="candidate-row">
         <div class="candidate-main">
           <span class="surface">{{ candidate.surface }}</span>
           <span class="mono candidate-id">{{ candidate.candidate_id }}</span>
@@ -55,6 +63,14 @@
       </div>
       <a-empty v-if="!candidates.length && !loading" :description="t('ontology.candidateEmpty')" />
     </div>
+    <a-pagination
+      v-if="candidates.length"
+      v-model:current="candidatePage"
+      :page-size="20"
+      :total="candidates.length"
+      :show-size-changer="false"
+      class="list-pagination"
+    />
   </div>
 </template>
 
@@ -81,6 +97,13 @@ const candidateStatus = ref<'pending' | 'approved' | 'rejected'>('pending')
 const candidates = ref<RelationCandidate[]>([])
 
 const relationTerms = computed(() => (props.schema?.terms ?? []).filter((term) => term.kind === 'relation'))
+
+const profilePage = ref(1)
+const pagedRelationTerms = computed(() => relationTerms.value.slice((profilePage.value - 1) * 20, profilePage.value * 20))
+watch(() => relationTerms.value.length, () => { profilePage.value = 1 })
+const candidatePage = ref(1)
+const pagedCandidates = computed(() => candidates.value.slice((candidatePage.value - 1) * 20, candidatePage.value * 20))
+watch(() => candidates.value.length, () => { candidatePage.value = 1 })
 
 async function loadCandidates() {
   loading.value = true
@@ -205,5 +228,10 @@ onMounted(loadCandidates)
 }
 .mono {
   font-family: var(--nr-font-mono, monospace);
+}
+.list-pagination {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
 }
 </style>

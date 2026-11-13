@@ -17,7 +17,7 @@
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in cqRows" :key="row.cqId" :data-testid="`cq-row-${row.cqId}`">
+        <tr v-for="row in pagedCqRows" :key="row.cqId" :data-testid="`cq-row-${row.cqId}`">
           <td class="mono">{{ row.cqId }}</td>
           <td>{{ row.question }}</td>
           <td>{{ row.actor }}</td>
@@ -32,17 +32,30 @@
         </tr>
       </tbody>
     </table>
+    <a-pagination
+      v-if="(cqRows ?? []).length"
+      v-model:current="currentPage"
+      :page-size="20"
+      :total="(cqRows ?? []).length"
+      :show-size-changer="false"
+      class="list-pagination"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { CqRow } from '@/types/ontology'
 
 /** 行只来自服务端 cq-matrix 读数面；null = 读面失败（显式报错，不渲染假表）。 */
-defineProps<{ cqRows: CqRow[] | null }>()
+const props = defineProps<{ cqRows: CqRow[] | null }>()
 
 const { t } = useI18n()
+
+const currentPage = ref(1)
+const pagedCqRows = computed(() => (props.cqRows ?? []).slice((currentPage.value - 1) * 20, currentPage.value * 20))
+watch(() => (props.cqRows ?? []).length, () => { currentPage.value = 1 })
 
 function statusColor(status: CqRow['status']): string {
   if (status === 'implemented') return 'green'
@@ -83,6 +96,11 @@ function statusLabel(status: CqRow['status']): string {
 .query-cell {
   max-width: 260px;
   word-break: break-all;
+}
+.list-pagination {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
 }
 .mono {
   font-family: var(--nr-font-mono, monospace);
