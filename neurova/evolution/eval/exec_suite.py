@@ -44,7 +44,20 @@ ASSERTION_OPS: Dict[str, str] = {
     "regex": "输出匹配 value 正则（re.search）",
     "length_le": "输出长度 ≤ int(value)",
     "length_ge": "输出长度 ≥ int(value)",
+    # R2 结构化断言：面向 JSON 形态的输出
+    "json_path": "输出按 JSON 解析后，value（点路径，列表用数字下标）可解析；"
+                 "spec 带 expected 时还须与该值相等",
+    "json_keys": "输出按 JSON 对象解析后，value（逗号分隔键名）全部存在",
+    # R2 差分（metamorphic）断言：相对基线输出的判定
+    "differs_from_baseline": "输出与同案基线输出不同",
+    "same_as_baseline": "输出与同案基线输出相同",
 }
+
+#: 差分 op（需要同案基线输出才能判定；缺席 ⇒ 该案 unevidenced）
+_DIFFERENTIAL_OPS = frozenset({"differs_from_baseline", "same_as_baseline"})
+
+#: R7 覆盖面：哪些工件类型合成可执行套件（单一出处，service 装配读它）
+EXEC_SUITE_ARTIFACT_TYPES = ("skill", "template", "tool_description")
 
 _GEN_SYSTEM = (
     "你是一名评测工程师。给定一段 agent 技能/提示词文本（公共契约）与若干任务示例，"
@@ -58,17 +71,41 @@ _GEN_SYSTEM = (
 )
 
 
-def evaluateAssertions(output: str, assertions: List[Dict[str, Any]]) -> List[str]:
+def _jsonPathResolve(payload: Any, path: str) -> tuple:
+    """点路径取值（列表用数字下标）→ (found, value)。"""
+    current = payload
+    for part in [p for p in str(path or "").split(".") if p]:
+        if isinstance(current, dict):
+            if part not in current:
+                return (False, None)
+            current = current[part]
+        elif isinstance(current, list):
+            try:
+                idx = int(part)
+            except ValueError:
+                return (False, None)
+            if idx < 0 or idx >= len(current):
+                return (False, None)
+            current = current[idx]
+        else:
+            return (False, None)
+    return (True, current)
+
+
+def evaluateAssertions(output: str, assertions: List[Dict[str, Any]],
+                       baseline_output: Optional[str] = None) -> List[str]:
     """对单条输出执行一组断言，返回**失败原因**列表（空 = 全过）。
 
-    确定性字符串/正则判定，不执行任何生成代码；未知 op 记失败并点名
-    （不崩溃、不静默当作通过）。
+    确定性字符串/正则/JSON 判定，不执行任何生成代码；未知 op 记失败并点名
+    （不崩溃、不静默当作通过）。差分 op 需要同案基线输出——缺席时记失败
+    （run_exec_suite 在更上层把这种案整体标 unevidenced，不进通过率分母）。
     """
     text = str(output if output is not None else "")
     failures: List[str] = []
     for spec in assertions or []:
         op = str((spec or {}).get("op", "")).strip().lower()
         value = (spec or {}).get("value")
+        expected = (spec or {}).get("expected")
         if op == "non_empty":
             if not text.strip():
                 failures.append("non_empty: 输出为空")
@@ -99,6 +136,41 @@ def evaluateAssertions(output: str, assertions: List[Dict[str, Any]]) -> List[st
                     failures.append(f"length_ge: 长度 {len(text)} < {value}")
             except (TypeError, ValueError):
                 failures.append(f"length_ge: 阈值非法 {value!r}")
+        elif op == "json_path":
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                failures.append("json_path: 输出不是合法 JSON")
+                continue
+            found, resolved = _jsonPathResolve(payload, value)
+            if not found:
+                failures.append(f"json_path: 路径 {value!r} 不可解析")
+            elif "expected" in (spec or {}):
+                if resolved != expected:
+                    failures.append(
+                        f"json_path: {value!r} 期望 {expected!r} 实得 {resolved!r}")
+        elif op == "json_keys":
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                failures.append("json_keys: 输出不是合法 JSON")
+                continue
+            if not isinstance(payload, dict):
+                failures.append("json_keys: 输出不是 JSON 对象")
+                continue
+            wanted = [k.strip() for k in str(value or "").split(",") if k.strip()]
+            missing = [k for k in wanted if k not in payload]
+            if missing:
+                failures.append(f"json_keys: 缺键 {missing}")
+        elif op in _DIFFERENTIAL_OPS:
+            if baseline_output is None:
+                failures.append(f"{op}: 同案基线输出缺席，无法判定")
+            else:
+                same = text == str(baseline_output)
+                if op == "differs_from_baseline" and same:
+                    failures.append("differs_from_baseline: 与基线输出相同")
+                if op == "same_as_baseline" and not same:
+                    failures.append("same_as_baseline: 与基线输出不同")
         else:
             failures.append(f"未知断言 op: {op!r}")
     return failures
@@ -165,7 +237,10 @@ def _parseCases(raw_cases: Any, *, cap: int) -> tuple:
             op = str(spec.get("op", "")).strip().lower()
             if op not in ASSERTION_OPS:
                 continue
-            assertions.append({"op": op, "value": spec.get("value", "")})
+            entry = {"op": op, "value": spec.get("value", "")}
+            if "expected" in spec:  # json_path 等结构化断言的期望值
+                entry["expected"] = spec.get("expected")
+            assertions.append(entry)
         if not assertions:
             continue
         cases.append(
@@ -256,11 +331,14 @@ def _extractJsonArray(text: str) -> Optional[list]:
 
 
 def run_exec_suite(suite: ExecutableTestSuite,
-                   outputs: Dict[str, str]) -> Dict[str, Any]:
+                   outputs: Dict[str, str],
+                   baseline_outputs: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """对已捕获的输出执行套件断言（确定性，无 LLM、无代码执行）。
 
     - 输出缺失的用例记 unevidenced（**不是通过**）；
-    - pass_rate 分母 = 已评测数（unevidenced 不进分母也不进分子）；
+    - 差分断言（differs_from_baseline/same_as_baseline）需要同案基线输出——
+      基线缺席时该案 unevidenced（不进分母也不冒充通过）；
+    - pass_rate 分母 = 已评测数；
     - state 三态：measured（全部跑到）/ partially_measured（部分跑到——
       分母不一致，消费方不得拿它做两侧对比判据）/ unevidenced（一条都没跑到）。
     """
@@ -274,7 +352,17 @@ def run_exec_suite(suite: ExecutableTestSuite,
             rows.append({"case_id": case.case_id, "task_input": case.task_input[:80],
                          "state": "unevidenced", "passed": None, "failures": []})
             continue
-        failures = evaluateAssertions(outputs[case.task_input], list(case.assertions))
+        needsBaseline = any(a.get("op") in _DIFFERENTIAL_OPS for a in case.assertions)
+        baseOut = None
+        if needsBaseline:
+            baseOut = (baseline_outputs or {}).get(case.task_input)
+            if baseOut is None:
+                rows.append({"case_id": case.case_id, "task_input": case.task_input[:80],
+                             "state": "unevidenced", "passed": None,
+                             "failures": ["差分断言缺同案基线输出"]})
+                continue
+        failures = evaluateAssertions(outputs[case.task_input], list(case.assertions),
+                                      baseline_output=baseOut)
         case_passed = not failures
         evaluated += 1
         passed += int(case_passed)

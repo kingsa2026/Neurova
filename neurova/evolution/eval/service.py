@@ -728,6 +728,13 @@ class SkillEvolutionService:
 
     # ── 进化主流程 ──
 
+    @staticmethod
+    def _execSuiteApplies(artifact_type: str) -> bool:
+        """R7 覆盖面单点：哪些工件类型合成可执行套件（出处 exec_suite 模块常量）。"""
+        from neurova.evolution.eval.exec_suite import EXEC_SUITE_ARTIFACT_TYPES
+
+        return str(artifact_type or "") in EXEC_SUITE_ARTIFACT_TYPES
+
     async def evolve(
         self,
         *,
@@ -791,7 +798,7 @@ class SkillEvolutionService:
         if executorKind(executor) == EXECUTOR_KIND_REAL:
             verdict = checkRealArmBudget(
                 planRealArmTurns(dataset, cfg, iterations=iterations,
-                                 include_exec_suite=(artifact_type == "skill")),
+                                 include_exec_suite=self._execSuiteApplies(artifact_type)),
                 realArmMaxTurns())
             if not verdict.allowed:
                 executor = SimulatedAgent(model=cfg.judge_model)
@@ -844,11 +851,11 @@ class SkillEvolutionService:
         _tokens_before = (get_usage_accounting().snapshot()["total"]["total_tokens"]
                           if executorKind(executor) == EXECUTOR_KIND_REAL else None)
 
-        # HN2/HC2：可执行测试套件——只对 skill 类工件合成；生成失败诚实回退
-        # judge（套件不可用），运行不中断。生成器只读基线契约与参考任务面，
-        # 不读候选正文（反 gaming 边界见 exec_suite.py 模块注）。
+        # HN2/HC2：可执行测试套件——对 §EXEC_SUITE_ARTIFACT_TYPES 内的工件
+        # 合成；生成失败诚实回退 judge（套件不可用），运行不中断。生成器只读
+        # 基线契约与参考任务面，不读候选正文（反 gaming 边界见 exec_suite.py）。
         execSuite = None
-        if cfg.exec_suite_enabled and artifact_type == "skill":
+        if cfg.exec_suite_enabled and self._execSuiteApplies(artifact_type):
             try:
                 from neurova.evolution.eval.exec_suite import TestSynthesizer
 
@@ -882,7 +889,7 @@ class SkillEvolutionService:
         # 传入：传进来就等于允许调用方替运行编一个预算数。
         kind = executorKind(executor)
         plan = (planRealArmTurns(dataset, cfg, iterations=iterations,
-                                 include_exec_suite=(artifact_type == "skill"))
+                                 include_exec_suite=self._execSuiteApplies(artifact_type))
                 if kind == EXECUTOR_KIND_REAL else None)
         result.experiment_fingerprint = experimentFp
         result.executorKind = kind

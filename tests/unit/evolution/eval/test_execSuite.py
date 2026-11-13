@@ -236,3 +236,85 @@ class TestRunnerExecSuiteGate:
                                   dataset=_ds(), exec_suite=_suite())
         assert not result.rejected
         assert result.exec_suite["state"] == "disabled"
+
+
+# ── R2：结构化/差分断言 op ───────────────────────────────────────
+
+class TestStructuredAssertionOps:
+    def test_json_path_resolves_and_compares(self):
+        out = '{"meta": {"count": 3}, "items": ["a", "b"]}'
+        assert evaluateAssertions(out, [
+            {"op": "json_path", "value": "meta.count", "expected": 3},
+            {"op": "json_path", "value": "items.1", "expected": "b"},
+            {"op": "json_path", "value": "meta.count"},
+        ]) == []
+        failures = evaluateAssertions(out, [
+            {"op": "json_path", "value": "meta.count", "expected": 5},
+            {"op": "json_path", "value": "meta.missing"},
+            {"op": "json_path", "value": "not-json"},
+        ])
+        assert len(failures) == 3
+
+    def test_json_path_on_non_json_output_fails(self):
+        failures = evaluateAssertions("这不是 JSON", [{"op": "json_path", "value": "a.b"}])
+        assert len(failures) == 1
+
+    def test_json_keys_requires_all_named_keys(self):
+        out = '{"id": 1, "name": "x", "extra": true}'
+        assert evaluateAssertions(out, [{"op": "json_keys", "value": "id,name"}]) == []
+        failures = evaluateAssertions(out, [{"op": "json_keys", "value": "id,missing"}])
+        assert len(failures) == 1
+
+    def test_differs_from_baseline_metamorphic(self):
+        suite = _suite_from([
+            {"task_input": "a", "assertions": [{"op": "differs_from_baseline", "value": ""}]},
+        ])
+        readout = run_exec_suite(suite, {"a": "候选输出"}, baseline_outputs={"a": "基线输出"})
+        assert readout["state"] == "measured"
+        assert readout["passed"] == 1
+        same = run_exec_suite(suite, {"a": "相同输出"}, baseline_outputs={"a": "相同输出"})
+        assert same["passed"] == 0
+
+    def test_differential_op_without_baseline_is_unevidenced(self):
+        """差分断言缺基线输出 ⇒ 该案 unevidenced（不是通过也不是失败）。"""
+        suite = _suite_from([
+            {"task_input": "a", "assertions": [{"op": "differs_from_baseline", "value": ""}]},
+        ])
+        readout = run_exec_suite(suite, {"a": "候选输出"})
+        assert readout["state"] == "unevidenced"
+        assert readout["evaluated"] == 0
+
+
+# ── R7：套件覆盖面扩展（template/tool_description 也合成）────────
+
+class TestExecSuiteCoverage:
+    def test_artifact_type_coverage_set(self):
+        from neurova.evolution.eval.exec_suite import EXEC_SUITE_ARTIFACT_TYPES
+
+        assert {"skill", "template", "tool_description"} <= set(EXEC_SUITE_ARTIFACT_TYPES)
+
+    @pytest.mark.asyncio
+    async def test_template_artifact_triggers_synthesis(self, monkeypatch, tmp_path):
+        """template 类工件也走套件合成（R7 覆盖面）。"""
+        from neurova.evolution.eval import exec_suite as es
+        from neurova.evolution.eval.service import SkillEvolutionService
+
+        called = {"n": 0}
+
+        async def spy(self, **kw):
+            called["n"] += 1
+            return es.TestSynthesizer._build(
+                skill_id="", source="test",
+                raw_cases=[{"task_input": "x1",
+                            "assertions": [{"op": "contains", "value": "GOOD"}]}])
+
+        monkeypatch.setattr(es.TestSynthesizer, "generate", spy)
+        svc = SkillEvolutionService("cov-agent", base_dir=tmp_path)
+        await svc.evolve(
+            skill_id="sk-tpl", skill_text=BASELINE, dataset=_ds(),
+            iterations=1, agent=_RoutedAgent(), judge=_judge_with_gain(0.02),
+            mutate=_echo_mutate(),
+            config=EvolutionConfig(noise_repeats=1),
+            artifact_type="template",
+        )
+        assert called["n"] == 1
