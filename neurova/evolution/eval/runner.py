@@ -148,6 +148,9 @@ class EvolutionRunResult:
     # HN2/HC2 可执行测试判据层（eval/exec_suite.py）：套件哈希 + 基线/候选
     # 断言通过率与逐案明细。state=unavailable/disabled 时不含通过率。
     exec_suite: dict = field(default_factory=dict)
+    # R1 成本升选择键：近平分成本 tiebreak 的读数（applied/not_applicable/
+    # disabled + 近平分候选数）。
+    cost_tiebreak: dict = field(default_factory=dict)
 
     @property
     def improvement(self) -> float:
@@ -243,6 +246,7 @@ class EvolutionRunResult:
             "budget_plan_exceeded": self.budgetPlanExceeded,
             "cost_summary": dict(self.cost_summary),
             "exec_suite": dict(self.exec_suite),
+            "cost_tiebreak": dict(self.cost_tiebreak),
         }
 
 
@@ -626,6 +630,31 @@ class SkillEvolutionRunner:
                         blind_winner_idx = first_idx
         result.blind_tiebreak = blind_tiebreak
 
+        # R1 近平分成本 tiebreak：增益达线（>基线+阈值）且与最高分近平分的
+        # 候选集里，选文本最短者（文本臂成本代理，与 P1-5 同源）——
+        # 「同增益下选省的」。盲选（judge 偏好）优先级更高：盲选 measured 时
+        # 本 tiebreak 让位；等长保持先到（确定性，既有钉子不破）。
+        cost_tiebreak: dict = {"state": "not_applicable", "near_tie_count": 0}
+        cost_override_idx: Optional[int] = None
+        if survivors_scores:
+            _max = max(s for _k, s, _d in survivors_scores)
+            _band = max(float(self.config.min_improvement), 0.02)
+            near_tie = [i for i, (_k, s, _d) in enumerate(survivors_scores)
+                        if s > best_score + _EPS and s >= _max - _band]
+            cost_tiebreak["near_tie_count"] = len(near_tie)
+            if len(near_tie) > 1:
+                if not self.config.cost_tiebreak_enabled:
+                    cost_tiebreak["state"] = "disabled"
+                elif blind_tiebreak.get("state") == "measured":
+                    cost_tiebreak["state"] = "yielded_to_blind"
+                else:
+                    chosen = min(near_tie,
+                                 key=lambda i: (len(survivors_scores[i][0][0]), i))
+                    if chosen != near_tie[0]:
+                        cost_tiebreak["state"] = "applied"
+                        cost_override_idx = chosen
+        result.cost_tiebreak = cost_tiebreak
+
         # 先定 argmax 胜者（严格大于才替换——平分保持先到，确定性），
         # 再逐候选入账：只有最终胜者记 accepted=True（超越本轮基线才算）
         winner_idx: Optional[int] = None
@@ -636,6 +665,10 @@ class SkillEvolutionRunner:
                 winner_idx = idx
         if blind_winner_idx is not None and survivors_scores[blind_winner_idx][1] > best_score + _EPS:
             winner_idx = blind_winner_idx
+        if cost_override_idx is not None and (
+                winner_idx is None
+                or survivors_scores[cost_override_idx][1] > best_score + _EPS):
+            winner_idx = cost_override_idx
         winner: Optional[tuple[str, float, Optional[int]]] = None
         for idx, ((cand, shard), score, cand_details) in enumerate(survivors_scores):
             is_winner = winner_idx == idx
@@ -1002,6 +1035,21 @@ class SkillEvolutionRunner:
                 budget = self.config.cost_beta0 + self.config.cost_beta1 * result.improvement
                 if delta_c > budget:
                     return await rejectRun("cost_rule_failed")
+
+        # ── 判定 2.6:执行成本硬门（R1，默认关）──
+        # 与 2.5 的文本长度规则互补：这条量的是**真实执行花费**（usage 差分，
+        # 每任务成本账的 baseline/candidate 两臂）。开启后涨幅超阈即拒——
+        # 管理员的选择，不是默认形态（默认走 service 侧软门人工复核）。
+        if self.config.cost_hard_gate_enabled:
+            _costSummary = self._run_cost_ledger.summarize()
+            if _costSummary.get("state") == "measured":
+                _arms = _costSummary.get("arms") or {}
+                _baseUsd = float((_arms.get("baseline") or {}).get("cost_usd") or 0.0)
+                _candUsd = float((_arms.get("candidate") or {}).get("cost_usd") or 0.0)
+                if _baseUsd > 0:
+                    _costRatio = (_candUsd - _baseUsd) / _baseUsd
+                    if _costRatio > self.config.cost_hard_gate_ratio:
+                        return await rejectRun("cost_gate_failed")
 
         # ── 判定 3:benchmark 回归门(技能分涨但 bench 回退 → 拒绝)──
         if self._bench_gate is not None:

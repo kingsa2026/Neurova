@@ -136,6 +136,17 @@ class EvolutionConfig:
     #（逐字旧行为）。
     eval_coreset_k: int = 0
 
+    # ── R1 成本升选择键（2026-11-13，§10.2）──
+    # 近平分成本 tiebreak：多变体轮里，增益达线（>基线+阈值）且彼此近平分
+    # 的候选集中，选文本长度最小者（文本臂成本代理，与 P1-5 同源）。
+    # 盲选（judge 偏好）优先级更高；等长保持先到（确定性）。False = 纯 argmax。
+    cost_tiebreak_enabled: bool = True
+    # 成本硬门（默认关）：开启后，候选臂执行成本（usage 差分）相对基线臂
+    # 涨幅 > cost_hard_gate_ratio ⇒ 直接拒绝（cost_gate_failed）。
+    # 软门（人工复核）不受影响，两者可并存。
+    cost_hard_gate_enabled: bool = False
+    cost_hard_gate_ratio: float = 0.5
+
 
 def text_evolution_enabled() -> bool:
     """文本级进化总开关,默认关。
