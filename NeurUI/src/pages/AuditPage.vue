@@ -5,6 +5,56 @@
       <GlassButton variant="secondary" size="sm" :loading="exporting" @click="exportAudit">{{ t('common.export') }}</GlassButton>
     </div>
 
+    <!-- W12 追责查询面板 -->
+    <GlassPanel class="panel" data-testid="accountability-panel">
+      <div class="panel-head">
+        <span class="panel-title" data-testid="accountability-title">{{ t('ontology.accountabilityTitle') }}</span>
+      </div>
+      <div class="acc-filters">
+        <a-input v-model:value="accSubject" size="small" :placeholder="t('ontology.accSubject')" style="width: 160px" data-testid="acc-subject" />
+        <a-input v-model:value="accActor" size="small" :placeholder="t('ontology.accActor')" style="width: 160px" data-testid="acc-actor" />
+        <GlassButton size="sm" :loading="accLoading" data-testid="acc-search" @click="runAccountability">
+          {{ t('common.search') }}
+        </GlassButton>
+      </div>
+      <div v-if="accError" class="acc-error" data-testid="acc-error">{{ accError }}</div>
+      <div v-if="accResult" class="acc-result" data-testid="acc-result">
+        <p class="acc-total">{{ t('ontology.accTotal', { count: accResult.total }) }}</p>
+        <table class="acc-table">
+          <thead><tr>
+            <th>{{ t('ontology.accLedger') }}</th><th>{{ t('ontology.accWho') }}</th>
+            <th>{{ t('ontology.accWhen') }}</th><th>{{ t('ontology.accAction') }}</th>
+            <th>{{ t('ontology.accOutcome') }}</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="(e, i) in accResult.events.slice(0, 20)" :key="i">
+              <td class="acc-ledger">{{ e.ledger }}</td>
+              <td>{{ e.who }}</td>
+              <td class="acc-when">{{ e.when }}</td>
+              <td>{{ e.action }}</td>
+              <td>{{ e.outcome }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </GlassPanel>
+
+    <!-- W12 防篡改验证 -->
+    <GlassPanel class="panel" data-testid="digest-verify-panel">
+      <div class="panel-head">
+        <span class="panel-title" data-testid="digest-title">{{ t('ontology.digestVerifyTitle') }}</span>
+        <GlassButton size="sm" :loading="verifyLoading" data-testid="digest-run" @click="runVerify">
+          {{ t('ontology.digestVerifyBtn') }}
+        </GlassButton>
+      </div>
+      <div v-if="verifyResult" class="verify-result" data-testid="digest-result">
+        <span :class="verifyResult.ok ? 'verify-pass' : 'verify-fail'" data-testid="digest-status">
+          {{ verifyResult.ok ? t('ontology.digestPass') : t('ontology.digestBroken') }}
+        </span>
+        <span class="mono">chains={{ verifyResult.chains }} rows={{ verifyResult.rows }}</span>
+      </div>
+    </GlassPanel>
+
     <!-- Filters -->
     <GlassCard>
       <div class="filters-row">
@@ -71,7 +121,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { queryOntologyAccountability, verifyDigestChain } from '@/api/modules/ontology'
 import { useI18n } from 'vue-i18n'
 import { listAuditRecords, exportAudit as exportAuditApi } from '@/api/modules/audit'
 import { getDesktopAuditWaiting, getIngressBypassStats, getPendingApprovals } from '@/api/modules/governance'
@@ -116,6 +167,44 @@ const actionColor = (action: string) => {
   return map[action] || 'default'
 }
 
+
+const accSubject = ref('')
+const accActor = ref('')
+const accLoading = ref(false)
+const accError = ref('')
+const accResult = ref<{ events: Array<Record<string, unknown>>; total: number } | null>(null)
+const verifyLoading = ref(false)
+const verifyResult = ref<{ ok: boolean; chains: number; rows: number } | null>(null)
+
+async function runAccountability() {
+  accError.value = ''
+  accResult.value = null
+  accLoading.value = true
+  try {
+    const res = await queryOntologyAccountability({
+      subject: accSubject.value || undefined,
+      actor: accActor.value || undefined,
+    })
+    accResult.value = res.data ?? null
+  } catch {
+    accError.value = t('ontology.accLoadError')
+  } finally {
+    accLoading.value = false
+  }
+}
+
+async function runVerify() {
+  verifyLoading.value = true
+  verifyResult.value = null
+  try {
+    const res = await verifyDigestChain()
+    verifyResult.value = res.data as unknown as typeof verifyResult.value
+  } catch {
+    verifyResult.value = { ok: false, chains: 0, rows: 0 }
+  } finally {
+    verifyLoading.value = false
+  }
+}
 
 const fetchAudit = async () => {
   loading.value = true
@@ -227,4 +316,33 @@ onMounted(() => {
 .audit-resource { font-family: var(--nr-font-mono); font-size: 12px; color: var(--nr-text-secondary); }
 .audit-details { color: var(--nr-primary-light, #6366f1); cursor: pointer; font-size: 12px; }
 .text-muted { color: var(--nr-text-muted); }
+.acc-filters {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.acc-error {
+  color: var(--nr-error, #ef4444);
+  font-size: 12px;
+}
+.acc-total {
+  font-size: 12px;
+  margin: 4px 0;
+}
+.acc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.acc-table th, .acc-table td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--nr-border, rgba(128, 128, 128, 0.2));
+}
+.acc-ledger { font-family: var(--nr-font-mono, monospace); font-size: 11px; }
+.acc-when { font-size: 11px; color: var(--nr-text-secondary, rgba(128,128,128,0.7)); }
+.verify-result { font-size: 12px; display: flex; gap: 12px; align-items: center; }
+.verify-pass { color: var(--nr-success, #52c41a); font-weight: 600; }
+.verify-fail { color: var(--nr-error, #ef4444); font-weight: 600; }
+.mono { font-family: var(--nr-font-mono, monospace); font-size: 11px; }
 </style>

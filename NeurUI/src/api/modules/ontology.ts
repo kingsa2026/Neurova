@@ -511,3 +511,18 @@ export function exportOntologyCsv(agentId?: string) {
     params: agentId ? { agent_id: agentId } : {},
   })
 }
+
+export function queryOntologyAccountability(params?: {
+  subject?: string; actor?: string; start?: string; end?: string
+}) {
+  const qs = Object.entries(params ?? {})
+    .filter(([, v]) => v)
+    .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
+    .join('&')
+  return api.get<ApiResponse<{ events: Array<Record<string, unknown>>; ledger_counts: Record<string, number>; total: number }>>(
+    `/knowledge/ontology/accountability${qs ? '?' + qs : ''}`)
+}
+
+export function verifyDigestChain() {
+  return api.get<ApiResponse<Record<string, unknown>>>('/knowledge/foundation/integrity')
+}
