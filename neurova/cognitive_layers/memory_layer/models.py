@@ -338,7 +338,32 @@ class Memory:
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_accessed_at: Optional[datetime] = None
+    #: C6（graphiti 对照批）：fact 级有效期窗口。None＝永远有效（旧行为零
+    #: 变化）；判活谓词单点在 `isVisibleAt`，与 knowledge_facts/temporal_facts
+    #: 的「生效窗口外不可见」同语义，不在检索面各写一份时间判断。
+    valid_from: Optional[datetime] = None
+    valid_until: Optional[datetime] = None
     isolation_context: Optional[IsolationContext] = None
+
+    def isVisibleAt(self, moment: Optional[datetime] = None) -> bool:
+        """fact 级判活：生效窗口外的记忆不进检索召回。
+
+        口径与 `temporal_facts` 判活一致——valid_from 未到或 valid_until
+        已过即不可见；窗口边界取「valid_until == now 视为已失效」。naive
+        时间戳按 UTC 补齐（库内 ISO 串回填的常态形态）。
+        """
+        if self.valid_from is None and self.valid_until is None:
+            return True
+        now = moment or datetime.now(timezone.utc)
+        if self.valid_from is not None:
+            vf = self.valid_from if self.valid_from.tzinfo else self.valid_from.replace(tzinfo=timezone.utc)
+            if vf > now:
+                return False
+        if self.valid_until is not None:
+            vu = self.valid_until if self.valid_until.tzinfo else self.valid_until.replace(tzinfo=timezone.utc)
+            if vu <= now:
+                return False
+        return True
 
     def __post_init__(self):
         """处理隔离上下文：从上下文设置三层隔离字段"""
@@ -465,6 +490,8 @@ class Memory:
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             "last_accessed_at": self.last_accessed_at.isoformat() if self.last_accessed_at else None,
+            "valid_from": self.valid_from.isoformat() if self.valid_from else None,
+            "valid_until": self.valid_until.isoformat() if self.valid_until else None,
         }
 
     @classmethod
@@ -518,5 +545,7 @@ class Memory:
             created_at=_parse_dt_field(data.get("created_at"), _now),
             updated_at=_parse_dt_field(data.get("updated_at"), _now),
             last_accessed_at=_parse_dt_field(data.get("last_accessed_at"), None),
+            valid_from=_parse_dt_field(data.get("valid_from"), None),
+            valid_until=_parse_dt_field(data.get("valid_until"), None),
             isolation_context=isolation_context,
         )

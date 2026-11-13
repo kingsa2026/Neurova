@@ -344,6 +344,42 @@ def _migrateBodyShareGroups(conn) -> None:
 register_migration(6, _migrateBodyShareGroups, domain=MEMORY_BODY_DOMAIN)
 
 
+def _migrateBodyValidityWindow(conn) -> None:
+    """memory 域 v7：`memories.valid_from/valid_until` 列（C6，graphiti 对照批）。
+
+    fact 级有效期窗口（可空 TEXT ISO 串）：NULL＝永远有效，旧行为零变化。
+    判活谓词单点在 `Memory.isVisibleAt`——检索面（recall/全文）共用同一
+    Python 谓词，不在 SQL 里各写一份时间判断（防口径漂移）。
+    """
+    for column in ("valid_from", "valid_until"):
+        try:
+            conn.execute("ALTER TABLE memories ADD COLUMN %s TEXT" % column)
+        except sqlite3.OperationalError as exc:
+            # 列已在（同批重跑/并发初始化）——幂等放行；其余错误如实上抛
+            if "duplicate column" not in str(exc).lower():
+                raise
+
+
+register_migration(7, _migrateBodyValidityWindow, domain=MEMORY_BODY_DOMAIN)
+
+
+def _coerce_validity_moment(value) -> Optional[datetime.datetime]:
+    """C6：remember 窗口入参宽容解析——datetime 原样、ISO 串解析、
+    None/空串归 None（永远有效）。不可解析串显式报错（诚实拒绝），
+    不静默吞成 NULL 把「写错的有效期」变成「永远有效」。"""
+    if value is None:
+        return None
+    if isinstance(value, datetime.datetime):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    parsed = datetime.datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return parsed
+
+
 
 class MemoryManager:
     """记忆管理器 Facade — 通过 EventBus 路由到各子模块"""
@@ -660,6 +696,15 @@ class MemoryManager:
             last_accessed_at=(
                 datetime.fromisoformat(row["last_accessed_at"]) if row["last_accessed_at"] else None
             ),
+            # C6：窗口列旧库快照可能缺列——按行键探测，缺列视为 NULL（永远有效）
+            valid_from=(
+                datetime.fromisoformat(row["valid_from"])
+                if "valid_from" in row.keys() and row["valid_from"] else None
+            ),
+            valid_until=(
+                datetime.fromisoformat(row["valid_until"])
+                if "valid_until" in row.keys() and row["valid_until"] else None
+            ),
         )
 
     def memoryScope(self) -> Tuple[str, str]:
@@ -744,6 +789,8 @@ class MemoryManager:
                 ).fetchall()
             # 唯一仲裁器裁决：本作用域行照常放行，共享行按组交集放行
             memories = [self._row_to_memory(row) for row in rows]
+            # C6：fact 级有效期——窗口外行不进全文召回（与 recall 同一谓词单点）
+            memories = [m for m in memories if m.isVisibleAt()]
             return [m for m in memories if self.isOwnedByRequestScope(m)]
 
     def _findBodyRow(self, memoryId: str):
@@ -1120,8 +1167,9 @@ class MemoryManager:
         """INSERT INTO memories
            (id, content, memory_type, category, lifecycle_stage, perspective, origin, emotion,
             temperature, importance, access_count, metadata, embedding, agent_id, neuser_id,
-            user_id, shared, share_group_ids, created_at, updated_at, last_accessed_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            user_id, shared, share_group_ids, created_at, updated_at, last_accessed_at,
+            valid_from, valid_until)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              content=excluded.content, memory_type=excluded.memory_type,
              category=excluded.category, lifecycle_stage=excluded.lifecycle_stage,
@@ -1132,7 +1180,8 @@ class MemoryManager:
              agent_id=excluded.agent_id, neuser_id=excluded.neuser_id, user_id=excluded.user_id,
              shared=excluded.shared, share_group_ids=excluded.share_group_ids,
              created_at=excluded.created_at,
-             updated_at=excluded.updated_at, last_accessed_at=excluded.last_accessed_at
+             updated_at=excluded.updated_at, last_accessed_at=excluded.last_accessed_at,
+             valid_from=excluded.valid_from, valid_until=excluded.valid_until
            WHERE memories.agent_id=excluded.agent_id
              AND memories.neuser_id=excluded.neuser_id
              AND memories.user_id=excluded.user_id"""
@@ -1193,6 +1242,8 @@ class MemoryManager:
             mem.created_at.isoformat(),
             mem.updated_at.isoformat(),
             mem.last_accessed_at.isoformat() if mem.last_accessed_at else None,
+            mem.valid_from.isoformat() if mem.valid_from else None,
+            mem.valid_until.isoformat() if mem.valid_until else None,
         )
 
     def persist_memory_batch(self, mems: List[Memory]) -> bool:
@@ -1686,6 +1737,9 @@ class MemoryManager:
         # isOwnedByRequestScope 仲裁。
         shared: bool = False,
         share_group_ids: Optional[List[str]] = None,
+        # C6：fact 级有效期窗口（ISO 串或 datetime；None＝永远有效）
+        valid_from: Optional[object] = None,
+        valid_until: Optional[object] = None,
         **kwargs,
     ) -> str:
         """存储一条记忆
@@ -1898,6 +1952,8 @@ class MemoryManager:
                 shared=shared,
                 share_group_ids=list(share_group_ids or []),
                 embedding=self._embeddingForNewRow(content),
+                valid_from=_coerce_validity_moment(valid_from),
+                valid_until=_coerce_validity_moment(valid_until),
             )
             if final_metadata.get("type") == "question_queue":
                 self._persist_memory(mem)
@@ -2320,6 +2376,10 @@ class MemoryManager:
 
             # P-3 修复: 排除已遗忘记忆（forget soft-delete 后不应被 recall 返回）
             results = [m for m in results if m.lifecycle_stage != LifecycleStage.FORGOTTEN]
+
+            # C6：fact 级有效期——生效窗口外的记忆不进召回（谓词单点
+            # Memory.isVisibleAt；NULL 窗口行为不变）
+            results = [m for m in results if m.isVisibleAt()]
 
             # 按类型过滤（页签契约，2026-09-08）：逗号分隔多值——长期记忆页签
             # 传 "semantic,episodic,procedural,pattern,emotional"（排除 working）。
