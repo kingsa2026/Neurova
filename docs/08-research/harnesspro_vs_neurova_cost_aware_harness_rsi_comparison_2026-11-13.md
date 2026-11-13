@@ -812,6 +812,16 @@ failed_samples，诊断条目标 stable/flaky）。均灰度默认关，关闭�
 逐字节一致；测试先行转绿（9＋3＋4 项），回归 evolution＋api 治理/递归面
 1946 全绿。N4（分类器灰度开启）属运营侧动作，机制面已就绪。
 
+**追补（同日，`4854adf96`）**：三项开关**设置项化**——新增
+`security/eval_experiment_settings.py`（JSON 持久化，env
+`NEUROVA_PROFILE_VARIANTS`/`NEUROVA_LINEAGE_PARETO`/`NEUROVA_DIAGNOSIS_ROLLOUTS`
+灰度直改仍优先）；governance GET/PUT `/governance/eval-experiments`（仅管理员，
+未知键 422、rollouts 1–5 越界 422）；runner 三机制生效值 = 代码级配置
+OR/max 治理设置；SettingPage 新增「实验性评测机制」面板（两开关＋采样数
+输入）＋ settings.ts 客户端＋ i18n 8 键 ×11 语言。验证：governance 定向
+6 项先行转绿（29 项全绿）、前端 vitest 2464 绿＋i18n 一致性 41 绿＋
+vue-tsc 0 错。
+
 ### 11.4 口径警告
 
 - 本轮分数描述「机制已落地且经测试」的实态；**运营实态未变**——分类器默认关、
