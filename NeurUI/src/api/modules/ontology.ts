@@ -537,6 +537,12 @@ export function listOntologyCommunities() {
     '/knowledge/ontology/communities')
 }
 
+/** U4：社区检测手动触发（管理员）——标签传播＋持久化，返回社区行。 */
+export function detectOntologyCommunities() {
+  return api.post<ApiResponse<Array<{ community_id: string; level: number; member_labels: string[]; summary_text: string }>>>(
+    '/knowledge/ontology/communities/detect', {})
+}
+
 /** U3：消解队列 blocking 预读数（候选对数/全对数对比——分对数级剪枝证据）。 */
 export function getOntologyBlockingStats() {
   return api.get<ApiResponse<{ full_scan: number; blocking: number; reduction_pct: number }>>(

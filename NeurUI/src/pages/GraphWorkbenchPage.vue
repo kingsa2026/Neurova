@@ -178,7 +178,11 @@
           </div>
         </div>
         <div v-if="communityOverlayOn && !communities.length" class="community-empty">
-          {{ t('ontology.communityOverlayEmpty') }}
+          <p>{{ t('ontology.communityOverlayEmpty') }}</p>
+          <GlassButton v-if="isAdmin" size="sm" variant="secondary" :loading="communityDetecting"
+                       data-testid="community-detect-btn" @click="runCommunityDetect">
+            {{ t('ontology.communityDetectBtn') }}
+          </GlassButton>
         </div>
       </GlassPanel>
 
@@ -311,9 +315,11 @@ import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { useAuthStore } from '@/stores/auth'
+import { extractApiDetail } from '@/utils/error'
 import { request } from '@/api'
 import { forceLayout } from '@/pages/graph-workbench/forceLayout'
 import { NODE_BUDGET, withinNodeBudget } from '@/pages/graph-workbench/perfBudget'
+import { detectOntologyCommunities } from '@/api/modules/ontology'
 import { listOntologyCommunities } from '@/api/modules/ontology'
 import FlowEdge from '@/pages/graph-workbench/FlowEdge.vue'
 import { FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons-vue'
@@ -842,6 +848,7 @@ const onNodeSelected = (nodeId: string) => {
 
 const communityOverlayOn = ref(false)
 const communities = ref<Array<{ community_id: string; member_labels: string[]; summary_text: string }>>([])
+const communityDetecting = ref(false)
 
 async function loadCommunities() {
   try {
@@ -849,6 +856,19 @@ async function loadCommunities() {
     communities.value = (res.data ?? []) as typeof communities.value
   } catch {
     communities.value = []
+  }
+}
+
+async function runCommunityDetect() {
+  communityDetecting.value = true
+  try {
+    await detectOntologyCommunities()
+    await loadCommunities()
+    message.success(t('ontology.communityDetectDone'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
+  } finally {
+    communityDetecting.value = false
   }
 }
 
