@@ -388,6 +388,57 @@ async def ontology_community_search(
 
 
 @_SERVER.tool()
+async def graph_search(
+    ctx: Context,
+    query: str,
+    mode: str = "walk",
+    max_hops: int = 2,
+    limit: int = 8,
+) -> dict:
+    """知识图谱检索（graphiti 对照批 C4，只读）：mode=walk（从查询主体沿
+    事实边多跳走查，答实体间关系链）、global（社区摘要匹配）、drift（实体
+    邻域＋所属社区摘要）。与内置工具 graph_search 同语义、同租户/agent 域
+    过滤；max_hops 钳位 2-4，limit 钳位 1-50。"""
+    if mode not in ("walk", "global", "drift"):
+        return {"rejected": True, "detail": "mode %r 只支持 walk|global|drift" % mode}
+    try:
+        limit = max(1, min(int(limit), 50))
+    except (TypeError, ValueError):
+        limit = 8
+    try:
+        maxHops = max(2, min(int(max_hops), 4))
+    except (TypeError, ValueError):
+        maxHops = 2
+    user = _currentUserFromContext(ctx)
+    agentId = _agentIdOf(user, None)
+    tenant = _tenantOf(user)
+    store = _store()
+    if mode == "walk":
+        from neurova.knowledge.foundation.graph_walk import (
+            GraphFactWalker,
+            GraphWalkConfig,
+        )
+
+        walker = GraphFactWalker(
+            store, agentId=agentId,
+            config=GraphWalkConfig(enabled=True, maxHops=maxHops, limit=limit),
+        )
+        results = walker.walkFromQuery(query, maxHops=maxHops, limit=limit,
+                                       tenantId=tenant)
+    elif mode == "global":
+        from neurova.knowledge.community_graph import communityGlobalSearch
+
+        results = communityGlobalSearch(store, query, agentId=agentId,
+                                        tenantId=tenant, limit=limit)
+    else:
+        from neurova.knowledge.community_graph import communityDriftSearch
+
+        results = communityDriftSearch(store, query, agentId=agentId,
+                                       tenantId=tenant, limit=limit)
+    return {"mode": mode, "results": results, "count": len(results)}
+
+
+@_SERVER.tool()
 async def ontology_decision_record(
     ctx: Context,
     category: str,
