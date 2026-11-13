@@ -526,3 +526,8 @@ export function queryOntologyAccountability(params?: {
 export function verifyDigestChain() {
   return api.get<ApiResponse<Record<string, unknown>>>('/knowledge/foundation/integrity')
 }
+
+export function searchCommunityGraph(query: string, mode: string, limit?: number) {
+  return api.post<ApiResponse<Array<Record<string, unknown>>>>(
+    '/knowledge/ontology/community-search', { query, mode, limit: limit ?? 5 })
+}

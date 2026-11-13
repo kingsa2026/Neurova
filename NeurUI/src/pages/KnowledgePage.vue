@@ -419,6 +419,16 @@
               :placeholder="t('knowledge.chunkStrategyPlaceholder')"
               data-testid="chunk-strategy-select"
             />
+            <a-select
+              v-model:value="communityMode"
+              size="small"
+              style="min-width: 120px"
+              :options="[{ value: '', label: t('knowledge.communityModeDefault') },
+                         { value: 'global', label: t('knowledge.communityModeGlobal') },
+                         { value: 'drift', label: t('knowledge.communityModeDrift') }]"
+              :placeholder="t('knowledge.communityModePlaceholder')"
+              data-testid="community-mode-select"
+            />
             <a-button type="link" size="small" :loading="previewLoading" @click="handlePreviewChunking">
               {{ t('knowledge.previewBtn') }}
             </a-button>
@@ -812,7 +822,7 @@ import {
 import type { KbConfig, KbCollection, KnowledgeNode, KnowledgeScope, KnowledgeConflict, ConflictTimeContext, DeletedKnowledge, GraphResolutionReview, KnowledgeChunkRow, IngressTask, IngressSpan } from '@/api/modules/knowledge'
 import { listKnowledgeCategories } from '@/api/modules/knowledge'
 import { request } from '@/api'
-import { listChunkStrategies } from '@/api/modules/ontology'
+import { listChunkStrategies, searchCommunityGraph } from '@/api/modules/ontology'
 import { useAuthStore } from '@/stores/auth'
 import GlassPanel from '@/components/GlassPanel.vue'
 import AnnotationDrawer from '@/modules/collaboration/AnnotationDrawer.vue'
@@ -1321,6 +1331,7 @@ async function handleCancelIngress(record: IngressTask) {
 const previewLoading = ref(false)
 const chunkStrategies = ref<Array<{ strategy_id: string; kind: string; params: Record<string, unknown> }>>([])
 const chunkStrategyId = ref<string>('')
+const communityMode = ref<string>('')
 
 const chunkStrategyOptions = computed(() =>
   chunkStrategies.value.map((s) => ({
