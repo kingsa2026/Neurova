@@ -192,53 +192,61 @@ episode 摄入 → LLM 结构化抽取实体（含反思步，speaker 自动成�
 
 ---
 
-## 7. 改进候选清单（全部待点单，未实施）
+## 7. 改进候选清单（2026-11-14 点单回执：C2–C7 已实施，C1/C8 未做）
 
 > 按 AGENTS.md 核心原则 8 给出影响面。编号沿用本仓惯例；P0 最高。
+> **实施回执（2026-11-14）**：用户点单「C1、C8 不做，其余按建议一次性实施」。
+> 落点 commit：C4=b82301c、C6=16a546f4f、C3=646d6cd5c、C2=a9e8c3b23、
+> C5=d9ffec6ee、C7=155de75a4。live-verify（真后端 9527，.venv 重启，
+> 启动日志 [ERROR]=0）：检索配方 GET/PUT/422/回退全通；communities/refresh
+> 真库读数 refreshed=false、drift=0.0136、communities=66（漂移才动）；冲突
+> llm-advice 404 映射与鉴权活体通过。回归：knowledge+performance-memory
+> 1891 passed（test_everyTableExistsAfterMigrationChain 1 失败为 v50 批预存红：
+> 测试硬编码 user_version==49，与本批无关，stash/硬编码比对定责）。
 
-### C1（P0）episode→事实图自动蒸馏管线
+### C1（P0，未做——用户裁定跳过）episode→事实图自动蒸馏管线
 - **动机**：§4 维度 B 最大差距。让 knowledge_facts 从「人工喂」变「对话流自动长」，同时用既有治理面守住质量。
 - **建议落点**：`post_chat_pipeline.py` 后挂 `knowledge/digestion/`（新模块）：LLM 抽取 (subject, predicate, object, valid_from, confidence) 候选三元组 → hybrid 召回既有同主谓事实 + 向量近似 → LLM 判重/矛盾 → 以 `origin=untrusted` 走 `KnowledgeAdmissionGate.admit` → 落 knowledge_facts（自动带 agent_id/tenant_id）。
 - **影响面**：`post_chat_pipeline.py`、`knowledge/foundation/admission.py`、`knowledge/foundation/knowledge_facts.py`、新增 digestion 模块与测试；不改权威读面。
 - **代价/不可逆点**：每轮对话新增 1-2 次 LLM 调用（成本）；抽取质量差会污染事实库——靠 untrusted 降权 + 审批兜底，可回滚（change_log）。
 
-### C2（P1）事实矛盾自动消解（temporal invalidation 闭环）
+### C2（P1，已实施 a9e8c3b23）事实矛盾自动消解（temporal invalidation 闭环）
 - **动机**：Graphiti 的核心卖点之一；Neurova 已有 supersedes/status 与「冲突建议不改判」，差一步自动建议→审批闭环。
 - **建议落点**：digestion 管线判矛盾时生成 `supersede` 建议 → 走 `relation_candidates` 同款审批面 → 批准后置旧事实 status=superseded + supersedes_fact_id，新事实 valid_from 继承。
 - **影响面**：knowledge_facts 状态机、审批 API（`knowledge_ontology.py`）、前端审批面板；纯增量。
 - **代价**：无破坏性；不改既有判例语义。
 
-### C3（P1）检索配方化 + rerank 默认档
+### C3（P1，已实施 646d6cd5c）检索配方化 + rerank 默认档
 - **动机**：维度 C 差距。把「四路 RRF+图第五路+采纳先验+可选精排」收敛为命名配方并设置项化。
 - **建议落点**：`knowledge/search_recipes.py`（新）定义 default/balanced/precise/graph_expanded 四配方；`knowledge_retriever_adapter.py` 改读配方；SettingPage 加检索配方选择；i18n×11。
 - **影响面**：knowledge 检索装配点、设置 API/前端、守卫测试（新配方默认值需与现网行为等价，避免隐性回归）。
 - **代价**：中；需 A/B 自证检索质量不回退。
 
-### C4（P1）agent 一等图查询工具 `graph_search`
+### C4（P1，已实施 b82301c）agent 一等图查询工具 `graph_search`
 - **动机**：§3.7 缺口——图走查只能被动注入，agent 无法主动查图。
 - **建议落点**：`builtin_tools.py` 新增 `graph_search`（包 `GraphFactWalker` 多跳 + 可选 `community_search`），出参=事实链+来源+validity 窗口；登记 MCP 侧同名工具。
 - **影响面**：builtin_tools、tool_executor 白名单、MCP 工具表、前端工具说明。
 - **代价**：小；注意注入上下文的 token 预算（限跳数与条数）。
 
-### C5（P2）社区图增量自动维护
+### C5（P2，已实施 d9ffec6ee）社区图增量自动维护
 - **动机**：Graphiti 社区先删后建是已知弱点；Neurova community_graph 有标签传播+摘要，但触发方式未自动化。
 - **建议落点**：把 community 重建接进 `ontology/pipeline.py`（dry-run/diff/rollback），digestion 批次后增量触发，diff 超阈值才全量。
 - **影响面**：ontology pipeline、community_graph、v48 表；可审计回滚。
 - **代价**：中；需控制重建频率防抖。
 
-### C6（P2）记忆库 fact 级时间语义
+### C6（P2，已实施 16a546f4f）记忆库 fact 级时间语义
 - **动机**：维度 A 扣分点——记忆条目只有 created/updated/accessed，无 validity。
 - **建议落点**：memory_layer models 增可选 `effective_from/invalid_at` 字段（schema 迁移注册表），检索链按 asOf 过滤（复用 `temporal_facts` 语义）；缺省 NULL 行为不变。
 - **影响面**：memory_layer schema+manager+检索链；老数据零迁移成本（NULL=永远有效）。
 - **代价**：中；注意与温度衰减语义叠加时的排序口径。
 
-### C7（P2）对外记忆基准（LongMemEval 式最小集）
+### C7（P2，已实施 155de75a4）对外记忆基准（LongMemEval 式最小集）
 - **动机**：维度 I 差距；建立可复跑的对外证据。
 - **建议落点**：`tests/performance/memory_benchmark/`（新）：多轮对话注入→间隔追问→测检索命中/答案正确率/延迟/token 成本；先做「金集自证」，再考虑公开口径。
 - **影响面**：新增性能测试目录（唯一测试根 tests/ 下）；不接 CI 门禁（只出报告）。
 - **代价**：中高（需标注集）；可与 RSI 证据机器的评测基建复用。
 
-### C8（P3，谨慎）图存储接口抽象预留多后端
+### C8（P3，谨慎，未做——用户裁定跳过）图存储接口抽象预留多后端
 - **动机**：维度 E 演进位。把 `graph_walk.py` 的递归 CTE 走查抽象成 GraphStore 接口，预留 Neo4j/Kuzu 适配位。
 - **风险与保留**：违反教义第 6 条风险高（易造平行体系）；SQLite 权威是 D11 裁定。**仅建议做接口切面（读面抽象），不做第二套权威存储**；除非出现真实的多后端需求，否则不实施。
 
