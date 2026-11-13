@@ -806,6 +806,46 @@ async def update_agent_limits(body: AgentLimitsUpdate, admin=Depends(_governance
     return {"code": 0, "data": get_effective_limits(), "domains": get_limit_domains()}
 
 
+# ── per-agent 执行档位（R6，HarnessPro 对照 §10.2，2026-11-13）──────
+
+
+@router.get("/agent-exec-profiles")
+async def get_agent_exec_profiles(admin=Depends(_governance_admin_dep)):
+    """per-agent 执行档位全量读数（仅管理员）：合法域 = EXEC_PROFILES 键集。
+
+    覆盖优先级：显式 env > 本存储的 agent 档位 > 部署 env 档位 > 内置默认
+    （任务级分类器见 agent/turn_profile，另一条灰度线）。
+    """
+    from neurova.security.agent_limits_settings import EXEC_PROFILES
+    from neurova.security.agent_profile_settings import all_agent_profiles
+
+    return {"code": 0, "data": all_agent_profiles(),
+            "domains": sorted(EXEC_PROFILES.keys())}
+
+
+class AgentProfileUpdate(BaseModel):
+    """per-agent 档位更新载荷：只收 profile 一个键，未知键当场拒。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile: str
+
+
+@router.put("/agent-exec-profiles/{agent_id}")
+async def update_agent_exec_profile(agent_id: str, body: AgentProfileUpdate,
+                                    admin=Depends(_governance_admin_dep)):
+    """设置某 agent 的执行档位（仅管理员）；非法档位/空 id 422（不静默改值）。"""
+    from neurova.security.agent_profile_settings import get_agent_profile, set_agent_profile
+
+    if not str(agent_id or "").strip():
+        raise HTTPException(status_code=422, detail="agent_id 不能为空")
+    if not set_agent_profile(agent_id, body.profile):
+        raise HTTPException(status_code=422,
+                            detail=f"非法档位 {body.profile!r}（可选 lite/standard/heavy）")
+    return {"code": 0, "data": {"agent_id": agent_id,
+                                "profile": get_agent_profile(agent_id)}}
+
+
 # ── 工具结果溢出阈值（P1-#6，2026-09-13 设置-高级）──────────────────
 
 
