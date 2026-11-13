@@ -1,7 +1,7 @@
 /**
  * 契约：挂在 MainLayout 路由过渡下的页面组件，模板根必须是「唯一元素节点」。
  *
- * 为什么是硬约束：MainLayout/ChatLayout 用
+ * 为什么是硬约束：MainLayout 用
  *   <transition name="fade-slide" mode="out-in"><component :is="Component" :key="route.path"/></transition>
  * 包裹 router-view。若页面模板根位置存在静态注释（或 v-if 根 / 多根），
  * 组件的 subTree 便是 Fragment，out-in 的离场永不完成、state.isLeaving 永久挂起，

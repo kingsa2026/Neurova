@@ -11,11 +11,13 @@
 - ``resolve_generation_creds`` / ``persist_media``：自 ``api/endpoints/generation.py``
   搬移（端点改薄包装，安全测试 patch 面不变；凭据解析与产物落盘口径单源）；
 - ``ProtocolGenerator``：按 GeneratorType 分发到 protocols 实测矩阵，产物即刻
-  本地化，返回渠道三 mixin 读取的 ``GenerationResult.success/urls/error_message``
+  本地化，返回渠道 mixin 读取的 ``GenerationResult.success/urls/error_message``
   契约（urls=服务端本地路径，渠道 ``_download_url`` 带本地分支）；
-- ``LegacyBytesAdapter``：wechat_ai/feishu_ai 旧工厂契约 ``generate(**kwargs)->bytes``；
 - keyframe_to_video / video_to_video 无实测协议：**诚实报错**（缓后台账登记），
   不假成功。
+
+旧 ``LegacyBytesAdapter``（wechat_ai/feishu_ai 旧工厂契约 ``generate(**kwargs)->bytes``）
+已随那两个死码文件于 2026-11-14 退役。
 """
 from __future__ import annotations
 
@@ -30,7 +32,6 @@ from neurova.llm.generators import protocols as protocols
 from neurova.llm.generators.base import GenerationConfig, GenerationResult, GeneratorType
 from neurova.llm.generators.protocols import ProtocolCredentials
 from neurova.core.data_root import get_data_root
-from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -395,98 +396,3 @@ class ProtocolGenerator:
                 "model": creds.model,
             },
         )
-
-
-# ── LegacyBytesAdapter：wechat_ai/feishu_ai 旧工厂契约 ─────────────────────
-
-
-class LegacyBytesAdapter:
-    """``async generate(**kwargs) -> bytes | None``。
-
-    wechat_ai.py / feishu_ai.py 旧代码按想象契约写：kwargs 传 prompt/width/...
-    并期待产物 bytes。此适配器把 kwargs 规整进 GenerationConfig（含 wechat 的
-    ``image=<bytes>`` 入参 → 落临时文件转 data URL 参考图），走 ProtocolGenerator，
-    读本地产物 bytes 返回；失败返回 None（旧代码 ``if not data`` 分支诚实兜底）。
-    """
-
-    def __init__(self, generator_type: GeneratorType):
-        self.generator_type = generator_type
-        self._inner = ProtocolGenerator(generator_type=generator_type)
-
-    async def generate(self, **kwargs: Any) -> Optional[bytes]:
-        ref_image_bytes = kwargs.pop("image", None)
-        num_images = kwargs.pop("num_images", None)
-        image_path = str(kwargs.pop("image_path", "") or kwargs.pop("image_url", "") or "")
-        if ref_image_bytes and not image_path:
-            image_path = self._materialize_bytes(ref_image_bytes)
-        try:
-            cfg = GenerationConfig(
-                type=self.generator_type,
-                prompt=str(kwargs.pop("prompt", "") or ""),
-                negative_prompt=str(kwargs.pop("negative_prompt", "") or ""),
-                width=int(kwargs.pop("width", 1024) or 1024),
-                height=int(kwargs.pop("height", 1024) or 1024),
-                model=str(kwargs.pop("model", "") or ""),
-                duration=float(kwargs.pop("duration", 5) or 5),
-                fps=int(kwargs.pop("fps", 30) or 30),
-                strength=float(kwargs.pop("strength", 0.75) or 0.75),
-                num_outputs=int(num_images or kwargs.pop("num_outputs", 1) or 1),
-                image_url=image_path,
-                extra_params=dict(kwargs),
-            )
-        except (TypeError, ValueError) as e:
-            logger.error("legacy AIGC 参数非法: %s", e)
-            return None
-        result = await self._inner.generate(cfg)
-        if not result.success:
-            logger.error("legacy AIGC 生成失败(%s): %s", self.generator_type.value, result.error)
-            return None
-        # urls 首项为本地路径（facade 契约）；远端 URL 回退时下载
-        first = (result.urls or [""])[0]
-        if first and not first.startswith(("http://", "https://")):
-            try:
-                return Path(first).read_bytes()
-            except OSError as e:
-                logger.error("读取产物失败(%s): %s", first, e)
-                return None
-        try:
-            persisted = await persist_media(first, "image", str(result.metadata.get("task_id") or uuid.uuid4().hex[:16]), 0)
-            return Path(persisted).read_bytes()
-        except Exception as e:  # noqa: BLE001
-            logger.error("legacy AIGC 产物获取失败: %s", e)
-            return None
-
-    def _materialize_bytes(self, data: Any) -> str:
-        """wechat i2i 传裸 bytes → 落输入目录供 media_to_data_url 读取。"""
-        try:
-            in_dir = GENERATION_OUTPUT_DIR / "inputs"
-            in_dir.mkdir(parents=True, exist_ok=True)
-            path = in_dir / f"ref_{uuid.uuid4().hex[:12]}.png"
-            path.write_bytes(bytes(data))
-            return str(path)
-        except OSError as e:
-            logger.error("参考图 bytes 落盘失败: %s", e)
-            return ""
-
-
-_get_image_adapter: Optional[LegacyBytesAdapter] = None
-_get_video_adapter: Optional[LegacyBytesAdapter] = None
-
-
-@lazySingleton("_get_image_adapter")
-def get_image_generator() -> LegacyBytesAdapter:
-    """旧工厂兼容：文生图 bytes 适配器。"""
-    return LegacyBytesAdapter(GeneratorType.TEXT_TO_IMAGE)
-
-
-@lazySingleton("_get_video_adapter")
-def get_video_generator() -> LegacyBytesAdapter:
-    """旧工厂兼容：文生视频 bytes 适配器。"""
-    return LegacyBytesAdapter(GeneratorType.TEXT_TO_VIDEO)
-
-
-def reset_legacy_adapters() -> None:
-    """测试用：重置单例。"""
-    global _get_image_adapter, _get_video_adapter
-    _get_image_adapter = None
-    _get_video_adapter = None

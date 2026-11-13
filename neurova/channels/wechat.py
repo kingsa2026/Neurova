@@ -22,10 +22,10 @@ from __future__ import annotations
 from neurova.core.logger import get_logger
 from typing import Any, Dict, List, Optional
 
+from neurova.channels import MessageChannel
 from neurova.channels.base import (
     ChannelAdapter,
     ChannelConfig,
-    MessageChannel,
 )
 from neurova.channels.models import ContentType, UnifiedMessage
 from neurova.channels.wechat_kf import WeChatKfEventsMixin

@@ -609,7 +609,7 @@ class TestBug13AttachmentManagerDuplicate:
     """BUG-13: AttachmentManager 重复定义
 
     根因: cognitive_layers/memory_layer/attachment_manager.py 和 core/attachment_manager.py
-          两个同名类
+          两个同名类（core 版已于 2026-11-14 随死码退役批删除）
     修复: memory_layer 版本标记为权威实现
     """
 

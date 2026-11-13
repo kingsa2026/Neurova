@@ -3,8 +3,8 @@
 
 权威实现 (canonical): 本模块是 AttachmentManager 的权威实现，
 提供完整的 SQLite + 文件存储 API（_init_db / save_attachment /
-get_attachment / delete_attachment）。core/attachment_manager.py
-为旧版兼容入口，不应再扩展。
+get_attachment / delete_attachment）。旧版 core/attachment_manager.py
+已于 2026-11-14 随死码退役批删除。
 
 功能:
 - 文件存储与检索

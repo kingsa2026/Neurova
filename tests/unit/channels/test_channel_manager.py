@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from neurova.channels.manager import ChannelManager
-from neurova.channels.base import ChannelAdapter, ChannelConfig, MessageChannel
+from neurova.channels.base import ChannelAdapter, ChannelConfig
 
 
 class MockAdapter(ChannelAdapter):

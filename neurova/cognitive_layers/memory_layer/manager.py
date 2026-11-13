@@ -5147,8 +5147,8 @@ class MemoryManager:
     def delete_memory_soft(self, memory_id: str) -> bool:
         return self.forget(memory_id, soft=True)
 
-    def recover_from_archive(self, memory_id: str) -> bool:
-        """从归档恢复记忆
+    def _recover(self, memory_id: str, kind: str) -> bool:
+        """恢复记忆的公共实现（kind: archive / soft_delete，用于恢复计数分账）。
 
         BUG-6 修复: 加 _persist_memory 持久化 lifecycle_stage 变更。
         BUG-7 修复: 加 self._lock 保护读写路径。
@@ -5159,11 +5159,22 @@ class MemoryManager:
                 mem.lifecycle_stage = LifecycleStage.ACTIVE
                 # BUG-6 修复: 持久化 lifecycle_stage 变更
                 self._persist_memory(mem)
+                # 自 forgetting_recovery_storage_mixin 取长补短（2026-11-14 退役裁定）：
+                # 恢复动作记账（进程内累计，不持久化），供 get_forgetting_statistics 的恢复率。
+                counts = getattr(self, "_recovery_event_counts", None)
+                if counts is None:
+                    counts = self._recovery_event_counts = {"archive": 0, "soft_delete": 0}
+                counts[kind] = counts.get(kind, 0) + 1
                 return True
             return False
 
+    def recover_from_archive(self, memory_id: str) -> bool:
+        """从归档恢复记忆"""
+        return self._recover(memory_id, "archive")
+
     def recover_from_delete(self, memory_id: str) -> bool:
-        return self.recover_from_archive(memory_id)
+        """从软删恢复记忆"""
+        return self._recover(memory_id, "soft_delete")
 
     def get_archived_memories(self, limit: int = 10) -> List[Dict[str, Any]]:
         """获取已归档记忆
@@ -5180,6 +5191,56 @@ class MemoryManager:
         """
         with self._lock:
             return [m.to_dict() for m in self._memories.values() if m.lifecycle_stage == LifecycleStage.FORGOTTEN][:limit]
+
+    def cleanup_old_archived(self, days: int = 30) -> int:
+        """清理归档超过 days 天的记忆（硬删，返回清理数）。
+
+        自 forgetting_recovery_storage_mixin.cleanup_old_archives 取长补短
+        （2026-11-14 退役裁定，见 docs/05-reports/全库代码审计报告_2026-11-14.md §5）：
+        宿主以 lifecycle_stage 为单一事实源后，清理直接作用于 ARCHIVED 阶段记忆，
+        按 updated_at 判旧；agent_wide=True 走管理页口径（清理是运维动作，不看请求作用域）。
+        """
+        cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+        purged = 0
+        with self._lock:
+            stale = [
+                memory_id
+                for memory_id, mem in self._memories.items()
+                if mem.lifecycle_stage == LifecycleStage.ARCHIVED and mem.updated_at < cutoff
+            ]
+            for memory_id in stale:
+                if self.forget(memory_id, soft=False, agent_wide=True):
+                    purged += 1
+        if purged:
+            logger.info("清理 %s 个超过 %s 天的归档记忆", purged, days)
+        return purged
+
+    def get_forgetting_statistics(self) -> Dict[str, Any]:
+        """遗忘/恢复统计（自 forgetting_recovery_storage_mixin.get_forgetting_statistics
+        取长补短，2026-11-14 退役裁定）。
+
+        recovery 计数为进程内累计（见 _recover），不持久化；
+        recovery_rate = 恢复次数 / (归档 + 遗忘 + 恢复)。
+        """
+        with self._lock:
+            stage_distribution: Dict[str, int] = {}
+            for mem in self._memories.values():
+                key = mem.lifecycle_stage.value
+                stage_distribution[key] = stage_distribution.get(key, 0) + 1
+        counters = getattr(self, "_recovery_event_counts", {"archive": 0, "soft_delete": 0})
+        recovered = counters.get("archive", 0) + counters.get("soft_delete", 0)
+        archived = stage_distribution.get("archived", 0)
+        forgotten = stage_distribution.get("forgotten", 0)
+        denominator = archived + forgotten + recovered
+        return {
+            "stage_distribution": stage_distribution,
+            "archived_count": archived,
+            "forgotten_count": forgotten,
+            "recovery_count": recovered,
+            "recovery_from_archive": counters.get("archive", 0),
+            "recovery_from_soft_delete": counters.get("soft_delete", 0),
+            "recovery_rate": (recovered / denominator) if denominator else 0.0,
+        }
 
     def get_recovery_history(self) -> List[Dict[str, Any]]:
         """获取恢复历史（委托到 ForgettingRecoveryModule，收集所有记忆的复习记录）
