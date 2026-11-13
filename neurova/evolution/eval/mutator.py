@@ -36,6 +36,10 @@ class JudgeFailure:
     score: float = 0.0
     environments: List[str] = field(default_factory=list)
     tool_trace: List[dict] = field(default_factory=list)
+    # N3（2026-11-13）：G-rollout 采样归因——该用例共采了几次、其中几次失败。
+    # 1/1 = 旧单采样形态（无稳定性信息）；部分失败 ⇒ flaky（偶发），全失败 ⇒ stable。
+    sample_count: int = 1
+    failed_samples: int = 0
 
 
 _MUTATOR_SYSTEM = (

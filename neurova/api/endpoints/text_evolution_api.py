@@ -267,6 +267,8 @@ class EvolveRecursiveRequest(BaseModel):
     # R5：递归轮数——每轮 = 一次完整单轮进化（上轮胜者作下轮基线）；
     # 总预算 ≈ 单轮计划 × epochs，预算闸按放大后的计划把关。
     epochs: int = Field(default=2, ge=1, le=10)
+    # N2：候选池容量——>1 时每轮对池内每个基各跑一次进化（多谱系并行）。
+    pool_size: int = Field(default=1, ge=1, le=3)
     iterations: Optional[int] = Field(default=None, ge=1, le=50)
     dataset_source: str = Field(default="auto", pattern="^(auto|golden|mined|synthetic)$")
     real_trajectory: Optional[bool] = None
@@ -309,12 +311,13 @@ async def evolve_skill_recursive(body: EvolveRecursiveRequest, agent_id: str,
         realTrajectory=body.real_trajectory,
     )
     if executor is not None:
-        # 预算闸按「单轮计划 × epochs」放大把关——递归的总花费是每轮之和。
+        # 预算闸按「单轮计划 × epochs × pool_size」放大把关——递归的总花费
+        # 是每轮每个池内基之和。
         from neurova.evolution.eval.service import planRealArmTurns
 
         plan = planRealArmTurns(dataset, config, iterations=body.iterations,
                                 include_exec_suite=True)
-        scaled = {"planned": int(plan["planned"]) * body.epochs,
+        scaled = {"planned": int(plan["planned"]) * body.epochs * body.pool_size,
                   "breakdown": plan["breakdown"]}
         verdict = _realArmBudgetVerdict(scaled)
         if not verdict.allowed:
@@ -346,6 +349,7 @@ async def evolve_skill_recursive(body: EvolveRecursiveRequest, agent_id: str,
     report = await service.evolveRecursive(
         skill_id=body.skill_id, skill_text=skill_text,
         dataset=dataset, epochs=body.epochs, iterations=body.iterations,
+        pool_size=body.pool_size,
         config=config, agent=executor, extra_failures=extra_failures,
         domain_harnesses=domain_harnesses,
     )

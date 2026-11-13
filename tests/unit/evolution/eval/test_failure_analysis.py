@@ -165,3 +165,69 @@ class TestDiagnosisWiring:
                              failures=failures)
         rendered = json.dumps(captured[-1], ensure_ascii=False)
         assert "联合诊断" not in rendered
+
+    @pytest.mark.asyncio
+    async def test_rollouts_attribute_stability(self, monkeypatch):
+        """N3：G=2 采样——偶发失败（1/2 采样挂）标 flaky，全挂标 stable。"""
+        v0_calls = {"n": 0}
+
+        async def judge(*, task_input, expected_behavior, output, skill_text, **kw):
+            if "IMPROVED" in skill_text:
+                c = 0.42
+            elif task_input == "v0":
+                # v0 的第 2 次调用（= 失败收割的首采样）抛错——1/2 采样失败 ⇒ flaky
+                v0_calls["n"] += 1
+                if v0_calls["n"] == 2:
+                    raise RuntimeError("flaky rollout failure")
+                c = 0.5
+            else:
+                c = 0.2
+            return FitnessScore(correctness=c, procedure_following=c, conciseness=c,
+                                feedback="统一反馈：输出缺少语义校验")
+
+        seen: dict = {}
+
+        async def mutate(*, artifact_text, artifact_type, failures, diagnosis=None):
+            seen["diagnosis"] = diagnosis
+            return artifact_text + " IMPROVED"
+
+        runner = SkillEvolutionRunner(EvolutionConfig(noise_repeats=1,
+                                                      diagnosis_rollouts=2),
+                                      judge=judge, mutate=mutate)
+        await runner.run(baseline_text=BASELINE, artifact_type="skill",
+                         dataset=_ds(), iterations=1)
+        entries = seen["diagnosis"]
+        by_stability = {e.get("stability"): e for e in entries if e.get("stability")}
+        assert "flaky" in by_stability, "偶发失败必须被标为 flaky"
+        assert by_stability["flaky"]["sample_failures"] >= 1
+        assert by_stability["flaky"]["sample_total"] >= 2
+
+    @pytest.mark.asyncio
+    async def test_rollouts_default_one_keeps_legacy(self):
+        """diagnosis_rollouts=1（默认）：诊断无 stability 字段（旧形态一致）。"""
+        seen: dict = {}
+
+        async def mutate(*, artifact_text, artifact_type, failures, diagnosis=None):
+            seen["diagnosis"] = diagnosis
+            return artifact_text + " IMPROVED"
+
+        runner = SkillEvolutionRunner(EvolutionConfig(noise_repeats=1),
+                                      judge=_judge(), mutate=mutate)
+        await runner.run(baseline_text=BASELINE, artifact_type="skill",
+                         dataset=_ds(), iterations=1)
+        assert all("stability" not in e for e in seen["diagnosis"])
+
+    def test_build_diagnosis_stability_from_sample_fields(self):
+        """buildDiagnosis 直接消费采样字段：全挂=stable、部分挂=flaky、单采样无标记。"""
+        stable = JudgeFailure(task_input="t1", output="o", feedback="模式甲", score=0.0,
+                              environments=[], sample_count=3, failed_samples=3)
+        flaky = JudgeFailure(task_input="t2", output="o", feedback="模式乙", score=0.2,
+                             environments=[], sample_count=2, failed_samples=1)
+        single = JudgeFailure(task_input="t3", output="o", feedback="模式丙", score=0.3,
+                              environments=[])
+        entries = buildDiagnosis([stable, flaky, single])
+        by_pattern = {e["pattern"][:3]: e for e in entries}
+        assert by_pattern["模式甲"]["stability"] == "stable"
+        assert by_pattern["模式甲"]["sample_failures"] == 3
+        assert by_pattern["模式乙"]["stability"] == "flaky"
+        assert "stability" not in by_pattern["模式丙"]
