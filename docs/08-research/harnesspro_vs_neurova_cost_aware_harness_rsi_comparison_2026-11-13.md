@@ -803,6 +803,15 @@ API/运营接线（R5）——这些是下一批的事，不在本文自行改�
 | N3 | P2 | G-rollout 联合诊断 | dim 4 与 8.5 的残差 | 同一任务 G 次采样的联合归因（当前诊断聚合跨任务、不跨采样） |
 | N4 | 运营 | 分类器灰度开启 | dim 5 的默认关 | 管理员经 `/governance/task-profile` 开启后观察档位分布与误判率 |
 
+**落地回执（同日，`fe335e2a4`）**：N1/N2/N3 全部落地——N1 `profile_variants_enabled`
+（档位轮转评测＋`pareto_set` 非劣集交付＋`candidate:*` 成本臂）；N2
+`lineage_pareto_enabled`（非劣幸存者透出）＋`evolveRecursive pool_size`（多谱系
+递归，API `pool_size` 1–3、预算闸按「单轮计划 × epochs × pool_size」放大）；
+N3 `diagnosis_rollouts`（G-rollout 采样，JudgeFailure 携 sample_count/
+failed_samples，诊断条目标 stable/flaky）。均灰度默认关，关闭时与既有行为
+逐字节一致；测试先行转绿（9＋3＋4 项），回归 evolution＋api 治理/递归面
+1946 全绿。N4（分类器灰度开启）属运营侧动作，机制面已就绪。
+
 ### 11.4 口径警告
 
 - 本轮分数描述「机制已落地且经测试」的实态；**运营实态未变**——分类器默认关、
