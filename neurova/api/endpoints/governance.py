@@ -961,6 +961,58 @@ async def update_eval_experiment_settings(body: EvalExperimentsUpdate,
     return {"code": 0, "data": load_settings()}
 
 
+# ── 检索配方（C3，graphiti 对照批）────────────────────────────────────
+
+
+@router.get("/retrieval-recipe")
+async def get_retrieval_recipe(admin=Depends(_governance_admin_dep)):
+    """检索配方读数（仅管理员）：当前生效配方、来源与全部可选配方参数。"""
+    from neurova.knowledge.search_recipes import (
+        RECIPE_NAMES,
+        recipeByName,
+        resolveRecipe,
+    )
+    from neurova.security.retrieval_recipe_settings import load_settings
+
+    active = resolveRecipe()
+    stored = load_settings()
+    return {
+        "code": 0,
+        "data": {
+            "active_recipe": active.name,
+            "source": stored.get("source", "default"),
+            "options": [recipeByName(name).__dict__ for name in RECIPE_NAMES],
+        },
+    }
+
+
+class RetrievalRecipeUpdate(BaseModel):
+    """检索配方更新载荷：未知键当场拒。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    active_recipe: str
+
+
+@router.put("/retrieval-recipe")
+async def update_retrieval_recipe(body: RetrievalRecipeUpdate,
+                                  admin=Depends(_governance_admin_dep)):
+    """切换检索配方（仅管理员）；非法配方名 422。"""
+    from neurova.knowledge.search_recipes import recipeByName
+    from neurova.security.retrieval_recipe_settings import (
+        load_settings,
+        save_settings,
+    )
+
+    try:
+        recipeByName(body.active_recipe)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if not save_settings({"active_recipe": body.active_recipe}):
+        raise HTTPException(status_code=500, detail="检索配方设置保存失败")
+    return {"code": 0, "data": load_settings()}
+
+
 # ── 工具结果溢出阈值（P1-#6，2026-09-13 设置-高级）──────────────────
 
 

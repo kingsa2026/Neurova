@@ -394,6 +394,24 @@
           </template>
         </GlassCard>
 
+        <!-- 检索配方（C3：图路权重/精排方法/候选池/时近权重的命名组合） -->
+        <GlassCard :title="t('settings.retrievalRecipeTitle')">
+          <p class="governance-hint">{{ t('settings.retrievalRecipeHint') }}</p>
+          <a-form layout="vertical">
+            <a-form-item :label="t('settings.retrievalRecipeLabel')">
+              <a-select v-model:value="retrievalRecipe.active_recipe" style="width: 100%">
+                <a-select-option value="default">{{ t('settings.retrievalRecipeOptDefault') }}</a-select-option>
+                <a-select-option value="balanced">{{ t('settings.retrievalRecipeOptBalanced') }}</a-select-option>
+                <a-select-option value="precise">{{ t('settings.retrievalRecipeOptPrecise') }}</a-select-option>
+                <a-select-option value="graph_expanded">{{ t('settings.retrievalRecipeOptGraph') }}</a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-form>
+          <template #footer>
+            <GlassButton variant="primary" size="sm" :loading="savingRetrievalRecipe" @click="saveRetrievalRecipe">{{ t('common.save') }}</GlassButton>
+          </template>
+        </GlassCard>
+
         <!-- per-agent 档位派发（R6：未设置的 Agent 跟随部署档位） -->
         <GlassCard :title="t('settings.agentProfilesTitle')">
           <p class="governance-hint">{{ t('settings.agentProfilesHint') }}</p>
@@ -456,7 +474,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getSettings, updateSettings, clearCache as clearCacheApi, getGovernanceSettings, updateGovernanceSettings, getAgentLimits, updateAgentLimits, getToolOffloadSettings, updateToolOffloadSettings, getLlmRetrySettings, updateLlmRetrySettings, getTaskProfileSettings, updateTaskProfileSettings, getAgentExecProfiles, updateAgentExecProfile, getEvalCoresetSettings, updateEvalCoresetSettings, getEvalExperimentSettings, updateEvalExperimentSettings } from '@/api/modules/settings'
+import { getSettings, updateSettings, clearCache as clearCacheApi, getGovernanceSettings, updateGovernanceSettings, getAgentLimits, updateAgentLimits, getToolOffloadSettings, updateToolOffloadSettings, getLlmRetrySettings, updateLlmRetrySettings, getTaskProfileSettings, updateTaskProfileSettings, getAgentExecProfiles, updateAgentExecProfile, getEvalCoresetSettings, updateEvalCoresetSettings, getEvalExperimentSettings, updateEvalExperimentSettings, getRetrievalRecipe, updateRetrievalRecipe } from '@/api/modules/settings'
 import type { AgentExecProfile } from '@/api/modules/settings'
 import api from '@/api'
 import type { AgentLimits, AgentLimitDomains, AgentLimitDomain } from '@/api/modules/settings'
@@ -820,6 +838,41 @@ const saveEvalExperiments = async () => {
   }
 }
 
+/** 检索配方（C3）：图路权重/精排方法/候选池/时近权重的命名组合 */
+const retrievalRecipe = ref({ active_recipe: 'default' })
+const savingRetrievalRecipe = ref(false)
+const retrievalRecipeLoaded = ref(false)
+
+const fetchRetrievalRecipe = async () => {
+  try {
+    const res = await getRetrievalRecipe()
+    const data = (res as any)?.data?.data ?? (res as any)?.data
+    if (data?.active_recipe) {
+      retrievalRecipe.value = { active_recipe: String(data.active_recipe) }
+      retrievalRecipeLoaded.value = true
+    }
+  } catch (err) {
+    console.error('[Settings] fetchRetrievalRecipe failed:', err)
+    retrievalRecipeLoaded.value = false
+  }
+}
+
+const saveRetrievalRecipe = async () => {
+  if (!retrievalRecipeLoaded.value) {
+    message.warning(t('settings.notLoadedSaveBlocked'))
+    return
+  }
+  savingRetrievalRecipe.value = true
+  try {
+    await updateRetrievalRecipe({ active_recipe: retrievalRecipe.value.active_recipe })
+    message.success(t('common.success'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
+  } finally {
+    savingRetrievalRecipe.value = false
+  }
+}
+
 /** per-agent 档位派发（R6）：未设置的 Agent 跟随部署档位（空串占位） */
 interface AgentProfileRow {
   agent_id: string
@@ -1059,6 +1112,7 @@ onMounted(() => {
   fetchTaskProfile()
   fetchEvalCoreset()
   fetchEvalExperiments()
+  fetchRetrievalRecipe()
   fetchAgentProfiles()
 })
 </script>

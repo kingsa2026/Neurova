@@ -56,11 +56,10 @@ class MainPathRerankConfig:
     def fromEnv(cls) -> "MainPathRerankConfig":
         raw = (os.environ.get(MAIN_RERANK_ENV) or "").strip().lower()
         enabled = raw not in _OFF_VALUES
-        method = (os.environ.get("NEUROVA_KB_MAIN_RERANK_METHOD") or "weight").strip().lower()
-        try:
-            poolFactor = max(int(os.environ.get("NEUROVA_KB_MAIN_RERANK_POOL") or 3), 1)
-        except ValueError:
-            poolFactor = 3
+        # C3：method/pool 解析收口到检索配方（env 显式设置 > 配方 > default）
+        from neurova.knowledge.search_recipes import resolveRerankParams
+
+        method, poolFactor = resolveRerankParams()
         shadow = (os.environ.get("NEUROVA_KB_MAIN_RERANK_SHADOW") or "").strip().lower() in (
             "1", "true", "on", "yes")
         shadowMethod = (

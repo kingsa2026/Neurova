@@ -138,12 +138,10 @@ class KnowledgeRetrieverAdapter:
                 })
             graphWeight = 0.0
             if mode in ("on", "1", "true", "yes"):
-                try:
-                    graphWeight = float(
-                        os.environ.get("NEUROVA_KB_GRAPH_ROUTE_WEIGHT", "0.10")
-                    )
-                except ValueError:
-                    graphWeight = 0.10
+                # C3：权重解析收口到检索配方（env 显式设置 > 配方 > 0.10 缺省）
+                from neurova.knowledge.search_recipes import resolveGraphRouteWeight
+
+                graphWeight = resolveGraphRouteWeight()
             return [
                 (entryId, 1.0 / (index + 1))
                 for index, entryId in enumerate(ranks)
@@ -335,14 +333,15 @@ class KnowledgeRetrieverAdapter:
             ) = self._enrich(knowledge_items)
 
             # C-1（升级计划第一批）：recency 权重——时间衰减让新事实排名靠前。
-            # NEUROVA_RECENCY_WEIGHT 默认 0（纯 RRF 不变），env 翻转后生效。
-            recencyWeight = float(os.environ.get("NEUROVA_RECENCY_WEIGHT", "0") or 0)
+            # C3：权重/半衰期解析收口到检索配方（env 显式设置 > 配方；
+            # default 配方 recencyWeight=0 与旧缺省行为一致）。
+            from neurova.knowledge.search_recipes import resolveRecencyParams
+
+            recencyWeight, halfLifeDays = resolveRecencyParams()
             if recencyWeight > 0 and knowledge_items:
                 import math as _math
                 from datetime import datetime as _dt, timezone as _tz
 
-                halfLifeDays = float(
-                    os.environ.get("NEUROVA_RECENCY_HALF_LIFE_DAYS", "30") or 30)
                 now = _dt.now(_tz.utc)
                 for hit in knowledge_items:
                     recordedAt = str(hit.get("recorded_at") or "")
