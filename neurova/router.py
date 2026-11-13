@@ -6,7 +6,6 @@ D1 任务重构版本：
 - 注入 SkillRegistry 和 MemoryManager，实现完整的 Skill/记忆路由
 - 支持通过 Agent 处理普通聊天消息
 - 支持事件总线触发（预留接口）
-- 集成 LLMRouter 实现智能模型选择
 """
 
 import inspect
@@ -17,17 +16,9 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Dict, Optional
 
-# LLM Router 导入。原先包着 `except ImportError` 的同名桩：`RequestType` 那枚把十一个类型成员
-# 抄成第二份词汇（与真身各漂各的），三枚函数桩一律 `return None`——真触发时选模型静默拿不到任何
-# 结果，而调用方看见的是"有兜底"。`neurova.llm.llm_router` 的模块级闭包只碰 stdlib 与本仓，
-# 这条兜底按批 43 已裁口径永不可达（台账 §6-228）。
-# 同一段里的 `LLM_ROUTER_AVAILABLE` 一并摘掉：全仓现读**只写不读**（两处赋值、零消费方），
-# 留着就是 §2 说的"只写不读的配置"——它承诺了一个没人查的状态。
-from neurova.llm.llm_router import (
-    RequestType,
-    get_llm_router,
-    select_model_for_request,
-)
+# 旧「LLM Router 集成」死导入已于 2026-11-14 死码退役批删除（P3-11）：
+# 三个名字全文件零使用、enable_llm_router 参数无调用方传参；模型选型单源
+# 在 neurova.llm.llm_router（按 scope 走 select_model_for_request）。
 
 
 class MessageType(Enum):
@@ -492,7 +483,6 @@ def create_default_router(
     agent=None,
     skill_registry=None,
     memory_manager=None,
-    enable_llm_router: bool = True,
 ) -> MessageRouter:
     """
     创建默认路由器
@@ -501,7 +491,6 @@ def create_default_router(
         agent: Agent 实例
         skill_registry: Skill 注册表
         memory_manager: 记忆管理器
-        enable_llm_router: 是否启用 LLM 路由器
 
     Returns:
         MessageRouter 实例

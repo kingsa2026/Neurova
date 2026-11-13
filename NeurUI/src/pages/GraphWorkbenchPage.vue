@@ -39,6 +39,16 @@
       :message="t('ontology.nodeBudgetWarning', { count: filteredNodes.length, budget: NODE_BUDGET })"
     />
 
+    <!-- 布局降级读数（P3-1 接线）：力导向模拟被预算门跳过时，告知用户当前为网格撒点 -->
+    <a-alert
+      v-if="layoutDegraded"
+      type="info"
+      show-icon
+      class="truncated-hint"
+      data-testid="layout-degraded-warning"
+      :message="t('ontology.layoutDegradedHint', { count: filteredNodes.length, budget: LAYOUT_NODE_BUDGET })"
+    />
+
     <div class="workbench-layout">
       <GlassCard class="canvas-card">
         <a-spin :spinning="loading">
@@ -321,7 +331,7 @@ import { useAgentPage } from '@/composables/useAgentPage'
 import { useAuthStore } from '@/stores/auth'
 import { extractApiDetail } from '@/utils/error'
 import { request } from '@/api'
-import { forceLayout } from '@/pages/graph-workbench/forceLayout'
+import { forceLayoutFull, LAYOUT_NODE_BUDGET } from '@/pages/graph-workbench/forceLayout'
 import { NODE_BUDGET, withinNodeBudget } from '@/pages/graph-workbench/perfBudget'
 import { detectOntologyCommunities } from '@/api/modules/ontology'
 import { listOntologyCommunities } from '@/api/modules/ontology'
@@ -419,13 +429,20 @@ const instanceForm = reactive({
   entry_id: '', evidence_text: '', basis: '',
 })
 
+// 布局降级读数（2026-11-14 审计 P3-1 接线）：超预算跳过力导向模拟时如实提示一次
+const layoutDegraded = ref(false)
+
 const flowNodes = computed(() => {
   const nodes = filteredNodes.value
   // 力导向布局：以选中节点为根（聚焦后硬锚定原点重收敛），无选中取度数
   // 枢纽——collide 硬防重叠、弹簧边短而匀，交叉局部最小化（放射只对树边
   // 承诺零交叉，多父稠密图的非树边大量交错）。用户拖拽/已保存布局优先。
-  const layoutPositions = forceLayout(
+  const layoutResult = forceLayoutFull(
     nodes, (displayData.value?.edges ?? []) as never, selectedNodeId.value || focusNodeId.value || undefined)
+  if (layoutResult.nodeCount > LAYOUT_NODE_BUDGET) {
+    layoutDegraded.value = true
+  }
+  const layoutPositions = layoutResult.positions
   const resolved = nodes.map((n) => ({
     id: n.id,
     label: n.label,

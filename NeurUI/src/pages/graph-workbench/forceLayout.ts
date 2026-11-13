@@ -65,8 +65,6 @@ function seededRandom(): () => number {
 /** C3 性能预算门：节点数超过此值时返回退化布局（网格撒点，跳过 tick 模拟）
  *  ——大图不卡主线程（同步 300 tick 在 1000+ 节点时实测 >2 秒）。 */
 export const LAYOUT_NODE_BUDGET = 500
-/** 实际参与模拟的节点数（超过 budget 后被降级跳过的节点数）。 */
-export const LAYOUT_SIM_SKIPPED = -1
 
 export interface ForceLayoutResult {
   positions: Map<string, LayoutPoint>
@@ -76,15 +74,8 @@ export interface ForceLayoutResult {
   nodeCount: number
 }
 
-export function forceLayout(
-  nodes: LayoutNode[],
-  edges: LayoutEdge[],
-  rootId?: string,
-): Map<string, LayoutPoint> {
-  return forceLayoutFull(nodes, edges, rootId).positions
-}
-
-/** C3：完整版返回 { positions, simulated, nodeCount }——调用方可读模拟状态。 */
+/** C3：完整版返回 { positions, simulated, nodeCount }——调用方可读模拟状态。
+ *  simulated=false（超预算降级）时调用方应向用户如实提示（GraphWorkbenchPage 一次性 alert）。 */
 export function forceLayoutFull(
   nodes: LayoutNode[],
   edges: LayoutEdge[],

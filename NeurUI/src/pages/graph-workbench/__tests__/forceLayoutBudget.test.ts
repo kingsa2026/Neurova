@@ -2,7 +2,6 @@
 // 超预算降级（不卡主线程）＋未超预算正常模拟＋确定性不破。
 import { describe, expect, it } from 'vitest'
 import {
-  forceLayout,
   forceLayoutFull,
   LAYOUT_NODE_BUDGET,
   LAYOUT_COLLIDE_DIAMETER,
@@ -48,13 +47,6 @@ describe('forceLayout performance budget', () => {
   it('budget constant is honest', () => {
     expect(LAYOUT_NODE_BUDGET).toBeGreaterThan(0)
     expect(LAYOUT_NODE_BUDGET).toBeLessThanOrEqual(1000)
-  })
-
-  it('forceLayout backward-compat still returns Map', () => {
-    const nodes = makeNodes(5)
-    const positions = forceLayout(nodes, makeEdges(5, 5))
-    expect(positions).toBeInstanceOf(Map)
-    expect(positions.size).toBe(5)
   })
 
   it('deterministic: same input same output', () => {
