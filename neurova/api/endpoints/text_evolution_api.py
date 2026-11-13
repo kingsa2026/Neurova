@@ -159,6 +159,23 @@ class EvolveRequest(BaseModel):
     real_trajectory: Optional[bool] = None
 
 
+async def _resolveEvolutionDataset(service, config, skill_id: str, skill_text: str,
+                                   source: str) -> Optional["EvalDataset"]:
+    """三级回退取评测集——/evolve 与 /evolve-recursive 共用的单点（教义第 7 条）。"""
+    from neurova.evolution.eval.dataset import EvalDataset
+    from neurova.evolution.eval.synthetic import SyntheticDatasetBuilder
+
+    dataset: Optional[EvalDataset] = None
+    if source == "auto":
+        dataset = await service.build_dataset(skill_id, skill_text)
+    elif source == "synthetic":
+        dataset = await SyntheticDatasetBuilder(config).generate(skill_text, "skill")
+    # golden/mined: build_dataset 内部按源取(空则报错)
+    if source in ("golden", "mined"):
+        dataset = await service.build_dataset(skill_id, skill_text, source=source)
+    return dataset
+
+
 @router.post("/skills/{agent_id}/evolve", dependencies=[Depends(_admin_dep)])
 async def evolve_skill(body: EvolveRequest, agent_id: str,
                        user: Dict[str, Any] = Depends(get_current_user)):
@@ -176,23 +193,12 @@ async def evolve_skill(body: EvolveRequest, agent_id: str,
         raise HTTPException(status_code=422, detail="技能正文为空,无进化对象")
 
     settings = _load_settings_safe()
-    from neurova.evolution.eval.dataset import EvalDataset
-    from neurova.evolution.eval.synthetic import SyntheticDatasetBuilder
-
     service = SkillEvolutionService(agent_id)
     config = EvolutionConfig(
         judge_model=settings.judge_model, optimizer_model=settings.optimizer_model
     )
-    dataset: Optional[EvalDataset] = None
-    if body.dataset_source == "auto":
-        dataset = await service.build_dataset(body.skill_id, skill_text)
-    elif body.dataset_source == "synthetic":
-        dataset = await SyntheticDatasetBuilder(config).generate(skill_text, "skill")
-    # golden/mined: build_dataset 内部按源取(空则报错)
-    if body.dataset_source in ("golden", "mined"):
-        dataset = await service.build_dataset(
-            body.skill_id, skill_text, source=body.dataset_source
-        )
+    dataset = await _resolveEvolutionDataset(
+        service, config, body.skill_id, skill_text, body.dataset_source)
     if not dataset or not dataset.all_examples:
         raise HTTPException(
             status_code=422,
@@ -210,7 +216,8 @@ async def evolve_skill(body: EvolveRequest, agent_id: str,
         from neurova.evolution.eval.service import planRealArmTurns
 
         verdict = _realArmBudgetVerdict(
-            planRealArmTurns(dataset, config, iterations=body.iterations)
+            planRealArmTurns(dataset, config, iterations=body.iterations,
+                             include_exec_suite=True)
         )
         if not verdict.allowed:
             if body.real_trajectory is True:
@@ -250,6 +257,104 @@ async def evolve_skill(body: EvolveRequest, agent_id: str,
             **result.to_dict(),
             "proposal": proposal.to_dict() if proposal else None,
             "executor_requested": requested,
+            "real_trajectory_fallback": fallback_reason,
+        },
+    }
+
+
+class EvolveRecursiveRequest(BaseModel):
+    skill_id: str
+    # R5：递归轮数——每轮 = 一次完整单轮进化（上轮胜者作下轮基线）；
+    # 总预算 ≈ 单轮计划 × epochs，预算闸按放大后的计划把关。
+    epochs: int = Field(default=2, ge=1, le=10)
+    iterations: Optional[int] = Field(default=None, ge=1, le=50)
+    dataset_source: str = Field(default="auto", pattern="^(auto|golden|mined|synthetic)$")
+    real_trajectory: Optional[bool] = None
+
+
+@router.post("/skills/{agent_id}/evolve-recursive", dependencies=[Depends(_admin_dep)])
+async def evolve_skill_recursive(body: EvolveRecursiveRequest, agent_id: str,
+                                 user: Dict[str, Any] = Depends(get_current_user)):
+    """R5 递归多轮演化：上轮胜者作下轮基线，逐轮轨迹/成本随响应返回。
+
+    提案仍全部 pending＋人工批准——本端点不自动应用任何正文。
+    """
+    from neurova.evolution.eval.config import EvolutionConfig
+    from neurova.evolution.eval.service import SkillEvolutionService
+
+    svc = _skill_service(agent_id)
+    info = svc.get_skill_info(body.skill_id)
+    if info is None:
+        raise HTTPException(status_code=404, detail=f"技能不存在: {body.skill_id}")
+    cfg = dict((info.get("manifest") or {}).get("config") or {})
+    skill_text = str(cfg.get("context_template") or info.get("description") or "")
+    if not skill_text.strip():
+        raise HTTPException(status_code=422, detail="技能正文为空,无进化对象")
+
+    settings = _load_settings_safe()
+    service = SkillEvolutionService(agent_id)
+    config = EvolutionConfig(
+        judge_model=settings.judge_model, optimizer_model=settings.optimizer_model
+    )
+    dataset = await _resolveEvolutionDataset(
+        service, config, body.skill_id, skill_text, body.dataset_source)
+    if not dataset or not dataset.all_examples:
+        raise HTTPException(
+            status_code=422,
+            detail=f"无可用评测集(source={body.dataset_source});先 golden/mined/synthetic 准备用例",
+        )
+
+    executor, fallback_reason = _textArmExecutor(
+        agent_id, info, skill_id=body.skill_id,
+        realTrajectory=body.real_trajectory,
+    )
+    if executor is not None:
+        # 预算闸按「单轮计划 × epochs」放大把关——递归的总花费是每轮之和。
+        from neurova.evolution.eval.service import planRealArmTurns
+
+        plan = planRealArmTurns(dataset, config, iterations=body.iterations,
+                                include_exec_suite=True)
+        scaled = {"planned": int(plan["planned"]) * body.epochs,
+                  "breakdown": plan["breakdown"]}
+        verdict = _realArmBudgetVerdict(scaled)
+        if not verdict.allowed:
+            if body.real_trajectory is True:
+                raise HTTPException(status_code=422, detail=verdict.reason)
+            executor = None
+            from neurova.evolution.eval.service import REAL_ARM_FALLBACK_BUDGET_EXCEEDED
+
+            fallback_reason = REAL_ARM_FALLBACK_BUDGET_EXCEEDED
+    extra_failures = []
+    try:
+        from neurova.evolution.skill_evidence import failureJudgeFailures
+        from neurova.evolution.skill_improver import get_skill_improver
+
+        extra_failures = failureJudgeFailures(
+            get_skill_improver().get_usage_history(body.skill_id), limit=5
+        )
+    except Exception as evidence_err:  # noqa: BLE001 - 证据装载失败不阻断进化
+        logger.debug("失败证据装载失败: %s", evidence_err)
+    domain_harnesses = []
+    try:
+        domain_harnesses = svc.listDomainHarnesses(
+            svc.skillDomain(body.skill_id),
+            limit=5,
+            exclude_skill_id=body.skill_id,
+        )
+    except Exception as library_err:  # noqa: BLE001 - 域库不可读不阻断进化
+        logger.debug("同域 harness 读取失败: %s", library_err)
+    report = await service.evolveRecursive(
+        skill_id=body.skill_id, skill_text=skill_text,
+        dataset=dataset, epochs=body.epochs, iterations=body.iterations,
+        config=config, agent=executor, extra_failures=extra_failures,
+        domain_harnesses=domain_harnesses,
+    )
+    proposal = report.pop("proposal")
+    return {
+        "code": 0,
+        "data": {
+            **report,
+            "proposal": proposal.to_dict() if proposal else None,
             "real_trajectory_fallback": fallback_reason,
         },
     }
