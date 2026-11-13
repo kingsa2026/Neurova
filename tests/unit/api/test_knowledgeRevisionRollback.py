@@ -115,6 +115,18 @@ class TestRevisionRollback:
         assert r.status_code == 200
         assert r.json()["title"] == "v2"
 
+    def test_rollbackSkipsConsistentSnapshot(self, client, repo):
+        """回滚目标态已有任一一致快照（title/content/chunks/指纹全同）→ 不再新产生快照。"""
+        entry = _seedEntry(repo, "v1")
+        kid = entry["knowledge_id"]
+        repo.update_knowledge("default", kid, {"title": "v2"})
+        client.post(f"{PREFIX}/{kid}/revisions/0/rollback")   # 快照链: v2
+        client.post(f"{PREFIX}/{kid}/revisions/0/rollback")   # 快照链: v2, v1
+        client.post(f"{PREFIX}/{kid}/revisions/0/rollback")   # 目标态 v2 已有一致快照 → 不新增
+        versions = client.get(f"{PREFIX}/{kid}/versions").json()["data"]
+        assert [v["version"] for v in versions] == [2, 1], \
+            "与已有快照一致的状态不应重复留档"
+
     def test_badIndex404(self, client, repo):
         entry = _seedEntry(repo, "v1")
         kid = entry["knowledge_id"]
