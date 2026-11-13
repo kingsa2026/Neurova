@@ -79,8 +79,17 @@ def clearTurnProfile() -> None:
 
 
 def taskProfileEnabled() -> bool:
-    """任务分类器灰度开关：NEUROVA_TASK_PROFILE=1 显式开，默认关。"""
-    return os.environ.get("NEUROVA_TASK_PROFILE", "").strip() == "1"
+    """任务分类器开关（R3 治理面单源）：设置项 env > 文件 > 默认关。
+
+    env `NEUROVA_TASK_PROFILE` 保留灰度直开/应急关的最高优先级；
+    常规运营经 governance 设置项（`security/task_profile_settings`）读写。
+    """
+    try:
+        from neurova.security.task_profile_settings import classification_enabled
+
+        return classification_enabled()
+    except Exception:  # noqa: BLE001 - 设置面故障退回 env 直读（fail-open 同旧形态）
+        return os.environ.get("NEUROVA_TASK_PROFILE", "").strip() == "1"
 
 
 def applyTurnProfileOverlay(settings: Dict[str, Any], name: str) -> Dict[str, Any]:

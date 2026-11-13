@@ -254,3 +254,50 @@ class TestTurnProfileConsumers:
         finally:
             resetTurnProfile(token)
         assert tos.get_threshold_kb() == 64
+
+
+# ── 7. 分类器开关设置项化（env > 文件 > 默认关）──────────────────
+
+class TestTaskProfileSettings:
+    def test_default_off(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("NEUROVA_TASK_PROFILE_SETTINGS", str(tmp_path / "tp.json"))
+        monkeypatch.delenv("NEUROVA_TASK_PROFILE", raising=False)
+        from neurova.security import task_profile_settings as tps
+
+        assert tps.classification_enabled() is False
+
+    def test_file_persists_and_env_wins(self, monkeypatch, tmp_path):
+        from neurova.security import task_profile_settings as tps
+
+        cfg = tmp_path / "tp.json"
+        monkeypatch.setenv("NEUROVA_TASK_PROFILE_SETTINGS", str(cfg))
+        monkeypatch.delenv("NEUROVA_TASK_PROFILE", raising=False)
+        assert tps.save_settings(True, cfg) is True
+        assert tps.load_settings(cfg)["classification_enabled"] is True
+        # env=0 压过文件的开
+        monkeypatch.setenv("NEUROVA_TASK_PROFILE", "0")
+        assert tps.classification_enabled() is False
+        # env=1 压过文件的关
+        tps.save_settings(False, cfg)
+        monkeypatch.setenv("NEUROVA_TASK_PROFILE", "1")
+        assert tps.classification_enabled() is True
+
+    def test_turn_profile_switch_reads_settings(self, monkeypatch, tmp_path):
+        from neurova.security import task_profile_settings as tps
+
+        cfg = tmp_path / "tp.json"
+        monkeypatch.setenv("NEUROVA_TASK_PROFILE_SETTINGS", str(cfg))
+        monkeypatch.delenv("NEUROVA_TASK_PROFILE", raising=False)
+        tps.save_settings(True, cfg)
+        assert taskProfileEnabled() is True
+        tps.save_settings(False, cfg)
+        assert taskProfileEnabled() is False
+
+    def test_corrupt_file_falls_back(self, monkeypatch, tmp_path):
+        cfg = tmp_path / "tp.json"
+        cfg.write_text("{not json", encoding="utf-8")
+        monkeypatch.setenv("NEUROVA_TASK_PROFILE_SETTINGS", str(cfg))
+        monkeypatch.delenv("NEUROVA_TASK_PROFILE", raising=False)
+        from neurova.security import task_profile_settings as tps
+
+        assert tps.classification_enabled() is False

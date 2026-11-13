@@ -846,6 +846,36 @@ async def update_agent_exec_profile(agent_id: str, body: AgentProfileUpdate,
                                 "profile": get_agent_profile(agent_id)}}
 
 
+# ── 任务级档位分类器开关（R3 治理面，2026-11-13）────────────────────
+
+
+@router.get("/task-profile")
+async def get_task_profile_settings(admin=Depends(_governance_admin_dep)):
+    """任务级档位分类器开关读数（仅管理员）：env 灰度直开仍优先于设置文件。"""
+    from neurova.security.task_profile_settings import load_settings
+
+    return {"code": 0, "data": load_settings()}
+
+
+class TaskProfileUpdate(BaseModel):
+    """任务级档位分类器更新载荷：只收开关一个键，未知键当场拒。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    classification_enabled: bool
+
+
+@router.put("/task-profile")
+async def update_task_profile_settings(body: TaskProfileUpdate,
+                                       admin=Depends(_governance_admin_dep)):
+    """更新任务级档位分类器开关（仅管理员）。"""
+    from neurova.security.task_profile_settings import load_settings, save_settings
+
+    if not save_settings(body.classification_enabled):
+        raise HTTPException(status_code=500, detail="任务级档位设置保存失败")
+    return {"code": 0, "data": load_settings()}
+
+
 # ── 工具结果溢出阈值（P1-#6，2026-09-13 设置-高级）──────────────────
 
 

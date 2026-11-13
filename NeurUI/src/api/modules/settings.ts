@@ -255,3 +255,42 @@ export function getLlmRetrySettings() {
 export function updateLlmRetrySettings(data: Partial<LlmRetrySettings>) {
   return api.put<ApiResponse<LlmRetrySettings>>('/governance/llm-retry', data)
 }
+
+// ---------------------------------------------------------------------------
+// 任务级档位分类器（R3：NEUROVA_TASK_PROFILE 的设置项化；env 灰度直开仍优先）
+// ---------------------------------------------------------------------------
+
+export interface TaskProfileSettings {
+  classification_enabled: boolean
+}
+
+export function getTaskProfileSettings() {
+  return api.get<ApiResponse<TaskProfileSettings>>('/governance/task-profile')
+}
+
+export function updateTaskProfileSettings(data: Partial<TaskProfileSettings>) {
+  return api.put<ApiResponse<TaskProfileSettings>>('/governance/task-profile', data)
+}
+
+// ---------------------------------------------------------------------------
+// per-agent 执行档位（R6：lite/standard/heavy 按 agent 派发；未设跟随部署档位）
+// ---------------------------------------------------------------------------
+
+export type AgentExecProfile = 'lite' | 'standard' | 'heavy'
+
+export interface AgentExecProfilesResponse {
+  code: number
+  data: Record<string, AgentExecProfile>
+  domains?: string[]
+}
+
+export function getAgentExecProfiles() {
+  return api.get<AgentExecProfilesResponse>('/governance/agent-exec-profiles')
+}
+
+export function updateAgentExecProfile(agentId: string, profile: AgentExecProfile) {
+  return api.put<ApiResponse<{ agent_id: string; profile: AgentExecProfile }>>(
+    `/governance/agent-exec-profiles/${encodeURIComponent(agentId)}`,
+    { profile },
+  )
+}
