@@ -86,12 +86,16 @@ class ReflectiveMutator:
         failures: list[JudgeFailure],
         history: Optional[list[dict]] = None,
         domain_harnesses: Optional[list[dict]] = None,
+        diagnosis: Optional[list[dict]] = None,
     ) -> str:
         """基于失败反馈生成定向改进后的文本;失败时返回原文。
 
         history（P1-4）：EvolutionLedger.recent() 的候选结局记录——已实测
         无效的假设渲染进提示段禁止重画；None/空列表时提示词与旧版逐字节
         一致。
+        diagnosis（R4，2026-11-13）：轨迹联合诊断（eval/diagnosis.py 的
+        结构化条目）——渲染成「联合诊断」提示段，把"哪类失败、占多少、
+        例证是什么"摆在变异器面前；None/空时提示词与旧版逐字节一致。
         """
         budget = self._size_budget(artifact_type)
 
@@ -127,6 +131,15 @@ class ReflectiveMutator:
                 f"以下是一个 {artifact_type} 的当前正文。请在保持核心意图的前提下,"
                 f"让它更清晰、更可执行。\n\n【当前正文】\n{artifact_text}"
             )
+        if diagnosis:
+            try:
+                from neurova.evolution.eval.failure_analysis import diagnosisDigest
+
+                digest = diagnosisDigest(diagnosis)
+                if digest:
+                    instruction += f"\n\n【联合诊断】\n{digest}"
+            except Exception as e:  # noqa: BLE001 - 诊断渲染失败不阻断变异
+                logger.debug("联合诊断渲染失败(忽略): %s", e)
 
         if history:
             from neurova.evolution.eval.history_ledger import EvolutionLedger

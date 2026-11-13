@@ -325,6 +325,11 @@ class SkillEvolutionRunner:
                       failures: list[JudgeFailure],
                       history: Optional[list[dict]] = None,
                       domain_harnesses: Optional[list[dict]] = None) -> str:
+        # R4 轨迹联合诊断：失败证据聚合成结构化诊断（模式/次数/例证/环节证据），
+        # 随变异调用传入——采集与消费之间不再断链。
+        from neurova.evolution.eval.failure_analysis import buildDiagnosis
+
+        diagnosis = buildDiagnosis(failures) if failures else []
         if self._mutate_fn is not None:
             # 旧签名注入的 mutate 不传新 kwarg——装配契约不漂移
             kwargs: dict[str, Any] = {}
@@ -340,6 +345,12 @@ class SkillEvolutionRunner:
                         kwargs["domain_harnesses"] = domain_harnesses
                 except (TypeError, ValueError):
                     pass
+            if diagnosis:
+                try:
+                    if "diagnosis" in inspect.signature(self._mutate_fn).parameters:
+                        kwargs["diagnosis"] = diagnosis
+                except (TypeError, ValueError):
+                    pass
             return await self._mutate_fn(
                 artifact_text=artifact_text, artifact_type=artifact_type, failures=failures,
                 **kwargs
@@ -349,6 +360,7 @@ class SkillEvolutionRunner:
         return await ReflectiveMutator(self.config).mutate(
             artifact_text=artifact_text, artifact_type=artifact_type, failures=failures,
             history=history, domain_harnesses=domain_harnesses,
+            diagnosis=diagnosis,
         )
 
     def _ledger_append(self, ledger_key: str, artifact_type: str,

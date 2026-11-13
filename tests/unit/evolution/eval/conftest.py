@@ -97,6 +97,33 @@ def _blockOutboundLlmCalls(monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _stubExecutableSuiteSynthesis(monkeypatch):
+    """R7 覆盖面扩展（2026-11-13）后，`service.evolve` 会对 skill/template/
+    tool_description 合成可执行测试套件——那是一次真实 LLM 出站，会撞上面
+    这道闸（BaseException 不被 service 的 except Exception 收口）。
+
+    本夹具把 `TestSynthesizer._call_llm` 钉成「无 LLM 可用」（success=False）：
+    generate 走真实逻辑产出**不可用空套件**，运行诚实回退 judge-only——
+    与生产里「合成失败不阻断进化」同一形态。要测合成器本身的用例
+    （注入 llm_call 或 monkeypatch generate）不受影响：注入路径不经过
+    `_call_llm`，用例级 monkeypatch 晚于本夹具生效。
+    """
+    from neurova.evolution.eval import exec_suite as exec_suite_mod
+
+    _originalCallLlm = exec_suite_mod.TestSynthesizer._call_llm
+
+    async def _noLlmAvailable(self, messages, model):
+        # 注入 llm_call 的用例（合成器自身的测试）走原逻辑，不受本钉影响
+        if getattr(self, "_llm_call", None) is not None:
+            return await _originalCallLlm(self, messages, model)
+        return {"success": False, "error": "offline eval dir: no llm"}
+
+    monkeypatch.setattr(exec_suite_mod.TestSynthesizer, "_call_llm",
+                        _noLlmAvailable, raising=False)
+    yield
+
+
 class _EchoAgent:
     """离线执行器：把技能文本原样当输出，使脚本判分器可确定性打分。"""
 
