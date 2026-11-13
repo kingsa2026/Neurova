@@ -475,3 +475,44 @@ async def get_error_stats(
             "by_endpoint": [],
             "recent_errors": [],
         }
+
+
+@router.get("/cost-readout")
+async def get_cost_readout(
+    current_user: dict = Depends(get_current_user),
+    top_n: int = 10,
+):
+    """R8/R9 成本读数出街（2026-11-13）：进程级记账 + 按用户/模型的历史成本估算。
+
+    - `process`：当前进程记账器快照（含 Prompt Cache 命中）与定价目录估算成本；
+    - `by_user`：持久化历史（usage_history）按用户×模型聚合的 token 与成本
+      估算（同一张定价目录、同一个口径——`estimate_cost_for` 单点；未知模型
+      计 0，不伪造）。
+    成本均为**定价目录估算值**，非账单（provider 折扣/长上下文乘数不可得，
+    与 HarnessPro pricing 口径同限，如实声明）。
+    """
+    from neurova.core.usage_accounting import get_usage_accounting
+    from neurova.core.usage_history import get_usage_history
+
+    snapshot = get_usage_accounting().snapshot()
+    total = snapshot.get("total") or {}
+    try:
+        by_user = get_usage_history().per_user_cost_totals()[: max(1, int(top_n))]
+    except Exception as e:  # noqa: BLE001 - 读数失败不冒充空账（诚实回空由 store 层兜）
+        logger.debug("按用户成本读数失败: %s", e)
+        by_user = []
+    return {
+        "code": 0,
+        "data": {
+            "process": {
+                "calls": int(total.get("calls") or 0),
+                "prompt_tokens": int(total.get("prompt_tokens") or 0),
+                "completion_tokens": int(total.get("completion_tokens") or 0),
+                "total_tokens": int(total.get("total_tokens") or 0),
+                "cache_read_tokens": int(total.get("cache_read_tokens") or 0),
+                "cache_write_tokens": int(total.get("cache_write_tokens") or 0),
+                "estimated_cost_usd": round(float(snapshot.get("total_cost") or 0.0), 6),
+            },
+            "by_user": by_user,
+        },
+    }

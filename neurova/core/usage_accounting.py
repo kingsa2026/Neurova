@@ -211,6 +211,21 @@ class TokenUsageAccounting:
             )
         return cost
 
+    @staticmethod
+    def estimate_cost_for(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+        """按定价目录估算一笔 token 量的成本（$）；未知模型 0.0——不伪造。
+
+        R8/R9（2026-11-13）：持久化历史（usage_history）按用户/模型聚合时
+        与本记账器共用同一张定价目录、同一个口径。
+        """
+        pricing = TokenUsageAccounting._PRICING.get(model)
+        if not pricing:
+            return 0.0
+        return (
+            int(prompt_tokens or 0) * pricing.get("prompt", 0.0)
+            + int(completion_tokens or 0) * pricing.get("completion", 0.0)
+        )
+
 
 _usage_accounting: Optional[TokenUsageAccounting] = None
 _usage_lock = threading.Lock()
