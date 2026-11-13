@@ -2941,6 +2941,10 @@ class MemoryManager:
                 self._delete_persisted_memory(
                     memory_id, owner=(mem.agent_id, mem.neuser_id, mem.user_id)
                 )  # 删除持久化
+                # D5 接线：硬删同步摘除情感传导图节点与关联（软删保留情感态）
+                conduction = getattr(self, "_emotion_conduction", None)
+                if conduction is not None:
+                    conduction.remove_memory(memory_id)
             self._stats["total_memories"] = len(self._memories)
         # 事件投递在锁外执行，避免持锁调用 handler 导致递归死锁
         self._publishMemoryEvent(
@@ -4706,6 +4710,13 @@ class MemoryManager:
             strength=kwargs.get("strength", 0.5),
             metadata=kwargs.get("metadata"),
         )
+        # D5 接线：关系面作为情感传导关联图的数据源之一（自动回流成边）
+        try:
+            self._ensure_emotion_conduction().add_association(
+                kwargs.get("source_id", ""), kwargs.get("target_id", "")
+            )
+        except Exception:  # noqa: BLE001 - 观测副路径失败不影响关系写入
+            logger.debug("情感传导关联回流跳过", exc_info=True)
         # 关系写入口必须让懒建图失效：否则 traverse/analyze 永远读首次快照。
         self._graph_traversal = None
         return True
@@ -5242,6 +5253,90 @@ class MemoryManager:
             "recovery_rate": (recovered / denominator) if denominator else 0.0,
         }
 
+    # ────── 记忆间情感传导（D5 接线做实：原 _emotion_conduction 恒 None 死槽位，
+    # 2026-11-14 退役裁定 B-3，见 docs/05-reports/全库代码审计报告_2026-11-14.md §5）──────
+
+    def _ensure_emotion_conduction(self):
+        """懒装配记忆间情感传导模块（快照存在则先恢复）"""
+        if getattr(self, "_emotion_conduction", None) is None:
+            from neurova.cognitive_layers.memory_layer.modules.emotion_conduction_module import (
+                EmotionConductionModule,
+            )
+
+            self._emotion_conduction = EmotionConductionModule()
+            self._emotion_conduction.init()
+            self._restore_emotion_conduction_snapshot()
+        return self._emotion_conduction
+
+    def _emotion_conduction_snapshot_path(self):
+        """快照落点：持久库同目录的 emotion_conduction_snapshot.json"""
+        from pathlib import Path
+
+        db_path = getattr(self, "_persist_db_path", None)
+        if not db_path:
+            return None
+        return Path(db_path).parent / "emotion_conduction_snapshot.json"
+
+    def flush_emotion_conduction(self) -> bool:
+        """把记忆间情感传导状态落盘（JSON 快照；写操作与 close() 时刷新）"""
+        path = self._emotion_conduction_snapshot_path()
+        if path is None:
+            return False
+        try:
+            path.write_text(
+                json.dumps(self._ensure_emotion_conduction().snapshot(), ensure_ascii=False),
+                encoding="utf-8",
+            )
+            return True
+        except Exception as e:  # noqa: BLE001 - 观测副路径失败不影响主流程
+            logger.warning("情感传导快照落盘失败: %s", e)
+            return False
+
+    def _restore_emotion_conduction_snapshot(self) -> None:
+        """从快照恢复（文件缺失/损坏时静默跳过，按空图起步）"""
+        path = self._emotion_conduction_snapshot_path()
+        if path is None or not path.is_file():
+            return
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+            self._emotion_conduction.restore(state)
+            logger.info("情感传导快照已恢复（%s 条情感值）", len(state.get("emotion_values", {})))
+        except Exception as e:  # noqa: BLE001 - 恢复失败按空图起步
+            logger.warning("情感传导快照恢复失败: %s", e)
+
+    def set_memory_emotion(self, memory_id: str, emotion_value: float) -> None:
+        """设置记忆情感值（[-1,1]），并刷新传导快照"""
+        self._ensure_emotion_conduction().set_emotion(memory_id, emotion_value)
+        self.flush_emotion_conduction()
+
+    def get_memory_emotion(self, memory_id: str) -> float:
+        """读取记忆情感值"""
+        return self._ensure_emotion_conduction().get_emotion(memory_id)
+
+    def add_memory_association(self, memory_id_1: str, memory_id_2: str) -> None:
+        """显式建立记忆间关联（关系面 add_relation 亦会自动回流）"""
+        self._ensure_emotion_conduction().add_association(memory_id_1, memory_id_2)
+        self.flush_emotion_conduction()
+
+    def conduct_memory_emotion(self, source_id: str, emotion_value: float) -> Dict[str, Any]:
+        """从源记忆沿关联图 BFS 传导情感（衰减+加权融合），返回受影响记忆及新值"""
+        affected = self._ensure_emotion_conduction().conduct_emotion(source_id, emotion_value)
+        self.flush_emotion_conduction()
+        return affected
+
+    def get_memories_by_emotion(self, polarity: str, threshold: float = 0.3, limit: int = 10) -> List[str]:
+        """按情感极性检索记忆（positive/negative/neutral）"""
+        module = self._ensure_emotion_conduction()
+        if polarity == "positive":
+            return module.get_positive_memories(threshold, limit)
+        if polarity == "negative":
+            return module.get_negative_memories(-abs(threshold), limit)
+        return module.get_neutral_memories(abs(threshold), limit)
+
+    def get_emotion_conduction_stats(self) -> Dict[str, Any]:
+        """情感传导模块统计"""
+        return self._ensure_emotion_conduction().get_stats()
+
     def get_recovery_history(self) -> List[Dict[str, Any]]:
         """获取恢复历史（委托到 ForgettingRecoveryModule，收集所有记忆的复习记录）
 
@@ -5353,6 +5448,11 @@ class MemoryManager:
         neurova_memories_persist.db 句柄（Windows WinError 32）。
         """
         self._started = False
+        # D5 接线：情感传导快照随关闭落盘
+        try:
+            self.flush_emotion_conduction()
+        except Exception as e:  # noqa: BLE001 — 收尾不外泄
+            logger.warning("emotion conduction flush failed: %s", e)
         conn = getattr(self, "_persist_conn", None)
         if conn is not None:
             with self._persist_db_lock:
