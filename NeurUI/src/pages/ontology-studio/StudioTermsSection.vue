@@ -372,18 +372,23 @@ onMounted(() => {
 function parseExternalIris(text: string): Array<{ kind: string; iri: string }> | null {
   const trimmed = text.trim()
   if (!trimmed) return null
-  const parsed = JSON.parse(trimmed) as Array<{ kind?: string; iri?: string }>
-  if (!Array.isArray(parsed)) {
-    throw new Error('external_iris 必须是 [{"kind": "...", "iri": "..."}] 数组')
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch {
+    throw new Error(t('ontology.externalIrisFormatError'))
   }
-  for (const entry of parsed) {
+  if (!Array.isArray(parsed)) {
+    throw new Error(t('ontology.externalIrisFormatError'))
+  }
+  for (const entry of parsed as Array<{ kind?: string; iri?: string }>) {
     const kind = String(entry.kind ?? '').trim()
     const iri = String(entry.iri ?? '').trim()
     if (!EXTERNAL_IRI_KINDS.includes(kind) || !iri) {
-      throw new Error('external_iris 条目非法：kind 须在闭集内且 iri 非空')
+      throw new Error(t('ontology.externalIrisEntryError'))
     }
   }
-  return parsed.map((e) => ({ kind: String(e.kind ?? '').trim(), iri: String(e.iri ?? '').trim() }))
+  return (parsed as Array<{ kind: string; iri: string }>).map((e) => ({ kind: String(e.kind ?? '').trim(), iri: String(e.iri ?? '').trim() }))
 }
 
 function selectTerm(term: OntologyTerm) {
