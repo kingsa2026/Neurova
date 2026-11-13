@@ -86,7 +86,6 @@ _MODULE_MAP = {
     "temperature": "neurova.cognitive_layers.memory_layer.temperature",
     "sleep": "neurova.cognitive_layers.memory_layer.sleep",
     "compression": "neurova.cognitive_layers.memory_layer.compression",
-    "proactive_question": "neurova.cognitive_layers.memory_layer.proactive_question",
     "conversation_buffer": "neurova.cognitive_layers.memory_layer.conversation_buffer",
     "conflict": "neurova.cognitive_layers.memory_layer.conflict",
     "version_control": "neurova.cognitive_layers.memory_layer.version_control",

@@ -94,6 +94,178 @@ _PRIORITY_ORDER = {
 }
 
 
+class CuriosityType(Enum):
+    """好奇心类型（D4 自 proactive_question.py 取长补短并入，2026-11-14 退役裁定）"""
+
+    KNOWLEDGE_GAP = "knowledge_gap"  # 知识缺口
+    NOVELTY_SEEKING = "novelty_seeking"  # 新奇探索
+    PATTERN_DISCOVERY = "pattern_discovery"  # 模式发现
+    CAUSAL_REASONING = "causal_reasoning"  # 因果推理
+    COUNTERFACTUAL = "counterfactual"  # 反事实思考
+
+
+@dataclass
+class ExplorationRecord:
+    """探索记录（好奇心驱动的问题探索台账）"""
+
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    question_id: str = ""
+    topic: str = ""
+    curiosity_type: CuriosityType = CuriosityType.KNOWLEDGE_GAP
+    started_at: float = field(default_factory=time.time)
+    ended_at: Optional[float] = None
+    status: str = "in_progress"  # in_progress / completed / abandoned
+    findings: List[str] = field(default_factory=list)
+    knowledge_gained: float = 0.0
+
+
+class CuriosityDrive:
+    """好奇心驱动器（D4 并入；评估函数已做实，不再恒返占位值）。
+
+    强度 = 基线 0.5 + 知识缺口×0.3 + 新颖性×0.2 − 探索疲劳×0.4，夹到 [0,1]。
+    - 新颖性**做实**：按主题首见/复见次数衰减（复见一次 -0.3，下限 0）；
+    - 知识缺口：显式信号（unknown_terms/unresolved/open_questions）或缺口账本
+      均值；两者皆无时回落 0.5（中性未知，不伪造确定值）；
+    - 探索疲劳**做实**：近 24h 探索越多越克制（原版三项只会加分、强度恒 ≥0.5，
+      其 <0.3 的生成闸永不可达——本次改为疲劳负项，闸门真实可达）。
+    """
+
+    def __init__(self) -> None:
+        self._explorations: Dict[str, ExplorationRecord] = {}
+        self._knowledge_gaps: Dict[str, float] = {}
+        self._seen_topics: Dict[str, int] = {}
+
+    def calculate_intensity(self, context: Dict[str, Any]) -> float:
+        """计算好奇心强度（0.0-1.0）"""
+        topic = str(context.get("current_topic", "") or "")
+        adjustments = [
+            self._assess_knowledge_gap(context) * 0.3,
+            self._assess_context_novelty(topic) * 0.2,
+        ]
+        fatigue = min(1.0, len(self._get_recent_explorations(hours=24)) / 10.0)
+        adjustments.append(-fatigue * 0.4)
+        return max(0.0, min(1.0, 0.5 + sum(adjustments)))
+
+    def _get_recent_explorations(self, hours: int = 24) -> List[ExplorationRecord]:
+        """获取最近的探索记录"""
+        cutoff = time.time() - hours * 3600
+        return [e for e in self._explorations.values() if e.started_at >= cutoff]
+
+    def _assess_context_novelty(self, topic: str) -> float:
+        """评估上下文新颖性：主题首见满分，每复见一次衰减 0.3"""
+        if not topic:
+            return 0.5
+        return max(0.0, 1.0 - self._seen_topics.get(topic, 0) * 0.3)
+
+    def _assess_knowledge_gap(self, context: Dict[str, Any]) -> float:
+        """评估知识缺口：缺口账本均值；无账本时看显式信号，皆无回落中性 0.5"""
+        if self._knowledge_gaps:
+            return sum(self._knowledge_gaps.values()) / len(self._knowledge_gaps)
+        if self._identify_knowledge_gaps(context):
+            return 0.8
+        return 0.5
+
+    def _identify_knowledge_gaps(self, context: Dict[str, Any]) -> List[str]:
+        """识别知识缺口：显式信号优先，其次缺口账本按缺口从大到小"""
+        for key in ("unknown_terms", "unresolved", "open_questions"):
+            values = context.get(key)
+            if values:
+                return [str(v) for v in values]
+        if self._knowledge_gaps:
+            return [t for t, _ in sorted(self._knowledge_gaps.items(), key=lambda x: x[1], reverse=True)]
+        return []
+
+    def record_exploration(
+        self, question_id: str, topic: str, curiosity_type: CuriosityType
+    ) -> ExplorationRecord:
+        """记录探索开始（同主题计入新颖性衰减账本）"""
+        exploration = ExplorationRecord(
+            question_id=question_id,
+            topic=topic,
+            curiosity_type=curiosity_type,
+        )
+        self._explorations[exploration.id] = exploration
+        if topic:
+            self._seen_topics[topic] = self._seen_topics.get(topic, 0) + 1
+        logger.debug("记录探索: %s", exploration.id)
+        return exploration
+
+    def complete_exploration(
+        self, exploration_id: str, findings: List[str], knowledge_gained: float = 0.0
+    ) -> Optional[ExplorationRecord]:
+        """完成探索（ findings 与获得知识量入账，冲抵同主题知识缺口）"""
+        exploration = self._explorations.get(exploration_id)
+        if not exploration:
+            return None
+        exploration.ended_at = time.time()
+        exploration.status = "completed"
+        exploration.findings = findings
+        exploration.knowledge_gained = knowledge_gained
+        if exploration.topic in self._knowledge_gaps:
+            self._knowledge_gaps[exploration.topic] = max(
+                0.0, self._knowledge_gaps[exploration.topic] - knowledge_gained
+            )
+        logger.debug("完成探索: %s", exploration_id)
+        return exploration
+
+    def generate_curiosity_question(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """生成好奇心驱动的问题草案（强度 <0.3 不生成）。
+
+        Returns:
+            {content, priority, curiosity_type, topic, intensity} 或 None。
+            priority/curiosity_type 为枚举值字符串，供队列元数据直接使用。
+        """
+        intensity = self.calculate_intensity(context)
+        if intensity < 0.3:
+            return None
+
+        gaps = self._identify_knowledge_gaps(context)
+        if gaps:
+            curiosity_type = CuriosityType.KNOWLEDGE_GAP
+            topic = gaps[0]
+        else:
+            curiosity_type = CuriosityType.NOVELTY_SEEKING
+            topic = str(context.get("current_topic", "") or "未知主题")
+
+        templates = {
+            CuriosityType.KNOWLEDGE_GAP: f"关于 {topic}，我还不了解什么？",
+            CuriosityType.NOVELTY_SEEKING: f"关于 {topic}，有什么新发现吗？",
+            CuriosityType.PATTERN_DISCOVERY: f"在 {topic} 中，有什么模式可以发现？",
+            CuriosityType.CAUSAL_REASONING: f"在 {topic} 中，因果关系是什么？",
+            CuriosityType.COUNTERFACTUAL: f"如果 {topic} 的情况不同，会怎样？",
+        }
+        return {
+            "content": templates.get(curiosity_type, f"关于 {topic}，有什么有趣的问题？"),
+            "priority": QuestionPriority.HIGH.value if intensity > 0.7 else QuestionPriority.NORMAL.value,
+            "curiosity_type": curiosity_type.value,
+            "topic": topic,
+            "intensity": intensity,
+        }
+
+    def get_exploration_stats(self) -> Dict[str, Any]:
+        """获取探索统计信息"""
+        explorations = list(self._explorations.values())
+        if not explorations:
+            return {
+                "total_explorations": 0,
+                "completed_explorations": 0,
+                "average_knowledge_gained": 0,
+                "curiosity_type_distribution": {},
+            }
+        completed = [e for e in explorations if e.status == "completed"]
+        total_knowledge = sum(e.knowledge_gained for e in completed)
+        type_dist: Dict[str, int] = {}
+        for exploration in explorations:
+            ct = exploration.curiosity_type.value
+            type_dist[ct] = type_dist.get(ct, 0) + 1
+        return {
+            "total_explorations": len(explorations),
+            "completed_explorations": len(completed),
+            "average_knowledge_gained": total_knowledge / len(completed) if completed else 0,
+            "curiosity_type_distribution": type_dist,
+        }
+
+
 class QuestionQueueManager:
     """
     问题队列管理器
@@ -129,6 +301,10 @@ class QuestionQueueManager:
 
         # 状态索引
         self._status_index: Dict[QuestionStatus, List[str]] = {status: [] for status in QuestionStatus}
+
+        # D4 并入：好奇心驱动器（探索台账/强度模型），生成的问题走本队列持久化通道
+        self.curiosity_drive = CuriosityDrive()
+        self._base_cooldown = default_cooldown
 
         # 2026-09-07 根因修复（audit SUB-P2-15）：on_initialize 全仓无人调用，
         # 持久化问题跨重启静默丢失且 _memory_ids 为空导致每次状态流转复制新记忆；
@@ -442,7 +618,63 @@ class QuestionQueueManager:
                 "by_priority": {
                     p.value: sum(1 for q in self._questions.values() if q.priority == p) for p in QuestionPriority
                 },
+                "curiosity": self.curiosity_drive.get_exploration_stats(),
             }
+
+    # ============================================================
+    # 好奇心驱动提问（D4 自 proactive_question.py 取长补短并入）
+    # ============================================================
+
+    def generate_curiosity_question(self, context: Dict[str, Any]) -> Optional[QuestionEntry]:
+        """按好奇心强度生成问题并走现役持久化队列（强度 <0.3 返回 None）。
+
+        与旧版差别：生成结果进 generate_question 单源通道——去重、容量治理、
+        记忆持久化全部继承现役队列语义；好奇心类型/主题/强度存 metadata。
+        """
+        draft = self.curiosity_drive.generate_curiosity_question(context)
+        if draft is None:
+            return None
+        return self.generate_question(
+            content=draft["content"],
+            priority=QuestionPriority(draft["priority"]),
+            metadata={
+                "curiosity_type": draft["curiosity_type"],
+                "topic": draft["topic"],
+                "intensity": draft["intensity"],
+            },
+        )
+
+    def evaluate_question_quality(
+        self,
+        content: str,
+        priority: QuestionPriority = QuestionPriority.NORMAL,
+        curiosity_type: Optional[CuriosityType] = None,
+    ) -> float:
+        """评估问题质量（0.0-1.0）：基线 0.4 + 优先级加分 + 好奇心类型加分。
+
+        自 proactive_question.py 取长补短并入（做实为按传入特征计算，非恒 0.5）。
+        """
+        score = 0.4
+        score += {QuestionPriority.HIGH: 0.2, QuestionPriority.NORMAL: 0.1, QuestionPriority.LOW: 0.0}.get(
+            priority, 0.0
+        )
+        score += {
+            CuriosityType.KNOWLEDGE_GAP: 0.2,
+            CuriosityType.NOVELTY_SEEKING: 0.15,
+            CuriosityType.PATTERN_DISCOVERY: 0.2,
+            CuriosityType.CAUSAL_REASONING: 0.25,
+            CuriosityType.COUNTERFACTUAL: 0.2,
+        }.get(curiosity_type, 0.0)
+        _ = content  # 保留入参：未来可按内容特征（具体性/可答性）加细
+        return max(0.0, min(1.0, score))
+
+    def on_user_busy(self) -> None:
+        """用户忙碌：冷却翻倍（不低于 600s 口径），降低打扰频率"""
+        self._default_cooldown = max(self._default_cooldown, self._base_cooldown * 2)
+
+    def on_user_idle(self) -> None:
+        """用户空闲：恢复基准冷却"""
+        self._default_cooldown = self._base_cooldown
 
     def _load_questions_from_memory(self) -> None:
         """从记忆系统加载问题

@@ -425,7 +425,6 @@ class PostChatPipeline:
         self._tool_marketplace = None
         self._conflict_detector = None
         self._version_control = None
-        self._proactive_question_manager = None
         self._rsi_orchestrator = None
         self._voice_memory_bridge = None
         self._skill_packer = None
@@ -490,10 +489,9 @@ class PostChatPipeline:
         pattern_miner: Any = None,
         genetic_engine: Any = None,
         tool_marketplace: Any = None,
-        conflict_detector: Any = None,
-        version_control: Any = None,
-        proactive_question_manager: Any = None,
-        rsi_orchestrator: Any = None,
+            conflict_detector: Any = None,
+            version_control: Any = None,
+            rsi_orchestrator: Any = None,
         voice_memory_bridge: Any = None,
         skill_packer: Any = None,
         voice_pipeline: Any = None,
@@ -515,7 +513,6 @@ class PostChatPipeline:
             tool_marketplace: 工具市场实例
             conflict_detector: 冲突检测器实例
             version_control: 版本控制实例
-            proactive_question_manager: 主动提问管理器实例
             rsi_orchestrator: RSI编排器实例
             voice_memory_bridge: 语音记忆桥接器实例
             skill_packer: 技能打包器实例
@@ -546,8 +543,6 @@ class PostChatPipeline:
             self._conflict_detector = conflict_detector
         if version_control is not None:
             self._version_control = version_control
-        if proactive_question_manager is not None:
-            self._proactive_question_manager = proactive_question_manager
         if rsi_orchestrator is not None:
             self._rsi_orchestrator = rsi_orchestrator
         if voice_memory_bridge is not None:
@@ -565,7 +560,7 @@ class PostChatPipeline:
             "growth_analyzer=%s, growth_log_manager=%s, evolution=%s, "
             "neuHebb_manager=%s, tool_lifecycle=%s, pattern_miner=%s, "
             "genetic_engine=%s, tool_marketplace=%s, conflict_detector=%s, "
-            "version_control=%s, proactive_question_manager=%s, rsi_orchestrator=%s, "
+            "version_control=%s, rsi_orchestrator=%s, "
             "voice_pipeline=%s, neurflow_executor=%s",
             self._conversation_buffer is not None,
             self._memory_manager is not None,
@@ -580,7 +575,6 @@ class PostChatPipeline:
             self._tool_marketplace is not None,
             self._conflict_detector is not None,
             self._version_control is not None,
-            self._proactive_question_manager is not None,
             self._rsi_orchestrator is not None,
             self._voice_pipeline is not None,
             self._neurflow_executor is not None,
