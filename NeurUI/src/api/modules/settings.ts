@@ -312,3 +312,21 @@ export function getEvalCoresetSettings() {
 export function updateEvalCoresetSettings(data: Partial<EvalCoresetSettings>) {
   return api.put<ApiResponse<EvalCoresetSettings>>('/governance/eval-coreset', data)
 }
+
+// ---------------------------------------------------------------------------
+// 实验性评测机制开关（N1–N3：Pareto 多档交付 / 候选集并行递归 / G-rollout 诊断）
+// ---------------------------------------------------------------------------
+
+export interface EvalExperimentSettings {
+  profile_variants_enabled: boolean
+  lineage_pareto_enabled: boolean
+  diagnosis_rollouts: number
+}
+
+export function getEvalExperimentSettings() {
+  return api.get<ApiResponse<EvalExperimentSettings>>('/governance/eval-experiments')
+}
+
+export function updateEvalExperimentSettings(data: Partial<EvalExperimentSettings>) {
+  return api.put<ApiResponse<EvalExperimentSettings>>('/governance/eval-experiments', data)
+}

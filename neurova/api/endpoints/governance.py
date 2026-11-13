@@ -920,6 +920,43 @@ async def update_eval_coreset_settings(body: EvalCoresetUpdate,
     return {"code": 0, "data": load_settings()}
 
 
+# ── 实验性评测机制开关（N1–N3 治理面，2026-11-13）────────────────────
+
+
+@router.get("/eval-experiments")
+async def get_eval_experiment_settings(admin=Depends(_governance_admin_dep)):
+    """实验性评测机制开关读数（仅管理员）：env 灰度直改仍优先于设置文件。"""
+    from neurova.security.eval_experiment_settings import load_settings
+
+    return {"code": 0, "data": load_settings(),
+            "domains": {"diagnosis_rollouts_min": 1, "diagnosis_rollouts_max": 5}}
+
+
+class EvalExperimentsUpdate(BaseModel):
+    """实验性评测机制更新载荷：三键均可选（None=本次不改），未知键当场拒。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile_variants_enabled: Optional[bool] = None
+    lineage_pareto_enabled: Optional[bool] = None
+    diagnosis_rollouts: Optional[int] = Field(
+        None, ge=1, le=5)
+
+
+@router.put("/eval-experiments")
+async def update_eval_experiment_settings(body: EvalExperimentsUpdate,
+                                          admin=Depends(_governance_admin_dep)):
+    """更新实验性评测机制开关（仅管理员）；至少一个有效键，否则 422。"""
+    from neurova.security.eval_experiment_settings import load_settings, save_settings
+
+    payload = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not payload:
+        raise HTTPException(status_code=422, detail="无有效更新字段")
+    if not save_settings(payload):
+        raise HTTPException(status_code=500, detail="实验性评测设置保存失败")
+    return {"code": 0, "data": load_settings()}
+
+
 # ── 工具结果溢出阈值（P1-#6，2026-09-13 设置-高级）──────────────────
 
 
