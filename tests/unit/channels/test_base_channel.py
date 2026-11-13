@@ -6,7 +6,8 @@ TDD: 先写测试，再实现
 
 import pytest
 from abc import ABC
-from neurova.channels.base import ChannelAdapter, ChannelConfig, ChannelMessage, MessageChannel
+from neurova.channels.base import ChannelAdapter, ChannelConfig, ChannelMessage
+from neurova.channels import MessageChannel
 
 
 class TestBaseChannelInterface:

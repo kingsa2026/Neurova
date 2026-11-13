@@ -45,27 +45,6 @@ class ChannelEventType(str, Enum):
     HUMAN_TAKEOVER_ENDED = "human_takeover_ended"
 
 
-class MessageChannel(str, Enum):
-    """消息渠道枚举"""
-
-    WECHAT = "wechat"
-    FEISHU = "feishu"
-    DINGTALK = "dingtalk"
-    WECOM = "wecom"
-    WEBHOOK = "webhook"
-    API = "api"
-    TELEGRAM = "telegram"
-    WEBSOCKET = "websocket"
-    SIP = "sip"
-    QQBOT = "qqbot"
-    QQ = "qq"
-    QCLAW = "qclaw"
-    MQTT = "mqtt"
-    DISCORD = "discord"
-    MOBILE = "mobile"
-    XIAOYI = "xiaoyi"
-
-
 @dataclass
 class ChannelConfig:
     """渠道配置"""

@@ -16,7 +16,6 @@ except ImportError:
     REQUESTS_AVAILABLE = False
 
 from neurova.channels.access_policy import chatAccessDecision
-from neurova.channels.base import MessageChannel
 from neurova.channels.models import ContentType, UnifiedMessage
 
 if TYPE_CHECKING:

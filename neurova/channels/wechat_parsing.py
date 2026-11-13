@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, Optional
 from xml.etree import ElementTree as ET
 
-from neurova.channels.base import MessageChannel
+from neurova.channels import MessageChannel
 from neurova.channels.models import ContentType, UnifiedMessage
 
 if TYPE_CHECKING:

@@ -19,15 +19,13 @@ import pytest
 
 
 def test_package_exports_facade_symbols():
-    from neurova.llm.generators import (  # noqa: F401  当前恒 ImportError → RED
+    from neurova.llm.generators import (  # noqa: F401
         BaseGenerator,
         GenerationConfig,
         GenerationResult,
         GeneratorManager,
         GeneratorType,
         get_generator_manager,
-        get_image_generator,
-        get_video_generator,
         reset_generator_manager,
     )
 
@@ -300,63 +298,6 @@ def test_facade_v2v_unsupported_not_fake(runtime_patched):
     )))
     assert not result.success
     assert "协议" in result.error  # 诚实说明原因，而非假成功或空 error
-
-
-# ── 5. Legacy bytes 适配器（wechat_ai/feishu_ai 旧工厂契约）────────────────
-
-
-def test_legacy_image_adapter_returns_bytes(runtime_patched):
-    runtime, calls = runtime_patched
-    from neurova.llm.generators import get_image_generator
-    from neurova.llm.generators import protocols as proto_mod
-
-    async def fake_generate_image(creds, prompt, **kw):
-        return {"images": ["http://cdn/img.png"], "task_id": None, "raw": {}}
-
-    orig = proto_mod.generate_image
-    proto_mod.generate_image = fake_generate_image
-    try:
-        gen = get_image_generator()
-        data = _run(gen.generate(
-            prompt="p", negative_prompt="", width=512, height=512, num_images=1,
-        ))
-    finally:
-        proto_mod.generate_image = orig
-    assert data == b"BYTES"
-
-
-def test_legacy_image_adapter_none_on_failure(monkeypatch):
-    from neurova.llm.generators import GenerationCredsError, get_image_generator, runtime
-
-    def boom(*a, **k):
-        raise GenerationCredsError("no creds")
-
-    monkeypatch.setattr(runtime, "resolve_generation_creds", boom)
-    gen = get_image_generator()
-    data = _run(gen.generate(prompt="p"))
-    assert data is None
-
-
-def test_legacy_video_adapter_maps_kwargs(runtime_patched):
-    runtime, calls = runtime_patched
-    from neurova.llm.generators import get_video_generator
-    from neurova.llm.generators import protocols as proto_mod
-
-    captured = {}
-
-    async def fake_wait(creds, prompt, **kw):
-        captured["kwargs"] = kw
-        return {"status": "succeeded", "video_url": "http://cdn/v.mp4", "raw": {}}
-
-    orig = proto_mod.generate_video_wait
-    proto_mod.generate_video_wait = fake_wait
-    try:
-        gen = get_video_generator()
-        data = _run(gen.generate(prompt="p", duration=8, fps=24))
-    finally:
-        proto_mod.generate_video_wait = orig
-    assert data == b"BYTES"
-    assert captured["kwargs"].get("duration") == 8
 
 
 # ── 6. 端点侧搬移后兼容（安全测试 patch 面不变）────────────────────────────

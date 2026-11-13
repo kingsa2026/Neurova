@@ -12,7 +12,6 @@ const SRC = join(__dirname, '..', '..')
 
 const files = {
   mainLayout: join(SRC, 'layouts', 'MainLayout.vue'),
-  chatLayout: join(SRC, 'layouts', 'ChatLayout.vue'),
   glassNav: join(SRC, 'components', 'GlassNav.vue'),
   login: join(SRC, 'pages', 'LoginPage.vue'),
   register: join(SRC, 'pages', 'RegisterPage.vue'),
@@ -27,7 +26,6 @@ function read(p: string): string {
 describe('品牌渲染契约 · 全站点防回归', () => {
   const surface = [
     files.mainLayout,
-    files.chatLayout,
     files.glassNav,
     files.login,
     files.register,
@@ -42,7 +40,7 @@ describe('品牌渲染契约 · 全站点防回归', () => {
   })
 
   it('布局与组件品牌面必须使用 BrandLogo 组件', () => {
-    for (const p of [files.mainLayout, files.chatLayout, files.glassNav]) {
+    for (const p of [files.mainLayout, files.glassNav]) {
       const src = read(p)
       expect(src, `已导入 BrandLogo: ${p}`).toContain('BrandLogo')
       expect(src, `已使用 <BrandLogo>: ${p}`).toContain('<BrandLogo')

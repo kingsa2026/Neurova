@@ -3,7 +3,7 @@
  *
  * 需求:
  *   1. 展开态 logo 在液态玻璃胶囊内水平居中。
- *   2. 折叠态用户头像在底部玻璃胶囊内水平居中（ChatLayout 折叠页脚同理）。
+ *   2. 折叠态用户头像在底部玻璃胶囊内水平居中。
  *
  * 断言方式沿用 compileStyle 先例（GlassButtonLightTheme）：编译 SFC 样式产物。
  */
@@ -41,15 +41,6 @@ describe('折叠态用户头像/页脚居中', () => {
     const { css, source } = compiledCss('src/layouts/MainLayout.vue')
     expect(source).toMatch(/class="nr-nav-user"[^>]*:class="\{\s*'is-collapsed'/)
     expect(ruleBody(css, 'nr-nav-user\\.is-collapsed')).toMatch(/justify-content:\s*center/)
-  })
-
-  it('ChatLayout: .nr-chat-sidebar-footer 绑定 is-collapsed 且折叠时居中', () => {
-    const { css, source } = compiledCss('src/layouts/ChatLayout.vue')
-    expect(source).toMatch(/class="nr-chat-sidebar-footer"[^>]*:class="\{\s*'is-collapsed'/)
-    const body = ruleBody(css, 'nr-chat-sidebar-footer\\.is-collapsed')
-    expect(body).toMatch(/justify-content:\s*center/)
-    // 32px 按钮 + 8×2 内边距 = 48 高，与品牌胶囊同径成圆
-    expect(body).toMatch(/padding:\s*8px\s+0/)
   })
 })
 

@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from neurova.channels.base import MessageChannel
+from neurova.channels import MessageChannel
 from neurova.channels.models import ContentType, UnifiedMessage
 
 if TYPE_CHECKING:

@@ -319,3 +319,32 @@ class RelationModule:
                 "by_type": type_counts,
                 "memories_with_relations": len(self._source_index) + len(self._target_index),
             }
+
+    def graph_density(self) -> float:
+        """图密度：实际关系数 / 无向完全图可能边数；无边或单节点时为 0。
+
+        自 relation_mixin.get_relation_statistics 取长补短（2026-11-14 退役裁定，
+        见 docs/05-reports/全库代码审计报告_2026-11-14.md §5）——那是该口径的
+        全仓唯一实装，随死码退役并入本模块。
+        """
+        with self._lock:
+            relations = list(self._relations.values())
+            if not relations:
+                return 0.0
+            nodes = {r.source_id for r in relations} | {r.target_id for r in relations}
+            n = len(nodes)
+            max_possible = n * (n - 1) / 2
+            return len(relations) / max_possible if max_possible > 0 else 0.0
+
+    def most_connected(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """按连接度（出边+入边）返回前 limit 个记忆。
+
+        同上：自 relation_mixin 取长补短（graph_density 的姊妹读数）。
+        """
+        with self._lock:
+            degree: Dict[str, int] = {}
+            for relation in self._relations.values():
+                degree[relation.source_id] = degree.get(relation.source_id, 0) + 1
+                degree[relation.target_id] = degree.get(relation.target_id, 0) + 1
+            ranked = sorted(degree.items(), key=lambda x: x[1], reverse=True)[:limit]
+            return [{"memory_id": memory_id, "degree": deg} for memory_id, deg in ranked]

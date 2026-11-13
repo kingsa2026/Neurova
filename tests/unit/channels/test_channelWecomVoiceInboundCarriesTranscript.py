@@ -6,11 +6,10 @@
   委托进来，验签在 `:182-188` 已 fail-closed）。它此前只读 `MsgType` 与 `Content` ⇒ 语音消息的
   正文恒为空串（企业微信把语音的转写文本放在 `<Recognition>`、素材引用放在 `<MediaId>`），
   用户发一条语音进回合等于什么都没说。
-- **另一份同族解析在死路上**：`channels/wechat_message.py` 早就写了 voice 的映射
-  （`content = data.get("Recognition")`），但它经 `wechat_parsing.py`/`wechat_message.py` 出的是
-  `UnifiedMessage`/裸 dict 那一族——§6-170 与本档第三格现量：`parse_raw_message` 在全仓
-  **只有定义没有调用**（除 telegram 自己文件内那一处）。**在死路上补另一半会把"形状没接"
-  洗成"看着已修"**，所以本批不动它，只把活那条补上；两份并存按 §6-170 同一口径登记为退役候选。
+- **另一份同族解析原在死路上**：`channels/wechat_message.py` 早就写了 voice 的映射
+  （`content = data.get("Recognition")`），但从未被接线——`parse_raw_message` 在全仓
+  **只有定义没有调用**（除 telegram 自己文件内那一处）。本批只把活那条补上；该死路文件
+  已于 2026-11-14 随死码退役批删除（裁定见 docs/05-reports/全库代码审计报告_2026-11-14.md §5）。
 - **协议事实不需要往外找**：`Recognition`/`MediaId` 两个字段名在仓内那份映射里就是这么写的，
   本批按它取，不另猜第三种形状。
 
@@ -56,7 +55,6 @@ _LIVE_INBOUND_FILES = {
 #: 值是**入口符号名**清单（判定单位是符号不是文件——同一文件半区死半区活），`"__module__"` 表示
 #: 整档无人 import。豁免清单一旦过期（死路被接活），第三格立刻红。
 _DEAD_ROAD_EXEMPT: dict = {
-    "neurova/channels/feishu_message.py": ("__module__",),
     "neurova/channels/telegram_parser.py": ("parse_raw_message", "receive_message"),
     "neurova/channels/wechat_parsing.py": ("parse_raw_message", "receive_message"),
 }
