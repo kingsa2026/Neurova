@@ -968,6 +968,81 @@ class SkillEvolutionService:
             )
         return result, proposal
 
+    async def evolveRecursive(
+        self,
+        *,
+        skill_id: str,
+        skill_text: str,
+        dataset: Optional[EvalDataset] = None,
+        epochs: int = 2,
+        iterations: Optional[int] = None,
+        artifact_type: str = "template",
+        agent: Any = None,
+        config: Optional[EvolutionConfig] = None,
+        judge: Any = None,
+        mutate: Any = None,
+        bench_gate: Any = None,
+        extra_failures: Optional[list] = None,
+        domain_harnesses: Optional[list] = None,
+    ) -> Dict[str, Any]:
+        """R5 递归多轮演化（§10.2，2026-11-13）：上轮胜者作下轮基线。
+
+        与单轮 `evolve` 的关系：单轮是本方法的每个 epoch（同一评测集固定，
+        与 HarnessPro 的「合成测试一次生成、全程固定」同纪律）；本方法负责
+        **跨轮递归**——上轮过门胜者成为下轮基线，逐轮把 rejected/reason/
+        holdout 前后/改善/成本态/提案 id 记进轨迹，遇拒绝或无改善早停。
+
+        诚实边界：每 epoch 的评测预算 = 单轮预算（真臂按 planRealArmTurns
+        计），总预算 ≈ 单轮 × epochs——调用方（API/运营）须按总预算把关；
+        提案仍全部走 pending＋人工批准，本方法不自动应用任何正文。
+        """
+        current = skill_text
+        trajectory: list = []
+        last_proposal: Optional[EvolutionProposal] = None
+        stopped_reason = ""
+        total_improvement = 0.0
+        for epoch in range(1, max(1, int(epochs)) + 1):
+            result, proposal = await self.evolve(
+                skill_id=skill_id, skill_text=current, dataset=dataset,
+                iterations=iterations, artifact_type=artifact_type, agent=agent,
+                config=config, judge=judge, mutate=mutate, bench_gate=bench_gate,
+                extra_failures=extra_failures, domain_harnesses=domain_harnesses,
+            )
+            cost_arms = (result.cost_summary or {}).get("arms") or {}
+            trajectory.append({
+                "epoch": epoch,
+                "rejected": bool(result.rejected),
+                "reject_reason": result.reject_reason,
+                "holdout_before": round(result.holdout_before, 4),
+                "holdout_after": round(result.holdout_after, 4),
+                "improvement": round(result.improvement, 4),
+                "cost_state": (result.cost_summary or {}).get("state"),
+                "candidate_cost_usd": (cost_arms.get("candidate") or {}).get("cost_usd"),
+                "exec_suite_state": (result.exec_suite or {}).get("state"),
+                "proposal_id": proposal.proposal_id if proposal else "",
+            })
+            if result.rejected:
+                stopped_reason = result.reject_reason or "rejected"
+                break
+            if not result.changed:
+                stopped_reason = "no_change"
+                break
+            total_improvement += result.improvement
+            current = result.deployed_text
+            last_proposal = proposal
+        else:
+            stopped_reason = "epochs_exhausted"
+        return {
+            "skill_id": skill_id,
+            "baseline_text": skill_text,
+            "deployed_text": current,
+            "epochs_run": len(trajectory),
+            "epochs": trajectory,
+            "total_improvement": round(total_improvement, 4),
+            "stopped_reason": stopped_reason,
+            "proposal": last_proposal,
+        }
+
     # ── P0-1 噪声校准 ──
 
     async def _noise_band_for(self, cfg: EvolutionConfig, runner: Any,
