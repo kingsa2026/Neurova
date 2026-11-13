@@ -71,6 +71,21 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["query"],
         },
     },
+    "graph_search": {
+        # 并行能力声明：知识图谱只读走查（递归 CTE 只读，无写作用域）。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
+        "description": "【知识图谱检索】在本 Agent 的知识图谱上查结构化关系（主体-谓词-客体事实链）。三种模式：walk——从查询提到的主体出发沿事实边多跳走查，答「A 和 B 之间是什么关系/通过谁关联」；global——按社区摘要匹配，答「某主题涉及哪一群实体」；drift——实体邻域＋所属社区摘要，答「某实体周边的关联图景」。【何时不用】查记忆条目原文用 memory_search；查网页用 web_search；查/登记术语与本体规则走 ontology 管理面。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "查询文本（walk 提取主体锚点；global 匹配社区摘要；drift 为实体标签）"},
+                "mode": {"type": "string", "enum": ["walk", "global", "drift"], "description": "检索模式", "default": "walk"},
+                "max_hops": {"type": "integer", "description": "walk 模式最大跳数（2-4，默认 2，超出钳位）", "default": 2},
+                "limit": {"type": "integer", "description": "返回数量上限（默认 8，上界 50）", "default": 8},
+            },
+            "required": ["query"],
+        },
+    },
     "file_read": {
         # 并行能力声明：本地文件只读（执行体 to_thread 打开只读句柄），无写作用域。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},

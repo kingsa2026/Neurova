@@ -278,6 +278,7 @@ class ToolExecutor:
     # 注意：search/execute_code 是历史兼容别名，不可删除。
     _builtin_dispatch: Dict[str, str] = {
         "memory_search": "_execute_memory_search",
+        "graph_search": "_execute_graph_search",
         "recall_history": "_execute_recall_history",
         "recall_context_span": "_execute_recall_context_span",
         "search": "_execute_web_search",
@@ -4531,6 +4532,86 @@ class ToolExecutor:
         except Exception as e:
             logger.error("记忆搜索执行失败: %s", e)
             return {"error": f"记忆搜索执行失败: {str(e)}"}
+
+    async def _execute_graph_search(self, params: Dict) -> Dict:
+        """执行知识图谱检索（graphiti 对照批 C4）：walk=多跳事实走查，
+        global/drift=社区图检索。同步 SQLite 走查经 to_thread 下沉线程池，
+        不阻塞事件循环；租户/agent 域与检索链同口径收口。"""
+        try:
+            query = str(params.get("query") or "").strip()
+            if not query:
+                return {"error": "缺少查询语句（query）"}
+            mode = str(params.get("mode") or "walk").strip().lower()
+            if mode not in ("walk", "global", "drift"):
+                return {"error": "不支持的 mode: %s（可选 walk/global/drift）" % mode}
+            try:
+                limit = max(1, min(int(params.get("limit", 8)), 50))
+            except (TypeError, ValueError):
+                limit = 8
+            try:
+                maxHops = max(2, min(int(params.get("max_hops", 2)), 4))
+            except (TypeError, ValueError):
+                maxHops = 2
+            userId, agentIdRaw = self._agent_identity()
+            agentId = str(agentIdRaw or "default")
+            dept = self._callerDepartment(str(userId or "")) or {}
+            tenantId = str(dept.get("tenant_id") or "default")
+
+            from neurova.knowledge.foundation.knowledge_facts import (
+                get_knowledge_fact_store,
+            )
+
+            store = get_knowledge_fact_store()
+            if mode == "walk":
+                from neurova.knowledge.foundation.graph_walk import (
+                    GraphFactWalker,
+                    GraphWalkConfig,
+                )
+
+                walker = GraphFactWalker(
+                    store, agentId=agentId,
+                    config=GraphWalkConfig(enabled=True, maxHops=maxHops,
+                                           limit=limit),
+                )
+                hops = await asyncio.to_thread(
+                    walker.walkFromQuery, query, maxHops, limit, None,
+                    tenantId, None,
+                )
+                return {
+                    "success": True,
+                    "mode": "walk",
+                    "query": query,
+                    "results": hops,
+                    "count": len(hops),
+                }
+            if mode == "global":
+                from neurova.knowledge.community_graph import communityGlobalSearch
+
+                hits = await asyncio.to_thread(
+                    communityGlobalSearch, store, query, agentId, tenantId, limit
+                )
+                return {
+                    "success": True,
+                    "mode": "global",
+                    "query": query,
+                    "results": hits,
+                    "count": len(hits),
+                }
+            from neurova.knowledge.community_graph import communityDriftSearch
+
+            hits = await asyncio.to_thread(
+                communityDriftSearch, store, query, agentId, tenantId, limit
+            )
+            return {
+                "success": True,
+                "mode": "drift",
+                "query": query,
+                "results": hits,
+                "count": len(hits),
+            }
+        except Exception as e:
+            logger.error("graph_search 执行失败: %s", e)
+            return {"error": f"图谱检索执行失败: {str(e)}"}
 
     async def _execute_file_read(self, params: Dict) -> Dict:
         """执行文件读取"""
