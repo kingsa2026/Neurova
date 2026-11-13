@@ -366,6 +366,34 @@
           </template>
         </GlassCard>
 
+        <!-- 实验性评测机制开关（N1–N3：默认全关，开启后作用于新一轮进化运行） -->
+        <GlassCard :title="t('settings.evalExperimentsTitle')">
+          <p class="governance-hint">{{ t('settings.evalExperimentsHint') }}</p>
+          <a-form layout="vertical">
+            <a-form-item :label="t('settings.evalExperimentsProfileVariants')">
+              <a-switch v-model:checked="evalExperiments.profile_variants_enabled" />
+              <p class="governance-hint">{{ t('settings.evalExperimentsProfileVariantsHint') }}</p>
+            </a-form-item>
+            <a-form-item :label="t('settings.evalExperimentsLineagePareto')">
+              <a-switch v-model:checked="evalExperiments.lineage_pareto_enabled" />
+              <p class="governance-hint">{{ t('settings.evalExperimentsLineageParetoHint') }}</p>
+            </a-form-item>
+            <a-form-item :label="t('settings.evalExperimentsRollouts')">
+              <a-input-number
+                v-model:value="evalExperiments.diagnosis_rollouts"
+                :min="1"
+                :max="5"
+                :step="1"
+                style="width: 100%"
+              />
+              <p class="governance-hint">{{ t('settings.evalExperimentsRolloutsHint') }}</p>
+            </a-form-item>
+          </a-form>
+          <template #footer>
+            <GlassButton variant="primary" size="sm" :loading="savingEvalExperiments" @click="saveEvalExperiments">{{ t('common.save') }}</GlassButton>
+          </template>
+        </GlassCard>
+
         <!-- per-agent 档位派发（R6：未设置的 Agent 跟随部署档位） -->
         <GlassCard :title="t('settings.agentProfilesTitle')">
           <p class="governance-hint">{{ t('settings.agentProfilesHint') }}</p>
@@ -428,7 +456,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getSettings, updateSettings, clearCache as clearCacheApi, getGovernanceSettings, updateGovernanceSettings, getAgentLimits, updateAgentLimits, getToolOffloadSettings, updateToolOffloadSettings, getLlmRetrySettings, updateLlmRetrySettings, getTaskProfileSettings, updateTaskProfileSettings, getAgentExecProfiles, updateAgentExecProfile, getEvalCoresetSettings, updateEvalCoresetSettings } from '@/api/modules/settings'
+import { getSettings, updateSettings, clearCache as clearCacheApi, getGovernanceSettings, updateGovernanceSettings, getAgentLimits, updateAgentLimits, getToolOffloadSettings, updateToolOffloadSettings, getLlmRetrySettings, updateLlmRetrySettings, getTaskProfileSettings, updateTaskProfileSettings, getAgentExecProfiles, updateAgentExecProfile, getEvalCoresetSettings, updateEvalCoresetSettings, getEvalExperimentSettings, updateEvalExperimentSettings } from '@/api/modules/settings'
 import type { AgentExecProfile } from '@/api/modules/settings'
 import api from '@/api'
 import type { AgentLimits, AgentLimitDomains, AgentLimitDomain } from '@/api/modules/settings'
@@ -753,6 +781,45 @@ const saveEvalCoreset = async () => {
   }
 }
 
+/** 实验性评测机制开关（N1–N3）：默认全关，作用于新一轮进化运行 */
+const evalExperiments = ref({
+  profile_variants_enabled: false,
+  lineage_pareto_enabled: false,
+  diagnosis_rollouts: 1,
+})
+const savingEvalExperiments = ref(false)
+const evalExperimentsLoaded = ref(false)
+
+const fetchEvalExperiments = async () => {
+  try {
+    const res = await getEvalExperimentSettings()
+    const data = (res as any)?.data?.data ?? (res as any)?.data
+    if (data) {
+      evalExperiments.value = { ...evalExperiments.value, ...data }
+      evalExperimentsLoaded.value = true
+    }
+  } catch (err) {
+    console.error('[Settings] fetchEvalExperiments failed:', err)
+    evalExperimentsLoaded.value = false
+  }
+}
+
+const saveEvalExperiments = async () => {
+  if (!evalExperimentsLoaded.value) {
+    message.warning(t('settings.notLoadedSaveBlocked'))
+    return
+  }
+  savingEvalExperiments.value = true
+  try {
+    await updateEvalExperimentSettings({ ...evalExperiments.value })
+    message.success(t('common.success'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
+  } finally {
+    savingEvalExperiments.value = false
+  }
+}
+
 /** per-agent 档位派发（R6）：未设置的 Agent 跟随部署档位（空串占位） */
 interface AgentProfileRow {
   agent_id: string
@@ -991,6 +1058,7 @@ onMounted(() => {
   fetchLlmRetry()
   fetchTaskProfile()
   fetchEvalCoreset()
+  fetchEvalExperiments()
   fetchAgentProfiles()
 })
 </script>

@@ -619,9 +619,22 @@ class SkillEvolutionRunner:
         # N1 Pareto 多档交付：幸存候选按 lite/standard/heavy 轮转指派执行档位，
         # **串行**评测（turn 级档位真实生效于门控/预算/压缩，成本按档位归账），
         # 产出 (分数, 成本) 非劣集随结果交付——「按部署预算交付」的读数面。
-        # 默认关 = 既有并行评测逐字节不变。
-        profileVariants = (bool(getattr(self.config, "profile_variants_enabled", False))
-                           and len(survivors) >= 2)
+        # 开关：代码级配置 OR 治理设置项（env 灰度直改仍优先）。默认关 =
+        # 既有并行评测逐字节不变。
+        try:
+            from neurova.security.eval_experiment_settings import (
+                lineage_pareto_enabled as _lineageParetoSetting,
+                profile_variants_enabled as _profileVariantsSetting,
+            )
+
+            _pvOn = (bool(getattr(self.config, "profile_variants_enabled", False))
+                     or _profileVariantsSetting())
+            _lpOn = (bool(getattr(self.config, "lineage_pareto_enabled", False))
+                     or _lineageParetoSetting())
+        except Exception:  # noqa: BLE001 - 设置面故障回退代码级配置
+            _pvOn = bool(getattr(self.config, "profile_variants_enabled", False))
+            _lpOn = bool(getattr(self.config, "lineage_pareto_enabled", False))
+        profileVariants = _pvOn and len(survivors) >= 2
         tierArms = ["candidate:lite", "candidate:standard", "candidate:heavy"]
         evaluated: list = []
         if profileVariants:
@@ -679,7 +692,7 @@ class SkillEvolutionRunner:
             {"text": entry["text"], "score": entry["score"]}
             for entry in paretoEntries
             if not entry["dominated"]
-        ] if bool(getattr(self.config, "lineage_pareto_enabled", False)) else []
+        ] if _lpOn else []
 
         # N7：top 两候选近平分时，匿名比例只读产物，优先于先到 argmax。
         blind_tiebreak: dict = {"state": "not_applicable"}
@@ -766,7 +779,14 @@ class SkillEvolutionRunner:
     ) -> list[JudgeFailure]:
         # N3 G-rollout：diagnosis_rollouts>1 时每用例采样 G 次，聚合出稳定性
         # （全挂=stable / 部分挂=flaky）供联合诊断归因；1 = 旧单采样形态。
+        # 生效 G = max(代码级配置, 治理设置项)——治理设置抬底线。
         rollouts = max(1, int(getattr(self.config, "diagnosis_rollouts", 1) or 1))
+        try:
+            from neurova.security.eval_experiment_settings import diagnosis_rollouts as _rolloutsSetting
+
+            rollouts = max(rollouts, int(_rolloutsSetting()))
+        except Exception:  # noqa: BLE001 - 设置面故障回退代码级配置
+            pass
         agg: Dict[str, Dict[str, Any]] = {}
         for _sample in range(rollouts):
             _, details = await self._evaluate(skill_text, examples, artifact_type,
