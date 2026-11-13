@@ -5,6 +5,8 @@
 1–10、预算闸按「单轮计划 × epochs」放大；service.evolveRecursive 的报告
 随响应返回（proposal 转 dict）。
 """
+import json
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -74,6 +76,71 @@ def _report(**over):
 
 
 INFO = {"id": "s1", "description": "d", "manifest": {"config": {"context_template": "B"}}}
+
+
+class TestParetoAdoption:
+    """N5：Pareto 非劣集读取＋按档位采纳（人工按预算选档终点）。"""
+
+    def _seed(self, client, monkeypatch, tmp_path):
+        from neurova.evolution.eval import service as svc_mod
+
+        target = tmp_path / "evo"
+        target.mkdir(parents=True, exist_ok=True)
+
+        def _init(self, agent_id, base_dir=None):
+            self._dir = target
+            self._proposals_file = target / "proposals.json"
+            self._runsDir = lambda: target / "runs"
+
+        monkeypatch.setattr(svc_mod.SkillEvolutionService, "__init__", _init)
+        run_payload = {
+            "skill_id": "s1", "run_id": "run_test_1",
+            "pareto_set": {"state": "measured"},
+            "pareto_variants": [
+                {"text": "B1", "score": 0.22, "tier": "lite",
+                 "cost_usd": 0.01, "tokens": 100},
+                {"text": "B2", "score": 0.28, "tier": "heavy",
+                 "cost_usd": 0.05, "tokens": 300},
+            ],
+        }
+        runs_dir = target / "runs"
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        (runs_dir / "run_test_1.json").write_text(
+            json.dumps(run_payload, ensure_ascii=False), encoding="utf-8")
+        (target / "proposals.json").write_text(json.dumps([{
+            "proposal_id": "evo_p1", "agent_id": "a1", "skill_id": "s1",
+            "artifact_type": "template", "status": "pending",
+            "run_id": "run_test_1", "baseline_text": "B", "improved_text": "B2",
+        }], ensure_ascii=False), encoding="utf-8")
+        applied: list = []
+        monkeypatch.setattr(svc_mod.SkillEvolutionService, "_apply_to_skill",
+                            lambda self, proposal, registry: applied.append(
+                                proposal["improved_text"]) or True)
+        return target, applied
+
+    def test_pareto_read(self, client, monkeypatch, tmp_path):
+        self._seed(client, monkeypatch, tmp_path)
+        r = client.get(f"{BASE}/skills/a1/proposals/evo_p1/pareto")
+        assert r.status_code == 200
+        variants = r.json()["data"]["pareto_variants"]
+        assert [v["tier"] for v in variants] == ["lite", "heavy"]
+
+    def test_adopt_variant_applies_and_marks_applied(self, client, monkeypatch, tmp_path):
+        target, applied = self._seed(client, monkeypatch, tmp_path)
+        r = client.post(f"{BASE}/skills/a1/proposals/evo_p1/adopt-variant",
+                        json={"variant_index": 0})
+        assert r.status_code == 200
+        assert r.json()["data"]["adopted_variant"]["tier"] == "lite"
+        assert applied == ["B1"]  # 被采纳的是 lite 档变体文本
+        proposals = json.loads((target / "proposals.json").read_text(encoding="utf-8"))
+        assert proposals[0]["status"] == "applied"
+        assert proposals[0]["adopted_variant"]["index"] == 0
+
+    def test_adopt_rejects_out_of_range(self, client, monkeypatch, tmp_path):
+        self._seed(client, monkeypatch, tmp_path)
+        r = client.post(f"{BASE}/skills/a1/proposals/evo_p1/adopt-variant",
+                        json={"variant_index": 9})
+        assert r.status_code == 400
 
 
 class TestEvolveRecursiveEndpoint:
