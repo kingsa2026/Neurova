@@ -4,14 +4,18 @@ EventBusEnhanced — 增强版事件总线深度模块
 在现有EventBus基础上，增加以下功能：
 1. 事件过滤（基于数据内容）
 2. 事件重播（重新触发历史事件）
-3. 死信队列（处理失败的事件）
-4. 事件超时处理
+3. 死信队列（处理失败的事件；D6 起处理器异常**自动**落死信，不再只靠手工登记）
+4. 事件超时处理（D6 起对异步处理器以 asyncio.wait_for 强制执行；同步处理器
+   无法被安全打断，超时仅承诺异步路径——如实限定）
 5. 事件链（一个事件触发另一个事件）
 
 设计原则：
 - 小接口，深实现
 - 向后兼容（继承EventBus）
 - 可测试性
+
+D6（2026-11-14 审计 B-5 拍板）：本模块转正当作全局唯一总线
+（get_event_bus() 即本类实例），独立的沉睡单例已并入 get_event_bus()。
 """
 
 import asyncio
@@ -22,7 +26,14 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Set
 
-from .event_bus import Event, EventBus, EventPriority, Subscription
+from .event_bus import (
+    Event,
+    EventBus,
+    EventPriority,
+    Subscription,
+    get_event_bus,
+    reset_event_bus,
+)
 
 logger = get_logger(__name__)
 
@@ -52,8 +63,8 @@ class EventBusEnhanced(EventBus):
     在现有EventBus基础上，增加：
     1. 事件过滤
     2. 事件重播
-    3. 死信队列
-    4. 事件超时处理
+    3. 死信队列（处理器异常自动落库）
+    4. 事件超时处理（异步处理器强制执行；同步处理器不承诺——不可安全打断）
     5. 事件链
     """
 
@@ -264,12 +275,13 @@ class EventBusEnhanced(EventBus):
                             self._async_queue.put_nowait((sub, event))
                         continue
                     try:
-                        result = sub.handler(event)
+                        result = self._run_handler(sub, event)
                         results.append(result)
                         if sub.once:
                             to_remove.append(sub)
                     except Exception as e:
                         logger.error(f"Error in event handler for '{event.name}': {e}", exc_info=True)
+                        self._on_handler_error(event, sub, e)
 
                 # 移除一次性订阅
                 if to_remove:
@@ -347,15 +359,25 @@ class EventBusEnhanced(EventBus):
 
     def set_event_timeout(self, event_name: str, timeout_seconds: float) -> None:
         """
-        设置事件超时时间
+        设置事件超时时间（对异步处理器以 asyncio.wait_for 强制执行；
 
-        Args:
-            event_name: 事件名称
-            timeout_seconds: 超时时间（秒）
+        超时异常走处理器异常钩子自动落死信。同步处理器无法被安全打断，
+        本承诺仅覆盖异步路径——诚实限定，不假装同步也有超时。
         """
         with self._lock:
             self._timeout_handlers[event_name] = timeout_seconds
         logger.debug("Set timeout for event '%s': %.2f seconds", event_name, timeout_seconds)
+
+    def _run_handler_async(self, sub: Subscription, event: Event) -> Any:
+        """带超时强制的异步处理器执行（D6 补完：此前 _timeout_handlers 只写不读）"""
+        timeout = self._timeout_handlers.get(event.name)
+        if timeout is None:
+            return super()._run_handler_async(sub, event)
+        return asyncio.wait_for(sub.handler(event), timeout=timeout)
+
+    def _on_handler_error(self, event: Event, subscription: Subscription, error: Exception) -> None:
+        """处理器异常自动落死信（D6 补完：此前死信只有手工 add_dead_letter 才会产生）"""
+        self.add_dead_letter(event, subscription, error)
 
     def get_event_history(self, event_name: Optional[str] = None, limit: int = 100) -> List[Event]:
         """
@@ -394,33 +416,20 @@ class EventBusEnhanced(EventBus):
         return base_stats
 
 
-# 全局单例
-_global_event_bus_enhanced: Optional[EventBusEnhanced] = None
-_bus_enhanced_lock = threading.Lock()
-
+# 全局单例（D6 起：get_event_bus() 本身即 Enhanced 实例，两个入口共享同一实例）
 
 def get_event_bus_enhanced() -> EventBusEnhanced:
     """
-    获取全局增强事件总线实例
+    获取全局增强事件总线实例（与 get_event_bus() 同一实例）
 
     Returns:
         EventBusEnhanced 全局单例
     """
-    global _global_event_bus_enhanced
-    if _global_event_bus_enhanced is None:
-        with _bus_enhanced_lock:
-            if _global_event_bus_enhanced is None:
-                _global_event_bus_enhanced = EventBusEnhanced()
-                _global_event_bus_enhanced.start()
-    return _global_event_bus_enhanced
+    return get_event_bus()  # type: ignore[return-value]
 
 
 def reset_event_bus_enhanced() -> None:
     """
     重置全局增强事件总线 (主要用于测试)
     """
-    global _global_event_bus_enhanced
-    with _bus_enhanced_lock:
-        if _global_event_bus_enhanced is not None:
-            _global_event_bus_enhanced.stop()
-        _global_event_bus_enhanced = None
+    reset_event_bus()
