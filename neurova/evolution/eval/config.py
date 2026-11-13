@@ -113,6 +113,16 @@ class EvolutionConfig:
     # ── 优化期间快速打分(省钱):judge 只对 val 集跑,训练集用重叠代理 ──
     fast_proxy: bool = True
 
+    # ── 每任务成本账 + CoP + 成本软门（HN1/HC1，HarnessPro 对照 2026-11-13）──
+    # CoP（Cost-of-Pass）的"通过"判分线：单例 composite ≥ cop_pass_score 记
+    # 通过（judge 0..1 分制）。零通过 ⇒ CoP=None（无定义），不是 0。
+    cop_pass_score: float = 0.5
+    # 成本软门：候选臂执行成本（usage 快照差分，见 eval/cost_ledger.py）相对
+    # 基线臂涨幅 > cost_soft_gate_ratio ⇒ 提案 requires_manual_review=True
+    #（不自动应用、也不拒绝——钱的事人说了算）。enabled=False 为逃生门。
+    cost_soft_gate_enabled: bool = True
+    cost_soft_gate_ratio: float = 0.2
+
 
 def text_evolution_enabled() -> bool:
     """文本级进化总开关,默认关。

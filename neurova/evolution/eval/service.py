@@ -27,6 +27,7 @@ from typing import Any, Dict, NamedTuple, Optional
 from neurova.core.data_root import get_data_root
 from neurova.core.logger import get_logger
 from neurova.evolution.eval.config import EvolutionConfig, text_evolution_enabled
+from neurova.evolution.eval.cost_ledger import costSoftGateVerdict
 from neurova.evolution.eval.dataset import EvalDataset, dataset_dir_for
 from neurova.evolution.eval.runner import EvolutionRunResult
 from neurova.evolution.proposal_lifecycle import (
@@ -504,6 +505,9 @@ class EvolutionProposal:
     # judge 回退门产出的提案：只能人工复核，自动审批路径必须拒绝。
     judge_fallback: str = ""
     requires_manual_review: bool = False
+    # HN1/HC1 成本软门读数（eval/cost_ledger.costSoftGateVerdict 的出街形态）：
+    # 候选臂执行成本相对基线臂涨幅超阈值 ⇒ manual_review。只加复核，不自动拒绝。
+    cost_gate: dict = field(default_factory=dict)
     created_at: str = ""
     decided_at: str = ""
 
@@ -876,6 +880,14 @@ class SkillEvolutionService:
 
         proposal: Optional[EvolutionProposal] = None
         if not result.rejected and result.changed:
+            # HN1/HC1 成本软门：候选臂执行成本（usage 差分）相对基线臂涨幅
+            # 超阈值 ⇒ 强制人工复核。判定在 cost_ledger 单点；这里只消费读数
+            # 与拼接提案——不自动应用、也不自动拒绝（软门语义）。
+            costGate = costSoftGateVerdict(
+                result.cost_summary,
+                ratio_threshold=cfg.cost_soft_gate_ratio,
+                enabled=cfg.cost_soft_gate_enabled,
+            )
             proposal = EvolutionProposal(
                 proposal_id=f"evo_{uuid.uuid4().hex[:12]}",
                 agent_id=self.agent_id,
@@ -900,7 +912,9 @@ class SkillEvolutionService:
                 iterations_run=result.iterations_run,
                 case_gate=result.caseGateReadout(),
                 judge_fallback=result.judge_fallback,
-                requires_manual_review=bool(result.judge_fallback),
+                requires_manual_review=bool(result.judge_fallback)
+                or costGate.get("state") == "manual_review",
+                cost_gate=costGate,
                 created_at=datetime.now(UTC).isoformat(),
             )
             self._append_proposal(proposal)
