@@ -555,3 +555,66 @@ HarnessPro 证明了一件事：**递归自改进的下一步收益不在「更�
 都已就位，按 HC1（成本入账入门）→ HC2（可执行测试判据）→ HC3/HC4（档位化工件与
 分段钩子）补层即可；同时守住本仓的硬资产——真值判据、人工评审、回滚与那 2.5 万个
 测试——不因「像对方」而退让。
+
+---
+
+## 9. 落地回执（2026-11-13 修复批，晚于上文评测快照）
+
+> 用户点单「先把断点修复掉」后，按 §5.2 候选与 §6 推荐项（T1A/T2A/T3A/T4A）实施的
+> 落地记录。评测正文（§0–§8）是当日评估快照，不因本节改写；本节只记「断点修了什么、
+> 落在哪、怎么验的」。四批提交：`71db6a1f5`（批1）/ `256873e6a`（批2）/ `00d9e62ea`
+> （批3）/ `3795b4a2a`（批4）。
+
+### 9.1 逐断点落地状态
+
+| 断点 | 落地形态 | 提交 | 关键落点 |
+|---|---|---|---|
+| HN1 成本不进目标 | 每任务成本账＋CoP＋成本软门 | `71db6a1f5` | `eval/cost_ledger.py`（EvalCostLedger＋costSoftGateVerdict）；runner 三返回路径按臂落 usage 差分；提案 `cost_gate`＋`requires_manual_review`（涨幅>0.2 软门） |
+| HN2 判据靠 judge | 可执行测试判据层 | `256873e6a` | `eval/exec_suite.py`（TestSynthesizer＋冻结 suite_hash＋七种确定性断言 op）；runner 判定 2.15 非回归门（`exec_suite_regression`）；套件生成失败诚实回退 judge |
+| HN3 路由无兜底 | 歧义显式回退 standard | `00d9e62ea` | `effort_inference.resolveQueryEffort`（explicit/inferred/fallback_standard）；`_resolve_auto_effort` 落档位＋来源标记（提示面同形：standard 不注入指令） |
+| HN4 预算无分档/Stop 未接线 | 执行档位组＋分段提醒＋Stop 接线 | `00d9e62ea` | `agent_limits_settings.EXEC_PROFILES`（lite/standard/heavy，优先级 env>档位>文件>默认）；`agent/budget_stages.py`（economy/strict/finalize 纯文本提醒，两环注入，不造第二把 TERMINATE）；`hooks_engine.runStopHooks`（默认关，`NEUROVA_STOP_HOOKS=1` 灰度开） |
+| HN5 压缩阈值全局化 | 按档溢出阈值 | `3795b4a2a` | `tool_offload_settings`：无显式设置时默认 64KB 按档缩放（lite ×0.5/heavy ×2，夹紧合法域）；显式设置优先于档位 |
+| HN6 无核选/无多档工件 | 难度加权多样性核选 | `3795b4a2a` | `eval/coreset.py`（bigram Jaccard 距离＋信息量权重的确定性贪心，DPP 思想自研近似）；runner `eval_coreset_k>0` 时核选到 K 再走既有 split（默认 0=旧行为） |
+
+**档位工件（HC3）的「多档部署工件」形态以命名配置组落地**（`NEUROVA_EXEC_PROFILE=
+lite|standard|heavy`，standard=内置默认逐字不变）；管理端只读展示页未做（前端面另批）。
+
+### 9.2 与 §6 拍板项的对应
+
+- **T1**：按 A 先做只读成本单（`cost_summary` 进 run 审计与提案面），软门同步落
+  （涨幅>20% ⇒ 人工复核，不自动拒绝）。
+- **T2**：按 A——可执行测试只对 skill 类工件；生成器只读基线契约与参考任务面
+  （不读候选正文）；套件冻结（suite_hash 进结果面）；断言引擎确定性、无代码执行；
+  golden/留出真值门保留。
+- **T3**：按 A——命名配置组＋env 切换，默认 standard=现行为；无管理端 UI（另批）。
+- **T4**：按 A——分段提醒默认开（纯文本）；Stop 钩子与「硬停新档位」默认关
+  （`NEUROVA_STOP_HOOKS=1` 灰度）；既有四把门控仍是唯一 TERMINATE 执法点。
+- **HC5（rubric 分类器）**：按文档定位为 P2 条件项（HC4 后仍观察到误判才升），
+  本批未实施——`resolveQueryEffort` 的显式回退已消除「歧义不留档」的失控形态。
+
+### 9.3 验证证据
+
+- **先红后绿**：`test_taskCostLedger.py`（11 项）、`test_execSuite.py`（14 项）、
+  `test_budgetStagesAndProfiles.py`（25 项）、`test_coreset.py`（6 项）均先行红灯
+  （ImportError/断言失败）后转绿；`test_effort_inference.py` 的歧义钉子同步改约。
+- **回归**：`tests/unit/evolution` **1872 passed**；`tests/unit/agent` **1688 passed**＋
+  2 项预存红（`test_tkg_retriever`，审计批次已登记的预存基线，与本批无关）；
+  溢出/寻址/门控阈值/ hooks 定向 80+ 项全绿。
+- **活体探针（教义第 4 条）**：`tests/manual/harnesspro_gaps_live.py`（跑毕即删）
+  **21/21 PASS**——真实 usage_accounting 单例记账差分 → 成本账/CoP/软门全链；
+  真实 settings/hooks 引擎上的档位切换、分段提醒、Stop 灰度；可执行套件合成→
+  冻结→断言→非回归门。LLM 判分/执行/合成的模型调用为注入替身（离线无凭据，
+  诚实声明）；`LIVE_ALL_OK`。
+- **评分投影（自评，非承诺）**：§4.3 预期的第 3 维（成本入目标）与第 5 维（分档
+  运行时）提升成立；第 2 维（可执行判据）就位。综合分预计 7.9 → ≈8.2，复核需
+  按本文 §4 口径重评（本文不自行改分）。
+
+### 9.4 本批明确的边界（不冒充完成）
+
+- 执行档位目前是**进程级 env 选择**，没有管理端 UI 与按 agent 粒度的档位派发；
+- 可执行测试合成器的 LLM 面在生产走 multi_model_client，其生成质量未经真实
+  模型实证（离线探针用替身）——首次真实生成需按 HC2 的防 gaming 闸复核；
+- 成本账的 usage 差分是**进程级**口径（并发 LLM 活动会并入，与
+  `agent_turns_tokens` 同边界）——多租户按用户拆账是另一条已有线（usage_history）；
+- `eval_coreset_k` 默认 0（能力在、默认不开），开启后的判据有效性需按 §5.2 HC6
+  的「核选通过→全量复核」双段设计实证。
