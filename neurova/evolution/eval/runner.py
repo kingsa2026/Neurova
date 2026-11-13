@@ -910,7 +910,8 @@ class SkillEvolutionRunner:
                 arm="exec_candidate" if best_text != baseline_text else "exec_baseline")
             _cOutputs = {ex.task_input: out
                          for ex, _s, out, _f, _failed, _env in _cDetails}
-            execCandidate = _exec_suite_mod.run_exec_suite(exec_suite, _cOutputs)
+            execCandidate = _exec_suite_mod.run_exec_suite(
+                exec_suite, _cOutputs, baseline_outputs=_bOutputs)
             result.exec_suite = {
                 "state": "measured",
                 "suite_hash": exec_suite.suite_hash,
