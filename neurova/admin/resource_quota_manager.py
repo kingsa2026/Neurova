@@ -55,6 +55,104 @@ _USAGE_TO_LIMIT: Dict[str, str] = {
 }
 
 
+def _validated_limit(value: Any) -> Optional[int]:
+    """设置面来的额度值只收 **int ≥ 1**；其余（bool/浮点/字符串/0/负数）一律
+    视为未配置（返回 None，调用方回落默认）——判额面不收垃圾。"""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if value >= 1 else None
+
+
+def _username_for_user(user_id: str) -> Optional[str]:
+    """user_id → username（组员名册按 username 记账）。查无此人/库不可达返回 None。"""
+    try:
+        from neurova.auth.user_model import UserModel
+
+        user = UserModel().get_user_by_id(int(str(user_id).strip()))
+        if not user:
+            return None
+        username = getattr(user, "username", None)
+        if not username and isinstance(user, dict):
+            username = user.get("username")
+        return str(username) if username else None
+    except Exception:
+        return None
+
+
+def _map_group_quota(quota: Any) -> Dict[str, int]:
+    """ResourceQuota 字段 → 管理器额度键（单位对齐：MB→Bytes 两格换算）。
+
+    只映射管理器**有判额闸**的键；组的其余配额字段（内存/每分钟请求/并发
+    任务/组员数）暂无对应闸，不伪造覆盖。
+    """
+    mib = 1024 * 1024
+    mapped: Dict[str, int] = {}
+    for src, dst, scale in (
+        ("max_llm_calls_per_day", "max_llm_calls_per_day", 1),
+        ("max_tokens_per_day", "max_llm_tokens_per_day", 1),
+        ("max_agents", "max_agents", 1),
+        ("max_storage_mb", "max_storage_bytes", mib),
+        ("max_file_size_mb", "max_file_size_bytes", mib),
+    ):
+        v = getattr(quota, src, None)
+        if isinstance(v, int) and not isinstance(v, bool) and v >= 1:
+            mapped[dst] = v * scale
+    return mapped
+
+
+def _first_nondefault_quota_in_chain(mgr: Any, start_group: Any) -> Optional[Any]:
+    """从直接组沿 parent_group_id 向部门根取**第一个非默认**配额
+    （子组覆盖、未配置继承父组）；全链默认 → None（不 overlay）。"""
+    from neurova.auth.user_group_model import ResourceQuota
+
+    blank = ResourceQuota()
+    seen: set = set()
+    cursor = start_group
+    while cursor is not None and cursor.group_id not in seen:
+        seen.add(cursor.group_id)
+        q = getattr(cursor, "resource_quota", None)
+        if q is not None and q != blank:
+            return q
+        parent_id = getattr(cursor, "parent_group_id", None)
+        cursor = mgr.get_group(parent_id) if parent_id else None
+    return None
+
+
+def _resolve_group_quota_overlay(user_id: str) -> Dict[str, int]:
+    """用户所属组（T-A 单主组沿父链继承）的 ResourceQuota → 额度覆盖层。
+
+    组解析与 resolveUserDepartment 同源：组员名册按 username、只认 CUSTOM
+    主组。任何失败 fail-soft 返回 {}（不 overlay，回落默认/设置）。
+    """
+    try:
+        from neurova.auth.user_group_model import UserGroupType
+
+        username = _username_for_user(user_id)
+        if not username:
+            return {}
+        mgr = _user_group_manager()
+        custom = [
+            g
+            for g in mgr.get_groups_for_user(username)
+            if getattr(g, "group_type", None) == UserGroupType.CUSTOM
+        ]
+        if not custom:
+            return {}
+        quota = _first_nondefault_quota_in_chain(mgr, custom[0])
+        if quota is None:
+            return {}
+        return _map_group_quota(quota)
+    except Exception as e:  # noqa: BLE001 - 组配额解析失败不阻断判额
+        logger.warning("组级配额解析失败（忽略 overlay）: %s", e)
+        return {}
+
+
+def _user_group_manager() -> Any:
+    from neurova.auth.user_group_model import get_user_group_manager
+
+    return get_user_group_manager()
+
+
 @dataclass
 class ResourceUsage:
     user_id: str
@@ -168,9 +266,24 @@ class ResourceQuotaManager:
     def get_user_quota(self, user_id: str, group_type: str = "user") -> Dict[str, int]:
         with self._lock:
             quota: Dict[str, int] = dict(DEFAULT_LIMITS)
+            # 运营设置覆盖（2026-11-14 LLM 日配额运营化）：app_settings.quota
+            # 的合法值（int ≥ 1）覆盖硬编码默认，判额时现读——改完即生效。
+            # 优先级：硬编码默认 < 运营设置 < custom_limits < group_limits
+            # < 用户所属组（组级 ResourceQuota，最具体的额度事实）。
+            try:
+                from neurova.core.app_settings import get_quota_settings
+
+                for key, value in get_quota_settings().items():
+                    if key in DEFAULT_LIMITS:
+                        validated = _validated_limit(value)
+                        if validated is not None:
+                            quota[key] = validated
+            except Exception as e:  # noqa: BLE001 - 设置读取失败回退默认
+                logger.warning("配额设置读取失败，使用默认值: %s", e)
             quota.update(self._custom_limits)
             if group_type in self._group_limits:
                 quota.update(self._group_limits[group_type])
+            quota.update(_resolve_group_quota_overlay(user_id))
             return quota
 
     def get_usage(self, user_id: str) -> ResourceUsage:

@@ -51,7 +51,7 @@ _default_settings = {
 
 # 结构化 section（真持久化，data/app_settings.json——替换内存 stub：
 # 此前高级选项卡保存即丢、读取形状错位，整页为装饰性）
-_SETTINGS_SECTIONS = ("general", "security", "storage", "advanced", "routing")
+_SETTINGS_SECTIONS = ("general", "security", "storage", "advanced", "routing", "quota")
 
 #: 已退役的语言键：本面**既不读也不收**。
 #: 只删默认表是不够的——`PUT /settings` 的 body 是 `Dict[str, Any]`，没有任何闭集校验
@@ -148,6 +148,22 @@ def _merged_settings() -> Dict[str, Any]:
     return _dropRetiredLanguageKeys(settings)
 
 
+def _validate_quota_section(section: Dict[str, Any]) -> None:
+    """quota section 只收**已知配额键 + int ≥ 1**（与 DEFAULT_LIMITS 对齐）。
+
+    非法值在端点 400 诚实拒收，而不是落盘后被管理器静默回落默认——那会让
+    运营以为改成功了。合法域与判额面（resource_quota_manager._validated_limit）
+    同一口径：int ≥ 1，bool 不算 int。
+    """
+    from neurova.admin.resource_quota_manager import DEFAULT_LIMITS
+
+    for k, v in section.items():
+        if k not in DEFAULT_LIMITS:
+            raise HTTPException(status_code=400, detail=f"quota 未知配额键: {k}")
+        if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+            raise HTTPException(status_code=400, detail=f"quota.{k} 必须是 ≥1 的整数")
+
+
 @router.get("", response_model=SettingsResponse)
 async def get_settings(
     request: Request,
@@ -198,6 +214,8 @@ async def update_settings(
         if key in _SETTINGS_SECTIONS and isinstance(value, dict):
             if RETIRED_LANGUAGE_KEY in value:
                 _rejectRetiredLanguageKey(RETIRED_LANGUAGE_KEY, f"`{key}` section")
+            if key == "quota":
+                _validate_quota_section(value)
 
     flat_updates: Dict[str, Any] = {}
     for key, value in body.settings.items():

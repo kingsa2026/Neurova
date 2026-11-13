@@ -73,6 +73,7 @@ class ResourceQuota:
     max_memory_mb: int = 1024  # 最大内存使用(MB)
     max_storage_mb: int = 10240  # 最大存储空间(MB)
     max_requests_per_minute: int = 60  # 每分钟最大请求数
+    max_llm_calls_per_day: int = 100  # 每天最大LLM调用次数（判额闸经 resource_quota_manager 生效）
     max_tokens_per_day: int = 100000  # 每天最大token使用量
     max_concurrent_tasks: int = 5  # 最大并发任务数
     max_file_size_mb: int = 100  # 最大文件大小(MB)

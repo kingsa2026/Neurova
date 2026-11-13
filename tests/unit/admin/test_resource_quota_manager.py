@@ -194,3 +194,46 @@ class TestSingleton:
             assert a is b
         finally:
             mod.reset_resource_quota_manager()
+
+
+class TestQuotaSettingsOverride:
+    """LLM 日配额运营化（2026-11-14）：app_settings.quota 覆盖硬编码默认。
+
+    优先级：硬编码默认 < 运营设置 < custom_limits（构造注入）< group_limits。
+    非法值（非整数 / < 1 / bool）不生效回落默认——设置面收垃圾，判额面不收。
+    """
+
+    @staticmethod
+    def _patch_settings(monkeypatch, quota):
+        from neurova.core import app_settings as APPS
+
+        merged = {**APPS.QUOTA_DEFAULTS, **quota}
+        monkeypatch.setattr(APPS, "get_quota_settings", lambda path=None: merged)
+
+    def test_defaults_unchanged_without_settings(self, manager):
+        q = manager.get_user_quota("u1")
+        assert q["max_llm_calls_per_day"] == 100
+        assert q["max_llm_tokens_per_day"] == 100_000
+
+    def test_settings_override_llm_call_limit(self, manager, monkeypatch):
+        self._patch_settings(monkeypatch, {"max_llm_calls_per_day": 500})
+        assert manager.get_user_quota("u1")["max_llm_calls_per_day"] == 500
+        assert manager.check_llm_call_quota("u1")["limit"] == 500
+
+    def test_settings_override_token_limit(self, manager, monkeypatch):
+        self._patch_settings(monkeypatch, {"max_llm_tokens_per_day": 250_000})
+        assert manager.check_llm_token_quota("u1")["limit"] == 250_000
+
+    def test_invalid_values_fall_back_to_default(self, manager, monkeypatch):
+        for bad in (-5, 0, "abc", True, 2.5, None):
+            self._patch_settings(monkeypatch, {"max_llm_calls_per_day": bad})
+            assert (
+                manager.get_user_quota("u1")["max_llm_calls_per_day"] == 100
+            ), f"非法值 {bad!r} 不得生效"
+
+    def test_custom_limits_beat_settings(self, tmp_path, monkeypatch):
+        self._patch_settings(monkeypatch, {"max_llm_calls_per_day": 500})
+        mgr = ResourceQuotaManager(
+            str(tmp_path / "q2"), custom_limits={"max_llm_calls_per_day": 20}
+        )
+        assert mgr.get_user_quota("u1")["max_llm_calls_per_day"] == 20

@@ -87,35 +87,6 @@ GROUP_PERMISSIONS: Dict[str, List[str]] = {
 DEFAULT_GROUP_PERMISSIONS: List[str] = list(GROUP_PERMISSIONS[GroupType.USER.value])
 
 
-GROUP_QUOTAS: Dict[str, Dict[str, int]] = {
-    GroupType.USER.value: {
-        "storage_mb": 1024,
-        "api_calls_per_day": 5000,
-        "projects": 5,
-    },
-    GroupType.ADMIN.value: {
-        "storage_mb": 102400,
-        "api_calls_per_day": 100000,
-        "projects": 500,
-    },
-    GroupType.GUEST.value: {
-        "storage_mb": 100,
-        "api_calls_per_day": 1000,
-        "projects": 1,
-    },
-    GroupType.PREMIUM.value: {
-        "storage_mb": 51200,
-        "api_calls_per_day": 50000,
-        "projects": 100,
-    },
-    GroupType.DEVELOPER.value: {
-        "storage_mb": 10240,
-        "api_calls_per_day": 20000,
-        "projects": 50,
-    },
-}
-
-
 def _new_id(prefix: str = "") -> str:
     return f"{prefix}{uuid.uuid4().hex}" if prefix else uuid.uuid4().hex
 
@@ -176,10 +147,6 @@ def _verify_password(password: str, stored_hash: str) -> bool:
     return hmac.compare_digest(derived, expected)
 
 
-def _default_quota(group_type: str) -> Dict[str, int]:
-    return dict(GROUP_QUOTAS.get(group_type, GROUP_QUOTAS[GroupType.USER.value]))
-
-
 def _coerce_group_type(value: Optional[str]) -> str:
     if not value:
         return DEFAULT_GROUP_TYPE
@@ -228,17 +195,14 @@ class EnhancedUserModel:
         self._dir.mkdir(parents=True, exist_ok=True)
         self._users_path = self._dir / "users.json"
         self._logs_path = self._dir / "login_logs.json"
-        self._quotas_path = self._dir / "quotas.json"
         self._users: Dict[str, Dict[str, Any]] = {}
         self._logs: List[Dict[str, Any]] = []
-        self._quotas: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.RLock()
         self._load()
 
     def _load(self) -> None:
         self._load_dict(self._users_path, self._users)
         self._load_list(self._logs_path, self._logs)
-        self._load_dict(self._quotas_path, self._quotas)
 
     def _load_dict(self, path: Path, target: Dict[str, Dict[str, Any]]) -> None:
         if not path.exists():
@@ -275,10 +239,6 @@ class EnhancedUserModel:
             json.dumps(self._logs, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        self._quotas_path.write_text(
-            json.dumps(self._quotas, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
 
     def _build_user(
         self,
@@ -307,21 +267,6 @@ class EnhancedUserModel:
             "metadata": {},
             "created_at": now,
             "updated_at": now,
-        }
-
-    def _build_quota(self, user_id: str, group_type: str) -> Dict[str, Any]:
-        gtype = _coerce_group_type(group_type)
-        return {
-            "user_id": user_id,
-            "group_type": gtype,
-            "quota": _default_quota(gtype),
-            "usage": {
-                "storage_mb": 0,
-                "api_calls_per_day": 0,
-                "api_calls_today": 0,
-                "projects": 0,
-            },
-            "updated_at": _now_iso(),
         }
 
     def _username_exists(self, username: str) -> bool:
@@ -353,7 +298,6 @@ class EnhancedUserModel:
             gtype = _coerce_group_type(group_type)
             user = self._build_user(username, email, password, gtype)
             self._users[user["id"]] = user
-            self._quotas[user["id"]] = self._build_quota(user["id"], gtype)
             self._save()
             return dict(user)
 
@@ -418,21 +362,14 @@ class EnhancedUserModel:
             u = self._users.get(user_id)
             if not u:
                 return False
-            group_changed = False
             for k, v in fields.items():
                 if k in self._PROFILE_FIELDS:
                     if k == "group_type":
                         new_gtype = _coerce_group_type(v)
                         if new_gtype != u.get("group_type"):
                             u[k] = new_gtype
-                            group_changed = True
                     else:
                         u[k] = v
-            if group_changed and user_id in self._quotas:
-                gtype = u.get("group_type") or DEFAULT_GROUP_TYPE
-                self._quotas[user_id]["group_type"] = gtype
-                self._quotas[user_id]["quota"] = _default_quota(gtype)
-                self._quotas[user_id]["updated_at"] = _now_iso()
             u["updated_at"] = _now_iso()
             self._save()
             return True
@@ -443,7 +380,6 @@ class EnhancedUserModel:
         with self._lock:
             existed = self._users.pop(user_id, None) is not None
             if existed:
-                self._quotas.pop(user_id, None)
                 self._save()
             return existed
 
@@ -582,88 +518,6 @@ class EnhancedUserModel:
                 return []
             gtype = u.get("group_type") or DEFAULT_GROUP_TYPE
         return [gtype]
-
-    # -- quota (local, no cross-import) --
-
-    def get_user_quota(self, user_id: str) -> Optional[Dict[str, Any]]:
-        if not user_id:
-            return None
-        with self._lock:
-            q = self._quotas.get(user_id)
-            if q:
-                return dict(q)
-            u = self._users.get(user_id)
-            if not u:
-                return None
-            gtype = u.get("group_type") or DEFAULT_GROUP_TYPE
-            q = self._build_quota(user_id, gtype)
-            self._quotas[user_id] = q
-            self._save()
-            return dict(q)
-
-    def get_user_usage(self, user_id: str) -> Dict[str, Any]:
-        quota = self.get_user_quota(user_id)
-        if not quota:
-            return {
-                "storage_mb": 0,
-                "api_calls_per_day": 0,
-                "api_calls_today": 0,
-                "projects": 0,
-            }
-        return dict(quota.get("usage") or {})
-
-    def get_user_quota_status(self, user_id: str) -> Dict[str, Any]:
-        quota = self.get_user_quota(user_id)
-        if not quota:
-            return {
-                "exists": False,
-                "user_id": user_id,
-                "quota": None,
-                "usage": None,
-                "ratios": {},
-            }
-        q = dict(quota.get("quota") or {})
-        u = dict(quota.get("usage") or {})
-        ratios: Dict[str, float] = {}
-        for k, v in q.items():
-            if isinstance(v, (int, float)) and v:
-                used = float(u.get(k, 0))
-                ratios[k] = round(used / float(v), 4)
-        return {
-            "exists": True,
-            "user_id": user_id,
-            "group_type": quota.get("group_type"),
-            "quota": q,
-            "usage": u,
-            "ratios": ratios,
-        }
-
-    def record_usage(
-        self,
-        user_id: str,
-        storage_mb: int = 0,
-        api_calls: int = 0,
-        projects: int = 0,
-    ) -> bool:
-        if not user_id:
-            return False
-        with self._lock:
-            q = self._quotas.get(user_id)
-            if not q:
-                u = self._users.get(user_id)
-                if not u:
-                    return False
-                gtype = u.get("group_type") or DEFAULT_GROUP_TYPE
-                q = self._build_quota(user_id, gtype)
-                self._quotas[user_id] = q
-            usage = q.setdefault("usage", {})
-            usage["storage_mb"] = int(usage.get("storage_mb", 0)) + int(storage_mb)
-            usage["api_calls_per_day"] = int(usage.get("api_calls_per_day", 0)) + int(api_calls)
-            usage["api_calls_today"] = int(usage.get("api_calls_today", 0)) + int(api_calls)
-            usage["projects"] = int(usage.get("projects", 0)) + int(projects)
-            q["updated_at"] = _now_iso()
-            self._save()
-            return True
 
 
 # ============== 全局单例 ==============

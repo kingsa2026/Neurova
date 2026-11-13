@@ -528,97 +528,16 @@ class TestEnhancedUserModel:
 
         assert has_permission is False
 
-    def test_get_user_quota(self, setup):
-        """测试获取用户的资源配额"""
-        user_model = setup["user_model"]
-        
-        # 创建普通用户
-        user = user_model.create_user(
-            username="testuser",
-            password=TEST_PASSWORD,
-            email=TEST_EMAIL,
-            group_type=UserGroupType.USER,
-        )
-        
-        # 获取配额
-        quota = user_model.get_user_quota(user["id"])
-        
-        assert quota is not None
-        # 实现返回记录 {group_type, quota:{api_calls_per_day/projects/storage_mb}, usage}
-        assert "api_calls_per_day" in quota["quota"]
-        assert "projects" in quota["quota"]
-        assert "storage_mb" in quota["quota"]
-
-    def test_get_user_quota_not_found(self, setup):
-        """测试获取不存在的用户配额"""
-        user_model = setup["user_model"]
-        
-        quota = user_model.get_user_quota(999)
-        
-        assert quota is None
-
-    def test_get_user_usage(self, setup):
-        """测试获取用户的资源使用量"""
-        user_model = setup["user_model"]
-        
-        # 创建普通用户
-        user = user_model.create_user(
-            username="testuser",
-            password=TEST_PASSWORD,
-            email=TEST_EMAIL,
-            group_type=UserGroupType.USER,
-        )
-        
-        # 获取使用量
-        usage = user_model.get_user_usage(user["id"])
-        
-        assert usage is not None
-        assert usage.get("projects") == 0
-        assert "api_calls_today" in usage
-
     def test_get_user_usage_not_found(self, setup):
         """测试获取不存在的用户使用量"""
         user_model = setup["user_model"]
         quota_manager = setup["quota_manager"]
-        
+
         # 获取使用量
         usage = quota_manager.get_usage("999")
-        
+
         assert usage is not None  # 应该创建新的使用量记录
         assert usage.user_id == "999"
-
-    def test_get_user_quota_status(self, setup):
-        """测试获取用户配额状态"""
-        user_model = setup["user_model"]
-        
-        # 创建普通用户
-        user = user_model.create_user(
-            username="testuser",
-            password=TEST_PASSWORD,
-            email=TEST_EMAIL,
-            group_type=UserGroupType.USER,
-        )
-        
-        # 获取配额状态
-        status = user_model.get_user_quota_status(user["id"])
-        
-        assert status is not None
-        assert "quota" in status
-        assert "usage" in status
-        assert "ratios" in status
-
-        # 检查配额（实现模板键面）
-        assert "projects" in status["quota"]
-        assert "projects" in status["usage"]
-
-    def test_get_user_quota_status_not_found(self, setup):
-        """测试获取不存在的用户配额状态"""
-        user_model = setup["user_model"]
-        
-        status = user_model.get_user_quota_status("ghost")
-
-        # 实现返回结构化 not-found 响应（exists=False），不返回 None
-        assert status["exists"] is False
 
     def test_persistence_round_trip(self, setup, tmp_path):
         """存储持久化往返：写入后重开实例数据仍在（JSON 存储替代旧 SQLite 迁移架构）"""

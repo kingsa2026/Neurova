@@ -466,6 +466,24 @@
         </GlassCard>
         </div>
       </a-tab-pane>
+      <a-tab-pane key="quota" :tab="t('settings.quotaTab')">
+        <div class="advanced-stack">
+        <GlassCard :title="t('settings.quotaTab')">
+          <a-form layout="vertical">
+            <a-form-item :label="t('settings.maxLlmCallsPerDay')">
+              <a-input-number v-model:value="quota.max_llm_calls_per_day" :min="1" :precision="0" style="width: 100%" />
+            </a-form-item>
+            <a-form-item :label="t('settings.maxLlmTokensPerDay')">
+              <a-input-number v-model:value="quota.max_llm_tokens_per_day" :min="1" :precision="0" style="width: 100%" />
+            </a-form-item>
+            <p class="quota-hint">{{ t('settings.quotaHint') }}</p>
+          </a-form>
+          <template #footer>
+            <GlassButton variant="primary" size="sm" :loading="saving" @click="saveSection('quota')">{{ t('common.save') }}</GlassButton>
+          </template>
+        </GlassCard>
+        </div>
+      </a-tab-pane>
     </a-tabs>
     </template>
   </div>
@@ -513,6 +531,8 @@ const savingDefault = ref(false)
 const security = ref({ jwt_secret: '', jwt_expiry_hours: 24, min_password_length: 8, require_special: true })
 const storage = ref({ media_path: '/data/media', max_upload_mb: 50, cache_ttl_minutes: 60 })
 const advanced = ref({ debug_mode: false, log_level: 'info', telemetry: false, max_output_tokens: 131072, graph_studio_limit: 200, desktop_runtime_mode: 'full', desktop_provider: '', skill_catalog_enabled: true, skill_schema_budget_enabled: true, evolution_queue_enabled: true, skill_semantic_recall_enabled: true, tool_search_enabled: true })
+// 资源配额（LLM 日配额运营化，2026-11-14）：与后端 app_settings.quota / DEFAULT_LIMITS 对齐
+const quota = ref({ max_llm_calls_per_day: 100, max_llm_tokens_per_day: 100000 })
 const savingRecall = ref(false)
 
 /** LLM 路由设置：actionability 门控 + 群领导选举（均默认关，仅机器源/群聊生效） */
@@ -1002,6 +1022,7 @@ const fetchSettings = async () => {
     if (data?.storage) storage.value = { ...storage.value, ...data.storage }
     if (data?.advanced) advanced.value = { ...advanced.value, ...data.advanced }
     if (data?.routing) routing.value = { ...routing.value, ...data.routing }
+    if (data?.quota) quota.value = { ...quota.value, ...data.quota }
   } catch (err) {
     message.error(extractApiDetail(err) || t('common.error'))
   }
@@ -1010,7 +1031,7 @@ const fetchSettings = async () => {
 const saveSection = async (section: string) => {
   saving.value = true
   try {
-    const sectionMap: Record<string, any> = { general: general.value, security: security.value, storage: storage.value, advanced: advanced.value, routing: routing.value }
+    const sectionMap: Record<string, any> = { general: general.value, security: security.value, storage: storage.value, advanced: advanced.value, routing: routing.value, quota: quota.value }
     await updateSettings(section, sectionMap[section])
 
     // 这里原先有一段"保存 general 时顺手把管理员自己的界面语言也切过去"——它删得掉
@@ -1151,4 +1172,5 @@ onMounted(() => {
 .social-status-row { display: flex; align-items: center; gap: 10px; }
 .social-platform-name { font-family: 'Consolas', 'Menlo', monospace; flex: 1; text-transform: capitalize; }
 .governance-hint { font-size: 12px; color: var(--nr-text-secondary, #8a8a92); margin: 0 0 12px; }
+.quota-hint { font-size: 12px; color: var(--nr-text-secondary, #8a8a92); margin: 0; }
 </style>

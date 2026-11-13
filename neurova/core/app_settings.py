@@ -88,11 +88,22 @@ SECURITY_DEFAULTS: Dict[str, Any] = {
     # env NEUROVA_COGNITIVE_SECURITY 显式值最优先（运维逃生门）。
     "cognitive_security_mode": "observe",
 }
+# 资源配额分区（2026-11-14 运营化）：此前 LLM 日配额只有 resource_quota_manager.py
+# 的硬编码默认值，提额只能改代码或等自然日重置。默认值与该文件 DEFAULT_LIMITS
+# 保持一致；额度装配在硬编码默认之上读本 section（运营设置 > 硬编码默认），
+# 每次判额现读——改完即生效，无需重启。
+QUOTA_DEFAULTS: Dict[str, Any] = {
+    # 每用户每自然日 LLM 调用次数上限（工具循环里的每次模型调用都计数）
+    "max_llm_calls_per_day": 100,
+    # 每用户每自然日 LLM token 上限
+    "max_llm_tokens_per_day": 100_000,
+}
 SECTION_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "general": GENERAL_DEFAULTS,
     "advanced": ADVANCED_DEFAULTS,
     "routing": ROUTING_DEFAULTS,
     "security": SECURITY_DEFAULTS,
+    "quota": QUOTA_DEFAULTS,
 }
 
 
@@ -142,6 +153,11 @@ def save_app_settings(
 
 def get_advanced_settings(path: Optional[Path] = None) -> Dict[str, Any]:
     return load_app_settings(path).get("advanced") or dict(ADVANCED_DEFAULTS)
+
+
+def get_quota_settings(path: Optional[Path] = None) -> Dict[str, Any]:
+    """资源配额设置（LLM 日配额等）；键与 resource_quota_manager.DEFAULT_LIMITS 对齐。"""
+    return load_app_settings(path).get("quota") or dict(QUOTA_DEFAULTS)
 
 
 def apply_global_output_budget(llm_config: Any, path: Optional[Path] = None) -> bool:
