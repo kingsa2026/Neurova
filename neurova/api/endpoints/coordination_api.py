@@ -3,10 +3,10 @@ Neurova Multi-Agent Coordination API Endpoints
 Multi-agent 协作管理 RESTful API
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 
 from neurova.core.logger import get_logger
@@ -24,10 +24,30 @@ from neurova.experiments.ab_test_manager import (
     ExperimentConfig,
     ExperimentGroup,
 )
+from neurova.api.auth import get_current_user
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/coordination", tags=["coordination"])
+
+def require_admin_dep():
+    """路由内延迟获取 admin 门（模块导入顺序安全，跟随 audio.py 形态）。
+
+    必须以 `Depends(require_admin_dep())` 使用：调用后返回的才是真正依赖函数。
+    写成 `Depends(require_admin_dep)` 会把返回的函数对象当参数值注入、
+    角色检查永不执行（已实测证实，audio.py 旧用法即此病，已同批修正）。
+    """
+    from neurova.api.deps import require_admin
+
+    return require_admin()
+
+
+# P1-6：router 级登录门——本文件全部端点默认要求登录；
+# 五个 reset/clear 运维面另收 admin（见各端点）。
+router = APIRouter(
+    prefix="/coordination",
+    tags=["coordination"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 # ========== Seen Boundary Endpoints ==========
@@ -98,7 +118,7 @@ async def seenBoundaryStats():
 
 
 @router.post("/seen-boundary/reset")
-async def seenBoundaryReset():
+async def seenBoundaryReset(admin: Dict[str, Any] = Depends(require_admin_dep())):
     from neurova.collaboration.seen_cursor import (
         get_seen_cursor_manager,
         reset_seen_cursor_manager,
@@ -167,8 +187,8 @@ async def unregister_agent(
 
 
 @router.post("/yield-checker/reset")
-async def reset_yield_checker_endpoint():
-    """重置 Yield Checker（仅用于测试）"""
+async def reset_yield_checker_endpoint(admin: Dict[str, Any] = Depends(require_admin_dep())):
+    """重置 Yield Checker（仅用于测试）— 仅管理员"""
     await reset_glance_yield_checker()
     logger.info("Reset yield checker")
     return {"status": "reset"}
@@ -201,8 +221,8 @@ async def triage_message(
 
 
 @router.post("/triage/clear-cache")
-async def clear_triage_cache():
-    """清除 Triage 缓存"""
+async def clear_triage_cache(admin: Dict[str, Any] = Depends(require_admin_dep())):
+    """清除 Triage 缓存 — 仅管理员"""
     gate = get_small_brain_triage_gate()
     gate.clear_cache()
     
@@ -211,8 +231,8 @@ async def clear_triage_cache():
 
 
 @router.post("/triage/reset")
-async def reset_triage_gate_endpoint():
-    """重置 Triage Gate（仅用于测试）"""
+async def reset_triage_gate_endpoint(admin: Dict[str, Any] = Depends(require_admin_dep())):
+    """重置 Triage Gate（仅用于测试）— 仅管理员"""
     reset_small_brain_triage_gate()
     logger.info("Reset triage gate")
     return {"status": "reset"}
@@ -348,8 +368,8 @@ async def get_ab_test_results(experiment_name: str):
 
 
 @router.post("/ab-tests/reset")
-async def reset_ab_test_manager_endpoint():
-    """重置 A/B Test Manager（仅用于测试）"""
+async def reset_ab_test_manager_endpoint(admin: Dict[str, Any] = Depends(require_admin_dep())):
+    """重置 A/B Test Manager（仅用于测试）— 仅管理员"""
     await reset_ab_test_manager()
     logger.info("Reset ab test manager")
     return {"status": "reset"}
@@ -368,7 +388,7 @@ async def get_coordination_summary():
     ab_tests = ab_manager.list_experiments()
 
     return {
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "yield_checker": yield_stats,
         "triage_gate": triage_stats,
         "active_experiments": len(ab_tests),

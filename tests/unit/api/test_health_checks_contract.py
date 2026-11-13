@@ -27,6 +27,12 @@ def client():
     """轻量 app：只挂 health 路由，单例换成干净实例（不拉全量 lifespan）"""
     app = FastAPI()
     app.include_router(health_router, prefix="/health")
+    # P3-7 收口后 POST /checks/{name}/run 需登录——测试身份走依赖覆盖。
+    from neurova.api.auth import get_current_user as _gcu
+
+    app.dependency_overrides[_gcu] = lambda: {
+        "user_id": "tuser", "username": "tuser", "role": "admin", "neuser_id": "tuser",
+    }
     from neurova.api.endpoints import health as health_mod
     checker = HealthChecker()
     checker.register(

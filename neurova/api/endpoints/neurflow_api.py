@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 
 from neurova.api.auth import get_current_user, get_current_user_or_default
+from neurova.api.deps import require_admin
 from neurova.api.endpoints import defaultAgentId, get_agent_instance
 from neurova.collaboration.neurflow.dag import get_dag_validator
 from neurova.collaboration.neurflow.event_recorder import (
@@ -37,7 +38,9 @@ from neurova.collaboration.neurflow.storage import NeurflowStorage
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+# P1-4：router 级登录门——本文件全部端点默认要求登录；
+# 节点同步 / ComfyUI 执行 / 团队 Agent 写面 / 执行取消另收 admin（见各端点）。
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 # P2-6: fire-and-forget 后台任务必须持强引用并挂 done_callback 回收——
 # 否则任务可能被 GC 中途回收、异常无人收割（对照 multi_model_client._pending_tasks）
@@ -863,8 +866,8 @@ async def search_nodes(query: str):
 
 
 @router.post("/nodes/sync")
-async def sync_nodes():
-    """同步所有节点（工具/技能/MCP）"""
+async def sync_nodes(admin: Dict[str, Any] = Depends(require_admin())):
+    """同步所有节点（工具/技能/MCP）— 仅管理员"""
     registry = get_node_registry()
     result = registry.sync_all()
     return {"sync_result": result, "message": "节点同步完成"}
@@ -1135,8 +1138,8 @@ async def publish_workflow(
 
 
 @router.post("/executions/{execution_id}/cancel")
-async def cancel_execution(execution_id: str):
-    """取消执行"""
+async def cancel_execution(execution_id: str, admin: Dict[str, Any] = Depends(require_admin())):
+    """取消执行 — 仅管理员"""
     storage = _get_storage()
     execution = storage.get_execution(execution_id)
     if not execution:
@@ -1210,8 +1213,8 @@ async def list_agents(
 
 
 @router.post("/agents")
-async def create_agent(data: Dict[str, Any] = Body(...)):
-    """创建临时团队 Agent"""
+async def create_agent(data: Dict[str, Any] = Body(...), admin: Dict[str, Any] = Depends(require_admin())):
+    """创建临时团队 Agent — 仅管理员"""
     try:
         from neurova.collaboration.neurflow.agent_manager import get_agent_manager
 
@@ -1243,8 +1246,8 @@ async def create_agent(data: Dict[str, Any] = Body(...)):
 
 
 @router.post("/agents/{agent_id}/archive")
-async def archive_agent(agent_id: str):
-    """归档 Agent"""
+async def archive_agent(agent_id: str, admin: Dict[str, Any] = Depends(require_admin())):
+    """归档 Agent — 仅管理员"""
     try:
         from neurova.collaboration.neurflow.agent_manager import get_agent_manager
 
@@ -1261,8 +1264,8 @@ async def archive_agent(agent_id: str):
 
 
 @router.post("/agents/{agent_id}/restore")
-async def restore_agent(agent_id: str):
-    """恢复 Agent"""
+async def restore_agent(agent_id: str, admin: Dict[str, Any] = Depends(require_admin())):
+    """恢复 Agent — 仅管理员"""
     try:
         from neurova.collaboration.neurflow.agent_manager import get_agent_manager
 
@@ -1441,8 +1444,10 @@ async def get_comfyui_status():
 
 
 @router.post("/comfyui/execute")
-async def execute_comfyui_node_endpoint(request: ComfyUIExecuteRequest):
-    """直接执行单个 ComfyUI 节点（提交 prompt 到 ComfyUI /prompt）"""
+async def execute_comfyui_node_endpoint(
+    request: ComfyUIExecuteRequest, admin: Dict[str, Any] = Depends(require_admin())
+):
+    """直接执行单个 ComfyUI 节点（提交 prompt 到 ComfyUI /prompt）— 仅管理员"""
     from neurova.collaboration.neurflow.comfyui_nodes import _execute_comfyui_node
 
     result = await _execute_comfyui_node(f"comfyui:{request.class_type}", request.config, request.inputs)

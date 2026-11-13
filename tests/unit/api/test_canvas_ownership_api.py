@@ -2,11 +2,13 @@
 """B0 画布属主隔离（HTTP 端点契约，TDD 先红后绿）。
 
 契约：
-- 画布 CRUD/run/ops 挂 get_current_user_or_default（无凭证→default，保留既有行为）
+- P1-5 收口后 collaboration router 级挂严格登录门（匿名一律 401）；
+  画布 CRUD/run/ops 的身份解析仍走 get_current_user_or_default
+  （登录态下未带显式用户语境→default）
 - 非属主 GET/PUT/DELETE/run/ops → 404（与不存在同构，防枚举）
 - admin 全通；项目成员可读（GET/run），不可写
-- 列表 view=personal|project|agent 过滤；匿名只见 default 空间
-- 创建带 project_id 需项目成员（admin/匿名 default 放行），否则 400
+- 列表 view=personal|project|agent 过滤
+- 创建带 project_id 需项目成员（admin 放行），否则 400
 - 创建落 user_id=JWT 实名；origin 默认 manual 可透传
 """
 import unittest
@@ -51,10 +53,18 @@ class CanvasOwnershipApiBase(unittest.TestCase):
         self.addCleanup(p2.stop)
 
     def login(self, user_id: str, role: str = "user"):
-        self.app.dependency_overrides[get_current_user_or_default] = lambda: {
+        identity = {
             "user_id": user_id,
+            "username": user_id,
             "role": role,
+            "neuser_id": user_id,
         }
+        # P1-5 收口后 collaboration router 级是严格登录门——与 or_default 同步覆盖，
+        # 否则路由级先 401、端点自身的身份解析根本轮不到。
+        from neurova.api.auth import get_current_user as _strictGate
+
+        self.app.dependency_overrides[_strictGate] = lambda: dict(identity)
+        self.app.dependency_overrides[get_current_user_or_default] = lambda: dict(identity)
         self.addCleanup(self.app.dependency_overrides.clear)
 
     def create_as(self, user_id, payload=None, role="user"):
@@ -72,10 +82,11 @@ class TestOwnership(CanvasOwnershipApiBase):
         self.assertEqual(data["user_id"], "alice")
         self.assertEqual(data.get("origin"), "manual")
 
-    def test_anonymous_defaults_to_default_user(self):
+    def test_anonymous_is_rejected_by_router_gate(self):
+        """P1-5 收口后：匿名请求被 collaboration router 级登录门拒绝（401），
+        不再"默认 default 用户"放行。"""
         resp = self.client.post("/api/v1/collaboration/canvas", json=_snapshot())
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()["data"]["user_id"], "default")
+        self.assertEqual(resp.status_code, 401)
 
     def test_non_owner_get_returns_404(self):
         cid = self.create_as("alice")
@@ -161,10 +172,13 @@ class TestOwnership(CanvasOwnershipApiBase):
             self.assertEqual(resp.status_code, 200)
 
     def test_create_project_allowed_for_default_and_admin(self):
+        # P1-5 收口后无匿名面：桌面首启的 default 身份改走登录态（router 级登录门）。
+        self.login("default")
         resp = self.client.post(
             "/api/v1/collaboration/canvas", json={**_snapshot(), "project_id": "p1"}
         )
-        self.assertEqual(resp.status_code, 200)  # 匿名 default（桌面首启）
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["data"]["user_id"], "default")
         self.login("root", "admin")
         resp = self.client.post(
             "/api/v1/collaboration/canvas", json={**_snapshot("admin"), "project_id": "p2"}

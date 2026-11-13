@@ -436,8 +436,8 @@ async def list_sessions(
 
 
 @router.get("/statistics")
-async def get_statistics():
-    """获取同步统计信息"""
+async def get_statistics(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """获取同步统计信息（与 /connections 同口径：登录用户可读）"""
     manager = get_session_sync_manager()
     return manager.get_statistics()
 

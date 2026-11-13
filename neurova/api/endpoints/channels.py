@@ -518,14 +518,17 @@ async def _handle_wecom_webhook(adapter, body: bytes, query_params, request) -> 
 
 
 @router.get("/health/all", summary="渠道健康检查")
-async def health_check_all():
-    """检查所有渠道的健康状态"""
+async def health_check_all(current_user: Any = Depends(get_current_user)):
+    """检查所有渠道的健康状态（登录用户可读，与渠道状态面同口径）"""
     manager = get_channel_manager()
     return await manager.health_check()
 
 
 @router.get("/ingress/bypass-stats", summary="入站旁路直发读数（批 D）")
-async def ingress_bypass_stats(limit: int = Query(50, ge=1, le=500)):
+async def ingress_bypass_stats(
+    limit: int = Query(50, ge=1, le=500),
+    current_user: Any = Depends(get_current_user),
+):
     """队列不可用时旁路直发的台账读数：总数＋最近记录。
 
     批 D（T4 已裁有界直发）：旁路计数是常驻读数——队列可用性有了事实判据，

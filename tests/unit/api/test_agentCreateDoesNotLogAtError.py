@@ -47,6 +47,12 @@ def agentsApi():
     reset_agent_manager()
     app = FastAPI()
     app.include_router(NF.router, prefix=PREFIX)
+    # P1-4 收口后 POST /neurflow/agents 仅管理员——测试身份走依赖覆盖。
+    from neurova.api.auth import get_current_user as _gcu
+
+    app.dependency_overrides[_gcu] = lambda: {
+        "user_id": "tuser", "username": "tuser", "role": "admin", "neuser_id": "tuser",
+    }
 
     collector = _Collector()
     NF.logger.addHandler(collector)

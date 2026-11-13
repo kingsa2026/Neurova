@@ -25,10 +25,16 @@ router = APIRouter()
 
 # 模块级导入（避免重复导入）
 from neurova.api.endpoints import get_app_state
+from neurova.api.auth import get_current_user
 
 
 def require_admin_dep():
-    """路由内延迟获取（模块导入顺序安全）"""
+    """路由内延迟获取（模块导入顺序安全）
+
+    注意：须以 `Depends(require_admin_dep())` 形态使用——调用后返回的才是
+    真正依赖函数；写成 `Depends(require_admin_dep)` 会把返回的函数对象当
+    参数值注入、角色检查永不执行（P2 批次实测修正）。
+    """
     from neurova.api.deps import require_admin
 
     return require_admin()
@@ -131,7 +137,11 @@ def _get_asr_manager():
 
 
 @router.post("/synthesize")
-async def synthesize_speech(request: Request, body: SynthesizeRequest):
+async def synthesize_speech(
+    request: Request,
+    body: SynthesizeRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """
     TTS 语音合成
 
@@ -268,7 +278,11 @@ async def synthesize_speech(request: Request, body: SynthesizeRequest):
 
 
 @router.post("/synthesize-stream")
-async def synthesize_speech_stream(request: Request, body: SynthesizeRequest):
+async def synthesize_speech_stream(
+    request: Request,
+    body: SynthesizeRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """
     TTS 流式语音合成
 
@@ -358,6 +372,7 @@ async def transcribe_audio(
     request: Request,
     audio_file: UploadFile = File(..., description="音频文件"),
     language: str = Form(default="zh", description="语言"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     语音识别（ASR）
@@ -431,7 +446,7 @@ async def transcribe_audio(
 
 
 @router.get("/status")
-async def audio_status():
+async def audio_status(current_user: Dict[str, Any] = Depends(get_current_user)):
     """
     音频系统状态
 
@@ -470,7 +485,7 @@ async def audio_status():
 
 
 @router.get("/engines")
-async def list_engines():
+async def list_engines(current_user: Dict[str, Any] = Depends(get_current_user)):
     """列出所有可用的音频引擎"""
     # 优先使用 VoiceEngine
     tts_voice_engine = _get_voice_engine("tts")
@@ -537,7 +552,7 @@ async def list_engines():
 
 @router.get("/asr/local-whisper/status")
 async def local_whisper_status(
-    current_user: Dict[str, Any] = Depends(require_admin_dep),
+    current_user: Dict[str, Any] = Depends(require_admin_dep()),
 ):
     """本地 Whisper 同意门状态（管理员）"""
     asr_manager = _get_asr_manager()
@@ -548,7 +563,7 @@ async def local_whisper_status(
 
 @router.post("/asr/local-whisper/consent")
 async def local_whisper_consent(
-    current_user: Dict[str, Any] = Depends(require_admin_dep),
+    current_user: Dict[str, Any] = Depends(require_admin_dep()),
 ):
     """管理员同意本地 Whisper 下载安装并即时启用（阻塞至重跑链完成，上限 10 分钟）"""
     asr_manager = _get_asr_manager()

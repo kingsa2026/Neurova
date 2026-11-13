@@ -19,6 +19,12 @@ def _make_app():
 
     app = FastAPI()
     app.include_router(audio_mod.router, prefix="/audio")
+    # P2-1 收口后 audio 面需登录——测试身份走依赖覆盖。
+    from neurova.api.auth import get_current_user as _gcu
+
+    app.dependency_overrides[_gcu] = lambda: {
+        "user_id": "tuser", "username": "tuser", "role": "admin", "neuser_id": "tuser",
+    }
     return audio_mod, TestClient(app)
 
 

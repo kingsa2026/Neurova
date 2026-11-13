@@ -32,6 +32,12 @@ def _make_client(engine_media_type: str):
 
     app = FastAPI()
     app.include_router(audio_mod.router, prefix="/audio")
+    # P2-1 收口后 audio 面需登录——测试身份走依赖覆盖。
+    from neurova.api.auth import get_current_user as _gcu
+
+    app.dependency_overrides[_gcu] = lambda: {
+        "user_id": "tuser", "username": "tuser", "role": "admin", "neuser_id": "tuser",
+    }
     client = TestClient(app)
 
     return client, audio_mod, monkey_patch
@@ -90,6 +96,12 @@ def test_voice_engine_wrapper_does_not_500():
 
     app = FastAPI()
     app.include_router(audio_mod.router, prefix="/audio")
+    # P2-1 收口后 audio 面需登录——测试身份走依赖覆盖。
+    from neurova.api.auth import get_current_user as _gcu
+
+    app.dependency_overrides[_gcu] = lambda: {
+        "user_id": "tuser", "username": "tuser", "role": "admin", "neuser_id": "tuser",
+    }
     client = TestClient(app)
     resp = client.post("/audio/synthesize-stream", json={"text": "你好"})
     assert resp.status_code == 200, resp.text

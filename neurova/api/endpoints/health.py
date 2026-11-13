@@ -15,8 +15,10 @@ from __future__ import annotations
 from neurova.core.logger import get_logger
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+
+from neurova.api.auth import get_current_user
 
 logger = get_logger(__name__)
 
@@ -130,8 +132,8 @@ async def get_check_result(name: str):
 
 
 @router.post("/checks/{name}/run", response_model=CheckResultResponse)
-async def run_check(name: str):
-    """手动触发指定健康检查"""
+async def run_check(name: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """手动触发指定健康检查（登录用户可触发，P3-7）"""
     checker = _get_health_checker()
     if not checker:
         raise HTTPException(status_code=503, detail="Health checker not available")

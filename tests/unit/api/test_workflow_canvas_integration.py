@@ -51,6 +51,12 @@ class TestOldComfyuiImportRetired:
 
         app = FastAPI()
         app.include_router(router, prefix="/v1/neurflow")
+        # P1-4 收口后 neurflow router 级需登录——测试身份走依赖覆盖。
+        from neurova.api.auth import get_current_user as _gcu
+
+        app.dependency_overrides[_gcu] = lambda: {
+            "user_id": "tuser", "username": "tuser", "role": "admin", "neuser_id": "tuser",
+        }
         return TestClient(app)
 
     def test_definition_import_endpoint_retired(self, client):

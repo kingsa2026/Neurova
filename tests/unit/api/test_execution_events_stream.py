@@ -72,6 +72,13 @@ class ExecutionStreamTestBase(unittest.IsolatedAsyncioTestCase):
 
         self.app = FastAPI()
         self.app.include_router(neurflow_api.router, prefix="/api/v1/neurflow")
+        # P1-4 收口后 neurflow router 级需登录——测试身份走依赖覆盖
+        # （归属隔离仍由各用例自己的 or_default 覆盖控制）。
+        from neurova.api.auth import get_current_user as _gcu
+
+        self.app.dependency_overrides[_gcu] = lambda: {
+            "user_id": "default", "username": "default", "role": "admin", "neuser_id": "default",
+        }
         patcher = patch.object(neurflow_api, "_get_storage", return_value=self.storage)
         patcher.start()
         self.addCleanup(patcher.stop)
