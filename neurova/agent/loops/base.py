@@ -368,11 +368,19 @@ class BaseAgentLoop(ABC):
         """读取 Agent 运行限制设置（token_budget/max_loop_rounds）。
 
         失败时回退内置默认（100000/20），不阻断 Loop 构造。
+        任务级档位（R3/R6，turn ContextVar）在此叠加——同一请求任务内
+        门控/分段提醒/溢出阈值读到同一份档位。
         """
         try:
             from neurova.security.agent_limits_settings import get_effective_limits
 
-            return get_effective_limits()
+            limits = get_effective_limits()
+            from neurova.agent.turn_profile import applyTurnProfileOverlay, getTurnProfile
+
+            turn_profile = getTurnProfile()
+            if turn_profile:
+                limits = applyTurnProfileOverlay(limits, turn_profile)
+            return limits
         except Exception as e:  # noqa: BLE001
             logger.warning("读取 agent limits 失败，使用默认: %s", e)
             return {

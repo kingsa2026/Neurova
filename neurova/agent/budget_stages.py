@@ -55,7 +55,18 @@ def stagesEnabled() -> bool:
 
 
 def activeProfile() -> str:
-    """当前执行档位——单源取 agent_limits_settings（不在此重读 env）。"""
+    """当前执行档位——任务级（turn ContextVar，R3/R6）优先，回落部署级。
+
+    两条都故障时回 standard（fail-open）。
+    """
+    try:
+        from neurova.agent.turn_profile import getTurnProfile
+
+        turn_profile = getTurnProfile()
+        if turn_profile:
+            return turn_profile
+    except Exception:  # noqa: BLE001
+        pass
     try:
         from neurova.security.agent_limits_settings import active_exec_profile
 

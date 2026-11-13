@@ -2480,6 +2480,50 @@ class ChatPipeline:
         except Exception:  # noqa: BLE001 - 自动定档失败回落现状，不阻断对话
             logger.debug("自动定档解析失败（忽略）", exc_info=True)
 
+    async def _resolve_task_profile(self, ctx: ChatContext):
+        """R3/R6 任务级执行档位解析（§10.2，2026-11-13）。
+
+        优先级：调用方显式 metadata.task_profile > agent 存储档位（R6，
+        governance 面派发）> 任务分类器（R3，NEUROVA_TASK_PROFILE=1 灰度开）
+        > 部署 env 档位（不设 ContextVar 即回落）。
+
+        结果写 turn 级 ContextVar（`agent/turn_profile`），同轮的门控装配
+        （`_buildGateRunner`）、分段提醒（budget_stages）与溢出阈值
+        （tool_offload）读到同一份档位；metadata 落 task_profile/source/
+        confidence 供读数。fail-open：任何异常回落部署默认，不阻断对话。
+        """
+        try:
+            from neurova.agent.turn_profile import setTurnProfile
+
+            meta = ctx.metadata if isinstance(ctx.metadata, dict) else {}
+            explicit = str(meta.get("task_profile") or "").strip().lower()
+            if explicit:  # 调用方显式指定，绝不覆盖
+                setTurnProfile(explicit)
+                return
+            agent_id = str(getattr(self._agent, "agent_id", "") or "")
+            if agent_id:
+                from neurova.security.agent_profile_settings import get_agent_profile
+
+                stored = get_agent_profile(agent_id)
+                if stored:  # R6：管理员为该 agent 派发的档位
+                    setTurnProfile(stored)
+                    return
+            from neurova.agent.turn_profile import (
+                classifyTaskProfile,
+                taskProfileEnabled,
+            )
+
+            if not taskProfileEnabled():  # R3 分类器灰度默认关
+                return
+            profile, source, confidence = await classifyTaskProfile(ctx.user_input or "")
+            setTurnProfile(profile)
+            ctx.metadata = dict(ctx.metadata or {})
+            ctx.metadata["task_profile"] = profile
+            ctx.metadata["task_profile_source"] = source
+            ctx.metadata["task_profile_confidence"] = round(float(confidence), 3)
+        except Exception:  # noqa: BLE001 - 档位解析失败回落部署默认
+            logger.debug("任务级档位解析失败（忽略）", exc_info=True)
+
     def _apply_thinking_effort(self, ctx: ChatContext):
         """按 metadata.thinking_effort（light/standard/deep）注入回答深度指令。
 
@@ -2544,6 +2588,7 @@ class ChatPipeline:
                 "如属误拦，可在系统设置 security 分区将 cognitive_security_mode 调回 observe。"
             )
             return
+        await self._resolve_task_profile(ctx)
         self._apply_thinking_effort(ctx)
         tools_for_llm = await self.context_orchestrator.build_tools_for_llm()
 

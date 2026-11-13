@@ -159,6 +159,20 @@ def active_exec_profile() -> str:
     return "standard"
 
 
+def apply_profile_overlay(settings: Dict[str, Any], name: str) -> Dict[str, Any]:
+    """把指定档位的键值覆盖到 settings 上（standard 档为空表 = 原样返回）。
+
+    供 `get_effective_limits`（部署级）与 `agent/turn_profile`（任务级，
+    R3/R6）共用——覆盖语义只有一份，不各写一遍（教义第 6 条）。
+    """
+    overlay = EXEC_PROFILES.get(str(name or "").strip().lower())
+    if not overlay:
+        return settings
+    merged = dict(settings)
+    merged.update(overlay)
+    return merged
+
+
 def get_limit_domains() -> Dict[str, Dict[str, Any]]:
     """每键的控件形态与合法域——**面板该长什么样**的唯一出处。
 
@@ -263,8 +277,7 @@ def get_effective_limits() -> Dict[str, Any]:
     """
     settings = load_agent_limits()
     # 执行档位覆盖（standard 档为空表 = 内置默认逐字不变）：
-    for _pkey, _pvalue in EXEC_PROFILES[active_exec_profile()].items():
-        settings[_pkey] = _pvalue
+    settings = apply_profile_overlay(settings, active_exec_profile())
 
     env_budget = os.environ.get("NEUROVA_AGENT_TOKEN_BUDGET")
     if env_budget and env_budget.isdigit():

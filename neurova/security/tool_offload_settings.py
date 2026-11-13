@@ -42,6 +42,12 @@ _PROFILE_MULTIPLIERS: Dict[str, float] = {
 
 def _profileMultiplier() -> float:
     try:
+        # 任务级档位（R3/R6）优先，回落部署级档位
+        from neurova.agent.turn_profile import getTurnProfile
+
+        turn_profile = getTurnProfile()
+        if turn_profile:
+            return _PROFILE_MULTIPLIERS.get(turn_profile, 1.0)
         from neurova.security.agent_limits_settings import active_exec_profile
 
         return _PROFILE_MULTIPLIERS.get(active_exec_profile(), 1.0)
