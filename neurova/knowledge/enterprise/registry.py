@@ -46,8 +46,17 @@ def buildAdapter(descriptor: Dict[str, Any], sourceId: str,
         return _requireVariant(descriptor, sourceId, tenantId, "sql",
                                "SqlDirectAdapter", "connectors_sql")
     if sourceType == "erp_api":
-        return _requireVariant(descriptor, sourceId, tenantId, "erp_api",
-                               "ErpRestAdapter", "connectors_erp")
+        # W11 vendor 数据化（specs/2026-11-12 §12）：kind→适配器工厂表是数据
+        import importlib
+
+        module = importlib.import_module("neurova.knowledge.enterprise.connectors_erp")
+        vendor = str(descriptor.get("vendor") or "")
+        adapters = getattr(module, "ERP_VENDOR_ADAPTERS", {})
+        adapterClass = adapters.get(vendor)
+        if adapterClass is None:
+            return _requireVariant(descriptor, sourceId, tenantId, "erp_api",
+                                   "ErpRestAdapter", "connectors_erp")
+        return adapterClass(descriptor, sourceId, tenantId)
     if sourceType == "chat":
         return _requireVariant(descriptor, sourceId, tenantId, "chat",
                                "ChatChannelAdapter", "connectors_chat")

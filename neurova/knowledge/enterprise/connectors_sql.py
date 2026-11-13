@@ -160,6 +160,7 @@ class SqlDirectAdapter:
         self._database = str(self._descriptor.get("database") or "")
 
         self._cursorColumn = str(self._descriptor.get("cursorColumn") or "").strip()
+        self._watermarkType = str(descriptor.get("watermarkType") or "integer").strip().lower()
         if not self._cursorColumn or not _IDENTIFIER.match(self._cursorColumn):
             raise MappingError("cursorColumn 标识符 %r 缺失或不合法（水位增量列，"
                                "只允许字母数字下划线）" % self._descriptor.get("cursorColumn"))
@@ -234,6 +235,14 @@ class SqlDirectAdapter:
                      "set" if nextCursor is not None else "none")
         return ChangeBatch(rows=rows, nextCursor=nextCursor, hasMore=hasMore)
 
+    def _watermarkCondition(self) -> str:
+        """W11 边界等值（specs/2026-11-12 §12）：timestamp 类型用 >=（防漏——
+        同水位多行不跳过），integer 类型保持 >（唯一值不漏不重）。
+        未声明 watermarkType 的存量行为零漂移（回退 integer → >）。"""
+        if self._watermarkType == "timestamp":
+            return ">="
+        return ">"
+
     def _buildFetchSql(self, watermark: Optional[Any],
                        boundLimit: int) -> Tuple[str, Tuple[Any, ...]]:
         """组装取数 SQL：值一律参数化，名字全部来自已过白名单的标识符。"""
@@ -241,12 +250,16 @@ class SqlDirectAdapter:
             fills = {"cols": ", ".join(self._columns) if self._columns else "*",
                      "table": self._table, "col": self._cursorColumn}
             if watermark is not None:
-                return _FETCH_TEMPLATES[self._driver].format(**fills), (watermark, boundLimit)
+                template = _FETCH_TEMPLATES[self._driver]
+                if self._watermarkCondition() == ">=":
+                    template = template.replace(" > ", " >= ")
+                return template.format(**fills), (watermark, boundLimit)
             return _FETCH_TEMPLATES_FIRST[self._driver].format(**fills), (boundLimit,)
         # query 路由：槽位参数化注入（绑定序固定 {wmCond} → {lim}）
         binds: List[Any] = []
         if watermark is not None:
-            condition = "%s > %s" % (self._cursorColumn, self._nextMarker(binds))
+            condition = "%s %s %s" % (self._cursorColumn, self._watermarkCondition(),
+                                      self._nextMarker(binds))
             binds.append(watermark)
         else:
             condition = "1=1"  # 首轮全量快照
