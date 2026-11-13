@@ -1117,6 +1117,26 @@ async def list_knowledge_revisions(
     entry_or_404(repo, knowledge_id, current_user)
     return repo.list_revisions(knowledge_id)
 
+@router.post("/{knowledge_id}/revisions/{revision_index}/rollback")
+async def rollback_knowledge_revision(
+    request: Request,
+    knowledge_id: str = Path(..., description="知识ID"),
+    revision_index: int = Path(..., ge=0, description="revision 序号（list_revisions 序，0=最新）"),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """回滚条目到指定 revision（属主/管理员；entry_for_update 同款判权）。
+
+    撤销该次变更（账本 old 值写回 changed_fields），回滚前现值也快照进
+    账本（reason=rollback）——回滚可再回滚。"""
+    repo = get_repository()
+    agent_id, _item = entry_for_update(repo, knowledge_id, current_user, {})
+    rolled = repo.rollback_revision(knowledge_id, int(revision_index))
+    if rolled is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Revision '%s@%s' not found" % (knowledge_id, revision_index))
+    return item_response(rolled)
+
 
 @router.get("/{knowledge_id}/chunks")
 async def list_knowledge_chunks(

@@ -180,6 +180,12 @@ export function listPublicSubmissions() {
   return api.get<ApiResponse<KnowledgeNode[]>>(`${BASE}/public-submissions`)
 }
 
+/** 回滚条目到指定 revision（list_revisions 序，0=最新；回滚本身也进账本） */
+export function rollbackKnowledgeRevision(knowledgeId: string, revisionIndex: number) {
+  return api.post<ApiResponse<KnowledgeNode>>(
+    `${BASE}/${knowledgeId}/revisions/${revisionIndex}/rollback`)
+}
+
 /** Admin: approve or reject a public submission. */
 export function reviewKnowledgePublic(id: string, approve: boolean, note = '') {
   return api.post<ApiResponse<KnowledgeNode>>(`${BASE}/${id}/review-public`, { approve, note })

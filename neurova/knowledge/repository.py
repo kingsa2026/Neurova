@@ -960,8 +960,9 @@ class KnowledgeRepository:
                             "old": {
                                 "title": existing.get("title"),
                                 "content": existing.get("content"),
+                                "chunks": list(existing.get("chunks") or []),
                             },
-                            "changed_fields": ["title", "content"],
+                            "changed_fields": ["title", "content", "chunks"],
                             "updated_at": datetime.datetime.now(
                                 datetime.timezone.utc).isoformat(),
                             "reason": "source_update_reingest",
@@ -2093,6 +2094,48 @@ class KnowledgeRepository:
             if found is None:
                 return []
             return list(reversed((found[1].get("revisions") or [])))
+
+    def rollback_revision(self, knowledge_id: str, revision_index: int) -> Optional[Dict[str, Any]]:
+        """回滚到 revision 账本第 revision_index 条（list_revisions 序，0=最新）。
+
+        撤销该次变更：账本记录的 old 值写回 changed_fields；回滚本身也快照
+        进账本（reason='rollback'，记录回滚前现值）——回滚可再回滚。
+        content 回滚时同步刷新 content_fingerprint（内容去重口径不漂移）。
+        条目或序号非法返回 None。
+        """
+        with self._lock:
+            for _agent_id, items in self._items.items():
+                for item in items:
+                    if item.get("knowledge_id") != knowledge_id:
+                        continue
+                    revs = item.get("revisions") or []
+                    ledgerIndex = len(revs) - 1 - int(revision_index)
+                    if ledgerIndex < 0 or ledgerIndex >= len(revs):
+                        return None
+                    rev = revs[ledgerIndex]
+                    old = rev.get("old") or {}
+                    changed = [k for k in (rev.get("changed_fields") or []) if k in old]
+                    if not changed:
+                        return None
+                    revs.append({
+                        "old": {k: item[k] for k in changed if k in item},
+                        "changed_fields": changed,
+                        "updated_at": datetime.datetime.now(
+                            datetime.timezone.utc).isoformat(),
+                        "reason": "rollback",
+                        "rolled_back_revision": ledgerIndex,
+                    })
+                    for k in changed:
+                        item[k] = old[k]
+                    if "content" in changed:
+                        item["content_fingerprint"] = _contentFingerprint(
+                            str(item.get("tenant_id") or "default"),
+                            str(item.get("content") or ""))
+                    item["updated_at"] = datetime.datetime.now(
+                        datetime.timezone.utc).timestamp()
+                    self._save()
+                    return dict(item)
+        return None
 
     # ── P1#8 块级编辑──
 
