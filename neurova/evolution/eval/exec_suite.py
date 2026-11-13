@@ -280,7 +280,12 @@ class TestSynthesizer:
 
     async def generate(self, *, skill_text: str, reference_tasks: Optional[List[str]] = None,
                        artifact_type: str = "skill") -> ExecutableTestSuite:
-        """从技能契约生成套件；任何失败都回**不可用空套件**（不臆造）。"""
+        """从技能契约生成套件；任何失败都回**不可用空套件**（不臆造）。
+
+        真模型实证（2026-11-13）：链路可通（真实 provider 合成出可用套件），
+        但存在输出不可解析的运行间波动——故对「调用成功但解析失败」多做
+        一次重试（有界 2 次），仍失败即诚实回退。
+        """
         size = max(1, int(self.config.exec_suite_size))
         refs = [str(t)[:200] for t in (reference_tasks or []) if str(t).strip()][:6]
         user = (
@@ -289,20 +294,24 @@ class TestSynthesizer:
             + ("\n".join(f"- {t}" for t in refs) if refs else "（无）")
             + f"\n\n请生成 {size} 条可执行评测用例。"
         )
-        try:
-            result = await self._call_llm(
-                [{"role": "system", "content": _GEN_SYSTEM},
-                 {"role": "user", "content": user}],
-                self.config.judge_model,
-            )
-        except Exception as e:  # noqa: BLE001 - 合成器故障不阻断进化，诚实回退
-            logger.debug("可执行测试合成失败: %s", e)
-            return ExecutableTestSuite(skill_id="", cases=tuple(), source="error")
-        if not result.get("success"):
-            return ExecutableTestSuite(skill_id="", cases=tuple(), source="llm_failed")
-        raw = _extractJsonArray(result.get("response") or "")
-        return self._build(skill_id="", raw_cases=raw, source="synthetic",
-                           cap=size)
+        messages = [{"role": "system", "content": _GEN_SYSTEM},
+                    {"role": "user", "content": user}]
+        last_source = "llm_failed"
+        for _attempt in range(2):
+            try:
+                result = await self._call_llm(messages, self.config.judge_model)
+            except Exception as e:  # noqa: BLE001 - 合成器故障不阻断进化，诚实回退
+                logger.debug("可执行测试合成失败: %s", e)
+                return ExecutableTestSuite(skill_id="", cases=tuple(), source="error")
+            if not result.get("success"):
+                return ExecutableTestSuite(skill_id="", cases=tuple(),
+                                           source=last_source)
+            raw = _extractJsonArray(str(result.get("response") or ""))
+            if raw:
+                return self._build(skill_id="", raw_cases=raw, source="synthetic",
+                                   cap=size)
+            last_source = "unparseable"  # 调用成功但输出不可解析 → 重试一次
+        return ExecutableTestSuite(skill_id="", cases=tuple(), source=last_source)
 
     @staticmethod
     def _build(*, skill_id: str, raw_cases: Any, source: str,
