@@ -4187,3 +4187,5 @@ tests/unit/knowledge/ontology/test_quantityNormalization.py
 tests/unit/knowledge/ontology/test_extractionNumericQualifier.py
 tests/unit/knowledge/ontology/test_artifactStore.py
 tests/unit/knowledge/ontology/test_byteRoundTrip.py
+# P2-29：进化统一测试按现实现重写并纳入受保护子集（原整文件 skip 已解除）
+tests/integration/test_evolution_unified.py
