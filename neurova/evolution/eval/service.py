@@ -383,7 +383,8 @@ def planAbArmTurns(dataset: EvalDataset) -> dict:
 
 
 def planRealArmTurns(dataset: EvalDataset, config: EvolutionConfig,
-                     *, iterations: Optional[int] = None) -> dict:
+                     *, iterations: Optional[int] = None,
+                     include_exec_suite: bool = False) -> dict:
     """真臂一次进化运行的**回合上界**，逐项点名——镜像 `runner.run` 的调度。
 
     为什么必须是上界而不是精确值：装配体里还有约束闸与泄漏闸，它们会跳过部分候选，
@@ -409,7 +410,7 @@ def planRealArmTurns(dataset: EvalDataset, config: EvolutionConfig,
     rounds = max(0, int(config.iterations if iterations is None else iterations))
     variants = max(1, int(config.variants_per_round))
     harvestSet = dataset.val or tune
-    return _planOf({
+    breakdown = {
         "probe": 1 if holdout else 0,
         "baselineHoldout": len(holdout),
         "baselineTune": len(tune),
@@ -420,7 +421,12 @@ def planRealArmTurns(dataset: EvalDataset, config: EvolutionConfig,
         "heldoutEvidence": 2 * len(dataset.heldout),
         "noiseCalibration": (int(config.noise_repeats) * len(holdout) + 1
                              if config.noise_repeats > 1 else 0),
-    })
+    }
+    # HN2/HC2：可执行断言面按「基线一遍＋胜者一遍」计上界；只在调用方声明
+    # 本轮会生成套件时计入（默认 False＝既有调用方的逐字旧行为）。
+    if include_exec_suite and config.exec_suite_enabled and int(config.exec_suite_size) > 0:
+        breakdown["execSuite"] = 2 * int(config.exec_suite_size)
+    return _planOf(breakdown)
 
 
 class RealArmBudgetVerdict(NamedTuple):
@@ -508,6 +514,8 @@ class EvolutionProposal:
     # HN1/HC1 成本软门读数（eval/cost_ledger.costSoftGateVerdict 的出街形态）：
     # 候选臂执行成本相对基线臂涨幅超阈值 ⇒ manual_review。只加复核，不自动拒绝。
     cost_gate: dict = field(default_factory=dict)
+    # HN2/HC2 可执行断言面读数（紧凑出街；逐案明细在 run 审计文件里）。
+    exec_suite: dict = field(default_factory=dict)
     created_at: str = ""
     decided_at: str = ""
 
@@ -782,7 +790,9 @@ class SkillEvolutionService:
         realArmFallback = ""
         if executorKind(executor) == EXECUTOR_KIND_REAL:
             verdict = checkRealArmBudget(
-                planRealArmTurns(dataset, cfg, iterations=iterations), realArmMaxTurns())
+                planRealArmTurns(dataset, cfg, iterations=iterations,
+                                 include_exec_suite=(artifact_type == "skill")),
+                realArmMaxTurns())
             if not verdict.allowed:
                 executor = SimulatedAgent(model=cfg.judge_model)
                 realArmFallback = REAL_ARM_FALLBACK_BUDGET_EXCEEDED
@@ -833,6 +843,24 @@ class SkillEvolutionService:
 
         _tokens_before = (get_usage_accounting().snapshot()["total"]["total_tokens"]
                           if executorKind(executor) == EXECUTOR_KIND_REAL else None)
+
+        # HN2/HC2：可执行测试套件——只对 skill 类工件合成；生成失败诚实回退
+        # judge（套件不可用），运行不中断。生成器只读基线契约与参考任务面，
+        # 不读候选正文（反 gaming 边界见 exec_suite.py 模块注）。
+        execSuite = None
+        if cfg.exec_suite_enabled and artifact_type == "skill":
+            try:
+                from neurova.evolution.eval.exec_suite import TestSynthesizer
+
+                execSuite = await TestSynthesizer(cfg).generate(
+                    skill_text=skill_text,
+                    reference_tasks=[ex.task_input for ex in evaluation_split(dataset)[:6]],
+                    artifact_type=artifact_type,
+                )
+            except Exception as e:  # noqa: BLE001 - 合成器故障不阻断进化
+                logger.debug("可执行测试套件生成失败（回退 judge）: %s", e)
+                execSuite = None
+
         result = await runner.run(
             baseline_text=skill_text, artifact_type=artifact_type,
             dataset=dataset, iterations=iterations, noise_band=noise_band,
@@ -840,6 +868,7 @@ class SkillEvolutionService:
             extra_failures=extra_failures,
             experiment_fingerprint=experimentFp,
             domain_harnesses=domain_harnesses,
+            exec_suite=execSuite,
         )
         if _tokens_before is not None:
             from neurova.core.usage_accounting import tokensDelta
@@ -852,7 +881,8 @@ class SkillEvolutionService:
         # 分数没有来历（同一份推导见 `executorKind`）。计划在此**重算**而不是由调用方
         # 传入：传进来就等于允许调用方替运行编一个预算数。
         kind = executorKind(executor)
-        plan = (planRealArmTurns(dataset, cfg, iterations=iterations)
+        plan = (planRealArmTurns(dataset, cfg, iterations=iterations,
+                                 include_exec_suite=(artifact_type == "skill"))
                 if kind == EXECUTOR_KIND_REAL else None)
         result.experiment_fingerprint = experimentFp
         result.executorKind = kind
@@ -915,6 +945,13 @@ class SkillEvolutionService:
                 requires_manual_review=bool(result.judge_fallback)
                 or costGate.get("state") == "manual_review",
                 cost_gate=costGate,
+                exec_suite={
+                    "state": result.exec_suite.get("state"),
+                    "suite_hash": result.exec_suite.get("suite_hash", ""),
+                    "cases": result.exec_suite.get("cases", 0),
+                    "baseline_pass_rate": result.exec_suite.get("baseline_pass_rate"),
+                    "candidate_pass_rate": result.exec_suite.get("candidate_pass_rate"),
+                },
                 created_at=datetime.now(UTC).isoformat(),
             )
             self._append_proposal(proposal)
