@@ -27,11 +27,35 @@ def _sqlDriverNames() -> tuple:
         return ("postgresql", "mysql", "mssql", "oracle", "sqlite")
 
 
+def _erpVendorNames() -> tuple:
+    """从 connectors_erp.ERP_VENDOR_ADAPTERS 派生 vendor 闭集（dataification 单源）。"""
+    try:
+        from .connectors_erp import ERP_VENDOR_ADAPTERS
+        return tuple(ERP_VENDOR_ADAPTERS.keys())
+    except Exception:
+        return ("kingdee", "yongyou")
+
+
+def _lakehouseKindNames() -> tuple:
+    """从 connectors_lakehouse._LAKEHOUSE_KINDS 派生湖仓 kind 闭集（dataification 单源）。"""
+    try:
+        from .connectors_lakehouse import _LAKEHOUSE_KINDS
+        return tuple(_LAKEHOUSE_KINDS)
+    except Exception:
+        return ("unity_catalog", "snowflake", "sap_odata")
+
+
 VARIANT_CLOSED_SETS: Dict[str, tuple] = {
     "file": ("format", ("csv", "tsv", "json", "jsonl")),
     # W11 dataification：driver 闭集从 connectors_sql._DRIVER_MODULES 派生（单源）
     "sql": ("driver", tuple(_sqlDriverNames())),
-    "erp_api": ("vendor", ("kingdee", "yongyou")),
+    # W11 dataification：vendor 闭集从 connectors_erp.ERP_VENDOR_ADAPTERS 派生（单源）
+    "erp_api": ("vendor", tuple(_erpVendorNames())),
+    # W10 dataification：湖仓 kind 闭集从 connectors_lakehouse._LAKEHOUSE_KINDS 派生
+    "unity_catalog": ("base_url", tuple(_lakehouseKindNames())),
+    "snowflake": ("base_url", tuple(_lakehouseKindNames())),
+    "sap_odata": ("base_url", tuple(_lakehouseKindNames())),
+    "http_pull": ("url", ("http_pull",)),
     "chat": ("vendor", ("wecom", "wechat")),
 }
 

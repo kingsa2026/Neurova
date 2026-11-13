@@ -88,3 +88,33 @@ class TestErpVendorDataify:
         with pytest.raises(RuntimeError, match="环"):
             adapter._checkCursorLoop("page_5")
             adapter._checkCursorLoop("page_5")
+
+class TestClosedSetDataification:
+    def test_sqlDriversFromSingleSource(self):
+        """SQL driver 闭集从 _DRIVER_MODULES 派生（非硬编码）。"""
+        from neurova.knowledge.enterprise.connectors_sql import _DRIVER_MODULES
+        from neurova.knowledge.enterprise.schema_mapping import VARIANT_CLOSED_SETS
+
+        closed = VARIANT_CLOSED_SETS["sql"][1]
+        assert set(closed) == set(_DRIVER_MODULES.keys()),             "SQL driver 闭集应从 _DRIVER_MODULES 单源派生"
+
+    def test_erpVendorsFromSingleSource(self):
+        """ERP vendor 闭集从 ERP_VENDOR_ADAPTERS 派生（非硬编码）。"""
+        from neurova.knowledge.enterprise.connectors_erp import ERP_VENDOR_ADAPTERS
+        from neurova.knowledge.enterprise.schema_mapping import VARIANT_CLOSED_SETS
+
+        closed = VARIANT_CLOSED_SETS["erp_api"][1]
+        assert set(closed) == set(ERP_VENDOR_ADAPTERS.keys()),             "ERP vendor 闭集应从 ERP_VENDOR_ADAPTERS 单源派生"
+
+    def test_lakehouseKindsFromSingleSource(self):
+        """湖仓 kind 闭集从 connectors_lakehouse 派生。"""
+        from neurova.knowledge.enterprise.connectors_lakehouse import _LAKEHOUSE_KINDS
+        from neurova.knowledge.enterprise.schema_mapping import VARIANT_CLOSED_SETS
+
+        for kind in _LAKEHOUSE_KINDS:
+            assert kind in VARIANT_CLOSED_SETS, f"湖仓 kind {kind} 应有闭集条目"
+
+    def test_httpPullHasClosedSet(self):
+        from neurova.knowledge.enterprise.schema_mapping import VARIANT_CLOSED_SETS
+
+        assert "http_pull" in VARIANT_CLOSED_SETS
