@@ -10,8 +10,9 @@
 模型生成的前瞻线索属批 C，落独立模块，与本文件共享同一份存储与同一套作用域门——
 不另起第二份口径（教义第 6 条）。
 
-命名说明：本仓不叫 trigger。`explainability.py` 的死 trigger-chain DAG 与 `schema.py`
-的死 `trigger_chains` 表都还在册，复用该词即造第二份「触发器」语义。
+命名说明：本仓不叫 trigger。旧 `explainability.py` 的死 trigger-chain DAG 已于
+2026-11-14 退役，其能力并入 `modules/explainability_module.py` 的 `TriggerChain`——
+那是仓内唯一的「触发链」语义；本文件不复用该词，避免第二份「触发器」语义。
 """
 
 import hashlib
