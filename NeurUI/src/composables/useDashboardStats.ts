@@ -114,7 +114,7 @@ export function useDashboardStats(options?: { agentId?: string | (() => string) 
         getHomeTrends(7),
         getTokenUsage(),
         getMemoryStats(agentId),
-        getKnowledgeNodes({ page: 1, size: 1 }),
+        getKnowledgeNodes({ page: 1, page_size: 1 }),
         getSystemInfo(),
         getHealthReport(),
         getSchedulerStatus(),

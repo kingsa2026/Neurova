@@ -1,5 +1,5 @@
 import api from '@/api'
-import type { ApiResponse, PaginatedData, PageParams } from '@/types/response'
+import type { ApiResponse, PaginatedData } from '@/types/response'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -81,12 +81,13 @@ export interface KnowledgeCreatePayload {
 const BASE = '/knowledge'
 
 /** List knowledge nodes, optionally filtered by agent.
- * 2026-09-06 契约对齐：后端分页认 page/page_size（limit/offset 兼容），
- * 响应为 {items,total,page,page_size} 信封（此前 page_size 被静默忽略 → 恒前 20 条）。 */
-export function getKnowledgeNodes(params?: PageParams & { agent_id?: string; category?: string; search?: string; q?: string; scope?: KnowledgeScope; page_size?: number }) {
-  const { size, ...rest } = params ?? {}
-  const query = { ...rest, page_size: rest.page_size ?? size }
-  return api.get<ApiResponse<PaginatedData<KnowledgeNode>>>(BASE, { params: query })
+ * 2026-09-06 契约对齐：后端分页双兼容 page/page_size 与 limit/offset
+ * （knowledge_core.py list 路由），响应为 {items,total,page,page_size} 信封。
+ * P1-13（审计 2026-11-14）：统一分页词 PageParams 已改为 limit/offset；
+ * 本端点的页面消费方（KnowledgePage）沿用 page/page_size 口径且后端原生支持，
+ * 故这里显式声明 page/page_size，不再借用 PageParams 混装两套词。 */
+export function getKnowledgeNodes(params?: { page?: number; page_size?: number; agent_id?: string; category?: string; search?: string; q?: string; scope?: KnowledgeScope }) {
+  return api.get<ApiResponse<PaginatedData<KnowledgeNode>>>(BASE, { params })
 }
 
 /** Get a single knowledge node. */

@@ -44,8 +44,9 @@ export interface PushStats {
 
 const BASE = '/notifications'
 
-/** List notifications. */
-export function getNotifications(params?: PageParams & { type?: string; read?: boolean; agent_id?: string }) {
+/** List notifications. 后端分页认 limit/offset（P1-13：旧 page/size 被静默忽略）；
+ * 类型筛选参数名是 notification_type（旧 type 会被后端静默忽略）。 */
+export function getNotifications(params?: PageParams & { notification_type?: string; read?: boolean }) {
   return api.get<ApiResponse<PaginatedData<Notification>>>(BASE, { params })
 }
 

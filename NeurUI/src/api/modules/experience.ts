@@ -60,9 +60,22 @@ export interface ExperienceStats {
 
 const BASE = '/experience'
 
+/** 后端 /experience/ranking 只认 page/size（experience_knowledge_api.py
+ * get_experience_ranking(page, size)，无 limit/offset）。统一分页词是
+ * limit/offset（P1-13），换算收在本模块一处：offset 须为 limit 整数倍
+ * （分页器本就按 offset=(page-1)*size 发）。 */
+function toBackendPageQuery({ limit, offset }: PageParams = {}) {
+  const size = limit ?? 20
+  const page = Math.floor((offset ?? 0) / size) + 1
+  return { page, size }
+}
+
 /** List experience records for an agent (uses /ranking endpoint). */
 export function getExperiences(agentId: string, params?: PageParams & { task_type?: string }) {
-  return api.get<ApiResponse<PaginatedData<ExperienceRecord>>>(`${BASE}/ranking`, { params: { ...params, agent_id: agentId } })
+  const { limit, offset, task_type } = params ?? {}
+  return api.get<ApiResponse<PaginatedData<ExperienceRecord>>>(`${BASE}/ranking`, {
+    params: { ...toBackendPageQuery({ limit, offset }), agent_id: agentId, task_type },
+  })
 }
 
 /** Get a single experience record. */
@@ -108,5 +121,7 @@ export function getExperienceStats(agentId: string) {
 
 /** Get experience ranking. */
 export function getExperienceRanking(agentId: string, params?: PageParams) {
-  return api.get<ApiResponse<PaginatedData<ExperienceRecord>>>(`${BASE}/ranking`, { params: { ...params, agent_id: agentId } })
+  return api.get<ApiResponse<PaginatedData<ExperienceRecord>>>(`${BASE}/ranking`, {
+    params: { ...toBackendPageQuery(params), agent_id: agentId },
+  })
 }

@@ -24,6 +24,8 @@ export interface RuleCreatePayload {
   rule_type: string
   action: string
   value: string
+  /** 是否启用（后端 FirewallRuleCreate.enabled，缺省 true） */
+  enabled?: boolean
   /** rate_limit 规则的目标窗口（minute|hour） */
   window?: string
 }

@@ -1713,6 +1713,11 @@ conflictTimeReadout: 'Lecture temporelle : {basis} (ancienne {old} → nouvelle 
     ingressProcessed: 'Processed',
 
     disconnected: 'Déconnecté',
+    restPolling: 'Polling REST actif',
+    sessionLoadFailed: 'Échec du chargement des sessions',
+    sessionCreateFailed: 'Échec de la création de la session',
+    sessionSendFailed: 'Échec de l’envoi du message',
+    sessionDeleteFailed: 'Échec de la clôture de la session',
     title: 'Gestion des canaux',
     create: 'Créer un canal',
     test: 'Tester la connexion',

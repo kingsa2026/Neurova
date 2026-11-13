@@ -46,9 +46,10 @@ export interface WebhookDelivery {
 
 const BASE = '/webhooks'
 
-/** List all webhooks. */
-export function getWebhooks(params?: PageParams & { agent_id?: string }) {
-  return api.get<ApiResponse<PaginatedData<Webhook>>>(BASE, { params })
+/** List all webhooks. 后端 GET /webhooks 不收任何查询参数（P1-13 核对：
+ * webhooks.py list_webhooks 无 limit/offset/筛选），不假装支持分页。 */
+export function getWebhooks() {
+  return api.get<ApiResponse<PaginatedData<Webhook>>>(BASE)
 }
 
 /** Get a single webhook. */
@@ -76,7 +77,8 @@ export function testWebhook(id: string) {
   return api.post<ApiResponse<{ success: boolean; status_code: number; duration_ms: number }>>(`${BASE}/${id}/test`)
 }
 
-/** Get delivery history for a webhook. */
-export function getWebhookDeliveries(webhookId: string, params?: PageParams) {
+/** Get delivery history for a webhook. 后端只收 limit（webhooks.py
+ * list_deliveries(limit: int = 50)，无 offset），不假装支持 offset。 */
+export function getWebhookDeliveries(webhookId: string, params?: Pick<PageParams, 'limit'>) {
   return api.get<ApiResponse<PaginatedData<WebhookDelivery>>>(`${BASE}/${webhookId}/deliveries`, { params })
 }

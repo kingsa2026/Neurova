@@ -3,9 +3,9 @@
     <div class="page-header">
       <h2>{{ t('channel.session') }}</h2>
       <div class="header-actions">
-        <div class="ws-indicator" :class="{ connected: wsConnected }">
-          <span class="ws-dot" />
-          <span class="ws-label">{{ wsConnected ? t('channel.connected') : t('channel.disconnected') }}</span>
+        <div class="poll-indicator">
+          <span class="poll-dot" />
+          <span class="poll-label">{{ t('channel.restPolling') }}</span>
         </div>
         <GlassButton variant="primary" size="sm" @click="openCreate">{{ t('common.create') }}</GlassButton>
       </div>
@@ -29,7 +29,7 @@
           :data-source="sessions"
           :pagination="{ pageSize: 10 }"
           size="small"
-          row-key="id"
+          row-key="session_id"
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'status'">
@@ -37,8 +37,8 @@
             </template>
             <template v-if="column.key === 'actions'">
               <GlassButton variant="secondary" size="sm" @click="openMessage(record)">{{ t('chat.send') }}</GlassButton>
-              <a-popconfirm :title="t('common.confirm') + '?'" @confirm="handleClose(record.id)">
-                <GlassButton variant="danger" size="sm">{{ t('common.close') }}</GlassButton>
+              <a-popconfirm :title="t('common.confirm') + '?'" @confirm="handleClose(record.session_id)">
+                <GlassButton variant="danger" size="sm">{{ t('common.delete') }}</GlassButton>
               </a-popconfirm>
             </template>
           </template>
@@ -72,24 +72,22 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
+import { message } from 'ant-design-vue'
+import {
+  listSyncSessions,
+  createSyncSession,
+  sendSyncSessionMessage,
+  endSyncSession,
+} from '@/api/modules/sessionSync'
+import type { SyncSession } from '@/api/modules/sessionSync'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 
 const { t } = useI18n()
 
-interface SyncSession {
-  id: string
-  name: string
-  status: string
-  createdAt: string
-  lastSync?: string
-}
-
 const sessions = ref<SyncSession[]>([])
 const loading = ref(false)
-const wsConnected = ref(false)
 const showCreateModal = ref(false)
 const showMessageModal = ref(false)
 const creating = ref(false)
@@ -100,9 +98,9 @@ const messageText = ref('')
 const createForm = reactive({ name: '', description: '' })
 
 const columns = [
-  { title: t('common.name'), dataIndex: 'name', key: 'name' },
+  { title: t('common.id'), dataIndex: 'session_id', key: 'session_id' },
   { title: t('common.status'), dataIndex: 'status', key: 'status' },
-  { title: t('common.createdAt'), dataIndex: 'createdAt', key: 'createdAt' },
+  { title: t('common.createdAt'), dataIndex: 'created_at', key: 'createdAt' },
   { title: t('common.actions'), key: 'actions', width: 200 },
 ]
 
@@ -116,9 +114,12 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 async function fetchSessions() {
   loading.value = true
   try {
-    const res = await request.get('/sync/sessions') as unknown as SyncSession[] | { data: SyncSession[] }
-    sessions.value = Array.isArray(res) ? res : Array.isArray(res.data) ? res.data : []
-  } catch { sessions.value = [] } finally { loading.value = false }
+    const res = await listSyncSessions()
+    sessions.value = res?.sessions ?? []
+  } catch {
+    message.error(t('channel.sessionLoadFailed'))
+    sessions.value = []
+  } finally { loading.value = false }
 }
 
 function openCreate() {
@@ -128,7 +129,7 @@ function openCreate() {
 }
 
 function openMessage(session: SyncSession) {
-  activeSessionId.value = session.id
+  activeSessionId.value = session.session_id
   messageText.value = ''
   showMessageModal.value = true
 }
@@ -137,37 +138,50 @@ async function handleCreate() {
   if (!createForm.name) return
   creating.value = true
   try {
-    await request.post('/sync/sessions', { ...createForm })
+    // 后端契约（session_sync.py CreateSessionRequest）：归属取 token 主体，
+    // user_id 字段留空仅满足 schema；页面收集的名称/说明入 metadata。
+    await createSyncSession({
+      user_id: '',
+      agent_id: 'default',
+      metadata: { name: createForm.name, description: createForm.description },
+    })
     showCreateModal.value = false
     await fetchSessions()
-  } catch { /* handled */ } finally { creating.value = false }
+  } catch {
+    message.error(t('channel.sessionCreateFailed'))
+  } finally { creating.value = false }
 }
 
 async function handleSend() {
   if (!activeSessionId.value || !messageText.value) return
   sending.value = true
   try {
-    await request.post(`/sync/sessions/${activeSessionId.value}/message`, { message: messageText.value })
+    // P1-8：REST 降级发消息走复数 /messages，正文字段名是 content。
+    await sendSyncSessionMessage(activeSessionId.value, { content: messageText.value })
     showMessageModal.value = false
-  } catch { /* handled */ } finally { sending.value = false }
+  } catch {
+    message.error(t('channel.sessionSendFailed'))
+  } finally { sending.value = false }
 }
 
 async function handleClose(id: string) {
   try {
-    await request.post(`/sync/sessions/${id}/close`)
+    // P1-9：终结会话＝DELETE /sync/sessions/{id}（后端无 /close 端点）。
+    await endSyncSession(id)
     await fetchSessions()
-  } catch { /* handled */ }
+  } catch {
+    message.error(t('channel.sessionDeleteFailed'))
+  }
 }
 
 onMounted(() => {
   fetchSessions()
-  wsConnected.value = true
+  // P3-15：本页没有 WebSocket，只有 15s REST 轮询——指示灯不再假报"已连接"。
   pollTimer = setInterval(fetchSessions, 15000)
 })
 
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
-  wsConnected.value = false
 })
 </script>
 
@@ -176,10 +190,8 @@ onUnmounted(() => {
 .page-header { display: flex; justify-content: space-between; align-items: center; }
 .page-header h2 { color: var(--nr-text-primary); font-family: var(--nr-font-display); font-weight: 700; margin: 0; }
 .header-actions { display: flex; gap: 12px; align-items: center; }
-.ws-indicator { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--nr-text-tertiary); }
-.ws-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--nr-error); transition: background 0.3s; }
-.ws-indicator.connected .ws-dot { background: var(--nr-success); }
-.ws-indicator.connected .ws-label { color: var(--nr-success); }
+.poll-indicator { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--nr-text-tertiary); }
+.poll-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--nr-text-tertiary); }
 .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
 .stat-value { font-family: var(--nr-font-display); font-size: 24px; font-weight: 700; color: var(--nr-text-primary); }
 .section-title { color: var(--nr-text-primary); font-family: var(--nr-font-display); font-weight: 600; margin: 0 0 16px; font-size: 16px; }

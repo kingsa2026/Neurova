@@ -33,7 +33,9 @@ export const useNotificationStore = defineStore('notifications', () => {
     loading.value = true
     page.value = p
     try {
-      const res = await getNotifications({ page: p, size: size.value })
+      // P1-13（审计 2026-11-14）：后端只认 limit/offset；旧 page/size 被静默
+      // 忽略成恒第一页（翻页坏）。
+      const res = await getNotifications({ limit: size.value, offset: (p - 1) * size.value })
       notifications.value = res.data.items
       total.value = res.data.total
       // P2-29：列表拉取后同步未读徽标——页面与布局头同源联动

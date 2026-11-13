@@ -27,9 +27,22 @@ export interface Plugin {
 
 const BASE = '/plugins'
 
+/** 后端 /plugins 只认 page/size（plugin.py list_plugins(page=1, size=20)，
+ * 无 limit/offset）。统一分页词是 limit/offset（P1-13），换算只在这里做一次：
+ * offset须为 limit 整数倍（分页器本就按 offset=(page-1)*size 发）。
+ */
+function toBackendPageQuery({ limit, offset }: PageParams = {}) {
+  const size = limit ?? 20
+  const page = Math.floor((offset ?? 0) / size) + 1
+  return { page, size }
+}
+
 /** List all plugins (installed). */
 export function getPlugins(params?: PageParams & { category?: string; status?: string }) {
-  return api.get<ApiResponse<PaginatedData<Plugin>>>(BASE, { params })
+  const { limit, offset, ...filters } = params ?? {}
+  return api.get<ApiResponse<PaginatedData<Plugin>>>(BASE, {
+    params: { ...toBackendPageQuery({ limit, offset }), ...filters },
+  })
 }
 
 /** Get a single plugin. */

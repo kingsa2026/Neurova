@@ -1713,6 +1713,11 @@ conflictTimeReadout: 'قراءة الوقت: {basis} (القديم {old} → ا�
     ingressProcessed: 'Processed',
 
     disconnected: 'غير متصل',
+    restPolling: 'استقصاء REST نشط',
+    sessionLoadFailed: 'فشل تحميل الجلسات',
+    sessionCreateFailed: 'فشل إنشاء الجلسة',
+    sessionSendFailed: 'فشل إرسال الرسالة',
+    sessionDeleteFailed: 'فشل إنهاء الجلسة',
     title: 'إدارة القنوات',
     create: 'إنشاء قناة',
     test: 'اختبار الاتصال',

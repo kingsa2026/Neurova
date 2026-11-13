@@ -1713,6 +1713,11 @@ conflictTimeReadout: 'Lectura temporal: {basis} (antigua {old} → nueva {new})'
     ingressProcessed: 'Processed',
 
     disconnected: 'Desconectado',
+    restPolling: 'Sondeo REST activo',
+    sessionLoadFailed: 'Error al cargar las sesiones',
+    sessionCreateFailed: 'Error al crear la sesión',
+    sessionSendFailed: 'Error al enviar el mensaje',
+    sessionDeleteFailed: 'Error al finalizar la sesión',
     title: 'Gestión de canales',
     create: 'Crear canal',
     test: 'Probar conexión',

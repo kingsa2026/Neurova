@@ -64,14 +64,16 @@ export function getOntologySchema() {
   return api.get<ApiResponse<OntologySchemaData>>(`${BASE}/ontology/schema`)
 }
 
-/** G5：可用领域包清单（概要：packId/namespace/basedOn/note/termCount）。 */
+/** G5：可用领域包清单（概要：packId/namespace/basedOn/note/termCount）。
+ * P1-11（审计 2026-11-14）：后端路径是 /ontology/domain-packs，少拼 ontology
+ * 段会被 knowledge 的 GET /{knowledge_id} 参数路由吃掉报"条目不存在"。 */
 export function listDomainPacks() {
-  return api.get<ApiResponse<Array<{ packId: string; namespace: string; basedOn: string; note: string; termCount: number }>>>(`${BASE}/domain-packs`)
+  return api.get<ApiResponse<Array<{ packId: string; namespace: string; basedOn: string; note: string; termCount: number }>>>(`${BASE}/ontology/domain-packs`)
 }
 
 /** G5：导入领域包（admin，只补缺幂等；返回补上条数）。 */
 export function importDomainPack(packId: string) {
-  return api.post<ApiResponse<{ pack_id: string; added: number }>>(`${BASE}/domain-packs/${encodeURIComponent(packId)}/import`)
+  return api.post<ApiResponse<{ pack_id: string; added: number }>>(`${BASE}/ontology/domain-packs/${encodeURIComponent(packId)}/import`)
 }
 
 /** G4：可用 IRI 命名空间注册表（前缀 → 基座；空 namespace 语义 = 缺省 kbg:）。 */
@@ -364,12 +366,16 @@ export function deleteOntologyFunction(functionId: string) {
     `/knowledge/ontology/functions/${encodeURIComponent(functionId)}`)
 }
 
+/** W2：函数 dry 求值。P1-12（审计 2026-11-14）：后端是
+ * POST /ontology/functions/{function_id}/compute，function_id 在路径里，
+ * 放请求体必 404。 */
 export function computeOntologyFunction(body: {
   function_id: string
   subject?: string
 }) {
+  const { function_id, ...rest } = body
   return api.post<ApiResponse<OntologyComputeResult>>(
-    '/knowledge/ontology/functions/compute', body)
+    `/knowledge/ontology/functions/${encodeURIComponent(function_id)}/compute`, rest)
 }
 
 export function listOntologyStateMachines() {

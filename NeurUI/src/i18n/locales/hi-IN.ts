@@ -1713,6 +1713,11 @@ conflictTimeReadout: 'समय रीडआउट: {basis} (पुराना 
     ingressProcessed: 'Processed',
 
     disconnected: 'डिस्कनेक्टेड',
+    restPolling: 'REST पोलिंग सक्रिय',
+    sessionLoadFailed: 'सेशन लोड करने में विफल',
+    sessionCreateFailed: 'सेशन बनाने में विफल',
+    sessionSendFailed: 'संदेश भेजने में विफल',
+    sessionDeleteFailed: 'सेशन समाप्त करने में विफल',
     title: 'चैनल प्रबंधन',
     create: 'चैनल बनाएं',
     test: 'कनेक्शन परीक्षण',
