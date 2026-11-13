@@ -130,6 +130,12 @@ class EvolutionConfig:
     exec_suite_enabled: bool = True
     exec_suite_size: int = 4
 
+    # ── 评测集核选（HN6/HC6，HarnessPro 对照 2026-11-13）──
+    # 评测集超过该容量时，按「难度加权多样性」贪心（eval/coreset.py）收缩到
+    # K 个再走既有 split——判据集变小、评测成本不随语料线性走。0 = 不核选
+    #（逐字旧行为）。
+    eval_coreset_k: int = 0
+
 
 def text_evolution_enabled() -> bool:
     """文本级进化总开关,默认关。

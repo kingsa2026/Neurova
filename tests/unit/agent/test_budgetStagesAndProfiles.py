@@ -184,6 +184,39 @@ class TestStopHooks:
             hooks_engine.reset_hook_engine()
 
 
+# ── 3.5 按档工具溢出阈值（HN5/HC7）──────────────────────────────
+
+class TestProfileOffloadThresholds:
+    def test_standard_keeps_default(self, isolated_limits):
+        from neurova.security.tool_offload_settings import get_threshold_kb
+
+        assert get_threshold_kb() == 64
+
+    def test_lite_halves_threshold(self, isolated_limits):
+        """lite 档更激进落盘：阈值减半。"""
+        isolated_limits.setenv("NEUROVA_EXEC_PROFILE", "lite")
+        from neurova.security.tool_offload_settings import get_threshold_kb
+
+        assert get_threshold_kb() == 32
+
+    def test_heavy_doubles_threshold(self, isolated_limits):
+        """heavy 档更宽容：阈值翻倍。"""
+        isolated_limits.setenv("NEUROVA_EXEC_PROFILE", "heavy")
+        from neurova.security.tool_offload_settings import get_threshold_kb
+
+        assert get_threshold_kb() == 128
+
+    def test_explicit_setting_beats_profile(self, isolated_limits, tmp_path):
+        """显式设置（文件/env）优先于档位缩放。"""
+        cfg = tmp_path / "offload.json"
+        cfg.write_text(json.dumps({"threshold_kb": 16}), encoding="utf-8")
+        isolated_limits.setenv("NEUROVA_TOOL_OFFLOAD_SETTINGS", str(cfg))
+        isolated_limits.setenv("NEUROVA_EXEC_PROFILE", "heavy")
+        from neurova.security.tool_offload_settings import get_threshold_kb
+
+        assert get_threshold_kb() == 16
+
+
 # ── 4. 努力回退（HN3）────────────────────────────────────────────
 
 class TestResolveQueryEffort:

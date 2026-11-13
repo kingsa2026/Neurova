@@ -29,6 +29,25 @@ MAX_THRESHOLD_KB = 512  # 上限拍板 2026-09-13（512KB 之上的单结果实�
 
 DEFAULTS: Dict[str, Any] = {"threshold_kb": DEFAULT_THRESHOLD_KB}
 
+# ── 执行档位缩放（HN5/HC7，HarnessPro 对照 2026-11-13）──────────────
+# 无显式设置时，溢出阈值随执行档位缩放：lite 更激进落盘（阈值减半）、
+# heavy 更宽容（翻倍）。显式设置（文件/env）优先于档位——管理员微调不被
+# 选档悄悄覆盖。standard = 1.0（内置默认逐字不变）。
+_PROFILE_MULTIPLIERS: Dict[str, float] = {
+    "lite": 0.5,
+    "standard": 1.0,
+    "heavy": 2.0,
+}
+
+
+def _profileMultiplier() -> float:
+    try:
+        from neurova.security.agent_limits_settings import active_exec_profile
+
+        return _PROFILE_MULTIPLIERS.get(active_exec_profile(), 1.0)
+    except Exception:  # noqa: BLE001 - 档位面故障回退不缩放（fail-open）
+        return 1.0
+
 
 def settings_path() -> Path:
     custom = os.environ.get("NEUROVA_TOOL_OFFLOAD_SETTINGS")
@@ -46,20 +65,27 @@ def _clamp(v: Any) -> int:
 
 
 def load_settings(path: Optional[Path] = None) -> Dict[str, Any]:
-    """env 优先 > 文件 > 默认；损坏文件回落默认（agent_limits 同语义）。"""
+    """env 优先 > 文件 > 档位缩放默认；损坏文件回落默认（agent_limits 同语义）。
+
+    HN5/HC7：无任何显式设置时，默认 64KB 按执行档位缩放（lite ×0.5 /
+    heavy ×2.0，夹紧到合法域）——压缩激进度随部署档位走，不再全局一刀切。
+    """
     p = Path(path) if path else settings_path()
-    merged = dict(DEFAULTS)
+    explicit: Optional[int] = None
     try:
         if p.exists():
             data = json.loads(p.read_text(encoding="utf-8"))
             if isinstance(data, dict) and data.get("threshold_kb") is not None:
-                merged["threshold_kb"] = _clamp(data["threshold_kb"])
+                explicit = _clamp(data["threshold_kb"])
     except Exception as e:  # noqa: BLE001
         logger.warning("加载 tool_offload 设置失败，使用默认: %s", e)
     env = os.environ.get("NEUROVA_TOOL_OFFLOAD_THRESHOLD_KB")
     if env:
-        merged["threshold_kb"] = _clamp(env)
-    return merged
+        explicit = _clamp(env)
+    if explicit is not None:
+        return {"threshold_kb": explicit}
+    scaled = int(DEFAULT_THRESHOLD_KB * _profileMultiplier())
+    return {"threshold_kb": _clamp(scaled)}
 
 
 def get_threshold_kb() -> int:
