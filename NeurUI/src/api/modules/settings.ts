@@ -294,3 +294,21 @@ export function updateAgentExecProfile(agentId: string, profile: AgentExecProfil
     { profile },
   )
 }
+
+// ---------------------------------------------------------------------------
+// 评测集核选容量（R7/HC6：评测集超容量时按难度加权多样性收缩到 K 个再评）
+// ---------------------------------------------------------------------------
+
+export interface EvalCoresetSettings {
+  coreset_k: number
+  min?: number
+  max?: number
+}
+
+export function getEvalCoresetSettings() {
+  return api.get<ApiResponse<EvalCoresetSettings>>('/governance/eval-coreset')
+}
+
+export function updateEvalCoresetSettings(data: Partial<EvalCoresetSettings>) {
+  return api.put<ApiResponse<EvalCoresetSettings>>('/governance/eval-coreset', data)
+}
