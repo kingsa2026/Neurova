@@ -4,6 +4,8 @@
 - index 按 list_revisions 序（0=最新）；
 - 回滚撤销该次变更（账本 old 值写回 changed_fields），回滚本身也进账本
   （reason=rollback，记录回滚前现值）——回滚可再回滚；
+- 回滚保留回滚前最新版完整快照（/versions 版本链）；
+- Ontology 感知：回滚落知识活动台账（knowledge_revision_rollback）；
 - 属主/管理员可操作，他人 403；非法序号 404。
 """
 
@@ -31,7 +33,18 @@ def repo(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def client(repo):
+def fact_store(tmp_path, monkeypatch):
+    from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
+
+    s = KnowledgeFactStore(str(tmp_path / "facts.db"))
+    monkeypatch.setattr(
+        "neurova.knowledge.foundation.get_knowledge_fact_store", lambda: s)
+    yield s
+    s.close()
+
+
+@pytest.fixture
+def client(repo, fact_store):
     from neurova.api.endpoints import knowledge_core
 
     app = FastAPI()
@@ -64,6 +77,33 @@ class TestRevisionRollback:
         revs = client.get(f"{PREFIX}/{kid}/revisions").json()
         assert revs[0].get("reason") == "rollback"
         assert revs[0]["old"]["title"] == "v2"
+
+    def test_rollbackKeepsPreRollbackSnapshot(self, client, repo):
+        """回滚后：回滚前最新版完整快照入版本链（/versions 可读）。"""
+        entry = _seedEntry(repo, "v1")
+        kid = entry["knowledge_id"]
+        repo.update_knowledge("default", kid, {"title": "v2", "content": "v2 内容"})
+        r = client.post(f"{PREFIX}/{kid}/revisions/0/rollback")
+        assert r.status_code == 200
+        versions = client.get(f"{PREFIX}/{kid}/versions").json()["data"]
+        assert len(versions) >= 2, "编辑与回滚都应留完整快照"
+        rollbackSnap = versions[0]
+        assert rollbackSnap["reason"] == "rollback"
+        assert rollbackSnap["data"]["title"] == "v2", "回滚前最新版（v2）应被保留"
+        assert rollbackSnap["data"]["content"] == "v2 内容"
+
+    def test_rollbackLandsOntologyActivity(self, client, repo, fact_store):
+        """Ontology 感知：回滚落知识活动台账（kind=knowledge_revision_rollback）。"""
+        entry = _seedEntry(repo, "v1")
+        kid = entry["knowledge_id"]
+        repo.update_knowledge("default", kid, {"title": "v2"})
+        r = client.post(f"{PREFIX}/{kid}/revisions/0/rollback")
+        assert r.status_code == 200
+        rows = fact_store._conn.execute(
+            "SELECT activity_kind, inputs_json FROM knowledge_activities"
+            " WHERE activity_kind = 'knowledge_revision_rollback'").fetchall()
+        assert len(rows) >= 1, "回滚应在知识活动台账留痕（Ontology 感知）"
+        assert "knowledge_id" in rows[0]["inputs_json"]
 
     def test_rollbackIsReversible(self, client, repo):
         entry = _seedEntry(repo, "v1")

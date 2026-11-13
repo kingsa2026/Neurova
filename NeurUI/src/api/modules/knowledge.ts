@@ -186,6 +186,12 @@ export function rollbackKnowledgeRevision(knowledgeId: string, revisionIndex: nu
     `${BASE}/${knowledgeId}/revisions/${revisionIndex}/rollback`)
 }
 
+/** 版本快照链（回滚/同名重传/编辑留下的完整版本档，最新在前） */
+export function listKnowledgeVersions(knowledgeId: string) {
+  return api.get<ApiResponse<Array<{ version: number; reason: string; actor: string; time: string; data: { title: string; content: string } }>>>(
+    `${BASE}/${knowledgeId}/versions`)
+}
+
 /** Admin: approve or reject a public submission. */
 export function reviewKnowledgePublic(id: string, approve: boolean, note = '') {
   return api.post<ApiResponse<KnowledgeNode>>(`${BASE}/${id}/review-public`, { approve, note })

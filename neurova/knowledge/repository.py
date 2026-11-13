@@ -956,6 +956,7 @@ class KnowledgeRepository:
                         oldSourceT = _parseSourceDate(existing.get("source_modified_at"))
                         if oldSourceT is None or newSourceT <= oldSourceT:
                             continue
+                        self._pushVersionSnapshot(existing, "source_update_reingest")
                         existing.setdefault("revisions", []).append({
                             "old": {
                                 "title": existing.get("title"),
@@ -1597,6 +1598,7 @@ class KnowledgeRepository:
                     changed = [k for k in fields if k in _REVISION_FIELDS and k in item and item[k] != fields[k]]
                     if changed:
                         try:
+                            self._pushVersionSnapshot(item, "update")
                             revs = item.setdefault("revisions", [])
                             revs.append(
                                 {
@@ -2095,7 +2097,37 @@ class KnowledgeRepository:
                 return []
             return list(reversed((found[1].get("revisions") or [])))
 
-    def rollback_revision(self, knowledge_id: str, revision_index: int) -> Optional[Dict[str, Any]]:
+    def _pushVersionSnapshot(self, item: Dict[str, Any], reason: str,
+                             actor: str = "") -> None:
+        """完整版本快照（版本链）：回滚/同名重传覆盖/编辑共用。
+
+        每次内容态变更前把 title/content/chunks/指纹 整体留档——时间轴上
+        可回放任意版本，变化趋势可感知。append-only，随 _save 持久化。
+        """
+        snaps = item.setdefault("version_snapshots", [])
+        snaps.append({
+            "version": len(snaps) + 1,
+            "reason": reason,
+            "actor": actor,
+            "time": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "data": {
+                "title": item.get("title"),
+                "content": item.get("content"),
+                "chunks": list(item.get("chunks") or []),
+                "content_fingerprint": item.get("content_fingerprint"),
+            },
+        })
+
+    def list_versions(self, knowledge_id: str) -> List[Dict[str, Any]]:
+        """版本快照链（最新在前）。条目不存在返回 []。"""
+        with self._lock:
+            found = self.find_item(knowledge_id)
+            if found is None:
+                return []
+            return list(reversed(found[1].get("version_snapshots") or []))
+
+    def rollback_revision(self, knowledge_id: str, revision_index: int,
+                          actor: str = "") -> Optional[Dict[str, Any]]:
         """回滚到 revision 账本第 revision_index 条（list_revisions 序，0=最新）。
 
         撤销该次变更：账本记录的 old 值写回 changed_fields；回滚本身也快照
@@ -2117,6 +2149,8 @@ class KnowledgeRepository:
                     changed = [k for k in (rev.get("changed_fields") or []) if k in old]
                     if not changed:
                         return None
+                    # 回滚前最新版完整快照（用户裁定：回滚不丢最新版）
+                    self._pushVersionSnapshot(item, "rollback", actor=actor)
                     revs.append({
                         "old": {k: item[k] for k in changed if k in item},
                         "changed_fields": changed,
