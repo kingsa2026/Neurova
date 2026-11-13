@@ -114,6 +114,17 @@
   - W1 配套：术语 qualifier_schema 声明 `type: number` 的键，写入时在咽喉单点归一成
     canonical 量值（`quantity.py` 单源）；`POST /graph/instances` 可带 `qualifier`；
     抽取 prompt 对数值谓词输出「数字＋单位」引导段（`graph_bridge`）
+
+
+- **状态机（W3，v44）**：`GET|POST|DELETE /ontology/state-machines`（admin 写/登录读）＋`GET /ontology/domain-packs`（导入即补缺 has_state cardinality=1）；MCP `ontology_state`
+- **动作语义（W4，v45）**：ontology_actions 三列 precondition_json/impact_json/state_change_json；`POST /ontology/actions` 透传三段；MCP `ontology_act` 门面转交 ToolExecutor.execute 单管道
+- **推演（W5，v46）**：`POST|GET /ontology/simulations`（admin）——backup 副本→假设注入→规则/函数推演→diff；生产零写；MCP `ontology_simulate`
+- **决策台账（W7，v47）**：`POST|GET /ontology/decisions`＋`POST /ontology/decisions/{id}/links`＋`GET /ontology/decisions/{id}/trace`＋`GET /ontology/decisions/precedents`；MCP 四工具 ontology_decision_record/link/trace/precedents
+- **GraphRAG（W8，v48）**：`GET|POST|DELETE /ontology/chunk-strategies`＋`GET /ontology/communities`＋`POST /ontology/community-search`（global/drift）；MCP `ontology_community_search`
+- **推理广度（W9）**：`POST /ontology/sparql`（501 not_supported）＋`POST /ontology/abduce`；MCP `ontology_sparql`/`ontology_abduce`
+- **摄取广度（W10）**：`POST /enterprise/webhook/{source_id}`（HMAC 非登录态；缺省 off）；SOURCE_TYPES 扩 unity_catalog/snowflake/sap_odata/http_pull
+- **追责审计（W12）**：`GET /ontology/accountability`（admin 只读跨五账聚合）；digest_chain verify 经 `/foundation/integrity` 共存
+- **C2 工件溯源**：`GET /ontology/domain-packs/{id}/attribution`＋`GET /ontology/domain-packs/{id}/integrity`
 - 本体关系映射（2026-11-05，升级计划 B8，实现 `term_registry.py`＋`rule_engine.py`＋`relation_candidates.py`）：
   - 术语写面（`POST|PUT /ontology/terms`）新增字段：`inverse_of`/`symmetric`/`transitive`/`aliases`/`external_iris`/`deprecated`/`replaced_by`（None＝PUT 保留现值）；relation 可挂 relation 父属性（`rdfs:subPropertyOf`，父子 kind 必须一致、登记处判环）；`inverse_of` 登记时双向补齐；别名按租户唯一；`cardinality=1` 即函数属性（不新增列）
   - 规则写面（`POST|PUT /ontology/rules`）新增字段：`shape`（relay/conjunction/inverse；缺省按 `head_object_const` 推断）；inverse 要求 head 主语变元＝正原子客体变元
