@@ -5,7 +5,16 @@
 //  4. 聚焦根近原点（选中节点居中语义）；5. 包围盒有界；6. 确定性。
 import { describe, expect, it } from 'vitest'
 
-import { forceLayout, LAYOUT_COLLIDE_DIAMETER } from '@/pages/graph-workbench/forceLayout'
+import { forceLayoutFull, LAYOUT_COLLIDE_DIAMETER } from '@/pages/graph-workbench/forceLayout'
+
+/** forceLayout 包装已随死码退役批删除（P3-1）：断言改走 forceLayoutFull().positions */
+function forceLayout(
+  nodes: Array<{ id: string; label: string; type: string }>,
+  edges: Array<{ source: string; target: string }>,
+  rootId?: string,
+) {
+  return forceLayoutFull(nodes, edges, rootId).positions
+}
 
 const STAR = {
   nodes: [

@@ -1504,10 +1504,59 @@ class TaskScheduler:
 _scheduler_instance: Optional[TaskScheduler] = None
 
 
+def _on_task_scheduler_event(event_type: str, data: Any) -> None:
+    """TaskScheduler 事件 → 站内通知镜像（2026-11-14 审计 F-4 接线）。
+
+    此前六类任务事件发射进恒空的 handler 列表——事件只进调度器内部，
+    无任何监控/通知消费方。本桥按 collaborate 侧调度通知桥同款口径，
+    挑对运维有意义的镜像：执行开始/完成（含失败/超时）与任务停用；
+    增删改三类 CRUD 不打扰。接收人=notify_admins；镜像失败只记日志，
+    不阻断调度线程。
+    """
+    try:
+        from neurova.api.endpoints.notifications import notify_admins
+
+        if event_type == "execution_started":
+            notify_admins(
+                f"任务开始执行: {getattr(data, 'task_name', '') or ''}",
+                f"执行 {getattr(data, 'id', '')} 已开始（触发方式 {getattr(data, 'triggered_by', '')}）",
+                "task_started",
+                data={"task_id": getattr(data, "task_id", ""), "execution_id": getattr(data, "id", "")},
+            )
+        elif event_type == "execution_completed":
+            status = getattr(getattr(data, "status", None), "value", "") or str(getattr(data, "status", ""))
+            error = getattr(data, "error", None)
+            if status in ("failed", "timeout"):
+                notify_admins(
+                    f"任务执行失败: {getattr(data, 'task_name', '') or ''}",
+                    f"执行 {getattr(data, 'id', '')} 状态 {status}：{error or '无错误详情'}",
+                    "task_failed",
+                    data={"task_id": getattr(data, "task_id", ""), "status": status, "error": error},
+                )
+            else:
+                notify_admins(
+                    f"任务执行完成: {getattr(data, 'task_name', '') or ''}",
+                    f"执行 {getattr(data, 'id', '')} 状态 {status}，耗时 {getattr(data, 'duration_ms', '?')}ms",
+                    "task_completed",
+                    data={"task_id": getattr(data, "task_id", ""), "status": status},
+                )
+        elif event_type == "task_disabled":
+            notify_admins(
+                f"任务已停用: {getattr(data, 'name', '') or ''}",
+                f"任务 {getattr(data, 'id', '')} 被停用",
+                "task_disabled",
+                data={"task_id": getattr(data, "id", "")},
+            )
+    except Exception as e:  # noqa: BLE001 - 通知镜像失败不阻断调度线程
+        logger.warning("TaskScheduler 事件通知镜像失败 (%s): %s", event_type, e)
+
+
 @lazySingleton("_scheduler_instance")
 def get_scheduler() -> TaskScheduler:
-    """获取任务调度器单例"""
-    return TaskScheduler()
+    """获取任务调度器单例（创建时注册通知桥；单例创建路径天然幂等，不叠加 handler）"""
+    scheduler = TaskScheduler()
+    scheduler.add_event_handler(_on_task_scheduler_event)
+    return scheduler
 
 
 def init_scheduler() -> TaskScheduler:

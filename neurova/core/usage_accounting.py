@@ -78,6 +78,7 @@ class TokenUsageAccounting:
         estimated: bool = False,
         cache_read_tokens: int = 0,
         cache_write_tokens: int = 0,
+        response_id: Optional[str] = None,
     ) -> None:
         """记一次 LLM 调用的真实 token 用量。
 
@@ -86,6 +87,8 @@ class TokenUsageAccounting:
         B1-5（#7342）：cache_read/write_tokens 记 Prompt Cache 命中与写入
         （OpenAI prompt_tokens_details.cached_tokens / Anthropic
         cache_creation_input_tokens——由 multi_model_client 提取透传）。
+        response_id：provider 响应/分片 id（2026-11-14 审计 P3-12 接线）——
+        随 last_call() 供轨迹 llm_call_end 事件做供应商侧对账。
         """
         prompt_tokens = int(prompt_tokens or 0)
         completion_tokens = int(completion_tokens or 0)
@@ -137,6 +140,7 @@ class TokenUsageAccounting:
                 "estimated": estimated,
                 "cache_read_tokens": cache_read_tokens,
                 "cache_write_tokens": cache_write_tokens,
+                "response_id": response_id,
             }
             with self._lock:
                 self._last_call = payload

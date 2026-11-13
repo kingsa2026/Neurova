@@ -3150,12 +3150,22 @@ class ChatPipeline:
 
         # 记录 LLM 调用事件
         if self._trajectory_recorder and ctx.trace_id:
+            # P3-12 接线：response_id 取自 usage 记账的本次调用真值（provider 响应/分片 id），
+            # 供轨迹与供应商侧日志对账；读取失败不影响回复。
+            _last_llm: Dict[str, Any] = {}
+            try:
+                from neurova.core.usage_accounting import get_usage_accounting
+
+                _last_llm = get_usage_accounting().last_call() or {}
+            except Exception:  # noqa: BLE001 - 观测副路径失败不影响回复
+                logger.debug("llm_call_end response_id 读取跳过", exc_info=True)
             self._trajectory_recorder.record_event(
                 trace_id=ctx.trace_id,
                 event_type="llm_call_end",
                 data={
                     "reply_length": len(ctx.reply) if ctx.reply else 0,
                     "model": self.config.llm_config.model,
+                    "response_id": _last_llm.get("response_id"),
                 },
             )
 

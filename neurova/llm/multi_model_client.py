@@ -860,6 +860,8 @@ class MultiModelLLMClient:
                     estimated=_estimated,
                     cache_read_tokens=_cache_read,
                     cache_write_tokens=_cache_write,
+                    # P3-12 接线：provider 响应 id 随 usage 入账，供轨迹 llm_call_end 对账
+                    response_id=getattr(result, "response_id", None) or getattr(result, "id", None),
                 ))
                 # 持久化历史：同一回 true usage 同时落 SQLite（重启不归零）。
                 # user_id 取请求级 ContextVar（chat_pipeline.execute 注入），
@@ -1041,6 +1043,7 @@ class MultiModelLLMClient:
                 _cache_read, _cache_write = 0, 0
                 reply_text = ""
                 first_token_ms = 0  # P1-8：首块耗时入账
+                _stream_response_id: Optional[str] = None  # P3-12：provider 响应/分片 id（对账用）
                 # 审计 P0-C5：上游声明回传 usage（OpenAI 标准行为）→ 无需整段缓冲
                 _needs_reply_text = not getattr(client.client, "_compat_include_stream_usage", lambda: True)()
                 # 流内静默看门狗（2026-09-10 流中断事故遥测）：任何退出路径都必须
@@ -1111,6 +1114,9 @@ class MultiModelLLMClient:
                         if first_token_ms == 0:
                             # 首个有效 chunk（含 reasoning/content/usage 任一载荷）
                             first_token_ms = int((time.time() - start_time) * 1000)
+                        # P3-12 接线：分片携带的 provider 响应 id，取首个非空值供对账
+                        if _stream_response_id is None:
+                            _stream_response_id = getattr(chunk, "response_id", None) or getattr(chunk, "id", None)
                         # 根因修复 (2026-09-02): 流式 usage 在最后一个 chunk 携带全量
                         # （LLMClient 已请求 stream_options.include_usage）——
                         # 取最后一次非空值，逐 chunk 累加会把 token 双计。
@@ -1201,6 +1207,7 @@ class MultiModelLLMClient:
                         estimated=_estimated,
                         cache_read_tokens=_cache_read,
                         cache_write_tokens=_cache_write,
+                        response_id=_stream_response_id,
                     ))
                     # 持久化历史（同 chat 路径）：user_id 取请求级 ContextVar，缺失记 anonymous
                     from neurova.core.identity_context import get_request_user_id
