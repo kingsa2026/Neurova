@@ -40,23 +40,7 @@
     />
 
     <div class="workbench-layout">
-      <GlassPanel class="panel" data-testid="community-overlay-panel">
-        <div class="panel-head">
-          <span class="panel-title" data-testid="community-title">{{ t('ontology.communityOverlayTitle') }}</span>
-          <a-switch v-model:checked="communityOverlayOn" size="small" data-testid="community-toggle" />
-        </div>
-        <div v-if="communityOverlayOn && communities.length" class="community-legend">
-          <div v-for="(c, ci) in communities.slice(0, 5)" :key="c.community_id" class="community-item">
-            <span class="community-swatch" :style="{ background: communityColor(ci) }" />
-            <span class="mono">{{ c.community_id.slice(0, 10) }}</span>
-            <span>{{ c.member_labels.join(', ') }}</span>
-            <span v-if="c.summary_text" class="community-summary">{{ c.summary_text.slice(0, 60) }}</span>
-          </div>
-        </div>
-        <div v-if="communityOverlayOn && !communities.length" class="community-empty">
-          {{ t('ontology.communityOverlayEmpty') }}
-        </div>
-      </GlassPanel><GlassCard class="canvas-card">
+      <GlassCard class="canvas-card">
         <a-spin :spinning="loading">
           <div ref="canvasStageRef" data-testid="workbench-canvas-stage" class="canvas-stage">
           <div class="canvas-toolbar">
@@ -178,6 +162,25 @@
           </div>
         </a-spin>
       </GlassCard>
+
+      <!-- U4 社区图层：右列顶部（与画布同列轴——图谱居主位左列） -->
+      <GlassPanel class="panel community-panel" data-testid="community-overlay-panel">
+        <div class="panel-head">
+          <span class="panel-title" data-testid="community-title">{{ t('ontology.communityOverlayTitle') }}</span>
+          <a-switch v-model:checked="communityOverlayOn" size="small" data-testid="community-toggle" />
+        </div>
+        <div v-if="communityOverlayOn && communities.length" class="community-legend">
+          <div v-for="(c, ci) in communities.slice(0, 5)" :key="c.community_id" class="community-item">
+            <span class="community-swatch" :style="{ background: communityColor(ci) }" />
+            <span class="mono">{{ c.community_id.slice(0, 10) }}</span>
+            <span>{{ c.member_labels.join(', ') }}</span>
+            <span v-if="c.summary_text" class="community-summary">{{ c.summary_text.slice(0, 60) }}</span>
+          </div>
+        </div>
+        <div v-if="communityOverlayOn && !communities.length" class="community-empty">
+          {{ t('ontology.communityOverlayEmpty') }}
+        </div>
+      </GlassPanel>
 
       <GlassCard class="panel-card">
         <a-tabs v-model:active-key="activeTab">
@@ -978,6 +981,39 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
+/* 显式落位：图谱跨右侧两行（社区图层＋功能 tab）——高度与右列合计对齐 */
+.canvas-card {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 卡片拉伸后内容链同步撑满：GlassPanel 内容体→GlassCard 内体→spin→stage 逐级 flex */
+.canvas-card :deep(.nr-glass-content),
+.canvas-card :deep(.nr-glass-card),
+.canvas-card :deep(.nr-glass-card-body),
+.canvas-card :deep(.ant-spin-nested-loading),
+.canvas-card :deep(.ant-spin-container) {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.community-panel {
+  grid-column: 2;
+  grid-row: 1;
+  /* 行高随跨行画布膨胀后，右列两卡各自撑满所在行——高度与画布对齐 */
+  height: 100%;
+}
+
+.panel-card {
+  grid-column: 2;
+  grid-row: 2;
+  height: 100%;
+}
+
 .canvas-card,
 .panel-card {
   min-height: 420px;
@@ -985,13 +1021,20 @@ onBeforeUnmount(() => {
 }
 
 .canvas-wrap {
-  height: 560px;
+  /* 高度随卡片拉伸（对齐右侧两行合计），560px 只作下限；
+     relative 锚点——画布/3D 嵌入用 absolute-fill 拿实高（wrap 高由 flex/min-height
+     决定时，子元素 percentage height 会落到 0，2D 视图因此隐身） */
+  position: relative;
+  flex: 1;
+  min-height: 560px;
 }
 
 /* 全屏舞台：toolbar＋画布一起进全屏，退出按钮仍可见；画布占满剩余高度。 */
 .canvas-stage {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 .canvas-stage:fullscreen {
@@ -1061,6 +1104,10 @@ onBeforeUnmount(() => {
 }
 
 .explorer3d-embed {
+  /* 与 2D 同款 absolute-fill（wrap 高度来自 flex/min-height 时 percentage 塌 0） */
+  position: absolute;
+  inset: 0;
+  width: 100%;
   height: 100%;
 }
 
@@ -1071,10 +1118,30 @@ onBeforeUnmount(() => {
 }
 
 .workbench-flow {
+  /* absolute-fill：wrap 高度来自 flex/min-height 时，percentage height 会塌 0 */
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   background: var(--nr-bg-inset);
   border-radius: var(--nr-radius-md, 12px);
+}
+
+/* 缩略小地图：组件默认白底＋浅灰节点，暗色主题里刺眼且节点不可辨——令牌化重配色 */
+.workbench-flow :deep(.vue-flow__minimap) {
+  background-color: var(--nr-bg-elevated);
+  border: 1px solid var(--nr-glass-border);
+  border-radius: var(--nr-radius-md, 12px);
+  overflow: hidden;
+}
+
+.workbench-flow :deep(.vue-flow__minimap-node) {
+  fill: var(--nr-primary-light);
+  stroke: var(--nr-primary);
+}
+
+.workbench-flow :deep(.vue-flow__minimap-mask) {
+  fill: var(--nr-bg-inset-deep);
 }
 
 .panel-toolbar {
@@ -1163,6 +1230,13 @@ onBeforeUnmount(() => {
 @media (max-width: 960px) {
   .workbench-layout {
     grid-template-columns: 1fr;
+  }
+  /* 单列流：显式落位退回自动（否则 col2 落位在 1fr 网格里越界） */
+  .canvas-card,
+  .community-panel,
+  .panel-card {
+    grid-column: auto;
+    grid-row: auto;
   }
 }
 

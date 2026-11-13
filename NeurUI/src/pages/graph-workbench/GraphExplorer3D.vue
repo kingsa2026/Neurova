@@ -328,13 +328,15 @@ const _createGraph = async () => {
           return sid === currentNodeId.value || tid === currentNodeId.value
             ? LINK_HIGHLIGHT : LINK_BASE
         })
-        .linkWidth(4)
+        /* 连接线粗细：4 → 2.7（用户裁定减三分之一） */
+        .linkWidth(2.7)
         .linkOpacity(0.85)
         // 微曲率——有机感，不是 CAD 直线
         .linkCurvature(0.18)
         // ── 生物电粒子：沿线流动的信号脉冲 ──
         .linkDirectionalParticles(5)
-        .linkDirectionalParticleSpeed(0.015)
+        /* 粒子流速：0.015 → 0.0075（用户裁定减半） */
+        .linkDirectionalParticleSpeed(0.0075)
         .linkDirectionalParticleWidth(4.5)
         .linkDirectionalParticleColor(LINK_PARTICLE)
         // ── 灯光：暗场点光＋环境光（辉光材质需要） ──
@@ -430,6 +432,14 @@ onBeforeUnmount(() => {
 
 .hops-select {
   width: 76px;
+}
+
+/* 类型筛选：窄面板里不许缩到 min-content——否则下拉跟着触发器变窄，
+   「暂无数据」会一字一行竖排（用户实测截图）。给稳定弹性宽度。 */
+.types-select {
+  flex: 1 1 200px;
+  min-width: 200px;
+  max-width: 340px;
 }
 
 .hop-label {
