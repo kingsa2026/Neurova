@@ -10,6 +10,7 @@
  *   extract_tool_artifacts 同契约）/ artifactFromEvent / mergeMessageArtifacts 去重。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 import {
   fetchContentObjectUrl,
   artifactContentObjectUrl,
@@ -22,8 +23,11 @@ import {
   artifactsFromToolResult,
   mergeMessageArtifacts,
   artifactUiIcon,
+  openArtifactTab,
+  openMessageArtifact,
   type MessageArtifact,
 } from '../artifacts'
+import { useRightDockStore } from '@/stores/rightDock'
 
 describe('parseToolResultArtifacts', () => {
   it('完整 JSON dict 提取 file_path', () => {
@@ -37,11 +41,13 @@ describe('parseToolResultArtifacts', () => {
   it('audio_path 与 output_ref.path 均可提取', () => {
     const raw = JSON.stringify({
       audio_path: 'C:\\Temp\\neurova_tts\\tts_1.wav',
-      output_ref: { path: 'E:\\ws\\tool_outputs\\ref_1.json', size_bytes: 99 },
+      // output_ref.path 本身仍是合法提取源（2026-11-14 起仅排除内部引用形态：
+      // tool_outputs/ 目录与 ref_*.json 命名，见下方专测）
+      output_ref: { path: 'E:\\ws\\fetched.json', size_bytes: 99 },
     })
     const paths = parseToolResultArtifacts(raw).map((r) => r.path)
     expect(paths).toContain('C:\\Temp\\neurova_tts\\tts_1.wav')
-    expect(paths).toContain('E:\\ws\\tool_outputs\\ref_1.json')
+    expect(paths).toContain('E:\\ws\\fetched.json')
   })
 
   it('截断 JSON（[:500] 切掉收尾引号）正则兜底', () => {
@@ -60,6 +66,38 @@ describe('parseToolResultArtifacts', () => {
     expect(parseToolResultArtifacts('just text')).toEqual([])
     expect(parseToolResultArtifacts(JSON.stringify({ stdout: 'hello' }))).toEqual([])
     expect(parseToolResultArtifacts('')).toEqual([])
+  })
+
+  it('OutputRef 内部引用（tool_outputs/、ref_*.json）不提取——与后端注册侧同契约', () => {
+    // 2026-11-14 实测残差：后端注册侧排除后 SSE artifact 事件不再发，
+    // 但 tool_result 文本仍带 output_ref.path——前端兜底通道若不同步排除，
+    // ref_*.json 依旧顶进产出物卡片，且因无 artifactId 点开必报"产物内容不可用"。
+    const raw = JSON.stringify({
+      success: true,
+      output_ref: {
+        path: 'E:\\ws\\tool_outputs\\ref_1794595742_run_code_22a5.json',
+        size_bytes: 14296,
+        truncated: true,
+        preview: '{}',
+      },
+      note: '工具 run_code 输出超阈值，完整内容已落盘',
+    })
+    expect(parseToolResultArtifacts(raw)).toEqual([])
+    expect(artifactsFromToolResult(raw)).toEqual([])
+    // 正则兜底通道（半截 JSON）同样排除
+    const truncated = '{"output_ref": {"path": "E:\\\\ws\\\\tool_outputs\\\\ref_1_x.json"'
+    expect(parseToolResultArtifacts(truncated)).toEqual([])
+  })
+
+  it('混合结果：真实文件保留，OutputRef 引用剔除', () => {
+    const mixed = JSON.stringify({
+      success: true,
+      file_path: 'E:\\ws\\报告.md',
+      output_ref: { path: 'E:\\ws\\tool_outputs\\ref_1.json' },
+    })
+    const refs = parseToolResultArtifacts(mixed)
+    expect(refs).toHaveLength(1)
+    expect(refs[0].path).toBe('E:\\ws\\报告.md')
   })
 })
 
@@ -119,6 +157,46 @@ describe('消息级产出物收集（产出物卡片契约）', () => {
     expect(merged[0].artifactId).toBe('ar1')
     expect(merged[1].name).toBe('note.md')
     expect(mergeMessageArtifacts(undefined, [])).toEqual([])
+  })
+
+  it('mergeMessageArtifacts：兜底通道先到（无 artifactId）时，后到的主通道事件补全 id', () => {
+    // 真实时序（2026-11-14 kai 增量版报告实测缺陷）：SSE 事件表里 tool_result
+    // 恒先于 artifact（console.py 同一 events 列表顺序吐出）——兜底通道的
+    // 无 id 项先占位，主通道富信息项被"先到先得"丢掉 → 产出物卡片的
+    // 审验/打开 永远拿不到 artifactId → "产物内容不可用"。
+    const existing: MessageArtifact[] = [
+      { name: 'Neurova探索报告_2026-11-14增量版.md', kind: 'markdown' },
+    ]
+    const merged = mergeMessageArtifacts(existing, [
+      {
+        artifactId: 'ar9',
+        name: 'Neurova探索报告_2026-11-14增量版.md',
+        kind: 'markdown',
+        size: 3697,
+      },
+    ])
+    expect(merged).toHaveLength(1)
+    expect(merged[0].artifactId).toBe('ar9')
+    expect(merged[0].size).toBe(3697)
+  })
+
+  it('openMessageArtifact：同名 dock tab 已有富信息时，不得被无 id 项的 undefined 反向覆盖', () => {
+    setActivePinia(createPinia())
+    const dock = useRightDockStore()
+    // 主通道先开好带 artifactId 的 tab
+    openArtifactTab({
+      artifact_id: 'ar9',
+      kind: 'markdown',
+      name: '报告.md',
+      size: 10,
+      path: 'E:\\ws\\报告.md',
+    })
+    // 产出物卡片按钮（修复前中间态的无 id 项）再开同一 tab：
+    // data 展开合并不得把已得的 artifactId 冲成 undefined
+    openMessageArtifact({ name: '报告.md', kind: 'markdown' })
+    const tab = dock.tabs.find((t) => t.id === `doc:p${shortHash('报告.md')}`)
+    expect(tab).toBeDefined()
+    expect(tab?.data.artifactId).toBe('ar9')
   })
 
   it('artifactUiIcon：kind → UiIcon 图标名，未知 kind 落 file', () => {

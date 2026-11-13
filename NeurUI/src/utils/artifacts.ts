@@ -63,8 +63,32 @@ export interface ParsedPathRef {
 }
 
 /**
+ * OutputRef 内部引用判别（与后端 artifacts_api._is_internal_output_ref 同契约）：
+ * `tool_outputs/` 目录与 `ref_*.json` 命名是 tool_output_ref.py 大输出折叠
+ * 机制的专属形态——内部减负机制不是产出物（2026-11-14 产品口径）。后端
+ * 注册侧已排除；前端兜底通道若不同步排除，ref_*.json 依旧顶进产出物卡片
+ * （且无 artifactId，点开必报"产物内容不可用"——kai 增量版报告轮实测）。
+ */
+function isInternalOutputRef(path: string): boolean {
+  const parts = path.split(/[\\/]+/)
+  if (parts.includes('tool_outputs')) return true
+  const base = parts[parts.length - 1] ?? ''
+  return base.startsWith('ref_') && base.endsWith('.json')
+}
+
+function dedupePaths(refs: ParsedPathRef[]): ParsedPathRef[] {
+  const out: ParsedPathRef[] = []
+  for (const ref of refs) {
+    if (isInternalOutputRef(ref.path)) continue
+    if (!out.some((f) => f.path === ref.path)) out.push(ref)
+  }
+  return out
+}
+
+/**
  * 从 tool_result 文本提取产物路径引用。
  * JSON dict 精确解析优先；截断 JSON 正则兜底（与后端同思路）。
+ * OutputRef 内部引用（tool_outputs/、ref_*.json）一律剔除。
  */
 export function parseToolResultArtifacts(resultText: string): ParsedPathRef[] {
   if (!resultText || typeof resultText !== 'string') return []
@@ -83,18 +107,18 @@ export function parseToolResultArtifacts(resultText: string): ParsedPathRef[] {
             break
           }
         }
-        if (ok && typeof node === 'string' && node && !found.some((f) => f.path === node)) {
+        if (ok && typeof node === 'string' && node) {
           found.push({ path: node, field })
         }
       }
       const ref = (parsed as Record<string, unknown>).output_ref
       if (ref && typeof ref === 'object') {
         const p = (ref as Record<string, unknown>).path
-        if (typeof p === 'string' && p && !found.some((f) => f.path === p)) {
+        if (typeof p === 'string' && p) {
           found.push({ path: p, field: 'output_ref.path' })
         }
       }
-      return found
+      return dedupePaths(found)
     }
   } catch {
     /* 非 JSON，走正则 */
@@ -108,11 +132,11 @@ export function parseToolResultArtifacts(resultText: string): ParsedPathRef[] {
     } catch {
       /* 半截转义，原样用 */
     }
-    if (raw && !found.some((f) => f.path === raw)) {
+    if (raw) {
       found.push({ path: raw, field: m[1] })
     }
   }
-  return found
+  return dedupePaths(found)
 }
 
 /** 后端 artifact 事件的载荷形态（console.py _extract_artifacts 输出） */
@@ -176,7 +200,7 @@ function artifactKey(a: MessageArtifact): string {
   return a.name || (a.path ? basenameOf(a.path) : '')
 }
 
-/** 合并消息产出物（按 key 去重，先到先得保住 artifactId/size 富信息） */
+/** 合并消息产出物（按 key 去重；富信息优先——不问先到后到） */
 export function mergeMessageArtifacts(
   existing: MessageArtifact[] | undefined,
   incoming: MessageArtifact[],
@@ -185,8 +209,16 @@ export function mergeMessageArtifacts(
   for (const item of incoming) {
     const key = artifactKey(item)
     if (!key) continue
-    if (merged.some((m) => artifactKey(m) === key)) continue
-    merged.push(item)
+    const idx = merged.findIndex((m) => artifactKey(m) === key)
+    if (idx === -1) {
+      merged.push(item)
+      continue
+    }
+    // 富信息优先：SSE 事件表里 tool_result 恒先于 artifact 事件（console.py
+    // 同一 events 列表顺序吐出），兜底通道的无 artifactId 项必先占位——
+    // 若一味"先到先得"，主通道的 artifactId 永远补不进来，产出物卡片的
+    // 审验/打开 必然"产物内容不可用"（2026-11-14 kai 增量版报告实测）。
+    if (!merged[idx].artifactId && item.artifactId) merged[idx] = { ...item }
   }
   return merged
 }
@@ -218,15 +250,18 @@ export function openMessageArtifact(artifact: MessageArtifact): void {
   const dock = useRightDockStore()
   const kind = (KIND_BY_EXT[bucketOf(artifact.name)] ?? (artifact.kind as DockTabKind)) || 'text'
   const id = `doc:p${shortHash(artifact.name || artifact.path || artifact.artifactId || '')}`
+  // 只带**实有**字段：tab 可能已由主通道（openArtifactTab）开好并带上
+  // artifactId——这里若把 undefined.artifactId 展开进去，会把已得的 id
+  // 冲掉，预览面板随即"产物内容不可用"（2026-11-14 实测）。
+  const data: { artifactId?: string; path?: string } = {}
+  if (artifact.artifactId) data.artifactId = artifact.artifactId
+  if (artifact.path) data.path = artifact.path
   dock.openTab({
     id,
     kind,
     title: artifact.name || artifact.path || '',
     icon: DOCK_ICONS[kind] ?? 'file',
-    data: {
-      artifactId: artifact.artifactId,
-      path: artifact.path,
-    },
+    data,
   })
 }
 
