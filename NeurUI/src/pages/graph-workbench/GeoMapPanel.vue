@@ -18,8 +18,8 @@
     <div v-if="mapFailed" class="geo-empty">
       <a-empty :description="t('knowledge.workbenchNoGeoItems')" />
     </div>
-    <div v-if="!loading && !items.length" class="geo-empty">
-      <a-empty :description="t('knowledge.workbenchNoGeoItems')" />
+    <div v-if="!loading && !items.length && !nodeGeo.length" class="geo-empty">
+      <a-empty :description="emptyReason" />
     </div>
   </div>
 </template>
@@ -30,12 +30,17 @@
  * 底图用本地空白样式（不依赖外部瓦片服务）；数据来自 /knowledge/geo
  * （服务端已按可见性与 radius/bbox 过滤，前端不重复判权）。
  */
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import { Map as MaplibreMap, Marker, Popup, AttributionControl } from 'maplibre-gl'
 import GlassButton from '@/components/GlassButton.vue'
 import { request } from '@/api'
+
+const props = defineProps<{
+  nodes?: Array<{ id: string; label: string; type: string }>
+  agentId?: string
+}>()
 
 const { t } = useI18n()
 const mapRef = ref<HTMLElement | null>(null)
@@ -44,6 +49,13 @@ const lat = ref('')
 const lon = ref('')
 const radiusKm = ref('')
 const items = ref<Array<{ knowledge_id: string; title: string; geo: { lat: number; lon: number } }>>([])
+const nodeGeo = ref<Array<{ node_id: string; label: string; type: string; geo: { lat: number; lon: number } }>>([])
+const emptyReason = computed(() => {
+  if ((props.nodes?.length ?? 0) > 0 || nodeGeo.value.length || items.value.length) {
+    return t('knowledge.workbenchNoGeoNodesHint')
+  }
+  return t('knowledge.workbenchNoGeoItems')
+})
 const mapFailed = ref(false)
 
 let map: MaplibreMap | null = null
@@ -61,6 +73,15 @@ const fetchGeo = async () => {
     }
     const res: any = await request.get('/knowledge/geo', { params })
     items.value = res?.data?.items ?? []
+    if (props.agentId) {
+      try {
+        const nr: any = await request.get(
+          `/knowledge-graph/${props.agentId}/spatial-nodes`)
+        nodeGeo.value = nr?.data ?? []
+      } catch {
+        nodeGeo.value = []
+      }
+    }
     renderMarkers()
   } catch (e: any) {
     message.error(e?.response?.data?.detail || e?.message || t('common.error'))
@@ -92,11 +113,29 @@ const renderMarkers = () => {
         .addTo(map!),
     )
   }
-  if (items.value.length === 1 && map) {
-    map.flyTo({ center: [items.value[0].geo.lon, items.value[0].geo.lat], zoom: 5 })
-  } else if (items.value.length > 1 && map) {
-    const lons = items.value.map((i) => i.geo.lon)
-    const lats = items.value.map((i) => i.geo.lat)
+  // 图谱节点标记（社区/类型着色由节点自身语义决定，这里用固定异形标记区分）
+  for (const node of nodeGeo.value) {
+    if (!node.geo?.lat || !node.geo?.lon) continue
+    const el = document.createElement('div')
+    el.className = 'geo-marker geo-marker-node'
+    el.textContent = '◉'
+    el.title = node.label
+    markers.push(
+      new Marker({ element: el })
+        .setLngLat([node.geo.lon, node.geo.lat])
+        .setPopup(new Popup({ offset: 12 }).setText(node.label))
+        .addTo(map!),
+    )
+  }
+  const allPoints = [
+    ...items.value.map((i) => i.geo).filter((g) => g?.lat && g?.lon),
+    ...nodeGeo.value.map((n) => n.geo).filter((g) => g?.lat && g?.lon),
+  ]
+  if (allPoints.length === 1 && map) {
+    map.flyTo({ center: [allPoints[0].lon, allPoints[0].lat], zoom: 5 })
+  } else if (allPoints.length > 1 && map) {
+    const lons = allPoints.map((g) => g.lon)
+    const lats = allPoints.map((g) => g.lat)
     map.fitBounds(
       [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
       { padding: 60, maxZoom: 8 },
@@ -163,6 +202,13 @@ onBeforeUnmount(() => {
   border: 1px solid var(--nr-glass-border);
   border-radius: var(--nr-radius-md, 12px);
   overflow: hidden;
+}
+
+.geo-marker-node {
+  color: var(--nr-primary-light, #818cf8);
+  font-size: 14px;
+  line-height: 18px;
+  text-align: center;
 }
 
 .geo-empty {

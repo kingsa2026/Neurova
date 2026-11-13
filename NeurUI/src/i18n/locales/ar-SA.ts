@@ -909,6 +909,7 @@ export default {
     workbenchLat: 'خط العرض',
     workbenchLon: 'خط الطول',
     workbenchNoGeoItems: 'لا توجد إدخالات بإحداثيات في النطاق المرئي',
+    workbenchNoGeoNodesHint: "لا تحمل العقد الظاهرة إحداثيات جغرافية — أدخل خط العرض/الطول عند إنشاء إدخال المعرفة أو تحريره ليجب العقدة على الخريطة",
     workbenchRadius: 'نصف القطر كم',
     workbenchSpatial: 'المكاني',
     workbenchView2d: 'عرض ثنائي الأبعاد',

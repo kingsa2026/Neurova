@@ -290,7 +290,9 @@
           <a-tab-pane key="spatial" :tab="t('knowledge.workbenchSpatial')">
             <!-- antdv tabs 会挂载全部页签内容；地图/3D 只在首次激活时挂载，
                  jsdom/无 WebGL 环境不因未打开的页签崩 -->
-            <GeoMapPanel v-if="activeTab === 'spatial'" />
+            <GeoMapPanel v-if="activeTab === 'spatial'"
+                          :nodes="filteredNodes"
+                          :agent-id="agentId" />
           </a-tab-pane>
         </a-tabs>
       </GlassCard>

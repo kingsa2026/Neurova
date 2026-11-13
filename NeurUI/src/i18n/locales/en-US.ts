@@ -907,6 +907,7 @@ export default {
     workbenchLat: 'Latitude',
     workbenchLon: 'Longitude',
     workbenchNoGeoItems: 'No geo-tagged entries in the visible scope',
+    workbenchNoGeoNodesHint: "None of the visible nodes carry geographic coordinates — fill in latitude/longitude when creating or editing a knowledge entry and the node will appear on the map",
     workbenchRadius: 'Radius km',
     workbenchSpatial: 'Spatial',
     workbenchView2d: '2D view',

@@ -909,6 +909,7 @@ export default {
     workbenchLat: 'Breite',
     workbenchLon: 'Länge',
     workbenchNoGeoItems: 'Keine geotaggen Einträge im sichtbaren Bereich',
+    workbenchNoGeoNodesHint: "Keine der sichtbaren Knoten hat geografische Koordinaten — Breiten-/Längengrad beim Anlegen oder Bearbeiten eines Wissenseintrags ausfüllen, dann erscheint der Knoten auf der Karte",
     workbenchRadius: 'Radius km',
     workbenchSpatial: 'Räumlich',
     workbenchView2d: '2D-Ansicht',

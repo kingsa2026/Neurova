@@ -14,7 +14,7 @@ from neurova.api.auth import get_current_user_or_default
 from neurova.core import app_settings
 from neurova.core.logger import get_logger
 import typing
-from typing import Dict
+from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
@@ -159,6 +159,38 @@ async def get_knowledge_graph(
             "hint": "" if nodes else "图谱为空：导入知识或通过知识条目抽取生成图谱节点（见 graph_bridge）",
         },
     }
+
+
+@router.get("/{agent_id}/spatial-nodes")
+async def get_graph_spatial_nodes(
+    agent_id: str,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+):
+    """空间视图（A6）节点落图：可见图节点按同名条目的 geo 解析坐标。
+
+    图节点本身不携带坐标——与节点同名的知识条目（标题＝节点标签）填写了
+    经纬度时节点才落图；无坐标节点不进结果（诚实不造坐标）。可见性边界
+    与条目读数同源（repo.visible_items）。
+    """
+    manager = _get_kg_manager(agent_id, _tenant_of(current_user))
+    nodes = list(manager._nodes.values()) if manager is not None else []
+    from neurova.api.endpoints.knowledge_common import get_repository
+
+    repo = get_repository()
+    geo_by_title: dict = {}
+    for it in repo.visible_items(current_user, scope="all"):
+        g = it.get("geo")
+        title = str(it.get("title") or "")
+        if g and title and title not in geo_by_title:
+            geo_by_title[title] = g
+    out = []
+    for n in nodes:
+        g = geo_by_title.get(n.label)
+        if g:
+            out.append({"node_id": n.node_id, "label": n.label,
+                        "type": n.nodeTypeValue, "geo": g})
+    return {"code": 0, "data": out, "request_id": _get_request_id(request)}
 
 
 @router.get("/{agent_id}/knowledge-graph/search")

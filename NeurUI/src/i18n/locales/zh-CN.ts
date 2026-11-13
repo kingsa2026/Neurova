@@ -916,6 +916,7 @@ export default {
     workbenchLat: '纬度',
     workbenchLon: '经度',
     workbenchNoGeoItems: '可见范围内没有带坐标的条目',
+    workbenchNoGeoNodesHint: "当前可见节点均未标注地理坐标——在知识条目创建/编辑时填写经纬度，对应节点即可落图",
     workbenchRadius: '半径 km',
     workbenchSpatial: '空间',
     workbenchView2d: '2D 视图',

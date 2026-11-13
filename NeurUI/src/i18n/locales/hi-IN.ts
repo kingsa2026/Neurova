@@ -909,6 +909,7 @@ export default {
     workbenchLat: 'अक्षांश',
     workbenchLon: 'देशांतर',
     workbenchNoGeoItems: 'दृश्य क्षेत्र में कोई जियो-टैग प्रविष्टि नहीं',
+    workbenchNoGeoNodesHint: "दिखाई दे रहे किसी नोड पर भौगोलिक निर्देशांक नहीं हैं——ज्ञान प्रविष्टि बनाते/संपादित करते समय अक्षांश/देशांतर भरें, तब संबंधित नोड नक्शे पर दिखेगा",
     workbenchRadius: 'त्रिज्या किमी',
     workbenchSpatial: 'स्थानिक',
     workbenchView2d: '2D दृश्य',
