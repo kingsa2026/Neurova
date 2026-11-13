@@ -1465,3 +1465,34 @@ tests/unit/agent/test_derivationReachesTurnMetadata.py
 #   分支的 ref，靠「检出附带」就红在「解析不到」上（构建 cnb-98o-1k6rpqmf9#003 三格）。
 #   判据咬四件：物化 stage 在、排在跑子集之前、取不到就响应、受治面非空。
 tests/unit/ci/test_mainBaselineRefIsMaterialized.py
+tests/unit/knowledge/enterprise/test_sqlErpUpgrade.py
+tests/unit/knowledge/ontology/test_artifactAttribution.py
+tests/unit/knowledge/ontology/test_exportFormats.py
+tests/unit/knowledge/ontology/test_accountabilityQuery.py
+tests/unit/knowledge/ontology/test_rdfImport.py
+tests/unit/knowledge/ontology/test_simulationIsolation.py
+tests/unit/knowledge/ontology/test_simulationDiff.py
+tests/unit/knowledge/ontology/test_decisionLedger.py
+tests/unit/knowledge/ontology/test_decisionCausalChain.py
+tests/unit/knowledge/ontology/test_decisionPrecedents.py
+tests/unit/knowledge/ontology/test_stateMachineValidation.py
+tests/unit/knowledge/ontology/test_stateEventBridge.py
+tests/unit/knowledge/enterprise/test_enterpriseIntervalSync.py
+tests/unit/knowledge/enterprise/test_lakehouseConnectors.py
+tests/unit/knowledge/enterprise/test_webhookIngest.py
+tests/unit/knowledge/ontology/test_semiNaiveEquivalence.py
+tests/unit/knowledge/ontology/test_sparqlReadOnly.py
+tests/unit/knowledge/ontology/test_functionRegistry.py
+tests/unit/knowledge/ontology/test_functionEval.py
+tests/unit/knowledge/ontology/test_functionDerivationGovernance.py
+tests/unit/knowledge/ontology/test_actionPrecondition.py
+tests/unit/knowledge/ontology/test_actionStateChange.py
+tests/unit/knowledge/ontology/test_actionGovernanceInherited.py
+tests/unit/knowledge/ontology/test_bitemporalRestWiring.py
+tests/unit/knowledge/ontology/test_graphAnchorAliasExpansion.py
+tests/unit/knowledge/ontology/test_quantityNormalization.py
+tests/unit/knowledge/ontology/test_extractionNumericQualifier.py
+tests/unit/knowledge/ontology/test_artifactStore.py
+tests/unit/knowledge/ontology/test_byteRoundTrip.py
+# P2-29：进化统一测试按现实现重写并纳入受保护子集（原整文件 skip 已解除）
+tests/integration/test_evolution_unified.py
