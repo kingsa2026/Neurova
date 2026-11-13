@@ -387,7 +387,10 @@ async def build_context_v2(
 
 
 @router.get("/stats", response_model=ContextStats)
-async def get_context_stats(request: Request):
+async def get_context_stats(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """获取上下文统计信息"""
     return ContextStats(
         total_contexts=0,
@@ -443,6 +446,7 @@ async def get_context_budget(
 async def get_context_preview(
     request: Request,
     context_id: str = Path(..., description="上下文ID"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """获取上下文预览（P2-1 实装：读取 /build 登记的构建产物；未知 id 404）"""
     entry = _built_contexts.get(context_id)
@@ -464,6 +468,7 @@ async def compress_context(
     request: Request,
     context_id: str = Path(..., description="上下文ID"),
     target_tokens: int = Query(default=4000, description="目标 token 数"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """压缩上下文（P2-1 实装：保留最近段落在目标 token 预算内，淘汰最旧段；
     压缩结果写回登记，后续 preview 读到的是压缩后版本）"""
@@ -525,6 +530,7 @@ async def inject_reflection_log(
     request: Request,
     agent_id: str = Query(default="default", description="Agent ID"),
     limit: int = Query(default=10, ge=1, le=100, description="数量限制"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """注入反思日志到上下文"""
     request_id = _get_request_id(request)
@@ -564,6 +570,7 @@ async def inject_memories(
     agent_id: str = Query(default="default", description="Agent ID"),
     query: str = Query(default="", description="搜索查询"),
     limit: int = Query(default=10, ge=1, le=100, description="数量限制"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """注入相关记忆到上下文"""
     request_id = _get_request_id(request)
@@ -602,6 +609,7 @@ async def inject_hot_memories(
     request: Request,
     agent_id: str = Query(default="default", description="Agent ID"),
     limit: int = Query(default=5, ge=1, le=50, description="数量限制"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """注入高温记忆到上下文"""
     request_id = _get_request_id(request)

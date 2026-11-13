@@ -2,7 +2,10 @@
 Computer Management API Endpoints
 """
 
-from fastapi import APIRouter, HTTPException, Depends, status
+import hashlib
+import hmac
+
+from fastapi import APIRouter, HTTPException, Depends, Request, status
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
@@ -240,19 +243,60 @@ async def revoke_computer(
 # Heartbeat & Status
 # ============================================================================
 
+def _verifyDaemonCredential(computer: Computer, presented: Optional[str]) -> None:
+    """校验 daemon 上报的共享令牌（P2-3：心跳此前是匿名写入面）。
+
+    daemon 在 BYOA 配对时获得 device credential；服务端存 SHA256 摘要
+    （Computer.daemon_token）。daemon 交原文（服务端现算摘要比对）或直接
+    交摘要均可；常量时间比较。缺凭证/未配对/不匹配一律 401——不因"保持
+    可用"而对匿名请求放行写入。
+    """
+    stored = computer.daemon_token
+    if not stored:
+        raise HTTPException(
+            status_code=401,
+            detail="computer 未配对，无共享令牌可校验；请先完成 BYOA 配对",
+        )
+    if not presented:
+        raise HTTPException(
+            status_code=401,
+            detail="daemon credential required（Authorization: Bearer <token> 或 ?token=）",
+        )
+    digest = hashlib.sha256(presented.encode("utf-8")).hexdigest()
+    if not (hmac.compare_digest(digest, stored) or hmac.compare_digest(presented, stored)):
+        raise HTTPException(status_code=401, detail="daemon credential mismatch")
+
+
 @router.post("/{computer_id}/heartbeat")
 async def heartbeat(
     computer_id: str,
+    request: Request,
     version: Optional[str] = None,
 ):
     """
-    接收 Computer heartbeat
+    接收 Computer heartbeat（daemon 上报，须携带配对共享令牌）
 
     - **computer_id**: Computer ID
     - **version**: daemon 版本
+    - 凭证：`Authorization: Bearer <token>` 优先，回退 `?token=`
     """
     try:
         manager = get_computer_manager_singleton()
+
+        computer = manager.get_computer(computer_id)
+        if not computer:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Unknown computer: {computer_id}"
+            )
+
+        auth_header = request.headers.get("authorization") or ""
+        presented = None
+        if auth_header.lower().startswith("bearer "):
+            presented = auth_header[7:].strip()
+        if not presented:
+            presented = request.query_params.get("token")
+        _verifyDaemonCredential(computer, presented)
 
         result = manager.heartbeat(computer_id, version=version)
 
@@ -338,6 +382,7 @@ async def admin_list_all_computers(
 @router.get("/cloud", response_model=Computer)
 async def get_cloud_computer(
     company_id: Optional[str] = None,
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     获取 Cloud Computer 实例
@@ -370,12 +415,18 @@ async def get_cloud_computer(
 @router.post("/cleanup-offline")
 async def cleanup_offline_computers(
     timeout_minutes: int = 90,
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
-    清理离线超过超时时间的 Computers
+    清理离线超过超时时间的 Computers（仅管理员）
 
     - **timeout_minutes**: 超时时间 (分钟)
     """
+    if current_user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions. Required role: admin",
+        )
     try:
         manager = get_computer_manager_singleton()
 

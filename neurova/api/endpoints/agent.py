@@ -844,7 +844,11 @@ async def delete_agent(request: Request, agent_id: str = FastAPIPath(...), curre
 
 
 @router.get("/{agent_id}/stats")
-async def get_agent_stats(request: Request, agent_id: str = FastAPIPath(...)):
+async def get_agent_stats(
+    request: Request,
+    agent_id: str = FastAPIPath(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """获取 Agent 统计"""
     _get_request_id(request)
 
@@ -894,7 +898,11 @@ async def switch_agent(request: Request, agent_id: str = FastAPIPath(...), curre
 
 
 @router.get("/{agent_id}/constitution")
-async def get_constitution(request: Request, agent_id: str = FastAPIPath(...)):
+async def get_constitution(
+    request: Request,
+    agent_id: str = FastAPIPath(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """获取 Agent 宪法"""
     _get_request_id(request)
 
@@ -938,6 +946,7 @@ async def make_decision(
     request: Request,
     agent_id: str = FastAPIPath(...),
     body: DecisionRequest = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """请求 Agent 做出决策"""
     _get_request_id(request)

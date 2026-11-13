@@ -433,7 +433,11 @@ async def update_model(
         raise HTTPException(status_code=500, detail=f"Failed to update model: {str(e)}")
 
 @router.get("/active", response_model=ModelInfo)
-async def get_active_model(request: Request, agent_id: str = Query(default="default")):
+async def get_active_model(
+    request: Request,
+    agent_id: str = Query(default="default"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """获取当前活跃模型"""
     _get_request_id(request)
 

@@ -50,6 +50,12 @@ def _client(fake_tts, monkeypatch):
     monkeypatch.setattr(audio_api, "_get_tts_manager", lambda: fake_tts)
     app = FastAPI()
     app.include_router(audio_api.router, prefix="/api/v1/audio")
+    # P2-1 收口后 audio 面需登录——测试身份走依赖覆盖。
+    from neurova.api.auth import get_current_user as _gcu
+
+    app.dependency_overrides[_gcu] = lambda: {
+        "user_id": "tuser", "username": "tuser", "role": "admin", "neuser_id": "tuser",
+    }
     return TestClient(app)
 
 

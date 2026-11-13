@@ -4,7 +4,6 @@ Enhanced Memory Search API - 增强版记忆检索API
 支持 NeRF 体渲染融合模式的配置和查询。
 """
 
-import datetime
 from neurova.core.logger import get_logger
 import typing
 
@@ -15,7 +14,9 @@ from neurova.api.deps import get_current_user, require_admin
 from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
-router = APIRouter()
+# P1-1：router 级登录门——本文件全部端点默认要求登录（/settings 写面、
+# /nerf-settings 写面另有 require_admin 叠加）。
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 def _get_all_recall_engines(request: Request) -> typing.List:
@@ -517,9 +518,12 @@ async def get_channel_weights(
 
 @router.post("/decay")
 async def decay_activations():
-    """手动触发激活衰减"""
-    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    return {"code": 0, "message": "Activation decay triggered", "data": {"triggered_at": now, "affected_count": 0}}
+    """手动触发激活衰减
+
+    P2-6：激活衰减尚无运行时实现，此前恒回 affected_count:0 的假成功。
+    改为诚实 501，不谎报已触发。
+    """
+    raise HTTPException(status_code=501, detail="激活衰减未实现")
 
 
 @router.post("/analyze")

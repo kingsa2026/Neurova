@@ -22,7 +22,9 @@ from neurova.api.auth import get_current_user, get_current_user_or_default
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+# P1-5：router 级登录门——本文件全部端点默认要求登录；
+# 端点内既有的 get_current_user / get_current_user_or_default 声明保持不变。
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 # P2-6: fire-and-forget 后台任务持强引用集合——防任务被 GC 中途回收、
 # 异常无人收割（对照 multi_model_client._pending_tasks 姿势）

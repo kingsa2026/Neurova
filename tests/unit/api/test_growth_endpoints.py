@@ -66,6 +66,10 @@ class GrowthReflectionEndpointsTest(unittest.TestCase):
         # context 路由单独挂载
         app_ctx = FastAPI()
         app_ctx.include_router(context_api.router, prefix="/api/v1/context")
+        # P1-2 收口后 context router 级需登录——与 growth 面同一测试身份
+        app_ctx.dependency_overrides[_gcu] = lambda: {
+            "user_id": "tuser", "username": "tuser", "role": "admin", "neuser_id": "tuser",
+        }
         self.ctx_client = TestClient(app_ctx)
         self._ctx_patcher = patch.object(context_api, "_get_agent", return_value=agent)
         self._ctx_patcher.start()

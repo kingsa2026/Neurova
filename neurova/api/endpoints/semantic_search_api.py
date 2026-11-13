@@ -572,8 +572,11 @@ async def compare_search(
 
 
 @router.post("/analyze")
-async def analyze_query(body: AnalyzeQueryRequest):
-    """分析查询特征 - 评估三种搜索方式的预期表现"""
+async def analyze_query(
+    body: AnalyzeQueryRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """分析查询特征 - 评估三种搜索方式的预期表现（登录/服务凭证，P3-7）"""
     query = body.query
     features = _analyze_query_features(query)
     weights = _recommend_weights(features)

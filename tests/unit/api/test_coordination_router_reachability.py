@@ -118,6 +118,12 @@ class TestSummaryEndpointServes:
 
         app = fastapi.FastAPI()
         app.include_router(coordination_api.router, prefix="/api")
+        # P1-6 收口后 coordination router 级需登录——测试身份走依赖覆盖。
+        from neurova.api.auth import get_current_user as _gcu
+
+        app.dependency_overrides[_gcu] = lambda: {
+            "user_id": "tuser", "username": "tuser", "role": "admin", "neuser_id": "tuser",
+        }
         client = TestClient(app)
 
         import warnings

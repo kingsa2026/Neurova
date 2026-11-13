@@ -64,8 +64,11 @@ async def accessQuery(
 
 
 @router.post("/access/analyze")
-async def accessAnalyze(body: AnalyzeQueryRequest):
-    """analyze 动词：转发 `/v1/semantic-search/analyze` 的查询特征分析。"""
+async def accessAnalyze(
+    body: AnalyzeQueryRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """analyze 动词：转发 `/v1/semantic-search/analyze` 的查询特征分析（登录/服务凭证，P3-7）。"""
     from neurova.api.endpoints.semantic_search_api import analyze_query
 
     return await analyze_query(body)

@@ -114,7 +114,7 @@ def _build_trends(days: int = 7) -> List[Dict[str, Any]]:
 
 
 @router.get("")
-async def get_system_stats(request: Request):
+async def get_system_stats(request: Request, current_user: Dict[str, Any] = Depends(get_current_user)):
     """获取系统统计（overview + 趋势，全部真实）"""
     _get_request_id(request)
     try:
@@ -133,7 +133,7 @@ async def get_system_stats(request: Request):
 
 
 @router.get("/system")
-async def get_system_info(request: Request):
+async def get_system_info(request: Request, current_user: Dict[str, Any] = Depends(get_current_user)):
     """获取系统信息（psutil 真实资源）"""
     try:
         import psutil
@@ -243,7 +243,7 @@ async def get_agents_stats(
 
 
 @router.get("/token-usage")
-async def get_token_usage(request: Request):
+async def get_token_usage(request: Request, current_user: Dict[str, Any] = Depends(get_current_user)):
     """获取进程级 Token 用量（真实记账器快照，服务启动起累计）
 
     数据源: neurova.core.usage_accounting.TokenUsageAccounting 单例
@@ -573,7 +573,7 @@ async def export_stats(
 
 
 @router.get("/usage")
-async def get_usage_stats(request: Request):
+async def get_usage_stats(request: Request, current_user: Dict[str, Any] = Depends(get_current_user)):
     """获取使用统计（真实：会话按天 + prometheus 调用/失败/延迟）"""
     _get_request_id(request)
 
@@ -600,7 +600,7 @@ async def get_usage_stats(request: Request):
 
 
 @router.get("/performance")
-async def get_performance_stats(request: Request):
+async def get_performance_stats(request: Request, current_user: Dict[str, Any] = Depends(get_current_user)):
     """获取性能统计（psutil 系统资源真实）"""
     _get_request_id(request)
 

@@ -177,6 +177,12 @@ class CanvasEndpointBase(unittest.TestCase):
         self.client.app.include_router(
             collaboration_api.router, prefix="/api/v1/collaboration"
         )
+        # P1-5 收口后 collaboration router 级需登录——测试身份走依赖覆盖。
+        from neurova.api.auth import get_current_user as _gcu
+
+        self.client.app.dependency_overrides[_gcu] = lambda: {
+            "user_id": "tuser", "username": "tuser", "role": "admin", "neuser_id": "tuser",
+        }
         patcher = patch.object(
             collaboration_api, "_get_canvas_store", return_value=self.store
         )

@@ -27,6 +27,12 @@ def _cleanSeenCursor(tmp_path, monkeypatch):
 def client():
     app = FastAPI()
     app.include_router(router)
+    # P1-6 收口后 coordination router 级需登录（reset 另收 admin）——测试身份走依赖覆盖。
+    from neurova.api.auth import get_current_user as _gcu
+
+    app.dependency_overrides[_gcu] = lambda: {
+        "user_id": "tuser", "username": "tuser", "role": "admin", "neuser_id": "tuser",
+    }
     return TestClient(app)
 
 

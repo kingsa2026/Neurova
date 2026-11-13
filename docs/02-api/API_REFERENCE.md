@@ -410,49 +410,50 @@
 > 守卫 `tests/unit/api/test_authSurfaceFreshness.py` 逐字比对，漂移即红。
 > 口径：只认**路由依赖图**里的身份/角色门；在 handler 体内自验 token 的那一类**未覆盖**，要确认它只能真打请求。404/405 不算门。
 
-**汇总**：路由 984 条（含方法展开）——需认证 **872**、公开 **112**。
+**汇总**：路由 999 条（含方法展开）——需认证 **979**、公开 **20**。
 
 | 模块前缀 | 路由 | 需认证 | 公开 |
 |----------|------|--------|------|
 | `agent-communication` | 12 | 12 | 0 |
 | `agent-enhancement` | 4 | 4 | 0 |
-| `agents` | 15 | 12 | 3 |
-| `analytics` | 4 | 4 | 0 |
-| `api` | 37 | 16 | 21 |
+| `agents` | 15 | 15 | 0 |
+| `analytics` | 5 | 5 | 0 |
+| `api` | 37 | 37 | 0 |
 | `artifacts` | 2 | 2 | 0 |
-| `audio` | 7 | 2 | 5 |
+| `audio` | 7 | 7 | 0 |
 | `audit` | 4 | 4 | 0 |
 | `auth` | 10 | 0 | 10 |
 | `backups` | 3 | 3 | 0 |
 | `benchmark` | 14 | 14 | 0 |
-| `budgets` | 7 | 0 | 7 |
+| `budgets` | 7 | 7 | 0 |
 | `build` | 6 | 6 | 0 |
 | `builder` | 5 | 5 | 0 |
-| `channel-adapters` | 11 | 8 | 3 |
+| `channel-adapters` | 11 | 10 | 1 |
 | `channel-configs` | 16 | 16 | 0 |
 | `channel-sharing` | 7 | 7 | 0 |
 | `chat` | 6 | 6 | 0 |
-| `collaboration` | 23 | 15 | 8 |
+| `collaboration` | 23 | 23 | 0 |
 | `computer` | 25 | 25 | 0 |
-| `computers` | 11 | 8 | 3 |
+| `computers` | 11 | 10 | 1 |
 | `console` | 26 | 26 | 0 |
-| `context` | 10 | 4 | 6 |
-| `cost-rollup` | 8 | 0 | 8 |
-| `enhanced-memory-search` | 11 | 6 | 5 |
-| `enhanced-users` | 8 | 8 | 0 |
-| `evolution` | 13 | 13 | 0 |
+| `context` | 10 | 10 | 0 |
+| `cost-rollup` | 8 | 8 | 0 |
+| `diagnostics` | 1 | 1 | 0 |
+| `enhanced-memory-search` | 11 | 11 | 0 |
+| `enhanced-users` | 6 | 6 | 0 |
+| `evolution` | 16 | 16 | 0 |
 | `experience` | 7 | 7 | 0 |
 | `files` | 12 | 12 | 0 |
 | `firewall` | 6 | 6 | 0 |
 | `generation` | 10 | 10 | 0 |
-| `governance` | 27 | 27 | 0 |
+| `governance` | 38 | 38 | 0 |
 | `groups` | 8 | 8 | 0 |
 | `growth` | 13 | 13 | 0 |
-| `health` | 6 | 0 | 6 |
+| `health` | 6 | 1 | 5 |
 | `home` | 2 | 2 | 0 |
 | `image` | 5 | 5 | 0 |
-| `knowledge` | 10 | 9 | 1 |
-| `knowledge-graph` | 11 | 11 | 0 |
+| `knowledge` | 10 | 10 | 0 |
+| `knowledge-graph` | 12 | 12 | 0 |
 | `knowledge-integration` | 10 | 10 | 0 |
 | `language` | 6 | 6 | 0 |
 | `logs` | 4 | 4 | 0 |
@@ -466,10 +467,10 @@
 | `memory-timeline` | 4 | 4 | 0 |
 | `metacognition` | 7 | 7 | 0 |
 | `mobile` | 10 | 7 | 3 |
-| `models` | 15 | 14 | 1 |
+| `models` | 15 | 15 | 0 |
 | `monitor` | 5 | 5 | 0 |
 | `negative-screen` | 4 | 4 | 0 |
-| `neurflow` | 47 | 31 | 16 |
+| `neurflow` | 47 | 47 | 0 |
 | `notifications` | 9 | 9 | 0 |
 | `openplatform` | 8 | 8 | 0 |
 | `phase3` | 15 | 15 | 0 |
@@ -482,16 +483,16 @@
 | `runtime` | 4 | 4 | 0 |
 | `sandbox` | 8 | 8 | 0 |
 | `scheduler` | 7 | 7 | 0 |
-| `semantic-search` | 5 | 4 | 1 |
+| `semantic-search` | 5 | 5 | 0 |
 | `settings` | 13 | 13 | 0 |
 | `shared-config` | 14 | 14 | 0 |
 | `skill-pool` | 37 | 37 | 0 |
 | `skill-versions` | 8 | 8 | 0 |
 | `skills` | 8 | 8 | 0 |
 | `sleep` | 14 | 14 | 0 |
-| `stats` | 9 | 5 | 4 |
+| `stats` | 9 | 9 | 0 |
 | `studio` | 21 | 21 | 0 |
-| `sync` | 8 | 7 | 1 |
+| `sync` | 8 | 8 | 0 |
 | `synonyms` | 12 | 12 | 0 |
 | `tasks` | 8 | 8 | 0 |
 | `teams` | 10 | 10 | 0 |
@@ -503,35 +504,6 @@
 
 **依赖图里未见身份门的路由（候选集，不等于「无凭证可打」）**：
 
-- `POST /api/coordination/ab-tests/assign`
-- `POST /api/coordination/ab-tests/end/{experiment_name}`
-- `GET /api/coordination/ab-tests/list`
-- `POST /api/coordination/ab-tests/record-metric`
-- `POST /api/coordination/ab-tests/reset`
-- `GET /api/coordination/ab-tests/results/{experiment_name}`
-- `POST /api/coordination/ab-tests/start`
-- `POST /api/coordination/seen-boundary/check-freshness`
-- `POST /api/coordination/seen-boundary/record`
-- `POST /api/coordination/seen-boundary/reset`
-- `GET /api/coordination/seen-boundary/stats`
-- `GET /api/coordination/summary`
-- `POST /api/coordination/triage/check`
-- `POST /api/coordination/triage/clear-cache`
-- `POST /api/coordination/triage/reset`
-- `GET /api/coordination/triage/stats`
-- `POST /api/coordination/yield-checker/check`
-- `POST /api/coordination/yield-checker/register-agent`
-- `POST /api/coordination/yield-checker/reset`
-- `GET /api/coordination/yield-checker/stats`
-- `POST /api/coordination/yield-checker/unregister-agent`
-- `GET /api/v1/agents/{agent_id}/constitution`
-- `POST /api/v1/agents/{agent_id}/decision`
-- `GET /api/v1/agents/{agent_id}/stats`
-- `GET /api/v1/audio/engines`
-- `GET /api/v1/audio/status`
-- `POST /api/v1/audio/synthesize`
-- `POST /api/v1/audio/synthesize-stream`
-- `POST /api/v1/audio/transcribe`
 - `POST /api/v1/auth/login`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
@@ -542,79 +514,16 @@
 - `POST /api/v1/auth/register/send-code`
 - `POST /api/v1/auth/register/verify-code`
 - `GET /api/v1/auth/setup-status`
-- `GET /api/v1/budgets/alerts`
-- `POST /api/v1/budgets/alerts/config/update`
-- `GET /api/v1/budgets/health`
-- `POST /api/v1/budgets/record`
-- `GET /api/v1/budgets/status/all`
-- `GET /api/v1/budgets/status/{agent_id}`
-- `GET /api/v1/budgets/{scope}/{identifier}/status`
-- `GET /api/v1/channel-adapters/health/all`
-- `GET /api/v1/channel-adapters/ingress/bypass-stats`
 - `POST /api/v1/channel-adapters/{channel_type}/webhook`
-- `GET /api/v1/collaboration/history`
-- `GET /api/v1/collaboration/sessions`
-- `GET /api/v1/collaboration/stats`
-- `GET /api/v1/collaboration/templates`
-- `POST /api/v1/collaboration/templates`
-- `DELETE /api/v1/collaboration/templates/{template_id}`
-- `GET /api/v1/collaboration/templates/{template_id}`
-- `PUT /api/v1/collaboration/templates/{template_id}`
-- `POST /api/v1/computers/cleanup-offline`
-- `GET /api/v1/computers/cloud`
 - `POST /api/v1/computers/{computer_id}/heartbeat`
-- `GET /api/v1/context/inject/hot`
-- `GET /api/v1/context/inject/memories`
-- `GET /api/v1/context/inject/reflection`
-- `GET /api/v1/context/stats`
-- `POST /api/v1/context/{context_id}/compress`
-- `GET /api/v1/context/{context_id}/preview`
-- `GET /api/v1/cost-rollup/agent/{agent_id}/cost`
-- `GET /api/v1/cost-rollup/dashboard/metrics`
-- `GET /api/v1/cost-rollup/history/daily`
-- `GET /api/v1/cost-rollup/history/hourly`
-- `GET /api/v1/cost-rollup/queries/{query_name}`
-- `POST /api/v1/cost-rollup/rollup/now`
-- `POST /api/v1/cost-rollup/rollup/range`
-- `GET /api/v1/cost-rollup/rollup/status`
-- `GET /api/v1/enhanced-memory-search/activation/{memory_id}`
-- `POST /api/v1/enhanced-memory-search/analyze`
-- `POST /api/v1/enhanced-memory-search/decay`
-- `POST /api/v1/enhanced-memory-search/search`
-- `GET /api/v1/enhanced-memory-search/stats`
 - `GET /api/v1/health`
 - `GET /api/v1/health/checks`
 - `GET /api/v1/health/checks/{name}`
-- `POST /api/v1/health/checks/{name}/run`
 - `POST /api/v1/health/recover`
 - `GET /api/v1/health/report`
-- `POST /api/v1/knowledge/access/analyze`
 - `POST /api/v1/mobile/pairing/confirm`
 - `POST /api/v1/mobile/pairing/refresh`
 - `POST /api/v1/mobile/pairing/resolve`
-- `GET /api/v1/models/active`
-- `GET /api/v1/neurflow/agents`
-- `POST /api/v1/neurflow/agents`
-- `POST /api/v1/neurflow/agents/{agent_id}/archive`
-- `POST /api/v1/neurflow/agents/{agent_id}/restore`
-- `POST /api/v1/neurflow/comfyui/execute`
-- `GET /api/v1/neurflow/comfyui/status`
-- `GET /api/v1/neurflow/executions`
-- `GET /api/v1/neurflow/executions/{execution_id}`
-- `POST /api/v1/neurflow/executions/{execution_id}/cancel`
-- `GET /api/v1/neurflow/nodes`
-- `GET /api/v1/neurflow/nodes/search/{query}`
-- `GET /api/v1/neurflow/nodes/stats`
-- `POST /api/v1/neurflow/nodes/sync`
-- `GET /api/v1/neurflow/nodes/{node_type:path}`
-- `GET /api/v1/neurflow/otel/status`
-- `GET /api/v1/neurflow/stats`
-- `POST /api/v1/semantic-search/analyze`
-- `GET /api/v1/stats`
-- `GET /api/v1/stats/performance`
-- `GET /api/v1/stats/token-usage`
-- `GET /api/v1/stats/usage`
-- `GET /api/v1/sync/statistics`
 <!-- auth-surface:end -->
 
 > **抽样复核（裁定 C，2026-10-22）**：对机器段里 49 条安全的 GET 逐条以无凭证真打（隔离数据根）
