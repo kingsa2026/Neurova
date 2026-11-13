@@ -267,10 +267,16 @@ class TestSynthesizer:
         try:
             from neurova.llm.multi_model_client import get_multi_model_client
 
-            return await get_multi_model_client().chat(messages, model=model or None)
-        except Exception as e:  # noqa: BLE001 - 与 SyntheticDatasetBuilder 同口径：失败如实回空
+            result = await get_multi_model_client().chat(messages, model=model or None)
+        except Exception as e:  # noqa: BLE001
             logger.debug("可执行测试合成 LLM 调用失败: %s", e)
             return {"success": False, "error": str(e)}
+        # 形态归一：部分 provider/mock 路径的 result["response"] 是 LLMResponse
+        # 对象而非字符串——取其 content，保证下游解析面拿到字符串。
+        if result.get("success") and not isinstance(result.get("response"), str):
+            response = result.get("response")
+            result["response"] = str(getattr(response, "content", "") or "")
+        return result
 
     async def generate(self, *, skill_text: str, reference_tasks: Optional[List[str]] = None,
                        artifact_type: str = "skill") -> ExecutableTestSuite:
