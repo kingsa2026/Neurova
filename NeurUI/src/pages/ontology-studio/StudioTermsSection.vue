@@ -74,8 +74,12 @@
         </table>
 
         <!-- 详情/编辑器：结构化字段；labels/module/identityKeys 只读展示 -->
-        <div v-if="editorVisible" class="term-editor" data-testid="term-editor">
+    <div v-if="editorVisible" class="term-editor-wrap" data-testid="term-editor">
+      <div class="term-editor">
+        <div class="term-editor-head">
           <h4 class="editor-title">{{ editingId ? t('ontology.editTerm') : t('ontology.newTerm') }}</h4>
+          <a-button type="text" size="sm" data-testid="term-editor-close" @click="closeEditor">✕</a-button>
+        </div>
           <div class="editor-grid">
             <label class="field">
               <span>{{ t('ontology.termId') }}</span>
@@ -226,6 +230,7 @@
             </GlassButton>
           </div>
         </div>
+    </div>
       </div>
     </div>
   </div>
@@ -606,15 +611,30 @@ defineExpose({ loadTerms })
   font-family: var(--nr-font-mono, monospace);
   font-size: 12px;
 }
+.term-editor-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: var(--nr-bg-inset-deep, rgba(0, 0, 0, 0.35));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .term-editor {
-  margin-top: 12px;
-  padding: 12px;
+  width: 880px;
+  max-width: calc(100vw - 48px);
+  max-height: 82vh;
+  overflow: auto;
+  padding: 16px;
   border: 1px solid var(--nr-border, rgba(128, 128, 128, 0.25));
   border-radius: 10px;
+  background: var(--nr-bg-elevated, #111827);
 }
-.editor-title {
-  margin: 0 0 10px;
-  font-size: 14px;
+.term-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
 }
 .editor-grid {
   display: grid;
