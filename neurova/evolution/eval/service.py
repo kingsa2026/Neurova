@@ -18,6 +18,7 @@ from neurova.skills.library_service import agentLibrary
 
 import json
 import re
+import threading
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -44,15 +45,18 @@ logger = get_logger(__name__)
 # 的逐轮监测——与 D4 自适应污染监测同一台机器（教义第 6 条：接线不并造）。
 # 审批人第一次同时看到"评审说好"与"结局好不好"：背离连续出现即 suspect。
 _judgeSealedMonitor = None
+_judgeSealedMonitorLock = threading.RLock()
 
 
 def getJudgeSealedMonitor():
-    """B4 监测器单点（懒创建，进程内态；判定面读数走 proposal 侧出街）。"""
+    """B4 监测器单点（懒创建走 DCL——懒单例 DCL 守卫判据；判定面读数走 proposal 侧出街）。"""
     global _judgeSealedMonitor
     if _judgeSealedMonitor is None:
-        from neurova.evolution.eval.adaptation_monitor import AdaptationMonitor
+        with _judgeSealedMonitorLock:
+            if _judgeSealedMonitor is None:
+                from neurova.evolution.eval.adaptation_monitor import AdaptationMonitor
 
-        _judgeSealedMonitor = AdaptationMonitor()
+                _judgeSealedMonitor = AdaptationMonitor()
     return _judgeSealedMonitor
 
 
