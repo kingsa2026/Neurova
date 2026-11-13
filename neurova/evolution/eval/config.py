@@ -123,6 +123,13 @@ class EvolutionConfig:
     cost_soft_gate_enabled: bool = True
     cost_soft_gate_ratio: float = 0.2
 
+    # ── 可执行测试判据层（HN2/HC2，HarnessPro 对照 2026-11-13）──
+    # 对 skill 类工件在 judge 之外建一层确定性断言判据（eval/exec_suite.py）：
+    # 合成一次、全程冻结，基线与胜者各跑一遍；候选断言通过率低于基线 ⇒
+    # exec_suite_regression 拒绝。size 是套件用例数（真臂预算按 2×size 计上）。
+    exec_suite_enabled: bool = True
+    exec_suite_size: int = 4
+
 
 def text_evolution_enabled() -> bool:
     """文本级进化总开关,默认关。

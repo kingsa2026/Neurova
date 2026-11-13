@@ -19,6 +19,7 @@ from typing import Any, Awaitable, Callable, Optional, Protocol
 
 from neurova.core.logger import get_logger
 from neurova.evolution.eval import cost_ledger as _cost_ledger
+from neurova.evolution.eval import exec_suite as _exec_suite_mod
 from neurova.evolution.eval.calibration import NoiseBand
 from neurova.evolution.eval.config import EvolutionConfig
 from neurova.evolution.eval.dataset import EvalDataset, EvalExample, evaluation_split
@@ -144,6 +145,9 @@ class EvolutionRunResult:
     # CoP（Cost-of-Pass）+ 任务级明细（截断外露）。state=no_usage_events 表示
     # 本轮没有任何 usage 事件——0 是「没量到」不是「免费」。
     cost_summary: dict = field(default_factory=dict)
+    # HN2/HC2 可执行测试判据层（eval/exec_suite.py）：套件哈希 + 基线/候选
+    # 断言通过率与逐案明细。state=unavailable/disabled 时不含通过率。
+    exec_suite: dict = field(default_factory=dict)
 
     @property
     def improvement(self) -> float:
@@ -238,6 +242,7 @@ class EvolutionRunResult:
             "agent_turns_used": self.agentTurnsUsed,
             "budget_plan_exceeded": self.budgetPlanExceeded,
             "cost_summary": dict(self.cost_summary),
+            "exec_suite": dict(self.exec_suite),
         }
 
 
@@ -669,6 +674,7 @@ class SkillEvolutionRunner:
         extra_failures: Optional[list] = None,
         experiment_fingerprint: str = "",
         domain_harnesses: Optional[list[dict]] = None,
+        exec_suite: Optional[Any] = None,
     ) -> EvolutionRunResult:
         result = EvolutionRunResult(baseline_text=baseline_text, deployed_text=baseline_text)
         self._run_eval_errors = 0  # P2-9：本轮清零（探针路径有独立语义，不计入）
@@ -719,6 +725,37 @@ class SkillEvolutionRunner:
                 result.reject_reason = "judge_unavailable"
                 result.cost_summary = self._run_cost_ledger.summarize()
                 return result
+
+        # ── HN2/HC2 可执行测试判据层 ──
+        # 套件冻结、基线与胜者共跑同一份；三态诚实外露：disabled（配置关）/
+        # unavailable（未提供或不可用）/ measured。不可用时诚实回退 judge，
+        # 运行不中断——判据层是增益，不是依赖。
+        suiteExamples: list[EvalExample] = []
+        if not self.config.exec_suite_enabled:
+            result.exec_suite = {"state": "disabled", "cases": 0}
+        elif exec_suite is None or not exec_suite.isUsable():
+            result.exec_suite = {"state": "unavailable", "cases": 0}
+        else:
+            suiteExamples = [
+                EvalExample(
+                    task_input=case.task_input,
+                    expected_behavior="断言: " + "; ".join(
+                        f"{a['op']}:{a['value']}" for a in case.assertions),
+                    source="exec_suite",
+                )
+                for case in exec_suite.cases
+            ]
+            _bAvg, _bDetails = await self._evaluate(
+                baseline_text, suiteExamples, artifact_type, arm="exec_baseline")
+            _bOutputs = {ex.task_input: out
+                         for ex, _s, out, _f, _failed, _env in _bDetails}
+            execBaseline = _exec_suite_mod.run_exec_suite(exec_suite, _bOutputs)
+            result.exec_suite = {
+                "state": "baseline_measured",
+                "suite_hash": exec_suite.suite_hash,
+                "cases": len(exec_suite.cases),
+                "baseline": execBaseline,
+            }
 
         holdoutBeforeAvg, holdoutBeforeDetails = await self._evaluate(
             baseline_text, holdout, artifact_type, arm="baseline")
@@ -820,6 +857,23 @@ class SkillEvolutionRunner:
         holdoutAfterAvg, holdoutAfterDetails = await self._evaluate(
             best_text, holdout, artifact_type, arm=holdoutAfterArm)
         result.holdout_after = holdoutAfterAvg
+        # 胜者过断言面（同一份冻结套件）：与基线面同机判定，非回归门读这里。
+        if suiteExamples:
+            _cAvg, _cDetails = await self._evaluate(
+                best_text, suiteExamples, artifact_type,
+                arm="exec_candidate" if best_text != baseline_text else "exec_baseline")
+            _cOutputs = {ex.task_input: out
+                         for ex, _s, out, _f, _failed, _env in _cDetails}
+            execCandidate = _exec_suite_mod.run_exec_suite(exec_suite, _cOutputs)
+            result.exec_suite = {
+                "state": "measured",
+                "suite_hash": exec_suite.suite_hash,
+                "cases": len(exec_suite.cases),
+                "baseline": result.exec_suite.get("baseline"),
+                "candidate": execCandidate,
+                "baseline_pass_rate": (result.exec_suite.get("baseline") or {}).get("pass_rate"),
+                "candidate_pass_rate": execCandidate.get("pass_rate"),
+            }
         holdoutCandScores = {
             ex.task_input: (score, failed)
             for ex, score, _o, _f, failed, _env in holdoutAfterDetails
@@ -891,6 +945,17 @@ class SkillEvolutionRunner:
         result.unevidencedCases = unevidencedCases
         if len(caseRegressions) > result.caseAllowance:
             return await rejectRun("case_regression")
+
+        # ── 判定 2.15:可执行断言面非回归（HN2/HC2）──
+        # judge 均值/例级门都过了、但确定性断言面被改坏 ⇒ 拒绝。两层判据各管
+        # 各的：judge 管开放维度，断言管「仅凭公共契约即可判定」的维度。
+        # 任一侧未量出（unevidenced）不判——拿器械故障当质量结论是老忌讳。
+        if (result.exec_suite.get("state") == "measured"
+                and result.exec_suite.get("baseline_pass_rate") is not None
+                and result.exec_suite.get("candidate_pass_rate") is not None
+                and result.exec_suite["candidate_pass_rate"]
+                < result.exec_suite["baseline_pass_rate"] - _EPS):
+            return await rejectRun("exec_suite_regression")
 
         # ── 判定 2.2:锚定地板(P2-4,SkillGLoW 对比 2026-10-07)──
         # A = max(历史最优留出, 无技能基线)。只赢过**正在退化的现役基线**不算
