@@ -55,6 +55,41 @@
       </div>
     </GlassPanel>
 
+    <!-- U7：待审批行——展开动作语义引用（W4 联动；读数面不裁决） -->
+    <GlassPanel class="panel" data-testid="pending-approvals-panel">
+      <div class="panel-head">
+        <span class="panel-title" data-testid="pending-approvals-title">{{ t('ontology.approvalsPanelTitle') }}</span>
+        <GlassButton size="sm" :loading="approvalsLoading" data-testid="approvals-refresh" @click="fetchPendingApprovals">
+          {{ t('common.refresh') }}
+        </GlassButton>
+      </div>
+      <a-empty v-if="!pendingApprovals.length" :description="t('ontology.approvalsEmpty')" />
+      <a-table v-else size="small" row-key="request_id" :data-source="pendingApprovals"
+               :pagination="false" data-testid="approvals-table">
+        <a-table-column key="command" :title="t('ontology.approvalCommand')" data-index="command" />
+        <a-table-column key="user_id" :title="t('ontology.approvalUser')" data-index="user_id" />
+        <a-table-column key="created_at" :title="t('ontology.approvalCreatedAt')" data-index="created_at" />
+        <template #expandedRowRender="{ record }">
+          <div class="approval-expand" data-testid="approval-expand">
+            <p v-if="record.danger_reason" class="approval-reason">
+              {{ t('ontology.approvalReason') }}: {{ record.danger_reason }}
+            </p>
+            <template v-if="actionOfRequest(record)">
+              <p class="mono">
+                {{ t('ontology.approvalActionPrecondition') }}:
+                <code>{{ JSON.stringify(actionOfRequest(record)?.precondition ?? {}) }}</code>
+              </p>
+              <p class="mono">
+                {{ t('ontology.approvalActionImpact') }}:
+                <code>{{ (actionOfRequest(record)?.impact ?? []).join('; ') || '-' }}</code>
+              </p>
+            </template>
+            <p v-else class="approval-no-action">{{ t('ontology.approvalNoAction') }}</p>
+          </div>
+        </template>
+      </a-table>
+    </GlassPanel>
+
     <!-- Filters -->
     <GlassCard>
       <div class="filters-row">
@@ -122,7 +157,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { queryOntologyAccountability, verifyDigestChain } from '@/api/modules/ontology'
+import { queryOntologyAccountability, verifyDigestChain, listOntologyActions } from '@/api/modules/ontology'
+import type { OntologyActionRow } from '@/types/ontology'
 import { useI18n } from 'vue-i18n'
 import { listAuditRecords, exportAudit as exportAuditApi } from '@/api/modules/audit'
 import { getDesktopAuditWaiting, getIngressBypassStats, getPendingApprovals } from '@/api/modules/governance'
@@ -175,6 +211,38 @@ const accError = ref('')
 const accResult = ref<{ events: Array<Record<string, unknown>>; total: number } | null>(null)
 const verifyLoading = ref(false)
 const verifyResult = ref<{ ok: boolean; chains: number; rows: number } | null>(null)
+
+// U7：待审批行展开——动作语义（precondition/impact）引用（W4 联动；读数面不裁决）
+const pendingApprovals = ref<Array<Record<string, any>>>([])
+const ontologyActions = ref<OntologyActionRow[]>([])
+const approvalsLoading = ref(false)
+
+async function fetchPendingApprovals() {
+  approvalsLoading.value = true
+  try {
+    const res: any = await getPendingApprovals()
+    pendingApprovals.value = res?.data?.requests ?? []
+  } catch {
+    pendingApprovals.value = []
+  } finally {
+    approvalsLoading.value = false
+  }
+}
+
+async function fetchOntologyActions() {
+  try {
+    const res: any = await listOntologyActions()
+    ontologyActions.value = res?.data ?? []
+  } catch {
+    ontologyActions.value = []
+  }
+}
+
+/** 审批请求 → 关联动作（metadata.action_id；无关联如实回落） */
+function actionOfRequest(req: Record<string, any>): OntologyActionRow | undefined {
+  const actionId = String(req?.metadata?.action_id ?? '')
+  return ontologyActions.value.find((a) => a.action_id === actionId)
+}
 
 async function runAccountability() {
   accError.value = ''
@@ -302,6 +370,8 @@ const fetchWaitingHuman = async () => {
 onMounted(() => {
   void fetchAudit()
   void fetchWaitingHuman()
+  void fetchPendingApprovals()
+  void fetchOntologyActions()
 })
 </script>
 
@@ -345,4 +415,9 @@ onMounted(() => {
 .verify-pass { color: var(--nr-success, #52c41a); font-weight: 600; }
 .verify-fail { color: var(--nr-error, #ef4444); font-weight: 600; }
 .mono { font-family: var(--nr-font-mono, monospace); font-size: 11px; }
+.approval-expand { font-size: 12px; }
+.approval-reason { color: var(--nr-warning); margin: 4px 0; }
+.approval-no-action { color: var(--nr-text-tertiary); margin: 4px 0; }
+.panel-head { display: flex; justify-content: space-between; align-items: center; }
+.panel-title { font-weight: 600; font-size: 13px; color: var(--nr-text-primary); }
 </style>

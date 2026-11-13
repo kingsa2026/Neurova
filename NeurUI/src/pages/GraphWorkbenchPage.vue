@@ -29,56 +29,34 @@
       :message="t('knowledge.workbenchTruncatedHint', { total: studio?.total_nodes ?? 0 })"
     />
 
+    <!-- C3 性能预算读数：渲染集超首屏节点上限时如实提示（预算单源 perfBudget.ts） -->
+    <a-alert
+      v-if="overNodeBudget"
+      type="warning"
+      show-icon
+      class="truncated-hint"
+      data-testid="node-budget-warning"
+      :message="t('ontology.nodeBudgetWarning', { count: filteredNodes.length, budget: NODE_BUDGET })"
+    />
+
     <div class="workbench-layout">
-          <GlassPanel class="panel" data-testid="community-overlay-panel">
-      <div class="panel-head">
-        <span class="panel-title" data-testid="community-title">{{ t('ontology.communityOverlayTitle') }}</span>
-        <a-switch v-model:checked="communityOverlayOn" size="small" data-testid="community-toggle" />
-      </div>
-      <div v-if="communityOverlayOn && communities.length" class="community-legend">
-        <div v-for="c in communities.slice(0, 5)" :key="c.community_id" class="community-item">
-          <span class="mono">{{ c.community_id.slice(0, 10) }}</span>
-          <span>{{ c.member_labels.join(', ') }}</span>
-          <span v-if="c.summary_text" class="community-summary">{{ c.summary_text.slice(0, 60) }}</span>
+      <GlassPanel class="panel" data-testid="community-overlay-panel">
+        <div class="panel-head">
+          <span class="panel-title" data-testid="community-title">{{ t('ontology.communityOverlayTitle') }}</span>
+          <a-switch v-model:checked="communityOverlayOn" size="small" data-testid="community-toggle" />
         </div>
-      </div>
-      <div v-if="communityOverlayOn && !communities.length" class="community-empty">
-        {{ t('ontology.communityOverlayEmpty') }}
-      </div>
-    </GlassPanel>
-        <GlassPanel class="panel" data-testid="community-overlay-panel">
-      <div class="panel-head">
-        <span class="panel-title" data-testid="community-title">{{ t('ontology.communityOverlayTitle') }}</span>
-        <a-switch v-model:checked="communityOverlayOn" size="small" data-testid="community-toggle" />
-      </div>
-      <div v-if="communityOverlayOn && communities.length" class="community-legend">
-        <div v-for="c in communities.slice(0, 5)" :key="c.community_id" class="community-item">
-          <span class="mono">{{ c.community_id.slice(0, 10) }}</span>
-          <span>{{ c.member_labels.join(', ') }}</span>
-          <span v-if="c.summary_text" class="community-summary">{{ c.summary_text.slice(0, 60) }}</span>
+        <div v-if="communityOverlayOn && communities.length" class="community-legend">
+          <div v-for="(c, ci) in communities.slice(0, 5)" :key="c.community_id" class="community-item">
+            <span class="community-swatch" :style="{ background: communityColor(ci) }" />
+            <span class="mono">{{ c.community_id.slice(0, 10) }}</span>
+            <span>{{ c.member_labels.join(', ') }}</span>
+            <span v-if="c.summary_text" class="community-summary">{{ c.summary_text.slice(0, 60) }}</span>
+          </div>
         </div>
-      </div>
-      <div v-if="communityOverlayOn && !communities.length" class="community-empty">
-        {{ t('ontology.communityOverlayEmpty') }}
-      </div>
-    </GlassPanel>
-        <GlassPanel class="panel" data-testid="community-overlay-panel">
-      <div class="panel-head">
-        <span class="panel-title" data-testid="community-title">{{ t('ontology.communityOverlayTitle') }}</span>
-        <a-switch v-model:checked="communityOverlayOn" size="small" data-testid="community-toggle" />
-      </div>
-      <div v-if="communityOverlayOn && communities.length" class="community-legend">
-        <div v-for="c in communities.slice(0, 5)" :key="c.community_id" class="community-item">
-          <span class="mono">{{ c.community_id.slice(0, 10) }}</span>
-          <span>{{ c.member_labels.join(', ') }}</span>
-          <span v-if="c.summary_text" class="community-summary">{{ c.summary_text.slice(0, 60) }}</span>
+        <div v-if="communityOverlayOn && !communities.length" class="community-empty">
+          {{ t('ontology.communityOverlayEmpty') }}
         </div>
-      </div>
-      <div v-if="communityOverlayOn && !communities.length" class="community-empty">
-        {{ t('ontology.communityOverlayEmpty') }}
-      </div>
-    </GlassPanel>
-    <GlassCard class="canvas-card">
+      </GlassPanel><GlassCard class="canvas-card">
         <a-spin :spinning="loading">
           <div ref="canvasStageRef" data-testid="workbench-canvas-stage" class="canvas-stage">
           <div class="canvas-toolbar">
@@ -182,6 +160,15 @@
               <Controls />
               <template #edge-flow="edgeProps">
                 <FlowEdge v-bind="edgeProps" :label="String(edgeProps.label ?? '')" />
+              </template>
+              <template #node-community="nodeProps">
+                <div class="wb-community-node"
+                     :style="{ borderColor: nodeProps.data.color }"
+                     :title="nodeProps.data.summary || nodeProps.data.label">
+                  {{ nodeProps.data.label }}
+                </div>
+                <Handle type="target" :position="Position.Left" />
+                <Handle type="source" :position="Position.Right" />
               </template>
             </VueFlow>
             <div v-else-if="!loading" class="canvas-empty">
@@ -306,7 +293,7 @@
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
-import { VueFlow } from '@vue-flow/core'
+import { VueFlow, Handle, Position } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { MiniMap } from '@vue-flow/minimap'
 import { Controls } from '@vue-flow/controls'
@@ -317,11 +304,13 @@ import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/minimap/dist/style.css'
 import '@vue-flow/controls/dist/style.css'
 import GlassCard from '@/components/GlassCard.vue'
+import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { useAuthStore } from '@/stores/auth'
 import { request } from '@/api'
 import { forceLayout } from '@/pages/graph-workbench/forceLayout'
+import { NODE_BUDGET, withinNodeBudget } from '@/pages/graph-workbench/perfBudget'
 import { listOntologyCommunities } from '@/api/modules/ontology'
 import FlowEdge from '@/pages/graph-workbench/FlowEdge.vue'
 import { FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons-vue'
@@ -439,14 +428,35 @@ const flowNodes = computed(() => {
       minY: Math.min(...ys), maxY: Math.max(...ys),
     }
   }
-  return resolved.map((n) => ({
-    id: n.id,
-    label: n.label,
-    position: n.position,
-    data: { label: n.label, type: n.type },
-    type: 'default',
-    class: n.id === selectedNodeId.value ? 'wb-node-selected' : '',
-  }))
+  // U4 社区图层：开启时按社区着色（令牌色板）＋hover 社区摘要；关闭时逐字原样
+  const communityIndexOf = communityIndexByLabel.value
+  return resolved.map((n) => {
+    const nodeClass = n.id === selectedNodeId.value ? 'wb-node-selected' : ''
+    const cIndex = communityOverlayOn.value ? communityIndexOf.get(n.label) : undefined
+    if (cIndex === undefined) {
+      return {
+        id: n.id,
+        label: n.label,
+        position: n.position,
+        data: { label: n.label, type: n.type },
+        type: 'default',
+        class: nodeClass,
+      }
+    }
+    return {
+      id: n.id,
+      label: n.label,
+      position: n.position,
+      data: {
+        label: n.label,
+        type: n.type,
+        color: communityColor(cIndex),
+        summary: communities.value[cIndex]?.summary_text ?? '',
+      },
+      type: 'community',
+      class: nodeClass,
+    }
+  })
 })
 
 // fit-view-on-init 的实测缺陷：其包围盒测量与 zoom 夹取组合会把视口平移到
@@ -551,6 +561,8 @@ const filteredNodes = computed(() => {
   if (fullGraph.value) return byRelation
   return byRelation.filter((n) => (depthFromHub.value.get(n.id) ?? 99) <= 2)
 })
+// C3：渲染集超首屏节点预算（单源 perfBudget.ts）→ 诚实警示，不静默降采样
+const overNodeBudget = computed(() => !withinNodeBudget(filteredNodes.value.length))
 const focusFirstMatch = () => {
   const hit = filteredNodes.value[0]
   if (hit) selectedNodeId.value = hit.id
@@ -837,6 +849,27 @@ async function loadCommunities() {
   }
 }
 
+// U4 社区着色：令牌色板（禁硬编码色值——var 兜底仅防未定义）
+const COMMUNITY_PALETTE = [
+  'var(--nr-primary)',
+  'var(--nr-accent)',
+  'var(--nr-accent-secondary)',
+  'var(--nr-success)',
+  'var(--nr-warning)',
+  'var(--nr-error)',
+]
+function communityColor(index: number): string {
+  return COMMUNITY_PALETTE[index % COMMUNITY_PALETTE.length]
+}
+// label → 社区序号（communities.member_labels 是 label 集，节点以 label 归属）
+const communityIndexByLabel = computed(() => {
+  const indexMap = new Map<string, number>()
+  communities.value.forEach((c, i) => {
+    for (const label of c.member_labels) if (!indexMap.has(label)) indexMap.set(label, i)
+  })
+  return indexMap
+})
+
 onMounted(loadCommunities)
 onMounted(() => {
   document.addEventListener('fullscreenchange', onFullscreenChange)
@@ -854,6 +887,60 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.wb-community-node {
+  border: 2px solid var(--nr-primary);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  background: var(--nr-bg-elevated);
+  color: var(--nr-text-primary);
+  cursor: help;
+}
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.panel-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--nr-text-primary);
+}
+.community-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+.community-item {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+  color: var(--nr-text-primary);
+}
+.community-item .mono {
+  font-family: var(--nr-font-mono);
+}
+.community-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+  align-self: center;
+}
+.community-summary {
+  color: var(--nr-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.community-empty {
+  font-size: 12px;
+  color: var(--nr-text-tertiary);
+  margin-top: 6px;
+}
+
 .graph-workbench-page {
   display: flex;
   flex-direction: column;

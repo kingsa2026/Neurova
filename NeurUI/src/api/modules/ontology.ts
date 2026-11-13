@@ -536,3 +536,39 @@ export function listOntologyCommunities() {
   return api.get<ApiResponse<Array<{ community_id: string; level: number; member_labels: string[]; summary_text: string }>>>(
     '/knowledge/ontology/communities')
 }
+
+/** U3：消解队列 blocking 预读数（候选对数/全对数对比——分对数级剪枝证据）。 */
+export function getOntologyBlockingStats() {
+  return api.get<ApiResponse<{ full_scan: number; blocking: number; reduction_pct: number }>>(
+    '/knowledge/ontology/blocking-stats')
+}
+
+/** U3：术语级 conflict_policy 声明读数（数据驱动裁决策略的 UI 回显）。 */
+export function getOntologyConflictPolicy(termId: string) {
+  return api.get<ApiResponse<{ term_id: string; conflict_policy: string }>>(
+    `/knowledge/ontology/conflict-policy/${encodeURIComponent(termId)}`)
+}
+
+/** U5：webhook 接收面读数（enabled＋密钥指纹掩码——绝不回传明文）。 */
+export function getWebhookConfig() {
+  return api.get<ApiResponse<{ enabled: boolean; secret_env: string; secret_fingerprint: string }>>(
+    '/knowledge/ontology/webhook/config')
+}
+
+/** U5：webhook 密钥轮换（进程内 env 指针写新随机值，回新指纹）。 */
+export function rotateWebhookSecret() {
+  return api.post<ApiResponse<{ secret_fingerprint: string }>>(
+    '/knowledge/ontology/webhook/rotate', {})
+}
+
+/** U5：webhook 模拟推送（ok/duplicate/bad_signature 三态——诚实验收面）。 */
+export function simulateWebhookPush(mode: 'ok' | 'duplicate' | 'bad_signature') {
+  return api.post<ApiResponse<Record<string, unknown>>>(
+    '/knowledge/ontology/webhook/simulate', { mode })
+}
+
+/** U5：webhook 幂等去重台账读数。 */
+export function getWebhookDedupStats() {
+  return api.get<ApiResponse<{ rows: number; sources: number }>>(
+    '/knowledge/ontology/webhook/dedup-stats')
+}

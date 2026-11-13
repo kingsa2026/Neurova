@@ -45,7 +45,8 @@ class RdfImportResult:
         self.unsupported: List[str] = []
         self.inert = True
         self.triple_count = 0
-        self.sha256: str = ""
+        # sha256 不另存字段：只读属性从 original_bytes 现算（单一事实源，
+        # 实例属性赋值会与只读 property 冲突——465ef81fe 引入的隐患在此根修）
 
     @property
     def sha256(self) -> str:

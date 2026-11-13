@@ -269,6 +269,9 @@
                 <a-tag color="blue">
                   {{ t('knowledge.conflictPolicy', { policy: conflictPolicyLabel(item.recommended_policy) }) }}
                 </a-tag>
+                <a-tag v-if="conflictPolicies[item.predicate_term_id]" data-testid="conflict-declared-policy">
+                  {{ t('ontology.conflictDeclaredPolicy', { policy: conflictPolicies[item.predicate_term_id] }) }}
+                </a-tag>
                 <a-tag v-if="!item.policy_basis" color="red" data-testid="conflict-no-basis">
                   {{ t('knowledge.conflictNoBasis') }}
                 </a-tag>
@@ -362,6 +365,9 @@
         <a-button size="small" :loading="resolutionRunning" @click="handleRunResolution">
           {{ t('knowledge.resolutionRun') }}
         </a-button>
+      </div>
+      <div v-if="blockingStats" class="kb-blocking-readout" data-testid="blocking-readout">
+        {{ t('ontology.blockingReadout', { blocked: blockingStats.blocking, full: blockingStats.full_scan, pct: blockingStats.reduction_pct }) }}
       </div>
       <a-empty v-if="!resolutionReviews.length" :description="t('knowledge.resolutionEmpty')" />
       <a-list v-else :data-source="resolutionReviews" row-key="review_id">
@@ -822,7 +828,7 @@ import {
 import type { KbConfig, KbCollection, KnowledgeNode, KnowledgeScope, KnowledgeConflict, ConflictTimeContext, DeletedKnowledge, GraphResolutionReview, KnowledgeChunkRow, IngressTask, IngressSpan } from '@/api/modules/knowledge'
 import { listKnowledgeCategories } from '@/api/modules/knowledge'
 import { request } from '@/api'
-import { listChunkStrategies, searchCommunityGraph } from '@/api/modules/ontology'
+import { listChunkStrategies, searchCommunityGraph, getOntologyBlockingStats, getOntologyConflictPolicy } from '@/api/modules/ontology'
 import { useAuthStore } from '@/stores/auth'
 import GlassPanel from '@/components/GlassPanel.vue'
 import AnnotationDrawer from '@/modules/collaboration/AnnotationDrawer.vue'
@@ -890,6 +896,9 @@ const conflicts = ref<KnowledgeConflict[]>([])
 const tombstones = ref<DeletedKnowledge[]>([])
 const resolutionReviews = ref<GraphResolutionReview[]>([])
 const resolutionRunning = ref(false)
+// U3：blocking 预读数（候选对/全对比）＋术语级 conflict_policy 声明缓存
+const blockingStats = ref<{ full_scan: number; blocking: number; reduction_pct: number } | null>(null)
+const conflictPolicies = ref<Record<string, string>>({})
 const revisionsOpen = ref(false)
 const revisions = ref<{ old: Record<string, unknown>; changed_fields: string[]; updated_at: string }[]>([])
 // 语义检索的可信度映射（id → rrf 归一化分）
@@ -1692,6 +1701,23 @@ async function fetchConflicts() {
   } catch {
     conflicts.value = []
   }
+  await loadConflictPolicies()
+}
+
+/** U3：事实轴冲突的术语级 conflict_policy 声明读数（逐 term 拉，失败留空不冒充）。 */
+async function loadConflictPolicies() {
+  const termIds = [...new Set(conflicts.value
+    .filter((c): c is Extract<typeof c, { axis: 'fact' }> => c.axis === 'fact' && !!c.predicate_term_id)
+    .map((c) => c.predicate_term_id))]
+  await Promise.all(termIds.map(async (termId) => {
+    if (conflictPolicies.value[termId]) return
+    try {
+      const res: any = await getOntologyConflictPolicy(termId)
+      conflictPolicies.value[termId] = res?.data?.conflict_policy ?? ''
+    } catch {
+      conflictPolicies.value[termId] = ''
+    }
+  }))
 }
 
 /** 事实侧的胜方由人指明：没有"自动裁决"按钮，也没有默认胜方。 */
@@ -1824,6 +1850,13 @@ async function fetchResolutionReviews() {
     resolutionReviews.value = res?.data?.reviews ?? []
   } catch {
     resolutionReviews.value = []
+  }
+  // U3：blocking 预读数随队列刷新（失败留 null 不冒充零剪枝）
+  try {
+    const res: any = await getOntologyBlockingStats()
+    blockingStats.value = res?.data ?? null
+  } catch {
+    blockingStats.value = null
   }
 }
 
@@ -2161,6 +2194,13 @@ watch(agentId, () => {
 </script>
 
 <style scoped>
+.kb-blocking-readout {
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+  font-family: var(--nr-font-mono);
+  margin: 6px 0;
+}
+
 .knowledge-page {
   display: flex;
   flex-direction: column;

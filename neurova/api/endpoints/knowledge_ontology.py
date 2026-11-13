@@ -162,12 +162,18 @@ async def export_ontology_turtle(
 
     text = serializeAll(get_knowledge_fact_store(), tenantId=_tenantOf(current_user),
                         agentId=agent_id)
-    # C1 字节级往返：响应头携带最近一次 RDF/XML 导入的 SHA-256 引用
-    import os
-    lastImportSha = os.environ.get("_LAST_RDF_IMPORT_SHA256", "")
+    # C1 字节级往返：响应头引用最近一次 RDF/XML 导入工件（单源＝ontology_artifacts，
+    # 先按导出 agent 收窄，缺省回落本租户最近一次）
+    from neurova.knowledge.foundation import get_knowledge_fact_store as _gkfs
+    from neurova.knowledge.ontology.artifact_store import latestArtifact as _latestArtifact
+
+    _store = _gkfs()
+    _tenant = _tenantOf(current_user)
+    latest = (_latestArtifact(_store, "rdf_import", tenantId=_tenant, agentId=agent_id or "")
+              if agent_id else None) or _latestArtifact(_store, "rdf_import", tenantId=_tenant)
     headers = {}
-    if lastImportSha:
-        headers["X-Original-Import-Sha256"] = lastImportSha
+    if latest is not None:
+        headers["X-Original-Import-Sha256"] = latest["sha256"]
     return Response(content=text, media_type="text/turtle; charset=utf-8",
                     headers=headers)
 
@@ -309,10 +315,19 @@ async def import_domain_pack(
     except ValueError as exc:
         raise HTTPException(status_code=404 if "未注册领域包" in str(exc) else 400,
                             detail=str(exc))
+    # C2：领域包原始字节进不可变工件存储（content-addressed，漂移显式拒由
+    # importDomainPack 的登记表把守，这里落的是工件层不可变版本）
+    from neurova.knowledge.ontology.artifact_store import putArtifact
+    from neurova.knowledge.ontology.domain_pack import packBytes
+
+    artifact = putArtifact(store, "domain_pack", packBytes(pack_id),
+                           sourceRef=pack_id, tenantId=tenant)
     _landActivity(store, "ontology_domain_pack_import", current_user, "import",
-                  {"pack_id": pack_id, "added": added}, "")
+                  {"pack_id": pack_id, "added": added, "artifact_sha256": artifact["sha256"]}, "")
     return {"code": 0, "message": "success",
-            "data": {"pack_id": pack_id, "added": added},
+            "data": {"pack_id": pack_id, "added": added,
+                     "artifact_sha256": artifact["sha256"],
+                     "artifact_created": artifact["created"]},
             "request_id": getattr(request.state, "request_id", "")}
 
 
@@ -492,22 +507,126 @@ async def create_state_machine(
     return {"code": 0, "data": item, "request_id": ""}
 
 
-@router.get("/ontology/blocking-stats")
-async def get_blocking_stats(
+@router.get("/ontology/webhook/config")
+async def get_webhook_config(
     current_user: Dict = Depends(get_current_user_or_service),
 ):
-    """U3 消解队列 blocking 读数（登录可读）：候选对数/全对数对比。"""
+    """U5：webhook 接收面读数——enabled＋密钥指纹（SHA-256 前缀掩码，绝不回明文）。"""
+    import hashlib
+    import os
+
+    from neurova.knowledge.enterprise.webhook_receiver import (
+        WEBHOOK_ENV,
+        WEBHOOK_SECRET_ENV,
+        webhookEnabled,
+    )
+
+    secret = os.environ.get(WEBHOOK_SECRET_ENV, "")
+    fingerprint = hashlib.sha256(secret.encode("utf-8")).hexdigest()[:12] if secret else ""
+    return {"code": 0,
+            "data": {"enabled": webhookEnabled(), "secret_env": WEBHOOK_SECRET_ENV,
+                     "enabled_env": WEBHOOK_ENV, "secret_fingerprint": fingerprint},
+            "request_id": ""}
+
+
+@router.post("/ontology/webhook/rotate")
+async def rotate_webhook_secret(
+    admin: Dict = Depends(require_admin()),
+):
+    """U5：签名密钥轮换（admin）——进程内 env 指针写新随机值，回新指纹。
+
+    部署面的持久化仍走环境变量指针（凭据不进库不进前端，AGENTS.md §3 同源）。
+    """
+    import hashlib
+    import os
+    import secrets
+
+    from neurova.knowledge.enterprise.webhook_receiver import WEBHOOK_SECRET_ENV
+
+    newSecret = secrets.token_hex(32)
+    os.environ[WEBHOOK_SECRET_ENV] = newSecret
+    fingerprint = hashlib.sha256(newSecret.encode("utf-8")).hexdigest()[:12]
+    return {"code": 0, "data": {"secret_fingerprint": fingerprint}, "request_id": ""}
+
+
+@router.post("/ontology/webhook/simulate")
+async def simulate_webhook_push(
+    body: Dict[str, Any],
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """U5：模拟推送三态——ok / duplicate（同幂等键二次推送零二次写）/
+    bad_signature（坏签名拒收）。回执是接收器原话（含诚实拒绝），不加工。"""
+    import json
+    import os
+    import time
+    import uuid
+
+    from neurova.knowledge.enterprise.webhook_receiver import (
+        WEBHOOK_SECRET_ENV,
+        WebhookReceiver,
+        computeSignature,
+    )
     from neurova.knowledge.foundation import get_knowledge_fact_store
-    from neurova.knowledge.resolution import candidatePairsBlocking, candidatePairsFullScan
+
+    mode = str(body.get("mode") or "ok")
+    if mode not in ("ok", "duplicate", "bad_signature"):
+        raise HTTPException(status_code=400,
+                            detail=f"mode 须为 ok/duplicate/bad_signature，得到 {mode!r}")
+    secret = os.environ.get(WEBHOOK_SECRET_ENV, "")
+    store = get_knowledge_fact_store()
+    receiver = WebhookReceiver(store, secret=secret, sourceId="sim:webhook",
+                               agentId="default", tenantId=_tenantOf(current_user))
+    payload = json.dumps({
+        "idempotency_key": "sim-" + uuid.uuid4().hex,
+        "subject": "模拟主体", "predicate": "is_a", "object": "concept",
+    }, ensure_ascii=False).encode("utf-8")
+    ts = int(time.time())
+    signature = computeSignature(payload, ts, secret)
+    if mode == "bad_signature":
+        signature = "0" * 64 if signature[0] != "0" else "1" * 64
+    first = receiver.handle(payload, ts, signature)
+    result: Dict[str, Any] = {"mode": mode, "first": first}
+    if mode == "duplicate":
+        # 同一幂等键立即重推：去重面应答"零二次写"
+        result["second"] = receiver.handle(payload, ts, signature)
+    return {"code": 0, "data": result, "request_id": ""}
+
+
+@router.get("/ontology/webhook/dedup-stats")
+async def get_webhook_dedup_stats(
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """U5：幂等去重台账读数（行数＋源数）——表随 v49 步就绪，未消费即 0。"""
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.foundation.foundation_schema import applyTo
 
     store = get_knowledge_fact_store()
-    nodes = []
     with store._lock:
-        rows = store._conn.execute(
-            "SELECT node_id, label, node_type FROM knowledge_graph_nodes"
-            " WHERE status = 'active' LIMIT 500").fetchall()
-    nodes = [type("N", (), {"node_id": r["node_id"], "label": r["label"],
-                            "node_type": r["node_type"]}) for r in rows]
+        applyTo(store._conn)
+        row = store._conn.execute(
+            "SELECT COUNT(*) AS n, COUNT(DISTINCT source_id) AS s"
+            " FROM enterprise_webhook_dedup").fetchone()
+    return {"code": 0, "data": {"rows": row["n"], "sources": row["s"]},
+            "request_id": ""}
+
+
+@router.get("/ontology/blocking-stats")
+async def get_blocking_stats(
+    agent_id: str = Query(default="default", description="图谱所属 agent"),
+    node_limit: int = Query(default=500, ge=1, le=2000, alias="nodeLimit"),
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """U3 消解队列 blocking 读数（登录可读）：候选对数/全对数对比。
+
+    节点源与消解队列同源（KnowledgeGraphManager per-agent，教义第 6 条），
+    不另造第二份节点读取。
+    """
+    from neurova.api.endpoints.knowledge_graph_api import _get_kg_manager
+    from neurova.knowledge.resolution import candidatePairsBlocking, candidatePairsFullScan
+
+    manager = _get_kg_manager(str(agent_id or "default"), _tenantOf(current_user))
+    nodes = (list(manager._nodes.values())[:max(1, min(int(node_limit), 2000))]
+             if manager is not None else [])
     full = candidatePairsFullScan(nodes)
     blocked = candidatePairsBlocking(nodes)
     return {"code": 0, "data": {"full_scan": len(full), "blocking": len(blocked),
@@ -533,7 +652,7 @@ async def get_conflict_policy(
             "request_id": ""}
 
 
-@router.get("/ontology/accountability")@router.get("/ontology/accountability")
+@router.get("/ontology/accountability")
 async def query_ontology_accountability(
     subject: Optional[str] = Query(default=None),
     actor: Optional[str] = Query(default=None),
@@ -798,6 +917,69 @@ async def run_ontology_sparql(
     return {"code": 0, "data": result, "request_id": ""}
 
 
+@router.get("/ontology/artifacts")
+async def list_ontology_artifacts(
+    kind: Optional[str] = Query(default=None, description="工件种类闭集过滤"),
+    limit: int = Query(default=100, ge=1, le=500),
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """C2：工件清单（元数据＋SHA-256 引用，不含字节）——按哈希引用的读数面。"""
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.artifact_store import listArtifacts
+
+    rows = listArtifacts(get_knowledge_fact_store(), kind=kind,
+                         tenantId=_tenantOf(current_user), limit=limit)
+    return {"code": 0, "data": rows, "request_id": ""}
+
+
+@router.get("/ontology/artifacts/{sha256}/content")
+async def get_ontology_artifact_content(
+    sha256: str = Path(..., description="工件 SHA-256（内容地址）"),
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """C1/C2：按哈希读工件原始字节（读时校验——损坏显式 500，不静默换字）。"""
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.artifact_store import getArtifact
+
+    content = getArtifact(get_knowledge_fact_store(), sha256)
+    if content is None:
+        raise HTTPException(status_code=404, detail=f"工件未登记: {sha256[:16]}")
+    return Response(content=content, media_type="application/octet-stream",
+                    headers={"X-Artifact-Sha256": sha256})
+
+
+@router.get("/ontology/artifacts/{sha256}/verify")
+async def verify_ontology_artifact(
+    sha256: str = Path(...),
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """C2：工件完整性核验（ok/drift/missing）——读数不是修复。"""
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.artifact_store import verifyArtifact
+
+    return {"code": 0, "data": verifyArtifact(get_knowledge_fact_store(), sha256),
+            "request_id": ""}
+
+
+@router.get("/ontology/import-artifact/latest")
+async def get_latest_import_artifact(
+    current_user: Dict = Depends(get_current_user_or_service),
+    agent_id: Optional[str] = Query(default=None),
+):
+    """C1 字节级往返读数面：最近一次 RDF/XML 导入的原始字节（逐字节原样）。"""
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.artifact_store import latestArtifact
+
+    store = get_knowledge_fact_store()
+    tenant = _tenantOf(current_user)
+    latest = (latestArtifact(store, "rdf_import", tenantId=tenant, agentId=agent_id or "")
+              if agent_id else None) or latestArtifact(store, "rdf_import", tenantId=tenant)
+    if latest is None:
+        raise HTTPException(status_code=404, detail="尚无 RDF/XML 导入工件")
+    return Response(content=latest["content"], media_type="application/octet-stream",
+                    headers={"X-Original-Import-Sha256": latest["sha256"]})
+
+
 @router.post("/ontology/import-rdf")
 async def import_ontology_rdf(
     request: Request,
@@ -826,6 +1008,12 @@ async def import_ontology_rdf(
         raise HTTPException(status_code=501, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    # C1：原始字节进不可变工件存储（content-addressed，write-once）
+    from neurova.knowledge.ontology.artifact_store import putArtifact
+
+    artifact = putArtifact(store, "rdf_import", result.original_bytes,
+                           sourceRef="import-rdf", tenantId=_tenantOf(current_user),
+                           agentId=str(current_user.get("agent_id") or "default"))
     return {
         "code": 0,
         "data": {
@@ -834,12 +1022,15 @@ async def import_ontology_rdf(
             "unsupported_count": len(result.unsupported),
             "unsupported": result.unsupported[:20],
             "original_bytes": len(result.original_bytes),
+            "sha256": result.sha256,
+            "artifact_sha256": artifact["sha256"],
+            "artifact_created": artifact["created"],
         },
         "request_id": "",
     }
 
 
-@router.post("/ontology/abduce")@router.post("/ontology/abduce")
+@router.post("/ontology/abduce")
 async def run_ontology_abduce(
     body: Dict[str, Any],
     current_user: Dict = Depends(get_current_user_or_service),
@@ -885,7 +1076,7 @@ async def search_ontology_community(
     return {"code": 0, "data": hits, "request_id": ""}
 
 
-@router.get("/ontology/communities")@router.get("/ontology/communities")
+@router.get("/ontology/communities")
 async def list_ontology_communities(
     current_user: Dict = Depends(get_current_user_or_service),
 ):

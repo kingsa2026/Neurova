@@ -25,6 +25,8 @@ logger = get_logger(__name__)
 
 #: webhook 总开关（缺省 off——新能力默认态＝旧行为）
 WEBHOOK_ENV = "NEUROVA_KB_WEBHOOK_ENABLED"
+#: 签名密钥 env 指针（U5 单源——rotate 写这里，接收面/模拟推送读这里；零明文落库）
+WEBHOOK_SECRET_ENV = "NEUROVA_KB_WEBHOOK_SECRET"
 #: 时间戳窗口（秒）——窗口外重放拒
 TIMESTAMP_WINDOW_SECONDS = 300
 
