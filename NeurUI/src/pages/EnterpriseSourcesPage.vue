@@ -573,6 +573,7 @@ const OBJECT_KINDS = ['column', 'template', 'term', 'literal'].map((k) => ({
   label: t('ontology.entObjectKind') + ': ' + k, value: k,
 }))
 
+const webhookDrawerNote = 'ontology.entWebhookNote'
 const typeCardOf = (kind: string) => KIND_CARDS.find((c) => c.kind === kind) ?? KIND_CARDS[0]
 
 const LAKEHOUSE_KINDS: ConnectKind[] = ['unity_catalog', 'snowflake', 'sap_odata', 'http_pull']

@@ -35,7 +35,25 @@
         · {{ t('ontology.abduceMissing') }}: {{ (abduceResult.missing ?? []).length }}
       </div>
     </div>
-    <h4 class="section-title">{{ t('ontology.rulesCountTitle') }}</h4>
+        <h4 class="section-title">{{ t('ontology.strategyTitle') }}</h4>
+    <div class="strategy-panel" data-testid="strategy-panel">
+      <span class="mono">{{ t('ontology.strategyCurrent') }}: <strong>{{ evalStrategy }}</strong></span>
+      <GlassButton v-if="isAdmin" size="sm" variant="secondary" data-testid="strategy-switch"
+                   @click="switchStrategy">{{ t('ontology.strategySwitch') }}</GlassButton>
+    </div>
+    <h4 class="section-title">{{ t('ontology.strategyTitle') }}</h4>
+    <div class="strategy-panel" data-testid="strategy-panel">
+      <span class="mono">{{ t('ontology.strategyCurrent') }}: <strong>{{ evalStrategy }}</strong></span>
+      <GlassButton v-if="isAdmin" size="sm" variant="secondary" data-testid="strategy-switch"
+                   @click="switchStrategy">{{ t('ontology.strategySwitch') }}</GlassButton>
+    </div>
+    <h4 class="section-title">{{ t('ontology.strategyTitle') }}</h4>
+    <div class="strategy-panel" data-testid="strategy-panel">
+      <span class="mono">{{ t('ontology.strategyCurrent') }}: <strong>{{ evalStrategy }}</strong></span>
+      <GlassButton v-if="isAdmin" size="sm" variant="secondary" data-testid="strategy-switch"
+                   @click="switchStrategy">{{ t('ontology.strategySwitch') }}</GlassButton>
+    </div>
+<h4 class="section-title">{{ t('ontology.rulesCountTitle') }}</h4>
     <table class="rules-table" data-testid="rules-table">
       <thead>
         <tr>
@@ -68,13 +86,25 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import GlassButton from '@/components/GlassButton.vue'
+import { useAuthStore } from '@/stores/auth'
 import { runOntologyAbduce, runOntologySparql } from '@/api/modules/ontology'
 import type { OntologySchemaData } from '@/types/ontology'
 
 const props = defineProps<{ schema: OntologySchemaData | null }>()
 const { t } = useI18n()
+const authStore = useAuthStore()
 
 const rules = computed(() => props.schema?.rules ?? [])
+
+const isAdmin = computed(() => {
+  const user = authStore.user as { role?: string } | null | undefined
+  return user?.role === 'admin'
+})
+const evalStrategy = ref('full_replay')
+async function switchStrategy() {
+  const next = evalStrategy.value === 'full_replay' ? 'rete' : 'full_replay'
+  evalStrategy.value = next
+}
 
 // W9：SPARQL 只读查询＋溯因解释树（501 not_supported 显式横幅）
 const sparqlQuery = ref('')

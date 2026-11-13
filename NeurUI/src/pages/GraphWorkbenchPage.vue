@@ -30,7 +30,55 @@
     />
 
     <div class="workbench-layout">
-      <GlassCard class="canvas-card">
+          <GlassPanel class="panel" data-testid="community-overlay-panel">
+      <div class="panel-head">
+        <span class="panel-title" data-testid="community-title">{{ t('ontology.communityOverlayTitle') }}</span>
+        <a-switch v-model:checked="communityOverlayOn" size="small" data-testid="community-toggle" />
+      </div>
+      <div v-if="communityOverlayOn && communities.length" class="community-legend">
+        <div v-for="c in communities.slice(0, 5)" :key="c.community_id" class="community-item">
+          <span class="mono">{{ c.community_id.slice(0, 10) }}</span>
+          <span>{{ c.member_labels.join(', ') }}</span>
+          <span v-if="c.summary_text" class="community-summary">{{ c.summary_text.slice(0, 60) }}</span>
+        </div>
+      </div>
+      <div v-if="communityOverlayOn && !communities.length" class="community-empty">
+        {{ t('ontology.communityOverlayEmpty') }}
+      </div>
+    </GlassPanel>
+        <GlassPanel class="panel" data-testid="community-overlay-panel">
+      <div class="panel-head">
+        <span class="panel-title" data-testid="community-title">{{ t('ontology.communityOverlayTitle') }}</span>
+        <a-switch v-model:checked="communityOverlayOn" size="small" data-testid="community-toggle" />
+      </div>
+      <div v-if="communityOverlayOn && communities.length" class="community-legend">
+        <div v-for="c in communities.slice(0, 5)" :key="c.community_id" class="community-item">
+          <span class="mono">{{ c.community_id.slice(0, 10) }}</span>
+          <span>{{ c.member_labels.join(', ') }}</span>
+          <span v-if="c.summary_text" class="community-summary">{{ c.summary_text.slice(0, 60) }}</span>
+        </div>
+      </div>
+      <div v-if="communityOverlayOn && !communities.length" class="community-empty">
+        {{ t('ontology.communityOverlayEmpty') }}
+      </div>
+    </GlassPanel>
+        <GlassPanel class="panel" data-testid="community-overlay-panel">
+      <div class="panel-head">
+        <span class="panel-title" data-testid="community-title">{{ t('ontology.communityOverlayTitle') }}</span>
+        <a-switch v-model:checked="communityOverlayOn" size="small" data-testid="community-toggle" />
+      </div>
+      <div v-if="communityOverlayOn && communities.length" class="community-legend">
+        <div v-for="c in communities.slice(0, 5)" :key="c.community_id" class="community-item">
+          <span class="mono">{{ c.community_id.slice(0, 10) }}</span>
+          <span>{{ c.member_labels.join(', ') }}</span>
+          <span v-if="c.summary_text" class="community-summary">{{ c.summary_text.slice(0, 60) }}</span>
+        </div>
+      </div>
+      <div v-if="communityOverlayOn && !communities.length" class="community-empty">
+        {{ t('ontology.communityOverlayEmpty') }}
+      </div>
+    </GlassPanel>
+    <GlassCard class="canvas-card">
         <a-spin :spinning="loading">
           <div ref="canvasStageRef" data-testid="workbench-canvas-stage" class="canvas-stage">
           <div class="canvas-toolbar">
@@ -274,6 +322,7 @@ import { useAgentPage } from '@/composables/useAgentPage'
 import { useAuthStore } from '@/stores/auth'
 import { request } from '@/api'
 import { forceLayout } from '@/pages/graph-workbench/forceLayout'
+import { listOntologyCommunities } from '@/api/modules/ontology'
 import FlowEdge from '@/pages/graph-workbench/FlowEdge.vue'
 import { FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons-vue'
 // 全屏助手与协作画布共用同一份（标准 API 优先、webkit 前缀回退），不另造平行实装。
@@ -776,6 +825,19 @@ const onNodeSelected = (nodeId: string) => {
   selectedNodeId.value = nodeId
 }
 
+const communityOverlayOn = ref(false)
+const communities = ref<Array<{ community_id: string; member_labels: string[]; summary_text: string }>>([])
+
+async function loadCommunities() {
+  try {
+    const res = await listOntologyCommunities()
+    communities.value = (res.data ?? []) as typeof communities.value
+  } catch {
+    communities.value = []
+  }
+}
+
+onMounted(loadCommunities)
 onMounted(() => {
   document.addEventListener('fullscreenchange', onFullscreenChange)
   document.addEventListener('webkitfullscreenchange', onFullscreenChange)
