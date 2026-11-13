@@ -416,6 +416,19 @@ export function resolveKnowledgeConflict(
     { resolution, ...(winnerFactId ? { winner_fact_id: winnerFactId } : {}) })
 }
 
+/** Admin: pending 冲突的 LLM 参考意见（C2；只读辅助——不落账、不改冲突状态）。 */
+export interface ConflictLlmAdvice {
+  contradicts: boolean
+  winner_fact_id: string
+  reason: string
+  members: string[]
+}
+
+export function requestConflictLlmAdvice(conflictId: string) {
+  return api.post<{ code: number; data: ConflictLlmAdvice }>(
+    `${BASE}/conflicts/${conflictId}/llm-advice`)
+}
+
 // ---------------------------------------------------------------------------
 // 工单 024：事实血缘与 Turtle 导出（G01 的用户可见面）
 // ---------------------------------------------------------------------------

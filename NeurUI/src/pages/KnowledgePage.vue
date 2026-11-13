@@ -276,6 +276,12 @@
                   {{ t('knowledge.conflictNoBasis') }}
                 </a-tag>
                 <p v-if="item.policy_basis" class="kb-conflict-basis">{{ item.policy_basis }}</p>
+                <!-- C2：LLM 参考意见（只读辅助，不参与自动裁决） -->
+                <p
+                  v-if="conflictLlmAdvice[item.conflict_id]"
+                  class="kb-conflict-basis"
+                  data-testid="conflict-llm-advice"
+                >🤖 {{ conflictLlmAdvice[item.conflict_id] }}</p>
               </template>
             </div>
             <template #actions>
@@ -313,6 +319,14 @@
                 <!-- 裁决前先看清每条说法的来源：血缘抽屉吃 member_fact_id，选中的成员优先 -->
                 <a-button size="small" @click="openLineage(conflictLineageTarget(item))">
                   {{ t('knowledge.conflictViewLineage') }}
+                </a-button>
+                <!-- C2：LLM 语义参考意见（管理员主动触发，仅 pending 事实轴冲突） -->
+                <a-button
+                  size="small"
+                  :loading="!!conflictLlmAdviceLoading[item.conflict_id]"
+                  @click="handleRequestLlmAdvice(item)"
+                >
+                  {{ t('knowledge.conflictLlmAdvice') }}
                 </a-button>
               </template>
             </template>
@@ -841,6 +855,7 @@ import {
   deleteKbCollection,
   listKnowledgeConflicts,
   resolveKnowledgeConflict,
+  requestConflictLlmAdvice,
   type ConflictResolution,
   listDeletedKnowledge,
   restoreKnowledgeNode,
@@ -1848,6 +1863,30 @@ async function handleResolveConflict(item: KnowledgeConflict, resolution: Confli
     if (isAdmin.value) fetchTombstones()
   } catch (err: any) {
     message.error(extractApiDetail(err) || t('knowledge.reviewError'))
+  }
+}
+
+/** C2：LLM 参考意见（只读辅助）——按 conflict_id 缓存展示，不落账不改状态 */
+const conflictLlmAdvice = ref<Record<string, string>>({})
+const conflictLlmAdviceLoading = ref<Record<string, boolean>>({})
+
+async function handleRequestLlmAdvice(item: KnowledgeConflict) {
+  const cid = item.conflict_id
+  conflictLlmAdviceLoading.value = { ...conflictLlmAdviceLoading.value, [cid]: true }
+  try {
+    const res: any = await requestConflictLlmAdvice(cid)
+    const data = res?.data?.data ?? res?.data
+    if (!data) throw new Error('empty advice')
+    conflictLlmAdvice.value = {
+      ...conflictLlmAdvice.value,
+      [cid]: data.contradicts
+        ? `${data.reason}（${t('knowledge.conflictLlmAdviceWinner')}: ${data.winner_fact_id || t('knowledge.conflictLlmAdviceNoWinner')}）`
+        : t('knowledge.conflictLlmAdviceNoConflict'),
+    }
+  } catch (err: any) {
+    message.error(extractApiDetail(err) || t('common.error'))
+  } finally {
+    conflictLlmAdviceLoading.value = { ...conflictLlmAdviceLoading.value, [cid]: false }
   }
 }
 
