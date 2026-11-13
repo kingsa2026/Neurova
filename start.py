@@ -71,11 +71,22 @@ from scripts.health_check import (
 # ═══════════════════════════════════════════════════════════════
 
 def _get_backend_python() -> list:
-    """获取后端 Python 命令"""
+    """获取后端 Python 命令——只允许项目 .venv（AGENTS.md §0）。
+
+    旧形态在 venv 缺失时静默回退 `sys.executable`：系统 Python 恰好装了
+    fastapi 就能把服务拉起来，而缺的依赖（prometheus-client / jwt /
+    langchain 系列）留到运行期才爆——端点注册表缺角、鉴权面静默降级、
+    LLM 客户端退化，日志读数全像"本项目坏了"却查不到启动错。现改为
+    启动期显式报错退出，把"先建 .venv"这件事提前暴露。
+    """
     venv_python = get_venv_python()
     if venv_python.exists():
         return [str(venv_python)]
-    return [sys.executable]
+    print(f"\n  {c('✗', Colors.RED)} 项目虚拟环境缺失: {venv_python}")
+    print(f"  {c('!', Colors.YELLOW)} 后端只允许用项目 .venv 解释器启动——"
+          f"系统 Python 缺 prometheus-client/jwt/langchain 等依赖时会静默降级。")
+    print(f"  请先运行: {c('python install.py', Colors.BOLD)} 创建虚拟环境后重试。")
+    raise SystemExit(1)
 
 
 def _rotate_log_file(path: Path, max_bytes: int = 20 * 1024 * 1024, backups: int = 3) -> None:
