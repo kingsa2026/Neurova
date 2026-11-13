@@ -68,7 +68,7 @@
       </div>
     </div>
 
-    <h4 class="section-title">Rollback</h4>
+    <h4 class="section-title">{{ t('ontology.rollbackTitle') }}</h4>
     <div class="rollback-form">
       <label class="field">
         <span>toBaselineId</span>
@@ -87,7 +87,7 @@
           data-testid="rollback-btn"
           @click="rollback"
         >
-          Rollback
+          {{ t('ontology.rollbackBtn') }}
         </GlassButton>
       </div>
       <pre v-if="rollbackResult" class="result-pre" data-testid="rollback-result">{{ rollbackResult }}</pre>

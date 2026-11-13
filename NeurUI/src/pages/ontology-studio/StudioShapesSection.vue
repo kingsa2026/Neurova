@@ -3,10 +3,7 @@
     <div class="shapes-head">
       <div>
         <h4 class="section-title">{{ t('ontology.shapesTitle') }}</h4>
-        <p class="shapes-note">
-          JSON DSL: in / pattern / minCount / maxCount / class. Builtin six
-          constraints stay in the single evaluator; duplicate dimensions are rejected.
-        </p>
+        <p class="shapes-note">{{ t('ontology.shapesNote') }}</p>
       </div>
       <GlassButton
         v-if="isAdmin"
@@ -14,16 +11,16 @@
         data-testid="shapes-new"
         @click="showForm = !showForm"
       >
-        New shape
+        {{ t('ontology.shapesNewBtn') }}
       </GlassButton>
     </div>
 
-    <p v-if="!isAdmin" class="admin-note" data-testid="shapes-admin-note">Admin only</p>
+    <p v-if="!isAdmin" class="admin-note" data-testid="shapes-admin-note">{{ t('ontology.shapesAdminOnly') }}</p>
 
     <div v-if="isAdmin && showForm" class="shape-form" data-testid="shape-form">
       <label class="field"><span>shape_id</span><a-input v-model:value="form.shape_id" size="sm" data-testid="shape-id" /></label>
       <label class="field">
-        <span>target_kind</span>
+        <span>{{ t('ontology.shapesFieldTargetKind') }}</span>
         <a-select v-model:value="form.target_kind" size="sm" data-testid="shape-target-kind">
           <a-select-option value="relation">relation</a-select-option>
           <a-select-option value="concept">concept</a-select-option>
@@ -31,20 +28,20 @@
       </label>
       <label class="field"><span>target_term_id</span><a-input v-model:value="form.target_term_id" size="sm" data-testid="shape-target-term" /></label>
       <label class="field">
-        <span>constraint_kind</span>
+        <span>{{ t('ontology.shapesFieldConstraintKind') }}</span>
         <a-select v-model:value="form.constraint_kind" size="sm" data-testid="shape-constraint-kind">
           <a-select-option v-for="kind in CONSTRAINT_KINDS" :key="kind" :value="kind">{{ kind }}</a-select-option>
         </a-select>
       </label>
-      <label class="field"><span>constraint JSON</span><a-textarea v-model:value="form.constraint_text" :rows="3" data-testid="shape-constraint-json" /></label>
+      <label class="field"><span>{{ t('ontology.shapesFieldConstraintJson') }}</span><a-textarea v-model:value="form.constraint_text" :rows="3" data-testid="shape-constraint-json" /></label>
       <label class="field">
-        <span>severity</span>
+        <span>{{ t('ontology.shapesFieldSeverity') }}</span>
         <a-select v-model:value="form.severity" size="sm" data-testid="shape-severity">
           <a-select-option v-for="sev in SEVERITIES" :key="sev" :value="sev">{{ sev }}</a-select-option>
         </a-select>
       </label>
-      <label class="field"><span>message</span><a-input v-model:value="form.message" size="sm" data-testid="shape-message" /></label>
-      <label class="field field--inline"><span>enabled</span><a-checkbox v-model:checked="form.enabled" data-testid="shape-enabled" /></label>
+      <label class="field"><span>{{ t('ontology.shapesFieldMessage') }}</span><a-input v-model:value="form.message" size="sm" data-testid="shape-message" /></label>
+      <label class="field field--inline"><span>{{ t('ontology.shapesFieldEnabled') }}</span><a-checkbox v-model:checked="form.enabled" data-testid="shape-enabled" /></label>
       <div class="form-actions">
         <GlassButton size="sm" :loading="saving" data-testid="shape-create" @click="createShape">
           {{ t('common.confirm') }}
@@ -55,7 +52,7 @@
 
     <a-spin :spinning="loading">
       <table v-if="shapes.length" class="shapes-table" data-testid="shapes-table">
-        <thead><tr><th>shape_id</th><th>target</th><th>constraint</th><th>severity</th><th>message</th><th></th></tr></thead>
+        <thead><tr><th>shape_id</th><th>{{ t('ontology.shapesThTarget') }}</th><th>{{ t('ontology.shapesThConstraint') }}</th><th>{{ t('ontology.shapesFieldSeverity') }}</th><th>{{ t('ontology.shapesFieldMessage') }}</th><th></th></tr></thead>
         <tbody>
           <tr v-for="shape in shapes" :key="shape.shape_id" :data-testid="`shape-row-${shape.shape_id}`">
             <td class="mono">{{ shape.shape_id }}</td>
@@ -76,7 +73,7 @@
           </tr>
         </tbody>
       </table>
-      <a-empty v-else-if="!loading" data-testid="shapes-empty" description="No shapes" />
+      <a-empty v-else-if="!loading" data-testid="shapes-empty" :description="t('ontology.shapesEmpty')" />
     </a-spin>
   </div>
 </template>
