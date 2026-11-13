@@ -218,7 +218,7 @@ class AppContainerSandbox:
 
     def _grant_dir_access(self, directory: str, sid_string: str) -> None:
         """容器对输出目录的写权限（icacls 授 ACE）。"""
-        icacls = os.path.join(os.environ["SystemRoot"], "System32", "icacls.exe")
+        icacls = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "icacls.exe")
         subprocess.run(
             [icacls, directory, "/grant", f"*{sid_string}:(OI)(CI)(R,W)"],
             capture_output=True, timeout=10,

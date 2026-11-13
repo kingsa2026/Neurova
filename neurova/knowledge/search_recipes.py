@@ -15,6 +15,10 @@ import os
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from neurova.core.logger import get_logger
+
+logger = get_logger(__name__)
+
 RECIPE_NAMES = ("default", "balanced", "precise", "graph_expanded")
 
 
@@ -95,12 +99,36 @@ def resolveRerankParams() -> Tuple[str, int]:
 
 
 def resolveRecencyParams() -> Tuple[float, float]:
-    """recency (weight, halfLifeDays)：env 显式 > 配方。"""
+    """recency (weight, halfLifeDays)：env 显式 > 配方。env 非法回落配方值。"""
     rawWeight = (os.environ.get("NEUROVA_RECENCY_WEIGHT") or "").strip()
     rawHalfLife = (os.environ.get("NEUROVA_RECENCY_HALF_LIFE_DAYS") or "").strip()
     recipe = None
-    if not rawWeight or not rawHalfLife:
-        recipe = resolveRecipe()
-    weight = float(rawWeight) if rawWeight else recipe.recencyWeight
-    halfLife = float(rawHalfLife) if rawHalfLife else recipe.recencyHalfLifeDays
+
+    def _recipe():
+        nonlocal recipe
+        if recipe is None:
+            recipe = resolveRecipe()
+        return recipe
+
+    weight: Optional[float] = None
+    if rawWeight:
+        try:
+            weight = float(rawWeight)
+        except ValueError:
+            logger.warning(
+                "NEUROVA_RECENCY_WEIGHT 非法值 %r，回落配方 recencyWeight", rawWeight)
+    if weight is None:
+        weight = _recipe().recencyWeight
+
+    halfLife: Optional[float] = None
+    if rawHalfLife:
+        try:
+            halfLife = float(rawHalfLife)
+        except ValueError:
+            logger.warning(
+                "NEUROVA_RECENCY_HALF_LIFE_DAYS 非法值 %r，回落配方 recencyHalfLifeDays",
+                rawHalfLife)
+    if halfLife is None:
+        halfLife = _recipe().recencyHalfLifeDays
+
     return weight, halfLife

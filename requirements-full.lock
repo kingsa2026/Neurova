@@ -10,8 +10,6 @@ aiohttp==3.14.5
     #   wecom-aibot-python-sdk
 aiosignal==1.4.0
     # via aiohttp
-aiosqlite==0.22.1
-    # via -r requirements.txt
 annotated-doc==0.0.5
     # via
     #   fastapi
@@ -19,9 +17,7 @@ annotated-doc==0.0.5
 annotated-types==0.8.0
     # via pydantic
 anthropic==1.6.0
-    # via
-    #   -r requirements.txt
-    #   langchain-anthropic
+    # via langchain-anthropic
 anyio==4.15.1
     # via
     #   anthropic

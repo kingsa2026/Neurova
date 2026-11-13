@@ -2494,16 +2494,24 @@ class ChatPipeline:
         """
         try:
             from neurova.agent.turn_profile import (
+                VALID_PROFILES,
                 recordProfileUsage,
                 setTurnProfile,
             )
 
             meta = ctx.metadata if isinstance(ctx.metadata, dict) else {}
             explicit = str(meta.get("task_profile") or "").strip().lower()
-            if explicit:  # 调用方显式指定，绝不覆盖
+            if explicit and explicit in VALID_PROFILES:  # 调用方显式指定，绝不覆盖
                 setTurnProfile(explicit)
                 recordProfileUsage(explicit, "explicit")
                 return
+            if explicit:
+                # P3-2：非法显式档位不记 usage、不短路——继续走存储档位/分类器解析
+                logger.warning(
+                    "忽略非法 task_profile=%r（合法域 %s），继续按存储档位/分类器解析",
+                    explicit,
+                    VALID_PROFILES,
+                )
             agent_id = str(getattr(self._agent, "agent_id", "") or "")
             if agent_id:
                 from neurova.security.agent_profile_settings import get_agent_profile

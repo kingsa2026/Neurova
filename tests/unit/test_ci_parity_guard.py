@@ -329,7 +329,6 @@ E2E_REQUIRED_PACKAGES = (
     "bcrypt",  # neurova.auth.password_hasher 裸 import（conftest 必经）
     "passlib",  # 同上，声明侧算法来源
     "python-dotenv",  # 配置加载
-    "aiosqlite",  # sqlite 依赖
     "prometheus_client",  # /metrics 暴露面
 )
 
