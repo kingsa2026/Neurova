@@ -54,7 +54,7 @@
       <table v-if="shapes.length" class="shapes-table" data-testid="shapes-table">
         <thead><tr><th>shape_id</th><th>{{ t('ontology.shapesThTarget') }}</th><th>{{ t('ontology.shapesThConstraint') }}</th><th>{{ t('ontology.shapesFieldSeverity') }}</th><th>{{ t('ontology.shapesFieldMessage') }}</th><th></th></tr></thead>
         <tbody>
-          <tr v-for="shape in shapes" :key="shape.shape_id" :data-testid="`shape-row-${shape.shape_id}`">
+          <tr v-for="shape in pagedShapes" :key="shape.shape_id" :data-testid="`shape-row-${shape.shape_id}`">
             <td class="mono">{{ shape.shape_id }}</td>
             <td class="mono">{{ shape.target_kind }}:{{ shape.target_term_id || '-' }}</td>
             <td class="mono">{{ shape.constraint_kind }} {{ shortJson(shape.constraint) }}</td>
@@ -73,13 +73,21 @@
           </tr>
         </tbody>
       </table>
+      <a-pagination
+        v-if="shapes.length"
+        v-model:current="shapesPage"
+        :page-size="20"
+        :total="shapes.length"
+        :show-size-changer="false"
+        class="list-pagination"
+      />
       <a-empty v-else-if="!loading" data-testid="shapes-empty" :description="t('ontology.shapesEmpty')" />
     </a-spin>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -98,6 +106,10 @@ const CONSTRAINT_KINDS = ['in', 'pattern', 'minCount', 'maxCount', 'class'] as c
 const SEVERITIES = ['violation', 'warning', 'info'] as const
 
 const shapes = ref<OntologyShape[]>([])
+
+const shapesPage = ref(1)
+const pagedShapes = computed(() => shapes.value.slice((shapesPage.value - 1) * 20, shapesPage.value * 20))
+watch(() => shapes.value.length, () => { shapesPage.value = 1 })
 const loading = ref(false)
 const saving = ref(false)
 const showForm = ref(false)
@@ -224,6 +236,11 @@ onMounted(reload)
 .form-actions {
   display: flex;
   gap: 8px;
+}
+.list-pagination {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
 }
 .shapes-table {
   width: 100%;
