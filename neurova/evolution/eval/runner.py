@@ -151,6 +151,10 @@ class EvolutionRunResult:
     # R1 成本升选择键：近平分成本 tiebreak 的读数（applied/not_applicable/
     # disabled + 近平分候选数）。
     cost_tiebreak: dict = field(default_factory=dict)
+    # R7/HC6 双段复核：核选集上选出的胜者在**全量留出**上复核的读数。
+    # state=measured 时 full_improvement < 0 ⇒ coreset_recheck_failed 拒绝
+    # （核选探路便宜，但结论必须经得起全量复核）。
+    coreset_recheck: dict = field(default_factory=dict)
 
     @property
     def improvement(self) -> float:
@@ -247,6 +251,7 @@ class EvolutionRunResult:
             "cost_summary": dict(self.cost_summary),
             "exec_suite": dict(self.exec_suite),
             "cost_tiebreak": dict(self.cost_tiebreak),
+            "coreset_recheck": dict(self.coreset_recheck),
         }
 
 
@@ -737,8 +742,16 @@ class SkillEvolutionRunner:
         # ── HN6/HC6 评测集核选 ──
         # 评测集超过核选容量时按「难度加权多样性」收缩到 K 个再走既有 split
         # （train/val/holdout 从核选集重分）——判据集变小、评测成本不随语料
-        # 线性走。eval_coreset_k=0（默认）不核选，逐字旧行为。
+        # 线性走。生效 K = max(代码级配置, 治理设置项)——治理设置抬底线，
+        # 调用方/测试的显式配置不被覆盖。两处都为 0 不核选，逐字旧行为。
         _coresetK = int(getattr(self.config, "eval_coreset_k", 0) or 0)
+        try:
+            from neurova.security.eval_coreset_settings import coreset_k as _settingsCoresetK
+
+            _coresetK = max(_coresetK, int(_settingsCoresetK()))
+        except Exception:  # noqa: BLE001 - 设置面故障回退代码级配置
+            pass
+        _fullDataset = dataset
         if _coresetK > 0 and len(dataset.all_examples) > _coresetK:
             from neurova.evolution.eval.coreset import selectCoreset
 
@@ -959,6 +972,22 @@ class SkillEvolutionRunner:
             except OSError as e:
                 logger.debug("编辑历史台账回填失败: %s", e)
 
+        # ── R7/HC6 双段复核：核选集探路，全量留出复核 ──
+        # 核选把判据集缩小了；胜者必须在**未收缩的全量留出**上再复核一遍，
+        # 「核选上过关」才作数。复核只加证据与一道非回归门（不替代核选判据）。
+        if _fullDataset is not dataset and _fullDataset.holdout:
+            _fullBefore = await self._evaluate_avg(
+                baseline_text, _fullDataset.holdout, artifact_type, arm="holdout_full")
+            _fullAfter = await self._evaluate_avg(
+                best_text, _fullDataset.holdout, artifact_type, arm="holdout_full")
+            result.coreset_recheck = {
+                "state": "measured",
+                "full_holdout_tasks": len(_fullDataset.holdout),
+                "full_holdout_before": round(_fullBefore, 4),
+                "full_holdout_after": round(_fullAfter, 4),
+                "full_improvement": round(_fullAfter - _fullBefore, 4),
+            }
+
         # ── 终局拒绝的唯一出口 ──
         async def rejectRun(reason: str) -> EvolutionRunResult:
             """落理由、复位部署正文、把台账结局改回「未部署」、附 heldout 证据后返回。
@@ -986,6 +1015,13 @@ class SkillEvolutionRunner:
         # ── 判定 1:留出集回退 → 拒绝(防过拟合)──
         if result.holdout_after < result.holdout_before - _EPS:
             return await rejectRun("holdout_regression")
+
+        # ── 判定 1.5:核选双段复核的非回归门（R7/HC6）──
+        # 核选集上过关、全量留出上被改坏 ⇒ 拒绝——「核选探路便宜」不以
+        # 放过全量回归为代价。未核选/未量出时不判（诚实缺格）。
+        if (result.coreset_recheck.get("state") == "measured"
+                and result.coreset_recheck.get("full_improvement", 0.0) < -_EPS):
+            return await rejectRun("coreset_recheck_failed")
 
         # ── 判定 2:无实质增益 → 保留基线 ──
         # 阈值 = max(min_improvement, δ)：δ>0（已校准）时，评测噪声内的

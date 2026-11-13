@@ -876,6 +876,50 @@ async def update_task_profile_settings(body: TaskProfileUpdate,
     return {"code": 0, "data": load_settings()}
 
 
+# ── 评测集核选 K 值（R7/HC6 治理面，2026-11-13）──────────────────────
+
+
+@router.get("/eval-coreset")
+async def get_eval_coreset_settings(admin=Depends(_governance_admin_dep)):
+    """评测集核选容量读数（仅管理员）：0 = 不核选；env 灰度直改仍优先。"""
+    from neurova.security.eval_coreset_settings import (
+        MAX_CORESET_K,
+        MIN_CORESET_K,
+        load_settings,
+    )
+
+    return {"code": 0, "data": load_settings(),
+            "domains": {"min": MIN_CORESET_K, "max": MAX_CORESET_K}}
+
+
+class EvalCoresetUpdate(BaseModel):
+    """核选容量更新载荷：只收 coreset_k 一个键，未知键当场拒。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    coreset_k: int
+
+
+@router.put("/eval-coreset")
+async def update_eval_coreset_settings(body: EvalCoresetUpdate,
+                                       admin=Depends(_governance_admin_dep)):
+    """更新评测集核选容量（仅管理员）；越界 422（端点层严格，存储层钳位兜脏值）。"""
+    from neurova.security.eval_coreset_settings import (
+        MAX_CORESET_K,
+        MIN_CORESET_K,
+        load_settings,
+        save_settings,
+    )
+
+    if not (MIN_CORESET_K <= body.coreset_k <= MAX_CORESET_K):
+        raise HTTPException(
+            status_code=422,
+            detail=f"coreset_k 须在 {MIN_CORESET_K}–{MAX_CORESET_K} 之间（0=不核选）")
+    if not save_settings(body.coreset_k):
+        raise HTTPException(status_code=500, detail="核选设置保存失败")
+    return {"code": 0, "data": load_settings()}
+
+
 # ── 工具结果溢出阈值（P1-#6，2026-09-13 设置-高级）──────────────────
 
 

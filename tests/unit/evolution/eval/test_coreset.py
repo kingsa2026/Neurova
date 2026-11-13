@@ -115,3 +115,128 @@ class TestCoresetWiring:
         cored = await runner_run_size(4)
         assert full > cored
         assert cored == 4  # train(4) 全量 + val/holdout 从核选集再分
+
+
+# ── 设置项化（治理面 K 值）────────────────────────────────────────
+
+class TestCoresetSettings:
+    def test_default_zero_and_roundtrip(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("NEUROVA_EVAL_CORESET_SETTINGS", str(tmp_path / "cs.json"))
+        monkeypatch.delenv("NEUROVA_EVAL_CORESET_K", raising=False)
+        from neurova.security import eval_coreset_settings as ecs
+
+        assert ecs.coreset_k() == 0
+        assert ecs.save_settings(6) is True
+        assert ecs.coreset_k() == 6
+
+    def test_env_override_wins(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("NEUROVA_EVAL_CORESET_SETTINGS", str(tmp_path / "cs.json"))
+        from neurova.security import eval_coreset_settings as ecs
+
+        ecs.save_settings(6)
+        monkeypatch.setenv("NEUROVA_EVAL_CORESET_K", "2")
+        assert ecs.coreset_k() == 2
+
+    def test_clamped_to_domain(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("NEUROVA_EVAL_CORESET_SETTINGS", str(tmp_path / "cs.json"))
+        from neurova.security import eval_coreset_settings as ecs
+
+        ecs.save_settings(9999)
+        assert ecs.coreset_k() == 200
+        ecs.save_settings(-3)
+        assert ecs.coreset_k() == 0
+
+    @pytest.mark.asyncio
+    async def test_runner_uses_max_of_config_and_settings(self, monkeypatch, tmp_path):
+        """生效 K = max(代码级配置, 治理设置)——治理设置抬底线，测试配置不失效。"""
+        seen: list = []
+        import neurova.evolution.eval.coreset as coreset_mod
+
+        real = coreset_mod.selectCoreset
+
+        def spy(cases, k):
+            seen.append(k)
+            return real(cases, k)
+
+        monkeypatch.setattr(coreset_mod, "selectCoreset", spy)
+        monkeypatch.setenv("NEUROVA_EVAL_CORESET_SETTINGS", str(tmp_path / "cs.json"))
+        from neurova.security import eval_coreset_settings as ecs
+
+        ecs.save_settings(6)
+        runner = SkillEvolutionRunner(
+            EvolutionConfig(noise_repeats=1),  # config K=0
+            judge=_judge_with_gain(0.02), mutate=_mutate)
+        result = await runner.run(baseline_text=BASELINE, artifact_type="skill",
+                                  dataset=_ds(), iterations=1)
+        assert not result.rejected
+        assert seen and seen[0] == 6  # 治理设置抬到 6
+
+        seen.clear()
+        runner2 = SkillEvolutionRunner(
+            EvolutionConfig(noise_repeats=1, eval_coreset_k=4),
+            judge=_judge_with_gain(0.02), mutate=_mutate)
+        await runner2.run(baseline_text=BASELINE, artifact_type="skill",
+                          dataset=_ds(), iterations=1)
+        assert seen[0] == 6  # max(4, 6) = 6
+
+
+# ── 双段复核（核选探路 → 全量留出复核）────────────────────────────
+
+class TestFullRecheck:
+    def _fixed_coreset(self, monkeypatch):
+        """把核选钉成「前 4 条」，使核选留出与全量留出（终审任务）可区分。"""
+        import neurova.evolution.eval.coreset as coreset_mod
+
+        real = coreset_mod.selectCoreset
+
+        def fixed(cases, k):
+            return real(list(cases)[:4], min(4, len(cases)))
+
+        monkeypatch.setattr(coreset_mod, "selectCoreset", fixed)
+
+    @pytest.mark.asyncio
+    async def test_recheck_measured_on_full_holdout(self, monkeypatch):
+        """核选选出的胜者在**全量留出**上复核，读数落 coreset_recheck。"""
+        self._fixed_coreset(monkeypatch)
+        runner = SkillEvolutionRunner(
+            EvolutionConfig(noise_repeats=1, eval_coreset_k=4),
+            judge=_judge_with_gain(0.02), mutate=_mutate)
+        result = await runner.run(baseline_text=BASELINE, artifact_type="skill",
+                                  dataset=_ds(), iterations=1)
+        assert not result.rejected
+        assert result.coreset_recheck["state"] == "measured"
+        assert result.coreset_recheck["full_improvement"] == pytest.approx(0.02)
+
+    @pytest.mark.asyncio
+    async def test_recheck_rejects_full_holdout_regression(self, monkeypatch):
+        """核选留出过关、但全量留出被改坏 ⇒ coreset_recheck_failed 拒绝。"""
+        self._fixed_coreset(monkeypatch)
+
+        async def judge(*, task_input, expected_behavior, output, skill_text, **kw):
+            if "IMPROVED" not in skill_text:
+                c = 0.2
+            elif "终审" in task_input:
+                c = 0.0  # 只在全量留出任务上改坏——核选集里看不到
+            else:
+                c = 0.42
+            return FitnessScore(correctness=c, procedure_following=c, conciseness=c, feedback="")
+
+        runner = SkillEvolutionRunner(
+            EvolutionConfig(noise_repeats=1, eval_coreset_k=4),
+            judge=judge, mutate=_mutate)
+        result = await runner.run(baseline_text=BASELINE, artifact_type="skill",
+                                  dataset=_ds(), iterations=1)
+        assert result.rejected
+        assert result.reject_reason == "coreset_recheck_failed"
+        assert result.deployed_text == BASELINE
+
+    @pytest.mark.asyncio
+    async def test_no_shrink_no_recheck(self, monkeypatch):
+        """未核选（K=0）⇒ 无复核读数（旧行为逐字节不变）。"""
+        runner = SkillEvolutionRunner(
+            EvolutionConfig(noise_repeats=1),
+            judge=_judge_with_gain(0.02), mutate=_mutate)
+        result = await runner.run(baseline_text=BASELINE, artifact_type="skill",
+                                  dataset=_ds(), iterations=1)
+        assert not result.rejected
+        assert result.coreset_recheck == {}
