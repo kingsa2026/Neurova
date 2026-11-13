@@ -489,3 +489,7 @@ tests/**/*.llm.json
 tests/**/*.env
 tests/**/.env
 tests/**/.env.*
+
+# Playwright e2e artifacts (C3)
+NeurUI/test-results/
+NeurUI/playwright-report/

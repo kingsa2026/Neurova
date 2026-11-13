@@ -41,18 +41,6 @@
       <GlassButton v-if="isAdmin" size="sm" variant="secondary" data-testid="strategy-switch"
                    @click="switchStrategy">{{ t('ontology.strategySwitch') }}</GlassButton>
     </div>
-    <h4 class="section-title">{{ t('ontology.strategyTitle') }}</h4>
-    <div class="strategy-panel" data-testid="strategy-panel">
-      <span class="mono">{{ t('ontology.strategyCurrent') }}: <strong>{{ evalStrategy }}</strong></span>
-      <GlassButton v-if="isAdmin" size="sm" variant="secondary" data-testid="strategy-switch"
-                   @click="switchStrategy">{{ t('ontology.strategySwitch') }}</GlassButton>
-    </div>
-    <h4 class="section-title">{{ t('ontology.strategyTitle') }}</h4>
-    <div class="strategy-panel" data-testid="strategy-panel">
-      <span class="mono">{{ t('ontology.strategyCurrent') }}: <strong>{{ evalStrategy }}</strong></span>
-      <GlassButton v-if="isAdmin" size="sm" variant="secondary" data-testid="strategy-switch"
-                   @click="switchStrategy">{{ t('ontology.strategySwitch') }}</GlassButton>
-    </div>
 <h4 class="section-title">{{ t('ontology.rulesCountTitle') }}</h4>
     <table class="rules-table" data-testid="rules-table">
       <thead>

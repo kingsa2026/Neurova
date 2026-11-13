@@ -397,6 +397,41 @@
         >{{ t('common.save') }}</GlassButton>
       </div>
     </a-modal>
+    <!-- U5：webhook 接收面抽屉——密钥指纹掩码/轮换、模拟推送三态、幂等去重读数 -->
+    <a-drawer v-model:open="webhookDrawerOpen" :title="t('ontology.entWebhookBtn')" width="480px"
+              data-testid="webhook-drawer">
+      <p class="honest-note">{{ t('ontology.entWebhookNote') }}</p>
+      <div class="webhook-row" data-testid="webhook-enabled-readout">
+        <span>{{ t('ontology.entWebhookEnabled') }}</span>
+        <a-tag :color="webhookConfig?.enabled ? 'green' : 'red'" data-testid="webhook-enabled-tag">
+          {{ webhookConfig?.enabled ? t('common.yes') : t('common.no') }}
+        </a-tag>
+      </div>
+      <div class="webhook-row">
+        <span>{{ t('ontology.entWebhookSecretEnv') }}</span>
+        <span class="mono">{{ webhookConfig?.secret_env || '-' }}</span>
+      </div>
+      <div class="webhook-row" data-testid="webhook-fingerprint">
+        <span>{{ t('ontology.entWebhookFingerprint') }}</span>
+        <span class="mono">{{ webhookConfig?.secret_fingerprint || t('ontology.entWebhookNoSecret') }}</span>
+      </div>
+      <GlassButton variant="secondary" size="sm" :loading="webhookRotating" data-testid="webhook-rotate"
+                   @click="doRotateSecret">{{ t('ontology.entWebhookRotate') }}</GlassButton>
+      <a-divider>{{ t('ontology.entWebhookSimTitle') }}</a-divider>
+      <div class="webhook-sim-actions">
+        <GlassButton size="sm" :loading="webhookSimulating === 'ok'" data-testid="webhook-sim-ok"
+                     @click="doSimulate('ok')">{{ t('ontology.entWebhookSimOk') }}</GlassButton>
+        <GlassButton size="sm" :loading="webhookSimulating === 'duplicate'" data-testid="webhook-sim-duplicate"
+                     @click="doSimulate('duplicate')">{{ t('ontology.entWebhookSimDuplicate') }}</GlassButton>
+        <GlassButton size="sm" :loading="webhookSimulating === 'bad_signature'" data-testid="webhook-sim-bad"
+                     @click="doSimulate('bad_signature')">{{ t('ontology.entWebhookSimBad') }}</GlassButton>
+      </div>
+      <pre v-if="webhookSimResult" class="mono webhook-result" data-testid="webhook-sim-result">{{ webhookSimResult }}</pre>
+      <div class="webhook-row" data-testid="webhook-dedup-stats">
+        <span>{{ t('ontology.entWebhookDedup') }}</span>
+        <span class="mono">{{ t('ontology.entWebhookDedupValue', { rows: webhookDedup?.rows ?? 0, sources: webhookDedup?.sources ?? 0 }) }}</span>
+      </div>
+    </a-drawer>
   </div>
 </template>
 
@@ -414,6 +449,10 @@ import {
   submitEnterpriseSource,
   triggerEnterpriseIngest,
   triggerEnterpriseMedia,
+  getWebhookConfig,
+  rotateWebhookSecret,
+  simulateWebhookPush,
+  getWebhookDedupStats,
 } from '@/api/modules/ontology'
 import type { EnterpriseDescriptor, EnterpriseSourceConfig } from '@/types/ontology'
 import { extractApiDetail } from '@/utils/error'
@@ -573,7 +612,56 @@ const OBJECT_KINDS = ['column', 'template', 'term', 'literal'].map((k) => ({
   label: t('ontology.entObjectKind') + ': ' + k, value: k,
 }))
 
-const webhookDrawerNote = 'ontology.entWebhookNote'
+// U5：webhook 接收面抽屉（读数＋轮换＋模拟推送；凭据零明文——只回指纹）
+const webhookDrawerOpen = ref(false)
+const webhookConfig = ref<{ enabled: boolean; secret_env: string; secret_fingerprint: string } | null>(null)
+const webhookDedup = ref<{ rows: number; sources: number } | null>(null)
+const webhookRotating = ref(false)
+const webhookSimulating = ref<'' | 'ok' | 'duplicate' | 'bad_signature'>('')
+const webhookSimResult = ref('')
+
+async function openWebhookDrawer() {
+  webhookDrawerOpen.value = true
+  try {
+    const res: any = await getWebhookConfig()
+    webhookConfig.value = res?.data ?? null
+  } catch {
+    webhookConfig.value = null
+  }
+  try {
+    const res: any = await getWebhookDedupStats()
+    webhookDedup.value = res?.data ?? null
+  } catch {
+    webhookDedup.value = null
+  }
+}
+
+async function doRotateSecret() {
+  webhookRotating.value = true
+  try {
+    const res: any = await rotateWebhookSecret()
+    if (webhookConfig.value && res?.data?.secret_fingerprint) {
+      webhookConfig.value = { ...webhookConfig.value, secret_fingerprint: res.data.secret_fingerprint }
+    }
+    message.success(t('ontology.entWebhookRotated'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
+  } finally {
+    webhookRotating.value = false
+  }
+}
+
+async function doSimulate(mode: 'ok' | 'duplicate' | 'bad_signature') {
+  webhookSimulating.value = mode
+  try {
+    const res: any = await simulateWebhookPush(mode)
+    webhookSimResult.value = JSON.stringify(res?.data ?? res, null, 2)
+  } catch (err) {
+    webhookSimResult.value = extractApiDetail(err) || t('common.error')
+  } finally {
+    webhookSimulating.value = ''
+  }
+}
 const typeCardOf = (kind: string) => KIND_CARDS.find((c) => c.kind === kind) ?? KIND_CARDS[0]
 
 const LAKEHOUSE_KINDS: ConnectKind[] = ['unity_catalog', 'snowflake', 'sap_odata', 'http_pull']
@@ -869,6 +957,34 @@ onMounted(loadSources)
 </script>
 
 <style scoped>
+.header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.webhook-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  padding: 6px 0;
+}
+.webhook-sim-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.webhook-result {
+  max-height: 240px;
+  overflow: auto;
+  font-size: 11px;
+  padding: 8px;
+  border: 1px solid var(--nr-border, rgba(128, 128, 128, 0.2));
+  border-radius: 6px;
+  white-space: pre-wrap;
+}
+
 .enterprise-sources-page { display: flex; flex-direction: column; gap: 16px; }
 .page-title { font-family: var(--nr-font-display); font-size: 22px; font-weight: 700; color: var(--nr-text-primary); margin: 0; }
 .page-subtitle { margin: 4px 0 0; font-size: 12px; color: var(--nr-text-secondary); }

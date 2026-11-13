@@ -377,6 +377,11 @@ main:
         - name: unit tests (vitest)
           script: cd NeurUI && npx vitest run
           timeout: 30m
+        # ── C3 本体图性能预算门（specs/2026-11-12 §18）：Chromium 主线程
+        # 单任务上限＋首屏节点上限；预算单源 src/pages/graph-workbench/perfBudget.ts
+        - name: e2e performance budget (playwright)
+          script: cd NeurUI && npx playwright install --with-deps chromium && npx playwright test
+          timeout: 20m
 
     # ── 8. 性能门禁：import 时长 + 关键路径微基准（阻断）────────────────
     # 原状：.cnb.yml 无任何 perf/benchmark 任务，尾延迟回归只能人肉发现。

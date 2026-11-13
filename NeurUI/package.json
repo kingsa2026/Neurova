@@ -9,7 +9,8 @@
     "build:desktop": "cross-env VITE_API_BASE_URL=http://127.0.0.1:9527/api/v1 vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix",
-    "test": "vitest"
+    "test": "vitest",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "@ant-design/icons-vue": "^7.0.1",
@@ -44,6 +45,7 @@
     "vue-router": "^4.5.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.0",
     "@tauri-apps/cli": "^2.11.4",
     "@types/d3-force": "^3.0.10",
     "@types/katex": "^0.16.8",

@@ -69,14 +69,19 @@ def importDomainPack(registry: Any, packId: str, tenantId: str = "default") -> i
     return added
 
 
+def packBytes(packId: str) -> bytes:
+    """领域包原始字节（C2 工件层——校验和与不可变登记共用这一个读法）。"""
+    path = (_PACKS_DIR / ("%s_pack.json" % packId)).resolve()
+    if not path.is_file() or _PACKS_DIR.resolve() not in path.parents:
+        raise ValueError("未注册领域包: %r" % packId)
+    return path.read_bytes()
+
+
 def packChecksum(packId: str) -> str:
     """领域包原始字节的 SHA-256 校验和（C2 工件级内容地址溯源）。"""
     import hashlib
 
-    path = (_PACKS_DIR / ("%s_pack.json" % packId)).resolve()
-    if not path.is_file() or _PACKS_DIR.resolve() not in path.parents:
-        raise ValueError("未注册领域包: %r" % packId)
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashlib.sha256(packBytes(packId)).hexdigest()
 
 
 def packAttribution(packId: str) -> Dict[str, Any]:

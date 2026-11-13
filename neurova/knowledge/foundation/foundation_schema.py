@@ -44,6 +44,8 @@ from ..ontology.action_registry import _SCHEMA_V42_ACTIONS, _SCHEMA_V45_ACTION_S
 from ..ontology.change_log import _SCHEMA_V33
 from ..ontology.function_registry import _SCHEMA_V43_FUNCTIONS
 from ..community_graph import _SCHEMA_V48_COMMUNITIES
+from ..enterprise.webhook_receiver import _SCHEMA_V49_WEBHOOK_DEDUP
+from ..ontology.artifact_store import _SCHEMA_V50_ARTIFACTS
 from ..ontology.decision_ledger import _SCHEMA_V47_DECISIONS
 from ..ontology.simulation import _SCHEMA_V46_SIMULATIONS
 from ..ontology.state_machine_registry import _SCHEMA_V44_STATE_MACHINES
@@ -173,6 +175,12 @@ _STEPS: List[tuple] = [
     # v48：GraphRAG 工艺（specs/2026-11-12 §9 W8）——切块策略注册表
     #      ＋社区表＋术语行 conflict_policy 列（冲突策略数据化）
     (48, _SCHEMA_V48_COMMUNITIES),
+    # v49：webhook 幂等去重（specs/2026-11-12 §11 W10）——
+    #      unique(source_id, idempotency_key)，拒签不消耗键
+    (49, _SCHEMA_V49_WEBHOOK_DEDUP),
+    # v50：工件级内容地址存储（specs/2026-11-12 §18 C1/C2）——
+    #      ontology_artifacts 主键＝SHA-256(content)，write-once 不可变面
+    (50, _SCHEMA_V50_ARTIFACTS),
 ]
 
 _registered = False
