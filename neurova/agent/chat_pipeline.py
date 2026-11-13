@@ -2455,23 +2455,28 @@ class ChatPipeline:
         """G2 per-turn 自动定档：调用方未显式选档时，按查询难度保守推断并回写
         metadata["thinking_effort"]（与指令注入/reasoning_effort 两路共用单一真源）。
 
-        安全边界：显式档位绝不覆盖；歧义不改现状；kill-switch=NEUROVA_AUTO_EFFORT=off；
+        HN3/HC4（2026-11-13）：歧义不再"什么都不留"——显式回退 standard 并
+        落 thinking_effort_source 来源标记（explicit/inferred/fallback_standard）。
+        standard 不注入回答模式指令（提示面与旧行为同形），仅让 reasoning_effort
+        透传与读数面拿到确定档位。
+
+        安全边界：显式档位绝不覆盖；kill-switch=NEUROVA_AUTO_EFFORT=off；
         无 LLM/IO，fail-open——任何异常不阻断对话。
         """
         try:
-            from neurova.agent.effort_inference import auto_effort_enabled, infer_query_effort
+            from neurova.agent.effort_inference import auto_effort_enabled, resolveQueryEffort
 
             if not auto_effort_enabled():
                 return
             current = ""
             if isinstance(ctx.metadata, dict):
                 current = str(ctx.metadata.get("thinking_effort") or "").strip().lower()
-            if current:  # 尊重调用方显式档位（含 standard），绝不改写
+            effort, source = resolveQueryEffort(ctx.user_input or "", current)
+            if source == "explicit":  # 尊重调用方显式档位（含 standard），绝不改写
                 return
-            inferred = infer_query_effort(ctx.user_input or "")
-            if inferred:
-                ctx.metadata = dict(ctx.metadata or {})
-                ctx.metadata["thinking_effort"] = inferred
+            ctx.metadata = dict(ctx.metadata or {})
+            ctx.metadata["thinking_effort"] = effort
+            ctx.metadata["thinking_effort_source"] = source
         except Exception:  # noqa: BLE001 - 自动定档失败回落现状，不阻断对话
             logger.debug("自动定档解析失败（忽略）", exc_info=True)
 
@@ -3185,6 +3190,22 @@ class ChatPipeline:
                 data={"result": ctx.result},
             )
             self._trajectory_recorder.end_trace(ctx.trace_id)
+
+        # HN4/HC4：Stop 会话钩子（hooks_engine 的 Stop 事件此前已定义、全仓
+        # 零调用点）。默认关（NEUROVA_STOP_HOOKS=1 灰度开）；fail-open，
+        # 钩子故障不影响本轮结果交付。
+        try:
+            from neurova.core.hooks_engine import runStopHooks
+
+            runStopHooks({
+                "event": "Stop",
+                "session_id": ctx.session_id,
+                "agent_id": getattr(self._agent, "agent_id", "") or "",
+                "user_input": str(ctx.user_input or "")[:2000],
+                "reply": str(ctx.reply or "")[:2000],
+            })
+        except Exception as e:  # noqa: BLE001 - 钩子故障不阻断结果交付
+            logger.debug("Stop 钩子执行失败(忽略): %s", e)
 
     async def _run_post_chat_pipeline(self, ctx: ChatContext) -> Dict[str, Any]:
         """执行对话后处理管线（委托 PostChatPipeline.process）。

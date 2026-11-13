@@ -56,4 +56,25 @@ def auto_effort_enabled() -> bool:
     return (os.environ.get("NEUROVA_AUTO_EFFORT") or "on").strip().lower() != "off"
 
 
-__all__ = ["infer_query_effort", "auto_effort_enabled"]
+def resolveQueryEffort(text: str, current: str = "") -> Tuple[str, str]:
+    """显式档位优先 > 启发式推断 > 歧义显式回退 standard（HN3/HC4）。
+
+    Returns:
+        (effort, source)：
+        - ("...", "explicit")   — 调用方已显式选档，原样保留；
+        - ("deep"/"light", "inferred") — 启发式命中；
+        - ("standard", "fallback_standard") — 歧义时的**显式**兜底档：
+          此前歧义返回空串 = "什么都不留"（下游读不到档位），现在落一个
+          明确档位与来源标记。standard 不注入回答模式指令（提示面与旧行为
+          同形），仅让 reasoning_effort 透传与读数面拿到确定值。
+    """
+    cur = (current or "").strip().lower()
+    if cur:
+        return cur, "explicit"
+    inferred = infer_query_effort(text)
+    if inferred:
+        return inferred, "inferred"
+    return "standard", "fallback_standard"
+
+
+__all__ = ["infer_query_effort", "auto_effort_enabled", "resolveQueryEffort"]

@@ -157,3 +157,24 @@ def reset_hook_engine() -> None:
     global _ENGINE
     with _ENGINE_LOCK:
         _ENGINE = None
+
+
+def stopHooksEnabled() -> bool:
+    """Stop 会话钩子灰度开关（HN4/HC4，T4 拍板：默认关）。
+
+    Stop 在每轮对话结束都会到达——外部脚本随之全量执行是生产风险面，
+    故与 PreToolUse/PostToolUse（NEUROVA_HOOKS 全局开关）不同，单独灰度：
+    NEUROVA_STOP_HOOKS=1 显式开，默认关。
+    """
+    return os.environ.get("NEUROVA_STOP_HOOKS", "").strip() == "1"
+
+
+def runStopHooks(payload: Dict[str, Any]) -> List[HookOutcome]:
+    """Stop 事件的唯一接线口——`KNOWN_EVENTS` 里的 Stop 此前全仓零调用点。
+
+    默认关（见 `stopHooksEnabled`）；开启后执行 hooks 配置里 Stop 桶的
+    全部条目，fail-open 与其余事件同纪律。
+    """
+    if not stopHooksEnabled():
+        return []
+    return get_hook_engine().run("Stop", payload)
