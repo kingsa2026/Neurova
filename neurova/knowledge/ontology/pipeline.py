@@ -168,8 +168,9 @@ class OntologyPipeline:
         factCandidates: Optional[List[Dict[str, Any]]] = None,
         createdBy: str = "",
         reason: str = "",
+        refreshCommunities: bool = True,
     ) -> Dict[str, Any]:
-        """一批变更成版。返回 `{accepted, baselineId, applied, summary[, rejections]}`。"""
+        """一批变更成版。返回 `{accepted, baselineId, applied, summary[, rejections, communities]}`。"""
         tenant = str(tenantId or "default")
         termUpserts = list(termUpserts or [])
         ruleRegistrations = list(ruleRegistrations or [])
@@ -254,7 +255,7 @@ class OntologyPipeline:
                 (baselineId, ONTOLOGY_PIPELINE_SCOPE, str(agentId or ""),
                  json.dumps(snapshot, ensure_ascii=False, sort_keys=True),
                  str(createdBy or ""), str(reason or ""), _now(), tenant))
-        return {
+        result = {
             "accepted": True,
             "baselineId": baselineId,
             "applied": applied,
@@ -262,6 +263,22 @@ class OntologyPipeline:
                        "基线已冻结" % (len(appliedTermIds), len(appliedRuleIds),
                                        len(factCandidates)),
         }
+        if refreshCommunities:
+            # C5：落盘后社区图增量维护（fail-soft，不影响流水线主结果）
+            result["communities"] = self._refreshCommunities(agentId, tenant)
+        return result
+
+    def _refreshCommunities(self, agentId: str, tenant: str) -> Dict[str, Any]:
+        """C5：社区图增量维护（fail-soft）——摘要缺省/检测失败只记读数，
+        绝不影响本体流水线主结果。"""
+        try:
+            from ..community_graph import CommunityGraphBuilder
+
+            return CommunityGraphBuilder(
+                self._store, agentId=str(agentId or "default"),
+                tenantId=tenant).rebuildIfDrifted()
+        except Exception as exc:  # noqa: BLE001 — 刷新失败点名，不静默
+            return {"refreshed": False, "error": str(exc)}
 
     def _rollbackApplied(self, appliedTermIds: List[str], appliedRuleIds: List[str],
                          tenantId: str) -> Dict[str, Any]:
@@ -452,4 +469,6 @@ class OntologyPipeline:
 
         self._engine.ensureAutoRules(tenantId=tenant)
         self._engine.fireAll(tenantId=tenant)
-        return {"accepted": True, "baselineId": toBaselineId, "restored": restored}
+        # C5：回滚后图面已变，社区增量维护照走（fail-soft）
+        return {"accepted": True, "baselineId": toBaselineId, "restored": restored,
+                "communities": self._refreshCommunities("", tenant)}

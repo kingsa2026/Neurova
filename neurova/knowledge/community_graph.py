@@ -164,6 +164,84 @@ class CommunityGraphBuilder:
                  "member_labels": json.loads(r["member_labels_json"] or "[]"),
                  "summary_text": str(r["summary_text"] or "")} for r in rows]
 
+    def rebuildIfDrifted(self, summarizer: Optional[Callable[[List[str]], str]] = None,
+                         level: int = 0,
+                         driftThreshold: float = 0.3) -> Dict[str, Any]:
+        """增量维护入口（C5，graphiti 对照批）：漂移超阈值才全量替换。
+
+        与 detect 的差别：detect 每次全新 community_id 落行、旧行不清
+        （重复调用累积重复社区）；本方法把「新检测结果 vs 既有行」的成员
+        集合 Jaccard 漂移量算出来，未超阈值直接返回现况（community_id
+        保持不变），超阈值才在**同一事务**里先删该 (tenant, level) 旧行
+        再插新行——替换可审计、不累积。首建（无既有行）视漂移为 1.0。
+        返回 `{"refreshed", "drift", "communities"}` 读数。
+        """
+        nodes, edges = self._readGraph()
+        groups = _labelPropagation(nodes, edges)
+        existing = self.loadCommunities(level=level)
+        drift = _communityDrift(existing, groups)
+        if existing and drift < driftThreshold:
+            return {"refreshed": False, "drift": drift,
+                    "communities": len(existing)}
+        with self._store._lock, self._store._conn:
+            self._store._conn.execute(
+                "DELETE FROM ontology_communities WHERE tenant_id = ? AND level = ?",
+                (self._tenantId, int(level)))
+            for members in groups:
+                summary = ""
+                if summarizer is not None:
+                    summary = str(summarizer(members) or "")
+                communityId = "com_%s" % uuid.uuid4().hex[:12]
+                self._store._conn.execute(
+                    "INSERT OR REPLACE INTO ontology_communities"
+                    " (tenant_id, community_id, level, member_labels_json,"
+                    "  summary_text, summary_digest, updated_at) VALUES (?,?,?,?,?,?,?)",
+                    (self._tenantId, communityId, int(level),
+                     json.dumps(members, ensure_ascii=False),
+                     summary, _digest(summary), _now()))
+        return {"refreshed": True, "drift": drift, "communities": len(groups)}
+
+
+def _communityDrift(existing: List[Dict[str, Any]],
+                    newGroups: List[List[str]]) -> float:
+    """漂移量 = max(成员对称差比例, 结构重排距离)；无既有行 = 1.0（首建）。
+
+    两个信号各管一种变化、取 max 防稀释：
+    - 成员级对称差——图里新增/移除主体直接可见（双向平均 Jaccard 会把
+      「凭空长出一半社区」稀释到 0.25，漏过 0.3 阈值，实测踩过）；
+    - 双向平均最佳 Jaccard——成员不变但分组重排（拆簇/并簇）时成员级
+      口径恒 0，只有它看得见。"""
+    if not existing:
+        return 1.0
+    newSets = [set(g) for g in newGroups]
+    if not newSets:
+        return 1.0
+    oldSets = [set(row["member_labels"]) for row in existing]
+
+    oldAll = set()
+    for s in oldSets:
+        oldAll |= s
+    newAll = set()
+    for s in newSets:
+        newAll |= s
+    union = oldAll | newAll
+    memberDrift = (len(oldAll ^ newAll) / len(union)) if union else 0.0
+
+    def _avgBest(src: List[set], dst: List[set]) -> float:
+        sims = []
+        for s in src:
+            best = 0.0
+            for d in dst:
+                union2 = s | d
+                if union2:
+                    best = max(best, len(s & d) / len(union2))
+            sims.append(best)
+        return sum(sims) / len(sims) if sims else 1.0
+
+    structureDrift = 1.0 - (_avgBest(oldSets, newSets)
+                            + _avgBest(newSets, oldSets)) / 2.0
+    return round(max(memberDrift, structureDrift), 6)
+
 
 def _digest(text: str) -> str:
     import hashlib
