@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user_or_service
+from neurova.api.deps import get_llm_client
 from neurova.core.logger import get_logger
 from neurova.api.endpoints.knowledge_common import (
     KnowledgeItem,
@@ -167,6 +168,42 @@ async def resolve_conflict(
         "message": "Conflict resolved (%s)" % body.resolution,
         "data": {"conflict_id": conflict_id, "resolution": body.resolution, "axis": axis},
     }
+
+
+@router.post("/conflicts/{conflict_id}/llm-advice")
+async def conflict_llm_advice(
+    request: Request,
+    conflict_id: str = Path(..., description="冲突记录ID"),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+    llm: Any = Depends(get_llm_client),
+):
+    """pending 冲突的 LLM 参考意见（仅管理员，主动触发）。
+
+    只读辅助：不落账、不改冲突状态、不自动 supersede——真正的裁决仍走
+    resolve 端点（建议不改判，工单 007）。LLM 不可用诚实 503，输出不合法 502。
+    """
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可请求 LLM 裁决意见")
+    store = _factStore()
+    tenant = str(current_user.get("tenant_id") or "default")
+    pendingIds = {str(r.get("conflict_id") or "")
+                  for r in store.conflicts(status="pending", tenantId=tenant)}
+    if conflict_id not in pendingIds:
+        # 跨租户/已裁决/不存在的 id 一律按"不可给意见"处理，不泄露存在性
+        raise HTTPException(status_code=404, detail="Conflict '%s' not pending" % conflict_id)
+    members = store.conflictMembers(conflict_id)
+    if not members:
+        raise HTTPException(status_code=404, detail="Conflict members not found")
+    from neurova.knowledge.foundation.conflict_llm_judge import llmConflictAdvice
+
+    try:
+        advice = llmConflictAdvice(llm, members)
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail="LLM 意见不可用: %s" % e)
+    except Exception as e:  # noqa: BLE001 - LLM 面故障诚实上报
+        logger.warning("LLM 冲突意见调用失败: %s", e)
+        raise HTTPException(status_code=503, detail="LLM 客户端不可用: %s" % e)
+    return {"code": 0, "data": advice}
 
 
 @router.get("/deleted")
