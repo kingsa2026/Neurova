@@ -231,12 +231,13 @@ class EventBus:
                         )
                 continue
             try:
-                result = sub.handler(event)
+                result = self._run_handler(sub, event)
                 results.append(result)
                 if sub.once:
                     to_remove.append(sub)
             except Exception as e:
                 logger.error(f"Error in event handler for '{event_name}': {e}", exc_info=True)
+                self._on_handler_error(event, sub, e)
 
         # 移除一次性订阅
         if to_remove:
@@ -289,14 +290,15 @@ class EventBus:
         for sub in subs:
             try:
                 if sub.is_async:
-                    result = await sub.handler(event)
+                    result = await self._run_handler_async(sub, event)
                 else:
-                    result = sub.handler(event)
+                    result = self._run_handler(sub, event)
                 results.append(result)
                 if sub.once:
                     to_remove.append(sub)
             except Exception as e:
                 logger.error(f"Error in async event handler for '{event_name}': {e}", exc_info=True)
+                self._on_handler_error(event, sub, e)
 
         if to_remove:
             with self._lock:
@@ -325,9 +327,10 @@ class EventBus:
     async def _safe_async_handler(self, sub: Subscription, event: Event) -> None:
         """安全执行异步处理器"""
         try:
-            await sub.handler(event)
+            await self._run_handler_async(sub, event)
         except Exception as e:
             logger.error(f"Error in async handler for '{event.name}': {e}", exc_info=True)
+            self._on_handler_error(event, sub, e)
 
     def _log_event(self, event: Event) -> None:
         """记录事件日志"""
@@ -373,6 +376,20 @@ class EventBus:
         """异步订阅者投递被跳过的累计次数（§6-49：无队列 + 队列满两种形态都计入）"""
         return self._async_no_queue_dropped + self._async_queue_full_dropped
 
+    # ── D6 扩展点：处理器执行与异常钩子（Enhanced 总线挂超时强制与死信自动落库）──
+
+    def _run_handler(self, sub: Subscription, event: Event) -> Any:
+        """执行同步处理器（默认直调；Enhanced 总线可覆写）"""
+        return sub.handler(event)
+
+    async def _run_handler_async(self, sub: Subscription, event: Event) -> Any:
+        """执行异步处理器（默认直调；Enhanced 总线覆写为带超时强制）"""
+        return await sub.handler(event)
+
+    def _on_handler_error(self, event: Event, subscription: Subscription, error: Exception) -> None:
+        """处理器异常钩子（默认无动作；Enhanced 总线用它把失败自动落死信）"""
+        return None
+
 
 # 全局单例
 _global_event_bus: Optional[EventBus] = None
@@ -398,14 +415,20 @@ def get_event_bus() -> EventBus:
     """
     获取全局事件总线实例
 
+    D6（2026-11-14 审计 B-5 拍板）：全局总线即增强版——过滤/重播/事件链/死信/
+    超时对全仓生效，不再有第二套沉睡的单例。
+
     Returns:
-        EventBus 全局单例
+        EventBus 全局单例（EventBusEnhanced 实例）
     """
     global _global_event_bus
     if _global_event_bus is None:
         with _bus_lock:
             if _global_event_bus is None:
-                _global_event_bus = EventBus()
+                # 延迟导入避免顶层环（enhanced 模块反向 import 本模块的 Event/EventBus）
+                from neurova.core.event_bus_enhanced import EventBusEnhanced
+
+                _global_event_bus = EventBusEnhanced()
                 _global_event_bus.start()
     return _global_event_bus
 
