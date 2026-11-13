@@ -1092,6 +1092,21 @@ async def detect_ontology_communities(
     return {"code": 0, "data": rows, "request_id": ""}
 
 
+@router.post("/ontology/communities/refresh")
+async def refresh_ontology_communities(
+    current_user: Dict = Depends(require_admin()),
+):
+    """社区图增量维护（C5，管理员）：漂移超阈值才全量替换（同事务先删后插，
+    不累积重复行）。返回 `{"refreshed", "drift", "communities"}` 读数。"""
+    from neurova.knowledge.community_graph import CommunityGraphBuilder
+
+    store, _registry, _engine = _ontologyParts()
+    report = CommunityGraphBuilder(
+        store, agentId=str(current_user.get("agent_id") or "default"),
+        tenantId=_tenantOf(current_user)).rebuildIfDrifted()
+    return {"code": 0, "data": report, "request_id": ""}
+
+
 @router.get("/ontology/communities")
 async def list_ontology_communities(
     current_user: Dict = Depends(get_current_user_or_service),
