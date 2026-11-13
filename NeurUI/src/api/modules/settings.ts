@@ -330,3 +330,30 @@ export function getEvalExperimentSettings() {
 export function updateEvalExperimentSettings(data: Partial<EvalExperimentSettings>) {
   return api.put<ApiResponse<EvalExperimentSettings>>('/governance/eval-experiments', data)
 }
+
+// ---------------------------------------------------------------------------
+// 检索配方（C3：图路权重/精排方法/候选池/时近权重的命名组合）
+// ---------------------------------------------------------------------------
+
+export interface RetrievalRecipeOption {
+  name: string
+  graphRouteWeight: number
+  rerankMethod: string
+  rerankPoolFactor: number
+  recencyWeight: number
+  recencyHalfLifeDays: number
+}
+
+export interface RetrievalRecipeSettings {
+  active_recipe: string
+  source?: string
+  options?: RetrievalRecipeOption[]
+}
+
+export function getRetrievalRecipe() {
+  return api.get<ApiResponse<RetrievalRecipeSettings>>('/governance/retrieval-recipe')
+}
+
+export function updateRetrievalRecipe(data: Partial<RetrievalRecipeSettings>) {
+  return api.put<ApiResponse<RetrievalRecipeSettings>>('/governance/retrieval-recipe', data)
+}
