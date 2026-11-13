@@ -231,3 +231,29 @@ class EmotionConductionModule:
                 "neutral_count": sum(1 for v in values if abs(v) <= 0.3),
                 "total_associations": sum(len(ids) for ids in self._associations.values()) // 2,
             }
+
+    def snapshot(self) -> Dict[str, Any]:
+        """导出可持久化状态（D5 接线做实：情感值与关联图落盘/恢复用）"""
+        with self._lock:
+            return {
+                "emotion_values": dict(self._emotion_values),
+                "associations": {mid: list(ids) for mid, ids in self._associations.items()},
+            }
+
+    def restore(self, state: Dict[str, Any]) -> None:
+        """从快照恢复（形状不符的条目如实跳过，不抛断整批）"""
+        if not isinstance(state, dict):
+            return
+        with self._lock:
+            values = state.get("emotion_values")
+            if isinstance(values, dict):
+                for mid, val in values.items():
+                    try:
+                        self._emotion_values[str(mid)] = max(-1.0, min(1.0, float(val)))
+                    except (TypeError, ValueError):
+                        continue
+            associations = state.get("associations")
+            if isinstance(associations, dict):
+                for mid, ids in associations.items():
+                    if isinstance(ids, list):
+                        self._associations[str(mid)] = [str(x) for x in ids]
