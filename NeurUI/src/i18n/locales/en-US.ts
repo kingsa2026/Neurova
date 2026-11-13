@@ -450,6 +450,8 @@ export default {
     selectModel: 'Select model',
     idHint: 'Letters/digits/underscores, leave empty to auto-generate',
     idReadonly: 'Cannot be changed after creation',
+    execProfile: 'Execution profile',
+    execProfileHint: 'This agent\'s runtime budget tier (lite = fast/budget, standard = balanced, heavy = high quality). Unset agents follow the deployment-level profile.',
     idPlaceholder: 'e.g. kai, my-assistant',
     status: 'Status',
     config: 'Configuration',

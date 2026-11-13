@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 from contextvars import ContextVar, Token
 from typing import Any, Dict, Optional, Tuple
 
@@ -90,6 +91,33 @@ def taskProfileEnabled() -> bool:
         return classification_enabled()
     except Exception:  # noqa: BLE001 - 设置面故障退回 env 直读（fail-open 同旧形态）
         return os.environ.get("NEUROVA_TASK_PROFILE", "").strip() == "1"
+
+
+# ── N8：任务级档位分布计数（治理面 /task-profile 的 usage 读数源）────────
+_USAGE_TALLY: Dict[str, int] = {}
+_USAGE_TALLY_LOCK = threading.Lock()
+
+
+def recordProfileUsage(profile: str, source: str) -> None:
+    """记录一次任务级档位解析结果（分布/来源计数，灰度开启后的观察读数）。"""
+    key = f"{str(profile or 'standard').strip().lower()}|{str(source or 'unknown').strip()}"
+    with _USAGE_TALLY_LOCK:
+        _USAGE_TALLY[key] = _USAGE_TALLY.get(key, 0) + 1
+
+
+def usageTally() -> Dict[str, Any]:
+    """档位解析分布读数：总量、按档位、按来源（explicit/agent_stored/classified/fallback_standard）。"""
+    with _USAGE_TALLY_LOCK:
+        snapshot = dict(_USAGE_TALLY)
+    by_profile: Dict[str, int] = {}
+    by_source: Dict[str, int] = {}
+    total = 0
+    for key, count in sorted(snapshot.items()):
+        profile, source = key.split("|", 1)
+        by_profile[profile] = by_profile.get(profile, 0) + count
+        by_source[source] = by_source.get(source, 0) + count
+        total += count
+    return {"total": total, "by_profile": by_profile, "by_source": by_source}
 
 
 def applyTurnProfileOverlay(settings: Dict[str, Any], name: str) -> Dict[str, Any]:

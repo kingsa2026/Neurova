@@ -449,6 +449,8 @@ export default {
     selectModel: 'يرجى اختيار نموذج',
     idHint: 'أحرف/أرقام/شرطات سفلية؛ اتركه فارغاً للتوليد التلقائي',
     idReadonly: 'لا يمكن تعديله بعد الإنشاء',
+    execProfile: 'ملف التنفيذ',
+    execProfileHint: 'مستوى ميزانية تنفيذ هذا الوكيل (lite = سريع، standard = متوازن، heavy = جودة عالية). غير محدد: يتبع ملف النشر.',
     idPlaceholder: 'مثال: kai, my-assistant',
     status: 'الحالة',
     config: 'التكوين',

@@ -453,6 +453,8 @@ export default {
     selectModel: '请选择模型',
     idHint: '字母/数字/下划线，留空自动生成',
     idReadonly: '创建后不可修改',
+    execProfile: '执行档位',
+    execProfileHint: '该 Agent 的运行预算档（lite=省预算快速、standard=均衡、heavy=高质量）；未设置时跟随部署级档位。',
     idPlaceholder: '如: kai, my-assistant',
     status: '状态',
     config: '配置',

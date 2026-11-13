@@ -88,3 +88,25 @@ def set_agent_profile(agent_id: str, profile: str, path: Optional[Path] = None) 
         except Exception as e:  # noqa: BLE001
             logger.error("保存 per-agent 档位失败: %s", e)
             return False
+
+
+def clear_agent_profile(agent_id: str, path: Optional[Path] = None) -> bool:
+    """清除某 agent 的档位（回落部署级档位）；agent 建/改表单的「未设置」形态。"""
+    agent_key = str(agent_id or "").strip()
+    if not agent_key:
+        return False
+    p = Path(path) if path else store_path()
+    with _LOCK:
+        try:
+            current = _load(p)
+            if agent_key in current:
+                del current[agent_key]
+                p.parent.mkdir(parents=True, exist_ok=True)
+                tmp = p.with_suffix(".json.tmp")
+                tmp.write_text(json.dumps(current, ensure_ascii=False, indent=2),
+                               encoding="utf-8")
+                os.replace(tmp, p)
+            return True
+        except Exception as e:  # noqa: BLE001
+            logger.error("清除 per-agent 档位失败: %s", e)
+            return False

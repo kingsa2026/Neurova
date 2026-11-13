@@ -71,6 +71,20 @@
           <a-form-item :label="t('agent.description')">
             <a-textarea v-model:value="formState.description" :rows="2" :placeholder="t('agent.description')" />
           </a-form-item>
+
+          <!-- 执行档位派发（R6：lite/standard/heavy；未设置跟随部署档位） -->
+          <a-form-item :label="t('agent.execProfile')" :extra="t('agent.execProfileHint')">
+            <a-select
+              v-model:value="formState.execProfile"
+              :placeholder="t('settings.agentProfilesUnset')"
+              allow-clear
+              style="width: 100%"
+            >
+              <a-select-option value="lite">lite</a-select-option>
+              <a-select-option value="standard">standard</a-select-option>
+              <a-select-option value="heavy">heavy</a-select-option>
+            </a-select>
+          </a-form-item>
         </GlassCard>
 
         <!-- Temperature & max tokens -->
@@ -257,6 +271,7 @@ const formState = ref({
   model: '',
   provider: '',
   group_id: '',
+  execProfile: '',
   temperature: 0.7,
   maxTokens: 4096,
   personality: '',
@@ -347,6 +362,7 @@ const loadAgent = async () => {
         model: agent.model || '',
         provider: agent.provider || '',
         group_id: agent.group_id || '',
+        execProfile: (agent as any).exec_profile || '',
         temperature: agent.config?.temperature ?? 0.7,
         maxTokens: agent.config?.maxTokens ?? 4096,
         // P1-5b：性格/宪法真实回填（后端 agent_to_info 顶层字段）
@@ -374,6 +390,8 @@ const handleSave = async () => {
       model: formState.value.model,
       provider: formState.value.provider,
       group_id: formState.value.group_id || undefined,
+      // 执行档位派发（R6）：空串 = 清除（跟随部署档位）
+      exec_profile: formState.value.execProfile || '',
       // P1-5b：性格/宪法随表单提交（后端 create/update 消费，落 agent_config.json）
       personality: formState.value.personality,
       constitution: formState.value.constitution,

@@ -851,10 +851,14 @@ async def update_agent_exec_profile(agent_id: str, body: AgentProfileUpdate,
 
 @router.get("/task-profile")
 async def get_task_profile_settings(admin=Depends(_governance_admin_dep)):
-    """任务级档位分类器开关读数（仅管理员）：env 灰度直开仍优先于设置文件。"""
+    """任务级档位分类器开关读数（仅管理员）：env 灰度直改仍优先于设置文件。
+
+    `usage` 为 N8 观察读数：分类器开启后的档位分布/来源计数（进程内累计）。
+    """
+    from neurova.agent.turn_profile import usageTally
     from neurova.security.task_profile_settings import load_settings
 
-    return {"code": 0, "data": load_settings()}
+    return {"code": 0, "data": load_settings(), "usage": usageTally()}
 
 
 class TaskProfileUpdate(BaseModel):

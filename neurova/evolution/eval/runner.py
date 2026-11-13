@@ -259,6 +259,7 @@ class EvolutionRunResult:
             "cost_tiebreak": dict(self.cost_tiebreak),
             "coreset_recheck": dict(self.coreset_recheck),
             "pareto_set": dict(self.pareto_set),
+            "pareto_variants": list(self.pareto_variants),
         }
 
 
@@ -623,17 +624,13 @@ class SkillEvolutionRunner:
         # 既有并行评测逐字节不变。
         try:
             from neurova.security.eval_experiment_settings import (
-                lineage_pareto_enabled as _lineageParetoSetting,
                 profile_variants_enabled as _profileVariantsSetting,
             )
 
             _pvOn = (bool(getattr(self.config, "profile_variants_enabled", False))
                      or _profileVariantsSetting())
-            _lpOn = (bool(getattr(self.config, "lineage_pareto_enabled", False))
-                     or _lineageParetoSetting())
         except Exception:  # noqa: BLE001 - 设置面故障回退代码级配置
             _pvOn = bool(getattr(self.config, "profile_variants_enabled", False))
-            _lpOn = bool(getattr(self.config, "lineage_pareto_enabled", False))
         profileVariants = _pvOn and len(survivors) >= 2
         tierArms = ["candidate:lite", "candidate:standard", "candidate:heavy"]
         evaluated: list = []
@@ -687,12 +684,19 @@ class SkillEvolutionRunner:
             "entries": [{k: v for k, v in entry.items() if k != "text"}
                         for entry in paretoEntries],
         }
-        # N2：非劣幸存者透出（递归演化据此把多个谱系推进下轮；默认关 = 不透出）。
+        # N2/N5：非劣幸存者透出——递归池化推进下轮（N2）＋Pareto 多档交付的
+        # 工件面（N5：档位标签按成本升序排 lite/standard/heavy；档位轮转模式
+        # 用评测档位本身）。
+        nonDominated = [e for e in paretoEntries if not e["dominated"]]
+        nonDominated.sort(key=lambda e: (-e["score"], e["cost_usd"]))
+        if not profileVariants:
+            for rank, entry in enumerate(nonDominated):
+                entry["tier"] = ("lite", "standard", "heavy")[min(rank, 2)]
         result.pareto_variants = [
-            {"text": entry["text"], "score": entry["score"]}
-            for entry in paretoEntries
-            if not entry["dominated"]
-        ] if _lpOn else []
+            {"text": e["text"], "score": e["score"], "tier": e["tier"],
+             "cost_usd": e["cost_usd"], "tokens": e["tokens"]}
+            for e in nonDominated
+        ]
 
         # N7：top 两候选近平分时，匿名比例只读产物，优先于先到 argmax。
         blind_tiebreak: dict = {"state": "not_applicable"}

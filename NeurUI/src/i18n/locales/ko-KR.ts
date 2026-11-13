@@ -449,6 +449,8 @@ export default {
     selectModel: '모델을 선택하세요',
     idHint: '영문자/숫자/밑줄. 비워두면 자동 생성',
     idReadonly: '생성 후 수정 불가',
+    execProfile: '실행 프로파일',
+    execProfileHint: '이 Agent의 실행 예산 등급(lite=빠름/standard=균형/heavy=고품질). 미설정 시 배포 수준 프로파일을 따릅니다.',
     idPlaceholder: '예: kai, my-assistant',
     status: '상태',
     config: '설정',

@@ -1381,6 +1381,53 @@ class SkillEvolutionService:
             logger.debug("应用进化提案失败: %s", e)
             return False
 
+    def adoptVariant(self, proposal_id: str, variant_index: int) -> Dict[str, Any]:
+        """N5：从提案关联运行的 Pareto 非劣集采纳指定档位变体（人工按预算选档终点）。
+
+        与 approve 的差异：approve 写 `improved_text`（质量最优者）；本方法写
+        **选定档位的变体文本**（预算最优者之一）。写路径复用 `_apply_to_skill`
+        的同一套技能更新机制；提案转 applied 并记录 adopted_variant。
+        错误以 ValueError 抛出（端点层映射 400/404）。
+        """
+        proposals = self.list_proposals()
+        proposal = next((p for p in proposals if p.get("proposal_id") == proposal_id), None)
+        if proposal is None:
+            raise ValueError(f"提案不存在: {proposal_id}")
+        if str(proposal.get("status") or "") != STATUS_PENDING:
+            raise ValueError(
+                f"提案 {proposal_id} 状态为 {proposal.get('status')}，仅 pending 可采纳变体")
+        state, run = self.runLookup(str(proposal.get("run_id") or ""))
+        if state != "attached" or run is None:
+            raise ValueError(f"提案 {proposal_id} 的运行审计不可读（{state}）")
+        variants = run.get("pareto_variants") or []
+        if not variants:
+            raise ValueError("该运行没有可采纳的 Pareto 变体")
+        try:
+            idx = int(variant_index)
+        except (TypeError, ValueError):
+            raise ValueError(f"变体下标非法: {variant_index!r}")
+        if idx < 0 or idx >= len(variants):
+            raise ValueError(f"变体下标越界: {idx}（共 {len(variants)} 个）")
+        variant = variants[idx]
+        chosen = dict(proposal)
+        chosen["improved_text"] = str(variant.get("text") or "")
+        if not chosen["improved_text"].strip():
+            raise ValueError(f"变体 {idx} 文本为空，不可采纳")
+        chosen["adopted_variant"] = {"index": idx, "tier": variant.get("tier"),
+                                     "score": variant.get("score")}
+        if not self._apply_to_skill(chosen, None):
+            raise ValueError("变体应用失败（技能更新未成功）")
+        proposals_all = self.list_proposals()
+        for record in proposals_all:
+            if record.get("proposal_id") == proposal_id:
+                record["status"] = STATUS_APPLIED
+                record["decided_at"] = datetime.now(UTC).isoformat()
+                record["adopted_variant"] = chosen["adopted_variant"]
+                break
+        self._write_proposals(proposals_all)
+        return {"applied": True, "skill_id": proposal.get("skill_id"),
+                "adopted_variant": chosen["adopted_variant"]}
+
     # ── 审计落盘 ──
 
     def _persist_run(self, skill_id: str, artifact_type: str,

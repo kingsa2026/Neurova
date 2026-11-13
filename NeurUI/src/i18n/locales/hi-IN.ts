@@ -449,6 +449,8 @@ export default {
     selectModel: 'कृपया एक मॉडल चुनें',
     idHint: 'अक्षर/अंक/अंडरस्कोर; स्वतः जनरेट के लिए खाली छोड़ें',
     idReadonly: 'बनाने के बाद संशोधित नहीं किया जा सकता',
+    execProfile: 'निष्पादन प्रोफ़ाइल',
+    execProfileHint: 'इस Agent का रनटाइम बजट स्तर (lite = तेज़, standard = संतुलित, heavy = उच्च गुणवत्ता)। अनसेट होने पर डिप्लॉयमेंट प्रोफ़ाइल का पालन होता है।',
     idPlaceholder: 'उदा.: kai, my-assistant',
     status: 'स्थिति',
     config: 'कॉन्फ़िगरेशन',
