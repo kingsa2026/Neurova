@@ -63,6 +63,10 @@ ADVANCED_DEFAULTS: Dict[str, Any] = {
     # 图谱读面（studio 首屏 / subgraph 探索）缺省渲染上限：显式查询参数最优先，
     # 缺省跟本值；设置面无 le 校验，端点按 2000 钳（与查询参数 le 同一合法域）。
     "graph_studio_limit": 200,
+    # Ontology 设置卡：知识条目 编辑/回滚 后 facts 自动重抽（图谱对版本变化
+    # 自动感知）。默认 off＝旧行为（drift 读数被动发现）；env
+    # NEUROVA_KB_EXTRACT_ON_UPDATE 显式值最优先（运维逃生门）。
+    "ontology_extract_on_update": False,
 }
 
 # LLM 路由设置分区（actionability 门控等路由期决策）——默认全关，零行为漂移。

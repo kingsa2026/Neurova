@@ -881,6 +881,45 @@ async def get_retrieval_metrics_snapshot(
     return {"code": 0, "message": "ok", "data": data}
 
 
+@router.get("/ontology/settings")
+async def get_ontology_settings(
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """Ontology 设置卡读数（登录可读）：facts 重抽开关现值与来源。
+
+    source：env=环境变量显式值最优先；setting=设置面；default=出厂默认。"""
+    import os
+
+    from neurova.api.endpoints.knowledge_common import ENV_EXTRACT_ON_UPDATE
+    from neurova.core.app_settings import get_advanced_settings
+
+    raw = str(os.environ.get(ENV_EXTRACT_ON_UPDATE) or "").strip().lower()
+    if raw:
+        source = "env"
+        value = raw in ("1", "true", "on", "yes")
+    else:
+        source = "setting"
+        value = bool(get_advanced_settings().get("ontology_extract_on_update"))
+    return {"code": 0, "message": "ok",
+            "data": {"extract_on_update": value, "source": source}}
+
+
+@router.put("/ontology/settings")
+async def update_ontology_settings(
+    body: Dict[str, Any],
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """Ontology 设置卡写面（仅管理员）：facts 重抽开关。"""
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可修改 Ontology 设置")
+    from neurova.core.app_settings import save_app_settings
+
+    value = bool(body.get("extract_on_update"))
+    save_app_settings("advanced", {"ontology_extract_on_update": value})
+    return {"code": 0, "message": "ok",
+            "data": {"extract_on_update": value}}
+
+
 @router.get("/geo")
 async def list_knowledge_geo(
     request: Request,
