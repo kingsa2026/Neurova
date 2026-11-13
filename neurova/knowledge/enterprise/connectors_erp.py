@@ -37,6 +37,8 @@ _REQUEST_TIMEOUT_SECONDS = 30.0
 _MAX_BATCH_LIMIT = 500
 
 
+ERP_VENDOR_ADAPTERS: Dict[str, type] = {}
+
 class ErpRestAdapter:
     """`sourceType=erp_api` 的 Protocol 实现（vendor ∈ kingdee/yongyou）。"""
 
@@ -66,6 +68,16 @@ class ErpRestAdapter:
                                  or self._descriptor.get("docType") or "documents"),
                      "columns": list(self._columns), "vendor": self._vendor}],
         )
+
+    _seenCursors: set = set()
+
+    def _checkCursorLoop(self, cursorToken: str) -> None:
+        """W11 分页 cursor 环检测：同 cursor 再现即停并如实报错。"""
+        if cursorToken in type(self)._seenCursors:
+            raise RuntimeError(
+                "分页 cursor 环检测：cursor %r 连续再现（上游分页异常，停止拉取）"
+                % cursorToken[:40])
+        type(self)._seenCursors.add(cursorToken)
 
     async def fetchBatch(self, cursor: Optional[SourceCursor], limit: int) -> ChangeBatch:
         limit = max(1, min(int(limit), _MAX_BATCH_LIMIT))
@@ -299,3 +311,7 @@ class _TokenInvalid(Exception):
 
 class _RateLimited(Exception):
     """限频形状（429）——触发具名退避。"""
+
+
+ERP_VENDOR_ADAPTERS["kingdee"] = ErpRestAdapter
+ERP_VENDOR_ADAPTERS["yongyou"] = ErpRestAdapter
