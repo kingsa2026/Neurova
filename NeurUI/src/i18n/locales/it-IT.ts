@@ -909,6 +909,7 @@ export default {
     workbenchLat: 'Latitudine',
     workbenchLon: 'Longitudine',
     workbenchNoGeoItems: 'Nessuna voce geolocalizzata nell\'ambito visibile',
+    workbenchNoGeoNodesHint: "Nessuno dei nodi visibili ha coordinate geografiche — compila latitudine/longitudine creando o modificando una voce di conoscenza e il nodo apparirà sulla mappa",
     workbenchRadius: 'Raggio km',
     workbenchSpatial: 'Spaziale',
     workbenchView2d: 'Vista 2D',

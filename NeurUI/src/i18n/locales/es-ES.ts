@@ -909,6 +909,7 @@ export default {
     workbenchLat: 'Latitud',
     workbenchLon: 'Longitud',
     workbenchNoGeoItems: 'No hay entradas con coordenadas en el alcance visible',
+    workbenchNoGeoNodesHint: "Ninguno de los nodos visibles tiene coordenadas geográficas — rellena latitud/longitud al crear o editar una entrada de conocimiento y el nodo aparecerá en el mapa",
     workbenchRadius: 'Radio km',
     workbenchSpatial: 'Espacial',
     workbenchView2d: 'Vista 2D',

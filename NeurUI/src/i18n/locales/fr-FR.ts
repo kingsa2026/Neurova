@@ -909,6 +909,7 @@ export default {
     workbenchLat: 'Latitude',
     workbenchLon: 'Longitude',
     workbenchNoGeoItems: 'Aucune entrée géolocalisée dans le périmètre visible',
+    workbenchNoGeoNodesHint: "Aucun nœud visible ne porte de coordonnées géographiques — renseignez latitude/longitude lors de la création ou la modification d'une entrée de connaissance pour que le nœud apparaisse sur la carte",
     workbenchRadius: 'Rayon km',
     workbenchSpatial: 'Spatial',
     workbenchView2d: 'Vue 2D',

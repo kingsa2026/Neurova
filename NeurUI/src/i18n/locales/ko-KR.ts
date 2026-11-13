@@ -909,6 +909,7 @@ export default {
     workbenchLat: '위도',
     workbenchLon: '경도',
     workbenchNoGeoItems: '보이는 범위에 좌표가 있는 항목이 없습니다',
+    workbenchNoGeoNodesHint: "표시된 노드에 지리 좌표가 없습니다——지식 항목 생성/편집 시 위도/경도를 입력하면 해당 노드가 지도에 표시됩니다",
     workbenchRadius: '반경 km',
     workbenchSpatial: '공간',
     workbenchView2d: '2D 보기',

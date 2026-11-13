@@ -909,6 +909,7 @@ export default {
     workbenchLat: 'Широта',
     workbenchLon: 'Долгота',
     workbenchNoGeoItems: 'В видимой области нет записей с координатами',
+    workbenchNoGeoNodesHint: "У видимых узлов нет географических координат — заполните широту/долготу при создании или редактировании записи знаний, и соответствующий узел появится на карте",
     workbenchRadius: 'Радиус км',
     workbenchSpatial: 'Пространство',
     workbenchView2d: '2D-вид',

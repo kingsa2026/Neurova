@@ -909,6 +909,7 @@ export default {
     workbenchLat: '緯度',
     workbenchLon: '経度',
     workbenchNoGeoItems: '表示範囲に座標付きエントリがありません',
+    workbenchNoGeoNodesHint: "表示中のノードに地理座標がありません——ナレッジエントリの作成・編集時に緯度経度を入力すると、対応するノードが地図に表示されます",
     workbenchRadius: '半径 km',
     workbenchSpatial: '空間',
     workbenchView2d: '2D 表示',
