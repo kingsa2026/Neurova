@@ -123,6 +123,8 @@
               class="explorer3d-embed"
               :agent-id="agentId"
               :focus-id="selectedNodeId || undefined"
+              :communities="communities"
+              :community-overlay-on="communityOverlayOn"
               @select="onNodeSelected"
               @clear="selectedNodeId = ''"
             />

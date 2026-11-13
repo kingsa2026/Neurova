@@ -60,6 +60,8 @@ import { request } from '@/api'
 const props = defineProps<{
   agentId: string
   focusId?: string
+  communities?: Array<{ community_id: string; member_labels: string[]; summary_text: string }>
+  communityOverlayOn?: boolean
 }>()
 const emit = defineEmits<{
   (e: 'select', nodeId: string, label: string): void
@@ -117,6 +119,30 @@ const neuronColor = (node: any) =>
     ? SELECT_NEURON
     : NEURON_PALETTE[node?.type] ?? FALLBACK_NEURON
 
+// ── U4 社区图层（3D）：节点按社区着色 ────────────────────────
+// 色板运行时读 :root 令牌（与 2D 同源变量），不新增硬编码色值。
+const COMMUNITY_TOKENS = ['--nr-primary', '--nr-accent', '--nr-accent-secondary',
+  '--nr-success', '--nr-warning', '--nr-error']
+const communityPalette = (): string[] => {
+  if (typeof document === 'undefined') return []
+  const s = getComputedStyle(document.documentElement)
+  return COMMUNITY_TOKENS.map((v) => s.getPropertyValue(v).trim()).filter(Boolean)
+}
+const communityIndexByLabel = computed(() => {
+  const m = new Map<string, number>()
+  ;(props.communities ?? []).forEach((c, i) => {
+    for (const label of c.member_labels) if (!m.has(label)) m.set(label, i)
+  })
+  return m
+})
+const communityColorOf = (label: string): string | null => {
+  if (!props.communityOverlayOn) return null
+  const idx = communityIndexByLabel.value.get(label)
+  if (idx === undefined) return null
+  const palette = communityPalette()
+  return palette.length ? palette[idx % palette.length] : null
+}
+
 const typeOptions = computed(() => {
   const kinds = new Set(rawNodes.map((n) => n.type).filter(Boolean))
   return Array.from(kinds).sort().map((k) => ({ value: k, label: k }))
@@ -128,7 +154,7 @@ const typeOptions = computed(() => {
 const labelTextureCache = new Map<string, { texture: any; canvas: any }>()
 
 const makeLabelSprite = (text: string, three: any, color: string) => {
-  const cached = labelTextureCache.get(text)
+  const cached = labelTextureCache.get(color + '|' + text)
   if (cached) return cached
 
   const canvas = document.createElement('canvas')
@@ -155,7 +181,7 @@ const makeLabelSprite = (text: string, three: any, color: string) => {
   const texture = new three.CanvasTexture(canvas)
   texture.needsUpdate = true
   const entry = { texture, canvas }
-  labelTextureCache.set(text, entry)
+  labelTextureCache.set(color + '|' + text, entry)
   return entry
 }
 
@@ -164,7 +190,7 @@ const makeLabelSprite = (text: string, three: any, color: string) => {
 // selected 节点额外放大＋琥珀色；标签用节点类型对应辉光色。
 const makeNodeObject = (node: any, three: any) => {
   const group = new three.Group()
-  const color = neuronColor(node)
+  const color = communityColorOf(String(node?.name ?? '')) ?? neuronColor(node)
   const isSelected = node?.id === currentNodeId.value
   const radius = isSelected ? 6 : 4
 
@@ -225,6 +251,10 @@ const applyRender = () => {
 
 watch(visibleTypes, () => {
   applyRender()
+})
+
+watch([() => props.communityOverlayOn, () => props.communities], () => {
+  if (rawNodes.length) applyRender()
 })
 
 const refetch = async (opts?: { forceFull?: boolean }) => {
