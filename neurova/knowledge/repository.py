@@ -2149,8 +2149,24 @@ class KnowledgeRepository:
                     changed = [k for k in (rev.get("changed_fields") or []) if k in old]
                     if not changed:
                         return None
-                    # 回滚前最新版完整快照（用户裁定：回滚不丢最新版）
-                    self._pushVersionSnapshot(item, "rollback", actor=actor)
+                    # 回滚前最新版完整快照（用户裁定：回滚不丢最新版）；
+                    # 版本链里已存在任一一致快照（title/content/chunks/指纹全同）
+                    # 则不再新产生——回滚往返不制造重复快照
+                    pre = {
+                        "title": item.get("title"),
+                        "content": item.get("content"),
+                        "chunks": list(item.get("chunks") or []),
+                        "content_fingerprint": item.get("content_fingerprint"),
+                    }
+                    snaps = item.get("version_snapshots") or []
+                    hasConsistent = any(
+                        (s.get("data") or {}).get("title") == pre["title"]
+                        and (s.get("data") or {}).get("content") == pre["content"]
+                        and (s.get("data") or {}).get("content_fingerprint") == pre["content_fingerprint"]
+                        and list((s.get("data") or {}).get("chunks") or []) == pre["chunks"]
+                        for s in snaps)
+                    if not hasConsistent:
+                        self._pushVersionSnapshot(item, "rollback", actor=actor)
                     revs.append({
                         "old": {k: item[k] for k in changed if k in item},
                         "changed_fields": changed,
