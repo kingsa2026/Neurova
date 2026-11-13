@@ -714,3 +714,16 @@ test_usage_cost_readout 6）；回归 `tests/unit/evolution` 408、agent 1713（
 **复评分数维持 §10.1 的 8.2**（R1–R10 是把 §10.1 复评时的缺口落进代码；进一步的分数上移
 取决于：真模型实证（R2）、按任务分类器的实装灰度（R3）、管理端 UI（R6）与递归多轮的
 API/运营接线（R5）——这些是下一批的事，不在本文自行改分。
+
+### 10.5 追补（同日，用户点单两项）
+
+- **R3 分类器开关设置项化**（`81fd4f039`）：新增 `security/task_profile_settings.py`
+  （JSON 持久化，优先级 env 灰度直开 > 设置文件 > 默认关）；`turn_profile.taskProfileEnabled`
+  改读设置单源；governance GET/PUT `/governance/task-profile`（仅管理员）。
+- **R6 前端 UI 补齐**（同提交）：SettingPage 新增「任务级档位分类」开关面板与
+  「Agent 档位派发」面板（agent 列表 × lite/standard/heavy 选择，未设置显示
+  「跟随部署档位」占位，变更即 PUT）；`settings.ts` 增 task-profile /
+  agent-exec-profiles 客户端；i18n settings 段新增 8 键 ×11 语言。
+- **验证**：taskProfile/governance 定向 33 绿；前端 vitest 2464 绿＋i18n 一致性 41 绿＋
+  vue-tsc 0 错。
+- **剩余尾巴**：R2 真模型实证（待有凭据环境）、R5 的 API/运营接线、coreset 双段实证。
