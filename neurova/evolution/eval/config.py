@@ -137,15 +137,27 @@ class EvolutionConfig:
     eval_coreset_k: int = 0
 
     # ── R1 成本升选择键（2026-11-13，§10.2）──
-    # 近平分成本 tiebreak：多变体轮里，增益达线（>基线+阈值）且彼此近平分
-    # 的候选集中，选文本长度最小者（文本臂成本代理，与 P1-5 同源）。
-    # 盲选（judge 偏好）优先级更高；等长保持先到（确定性）。False = 纯 argmax。
+    # 近平分成本 tiebreak：多变体轮里，增益达线且彼此近平分的候选集中，选文本
+    # 长度最小者（文本臂成本代理，与 P1-5 同源）。盲选（judge 偏好）优先级
+    # 更高；等长保持先到（确定性）。False = 纯 argmax。
     cost_tiebreak_enabled: bool = True
     # 成本硬门（默认关）：开启后，候选臂执行成本（usage 差分）相对基线臂
     # 涨幅 > cost_hard_gate_ratio ⇒ 直接拒绝（cost_gate_failed）。
     # 软门（人工复核）不受影响，两者可并存。
     cost_hard_gate_enabled: bool = False
     cost_hard_gate_ratio: float = 0.5
+
+    # ── N1/N2/N3（§11.3 残差清偿，2026-11-13）──
+    # N1 Pareto 多档交付：多变体轮幸存候选按 lite/standard/heavy 轮转指派执行
+    # 档位并串行评测（turn 级档位真实生效、成本按档位归账），产出 (分数, 成本)
+    # 非劣集随结果交付。默认关＝既有并行评测行为逐字节不变。
+    profile_variants_enabled: bool = False
+    # N2 候选集并行递归：多变体轮把非劣幸存者透出到结果，递归演化
+    # （evolveRecursive pool_size>1）的下轮对池内每个基各跑一次进化。
+    lineage_pareto_enabled: bool = False
+    # N3 G-rollout 联合诊断：失败采集时每用例采样 G 次（>1 才启用），诊断按
+    # 「全挂=stable / 部分挂=flaky」归因——区分稳定缺陷与偶发噪声。1 = 旧形态。
+    diagnosis_rollouts: int = 1
 
 
 def text_evolution_enabled() -> bool:

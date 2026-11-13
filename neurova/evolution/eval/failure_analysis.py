@@ -57,6 +57,9 @@ def buildDiagnosis(failures: List[Any], *, max_entries: int = _MAX_ENTRIES) -> L
             "worst_score": None,
             "tasks": [],
             "env_kinds": set(),
+            # N3：G-rollout 稳定性归因（sample_count>1 的用例才携带）
+            "sample_failures": 0,
+            "sample_total": 0,
         })
         group["count"] += 1
         score = getattr(failure, "score", None)
@@ -69,9 +72,14 @@ def buildDiagnosis(failures: List[Any], *, max_entries: int = _MAX_ENTRIES) -> L
         for kind in (getattr(failure, "environments", None) or []):
             if str(kind or "").strip():
                 group["env_kinds"].add(str(kind))
+        sample_count = int(getattr(failure, "sample_count", 1) or 1)
+        failed_samples = int(getattr(failure, "failed_samples", 0) or 0)
+        if sample_count > 1:
+            group["sample_total"] += sample_count
+            group["sample_failures"] += min(failed_samples, sample_count)
     entries = []
     for group in groups.values():
-        entries.append({
+        entry: Dict[str, Any] = {
             "pattern": group["pattern"][:120],
             "count": group["count"],
             "share": round(group["count"] / total, 3) if total else 0.0,
@@ -79,7 +87,16 @@ def buildDiagnosis(failures: List[Any], *, max_entries: int = _MAX_ENTRIES) -> L
                             if group["worst_score"] is not None else None),
             "tasks": group["tasks"],
             "env_kinds": sorted(group["env_kinds"]),
-        })
+        }
+        # N3 稳定性：组内 carry 了多采样**失败**证据时才标注——全挂=stable
+        # （稳定缺陷）、部分挂=flaky（偶发/噪声）；无失败的组不标（通过不是
+        # 稳定性结论），单采样用例也不带该字段（旧形态一致）。
+        if group["sample_failures"] > 0:
+            entry["sample_failures"] = group["sample_failures"]
+            entry["sample_total"] = group["sample_total"]
+            entry["stability"] = ("stable" if group["sample_failures"]
+                                  >= group["sample_total"] else "flaky")
+        entries.append(entry)
     entries.sort(key=lambda e: (-e["count"], e["pattern"]))
     return entries[:max(1, int(max_entries))]
 
@@ -94,6 +111,9 @@ def diagnosisDigest(entries: List[Dict[str, Any]]) -> str:
                  f"出现 {entry['count']} 次（占比 {entry['share']:.0%}）"]
         if entry.get("worst_score") is not None:
             parts.append(f"最差分 {entry['worst_score']}")
+        if entry.get("stability"):
+            parts.append(f"稳定性: {entry['stability']}"
+                         f"（采样失败 {entry.get('sample_failures', 0)}/{entry.get('sample_total', 0)}）")
         if entry.get("tasks"):
             parts.append("例证: " + "；".join(entry["tasks"]))
         if entry.get("env_kinds"):

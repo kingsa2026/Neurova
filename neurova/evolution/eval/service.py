@@ -976,6 +976,7 @@ class SkillEvolutionService:
         dataset: Optional[EvalDataset] = None,
         epochs: int = 2,
         iterations: Optional[int] = None,
+        pool_size: int = 1,
         artifact_type: str = "template",
         agent: Any = None,
         config: Optional[EvolutionConfig] = None,
@@ -998,47 +999,94 @@ class SkillEvolutionService:
         """
         current = skill_text
         trajectory: list = []
+        epoch_pool: list = []
         last_proposal: Optional[EvolutionProposal] = None
         stopped_reason = ""
-        total_improvement = 0.0
-        for epoch in range(1, max(1, int(epochs)) + 1):
-            result, proposal = await self.evolve(
-                skill_id=skill_id, skill_text=current, dataset=dataset,
-                iterations=iterations, artifact_type=artifact_type, agent=agent,
-                config=config, judge=judge, mutate=mutate, bench_gate=bench_gate,
-                extra_failures=extra_failures, domain_harnesses=domain_harnesses,
-            )
-            cost_arms = (result.cost_summary or {}).get("arms") or {}
-            trajectory.append({
-                "epoch": epoch,
-                "rejected": bool(result.rejected),
-                "reject_reason": result.reject_reason,
-                "holdout_before": round(result.holdout_before, 4),
-                "holdout_after": round(result.holdout_after, 4),
-                "improvement": round(result.improvement, 4),
-                "cost_state": (result.cost_summary or {}).get("state"),
-                "candidate_cost_usd": (cost_arms.get("candidate") or {}).get("cost_usd"),
-                "exec_suite_state": (result.exec_suite or {}).get("state"),
-                "proposal_id": proposal.proposal_id if proposal else "",
-            })
-            if result.rejected:
-                stopped_reason = result.reject_reason or "rejected"
+        first_before: Optional[float] = None
+        best_after: Optional[float] = None
+        pool: list = [skill_text]
+        seen_pool = {skill_text}
+        last_reject = ""
+        epoch = 0
+        # N2 候选集并行递归：pool_size>1 时，每轮对池内**每个基**各跑一次进化，
+        # 非劣幸存者（含多变体轮透出的非劣变体）进下轮池——多谱系并行推进。
+        # pool_size=1（默认）＝既有单谱系逐字行为。
+        while epoch < max(1, int(epochs)) and pool:
+            epoch += 1
+            epoch_bases = []
+            for base_index, base in enumerate(pool):
+                result, proposal = await self.evolve(
+                    skill_id=skill_id, skill_text=base, dataset=dataset,
+                    iterations=iterations, artifact_type=artifact_type, agent=agent,
+                    config=config, judge=judge, mutate=mutate, bench_gate=bench_gate,
+                    extra_failures=extra_failures, domain_harnesses=domain_harnesses,
+                )
+                if first_before is None:
+                    first_before = result.holdout_before
+                cost_arms = (result.cost_summary or {}).get("arms") or {}
+                trajectory.append({
+                    "epoch": epoch,
+                    "base_index": base_index,
+                    "rejected": bool(result.rejected),
+                    "reject_reason": result.reject_reason,
+                    "holdout_before": round(result.holdout_before, 4),
+                    "holdout_after": round(result.holdout_after, 4),
+                    "improvement": round(result.improvement, 4),
+                    "cost_state": (result.cost_summary or {}).get("state"),
+                    "candidate_cost_usd": (cost_arms.get("candidate") or {}).get("cost_usd"),
+                    "exec_suite_state": (result.exec_suite or {}).get("state"),
+                    "proposal_id": proposal.proposal_id if proposal else "",
+                })
+                last_reject = result.reject_reason or last_reject
+                epoch_bases.append({"base": base[:60], "result": result,
+                                    "proposal": proposal})
+            epoch_pool.append({"epoch": epoch,
+                               "bases": [b["base"] for b in epoch_bases]})
+            # 收集下轮池：各基的过门胜者＋非劣变体（N2），非劣过滤＋去重＋截断
+            candidates: list = []
+            for entry in epoch_bases:
+                result = entry["result"]
+                if result.rejected or not result.changed:
+                    continue
+                if best_after is None or result.holdout_after > best_after:
+                    best_after = result.holdout_after
+                    current = result.deployed_text
+                    last_proposal = entry["proposal"]
+                for variant in (result.pareto_variants or []):
+                    candidates.append((float(variant.get("score") or 0.0),
+                                       str(variant.get("text") or "")))
+                if not (result.pareto_variants or []):
+                    candidates.append((result.holdout_after, result.deployed_text))
+            deduped: Dict[str, float] = {}
+            for score, text in candidates:
+                if text not in seen_pool:
+                    deduped[text] = max(score, deduped.get(text, score))
+            ranked = sorted(deduped.items(), key=lambda p: (-p[1], len(p[0])))
+            next_pool: list = []
+            for text, score in ranked:
+                if any(s >= score and len(t) <= len(text)
+                       and (s > score or len(t) < len(text)) for s, t in next_pool):
+                    continue  # 被池内成员支配
+                next_pool.append((score, text))
+            pool = [text for _s, text in next_pool][:max(1, int(pool_size))]
+            seen_pool.update(pool)
+            if not pool:
+                stopped_reason = last_reject or "pool_exhausted"
                 break
-            if not result.changed:
-                stopped_reason = "no_change"
-                break
-            total_improvement += result.improvement
-            current = result.deployed_text
-            last_proposal = proposal
         else:
             stopped_reason = "epochs_exhausted"
+        total_improvement = (round(best_after - first_before, 4)
+                             if best_after is not None and first_before is not None else 0.0)
         return {
             "skill_id": skill_id,
             "baseline_text": skill_text,
             "deployed_text": current,
             "epochs_run": len(trajectory),
             "epochs": trajectory,
-            "total_improvement": round(total_improvement, 4),
+            "epoch_pool": epoch_pool,
+            "pool_size": max(1, int(pool_size)),
+            "final_pool_size": len(pool),
+            "total_improvement": total_improvement,
             "stopped_reason": stopped_reason,
             "proposal": last_proposal,
         }

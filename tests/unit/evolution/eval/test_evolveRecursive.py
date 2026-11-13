@@ -18,7 +18,7 @@ from neurova.evolution.eval.fitness import FitnessScore
 from neurova.evolution.eval.service import SkillEvolutionService
 
 
-BASELINE = "基础技能正文。" + "补充说明文字用于满足约束闸的基线长度要求。" * 4
+BASELINE = "基础技能正文。" + "补充说明文字用于满足约束闸的基线长度要求。" * 10
 
 
 def _ds():

@@ -155,6 +155,12 @@ class EvolutionRunResult:
     # state=measured 时 full_improvement < 0 ⇒ coreset_recheck_failed 拒绝
     # （核选探路便宜，但结论必须经得起全量复核）。
     coreset_recheck: dict = field(default_factory=dict)
+    # N1 Pareto 多档交付：多变体轮的 (分数, 成本) 非劣集读数（tier/dominated）。
+    # state=disabled 表示未开档位轮转（旧并行评测形态）。
+    pareto_set: dict = field(default_factory=dict)
+    # N2 候选集并行递归：非劣幸存者（text/score），供递归演化推进下轮多谱系。
+    # 默认关时恒为空表。
+    pareto_variants: list = field(default_factory=list)
 
     @property
     def improvement(self) -> float:
@@ -252,6 +258,7 @@ class EvolutionRunResult:
             "exec_suite": dict(self.exec_suite),
             "cost_tiebreak": dict(self.cost_tiebreak),
             "coreset_recheck": dict(self.coreset_recheck),
+            "pareto_set": dict(self.pareto_set),
         }
 
 
@@ -609,14 +616,70 @@ class SkillEvolutionRunner:
             return None
         result.candidates_evaluated += len(survivors)
         result.iterations_run += len(survivors)
-        evaluated = await asyncio.gather(*[
-            self._evaluate(cand, tune, artifact_type, arm="candidate") for cand, _ in survivors
-        ])
+        # N1 Pareto 多档交付：幸存候选按 lite/standard/heavy 轮转指派执行档位，
+        # **串行**评测（turn 级档位真实生效于门控/预算/压缩，成本按档位归账），
+        # 产出 (分数, 成本) 非劣集随结果交付——「按部署预算交付」的读数面。
+        # 默认关 = 既有并行评测逐字节不变。
+        profileVariants = (bool(getattr(self.config, "profile_variants_enabled", False))
+                           and len(survivors) >= 2)
+        tierArms = ["candidate:lite", "candidate:standard", "candidate:heavy"]
+        evaluated: list = []
+        if profileVariants:
+            from neurova.agent.turn_profile import resetTurnProfile, setTurnProfile
+
+            for idx, (cand, _shard) in enumerate(survivors):
+                tierArm = tierArms[idx % len(tierArms)]
+                token = setTurnProfile(tierArm[len("candidate:"):])
+                try:
+                    evaluated.append(await self._evaluate(
+                        cand, tune, artifact_type, arm=tierArm))
+                finally:
+                    resetTurnProfile(token)
+        else:
+            evaluated = await asyncio.gather(*[
+                self._evaluate(cand, tune, artifact_type, arm="candidate")
+                for cand, _ in survivors
+            ])
         # P2-10：并行路径同样携带 per-task 详情做归因
         survivors_scores = [
             ((cand, shard), avg, details)
             for ((cand, shard), (avg, details)) in zip(survivors, evaluated)
         ]
+
+        # N1：Pareto 非劣集（分数↑、成本↓）。成本取候选评测的真实 usage 差分
+        # （档位臂）；未开档位轮转时回退文本长度代理。胜者选择逻辑不变。
+        paretoEntries: list = []
+        _arms = (self._run_cost_ledger.summarize().get("arms") or {}) if profileVariants else {}
+        for idx, ((cand, _shard), avg, _details) in enumerate(survivors_scores):
+            if profileVariants:
+                arm = tierArms[idx % len(tierArms)]
+                armData = _arms.get(arm) or {}
+                cost = float(armData.get("cost_usd") or 0.0)
+                tokens = int(armData.get("tokens") or 0)
+            else:
+                arm = "candidate"
+                cost = float(len(cand))
+                tokens = int(len(cand))
+            paretoEntries.append({"index": idx,
+                                  "tier": arm[len("candidate:"):] if arm.startswith("candidate:") else arm,
+                                  "text": cand, "score": round(avg, 4),
+                                  "cost_usd": cost, "tokens": tokens})
+        for entry in paretoEntries:
+            entry["dominated"] = any(
+                other["score"] >= entry["score"] and other["cost_usd"] <= entry["cost_usd"]
+                and (other["score"] > entry["score"] or other["cost_usd"] < entry["cost_usd"])
+                for other in paretoEntries if other is not entry)
+        result.pareto_set = {
+            "state": "measured" if profileVariants else "disabled",
+            "entries": [{k: v for k, v in entry.items() if k != "text"}
+                        for entry in paretoEntries],
+        }
+        # N2：非劣幸存者透出（递归演化据此把多个谱系推进下轮；默认关 = 不透出）。
+        result.pareto_variants = [
+            {"text": entry["text"], "score": entry["score"]}
+            for entry in paretoEntries
+            if not entry["dominated"]
+        ] if bool(getattr(self.config, "lineage_pareto_enabled", False)) else []
 
         # N7：top 两候选近平分时，匿名比例只读产物，优先于先到 argmax。
         blind_tiebreak: dict = {"state": "not_applicable"}
@@ -701,13 +764,39 @@ class SkillEvolutionRunner:
     async def _collect_failures(
         self, skill_text: str, examples: list[EvalExample], artifact_type: str
     ) -> list[JudgeFailure]:
-        _, details = await self._evaluate(skill_text, examples, artifact_type, arm="probe")
-        worst = sorted(details, key=lambda d: d[1])[:_MAX_FAILURES]
-        return [
-            JudgeFailure(task_input=ex.task_input, output=output, feedback=feedback, score=score,
-                         environments=list(env))
-            for ex, score, output, feedback, _failed, env in worst
-        ]
+        # N3 G-rollout：diagnosis_rollouts>1 时每用例采样 G 次，聚合出稳定性
+        # （全挂=stable / 部分挂=flaky）供联合诊断归因；1 = 旧单采样形态。
+        rollouts = max(1, int(getattr(self.config, "diagnosis_rollouts", 1) or 1))
+        agg: Dict[str, Dict[str, Any]] = {}
+        for _sample in range(rollouts):
+            _, details = await self._evaluate(skill_text, examples, artifact_type,
+                                              arm="probe")
+            for ex, score, output, feedback, failed, env in details:
+                slot = agg.setdefault(ex.task_input, {
+                    "sample_count": 0, "failed_samples": 0, "min_score": None,
+                    "output": output, "feedback": feedback, "score": score,
+                    "env": list(env)})
+                slot["sample_count"] += 1
+                if failed:
+                    slot["failed_samples"] += 1
+                if slot["min_score"] is None or score < slot["min_score"]:
+                    slot["min_score"] = score
+                    slot["output"] = output
+                    slot["feedback"] = feedback
+                    slot["score"] = score
+                    slot["env"] = list(env)
+        merged: list[JudgeFailure] = []
+        for task, slot in agg.items():
+            note = (f" [采样失败 {slot['failed_samples']}/{slot['sample_count']}]"
+                    if rollouts > 1 and slot["failed_samples"] else "")
+            merged.append(JudgeFailure(
+                task_input=task, output=slot["output"],
+                feedback=slot["feedback"] + note,
+                score=slot["score"], environments=list(slot["env"]),
+                sample_count=slot["sample_count"],
+                failed_samples=slot["failed_samples"]))
+        merged.sort(key=lambda f: f.score)
+        return merged[:_MAX_FAILURES]
 
     # ── 主循环 ──
 
