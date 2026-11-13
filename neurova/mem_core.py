@@ -448,7 +448,7 @@ class MemCore:
     - config, memory_manager, storage, temperature_engine
     - recall_engine, attachment_manager, growth_log_manager
     - question_queue_manager, conflict_detector, version_control
-    - proactive_question_manager, working_memory
+    - working_memory
     - conversation_buffer, buffer_module, session_manager
     - evolution, tool_memory
     """
