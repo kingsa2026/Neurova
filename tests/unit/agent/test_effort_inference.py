@@ -104,12 +104,19 @@ class TestApplyThinkingEffortAutoResolve:
         assert ctx.metadata["thinking_effort"] == "deep"
         assert "深度思考" in _system_content(ctx)
 
-    def test_ambiguous_text_stays_uninjected(self, monkeypatch):
+    def test_ambiguous_text_gets_explicit_standard_fallback(self, monkeypatch):
+        """HN3/HC4（2026-11-13）：歧义不再"什么都不留"——显式回退 standard。
+
+        提示面与旧行为同形（standard 不注入回答模式指令）；变化在元数据面：
+        thinking_effort 落确定档、来源标记 fallback_standard，reasoning_effort
+        透传与读数面从此拿到确定值。
+        """
         monkeypatch.delenv("NEUROVA_AUTO_EFFORT", raising=False)
         pipe = _pipeline()
         ctx = ChatContext(user_input="帮我看看这个项目", metadata={}, context=[])
         pipe._apply_thinking_effort(ctx)
-        assert ctx.metadata.get("thinking_effort") in (None, "")
+        assert ctx.metadata.get("thinking_effort") == "standard"
+        assert ctx.metadata.get("thinking_effort_source") == "fallback_standard"
         assert _system_content(ctx) == ""
 
     def test_kill_switch_off_no_inference(self, monkeypatch):

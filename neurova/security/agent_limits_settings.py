@@ -120,6 +120,44 @@ MAX_DOOM_LOOP_INTERRUPTS = 8
 MIN_DOOM_LOOP_SIMILARITY = 0.5
 MAX_DOOM_LOOP_SIMILARITY = 1.0
 
+# ── 执行档位（HN3+HN4/HC3，HarnessPro 对照 2026-11-13）──────────────
+# 部署档位 = 一组命名预算（lite/standard/heavy）：standard 即内置默认
+#（不覆盖任何键），lite/heavy 是运营按部署预算选档的入口。单源在本表；
+# env NEUROVA_EXEC_PROFILE 选择档位。
+# 优先级：显式 env 键（NEUROVA_AGENT_*）> 档位 > 设置文件 > 内置默认——
+# 选档是部署级决定，强于管理员微调文件；显式 env 仍最高（测试钉住）。
+# 值域约束：每个值都必须落在 get_effective_limits 的夹紧域内
+#（test_every_profile_value_within_legal_domain 逐档逐键复算）。
+EXEC_PROFILES: Dict[str, Dict[str, Any]] = {
+    "standard": {},
+    "lite": {
+        "token_budget": 40000,
+        "max_loop_rounds": 10,
+        "max_parallel_tools": 2,
+        "goal_max_continuations": 1,
+        "max_subagent_depth": 1,
+    },
+    "heavy": {
+        "token_budget": 200000,
+        "max_loop_rounds": 40,
+        "max_parallel_tools": 6,
+        "goal_max_continuations": 3,
+    },
+}
+EXEC_PROFILE_ENV = "NEUROVA_EXEC_PROFILE"
+
+
+def active_exec_profile() -> str:
+    """当前执行档位名（非法值回退 standard 并告警，不静默）。"""
+    raw = (os.environ.get(EXEC_PROFILE_ENV) or "").strip().lower()
+    if not raw:
+        return "standard"
+    if raw in EXEC_PROFILES:
+        return raw
+    logger.warning("%s=%r 不是已登记档位（可选：%s），回退 standard",
+                   EXEC_PROFILE_ENV, raw, "/".join(sorted(EXEC_PROFILES)))
+    return "standard"
+
 
 def get_limit_domains() -> Dict[str, Dict[str, Any]]:
     """每键的控件形态与合法域——**面板该长什么样**的唯一出处。
@@ -216,12 +254,17 @@ def save_agent_limits(data: Dict[str, Any], path: Optional[Path] = None) -> bool
 def get_effective_limits() -> Dict[str, Any]:
     """生效限制值（环境变量显式设置优先于持久化设置）。
 
+    优先级：显式 env 键 > 执行档位（NEUROVA_EXEC_PROFILE，HN3+HN4/HC3）>
+    设置文件 > 内置默认。档位覆盖写在文件合并之后——选档是部署级决定。
     env 键：NEUROVA_AGENT_TOKEN_BUDGET / NEUROVA_AGENT_MAX_LOOP_ROUNDS /
     NEUROVA_AGENT_MAX_SUBAGENT_DEPTH / NEUROVA_AGENT_MAX_PARALLEL_TOOLS /
     NEUROVA_AGENT_GOAL_ROUND_BUDGET / NEUROVA_AGENT_DOOM_LOOP_WINDOW /
     NEUROVA_AGENT_DOOM_LOOP_MAX_INTERRUPTS
     """
     settings = load_agent_limits()
+    # 执行档位覆盖（standard 档为空表 = 内置默认逐字不变）：
+    for _pkey, _pvalue in EXEC_PROFILES[active_exec_profile()].items():
+        settings[_pkey] = _pvalue
 
     env_budget = os.environ.get("NEUROVA_AGENT_TOKEN_BUDGET")
     if env_budget and env_budget.isdigit():

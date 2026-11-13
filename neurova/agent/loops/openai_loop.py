@@ -506,6 +506,16 @@ class OpenAILoop(BaseAgentLoop):
                 )
                 logger.info("门控 %s 软干预（非流式，提示已注入消息序列）: %s", _gd.gate_name, _gd.reason)
 
+        # HN4/HC4：分段预算提醒（economy/strict/finalize，纯文本引导，
+        # NEUROVA_BUDGET_STAGES=off 关）。追加在工具结果入历史之后——
+        # 不改写既有消息，保 provider 的 prompt cache 前缀命中。
+        from neurova.agent.budget_stages import budgetStageGuidance
+
+        _stage = budgetStageGuidance(state.toolRounds, state.maxToolRounds)
+        if _stage:
+            request_params["messages"].append({"role": "user", "content": _stage})
+            logger.info("分段预算提醒（非流式，round=%s）: %s", state.toolRounds, _stage[:60])
+
         # 本轮结束、循环继续（迭代形态：返回上一层 while，不再递归自身）。
         # 原先此处的 `if state.toolRounds > state.maxToolRounds: return` 守卫已删：
         # T-04 把守卫与 `IterationGate` 收成同一个数后，门控在 `>= max` 那一轮先
@@ -978,6 +988,15 @@ class OpenAILoop(BaseAgentLoop):
                 )
                 logger.info("门控 %s 软干预（提示已注入消息序列）: %s", gate_decision.gate_name, gate_decision.reason)
                 yield {"type": "reasoning", "data": gate_decision.continuation_prompt}
+
+            # HN4/HC4：分段预算提醒（与非流式路径同一注入语义；纯文本引导，
+            # 不发 TERMINATE——硬停止仍由既有门控单点执法）。
+            from neurova.agent.budget_stages import budgetStageGuidance
+
+            _stage = budgetStageGuidance(state.toolRounds, state.maxToolRounds)
+            if _stage:
+                request_params["messages"].append({"role": "user", "content": _stage})
+                logger.info("分段预算提醒（流式，round=%s）: %s", state.toolRounds, _stage[:60])
 
             if stagnant:
                 state.stagnationCount += 1
