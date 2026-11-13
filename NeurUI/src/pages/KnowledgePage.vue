@@ -349,11 +349,21 @@
       <a-empty v-if="!revisions.length" :description="t('knowledge.revisionsEmpty')" />
       <a-timeline v-else>
         <a-timeline-item v-for="(rev, idx) in revisions" :key="idx">
-          <p class="rev-time">{{ formatTimestampText(rev.updated_at) }}</p>
+          <p class="rev-time">
+            {{ formatTimestampText(rev.updated_at) }}
+            <a-tag v-if="rev.reason" color="blue" class="rev-reason" data-testid="revision-reason">
+              {{ rev.reason === 'rollback' ? t('knowledge.revisionReasonRollback') : t('knowledge.revisionReasonReingest') }}
+            </a-tag>
+          </p>
           <p v-for="field in rev.changed_fields" :key="field" class="rev-field">
             <span class="rev-name">{{ field }}</span>
             <span class="rev-old">{{ truncate(String(rev.old?.[field] ?? ''), 120) }}</span>
           </p>
+          <GlassButton v-if="isAdmin && revisionsEntry && canManage(revisionsEntry)"
+                       size="sm" variant="secondary" data-testid="revision-rollback-btn"
+                       :loading="rollbackPending === idx" @click="handleRevisionRollback(idx)">
+            {{ t('knowledge.revisionsRollbackBtn') }}
+          </GlassButton>
         </a-timeline-item>
       </a-timeline>
     </a-drawer>
@@ -812,6 +822,7 @@ import {
   type ConflictResolution,
   listDeletedKnowledge,
   restoreKnowledgeNode,
+  rollbackKnowledgeRevision,
   listKnowledgeRevisions,
   syncKbConfig,
   previewChunking,
@@ -900,7 +911,10 @@ const resolutionRunning = ref(false)
 const blockingStats = ref<{ full_scan: number; blocking: number; reduction_pct: number } | null>(null)
 const conflictPolicies = ref<Record<string, string>>({})
 const revisionsOpen = ref(false)
-const revisions = ref<{ old: Record<string, unknown>; changed_fields: string[]; updated_at: string }[]>([])
+const revisions = ref<{ old: Record<string, unknown>; changed_fields: string[]; updated_at: string; reason?: string }[]>([])
+const revisionsEntryId = ref('')
+const revisionsEntry = ref<KnowledgeItem | null>(null)
+const rollbackPending = ref(-1)
 // 语义检索的可信度映射（id → rrf 归一化分）
 const confidenceMap = ref<Record<string, number>>({})
 
@@ -1837,9 +1851,27 @@ async function openRevisions(item: KnowledgeItem) {
   try {
     const res: any = await listKnowledgeRevisions(item.id)
     revisions.value = Array.isArray(res) ? res : (res?.data ?? [])
+    revisionsEntryId.value = item.id
+    revisionsEntry.value = item
     revisionsOpen.value = true
   } catch (err) {
     message.error(extractApiDetail(err) || t('knowledge.revisionsError'))
+  }
+}
+
+async function handleRevisionRollback(idx: number) {
+  if (!revisionsEntryId.value) return
+  rollbackPending.value = idx
+  try {
+    await rollbackKnowledgeRevision(revisionsEntryId.value, idx)
+    message.success(t('knowledge.revisionsRollbackDone'))
+    const res: any = await listKnowledgeRevisions(revisionsEntryId.value)
+    revisions.value = Array.isArray(res) ? res : (res?.data ?? [])
+    fetchKnowledge()
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('knowledge.revisionsRollbackError'))
+  } finally {
+    rollbackPending.value = -1
   }
 }
 
