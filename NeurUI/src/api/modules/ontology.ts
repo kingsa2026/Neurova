@@ -538,6 +538,18 @@ export function listOntologyCommunities() {
 }
 
 /** U4：社区检测手动触发（管理员）——标签传播＋持久化，返回社区行。 */
+/** Ontology 设置卡读数（登录可读）：facts 重抽开关现值与来源。 */
+export function getOntologySettings() {
+  return api.get<ApiResponse<{ extract_on_update: boolean; source: 'env' | 'setting' | 'default' }>>(
+    '/knowledge/ontology/settings')
+}
+
+/** Ontology 设置卡写面（管理员）：facts 重抽开关。 */
+export function updateOntologySettings(extractOnUpdate: boolean) {
+  return api.put<ApiResponse<{ extract_on_update: boolean }>>(
+    '/knowledge/ontology/settings', { extract_on_update: extractOnUpdate })
+}
+
 export function detectOntologyCommunities() {
   return api.post<ApiResponse<Array<{ community_id: string; level: number; member_labels: string[]; summary_text: string }>>>(
     '/knowledge/ontology/communities/detect', {})

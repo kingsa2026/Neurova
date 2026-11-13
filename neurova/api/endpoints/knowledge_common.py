@@ -350,8 +350,14 @@ def extract_after_update(
     fail-soft 返回状态串，绝不打断更新主流程。
     """
     raw = str(os.environ.get(ENV_EXTRACT_ON_UPDATE) or "").strip().lower()
-    if raw not in ("1", "true", "on", "yes"):
+    if raw in ("0", "false", "off", "no"):
         return "skipped_disabled"
+    if raw not in ("1", "true", "on", "yes"):
+        # 无 env 显式值 → 跟随设置面（Ontology 设置卡，app_settings 持久化）
+        from neurova.core.app_settings import get_advanced_settings
+
+        if not bool(get_advanced_settings().get("ontology_extract_on_update")):
+            return "skipped_disabled"
     try:
         _try_extract_to_graph(
             [dict(item)], request, agent_id=agent_id, tenant_id=tenant_id
