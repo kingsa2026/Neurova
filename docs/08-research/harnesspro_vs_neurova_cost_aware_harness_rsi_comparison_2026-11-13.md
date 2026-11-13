@@ -726,4 +726,38 @@ API/运营接线（R5）——这些是下一批的事，不在本文自行改�
   agent-exec-profiles 客户端；i18n settings 段新增 8 键 ×11 语言。
 - **验证**：taskProfile/governance 定向 33 绿；前端 vitest 2464 绿＋i18n 一致性 41 绿＋
   vue-tsc 0 错。
-- **剩余尾巴**：R2 真模型实证（待有凭据环境）、R5 的 API/运营接线、coreset 双段实证。
+- **剩余尾巴**：~~R2 真模型实证（待有凭据环境）~~、~~R5 的 API/运营接线~~、
+  ~~coreset 双段实证~~——三项均已清偿，见 §10.6。
+
+### 10.6 尾巴清偿（2026-11-13 第三批：R1–R10 余项全部闭合）
+
+> 提交：`c859eca2c`（coreset 设置项＋双段复核）/ `77e89fbb5`（R5 API 接线）/
+> `d9524b714`（R2 实证＋重试）。
+
+- **coreset 设置项化＋双段复核**（`c859eca2c`）：新增
+  `security/eval_coreset_settings.py`（K 值 JSON 持久化，合法域 0–200，
+  env `NEUROVA_EVAL_CORESET_K` 灰度直改仍优先）＋ governance GET/PUT
+  `/governance/eval-coreset`；runner 生效 K = max(代码级配置, 治理设置)。
+  **双段复核落格**：核选收缩后，胜者在未收缩的全量留出上复核
+  （arm=holdout_full 入成本账），全量改善 <0 ⇒ `coreset_recheck_failed`
+  拒绝——「核选探路便宜」不以放过全量回归为代价。
+- **R5 API 接线**（`77e89fbb5`）：`POST /skills/{agent_id}/evolve-recursive`
+  （仅管理员）——epochs 1–10、数据集三级回退（抽取
+  `_resolveEvolutionDataset` 供 /evolve 与本端点共用）、预算闸按
+  「单轮计划 × epochs」放大；响应含递归轨迹与末轮 pending 提案。
+  顺带修一处口径不一致：/evolve 的 API 侧预算闸补 `include_exec_suite`
+  （R7 后 template 也产生套件回合，API 侧上界此前未计）。
+- **R2 真模型实证转实测通过**（`d9524b714`）：真实 provider
+  （上海人工智能实验室）上合成出 4 条可用用例
+  （suite_hash `sha256:770fef43…`），断言烟囱 pass_rate=1.0；同时暴露
+  「同一技能二次合成输出不可解析」的运行间波动——generate 对解析失败
+  增加一次有界重试（共 2 次），仍失败诚实回退空套件。前次已落的响应
+  形态归一是本次打通的前置。
+- **验证**：新红 8（coreset 设置/双段复核）＋7（递归 API）先行转绿；
+  终局回归 `tests/unit/evolution`＋api 治理/递归/usage 面 **1961 全绿**。
+- **至此 §10.2 R1–R10 与全部尾巴闭合，无遗留项**；后续运营化事项
+  （分类器灰度开启、档位 UI 的运营使用反馈）属使用侧，不再挂尾巴。
+- **追补（同日）**：核选容量的**管理端 UI** 补齐（SettingPage「评测集核选容量」
+  面板＋settings.ts 客户端＋i18n 4 键 ×11 语言）——治理设置项至此与其它
+  governance 旋钮同形态（API＋UI 双达）；前端 vitest 2464 绿、i18n 一致性
+  41 绿、vue-tsc 0 错。
