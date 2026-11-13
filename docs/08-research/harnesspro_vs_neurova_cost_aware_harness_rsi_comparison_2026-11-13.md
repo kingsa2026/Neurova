@@ -679,3 +679,38 @@ lite|standard|heavy`，standard=内置默认逐字不变）；管理端只读展
   不是「省字先于对错」；HarnessPro 的性能地板（PR ≥ PR(h₀)）与本仓留出非退化门
   同义，已具备。
 - **不照搬 POSIX-only 钩子/无沙箱执行器/单 rollout 采纳**（§5.3 维持）。
+
+### 10.4 落地回执（2026-11-13 第二批：R1–R10 执行完毕）
+
+> 用户点单「按照文档 10.2 部分 R1 到 R10 执行提升」后的落地记录。提交：
+> `cbcd458c4`（R1）/ `5a5ed972a`（R2+R7）/ `42266a095`（R3+R6）/ `cd9b131b6`（R4）/
+> `45e0a3fb0`（R5）/ `2758df499`（R8+R9）/ `456965495`（R2 加固）。
+
+| 项 | 状态 | 落地形态与落点 |
+|---|---|---|
+| R1 成本升选择键 | **已落** | 近平分成本 tiebreak（增益达线且与最高分近平分的候选集选文本最短者；盲选让位、等长保持先到）；成本硬门 `cost_hard_gate_enabled/ratio`（默认关）；`cost_tiebreak` 读数出街（`eval/runner.py`、config） |
+| R2 可执行测试实证 | **部分**（诚实边界） | 新增 `json_path`/`json_keys`/`differs_from_baseline`/`same_as_baseline` 断言 op；合成器 LLM 响应形态归一（mock/provider 对象路径取 content）。**真模型实证 SKIP**：本机 provider 走 mock 面（无真实凭据），合成诚实返回空套件——待有凭据环境复跑 |
+| R3 按任务动态档位 | **已落（灰度）** | `agent/turn_profile.py`：turn 级 ContextVar 档位通道＋rubric 分类器（置信度<0.6 回退 standard、LLM 失败 fail-open）；`NEUROVA_TASK_PROFILE=1` 灰度开（默认关） |
+| R4 轨迹联合诊断 | **已落** | `eval/failure_analysis.py`：失败证据按归一化模式聚合（次数/占比/最差分/例证/环节证据并集）→ `diagnosisDigest` 渲染「联合诊断」段进变异器；runner 按签名内省传参，旧签名契约不漂移 |
+| R5 递归多轮演化 | **已落（service 级）** | `SkillEvolutionService.evolveRecursive`：上轮胜者作下轮基线，逐轮 rejected/reason/holdout/成本态/提案 id 轨迹，早停＋总改善；API 面未接（另批） |
+| R6 档位派发 | **部分** | per-agent 档位存储（`security/agent_profile_settings.py`）＋governance GET/PUT `/governance/agent-exec-profiles[/{id}]`（仅管理员）＋轮次解析接线（显式 metadata > agent 存储 > 分类器 > 部署 env）；**前端 UI 未做** |
+| R7 套件覆盖面扩展 | **已落** | `EXEC_SUITE_ARTIFACT_TYPES = (skill, template, tool_description)`；service 装配单点 `_execSuiteApplies`；预算上界同步 |
+| R8 按用户成本 | **已落** | `usage_history.per_user_cost_totals`（按用户×模型聚合，`estimate_cost_for` 定价目录单点，未知模型 0 不伪造） |
+| R9 观测面出街 | **已落（后端）** | `GET /analytics/cost-readout`：进程级快照＋按用户成本榜；run 审计文件本就含 `cost_summary/exec_suite` 全量 |
+| R10 推送 | **本批执行** | fetch 远端确认未前移后推送（merge 不 rebase） |
+
+**验证**：每项均先红后绿（test_costSelection 7 / test_execSuite 21 / test_taskProfile 21 /
+test_governance_agent_profiles 5 / test_failure_analysis 10 / test_evolveRecursive 4 /
+test_usage_cost_readout 6）；回归 `tests/unit/evolution` 408、agent 1713（+2 tkg 预存）、
+治理/analytics/usage 定向 62、跨面终局 1931 全绿。
+
+**过程发现（如实记）**：① `.gitignore` 既有临时脚本规则族（`diag*/check*/verify*/patch*` 等）
+会命中正经源码模块——新模块命名需避开（diagnosis→failure_analysis 两次改名）；② R7 覆盖面
+扩展后，service.evolve 对 template 等工件也会发起套件合成，离线测试目录经 conftest 增补
+`_call_llm` 离线钉子（注入路径不受影响）后恢复全绿；③ 本机 provider 无真实凭据走 mock 面，
+`result["response"]` 为 LLMResponse 对象——合成器出口已归一，`SyntheticDatasetBuilder`/
+`SimulatedAgent` 的同形假设是**既有问题**（登记，未在本批扩大处置面）。
+
+**复评分数维持 §10.1 的 8.2**（R1–R10 是把 §10.1 复评时的缺口落进代码；进一步的分数上移
+取决于：真模型实证（R2）、按任务分类器的实装灰度（R3）、管理端 UI（R6）与递归多轮的
+API/运营接线（R5）——这些是下一批的事，不在本文自行改分。
