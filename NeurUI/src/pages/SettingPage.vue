@@ -332,6 +332,42 @@
           </template>
         </GlassCard>
 
+        <!-- 任务级档位分类（R3：每次任务一次小模型调用选档；默认关） -->
+        <GlassCard :title="t('settings.taskProfileTitle')">
+          <p class="governance-hint">{{ t('settings.taskProfileHint') }}</p>
+          <a-form layout="vertical">
+            <a-form-item :label="t('settings.taskProfileEnabledLabel')">
+              <a-switch v-model:checked="taskProfile.classification_enabled" />
+              <p class="governance-hint">{{ t('settings.taskProfileEnabledHint') }}</p>
+            </a-form-item>
+          </a-form>
+          <template #footer>
+            <GlassButton variant="primary" size="sm" :loading="savingTaskProfile" @click="saveTaskProfile">{{ t('common.save') }}</GlassButton>
+          </template>
+        </GlassCard>
+
+        <!-- per-agent 档位派发（R6：未设置的 Agent 跟随部署档位） -->
+        <GlassCard :title="t('settings.agentProfilesTitle')">
+          <p class="governance-hint">{{ t('settings.agentProfilesHint') }}</p>
+          <p v-if="!agentProfileRows.length" class="governance-hint">{{ t('settings.agentProfilesEmpty') }}</p>
+          <a-form v-else layout="vertical">
+            <div v-for="row in agentProfileRows" :key="row.agent_id" class="limit-row">
+              <a-form-item :label="row.name ? `${row.name} (${row.agent_id})` : row.agent_id">
+                <a-select
+                  :value="row.profile"
+                  :placeholder="t('settings.agentProfilesUnset')"
+                  style="width: 100%"
+                  @update:value="setAgentProfile(row, $event)"
+                >
+                  <a-select-option value="lite">lite</a-select-option>
+                  <a-select-option value="standard">standard</a-select-option>
+                  <a-select-option value="heavy">heavy</a-select-option>
+                </a-select>
+              </a-form-item>
+            </div>
+          </a-form>
+        </GlassCard>
+
         <!-- 进化治理（RSI 部署阶段 + 对话规则提取 LLM 成本门控） -->
         <GlassCard :title="t('settings.governanceTitle')">
           <p class="governance-hint">{{ t('settings.governanceHint') }}</p>
@@ -372,7 +408,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getSettings, updateSettings, clearCache as clearCacheApi, getGovernanceSettings, updateGovernanceSettings, getAgentLimits, updateAgentLimits, getToolOffloadSettings, updateToolOffloadSettings, getLlmRetrySettings, updateLlmRetrySettings } from '@/api/modules/settings'
+import { getSettings, updateSettings, clearCache as clearCacheApi, getGovernanceSettings, updateGovernanceSettings, getAgentLimits, updateAgentLimits, getToolOffloadSettings, updateToolOffloadSettings, getLlmRetrySettings, updateLlmRetrySettings, getTaskProfileSettings, updateTaskProfileSettings, getAgentExecProfiles, updateAgentExecProfile } from '@/api/modules/settings'
+import type { AgentExecProfile } from '@/api/modules/settings'
+import api from '@/api'
 import type { AgentLimits, AgentLimitDomains, AgentLimitDomain } from '@/api/modules/settings'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
@@ -625,6 +663,93 @@ const saveToolOffload = async () => {
   }
 }
 
+/** 任务级档位分类器开关（R3：env 灰度直开仍优先于本设置项） */
+const taskProfile = ref({ classification_enabled: false })
+const savingTaskProfile = ref(false)
+const taskProfileLoaded = ref(false)
+
+const fetchTaskProfile = async () => {
+  try {
+    const res = await getTaskProfileSettings()
+    const data = (res as any)?.data?.data ?? (res as any)?.data
+    if (data) {
+      taskProfile.value = { ...taskProfile.value, ...data }
+      taskProfileLoaded.value = true
+    }
+  } catch (err) {
+    console.error('[Settings] fetchTaskProfile failed:', err)
+    taskProfileLoaded.value = false
+  }
+}
+
+const saveTaskProfile = async () => {
+  if (!taskProfileLoaded.value) {
+    message.warning(t('settings.notLoadedSaveBlocked'))
+    return
+  }
+  savingTaskProfile.value = true
+  try {
+    await updateTaskProfileSettings({ classification_enabled: taskProfile.value.classification_enabled })
+    message.success(t('common.success'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
+  } finally {
+    savingTaskProfile.value = false
+  }
+}
+
+/** per-agent 档位派发（R6）：未设置的 Agent 跟随部署档位（空串占位） */
+interface AgentProfileRow {
+  agent_id: string
+  name: string
+  profile: AgentExecProfile | ''
+}
+
+const agentProfileRows = ref<AgentProfileRow[]>([])
+const agentProfilesLoaded = ref(false)
+
+const fetchAgentProfiles = async () => {
+  try {
+    const [profilesRes, agentsRes] = await Promise.all([
+      getAgentExecProfiles(),
+      api.get('/agents'),
+    ])
+    const profiles = (profilesRes as any)?.data?.data ?? {}
+    const agentsPayload = (agentsRes as any)?.data ?? (agentsRes as any)
+    const agents = Array.isArray(agentsPayload)
+      ? agentsPayload
+      : agentsPayload?.items ?? agentsPayload?.agents ?? []
+    agentProfileRows.value = agents
+      .map((a: any) => {
+        const agentId = String(a?.agent_id ?? a?.id ?? '').trim()
+        const name = String(a?.name ?? '').trim()
+        const profile = profiles[agentId]
+        return {
+          agent_id: agentId,
+          name,
+          profile: (profile === 'lite' || profile === 'standard' || profile === 'heavy')
+            ? (profile as AgentExecProfile)
+            : '',
+        }
+      })
+      .filter((r: AgentProfileRow) => r.agent_id)
+    agentProfilesLoaded.value = true
+  } catch (err) {
+    console.error('[Settings] fetchAgentProfiles failed:', err)
+    agentProfilesLoaded.value = false
+  }
+}
+
+const setAgentProfile = async (row: AgentProfileRow, profile: AgentExecProfile) => {
+  try {
+    await updateAgentExecProfile(row.agent_id, profile)
+    row.profile = profile
+    message.success(t('common.success'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
+  }
+}
+
 const fetchGovernance = async () => {
   try {
     const res = await getGovernanceSettings()
@@ -809,6 +934,8 @@ onMounted(() => {
   fetchAgentLimits()
   fetchToolOffload()
   fetchLlmRetry()
+  fetchTaskProfile()
+  fetchAgentProfiles()
 })
 </script>
 

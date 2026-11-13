@@ -71,3 +71,32 @@ def test_put_rejects_blank_agent_id(client):
 def test_requires_admin(client):
     r = client.get("/api/v1/governance/agent-exec-profiles")
     assert r.status_code in (401, 403)
+
+
+# ── R3 任务级档位分类器开关（设置项化）────────────────────────────
+
+def test_task_profile_default_off_and_put_roundtrip(client, tmp_path, monkeypatch):
+    _as_admin(client)
+    monkeypatch.setenv("NEUROVA_TASK_PROFILE_SETTINGS", str(tmp_path / "tp.json"))
+    monkeypatch.delenv("NEUROVA_TASK_PROFILE", raising=False)
+    r = client.get("/api/v1/governance/task-profile")
+    assert r.status_code == 200
+    assert r.json()["data"]["classification_enabled"] is False
+    r = client.put("/api/v1/governance/task-profile",
+                   json={"classification_enabled": True})
+    assert r.status_code == 200
+    assert r.json()["data"]["classification_enabled"] is True
+    r = client.get("/api/v1/governance/task-profile")
+    assert r.json()["data"]["classification_enabled"] is True
+
+
+def test_task_profile_rejects_extra_keys(client):
+    _as_admin(client)
+    r = client.put("/api/v1/governance/task-profile",
+                   json={"classification_enabled": True, "hacker": 1})
+    assert r.status_code == 422
+
+
+def test_task_profile_requires_admin(client):
+    r = client.get("/api/v1/governance/task-profile")
+    assert r.status_code in (401, 403)
