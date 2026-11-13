@@ -63,9 +63,15 @@ def _labelPropagation(nodes: List[str], edges: List[tuple]) -> List[List[str]]:
         weights[(a, b)] = weights.get((a, b), 0) + 1
         weights[(b, a)] = weights.get((b, a), 0) + 1
     labels: Dict[str, str] = {n: n for n in nodes}
-    for _round in range(len(nodes) + 1):
+    # 边端点可能没有主体行（客体词不建 subject）——必须入册，否则
+    # tally[labels[b]] 直接 KeyError（实测：A1→B1 弱边即触发）
+    for a, b in weights:
+        for end in (a, b):
+            if end not in labels:
+                labels[end] = end
+    for _round in range(len(labels) + 1):
         changed = False
-        for node in nodes:
+        for node in labels:
             tally: Counter = Counter()
             for (a, b), w in weights.items():
                 if a == node:
@@ -81,7 +87,7 @@ def _labelPropagation(nodes: List[str], edges: List[tuple]) -> List[List[str]]:
         if not changed:
             break
     groups: Dict[str, List[str]] = {}
-    for node in nodes:
+    for node in labels:
         groups.setdefault(labels[node], []).append(node)
     return sorted([sorted(g) for g in groups.values()], key=lambda g: -len(g))
 

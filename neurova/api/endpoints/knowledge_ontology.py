@@ -1076,6 +1076,22 @@ async def search_ontology_community(
     return {"code": 0, "data": hits, "request_id": ""}
 
 
+@router.post("/ontology/communities/detect")
+async def detect_ontology_communities(
+    current_user: Dict = Depends(require_admin()),
+):
+    """W8：社区检测手动触发（管理员）——标签传播＋持久化，返回社区行清单。
+
+    检测缺省 off（读数面只出不进），本端点是唯一手动入口；摄取后增量另计。
+    """
+    from neurova.knowledge.community_graph import CommunityGraphBuilder
+
+    store, _registry, _engine = _ontologyParts()
+    rows = CommunityGraphBuilder(store, agentId=str(current_user.get("agent_id") or "default"),
+                                 tenantId=_tenantOf(current_user)).detect()
+    return {"code": 0, "data": rows, "request_id": ""}
+
+
 @router.get("/ontology/communities")
 async def list_ontology_communities(
     current_user: Dict = Depends(get_current_user_or_service),
