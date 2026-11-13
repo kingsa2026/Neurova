@@ -371,18 +371,9 @@ class WeChatMediaMixin:
             except Exception as e:
                 logger.error("httpx下载异常: %s", e)
                 return None
-        elif REQUESTS_AVAILABLE:
-            try:
-                response = requests.get(url, timeout=timeout)
-                if response.status_code == 200:
-                    return response.content
-                else:
-                    logger.error("下载失败 HTTP %s: %s", response.status_code, url)
-                    return None
-            except Exception as e:
-                logger.error("requests下载异常: %s", e)
-                return None
         else:
+            # P3-14：requests 同步回退已删——httpx 是硬依赖，回退分支在 async
+            # 上下文里同步阻塞事件循环；httpx 不可用属装配故障，如实报错。
             logger.error("无可用的HTTP客户端")
             return None
 

@@ -237,7 +237,7 @@
                     <span class="nr-hint">{{ t('model.headerHint') }}</span>
                     <span class="nr-link-btn" @click="addCustomHeader">{{ t('model.addHeader') }}</span>
                   </div>
-                  <div v-for="(h, i) in configForm.headers" :key="i" class="nr-header-row">
+                  <div v-for="(h, i) in configForm.headers" :key="h.rowId" class="nr-header-row">
                     <input v-model="h.key" class="nr-input" :placeholder="t('model.headerName')" />
                     <input v-model="h.value" class="nr-input" :placeholder="t('model.headerValuePlaceholder')" />
                     <button class="nr-remove-btn" @click="configForm.headers.splice(i, 1)">&times;</button>
@@ -624,11 +624,16 @@ const addForm = reactive({ name: '', provider_type: 'openai', base_url: '', api_
 // Configure provider modal
 const showConfigure = ref(false)
 const configureTarget = ref<Provider | null>(null)
+// 自定义头行携带行内稳定 rowId（P3-16）：v-for :key 不再用数组下标，
+// 中途删行/重排时输入框状态不会串行
+let headerRowSeq = 0
+type CustomHeaderRow = { rowId: number; key: string; value: string }
+const nextHeaderRowId = (): number => ++headerRowSeq
 const configForm = reactive({
   base_url: '',
   api_key: '',
   auth_method: 'api_key' as 'api_key' | 'bearer',
-  headers: [] as { key: string; value: string }[],
+  headers: [] as CustomHeaderRow[],
   genParamsJson: '{}',
 })
 
@@ -1251,7 +1256,7 @@ function openConfigure(p: Provider) {
   configForm.api_key = p.api_key || ''
   configForm.auth_method = p.auth_method || (p.protocol === 'anthropic' ? 'api_key' : 'bearer')
   configForm.headers = p.headers
-    ? Object.entries(p.headers).map(([key, value]) => ({ key, value }))
+    ? Object.entries(p.headers).map(([key, value]) => ({ rowId: nextHeaderRowId(), key, value }))
     : []
   configForm.genParamsJson = p.config ? JSON.stringify(p.config, null, 2) : '{}'
   advancedOpen.value = false
@@ -1259,7 +1264,7 @@ function openConfigure(p: Provider) {
 }
 
 function addCustomHeader() {
-  configForm.headers.push({ key: '', value: '' })
+  configForm.headers.push({ rowId: nextHeaderRowId(), key: '', value: '' })
 }
 
 async function testProviderConnection() {

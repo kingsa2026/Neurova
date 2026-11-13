@@ -623,11 +623,12 @@ async def ontology_state(
     tenant = _tenantOf(user)
     store = _store()
     normalized = normalizeLabel(subject_label)
-    row = store._conn.execute(
-        "SELECT subject_key, type_term_id FROM knowledge_subjects"
-        " WHERE agent_id = ? AND tenant_id = ? AND normalized_label = ?"
-        " AND status = 'active'",
-        (agentId, tenant, normalized)).fetchone()
+    with store._lock:  # P3-3：裸读 _conn 须持 store 锁（同文件读法统一纪律）
+        row = store._conn.execute(
+            "SELECT subject_key, type_term_id FROM knowledge_subjects"
+            " WHERE agent_id = ? AND tenant_id = ? AND normalized_label = ?"
+            " AND status = 'active'",
+            (agentId, tenant, normalized)).fetchone()
     if row is None:
         return {"rejected": True, "detail": "主体未登记: %s" % subject_label}
     subjectKey = str(row["subject_key"])
@@ -704,10 +705,11 @@ async def ontology_derive(
     # 主体定位：身份归一（大小写/空白不敏感）→ subject_key
     normalized = normalizeLabel(subject_label)
     subjectKey = ""
-    row = store._conn.execute(
-        "SELECT subject_key FROM knowledge_subjects"
-        " WHERE agent_id = ? AND tenant_id = ? AND normalized_label = ?",
-        (agentId, tenant, normalized)).fetchone()
+    with store._lock:  # P3-3：裸读 _conn 须持 store 锁
+        row = store._conn.execute(
+            "SELECT subject_key FROM knowledge_subjects"
+            " WHERE agent_id = ? AND tenant_id = ? AND normalized_label = ?",
+            (agentId, tenant, normalized)).fetchone()
     if row is not None:
         subjectKey = str(row["subject_key"])
 
@@ -717,12 +719,13 @@ async def ontology_derive(
 
     conclusions: List[Dict[str, Any]] = []
     if subjectKey:
-        factRows = store._conn.execute(
-            "SELECT fact_id, subject_key, predicate_term_id, object_term"
-            " FROM knowledge_facts WHERE tenant_id = ? AND agent_id = ?"
-            " AND subject_key = ? AND status = 'active' AND record_kind = 'triple'"
-            " ORDER BY predicate_term_id",
-            (tenant, agentId, subjectKey)).fetchall()
+        with store._lock:  # P3-3：裸读 _conn 须持 store 锁
+            factRows = store._conn.execute(
+                "SELECT fact_id, subject_key, predicate_term_id, object_term"
+                " FROM knowledge_facts WHERE tenant_id = ? AND agent_id = ?"
+                " AND subject_key = ? AND status = 'active' AND record_kind = 'triple'"
+                " ORDER BY predicate_term_id",
+                (tenant, agentId, subjectKey)).fetchall()
         for factRow in factRows:
             factId = str(factRow["fact_id"])
             premises = ledger.premisesOf(factId)
