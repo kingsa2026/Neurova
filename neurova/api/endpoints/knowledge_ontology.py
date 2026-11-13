@@ -768,7 +768,35 @@ async def run_ontology_abduce(
     return {"code": 0, "data": result, "request_id": ""}
 
 
-@router.get("/ontology/communities")
+@router.post("/ontology/community-search")
+async def search_ontology_community(
+    body: Dict[str, Any],
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """W8：社区检索（登录可读）——global/drift 两种模式。"""
+    from neurova.knowledge.community_graph import (
+        communityDriftSearch,
+        communityGlobalSearch,
+    )
+
+    store, _registry, _engine = _ontologyParts()
+    agentId = str(current_user.get("agent_id") or "default")
+    tenant = _tenantOf(current_user)
+    query = str(body.get("query") or "")
+    mode = str(body.get("mode") or "global")
+    limit = int(body.get("limit") or 5)
+    if mode == "global":
+        hits = communityGlobalSearch(store, query, agentId=agentId,
+                                     tenantId=tenant, limit=limit)
+    elif mode == "drift":
+        hits = communityDriftSearch(store, query, agentId=agentId,
+                                    tenantId=tenant, limit=limit)
+    else:
+        raise HTTPException(status_code=400, detail="mode 只支持 global|drift")
+    return {"code": 0, "data": hits, "request_id": ""}
+
+
+@router.get("/ontology/communities")@router.get("/ontology/communities")
 async def list_ontology_communities(
     current_user: Dict = Depends(get_current_user_or_service),
 ):
