@@ -630,7 +630,13 @@ class ChatPipeline:
 
         返回的会话 id 与本轮「已落盘」标记要回写进 ctx：回合末那一次写据此只补
         assistant，同一条用户消息才不会落两遍。
+
+        P1-6c：/replay 重放时用户消息**已在盘上**——跳过提前落盘（同一条
+        用户消息不落两遍），回合末只补 assistant。
         """
+        if isinstance(ctx.metadata, dict) and ctx.metadata.get("replay"):
+            ctx.user_message_persisted = True
+            return
         persisted = failed_turn_landing.persistUserMessageEarly(
             ctx, getattr(self._agent, "memory_agent", None)
         )
@@ -912,6 +918,7 @@ class ChatPipeline:
 
     async def _step_pre_llm_checks(self, ctx: ChatContext):
         """命令分发（B4）、/compact 压缩命令、/review 评审命令、ToolMemory 检查、技能获取、NL 合成、可行动性门控、认知安全门"""
+        await self._check_replay_command(ctx)
         await self._check_user_prompt_hooks(ctx)
         await self._check_compact_command(ctx)
         await self._check_review_command(ctx)
@@ -921,6 +928,65 @@ class ChatPipeline:
         await self._check_nl_synthesis(ctx)
         await self._check_actionability(ctx)
         await self._check_cognitive_security(ctx)
+
+    async def _check_replay_command(self, ctx: ChatContext):
+        """/replay（P1-6 尾巴）：重放崩溃悬空轮。
+
+        崩溃窗口 = 本轮用户消息已落盘 + 注入账本已留痕，但 assistant 回复
+        未落盘。/replay 找到该悬空轮后把 ctx.user_input 改写为悬空输入、
+        metadata.replay_pinned_view 带上账本里的字节级视图——后续
+        build_context 直接使用钉住视图（不重新推导信封），模型看到的上下文
+        与崩溃前一致；回复照常落盘，悬空轮就此闭合。
+
+        无悬空轮 / 账本无匹配视图 → command_dispatched 短路并诚实说明。
+        """
+        text = (ctx.user_input or "").strip().lower()
+        if text not in ("/replay", "/重放"):
+            return
+        try:
+            recent = self.session_manager.get_recent_context(
+                agent_id=self.config.agent_id,
+                session_id=ctx.session_id,
+                max_messages=None,
+            ) or []
+            lastUserIdx = None
+            for i in range(len(recent) - 1, -1, -1):
+                if recent[i].get("role") == "user":
+                    lastUserIdx = i
+                    break
+            if lastUserIdx is None:
+                raise ValueError("会话中没有用户消息")
+            tail = recent[lastUserIdx + 1:]
+            danglingInput = str(recent[lastUserIdx].get("content") or "")
+            if not danglingInput or any(m.get("role") == "assistant" for m in tail):
+                raise ValueError("没有待重放的悬空轮（末条 user 消息已有回复）")
+            from neurova.context.injection_ledger import matchRestoredView, readInjections
+
+            verify = matchRestoredView(ctx.session_id, danglingInput)
+            if not verify.get("restore_match"):
+                raise ValueError(
+                    f"注入账本中没有与该悬空轮匹配的视图（restore_match={verify.get('restore_match')}）"
+                )
+            rows = readInjections(ctx.session_id)
+            ctx.user_input = danglingInput
+            ctx.metadata = dict(ctx.metadata or {})
+            ctx.metadata["replay"] = True
+            ctx.metadata["replay_pinned_view"] = rows[-1].get("content")
+            logger.info(
+                "/replay：重放会话 %s 的悬空轮（账本 seq=%s，%s 字符）",
+                ctx.session_id, verify.get("restore_seq"), len(danglingInput),
+            )
+        except Exception as e:
+            # 诚实短路：无可重放内容时不走 LLM
+            ctx.reply = f"↩️ /replay 无法执行：{e}"
+            ctx.metadata = dict(ctx.metadata or {})
+            ctx.metadata["command_dispatched"] = True
+            if callable(getattr(ctx, "event_emitter", None)):
+                try:
+                    ctx.event_emitter("content", ctx.reply)
+                except Exception:  # noqa: BLE001 - 发射失败不影响短路
+                    logger.debug("/replay 回复发射失败", exc_info=True)
+            logger.info("/replay 短路: %s", e)
 
     def _mergeHookGuidance(self, ctx: ChatContext, retrievalGuidance: str) -> str:
         """P2-10：UserPromptSubmit 钩子的 additionalContext 并入受控指引通道。
@@ -1929,6 +1995,12 @@ class ChatPipeline:
             chat_channel=_scopeCtx["channel"],
             chat_group_id=_scopeCtx["chat_id"],
             retrieval_guidance=retrievalGuidance,
+            # P1-6c：/replay 重放悬空轮时钉住账本字节级视图（不重新推导信封）
+            pinned_view=(
+                ctx.metadata.get("replay_pinned_view")
+                if isinstance(ctx.metadata, dict) and ctx.metadata.get("replay")
+                else None
+            ),
         )
 
         # Private guidance is turn-local, never archived into the shared experience pool.
