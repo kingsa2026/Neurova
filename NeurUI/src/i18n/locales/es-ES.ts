@@ -2736,6 +2736,8 @@ conflictTimeReadout: 'Lectura temporal: {basis} (antigua {old} → nueva {new})'
     evalExperimentsLineageParetoHint: 'La evolución recursiva avanza todos los candidatos no dominados a la siguiente ronda (linajes paralelos) en lugar de un solo ganador.',
     evalExperimentsRollouts: 'Número de muestras de diagnóstico',
     evalExperimentsRolloutsHint: 'La recolección de fallos muestrea cada caso G veces: fallo total = defecto estable, fallo parcial = ruido intermitente. 1 = muestra única (anterior).',
+    evalExperimentsRepairRounds: 'Rondas de reparación near-miss',
+    evalExperimentsRepairRoundsHint: 'Los candidatos rechazados por las puertas de validación pese a mejorar en desarrollo entran en un bucle de reparación acotado con diagnóstico; 0 = desactivado (se descartan).',
     retrievalRecipeTitle: 'Receta de recuperación',
     retrievalRecipeHint: 'Conjuntos de parámetros con nombre para la recuperación de conocimiento (peso del grafo, método de rerank, pool de candidatos, peso de recencia); se aplican a nuevas rondas de recuperación.',
     retrievalRecipeLabel: 'Receta activa',

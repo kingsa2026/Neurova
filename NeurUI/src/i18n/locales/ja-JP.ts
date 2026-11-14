@@ -2736,6 +2736,8 @@ conflictTimeReadout: '時刻の読み取り: {basis}（旧 {old} → 新 {new}�
     evalExperimentsLineageParetoHint: '再帰進化で単一の勝者ではなく、非劣候補を次ラウンドへ進めます（並行譜系）。',
     evalExperimentsRollouts: '診断サンプル数',
     evalExperimentsRolloutsHint: '失敗収集時に各ケースを G 回サンプリング：全失敗は安定した欠陥、一部失敗は偶発ノイズと記録。1 = 従来の単発。',
+    evalExperimentsRepairRounds: 'ニアミス修復ラウンド数',
+    evalExperimentsRepairRoundsHint: '検証ゲートで却下されたが開発利得のある候選を、失敗診断付きの有界修復ラウンドへ再投入します。0 = 無効（却下候選は破棄）。',
     retrievalRecipeTitle: '検索レシピ',
     retrievalRecipeHint: '知識検索の名前付きパラメータ組（グラフ重み・リランク方式・候選プール・新しさ重み）。変更は新しい検索ラウンドに適用されます。',
     retrievalRecipeLabel: '現在のレシピ',

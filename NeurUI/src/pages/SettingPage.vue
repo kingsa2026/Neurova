@@ -366,7 +366,7 @@
           </template>
         </GlassCard>
 
-        <!-- 实验性评测机制开关（N1–N3：默认全关，开启后作用于新一轮进化运行） -->
+        <!-- 实验性评测机制开关（N1–N3+V1：默认全关，开启后作用于新一轮进化运行） -->
         <GlassCard :title="t('settings.evalExperimentsTitle')">
           <p class="governance-hint">{{ t('settings.evalExperimentsHint') }}</p>
           <a-form layout="vertical">
@@ -387,6 +387,16 @@
                 style="width: 100%"
               />
               <p class="governance-hint">{{ t('settings.evalExperimentsRolloutsHint') }}</p>
+            </a-form-item>
+            <a-form-item :label="t('settings.evalExperimentsRepairRounds')">
+              <a-input-number
+                v-model:value="evalExperiments.repair_rounds"
+                :min="0"
+                :max="5"
+                :step="1"
+                style="width: 100%"
+              />
+              <p class="governance-hint">{{ t('settings.evalExperimentsRepairRoundsHint') }}</p>
             </a-form-item>
           </a-form>
           <template #footer>
@@ -819,11 +829,12 @@ const saveEvalCoreset = async () => {
   }
 }
 
-/** 实验性评测机制开关（N1–N3）：默认全关，作用于新一轮进化运行 */
+/** 实验性评测机制开关（N1–N3+V1）：默认全关，作用于新一轮进化运行 */
 const evalExperiments = ref({
   profile_variants_enabled: false,
   lineage_pareto_enabled: false,
   diagnosis_rollouts: 1,
+  repair_rounds: 0,
 })
 const savingEvalExperiments = ref(false)
 const evalExperimentsLoaded = ref(false)

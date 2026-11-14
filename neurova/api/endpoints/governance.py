@@ -938,7 +938,7 @@ async def update_eval_coreset_settings(body: EvalCoresetUpdate,
     return {"code": 0, "data": load_settings()}
 
 
-# ── 实验性评测机制开关（N1–N3 治理面，2026-11-13）────────────────────
+# ── 实验性评测机制开关（N1–N3 + V1 治理面，2026-11-13/14）────────────────────
 
 
 @router.get("/eval-experiments")
@@ -947,11 +947,12 @@ async def get_eval_experiment_settings(admin=Depends(_governance_admin_dep)):
     from neurova.security.eval_experiment_settings import load_settings
 
     return {"code": 0, "data": load_settings(),
-            "domains": {"diagnosis_rollouts_min": 1, "diagnosis_rollouts_max": 5}}
+            "domains": {"diagnosis_rollouts_min": 1, "diagnosis_rollouts_max": 5,
+                        "repair_rounds_min": 0, "repair_rounds_max": 5}}
 
 
 class EvalExperimentsUpdate(BaseModel):
-    """实验性评测机制更新载荷：三键均可选（None=本次不改），未知键当场拒。"""
+    """实验性评测机制更新载荷：各键均可选（None=本次不改），未知键当场拒。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -959,6 +960,8 @@ class EvalExperimentsUpdate(BaseModel):
     lineage_pareto_enabled: Optional[bool] = None
     diagnosis_rollouts: Optional[int] = Field(
         None, ge=1, le=5)
+    # V1 near-miss 有界修复轮数（0=关闭，拒绝即弃置）
+    repair_rounds: Optional[int] = Field(None, ge=0, le=5)
 
 
 @router.put("/eval-experiments")

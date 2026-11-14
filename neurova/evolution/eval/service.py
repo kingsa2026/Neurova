@@ -430,6 +430,18 @@ def planRealArmTurns(dataset: EvalDataset, config: EvolutionConfig,
     # 本轮会生成套件时计入（默认 False＝既有调用方的逐字旧行为）。
     if include_exec_suite and config.exec_suite_enabled and int(config.exec_suite_size) > 0:
         breakdown["execSuite"] = 2 * int(config.exec_suite_size)
+    # V1 near-miss 修复轮（VideoEvolve 对照 2026-11-14）：每轮修复最多追加
+    # 一次 tune 评测 + 一次留出终审。生效额度 = max(配置, 治理设置)——与
+    # runner 修复环同一把尺，计划上界才不漏算修复轮的花费。
+    try:
+        from neurova.security.eval_experiment_settings import effective_repair_rounds
+
+        repairRounds = effective_repair_rounds(
+            int(getattr(config, "repair_rounds", 0) or 0))
+    except Exception:  # noqa: BLE001 - 设置面故障回退代码级配置
+        repairRounds = max(0, int(getattr(config, "repair_rounds", 0) or 0))
+    if repairRounds > 0:
+        breakdown["repairRounds"] = repairRounds * (len(tune) + len(holdout))
     return _planOf(breakdown)
 
 
@@ -981,6 +993,7 @@ class SkillEvolutionService:
         epochs: int = 2,
         iterations: Optional[int] = None,
         pool_size: int = 1,
+        branch_retries: int = 0,
         artifact_type: str = "template",
         agent: Any = None,
         config: Optional[EvolutionConfig] = None,
@@ -990,17 +1003,26 @@ class SkillEvolutionService:
         extra_failures: Optional[list] = None,
         domain_harnesses: Optional[list] = None,
     ) -> Dict[str, Any]:
-        """R5 递归多轮演化（§10.2，2026-11-13）：上轮胜者作下轮基线。
+        """R5 递归多轮演化（§10.2，2026-11-13）＋ V2 分支一等化（2026-11-14）。
 
         与单轮 `evolve` 的关系：单轮是本方法的每个 epoch（同一评测集固定，
         与 HarnessPro 的「合成测试一次生成、全程固定」同纪律）；本方法负责
         **跨轮递归**——上轮过门胜者成为下轮基线，逐轮把 rejected/reason/
         holdout 前后/改善/成本态/提案 id 记进轨迹，遇拒绝或无改善早停。
 
+        V2 分支引导进化（VideoEvolve 对照）：池内基线升级为**保留分支**一等
+        对象（branch_pool.BranchPool）——晋升（后代成为新 champion）或重试
+        额度耗尽即退役；`branch_retries>0` 时颗粒无收的分支保留到下轮继续
+        精炼（「别急着砍第二名」）。`branch_retries=0`（默认）＝颗粒无收即弃，
+        与既有递归行为一致；保留分支与孩子共享 pool_size 容量（孩子优先），
+        每轮评测数不因保留而放大。
+
         诚实边界：每 epoch 的评测预算 = 单轮预算（真臂按 planRealArmTurns
-        计），总预算 ≈ 单轮 × epochs——调用方（API/运营）须按总预算把关；
-        提案仍全部走 pending＋人工批准，本方法不自动应用任何正文。
+        计），总预算 ≈ 单轮 × epochs × pool_size——调用方（API/运营）须按总
+        预算把关；提案仍全部走 pending＋人工批准，本方法不自动应用任何正文。
         """
+        from neurova.evolution.eval.branch_pool import BranchPool
+
         current = skill_text
         trajectory: list = []
         epoch_pool: list = []
@@ -1008,19 +1030,21 @@ class SkillEvolutionService:
         stopped_reason = ""
         first_before: Optional[float] = None
         best_after: Optional[float] = None
-        pool: list = [skill_text]
+        pool = BranchPool(retry_budget=max(0, int(branch_retries)))
+        seedBranch = pool.seed(skill_text)
         seen_pool = {skill_text}
         last_reject = ""
         epoch = 0
-        # N2 候选集并行递归：pool_size>1 时，每轮对池内**每个基**各跑一次进化，
-        # 非劣幸存者（含多变体轮透出的非劣变体）进下轮池——多谱系并行推进。
-        # pool_size=1（默认）＝既有单谱系逐字行为。
-        while epoch < max(1, int(epochs)) and pool:
+        # N2 候选集并行递归：pool_size>1 时，每轮对池内**每个分支**各跑一次进化，
+        # 非劣幸存者（含多变体轮透出的非劣变体）作为子分支进下轮池——多谱系并行。
+        # pool_size=1（默认）＝既有单谱系行为。
+        while epoch < max(1, int(epochs)) and pool.hasActive():
             epoch += 1
             epoch_bases = []
-            for base_index, base in enumerate(pool):
+            fruitless: list = []
+            for base_index, branch in enumerate(pool.active()):
                 result, proposal = await self.evolve(
-                    skill_id=skill_id, skill_text=base, dataset=dataset,
+                    skill_id=skill_id, skill_text=branch.text, dataset=dataset,
                     iterations=iterations, artifact_type=artifact_type, agent=agent,
                     config=config, judge=judge, mutate=mutate, bench_gate=bench_gate,
                     extra_failures=extra_failures, domain_harnesses=domain_harnesses,
@@ -1031,6 +1055,8 @@ class SkillEvolutionService:
                 trajectory.append({
                     "epoch": epoch,
                     "base_index": base_index,
+                    "branch_id": branch.branch_id,
+                    "parent_id": branch.parent_id,
                     "rejected": bool(result.rejected),
                     "reject_reason": result.reject_reason,
                     "holdout_before": round(result.holdout_before, 4),
@@ -1042,39 +1068,69 @@ class SkillEvolutionService:
                     "proposal_id": proposal.proposal_id if proposal else "",
                 })
                 last_reject = result.reject_reason or last_reject
-                epoch_bases.append({"base": base[:60], "result": result,
-                                    "proposal": proposal})
+                epoch_bases.append({"branch": branch, "base": branch.text[:60],
+                                    "result": result, "proposal": proposal})
             epoch_pool.append({"epoch": epoch,
-                               "bases": [b["base"] for b in epoch_bases]})
-            # 收集下轮池：各基的过门胜者＋非劣变体（N2），非劣过滤＋去重＋截断
-            candidates: list = []
+                               "bases": [b["base"] for b in epoch_bases],
+                               "branch_ids": [b["branch"].branch_id for b in epoch_bases]})
+            # 收集下轮池：各分支的过门胜者＋非劣变体（N2）作为**子分支**保留，
+            # 非劣过滤＋去重＋截断（容量与既有口径一致：pool_size 封顶）。
+            candidates: list = []  # (score, text, producer_branch_id)
             for entry in epoch_bases:
+                branch = entry["branch"]
                 result = entry["result"]
                 if result.rejected or not result.changed:
+                    fruitless.append(branch)
                     continue
                 if best_after is None or result.holdout_after > best_after:
                     best_after = result.holdout_after
                     current = result.deployed_text
                     last_proposal = entry["proposal"]
+                    # V2 晋升：该分支的后代成为新 champion——光荣退役
+                    pool.markPromoted(branch.branch_id, epoch)
                 for variant in (result.pareto_variants or []):
                     candidates.append((float(variant.get("score") or 0.0),
-                                       str(variant.get("text") or "")))
+                                       str(variant.get("text") or ""),
+                                       branch.branch_id))
                 if not (result.pareto_variants or []):
-                    candidates.append((result.holdout_after, result.deployed_text))
-            deduped: Dict[str, float] = {}
-            for score, text in candidates:
-                if text not in seen_pool:
-                    deduped[text] = max(score, deduped.get(text, score))
-            ranked = sorted(deduped.items(), key=lambda p: (-p[1], len(p[0])))
+                    candidates.append((result.holdout_after, result.deployed_text,
+                                       branch.branch_id))
+            deduped: Dict[str, tuple] = {}
+            for score, text, producer in candidates:
+                if text in seen_pool:
+                    continue
+                existing = deduped.get(text)
+                if existing is None or score > existing[0]:
+                    deduped[text] = (score, producer)
+            ranked = sorted(deduped.items(), key=lambda p: (-p[1][0], len(p[0])))
             next_pool: list = []
-            for text, score in ranked:
+            for text, (score, producer) in ranked:
                 if any(s >= score and len(t) <= len(text)
-                       and (s > score or len(t) < len(text)) for s, t in next_pool):
+                       and (s > score or len(t) < len(text)) for s, t, _p in next_pool):
                     continue  # 被池内成员支配
-                next_pool.append((score, text))
-            pool = [text for _s, text in next_pool][:max(1, int(pool_size))]
-            seen_pool.update(pool)
-            if not pool:
+                next_pool.append((score, text, producer))
+            # 子分支入池（重试额度重置）；容量封顶 pool_size
+            for score, text, producer in next_pool[:max(1, int(pool_size))]:
+                pool.retain(text=text, score=score, parent_id=producer, epoch=epoch)
+                seen_pool.add(text)
+            # V2 分支生命周期收尾：产出孩子的母分支由孩子继承谱系（晋升者已在
+            # markPromoted 退役；未晋升者就此退役）——池里不同时养「母与子」。
+            fruitlessIds = {b.branch_id for b in fruitless}
+            for entry in epoch_bases:
+                branch = entry["branch"]
+                if branch.branch_id not in fruitlessIds and branch.status == "active":
+                    pool.exhaust(branch.branch_id)
+            # V2 保留语义：颗粒无收的分支扣重试额度；额度未尽且池有空位时保留
+            # 到下轮继续精炼（孩子优先占容量，不放大每轮评测数）。
+            for branch in fruitless:
+                pool.markFailed(branch.branch_id)
+            capacity = max(1, int(pool_size))
+            childrenKept = len([b for b in pool.active() if b.epoch_created >= epoch])
+            staleActive = [b for b in pool.active() if b.epoch_created < epoch]
+            keepStale = max(0, capacity - childrenKept)
+            for branch in staleActive[keepStale:]:
+                pool.exhaust(branch.branch_id)
+            if not pool.hasActive():
                 stopped_reason = last_reject or "pool_exhausted"
                 break
         else:
@@ -1089,7 +1145,10 @@ class SkillEvolutionService:
             "epochs": trajectory,
             "epoch_pool": epoch_pool,
             "pool_size": max(1, int(pool_size)),
-            "final_pool_size": len(pool),
+            "branch_retries": max(0, int(branch_retries)),
+            "branches": pool.to_dict(),
+            "seed_branch_id": seedBranch.branch_id,
+            "final_pool_size": len(pool.active()),
             "total_improvement": total_improvement,
             "stopped_reason": stopped_reason,
             "proposal": last_proposal,
