@@ -40,7 +40,9 @@ def runChecker(root: Path, *extra: str, baseline: Path | None = None) -> subproc
         str(baseline or BASELINE),
         *extra,
     ]
-    return subprocess.run(cmd, capture_output=True, text=True, cwd=str(REPO_ROOT))
+    return subprocess.run(
+        cmd, capture_output=True, text=True, encoding="utf-8", cwd=str(REPO_ROOT)
+    )
 
 
 def writeTree(root: Path, files: dict[str, str]) -> Path:

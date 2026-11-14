@@ -34,6 +34,10 @@ DEFAULT_POLICY = Path(__file__).resolve().parent / "architecture_policy.yaml"
 DEFAULT_BASELINE = Path(__file__).resolve().parent / "architecture_baseline.json"
 DEFAULT_ROOT = "neurova"
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# standalone 脚本：把仓根挂进 sys.path，让全仓唯一的 ast 解析出口可导入
+sys.path.insert(0, str(REPO_ROOT))
+
+from tests.ast_scan import parseSource  # noqa: E402  全仓解析唯一出口（ratchet 钉住）
 
 EXIT_OK = 0
 EXIT_VIOLATIONS = 1
@@ -119,7 +123,7 @@ def scanFile(path: Path, root: Path) -> tuple[str | None, list[tuple[str, int]],
         src = parts[0]
         pkgParts = parts[:-1]
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        tree = parseSource(path.read_text(encoding="utf-8", errors="replace"), filename=str(path))
     except SyntaxError:
         return src, [], False
     edges: list[tuple[str, int]] = []
@@ -135,13 +139,18 @@ def changedFiles(repo: Path, base: str | None) -> set[str]:
     if base:
         cmd = ["git", "-C", str(repo), "diff", "--name-only", f"{base}...HEAD"]
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
+        out = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", check=True).stdout
     except (subprocess.CalledProcessError, OSError):
         return set()
     return {line.strip().replace("\\", "/") for line in out.splitlines() if line.strip()}
 
 
 def main() -> int:
+    # 非 ASCII 输出（中文判据文案）在 Windows 控制台默认 cp936 下会炸——
+    # scripts 族 stdout 钉面（ratchet 钉住）要求显式钉 UTF-8。
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="architecture policy gate")
     parser.add_argument("--policy", default=str(DEFAULT_POLICY))
     parser.add_argument("--baseline", default=str(DEFAULT_BASELINE))
