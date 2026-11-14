@@ -101,11 +101,24 @@ class LLMRouter:
         if self._initialized:
             return
 
+        # 键为复合键 `f"{scope}:{provider_id}"`（P2-10：不同 scope 的同名
+        # provider_id 不再互相顶掉；scope 缺省 "admin"＝全局表）。
         self._providers: Dict[str, Dict[str, Any]] = {}
         self._initialized = True
         logger.info("LLMRouter initialized")
 
-    def register_provider(self, provider_id: str, provider_name: str, models: List[Dict[str, Any]]):
+    @staticmethod
+    def _scopedKey(provider_id: str, scope: str) -> str:
+        """provider_id → 注册表复合键（scope 段在前，provider_id 可含冒号）。"""
+        return f"{scope or 'admin'}:{provider_id}"
+
+    def register_provider(
+        self,
+        provider_id: str,
+        provider_name: str,
+        models: List[Dict[str, Any]],
+        scope: str = "admin",
+    ):
         """
         注册提供商
 
@@ -119,32 +132,57 @@ class LLMRouter:
                 - health_status: 健康状态
                 - response_time: 响应时间
                 - weight: 权重
+            scope: 注册表作用域（P2-10）。缺省 "admin"＝全局表；用户域传
+                scope_for_owner(owner) 等域键，同名 provider_id 各域独立。
         """
-        self._providers[provider_id] = {"name": provider_name, "models": models}
-        logger.info("Provider registered: %s (%s) with %s models", provider_id, provider_name, len(models))
+        key = self._scopedKey(provider_id, scope)
+        # P2-10：_providers 读写一律持单例锁——注册/选型并发时不再
+        # 抛 "dictionary changed size during iteration"。
+        with self._instanceLock:
+            self._providers[key] = {"name": provider_name, "models": models}
+        logger.info("Provider registered: %s (%s) with %s models (scope=%s)", provider_id, provider_name, len(models), scope)
 
-    def unregister_provider(self, provider_id: str):
+    def unregister_provider(self, provider_id: str, scope: str = "admin"):
         """
         注销提供商
 
         Args:
             provider_id: 提供商ID
+            scope: 注册表作用域（P2-10，与 register_provider 同口径）。
         """
-        if provider_id in self._providers:
-            del self._providers[provider_id]
-            logger.info("Provider unregistered: %s", provider_id)
+        key = self._scopedKey(provider_id, scope)
+        with self._instanceLock:
+            if key in self._providers:
+                del self._providers[key]
+                logger.info("Provider unregistered: %s (scope=%s)", provider_id, scope)
 
-    def list_providers(self) -> List[Dict[str, Any]]:
+    def providerCount(self) -> int:
+        """当前注册条目数（线程安全读；select_model_for_request 惰性同步判定用）。"""
+        with self._instanceLock:
+            return len(self._providers)
+
+    def list_providers(self, scope: str = "admin") -> List[Dict[str, Any]]:
         """
-        列出所有提供商
+        列出提供商
+
+        Args:
+            scope: 注册表作用域（P2-10）。缺省 "admin"＝全局表（存量行为）；
+                传域键只看该域。provider_id 返回剥掉 scope 前缀的原始 ID。
 
         Returns:
             提供商列表
         """
+        prefix = f"{scope or 'admin'}:"
+        with self._instanceLock:
+            snapshot = [(k, v) for k, v in self._providers.items() if k.startswith(prefix)]
         result = []
-        for provider_id, provider_data in self._providers.items():
+        for key, provider_data in snapshot:
             result.append(
-                {"provider_id": provider_id, "provider_name": provider_data["name"], "models": provider_data["models"]}
+                {
+                    "provider_id": key[len(prefix):],
+                    "provider_name": provider_data["name"],
+                    "models": provider_data["models"],
+                }
             )
         return result
 
@@ -153,6 +191,7 @@ class LLMRouter:
         request_type: RequestType,
         required_capabilities: Optional[List[ModelCapability]] = None,
         exclude_providers: Optional[List[str]] = None,
+        scope: str = "admin",
     ) -> Optional[ModelSelectionResult]:
         """
         根据请求类型选择最佳模型
@@ -160,17 +199,25 @@ class LLMRouter:
         Args:
             request_type: 请求类型
             required_capabilities: 必需的能力列表
-            exclude_providers: 排除的提供商列表
+            exclude_providers: 排除的提供商列表（原始 provider_id，同 scope 内比较）
+            scope: 注册表作用域（P2-10）——只在该 scope 前缀的注册条目里选型。
 
         Returns:
             最佳模型选择结果，如果没有合适的模型返回None
         """
         exclude_providers = exclude_providers or []
+        prefix = f"{scope or 'admin'}:"
+
+        # 锁内取该 scope 的快照，锁外遍历——注册并发时不再
+        # 抛 "dictionary changed size during iteration"。
+        with self._instanceLock:
+            scoped_items = [(k, v) for k, v in self._providers.items() if k.startswith(prefix)]
 
         # 收集所有候选模型
         candidates = []
 
-        for provider_id, provider_data in self._providers.items():
+        for key, provider_data in scoped_items:
+            provider_id = key[len(prefix):]
             if provider_id in exclude_providers:
                 continue
 
@@ -365,11 +412,13 @@ def register_provider_from_config(
     provider_name: str,
     model_names: List[str],
     model_metadata: Optional[Dict[str, Dict[str, Any]]] = None,
+    scope: str = "admin",
 ) -> None:
     """将 ProviderConfig 风格的 providers 注册到全局 LLMRouter。
 
     能力来源：provider.model_metadata 中已持久化的 capabilities 优先
     （模型管理页"自动检测"写入），缺失时名称推断兜底 —— 路由与标记同源。
+    scope 透传给注册表复合键（P2-10），缺省 "admin"＝全局表。
     """
     from neurova.llm.capability_detector import detect_model_capabilities
 
@@ -395,7 +444,7 @@ def register_provider_from_config(
                 "weight": 1.0,
             }
         )
-    router.register_provider(provider_id, provider_name, models)
+    router.register_provider(provider_id, provider_name, models, scope=scope)
 
 
 def sync_llm_router(scope: Optional[str] = None) -> None:
@@ -404,6 +453,7 @@ def sync_llm_router(scope: Optional[str] = None) -> None:
     P1-15（全库断点审计 2026-11-12）：scope 缺省（None）＝全局 admin 注册表
     （存量行为）；传入 scope_for_owner(owner) 等用户域时按该域注册表同步——
     普通用户 agent 的多模态路由从此看得见自己的 provider。
+    P2-10：同步目标键带 scope 前缀，各域同名 provider_id 互不顶掉。
     """
     try:
         from neurova.llm.provider_manager import get_provider_manager
@@ -411,8 +461,9 @@ def sync_llm_router(scope: Optional[str] = None) -> None:
         mgr = get_provider_manager(scope=scope) if scope else get_provider_manager()
         if mgr is None:
             return
+        target_scope = scope or "admin"
         for pid, pconf in mgr._providers.items():
-            register_provider_from_config(pid, pconf.name, pconf.models, pconf.model_metadata)
+            register_provider_from_config(pid, pconf.name, pconf.models, pconf.model_metadata, scope=target_scope)
     except Exception as e:  # noqa: BLE001
         logger.warning("sync_llm_router 失败（多模态路由将惰性回退）: %s", e)
 
@@ -445,6 +496,8 @@ def select_model_for_request(
         required_capabilities: 必需的能力列表
         scope: P1-15——provider 注册表作用域（scope_for_owner(owner)）。
             缺省 None＝全局 admin 表（存量行为）。候选空时回全局兜底。
+            P2-10：scope 透传给路由器按 `f"{scope}:"` 前缀过滤候选，
+            各域同名 provider_id 不再互相顶掉。
 
     Returns:
         最佳模型选择结果
@@ -454,13 +507,13 @@ def select_model_for_request(
     # 带 scope 时按该域注册表同步（普通用户 agent 看得见自己的 provider）
     if scope:
         _sync_scope_once(scope)
-    elif not router._providers:
+    elif not router.providerCount():
         sync_llm_router()
-    result = router.select_model(request_type, required_capabilities)
+    result = router.select_model(request_type, required_capabilities, scope=scope or "admin")
     if result is None and scope:
         # 候选空再回全局（审计口径）：用户域没配该能力时回落 admin 表
         sync_llm_router()
-        result = router.select_model(request_type, required_capabilities)
+        result = router.select_model(request_type, required_capabilities, scope="admin")
     return result
 
 

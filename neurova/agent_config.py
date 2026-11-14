@@ -5,6 +5,7 @@ Agent Config Manager - Agent 配置管理器
 
 import datetime
 import json
+import os
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -95,33 +96,60 @@ class AgentConfigManager:
 
         return []
 
-    def _save_agents_list(self, agents: Dict[str, Dict[str, Any]]) -> None:
+    def _save_agents_list(self, agents: Dict[str, Dict[str, Any]]) -> bool:
         """
-        保存 Agent 配置
+        保存 Agent 配置（P2-11：tmp + os.replace 原子写）
 
         Args:
             agents: Agent 配置字典
+
+        Returns:
+            是否保存成功（失败记 error 日志并返回 False，不谎报成功）
         """
+        tmp_file = self._agents_file.parent / (self._agents_file.name + ".tmp")
         try:
-            with open(self._agents_file, "w", encoding="utf-8") as f:
+            with open(tmp_file, "w", encoding="utf-8") as f:
                 json.dump(agents, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_file, self._agents_file)
             logger.debug("Agent 配置已保存")
+            return True
         except Exception as e:
             logger.error("保存 Agent 配置失败: %s", e)
+            return False
+        finally:
+            # 写失败/中断时清理残留 tmp，原配置文件不受影响（原子性）
+            try:
+                if tmp_file.exists():
+                    tmp_file.unlink()
+            except OSError:
+                pass
 
-    def _save_models(self, models: List[Dict[str, Any]]) -> None:
+    def _save_models(self, models: List[Dict[str, Any]]) -> bool:
         """
-        保存模型配置
+        保存模型配置（P2-11：tmp + os.replace 原子写）
 
         Args:
             models: 模型配置列表
+
+        Returns:
+            是否保存成功（失败记 error 日志并返回 False，不谎报成功）
         """
+        tmp_file = self._models_file.parent / (self._models_file.name + ".tmp")
         try:
-            with open(self._models_file, "w", encoding="utf-8") as f:
+            with open(tmp_file, "w", encoding="utf-8") as f:
                 json.dump(models, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_file, self._models_file)
             logger.debug("模型配置已保存")
+            return True
         except Exception as e:
             logger.error("保存模型配置失败: %s", e)
+            return False
+        finally:
+            try:
+                if tmp_file.exists():
+                    tmp_file.unlink()
+            except OSError:
+                pass
 
     def list_agents(self) -> List[Dict[str, Any]]:
         """
@@ -197,7 +225,7 @@ class AgentConfigManager:
                 未启动实例的属主过滤依据）
 
         Returns:
-            是否创建成功
+            是否创建成功（P2-11：保存失败返回 False，不再恒 True）
         """
         with self._lock:
             if agent_id in self._agents:
@@ -216,8 +244,13 @@ class AgentConfigManager:
             if owner_user_id:
                 agent_config["owner_user_id"] = str(owner_user_id)
 
-            self._agents[agent_id] = agent_config
-            self._save_agents_list(self._agents)
+            # P2-11：先在副本上保存，成功才应用到内存——保存失败时
+            # 内存与磁盘都保持原状，不产生"内存有、盘上无"的漂移。
+            trial = dict(self._agents)
+            trial[agent_id] = agent_config
+            if not self._save_agents_list(trial):
+                return False
+            self._agents = trial
 
             logger.info("创建 Agent: %s - %s", agent_id, name)
             return True
@@ -231,19 +264,23 @@ class AgentConfigManager:
             updates: 更新内容
 
         Returns:
-            是否更新成功
+            是否更新成功（P2-11：保存失败返回 False，不再恒 True）
         """
         with self._lock:
             if agent_id not in self._agents:
                 logger.warning("Agent 不存在: %s", agent_id)
                 return False
 
-            # 更新配置
-            agent_config = self._agents[agent_id]
+            # 更新配置（P2-11：副本上保存，成功才应用内存，失败不漂移）
+            agent_config = dict(self._agents[agent_id])
             agent_config.update(updates)
             agent_config["last_active"] = datetime.datetime.now().isoformat()
 
-            self._save_agents_list(self._agents)
+            trial = dict(self._agents)
+            trial[agent_id] = agent_config
+            if not self._save_agents_list(trial):
+                return False
+            self._agents = trial
 
             logger.info("更新 Agent: %s", agent_id)
             return True
@@ -256,16 +293,19 @@ class AgentConfigManager:
             agent_id: Agent ID
 
         Returns:
-            是否删除成功
+            是否删除成功（P2-11：保存失败返回 False，不再恒 True）
         """
         with self._lock:
             if agent_id not in self._agents:
                 logger.warning("Agent 不存在: %s", agent_id)
                 return False
 
-            # 删除配置
-            del self._agents[agent_id]
-            self._save_agents_list(self._agents)
+            # 删除配置（P2-11：副本上保存，成功才应用内存，失败不漂移）
+            trial = dict(self._agents)
+            del trial[agent_id]
+            if not self._save_agents_list(trial):
+                return False
+            self._agents = trial
 
             logger.info("删除 Agent: %s", agent_id)
             return True
@@ -358,7 +398,7 @@ class AgentConfigManager:
             model: 模型信息
 
         Returns:
-            是否添加成功
+            是否添加成功（P2-11：保存失败返回 False，不再恒 True）
         """
         with self._lock:
             # 检查是否已存在
@@ -367,8 +407,12 @@ class AgentConfigManager:
                 logger.warning("模型已存在: %s", model.get('id'))
                 return False
 
-            self._models.append(model)
-            self._save_models(self._models)
+            # P2-11：副本上保存，成功才应用内存，失败不漂移
+            trial = list(self._models)
+            trial.append(model)
+            if not self._save_models(trial):
+                return False
+            self._models = trial
 
             logger.info("添加模型: %s", model.get('id'))
             return True
@@ -382,13 +426,19 @@ class AgentConfigManager:
             updates: 更新内容
 
         Returns:
-            是否更新成功
+            是否更新成功（P2-11：保存失败返回 False，不再恒 True）
         """
         with self._lock:
             for i, model in enumerate(self._models):
                 if model.get("id") == model_id:
-                    self._models[i].update(updates)
-                    self._save_models(self._models)
+                    # P2-11：副本上保存，成功才应用内存，失败不漂移
+                    updated = dict(model)
+                    updated.update(updates)
+                    trial = list(self._models)
+                    trial[i] = updated
+                    if not self._save_models(trial):
+                        return False
+                    self._models = trial
 
                     logger.info("更新模型: %s", model_id)
                     return True
@@ -404,13 +454,17 @@ class AgentConfigManager:
             model_id: 模型 ID
 
         Returns:
-            是否删除成功
+            是否删除成功（P2-11：保存失败返回 False，不再恒 True）
         """
         with self._lock:
             for i, model in enumerate(self._models):
                 if model.get("id") == model_id:
-                    del self._models[i]
-                    self._save_models(self._models)
+                    # P2-11：副本上保存，成功才应用内存，失败不漂移
+                    trial = list(self._models)
+                    del trial[i]
+                    if not self._save_models(trial):
+                        return False
+                    self._models = trial
 
                     logger.info("删除模型: %s", model_id)
                     return True

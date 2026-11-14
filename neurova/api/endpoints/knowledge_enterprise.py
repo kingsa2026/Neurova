@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -212,9 +213,12 @@ async def triggerEnterpriseMediaFetch(
         reason = str((context or {}).get("reason") or "企微通道未装配")
         raise HTTPException(status_code=409, detail="存档凭据未就绪：%s" % reason)
     archiveDb = wecom_archive.resolveArchiveDbPath(descriptor)
-    sdk = wecom_archive.buildArchiveSdkForContext(context)
+    # P2-15：SDK 构建（ctypes.CDLL 加载）与媒体取回（ctypes 分片下载）都是
+    # 同步阻塞调用，放线程池跑——不阻塞事件循环（async 端点内直呼会卡住
+    # 全进程的请求调度）。
+    sdk = await asyncio.to_thread(wecom_archive.buildArchiveSdkForContext, context)
     try:
-        outcome = wecom_archive.stageArchiveMedia(archiveDb, msgId, sdk)
+        outcome = await asyncio.to_thread(wecom_archive.stageArchiveMedia, archiveDb, msgId, sdk)
     except wecom_archive.ArchiveMediaUnavailable as exc:
         raise HTTPException(status_code=502, detail=str(exc))
     except wecom_archive.ArchiveSdkError as exc:
