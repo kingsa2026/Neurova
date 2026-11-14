@@ -384,6 +384,7 @@
         @slash-plan="onSlashPlan"
         @slash-build="onSlashBuild"
         @slash-compact="onSlashCompact"
+        @slash-replay="onSlashReplay"
         @steer="onSteer"
       />
 
@@ -771,6 +772,13 @@ function onBuildInteraction(event: any): void {
  *  发往后端命令分发（报告为该轮回复；流式/排队/锁互斥全复用） */
 function onSlashCompact(): void {
   chatStore.setInputText('/compact')
+  void sendMessage()
+}
+
+/** /replay 斜杠命令（P1-6 尾巴）：重放崩溃悬空轮——同经 sendMessage 原链路，
+ *  后端用账本字节级视图重跑该轮并补回答复 */
+function onSlashReplay(): void {
+  chatStore.setInputText('/replay')
   void sendMessage()
 }
 
@@ -1584,6 +1592,8 @@ async function sendMessage() {
     model: fileIds.length > 0 ? undefined : (selectedModel.value || undefined),
     // 思考程度：light/standard/deep，后端注入对应回答深度指令
     thinking_effort: thinkingEffort.value,
+    // P1-4：会话级权限模式（''=默认读 Agent 配置/治理设置）
+    permission_mode: chatStore.permissionMode || undefined,
     ...(replayFrom !== undefined ? { replay_from: replayFrom } : {}),
   })
 

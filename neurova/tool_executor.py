@@ -1944,6 +1944,11 @@ class ToolExecutor:
         except Exception as pr_err:
             logger.debug("PermissionRequest 钩子跳过: %s", pr_err)
 
+        # P1-2a：执行入参指纹尾（审批卡展示用）——与审批单 metadata 里的
+        # 完整指纹同源同值，前端据此核验「批准对象=执行对象」。
+        from neurova.security.tool_metadata import executionFingerprint
+
+        fingerprintTail = executionFingerprint(tool_name, params)[:12]
         approval_id = self._create_approval_request(tool_name, params, verdict)
 
         def _pendingShape(extra: Dict[str, Any]) -> Dict[str, Any]:
@@ -1952,6 +1957,7 @@ class ToolExecutor:
                 "approval_id": approval_id,
                 "tool_name": tool_name,
                 "params": params,
+                "fingerprint_tail": fingerprintTail,
                 "error": "操作待用户确认: " + "; ".join(verdict.reasons),
                 "governance": verdict.to_dict(),
                 **extra,
@@ -2387,7 +2393,7 @@ class ToolExecutor:
         import json as _json
         import time as _time
 
-        from neurova.workflow.scripted import WorkflowJournal, runScriptedWorkflow
+        from neurova.workflow.scripted import WorkflowJournal, runScriptedWorkflowSubprocess
 
         script = str(params.get("script") or "")
         if not script.strip():
@@ -2415,7 +2421,7 @@ class ToolExecutor:
                 }
             return sub
 
-        result = await runScriptedWorkflow(
+        result = await runScriptedWorkflowSubprocess(
             script, _callTool, journal, resumeRows=resumeRows, timeout=timeout
         )
         result["run_id"] = runId

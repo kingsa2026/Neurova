@@ -75,6 +75,20 @@ export interface EvolutionRunAudit {
     baseline_failed?: boolean
     candidate_failed?: boolean
   }>
+  // V1 near-miss 修复通道审计：每轮修复尝试（门别/是否改善/证据任务）与
+  // 「最终胜者是否由修复通道救回」（V4 归因面）。缺席 = 旧记录或未启用。
+  repair_rescued?: boolean
+  repair_attempts?: RepairAttempt[]
+}
+
+/** V1 单轮修复尝试的审计行（runner.repair_attempts 的出街形态）。 */
+export interface RepairAttempt {
+  round: number
+  gate: string
+  improved?: boolean
+  blocked?: string
+  evidence_tasks?: string[]
+  tune_score?: number
 }
 
 /** 详情面对那次运行的三态读数；与后端 `SkillEvolutionService.runLookup` 逐字同形。 */
@@ -100,6 +114,89 @@ export interface EvolutionProposal {
   // 详情面独有：列表面不夹带运行明细（与"列表不夹带正文"同一口径）。
   evolution_run?: EvolutionRunAudit | null
   evolution_run_status?: AuditRunState
+  // ── 证据与代价读数（详情面展示；旧记录整键缺席 ⇒ 空不显示）──
+  // M-C：验收证据跑在哪个基座上（空串 = 未记）。
+  model_under_test?: string
+  // 例级不退化门读数（容忍度/撞坏用例/未量出用例）。
+  case_gate?: { allowance: number; regressions: string[]; unevidenced: string[] }
+  // 可执行断言面（紧凑出街；逐案明细在 run 审计里）。
+  exec_suite?: { state?: string; suite_hash?: string; cases?: number
+    baseline_pass_rate?: number | null; candidate_pass_rate?: number | null }
+  // B4 judge 选择面 × 密封面增益两列。
+  judge_vs_sealed?: { judge_gain?: number; sealed_gain?: number | null; missing?: string[] }
+  // 证据的用例来源构成（golden/history/synthetic…）。
+  source_mix?: Record<string, number>
+  // 成本软门读数（manual_review/within_budget/unmeasured/disabled）。
+  cost_gate?: { state: string; ratio?: number; threshold?: number }
+  // V6 部署形态成本差：采纳后每任务多花多少（与开发搜索花费分格）。
+  deployment_cost?: DeploymentCostDelta
+  // V4 增益-代价归因面板。
+  gain_attribution?: GainAttribution
+  // V3 可进化面读数（本提案改写的是哪个面）。
+  surface?: { name: string; label: string; kind: string; max_size: number }
+}
+
+/** V6：胜者相对基线臂的每任务执行成本差；unmeasured = 没量到（不是 0）。 */
+export interface DeploymentCostDelta {
+  state: 'measured' | 'unmeasured' | string
+  reason?: string
+  baseline_per_case_usd?: number
+  candidate_per_case_usd?: number
+  delta_per_case_usd?: number
+  delta_ratio?: number | null
+  baseline_per_case_tokens?: number
+  candidate_per_case_tokens?: number
+  delta_per_case_tokens?: number
+  baseline_cop_usd?: number | null
+  candidate_cop_usd?: number | null
+}
+
+/** V4：增益-代价归因（数值全部取自运行读数）。 */
+export interface GainAttribution {
+  surfaces_touched?: string[]
+  holdout_gain?: number
+  size_delta_ratio?: number | null
+  repair_rounds?: number
+  repair_rescued?: boolean
+  note?: string
+}
+
+/** V5 工件里的非劣变体（Pareto 多档交付的档位件）。 */
+export interface ArtifactVariant {
+  text: string
+  score: number
+  tier: string
+  cost_usd?: number
+  tokens?: number
+}
+
+/** V5 可部署工件：一次过门运行的版本化交付（冠军＋变体＋证据指针）。 */
+export interface EvolutionArtifact {
+  artifact_id: string
+  skill_id: string
+  artifact_type: string
+  status: 'pending' | 'applied' | 'rolled_back' | string
+  created_at: string
+  experiment_fingerprint?: string
+  champion_text?: string
+  baseline_text?: string
+  variants?: ArtifactVariant[]
+  evidence?: { run_id?: string; proposal_id?: string; journal_commit?: string | null }
+  scores?: Record<string, number | undefined>
+  surface?: { name: string; label: string; kind: string; max_size: number }
+  cost?: DeploymentCostDelta
+}
+
+/** V2 递归演化的分支账本行（branch_pool.EvolutionBranch 的出街形态）。 */
+export interface RecursiveBranch {
+  branch_id: string
+  parent_id: string
+  epoch_created: number
+  status: 'active' | 'promoted' | 'exhausted' | string
+  retries_left: number
+  score: number
+  promoted_epoch?: number | null
+  text_head?: string
 }
 
 export type ProposalSummary = Omit<
@@ -223,4 +320,74 @@ export function abCompareSkills(
   },
 ) {
   return api.post<ApiResponse<AbReportData>>(`${BASE}/skills/${agentId}/ab`, payload)
+}
+
+// ---------------------------------------------------------------------------
+// V2 递归多轮演化（分支账本随报告出街）
+// ---------------------------------------------------------------------------
+
+export interface RecursiveEpochRow {
+  epoch: number
+  base_index: number
+  branch_id?: string
+  parent_id?: string
+  rejected: boolean
+  reject_reason: string
+  holdout_before: number
+  holdout_after: number
+  improvement: number
+  proposal_id?: string
+}
+
+export interface RecursiveReport {
+  skill_id: string
+  baseline_text: string
+  deployed_text: string
+  epochs_run: number
+  epochs: RecursiveEpochRow[]
+  pool_size: number
+  branch_retries?: number
+  branches?: RecursiveBranch[]
+  seed_branch_id?: string
+  final_pool_size: number
+  total_improvement: number
+  stopped_reason: string
+}
+
+export function evolveSkillRecursive(
+  agentId: string,
+  payload: {
+    skill_id: string
+    epochs?: number
+    pool_size?: number
+    branch_retries?: number
+    iterations?: number
+    dataset_source?: 'auto' | 'golden' | 'mined' | 'synthetic'
+  },
+) {
+  return api.post<ApiResponse<RecursiveReport>>(
+    `${BASE}/skills/${agentId}/evolve-recursive`, payload)
+}
+
+// ---------------------------------------------------------------------------
+// V5 可部署工件：冠军与非劣变体的版本化交付（列表不夹带正文，详情给全文）
+// ---------------------------------------------------------------------------
+
+export function listArtifacts(agentId: string, skillId?: string) {
+  return api.get<ApiResponse<EvolutionArtifact[]>>(
+    `${BASE}/skills/${agentId}/artifacts`,
+    { params: skillId ? { skill_id: skillId } : {} },
+  )
+}
+
+export function getArtifact(agentId: string, artifactId: string) {
+  return api.get<ApiResponse<EvolutionArtifact>>(
+    `${BASE}/skills/${agentId}/artifacts/${artifactId}`,
+  )
+}
+
+export function rollbackArtifact(agentId: string, artifactId: string) {
+  return api.post<ApiResponse<{ rolled_back: boolean; skill_id: string }>>(
+    `${BASE}/skills/${agentId}/artifacts/${artifactId}/rollback`,
+  )
 }

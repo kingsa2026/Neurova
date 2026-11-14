@@ -87,11 +87,13 @@ function onSlashKeydown(e: KeyboardEvent): boolean {
  * 组装命令注册表（模块级共享：ChatPage 与 ChatComposerArea 共用同一面板态）。
  * openPlanPanel：/plan 触发时回调（页面持有 planPanelOpen/planRequestSeed）。
  * onCompact：/compact 触发时回调（页面经 sendMessage 原链路发往后端命令分发）。
+ * onReplay：/replay 触发时回调（重放崩溃悬空轮，同 sendMessage 原链路）。
  */
 export function setupSlashCommands(
   openPlanPanel: (seed: string) => void,
   onCompact?: () => void,
   openBuildPanel?: (seed: string) => void,
+  onReplay?: () => void,
 ): void {
   const { t } = useI18n()
   const chatStore = useChatStore()
@@ -148,6 +150,17 @@ export function setupSlashCommands(
       run: () => {
         if (onCompact) {
           onCompact()
+        }
+      },
+    },
+    {
+      // /replay 重放崩溃悬空轮：同 /compact，经 sendMessage 原链路
+      // 发往后端命令分发（后端用账本字节级视图重跑该轮并补回答复）
+      name: '/replay',
+      descKey: 'chat.slashReplay',
+      run: () => {
+        if (onReplay) {
+          onReplay()
         }
       },
     },
