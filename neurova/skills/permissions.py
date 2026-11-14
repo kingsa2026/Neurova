@@ -38,6 +38,9 @@ _CATEGORY_TOOLS: Dict[str, Set[str]] = {
         # ref 族与 role 族是同一动作面的两种寻址：漏登记时 allows_tool 的
         # 「未归类即放行」分支会把它做成关不掉的写操作口子
         "browser_click_ref", "browser_fill_ref",
+        # tab 管理与页面脚本逃逸舱：同一浏览器动作面（eval 是任意 JS 执行，必须受网络面约束）
+        "browser_tab_open", "browser_tab_list", "browser_tab_switch", "browser_tab_close",
+        "browser_eval",
         # write_pdf 可内嵌远程图（经 persist_media 出网），与 file 同属其归类面
         "write_pdf",
     },
