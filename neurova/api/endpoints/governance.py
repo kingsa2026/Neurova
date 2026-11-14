@@ -1152,6 +1152,8 @@ class GovernanceSettingsUpdate(BaseModel):
     # 只读 argv 自动放行（内容检测零发现时免审批；默认关）。
     guarded_syntax_gate_enabled: Optional[bool] = None
     readonly_argv_autoallow_enabled: Optional[bool] = None
+    # P1-4 权限模式 agent 级覆写：{agent_id: plan|build|edit|yolo|guarded|auto}
+    permission_mode_overrides: Optional[Dict[str, str]] = None
 
 
 @router.put("/settings")
@@ -1178,6 +1180,26 @@ async def update_governance_settings(body: GovernanceSettingsUpdate, admin=Depen
             raise HTTPException(
                 status_code=422,
                 detail=f"rsi_phase_overrides 含非法条目（agent_id 须非空、phase 须 0..4）: {bad}",
+            )
+    # P1-4：权限模式覆写显式校验——agent_id 非空、mode 在六态枚举内。
+    # 静默丢弃非法条目就是"管理员以为配了模式，运行时却按 build 走"。
+    modeOverrides = payload.get("permission_mode_overrides")
+    if modeOverrides is not None:
+        from neurova.security.permission_mode import VALID_MODE_VALUES
+
+        badModes = {
+            str(agent): str(mode)
+            for agent, mode in modeOverrides.items()
+            if not str(agent).strip()
+            or str(mode).strip().lower() not in VALID_MODE_VALUES
+        }
+        if badModes:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "permission_mode_overrides 含非法条目（agent_id 须非空、"
+                    f"mode 须为 {sorted(VALID_MODE_VALUES)}）: {badModes}"
+                ),
             )
     if not save_governance_settings(payload):
         raise HTTPException(status_code=500, detail="治理设置保存失败")

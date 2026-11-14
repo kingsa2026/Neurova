@@ -280,7 +280,12 @@ class GovernancePolicy:
         from neurova.security.governance_settings import resolve_flag
 
         if not resolve_flag("guarded_syntax_gate_enabled", "NEUROVA_GUARDED_SYNTAX_GATE"):
-            return None
+            # P1-4：guarded 权限模式下语法门强制生效——设置被关也开
+            # （否则「guarded」就只剩一个名字，没有可复算的行为差异）。
+            from neurova.security.permission_mode import contextForcesGuardedGate
+
+            if not contextForcesGuardedGate():
+                return None
         return [
             f"语法级危险命令，需逐次确认（guarded）: {hit.verdict.reason}（段: {hit.text[:60]}）"
             for hit in syntax.destructiveHits

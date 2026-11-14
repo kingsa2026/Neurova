@@ -1770,6 +1770,20 @@ class ToolExecutor:
         if verdict is None:
             # 无可裁决内容（如 memory_search / screenshot 等），直接放行
             return None
+        # P1-4：权限模式语义化——把生效模式落到裁决上（只收敛：yolo 放 ASK、
+        # edit 放文件编辑 ASK、plan 收非只读 ALLOW；DENY/SANDBOX 恒不动），
+        # 并把生效模式钉进任务上下文（供治理侧 guarded 语法门与子代理继承读取）。
+        # 审计记录的是**生效后**的裁决。
+        try:
+            from neurova.security.permission_mode import (
+                resolveEffectivePermissionMode,
+                setActivePermissionMode,
+            )
+
+            setActivePermissionMode(resolveEffectivePermissionMode(self._agent))
+            verdict = self._applyPermissionMode(tool_name, verdict)
+        except Exception as e:  # noqa: BLE001 - 模式面故障不改变既有裁决语义
+            logger.warning("权限模式应用异常 %s（按未应用处理）: %s", tool_name, e)
         self._audit_governance(tool_name, verdict.to_dict(), params)
 
         if verdict.decision == GovernanceDecision.DENY:
@@ -2032,6 +2046,82 @@ class ToolExecutor:
         except Exception as e:  # noqa: BLE001 - 地址缺失不该让审批创建失败
             logger.debug("审批回投地址取不到（保持 None）: %s", e)
             return {"session_id": None, "tool_call_id": None}
+
+    def _applyPermissionMode(self, tool_name: str, verdict):
+        """P1-4：权限模式落到治理裁决（只收敛，不放宽 DENY/SANDBOX）。
+
+        - yolo：ASK→ALLOW（拒绝/沙箱裁决恒不动）；
+        - edit：仅工作区文件编辑三工具 ASK→ALLOW；
+        - plan：非只读工具的 ALLOW→ASK（规划态不改世界）；
+        - guarded：裁决不变（其差异在 governance 侧强制语法门）；
+        - auto：预留位未实现，诚实按 build 走。
+        """
+        from neurova.security.governance import GovernanceDecision
+        from neurova.security.permission_mode import (
+            FILE_EDIT_TOOLS,
+            PermissionMode,
+            resolveEffectivePermissionMode,
+        )
+
+        mode = resolveEffectivePermissionMode(self._agent)
+        if mode == PermissionMode.AUTO:
+            mode = PermissionMode.BUILD
+        if mode == PermissionMode.BUILD:
+            return verdict
+
+        if mode == PermissionMode.YOLO and verdict.decision == GovernanceDecision.ASK:
+            logger.info("权限模式 yolo：ASK 自动放行 %s", tool_name)
+            return self._verdictWithDecision(
+                verdict, GovernanceDecision.ALLOW, "yolo 模式自动放行（拒绝/沙箱裁决不受影响）"
+            )
+        if (
+            mode == PermissionMode.EDIT
+            and verdict.decision == GovernanceDecision.ASK
+            and tool_name in FILE_EDIT_TOOLS
+        ):
+            logger.info("权限模式 edit：文件编辑免确认 %s", tool_name)
+            return self._verdictWithDecision(
+                verdict, GovernanceDecision.ALLOW, "edit 模式：工作区文件编辑免确认"
+            )
+        if (
+            mode == PermissionMode.PLAN
+            and verdict.decision == GovernanceDecision.ALLOW
+            and not self._toolIsReadonly(tool_name)
+        ):
+            logger.info("权限模式 plan：非只读操作转确认 %s", tool_name)
+            return self._verdictWithDecision(
+                verdict, GovernanceDecision.ASK, "plan 模式：非只读操作需人工确认"
+            )
+        return verdict
+
+    @staticmethod
+    def _verdictWithDecision(verdict, decision, reason: str):
+        """复制裁决并改判（保留 findings/segments/path_values 供审计与展示）。"""
+        from neurova.security.governance import GovernanceResult
+
+        return GovernanceResult(
+            decision=decision,
+            reasons=[*verdict.reasons, reason],
+            severity=verdict.severity,
+            findings=verdict.findings,
+            segments=verdict.segments,
+            path_values=verdict.path_values,
+        )
+
+    @staticmethod
+    def _toolIsReadonly(tool_name: str) -> bool:
+        """工具只读声明；取不到声明（MCP/未知）按非只读——plan 模式保守收口。"""
+        try:
+            from neurova.builtin_tools import get_builtin_tool_capability
+
+            cap = get_builtin_tool_capability(tool_name)
+        except Exception:  # noqa: BLE001 - 取不到声明按非只读（保守）
+            return False
+        if cap is None:
+            return False
+        if isinstance(cap, dict):
+            return bool(cap.get("readOnly"))
+        return bool(getattr(cap, "readOnly", False))
 
     def _create_approval_request(self, tool_name: str, params: Dict, verdict) -> Optional[str]:
         """为 ASK 裁决创建待审批请求；失败不阻断主流程（返回 None 走原语义）。"""
@@ -2488,15 +2578,23 @@ class ToolExecutor:
 
         swarm = get_swarm_manager()
         session_id = getattr(self._agent, "current_session_id", None)
-        result = await swarm.spawn(
-            task=str(task),
-            agent_id=params.get("agent_id") or None,
-            session_id=session_id,
-            background=bool(params.get("background", False)),
-            origin="chat",
-            stream=True,
-            initiator_agent=self._agent,
+        # P1-4：子代理权限只收窄不升级——把父会话生效模式作为继承上下文
+        # 传给派生任务（随 ContextVar 传播到子代理的每次治理预检）。
+        from neurova.security.permission_mode import (
+            inheritedModeScope,
+            resolveEffectivePermissionMode,
         )
+
+        with inheritedModeScope(resolveEffectivePermissionMode(self._agent)):
+            result = await swarm.spawn(
+                task=str(task),
+                agent_id=params.get("agent_id") or None,
+                session_id=session_id,
+                background=bool(params.get("background", False)),
+                origin="chat",
+                stream=True,
+                initiator_agent=self._agent,
+            )
         # 终态回灌父会话邮箱由蜂群侧一处投递（`SwarmManager._notifyParentMail`）：
         # 这里拿到的 result 在后台模式下只是 pending 回执，没有正文可投。
         return result
