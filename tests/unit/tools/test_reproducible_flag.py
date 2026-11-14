@@ -40,6 +40,8 @@ EXPECTED_NON_REPRODUCIBLE = {
     "browser_tab_open", "browser_tab_switch", "browser_tab_close", "browser_eval",
     # 页面级动作：导航改会话历史、滚动是相对量（重放继续滚）、按键可重复触发页面行为
     "browser_back", "browser_forward", "browser_reload", "browser_scroll", "browser_press",
+    # 元素交互扩展：select/check 与 fill_role 同轴（改写页面表单状态）
+    "browser_select", "browser_check",
     "computer_som_snapshot", "computer_dom_snapshot",
     # P0-3 会话式 shell：进程输出不可重放（重跑时系统状态已变）
     "exec_command", "write_stdin",

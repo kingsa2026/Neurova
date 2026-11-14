@@ -698,6 +698,27 @@ class ComputerUseManager:
             return await bm.press_key(key, delay=delay, generation=generation)
         return {"error": "浏览器管理器不可用"}
 
+    async def browser_hover(self, role: str, name: str = None, generation: int = None) -> typing.Any:
+        """按 ARIA role+name 悬停元素（触发菜单/提示类交互）"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.hover_role(role, name, generation=generation)
+        return {"error": "浏览器管理器不可用"}
+
+    async def browser_select(self, role: str, values: typing.List[str], name: str = None, generation: int = None) -> typing.Any:
+        """按 ARIA role+name 选中下拉选项"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.select_role(role, values, name=name, generation=generation)
+        return {"error": "浏览器管理器不可用"}
+
+    async def browser_check(self, role: str, checked: bool, name: str = None, generation: int = None) -> typing.Any:
+        """按 ARIA role+name 勾选/取消勾选"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.check_role(role, checked, name=name, generation=generation)
+        return {"error": "浏览器管理器不可用"}
+
     async def browser_capabilities(self) -> typing.Any:
         """查询当前后端能力清单"""
         bm = self._get_browser_manager()

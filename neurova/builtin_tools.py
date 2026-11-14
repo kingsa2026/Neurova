@@ -701,6 +701,51 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["key"],
         },
     },
+    # ── 元素交互扩展（P2 批B）：role+name 定位协议补齐悬停/下拉/勾选 ──
+    "browser_hover": {
+        # 并行能力声明：语义只读（悬停本身不改 DOM），但作用域为共享（共享页面指针）⇒ 可并行。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
+        "description": "【悬停元素】把鼠标悬停到指定 ARIA role+name 的元素上，触发悬停类交互（下拉菜单展开、tooltip 显示等）。悬停可能使页面结构变化（菜单展开），快照事实随之失效（generation 递增），后续交互前需重新 browser_dom_snapshot。参数必须来自最近一次快照事实。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "role": {"type": "string", "description": "ARIA 角色（button/link/menuitem 等，来自快照）"},
+                "name": {"type": "string", "description": "可访问名称（来自快照）"},
+                "generation": {"type": "integer", "description": "可选。最近一次快照返回的 generation；跨代即拒绝"},
+            },
+            "required": ["role"],
+        },
+    },
+    "browser_select": {
+        # 并行能力声明：驱动同一个内置浏览器实例（按 ARIA 角色改写表单选中态）——共享态。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【下拉选择】在指定 ARIA role+name 的下拉框（combobox/select）中选中一个或多个选项（values 为 option 的 value 或可见标签）。改写页面表单状态，快照事实随之失效（generation 递增）。参数必须来自最近一次快照事实；选完表单未提交时用 browser_press(key=Enter) 或点击提交按钮。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "role": {"type": "string", "description": "ARIA 角色（combobox/select，来自快照）"},
+                "values": {"type": "array", "items": {"type": "string"}, "description": "要选中的 option 值或可见标签（多选框可给多个）"},
+                "name": {"type": "string", "description": "可访问名称（来自快照，如字段标签）"},
+                "generation": {"type": "integer", "description": "可选。最近一次快照返回的 generation；跨代即拒绝"},
+            },
+            "required": ["role", "values"],
+        },
+    },
+    "browser_check": {
+        # 并行能力声明：驱动同一个内置浏览器实例（按 ARIA 角色改写勾选态）——共享态。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【勾选/取消勾选】勾选（checked=true）或取消勾选（checked=false）指定 ARIA role+name 的复选框/单选框。改写页面表单状态，快照事实随之失效（generation 递增）。参数必须来自最近一次快照事实。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "role": {"type": "string", "description": "ARIA 角色（checkbox/radio，来自快照）"},
+                "checked": {"type": "boolean", "description": "true=勾选，false=取消勾选"},
+                "name": {"type": "string", "description": "可访问名称（来自快照，如选项文字）"},
+                "generation": {"type": "integer", "description": "可选。最近一次快照返回的 generation；跨代即拒绝"},
+            },
+            "required": ["role", "checked"],
+        },
+    },
     # ── 互联网平台直达（Web Reach，零配置路径）──
     "youtube_transcript": {
         # 并行能力声明：语义只读但作用域为共享（yt-dlp 的 YouTube extractor 会把播放器
@@ -1909,6 +1954,9 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     # 页面级动作：导航改会话历史、滚动是相对量（重放继续滚）、按键可重复触发页面行为；
     # wait 是同参数同效果的纯等待，属可重现，不入名单
     "browser_back", "browser_forward", "browser_reload", "browser_scroll", "browser_press",
+    # 元素交互扩展：select/check 与 fill_role 同轴（改写页面表单状态，重放可能选错/改状态）；
+    # hover 悬停同参数同效果（无 DOM 突变），不入名单
+    "browser_select", "browser_check",
     # 会话式 shell：进程输出不可重放（重跑时系统状态已变）
     "exec_command", "write_stdin",
     # 子代理派生：spawn 有副作用

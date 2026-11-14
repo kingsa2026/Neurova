@@ -44,6 +44,8 @@ _CATEGORY_TOOLS: Dict[str, Set[str]] = {
         # 页面级动作（导航补全/等待/滚动/按键）：同一浏览器动作面
         "browser_back", "browser_forward", "browser_reload", "browser_wait",
         "browser_scroll", "browser_press",
+        # 元素交互扩展（悬停/下拉/勾选）：同一浏览器动作面
+        "browser_hover", "browser_select", "browser_check",
         # write_pdf 可内嵌远程图（经 persist_media 出网），与 file 同属其归类面
         "write_pdf",
     },
