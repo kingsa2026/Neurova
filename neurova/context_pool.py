@@ -241,6 +241,12 @@ class ContextPool:
         return f"{self.user_id}:{self.agent_id}:{session_part}"
 
     def add_context(self, context):
+        # P3-9：持久化挪到锁外——锁内只改内存结构与待落库判定，SQLite 提交
+        # （_persist_archived → _writeArchived）在锁外执行（参照同文件
+        # archiveBatch 的"锁内入批、锁外 flush"形态）。写库期间不再持池锁，
+        # 不会阻塞并发读/写路径；persist_item 只在锁内新增成功后置位，
+        # 异常路径不会重复落库（替换/去重跳过路径不落库，语义与改前一致）。
+        persist_item = None
         with self._lock:
             # B6-10 批次 D：TTL 回收挂在**写入咽喉**（每一次落常驻之前）。
             # 改前 `cleanup_expired` 生产零调用点：读面只做惰性过滤，过期条目
@@ -293,7 +299,7 @@ class ContextPool:
             # B4/001：落常驻即写穿持久台账——这是池的**唯一写入咽喉**，
             # 驱逐路径不可达（生产构造面下 resident_limit=None、ttl_seconds=0），
             # 归档"永不丢失"必须靠本条通路跨重启为真。
-            self._persist_archived(context)
+            persist_item = context
 
             if (
                 not self._max_size_warned
@@ -309,6 +315,10 @@ class ContextPool:
 
             if self.resident_limit and len(self._collector._contexts) > self.resident_limit:
                 self._enforce_resident_limit()
+
+        # 锁外写穿持久台账（B4/001 唯一写入咽喉，语义不变：本方法返回时已落库）
+        if persist_item is not None:
+            self._persist_archived(persist_item)
 
     def _enforce_resident_limit(self) -> None:
         """常驻上限回收（调用方须持 _lock）。
@@ -726,16 +736,21 @@ class ContextPool:
         批量上下文（``archiveBatch``）内只入批不落库，批结束时一次事务提交；
         批外单条立即提交（A1 的跨重启语义依赖"写完即可见"）。
 
+        P3-9：本方法在**锁外**被调用（add_context 已把持久化挪出锁），
+        批状态的读/append 自持 ``_lock``——与 archiveBatch 的置批/取批互斥，
+        不会 append 到已结算的批；SQLite 提交（_writeArchived）不持池锁。
+
         写失败不阻断归档主流程（本条仍驻内存、本进程内照常可召回），但**不静默**：
         计数与点名原因经 ``get_retention_stats()["ledger_persistence"]`` 上报。
         """
         if self._ledger_db is None:
             return
-        if self._ledger_batch is not None:
-            # 批内**不写库**：一次归档调用共用一个事务（A2）。库里还没写，
-            # 所以这里也不得先记 written——计数在批结算时一次落定。
-            self._ledger_batch.append(item)
-            return
+        with self._lock:
+            if self._ledger_batch is not None:
+                # 批内**不写库**：一次归档调用共用一个事务（A2）。库里还没写，
+                # 所以这里也不得先记 written——计数在批结算时一次落定。
+                self._ledger_batch.append(item)
+                return
         try:
             inserted = self._writeArchived(item)
         except Exception as exc:  # noqa: BLE001 - 归档主流程不可被台账故障打断，但必须可见

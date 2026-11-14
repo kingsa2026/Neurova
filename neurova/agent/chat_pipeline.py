@@ -21,6 +21,7 @@ from neurova.skills.library_service import agentLibrary
 from neurova.core.lazy_singleton import lazySingleton
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
+import asyncio
 import uuid
 
 from neurova.agent.crystallized_experience_manager import CrystallizedExperienceManager
@@ -3263,16 +3264,21 @@ class ChatPipeline:
         # HN4/HC4：Stop 会话钩子（hooks_engine 的 Stop 事件此前已定义、全仓
         # 零调用点）。默认关（NEUROVA_STOP_HOOKS=1 灰度开）；fail-open，
         # 钩子故障不影响本轮结果交付。
+        # P3-4：runStopHooks 内部是 subprocess.run 同步等待（最长 600s），
+        # 放线程池执行——不阻塞事件循环。
         try:
             from neurova.core.hooks_engine import runStopHooks
 
-            runStopHooks({
-                "event": "Stop",
-                "session_id": ctx.session_id,
-                "agent_id": getattr(self._agent, "agent_id", "") or "",
-                "user_input": str(ctx.user_input or "")[:2000],
-                "reply": str(ctx.reply or "")[:2000],
-            })
+            await asyncio.to_thread(
+                runStopHooks,
+                {
+                    "event": "Stop",
+                    "session_id": ctx.session_id,
+                    "agent_id": getattr(self._agent, "agent_id", "") or "",
+                    "user_input": str(ctx.user_input or "")[:2000],
+                    "reply": str(ctx.reply or "")[:2000],
+                },
+            )
         except Exception as e:  # noqa: BLE001 - 钩子故障不阻断结果交付
             logger.debug("Stop 钩子执行失败(忽略): %s", e)
 

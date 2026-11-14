@@ -12,21 +12,19 @@ import datetime
 import json
 from neurova.core.logger import get_logger
 import threading
+import time
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from neurova.core.data_root import dataPath
+from neurova.core.time_utils import nowIso as _now_iso
 
 logger = get_logger(__name__)
 
 
 def _new_id(prefix: str = "") -> str:
     return f"{prefix}{uuid.uuid4().hex}" if prefix else uuid.uuid4().hex
-
-
-def _now_iso() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 DEFAULT_LIMITS: Dict[str, int] = {
@@ -63,12 +61,28 @@ def _validated_limit(value: Any) -> Optional[int]:
     return value if value >= 1 else None
 
 
+# P2-12：UserModel 构造含建库 DDL + INFO 日志，判额热路径每次新建既慢又刷日志。
+# 模块级惰性单例（DCL + RLock，AGENTS.md §3）——全进程只构造一次。
+_user_model_singleton: Optional[Any] = None
+_user_model_lock = threading.RLock()
+
+
+def _getUserModel() -> Any:
+    """取共享 UserModel 实例（懒建单例；构造失败不缓存，下次重试）。"""
+    global _user_model_singleton
+    if _user_model_singleton is None:
+        with _user_model_lock:
+            if _user_model_singleton is None:
+                from neurova.auth.user_model import UserModel
+
+                _user_model_singleton = UserModel()
+    return _user_model_singleton
+
+
 def _username_for_user(user_id: str) -> Optional[str]:
     """user_id → username（组员名册按 username 记账）。查无此人/库不可达返回 None。"""
     try:
-        from neurova.auth.user_model import UserModel
-
-        user = UserModel().get_user_by_id(int(str(user_id).strip()))
+        user = _getUserModel().get_user_by_id(int(str(user_id).strip()))
         if not user:
             return None
         username = getattr(user, "username", None)
@@ -118,16 +132,24 @@ def _first_nondefault_quota_in_chain(mgr: Any, start_group: Any) -> Optional[Any
     return None
 
 
+# P2-12：组链解析（用户名册 → 组 → 父链配额）每次判额都走库，属热路径；
+# 组变更低频，按 user_id 做 60s TTL 缓存。缓存挂在 ResourceQuotaManager
+# 实例上（生产＝单例，等效全局；测试每例新建实例，天然互不泄漏）。
+# 空结果（{}，含"无组/解析失败"）同样入缓存——失败也 60s 内不反复打库。
+_GROUP_OVERLAY_TTL_SECONDS = 60
+
+
 def _resolve_group_quota_overlay(user_id: str) -> Dict[str, int]:
-    """用户所属组（T-A 单主组沿父链继承）的 ResourceQuota → 额度覆盖层。
+    """用户所属组（T-A 单主组沿父链继承）的 ResourceQuota → 额度覆盖层（无缓存纯解析）。
 
     组解析与 resolveUserDepartment 同源：组员名册按 username、只认 CUSTOM
     主组。任何失败 fail-soft 返回 {}（不 overlay，回落默认/设置）。
+    判额热路径请走 ResourceQuotaManager._resolveGroupQuotaOverlay（带 TTL 缓存）。
     """
     try:
         from neurova.auth.user_group_model import UserGroupType
 
-        username = _username_for_user(user_id)
+        username = _username_for_user(str(user_id))
         if not username:
             return {}
         mgr = _user_group_manager()
@@ -216,6 +238,10 @@ class ResourceQuotaManager:
         self._custom_limits: Dict[str, int] = dict(custom_limits) if custom_limits else {}
         self._group_limits: Dict[str, Dict[str, int]] = {g: dict(limits) for g, limits in (group_limits or {}).items()}
         self._lock = threading.RLock()
+        # P2-12：组配额覆盖层 TTL 缓存（user_id → (到期时刻, overlay)），
+        # 访问都发生在 self._lock 内；组变更低频，60s 自动过期，
+        # 需立即生效走 invalidateGroupQuotaCache。
+        self._group_overlay_cache: Dict[str, Tuple[float, Dict[str, int]]] = {}
         self._load()
 
     def _load(self) -> None:
@@ -263,6 +289,35 @@ class ResourceQuotaManager:
         self._persist(usage)
         return usage
 
+    def _resolveGroupQuotaOverlay(self, user_id: str) -> Dict[str, int]:
+        """组配额覆盖层解析（P2-12：实例级 60s TTL 缓存；调用方须持 _lock）。
+
+        组变更低频，TTL 到期自动重取即可；需立即生效走 invalidateGroupQuotaCache。
+        空结果同样缓存，避免"无组用户"每次判额都打组库。
+        """
+        cache_key = str(user_id)
+        now = time.monotonic()
+        cached = self._group_overlay_cache.get(cache_key)
+        if cached is not None and (now - cached[0]) < _GROUP_OVERLAY_TTL_SECONDS:
+            return dict(cached[1])
+        overlay = _resolve_group_quota_overlay(cache_key)
+        self._group_overlay_cache[cache_key] = (now, overlay)
+        return dict(overlay)
+
+    def invalidateGroupQuotaCache(self, user_id: Optional[str] = None) -> None:
+        """组配额覆盖层缓存失效入口（P2-12）。
+
+        组变更低频、缓存 60s TTL 自动过期即可满足"最终一致"；管理端改动组
+        配额后若需立即生效，可显式调用本入口：user_id 给定只失效该用户，
+        None 全清。（"运营设置现读即生效"的语义不受影响——app_settings.quota
+        不走本缓存。）
+        """
+        with self._lock:
+            if user_id is None:
+                self._group_overlay_cache.clear()
+            else:
+                self._group_overlay_cache.pop(str(user_id), None)
+
     def get_user_quota(self, user_id: str, group_type: str = "user") -> Dict[str, int]:
         with self._lock:
             quota: Dict[str, int] = dict(DEFAULT_LIMITS)
@@ -283,7 +338,7 @@ class ResourceQuotaManager:
             quota.update(self._custom_limits)
             if group_type in self._group_limits:
                 quota.update(self._group_limits[group_type])
-            quota.update(_resolve_group_quota_overlay(user_id))
+            quota.update(self._resolveGroupQuotaOverlay(user_id))
             return quota
 
     def get_usage(self, user_id: str) -> ResourceUsage:
@@ -502,3 +557,14 @@ def reset_resource_quota_manager() -> None:
     global _singleton
     with _singleton_lock:
         _singleton = None
+
+
+def invalidateGroupQuotaCache(user_id: Optional[str] = None) -> None:
+    """组配额覆盖层缓存失效入口（P2-12，模块级便捷封装）。
+
+    组变更低频、缓存 60s TTL 自动过期即可满足"最终一致"；管理端改动组配额
+    后若需立即生效，可显式调用本入口：user_id 给定只失效该用户，None 全清。
+    单例尚未创建时无需清理（缓存随实例走，无遗留）。
+    """
+    if _singleton is not None:
+        _singleton.invalidateGroupQuotaCache(user_id)
