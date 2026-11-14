@@ -37,7 +37,7 @@ langchain-google-genai>=4.0
 jieba>=0.42.1
 
 # 知识库/附件文档解析（knowledge import + 聊天附件抽取，attachment_parser.py）
-python-docx>=1.1.0
+python-docx>=1.2.0
 openpyxl>=3.1.2
 python-pptx>=1.0.0
 pypdf>=6.21.2
