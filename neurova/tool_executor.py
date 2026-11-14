@@ -2036,6 +2036,11 @@ class ToolExecutor:
     def _create_approval_request(self, tool_name: str, params: Dict, verdict) -> Optional[str]:
         """为 ASK 裁决创建待审批请求；失败不阻断主流程（返回 None 走原语义）。"""
         try:
+            from neurova.security.tool_metadata import (
+                EXECUTION_FINGERPRINT_KEY,
+                executionFingerprint,
+            )
+
             am = _get_approval_manager()
             command = str(params.get("command") or params.get("code") or "")
             _user_id, _agent_id = self._agent_identity()
@@ -2048,6 +2053,8 @@ class ToolExecutor:
                 metadata={
                     "tool_name": tool_name,
                     "params": params,
+                    # P1-2：执行入参指纹——批准重放前复核，批准对象=执行对象
+                    EXECUTION_FINGERPRINT_KEY: executionFingerprint(tool_name, params),
                     "governance": verdict.to_dict(),
                     **self._approvalRoutingAddress(),
                 },
@@ -2062,6 +2069,11 @@ class ToolExecutor:
     ) -> Optional[str]:
         """沙箱拒绝升级审批（P1-4）：metadata 带原始 params 供批准后重放。"""
         try:
+            from neurova.security.tool_metadata import (
+                EXECUTION_FINGERPRINT_KEY,
+                executionFingerprint,
+            )
+
             am = _get_approval_manager()
             command = str(params.get("command") or params.get("code") or "")
             _user_id, _agent_id = self._agent_identity()
@@ -2074,6 +2086,8 @@ class ToolExecutor:
                 metadata={
                     "tool_name": tool_name,
                     "params": params,
+                    # P1-2：与 ASK 审批单同规格的执行入参指纹
+                    EXECUTION_FINGERPRINT_KEY: executionFingerprint(tool_name, params),
                     "kind": "sandbox_escalation",
                     "sandbox_denial": denial,
                     **self._approvalRoutingAddress(),
