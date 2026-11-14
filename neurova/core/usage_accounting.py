@@ -67,6 +67,9 @@ class TokenUsageAccounting:
         #          "by_provider": {provider: {...}}}}
         self._by_model: Dict[str, Dict[str, Any]] = {}
         self._last_call: Optional[Dict[str, Any]] = None
+        # B6（对照改进项）：换模型计数——cache miss 归因第一信号
+        # （换模型必破 provider 侧前缀缓存）。
+        self._model_switches = 0
 
     def record(
         self,
@@ -142,6 +145,11 @@ class TokenUsageAccounting:
                 "cache_write_tokens": cache_write_tokens,
                 "response_id": response_id,
             }
+            # B6：换模型归因计数——与上一条调用比，模型变了即计一次
+            # （首条调用不算换）。同锁内判定，避免并发下漏计/双计。
+            last = self._last_call
+            if last is not None and str(last.get("model") or "") != str(model or ""):
+                self._model_switches += 1
             with self._lock:
                 self._last_call = payload
             # P2-6：任务级快照——同任务内的 last_call() 读到的必是本次调用。
@@ -181,6 +189,8 @@ class TokenUsageAccounting:
             "estimated_calls": sum(e.get("estimated_calls", 0) for e in by_model.values()),
             "cache_read_tokens": sum(e.get("cache_read_tokens", 0) for e in by_model.values()),
             "cache_write_tokens": sum(e.get("cache_write_tokens", 0) for e in by_model.values()),
+            # B6：cache miss 归因信号（换模型必破前缀缓存）
+            "model_switches": self._model_switches,
         }
         return {
             "by_model": by_model,

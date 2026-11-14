@@ -117,6 +117,13 @@ def normalize_anthropic_response(data: dict) -> LLMResponse:
         "prompt_tokens": usage_raw.get("input_tokens", 0),
         "completion_tokens": usage_raw.get("output_tokens", 0),
     }
+    # B6（对照改进项）：Prompt Cache 命中/写入透传。改前此处丢
+    # cache_read/cache_creation_input_tokens，原生 Anthropic 链路的
+    # cache 计量恒 0。无字段不伪造（诚实口径）。
+    if usage_raw.get("cache_read_input_tokens") is not None:
+        usage["cache_read_input_tokens"] = usage_raw.get("cache_read_input_tokens")
+    if usage_raw.get("cache_creation_input_tokens") is not None:
+        usage["cache_creation_input_tokens"] = usage_raw.get("cache_creation_input_tokens")
     resp = _llm_response(
         content="".join(texts),
         reasoning_content="".join(thinkings) or None,
@@ -207,7 +214,22 @@ def _handle_anthropic_event(
     if etype == "message_start":
         message = data.get("message") or {}
         model = str(message.get("model") or "")
-        return [_llm_response(model=model)], model
+        # B6（对照改进项）：message_start 携带 input 侧 usage（含 Prompt Cache
+        # 命中/写入）。存进 pending 供 message_delta 合并——下游流式聚合取
+        # 「最后一个非空 usage chunk」，不合并则 input/cache 侧永远丢。
+        # 同时把 input 侧挂在首 chunk 上：异常截断的流（无 message_delta）
+        # 也至少留下 input 侧真值。无字段不伪造。
+        start_usage = message.get("usage") or {}
+        start_payload = {}
+        if start_usage.get("input_tokens") is not None:
+            start_payload["prompt_tokens"] = start_usage.get("input_tokens")
+        if start_usage.get("cache_read_input_tokens") is not None:
+            start_payload["cache_read_input_tokens"] = start_usage.get("cache_read_input_tokens")
+        if start_usage.get("cache_creation_input_tokens") is not None:
+            start_payload["cache_creation_input_tokens"] = start_usage.get("cache_creation_input_tokens")
+        if pending is not None:
+            pending["startUsage"] = start_payload
+        return [_llm_response(model=model, usage=dict(start_payload))], model
     if etype == "content_block_start" and pending is not None:
         block = data.get("content_block") or {}
         if block.get("type") == "tool_use":
@@ -262,7 +284,11 @@ def _handle_anthropic_event(
         delta = data.get("delta") or {}
         stop = _ANTHROPIC_STOP_REASON_MAP.get(delta.get("stop_reason") or "")
         usage_raw = data.get("usage") or {}
-        usage = {"completion_tokens": usage_raw.get("output_tokens", 0)}
+        # B6（对照改进项）：合并 message_start 存下的 input/cache 侧 usage，
+        # 使末 chunk 携带完整 prompt+completion+cache——下游「取最后一个
+        # 非空 usage chunk」的聚合才拿得到全量。无字段不伪造。
+        usage = dict((pending or {}).get("startUsage") or {})
+        usage["completion_tokens"] = usage_raw.get("output_tokens", 0)
         return [_llm_response(model=model, finish_reason=stop, usage=usage)], model
     if etype == "message_stop":
         return [_llm_response(model=model, finish_reason="stop")], model
@@ -328,6 +354,13 @@ def normalize_gemini_response(data: dict) -> LLMResponse:
         "prompt_tokens": usage_raw.get("promptTokenCount", 0),
         "completion_tokens": usage_raw.get("candidatesTokenCount", 0),
     }
+    # B6（对照改进项）：Gemini 的缓存命中计数统一成 OpenAI 形态
+    # （prompt_tokens_details.cached_tokens），下游 _extract_cache_tokens
+    # 单源识别。无字段不伪造（诚实口径）。
+    if usage_raw.get("cachedContentTokenCount") is not None:
+        usage["prompt_tokens_details"] = {
+            "cached_tokens": usage_raw.get("cachedContentTokenCount")
+        }
     tool_calls = toOpenAIToolCalls(tool_blocks)
     if tool_calls and finish == "stop":
         # 与 OpenAI 兼容链路同一契约：带工具调用时的 finish_reason 是 tool_calls
