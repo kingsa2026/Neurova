@@ -39,6 +39,19 @@ def _append_entries(log_file: Path, entries: List[Dict[str, Any]]) -> None:
     with open(log_file, "a", encoding="utf-8") as f:
         for entry in entries:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    # P2-13：本地账写完后转发遥测（fail-open；遥测关=直接丢弃）。
+    # 懒导入：error_logger 属基础层，不得在模块级引更高层遥测包。
+    try:
+        _telemetrySink(entries)
+    except Exception as telemetry_err:  # noqa: BLE001 - 遥测故障不阻断错误落账
+        logger.debug("遥测转发跳过: %s", telemetry_err)
+
+
+def _telemetrySink(entries: List[Dict[str, Any]]) -> None:
+    """错误账本 → 遥测导出的转发点（模块级便于测试替换）。"""
+    from neurova.telemetry import getTelemetryClient
+
+    getTelemetryClient().recordBatch(entries)
 
 
 def _read_entries(log_file: Path) -> List[Dict[str, Any]]:
