@@ -14,6 +14,7 @@ import base64
 import json
 import os
 import re
+import sys
 from neurova.core.logger import get_logger
 import threading
 import time
@@ -391,6 +392,28 @@ class ScraplingSpiderTool:
         return False
 
 
+def diagnoseKernelFailure(message: str) -> Optional[Dict[str, str]]:
+    """Playwright 启动失败的根因分诊：内核缺失时给出结构化补救指引。
+
+    判据与 `web_reach/browser_read.py` 的内核缺失检测同族（"executable
+    doesn't exist" / "playwright install"）；两处消费场景不同（抓取入口 vs
+    后端初始化），各自落地、注释互指，不强行抽公共层。
+    返回 None 表示非内核缺失类失败（调用方原样透传原因，不误诊）。
+    """
+    low = (message or "").lower()
+    if "executable doesn't exist" in low or "playwright install" in low:
+        return {
+            "missing": "browser-kernel",
+            "install_command": "playwright install chromium",
+            "remediation": (
+                "浏览器内核缺失：可运行 playwright install chromium 安装"
+                "（约 150MB，装到本机 Playwright 缓存目录，可随时删除）。"
+                "属环境变更——请先向用户说明并征得同意，再调用 browser_install 工具。"
+            ),
+        }
+    return None
+
+
 @dataclass(frozen=True)
 class RefTarget:
     """一个 ref 在本代快照里指向什么：role + accessible name + **同名序号**。
@@ -675,6 +698,9 @@ class PlaywrightBackend(BrowserBackend):
         self._dialog_handler = dialog_handler
         # console/pageerror 事件缓冲（browser_console 读数面）：会话内环形，防长会话无界
         self._consoleLog: List[Dict[str, Any]] = []
+        # 最近一次 initialize 失败的分诊（diagnoseKernelFailure 产物）；成功后清空。
+        # 供 _get_backend 拒绝文案与 browser_install 的引导面读取。
+        self.initFailure: Optional[Dict[str, str]] = None
 
     def _recordConsole(self, kind: str, text: str) -> None:
         self._consoleLog.append({"type": kind, "text": text})
@@ -1432,8 +1458,13 @@ class PlaywrightBackend(BrowserBackend):
             return BrowserResult(success=False, route="playwright_role", error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
     async def initialize(self) -> bool:
+        self.initFailure = None
         if not HAS_PLAYWRIGHT:
             logger.warning("Playwright not available")
+            self.initFailure = {
+                "missing": "python-package",
+                "remediation": "playwright Python 库未安装（requirements.txt 已登记）：pip install playwright",
+            }
             return False
         try:
             from playwright.async_api import async_playwright
@@ -1450,6 +1481,7 @@ class PlaywrightBackend(BrowserBackend):
             return True
         except Exception as e:
             logger.error("Failed to initialize Playwright: %s", str(e))
+            self.initFailure = diagnoseKernelFailure(str(e)) or {"missing": "startup", "remediation": str(e)}
             return False
 
     async def navigate(self, url: str, generation: Optional[int] = None) -> BrowserResult:
@@ -2503,7 +2535,12 @@ class BrowserManager:
         if not backend._initialized:
             success = await backend.initialize()
             if not success:
-                raise RuntimeError(self._capabilityRefusal(name, "initialize() 返回失败"))
+                diagnosis = getattr(backend, "initFailure", None) or {}
+                remediation = str(diagnosis.get("remediation") or "").strip()
+                raise RuntimeError(self._capabilityRefusal(
+                    name,
+                    "initialize() 返回失败" + (f"｜{remediation}" if remediation else ""),
+                ))
 
         self._active_backend = backend
         return backend
@@ -2881,6 +2918,80 @@ class BrowserManager:
                 logger.error("Error closing user camofox backend: %s", str(e))
         self._user_camofox_backends.clear()
         self._active_backend = None
+
+    # ── 内核安装与重探（browser_install 工具的执行体；环境变更动作）──
+    #: Chromium 下载约 150MB，给足慢网余量；超时诚实失败，不吊死事件循环
+    INSTALL_TIMEOUT_SECONDS = 600
+
+    async def _runPlaywrightInstall(self, browser: str) -> Tuple[int, str]:
+        """执行 playwright 内核安装子进程（subprocess 阻塞调发放线程池，不卡事件循环）。
+
+        命令固定为 `playwright install <browser>`——本工具不接受任意命令，
+        任意命令面收在工具语义里（arbitrary_command 高危档照常声明）。
+        """
+        import subprocess
+
+        def _run() -> Tuple[int, str]:
+            try:
+                proc = subprocess.run(
+                    [sys.executable, "-m", "playwright", "install", browser],
+                    capture_output=True,
+                    text=True,
+                    timeout=self.INSTALL_TIMEOUT_SECONDS,
+                )
+                return int(proc.returncode), f"{proc.stdout or ''}{proc.stderr or ''}"
+            except subprocess.TimeoutExpired:
+                return 124, f"安装超时（超过 {self.INSTALL_TIMEOUT_SECONDS}s）"
+            except Exception as e:  # noqa: BLE001 - 安装器起不来也要把原因带回去
+                return 1, str(e)
+
+        return await asyncio.to_thread(_run)
+
+    async def install_kernel(self, browser: str = "chromium") -> BrowserResult:
+        """安装浏览器内核并重探恢复。
+
+        **环境变更动作**：会下载数百 MB 到本机 Playwright 缓存目录。
+        调用前模型必须经 ask_user 征得用户同意（工具描述里点名）。
+        """
+        browser = str(browser or "chromium").strip().lower()
+        if browser != "chromium":
+            return BrowserResult(success=False, error=f"仅支持安装 chromium（收到 {browser}）")
+        if not HAS_PLAYWRIGHT:
+            return BrowserResult(
+                success=False,
+                error="playwright Python 库未安装——本工具只装浏览器内核，库本身请先 pip install playwright",
+            )
+        start_time = time.time()
+        code, output = await self._runPlaywrightInstall(browser)
+        if code != 0:
+            return BrowserResult(
+                success=False,
+                error=f"内核安装失败（退出码 {code}）：{output[-800:]}",
+                duration_ms=(time.time() - start_time) * 1000,
+            )
+        probe = await self.reprobe()
+        return BrowserResult(
+            success=bool(probe.get("ok")),
+            data={"probe": probe, "install_output_tail": output[-300:]},
+            duration_ms=(time.time() - start_time) * 1000,
+        )
+
+    async def reprobe(self) -> Dict[str, Any]:
+        """内核安装后重探：关闭并重建 playwright 后端，重新走 initialize。"""
+        with self._lock:
+            backend = self._backends.pop("playwright", None)
+        if backend is not None:
+            try:
+                await backend.close()
+            except Exception as e:  # noqa: BLE001 - 旧后端关不掉不阻碍重建
+                logger.debug("重探前关闭旧 playwright 后端失败（忽略）: %s", e)
+        # 重建在册条目（与 _load_config 同口径）——只 pop 不补会让选路落到 scrapling
+        self._load_config()
+        try:
+            new_backend = await self._get_backend()
+            return {"ok": bool(getattr(new_backend, "_initialized", False)), "backend": "playwright"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     def get_status(self) -> Dict[str, Any]:
         """获取状态"""

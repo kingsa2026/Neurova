@@ -50,6 +50,8 @@ _CATEGORY_TOOLS: Dict[str, Set[str]] = {
         "browser_cookies", "browser_storage", "browser_console",
         # 采集与扩展（下载/PDF/拖拽/上传）：同一浏览器动作面
         "browser_download", "browser_pdf", "browser_drag", "browser_upload",
+        # 环境自举（内核安装，会改本机环境）：同一浏览器动作面
+        "browser_install",
         # write_pdf 可内嵌远程图（经 persist_media 出网），与 file 同属其归类面
         "write_pdf",
     },

@@ -854,6 +854,21 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["role", "paths"],
         },
     },
+    # ── 环境自举：浏览器内核缺失时的受控安装（先经 ask_user 征得用户同意）──
+    "browser_install": {
+        # 并行能力声明：改本机浏览器环境（下载内核 + 重建后端），独占执行。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        # 任意命令执行语义（与 computer_shell 同档）：内部固定跑 playwright install。
+        "arbitrary_command": True,
+        "description": "【安装浏览器内核】当 browser_* 工具报「浏览器内核缺失」时，安装 Playwright 管理的 Chromium 内核并自动重探恢复。这是环境变更动作：会下载数百 MB 到本机 Playwright 缓存目录——**调用前必须先向用户说明并征得同意**（用 ask_user），不得静默安装。仅支持 chromium；playwright 库本身未安装时会报错并指引 pip install playwright。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "browser": {"type": "string", "enum": ["chromium"], "description": "要安装的内核（当前仅 chromium）"},
+            },
+            "required": [],
+        },
+    },
     # ── 互联网平台直达（Web Reach，零配置路径）──
     "youtube_transcript": {
         # 并行能力声明：语义只读但作用域为共享（yt-dlp 的 YouTube extractor 会把播放器
@@ -2072,6 +2087,8 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     "browser_cookies", "browser_storage", "browser_console",
     # 采集与扩展：download/pdf 落盘产物（重放登记第二份）；drag/upload 是页面写
     "browser_download", "browser_pdf", "browser_drag", "browser_upload",
+    # 环境自举：装内核是环境变更，重放会再改环境
+    "browser_install",
     # 会话式 shell：进程输出不可重放（重跑时系统状态已变）
     "exec_command", "write_stdin",
     # 子代理派生：spawn 有副作用
