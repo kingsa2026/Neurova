@@ -324,6 +324,16 @@ class ContextOrchestrator:
                 "truncated_chars": 0,
                 "last_error": None,
             },
+            # B5（对照改进项）：折叠触发判据读数。`last_reason` 取封闭原因集
+            # （fold_trigger 模块），增长门主动折叠计入 `proactive_folds`。
+            "fold_trigger": {
+                "last_reason": None,
+                "should_fold": False,
+                "last_occupancy": 0.0,
+                "last_growth_tokens": 0,
+                "last_growth_msgs": 0,
+                "proactive_folds": 0,
+            },
             "microcompact": {
                 "calls": 0,
                 "triggered_calls": 0,
@@ -2450,76 +2460,125 @@ class ContextOrchestrator:
         budget_tokens = self._effectiveWindowBudget(budget_tokens)
 
         msgs = normalizeViewMessages(conversation_context)
-        if not msgs or estimate_window_tokens(msgs) <= budget_tokens:
-            return normalizeViewMessages(conversation_context)
+        if not msgs:
+            return []
 
         cache = self._window_cache_slot(cache_key or self._resolve_window_cache_key())
-        # 增量防抖：距上次成功摘要新追加的消息数 ≤ 阈值时复用缓存摘要
-        # （省一轮摘要 LLM——实测摘要链路 30s+，每轮重调不可接受）。
-        # 未覆盖的消息仍归档在池中，零丢失。
+        total_tokens = estimate_window_tokens(msgs)
+
+        # ── B5：触发判据（预算击穿 ∨ 增长门），单源 fold_trigger.decideFoldTrigger。
+        # 门默认关（NEUROVA_FOLD_GROWTH_GATE=1 开启）：关闭时只有击穿才折，
+        # 与改前行为一致。
+        from neurova.context.fold_trigger import (
+            decideFoldTrigger,
+            splitFrozenCoveredPrefix,
+        )
+
+        decision = decideFoldTrigger(
+            total_tokens=total_tokens,
+            budget_tokens=budget_tokens,
+            last_fold_tokens=int(cache.get("last_fold_tokens") or 0),
+            last_fold_msgs=int(cache.get("last_fold_msgs") or 0),
+            total_msgs=len(msgs),
+            foldable_msgs=max(0, len(msgs) - 6),
+        )
+        self._recordFoldTriggerReadout(decision)
+        if not decision.should_fold:
+            # B2：零折叠轮也走冻结头——视图 = 冻结摘要行 + 未覆盖尾部，
+            # 已覆盖前缀不再以裸原文反复进出视图（前缀缓存跨轮存活）。
+            return self._frozenView(msgs, cache)
+
+        # ── B2：冻结已折叠前缀，折叠只作用于未覆盖尾部（增量折叠）。
+        # 改前每次折叠都对整窗重切重摘（previous_summary 链式续写），视图头部
+        # 摘要行逐轮改写 → KV 前缀缓存每轮失效。冻结分区后：头部按既有代际
+        # 渲染并缓存在折叠槽（两次折叠之间逐字节复用），新摘要只覆盖尾部增量。
+        frozen, rest = splitFrozenCoveredPrefix(
+            msgs, cache.get("covered") or set(), self._windowChunkHash
+        )
+        incremental = bool(frozen) and bool(rest)
+        if incremental:
+            head_rows = cache.get("frozen_head_rows")
+            if not head_rows:
+                head_rows = self._renderFrozenHead(cache, budget_tokens)
+            head_tokens = estimate_window_tokens(head_rows)
+            fold_budget = max(1000, budget_tokens - head_tokens)
+            if estimate_window_tokens(rest) <= fold_budget:
+                # 尾部未超份额：本轮零折叠（无摘要调用，头部字节稳定）
+                cache["frozen_head_rows"] = head_rows
+                logger.info(
+                    "[WINDOW_COMPACT] 增量尾部未超份额，零折叠（reason=%s, 尾部 %d 条/%d token，份额 %d）",
+                    decision.reason, len(rest), estimate_window_tokens(rest), fold_budget,
+                )
+                return head_rows + rest
+            fold_source: list = rest
+            previous_summary = ""  # 增量折叠不续写冻结摘要——旧代保持字节稳定
+        else:
+            fold_source = msgs
+            previous_summary = str(cache.get("summary") or "")
+            fold_budget = budget_tokens
+            if decision.reason == "growth_gate":
+                # B5 增长门主动折叠：源窗口未超预算，compact_window 的"超预算才折"
+                # 不会动作——把折叠目标压到当前占用的推荐比例（对齐
+                # split_window_by_budget 的 target_ratio=0.5），即"收走已消费的
+                # 老一半增量，保留近期区"。
+                fold_budget = max(1000, int(total_tokens * 0.5))
+
+        # 增量防抖（两条路径同判据）：距上次成功摘要新追加的消息数 ≤ 阈值时
+        # 复用缓存摘要/免调摘要（省一轮摘要 LLM——实测摘要链路 30s+）。
+        # 增量路径的零折叠判据在上面份额检查里；这里防的是"尾部略超份额"
+        # 的小增量轮——照旧折叠但**不调摘要**（静态桩、覆盖账不推进，
+        # P1-2 的不记假账纪律不变），增量累积过阈值后再真摘要。
         last_count = cache.get("last_count", 0)
         delta_msgs = (len(msgs) - last_count) if last_count else len(msgs)
         reuse_summary = bool(cache.get("summary")) and delta_msgs <= self._DELTA_RESUMMARY_MSGS
         summarize = None if reuse_summary else self._build_window_summarizer()
 
         compaction = await compact_window(
-            msgs,
-            budget_tokens,
+            fold_source,
+            fold_budget,
             summarize=summarize,
-            previous_summary=cache.get("summary", ""),
+            previous_summary=previous_summary,
             # T-11e（工单 §12.7 判据 6）：关键路径**只付一次**摘要 LLM 调用。
-            # 压缩器的"失败丢最旧一条重试"与"递进扩折叠重摘要"都是它自己的收敛
-            # 保证（对直接调用者有意义），不该由热路径代付 —— 实测把它们留在热
-            # 路径上时，恒失败的摘要器会让单轮发起 4 次调用。补做落点在下方
-            # `foldRollupWorker()`。
             summary_max_retries=0,
             summary_call_budget=1,
         )
-        if compaction is None:
+        if compaction is None or compaction.compacted_count == 0:
             self._last_folded_hashes = set()
             return msgs
 
         # 本轮被折叠消息 hash 集（build_context 据此当轮防召回——刚折叠即召回
-        # 会让折叠白做；下轮起窗口滑走、恢复正常语义召回）
+        # 会让折叠白做；下轮起窗口滑走、恢复正常语义召回）。增量路径只对尾部
+        # 计算（冻结头不重复计入）。
         kept_contents = {m.get("content", "") for m in compaction.window}
-        # 指纹域与归档侧同源（`_windowChunkHash`）：工具结果归档在 TOOL_CALL 域，
-        # 折叠侧若一律按 CONVERSATION 取，防召回集合对工具归档恒不命中。
         self._last_folded_hashes = {
             self._windowChunkHash(m)
-            for m in msgs
+            for m in fold_source
             if m.get("content", "") not in kept_contents
         }
-        # 零丢失判据的消费点（改前 `_last_archived_window_hashes` 只写不读）：
-        # 折叠发生即对归档对账，读数并进 get_context_health()["fold_integrity"]。
+        # 零丢失判据的消费点：折叠发生即对归档对账，读数并进
+        # get_context_health()["fold_integrity"]。
         from neurova.context.fold_integrity import verifyOrchestratorFoldIntegrity
 
         # `__new__` 直构路径（测试/工具）不跑 __init__、没有 `_context_health`：
-        # 读数面按需建一份（空形状取 `_emptyContextHealth()` 单源，不在此另写
-        # 一份字段表），而不是让判据在这条路径上抛异常（那是判据被绕过）。
+        # 读数面按需建一份（空形状取 `_emptyContextHealth()` 单源）。
         health = getattr(self, "_context_health", None)
         if health is None:
             health = self._context_health = self._emptyContextHealth()
         health["fold_integrity"] = verifyOrchestratorFoldIntegrity(self)
 
         # 更新跨轮缓存（摘要失败时保留旧摘要，下次重试增量）。
-        #
-        # P1-2：只有**新**摘要才能推进覆盖记账。摘要失败时 summarize 会沿用
-        # previous_summary（对池侧是幂等 no-op），返回值仍非空；旧实现据此把
-        # last_count 前移、把新增消息记为"已覆盖"——而那份摘要在诞生时它们
-        # 还在窗口里，等于在摘要层做假账（防抖期内不再重摘要，视图只剩一个
-        # 与内容无关的旧标题）。
+        # P1-2：只有**新**摘要才能推进覆盖记账（防把新增消息谎报为已覆盖）。
         if compaction.summary and compaction.summary_is_fresh:
             cache["last_count"] = len(msgs)
             from neurova.context_pool import ContextInput, ContextSource
 
             # 标记本轮仍被折叠的消息为已覆盖（凡未出现在新窗口的），
             # 并同批收集这一代的 covers（hash + 轮次 id）。
-            # 轮次 id 的派生与归档侧**同源**（`assign_turn_ids`）：另起一份
-            # "第几条算一轮"的算法，covers 的 turn 区间会与归档归属对不上。
+            # 轮次 id 的派生与归档侧**同源**（`assign_turn_ids`）。
             kept_set = {m["content"] for m in compaction.window}
             coveredNow: List[str] = []
             turnIdsNow: List[str] = []
-            for m, turnId in assign_turn_ids(msgs):
+            for m, turnId in assign_turn_ids(fold_source):
                 if m.get("content", "") in kept_set:
                     continue
                 fingerprint = self._windowChunkHash(m)
@@ -2527,24 +2586,19 @@ class ContextOrchestrator:
                 coveredNow.append(fingerprint)
                 turnIdsNow.append(turnId)
             # T-11a/T-11b：新摘要推进代际栈（旧摘要降一层）并写进池带 covers。
-            # 顺序不可换：covers 取的正是上面刚落进 `covered` 的那批 hash，
-            # 先推进则这一代没有任何原文可寻址。
             self._advanceFoldGeneration(
                 cache, compaction.summary, covers=coveredNow, turnIds=turnIdsNow
             )
         elif compaction.compacted_count > 0 and summarize is not None:
             # T-11e：本轮摘要失败（或没轮到它）。折叠发生了，但覆盖账**不推进**
             # （T-05 同族：不给折叠缓存记假账），批次交后台补做。
-            # 视图这一轮走下方既有静态桩语义 —— 不阻塞当轮回答，也不谎报已覆盖。
-            # covers 与派发时刻的窗口条数一并发给 worker：后台跑完时窗口早已前移，
-            # 用那时的条数会把期间新增的消息一并谎报为已覆盖。
             worker = self.foldRollupWorker()
             if worker is not None:
                 kept_set = {m["content"] for m in compaction.window}
                 coversNow: List[str] = []
                 turnsNow: List[str] = []
                 droppedMsgs: List[dict] = []
-                for m, turnId in assign_turn_ids(msgs):
+                for m, turnId in assign_turn_ids(fold_source):
                     if m.get("content", "") in kept_set:
                         continue
                     coversNow.append(self._windowChunkHash(m))
@@ -2559,40 +2613,130 @@ class ContextOrchestrator:
                     lastCount=len(msgs),
                 )
 
-        window = compaction.window
-        if compaction.compacted_count > 0 and not compaction.summary:
-            # 摘要器缺失/失败：注入静态折叠桩（或沿用既有摘要），不静默丢上下文
-            existing = cache.get("summary", "")
-            stub = (
-                f"[早期对话摘要] {existing}"
-                if existing
-                else (
-                    f"[早期对话摘要] （早期 {compaction.compacted_count} 条消息已折叠以控制上下文预算；"
+        # B5：折叠落地即记增长基线（下次增长门以此次为准）
+        cache["last_fold_tokens"] = total_tokens
+        cache["last_fold_msgs"] = len(msgs)
+
+        if incremental:
+            # B2 视图 = 冻结头（重渲染：新代已入阶梯）+ 尾部保留原文。
+            # 头部渲染以**整预算**为 region 基准（与尾部实占解耦）——同一批代际
+            # 在两次折叠之间逐字节复用，这正是前缀缓存存活的判据。
+            # 新代摘要行由阶梯统一渲染（head_rows 已含全部代际），compaction
+            # 里的那行不再重复拼入——否则最新一代在视图里出现两次。
+            head_rows = self._renderFrozenHead(cache, budget_tokens)
+            cache["frozen_head_rows"] = head_rows
+            keptTail = [
+                m
+                for m in compaction.window
+                if not (
+                    (m or {}).get("role") == "system"
+                    and "早期对话摘要" in str((m or {}).get("content", ""))
+                )
+            ]
+            window = head_rows + keptTail
+            if not compaction.summary:
+                # 尾部摘要缺席（摘要器缺失/失败/防抖免调）：补尾部静态桩。
+                # 桩文本用通用形态、不复述冻结头摘要——防抖轮的覆盖账未推进，
+                # 复述旧摘要会谎报"新滑入的消息已被摘要覆盖"（P1-2 同族）。
+                stub = (
+                    f"[早期对话摘要] （近期 {compaction.compacted_count} 条消息已折叠以控制上下文预算；"
                     "如需细节请让我检索历史记忆。）"
                 )
-            )
-            window = [{"role": "system", "content": stub}] + window
+                window = head_rows + [{"role": "system", "content": stub}] + keptTail
+        else:
+            window = compaction.window
+            if compaction.compacted_count > 0 and not compaction.summary:
+                # 摘要器缺失/失败：注入静态折叠桩（或沿用既有摘要），不静默丢上下文
+                existing = cache.get("summary", "")
+                stub = (
+                    f"[早期对话摘要] {existing}"
+                    if existing
+                    else (
+                        f"[早期对话摘要] （早期 {compaction.compacted_count} 条消息已折叠以控制上下文预算；"
+                        "如需细节请让我检索历史记忆。）"
+                    )
+                )
+                window = [{"role": "system", "content": stub}] + window
 
-        # T-11d：把这一代的 `covers_ref` 内联进摘要行 —— 模型据此**确定性**下钻，
-        # 而不是靠 recall_history 的相关性门槛碰运气（工单 §12.5 第 3 条）。
-        # 放在两条分支汇合处：有 LLM 摘要与只有静态桩两种形状都要带引用，
-        # 否则"摘要行有引用"这件事就只在摘要成功时才成立（那是运气，不是契约）。
-        window = self._inlineCoversRef(window, cache)
-        # T-11c：把唯一那行摘要换成**按距离几何退避的多档概览**（近细远粗）。
-        # 放在引用内联之后：本方法自己渲染每一档的引用（引用属于**该档**，
-        # 拿栈顶那一份去挂全部档位就是第二份寻址口径）。
-        window = self._assembleResolutionLadder(window, cache, budget_tokens)
+            # T-11d：把这一代的 `covers_ref` 内联进摘要行 —— 模型据此**确定性**下钻。
+            window = self._inlineCoversRef(window, cache)
+            # T-11c：把唯一那行摘要换成**按距离几何退避的多档概览**（近细远粗）。
+            window = self._assembleResolutionLadder(window, cache, budget_tokens)
+            # B2：整窗折叠后也缓存冻结头（下次零折叠轮直接复用）
+            cache["frozen_head_rows"] = self._renderFrozenHead(cache, budget_tokens)
 
         logger.info(
-            "[WINDOW_COMPACT] 窗口超预算折叠: %d msgs → %d（折叠 %d 条, token %d → %d, LLM摘要=%s）",
+            "[WINDOW_COMPACT] 窗口折叠: %d msgs → %d（%s，reason=%s，折叠 %d 条, token %d → %d, LLM摘要=%s）",
             len(msgs),
             len(window),
+            "增量" if incremental else "整窗",
+            decision.reason,
             compaction.compacted_count,
             compaction.tokens_before,
             compaction.tokens_after,
             bool(compaction.summary),
         )
         return window
+
+    def _renderFrozenHead(self, cache: dict, budget_tokens: int) -> list:
+        """B2：把已覆盖前缀渲染成冻结头（代际阶梯，region=整预算）。
+
+        与尾部实占解耦：同一批代际渲染出的行**只取决于（代际栈，预算）**，
+        不随本轮尾部大小波动——折叠槽缓存渲染产物（`frozen_head_rows`），
+        两次折叠之间逐字节复用。摘要缺失且无代际时返回空（无头可冻结）。
+        """
+        summary = str(cache.get("summary") or "")
+        if not summary and not cache.get("generations"):
+            return []
+        if summary:
+            row = {"role": "system", "content": f"[早期对话摘要] {summary}"}
+        else:
+            row = {
+                "role": "system",
+                "content": (
+                    "[早期对话摘要] （早期消息已折叠以控制上下文预算；"
+                    "如需细节请让我检索历史记忆。）"
+                ),
+            }
+        rows = self._inlineCoversRef([row], cache)
+        rows = self._assembleResolutionLadder(rows, cache, budget_tokens)
+        return rows
+
+    def _frozenView(self, msgs: list, cache: dict) -> list:
+        """B2：零折叠轮的视图 = 冻结头 + 未覆盖尾部。
+
+        无已覆盖前缀时原样返回（与改前逐字一致）。冻结头渲染产物缓存在
+        折叠槽（`frozen_head_rows`），跨轮逐字节复用。
+        """
+        from neurova.context.fold_trigger import splitFrozenCoveredPrefix
+
+        frozen, rest = splitFrozenCoveredPrefix(
+            msgs, cache.get("covered") or set(), self._windowChunkHash
+        )
+        if not frozen:
+            return msgs
+        head_rows = cache.get("frozen_head_rows")
+        if not head_rows:
+            head_rows = self._renderFrozenHead(
+                cache, self._effectiveWindowBudget(self._resolve_window_token_budget())
+            )
+        cache["frozen_head_rows"] = head_rows
+        return head_rows + rest
+
+    def _recordFoldTriggerReadout(self, decision) -> None:
+        """B5：触发判据读数（归因面）——进 context health 的 fold_trigger 槽。"""
+        readout = self._contextHealthSlot("fold_trigger")
+        readout.update(
+            {
+                "last_reason": decision.reason,
+                "should_fold": bool(decision.should_fold),
+                "last_occupancy": round(float(decision.occupancy), 4),
+                "last_growth_tokens": int(decision.growth_tokens),
+                "last_growth_msgs": int(decision.growth_msgs),
+            }
+        )
+        if decision.should_fold and decision.reason == "growth_gate":
+            readout["proactive_folds"] = int(readout.get("proactive_folds") or 0) + 1
 
     async def manual_compact(self, conversation_history: list) -> dict:
         """/compact 手动压缩：无视预算水位强制折叠当前会话窗口。

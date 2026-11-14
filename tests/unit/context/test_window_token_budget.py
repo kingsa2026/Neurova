@@ -170,12 +170,11 @@ class TestWindowTokenBudget:
         _ = await self._build(orch, ctx)
         assert calls["n"] == 1
 
-        # 追加 6 条短消息（累计增量 ≥ 阈值 250 token）→ 重新摘要
-        for j in range(3):
-            ctx = ctx + [
-                {"role": "user", "content": f"短问题{j}a"},
-                {"role": "assistant", "content": f"短回答{j}b"},
-            ]
+        # 追加 6 条长消息（B2 增量折叠：未覆盖尾部超出其份额 → 重新摘要）。
+        # 注意：B2 之后"重新摘要"的触发条件是**尾部超出份额**而非整窗击穿——
+        # 小增量短消息时尾部仍在份额内，走零折叠（不调摘要），这是预期行为。
+        for j in range(6):
+            ctx = ctx + [{"role": "user", "content": f"追加长消息{j}: " + "测" * 900}]
         r3 = await self._build(orch, ctx)
         assert calls["n"] == 2, "累计增量超阈值应重新摘要"
         joined3 = "".join(m["content"] for m in r3)
