@@ -19,7 +19,7 @@ import pytest
 from neurova.llm.provider_manager import (
     LLMProviderManager,
     ProviderConfig,
-    _BUILTIN_PROVIDER_DEFS,
+    builtinProviderDefs,
 )
 
 # 测试占位,不落源码;真实密钥只能来自配置/环境变量
@@ -39,7 +39,7 @@ def manager():
 
 class TestBuiltinDefs:
     def test_defs_cover_frontend_seed_core(self):
-        ids = {d["id"] for d in _BUILTIN_PROVIDER_DEFS}
+        ids = {d["id"] for d in builtinProviderDefs()}
         assert {"openrouter", "opencode"} <= ids
 
     def test_empty_scope_seeds_builtins(self, manager):
@@ -103,7 +103,7 @@ class TestSensetimeBuiltin:
     """
 
     def test_sensetime_in_builtin_defs(self):
-        ids = {d["id"] for d in _BUILTIN_PROVIDER_DEFS}
+        ids = {d["id"] for d in builtinProviderDefs()}
         assert "sensetime" in ids
 
     def test_sensetime_seeds_with_real_base_url(self, manager):

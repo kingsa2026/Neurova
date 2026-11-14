@@ -82,6 +82,7 @@ from neurova.core.logger import get_logger
 from neurova.core.module_system import Module
 from neurova.llm.presets import LLMPresetRegistry, ModelPreset, get_preset_registry
 from neurova.llm.providers.secret_store_clean import SecretStore, decrypt_api_key, encrypt_api_key
+from pydantic import BaseModel, ValidationError
 from neurova.llm.providers.types import (
     ConnectionResult,
     ModelInfo as PydanticModelInfo,
@@ -103,145 +104,54 @@ NO_API_REQUIRED_PROVIDER_IDS: frozenset = (
     KEYLESS_PROVIDER_IDS | frozenset({"openrouter", "openai"})
 )
 
-# 内置服务商定义(与前端 ModelPage 种子卡片对齐;缺失时才补入,绝不覆盖用户配置)
-_BUILTIN_PROVIDER_DEFS: tuple[dict, ...] = (
-    {
-        "id": "openrouter",
-        "name": "OpenRouter",
-        "provider": "openrouter",
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_prefix": "sk-or-v1-",
-    },
-    {
-        "id": "opencode",
-        "name": "OpenCode",
-        "provider": "opencode",
-        "base_url": "https://opencode.ai/zen/v1",
-    },
-    {
-        "id": "kilo-code",
-        "name": "Kilo Code",
-        "provider": "kilo",
-        "base_url": "https://api.kilo.ai/api/gateway",
-    },
-    {
-        "id": "github-models",
-        "name": "GitHub Models",
-        "provider": "openai",
-        "base_url": "https://models.github.ai/inference",
-    },
-    {
-        # 商汤 LLM:真实端点 token.sensenova.cn/v1(OpenAI 兼容)。
-        # 曾查实前端卡片写的是 api.sensetime.com/v1(不可用),用户须手动
-        # 新建自定义 provider 才能用 —— 内置后填 key 即开箱。
-        "id": "sensetime",
-        "name": "商汤科技",
-        "provider": "openai",
-        "base_url": "https://token.sensenova.cn/v1",
-        "api_key_prefix": "",
-    },
-    # ── B1-4：
-    # 作为静态回退清单：用户填 key 后发现失败时仍有可用模型列表
-    {
-        "id": "volcengine",
-        "name": "火山引擎（Ark）",
-        "provider": "openai",
-        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
-        "api_key_prefix": "",
-        "models": [
-            "doubao-seed-evolving",
-            "doubao-seed-2-1-pro-260628",
-            "doubao-seed-2-1-turbo-260628",
-            "doubao-seed-2-0-pro-260215",
-            "doubao-seed-2-0-lite-260628",
-            "doubao-seed-2-0-lite-260428",
-            "doubao-seed-2-0-lite-260215",
-            "doubao-seed-2-0-mini-260628",
-            "doubao-seed-2-0-mini-260428",
-            "doubao-seed-2-0-mini-260215",
-            "doubao-seed-2-0-code-preview-260215",
-            "doubao-seed-character-260628",
-            "doubao-seed-character-251128",
-            "glm-5-2-260617",
-            "kimi-k2-250905",
-            "deepseek-v3-2-251201",
-            # AIGC 预置（方舟目录实测 ID：seedream 图像 / seedance 视频）
-            "doubao-seedream-4-0-250828",
-            "doubao-seedream-5-0-260128",
-            "doubao-seedream-5-0-pro-260628",
-            "doubao-seedance-1-0-pro-250528",
-            "doubao-seedance-2-0-260128",
-            "doubao-seedance-2-5-260628",
-        ],
-    },
-    {
-        "id": "volcengine-agentplan",
-        "name": "火山引擎 Agent Plan",
-        "provider": "openai",
-        "base_url": "https://ark.cn-beijing.volces.com/api/plan/v3",
-        "api_key_prefix": "",
-        "models": [
-            "doubao-seed-2.0-lite",
-            "doubao-seed-2.0-mini",
-            "deepseek-v4-flash",
-            "deepseek-v4-pro",
-            "minimax-m3",
-            "glm-5.3",
-            "doubao-seed-2.1-turbo",
-            "doubao-seed-evolving",
-            "kimi-k3",
-            "kimi-k2.7-code",
-            "ark-code-latest",
-        ],
-    },
-    {
-        "id": "mimo",
-        "name": "小米 MiMo",
-        "provider": "openai",
-        "base_url": "https://api.xiaomimimo.com/v1",
-        "api_key_prefix": "sk-",
-        "models": ["mimo-v2.5", "mimo-v2.5-pro"],
-    },
-    {
-        "id": "mimo-tokenplan",
-        "name": "小米 MiMo Token Plan",
-        "provider": "openai",
-        "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
-        "api_key_prefix": "",
-        "models": ["mimo-v2.5", "mimo-v2.5-pro"],
-    },
-    # ── AIGC 服务商预置（2026-09-14 实测端点矩阵，docs/08-research/AIGC生成端点矩阵）──
-    # 模型 ID 仅收录已证实存在的（/models 或图像端点 200 实测）；视频端点未证实的不放。
-    {
-        # 国际网关：本会话实测 GET /v1/models 200、POST /v1/images/generations 200 出图。
-        "id": "agnes-intl",
-        "name": "Agnes（国际网关）",
-        "provider": "openai",
-        "base_url": "https://apihub.agnes-ai.com/v1",
-        "api_key_prefix": "sk-",
-        "models": [
-            "agnes-3.0-flash", "agnes-2.5-pro-alpha", "agnes-2.5-flash",
-            "agnes-image-2.1-flash", "agnes-image-2.1-flashv",
-            "agnes-image-2.0-flash", "agnes-image-2.0-flashv",
-            # 2026-09-14 官方仓 AgnesAI-Labs/AgnesAI-Models 实核端点契约后解锁
-            "agnes-video-v2.0",
-        ],
-    },
-    {
-        # 国内网关：与本会话所用 key 不匹配（该 key 返回 401）；按用户实际所属选填。
-        "id": "agnes-cn",
-        "name": "Agnes（国内网关）",
-        "provider": "openai",
-        "base_url": "https://api.agnes-ai.cn/v1",
-        "api_key_prefix": "sk-",
-        "models": [
-            "agnes-3.0-flash", "agnes-2.5-pro-alpha", "agnes-2.5-flash",
-            "agnes-image-2.1-flash", "agnes-image-2.1-flashv",
-            "agnes-image-2.0-flash", "agnes-image-2.0-flashv",
-            "agnes-video-v2.0",
-        ],
-    },
-)
+# 内置服务商模板（P1-5 数据驱动化）：单一事实源 = config/llm_provider_templates.json。
+# 与前端 ModelPage 种子卡片对齐；缺失时才补入，绝不覆盖用户配置。
+# 读取即校验（必填字段 / base_url 形态 / id 唯一），仓库数据坏了显式报错——
+# 静默少装一批内置 provider 就是「管理页看不到、日志里没有」的暗病。
+
+
+class _ProviderTemplate(BaseModel):
+    """config/llm_provider_templates.json 的单条模板。"""
+
+    id: str
+    name: str
+    provider: str
+    base_url: str
+    api_key_prefix: str = ""
+    models: List[str] = []
+    note: str = ""
+
+
+def _providerTemplatePath() -> Path:
+    return (
+        Path(__file__).resolve().parent.parent.parent / "config" / "llm_provider_templates.json"
+    )
+
+
+def builtinProviderDefs() -> tuple[dict, ...]:
+    """内置服务商模板（读取即校验；文件极小、装载频次低，不设缓存）。"""
+    path = _providerTemplatePath()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as e:
+        raise FileNotFoundError(f"内置服务商模板文件缺失: {path}") from e
+    except json.JSONDecodeError as e:
+        raise ValueError(f"内置服务商模板 JSON 损坏: {path}: {e}") from e
+    entries = data.get("providers") if isinstance(data, dict) else None
+    if not isinstance(entries, list) or not entries:
+        raise ValueError(f"内置服务商模板缺少非空 providers 列表: {path}")
+    defs: List[dict] = []
+    seen: set[str] = set()
+    for idx, entry in enumerate(entries):
+        try:
+            tpl = _ProviderTemplate.model_validate(entry)
+        except ValidationError as e:
+            raise ValueError(f"内置服务商模板第 {idx} 条校验失败: {e}") from e
+        if tpl.id in seen:
+            raise ValueError(f"内置服务商模板 id 重复: {tpl.id}")
+        seen.add(tpl.id)
+        defs.append(tpl.model_dump())
+    return tuple(defs)
 
 
 def _classify_discovery_error_kind(exc: BaseException) -> str:
@@ -575,7 +485,7 @@ class LLMProviderManager(Module):
         前端种子对齐的核心定义(openrouter/opencode/kilo/github-models)。
         无默认可配模型(models=[]):真实清单由发现流程填充。
         """
-        for definition in _BUILTIN_PROVIDER_DEFS:
+        for definition in builtinProviderDefs():
             if definition["id"] in self._providers:
                 continue
             self._providers[definition["id"]] = ProviderConfig(
@@ -591,7 +501,7 @@ class LLMProviderManager(Module):
             "Merged built-in provider seeds: %s",
             ", ".join(
                 d["id"]
-                for d in _BUILTIN_PROVIDER_DEFS
+                for d in builtinProviderDefs()
                 if d["id"] in self._providers
             ),
         )
