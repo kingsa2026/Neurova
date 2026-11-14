@@ -19,13 +19,13 @@
 
 from __future__ import annotations
 
-import datetime
 import json
 import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from .term_registry import IS_A_PREDICATE
+from neurova.core.time_utils import nowIso as _now
 
 _SCHEMA_V9 = """
 CREATE TABLE IF NOT EXISTS ontology_rules (
@@ -64,10 +64,6 @@ ALTER TABLE ontology_rules ADD COLUMN materialization TEXT NOT NULL DEFAULT 'obs
 
 #: 档位闭集：写错一个字母就当没写过，等于偷偷把一条规则转正——所以在写入处拒。
 MATERIALIZATION_MODES = ("observe", "enforce")
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 #: 求值策略闭集（specs/2026-11-12 §10 W9，D9：策略是数据不是第二引擎）——

@@ -14,6 +14,7 @@ from __future__ import annotations
 import datetime
 import json
 from typing import Any, Dict, List, Optional
+from neurova.core.time_utils import nowIso as _now
 
 _SCHEMA_V43_FUNCTIONS = """
 CREATE TABLE IF NOT EXISTS ontology_functions (
@@ -38,10 +39,6 @@ ALTER TABLE knowledge_derivation_edges ADD COLUMN source_kind TEXT NOT NULL DEFA
 _MATERIALIZATIONS = ("observe", "enforce")
 
 _NOW_COL = "datetime"
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 class FunctionRegistry:

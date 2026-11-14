@@ -7,10 +7,15 @@ tmp + ``os.replace`` 语义：写盘中途崩溃/断电不会留下半截 JSON�
 """
 from __future__ import annotations
 
+import json
 import os
 import time
 from pathlib import Path
-from typing import Union
+from typing import Any, Union
+
+from neurova.core.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def atomic_write_text(path: Union[str, Path], text: str, *, encoding: str = "utf-8") -> None:
@@ -20,6 +25,36 @@ def atomic_write_text(path: Union[str, Path], text: str, *, encoding: str = "utf
     tmp = p.with_name(p.name + ".tmp")
     tmp.write_text(text, encoding=encoding)
     os.replace(str(tmp), str(p))
+
+
+def loadJsonStore(path: Union[str, Path], default: Any) -> Any:
+    """读取 JSON 持久化库文件；缺失/损坏/顶层非对象一律返回 ``default``。
+
+    全仓 JSON 库文件读口径单源（P2-26）：文件不存在按"还没有数据"返回默认值；
+    解析失败以 warning 点名文件与原因（不静默装作没配过），也返回默认值，
+    是否把损坏文件隔离交由调用方结合 :func:`quarantine_corrupt_file` 决定。
+    """
+    p = Path(path)
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return default
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("JSON store unreadable, fallback to default: %s (%s)", p, exc)
+        return default
+    if isinstance(raw, dict):
+        return raw
+    logger.warning("JSON store top-level is not an object, fallback to default: %s", p)
+    return default
+
+
+def saveJsonStore(path: Union[str, Path], data: Any) -> None:
+    """原子写 JSON 持久化库文件（同目录 .tmp 中转 + ``os.replace`` 原子替换）。
+
+    全仓 JSON 库文件写口径单源（P2-26）：序列化格式统一
+    ``ensure_ascii=False, indent=2``，落盘语义与 :func:`atomic_write_text` 一致。
+    """
+    atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=2))
 
 
 def quarantine_corrupt_file(path: Union[str, Path]) -> str:

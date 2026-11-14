@@ -11,10 +11,9 @@ Webhook 管理 API
 - GET    /v1/webhooks/{webhook_id}/deliveries   投递记录
 """
 
+from neurova.core.atomic_io import loadJsonStore, saveJsonStore
 from neurova.core.logger import get_logger
 from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
-import json
-import pathlib
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -79,23 +78,13 @@ def _load_store() -> None:
     """启动时从磁盘重载 webhook 与投递记录（进程内 dict 原为易失态）。"""
     _webhooks.clear()
     _deliveries.clear()
-    try:
-        with open(_STORE_FILE, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-        if isinstance(raw, dict):
-            _webhooks.update(raw.get("webhooks", {}) or {})
-            _deliveries.update(raw.get("deliveries", {}) or {})
-    except FileNotFoundError:
-        pass
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Failed to load webhook store: %s", e)
+    raw = loadJsonStore(_STORE_FILE, {})
+    _webhooks.update(raw.get("webhooks", {}) or {})
+    _deliveries.update(raw.get("deliveries", {}) or {})
 
 
 def _save_store() -> None:
-    p = pathlib.Path(_STORE_FILE)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump({"webhooks": _webhooks, "deliveries": _deliveries}, f, indent=2, ensure_ascii=False)
+    saveJsonStore(_STORE_FILE, {"webhooks": _webhooks, "deliveries": _deliveries})
 
 
 _load_store()

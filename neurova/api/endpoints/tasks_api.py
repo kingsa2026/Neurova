@@ -20,9 +20,7 @@
 
 from neurova.core.logger import get_logger
 from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
-import json
 import os
-import pathlib
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -30,6 +28,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
+from neurova.core.atomic_io import loadJsonStore, saveJsonStore
 from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
@@ -124,25 +123,13 @@ _tasks_store: Dict[str, Dict[str, Any]] = {}
 
 
 def _load_store() -> None:
-    try:
-        with open(_STORE_FILE, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-        if isinstance(raw, dict):
-            _boards_store.update(raw.get("boards", {}) or {})
-            _tasks_store.update(raw.get("tasks", {}) or {})
-    except FileNotFoundError:
-        pass
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Failed to load tasks store: %s", e)
+    raw = loadJsonStore(_STORE_FILE, {})
+    _boards_store.update(raw.get("boards", {}) or {})
+    _tasks_store.update(raw.get("tasks", {}) or {})
 
 
 def _save_store() -> None:
-    p = pathlib.Path(_STORE_FILE)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(p.name + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"boards": _boards_store, "tasks": _tasks_store}, f, indent=2, ensure_ascii=False)
-    tmp.replace(p)
+    saveJsonStore(_STORE_FILE, {"boards": _boards_store, "tasks": _tasks_store})
 
 
 def _reboot_load() -> None:

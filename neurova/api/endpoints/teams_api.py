@@ -21,9 +21,7 @@
 """
 
 from neurova.core.logger import get_logger
-import json
 import os
-import pathlib
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -31,6 +29,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
+from neurova.core.atomic_io import loadJsonStore, saveJsonStore
 from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
@@ -104,24 +103,12 @@ def _team_view(team: Dict[str, Any]) -> TeamInfo:
 
 
 def _load_store() -> None:
-    try:
-        with open(_STORE_FILE, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-        if isinstance(raw, dict):
-            _teams_store.update(raw.get("teams", {}) or {})
-    except FileNotFoundError:
-        pass
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Failed to load teams store: %s", e)
+    raw = loadJsonStore(_STORE_FILE, {})
+    _teams_store.update(raw.get("teams", {}) or {})
 
 
 def _save_store() -> None:
-    p = pathlib.Path(_STORE_FILE)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(p.name + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"teams": _teams_store}, f, indent=2, ensure_ascii=False)
-    tmp.replace(p)
+    saveJsonStore(_STORE_FILE, {"teams": _teams_store})
 
 
 def _reboot_load() -> None:

@@ -28,6 +28,8 @@ from .models import NodeDefinition
 from neurova.context.token_estimator import estimate_tokens as estimate_text_tokens
 from neurova.security.safe_expr import SafeExprError, safe_eval
 
+from neurova.collaboration.neurflow.llm_bridge import get_agent as _get_agent
+from neurova.collaboration.neurflow.llm_bridge import extract_llm_text as _extract_llm_text
 logger = get_logger(__name__)
 
 
@@ -710,17 +712,6 @@ BUILTIN_NODES: List[Dict[str, Any]] = [
 # ==================== 服务获取函数（延迟加载） ====================
 
 
-def _get_agent():
-    """获取 Agent 实例"""
-    try:
-        from neurova.agent_core import Agent
-
-        return Agent.get_instance()
-    except (ImportError, AttributeError):
-        logger.debug("Agent 未可用")
-        return None
-
-
 def _get_evolution():
     """获取 EvolutionOrchestrator 实例"""
     try:
@@ -835,28 +826,6 @@ def _get_resource_quota_manager():
         return get_resource_quota_manager()
     except Exception:  # noqa: BLE001
         return None
-
-
-def _extract_llm_text(response: Any) -> str:
-    """从多种响应形状中安全提取文本内容"""
-    if isinstance(response, str):
-        return response
-    if isinstance(response, dict):
-        choices = response.get("choices")
-        if isinstance(choices, list) and choices:
-            message = choices[0].get("message", {})
-            if isinstance(message, dict):
-                return str(message.get("content", ""))
-        return str(response)
-    # OpenAI 风格对象：choices[0].message.content
-    try:
-        if hasattr(response, "choices") and response.choices:
-            message = response.choices[0].message
-            if hasattr(message, "content"):
-                return str(message.content)
-    except Exception:
-        pass
-    return str(response)
 
 
 # ==================== 节点执行器 ====================

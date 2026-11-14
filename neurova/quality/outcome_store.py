@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional
 from neurova.core.data_root import dataPath
 from neurova.core.logger import get_logger
 from neurova.knowledge.foundation.storage_fence import assertNotUnderProductionMemory
+from neurova.core.time_utils import nowIso as _now
 
 logger = get_logger(__name__)
 
@@ -47,10 +48,6 @@ CREATE INDEX IF NOT EXISTS idx_quality_session_time
 CREATE INDEX IF NOT EXISTS idx_quality_type_time
     ON conversation_quality_events(event_type, occurred_at);
 """
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 def _windowStart(seconds: int) -> str:

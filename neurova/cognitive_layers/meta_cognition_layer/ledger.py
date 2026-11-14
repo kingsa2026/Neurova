@@ -20,6 +20,7 @@ from typing import Optional
 
 from neurova.core.logger import get_logger
 from neurova.core.data_root import dataPath
+from neurova.core.time_utils import nowIso as _now_iso
 
 logger = get_logger(__name__)
 
@@ -75,10 +76,6 @@ CREATE TABLE IF NOT EXISTS meta_states (
 );
 CREATE INDEX IF NOT EXISTS idx_meta_states_agent ON meta_states(agent_id, created_at);
 """
-
-
-def _now_iso() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 class MetaLedger:

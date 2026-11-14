@@ -501,7 +501,7 @@ def _tiktok_sign_sha256(secret: str, params: Dict[str, Any]) -> str:
 
 def get_secret_store():
     """懒导入避免循环依赖"""
-    from neurova.llm.providers.secret_store import get_secret_store as _gss
+    from neurova.llm.providers.secret_store_clean import get_secret_store as _gss
 
     return _gss()
 

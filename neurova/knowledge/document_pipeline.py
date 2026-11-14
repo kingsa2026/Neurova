@@ -12,7 +12,6 @@
 """
 from __future__ import annotations
 
-import datetime
 import io
 import os
 import re
@@ -39,6 +38,7 @@ from neurova.knowledge import parser_shadow
 from neurova.knowledge.ocr_engines import selectOcrEngine
 from neurova.knowledge.splitter import build_entry_chunks
 from neurova.security.skill_scanner import DOC_ASSET_SUFFIXES
+from neurova.core.time_utils import nowIso as _now
 
 logger = get_logger(__name__)
 
@@ -101,10 +101,6 @@ class ParsedDocument:
             "chunks": [dict(chunk) for chunk in self.chunks],
             "warnings": list(self.warnings),
         }
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 def _ext(filename: str) -> str:

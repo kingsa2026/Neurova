@@ -17,7 +17,7 @@ from __future__ import annotations
 """
 
 import asyncio
-import json
+from neurova.core.atomic_io import loadJsonStore, saveJsonStore
 from neurova.core.logger import get_logger
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
@@ -130,29 +130,19 @@ class ChannelTestResult(BaseModel):
 
 
 def _save_store(store: Dict[str, Any]) -> None:
-    target = _configFile()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_name(target.name + ".tmp")
     # 凭据封存只发生在**落盘这一处**（读侧对称解密见 `_load_store`）：
     # 加密改的是磁盘表示，不改业务链路拿到的内存契约 —— 装配、冲突检测、
     # 扫码回填照旧读明文，不会在消费端派生第二套语义。
-    tmp.write_text(
-        json.dumps(sealSecrets(store), ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    tmp.replace(target)
+    saveJsonStore(_configFile(), sealSecrets(store))
 
 
 def _load_store() -> Dict[str, Any]:
     target = _configFile()
     if not target.exists():
         return {"version": 2, "agents": {}}
-    try:
-        raw = json.loads(target.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, IOError) as exc:
-        # 损坏与「没有配置」是两回事：静默返回空表会把用户的真实配置
-        # 变成"从未配过"，且下一次保存就地覆盖 —— 故此处点名文件与原因。
-        logger.warning("渠道配置文件不可读，按空表继续（下一次保存将覆盖）: %s (%s)", target, exc)
-        return {"version": 2, "agents": {}}
+    # 损坏与「没有配置」是两回事：loadJsonStore 会点名文件与原因后按默认空表继续
+    #（下一次保存将覆盖），这里把默认值取成 v2 空表以保持原语义。
+    raw = loadJsonStore(target, {"version": 2, "agents": {}})
     if isinstance(raw, dict) and raw.get("version") == 2 and isinstance(raw.get("agents"), dict):
         return unsealSecrets(raw)
     # v1 平铺 {channel_type: cfg} → 迁移为 default agent 并落盘（幂等）

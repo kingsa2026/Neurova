@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from neurova.core.data_root import dataPath
 from neurova.core.db_migration import migrate as applyMigrations, register_migration
 from neurova.core.logger import get_logger
+from neurova.core.time_utils import nowIso as _now
 
 logger = get_logger(__name__)
 
@@ -39,10 +40,6 @@ CREATE INDEX IF NOT EXISTS idx_ingest_jobs_status
     ON knowledge_ingest_jobs(status, next_attempt_at);
 """
 register_migration(1, _SCHEMA, domain=_DOMAIN)
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 class KnowledgeIngestQueue:

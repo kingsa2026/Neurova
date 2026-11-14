@@ -17,10 +17,10 @@ G08 的形状：`NodeType` / `RelationType` 两个 Enum 长在代码里，加一
 
 from __future__ import annotations
 
-import datetime
 import json
 import re
 from typing import Any, Dict, List, Optional
+from neurova.core.time_utils import nowIso as _now
 
 _TERM_KINDS = ("concept", "relation", "property")
 
@@ -196,10 +196,6 @@ _LIST_COLUMNS = ("domain_terms", "range_terms", "range_kinds", "disjoint_with",
 _MAP_COLUMNS = ("labels", "alt_labels", "qualifier_schema")
 _FLAG_COLUMNS = ("symmetric", "transitive", "deprecated")
 _PASSTHROUGH_COLUMNS = ("cardinality", "parent_term_id")
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 class OntologyTermRegistry:

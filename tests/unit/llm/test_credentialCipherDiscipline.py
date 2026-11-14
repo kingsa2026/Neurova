@@ -8,10 +8,10 @@
 - `_load_secrets()` 解不开时只 `logger.warning` 后**丢弃该条**，而 `_save_secrets()`
   从内存重写整个 `secrets.json` → 一次换密钥/一次损坏就让存量凭据**静默消失**，
   而 `store_secret()` 照样回 True；
-- pycryptodome 缺失时（`providers/secret_store.HAS_CRYPTO=False`）本模块毫无察觉，
+- pycryptodome 缺失时（`secret_store_clean.HAS_CRYPTO=False`）本模块毫无察觉，
   照旧写 XOR——降级门开着且不点名。
 
-处置口径：仓内已有唯一认证加密实现（`providers/secret_store.py` 的 `enc:v2:`
+处置口径：仓内已有唯一认证加密实现（`secret_store_clean.py` 的 `enc:v2:`
 AES-256-GCM，per-record 随机 salt+nonce），写侧必须走它，不新造第二套密码学；
 本模块历史格式只保留**只读**遗留解码并在下次落盘时自动升级。
 """
@@ -113,7 +113,7 @@ def testUndecryptableEntrySurvivesNextSave(tmp_path):
 
 def testMissingCryptoDependencyDoesNotQuietlyWriteXor(tmp_path, monkeypatch):
     """认证加密依赖缺失时必须失败并点名，不得回落到弱加密照写。"""
-    monkeypatch.setattr("neurova.llm.providers.secret_store.HAS_CRYPTO", False)
+    monkeypatch.setattr("neurova.llm.providers.secret_store_clean.HAS_CRYPTO", False)
     bucket = tmp_path / "bucket"
     store = SecretStore(storage_path=str(bucket), encryption_key="k1")
 
@@ -124,14 +124,36 @@ def testMissingCryptoDependencyDoesNotQuietlyWriteXor(tmp_path, monkeypatch):
     assert all(v.startswith("enc:v2:") for v in raw.values()), f"盘上出现了弱密文：{raw}"
 
 
-def testWeakCipherAndDeadSingletonRetired():
-    """防回流：XOR 加密器与"随机临时密钥 + 零消费者"的全局单例都必须消失。"""
+def testWeakCipherRetiredAndSingletonIsConfigKeyed(monkeypatch, tmp_path):
+    """防回流：XOR 加密器必须消失；全局单例密钥必须来自配置，不得随机生成。
+
+    P2-22 合并后 `get_secret_store()`（原 `providers/secret_store.py` 的全局单例）
+    落在本模块，纪律不变：master_key 取自 NEUROVA_MASTER_KEY，路径取自
+    NEUROVA_SECRETS_PATH——绝不随机临时密钥（那会写出下个进程解不开的密文）。
+    """
     assert not hasattr(cleanModule, "SimpleCipher"), (
         "SimpleCipher 回来了——重复密钥流 XOR 不得再作为写路径"
     )
-    assert not hasattr(cleanModule, "get_secret_store"), (
-        "get_secret_store() 无参构造用的是随机临时密钥，写出的密文下个进程解不开；"
-        "全仓零消费者，按断点退役"
+
+    monkeypatch.setattr(cleanModule, "_singleton", None)
+    requestedKeys = []
+
+    def _fakeConfigGet(key, default=""):
+        requestedKeys.append(key)
+        return {
+            "NEUROVA_MASTER_KEY": "config-master-key",
+            "NEUROVA_SECRETS_PATH": str(tmp_path / "secrets.json"),
+        }.get(key, default)
+
+    monkeypatch.setattr(cleanModule.config, "get", _fakeConfigGet)
+    try:
+        store = cleanModule.get_secret_store()
+    finally:
+        cleanModule._reset_singleton_for_tests()
+
+    assert "NEUROVA_MASTER_KEY" in requestedKeys, "单例必须从配置读主密钥"
+    assert store.master_key == "config-master-key", (
+        "全局单例的密钥必须来自 NEUROVA_MASTER_KEY，不得随机生成"
     )
 
 
@@ -159,7 +181,7 @@ def testUpgradeFailureLeavesExistingCiphertextIntact(tmp_path, monkeypatch):
     bucket = _seedLegacyBucket(tmp_path)
     before = _rawStored(bucket)
 
-    monkeypatch.setattr("neurova.llm.providers.secret_store.HAS_CRYPTO", False)
+    monkeypatch.setattr("neurova.llm.providers.secret_store_clean.HAS_CRYPTO", False)
     store = SecretStore(storage_path=str(bucket), encryption_key="k1")
 
     assert _rawStored(bucket) == before, "升级失败却改写了盘——存量凭据自此不可恢复"

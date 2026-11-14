@@ -29,6 +29,14 @@ from .ad_action_policy import (
 )
 from .store_connections import get_store_connection_manager
 
+from neurova.collaboration.neurflow.llm_bridge import get_agent as _get_agent
+from neurova.collaboration.neurflow.llm_bridge import call_agent as _bridge_call_agent
+
+
+async def _call_agent(prompt: str, system_prompt: str = "") -> str:
+    """调用 Agent 生成文本（Agent 获取走本模块可替换的 _get_agent 测试接缝）。"""
+    return await _bridge_call_agent(prompt, system_prompt, agent_getter=_get_agent)
+from neurova.collaboration.neurflow.llm_bridge import extract_llm_text as _extract_llm_text
 logger = get_logger(__name__)
 
 # ==================== 共享平台选项 ====================
@@ -1015,51 +1023,6 @@ COMMERCE_NODES: List[Dict[str, Any]] = [
 
 
 # ==================== 辅助函数 ====================
-
-
-def _get_agent():
-    """获取 Agent 实例"""
-    try:
-        from neurova.agent_core import Agent
-
-        return Agent.get_instance()
-    except (ImportError, AttributeError):
-        logger.debug("Agent 未可用")
-        return None
-
-
-async def _call_agent(prompt: str, system_prompt: str = "") -> str:
-    """调用 Agent 生成文本，失败时抛出异常"""
-    agent = _get_agent()
-    if agent is None:
-        raise RuntimeError("Agent 未初始化")
-    response = await agent.chat(
-        prompt,
-        system_prompt=system_prompt,
-        metadata={"history": []},
-    )
-    return response if isinstance(response, str) else str(response)
-
-
-def _extract_llm_text(response: Any) -> str:
-    """从多种响应形状中安全提取文本内容"""
-    if isinstance(response, str):
-        return response
-    if isinstance(response, dict):
-        choices = response.get("choices")
-        if isinstance(choices, list) and choices:
-            message = choices[0].get("message", {})
-            if isinstance(message, dict):
-                return str(message.get("content", ""))
-        return str(response)
-    try:
-        if hasattr(response, "choices") and response.choices:
-            message = response.choices[0].message
-            if hasattr(message, "content"):
-                return str(message.content)
-    except Exception:
-        pass
-    return str(response)
 
 
 def _parse_llm_json(text: Any) -> dict:

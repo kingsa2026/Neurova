@@ -12,9 +12,7 @@
 
 import datetime
 from neurova.core.logger import get_logger
-import json
 import os
-import pathlib
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -23,6 +21,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user
+from neurova.core.atomic_io import loadJsonStore, saveJsonStore
 from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
@@ -102,24 +101,12 @@ _logs_store: Dict[str, Dict[str, Any]] = {}
 
 
 def _load_store() -> None:
-    try:
-        with open(_STORE_FILE, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-        if isinstance(raw, dict):
-            _logs_store.update(raw.get("logs", {}) or {})
-    except FileNotFoundError:
-        pass
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Failed to load work logs store: %s", e)
+    raw = loadJsonStore(_STORE_FILE, {})
+    _logs_store.update(raw.get("logs", {}) or {})
 
 
 def _save_store() -> None:
-    p = pathlib.Path(_STORE_FILE)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(p.name + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"logs": _logs_store}, f, indent=2, ensure_ascii=False)
-    tmp.replace(p)
+    saveJsonStore(_STORE_FILE, {"logs": _logs_store})
 
 
 def _reboot_load() -> None:

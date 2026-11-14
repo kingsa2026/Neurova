@@ -17,7 +17,7 @@
 import pytest
 
 from neurova.collaboration.neurflow.storage import NeurflowStorage
-from neurova.llm.providers.secret_store import SecretStore
+from neurova.llm.providers.secret_store_clean import SecretStore
 
 # ---- 占位凭据：键名/值全部片段拼接，避免源码出现敏感字面量 ----
 

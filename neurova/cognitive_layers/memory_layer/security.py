@@ -254,7 +254,7 @@ class MemorySecurity:
 
         if method == EncryptionMethod.FERNET:
             if not HAS_CRYPTOGRAPHY:
-                # 与 `llm/providers/secret_store.py` 同口径：依赖缺失就点名拒绝，
+                # 与 `llm/providers/secret_store_clean.py` 同口径：依赖缺失就点名拒绝，
                 # 不换新一把弱钥匙继续写"看起来加密了"的内容。
                 raise RuntimeError(
                     "cryptography 库未安装，无法初始化记忆加密 "

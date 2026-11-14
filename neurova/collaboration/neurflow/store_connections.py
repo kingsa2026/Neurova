@@ -127,7 +127,7 @@ class StoreConnectionManager:
     @property
     def _secrets(self) -> Any:
         if self._secret_store is None:
-            from neurova.llm.providers.secret_store import get_secret_store
+            from neurova.llm.providers.secret_store_clean import get_secret_store
 
             self._secret_store = get_secret_store()
         return self._secret_store

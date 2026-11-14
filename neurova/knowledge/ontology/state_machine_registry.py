@@ -11,9 +11,9 @@
 
 from __future__ import annotations
 
-import datetime
 import json
 from typing import Any, Dict, List, Optional
+from neurova.core.time_utils import nowIso as _now
 
 SCHEMA_V44_STATE_MACHINES = "_SCHEMA_V44_STATE_MACHINES"
 
@@ -35,10 +35,6 @@ ALTER TABLE enterprise_source_configs ADD COLUMN sync_interval_seconds
 """
 
 _HAS_STATE_PREDICATE = "has_state"
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 class StateMachineRegistry:

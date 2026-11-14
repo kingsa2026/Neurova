@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import datetime
 import json
 import math
 import sqlite3
@@ -23,6 +22,7 @@ from neurova.knowledge.foundation.storage_fence import (
     assertNotUnderProductionStorage,
 )
 from neurova.knowledge.hybrid import hybrid_search_knowledge
+from neurova.core.time_utils import nowIso as _now
 
 logger = get_logger(__name__)
 
@@ -77,10 +77,6 @@ ALTER TABLE evaluation_findings ADD COLUMN ndcg_at_k REAL NOT NULL DEFAULT 0;
 ALTER TABLE evaluation_findings ADD COLUMN rerank_ndcg_at_k REAL;
 """
 register_migration(2, _SCHEMA_V2, domain="knowledge_evaluation")
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 # 生产路径只有 storage_fence 一处定义；评测账本与底座库同目录但分库，互不共用存储。

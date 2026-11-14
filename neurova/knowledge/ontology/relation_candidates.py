@@ -11,10 +11,10 @@
 
 from __future__ import annotations
 
-import datetime
 import re
 import uuid
 from typing import Any, Dict, List, Optional
+from neurova.core.time_utils import nowIso as _now
 
 _CANDIDATE_STATUSES = ("pending", "approved", "rejected")
 
@@ -38,10 +38,6 @@ CREATE INDEX IF NOT EXISTS idx_relation_candidates_review
 CREATE UNIQUE INDEX IF NOT EXISTS ux_relation_candidates_dedupe
     ON ontology_relation_candidates(tenant_id, normalized_surface, source_entry_id);
 """
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 def normalizeSurface(text: str) -> str:

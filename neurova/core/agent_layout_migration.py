@@ -49,6 +49,8 @@ from neurova.core.agent_workspaces import (
 from neurova.core.data_root import get_data_root, repoRoot
 from neurova.core.logger import get_logger
 
+from neurova.core.sql_utils import quoteIdent as _quoteIdent
+from neurova.core.sql_utils import replacePathStrings as _replacePathString
 logger = get_logger(__name__)
 
 REPORT_NAME = "agent_layout_migration.json"
@@ -270,9 +272,6 @@ def _migrate_agent_library(agent_id: str, data_root: Path, root: Path, report: _
         _prune_empty_dir(soul_dir)
 
 
-_PATH_BOUNDARY = r"(?=$|[\\/\"'\s,;:)\]}>])"
-
-
 def _pathPairs(agent_id: str, legacy_ws_root: Optional[Path], data_root: Path, root: Path) -> List[tuple]:
     """旧绝对路径 → 新绝对路径（长前缀优先，避免 memory 被 workspace 泛映射吞掉）。"""
     pairs: List[tuple] = []
@@ -331,13 +330,6 @@ def _pathPairs(agent_id: str, legacy_ws_root: Optional[Path], data_root: Path, r
     return expanded
 
 
-def _replacePathString(value: str, pairs: List[tuple]) -> str:
-    for src, dst in pairs:
-        if src in value:
-            value = re.sub(re.escape(src) + _PATH_BOUNDARY, lambda _m: dst, value)
-    return value
-
-
 def _rewriteJsonValue(value: Any, pairs: List[tuple]) -> Any:
     if isinstance(value, dict):
         return {k: _rewriteJsonValue(v, pairs) for k, v in value.items()}
@@ -391,10 +383,6 @@ def _rewriteJsonLinesFile(path: Path, pairs: List[tuple]) -> bool:
     tmp.write_text("\n".join(out) + ("\n" if lines else ""), encoding="utf-8")
     tmp.replace(path)
     return True
-
-
-def _quoteIdent(value: str) -> str:
-    return '"' + value.replace('"', '""') + '"'
 
 
 def _rewriteSqliteFile(path: Path, pairs: List[tuple], report: _MigrationReport, label: str) -> int:

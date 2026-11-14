@@ -7,9 +7,9 @@ before/after 快照——"谁在什么时候把什么改成了什么"必须可�
 
 from __future__ import annotations
 
-import datetime
 import uuid
 from typing import Any, Dict, List
+from neurova.core.time_utils import nowIso as _now
 
 _SCHEMA_V33 = """
 CREATE TABLE IF NOT EXISTS ontology_change_log (
@@ -28,10 +28,6 @@ CREATE TABLE IF NOT EXISTS ontology_change_log (
 CREATE INDEX IF NOT EXISTS idx_change_log_review
     ON ontology_change_log(tenant_id, created_at);
 """
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 class ChangeLog:

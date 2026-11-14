@@ -11,11 +11,11 @@
 
 from __future__ import annotations
 
-import datetime
 import json
 import re
 import uuid
 from typing import Any, Dict, List, Optional
+from neurova.core.time_utils import nowIso as _now
 
 #: 内置 constraintKind 闭集：这些维度由 validation.py 的固定校验拥有，
 #: 用户 shape 声明同名维度即撞车（单一事实源，教义第 6 条）。
@@ -48,10 +48,6 @@ CREATE TABLE IF NOT EXISTS ontology_shapes (
 CREATE INDEX IF NOT EXISTS idx_shapes_target
     ON ontology_shapes(tenant_id, target_term_id, enabled);
 """
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 class ShapeRegistry:

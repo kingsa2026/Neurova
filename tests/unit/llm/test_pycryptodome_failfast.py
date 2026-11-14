@@ -41,7 +41,7 @@ from unittest.mock import patch
 
 def _reload_secret_store():
     """重新加载 secret_store 模块,以便 HAS_CRYPTO 标志按当前环境重新计算"""
-    import neurova.llm.providers.secret_store as ss
+    import neurova.llm.providers.secret_store_clean as ss
     importlib.reload(ss)
     return ss
 
@@ -148,7 +148,7 @@ class TestPycryptodomeFailFast(unittest.TestCase):
         }
 
         # patch provider_manager 中已经 import 进来的 decrypt_api_key 引用
-        # (provider_manager 顶部 `from neurova.llm.providers.secret_store import decrypt_api_key`)
+        # (provider_manager 顶部 `from neurova.llm.providers.secret_store_clean import decrypt_api_key`)
         err = RuntimeError(
             "pycryptodome not installed — run: pip install pycryptodome"
         )

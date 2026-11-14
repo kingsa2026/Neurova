@@ -10,8 +10,8 @@
 
 from __future__ import annotations
 
-import datetime
 from typing import Any, Dict, List, Optional
+from neurova.core.time_utils import nowIso as _now
 
 _SCHEMA_V38_CATEGORIES = """
 CREATE TABLE IF NOT EXISTS knowledge_categories (
@@ -25,10 +25,6 @@ CREATE TABLE IF NOT EXISTS knowledge_categories (
     updated_at TEXT NOT NULL
 );
 """
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 def normalizeCategoryId(raw: str) -> str:

@@ -206,7 +206,7 @@ class TestDeliveryRecording:
             WorkflowDefinition, WorkflowNode, WorkflowEdge,
             WorkflowStatus, TriggerType, WorkflowTrigger,
         )
-        from neurova.llm.providers.secret_store import encrypt_api_key
+        from neurova.llm.providers.secret_store_clean import encrypt_api_key
 
         storage = neurflow_api.NeurflowStorage(db_path=str(tmp_path / "dl_e2e.db"))
         monkeypatch.setattr(neurflow_api, "_get_storage", lambda: storage)

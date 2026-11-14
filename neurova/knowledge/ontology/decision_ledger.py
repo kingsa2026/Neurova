@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-import datetime
 import json
 import math
 import re
@@ -25,6 +24,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.time_utils import nowIso as _now
 
 logger = get_logger(__name__)
 
@@ -74,10 +74,6 @@ CREATE INDEX IF NOT EXISTS idx_decision_links_dst
 """
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+|[\u4e00-\u9fff]")
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 class DecisionLedger:
