@@ -159,6 +159,13 @@ class EvolutionConfig:
     # 「全挂=stable / 部分挂=flaky」归因——区分稳定缺陷与偶发噪声。1 = 旧形态。
     diagnosis_rollouts: int = 1
 
+    # ── V1 near-miss 有界修复通道（VideoEvolve 对照 2026-11-14）──
+    # 被验证侧门（holdout_regression/coreset_recheck_failed/case_regression/
+    # exec_suite_regression）拒绝、但开发增益为正的候选，带门别诊断进入修复轮
+    # 的次数上限。0 = 关闭（拒绝即弃置，逐字旧行为）。生效值 = max(本配置,
+    # 治理设置项)——治理抬底线，与 N3 同纪律。
+    repair_rounds: int = 0
+
 
 def text_evolution_enabled() -> bool:
     """文本级进化总开关,默认关。

@@ -2736,6 +2736,8 @@ conflictTimeReadout: 'Lettura temporale: {basis} (vecchia {old} → nuova {new})
     evalExperimentsLineageParetoHint: 'L\'evoluzione ricorsiva fa avanzare tutti i candidati non dominati al turno successivo (linee parallele) invece di un solo vincitore.',
     evalExperimentsRollouts: 'Numero di campioni di diagnosi',
     evalExperimentsRolloutsHint: 'La raccolta degli errori campiona ogni caso G volte: fallimento totale = difetto stabile, parziale = rumore intermittente. 1 = campione singolo (precedente).',
+    evalExperimentsRepairRounds: 'Round di riparazione near-miss',
+    evalExperimentsRepairRoundsHint: 'I candidati respinti dai gate di validazione nonostante un guadagno in sviluppo rientrano in un ciclo di riparazione limitato con diagnosi; 0 = disattivato (scartati).',
     retrievalRecipeTitle: 'Ricetta di retrieval',
     retrievalRecipeHint: 'Insiemi di parametri denominati per la ricerca della conoscenza (peso del grafo, metodo di rerank, pool di candidati, peso di recenza); applicati ai nuovi cicli di ricerca.',
     retrievalRecipeLabel: 'Ricetta attiva',

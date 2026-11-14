@@ -2736,6 +2736,8 @@ conflictTimeReadout: 'समय रीडआउट: {basis} (पुराना 
     evalExperimentsLineageParetoHint: 'पुनरावर्ती विकास एक विजेता के बजाय सभी गैर-प्रभावी उम्मीदवारों को अगले राउंड में ले जाता है (समानांतर वंश)।',
     evalExperimentsRollouts: 'निदान नमूना संख्या',
     evalExperimentsRolloutsHint: 'विफलता संग्रह प्रत्येक केस का G बार नमूना लेता है: पूर्ण विफल = स्थिर दोष, आंशिक = fickle शोर। 1 = एकल नमूना (पुराना)।',
+    evalExperimentsRepairRounds: 'Near-miss सुधार राउंड',
+    evalExperimentsRepairRoundsHint: 'सत्यापन गेट से अस्वीकृत लेकिन डेवलपमेंट लाभ वाले उम्मीदवार विफलता निदान के साथ सीमित सुधार राउंड में लौटते हैं; 0 = बंद (अस्वीकृत हटा दिए जाते हैं)।',
     retrievalRecipeTitle: 'रिट्रीवल रेसिपी',
     retrievalRecipeHint: 'ज्ञान खोज के नामित पैरामीटर सेट (ग्राफ़ वजन, रीरैंक विधि, उम्मीदवार पूल, नवीनता वजन); नए खोज दौरों पर लागू।',
     retrievalRecipeLabel: 'सक्रिय रेसिपी',

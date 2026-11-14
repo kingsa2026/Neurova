@@ -2736,6 +2736,8 @@ conflictTimeReadout: 'Lecture temporelle : {basis} (ancienne {old} → nouvelle 
     evalExperimentsLineageParetoHint: 'L\'évolution récursive fait avancer tous les candidats non dominés au tour suivant (lignées parallèles) au lieu d\'un seul gagnant.',
     evalExperimentsRollouts: 'Nombre d\'échantillons de diagnostic',
     evalExperimentsRolloutsHint: 'La collecte des échecs échantillonne chaque cas G fois : échec total = défaut stable, échec partiel = bruit intermittent. 1 = échantillon unique (historique).',
+    evalExperimentsRepairRounds: 'Tours de réparation near-miss',
+    evalExperimentsRepairRoundsHint: 'Les candidats rejetés par les portes de validation malgré un gain en développement réintègrent une boucle de réparation bornée avec diagnostic ; 0 = désactivé (rejet définitif).',
     retrievalRecipeTitle: 'Recette de recherche',
     retrievalRecipeHint: 'Jeux de paramètres nommés pour la recherche de connaissances (poids du graphe, méthode de rerank, pool de candidats, poids de récence) ; appliqués aux nouveaux cycles de recherche.',
     retrievalRecipeLabel: 'Recette active',

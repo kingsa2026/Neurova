@@ -269,6 +269,9 @@ class EvolveRecursiveRequest(BaseModel):
     epochs: int = Field(default=2, ge=1, le=10)
     # N2：候选池容量——>1 时每轮对池内每个基各跑一次进化（多谱系并行）。
     pool_size: int = Field(default=1, ge=1, le=3)
+    # V2：分支重试额度——颗粒无收的分支保留到下轮继续精炼的轮数上限
+    #（0=颗粒无收即弃，既有行为；保留者与孩子共享 pool_size 容量）。
+    branch_retries: int = Field(default=0, ge=0, le=3)
     iterations: Optional[int] = Field(default=None, ge=1, le=50)
     dataset_source: str = Field(default="auto", pattern="^(auto|golden|mined|synthetic)$")
     real_trajectory: Optional[bool] = None
@@ -349,7 +352,7 @@ async def evolve_skill_recursive(body: EvolveRecursiveRequest, agent_id: str,
     report = await service.evolveRecursive(
         skill_id=body.skill_id, skill_text=skill_text,
         dataset=dataset, epochs=body.epochs, iterations=body.iterations,
-        pool_size=body.pool_size,
+        pool_size=body.pool_size, branch_retries=body.branch_retries,
         config=config, agent=executor, extra_failures=extra_failures,
         domain_harnesses=domain_harnesses,
     )

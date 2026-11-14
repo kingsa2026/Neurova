@@ -161,6 +161,10 @@ class EvolutionRunResult:
     # N2 候选集并行递归：非劣幸存者（text/score），供递归演化推进下轮多谱系。
     # 默认关时恒为空表。
     pareto_variants: list = field(default_factory=list)
+    # V1 near-miss 有界修复（VideoEvolve 对照 2026-11-14）：每轮修复尝试的
+    # 审计记录（round/gate/improved/blocked/evidence_tasks/tune_score）。
+    # 空表 = 未启用或未触发——「修过没修成」与「压根没修」都看得见。
+    repair_attempts: list = field(default_factory=list)
 
     @property
     def improvement(self) -> float:
@@ -260,6 +264,7 @@ class EvolutionRunResult:
             "coreset_recheck": dict(self.coreset_recheck),
             "pareto_set": dict(self.pareto_set),
             "pareto_variants": list(self.pareto_variants),
+            "repair_attempts": list(self.repair_attempts),
         }
 
 
@@ -290,6 +295,81 @@ def _caseRegressionReadout(caseScores: dict) -> tuple[list[str], list[str]]:
         if readout["candidate"] < readout["baseline"] - _EPS:
             regressions.append(task)
     return regressions, unevidenced
+
+
+# V1 可修复门（VideoEvolve 对照 2026-11-14）：只修**回归型**拒绝——它们有
+# 「哪条任务被改坏」的具体证据，修复可以定向；no_improvement（无增益）、
+# anchor_unreached（地板）、cost_*（成本）、bench_regression（基准）没有
+# 定向证据，修复只是盲目重试，不进修复通道。
+_REPAIRABLE_GATES = frozenset({
+    "holdout_regression",
+    "coreset_recheck_failed",
+    "case_regression",
+    "exec_suite_regression",
+})
+
+
+def _repairEvidence(gate: str, *, holdoutAfterDetails: list,
+                    holdoutBaseScores: dict, caseRegressions: list,
+                    execCandidate: dict, fullBeforeDetails: list,
+                    fullAfterDetails: list) -> list:
+    """V1：门别修复证据——把「哪条任务被改坏、坏在哪」变成变异器的定向输入。
+
+    只收**实测回归**的任务（两侧都量到且候选更差）；单例器械故障（failed）
+    不冒充质量结论（与例级门同一口径）。
+    """
+    from neurova.evolution.eval.mutator import JudgeFailure
+
+    def _build(targets: list, candTable: dict, baseTable: dict,
+               baseFailed: dict, label: str) -> list:
+        out: list = []
+        for task in targets:
+            candScore, candOutput, candFailed = candTable.get(task, (0.0, "", True))
+            if candFailed:
+                continue
+            baseScore = baseTable.get(task)
+            if baseScore is None or (baseFailed or {}).get(task):
+                continue
+            out.append(JudgeFailure(
+                task_input=task, output=candOutput,
+                feedback=(f"{label}（基线 {baseScore:.2f} → 候选 {candScore:.2f}）："
+                          "修复该任务的失败模式，且不得回退其他任务"),
+                score=candScore))
+        return out
+
+    if gate == "case_regression":
+        candTable = {ex.task_input: (s, o, f)
+                     for ex, s, o, _fb, f, _env in holdoutAfterDetails}
+        baseTable = {t: v[0] for t, v in holdoutBaseScores.items()}
+        baseFailed = {t: v[1] for t, v in holdoutBaseScores.items()}
+        return _build(list(caseRegressions or []), candTable, baseTable,
+                      baseFailed, "例级退化")
+    if gate == "holdout_regression":
+        candTable = {ex.task_input: (s, o, f)
+                     for ex, s, o, _fb, f, _env in holdoutAfterDetails}
+        baseTable = {t: v[0] for t, v in holdoutBaseScores.items()}
+        baseFailed = {t: v[1] for t, v in holdoutBaseScores.items()}
+        targets = [t for t, b in baseTable.items()
+                   if t in candTable and not baseFailed.get(t)
+                   and not candTable[t][2] and candTable[t][0] < b - _EPS]
+        return _build(targets, candTable, baseTable, baseFailed, "留出集回归")
+    if gate == "coreset_recheck_failed":
+        candTable = {ex.task_input: (s, o, f)
+                     for ex, s, o, _fb, f, _env in fullAfterDetails}
+        baseTable = {ex.task_input: s for ex, s, _o, _fb, _f, _env in fullBeforeDetails}
+        baseFailed = {ex.task_input: f for ex, _s, _o, _fb, f, _env in fullBeforeDetails}
+        targets = [t for t, b in baseTable.items()
+                   if t in candTable and not baseFailed.get(t)
+                   and not candTable[t][2] and candTable[t][0] < b - _EPS]
+        return _build(targets, candTable, baseTable, baseFailed, "核选复核回归")
+    if gate == "exec_suite_regression":
+        return [JudgeFailure(
+            task_input=str(row.get("task_input") or ""), output="",
+            feedback=("可执行断言未过: " + "; ".join(row.get("failures") or []))[:200],
+            score=0.0)
+            for row in (execCandidate.get("cases") or [])
+            if row.get("passed") is False]
+    return []
 
 
 class SkillEvolutionRunner:
@@ -822,6 +902,74 @@ class SkillEvolutionRunner:
         merged.sort(key=lambda f: f.score)
         return merged[:_MAX_FAILURES]
 
+    # ── V1 near-miss 修复 ──
+
+    async def _repairAttempt(self, *, best_text: str, best_score: float,
+                             baseline_text: str, tune: list,
+                             artifact_type: str, ledger_key: str,
+                             leak_markers, failures: list,
+                             result: EvolutionRunResult, base_scores: dict,
+                             domain_harnesses, attempt: dict
+                             ) -> Optional[tuple[str, float, Optional[int]]]:
+        """V1 单次修复尝试：以当前最优为起点、带门别诊断再变异，过同款闸后上 tune 评测。
+
+        候选照常过约束闸与泄漏闸——修复通道**不是**绕闸通道；候选计数进恒等式账。
+        过程读数就地写进 `attempt`（improved/blocked/tune_score）；产出更优候选时
+        回 `(candidate, score, seq)`，否则回 None。
+        """
+        history = None
+        if self._ledger is not None and ledger_key:
+            history = self._ledger.recent(ledger_key)
+        candidate = await self._mutate(best_text, artifact_type, failures,
+                                       history=history,
+                                       domain_harnesses=domain_harnesses)
+        if not candidate or candidate == best_text:
+            attempt["improved"] = False
+            return None
+        result.candidates_generated += 1
+        if self._constraints is not None:
+            checks = self._constraints.validate(candidate, artifact_type,
+                                                baseline_text=baseline_text)
+            failed = [c.name for c in checks if not c.passed]
+            if failed:
+                result.candidates_rejected_pre_eval += 1
+                result.constraint_failures.extend(failed)
+                logger.debug("修复候选被约束闸拒绝: %s", failed)
+                self._ledger_append(ledger_key, artifact_type, failures,
+                                    accepted=False,
+                                    reject_reason=f"constraints:{','.join(failed)}",
+                                    constraint_failures=result.constraint_failures)
+                attempt.update(improved=False, blocked="constraints")
+                return None
+        if self._leak_critic is not None:
+            verdict = await self._leak_critic.review(
+                candidate_text=candidate, baseline_text=baseline_text,
+                markers=leak_markers)
+            if verdict.leaked:
+                result.candidates_rejected_pre_eval += 1
+                result.constraint_failures.append(f"leak:{verdict.category}")
+                logger.debug("修复候选被泄漏闸拒绝(%s)", verdict.category)
+                self._ledger_append(ledger_key, artifact_type, failures,
+                                    accepted=False,
+                                    reject_reason=f"leak:{verdict.category}",
+                                    constraint_failures=result.constraint_failures)
+                attempt.update(improved=False, blocked="leak")
+                return None
+        result.iterations_run += 1
+        result.candidates_evaluated += 1
+        score, cand_details = await self._evaluate(candidate, tune, artifact_type,
+                                                   arm="candidate")
+        improved = score > best_score + _EPS
+        attempt.update(improved=improved, tune_score=round(score, 4))
+        seq = self._ledger_append(ledger_key, artifact_type, failures,
+                                  accepted=improved,
+                                  reject_reason="" if improved else "repair_not_improved",
+                                  delta_train=score - best_score,
+                                  cand_details=cand_details, base_scores=base_scores)
+        if improved:
+            return candidate, score, seq
+        return None
+
     # ── 主循环 ──
 
     async def run(
@@ -1035,71 +1183,27 @@ class SkillEvolutionRunner:
                 best_seq = seq
 
         result.train_best = best_score
-        # 终审留出：胜者臂按正文身份标注——无候选胜出时 best_text 就是基线，
-        # 这一遍是基线的复测，记回基线臂（不冒充候选花费）。
-        holdoutAfterArm = "candidate" if best_text != baseline_text else "baseline"
-        holdoutAfterAvg, holdoutAfterDetails = await self._evaluate(
-            best_text, holdout, artifact_type, arm=holdoutAfterArm)
-        result.holdout_after = holdoutAfterAvg
-        # 胜者过断言面（同一份冻结套件）：与基线面同机判定，非回归门读这里。
-        if suiteExamples:
-            _cAvg, _cDetails = await self._evaluate(
-                best_text, suiteExamples, artifact_type,
-                arm="exec_candidate" if best_text != baseline_text else "exec_baseline")
-            _cOutputs = {ex.task_input: out
-                         for ex, _s, out, _f, _failed, _env in _cDetails}
-            execCandidate = _exec_suite_mod.run_exec_suite(
-                exec_suite, _cOutputs, baseline_outputs=_bOutputs)
-            result.exec_suite = {
-                "state": "measured",
-                "suite_hash": exec_suite.suite_hash,
-                "cases": len(exec_suite.cases),
-                "baseline": result.exec_suite.get("baseline"),
-                "candidate": execCandidate,
-                "baseline_pass_rate": (result.exec_suite.get("baseline") or {}).get("pass_rate"),
-                "candidate_pass_rate": execCandidate.get("pass_rate"),
-            }
-        holdoutCandScores = {
-            ex.task_input: (score, failed)
-            for ex, score, _o, _f, failed, _env in holdoutAfterDetails
-        }
-        result.holdout_case_scores = {
-            task: {
-                "baseline": holdoutBaseScores[task][0],
-                "candidate": holdoutCandScores[task][0],
-                "baseline_failed": holdoutBaseScores[task][1],
-                "candidate_failed": holdoutCandScores[task][1],
-            }
-            for task in holdoutCandScores
-            if task in holdoutBaseScores
-        }
-        result.deployed_text = best_text
-        # P1-4：胜者在留出集上的实测差回填其台账记录（无论最终接受与否，
-        # 这都是该假设的诚实证据）
-        if self._ledger is not None and ledger_key and best_seq is not None:
-            try:
-                self._ledger.patch(ledger_key, best_seq,
-                                   {"delta_holdout": round(result.improvement, 6),
-                                    # P2-4:绝对留出分入账——历史最优锚的数据源
-                                    "holdout_after": round(result.holdout_after, 6)})
-            except OSError as e:
-                logger.debug("编辑历史台账回填失败: %s", e)
+        # ── V1 near-miss 有界修复（VideoEvolve 对照 2026-11-14）──
+        # 被验证侧门拒绝、但开发增益为正的候选（near miss）不直接弃置：带门别
+        # 诊断进入 ≤repairBudget 次修复轮（以当前最优为起点再变异，同款闸同款账）。
+        # 生效额度 = max(代码级配置, 治理设置项)；0 = 关闭（拒绝即弃置，逐字旧行为）。
+        try:
+            from neurova.security.eval_experiment_settings import (
+                effective_repair_rounds as _effectiveRepairRounds,
+            )
 
-        # ── R7/HC6 双段复核：核选集探路，全量留出复核 ──
-        # 核选把判据集缩小了；胜者必须在**未收缩的全量留出**上再复核一遍，
-        # 「核选上过关」才作数。复核只加证据与一道非回归门（不替代核选判据）。
+            repairBudget = _effectiveRepairRounds(
+                int(getattr(self.config, "repair_rounds", 0) or 0))
+        except Exception:  # noqa: BLE001 - 设置面故障回退代码级配置
+            repairBudget = max(0, int(getattr(self.config, "repair_rounds", 0) or 0))
+        repairsUsed = 0
+
+        # R7/HC6 双段复核：基线侧全量留出只测一次（不随修复轮重跑）。
+        _fullBeforeAvg = 0.0
+        fullBeforeDetails: list = []
         if _fullDataset is not dataset and _fullDataset.holdout:
-            _fullBefore = await self._evaluate_avg(
+            _fullBeforeAvg, fullBeforeDetails = await self._evaluate(
                 baseline_text, _fullDataset.holdout, artifact_type, arm="holdout_full")
-            _fullAfter = await self._evaluate_avg(
-                best_text, _fullDataset.holdout, artifact_type, arm="holdout_full")
-            result.coreset_recheck = {
-                "state": "measured",
-                "full_holdout_tasks": len(_fullDataset.holdout),
-                "full_holdout_before": round(_fullBefore, 4),
-                "full_holdout_after": round(_fullAfter, 4),
-                "full_improvement": round(_fullAfter - _fullBefore, 4),
-            }
 
         # ── 终局拒绝的唯一出口 ──
         async def rejectRun(reason: str) -> EvolutionRunResult:
@@ -1125,45 +1229,140 @@ class SkillEvolutionRunner:
             result.assertCandidateIdentity()
             return result
 
-        # ── 判定 1:留出集回退 → 拒绝(防过拟合)──
-        if result.holdout_after < result.holdout_before - _EPS:
-            return await rejectRun("holdout_regression")
+        while True:
+            # 终审留出：胜者臂按正文身份标注——无候选胜出时 best_text 就是基线，
+            # 这一遍是基线的复测，记回基线臂（不冒充候选花费）。
+            holdoutAfterArm = "candidate" if best_text != baseline_text else "baseline"
+            holdoutAfterAvg, holdoutAfterDetails = await self._evaluate(
+                best_text, holdout, artifact_type, arm=holdoutAfterArm)
+            result.holdout_after = holdoutAfterAvg
+            # 胜者过断言面（同一份冻结套件）：与基线面同机判定，非回归门读这里。
+            execCandidate: dict = {}
+            if suiteExamples:
+                _cAvg, _cDetails = await self._evaluate(
+                    best_text, suiteExamples, artifact_type,
+                    arm="exec_candidate" if best_text != baseline_text else "exec_baseline")
+                _cOutputs = {ex.task_input: out
+                             for ex, _s, out, _f, _failed, _env in _cDetails}
+                execCandidate = _exec_suite_mod.run_exec_suite(
+                    exec_suite, _cOutputs, baseline_outputs=_bOutputs)
+                result.exec_suite = {
+                    "state": "measured",
+                    "suite_hash": exec_suite.suite_hash,
+                    "cases": len(exec_suite.cases),
+                    "baseline": result.exec_suite.get("baseline"),
+                    "candidate": execCandidate,
+                    "baseline_pass_rate": (result.exec_suite.get("baseline") or {}).get("pass_rate"),
+                    "candidate_pass_rate": execCandidate.get("pass_rate"),
+                }
+            holdoutCandScores = {
+                ex.task_input: (score, failed)
+                for ex, score, _o, _f, failed, _env in holdoutAfterDetails
+            }
+            result.holdout_case_scores = {
+                task: {
+                    "baseline": holdoutBaseScores[task][0],
+                    "candidate": holdoutCandScores[task][0],
+                    "baseline_failed": holdoutBaseScores[task][1],
+                    "candidate_failed": holdoutCandScores[task][1],
+                }
+                for task in holdoutCandScores
+                if task in holdoutBaseScores
+            }
+            result.deployed_text = best_text
+            # P1-4：胜者在留出集上的实测差回填其台账记录（无论最终接受与否，
+            # 这都是该假设的诚实证据）
+            if self._ledger is not None and ledger_key and best_seq is not None:
+                try:
+                    self._ledger.patch(ledger_key, best_seq,
+                                       {"delta_holdout": round(result.improvement, 6),
+                                        # P2-4:绝对留出分入账——历史最优锚的数据源
+                                        "holdout_after": round(result.holdout_after, 6)})
+                except OSError as e:
+                    logger.debug("编辑历史台账回填失败: %s", e)
 
-        # ── 判定 1.5:核选双段复核的非回归门（R7/HC6）──
-        # 核选集上过关、全量留出上被改坏 ⇒ 拒绝——「核选探路便宜」不以
-        # 放过全量回归为代价。未核选/未量出时不判（诚实缺格）。
-        if (result.coreset_recheck.get("state") == "measured"
-                and result.coreset_recheck.get("full_improvement", 0.0) < -_EPS):
-            return await rejectRun("coreset_recheck_failed")
+            # ── R7/HC6 双段复核：核选集探路，全量留出复核 ──
+            # 核选把判据集缩小了；胜者必须在**未收缩的全量留出**上再复核一遍，
+            # 「核选上过关」才作数。复核只加证据与一道非回归门（不替代核选判据）。
+            fullAfterDetails: list = []
+            if _fullDataset is not dataset and _fullDataset.holdout:
+                _fullAfterAvg, fullAfterDetails = await self._evaluate(
+                    best_text, _fullDataset.holdout, artifact_type, arm="holdout_full")
+                result.coreset_recheck = {
+                    "state": "measured",
+                    "full_holdout_tasks": len(_fullDataset.holdout),
+                    "full_holdout_before": round(_fullBeforeAvg, 4),
+                    "full_holdout_after": round(_fullAfterAvg, 4),
+                    "full_improvement": round(_fullAfterAvg - _fullBeforeAvg, 4),
+                }
 
-        # ── 判定 2:无实质增益 → 保留基线 ──
-        # 阈值 = max(min_improvement, δ)：δ>0（已校准）时，评测噪声内的
-        # "增益"不被当成真提升（P0-1 噪声地板）；未校准时即 min_improvement。
-        if result.holdout_after <= result.holdout_before + accept_threshold + _EPS:
-            return await rejectRun("no_improvement")
+            # ── 判定链（可修复门段：1 → 1.5 → 2 → 2.1 → 2.15）──
+            rejectReason = ""
+            # 判定 1:留出集回退(防过拟合)
+            if result.holdout_after < result.holdout_before - _EPS:
+                rejectReason = "holdout_regression"
+            # 判定 1.5:核选双段复核的非回归门（未核选/未量出时不判，诚实缺格）
+            elif (result.coreset_recheck.get("state") == "measured"
+                    and result.coreset_recheck.get("full_improvement", 0.0) < -_EPS):
+                rejectReason = "coreset_recheck_failed"
+            # 判定 2:无实质增益 → 保留基线。阈值 = max(min_improvement, δ)：
+            # δ>0（已校准）时，评测噪声内的"增益"不被当成真提升（P0-1 噪声地板）。
+            elif result.holdout_after <= result.holdout_before + accept_threshold + _EPS:
+                rejectReason = "no_improvement"
+            else:
+                # 判定 2.1:例级不退化门（§8 前置 1）——均值涨了不算过关：
+                # 一条用例被改坏可以被另一条的涨幅抵掉。判分未量出的单例两个
+                # 方向都不记账（落 unevidencedCases），既不救它也不杀它。
+                caseRegressions, unevidencedCases = _caseRegressionReadout(
+                    result.holdout_case_scores)
+                result.caseAllowance = max(0, int(self.config.case_regression_allowance))
+                result.caseRegressions = caseRegressions
+                result.unevidencedCases = unevidencedCases
+                if len(caseRegressions) > result.caseAllowance:
+                    rejectReason = "case_regression"
+                # 判定 2.15:可执行断言面非回归（HN2/HC2）——judge 均值/例级门
+                # 都过了、但确定性断言面被改坏 ⇒ 拒。任一侧未量出不判。
+                if (not rejectReason
+                        and result.exec_suite.get("state") == "measured"
+                        and result.exec_suite.get("baseline_pass_rate") is not None
+                        and result.exec_suite.get("candidate_pass_rate") is not None
+                        and result.exec_suite["candidate_pass_rate"]
+                        < result.exec_suite["baseline_pass_rate"] - _EPS):
+                    rejectReason = "exec_suite_regression"
 
-        # ── 判定 2.1:例级不退化门（§8 前置 1）──
-        # 均值的性质决定的：一条用例被改坏，可以被另一条的涨幅抵掉。这道门只看
-        # "有多少既有用例从可用变成了不可用"，与增益幅度无关。判分未量出的
-        # 单例两个方向都不记账（落 unevidencedCases），既不救它也不杀它。
-        caseRegressions, unevidencedCases = _caseRegressionReadout(
-            result.holdout_case_scores)
-        result.caseAllowance = max(0, int(self.config.case_regression_allowance))
-        result.caseRegressions = caseRegressions
-        result.unevidencedCases = unevidencedCases
-        if len(caseRegressions) > result.caseAllowance:
-            return await rejectRun("case_regression")
+            if not rejectReason:
+                break  # 可修复门段全过 → 交锚定/成本/bench 尾段
 
-        # ── 判定 2.15:可执行断言面非回归（HN2/HC2）──
-        # judge 均值/例级门都过了、但确定性断言面被改坏 ⇒ 拒绝。两层判据各管
-        # 各的：judge 管开放维度，断言管「仅凭公共契约即可判定」的维度。
-        # 任一侧未量出（unevidenced）不判——拿器械故障当质量结论是老忌讳。
-        if (result.exec_suite.get("state") == "measured"
-                and result.exec_suite.get("baseline_pass_rate") is not None
-                and result.exec_suite.get("candidate_pass_rate") is not None
-                and result.exec_suite["candidate_pass_rate"]
-                < result.exec_suite["baseline_pass_rate"] - _EPS):
-            return await rejectRun("exec_suite_regression")
+            # ── V1 near-miss 修复：只对回归型拒绝、有额度、且确有开发增益候选时发起。
+            # 修复候选同过约束/泄漏闸与 tune 评测（不是绕闸通道）；额度耗尽或
+            # 修复无增益即按原门最终拒绝。
+            if (rejectReason in _REPAIRABLE_GATES
+                    and repairsUsed < repairBudget
+                    and best_text != baseline_text):
+                repairsUsed += 1
+                attempt: dict = {"round": repairsUsed, "gate": rejectReason}
+                repairFailures = _repairEvidence(
+                    rejectReason,
+                    holdoutAfterDetails=holdoutAfterDetails,
+                    holdoutBaseScores=holdoutBaseScores,
+                    caseRegressions=result.caseRegressions,
+                    execCandidate=execCandidate,
+                    fullBeforeDetails=fullBeforeDetails,
+                    fullAfterDetails=fullAfterDetails,
+                )
+                attempt["evidence_tasks"] = [f.task_input[:60] for f in repairFailures]
+                won = await self._repairAttempt(
+                    best_text=best_text, best_score=best_score,
+                    baseline_text=baseline_text, tune=tune,
+                    artifact_type=artifact_type, ledger_key=ledger_key,
+                    leak_markers=leak_markers, failures=repairFailures,
+                    result=result, base_scores=base_scores,
+                    domain_harnesses=domain_harnesses, attempt=attempt)
+                result.repair_attempts.append(attempt)
+                if won is not None:
+                    best_text, best_score, best_seq = won
+                    continue  # 新最优重新过全链门
+            return await rejectRun(rejectReason)
 
         # ── 判定 2.2:锚定地板(P2-4,SkillGLoW 对比 2026-10-07)──
         # A = max(历史最优留出, 无技能基线)。只赢过**正在退化的现役基线**不算

@@ -16,7 +16,7 @@ from neurova.security import eval_experiment_settings as ees
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("NEUROVA_EVAL_EXPERIMENT_SETTINGS", str(tmp_path / "exp.json"))
     for key in ("NEUROVA_PROFILE_VARIANTS", "NEUROVA_LINEAGE_PARETO",
-                "NEUROVA_DIAGNOSIS_ROLLOUTS"):
+                "NEUROVA_DIAGNOSIS_ROLLOUTS", "NEUROVA_EVOLUTION_REPAIR_ROUNDS"):
         monkeypatch.delenv(key, raising=False)
     app = create_app(enable_memory=False, enable_channels=False)
     return TestClient(app)
@@ -85,6 +85,25 @@ def test_env_still_wins_over_file(client, monkeypatch):
     monkeypatch.setenv("NEUROVA_PROFILE_VARIANTS", "1")
     r = client.get("/api/v1/governance/eval-experiments")
     assert r.json()["data"]["profile_variants_enabled"] is True
+
+
+def test_repair_rounds_roundtrip_and_domain(client):
+    """V1 修复额度走同一治理面：默认 0（关）、roundtrip 生效、越域 422。"""
+    _as_admin(client)
+    r = client.get("/api/v1/governance/eval-experiments")
+    assert r.status_code == 200
+    assert r.json()["data"]["repair_rounds"] == 0
+    assert r.json()["domains"]["repair_rounds_max"] == 5
+
+    r = client.put("/api/v1/governance/eval-experiments", json={"repair_rounds": 2})
+    assert r.status_code == 200
+    assert r.json()["data"]["repair_rounds"] == 2
+    assert ees.load_settings()["repair_rounds"] == 2
+
+    assert client.put("/api/v1/governance/eval-experiments",
+                      json={"repair_rounds": 6}).status_code == 422
+    assert client.put("/api/v1/governance/eval-experiments",
+                      json={"repair_rounds": -1}).status_code == 422
 
 
 def test_requires_admin(client):
