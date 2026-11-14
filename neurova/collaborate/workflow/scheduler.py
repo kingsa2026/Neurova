@@ -10,7 +10,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from .models import FlowContext, ScheduledTask
+from .models import FlowContext, ScheduledTask, compute_next_run
 from neurova.core.data_root import dataPath
 from neurova.core.lazy_singleton import lazySingleton
 
@@ -153,6 +153,84 @@ class AgentScheduler:
             task.cancel()
             logger.info("Task cancelled: %s (%s)", task_id, task.name)
             self._emit_event("task_cancelled", task)
+            self._persist()
+            return task
+
+    def pause_task(self, task_id: str) -> Optional[ScheduledTask]:
+        """暂停任务（保留配置与统计；paused 状态 is_due 恒 False，不再触发）。"""
+        with self._task_lock:
+            task = self._tasks.get(task_id)
+            if task is None or task.status not in ("pending", "running"):
+                return None
+            task.status = "paused"
+            task.updated_at = time.time()
+            logger.info("Task paused: %s (%s)", task_id, task.name)
+            self._emit_event("task_paused", task)
+            self._persist()
+            return task
+
+    def resume_task(self, task_id: str) -> Optional[ScheduledTask]:
+        """恢复暂停的任务（next_run_at 自现在重算，不补跑停摆窗口）。"""
+        with self._task_lock:
+            task = self._tasks.get(task_id)
+            if task is None or task.status != "paused":
+                return None
+            task.status = "pending"
+            task.updated_at = time.time()
+            if task.interval_seconds:
+                task.next_run_at = compute_next_run(interval_seconds=task.interval_seconds)
+            elif task.cron_expression:
+                task.next_run_at = compute_next_run(cron_expression=task.cron_expression)
+            logger.info("Task resumed: %s (%s)", task_id, task.name)
+            self._emit_event("task_resumed", task)
+            self._persist()
+            return task
+
+    def update_task(self, task_id: str, updates: Dict[str, Any]) -> Optional[ScheduledTask]:
+        """更新任务的可编辑字段（名称/描述/最大次数/调度表达式）。
+
+        cron 与 interval 二选一：提供 cron_expression 时清 interval，反之亦然；
+        调度变化后 next_run_at 自现在重算。非法 cron 抛 ValueError（工具层转错误结果）。
+        """
+        with self._task_lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return None
+            if "name" in updates and str(updates["name"] or "").strip():
+                task.name = str(updates["name"]).strip()
+            if "description" in updates:
+                task.description = str(updates["description"] or "")
+            if "max_runs" in updates:
+                raw = updates["max_runs"]
+                task.max_runs = int(raw) if raw not in (None, "") else None
+            scheduleChanged = False
+            if "cron_expression" in updates:
+                cron = str(updates["cron_expression"] or "").strip() or None
+                if cron and len(cron.split()) != 5:
+                    raise ValueError(f"cron 表达式无法解析（需要 5 段：分 时 日 月 周）: {cron!r}")
+                if cron != task.cron_expression:
+                    task.cron_expression = cron
+                    task.interval_seconds = None
+                    scheduleChanged = True
+            if "interval_seconds" in updates:
+                raw = updates["interval_seconds"]
+                if raw in (None, ""):
+                    interval = None
+                else:
+                    interval = int(raw)
+                    if interval <= 0:
+                        raise ValueError("interval_seconds 必须大于 0")
+                if interval != task.interval_seconds:
+                    task.interval_seconds = interval
+                    task.cron_expression = None
+                    scheduleChanged = True
+            if scheduleChanged:
+                if task.cron_expression:
+                    task.next_run_at = compute_next_run(cron_expression=task.cron_expression)
+                elif task.interval_seconds:
+                    task.next_run_at = compute_next_run(interval_seconds=task.interval_seconds)
+            task.updated_at = time.time()
+            logger.info("Task updated: %s (%s)", task_id, task.name)
             self._persist()
             return task
 

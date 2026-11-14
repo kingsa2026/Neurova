@@ -3482,7 +3482,76 @@ class ToolExecutor:
                 return {"success": False, "error": f"任务取消失败: {task_id}"}
             return {"success": True, "task": cancelled.to_dict()}
 
-        return {"success": False, "error": f"未知 action: {action!r}（create / list / cancel）"}
+        # P3-14 对照补齐：定时任务全生命周期（改/删/暂停/恢复）
+        if action in ("pause", "resume"):
+            task_id = str(params.get("task_id") or "").strip()
+            if not task_id:
+                return {"success": False, "error": f"{action} 需要 task_id"}
+            task = scheduler.get_task(task_id)
+            if task is None:
+                return {"success": False, "error": f"任务不存在: {task_id}"}
+            if task.agent_id and task.agent_id != current_agent:
+                return {
+                    "success": False,
+                    "error": "只能操作自己 Agent 的定时任务",
+                    "task": task.to_dict(),
+                }
+            paused = (
+                scheduler.pause_task(task_id)
+                if action == "pause"
+                else scheduler.resume_task(task_id)
+            )
+            if paused is None:
+                return {"success": False, "error": f"任务{action}失败（状态不允许）: {task_id}"}
+            return {"success": True, "task": paused.to_dict()}
+
+        if action == "update":
+            task_id = str(params.get("task_id") or "").strip()
+            if not task_id:
+                return {"success": False, "error": "update 需要 task_id"}
+            task = scheduler.get_task(task_id)
+            if task is None:
+                return {"success": False, "error": f"任务不存在: {task_id}"}
+            if task.agent_id and task.agent_id != current_agent:
+                return {
+                    "success": False,
+                    "error": "只能更新自己 Agent 的定时任务",
+                    "task": task.to_dict(),
+                }
+            updates = {
+                key: params.get(key)
+                for key in ("name", "description", "cron_expression", "interval_seconds", "max_runs")
+                if key in params
+            }
+            try:
+                updated = scheduler.update_task(task_id, updates)
+            except ValueError as e:
+                return {"success": False, "error": str(e)}
+            if updated is None:
+                return {"success": False, "error": f"任务更新失败: {task_id}"}
+            return {"success": True, "task": updated.to_dict()}
+
+        if action == "delete":
+            task_id = str(params.get("task_id") or "").strip()
+            if not task_id:
+                return {"success": False, "error": "delete 需要 task_id"}
+            task = scheduler.get_task(task_id)
+            if task is None:
+                return {"success": False, "error": f"任务不存在: {task_id}"}
+            if task.agent_id and task.agent_id != current_agent:
+                return {
+                    "success": False,
+                    "error": "只能删除自己 Agent 的定时任务",
+                    "task": task.to_dict(),
+                }
+            if not scheduler.remove_task(task_id):
+                return {"success": False, "error": f"任务删除失败: {task_id}"}
+            return {"success": True, "deleted": True, "task_id": task_id}
+
+        return {
+            "success": False,
+            "error": f"未知 action: {action!r}（create / list / cancel / update / delete / pause / resume）",
+        }
 
     # ── 画布工具（CanvasOpService 语义操作层的薄封装） ───────────
     # 所有写操作经 canvas_ops（与 HTTP 端点 /canvas/{id}/ops 共用同一层，
