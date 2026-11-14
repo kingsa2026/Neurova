@@ -154,6 +154,13 @@ class ContextPool:
         # 活水上下文池新增组件
         self._drawer = SemanticMatchDrawer(max_tokens)
         self._deduplicator = DriftSafeDeduplicator()
+        # B12（对照改进项）：语义判重读数与还原台账（防漂移：判重可审计、可还原）。
+        self._semanticChecks = 0
+        self._semanticDedupTotal = 0
+        self._semanticRestores = 0
+        self._semanticLastSimilarity: Optional[float] = None
+        self._dedupRestoreLedger: List[Dict[str, Any]] = []
+        self._restoreExemptHashes: set = set()
 
         # 自动标签生成器
         if auto_tag:
@@ -247,6 +254,7 @@ class ContextPool:
         # 不会阻塞并发读/写路径；persist_item 只在锁内新增成功后置位，
         # 异常路径不会重复落库（替换/去重跳过路径不落库，语义与改前一致）。
         persist_item = None
+        semantically_deduped = False
         with self._lock:
             # B6-10 批次 D：TTL 回收挂在**写入咽喉**（每一次落常驻之前）。
             # 改前 `cleanup_expired` 生产零调用点：读面只做惰性过滤，过期条目
@@ -286,39 +294,157 @@ class ContextPool:
                                      context.hash[:8], context.source.value if context.source else "?")
                     return
 
-            # [无损归档] 归档层不按容量驱逐——池的定位是永久归档，"永不丢失
-            # 上下文"是硬约束；容量控制发生在视图层（Drawer 按预算整条选取）。
-            # Issue #65：max_size 已失效，首次越界告警一次（否则"设了没生效"
-            # 只会在压测里被发现）；常驻上限改由显式 resident_limit 承载。
-            self._collector.add_context(context)
-            self._noteTtlFloor(getattr(context, "created_at", None))
-            if context.hash:
-                self._by_hash[context.hash] = context
-            self._read_index.add(context)
-            self._cache_version += 1
-            # B4/001：落常驻即写穿持久台账——这是池的**唯一写入咽喉**，
-            # 驱逐路径不可达（生产构造面下 resident_limit=None、ttl_seconds=0），
-            # 归档"永不丢失"必须靠本条通路跨重启为真。
-            persist_item = context
+            # B12（对照改进项）：语义判重（写入期、同 source、高阈值、默认关）。
+            # 判重条目**不入常驻**但仍写穿持久台账（零丢失，recall_evicted 可召回）；
+            # 判重决定进还原台账，可 restoreDedup 一键还原（防漂移：可审计、可逆）。
+            if context.hash and context.hash not in self._restoreExemptHashes:
+                matched, similarity = None, 0.0
+                if self._semanticDedupEnabled() and self._semanticEligible(context):
+                    self._semanticChecks += 1
+                    residents = list(self._read_index.source_entries(context.source))
+                    matched, similarity = self._deduplicator.semanticDuplicate(
+                        context,
+                        residents,
+                        probe=self._semanticProbe,
+                        threshold=self._semanticThreshold(),
+                    )
+                if matched is not None:
+                    self._semanticDedupTotal += 1
+                    self._semanticLastSimilarity = float(similarity)
+                    self._dedupRestoreLedger.append({
+                        "dropped_hash": context.hash,
+                        "kept_hash": matched.hash,
+                        "similarity": round(float(similarity), 4),
+                        "source": context.source.value if context.source else "?",
+                        "dropped": context,
+                        "kept": matched,
+                    })
+                    if len(self._dedupRestoreLedger) > self._DEDUP_RESTORE_LEDGER_CAP:
+                        self._dedupRestoreLedger.pop(0)
+                    semantically_deduped = True
+                    logger.info(
+                        "[DEDUP_SEMANTIC] 语义判重: source=%s sim=%.4f dropped=%s kept=%s",
+                        context.source.value if context.source else "?", similarity,
+                        context.hash[:8], matched.hash[:8],
+                    )
 
-            if (
-                not self._max_size_warned
-                and self.max_size
-                and len(self._collector._contexts) > self.max_size
-            ):
-                self._max_size_warned = True
-                logger.warning(
-                    "ContextPool max_size=%s 已失效（无损归档不驱逐）：当前常驻 %s 条，"
-                    "仅首次告警。需要常驻上限请用 resident_limit + ledger_db",
-                    self.max_size, len(self._collector._contexts),
-                )
+            if not semantically_deduped:
+                # [无损归档] 归档层不按容量驱逐——池的定位是永久归档，"永不丢失
+                # 上下文"是硬约束；容量控制发生在视图层（Drawer 按预算整条选取）。
+                # Issue #65：max_size 已失效，首次越界告警一次（否则"设了没生效"
+                # 只会在压测里被发现）；常驻上限改由显式 resident_limit 承载。
+                self._collector.add_context(context)
+                self._noteTtlFloor(getattr(context, "created_at", None))
+                if context.hash:
+                    self._by_hash[context.hash] = context
+                self._read_index.add(context)
+                self._cache_version += 1
+                # B4/001：落常驻即写穿持久台账——这是池的**唯一写入咽喉**，
+                # 驱逐路径不可达（生产构造面下 resident_limit=None、ttl_seconds=0），
+                # 归档"永不丢失"必须靠本条通路跨重启为真。
+                persist_item = context
 
-            if self.resident_limit and len(self._collector._contexts) > self.resident_limit:
-                self._enforce_resident_limit()
+                if (
+                    not self._max_size_warned
+                    and self.max_size
+                    and len(self._collector._contexts) > self.max_size
+                ):
+                    self._max_size_warned = True
+                    logger.warning(
+                        "ContextPool max_size=%s 已失效（无损归档不驱逐）：当前常驻 %s 条，"
+                        "仅首次告警。需要常驻上限请用 resident_limit + ledger_db",
+                        self.max_size, len(self._collector._contexts),
+                    )
+
+                if self.resident_limit and len(self._collector._contexts) > self.resident_limit:
+                    self._enforce_resident_limit()
 
         # 锁外写穿持久台账（B4/001 唯一写入咽喉，语义不变：本方法返回时已落库）
+        if semantically_deduped:
+            # B12：被判重条目同样落库（零丢失）——只是不进常驻、不占召回位。
+            self._persist_archived(context)
         if persist_item is not None:
             self._persist_archived(persist_item)
+
+    # ── B12：语义判重（默认关；开关与阈值单源在此）────────────────────
+
+    _DEDUP_RESTORE_LEDGER_CAP = 500
+
+    def _semanticDedupEnabled(self) -> bool:
+        """语义判重总开关：默认关（NEUROVA_DEDUP_SEMANTIC=1 显式开启）。
+
+        语义判重有信息丢失与漂移风险（设计文档 §3.3 自证），未灰度不得
+        默认改写入行为。
+        """
+        import os as _os
+
+        return _os.environ.get("NEUROVA_DEDUP_SEMANTIC", "0") == "1"
+
+    def _semanticThreshold(self) -> float:
+        """判重阈值：去重器默认 0.95，env 可覆写（钳 0.5-1.0）。"""
+        import os as _os
+
+        try:
+            value = float(_os.environ.get(
+                "NEUROVA_DEDUP_SEMANTIC_THRESHOLD", str(self._deduplicator.semantic_threshold)
+            ))
+        except (TypeError, ValueError):
+            value = self._deduplicator.semantic_threshold
+        return min(1.0, max(0.5, value))
+
+    def _semanticEligible(self, context) -> bool:
+        """入池条目是否参与语义判重（豁免面：设计文档 §5.3 关键上下文）。"""
+        if getattr(context, "source", None) in (
+            ContextSource.USER_INPUT,
+            ContextSource.SYSTEM_INSTRUCTION,
+            ContextSource.DEVELOPER_INSTRUCTION,
+        ):
+            return False
+        if (getattr(context, "priority", 0) or 0) >= 90:
+            return False
+        return len(str(getattr(context, "content", "") or "").strip()) >= 20
+
+    def _semanticProbe(self, text_a: str, text_b: str) -> Optional[float]:
+        """语义相似度探针：复用抽屉向量面与 B11 缓存；不可用返回 None（fail-open）。"""
+        try:
+            store = self._drawer.vector_store
+            if not store:
+                return None
+            vector_a = self._drawer._cachedEncode(store, text_a)
+            vector_b = self._drawer._cachedEncode(store, text_b)
+            from neurova.core import vector_math
+
+            return vector_math.cosineScore(vector_a, vector_b)
+        except Exception as e:  # noqa: BLE001 - 探针失败按不可用处理（fail-open）
+            logger.debug("语义探针不可用: %s", e)
+            return None
+
+    def restoreDedup(self, dropped_hash: str) -> bool:
+        """B12 防漂移：把被语义判重的条目还原回常驻（一键撤销判重决定）。
+
+        还原走正常写入咽喉（add_context），并对其 hash 一次性豁免语义判重
+        （否则刚还原就会被再次判重）。未找到记录返回 False。
+        """
+        with self._lock:
+            record = next(
+                (
+                    item
+                    for item in reversed(self._dedupRestoreLedger)
+                    if item.get("dropped_hash") == dropped_hash
+                ),
+                None,
+            )
+            if record is None:
+                return False
+            self._restoreExemptHashes.add(dropped_hash)
+        try:
+            self.add_context(record["dropped"])
+        finally:
+            with self._lock:
+                self._restoreExemptHashes.discard(dropped_hash)
+        with self._lock:
+            self._semanticRestores += 1
+        return True
 
     def _enforce_resident_limit(self) -> None:
         """常驻上限回收（调用方须持 _lock）。
@@ -405,6 +531,25 @@ class ContextPool:
             # B13（对照改进项）：取水质量持续读数——抽屉的累计计数
             # （门槛通过/拦下、注入条数/token、降级轮次），供漂移发现。
             "drawer": self._drawer.readouts(),
+            # B12（对照改进项）：语义判重读数与还原台账（防漂移：可审计、可逆）。
+            "dedup": {
+                "semantic_enabled": self._semanticDedupEnabled(),
+                "semantic_threshold": self._semanticThreshold(),
+                "semantic_checks": self._semanticChecks,
+                "semantic_dedup_total": self._semanticDedupTotal,
+                "restores": self._semanticRestores,
+                "last_similarity": self._semanticLastSimilarity,
+                "restore_ledger_size": len(self._dedupRestoreLedger),
+                "restore_ledger": [
+                    {
+                        "dropped_hash": item.get("dropped_hash"),
+                        "kept_hash": item.get("kept_hash"),
+                        "similarity": item.get("similarity"),
+                        "source": item.get("source"),
+                    }
+                    for item in self._dedupRestoreLedger
+                ],
+            },
         }
 
     def _rebuild_indexes(self) -> None:
