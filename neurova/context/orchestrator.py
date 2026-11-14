@@ -357,12 +357,16 @@ class ContextOrchestrator:
                 "last_error": None,
             },
             # P1-6：注入 write-ahead 账本完整性读数（恢复/审计侧核验）。
-            # rows/ok/broken/last_seq 来自 injection_ledger.verifyInjections。
+            # rows/ok/broken/last_seq 来自 injection_ledger.verifyInjections；
+            # restore_* 来自恢复链路的核验（noteRestoreVerification 写入本槽）。
             "injection_ledger": {
                 "rows": 0,
                 "ok": 0,
                 "broken": 0,
                 "last_seq": None,
+                "restore_match": None,
+                "restore_seq": None,
+                "restore_rows": 0,
                 "last_error": None,
             },
             # Issue #289 002：池分支压缩经济性判据读数。字段与注入器侧
@@ -560,6 +564,7 @@ class ContextOrchestrator:
             if _ledgerSession:
                 snapshot["injection_ledger"] = {
                     **empty["injection_ledger"],
+                    **dict(health.get("injection_ledger") or {}),
                     **verifyInjections(_ledgerSession),
                 }
         except Exception as exc:  # noqa: BLE001 - 读数失败不影响其余读数
@@ -568,6 +573,14 @@ class ContextOrchestrator:
                 "last_error": f"{type(exc).__name__}: {exc}",
             }
         return snapshot
+
+    def noteRestoreVerification(self, summary: Dict[str, Any]) -> None:
+        """P1-6c：恢复侧核验读数入槽（写侧是每轮 build_context 的出口落账，
+        读侧是会话恢复时的字节级比对——两边在同一条健康读数上汇合）。"""
+        slot = self._contextHealthSlot("injection_ledger")
+        for key in ("restore_match", "restore_seq", "restore_rows"):
+            if key in summary:
+                slot[key] = summary[key]
 
     def _foldedHashes(self) -> set:
         """折叠侧登记的已覆盖 hash 全集（覆盖闭合对账的**唯一**事实源）。

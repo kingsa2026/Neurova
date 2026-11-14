@@ -869,6 +869,27 @@ class ChatPipeline:
                 session_id=ctx.session_id,
                 max_messages=20,
             )
+
+            # P1-6c：恢复侧核验——账本里「模型最后看到的视图」（信封+输入，
+            # 字节级）应以此刻恢复出的末条 user 消息收尾；不一致即漂移，
+            # 进健康读数（injection_ledger.restore_match）。账本缺席/故障
+            # 不阻断恢复（会话无账本行时 restore_match=None）。
+            try:
+                from neurova.context.injection_ledger import matchRestoredView
+
+                _restoredLastUser = next(
+                    (m.get("content") for m in reversed(ctx.session_context or [])
+                     if isinstance(m, dict) and m.get("role") == "user"),
+                    None,
+                )
+                _restoreVerify = matchRestoredView(
+                    ctx.session_id, str(_restoredLastUser or "")
+                )
+                note = getattr(self.context_orchestrator, "noteRestoreVerification", None)
+                if callable(note):
+                    note(_restoreVerify)
+            except Exception as ledger_err:
+                logger.debug("注入账本恢复核验跳过: %s", ledger_err)
         except Exception as e:
             logger.warning("恢复 session %s 失败: %s", ctx.session_id, e)
 

@@ -153,3 +153,29 @@ def verifyInjections(sessionId: str) -> Dict[str, Any]:
         "last_seq": rows[-1]["seq"] if rows else None,
         "last_error": None,
     }
+
+
+def matchRestoredView(sessionId: str, restoredLastUserText: str) -> Dict[str, Any]:
+    """恢复侧核验（P1-6c）：账本末行 content 应以恢复出的末条 user 消息收尾。
+
+    行 content = 信封 + 空行 + user_input（无信封时恰为 user_input），故
+    ``content == text`` 或 ``content.endswith("\\n\\n" + text)`` 即一致；
+    不一致 = 会话文件与账本对「模型最后看到了什么」各执一词（漂移）。
+
+    Returns:
+        {"rows": 账本行数, "restore_match": True/False/None(无账本行),
+         "restore_seq": 末行 seq, "restore_rows": 账本行数（与健康读数槽同名）}。
+    """
+    rows = _readRows(ledgerPathFor(sessionId))
+    if not rows:
+        return {"rows": 0, "restore_match": None, "restore_seq": None, "restore_rows": 0}
+    last = rows[-1]
+    content = str(last.get("content", ""))
+    text = str(restoredLastUserText or "")
+    match = bool(text) and (content == text or content.endswith("\n\n" + text))
+    return {
+        "rows": len(rows),
+        "restore_match": match,
+        "restore_seq": last.get("seq"),
+        "restore_rows": len(rows),
+    }
