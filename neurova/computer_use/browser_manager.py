@@ -676,22 +676,20 @@ class PlaywrightBackend(BrowserBackend):
         # console/pageerror 事件缓冲（browser_console 读数面）：会话内环形，防长会话无界
         self._consoleLog: List[Dict[str, Any]] = []
 
+    def _recordConsole(self, kind: str, text: str) -> None:
+        self._consoleLog.append({"type": kind, "text": text})
+        if len(self._consoleLog) > 200:
+            del self._consoleLog[:-200]
+
     def _attachConsoleListener(self, target) -> None:
-        """把 console/pageerror 事件收进环形缓冲，供 browser_console 读取排障。
+        """把 console 事件收进环形缓冲，供 browser_console 读取排障。
 
-        挂 context 级（与 _attachDialogListener 同理）：一处注册覆盖全部 tab。
+        **console 是 context 级事件**（一处注册覆盖全部 tab）；`pageerror` 是
+        **page 级事件**（context 上没有这个事件，挂上去静默无效）——它在
+        `_register_tab` 里逐 page 挂载。
         """
-        def _record(kind: str):
-            def _handler(payload) -> None:
-                text = getattr(payload, "text", None) or str(payload)
-                self._consoleLog.append({"type": kind, "text": text})
-                if len(self._consoleLog) > 200:
-                    del self._consoleLog[:-200]
-            return _handler
-
         try:
-            target.on("console", _record("console"))
-            target.on("pageerror", _record("pageerror"))
+            target.on("console", lambda msg: self._recordConsole("console", getattr(msg, "text", None) or str(msg)))
         except Exception as e:  # noqa: BLE001 - 监听注册失败不阻断浏览器主链，但留痕
             logger.debug("console 监听注册失败（忽略）: %s", e)
 
@@ -739,6 +737,11 @@ class PlaywrightBackend(BrowserBackend):
         target_id = f"tab_{uuid.uuid4().hex[:8]}"
         self._tabs[target_id] = {"page": page, "generation": 1}
         self._active_target_id = target_id
+        # pageerror 是 page 级事件：每个 tab 各挂一份，全部汇入同一缓冲
+        try:
+            page.on("pageerror", lambda exc: self._recordConsole("pageerror", str(exc)))
+        except Exception as e:  # noqa: BLE001 - 监听注册失败不阻断浏览器主链
+            logger.debug("pageerror 监听注册失败（忽略）: %s", e)
         return {"target_id": target_id, "generation": 1}
 
     def _check_active_generation(self, generation: Optional[int]) -> Optional[BrowserResult]:
@@ -1563,8 +1566,12 @@ class PlaywrightBackend(BrowserBackend):
         try:
             if not self._page:
                 raise RuntimeError(NO_ACTIVE_TAB_ERROR)
-            response = await self._page.go_back()
-            if response is None:
+            # 无历史判据用 **URL 是否变化**，不用 go_back 返回值——Playwright 对
+            # data: URL 等无网络响应的导航即使成功也返回 None，按返回值判会
+            # 把成功后退误报成"无历史"。
+            before_url = self._page.url
+            await self._page.go_back()
+            if self._page.url == before_url:
                 return BrowserResult(
                     success=False,
                     error="无后退历史（当前页已是本次会话的第一个页面）",
@@ -1590,8 +1597,9 @@ class PlaywrightBackend(BrowserBackend):
         try:
             if not self._page:
                 raise RuntimeError(NO_ACTIVE_TAB_ERROR)
-            response = await self._page.go_forward()
-            if response is None:
+            before_url = self._page.url
+            await self._page.go_forward()
+            if self._page.url == before_url:
                 return BrowserResult(
                     success=False,
                     error="无前进历史（当前页已是本次会话的最新页面）",
