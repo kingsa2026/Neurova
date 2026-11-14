@@ -1578,7 +1578,15 @@ class ContextOrchestrator:
             except Exception as e:  # noqa: BLE001 - 预算联动失败不阻断召回
                 logger.debug("draw 预算联动跳过: %s", e)
                 retrievalBudget = None
-            drawn_contexts = self.context_pool.draw(need=user_input, budget_tokens=retrievalBudget)
+            # B10（对照改进项）：召回需求锚 = 当前输入 + 近轮要点。短输入
+            # （"继续""这样不对"）单凭输入向量几乎无区分力，召回退化成
+            # "最近优先"；并入最近几轮对话要点后，锚才带得上任务语境。
+            # 抽屉对 need 只编码一次，加长锚不增加编码成本。
+            # 开关 NEUROVA_RECALL_NEED_ENRICH=0 可回退（默认开）。
+            drawn_contexts = self.context_pool.draw(
+                need=self._buildRecallNeedAnchor(user_input, window_msgs),
+                budget_tokens=retrievalBudget,
+            )
             # 会话作用域隔离：旁路"历史回忆"召回同样过滤——单聊/非协作仅见 direct（仍跨普通
             # 会话召回），排除任何房间归档；群轮见 direct + 本群。chunk 归属由 metadata.session_id
             # 的 project_ 前缀判定（与长期记忆同规则）。
@@ -2034,6 +2042,11 @@ class ContextOrchestrator:
     _TOOL_PAYLOAD_MIN_TOKENS = 2000  # 收益门槛：省下的还不抵指针开销时不动手
     _TOOL_RESULT_KEEP_SHARE = 0.5  # 保留窗：最新若干条累计载荷不超过载荷的一半
     _TOOL_RESULT_MIN_CHARS = 80  # 极短结果（状态码类）恒保留原文
+    # B7（对照改进项）：单条巨结果封顶线——即便它是最新一条也换占位指针
+    # （CCR 同语义：巨结果当轮把窗口顶高、逼出不必要的整窗折叠；原文在池，
+    # 模型凭 call=<id> 直取）。取 20000：常规大结果（数 K token）仍原文驻留
+    # （T-10c 裁定的"最新结果模型立即可用"不受影响），只封病理级巨结果。
+    _TOOL_RESULT_SINGLE_CEILING = 20000
 
     @classmethod
     def _tool_placeholder(cls, msg: dict) -> str:
@@ -2183,6 +2196,22 @@ class ContextOrchestrator:
             if len(content) >= self._TOOL_RESULT_MIN_CHARS:
                 cleared[i] = {**cleared[i], "content": self._tool_placeholder(cleared[i])}
                 replaced += 1
+
+        # B7（对照改进项）：单条巨结果封顶——即便它是保留窗里的最新一条。
+        # 一条 30K 的工具结果当轮就把窗口顶高、逼出不必要的整窗折叠；封顶后
+        # 占位指针指向池归档原文，模型凭 call=<id> 直取（CCR 同语义）。
+        single_capped = 0
+        for i in positions:
+            row = cleared[i]
+            if meter.one(row) <= self._TOOL_RESULT_SINGLE_CEILING:
+                continue
+            content = str(row.get("content", "") or "")
+            if len(content) < self._TOOL_RESULT_MIN_CHARS or content.startswith("[工具输出已移出上下文"):
+                continue
+            cleared[i] = {**row, "content": self._tool_placeholder(row)}
+            single_capped += 1
+        if single_capped:
+            readout["last_single_capped"] = single_capped
 
         readout["triggered_calls"] += 1
         readout["last_replaced"] = replaced
@@ -2737,6 +2766,35 @@ class ContextOrchestrator:
         )
         if decision.should_fold and decision.reason == "growth_gate":
             readout["proactive_folds"] = int(readout.get("proactive_folds") or 0) + 1
+
+    @staticmethod
+    def _buildRecallNeedAnchor(user_input, window_msgs) -> str:
+        """B10（对照改进项）：召回需求锚 = 当前输入 + 近轮要点。
+
+        短输入（"继续""这样不对"）单凭输入向量几乎无区分力；并入最近几轮
+        对话要点后，锚才带得上任务语境。抽屉对 need 只编码一次，加长锚
+        不增加编码成本。
+
+        ⚠️ 默认关（NEUROVA_RECALL_NEED_ENRICH=1 显式开启）：0.65 相关性门槛
+        是按**纯输入锚**两点校准的（无关基线 ~0.61-0.63、相关带 ≥0.64）；
+        实测复合锚会把无关对的分数抬过门槛（"天气"输入 + 闲聊近轮 →
+        固件教训 0.633 → 0.685 泄漏进视图）。默认开启等于未校准就改判据，
+        故先做成显式开启的实验位，待复合锚刻度重新校准后再转正。
+        """
+        import os as _os
+
+        base = str(user_input or "").strip()
+        if _os.environ.get("NEUROVA_RECALL_NEED_ENRICH", "0") != "1":
+            return base
+        tail = [
+            str((m or {}).get("content") or "").strip()
+            for m in (window_msgs or [])[-3:]
+            if str((m or {}).get("content") or "").strip()
+        ]
+        recent = " ".join(item[:160] for item in tail)
+        if recent:
+            return f"{base} 近轮要点：{recent}" if base else f"近轮要点：{recent}"
+        return base
 
     async def manual_compact(self, conversation_history: list) -> dict:
         """/compact 手动压缩：无视预算水位强制折叠当前会话窗口。
