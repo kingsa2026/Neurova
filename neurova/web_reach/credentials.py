@@ -2,7 +2,7 @@
 
 设计：
 - 每用户一个凭据桶目录（base_dir/{user_id}/），凭据值经认证加密落盘
-  （`secret_store_clean` 复用 `providers.secret_store` 的 AES-256-GCM 口径，明文不落磁盘）；
+  （`secret_store_clean` 的 AES-256-GCM 认证加密口径，明文不落磁盘）；
   加密 keyfile 首次生成后持久（重启稳定）
 - 与全局配置的关系：不做全局 fallback。凭据一律按归属桶存取，
   单用户部署在 default 桶配置即可。
