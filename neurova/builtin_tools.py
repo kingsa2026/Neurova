@@ -1271,6 +1271,33 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["question"],
         },
     },
+    "escalate": {
+        # P2-10 增强：子代理升级通道。通知面（邮箱+运行记录），不改共享存储。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
+        "description": "【子代理升级】子代理遇阻时把问题升级给主代理/用户：说明卡点、已尝试与需要的决策。仅子代理运行内可用；升级后请在最终回复说明已升级并结束本轮。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reason": {"type": "string", "description": "升级原因：卡点是什么、为什么自己解决不了"},
+                "question": {"type": "string", "description": "需要用户/主代理决策的问题（可选）"},
+                "severity": {"type": "string", "enum": ["normal", "urgent"], "description": "严重程度，默认 normal"},
+            },
+            "required": ["reason"],
+        },
+    },
+    "submit_result": {
+        # P2-10 增强：子代理结构化结果提交。通知面（邮箱+运行记录），不改共享存储。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
+        "description": "【子代理结果提交】子代理以结构化形态提交最终结果（摘要/状态），主代理与用户会收到通知。仅子代理运行内可用；提交后请在最终回复中重述要点。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string", "description": "结果摘要（结论/关键数据/未尽事项）"},
+                "status": {"type": "string", "enum": ["success", "partial", "failed"], "description": "结果状态，默认 success"},
+            },
+            "required": ["summary"],
+        },
+    },
     "custom_node_create": {
         # 并行能力声明：写共享的自定义节点注册表——同批两个创建会撞同一份注册表与版本表。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
@@ -1678,7 +1705,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "type": "object",
             "properties": {
                 "code": {"type": "string", "description": "要执行的代码字符串"},
-                "language": {"type": "string", "description": "代码语言：python（默认）或 shell"},
+                "language": {"type": "string", "description": "代码语言：python（默认）/ shell / javascript（经 node -e 执行，node 缺席时诚实报错）"},
                 "timeout": {"type": "integer", "description": "执行超时秒数（默认 60）"},
                 "runtime_type": {"type": "string", "description": "运行时类型：local（默认）或 docker", "enum": ["local", "docker"], "default": "local"},
                 "cwd": {"type": "string", "description": "工作目录（可选，默认执行器当前目录）"},

@@ -458,6 +458,9 @@ class ToolExecutor:
         "spawn_subagent": "_execute_spawn_subagent",
         "subagent_status": "_execute_subagent_status",
         "list_agents": "_execute_list_agents",
+        # P2-10 增强：子代理升级/结构化结果提交
+        "escalate": "_execute_escalate",
+        "submit_result": "_execute_submit_result",
         "create_skill": "_execute_create_skill",
         # 构建问询：写 BuildSession 交互并返回 paused，回答后由面板恢复
         "ask_user": "_execute_ask_user",
@@ -2426,6 +2429,70 @@ class ToolExecutor:
         )
         result["run_id"] = runId
         return result
+
+    async def _execute_escalate(self, params: Dict) -> Dict:
+        """P2-10 增强：子代理升级（遇阻上报主代理/用户）。仅子代理运行内可用。"""
+        from neurova.agent.swarm import get_swarm_manager
+        from neurova.core.turn_context import get_turn_session_id
+
+        reason = str(params.get("reason") or "").strip()
+        if not reason:
+            return {"success": False, "error": "escalate 需要 reason（说明卡点）"}
+        memberSession = get_turn_session_id()
+        run = (
+            get_swarm_manager().getRunByMemberSession(memberSession)
+            if memberSession
+            else None
+        )
+        if run is None:
+            return {
+                "success": False,
+                "error": "仅子代理运行内可升级（当前调用不在子代理上下文）",
+            }
+        envelope = get_swarm_manager().recordEscalation(
+            run,
+            reason,
+            str(params.get("question") or ""),
+            str(params.get("severity") or "normal"),
+        )
+        return {
+            "success": True,
+            "escalated": True,
+            "subagent_id": run.subagent_id,
+            "notified": bool(envelope.get("task")),
+            "guidance": "升级已送达主代理；请在最终回复中说明已升级并结束本轮",
+        }
+
+    async def _execute_submit_result(self, params: Dict) -> Dict:
+        """P2-10 增强：子代理结构化结果提交。仅子代理运行内可用。"""
+        from neurova.agent.swarm import get_swarm_manager
+        from neurova.core.turn_context import get_turn_session_id
+
+        summary = str(params.get("summary") or "").strip()
+        if not summary:
+            return {"success": False, "error": "submit_result 需要 summary"}
+        status = str(params.get("status") or "success")
+        if status not in ("success", "partial", "failed"):
+            status = "success"
+        memberSession = get_turn_session_id()
+        run = (
+            get_swarm_manager().getRunByMemberSession(memberSession)
+            if memberSession
+            else None
+        )
+        if run is None:
+            return {
+                "success": False,
+                "error": "仅子代理运行内可提交结果（当前调用不在子代理上下文）",
+            }
+        envelope = get_swarm_manager().recordSubmittedResult(run, summary, status)
+        return {
+            "success": True,
+            "submitted": True,
+            "subagent_id": run.subagent_id,
+            "status": envelope.get("status"),
+            "guidance": "结果已提交并通知主代理；请在最终回复中重述要点",
+        }
 
     async def _execute_builtin_tool(self, tool_name: str, params: Dict) -> Dict:
         """执行内置工具(分派表驱动,见 _builtin_dispatch 注释)"""
@@ -7816,6 +7883,18 @@ class ToolExecutor:
                 elif language in ("shell", "bash", "sh"):
                     command = "sh"
                     args = ["-c", code]
+                elif language in ("javascript", "js"):
+                    # P3-14 对照：JavaScript 执行（node -e 内联）。node 缺席时
+                    # 诚实报错（不静默回落 shell）。
+                    import shutil as _shutil
+
+                    if _shutil.which("node") is None:
+                        return {
+                            "success": False,
+                            "error": "node 不可用（未安装或不在 PATH）——JavaScript 执行需要 Node.js",
+                        }
+                    command = "node"
+                    args = ["-e", code]
                 else:
                     command = language
                     args = [code]

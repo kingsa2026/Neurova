@@ -119,6 +119,10 @@ class SubAgentRun:
     # Windows 文件名安全。
     member_session_id: str = ""
     status: str = SUBAGENT_PENDING  # 取值域见 SUBAGENT_STATUSES（本模块常量，唯一出处）
+    # P2-10 增强：子代理升级/结构化结果提交（escalate/submit_result 工具写入，
+    # 随邮箱投递发起者会话；只作读数与通知，不改变运行状态机）
+    escalation: Optional[Dict[str, Any]] = None
+    submitted_result: Optional[Dict[str, Any]] = None
     # 收尾成因（见 `agent_run_ledger.SUBAGENT_CAUSE_*`）：台账的 error_type 由它翻出来，
     # 不靠嗅探 error 文本——那正是「同一件事两份口径」的下一种形态。
     cause: str = "" 
@@ -902,6 +906,84 @@ class SwarmManager:
             )
         except Exception as e:  # noqa: BLE001 - 回灌失败不影响主流程
             logger.debug("Swarm: 邮箱回灌失败 (%s): %s", run.subagent_id, e)
+
+
+    def getRunByMemberSession(self, memberSessionId: str) -> Optional[SubAgentRun]:
+        """按 member 会话找**活跃**的子代理运行（子代理回合内的工具调用，
+        其 turn session 即 member_session_id）；无则 None。"""
+        if not memberSessionId:
+            return None
+        for run in self._runs.values():
+            if (
+                run.member_session_id == memberSessionId
+                and run.status in SUBAGENT_ACTIVE_STATUSES
+            ):
+                return run
+        return None
+
+    def recordEscalation(
+        self, run: SubAgentRun, reason: str, question: str = "", severity: str = "normal"
+    ) -> Dict[str, Any]:
+        """记录子代理升级，并把升级信封投递发起者会话邮箱（主代理/用户可见）。"""
+        run.escalation = {
+            "reason": str(reason or ""),
+            "question": str(question or ""),
+            "severity": str(severity or "normal"),
+            "at": time.time(),
+        }
+        envelope = {
+            "kind": "escalate",
+            "subagent_id": run.subagent_id,
+            "agent_id": run.agent_id,
+            "agent_name": run.agent_name,
+            "task": run.task,
+            "reason": run.escalation["reason"],
+            "question": run.escalation["question"],
+            "severity": run.escalation["severity"],
+        }
+        if run.origin == "chat" and run.session_id:
+            try:
+                from neurova.agent.mailbox import get_agent_mailbox
+
+                get_agent_mailbox().push(
+                    run.session_id,
+                    "[子Agent升级] " + json.dumps(envelope, ensure_ascii=False),
+                )
+            except Exception as e:  # noqa: BLE001 - 回灌失败不影响升级本身
+                logger.debug("Swarm: 升级邮箱投递失败 (%s): %s", run.subagent_id, e)
+        return envelope
+
+    def recordSubmittedResult(
+        self, run: SubAgentRun, summary: str, status: str = "success"
+    ) -> Dict[str, Any]:
+        """记录子代理的结构化结果提交，并投递发起者会话邮箱。"""
+        run.submitted_result = {
+            "summary": str(summary or ""),
+            "status": str(status or "success"),
+            "at": time.time(),
+        }
+        if str(summary or "").strip():
+            run.report = str(summary)
+        envelope = {
+            "kind": "submit_result",
+            "subagent_id": run.subagent_id,
+            "agent_id": run.agent_id,
+            "agent_name": run.agent_name,
+            "task": run.task,
+            "summary": run.submitted_result["summary"],
+            "status": run.submitted_result["status"],
+        }
+        if run.origin == "chat" and run.session_id:
+            try:
+                from neurova.agent.mailbox import get_agent_mailbox
+
+                get_agent_mailbox().push(
+                    run.session_id,
+                    "[子Agent结果] " + json.dumps(envelope, ensure_ascii=False),
+                )
+            except Exception as e:  # noqa: BLE001 - 投递失败不影响提交本身
+                logger.debug("Swarm: 结果邮箱投递失败 (%s): %s", run.subagent_id, e)
+        return envelope
 
 
 # ── 单例生命周期 ────────────────────────────────────────────────
