@@ -185,5 +185,51 @@ class TestApprovalEndpoints(GovernanceEndpointTestBase):
         self.assertEqual(req.status.value, "rejected")
 
 
+class TestPermissionModeSettingsPut(GovernanceEndpointTestBase):
+    """P1-4：权限模式 agent 级覆写的治理设置读写面（写歪的条目 422 点名）。"""
+
+    def setUp(self):
+        super().setUp()
+        # 设置文件指到临时路径，绝不写真实数据目录
+        import os as _os
+
+        self._settings_file = Path(self.tmp) / "governance_settings.json"
+        env_patcher = patch.dict(
+            _os.environ, {"NEUROVA_GOVERNANCE_SETTINGS": str(self._settings_file)}
+        )
+        env_patcher.start()
+        self.addCleanup(env_patcher.stop)
+
+    def test_mode_overrides_roundtrip(self):
+        resp = self.client.put(
+            "/api/v1/governance/settings",
+            json={"permission_mode_overrides": {"a1": "yolo", "a2": "guarded"}},
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(
+            resp.json()["data"]["permission_mode_overrides"],
+            {"a1": "yolo", "a2": "guarded"},
+        )
+        reread = self.client.get("/api/v1/governance/settings")
+        self.assertEqual(
+            reread.json()["data"]["permission_mode_overrides"].get("a1"), "yolo"
+        )
+
+    def test_mode_overrides_invalid_rejected(self):
+        resp = self.client.put(
+            "/api/v1/governance/settings",
+            json={"permission_mode_overrides": {"a1": "nuclear"}},
+        )
+        self.assertEqual(resp.status_code, 422)
+        self.assertIn("permission_mode_overrides", resp.json()["detail"])
+
+    def test_mode_overrides_blank_agent_rejected(self):
+        resp = self.client.put(
+            "/api/v1/governance/settings",
+            json={"permission_mode_overrides": {"  ": "yolo"}},
+        )
+        self.assertEqual(resp.status_code, 422)
+
+
 if __name__ == "__main__":
     unittest.main()

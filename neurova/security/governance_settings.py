@@ -49,6 +49,11 @@ DEFAULTS: Dict[str, Any] = {
     # P1-3：只读 argv 自动放行——全部段均为只读动词且内容检测零发现时免审批。
     # 默认关：先作为能力位存在，运营按需开启以扩大无人值守面。
     "readonly_argv_autoallow_enabled": False,
+    # P1-4 权限模式：agent 级覆写 {agent_id: plan|build|edit|yolo|guarded|auto}。
+    # 命中条目的 agent 按覆写模式走治理语义（解析唯一出处
+    # permission_mode.resolvePermissionModeFor）；未命中读默认 build。
+    # 子代理继承的「只收窄不升级」判据在 permission_mode.inheritPermissionMode。
+    "permission_mode_overrides": {},
     # 整合全自动 commit gate（2026-10-07 规则修订：用户指令"全自动替代人工审批"）。
     # gate 为确定性多检 fail-closed（召回预检+结构身份门槛，任一检不过仍留人工），
     # 动作=归档可逆+账本迁移+留痕；关=回退人工审批面。规则修订登记：
