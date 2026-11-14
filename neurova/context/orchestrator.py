@@ -1254,6 +1254,9 @@ class ContextOrchestrator:
         chat_channel: str = "",
         chat_group_id: str = "",
         retrieval_guidance: Optional[str] = None,
+        # P1-6c：/replay 重放悬空轮时钉住的账本字节级视图（信封+输入）。
+        # 提供时直接作为末条 user 消息，不重新推导信封（模型看到的与崩溃前一致）。
+        pinned_view: Optional[str] = None,
     ) -> List[Dict]:
         """构建完整的 LLM 上下文（Phase 2-5）
 
@@ -1730,6 +1733,12 @@ class ContextOrchestrator:
                         blocks["tooling"].append("\n".join(lines))
                 except Exception as e:
                     logger.debug("语音上下文注入跳过: %s", e)
+
+            # P1-6c：/replay 钉住视图——重放悬空轮时使用账本里的字节级原视图
+            # （信封+输入），不重新推导信封：模型看到的与崩溃前一致。
+            if pinned_view:
+                context.append({"role": "user", "content": pinned_view})
+                return await self._finishContext(context)
 
             # 5. 当前用户输入最后追加，确保是 LLM 看到的最后一条 user 消息
             #
