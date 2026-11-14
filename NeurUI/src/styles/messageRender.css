@@ -222,6 +222,23 @@
   color: var(--nr-accent);
 }
 
+/* 正文里点名的产物文件名 → 可点击打开右侧预览（2026-11-14 用户口径） */
+.nr-artifact-ref {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: var(--nr-primary-light);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.nr-artifact-ref:hover {
+  color: var(--nr-accent);
+}
+
 /* ── highlight.js token 配色（玻璃暗色系）── */
 .nr-code-block .hljs-comment,
 .nr-code-block .hljs-quote { color: #6b7280; font-style: italic; }
