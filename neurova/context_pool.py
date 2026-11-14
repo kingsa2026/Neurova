@@ -402,6 +402,9 @@ class ContextPool:
                 "keep_days": getattr(self._ledger_db, "keep_days", None),
                 "last_error": self._ledger_gc_last_error,
             },
+            # B13（对照改进项）：取水质量持续读数——抽屉的累计计数
+            # （门槛通过/拦下、注入条数/token、降级轮次），供漂移发现。
+            "drawer": self._drawer.readouts(),
         }
 
     def _rebuild_indexes(self) -> None:

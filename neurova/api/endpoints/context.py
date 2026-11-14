@@ -61,6 +61,8 @@ class ContextStats(BaseModel):
     archived_total: int = 0
     ledger_rows: int = 0
     indexed_entries: int = 0
+    # B13（对照改进项）：取水质量读数（各池抽屉累计计数求和）
+    drawer: Optional[Dict[str, Any]] = None
 
 
 class ContextCompositionResponse(BaseModel):
@@ -412,6 +414,16 @@ async def get_context_stats(
     archived_total = sum(int(s.get("archived_total") or 0) for s in stats)
     ledger_rows = sum(int((s.get("ledger") or {}).get("rows") or 0) for s in stats)
     indexed_entries = sum(int((s.get("read_index") or {}).get("indexed_entries") or 0) for s in stats)
+    # B13（对照改进项）：各池抽屉累计计数求和——键集固定（_READOUT_KEYS），
+    # 单池缺键按 0 计，不因单池读数形状漂移而 500。
+    drawer_keys = (
+        "draws_total", "offered_total", "candidates_total", "threshold_pass_total",
+        "threshold_miss_total", "injected_total", "injected_tokens_total", "degraded_total",
+    )
+    drawer_totals = {
+        key: sum(int((s.get("drawer") or {}).get(key) or 0) for s in stats)
+        for key in drawer_keys
+    }
     return ContextStats(
         pools=len(stats),
         total_contexts=total_contexts,
@@ -419,6 +431,7 @@ async def get_context_stats(
         archived_total=archived_total,
         ledger_rows=ledger_rows,
         indexed_entries=indexed_entries,
+        drawer=drawer_totals,
     )
 
 

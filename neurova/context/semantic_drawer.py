@@ -8,6 +8,7 @@ from neurova.core import vector_math
 """
 
 import hashlib
+import threading
 from dataclasses import replace
 
 from neurova.core.logger import get_logger
@@ -19,6 +20,21 @@ from typing import List, Optional
 from neurova.context.pool_models import ContextInput, ContextSource
 
 logger = get_logger(__name__)
+
+# B13（对照改进项）：取水质量持续读数的键集。全部是累计计数（无 per-key
+# 增长），经 `readouts()` 曝光、`ContextPool.get_retention_stats()["drawer"]`
+# 汇出——0.65 相关性门槛只做过一次性两点校准，没有持续读数就发现不了
+# 漂移（泄漏/漏召）。
+_READOUT_KEYS = (
+    "draws_total",           # draw 调用次数（非空池）
+    "offered_total",         # 入参池条目累计（粗筛前）
+    "candidates_total",      # 词法粗筛后进入打分的候选累计
+    "threshold_pass_total",  # 相关性门槛通过累计（仅 need 非空的轮计）
+    "threshold_miss_total",  # 相关性门槛拦下累计（仅 need 非空的轮计）
+    "injected_total",        # 实际选中注入视图的条目累计
+    "injected_tokens_total", # 选中条目 token 累计
+    "degraded_total",        # 语义编码失败降级关键词刻度的轮次累计
+)
 
 
 class SemanticMatchDrawer:
@@ -73,6 +89,23 @@ class SemanticMatchDrawer:
             max_candidates = CANDIDATE_LIMIT
         self.max_candidates = max(1, int(max_candidates))
         self._vector_store = None
+        # B13：取水读数（累计计数，RLock 保护——draw 可来自多线程池）
+        self._readoutLock = threading.RLock()
+        self._readouts = dict.fromkeys(_READOUT_KEYS, 0)
+
+    def readouts(self) -> dict:
+        """本实例累计取水读数（快照副本；键集见 `_READOUT_KEYS`）。"""
+        with self._readoutLock:
+            return dict(self._readouts)
+
+    def resetReadouts(self) -> None:
+        """读数清零（测试/运维用；不影响选取行为）。"""
+        with self._readoutLock:
+            self._readouts = dict.fromkeys(_READOUT_KEYS, 0)
+
+    def _bumpReadout(self, key: str, n: int = 1) -> None:
+        with self._readoutLock:
+            self._readouts[key] = self._readouts.get(key, 0) + int(n)
 
     @property
     def vector_store(self):
@@ -103,12 +136,17 @@ class SemanticMatchDrawer:
         if not drops:
             return []
         viewBudget = self._budgetFor(budget_tokens)
+        # B13：取水读数——入池面（粗筛前）计数
+        self._bumpReadout("draws_total")
+        self._bumpReadout("offered_total", len(drops))
 
         # ── 阶段 1：零编码词法粗筛（P1-4 根因修复） ────────────────────────
         # 池规模超过候选上限时，先把候选集收敛到上限以内再进语义打分；池内规模
         # 与单轮成本因此解耦。粗筛只收敛**候选**，不改变归档：未入选条目留在池中，
         # 后续轮次仍可被调取（无损归档语义不变）。
         candidates = self._prefilter_candidates(drops, need)
+        # B13：粗筛后进入打分的候选面计数
+        self._bumpReadout("candidates_total", len(candidates))
 
         # ── 阶段 2：单趟打分（每个文本至多一次语义编码） ───────────────────
         # 改前：need 与每条归档各自在 `_relevant()` 与 `_calculate_score()` 里
@@ -118,9 +156,18 @@ class SemanticMatchDrawer:
         # 不存在"两处各算一遍"的口径分裂。
         scoring = self._buildScoringContext(candidates, need)
         threshold_active = bool(need)
+        # B13：降级轮次计数（向量面缺件 → 关键词刻度，须可见）
+        if scoring.degraded:
+            self._bumpReadout("degraded_total")
 
         def _relevant(d: ContextInput) -> bool:
             return (not threshold_active) or scoring.matchScore(d) >= self.RELEVANCE_FLOOR
+
+        # B13：门槛通过/拦下计数（仅 need 非空的轮计——无 need 时门槛不参与）
+        if threshold_active:
+            passes = sum(1 for d in candidates if _relevant(d))
+            self._bumpReadout("threshold_pass_total", passes)
+            self._bumpReadout("threshold_miss_total", len(candidates) - passes)
 
         conv_items = [
             (i, d)
@@ -205,6 +252,9 @@ class SemanticMatchDrawer:
         # [缓存稳定] 最终顺序按 created_at 稳定排序：
         # 同一批被调取的条目在不同请求中保持相同相对位置，保住 LLM 前缀缓存
         selected.sort(key=lambda d: d.created_at or datetime.min)
+        # B13：实际注入面计数（截断副本按其视图 token 计）
+        self._bumpReadout("injected_total", len(selected))
+        self._bumpReadout("injected_tokens_total", sum(d.tokens or 0 for d in selected))
         return selected
 
     def _calculate_score(self, drop: ContextInput, need: str = None, scoring=None) -> float:
@@ -394,6 +444,11 @@ class ScoringContext:
         self._vectors = vectors or {}
         self._degraded = degraded
 
+    @property
+    def degraded(self) -> bool:
+        """语义编码是否失败降级（B13 读数消费此判定）。"""
+        return self._degraded
+
     @classmethod
     def build(cls, drawer, drops: List[ContextInput], need: str) -> "ScoringContext":
         if not need:
@@ -401,7 +456,9 @@ class ScoringContext:
 
         store = drawer.vector_store
         if not store:
-            return cls(drawer, need)
+            # B13：向量面缺件（未装配/初始化失败）与编码抛错同属降级——
+            # 本轮相关性分数来自关键词刻度，读数必须可见，不静默当正常轮。
+            return cls(drawer, need, degraded=True)
 
         candidate_drops = list(drops or [])
         try:

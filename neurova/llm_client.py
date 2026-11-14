@@ -450,6 +450,20 @@ class LLMClient:
                     "completion_tokens": response.usage.completion_tokens,
                     "total_tokens": response.usage.total_tokens,
                 }
+                # B6（对照改进项）：Prompt Cache 命中计数透传。改前此处只留
+                # 三键，SDK 的 prompt_tokens_details.cached_tokens 在这一步被
+                # 剥掉，下游 _extract_cache_tokens 恒读 (0,0)——cache 计量
+                # 断链的根因命中点之一。无该字段时不伪造（诚实口径）。
+                details = getattr(response.usage, "prompt_tokens_details", None)
+                cached = None
+                if details is not None:
+                    cached = (
+                        details.get("cached_tokens")
+                        if isinstance(details, dict)
+                        else getattr(details, "cached_tokens", None)
+                    )
+                if cached is not None:
+                    usage["prompt_tokens_details"] = {"cached_tokens": cached}
 
             # 提取 tool_calls
             tool_calls = None
