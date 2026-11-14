@@ -598,6 +598,19 @@ class BrowserBackend(ABC):
     async def press_key(self, key: str, delay: Optional[int] = None, generation: Optional[int] = None) -> BrowserResult:
         return BrowserResult(success=False, error=f"{type(self).__name__} does not support keyboard press")
 
+    async def hover_role(self, role: str, name: Optional[str] = None, generation: Optional[int] = None) -> BrowserResult:
+        return BrowserResult(success=False, error=f"{type(self).__name__} does not support hover")
+
+    async def select_role(
+        self, role: str, values: Optional[List[str]] = None, name: Optional[str] = None, generation: Optional[int] = None
+    ) -> BrowserResult:
+        return BrowserResult(success=False, error=f"{type(self).__name__} does not support select")
+
+    async def check_role(
+        self, role: str, checked: bool = True, name: Optional[str] = None, generation: Optional[int] = None
+    ) -> BrowserResult:
+        return BrowserResult(success=False, error=f"{type(self).__name__} does not support check")
+
 
 class PlaywrightBackend(BrowserBackend):
     """Playwright 浏览器后端"""
@@ -978,6 +991,94 @@ class PlaywrightBackend(BrowserBackend):
             return BrowserResult(
                 success=True,
                 route="playwright_role",
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+                generation=self._active_generation(),
+            )
+        except Exception as e:
+            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
+
+    async def hover_role(self, role: str, name: Optional[str] = None, generation: Optional[int] = None) -> BrowserResult:
+        """按 ARIA role + accessible name 定位悬停（触发菜单/提示类交互）"""
+        start_time = time.time()
+        if not role or not str(role).strip():
+            return BrowserResult(success=False, error="缺少 ARIA role（如 button/link）")
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        try:
+            if not self._page:
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
+            locator = self._page.get_by_role(str(role).strip(), **({"name": name} if name is not None else {}))
+            await locator.hover(timeout=10000)
+            # hover 可展开菜单/提示使 DOM 变化，快照事实随之失效
+            self._invalidateActiveTabFacts("hover_role")
+            return BrowserResult(
+                success=True,
+                route="playwright_role",
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+                generation=self._active_generation(),
+            )
+        except Exception as e:
+            return BrowserResult(success=False, route="playwright_role", error=str(e), duration_ms=(time.time() - start_time) * 1000)
+
+    async def select_role(
+        self, role: str, values: Optional[List[str]] = None, name: Optional[str] = None, generation: Optional[int] = None
+    ) -> BrowserResult:
+        """按 ARIA role + accessible name 定位下拉框并选中选项（values=value 或标签列表）"""
+        start_time = time.time()
+        if not role or not str(role).strip():
+            return BrowserResult(success=False, error="缺少 ARIA role（如 combobox）")
+        option_values = [str(v).strip() for v in (values or []) if str(v).strip()]
+        if not option_values:
+            return BrowserResult(success=False, error="缺少 values（要选中的 option 值/标签列表）")
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        try:
+            if not self._page:
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
+            locator = self._page.get_by_role(str(role).strip(), **({"name": name} if name is not None else {}))
+            await locator.select_option(option_values, timeout=10000)
+            self._invalidateActiveTabFacts("select_role")
+            return BrowserResult(
+                success=True,
+                route="playwright_role",
+                data={"selected": option_values},
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+                generation=self._active_generation(),
+            )
+        except Exception as e:
+            return BrowserResult(success=False, route="playwright_role", error=str(e), duration_ms=(time.time() - start_time) * 1000)
+
+    async def check_role(
+        self, role: str, checked: bool = True, name: Optional[str] = None, generation: Optional[int] = None
+    ) -> BrowserResult:
+        """按 ARIA role + accessible name 定位复选框/单选框勾选（checked=False 取消勾选）"""
+        start_time = time.time()
+        if not role or not str(role).strip():
+            return BrowserResult(success=False, error="缺少 ARIA role（如 checkbox/radio）")
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        try:
+            if not self._page:
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
+            locator = self._page.get_by_role(str(role).strip(), **({"name": name} if name is not None else {}))
+            if checked:
+                await locator.check(timeout=10000)
+            else:
+                await locator.uncheck(timeout=10000)
+            self._invalidateActiveTabFacts("check_role")
+            return BrowserResult(
+                success=True,
+                route="playwright_role",
+                data={"checked": bool(checked)},
                 url=self._page.url,
                 title=await self._page.title(),
                 duration_ms=(time.time() - start_time) * 1000,
@@ -2338,6 +2439,21 @@ class BrowserManager:
         """向当前页派发单个按键"""
         b = await self._get_backend(backend)
         return await b.press_key(key, delay=delay, generation=generation)
+
+    async def hover_role(self, role: str, name: Optional[str] = None, generation: Optional[int] = None, backend: Optional[str] = None) -> BrowserResult:
+        """按 role+name 悬停元素"""
+        b = await self._get_backend(backend)
+        return await b.hover_role(role, name, generation)
+
+    async def select_role(self, role: str, values: Optional[List[str]] = None, name: Optional[str] = None, generation: Optional[int] = None, backend: Optional[str] = None) -> BrowserResult:
+        """按 role+name 选中下拉选项"""
+        b = await self._get_backend(backend)
+        return await b.select_role(role, values, name=name, generation=generation)
+
+    async def check_role(self, role: str, checked: bool = True, name: Optional[str] = None, generation: Optional[int] = None, backend: Optional[str] = None) -> BrowserResult:
+        """按 role+name 勾选/取消勾选"""
+        b = await self._get_backend(backend)
+        return await b.check_role(role, checked, name=name, generation=generation)
 
     async def snapshot(self, backend: Optional[str] = None) -> BrowserResult:
         """获取快照"""

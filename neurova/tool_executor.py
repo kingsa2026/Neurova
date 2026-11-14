@@ -93,6 +93,9 @@ COMPUTER_USE_TOOLS = frozenset(
         "browser_wait",
         "browser_scroll",
         "browser_press",
+        "browser_hover",
+        "browser_select",
+        "browser_check",
     }
 )
 
@@ -172,6 +175,9 @@ _COMPUTER_TOOL_PARAM_KEYS: Dict[str, frozenset] = {
     "browser_wait": frozenset({"ms", "selector", "state", "generation"}),
     "browser_scroll": frozenset({"scroll_x", "scroll_y", "generation"}),
     "browser_press": frozenset({"key", "delay", "generation"}),
+    "browser_hover": frozenset({"role", "name", "generation"}),
+    "browser_select": frozenset({"role", "name", "values", "generation"}),
+    "browser_check": frozenset({"role", "name", "checked", "generation"}),
 }
 
 _BUTTON_ALIASES = {
@@ -295,6 +301,13 @@ def describe_computer_action(tool_name: str, params: Dict) -> str:
         return f"滚动页面 ({params.get('scroll_x', 0)}, {params.get('scroll_y', 0)})"
     if tool_name == "browser_press":
         return f"按下按键 {params.get('key', '?')}"
+    if tool_name == "browser_hover":
+        return f"悬停元素 {params.get('role', '?')}「{params.get('name', '')}」"
+    if tool_name == "browser_select":
+        return f"选择 {params.get('role', '?')}「{params.get('name', '')}」选项 {params.get('values')}"
+    if tool_name == "browser_check":
+        verb = "勾选" if params.get("checked") else "取消勾选"
+        return f"{verb} {params.get('role', '?')}「{params.get('name', '')}」"
     return tool_name
 
 
@@ -380,6 +393,9 @@ class ToolExecutor:
         "browser_wait": "_execute_browser_wait",
         "browser_scroll": "_execute_browser_scroll",
         "browser_press": "_execute_browser_press",
+        "browser_hover": "_execute_browser_hover",
+        "browser_select": "_execute_browser_select",
+        "browser_check": "_execute_browser_check",
         "planning": "_execute_planning",
         "youtube_transcript": "_execute_youtube_transcript",
         "browser_read": "_execute_browser_read",
@@ -6730,6 +6746,86 @@ class ToolExecutor:
         except Exception as e:
             logger.error("按键派发失败: %s", e)
             return {"error": f"按键派发失败: {str(e)}"}
+
+    async def _execute_browser_hover(self, params: Dict) -> Dict:
+        """按 role+name 悬停元素（触发菜单/提示类交互）"""
+        role = str(params.get("role") or "").strip()
+        if not role:
+            return {"error": "缺少 role 参数（来自 browser_dom_snapshot 快照）"}
+        name = params.get("name")
+        generation = params.get("generation")
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_hover(
+                    role,
+                    name=name,
+                    generation=int(generation) if generation is not None else None,
+                )
+            )
+            await self._emit_computer_event("browser_hover", params, result)
+            return result
+        except Exception as e:
+            logger.error("悬停失败: %s", e)
+            return {"error": f"悬停失败: {str(e)}"}
+
+    async def _execute_browser_select(self, params: Dict) -> Dict:
+        """按 role+name 选中下拉选项"""
+        role = str(params.get("role") or "").strip()
+        values = params.get("values")
+        if not role:
+            return {"error": "缺少 role 参数（来自 browser_dom_snapshot 快照）"}
+        if not isinstance(values, list) or not [v for v in values if str(v).strip()]:
+            return {"error": "缺少 values（要选中的 option 值/标签列表）"}
+        name = params.get("name")
+        generation = params.get("generation")
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_select(
+                    role,
+                    [str(v) for v in values],
+                    name=name,
+                    generation=int(generation) if generation is not None else None,
+                )
+            )
+            await self._emit_computer_event("browser_select", params, result)
+            return result
+        except Exception as e:
+            logger.error("下拉选择失败: %s", e)
+            return {"error": f"下拉选择失败: {str(e)}"}
+
+    async def _execute_browser_check(self, params: Dict) -> Dict:
+        """按 role+name 勾选/取消勾选"""
+        role = str(params.get("role") or "").strip()
+        checked = params.get("checked")
+        if not role:
+            return {"error": "缺少 role 参数（来自 browser_dom_snapshot 快照）"}
+        if checked is None:
+            return {"error": "缺少 checked 参数（true=勾选，false=取消勾选）"}
+        name = params.get("name")
+        generation = params.get("generation")
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_check(
+                    role,
+                    bool(checked),
+                    name=name,
+                    generation=int(generation) if generation is not None else None,
+                )
+            )
+            await self._emit_computer_event("browser_check", params, result)
+            return result
+        except Exception as e:
+            logger.error("勾选失败: %s", e)
+            return {"error": f"勾选失败: {str(e)}"}
 
     async def _execute_planning(self, params: Dict) -> Dict:
         """任务计划工具：7 个子命令（create/update/list/get/set_active/mark_step/delete）。
