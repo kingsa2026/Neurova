@@ -49,6 +49,15 @@ vi.mock('@/api/modules/knowledge', () => ({
   listIngressTasks: vi.fn().mockResolvedValue({ data: { tasks: [], stats: {} } }),
   getIngressTask: vi.fn().mockResolvedValue({ data: { spans: [] } }),
   cancelIngressTask: vi.fn().mockResolvedValue({ data: {} }),
+  // P2-21：MCP 源与导入收口到 knowledge module 函数（页面不再裸写 URL）
+  listMcpSources: vi.fn().mockResolvedValue({ data: { items: [] } }),
+  probeMcpTools: vi.fn().mockResolvedValue({ data: { tools: [] } }),
+  createMcpSource: vi.fn().mockResolvedValue({ data: {} }),
+  updateMcpSource: vi.fn().mockResolvedValue({ data: {} }),
+  pullMcpSource: vi.fn().mockResolvedValue({ data: {} }),
+  deleteMcpSource: vi.fn().mockResolvedValue({ data: {} }),
+  importKnowledgeFile: vi.fn().mockResolvedValue({ code: 0, message: 'ok', data: { items: [] } }),
+  importKnowledgeFromUrl: vi.fn().mockResolvedValue({ code: 0, message: 'ok', data: {} }),
 }))
 
 vi.mock('@/api', () => ({
@@ -68,7 +77,7 @@ vi.mock('ant-design-vue', () => ({
   Modal: { confirm: vi.fn() },
 }))
 
-import { createKbConfig, getKnowledgeNodes, searchKnowledge } from '@/api/modules/knowledge'
+import { createKbConfig, getKnowledgeNodes, searchKnowledge, importKnowledgeFile } from '@/api/modules/knowledge'
 
 /** P0-2 分块样例：长文被切成 4 块，检索命中第 3 块 */
 const CHUNKED_ITEM = {
@@ -437,8 +446,7 @@ describe('KnowledgePage 文件导入（批量契约）', () => {
 
   it('多选批量上传：2 个文件依次上传，全部成功弹批量成功提示并刷新', async () => {
     vi.mocked(getKnowledgeNodes).mockResolvedValue({ data: { items: [], total: 0 } } as any)
-    const { request } = await import('@/api')
-    vi.mocked(request.post).mockResolvedValue({
+    vi.mocked(importKnowledgeFile).mockResolvedValue({
       code: 0, message: 'Import completed',
       data: { items: [{ knowledge_id: 'k1', title: 't', content: 'x' }] },
     } as any)
@@ -453,7 +461,7 @@ describe('KnowledgePage 文件导入（批量契约）', () => {
     await vm.handleImport()
     await flushPromises()
 
-    expect(request.post).toHaveBeenCalledTimes(2)
+    expect(importKnowledgeFile).toHaveBeenCalledTimes(2)
     expect(message.success).toHaveBeenCalledTimes(1)
     expect(vi.mocked(message.success).mock.calls[0][0]).toContain('2 个')
     expect(getKnowledgeNodes, '有成功须刷新列表').toHaveBeenCalledTimes(1)
@@ -475,8 +483,7 @@ describe('KnowledgePage 文件导入（批量契约）', () => {
 
   it('部分失败：成功 1 失败 1 弹批量部分提示，仍刷新列表', async () => {
     vi.mocked(getKnowledgeNodes).mockResolvedValue({ data: { items: [], total: 0 } } as any)
-    const { request } = await import('@/api')
-    vi.mocked(request.post)
+    vi.mocked(importKnowledgeFile)
       .mockResolvedValueOnce({ code: 0, message: 'ok', data: { items: [{ knowledge_id: 'k1' }] } } as any)
       .mockResolvedValueOnce({ code: 1, message: 'extract_failed:unsupported_format', data: { items: [], status: 'unsupported_format' } } as any)
 
@@ -497,8 +504,7 @@ describe('KnowledgePage 文件导入（批量契约）', () => {
 
   it('全部失败：不弹成功、不刷新列表，错误信息含失败原因', async () => {
     vi.mocked(getKnowledgeNodes).mockResolvedValue({ data: { items: [], total: 0 } } as any)
-    const { request } = await import('@/api')
-    vi.mocked(request.post).mockResolvedValue({
+    vi.mocked(importKnowledgeFile).mockResolvedValue({
       code: 1, message: 'extract_failed:unsupported_format',
       data: { items: [], status: 'unsupported_format' },
     } as any)

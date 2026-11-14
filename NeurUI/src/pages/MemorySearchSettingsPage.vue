@@ -173,8 +173,16 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
-import { getNerfSettings, updateNerfSettings, resetNerfSettings, getChannelWeights } from '@/api/modules/memory'
+import {
+  getNerfSettings,
+  updateNerfSettings,
+  resetNerfSettings,
+  getChannelWeights,
+  getEnhancedSearchSettings,
+  updateEnhancedSearchSettings,
+  hybridSearch,
+  enhancedSearch,
+} from '@/api/modules/memory'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
@@ -242,7 +250,7 @@ const channelLabel = (ch: string) => t(`memorySearch.${channelLabelMap[ch] || ch
 const fetchSettings = async () => {
   loading.value = true
   try {
-    const res: any = await request.get('/enhanced-memory-search/settings')
+    const res: any = await getEnhancedSearchSettings()
     const data = res?.data ?? res ?? {}
     if (data.search) searchConfig.value = { ...searchConfig.value, ...data.search }
     if (data.decay) decay.value = { ...decay.value, ...data.decay }
@@ -289,7 +297,7 @@ const onChannelDensityChange = (ch: string, val: number) => {
 const saveSettings = async () => {
   saving.value = true
   try {
-    await request.put('/enhanced-memory-search/settings', {
+    await updateEnhancedSearchSettings({
       search: searchConfig.value,
       decay: decay.value,
       enhancement: enhancement.value,
@@ -339,13 +347,19 @@ const resetNerf = async () => {
 const runTestSearch = async () => {
   if (!testQuery.value) return
   try {
-    const endpoint = searchConfig.value.method === 'hybrid' ? '/semantic-search/hybrid' : '/enhanced-memory-search/search'
-    const res: any = await request.post(endpoint, {
-      query: testQuery.value,
-      method: searchConfig.value.method,
-      top_k: searchConfig.value.top_k,
-      score_threshold: searchConfig.value.score_threshold / 100,
-    })
+    // hybrid 走 /semantic-search/hybrid，其余走 /enhanced-memory-search/search——
+    // 路径口径与原实现一致，试搜体逐字对齐（query/method/top_k/score_threshold）。
+    const res: any = searchConfig.value.method === 'hybrid'
+      ? await hybridSearch(testQuery.value, {
+          method: searchConfig.value.method,
+          top_k: searchConfig.value.top_k,
+          score_threshold: searchConfig.value.score_threshold / 100,
+        })
+      : await enhancedSearch(testQuery.value, {
+          method: searchConfig.value.method,
+          top_k: searchConfig.value.top_k,
+          score_threshold: searchConfig.value.score_threshold / 100,
+        })
     const data = res?.data ?? res ?? {}
     testResults.value = data.results ?? data.items ?? (Array.isArray(data) ? data : [])
     testExecuted.value = true

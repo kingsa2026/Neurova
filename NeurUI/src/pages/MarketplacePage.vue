@@ -252,7 +252,16 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
+import {
+  listMarketplaceSkills,
+  listInstalledMarketplaceSkills,
+  syncMarketplaceSources,
+  createMarketplaceSkill,
+  updateMarketplaceSkill,
+  deleteMarketplaceSkill,
+  installMarketplaceSkill,
+  uninstallMarketplaceSkill,
+} from '@/api/modules/marketplace'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
@@ -326,7 +335,7 @@ async function fetchBrowse() {
   try {
     const params: any = { limit: pageSize, offset: (browsePage.value - 1) * pageSize, with_total: true }
     if (searchQuery.value) params.search = searchQuery.value
-    const res: any = await request.get('/marketplace/skills', { params })
+    const res: any = await listMarketplaceSkills(params)
     const data = res?.data ?? res
     // 信封 {items,total} 或裸数组（老后端兜底）
     if (Array.isArray(data)) {
@@ -349,7 +358,7 @@ async function fetchSource(source: string) {
   try {
     const params: any = { source, limit: pageSize, offset: (sourcePage.value - 1) * pageSize, with_total: true }
     if (searchQuery.value) params.search = searchQuery.value
-    const res: any = await request.get('/marketplace/skills', { params })
+    const res: any = await listMarketplaceSkills(params)
     const data = res?.data ?? res
     if (Array.isArray(data)) {
       sourceItems.value = data
@@ -370,7 +379,7 @@ const syncing = ref(false)
 async function syncSources() {
   syncing.value = true
   try {
-    const res: any = await request.post('/marketplace/sync')
+    const res: any = await syncMarketplaceSources()
     const data = res?.data ?? res
     const totals = data?.totals ?? {}
     message.success(`+${totals.created ?? 0} / ~${totals.updated ?? 0} / -${totals.removed ?? 0}`)
@@ -412,9 +421,9 @@ async function savePublish() {
   try {
     if (editingSkill.value) {
       const { skill_id, ...patch } = publishForm.value
-      await request.put(`/marketplace/skills/${skill_id}`, patch)
+      await updateMarketplaceSkill(skill_id, patch)
     } else {
-      await request.post('/marketplace/skills', publishForm.value)
+      await createMarketplaceSkill(publishForm.value)
     }
     message.success(t('common.success'))
     showPublish.value = false
@@ -428,7 +437,7 @@ async function savePublish() {
 
 async function removeMarketSkill(item: any) {
   try {
-    await request.delete(`/marketplace/skills/${item.skill_id}`)
+    await deleteMarketplaceSkill(item.skill_id)
     message.success(t('common.success'))
     // 刷新当前页（total 变化）
     await fetchBrowse()
@@ -441,7 +450,7 @@ async function removeMarketSkill(item: any) {
 async function updateItem(item: any) {
   updatingId.value = item.skill_id
   try {
-    await request.post(`/marketplace/skills/${item.skill_id}/install`, { force: true })
+    await installMarketplaceSkill(item.skill_id, { force: true })
     message.success(t('common.success'))
     await fetchMarketplace()
   } catch (err: any) {
@@ -468,8 +477,8 @@ const fetchMarketplace = async () => {
 
     // installed tab
     const [installRes, marketRes]: any[] = await Promise.all([
-      request.get('/marketplace/installed', { params }),
-      request.get('/marketplace/skills', {}),
+      listInstalledMarketplaceSkills(params),
+      listMarketplaceSkills(),
     ])
     const installed = installRes?.data ?? installRes ?? []
     const market = marketRes?.data ?? marketRes ?? []
@@ -488,7 +497,7 @@ const fetchMarketplace = async () => {
 const installItem = async (item: any) => {
   installingId.value = item.skill_id
   try {
-    await request.post(`/marketplace/skills/${item.skill_id}/install`)
+    await installMarketplaceSkill(item.skill_id)
     message.success(t('common.success'))
     item.installed = true
   } catch (err: any) {
@@ -500,7 +509,7 @@ const installItem = async (item: any) => {
 
 const uninstallItem = async (id: string) => {
   try {
-    await request.delete(`/marketplace/skills/${id}/install`)
+    await uninstallMarketplaceSkill(id)
     message.success(t('common.success'))
     installedItems.value = installedItems.value.filter(i => i.skill_id !== id)
   } catch (err: any) {

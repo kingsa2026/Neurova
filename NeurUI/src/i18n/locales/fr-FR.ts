@@ -4,6 +4,7 @@ import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSec
 import { ontologySection } from './_ontologySection'
 export default {
   common: {
+    id: 'ID',
     markAllRead: 'Tout marquer comme lu',
     markRead: 'Marquer comme lu',
     clear: "Effacer",
@@ -804,6 +805,21 @@ export default {
     shareGroups: 'Groupes de partage',
     expires: 'Expire le',
     metadata: 'Métadonnées',
+    validFrom: 'Valide à partir du',
+    validUntil: 'Valide jusqu au',
+    validityOptional: 'Sans limite (optionnel)',
+    contextDebug: 'Débogage du contexte',
+    contextDebugDesc: 'Construire le contexte de l agent courant, le prévisualiser puis le compresser ; les vues d injection sont en lecture seule.',
+    contextDebugInputHint: 'Saisir du texte puis construire pour prévisualiser la composition du contexte',
+    contextBuild: 'Construire le contexte',
+    contextTargetTokens: 'Tokens cibles',
+    contextCompress: 'Compresser',
+    contextInjectReflection: 'Injecter la réflexion',
+    contextInjectMemories: 'Injecter des souvenirs',
+    contextInjectHot: 'Injecter les souvenirs chauds',
+    contextBuiltMeta: 'Construit : {tokens} tokens | sources : {sources}',
+    contextCompressedMeta: 'Compressé : {original} → {compressed} tokens ({dropped} segments supprimés)',
+    contextInjectMeta: 'Injecté : {count} éléments',
   },
   conflictAxis: {
     entry: 'Doublon',

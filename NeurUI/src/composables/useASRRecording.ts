@@ -4,7 +4,7 @@ import { useAppStore } from '@/stores/app'
 import { useChatStore } from '@/stores/chat'
 import { storeToRefs } from 'pinia'
 import { useASRRestartGuard } from '@/composables/useASRRestartGuard'
-import { api } from '@/api'
+import { transcribeAudio } from '@/api/modules/asr'
 import { uiMessage } from '@/utils/message'
 
 /**
@@ -162,9 +162,7 @@ async function transcribeAudioFile(file: File): Promise<string | null> {
     const formData = new FormData()
     formData.append('audio_file', file)
     formData.append('language', appStore.locale === 'zh-CN' ? 'zh' : 'en')
-    const res: any = await api.post('/audio/transcribe', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    })
+    const res: any = await transcribeAudio(formData)
     const data = res?.data ?? res
     return data?.data?.text || data?.text || null
   } catch (err) {

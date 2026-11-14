@@ -15,12 +15,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 
-vi.mock('@/api', () => ({
-  request: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
-  // stores/agents（AgentPageTabs 依赖链）用命名导出 api.get('/agents')；
-  // 缺导出会在挂载时报 "No api export" 噪声（2026-09-16 全量回归清理）
-  api: { get: vi.fn().mockResolvedValue({ data: [] }), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
-}))
+vi.mock('@/api', () => {
+  const request = { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }
+  return {
+    request,
+    // P2-21：页面收口到 api/modules/channel-sharing（内部走 default api 门面）——
+    // default 与 request 共用同一组 vi.fn，URL/载荷断言口径不变
+    default: request,
+    // stores/agents（AgentPageTabs 依赖链）用命名导出 api.get('/agents')；
+    // 缺导出会在挂载时报 "No api export" 噪声（2026-09-16 全量回归清理）
+    api: { get: vi.fn().mockResolvedValue({ data: [] }), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
+  }
+})
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ user: { id: 'u1', username: 'tester', role: 'admin' } }),

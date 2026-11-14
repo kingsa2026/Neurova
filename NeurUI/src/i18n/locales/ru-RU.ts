@@ -4,6 +4,7 @@ import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSec
 import { ontologySection } from './_ontologySection'
 export default {
   common: {
+    id: 'ID',
     markAllRead: 'Отметить все как прочитанные',
     markRead: 'Отметить как прочитанное',
     clear: "Очистить",
@@ -804,6 +805,21 @@ export default {
     shareGroups: 'Группы доступа',
     expires: 'Истекает',
     metadata: 'Метаданные',
+    validFrom: 'Действует с',
+    validUntil: 'Действует до',
+    validityOptional: 'Без ограничения (необязательно)',
+    contextDebug: 'Отладка контекста',
+    contextDebugDesc: 'Собирает контекст текущего агента, показывает его и сжимает; панели вливания — только для чтения.',
+    contextDebugInputHint: 'Введите текст и соберите контекст, чтобы увидеть его состав',
+    contextBuild: 'Собрать контекст',
+    contextTargetTokens: 'Целевые токены',
+    contextCompress: 'Сжать',
+    contextInjectReflection: 'Влить рефлексию',
+    contextInjectMemories: 'Влить воспоминания',
+    contextInjectHot: 'Влить горячие воспоминания',
+    contextBuiltMeta: 'Собрано: {tokens} токенов | источники: {sources}',
+    contextCompressedMeta: 'Сжато: {original} → {compressed} токенов (удалено сегментов: {dropped})',
+    contextInjectMeta: 'Влито: {count} записей',
   },
   conflictAxis: {
     entry: 'Дубликат записи',

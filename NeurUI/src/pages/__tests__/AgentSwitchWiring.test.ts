@@ -26,13 +26,16 @@ vi.mock('@/composables/useAgentPage', () => ({
   },
 }))
 
-vi.mock('@/api', () => ({
-  request: {
+vi.mock('@/api', () => {
+  const request = {
     get: vi.fn(),
     put: vi.fn().mockResolvedValue({ data: {} }),
     post: vi.fn().mockResolvedValue({ data: {} }),
-  },
-}))
+    delete: vi.fn().mockResolvedValue({ data: {} }),
+  }
+  // P2-21：页面收口到 api/modules/*（内部走 default api 门面）——default 与 request 同源
+  return { request, default: request }
+})
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({ isDark: false }),

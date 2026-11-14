@@ -31,6 +31,8 @@ vi.mock('@/api/modules/memory', () => ({
 vi.mock('@/api/modules/growth', () => ({
   getMotivation: vi.fn().mockResolvedValue({ code: 0, data: null }),
   getPersonality: vi.fn().mockResolvedValue({ code: 0, data: null }),
+  updatePersonality: vi.fn().mockResolvedValue({ code: 0, data: null }),
+  evolvePersonality: vi.fn().mockResolvedValue({ code: 0, data: null }),
 }))
 
 // 个性页签的 request（axios 包装）
@@ -53,7 +55,6 @@ vi.mock('ant-design-vue', async () => {
 import AgentPersonalityPage from '@/pages/AgentPersonalityPage.vue'
 import { getEmotionSummary, getEmotionTimeline } from '@/api/modules/memory'
 import { getMotivation, getPersonality } from '@/api/modules/growth'
-import { request } from '@/api'
 
 const zhMessages = {
   nav: { persona: '人格', emotion: '情绪', personality: '个性' },
@@ -134,7 +135,8 @@ describe('AgentPersonalityPage 人格双页签契约', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     // 新契约（2026-09-16）：服务端已持久化 traits 才渲染特质列表（空态引导见 persistence.test.ts）
-    vi.mocked(request.get).mockResolvedValue({
+    // P2-21：页面取数已收口到 api/modules/growth， personalities 桩随通道移到 getPersonality
+    vi.mocked(getPersonality).mockResolvedValue({
       code: 0, message: 'success',
       data: { agent_id: 'agent-A', traits: { openness: 0.7, conscientiousness: 0.6, extraversion: 0.5, agreeableness: 0.8, neuroticism: 0.3, creativity: 0.65 }, values: [], communication_style: 'balanced', decision_style: 'analytical' },
     } as any)
@@ -243,7 +245,7 @@ describe('AgentPersonalityPage 情绪页签不重复成长域卡片', () => {
   beforeEach(() => {
     // 模块级 mock 在全文件共享，先清空才能断言"零调用"
     vi.clearAllMocks()
-    vi.mocked(request.get).mockResolvedValue({ code: 0, data: { traits: {} } } as any)
+    vi.mocked(getPersonality).mockResolvedValue({ code: 0, data: { traits: {} } } as any)
     vi.mocked(getEmotionSummary).mockResolvedValue({
       code: 0,
       data: { total_annotated: 1, emotion_distribution: { joy: 1 } },
@@ -272,8 +274,11 @@ describe('AgentPersonalityPage 情绪页签不重复成长域卡片', () => {
   it('不再为这两张卡拉取 growth 动机/个性接口（不留死请求）', async () => {
     await mountPage()
     await flushPromises()
+    // 动机卡已整体移出本页：任何页签都不该再拉 /growth/motivation
     expect(getMotivation).not.toHaveBeenCalled()
-    expect(getPersonality).not.toHaveBeenCalled()
+    // P2-21：个性页签的特质取数收口到 getPersonality（挂载即拉，恰好一次）；
+    // “情绪页签不渲染成长域卡”由上一条 DOM 断言钉住
+    expect(getPersonality).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -293,7 +298,7 @@ describe('AgentPersonalityPage 情绪变化时间轴', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(request.get).mockResolvedValue({ code: 0, data: { traits: {} } } as any)
+    vi.mocked(getPersonality).mockResolvedValue({ code: 0, data: { traits: {} } } as any)
     vi.mocked(getEmotionSummary).mockResolvedValue({
       code: 0,
       data: { total_annotated: 1, emotion_distribution: { joy: 1 } },

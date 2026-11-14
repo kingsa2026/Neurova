@@ -28,6 +28,11 @@ vi.mock('@/api/modules/memory', () => ({
   updateNerfSettings: vi.fn(),
   resetNerfSettings: vi.fn(),
   getChannelWeights: vi.fn(),
+  // P2-21：设置读取/保存与试搜收口到 memory module 函数
+  getEnhancedSearchSettings: vi.fn(),
+  updateEnhancedSearchSettings: vi.fn(),
+  hybridSearch: vi.fn(),
+  enhancedSearch: vi.fn(),
 }))
 
 vi.mock('ant-design-vue', () => ({
@@ -41,8 +46,13 @@ vi.mock('@/stores/auth', () => ({
   }),
 }))
 
-import { request } from '@/api'
-import { getNerfSettings, getChannelWeights } from '@/api/modules/memory'
+import {
+  getNerfSettings,
+  getChannelWeights,
+  getEnhancedSearchSettings,
+  updateEnhancedSearchSettings,
+  enhancedSearch,
+} from '@/api/modules/memory'
 import type { ApiResponse } from '@/types/response'
 import type { NerfSettings, ChannelWeights } from '@/api/modules/memory'
 
@@ -172,9 +182,10 @@ function mountPage() {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.mocked(request.get).mockResolvedValue({ ...settingsPayload })
-  vi.mocked(request.put).mockResolvedValue({ code: 0 })
-  vi.mocked(request.post).mockResolvedValue({ data: { results: [] } })
+  // 桩走模块返回的宽松信封（页面只读 res?.data ?? res），与真实信封形状解耦
+  vi.mocked(getEnhancedSearchSettings).mockResolvedValue({ ...settingsPayload } as any)
+  vi.mocked(updateEnhancedSearchSettings).mockResolvedValue({ code: 0 } as any)
+  vi.mocked(enhancedSearch).mockResolvedValue({ data: { results: [] } } as any)
   vi.mocked(getNerfSettings).mockResolvedValue({ ...nerfPayload })
   vi.mocked(getChannelWeights).mockResolvedValue({ ...weightsPayload })
 })
@@ -214,7 +225,7 @@ describe('MemorySearchSettingsPage 首帧渲染', () => {
   })
 
   it('请求失败时仍显示表单(实测默认配置)，不永久留白', async () => {
-    vi.mocked(request.get).mockRejectedValue(new Error('boom'))
+    vi.mocked(getEnhancedSearchSettings).mockRejectedValue(new Error('boom'))
     const wrapper = mountPage()
     await flushPromises()
 
@@ -223,9 +234,9 @@ describe('MemorySearchSettingsPage 首帧渲染', () => {
   })
 
   it('测试结果 NeRF 标签走 nerfTag i18n 键（非硬编码）', async () => {
-    vi.mocked(request.post).mockResolvedValue({
+    vi.mocked(enhancedSearch).mockResolvedValue({
       data: { results: [{ content: '结果A', score: 0.9, channel_scores: { text: 0.8 } }] },
-    })
+    } as any)
     const wrapper = mountPage()
     await flushPromises()
 

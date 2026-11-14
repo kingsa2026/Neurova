@@ -4,6 +4,7 @@ import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSec
 import { ontologySection } from './_ontologySection'
 export default {
   common: {
+    id: 'ID',
     markAllRead: '全部标记已读',
     markRead: '标记已读',
     clear: "清除",
@@ -815,6 +816,21 @@ export default {
     shareGroups: '共享组',
     expires: '过期时间',
     metadata: '元数据',
+    validFrom: '有效期起',
+    validUntil: '有效期止',
+    validityOptional: '不设界（可选）',
+    contextDebug: '上下文调试',
+    contextDebugDesc: '构建当前 Agent 的上下文并预览/压缩；注入面只读展示，不落库。',
+    contextDebugInputHint: '输入文本，构建后预览上下文组成',
+    contextBuild: '构建上下文',
+    contextTargetTokens: '目标 tokens',
+    contextCompress: '压缩',
+    contextInjectReflection: '注入反思',
+    contextInjectMemories: '注入相关记忆',
+    contextInjectHot: '注入高温记忆',
+    contextBuiltMeta: '构建完成：{tokens} tokens｜来源：{sources}',
+    contextCompressedMeta: '压缩：{original} → {compressed} tokens（淘汰 {dropped} 段）',
+    contextInjectMeta: '注入读数：{count} 条',
   },
   conflictAxis: {
     entry: '同值条目',

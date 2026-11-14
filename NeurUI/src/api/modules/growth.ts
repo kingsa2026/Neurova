@@ -158,6 +158,11 @@ export function updatePersonality(agentId: string, data: Partial<PersonalityProf
   return api.put<ApiResponse<PersonalityProfile>>(`${BASE}/personality`, data, { params: { agent_id: agentId } })
 }
 
+/** Trigger personality evolution（自成长回路；agent_id 走 query）。 */
+export function evolvePersonality(agentId: string) {
+  return api.post<ApiResponse<PersonalityProfile>>(`${BASE}/personality/evolve`, {}, { params: { agent_id: agentId } })
+}
+
 /** Get constitution rules（envelope.data 列表）。 */
 export function getConstitution(agentId: string) {
   return api.get<ApiResponse<ConstitutionRule[]>>(`${BASE}/constitution/rules`, { params: { agent_id: agentId } })

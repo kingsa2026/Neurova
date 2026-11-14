@@ -4,6 +4,7 @@ import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSec
 import { ontologySection } from './_ontologySection'
 export default {
   common: {
+    id: 'ID',
     markAllRead: '모두 읽음으로 표시',
     markRead: '읽음으로 표시',
     clear: "지우기",
@@ -804,6 +805,21 @@ export default {
     shareGroups: '공유 그룹',
     expires: '만료 시간',
     metadata: '메타데이터',
+    validFrom: '유효 시작',
+    validUntil: '유효 종료',
+    validityOptional: '무제한(선택)',
+    contextDebug: '컨텍스트 디버그',
+    contextDebugDesc: '현재 Agent의 컨텍스트를 빌드하고 미리보기/압축합니다. 주입면은 읽기 전용 표시입니다.',
+    contextDebugInputHint: '텍스트를 입력해 빌드하면 컨텍스트 구성을 미리 볼 수 있습니다',
+    contextBuild: '컨텍스트 빌드',
+    contextTargetTokens: '목표 토큰',
+    contextCompress: '압축',
+    contextInjectReflection: '성찰 주입',
+    contextInjectMemories: '관련 기억 주입',
+    contextInjectHot: '고온 기억 주입',
+    contextBuiltMeta: '빌드 완료: {tokens} 토큰 | 소스: {sources}',
+    contextCompressedMeta: '압축: {original} → {compressed} 토큰({dropped}개 세그먼트 제거)',
+    contextInjectMeta: '주입 결과: {count}건',
   },
   conflictAxis: {
     entry: '중복 항목',

@@ -485,6 +485,8 @@ import {
   getConsoleChatRuns,
   getConsoleTasks,
   steerConsoleChat,
+  stopConsoleChat,
+  autoTitleConsoleSession,
 } from '@/api/modules/console'
 import { extractUploadedFileId } from '@/api/modules/files'
 import { useGovernanceApproval } from '@/composables/useGovernanceApproval'
@@ -2024,9 +2026,7 @@ function stopStreaming() {
   //（旧实现仅断流，后端照常跑完整轮并消耗 token）
   const sid = activeStreamSessionId || currentSessionId.value
   if (sid) {
-    void api
-      .post(`/console/chat/stop?session_id=${encodeURIComponent(sid)}`)
-      .catch(() => {})
+    void stopConsoleChat(sid).catch(() => {})
   }
   if (sid) abortChatStream(sid, 'userStopped')
   else abortController?.abort()
@@ -2207,7 +2207,7 @@ async function maybeAutoTitle(): Promise<void> {
   if (!session) return
   if (!isDefaultChatTitle(session.title, [t('ui.newConversation'), t('chat.newChat')])) return
   try {
-    const res: any = await api.post(`/console/chat/sessions/${sid}/auto-title`)
+    const res: any = await autoTitleConsoleSession(sid)
     const data = res?.data ?? res
     const title: string | undefined = data?.title
     if (title && title !== session.title) chatStore.renameSessionTitle(sid, title)

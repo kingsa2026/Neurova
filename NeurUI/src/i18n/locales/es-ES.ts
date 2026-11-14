@@ -4,6 +4,7 @@ import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSec
 import { ontologySection } from './_ontologySection'
 export default {
   common: {
+    id: 'ID',
     markAllRead: 'Marcar todo como leído',
     markRead: 'Marcar como leído',
     clear: "Limpiar",
@@ -804,6 +805,21 @@ export default {
     shareGroups: 'Grupos compartidos',
     expires: 'Caduca',
     metadata: 'Metadatos',
+    validFrom: 'Válido desde',
+    validUntil: 'Válido hasta',
+    validityOptional: 'Sin límite (opcional)',
+    contextDebug: 'Depuración de contexto',
+    contextDebugDesc: 'Construye el contexto del agente actual, velo en vista previa y comprímelo; las vistas de inyección son de solo lectura.',
+    contextDebugInputHint: 'Escribe texto y construye para previsualizar la composición del contexto',
+    contextBuild: 'Construir contexto',
+    contextTargetTokens: 'Tokens objetivo',
+    contextCompress: 'Comprimir',
+    contextInjectReflection: 'Inyectar reflexión',
+    contextInjectMemories: 'Inyectar memorias',
+    contextInjectHot: 'Inyectar memorias calientes',
+    contextBuiltMeta: 'Construido: {tokens} tokens | fuentes: {sources}',
+    contextCompressedMeta: 'Comprimido: {original} → {compressed} tokens ({dropped} segmentos eliminados)',
+    contextInjectMeta: 'Inyectado: {count} elementos',
   },
   conflictAxis: {
     entry: 'Entrada duplicada',

@@ -62,14 +62,22 @@ describe('术语写面单一属主', () => {
       expect(page, `图谱工作台仍带术语写面痕迹：${banned}`).not.toContain(banned)
     }
     expect(page, '图谱工作台应给本体工作台真链接（术语声明编辑的唯一入口）').toContain('/ontology-studio')
-    // 不可替代的部分不能被一起带走（布局已是力导向：radialLayout 退役）
-    for (const kept of ['GraphExplorer3D', 'forceLayout', '/knowledge/graph/instances', 'GeoMapPanel']) {
+    // 不可替代的部分不能被一起带走（布局已是力导向：radialLayout 退役）。
+    // P2-21：实例建边的 URL 收口到 api/modules/knowledge.ts（createGraphInstance），
+    // 页面形态钉改为对 module 函数的消费（能力仍在页面，判据随通道走）。
+    for (const kept of ['GraphExplorer3D', 'forceLayout', 'createGraphInstance', 'GeoMapPanel']) {
       expect(page, `图谱工作台丢了它唯一实装的能力：${kept}`).toContain(kept)
     }
   })
 
   it('规则写面的唯一应用内消费者仍是图谱工作台（删它即失去 REST 规则 CRUD 入口）', () => {
+    // P2-21：规则 URL 收口到类型化出口 api/modules/ontology.ts（与术语同口径）；
+    // 页面侧钉住对规则写面 module 函数的消费——删页面消费即失去 REST 规则 CRUD 入口
     const hits = filesMatching('/ontology/rules')
-    expect(hits).toEqual(['pages/GraphWorkbenchPage.vue'])
+    expect(hits).toEqual(['api/modules/ontology.ts'])
+    const page = codeOnly(readFileSync(resolve(SRC, 'pages/GraphWorkbenchPage.vue'), 'utf-8'))
+    for (const consumer of ['createOntologyRule', 'updateOntologyRule', 'deleteOntologyRule']) {
+      expect(page, `图谱工作台丢了规则写面消费：${consumer}`).toContain(consumer)
+    }
   })
 })

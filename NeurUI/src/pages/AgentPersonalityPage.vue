@@ -126,7 +126,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
@@ -136,6 +135,7 @@ import { useAgentPage } from '@/composables/useAgentPage'
 import { useEnumLabel } from '@/composables/useEnumLabel'
 import { getEmotionSummary, getEmotionTimeline } from '@/api/modules/memory'
 import type { EmotionTimelineRange, EmotionTimelinePoint } from '@/api/modules/memory'
+import { getPersonality, updatePersonality, evolvePersonality as evolvePersonalityApi } from '@/api/modules/growth'
 
 const { t } = useI18n()
 const { enumLabel } = useEnumLabel()
@@ -311,7 +311,7 @@ const emotionTimelineOption = computed(() => {
 const fetchPersonality = async () => {
   loading.value = true
   try {
-    const res: any = await request.get('/growth/personality', { params: { agent_id: agentId.value } })
+    const res: any = await getPersonality(agentId.value)
     // envelope.data 是唯一事实源（2026-09-16 契约收口，见 personality-envelope-contract.test.ts）
     const data = res?.data ?? {}
     const traits = data.traits ?? {}
@@ -336,7 +336,7 @@ type PersistResult =
   | { ok: false; reason: 'missing' }
   | { ok: false; reason: 'mismatch'; traits: Record<string, number> }
 const persistTraits = async (traits: Record<string, number>): Promise<PersistResult> => {
-  const res: any = await request.put('/growth/personality', { traits }, { params: { agent_id: agentId.value } })
+  const res: any = await updatePersonality(agentId.value, { traits })
   const readBack = res?.data?.traits
   if (!readBack || typeof readBack !== 'object') return { ok: false, reason: 'missing' }
   const mismatch = Object.entries(traits).some(([k, v]) => Math.abs((Number(readBack[k]) || 0) - v) > 1e-9)
@@ -406,7 +406,7 @@ const writeDefaultTraits = async () => {
 const evolvePersonality = async () => {
   evolving.value = true
   try {
-    await request.post('/growth/personality/evolve', {}, { params: { agent_id: agentId.value } })
+    await evolvePersonalityApi(agentId.value)
     message.success(t('common.success'))
     await fetchPersonality()
   } catch {

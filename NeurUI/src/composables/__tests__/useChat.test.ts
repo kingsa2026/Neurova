@@ -13,7 +13,10 @@ vi.mock('@/api', () => {
   }
 })
 
-vi.mock('@/api/modules/console', () => ({
+// P2-21：useChat 的会话 CRUD 已收口到 api/modules/console——真实 module 函数
+// 直接打在下方 mock 的 api 门面上；这里只覆盖需要断言的三个写面函数
+vi.mock('@/api/modules/console', async () => ({
+  ...(await vi.importActual<typeof import('@/api/modules/console')>('@/api/modules/console')),
   deleteConsoleSession: vi.fn(),
   archiveConsoleSession: vi.fn(),
   unarchiveConsoleSession: vi.fn(),
@@ -67,7 +70,7 @@ describe('useChat', () => {
       const { loadSessions, store } = useChat()
       await loadSessions('agent-1')
 
-      expect(api.get).toHaveBeenCalledWith('/console/chat/sessions?agent_id=agent-1')
+      expect(api.get).toHaveBeenCalledWith('/console/chat/sessions', { params: { agent_id: 'agent-1' } })
       expect(store.sessions).toHaveLength(2)
       expect(store.sessions[0]).toEqual({
         id: 's1',
@@ -126,7 +129,7 @@ describe('useChat', () => {
       vi.mocked(api.get).mockResolvedValueOnce({ data: { sessions: [] } } as any)
       const { loadSessions } = useChat()
       await loadSessions('')
-      expect(api.get).toHaveBeenCalledWith('/console/chat/sessions')
+      expect(api.get).toHaveBeenCalledWith('/console/chat/sessions', { params: undefined })
     })
 
     // ── chat.loadHistoryFailed 修复契约 (遗留边界情况) ──────────────
@@ -1080,7 +1083,7 @@ describe('useChat', () => {
         const { loadArchivedSessions, store } = useChat()
         await loadArchivedSessions('agent-1')
 
-        expect(api.get).toHaveBeenCalledWith('/console/chat/sessions/archived?agent_id=agent-1')
+        expect(api.get).toHaveBeenCalledWith('/console/chat/sessions/archived', { params: { agent_id: 'agent-1' } })
         expect(store.archivedSessions).toEqual([{ id: 'a1', title: 'Archived', updatedAt: '2026-01-01' }])
       })
 
@@ -1090,7 +1093,7 @@ describe('useChat', () => {
         const { loadArchivedSessions } = useChat()
         await loadArchivedSessions('')
 
-        expect(api.get).toHaveBeenCalledWith('/console/chat/sessions/archived')
+        expect(api.get).toHaveBeenCalledWith('/console/chat/sessions/archived', { params: undefined })
       })
     })
 

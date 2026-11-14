@@ -10,7 +10,11 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 const apiGet = vi.fn()
-vi.mock('@/api', () => ({ api: { get: (...args: any[]) => apiGet(...args) } }))
+// P2-21：回读收口到 api/modules/console 的 getConsoleChatRuns（内部走 default api 门面）
+vi.mock('@/api', () => ({
+  api: { get: (...args: any[]) => apiGet(...args) },
+  default: { get: (...args: any[]) => apiGet(...args) },
+}))
 
 import {
   useSubAgentWindows, restoreSubAgentWindows, LEDGER_TO_WINDOW_STATUS,

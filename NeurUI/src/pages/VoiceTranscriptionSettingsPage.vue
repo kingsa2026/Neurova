@@ -88,7 +88,7 @@ import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
-import { request } from '@/api'
+import { getLocalWhisperStatus, grantLocalWhisperConsent } from '@/api/modules/asr'
 import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
@@ -128,7 +128,7 @@ const activeEngineColor = computed(() =>
 const fetchAll = async () => {
   loading.value = true
   try {
-    const res: any = await request.get('/audio/asr/local-whisper/status')
+    const res: any = await getLocalWhisperStatus()
     const data = res?.data?.data ?? res?.data ?? {}
     Object.assign(whisperStatus, {
       consent: !!data.consent,
@@ -147,12 +147,8 @@ const fetchAll = async () => {
 const grantConsent = async () => {
   consentLoading.value = true
   try {
-    // 同意后服务端阻塞下载+重跑链（可能数分钟）——前端放宽超时
-    const res: any = await request.post(
-      '/audio/asr/local-whisper/consent',
-      {},
-      { timeout: 660_000 },
-    )
+    // 同意后服务端阻塞下载+重跑链（可能数分钟）——module 内放宽超时（660s）
+    const res: any = await grantLocalWhisperConsent()
     const data = res?.data?.data ?? res?.data ?? {}
     Object.assign(whisperStatus, {
       consent: !!data.status?.consent,

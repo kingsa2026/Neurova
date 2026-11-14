@@ -876,7 +876,16 @@ import {
 } from '@/api/modules/knowledge'
 import type { KbConfig, KbCollection, KnowledgeNode, KnowledgeScope, KnowledgeConflict, ConflictTimeContext, DeletedKnowledge, GraphResolutionReview, KnowledgeChunkRow, IngressTask, IngressSpan } from '@/api/modules/knowledge'
 import { listKnowledgeCategories } from '@/api/modules/knowledge'
-import { request } from '@/api'
+import {
+  listMcpSources,
+  probeMcpTools as probeMcpToolsApi,
+  createMcpSource,
+  updateMcpSource,
+  pullMcpSource as pullMcpSourceApi,
+  deleteMcpSource as deleteMcpSourceApi,
+  importKnowledgeFile,
+  importKnowledgeFromUrl,
+} from '@/api/modules/knowledge'
 import { listChunkStrategies, searchCommunityGraph, getOntologyBlockingStats, getOntologyConflictPolicy } from '@/api/modules/ontology'
 import { useAuthStore } from '@/stores/auth'
 import GlassPanel from '@/components/GlassPanel.vue'
@@ -1145,7 +1154,7 @@ const mcpForm = reactive({
 const fetchMcpSources = async () => {
   mcpLoading.value = true
   try {
-    const res: any = await request.get('/knowledge/mcp/sources')
+    const res: any = await listMcpSources()
     const data = res?.data ?? res
     mcpSources.value = data?.items ?? []
   } catch (e: any) {
@@ -1173,7 +1182,7 @@ const probeMcpTools = async () => {
   }
   mcpProbing.value = true
   try {
-    const res: any = await request.post('/knowledge/mcp/sources/tools', {
+    const res: any = await probeMcpToolsApi({
       endpoint: mcpForm.endpoint,
       auth_token: mcpForm.auth_token,
     })
@@ -1206,10 +1215,10 @@ const saveMcpSource = async () => {
       tool_args: toolArgs, agent_id: agentId.value,
     }
     if (editingMcpId.value) {
-      await request.put(`/knowledge/mcp/sources/${editingMcpId.value}`, payload)
+      await updateMcpSource(editingMcpId.value, payload)
       message.success(t('knowledge.mcpUpdated'))
     } else {
-      await request.post('/knowledge/mcp/sources', payload)
+      await createMcpSource(payload)
       message.success(t('knowledge.mcpCreated'))
     }
     mcpFormVisible.value = false
@@ -1224,7 +1233,7 @@ const saveMcpSource = async () => {
 const pullMcpSource = async (item: any) => {
   pullingId.value = item.source_id
   try {
-    const res: any = await request.post(`/knowledge/mcp/sources/${item.source_id}/pull`)
+    const res: any = await pullMcpSourceApi(item.source_id)
     const data = res?.data ?? res
     if (data?.duplicate) {
       message.info(t('knowledge.duplicateMerged'))
@@ -1242,7 +1251,7 @@ const pullMcpSource = async (item: any) => {
 
 const deleteMcpSource = async (item: any) => {
   try {
-    await request.delete(`/knowledge/mcp/sources/${item.source_id}`)
+    await deleteMcpSourceApi(item.source_id)
     message.success(t('knowledge.mcpDeleted'))
     await fetchMcpSources()
   } catch (e: any) {
@@ -2128,12 +2137,9 @@ async function handleImport() {
       try {
         // 后端对抽取失败（旧版 .ppt/纯图片页等）返回 code=1 + status，
         // 不再以成功语义静默返回空列表——按文件聚合失败原因
-        const res: any = await request.post('/knowledge/import', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-          params: {
-            agent_id: agentId.value,
-            ...(importCategory.value ? { category: importCategory.value } : {}),
-          },
+        const res: any = await importKnowledgeFile(formData, {
+          agent_id: agentId.value,
+          ...(importCategory.value ? { category: importCategory.value } : {}),
         })
         const status: string = res?.data?.status || ''
         if (res?.code !== 0 || !res?.data?.items?.length) {
@@ -2174,12 +2180,10 @@ async function handleImportUrl() {
   }
   importingUrl.value = true
   try {
-    await request.post('/knowledge/import-url', null, {
-      params: {
-        agent_id: agentId.value,
-        url,
-        ...(importCategory.value ? { category: importCategory.value } : {}),
-      },
+    await importKnowledgeFromUrl({
+      agent_id: agentId.value,
+      url,
+      ...(importCategory.value ? { category: importCategory.value } : {}),
     })
     message.success(t('knowledge.importSuccess'))
     importUrlValue.value = ''

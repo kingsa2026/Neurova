@@ -29,9 +29,11 @@ vi.mock('@/stores/auth', () => ({
 }))
 
 const { requestGet } = vi.hoisted(() => ({ requestGet: vi.fn() }))
-vi.mock('@/api', () => ({
-  request: { get: requestGet, post: vi.fn(), put: vi.fn(), delete: vi.fn() },
-}))
+vi.mock('@/api', () => {
+  const request = { get: requestGet, post: vi.fn(), put: vi.fn(), delete: vi.fn() }
+  // P2-21：页面取数收口到 api/modules/knowledge-graph 等（内部走 default api 门面）
+  return { request, default: request }
+})
 
 vi.mock('ant-design-vue', () => ({
   message: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
