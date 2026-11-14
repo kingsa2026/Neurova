@@ -184,7 +184,7 @@ jobs:
             python -m pytest -q --timeout 1500 --cov --cov-report= --cov-fail-under=0 "$@"
 
       - name: Upload coverage data
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-shard-${{ matrix.shard }}
           path: data/coverage/.coverage*
