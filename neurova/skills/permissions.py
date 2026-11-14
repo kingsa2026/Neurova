@@ -41,6 +41,9 @@ _CATEGORY_TOOLS: Dict[str, Set[str]] = {
         # tab 管理与页面脚本逃逸舱：同一浏览器动作面（eval 是任意 JS 执行，必须受网络面约束）
         "browser_tab_open", "browser_tab_list", "browser_tab_switch", "browser_tab_close",
         "browser_eval",
+        # 页面级动作（导航补全/等待/滚动/按键）：同一浏览器动作面
+        "browser_back", "browser_forward", "browser_reload", "browser_wait",
+        "browser_scroll", "browser_press",
         # write_pdf 可内嵌远程图（经 persist_media 出网），与 file 同属其归类面
         "write_pdf",
     },

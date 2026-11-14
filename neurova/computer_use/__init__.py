@@ -656,6 +656,48 @@ class ComputerUseManager:
             return await bm.execute_js(script)
         return {"error": "浏览器管理器不可用"}
 
+    async def browser_back(self, generation: int = None) -> typing.Any:
+        """浏览器后退（导航使快照事实失效）"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.go_back(generation=generation)
+        return {"error": "浏览器管理器不可用"}
+
+    async def browser_forward(self, generation: int = None) -> typing.Any:
+        """浏览器前进（导航使快照事实失效）"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.go_forward(generation=generation)
+        return {"error": "浏览器管理器不可用"}
+
+    async def browser_reload(self, generation: int = None) -> typing.Any:
+        """刷新当前页（导航使快照事实失效）"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.reload_page(generation=generation)
+        return {"error": "浏览器管理器不可用"}
+
+    async def browser_wait(self, ms: int = None, selector: str = None, state: str = None, generation: int = None) -> typing.Any:
+        """等待页面条件（ms/selector/state 至少一项）"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.wait_for(ms=ms, selector=selector, state=state, generation=generation)
+        return {"error": "浏览器管理器不可用"}
+
+    async def browser_scroll(self, scroll_x: int = 0, scroll_y: int = 0, generation: int = None) -> typing.Any:
+        """按像素滚动当前页（相对滚动）"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.scroll_by(scroll_x, scroll_y, generation=generation)
+        return {"error": "浏览器管理器不可用"}
+
+    async def browser_press(self, key: str, delay: int = None, generation: int = None) -> typing.Any:
+        """向当前页派发单个按键"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.press_key(key, delay=delay, generation=generation)
+        return {"error": "浏览器管理器不可用"}
+
     async def browser_capabilities(self) -> typing.Any:
         """查询当前后端能力清单"""
         bm = self._get_browser_manager()
