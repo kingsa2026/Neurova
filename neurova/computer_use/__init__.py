@@ -740,6 +740,34 @@ class ComputerUseManager:
             return await bm.console_messages(limit)
         return {"error": "浏览器管理器不可用"}
 
+    async def browser_download(self, url: str, filename: str = None, generation: int = None) -> typing.Any:
+        """拉取 URL 字节落产物目录（走浏览器会话网络栈，二进制保真）"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.download_file(url, filename, generation=generation)
+        return {"error": "浏览器管理器不可用"}
+
+    async def browser_pdf(self, generation: int = None) -> typing.Any:
+        """打印当前页为 PDF（落产物目录）"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.print_pdf(generation=generation)
+        return {"error": "浏览器管理器不可用"}
+
+    async def browser_drag(self, source_role: str, target_role: str, source_name: str = None, target_name: str = None, generation: int = None) -> typing.Any:
+        """按 ARIA role+name 拖拽（source→target）"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.drag_role(source_role, target_role, source_name=source_name, target_name=target_name, generation=generation)
+        return {"error": "浏览器管理器不可用"}
+
+    async def browser_upload(self, role: str, paths: typing.List[str], name: str = None, generation: int = None) -> typing.Any:
+        """向文件输入元素上传本地文件（路径须存在）"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.upload_files(role, paths, name=name, generation=generation)
+        return {"error": "浏览器管理器不可用"}
+
     async def browser_capabilities(self) -> typing.Any:
         """查询当前后端能力清单"""
         bm = self._get_browser_manager()
