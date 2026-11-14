@@ -29,6 +29,12 @@ from neurova.core.data_root import get_data_root
 from neurova.core.logger import get_logger
 from neurova.evolution.eval.config import EvolutionConfig, text_evolution_enabled
 from neurova.evolution.eval.cost_ledger import costSoftGateVerdict, deploymentCostDelta
+from neurova.evolution.eval.surfaces import surfaceReadout
+from neurova.evolution.eval.artifacts import (
+    ARTIFACT_APPLIED,
+    ARTIFACT_ROLLED_BACK,
+    buildArtifact,
+)
 from neurova.evolution.eval.dataset import EvalDataset, dataset_dir_for
 from neurova.evolution.eval.runner import EvolutionRunResult
 from neurova.evolution.proposal_lifecycle import (
@@ -540,6 +546,9 @@ class EvolutionProposal:
     # 修复通道贡献（V1 是否参与最终胜者）与可进化面标注。数值全部取自运行
     # 读数（不另算第二份）；策略/代码面接入后按面分解。
     gain_attribution: dict = field(default_factory=dict)
+    # V3 可进化面读数（「填空式」表示）：本提案改写的是哪个面（名称/标注/
+    # 类型/生效预算）——「提案按面记录」，扩面后逐面可追溯。
+    surface: dict = field(default_factory=dict)
     created_at: str = ""
     decided_at: str = ""
 
@@ -561,6 +570,16 @@ class SkillEvolutionService:
         self._proposals_file = self._dir / "proposals.json"
         self._history_ledger = None  # P1-4：懒创建
         self._skill_journal = None  # P2-11：懒创建
+        self._artifact_store = None  # V5：懒创建
+
+    @property
+    def artifactStore(self):
+        """V5 可部署工件仓（artifacts/）——冠军与非劣变体的版本化交付。"""
+        if self._artifact_store is None:
+            from neurova.evolution.eval.artifacts import ArtifactStore
+
+            self._artifact_store = ArtifactStore(self._dir / "artifacts")
+        return self._artifact_store
 
     @property
     def journal(self):
@@ -996,9 +1015,18 @@ class SkillEvolutionService:
                     "repair_rescued": bool(result.repair_rescued),
                     "note": "增益记指令面（当前唯一可进化面）；策略/代码面接入后按面分解",
                 },
+                surface=surfaceReadout(artifact_type, cfg),
                 created_at=datetime.now(UTC).isoformat(),
             )
             self._append_proposal(proposal)
+            # V5：过门运行打包成可部署工件（冠军＋非劣变体＋证据指针）。
+            # 工件是交付物，但不在提案之后阻断主链：落盘失败告警不炸运行。
+            try:
+                self.artifactStore.save(buildArtifact(
+                    skill_id=skill_id, artifact_type=artifact_type,
+                    proposal=proposal.to_dict(), result=result, config=cfg))
+            except OSError as e:
+                logger.warning("可部署工件落盘失败（提案已产出）: %s", e)
             logger.info(
                 "文本进化提案产出: %s/%s (holdout %.2f→%.2f)",
                 self.agent_id, skill_id, result.holdout_before, result.holdout_after,
@@ -1396,7 +1424,10 @@ class SkillEvolutionService:
                 if not ok:
                     return False
                 target["status"] = STATUS_APPLIED
-                self._journal_append(target)  # P2-11：批准即 commit（失败降级不阻断）
+                commit = self._journal_append(target)  # P2-11：批准即 commit（失败降级不阻断）
+                # V5：工件随批准转 applied 并回填 journal commit（证据链闭环）
+                self._patchArtifactForProposal(target, status=ARTIFACT_APPLIED,
+                                               journal_commit=commit)
             else:
                 target["status"] = STATUS_REJECTED
             if approver.strip():
@@ -1405,11 +1436,12 @@ class SkillEvolutionService:
             self._write_proposals(items)
             return True
 
-    def _journal_append(self, target: dict) -> None:
+    def _journal_append(self, target: dict) -> Optional[str]:
         """P2-11：批准即提交——正文变更进 per-agent git 日志仓。git 缺失
-        或失败诚实降级（journal.append 返回 None），审批主链不受损。"""
+        或失败诚实降级（返回 None），审批主链不受损。V5：commit id 回给
+        调用方（工件证据链回填用）。"""
         try:
-            self.journal.append(
+            return self.journal.append(
                 skill_id=str(target.get("skill_id") or ""),
                 before=str(target.get("baseline_text") or ""),
                 after=str(target.get("improved_text") or ""),
@@ -1422,6 +1454,85 @@ class SkillEvolutionService:
             )
         except Exception as e:  # noqa: BLE001 - 日志仓故障不阻断审批主链
             logger.debug("技能日志仓写入失败: %s", e)
+            return None
+
+    def _patchArtifactForProposal(self, target: dict, *, status: str,
+                                  journal_commit: Optional[str] = None) -> None:
+        """V5：按提案 id 找到随行工件并流转状态（批准→applied＋journal 证据）。
+
+        旧提案没有随行工件（改动之前落盘）⇒ 无工可做，静默返回。"""
+        proposal_id = str(target.get("proposal_id") or "")
+        if not proposal_id:
+            return
+        for artifact in self.artifactStore.list():
+            if (artifact.get("evidence") or {}).get("proposal_id") == proposal_id:
+                fields: Dict[str, Any] = {"status": status}
+                if journal_commit is not None:
+                    fields["evidence"] = {"journal_commit": journal_commit}
+                self.artifactStore.patch(artifact["artifact_id"], fields)
+                return
+
+    def rollbackArtifact(self, artifact_id: str) -> Dict[str, Any]:
+        """V5：按工件回滚——把技能正文恢复到该工件记录的基线（批准的逆操作）。
+
+        无漂移才可回滚：当前技能正文必须仍等于工件的冠军正文——批准后若有人
+        改过正文/换了代，覆盖它会丢掉别人的改动，如实拒绝并指名。回滚走同一套
+        技能更新机制留痕，工件状态转 rolled_back。错误以 ValueError 抛出
+        （端点层映射 400）。"""
+        artifact = self.artifactStore.get(artifact_id)
+        if artifact is None:
+            raise ValueError(f"工件不存在: {artifact_id}")
+        if str(artifact.get("status") or "") != ARTIFACT_APPLIED:
+            raise ValueError(
+                f"工件 {artifact_id} 状态为 {artifact.get('status')}，仅 applied 可回滚")
+        skill_id = str(artifact.get("skill_id") or "")
+        champion = str(artifact.get("champion_text") or "")
+        baseline = str(artifact.get("baseline_text") or "")
+        if not baseline.strip():
+            raise ValueError("工件未记录基线正文，无法回滚")
+        try:
+            svc = agentLibrary(self.agent_id)
+            info = svc.get_skill_info(skill_id)
+        except Exception as e:  # noqa: BLE001 - 读不到当前正文就不能判漂移
+            raise ValueError(f"技能服务不可用: {e}") from e
+        if info is None:
+            raise ValueError(f"技能不存在: {skill_id}")
+        current_config = (info.get("manifest") or {}).get("config") or {}
+        current = str(current_config.get("context_template") or "")
+        if current != champion:
+            raise ValueError(
+                "技能正文已偏离工件冠军形态（批准后被改过），拒绝覆盖；请先核对当前正文")
+        if not self._rollbackSkillText(skill_id, baseline):
+            raise ValueError("回滚写入失败（技能更新未成功）")
+        self.artifactStore.patch(artifact_id, {"status": ARTIFACT_ROLLED_BACK})
+        return {"rolled_back": True, "skill_id": skill_id, "artifact_id": artifact_id}
+
+    def _rollbackSkillText(self, skill_id: str, baseline_text: str) -> bool:
+        """V5 回滚的正文写入：与 _apply_to_skill 同一更新机制（版本号+1）。
+
+        刻意不并进 _apply_to_skill——那处的写入形态被判据钉住
+        （test_service_decide_is_the_only_text_writer），回滚是另一种动作。"""
+        try:
+            svc = agentLibrary(self.agent_id)
+            info = svc.get_skill_info(skill_id)
+            if info is None:
+                logger.debug("回滚目标技能已不存在: %s", skill_id)
+                return False
+            config = dict((info.get("manifest") or {}).get("config") or {})
+            if not config:
+                logger.debug("技能 %s 无 manifest.config，无法回滚", skill_id)
+                return False
+            config["context_template"] = baseline_text
+            version = str(info.get("version") or "1.0.0")
+            parts = version.split(".")
+            while len(parts) < 3:
+                parts.append("0")
+            parts[2] = str(int(parts[2]) + 1)
+            return svc.update_auto_skill(skill_id, version=".".join(parts),
+                                         config=config)
+        except Exception as e:  # noqa: BLE001 - 写入失败由调用方如实上报
+            logger.debug("回滚写入失败: %s", e)
+            return False
 
     @staticmethod
     def _baselineChanged(proposal: dict, registry: Any) -> bool:

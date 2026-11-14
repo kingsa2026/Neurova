@@ -704,3 +704,50 @@ async def adopt_pareto_variant(agent_id: str, proposal_id: str,
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"code": 0, "data": data}
+
+
+# ── V5 可部署工件（冠军＋非劣变体的版本化交付）──────────────────────────
+
+
+@router.get("/skills/{agent_id}/artifacts")
+async def list_artifacts(agent_id: str, skill_id: Optional[str] = Query(default=""),
+                         user: Dict[str, Any] = Depends(get_current_user)):
+    """可部署工件清单（新→旧；可选按技能过滤）。读=登录用户。"""
+    from neurova.evolution.eval.service import SkillEvolutionService
+
+    rows = SkillEvolutionService(agent_id).artifactStore.list(skill_id=skill_id or "")
+    # 列表面不夹带正文（可能很大），详情接口再给全文
+    return {"code": 0, "data": [
+        {k: row.get(k) for k in ("artifact_id", "skill_id", "artifact_type",
+                                 "status", "created_at", "experiment_fingerprint",
+                                 "evidence", "variants", "scores", "surface", "cost")}
+        for row in rows
+    ]}
+
+
+@router.get("/skills/{agent_id}/artifacts/{artifact_id}")
+async def get_artifact_detail(agent_id: str, artifact_id: str,
+                              user: Dict[str, Any] = Depends(get_current_user)):
+    """工件详情：冠军/基线正文＋变体＋证据指针＋成本指纹。"""
+    from neurova.evolution.eval.service import SkillEvolutionService
+
+    payload = SkillEvolutionService(agent_id).artifactStore.get(artifact_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="工件不存在")
+    return {"code": 0, "data": payload}
+
+
+@router.post("/skills/{agent_id}/artifacts/{artifact_id}/rollback",
+             dependencies=[Depends(_admin_dep)])
+async def rollback_artifact(agent_id: str, artifact_id: str,
+                            user: Dict[str, Any] = Depends(get_current_user)):
+    """按工件回滚：把技能正文恢复到该工件记录的基线（批准的逆操作，admin）。
+
+    无漂移才可回滚：当前正文仍是工件冠军形态才执行；已漂移 400 并指名。"""
+    from neurova.evolution.eval.service import SkillEvolutionService
+
+    try:
+        data = SkillEvolutionService(agent_id).rollbackArtifact(artifact_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"code": 0, "data": data}
