@@ -4874,6 +4874,7 @@ class ToolExecutor:
         from neurova.api.endpoints import files_api
         from neurova.attachment_dataset import (
             assertReadOnlySql,
+            extractSqlTables,
             materializeReadOnlyCopy,
             normalizeRowLimit,
             openReadOnlyConnection,
@@ -4913,7 +4914,13 @@ class ToolExecutor:
                 # "语句头非写、最外层动作是写"的形态，只有带 schema 的连接
                 # 才分得出来（内存探针实测漏放）。
                 assertReadOnlySql(str(sql), conn)
-                return runReadOnlyQuery(conn, str(sql), row_limit)
+                query_result = runReadOnlyQuery(conn, str(sql), row_limit)
+                # 表名审计读数：这次查询动了哪些表，有账可查（sqlglot 提取）
+                tables_accessed = extractSqlTables(str(sql))
+                if tables_accessed:
+                    query_result = dict(query_result)
+                    query_result["tables_accessed"] = tables_accessed
+                return query_result
             finally:
                 conn.close()
 

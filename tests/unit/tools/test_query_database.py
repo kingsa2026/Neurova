@@ -113,6 +113,36 @@ class TestRegistration:
         assert callable(method)
 
 
+class TestSqlAudit:
+    @pytest.mark.asyncio
+    async def test_sqlQuery_reportsTablesAccessed(self, tmp_path):
+        """SQL 查询返回 tables_accessed 审计读数——动了哪些表有账可查。"""
+        file_id = _registerAttachment(tmp_path, _sqliteBytes(tmp_path))
+        executor = _makeExecutor(tmp_path)
+
+        result = await executor._execute_builtin_tool(
+            "query_database",
+            {
+                "file_id": file_id,
+                "sql": "SELECT m.content FROM memories m JOIN audit_logs a ON m.id = a.id",
+            },
+        )
+
+        assert "error" not in result, result
+        assert result.get("tables_accessed") == ["audit_logs", "memories"], result
+
+    @pytest.mark.asyncio
+    async def test_summaryRead_hasNoTableAudit(self, tmp_path):
+        """无 SQL 的 schema 概览不标 tables_accessed（没执行查询就没有表级动作）。"""
+        file_id = _registerAttachment(tmp_path, _sqliteBytes(tmp_path))
+        executor = _makeExecutor(tmp_path)
+
+        result = await executor._execute_builtin_tool("query_database", {"file_id": file_id})
+
+        assert "error" not in result, result
+        assert "tables_accessed" not in result, result
+
+
 class TestRealRead:
     @pytest.mark.asyncio
     async def test_sqliteAttachment_returnsTablesAndSampleRows(self, tmp_path):
