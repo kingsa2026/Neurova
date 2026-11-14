@@ -56,8 +56,11 @@ ASSERTION_OPS: Dict[str, str] = {
 #: 差分 op（需要同案基线输出才能判定；缺席 ⇒ 该案 unevidenced）
 _DIFFERENTIAL_OPS = frozenset({"differs_from_baseline", "same_as_baseline"})
 
-#: R7 覆盖面：哪些工件类型合成可执行套件（单一出处，service 装配读它）
-EXEC_SUITE_ARTIFACT_TYPES = ("skill", "template", "tool_description")
+#: R7 覆盖面：哪些工件类型合成可执行套件——V3 起由 surfaces schema 派生
+#（单一出处：面的 exec_suite_applies 字段），本仓不再各写一份清单。
+from neurova.evolution.eval.surfaces import execSuiteArtifactTypes
+
+EXEC_SUITE_ARTIFACT_TYPES = execSuiteArtifactTypes()
 
 _GEN_SYSTEM = (
     "你是一名评测工程师。给定一段 agent 技能/提示词文本（公共契约）与若干任务示例，"

@@ -557,11 +557,11 @@ class SkillEvolutionRunner:
             _settle(0.0, True)
             return 0.0, "", _redact_eval_error(e), True, peekCapabilityGapKinds()
         envKinds = peekCapabilityGapKinds()
-        max_size = (
-            self.config.max_tool_desc_size
-            if artifact_type == "tool_description"
-            else self.config.max_skill_size
-        )
+        # V3：判分尺寸上限单源 surfaces.sizeBudgetFor（原三处抄写收口到此；
+        # param_description 不再被当成 15KB 正文量）
+        from neurova.evolution.eval.surfaces import sizeBudgetFor
+
+        max_size = sizeBudgetFor(artifact_type, self.config)
         try:
             score = await self._call_judge(
                 task_input=ex.task_input,
@@ -1478,11 +1478,10 @@ class SkillEvolutionRunner:
         ex = examples[0]
         try:
             output = await self.agent.run(skill_text=skill_text, task_input=ex.task_input)
-            max_size = (
-                self.config.max_tool_desc_size
-                if artifact_type == "tool_description"
-                else self.config.max_skill_size
-            )
+            # V3：与 _score_example 同一把尺（sizeBudgetFor 单源）
+            from neurova.evolution.eval.surfaces import sizeBudgetFor
+
+            max_size = sizeBudgetFor(artifact_type, self.config)
             score = await self._call_judge(
                 task_input=ex.task_input,
                 expected_behavior=ex.expected_behavior,
