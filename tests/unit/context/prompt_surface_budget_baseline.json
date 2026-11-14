@@ -29,6 +29,14 @@
       "tools_description": 16524,
       "total_always_on_chars": 17964,
       "waiver": "预存红清偿-2026-11-14"
+    },
+    {
+      "phase": "提示面清理-2026-11-14",
+      "date": "2026-11-14",
+      "description": "清偿两批累计的等量旧文案清理开项（CI-收口-2026-11-07 与 预存红清偿-2026-11-14 两个 waiver 的欠账）：93 件工具的描述逐条压缩，实测回落到增长前水平以下（tools 16524→13219，total 17964→14659），「净预算不升」自此真实成立。",
+      "rules_sections": 1440,
+      "tools_description": 13219,
+      "total_always_on_chars": 14659
     }
   ]
 }
