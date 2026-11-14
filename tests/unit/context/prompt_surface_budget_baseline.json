@@ -46,6 +46,15 @@
       "tools_description": 16462,
       "total_always_on_chars": 17902,
       "waiver": "B3-工具面-2026-11-14"
+    },
+    {
+      "phase": "P3-14-脚本化工作流-2026-11-14",
+      "date": "2026-11-14",
+      "description": "本批新增 1 个内置工具（run_scripted_workflow，P3-14 受限脚本化工作流：模型写 async def main(ctx) 脚本、AST 白名单校验、子进程隔离执行、副作用经 ctx.callTool 走治理管线、journal 可续跑），描述按提示面纪律撰写，实测 +295 字符（tools 16462→16757，total 17902→18197）。按 B3 同款纪律如实登记；等量旧文案清理开项在台账继续挂着，不冒充已完成。",
+      "rules_sections": 1440,
+      "tools_description": 16757,
+      "total_always_on_chars": 18197,
+      "waiver": "P3-14-脚本化工作流-2026-11-14"
     }
   ]
 }
