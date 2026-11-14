@@ -1118,7 +1118,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "web_search": {
         # 并行能力声明：联网检索为无副作用读（只发 GET，不改远端状态）。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
-        "description": "【实时网络搜索】查互联网实时信息（新闻/股价/百科/文档）。阶梯：先搜索拿网址 → web_fetch 读取 → 需交互/登录/动态渲染才升级 browser_*。【何时不用】已知 URL 直接 web_fetch；站点限定用垂直工具；内部记忆用 memory_search。",
+        "description": "【实时网络搜索】查互联网实时信息（新闻/股价/百科/文档）。工具选择阶梯（最轻优先）：先搜索拿网址 → web_fetch 读取 → 需交互/登录/动态渲染才升级 browser_*。【何时不用】已知 URL 直接 web_fetch；站点限定用垂直工具；内部记忆问题用 memory_search。",
         "parameters": {
             "type": "object",
             "properties": {
