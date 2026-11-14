@@ -77,15 +77,17 @@ class TestLedgerRoundtrip:
         assert [r["seq"] for r in rows] == [1]
         assert il.verifyInjections("s")["rows"] == 1
 
-    def test_compaction_keeps_recent_rows(self, dataRoot, monkeypatch):
-        monkeypatch.setattr(il, "COMPACTION_CHECK_INTERVAL", 10)
-        monkeypatch.setattr(il, "COMPACTION_THRESHOLD", 20)
-        monkeypatch.setattr(il, "COMPACTION_KEEP", 10)
-        for i in range(1, 26):
-            il.recordInjection("s", "k", f"row-{i}")
+    def test_compaction_keeps_recent_bytes(self, dataRoot, monkeypatch):
+        """体量治理按字节：实测单行可达数百 KB，按行数治理会膨到数百 MB。"""
+        monkeypatch.setattr(il, "COMPACTION_CHECK_INTERVAL", 5)
+        monkeypatch.setattr(il, "COMPACTION_MAX_BYTES", 4000)
+        monkeypatch.setattr(il, "COMPACTION_KEEP_BYTES", 2000)
+        for i in range(1, 21):
+            il.recordInjection("s", "k", "x" * 300)
         rows = il.readInjections("s")
-        assert [r["seq"] for r in rows] == list(range(11, 26))
-        assert rows[0]["content"] == "row-11"
+        assert len(rows) < 20, "老行应被按体量压缩掉"
+        assert rows[-1]["content"] == "x" * 300
+        assert il.verifyInjections("s")["broken"] == 0
 
 
 class TestFinishContextWriteAhead:

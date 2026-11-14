@@ -13,9 +13,10 @@ ctx.context——进程崩在「模型已见、回复未落盘」之间时，事
 - ``verifyInjections`` 重算哈希比对，接进编排器 get_context_health
   的 injection_ledger 读数槽；
 - 写失败诚实降级：返回 None 并记 warning，不阻断上下文构建；
-- 体量治理：超过 COMPACTION_THRESHOLD 行时压缩保留最近
-  COMPACTION_KEEP 行（每 COMPACTION_CHECK_INTERVAL 次追加检查一次，
-  摊薄重写成本）。
+- 体量治理（按**字节**而非行数——实测单行可达数百 KB）：每
+  COMPACTION_CHECK_INTERVAL 次追加检查一次，文件超过 COMPACTION_MAX_BYTES
+  时压缩保留最近 COMPACTION_KEEP_BYTES 的行（活体验证实测单行 301KB，
+  按行数治理会让长会话账本膨胀到数百 MB，故按字节）。
 """
 
 from __future__ import annotations
@@ -31,10 +32,10 @@ from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-#: 压缩检查间隔与保留行数（测试可经 monkeypatch 调小）
-COMPACTION_CHECK_INTERVAL = 500
-COMPACTION_THRESHOLD = 2000
-COMPACTION_KEEP = 1000
+#: 压缩检查间隔与体量阈值（测试可经 monkeypatch 调小）
+COMPACTION_CHECK_INTERVAL = 50
+COMPACTION_MAX_BYTES = 64 * 1024 * 1024
+COMPACTION_KEEP_BYTES = 32 * 1024 * 1024
 
 _LEDGER_LOCKS: Dict[str, threading.RLock] = {}
 _LEDGER_LOCKS_GUARD = threading.Lock()
@@ -106,16 +107,30 @@ def recordInjection(sessionId: str, kind: str, content: str,
             with open(path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(row, ensure_ascii=False) + "\n")
                 fh.flush()
-            # 体量治理：每 CHECK_INTERVAL 次追加检查一次，达到阈值压缩保留最近 KEEP 行
-            if row["seq"] % COMPACTION_CHECK_INTERVAL == 0 and len(rows) + 1 >= COMPACTION_THRESHOLD:
-                keep = rows[-(COMPACTION_KEEP - 1):] + [row]
-                tmp = path.with_suffix(".jsonl.tmp")
-                tmp.write_text(
-                    "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in keep),
-                    encoding="utf-8",
-                )
-                tmp.replace(path)
-                logger.info("注入账本已压缩：保留最近 %d 行（会话 %s）", len(keep), sessionId)
+            # 体量治理（按字节）：每 CHECK_INTERVAL 次追加检查一次，文件超过
+            # MAX_BYTES 时压缩保留最近 KEEP_BYTES 的行。压缩失败不影响本次落账。
+            if row["seq"] % COMPACTION_CHECK_INTERVAL == 0:
+                try:
+                    if path.stat().st_size > COMPACTION_MAX_BYTES:
+                        keptRows: List[Dict[str, Any]] = []
+                        keptBytes = 0
+                        for r in reversed(rows + [row]):
+                            keptRows.insert(0, r)
+                            keptBytes += int(r.get("chars", 0)) + 64
+                            if keptBytes >= COMPACTION_KEEP_BYTES:
+                                break
+                        tmp = path.with_suffix(".jsonl.tmp")
+                        tmp.write_text(
+                            "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in keptRows),
+                            encoding="utf-8",
+                        )
+                        tmp.replace(path)
+                        logger.info(
+                            "注入账本已按体量压缩：保留最近 %d 行（约 %d 字节，会话 %s）",
+                            len(keptRows), keptBytes, sessionId,
+                        )
+                except Exception as ce:  # noqa: BLE001 - 压缩失败不影响本次落账
+                    logger.warning("注入账本压缩失败（会话 %s）: %s", sessionId, ce)
             return row
     except Exception as e:  # noqa: BLE001 - 账本故障不阻断上下文构建
         logger.warning("注入账本落盘失败（会话 %s）: %s", sessionId, e)
