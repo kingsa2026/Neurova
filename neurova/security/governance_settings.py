@@ -43,6 +43,12 @@ DEFAULTS: Dict[str, Any] = {
     # 工单 015 收口的两个裸 env。默认值＝收口前的现网默认，不顺手改口径
     "crystallization_llm_gate_enabled": True,  # 结晶 LLM 裁决闸（关=候选直写存储引擎）
     "skill_auto_retire_enabled": False,  # 技能自动淘汰（关=只上报候选不执行禁用）
+    # P1-3 guarded：语法级危险命令门。白名单命中也会被 argv 语法级危险判定
+    # 降级为逐次确认（ASK）；默认开——只收紧危险命令，不放宽任何放行。
+    "guarded_syntax_gate_enabled": True,
+    # P1-3：只读 argv 自动放行——全部段均为只读动词且内容检测零发现时免审批。
+    # 默认关：先作为能力位存在，运营按需开启以扩大无人值守面。
+    "readonly_argv_autoallow_enabled": False,
     # 整合全自动 commit gate（2026-10-07 规则修订：用户指令"全自动替代人工审批"）。
     # gate 为确定性多检 fail-closed（召回预检+结构身份门槛，任一检不过仍留人工），
     # 动作=归档可逆+账本迁移+留痕；关=回退人工审批面。规则修订登记：

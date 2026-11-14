@@ -267,6 +267,25 @@ class GovernancePolicy:
             self._whitelist = []
             self._load_whitelist()
 
+    @staticmethod
+    def _guardedAskReasons(syntax) -> Optional[List[str]]:
+        """P1-3 guarded：白名单放行前，语法级危险命令强制单次确认。
+
+        危险命令审批先于白名单放行——白名单是"我常跑这类安全命令"的声明，
+        不是"rm -rf 也免确认"的授权。返回 None=不拦；返回 reasons=降级 ASK。
+        设置项 guarded_syntax_gate_enabled（默认开）可整体关闭。
+        """
+        if syntax is None or not syntax.destructiveHits:
+            return None
+        from neurova.security.governance_settings import resolve_flag
+
+        if not resolve_flag("guarded_syntax_gate_enabled", "NEUROVA_GUARDED_SYNTAX_GATE"):
+            return None
+        return [
+            f"语法级危险命令，需逐次确认（guarded）: {hit.verdict.reason}（段: {hit.text[:60]}）"
+            for hit in syntax.destructiveHits
+        ]
+
     def evaluate(
         self,
         command: str,
@@ -311,9 +330,27 @@ class GovernancePolicy:
             else []
         )
         is_multi_seg = len(segs) > 1
+        # P1-3 guarded：语法级命令分析（仅 shell 方言工具参与，segs 非空即命中该条件）。
+        # 危险命令审批先于白名单放行；只读 argv 自动放行是独立设置项（默认关）。
+        syntax = None
+        if segs:
+            try:
+                from neurova.security.command_syntax import analyzeCommand
+
+                syntax = analyzeCommand(command, segmented=is_multi_seg)
+            except Exception:  # noqa: BLE001 - 分析故障不得扩大放行面，按未分析处理
+                syntax = None
         if is_multi_seg:
             seg_hits = [self.match_whitelist(s.text, tool_name) for s in segs]
             if all(h is not None for h in seg_hits):
+                downgradeReasons = self._guardedAskReasons(syntax)
+                if downgradeReasons:
+                    return GovernanceResult(
+                        path_values=adjudicatedPaths,
+                        decision=GovernanceDecision.ASK,
+                        reasons=downgradeReasons,
+                        segments=[s.to_dict() for s in segs],
+                    )
                 return GovernanceResult(
                     path_values=adjudicatedPaths,
                     decision=GovernanceDecision.ALLOW,
@@ -325,6 +362,13 @@ class GovernancePolicy:
             hit = self.match_whitelist(command, tool_name)
 
         if hit is not None:
+            downgradeReasons = self._guardedAskReasons(syntax)
+            if downgradeReasons:
+                return GovernanceResult(
+                    path_values=adjudicatedPaths,
+                    decision=GovernanceDecision.ASK,
+                    reasons=downgradeReasons,
+                )
             return GovernanceResult(
                 path_values=adjudicatedPaths,
                 decision=GovernanceDecision.ALLOW,
@@ -397,6 +441,26 @@ class GovernancePolicy:
                 findings=findings,
                 segments=_seg_dicts_if_multi,
             )
+
+        # P1-3：只读 argv 自动放行（readonly_argv_autoallow_enabled，默认关）。
+        # 位置在内容检测之后：任何 critical/high/medium 发现都使本臂失效——
+        # 自动放行只对"内容检测零发现"的纯只读命令生效，绝不覆盖守卫裁决。
+        if (
+            syntax is not None
+            and syntax.allReadonly
+            and not findings
+        ):
+            from neurova.security.governance_settings import resolve_flag
+
+            if resolve_flag(
+                "readonly_argv_autoallow_enabled", "NEUROVA_READONLY_ARGV_AUTOALLOW"
+            ):
+                return GovernanceResult(
+                    path_values=adjudicatedPaths,
+                    decision=GovernanceDecision.ALLOW,
+                    reasons=["只读命令 argv 级白名单自动放行"],
+                    segments=_seg_dicts_if_multi,
+                )
 
         # P0-6 分段 ASK 兜底（顺序在内容检测之后）：多段命令有段未命中
         # 白名单且内容检测无发现 → 逐段确认而非 default_action 放行。

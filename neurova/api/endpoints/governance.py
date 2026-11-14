@@ -1148,6 +1148,10 @@ class GovernanceSettingsUpdate(BaseModel):
     # `skill_consolidator` 经 resolve_flag 现读，唯独 PUT 面没有入口 ⇒ 治理页读得到改不到。
     consolidation_auto_commit_enabled: Optional[bool] = None
     consolidation_semantic_plans_enabled: Optional[bool] = None
+    # P1-3 guarded：语法级危险命令门（白名单命中也降级逐次确认；默认开）与
+    # 只读 argv 自动放行（内容检测零发现时免审批；默认关）。
+    guarded_syntax_gate_enabled: Optional[bool] = None
+    readonly_argv_autoallow_enabled: Optional[bool] = None
 
 
 @router.put("/settings")
