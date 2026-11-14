@@ -308,18 +308,18 @@ class LLMRouter:
 # 调用 `register_provider()`，导致 `select_model()` 永远返回 None、多模态路由
 # 静默降级。改为共享单例 + 从 LLMProviderManager 单例惰性同步 provider。
 
-_router_instance: Optional["LLMRouter"] = None
 _router_lock = threading.RLock()
 
 
 def get_llm_router() -> "LLMRouter":
-    """获取全局 LLMRouter 单例（懒初始化）。"""
-    global _router_instance
-    if _router_instance is None:
-        with _router_lock:
-            if _router_instance is None:
-                _router_instance = LLMRouter()
-    return _router_instance
+    """获取全局 LLMRouter 单例。
+
+    单一事实源（2026-11-14）：直接走 `LLMRouter()` 的类级 DCL 单例。此前这里
+    另持一个模块级 `_router_instance`，与 `LLMRouter._instance` 是两个槽——
+    测试里重置 `LLMRouter._instance` 后两者分叉，便捷函数拿到的是没注册
+    新 provider 的旧实例（"No model found" 假红即此）。
+    """
+    return LLMRouter()
 
 
 def _infer_capabilities(model_name: str) -> List[ModelCapability]:

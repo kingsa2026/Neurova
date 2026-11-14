@@ -32,7 +32,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "recall_history": {
         # 并行能力声明：本地会话折叠台账的只读召回（执行体只读存储，无写作用域）。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
-        "description": "【历史召回】取回被移出上下文窗口的原文。①见『[工具输出已移出上下文…call=<id>]』占位时传 tool_call_id 直取该次结果全文；②子 Agent 会话整取须同时传 agent_id 与 session_id；③用户提“之前说的”用 query 模糊匹配折叠台账。跨会话记忆用 memory_search；语音用 voice_memory_search。",
+        "description": "【历史召回】取回被移出上下文窗口的原文。①见『[工具输出已移出上下文…call=<id>]』占位时传 tool_call_id 直取该次结果全文；②子 Agent 会话整取须同时传 agent_id 与 session_id；③用户提“之前说的”用 query 模糊匹配折叠台账。【何时不用】跨会话记忆用 memory_search；语音用 voice_memory_search；上下文还找得到的不召回。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -60,7 +60,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "memory_search": {
         # 并行能力声明：长期记忆库只读检索，无写作用域。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
-        "description": "【内部记忆检索】仅搜本 Agent 自身的历史对话与记忆条目；不能搜互联网/天气/新闻等外部实时信息。【何时不用】外部实时信息 web_search；本会话折叠对话 recall_history；语音内容 voice_memory_search。",
+        "description": "【内部记忆检索】仅搜本 Agent 自身的历史对话与记忆条目；不能搜互联网/天气/新闻等外部实时信息。【何时不用】外部信息 web_search；本会话折叠对话 recall_history；语音内容 voice_memory_search。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -437,7 +437,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         # 并行能力声明：语义只读但作用域为共享（读同一浏览器实例的当前页正文，并发会拿到对方翻页后的中间态）
         # ⇒ 推导判为不可并行。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
-        "description": "【浏览器提取文本】提取当前页面正文文字（阅读/总结/搜索结果）。先 browser_navigate 打开页面。【何时不用】长文分片用 browser_dom_read；静态页直接 web_fetch，不要单独开浏览器。",
+        "description": "【浏览器提取文本】提取当前页面正文文字（阅读/总结/搜索结果）。先 browser_navigate 打开页面。【何时不用】长文分片用 browser_dom_read；静态页直接 web_fetch。",
         "parameters": {
             "type": "object",
             "properties": {},
@@ -499,7 +499,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "browser_click_ref": {
         # 并行能力声明：驱动同一个内置浏览器实例（按快照编号定位）——编号表、页面与代次是共享态。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
-        "description": "【按快照编号点击】点击快照正文标 `[eN]` 的元素（同名元素无法用 role+name 唯一化、smart-click 回 409 列候选时用）。编号仅本次快照内有效，页面一变即失效；元素自证不符时拒绝发动作，此时应回到 role+name 定位。",
+        "description": "【按快照编号点击】点击快照正文标 `[eN]` 的元素（role+name 无法唯一化、smart-click 回 409 列候选时用）。编号仅本次快照内有效，页面一变即失效；自证不符时拒绝发动作。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -550,7 +550,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "browser_tab_switch": {
         # 并行能力声明：改共享浏览器实例的活动 tab 指针。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
-        "description": "【切换标签页】把指定 target_id 的标签页设为活动页，此后 browser_* 交互都作用于它。可带 generation 校验（不匹配则拒绝）；切换后需重新 browser_dom_snapshot。",
+        "description": "【切换标签页】把指定 target_id 的标签页设为活动页，此后 browser_* 交互都作用于它；可带 generation 校验。切换后需重新 browser_dom_snapshot。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -903,7 +903,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "subagent_status": {
         # 并行能力声明：只读蜂群运行记录（SwarmManager 的 status/list_all 在 RLock 下读内存态）。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
-        "description": "【查询子Agent状态】查蜂群子 Agent 的执行状态与最终报告。配合 spawn_subagent(background=true) 或前台转后台后的轮询；subagent_id 省略时返回最近派生列表（新→旧，report 截断）。",
+        "description": "【查询子Agent状态】查蜂群子 Agent 的执行状态与最终报告；配合 background=true 或前台转后台后的轮询。subagent_id 省略时返回最近派生列表（新→旧，report 截断）。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -928,7 +928,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "create_skill": {
         # 并行能力声明：注册技能并落盘技能库——技能注册表是共享态，并发注册同名技能会互相覆盖。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
-        "description": "【创建可执行技能】把反复出现的工具调用组合成持久化可执行技能，之后经 `name` 一键调用。技能＝有序工具调用＋可选步间占位符（{step_<idx>.<field>} 引用前序输出）。创建后本会话与 SkillRegistry 立即可调。",
+        "description": "【创建可执行技能】把反复出现的工具调用组合成持久化技能，之后经 `name` 一键调用。技能＝有序工具调用＋可选步间占位符（{step_<idx>.<field>} 引用前序输出）。创建后本会话与 SkillRegistry 立即可调。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -957,7 +957,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "ask_user": {
         # 并行能力声明：写构建会话的交互记录并暂停当前步，属共享状态。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
-        "description": "【向用户提问】构建/修复工作流遇到不明确、需选择、需补参数或凭据时，弹交互面板并暂停当前步，回答后恢复（pending/resume）。凭据用 kind=secret + secret_key（入 SecretStore），禁止聊天正文粘贴。",
+        "description": "【向用户提问】构建/修复工作流遇不明确、需选择、需补参数或凭据时，弹交互面板并暂停当前步，回答后恢复。凭据用 kind=secret + secret_key（入 SecretStore），禁止聊天正文粘贴。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -1241,7 +1241,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "file_list": {
         # 并行能力声明：本地目录枚举只读，无写作用域。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
-        "description": "【文件枚举】按 glob 列出文件（如 *.py、docs/**/*.md），支持递归。找到后用 file_read 读、file_search 按内容搜。截断时带 truncated=true 与 next_offset 续拉。",
+        "description": "【文件枚举】按 glob 列出文件（如 *.py、docs/**/*.md），支持递归。找到后用 file_read 读、file_search 按内容搜；截断时带 next_offset 续拉。",
         "parameters": {
             "type": "object",
             "properties": {
