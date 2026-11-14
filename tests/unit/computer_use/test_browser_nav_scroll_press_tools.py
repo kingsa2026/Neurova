@@ -133,20 +133,36 @@ class TestPlaywrightBackend:
     @pytest.mark.asyncio
     async def test_goBackNavigatesAndBumpsGeneration(self):
         b, page, tab = self._backend()
+        page.url = "http://x/b"
+
+        async def fake_go_back():
+            page.url = "http://x/a"  # 后退成功 = URL 变化
+            return MagicMock()
+
+        page.go_back = AsyncMock(side_effect=fake_go_back)
         result = await b.go_back()
         assert result.success and page.go_back.await_count == 1
         assert tab["generation"] == 2 and result.generation == 2
 
     @pytest.mark.asyncio
     async def test_goBackWithoutHistoryIsHonest(self):
+        """无历史 = go_back 后 URL 不变（返回值不可靠：data: URL 成功导航也返回 None）"""
         b, page, _ = self._backend()
-        page.go_back = AsyncMock(return_value=None)
+        page.url = "http://x/only"
+        page.go_back = AsyncMock(return_value=MagicMock())
         result = await b.go_back()
         assert not result.success and "后退" in result.error
 
     @pytest.mark.asyncio
     async def test_goForwardNavigatesAndBumpsGeneration(self):
         b, page, tab = self._backend()
+        page.url = "http://x/a"
+
+        async def fake_go_forward():
+            page.url = "http://x/b"
+            return MagicMock()
+
+        page.go_forward = AsyncMock(side_effect=fake_go_forward)
         result = await b.go_forward()
         assert result.success and page.go_forward.await_count == 1
         assert tab["generation"] == 2

@@ -169,6 +169,14 @@ class TestPlaywrightBackend:
         result = await b.console_messages()
         assert result.success and result.data == []
 
+    def test_pageErrorListenedPerTab(self):
+        """pageerror 是 page 级事件：_register_tab 必须逐 tab 挂载（context 级挂了静默无效）。"""
+        b, page, _, _ = self._backend()
+        page.on = MagicMock()
+        b._register_tab(page)
+        subscribed = [c.args[0] for c in page.on.call_args_list]
+        assert "pageerror" in subscribed, f"tab 未订阅 pageerror: {subscribed}"
+
 
 class FakeStateManager:
     def __init__(self):
