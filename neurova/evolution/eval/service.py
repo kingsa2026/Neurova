@@ -28,7 +28,7 @@ from typing import Any, Dict, NamedTuple, Optional
 from neurova.core.data_root import get_data_root
 from neurova.core.logger import get_logger
 from neurova.evolution.eval.config import EvolutionConfig, text_evolution_enabled
-from neurova.evolution.eval.cost_ledger import costSoftGateVerdict
+from neurova.evolution.eval.cost_ledger import costSoftGateVerdict, deploymentCostDelta
 from neurova.evolution.eval.dataset import EvalDataset, dataset_dir_for
 from neurova.evolution.eval.runner import EvolutionRunResult
 from neurova.evolution.proposal_lifecycle import (
@@ -532,6 +532,10 @@ class EvolutionProposal:
     cost_gate: dict = field(default_factory=dict)
     # HN2/HC2 可执行断言面读数（紧凑出街；逐案明细在 run 审计文件里）。
     exec_suite: dict = field(default_factory=dict)
+    # V6 部署形态成本差（VideoEvolve 对照 2026-11-14）：胜者相对基线臂的每任务
+    # 执行成本差（tokens/费用/CoP 两列）。审批人看「采纳后每任务多花多少」，
+    # 与开发搜索花费（cost_gate）分格。未量到 ⇒ state=unmeasured（不冒充 0）。
+    deployment_cost: dict = field(default_factory=dict)
     created_at: str = ""
     decided_at: str = ""
 
@@ -975,6 +979,7 @@ class SkillEvolutionService:
                     "baseline_pass_rate": result.exec_suite.get("baseline_pass_rate"),
                     "candidate_pass_rate": result.exec_suite.get("candidate_pass_rate"),
                 },
+                deployment_cost=deploymentCostDelta(result.cost_summary),
                 created_at=datetime.now(UTC).isoformat(),
             )
             self._append_proposal(proposal)
