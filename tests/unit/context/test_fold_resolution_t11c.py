@@ -129,8 +129,11 @@ async def _foldMany(orch, rounds: int = 6):
     orch._window_summarizer = summarizer
     history = [_longRound(i) for i in range(14)]
     view = await _build(orch, history)
+    # B2 增量折叠之后，每轮追加 3 条长消息——保证每轮的未覆盖尾部都超出
+    # 其份额、每轮都真折叠落一代（旧版每轮 +1 条时，B2 的零折叠判据会隔轮
+    # 跳过，代际栈长不到判据需要的深度）。
     for rnd in range(rounds - 1):
-        history = history + [_longRound(100 + rnd)]
+        history = history + [_longRound(100 + rnd * 6 + j) for j in range(6)]
         view = await _build(orch, history)
     return view
 
