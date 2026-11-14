@@ -1497,14 +1497,14 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "schedule_task": {
         # 并行能力声明：调度任务落共享存储，建/取消都会改共享态。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
-        "description": "【定时任务】创建/查看/取消定时任务：到点让指定 Agent 执行消息或跑工作流/画布。cron 5 段（分 时 日 月 周，0=周一）或固定间隔；重启后自动恢复。【何时不用】只跑一次用普通工具；需人盯的流程用审批节点。",
+        "description": "【定时任务】定时任务全生命周期：create 新建 / list 查看 / update 修改（cron、间隔、名称、次数）/ pause 暂停 / resume 恢复 / cancel 取消（留痕）/ delete 删除。到点让指定 Agent 执行消息或跑工作流/画布。cron 5 段（分 时 日 月 周，0=周一）或固定间隔；重启后自动恢复。【何时不用】只跑一次用普通工具；需人盯的流程用审批节点。",
         "parameters": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["create", "list", "cancel"],
-                    "description": "create 新建；list 查看自己 Agent 的任务；cancel 取消自己的任务",
+                    "enum": ["create", "list", "update", "pause", "resume", "cancel", "delete"],
+                    "description": "create 新建；list 查看自己 Agent 的任务；update 修改任务（cron/间隔/名称/描述/最大次数）；pause 暂停；resume 恢复；cancel 取消（留痕可查）；delete 删除",
                 },
                 "task_id": {"type": "string", "description": "cancel 时必填：任务 ID"},
                 "name": {"type": "string", "description": "任务名称（create 时建议填写）"},

@@ -288,3 +288,116 @@ class TestSchedulerBootstrap:
         assert task.status == "completed"
         assert task.last_result["success"] is True
         AgentScheduler._instance = None
+
+
+class TestScheduleTaskLifecycle:
+    """P3-14 对照补齐：定时任务全生命周期（update/pause/resume/delete）。"""
+
+    async def _create(self, executor, **overrides):
+        params = {
+            "action": "create",
+            "name": "每两小时看广告",
+            "interval_seconds": 7200,
+            "message": "检查广告数据",
+        }
+        params.update(overrides)
+        result = await executor._execute_schedule_task(params)
+        assert result["success"] is True
+        return result["task"]
+
+    @pytest.mark.asyncio
+    async def test_updateChangesScheduleAndName(self, executor):
+        task = await self._create(executor)
+        result = await executor._execute_schedule_task(
+            {
+                "action": "update",
+                "task_id": task["task_id"],
+                "name": "每天九点复盘",
+                "cron_expression": "0 9 * * *",
+            }
+        )
+
+        assert result["success"] is True
+        assert result["task"]["name"] == "每天九点复盘"
+        assert result["task"]["cron_expression"] == "0 9 * * *"
+        assert result["task"]["interval_seconds"] is None
+        assert result["task"]["next_run_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_updateInvalidCronRejected(self, executor):
+        task = await self._create(executor)
+        result = await executor._execute_schedule_task(
+            {"action": "update", "task_id": task["task_id"], "cron_expression": "不是cron"}
+        )
+        assert result["success"] is False
+        assert "cron" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_updateOtherAgentsTaskRejected(self, executor):
+        from neurova.collaborate.workflow.scheduler import get_scheduler
+
+        task = await self._create(executor)
+        get_scheduler().get_task(task["task_id"]).agent_id = "someone-else"
+        result = await executor._execute_schedule_task(
+            {"action": "update", "task_id": task["task_id"], "name": "抢夺"}
+        )
+        assert result["success"] is False
+        assert "只能更新自己" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_pauseAndResumeCycle(self, executor):
+        from neurova.collaborate.workflow.scheduler import get_scheduler
+
+        task = await self._create(executor, interval_seconds=3600)
+        tid = task["task_id"]
+
+        paused = await executor._execute_schedule_task({"action": "pause", "task_id": tid})
+        assert paused["success"] is True
+        assert paused["task"]["status"] == "paused"
+        schedTask = get_scheduler().get_task(tid)
+        assert schedTask.is_due() is False, "paused 任务不得触发"
+
+        resumed = await executor._execute_schedule_task({"action": "resume", "task_id": tid})
+        assert resumed["success"] is True
+        assert resumed["task"]["status"] == "pending"
+        assert resumed["task"]["next_run_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_pauseWrongStateRejected(self, executor):
+        task = await self._create(executor)
+        first = await executor._execute_schedule_task({"action": "pause", "task_id": task["task_id"]})
+        assert first["success"] is True
+        again = await executor._execute_schedule_task({"action": "pause", "task_id": task["task_id"]})
+        assert again["success"] is False, "已暂停的任务不能再次暂停"
+
+    @pytest.mark.asyncio
+    async def test_deleteRemovesTask(self, executor):
+        from neurova.collaborate.workflow.scheduler import get_scheduler
+
+        task = await self._create(executor)
+        result = await executor._execute_schedule_task(
+            {"action": "delete", "task_id": task["task_id"]}
+        )
+        assert result["success"] is True
+        assert result["deleted"] is True
+        ids = [t.task_id for t in get_scheduler().list_tasks()]
+        assert task["task_id"] not in ids
+
+    @pytest.mark.asyncio
+    async def test_deleteOtherAgentsTaskRejected(self, executor):
+        from neurova.collaborate.workflow.scheduler import get_scheduler
+
+        task = await self._create(executor)
+        get_scheduler().get_task(task["task_id"]).agent_id = "someone-else"
+        result = await executor._execute_schedule_task(
+            {"action": "delete", "task_id": task["task_id"]}
+        )
+        assert result["success"] is False
+        assert "只能删除自己" in result["error"]
+
+    def test_schemaActionsCoverLifecycle(self):
+        from neurova.builtin_tools import _BUILTIN_SCHEMAS
+
+        actions = _BUILTIN_SCHEMAS["schedule_task"]["parameters"]["properties"]["action"]["enum"]
+        for action in ("create", "list", "update", "pause", "resume", "cancel", "delete"):
+            assert action in actions
