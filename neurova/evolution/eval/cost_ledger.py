@@ -167,3 +167,42 @@ def costSoftGateVerdict(cost_summary: Optional[Dict[str, Any]], *,
         }
     return {"state": "within_budget", "ratio": round(ratio, 4),
             "threshold": float(ratio_threshold)}
+
+
+def deploymentCostDelta(cost_summary: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """V6 部署形态成本差（VideoEvolve 对照 2026-11-14）：胜者相对基线臂的
+    **每任务执行成本差**（tokens/费用），给审批人看「采纳后每任务多花多少」——
+    开发搜索的花费（成本账自身）与部署形态的花费（本读数）分开计量，对应
+    论文「进化后调用数 0.996→1.963」的披露纪律。
+
+    - 未量到（no_usage_events / 缺任一臂）⇒ state=unmeasured + 原因，不冒充 0；
+    - measured ⇒ 每任务 tokens/费用差 + 相对比例（基线零成本 ⇒ None，不产
+      无穷大）+ CoP 两列（每任务「通过成本」的两侧对照）。
+
+    唯一实现点：提案面与详情面都取这里，不各算一遍。
+    """
+    summary = cost_summary or {}
+    arms = summary.get("arms") or {}
+    base = arms.get("baseline") or {}
+    cand = arms.get("candidate") or {}
+    if summary.get("state") != "measured" or not base or not cand:
+        return {"state": "unmeasured",
+                "reason": str(summary.get("state") or "no_usage_events")}
+    base_usd = float(base.get("cost_per_case_usd") or 0.0)
+    cand_usd = float(cand.get("cost_per_case_usd") or 0.0)
+    base_tokens = float(base.get("cost_per_case_tokens") or 0.0)
+    cand_tokens = float(cand.get("cost_per_case_tokens") or 0.0)
+    return {
+        "state": "measured",
+        "baseline_per_case_usd": round(base_usd, 6),
+        "candidate_per_case_usd": round(cand_usd, 6),
+        "delta_per_case_usd": round(cand_usd - base_usd, 6),
+        # 基线零成本时比例无定义 ⇒ None（不是 0 也不是 inf）
+        "delta_ratio": (round((cand_usd - base_usd) / base_usd, 4)
+                        if base_usd > 0 else None),
+        "baseline_per_case_tokens": round(base_tokens, 2),
+        "candidate_per_case_tokens": round(cand_tokens, 2),
+        "delta_per_case_tokens": round(cand_tokens - base_tokens, 2),
+        "baseline_cop_usd": base.get("cop_usd"),
+        "candidate_cop_usd": cand.get("cop_usd"),
+    }
