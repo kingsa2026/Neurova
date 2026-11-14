@@ -19,6 +19,14 @@ PBKDF2-SHA256 20 万次迭代派生密钥，机密性与完整性同时给），
 
 两种布局的密文格式相同（同一加解密单源），但物理文件互不通用——
 单文件库存全局密钥，桶库存按用户隔离的凭据，属不同存储域而非重复实现。
+
+全局密钥库的落点自 P2-22 收尾起统一为 **default 桶**：:func:`get_secret_store`
+首次构建时经 :func:`migrateLegacyFileStore` 把旧单文件 ``secrets.json``
+（路径与旧版 ``providers/secret_store.py`` 一致，条目为裸密文串或
+``{"value": ...}`` 包装对象）一次性迁入同级 ``secrets/`` 桶目录，并把
+metadata/access_log 置初值；旧文件改名 ``secrets.json.retired-<时间戳>``
+隔离保留，旧文件不在原名即不再触发（幂等）。迁移 fail-soft 有界：
+损坏条目跳过并 warning 点名，任何意外都回落原单文件路径，不阻断启动。
 """
 
 import base64
@@ -307,7 +315,9 @@ class SecretStore:
     - 桶模式（web_reach 每用户凭据桶）：
       ``SecretStore(storage_path=<目录>, encryption_key=<密钥>)``
     - 单文件模式（全局密钥库，经 :func:`get_secret_store` 取单例）：
-      ``SecretStore(master_key=<密钥>, storage_path=<secrets.json 文件路径>)``
+      ``SecretStore(master_key=<密钥>, storage_path=<secrets.json 文件路径>)``；
+      单例的 storage_path 由 :func:`migrateLegacyFileStore` 解析——首次构建时把
+      旧单文件库迁入 default 桶（``<配置路径同级>/secrets/secrets.json``）
     """
 
     def __init__(
@@ -926,6 +936,154 @@ class SecretStore:
             return True
 
 
+# ==================================================================
+# 旧单文件库 → default 桶 一次性幂等迁移（P2-22 收尾）
+# ==================================================================
+
+def _retiredTarget(legacy: Path) -> Path:
+    """旧文件退役名：``secrets.json.retired-<时间戳>``；同名冲突补短随机尾。"""
+    stamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S%f")
+    target = legacy.with_name(f"{legacy.name}.retired-{stamp}")
+    if target.exists():
+        target = legacy.with_name(f"{legacy.name}.retired-{stamp}-{uuid.uuid4().hex[:8]}")
+    return target
+
+
+def _normalizeLegacyCipher(entry: Any, masterKey: str) -> Optional[str]:
+    """旧条目值归一为 clean ``enc:v2:`` 密文；形状不对/解不开返回 None（由调用方跳过并点名）。
+
+    旧单文件库的条目值有三种历史形态：
+    - ``"enc:v2:..."``：与 clean 同源同格式，验过可解（密钥同源）后**原样直搬**，不重加密；
+    - ``"enc:..."``：历史 XOR 弱密文，解到明文后按 clean 加密口径重新封装；
+    - 无前缀字符串：旧读语义视作明文，同样按 clean 加密口径重新封装。
+    ``{"value": ...}`` 包装对象先按旧语义解包出 ``value``，再走同一套归一规则。
+    """
+    if isinstance(entry, dict):
+        inner = entry.get("value")
+        if not isinstance(inner, str) or not inner:
+            return None
+        entry = inner
+    if not isinstance(entry, str) or not entry:
+        return None
+    if entry.startswith(_PREFIX_V2):
+        try:
+            # 直搬前验一遍可解性：密钥不同源/密文损坏的条目按损坏处理，不把死密文搬进新库
+            decrypt_api_key(entry, master_key=masterKey)
+        except Exception:
+            return None
+        return entry
+    try:
+        plaintext = decrypt_api_key(entry, master_key=masterKey)
+    except Exception:
+        return None
+    try:
+        return encrypt_api_key(plaintext, master_key=masterKey)
+    except Exception:
+        return None
+
+
+def migrateLegacyFileStore(legacyPath: str, masterKey: str = "") -> str:
+    """把旧单文件密钥库一次性迁入 default 桶，返回全局单例应使用的 storage_path。
+
+    - 触发条件：旧单文件 ``secrets.json``（路径与旧版逻辑一致）仍存在；
+      已迁移（旧文件已退役改名）或全新部署时直接返回 default 桶路径，不重复迁移；
+    - 动作：条目导入 default 桶（旧文件同级的 ``secrets/`` 桶目录）——``enc:v2:``
+      密文验解后直搬，其余形态解包后按 clean 加密口径重新封装；metadata/access_log
+      置初值；
+    - 迁移完成后旧文件改名为 ``secrets.json.retired-<时间戳>`` 隔离保留（不删除）；
+    - fail-soft 有界：损坏条目跳过并 warning 点名；任何意外都不阻断启动，
+      此时回落沿用原单文件路径。
+    """
+    legacy = Path(legacyPath)
+    bucketDir = legacy.parent / "secrets"
+    bucketFile = bucketDir / "secrets.json"
+    try:
+        if not legacy.exists():
+            # 旧文件已退役（迁移过）或全新部署：固定落 default 桶
+            return str(bucketFile)
+        if not HAS_CRYPTO:
+            # 无认证加密能力时不动盘：继续用原单文件（读路径仍按旧语义工作）
+            logger.warning("pycryptodome 缺失，旧密钥库 %s 暂缓迁移，继续沿用原单文件", legacy)
+            return str(legacy)
+        try:
+            data = json.loads(legacy.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("旧密钥库 %s 不可解析（%s），不导入仅退役留档", legacy, exc)
+            data = {}
+        imported: Dict[str, str] = {}
+        skipped: List[str] = []
+        if isinstance(data, dict):
+            for name, entry in data.items():
+                if not isinstance(name, str) or not name:
+                    skipped.append(repr(name))
+                    continue
+                cipher = _normalizeLegacyCipher(entry, masterKey)
+                if cipher is None:
+                    skipped.append(name)
+                    continue
+                imported[name] = cipher
+        else:
+            logger.warning("旧密钥库 %s 顶层不是 JSON 对象，按空库退役", legacy)
+        if skipped:
+            logger.warning(
+                "旧密钥库迁移：跳过 %d 条损坏/无法解密条目（原文留在退役文件中）: %s",
+                len(skipped),
+                skipped,
+            )
+
+        # 写 default 桶三件套。桶内已有条目保留（上次迁移写完盘但还没来得及改名时
+        # 重跑不丢数据），旧条目按名覆盖——同一条目内容一致，重跑仍幂等。
+        bucketDir.mkdir(parents=True, exist_ok=True)
+        merged: Dict[str, Any] = {}
+        if bucketFile.exists():
+            try:
+                existing = json.loads(bucketFile.read_text(encoding="utf-8"))
+                if isinstance(existing, dict):
+                    merged.update(existing)
+            except Exception as exc:
+                logger.warning("default 桶 %s 既有内容不可解析（%s），按空桶合并", bucketFile, exc)
+        merged.update(imported)
+        bucketFile.write_text(
+            json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+        metadataFile = bucketDir / "metadata.json"
+        metadata: Dict[str, Any] = {}
+        if metadataFile.exists():
+            try:
+                loadedMeta = json.loads(metadataFile.read_text(encoding="utf-8"))
+                if isinstance(loadedMeta, dict):
+                    metadata.update(loadedMeta)
+            except Exception:
+                metadata = {}
+        for name in imported:
+            metadata.setdefault(name, SecretMetadata(name=name).to_dict())
+        metadataFile.write_text(
+            json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        accessLogFile = bucketDir / "access_log.json"
+        if not accessLogFile.exists():
+            accessLogFile.write_text("[]", encoding="utf-8")
+
+        # 旧文件退役改名（隔离保留，不删除）。改名失败不回滚导入：数据已在桶里，
+        # 下次启动旧文件仍在原名会重跑迁移，仍幂等。
+        try:
+            legacy.rename(_retiredTarget(legacy))
+        except Exception as exc:
+            logger.warning("旧密钥库 %s 改名退役失败（%s）；导入已生效，下次启动将重试改名", legacy, exc)
+        logger.info(
+            "旧单文件密钥库已迁入 default 桶: %s -> %s（导入 %d 条，跳过 %d 条）",
+            legacy,
+            bucketFile,
+            len(imported),
+            len(skipped),
+        )
+        return str(bucketFile)
+    except Exception as exc:
+        logger.warning("旧密钥库迁移失败，继续沿用原单文件 %s: %s", legacy, exc)
+        return str(legacy)
+
+
 _singleton: Optional[SecretStore] = None
 _singleton_lock = threading.Lock()
 
@@ -937,6 +1095,8 @@ def get_secret_store() -> SecretStore:
         if _singleton is None:
             mk = config.get("NEUROVA_MASTER_KEY", "")
             path = config.get("NEUROVA_SECRETS_PATH", _DEFAULT_PATH)
+            # P2-22 收尾：首次构建时把旧单文件库一次性迁入 default 桶（幂等、fail-soft）
+            path = migrateLegacyFileStore(path, masterKey=mk)
             try:
                 _singleton = SecretStore(master_key=mk, storage_path=path)
             except Exception as exc:
