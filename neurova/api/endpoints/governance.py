@@ -275,6 +275,20 @@ async def approve_and_execute(request: Request, request_id: str,
     tool_name = metadata.get("tool_name")
     params = metadata.get("params") or {}
 
+    # P1-2：批准对象=执行对象。重放用的是 metadata 里存的 params，
+    # 批准前必须复核创建时的执行入参指纹——单据在创建与批准之间被改写/
+    # 损坏/版本漂移时，这里当場 409，绝不把 B 当 A 跑。
+    from neurova.security.tool_metadata import (
+        ApprovalFingerprintMismatch,
+        verifyApprovalFingerprint,
+    )
+
+    try:
+        verifyApprovalFingerprint(metadata)
+    except ApprovalFingerprintMismatch as fp_err:
+        logger.warning("审批 %s 指纹复核失败，拒绝重放: %s", request_id, fp_err)
+        raise HTTPException(status_code=409, detail=str(fp_err))
+
     if not am.approve_request(
         request_id, approved_by=body.approved_by, note=body.note, remember=body.remember
     ):

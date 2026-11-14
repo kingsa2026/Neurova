@@ -80,7 +80,10 @@ class TestWhitelistEndpoints(GovernanceEndpointTestBase):
 
 
 class TestApprovalEndpoints(GovernanceEndpointTestBase):
-    def _create_request(self) -> str:
+    def _create_request(self, params: dict | None = None) -> str:
+        from neurova.security.tool_metadata import executionFingerprint
+
+        replay_params = params if params is not None else {"file_path": str(self._note_path)}
         req = self.approvals.create_approval_request(
             agent_id="a1",
             user_id="u1",
@@ -89,7 +92,8 @@ class TestApprovalEndpoints(GovernanceEndpointTestBase):
             danger_reason="测试",
             metadata={
                 "tool_name": "file_read",
-                "params": {"file_path": str(self._note_path)},
+                "params": replay_params,
+                "execution_fingerprint": executionFingerprint("file_read", replay_params),
             },
         )
         return req.request_id
@@ -146,6 +150,29 @@ class TestApprovalEndpoints(GovernanceEndpointTestBase):
             f"/api/v1/governance/approvals/{request_id}/approve", json={}
         )
         self.assertEqual(second.status_code, 409)
+
+    def test_approve_rejects_tampered_params(self):
+        """P1-2：批准对象=执行对象——单据 params 被改写后，批准端点拒绝重放。"""
+        request_id = self._create_request()
+        req = self.approvals.get_request(request_id)
+        req.metadata["params"] = {"file_path": "E:/windows/system32/config"}  # 掉包
+
+        resp = self.client.post(
+            f"/api/v1/governance/approvals/{request_id}/approve", json={}
+        )
+        self.assertEqual(resp.status_code, 409)
+        self.assertIn("指纹", resp.json()["detail"])
+        # 单据保持 pending：拒绝的是这次被篡改的重放，不是把审批作废
+        self.assertEqual(self.approvals.get_request(request_id).status.value, "pending")
+
+    def test_approve_accepts_intact_fingerprint(self):
+        """P1-2：指纹一致时批准重放照常工作（正常链路不受影响）。"""
+        request_id = self._create_request()
+        resp = self.client.post(
+            f"/api/v1/governance/approvals/{request_id}/approve", json={}
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertTrue(resp.json()["data"]["executed"])
 
     def test_reject_flow(self):
         request_id = self._create_request()
