@@ -3369,6 +3369,8 @@ conflictTimeReadout: '時刻の読み取り: {basis}（旧 {old} → 新 {new}�
     title: 'スケジューラー',
     lastRun: '前回: ',
     runNow: '今すぐ実行',
+    pause: "一時停止",
+    resume: "再開",
     scheduleType: 'スケジュール種別',
     cronExpression: 'Cron 式',
     intervalSeconds: '間隔（秒）',

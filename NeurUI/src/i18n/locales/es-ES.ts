@@ -3369,6 +3369,8 @@ conflictTimeReadout: 'Lectura temporal: {basis} (antigua {old} → nueva {new})'
     title: 'Programador',
     lastRun: 'Última ejecución: ',
     runNow: 'Ejecutar ahora',
+    pause: "Pausar",
+    resume: "Reanudar",
     scheduleType: 'Tipo de programación',
     cronExpression: 'Expresión Cron',
     intervalSeconds: 'Intervalo (segundos)',

@@ -89,3 +89,62 @@ class TestRunNow:
         assert d["cron_expression"] == "0 9 * * 0,2,4"
         assert d["next_run_at"] is not None
         assert d["agent_id"] == "default"
+
+
+class TestPauseResume:
+    """P3-14 生命周期补齐：暂停/恢复端点（paused 不再触发；恢复自现在重算）。"""
+
+    def _createIntervalTask(self, c, name="pause-me"):
+        r = c.post("/api/v1/scheduler/tasks", json={
+            "name": name, "action": "no_such_action",
+            "interval_seconds": 3600, "agent_id": "default",
+        })
+        assert r.status_code == 200, r.text[:160]
+        return r.json()["task_id"]
+
+    def test_unauthorized_401(self, client):
+        app, c = client
+        r = c.post("/api/v1/scheduler/tasks/t-1/pause")
+        assert r.status_code == 401
+        r = c.post("/api/v1/scheduler/tasks/t-1/resume")
+        assert r.status_code == 401
+
+    def test_pause_resume_cycle(self, client):
+        app, c = client
+        _auth(c)
+        task_id = self._createIntervalTask(c)
+
+        r = c.post(f"/api/v1/scheduler/tasks/{task_id}/pause")
+        assert r.status_code == 200, r.text[:160]
+        assert r.json()["data"]["task"]["status"] == "paused"
+
+        # paused 任务不再触发：is_due 恒 False（直接核验调度器状态）
+        from neurova.collaborate.workflow.scheduler import get_scheduler
+
+        assert get_scheduler().get_task(task_id).is_due() is False
+
+        r = c.post(f"/api/v1/scheduler/tasks/{task_id}/resume")
+        assert r.status_code == 200, r.text[:160]
+        assert r.json()["data"]["task"]["status"] == "pending"
+        assert r.json()["data"]["task"]["next_run_at"] is not None
+
+    def test_pause_unknown_task_404(self, client):
+        app, c = client
+        _auth(c)
+        r = c.post("/api/v1/scheduler/tasks/does-not-exist/pause")
+        assert r.status_code == 404
+
+    def test_pause_twice_conflict_409(self, client):
+        app, c = client
+        _auth(c)
+        task_id = self._createIntervalTask(c)
+        assert c.post(f"/api/v1/scheduler/tasks/{task_id}/pause").status_code == 200
+        r = c.post(f"/api/v1/scheduler/tasks/{task_id}/pause")
+        assert r.status_code == 409
+
+    def test_resume_not_paused_conflict_409(self, client):
+        app, c = client
+        _auth(c)
+        task_id = self._createIntervalTask(c)
+        r = c.post(f"/api/v1/scheduler/tasks/{task_id}/resume")
+        assert r.status_code == 409

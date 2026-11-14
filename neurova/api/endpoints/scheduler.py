@@ -403,6 +403,80 @@ def run_task_now(
     }
 
 
+@router.post("/tasks/{task_id}/pause")
+def pause_scheduled_task(
+    request: Request,
+    task_id: str = Path(..., description="任务ID"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """暂停任务（paused 状态不再触发；恢复用 /resume。P3-14 生命周期补齐）"""
+    _get_request_id(request)
+
+    if get_scheduler is None:
+        raise HTTPException(status_code=503, detail="Scheduler service not available")
+
+    try:
+        scheduler = get_scheduler()
+        task = scheduler.get_task(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+
+        paused = scheduler.pause_task(task_id)
+        if paused is None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Task '{task_id}' cannot be paused (status: {task.status})",
+            )
+        return {
+            "code": 0,
+            "message": f"Task '{task_id}' paused",
+            "data": {"task": paused.to_dict()},
+            "request_id": _get_request_id(request),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error pausing task %s: %s", task_id, e)
+        raise HTTPException(status_code=500, detail=f"Failed to pause task: {str(e)}")
+
+
+@router.post("/tasks/{task_id}/resume")
+def resume_scheduled_task(
+    request: Request,
+    task_id: str = Path(..., description="任务ID"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """恢复暂停的任务（next_run_at 自现在重算。P3-14 生命周期补齐）"""
+    _get_request_id(request)
+
+    if get_scheduler is None:
+        raise HTTPException(status_code=503, detail="Scheduler service not available")
+
+    try:
+        scheduler = get_scheduler()
+        task = scheduler.get_task(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+
+        resumed = scheduler.resume_task(task_id)
+        if resumed is None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Task '{task_id}' cannot be resumed (status: {task.status})",
+            )
+        return {
+            "code": 0,
+            "message": f"Task '{task_id}' resumed",
+            "data": {"task": resumed.to_dict()},
+            "request_id": _get_request_id(request),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error resuming task %s: %s", task_id, e)
+        raise HTTPException(status_code=500, detail=f"Failed to resume task: {str(e)}")
+
+
 # 注册调度动作处理器(断点修复): AgentScheduler 此前全仓零注册,
 # 任务触发恒 "No handler registered" 失败。模块导入即绑定
 # send_message / execute_skill / run_workflow(agent 运行时惰性解析)。

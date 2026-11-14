@@ -27,13 +27,26 @@
           <div class="task-meta">
             <a-tag color="blue">{{ taskScheduleLabel(task) }}</a-tag>
             <a-tag color="default" v-if="task.agent_id">{{ task.agent_id }}</a-tag>
-            <a-tag :color="task.status === 'completed' ? 'green' : task.status === 'failed' ? 'red' : 'blue'">{{ task.status }}</a-tag>
+            <a-tag :color="task.status === 'completed' ? 'green' : task.status === 'failed' ? 'red' : task.status === 'paused' ? 'orange' : 'blue'">{{ task.status }}</a-tag>
             <span class="meta-text" v-if="task.next_run_at">{{ t('nav.scheduler') }}: {{ formatTs(task.next_run_at) }}</span>
             <span class="meta-text" v-if="task.last_run_at">{{ t('scheduler.lastRun') }}{{ formatTs(task.last_run_at) }}</span>
             <span class="meta-text" v-if="task.run_count">{{ t('scheduler.runCount') }}: {{ task.run_count }}</span>
           </div>
           <div class="task-actions">
             <GlassButton variant="secondary" size="sm" :loading="runningId === task.task_id" @click="handleRunNow(task.task_id)">{{ t('scheduler.runNow') }}</GlassButton>
+            <!-- P3-14：暂停/恢复（pending/running 可暂停；paused 可恢复） -->
+            <GlassButton
+              v-if="task.status === 'paused'"
+              variant="secondary" size="sm"
+              :loading="togglingId === task.task_id"
+              @click="handleResume(task.task_id)"
+            >{{ t('scheduler.resume') }}</GlassButton>
+            <GlassButton
+              v-else-if="task.status === 'pending' || task.status === 'running'"
+              variant="ghost" size="sm"
+              :loading="togglingId === task.task_id"
+              @click="handlePause(task.task_id)"
+            >{{ t('scheduler.pause') }}</GlassButton>
             <GlassButton variant="ghost" size="sm" @click="openEdit(task)">{{ t('common.edit') }}</GlassButton>
             <a-popconfirm :title="t('common.confirm') + '?'" @confirm="handleDelete(task.task_id)">
               <GlassButton variant="danger" size="sm">{{ t('common.delete') }}</GlassButton>
@@ -346,6 +359,27 @@ async function handleDelete(id: string) {
     await schedulerApi.deleteScheduledTask(id)
     await fetchTasks()
   } catch { message.error(t('common.error')) }
+}
+
+/** P3-14：暂停/恢复（pending/running 可暂停；paused 可恢复）。 */
+const togglingId = ref<string | null>(null)
+
+async function handlePause(id: string) {
+  togglingId.value = id
+  try {
+    await schedulerApi.pauseScheduledTask(id)
+    message.success(t('common.success'))
+    await fetchTasks()
+  } catch { message.error(t('common.error')) } finally { togglingId.value = null }
+}
+
+async function handleResume(id: string) {
+  togglingId.value = id
+  try {
+    await schedulerApi.resumeScheduledTask(id)
+    message.success(t('common.success'))
+    await fetchTasks()
+  } catch { message.error(t('common.error')) } finally { togglingId.value = null }
 }
 
 onMounted(() => {

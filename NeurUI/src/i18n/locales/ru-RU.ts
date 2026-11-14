@@ -3369,6 +3369,8 @@ conflictTimeReadout: 'Временные показатели: {basis} (стар
     title: 'Планировщик',
     lastRun: 'Последний: ',
     runNow: 'Запустить сейчас',
+    pause: "Приостановить",
+    resume: "Возобновить",
     scheduleType: 'Тип расписания',
     cronExpression: 'Cron-выражение',
     intervalSeconds: 'Интервал (секунды)',
