@@ -53,12 +53,14 @@ class BuildContextResponse(BaseModel):
 
 
 class ContextStats(BaseModel):
-    """上下文统计"""
+    """上下文池统计（P2-7 收口：字段全部来自池的真实读数，不再有恒零假位）"""
 
+    pools: int = 0
     total_contexts: int = 0
-    average_tokens: float = 0
-    cache_hit_rate: float = 0
-    compression_rate: float = 0
+    average_resident: float = 0
+    archived_total: int = 0
+    ledger_rows: int = 0
+    indexed_entries: int = 0
 
 
 class ContextCompositionResponse(BaseModel):
@@ -391,12 +393,32 @@ async def get_context_stats(
     request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """获取上下文统计信息"""
+    """获取上下文池真实统计（P2-7 收口：此前恒回全零 stub）。
+
+    聚合 context pool 注册表中全部已登记池的保留读数
+    （`ContextPool.get_retention_stats`，Issue #65 可观测面）。无池时
+    `pools=0`、各计数 0——那是"当前确实没有池"的真值，不是伪造的零。
+    """
+    from neurova.context_pool_registry import get_registry
+
+    pools = get_registry().allPools()
+    stats = []
+    for pool in pools:
+        try:
+            stats.append(pool.get_retention_stats())
+        except Exception:  # noqa: BLE001 - 单池读数失败不拖垮聚合
+            logger.warning("context stats: 单池读数失败", exc_info=True)
+    total_contexts = sum(int(s.get("resident_count") or 0) for s in stats)
+    archived_total = sum(int(s.get("archived_total") or 0) for s in stats)
+    ledger_rows = sum(int((s.get("ledger") or {}).get("rows") or 0) for s in stats)
+    indexed_entries = sum(int((s.get("read_index") or {}).get("indexed_entries") or 0) for s in stats)
     return ContextStats(
-        total_contexts=0,
-        average_tokens=0,
-        cache_hit_rate=0,
-        compression_rate=0,
+        pools=len(stats),
+        total_contexts=total_contexts,
+        average_resident=round(total_contexts / len(stats), 2) if stats else 0,
+        archived_total=archived_total,
+        ledger_rows=ledger_rows,
+        indexed_entries=indexed_entries,
     )
 
 
