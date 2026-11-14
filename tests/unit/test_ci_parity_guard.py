@@ -54,6 +54,9 @@ EXPECTED_MAP = {
     "dependency-audit": ["dependency-audit"],
     # 经验质量基准（工单 009 新增）：真实语料 A/B 读数 + 低质探针自证，双侧同命令。
     "experience-quality": ["experience-quality"],
+    # 架构即代码门禁（P1-7 新增）：模块分层/依赖方向/直连 Agent 收口/尺寸棘轮，
+    # 双侧同命令同判据（strict-ratchet：基线只降不升）。
+    "architecture-gate": ["architecture-gate"],
 }
 
 # 非阻塞（允许失败）的 job：两侧行为必须一致。
@@ -70,6 +73,8 @@ EXPECTED_CORE_COMMANDS = {
         "python -m ruff check neurova tests --no-cache",
     ],
     "deploy-config": ["python scripts/ci/deploy_config_consistency_check.py"],
+    # P1-7：架构门双侧同命令（strict-ratchet = 基线只降不升的棘轮口径）。
+    "architecture-gate": ["python scripts/ci/architecture_check.py --strict-ratchet"],
     "import-and-regression": [
         "python scripts/ci_static_gate.py",
         "python -m pytest tests/unit/test_audit_regressions.py -q",

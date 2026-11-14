@@ -424,6 +424,26 @@ main:
           script: python scripts/ci/deploy_config_consistency_check.py
           timeout: 10m
 
+    # ── 10. 架构即代码门禁（P1-7，阻断，对齐 GitHub architecture-gate）────
+    # 模块分层与依赖方向 / 直连 neurova.agent 白名单收口 / 单文件尺寸棘轮。
+    # 规则=scripts/ci/architecture_policy.yaml，基线=architecture_baseline.json
+    # （只降不升）；与 GitHub 侧同命令同判据。
+    - name: architecture-gate
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 2
+      docker:
+        image: python:3.12
+        volumes:
+          - /root/.cache/pip
+      stages:
+        - name: install pyyaml
+          script: python -m pip install pyyaml
+          timeout: 10m
+        - name: architecture policy check
+          script: python scripts/ci/architecture_check.py --strict-ratchet
+          timeout: 15m
+
     # ── 7. 依赖审计（阻塞，对齐 GitHub 已转阻塞的 dependency-audit）────────
     - name: dependency-audit
       # cpus 4 而不是 2：这条流水线的 Prepare 里要 `docker pull` 镜像、拷两份缓存卷，
