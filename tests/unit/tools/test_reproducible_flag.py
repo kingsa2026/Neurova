@@ -42,6 +42,8 @@ EXPECTED_NON_REPRODUCIBLE = {
     "browser_back", "browser_forward", "browser_reload", "browser_scroll", "browser_press",
     # 元素交互扩展：select/check 与 fill_role 同轴（改写页面表单状态）
     "browser_select", "browser_check",
+    # 页面状态面：cookies/storage 是状态写；console 是瞬时缓冲读数（只读也不可重放）
+    "browser_cookies", "browser_storage", "browser_console",
     "computer_som_snapshot", "computer_dom_snapshot",
     # P0-3 会话式 shell：进程输出不可重放（重跑时系统状态已变）
     "exec_command", "write_stdin",
