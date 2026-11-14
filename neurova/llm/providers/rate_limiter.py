@@ -37,6 +37,9 @@ class RetryConfig:
     multiplier: float = 2.0
     jitter: float = 0.1
     retryable_exceptions: tuple = (Exception,)
+    # P2-9：进程级重试预算（可选）。提供时每次「重试」前消耗一个名额，
+    # 预算耗尽立即停止重试（防失败风暴的重试雪崩）。None=不设预算。
+    retry_budget: Optional[Any] = None
 
 
 class ExponentialBackoff:
@@ -48,6 +51,7 @@ class ExponentialBackoff:
         multiplier: float = 2.0,
         jitter: float = 0.1,
         retryable_exceptions: tuple = (Exception,),
+        retry_budget: Optional[Any] = None,
     ) -> None:
         self.max_attempts = max_attempts
         self.initial_delay = initial_delay
@@ -55,6 +59,7 @@ class ExponentialBackoff:
         self.multiplier = multiplier
         self.jitter = jitter
         self.retryable_exceptions = retryable_exceptions
+        self.retry_budget = retry_budget
         self._lock = threading.RLock()
         self._attempt = 0
 
@@ -88,6 +93,9 @@ class ExponentialBackoff:
                     raise
                 if not self.is_retryable(attempt):
                     raise
+                # P2-9：重试预算（与 aretry 同口径）
+                if self.retry_budget is not None and not self.retry_budget.tryConsume():
+                    raise
                 delay = self.calculate_delay(attempt)
                 if delay > 0:
                     time.sleep(delay)
@@ -108,6 +116,9 @@ class ExponentialBackoff:
                 if not self.should_retry_exception(exc):
                     raise
                 if not self.is_retryable(attempt):
+                    raise
+                # P2-9：重试预算——耗尽时立即停止重试（防重试风暴），上抛末次异常
+                if self.retry_budget is not None and not self.retry_budget.tryConsume():
                     raise
                 delay = self.calculate_delay(attempt)
                 if delay > 0:
@@ -333,6 +344,7 @@ def with_retry_and_circuit_breaker(
     max_delay: Optional[float] = None,
     failure_threshold: Optional[int] = None,
     recovery_timeout: Optional[float] = None,
+    retry_budget: Optional[Any] = None,
 ) -> Any:
     if (
         func is not None
@@ -347,6 +359,7 @@ def with_retry_and_circuit_breaker(
                 max_delay,
                 failure_threshold,
                 recovery_timeout,
+                retry_budget,
             )
         )
     ):
@@ -373,6 +386,7 @@ def with_retry_and_circuit_breaker(
         multiplier=rc.multiplier,
         jitter=rc.jitter,
         retryable_exceptions=rc.retryable_exceptions,
+        retry_budget=getattr(rc, "retry_budget", None),
     )
 
     def _decorator(target: Callable[..., Any]) -> Callable[..., Any]:

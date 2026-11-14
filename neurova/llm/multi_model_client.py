@@ -625,10 +625,14 @@ class MultiModelLLMClient:
             self._retry_guards_inst = {}
         guard = self._retry_guards_inst.get(pid)
         if guard is None:
+            from neurova.llm.resilience import getSharedRetryBudget
+
             guard = (
                 __import__("neurova.llm.providers.rate_limiter", fromlist=["RetryConfig"]).RetryConfig(
                     max_attempts=3, initial_delay=0.05, max_delay=1.0,
                     retryable_exceptions=MultiModelLLMClient._RETRYABLE,
+                    # P2-9：进程级重试预算（防失败风暴的重试雪崩）
+                    retry_budget=getSharedRetryBudget(),
                 ),
                 CircuitBreaker(failure_threshold=5, recovery_timeout=30.0, name=f"llm:{pid}"),
             )
@@ -649,7 +653,25 @@ class MultiModelLLMClient:
         （拒绝请求不触达底层），recovery_timeout 后半开恢复。
         bypass_guard：429 同模型等待重试的直调路径——外层已有 10s 间隔的
         重试预算，跳过内层快速重试与熔断计数（预算不喂爆 5 次阈值的熔断器）。
+
+        P2-9：进程级准入——在飞调用超过 NEUROVA_LLM_MAX_INFLIGHT（默认 0=不限）
+        时在时限内排队，超时快速失败为「系统繁忙」（可 fallback 类别）。
         """
+        from neurova.llm.resilience import getSharedAdmission
+
+        adm = getSharedAdmission()
+        if adm.maxInFlight <= 0:
+            return await self._chatWithRetryInner(client, messages, bypass_guard=bypass_guard, **kwargs)
+        if not await adm.acquireAsync(timeout=30.0):
+            raise LLMServiceUnavailableError("系统繁忙：在飞 LLM 调用已达进程上限，请稍后重试")
+        try:
+            return await self._chatWithRetryInner(client, messages, bypass_guard=bypass_guard, **kwargs)
+        finally:
+            adm.release()
+
+    async def _chatWithRetryInner(
+        self, client, messages: List[Dict[str, str]], *, bypass_guard: bool = False, **kwargs
+    ) -> Any:
         from neurova.llm.providers.rate_limiter import RetryConfig
 
         rc, cb = self._get_retry_guard(client)
