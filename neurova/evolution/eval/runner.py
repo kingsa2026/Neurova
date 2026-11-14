@@ -165,6 +165,8 @@ class EvolutionRunResult:
     # 审计记录（round/gate/improved/blocked/evidence_tasks/tune_score）。
     # 空表 = 未启用或未触发——「修过没修成」与「压根没修」都看得见。
     repair_attempts: list = field(default_factory=list)
+    # V4 归因面：最终胜者是否由修复通道捞回（增益来路——采纳者该知道）。
+    repair_rescued: bool = False
 
     @property
     def improvement(self) -> float:
@@ -265,6 +267,7 @@ class EvolutionRunResult:
             "pareto_set": dict(self.pareto_set),
             "pareto_variants": list(self.pareto_variants),
             "repair_attempts": list(self.repair_attempts),
+            "repair_rescued": bool(self.repair_rescued),
         }
 
 
@@ -1361,6 +1364,8 @@ class SkillEvolutionRunner:
                 result.repair_attempts.append(attempt)
                 if won is not None:
                     best_text, best_score, best_seq = won
+                    # V4 归因：最终胜者来自修复通道——增益来路如实入账
+                    result.repair_rescued = True
                     continue  # 新最优重新过全链门
             return await rejectRun(rejectReason)
 

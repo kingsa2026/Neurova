@@ -536,6 +536,10 @@ class EvolutionProposal:
     # 执行成本差（tokens/费用/CoP 两列）。审批人看「采纳后每任务多花多少」，
     # 与开发搜索花费（cost_gate）分格。未量到 ⇒ state=unmeasured（不冒充 0）。
     deployment_cost: dict = field(default_factory=dict)
+    # V4 增益-代价归因（VideoEvolve 对照 2026-11-14）：增益（留出）、体积代价、
+    # 修复通道贡献（V1 是否参与最终胜者）与可进化面标注。数值全部取自运行
+    # 读数（不另算第二份）；策略/代码面接入后按面分解。
+    gain_attribution: dict = field(default_factory=dict)
     created_at: str = ""
     decided_at: str = ""
 
@@ -980,6 +984,18 @@ class SkillEvolutionService:
                     "candidate_pass_rate": result.exec_suite.get("candidate_pass_rate"),
                 },
                 deployment_cost=deploymentCostDelta(result.cost_summary),
+                gain_attribution={
+                    # 当前唯一可进化面是技能正文（指令面）；策略/代码面接入后
+                    # 在此按面分解（V3 前置）。
+                    "surfaces_touched": ["instruction"],
+                    "holdout_gain": round(result.improvement, 4),
+                    # 文本体积变化率（P1-5 已量的 cost_change，不另算）
+                    "size_delta_ratio": (round(result.cost_change, 4)
+                                         if result.cost_baseline else None),
+                    "repair_rounds": len(result.repair_attempts),
+                    "repair_rescued": bool(result.repair_rescued),
+                    "note": "增益记指令面（当前唯一可进化面）；策略/代码面接入后按面分解",
+                },
                 created_at=datetime.now(UTC).isoformat(),
             )
             self._append_proposal(proposal)
