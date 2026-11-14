@@ -1544,10 +1544,14 @@ class ToolExecutor:
             # 自我纠正所需的诊断，折叠成引用即诊断蒸发；体量折叠由回环处的
             # `apply_offload_policy` 单源承担。
             from neurova.agent.tool_output_ref import maybe_output_ref
+            from neurova.builtin_tools import get_builtin_tool_result_budget
 
             result = maybe_output_ref(
                 tool_name, result, getattr(self._agent, "workspace_path", None),
                 success=success,
+                # P1-1 逐工具预算：schema 声明 result_budget_chars 的工具按声明值，
+                # 未声明传 None → maybe_output_ref 用装配时的全局阈值
+                max_chars=get_builtin_tool_result_budget(tool_name),
             )
             return result
         finally:

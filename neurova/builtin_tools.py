@@ -1133,6 +1133,10 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "web_search": {
         # 并行能力声明：联网检索为无副作用读（只发 GET，不改远端状态）。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
+        # P1-1 逐工具结果预算：搜索结果（多条摘要+链接）在 8K 全局阈值下
+        # 常被压成 500 字符预览，信息损失大；放宽到 16K（仍低于回环 B7
+        # 单结果封顶 20000），超限依旧落盘引用+预览。
+        "result_budget_chars": 16384,
         "description": "【实时网络搜索】查互联网实时信息（新闻/股价/百科/文档）。工具选择阶梯（最轻优先）：先搜索拿网址 → web_fetch 读取 → 需交互/登录/动态渲染才升级 browser_*。【何时不用】已知 URL 直接 web_fetch；站点限定用垂直工具；内部记忆问题用 memory_search。",
         "parameters": {
             "type": "object",
@@ -2271,6 +2275,23 @@ def get_builtin_tool_flags(tool_name: str) -> Dict[str, bool]:
     return {
         key: True for key in _DECLARED_FLAG_KEYS if schema.get(key) is True
     }
+
+
+def get_builtin_tool_result_budget(tool_name: str) -> Optional[int]:
+    """读取工具的逐工具结果预算声明（P1-1）；未声明/非法返回 None（用全局默认）。
+
+    声明位不进入 to_openai_format()（模型可见面零变化），仅供结果出流咽喉
+    （tool_executor → maybe_output_ref）消费：结果序列化超过该值 → 落盘
+    tool_outputs/ 引用 + 预览。非法声明（负数/非整数/布尔）按未声明处理，
+    不炸取数口。
+    """
+    schema = _BUILTIN_SCHEMAS.get(tool_name)
+    if not isinstance(schema, dict):
+        return None
+    value = schema.get("result_budget_chars")
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
 
 
 def listBuiltinToolsWithFlag(flagKey: str) -> List[str]:
