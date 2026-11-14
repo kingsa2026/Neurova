@@ -636,6 +636,27 @@ class BrowserBackend(ABC):
     async def console_messages(self, limit: int = 50) -> BrowserResult:
         return BrowserResult(success=False, error=f"{type(self).__name__} does not support console capture")
 
+    async def print_pdf(self, generation: Optional[int] = None) -> BrowserResult:
+        return BrowserResult(success=False, error=f"{type(self).__name__} does not support pdf printing")
+
+    async def download_file(self, url: str, filename: Optional[str] = None, generation: Optional[int] = None) -> BrowserResult:
+        return BrowserResult(success=False, error=f"{type(self).__name__} does not support file download")
+
+    async def drag_role(
+        self,
+        source_role: str,
+        target_role: str,
+        source_name: Optional[str] = None,
+        target_name: Optional[str] = None,
+        generation: Optional[int] = None,
+    ) -> BrowserResult:
+        return BrowserResult(success=False, error=f"{type(self).__name__} does not support drag")
+
+    async def upload_files(
+        self, role: str, paths: Optional[List[str]] = None, name: Optional[str] = None, generation: Optional[int] = None
+    ) -> BrowserResult:
+        return BrowserResult(success=False, error=f"{type(self).__name__} does not support file upload")
+
 
 class PlaywrightBackend(BrowserBackend):
     """Playwright 浏览器后端"""
@@ -1268,6 +1289,144 @@ class PlaywrightBackend(BrowserBackend):
             )
         except Exception as e:
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
+
+    # ── 采集与扩展（P3 批D）：PDF 打印 / 文件下载 / 拖拽 / 上传 ──
+    async def print_pdf(self, generation: Optional[int] = None) -> BrowserResult:
+        """打印当前页为 PDF，落产物目录（复用 persist_bytes 落盘单源）"""
+        start_time = time.time()
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        try:
+            if not self._page:
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
+            pdf_bytes = await self._page.pdf(format="A4")
+            from neurova.llm.generators.runtime import persist_bytes
+
+            path = await persist_bytes(pdf_bytes, "pdf", "browser-pdf")
+            from pathlib import Path
+
+            return BrowserResult(
+                success=True,
+                data={"file_path": path, "file_name": Path(path).name, "bytes": len(pdf_bytes)},
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+                generation=self._active_generation(),
+            )
+        except Exception as e:
+            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
+
+    async def download_file(self, url: str, filename: Optional[str] = None, generation: Optional[int] = None) -> BrowserResult:
+        """拉取 URL 字节落产物目录（走浏览器会话网络栈，二进制保真）"""
+        start_time = time.time()
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        url = str(url or "").strip()
+        if not url:
+            return BrowserResult(success=False, error="缺少 url 参数", duration_ms=(time.time() - start_time) * 1000)
+        try:
+            if not self._context:
+                raise RuntimeError(BROWSER_NOT_STARTED_ERROR)
+            response = await self._context.request.get(url)
+            status = int(getattr(response, "status", 0) or 0)
+            if status < 200 or status >= 300:
+                return BrowserResult(
+                    success=False,
+                    error=f"下载失败：HTTP {status}（{url}）",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            body = await response.body()
+            from pathlib import Path
+            from urllib.parse import urlparse
+
+            from neurova.llm.generators.runtime import persist_bytes
+
+            tail = [s for s in urlparse(url).path.split("/") if s]
+            ext = tail[-1].rsplit(".", 1)[-1] if tail and "." in tail[-1] else "bin"
+            ext = ("".join(c for c in ext.lower() if c.isalnum())[:8]) or "bin"
+            path = await persist_bytes(body, ext, str(filename or "browser-download"))
+            return BrowserResult(
+                success=True,
+                data={"file_path": path, "file_name": Path(path).name, "bytes": len(body), "status": status},
+                url=url,
+                duration_ms=(time.time() - start_time) * 1000,
+                generation=self._active_generation(),
+            )
+        except Exception as e:
+            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
+
+    async def drag_role(
+        self,
+        source_role: str,
+        target_role: str,
+        source_name: Optional[str] = None,
+        target_name: Optional[str] = None,
+        generation: Optional[int] = None,
+    ) -> BrowserResult:
+        """按 role+name 定位拖拽（source 拖到 target 上）"""
+        start_time = time.time()
+        if not source_role or not str(source_role).strip():
+            return BrowserResult(success=False, error="缺少 source_role（拖拽起点，来自快照）")
+        if not target_role or not str(target_role).strip():
+            return BrowserResult(success=False, error="缺少 target_role（拖拽落点，来自快照）")
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        try:
+            if not self._page:
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
+            source = self._page.get_by_role(str(source_role).strip(), **({"name": source_name} if source_name is not None else {}))
+            target = self._page.get_by_role(str(target_role).strip(), **({"name": target_name} if target_name is not None else {}))
+            await source.drag_to(target, timeout=10000)
+            self._invalidateActiveTabFacts("drag_role")
+            return BrowserResult(
+                success=True,
+                route="playwright_role",
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+                generation=self._active_generation(),
+            )
+        except Exception as e:
+            return BrowserResult(success=False, route="playwright_role", error=str(e), duration_ms=(time.time() - start_time) * 1000)
+
+    async def upload_files(
+        self, role: str, paths: Optional[List[str]] = None, name: Optional[str] = None, generation: Optional[int] = None
+    ) -> BrowserResult:
+        """向文件输入元素上传本地文件（路径须存在）"""
+        start_time = time.time()
+        if not role or not str(role).strip():
+            return BrowserResult(success=False, error="缺少 ARIA role（文件输入元素，来自快照）")
+        file_paths = [str(p).strip() for p in (paths or []) if str(p).strip()]
+        if not file_paths:
+            return BrowserResult(success=False, error="缺少 paths（要上传的本地文件路径列表）")
+        from pathlib import Path
+
+        missing = [p for p in file_paths if not Path(p).exists()]
+        if missing:
+            return BrowserResult(success=False, error=f"文件不存在: {missing}")
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        try:
+            if not self._page:
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
+            locator = self._page.get_by_role(str(role).strip(), **({"name": name} if name is not None else {}))
+            await locator.set_input_files(file_paths, timeout=10000)
+            self._invalidateActiveTabFacts("upload_files")
+            return BrowserResult(
+                success=True,
+                route="playwright_role",
+                data={"uploaded": [Path(p).name for p in file_paths]},
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+                generation=self._active_generation(),
+            )
+        except Exception as e:
+            return BrowserResult(success=False, route="playwright_role", error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
     async def initialize(self) -> bool:
         if not HAS_PLAYWRIGHT:
@@ -2652,6 +2811,26 @@ class BrowserManager:
         """读取 console/pageerror 环形缓冲"""
         b = await self._get_backend(backend)
         return await b.console_messages(limit)
+
+    async def print_pdf(self, generation: Optional[int] = None, backend: Optional[str] = None) -> BrowserResult:
+        """打印当前页为 PDF（落产物目录）"""
+        b = await self._get_backend(backend)
+        return await b.print_pdf(generation)
+
+    async def download_file(self, url: str, filename: Optional[str] = None, generation: Optional[int] = None, backend: Optional[str] = None) -> BrowserResult:
+        """拉取 URL 字节落产物目录"""
+        b = await self._get_backend(backend)
+        return await b.download_file(url, filename, generation)
+
+    async def drag_role(self, source_role: str, target_role: str, source_name: Optional[str] = None, target_name: Optional[str] = None, generation: Optional[int] = None, backend: Optional[str] = None) -> BrowserResult:
+        """按 role+name 拖拽（source→target）"""
+        b = await self._get_backend(backend)
+        return await b.drag_role(source_role, target_role, source_name=source_name, target_name=target_name, generation=generation)
+
+    async def upload_files(self, role: str, paths: Optional[List[str]] = None, name: Optional[str] = None, generation: Optional[int] = None, backend: Optional[str] = None) -> BrowserResult:
+        """向文件输入元素上传本地文件"""
+        b = await self._get_backend(backend)
+        return await b.upload_files(role, paths, name=name, generation=generation)
 
     async def snapshot(self, backend: Optional[str] = None) -> BrowserResult:
         """获取快照"""

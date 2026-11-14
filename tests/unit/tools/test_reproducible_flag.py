@@ -18,6 +18,8 @@ from neurova.builtin_tools import (
 # 快照族含**浏览器侧**两条与**桌面侧**三条：同一根因（瞬时画面/结构）的全部命中点，
 # 漏一条就少一份「只读也可能不可重放」的证据（教义第 5 条）。
 EXPECTED_NON_REPRODUCIBLE = {
+    # B1：模型自决折叠改写当前会话视图（重放会产出第二次折叠回执）。
+    "context_compress",
     "run_code", "git", "file_write", "file_create", "file_edit", "file_delete",
     "create_skill", "spawn_subagent", "planning", "schedule_task", "ask_user", "sync_nodes",
     "custom_node_create", "custom_node_update", "custom_node_activate", "custom_node_delete",
@@ -44,6 +46,8 @@ EXPECTED_NON_REPRODUCIBLE = {
     "browser_select", "browser_check",
     # 页面状态面：cookies/storage 是状态写；console 是瞬时缓冲读数（只读也不可重放）
     "browser_cookies", "browser_storage", "browser_console",
+    # 采集与扩展：download/pdf 落盘产物（重放登记第二份）；drag/upload 是页面写
+    "browser_download", "browser_pdf", "browser_drag", "browser_upload",
     "computer_som_snapshot", "computer_dom_snapshot",
     # P0-3 会话式 shell：进程输出不可重放（重跑时系统状态已变）
     "exec_command", "write_stdin",

@@ -60,8 +60,9 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "context_compress": {
         # B1（对照改进项）：模型自决触发折叠。折叠只影响视图，原文在归档池
         # （零丢失），与 /compact 命令同一折叠机构。
-        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("context_view",)},
-        "description": "【上下文主动折叠】把当前会话窗口里较老的消息折叠成摘要（原文仍在归档池，可经 recall_history / recall_context_span 找回）。【何时用】你判断当前任务步骤已完成、早期内容短期内不再需要时，主动调用保持上下文精炼。【何时不用】正处在调试/多步推理中途（折叠会丢工作现场）；只是想查历史用 recall_history；本工具不删除任何原文。",
+        # 并行能力声明：改写当前会话视图（折叠落代际），触碰共享会话态，不可并行。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【上下文主动折叠】把窗口里较老的消息折叠成摘要（原文仍在归档池，可经 recall_history 找回）。【何时用】任务步骤完成、早期内容短期不再需要时。【何时不用】调试/推理中途；只查历史用 recall_history。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -71,14 +72,16 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     },
     "context_status": {
         # B1（对照改进项）：上下文盘点（只读）。
-        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
-        "description": "【上下文盘点】返回当前会话上下文的构成与水位：窗口 token 估算/预算、折叠代际数与最近一次触发原因、池归档规模、取水读数。【何时用】决定是否主动折叠（context_compress）前；不确定早期内容是否还能召回时。",
+        # 并行能力声明：只读健康/预算读数，但走同步 SQLite/内存读，保守不并行。
+        "capability": {"readOnly": True, "concurrentSafe": False, "writeScopes": ("none",)},
+        "description": "【上下文盘点】返回窗口 token 估算/预算、折叠代际与最近触发原因、池归档规模、取水读数。【何时用】决定是否 context_compress 前。",
         "parameters": {"type": "object", "properties": {}},
     },
     "pool_search": {
         # B9（对照改进项）：归档池语义检索（与视图抽屉同一打分面）。
-        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
-        "description": "【归档语义检索】对本 Agent 归档池做向量语义检索（含被折叠/被移出窗口的原文），按相关性排序返回。【何时用】“之前讨论过的跟 X 类似的内容”；按语义找历史原文。【何时不用】精确占位指针直取用 recall_history；分层摘要下钻用 recall_context_span；跨会话长期记忆用 memory_search。",
+        # 并行能力声明：只读池+FTS 同步读，保守不并行（与 recall_history 同判）。
+        "capability": {"readOnly": True, "concurrentSafe": False, "writeScopes": ("none",)},
+        "description": "【归档语义检索】对归档池做向量语义检索（含被折叠原文），按相关性排序。【何时用】按语义找历史原文。【何时不用】精确指针直取 recall_history；分层下钻 recall_context_span；跨会话记忆 memory_search。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -791,6 +794,64 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                 "limit": {"type": "integer", "description": "返回最近多少条（默认 50，上限 200）", "minimum": 1, "maximum": 200},
             },
             "required": [],
+        },
+    },
+    # ── 采集与扩展（P3 批D）：PDF 打印 / 文件下载 / 拖拽 / 上传 ──
+    "browser_pdf": {
+        # 并行能力声明：采集当前页并落产物目录（重放登记出第二份产物）。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【页面转 PDF】把当前活动页打印成 PDF 并落产物目录，返回文件路径与字节数。用于网页存档、报表出件。【何时不用】只要正文文字用 browser_extract_text；要排版文档用 write_pdf（Markdown→PDF）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "generation": {"type": "integer", "description": "可选。当前页代数；页面已被外部改变时拒绝"},
+            },
+            "required": [],
+        },
+    },
+    "browser_download": {
+        # 并行能力声明：拉取远端字节落产物目录（重放登记出第二份产物）。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【文件下载】用浏览器会话的网络栈拉取 URL 的原始字节并落产物目录（二进制保真），返回文件路径、字节数与 HTTP 状态。适合下载 zip/csv/图片等二进制文件；非 2xx 诚实报错。【何时不用】纯文本/API JSON 读取用 web_fetch（更轻）；需要登录态的下载本工具会带上会话 Cookie。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "要下载的文件 URL（http/https）"},
+                "filename": {"type": "string", "description": "可选。产物文件名前缀（扩展名从 URL 自动推断）"},
+                "generation": {"type": "integer", "description": "可选。当前页代数；页面已被外部改变时拒绝"},
+            },
+            "required": ["url"],
+        },
+    },
+    "browser_drag": {
+        # 并行能力声明：驱动同一个内置浏览器实例（改写页面元素位置/状态）——共享态。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【拖拽元素】把 source（ARIA role+name 定位）拖拽到 target 上。用于拖拽排序、滑块、看板移动等交互。拖拽改页面状态，快照事实随之失效（generation 递增）。参数必须来自最近一次快照事实。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "source_role": {"type": "string", "description": "拖拽起点的 ARIA 角色（来自快照）"},
+                "source_name": {"type": "string", "description": "拖拽起点的可访问名称"},
+                "target_role": {"type": "string", "description": "拖拽落点的 ARIA 角色（来自快照）"},
+                "target_name": {"type": "string", "description": "拖拽落点的可访问名称"},
+                "generation": {"type": "integer", "description": "可选。最近一次快照返回的 generation；跨代即拒绝"},
+            },
+            "required": ["source_role", "target_role"],
+        },
+    },
+    "browser_upload": {
+        # 并行能力声明：驱动同一个内置浏览器实例（向文件输入元素写文件）——共享态。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【文件上传】向指定 ARIA role+name 的文件输入元素（input[type=file]）上传一个或多个本地文件（paths 须为存在的绝对路径）。上传改页面状态，快照事实随之失效（generation 递增）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "role": {"type": "string", "description": "文件输入元素的 ARIA 角色（来自快照）"},
+                "name": {"type": "string", "description": "可访问名称（来自快照）"},
+                "paths": {"type": "array", "items": {"type": "string"}, "description": "要上传的本地文件绝对路径列表（须存在）"},
+                "generation": {"type": "integer", "description": "可选。最近一次快照返回的 generation；跨代即拒绝"},
+            },
+            "required": ["role", "paths"],
         },
     },
     # ── 互联网平台直达（Web Reach，零配置路径）──
@@ -1961,6 +2022,8 @@ _SANDBOX_REQUIRED_KEY = "sandbox_required"
 # 与 tests/unit/tools/test_cross_axis_declarations.py 的
 # TestCursorToolsAreADifferentAxis（快照族与游标族在重放轴上必须给出**不同**读数）。
 _NON_REPRODUCIBLE_TOOLS = frozenset({
+    # B1：模型自决折叠改写当前会话视图（重放会产出第二次折叠回执），不可重现。
+    "context_compress",
     # 任意代码/命令：输出依赖外部状态且可能已产生副作用
     "run_code", "computer_shell", "computer_ssh_exec",
     # git 含写子命令（commit/push/checkout），tool 粒度从严
@@ -2007,6 +2070,8 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     # 页面状态面：cookies/storage 是状态写（重放制造新状态）；console 是瞬时缓冲读数
     # （重放时缓冲可能已追加，与 screenshot 同属"只读也不可重放"反例族）
     "browser_cookies", "browser_storage", "browser_console",
+    # 采集与扩展：download/pdf 落盘产物（重放登记第二份）；drag/upload 是页面写
+    "browser_download", "browser_pdf", "browser_drag", "browser_upload",
     # 会话式 shell：进程输出不可重放（重跑时系统状态已变）
     "exec_command", "write_stdin",
     # 子代理派生：spawn 有副作用

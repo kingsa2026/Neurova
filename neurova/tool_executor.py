@@ -99,6 +99,10 @@ COMPUTER_USE_TOOLS = frozenset(
         "browser_cookies",
         "browser_storage",
         "browser_console",
+        "browser_download",
+        "browser_pdf",
+        "browser_drag",
+        "browser_upload",
     }
 )
 
@@ -184,6 +188,10 @@ _COMPUTER_TOOL_PARAM_KEYS: Dict[str, frozenset] = {
     "browser_cookies": frozenset({"action", "name", "value", "url", "domain", "path", "generation"}),
     "browser_storage": frozenset({"kind", "action", "key", "value", "generation"}),
     "browser_console": frozenset({"limit"}),
+    "browser_download": frozenset({"url", "filename", "generation"}),
+    "browser_pdf": frozenset({"generation"}),
+    "browser_drag": frozenset({"source_role", "source_name", "target_role", "target_name", "generation"}),
+    "browser_upload": frozenset({"role", "name", "paths", "generation"}),
 }
 
 _BUTTON_ALIASES = {
@@ -320,6 +328,15 @@ def describe_computer_action(tool_name: str, params: Dict) -> str:
         return f"页面存储 {params.get('kind', 'local')}.{params.get('action', 'get')}"
     if tool_name == "browser_console":
         return "读取控制台消息"
+    if tool_name == "browser_download":
+        return f"下载 {params.get('url', '?')}"
+    if tool_name == "browser_pdf":
+        return "打印页面为 PDF"
+    if tool_name == "browser_drag":
+        return f"拖拽 {params.get('source_role', '?')}→{params.get('target_role', '?')}"
+    if tool_name == "browser_upload":
+        paths = params.get("paths") or []
+        return f"上传 {len(paths)} 个文件"
     return tool_name
 
 
@@ -411,6 +428,10 @@ class ToolExecutor:
         "browser_cookies": "_execute_browser_cookies",
         "browser_storage": "_execute_browser_storage",
         "browser_console": "_execute_browser_console",
+        "browser_download": "_execute_browser_download",
+        "browser_pdf": "_execute_browser_pdf",
+        "browser_drag": "_execute_browser_drag",
+        "browser_upload": "_execute_browser_upload",
         "planning": "_execute_planning",
         "youtube_transcript": "_execute_youtube_transcript",
         "browser_read": "_execute_browser_read",
@@ -6912,6 +6933,104 @@ class ToolExecutor:
         except Exception as e:
             logger.error("控制台读取失败: %s", e)
             return {"error": f"控制台读取失败: {str(e)}"}
+
+    async def _execute_browser_download(self, params: Dict) -> Dict:
+        """拉取 URL 字节落产物目录（二进制保真）"""
+        url = str(params.get("url") or "").strip()
+        if not url:
+            return {"error": "缺少 url 参数"}
+        filename = params.get("filename")
+        generation = params.get("generation")
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_download(
+                    url,
+                    filename=str(filename) if filename else None,
+                    generation=int(generation) if generation is not None else None,
+                )
+            )
+            await self._emit_computer_event("browser_download", params, result)
+            return result
+        except Exception as e:
+            logger.error("文件下载失败: %s", e)
+            return {"error": f"文件下载失败: {str(e)}"}
+
+    async def _execute_browser_pdf(self, params: Dict) -> Dict:
+        """打印当前页为 PDF（落产物目录）"""
+        generation = params.get("generation")
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_pdf(
+                    generation=int(generation) if generation is not None else None,
+                )
+            )
+            await self._emit_computer_event("browser_pdf", params, result)
+            return result
+        except Exception as e:
+            logger.error("页面转 PDF 失败: %s", e)
+            return {"error": f"页面转 PDF 失败: {str(e)}"}
+
+    async def _execute_browser_drag(self, params: Dict) -> Dict:
+        """按 role+name 拖拽（source→target）"""
+        source_role = str(params.get("source_role") or "").strip()
+        target_role = str(params.get("target_role") or "").strip()
+        if not source_role:
+            return {"error": "缺少 source_role 参数（拖拽起点，来自快照）"}
+        if not target_role:
+            return {"error": "缺少 target_role 参数（拖拽落点，来自快照）"}
+        generation = params.get("generation")
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_drag(
+                    source_role,
+                    target_role,
+                    source_name=params.get("source_name"),
+                    target_name=params.get("target_name"),
+                    generation=int(generation) if generation is not None else None,
+                )
+            )
+            await self._emit_computer_event("browser_drag", params, result)
+            return result
+        except Exception as e:
+            logger.error("拖拽失败: %s", e)
+            return {"error": f"拖拽失败: {str(e)}"}
+
+    async def _execute_browser_upload(self, params: Dict) -> Dict:
+        """向文件输入元素上传本地文件"""
+        role = str(params.get("role") or "").strip()
+        paths = params.get("paths")
+        if not role:
+            return {"error": "缺少 role 参数（文件输入元素，来自快照）"}
+        if not isinstance(paths, list) or not [p for p in paths if str(p).strip()]:
+            return {"error": "缺少 paths（要上传的本地文件路径列表）"}
+        name = params.get("name")
+        generation = params.get("generation")
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_upload(
+                    role,
+                    [str(p) for p in paths],
+                    name=name,
+                    generation=int(generation) if generation is not None else None,
+                )
+            )
+            await self._emit_computer_event("browser_upload", params, result)
+            return result
+        except Exception as e:
+            logger.error("文件上传失败: %s", e)
+            return {"error": f"文件上传失败: {str(e)}"}
 
     async def _execute_planning(self, params: Dict) -> Dict:
         """任务计划工具：7 个子命令（create/update/list/get/set_active/mark_step/delete）。
