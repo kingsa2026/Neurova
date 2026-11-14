@@ -356,6 +356,15 @@ class ContextOrchestrator:
                 "demoted": 0,
                 "last_error": None,
             },
+            # P1-6：注入 write-ahead 账本完整性读数（恢复/审计侧核验）。
+            # rows/ok/broken/last_seq 来自 injection_ledger.verifyInjections。
+            "injection_ledger": {
+                "rows": 0,
+                "ok": 0,
+                "broken": 0,
+                "last_seq": None,
+                "last_error": None,
+            },
             # Issue #289 002：池分支压缩经济性判据读数。字段与注入器侧
             # `_lastEconomicsReadout` **同名同义**（同一份判据的两个接入点，
             # 不另立第二套口径）；`discarded`/`reason` 只在真的弃封时出现，
@@ -541,6 +550,23 @@ class ContextOrchestrator:
             }
         except Exception as exc:  # noqa: BLE001 - 读数失败不影响其余读数
             snapshot["compression_economics"]["last_error"] = f"{type(exc).__name__}: {exc}"
+        # P1-6：注入 write-ahead 账本完整性读数——账本行是否被改/截断，
+        # 恢复与审计侧从这里看，不翻文件。会话身份缺席时保留空形状。
+        try:
+            from neurova.core.turn_context import get_turn_session_id
+            from neurova.context.injection_ledger import verifyInjections
+
+            _ledgerSession = get_turn_session_id()
+            if _ledgerSession:
+                snapshot["injection_ledger"] = {
+                    **empty["injection_ledger"],
+                    **verifyInjections(_ledgerSession),
+                }
+        except Exception as exc:  # noqa: BLE001 - 读数失败不影响其余读数
+            snapshot["injection_ledger"] = {
+                **empty["injection_ledger"],
+                "last_error": f"{type(exc).__name__}: {exc}",
+            }
         return snapshot
 
     def _foldedHashes(self) -> set:
@@ -1911,6 +1937,31 @@ class ContextOrchestrator:
             readout = self._contextHealthSlot("reflection_injection")
             readout["last_error"] = f"{type(exc).__name__}: {exc}"
             logger.warning("反思进视图记账失败（已在读数点名）: %s", exc)
+        # P1-6：注入 write-ahead——装配出口先落账、后进模型。三条分支的最终
+        # 视图都从这里出去（本方法是唯一出口），取最后一条 user 消息（信封 +
+        # 本轮输入）字节级留痕：崩在「模型已见、回复未落盘」之间时，账本是
+        # 知道模型当时看到了什么的唯一事实源。会话身份缺席（非聊天路径）不记
+        # ——没有会话就没有可挂的账本。落账失败不阻断（读数与日志点名）。
+        try:
+            from neurova.core.turn_context import get_turn_session_id
+            from neurova.context.injection_ledger import recordInjection
+
+            _waSession = get_turn_session_id()
+            if _waSession:
+                _lastUser = next(
+                    (m for m in reversed(context)
+                     if isinstance(m, dict) and m.get("role") == "user"),
+                    None,
+                )
+                if _lastUser is not None:
+                    recordInjection(
+                        _waSession,
+                        kind="final_user_view",
+                        content=str(_lastUser.get("content") or ""),
+                        meta={"messages_in_view": len(context)},
+                    )
+        except Exception as exc:  # noqa: BLE001 - 账本故障不阻断上下文构建
+            logger.warning("注入 write-ahead 落账失败（不阻断）: %s", exc)
         return context
 
     async def _accountReflectionInjection(self, context: List[Dict[str, Any]]) -> None:
