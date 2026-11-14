@@ -154,12 +154,14 @@ class MoERetrieverAdapter:
             # BUG#1: MoEMemoryRouter.retrieve 是 async,必须 await(否则返回 coroutine,len() 抛 TypeError)
             _cb = getattr(context, "progress_callback", None)
             _kwargs = {"progress_cb": _cb} if _cb is not None else {}
-            # P1-10 残留实装：检索链身份形参透传（显式覆盖位；缺省走 ContextVar）
+            # P1-10 残留实装：检索链身份形参透传（显式覆盖位）——身份缺省不传
+            # （路由器走自身 resolver/ContextVar），有显式身份才带参
+            if getattr(context, "neuser_id", None) and getattr(context, "user_id", None):
+                _kwargs["neuser_id"] = context.neuser_id
+                _kwargs["user_id"] = context.user_id
             memories = await self._router.retrieve(
                 query=context.query,
                 limit=context.limit,
-                neuser_id=getattr(context, "neuser_id", None),
-                user_id=getattr(context, "user_id", None),
                 **_kwargs,
             )
 
