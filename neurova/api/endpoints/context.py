@@ -63,6 +63,8 @@ class ContextStats(BaseModel):
     indexed_entries: int = 0
     # B13（对照改进项）：取水质量读数（各池抽屉累计计数求和）
     drawer: Optional[Dict[str, Any]] = None
+    # B12（对照改进项）：语义判重读数（各池累计计数求和；台账规模求和）
+    dedup: Optional[Dict[str, Any]] = None
 
 
 class ContextCompositionResponse(BaseModel):
@@ -424,6 +426,21 @@ async def get_context_stats(
         key: sum(int((s.get("drawer") or {}).get(key) or 0) for s in stats)
         for key in drawer_keys
     }
+    # B12（对照改进项）：语义判重读数聚合（计数求和；开关取任一池开启）。
+    dedup_keys = ("semantic_checks", "semantic_dedup_total", "restores", "restore_ledger_size")
+    dedup_totals: Dict[str, Any] = {
+        key: sum(int((s.get("dedup") or {}).get(key) or 0) for s in stats)
+        for key in dedup_keys
+    }
+    dedup_totals["semantic_enabled"] = any(
+        bool((s.get("dedup") or {}).get("semantic_enabled")) for s in stats
+    )
+    similarities = [
+        float((s.get("dedup") or {}).get("last_similarity"))
+        for s in stats
+        if (s.get("dedup") or {}).get("last_similarity") is not None
+    ]
+    dedup_totals["last_similarity"] = max(similarities) if similarities else None
     return ContextStats(
         pools=len(stats),
         total_contexts=total_contexts,
@@ -432,6 +449,7 @@ async def get_context_stats(
         ledger_rows=ledger_rows,
         indexed_entries=indexed_entries,
         drawer=drawer_totals,
+        dedup=dedup_totals,
     )
 
 
