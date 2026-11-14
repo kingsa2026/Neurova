@@ -6,7 +6,7 @@ P2: 实现图遍历检索（多跳推理）
 """
 
 import pytest
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from neurova.cognitive_layers.memory_layer.sleep import (
     SleepConsolidation, MemoryRecord, MergeResult
@@ -121,19 +121,31 @@ class TestSleepConsolidation:
         assert any(len(mr.source_ids) == 3 for mr in merge_results)
 
     def test_sleep_decay_applies(self):
-        """测试28: 睡眠期间温度衰减"""
+        """测试28: 睡眠期间温度衰减
+
+        衰减引擎的豁免规则（temperature.py）：固化记忆不衰减、高温(>=80)视为
+        固化不衰减、今天访问过的(days_idle<1)不衰减。夹具因此用两天前的
+        created_at 与 <80 的温度落在真实衰减带内；另钉一条 80.0 豁免锁。
+        """
         engine = SleepConsolidation(decay_rate=0.2)
-        
+        backdated = datetime.now(timezone.utc) - timedelta(days=2)
+
         memories = [
-            MemoryRecord(id="m1", content="高温度", temperature=80.0, importance=0.5),
-            MemoryRecord(id="m2", content="低温度", temperature=10.0, importance=0.5),
+            MemoryRecord(id="m1", content="中温度", temperature=60.0, importance=0.5,
+                         created_at=backdated),
+            MemoryRecord(id="m2", content="低温度", temperature=10.0, importance=0.5,
+                         created_at=backdated),
+            MemoryRecord(id="m3", content="高温豁免", temperature=80.0, importance=0.5,
+                         created_at=backdated),
         ]
-        
+
         decayed = engine.apply_sleep_decay(memories)
-        
-        # 所有记忆温度都应该降低
-        assert decayed[0].temperature < 80.0
+
+        # 衰减带内的记忆温度都应该降低
+        assert decayed[0].temperature < 60.0
         assert decayed[1].temperature < 10.0
+        # 高温(>=80)豁免：视为固化，温度原样
+        assert decayed[2].temperature == 80.0
 
     def test_archive_low_temperature(self):
         """测试29: 低温度记忆被归档"""

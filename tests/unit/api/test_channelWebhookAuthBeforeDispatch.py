@@ -214,21 +214,25 @@ class TestFeishuMustUseTheExistingGate:
         assert "encrypt" in r.text.lower(), f"拒绝原因没点名密文未实装：{r.text[:160]}"
 
     def testMissingVerificationTokenFailsClosed(self, clientWith):
-        ChannelManager._instance = None
+        # 复用夹具的活 app：此前这里另起一个 create_app() 嵌套 lifespan，其关停
+        # 会重置进程级单例（连接池/ExecutionEngine），把外层 TestClient 的
+        # portal 一起带死——单跑挂死/teardown 报错的根因。换适配器即可达到
+        # 同一隔离目的（分派按 channel_type 取adapter）。
+        client, _events = clientWith
         seen: list = []
 
         async def _record(_t, m):
             seen.append(m)
 
-        from neurova.channels.manager import get_channel_manager as getMgr
+        from neurova.channels.manager import get_channel_manager
 
         bare = FeishuAdapter(ChannelConfig(channel_type="feishu", app_id="cli", app_secret="s"))
-        with TestClient(create_app(), raise_server_exceptions=False) as c:
-            getMgr().register_adapter(bare)
-            bare._event_callback = _record
-            r = c.post(WEBHOOK.format("feishu"), json={
-                "schema": "2.0", "header": {"token": "", "event_type": "im.message.receive_v1"},
-                "event": {"sender": {"sender_id": {"user_id": "x"}}, "message": {}}})
-        ChannelManager._instance = None
+        mgr = get_channel_manager()
+        mgr._adapters["feishu"] = bare
+        mgr._agent_adapters[("default", "feishu")] = bare
+        bare._event_callback = _record
+        r = client.post(WEBHOOK.format("feishu"), json={
+            "schema": "2.0", "header": {"token": "", "event_type": "im.message.receive_v1"},
+            "event": {"sender": {"sender_id": {"user_id": "x"}}, "message": {}}})
 
         assert r.status_code in (401, 403) and not seen, "未配置 verification_token 时放行了"

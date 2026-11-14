@@ -201,7 +201,8 @@ class TestMigrationVersions:
         # v48：GraphRAG 工艺（specs/2026-11-12 W8）——chunk_strategies＋communities
         #      ＋术语行 conflict_policy 列。
         # v49：webhook 幂等去重（specs/2026-11-12 W10）。
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 49
+        # v50：工件级内容地址存储（specs/2026-11-12 §18 C1/C2）——ontology_artifacts。
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 50
         assert {'knowledge_mcp_sources', 'knowledge_alias_candidates',
                 'ontology_relation_candidates', 'ontology_shapes',
                 'ontology_change_log', 'enterprise_source_configs',
@@ -209,7 +210,7 @@ class TestMigrationVersions:
                 'ontology_actions', 'ontology_functions', 'ontology_state_machines', 'ontology_simulations',
                 'ontology_decisions', 'ontology_decision_links',
                 'ontology_chunk_strategies', 'ontology_communities',
-                'enterprise_webhook_dedup'} <= names
+                'enterprise_webhook_dedup', 'ontology_artifacts'} <= names
         # v28 存量行零漂移：缺省必须是旧语义 relay（head 客体常量空＝不搬移客体）
         rule_columns = {
             r[1]: (r[2], r[4]) for r in store._conn.execute(

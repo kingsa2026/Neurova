@@ -14,6 +14,7 @@
 | 入口 | 通道侧（`set_request_user_id`）读的是 | 载体侧（`metadata['user_id']`） |
 | --- | --- | --- |
 | `api/endpoints/chat.py` | 登录用户 `current_user['user_id']`（非流式 + 流式各一处） | 同一个变量塞进 metadata，由管线读取 |
+| `api/endpoints/agent.py` | 登录用户 `current_user['user_id']`（`/{agent_id}/decision` 决策轮） | 同一个变量进 metadata['user_id'] |
 | `api/endpoints/console.py` | REST 用 `current_user`，`/ws` 自验 JWT | 同一个变量进 dict 字面量 |
 | `api/endpoints/mobile_pairing.py` | WS 接入层解出后按参数交给处理器（§6-154） | 同一个变量进 `turnMetadata` |
 | `tool_executor.py` | `self._agent_identity()[0]` —— 门面读数转写过来 | 它不写载体，它读通道 |
@@ -88,6 +89,13 @@ ENTRY_POINTS: Dict[str, Dict[str, object]] = {
                          "与流式 `/chat/stream`（裁定甲，§6-153——流式此前不写 ⇒ 空属主 "
                          "对全员可见）",
         "carrierSource": "同一个 user_id 赋给 call_metadata['user_id']，随请求内联给技能与经验面",
+        "feedsVia": "user_id",
+    },
+    "neurova/api/endpoints/agent.py": {
+        "kind": "boundaryFeedsMetadata",
+        "requestSource": "current_user['user_id']——`/{agent_id}/decision` 决策轮自己跑 "
+                         "agent.chat，与 /v1/chat 同规在请求边界写一次发送者身份",
+        "carrierSource": "同一个 user_id 进 metadata['user_id'] 随请求内联",
         "feedsVia": "user_id",
     },
     "neurova/api/endpoints/console.py": {

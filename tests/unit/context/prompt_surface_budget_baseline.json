@@ -20,6 +20,15 @@
       "tools_description": 15805,
       "total_always_on_chars": 17240,
       "waiver": "CI-收口-2026-11-07"
+    },
+    {
+      "phase": "预存红清偿-2026-11-14",
+      "date": "2026-11-14",
+      "description": "工具清单 91 → 93 件（graph_search 等）＋规则段 +5：自 CI-收口-2026-11-07 以来各批新增能力的如实登记，基线再脱节 724 字符。等量旧文案清理仍未做（两批累计开项，见台账），不冒充已完成。",
+      "rules_sections": 1440,
+      "tools_description": 16524,
+      "total_always_on_chars": 17964,
+      "waiver": "预存红清偿-2026-11-14"
     }
   ]
 }

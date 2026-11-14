@@ -152,6 +152,8 @@ class TestExportRest:
 
 class TestBitemporalQueryRest:
     def testAsOfAndKnownAtFilterFacts(self, client, store):
+        from datetime import datetime, timedelta, timezone
+
         gate = productionAdmissionGate(store)
         gate.admit(AdmissionRequest(
             agentId="default", subjectLabel="订单D01", predicateTermId="is_a",
@@ -160,10 +162,14 @@ class TestBitemporalQueryRest:
             assertions=[{"actorType": "pipeline", "actorId": "unit",
                          "mediumRef": "unit:test", "statementText": "订单D01 is_a Order"}]))
 
+        # knownAt 取「明天」：事务时间语义是 recorded_at <= knownAt 才可见，
+        # 写死过去某天会随墙钟前进变成时间炸弹（种子行的 recorded_at 是 now）。
+        knownAt = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+
         inside = client.post(PREFIX + "/access/query",
                              params={"agent_id": "default"},
                              json={"query": "D01", "asOf": "2026-06-01",
-                                   "knownAt": "2026-11-06"})
+                                   "knownAt": knownAt})
         assert inside.status_code == 200
         assert len(inside.json()) == 1
         assert inside.json()[0]["knowledge_id"]
@@ -171,6 +177,6 @@ class TestBitemporalQueryRest:
         outside = client.post(PREFIX + "/access/query",
                               params={"agent_id": "default"},
                               json={"query": "D01", "asOf": "2027-01-01",
-                                    "knownAt": "2026-11-06"})
+                                    "knownAt": knownAt})
         assert outside.status_code == 200
         assert outside.json() == []

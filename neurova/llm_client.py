@@ -859,22 +859,6 @@ class LLMClient:
             finish_reason="stop",
         )
 
-    _tokenizer = None  # tiktoken 编码器（进程级惰性共享）
-
-    @classmethod
-    def _get_tokenizer(cls):
-        """tiktoken 编码器；下载/导入失败时返回 None（回退估算）"""
-        if cls._tokenizer is not None:
-            return cls._tokenizer
-        try:
-            import tiktoken
-
-            cls._tokenizer = tiktoken.get_encoding("cl100k_base")
-        except Exception as e:  # noqa: BLE001 - 离线环境编码表下载失败
-            logging.getLogger(__name__).debug("tiktoken 编码器不可用，回退估算: %s", e)
-            return None
-        return cls._tokenizer
-
     @staticmethod
     def _wrap_llm_error(e: Exception) -> Exception:
         """把 provider 异常分类为 LLMError 子类（五类标准错误，单一事实源）。
@@ -923,7 +907,10 @@ class LLMClient:
         """
         统计文本 token 数量
 
-        tiktoken 精确计数（cl100k_base），编码器不可用时回退到按字符估算。
+        走全仓唯一尺子（token_estimator：tiktoken o200k 精确计数，编码器
+        不可用时按类别上界回退）。此前本处私挂 cl100k_base——同一文本与
+        Anthropic 侧（o200k 口径）相差近一倍，输入预算闸门随 provider 漂移；
+        单一事实源收口后各 provider 同尺（2026-11-14）。
 
         Args:
             text: 输入文本
@@ -934,14 +921,6 @@ class LLMClient:
         if not text:
             return 0
 
-        tokenizer = self._get_tokenizer()
-        if tokenizer is not None:
-            try:
-                return len(tokenizer.encode(text))
-            except Exception:  # noqa: BLE001 - 单条编码失败回退估算
-                pass
-        # 回退估算：走全仓唯一尺子（上界口径），不再就地 len*1.5——
-        # 该近似对 ASCII 密集内容低估 5 倍量级，会让输入预算闸门漏放。
         from neurova.context.token_estimator import estimate_tokens
 
         return estimate_tokens(text)

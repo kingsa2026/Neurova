@@ -669,7 +669,10 @@ class TestFullDeclarationCoverage:
         )
         assert eligible == [
             "bilibili_search", "calculator", "emotion_analyze", "file_list", "file_parse",
-            "file_read", "file_search", "get_datetime", "list_agents", "memory_search",
+            "file_read", "file_search", "get_datetime",
+            # 知识图谱只读走查（递归 CTE 只读、无写作用域，依据行在 builtin_tools.py 声明位）。
+            "graph_search",
+            "list_agents", "memory_search",
             # 环境预检：只读环境变量名与 SecretStore 键名、不读凭据值、无写作用域，
             # 故与同批其余只读工具并发安全（依据行在 `builtin_tools.py` 该声明位上方）。
             "node_env_preflight",
