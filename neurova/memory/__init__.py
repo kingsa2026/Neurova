@@ -29,13 +29,9 @@ from neurova.cognitive_layers.memory_layer import TemperatureEngine
 from neurova.cognitive_layers.memory_layer import UnifiedVectorStore
 
 # 其余子系统的再导出（这一组原先也各带一条 None 兜底；拆掉后全部指得通，注释随之改如实）
-from neurova.cognitive_layers.memory_layer.working_memory import WorkingMemoryAugmenter
-
-from neurova.cognitive_layers.memory_layer.temporal_knowledge_graph import TemporalKnowledgeGraph
-
 from neurova.cognitive_layers.memory_layer.storage import MemoryStorage
 
-from neurova.cognitive_layers.memory_layer.models import SelfModel, UserProfile
+from neurova.cognitive_layers.memory_layer.models import UserProfile
 
 from neurova.cognitive_layers.memory_layer.compression import MemoryCompressor
 
@@ -79,8 +75,6 @@ except ImportError:
 
 # 为了支持 `from neurova.memory.xxx import ...` 这样的导入
 _MODULE_MAP = {
-    "working_memory": "neurova.cognitive_layers.memory_layer.working_memory",
-    "temporal_knowledge_graph": "neurova.cognitive_layers.memory_layer.temporal_knowledge_graph",
     "storage": "neurova.cognitive_layers.memory_layer.storage",
     "models": "neurova.cognitive_layers.memory_layer.models",
     "temperature": "neurova.cognitive_layers.memory_layer.temperature",
@@ -99,10 +93,7 @@ for alias, target in _MODULE_MAP.items():
         logger.debug("memory 子模块别名 %s -> %s 映射失败: %s", alias, target, _e)
 
 __all__ = [
-    "WorkingMemoryAugmenter",
-    "TemporalKnowledgeGraph",
     "MemoryStorage",
-    "SelfModel",
     "UserProfile",
     "Memory",
     "TemperatureEngine",

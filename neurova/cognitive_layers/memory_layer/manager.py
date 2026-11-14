@@ -7,7 +7,7 @@ MemoryManager — 记忆管理器（CogArch 总线版）
 架构现状 (基于实际代码, 2026-09-16 标注诚实性审计后更新):
   - 门面职责: 本类是对 modules/* 各子模块的委托门面 + 核心记忆 CRUD 本体
   - 各功能区 (Emotion/Classification/SelfModel/Meta/EKI/TKG/WorkingMemory/
-    SelfCommands/Conflict/Relation/Sleep/Explainability/ForgettingRecovery)
+    SelfCommands/Conflict/Relation/Explainability/ForgettingRecovery)
     均已委托到对应模块或真实实现——历史上标注的 "STUB" 区块已全部落地,
     旧文件头声称的 "50+ 方法为 stub" 已不再成立
   - 诚实透传 (有意设计, 非 stub): apply_emotion_to_temperature/apply_emotion_to_style/
@@ -463,9 +463,8 @@ class MemoryManager:
             max_workers=min(4, (os.cpu_count() or 2)),
             thread_name_prefix="mem-dep",
         )
-        # EKI/Sleep 模块（阶段2委托）
+        # EKI 模块（阶段2委托）；Sleep 委托已随 SleepModule 退役（教义第 7 条）
         self._eki_module = None
-        self._sleep_module = None
         self._eki_enabled = False
 
         # 全量模块委托（阶段10）
@@ -4962,130 +4961,12 @@ class MemoryManager:
     def search_similar_memories(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         return self.recall(query=query, limit=limit)
 
-    # ────── Sleep (委托到 modules/sleep_module.py) ──────
-
-    def _ensure_sleep_module(self):
-        """懒加载 SleepModule（首次调用时初始化）"""
-        if self._sleep_module is None:
-            from neurova.cognitive_layers.memory_layer.modules.sleep_module import SleepModule
-
-            self._sleep_module = SleepModule(
-                consolidation_threshold=0.7,
-                cleanup_threshold=0.2,
-                dream_probability=0.1,
-            )
-            self._sleep_module.init()
-            logger.info("SleepModule lazily initialized")
-        return self._sleep_module
-
-    def _collect_memories_for_sleep(self) -> List[Dict[str, Any]]:
-        """收集所有记忆用于睡眠处理
-
-        BUG-7 修复: 加 self._lock 保护读路径。
-        """
-        with self._lock:
-            memories = []
-            for mem_id, mem in self._memories.items():
-                memories.append({
-                    "id": mem_id,
-                    "content": mem.content,
-                    "importance": mem.importance / 100.0,  # 归一化到 0-1
-                })
-            return memories
-
-    def run_light_sleep_cycle(self) -> Dict[str, Any]:
-        """轻度睡眠周期（巩固重要记忆）"""
-        module = self._ensure_sleep_module()
-        module.start_sleep()
-        memories = self._collect_memories_for_sleep()
-        result = module.process_memories(memories)
-        stats = module.end_sleep()
-        return {
-            "cycle": "light",
-            "consolidated": result.get("consolidated", []),
-            "cleaned": result.get("cleaned", []),
-            "stats": stats,
-        }
-
-    def run_rem_sleep_cycle(self) -> Dict[str, Any]:
-        """REM 睡眠周期（含梦境回放）
-
-        BUG-12 修复: 不再直接修改 module._dream_probability 私有属性,
-        改为保存/恢复模式避免并发调用互相覆盖。
-        """
-        module = self._ensure_sleep_module()
-        module.start_sleep()
-        memories = self._collect_memories_for_sleep()
-        # BUG-12 修复: 保存原始值, 处理后恢复（避免并发污染）
-        original_dream_prob = module._dream_probability
-        try:
-            module._dream_probability = 0.5
-            result = module.process_memories(memories)
-        finally:
-            module._dream_probability = original_dream_prob
-        stats = module.end_sleep()
-        return {
-            "cycle": "rem",
-            "consolidated": result.get("consolidated", []),
-            "cleaned": result.get("cleaned", []),
-            "dreamed": result.get("dreamed", []),
-            "stats": stats,
-        }
-
-    def run_deep_sleep_cycle(self) -> Dict[str, Any]:
-        """深度睡眠周期（强化巩固 + 清理）
-
-        BUG-12 修复: 不再直接修改 module._consolidation_threshold / _cleanup_threshold,
-        改为保存/恢复模式避免并发污染。
-        """
-        module = self._ensure_sleep_module()
-        module.start_sleep()
-        # BUG-12 修复: 保存原始值, 处理后恢复
-        original_consolidation = module._consolidation_threshold
-        original_cleanup = module._cleanup_threshold
-        try:
-            # 深度睡眠降低巩固阈值，提高清理力度
-            module._consolidation_threshold = 0.5
-            module._cleanup_threshold = 0.3
-            memories = self._collect_memories_for_sleep()
-            result = module.process_memories(memories)
-        finally:
-            module._consolidation_threshold = original_consolidation
-            module._cleanup_threshold = original_cleanup
-        stats = module.end_sleep()
-        return {
-            "cycle": "deep",
-            "consolidated": result.get("consolidated", []),
-            "cleaned": result.get("cleaned", []),
-            "stats": stats,
-        }
-
-    def run_dormant_cycle(self) -> Dict[str, Any]:
-        """休眠周期（仅清理，不巩固）
-
-        BUG-12 修复: 保存/恢复私有属性避免并发污染。
-        """
-        module = self._ensure_sleep_module()
-        module.start_sleep()
-        # BUG-12 修复: 保存原始值, 处理后恢复
-        original_consolidation = module._consolidation_threshold
-        original_cleanup = module._cleanup_threshold
-        try:
-            # 休眠周期只清理低重要性记忆
-            module._consolidation_threshold = 1.0  # 不巩固
-            module._cleanup_threshold = 0.4  # 更激进清理
-            memories = self._collect_memories_for_sleep()
-            result = module.process_memories(memories)
-        finally:
-            module._consolidation_threshold = original_consolidation
-            module._cleanup_threshold = original_cleanup
-        stats = module.end_sleep()
-        return {
-            "cycle": "dormant",
-            "consolidated": result.get("consolidated", []),
-            "cleaned": result.get("cleaned", []),
-            "stats": stats,
-        }
+    # ────── Sleep ──────
+    # 睡眠整理唯一实现在是 sleep.py 的 SleepConsolidation（idle_tracker 空闲触发、
+    # agent_shutdown 关机写回、/api/v1/sleep 读数均消费它）。此前的
+    # modules/sleep_module.py 及本门面的四个周期方法（run_light/rem/deep/dormant_
+    # sleep_cycle）回调从未接线（set_callbacks 零调用）、生产零调用方，
+    # 按教义第 7 条于 2026-11-14 一并退役。
 
     # ────── Explainability (委托到 modules/explainability_module.py) ──────
 

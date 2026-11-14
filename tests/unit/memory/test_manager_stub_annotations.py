@@ -41,32 +41,7 @@ def manager_source() -> str:
         return f.read()
 
 
-# ────── Sleep: 已委托到 modules/sleep_module.py ──────
-
-
-class TestSleepDelegated:
-    """验证 Sleep 区域已委托到真实模块（阶段2完成）"""
-
-    def test_light_sleep_returns_stats(self, manager):
-        """run_light_sleep_cycle 应返回统计字典，而非抛出异常"""
-        result = manager.run_light_sleep_cycle()
-        assert isinstance(result, dict)
-        assert "cycle" in result
-
-    def test_rem_sleep_returns_stats(self, manager):
-        result = manager.run_rem_sleep_cycle()
-        assert isinstance(result, dict)
-        assert result["cycle"] == "rem"
-
-    def test_deep_sleep_returns_stats(self, manager):
-        result = manager.run_deep_sleep_cycle()
-        assert isinstance(result, dict)
-        assert result["cycle"] == "deep"
-
-    def test_dormant_returns_stats(self, manager):
-        result = manager.run_dormant_cycle()
-        assert isinstance(result, dict)
-        assert result["cycle"] == "dormant"
+# ────── Sleep: 委托面已随 SleepModule 退役（教义第 7 条） ──────
 
 
 # ────── Explainability: 标注为 PARTIAL ──────

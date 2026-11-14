@@ -1443,16 +1443,16 @@ class Agent:
             "CognitiveStorageEngine 初始化完成: %s", self.memory_manager.persistenceDbPath()
         )
 
-        # 2. 初始化 UnifiedRetriever（包装旧检索器）
+        # 2. 初始化 UnifiedRetriever（CSE 直查 + MoE/Recall 混合召回）
+        # Hebb 支路已退役（教义第 7 条）：MemCore 本无 hebb_manager 属性，旧装配
+        # getattr 恒得 None，该支路从未生效；Neurova Hebb 走 chat_pipeline 注入步。
         moe_router = getattr(self.memory_agent, "moe_router", None)
         recall_engine = getattr(self.memory_agent, "recall_engine", None)
-        hebb_manager = getattr(self.memory_agent, "hebb_manager", None)
 
         self.unified_retriever = UnifiedRetriever(
             engine=self.cognitive_engine,
             moe_router=moe_router,
             recall_engine=recall_engine,
-            hebb_manager=hebb_manager,
         )
         logger.info("UnifiedRetriever 初始化完成")
 

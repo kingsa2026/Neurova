@@ -193,45 +193,6 @@ class Skill:
 
 
 @dataclass
-class SelfModel:
-    """自我模型"""
-
-    agent_id: str = ""
-    name: str = ""
-    personality_traits: List[str] = field(default_factory=list)
-    capabilities: List[str] = field(default_factory=list)
-    beliefs: Dict[str, Any] = field(default_factory=dict)
-    goals: List[str] = field(default_factory=list)
-    version: int = 1
-    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "agent_id": self.agent_id,
-            "name": self.name,
-            "personality_traits": self.personality_traits,
-            "capabilities": self.capabilities,
-            "beliefs": self.beliefs,
-            "goals": self.goals,
-            "version": self.version,
-            "updated_at": self.updated_at.isoformat(),
-        }
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "SelfModel":
-        return cls(
-            agent_id=data.get("agent_id", ""),
-            name=data.get("name", ""),
-            personality_traits=data.get("personality_traits", []),
-            capabilities=data.get("capabilities", []),
-            beliefs=data.get("beliefs", {}),
-            goals=data.get("goals", []),
-            version=data.get("version", 1),
-            updated_at=_parse_dt_field(data.get("updated_at"), datetime.now(timezone.utc)),
-        )
-
-
-@dataclass
 class Attachment:
     """附件"""
 

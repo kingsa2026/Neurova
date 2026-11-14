@@ -175,14 +175,16 @@ class TestRetrieverContractAndAssembly:
                 if getattr(r, "name", "") == "TKGRetriever"]
 
     def test_assemblyNeverBuildsThePrivateEmptyTable(self, store, monkeypatch):
-        """装配必须读底座；再出现无参 TemporalKnowledgeGraph() 就是 B01 原地复活。"""
-        import neurova.cognitive_layers.memory_layer.temporal_knowledge_graph as tkg_mod
+        """装配必须读底座；旧私有 TKG 表（temporal_knowledge_graph.py）已按教义第 7 条
+        整体退役——模块名再可导入就是 B01 原地复活。"""
+        import importlib
+
         import neurova.knowledge.foundation.knowledge_facts as kf_mod
 
-        def _boom(*a, **k):
-            raise AssertionError("012 之后装配不得再构造私有 TKG 表")
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(
+                "neurova.cognitive_layers.memory_layer.temporal_knowledge_graph")
 
-        monkeypatch.setattr(tkg_mod, "TemporalKnowledgeGraph", _boom)
         monkeypatch.setattr(kf_mod, "get_knowledge_fact_store", lambda *a, **k: store)
 
         branch = self._branch(self._pipeline())
