@@ -11,13 +11,13 @@
 
 from __future__ import annotations
 
-import datetime
 import json
 import uuid
 from collections import Counter
 from typing import Any, Callable, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.time_utils import nowIso as _now
 
 logger = get_logger(__name__)
 
@@ -47,10 +47,6 @@ CREATE TABLE IF NOT EXISTS ontology_communities (
     PRIMARY KEY (tenant_id, community_id)
 );
 """
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 def _labelPropagation(nodes: List[str], edges: List[tuple]) -> List[List[str]]:
@@ -109,20 +105,20 @@ class CommunityGraphBuilder:
             applyTo(self._store._conn)
 
     def _readGraph(self) -> tuple:
-        with self._store._lock:
-            nodeRows = self._store._conn.execute(
-                "SELECT canonical_label FROM knowledge_subjects"
-                " WHERE agent_id = ? AND tenant_id = ? AND status = 'active'"
-                " ORDER BY canonical_label",
-                (self._agentId, self._tenantId)).fetchall()
-            edgeRows = self._store._conn.execute(
-                "SELECT s.canonical_label AS src, f.object_term AS dst"
-                " FROM knowledge_facts f JOIN knowledge_subjects s"
-                " ON s.subject_key = f.subject_key"
-                " WHERE f.agent_id = ? AND f.tenant_id = ? AND f.status = 'active'"
-                " AND f.record_kind = 'triple' AND s.canonical_label = s.canonical_label"
-                " ORDER BY s.canonical_label, f.object_term, f.fact_id",
-                (self._agentId, self._tenantId)).fetchall()
+        # P3-6：图读数走 store 只读公开口，不再直摸 `_lock`/`_conn`。
+        nodeRows = self._store.queryReadOnly(
+            "SELECT canonical_label FROM knowledge_subjects"
+            " WHERE agent_id = ? AND tenant_id = ? AND status = 'active'"
+            " ORDER BY canonical_label",
+            (self._agentId, self._tenantId))
+        edgeRows = self._store.queryReadOnly(
+            "SELECT s.canonical_label AS src, f.object_term AS dst"
+            " FROM knowledge_facts f JOIN knowledge_subjects s"
+            " ON s.subject_key = f.subject_key"
+            " WHERE f.agent_id = ? AND f.tenant_id = ? AND f.status = 'active'"
+            " AND f.record_kind = 'triple' AND s.canonical_label = s.canonical_label"
+            " ORDER BY s.canonical_label, f.object_term, f.fact_id",
+            (self._agentId, self._tenantId))
         nodes = [str(r["canonical_label"]) for r in nodeRows]
         edges = [(str(r["src"]), str(r["dst"])) for r in edgeRows]
         return nodes, edges
@@ -253,17 +249,13 @@ def communityGlobalSearch(store: Any, query: str, agentId: str = "default",
                           tenantId: str = "default",
                           limit: int = 5) -> List[Dict[str, Any]]:
     """global 检索：查询→社区摘要 map 命中（词法重叠计分，零新依赖）。"""
-    from .foundation.foundation_schema import applyTo
-
-    with store._lock, store._conn:
-        applyTo(store._conn)
     queryTokens = set(query.casefold())
     hits: List[Dict[str, Any]] = []
-    with store._lock:
-        rows = store._conn.execute(
-            "SELECT community_id, member_labels_json, summary_text"
-            " FROM ontology_communities WHERE tenant_id = ? ORDER BY level",
-            (tenantId,)).fetchall()
+    # P3-6：读数走 store 只读公开口（表随 store 建库时就绪，无需此地再保一次 schema）。
+    rows = store.queryReadOnly(
+        "SELECT community_id, member_labels_json, summary_text"
+        " FROM ontology_communities WHERE tenant_id = ? ORDER BY level",
+        (tenantId,))
     for row in rows:
         summary = str(row["summary_text"] or "")
         summaryTokens = set(summary.casefold())
@@ -281,24 +273,18 @@ def communityDriftSearch(store: Any, entityLabel: str, agentId: str = "default",
                          tenantId: str = "default",
                          limit: int = 5) -> List[Dict[str, Any]]:
     """drift 检索：实体邻域（knowledge_facts 既有客体接力一跳）＋所属社区摘要混合。"""
-    from .foundation.foundation_schema import applyTo
-
-    with store._lock, store._conn:
-        applyTo(store._conn)
-    neighbors: List[str] = []
-    with store._lock:
-        rows = store._conn.execute(
-            "SELECT DISTINCT f.object_term FROM knowledge_facts f"
-            " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
-            " WHERE s.canonical_label = ? AND s.agent_id = ? AND s.tenant_id = ?"
-            " AND f.status = 'active' AND f.record_kind = 'triple' LIMIT ?",
-            (entityLabel, agentId, tenantId, int(limit))).fetchall()
+    # P3-6：读数走 store 只读公开口（同 communityGlobalSearch）。
+    rows = store.queryReadOnly(
+        "SELECT DISTINCT f.object_term FROM knowledge_facts f"
+        " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
+        " WHERE s.canonical_label = ? AND s.agent_id = ? AND s.tenant_id = ?"
+        " AND f.status = 'active' AND f.record_kind = 'triple' LIMIT ?",
+        (entityLabel, agentId, tenantId, int(limit)))
     neighbors = [str(r["object_term"]) for r in rows]
     hits: List[Dict[str, Any]] = []
-    with store._lock:
-        rows = store._conn.execute(
-            "SELECT community_id, member_labels_json, summary_text"
-            " FROM ontology_communities WHERE tenant_id = ?", (tenantId,)).fetchall()
+    rows = store.queryReadOnly(
+        "SELECT community_id, member_labels_json, summary_text"
+        " FROM ontology_communities WHERE tenant_id = ?", (tenantId,))
     for row in rows:
         labels = json.loads(row["member_labels_json"] or "[]")
         if entityLabel in labels or any(n in labels for n in neighbors):

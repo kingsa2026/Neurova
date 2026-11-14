@@ -45,7 +45,9 @@ class AppState:
         self.startup_manager = None
         self.health_checker = None
         self.agents: Dict[str, Any] = {}  # agent_id -> Agent instance
-        self.llm_client = None
+        # AppState.llm_client 假位已删除（P1-14，教义第 6 条）：全仓从未给它
+        # 装配过非 None 值，唯一消费者（冲突裁决 LLM 意见端点）因此恒 503。
+        # LLM 客户端的唯一事实源是各 Agent 的 `agent.llm_client`。
         self.provider_manager = None
         self.llm_router = None
         # G4/M0：本体 MCP server 的 lifespan 上下文与驱动栈（挂载失败为 None）
@@ -581,7 +583,6 @@ def _register_routes(app: FastAPI, app_state: AppState) -> None:
             "startup_manager": app_state.startup_manager,
             "health_checker": app_state.health_checker,
             "agents": app_state.agents,
-            "llm_client": app_state.llm_client,
             "provider_manager": app_state.provider_manager,
             "llm_router": app_state.llm_router,
             "channel_manager": app_state.channel_manager,
@@ -1189,7 +1190,6 @@ async def _on_startup(app_state: AppState) -> None:
             "startup_manager": app_state.startup_manager,
             "health_checker": app_state.health_checker,
             "agents": app_state.agents,
-            "llm_client": app_state.llm_client,
             "provider_manager": app_state.provider_manager,
             "llm_router": app_state.llm_router,
             "channel_manager": app_state.channel_manager,

@@ -389,6 +389,25 @@ def _resolve_runtime_agents(request: Optional[Request]) -> Dict[str, Any]:
         return {}
 
 
+def resolveAgentLlmClients(request: Optional[Request], prefer_agent_id: Optional[str] = None) -> List[Any]:
+    """运行时 Agent 注册表 → 可用 LLM 客户端候选（prefer_agent_id 优先）。
+
+    LLM 客户端的唯一事实源是各 Agent 的 `llm_client`（per-agent 模型配置）；
+    运行时无任何可用客户端时返回空列表——调用方按自己的契约诚实降级
+    （后台任务跳过 / 端点 503），不再读 `AppState.llm_client` 这个从未装配的假位
+    （P1-14：该字段恒 None，曾经它当依赖的端点生产恒 503）。
+    """
+    agents = _resolve_runtime_agents(request)
+    candidates: List[Any] = []
+    if prefer_agent_id and prefer_agent_id in agents:
+        candidates.append(agents[prefer_agent_id])
+    for aid, agent in agents.items():
+        if prefer_agent_id and aid == prefer_agent_id:
+            continue
+        candidates.append(agent)
+    return [c for c in (getattr(a, "llm_client", None) for a in candidates) if c is not None]
+
+
 def _default_llm_call(request: Optional[Request], prefer_agent_id: Optional[str] = None):
     """从运行时 Agent 解析 LLM 调用器（prompt→文本）；不可用返回 None（跳过抽取）。
 
@@ -402,15 +421,7 @@ def _default_llm_call(request: Optional[Request], prefer_agent_id: Optional[str]
     逐个回退其他活跃 Agent——抽取是后台增强任务，不应因单个 Agent 配置坏而死亡。
     """
     try:
-        agents = _resolve_runtime_agents(request)
-        candidates: List[Any] = []
-        if prefer_agent_id and prefer_agent_id in agents:
-            candidates.append(agents[prefer_agent_id])
-        for aid, agent in agents.items():
-            if prefer_agent_id and aid == prefer_agent_id:
-                continue
-            candidates.append(agent)
-        clients = [c for c in (getattr(a, "llm_client", None) for a in candidates) if c is not None]
+        clients = resolveAgentLlmClients(request, prefer_agent_id=prefer_agent_id)
         if not clients:
             return None
 

@@ -90,3 +90,23 @@ class TestCommunitiesDetectEndpoint:
             lambda: dict(VIEWER)
         r = client.post(f"{PREFIX}/ontology/communities/detect")
         assert r.status_code == 403, f"普通用户触发应 403，得到 {r.status_code}"
+
+    def test_repeatedDetectDoesNotAccumulate(self, client, store):
+        """P2-14：detect 改走 rebuildIfDrifted(driftThreshold=1.0) 替换式落库——
+        重复触发不再"每次全新 community_id 落行、旧行不清"地把读数与
+        global/drift 检索污染成同批节点的多套社区行。"""
+        _seedGraph(store)
+        r1 = client.post(f"{PREFIX}/ontology/communities/detect")
+        assert r1.status_code == 200
+        first = r1.json()["data"]
+        assert len(first) >= 1, "首测应产出社区"
+        r2 = client.post(f"{PREFIX}/ontology/communities/detect")
+        assert r2.status_code == 200
+        second = r2.json()["data"]
+        assert len(second) == len(first), "两次 detect 后行数不得翻倍"
+        assert ({r["community_id"] for r in second}
+                == {r["community_id"] for r in first}), "无漂移时 community_id 保持不变"
+        # 账面核实：表内行数＝读数行数（无隐藏的旧 community_id 残留）
+        count = store.queryReadOnly(
+            "SELECT COUNT(*) AS n FROM ontology_communities")[0]["n"]
+        assert count == len(first)

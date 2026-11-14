@@ -4,6 +4,7 @@
 纪律：意见只读辅助，不落账不改状态；解析不合法/winner 越权一律 ValueError。
 """
 
+import asyncio
 import json
 from types import SimpleNamespace
 
@@ -75,13 +76,13 @@ class TestOrchestration:
             def __init__(self):
                 self.seen = None
 
-            def chat(self, messages, **kwargs):
+            async def chat(self, messages, **kwargs):
                 self.seen = messages
                 return SimpleNamespace(content=json.dumps(
                     {"contradicts": True, "winner_fact_id": "f2", "reason": "离线更可信"}))
 
         fake = _FakeLlm()
-        advice = llmConflictAdvice(fake, MEMBERS)
+        advice = asyncio.run(llmConflictAdvice(fake, MEMBERS))
         assert advice["winner_fact_id"] == "f2"
         assert advice["contradicts"] is True
         assert advice["members"] == ["f1", "f2"]
@@ -89,16 +90,16 @@ class TestOrchestration:
 
     def test_llmFailurePropagates(self):
         class _BrokenLlm:
-            def chat(self, messages, **kwargs):
+            async def chat(self, messages, **kwargs):
                 raise ConnectionError("网关不可达")
 
         with pytest.raises(ConnectionError):
-            llmConflictAdvice(_BrokenLlm(), MEMBERS)
+            asyncio.run(llmConflictAdvice(_BrokenLlm(), MEMBERS))
 
     def test_badLlmOutputRaisesValueError(self):
         class _BadLlm:
-            def chat(self, messages, **kwargs):
+            async def chat(self, messages, **kwargs):
                 return SimpleNamespace(content="我不同意")
 
         with pytest.raises(ValueError):
-            llmConflictAdvice(_BadLlm(), MEMBERS)
+            asyncio.run(llmConflictAdvice(_BadLlm(), MEMBERS))

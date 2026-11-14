@@ -86,7 +86,7 @@ pytestmark = pytest.mark.timeout(120)
 EXPECTED_FACES: dict = {  # type: ignore[type-arg]
     "neurova.api.endpoints": {
         "DEFAULT_AGENT_ID", "ENDPOINT_MODULES", "defaultAgentId", "get_agent_instance",
-        "get_app_state", "get_health_checker", "get_llm_client", "get_provider_manager",
+        "get_app_state", "get_health_checker", "get_provider_manager",
         "get_startup_manager", "register_endpoint_routers", "setDefaultAgentId",
         "set_app_state"},
     "neurova.computer_use": {

@@ -17,7 +17,6 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user_or_service
-from neurova.api.deps import get_llm_client
 from neurova.core.logger import get_logger
 from neurova.api.endpoints.knowledge_common import (
     KnowledgeItem,
@@ -30,6 +29,7 @@ from neurova.api.endpoints.knowledge_common import (
     guard,
     item_response,
     resolve_usernames,
+    resolveAgentLlmClients,
 )
 
 logger = get_logger(__name__)
@@ -175,15 +175,25 @@ async def conflict_llm_advice(
     request: Request,
     conflict_id: str = Path(..., description="冲突记录ID"),
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
-    llm: Any = Depends(get_llm_client),
 ):
     """pending 冲突的 LLM 参考意见（仅管理员，主动触发）。
 
     只读辅助：不落账、不改冲突状态、不自动 supersede——真正的裁决仍走
     resolve 端点（建议不改判，工单 007）。LLM 不可用诚实 503，输出不合法 502。
+
+    LLM 客户端走 agent 作用域单源：从运行时 Agent 注册表取 `agent.llm_client`
+    （与图谱抽取/出题同一解析，`resolveAgentLlmClients`）。运行时一个可用
+    客户端都没有时诚实 503——不再经 `AppState.llm_client` 这个从未装配的恒
+    None 假位（P1-14：曾使本端点生产恒 503/502）。
     """
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="仅管理员可请求 LLM 裁决意见")
+    clients = resolveAgentLlmClients(request)
+    if not clients:
+        raise HTTPException(
+            status_code=503,
+            detail="LLM 客户端不可用: 运行时无任何 Agent 装配 llm_client",
+        )
     store = _factStore()
     tenant = str(current_user.get("tenant_id") or "default")
     pendingIds = {str(r.get("conflict_id") or "")
@@ -197,7 +207,7 @@ async def conflict_llm_advice(
     from neurova.knowledge.foundation.conflict_llm_judge import llmConflictAdvice
 
     try:
-        advice = llmConflictAdvice(llm, members)
+        advice = await llmConflictAdvice(clients[0], members)
     except ValueError as e:
         raise HTTPException(status_code=502, detail="LLM 意见不可用: %s" % e)
     except Exception as e:  # noqa: BLE001 - LLM 面故障诚实上报

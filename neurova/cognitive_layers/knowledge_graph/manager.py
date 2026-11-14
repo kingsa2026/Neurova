@@ -1064,6 +1064,13 @@ class KnowledgeGraphManager:
                 "stats": self.get_stats().to_dict(),
             }
 
+    def nodesSnapshot(self, limit: int = 2000) -> List[GraphNode]:
+        """节点只读快照（公开口，P3-6 收口）：端点读数面经此取节点对象，
+        不再直摸 `_nodes`。返回 GraphNode 本体（blocking 等判据要吃对象属性，
+        不是 to_dict 的字典）。锁内拷贝，调用方拿到后与图解耦。"""
+        with self._lock:
+            return list(self._nodes.values())[: max(0, int(limit))]
+
     def get_stats(self) -> GraphStats:
         """获取图谱统计信息"""
         with self._lock:

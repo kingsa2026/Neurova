@@ -115,6 +115,47 @@
       </GlassCard>
     </div>
 
+    <!-- P2-8 上下文调试区：/context 的 build→preview→compress 与 inject 三兄弟的真实消费面 -->
+    <GlassCard variant="subtle" class="context-debug">
+      <div class="breakdown-header">{{ t('memory.contextDebug') }}</div>
+      <p class="context-debug-desc">{{ t('memory.contextDebugDesc') }}</p>
+      <a-textarea
+        v-model:value="ctxDebug.input"
+        :rows="2"
+        :placeholder="t('memory.contextDebugInputHint')"
+      />
+      <div class="context-debug-actions">
+        <GlassButton variant="primary" size="sm" :loading="ctxDebug.building" @click="handleContextBuild">
+          {{ t('memory.contextBuild') }}
+        </GlassButton>
+        <span class="ctx-target">
+          <span class="ctx-target-label">{{ t('memory.contextTargetTokens') }}</span>
+          <a-input-number v-model:value="ctxDebug.targetTokens" :min="64" :max="200000" size="small" style="width: 120px" />
+        </span>
+        <GlassButton
+          variant="secondary"
+          size="sm"
+          :disabled="!ctxDebug.contextId"
+          :loading="ctxDebug.compressing"
+          @click="handleContextCompress"
+        >
+          {{ t('memory.contextCompress') }}
+        </GlassButton>
+        <a-divider type="vertical" />
+        <GlassButton variant="ghost" size="sm" :loading="ctxDebug.injecting === 'reflection'" @click="handleContextInject('reflection')">
+          {{ t('memory.contextInjectReflection') }}
+        </GlassButton>
+        <GlassButton variant="ghost" size="sm" :loading="ctxDebug.injecting === 'memories'" @click="handleContextInject('memories')">
+          {{ t('memory.contextInjectMemories') }}
+        </GlassButton>
+        <GlassButton variant="ghost" size="sm" :loading="ctxDebug.injecting === 'hot'" @click="handleContextInject('hot')">
+          {{ t('memory.contextInjectHot') }}
+        </GlassButton>
+      </div>
+      <div v-if="ctxDebug.meta" class="context-meta">{{ ctxDebug.meta }}</div>
+      <pre v-if="ctxDebug.output" class="context-output">{{ ctxDebug.output }}</pre>
+    </GlassCard>
+
     <!-- Tabs & filters -->
     <GlassCard>
       <a-tabs v-model:activeKey="activeTab" @change="onTabChange">
@@ -324,6 +365,31 @@
         <a-form-item :label="t('memory.tags')">
           <a-select v-model:value="createForm.tags" mode="tags" :placeholder="t('memory.addTags')" />
         </a-form-item>
+        <!-- P2-13：C6 有效期窗口写入面（ISO 8601 串；两者皆可选，缺省不设界） -->
+        <a-row :gutter="16">
+          <a-col :span="12">
+            <a-form-item :label="t('memory.validFrom')">
+              <a-date-picker
+                v-model:value="createForm.validFrom"
+                show-time
+                value-format="YYYY-MM-DDTHH:mm:ssZ"
+                style="width: 100%"
+                :placeholder="t('memory.validityOptional')"
+              />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item :label="t('memory.validUntil')">
+              <a-date-picker
+                v-model:value="createForm.validUntil"
+                show-time
+                value-format="YYYY-MM-DDTHH:mm:ssZ"
+                style="width: 100%"
+                :placeholder="t('memory.validityOptional')"
+              />
+            </a-form-item>
+          </a-col>
+        </a-row>
       </a-form>
     </a-modal>
 
@@ -462,6 +528,7 @@ import { useAgentStore } from '@/stores/agents'
 import { useAuthStore } from '@/stores/auth'
 import * as memoryApi from '@/api/modules/memory'
 import type { MemoryEntry, MemorySearchResult, MemoryStats } from '@/api/modules/memory'
+import * as contextApi from '@/api/modules/context'
 import { listGroups } from '@/api/modules/groups'
 
 // 模板里直接读模块命名空间（memoryApi.X）会让渲染代理去 unref 命名空间对象，
@@ -612,6 +679,94 @@ async function saveMarkdownEdits(): Promise<void> {
 // Stats from API
 const memoryStats = ref<MemoryStats | null>(null)
 
+// ── P2-8：context 面接线（build/preview/compress 与 inject 三兄弟此前零前端消费）──
+const ctxDebug = reactive({
+  input: '',
+  contextId: '',
+  targetTokens: 512,
+  building: false,
+  compressing: false,
+  injecting: '' as '' | 'reflection' | 'memories' | 'hot',
+  meta: '',
+  output: '',
+})
+
+/** 构建上下文：产物按 id 落在后端登记表，preview/compress 都围着这个 id 转 */
+async function handleContextBuild(): Promise<void> {
+  ctxDebug.building = true
+  try {
+    // axios 拦截器已剥到 HTTP 体；/build 直接回 BuildContextResponse（无信封）
+    const body: any = await contextApi.buildContext({
+      agent_id: agentId.value || 'default',
+      user_input: ctxDebug.input,
+    })
+    ctxDebug.contextId = body?.context_id ?? ''
+    ctxDebug.meta = t('memory.contextBuiltMeta', {
+      tokens: body?.token_count ?? 0,
+      sources: (body?.sources ?? []).join(', '),
+    })
+    // 展示内容经 preview 端点读登记产物（preview 由此有真实消费方）；
+    // 产物被有界淘汰时回落 build 响应原文，不误报为空。
+    let content = body?.content ?? ''
+    if (ctxDebug.contextId) {
+      try {
+        const preview: any = await contextApi.getContextPreview(ctxDebug.contextId)
+        const p = preview?.data ?? preview
+        if (p?.content) content = p.content
+      } catch { /* 404＝产物已淘汰，用 build 原文 */ }
+    }
+    ctxDebug.output = content
+  } catch (e: any) {
+    reportApiFailure(e)
+  } finally {
+    ctxDebug.building = false
+  }
+}
+
+/** 压缩当前构建产物：保留最近段落至目标 token 预算，结果写回登记（再预览即压缩后版本） */
+async function handleContextCompress(): Promise<void> {
+  if (!ctxDebug.contextId) return
+  ctxDebug.compressing = true
+  try {
+    const body: any = await contextApi.compressContext(ctxDebug.contextId, ctxDebug.targetTokens)
+    const payload = body?.data ?? body
+    ctxDebug.meta = t('memory.contextCompressedMeta', {
+      original: payload?.original_tokens ?? 0,
+      compressed: payload?.compressed_tokens ?? 0,
+      dropped: payload?.dropped_segments ?? 0,
+    })
+    ctxDebug.output = payload?.content ?? ''
+  } catch (e: any) {
+    reportApiFailure(e)
+  } finally {
+    ctxDebug.compressing = false
+  }
+}
+
+/** 注入三兄弟：反思日志 / 相关记忆 / 高温记忆——调试区只读展示，不改上下文 */
+async function handleContextInject(kind: 'reflection' | 'memories' | 'hot'): Promise<void> {
+  ctxDebug.injecting = kind
+  try {
+    const aid = agentId.value || 'default'
+    let payload: any
+    if (kind === 'reflection') {
+      payload = (await contextApi.injectReflection(aid, 10) as any)?.data
+      ctxDebug.output = JSON.stringify(payload?.reflection_logs ?? [], null, 2)
+    } else if (kind === 'memories') {
+      payload = (await contextApi.injectMemories(aid, ctxDebug.input, 10) as any)?.data
+      ctxDebug.output = JSON.stringify(payload?.memories ?? [], null, 2)
+    } else {
+      payload = (await contextApi.injectHotMemories(aid, 5) as any)?.data
+      ctxDebug.output = JSON.stringify(payload?.hot_memories ?? [], null, 2)
+    }
+    ctxDebug.meta = t('memory.contextInjectMeta', { count: payload?.count ?? 0 })
+  } catch (e: any) {
+    reportApiFailure(e)
+  } finally {
+    ctxDebug.injecting = ''
+  }
+}
+
 // Semantic search results
 const searchResults = ref<MemorySearchResult[]>([])
 
@@ -626,6 +781,9 @@ const createForm = ref({
   category: 'general',
   importance: 0.5,
   tags: [] as string[],
+  // P2-13：C6 有效期窗口（ISO 8601 串，date-picker value-format 直出）
+  validFrom: '' as string,
+  validUntil: '' as string,
 })
 
 const typeColor = (type: string) =>
@@ -813,12 +971,15 @@ const createMemory = async () => {
         memory_type: createForm.value.type,
         importance: createForm.value.importance,
         tags: createForm.value.tags.length > 0 ? createForm.value.tags : undefined,
+        // P2-13：有效期窗口透传（空串＝不设界）
+        valid_from: createForm.value.validFrom || undefined,
+        valid_until: createForm.value.validUntil || undefined,
       },
       agentId.value,
     )
     message.success(t('common.success'))
     showCreateModal.value = false
-    createForm.value = { content: '', type: 'semantic', category: 'general', importance: 0.5, tags: [] }
+    createForm.value = { content: '', type: 'semantic', category: 'general', importance: 0.5, tags: [], validFrom: '', validUntil: '' }
     await fetchMemories()
     await fetchStats()
   } catch (e: any) {
@@ -1345,5 +1506,51 @@ async function handleRejectPending(item: memoryApi.PendingMemory) {
   overflow-x: auto;
   max-height: 160px;
   margin: 0;
+}
+
+/* P2-8 上下文调试区 */
+.context-debug .context-debug-desc {
+  color: var(--nr-text-tertiary);
+  font-size: 12px;
+  margin: 4px 0 10px;
+}
+
+.context-debug-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.ctx-target {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ctx-target-label {
+  font-size: 12px;
+  color: var(--nr-text-tertiary);
+}
+
+.context-debug .context-meta {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+}
+
+.context-debug .context-output {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  background: var(--nr-bg-inset);
+  border-radius: 8px;
+  font-family: var(--nr-font-mono);
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 280px;
+  overflow: auto;
 }
 </style>

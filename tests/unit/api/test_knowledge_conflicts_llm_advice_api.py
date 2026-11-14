@@ -3,9 +3,17 @@
 
 仅管理员；只对 pending 事实轴冲突给意见；LLM 坏输出 502、不可用 503；
 不落账不改状态（意见后冲突仍 pending，resolve 通道不受影响）。
+
+P1-14 后 LLM 客户端走 agent 作用域单源（运行时 Agent 注册表的
+`agent.llm_client`，与图谱抽取/出题同一解析）：测试经 `app.state.agents`
+注入 fake agent——这正是 `knowledge_common._resolve_runtime_agents` 注明的
+"测试自建 app 直接挂载"回退路径。fake 的 `chat` 是 **async**，与生产
+`AgentLLMClient.chat` 同形：此前的同步 fake 依赖覆盖恰好掩盖了
+"AppState.llm_client 恒 None + 同步调 async chat"的双重断链。
 """
 
 import json
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -13,7 +21,6 @@ from fastapi.testclient import TestClient
 
 from neurova.api import auth as knowledge_auth
 from neurova.api.endpoints import knowledge as knowledge_module
-from neurova.api.deps import get_llm_client
 from neurova.knowledge.foundation.admission import (
     AdmissionRequest,
     productionAdmissionGate,
@@ -36,8 +43,8 @@ def _seedPendingConflict(store: KnowledgeFactStore) -> str:
             objectTerm=obj, content=content,
             assertions=[{"actorType": "pipeline", "actorId": "unit",
                          "mediumRef": "unit:test", "statementText": content}]))
-    rows = store._conn.execute(
-        "SELECT fact_id FROM knowledge_facts ORDER BY fact_id").fetchall()
+    rows = store.queryReadOnly(
+        "SELECT fact_id FROM knowledge_facts ORDER BY fact_id")
     memberIds = [str(r["fact_id"]) for r in rows][:2]
     conflictId = store.insertConflict(
         kind="value", subjectKey="s_a1", predicateTermId="status_a",
@@ -46,6 +53,20 @@ def _seedPendingConflict(store: KnowledgeFactStore) -> str:
         status="pending", winnerFactId=None, tenantId="default")
     assert conflictId, "pending 冲突行必须落账"
     return conflictId
+
+
+def _asyncLlm(responder) -> SimpleNamespace:
+    """async chat 的 fake LLM 客户端（与 AgentLLMClient.chat 同形）。"""
+
+    async def _chat(messages, **kwargs):
+        return responder(messages, **kwargs)
+
+    return SimpleNamespace(chat=_chat)
+
+
+def _installLlm(client: TestClient, llm) -> None:
+    """把 fake agent 装进本 app 的运行时注册表（端点解析的唯一取源）。"""
+    client.app.state.agents = {"default": SimpleNamespace(llm_client=llm)}
 
 
 @pytest.fixture()
@@ -61,24 +82,17 @@ def api(tmp_path, monkeypatch):
     holder = {"user": dict(ADMIN)}
     app.dependency_overrides[knowledge_auth.get_current_user_or_service] = (
         lambda: holder["user"])
-    fake_llm = type("FakeLlm", (), {
-        "chat": staticmethod(lambda messages, **kw: type(
-            "R", (), {"content": json.dumps({
-                "contradicts": True, "winner_fact_id": "f?",
-                "reason": "测试意见"})})()),
-    })()
 
-    def _fake_chat(messages, **kwargs):
+    def _respond(messages, **kwargs):
         memberLine = [ln for ln in messages[1]["content"].splitlines()
                       if "fact_id=" in ln]
         winner = memberLine[0].split("fact_id=")[1].split(" ")[0]
-        return type("R", (), {"content": json.dumps({
+        return SimpleNamespace(content=json.dumps({
             "contradicts": True, "winner_fact_id": winner,
-            "reason": "第一条更可信"})})()
+            "reason": "第一条更可信"}))
 
-    fake_llm.chat = _fake_chat
-    app.dependency_overrides[get_llm_client] = lambda: fake_llm
     client = TestClient(app)
+    _installLlm(client, _asyncLlm(_respond))
     yield client, holder, store, conflictId
     store.close()
 
@@ -105,25 +119,31 @@ class TestLlmAdviceApi:
         client, holder, store, conflictId = api
         assert client.post(f"{PREFIX}/conflicts/nope/llm-advice").status_code == 404
 
-    def test_badLlmOutputIs502(self, api, monkeypatch):
+    def test_badLlmOutputIs502(self, api):
         client, holder, store, conflictId = api
 
-        def _bad_chat(messages, **kwargs):
-            return type("R", (), {"content": "说不清"})()
+        def _bad_respond(messages, **kwargs):
+            return SimpleNamespace(content="说不清")
 
-        app = client.app
-        app.dependency_overrides[get_llm_client] = lambda: type(
-            "BadLlm", (), {"chat": staticmethod(_bad_chat)})()
+        _installLlm(client, _asyncLlm(_bad_respond))
         resp = client.post(f"{PREFIX}/conflicts/{conflictId}/llm-advice")
         assert resp.status_code == 502
 
     def test_llmOutageIs503(self, api):
         client, holder, store, conflictId = api
 
-        def _down_chat(messages, **kwargs):
+        async def _down_chat(messages, **kwargs):
             raise ConnectionError("网关不可达")
 
-        client.app.dependency_overrides[get_llm_client] = lambda: type(
-            "DownLlm", (), {"chat": staticmethod(_down_chat)})()
+        _installLlm(client, SimpleNamespace(chat=_down_chat))
         resp = client.post(f"{PREFIX}/conflicts/{conflictId}/llm-advice")
         assert resp.status_code == 503
+
+    def test_noLlmClientIsHonest503(self, api):
+        """P1-14 判据：运行时一个可用 llm_client 都没有时诚实 503——
+        不再经 AppState.llm_client 这个恒 None 假位把"没装配"藏成别种故障。"""
+        client, holder, store, conflictId = api
+        client.app.state.agents = {}
+        resp = client.post(f"{PREFIX}/conflicts/{conflictId}/llm-advice")
+        assert resp.status_code == 503
+        assert "llm_client" in resp.json()["detail"]

@@ -17,6 +17,7 @@ S2 开写面：术语/规则 CRUD、删除前影响面、变更留痕。判据�
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, Path
@@ -592,21 +593,58 @@ async def simulate_webhook_push(
     return {"code": 0, "data": result, "request_id": ""}
 
 
+@router.post("/ontology/webhook/receive")
+async def receive_webhook_push(request: Request):
+    """P2-9：企业 webhook 入站接收——外部系统唯一的推送 URL。
+
+    **公开路由**：不走 JWT，由 `WebhookReceiver` 的 HMAC-SHA256 签名校验把关
+    （fail-closed：无有效签名一律拒收；时间戳 ±300s 窗口拒重放；幂等键
+    (source_id, idempotency_key) 去重拒二次写；接收面缺省 off，env 显式开）。
+    HTTP 恒 200，验签/去重/admit 的结论都在回执里如实带出（接收器原话，
+    不加工）——不借状态码区分"拒收原因"，也不给坏请求重试风暴的抓手。
+
+    请求契约：
+    - 头 `X-Neurova-Signature`：`HMAC-SHA256(body + timestamp, secret)` 的 hex
+      （与 `computeSignature`/simulate 同一算法）。
+    - 头 `X-Neurova-Timestamp`：unix 秒（重放窗口见 TIMESTAMP_WINDOW_SECONDS）。
+    - 头 `X-Neurova-Source`（可选）：源标识，进幂等键；缺省 "webhook"。
+    - 头 `X-Neurova-Tenant`（可选）：租户分区；缺省 "default"。
+    - 体：JSON `{"idempotency_key", "subject", "predicate", "object"}`。
+    - secret：源配置面 env（`NEUROVA_KB_WEBHOOK_SECRET`），与 rotate/simulate 单源。
+    """
+    import os
+
+    from neurova.knowledge.enterprise.webhook_receiver import (
+        WEBHOOK_SECRET_ENV,
+        WebhookReceiver,
+    )
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+
+    body = await request.body()
+    signature = request.headers.get("X-Neurova-Signature", "")
+    timestamp = request.headers.get("X-Neurova-Timestamp", "")
+    sourceId = request.headers.get("X-Neurova-Source", "webhook")
+    tenantId = request.headers.get("X-Neurova-Tenant", "default")
+    store = get_knowledge_fact_store()
+    receiver = WebhookReceiver(store, secret=os.environ.get(WEBHOOK_SECRET_ENV, ""),
+                               sourceId=str(sourceId or "webhook"),
+                               agentId="default", tenantId=str(tenantId or "default"))
+    receipt = receiver.handle(body, timestamp, signature)
+    return {"code": 0, "data": receipt, "request_id": ""}
+
+
 @router.get("/ontology/webhook/dedup-stats")
 async def get_webhook_dedup_stats(
     current_user: Dict = Depends(get_current_user_or_service),
 ):
     """U5：幂等去重台账读数（行数＋源数）——表随 v49 步就绪，未消费即 0。"""
     from neurova.knowledge.foundation import get_knowledge_fact_store
-    from neurova.knowledge.foundation.foundation_schema import applyTo
 
     store = get_knowledge_fact_store()
-    with store._lock:
-        applyTo(store._conn)
-        row = store._conn.execute(
-            "SELECT COUNT(*) AS n, COUNT(DISTINCT source_id) AS s"
-            " FROM enterprise_webhook_dedup").fetchone()
-    return {"code": 0, "data": {"rows": row["n"], "sources": row["s"]},
+    rows = store.queryReadOnly(
+        "SELECT COUNT(*) AS n, COUNT(DISTINCT source_id) AS s"
+        " FROM enterprise_webhook_dedup")
+    return {"code": 0, "data": {"rows": rows[0]["n"], "sources": rows[0]["s"]},
             "request_id": ""}
 
 
@@ -625,7 +663,7 @@ async def get_blocking_stats(
     from neurova.knowledge.resolution import candidatePairsBlocking, candidatePairsFullScan
 
     manager = _get_kg_manager(str(agent_id or "default"), _tenantOf(current_user))
-    nodes = (list(manager._nodes.values())[:max(1, min(int(node_limit), 2000))]
+    nodes = (manager.nodesSnapshot(limit=max(1, min(int(node_limit), 2000)))
              if manager is not None else [])
     full = candidatePairsFullScan(nodes)
     blocked = candidatePairsBlocking(nodes)
@@ -1083,13 +1121,24 @@ async def detect_ontology_communities(
     """W8：社区检测手动触发（管理员）——标签传播＋持久化，返回社区行清单。
 
     检测缺省 off（读数面只出不进），本端点是唯一手动入口；摄取后增量另计。
+
+    P2-14：改走 `rebuildIfDrifted(driftThreshold=1.0)` 的替换式落库（同事务
+    先删该 (tenant, level) 旧行再插新行）——旧 `detect()` 每次用全新
+    community_id 落行、旧行不清，管理员多次点击即同批节点存多套 community_id，
+    社区读数与 global/drift 检索被重复污染。阈值取 1.0＝"首建或结构全换才
+    重建，否则如实返回现况"：本端点是**幂等快照入口**，增量漂移维护走
+    `/communities/refresh`（阈值 0.3）。响应仍是社区行清单（与旧契约同形，
+    GraphWorkbench 的 detect→list 链不变）。
     """
     from neurova.knowledge.community_graph import CommunityGraphBuilder
 
     store, _registry, _engine = _ontologyParts()
-    rows = CommunityGraphBuilder(store, agentId=str(current_user.get("agent_id") or "default"),
-                                 tenantId=_tenantOf(current_user)).detect()
-    return {"code": 0, "data": rows, "request_id": ""}
+    builder = CommunityGraphBuilder(store, agentId=str(current_user.get("agent_id") or "default"),
+                                    tenantId=_tenantOf(current_user))
+    # P3-4：标签传播是同步 CPU 计算，放线程池执行——不阻塞事件循环
+    #（只包计算，不改算法）。
+    await asyncio.to_thread(builder.rebuildIfDrifted, driftThreshold=1.0)
+    return {"code": 0, "data": builder.loadCommunities(), "request_id": ""}
 
 
 @router.post("/ontology/communities/refresh")
@@ -1130,12 +1179,11 @@ async def list_ontology_simulations(
 
     store = get_knowledge_fact_store()
     tenant = _tenantOf(current_user)
-    with store._lock:
-        rows = store._conn.execute(
-            "SELECT simulation_id, agent_id, scope_json, hypothesis_json,"
-            " diff_summary_json, created_at FROM ontology_simulations"
-            " WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?",
-            (tenant, int(limit))).fetchall()
+    rows = store.queryReadOnly(
+        "SELECT simulation_id, agent_id, scope_json, hypothesis_json,"
+        " diff_summary_json, created_at FROM ontology_simulations"
+        " WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?",
+        (tenant, int(limit)))
     import json as _json
 
     items = []
