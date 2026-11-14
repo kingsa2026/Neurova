@@ -150,6 +150,13 @@ async def get_performance_metrics(request: Request):
     error_requests = 0
     for family in metrics.http_requests_total.collect():
         for sample in family.samples:
+            # 只认 counter 本体的 `_total` 样本：prometheus_client 会附送
+            # `_created` 派生样本（值为创建时刻的 Unix 时间戳），混入求和会把
+            # total 抬成 ~1e9 量级、error_rate 拉成 ~0.5 的死数（新建 label
+            # 组时还会让 RPS 差分爆表）。按暴露的样本名逐字匹配，与
+            # analytics._counterSamples 同一教训、同一口径。
+            if sample.name != "neurova_http_requests_total":
+                continue
             total_requests += int(sample.value)
             if str(sample.labels.get("status", "")).startswith("5"):
                 error_requests += int(sample.value)
