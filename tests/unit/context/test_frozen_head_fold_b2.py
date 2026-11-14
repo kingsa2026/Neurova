@@ -174,9 +174,13 @@ class TestGrowthGateWiring:
         monkeypatch.setenv("NEUROVA_FOLD_GROWTH_GATE", "1")
         monkeypatch.setenv("NEUROVA_FOLD_GROWTH_FLOOR", "0.1")
         monkeypatch.setenv("NEUROVA_FOLD_GROWTH_MIN_TOKENS", "1000")
+        # 份额也放宽（门槛随预算缩放后 = max(2000, 预算×份额)，100000×0.25=25000
+        # 会盖过本用例的增量）——本用例验证的是"门开即按门折叠"的接线，
+        # 不是份额刻度本身。
+        monkeypatch.setenv("NEUROVA_FOLD_GROWTH_BUDGET_SHARE", "0.01")
         orch = self._mk_orchestrator(budget=100000)  # 永不击穿
         orch._window_hard_limit = 1000000
-        # 12 条 ≈ 10.9k token，占用 0.11 ≥ 0.1，增量 10.9k ≥ 1000，
+        # 12 条 ≈ 10.9k token，占用 0.11 ≥ 0.1，增量 10.9k ≥ max(1000, 1000)，
         # 可折 6 条 ≥ keep_min → 主动折（未超预算）
         async def fake_summarize(chunks, previous_summary=""):
             return "摘要：主动折叠主题Z。"

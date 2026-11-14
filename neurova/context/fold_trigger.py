@@ -85,6 +85,20 @@ def growthGateParams() -> Dict[str, float]:
     }
 
 
+def growthBudgetShare() -> float:
+    """增量门槛的**预算份额**（窗口自适应，B5 追加批）。
+
+    门槛随模型窗口缩放：大窗口模型要积累更多增量才主动折（"模型给多大
+    预算，系统花多大"），小窗口模型更早折。有效门槛 =
+    max(静态下限 NEUROVA_FOLD_GROWTH_MIN_TOKENS, 预算 × 本份额)。
+    """
+    try:
+        share = float(os.environ.get("NEUROVA_FOLD_GROWTH_BUDGET_SHARE", "0.25"))
+    except (TypeError, ValueError):
+        share = 0.25
+    return min(max(share, 0.0), 1.0)
+
+
 def decideFoldTrigger(
     *,
     total_tokens: int,
@@ -130,7 +144,13 @@ def decideFoldTrigger(
     params = growthGateParams()
     if occupancy < params["floor"]:
         return FoldTriggerDecision(False, REASON_BELOW_FLOOR, occupancy, growth_tokens, growth_msgs)
-    if growth_tokens < params["growth_min_tokens"] or growth_msgs < params["growth_min_msgs"]:
+    # 窗口自适应（B5 追加批）：增量门槛随预算缩放——大窗口模型要积累更多
+    # 增量才主动折，小窗口模型更早折；静态下限兜住小预算场景。
+    growth_floor_tokens = max(
+        params["growth_min_tokens"],
+        int(budget_tokens * growthBudgetShare()),
+    )
+    if growth_tokens < growth_floor_tokens or growth_msgs < params["growth_min_msgs"]:
         return FoldTriggerDecision(False, REASON_INSUFFICIENT_GROWTH, occupancy, growth_tokens, growth_msgs)
     if max(0, int(foldable_msgs)) < max(0, int(keep_min_messages)):
         return FoldTriggerDecision(False, REASON_INSUFFICIENT_MASS, occupancy, growth_tokens, growth_msgs)
