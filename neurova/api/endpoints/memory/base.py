@@ -7,10 +7,11 @@ from __future__ import annotations
 """
 
 from neurova.core.logger import get_logger
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from neurova.api.auth import requireIdentityForMemoryFace
 from neurova.interfaces.api_standard import (
@@ -76,6 +77,29 @@ class AddMemoryRequest(BaseModel):
     # 全员可见；share_group_ids＝读者组交集可见，由唯一仲裁器裁决）
     shared: Optional[bool] = Field(default=None, description="跨 agent 共享开关（旧模式）")
     share_group_ids: Optional[List[str]] = Field(default=None, description="共享组 ID 列表")
+    # P2-13：C6 fact 级有效期窗口写入面——检索侧 isVisibleAt 过滤早已接线，
+    # 写入面此前零调用方（生产普通记忆行窗口恒 NULL）。ISO 8601 串，
+    # manager.remember 的 _coerce_validity_moment 解析（naive 视作 UTC）。
+    valid_from: Optional[str] = Field(default=None, description="有效期起（ISO 8601 串，缺省=立即生效）")
+    valid_until: Optional[str] = Field(default=None, description="有效期止（ISO 8601 串，缺省=永不过期）")
+
+    @field_validator("valid_from", "valid_until")
+    @classmethod
+    def _validateValidityWindow(cls, value):
+        """有效期串在请求边界校验（不可解析 422），不许把写错的窗口吞成
+        "永远有效"（_coerce_validity_moment 对不可解析串是显式报错，这里同口径
+        提前到契约面）。空串归一为 None＝不设界。"""
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            datetime.fromisoformat(text)
+        except ValueError as e:
+            raise ValueError(
+                "有效期须为 ISO 8601 串（如 2026-11-14T10:00:00）: %r" % value) from e
+        return text
 
 
 class UpdateMemoryRequest(BaseModel):

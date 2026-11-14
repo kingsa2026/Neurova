@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
+from neurova.core.time_utils import nowIso as _now
 
 from .credibility import ConfidenceAggregator
 from .narratives import FOUNDATION_DB_NAME
@@ -451,10 +452,6 @@ def parseBitemporalStamp(value: str, field: str) -> str:
     return text
 
 
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
-
-
 def _instant(value) -> Optional[str]:
     """时效判定比的是瞬时不是字面：混着 Z / +08:00 / 无时区写入时，
     文本序会把"已到期"读成"未到期"，所以进出都归一成 UTC ISO。naive 按 UTC 解读。
@@ -545,6 +542,20 @@ class KnowledgeFactStore:
     def close(self) -> None:
         with self._lock:
             self._conn.close()
+
+    def queryReadOnly(self, sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
+        """只读查询公开口（P3-6 收口）：外部读数面一律经此取行，不再直摸 `_lock`/`_conn`。
+
+        仅放行 SELECT 单语句（sqlite3 `execute` 本就只跑单语句，前缀校验即闭合
+        写入口）；返回 dict 行（按列名取值）。锁内执行，与既有读法同一把 RLock；
+        store 将来换连接池时只改这一处，端点与 community_graph 的读数不再各自
+        认识连接对象。
+        """
+        stripped = str(sql or "").lstrip()
+        if not stripped.lower().startswith("select"):
+            raise ValueError("queryReadOnly 仅接受 SELECT 查询")
+        with self._lock:
+            return [dict(row) for row in self._conn.execute(stripped, tuple(params)).fetchall()]
 
     @contextmanager
     def batchScope(self):

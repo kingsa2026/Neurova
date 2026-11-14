@@ -25,10 +25,12 @@ export interface BuildContextResponse {
 }
 
 export interface ContextStats {
+  pools: number
   total_contexts: number
-  average_tokens: number
-  cache_hit_rate: number
-  compression_rate: number
+  average_resident: number
+  archived_total: number
+  ledger_rows: number
+  indexed_entries: number
 }
 
 // ---------------------------------------------------------------------------
@@ -59,7 +61,14 @@ export function getContextPreview(contextId: string) {
 
 /** Compress context. */
 export function compressContext(contextId: string, targetTokens = 4000) {
-  return api.post<ApiResponse<{ context_id: string; target_tokens: number }>>(`${BASE}/${contextId}/compress`, null, { params: { target_tokens: targetTokens } })
+  return api.post<ApiResponse<{
+    context_id: string
+    target_tokens: number
+    original_tokens: number
+    compressed_tokens: number
+    dropped_segments: number
+    content: string
+  }>>(`${BASE}/${contextId}/compress`, null, { params: { target_tokens: targetTokens } })
 }
 
 /** Inject reflection logs into context. */
@@ -75,4 +84,12 @@ export function injectMemories(agentId: string, query = '', limit = 10) {
 /** Inject hot memories into context. */
 export function injectHotMemories(agentId: string, limit = 5) {
   return api.get<ApiResponse<{ hot_memories: unknown[]; count: number }>>(`${BASE}/inject/hot`, { params: { agent_id: agentId, limit } })
+}
+
+/** Context composition 快照（usage 环图兜底 + 面板数据源；404=尚无实测，降级 debug 不刷红）。 */
+export function getContextComposition(params: { agent_id: string; session_id?: string }) {
+  return api.get<ApiResponse<Record<string, unknown>>>(`${BASE}/composition`, {
+    params,
+    __expectedStatus: 404,
+  })
 }

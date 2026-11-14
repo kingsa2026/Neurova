@@ -4,9 +4,10 @@
 只能落 manual 待人工。本模块给审批面提供**语义参考意见**：管理员在审批面板
 主动触发——不进写入路径、不自动改状态，「建议不改判」（工单 007）纪律照旧。
 
-LLM 客户端由端点层注入（api/deps.get_llm_client），本模块只做 prompt 构造、
-输出解析两个纯函数＋一个编排入口，全部可单测；解析不合法/winner 越权
-一律 ValueError（端点转 502），LLM 调用失败原样上抛（端点转 503）。
+LLM 客户端由端点层按 agent 作用域解析注入（运行时 Agent 注册表的
+`agent.llm_client`），本模块只做 prompt 构造、输出解析两个纯函数＋一个
+编排入口，全部可单测；解析不合法/winner 越权一律 ValueError（端点转 502），
+LLM 调用失败原样上抛（端点转 503）。
 """
 
 from __future__ import annotations
@@ -63,10 +64,15 @@ def parseLlmConflictAdvice(text: str, memberIds: List[str]) -> Dict[str, Any]:
     }
 
 
-def llmConflictAdvice(llm: Any, members: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """编排：prompt → LLM → 解析。成员行须含 fact_id（store.conflictMembers 产物）。"""
+async def llmConflictAdvice(llm: Any, members: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """编排：prompt → LLM → 解析。成员行须含 fact_id（store.conflictMembers 产物）。
+
+    `llm.chat` 的生产实现（AgentLLMClient）是 async——本编排随之 async，
+    由端点 await。此前同步调用拿到的是 coroutine，`getattr(response, "content")`
+    恒空 → 解析恒 502（P1-14 双重断链的第二处）。
+    """
     memberIds = [str(m.get("fact_id") or "") for m in members]
-    response = llm.chat(buildConflictAdvicePrompt(members), temperature=0.0)
+    response = await llm.chat(buildConflictAdvicePrompt(members), temperature=0.0)
     text = getattr(response, "content", "") or ""
     advice = parseLlmConflictAdvice(text, memberIds)
     advice["members"] = memberIds

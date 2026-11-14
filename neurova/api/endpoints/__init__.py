@@ -18,7 +18,6 @@ __all__ = [
     "get_agent_instance",
     "get_app_state",
     "get_health_checker",
-    "get_llm_client",
     "get_provider_manager",
     "get_startup_manager",
     "register_endpoint_routers",
@@ -65,13 +64,6 @@ def get_health_checker():
     from neurova.core.health_checker import get_health_checker as _get
 
     return _get()
-
-
-def get_llm_client():
-    """获取 LLM 客户端"""
-    if _app_state:
-        return _app_state.get("llm_client")
-    return None
 
 
 def get_provider_manager():
@@ -147,20 +139,6 @@ def create_database_check():
             return False, str(e)
 
     return check_database
-
-
-def create_llm_check():
-    """创建 LLM 检查"""
-
-    def check_llm():
-        try:
-            if _app_state and _app_state.get("llm_client"):
-                return True, "LLM client available"
-            return False, "LLM client not initialized"
-        except Exception as e:
-            return False, str(e)
-
-    return check_llm
 
 
 def create_memory_check():

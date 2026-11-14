@@ -415,6 +415,11 @@
         <span>{{ t('ontology.entWebhookFingerprint') }}</span>
         <span class="mono">{{ webhookConfig?.secret_fingerprint || t('ontology.entWebhookNoSecret') }}</span>
       </div>
+      <!-- P2-9：入站接收 URL（由前端 API 基址推导；验签由接收器 fail-closed 把关） -->
+      <div class="webhook-row webhook-url-row" data-testid="webhook-receive-url">
+        <span>{{ t('ontology.entWebhookReceiveUrl') }}</span>
+        <span class="mono webhook-url">{{ webhookReceiveUrl }}</span>
+      </div>
       <GlassButton variant="secondary" size="sm" :loading="webhookRotating" data-testid="webhook-rotate"
                    @click="doRotateSecret">{{ t('ontology.entWebhookRotate') }}</GlassButton>
       <a-divider>{{ t('ontology.entWebhookSimTitle') }}</a-divider>
@@ -457,6 +462,7 @@ import {
 import type { EnterpriseDescriptor, EnterpriseSourceConfig } from '@/types/ontology'
 import { extractApiDetail } from '@/utils/error'
 import { splitList } from '@/utils/ontologyFormat'
+import config from '@/config'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -619,6 +625,14 @@ const webhookDedup = ref<{ rows: number; sources: number } | null>(null)
 const webhookRotating = ref(false)
 const webhookSimulating = ref<'' | 'ok' | 'duplicate' | 'bad_signature'>('')
 const webhookSimResult = ref('')
+
+// P2-9：入站接收 URL——外部系统按此 URL 推送（POST，HMAC 头见后端契约）。
+// 由前端 API 基址推导，不在后端响应里回传（部署面自己拼绝对地址即可）。
+const webhookReceiveUrl = computed(() => {
+  const base = config.apiBaseUrl || '/api/v1'
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  return `${origin}${base}/knowledge/ontology/webhook/receive`
+})
 
 async function openWebhookDrawer() {
   webhookDrawerOpen.value = true
@@ -969,6 +983,15 @@ onMounted(loadSources)
   gap: 12px;
   font-size: 13px;
   padding: 6px 0;
+}
+/* P2-9：接收 URL 行——长 URL 可换行可复制 */
+.webhook-url-row {
+  align-items: flex-start;
+}
+.webhook-url {
+  word-break: break-all;
+  text-align: right;
+  max-width: 320px;
 }
 .webhook-sim-actions {
   display: flex;

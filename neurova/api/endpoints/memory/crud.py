@@ -112,6 +112,10 @@ async def add_memory(
             # P1-10 残留实装：共享组写入（isolation.py 语义单源）
             shared=bool(request.shared),
             share_group_ids=list(request.share_group_ids or []),
+            # P2-13：C6 有效期窗口透传（ISO 串由 manager._coerce_validity_moment
+            # 解析；None＝不设界）。此前写入面零透传，检索侧 isVisibleAt 恒真。
+            valid_from=request.valid_from,
+            valid_until=request.valid_until,
         )
 
         return success_response(

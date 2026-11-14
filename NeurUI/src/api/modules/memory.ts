@@ -126,6 +126,9 @@ export interface MemoryCreatePayload {
   /** 分类上下文（后端为 dict，如 { emotion: 'joy' 触发情感亲和增强 }；此前 TS 误标为 string） */
   classification_context?: Record<string, unknown>
   auto_analyze_emotion?: boolean
+  /** P2-13：C6 有效期窗口（ISO 8601 串；缺省=不设界） */
+  valid_from?: string
+  valid_until?: string
 }
 
 export interface MemorySearchResult {
@@ -1014,8 +1017,8 @@ export function getChannelWeights(intent: string) {
   return api.get<ApiResponse<ChannelWeights>>(`${ENHANCED_BASE}/channel-weights`, { params: { intent } })
 }
 
-/** Enhanced multi-layer search. */
-export function enhancedSearch(query: string, params?: { top_k?: number; min_score?: number; include_metadata?: boolean }) {
+/** Enhanced multi-layer search. method/score_threshold 供设置页试搜同体传参（P2-21）。 */
+export function enhancedSearch(query: string, params?: { top_k?: number; min_score?: number; include_metadata?: boolean; method?: string; score_threshold?: number }) {
   return api.post<ApiResponse<EnhancedSearchResult[]>>(`${ENHANCED_BASE}/search`, { query, ...params })
 }
 
@@ -1055,8 +1058,8 @@ export function getMemoryActivation(memoryId: string) {
 
 const SEMANTIC_BASE = '/semantic-search'
 
-/** Hybrid search (BM25 + Vector + FTS5). */
-export function hybridSearch(query: string, params?: { top_k?: number; bm25_weight?: number; vector_weight?: number; fts_weight?: number; filters?: Record<string, unknown> }) {
+/** Hybrid search (BM25 + Vector + FTS5). method/score_threshold 供设置页试搜同体传参（P2-21）。 */
+export function hybridSearch(query: string, params?: { top_k?: number; bm25_weight?: number; vector_weight?: number; fts_weight?: number; filters?: Record<string, unknown>; method?: string; score_threshold?: number }) {
   return api.post<ApiResponse<EnhancedSearchResult[]>>(`${SEMANTIC_BASE}/hybrid`, { query, ...params })
 }
 

@@ -277,28 +277,6 @@ def get_startup_manager():
         ) from e
 
 
-def get_llm_client():
-    """
-    FastAPI 依赖：获取 LLM 客户端
-
-    Returns:
-        LLM 客户端实例
-
-    Raises:
-        HTTPException: LLM 客户端不存在
-    """
-    try:
-        from neurova.api.endpoints import get_llm_client as _get
-
-        return _get()
-    except Exception as e:
-        logger.error("Failed to get LLM client: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LLM client not available",
-        ) from e
-
-
 # ============================================================
 # 权限检查依赖
 # ============================================================

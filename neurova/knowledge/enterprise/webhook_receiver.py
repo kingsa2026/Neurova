@@ -10,7 +10,6 @@ ContextVar 猜——AGENTS.md §3）；admit 拒记审计不重试风暴（fail-
 
 from __future__ import annotations
 
-import datetime
 import hashlib
 import hmac
 import json
@@ -20,6 +19,7 @@ import uuid
 from typing import Any, Dict, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.time_utils import nowIso as _now
 
 logger = get_logger(__name__)
 
@@ -41,10 +41,6 @@ CREATE TABLE IF NOT EXISTS enterprise_webhook_dedup (
     PRIMARY KEY (source_id, idempotency_key)
 );
 """
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 def webhookEnabled() -> bool:
