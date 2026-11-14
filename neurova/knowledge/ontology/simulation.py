@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-import datetime
 import json
 import os
 import sqlite3
@@ -21,6 +20,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.time_utils import nowIso as _now
 
 logger = get_logger(__name__)
 
@@ -38,10 +38,6 @@ CREATE TABLE IF NOT EXISTS ontology_simulations (
     created_at TEXT NOT NULL
 );
 """
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 class ScopeTooLargeError(ValueError):

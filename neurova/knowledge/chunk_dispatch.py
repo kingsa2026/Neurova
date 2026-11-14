@@ -13,12 +13,12 @@
 
 from __future__ import annotations
 
-import datetime
 import json
 import re
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.time_utils import nowIso as _now
 
 logger = get_logger(__name__)
 
@@ -105,10 +105,6 @@ class ChunkStrategyRegistry:
         d["params"] = json.loads(d.pop("params_json") or "{}")
         d["enabled"] = bool(d.get("enabled"))
         return d
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 # ── 各 kind 实装（stdlib，零新依赖）─────────────────────────────────

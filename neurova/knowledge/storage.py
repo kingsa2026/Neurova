@@ -4,7 +4,6 @@
 用户级 API Key 和知识库配置的存储管理。基于 JSON 文件的轻量持久化。
 """
 
-import datetime
 import hashlib
 import json
 import os
@@ -14,16 +13,13 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from neurova.core.data_root import dataPath
+from neurova.core.time_utils import nowIso as _now_iso
 
 logger = get_logger(__name__)
 
 
 def _new_id(prefix: str = "") -> str:
     return f"{prefix}{uuid.uuid4().hex}" if prefix else uuid.uuid4().hex
-
-
-def _now_iso() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 def _encrypt_secret(plain: str) -> Optional[str]:

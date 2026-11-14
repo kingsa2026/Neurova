@@ -119,7 +119,7 @@ def resolve_generation_creds(
                 break
     if provider is not None:
         try:
-            from neurova.llm.providers.secret_store import decrypt_api_key
+            from neurova.llm.providers.secret_store_clean import decrypt_api_key
 
             key = decrypt_api_key(getattr(provider, "api_key", "") or "")
         except Exception:

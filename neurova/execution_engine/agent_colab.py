@@ -4,7 +4,6 @@
 最小可用实现：基于 JSON 存储的协作计划/任务分配/状态流转/统计。
 """
 
-import datetime
 import json
 from neurova.core.logger import get_logger
 import threading
@@ -12,6 +11,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from neurova.core.data_root import dataPath
+from neurova.core.time_utils import nowIso as _now_iso
 
 logger = get_logger(__name__)
 
@@ -22,10 +22,6 @@ _VALID_ASSIGNMENT_STATUSES = {"pending", "running", "completed", "failed", "canc
 
 def _new_id(prefix: str = "") -> str:
     return f"{prefix}{uuid.uuid4().hex}" if prefix else uuid.uuid4().hex
-
-
-def _now_iso() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 class AgentCollaborationService:

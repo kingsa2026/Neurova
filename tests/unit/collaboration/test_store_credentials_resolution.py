@@ -15,7 +15,7 @@ import pytest
 
 from neurova.collaboration.neurflow.external_api import ExternalAPIError
 from neurova.collaboration.neurflow.storage import NeurflowStorage
-from neurova.llm.providers.secret_store import SecretStore
+from neurova.llm.providers.secret_store_clean import SecretStore
 
 _A = "aaaa" + "1111"
 _B = "bbbb" + "2222"

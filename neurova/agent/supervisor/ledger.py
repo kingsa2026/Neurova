@@ -6,7 +6,6 @@
 """
 from __future__ import annotations
 
-import datetime
 import json
 import sqlite3
 import threading
@@ -15,6 +14,7 @@ from typing import Any, Dict, Optional
 
 from neurova.core.data_root import dataPath
 from neurova.core.db_migration import migrate as applyMigrations, register_migration
+from neurova.core.time_utils import nowIso as _now
 
 _DOMAIN = "agent_supervisor_tasks"
 _SCHEMA = """
@@ -28,10 +28,6 @@ CREATE INDEX IF NOT EXISTS idx_supervisor_tasks_updated
     ON agent_supervisor_tasks(updated_at);
 """
 register_migration(1, _SCHEMA, domain=_DOMAIN)
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 class SupervisorTaskLedger:

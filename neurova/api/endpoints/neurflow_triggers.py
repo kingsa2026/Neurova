@@ -29,7 +29,7 @@ def _webhook_ingress_deps() -> Dict[str, Any]:
     from neurova.api.endpoints import neurflow_api as api
 
     from neurova.core.trigger_rate_limiter import TriggerRateLimiter
-    from neurova.llm.providers.secret_store import decrypt_api_key
+    from neurova.llm.providers.secret_store_clean import decrypt_api_key
     from neurova.collaboration.neurflow.models import WorkflowStatus
 
     def load_trigger(tid: str):
@@ -176,7 +176,7 @@ async def create_workflow_trigger(
 
     import secrets as _secrets
 
-    from neurova.llm.providers.secret_store import encrypt_api_key
+    from neurova.llm.providers.secret_store_clean import encrypt_api_key
 
     storage = api._get_storage()
     if not api._owned_workflow_or_404(storage, workflow_id, current_user):

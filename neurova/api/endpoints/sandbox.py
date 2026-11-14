@@ -30,7 +30,6 @@
 from __future__ import annotations
 
 import asyncio
-import datetime
 import threading
 import typing
 import uuid
@@ -48,6 +47,7 @@ from neurova.sandbox.code_sandbox import (
     dockerAvailable,
     supportedLanguages,
 )
+from neurova.core.time_utils import nowIso as _now
 
 logger = get_logger(__name__)
 
@@ -156,10 +156,6 @@ def reset_execution_sandboxes() -> None:
         carrier = session.get("carrier")
         if isinstance(carrier, CodeSandboxSession):
             carrier.close()
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 def _publicView(session: dict) -> dict:

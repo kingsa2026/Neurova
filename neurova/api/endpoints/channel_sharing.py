@@ -13,10 +13,9 @@
 
 from __future__ import annotations
 
+from neurova.core.atomic_io import loadJsonStore, saveJsonStore
 from neurova.core.logger import get_logger
 import copy
-import json
-import pathlib
 import time
 from typing import Any, Dict, List
 
@@ -76,22 +75,11 @@ def _load_store() -> None:
     now = time.time()
     _sharing_config["created_at"] = now
     _sharing_config["updated_at"] = now
-    try:
-        with open(_STORE_FILE, "r", encoding="utf-8") as f:
-            saved = json.load(f)
-        if isinstance(saved, dict):
-            _sharing_config.update(saved)
-    except FileNotFoundError:
-        pass
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Failed to load channel sharing config: %s", e)
+    _sharing_config.update(loadJsonStore(_STORE_FILE, {}))
 
 
 def _save_store() -> None:
-    p = pathlib.Path(_STORE_FILE)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(_sharing_config, f, indent=2, ensure_ascii=False)
+    saveJsonStore(_STORE_FILE, _sharing_config)
 
 
 _load_store()

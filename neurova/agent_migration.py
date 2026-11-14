@@ -40,6 +40,7 @@ from neurova.core.data_root import get_data_root, repoRoot
 from neurova.core.logger import get_logger
 from neurova.security.safe_archive import UnsafeArchiveError, safe_extract_zip
 
+from neurova.core.sql_utils import quoteIdent as _quoteIdent, replacePathStrings
 logger = get_logger(__name__)
 
 MANIFEST_KIND = "neurova.agent-migration"
@@ -283,10 +284,6 @@ def _validateZip(zip_path: Path) -> Dict[str, Any]:
     return manifest
 
 
-def _quoteIdent(value: str) -> str:
-    return '"' + value.replace('"', '""') + '"'
-
-
 def _rewriteSqlite(path: Path, agent_from: str, agent_to: str, importer: str, pathPairs: List[Tuple[str, str]]) -> int:
     if not _is_sqlite(path):
         return 0
@@ -347,14 +344,7 @@ def _rewriteJsonValue(value: Any, agent_from: str, agent_to: str, importer: str,
     if isinstance(value, list):
         return [_rewriteJsonValue(v, agent_from, agent_to, importer, pathPairs) for v in value]
     if isinstance(value, str):
-        for src, dst in pathPairs:
-            if src in value:
-                value = re.sub(
-                    re.escape(src) + r"(?=$|[\\/\"'\s,;:)\]}>])",
-                    lambda _m: dst,
-                    value,
-                )
-        return value
+        return replacePathStrings(value, pathPairs)
     return value
 
 

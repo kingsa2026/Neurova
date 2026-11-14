@@ -18,12 +18,12 @@ violations 当整批闸——任一候选违规即整批拒绝、零落盘。
 
 from __future__ import annotations
 
-import datetime
 import json
 import uuid
 from typing import Any, Dict, List, Optional
 
 from neurova.knowledge.foundation.admission import AdmissionRequest
+from neurova.core.time_utils import nowIso as _now
 
 from .rule_engine import ForwardChainingEngine
 from .shapes import ShapeRegistry
@@ -32,10 +32,6 @@ from .validation import OntologyValidationReport
 
 #: 本体流水线基线在 `knowledge_baselines.scope` 上的分区值（复用既有表，无新表）
 ONTOLOGY_PIPELINE_SCOPE = "ontology_pipeline"
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 

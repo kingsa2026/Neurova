@@ -14,12 +14,12 @@ evaluate_tool_call 的判定链不动；动作运行时执行仍走既有 tool_c
 
 from __future__ import annotations
 
-import datetime
 import json
 import threading
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.time_utils import nowIso as _now
 
 logger = get_logger(__name__)
 
@@ -50,10 +50,6 @@ ALTER TABLE ontology_actions ADD COLUMN precondition_json TEXT NOT NULL DEFAULT 
 ALTER TABLE ontology_actions ADD COLUMN impact_json TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE ontology_actions ADD COLUMN state_change_json TEXT NOT NULL DEFAULT '{}';
 """
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 class ActionRegistry:

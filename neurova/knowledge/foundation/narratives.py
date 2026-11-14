@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import datetime
 import json
 import sqlite3
 from contextlib import contextmanager
@@ -24,6 +23,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
 from .storage_fence import assertNotUnderProductionStorage
+from neurova.core.time_utils import nowIso as _now
 
 
 NARRATIVE_DOMAIN = "knowledge_foundation"
@@ -49,10 +49,6 @@ CREATE INDEX IF NOT EXISTS idx_narrative_owner ON knowledge_narratives(owner_use
 # 否则"删空后重启"会拿快照把已删条目（或删除史）复活。
 # 前缀挂在**原文件名之后**，条目与墓碑各自留名，否则两份归档互相顶替、事后认不出谁是谁。
 ARCHIVE_PREFIX = ".pre-narrative-store-"
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 class NarrativeStore:

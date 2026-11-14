@@ -11,7 +11,6 @@ schema 归属（K-09，2026-11-07 裁定）：本索引的库文件就是 founda
 """
 from __future__ import annotations
 
-import datetime
 import hashlib
 import json
 import sqlite3
@@ -23,6 +22,7 @@ from neurova.core.logger import get_logger
 from neurova.knowledge.lifecycle import isRetrievable
 from neurova.knowledge.search import tokenize
 from neurova.knowledge.splitter import build_index_content
+from neurova.core.time_utils import nowIso as _nowIso
 
 logger = get_logger(__name__)
 
@@ -50,10 +50,6 @@ CREATE TABLE IF NOT EXISTS knowledge_fts_docs (
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(content);
 """
-
-
-def _nowIso() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 def _tokens(text: str) -> str:

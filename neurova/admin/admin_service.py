@@ -12,16 +12,13 @@ from neurova.core.data_root import dataPath
 from neurova.admin.resource_quota_manager import (
     get_resource_quota_manager,
 )
+from neurova.core.time_utils import nowIso as _now_iso
 
 logger = get_logger(__name__)
 
 
 def _new_id(prefix: str = "") -> str:
     return f"{prefix}{uuid.uuid4().hex}" if prefix else uuid.uuid4().hex
-
-
-def _now_iso() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 def _parse_iso(value: Any) -> datetime.datetime:

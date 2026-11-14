@@ -87,7 +87,7 @@ def _extractJson(text: str) -> Dict[str, Any]:
 
 
 def _secretStore():
-    from neurova.llm.providers.secret_store import get_secret_store
+    from neurova.llm.providers.secret_store_clean import get_secret_store
 
     return get_secret_store()
 

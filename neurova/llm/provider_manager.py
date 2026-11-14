@@ -21,7 +21,7 @@ LLM 服务商配置管理器
 - `get_provider_manager(config_path=None) -> LLMProviderManager`
     获取单例。使用模块级 `_provider_manager_lock`(threading.Lock)+ 双重检查锁定,
     确保并发首次调用只创建一个实例。
-    参照 `neurova.llm.providers.secret_store.get_secret_store()` 的模式。
+    参照 `neurova.llm.providers.secret_store_clean.get_secret_store()` 的模式。
 - `reset_provider_manager() -> None`
     清除模块级 `_provider_manager = None`,使下次 `get_provider_manager()` 重新创建实例。
     在 `_provider_manager_lock` 保护下清除,避免与并发 `get_provider_manager()` 竞态。
@@ -81,7 +81,7 @@ from neurova.core.log_level import LogLevel
 from neurova.core.logger import get_logger
 from neurova.core.module_system import Module
 from neurova.llm.presets import LLMPresetRegistry, ModelPreset, get_preset_registry
-from neurova.llm.providers.secret_store import SecretStore, decrypt_api_key, encrypt_api_key
+from neurova.llm.providers.secret_store_clean import SecretStore, decrypt_api_key, encrypt_api_key
 from neurova.llm.providers.types import (
     ConnectionResult,
     ModelInfo as PydanticModelInfo,

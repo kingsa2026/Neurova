@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import datetime
 import json
 from neurova.core.logger import get_logger
 import os
@@ -17,16 +16,13 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from neurova.core.data_root import dataPath
+from neurova.core.time_utils import nowIso as _now_iso
 
 logger = get_logger(__name__)
 
 
 def _new_id(prefix: str = "") -> str:
     return f"{prefix}{uuid.uuid4().hex}" if prefix else uuid.uuid4().hex
-
-
-def _now_iso() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 VISION_EXTS = {

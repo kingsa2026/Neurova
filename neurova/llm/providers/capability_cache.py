@@ -22,16 +22,13 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from neurova.core.data_root import dataPath, get_data_root
+from neurova.core.time_utils import nowIso as _now_iso
 
 logger = get_logger(__name__)
 
 
 def _new_id(prefix: str = "") -> str:
     return f"{prefix}{uuid.uuid4().hex}" if prefix else uuid.uuid4().hex
-
-
-def _now_iso() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 @dataclass

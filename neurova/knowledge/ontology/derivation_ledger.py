@@ -16,11 +16,11 @@
 
 from __future__ import annotations
 
-import datetime
 import json
 import threading
 import uuid
 from typing import Any, Dict, List, Optional
+from neurova.core.time_utils import nowIso as _now
 
 _SCHEMA_V10 = """
 CREATE TABLE IF NOT EXISTS knowledge_derivation_edges (
@@ -47,10 +47,6 @@ CREATE TABLE IF NOT EXISTS ontology_rule_fires (
 );
 CREATE INDEX IF NOT EXISTS idx_rule_fires_rule ON ontology_rule_fires(rule_id, fired_at);
 """
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 class DerivationLedger:

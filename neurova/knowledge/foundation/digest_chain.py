@@ -17,9 +17,9 @@
 
 from __future__ import annotations
 
-import datetime
 import hashlib
 from typing import Any, Dict, List, Optional
+from neurova.core.time_utils import nowIso as _now
 
 _SCHEMA_V11 = """
 ALTER TABLE knowledge_assertions ADD COLUMN seq INTEGER NOT NULL DEFAULT 0;
@@ -49,10 +49,6 @@ _DIGEST_FIELDS = ("assertion_id", "fact_id", "actor_type", "actor_id", "activity
                   "medium_ref", "statement_hash")
 
 _UNLINKED_FIELD = "digest"   # 判"有没有上链"看这一列，seq 为 0 只是它的副产物
-
-
-def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
 def _sha(text: str) -> str:

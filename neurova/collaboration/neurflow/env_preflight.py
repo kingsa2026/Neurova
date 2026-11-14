@@ -52,7 +52,7 @@ def _secretKeys(secretStore) -> set:
     store = secretStore
     if store is None:
         try:
-            from neurova.llm.providers.secret_store import get_secret_store
+            from neurova.llm.providers.secret_store_clean import get_secret_store
 
             store = get_secret_store()
         except Exception as exc:  # noqa: BLE001 - 预检失败不阻断，按无密钥处理

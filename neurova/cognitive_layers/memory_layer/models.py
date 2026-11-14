@@ -9,6 +9,11 @@ from typing import Any, Dict, List, Optional
 
 from neurova.cognitive_layers.memory_layer.isolation import IsolationContext
 
+# EmotionType 单源在 modules/emotion_module.py（P3-18）：str 混入枚举，与情感
+# 模块 / manager 共用同一对象；此处别名再导出。MemoryRecord.emotion 的序列化
+# （.value）与成员比较（==）口径不变。
+from neurova.cognitive_layers.memory_layer.modules.emotion_module import EmotionType
+
 # ────── Enums ──────
 
 
@@ -94,20 +99,6 @@ class MemoryPerspective(Enum):
     SECOND_PERSON = "second_person"  # 第二人称
     THIRD_PERSON = "third_person"  # 第三人称
     SYSTEM = "system"  # 系统视角
-
-
-class EmotionType(Enum):
-    """情感类型"""
-
-    NEUTRAL = "neutral"
-    JOY = "joy"
-    SADNESS = "sadness"
-    ANGER = "anger"
-    FEAR = "fear"
-    SURPRISE = "surprise"
-    DISGUST = "disgust"
-    TRUST = "trust"
-    ANTICIPATION = "anticipation"
 
 
 # ────── Data Models ──────
