@@ -57,6 +57,37 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["covers_ref"],
         },
     },
+    "context_compress": {
+        # B1（对照改进项）：模型自决触发折叠。折叠只影响视图，原文在归档池
+        # （零丢失），与 /compact 命令同一折叠机构。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("context_view",)},
+        "description": "【上下文主动折叠】把当前会话窗口里较老的消息折叠成摘要（原文仍在归档池，可经 recall_history / recall_context_span 找回）。【何时用】你判断当前任务步骤已完成、早期内容短期内不再需要时，主动调用保持上下文精炼。【何时不用】正处在调试/多步推理中途（折叠会丢工作现场）；只是想查历史用 recall_history；本工具不删除任何原文。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reason": {"type": "string", "description": "折叠原因（进读数，便于归因），如“阶段完成”“切换话题前清理”"},
+            },
+        },
+    },
+    "context_status": {
+        # B1（对照改进项）：上下文盘点（只读）。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
+        "description": "【上下文盘点】返回当前会话上下文的构成与水位：窗口 token 估算/预算、折叠代际数与最近一次触发原因、池归档规模、取水读数。【何时用】决定是否主动折叠（context_compress）前；不确定早期内容是否还能召回时。",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    "pool_search": {
+        # B9（对照改进项）：归档池语义检索（与视图抽屉同一打分面）。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
+        "description": "【归档语义检索】对本 Agent 归档池做向量语义检索（含被折叠/被移出窗口的原文），按相关性排序返回。【何时用】“之前讨论过的跟 X 类似的内容”；按语义找历史原文。【何时不用】精确占位指针直取用 recall_history；分层摘要下钻用 recall_context_span；跨会话长期记忆用 memory_search。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "检索需求（自然语言，同义表达即可命中）"},
+                "limit": {"type": "integer", "description": "返回条数上限", "default": 8},
+            },
+            "required": ["query"],
+        },
+    },
     "memory_search": {
         # 并行能力声明：长期记忆库只读检索，无写作用域。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
@@ -586,6 +617,88 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                 "script": {"type": "string", "description": "要执行的 JavaScript 表达式或函数体（在页面上下文中 evaluate）"},
             },
             "required": ["script"],
+        },
+    },
+    # ── 页面级动作（P2 批A）：导航补全/等待/滚动/按键 ──
+    # 底层走 PlaywrightBackend.go_back/go_forward/reload_page/wait_for/scroll_by/press_key；
+    # 导航类动作使活动页快照事实失效（generation 递增），交互前须重新 dom_snapshot。
+    "browser_back": {
+        # 并行能力声明：驱动同一个内置浏览器实例的会话历史——历史游标是共享态。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【浏览器后退】回退到本次会话的上一个页面（等价浏览器后退键）。导航使当前页快照事实失效（generation 递增），后续交互前需重新 browser_dom_snapshot。已在会话第一个页面时诚实报错「无后退历史」。【何时不用】刚 browser_navigate 打开的第一个页面没有可退历史。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "generation": {"type": "integer", "description": "可选。当前页代数；页面已被外部改变时拒绝"},
+            },
+            "required": [],
+        },
+    },
+    "browser_forward": {
+        # 并行能力声明：驱动同一个内置浏览器实例的会话历史——历史游标是共享态。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【浏览器前进】前进到本次会话退回前的下一个页面（等价浏览器前进键）。失效语义同 browser_back；已在最新页面时诚实报错「无前进历史」。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "generation": {"type": "integer", "description": "可选。当前页代数；页面已被外部改变时拒绝"},
+            },
+            "required": [],
+        },
+    },
+    "browser_reload": {
+        # 并行能力声明：驱动同一个内置浏览器实例的当前页——页面与代次是共享态。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【刷新页面】重新加载当前活动页（等价浏览器刷新键）。页面内未保存的表单输入会丢失；导航使快照事实失效（generation 递增），交互前需重新 browser_dom_snapshot。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "generation": {"type": "integer", "description": "可选。当前页代数；页面已被外部改变时拒绝"},
+            },
+            "required": [],
+        },
+    },
+    "browser_wait": {
+        # 并行能力声明：只读等待但作用域为共享（等待期间共享页面的时序在推进）。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
+        "description": "【等待条件】等待页面达到指定条件再继续，三种条件可组合、至少给一个：固定毫秒（≤30000）、等待某 CSS 选择器的元素出现、等待加载状态（load/domcontentloaded/networkidle）。用于 SPA 异步渲染后的时序对齐——先等元素出现再 browser_dom_snapshot，不要靠盲等硬凑。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "ms": {"type": "integer", "description": "固定等待毫秒数（上限 30000，超出按 30000 计）", "minimum": 1, "maximum": 30000},
+                "selector": {"type": "string", "description": "等待该 CSS 选择器匹配的元素出现"},
+                "state": {"type": "string", "enum": ["load", "domcontentloaded", "networkidle"], "description": "等待页面加载状态"},
+                "generation": {"type": "integer", "description": "可选。当前页代数；页面已被外部改变时拒绝等待"},
+            },
+            "required": [],
+        },
+    },
+    "browser_scroll": {
+        # 并行能力声明：改共享浏览器实例当前页的视口滚动位置。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【滚动页面】按像素相对滚动当前页（正=右/下，负=左/上），返回滚动后的绝对位置。用于触发懒加载、查看长页下方内容。滚动不改变 aria 快照的可交互结构，但两个滚动量全为 0 时拒绝。【何时不用】要读页面正文用 browser_extract_text/browser_read。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "scroll_x": {"type": "integer", "description": "横向滚动像素（正=右，负=左）"},
+                "scroll_y": {"type": "integer", "description": "纵向滚动像素（正=下，负=上）"},
+                "generation": {"type": "integer", "description": "可选。当前页代数；页面已被外部改变时拒绝滚动"},
+            },
+            "required": [],
+        },
+    },
+    "browser_press": {
+        # 并行能力声明：向共享浏览器实例的当前页派发键盘事件。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【键盘按键】向当前页面派发单个按键（Enter/Escape/Tab/ArrowDown/a 等，组合键用 + 连接如 Control+a）。用于提交表单、关闭弹层、键盘导航。按键可能触发页面行为，快照事实随之失效（generation 递增）。【何时不用】向输入框填文本用 browser_fill_role/fill_ref（更精确）；按键后要继续交互先重新 browser_dom_snapshot。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string", "description": "键名（如 Enter/Escape/Tab/ArrowDown/a；组合键用 + 连接，如 Control+a）"},
+                "delay": {"type": "integer", "description": "可选。按下到抬起的间隔毫秒", "minimum": 0},
+                "generation": {"type": "integer", "description": "可选。当前页代数；页面已被外部改变时拒绝"},
+            },
+            "required": ["key"],
         },
     },
     # ── 互联网平台直达（Web Reach，零配置路径）──
@@ -1793,6 +1906,9 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     # tab 管理（开/切/关改共享 tab 表与活动指针）与页面脚本（任意 JS 可写页面态）：
     # 重放会制造新 tab/新页面状态；tab_list 只读不入名单
     "browser_tab_open", "browser_tab_switch", "browser_tab_close", "browser_eval",
+    # 页面级动作：导航改会话历史、滚动是相对量（重放继续滚）、按键可重复触发页面行为；
+    # wait 是同参数同效果的纯等待，属可重现，不入名单
+    "browser_back", "browser_forward", "browser_reload", "browser_scroll", "browser_press",
     # 会话式 shell：进程输出不可重放（重跑时系统状态已变）
     "exec_command", "write_stdin",
     # 子代理派生：spawn 有副作用

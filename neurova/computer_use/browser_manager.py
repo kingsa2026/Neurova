@@ -573,6 +573,31 @@ class BrowserBackend(ABC):
             error=f"ref-not-supported: {type(self).__name__} 不产出 ref 编号，请用 browser_fill_role 按 role+name 定位",
         )
 
+    # ── 页面级动作（导航补全/等待/滚动/按键）：同能力裁剪模式，不支持的后端诚实降级 ──
+    async def go_back(self, generation: Optional[int] = None) -> BrowserResult:
+        return BrowserResult(success=False, error=f"{type(self).__name__} does not support go_back")
+
+    async def go_forward(self, generation: Optional[int] = None) -> BrowserResult:
+        return BrowserResult(success=False, error=f"{type(self).__name__} does not support go_forward")
+
+    async def reload_page(self, generation: Optional[int] = None) -> BrowserResult:
+        return BrowserResult(success=False, error=f"{type(self).__name__} does not support reload")
+
+    async def wait_for(
+        self,
+        ms: Optional[int] = None,
+        selector: Optional[str] = None,
+        state: Optional[str] = None,
+        generation: Optional[int] = None,
+    ) -> BrowserResult:
+        return BrowserResult(success=False, error=f"{type(self).__name__} does not support wait_for")
+
+    async def scroll_by(self, scroll_x: int = 0, scroll_y: int = 0, generation: Optional[int] = None) -> BrowserResult:
+        return BrowserResult(success=False, error=f"{type(self).__name__} does not support scroll")
+
+    async def press_key(self, key: str, delay: Optional[int] = None, generation: Optional[int] = None) -> BrowserResult:
+        return BrowserResult(success=False, error=f"{type(self).__name__} does not support keyboard press")
+
 
 class PlaywrightBackend(BrowserBackend):
     """Playwright 浏览器后端"""
@@ -1079,6 +1104,184 @@ class PlaywrightBackend(BrowserBackend):
                 url=self._page.url,
                 title=await self._page.title(),
                 duration_ms=(time.time() - start_time) * 1000,
+            )
+        except Exception as e:
+            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
+
+    # ── 页面级动作：导航补全/等待/滚动/按键（P2 批A）──
+    # 等待上限：LLM 面传大数值一律夹到这里，防单次调用长时间占住浏览器
+    _MAX_WAIT_MS = 30_000
+
+    async def go_back(self, generation: Optional[int] = None) -> BrowserResult:
+        start_time = time.time()
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        try:
+            if not self._page:
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
+            response = await self._page.go_back()
+            if response is None:
+                return BrowserResult(
+                    success=False,
+                    error="无后退历史（当前页已是本次会话的第一个页面）",
+                    duration_ms=(time.time() - start_time) * 1000,
+                    generation=self._active_generation(),
+                )
+            self._invalidateActiveTabFacts("go_back")
+            return BrowserResult(
+                success=True,
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+                generation=self._active_generation(),
+            )
+        except Exception as e:
+            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
+
+    async def go_forward(self, generation: Optional[int] = None) -> BrowserResult:
+        start_time = time.time()
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        try:
+            if not self._page:
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
+            response = await self._page.go_forward()
+            if response is None:
+                return BrowserResult(
+                    success=False,
+                    error="无前进历史（当前页已是本次会话的最新页面）",
+                    duration_ms=(time.time() - start_time) * 1000,
+                    generation=self._active_generation(),
+                )
+            self._invalidateActiveTabFacts("go_forward")
+            return BrowserResult(
+                success=True,
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+                generation=self._active_generation(),
+            )
+        except Exception as e:
+            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
+
+    async def reload_page(self, generation: Optional[int] = None) -> BrowserResult:
+        start_time = time.time()
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        try:
+            if not self._page:
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
+            await self._page.reload(wait_until="load")
+            self._invalidateActiveTabFacts("reload")
+            return BrowserResult(
+                success=True,
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+                generation=self._active_generation(),
+            )
+        except Exception as e:
+            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
+
+    async def wait_for(
+        self,
+        ms: Optional[int] = None,
+        selector: Optional[str] = None,
+        state: Optional[str] = None,
+        generation: Optional[int] = None,
+    ) -> BrowserResult:
+        start_time = time.time()
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        try:
+            if not self._page:
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
+            if ms is None and not selector and not state:
+                return BrowserResult(
+                    success=False,
+                    error="等待条件至少给一个：ms / selector / state",
+                    duration_ms=(time.time() - start_time) * 1000,
+                    generation=self._active_generation(),
+                )
+            waited: List[str] = []
+            timeout_ms = min(int(ms), self._MAX_WAIT_MS) if ms else None
+            if timeout_ms is not None:
+                await self._page.wait_for_timeout(timeout_ms)
+                waited.append(f"{timeout_ms}ms")
+            if selector:
+                await self._page.wait_for_selector(selector, timeout=timeout_ms or self._MAX_WAIT_MS)
+                waited.append(f"selector={selector}")
+            if state:
+                await self._page.wait_for_load_state(state)
+                waited.append(f"state={state}")
+            return BrowserResult(
+                success=True,
+                data={"waited": waited},
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+                generation=self._active_generation(),
+            )
+        except Exception as e:
+            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
+
+    async def scroll_by(self, scroll_x: int = 0, scroll_y: int = 0, generation: Optional[int] = None) -> BrowserResult:
+        start_time = time.time()
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        try:
+            if not self._page:
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
+            if not scroll_x and not scroll_y:
+                return BrowserResult(
+                    success=False,
+                    error="滚动量至少给一个非零：scroll_x / scroll_y",
+                    duration_ms=(time.time() - start_time) * 1000,
+                    generation=self._active_generation(),
+                )
+            await self._page.mouse.wheel(int(scroll_x), int(scroll_y))
+            position = await self._page.evaluate("() => ({x: window.scrollX, y: window.scrollY})")
+            return BrowserResult(
+                success=True,
+                data=position,
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+                generation=self._active_generation(),
+            )
+        except Exception as e:
+            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
+
+    async def press_key(self, key: str, delay: Optional[int] = None, generation: Optional[int] = None) -> BrowserResult:
+        start_time = time.time()
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        try:
+            if not self._page:
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
+            key = str(key or "").strip()
+            if not key:
+                return BrowserResult(
+                    success=False,
+                    error="缺少 key 参数（如 Enter/Escape/ArrowDown/Control+a）",
+                    duration_ms=(time.time() - start_time) * 1000,
+                    generation=self._active_generation(),
+                )
+            await self._page.keyboard.press(key, delay=delay)
+            self._invalidateActiveTabFacts("press_key")
+            return BrowserResult(
+                success=True,
+                data={"key": key},
+                url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000,
+                generation=self._active_generation(),
             )
         except Exception as e:
             return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
@@ -2097,6 +2300,44 @@ class BrowserManager:
         """执行 JavaScript"""
         b = await self._get_backend(backend)
         return await b.execute_js(script)
+
+    # ── 页面级动作（P2 批A）：透传后端，generation 新鲜度校验在后端内 ──
+    async def go_back(self, generation: Optional[int] = None, backend: Optional[str] = None) -> BrowserResult:
+        """浏览器后退（导航使快照事实失效）"""
+        b = await self._get_backend(backend)
+        return await b.go_back(generation)
+
+    async def go_forward(self, generation: Optional[int] = None, backend: Optional[str] = None) -> BrowserResult:
+        """浏览器前进（导航使快照事实失效）"""
+        b = await self._get_backend(backend)
+        return await b.go_forward(generation)
+
+    async def reload_page(self, generation: Optional[int] = None, backend: Optional[str] = None) -> BrowserResult:
+        """刷新当前页（导航使快照事实失效）"""
+        b = await self._get_backend(backend)
+        return await b.reload_page(generation)
+
+    async def wait_for(
+        self,
+        ms: Optional[int] = None,
+        selector: Optional[str] = None,
+        state: Optional[str] = None,
+        generation: Optional[int] = None,
+        backend: Optional[str] = None,
+    ) -> BrowserResult:
+        """等待页面条件（ms/selector/state 至少一项）"""
+        b = await self._get_backend(backend)
+        return await b.wait_for(ms=ms, selector=selector, state=state, generation=generation)
+
+    async def scroll_by(self, scroll_x: int = 0, scroll_y: int = 0, generation: Optional[int] = None, backend: Optional[str] = None) -> BrowserResult:
+        """按像素滚动当前页（相对滚动）"""
+        b = await self._get_backend(backend)
+        return await b.scroll_by(scroll_x, scroll_y, generation)
+
+    async def press_key(self, key: str, delay: Optional[int] = None, generation: Optional[int] = None, backend: Optional[str] = None) -> BrowserResult:
+        """向当前页派发单个按键"""
+        b = await self._get_backend(backend)
+        return await b.press_key(key, delay=delay, generation=generation)
 
     async def snapshot(self, backend: Optional[str] = None) -> BrowserResult:
         """获取快照"""

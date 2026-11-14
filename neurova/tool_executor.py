@@ -87,6 +87,12 @@ COMPUTER_USE_TOOLS = frozenset(
         "browser_tab_switch",
         "browser_tab_close",
         "browser_eval",
+        "browser_back",
+        "browser_forward",
+        "browser_reload",
+        "browser_wait",
+        "browser_scroll",
+        "browser_press",
     }
 )
 
@@ -160,6 +166,12 @@ _COMPUTER_TOOL_PARAM_KEYS: Dict[str, frozenset] = {
     "browser_tab_switch": frozenset({"target_id", "generation"}),
     "browser_tab_close": frozenset({"target_id", "generation"}),
     "browser_eval": frozenset({"script"}),
+    "browser_back": frozenset({"generation"}),
+    "browser_forward": frozenset({"generation"}),
+    "browser_reload": frozenset({"generation"}),
+    "browser_wait": frozenset({"ms", "selector", "state", "generation"}),
+    "browser_scroll": frozenset({"scroll_x", "scroll_y", "generation"}),
+    "browser_press": frozenset({"key", "delay", "generation"}),
 }
 
 _BUTTON_ALIASES = {
@@ -168,7 +180,7 @@ _BUTTON_ALIASES = {
     "primary": "left", "secondary": "right", "middle_button": "middle",
 }
 
-_INT_KEYS = frozenset({"scroll_x", "scroll_y", "max_nodes", "max_depth", "generation", "index", "offset", "chunk_size"})
+_INT_KEYS = frozenset({"scroll_x", "scroll_y", "max_nodes", "max_depth", "generation", "index", "offset", "chunk_size", "ms", "delay"})
 _FLOAT_KEYS = frozenset({"x", "y", "interval"})
 
 
@@ -270,6 +282,19 @@ def describe_computer_action(tool_name: str, params: Dict) -> str:
         return f"关闭标签页 {params.get('target_id', '?')}"
     if tool_name == "browser_eval":
         return f"在页面中执行脚本 {str(params.get('script', ''))[:60]}"
+    if tool_name == "browser_back":
+        return "浏览器后退"
+    if tool_name == "browser_forward":
+        return "浏览器前进"
+    if tool_name == "browser_reload":
+        return "刷新当前页面"
+    if tool_name == "browser_wait":
+        cond = params.get("selector") or params.get("state") or f"{params.get('ms', '?')}ms"
+        return f"等待页面条件 {cond}"
+    if tool_name == "browser_scroll":
+        return f"滚动页面 ({params.get('scroll_x', 0)}, {params.get('scroll_y', 0)})"
+    if tool_name == "browser_press":
+        return f"按下按键 {params.get('key', '?')}"
     return tool_name
 
 
@@ -301,6 +326,9 @@ class ToolExecutor:
         "graph_search": "_execute_graph_search",
         "recall_history": "_execute_recall_history",
         "recall_context_span": "_execute_recall_context_span",
+        "context_compress": "_execute_context_compress",
+        "context_status": "_execute_context_status",
+        "pool_search": "_execute_pool_search",
         "search": "_execute_web_search",
         "web_search": "_execute_web_search",
         "weather": "_execute_weather",
@@ -346,6 +374,12 @@ class ToolExecutor:
         "browser_tab_switch": "_execute_browser_tab_switch",
         "browser_tab_close": "_execute_browser_tab_close",
         "browser_eval": "_execute_browser_eval",
+        "browser_back": "_execute_browser_back",
+        "browser_forward": "_execute_browser_forward",
+        "browser_reload": "_execute_browser_reload",
+        "browser_wait": "_execute_browser_wait",
+        "browser_scroll": "_execute_browser_scroll",
+        "browser_press": "_execute_browser_press",
         "planning": "_execute_planning",
         "youtube_transcript": "_execute_youtube_transcript",
         "browser_read": "_execute_browser_read",
@@ -4410,6 +4444,112 @@ class ToolExecutor:
             logger.warning("recall_context_span 执行失败: %s", e)
             return {"error": f"分层下钻失败: {e}"}
 
+    async def _execute_context_compress(self, params: Dict) -> Dict:
+        """B1（对照改进项）：模型自决触发折叠。
+
+        与 `/compact` 命令、自动折叠共用同一折叠机构（`manual_compact` →
+        `compact_window` → 分代推进 → 池归档）：折叠只影响视图，原文零丢失。
+        回执带 invoked_by=model 与模型给的原因，进读数可归因。
+        """
+        try:
+            orchestrator = getattr(self._agent, "context_orchestrator", None)
+            if orchestrator is None:
+                return {"error": "上下文编排器不可用，无法执行主动折叠"}
+            history = list(getattr(self._agent, "conversation_history", []) or [])
+            reason = str(params.get("reason") or "model_invoked")
+            receipt = await orchestrator.manual_compact(history)
+            receipt["invoked_by"] = "model"
+            receipt["reason"] = reason
+            return receipt
+        except Exception as e:
+            logger.warning("context_compress 执行失败: %s", e)
+            return {"error": f"主动折叠失败: {e}"}
+
+    async def _execute_context_status(self, params: Dict) -> Dict:
+        """B1（对照改进项）：上下文盘点（只读）——预算/折叠/池三面读数。"""
+        try:
+            orchestrator = getattr(self._agent, "context_orchestrator", None)
+            if orchestrator is None:
+                return {"error": "上下文编排器不可用"}
+            from neurova.context.window_compactor import estimate_window_tokens
+
+            history = list(getattr(self._agent, "conversation_history", []) or [])
+            health = {}
+            try:
+                health = dict(orchestrator.get_context_health() or {})
+            except Exception:  # noqa: BLE001 - 健康面缺失不阻断盘点
+                pass
+            pool = getattr(orchestrator, "context_pool", None)
+            pool_face = {}
+            if pool is not None:
+                try:
+                    pool_face = pool.get_retention_stats()
+                except Exception:  # noqa: BLE001
+                    pool_face = {}
+            return {
+                "window": {
+                    "messages": len(history),
+                    "tokens": estimate_window_tokens(history),
+                    "budget_tokens": orchestrator._effectiveWindowBudget(
+                        orchestrator._resolve_window_token_budget()
+                    ),
+                },
+                "fold": {
+                    "generations": (health.get("fold_layers") or {}).get("levels", 0)
+                    if isinstance(health.get("fold_layers"), dict)
+                    else 0,
+                    "last_reason": (health.get("fold_trigger") or {}).get("last_reason"),
+                    "proactive_folds": (health.get("fold_trigger") or {}).get("proactive_folds", 0),
+                    "integrity": health.get("fold_integrity"),
+                },
+                "pool": {
+                    "resident": pool_face.get("resident_count"),
+                    "archived_total": pool_face.get("archived_total"),
+                    "ledger_rows": (pool_face.get("ledger") or {}).get("rows"),
+                    "drawer": pool_face.get("drawer"),
+                },
+            }
+        except Exception as e:
+            logger.warning("context_status 执行失败: %s", e)
+            return {"error": f"上下文盘点失败: {e}"}
+
+    async def _execute_pool_search(self, params: Dict) -> Dict:
+        """B9（对照改进项）：归档池语义检索——与视图抽屉同一打分面。"""
+        try:
+            query = str(params.get("query") or "").strip()
+            if not query:
+                return {"error": "缺少 query：请用自然语言描述要找的内容"}
+            try:
+                limit = int(params.get("limit", 8))
+            except (TypeError, ValueError):
+                limit = 8
+            limit = max(1, min(limit, 50))
+            orchestrator = getattr(self._agent, "context_orchestrator", None)
+            pool = getattr(orchestrator, "context_pool", None) if orchestrator else None
+            if pool is None:
+                return {"error": "上下文池不可用，无法检索"}
+            search = getattr(pool, "search", None)
+            if search is None:
+                return {"error": "池检索面未装配"}
+            drops = search(query, limit=limit)
+            return {
+                "success": True,
+                "query": query,
+                "count": len(drops),
+                "results": [
+                    {
+                        "content": str(getattr(d, "content", "")),
+                        "source": str(getattr(getattr(d, "source", None), "value", getattr(d, "source", ""))),
+                        "created_at": str(getattr(d, "created_at", "")),
+                        "tags": list(getattr(d, "tags", []) or []),
+                    }
+                    for d in drops
+                ],
+            }
+        except Exception as e:
+            logger.warning("pool_search 执行失败: %s", e)
+            return {"error": f"池检索失败: {e}"}
+
     async def _execute_recall_history(self, params: Dict) -> Dict:
         """召回历史上下文（P1-1③ + P1-#6 双模式）。
 
@@ -6462,6 +6602,134 @@ class ToolExecutor:
         except Exception as e:
             logger.error("页面脚本执行失败: %s", e)
             return {"error": f"页面脚本执行失败: {str(e)}"}
+
+    async def _execute_browser_back(self, params: Dict) -> Dict:
+        """浏览器后退（无历史时诚实报错）"""
+        generation = params.get("generation")
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_back(
+                    generation=int(generation) if generation is not None else None,
+                )
+            )
+            await self._emit_computer_event("browser_back", params, result)
+            return result
+        except Exception as e:
+            logger.error("浏览器后退失败: %s", e)
+            return {"error": f"浏览器后退失败: {str(e)}"}
+
+    async def _execute_browser_forward(self, params: Dict) -> Dict:
+        """浏览器前进（无历史时诚实报错）"""
+        generation = params.get("generation")
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_forward(
+                    generation=int(generation) if generation is not None else None,
+                )
+            )
+            await self._emit_computer_event("browser_forward", params, result)
+            return result
+        except Exception as e:
+            logger.error("浏览器前进失败: %s", e)
+            return {"error": f"浏览器前进失败: {str(e)}"}
+
+    async def _execute_browser_reload(self, params: Dict) -> Dict:
+        """刷新当前活动页"""
+        generation = params.get("generation")
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_reload(
+                    generation=int(generation) if generation is not None else None,
+                )
+            )
+            await self._emit_computer_event("browser_reload", params, result)
+            return result
+        except Exception as e:
+            logger.error("页面刷新失败: %s", e)
+            return {"error": f"页面刷新失败: {str(e)}"}
+
+    async def _execute_browser_wait(self, params: Dict) -> Dict:
+        """等待页面条件（ms/selector/state 至少一项）"""
+        ms = params.get("ms")
+        selector = str(params.get("selector") or "").strip() or None
+        state = str(params.get("state") or "").strip() or None
+        generation = params.get("generation")
+        if ms is None and not selector and not state:
+            return {"error": "等待条件至少给一个：ms / selector / state"}
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_wait(
+                    ms=int(ms) if ms is not None else None,
+                    selector=selector,
+                    state=state,
+                    generation=int(generation) if generation is not None else None,
+                )
+            )
+            await self._emit_computer_event("browser_wait", params, result)
+            return result
+        except Exception as e:
+            logger.error("页面等待失败: %s", e)
+            return {"error": f"页面等待失败: {str(e)}"}
+
+    async def _execute_browser_scroll(self, params: Dict) -> Dict:
+        """按像素相对滚动当前页"""
+        scroll_x = int(params.get("scroll_x") or 0)
+        scroll_y = int(params.get("scroll_y") or 0)
+        generation = params.get("generation")
+        if not scroll_x and not scroll_y:
+            return {"error": "滚动量至少给一个非零：scroll_x / scroll_y"}
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_scroll(
+                    scroll_x=scroll_x,
+                    scroll_y=scroll_y,
+                    generation=int(generation) if generation is not None else None,
+                )
+            )
+            await self._emit_computer_event("browser_scroll", params, result)
+            return result
+        except Exception as e:
+            logger.error("页面滚动失败: %s", e)
+            return {"error": f"页面滚动失败: {str(e)}"}
+
+    async def _execute_browser_press(self, params: Dict) -> Dict:
+        """向当前页派发单个按键"""
+        key = str(params.get("key") or "").strip()
+        if not key:
+            return {"error": "缺少 key 参数（如 Enter/Escape/ArrowDown/Control+a）"}
+        delay = params.get("delay")
+        generation = params.get("generation")
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_press(
+                    key,
+                    delay=int(delay) if delay is not None else None,
+                    generation=int(generation) if generation is not None else None,
+                )
+            )
+            await self._emit_computer_event("browser_press", params, result)
+            return result
+        except Exception as e:
+            logger.error("按键派发失败: %s", e)
+            return {"error": f"按键派发失败: {str(e)}"}
 
     async def _execute_planning(self, params: Dict) -> Dict:
         """任务计划工具：7 个子命令（create/update/list/get/set_active/mark_step/delete）。
