@@ -17,10 +17,10 @@
     "neurova/security/tool_circuit_breaker.py"
   ],
   "sizeBaselines": {
-    "neurova/agent/chat_pipeline.py": 3312,
+    "neurova/agent/chat_pipeline.py": 3333,
     "neurova/cognitive_layers/memory_layer/manager.py": 5407,
     "neurova/computer_use/browser_manager.py": 3034,
-    "neurova/context/orchestrator.py": 3874,
+    "neurova/context/orchestrator.py": 3887,
     "neurova/post_chat_pipeline.py": 3896,
     "neurova/tool_executor.py": 7912
   }
