@@ -10,7 +10,7 @@ import pytest
 
 from neurova.workflow.scripted import (
     WorkflowJournal,
-    runScriptedWorkflow,
+    runScriptedWorkflowSubprocess,
     validateScript,
 )
 
@@ -75,7 +75,7 @@ class TestEngine:
             "    b = await ctx.callTool('web_search', {'q': 2})\n"
             "    ctx.setVar('两个', [a, b])\n"
         )
-        result = asyncio.run(runScriptedWorkflow(script, callTool, journal))
+        result = asyncio.run(runScriptedWorkflowSubprocess(script, callTool, journal))
         assert result["success"] is True
         assert result["vars"]["两个"][0]["content"] == "file_read-结果"
         assert result["logs"] == ["开始"]
@@ -98,12 +98,12 @@ class TestEngine:
             "    c = await ctx.callTool('t3', {})\n"
             "    ctx.setVar('count', c['n'])\n"
         )
-        asyncio.run(runScriptedWorkflow(script, callTool, journal))
+        asyncio.run(runScriptedWorkflowSubprocess(script, callTool, journal))
         assert len(liveCalls) == 3
 
         # 续跑：journal 里已有 3 次调用——复用结果，不重复执行副作用
         result = asyncio.run(
-            runScriptedWorkflow(script, callTool, journal, resumeRows=journal.readRows())
+            runScriptedWorkflowSubprocess(script, callTool, journal, resumeRows=journal.readRows())
         )
         assert result["success"] is True
         assert result["replayed_calls"] == 3
@@ -117,7 +117,7 @@ class TestEngine:
             "    await ctx.sleep(30)\n"
         )
         result = asyncio.run(
-            runScriptedWorkflow(script, lambda n, p: None, journal, timeout=5)
+            runScriptedWorkflowSubprocess(script, lambda n, p: None, journal, timeout=5)
         )
         assert result["success"] is False
         assert "超时" in result["error"]
@@ -129,14 +129,14 @@ class TestEngine:
             "    ctx.log('before')\n"
             "    raise RuntimeError('炸了')\n"
         )
-        result = asyncio.run(runScriptedWorkflow(script, lambda n, p: None, journal))
+        result = asyncio.run(runScriptedWorkflowSubprocess(script, lambda n, p: None, journal))
         assert result["success"] is False
         assert "炸了" in result["error"]
         assert result["logs"] == ["before"]
 
     def test_invalid_script_rejected_before_exec(self, tmp_path):
         result = asyncio.run(
-            runScriptedWorkflow("import os", lambda n, p: None, WorkflowJournal("bad"))
+            runScriptedWorkflowSubprocess("import os", lambda n, p: None, WorkflowJournal("bad"))
         )
         assert result["success"] is False
         assert result["errors"]
