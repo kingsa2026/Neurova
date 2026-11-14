@@ -880,6 +880,23 @@ class MultiModelLLMClient:
                     cache_read_tokens=_cache_read,
                     cache_write_tokens=_cache_write,
                 )
+                # A1（对照改进项）：尺子校准采样——完成侧净信号（同段文本的
+                # 尺子估算 vs 账单真值）。工具调用响应跳过（账单含参数 JSON
+                # 会污染文本偏差）；估算账本（estimated=True）无真值，同样跳过。
+                try:
+                    from neurova.core import token_calibration
+
+                    if (token_calibration.wantsSample(client.model)
+                            and not _estimated and (_completion or 0) > 0):
+                        token_calibration.recordOutputSample(
+                            client.model,
+                            (getattr(result, "content", "") or "")
+                            + (getattr(result, "reasoning_content", "") or ""),
+                            _completion or 0,
+                            has_tool_calls=bool(getattr(result, "tool_calls", None)),
+                        )
+                except Exception:
+                    pass
             except Exception:
                 pass
             finally:
@@ -1044,6 +1061,13 @@ class MultiModelLLMClient:
                 reply_text = ""
                 first_token_ms = 0  # P1-8：首块耗时入账
                 _stream_response_id: Optional[str] = None  # P3-12：provider 响应/分片 id（对账用）
+                # A1（对照改进项）：尺子校准采样——样本足够后就地停采（零持续开销）
+                from neurova.core import token_calibration
+
+                _calib_model = client.model or "unknown"
+                _calib_collect = token_calibration.wantsSample(_calib_model)
+                _calib_text = ""
+                _calib_tool_seen = False
                 # 审计 P0-C5：上游声明回传 usage（OpenAI 标准行为）→ 无需整段缓冲
                 _needs_reply_text = not getattr(client.client, "_compat_include_stream_usage", lambda: True)()
                 # 流内静默看门狗（2026-09-10 流中断事故遥测）：任何退出路径都必须
@@ -1141,6 +1165,13 @@ class MultiModelLLMClient:
                         _cc = getattr(chunk, "content", None)
                         if _cc:
                             _stream_state["content_chars"] += len(_cc)
+                        # A1：校准采样累积（仅采样期；含工具调用分片的响应不采样）
+                        if _calib_collect:
+                            _calib_text += (getattr(chunk, "content", "") or "") + (
+                                getattr(chunk, "reasoning_content", "") or ""
+                            )
+                            if getattr(chunk, "tool_calls", None):
+                                _calib_tool_seen = True
                         yielded_any = True
                         yield chunk
                 finally:
@@ -1225,6 +1256,15 @@ class MultiModelLLMClient:
                         cache_read_tokens=_cache_read,
                         cache_write_tokens=_cache_write,
                     )
+                    # A1（对照改进项）：尺子校准采样——完成侧净信号；工具调用
+                    # 响应与估算账本（无真值）跳过。
+                    if _calib_collect and not _estimated and (_completion or 0) > 0:
+                        token_calibration.recordOutputSample(
+                            _calib_model,
+                            _calib_text,
+                            _completion or 0,
+                            has_tool_calls=_calib_tool_seen,
+                        )
                 except Exception:
                     logger.debug("流式 usage 入账跳过", exc_info=True)
                 return

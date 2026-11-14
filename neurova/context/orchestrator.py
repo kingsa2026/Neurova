@@ -334,6 +334,13 @@ class ContextOrchestrator:
                 "last_growth_msgs": 0,
                 "proactive_folds": 0,
             },
+            # A1（对照改进项）：尺子校准读数——当前模型实测偏差因子与校准后
+            # 预算（因子中性 1.0 = 未应用）。
+            "token_calibration": {
+                "model": None,
+                "factor": 1.0,
+                "last_budget_tokens": None,
+            },
             "microcompact": {
                 "calls": 0,
                 "triggered_calls": 0,
@@ -2319,7 +2326,26 @@ class ContextOrchestrator:
         B6-9（P2-6）：改前 `_apply_window_budget` 内部自钳，而召回额度公式用的是
         未钳制的 `window_budget`——同一轮里两处对"窗口预算"理解不一致（配置预算
         大于模型上下文 90% 时，召回按大预算取、窗口按小预算裁）。
+
+        A1（对照改进追问批）：按模型实测的尺子偏差校准——先除因子（ruler 单位
+        → 真值单位），后钳 90% 硬顶（硬顶是真值单位）。因子中性 1.0（无采样/
+        偏差在带内）时与改前逐字一致。
         """
+        try:
+            from neurova.core import token_calibration
+
+            modelName = str(getattr(self.config, "llm_model", "") or "")
+            calibrationFactor = token_calibration.factorFor(modelName) or 1.0
+            if calibrationFactor != 1.0:
+                budget_tokens = max(1000, int(budget_tokens / calibrationFactor))
+                readout = self._contextHealthSlot("token_calibration")
+                readout.update({
+                    "model": modelName,
+                    "factor": round(float(calibrationFactor), 4),
+                    "last_budget_tokens": int(budget_tokens),
+                })
+        except Exception:  # noqa: BLE001 - 校准失败不阻断预算解析（中性回退）
+            pass
         hardLimit = self._resolve_auto_compact_hard_limit()
         if hardLimit and hardLimit < budget_tokens:
             return hardLimit
