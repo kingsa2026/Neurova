@@ -90,6 +90,94 @@ class TestLedgerRoundtrip:
         assert il.verifyInjections("s")["broken"] == 0
 
 
+class TestMatchRestoredView:
+    """恢复侧核验：账本末行（信封+输入）应以恢复出的末条 user 消息收尾。"""
+
+    def test_match_with_envelope(self, dataRoot):
+        il.recordInjection("s", "final_user_view", "<memories>召回</memories>\n\n输入一")
+        r = il.matchRestoredView("s", "输入一")
+        assert r["restore_match"] is True and r["restore_seq"] == 1 and r["rows"] == 1
+
+    def test_match_without_envelope(self, dataRoot):
+        il.recordInjection("s", "final_user_view", "输入二")
+        assert il.matchRestoredView("s", "输入二")["restore_match"] is True
+
+    def test_mismatch_is_drift(self, dataRoot):
+        il.recordInjection("s", "final_user_view", "<memories>召回</memories>\n\n输入一")
+        assert il.matchRestoredView("s", "别的输入")["restore_match"] is False
+
+    def test_no_rows_returns_none_match(self, dataRoot):
+        r = il.matchRestoredView("ghost", "输入")
+        assert r["restore_match"] is None and r["rows"] == 0
+
+
+class TestRestorePathWiring:
+    """恢复链路接账本（P1-6c）：_restore_session_history 末尾核验并进健康读数。"""
+
+    def _pipeline(self, tmp_path):
+        from types import SimpleNamespace
+
+        from neurova.agent.chat_pipeline import ChatPipeline
+        from neurova.context.orchestrator import ContextOrchestrator
+        from neurova.session_manager import SessionManager
+
+        sm = SessionManager()
+        sm._sessions_dir = tmp_path / "sessions"
+        sm._sessions_dir.mkdir(parents=True, exist_ok=True)
+        orch = ContextOrchestrator.__new__(ContextOrchestrator)
+        orch._context_health = orch._emptyContextHealth()
+        pipeline = ChatPipeline.__new__(ChatPipeline)
+        # session_manager/config 都是经 _agent 的只读属性——直接装 _agent
+        pipeline._agent = SimpleNamespace(
+            conversation_history=[],
+            context_orchestrator=orch,
+            session_manager=sm,
+            config=SimpleNamespace(agent_id="a-p16c"),
+        )
+        return pipeline, orch
+
+    def test_restore_verifies_ledger_view(self, dataRoot, tmp_path):
+        pipeline, orch = self._pipeline(tmp_path)
+        sm = pipeline.session_manager
+        sm.save_message("a-p16c", "s-p16c", "user", "输入一", user_id="u-1")
+        il.recordInjection("s-p16c", "final_user_view", "<memories>召回</memories>\n\n输入一")
+
+        from types import SimpleNamespace
+
+        ctx = SimpleNamespace(session_id="s-p16c", session_context=None, user_input="输入一")
+        asyncio.run(pipeline._restore_session_history(ctx))
+
+        lastUser = [m for m in ctx.session_context if m.get("role") == "user"][-1]
+        assert lastUser["content"] == "输入一"
+        health = orch.get_context_health()
+        assert health["injection_ledger"]["restore_match"] is True
+        assert health["injection_ledger"]["restore_rows"] == 1
+
+    def test_restore_detects_drift(self, dataRoot, tmp_path):
+        pipeline, orch = self._pipeline(tmp_path)
+        sm = pipeline.session_manager
+        sm.save_message("a-p16c", "s-p16c", "user", "会话里的输入", user_id="u-1")
+        il.recordInjection("s-p16c", "final_user_view", "<memories>召回</memories>\n\n另一条输入")
+
+        from types import SimpleNamespace
+
+        ctx = SimpleNamespace(session_id="s-p16c", session_context=None, user_input="会话里的输入")
+        asyncio.run(pipeline._restore_session_history(ctx))
+        health = orch.get_context_health()
+        assert health["injection_ledger"]["restore_match"] is False
+
+    def test_restore_without_ledger_rows_is_none(self, dataRoot, tmp_path):
+        pipeline, orch = self._pipeline(tmp_path)
+        sm = pipeline.session_manager
+        sm.save_message("a-p16c", "s-p16c", "user", "输入", user_id="u-1")
+
+        from types import SimpleNamespace
+
+        ctx = SimpleNamespace(session_id="s-p16c", session_context=None, user_input="输入")
+        asyncio.run(pipeline._restore_session_history(ctx))
+        assert orch.get_context_health()["injection_ledger"]["restore_match"] is None
+
+
 class TestFinishContextWriteAhead:
     """装配出口 write-ahead：_finishContext 先落账、后进模型。"""
 
