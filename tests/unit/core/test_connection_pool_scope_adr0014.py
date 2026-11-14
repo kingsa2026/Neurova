@@ -36,7 +36,6 @@ RESIDENT_CONN_FILES = [
     "neurova/evolution/job_queue.py",
     "neurova/channels/channel_ingress_queue.py",
     "neurova/cognitive_layers/memory_layer/cognitive_storage_engine.py",
-    "neurova/cognitive_layers/memory_layer/temporal_knowledge_graph.py",
     "neurova/cognitive_layers/memory_layer/modules/emotion_module.py",
     "neurova/cognitive_layers/memory_layer/attachment_manager.py",
     "neurova/cognitive_layers/meta_cognition_layer/ledger.py",

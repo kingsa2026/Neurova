@@ -1,6 +1,6 @@
-"""阶段2 RED: 验证 manager.py EKI/Sleep stub 委托到真实模块
+"""阶段2 RED: 验证 manager.py EKI stub 委托到真实模块
 
-TDD 红灯阶段: 测试预期 EKI/Sleep stub 方法委托到 modules/eki_module.py 和 modules/sleep_module.py，
+TDD 红灯阶段: 测试预期 EKI stub 方法委托到 modules/eki_module.py，
 而非抛出 NotImplementedError。
 
 当前 stub 抛出 NotImplementedError，本测试将失败（RED）。
@@ -10,7 +10,8 @@ GREEN 阶段将修改 manager.py 委托到真实模块。
   - EKI (10): eki_process_task, eki_recommend_reinforcement, eki_predict_decay,
               eki_get_memory_strength, eki_get_statistics, eki_batch_update,
               eki_update_memory_from_access, eki_set_enabled, eki_get_enabled, eki_configure
-  - Sleep (4): run_light_sleep_cycle, run_rem_sleep_cycle, run_deep_sleep_cycle, run_dormant_cycle
+  （Sleep 四周期委托已随 SleepModule 退役删除，教义第 7 条，2026-11-14；
+    睡眠整理唯一实现在是 sleep.py 的 SleepConsolidation）
 """
 from __future__ import annotations
 
@@ -109,62 +110,7 @@ class TestEKIDelegation:
         assert isinstance(result, list)
 
 
-# ────── Sleep 委托测试 ──────
-
-
-class TestSleepDelegation:
-    """验证 Sleep stub 委托到 SleepModule"""
-
-    def test_run_light_sleep_cycle_returns_stats(self, manager):
-        """run_light_sleep_cycle 应返回睡眠统计"""
-        # 先存储一些记忆
-        manager.remember("memory 1", importance=80.0)
-        manager.remember("memory 2", importance=10.0)
-        result = manager.run_light_sleep_cycle()
-        # 应返回包含 consolidated/cleaned 计数的字典
-        assert isinstance(result, dict)
-        assert "consolidated" in result or "stats" in result
-
-    def test_run_rem_sleep_cycle_returns_stats(self, manager):
-        """run_rem_sleep_cycle 应返回睡眠统计（含梦境）"""
-        manager.remember("dream memory 1", importance=80.0)
-        manager.remember("dream memory 2", importance=80.0)
-        result = manager.run_rem_sleep_cycle()
-        assert isinstance(result, dict)
-
-    def test_run_deep_sleep_cycle_returns_stats(self, manager):
-        """run_deep_sleep_cycle 应返回深度睡眠统计"""
-        manager.remember("deep memory", importance=90.0)
-        result = manager.run_deep_sleep_cycle()
-        assert isinstance(result, dict)
-
-    def test_run_dormant_cycle_returns_stats(self, manager):
-        """run_dormant_cycle 应返回休眠统计"""
-        result = manager.run_dormant_cycle()
-        assert isinstance(result, dict)
-
-    def test_sleep_cycles_do_not_raise_not_implemented(self, manager):
-        """所有 sleep 周期方法不应抛出 NotImplementedError"""
-        # 这是关键验证：委托后不应再抛出 NotImplementedError
-        try:
-            manager.run_light_sleep_cycle()
-        except NotImplementedError:
-            pytest.fail("run_light_sleep_cycle should delegate to SleepModule, not raise NotImplementedError")
-
-        try:
-            manager.run_rem_sleep_cycle()
-        except NotImplementedError:
-            pytest.fail("run_rem_sleep_cycle should delegate to SleepModule, not raise NotImplementedError")
-
-        try:
-            manager.run_deep_sleep_cycle()
-        except NotImplementedError:
-            pytest.fail("run_deep_sleep_cycle should delegate to SleepModule, not raise NotImplementedError")
-
-        try:
-            manager.run_dormant_cycle()
-        except NotImplementedError:
-            pytest.fail("run_dormant_cycle should delegate to SleepModule, not raise NotImplementedError")
+# ────── Sleep 委托测试已删除：SleepModule 及 manager 四周期方法按教义第 7 条退役 ──────
 
 
 # ────── EKI 不应抛出 NotImplementedError ──────

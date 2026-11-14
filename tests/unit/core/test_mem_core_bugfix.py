@@ -181,7 +181,6 @@ class TestBug4BufferModuleBufferContract:
              patch("neurova.cognitive_layers.memory_layer.manager.MemoryManager") as MockMM, \
              patch("neurova.cognitive_layers.memory_layer.modules.buffer_module.BufferModule") as MockBM, \
              patch("neurova.cognitive_layers.memory_layer.temperature.TemperatureEngine"), \
-             patch("neurova.cognitive_layers.memory_layer.working_memory.WorkingMemoryAugmenter"), \
              patch("neurova.cognitive_layers.meta_cognition_layer.growth_log.GrowthLogManager"), \
              patch("neurova.cognitive_layers.meta_cognition_layer.question_queue.QuestionQueueManager"), \
              patch("neurova.cognitive_layers.memory_layer.attachment_manager.AttachmentManager"), \

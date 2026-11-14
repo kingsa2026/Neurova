@@ -26,33 +26,42 @@ class TestUnifiedRetrieverInit:
         
         engine = MagicMock(spec=CognitiveStorageEngine)
         retriever = UnifiedRetriever(engine=engine)
-        
+
         assert retriever.engine is engine
         assert retriever._moe is None
         assert retriever._recall is None
-        assert retriever._hebb is None
 
-    def test_init_with_all_retrievers(self):
-        """提供所有旧检索器时可以初始化"""
+    def test_init_rejects_retired_hebb_manager(self):
+        """Hebb 支路已退役（教义第 7 条，2026-11-14）：hebb_manager 形参不许再存在。
+
+        生产装配里它恒为 None（MemCore 无 hebb_manager 属性），Neurova Hebb 的
+        真实消费面是 chat_pipeline 的 Evocate 注入步。
+        """
         from neurova.cognitive_layers.memory_layer.unified_retriever import UnifiedRetriever
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import CognitiveStorageEngine
-        
+
+        engine = MagicMock(spec=CognitiveStorageEngine)
+        with pytest.raises(TypeError):
+            UnifiedRetriever(engine=engine, hebb_manager=MagicMock())
+
+    def test_init_with_hybrid_retrievers(self):
+        """提供 MoE/Recall 混合召回源时可以初始化"""
+        from neurova.cognitive_layers.memory_layer.unified_retriever import UnifiedRetriever
+        from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import CognitiveStorageEngine
+
         engine = MagicMock(spec=CognitiveStorageEngine)
         moe = MagicMock()
         recall = MagicMock()
-        hebb = MagicMock()
-        
+
         retriever = UnifiedRetriever(
             engine=engine,
             moe_router=moe,
             recall_engine=recall,
-            hebb_manager=hebb,
         )
-        
+
         assert retriever.engine is engine
         assert retriever._moe is moe
         assert retriever._recall is recall
-        assert retriever._hebb is hebb
 
 
 # ── Tracer Bullet 2: retrieve() 基本功能 ──────────────────────────────────────
@@ -91,8 +100,9 @@ class TestUnifiedRetrieverRetrieve:
         
         retriever = UnifiedRetriever(engine=engine)
         result = asyncio.run(retriever.retrieve("test query", limit=5))
-        
-        engine.retrieve.assert_called_once_with("test query", limit=5)
+
+        # P1-10 身份透传落地后的现实契约：显式身份缺省时以 scope_override=None 调用
+        engine.retrieve.assert_called_once_with("test query", limit=5, scope_override=None)
         assert len(result) == 1
         assert result[0]['id'] == "test-id"
         assert result[0]['content'] == "test content"
@@ -175,42 +185,27 @@ class TestUnifiedRetrieverRecall:
         assert isinstance(result, list)
 
 
-# ── Tracer Bullet 5: retrieve() 与 HebbManager 集成 ────────────────────────────
+# ── Tracer Bullet 5: Hebb 支路退役 ────────────────────────────────────────
 
-class TestUnifiedRetrieverHebb:
-    """retrieve() 与 HebbManager 集成"""
+class TestUnifiedRetrieverHebbRetired:
+    """Hebb 支路已按教义第 7 条退役：retrieve() 不再消费 HebbManager"""
 
-    def test_retrieve_calls_hebb_when_provided(self):
-        """当提供 HebbManager 时，retrieve() 会调用它"""
+    def test_retrieve_ignores_hebb_even_if_attr_assigned(self):
+        """即便有人手工挂上 _hebb，retrieve() 也不得再调用它"""
         from neurova.cognitive_layers.memory_layer.unified_retriever import UnifiedRetriever
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import CognitiveStorageEngine
-        
+
         engine = MagicMock(spec=CognitiveStorageEngine)
         engine.retrieve.return_value = []
-        
+
+        retriever = UnifiedRetriever(engine=engine)
         hebb = MagicMock()
-        mock_hebb = MagicMock()
-        mock_hebb.content = "hebb result"
-        hebb.retrieve_neurova_hebb.return_value = [mock_hebb]
-        hebb.convert_to_recall_format.return_value = {"content": "hebb result", "score": 0.7}
-        
-        retriever = UnifiedRetriever(engine=engine, hebb_manager=hebb)
-        result = asyncio.run(retriever.retrieve("test query"))
-        
-        hebb.retrieve_neurova_hebb.assert_called_once_with("test query")
-        assert any("hebb result" in r.get('content', '') for r in result)
+        hebb.retrieve_neurova_hebb.return_value = [MagicMock()]
+        retriever._hebb = hebb  # 复活尝试：直接塞私有属性
 
-    def test_retrieve_does_not_call_hebb_when_none(self):
-        """当 HebbManager 为 None 时，retrieve() 不调用它"""
-        from neurova.cognitive_layers.memory_layer.unified_retriever import UnifiedRetriever
-        from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import CognitiveStorageEngine
-        
-        engine = MagicMock(spec=CognitiveStorageEngine)
-        engine.retrieve.return_value = []
-        
-        retriever = UnifiedRetriever(engine=engine, hebb_manager=None)
-        # 应该不抛出异常
         result = asyncio.run(retriever.retrieve("test query"))
+
+        hebb.retrieve_neurova_hebb.assert_not_called()
         assert isinstance(result, list)
 
 
@@ -321,10 +316,10 @@ class TestUnifiedRetrieverFullFlow:
     """retrieve() 完整流程测试"""
 
     def test_retrieve_integrates_all_sources(self):
-        """retrieve() 整合所有数据源"""
+        """retrieve() 整合所有数据源（CSE + MoE + Recall；Hebb 已退役）"""
         from neurova.cognitive_layers.memory_layer.unified_retriever import UnifiedRetriever
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import CognitiveStorageEngine, UnifiedMemoryNode
-        
+
         # Mock engine
         engine = MagicMock(spec=CognitiveStorageEngine)
         mock_node = MagicMock()
@@ -335,45 +330,35 @@ class TestUnifiedRetrieverFullFlow:
         mock_node.category = "general"
         mock_node.metadata = {}
         engine.retrieve.return_value = [mock_node]
-        
+
         # Mock MoE
         moe = MagicMock()
         moe.retrieve.return_value = [
             {"content": "moe content", "score": 0.9}
         ]
-        
+
         # Mock Recall
         recall = MagicMock()
         recall.recall_flat.return_value = [
             {"content": "recall content", "score": 0.7}
         ]
-        
-        # Mock Hebb
-        hebb = MagicMock()
-        mock_hebb = MagicMock()
-        mock_hebb.content = "hebb content"
-        hebb.retrieve_neurova_hebb.return_value = [mock_hebb]
-        hebb.convert_to_recall_format.return_value = {"content": "hebb content", "score": 0.6}
-        
+
         retriever = UnifiedRetriever(
             engine=engine,
             moe_router=moe,
             recall_engine=recall,
-            hebb_manager=hebb,
         )
-        
+
         result = asyncio.run(retriever.retrieve("test query", limit=10))
-        
-        # 验证所有数据源被调用
+
+        # 验证各数据源被调用
         engine.retrieve.assert_called_once()
         moe.retrieve.assert_called_once()
         recall.recall_flat.assert_called_once()
-        hebb.retrieve_neurova_hebb.assert_called_once()
-        
+
         # 验证结果去重
         assert len(result) <= 10
         contents = [r.get('content') for r in result]
         assert "engine content" in contents
         assert "moe content" in contents
         assert "recall content" in contents
-        assert "hebb content" in contents

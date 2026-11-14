@@ -48,7 +48,6 @@ class TestMemCoreInitialization:
         assert hasattr(mem_core, 'storage')
         assert hasattr(mem_core, 'temperature_engine')
         assert hasattr(mem_core, 'recall_engine')
-        assert hasattr(mem_core, 'working_memory')
         assert hasattr(mem_core, 'conversation_buffer')
         assert hasattr(mem_core, 'buffer_module')
 
@@ -109,7 +108,6 @@ class TestMemCoreMemoryModules:
     @patch('neurova.cognitive_layers.memory_layer.attachment_manager.AttachmentManager')
     @patch('neurova.cognitive_layers.memory_layer.modules.buffer_module.BufferModule')
     @patch('neurova.cognitive_layers.memory_layer.conversation_buffer.ConversationMemoryBuffer')
-    @patch('neurova.cognitive_layers.memory_layer.working_memory.WorkingMemoryAugmenter')
     @patch('neurova.cognitive_layers.memory_layer.neurova_recall.NeurovaRecallEngine')
     @patch('neurova.cognitive_layers.memory_layer.temperature.TemperatureEngine')
     @patch('neurova.cognitive_layers.memory_layer.manager.MemoryManager')
@@ -144,7 +142,6 @@ class TestMemCoreMemoryModules:
     @patch('neurova.cognitive_layers.memory_layer.attachment_manager.AttachmentManager')
     @patch('neurova.cognitive_layers.memory_layer.modules.buffer_module.BufferModule')
     @patch('neurova.cognitive_layers.memory_layer.conversation_buffer.ConversationMemoryBuffer')
-    @patch('neurova.cognitive_layers.memory_layer.working_memory.WorkingMemoryAugmenter')
     @patch('neurova.cognitive_layers.memory_layer.neurova_recall.NeurovaRecallEngine')
     @patch('neurova.cognitive_layers.memory_layer.temperature.TemperatureEngine')
     @patch('neurova.cognitive_layers.memory_layer.manager.MemoryManager')
@@ -277,7 +274,7 @@ class TestMemCoreIntegration:
         # 验证 - MemCore 应该有所有必要的属性
         required_attrs = [
             'memory_manager', 'storage', 'temperature_engine',
-            'recall_engine', 'working_memory', 'conversation_buffer',
+            'recall_engine', 'conversation_buffer',
             'buffer_module', 'growth_log_manager', 'question_queue_manager',
             'tool_memory', 'muscle_memory', 'attachment_manager'
         ]

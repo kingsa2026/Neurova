@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 """TKG（时效知识图谱）检索适配器（补课 5.2）。
 
-TemporalKnowledgeGraph 此前是全仓零实例化的孤岛模块——本适配器把它
-接入 MemoryRetrievalChain 作为补充知识源。
+旧私有 TKG 存储（temporal_knowledge_graph.py）曾是全仓零实例化的孤岛模块，
+本适配器把它接入 MemoryRetrievalChain 作为补充知识源；012 之后权威移到底座
+knowledge_facts（工单 012 灭 B01），旧存储已按教义第 7 条整体退役（2026-11-14）——
+本适配器现在适配的是底座读面 TemporalFactReader。
 
 - priority=26：在 KnowledgeRetriever(25) 之后、Cache(30) 之前
   （记忆 >> 知识库 >> TKG 事实 >> 缓存）
-- 检索调 query_current()（只取当前有效事实，时效语义由 TKG 自管）
+- 检索调 query_tkg_for_context/forQuery（只取当前有效事实，时效语义由底座自管）
 - 事实转 dict：{id, content: "subject predicate object", ...}
 """
 import asyncio
@@ -19,12 +21,12 @@ logger = get_logger(__name__)
 
 
 class TKGRetrieverAdapter:
-    """适配 TemporalKnowledgeGraph，作为检索链的事实级补充源。"""
+    """适配底座时效事实读面（TemporalFactReader），作为检索链的事实级补充源。"""
 
     def __init__(self, tkg):
         """
         参数:
-            tkg: TemporalKnowledgeGraph 实例（需有 query_current 方法）
+            tkg: 时效事实读面实例（需有 forQuery 或 query_tkg_for_context 方法）
         """
         self._tkg = tkg
         self._name = "TKGRetriever"

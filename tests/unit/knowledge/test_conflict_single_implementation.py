@@ -11,13 +11,11 @@
 
 from __future__ import annotations
 
-import inspect
 import pathlib
 
 import pytest
 
 from neurova.cognitive_layers.memory_layer.modules.tkg_module import TKGModule
-from neurova.cognitive_layers.memory_layer.temporal_knowledge_graph import TemporalKnowledgeGraph
 from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
 
 MEMORY_LAYER = pathlib.Path("neurova/cognitive_layers/memory_layer")
@@ -31,24 +29,15 @@ def store(tmp_path):
 
 
 class TestTheSecondAndThirdImplementationAreGone:
-    def test_tkgHoldsNoConflictMachinery(self):
-        for gone in ("detect_conflicts", "_is_contradiction",
-                     "_is_relation_mutually_exclusive", "_has_temporal_overlap", "_store_conflict"):
-            assert not hasattr(TemporalKnowledgeGraph, gone), "%s 还在 TKG 里，判定又长了第二套" % gone
+    def test_privateTkgStoreIsRetiredEntirely(self):
+        """旧私有 TKG 存储（temporal_knowledge_graph.py）已按教义第 7 条整体退役
+        （2026-11-14）：时序事实唯一权威在底座 knowledge_facts，读面是
+        foundation.temporal_facts.TemporalFactReader。模块名再可导入即复活。"""
+        import importlib
 
-    def test_addFactIsJustAWrite(self, tmp_path):
-        """写事实的函数不再顺手裁决，也不再"严重度>0.7 就拒写"——那是咽喉段4的职权。"""
-        tkg = TemporalKnowledgeGraph(str(tmp_path / "tkg.db"))
-        try:
-            params = list(inspect.signature(tkg.add_fact).parameters)
-            assert params == ["fact"], "add_fact 只该收一条事实，收到 %s" % params
-        finally:
-            tkg.close()
-
-    def test_privateFactConflictsTableIsGone(self):
-        text = (MEMORY_LAYER / "temporal_knowledge_graph.py").read_text(encoding="utf-8")
-        assert "fact_conflicts" not in text, "私库冲突表还在，就等于还留着第二份账"
-        assert "FactConflict" not in text
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(
+                "neurova.cognitive_layers.memory_layer.temporal_knowledge_graph")
 
     def test_noMemoryLayerFileJudgesSpoContradictionsExceptByDelegation(self):
         """memory_layer 里可以有人*问*冲突，不许有人自己*判*冲突。"""

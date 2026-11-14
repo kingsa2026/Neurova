@@ -185,7 +185,9 @@ def test_unifiedRetrieverAdapterPassesSessionId():
         def __init__(self):
             self.seenSession = None
 
-        def retrieve(self, query, limit=10, session_id=None):
+        # P1-10 身份透传落地后的现实签名（与 UnifiedRetriever.retrieve 对齐）：
+        # 适配器总会显式传 neuser_id/user_id（缺省 None）
+        def retrieve(self, query, limit=10, session_id=None, neuser_id=None, user_id=None):
             self.seenSession = session_id
             return [{"id": "m1", "content": "x"}]
 

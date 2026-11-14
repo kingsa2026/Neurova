@@ -67,9 +67,13 @@ def _bridge(graph, registry, store, entities, relations=None):
 
 class TestB02DeadCodeRetired:
     def test_extractionBridgeIsGone(self):
-        from neurova.cognitive_layers.memory_layer import temporal_knowledge_graph as tkg
+        """旧私有 TKG 模块（temporal_knowledge_graph.py）已按教义第 7 条整体退役
+        （2026-11-14）：TemporalKGMemoryBridge 与死码随模块一起消失，模块名再可导入即复活。"""
+        import importlib
 
-        assert not hasattr(tkg, "TemporalKGMemoryBridge"), "死码要删掉，不是注释掉"
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(
+                "neurova.cognitive_layers.memory_layer.temporal_knowledge_graph")
 
     def test_liveReadPathIsStillWired(self):
         """退役不能把在用的那条路一起带走：012 之后读面在底座时效视图里。"""

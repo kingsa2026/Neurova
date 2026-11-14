@@ -18,7 +18,7 @@ Bug 清单:
     Bug 9  (LOW)   cleanup_completed_contexts 未持锁
     Bug 10 (LOW)   cancel() 后不 await task
     Bug 11 (LOW)   _execute_infinite 双重赋值 context.error
-    Bug 12 (MEDIUM) sleep_module TOCTOU
+    Bug 12 (MEDIUM) sleep_module TOCTOU（SleepModule 已按教义第 7 条退役，测试随之删除）
     Bug 13 (MEDIUM) self_model_module substring 匹配
     Bug 14 (MEDIUM) emotion_module 阈值重复定义
     Bug 15 (LOW)   emotion_module _init_db 静默吞异常
@@ -31,7 +31,6 @@ import inspect
 import json
 import logging
 import sqlite3
-import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -41,91 +40,8 @@ from tests.ast_scan import parseSource
 
 
 # ============================================================
-# Bug 1: WorkingMemoryAugmenter 完全无锁
-# ============================================================
-
-
-def test_bug1_working_memory_concurrent_add_evict_no_error():
-    """Bug 1: 并发 add + _evict 不应抛 RuntimeError"""
-    from neurova.cognitive_layers.memory_layer.working_memory import (
-        WorkingMemoryAugmenter,
-    )
-
-    augmenter = WorkingMemoryAugmenter(capacity=5)
-    errors = []
-
-    def worker():
-        try:
-            tid = threading.current_thread().ident
-            for i in range(50):
-                augmenter.add(f"key_{tid}_{i}", content=f"value_{i}", importance=0.5)
-        except Exception as e:
-            errors.append(e)
-
-    threads = [threading.Thread(target=worker) for _ in range(5)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    assert not errors, f"并发 add/_evict 抛出错误: {errors}"
-
-
-def test_bug1_working_memory_has_lock():
-    """Bug 1: WorkingMemoryAugmenter 应有 _lock 字段"""
-    from neurova.cognitive_layers.memory_layer.working_memory import (
-        WorkingMemoryAugmenter,
-    )
-
-    augmenter = WorkingMemoryAugmenter()
-    assert hasattr(augmenter, "_lock"), "WorkingMemoryAugmenter 应有 _lock 字段"
-
-
-# ============================================================
-# Bug 2: get() 返回 None 无法区分 cache miss vs cached None
-# ============================================================
-
-
-def test_bug2_working_memory_get_distinguishes_miss_from_none():
-    """Bug 2: 存 None 值,验证 get 返回 None != miss 的 _MISSING"""
-    from neurova.cognitive_layers.memory_layer.working_memory import (
-        _MISSING,
-        WorkingMemoryAugmenter,
-    )
-
-    augmenter = WorkingMemoryAugmenter()
-
-    # 存 None 值
-    augmenter.add("key_with_none", content=None)
-
-    # 获取存了 None 的 key - 应返回 None (不是 _MISSING)
-    result = augmenter.get("key_with_none")
-    assert result is None, f"存了 None 的 key 应返回 None, got {result!r}"
-
-    # 获取不存在的 key - 应返回 _MISSING (不是 None)
-    result = augmenter.get("missing_key")
-    assert result is _MISSING, (
-        f"缺失 key 应返回 _MISSING sentinel 区分 cache miss, got {result!r}"
-    )
-
-
-# ============================================================
-# Bug 3: self.memory_manager 死代码
-# ============================================================
-
-
-def test_bug3_working_memory_no_dead_memory_manager_field():
-    """Bug 3: 验证 memory_manager 死代码字段已删除"""
-    from neurova.cognitive_layers.memory_layer import working_memory
-
-    source = inspect.getsource(working_memory)
-    assert "self.memory_manager" not in source, (
-        "死代码: self.memory_manager 字段应删除或在 eviction 策略中实际使用"
-    )
-
-
-# ============================================================
-# Bug 4: chat_pipeline 注入 MemCore 给 CrystallizedExp,但 MemCore 无 recall()
+# Bug 1/2/3（WorkingMemoryAugmenter 锁/哨兵/死字段）随该类退役删除：
+# 工作记忆唯一实现在是 modules/working_memory_module.py（教义第 7 条，2026-11-14）。
 # ============================================================
 
 
@@ -430,59 +346,9 @@ def test_bug11_execute_infinite_no_double_error_assignment():
 
 
 # ============================================================
-# Bug 12: sleep_module TOCTOU
+# Bug 12（sleep_module TOCTOU）随 SleepModule 退役删除（教义第 7 条，2026-11-14）：
+# 睡眠整理唯一实现在是 sleep.py 的 SleepConsolidation。
 # ============================================================
-
-
-def test_bug12_sleep_module_consolidate_check_inside_lock():
-    """Bug 12: consolidate_memory 的 _is_sleeping 检查应在 with self._lock 之后(TOCTOU fix)"""
-    from neurova.cognitive_layers.memory_layer.modules.sleep_module import SleepModule
-
-    source = inspect.getsource(SleepModule.consolidate_memory)
-
-    lock_pos = source.find("with self._lock")
-    check_pos = source.find("if not self._is_sleeping")
-
-    assert lock_pos != -1, "consolidate_memory 应使用 with self._lock"
-    assert check_pos != -1, "consolidate_memory 应检查 _is_sleeping"
-    assert check_pos > lock_pos, (
-        f"consolidate_memory: _is_sleeping 检查(pos {check_pos})应在 with self._lock"
-        f"(pos {lock_pos})之后(锁内),修复 TOCTOU"
-    )
-
-
-def test_bug12_sleep_module_cleanup_check_inside_lock():
-    """Bug 12: cleanup_memory 的 _is_sleeping 检查应在 with self._lock 之后"""
-    from neurova.cognitive_layers.memory_layer.modules.sleep_module import SleepModule
-
-    source = inspect.getsource(SleepModule.cleanup_memory)
-
-    lock_pos = source.find("with self._lock")
-    check_pos = source.find("if not self._is_sleeping")
-
-    assert lock_pos != -1, "cleanup_memory 应使用 with self._lock"
-    assert check_pos != -1, "cleanup_memory 应检查 _is_sleeping"
-    assert check_pos > lock_pos, (
-        f"cleanup_memory: _is_sleeping 检查(pos {check_pos})应在 with self._lock"
-        f"(pos {lock_pos})之后(锁内),修复 TOCTOU"
-    )
-
-
-def test_bug12_sleep_module_dream_check_inside_lock():
-    """Bug 12: dream 的 _is_sleeping 检查应在 with self._lock 之后"""
-    from neurova.cognitive_layers.memory_layer.modules.sleep_module import SleepModule
-
-    source = inspect.getsource(SleepModule.dream)
-
-    lock_pos = source.find("with self._lock")
-    check_pos = source.find("if not self._is_sleeping")
-
-    assert lock_pos != -1, "dream 应使用 with self._lock"
-    assert check_pos != -1, "dream 应检查 _is_sleeping"
-    assert check_pos > lock_pos, (
-        f"dream: _is_sleeping 检查(pos {check_pos})应在 with self._lock"
-        f"(pos {lock_pos})之后(锁内),修复 TOCTOU"
-    )
 
 
 # ============================================================

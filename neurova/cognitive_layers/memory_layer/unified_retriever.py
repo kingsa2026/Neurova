@@ -1,7 +1,10 @@
 """
-统一检索器 — 替代 MoE + RecallEngine + HebbManager 三路并行
+统一检索器 — CognitiveStorageEngine 直查 + MoE/RecallEngine 混合召回的融合位
 
 深度模块设计：小接口（retrieve），深实现（整合多个检索源）。
+Hebb 支路已退役（2026-11-14，教义第 7 条）：生产装配里 hebb_manager 恒为
+None（MemCore 无该属性），Neurova Hebb 的真实消费面是 chat_pipeline 的
+Evocate 注入步——此处不再保留永不生效的死支路。
 """
 
 from __future__ import annotations
@@ -18,11 +21,11 @@ logger = get_logger(__name__)
 
 class UnifiedRetriever:
     """
-    统一检索器 — 替代 MoE + RecallEngine + HebbManager 三路并行
+    统一检索器 — CognitiveStorageEngine 直查 + MoE/RecallEngine 混合召回
 
     核心思想：
       1. 新数据：直接使用 CognitiveStorageEngine
-      2. 旧数据：包装旧检索器作为子组件
+      2. 混合召回：融合 MoE 路由与 RecallEngine 多通道结果
       3. 去重排序：统一结果格式，去重，按分数排序
     """
 
@@ -31,7 +34,6 @@ class UnifiedRetriever:
         engine: CognitiveStorageEngine,
         moe_router=None,
         recall_engine=None,
-        hebb_manager=None,
     ):
         """
         初始化统一检索器
@@ -40,18 +42,15 @@ class UnifiedRetriever:
             engine: CognitiveStorageEngine 实例
             moe_router: MoE 路由器（可选）
             recall_engine: RecallEngine 实例（可选）
-            hebb_manager: HebbManager 实例（可选）
         """
         self.engine = engine
         self._moe = moe_router
         self._recall = recall_engine
-        self._hebb = hebb_manager
 
         logger.info(
             "UnifiedRetriever 初始化完成，"
             f"MoE: {'是' if moe_router else '否'}, "
-            f"Recall: {'是' if recall_engine else '否'}, "
-            f"Hebb: {'是' if hebb_manager else '否'}"
+            f"Recall: {'是' if recall_engine else '否'}"
         )
 
     async def retrieve(
@@ -107,14 +106,6 @@ class UnifiedRetriever:
                         results.append(rm)
             except Exception as e:
                 logger.warning("Recall 检索失败: %s", e)
-
-        if self._hebb:
-            try:
-                hebbs = self._hebb.retrieve_neurova_hebb(query)
-                hebb_results = [self._hebb.convert_to_recall_format(h) for h in hebbs]
-                results.extend(hebb_results)
-            except Exception as e:
-                logger.warning("Hebb 检索失败: %s", e)
 
         # 去重 + 排序
         return self._dedup_rank(results, limit)

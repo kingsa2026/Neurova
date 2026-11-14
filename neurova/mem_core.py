@@ -500,14 +500,6 @@ class MemCore:
         self._agent.recall_engine = value
 
     @property
-    def working_memory(self):
-        return getattr(self._agent, "working_memory", None)
-
-    @working_memory.setter
-    def working_memory(self, value):
-        self._agent.working_memory = value
-
-    @property
     def conversation_buffer(self):
         return getattr(self._agent, "conversation_buffer", None)
 
@@ -598,7 +590,6 @@ class MemCore:
         from neurova.cognitive_layers.memory_layer.manager import MemoryManager
         from neurova.cognitive_layers.memory_layer.modules.buffer_module import BufferModule
         from neurova.cognitive_layers.memory_layer.temperature import TemperatureEngine
-        from neurova.cognitive_layers.memory_layer.working_memory import WorkingMemoryAugmenter
         from neurova.cognitive_layers.meta_cognition_layer.growth_log import GrowthLogManager
         from neurova.cognitive_layers.meta_cognition_layer.question_queue import QuestionQueueManager
 
@@ -689,14 +680,9 @@ class MemCore:
                 self._agent.proactive_behavior_engine = None
                 self._agent.intrinsic_motivation = None
 
-            # 初始化工作记忆
-            self.working_memory = WorkingMemoryAugmenter(
-                config={
-                    "max_items": 10,
-                    "memory_manager": self.memory_manager,
-                }
-            )
-            logger.info("Agent %s: WorkingMemoryAugmenter（工作记忆）已启用", self.config.name)
+            # 工作记忆统一由 MemoryManager 的 WorkingMemoryModule 承担
+            # （manager.wm_* → /api/v1/memory/working-memory）；此前的
+            # WorkingMemoryAugmenter 装配后零调用，按教义第 7 条退役。
 
             # 初始化对话缓冲区
             self.conversation_buffer = ConversationMemoryBuffer(
@@ -1542,7 +1528,6 @@ class MemCore:
             "storage_available": self.storage is not None,
             "temperature_engine_available": self.temperature_engine is not None,
             "recall_engine_available": self.recall_engine is not None,
-            "working_memory_available": self.working_memory is not None,
             "conversation_buffer_available": self.conversation_buffer is not None,
             "buffer_module_available": self.buffer_module is not None,
             "conversation_history_length": len(self.conversation_history),

@@ -29,7 +29,6 @@ _TARGET_MODULES = {
     "neurova.cognitive_layers.memory_layer.manager": {"MemoryManager"},
     "neurova.cognitive_layers.memory_layer.modules.buffer_module": {"BufferModule"},
     "neurova.cognitive_layers.memory_layer.temperature": {"TemperatureEngine"},
-    "neurova.cognitive_layers.memory_layer.working_memory": {"WorkingMemoryAugmenter"},
     "neurova.cognitive_layers.meta_cognition_layer.growth_log": {"GrowthLogManager"},
     "neurova.cognitive_layers.meta_cognition_layer.question_queue": {
         "QuestionQueueManager"

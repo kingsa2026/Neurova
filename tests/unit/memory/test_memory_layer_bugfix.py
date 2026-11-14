@@ -12,7 +12,7 @@
   BUG-9:  remember 中 except Exception: pass 静默吞情感分析异常
   BUG-10: MemoryWriteQueue.flush_to_storage TOCTOU race
   BUG-11: AttachmentManager.__del__ 调用 close() 获取锁
-  BUG-12: run_*_sleep_cycle 修改模块私有属性非线程安全
+  BUG-12: run_*_sleep_cycle 修改模块私有属性非线程安全（SleepModule 已按教义第 7 条退役，测试随之删除）
   BUG-13: AttachmentManager 重复定义
   BUG-14: TemperatureEngine._default_instance 无锁
   BUG-15: get_attachment_manager 单例无双重检查锁
@@ -552,52 +552,6 @@ class TestBug11AttachmentManagerDelLock:
         source = inspect.getsource(AttachmentManager.__del__)
         assert "close" in source or "_conn" in source, (
             "__del__ 应关闭 _conn 连接"
-        )
-
-
-# ═══════════════════════════════════════════════════════════════════
-# BUG-12 (LOW): run_*_sleep_cycle 修改模块私有属性
-# ═══════════════════════════════════════════════════════════════════
-
-class TestBug12SleepCyclePrivateAttrMutation:
-    """BUG-12: run_*_sleep_cycle 修改模块私有属性非线程安全
-
-    根因: 直接修改 module._dream_probability / _consolidation_threshold / _cleanup_threshold
-    修复: 用参数传递而非修改私有属性
-    """
-
-    def test_run_rem_sleep_cycle_does_not_mutate_private_attr(self, tmp_path):
-        """run_rem_sleep_cycle 不应直接修改 module._dream_probability"""
-        manager = _make_manager(tmp_path=tmp_path)
-        module = manager._ensure_sleep_module()
-        original_dream = module._dream_probability
-
-        # 需要有记忆才能运行
-        manager.remember(content="sleep test", importance=0.8)
-        manager.run_rem_sleep_cycle()
-
-        # 检查私有属性是否被恢复（修复后不应被修改）
-        assert module._dream_probability == original_dream, (
-            f"run_rem_sleep_cycle 修改了 module._dream_probability "
-            f"(原值={original_dream}, 当前={module._dream_probability})。"
-            "应通过参数传递而非修改私有属性。"
-        )
-
-    def test_run_deep_sleep_cycle_does_not_mutate_private_attr(self, tmp_path):
-        """run_deep_sleep_cycle 不应直接修改 module._consolidation_threshold"""
-        manager = _make_manager(tmp_path=tmp_path)
-        module = manager._ensure_sleep_module()
-        original_consolidation = module._consolidation_threshold
-        original_cleanup = module._cleanup_threshold
-
-        manager.remember(content="sleep test", importance=0.8)
-        manager.run_deep_sleep_cycle()
-
-        assert module._consolidation_threshold == original_consolidation, (
-            "run_deep_sleep_cycle 修改了 module._consolidation_threshold。"
-        )
-        assert module._cleanup_threshold == original_cleanup, (
-            "run_deep_sleep_cycle 修改了 module._cleanup_threshold。"
         )
 
 

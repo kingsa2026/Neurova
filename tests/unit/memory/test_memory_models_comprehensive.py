@@ -3,7 +3,7 @@ Neurova Memory Models - 全面单元测试（按当前真实模型重写）
 
 覆盖:
 1. 枚举: MemoryType, MemoryCategory, LifecycleStage, MemoryPerspective, EmotionType
-2. 数据类: UserProfile, Skill, SelfModel, Attachment, Memory, MemoryRelation, MetaTrace
+2. 数据类: UserProfile, Skill, Attachment, Memory, MemoryRelation, MetaTrace
 """
 
 import pytest
@@ -17,7 +17,6 @@ from neurova.cognitive_layers.memory_layer.models import (
     EmotionType,
     UserProfile,
     Skill,
-    SelfModel,
     Attachment,
     Memory,
     MemoryRelation,
@@ -124,24 +123,6 @@ class TestSkill:
         d = s.to_dict()
         assert d["skill_id"] == "sk1"
         assert d["name"] == "搜索"
-
-
-class TestSelfModel:
-    def test_defaults(self):
-        m = SelfModel(agent_id="a1")
-        assert m.agent_id == "a1"
-        assert m.capabilities == []
-        assert m.goals == []
-
-    def test_traits_and_beliefs(self):
-        m = SelfModel(
-            agent_id="a1", name="助手",
-            personality_traits={"friendly": 0.8},
-            beliefs={"用户至上": 1.0},
-            goals=["帮助用户"],
-        )
-        assert m.personality_traits["friendly"] == 0.8
-        assert m.goals == ["帮助用户"]
 
 
 class TestAttachment:

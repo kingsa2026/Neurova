@@ -325,10 +325,12 @@ class TestMemoryFacadeBrokenPointersRepaired:
         from neurova.cognitive_layers.memory_layer.graph_traversal import GraphTraversal
         from neurova.cognitive_layers.memory_layer.sleep import SleepConsolidation
 
-        assert facade.SelfModel is layerModels.SelfModel
+        # SelfModel 已按教义第 7 条从门面退役（2026-11-14）：零生产消费方的死数据类，
+        # 自我模型的活形态是 SelfModelModule/SelfManagerModule/SelfModelEngine。
         assert facade.UserProfile is layerModels.UserProfile
         assert facade.GraphTraversal is GraphTraversal
         assert facade.SleepConsolidation is SleepConsolidation
+        assert not hasattr(facade, "SelfModel"), "退役名字不许再挂在门面上"
 
     def testNamesWithoutImplementationAreNotReExportedAsNulls(self):
         """`ProactiveQuestion` / `VersionControl` 在仓内没有实装 ⇒ 门面不再假装有这两个名字。

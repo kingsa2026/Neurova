@@ -93,10 +93,10 @@ def main() -> int:
     from neurova.cognitive_layers.memory_layer.graph_traversal import GraphTraversal
     from neurova.cognitive_layers.memory_layer.sleep import SleepConsolidation
 
-    check("[2] 四条坏指路接回真身（同一对象，不是复制）",
-          mem.SelfModel is layerModels.SelfModel and mem.UserProfile is layerModels.UserProfile
+    check("[2] 坏指路接回真身（同一对象，不是复制）；SelfModel 已随教义7退役不再挂门面",
+          mem.UserProfile is layerModels.UserProfile
           and mem.GraphTraversal is GraphTraversal and mem.SleepConsolidation is SleepConsolidation,
-          f"SelfModel={mem.SelfModel.__module__} GraphTraversal={mem.GraphTraversal.__module__}")
+          f"GraphTraversal={mem.GraphTraversal.__module__}")
 
     cache = importlib.import_module("neurova.core.cache")
     check("[3] 缓存出处只有一处（薄壳与门面已随批 45 退役，循环失去载体）",

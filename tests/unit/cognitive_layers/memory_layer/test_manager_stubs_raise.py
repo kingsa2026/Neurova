@@ -4,7 +4,8 @@
 阶段10 GREEN 完成后，所有 stub 已委托，原测试不再适用。
 
 委托验证请见: test_manager_full_delegation.py
-EKI/Sleep 委托验证请见: test_manager_eki_sleep_delegation.py
+EKI 委托验证请见: test_manager_eki_sleep_delegation.py
+（Sleep 委托已随 SleepModule 退役，教义第 7 条，2026-11-14）
 
 保留下列真实实现验证测试，确保核心功能未被破坏。
 """
@@ -46,7 +47,6 @@ def manager(tmp_path):
 #   - Explainability (2): get_explanation_chain 等 → ExplainabilityModule
 #   - ForgettingRecovery (1): get_recovery_history → ForgettingRecoveryModule
 #   - EKI (10): eki_process_task 等 → EKIModule（阶段2委托）
-#   - Sleep (4): run_light_sleep_cycle 等 → SleepModule（阶段2委托）
 
 
 # ────── 真实实现验证 (确保核心功能未被破坏) ──────
