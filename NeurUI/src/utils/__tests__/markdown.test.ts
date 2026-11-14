@@ -18,6 +18,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { renderMarkdown } from '@/utils/markdown'
+import { escapeHtml } from '@/utils/security'
 
 describe('renderMarkdown — GFM 语法覆盖', () => {
   it('渲染标题 (h1-h6)', () => {
@@ -89,7 +90,7 @@ describe('renderMarkdown — 代码块 (格式美化 + 防污染回归)', () => 
   it('代码块内容转义 HTML (旧 bug: <div> 被当作标签)', () => {
     const html = renderMarkdown('```html\n<div>hi</div>\n```')
     const text = html.replace(/<[^>]*>/g, '')
-    expect(text).toContain('&lt;div&gt;')
+    expect(text).toContain(escapeHtml('<div>'))
     expect(html).not.toContain('<div>hi</div>')
   })
 
@@ -172,8 +173,8 @@ describe('renderMarkdown — 鲁棒性', () => {
 
   it('纯文本 < 被转义', () => {
     const html = renderMarkdown('1 < 2 且 3 > 2')
-    expect(html).toContain('1 &lt; 2')
-    expect(html).toContain('3 &gt; 2')
+    expect(html).toContain(escapeHtml('1 < 2'))
+    expect(html).toContain(escapeHtml('3 > 2'))
   })
 
   it('流式半截代码块不抛错且输出合法', () => {
@@ -192,5 +193,57 @@ describe('renderMarkdown — 鲁棒性', () => {
       expect(html.length).toBeGreaterThan(0)
     }
     expect(renderMarkdown(acc)).toContain('language-js')
+  })
+})
+
+describe('renderMarkdown — 产物文件名可点击（2026-11-14 用户口径）', () => {
+  const REFS = [
+    { name: '报告.md', artifactId: 'abc123', path: 'E:\\ws\\报告.md', kind: 'markdown' },
+    { name: 'neurova-67c03017_0.pdf', artifactId: 'pdf001', path: 'E:\\gen\\neurova-67c03017_0.pdf', kind: 'pdf' },
+  ]
+
+  it('行内代码文件名命中产物 → nr-artifact-ref 可点击按钮', () => {
+    const html = renderMarkdown('产物：`报告.md` 已就绪', '⧉', REFS)
+    expect(html).toContain('nr-artifact-ref')
+    expect(html).toContain('data-artifact-name="报告.md"')
+    expect(html).toContain('data-artifact-id="abc123"')
+    expect(html).toContain('>报告.md</button>')
+  })
+
+  it('正文裸文件名（含生成文件下载 URL 内）同样成链接', () => {
+    const html = renderMarkdown('下载地址 /api/v1/generation/files/neurova-67c03017_0.pdf', '⧉', REFS)
+    expect(html).toContain('nr-artifact-ref')
+    expect(html).toContain('data-artifact-id="pdf001"')
+    // URL 其余部分保持文本，不被吃掉
+    expect(html).toContain('/api/v1/generation/files/')
+  })
+
+  it('未命中产物的行内代码保持 <code> 原样', () => {
+    const html = renderMarkdown('配置 `npm install` 不变', '⧉', REFS)
+    expect(html).toContain('<code>npm install</code>')
+    expect(html).not.toContain('nr-artifact-ref')
+  })
+
+  it('不传产物表时输出与旧契约一致（无 nr-artifact-ref）', () => {
+    const html = renderMarkdown('产物：`报告.md`', '⧉')
+    expect(html).toContain('<code>报告.md</code>')
+    expect(html).not.toContain('nr-artifact-ref')
+  })
+
+  it('缓存键含产物表身份：同文本不同产物不串缓存', () => {
+    const other = [{ name: '报告.md', artifactId: 'other999', kind: 'markdown' }]
+    const a = renderMarkdown('产物：`报告.md`', '⧉', REFS)
+    const b = renderMarkdown('产物：`报告.md`', '⧉', other)
+    expect(a).toContain('data-artifact-id="abc123"')
+    expect(b).toContain('data-artifact-id="other999"')
+  })
+
+  it('文件名含 HTML 特殊字符时安全转义（不成注入面）', () => {
+    const evil = [{ name: 'a<b>&c.md', artifactId: 'x1', kind: 'text' }]
+    const html = renderMarkdown('产物：`a<b>&c.md`', '⧉', evil)
+    expect(html).toContain('nr-artifact-ref')
+    // 按钮文本是转义实体（escapeHtml 同源），<b> 只存在于引号属性值内（惰性）
+    expect(html).toContain(escapeHtml('a<b>&c.md') + '</button>')
+    expect(html).not.toContain('><b>')
   })
 })

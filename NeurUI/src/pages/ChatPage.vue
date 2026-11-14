@@ -166,8 +166,10 @@
             <MessageContent
               v-else-if="msg.content"
               :content="msg.content"
+              :artifacts="msg.artifacts"
               @open-code="onOpenCode"
               @open-image="onOpenImage"
+              @open-artifact="openMessageArtifact"
             />
 
             <!-- File Attachments (Enhanced) -->

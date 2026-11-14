@@ -21,14 +21,19 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { renderMarkdown } from '@/utils/markdown'
+import type { MessageArtifact } from '@/utils/artifacts'
 import { useMermaidRenderer } from '@/composables/useMermaidRenderer'
 import '@/styles/messageRender.css'
 
-const props = withDefaults(defineProps<{ content: string; bare?: boolean }>(), { bare: false })
+const props = withDefaults(defineProps<{ content: string; bare?: boolean; artifacts?: MessageArtifact[] }>(), {
+  bare: false,
+  artifacts: undefined,
+})
 
 const emit = defineEmits<{
   (e: 'openCode', lang: string, code: string): void
   (e: 'openImage', src: string, alt: string): void
+  (e: 'openArtifact', artifact: MessageArtifact): void
 }>()
 
 const { t } = useI18n()
@@ -36,13 +41,21 @@ const appStore = useAppStore()
 const bodyRef = ref<HTMLElement | null>(null)
 
 const { renderIn, scheduleRender, dispose } = useMermaidRenderer(() => !appStore.isDark)
-const renderedHtml = computed(() => renderMarkdown(props.content, t('common.copy')))
+const renderedHtml = computed(() => renderMarkdown(props.content, t('common.copy'), props.artifacts))
 
 const copyResetTimers: number[] = []
 
-/** 事件委托：复制（就地）→ 代码预览（emit）→ 内联图片放大（emit）。 */
+/** 事件委托：复制（就地）→ 代码预览（emit）→ 产物文件名（emit）→ 内联图片放大（emit）。 */
 function handleClick(e: MouseEvent): void {
   const target = e.target as HTMLElement
+
+  const artifactRef = target.closest('.nr-artifact-ref') as HTMLElement | null
+  if (artifactRef) {
+    const name = artifactRef.dataset.artifactName || ''
+    const hit = props.artifacts?.find((a) => a.name === name)
+    if (hit) emit('openArtifact', hit)
+    return
+  }
 
   const copyBtn = target.closest('.nr-code-copy-btn') as HTMLButtonElement | null
   if (copyBtn) {

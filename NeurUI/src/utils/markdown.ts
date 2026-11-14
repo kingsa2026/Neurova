@@ -55,7 +55,60 @@ for (const [name, language] of HLJS_LANGUAGES) {
   hljs.registerLanguage(name, language)
 }
 
-function createRenderer(copyLabel: string, previewLabel = '◫') {
+// ---------------------------------------------------------------------------
+// 产物文件名可点击（2026-11-14 用户口径）：回复正文里点名的文件名，命中
+// 本轮产物表（msg.artifacts，后端 metadata.artifacts / SSE / 带挂同源）
+// 即渲染为 nr-artifact-ref 按钮，点击由宿主开右侧预览面板。
+// ---------------------------------------------------------------------------
+
+/** 产物引用的最小形状（MessageArtifact 的结构子集，免跨模块类型耦合） */
+export interface ArtifactRefLike {
+  name: string
+  artifactId?: string
+  path?: string
+  kind?: string
+}
+
+function artifactRefHtml(ref: ArtifactRefLike, labelHtml: string): string {
+  const id = ref.artifactId ? ` data-artifact-id="${escapeHtml(ref.artifactId)}"` : ''
+  const path = ref.path ? ` data-artifact-path="${escapeHtml(ref.path)}"` : ''
+  const kind = ref.kind ? ` data-artifact-kind="${escapeHtml(ref.kind)}"` : ''
+  return `<button class="nr-artifact-ref" data-artifact-name="${escapeHtml(ref.name)}"${id}${path}${kind}>${labelHtml}</button>`
+}
+
+/** 纯文本里的产物名 → 链接（raw 级匹配、逐段转义，不成注入面） */
+function linkifyArtifactNames(raw: string, refs: Map<string, ArtifactRefLike>): string {
+  let html = ''
+  let i = 0
+  while (i < raw.length) {
+    let hit: { name: string; ref: ArtifactRefLike; at: number } | null = null
+    for (const [name, ref] of refs) {
+      if (!name) continue
+      const at = raw.indexOf(name, i)
+      if (at !== -1 && (hit === null || at < hit.at)) hit = { name, ref, at }
+    }
+    if (hit === null) {
+      html += escapeHtml(raw.slice(i))
+      break
+    }
+    html += escapeHtml(raw.slice(i, hit.at))
+    html += artifactRefHtml(hit.ref, escapeHtml(hit.name))
+    i = hit.at + hit.name.length
+  }
+  return html
+}
+
+/** 产物数组 → 按名索引（同名先到先得） */
+function indexArtifactRefs(artifacts?: readonly ArtifactRefLike[]): Map<string, ArtifactRefLike> | undefined {
+  if (!artifacts || artifacts.length === 0) return undefined
+  const map = new Map<string, ArtifactRefLike>()
+  for (const a of artifacts) {
+    if (a && a.name && !map.has(a.name)) map.set(a.name, a)
+  }
+  return map.size > 0 ? map : undefined
+}
+
+function createRenderer(copyLabel: string, previewLabel = '◫', artifactRefs?: Map<string, ArtifactRefLike>) {
   return {
     /** 围栏代码块: 语法高亮 + 语言标签 + 复制/预览按钮 (升级后的代码块卡片) */
     code(token: Tokens.Code): string {
@@ -88,6 +141,22 @@ function createRenderer(copyLabel: string, previewLabel = '◫') {
         `<pre class="nr-code-block"><code class="${codeClass}">${highlighted}</code></pre>` +
         `</div>`
       )
+    },
+
+    /** 行内代码：文件名命中本轮产物 → 可点击产物引用（点击开右侧预览） */
+    codespan(token: Tokens.Codespan): string {
+      const ref = artifactRefs?.get(token.text)
+      if (ref) return artifactRefHtml(ref, escapeHtml(token.text))
+      return `<code>${escapeHtml(token.text)}</code>`
+    },
+
+    /** 普通文本：裸文件名 / 生成文件下载 URL 里点名的产物同样成链接 */
+    text(token: Tokens.Text | Tokens.Escape): string {
+      const isEscaped = 'escaped' in token && Boolean(token.escaped)
+      if (isEscaped || !artifactRefs || artifactRefs.size === 0) {
+        return isEscaped ? token.text : escapeHtml(token.text)
+      }
+      return linkifyArtifactNames(token.text, artifactRefs)
     },
 
     /** 链接: 协议白名单校验, 危险协议退化为纯文本 (不产生 <a>) */
@@ -131,18 +200,25 @@ function createRenderer(copyLabel: string, previewLabel = '◫') {
 const RENDER_CACHE_MAX = 200
 const renderCache = new Map<string, string>()
 
-function cacheKey(text: string, copyLabel: string): string {
-  return `${copyLabel}::${text.length}::${text}`
+function cacheKey(text: string, copyLabel: string, refsKey = ''): string {
+  return `${copyLabel}::${text.length}::${text}::${refsKey}`
 }
 
 export function clearMarkdownRenderCache(): void {
   renderCache.clear()
 }
 
-export function renderMarkdown(text: string, copyLabel = '⧉'): string {
+export function renderMarkdown(
+  text: string,
+  copyLabel = '⧉',
+  artifactRefs?: readonly ArtifactRefLike[],
+): string {
   if (!text || typeof text !== 'string') return ''
 
-  const key = cacheKey(text, copyLabel)
+  const refs = indexArtifactRefs(artifactRefs)
+  // 缓存键含产物表身份：同文本不同产物（重注册/带挂差异）不得串缓存
+  const refsKey = refs ? [...refs.values()].map((r) => `${r.name}:${r.artifactId ?? ''}`).sort().join('|') : ''
+  const key = cacheKey(text, copyLabel, refsKey)
   const cached = renderCache.get(key)
   if (cached !== undefined) {
     // LRU 触达刷新
@@ -156,7 +232,7 @@ export function renderMarkdown(text: string, copyLabel = '⧉'): string {
   const marked = new Marked({
     gfm: true,
     breaks: true,
-    renderer: createRenderer(copyLabel),
+    renderer: createRenderer(copyLabel, '◫', refs),
   })
 
   let html: string
