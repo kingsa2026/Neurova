@@ -3,10 +3,10 @@
 from neurova.llm.provider_manager import (
     LLMProviderManager,
     ProviderConfig,
-    _BUILTIN_PROVIDER_DEFS,
+    builtinProviderDefs,
 )
 
-_SEEDS = {d["id"]: d for d in _BUILTIN_PROVIDER_DEFS}
+_SEEDS = {d["id"]: d for d in builtinProviderDefs()}
 
 
 def test_agnes_gateways_seeded():
