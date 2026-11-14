@@ -611,6 +611,31 @@ class BrowserBackend(ABC):
     ) -> BrowserResult:
         return BrowserResult(success=False, error=f"{type(self).__name__} does not support check")
 
+    async def cookies(
+        self,
+        action: str = "get",
+        name: Optional[str] = None,
+        value: Optional[str] = None,
+        url: Optional[str] = None,
+        domain: Optional[str] = None,
+        path: Optional[str] = None,
+        generation: Optional[int] = None,
+    ) -> BrowserResult:
+        return BrowserResult(success=False, error=f"{type(self).__name__} does not support cookies")
+
+    async def storage(
+        self,
+        kind: str = "local",
+        action: str = "get",
+        key: Optional[str] = None,
+        value: Optional[str] = None,
+        generation: Optional[int] = None,
+    ) -> BrowserResult:
+        return BrowserResult(success=False, error=f"{type(self).__name__} does not support web storage")
+
+    async def console_messages(self, limit: int = 50) -> BrowserResult:
+        return BrowserResult(success=False, error=f"{type(self).__name__} does not support console capture")
+
 
 class PlaywrightBackend(BrowserBackend):
     """Playwright 浏览器后端"""
@@ -627,6 +652,27 @@ class PlaywrightBackend(BrowserBackend):
         # 只有本后端拿得到这个事件：`ScraplingBackend` 走 fetcher 没有实时页面，
         # camofox／remote 是 REST／action RPC 面，词汇里没有 dialog。
         self._dialog_handler = dialog_handler
+        # console/pageerror 事件缓冲（browser_console 读数面）：会话内环形，防长会话无界
+        self._consoleLog: List[Dict[str, Any]] = []
+
+    def _attachConsoleListener(self, target) -> None:
+        """把 console/pageerror 事件收进环形缓冲，供 browser_console 读取排障。
+
+        挂 context 级（与 _attachDialogListener 同理）：一处注册覆盖全部 tab。
+        """
+        def _record(kind: str):
+            def _handler(payload) -> None:
+                text = getattr(payload, "text", None) or str(payload)
+                self._consoleLog.append({"type": kind, "text": text})
+                if len(self._consoleLog) > 200:
+                    del self._consoleLog[:-200]
+            return _handler
+
+        try:
+            target.on("console", _record("console"))
+            target.on("pageerror", _record("pageerror"))
+        except Exception as e:  # noqa: BLE001 - 监听注册失败不阻断浏览器主链，但留痕
+            logger.debug("console 监听注册失败（忽略）: %s", e)
 
     def _attachDialogListener(self, target) -> None:
         """把对话框应答挂到 context（或 page）的 `dialog` 事件上。
@@ -1087,6 +1133,142 @@ class PlaywrightBackend(BrowserBackend):
         except Exception as e:
             return BrowserResult(success=False, route="playwright_role", error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
+    # ── 页面状态面（P2/P3 批C）：cookies / web storage / console 缓冲 ──
+    _STORAGE_JS = """
+([kind, action, key, value]) => {
+  const store = kind === 'session' ? sessionStorage : localStorage;
+  if (action === 'get') {
+    if (key) return { [key]: store.getItem(key) };
+    const out = {};
+    for (let i = 0; i < store.length; i++) { const k = store.key(i); out[k] = store.getItem(k); }
+    return out;
+  }
+  if (action === 'set') { store.setItem(key, value); return { [key]: store.getItem(key) }; }
+  if (action === 'remove') { store.removeItem(key); return { removed: key }; }
+  if (action === 'clear') { store.clear(); return { cleared: true }; }
+  return { error: 'unknown action' };
+}
+"""
+
+    async def cookies(
+        self,
+        action: str = "get",
+        name: Optional[str] = None,
+        value: Optional[str] = None,
+        url: Optional[str] = None,
+        domain: Optional[str] = None,
+        path: Optional[str] = None,
+        generation: Optional[int] = None,
+    ) -> BrowserResult:
+        """Cookie 读/写/清（走 BrowserContext，跨 tab 生效；登录态管理基础面）"""
+        start_time = time.time()
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        try:
+            if not self._context:
+                raise RuntimeError(BROWSER_NOT_STARTED_ERROR)
+            action = str(action or "get").strip().lower()
+            if action == "get":
+                data = await (self._context.cookies(url) if url else self._context.cookies())
+                return BrowserResult(
+                    success=True, data=data, url=self._page.url if self._page else "",
+                    duration_ms=(time.time() - start_time) * 1000, generation=self._active_generation(),
+                )
+            if action == "set":
+                if not name or value is None:
+                    return BrowserResult(
+                        success=False, error="set 需要 name 与 value（value 可为空串）",
+                        duration_ms=(time.time() - start_time) * 1000,
+                    )
+                spec: Dict[str, Any] = {"name": name, "value": value}
+                if url:
+                    spec["url"] = url
+                if domain:
+                    spec["domain"] = domain
+                if path:
+                    spec["path"] = path
+                await self._context.add_cookies([spec])
+                return BrowserResult(
+                    success=True, data={"set": name}, url=self._page.url if self._page else "",
+                    duration_ms=(time.time() - start_time) * 1000, generation=self._active_generation(),
+                )
+            if action == "clear":
+                await self._context.clear_cookies()
+                return BrowserResult(
+                    success=True, data={"cleared": True}, url=self._page.url if self._page else "",
+                    duration_ms=(time.time() - start_time) * 1000, generation=self._active_generation(),
+                )
+            return BrowserResult(
+                success=False, error=f"未知 action: {action}（可选 get/set/clear）",
+                duration_ms=(time.time() - start_time) * 1000,
+            )
+        except Exception as e:
+            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
+
+    async def storage(
+        self,
+        kind: str = "local",
+        action: str = "get",
+        key: Optional[str] = None,
+        value: Optional[str] = None,
+        generation: Optional[int] = None,
+    ) -> BrowserResult:
+        """localStorage/sessionStorage 读/写/删/清（页面内同步执行）"""
+        start_time = time.time()
+        stale = self._check_active_generation(generation)
+        if stale:
+            return stale
+        try:
+            if not self._page:
+                raise RuntimeError(NO_ACTIVE_TAB_ERROR)
+            kind = str(kind or "local").strip().lower()
+            action = str(action or "get").strip().lower()
+            if kind not in ("local", "session"):
+                return BrowserResult(
+                    success=False, error=f"未知 kind: {kind}（可选 local/session）",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            if action not in ("get", "set", "remove", "clear"):
+                return BrowserResult(
+                    success=False, error=f"未知 action: {action}（可选 get/set/remove/clear）",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            if action == "set" and (not key or value is None):
+                return BrowserResult(
+                    success=False, error="set 需要 key 与 value（value 可为空串）",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            if action == "remove" and not key:
+                return BrowserResult(
+                    success=False, error="remove 需要 key",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            data = await self._page.evaluate(self._STORAGE_JS, [kind, action, key, value])
+            if action in ("set", "remove", "clear"):
+                # 写操作改页面态，快照事实随之失效
+                self._invalidateActiveTabFacts(f"storage_{action}")
+            return BrowserResult(
+                success=True, data=data, url=self._page.url,
+                title=await self._page.title(),
+                duration_ms=(time.time() - start_time) * 1000, generation=self._active_generation(),
+            )
+        except Exception as e:
+            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
+
+    async def console_messages(self, limit: int = 50) -> BrowserResult:
+        """读取会话内 console/pageerror 环形缓冲（最近 limit 条）"""
+        start_time = time.time()
+        try:
+            bounded = max(1, min(int(limit or 50), 200))
+            data = list(self._consoleLog)[-bounded:]
+            return BrowserResult(
+                success=True, data=data, url=self._page.url if self._page else "",
+                duration_ms=(time.time() - start_time) * 1000, generation=self._active_generation(),
+            )
+        except Exception as e:
+            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
+
     async def initialize(self) -> bool:
         if not HAS_PLAYWRIGHT:
             logger.warning("Playwright not available")
@@ -1099,6 +1281,7 @@ class PlaywrightBackend(BrowserBackend):
             self._context = await self._browser.new_context()
             # 对话框应答链的事件侧：context 一建好就注册，覆盖此后该 context 内所有页面。
             self._attachDialogListener(self._context)
+            self._attachConsoleListener(self._context)
             page = await self._context.new_page()
             self._register_tab(page)
             self._initialized = True
@@ -2454,6 +2637,21 @@ class BrowserManager:
         """按 role+name 勾选/取消勾选"""
         b = await self._get_backend(backend)
         return await b.check_role(role, checked, name=name, generation=generation)
+
+    async def cookies(self, action: str = "get", name: Optional[str] = None, value: Optional[str] = None, url: Optional[str] = None, domain: Optional[str] = None, path: Optional[str] = None, generation: Optional[int] = None, backend: Optional[str] = None) -> BrowserResult:
+        """Cookie 读/写/清（BrowserContext 级，跨 tab 生效）"""
+        b = await self._get_backend(backend)
+        return await b.cookies(action=action, name=name, value=value, url=url, domain=domain, path=path, generation=generation)
+
+    async def storage(self, kind: str = "local", action: str = "get", key: Optional[str] = None, value: Optional[str] = None, generation: Optional[int] = None, backend: Optional[str] = None) -> BrowserResult:
+        """localStorage/sessionStorage 读/写/删/清"""
+        b = await self._get_backend(backend)
+        return await b.storage(kind=kind, action=action, key=key, value=value, generation=generation)
+
+    async def console_messages(self, limit: int = 50, backend: Optional[str] = None) -> BrowserResult:
+        """读取 console/pageerror 环形缓冲"""
+        b = await self._get_backend(backend)
+        return await b.console_messages(limit)
 
     async def snapshot(self, backend: Optional[str] = None) -> BrowserResult:
         """获取快照"""

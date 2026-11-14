@@ -746,6 +746,53 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["role", "checked"],
         },
     },
+    # ── 页面状态面（P2/P3 批C）：cookies / web storage / console 缓冲 ──
+    "browser_cookies": {
+        # 并行能力声明：改共享浏览器实例的 context 级 Cookie（跨 tab 生效）。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【Cookie 管理】读取（get，可按 url 过滤）、写入（set，需 name+value，定位用 url 或 domain+path）、清空（clear）当前浏览器会话的 Cookie。用于登录态检查与保持。【何时不用】只是查看页面内容不需要动 Cookie；set 前先 get 确认现有值，避免误覆盖登录态。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["get", "set", "clear"], "description": "get=读取 / set=写入 / clear=清空"},
+                "name": {"type": "string", "description": "Cookie 名（set 必填）"},
+                "value": {"type": "string", "description": "Cookie 值（set 必填，可为空串）"},
+                "url": {"type": "string", "description": "Cookie 关联 URL（set 时与 domain+path 二选一；get 时可作过滤）"},
+                "domain": {"type": "string", "description": "Cookie 域（set 定位用）"},
+                "path": {"type": "string", "description": "Cookie 路径（set 定位用）"},
+                "generation": {"type": "integer", "description": "可选。当前页代数；页面已被外部改变时拒绝"},
+            },
+            "required": ["action"],
+        },
+    },
+    "browser_storage": {
+        # 并行能力声明：读写共享浏览器实例当前页的 web storage。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【页面存储】读写 localStorage/sessionStorage（kind=local/session）：get（给 key 取单键，省略取全部）、set（key+value）、remove（key）、clear。用于检查页面本地状态、注入测试令牌等。set/remove/clear 会使快照事实失效（generation 递增）。【何时不用】大体积数据读写不要走本工具（受工具结果字符预算约束）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "enum": ["local", "session"], "description": "localStorage 或 sessionStorage"},
+                "action": {"type": "string", "enum": ["get", "set", "remove", "clear"], "description": "读/写/删/清"},
+                "key": {"type": "string", "description": "存储键（set/remove 必填；get 省略则取全部）"},
+                "value": {"type": "string", "description": "存储值（set 必填，可为空串）"},
+                "generation": {"type": "integer", "description": "可选。当前页代数；页面已被外部改变时拒绝"},
+            },
+            "required": ["kind", "action"],
+        },
+    },
+    "browser_console": {
+        # 并行能力声明：只读共享实例的会话内事件缓冲。
+        "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("shared",)},
+        "description": "【控制台读数】读取本次浏览器会话累积的 console 输出与页面错误（pageerror），返回最近的 limit 条（type=console/pageerror）。用于交互后检查报错、验证页面行为。缓冲上限 200 条、只保留最近记录。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "返回最近多少条（默认 50，上限 200）", "minimum": 1, "maximum": 200},
+            },
+            "required": [],
+        },
+    },
     # ── 互联网平台直达（Web Reach，零配置路径）──
     "youtube_transcript": {
         # 并行能力声明：语义只读但作用域为共享（yt-dlp 的 YouTube extractor 会把播放器
@@ -1957,6 +2004,9 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     # 元素交互扩展：select/check 与 fill_role 同轴（改写页面表单状态，重放可能选错/改状态）；
     # hover 悬停同参数同效果（无 DOM 突变），不入名单
     "browser_select", "browser_check",
+    # 页面状态面：cookies/storage 是状态写（重放制造新状态）；console 是瞬时缓冲读数
+    # （重放时缓冲可能已追加，与 screenshot 同属"只读也不可重放"反例族）
+    "browser_cookies", "browser_storage", "browser_console",
     # 会话式 shell：进程输出不可重放（重跑时系统状态已变）
     "exec_command", "write_stdin",
     # 子代理派生：spawn 有副作用

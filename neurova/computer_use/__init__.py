@@ -719,6 +719,27 @@ class ComputerUseManager:
             return await bm.check_role(role, checked, name=name, generation=generation)
         return {"error": "浏览器管理器不可用"}
 
+    async def browser_cookies(self, action: str = "get", name: str = None, value: str = None, url: str = None, domain: str = None, path: str = None, generation: int = None) -> typing.Any:
+        """Cookie 读/写/清（BrowserContext 级，跨 tab 生效）"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.cookies(action=action, name=name, value=value, url=url, domain=domain, path=path, generation=generation)
+        return {"error": "浏览器管理器不可用"}
+
+    async def browser_storage(self, kind: str = "local", action: str = "get", key: str = None, value: str = None, generation: int = None) -> typing.Any:
+        """localStorage/sessionStorage 读/写/删/清"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.storage(kind=kind, action=action, key=key, value=value, generation=generation)
+        return {"error": "浏览器管理器不可用"}
+
+    async def browser_console(self, limit: int = 50) -> typing.Any:
+        """读取会话内 console/pageerror 环形缓冲（最近 limit 条）"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.console_messages(limit)
+        return {"error": "浏览器管理器不可用"}
+
     async def browser_capabilities(self) -> typing.Any:
         """查询当前后端能力清单"""
         bm = self._get_browser_manager()

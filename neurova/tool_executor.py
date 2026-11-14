@@ -96,6 +96,9 @@ COMPUTER_USE_TOOLS = frozenset(
         "browser_hover",
         "browser_select",
         "browser_check",
+        "browser_cookies",
+        "browser_storage",
+        "browser_console",
     }
 )
 
@@ -178,6 +181,9 @@ _COMPUTER_TOOL_PARAM_KEYS: Dict[str, frozenset] = {
     "browser_hover": frozenset({"role", "name", "generation"}),
     "browser_select": frozenset({"role", "name", "values", "generation"}),
     "browser_check": frozenset({"role", "name", "checked", "generation"}),
+    "browser_cookies": frozenset({"action", "name", "value", "url", "domain", "path", "generation"}),
+    "browser_storage": frozenset({"kind", "action", "key", "value", "generation"}),
+    "browser_console": frozenset({"limit"}),
 }
 
 _BUTTON_ALIASES = {
@@ -308,6 +314,12 @@ def describe_computer_action(tool_name: str, params: Dict) -> str:
     if tool_name == "browser_check":
         verb = "勾选" if params.get("checked") else "取消勾选"
         return f"{verb} {params.get('role', '?')}「{params.get('name', '')}」"
+    if tool_name == "browser_cookies":
+        return f"Cookie {params.get('action', 'get')}"
+    if tool_name == "browser_storage":
+        return f"页面存储 {params.get('kind', 'local')}.{params.get('action', 'get')}"
+    if tool_name == "browser_console":
+        return "读取控制台消息"
     return tool_name
 
 
@@ -396,6 +408,9 @@ class ToolExecutor:
         "browser_hover": "_execute_browser_hover",
         "browser_select": "_execute_browser_select",
         "browser_check": "_execute_browser_check",
+        "browser_cookies": "_execute_browser_cookies",
+        "browser_storage": "_execute_browser_storage",
+        "browser_console": "_execute_browser_console",
         "planning": "_execute_planning",
         "youtube_transcript": "_execute_youtube_transcript",
         "browser_read": "_execute_browser_read",
@@ -6826,6 +6841,77 @@ class ToolExecutor:
         except Exception as e:
             logger.error("勾选失败: %s", e)
             return {"error": f"勾选失败: {str(e)}"}
+
+    async def _execute_browser_cookies(self, params: Dict) -> Dict:
+        """Cookie 读/写/清（BrowserContext 级，跨 tab 生效）"""
+        action = str(params.get("action") or "").strip().lower()
+        if action not in ("get", "set", "clear"):
+            return {"error": "action 必须是 get/set/clear"}
+        generation = params.get("generation")
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_cookies(
+                    action=action,
+                    name=params.get("name"),
+                    value=params.get("value"),
+                    url=params.get("url"),
+                    domain=params.get("domain"),
+                    path=params.get("path"),
+                    generation=int(generation) if generation is not None else None,
+                )
+            )
+            await self._emit_computer_event("browser_cookies", params, result)
+            return result
+        except Exception as e:
+            logger.error("Cookie 操作失败: %s", e)
+            return {"error": f"Cookie 操作失败: {str(e)}"}
+
+    async def _execute_browser_storage(self, params: Dict) -> Dict:
+        """localStorage/sessionStorage 读/写/删/清"""
+        kind = str(params.get("kind") or "").strip().lower()
+        action = str(params.get("action") or "").strip().lower()
+        if kind not in ("local", "session"):
+            return {"error": "kind 必须是 local/session"}
+        if action not in ("get", "set", "remove", "clear"):
+            return {"error": "action 必须是 get/set/remove/clear"}
+        generation = params.get("generation")
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_storage(
+                    kind=kind,
+                    action=action,
+                    key=params.get("key"),
+                    value=params.get("value"),
+                    generation=int(generation) if generation is not None else None,
+                )
+            )
+            await self._emit_computer_event("browser_storage", params, result)
+            return result
+        except Exception as e:
+            logger.error("页面存储操作失败: %s", e)
+            return {"error": f"页面存储操作失败: {str(e)}"}
+
+    async def _execute_browser_console(self, params: Dict) -> Dict:
+        """读取会话内 console/pageerror 环形缓冲"""
+        limit = params.get("limit")
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_console(int(limit) if limit is not None else 50)
+            )
+            await self._emit_computer_event("browser_console", params, result)
+            return result
+        except Exception as e:
+            logger.error("控制台读取失败: %s", e)
+            return {"error": f"控制台读取失败: {str(e)}"}
 
     async def _execute_planning(self, params: Dict) -> Dict:
         """任务计划工具：7 个子命令（create/update/list/get/set_active/mark_step/delete）。

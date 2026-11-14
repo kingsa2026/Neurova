@@ -46,6 +46,8 @@ _CATEGORY_TOOLS: Dict[str, Set[str]] = {
         "browser_scroll", "browser_press",
         # 元素交互扩展（悬停/下拉/勾选）：同一浏览器动作面
         "browser_hover", "browser_select", "browser_check",
+        # 页面状态面（Cookie/页面存储/控制台读数）：同一浏览器动作面
+        "browser_cookies", "browser_storage", "browser_console",
         # write_pdf 可内嵌远程图（经 persist_media 出网），与 file 同属其归类面
         "write_pdf",
     },
