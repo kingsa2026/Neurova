@@ -18,6 +18,8 @@ import logging
 from typing import Awaitable, Callable, List, Optional
 
 from neurova.context.pool_models import ContextInput
+# B3（对照改进项）：摘要 prompt 的质量纪律单源——压缩教义（版本化、覆盖门禁）。
+from neurova.context.compression_doctrine import renderDoctrine
 
 # 逐字可核闸的判定实现在共享位（`knowledge/verifiability.py`）：同一类风险
 # （模型编造）全仓只允许一份判定——摘要、经验、知识、教训四条调用点共用。
@@ -36,12 +38,13 @@ logger = logging.getLogger(__name__)
 _REDACT_TOKEN = "[REDACTED]"
 
 _DEFAULT_PROMPT_TEMPLATE = """你是对话摘要器。请把以下被折叠的早期对话轮次，合并进已有摘要，\
-输出一段连续的中文摘要（不要罗列、不要解释）。必须保留：\
-（1）日期、时间、时长、数量等时间与计量表达——原样保留，禁止模糊化（"周三前"不得写成"近期前"）；\
-（2）用户已做的决定与偏好；\
-（3）未解决的问题与待办事项；\
-（4）专有名词、文件路径、版本号原文（不意译）。\
-丢弃：寒暄、重复内容。
+输出一段连续的中文摘要（不要罗列、不要解释）。
+
+""" + renderDoctrine() + """
+
+以上教义是承重件：逐字保留类必须执行——日期、时间、时长、数量等时间与计量表达\
+原样保留、禁止模糊化；用户已做的决定与偏好、未解决的问题与待办、专有名词与\
+版本号原文一律保留。保留与丢弃冲突时按优先级段处置。
 
 [已有摘要]
 {previous_summary}

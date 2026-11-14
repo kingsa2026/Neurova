@@ -1548,6 +1548,32 @@ class ContextPool:
                 )
             return report.kept
 
+    def search(self, need: str, limit: int = 8, max_tokens: int = 4000) -> List:
+        """B9（对照改进项）：模型可调用的池语义检索。
+
+        与视图 `draw()` 同一打分面（同一抽屉、同一相关性门槛、同一去重），
+        不另算一份分——区别只在消费方：draw 服务本轮视图装配（预算与窗口
+        联动），search 服务模型的主动检索（预算独立给定量）。折叠层索引
+        节点同样排除（它们走 `drilldown` 确定性寻址，不参加概率召回）。
+        """
+        need = str(need or "").strip()
+        if not need:
+            return []
+        limit = max(1, int(limit))
+        with self._lock:
+            all_drops = self._collector.collect()
+            all_drops = self._filter_ttl(all_drops)
+            from neurova.context.fold_index import isIndexNode
+
+            all_drops = [
+                drop
+                for drop in all_drops
+                if not isIndexNode(getattr(drop, "metadata", None))
+            ]
+            deduped = self._deduplicator.dedup(all_drops, stage="output")
+        selected = self._drawer.draw(deduped, need=need, budget_tokens=max_tokens)
+        return selected[:limit]
+
 
 from neurova.context.pairing import validate_pairing
 

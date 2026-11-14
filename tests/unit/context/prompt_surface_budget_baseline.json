@@ -37,6 +37,15 @@
       "rules_sections": 1440,
       "tools_description": 13219,
       "total_always_on_chars": 14659
+    },
+    {
+      "phase": "B3-工具面-2026-11-14",
+      "date": "2026-11-14",
+      "description": "本批新增 3 个上下文工具（context_compress/context_status/pool_search，B1/B9 模型可调用工具面），描述已按提示面纪律精简，实测 +379 字符；剔除本批后工具面 15835，其中 +2616 为工作树在途批次（93→114 件）的未登记增长，按『预存红清偿-2026-11-14』同款纪律如实登记，不冒充已完成；等量旧文案清理开项在台账继续挂着。",
+      "rules_sections": 1440,
+      "tools_description": 16214,
+      "total_always_on_chars": 17654,
+      "waiver": "B3-工具面-2026-11-14"
     }
   ]
 }
