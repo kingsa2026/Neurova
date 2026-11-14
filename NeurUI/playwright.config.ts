@@ -10,6 +10,8 @@ export default defineConfig({
   timeout: 60_000,
   fullyParallel: false,
   workers: 1,
+  // P2-12：CI 侧对偶发失败重试一次（本地不重试，快速暴露问题）
+  retries: process.env.CI ? 1 : 0,
   use: {
     baseURL: 'http://localhost:8100',
   },
