@@ -9,6 +9,7 @@ from neurova.core import vector_math
 
 import hashlib
 import threading
+from collections import OrderedDict
 from dataclasses import replace
 
 from neurova.core.logger import get_logger
@@ -92,6 +93,51 @@ class SemanticMatchDrawer:
         # B13：取水读数（累计计数，RLock 保护——draw 可来自多线程池）
         self._readoutLock = threading.RLock()
         self._readouts = dict.fromkeys(_READOUT_KEYS, 0)
+        # B11（对照改进项）：水滴向量跨轮缓存（实例级 LRU，按原文键控）。
+        # 池归档只增不减，无缓存的取水每轮对同批热条目重复编码——成本随
+        # 轮数爬升。内容不可变（同文本恒同向量），缓存无需失效、只限容量。
+        self._vectorCache = OrderedDict()
+        self._vectorCacheLock = threading.RLock()
+
+    #: 向量缓存容量（条）。池的热点候选远小于它；超限按 LRU 淘汰。
+    _VECTOR_CACHE_CAPACITY = 4096
+
+    def _cachedEncode(self, store, text: str):
+        """单条编码（带实例级缓存）。向量面抛错时原样上抛（降级纪律不变）。"""
+        with self._vectorCacheLock:
+            if text in self._vectorCache:
+                return self._vectorCache[text]
+        vector = store.encode(text)
+        with self._vectorCacheLock:
+            self._vectorCache[text] = vector
+            while len(self._vectorCache) > self._VECTOR_CACHE_CAPACITY:
+                self._vectorCache.popitem(last=False)
+        return vector
+
+    def _cachedEncodeBatch(self, store, texts: List[str]) -> List:
+        """批量编码（带实例级缓存）：命中直接取，未命中集交 store 批量编码。"""
+        result: List = [None] * len(texts)
+        miss_idx: List[int] = []
+        miss_texts: List[str] = []
+        with self._vectorCacheLock:
+            for idx, text in enumerate(texts):
+                if text in self._vectorCache:
+                    result[idx] = self._vectorCache[text]
+                else:
+                    miss_idx.append(idx)
+                    miss_texts.append(text)
+        if miss_texts:
+            if hasattr(store, "encode_batch"):
+                encoded = store.encode_batch(miss_texts)
+            else:
+                encoded = [store.encode(t) for t in miss_texts]
+            with self._vectorCacheLock:
+                for idx, text, vector in zip(miss_idx, miss_texts, encoded):
+                    result[idx] = vector
+                    self._vectorCache[text] = vector
+            while len(self._vectorCache) > self._VECTOR_CACHE_CAPACITY:
+                self._vectorCache.popitem(last=False)
+        return result
 
     def readouts(self) -> dict:
         """本实例累计取水读数（快照副本；键集见 `_READOUT_KEYS`）。"""
@@ -462,12 +508,12 @@ class ScoringContext:
 
         candidate_drops = list(drops or [])
         try:
-            need_vector = store.encode(need)
+            # B11：编码走实例级向量缓存——同文本跨轮不重复编码（成本单次付清）。
+            need_vector = drawer._cachedEncode(store, need)
             texts = [drawer._drop_text(drop) for drop in candidate_drops]
             if not texts:
                 return cls(drawer, need, needVector=need_vector, vectors={})
-            encoded = store.encode_batch(texts) if hasattr(store, "encode_batch") else None
-            raw = encoded if encoded is not None else [store.encode(text) for text in texts]
+            raw = drawer._cachedEncodeBatch(store, texts)
             vectors = {id(drop): vector for drop, vector in zip(candidate_drops, raw)}
         except Exception as e:  # noqa: BLE001 - 向量不可用时退回关键词刻度
             logger.warning("批量语义编码失败，全部候选降级为关键词刻度: %s", e)
