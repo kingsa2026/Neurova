@@ -1553,6 +1553,24 @@ class ToolExecutor:
                 # 未声明传 None → maybe_output_ref 用装配时的全局阈值
                 max_chars=get_builtin_tool_result_budget(tool_name),
             )
+            # P2-10：PostToolUseFailure 钩子（默认关，NEUROVA_TOOL_FAILURE_HOOKS=1
+            # 开）——工具失败后触发；外部脚本自担副作用（告警/归集），
+            # 只读面，不改变结果。
+            if not success:
+                try:
+                    from neurova.core.hooks_engine import runPostToolUseFailureHooks
+                    from neurova.core.turn_context import get_turn_session_id
+
+                    runPostToolUseFailureHooks({
+                        "tool_name": tool_name,
+                        "error": (
+                            str(result.get("error"))[:500]
+                            if isinstance(result, dict) else ""
+                        ),
+                        "session_id": get_turn_session_id(),
+                    })
+                except Exception as failure_hook_err:
+                    logger.debug("PostToolUseFailure 钩子跳过: %s", failure_hook_err)
             return result
         finally:
             # H5: 所有路径统一触发 on_tool_executed（成功/失败均触发）
@@ -1896,6 +1914,34 @@ class ToolExecutor:
         等待预算为 0、或无运行中的事件循环（CLI/带外路径）时，退回改造前的
         "pending 当结果"语义——这是灰度与回退入口，不是第二条判据。
         """
+        # P2-10：PermissionRequest 钩子（默认关，NEUROVA_PERMISSION_REQUEST_HOOKS=1
+        # 开）——审批单创建前触发；钩子只能 deny（不代人工批准）。
+        # block → 不建审批单，工具直接拒（诚实 deny 形态）。
+        try:
+            from neurova.core.hooks_engine import runPermissionRequestHooks
+
+            _prOutcomes = runPermissionRequestHooks({
+                "tool_name": tool_name,
+                "params": params,
+                "session_id": self._approvalRoutingAddress().get("session_id"),
+            })
+            _prBlocked = [o for o in _prOutcomes if o.get("blocked")]
+            if _prBlocked:
+                _prReasons = [o.get("reason") or "blocked" for o in _prBlocked]
+                logger.info("PermissionRequest 钩子拒绝 %s: %s", tool_name, "; ".join(_prReasons))
+                return {
+                    "success": False,
+                    "error": "操作被 PermissionRequest 钩子拒绝: " + "; ".join(_prReasons),
+                    "governance": {
+                        "decision": "deny",
+                        "reasons": _prReasons,
+                        "severity": "none",
+                        "finding_count": 0,
+                    },
+                }
+        except Exception as pr_err:
+            logger.debug("PermissionRequest 钩子跳过: %s", pr_err)
+
         approval_id = self._create_approval_request(tool_name, params, verdict)
 
         def _pendingShape(extra: Dict[str, Any]) -> Dict[str, Any]:

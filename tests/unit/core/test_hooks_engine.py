@@ -96,3 +96,61 @@ class TestHookEngine:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestExtendedEvents:
+    """P2-10：新增四类事件（各自独立灰度，默认关）。"""
+
+    def test_known_events_extended(self):
+        from neurova.core.hooks_engine import KNOWN_EVENTS
+
+        for event in ("SessionStart", "UserPromptSubmit", "PermissionRequest", "PostToolUseFailure"):
+            assert event in KNOWN_EVENTS
+
+    @pytest.mark.parametrize("event,helperName", [
+        ("SessionStart", "runSessionStartHooks"),
+        ("UserPromptSubmit", "runUserPromptSubmitHooks"),
+        ("PermissionRequest", "runPermissionRequestHooks"),
+        ("PostToolUseFailure", "runPostToolUseFailureHooks"),
+    ])
+    def test_default_off(self, tmp_path, monkeypatch, event, helperName):
+        _write_config(tmp_path, {event: [{"command": _py("print(json.dumps({'decision':'block','reason':'x'}))")}]})
+        import neurova.core.hooks_engine as he
+        helper = getattr(he, helperName)
+        assert helper({"tool_name": "t"}) == []
+
+    @pytest.mark.parametrize("event,helperName,envName", [
+        ("SessionStart", "runSessionStartHooks", "NEUROVA_SESSION_START_HOOKS"),
+        ("UserPromptSubmit", "runUserPromptSubmitHooks", "NEUROVA_USER_PROMPT_HOOKS"),
+        ("PermissionRequest", "runPermissionRequestHooks", "NEUROVA_PERMISSION_REQUEST_HOOKS"),
+        ("PostToolUseFailure", "runPostToolUseFailureHooks", "NEUROVA_TOOL_FAILURE_HOOKS"),
+    ])
+    def test_enabled_runs(self, tmp_path, monkeypatch, event, helperName, envName):
+        cmd = _py("import sys,json;print(json.dumps({'additionalContext':'ctx-t','reason':'r'}))")
+        _write_config(tmp_path, {event: [{"command": cmd}]})
+        monkeypatch.setenv(envName, "1")
+        import neurova.core.hooks_engine as he
+        helper = getattr(he, helperName)
+        out = helper({"tool_name": "t"})
+        assert len(out) == 1
+        assert out[0]["additional_context"] == "ctx-t"
+
+    def test_block_semantics_for_new_events(self, tmp_path, monkeypatch):
+        cmd = _py("import sys,json;print(json.dumps({'decision':'block','reason':'拒'}))")
+        _write_config(tmp_path, {
+            "UserPromptSubmit": [{"command": cmd}],
+            "PermissionRequest": [{"command": cmd}],
+            "PostToolUseFailure": [{"command": cmd}],
+            "SessionStart": [{"command": cmd}],
+        })
+        monkeypatch.setenv("NEUROVA_USER_PROMPT_HOOKS", "1")
+        monkeypatch.setenv("NEUROVA_PERMISSION_REQUEST_HOOKS", "1")
+        monkeypatch.setenv("NEUROVA_TOOL_FAILURE_HOOKS", "1")
+        monkeypatch.setenv("NEUROVA_SESSION_START_HOOKS", "1")
+        engine = HookEngine()
+        # 可 block：UserPromptSubmit / PermissionRequest
+        assert engine.run("UserPromptSubmit", {"tool_name": "t"})[0]["blocked"] is True
+        assert engine.run("PermissionRequest", {"tool_name": "t"})[0]["blocked"] is True
+        # 只读面：SessionStart / PostToolUseFailure 永不 block
+        assert engine.run("PostToolUseFailure", {"tool_name": "t"})[0]["blocked"] is False
+        assert engine.run("SessionStart", {"tool_name": "t"})[0]["blocked"] is False

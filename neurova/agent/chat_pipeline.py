@@ -890,6 +890,19 @@ class ChatPipeline:
                     note(_restoreVerify)
             except Exception as ledger_err:
                 logger.debug("注入账本恢复核验跳过: %s", ledger_err)
+
+            # P2-10：SessionStart 钩子（默认关，NEUROVA_SESSION_START_HOOKS=1 开）
+            # ——会话恢复/首建时触发；副作用由外部脚本自担（预热/通知），fail-open。
+            try:
+                from neurova.core.hooks_engine import runSessionStartHooks
+
+                runSessionStartHooks({
+                    "session_id": ctx.session_id,
+                    "agent_id": getattr(getattr(self, "config", None), "agent_id", None),
+                    "restored_messages": len(ctx.session_context or []),
+                })
+            except Exception as session_hook_err:
+                logger.debug("SessionStart 钩子跳过: %s", session_hook_err)
         except Exception as e:
             logger.warning("恢复 session %s 失败: %s", ctx.session_id, e)
 
@@ -899,6 +912,7 @@ class ChatPipeline:
 
     async def _step_pre_llm_checks(self, ctx: ChatContext):
         """命令分发（B4）、/compact 压缩命令、/review 评审命令、ToolMemory 检查、技能获取、NL 合成、可行动性门控、认知安全门"""
+        await self._check_user_prompt_hooks(ctx)
         await self._check_compact_command(ctx)
         await self._check_review_command(ctx)
         await self._check_command_dispatch(ctx)
@@ -907,6 +921,57 @@ class ChatPipeline:
         await self._check_nl_synthesis(ctx)
         await self._check_actionability(ctx)
         await self._check_cognitive_security(ctx)
+
+    def _mergeHookGuidance(self, ctx: ChatContext, retrievalGuidance: str) -> str:
+        """P2-10：UserPromptSubmit 钩子的 additionalContext 并入受控指引通道。
+
+        钩子上下文挂最前（与 W4 的「指引挂注入块首」同位，同受信封预算管辖）；
+        两者都有时以换行相连；无钩子上下文时原样返回。
+        """
+        hookCtx = ""
+        if isinstance(ctx.metadata, dict):
+            hookCtx = str(ctx.metadata.get("hook_additional_context") or "")
+        if not hookCtx:
+            return retrievalGuidance
+        if retrievalGuidance:
+            return f"{hookCtx}\n{retrievalGuidance}"
+        return hookCtx
+
+    async def _check_user_prompt_hooks(self, ctx: ChatContext):
+        """P2-10：UserPromptSubmit 钩子（默认关，NEUROVA_USER_PROMPT_HOOKS=1 开）。
+
+        - decision=block → 本轮拒答（metadata.user_prompt_blocked，交
+          _step_llm_call 早退，不走 LLM 不进工具链）；
+        - additionalContext → metadata["hook_additional_context"]，由
+          build_context 的 retrieval_guidance 通道并入（受预算管辖）。
+        fail-open：钩子故障放行。
+        """
+        try:
+            from neurova.core.hooks_engine import runUserPromptSubmitHooks
+
+            outcomes = runUserPromptSubmitHooks({
+                "session_id": ctx.session_id,
+                "agent_id": getattr(getattr(self, "config", None), "agent_id", None),
+                "user_input": ctx.user_input,
+            })
+            if not outcomes:
+                return
+            blocked = [o for o in outcomes if o.get("blocked")]
+            if blocked:
+                ctx.metadata = dict(ctx.metadata or {})
+                ctx.metadata["user_prompt_blocked"] = True
+                ctx.metadata["user_prompt_blocked_reason"] = "; ".join(
+                    o.get("reason") or "blocked" for o in blocked
+                )
+                return
+            extra = "\n".join(
+                o.get("additional_context") for o in outcomes if o.get("additional_context")
+            )
+            if extra:
+                ctx.metadata = dict(ctx.metadata or {})
+                ctx.metadata["hook_additional_context"] = extra
+        except Exception:  # noqa: BLE001 - 钩子故障放行
+            logger.debug("UserPromptSubmit 钩子检查失败（放行）", exc_info=True)
 
     async def _check_actionability(self, ctx: ChatContext):
         """任务2 可行动性门控：仅当"门控开启 + 明确机器源 + 近期无人类"时置不可行标记，
@@ -1845,7 +1910,7 @@ class ChatPipeline:
 
         # W4 同名多口径：on 档把歧义载荷翻成一段模型面向的受控指引，挂在注入块首；
         # shadow 只留 metadata（上面已落到 ctx.metadata），不碰提示词。
-        retrievalGuidance = self._ambiguityGuidance(ctx)
+        retrievalGuidance = self._mergeHookGuidance(ctx, self._ambiguityGuidance(ctx))
 
         ctx.context = await self.context_orchestrator.build_context(
             user_input=ctx.user_input,
@@ -2607,6 +2672,14 @@ class ChatPipeline:
                 "actionability 门控判定不可行（origin=%s reason=%s），本轮跳过 LLM 调用",
                 ctx.metadata.get("actionable_origin"),
                 ctx.metadata.get("actionable_reason"),
+            )
+            ctx.reply = ""
+            return
+        # P2-10：UserPromptSubmit 钩子 block → 早退拒答（不走 LLM 不进工具链）。
+        if isinstance(ctx.metadata, dict) and ctx.metadata.get("user_prompt_blocked"):
+            logger.info(
+                "UserPromptSubmit 钩子拒绝本轮输入（reason=%s），跳过 LLM 调用",
+                ctx.metadata.get("user_prompt_blocked_reason"),
             )
             ctx.reply = ""
             return
