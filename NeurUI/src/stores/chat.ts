@@ -32,6 +32,8 @@ export const useChatStore = defineStore('chat', () => {
   const messages = ref<ChatMessage[]>([])
   const isStreaming = ref<boolean>(false)
   const inputText = ref<string>('')
+  /** P1-4：当前会话的权限模式（''=默认；plan/edit/yolo/guarded/auto），随会话切换重置 */
+  const permissionMode = ref<string>('')
   const searchQuery = ref<string>('')
 
   // ── Token 用量──
@@ -124,6 +126,8 @@ export const useChatStore = defineStore('chat', () => {
 
   function setCurrentSession(sessionId: string | null): void {
     currentSessionId.value = sessionId
+    // 权限模式是会话级意图：切会话即回默认（避免上一会的 yolo 泄到新会话）
+    permissionMode.value = ''
   }
 
   // ---------------------------------------------------------------------------
@@ -271,6 +275,7 @@ export const useChatStore = defineStore('chat', () => {
     messages,
     isStreaming,
     inputText,
+    permissionMode,
     searchQuery,
     sessionTokenUsage,
     lastTurnUsage,
