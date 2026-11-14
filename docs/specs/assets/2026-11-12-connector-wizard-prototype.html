@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neurova · 数据源连接器向导 — U5 交互原型</title>
+<style>
+/* ═══════════════════════════════════════════════════════════
+   Neurova Cosmic 玻璃拟态 · 连接器向导原型（U5 目标态）
+   令牌对齐 NeurUI/src/styles/variables.css cosmic 皮肤
+   ═══════════════════════════════════════════════════════════ */
+:root{
+  --bg-deep:#06080f; --bg-base:#0a0e1a; --bg-surface:#111827; --bg-elevated:#1a2236;
+  --glass-bg:rgba(255,255,255,.035); --glass-bg-hover:rgba(255,255,255,.06);
+  --glass-bg-active:rgba(255,255,255,.10); --glass-border:rgba(255,255,255,.08);
+  --glass-border-hover:rgba(255,255,255,.16);
+  --primary:#6366f1; --primary-light:#818cf8; --primary-dark:#4f46e5;
+  --violet:#a78bfa; --cyan:#22d3ee;
+  --grad-primary:linear-gradient(135deg,#6366f1 0%,#8b5cf6 50%,#a78bfa 100%);
+  --grad-accent:linear-gradient(135deg,#22d3ee 0%,#6366f1 100%);
+  --text-1:rgba(255,255,255,.95); --text-2:rgba(255,255,255,.70);
+  --text-3:rgba(255,255,255,.45); --text-4:rgba(255,255,255,.25);
+  --success:#10b981; --warning:#f59e0b; --error:#ef4444; --info:#3b82f6;
+  --shadow-md:0 4px 16px rgba(0,0,0,.4); --shadow-lg:0 8px 32px rgba(0,0,0,.5);
+  --glow:0 0 24px rgba(99,102,241,.18);
+  --radius:14px; --radius-sm:8px;
+  --inset:rgba(0,0,0,.22);
+  color-scheme:dark;
+}
+[data-theme="light"]{
+  --bg-deep:#eef1f8; --bg-base:#f4f6fb; --bg-surface:#ffffff; --bg-elevated:#ffffff;
+  --glass-bg:rgba(255,255,255,.66); --glass-bg-hover:rgba(255,255,255,.85);
+  --glass-bg-active:rgba(99,102,241,.08); --glass-border:rgba(15,23,42,.09);
+  --glass-border-hover:rgba(15,23,42,.18);
+  --text-1:rgba(15,23,42,.94); --text-2:rgba(15,23,42,.68);
+  --text-3:rgba(15,23,42,.46); --text-4:rgba(15,23,42,.28);
+  --shadow-md:0 4px 16px rgba(30,41,90,.10); --shadow-lg:0 12px 36px rgba(30,41,90,.16);
+  --glow:0 0 24px rgba(99,102,241,.12);
+  --inset:rgba(15,23,42,.05);
+  color-scheme:light;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  font-family:"DM Sans","PingFang SC","Microsoft YaHei",ui-sans-serif,system-ui,sans-serif;
+  background:var(--bg-base); color:var(--text-1);
+  min-height:100vh; overflow-x:hidden; font-size:14px; line-height:1.55;
+}
+/* ── 环境光背景：极光 + 网格 + 漂移光斑 ── */
+.ambient{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+.ambient .aurora{position:absolute;border-radius:50%;filter:blur(90px);opacity:.5;transition:opacity .6s}
+.ambient .a1{width:640px;height:640px;left:-180px;top:-220px;background:radial-gradient(circle,rgba(99,102,241,.34),transparent 65%);animation:drift1 26s ease-in-out infinite alternate}
+.ambient .a2{width:560px;height:560px;right:-160px;top:12%;background:radial-gradient(circle,rgba(34,211,238,.20),transparent 65%);animation:drift2 32s ease-in-out infinite alternate}
+.ambient .a3{width:520px;height:520px;left:34%;bottom:-260px;background:radial-gradient(circle,rgba(167,139,250,.22),transparent 65%);animation:drift3 38s ease-in-out infinite alternate}
+[data-theme="light"] .ambient .aurora{opacity:.30}
+.ambient .grid{position:absolute;inset:0;
+  background-image:linear-gradient(rgba(129,140,248,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(129,140,248,.05) 1px,transparent 1px);
+  background-size:44px 44px;
+  mask-image:radial-gradient(ellipse 90% 70% at 50% 0%,#000 30%,transparent 100%);}
+[data-theme="light"] .ambient .grid{background-image:linear-gradient(rgba(79,70,229,.06) 1px,transparent 1px),linear-gradient(90deg,rgba(79,70,229,.06) 1px,transparent 1px)}
+@keyframes drift1{to{transform:translate(90px,60px) scale(1.08)}}
+@keyframes drift2{to{transform:translate(-70px,80px) scale(.94)}}
+@keyframes drift3{to{transform:translate(60px,-70px) scale(1.06)}}
+/* ── 滚动条（取自身palette） ── */
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:var(--inset);border-radius:8px}
+::-webkit-scrollbar-thumb{background:linear-gradient(180deg,var(--primary),var(--violet));border-radius:8px;border:2px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background:linear-gradient(180deg,var(--primary-light),var(--cyan));background-clip:padding-box}
+/* ── 顶栏 ── */
+.topbar{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:14px;
+  padding:12px 26px;background:color-mix(in srgb,var(--bg-base) 72%,transparent);
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--glass-border)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;letter-spacing:.3px}
+.brand .mark{width:30px;height:30px;border-radius:9px;background:var(--grad-primary);display:grid;place-items:center;box-shadow:var(--glow)}
+.brand .mark svg{width:18px;height:18px}
+.brand small{color:var(--text-3);font-weight:400;font-size:12px;margin-left:2px}
+.topbar .spacer{flex:1}
+.demo-badge{font-size:11px;color:var(--cyan);border:1px solid rgba(34,211,238,.35);background:rgba(34,211,238,.08);padding:3px 10px;border-radius:99px;letter-spacing:.5px}
+.icon-btn{width:34px;height:34px;border-radius:10px;border:1px solid var(--glass-border);background:var(--glass-bg);color:var(--text-2);cursor:pointer;display:grid;place-items:center;transition:.2s}
+.icon-btn:hover{background:var(--glass-bg-hover);color:var(--text-1);border-color:var(--glass-border-hover)}
+.btn{display:inline-flex;align-items:center;gap:7px;border:none;cursor:pointer;font-family:inherit;
+  font-size:13px;font-weight:600;border-radius:10px;padding:9px 18px;transition:.2s;color:#fff}
+.btn-primary{background:var(--grad-primary);box-shadow:var(--glow)}
+.btn-primary:hover{filter:brightness(1.12);transform:translateY(-1px)}
+.btn-primary:active{transform:translateY(0)}
+.btn-ghost{background:var(--glass-bg);border:1px solid var(--glass-border);color:var(--text-2)}
+.btn-ghost:hover{background:var(--glass-bg-hover);color:var(--text-1);border-color:var(--glass-border-hover)}
+.btn-sm{padding:6px 12px;font-size:12px;border-radius:8px}
+.btn:disabled{opacity:.45;cursor:not-allowed;transform:none;filter:none}
+/* ── 主区 ── */
+main{position:relative;z-index:1;max-width:1280px;margin:0 auto;padding:26px 26px 80px}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:20px;animation:rise .5s ease both}
+.page-head h1{font-size:24px;font-weight:700;background:var(--grad-primary);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.page-head p{color:var(--text-3);font-size:13px;margin-top:4px;max-width:640px}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+/* 统计条 */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+.stat{background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:var(--radius);
+  padding:16px 18px;backdrop-filter:blur(16px);position:relative;overflow:hidden;animation:rise .5s ease both}
+.stat:nth-child(2){animation-delay:.06s}.stat:nth-child(3){animation-delay:.12s}.stat:nth-child(4){animation-delay:.18s}
+.stat::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--sc,var(--primary))}
+.stat .num{font-size:26px;font-weight:700;color:var(--text-1);font-variant-numeric:tabular-nums}
+.stat .lbl{font-size:12px;color:var(--text-3);margin-top:2px}
+.stat .sub{font-size:11px;color:var(--text-4);margin-top:6px}
+/* 工具栏 */
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px;animation:rise .5s .2s ease both}
+.search{flex:1;min-width:220px;position:relative}
+.search input{width:100%;padding:9px 14px 9px 36px;border-radius:10px;border:1px solid var(--glass-border);
+  background:var(--glass-bg);color:var(--text-1);font-family:inherit;font-size:13px;outline:none;transition:.2s}
+.search input:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(99,102,241,.15)}
+.search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--text-3)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{padding:6px 13px;border-radius:99px;font-size:12px;cursor:pointer;border:1px solid var(--glass-border);
+  background:var(--glass-bg);color:var(--text-2);transition:.18s;font-family:inherit}
+.chip:hover{border-color:var(--glass-border-hover);color:var(--text-1)}
+.chip.on{background:rgba(99,102,241,.16);border-color:rgba(99,102,241,.5);color:var(--primary-light);font-weight:600}
+select,input[type="text"],input[type="password"],input[type="number"],textarea{
+  padding:8px 12px;border-radius:9px;border:1px solid var(--glass-border);background:var(--inset);
+  color:var(--text-1);font-family:inherit;font-size:13px;outline:none;transition:.2s;width:100%}
+select:focus,input:focus,textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(99,102,241,.14)}
+select{cursor:pointer}
+select option{background:var(--bg-elevated);color:var(--text-1)}
+.toolbar select{width:auto;min-width:130px}
+/* 源列表 */
+.panel{background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:var(--radius);
+  backdrop-filter:blur(16px);overflow:hidden;animation:rise .5s .26s ease both}
+.panel-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--glass-border)}
+.panel-head h2{font-size:15px;font-weight:600}
+.panel-head .count{font-size:12px;color:var(--text-3)}
+table.src{width:100%;border-collapse:collapse}
+table.src th{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-3);
+  text-align:left;padding:10px 14px;border-bottom:1px solid var(--glass-border);font-weight:600;white-space:nowrap}
+table.src td{padding:12px 14px;border-bottom:1px solid var(--glass-border);vertical-align:middle;font-size:13px}
+table.src tr.row{transition:.18s;animation:rise .4s ease both}
+table.src tr.row:hover{background:var(--glass-bg-hover)}
+table.src tr.row:last-child td{border-bottom:none}
+.src-name{display:flex;align-items:center;gap:11px}
+.kind-ico{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;flex:none;
+  background:color-mix(in srgb,var(--kc) 14%,transparent);border:1px solid color-mix(in srgb,var(--kc) 38%,transparent);color:var(--kc)}
+.kind-ico svg{width:18px;height:18px}
+.src-name .nm{font-weight:600;color:var(--text-1)}
+.src-name .id{font-size:11px;color:var(--text-3);font-family:ui-monospace,Consolas,monospace}
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:3px 9px;border-radius:99px;font-weight:600;white-space:nowrap}
+.badge .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.b-healthy{color:var(--success);background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3)}
+.b-degraded{color:var(--warning);background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3)}
+.b-offline{color:var(--error);background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3)}
+.b-off{color:var(--text-3);background:var(--inset);border:1px solid var(--glass-border)}
+.b-new{color:var(--cyan);background:rgba(34,211,238,.1);border:1px solid rgba(34,211,238,.35)}
+.b-kind{color:var(--kc);background:color-mix(in srgb,var(--kc) 10%,transparent);border:1px solid color-mix(in srgb,var(--kc) 32%,transparent)}
+.mono{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--text-2)}
+.dim{color:var(--text-3);font-size:12px}
+/* switch */
+.switch{position:relative;width:38px;height:21px;flex:none;cursor:pointer}
+.switch input{opacity:0;width:0;height:0;position:absolute}
+.switch .track{position:absolute;inset:0;border-radius:99px;background:var(--inset);border:1px solid var(--glass-border);transition:.22s}
+.switch .knob{position:absolute;top:2.5px;left:3px;width:15px;height:15px;border-radius:50%;background:var(--text-3);transition:.22s}
+.switch input:checked + .track{background:rgba(99,102,241,.35);border-color:rgba(99,102,241,.6)}
+.switch input:checked + .track .knob{left:19px;background:var(--primary-light);box-shadow:0 0 8px rgba(129,140,248,.7)}
+.row-actions{display:flex;gap:6px;justify-content:flex-end}
+.act{width:30px;height:30px;border-radius:8px;border:1px solid var(--glass-border);background:transparent;
+  color:var(--text-3);cursor:pointer;display:grid;place-items:center;transition:.18s}
+.act:hover{color:var(--text-1);background:var(--glass-bg-hover);border-color:var(--glass-border-hover)}
+.act.danger:hover{color:var(--error);border-color:rgba(239,68,68,.4);background:rgba(239,68,68,.08)}
+.act svg{width:14px;height:14px}
+.act:disabled{opacity:.35;cursor:not-allowed}
+/* ingest progress */
+.ingest-bar{height:3px;border-radius:2px;background:var(--inset);overflow:hidden;margin-top:6px;width:150px}
+.ingest-bar i{display:block;height:100%;width:40%;background:var(--grad-accent);border-radius:2px;animation:slide 1s linear infinite}
+@keyframes slide{from{transform:translateX(-100%)}to{transform:translateX(350%)}}
+.honest-note{margin-top:16px;font-size:12px;color:var(--text-3);display:flex;gap:8px;align-items:flex-start;animation:rise .5s .3s ease both}
+.honest-note svg{width:14px;height:14px;flex:none;margin-top:2px;color:var(--warning)}
+.empty{padding:46px;text-align:center;color:var(--text-3)}
+/* ── 向导遮罩 ── */
+.overlay{position:fixed;inset:0;z-index:100;background:rgba(4,6,12,.66);backdrop-filter:blur(8px);
+  display:grid;place-items:center;padding:22px;opacity:0;pointer-events:none;transition:.25s}
+.overlay.open{opacity:1;pointer-events:auto}
+.wizard{width:min(880px,100%);max-height:92vh;display:flex;flex-direction:column;
+  background:color-mix(in srgb,var(--bg-surface) 92%,transparent);border:1px solid var(--glass-border-hover);
+  border-radius:18px;box-shadow:var(--shadow-lg);backdrop-filter:blur(24px);
+  transform:translateY(18px) scale(.98);transition:.28s cubic-bezier(.2,.9,.3,1.2)}
+.overlay.open .wizard{transform:none}
+.wizard-head{display:flex;align-items:center;gap:12px;padding:18px 22px;border-bottom:1px solid var(--glass-border)}
+.wizard-head h3{font-size:16px;font-weight:700}
+.wizard-head .sub{font-size:12px;color:var(--text-3)}
+.wizard-body{padding:20px 22px;overflow-y:auto;flex:1}
+.wizard-foot{display:flex;align-items:center;gap:10px;padding:15px 22px;border-top:1px solid var(--glass-border)}
+.wizard-foot .hint{flex:1;font-size:12px;color:var(--text-3)}
+/* steps */
+.steps{display:flex;gap:0;margin-bottom:20px}
+.step{flex:1;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-4);position:relative}
+.step .n{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:11px;
+  border:1px solid var(--glass-border);background:var(--inset);flex:none;transition:.25s}
+.step.active{color:var(--text-1)}
+.step.active .n{background:var(--grad-primary);border-color:transparent;color:#fff;box-shadow:var(--glow)}
+.step.done{color:var(--text-2)}
+.step.done .n{background:rgba(16,185,129,.15);border-color:rgba(16,185,129,.5);color:var(--success)}
+.step::after{content:"";flex:1;height:1px;background:var(--glass-border);margin:0 8px}
+.step:last-child::after{display:none}
+/* kind cards */
+.kind-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.kind-card{position:relative;text-align:left;border:1px solid var(--glass-border);border-radius:13px;
+  background:var(--glass-bg);padding:15px;cursor:pointer;transition:.2s;font-family:inherit;color:var(--text-1)}
+.kind-card:hover{background:var(--glass-bg-hover);border-color:var(--glass-border-hover);transform:translateY(-2px)}
+.kind-card.sel{border-color:color-mix(in srgb,var(--kc) 65%,transparent);background:color-mix(in srgb,var(--kc) 9%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--kc) 16%,transparent)}
+.kind-card .kc-top{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.kind-card .kc-name{font-weight:700;font-size:13.5px}
+.kind-card .kc-desc{font-size:11.5px;color:var(--text-3);line-height:1.5}
+.kind-card .kc-tag{position:absolute;top:10px;right:10px}
+.kind-card.locked{opacity:.55;cursor:not-allowed}
+.group-label{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--text-3);margin:16px 0 9px;font-weight:700}
+.group-label:first-child{margin-top:0}
+/* forms */
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:13px 16px}
+.field{display:flex;flex-direction:column;gap:5px}
+.field.full{grid-column:1/-1}
+.field label{font-size:12px;font-weight:600;color:var(--text-2)}
+.field label .req{color:var(--error);margin-left:2px}
+.field .fhint{font-size:11px;color:var(--text-4)}
+.field.err input,.field.err select,.field.err textarea{border-color:rgba(239,68,68,.6);box-shadow:0 0 0 3px rgba(239,68,68,.12)}
+.field .ferr{font-size:11px;color:var(--error);display:none}
+.field.err .ferr{display:block}
+.seg{display:flex;gap:6px}
+.seg button{flex:1;padding:7px;border-radius:8px;border:1px solid var(--glass-border);background:var(--inset);color:var(--text-2);cursor:pointer;font-family:inherit;font-size:12px;transition:.18s}
+.seg button.on{background:rgba(99,102,241,.18);border-color:rgba(99,102,241,.55);color:var(--primary-light);font-weight:600}
+.test-row{display:flex;align-items:center;gap:12px;margin-top:16px;padding:13px 15px;border-radius:11px;background:var(--inset);border:1px solid var(--glass-border)}
+.test-result{font-size:12px;font-family:ui-monospace,Consolas,monospace}
+.test-ok{color:var(--success)}.test-fail{color:var(--error)}.test-wait{color:var(--text-3)}
+.spinner{width:14px;height:14px;border:2px solid rgba(129,140,248,.25);border-top-color:var(--primary-light);border-radius:50%;animation:spin .7s linear infinite;flex:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* webhook 特殊块 */
+.wh-box{border:1px solid rgba(250,204,21,.3);background:rgba(250,204,21,.05);border-radius:12px;padding:15px;margin-bottom:15px}
+.wh-box h4{font-size:13px;color:#facc15;display:flex;gap:7px;align-items:center;margin-bottom:9px}
+.wh-box h4 svg{width:15px;height:15px}
+.copyline{display:flex;gap:8px;align-items:center}
+.copyline input{flex:1;font-family:ui-monospace,Consolas,monospace;font-size:12px}
+/* mapping preview */
+.triple-preview{margin-top:16px;border:1px solid var(--glass-border);border-radius:12px;overflow:hidden}
+.triple-preview .tp-head{padding:9px 14px;font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--text-3);background:var(--inset);font-weight:700}
+.triple-preview .tp-body{padding:13px 14px;font-family:ui-monospace,Consolas,monospace;font-size:12.5px;display:flex;flex-direction:column;gap:7px}
+.tp-row{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.tp-k{color:var(--text-3);min-width:86px}
+.tp-s{color:var(--cyan)}.tp-p{color:var(--primary-light)}.tp-o{color:var(--violet)}.tp-q{color:var(--text-2)}
+/* confirm */
+.desc-list{border:1px solid var(--glass-border);border-radius:12px;overflow:hidden}
+.desc-item{display:flex;border-bottom:1px solid var(--glass-border)}
+.desc-item:last-child{border-bottom:none}
+.desc-item .dk{width:150px;flex:none;padding:10px 14px;background:var(--inset);font-size:12px;color:var(--text-3);font-weight:600}
+.desc-item .dv{padding:10px 14px;font-size:12.5px;flex:1;word-break:break-all}
+.confirm-enabled{display:flex;align-items:center;gap:12px;margin-top:15px;padding:13px 15px;border-radius:11px;background:var(--inset);border:1px solid var(--glass-border)}
+.confirm-enabled .ce-txt{flex:1}
+.confirm-enabled .ce-txt b{font-size:13px}
+.confirm-enabled .ce-txt p{font-size:11.5px;color:var(--text-3)}
+/* ── drawer ── */
+.drawer{position:fixed;top:0;right:0;bottom:0;z-index:110;width:min(520px,100%);
+  background:color-mix(in srgb,var(--bg-surface) 95%,transparent);border-left:1px solid var(--glass-border-hover);
+  box-shadow:var(--shadow-lg);backdrop-filter:blur(24px);transform:translateX(102%);transition:.3s cubic-bezier(.2,.9,.3,1);
+  display:flex;flex-direction:column}
+.drawer.open{transform:none}
+.drawer-head{padding:18px 20px;border-bottom:1px solid var(--glass-border);display:flex;align-items:center;gap:11px}
+.drawer-head h3{font-size:15px;flex:1}
+.drawer-body{padding:18px 20px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:16px}
+.dsection{border:1px solid var(--glass-border);border-radius:12px;padding:14px;background:var(--glass-bg)}
+.dsection h4{font-size:12px;letter-spacing:.6px;text-transform:uppercase;color:var(--text-3);margin-bottom:10px;font-weight:700}
+.kv{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:5px 0}
+.kv .k{color:var(--text-3)}
+.delivery-feed{display:flex;flex-direction:column;gap:7px;max-height:260px;overflow-y:auto}
+.delivery{display:flex;align-items:center;gap:9px;padding:8px 11px;border-radius:9px;background:var(--inset);border:1px solid var(--glass-border);font-size:12px;animation:rise .3s ease both}
+.delivery .dk{font-family:ui-monospace,Consolas,monospace;color:var(--text-2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.delivery .dt{color:var(--text-4);font-size:11px;flex:none}
+.d-actions{display:flex;gap:8px;flex-wrap:wrap}
+/* toast */
+.toast-root{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:200;display:flex;flex-direction:column;gap:9px;align-items:center}
+.toast{display:flex;align-items:center;gap:11px;padding:11px 17px;border-radius:12px;
+  background:color-mix(in srgb,var(--bg-elevated) 94%,transparent);border:1px solid var(--glass-border-hover);
+  box-shadow:var(--shadow-lg);backdrop-filter:blur(18px);font-size:13px;animation:toastIn .3s cubic-bezier(.2,.9,.3,1.2) both;max-width:min(560px,92vw)}
+.toast.out{animation:toastOut .25s ease both}
+.toast .t-ico{width:8px;height:8px;border-radius:50%;flex:none}
+.toast.ok .t-ico{background:var(--success);box-shadow:0 0 8px var(--success)}
+.toast.err .t-ico{background:var(--error);box-shadow:0 0 8px var(--error)}
+.toast.info .t-ico{background:var(--info);box-shadow:0 0 8px var(--info)}
+.toast button{border:none;background:rgba(99,102,241,.2);color:var(--primary-light);font-weight:700;border-radius:7px;padding:4px 11px;cursor:pointer;font-family:inherit;font-size:12px}
+.toast button:hover{background:rgba(99,102,241,.35)}
+@keyframes toastIn{from{opacity:0;transform:translateY(16px) scale(.96)}to{opacity:1;transform:none}}
+@keyframes toastOut{to{opacity:0;transform:translateY(10px) scale(.97)}}
+/* responsive */
+@media (max-width:960px){
+  .stats{grid-template-columns:repeat(2,1fr)}
+  .hide-m{display:none}
+  .form-grid{grid-template-columns:1fr}
+  main{padding:18px 14px 70px}
+  .topbar{padding:10px 14px}
+  .brand small{display:none}
+}
+@media (max-width:620px){
+  .stats{grid-template-columns:1fr 1fr;gap:9px}
+  .stat .num{font-size:21px}
+  .page-head{flex-direction:column;align-items:flex-start}
+  .wizard-body{padding:15px}
+  .step .sl{display:none}
+}
+</style>
+</head>
+<body>
+<div class="ambient" aria-hidden="true">
+  <div class="aurora a1"></div><div class="aurora a2"></div><div class="aurora a3"></div><div class="grid"></div>
+</div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="5" r="2.2"/><circle cx="5" cy="17" r="2.2"/><circle cx="19" cy="17" r="2.2"/><path d="M12 7.2 5.8 15M12 7.2l6.2 7.8M7.2 17h9.6"/></svg></span>
+    Neurova<small>知识底座 · 企业源</small>
+  </div>
+  <span class="demo-badge">U5 原型 · 本地演示数据</span>
+  <div class="spacer"></div>
+  <button class="icon-btn" id="themeBtn" title="切换明暗" data-action="theme">
+    <svg id="themeIco" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+  </button>
+  <button class="btn btn-primary" data-action="new-source">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+    新建源
+  </button>
+</header>
+
+<main>
+  <div class="page-head">
+    <div>
+      <h1>数据源连接器</h1>
+      <p>湖仓 · SQL · ERP · 推送摄取统一注册面。行 → 语义映射 → admission 单写咽喉；凭据 fail-closed，适配器注册态逐源如实回显。</p>
+    </div>
+  </div>
+
+  <section class="stats" id="stats"></section>
+
+  <section class="toolbar">
+    <div class="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input type="text" id="searchInput" placeholder="搜索源名称 / ID / 供应商…">
+    </div>
+    <div class="chips" id="kindChips"></div>
+    <select id="sortSel" title="排序">
+      <option value="name">按名称</option>
+      <option value="health">按健康度</option>
+      <option value="last">按最近摄取</option>
+      <option value="rows">按今日行数</option>
+    </select>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>摄取源</h2><span class="count" id="srcCount"></span>
+      <div class="spacer" style="flex:1"></div>
+      <span class="dim">触发摄取走 runOnce 单管道 · 批量上限 20×200</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="src">
+        <thead><tr>
+          <th>源</th><th class="hide-m">类型</th><th>健康</th><th class="hide-m">水位 / cursor</th>
+          <th class="hide-m">最近摄取</th><th>今日行数</th><th>启用</th><th style="text-align:right">操作</th>
+        </tr></thead>
+        <tbody id="srcBody"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="emptyBox" hidden>没有匹配的源——调整搜索或过滤，或点「新建源」。</div>
+  </section>
+
+  <p class="honest-note">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+    <span>诚实边界：Kafka/Kinesis 消息中间件实时流缓办（D10 裁定，流式最小形态＝http_pull＋入站 webhook）；SQL 驱动闭集五种，新增原生驱动须另拍；未接线适配器诚实禁用，不假装可用。本原型为 W10 目标态演示，不接真后端。</span>
+  </p>
+</main>
+
+<!-- ── 向导 ── -->
+<div class="overlay" id="wizardOverlay">
+  <div class="wizard" role="dialog" aria-modal="true" aria-label="新建摄取源向导">
+    <div class="wizard-head">
+      <div style="flex:1">
+        <h3 id="wizTitle">新建摄取源</h3>
+        <div class="sub" id="wizSub">选择源类型 → 连接参数 → 语义映射 → 确认登记</div>
+      </div>
+      <button class="icon-btn" data-action="close-wizard" title="关闭">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="wizard-body" id="wizBody"></div>
+    <div class="wizard-foot">
+      <span class="hint" id="wizHint"></span>
+      <button class="btn btn-ghost btn-sm" id="wizBack" data-action="wiz-back">上一步</button>
+      <button class="btn btn-primary btn-sm" id="wizNext" data-action="wiz-next">下一步</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── webhook 详情抽屉 ── -->
+<aside class="drawer" id="drawer" aria-label="Webhook 源详情">
+  <div class="drawer-head">
+    <span class="kind-ico" style="--kc:#facc15"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z"/></svg></span>
+    <h3 id="drawerTitle">Webhook 源</h3>
+    <button class="icon-btn" data-action="close-drawer" title="关闭">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+  </div>
+  <div class="drawer-body" id="drawerBody"></div>
+</aside>
+
+<div class="toast-root" id="toastRoot"></div>
+
+<script>
+"use strict";
+/* ═══════════════ 图标 ═══════════════ */
+const I = {
+  sql:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><ellipse cx="12" cy="5.5" rx="7.5" ry="3"/><path d="M4.5 5.5v13c0 1.66 3.36 3 7.5 3s7.5-1.34 7.5-3v-13M4.5 12c0 1.66 3.36 3 7.5 3s7.5-1.34 7.5-3"/></svg>',
+  erp:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M3 21h18M5 21V5l7-3v19M12 21V9l7 2v10"/><path d="M8 8h.01M8 12h.01M8 16h.01M16 14h.01M16 17h.01"/></svg>',
+  wecom:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.3 9 9 0 0 1-3.8-.8L3 20l1.1-4.9a8 8 0 0 1-1.1-4A8.4 8.4 0 0 1 11.5 3 8.4 8.4 0 0 1 21 11.5Z"/><path d="M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01" stroke-linecap="round"/></svg>',
+  wechat:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M9.5 4C5.9 4 3 6.4 3 9.4c0 1.7 1 3.2 2.5 4.2L4.8 16l2.6-1.3c.7.2 1.4.3 2.1.3"/><path d="M21 14.2c0-2.6-2.5-4.7-5.5-4.7S10 11.6 10 14.2s2.5 4.7 5.5 4.7c.6 0 1.2-.1 1.8-.3l2.2 1.1-.6-2c1.3-.8 2.1-2.1 2.1-3.5Z"/></svg>',
+  file:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M9 13h6M9 17h6"/></svg>',
+  unity_catalog:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><path d="M17.25 13.5v7.5M13.5 17.25h7.5"/></svg>',
+  snowflake:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 2v20M4 6l16 12M20 6 4 18M12 2l-2.5 2.5M12 2l2.5 2.5M12 22l-2.5-2.5M12 22l2.5-2.5"/></svg>',
+  sap_odata:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="m12 2 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 17l9 5 9-5"/></svg>',
+  http_pull:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>',
+  webhook:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z"/></svg>',
+  play:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.8v14.4a.8.8 0 0 0 1.2.7l11.2-7.2a.8.8 0 0 0 0-1.4L8.2 4.1a.8.8 0 0 0-1.2.7Z"/></svg>',
+  edit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>',
+  trash:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/></svg>',
+  bolt:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z"/></svg>',
+  copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+  eye:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
+  check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m4.5 12.5 5 5 10-11"/></svg>'
+};
+/* ═══════════════ 源类型注册（能力是数据） ═══════════════ */
+const KINDS = {
+  sql:{name:"SQL 数据库",hue:"#6366f1",group:"existing",desc:"五驱动水位增量 · postgres / mysql / mssql / oracle / sqlite",
+    fields:[
+      {k:"driver",l:"驱动",t:"select",opts:["postgres","mysql","mssql","oracle","sqlite"],req:1,def:"postgres"},
+      {k:"host",l:"主机",req:1,ph:"db.internal.example"},
+      {k:"port",l:"端口",t:"number",req:1,def:"5432"},
+      {k:"database",l:"数据库",req:1,ph:"orders"},
+      {k:"user",l:"用户",req:1,ph:"readonly_user"},
+      {k:"password",l:"密码",t:"password",req:1,ph:"fail-closed：缺失即拒"},
+      {k:"watermarkColumn",l:"水位列",req:1,ph:"updated_at"},
+      {k:"watermarkType",l:"水位类型",t:"select",opts:["timestamp","integer"],req:1,def:"timestamp",hint:"边界等值按类型处理，防漏防重"}],
+    sample:{order_id:"SO-1042",status:"shipped",amount:"12800",updated_at:"2026-11-12T08:30:00Z"},
+    cols:"order_id,status,amount,updated_at",subject:"order:{order_id}",pred:"has_status"},
+  erp:{name:"ERP REST",hue:"#f59e0b",group:"existing",desc:"金蝶 / 用友 REST · 分页 cursor · 无厂商 SDK",
+    fields:[
+      {k:"vendor",l:"厂商",t:"select",opts:["kingdee","yongyou"],req:1,def:"kingdee"},
+      {k:"baseUrl",l:"API 基址",req:1,ph:"https://erp.example.com/api"},
+      {k:"appId",l:"App ID",req:1,ph:"app_xxx"},
+      {k:"appSecret",l:"App Secret",t:"password",req:1,ph:"fail-closed"},
+      {k:"orgCode",l:"组织编码",req:1,ph:"ORG-001"}],
+    sample:{bill_no:"AP-2210",vendor:"华北供应链",total:"56000",modify_time:"2026-11-12 07:12"},
+    cols:"bill_no,vendor,total,modify_time",subject:"bill:{bill_no}",pred:"supplied_by"},
+  wecom:{name:"企业微信",hue:"#3b82f6",group:"existing",desc:"捕获/存档两面 · 零凭据只读渠道投影库",
+    note:"本源零凭据：只读渠道层落库的投影面。corpid／corpsecret／回调 Token／EncodingAESKey 在渠道配置面（企业微信渠道）填写；存档 Secret 与 RSA 私钥只以指针进配置（环境变量名／文件路径），明文即拒。",
+    fields:[
+      {k:"chatSource",l:"来源面",t:"select",opts:["capture","archive"],req:1,def:"capture",reload:1,hint:"capture＝既有入站捕获面；archive＝会话存档投影面（通道层拉取落库）"},
+      {k:"ingressDb",l:"捕获库路径",when:{chatSource:"capture"},ph:"缺省 channel_ingress.db",hint:"可选覆盖；缺省与渠道层同一注入（NEUROVA_CHANNEL_INGRESS_DB）"},
+      {k:"archiveSdkPath",l:"存档 SDK 库路径",req:1,when:{chatSource:"archive"},ph:"/opt/wecom-sdk/libWeWorkFinanceSdk_C.so",hint:"官方 C 动态库；或 env NEUROVA_WECOM_ARCHIVE_SDK"},
+      {k:"archiveSecretEnv",l:"存档 Secret 环境变量名",req:1,when:{chatSource:"archive"},ph:"WECOM_ARCHIVE_SECRET",hint:"存的是变量名不是值——管理工具→聊天内容存档专用 Secret，不是应用 Secret"},
+      {k:"archivePrivateKeys",l:"私钥文件映射",t:"textarea",req:1,when:{chatSource:"archive"},ph:"1=private_v1.pem",hint:"publickey_ver=路径（RSA2048）；裸文件名在约定目录解析（NEUROVA_WECOM_ARCHIVE_KEYDIR）"},
+      {k:"archiveRoomAllowlist",l:"群白名单",t:"textarea",when:{chatSource:"archive"},ph:"roomid 逐行",hint:"隐私白名单：落库前过滤，不是摄取后再删"},
+      {k:"archiveUserAllowlist",l:"成员白名单",t:"textarea",when:{chatSource:"archive"},ph:"userid 逐行",hint:"同上；覆盖范围由席位与成员同意决定"}],
+    sample:{msg_id:"wm_8812",chat_id:"room_88",chat_type:"group",sender:"zhang.wei",sent_at:"2026-11-12T08:30:00Z",text:"产线 B 已切换",media_ref:""},
+    cols:"msg_id,chat_id,chat_type,sender,sent_at,text",subject:"chat:{chat_id}",pred:"mentions"},
+  wechat:{name:"微信客服",hue:"#22c55e",group:"existing",desc:"客服捕获面 · 零凭据只读（无存档面）",
+    note:"微信客服凭据在渠道层：corpid＋客服专用 corpsecret＋open_kfid＋kf_mode=true＋回调 Token／EncodingAESKey。微信侧无官方历史消息拉取通道——会话存档仅企微提供，本源只读捕获面。",
+    fields:[
+      {k:"chatSource",l:"来源面",t:"select",opts:["capture"],req:1,def:"capture",hint:"archive 仅 wecom 可用——微信侧无存档面，构造期即拒"},
+      {k:"ingressDb",l:"捕获库路径",ph:"缺省 channel_ingress.db",hint:"可选覆盖；缺省与渠道层同一注入（NEUROVA_CHANNEL_INGRESS_DB）"}],
+    sample:{msg_id:"kf_301",chat_id:"s_991",chat_type:"p2p",sender:"oUser_7",sent_at:"2026-11-12T09:10:00Z",text:"订单何时发货",media_ref:""},
+    cols:"msg_id,chat_id,chat_type,sender,sent_at,text",subject:"chat:{chat_id}",pred:"asks_about"},
+  file:{name:"文件目录",hue:"#a78bfa",group:"existing",desc:"CSV / JSONL / Markdown · 目录扫描",
+    fields:[
+      {k:"rootPath",l:"根路径",req:1,ph:"/data/imports"},
+      {k:"pattern",l:"文件模式",req:1,ph:"*.csv",def:"*.csv"},
+      {k:"format",l:"格式",t:"select",opts:["csv","jsonl","markdown"],req:1,def:"csv"}],
+    sample:{sku:"SKU-77",stock:"320",warehouse:"WH-East",date:"2026-11-12"},
+    cols:"sku,stock,warehouse,date",subject:"sku:{sku}",pred:"stored_in"},
+  unity_catalog:{name:"Unity Catalog",hue:"#22d3ee",group:"new",desc:"湖仓表清单 / 列 schema / 血缘 REST 面",
+    fields:[
+      {k:"catalogUrl",l:"Catalog 端点",req:1,ph:"https://dbc-xxx.cloud.databricks.com"},
+      {k:"token",l:"访问令牌",t:"password",req:1,ph:"dapi… · fail-closed"},
+      {k:"catalog",l:"Catalog",req:1,ph:"main"},
+      {k:"schema",l:"Schema",req:1,ph:"sales"},
+      {k:"includeLineage",l:"摄取血缘",t:"toggle",def:true,hint:"血缘 REST → lineage 断言（mediumRef 溯源）"}],
+    sample:{table:"fact_orders",column:"amount",upstream:"raw.orders",downstream:"mart.revenue"},
+    cols:"table,column,upstream,downstream",subject:"table:{table}",pred:"derived_from"},
+  snowflake:{name:"Snowflake",hue:"#93c5fd",group:"new",desc:"SQL REST API · 只读查询 · 水位增量复用",
+    fields:[
+      {k:"accountUrl",l:"账户端点",req:1,ph:"https://xy12345.snowflakecomputing.com"},
+      {k:"token",l:"PAT 令牌",t:"password",req:1,ph:"fail-closed"},
+      {k:"warehouse",l:"Warehouse",req:1,ph:"COMPUTE_WH"},
+      {k:"database",l:"Database",req:1,ph:"ANALYTICS"},
+      {k:"schema",l:"Schema",req:1,ph:"PUBLIC"},
+      {k:"query",l:"只读查询",t:"textarea",req:1,ph:"SELECT … WHERE updated_at > ?",full:1},
+      {k:"watermarkColumn",l:"水位列",req:1,ph:"updated_at"}],
+    sample:{region:"APAC",revenue:"912000",pipeline:"enterprise",updated_at:"2026-11-12T09:00:00Z"},
+    cols:"region,revenue,pipeline,updated_at",subject:"region:{region}",pred:"has_revenue"},
+  sap_odata:{name:"SAP OData",hue:"#f472b6",group:"new",desc:"entity set REST · $skiptoken/$top 分页",
+    fields:[
+      {k:"serviceUrl",l:"Service 端点",req:1,ph:"https://sap.example.com/sap/opu/odata/sap/API_MATERIAL"},
+      {k:"authType",l:"认证",t:"select",opts:["basic","oauth2"],req:1,def:"basic"},
+      {k:"username",l:"用户 / Client ID",req:1,ph:"SAP_USER"},
+      {k:"password",l:"密码 / Secret",t:"password",req:1,ph:"fail-closed"},
+      {k:"entitySet",l:"Entity Set",req:1,ph:"A_Material"},
+      {k:"pageSize",l:"页大小 ($top)",t:"number",req:1,def:"200"}],
+    sample:{Material:"MAT-5001",MaterialName:"轴承组件",Plant:"WERK-1000",LastChanged:"2026-11-12T06:00:00"},
+    cols:"Material,MaterialName,Plant,LastChanged",subject:"material:{Material}",pred:"produced_in"},
+  http_pull:{name:"HTTP 拉取",hue:"#fb7185",group:"new",desc:"通用 URL 拉取 · 分页 cursor 声明是数据 · 批 C3 接线",
+    fields:[
+      {k:"url",l:"拉取 URL",req:1,ph:"https://api.example.com/v1/prices",full:1},
+      {k:"method",l:"方法",t:"select",opts:["GET","POST"],req:1,def:"GET"},
+      {k:"headersJson",l:"Headers (JSON)",t:"textarea",ph:'{"Authorization":"Bearer …"}',full:1},
+      {k:"cursorField",l:"分页 cursor 字段",req:1,ph:"next_cursor"},
+      {k:"intervalSeconds",l:"同步间隔（秒）",t:"number",def:"0",hint:"0＝仅手动 runOnce；非零注册 interval job"}],
+    sample:{item:"铜期货",price:"71250",currency:"CNY",next_cursor:"c_88"},
+    cols:"item,price,currency",subject:"item:{item}",pred:"has_price"},
+  webhook:{name:"入站 Webhook",hue:"#facc15",group:"new",desc:"推送直落 admission · HMAC 签名 · 幂等去重 · 缺省 off",
+    fields:[
+      {k:"secret",l:"HMAC 签名密钥",t:"password",req:1,gen:1,hint:"自动生成，可重新生成；泄露即轮换"},
+      {k:"timestampWindow",l:"时间戳窗口（秒）",t:"number",req:1,def:"300",hint:"超窗拒重放"},
+      {k:"idempotencyField",l:"幂等键字段",req:1,def:"event_id",hint:"unique(source_id, idempotency_key) 去重"}],
+    sample:{event_id:"evt-9001",device:"CNC-07",state:"fault",ts:"1762932000"},
+    cols:"event_id,device,state,ts",subject:"device:{device}",pred:"has_state"}
+};
+const NEW_KINDS = Object.keys(KINDS).filter(k=>KINDS[k].group==="new");
+/* ═══════════════ 种子数据 ═══════════════ */
+const now = Date.now();
+const H = 3600e3;
+function seed(){return [
+  {id:"src_pg_orders",name:"订单主库",kind:"sql",enabled:true,health:"healthy",cursor:"2026-11-12T08:30:00Z",last:now-0.4*H,rows:1240,facts:86210,cfg:{driver:"postgres",host:"pg.orders.internal",port:"5432",database:"orders",user:"ro_ingest",password:"••••••••",watermarkColumn:"updated_at",watermarkType:"timestamp"}},
+  {id:"src_kingdee_fin",name:"金蝶财务云",kind:"erp",enabled:true,health:"healthy",cursor:"StartRow:4800",last:now-1.2*H,rows:430,facts:21340,cfg:{vendor:"kingdee",baseUrl:"https://kd.example.com/api",appId:"app_fin",appSecret:"••••••••",orgCode:"ORG-001"}},
+  {id:"src_yongyou_inv",name:"用友库存",kind:"erp",enabled:true,health:"degraded",cursor:"page:37",last:now-5*H,rows:128,facts:9102,cfg:{vendor:"yongyou",baseUrl:"https://yy.example.com/api",appId:"app_inv",appSecret:"••••••••",orgCode:"ORG-002"}},
+  {id:"src_wecom_archive",name:"企微会话存档",kind:"wecom",enabled:true,health:"degraded",cursor:"seq:99120",last:now-0.2*H,rows:2210,facts:40112,cfg:{chatSource:"archive",archiveSdkPath:"/opt/wecom-sdk/libWeWorkFinanceSdk_C.so",archiveSecretEnv:"WECOM_ARCHIVE_SECRET",archivePrivateKeys:"1=private_v1.pem",archiveRoomAllowlist:"room_88",archiveUserAllowlist:""}},
+  {id:"src_docs_manual",name:"工艺文档目录",kind:"file",enabled:true,health:"healthy",cursor:"files:182",last:now-26*H,rows:182,facts:3051,cfg:{rootPath:"/data/process-docs",pattern:"*.md",format:"markdown"}},
+  {id:"src_uc_lineage",name:"湖仓血缘 · Databricks",kind:"unity_catalog",enabled:true,health:"healthy",cursor:"api:2.1",last:now-2.5*H,rows:96,facts:1204,cfg:{catalogUrl:"https://dbc-9a2f.cloud.databricks.com",token:"••••••••",catalog:"main",schema:"sales",includeLineage:true}},
+  {id:"src_sf_sales",name:"Snowflake 营收",kind:"snowflake",enabled:true,health:"healthy",cursor:"2026-11-12T09:00:00Z",last:now-1*H,rows:64,facts:880,cfg:{accountUrl:"https://xy12345.snowflakecomputing.com",token:"••••••••",warehouse:"COMPUTE_WH",database:"ANALYTICS",schema:"PUBLIC",query:"SELECT region,revenue,pipeline,updated_at FROM mart.revenue WHERE updated_at > ?",watermarkColumn:"updated_at"}},
+  {id:"src_sap_materials",name:"SAP 物料主数据",kind:"sap_odata",enabled:true,health:"degraded",cursor:"$skiptoken:8f2",last:now-7*H,rows:310,facts:2450,cfg:{serviceUrl:"https://sap.example.com/odata/API_MATERIAL",authType:"basic",username:"SAP_RO",password:"••••••••",entitySet:"A_Material",pageSize:"200"}},
+  {id:"src_http_prices",name:"行情价格拉取",kind:"http_pull",enabled:false,health:"healthy",cursor:"c_88",last:now-3*H,rows:0,facts:620,cfg:{url:"https://api.metals.example/v1/prices",method:"GET",headersJson:"{}",cursorField:"next_cursor",intervalSeconds:"3600"}},
+  {id:"src_wh_events",name:"设备事件推送",kind:"webhook",enabled:false,health:"healthy",cursor:"dedup:0",last:null,rows:0,facts:0,cfg:{secret:"whsec_9f27c1a4e8b3",timestampWindow:"300",idempotencyField:"event_id"},deliveries:[]}
+];}
+/* ═══════════════ 状态 ═══════════════ */
+const state = {
+  sources: seed(), filter:"all", query:"", sort:"name",
+  wizard:null, drawerId:null, ingesting:new Set(), theme:"dark"
+};
+const $ = s=>document.querySelector(s);
+const esc = s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const rid = p=>p+"_"+Math.random().toString(36).slice(2,8);
+const fmtTime = t=>{if(!t)return "—";const d=new Date(t);const p=n=>String(n).padStart(2,"0");return `${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`};
+const HEALTH_META = {healthy:["healthy","健康"],degraded:["degraded","降级"],offline:["offline","断连"]};
+const healthRank = {offline:0,degraded:1,healthy:2};
+/* ═══════════════ 渲染：统计 ═══════════════ */
+function renderStats(){
+  const s = state.sources;
+  const healthy = s.filter(x=>x.health==="healthy").length;
+  const off = s.filter(x=>!x.enabled).length;
+  const rows = s.reduce((a,x)=>a+x.rows,0);
+  $("#stats").innerHTML = `
+    <div class="stat" style="--sc:var(--primary)"><div class="num">${s.length}</div><div class="lbl">注册源</div><div class="sub">湖仓 ${s.filter(x=>["unity_catalog","snowflake","sap_odata"].includes(x.kind)).length} · 推送 ${s.filter(x=>["webhook","http_pull"].includes(x.kind)).length}</div></div>
+    <div class="stat" style="--sc:var(--success)"><div class="num">${healthy}/${s.length}</div><div class="lbl">健康</div><div class="sub">降级 ${s.filter(x=>x.health==="degraded").length} · 断连 ${s.filter(x=>x.health==="offline").length}</div></div>
+    <div class="stat" style="--sc:var(--warning)"><div class="num">${off}</div><div class="lbl">缺省关闭</div><div class="sub">webhook / interval 灰度 off 先例</div></div>
+    <div class="stat" style="--sc:var(--cyan)"><div class="num">${rows.toLocaleString()}</div><div class="lbl">今日摄取行</div><div class="sub">admission 单写咽喉 · 逐行 SAVEPOINT</div></div>`;
+}
+/* ═══════════════ 渲染：过滤 chips ═══════════════ */
+const FILTERS = [["all","全部"],["lake","湖仓"],["db","SQL/ERP"],["push","拉取/推送"],["chat","会话"],["file","文件"]];
+function kindInFilter(k,f){
+  if(f==="all")return true;
+  if(f==="lake")return ["unity_catalog","snowflake","sap_odata"].includes(k);
+  if(f==="db")return ["sql","erp"].includes(k);
+  if(f==="push")return ["http_pull","webhook"].includes(k);
+  if(f==="chat")return ["wecom","wechat"].includes(k);
+  if(f==="file")return k==="file";
+  return true;
+}
+function renderChips(){
+  $("#kindChips").innerHTML = FILTERS.map(([k,l])=>`<button class="chip ${state.filter===k?"on":""}" data-action="filter" data-k="${k}">${l}</button>`).join("");
+}
+/* ═══════════════ 渲染：列表 ═══════════════ */
+function visibleSources(){
+  let list = state.sources.filter(s=>kindInFilter(s.kind,state.filter));
+  if(state.query){
+    const q = state.query.toLowerCase();
+    list = list.filter(s=>(s.name+s.id+KINDS[s.kind].name+(s.cfg.vendor||"")).toLowerCase().includes(q));
+  }
+  const cmp = {
+    name:(a,b)=>a.name.localeCompare(b.name,"zh"),
+    health:(a,b)=>healthRank[a.health]-healthRank[b.health],
+    last:(a,b)=>(b.last||0)-(a.last||0),
+    rows:(a,b)=>b.rows-a.rows
+  }[state.sort];
+  return list.sort(cmp);
+}
+function renderList(){
+  const list = visibleSources();
+  $("#srcCount").textContent = `${list.length} / ${state.sources.length}`;
+  $("#emptyBox").hidden = list.length>0;
+  $("#srcBody").innerHTML = list.map((s,i)=>{
+    const K = KINDS[s.kind];
+    const [hc,hl] = HEALTH_META[s.health];
+    const busy = state.ingesting.has(s.id);
+    const vendor = s.cfg.vendor?` · ${esc(s.cfg.vendor)}`:(s.cfg.driver?` · ${esc(s.cfg.driver)}`:"");
+    return `<tr class="row" style="animation-delay:${Math.min(i*0.04,0.3)}s">
+      <td><div class="src-name">
+        <span class="kind-ico" style="--kc:${K.hue}">${I[s.kind]}</span>
+        <div><div class="nm">${esc(s.name)} ${NEW_KINDS.includes(s.kind)?'<span class="badge b-new" style="margin-left:4px">W10 新</span>':""}</div>
+        <div class="id">${esc(s.id)}</div>
+        ${busy?'<div class="ingest-bar"><i></i></div>':""}</div>
+      </div></td>
+      <td class="hide-m"><span class="badge b-kind" style="--kc:${K.hue}">${K.name}</span><div class="dim" style="margin-top:3px">${esc(vendor.replace(/^ · /,""))||"&nbsp;"}</div></td>
+      <td><span class="badge b-${hc}"><span class="dot"></span>${hl}</span>${!s.enabled?'<div style="margin-top:4px"><span class="badge b-off">已停用</span></div>':""}</td>
+      <td class="hide-m"><span class="mono">${esc(s.cursor)}</span></td>
+      <td class="hide-m"><span class="dim">${fmtTime(s.last)}</span></td>
+      <td><b style="font-variant-numeric:tabular-nums">${s.rows.toLocaleString()}</b><div class="dim">累计 ${s.facts.toLocaleString()}</div></td>
+      <td><label class="switch"><input type="checkbox" data-action="toggle" data-id="${s.id}" ${s.enabled?"checked":""}><span class="track"><span class="knob"></span></span></label></td>
+      <td><div class="row-actions">
+        ${s.kind==="webhook"?"":`<button class="act" title="触发摄取 runOnce" data-action="ingest" data-id="${s.id}" ${busy||!s.enabled?"disabled":""}>${I.play}</button>`}
+        ${s.kind==="webhook"?`<button class="act" title="Webhook 详情 / 投递演示（推送型，无 runOnce）" data-action="drawer" data-id="${s.id}" style="color:#facc15">${I.bolt}</button>`:""}
+        <button class="act" title="编辑" data-action="edit" data-id="${s.id}">${I.edit}</button>
+        <button class="act danger" title="删除" data-action="del" data-id="${s.id}">${I.trash}</button>
+      </div></td>
+    </tr>`;
+  }).join("");
+}
+function renderAll(){renderStats();renderChips();renderList();}
+/* ═══════════════ toast ═══════════════ */
+function toast(msg,type="info",undoFn=null){
+  const el = document.createElement("div");
+  el.className = `toast ${type}`;
+  el.innerHTML = `<span class="t-ico"></span><span style="flex:1">${msg}</span>${undoFn?'<button>撤销</button>':""}`;
+  if(undoFn) el.querySelector("button").onclick = ()=>{undoFn();kill();};
+  $("#toastRoot").appendChild(el);
+  const kill = ()=>{el.classList.add("out");setTimeout(()=>el.remove(),260)};
+  setTimeout(kill, undoFn?6000:3800);
+}
+function copyText(text){
+  const done = ()=>toast("已复制到剪贴板","ok");
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(done).catch(()=>fallback());}
+  else fallback();
+  function fallback(){const ta=document.createElement("textarea");ta.value=text;document.body.appendChild(ta);ta.select();try{document.execCommand("copy");done();}catch(e){toast("复制失败——请手动选择","err");}ta.remove();}
+}
+/* ═══════════════ 向导 ═══════════════ */
+function openWizard(editId=null){
+  const src = editId?state.sources.find(s=>s.id===editId):null;
+  state.wizard = {
+    step: src?1:0, kind: src?src.kind:null, editId,
+    pendingId: src?src.id:null, displayName: src?src.name:"", errs:new Set(),
+    form: src?{...src.cfg}:{}, mapping: src?{...(src.mapping||defaultMapping(src.kind))}:defaultMapping(null),
+    enabled: src?src.enabled:true, test:null, testing:false
+  };
+  if(src&&!src.mapping) src.mapping = defaultMapping(src.kind);
+  $("#wizTitle").textContent = src?`编辑源 · ${src.name}`:"新建摄取源";
+  $("#wizSub").textContent = src?"选型步对编辑锁定——直接进连接参数":"选择源类型 → 连接参数 → 语义映射 → 确认登记";
+  $("#wizardOverlay").classList.add("open");
+  renderWizard();
+}
+function defaultMapping(kind){
+  const K = kind?KINDS[kind]:null;
+  return {columns:K?K.cols:"",subjectMode:"template",subjectColumn:"",subjectTemplate:K?K.subject:"",
+    predicateTermId:K?K.pred:"",objectKind:"column",objectValue:"",qualifiers:"",validFrom:"",validUntil:""};
+}
+function closeWizard(){state.wizard=null;$("#wizardOverlay").classList.remove("open");}
+/* 缺省值单点落形：渲染进输入框的同时写进 form——validateConn 读 form，
+   不落形就会出现「框里明明有 300，校验却报缺失」的假 fail-closed。 */
+function seedFormDefaults(w){
+  KINDS[w.kind].fields.forEach(f=>{
+    if(w.form[f.k]===undefined&&f.def!==undefined)w.form[f.k]=f.def;
+  });
+  if(!w.editId&&!w.pendingId)w.pendingId="src_"+w.kind+"_"+Math.random().toString(36).slice(2,6);
+}
+/* 条件字段：when 不满足的字段不渲染也不校验（chatSource 两面各一套必填） */
+function activeFields(w){
+  return KINDS[w.kind].fields.filter(f=>!f.when||Object.entries(f.when).every(([k,v])=>String(w.form[k]??"")===v));
+}
+function stepsHtml(cur){
+  const names=["选型","连接参数","语义映射","确认登记"];
+  return `<div class="steps">${names.map((n,i)=>`<div class="step ${i===cur?"active":i<cur?"done":""}"><span class="n">${i<cur?"✓":i+1}</span><span class="sl">${n}</span></div>`).join("")}</div>`;
+}
+function fieldHtml(f,val){
+  const v = val??f.def??"";
+  const req = f.req?'<span class="req">*</span>':"";
+  const hint = f.hint?`<span class="fhint">${f.hint}</span>`:"";
+  let input;
+  if(f.t==="select") input = `<select data-bind="${f.k}">${f.opts.map(o=>`<option ${String(v)===o?"selected":""}>${o}</option>`).join("")}</select>`;
+  else if(f.t==="textarea") input = `<textarea data-bind="${f.k}" rows="3" placeholder="${esc(f.ph||"")}">${esc(String(v).trim())}</textarea>`;
+  else if(f.t==="toggle") input = `<label class="switch" style="margin-top:4px"><input type="checkbox" data-bind="${f.k}" ${v?"checked":""}><span class="track"><span class="knob"></span></span></label>`;
+  else if(f.t==="password") input = `<div class="copyline"><input type="password" data-bind="${f.k}" value="${esc(String(v).trim())}" placeholder="${esc(f.ph||"")}">${f.gen?'<button class="btn btn-ghost btn-sm" data-action="gen-secret" type="button">重新生成</button>':""}</div>`;
+  else input = `<input type="${f.t==="number"?"number":"text"}" data-bind="${f.k}" value="${esc(String(v).trim())}" placeholder="${esc(f.ph||"")}">`;
+  return `<div class="field ${f.full?"full":""} ${errCls(f.k)}" data-field="${f.k}"><label>${f.l}${req}</label>${input}<span class="ferr">必填（fail-closed）</span>${hint}</div>`;
+}
+function renderWizard(){
+  const w = state.wizard; if(!w)return;
+  const body = $("#wizBody");
+  $("#wizBack").style.visibility = w.step>(w.editId?1:0)?"visible":"hidden";
+  const next = $("#wizNext");
+  if(w.step===0){
+    const card = k=>{const K=KINDS[k];return `<button class="kind-card ${w.kind===k?"sel":""}" style="--kc:${K.hue}" data-action="pick-kind" data-k="${k}">
+      ${K.group==="new"?'<span class="kc-tag badge b-new">W10 新增</span>':""}
+      <div class="kc-top"><span class="kind-ico" style="--kc:${K.hue}">${I[k]}</span><span class="kc-name">${K.name}</span></div>
+      <div class="kc-desc">${K.desc}</div></button>`;};
+    body.innerHTML = stepsHtml(0)
+      + `<div class="group-label">现有连接器（已接线）</div><div class="kind-grid">${Object.keys(KINDS).filter(k=>KINDS[k].group==="existing").map(card).join("")}</div>`
+      + `<div class="group-label">摄取广度扩展（W10 · D10 已裁）</div><div class="kind-grid">${NEW_KINDS.map(card).join("")}</div>`
+      + `<p class="dim" style="margin-top:14px">消息中间件（Kafka/Kinesis）实时流不在注册面——D10 裁定缓办，如实不呈现。</p>`;
+    next.textContent = "下一步"; next.disabled = !w.kind;
+    $("#wizHint").textContent = w.kind?`已选：${KINDS[w.kind].name}`:"选择一种源类型";
+  }
+  else if(w.step===1){
+    const K = KINDS[w.kind];
+    let extra = "";
+    if(w.kind==="webhook"){
+      const sid = w.editId||w.pendingId;
+      extra = `<div class="wh-box"><h4>${I.bolt} 入站推送端点（登记后生效）</h4>
+        <div class="copyline"><input type="text" readonly value="POST /v1/knowledge/enterprise/webhook/${esc(sid)}" id="whEndpoint"><button class="btn btn-ghost btn-sm" data-action="copy-endpoint" type="button">${I.copy} 复制</button></div>
+        <p class="fhint" style="margin-top:8px">签名校验（HMAC-SHA256）＋时间戳窗口拒重放＋幂等键去重；admit 拒记审计不重试风暴。源级开关缺省 off（D10）。</p></div>`;
+    }
+    const idFields = `<div class="field ${errCls("__sid")}" data-field="__sid"><label>源 ID<span class="req">*</span></label>
+      <input type="text" data-wbind="pendingId" value="${esc(w.pendingId||"")}" ${w.editId?"readonly":""} placeholder="src_xxx">
+      <span class="ferr">必填 · 仅限字母数字下划线连字符 · 全局面唯一</span>${w.editId?'<span class="fhint">编辑态锁定——ID 是溯源锚点</span>':'<span class="fhint">mediumRef 溯源锚点：source:&lt;id&gt;:&lt;cursor&gt;</span>'}</div>
+      <div class="field" data-field="__name"><label>显示名</label>
+      <input type="text" data-wbind="displayName" value="${esc(w.displayName)}" placeholder="${esc(K.name)} · 新接"><span class="ferr"></span></div>`;
+    body.innerHTML = stepsHtml(1)+extra+`<div class="form-grid">${idFields}${activeFields(w).map(f=>fieldHtml(f,w.form[f.k])).join("")}</div>
+      ${K.note?`<p class="fhint" style="margin-top:10px">${K.note}</p>`:""}
+      <div class="test-row"><button class="btn btn-ghost btn-sm" data-action="test-conn" ${w.testing?"disabled":""}>${w.testing?'<span class="spinner"></span>':""} 测试连接</button>
+      <span class="test-result ${w.test?(w.test.ok?"test-ok":"test-fail"):"test-wait"}" id="testResult">${w.testing?"握手中…":w.test?(w.test.ok?`ok — ${w.test.msg}`:`fail — ${w.test.msg}`):"凭据 fail-closed：缺失即拒，不静默降级"}</span></div>`;
+    next.textContent = "下一步"; next.disabled = false;
+    $("#wizHint").textContent = w.editId?"编辑模式：类型锁定":"连接参数将加密存储于源配置面";
+  }
+  else if(w.step===2){
+    const m = w.mapping;
+    body.innerHTML = stepsHtml(2)+`<div class="form-grid">
+      <div class="field full ${errCls("m:columns")}" data-field="m:columns"><label>列清单<span class="req">*</span></label><input type="text" data-mbind="columns" value="${esc(m.columns)}" placeholder="逗号分隔，如 order_id,status,amount"><span class="ferr">必填</span></div>
+      <div class="field full ${errCls("m:subject")}" data-field="m:subject"><label>主体（subject）<span class="req">*</span></label>
+        <div class="seg"><button data-action="subject-mode" data-m="column" class="${m.subjectMode==="column"?"on":""}">取列值</button><button data-action="subject-mode" data-m="template" class="${m.subjectMode==="template"?"on":""}">模板</button></div>
+        ${m.subjectMode==="column"?`<input type="text" data-mbind="subjectColumn" value="${esc(m.subjectColumn)}" placeholder="列名">`:`<input type="text" data-mbind="subjectTemplate" value="${esc(m.subjectTemplate)}" placeholder="order:{order_id}">`}
+        <span class="ferr">必填</span></div>
+      <div class="field ${errCls("m:predicateTermId")}" data-field="m:predicateTermId"><label>谓词 term_id<span class="req">*</span></label><input type="text" data-mbind="predicateTermId" value="${esc(m.predicateTermId)}" placeholder="注册表已有谓词"><span class="ferr">必填</span></div>
+      <div class="field ${errCls("m:objectValue")}" data-field="m:objectValue"><label>客体（object）<span class="req">*</span></label>
+        <select data-mbind="objectKind"><option value="column" ${m.objectKind==="column"?"selected":""}>取列值</option><option value="constant" ${m.objectKind==="constant"?"selected":""}>常量</option><option value="template" ${m.objectKind==="template"?"selected":""}>模板</option></select>
+        <input type="text" data-mbind="objectValue" value="${esc(m.objectValue)}" placeholder="${m.objectKind==="constant"?"常量值":"列名或 {模板}"}" style="margin-top:6px"><span class="ferr">必填</span></div>
+      <div class="field full"><label>qualifier 映射</label><input type="text" data-mbind="qualifiers" value="${esc(m.qualifiers)}" placeholder="name=column,amount=amount"><span class="fhint">数值键经 quantity 单源归一（W1）</span></div>
+      <div class="field"><label>valid_from 列</label><input type="text" data-mbind="validFrom" value="${esc(m.validFrom)}" placeholder="可选"></div>
+      <div class="field"><label>valid_until 列</label><input type="text" data-mbind="validUntil" value="${esc(m.validUntil)}" placeholder="可选"></div>
+    </div>
+    <div class="triple-preview"><div class="tp-head">映射预览 · 样例行 → AdmissionRequest</div><div class="tp-body" id="tpBody"></div></div>`;
+    updateTriplePreview();
+    next.textContent = "下一步"; next.disabled = false;
+    $("#wizHint").textContent = "行 → applyMapping → admitBatch 单管道";
+  }
+  else{
+    const K = KINDS[w.kind], m = w.mapping;
+    const sid = w.editId||w.pendingId;
+    const credCount = K.fields.filter(f=>f.t==="password").length;
+    const credReadout = (w.kind==="wecom"||w.kind==="wechat")?"零凭据 · 凭据在渠道配置面 · 只读投影库":`${credCount} 项 · 加密存储 · fail-closed`;
+    body.innerHTML = stepsHtml(3)+`<div class="desc-list">
+      <div class="desc-item"><div class="dk">源 ID</div><div class="dv mono">${esc(sid)}</div></div>
+      <div class="desc-item"><div class="dk">显示名</div><div class="dv">${esc(w.displayName.trim()||K.name+" · 新接")}</div></div>
+      <div class="desc-item"><div class="dk">类型</div><div class="dv"><span class="badge b-kind" style="--kc:${K.hue}">${K.name}</span>${K.group==="new"?' <span class="badge b-new">W10 新增</span>':""}</div></div>
+      <div class="desc-item"><div class="dk">列清单</div><div class="dv mono">${esc(m.columns)}</div></div>
+      <div class="desc-item"><div class="dk">主体</div><div class="dv mono">${esc(m.subjectMode==="column"?m.subjectColumn:m.subjectTemplate)}</div></div>
+      <div class="desc-item"><div class="dk">谓词</div><div class="dv mono">${esc(m.predicateTermId)}</div></div>
+      <div class="desc-item"><div class="dk">客体</div><div class="dv mono">${esc(m.objectKind)}:${esc(m.objectValue)}</div></div>
+      <div class="desc-item"><div class="dk">凭据</div><div class="dv">${credReadout}</div></div>
+      <div class="desc-item"><div class="dk">溯源形态</div><div class="dv mono">source:${esc(sid)}:&lt;cursor&gt;</div></div>
+    </div>
+    <div class="confirm-enabled"><div class="ce-txt"><b>登记后立即启用</b><p>${w.kind==="webhook"?"webhook 缺省 off（D10 灰度先例）——启用后才接收推送，幂等去重随之生效。":"interval / 事件桥等持续同步面仍按各自缺省 off 灰度。"}</p></div>
+    <label class="switch"><input type="checkbox" data-action="wiz-enabled" ${w.enabled?"checked":""}><span class="track"><span class="knob"></span></span></label></div>`;
+    next.textContent = w.editId?"保存修改":"登记源"; next.disabled = false;
+    $("#wizHint").textContent = "登记走 admin REST · 写入 → 读取 → 反馈闭环";
+  }
+}
+function updateTriplePreview(){
+  const w = state.wizard; if(!w||w.step!==2)return;
+  const K = KINDS[w.kind], m = w.mapping, sample = K.sample;
+  const fill = t=>String(t||"").replace(/\{(\w+)\}/g,(_,k)=>sample[k]??`{${k}}`);
+  const subj = m.subjectMode==="column"?(sample[m.subjectColumn]??`〈列 ${m.subjectColumn||"?"}〉`):fill(m.subjectTemplate);
+  const obj = m.objectKind==="constant"?m.objectValue:(m.objectKind==="template"?fill(m.objectValue):(sample[m.objectValue]??`〈列 ${m.objectValue||"?"}〉`));
+  const quals = (m.qualifiers||"").split(",").map(p=>p.trim()).filter(Boolean).map(p=>{const [k,c]=p.split("=");return `${k}=${sample[(c||"").trim()]?? "?"}`}).join(" · ");
+  const el = $("#tpBody"); if(!el)return;
+  el.innerHTML = `
+    <div class="tp-row"><span class="tp-k">subject</span><span class="tp-s">${esc(subj||"〈未填〉")}</span></div>
+    <div class="tp-row"><span class="tp-k">predicate</span><span class="tp-p">${esc(m.predicateTermId||"〈未填〉")}</span></div>
+    <div class="tp-row"><span class="tp-k">object</span><span class="tp-o">${esc(obj||"〈未填〉")}</span></div>
+    <div class="tp-row"><span class="tp-k">qualifiers</span><span class="tp-q">${esc(quals||"—")}</span></div>
+    <div class="tp-row"><span class="tp-k">mediumRef</span><span class="tp-q">source:${esc(w.editId||w.pendingId||"src_new")}:&lt;cursor&gt; · activityKind=import</span></div>`;
+}
+/* 错误标记进状态：renderWizard 重建 DOM 后红标不丢（post-hoc class 会被重渲染抹掉） */
+function markErr(k,bad){
+  const f=document.querySelector(`[data-field="${k}"]`);if(f)f.classList.toggle("err",bad);
+  const w=state.wizard;if(w&&w.errs){bad?w.errs.add(k):w.errs.delete(k);}
+}
+const errCls = k=>state.wizard&&state.wizard.errs.has(k)?"err":"";
+function validateConn(){
+  const w = state.wizard; let ok = true, missing = [];
+  const sid = String(w.pendingId||"").trim();
+  const sidBad = !sid || !/^[A-Za-z0-9_-]+$/.test(sid) || state.sources.some(s=>s.id===sid&&s.id!==w.editId);
+  markErr("__sid",sidBad);
+  if(sidBad){ok=false;missing.push("源 ID（必填/格式/唯一）");}
+  activeFields(w).forEach(f=>{
+    if(!f.req)return;
+    const v = w.form[f.k];
+    const bad = f.t==="toggle"?false:(v===undefined||String(v).trim()==="");
+    markErr(f.k,bad); if(bad){ok=false;missing.push(f.l);}
+  });
+  return {ok,missing};
+}
+function validateMapping(){
+  const m = state.wizard.mapping; let ok = true;
+  const checks = {"m:columns":m.columns,"m:predicateTermId":m.predicateTermId,"m:objectValue":m.objectValue,
+    "m:subject":(m.subjectMode==="column"?m.subjectColumn:m.subjectTemplate)};
+  Object.entries(checks).forEach(([k,v])=>{const bad=String(v??"").trim()==="";markErr(k,bad);if(bad)ok=false;});
+  return ok;
+}
+function testConnection(){
+  const w = state.wizard;
+  const {ok,missing} = validateConn();
+  if(!ok){w.test={ok:false,msg:`凭据缺失：${missing.join("、")}（fail-closed 拒）`};renderWizard();return;}
+  w.testing = true; w.test = null; renderWizard();
+  setTimeout(()=>{
+    const host = String(w.form.host||w.form.baseUrl||w.form.url||w.form.catalogUrl||w.form.accountUrl||w.form.serviceUrl||"");
+    if(host.includes("fail")){w.test={ok:false,msg:"握手失败：连接被拒（示例故障域）"};}
+    else if(w.kind==="webhook"){w.test={ok:true,msg:"端点就绪 · HMAC 密钥已生成 · 待启用后接收推送"};}
+    else if(w.kind==="wecom"||w.kind==="wechat"){
+      const p = String(w.form.ingressDb||w.form.archiveSdkPath||"");
+      if(p.includes("fail")){w.test={ok:false,msg:"投影面不可达：路径不存在（示例故障域）"};}
+      else if(w.form.chatSource==="archive"){w.test={ok:true,msg:"存档凭据指针齐备 · SDK 可加载 · 投影面只读探测通过"};}
+      else{w.test={ok:true,msg:"捕获面可达（channel_ingress_events）· 零凭据只读"};}
+    }
+    else{w.test={ok:true,msg:`握手 ${18+Math.floor(Math.random()*60)}ms · schema 采样 ${Object.keys(KINDS[w.kind].sample).length} 列`};}
+    w.testing = false; renderWizard();
+  },900);
+}
+function wizardNext(){
+  const w = state.wizard;
+  if(w.step===0){if(!w.kind)return;w.mapping=defaultMapping(w.kind);seedFormDefaults(w);if(w.kind==="webhook"){w.form.secret=w.form.secret||genSecret();w.enabled=false;}w.step=1;renderWizard();return;}
+  if(w.step===1){const {ok,missing}=validateConn();if(!ok){toast(`凭据缺失：${missing.join("、")}——fail-closed 不放行`,"err");return;}w.step=2;renderWizard();return;}
+  if(w.step===2){if(!validateMapping()){toast("映射必填项未齐——主体/谓词/客体缺一不可","err");return;}w.step=3;renderWizard();return;}
+  commitWizard();
+}
+function genSecret(){return "whsec_"+Array.from({length:16},()=>"0123456789abcdef"[Math.floor(Math.random()*16)]).join("");}
+function commitWizard(){
+  const w = state.wizard;
+  if(w.editId){
+    const s = state.sources.find(x=>x.id===w.editId);
+    Object.assign(s.cfg,w.form); s.mapping = {...w.mapping}; s.enabled = w.enabled;
+    if(w.displayName.trim())s.name = w.displayName.trim();
+    closeWizard(); renderAll(); toast(`源「${s.name}」已保存`,"ok");
+    if(state.drawerId===s.id)renderDrawer();
+    return;
+  }
+  const s = {id:String(w.pendingId).trim(),name:w.displayName.trim()||KINDS[w.kind].name+" · 新接",kind:w.kind,enabled:w.enabled,
+    health:"healthy",cursor:w.kind==="webhook"?"dedup:0":"—",last:null,rows:0,facts:0,
+    cfg:{...w.form},mapping:{...w.mapping}};
+  if(w.kind==="webhook")s.deliveries=[];
+  state.sources.unshift(s);
+  closeWizard(); renderAll();
+  toast(`源「${s.name}」已登记${w.enabled?"":"（缺省 off，诚实呈现）"}`,"ok");
+  if(w.kind==="webhook"){openDrawer(s.id);}
+}
+/* ═══════════════ 摄取模拟 ═══════════════ */
+function ingest(id){
+  const s = state.sources.find(x=>x.id===id);
+  if(!s||state.ingesting.has(id)||!s.enabled)return;
+  state.ingesting.add(id); renderList();
+  setTimeout(()=>{
+    const fetched = 40+Math.floor(Math.random()*160);
+    const rejected = Math.random()<0.35?1+Math.floor(Math.random()*3):0;
+    const admitted = fetched-rejected;
+    s.rows += fetched; s.facts += admitted; s.last = Date.now();
+    if(s.cfg.watermarkType==="integer"||/^\d+$/.test(s.cursor))s.cursor = String(parseInt(s.cursor||"0",10)+fetched);
+    else if(s.kind==="webhook")s.cursor = `dedup:${(s.deliveries||[]).length}`;
+    else s.cursor = new Date().toISOString().replace(/\.\d+Z$/,"Z");
+    if(s.health==="degraded"&&Math.random()<0.6)s.health="healthy";
+    state.ingesting.delete(id); renderAll();
+    toast(`「${s.name}」runOnce 完成：拉取 ${fetched} · 准入 ${admitted} · 拒 ${rejected}${rejected?"（逐行 SAVEPOINT 隔离，拒因见审计）":""}`,"ok");
+    if(state.drawerId===id)renderDrawer();
+  },1400);
+}
+/* ═══════════════ 删除 + 撤销 ═══════════════ */
+function delSource(id){
+  const idx = state.sources.findIndex(x=>x.id===id);
+  if(idx<0)return;
+  const [s] = state.sources.splice(idx,1);
+  if(state.drawerId===id)closeDrawer();
+  renderAll();
+  toast(`已删除「${s.name}」`,"info",()=>{state.sources.splice(Math.min(idx,state.sources.length),0,s);renderAll();toast("已恢复","ok");});
+}
+/* ═══════════════ webhook 抽屉 ═══════════════ */
+function openDrawer(id){state.drawerId=id;$("#drawer").classList.add("open");renderDrawer();}
+function closeDrawer(){state.drawerId=null;$("#drawer").classList.remove("open");}
+function renderDrawer(){
+  const s = state.sources.find(x=>x.id===state.drawerId);
+  if(!s||s.kind!=="webhook"){closeDrawer();return;}
+  $("#drawerTitle").textContent = s.name;
+  const dels = s.deliveries||[];
+  const admitted = dels.filter(d=>d.status==="admitted").length;
+  const dup = dels.filter(d=>d.status==="dedup").length;
+  const rej = dels.filter(d=>d.status==="rejected").length;
+  const statusBadge = {admitted:'<span class="badge b-healthy">准入</span>',dedup:'<span class="badge b-degraded">重复 · 零二次写</span>',rejected:'<span class="badge b-offline">拒 · 签名</span>'};
+  $("#drawerBody").innerHTML = `
+    <div class="dsection"><h4>端点与凭据</h4>
+      <div class="copyline" style="margin-bottom:9px"><input type="text" readonly value="POST /v1/knowledge/enterprise/webhook/${s.id}"><button class="btn btn-ghost btn-sm" data-action="copy-text" data-text="POST /v1/knowledge/enterprise/webhook/${s.id}">${I.copy}</button></div>
+      <div class="copyline"><input type="password" readonly id="whSecret" value="${esc(s.cfg.secret)}"><button class="btn btn-ghost btn-sm" data-action="reveal-secret" title="显示/隐藏">${I.eye}</button><button class="btn btn-ghost btn-sm" data-action="copy-text" data-text="${esc(s.cfg.secret)}">${I.copy}</button></div>
+      <div class="kv" style="margin-top:8px"><span class="k">时间戳窗口</span><span class="mono">${esc(s.cfg.timestampWindow)}s · 超窗拒重放</span></div>
+      <div class="kv"><span class="k">幂等键字段</span><span class="mono">${esc(s.cfg.idempotencyField)}</span></div>
+    </div>
+    <div class="dsection"><h4>源级开关（缺省 off · D10）</h4>
+      <div class="confirm-enabled" style="margin:0;padding:11px 13px"><div class="ce-txt"><b>${s.enabled?"接收推送中":"已关闭——推送将被拒"}</b><p>关闭时端点返回 403，不写入任何事实。</p></div>
+      <label class="switch"><input type="checkbox" data-action="toggle" data-id="${s.id}" ${s.enabled?"checked":""}><span class="track"><span class="knob"></span></span></label></div>
+    </div>
+    <div class="dsection"><h4>投递演示 · 准入 ${admitted} / 去重 ${dup} / 拒 ${rej}</h4>
+      <div class="d-actions" style="margin-bottom:11px">
+        <button class="btn btn-primary btn-sm" data-action="wh-push" ${!s.enabled?"disabled":""}>${I.bolt} 模拟推送</button>
+        <button class="btn btn-ghost btn-sm" data-action="wh-dup" ${!s.enabled||!dels.length?"disabled":""}>模拟重复推送</button>
+        <button class="btn btn-ghost btn-sm" data-action="wh-badsig" ${!s.enabled?"disabled":""}>模拟坏签名</button>
+      </div>
+      <div class="delivery-feed" id="deliveryFeed">${dels.length?dels.slice().reverse().map(d=>`<div class="delivery"><span class="dk">${esc(d.key)}</span>${statusBadge[d.status]}<span class="dt">${fmtTime(d.ts)}</span></div>`).join(""):'<div class="dim" style="padding:10px;text-align:center">尚无投递——点「模拟推送」演示幂等链路</div>'}</div>
+    </div>
+    <div class="dsection"><h4>映射与溯源</h4>
+      <div class="kv"><span class="k">谓词</span><span class="mono">${esc((s.mapping||{}).predicateTermId||"has_state")}</span></div>
+      <div class="kv"><span class="k">主体模板</span><span class="mono">${esc((s.mapping||{}).subjectTemplate||"device:{device}")}</span></div>
+      <div class="kv"><span class="k">mediumRef</span><span class="mono">source:${s.id}:&lt;cursor&gt;</span></div>
+      <div class="kv"><span class="k">累计事实</span><span class="mono">${s.facts.toLocaleString()}</span></div>
+    </div>`;
+}
+function whPush(mode){
+  const s = state.sources.find(x=>x.id===state.drawerId);
+  if(!s||!s.enabled)return;
+  s.deliveries = s.deliveries||[];
+  if(mode==="dup"){
+    const lastKey = s.deliveries.filter(d=>d.status==="admitted").slice(-1)[0]?.key || "evt-9001";
+    s.deliveries.push({key:lastKey,status:"dedup",ts:Date.now()});
+    toast(`幂等命中 ${lastKey}——零二次写（unique 约束）`,"info");
+  }else if(mode==="badsig"){
+    s.deliveries.push({key:"evt-"+Math.random().toString(36).slice(2,7),status:"rejected",ts:Date.now()});
+    toast("HMAC 校验失败——拒收并记审计，不重试风暴","err");
+  }else{
+    const key = "evt-"+Math.random().toString(36).slice(2,7);
+    s.deliveries.push({key,status:"admitted",ts:Date.now()});
+    s.rows += 1; s.facts += 1; s.last = Date.now(); s.cursor = `dedup:${s.deliveries.filter(d=>d.status!=="rejected").length}`;
+    toast(`推送 ${key} → admission 准入，has_state 落库`,"ok");
+  }
+  renderDrawer(); renderAll();
+}
+/* ═══════════════ 事件分派 ═══════════════ */
+document.addEventListener("click",e=>{
+  const el = e.target.closest("[data-action]");
+  if(!el)return;
+  const a = el.dataset.action, id = el.dataset.id;
+  if(a==="theme"){
+    state.theme = state.theme==="dark"?"light":"dark";
+    document.documentElement.dataset.theme = state.theme;
+    $("#themeIco").innerHTML = state.theme==="dark"?'<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>':'<circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/>';
+  }
+  else if(a==="new-source")openWizard();
+  else if(a==="filter"){state.filter=el.dataset.k;renderChips();renderList();}
+  else if(a==="ingest")ingest(id);
+  else if(a==="edit")openWizard(id);
+  else if(a==="del")delSource(id);
+  else if(a==="drawer")openDrawer(id);
+  else if(a==="close-drawer")closeDrawer();
+  else if(a==="close-wizard")closeWizard();
+  else if(a==="pick-kind"){const w=state.wizard;if(!w.editId&&w.kind!==el.dataset.k){w.form={};w.pendingId=null;}w.kind=el.dataset.k;renderWizard();}
+  else if(a==="wiz-back"){const w=state.wizard;w.step=Math.max(w.editId?1:0,w.step-1);renderWizard();}
+  else if(a==="wiz-next")wizardNext();
+  else if(a==="test-conn")testConnection();
+  else if(a==="gen-secret"){state.wizard.form.secret=genSecret();renderWizard();toast("HMAC 密钥已重新生成——旧签名即失效","info");}
+  else if(a==="copy-endpoint")copyText($("#whEndpoint").value);
+  else if(a==="copy-text")copyText(el.dataset.text);
+  else if(a==="reveal-secret"){const inp=$("#whSecret");inp.type=inp.type==="password"?"text":"password";}
+  else if(a==="subject-mode"){state.wizard.mapping.subjectMode=el.dataset.m;renderWizard();}
+  else if(a==="wh-push")whPush("new");
+  else if(a==="wh-dup")whPush("dup");
+  else if(a==="wh-badsig")whPush("badsig");
+});
+document.addEventListener("change",e=>{
+  const el = e.target;
+  if(el.dataset.action==="toggle"){
+    const s = state.sources.find(x=>x.id===el.dataset.id);
+    if(s){s.enabled=el.checked;renderAll();if(state.drawerId===s.id)renderDrawer();
+      toast(`「${s.name}」已${s.enabled?"启用":"停用"}${s.kind==="webhook"&&!s.enabled?"——端点即拒推送":""}`,s.enabled?"ok":"info");}
+    return;
+  }
+  if(el.dataset.action==="wiz-enabled"){state.wizard.enabled=el.checked;return;}
+  if(el.dataset.bind&&state.wizard){
+    const f = KINDS[state.wizard.kind].fields.find(x=>x.k===el.dataset.bind);
+    state.wizard.form[el.dataset.bind] = f&&f.t==="toggle"?el.checked:el.value;
+    markErr(el.dataset.bind,false);
+    if(f&&f.reload)renderWizard();
+  }
+});
+document.addEventListener("input",e=>{
+  const el = e.target;
+  if(el.id==="searchInput"){state.query=el.value;renderList();return;}
+  if(el.id==="sortSel"){state.sort=el.value;renderList();return;}
+  if(el.dataset.wbind&&state.wizard){
+    state.wizard[el.dataset.wbind]=el.value;
+    markErr(el.dataset.wbind==="pendingId"?"__sid":"__name",false);
+    if(el.dataset.wbind==="pendingId"&&state.wizard.kind==="webhook"){const ep=$("#whEndpoint");if(ep)ep.value="POST /v1/knowledge/enterprise/webhook/"+el.value.trim();}
+  }
+  if(el.dataset.bind&&state.wizard){state.wizard.form[el.dataset.bind]=el.value;markErr(el.dataset.bind,false);}
+  if(el.dataset.mbind&&state.wizard){const k=el.dataset.mbind;state.wizard.mapping[k]=el.value;markErr((k==="subjectColumn"||k==="subjectTemplate")?"m:subject":"m:"+k,false);updateTriplePreview();}
+});
+document.addEventListener("keydown",e=>{
+  if(e.key==="Escape"){if(state.wizard)closeWizard();else if(state.drawerId)closeDrawer();}
+});
+$("#wizardOverlay").addEventListener("click",e=>{if(e.target===e.currentTarget)closeWizard();});
+/* ═══════════════ 启动 ═══════════════ */
+renderAll();
+</script>
+</body>
+</html>

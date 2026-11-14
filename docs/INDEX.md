@@ -153,6 +153,7 @@
 [`08-research/sag_vs_neurova_event_graph_retrieval_comparison_2026-11-05.md`](08-research/sag_vs_neurova_event_graph_retrieval_comparison_2026-11-05.md)（Zleap-AI SAG（SQL-Retrieval Augmented Generation，事件-实体索引＋查询时 SQL JOIN 动态超边）与 Neurova 知识检索代码级对比：应用壳 MIT 开源（v1.9.2/1030 后端测试）但论文核心引擎闭源（zleap-sag==0.15.0 PyPI wheel）；宣传数字对账——Recall@2 79.30/68.14 出自 v1 表 2 的相对提升换算、「数亿级生产验证」双零命中；检索子域八维加权 8.3 vs 6.6（黑盒折扣声明）；断点 N3 已接线（多跳事实种子锚点 1ff64cfe0）、候选 C1–C5 已全部落地（C1 实测转正 shadow→on 0416a9031；C2/C3 净接线 6632c6560；C4/C5 新能力 env 门控默认关 21732f012/9e4b0ad57）＋不采纳三条，研究参考）
 [`08-research/ontology_landing_video_vs_neurova_knowledge_semantic_stack_comparison_2026-11-05.md`](08-research/ontology_landing_video_vs_neurova_knowledge_semantic_stack_comparison_2026-11-05.md)（视频号知识视频《Ontology 本体落地》参考架构与 Neurova 知识语义栈框架适配评测：对象为教学参考架构非产品，只评本方十维加权实现度 6.8/10（适用域折扣声明）——本体语义层与入库纪律超出参考架构（9 档），短板集中于 OWL 式条件类自动归入、标准栈互通、访问层统一四动词；候选 V1–V4＋缓办 V5＋不采纳三条，无新增断点，研究参考）
 [`08-research/rsi_survey_vs_neurova_rsi_evaluation_2026-11-10.md`](08-research/rsi_survey_vs_neurova_rsi_evaluation_2026-11-10.md)（《Recursive Self-Improvement in AI: A Survey》preprints 202609.2680/v1 未评审综述与 Neurova RSI 对照：RSI 对标链第四档、对象为评测协议本身而非机制；八维加权 4.9/10（协议覆盖面口径，与前作完成质量口径分列不互比）——结构 RSI on S 成立/实证递归改进不成立（改进器 I 无自更新、无 Eq8 配对探针）、默认 phase=0 且前置 2 恒假复核未漂移、holdout≠heldout 四集语义澄清与密封集默认关；增量 S1–S6（配对探针/全成本/保留迁移/密封开默认/真实增益升判据/漂移对照）重叠项指回前作 P1-A..C 与 M-A..E 不另立号，不采纳四条；**§10 通往 9 分路线图**（逐维 9 分锚点＋30 单工项四行式含验收红灯判据＋四波次轨迹 5.4→7.3→8.95→≈9.1，候选清单非承诺），研究参考）
+[`08-research/harnesspro_vs_neurova_cost_aware_harness_rsi_comparison_2026-11-13.md`](08-research/harnesspro_vs_neurova_cost_aware_harness_rsi_comparison_2026-11-13.md)（HarnessPro（arXiv:2610.26770v2，清华/Z.AI 等，under review）与 Neurova 成本感知 harness 自改进对照：RSI 对标链第六档；十维加权（方法 70%＋工程 30%）7.5 vs 7.9、生产就绪度单列 4.0 vs 8.4——方法域对方领先 0.7，落在成本入目标函数＋Pareto 三档交付（lite/medium/heavy）、label-free 可执行测试合成（失败召回 41.7%→83.3%）、分档预算钩子（动态推理路由＋economy/strict/finalize 硬停＋RTK 压缩）三处；本仓运行时对应物盘点（effort_inference/四把门控/tool_offload/hooks_engine）与断点 HN1–HN6、候选 HC1–HC7（成本账+软门/可执行测试判据/档位工件/分段钩子），重叠项指回 harness² N 系与综述 S 系；外部仓 Windows 实跑 6 errors（fcntl/pier）如实记录，研究参考）
 
 ### 2.5 审计报告 / 验证（历史留痕）
 
@@ -160,7 +161,9 @@
 `audit-skeleton-and-spec-compliance.md`、`external_cli_integration_report.md`、
 `voice_system_cross_validation_report.md`、`voice_system_validation_summary.md`、
 `voice-engine-integration-summary.md`、`test-results-2026-06-11.md`、
-`协作模块完整性检查报告.md`、`cache-cleanup-report.md`、`skeleton_files_implementation_progress.md`
+`协作模块完整性检查报告.md`、`cache-cleanup-report.md`、`skeleton_files_implementation_progress.md`、
+`全库断点断链与死码审计_2026-11-12.md`（2026-11-12 全库断点审计：50 项发现与执行回执）、
+[`05-reports/全库代码审计报告_2026-11-14.md`](05-reports/全库代码审计报告_2026-11-14.md)（2026-11-14 全库审计：67 项发现＋七项拍板＋全部执行回执）
 
 ### 2.6 产品 / 品牌 / 鸿蒙端
 
@@ -221,6 +224,8 @@
 `specs/2026-11-10-GB48000-3-本体建模符合性评估与补齐设计.md`（GB/T 48000.3-2026《标准数字化 第 3 部分：本体建模要求》符合性评估：适用性判定（标准管"标准本体"内容建模，通用平台不在强制范围，合规命题不成立）＋14 项机制对照（8 符合/4 部分/2 差距，逐项带文件:行号）＋五项补齐设计 G1–G5（Definition 描述项/数据属性五类型枚举/等价类语义/IRI 命名空间/标准本体领域包）＋G6 待核（OWL 导出 property 分支缺失）；P1–P3 三批切分共 ≈4.5 人日、每批红绿判据与验收口径；四项待拍板（external_iris 键语义、导出替换改附加的行为变更、明确不做清单、正式版文本核对约定）；设计先行未实施，按批点单）
 
 `specs/2026-11-10-Ontology接入Agent五步对照评估与补全设计.md`（Ontology 作为业务语义层/操作约束层接入 Agent 的五步对照评估：对象建模✅/关系与逻辑建模✅/动作与权限建模半缺（权限厚、动作登记缺）/封装成工具❌核心缺失（内置工具 91 个知识本体相关 0，四动词门面是 REST 而非 Agent 工具，推理结论不进运行时）/运行反馈部分（写回通道缺）；补全设计 A1–A5——本体查询/校验/写入/推理四工具化（经 A6 tool_search 目录＋治理链）＋动作建模最小面（ontology_actions 声明表绑工具与风险档，不越 NeurFlow 领地）＋反馈闭环走查；P1–P3 三批 ≈3 人日，四项拍板（fact_submit 默认审批档/bound_tool 粒度/启用范围/不做清单）；设计先行未实施，按批点单）
+
+`specs/2026-11-12-Ontology可运行世界模型补全设计.md`（对照"六器官＋World Runtime＋Simulation"文章框架的 2026-11-12 水平判定补全设计：Operational Ontology 已立有缺、Runnable World Model 未进入；六器官三扎实/两半缺/一缺＋Simulation 空白；工作包 W0–W12——asOf/knownAt 接线与 query_expander 先比后合退役、数值 qualifier 结构化（quantity 单源）、函数层（受限 AST 求值器＋ontology_functions 登记＋observe/enforce 物化＋推导账本 source_kind）、状态机＋事件桥＋interval 持续同步（has_state 约定＋validation 第六判）、Action 补 Precondition/Impact/State Change（ontology_act 门面转交 ToolExecutor 单管道）、Simulation（store 注入隔离副本＋diff 影响报告＋先演后决审计互链）、决策智能（第二轮对照评估缺口、D7 裁定必选：决策一等对象＋因果链＋判例检索，decision_ledger 单源＋v47 两表＋MCP 四工具＋hybrid source_kind 扩展，影响图并入下游闭包、策略门复用既有治理）、第三轮用户点单五项扩展——GraphRAG 工艺（十三种切块策略注册表＋标签传播层级社区＋global/drift 检索＋消解 blocking/语义去重补强＋冲突策略 term 数据化，合并历史与四策略已立只补强）、推理广度（递归 Datalog 已立原位补强 semi-naive＋Rete 内部求值策略槽＋rdflib 解禁只读 SPARQL 投影端点＋溯因只读反向搜索，D9 单事实源＋策略槽）、摄取广度（Unity Catalog/Snowflake/SAP OData 三 REST 连接器零依赖＋http_pull 接线清批 C3 欠账＋入站 webhook 幂等直落 admission，D10）、多语言存储（SQLite 权威＋九格式导出投影，D11 可换读面不可换写底＋SQL 水位边界/ERP vendor 数据化升级）、事后追责审计（五本台账只读聚合＋digest_chain 验证端点＋CSV 导出，不建第二审计存储）、前端 UI 七落点面 U1–U7（Studio 运行时第八分区五 tab／推理分区 SPARQL·溯因·策略扩展／KnowledgePage 切块策略·消解·冲突·社区检索／图工作台社区 overlay／源向导五新卡／导出格式四新卡／审计追责聚合·验证·CSV，全部现有页面扩展不建第二工作台，i18n 单源＋主题令牌＋vitest/vue-tsc 两门，W6 ≈5.5 人日）；P0–P10 十一批 ≈30.5 人日（P5/P6/P7/P8 仅依赖 P0 可并行、P9 依赖 P8、P10 依赖 P5）、每包红绿/红自证/live-verify 口径与实施 agent 执行清单；十一项拍板已裁（D1–D6/D8–D11 采纳推荐、D7 决策智能必选；2026-11-12）；§18 另登记三项工艺候选（导入面无损往返与 inert 姿态／工件级内容地址溯源／本体图性能预算门，Ontology-Playground 对照评估背景、按本仓缺口立题，不在已裁预算、启用另点单）；P0–P10＋C1–C3＋收尾 8 项已全部实施并推双远端（3ab9d7e7c），§18 工艺候选仍按点单启用）
 
 
 
