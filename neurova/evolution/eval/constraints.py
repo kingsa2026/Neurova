@@ -68,11 +68,10 @@ class ConstraintValidator:
     # ── 各闸 ──
 
     def _size_limit_for(self, artifact_type: str) -> int:
-        if artifact_type == "tool_description":
-            return self.config.max_tool_desc_size
-        if artifact_type == "param_description":
-            return self.config.max_param_desc_size
-        return self.config.max_skill_size
+        # V3：尺寸预算单源 surfaces.sizeBudgetFor（原三处抄写收口到此）
+        from neurova.evolution.eval.surfaces import sizeBudgetFor
+
+        return sizeBudgetFor(artifact_type, self.config)
 
     def _check_size(self, text: str, artifact_type: str) -> ConstraintResult:
         limit = self._size_limit_for(artifact_type)

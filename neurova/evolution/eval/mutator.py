@@ -76,11 +76,10 @@ class ReflectiveMutator:
             return {"success": False, "error": str(e)}
 
     def _size_budget(self, artifact_type: str) -> int:
-        if artifact_type == "tool_description":
-            return self.config.max_tool_desc_size
-        if artifact_type == "param_description":
-            return self.config.max_param_desc_size
-        return self.config.max_skill_size
+        # V3：尺寸预算单源 surfaces.sizeBudgetFor（原三处抄写收口到此）
+        from neurova.evolution.eval.surfaces import sizeBudgetFor
+
+        return sizeBudgetFor(artifact_type, self.config)
 
     async def mutate(
         self,
