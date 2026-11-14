@@ -34,6 +34,11 @@ def client():
 
     app = FastAPI()
     app.include_router(context_api.router, prefix="/api/v1/context")
+    # 鉴权门收紧后（get_current_user 必达），测试以依赖覆盖注入测试身份
+    # （与 tests/api/neurflow/test_webhook_receive.py 同一先例）
+    from neurova.api.auth import get_current_user
+
+    app.dependency_overrides[get_current_user] = lambda: {"user_id": 1, "username": "tester"}
     client = TestClient(app)
     client._probe_agent = agent  # type: ignore[attr-defined]
     import neurova.api.endpoints.context as ctx_mod

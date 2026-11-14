@@ -5205,8 +5205,13 @@ class MemoryManager:
         self.flush_emotion_conduction()
         return affected
 
-    def get_memories_by_emotion(self, polarity: str, threshold: float = 0.3, limit: int = 10) -> List[str]:
-        """按情感极性检索记忆（positive/negative/neutral）"""
+    def getMemoryIdsByEmotionPolarity(self, polarity: str, threshold: float = 0.3, limit: int = 10) -> List[str]:
+        """按情感极性检索记忆 ID（positive/negative/neutral）。
+
+        命名与 `get_memories_by_emotion`（按情绪类型返回完整记忆字典，服务
+        /api/v1/memory/emotion 端点）刻意区分：此前的同名第二定义把前者遮蔽，
+        导致情绪类型检索恒走极性分支返回空——已按单一事实源收口（2026-11-14）。
+        """
         module = self._ensure_emotion_conduction()
         if polarity == "positive":
             return module.get_positive_memories(threshold, limit)

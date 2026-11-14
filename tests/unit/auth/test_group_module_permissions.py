@@ -166,6 +166,7 @@ class TestLegacyGroupsFileMigration:
 # groups_api 契约
 # ---------------------------------------------------------------------------
 
+from neurova.api.auth import get_current_user as strictIdentityGate
 from neurova.api.deps import get_current_user
 from neurova.api.endpoints import groups_api
 
@@ -177,7 +178,11 @@ def client(monkeypatch, manager):
     a = FastAPI()
     a.include_router(groups_api.router, prefix="/api/v1/groups")
     monkeypatch.setattr(groups_api, "get_user_group_manager", lambda: manager)
+    # 角色门（require_admin→require_role）内部 Depends 的是 strictIdentityGate
+    # （auth.get_current_user 本体），与 deps.get_current_user（可回退查询参数
+    # 的旧路径变体）不是同一个对象——两个都要覆盖，少一个即 401（§6-54 判据）。
     a.dependency_overrides[get_current_user] = lambda: MOCK_ADMIN
+    a.dependency_overrides[strictIdentityGate] = lambda: MOCK_ADMIN
     with TestClient(a) as c:
         yield c
     a.dependency_overrides.clear()

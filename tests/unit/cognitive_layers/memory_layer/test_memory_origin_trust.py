@@ -256,6 +256,9 @@ class TestMoEOriginWeighting:
         router.storage = MagicMock()
         router.min_expert_results = 1
         router.min_relevance = 0.0
+        # P1-10 后 _scopeFilter 依赖 _scope_resolver；本测试只验 origin 加权，
+        # 显式给 None = 无 resolver 且无显式身份时原样放行
+        router._scope_resolver = None
 
         owner_item = {"id": "m1", "content": "x", "score": 0.8, "origin": "owner"}
         untrusted_item = {"id": "m2", "content": "y", "score": 0.8, "origin": "untrusted"}
@@ -292,6 +295,9 @@ class TestMoEOriginWeighting:
         router.storage = MagicMock()
         router.min_expert_results = 1
         router.min_relevance = 0.0
+        # P1-10 后 _scopeFilter 依赖 _scope_resolver；本测试只验 origin 加权，
+        # 显式给 None = 无 resolver 且无显式身份时原样放行
+        router._scope_resolver = None
 
         legacy_item = {"id": "m1", "content": "x", "score": 0.8}
         retriever = MagicMock()

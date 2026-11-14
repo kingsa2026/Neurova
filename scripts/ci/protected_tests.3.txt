@@ -973,7 +973,6 @@ tests/unit/core/test_plugins_modules.py
 # 退役面按构造今天恒绿；它翻红只有一种意思——有人把假流水线又写回来了。
 # 入册前逐文件单跑两次同读数 8 passed（7.64s / 8.36s）。
 tests/unit/cognitive/test_taskPipelineSingleSourceIsLive.py
-tests/unit/cognitive/test_workingMemoryAugmenterBehaviour.py
 # §6-166 三套零接线编排器退役的守卫面（比对与并格见 §6-157）。
 # 判据问的不是"这仨文件在不在"这一句形状，而是三件事一起成立：
 # ① 三只不可 import（真取数，不是注释说没了）；② 生产/测试/脚本无任何按路径或模块名的引用

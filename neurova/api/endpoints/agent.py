@@ -956,6 +956,14 @@ async def make_decision(
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
     try:
+        # 请求级属主（§6-121 乙案）：本端点带鉴权依赖且会跑 agent.chat，与
+        # /v1/chat 同规——在请求边界用同一个变量写两侧（usage 记账、按日配额、
+        # 会话属主读通道；技能可见视图/经验检索读载体）。ContextVar 按请求隔离。
+        user_id = str(current_user.get("user_id", "") or "")
+        from neurova.core.identity_context import set_request_user_id
+
+        set_request_user_id(user_id)
+
         # 使用 Agent 的 chat 方法进行决策
         prompt = f"请根据以下上下文做出决策:\n\n上下文: {body.context}"
         if body.options:
@@ -964,7 +972,7 @@ async def make_decision(
             prompt += f"\n\n约束条件: {', '.join(body.constraints)}"
 
         # S7 修复 (B-2 #10): 不注入 {"history": []},让 agent.chat() 从 session 恢复历史.
-        response = await agent.chat(user_input=prompt)
+        response = await agent.chat(user_input=prompt, metadata={"user_id": user_id})
 
         return {
             "code": 0,

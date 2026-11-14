@@ -24,6 +24,11 @@ class _FakeEngine:
     def retrieve(self, query, limit=5, filters=None):
         return []
 
+    def iter_nodes(self):
+        # 批 W4 起 _store_candidate 会遍历已存节点做同 pattern_key 查重；
+        # 假引擎如实交出已存节点，保持与真引擎同一契约
+        return list(self.stored)
+
 
 def _make_crystallizer(case, tmp_dir, llm_gate="1"):
     """构造一个指定闸态的结晶器。
