@@ -82,6 +82,11 @@ COMPUTER_USE_TOOLS = frozenset(
         "browser_fill_role",
         "browser_click_ref",
         "browser_fill_ref",
+        "browser_tab_open",
+        "browser_tab_list",
+        "browser_tab_switch",
+        "browser_tab_close",
+        "browser_eval",
     }
 )
 
@@ -150,6 +155,11 @@ _COMPUTER_TOOL_PARAM_KEYS: Dict[str, frozenset] = {
     "browser_fill_role": frozenset({"role", "name", "text", "generation"}),
     "browser_click_ref": frozenset({"ref", "generation"}),
     "browser_fill_ref": frozenset({"ref", "text", "generation"}),
+    "browser_tab_open": frozenset({"url"}),
+    "browser_tab_list": frozenset(),
+    "browser_tab_switch": frozenset({"target_id", "generation"}),
+    "browser_tab_close": frozenset({"target_id", "generation"}),
+    "browser_eval": frozenset({"script"}),
 }
 
 _BUTTON_ALIASES = {
@@ -250,6 +260,16 @@ def describe_computer_action(tool_name: str, params: Dict) -> str:
         return f"点击快照编号 {params.get('ref', '?')} 指向的元素"
     if tool_name == "browser_fill_ref":
         return f"在快照编号 {params.get('ref', '?')} 指向的元素中输入"
+    if tool_name == "browser_tab_open":
+        return f"新开标签页 {params.get('url') or '（空白页）'}"
+    if tool_name == "browser_tab_list":
+        return "列出浏览器标签页"
+    if tool_name == "browser_tab_switch":
+        return f"切换到标签页 {params.get('target_id', '?')}"
+    if tool_name == "browser_tab_close":
+        return f"关闭标签页 {params.get('target_id', '?')}"
+    if tool_name == "browser_eval":
+        return f"在页面中执行脚本 {str(params.get('script', ''))[:60]}"
     return tool_name
 
 
@@ -321,6 +341,11 @@ class ToolExecutor:
         "browser_fill_role": "_execute_browser_fill_role",
         "browser_click_ref": "_execute_browser_click_ref",
         "browser_fill_ref": "_execute_browser_fill_ref",
+        "browser_tab_open": "_execute_browser_tab_open",
+        "browser_tab_list": "_execute_browser_tab_list",
+        "browser_tab_switch": "_execute_browser_tab_switch",
+        "browser_tab_close": "_execute_browser_tab_close",
+        "browser_eval": "_execute_browser_eval",
         "planning": "_execute_planning",
         "youtube_transcript": "_execute_youtube_transcript",
         "browser_read": "_execute_browser_read",
@@ -6350,6 +6375,93 @@ class ToolExecutor:
         except Exception as e:
             logger.error("ref 输入失败: %s", e)
             return {"error": f"ref 输入失败: {str(e)}"}
+
+    async def _execute_browser_tab_open(self, params: Dict) -> Dict:
+        """新开标签页并激活（可顺带导航到 URL）"""
+        url = str(params.get("url") or "").strip() or None
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(await manager.browser_open_target(url))
+            await self._emit_computer_event("browser_tab_open", params, result)
+            return result
+        except Exception as e:
+            logger.error("新开标签页失败: %s", e)
+            return {"error": f"新开标签页失败: {str(e)}"}
+
+    async def _execute_browser_tab_list(self, params: Dict) -> Dict:
+        """列出全部标签页（target_id/URL/活动标记/generation）"""
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(await manager.browser_list_targets())
+            await self._emit_computer_event("browser_tab_list", params, result)
+            return result
+        except Exception as e:
+            logger.error("列出标签页失败: %s", e)
+            return {"error": f"列出标签页失败: {str(e)}"}
+
+    async def _execute_browser_tab_switch(self, params: Dict) -> Dict:
+        """切换活动标签页（此后 browser_* 作用于新活动页）"""
+        target_id = str(params.get("target_id") or "").strip()
+        if not target_id:
+            return {"error": "缺少 target_id 参数（先调用 browser_tab_list 获取）"}
+        generation = params.get("generation")
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_switch_target(
+                    target_id,
+                    generation=int(generation) if generation is not None else None,
+                )
+            )
+            await self._emit_computer_event("browser_tab_switch", params, result)
+            return result
+        except Exception as e:
+            logger.error("切换标签页失败: %s", e)
+            return {"error": f"切换标签页失败: {str(e)}"}
+
+    async def _execute_browser_tab_close(self, params: Dict) -> Dict:
+        """关闭指定标签页（关闭活动页时自动回落到剩余第一个标签页）"""
+        target_id = str(params.get("target_id") or "").strip()
+        if not target_id:
+            return {"error": "缺少 target_id 参数（先调用 browser_tab_list 获取）"}
+        generation = params.get("generation")
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(
+                await manager.browser_close_target(
+                    target_id,
+                    generation=int(generation) if generation is not None else None,
+                )
+            )
+            await self._emit_computer_event("browser_tab_close", params, result)
+            return result
+        except Exception as e:
+            logger.error("关闭标签页失败: %s", e)
+            return {"error": f"关闭标签页失败: {str(e)}"}
+
+    async def _execute_browser_eval(self, params: Dict) -> Dict:
+        """在当前页面上下文执行 JavaScript（快照协议的逃逸舱）"""
+        script = str(params.get("script") or "").strip()
+        if not script:
+            return {"error": "缺少 script 参数"}
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(await manager.browser_execute_js(script))
+            await self._emit_computer_event("browser_eval", params, result)
+            return result
+        except Exception as e:
+            logger.error("页面脚本执行失败: %s", e)
+            return {"error": f"页面脚本执行失败: {str(e)}"}
 
     async def _execute_planning(self, params: Dict) -> Dict:
         """任务计划工具：7 个子命令（create/update/list/get/set_active/mark_step/delete）。

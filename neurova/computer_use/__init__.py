@@ -649,6 +649,13 @@ class ComputerUseManager:
             return await bm.fill_ref(ref, text, generation=generation)
         return {"error": "浏览器管理器不可用"}
 
+    async def browser_execute_js(self, script: str) -> typing.Any:
+        """在当前页面上下文执行 JavaScript（快照协议的逃逸舱）"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.execute_js(script)
+        return {"error": "浏览器管理器不可用"}
+
     async def browser_capabilities(self) -> typing.Any:
         """查询当前后端能力清单"""
         bm = self._get_browser_manager()

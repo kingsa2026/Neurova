@@ -36,6 +36,8 @@ EXPECTED_NON_REPRODUCIBLE = {
     "browser_click", "browser_click_role", "browser_fill_role",
     "browser_click_ref", "browser_fill_ref",
     "browser_type", "browser_navigate", "browser_screenshot", "browser_dom_snapshot",
+    # tab 管理写共享 tab 表/活动指针；browser_eval 在页面里执行任意 JS（可写页面态）
+    "browser_tab_open", "browser_tab_switch", "browser_tab_close", "browser_eval",
     "computer_som_snapshot", "computer_dom_snapshot",
     # P0-3 会话式 shell：进程输出不可重放（重跑时系统状态已变）
     "exec_command", "write_stdin",
