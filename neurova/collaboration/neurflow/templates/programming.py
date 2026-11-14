@@ -12,9 +12,10 @@
 
 import time
 import uuid
-from typing import List
+from typing import Any, Dict, List
 
-from ..models import WorkflowDefinition, WorkflowEdge, WorkflowNode, WorkflowStatus, WorkflowVariable
+from ..models import WorkflowDefinition, WorkflowStatus
+from .builder import buildEdges, buildNodes, buildVariables
 
 
 def get_programming_template() -> WorkflowDefinition:
@@ -23,24 +24,14 @@ def get_programming_template() -> WorkflowDefinition:
     Returns:
         预定义的编程助手工作流定义
     """
-    # 创建节点
-    nodes = _create_nodes()
-
-    # 创建边
-    edges = _create_edges()
-
-    # 创建变量
-    variables = _create_variables()
-
-    # 创建工作流定义
     return WorkflowDefinition(
         id=f"template_programming_{uuid.uuid4().hex[:8]}",
         name="编程助手",
         description="自动化编程任务：需求分析 → TDD 实现 → 进化学习",
         version="1.0.0",
-        nodes=nodes,
-        edges=edges,
-        variables=variables,
+        nodes=buildNodes(_NODE_SPECS),
+        edges=buildEdges(_EDGE_SPECS),
+        variables=buildVariables(_VARIABLE_SPECS),
         tags=["programming", "tdd", "automation", "code-generation"],
         category="programming",
         author="Neurflow",
@@ -58,45 +49,50 @@ def get_programming_template() -> WorkflowDefinition:
     )
 
 
-def _create_nodes() -> List[WorkflowNode]:
-    """创建模板节点"""
-    return [
-        # 开始节点
-        WorkflowNode(
-            id="start",
-            type="builtin:start",
-            position={"x": 100, "y": 100},
-            config={
-                "inputs_schema": {
-                    "requirements": {
-                        "type": "textarea",
-                        "required": True,
-                        "description": "编程需求描述",
-                    },
-                    "language": {
-                        "type": "select",
-                        "options": ["Python", "JavaScript", "TypeScript", "Java", "Go"],
-                        "default": "Python",
-                        "description": "目标编程语言",
-                    },
-                    "test_framework": {
-                        "type": "select",
-                        "options": ["pytest", "jest", "junit", "go test"],
-                        "default": "pytest",
-                        "description": "测试框架",
-                    },
-                }
+# 节点声明式 spec：id/type/坐标/label/config，装配统一走 .builder
+_NODE_SPECS: List[Dict[str, Any]] = [
+    {
+        "id": "start",
+        "type": "builtin:start",
+        "x": 100,
+        "y": 100,
+        "label": "开始",
+        "metadata": {
+            "category": "flow",
+        },
+        "config": {
+            "inputs_schema": {
+                "requirements": {
+                    "type": "textarea",
+                    "required": True,
+                    "description": "编程需求描述",
+                },
+                "language": {
+                    "type": "select",
+                    "options": ["Python", "JavaScript", "TypeScript", "Java", "Go"],
+                    "default": "Python",
+                    "description": "目标编程语言",
+                },
+                "test_framework": {
+                    "type": "select",
+                    "options": ["pytest", "jest", "junit", "go test"],
+                    "default": "pytest",
+                    "description": "测试框架",
+                },
             },
-            label="开始",
-            metadata={"category": "flow"},
-        ),
-        # 需求分析节点（LLM）
-        WorkflowNode(
-            id="analyze_requirements",
-            type="builtin:llm",
-            position={"x": 400, "y": 100},
-            config={
-                "prompt": """分析以下编程需求，并生成详细的技术规格：
+        },
+    },
+    {
+        "id": "analyze_requirements",
+        "type": "builtin:llm",
+        "x": 400,
+        "y": 100,
+        "label": "需求分析",
+        "metadata": {
+            "category": "ai",
+        },
+        "config": {
+            "prompt": """分析以下编程需求，并生成详细的技术规格：
 
 需求：{{requirements}}
 编程语言：{{language}}
@@ -109,19 +105,21 @@ def _create_nodes() -> List[WorkflowNode]:
 4. 实现策略（算法选择、数据结构）
 
 输出格式：JSON""",
-                "temperature": 0.3,
-                "max_tokens": 2000,
-            },
-            label="需求分析",
-            metadata={"category": "ai"},
-        ),
-        # TDD 实现节点
-        WorkflowNode(
-            id="tdd_implementation",
-            type="builtin:tdd",
-            position={"x": 700, "y": 100},
-            config={
-                "test_spec": """根据以下技术规格生成测试用例：
+            "temperature": 0.3,
+            "max_tokens": 2000,
+        },
+    },
+    {
+        "id": "tdd_implementation",
+        "type": "builtin:tdd",
+        "x": 700,
+        "y": 100,
+        "label": "TDD 实现",
+        "metadata": {
+            "category": "ai",
+        },
+        "config": {
+            "test_spec": """根据以下技术规格生成测试用例：
 
 {{analyze_requirements.output}}
 
@@ -133,7 +131,7 @@ def _create_nodes() -> List[WorkflowNode]:
 2. 包含边界条件测试
 3. 包含异常处理测试
 4. 测试代码可直接运行""",
-                "implementation_prompt": """根据以下测试用例实现代码：
+            "implementation_prompt": """根据以下测试用例实现代码：
 
 {{tdd_implementation.tests}}
 
@@ -145,19 +143,21 @@ def _create_nodes() -> List[WorkflowNode]:
 2. 代码简洁、可读
 3. 遵循最佳实践
 4. 包含必要的错误处理""",
-                "max_iterations": 5,
-                "pass_threshold": 0.9,
-            },
-            label="TDD 实现",
-            metadata={"category": "ai"},
-        ),
-        # 代码审查节点（LLM）
-        WorkflowNode(
-            id="code_review",
-            type="builtin:llm",
-            position={"x": 1000, "y": 100},
-            config={
-                "prompt": """审查以下代码实现：
+            "max_iterations": 5,
+            "pass_threshold": 0.9,
+        },
+    },
+    {
+        "id": "code_review",
+        "type": "builtin:llm",
+        "x": 1000,
+        "y": 100,
+        "label": "代码审查",
+        "metadata": {
+            "category": "ai",
+        },
+        "config": {
+            "prompt": """审查以下代码实现：
 
 实现代码：
 {{tdd_implementation.output}}
@@ -173,53 +173,65 @@ def _create_nodes() -> List[WorkflowNode]:
 5. 重构建议（如果需要）
 
 输出格式：JSON""",
-                "temperature": 0.2,
-                "max_tokens": 1500,
-            },
-            label="代码审查",
-            metadata={"category": "ai"},
-        ),
-        # 条件节点（检查代码质量）
-        WorkflowNode(
-            id="quality_check",
-            type="builtin:condition",
-            position={"x": 1300, "y": 100},
-            config={
-                "expression": "{{code_review.output.score}} >= 8",
-                "branches": [
-                    {"label": "高质量", "condition": "true"},
-                    {"label": "需要改进", "condition": "false"},
-                ],
-            },
-            label="质量检查",
-            metadata={"category": "flow"},
-        ),
-        # 进化学习节点（代码质量高时）
-        WorkflowNode(
-            id="evolution_learning",
-            type="builtin:evolution",
-            position={"x": 1600, "y": 50},
-            config={
-                "mode": "learn",
-                "feedback_data": {
-                    "task_type": "code_generation",
-                    "language": "{{language}}",
-                    "quality_score": "{{code_review.output.score}}",
-                    "test_pass_rate": "{{tdd_implementation.pass_rate}}",
-                    "implementation": "{{tdd_implementation.output}}",
-                    "review": "{{code_review.output}}",
+            "temperature": 0.2,
+            "max_tokens": 1500,
+        },
+    },
+    {
+        "id": "quality_check",
+        "type": "builtin:condition",
+        "x": 1300,
+        "y": 100,
+        "label": "质量检查",
+        "metadata": {
+            "category": "flow",
+        },
+        "config": {
+            "expression": "{{code_review.output.score}} >= 8",
+            "branches": [
+                {
+                    "label": "高质量",
+                    "condition": "true",
                 },
+                {
+                    "label": "需要改进",
+                    "condition": "false",
+                },
+            ],
+        },
+    },
+    {
+        "id": "evolution_learning",
+        "type": "builtin:evolution",
+        "x": 1600,
+        "y": 50,
+        "label": "进化学习",
+        "metadata": {
+            "category": "ai",
+        },
+        "config": {
+            "mode": "learn",
+            "feedback_data": {
+                "task_type": "code_generation",
+                "language": "{{language}}",
+                "quality_score": "{{code_review.output.score}}",
+                "test_pass_rate": "{{tdd_implementation.pass_rate}}",
+                "implementation": "{{tdd_implementation.output}}",
+                "review": "{{code_review.output}}",
             },
-            label="进化学习",
-            metadata={"category": "ai"},
-        ),
-        # 代码优化节点（代码质量低时）
-        WorkflowNode(
-            id="code_optimization",
-            type="builtin:llm",
-            position={"x": 1600, "y": 200},
-            config={
-                "prompt": """根据审查结果优化代码：
+        },
+    },
+    {
+        "id": "code_optimization",
+        "type": "builtin:llm",
+        "x": 1600,
+        "y": 200,
+        "label": "代码优化",
+        "metadata": {
+            "category": "ai",
+        },
+        "config": {
+            "prompt": """根据审查结果优化代码：
 
 原始实现：
 {{tdd_implementation.output}}
@@ -233,131 +245,119 @@ def _create_nodes() -> List[WorkflowNode]:
 3. 提高代码质量
 
 输出优化后的代码：""",
-                "temperature": 0.3,
-                "max_tokens": 2000,
+            "temperature": 0.3,
+            "max_tokens": 2000,
+        },
+    },
+    {
+        "id": "merge_results",
+        "type": "builtin:merge",
+        "x": 1900,
+        "y": 100,
+        "label": "合并结果",
+        "metadata": {
+            "category": "flow",
+        },
+        "config": {
+            "strategy": "first",
+        },
+    },
+    {
+        "id": "end",
+        "type": "builtin:end",
+        "x": 2200,
+        "y": 100,
+        "label": "结束",
+        "metadata": {
+            "category": "flow",
+        },
+        "config": {
+            "output_mapping": {
+                "code": "{{tdd_implementation.output}}",
+                "tests": "{{tdd_implementation.tests}}",
+                "quality_score": "{{code_review.output.score}}",
+                "review": "{{code_review.output}}",
+                "language": "{{language}}",
             },
-            label="代码优化",
-            metadata={"category": "ai"},
-        ),
-        # 合并节点
-        WorkflowNode(
-            id="merge_results",
-            type="builtin:merge",
-            position={"x": 1900, "y": 100},
-            config={
-                "strategy": "first",
-            },
-            label="合并结果",
-            metadata={"category": "flow"},
-        ),
-        # 结束节点
-        WorkflowNode(
-            id="end",
-            type="builtin:end",
-            position={"x": 2200, "y": 100},
-            config={
-                "output_mapping": {
-                    "code": "{{tdd_implementation.output}}",
-                    "tests": "{{tdd_implementation.tests}}",
-                    "quality_score": "{{code_review.output.score}}",
-                    "review": "{{code_review.output}}",
-                    "language": "{{language}}",
-                },
-            },
-            label="结束",
-            metadata={"category": "flow"},
-        ),
-    ]
+        },
+    },
+]
+
+# 边声明式 spec：id/source/target（条件边带 source_handle）
+_EDGE_SPECS: List[Dict[str, Any]] = [
+    {
+        "id": "start_to_analyze",
+        "source": "start",
+        "target": "analyze_requirements",
+    },
+    {
+        "id": "analyze_to_tdd",
+        "source": "analyze_requirements",
+        "target": "tdd_implementation",
+    },
+    {
+        "id": "tdd_to_review",
+        "source": "tdd_implementation",
+        "target": "code_review",
+    },
+    {
+        "id": "review_to_check",
+        "source": "code_review",
+        "target": "quality_check",
+    },
+    {
+        "id": "check_to_evolution",
+        "source": "quality_check",
+        "target": "evolution_learning",
+        "source_handle": "true",
+    },
+    {
+        "id": "check_to_optimization",
+        "source": "quality_check",
+        "target": "code_optimization",
+        "source_handle": "false",
+    },
+    {
+        "id": "evolution_to_merge",
+        "source": "evolution_learning",
+        "target": "merge_results",
+    },
+    {
+        "id": "optimization_to_merge",
+        "source": "code_optimization",
+        "target": "merge_results",
+    },
+    {
+        "id": "merge_to_end",
+        "source": "merge_results",
+        "target": "end",
+    },
+]
+
+# 变量声明式 spec：name/type/默认值/描述/作用域
+_VARIABLE_SPECS: List[Dict[str, Any]] = [
+    {
+        "name": "max_iterations",
+        "type": "number",
+        "default_value": 5,
+        "description": "TDD 最大迭代次数",
+        "scope": "workflow",
+    },
+    {
+        "name": "quality_threshold",
+        "type": "number",
+        "default_value": 8,
+        "description": "代码质量阈值（1-10）",
+        "scope": "workflow",
+    },
+    {
+        "name": "include_comments",
+        "type": "boolean",
+        "default_value": True,
+        "description": "是否包含代码注释",
+        "scope": "workflow",
+    },
+]
 
 
-def _create_edges() -> List[WorkflowEdge]:
-    """创建边连接"""
-    return [
-        # 开始 → 需求分析
-        WorkflowEdge(
-            id="start_to_analyze",
-            source="start",
-            target="analyze_requirements",
-        ),
-        # 需求分析 → TDD 实现
-        WorkflowEdge(
-            id="analyze_to_tdd",
-            source="analyze_requirements",
-            target="tdd_implementation",
-        ),
-        # TDD 实现 → 代码审查
-        WorkflowEdge(
-            id="tdd_to_review",
-            source="tdd_implementation",
-            target="code_review",
-        ),
-        # 代码审查 → 质量检查
-        WorkflowEdge(
-            id="review_to_check",
-            source="code_review",
-            target="quality_check",
-        ),
-        # 质量检查 → 进化学习（高质量）
-        WorkflowEdge(
-            id="check_to_evolution",
-            source="quality_check",
-            target="evolution_learning",
-            source_handle="true",
-        ),
-        # 质量检查 → 代码优化（需要改进）
-        WorkflowEdge(
-            id="check_to_optimization",
-            source="quality_check",
-            target="code_optimization",
-            source_handle="false",
-        ),
-        # 进化学习 → 合并结果
-        WorkflowEdge(
-            id="evolution_to_merge",
-            source="evolution_learning",
-            target="merge_results",
-        ),
-        # 代码优化 → 合并结果
-        WorkflowEdge(
-            id="optimization_to_merge",
-            source="code_optimization",
-            target="merge_results",
-        ),
-        # 合并结果 → 结束
-        WorkflowEdge(
-            id="merge_to_end",
-            source="merge_results",
-            target="end",
-        ),
-    ]
-
-
-def _create_variables() -> List[WorkflowVariable]:
-    """创建工作流变量"""
-    return [
-        WorkflowVariable(
-            name="max_iterations",
-            type="number",
-            default_value=5,
-            description="TDD 最大迭代次数",
-            scope="workflow",
-        ),
-        WorkflowVariable(
-            name="quality_threshold",
-            type="number",
-            default_value=8,
-            description="代码质量阈值（1-10）",
-            scope="workflow",
-        ),
-        WorkflowVariable(
-            name="include_comments",
-            type="boolean",
-            default_value=True,
-            description="是否包含代码注释",
-            scope="workflow",
-        ),
-    ]
-
-
-# 便捷导出
 __all__ = ["get_programming_template"]

@@ -1,0 +1,1961 @@
+{
+ "data_analysis": {
+  "nodes": [
+   {
+    "id": "start",
+    "type": "builtin:start",
+    "position": {
+     "x": 100,
+     "y": 100
+    },
+    "config": {
+     "inputs_schema": {
+      "data_source": {
+       "type": "textarea",
+       "required": true,
+       "description": "数据来源（URL、文件路径或描述）"
+      },
+      "analysis_goal": {
+       "type": "textarea",
+       "required": true,
+       "description": "分析目标"
+      },
+      "output_format": {
+       "type": "select",
+       "options": [
+        "HTML报告",
+        "PDF报告",
+        "Markdown",
+        "JSON数据"
+       ],
+       "default": "HTML报告",
+       "description": "输出格式"
+      }
+     }
+    },
+    "label": "开始",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "fetch_data",
+    "type": "builtin:web-scrape",
+    "position": {
+     "x": 400,
+     "y": 100
+    },
+    "config": {
+     "url": "{{data_source}}",
+     "selector": "auto",
+     "pagination": false
+    },
+    "label": "数据抓取",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "clean_data",
+    "type": "builtin:llm",
+    "position": {
+     "x": 700,
+     "y": 100
+    },
+    "config": {
+     "prompt": "清洗以下数据：\n\n原始数据：{{fetch_data.output}}\n分析目标：{{analysis_goal}}\n\n要求：\n1. 处理缺失值\n2. 标准化格式\n3. 去除异常值\n4. 为分析做准备\n\n输出清洗后的数据：",
+     "temperature": 0.2,
+     "max_tokens": 2000
+    },
+    "label": "数据清洗",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "analyze_data",
+    "type": "builtin:data-analyze",
+    "position": {
+     "x": 1000,
+     "y": 100
+    },
+    "config": {
+     "data": "{{clean_data.output}}",
+     "analysis_type": "comprehensive",
+     "columns": "auto"
+    },
+    "label": "数据分析",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "visualize",
+    "type": "builtin:data-visualize",
+    "position": {
+     "x": 1300,
+     "y": 50
+    },
+    "config": {
+     "data": "{{analyze_data.output}}",
+     "chart_type": "auto",
+     "x_axis": "auto",
+     "y_axis": "auto"
+    },
+    "label": "数据可视化",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "generate_report",
+    "type": "builtin:llm",
+    "position": {
+     "x": 1300,
+     "y": 200
+    },
+    "config": {
+     "prompt": "生成数据分析报告：\n\n分析结果：{{analyze_data.output}}\n可视化图表：{{visualize.output}}\n分析目标：{{analysis_goal}}\n\n要求：\n1. 包含执行摘要\n2. 详细分析结果\n3. 关键发现\n4. 建议和结论\n5. 图表说明\n\n输出格式：{{output_format}}",
+     "temperature": 0.3,
+     "max_tokens": 3000
+    },
+    "label": "报告生成",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "end",
+    "type": "builtin:end",
+    "position": {
+     "x": 1600,
+     "y": 100
+    },
+    "config": {
+     "output_mapping": {
+      "analysis": "{{analyze_data.output}}",
+      "visualization": "{{visualize.output}}",
+      "report": "{{generate_report.output}}",
+      "format": "{{output_format}}"
+     }
+    },
+    "label": "结束",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   }
+  ],
+  "edges": [
+   {
+    "id": "e1",
+    "source": "start",
+    "target": "fetch_data",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e2",
+    "source": "fetch_data",
+    "target": "clean_data",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e3",
+    "source": "clean_data",
+    "target": "analyze_data",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e4",
+    "source": "analyze_data",
+    "target": "visualize",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e5",
+    "source": "analyze_data",
+    "target": "generate_report",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e6",
+    "source": "visualize",
+    "target": "end",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e7",
+    "source": "generate_report",
+    "target": "end",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   }
+  ],
+  "variables": [
+   {
+    "name": "sample_size",
+    "type": "number",
+    "default_value": 1000,
+    "description": "采样大小",
+    "scope": "workflow"
+   },
+   {
+    "name": "confidence_level",
+    "type": "number",
+    "default_value": 0.95,
+    "description": "置信水平",
+    "scope": "workflow"
+   }
+  ]
+ },
+ "document": {
+  "nodes": [
+   {
+    "id": "start",
+    "type": "builtin:start",
+    "position": {
+     "x": 100,
+     "y": 100
+    },
+    "config": {
+     "inputs_schema": {
+      "file_path": {
+       "type": "file",
+       "required": true,
+       "description": "输入文档路径",
+       "file_types": [
+        ".docx",
+        ".pdf",
+        ".txt",
+        ".md"
+       ]
+      },
+      "output_format": {
+       "type": "select",
+       "options": [
+        "DOCX",
+        "PDF",
+        "PPTX",
+        "Markdown",
+        "HTML"
+       ],
+       "default": "PDF",
+       "description": "输出格式"
+      },
+      "analysis_type": {
+       "type": "select",
+       "options": [
+        "摘要",
+        "关键词提取",
+        "结构分析",
+        "情感分析",
+        "翻译"
+       ],
+       "default": "摘要",
+       "description": "分析类型"
+      }
+     }
+    },
+    "label": "开始",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "read_doc",
+    "type": "builtin:doc-read",
+    "position": {
+     "x": 400,
+     "y": 100
+    },
+    "config": {
+     "file_path": "{{file_path}}",
+     "format": "auto"
+    },
+    "label": "读取文档",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "analyze",
+    "type": "builtin:llm",
+    "position": {
+     "x": 700,
+     "y": 100
+    },
+    "config": {
+     "prompt": "分析以下文档内容：\n\n{{read_doc.output}}\n\n分析类型：{{analysis_type}}\n\n要求：\n1. 提供详细分析结果\n2. 保持原文关键信息\n3. 结构化输出\n4. 适合进一步处理\n\n输出格式：JSON",
+     "temperature": 0.3,
+     "max_tokens": 2000
+    },
+    "label": "内容分析",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "format",
+    "type": "builtin:llm",
+    "position": {
+     "x": 1000,
+     "y": 100
+    },
+    "config": {
+     "prompt": "根据分析结果格式化文档：\n\n分析结果：{{analyze.output}}\n原始内容：{{read_doc.output}}\n输出格式：{{output_format}}\n\n要求：\n1. 保持分析结果的完整性\n2. 适合目标格式\n3. 包含必要的元数据\n4. 格式规范\n\n输出格式化后的内容：",
+     "temperature": 0.2,
+     "max_tokens": 3000
+    },
+    "label": "文档格式化",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "save",
+    "type": "builtin:doc-write",
+    "position": {
+     "x": 1300,
+     "y": 100
+    },
+    "config": {
+     "content": "{{format.output}}",
+     "format": "{{output_format}}",
+     "template": "default"
+    },
+    "label": "保存文档",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "end",
+    "type": "builtin:end",
+    "position": {
+     "x": 1600,
+     "y": 100
+    },
+    "config": {
+     "output_mapping": {
+      "analysis": "{{analyze.output}}",
+      "formatted_content": "{{format.output}}",
+      "output_path": "{{save.output.path}}",
+      "format": "{{output_format}}"
+     }
+    },
+    "label": "结束",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   }
+  ],
+  "edges": [
+   {
+    "id": "e1",
+    "source": "start",
+    "target": "read_doc",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e2",
+    "source": "read_doc",
+    "target": "analyze",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e3",
+    "source": "analyze",
+    "target": "format",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e4",
+    "source": "format",
+    "target": "save",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e5",
+    "source": "save",
+    "target": "end",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   }
+  ],
+  "variables": [
+   {
+    "name": "language",
+    "type": "string",
+    "default_value": "中文",
+    "description": "文档语言",
+    "scope": "workflow"
+   },
+   {
+    "name": "include_images",
+    "type": "boolean",
+    "default_value": true,
+    "description": "是否包含图片",
+    "scope": "workflow"
+   }
+  ]
+ },
+ "ecommerce": {
+  "nodes": [
+   {
+    "id": "start",
+    "type": "builtin:start",
+    "position": {
+     "x": 100,
+     "y": 100
+    },
+    "config": {
+     "inputs_schema": {
+      "platform": {
+       "type": "select",
+       "options": [
+        "淘宝",
+        "京东",
+        "拼多多",
+        "亚马逊",
+        "独立站"
+       ],
+       "default": "淘宝",
+       "description": "电商平台"
+      },
+      "product_category": {
+       "type": "textarea",
+       "required": true,
+       "description": "商品类目"
+      },
+      "monitor_type": {
+       "type": "select",
+       "options": [
+        "价格监控",
+        "库存监控",
+        "评价监控",
+        "竞品监控"
+       ],
+       "default": "价格监控",
+       "description": "监控类型"
+      }
+     }
+    },
+    "label": "开始",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "monitor",
+    "type": "builtin:price-monitor",
+    "position": {
+     "x": 400,
+     "y": 100
+    },
+    "config": {
+     "products": "{{product_category}}",
+     "alert_threshold": 0.1
+    },
+    "label": "商品监控",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "analyze",
+    "type": "builtin:llm",
+    "position": {
+     "x": 700,
+     "y": 100
+    },
+    "config": {
+     "prompt": "分析以下监控数据：\n\n监控结果：{{monitor.output}}\n平台：{{platform}}\n类目：{{product_category}}\n\n要求：\n1. 价格趋势分析\n2. 竞争对手分析\n3. 市场机会识别\n4. 风险预警\n5. 行动建议\n\n输出格式：JSON",
+     "temperature": 0.3,
+     "max_tokens": 1500
+    },
+    "label": "价格分析",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "ad_copy",
+    "type": "builtin:ad-copy",
+    "position": {
+     "x": 1000,
+     "y": 50
+    },
+    "config": {
+     "product": "{{product_category}}",
+     "platform": "{{platform}}",
+     "style": "促销"
+    },
+    "label": "广告文案",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "review_respond",
+    "type": "builtin:review-respond",
+    "position": {
+     "x": 1000,
+     "y": 200
+    },
+    "config": {
+     "reviews": "{{monitor.output.reviews}}",
+     "tone": "专业友好",
+     "templates": "default"
+    },
+    "label": "评价回复",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "merge",
+    "type": "builtin:merge",
+    "position": {
+     "x": 1300,
+     "y": 100
+    },
+    "config": {
+     "strategy": "all"
+    },
+    "label": "结果合并",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "end",
+    "type": "builtin:end",
+    "position": {
+     "x": 1600,
+     "y": 100
+    },
+    "config": {
+     "output_mapping": {
+      "analysis": "{{analyze.output}}",
+      "ad_copy": "{{ad_copy.output}}",
+      "review_responses": "{{review_respond.output}}",
+      "platform": "{{platform}}",
+      "category": "{{product_category}}"
+     }
+    },
+    "label": "结束",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   }
+  ],
+  "edges": [
+   {
+    "id": "e1",
+    "source": "start",
+    "target": "monitor",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e2",
+    "source": "monitor",
+    "target": "analyze",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e3",
+    "source": "analyze",
+    "target": "ad_copy",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e4",
+    "source": "analyze",
+    "target": "review_respond",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e5",
+    "source": "ad_copy",
+    "target": "merge",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e6",
+    "source": "review_respond",
+    "target": "merge",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e7",
+    "source": "merge",
+    "target": "end",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   }
+  ],
+  "variables": [
+   {
+    "name": "price_alert_threshold",
+    "type": "number",
+    "default_value": 0.1,
+    "description": "价格变动阈值（10%）",
+    "scope": "workflow"
+   },
+   {
+    "name": "auto_publish",
+    "type": "boolean",
+    "default_value": false,
+    "description": "是否自动发布广告文案",
+    "scope": "workflow"
+   }
+  ]
+ },
+ "media": {
+  "nodes": [
+   {
+    "id": "start",
+    "type": "builtin:start",
+    "position": {
+     "x": 100,
+     "y": 100
+    },
+    "config": {
+     "inputs_schema": {
+      "topic": {
+       "type": "textarea",
+       "required": true,
+       "description": "媒体内容主题"
+      },
+      "duration": {
+       "type": "select",
+       "options": [
+        "短片 (1-3分钟)",
+        "中等 (3-10分钟)",
+        "长片 (10-30分钟)"
+       ],
+       "default": "短片 (1-3分钟)",
+       "description": "视频时长"
+      },
+      "style": {
+       "type": "select",
+       "options": [
+        "教育",
+        "娱乐",
+        "商业",
+        "纪录片",
+        "创意"
+       ],
+       "default": "教育",
+       "description": "媒体风格"
+      }
+     }
+    },
+    "label": "开始",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "script",
+    "type": "builtin:llm",
+    "position": {
+     "x": 400,
+     "y": 100
+    },
+    "config": {
+     "prompt": "为以下主题创作媒体脚本：\n\n主题：{{topic}}\n时长：{{duration}}\n风格：{{style}}\n\n要求：\n1. 包含开场、主体、结尾\n2. 适合目标时长\n3. 语言生动，适合口语表达\n4. 包含视觉元素描述\n\n输出格式：JSON 格式脚本",
+     "temperature": 0.7,
+     "max_tokens": 2000
+    },
+    "label": "文案创作",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "voiceover",
+    "type": "builtin:tts",
+    "position": {
+     "x": 700,
+     "y": 100
+    },
+    "config": {
+     "text": "{{script.output.voiceover}}",
+     "voice": "zh-CN-YunxiNeural",
+     "speed": 1.0,
+     "language": "zh-CN"
+    },
+    "label": "配音生成",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "thumbnail",
+    "type": "builtin:llm",
+    "position": {
+     "x": 1000,
+     "y": 50
+    },
+    "config": {
+     "prompt": "为以下内容设计封面图描述：\n\n主题：{{topic}}\n风格：{{style}}\n脚本摘要：{{script.output.summary}}\n\n要求：\n1. 视觉吸引力强\n2. 符合内容主题\n3. 包含关键信息\n4. 适合社交媒体分享\n\n输出封面图设计描述：",
+     "temperature": 0.8,
+     "max_tokens": 500
+    },
+    "label": "封面设计",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "video_gen",
+    "type": "builtin:llm",
+    "position": {
+     "x": 1000,
+     "y": 200
+    },
+    "config": {
+     "prompt": "根据脚本生成视频分镜：\n\n脚本：{{script.output.script}}\n时长：{{duration}}\n\n要求：\n1. 每个场景包含：镜头描述、时长、转场效果\n2. 适合目标时长\n3. 视觉节奏合理\n4. 包含字幕时间点\n\n输出格式：JSON 分镜脚本",
+     "temperature": 0.5,
+     "max_tokens": 2000
+    },
+    "label": "视频分镜",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "merge",
+    "type": "builtin:merge",
+    "position": {
+     "x": 1300,
+     "y": 100
+    },
+    "config": {
+     "strategy": "all"
+    },
+    "label": "素材合并",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "end",
+    "type": "builtin:end",
+    "position": {
+     "x": 1600,
+     "y": 100
+    },
+    "config": {
+     "output_mapping": {
+      "script": "{{script.output}}",
+      "voiceover": "{{voiceover.output}}",
+      "thumbnail": "{{thumbnail.output}}",
+      "storyboard": "{{video_gen.output}}",
+      "duration": "{{duration}}",
+      "style": "{{style}}"
+     }
+    },
+    "label": "结束",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   }
+  ],
+  "edges": [
+   {
+    "id": "e1",
+    "source": "start",
+    "target": "script",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e2",
+    "source": "script",
+    "target": "voiceover",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e3",
+    "source": "script",
+    "target": "thumbnail",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e4",
+    "source": "script",
+    "target": "video_gen",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e5",
+    "source": "voiceover",
+    "target": "merge",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e6",
+    "source": "thumbnail",
+    "target": "merge",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e7",
+    "source": "video_gen",
+    "target": "merge",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e8",
+    "source": "merge",
+    "target": "end",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   }
+  ],
+  "variables": [
+   {
+    "name": "background_music",
+    "type": "string",
+    "default_value": "轻音乐",
+    "description": "背景音乐类型",
+    "scope": "workflow"
+   },
+   {
+    "name": "subtitle_style",
+    "type": "string",
+    "default_value": "白色黑边",
+    "description": "字幕样式",
+    "scope": "workflow"
+   }
+  ]
+ },
+ "programming": {
+  "nodes": [
+   {
+    "id": "start",
+    "type": "builtin:start",
+    "position": {
+     "x": 100,
+     "y": 100
+    },
+    "config": {
+     "inputs_schema": {
+      "requirements": {
+       "type": "textarea",
+       "required": true,
+       "description": "编程需求描述"
+      },
+      "language": {
+       "type": "select",
+       "options": [
+        "Python",
+        "JavaScript",
+        "TypeScript",
+        "Java",
+        "Go"
+       ],
+       "default": "Python",
+       "description": "目标编程语言"
+      },
+      "test_framework": {
+       "type": "select",
+       "options": [
+        "pytest",
+        "jest",
+        "junit",
+        "go test"
+       ],
+       "default": "pytest",
+       "description": "测试框架"
+      }
+     }
+    },
+    "label": "开始",
+    "enabled": true,
+    "metadata": {
+     "category": "flow"
+    },
+    "mock_output": null
+   },
+   {
+    "id": "analyze_requirements",
+    "type": "builtin:llm",
+    "position": {
+     "x": 400,
+     "y": 100
+    },
+    "config": {
+     "prompt": "分析以下编程需求，并生成详细的技术规格：\n\n需求：{{requirements}}\n编程语言：{{language}}\n测试框架：{{test_framework}}\n\n请提供：\n1. 功能分解（主要模块和函数）\n2. 接口设计（输入/输出）\n3. 测试用例设计（边界条件、正常流程、异常情况）\n4. 实现策略（算法选择、数据结构）\n\n输出格式：JSON",
+     "temperature": 0.3,
+     "max_tokens": 2000
+    },
+    "label": "需求分析",
+    "enabled": true,
+    "metadata": {
+     "category": "ai"
+    },
+    "mock_output": null
+   },
+   {
+    "id": "tdd_implementation",
+    "type": "builtin:tdd",
+    "position": {
+     "x": 700,
+     "y": 100
+    },
+    "config": {
+     "test_spec": "根据以下技术规格生成测试用例：\n\n{{analyze_requirements.output}}\n\n编程语言：{{language}}\n测试框架：{{test_framework}}\n\n要求：\n1. 覆盖所有功能点\n2. 包含边界条件测试\n3. 包含异常处理测试\n4. 测试代码可直接运行",
+     "implementation_prompt": "根据以下测试用例实现代码：\n\n{{tdd_implementation.tests}}\n\n技术规格：\n{{analyze_requirements.output}}\n\n要求：\n1. 实现所有测试用例\n2. 代码简洁、可读\n3. 遵循最佳实践\n4. 包含必要的错误处理",
+     "max_iterations": 5,
+     "pass_threshold": 0.9
+    },
+    "label": "TDD 实现",
+    "enabled": true,
+    "metadata": {
+     "category": "ai"
+    },
+    "mock_output": null
+   },
+   {
+    "id": "code_review",
+    "type": "builtin:llm",
+    "position": {
+     "x": 1000,
+     "y": 100
+    },
+    "config": {
+     "prompt": "审查以下代码实现：\n\n实现代码：\n{{tdd_implementation.output}}\n\n测试结果：\n{{tdd_implementation.tests}}\n\n请提供：\n1. 代码质量评分（1-10）\n2. 性能分析\n3. 安全性检查\n4. 改进建议\n5. 重构建议（如果需要）\n\n输出格式：JSON",
+     "temperature": 0.2,
+     "max_tokens": 1500
+    },
+    "label": "代码审查",
+    "enabled": true,
+    "metadata": {
+     "category": "ai"
+    },
+    "mock_output": null
+   },
+   {
+    "id": "quality_check",
+    "type": "builtin:condition",
+    "position": {
+     "x": 1300,
+     "y": 100
+    },
+    "config": {
+     "expression": "{{code_review.output.score}} >= 8",
+     "branches": [
+      {
+       "label": "高质量",
+       "condition": "true"
+      },
+      {
+       "label": "需要改进",
+       "condition": "false"
+      }
+     ]
+    },
+    "label": "质量检查",
+    "enabled": true,
+    "metadata": {
+     "category": "flow"
+    },
+    "mock_output": null
+   },
+   {
+    "id": "evolution_learning",
+    "type": "builtin:evolution",
+    "position": {
+     "x": 1600,
+     "y": 50
+    },
+    "config": {
+     "mode": "learn",
+     "feedback_data": {
+      "task_type": "code_generation",
+      "language": "{{language}}",
+      "quality_score": "{{code_review.output.score}}",
+      "test_pass_rate": "{{tdd_implementation.pass_rate}}",
+      "implementation": "{{tdd_implementation.output}}",
+      "review": "{{code_review.output}}"
+     }
+    },
+    "label": "进化学习",
+    "enabled": true,
+    "metadata": {
+     "category": "ai"
+    },
+    "mock_output": null
+   },
+   {
+    "id": "code_optimization",
+    "type": "builtin:llm",
+    "position": {
+     "x": 1600,
+     "y": 200
+    },
+    "config": {
+     "prompt": "根据审查结果优化代码：\n\n原始实现：\n{{tdd_implementation.output}}\n\n审查反馈：\n{{code_review.output}}\n\n要求：\n1. 应用所有改进建议\n2. 保持测试通过\n3. 提高代码质量\n\n输出优化后的代码：",
+     "temperature": 0.3,
+     "max_tokens": 2000
+    },
+    "label": "代码优化",
+    "enabled": true,
+    "metadata": {
+     "category": "ai"
+    },
+    "mock_output": null
+   },
+   {
+    "id": "merge_results",
+    "type": "builtin:merge",
+    "position": {
+     "x": 1900,
+     "y": 100
+    },
+    "config": {
+     "strategy": "first"
+    },
+    "label": "合并结果",
+    "enabled": true,
+    "metadata": {
+     "category": "flow"
+    },
+    "mock_output": null
+   },
+   {
+    "id": "end",
+    "type": "builtin:end",
+    "position": {
+     "x": 2200,
+     "y": 100
+    },
+    "config": {
+     "output_mapping": {
+      "code": "{{tdd_implementation.output}}",
+      "tests": "{{tdd_implementation.tests}}",
+      "quality_score": "{{code_review.output.score}}",
+      "review": "{{code_review.output}}",
+      "language": "{{language}}"
+     }
+    },
+    "label": "结束",
+    "enabled": true,
+    "metadata": {
+     "category": "flow"
+    },
+    "mock_output": null
+   }
+  ],
+  "edges": [
+   {
+    "id": "start_to_analyze",
+    "source": "start",
+    "target": "analyze_requirements",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "analyze_to_tdd",
+    "source": "analyze_requirements",
+    "target": "tdd_implementation",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "tdd_to_review",
+    "source": "tdd_implementation",
+    "target": "code_review",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "review_to_check",
+    "source": "code_review",
+    "target": "quality_check",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "check_to_evolution",
+    "source": "quality_check",
+    "target": "evolution_learning",
+    "source_handle": "true",
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "check_to_optimization",
+    "source": "quality_check",
+    "target": "code_optimization",
+    "source_handle": "false",
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "evolution_to_merge",
+    "source": "evolution_learning",
+    "target": "merge_results",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "optimization_to_merge",
+    "source": "code_optimization",
+    "target": "merge_results",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "merge_to_end",
+    "source": "merge_results",
+    "target": "end",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   }
+  ],
+  "variables": [
+   {
+    "name": "max_iterations",
+    "type": "number",
+    "default_value": 5,
+    "description": "TDD 最大迭代次数",
+    "scope": "workflow"
+   },
+   {
+    "name": "quality_threshold",
+    "type": "number",
+    "default_value": 8,
+    "description": "代码质量阈值（1-10）",
+    "scope": "workflow"
+   },
+   {
+    "name": "include_comments",
+    "type": "boolean",
+    "default_value": true,
+    "description": "是否包含代码注释",
+    "scope": "workflow"
+   }
+  ]
+ },
+ "short_drama": {
+  "nodes": [
+   {
+    "id": "start",
+    "type": "builtin:start",
+    "position": {
+     "x": 60,
+     "y": 200
+    },
+    "config": {
+     "inputs_schema": {
+      "theme": {
+       "type": "textarea",
+       "required": true,
+       "description": "一句话主题（例：落魄赘婿遭人羞辱，三年之期已到，龙王归来）"
+      },
+      "genre": {
+       "type": "select",
+       "options": [
+        "都市逆袭",
+        "甜宠恋爱",
+        "悬疑惊悚",
+        "古装权谋",
+        "战神归来"
+       ],
+       "default": "都市逆袭",
+       "description": "题材"
+      },
+      "style": {
+       "type": "input",
+       "default": "cinematic",
+       "description": "视觉风格（注入每个镜头的画面提示词）"
+      },
+      "aspect_ratio": {
+       "type": "select",
+       "options": [
+        "9:16 竖屏",
+        "16:9 横屏",
+        "1:1 方形"
+       ],
+       "default": "9:16 竖屏",
+       "description": "画幅（项目锁，创建后统一注入每镜）"
+      },
+      "image_provider": {
+       "type": "select",
+       "options": [
+        {
+         "value": "openai",
+         "label": "OpenAI 兼容"
+        },
+        {
+         "value": "wanx",
+         "label": "通义万相/百炼"
+        },
+        {
+         "value": "ark",
+         "label": "火山 Seedream"
+        },
+        {
+         "value": "comfyui",
+         "label": "ComfyUI 自建"
+        }
+       ],
+       "default": "openai",
+       "description": "图像生成服务商"
+      }
+     }
+    },
+    "label": "开始",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "script",
+    "type": "builtin:short-drama-script",
+    "position": {
+     "x": 300,
+     "y": 200
+    },
+    "config": {
+     "logline": "$node.start.output.theme",
+     "genre": "$node.start.output.genre",
+     "episodes": 1
+    },
+    "label": "剧本生成",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "storyboard",
+    "type": "builtin:storyboard",
+    "position": {
+     "x": 560,
+     "y": 200
+    },
+    "config": {
+     "script": "$node.script.output.script",
+     "style": "$node.start.output.style",
+     "aspect_ratio": "$node.start.output.aspect_ratio"
+    },
+    "label": "分镜拆解",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "scenes",
+    "type": "builtin:scene-gen",
+    "position": {
+     "x": 820,
+     "y": 120
+    },
+    "config": {
+     "shots": "$node.storyboard.output.shots",
+     "provider": "$node.start.output.image_provider",
+     "style": "$node.start.output.style"
+    },
+    "label": "逐镜生图",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "voiceover",
+    "type": "builtin:voice-over",
+    "position": {
+     "x": 820,
+     "y": 300
+    },
+    "config": {
+     "shots": "$node.storyboard.output.shots",
+     "voice": "旁白 浑厚",
+     "language": "zh"
+    },
+    "label": "旁白合成",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "compose",
+    "type": "builtin:video-compose",
+    "position": {
+     "x": 1100,
+     "y": 200
+    },
+    "config": {
+     "clips": "$node.scenes.output.images",
+     "resolution": "1080x1920",
+     "transition": "fade"
+    },
+    "label": "成片合成",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "end",
+    "type": "builtin:end",
+    "position": {
+     "x": 1360,
+     "y": 200
+    },
+    "config": {
+     "output_mapping": {
+      "storyboard": "$node.storyboard.output.shots",
+      "images": "$node.scenes.output.images",
+      "audio": "$node.voiceover.output.audio_paths",
+      "compose": "$node.compose.output"
+     }
+    },
+    "label": "结束",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   }
+  ],
+  "edges": [
+   {
+    "id": "e1",
+    "source": "start",
+    "target": "script",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e2",
+    "source": "script",
+    "target": "storyboard",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e3",
+    "source": "storyboard",
+    "target": "scenes",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e4",
+    "source": "storyboard",
+    "target": "voiceover",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e5",
+    "source": "scenes",
+    "target": "compose",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e6",
+    "source": "voiceover",
+    "target": "compose",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e7",
+    "source": "compose",
+    "target": "end",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   }
+  ]
+ },
+ "web_maintenance": {
+  "nodes": [
+   {
+    "id": "start",
+    "type": "builtin:start",
+    "position": {
+     "x": 100,
+     "y": 100
+    },
+    "config": {
+     "inputs_schema": {
+      "website_url": {
+       "type": "input",
+       "required": true,
+       "description": "网站 URL"
+      },
+      "maintenance_type": {
+       "type": "select",
+       "options": [
+        "全面维护",
+        "SEO优化",
+        "内容更新",
+        "链接检查"
+       ],
+       "default": "全面维护",
+       "description": "维护类型"
+      },
+      "depth": {
+       "type": "slider",
+       "min": 1,
+       "max": 5,
+       "default": 3,
+       "description": "抓取深度"
+      }
+     }
+    },
+    "label": "开始",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "scrape",
+    "type": "builtin:web-scrape",
+    "position": {
+     "x": 400,
+     "y": 100
+    },
+    "config": {
+     "url": "{{website_url}}",
+     "selector": "auto",
+     "pagination": true
+    },
+    "label": "内容抓取",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "seo_analysis",
+    "type": "builtin:seo-optimize",
+    "position": {
+     "x": 700,
+     "y": 50
+    },
+    "config": {
+     "content": "{{scrape.output}}",
+     "keywords": "auto",
+     "target_url": "{{website_url}}"
+    },
+    "label": "SEO 分析",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "broken_links",
+    "type": "builtin:broken-link-check",
+    "position": {
+     "x": 700,
+     "y": 200
+    },
+    "config": {
+     "url": "{{website_url}}",
+     "depth": "{{depth}}"
+    },
+    "label": "死链检测",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "content_update",
+    "type": "builtin:llm",
+    "position": {
+     "x": 1000,
+     "y": 50
+    },
+    "config": {
+     "prompt": "根据 SEO 分析结果更新网站内容：\n\n原始内容：{{scrape.output}}\nSEO 分析：{{seo_analysis.output}}\n\n要求：\n1. 应用 SEO 建议\n2. 提升内容质量\n3. 保持原有结构\n4. 优化关键词密度\n\n输出更新后的内容：",
+     "temperature": 0.3,
+     "max_tokens": 3000
+    },
+    "label": "内容更新",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "fix_links",
+    "type": "builtin:llm",
+    "position": {
+     "x": 1000,
+     "y": 200
+    },
+    "config": {
+     "prompt": "修复以下死链：\n\n死链列表：{{broken_links.output}}\n网站 URL：{{website_url}}\n\n要求：\n1. 分析死链原因\n2. 提供修复建议\n3. 生成修复脚本\n4. 预防措施\n\n输出修复方案：",
+     "temperature": 0.2,
+     "max_tokens": 1500
+    },
+    "label": "链接修复",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "generate_report",
+    "type": "builtin:llm",
+    "position": {
+     "x": 1300,
+     "y": 100
+    },
+    "config": {
+     "prompt": "生成网站维护报告：\n\n网站 URL：{{website_url}}\n维护类型：{{maintenance_type}}\nSEO 分析：{{seo_analysis.output}}\n死链检测：{{broken_links.output}}\n内容更新：{{content_update.output}}\n链接修复：{{fix_links.output}}\n\n要求：\n1. 维护摘要\n2. 详细分析\n3. 修复结果\n4. 优化建议\n5. 后续计划\n\n输出格式：Markdown",
+     "temperature": 0.3,
+     "max_tokens": 2000
+    },
+    "label": "报告生成",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "end",
+    "type": "builtin:end",
+    "position": {
+     "x": 1600,
+     "y": 100
+    },
+    "config": {
+     "output_mapping": {
+      "seo_analysis": "{{seo_analysis.output}}",
+      "broken_links": "{{broken_links.output}}",
+      "content_update": "{{content_update.output}}",
+      "link_fix": "{{fix_links.output}}",
+      "report": "{{generate_report.output}}",
+      "url": "{{website_url}}"
+     }
+    },
+    "label": "结束",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   }
+  ],
+  "edges": [
+   {
+    "id": "e1",
+    "source": "start",
+    "target": "scrape",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e2",
+    "source": "scrape",
+    "target": "seo_analysis",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e3",
+    "source": "scrape",
+    "target": "broken_links",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e4",
+    "source": "seo_analysis",
+    "target": "content_update",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e5",
+    "source": "broken_links",
+    "target": "fix_links",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e6",
+    "source": "content_update",
+    "target": "generate_report",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e7",
+    "source": "fix_links",
+    "target": "generate_report",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e8",
+    "source": "generate_report",
+    "target": "end",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   }
+  ],
+  "variables": [
+   {
+    "name": "check_frequency",
+    "type": "string",
+    "default_value": "weekly",
+    "description": "检查频率",
+    "scope": "workflow"
+   },
+   {
+    "name": "auto_fix",
+    "type": "boolean",
+    "default_value": false,
+    "description": "是否自动修复",
+    "scope": "workflow"
+   }
+  ]
+ },
+ "writing": {
+  "nodes": [
+   {
+    "id": "start",
+    "type": "builtin:start",
+    "position": {
+     "x": 100,
+     "y": 100
+    },
+    "config": {
+     "inputs_schema": {
+      "topic": {
+       "type": "textarea",
+       "required": true,
+       "description": "写作主题"
+      },
+      "style": {
+       "type": "select",
+       "options": [
+        "正式",
+        "非正式",
+        "学术",
+        "创意",
+        "技术"
+       ],
+       "default": "正式",
+       "description": "写作风格"
+      },
+      "length": {
+       "type": "select",
+       "options": [
+        "短文 (500字)",
+        "中等 (1500字)",
+        "长文 (3000字)",
+        "自定义"
+       ],
+       "default": "中等 (1500字)",
+       "description": "文章长度"
+      }
+     }
+    },
+    "label": "开始",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "outline",
+    "type": "builtin:llm",
+    "position": {
+     "x": 400,
+     "y": 100
+    },
+    "config": {
+     "prompt": "为以下主题创建详细大纲：\n\n主题：{{topic}}\n风格：{{style}}\n长度：{{length}}\n\n要求：\n1. 结构清晰，逻辑连贯\n2. 包含引言、正文、结论\n3. 列出主要观点和支持论据\n4. 考虑目标读者\n\n输出格式：Markdown 大纲",
+     "temperature": 0.5,
+     "max_tokens": 1000
+    },
+    "label": "大纲生成",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "research",
+    "type": "builtin:memory-load",
+    "position": {
+     "x": 700,
+     "y": 100
+    },
+    "config": {
+     "query": "{{topic}} 相关资料",
+     "limit": 5,
+     "memory_type": "knowledge"
+    },
+    "label": "检索参考",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "draft",
+    "type": "builtin:llm",
+    "position": {
+     "x": 1000,
+     "y": 100
+    },
+    "config": {
+     "prompt": "根据以下大纲和参考资料撰写初稿：\n\n大纲：\n{{outline.output}}\n\n参考资料：\n{{research.output}}\n\n主题：{{topic}}\n风格：{{style}}\n\n要求：\n1. 遵循大纲结构\n2. 引用参考资料\n3. 保持风格一致\n4. 语言流畅自然\n\n输出完整文章：",
+     "temperature": 0.7,
+     "max_tokens": 3000
+    },
+    "label": "撰写初稿",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "human_review",
+    "type": "builtin:human_input",
+    "position": {
+     "x": 1300,
+     "y": 100
+    },
+    "config": {
+     "prompt": "请审核初稿并提供反馈：{{draft.output}}",
+     "timeout": 300
+    },
+    "label": "人工审核",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "polish",
+    "type": "builtin:llm",
+    "position": {
+     "x": 1600,
+     "y": 100
+    },
+    "config": {
+     "prompt": "根据审核反馈润色文章：\n\n初稿：\n{{draft.output}}\n\n审核反馈：\n{{human_review.output}}\n\n要求：\n1. 应用所有修改建议\n2. 提升语言质量\n3. 保持风格一致\n4. 检查逻辑连贯性\n\n输出润色后的文章：",
+     "temperature": 0.3,
+     "max_tokens": 3000
+    },
+    "label": "文章润色",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   },
+   {
+    "id": "end",
+    "type": "builtin:end",
+    "position": {
+     "x": 1900,
+     "y": 100
+    },
+    "config": {
+     "output_mapping": {
+      "article": "{{polish.output}}",
+      "outline": "{{outline.output}}",
+      "references": "{{research.output}}",
+      "style": "{{style}}",
+      "topic": "{{topic}}"
+     }
+    },
+    "label": "结束",
+    "enabled": true,
+    "metadata": {},
+    "mock_output": null
+   }
+  ],
+  "edges": [
+   {
+    "id": "e1",
+    "source": "start",
+    "target": "outline",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e2",
+    "source": "outline",
+    "target": "research",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e3",
+    "source": "research",
+    "target": "draft",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e4",
+    "source": "draft",
+    "target": "human_review",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e5",
+    "source": "human_review",
+    "target": "polish",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   },
+   {
+    "id": "e6",
+    "source": "polish",
+    "target": "end",
+    "source_handle": null,
+    "target_handle": null,
+    "label": null,
+    "condition": null
+   }
+  ],
+  "variables": [
+   {
+    "name": "tone",
+    "type": "string",
+    "default_value": "专业",
+    "description": "文章基调",
+    "scope": "workflow"
+   },
+   {
+    "name": "include_citations",
+    "type": "boolean",
+    "default_value": true,
+    "description": "是否包含引用",
+    "scope": "workflow"
+   }
+  ]
+ }
+}

@@ -12,9 +12,10 @@
 
 import time
 import uuid
-from typing import List
+from typing import Any, Dict, List
 
-from ..models import WorkflowDefinition, WorkflowEdge, WorkflowNode, WorkflowStatus, WorkflowVariable
+from ..models import WorkflowDefinition, WorkflowStatus
+from .builder import buildEdges, buildNodes, buildVariables
 
 
 def get_document_template() -> WorkflowDefinition:
@@ -23,18 +24,14 @@ def get_document_template() -> WorkflowDefinition:
     Returns:
         预定义的文档处理工作流定义
     """
-    nodes = _create_nodes()
-    edges = _create_edges()
-    variables = _create_variables()
-
     return WorkflowDefinition(
         id=f"template_document_{uuid.uuid4().hex[:8]}",
         name="文档处理",
         description="读取 → 分析 → 格式化 → 输出 DOC/PDF/PPT",
         version="1.0.0",
-        nodes=nodes,
-        edges=edges,
-        variables=variables,
+        nodes=buildNodes(_NODE_SPECS),
+        edges=buildEdges(_EDGE_SPECS),
+        variables=buildVariables(_VARIABLE_SPECS),
         tags=["document", "pdf", "docx", "ppt", "conversion"],
         category="document",
         author="Neurflow",
@@ -52,53 +49,56 @@ def get_document_template() -> WorkflowDefinition:
     )
 
 
-def _create_nodes() -> List[WorkflowNode]:
-    """创建模板节点"""
-    return [
-        WorkflowNode(
-            id="start",
-            type="builtin:start",
-            position={"x": 100, "y": 100},
-            config={
-                "inputs_schema": {
-                    "file_path": {
-                        "type": "file",
-                        "required": True,
-                        "description": "输入文档路径",
-                        "file_types": [".docx", ".pdf", ".txt", ".md"],
-                    },
-                    "output_format": {
-                        "type": "select",
-                        "options": ["DOCX", "PDF", "PPTX", "Markdown", "HTML"],
-                        "default": "PDF",
-                        "description": "输出格式",
-                    },
-                    "analysis_type": {
-                        "type": "select",
-                        "options": ["摘要", "关键词提取", "结构分析", "情感分析", "翻译"],
-                        "default": "摘要",
-                        "description": "分析类型",
-                    },
-                }
+# 节点声明式 spec：id/type/坐标/label/config，装配统一走 .builder
+_NODE_SPECS: List[Dict[str, Any]] = [
+    {
+        "id": "start",
+        "type": "builtin:start",
+        "x": 100,
+        "y": 100,
+        "label": "开始",
+        "config": {
+            "inputs_schema": {
+                "file_path": {
+                    "type": "file",
+                    "required": True,
+                    "description": "输入文档路径",
+                    "file_types": [".docx", ".pdf", ".txt", ".md"],
+                },
+                "output_format": {
+                    "type": "select",
+                    "options": ["DOCX", "PDF", "PPTX", "Markdown", "HTML"],
+                    "default": "PDF",
+                    "description": "输出格式",
+                },
+                "analysis_type": {
+                    "type": "select",
+                    "options": ["摘要", "关键词提取", "结构分析", "情感分析", "翻译"],
+                    "default": "摘要",
+                    "description": "分析类型",
+                },
             },
-            label="开始",
-        ),
-        WorkflowNode(
-            id="read_doc",
-            type="builtin:doc-read",
-            position={"x": 400, "y": 100},
-            config={
-                "file_path": "{{file_path}}",
-                "format": "auto",
-            },
-            label="读取文档",
-        ),
-        WorkflowNode(
-            id="analyze",
-            type="builtin:llm",
-            position={"x": 700, "y": 100},
-            config={
-                "prompt": """分析以下文档内容：
+        },
+    },
+    {
+        "id": "read_doc",
+        "type": "builtin:doc-read",
+        "x": 400,
+        "y": 100,
+        "label": "读取文档",
+        "config": {
+            "file_path": "{{file_path}}",
+            "format": "auto",
+        },
+    },
+    {
+        "id": "analyze",
+        "type": "builtin:llm",
+        "x": 700,
+        "y": 100,
+        "label": "内容分析",
+        "config": {
+            "prompt": """分析以下文档内容：
 
 {{read_doc.output}}
 
@@ -111,17 +111,18 @@ def _create_nodes() -> List[WorkflowNode]:
 4. 适合进一步处理
 
 输出格式：JSON""",
-                "temperature": 0.3,
-                "max_tokens": 2000,
-            },
-            label="内容分析",
-        ),
-        WorkflowNode(
-            id="format",
-            type="builtin:llm",
-            position={"x": 1000, "y": 100},
-            config={
-                "prompt": """根据分析结果格式化文档：
+            "temperature": 0.3,
+            "max_tokens": 2000,
+        },
+    },
+    {
+        "id": "format",
+        "type": "builtin:llm",
+        "x": 1000,
+        "y": 100,
+        "label": "文档格式化",
+        "config": {
+            "prompt": """根据分析结果格式化文档：
 
 分析结果：{{analyze.output}}
 原始内容：{{read_doc.output}}
@@ -134,68 +135,85 @@ def _create_nodes() -> List[WorkflowNode]:
 4. 格式规范
 
 输出格式化后的内容：""",
-                "temperature": 0.2,
-                "max_tokens": 3000,
-            },
-            label="文档格式化",
-        ),
-        WorkflowNode(
-            id="save",
-            type="builtin:doc-write",
-            position={"x": 1300, "y": 100},
-            config={
-                "content": "{{format.output}}",
+            "temperature": 0.2,
+            "max_tokens": 3000,
+        },
+    },
+    {
+        "id": "save",
+        "type": "builtin:doc-write",
+        "x": 1300,
+        "y": 100,
+        "label": "保存文档",
+        "config": {
+            "content": "{{format.output}}",
+            "format": "{{output_format}}",
+            "template": "default",
+        },
+    },
+    {
+        "id": "end",
+        "type": "builtin:end",
+        "x": 1600,
+        "y": 100,
+        "label": "结束",
+        "config": {
+            "output_mapping": {
+                "analysis": "{{analyze.output}}",
+                "formatted_content": "{{format.output}}",
+                "output_path": "{{save.output.path}}",
                 "format": "{{output_format}}",
-                "template": "default",
             },
-            label="保存文档",
-        ),
-        WorkflowNode(
-            id="end",
-            type="builtin:end",
-            position={"x": 1600, "y": 100},
-            config={
-                "output_mapping": {
-                    "analysis": "{{analyze.output}}",
-                    "formatted_content": "{{format.output}}",
-                    "output_path": "{{save.output.path}}",
-                    "format": "{{output_format}}",
-                },
-            },
-            label="结束",
-        ),
-    ]
+        },
+    },
+]
 
+# 边声明式 spec：id/source/target（条件边带 source_handle）
+_EDGE_SPECS: List[Dict[str, Any]] = [
+    {
+        "id": "e1",
+        "source": "start",
+        "target": "read_doc",
+    },
+    {
+        "id": "e2",
+        "source": "read_doc",
+        "target": "analyze",
+    },
+    {
+        "id": "e3",
+        "source": "analyze",
+        "target": "format",
+    },
+    {
+        "id": "e4",
+        "source": "format",
+        "target": "save",
+    },
+    {
+        "id": "e5",
+        "source": "save",
+        "target": "end",
+    },
+]
 
-def _create_edges() -> List[WorkflowEdge]:
-    """创建边连接"""
-    return [
-        WorkflowEdge(id="e1", source="start", target="read_doc"),
-        WorkflowEdge(id="e2", source="read_doc", target="analyze"),
-        WorkflowEdge(id="e3", source="analyze", target="format"),
-        WorkflowEdge(id="e4", source="format", target="save"),
-        WorkflowEdge(id="e5", source="save", target="end"),
-    ]
-
-
-def _create_variables() -> List[WorkflowVariable]:
-    """创建工作流变量"""
-    return [
-        WorkflowVariable(
-            name="language",
-            type="string",
-            default_value="中文",
-            description="文档语言",
-            scope="workflow",
-        ),
-        WorkflowVariable(
-            name="include_images",
-            type="boolean",
-            default_value=True,
-            description="是否包含图片",
-            scope="workflow",
-        ),
-    ]
+# 变量声明式 spec：name/type/默认值/描述/作用域
+_VARIABLE_SPECS: List[Dict[str, Any]] = [
+    {
+        "name": "language",
+        "type": "string",
+        "default_value": "中文",
+        "description": "文档语言",
+        "scope": "workflow",
+    },
+    {
+        "name": "include_images",
+        "type": "boolean",
+        "default_value": True,
+        "description": "是否包含图片",
+        "scope": "workflow",
+    },
+]
 
 
 __all__ = ["get_document_template"]
