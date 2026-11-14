@@ -84,3 +84,13 @@ export function deleteScheduledTask(id: string) {
 export function runScheduledTask(id: string) {
   return api.post<ApiResponse<Record<string, unknown>>>(`${BASE}/tasks/${id}/run`)
 }
+
+/** P3-14：暂停任务（paused 状态不再触发；恢复用 resumeScheduledTask）。 */
+export function pauseScheduledTask(id: string) {
+  return api.post<ApiResponse<Record<string, unknown>>>(`${BASE}/tasks/${id}/pause`)
+}
+
+/** P3-14：恢复暂停的任务（next_run_at 自现在重算）。 */
+export function resumeScheduledTask(id: string) {
+  return api.post<ApiResponse<Record<string, unknown>>>(`${BASE}/tasks/${id}/resume`)
+}

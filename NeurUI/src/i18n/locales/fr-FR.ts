@@ -3369,6 +3369,8 @@ conflictTimeReadout: 'Lecture temporelle : {basis} (ancienne {old} → nouvelle 
     title: 'Planificateur',
     lastRun: 'Dernière exécution : ',
     runNow: 'Exécuter maintenant',
+    pause: "Suspendre",
+    resume: "Reprendre",
     scheduleType: 'Type de planification',
     cronExpression: 'Expression Cron',
     intervalSeconds: 'Intervalle (secondes)',

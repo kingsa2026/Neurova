@@ -3369,6 +3369,8 @@ conflictTimeReadout: 'قراءة الوقت: {basis} (القديم {old} → ا�
     title: 'المجدول',
     lastRun: 'الأخير: ',
     runNow: 'تشغيل الآن',
+    pause: "إيقاف مؤقت",
+    resume: "استئناف",
     scheduleType: 'نوع الجدولة',
     cronExpression: 'تعبير Cron',
     intervalSeconds: 'الفاصل الزمني (ثوانٍ)',

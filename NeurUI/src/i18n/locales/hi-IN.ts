@@ -3369,6 +3369,8 @@ conflictTimeReadout: 'समय रीडआउट: {basis} (पुराना 
     title: 'शेड्यूलर',
     lastRun: 'पिछला: ',
     runNow: 'अभी चलाएं',
+    pause: "रोकें",
+    resume: "फिर से शुरू करें",
     scheduleType: 'शेड्यूल प्रकार',
     cronExpression: 'Cron अभिव्यक्ति',
     intervalSeconds: 'अंतराल (सेकंड)',
