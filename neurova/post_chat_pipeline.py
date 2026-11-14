@@ -1107,17 +1107,13 @@ class PostChatPipeline:
                 "tool_calls": _tool_msgs or None,
             }
             # 产物卡片持久化（2026-09-08）：SSE artifact 事件只活在实时流，
-            # 刷新/重开会话后卡片消失。此处把本轮 tool_result 提取的产物
-            # 随 assistant_metadata.artifacts 落盘（注册幂等，与 SSE 出口
-            # extract_tool_artifacts 同一判读：读形态不算产出）。注册失败
-            # （路径越界/文件缺失）仅跳过该产物，不阻断会话保存。
-            _artifacts = self._collect_round_artifacts(_tool_msgs)
-            # 文档型结论落成 md 工件（2026-11-14 产品口径：产出物面展示
-            # 文档型成果，命名=任务内容+日期；OutputRef 内部引用已从产物
-            # 提取中排除）。失败降级为 None，不阻断会话保存。
-            _doc_art = self._capture_round_document(user_input, reply)
-            if _doc_art:
-                _artifacts = list(_artifacts or []) + [_doc_art]
+            # 随 assistant_metadata.artifacts 落盘（注册幂等）。装配单点
+            # _collect_round_artifacts：tool_result 提取＋文档工件＋回复点名
+            # 带挂（读形态/OutputRef 引用不算产出）。失败仅跳过不阻断保存。
+            _artifacts = self._collect_round_artifacts(
+                _tool_msgs, reply=reply,
+                doc_event=self._capture_round_document(user_input, reply),
+            )
             if _artifacts:
                 assistant_meta["artifacts"] = _artifacts
             # P0a 注入留痕（效力闭环）：本轮进了 prompt 的反思日志 id 随消息
@@ -1400,17 +1396,19 @@ class PostChatPipeline:
             logger.debug("文档工件捕获降级: %s", e)
             return None
 
-    def _collect_round_artifacts(self, tool_msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """从本轮 tool_result 列表提取产物（落盘到 assistant_metadata.artifacts）。
+    def _collect_round_artifacts(self, tool_msgs: List[Dict[str, Any]], reply: str = "",
+                                 doc_event: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """从本轮 tool_result 列表提取产物并装配（落盘到 assistant_metadata.artifacts）。
 
         与 SSE 出口共用 extract_tool_artifacts（读形态判读+注册+事件形态），
-        输出即 artifact SSE 事件形态（artifact_id/kind/name/size/path），
-        前端历史回放按 artifactFromEvent 同构恢复。失败逐项跳过（artifact
+        输出即 artifact SSE 事件形态，前端历史回放按 artifactFromEvent 同构
+        恢复。装配经 merge_round_artifacts 单点收口：tool_result 提取＋文档
+        工件（doc_event）＋回复点名带挂既有产物。失败逐项跳过（artifact
         是增强能力，不阻断会话保存）。
         """
         events: List[Dict[str, Any]] = []
         try:
-            from neurova.api.endpoints.artifacts_api import extract_tool_artifacts
+            from neurova.api.endpoints.artifacts_api import extract_tool_artifacts, merge_round_artifacts
 
             # A-03: Agent 的 agent_id 在 config.agent_id（与 :1463/:1588/:1973
             # 兄弟调用点一致）——原写法恒为空串
@@ -1432,6 +1430,7 @@ class PostChatPipeline:
                     )
                 except Exception as e:  # noqa: BLE001 - 单条产物失败不影响其余
                     logger.debug("产物提取跳过: %s", e)
+            events = merge_round_artifacts(events, reply=reply, user_id=user_id, doc_event=doc_event)
         except Exception as e:  # noqa: BLE001 - 整体降级：产物缺失不影响会话
             logger.debug("产物收集降级: %s", e)
         return events

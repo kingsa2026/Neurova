@@ -196,6 +196,15 @@ def _allowed_roots() -> List[Path]:
     from neurova.core.agent_workspaces import discover_agent_ids, get_agent_workspace_dir
 
     roots = [get_agent_workspace_dir(agent_id).resolve() for agent_id in discover_agent_ids()]
+    # generation 产物目录（write_pdf/browser_pdf/图音视频 persist 的统一落点）：
+    # 工具结果 file_path 指到这里时按产出注册（2026-11-14 产品口径：PDF 等
+    # 生成物进产出物面）。常量单一事实源 = runtime.GENERATION_OUTPUT_DIR。
+    from neurova.llm.generators.runtime import GENERATION_OUTPUT_DIR
+
+    try:
+        roots.append(Path(GENERATION_OUTPUT_DIR).resolve())
+    except OSError:  # pragma: no cover - resolve 异常时降级只剩其余根
+        pass
     tts_dir = Path(tempfile.gettempdir()) / _TTS_TEMP_DIRNAME
     try:
         roots.append(tts_dir.resolve())
@@ -470,3 +479,109 @@ def _extract_artifacts(result_text: str, agent_id: str = "", user_id: str = "") 
             }
         )
     return events
+
+
+# ---------------------------------------------------------------------------
+# 收尾轮回复点名带挂（2026-11-14）：回复里点名的既有产物挂进本轮产出物面
+# ---------------------------------------------------------------------------
+
+# 可带挂扩展名（_KIND_BY_EXT 同源并补常见文档/数据格式）——按名匹配只认
+# "像产物文件名"的 token，避免把普通词/版本号当产物
+_ATTACHABLE_EXTS = (
+    "md", "markdown", "pdf", "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg",
+    "wav", "mp3", "ogg", "flac", "aac", "m4a", "mp4", "webm", "mov", "mkv",
+    "html", "htm", "xhtml", "txt", "json", "csv", "log", "docx", "xlsx", "pptx",
+    "zip",
+)
+_REPLY_NAME_RE = _re.compile(
+    r"[A-Za-z0-9\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff._+-]*\.(?:"
+    + "|".join(_ATTACHABLE_EXTS) + r")",
+    _re.IGNORECASE,
+)
+_GEN_FILE_URL_RE = _re.compile(r"/api/v1/generation/files/([A-Za-z0-9._-]+)")
+
+
+def artifact_names_from_reply(reply: str) -> List[str]:
+    """回复正文里点名的候选产物文件名（带挂的提取端）。
+
+    两种形态：生成文件 URL（/api/v1/generation/files/<name>）与裸文件名
+    （反引号/正文中的 <name>.<ext>）。只收带产物扩展名的完整文件名——
+    宁可多提（反查注册表不中即弃），不可漏提。
+    """
+    if not reply or not isinstance(reply, str):
+        return []
+    found: List[str] = []
+    for m in _GEN_FILE_URL_RE.finditer(reply):
+        found.append(m.group(1))
+    for m in _REPLY_NAME_RE.finditer(reply):
+        found.append(m.group(0))
+    seen = set()
+    ordered: List[str] = []
+    for name in found:
+        if name and name not in seen:
+            seen.add(name)
+            ordered.append(name)
+    return ordered[:16]
+
+
+def find_artifacts_by_names(names: List[str], user_id: str = "") -> List[Dict[str, Any]]:
+    """按文件名反查当前用户可见的已注册产物（带挂的查询端）。
+
+    归属口径与读端 _get_owned_artifact 一致：shared 或属主==user_id；
+    文件已不存在的条目不回（不挂必 404 的死产物）。输出与 artifact SSE
+    事件同形态，调用方直接并入 assistant_metadata.artifacts。
+    """
+    uid = str(user_id or "")
+    out: List[Dict[str, Any]] = []
+    seen_ids = set()
+    for name in names or []:
+        for info in _artifacts_store.values():
+            if info.get("name") != name or info.get("artifact_id") in seen_ids:
+                continue
+            owner = str(info.get("user_id") or "")
+            if not info.get("shared") and (not owner or owner != uid):
+                continue
+            if not Path(str(info.get("path") or "")).is_file():
+                continue
+            seen_ids.add(info["artifact_id"])
+            out.append(
+                {
+                    "type": "artifact",
+                    "artifact_id": info["artifact_id"],
+                    "kind": info["kind"],
+                    "name": info["name"],
+                    "size": info["size"],
+                    "path": info["path"],
+                }
+            )
+    return out
+
+
+def merge_round_artifacts(base_events, reply: str = "", user_id: str = "",
+                          doc_event: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """本轮产物装配单点：tool_result 提取＋文档工件＋回复点名带挂。
+
+    按 artifact_id 去重保序（base → doc → 带挂）；带挂只挂当前用户可见的
+    既有产物。任一环失败都不影响其余（产物是增强能力）。
+    """
+    candidates = list(base_events or [])
+    if doc_event:
+        candidates.append(doc_event)
+    try:
+        candidates.extend(
+            find_artifacts_by_names(artifact_names_from_reply(reply), user_id=user_id)
+        )
+    except Exception as e:  # noqa: BLE001 - 带挂失败不丢已提取产物
+        logger.debug("回复带挂降级: %s", e)
+    merged: List[Dict[str, Any]] = []
+    seen = set()
+    for ev in candidates:
+        if not isinstance(ev, dict):
+            continue
+        aid = ev.get("artifact_id")
+        if aid:
+            if aid in seen:
+                continue
+            seen.add(aid)
+        merged.append(ev)
+    return merged
