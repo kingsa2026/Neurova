@@ -48,6 +48,8 @@ EXPECTED_NON_REPRODUCIBLE = {
     "browser_cookies", "browser_storage", "browser_console",
     # 采集与扩展：download/pdf 落盘产物（重放登记第二份）；drag/upload 是页面写
     "browser_download", "browser_pdf", "browser_drag", "browser_upload",
+    # 环境自举：装内核是环境变更，重放会再改环境
+    "browser_install",
     "computer_som_snapshot", "computer_dom_snapshot",
     # P0-3 会话式 shell：进程输出不可重放（重跑时系统状态已变）
     "exec_command", "write_stdin",

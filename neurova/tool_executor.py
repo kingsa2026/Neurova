@@ -103,6 +103,7 @@ COMPUTER_USE_TOOLS = frozenset(
         "browser_pdf",
         "browser_drag",
         "browser_upload",
+        "browser_install",
     }
 )
 
@@ -192,6 +193,7 @@ _COMPUTER_TOOL_PARAM_KEYS: Dict[str, frozenset] = {
     "browser_pdf": frozenset({"generation"}),
     "browser_drag": frozenset({"source_role", "source_name", "target_role", "target_name", "generation"}),
     "browser_upload": frozenset({"role", "name", "paths", "generation"}),
+    "browser_install": frozenset({"browser"}),
 }
 
 _BUTTON_ALIASES = {
@@ -337,6 +339,8 @@ def describe_computer_action(tool_name: str, params: Dict) -> str:
     if tool_name == "browser_upload":
         paths = params.get("paths") or []
         return f"上传 {len(paths)} 个文件"
+    if tool_name == "browser_install":
+        return f"安装浏览器内核 {params.get('browser', 'chromium')}"
     return tool_name
 
 
@@ -432,6 +436,7 @@ class ToolExecutor:
         "browser_pdf": "_execute_browser_pdf",
         "browser_drag": "_execute_browser_drag",
         "browser_upload": "_execute_browser_upload",
+        "browser_install": "_execute_browser_install",
         "planning": "_execute_planning",
         "youtube_transcript": "_execute_youtube_transcript",
         "browser_read": "_execute_browser_read",
@@ -7031,6 +7036,20 @@ class ToolExecutor:
         except Exception as e:
             logger.error("文件上传失败: %s", e)
             return {"error": f"文件上传失败: {str(e)}"}
+
+    async def _execute_browser_install(self, params: Dict) -> Dict:
+        """安装浏览器内核并重探（环境变更动作——调用前模型须先征得用户同意）"""
+        browser = str(params.get("browser") or "chromium").strip().lower()
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            result = self._normalize_browser_result(await manager.browser_install(browser))
+            await self._emit_computer_event("browser_install", params, result)
+            return result
+        except Exception as e:
+            logger.error("浏览器内核安装失败: %s", e)
+            return {"error": f"浏览器内核安装失败: {str(e)}"}
 
     async def _execute_planning(self, params: Dict) -> Dict:
         """任务计划工具：7 个子命令（create/update/list/get/set_active/mark_step/delete）。

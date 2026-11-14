@@ -768,6 +768,13 @@ class ComputerUseManager:
             return await bm.upload_files(role, paths, name=name, generation=generation)
         return {"error": "浏览器管理器不可用"}
 
+    async def browser_install(self, browser: str = "chromium") -> typing.Any:
+        """安装浏览器内核并重探（环境变更动作，调用前须经用户同意）"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.install_kernel(browser)
+        return {"error": "浏览器管理器不可用"}
+
     async def browser_capabilities(self) -> typing.Any:
         """查询当前后端能力清单"""
         bm = self._get_browser_manager()
