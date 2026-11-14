@@ -35,7 +35,8 @@ import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import { Map as MaplibreMap, Marker, Popup, AttributionControl } from 'maplibre-gl'
 import GlassButton from '@/components/GlassButton.vue'
-import { request } from '@/api'
+import { getKnowledgeGeo } from '@/api/modules/knowledge'
+import { getKnowledgeGraphSpatialNodes } from '@/api/modules/knowledge-graph'
 
 const props = defineProps<{
   nodes?: Array<{ id: string; label: string; type: string }>
@@ -71,12 +72,11 @@ const fetchGeo = async () => {
       params.lon = lon.value
       params.radius_km = radiusKm.value
     }
-    const res: any = await request.get('/knowledge/geo', { params })
+    const res: any = await getKnowledgeGeo(params)
     items.value = res?.data?.items ?? []
     if (props.agentId) {
       try {
-        const nr: any = await request.get(
-          `/knowledge-graph/${props.agentId}/spatial-nodes`)
+        const nr: any = await getKnowledgeGraphSpatialNodes(props.agentId)
         nodeGeo.value = nr?.data ?? []
       } catch {
         nodeGeo.value = []

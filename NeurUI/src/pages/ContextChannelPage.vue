@@ -42,7 +42,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
+import {
+  getChannelSharingConfig,
+  getAvailableSharingChannels,
+  updateSharedChannels,
+  testChannelSharing,
+} from '@/api/modules/channel-sharing'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -84,8 +89,8 @@ async function fetchSharings() {
     // （{type, label, description, is_shared}）。此前按数组解析该信封，
     // v-for 遍历对象导致卡片标题全空（无渠道名）。
     const [cfgRes, availRes] = await Promise.all([
-      request.get('/channel-sharing') as Promise<unknown>,
-      request.get('/channel-sharing/available-channels') as Promise<unknown>,
+      getChannelSharingConfig(),
+      getAvailableSharingChannels(),
     ])
     sharingEnabled.value = !!((cfgRes as { data?: { config?: { enabled?: boolean } } })?.data?.config?.enabled)
     const channels =
@@ -107,7 +112,7 @@ async function handleToggle(channelId: string, enabled: boolean) {
       .filter((c) => c.channelId !== channelId && c.sharingEnabled)
       .map((c) => c.channelId)
     const next = [...others, ...(enabled ? [channelId] : [])]
-    await request.post('/channel-sharing/channels', { channels: next, shared_context: sharingEnabled.value })
+    await updateSharedChannels({ channels: next, shared_context: sharingEnabled.value })
     await fetchSharings()
   } catch { /* handled */ }
 }
@@ -115,7 +120,7 @@ async function handleToggle(channelId: string, enabled: boolean) {
 async function handleTest(channelId: string) {
   testingId.value = channelId
   try {
-    await request.post('/channel-sharing/test', { channel: channelId })
+    await testChannelSharing(channelId)
   } catch { /* handled */ } finally { testingId.value = null }
 }
 

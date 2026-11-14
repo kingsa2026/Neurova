@@ -494,7 +494,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getSettings, updateSettings, clearCache as clearCacheApi, getGovernanceSettings, updateGovernanceSettings, getAgentLimits, updateAgentLimits, getToolOffloadSettings, updateToolOffloadSettings, getLlmRetrySettings, updateLlmRetrySettings, getTaskProfileSettings, updateTaskProfileSettings, getAgentExecProfiles, updateAgentExecProfile, getEvalCoresetSettings, updateEvalCoresetSettings, getEvalExperimentSettings, updateEvalExperimentSettings, getRetrievalRecipe, updateRetrievalRecipe } from '@/api/modules/settings'
 import type { AgentExecProfile } from '@/api/modules/settings'
-import api from '@/api'
+import { listAgents } from '@/api/modules/agents'
 import type { AgentLimits, AgentLimitDomains, AgentLimitDomain } from '@/api/modules/settings'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
@@ -907,7 +907,7 @@ const fetchAgentProfiles = async () => {
   try {
     const [profilesRes, agentsRes] = await Promise.all([
       getAgentExecProfiles(),
-      api.get('/agents'),
+      listAgents(),
     ])
     const profiles = (profilesRes as any)?.data?.data ?? {}
     const agentsPayload = (agentsRes as any)?.data ?? (agentsRes as any)

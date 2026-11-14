@@ -88,7 +88,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
+import { listBenchmarkSuites, listBenchmarkResults, runBenchmarkSuite } from '@/api/modules/benchmark'
 import { useAgentStore } from '@/stores/agents'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -152,7 +152,7 @@ const agentResultColumns = computed(() => [
 const fetchSuites = async () => {
   loading.value = true
   try {
-    const res: any = await request.get('/benchmark/suites')
+    const res: any = await listBenchmarkSuites()
     // 契约：信封 {code, data:{suites}}。此前取 res?.data 得到的是 data
     // 对象 {suites,total}，v-for 遍历对象 → 无名称幽灵卡，套件名丢失。
     suites.value = res?.data?.suites ?? (Array.isArray(res?.data) ? res.data : [])
@@ -168,7 +168,7 @@ const fetchResults = async (suiteId?: string) => {
   try {
     const params: any = {}
     if (suiteId) params.suite_id = suiteId
-    const res: any = await request.get('/benchmark/results', { params })
+    const res: any = await listBenchmarkResults(params)
     // 契约：/results 是 /runs 的别名，result 列表在 data.items（data.results 不存在）。
     const data = res?.data ?? res ?? {}
     results.value = data.items ?? (Array.isArray(data) ? data : [])
@@ -212,7 +212,7 @@ const runBenchmark = async () => {
   if (!selectedSuite.value) return
   running.value = true
   try {
-    const res: any = await request.post('/benchmark/run', {
+    const res: any = await runBenchmarkSuite({
       suite_id: selectedSuite.value.id,
       agent_id: effectiveAgentId.value,
     })
@@ -228,7 +228,7 @@ const runBenchmark = async () => {
 const runSuite = async (suiteId: string) => {
   running.value = true
   try {
-    const res: any = await request.post('/benchmark/run', {
+    const res: any = await runBenchmarkSuite({
       suite_id: suiteId,
       agent_id: effectiveAgentId.value,
     })

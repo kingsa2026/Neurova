@@ -31,6 +31,8 @@ vi.mock('@/api/modules/memory', () => ({
 vi.mock('@/api/modules/growth', () => ({
   getMotivation: vi.fn().mockResolvedValue({ code: 0, data: null }),
   getPersonality: vi.fn().mockResolvedValue({ code: 0, data: null }),
+  updatePersonality: vi.fn().mockResolvedValue({ code: 0, data: null }),
+  evolvePersonality: vi.fn().mockResolvedValue({ code: 0, data: null }),
 }))
 
 vi.mock('@/api', () => ({
@@ -51,7 +53,7 @@ vi.mock('ant-design-vue', async () => {
 
 import AgentPersonalityPage from '@/pages/AgentPersonalityPage.vue'
 import { message } from 'ant-design-vue'
-import { request } from '@/api'
+import { getPersonality, updatePersonality } from '@/api/modules/growth'
 
 const zhMessages = {
   nav: { persona: '人格', emotion: '情绪', personality: '个性' },
@@ -94,7 +96,7 @@ async function clickSave(wrapper: ReturnType<typeof mount>) {
   await editBtn!.trigger('click')
   const saveBtn = wrapper.findAll('.glass-btn').find((b) => b.text() === '保存')
   expect(saveBtn, '编辑态应有保存按钮').toBeTruthy()
-  vi.mocked(request.put).mockClear()
+  vi.mocked(updatePersonality).mockClear()
   await saveBtn!.trigger('click')
   await flushPromises()
 }
@@ -103,27 +105,25 @@ describe('AgentPersonalityPage 保存回读校验', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     // 前置：服务端已有档案（编辑流程存在的前提）；值与滑杆初始一致避免噪声
-    vi.mocked(request.get).mockResolvedValue({
+    // P2-21：取数收口到 api/modules/growth，桩随通道移到 getPersonality/updatePersonality
+    vi.mocked(getPersonality).mockResolvedValue({
       code: 0, message: 'success',
       data: { agent_id: 'a1', traits: { openness: 0.7, conscientiousness: 0.6, extraversion: 0.5, agreeableness: 0.8, neuroticism: 0.3, creativity: 0.65 }, values: [], communication_style: 'balanced', decision_style: 'analytical' },
     } as any)
-    vi.mocked(request.post).mockResolvedValue({ data: {} } as any)
   })
 
   it('PUT 回读 envelope.data.traits 与写入一致 → 成功提示并退出编辑态', async () => {
     const wrapper = mountPage()
     await flushPromises()
     const sent = { openness: 0.7, conscientiousness: 0.6, extraversion: 0.5, agreeableness: 0.8, neuroticism: 0.3, creativity: 0.65 }
-    vi.mocked(request.put).mockResolvedValueOnce({
+    vi.mocked(updatePersonality).mockResolvedValueOnce({
       code: 0, message: 'success',
       data: { agent_id: 'a1', traits: sent, values: [], communication_style: 'balanced', decision_style: 'analytical' },
     } as any)
 
     await clickSave(wrapper)
 
-    const put = vi.mocked(request.put).mock.calls.find((c) => c[0] === '/growth/personality')
-    expect(put, '保存应 PUT /growth/personality').toBeTruthy()
-    expect(put![1]).toEqual({ traits: sent })
+    expect(updatePersonality, '保存应经 updatePersonality 写 /growth/personality').toHaveBeenCalledWith('a1', { traits: sent })
     expect(message.success, '回读一致才报成功').toHaveBeenCalledWith('操作成功')
     expect(message.error).not.toHaveBeenCalled()
   })
@@ -131,7 +131,7 @@ describe('AgentPersonalityPage 保存回读校验', () => {
   it('PUT 回读与写入不一致 → 报错 + 展示校验提示条，不谎报成功', async () => {
     const wrapper = mountPage()
     await flushPromises()
-    vi.mocked(request.put).mockResolvedValueOnce({
+    vi.mocked(updatePersonality).mockResolvedValueOnce({
       code: 0, message: 'success',
       data: { agent_id: 'a1', traits: { openness: 0.1 }, values: [], communication_style: 'balanced', decision_style: 'analytical' },
     } as any)
@@ -148,7 +148,7 @@ describe('AgentPersonalityPage 保存回读校验', () => {
   it('PUT 未返回 envelope.data（旧格式/网关截断）→ 报错提示，不谎报成功', async () => {
     const wrapper = mountPage()
     await flushPromises()
-    vi.mocked(request.put).mockResolvedValueOnce({} as any)
+    vi.mocked(updatePersonality).mockResolvedValueOnce({} as any)
 
     await clickSave(wrapper)
 
@@ -160,7 +160,7 @@ describe('AgentPersonalityPage 保存回读校验', () => {
     const wrapper = mountPage()
     await flushPromises()
     const serverTraits = { openness: 0.42, conscientiousness: 0.6, extraversion: 0.5, agreeableness: 0.8, neuroticism: 0.3, creativity: 0.65 }
-    vi.mocked(request.put).mockResolvedValueOnce({
+    vi.mocked(updatePersonality).mockResolvedValueOnce({
       code: 0, message: 'success',
       data: { agent_id: 'a1', traits: serverTraits, values: [], communication_style: 'balanced', decision_style: 'analytical' },
     } as any)
@@ -177,11 +177,10 @@ describe('AgentPersonalityPage 保存回读校验', () => {
 describe('AgentPersonalityPage 特质空态引导', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(request.post).mockResolvedValue({ data: {} } as any)
   })
 
   it('服务端无持久化 traits → 个性页签显示空态引导而非默认值假档案', async () => {
-    vi.mocked(request.get).mockResolvedValueOnce({
+    vi.mocked(getPersonality).mockResolvedValueOnce({
       code: 0, message: 'success',
       data: { agent_id: 'a1', traits: {}, values: [], communication_style: 'balanced', decision_style: 'analytical' },
     } as any)
@@ -194,12 +193,12 @@ describe('AgentPersonalityPage 特质空态引导', () => {
   })
 
   it('点击"写入默认特质" → PUT 六维中性默认值（0.5），成功后退出空态', async () => {
-    vi.mocked(request.get).mockResolvedValueOnce({
+    vi.mocked(getPersonality).mockResolvedValueOnce({
       code: 0, message: 'success',
       data: { agent_id: 'a1', traits: {}, values: [], communication_style: 'balanced', decision_style: 'analytical' },
     } as any)
     const defaults = { openness: 0.5, conscientiousness: 0.5, extraversion: 0.5, agreeableness: 0.5, neuroticism: 0.5, creativity: 0.5 }
-    vi.mocked(request.put).mockResolvedValueOnce({
+    vi.mocked(updatePersonality).mockResolvedValueOnce({
       code: 0, message: 'success',
       data: { agent_id: 'a1', traits: defaults, values: [], communication_style: 'balanced', decision_style: 'analytical' },
     } as any)
@@ -212,10 +211,8 @@ describe('AgentPersonalityPage 特质空态引导', () => {
     await writeBtn!.trigger('click')
     await flushPromises()
 
-    const put = vi.mocked(request.put).mock.calls.find((c) => c[0] === '/growth/personality')
-    expect(put, '应 PUT /growth/personality').toBeTruthy()
-    expect(put![1]).toEqual({ traits: defaults })
-    expect(put![2]).toEqual({ params: { agent_id: 'a1' } })
+    // agent_id 走 query 的路由细节由 growth module 自身契约测试钉住，这里钉页面发的体
+    expect(updatePersonality, '应经 updatePersonality 写 /growth/personality').toHaveBeenCalledWith('a1', { traits: defaults })
     expect(message.success).toHaveBeenCalledWith('操作成功')
     // 成功后空态消失（回读已非空）
     const pane = wrapper.findAll('.ant-tab-pane').find((p) => p.attributes('data-tab') === '个性')!
@@ -223,11 +220,11 @@ describe('AgentPersonalityPage 特质空态引导', () => {
   })
 
   it('写入默认值回读不一致 → 报错并保持空态（不假成功）', async () => {
-    vi.mocked(request.get).mockResolvedValueOnce({
+    vi.mocked(getPersonality).mockResolvedValueOnce({
       code: 0, message: 'success',
       data: { agent_id: 'a1', traits: {}, values: [], communication_style: 'balanced', decision_style: 'analytical' },
     } as any)
-    vi.mocked(request.put).mockResolvedValueOnce({
+    vi.mocked(updatePersonality).mockResolvedValueOnce({
       code: 0, message: 'success',
       data: { agent_id: 'a1', traits: {}, values: [], communication_style: 'balanced', decision_style: 'analytical' },
     } as any)
@@ -246,7 +243,7 @@ describe('AgentPersonalityPage 特质空态引导', () => {
   })
 
   it('服务端有持久化 traits → 无空态引导，滑杆显示服务端值', async () => {
-    vi.mocked(request.get).mockResolvedValueOnce({
+    vi.mocked(getPersonality).mockResolvedValueOnce({
       code: 0, message: 'success',
       data: { agent_id: 'a1', traits: { openness: 0.8 }, values: [], communication_style: 'balanced', decision_style: 'analytical' },
     } as any)

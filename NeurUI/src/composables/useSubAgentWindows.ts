@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { api } from '@/api'
+import { getConsoleChatRuns } from '@/api/modules/console'
 import type { SubAgentWindowState } from '@/components/chat/SubAgentPanel.vue'
 
 /**
@@ -122,9 +122,7 @@ export async function restoreSubAgentWindows(
   if (!sessionId) return
   let runs: any[]
   try {
-    const res: any = await api.get('/console/chat/runs', {
-      params: { session_id: sessionId, scope: 'subagents' },
-    })
+    const res: any = await getConsoleChatRuns(sessionId, 'subagents')
     runs = res?.data?.runs ?? res?.runs ?? []
   } catch (e) {
     console.warn('[subagent] 台账读面不可用，浮窗不回填（不拿空列表冒充没有历史）:', e)

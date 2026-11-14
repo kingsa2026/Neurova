@@ -15,9 +15,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 
-vi.mock('@/api', () => ({
-  request: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
-}))
+// P2-21：页面取数收口到 api/modules/benchmark（内部走 api 门面）——
+// mock 的 request 与 default(api) 共用同一组 vi.fn，断言口径不变
+vi.mock('@/api', () => {
+  const request = { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }
+  return { request, default: request }
+})
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ user: { id: 'u1', username: 'tester', role: 'admin' } }),

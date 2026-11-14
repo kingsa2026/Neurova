@@ -15,10 +15,12 @@ import { createPinia, setActivePinia } from 'pinia'
  * agentId 变化即重取；守卫边界：store 自动兜底选中与同值切换不得触发重复取数。
  */
 
-vi.mock('@/api', () => ({
-  request: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
-  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
-}))
+vi.mock('@/api', () => {
+  const request = { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }
+  // P2-21：页面收口到 api/modules/channel-sharing（内部走 default api 门面）——
+  // default 与 request 共用同一组 vi.fn，取数次数断言口径不变
+  return { request, default: request, api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() } }
+})
 
 vi.mock('vue-router', () => ({
   // 形状须含 query：useAgentPage 的 route→store 同步 watch 读 route.query.agentId

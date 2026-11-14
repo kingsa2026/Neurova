@@ -40,6 +40,8 @@ vi.mock('@/api/modules/memory', () => ({
 vi.mock('@/api/modules/growth', () => ({
   getMotivation: vi.fn().mockResolvedValue({ code: 0, data: null }),
   getPersonality: vi.fn().mockResolvedValue({ code: 0, data: null }),
+  updatePersonality: vi.fn().mockResolvedValue({ code: 0, data: null }),
+  evolvePersonality: vi.fn().mockResolvedValue({ code: 0, data: null }),
 }))
 
 vi.mock('@/api', () => ({
@@ -60,7 +62,7 @@ vi.mock('ant-design-vue', async () => {
 
 import AgentPersonalityPage from '@/pages/AgentPersonalityPage.vue'
 import { getEmotionSummary } from '@/api/modules/memory'
-import { request } from '@/api'
+import { getPersonality, updatePersonality, evolvePersonality } from '@/api/modules/growth'
 
 const zhMessages = {
   nav: { persona: '人格', emotion: '情绪', personality: '个性' },
@@ -108,15 +110,15 @@ describe('AgentPersonalityPage agent 切换联动', () => {
     pageAgentId = undefined
     registeredOnAgentChange = undefined
     // 新契约（2026-09-16）：服务端已持久化 traits 才渲染特质列表（空态引导见 persistence.test.ts）
-    vi.mocked(request.get).mockResolvedValue({
+    // P2-21：取数收口到 api/modules/growth，桩随通道移到 module 函数
+    vi.mocked(getPersonality).mockResolvedValue({
       code: 0, message: 'success',
       data: { agent_id: 'agent-A', traits: { openness: 0.7, conscientiousness: 0.6, extraversion: 0.5, agreeableness: 0.8, neuroticism: 0.3, creativity: 0.65 }, values: [], communication_style: 'balanced', decision_style: 'analytical' },
     } as any)
-    vi.mocked(request.put).mockResolvedValue({
+    vi.mocked(updatePersonality).mockResolvedValue({
       code: 0, message: 'success',
       data: { agent_id: 'agent-A', traits: { openness: 0.7, conscientiousness: 0.6, extraversion: 0.5, agreeableness: 0.8, neuroticism: 0.3, creativity: 0.65 }, values: [], communication_style: 'balanced', decision_style: 'analytical' },
     } as any)
-    vi.mocked(request.post).mockResolvedValue({ data: {} } as any)
     vi.mocked(getEmotionSummary).mockResolvedValue({
       code: 0,
       data: { total_annotated: 1, emotion_distribution: { joy: 1 } },
@@ -128,10 +130,8 @@ describe('AgentPersonalityPage agent 切换联动', () => {
     mountPage()
     await flushPromises()
     expect(getEmotionSummary).toHaveBeenCalledWith('agent-A')
-    // 个性页签走 axios 包装 request —— 第二参数必须带 agent_id query
-    const g = vi.mocked(request.get).mock.calls.find((c) => c[0] === '/growth/personality')
-    expect(g, '个性页签应 GET /growth/personality').toBeTruthy()
-    expect((g![1] as any)?.params?.agent_id).toBe('agent-A')
+    // 个性页签走 api/modules/growth —— agent_id 由 module 以 query 带给后端
+    expect(getPersonality, '个性页签应经 getPersonality 拉 /growth/personality').toHaveBeenCalledWith('agent-A')
   })
 
   it('页面必须注册 onAgentChange（切换 agent 的数据联动总闸）', async () => {
@@ -152,11 +152,9 @@ describe('AgentPersonalityPage agent 切换联动', () => {
   it('切换 agent 后个性页签重拉且带新 agent_id', async () => {
     mountPage()
     await flushPromises()
-    vi.mocked(request.get).mockClear()
+    vi.mocked(getPersonality).mockClear()
     await switchToAgentB()
-    const g = vi.mocked(request.get).mock.calls.find((c) => c[0] === '/growth/personality')
-    expect(g, '切换后应重新 GET /growth/personality').toBeTruthy()
-    expect((g![1] as any)?.params?.agent_id).toBe('agent-B')
+    expect(getPersonality, '切换后应重新拉 /growth/personality').toHaveBeenLastCalledWith('agent-B')
   })
 
   it('保存个性写到当前 agent（防串数据）：PUT 带 agent_id 且落在编辑后的 agent', async () => {
@@ -169,14 +167,14 @@ describe('AgentPersonalityPage agent 切换联动', () => {
     await editBtn!.trigger('click')
     const saveBtn = wrapper.findAll('.glass-btn').find((b) => b.text() === '保存')
     expect(saveBtn).toBeTruthy()
-    vi.mocked(request.put).mockClear()
+    vi.mocked(updatePersonality).mockClear()
     await saveBtn!.trigger('click')
     await flushPromises()
 
-    const put = vi.mocked(request.put).mock.calls.find((c) => c[0] === '/growth/personality')
-    expect(put, '保存应 PUT /growth/personality').toBeTruthy()
-    // 第三参（axios config）携带 agent_id；body 只放 traits
-    expect((put![2] as any)?.params?.agent_id).toBe('agent-A')
+    const put = vi.mocked(updatePersonality).mock.calls.at(-1)
+    expect(put, '保存应经 updatePersonality 写 /growth/personality').toBeTruthy()
+    // 第一参 = 当前 agent（module 以 query 带给后端）；body 只放 traits
+    expect(put![0]).toBe('agent-A')
     expect((put![1] as any)?.agent_id, 'agent_id 不应混进 body（后端只认 Query）').toBeUndefined()
   })
 
@@ -185,11 +183,9 @@ describe('AgentPersonalityPage agent 切换联动', () => {
     await flushPromises()
     const evolveBtn = wrapper.findAll('.glass-btn').find((b) => b.text() === '进化')
     expect(evolveBtn, '个性页签应有进化按钮').toBeTruthy()
-    vi.mocked(request.post).mockClear()
+    vi.mocked(evolvePersonality).mockClear()
     await evolveBtn!.trigger('click')
     await flushPromises()
-    const post = vi.mocked(request.post).mock.calls.find((c) => c[0] === '/growth/personality/evolve')
-    expect(post).toBeTruthy()
-    expect((post![2] as any)?.params?.agent_id).toBe('agent-A')
+    expect(evolvePersonality, '进化应按当前 agent 调 /growth/personality/evolve').toHaveBeenCalledWith('agent-A')
   })
 })

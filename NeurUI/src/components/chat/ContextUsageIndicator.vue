@@ -74,7 +74,7 @@
  */
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import api from '@/api'
+import { getContextComposition } from '@/api/modules/context'
 
 interface TurnUsage {
   prompt: number
@@ -203,9 +203,9 @@ async function fetchComposition(): Promise<void> {
   compositionFetched.value = true
   const reqAgentId = props.agentId
   try {
-    const res: any = await api.get('/context/composition', {
-      params: { agent_id: reqAgentId, session_id: props.sessionId || '' },
-      __expectedStatus: 404,
+    const res: any = await getContextComposition({
+      agent_id: reqAgentId,
+      session_id: props.sessionId || '',
     })
     if (reqAgentId !== props.agentId) return // 已切走：丢弃过期响应
     const data = res?.data ?? res

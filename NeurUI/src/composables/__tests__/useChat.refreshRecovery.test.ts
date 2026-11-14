@@ -7,7 +7,10 @@ vi.mock('@/api', () => ({
   default: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
 }))
 
-vi.mock('@/api/modules/console', () => ({
+// P2-21：会话取数已收口到 api/modules/console——真实 module 函数打在 mock 的 api 门面上，
+// 这里只覆盖需要断言/排桩的四个函数
+vi.mock('@/api/modules/console', async () => ({
+  ...(await vi.importActual<typeof import('@/api/modules/console')>('@/api/modules/console')),
   deleteConsoleSession: vi.fn(),
   archiveConsoleSession: vi.fn(),
   unarchiveConsoleSession: vi.fn(),

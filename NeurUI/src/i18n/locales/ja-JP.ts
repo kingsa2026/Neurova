@@ -4,6 +4,7 @@ import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSec
 import { ontologySection } from './_ontologySection'
 export default {
   common: {
+    id: 'ID',
     markAllRead: 'すべて既読にする',
     markRead: '既読にする',
     clear: "クリア",
@@ -804,6 +805,21 @@ export default {
     shareGroups: '共有グループ',
     expires: '有効期限',
     metadata: 'メタデータ',
+    validFrom: '有効開始',
+    validUntil: '有効終了',
+    validityOptional: '無期限（任意）',
+    contextDebug: 'コンテキストデバッグ',
+    contextDebugDesc: '現在の Agent のコンテキストを構築し、プレビュー/圧縮します。注入面は読み取り専用表示です。',
+    contextDebugInputHint: 'テキストを入力して構築すると、コンテキスト構成をプレビューできます',
+    contextBuild: 'コンテキスト構築',
+    contextTargetTokens: '目標トークン数',
+    contextCompress: '圧縮',
+    contextInjectReflection: '反思を注入',
+    contextInjectMemories: '関連記憶を注入',
+    contextInjectHot: '高熱記憶を注入',
+    contextBuiltMeta: '構築完了：{tokens} トークン｜ソース：{sources}',
+    contextCompressedMeta: '圧縮：{original} → {compressed} トークン（{dropped} セグメント削除）',
+    contextInjectMeta: '注入読数：{count} 件',
   },
   conflictAxis: {
     entry: '重複エントリ',

@@ -596,3 +596,31 @@ export function getWebhookDedupStats() {
   return api.get<ApiResponse<{ rows: number; sources: number }>>(
     '/knowledge/ontology/webhook/dedup-stats')
 }
+
+// ---------------------------------------------------------------------------
+// Ontology rules（P2-21：自 GraphWorkbenchPage 裸写 URL 收编；路径/参数逐字对齐原调用）
+// ---------------------------------------------------------------------------
+
+/** 规则写入口径（create 带 rule_id，update 不带——主键走路径）。 */
+export interface OntologyRulePayload {
+  head_predicate: string
+  body: Array<Record<string, unknown>>
+  basis: string
+}
+
+/** Create an ontology rule. */
+export function createOntologyRule(data: OntologyRulePayload & { rule_id: string }) {
+  return api.post<ApiResponse<unknown>>('/knowledge/ontology/rules', data)
+}
+
+/** Update an ontology rule. */
+export function updateOntologyRule(ruleId: string, data: OntologyRulePayload) {
+  return api.put<ApiResponse<unknown>>(
+    `/knowledge/ontology/rules/${encodeURIComponent(ruleId)}`, data)
+}
+
+/** Delete an ontology rule（basis 走 query 留审计痕迹）。 */
+export function deleteOntologyRule(ruleId: string, params?: { basis?: string }) {
+  return api.delete<ApiResponse<null>>(
+    `/knowledge/ontology/rules/${encodeURIComponent(ruleId)}`, { params })
+}

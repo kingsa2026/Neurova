@@ -4,6 +4,7 @@ import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSec
 import { ontologySection } from './_ontologySection'
 export default {
   common: {
+    id: 'ID',
     markAllRead: 'Mark all read',
     markRead: 'Mark read',
     clear: "Clear",
@@ -806,6 +807,21 @@ export default {
     shareGroups: 'Share groups',
     expires: 'Expires',
     metadata: 'Metadata',
+    validFrom: 'Valid from',
+    validUntil: 'Valid until',
+    validityOptional: 'No bound (optional)',
+    contextDebug: 'Context debug',
+    contextDebugDesc: 'Build the current agent context, preview and compress it; injection views are read-only.',
+    contextDebugInputHint: 'Type text, then build to preview the context composition',
+    contextBuild: 'Build context',
+    contextTargetTokens: 'Target tokens',
+    contextCompress: 'Compress',
+    contextInjectReflection: 'Inject reflection',
+    contextInjectMemories: 'Inject memories',
+    contextInjectHot: 'Inject hot memories',
+    contextBuiltMeta: 'Built: {tokens} tokens | sources: {sources}',
+    contextCompressedMeta: 'Compressed: {original} → {compressed} tokens ({dropped} segments dropped)',
+    contextInjectMeta: 'Injected: {count} items',
   },
   conflictAxis: {
     entry: 'Duplicate entry',

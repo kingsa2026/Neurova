@@ -39,7 +39,7 @@
  */
 import { nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import api from '@/api'
+import { getConsoleChatHistory } from '@/api/modules/console'
 import { escapeHtml } from '@/utils/security'
 
 interface SessionLike {
@@ -121,7 +121,7 @@ async function search(): Promise<void> {
   for (const session of props.sessions) {
     if (epoch !== searchEpoch) return // 面板已关闭或新搜索启动
     try {
-      const res: any = await api.get(`/console/chat/history?session_id=${session.id}`)
+      const res: any = await getConsoleChatHistory(session.id)
       const data = res?.data ?? res
       const messages: Array<Record<string, unknown>> = Array.isArray(data) ? data : (data?.messages ?? [])
       for (let i = 0; i < messages.length; i++) {

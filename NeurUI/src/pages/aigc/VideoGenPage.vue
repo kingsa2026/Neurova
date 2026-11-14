@@ -7,8 +7,7 @@
 import { onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
-import { request } from '@/api'
-import { generateImage, submitVideo, resolveGeneration, type VideoGenerationPayload } from '@/api/modules/generation'
+import { generateImage, submitVideo, getVideoTaskStatus, resolveGeneration, type VideoGenerationPayload } from '@/api/modules/generation'
 import { uploadFile } from '@/api/modules/files'
 import { useAigcModels } from '@/composables/useAigcModels'
 import { withFileToken } from '@/utils/genFiles'
@@ -103,7 +102,7 @@ function pollStatus(taskId: string) {
   if (pollTimer) clearInterval(pollTimer)
   pollTimer = setInterval(async () => {
     try {
-      const res: any = await request.get(`/generation/video/status/${taskId}`)
+      const res: any = await getVideoTaskStatus(taskId)
       const data = res?.data ?? res
       status.value = {
         status: data?.status ?? 'processing',

@@ -692,3 +692,81 @@ export function deleteKnowledgeCategory(categoryId: string) {
     `${BASE}/categories/${encodeURIComponent(categoryId)}`,
   )
 }
+
+// ---------------------------------------------------------------------------
+// MCP sources（P2-21：自 KnowledgePage 裸写 URL 收编；路径/参数逐字对齐原调用）
+// ---------------------------------------------------------------------------
+
+/** MCP 源登记/写入口径（create/update 同一体）。 */
+export interface McpSourcePayload {
+  name: string
+  endpoint: string
+  auth_token: string
+  tool_name: string
+  tool_args: Record<string, unknown>
+  agent_id: string
+}
+
+/** List registered MCP sources（信封 data.items）。 */
+export function listMcpSources() {
+  return api.get<ApiResponse<{ items: unknown[] }>>(`${BASE}/mcp/sources`)
+}
+
+/** Probe the tools exposed by an MCP endpoint（不落库的连通性/工具清单探测）。 */
+export function probeMcpTools(data: { endpoint: string; auth_token: string }) {
+  return api.post<ApiResponse<{ tools: unknown[] }>>(`${BASE}/mcp/sources/tools`, data)
+}
+
+/** Register a new MCP source. */
+export function createMcpSource(data: McpSourcePayload) {
+  return api.post<ApiResponse<Record<string, unknown>>>(`${BASE}/mcp/sources`, data)
+}
+
+/** Update a registered MCP source. */
+export function updateMcpSource(sourceId: string, data: McpSourcePayload) {
+  return api.put<ApiResponse<Record<string, unknown>>>(`${BASE}/mcp/sources/${sourceId}`, data)
+}
+
+/** Pull（拉取入库）一个已登记 MCP source。 */
+export function pullMcpSource(sourceId: string) {
+  return api.post<ApiResponse<Record<string, unknown>>>(`${BASE}/mcp/sources/${sourceId}/pull`)
+}
+
+/** Delete a registered MCP source. */
+export function deleteMcpSource(sourceId: string) {
+  return api.delete<ApiResponse<null>>(`${BASE}/mcp/sources/${sourceId}`)
+}
+
+// ---------------------------------------------------------------------------
+// 导入（文件 / URL）
+// ---------------------------------------------------------------------------
+
+/** Import a knowledge file（multipart；抽取失败回 code=1 + status，不谎报成功）。 */
+export function importKnowledgeFile(
+  formData: FormData,
+  params: { agent_id: string; category?: string },
+) {
+  return api.post<ApiResponse<{ items: unknown[]; status?: string }>>(`${BASE}/import`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    params,
+  })
+}
+
+/** Import a knowledge document from a URL. */
+export function importKnowledgeFromUrl(params: { agent_id: string; url: string; category?: string }) {
+  return api.post<ApiResponse<unknown>>(`${BASE}/import-url`, null, { params })
+}
+
+// ---------------------------------------------------------------------------
+// 图谱实例 / 地理
+// ---------------------------------------------------------------------------
+
+/** Create a graph instance（SPO 边 + 证据；信封 data.fact_id）。 */
+export function createGraphInstance(data: Record<string, unknown>) {
+  return api.post<ApiResponse<{ fact_id?: string }>>(`${BASE}/graph/instances`, data)
+}
+
+/** Query knowledge entries with geo coordinates（可选 lat/lon/radius_km 过滤）。 */
+export function getKnowledgeGeo(params: Record<string, unknown>) {
+  return api.get<ApiResponse<{ items: unknown[] }>>(`${BASE}/geo`, { params })
+}

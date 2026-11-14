@@ -330,11 +330,11 @@ import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { useAuthStore } from '@/stores/auth'
 import { extractApiDetail } from '@/utils/error'
-import { request } from '@/api'
+import { getKnowledgeGraphStudio, searchKnowledgeGraphNodes, getKnowledgeGraphSubgraph } from '@/api/modules/knowledge-graph'
+import { createGraphInstance } from '@/api/modules/knowledge'
 import { forceLayoutFull, LAYOUT_NODE_BUDGET } from '@/pages/graph-workbench/forceLayout'
 import { NODE_BUDGET, withinNodeBudget } from '@/pages/graph-workbench/perfBudget'
-import { detectOntologyCommunities } from '@/api/modules/ontology'
-import { listOntologyCommunities } from '@/api/modules/ontology'
+import { detectOntologyCommunities, listOntologyCommunities, createOntologyRule, updateOntologyRule, deleteOntologyRule } from '@/api/modules/ontology'
 import FlowEdge from '@/pages/graph-workbench/FlowEdge.vue'
 import { FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons-vue'
 // 全屏助手与协作画布共用同一份（标准 API 优先、webkit 前缀回退），不另造平行实装。
@@ -603,7 +603,7 @@ const kindColor = (kind: string) =>
 const fetchStudio = async () => {
   loading.value = true
   try {
-    const res: any = await request.get(`/knowledge-graph/${agentId.value}/studio`)
+    const res: any = await getKnowledgeGraphStudio(agentId.value)
     studio.value = res?.data ?? res
     loadSavedLayout()
     // 强制求值 flowNodes：layoutBounds 在 computed 内更新，随后算初始视口。
@@ -645,11 +645,10 @@ const saveRule = async () => {
       basis: ruleForm.basis,
     }
     if (editingRuleId.value) {
-      await request.put(
-        `/knowledge/ontology/rules/${encodeURIComponent(editingRuleId.value)}`, payload)
+      await updateOntologyRule(editingRuleId.value, payload)
       message.success(t('knowledge.workbenchRuleUpdated'))
     } else {
-      await request.post('/knowledge/ontology/rules', { rule_id: ruleForm.rule_id, ...payload })
+      await createOntologyRule({ rule_id: ruleForm.rule_id, ...payload })
       message.success(t('knowledge.workbenchRuleCreated'))
     }
     ruleForm.rule_id = ''
@@ -686,9 +685,9 @@ const cancelEditRule = () => {
 
 const deleteRule = async (rule: OntologyRule) => {
   try {
-    await request.delete(
-      `/knowledge/ontology/rules/${encodeURIComponent(rule.rule_id)}`,
-      { params: { basis: t('knowledge.workbenchDeleteRuleBasis') } })
+    await deleteOntologyRule(
+      rule.rule_id,
+      { basis: t('knowledge.workbenchDeleteRuleBasis') })
     message.success(t('knowledge.workbenchRuleDeleted'))
     await fetchStudio()
   } catch (e: any) {
@@ -704,7 +703,7 @@ const createInstance = async () => {
   }
   edgeSaving.value = true
   try {
-    const res: any = await request.post('/knowledge/graph/instances', {
+    const res: any = await createGraphInstance({
       agent_id: agentId.value,
       ...instanceForm,
     })
@@ -736,9 +735,9 @@ const searchNodes = async () => {
   }
   searchBusy.value = true
   try {
-    const res: any = await request.get(
-      `/knowledge-graph/${agentId.value}/knowledge-graph/search`,
-      { params: { q, limit: 10 } })
+    const res: any = await searchKnowledgeGraphNodes(
+      agentId.value,
+      { q, limit: 10 })
     const data = res?.data ?? res
     searchHits.value = (data?.nodes ?? []) as StudioNode[]
   } catch (e: any) {
@@ -763,9 +762,9 @@ const loadFocusNeighborhood = async (id: string) => {
   loading.value = true
   try {
     // limit 缺省跟全局设置 advanced.graph_studio_limit（服务端单点解析），客户端不定值
-    const res: any = await request.get(
-      `/knowledge-graph/${agentId.value}/subgraph`,
-      { params: { focus: id, hops: 2 } })
+    const res: any = await getKnowledgeGraphSubgraph(
+      agentId.value,
+      { focus: id, hops: 2 })
     const data = res?.data ?? res
     localRender.value = {
       nodes: data?.nodes ?? [],

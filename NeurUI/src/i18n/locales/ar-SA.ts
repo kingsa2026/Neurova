@@ -4,6 +4,7 @@ import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSec
 import { ontologySection } from './_ontologySection'
 export default {
   common: {
+    id: 'ID',
     markAllRead: 'وضع علامة مقروء على الكل',
     markRead: 'وضع علامة مقروء',
     clear: "مسح",
@@ -804,6 +805,21 @@ export default {
     shareGroups: 'مجموعات المشاركة',
     expires: 'ينتهي في',
     metadata: 'البيانات الوصفية',
+    validFrom: 'صالح من',
+    validUntil: 'صالح حتى',
+    validityOptional: 'بلا حد (اختياري)',
+    contextDebug: 'تصحيح السياق',
+    contextDebugDesc: 'يبني سياق الوكيل الحالي ويعاينه ويضغطه؛ واجهات الحقن للقراءة فقط.',
+    contextDebugInputHint: 'اكتب نصًا ثم ابنِ السياق لمعاينة تركيبته',
+    contextBuild: 'بناء السياق',
+    contextTargetTokens: 'الرموز المستهدفة',
+    contextCompress: 'ضغط',
+    contextInjectReflection: 'حقن التأملات',
+    contextInjectMemories: 'حقن الذكريات',
+    contextInjectHot: 'حقن الذكريات الساخنة',
+    contextBuiltMeta: 'تم البناء: {tokens} رمزًا | المصادر: {sources}',
+    contextCompressedMeta: 'تم الضغط: {original} → {compressed} رمزًا (حذف {dropped} مقطعًا)',
+    contextInjectMeta: 'تم الحقن: {count} عنصرًا',
   },
   conflictAxis: {
     entry: 'مدخل مكرر',

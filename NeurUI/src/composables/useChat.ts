@@ -1,10 +1,19 @@
 import { ref } from 'vue'
-import api from '@/api'
 import {
   archiveConsoleSession,
   deleteConsoleSession,
   getConsoleSessionTimeline,
   unarchiveConsoleSession,
+  getConsoleSessions,
+  getConsoleChatHistory,
+  getArchivedConsoleSessions,
+  createConsoleSession,
+  renameConsoleSession,
+  pinConsoleSession,
+  deleteConsoleRound,
+  sendConsoleFeedback,
+  forkConsoleSession,
+  setConsoleCheckpoint,
 } from '@/api/modules/console'
 import { useChatStore } from '@/stores/chat'
 import type { ChatMessage, Session } from '@/types/chat'
@@ -139,8 +148,7 @@ export function useChat(options: UseChatOptions = {}) {
   async function loadSessions(agentId: string): Promise<void> {
     loadingSessions.value = true
     try {
-      const agentParam = agentId ? `?agent_id=${agentId}` : ''
-      const res: any = await api.get(`/console/chat/sessions${agentParam}`)
+      const res: any = await getConsoleSessions(agentId ? { agent_id: agentId } : undefined)
       const data = res?.data ?? res
       const sessionList = data?.sessions ?? data ?? []
       const mapped: Session[] = sessionList.map(
@@ -184,7 +192,7 @@ export function useChat(options: UseChatOptions = {}) {
    */
   async function createSession(agentId: string, defaultTitle: string = i18n.global.t('ui.newConversation')): Promise<string | null> {
     try {
-      const res: any = await api.post('/console/chat/new', { agent_id: agentId, title: defaultTitle })
+      const res: any = await createConsoleSession(agentId, defaultTitle)
       const data = res?.data ?? res
       // 幽灵 session 防御 (chat.loadHistoryFailed toast 根因修复):
       // 旧契约 fallback `|| crypto.randomUUID()` 会生成前端 UUID, 后端不知道,
@@ -239,7 +247,7 @@ export function useChat(options: UseChatOptions = {}) {
     // 旧 history 响应后到会覆盖新会话的消息列表，写入前校验归属
     const reqSeq = ++switchSessionSeq
     try {
-      const res: any = await api.get(`/console/chat/history?session_id=${sessionId}`)
+      const res: any = await getConsoleChatHistory(sessionId)
       if (reqSeq !== switchSessionSeq || store.currentSessionId !== sessionId) {
         return { ok: true } // 已被更新的切换取代，丢弃过期响应
       }
@@ -473,8 +481,7 @@ export function useChat(options: UseChatOptions = {}) {
    */
   async function loadArchivedSessions(agentId: string): Promise<void> {
     try {
-      const agentParam = agentId ? `?agent_id=${agentId}` : ''
-      const res: any = await api.get(`/console/chat/sessions/archived${agentParam}`)
+      const res: any = await getArchivedConsoleSessions(agentId ? { agent_id: agentId } : undefined)
       const data = res?.data ?? res
       const archivedList = data?.sessions ?? data ?? []
       const mapped: Session[] = archivedList.map(
@@ -571,7 +578,7 @@ export function useChat(options: UseChatOptions = {}) {
     const trimmed = title.trim()
     if (!trimmed) return false
     try {
-      await api.put(`/console/chat/sessions/${sessionId}`, { title: trimmed })
+      await renameConsoleSession(sessionId, trimmed)
       store.renameSessionTitle(sessionId, trimmed)
       bus.emit('chat:session-renamed', { sessionId, title: trimmed })
       return true
@@ -588,7 +595,7 @@ export function useChat(options: UseChatOptions = {}) {
    */
   async function pinSession(sessionId: string, pinned: boolean): Promise<boolean> {
     try {
-      await api.post(`/console/chat/sessions/${sessionId}/pin`, { pinned })
+      await pinConsoleSession(sessionId, pinned)
       store.setSessionPinned(sessionId, pinned)
       return true
     } catch (err) {
@@ -612,9 +619,7 @@ export function useChat(options: UseChatOptions = {}) {
    */
   async function deleteRound(sessionId: string, timestamp: string): Promise<DeleteResult> {
     try {
-      await api.delete(
-        `/console/chat/rounds?session_id=${encodeURIComponent(sessionId)}&timestamp=${encodeURIComponent(timestamp)}`,
-      )
+      await deleteConsoleRound(sessionId, timestamp)
       return { ok: true }
     } catch (err) {
       const status = (err as any)?.response?.status
@@ -637,11 +642,7 @@ export function useChat(options: UseChatOptions = {}) {
     feedback: 'like' | 'dislike' | null,
   ): Promise<boolean> {
     try {
-      await api.post('/console/chat/feedback', {
-        session_id: sessionId,
-        timestamp,
-        feedback,
-      })
+      await sendConsoleFeedback(sessionId, timestamp, feedback)
       return true
     } catch (err) {
       console.error('[Chat] Feedback failed:', err)
@@ -660,9 +661,7 @@ export function useChat(options: UseChatOptions = {}) {
     untilTimestamp?: string,
   ): Promise<{ ok: true; newSessionId: string } | { ok: false; error: unknown }> {
     try {
-      const res: any = await api.post(`/console/chat/sessions/${sessionId}/fork`, {
-        until_timestamp: untilTimestamp || null,
-      })
+      const res: any = await forkConsoleSession(sessionId, untilTimestamp)
       const newSessionId: string = res?.data?.new_session_id ?? res?.new_session_id ?? ''
       if (!newSessionId) return { ok: false, error: 'no new_session_id' }
       return { ok: true, newSessionId }
@@ -677,11 +676,7 @@ export function useChat(options: UseChatOptions = {}) {
    */
   async function setCheckpoint(sessionId: string, timestamp: string, active: boolean): Promise<boolean> {
     try {
-      await api.post('/console/chat/checkpoint', {
-        session_id: sessionId,
-        timestamp,
-        active,
-      })
+      await setConsoleCheckpoint(sessionId, timestamp, active)
       return true
     } catch (err) {
       console.error('[Chat] Checkpoint failed:', err)

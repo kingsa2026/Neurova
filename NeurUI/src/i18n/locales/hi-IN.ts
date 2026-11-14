@@ -4,6 +4,7 @@ import { knowledgeEvalSection, knowledgeEvalNavLabel } from './_knowledgeEvalSec
 import { ontologySection } from './_ontologySection'
 export default {
   common: {
+    id: 'ID',
     markAllRead: 'सभी को पढ़ा हुआ चिह्नित करें',
     markRead: 'पढ़ा हुआ चिह्नित करें',
     clear: "साफ़ करें",
@@ -804,6 +805,21 @@ export default {
     shareGroups: 'साझा समूह',
     expires: 'समाप्ति',
     metadata: 'मेटाडेटा',
+    validFrom: 'मान्य प्रारंभ',
+    validUntil: 'मान्य अंत',
+    validityOptional: 'असीमित (वैकल्पिक)',
+    contextDebug: 'संदर्भ डिबग',
+    contextDebugDesc: 'वर्तमान एजेंट का संदर्भ बनाएँ, पूर्वावलोकन और संपीड़न करें; इंजेक्शन दृश्य केवल पढ़ने के लिए हैं।',
+    contextDebugInputHint: 'टेक्स्ट लिखें और संदर्भ बनाएँ ताकि उसकी संरचना देख सकें',
+    contextBuild: 'संदर्भ बनाएँ',
+    contextTargetTokens: 'लक्ष्य टोकन',
+    contextCompress: 'संपीड़ित करें',
+    contextInjectReflection: 'चिंतन इंजेक्ट करें',
+    contextInjectMemories: 'स्मृतियाँ इंजेक्ट करें',
+    contextInjectHot: 'गर्म स्मृतियाँ इंजेक्ट करें',
+    contextBuiltMeta: 'बन गया: {tokens} टोकन | स्रोत: {sources}',
+    contextCompressedMeta: 'संपीड़ित: {original} → {compressed} टोकन ({dropped} खंड हटाए)',
+    contextInjectMeta: 'इंजेक्ट: {count} आइटम',
   },
   conflictAxis: {
     entry: 'डुप्लिकेट प्रविष्टि',
