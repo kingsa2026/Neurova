@@ -1,0 +1,115 @@
+version: 1
+
+# 架构即代码（P1-7）：模块分层、依赖方向、直连 Agent 收口、尺寸棘轮。
+# 规则注释只写在这里；生成态数据（尺寸基线/存量违规计数）在
+# scripts/ci/architecture_baseline.json，由 architecture_check.py --update-baselines 维护。
+#
+# 判据（与 AGENTS.md §3 同源）：
+#   - 层级方向：模块级 import 只允许指向同级或更低层（layerOrder 序号小 = 更底层）。
+#     函数内惰性 import 豁免——深模块经 agent_ref 依赖注入访问 Agent，不做模块级直连。
+#   - 直连 Agent：neurova.agent 仅允许 directAgentImportAllowlist 内的模块在模块级引入。
+#   - 尺寸：单文件 ≤ sizeHardCapLines 行；基线内文件按基线（只降不升）。
+
+layerOrder: [L0_foundation, L1_services, L2_orchestration, L3_delivery]
+
+layers:
+  # L0 基础设施：配置、接口、模型定义、日志、语言工具。不得依赖任何更高层。
+  L0_foundation:
+    - core
+    - shared_config
+    - interfaces
+    - models
+    - error_logger
+    - language
+  # L1 领域服务：安全、沙箱、模型接入、上下文、记忆、知识、技能、媒体与语音。
+  L1_services:
+    - security
+    - sandbox
+    - llm
+    - llm_client
+    - embedding
+    - knowledge
+    - context
+    - memory
+    - cognitive
+    - cognitive_layers
+    - memory_ingest
+    - skill_system
+    - skills
+    - plugins
+    - auth
+    - sync
+    - notifications
+    - media
+    - image_pipeline
+    - asr
+    - tts
+    - voice_context_module
+    - voice_engine
+    - voice_memory_bridge
+    - voice_pipeline
+    - computer_use
+    - document_model
+    - document_pdf
+    - document_sources
+    - attachment_parser
+    - attachment_dataset
+    - http_fetch
+    - crdt
+    - tool_layers
+    - session_manager
+    - session_repository
+    - web_reach
+  # L2 编排：Agent 循环、工具执行、规划、会话、协作、演化与质量。
+  L2_orchestration:
+    - agent
+    - agent_core
+    - agent_config
+    - agent_loop_detection
+    - agent_migration
+    - agent_shutdown
+    - tool_executor
+    - builtin_tools
+    - planning
+    - plan_mode
+    - context_pool
+    - context_pool_registry
+    - conversation_context
+    - session_title
+    - post_chat_pipeline
+    - checkpoints
+    - recovery
+    - execution_engine
+    - execution_layers
+    - collaboration
+    - collaborate
+    - guest_agent
+    - build_mode
+    - quality
+    - evolution
+    - experiments
+    - benchmark
+    - backup
+    - shared_core
+    - mem_core
+    - mcp_ontology_server
+    - router
+  # L3 交付面：HTTP API、管理台、渠道接入与对外工作室。
+  L3_delivery:
+    - api
+    - admin
+    - channels
+    - aigc_studio
+    - analytics
+    - tunnel
+    - relay
+
+# 模块级 `import neurova.agent` / `from neurova.agent import ...` 的白名单。
+# agent 包自身内部引用不在此列（同包天然允许）。
+directAgentImportAllowlist:
+  - agent_core
+  - api
+
+# 单文件行数硬上限；超过者必须登记进 architecture_baseline.json 的 sizeBaselines
+# （逐文件基线，只降不升——改小后应同步下调基线）。
+sizeHardCapLines: 3000
