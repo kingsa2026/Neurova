@@ -36,6 +36,9 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import sqlglot
+from sqlglot import exp as sqlglot_exp
+
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -54,6 +57,81 @@ MAX_RESULT_BYTES = 200_000
 _SQL_HEAD_ALLOWED = ("SELECT", "WITH", "PRAGMA")
 _SQL_COMMENT_PATTERN = re.compile(r"--[^\n]*|/\*.*?\*/", re.S)
 _SQL_LITERAL_PATTERN = re.compile(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"", re.S)
+
+# ── sqlglot AST 复核（纵深防御 + 审计读数）──────────────────
+# 现有闸（head 白名单 + EXPLAIN 干跑授权器）已覆盖 SQLite 写语句拦截；AST 层是
+# **第二道网**（白名单/干跑判据将来漂移时兜底）并顺带产出表名审计读数。
+# 方向是 fail-open 到下游：sqlglot 解析不动的语句一律放行（语法错误由干跑与
+# 真实执行诚实报），绝不因解析不动而误杀。
+_AST_WRITE_NODES = tuple(
+    node
+    for node in (
+        getattr(sqlglot_exp, name, None)
+        for name in ("Insert", "Update", "Delete", "Drop", "Create", "Alter", "Truncate", "Merge", "Attach", "Detach")
+    )
+    if node is not None
+)
+#: sqlite 方言下解析成通用 Command 的写型头（head 白名单其实已拦，这里双保险）
+_AST_COMMAND_WRITE_HEADS = ("ATTACH", "DETACH", "VACUUM", "ANALYZE", "REINDEX")
+
+
+def astReadOnlyCheck(sql: Any) -> Optional[str]:
+    """sqlglot AST 复核：解析成功且**确认为写/变更语句**时点名拒绝。
+
+    返回 None = 不是 AST 层能判定的写语句（放行给白名单/干跑/真实执行）。
+    判据取向是**宁可放行不误杀**——误杀会砍掉合法查询，漏杀还有下游两道闸。
+    """
+    code = _stripSqlComments(str(sql or "")).strip()
+    if code.endswith(";"):
+        code = code[:-1].strip()
+    if not code:
+        return None
+    try:
+        parsed = sqlglot.parse_one(code, dialect="sqlite")
+    except Exception:  # noqa: BLE001 - 解析不动不拦，交下游诚实报错
+        return None
+    if parsed is None:
+        return None
+    if isinstance(parsed, _AST_WRITE_NODES):
+        return f"AST 复核：不允许 {type(parsed).__name__.upper()} 写/变更语句"
+    if isinstance(parsed, sqlglot_exp.Command):
+        head = str(parsed.args.get("this") or "").strip().upper().split(None, 1)[0]
+        if head in _AST_COMMAND_WRITE_HEADS:
+            return f"AST 复核：不允许 {head} 命令"
+    return None
+
+
+def extractSqlTables(sql: Any) -> List[str]:
+    """提取 SQL 涉及的全部基表名（去重排序，供审计读数 tables_accessed）。
+
+    CTE 别名不是表（不计）；解析失败返回空表（审计缺位不阻断查询）。
+    """
+    code = _stripSqlComments(str(sql or "")).strip()
+    if code.endswith(";"):
+        code = code[:-1].strip()
+    if not code:
+        return []
+    try:
+        parsed = sqlglot.parse_one(code, dialect="sqlite")
+    except Exception:  # noqa: BLE001 - 审计缺位不阻断查询
+        return []
+    if parsed is None:
+        return []
+    # CTE 别名在 sqlglot 里也呈 Table 节点——先收 CTE 名再从基表里剔除
+    # （sqlglot 把 WITH 存在 `with_` 键——规避 Python 保留字，不是 `with`）
+    cte_names = set()
+    with_clause = parsed.args.get("with_")
+    if with_clause is not None:
+        for cte in getattr(with_clause, "expressions", []) or []:
+            alias = getattr(cte, "alias_or_name", "")
+            if alias:
+                cte_names.add(alias)
+    names = {
+        table.name
+        for table in parsed.find_all(sqlglot_exp.Table)
+        if table.name and table.name not in cte_names
+    }
+    return sorted(names)
 
 #: 只读 PRAGMA 的**单源**名单，按"取不取对象名实参"分两类。
 #: 名单之外一律拒（fail-closed）——`journal_mode` / `writable_schema` 这类
@@ -279,6 +357,10 @@ def assertReadOnlySql(sql: str, conn: sqlite3.Connection) -> str:
         raise ValueError(
             f"只读白名单只允许 SELECT / WITH … SELECT / 只读 PRAGMA，收到 {head}"
         )
+
+    ast_verdict = astReadOnlyCheck(code)
+    if ast_verdict:
+        raise ValueError(f"只读白名单拒绝非读取语句：{ast_verdict}")
 
     violation = _dryRunClassify(conn, code)
     if violation:

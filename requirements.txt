@@ -55,6 +55,7 @@ python-dotenv>=1.0.0
 psutil>=5.9.0
 numpy>=1.24.0
 tiktoken>=0.5.0
+sqlglot>=25.0  # query_database 的 SQL AST 复核与表名审计（纯 Python 零依赖）
 # 知识向量 ANN（基础部署镜像内置；未安装时代码自动回退 JSON 全量余弦）
 hnswlib>=0.8.0
 
