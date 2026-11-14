@@ -1474,6 +1474,26 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             },
         },
     },
+    "run_scripted_workflow": {
+        # 并行能力声明：脚本化工作流有副作用（ctx.callTool 走治理管线、journal 落盘）
+        # ——脚本本体无 I/O 原语（AST 白名单 + 受限内建）。P3-14。重放会重跑副作用，
+        # 故登记进 _NON_REPRODUCIBLE_TOOLS（不可重现）。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【脚本化工作流】把一段受限 Python 脚本（必须定义 async def main(ctx)）交给沙箱执行：ctx.callTool(工具名, 参数) 走完整治理管线（审批/审计不旁路），ctx.log/setVar/getVar 管理过程状态，ctx.sleep 有限等待。脚本禁 import/eval/exec/open 等危险调用与 dunder 属性；journal 逐调用落盘，传 resume_run_id 可从中断处续跑（已执行调用复用结果不重复执行）。适合多步骤确定性编排；探索性任务请用 planning。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "script": {
+                    "type": "string",
+                    "description": "受限 Python 脚本：必须定义 async def main(ctx)；禁 import/eval/exec/open/getattr 等危险调用与 __dunder__ 属性",
+                },
+                "name": {"type": "string", "description": "工作流名（run_id 前缀，默认 scripted）"},
+                "resume_run_id": {"type": "string", "description": "续跑的 run_id（从中断点继续，已执行调用复用结果）"},
+                "timeout": {"type": "number", "description": "执行超时秒（5-600，默认 120）"},
+            },
+            "required": ["script"],
+        },
+    },
     "schedule_task": {
         # 并行能力声明：调度任务落共享存储，建/取消都会改共享态。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
@@ -2041,6 +2061,8 @@ _SANDBOX_REQUIRED_KEY = "sandbox_required"
 # 与 tests/unit/tools/test_cross_axis_declarations.py 的
 # TestCursorToolsAreADifferentAxis（快照族与游标族在重放轴上必须给出**不同**读数）。
 _NON_REPRODUCIBLE_TOOLS = frozenset({
+    # P3-14：受限脚本化工作流——重放会重跑脚本里的全部工具副作用，不可重现。
+    "run_scripted_workflow",
     # B1：模型自决折叠改写当前会话视图（重放会产出第二次折叠回执），不可重现。
     "context_compress",
     # 任意代码/命令：输出依赖外部状态且可能已产生副作用

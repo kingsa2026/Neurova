@@ -463,6 +463,8 @@ class ToolExecutor:
         "ask_user": "_execute_ask_user",
         # 节点库同步：技能/自定义/MCP 节点注册后立即对 canvas_add_node 可见
         "sync_nodes": "_execute_sync_nodes",
+        # P3-14：受限脚本化工作流
+        "run_scripted_workflow": "_execute_scripted_workflow",
         # 自定义节点：默认 draft，按 BuildSession 批次激活
         "custom_node_create": "_execute_custom_node_create",
         "custom_node_update": "_execute_custom_node_update",
@@ -2373,6 +2375,51 @@ class ToolExecutor:
                 "status": "clarification_required",
                 "error": f"构建门禁不可用，已拒绝写入: {exc}",
             }
+
+    async def _execute_scripted_workflow(self, params: Dict) -> Dict:
+        """P3-14：受限脚本化工作流（见 neurova/workflow/scripted）。
+
+        脚本经 AST 白名单校验（禁 import/危险内建/dunder）后在受限内建
+        命名空间执行；副作用只能经 ctx.callTool 走完整治理管线（本执行器
+        的单工具全链路，审批/审计不旁路）；journal 逐调用落盘，
+        resume_run_id 续跑复用已执行结果（副作用不重复）。
+        """
+        import json as _json
+        import time as _time
+
+        from neurova.workflow.scripted import WorkflowJournal, runScriptedWorkflow
+
+        script = str(params.get("script") or "")
+        if not script.strip():
+            return {"error": "缺少 script"}
+        name = str(params.get("name") or "scripted")[:60]
+        resumeRunId = str(params.get("resume_run_id") or "")
+        try:
+            timeout = float(params.get("timeout") or 120.0)
+        except (TypeError, ValueError):
+            timeout = 120.0
+
+        runId = resumeRunId or f"{name}_{int(_time.time())}"
+        journal = WorkflowJournal(runId)
+        resumeRows = journal.readRows() if resumeRunId else None
+
+        async def _callTool(toolName: str, toolParams: Dict) -> Dict:
+            # 子调用走本执行器的完整单工具链路（治理/审批/审计不旁路）
+            sub = await self._execute_single_tool(str(toolName), dict(toolParams or {}))
+            text = _json.dumps(sub, ensure_ascii=False, default=str)
+            if len(text) > 100_000:
+                sub = {
+                    "success": bool(sub.get("success")) if isinstance(sub, dict) else False,
+                    "truncated": True,
+                    "preview": text[:2000],
+                }
+            return sub
+
+        result = await runScriptedWorkflow(
+            script, _callTool, journal, resumeRows=resumeRows, timeout=timeout
+        )
+        result["run_id"] = runId
+        return result
 
     async def _execute_builtin_tool(self, tool_name: str, params: Dict) -> Dict:
         """执行内置工具(分派表驱动,见 _builtin_dispatch 注释)"""

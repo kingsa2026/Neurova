@@ -18,6 +18,8 @@ from neurova.builtin_tools import (
 # 快照族含**浏览器侧**两条与**桌面侧**三条：同一根因（瞬时画面/结构）的全部命中点，
 # 漏一条就少一份「只读也可能不可重放」的证据（教义第 5 条）。
 EXPECTED_NON_REPRODUCIBLE = {
+    # P3-14：受限脚本化工作流——重放会重跑脚本里的全部工具副作用。
+    "run_scripted_workflow",
     # B1：模型自决折叠改写当前会话视图（重放会产出第二次折叠回执）。
     "context_compress",
     "run_code", "git", "file_write", "file_create", "file_edit", "file_delete",
