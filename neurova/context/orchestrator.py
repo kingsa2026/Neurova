@@ -1488,7 +1488,10 @@ class ContextOrchestrator:
             # 可凭 [历史回忆] 召回）。工具输出通常占窗口大头，先清它比折叠
             # 对话文本收益最大且不破坏轮次结构。
             try:
-                window_msgs = self._clear_old_tool_results(window_msgs)
+                window_msgs = self._clear_old_tool_results(
+                    window_msgs,
+                    model_window_tokens=self._resolve_auto_compact_hard_limit(),
+                )
             except Exception as e:  # noqa: BLE001 - 清除失败不阻断
                 logger.debug("工具结果占位清除跳过: %s", e)
             # T-10d（工单 §11.5）：**在 repair 之前**观测重建产出的配对合法性。
@@ -2039,6 +2042,9 @@ class ContextOrchestrator:
     # "保留几条消息"不再共用一个数，折叠发生后仍然动手：
     _TOOL_PAYLOAD_TRIGGER_TOKENS = 8000  # 绝对臂：载荷合计超过它即换指针
     _TOOL_PAYLOAD_TRIGGER_SHARE = 0.5  # 相对臂：载荷越过窗口实占的一半 = 工具输出撑满窗口
+    # 窗口自适应（对照改进追问批）：绝对臂随模型窗口放大（×10%）——大窗口
+    # 模型容忍更大的工具结果原文驻留，小窗口模型维持原线。
+    _TOOL_PAYLOAD_WINDOW_SHARE = 0.1
     _TOOL_PAYLOAD_MIN_TOKENS = 2000  # 收益门槛：省下的还不抵指针开销时不动手
     _TOOL_RESULT_KEEP_SHARE = 0.5  # 保留窗：最新若干条累计载荷不超过载荷的一半
     _TOOL_RESULT_MIN_CHARS = 80  # 极短结果（状态码类）恒保留原文
@@ -2061,18 +2067,27 @@ class ContextOrchestrator:
             "完整内容经 recall_history(session_id, tool_call_id) 取回]"
         )
 
-    def _toolPayloadTrigger(self, window_tokens: int) -> int:
+    def _toolPayloadTrigger(self, window_tokens: int, model_window_tokens: Optional[int] = None) -> int:
         """触发线：两条臂取**更松**的那个（任一超标即动手），再抬到收益门槛之上。
 
         - 绝对臂：载荷合计过 8000 —— 载荷本身就够大，换指针必然划算；
+          窗口自适应（对照改进追问批）：模型窗口大时绝对臂随之放大
+          （max(8000, 模型窗口×10%)）——大窗口模型容忍更大的工具结果
+          原文驻留，小窗口模型维持原线；
         - 相对臂：载荷越过**窗口实占的一半** —— 工具输出已撑满窗口
           （「未触发折叠但工具输出已撑满窗口」那一段由它覆盖）。
 
         收益门槛是**下限**：载荷太小时换指针省下的还不抵指针自身的 token 开销，
         所以不动手（判据取载荷本身，不看条数——条目再多、总量小也不划算）。
         """
+        absolute_arm = self._TOOL_PAYLOAD_TRIGGER_TOKENS
+        if model_window_tokens and int(model_window_tokens) > 0:
+            absolute_arm = max(
+                absolute_arm,
+                int(int(model_window_tokens) * self._TOOL_PAYLOAD_WINDOW_SHARE),
+            )
         return max(self._TOOL_PAYLOAD_MIN_TOKENS,
-                   min(self._TOOL_PAYLOAD_TRIGGER_TOKENS,
+                   min(absolute_arm,
                        int(window_tokens * self._TOOL_PAYLOAD_TRIGGER_SHARE)))
 
     def _recordToolTurnReadout(self, window_msgs: list) -> None:
@@ -2140,12 +2155,14 @@ class ContextOrchestrator:
             return {}
         return {str(k): int(v) for k, v in stats.items() if isinstance(v, (int, float))}
 
-    def _clear_old_tool_results(self, window_msgs: list) -> list:
+    def _clear_old_tool_results(self, window_msgs: list, model_window_tokens: Optional[int] = None) -> list:
         """microcompact：老工具结果的载荷换成寻址占位指针（原文在池/台账，可直取）。
 
         触发与保留都按**工具结果载荷**判定（常量注释见类属性处）：载荷越过
         `_toolPayloadTrigger` 即动手；保留最新的、累计载荷不超过载荷一半的原文
         （**至少 1 条**），更早的换成占位指针；极短结果恒保留原文。
+        `model_window_tokens`（窗口自适应）：传入模型窗口时，绝对臂随之放大
+        （max(8000, 窗口×10%)）——大窗口模型容忍更大的工具结果原文驻留。
 
         与窗口折叠的分工：折叠管对话文本的**条数**（`keep_min_messages`），本方法
         管工具载荷的**份额**——两根轴各自声明，折叠发生后本方法仍能动手。
@@ -2164,7 +2181,9 @@ class ContextOrchestrator:
         # 计量单源：与折叠/窗口预算同一把尺（重复计量由 meter 内部缓存承担）
         meter = WindowTokenMeter()
         payload_tokens = meter.total([window_msgs[i] for i in positions])
-        trigger_tokens = self._toolPayloadTrigger(meter.total(window_msgs))
+        trigger_tokens = self._toolPayloadTrigger(
+            meter.total(window_msgs), model_window_tokens=model_window_tokens
+        )
         readout = self._contextHealthSlot("microcompact")
         readout["calls"] += 1
         # 未触发也记账：载荷与触发线一律写回，"没触发"与"没跑"因此可分、
@@ -2370,7 +2389,17 @@ class ContextOrchestrator:
             pool_budget = ContextPool.get_token_budget_for_model(model_name)
         except Exception:  # noqa: BLE001 - 预算查询失败不阻断
             pool_budget = 16000
-        return max(3000, min(int(pool_budget * self._WINDOW_SHARE_OF_POOL_BUDGET), 100000))
+        # 钳顶（窗口自适应，对照改进追问批）：默认 100000（1M 模型触发线钳在
+        # 约 10% 窗口——既定的成本/注意力控制口径）；NEUROVA_WINDOW_BUDGET_CAP
+        # 可放开（如 300000/400000），让大窗口模型按服务商给的窗口用满份额。
+        import os as _os
+
+        cap = 100000
+        try:
+            cap = int(_os.environ.get("NEUROVA_WINDOW_BUDGET_CAP", "100000"))
+        except (TypeError, ValueError):
+            cap = 100000
+        return max(3000, min(int(pool_budget * self._WINDOW_SHARE_OF_POOL_BUDGET), max(3000, cap)))
 
     @staticmethod
     def _envelopeFixedTokens(blocks: Dict[str, list]) -> int:
