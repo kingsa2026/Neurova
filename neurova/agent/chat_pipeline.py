@@ -2748,12 +2748,11 @@ class ChatPipeline:
             ctx.reply = ""
             return
         # P2-10：UserPromptSubmit 钩子 block → 早退拒答（不走 LLM 不进工具链）。
+        # 拒答以诚实文案出街（空回复对用户是静默吞轮）。
         if isinstance(ctx.metadata, dict) and ctx.metadata.get("user_prompt_blocked"):
-            logger.info(
-                "UserPromptSubmit 钩子拒绝本轮输入（reason=%s），跳过 LLM 调用",
-                ctx.metadata.get("user_prompt_blocked_reason"),
-            )
-            ctx.reply = ""
+            _blockReason = ctx.metadata.get("user_prompt_blocked_reason")
+            logger.info("UserPromptSubmit 钩子拒绝本轮输入（reason=%s），跳过 LLM 调用", _blockReason)
+            ctx.reply = f"⛔ 本轮输入被 UserPromptSubmit 钩子拒绝：{_blockReason}"
             return
         # 认知安全门（C1）enforce：输入判不安全 → 早退诚实拒答（不走 LLM、不进工具链）。
         # 拒答点名原因与回退路径，不静默吞轮（修复教义第 2 条：报错以诚实形态暴露）。

@@ -469,6 +469,23 @@
                 data-testid="governance-phase-overrides"
               />
             </a-form-item>
+            <a-form-item :label="t('settings.governanceSyntaxGateLabel')">
+              <p class="governance-hint">{{ t('settings.governanceSyntaxGateHint') }}</p>
+              <a-switch v-model:checked="governance.guarded_syntax_gate_enabled" />
+            </a-form-item>
+            <a-form-item :label="t('settings.governanceReadonlyAutoallowLabel')">
+              <p class="governance-hint">{{ t('settings.governanceReadonlyAutoallowHint') }}</p>
+              <a-switch v-model:checked="governance.readonly_argv_autoallow_enabled" />
+            </a-form-item>
+            <a-form-item :label="t('settings.governancePermModeLabel')">
+              <p class="governance-hint">{{ t('settings.governancePermModeHint') }}</p>
+              <a-textarea
+                v-model:value="governance.permModeText"
+                :rows="3"
+                :placeholder="t('settings.governancePermModePlaceholder')"
+                data-testid="governance-permission-mode-overrides"
+              />
+            </a-form-item>
           </a-form>
           <template #footer>
             <GlassButton variant="primary" size="sm" :loading="savingGovernance" @click="saveGovernance">{{ t('common.save') }}</GlassButton>
@@ -555,6 +572,11 @@ const governance = ref({
   /** G2 覆写编辑态：textarea 逐行 `agent_id=phase`，保存时解析（后端 422 兜底值域）。 */
   rsi_phase_overrides: {} as Record<string, number>,
   overridesText: '',
+  /** P1-3/P1-4：语法级危险命令门、只读 argv 自动放行、agent 权限模式覆写。 */
+  guarded_syntax_gate_enabled: false,
+  readonly_argv_autoallow_enabled: false,
+  permission_mode_overrides: {} as Record<string, string>,
+  permModeText: '',
 })
 const savingGovernance = ref(false)
 
@@ -967,6 +989,10 @@ const fetchGovernance = async () => {
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([agent, phase]) => `${agent}=${phase}`)
         .join('\n')
+      governance.value.permModeText = Object.entries(data.permission_mode_overrides ?? {})
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([agent, mode]) => `${agent}=${mode}`)
+        .join('\n')
       governanceLoaded.value = true
     }
   } catch (err) {
@@ -1001,12 +1027,35 @@ const saveGovernance = async () => {
     message.warning(`${t('settings.governanceOverridesInvalid')}：${badLines.join('; ')}`)
     return
   }
+  // P1-4 权限模式覆写解析：逐行 `agent_id=mode`（后端 422 兜底六态值域）。
+  const VALID_MODES = ['plan', 'build', 'edit', 'yolo', 'guarded', 'auto']
+  const permModes: Record<string, string> = {}
+  const badModeLines: string[] = []
+  for (const raw of governance.value.permModeText.split('\n')) {
+    const line = raw.trim()
+    if (!line) continue
+    const eq = line.lastIndexOf('=')
+    const agent = eq > 0 ? line.slice(0, eq).trim() : ''
+    const mode = eq > 0 ? line.slice(eq + 1).trim().toLowerCase() : ''
+    if (!agent || !VALID_MODES.includes(mode)) {
+      badModeLines.push(line)
+      continue
+    }
+    permModes[agent] = mode
+  }
+  if (badModeLines.length) {
+    message.warning(`${t('settings.governancePermModeInvalid')}：${badModeLines.join('; ')}`)
+    return
+  }
   savingGovernance.value = true
   try {
     await updateGovernanceSettings({
       conversation_rules_enabled: governance.value.conversation_rules_enabled,
       rsi_phase: governance.value.rsi_phase,
       rsi_phase_overrides: overrides,
+      guarded_syntax_gate_enabled: governance.value.guarded_syntax_gate_enabled,
+      readonly_argv_autoallow_enabled: governance.value.readonly_argv_autoallow_enabled,
+      permission_mode_overrides: permModes,
     })
     message.success(t('common.success'))
   } catch (err) {
