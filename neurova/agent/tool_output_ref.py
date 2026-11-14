@@ -99,7 +99,7 @@ def ensure_output_ref_installed_from_env() -> None:
 
 
 def maybe_output_ref(tool_name: str, result: Any, workspace_dir: Any, *,
-                     success: bool) -> Any:
+                     success: bool, max_chars: Optional[int] = None) -> Any:
     """结果出流咽喉点调用：大输出落盘为引用。
 
     Args:
@@ -109,6 +109,8 @@ def maybe_output_ref(tool_name: str, result: Any, workspace_dir: Any, *,
         success: 成败判据由调用方给定（咽喉的 `_result_is_success` 是唯一判据，
             本模块不自持第二份）。**失败结果一律不折叠**：它的正文是模型自我
             纠正所需的诊断，折叠成引用即诊断蒸发。
+        max_chars: P1-1 逐工具预算覆盖（工具 schema 的 result_budget_chars）；
+            None=用装配时的全局阈值。两者取一处生效，不叠加。
 
     Returns:
         原结果（未安装/失败结果/小结果/降级）或引用 dict：
@@ -125,11 +127,12 @@ def maybe_output_ref(tool_name: str, result: Any, workspace_dir: Any, *,
     if workspace_dir is None:
         return result
 
+    limit = handle.max_chars if max_chars is None else max(1, int(max_chars))
     try:
         serialized = json.dumps(result, ensure_ascii=False)
     except (TypeError, ValueError):
         return result  # 不可序列化：原样透传（与未接入等价）
-    if len(serialized) <= handle.max_chars:
+    if len(serialized) <= limit:
         return result
 
     try:
@@ -145,7 +148,7 @@ def maybe_output_ref(tool_name: str, result: Any, workspace_dir: Any, *,
     size_bytes = path.stat().st_size
     logger.info(
         "工具 %s 输出 %d 字符超阈值 %d → 落盘 %s（%d 字节）",
-        tool_name, len(serialized), handle.max_chars, path, size_bytes,
+        tool_name, len(serialized), limit, path, size_bytes,
     )
     return {
         "success": True,
@@ -156,7 +159,7 @@ def maybe_output_ref(tool_name: str, result: Any, workspace_dir: Any, *,
             "preview": serialized[:_PREVIEW_CHARS],
         },
         "note": (
-            f"工具 {tool_name} 输出 {len(serialized)} 字符超过阈值 {handle.max_chars}，"
+            f"工具 {tool_name} 输出 {len(serialized)} 字符超过阈值 {limit}，"
             f"完整内容已落盘：{path}（可用 file_read 读取；本条仅保留引用与预览）"
         ),
     }
