@@ -99,6 +99,15 @@ class ContextPoolRegistry:
         with self._lock:
             self._pools.clear()
 
+    def allPools(self) -> list:
+        """登记池的只读快照（统计/巡检面用，P2-7 接线）。
+
+        返回池对象列表的浅拷贝——不暴露内部 dict 本体，调用方逐池取
+        `get_retention_stats()` 一类的公开读数。
+        """
+        with self._lock:
+            return list(self._pools.values())
+
 
 # 提供单例便捷访问
 def get_registry() -> ContextPoolRegistry:
