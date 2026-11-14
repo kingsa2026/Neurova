@@ -32,6 +32,11 @@
         <span class="approval-label">{{ t('ui.reason') }}</span>
         <span class="approval-reason">{{ approvalModal.reason }}</span>
       </div>
+      <!-- P1-2a：执行入参指纹尾——核验「批准对象=执行对象」（与后端审批单 metadata 同源） -->
+      <div v-if="approvalModal.fingerprintTail" class="approval-field">
+        <span class="approval-label">{{ t('ui.fingerprintTail') }}</span>
+        <code class="approval-fingerprint">{{ approvalModal.fingerprintTail }}</code>
+      </div>
       <a-checkbox v-model:checked="approvalAddWhitelist">
         {{ t('ui.addToWhitelistAndApprove') }}
       </a-checkbox>
@@ -120,6 +125,13 @@ const { approvalModal, approvalAddWhitelist, approvalRemember, confirmApproval, 
   font-size: 13px;
   color: var(--nr-warning);
   line-height: 1.5;
+}
+.approval-fingerprint {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+  line-height: 22px;
+  word-break: break-all;
 }
 .approval-hint {
   font-size: 12px;

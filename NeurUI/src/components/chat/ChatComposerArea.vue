@@ -143,6 +143,28 @@
             :agent-id="agentId"
             :session-id="currentSessionId"
           />
+          <!-- P1-4：权限模式（会话级；默认=读 Agent 配置/治理设置） -->
+          <a-dropdown :trigger="['click']" placement="topRight">
+            <button class="nr-composer-pill" :title="t('chat.permissionModeLabel')">
+              <svg class="nr-ico" viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.4 9.2-8 10-4.6-.8-8-5-8-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
+              <span>{{ permissionModeLabel }}</span>
+              <span class="nr-composer-pill-arrow">▾</span>
+            </button>
+            <template #overlay>
+              <div class="nr-glass-dropdown">
+                <div
+                  v-for="opt in permissionModeOptions"
+                  :key="opt.value"
+                  class="nr-glass-dropdown-item nr-composer-menu-item"
+                  :class="{ 'is-active': permissionMode === opt.value }"
+                  @click="setPermissionMode(opt.value)"
+                >
+                  <span>{{ t(opt.label) }}</span>
+                  <span v-if="permissionMode === opt.value" class="nr-composer-check">✓</span>
+                </div>
+              </div>
+            </template>
+          </a-dropdown>
           <a-dropdown :trigger="['click']" placement="topRight">
             <button class="nr-composer-pill" :title="t('chat.thinkingEffort')">
               <svg class="nr-ico" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></svg>
@@ -342,13 +364,15 @@ const emit = defineEmits<{
   slashBuild: [seed: string]
   /** /compact 斜杠命令（页面经 sendMessage 原链路发往后端命令分发） */
   slashCompact: []
+  /** /replay 斜杠命令（重放崩溃悬空轮，同经 sendMessage 原链路） */
+  slashReplay: []
 }>()
 
 const { t } = useI18n()
 const chatStore = useChatStore()
 const messageQueue = useMessageQueueStore()
 const rightDock = useRightDockStore()
-const { inputText, isStreaming, currentSessionId, retrievalStatus, eventsLostBanner } = storeToRefs(chatStore)
+const { inputText, isStreaming, currentSessionId, retrievalStatus, eventsLostBanner, permissionMode } = storeToRefs(chatStore)
 
 /** steer 插话：流式中把输入框内容投递会话邮箱（不取消当前轮），投递后清空输入 */
 function onSteerClick(): void {
@@ -411,6 +435,7 @@ setupSlashCommands(
   (seed) => emit('slashPlan', seed),
   () => emit('slashCompact'),
   (seed) => emit('slashBuild', seed),
+  () => emit('slashReplay'),
 )
 const { slashOpen, slashIndex, slashFiltered, runSlashCommand, onSlashKeydown, onSlashInput, closeSlashPanel } =
   useSlashCommands()
@@ -426,6 +451,23 @@ const currentThinkingLabel = computed<string>(() => {
   const opt = thinkingOptions.find((o) => o.value === thinkingEffort.value)
   return opt ? t(opt.label) : ''
 })
+
+// ── P1-4：权限模式（会话级；''=默认读 Agent 配置/治理设置）────────
+const permissionModeOptions: Array<{ value: string; label: string }> = [
+  { value: '', label: 'chat.permModeDefault' },
+  { value: 'plan', label: 'chat.permModePlan' },
+  { value: 'edit', label: 'chat.permModeEdit' },
+  { value: 'yolo', label: 'chat.permModeYolo' },
+  { value: 'guarded', label: 'chat.permModeGuarded' },
+  { value: 'auto', label: 'chat.permModeAuto' },
+]
+const permissionModeLabel = computed<string>(() => {
+  const opt = permissionModeOptions.find((o) => o.value === permissionMode.value)
+  return opt && opt.value ? t(opt.label) : t('chat.permModeDefault')
+})
+function setPermissionMode(value: string): void {
+  permissionMode.value = value
+}
 
 // ── 电脑分屏开关 ───────────────────────────────────────
 const isComputerTabActive = computed(() => rightDock.tabs.some((tab) => tab.kind === 'computer'))

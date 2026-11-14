@@ -918,6 +918,15 @@ class ChatPipeline:
 
     async def _step_pre_llm_checks(self, ctx: ChatContext):
         """命令分发（B4）、/compact 压缩命令、/review 评审命令、ToolMemory 检查、技能获取、NL 合成、可行动性门控、认知安全门"""
+        # P1-4：请求级权限模式（聊天请求体传入，会话级切换入口）——最先应用
+        try:
+            from neurova.security.permission_mode import setRequestPermissionMode
+
+            _reqMode = (ctx.metadata or {}).get("permission_mode")
+            if _reqMode:
+                setRequestPermissionMode(_reqMode)
+        except Exception as mode_err:  # noqa: BLE001 - 模式面故障不阻断对话
+            logger.debug("请求级权限模式应用失败（按缺省处理）: %s", mode_err)
         await self._check_replay_command(ctx)
         await self._check_user_prompt_hooks(ctx)
         await self._check_compact_command(ctx)

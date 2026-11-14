@@ -591,6 +591,8 @@ def _extract_approval_payload(result_text, tm: dict) -> dict:
             "params": parsed.get("params") or {},
             "reason": parsed.get("error", ""),
             "governance": parsed.get("governance") or {},
+            # P1-2a：执行入参指纹尾（审批卡展示，核验批准对象=执行对象）
+            "fingerprint_tail": parsed.get("fingerprint_tail") or "",
         }
     return {}
 

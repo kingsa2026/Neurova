@@ -153,6 +153,12 @@ export interface GovernanceSettings {
   rsi_phase: number
   /** G2 agent 级相位覆写：命中条目的 agent 按覆写值读相位（最小灰度维度）。 */
   rsi_phase_overrides: Record<string, number>
+  /** P1-3：语法级危险命令门（白名单放行前先做 argv 语法判定，命中降级逐次确认）。 */
+  guarded_syntax_gate_enabled?: boolean
+  /** P1-3：只读命令自动放行（全段只读且内容检测零发现时免审批）。 */
+  readonly_argv_autoallow_enabled?: boolean
+  /** P1-4：agent 级权限模式覆写（plan/build/edit/yolo/guarded/auto）。 */
+  permission_mode_overrides?: Record<string, string>
 }
 
 export function getGovernanceSettings() {

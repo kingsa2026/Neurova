@@ -92,10 +92,38 @@ def resolvePermissionModeFor(agentId, settings=None) -> PermissionMode:
     return PermissionMode.BUILD
 
 
+_requestMode: contextvars.ContextVar = contextvars.ContextVar(
+    "neurova_request_permission_mode", default=None
+)
+
+
+def setRequestPermissionMode(mode: Any) -> None:
+    """设置**本轮请求**的权限模式（聊天请求体传入；任务作用域，随请求结束失效）。
+
+    优先级最高：本轮请求 > Agent 配置/治理覆写 > 默认 build。子代理任务
+    继承本 ContextVar，并受 inheritPermissionMode 只收窄约束。
+    """
+    _requestMode.set(_coerceMode(mode))
+
+
+def clearRequestPermissionMode() -> None:
+    _requestMode.set(None)
+
+
 def resolveEffectivePermissionMode(agent) -> PermissionMode:
-    """生效模式 = inherit(继承上下文, 该 agent 的设置覆写)。"""
+    """生效模式解析（优先级从高到低）：
+
+    1. 本轮请求模式（聊天请求体/会话切换传入，ContextVar 随任务传播到子代理）；
+    2. 治理设置 per-agent 覆写（permission_mode_overrides）；
+    3. 默认 BUILD。
+
+    子代理：继承上下文（父生效模式）对自身模式**只收窄不升级**。
+    """
     agentId = str(getattr(getattr(agent, "config", None), "agent_id", "") or "")
     own = resolvePermissionModeFor(agentId)
+    requestMode = _coerceMode(_requestMode.get())
+    if requestMode is not None:
+        own = requestMode
     inherited = _coerceMode(_INHERITED_MODE.get())
     if inherited is not None:
         return inheritPermissionMode(inherited, own)

@@ -101,3 +101,47 @@ class TestMergeHookGuidance:
         ctx = _ctx("x")
         ctx.metadata = {"hook_additional_context": "合规提醒"}
         assert pipeline._mergeHookGuidance(ctx, "") == "合规提醒"
+
+
+class TestRequestPermissionMode:
+    """P2-10 增强：请求级权限模式（会话级切换）——优先级最高，子代理只收窄。"""
+
+    def test_request_mode_overrides_governance(self, monkeypatch):
+        from neurova.security.permission_mode import (
+            PermissionMode,
+            setRequestPermissionMode,
+            clearRequestPermissionMode,
+            resolveEffectivePermissionMode,
+        )
+        # 治理覆写说 yolo，但本轮请求要求 plan——请求级优先
+        monkeypatch.setattr(
+            "neurova.security.governance_settings.load_governance_settings",
+            lambda: {"permission_mode_overrides": {"a-req": "yolo"}},
+        )
+        agent = SimpleNamespace(config=SimpleNamespace(agent_id="a-req"))
+        setRequestPermissionMode(PermissionMode.PLAN)
+        try:
+            assert resolveEffectivePermissionMode(agent) == PermissionMode.PLAN
+        finally:
+            clearRequestPermissionMode()
+        # 清除后回落治理覆写
+        assert resolveEffectivePermissionMode(agent) == PermissionMode.YOLO
+
+    def test_subagent_inherits_narrowed_request_mode(self, monkeypatch):
+        from neurova.security.permission_mode import (
+            PermissionMode,
+            setRequestPermissionMode,
+            resolveEffectivePermissionMode,
+        )
+        monkeypatch.setattr(
+            "neurova.security.governance_settings.load_governance_settings",
+            lambda: {},
+        )
+        parent = SimpleNamespace(config=SimpleNamespace(agent_id="parent"))
+        setRequestPermissionMode(PermissionMode.GUARDED)
+        try:
+            # 父会话本轮 guarded：子代理即便配置/请求 yolo 也被压回 guarded
+            assert resolveEffectivePermissionMode(parent) == PermissionMode.GUARDED
+        finally:
+            setRequestPermissionMode(None)
+        assert resolveEffectivePermissionMode(parent) == PermissionMode.BUILD

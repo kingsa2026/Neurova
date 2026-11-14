@@ -20,6 +20,9 @@
           <GlassButton variant="secondary" size="sm" @click="openProposals">
             {{ t('skillEvo.proposals') }}
           </GlassButton>
+          <GlassButton variant="secondary" size="sm" @click="openArtifacts">
+            {{ t('skillEvo.artifacts') }}
+          </GlassButton>
           <GlassButton variant="secondary" size="sm" @click="openConsolidation">
             {{ t('skillEvo.consolidation') }}
           </GlassButton>
@@ -268,12 +271,58 @@
             <a-select-option value="synthetic">{{ t('skillEvo.sourceSynthetic') }}</a-select-option>
           </a-select>
         </a-form-item>
+        <a-form-item :label="t('skillEvo.recursiveMode')">
+          <a-switch v-model:checked="evolveRecursiveMode" />
+          <span class="proposal-metric">{{ t('skillEvo.recursiveModeHint') }}</span>
+        </a-form-item>
+        <template v-if="evolveRecursiveMode">
+          <a-form-item :label="t('skillEvo.recursiveEpochs')">
+            <a-input-number v-model:value="evolveEpochs" :min="1" :max="10" />
+          </a-form-item>
+          <a-form-item :label="t('skillEvo.recursivePoolSize')">
+            <a-input-number v-model:value="evolvePoolSize" :min="1" :max="3" />
+          </a-form-item>
+          <a-form-item :label="t('skillEvo.recursiveBranchRetries')">
+            <a-input-number v-model:value="evolveBranchRetries" :min="0" :max="3" />
+            <p class="proposal-metric">{{ t('skillEvo.recursiveBranchRetriesHint') }}</p>
+          </a-form-item>
+        </template>
         <a-alert
           v-if="evolveResult"
           type="info"
           :message="evolveResult"
           show-icon
         />
+        <div v-if="recursiveReport" class="recursive-report">
+          <p class="proposal-metric">
+            {{ t('skillEvo.recursiveStopped') }}: {{ recursiveReport.stopped_reason }}
+            · {{ t('skillEvo.recursiveTotalImprovement') }}:
+            {{ recursiveReport.total_improvement }}
+          </p>
+          <div v-if="recursiveReport.branches?.length" class="recursive-branches">
+            <div class="evo-diff-title">{{ t('skillEvo.recursiveBranches') }}</div>
+            <table class="ab-table">
+              <thead>
+                <tr>
+                  <th>{{ t('skillEvo.branchId') }}</th>
+                  <th>{{ t('skillEvo.branchParent') }}</th>
+                  <th>{{ t('skillEvo.branchEpoch') }}</th>
+                  <th>{{ t('skillEvo.branchStatus') }}</th>
+                  <th>{{ t('skillEvo.branchScore') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="b in recursiveReport.branches" :key="b.branch_id">
+                  <td>{{ b.branch_id }}</td>
+                  <td>{{ b.parent_id || '—' }}</td>
+                  <td>{{ b.epoch_created }}</td>
+                  <td>{{ b.status }}</td>
+                  <td>{{ b.score }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </a-form>
     </a-modal>
 
@@ -430,6 +479,17 @@
           </span>
         </p>
         <p v-if="auditRunNote" class="proposal-metric">{{ auditRunNote }}</p>
+        <!-- ── 证据与代价读数（V3/V4/V6＋既有各门；旧记录整键缺席 ⇒ 不显示）── -->
+        <div v-if="detailReadouts.length" class="evo-readouts">
+          <p v-for="row in detailReadouts" :key="row.label" class="proposal-metric">
+            <span class="evo-readout-label">{{ row.label }}:</span> {{ row.value }}
+          </p>
+        </div>
+        <!-- V1 修复尝试逐轮审计（来自那次运行；无修复 ⇒ 不显示） -->
+        <div v-if="repairRows.length" class="evo-readouts">
+          <div class="evo-diff-title">{{ t('skillEvo.repairAttemptsTitle') }}</div>
+          <p v-for="row in repairRows" :key="row.key" class="proposal-metric">{{ row.text }}</p>
+        </div>
         <a-row :gutter="12">
           <a-col :span="12">
             <div class="evo-diff-title">{{ t('skillEvo.baseline') }}</div>
@@ -505,6 +565,115 @@
           </GlassButton>
         </div>
       </template>
+    </a-modal>
+
+    <!-- V5 可部署工件：列表 → 详情（冠军/基线/变体/证据/成本）→ 回滚（admin） -->
+    <a-modal
+      v-model:open="artifactsVisible"
+      :title="t('skillEvo.artifacts')"
+      :footer="null"
+      width="860px"
+    >
+      <a-spin :spinning="artifactsLoading">
+        <template v-if="artifactDetail">
+          <p class="proposal-metric">
+            {{ artifactDetail.artifact_id }} ·
+            {{ artifactDetail.skill_id }} ·
+            <a-tag :color="artifactStatusColor(artifactDetail.status)">
+              {{ artifactDetail.status }}
+            </a-tag>
+          </p>
+          <p class="proposal-metric">
+            {{ t('skillEvo.artifactSurface') }}:
+            {{ artifactDetail.surface?.label || artifactDetail.surface?.name || '—' }}
+            · {{ t('skillEvo.artifactBudget') }}:
+            {{ artifactDetail.surface?.max_size ?? '—' }}
+          </p>
+          <a-row :gutter="12">
+            <a-col :span="12">
+              <div class="evo-diff-title">{{ t('skillEvo.baseline') }}</div>
+              <pre class="evo-diff-body">{{ artifactDetail.baseline_text }}</pre>
+            </a-col>
+            <a-col :span="12">
+              <div class="evo-diff-title evo-diff-new">{{ t('skillEvo.artifactChampion') }}</div>
+              <pre class="evo-diff-body">{{ artifactDetail.champion_text }}</pre>
+            </a-col>
+          </a-row>
+          <div v-if="artifactDetail.variants?.length" class="recursive-branches">
+            <div class="evo-diff-title">{{ t('skillEvo.artifactVariants') }}</div>
+            <table class="ab-table">
+              <thead>
+                <tr>
+                  <th>{{ t('skillEvo.artifactTier') }}</th>
+                  <th>{{ t('skillEvo.branchScore') }}</th>
+                  <th>{{ t('skillEvo.artifactCostUsd') }}</th>
+                  <th>{{ t('skillEvo.artifactTokens') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(v, i) in artifactDetail.variants" :key="i">
+                  <td>{{ v.tier }}</td>
+                  <td>{{ v.score }}</td>
+                  <td>{{ v.cost_usd ?? '—' }}</td>
+                  <td>{{ v.tokens ?? '—' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="proposal-metric">
+            {{ t('skillEvo.artifactEvidence') }}:
+            {{ t('skillEvo.artifactRun') }} {{ artifactDetail.evidence?.run_id || '—' }}
+            · {{ t('skillEvo.artifactProposal') }} {{ artifactDetail.evidence?.proposal_id || '—' }}
+            · {{ t('skillEvo.artifactJournal') }} {{ artifactDetail.evidence?.journal_commit || '—' }}
+          </p>
+          <p v-if="artifactDetail.cost" class="proposal-metric">
+            {{ t('skillEvo.deploymentCost') }}:
+            {{ artifactCostText(artifactDetail.cost) }}
+          </p>
+          <div class="proposal-actions">
+            <GlassButton variant="ghost" size="sm" @click="artifactDetail = null">
+              {{ t('skillEvo.artifactBack') }}
+            </GlassButton>
+            <template v-if="artifactDetail.status === 'applied'">
+              <GlassButton
+                v-if="rollbackConfirmId !== artifactDetail.artifact_id"
+                variant="secondary"
+                size="sm"
+                @click="rollbackConfirmId = artifactDetail.artifact_id"
+              >
+                {{ t('skillEvo.artifactRollback') }}
+              </GlassButton>
+              <template v-else>
+                <GlassButton variant="primary" size="sm" :loading="artifactBusy !== ''" @click="doRollbackArtifact(artifactDetail)">
+                  {{ t('skillEvo.artifactRollbackConfirm') }}
+                </GlassButton>
+                <GlassButton variant="ghost" size="sm" @click="rollbackConfirmId = ''">
+                  {{ t('common.cancel') }}
+                </GlassButton>
+              </template>
+            </template>
+          </div>
+        </template>
+        <template v-else>
+          <p v-if="!artifacts.length" class="proposal-metric">{{ t('skillEvo.artifactListEmpty') }}</p>
+          <div v-for="a in artifacts" :key="a.artifact_id" class="proposal-row">
+            <div>
+              <div class="proposal-skill">
+                {{ a.skill_id }}
+                <a-tag :color="artifactStatusColor(a.status)">{{ a.status }}</a-tag>
+              </div>
+              <div class="proposal-metric">
+                {{ a.artifact_id }} · {{ t('skillEvo.artifactCreatedAt') }} {{ a.created_at }}
+              </div>
+            </div>
+            <div class="proposal-actions">
+              <GlassButton variant="ghost" size="sm" @click="viewArtifact(a)">
+                {{ t('skillEvo.view') }}
+              </GlassButton>
+            </div>
+          </div>
+        </template>
+      </a-spin>
     </a-modal>
   </div>
 </template>
@@ -880,6 +1049,7 @@ async function runSweep() {
 function openEvolve(skill: Skill) {
   evolveTarget.value = skill
   evolveResult.value = null
+  recursiveReport.value = null
   evolveVisible.value = true
 }
 
@@ -887,7 +1057,26 @@ async function runEvolve() {
   if (!evolveTarget.value) return
   evolveRunning.value = true
   evolveResult.value = null
+  recursiveReport.value = null
   try {
+    if (evolveRecursiveMode.value) {
+      // V2 递归多轮演化：分支账本随报告展示；提案仍走 pending＋人工批准
+      const res = await evolutionApi.evolveSkillRecursive(props.agentId, {
+        skill_id: evolveTarget.value.id,
+        epochs: evolveEpochs.value || 2,
+        pool_size: evolvePoolSize.value || 1,
+        branch_retries: evolveBranchRetries.value || 0,
+        iterations: evolveIterations.value || 5,
+        dataset_source: evolveSource.value,
+      })
+      recursiveReport.value = ((res as any)?.data ?? res) as import('@/api/modules/text-evolution').RecursiveReport
+      evolveResult.value = t('skillEvo.recursiveDone', {
+        epochs: recursiveReport.value.epochs_run,
+        improvement: recursiveReport.value.total_improvement,
+      })
+      await refreshProposals()
+      return
+    }
     const res = await evolutionApi.evolveSkill(props.agentId, {
       skill_id: evolveTarget.value.id,
       // a-input-number 清空后是 null——钳到默认,避免后端 422
@@ -1008,6 +1197,176 @@ async function decideProposal(proposalId: string, approve: boolean) {
     message.error(msg)
   }
 }
+
+// ── V3/V4/V6 提案详情读数（增益来路/部署成本/可进化面/各门；旧记录缺键不显示）──
+
+const detailReadouts = computed(() => {
+  const d = proposalDetail.value
+  if (!d) return []
+  const rows: { label: string; value: string }[] = []
+  const attr = d.gain_attribution
+  if (attr && (attr.holdout_gain != null || attr.repair_rounds != null)) {
+    const parts: string[] = []
+    if (attr.holdout_gain != null) {
+      parts.push(`${t('skillEvo.attrHoldoutGain')} ${attr.holdout_gain >= 0 ? '+' : ''}${attr.holdout_gain}`)
+    }
+    if (attr.size_delta_ratio != null) {
+      parts.push(`${t('skillEvo.attrSizeDelta')} ${(attr.size_delta_ratio * 100).toFixed(1)}%`)
+    }
+    if (attr.repair_rounds != null) parts.push(`${t('skillEvo.attrRepairRounds')} ${attr.repair_rounds}`)
+    if (typeof attr.repair_rescued === 'boolean') {
+      parts.push(attr.repair_rescued ? t('skillEvo.attrRescued') : t('skillEvo.attrRegular'))
+    }
+    if (parts.length) rows.push({ label: t('skillEvo.attributionTitle'), value: parts.join(' · ') })
+  }
+  if (d.deployment_cost) {
+    rows.push({ label: t('skillEvo.deploymentCost'), value: artifactCostText(d.deployment_cost) })
+  }
+  const surf = d.surface
+  if (surf?.name) {
+    rows.push({
+      label: t('skillEvo.surfaceTitle'),
+      value: `${surf.label || surf.name} (${surf.name}) · ${t('skillEvo.artifactBudget')} ${surf.max_size}`,
+    })
+  }
+  const cg = d.case_gate
+  if (cg) {
+    rows.push({
+      label: t('skillEvo.caseGateTitle'),
+      value: `${t('skillEvo.caseGateRegressions')} ${cg.regressions?.length ?? 0} · ${t('skillEvo.caseGateUnevidenced')} ${cg.unevidenced?.length ?? 0} · ${t('skillEvo.caseGateAllowance')} ${cg.allowance}`,
+    })
+  }
+  const es = d.exec_suite
+  if (es && es.baseline_pass_rate != null && es.candidate_pass_rate != null) {
+    rows.push({
+      label: t('skillEvo.execSuiteTitle'),
+      value: `${(es.baseline_pass_rate * 100).toFixed(0)}% → ${(es.candidate_pass_rate * 100).toFixed(0)}%`,
+    })
+  }
+  const js = d.judge_vs_sealed
+  if (js && js.judge_gain != null) {
+    rows.push({
+      label: t('skillEvo.judgeSealedTitle'),
+      value: `${t('skillEvo.attrHoldoutGain')} +${js.judge_gain}`
+        + (js.sealed_gain != null ? ` · ${t('skillEvo.judgeSealedCol')} +${js.sealed_gain}` : ''),
+    })
+  }
+  const sm = d.source_mix
+  if (sm && Object.keys(sm).length) {
+    rows.push({
+      label: t('skillEvo.sourceMixTitle'),
+      value: Object.entries(sm).map(([k, v]) => `${k} ${v}`).join(' · '),
+    })
+  }
+  const cgate = d.cost_gate
+  if (cgate?.state) {
+    rows.push({
+      label: t('skillEvo.costGateTitle'),
+      value: cgate.state + (cgate.ratio != null ? ` (${(cgate.ratio * 100).toFixed(1)}%)` : ''),
+    })
+  }
+  if (d.model_under_test) {
+    rows.push({ label: t('skillEvo.modelUnderTest'), value: d.model_under_test })
+  }
+  return rows
+})
+
+const repairRows = computed(() => {
+  const attempts = auditRun.value?.repair_attempts || []
+  return attempts.map((a) => ({
+    key: `${a.round}-${a.gate}`,
+    text: `#${a.round} ${a.gate}: `
+      + (a.blocked
+        ? t('skillEvo.repairBlocked', { where: a.blocked })
+        : a.improved
+          ? t('skillEvo.repairImproved', { score: a.tune_score ?? '' })
+          : t('skillEvo.repairNotImproved', { score: a.tune_score ?? '' }))
+      + (a.evidence_tasks?.length
+        ? ` · ${t('skillEvo.repairEvidence')}: ${a.evidence_tasks.join('、')}`
+        : ''),
+  }))
+})
+
+function artifactCostText(dc: import('@/api/modules/text-evolution').DeploymentCostDelta): string {
+  if (dc.state !== 'measured') {
+    return t('skillEvo.costUnmeasured', { reason: dc.reason || dc.state })
+  }
+  const parts = [
+    `${t('skillEvo.costBaseline')} $${dc.baseline_per_case_usd ?? '—'} → ${t('skillEvo.costCandidate')} $${dc.candidate_per_case_usd ?? '—'}`,
+    `Δ $${dc.delta_per_case_usd ?? '—'}`,
+  ]
+  if (dc.delta_ratio != null) parts.push(`${(dc.delta_ratio * 100).toFixed(1)}%`)
+  if (dc.baseline_cop_usd != null || dc.candidate_cop_usd != null) {
+    parts.push(`CoP $${dc.baseline_cop_usd ?? '—'}→$${dc.candidate_cop_usd ?? '—'}`)
+  }
+  return parts.join(' · ')
+}
+
+// ── V5 可部署工件（冠军＋非劣变体的版本化交付；回滚=批准的逆操作）──
+
+const artifactsVisible = ref(false)
+const artifactsLoading = ref(false)
+const artifacts = ref<import('@/api/modules/text-evolution').EvolutionArtifact[]>([])
+const artifactDetail = ref<import('@/api/modules/text-evolution').EvolutionArtifact | null>(null)
+const artifactBusy = ref('')
+const rollbackConfirmId = ref('')
+
+function artifactStatusColor(status: string): string {
+  return status === 'applied' ? 'green' : status === 'rolled_back' ? 'orange' : 'default'
+}
+
+async function openArtifacts() {
+  artifactsVisible.value = true
+  await refreshArtifacts()
+}
+
+async function refreshArtifacts() {
+  artifactsLoading.value = true
+  try {
+    const res = await evolutionApi.listArtifacts(props.agentId)
+    artifacts.value = ((res as any)?.data ?? res) as import('@/api/modules/text-evolution').EvolutionArtifact[]
+  } catch (err: any) {
+    const msg = err?.response?.data?.error || err?.message || t('skillEvo.loadError')
+    message.error(msg)
+  } finally {
+    artifactsLoading.value = false
+  }
+}
+
+async function viewArtifact(a: import('@/api/modules/text-evolution').EvolutionArtifact) {
+  try {
+    const res = await evolutionApi.getArtifact(props.agentId, a.artifact_id)
+    artifactDetail.value = ((res as any)?.data ?? res) as import('@/api/modules/text-evolution').EvolutionArtifact
+    rollbackConfirmId.value = ''
+  } catch (err: any) {
+    const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message || t('skillEvo.loadError')
+    message.error(msg)
+  }
+}
+
+async function doRollbackArtifact(a: import('@/api/modules/text-evolution').EvolutionArtifact) {
+  artifactBusy.value = a.artifact_id
+  try {
+    await evolutionApi.rollbackArtifact(props.agentId, a.artifact_id)
+    message.success(t('skillEvo.artifactRollbackDone'))
+    rollbackConfirmId.value = ''
+    artifactDetail.value = null
+    await refreshArtifacts()
+  } catch (err: any) {
+    const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message || t('skillEvo.rollbackError')
+    message.error(msg)
+  } finally {
+    artifactBusy.value = ''
+  }
+}
+
+// ── V2 递归多轮演化（分支账本随报告展示）──
+
+const evolveRecursiveMode = ref(false)
+const evolveEpochs = ref<number>(2)
+const evolvePoolSize = ref<number>(1)
+const evolveBranchRetries = ref<number>(0)
+const recursiveReport = ref<import('@/api/modules/text-evolution').RecursiveReport | null>(null)
 
 // ── 技能合并审批面（P1-2：RSI 产计划、本处批准/拒绝执行）──
 
@@ -1379,6 +1738,31 @@ async function installFromMarket(skill: MarketSkill) {
   font-weight: 600;
   margin-bottom: 4px;
   color: var(--nr-text-secondary);
+}
+
+.evo-readouts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  margin: 8px 0;
+  border: 1px solid var(--nr-glass-border);
+  border-radius: 8px;
+  background: var(--nr-glass-bg);
+}
+
+.evo-readout-label {
+  font-weight: 600;
+  color: var(--nr-text-secondary);
+}
+
+.recursive-report {
+  margin-top: 8px;
+}
+
+.recursive-branches {
+  margin-top: 8px;
+  overflow-x: auto;
 }
 
 .evo-diff-new {

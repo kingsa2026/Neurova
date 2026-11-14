@@ -85,6 +85,8 @@ class ChatRequest(BaseModel):
     model: Optional[str] = Field(default=None, description="指定模型")
     temperature: Optional[float] = Field(default=None, description="温度参数")
     max_tokens: Optional[int] = Field(default=None, description="最大 token 数")
+    # P1-4：本轮权限模式（plan/build/edit/yolo/guarded/auto）——会话级切换入口
+    permission_mode: Optional[str] = Field(default=None, description="本轮权限模式（plan/build/edit/yolo/guarded/auto）；缺省读 Agent 配置/治理设置")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="附加元数据")
 
 
@@ -97,7 +99,25 @@ class ChatStreamRequest(BaseModel):
     model: Optional[str] = Field(default=None, description="指定模型")
     temperature: Optional[float] = Field(default=None, description="温度参数")
     max_tokens: Optional[int] = Field(default=None, description="最大 token 数")
+    # P1-4：同上，流式路径同等支持
+    permission_mode: Optional[str] = Field(default=None, description="本轮权限模式（plan/build/edit/yolo/guarded/auto）；缺省读 Agent 配置/治理设置")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="附加元数据")
+
+
+_PERMISSION_MODE_VALUES = ("plan", "build", "edit", "yolo", "guarded", "auto")
+
+
+def _validatedPermissionMode(raw: Optional[str]) -> Optional[str]:
+    """校验请求级权限模式；非法值 422（诚实拒收，不静默回落）。"""
+    if raw is None:
+        return None
+    mode = str(raw).strip().lower()
+    if mode not in _PERMISSION_MODE_VALUES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"permission_mode 非法：{raw}（须为 {'/'.join(_PERMISSION_MODE_VALUES)}）",
+        )
+    return mode
 
 
 class AttachmentRequest(BaseModel):
@@ -283,6 +303,8 @@ async def chat(
     并以**原回合属主**的身份执行。
     """
     request_id = _get_request_id(request)
+    # P1-4：本轮权限模式校验（非法值 422，先于任何副作用/落盘）
+    _validatedPermissionMode(body.permission_mode)
 
     # 权限检查
     user_id = current_user.get("user_id", "")
@@ -344,6 +366,10 @@ async def chat(
         # 且强制空历史导致 LLM 缺对话上下文,工具参数指代不清("搜一下他"不知道"他"是谁)。
         # 现在不强制注入,让 chat_pipeline 自行从 session 恢复历史。
         call_metadata = body.metadata or {}
+        # P1-4：本轮权限模式（会话级切换入口）；非法值 422（先于任何副作用拒收）
+        _permMode = _validatedPermissionMode(body.permission_mode)
+        if _permMode:
+            call_metadata["permission_mode"] = _permMode
         # 隔离注入：服务端身份覆盖客户端自报（kb_builder 等技能据此归属知识条目）
         call_metadata["user_id"] = user_id
         # 请求级属主（§6-121 (b) 的乙案）：**在请求边界写一次**，不再由管线中途补写。
@@ -453,6 +479,8 @@ async def chat_stream(
     `resume_run_id` 只由续跑端点在服务端填入：复用台账原行，并按原回合属主身份执行。
     """
     request_id = _get_request_id(request)
+    # P1-4：同 REST 路径——本轮权限模式校验（非法值 422）
+    _validatedPermissionMode(body.permission_mode)
 
     # 权限检查
     user_id = current_user.get("user_id", "")
@@ -531,6 +559,10 @@ async def chat_stream(
                 pass
 
         call_metadata = dict(body.metadata or {})
+        # P1-4：同 REST 路径——本轮权限模式（非法值 422 先于任何副作用）
+        _permMode = _validatedPermissionMode(body.permission_mode)
+        if _permMode:
+            call_metadata["permission_mode"] = _permMode
         call_metadata["event_emitter"] = _emit
         # 429 重试/切换倒计时事件转发（管线 retry_status → SSE retry）
         call_metadata["emit_status_events"] = True

@@ -33,6 +33,8 @@ const approvalModal = reactive({
   toolName: '',
   command: '',
   reason: '',
+  // P1-2a：执行入参指纹尾（核验批准对象=执行对象）
+  fingerprintTail: '',
   // P0-6 分段审批：多段命令的候选段（后端 governance.segments）
   segments: [] as ApprovalSegment[],
 })
@@ -47,6 +49,7 @@ function openApprovalModal(event: Record<string, any>): void {
   const params = typeof event.params === 'string' ? event.params : JSON.stringify(event.params ?? {}, null, 2)
   approvalModal.command = params !== '{}' ? params : event.command || ''
   approvalModal.reason = event.reason || ''
+  approvalModal.fingerprintTail = String(event.fingerprint_tail || '')
   const govSegments = event.governance?.segments
   approvalModal.segments = Array.isArray(govSegments)
     ? govSegments.map((s: any) => ({
