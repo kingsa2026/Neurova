@@ -24,7 +24,17 @@ from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
-KNOWN_EVENTS = ("PreToolUse", "PostToolUse", "Stop")
+KNOWN_EVENTS = (
+    "PreToolUse",
+    "PostToolUse",
+    "Stop",
+    # P2-10 扩展事件（对齐 ZCode 的七事件面）：各自独立灰度开关（默认关），
+    # 语义见各 run*Helpers 的 docstring。
+    "SessionStart",
+    "UserPromptSubmit",
+    "PermissionRequest",
+    "PostToolUseFailure",
+)
 _DEFAULT_HOOKS_FILE = dataPath("hooks.json")
 _DEFAULT_TIMEOUT = 60
 _MAX_TIMEOUT = 600
@@ -130,7 +140,10 @@ class HookEngine:
         except json.JSONDecodeError:
             pass
 
-        blocked = bool(decision.get("decision") == "block" and event == "PreToolUse")
+        blocked = bool(
+            decision.get("decision") == "block"
+            and event in ("PreToolUse", "UserPromptSubmit", "PermissionRequest")
+        )
         additional = str(decision.get("additionalContext", "") or "")[:_MAX_CONTEXT_CHARS]
         return HookOutcome(
             hook=str(hook.get("command", "")),
@@ -178,3 +191,68 @@ def runStopHooks(payload: Dict[str, Any]) -> List[HookOutcome]:
     if not stopHooksEnabled():
         return []
     return get_hook_engine().run("Stop", payload)
+
+
+# ── P2-10 扩展事件：各自独立灰度（默认关，显式 =1 开）────────────────
+# 高频事件（每轮/每失败）全量跑外部脚本属生产风险面，沿用 Stop 的
+# 单事件灰度先例，而非共用一把总闸。
+
+
+def _eventSwitch(envName: str) -> bool:
+    return os.environ.get(envName, "").strip() == "1"
+
+
+def sessionStartHooksEnabled() -> bool:
+    """SessionStart 钩子开关（会话恢复/首建时触发；默认关）。"""
+    return _eventSwitch("NEUROVA_SESSION_START_HOOKS")
+
+
+def runSessionStartHooks(payload: Dict[str, Any]) -> List[HookOutcome]:
+    """会话恢复/首建时触发（外部脚本可预热上下文/旁路通知）。"""
+    if not sessionStartHooksEnabled():
+        return []
+    return get_hook_engine().run("SessionStart", payload)
+
+
+def userPromptHooksEnabled() -> bool:
+    """UserPromptSubmit 钩子开关（每轮用户输入必经，默认关）。"""
+    return _eventSwitch("NEUROVA_USER_PROMPT_HOOKS")
+
+
+def runUserPromptSubmitHooks(payload: Dict[str, Any]) -> List[HookOutcome]:
+    """用户输入提交时触发。
+
+    语义对齐 ZCode：decision=block 可拒轮（reason 随拒答面出街），
+    additionalContext 作为受控指引并入本轮注入（同 W4 通道，受预算管辖）。
+    """
+    if not userPromptHooksEnabled():
+        return []
+    return get_hook_engine().run("UserPromptSubmit", payload)
+
+
+def permissionRequestHooksEnabled() -> bool:
+    """PermissionRequest 钩子开关（审批单创建前触发；默认关）。"""
+    return _eventSwitch("NEUROVA_PERMISSION_REQUEST_HOOKS")
+
+
+def runPermissionRequestHooks(payload: Dict[str, Any]) -> List[HookOutcome]:
+    """审批单创建前触发。
+
+    语义比 ZCode 收窄：钩子只能 **deny**（block）——不许钩子代人工批准
+    （自动批准等于绕过审批面）。block 即不建审批单、工具直接拒。
+    """
+    if not permissionRequestHooksEnabled():
+        return []
+    return get_hook_engine().run("PermissionRequest", payload)
+
+
+def toolFailureHooksEnabled() -> bool:
+    """PostToolUseFailure 钩子开关（工具失败后触发；默认关）。"""
+    return _eventSwitch("NEUROVA_TOOL_FAILURE_HOOKS")
+
+
+def runPostToolUseFailureHooks(payload: Dict[str, Any]) -> List[HookOutcome]:
+    """工具失败后触发（外部脚本可告警/归集；只读面，不改变结果）。"""
+    if not toolFailureHooksEnabled():
+        return []
+    return get_hook_engine().run("PostToolUseFailure", payload)
