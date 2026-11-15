@@ -114,6 +114,14 @@ router.include_router(_mcp_source_router)
 # （否则被 `/{knowledge_id}` 那一族参数路由在前头吃掉，红成一个查不出原因的 404）。
 router.include_router(_observability_router)
 
+# schema 建议面（`/ontology/schema-suggestions*`，P1-2）：目录→术语/关系候选的
+# 产出与审批；两段字面路径，同样先于 detail include。
+from neurova.api.endpoints.knowledge_schema_suggester import (  # noqa: E402
+    router as _schema_suggester_router,
+)
+
+router.include_router(_schema_suggester_router)
+
 # 精准回复命中表（`/annotations*`）：此前挂在 `/v1/console` 下，而它的唯一消费者
 # 是知识域的 `KnowledgePage` → `AnnotationDrawer`，前端按 `/v1/knowledge/annotations`
 # 请求，实测恒 404。标注是知识资产（重训练化集的语料来源），其归属就是知识域；
