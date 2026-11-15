@@ -16,10 +16,11 @@
 
 from neurova.workflow.scripted.engine import runScriptedWorkflowSubprocess
 from neurova.workflow.scripted.journal import WorkflowJournal
-from neurova.workflow.scripted.validator import validateScript
+from neurova.workflow.scripted.validator import analyzeScript, validateScript
 
 __all__ = [
     "WorkflowJournal",
     "runScriptedWorkflowSubprocess",
     "validateScript",
+    "analyzeScript",
 ]

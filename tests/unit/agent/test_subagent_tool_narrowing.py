@@ -139,3 +139,69 @@ class TestEnforcement:
 
 def _executor():
     return ToolExecutor(MagicMock())
+
+
+class TestMcpBorrow:
+    """P3（蜂群对照 #8）：general 型借用父上下文 MCP 调用面；explore 不借"""
+
+    def test_general_allowlist_unions_borrowed_mcp(self):
+        import neurova.agent.swarm as swarm_mod
+
+        borrowed = frozenset({"mcp.s1.search", "search"})
+        monkeyborrowed = swarm_mod.computeSubagentToolAllowlist("general", borrowMcp=borrowed)
+        assert "mcp.s1.search" in monkeyborrowed
+        assert "search" in monkeyborrowed
+        # 递归派生/续跑仍排除
+        assert "spawn_subagent" not in monkeyborrowed
+        assert "continue_subagent" not in monkeyborrowed
+
+    def test_explore_never_borrows_mcp(self):
+        allow = computeSubagentToolAllowlist("explore", borrowMcp=frozenset({"mcp.s1.search"}))
+        assert "mcp.s1.search" not in allow
+
+    def test_borrow_names_use_namespaced_and_bare_forms(self, monkeypatch):
+        import neurova.tool_layers.mcp_client as mcp_mod
+        from neurova.agent.swarm import mcpBorrowedToolNames
+
+        class FakeClient:
+            def list_tools(self):
+                return [
+                    {"name": "search", "server_id": "s1"},
+                    {"name": "bare_tool"},
+                ]
+
+        monkeypatch.setattr(mcp_mod, "get_mcp_client", lambda *a, **k: FakeClient())
+        names = mcpBorrowedToolNames()
+        assert "mcp.s1.search" in names
+        assert "search" in names
+        assert "bare_tool" in names
+
+    def test_borrow_enum_failure_returns_empty(self, monkeypatch):
+        import neurova.tool_layers.mcp_client as mcp_mod
+        from neurova.agent.swarm import mcpBorrowedToolNames
+
+        def boom(*a, **k):
+            raise RuntimeError("mcp down")
+
+        monkeypatch.setattr(mcp_mod, "get_mcp_client", boom)
+        assert mcpBorrowedToolNames() == frozenset()
+
+    def test_spawn_freezes_mcp_snapshot_into_run(self, swarm, monkeypatch):
+        import neurova.agent.swarm as swarm_mod
+        from unittest.mock import AsyncMock, patch
+
+        monkeypatch.setattr(
+            swarm_mod, "mcpBorrowedToolNames", lambda: frozenset({"mcp.s1.search"})
+        )
+        agent = MagicMock()
+        agent.config.name = "子"
+        agent.chat = AsyncMock(return_value={"text": "ok"})
+
+        async def _go():
+            with patch("neurova.api.endpoints.get_agent_instance", return_value=agent):
+                return await get_swarm_manager().spawn(task="任务", agent_id="researcher")
+
+        result = asyncio.run(_go())
+        run = get_swarm_manager()._runs[result["subagent_id"]]
+        # spawn 时刻的 MCP 快照冻结进 run.tool_allowlist（执行期不再重查）
+        assert "mcp.s1.search" in run.tool_allowlist

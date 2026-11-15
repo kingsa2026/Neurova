@@ -348,3 +348,56 @@ class TestErrorHierarchy:
         assert issubclass(PlanStateError, PlanError)
         assert issubclass(PlanLLMError, PlanError)
         assert issubclass(PlanDocError, PlanError)
+
+
+# ---------------------------------------------------------------------------
+# P3（蜂群对照 #6）：审批决定落盘——批准事实比 TTL 内存会话活得久
+# ---------------------------------------------------------------------------
+
+
+def _driveToAwaiting(store):
+    """问答收口 → 计划落盘 → awaiting_approval 态的会话"""
+    llm = _llm_factory([QUESTIONS_R1, PLAN_RESULT])
+    sess = _new_session(llm)
+    sess._doc_store = store
+    asyncio.run(sess.ensure_started())
+    asyncio.run(sess.submit_answers(answers=[{"id": "q1", "selected": ["Web"], "custom": ""}]))
+    return sess
+
+
+class TestPlanApprovalPersistence:
+    def test_approve_writes_record_file(self, store):
+        sess = _driveToAwaiting(store)
+        asyncio.run(sess.decide("approve", note="通过"))
+        rec = store.readApprovalRecord("default", sess.document["name"])
+        assert rec is not None
+        assert rec["kind"] == "plan_approval"
+        assert rec["action"] == "approve"
+        assert rec["note"] == "通过"
+        assert rec["plan"] == sess.document["name"]
+        assert rec["session_id"] == "sess-1"
+        assert rec["user_id"] == "u1"
+
+    def test_reject_writes_record_with_note(self, store):
+        sess = _driveToAwaiting(store)
+        asyncio.run(sess.decide("reject", note="范围太大"))
+        rec = store.readApprovalRecord("default", sess.document["name"])
+        assert rec["action"] == "reject"
+        assert rec["note"] == "范围太大"
+
+    def test_record_outlives_session_ttl(self, store):
+        """会话被 TTL 逐出后，仅凭 agent_id + 计划名仍能复查审批事实。"""
+        sess = _driveToAwaiting(store)
+        asyncio.run(sess.decide("approve"))
+        plan_name = sess.document["name"]
+        assert store.readApprovalRecord("default", plan_name)["action"] == "approve"
+
+    def test_unapproved_plan_reads_none(self, store):
+        result = store.save(agent_id="default", title="无审批计划", content="x")
+        assert store.readApprovalRecord("default", result["name"]) is None
+
+    def test_bad_plan_name_rejected(self, store):
+        with pytest.raises(PlanDocError):
+            store.saveApprovalRecord("default", "../evil.md", {"action": "approve"})
+        with pytest.raises(PlanDocError):
+            store.readApprovalRecord("default", "not-a-plan-name.md")

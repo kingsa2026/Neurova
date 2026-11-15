@@ -114,11 +114,42 @@ from neurova.core.agent_run_ledger import (
 )
 
 
-def computeSubagentToolAllowlist(subagentType: str) -> frozenset:
+def mcpBorrowedToolNames() -> frozenset:
+    """P3（蜂群对照 #8）：父上下文当前可用的 MCP 工具名快照（借用面）。
+
+    进程级 MCP 客户端单例的已缓存工具即"父能用的 MCP 面"；子代理与父同身份
+    执行，执行期仍走 MCP 既有授权/防火墙管线——借用只放行**调用面**，
+    MCP 生命周期管理（装/卸/启停插件）本就是内置工具，不在 mcp.* 命名空间。
+    fail-open：枚举失败回空集（不借，收窄不失守）。
+    """
+    try:
+        from neurova.tool_layers.mcp_client import get_mcp_client
+
+        client = get_mcp_client()
+        if client is None:
+            return frozenset()
+        names = set()
+        for tool in client.list_tools() or []:
+            raw = str((tool or {}).get("name") or "").strip()
+            server = str((tool or {}).get("server_id") or "").strip()
+            if raw:
+                names.add(raw)
+                if server:
+                    names.add(f"mcp.{server}.{raw}")
+        return frozenset(names)
+    except Exception:  # noqa: BLE001 - MCP 面不可枚举时不借
+        return frozenset()
+
+
+def computeSubagentToolAllowlist(
+    subagentType: str, borrowMcp: frozenset = frozenset()
+) -> frozenset:
     """按子代理类型计算工具面白名单（P1 蜂群对照；spawn 与测试共用的单一出口）。
 
-    - general：全量内置工具 − 递归派生（子代理不得再派生孙代理）；
-    - explore：只读白名单（检索/侦察型子代理不拿写工具）。
+    - general：全量内置工具 − 递归派生/续跑（子代理不得再派生孙代理，
+      也不得续跑兄弟——两者都是"从子代理回合里再拉起一条执行链"）；
+      可选借用父上下文的 MCP 调用面（``borrowMcp`` 快照，P3 #8）；
+    - explore：只读白名单（检索/侦察型子代理不拿写工具，也不借 MCP）。
     执行咽喉（ToolExecutor._execute_single_tool）据 member 上下文绑定的
     白名单强制拦截面外工具。
     """
@@ -136,7 +167,8 @@ def computeSubagentToolAllowlist(subagentType: str) -> frozenset:
         return frozenset(readonlyNames)
     # general：全量内置工具 − 递归派生/续跑（子代理不得再派生孙代理，
     # 也不得续跑兄弟——两者都是"从子代理回合里再拉起一条执行链"）
-    return frozenset(get_registered_tool_names()) - {"spawn_subagent", "continue_subagent"}
+    base = frozenset(get_registered_tool_names()) - {"spawn_subagent", "continue_subagent"}
+    return base | frozenset(borrowMcp)
 
 
 @dataclass
@@ -393,7 +425,12 @@ class SwarmManager:
                 "SUBAGENT_TYPE_UNKNOWN",
                 f"未知子代理类型 {subagent_type!r}（可选 general/explore）",
             )
-        toolAllowlist = computeSubagentToolAllowlist(subagent_type)
+        # P3（蜂群对照 #8）：general 型借用父上下文的 MCP 调用面（spawn 时刻
+        # 快照冻结进 run.tool_allowlist）；explore 型不借（只读白名单保持纯内置）。
+        toolAllowlist = computeSubagentToolAllowlist(
+            subagent_type,
+            borrowMcp=mcpBorrowedToolNames() if subagent_type == "general" else frozenset(),
+        )
 
         run = SubAgentRun(
             depth=child_depth,

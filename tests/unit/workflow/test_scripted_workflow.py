@@ -190,3 +190,72 @@ class TestExecutorWiring:
         )
         assert result["success"] is False
         assert result["errors"]
+
+
+class TestScriptAnalysis:
+    """P3（蜂群对照 #7）：静态分析——诊断码 + 四图（site/causality/flow/handoff）"""
+
+    def test_analyze_valid_script_four_graphs(self):
+        from neurova.workflow.scripted import analyzeScript
+
+        script = (
+            "async def main(ctx):\n"
+            "    a = await ctx.callTool('file_read', {'p': 1})\n"
+            "    if a:\n"
+            "        b = await ctx.callTool('web_search', {'q': a})\n"
+            "    for i in range(3):\n"
+            "        c = await ctx.callTool('t3', {'x': b})\n"
+        )
+        analysis = analyzeScript(script)
+        assert analysis["ok"] is True and analysis["diagnostics"] == []
+        sites = analysis["graphs"]["sites"]
+        assert [s["tool"] for s in sites] == ["file_read", "web_search", "t3"]
+        assert sites[0]["produces"] == "a" and sites[0]["line"] == 2
+        # 因果：b 消费 a、c 消费 b
+        edges = {(e["from_seq"], e["to_seq"], e["via"]) for e in analysis["graphs"]["causality"]}
+        assert (1, 2, "a") in edges and (2, 3, "b") in edges
+        # 控制流：1 分支 + 1 循环
+        assert analysis["graphs"]["flow"] == {"loops": 1, "branches": 1, "tryBlocks": 0, "awaits": 3}
+        # 交接链按序
+        handoff = analysis["graphs"]["handoff"]
+        assert [h["seq"] for h in handoff] == [1, 2, 3]
+        assert handoff[1]["consumes"] == ["a"] and handoff[1]["produces"] == "b"
+
+    def test_analyze_diagnostics_carry_codes(self):
+        from neurova.workflow.scripted import analyzeScript
+
+        analysis = analyzeScript("import os\nasync def main(ctx):\n    eval('1')\n    x = ctx.__class__\n")
+        assert analysis["ok"] is False
+        codes = {d["code"] for d in analysis["diagnostics"]}
+        assert 9002 in codes and 9006 in codes and 9005 in codes
+        assert all("message" in d for d in analysis["diagnostics"])
+
+    def test_analyze_missing_main_code_9004(self):
+        from neurova.workflow.scripted import analyzeScript
+
+        analysis = analyzeScript("x = 1")
+        assert analysis["ok"] is False
+        assert any(d["code"] == 9004 for d in analysis["diagnostics"])
+
+    def test_validate_and_analyze_share_one_walk(self):
+        """同一脚本两口径一致：validate 的文案即 analyze 诊断的 message（单一事实源）"""
+        from neurova.workflow.scripted import analyzeScript, validateScript
+
+        bad = "async def main(ctx):\n    open('/etc/passwd')\n"
+        msgs = validateScript(bad)
+        diags = analyzeScript(bad)["diagnostics"]
+        assert msgs == [d["message"] for d in diags]
+
+    def test_engine_failure_carries_analysis(self, tmp_path):
+        journal = WorkflowJournal("analysis-fail")
+
+        async def callTool(name, params):
+            return {"success": True}
+
+        result = asyncio.run(
+            runScriptedWorkflowSubprocess("import os\nx = 1", callTool, journal)
+        )
+        assert result["success"] is False
+        analysis = result["analysis"]
+        assert analysis["ok"] is False
+        assert any(d["code"] == 9002 for d in analysis["diagnostics"])

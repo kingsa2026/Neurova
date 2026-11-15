@@ -300,7 +300,12 @@ class PlanSession:
     # ------------------------------------------------------------------
 
     async def decide(self, action: str, note: str = "") -> Dict[str, Any]:
-        """审批决定：approve → approved + execute_prompt；reject → rejected。"""
+        """审批决定：approve → approved + execute_prompt；reject → rejected。
+
+        P3（蜂群对照 #6）：审批事实先落盘（<计划名>.approval.json）再翻内存态
+        ——会话注册表是 TTL 内存态（过期即逐出），审批记录文件才是可复查的
+        持久真相源；落盘失败则本次决定整体失败（诚实暴露，不留半截状态）。
+        """
         with self._lock:
             if self.status == self.STATUS_ASKING:
                 raise PlanStateError("计划尚未生成，无可审批对象")
@@ -310,16 +315,32 @@ class PlanSession:
             if not self.document:
                 raise PlanStateError("计划文档缺失")
             plan_md = self._doc_store.read(self.agent_id, self.document["name"])
-            self.execute_prompt = _EXECUTE_PROMPT_TEMPLATE.format(
+            execute_prompt = _EXECUTE_PROMPT_TEMPLATE.format(
                 rel_path=self.document["rel_path"], plan=plan_md
             )
-            with self._lock:
-                self.status = self.STATUS_APPROVED
         elif action == "reject":
-            with self._lock:
-                self.status = self.STATUS_REJECTED
+            execute_prompt = None
         else:
             raise PlanStateError(f"未知审批动作: {action}")
+        if self.document:
+            self._doc_store.saveApprovalRecord(
+                self.agent_id,
+                self.document["name"],
+                {
+                    "kind": "plan_approval",
+                    "session_id": self.session_id,
+                    "agent_id": self.agent_id,
+                    "user_id": self.user_id,
+                    "action": action,
+                    "note": str(note or ""),
+                    "plan": self.document["name"],
+                    "decided_at": time.time(),
+                },
+            )
+        with self._lock:
+            self.status = self.STATUS_APPROVED if action == "approve" else self.STATUS_REJECTED
+            if action == "approve":
+                self.execute_prompt = execute_prompt
         self._touch()
         return self.to_dict()
 
