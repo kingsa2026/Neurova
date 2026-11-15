@@ -1638,21 +1638,42 @@ class ContextOrchestrator:
             except Exception as e:  # noqa: BLE001 - 预算联动失败不阻断召回
                 logger.debug("draw 预算联动跳过: %s", e)
                 retrievalBudget = None
-            # B10（对照改进项）：召回需求锚 = 当前输入 + 近轮要点。短输入
-            # （"继续""这样不对"）单凭输入向量几乎无区分力，召回退化成
-            # "最近优先"；并入最近几轮对话要点后，锚才带得上任务语境。
-            # 抽屉对 need 只编码一次，加长锚不增加编码成本。
-            # 开关 NEUROVA_RECALL_NEED_ENRICH=0 可回退（默认开）。
+            # 输入通道：纯输入锚（B10 泄漏解法——近轮话题条目在此通道过不了
+            # 0.65 门槛，泄漏物理切断）。抽屉对 need 只编码一次。
             drawn_contexts = self.context_pool.draw(
-                need=self._buildRecallNeedAnchor(user_input, window_msgs),
-                budget_tokens=retrievalBudget,
+                need=user_input, budget_tokens=retrievalBudget
             )
+            # B10 解法·近轮通道：短输入时任务语境经此受控召回——高门槛
+            # （0.75）、预算 ×30% 封顶、[近轮相关] 标注（默认关，灰度）。
+            recent_contexts: List = []
+            if self._dualChannelEnabled():
+                recentAnchor = self._buildRecentTurnsAnchor(window_msgs)
+                if recentAnchor:
+                    recentBudget = (
+                        max(500, int(retrievalBudget * self._RECENT_CHANNEL_BUDGET_SHARE))
+                        if retrievalBudget
+                        else None
+                    )
+                    recent_contexts = self.context_pool.draw(
+                        need=recentAnchor,
+                        budget_tokens=recentBudget,
+                        relevance_floor=self._RECENT_CHANNEL_FLOOR,
+                    )
             # 会话作用域隔离：旁路"历史回忆"召回同样过滤——单聊/非协作仅见 direct（仍跨普通
             # 会话召回），排除任何房间归档；群轮见 direct + 本群。chunk 归属由 metadata.session_id
             # 的 project_ 前缀判定（与长期记忆同规则）。
             from neurova.collaboration.memory_scope import filter_by_scope
             drawn_contexts = filter_by_scope(
                 drawn_contexts,
+                lambda c: getattr(c, "metadata", None) or {},
+                collab=chat_collab,
+                room_id=chat_room_id,
+                channel_group=chat_channel_group,
+                channel=chat_channel,
+                chat_id=chat_group_id,
+            )
+            recent_contexts = filter_by_scope(
+                recent_contexts,
                 lambda c: getattr(c, "metadata", None) or {},
                 collab=chat_collab,
                 room_id=chat_room_id,
@@ -1679,21 +1700,17 @@ class ContextOrchestrator:
                     continue  # 已在窗口或本轮产物中，跳过避免重复
                 # 池召回一律进 <history>（D4 甲案：它是原文，池内无损可再召回；
                 # 按来源打标只影响行前缀，不再影响它落在哪一块）
-                if ctx.source == ContextSource.CONVERSATION:
-                    role_label = "助手" if (ctx.metadata or {}).get("role") == "assistant" else "用户"
-                    blocks["history"].append(f"[历史回忆] {role_label}: {ctx.content}")
-                elif ctx.source == ContextSource.MEMORY:
-                    blocks["history"].append(f"[记忆] {ctx.content}")
-                elif ctx.source == ContextSource.EXPERIENCE:
-                    blocks["history"].append(f"[经验] {ctx.content}")
-                elif ctx.source == ContextSource.REFLECTION:
-                    blocks["history"].append(f"[反思] {ctx.content}")
-                else:
-                    blocks["history"].append(str(ctx.content))
+                blocks["history"].append(f"[历史回忆] {self._historyRowBody(ctx)}")
+            for ctx in recent_contexts:
+                if ctx.hash and ctx.hash in injected_hashes:
+                    continue  # 已在窗口或本轮产物中，跳过避免重复
+                blocks["history"].append(f"[近轮相关] {self._historyRowBody(ctx)}")
 
             # P1-1④：记录本视图覆盖的池 chunk hash（模型请求成功后 ack 确认已读）
             self._last_view_hashes = {
-                c.hash for c in drawn_contexts if getattr(c, "hash", None)
+                c.hash
+                for c in list(drawn_contexts) + list(recent_contexts)
+                if getattr(c, "hash", None)
             }
 
             # 4. 本轮瞬态上下文（不入池归档，紧贴当前输入）
@@ -2346,6 +2363,11 @@ class ContextOrchestrator:
     _RECALL_FLOOR_SHARE = 0.05
     _RECALL_MIN_TOKENS = 1000
 
+    # B10 解法·双通道之近轮通道（常量单源）：门槛比输入通道更严（间接锚），
+    # 预算封顶为召回额度的份额——泄漏从缺陷变成受控、带标注的近轮上下文。
+    _RECENT_CHANNEL_FLOOR = 0.75
+    _RECENT_CHANNEL_BUDGET_SHARE = 0.3
+
     def _resolveRecallFloor(self) -> int:
         """召回额度地板：窗口预算的既定份额，钳在绝对下限之上。"""
         budget = self._resolve_window_token_budget()
@@ -2959,33 +2981,43 @@ class ContextOrchestrator:
             readout["proactive_folds"] = int(readout.get("proactive_folds") or 0) + 1
 
     @staticmethod
-    def _buildRecallNeedAnchor(user_input, window_msgs) -> str:
-        """B10（对照改进项）：召回需求锚 = 当前输入 + 近轮要点。
+    def _buildRecentTurnsAnchor(window_msgs) -> str:
+        """B10 解法（双通道之近轮通道）：近轮要点锚。
 
-        短输入（"继续""这样不对"）单凭输入向量几乎无区分力；并入最近几轮
-        对话要点后，锚才带得上任务语境。抽屉对 need 只编码一次，加长锚
-        不增加编码成本。
-
-        ⚠️ 默认关（NEUROVA_RECALL_NEED_ENRICH=1 显式开启）：0.65 相关性门槛
-        是按**纯输入锚**两点校准的（无关基线 ~0.61-0.63、相关带 ≥0.64）；
-        实测复合锚会把无关对的分数抬过门槛（"天气"输入 + 闲聊近轮 →
-        固件教训 0.633 → 0.685 泄漏进视图）。默认开启等于未校准就改判据，
-        故先做成显式开启的实验位，待复合锚刻度重新校准后再转正。
+        从最近 3 条视图消息提取要点（各截 160 字符）。短输入（"继续"）的
+        任务语境经此进入近轮通道——高门槛（0.75）、小预算（召回额度×30%）、
+        带 [近轮相关] 标注，不再混入输入通道（单复合锚的泄漏根因）。
         """
-        import os as _os
-
-        base = str(user_input or "").strip()
-        if _os.environ.get("NEUROVA_RECALL_NEED_ENRICH", "0") != "1":
-            return base
         tail = [
             str((m or {}).get("content") or "").strip()
             for m in (window_msgs or [])[-3:]
             if str((m or {}).get("content") or "").strip()
         ]
         recent = " ".join(item[:160] for item in tail)
-        if recent:
-            return f"{base} 近轮要点：{recent}" if base else f"近轮要点：{recent}"
-        return base
+        return f"近轮要点：{recent}" if recent else ""
+
+    @staticmethod
+    def _dualChannelEnabled() -> bool:
+        """双通道召回开关（B10 解法）：默认关（NEUROVA_RECALL_DUAL_CHANNEL=1 开启）。"""
+        import os as _os
+
+        return _os.environ.get("NEUROVA_RECALL_DUAL_CHANNEL", "0") == "1"
+
+    @staticmethod
+    def _historyRowBody(ctx) -> str:
+        """池召回行正文（按来源打标）：输入通道加 [历史回忆] 前缀，近轮通道加 [近轮相关] 前缀。"""
+        from neurova.context_pool import ContextSource
+
+        if ctx.source == ContextSource.CONVERSATION:
+            role_label = "助手" if (ctx.metadata or {}).get("role") == "assistant" else "用户"
+            return f"{role_label}: {ctx.content}"
+        if ctx.source == ContextSource.MEMORY:
+            return f"[记忆] {ctx.content}"
+        if ctx.source == ContextSource.EXPERIENCE:
+            return f"[经验] {ctx.content}"
+        if ctx.source == ContextSource.REFLECTION:
+            return f"[反思] {ctx.content}"
+        return str(ctx.content)
 
     async def manual_compact(self, conversation_history: list) -> dict:
         """/compact 手动压缩：无视预算水位强制折叠当前会话窗口。

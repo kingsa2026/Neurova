@@ -126,52 +126,6 @@ class TestB7SingleResultCeiling:
         assert tool_rows and "200 OK" in str(tool_rows[0].get("content", ""))
 
 
-class TestB10NeedAnchor:
-    def test_anchor_contains_recent_turns_when_enabled(self, monkeypatch):
-        monkeypatch.setenv("NEUROVA_RECALL_NEED_ENRICH", "1")
-        orch = ContextOrchestrator(_mk_agent(), use_pool=True, auto_tag=False)
-        window = [
-            {"role": "user", "content": "先看看缓存淘汰策略的代码"},
-            {"role": "assistant", "content": "已定位到 LRU 实现"},
-        ]
-        anchor = orch._buildRecallNeedAnchor("继续", window)
-        assert "继续" in anchor
-        assert "缓存淘汰策略" in anchor and "LRU" in anchor
-
-    def test_anchor_default_off_returns_input_only(self, monkeypatch):
-        """默认关：0.65 门槛按纯输入锚校准，复合锚未校准前不得默认启用。"""
-        monkeypatch.delenv("NEUROVA_RECALL_NEED_ENRICH", raising=False)
-        orch = ContextOrchestrator(_mk_agent(), use_pool=True, auto_tag=False)
-        window = [{"role": "user", "content": "先看看缓存淘汰策略的代码"}]
-        assert orch._buildRecallNeedAnchor("继续", window) == "继续"
-
-    def test_anchor_off_returns_input_only(self, monkeypatch):
-        monkeypatch.setenv("NEUROVA_RECALL_NEED_ENRICH", "0")
-        orch = ContextOrchestrator(_mk_agent(), use_pool=True, auto_tag=False)
-        window = [{"role": "user", "content": "先看看缓存淘汰策略的代码"}]
-        assert orch._buildRecallNeedAnchor("继续", window) == "继续"
-
-    @pytest.mark.asyncio
-    async def test_draw_receives_enriched_anchor(self, monkeypatch):
-        monkeypatch.setenv("NEUROVA_RECALL_NEED_ENRICH", "1")
-        agent = _mk_agent()
-        orch = ContextOrchestrator(agent, use_pool=True, auto_tag=False)
-        agent.context_orchestrator = orch
-        captured = {}
-        real_draw = orch.context_pool.draw
-
-        def spying_draw(need=None, budget_tokens=None):
-            captured["need"] = need
-            return real_draw(need=need, budget_tokens=budget_tokens)
-
-        orch.context_pool.draw = spying_draw
-        window = [{"role": "user", "content": "先看看缓存淘汰策略的代码"}]
-        with patch.object(orch, "get_tools_description", new_callable=AsyncMock) as m:
-            m.return_value = "工具描述占位"
-            await orch.build_context(user_input="继续", session_context=window, relevant_memories=[])
-        assert "缓存淘汰策略" in captured["need"], "draw 应收到增强后的需求锚"
-
-
 class TestB11VectorCache:
     def test_second_draw_skips_reencode(self):
         drawer = SemanticMatchDrawer(max_tokens=10 ** 9)
