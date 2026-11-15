@@ -137,6 +137,15 @@ async def submitEnterpriseSource(
         ingestor.saveConfig(tenant, sourceId, descriptor, enabled=bool(body.enabled))
     except ValueError as exc:  # MappingError 是 ValueError 子类：带定位的拒因原样出去
         raise HTTPException(status_code=400, detail=str(exc))
+    # P1-1：源注册即刷新 schema 目录（只读元数据、零行采样）。失败不阻断注册
+    # ——目录是缓存，显式 refresh 端点可重试；原因进日志不进响应。
+    try:
+        refreshSchemaCatalog(tenant, sourceId)
+    except Exception as exc:  # noqa: BLE001 - 目录刷新失败不挡源注册
+        from neurova.core.logger import get_logger
+
+        get_logger(__name__).warning(
+            "schema 目录自动刷新失败（source=%s）：%s", sourceId, exc)
     config = ingestor.loadConfig(tenant, sourceId) or {}
     return {"code": 0, "message": "success", "data": _view(sourceId, config, adapters)}
 
@@ -277,3 +286,102 @@ async def deleteEnterpriseSource(
     return {"code": 0,
             "message": "连接器配置已删除；已获取的知识数据保留",
             "data": {"source_id": sourceId}}
+
+
+# ── schema 目录（P1-1，2026-11-15）──────────────────────────────────
+
+def refreshSchemaCatalog(tenantId: str, sourceId: str) -> Dict[str, int]:
+    """拉取源 schema 落目录（P1-1）：配置在、适配器能建才执行。
+
+    describeSchema 是协议必选动词；describeRelations 是 SQL 适配器的可选能力
+    （hasattr 探测，缺省按无键处理）。工厂错（缺变体/驱动缺失）原样冒泡——
+    显式 refresh 端点把它转 400，自动刷新调用方自行降级。
+    """
+    from neurova.knowledge.enterprise.registry import buildAdapter, EnterpriseIngestor
+    from neurova.knowledge.enterprise.schema_catalog import SchemaCatalogStore
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+
+    ingestor = EnterpriseIngestor(get_knowledge_fact_store())
+    config = ingestor.loadConfig(tenantId, sourceId)
+    if config is None:
+        raise LookupError("企业源未提交: %s" % sourceId)
+    descriptor = dict(config["descriptor"])
+    descriptor["tenantId"] = tenantId
+    descriptor["sourceId"] = sourceId
+    adapter = buildAdapter(descriptor, sourceId, tenantId)
+    # 同步壳里跑 async 契约（run_async_safely 兼容有/无运行中事件循环两种上下文）
+    from neurova.mem_core import run_async_safely
+
+    schema = run_async_safely(adapter.describeSchema())
+    relations = None
+    describeRelations = getattr(adapter, "describeRelations", None)
+    if describeRelations is not None:
+        relations = run_async_safely(describeRelations())
+    store = SchemaCatalogStore(get_knowledge_fact_store())
+    return store.ingestSchema(tenantId, sourceId,
+                              str(descriptor.get("sourceType") or ""),
+                              schema, relations=relations)
+
+
+@router.post("/enterprise/sources/{source_id}/catalog/refresh")
+async def refreshEnterpriseCatalog(
+    source_id: str,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """手动刷新源 schema 目录（P1-1，仅管理员）：describeSchema 落账。
+
+    只读元数据动作，不触碰行数据；源未提交 404，适配器/驱动失败 400 带定位。
+    """
+    if str(current_user.get("role") or "") != "admin":
+        raise HTTPException(
+            status_code=403, detail="schema 目录刷新是治理动作，仅管理员可执行")
+    sourceId = str(source_id or "").strip()
+    if not sourceId:
+        raise HTTPException(status_code=400, detail="source_id 不能为空")
+    tenant = _tenantOf(current_user)
+    try:
+        ingested = refreshSchemaCatalog(tenant, sourceId)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:  # MappingError 是 ValueError 子类
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001 - 连接失败如实 400 点名
+        raise HTTPException(status_code=400,
+                            detail="schema 目录刷新失败: %s" % exc)
+    return {"code": 0, "message": "success",
+            "data": {"source_id": sourceId, "ingested": ingested}}
+
+
+@router.get("/enterprise/catalog/tables")
+async def listCatalogTables(
+    source_id: str = "",
+    q: str = "",
+    limit: int = 200,
+    offset: int = 0,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """目录表清单（登录可读）：租户分区；source_id/q 过滤。"""
+    from neurova.knowledge.enterprise.schema_catalog import SchemaCatalogStore
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+
+    store = SchemaCatalogStore(get_knowledge_fact_store())
+    items = store.listTables(_tenantOf(current_user), sourceId=str(source_id or "").strip(),
+                             q=q, limit=limit, offset=offset)
+    return {"code": 0, "message": "success",
+            "data": {"items": items, "total": len(items)}}
+
+
+@router.get("/enterprise/catalog/tables/{table_id}")
+async def getCatalogTableDetail(
+    table_id: str,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """单表目录明细（登录可读）：列、类型、主外键与术语链接。"""
+    from neurova.knowledge.enterprise.schema_catalog import SchemaCatalogStore
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+
+    store = SchemaCatalogStore(get_knowledge_fact_store())
+    detail = store.tableDetail(_tenantOf(current_user), str(table_id or "").strip())
+    if detail is None:
+        raise HTTPException(status_code=404, detail="目录表不存在: %s" % table_id)
+    return {"code": 0, "message": "success", "data": detail}

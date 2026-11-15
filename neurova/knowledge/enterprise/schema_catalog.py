@@ -1,0 +1,303 @@
+# -*- coding: utf-8 -*-
+"""schema 目录自动摄取（对照研究 P1-1，2026-11-15）。
+
+企业源适配器的 `describeSchema()` 此前五驱动已实现但全仓零生产调用——
+「数据源里有什么表/列/键」这件事没有一处落账。本模块把 schema 自省接进
+生产链：源注册与显式刷新时拉取目录，落 `ontology_catalog_tables` /
+`ontology_catalog_columns`（v51），作为术语建议（P1-2）、就绪探针（P2-2）
+与 NL2SQL grounding（P1-4）的唯一数据入口。
+
+边界：
+- 只读元数据，零行数据采样（采样属 P1-2 数据证实批，按源显式开）；
+- 目录是缓存不是事实源：源端 schema 变化以 refresh 为准（同源整体替换）；
+  删除源配置不级联删目录行，读面按现役配置归并；
+- 外键/主键来自 `describeRelations()`（可选能力，SQL 适配器实现；其余源空表）；
+- 表/列到本体术语的链接（term_id）只由 P1-2 建议审批流写入，摄取不清空它
+  ——重摄取按稳定 id 覆盖元数据列，term_id 列原样保留。
+"""
+
+from __future__ import annotations
+
+import hashlib
+import re
+from typing import Any, Dict, List, Optional
+
+from neurova.core.time_utils import nowIso as _now
+
+#: v51：schema 目录两表。term_id 是 P1-2 审批通过后回填的本体链接；
+#: 摄取本身永远写空它（机器不替人拍板）。
+_SCHEMA_V51_CATALOG = """
+CREATE TABLE IF NOT EXISTS ontology_catalog_tables (
+    catalog_table_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    source_id TEXT NOT NULL,
+    source_type TEXT NOT NULL DEFAULT '',
+    table_schema TEXT NOT NULL DEFAULT '',
+    table_name TEXT NOT NULL,
+    table_type TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    term_id TEXT NOT NULL DEFAULT '',
+    column_count INTEGER NOT NULL DEFAULT 0,
+    ingested_at TEXT NOT NULL,
+    UNIQUE(tenant_id, source_id, table_schema, table_name)
+);
+CREATE INDEX IF NOT EXISTS idx_catalog_tables_tenant
+    ON ontology_catalog_tables(tenant_id, source_id, table_name);
+CREATE TABLE IF NOT EXISTS ontology_catalog_columns (
+    catalog_column_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    source_id TEXT NOT NULL,
+    catalog_table_id TEXT NOT NULL,
+    column_name TEXT NOT NULL,
+    data_type TEXT NOT NULL DEFAULT '',
+    ordinal_position INTEGER,
+    is_primary_key INTEGER NOT NULL DEFAULT 0,
+    is_foreign_key INTEGER NOT NULL DEFAULT 0,
+    foreign_key_target TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    term_id TEXT NOT NULL DEFAULT '',
+    ingested_at TEXT NOT NULL,
+    UNIQUE(tenant_id, catalog_table_id, column_name)
+);
+CREATE INDEX IF NOT EXISTS idx_catalog_columns_table
+    ON ontology_catalog_columns(tenant_id, catalog_table_id, ordinal_position);
+CREATE INDEX IF NOT EXISTS idx_catalog_columns_name
+    ON ontology_catalog_columns(tenant_id, column_name);
+"""
+
+
+def _tableId(tenantId: str, sourceId: str, tableSchema: str, tableName: str) -> str:
+    raw = "|".join([tenantId, sourceId, tableSchema, tableName])
+    return "cat_t_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def _columnId(tenantId: str, tableId: str, columnName: str) -> str:
+    raw = "|".join([tenantId, tableId, columnName])
+    return "cat_c_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+class SchemaCatalogStore:
+    """`ontology_catalog_tables/_columns` 的唯一读写面（单一事实源）。"""
+
+    def __init__(self, store: Any) -> None:
+        self._store = store
+        from ..foundation.foundation_schema import applyTo
+
+        with self._store._lock, self._store._conn:
+            applyTo(self._store._conn)
+
+    # ── 写入（整体替换）─────────────────────────────────────
+
+    def ingestSchema(self, tenantId: str, sourceId: str, sourceType: str,
+                     schema: Any, relations: Optional[Dict[str, Any]] = None) -> Dict[str, int]:
+        """一份 SourceSchema 落目录：同 (租户, 源) 先清后插（陈旧列不残留）。
+
+        relations 形状：{"foreign_keys": [{source_table, source_column,
+        target_table, target_column}], "primary_keys": {table: [col, ...]}}；
+        缺省（适配器无 describeRelations 能力）按无键处理，如实落 0。
+        """
+        tenant = str(tenantId or "default")
+        source = str(sourceId or "")
+        relations = relations or {}
+        foreignKeys = list(relations.get("foreign_keys") or [])
+        primaryKeys = dict(relations.get("primary_keys") or {})
+        stamp = _now()
+        tables = list(getattr(schema, "tables", None) or [])
+        tableCount = 0
+        columnCount = 0
+        fkCount = 0
+        with self._store._lock, self._store._conn:
+            self._store._conn.execute(
+                "DELETE FROM ontology_catalog_columns WHERE tenant_id = ? AND source_id = ?",
+                (tenant, source))
+            self._store._conn.execute(
+                "DELETE FROM ontology_catalog_tables WHERE tenant_id = ? AND source_id = ?",
+                (tenant, source))
+            for table in tables:
+                tableName = str(table.get("name") or "").strip()
+                if not tableName:
+                    continue
+                tableId = _tableId(tenant, source, "", tableName)
+                columns = list(table.get("columns") or [])
+                pkColumns = {str(c) for c in (primaryKeys.get(tableName) or [])}
+                self._store._conn.execute(
+                    "INSERT OR REPLACE INTO ontology_catalog_tables"
+                    " (catalog_table_id, tenant_id, source_id, source_type, table_schema,"
+                    "  table_name, table_type, description, term_id, column_count, ingested_at)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (tableId, tenant, source, str(sourceType or ""), "",
+                     tableName, str(table.get("table_type") or ""),
+                     str(table.get("description") or ""), "",
+                     len(columns), stamp),
+                )
+                tableCount += 1
+                for position, column in enumerate(columns):
+                    # 适配器列形状两态并存：SQL 族是 {name, type}，文件族是裸列名
+                    # 字符串。目录层归一，不要求适配器改形状。
+                    if isinstance(column, dict):
+                        columnName = str(column.get("name") or "").strip()
+                        dataType = str(column.get("type") or "")
+                        columnDescription = str(column.get("description") or "")
+                    else:
+                        columnName = str(column or "").strip()
+                        dataType = ""
+                        columnDescription = ""
+                    if not columnName:
+                        continue
+                    isFk = 0
+                    fkTarget = ""
+                    for edge in foreignKeys:
+                        if (str(edge.get("source_table") or "") == tableName
+                                and str(edge.get("source_column") or "") == columnName):
+                            isFk = 1
+                            fkTarget = "%s.%s" % (edge.get("target_table") or "",
+                                                  edge.get("target_column") or "")
+                            fkCount += 1
+                            break
+                    self._store._conn.execute(
+                        "INSERT OR REPLACE INTO ontology_catalog_columns"
+                        " (catalog_column_id, tenant_id, source_id, catalog_table_id,"
+                        "  column_name, data_type, ordinal_position, is_primary_key,"
+                        "  is_foreign_key, foreign_key_target, description, term_id,"
+                        "  ingested_at)"
+                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (_columnId(tenant, tableId, columnName), tenant, source, tableId,
+                         columnName, dataType, position,
+                         1 if columnName in pkColumns else 0,
+                         isFk, fkTarget, columnDescription, "", stamp),
+                    )
+                    columnCount += 1
+        return {"tables": tableCount, "columns": columnCount, "foreign_keys": fkCount}
+
+    # ── 读取 ────────────────────────────────────────────────
+
+    def listTables(self, tenantId: str, sourceId: str = "", q: str = "",
+                   limit: int = 200, offset: int = 0) -> List[Dict[str, Any]]:
+        sql = ("SELECT t.*, (SELECT COUNT(*) FROM ontology_catalog_columns c"
+               " WHERE c.tenant_id = t.tenant_id AND c.catalog_table_id = t.catalog_table_id)"
+               " AS column_count FROM ontology_catalog_tables t WHERE t.tenant_id = ?")
+        params: List[Any] = [str(tenantId or "default")]
+        if sourceId:
+            sql += " AND t.source_id = ?"
+            params.append(str(sourceId))
+        needle = str(q or "").strip().lower()
+        if needle:
+            sql += " AND LOWER(t.table_name) LIKE ?"
+            params.append("%" + needle + "%")
+        sql += " ORDER BY t.source_id, t.table_name LIMIT ? OFFSET ?"
+        params += [max(1, int(limit)), max(0, int(offset))]
+        with self._store._lock:
+            rows = self._store._conn.execute(sql, tuple(params)).fetchall()
+        return [dict(r) for r in rows]
+
+    def tableDetail(self, tenantId: str, tableId: str) -> Optional[Dict[str, Any]]:
+        tenant = str(tenantId or "default")
+        with self._store._lock:
+            row = self._store._conn.execute(
+                "SELECT * FROM ontology_catalog_tables"
+                " WHERE tenant_id = ? AND catalog_table_id = ?",
+                (tenant, str(tableId or ""))).fetchone()
+            if row is None:
+                return None
+            table = dict(row)
+            table["columns"] = [dict(c) for c in self._store._conn.execute(
+                "SELECT * FROM ontology_catalog_columns"
+                " WHERE tenant_id = ? AND catalog_table_id = ?"
+                " ORDER BY COALESCE(ordinal_position, 9999), column_name",
+                (tenant, str(tableId or ""))).fetchall()]
+        return table
+
+    def search(self, tenantId: str, q: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """目录子串搜索（表名/列名）：规模是元数据级，LIKE + 排序足够；
+        FTS5 归并见报告 P3-4 的机制注记。"""
+        needle = str(q or "").strip().lower()
+        if not needle:
+            return []
+        tenant = str(tenantId or "default")
+        like = "%" + needle + "%"
+        hits: List[Dict[str, Any]] = []
+        with self._store._lock:
+            for row in self._store._conn.execute(
+                    "SELECT table_name, source_id, catalog_table_id"
+                    " FROM ontology_catalog_tables WHERE tenant_id = ?"
+                    " AND LOWER(table_name) LIKE ? ORDER BY table_name LIMIT ?",
+                    (tenant, like, int(limit))).fetchall():
+                hits.append({"kind": "table", "name": row["table_name"],
+                             "source_id": row["source_id"],
+                             "catalog_table_id": row["catalog_table_id"]})
+            for row in self._store._conn.execute(
+                    "SELECT c.column_name, c.source_id, c.catalog_table_id, c.data_type"
+                    " FROM ontology_catalog_columns c WHERE c.tenant_id = ?"
+                    " AND LOWER(c.column_name) LIKE ?"
+                    " ORDER BY c.column_name LIMIT ?",
+                    (tenant, like, int(limit))).fetchall():
+                hits.append({"kind": "column", "name": row["column_name"],
+                             "source_id": row["source_id"],
+                             "catalog_table_id": row["catalog_table_id"],
+                             "data_type": row["data_type"]})
+        # 精确前缀优先（与全局搜索体验对齐的最小排序）
+        hits.sort(key=lambda h: (not str(h["name"]).lower().startswith(needle),
+                                 str(h["name"]).lower()))
+        return hits[:max(1, int(limit))]
+
+    def foreignKeyEdges(self, tenantId: str, sourceId: str = "") -> List[Dict[str, Any]]:
+        sql = ("SELECT c.source_id, t.table_name AS source_table, c.column_name AS source_column,"
+               " c.foreign_key_target FROM ontology_catalog_columns c"
+               " JOIN ontology_catalog_tables t ON t.tenant_id = c.tenant_id"
+               " AND t.catalog_table_id = c.catalog_table_id"
+               " WHERE c.tenant_id = ? AND c.is_foreign_key = 1")
+        params: List[Any] = [str(tenantId or "default")]
+        if sourceId:
+            sql += " AND c.source_id = ?"
+            params.append(str(sourceId))
+        with self._store._lock:
+            rows = self._store._conn.execute(sql, tuple(params)).fetchall()
+        edges: List[Dict[str, Any]] = []
+        for row in rows:
+            targetTable, _, targetColumn = str(row["foreign_key_target"]).partition(".")
+            edges.append({"source_id": row["source_id"],
+                          "source_table": row["source_table"],
+                          "source_column": row["source_column"],
+                          "target_table": targetTable,
+                          "target_column": targetColumn})
+        return edges
+
+    def counts(self, tenantId: str) -> Dict[str, int]:
+        tenant = str(tenantId or "default")
+        with self._store._lock:
+            tables = int(self._store._conn.execute(
+                "SELECT COUNT(*) FROM ontology_catalog_tables WHERE tenant_id = ?",
+                (tenant,)).fetchone()[0])
+            columns = int(self._store._conn.execute(
+                "SELECT COUNT(*) FROM ontology_catalog_columns WHERE tenant_id = ?",
+                (tenant,)).fetchone()[0])
+            sources = int(self._store._conn.execute(
+                "SELECT COUNT(DISTINCT source_id) FROM ontology_catalog_tables"
+                " WHERE tenant_id = ?", (tenant,)).fetchone()[0])
+        return {"tables": tables, "columns": columns, "sources": sources}
+
+    def sourcesInCatalog(self, tenantId: str) -> List[str]:
+        with self._store._lock:
+            rows = self._store._conn.execute(
+                "SELECT DISTINCT source_id FROM ontology_catalog_tables"
+                " WHERE tenant_id = ? ORDER BY source_id",
+                (str(tenantId or "default"),)).fetchall()
+        return [str(r["source_id"]) for r in rows]
+
+    # ── 术语链接（只由 P1-2 审批流调用）────────────────────
+
+    def linkTableTerm(self, tenantId: str, tableId: str, termId: str) -> None:
+        with self._store._lock, self._store._conn:
+            self._store._conn.execute(
+                "UPDATE ontology_catalog_tables SET term_id = ?"
+                " WHERE tenant_id = ? AND catalog_table_id = ?",
+                (str(termId or ""), str(tenantId or "default"), str(tableId or "")))
+
+    def linkColumnTerm(self, tenantId: str, tableId: str, columnName: str,
+                       termId: str) -> None:
+        with self._store._lock, self._store._conn:
+            self._store._conn.execute(
+                "UPDATE ontology_catalog_columns SET term_id = ?"
+                " WHERE tenant_id = ? AND catalog_table_id = ? AND column_name = ?",
+                (str(termId or ""), str(tenantId or "default"), str(tableId or ""),
+                 str(columnName or "")))

@@ -45,6 +45,7 @@ from ..ontology.change_log import _SCHEMA_V33
 from ..ontology.function_registry import _SCHEMA_V43_FUNCTIONS
 from ..community_graph import _SCHEMA_V48_COMMUNITIES
 from ..enterprise.webhook_receiver import _SCHEMA_V49_WEBHOOK_DEDUP
+from ..enterprise.schema_catalog import _SCHEMA_V51_CATALOG
 from ..ontology.artifact_store import _SCHEMA_V50_ARTIFACTS
 from ..ontology.decision_ledger import _SCHEMA_V47_DECISIONS
 from ..ontology.simulation import _SCHEMA_V46_SIMULATIONS
@@ -181,6 +182,10 @@ _STEPS: List[tuple] = [
     # v50：工件级内容地址存储（specs/2026-11-12 §18 C1/C2）——
     #      ontology_artifacts 主键＝SHA-256(content)，write-once 不可变面
     (50, _SCHEMA_V50_ARTIFACTS),
+    # v51：schema 目录（对照研究 P1-1，2026-11-15）——describeSchema 的落账面：
+    #      ontology_catalog_tables/_columns（表/列/主外键画像 + P1-2 审批回填的
+    #      term_id 链接列）；摄取机器零采样，术语链接只由审批流写
+    (51, _SCHEMA_V51_CATALOG),
 ]
 
 _registered = False

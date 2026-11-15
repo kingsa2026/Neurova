@@ -103,6 +103,65 @@ _SCHEMA_QUERIES: Dict[str, Tuple[str, tuple]] = {
         " ORDER BY table_name, column_id", ()),
 }
 
+#: describeRelations 外键目录查询（P1-1；sqlite 走逐表 pragma，见 _describeRelationsSync）
+_RELATION_QUERIES: Dict[str, Tuple[str, tuple]] = {
+    "postgresql": (
+        "SELECT tc.table_name AS table_name, kcu.column_name AS column_name,"
+        " ccu.table_name AS ref_table, ccu.column_name AS ref_column"
+        " FROM information_schema.table_constraints tc"
+        " JOIN information_schema.key_column_usage kcu ON"
+        "  tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema"
+        " JOIN information_schema.constraint_column_usage ccu ON"
+        "  ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema"
+        " WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'", ()),
+    "mysql": (
+        "SELECT table_name, column_name, referenced_table_name AS ref_table,"
+        " referenced_column_name AS ref_column FROM information_schema.key_column_usage"
+        " WHERE referenced_table_name IS NOT NULL AND table_schema = DATABASE()", ()),
+    "mssql": (
+        "SELECT tc.table_name AS table_name, kcu.column_name AS column_name,"
+        " ccu.table_name AS ref_table, ccu.column_name AS ref_column"
+        " FROM information_schema.table_constraints tc"
+        " JOIN information_schema.key_column_usage kcu ON"
+        "  tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema"
+        " JOIN information_schema.constraint_column_usage ccu ON"
+        "  ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema"
+        " WHERE tc.constraint_type = 'FOREIGN KEY'", ()),
+    "oracle": (
+        "SELECT a.table_name AS table_name, a.column_name AS column_name,"
+        " b.table_name AS ref_table, b.column_name AS ref_column"
+        " FROM user_cons_columns a"
+        " JOIN user_constraints ac ON a.constraint_name = ac.constraint_name"
+        "  AND ac.constraint_type = 'R'"
+        " JOIN user_constraints bc ON ac.r_constraint_name = bc.constraint_name"
+        " JOIN user_cons_columns b ON bc.constraint_name = b.constraint_name"
+        "  AND b.position = a.position", ()),
+}
+
+#: describeRelations 主键目录查询（sqlite 走逐表 pragma）
+_PK_QUERIES: Dict[str, Tuple[str, tuple]] = {
+    "postgresql": (
+        "SELECT tc.table_name AS table_name, kcu.column_name AS column_name"
+        " FROM information_schema.table_constraints tc"
+        " JOIN information_schema.key_column_usage kcu ON"
+        "  tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema"
+        " WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_schema = 'public'", ()),
+    "mysql": (
+        "SELECT table_name, column_name FROM information_schema.key_column_usage"
+        " WHERE constraint_name = 'PRIMARY' AND table_schema = DATABASE()", ()),
+    "mssql": (
+        "SELECT tc.table_name AS table_name, kcu.column_name AS column_name"
+        " FROM information_schema.table_constraints tc"
+        " JOIN information_schema.key_column_usage kcu ON"
+        "  tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema"
+        " WHERE tc.constraint_type = 'PRIMARY KEY'", ()),
+    "oracle": (
+        "SELECT a.table_name AS table_name, a.column_name AS column_name"
+        " FROM user_cons_columns a"
+        " JOIN user_constraints ac ON a.constraint_name = ac.constraint_name"
+        "  AND ac.constraint_type = 'P'", ()),
+}
+
 #: 探活语句（五驱动通用）
 _HEALTH_PROBE_SQL = "SELECT 1"
 
@@ -130,6 +189,48 @@ class DriverNotInstalledError(RuntimeError):
 def _encodeWmValue(value: Any) -> str:
     """水位值 → token 载荷（json 编码：int/float/str 原生，类型可逆）。"""
     return json.dumps(value, ensure_ascii=False, default=repr)
+
+
+def assertReadonlySelect(sql: str) -> str:
+    """生成式只读 SELECT 的唯一校验口（P1-4/NL2SQL 与 executeReadonly 同用）。
+
+    比 `_validateReadonlyQuery`（描述符模板，带 {wmCond}/{lim} 槽位义务）更严：
+    只收 SELECT/WITH 单语句；多语句、注释拼接、任何写意图关键词一律显式拒绝。
+    返回清理后的 SQL（去首尾空白与结尾分号）。"""
+    text = str(sql or "").strip()
+    while text.endswith(";"):
+        text = text[:-1].strip()
+    if not text:
+        raise MappingError("SQL 为空")
+    if ";" in text or "--" in text or "/*" in text:
+        raise MappingError("SQL 不允许多语句与注释拼接形状（; -- /*）——只读边界")
+    leading = text.split(None, 1)[0].lower()
+    if leading not in ("select", "with"):
+        raise MappingError("仅允许 SELECT/WITH 只读查询，%r 不是——写意图显式拒绝" % leading)
+    hit = _WRITE_KEYWORDS.search(text)
+    if hit:
+        raise MappingError("SQL 含写意图关键词 %r——只读边界，显式拒绝" % hit.group(0))
+    return text
+
+
+def enforceReadonlyLimit(sql: str, driver: str, limit: int) -> str:
+    """把单次返回行数收敛到 limit：已有 LIMIT 取更小值，无 LIMIT 按方言补。"""
+    bound = max(1, int(limit))
+    text = str(sql or "").strip()
+    existing = re.search(r"\bLIMIT\s+(\d+)\s*$", text, re.IGNORECASE)
+    if existing:
+        kept = min(int(existing.group(1)), bound)
+        return text[:existing.start()] + "LIMIT %d" % kept
+    if driver == "mssql":
+        # OFFSET/FETCH 需 ORDER BY；TOP 对形状要求最松——插在 SELECT [DISTINCT] 后
+        match = re.match(r"(?is)^\s*SELECT\s+(DISTINCT\s+|ALL\s+)?", text)
+        if match:
+            insertAt = match.end()
+            return "%sTOP (%d) %s" % (text[:insertAt], bound, text[insertAt:])
+        return text
+    if driver == "oracle":
+        return "%s FETCH FIRST %d ROWS ONLY" % (text, bound)
+    return "%s\nLIMIT %d" % (text, bound)
 
 
 class SqlDirectAdapter:
@@ -202,6 +303,18 @@ class SqlDirectAdapter:
 
     async def describeSchema(self) -> SourceSchema:
         return await asyncio.to_thread(self._describeSync)
+
+    async def describeRelations(self) -> Dict[str, Any]:
+        """外键/主键自省（P1-1 可选能力；协议不强制，其余源型无此方法）。"""
+        return await asyncio.to_thread(self._describeRelationsSync)
+
+    async def executeReadonly(self, sql: str, limit: int = 200) -> List[Dict[str, Any]]:
+        """生成式只读查询执行口（P1-4）：assertReadonlySelect 硬闸 + LIMIT 收敛。
+
+        与描述符 query 路由（固定模板）不同，这里只服务经目录 grounding 生成、
+        已过白名单校验的单条 SELECT；调用方（nl2sql 管线）负责表/列归属校验。
+        """
+        return await asyncio.to_thread(self._executeReadonlySync, sql, limit)
 
     async def fetchBatch(self, cursor: Optional[SourceCursor], limit: int) -> ChangeBatch:
         limit = max(1, min(int(limit), _MAX_BATCH_LIMIT))
@@ -347,6 +460,90 @@ class SqlDirectAdapter:
         logger.debug("sql[%s/%s] describe tables=%d",
                      self._driver, self._sourceId, len(schemaTables))
         return SourceSchema(sourceId=self._sourceId, sourceType="sql", tables=schemaTables)
+
+    # ── 关系自归（P1-1）────────────────────────────────────
+
+    def _describeRelationsSync(self) -> Dict[str, Any]:
+        foreignKeys: List[Dict[str, Any]] = []
+        primaryKeys: Dict[str, List[str]] = {}
+        conn = self._connect()
+        try:
+            if self._driver == "sqlite":
+                cursorHandle = conn.cursor()
+                try:
+                    tableRows = cursorHandle.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                        " AND name NOT LIKE 'sqlite_%'").fetchall()
+                    for (tableName,) in tableRows:
+                        tableName = str(tableName)
+                        if not _TABLE_IDENTIFIER.match(tableName):
+                            continue  # 非常规表名不进 pragma 拼接，宁可漏不注入
+                        for row in cursorHandle.execute(
+                                "PRAGMA foreign_key_list(%s)" % tableName).fetchall():
+                            record = row if isinstance(row, dict) else dict(
+                                zip([d[0] for d in cursorHandle.description], row))
+                            foreignKeys.append({
+                                "source_table": tableName,
+                                "source_column": str(record.get("from", "")),
+                                "target_table": str(record.get("table", "")),
+                                "target_column": str(record.get("to", "") or ""),
+                            })
+                        pkColumns = []
+                        for row in cursorHandle.execute(
+                                "PRAGMA table_info(%s)" % tableName).fetchall():
+                            record = row if isinstance(row, dict) else dict(
+                                zip([d[0] for d in cursorHandle.description], row))
+                            if int(record.get("pk", 0) or 0) > 0:
+                                pkColumns.append(str(record.get("name", "")))
+                        if pkColumns:
+                            primaryKeys[tableName] = pkColumns
+                finally:
+                    cursorHandle.close()
+            else:
+                cursorHandle = conn.cursor()
+                try:
+                    fkSql, fkParams = _RELATION_QUERIES[self._driver]
+                    cursorHandle.execute(fkSql, tuple(fkParams))
+                    names = [d[0] for d in cursorHandle.description] \
+                        if cursorHandle.description else []
+                    for record in cursorHandle.fetchall():
+                        row = record if isinstance(record, dict) else dict(
+                            zip(names, record))
+                        foreignKeys.append({
+                            "source_table": str(row.get("table_name", "")),
+                            "source_column": str(row.get("column_name", "")),
+                            "target_table": str(row.get("ref_table", "")),
+                            "target_column": str(row.get("ref_column", "")),
+                        })
+                    pkSql, pkParams = _PK_QUERIES[self._driver]
+                    cursorHandle.execute(pkSql, tuple(pkParams))
+                    names = [d[0] for d in cursorHandle.description] \
+                        if cursorHandle.description else names
+                    for record in cursorHandle.fetchall():
+                        row = record if isinstance(record, dict) else dict(
+                            zip(names, record))
+                        primaryKeys.setdefault(str(row.get("table_name", "")), []) \
+                            .append(str(row.get("column_name", "")))
+                finally:
+                    cursorHandle.close()
+        finally:
+            conn.close()
+        logger.debug("sql[%s/%s] relations fk=%d pk_tables=%d",
+                     self._driver, self._sourceId, len(foreignKeys), len(primaryKeys))
+        return {"foreign_keys": foreignKeys, "primary_keys": primaryKeys}
+
+    def _executeReadonlySync(self, sql: str, limit: int) -> List[Dict[str, Any]]:
+        checked = assertReadonlySelect(sql)
+        bounded = enforceReadonlyLimit(checked, self._driver, limit)
+        with self._openCursor(bounded, ()) as cursorHandle:
+            raw = cursorHandle.fetchall()
+            description = cursorHandle.description
+        rows = self._normalizeRows(description, raw)
+        if len(rows) > max(1, int(limit)):
+            rows = rows[:max(1, int(limit))]
+        logger.debug("sql[%s/%s] executeReadonly rows=%d",
+                     self._driver, self._sourceId, len(rows))
+        return rows
 
     # ── 健康（显式三态，失败点名）───────────────────────────
 
