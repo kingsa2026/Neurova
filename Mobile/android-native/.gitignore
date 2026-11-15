@@ -1,0 +1,9 @@
+# 安卓工程构建产物与本机配置（不入库）
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 安全基线（手机客户端设计方案 §9.3）：全量排除自动备份，凭证一律不落明文 preferences -->
+<full-backup-content>
+    <exclude domain="root" path="." />
+    <exclude domain="file" path="." />
+    <exclude domain="database" path="." />
+    <exclude domain="sharedpref" path="." />
+    <exclude domain="external" path="." />
+</full-backup-content>
