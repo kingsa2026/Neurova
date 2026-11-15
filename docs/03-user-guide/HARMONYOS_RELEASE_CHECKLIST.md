@@ -1,7 +1,7 @@
 # Neurova 鸿蒙应用上架发布检查清单
 
 > 文档路径：`docs/03-user-guide/HARMONYOS_RELEASE_CHECKLIST.md`
-> 适用范围：NeurovaHarmony 鸿蒙 App（HarmonyOS 6.1 / API 13）
+> 适用范围：Mobile/harmony 鸿蒙 App（HarmonyOS 6.1 / API 13）
 > 用途：上架华为应用市场前的全面自检清单，确保每次发布版本均通过
 > 更新日期：2026-06-25
 
@@ -79,10 +79,10 @@
 | # | 检查项 | 检查方法 | 通过标准 | 状态 |
 |---|--------|----------|----------|------|
 | 5.1 | 签名配置文档 | `docs/03-user-guide/HARMONYOS_SIGNING_GUIDE.md` | 已按指南完成全部步骤 | ☐ |
-| 5.2 | 密钥库文件存在 | `NeurovaHarmony/signing/neurova-release.p12` | 文件存在且未损坏 | ☐ |
+| 5.2 | 密钥库文件存在 | `Mobile/harmony/signing/neurova-release.p12` | 文件存在且未损坏 | ☐ |
 | 5.3 | 发布证书存在 | `signing/neurova-release.cer` | 华为签发，未过期 | ☐ |
 | 5.4 | Profile 文件存在 | `signing/neurova-profile.p7b` | 华为签发，未过期（默认 1 年） | ☐ |
-| 5.5 | build-profile.json5 配置 | `NeurovaHarmony/build-profile.json5` 的 `signingConfigs` | 非空数组，`material` 字段完整 | ☐ |
+| 5.5 | build-profile.json5 配置 | `Mobile/harmony/build-profile.json5` 的 `signingConfigs` | 非空数组，`material` 字段完整 | ☐ |
 | 5.6 | signingConfig 关联 | `products[].signingConfig` | 与 `signingConfigs[].name` 一致 | ☐ |
 | 5.7 | 密码已加密 | DevEco Studio 中查看 | 密码字段显示为密文（非明文） | ☐ |
 | 5.8 | 签名算法合规 | `material.signAlg` | `SHA256withECDSA` | ☐ |
@@ -292,5 +292,5 @@ hvigorw ohosTest
 ---
 
 **文档版本**：v1.0
-**适用版本**：NeurovaHarmony v1.0.0
+**适用版本**：Mobile/harmony v1.0.0
 **下次复核触发**：每次版本发布前

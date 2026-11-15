@@ -1,6 +1,6 @@
 /**
  * 配对与通道状态字面量——三处单源之一（另两处：`neurova/tunnel/protocol.py` 为权威侧，
- * `NeurovaHarmony/.../libs/protocol/PairingProtocol.ets`）。
+ * `Mobile/harmony/.../libs/protocol/PairingProtocol.ets`）。
  *
  * 为什么在 TS 里再抄一份同名字面量：徽标与文案要按状态取词，而前端不能等服务端
  * 漂出某个词再发现画不出（本卷形态 403：判据读的对象与真装配点不同形）。

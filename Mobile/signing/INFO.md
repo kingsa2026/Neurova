@@ -43,7 +43,7 @@
 - `./gradlew assembleRelease` → `app-release.apk`（3.1MB，签名者 CN=Neurova Android Release，SHA-256 与上表一致，apksigner 验证）✓
 - 产物归档：`Mobile/dist/android/`
 
-**鸿蒙**（NeurovaHarmony 工程，经 ASCII 副本目录构建——hvigor 6 拒绝中文工程路径）：
+**鸿蒙**（Mobile/harmony 工程，经 ASCII 副本目录构建——hvigor 6 拒绝中文工程路径）：
 - 构建：`hvigorw.bat --mode module -p product=default -p buildMode=release assembleHap`
   → `entry-default-unsigned.hap`（88KB）✓
 - 签名：`java -jar hap-sign-tool.jar sign-app -mode localSign -inFile <unsigned> -outFile <signed>

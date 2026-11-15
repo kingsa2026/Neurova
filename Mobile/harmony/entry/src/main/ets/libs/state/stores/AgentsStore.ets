@@ -2,7 +2,7 @@
  * AgentsStore - Agent 列表与当前 Agent 状态
  */
 import { StateManager } from '../StateManager';
-import { EventBus } from '../bus/EventBus';
+import { EventBus } from '../../bus/EventBus';
 import { Agent } from '../../types';
 
 const KEY_AGENTS = 'agents:list';

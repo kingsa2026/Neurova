@@ -1,7 +1,7 @@
 # Neurova 鸿蒙应用签名配置指南
 
 > 文档路径：`docs/03-user-guide/HARMONYOS_SIGNING_GUIDE.md`
-> 适用范围：NeurovaHarmony 鸿蒙 App（HarmonyOS 6.1 / API 13）
+> 适用范围：Mobile/harmony 鸿蒙 App（HarmonyOS 6.1 / API 13）
 > 当前状态：`build-profile.json5` 中 `signingConfigs` 为空数组，需开发者按本指南完成配置后方可发布到华为应用市场。
 > 更新日期：2026-06-25
 
@@ -56,7 +56,7 @@ HarmonyOS 应用签名分两类，必须区分使用：
 建议在项目根目录创建（**不提交到 git**）：
 
 ```
-NeurovaHarmony/
+Mobile/harmony/
 ├── signing/                     # 签名文件目录（加入 .gitignore）
 │   ├── neurova-release.p12      # 发布密钥库
 │   ├── neurova-release.csr     # 证书请求文件（申请后可保留备份）
@@ -153,7 +153,7 @@ keytool -certreq \
 
 ## 5. build-profile.json5 配置示例
 
-编辑 `NeurovaHarmony/build-profile.json5`，将空 `signingConfigs` 替换为：
+编辑 `Mobile/harmony/build-profile.json5`，将空 `signingConfigs` 替换为：
 
 ```json5
 {
@@ -331,7 +331,7 @@ hdc install neurova-default-signed.hap
 ## 9. 安全注意事项
 
 1. **密钥库文件（.p12）禁止提交 git**：
-   - 在 `NeurovaHarmony/.gitignore` 中追加：
+   - 在 `Mobile/harmony/.gitignore` 中追加：
      ```
      signing/
      *.p12
@@ -348,8 +348,8 @@ hdc install neurova-default-signed.hap
 
 ## 10. 当前项目状态
 
-- `NeurovaHarmony/build-profile.json5` 中 `signingConfigs` 为空数组 `[]`
-- `NeurovaHarmony/.gitignore` 需追加签名文件忽略规则（见 9.1）
+- `Mobile/harmony/build-profile.json5` 中 `signingConfigs` 为空数组 `[]`
+- `Mobile/harmony/.gitignore` 需追加签名文件忽略规则（见 9.1）
 - 完成本指南全部步骤后，执行 M5.3.3 上架检查清单
 
 ---

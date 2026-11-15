@@ -71,7 +71,7 @@
 ### 3.2 工程结构
 
 ```
-NeurovaHarmony/                          # 鸿蒙工程根（独立于 NeurUI/）
+Mobile/harmony/                          # 鸿蒙工程根（独立于 NeurUI/）
 ├── entry/                               # 主模块
 │   └── src/main/ets/
 │       ├── entryability/                # UIAbility 入口

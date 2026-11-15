@@ -26,7 +26,7 @@
 | 配置 | `docs/configuration/` | 部署/配置事实源 |
 | 国际化 | `docs/i18n/` | 多语言事实源 |
 | 产品/品牌 | `PRODUCT_GUIDE.md` / `NEUROVA_BRAND.md` | 对外信息事实源 |
-| 鸿蒙端 | `HARMONYOS_*.md` | NeurovaHarmony 端事实源 |
+| 鸿蒙端 | `HARMONYOS_*.md` | Mobile/harmony 端事实源 |
 
 ## 2. 文档真实分布（实测，2026-08-23）
 
