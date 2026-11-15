@@ -3508,6 +3508,7 @@ conflictTimeReadout: 'Временные показатели: {basis} (стар
     subagent: 'Субагент',
     expand: 'Развернуть',
     minimize: 'Свернуть',
+    subagentStalled: 'Субагент не выдаёт результат {minutes} мин (напоминание #{count}) — ждите или переназначьте',
     execFailed: 'Ошибка выполнения',
     thinking: 'Думает…',
     selectCanvasWorkflow: 'Выберите рабочий процесс холста',

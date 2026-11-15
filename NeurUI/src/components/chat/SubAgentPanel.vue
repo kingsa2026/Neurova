@@ -23,6 +23,8 @@ export interface SubAgentWindowState {
   error?: string | null
   /** P1（蜂群对照）：子代理类型（general/explore）；explore = 工具面收窄为只读白名单 */
   subagentType?: string
+  /** P2（蜂群对照）：卡死渐进提醒——后端看门狗判 member 连续无产出后携带 */
+  stallNotice?: { stalledSeconds: number; reminderCount: number }
 }
 
 const props = defineProps<{ state: SubAgentWindowState }>()
@@ -87,6 +89,10 @@ function onOutputScroll(e: Event): void {
     </div>
     <div v-if="!minimized" class="panel-body">
       <div class="panel-task" :title="state.task">{{ state.task }}</div>
+      <!-- P2（蜂群对照）：卡死渐进提醒（发现而不裁决：只提示，等/停由用户决定） -->
+      <div v-if="state.status === 'running' && state.stallNotice" class="panel-stall">
+        ⏸ {{ t('ui.subagentStalled', { minutes: Math.max(1, Math.round(state.stallNotice.stalledSeconds / 60)), count: state.stallNotice.reminderCount }) }}
+      </div>
       <div ref="outputEl" class="panel-content" @scroll="onOutputScroll">
         <template v-if="state.status === 'failed'">⚠ {{ state.error || t('ui.execFailed') }}</template>
         <template v-else-if="bodyText">{{ bodyText }}<span v-if="state.status === 'running'" class="cursor">▌</span></template>
@@ -164,6 +170,16 @@ function onOutputScroll(e: Event): void {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.panel-stall {
+  margin: 2px 10px 0;
+  padding: 3px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  border-radius: 6px;
+  border: 1px solid rgba(250, 204, 21, 0.35);
+  background: rgba(250, 204, 21, 0.08);
+  color: var(--nr-text-secondary, #cbd5e1);
 }
 .panel-content {
   padding: 4px 10px 10px;

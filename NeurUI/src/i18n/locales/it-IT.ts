@@ -3508,6 +3508,7 @@ conflictTimeReadout: 'Lettura temporale: {basis} (vecchia {old} → nuova {new})
     subagent: 'Sottoagente',
     expand: 'Espandi',
     minimize: 'Minimizza',
+    subagentStalled: 'Il sotto-agente non produce output da {minutes} min (avviso #{count}) — attendere o riassegnare',
     execFailed: 'Esecuzione fallita',
     thinking: 'Sto pensando…',
     selectCanvasWorkflow: 'Seleziona flusso di lavoro canvas',

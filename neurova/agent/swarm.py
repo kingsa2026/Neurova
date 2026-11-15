@@ -92,6 +92,21 @@ SUBAGENT_FINISHED_STATUSES = frozenset({SUBAGENT_COMPLETED, SUBAGENT_FAILED})
 #: 运行窗口预算的覆盖入口；**默认值不写在蜂群里**，取 `tool_coordinator` 的
 #: `spawn_subagent` 那份读数（同一件事只许有一个尺度，见 `_effectiveRuntimeBudget`）
 SUBAGENT_BUDGET_ENV = "NEUROVA_SWARM_SUBAGENT_BUDGET_SEC"
+
+#: 前台自动转后台的定时器（秒；P2 蜂群对照 #4）。>0 时前台派生若在窗口内
+#: 未跑完，即脱离父 turn 转后台继续（返回 background 信封 + subagent_id，
+#: 终态仍走既有邮箱/广播回灌），父会话不再被长任务阻塞到预算墙。
+#: 0/未设 = 关闭（保持既有"前台等到底"语义）。
+AUTO_BACKGROUND_ENV = "NEUROVA_SWARM_AUTO_BACKGROUND_AFTER_S"
+
+#: 卡死渐进提醒（P2 蜂群对照 #5）：member 连续无产出达到首报阈值即提醒
+#: （广播 subagent_stalled + 父会话邮箱），此后按指数退避续报、封顶上限。
+#: **发现而不裁决**——只提醒，等/停由主代理决定。首报默认 900s，
+#: 0 = 关闭；上限默认 14400s（4h）。
+STALL_FIRST_REMINDER_ENV = "NEUROVA_SWARM_STALL_FIRST_S"
+STALL_REMINDER_CAP_ENV = "NEUROVA_SWARM_STALL_CAP_S"
+STALL_FIRST_REMINDER_DEFAULT_S = 900.0
+STALL_REMINDER_CAP_DEFAULT_S = 14400.0
 # 收尾成因的常量由台账侧持有（`agent_run_ledger`），swarm 只引用不自造第二份：
 # 台账的 error_type 与这里的 cause 必须是同一批词值。
 from neurova.core.agent_run_ledger import (
@@ -165,6 +180,10 @@ class SubAgentRun:
     # （continue_subagent 写入；空串 = 全新派生）。member 会话复用被续跑那条的
     # 键，子 Agent 的历史由既有会话恢复机制带回，不另造第二套状态搬运。
     resumed_from: str = ""
+    # P2（蜂群对照 #5）：卡死时钟的进度位——member 最近一次"有产出迹象"的
+    # 单调时刻（run 启动 / 流式 chunk 到达都算）。看门狗据此判 stall。
+    last_progress_at: float = field(default_factory=time.monotonic)
+    stall_reminder_count: int = 0
     # 运行时状态：预留的模型并发槽（None=未占用）；_execute 的 finally 据此释放
     slot_model: Optional[str] = field(default=None, repr=False)
 
@@ -426,8 +445,49 @@ class SwarmManager:
                 **quota,
             }
 
+        # P2（蜂群对照 #4）：前台自动转后台——窗口内跑完照常前台返回；
+        # 没跑完即脱离父 turn 转后台继续（任务引用登记防 GC），终态仍走
+        # 既有邮箱/广播回灌，父会话不再被长任务阻塞到预算墙。
+        autoBgAfter = self._autoBackgroundSeconds()
+        if autoBgAfter > 0:
+            execTask = asyncio.create_task(
+                self._execute(run, agent, initiator_agent, stream)
+            )
+            done, _pending = await asyncio.wait(
+                {execTask}, timeout=autoBgAfter, return_when=asyncio.FIRST_COMPLETED
+            )
+            if execTask in done:
+                return {**run.to_dict(), **self._quota_snapshot()}
+            execTask.add_done_callback(
+                lambda _task, _sid=run.subagent_id: self._forget_task(_sid)
+            )
+            with self._lock:
+                self._tasks[run.subagent_id] = execTask
+            return {
+                "subagent_id": run.subagent_id,
+                "agent_id": run.agent_id,
+                "agent_name": run.agent_name,
+                "member_session_id": run.member_session_id,
+                "status": run.status,
+                "background": True,
+                "auto_background": True,
+                "hint": (
+                    f"前台等待 {autoBgAfter:g}s 未完成已自动转后台"
+                    "（subagent_status 查询；终态会自动回灌本会话）"
+                ),
+                **quota,
+            }
+
         await self._execute(run, agent, initiator_agent, stream)
         return {**run.to_dict(), **self._quota_snapshot()}
+
+    def _autoBackgroundSeconds(self) -> float:
+        """前台自动转后台的窗口（秒）；0/未设 = 关闭（前台等到底）。"""
+        raw = (os.environ.get(AUTO_BACKGROUND_ENV) or "").strip()
+        try:
+            return float(raw) if raw else 0.0
+        except ValueError:
+            return 0.0
 
     def status(self, subagent_id: str) -> Dict[str, Any]:
         """查询子 Agent 运行状态
@@ -714,6 +774,8 @@ class SwarmManager:
         stream: bool,
     ) -> None:
         """执行子 Agent：无论成功/失败，finally 释放其预留的模型并发槽（防泄漏）。"""
+        # 卡死看门狗（发现而不裁决）：随 run 存活，终态即撤
+        watchdog = asyncio.create_task(self._stallWatchdog(run))
         try:
             await self._run_member(
                 run,
@@ -724,7 +786,84 @@ class SwarmManager:
                 toolAllowlist=run.tool_allowlist,
             )
         finally:
+            watchdog.cancel()
             self._release_slot(run)
+
+    def _stallFirstSeconds(self) -> float:
+        """卡死首报阈值（秒）；0 = 看门狗关闭。env 现取，默认 900s。"""
+        raw = (os.environ.get(STALL_FIRST_REMINDER_ENV) or "").strip()
+        try:
+            return float(raw) if raw else STALL_FIRST_REMINDER_DEFAULT_S
+        except ValueError:
+            return STALL_FIRST_REMINDER_DEFAULT_S
+
+    def _stallCapSeconds(self) -> float:
+        """续报间隔的指数退避上限（秒），默认 4h。"""
+        raw = (os.environ.get(STALL_REMINDER_CAP_ENV) or "").strip()
+        try:
+            return float(raw) if raw else STALL_REMINDER_CAP_DEFAULT_S
+        except ValueError:
+            return STALL_REMINDER_CAP_DEFAULT_S
+
+    async def _stallWatchdog(self, run: SubAgentRun) -> None:
+        """P2（蜂群对照 #5）：member 无产出渐进提醒。
+
+        进度信号 = 流式 chunk 到达（emitter 触碰 last_progress_at）＋ run 启动。
+        连续无产出达首报阈值即广播 subagent_stalled + 父会话邮箱提醒，
+        此后阈值指数退避（15m→30m→60m…封顶 cap）。**只提醒不裁决**：
+        等/停由主代理决定；run 状态机不受影响。
+        """
+        first = self._stallFirstSeconds()
+        if first <= 0 or not run.session_id:
+            return
+        cap = max(first, self._stallCapSeconds())
+        poll = max(1.0, min(30.0, first / 4))
+        threshold = first
+        while run.status in SUBAGENT_ACTIVE_STATUSES:
+            await asyncio.sleep(poll)
+            if run.status not in SUBAGENT_ACTIVE_STATUSES:
+                return
+            stalledFor = time.monotonic() - run.last_progress_at
+            if stalledFor < threshold:
+                continue
+            run.stall_reminder_count += 1
+            payload = {
+                "subagent_id": run.subagent_id,
+                "agent_name": run.agent_name,
+                "stalled_seconds": int(stalledFor),
+                "reminder_count": run.stall_reminder_count,
+                "next_threshold_seconds": int(min(threshold * 2, cap)),
+                "hint": "子代理长时间无产出；可继续等待（会再提醒）或派生替代任务",
+            }
+            await self._broadcast(run, "subagent_stalled", payload)
+            self._notifyStallMail(run, payload)
+            threshold = min(threshold * 2, cap)
+
+    def _notifyStallMail(self, run: SubAgentRun, payload: Dict[str, Any]) -> None:
+        """卡死提醒投父会话邮箱（与终态回灌同通道；失败不影响主流程）"""
+        if run.origin != "chat" or not run.session_id:
+            return
+        try:
+            from neurova.agent.mailbox import get_agent_mailbox
+
+            get_agent_mailbox().push(
+                run.session_id,
+                "[子Agent卡顿] "
+                + json.dumps(
+                    {
+                        "kind": "subagent_stalled",
+                        "subagent_id": run.subagent_id,
+                        "agent_id": run.agent_id,
+                        "task": run.task,
+                        "stalled_seconds": payload["stalled_seconds"],
+                        "reminder_count": payload["reminder_count"],
+                        "member_session_id": run.member_session_id,
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        except Exception as e:  # noqa: BLE001 - 回灌失败不影响主流程
+            logger.debug("Swarm: 卡死提醒投递失败 (%s): %s", run.subagent_id, e)
 
     async def _run_member(
         self,
@@ -924,6 +1063,9 @@ class SwarmManager:
             _fire_refs.discard(task)
 
         def emitter(event_type: str, data: Any) -> None:
+            # 卡死时钟的进度信号：chunk 到达 = member 活着（content 是产出，
+            # reasoning 也是生命迹象——模型仍在工作）
+            run.last_progress_at = time.monotonic()
             if contentBuffer is not None and event_type == "content" and isinstance(data, str):
                 contentBuffer.append(data)
             try:
