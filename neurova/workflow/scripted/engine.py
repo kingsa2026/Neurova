@@ -20,7 +20,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.workflow.scripted.journal import WorkflowJournal
-from neurova.workflow.scripted.validator import validateScript
+from neurova.workflow.scripted.validator import analyzeScript, validateScript
 
 logger = get_logger(__name__)
 
@@ -59,7 +59,9 @@ async def runScriptedWorkflowSubprocess(
     """
     violations = validateScript(script)
     if violations:
-        return {"success": False, "errors": violations}
+        # P3（蜂群对照 #7）：编不过直接回结构化诊断——诊断码 + 四图，
+        # 脚本作者（模型）据码定位修脚本，不弹窗不猜测
+        return {"success": False, "errors": violations, "analysis": analyzeScript(script)}
 
     replayCalls = [r for r in (resumeRows or []) if r.get("kind") == "callTool"]
     effectiveTimeout = min(max(float(timeout), 5.0), MAX_TIMEOUT)

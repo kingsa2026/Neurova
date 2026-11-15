@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import threading
 import time
@@ -21,6 +22,7 @@ logger = get_logger(__name__)
 _DEFAULT_AGENT = "default"
 _SLUG_FALLBACK = "plan"
 _NAME_RE = re.compile(r"^\d{8}-\d{6}-[^/\\]+\.md$")
+_APPROVAL_SUFFIX = ".approval.json"
 _WIN_RESERVED = {"CON", "PRN", "AUX", "NUL"}
 
 from neurova.plan_mode.errors import PlanDocError, PlanDocNotFound  # noqa: E402
@@ -125,6 +127,52 @@ class PlanDocStore:
         if plan_dir not in path.parents:
             raise PlanDocError(f"非法计划文档名: {name!r}")
         return path
+
+    # ------------------------------------------------------------------
+    # 审批记录落盘（P3 蜂群对照 #6：批准事实必须比 TTL 内存会话活得久）
+    # ------------------------------------------------------------------
+
+    def _approval_path(self, agent_id: str, plan_name: str) -> Path:
+        """审批记录路径 = 同名计划 MD 的 <stem>.approval.json（名从计划来，不自由起名）"""
+        if not _NAME_RE.match(plan_name or ""):
+            raise PlanDocError(f"非法计划文档名: {plan_name!r}")
+        return self._agent_plan_dir(agent_id) / (
+            plan_name[: -len(".md")] + _APPROVAL_SUFFIX
+        )
+
+    def saveApprovalRecord(
+        self, agent_id: str, plan_name: str, record: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """把审批决定（approve/reject + 谁何时何注）落盘为
+        ``<计划名>.approval.json``，返回 {name, rel_path, size, modified}。
+
+        会话注册表是 TTL 内存态（默认 1h 即逐出）——审批事实只写内存的话，
+        会话过期后就无处复查。文件是这一事实的唯一持久真相源。
+        """
+        apath = self._approval_path(agent_id, plan_name)
+        with self._lock:
+            apath.parent.mkdir(parents=True, exist_ok=True)
+            apath.write_text(
+                json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        rel = apath.relative_to(self._agent_dir(agent_id))
+        logger.info("计划审批记录落盘: %s", apath)
+        return {
+            "name": apath.name,
+            "rel_path": rel.as_posix(),
+            "size": apath.stat().st_size,
+            "modified": apath.stat().st_mtime,
+        }
+
+    def readApprovalRecord(self, agent_id: str, plan_name: str) -> Optional[Dict[str, Any]]:
+        """读审批记录；未审批过返回 None；文件坏/不可读按 PlanDocError 出声。"""
+        apath = self._approval_path(agent_id, plan_name)
+        if not apath.exists():
+            return None
+        try:
+            return json.loads(apath.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            raise PlanDocError(f"审批记录读取失败: {apath.name} ({e})") from e
 
 
 _doc_store_singleton: Optional[PlanDocStore] = None
