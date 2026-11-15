@@ -130,6 +130,14 @@ from neurova.api.endpoints.knowledge_nl2sql import (  # noqa: E402
 
 router.include_router(_nl2sql_router)
 
+# Ossie 风格语义模型互操作（`/ontology/export.ossie.yaml`、`/ontology/import-ossie`，
+# P2-4）：字面路径，先于 detail include。
+from neurova.api.endpoints.knowledge_ossie import (  # noqa: E402
+    router as _ossie_router,
+)
+
+router.include_router(_ossie_router)
+
 # 精准回复命中表（`/annotations*`）：此前挂在 `/v1/console` 下，而它的唯一消费者
 # 是知识域的 `KnowledgePage` → `AnnotationDrawer`，前端按 `/v1/knowledge/annotations`
 # 请求，实测恒 404。标注是知识资产（重训练化集的语料来源），其归属就是知识域；
