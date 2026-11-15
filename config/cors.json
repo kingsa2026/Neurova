@@ -7,9 +7,23 @@
     "http://127.0.0.1:5173",
     "http://127.0.0.1:3000",
     "http://tauri.localhost",
-    "https://tauri.localhost"
+    "https://tauri.localhost",
+    "http://localhost",
+    "https://localhost"
   ],
   "allow_credentials": true,
-  "allow_methods": ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  "allow_headers": ["Authorization", "Content-Type", "Accept", "X-Request-ID"]
+  "allow_methods": [
+    "GET",
+    "POST",
+    "PUT",
+    "DELETE",
+    "PATCH",
+    "OPTIONS"
+  ],
+  "allow_headers": [
+    "Authorization",
+    "Content-Type",
+    "Accept",
+    "X-Request-ID"
+  ]
 }
