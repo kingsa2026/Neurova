@@ -5,16 +5,41 @@
 import { Preferences } from '@capacitor/preferences'
 
 export async function storageGet(key: string): Promise<string | null> {
-  const { value } = await Preferences.get({ key })
-  return value ?? null
+  try {
+    const { value } = await Preferences.get({ key })
+    return value ?? null
+  } catch (e) {
+    // Capacitor 桥偶发失败时回退 localStorage（fail-soft，不阻断启动/导航）
+    try {
+      return window.localStorage.getItem(key)
+    } catch {
+      return null
+    }
+  }
 }
 
 export async function storageSet(key: string, value: string): Promise<void> {
-  await Preferences.set({ key, value })
+  try {
+    await Preferences.set({ key, value })
+  } catch (e) {
+    try {
+      window.localStorage.setItem(key, value)
+    } catch {
+      // 双写均失败：保持内存态（本次会话内仍可用）
+    }
+  }
 }
 
 export async function storageRemove(key: string): Promise<void> {
-  await Preferences.remove({ key })
+  try {
+    await Preferences.remove({ key })
+  } catch (e) {
+    try {
+      window.localStorage.removeItem(key)
+    } catch {
+      // 忽略
+    }
+  }
 }
 
 export async function storageGetJson<T>(key: string): Promise<T | null> {

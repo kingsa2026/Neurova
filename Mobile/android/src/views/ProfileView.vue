@@ -47,6 +47,14 @@ async function doLogout() {
       <span class="muted">{{ pairing.paired ? '已配对 ›' : '未配对 ›' }}</span>
     </div>
 
+    <div class="card">
+      <div class="section-title">管理入口</div>
+      <div class="link-row" @click="router.push('/manage/models')"><span>模型管理</span><span class="muted">›</span></div>
+      <div class="link-row" @click="router.push('/manage/memory')"><span>记忆管理</span><span class="muted">›</span></div>
+      <div class="link-row" @click="router.push('/manage/skills')"><span>技能</span><span class="muted">›</span></div>
+      <div class="link-row" @click="router.push('/manage/agents')"><span>智能体管理</span><span class="muted">›</span></div>
+    </div>
+
     <button class="logout" @click="doLogout">退出登录（切换账号/租户）</button>
     <p class="muted tip">租户随账号绑定：退出后用目标租户下的账号重新登录即完成切换。</p>
   </div>
@@ -63,4 +71,6 @@ async function doLogout() {
   border: 1px solid var(--border); border-radius: 10px; padding: 12px; font-size: 14px;
 }
 .tip { margin-top: 10px; }
+.section-title { font-weight: 600; font-size: 13px; margin-bottom: 8px; color: var(--text-dim); }
+.link-row { display: flex; justify-content: space-between; padding: 9px 0; font-size: 14px; cursor: pointer; }
 </style>
