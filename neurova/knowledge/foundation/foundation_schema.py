@@ -46,6 +46,7 @@ from ..ontology.function_registry import _SCHEMA_V43_FUNCTIONS
 from ..community_graph import _SCHEMA_V48_COMMUNITIES
 from ..enterprise.webhook_receiver import _SCHEMA_V49_WEBHOOK_DEDUP
 from ..enterprise.schema_catalog import _SCHEMA_V51_CATALOG
+from ..enterprise.nl2sql import _SCHEMA_V53_QUERY_HISTORY
 from ..ontology.artifact_store import _SCHEMA_V50_ARTIFACTS
 from ..ontology.schema_suggester import _SCHEMA_V52_SUGGESTIONS
 from ..ontology.decision_ledger import _SCHEMA_V47_DECISIONS
@@ -190,6 +191,9 @@ _STEPS: List[tuple] = [
     # v52：schema 术语建议（对照研究 P1-2，2026-11-15）——ontology_schema_suggestions
     #      （机器只产候选；关系候选复用 ontology_relation_candidates 审批流不另造表）
     (52, _SCHEMA_V52_SUGGESTIONS),
+    # v53：问数历史（对照研究 P1-4/P2-3，2026-11-15）——ontology_query_history
+    #      （成功/失败/拒答都留行的诚实审计；高频表组合回灌 sql_pattern 候选）
+    (53, _SCHEMA_V53_QUERY_HISTORY),
 ]
 
 _registered = False
