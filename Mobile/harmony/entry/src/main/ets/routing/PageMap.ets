@@ -19,6 +19,10 @@ import { AgentDetailPage } from '../pages/AgentDetailPage';
 import { KnowledgeImportPage } from '../pages/KnowledgeImportPage';
 import { EnterpriseSourcesPage } from '../pages/EnterpriseSourcesPage';
 import { GraphPreviewPage } from '../pages/GraphPreviewPage';
+import { AdminUsersPage } from '../pages/AdminUsersPage';
+import { AdminGroupsPage } from '../pages/AdminGroupsPage';
+import { AdminMarketPage } from '../pages/AdminMarketPage';
+import { AdminSettingsPage } from '../pages/AdminSettingsPage';
 import { KnowledgePage } from '../pages/KnowledgePage';
 import { MemoryPage } from '../pages/MemoryPage';
 import { ModelPage } from '../pages/ModelPage';
@@ -55,6 +59,14 @@ export function pageMap(name: string) {
     NavDestination() { EnterpriseSourcesPage() }.hideTitleBar(true)
   } else if (name === RouteNames.GRAPH_PREVIEW) {
     NavDestination() { GraphPreviewPage() }.hideTitleBar(true)
+  } else if (name === RouteNames.ADMIN_USERS) {
+    NavDestination() { AdminUsersPage() }.hideTitleBar(true)
+  } else if (name === RouteNames.ADMIN_GROUPS) {
+    NavDestination() { AdminGroupsPage() }.hideTitleBar(true)
+  } else if (name === RouteNames.ADMIN_MARKET) {
+    NavDestination() { AdminMarketPage() }.hideTitleBar(true)
+  } else if (name === RouteNames.ADMIN_SETTINGS) {
+    NavDestination() { AdminSettingsPage() }.hideTitleBar(true)
   } else if (name === RouteNames.KNOWLEDGE) {
     NavDestination() { KnowledgePage() }.hideTitleBar(true)
   } else if (name === RouteNames.MEMORY) {

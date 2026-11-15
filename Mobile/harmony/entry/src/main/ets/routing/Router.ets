@@ -32,6 +32,10 @@ export class RouteNames {
   static readonly KNOWLEDGE_IMPORT: string = 'KnowledgeImportPage';
   static readonly ENTERPRISE_SOURCES: string = 'EnterpriseSourcesPage';
   static readonly GRAPH_PREVIEW: string = 'GraphPreviewPage';
+  static readonly ADMIN_USERS: string = 'AdminUsersPage';
+  static readonly ADMIN_GROUPS: string = 'AdminGroupsPage';
+  static readonly ADMIN_MARKET: string = 'AdminMarketPage';
+  static readonly ADMIN_SETTINGS: string = 'AdminSettingsPage';
   static readonly PAIRING: string = 'PairingPage';
   static readonly CONNECTION: string = 'ConnectionPage';
   static readonly MEMORY: string = 'MemoryPage';
@@ -111,6 +115,10 @@ const PROTECTED_ROUTES: string[] = [
   RouteNames.KNOWLEDGE_IMPORT,
   RouteNames.ENTERPRISE_SOURCES,
   RouteNames.GRAPH_PREVIEW,
+  RouteNames.ADMIN_USERS,
+  RouteNames.ADMIN_GROUPS,
+  RouteNames.ADMIN_MARKET,
+  RouteNames.ADMIN_SETTINGS,
   RouteNames.CHAT,
   RouteNames.AGENT_LIST,
   RouteNames.AGENT_FORM,

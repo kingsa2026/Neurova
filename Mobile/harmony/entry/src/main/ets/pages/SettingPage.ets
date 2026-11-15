@@ -279,6 +279,12 @@ export struct SettingPage {
     this.loadSettings();
   }
 
+  /** 当前登录用户是否管理员（role 取自 /auth/me；非 admin 时管理员分组不渲染） */
+  private isAdmin(): boolean {
+    const u = this.authStore.user;
+    return u !== undefined && u.role === 'admin';
+  }
+
   /**
    * 加载设置分组
    * 流程：调用 API 获取分组 → 深拷贝原始快照 → 失败回退默认分组
@@ -529,6 +535,85 @@ export struct SettingPage {
           btnSize: 'small',
           onTap: () => { this.saveAll(); }
         })
+      }
+
+      // 管理员分组：仅 role=admin 渲染（原型 F10；role 取自 /auth/me）
+      if (this.isAdmin()) {
+        Column() {
+          Text('管理员')
+            .fontSize(12)
+            .fontColor(this.sm.getColor('text_tertiary'))
+            .margin({ left: 20, top: 4, bottom: 8 })
+          Row() {
+            Text('用户管理')
+              .fontSize(14)
+              .fontColor(this.sm.getColor('text_primary'))
+              .layoutWeight(1)
+            Text('›')
+              .fontSize(14)
+              .fontColor(this.sm.getColor('text_tertiary'))
+          }
+          .padding(14)
+          .borderRadius(14)
+          .backgroundColor(this.sm.getColor('surface'))
+          .border({ width: 1, color: this.sm.getColor('border') })
+          .margin({ left: 16, right: 16, bottom: 8 })
+          .onClick(() => {
+            this.router.push(RouteNames.ADMIN_USERS);
+          })
+          Row() {
+            Text('用户组管理')
+              .fontSize(14)
+              .fontColor(this.sm.getColor('text_primary'))
+              .layoutWeight(1)
+            Text('›')
+              .fontSize(14)
+              .fontColor(this.sm.getColor('text_tertiary'))
+          }
+          .padding(14)
+          .borderRadius(14)
+          .backgroundColor(this.sm.getColor('surface'))
+          .border({ width: 1, color: this.sm.getColor('border') })
+          .margin({ left: 16, right: 16, bottom: 8 })
+          .onClick(() => {
+            this.router.push(RouteNames.ADMIN_GROUPS);
+          })
+          Row() {
+            Text('市场管理')
+              .fontSize(14)
+              .fontColor(this.sm.getColor('text_primary'))
+              .layoutWeight(1)
+            Text('›')
+              .fontSize(14)
+              .fontColor(this.sm.getColor('text_tertiary'))
+          }
+          .padding(14)
+          .borderRadius(14)
+          .backgroundColor(this.sm.getColor('surface'))
+          .border({ width: 1, color: this.sm.getColor('border') })
+          .margin({ left: 16, right: 16, bottom: 8 })
+          .onClick(() => {
+            this.router.push(RouteNames.ADMIN_MARKET);
+          })
+          Row() {
+            Text('系统设置（治理）')
+              .fontSize(14)
+              .fontColor(this.sm.getColor('text_primary'))
+              .layoutWeight(1)
+            Text('›')
+              .fontSize(14)
+              .fontColor(this.sm.getColor('text_tertiary'))
+          }
+          .padding(14)
+          .borderRadius(14)
+          .backgroundColor(this.sm.getColor('surface'))
+          .border({ width: 1, color: this.sm.getColor('border') })
+          .margin({ left: 16, right: 16, bottom: 8 })
+          .onClick(() => {
+            this.router.push(RouteNames.ADMIN_SETTINGS);
+          })
+        }
+        .width('100%')
       }
 
       if (this.loading) {
