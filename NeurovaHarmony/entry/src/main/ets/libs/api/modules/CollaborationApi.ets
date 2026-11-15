@@ -100,27 +100,71 @@ export class CollaborationApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<Task>>('/v1/collaboration/tasks', query);
+    return this.listTasks();
   }
 
-  /** 获取单个任务 */
-  async getTask(id: string): Promise<ApiResponse<Task>> {
-    return this.client.get<Task>(`/v1/collaboration/tasks/${id}`);
+  /**
+   * 列出任务：聚合全部看板的任务（真端点 /v1/tasks/boards + /boards/{id}/tasks，
+   * 原 /v1/collaboration/tasks 后端不存在）。补齐 FE Task 契约缺省字段。
+   */
+  async listTasks(projectId?: string): Promise<ApiResponse<Task[]>> {
+    const boardsRes = await this.client.get<Object[]>('/v1/tasks/boards');
+    const boards = (boardsRes.data ?? []) as Array<Record<string, Object>>;
+    const all: Task[] = [];
+    for (const b of boards) {
+      if (projectId && String(b['id']) !== projectId) {
+        continue;
+      }
+      const boardId = String(b['id']);
+      const tasksRes = await this.client.get<Object[]>(`/v1/tasks/boards/${boardId}/tasks`);
+      const rows = (tasksRes.data ?? []) as Array<Record<string, Object>>;
+      for (const row of rows) {
+        all.push({
+          id: String(row['id'] ?? ''),
+          projectId: boardId,
+          title: String(row['title'] ?? ''),
+          description: String(row['description'] ?? ''),
+          status: String(row['status'] ?? 'todo') as Task['status'],
+          priority: String(row['priority'] ?? 'medium') as Task['priority'],
+          assignee: row['assignee'] !== undefined && row['assignee'] !== null ? String(row['assignee']) : undefined,
+          dueDate: String(row['dueDate'] ?? ''),
+          tags: [],
+          createdAt: row['created_at'] !== undefined ? new Date(Number(row['created_at']) * 1000).toISOString() : '',
+          updatedAt: row['updated_at'] !== undefined ? new Date(Number(row['updated_at']) * 1000).toISOString() : '',
+        });
+      }
+    }
+    return { code: 0, message: 'ok', data: all } as ApiResponse<Task[]>;
   }
 
-  /** 创建任务 */
+  /** 创建任务：落到第一个看板（无看板先建默认看板） */
   async createTask(data: Partial<Task>): Promise<ApiResponse<Task>> {
-    return this.client.post<Task>('/v1/collaboration/tasks', data);
-  }
-
-  /** 更新任务 */
-  async updateTask(id: string, data: Partial<Task>): Promise<ApiResponse<Task>> {
-    return this.client.put<Task>(`/v1/collaboration/tasks/${id}`, data);
-  }
-
-  /** 删除任务 */
-  async removeTask(id: string): Promise<ApiResponse<Object>> {
-    return this.client.delete<Object>(`/v1/collaboration/tasks/${id}`);
+    const boardsRes = await this.client.get<Object[]>('/v1/tasks/boards');
+    const boards = (boardsRes.data ?? []) as Array<Record<string, Object>>;
+    let boardId = boards.length > 0 ? String(boards[0]['id']) : '';
+    if (boardId === '') {
+      const created = await this.client.post<Object>('/v1/tasks/boards', { name: '任务看板' });
+      boardId = String((created.data as Record<string, Object>)['id'] ?? '');
+    }
+    const body = {
+      title: data.title ?? '',
+      description: data.description ?? '',
+      status: data.status ?? 'todo',
+      priority: data.priority ?? 'medium',
+      dueDate: data.dueDate ?? '',
+    };
+    const res = await this.client.post<Object>(`/v1/tasks/boards/${boardId}/tasks`, body);
+    const row = (res.data ?? {}) as Record<string, Object>;
+    return {
+      code: res.code, message: res.message,
+      data: {
+        id: String(row['id'] ?? ''), projectId: boardId, title: String(row['title'] ?? ''),
+        description: String(row['description'] ?? ''), status: String(row['status'] ?? 'todo') as Task['status'],
+        priority: String(row['priority'] ?? 'medium') as Task['priority'],
+        dueDate: String(row['dueDate'] ?? ''), tags: [],
+        createdAt: '', updatedAt: '',
+      },
+    } as ApiResponse<Task>;
   }
 
   // ========== Workflow ==========

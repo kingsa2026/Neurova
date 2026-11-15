@@ -26,6 +26,8 @@ import { Router, RouteNames } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
+import { ConfigManager } from '../libs/config/ConfigManager';
+import { PlatformAdapter } from '../libs/adapters/PlatformAdapter';
 
 @Entry
 @Component
@@ -41,6 +43,8 @@ export struct LoginPage {
 
   // 统一库单例
   private api = ApiFacade.getInstance();
+  private cm = ConfigManager.getInstance();
+  private platform = PlatformAdapter.getInstance();
   private authStore = new AuthStore();
   private router = Router.getInstance();
   private sm = StyleManager.getInstance();
@@ -69,6 +73,19 @@ export struct LoginPage {
         const meRes = await this.api.auth.me();
         if (meRes.code === 0 && meRes.data) {
           this.authStore.setUser(meRes.data);
+        }
+        // 登录成功后上报推送令牌（fail-soft；设计方案 §8.4 S-3）
+        try {
+          let pushToken = this.cm.get<string>('push_token', '');
+          if (pushToken === '') {
+            pushToken = `local-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e8).toString(36)}`;
+            this.cm.set<string>('push_token', pushToken);
+            await this.cm.saveToPreferences();
+          }
+          const info = this.platform.getDeviceInfo();
+          await this.api.push.upsert('harmony', pushToken, `${info.brand}-${info.model}`);
+        } catch (pushErr) {
+          this.logger.warn('LoginPage', '推送令牌上报失败（不影响登录）', pushErr as Error);
         }
         this.msg.success('登录成功');
         // 清空栈并跳转到 Dashboard

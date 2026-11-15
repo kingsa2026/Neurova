@@ -1,0 +1,40 @@
+/**
+ * PairingPayload - 配对二维码载荷解析**单源**（设计方案 §3.4／§5.6）
+ *
+ * 二维码文本格式（服务端 neurova/tunnel/protocol.py::pairingQrPayload 为唯一事实源）：
+ *   新：neurova://pair?ref=<22位base62一次性引用>   （地址扫码后经 resolve 换取，凭据与地址分离）
+ *   旧：neurova://pair?code=<6位配对码>             （兼容保留；confirm 直连通道）
+ *
+ * 页面不得各自写正则解析（教义第 6 条：载荷形状不允许第二份定义）。
+ */
+
+/** 解析结果：kind=ref 走 resolve→confirm 新流程；kind=code 走旧 confirm 直连 */
+export interface ParsedPairingPayload {
+  kind: string;
+  value: string;
+}
+
+export class PairingPayload {
+  /** 一次性引用长度（服务端 PAIRING_REF_LENGTH=22，base62） */
+  static readonly REF_LENGTH: number = 22;
+  /** 旧 6 位配对码 */
+  static readonly CODE_PATTERN: RegExp = /code=([A-Za-z0-9]{6})/;
+  /** 新高熵引用 */
+  static readonly REF_PATTERN: RegExp = /ref=([A-Za-z0-9]{22})/;
+
+  /** 解析扫码内容；无法识别返回 null（由页面给出"无效的配对二维码"） */
+  static parse(raw: string): ParsedPairingPayload | null {
+    if (!raw) {
+      return null;
+    }
+    const refMatch = raw.match(PairingPayload.REF_PATTERN);
+    if (refMatch) {
+      return { kind: 'ref', value: refMatch[1] };
+    }
+    const codeMatch = raw.match(PairingPayload.CODE_PATTERN);
+    if (codeMatch) {
+      return { kind: 'code', value: codeMatch[1] };
+    }
+    return null;
+  }
+}

@@ -29,6 +29,8 @@ import { websocket } from '@kit.NetworkKit';
 import { Logger } from '../logger/Logger';
 import { EventBus } from '../bus/EventBus';
 import { ConfigManager } from '../config/ConfigManager';
+import { AuthStore } from '../state/stores/AuthStore';
+import { ApiFacade } from '../api/ApiFacade';
 import { ErrorManager, ErrorCategory } from '../error/ErrorManager';
 import { WSMessage } from '../types';
 
@@ -61,6 +63,8 @@ export class WebSocketAdapter {
   private bus: EventBus = EventBus.getInstance();
   private config: ConfigManager = ConfigManager.getInstance();
   private errorManager: ErrorManager = ErrorManager.getInstance();
+  private authStore: AuthStore = new AuthStore();
+  private apiFacade: ApiFacade = ApiFacade.getInstance();
 
   /** 鸿蒙 WebSocket 实例 */
   private ws: websocket.WebSocket | null = null;
@@ -234,8 +238,14 @@ export class WebSocketAdapter {
         return;
       }
       this.bus.emit('ws:disconnected', { code, reason, manual: false });
-      // 触发自动重连
-      this.tryReconnect();
+      if (code === 4001) {
+        // 凭证失效（一次性 ticket 已消费/过期）：先续签再重连；
+        // 设备被解除时 refresh 会拒绝 → 发 device_deregistered 并停止（唯一重扫路径）
+        this.reauthAndReconnect();
+        return;
+      }
+      // 触发自动重连（重连前同样先续签，ticket 60s 时效重连时几乎必过期）
+      this.reauthAndReconnect();
     });
 
     // 错误
@@ -351,6 +361,14 @@ export class WebSocketAdapter {
    * 使用 setTimeout 句柄实现，便于 disconnect 时取消
    */
   private tryReconnect(): void {
+    this.reauthAndReconnect();
+  }
+
+  /**
+   * 续签后重连（M2 免扫码判据）：设备身份（pairingId+deviceSecret）换新一次性
+   * ticket 再连；设备被解除（refresh 403/410）→ 发 device_deregistered 并停止重连。
+   */
+  private reauthAndReconnect(): void {
     if (this.reconnectCount >= this.maxReconnect) {
       this.logger.warn(TAG, `达到最大重连次数 ${this.maxReconnect}，停止重连`);
       return;
@@ -364,12 +382,37 @@ export class WebSocketAdapter {
 
     this.reconnectTimerId = setTimeout(() => {
       this.reconnectTimerId = -1;
-      this.connect(this.lastUrl, this.lastToken).catch((e: Error) => {
+      this.refreshTicketThenConnect().catch((e: Error) => {
         this.logger.error(TAG, '重连失败', e);
-        // 递归尝试下一次重连
         this.tryReconnect();
       });
     }, interval);
+  }
+
+  /** 用长期设备身份换新 ticket 再连；无设备身份（未配对）时按旧 token 直连 */
+  private async refreshTicketThenConnect(): Promise<void> {
+    let ticket: string = this.lastToken;
+    if (this.authStore.pairingId !== '' && this.authStore.deviceSecret !== '') {
+      const res = await this.apiFacade.mobilePairing.refresh({
+        pairingId: this.authStore.pairingId,
+        deviceSecret: this.authStore.deviceSecret,
+        challenge: `${Date.now()}`,
+      });
+      if (res.code !== 0 || !res.data || !res.data.connectTicket) {
+        // 设备已解除/不在册：停止重连并点名（唯一需要重新配对的路径）
+        this.logger.warn(TAG, '续签被拒，设备可能已解除配对');
+        this.bus.emit('ws:error', { message: 'device_deregistered' });
+        this.errorManager.reportError(
+          'device_deregistered',
+          '设备配对已失效，请重新扫码配对',
+          ErrorCategory.WEBSOCKET,
+        );
+        return;
+      }
+      ticket = res.data.connectTicket;
+      this.lastToken = ticket;
+    }
+    await this.connect(this.lastUrl, ticket);
   }
 
   /** 停止重连定时器 */

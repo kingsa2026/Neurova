@@ -424,6 +424,10 @@ export struct SettingPage {
   /** 执行退出登录：清除认证状态 → 重置路由到登录页 */
   private logout(): void {
     try {
+      // 推送令牌注销（fire-and-forget；失败不影响登出）
+      this.api.push.remove('harmony-main').catch((e: Object) => {
+        this.logger.warn(TAG, '推送令牌注销失败（不影响登出）', e as Error);
+      });
       this.authStore.logout();
       this.msg.success('已退出登录');
       this.router.resetTo(RouteNames.LOGIN);

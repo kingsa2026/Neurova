@@ -33,13 +33,14 @@ import { Router, RouteNames } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { PairingConfirm } from '../libs/types';
+import { PairingConfirm, PairingResolved } from '../libs/types';
+import { PairingPayload } from '../libs/protocol/PairingPayload';
 
 /** 配对方式：scan=扫码，input=手动输入 */
 type PairingMode = 'scan' | 'input';
 
-/** 配对状态机：idle=待操作，waiting=配对中，success=成功，failed=失败 */
-type PairingStatus = 'idle' | 'waiting' | 'success' | 'failed';
+/** 配对状态机：idle=待操作，resolving=已扫码换地址中，waiting=配对中，success=成功，failed=失败 */
+type PairingStatus = 'idle' | 'resolving' | 'waiting' | 'success' | 'failed';
 
 /** 日志标签 */
 const TAG = 'PairingPage';
@@ -47,16 +48,20 @@ const TAG = 'PairingPage';
 /** 配对码长度（固定 6 位） */
 const CODE_LENGTH = 6;
 
-/** 配对码在二维码中的正则（QR 内容格式：neurova://pair?code=XXXXXX） */
-const QR_CODE_PATTERN = /code=([A-Za-z0-9]{6})/;
-
 /** 配对成功后跳转 Dashboard 的延迟（毫秒），用于展示"配对成功"反馈 */
 const SUCCESS_REDIRECT_DELAY = 1500;
+
+/** ApiResponse 业务失败判定（code!==0） */
+function resFailed(res: { code: number }): boolean {
+  return res.code !== 0;
+}
 
 @Component
 export struct PairingPage {
   // 当前配对方式（默认扫码）
   @State mode: PairingMode = 'scan';
+  // 扫码解析出的一次性 ref（新流程）或 6 位码（旧兼容）
+  @State pairingRef: string = '';
   // 当前配对状态
   @State status: PairingStatus = 'idle';
   // 6 位配对码（与 cells 同步，作为 confirm 入参的权威来源）
@@ -104,15 +109,22 @@ export struct PairingPage {
     this.errorMessage = '';
     try {
       const scanned = await this.platform.scanQRCode();
-      // 解析 QR 内容中的配对码（格式：neurova://pair?code=XXXXXX）
-      const match = scanned.match(QR_CODE_PATTERN);
-      if (!match) {
+      // 载荷解析单源：ref=新流程（凭据与地址分离），code=旧兼容
+      const parsed = PairingPayload.parse(scanned);
+      if (!parsed) {
         this.status = 'failed';
         this.errorMessage = '无效的配对二维码';
-        this.logger.warn(TAG, `扫码内容未匹配到配对码: ${scanned.slice(0, 100)}`);
+        this.logger.warn(TAG, `扫码内容未匹配到配对载荷: ${scanned.slice(0, 100)}`);
         return;
       }
-      this.code = match[1];
+      if (parsed.kind === 'ref') {
+        // 新流程：ref → resolve 换回连地址 → confirm（带 ref）
+        this.pairingRef = parsed.value;
+        await this.resolveAndConfirm();
+        return;
+      }
+      // 旧兼容：6 位码直连 confirm
+      this.code = parsed.value;
       this.syncCodeToCells(this.code);
       await this.confirmPairing();
     } catch (e) {
@@ -123,27 +135,54 @@ export struct PairingPage {
   }
 
   /**
+   * 新流程：resolve（ref 一次性消费，换回连地址）→ confirm（带 ref）
+   * 对应设计方案 §3.4；resolve 失败分型给文案（过期/已用/网络）。
+   */
+  private async resolveAndConfirm(): Promise<void> {
+    this.status = 'resolving';
+    this.errorMessage = '';
+    try {
+      const resolved = await this.api.mobilePairing.resolve(this.pairingRef);
+      if (resFailed(resolved)) {
+        this.status = 'failed';
+        this.errorMessage = resolved.message || '换取连接地址失败';
+        return;
+      }
+      const info: PairingResolved = resolved.data as PairingResolved;
+      this.logger.info(TAG, `resolve 成功，回连地址已换取（pairingId=${info.pairingId}）`);
+      await this.confirmPairing();
+    } catch (e) {
+      this.status = 'failed';
+      this.errorMessage = (e as Error).message;
+      this.logger.error(TAG, 'resolve 失败', e as Error);
+    }
+  }
+
+  /**
    * 确认配对（核心闭环）
    * 流程：校验 6 位 code → 调用 mobilePairing.confirm → 写入 wsToken/wsUrl → 置 success → 延迟跳转
    * 异常：业务失败展示后端 message；网络/未知异常展示错误信息并记录日志
    */
   private async confirmPairing(): Promise<void> {
-    if (this.code.length !== CODE_LENGTH) {
+    const usingRef = this.pairingRef.length > 0;
+    if (!usingRef && this.code.length !== CODE_LENGTH) {
       this.msg.warning(`请输入 ${CODE_LENGTH} 位配对码`);
       return;
     }
     this.status = 'waiting';
     this.errorMessage = '';
     try {
-      const form: PairingConfirm = {
-        code: this.code,
-        deviceName: this.deviceName,
-        deviceType: 'harmony',
-      };
+      const form: PairingConfirm = usingRef
+        ? { ref: this.pairingRef, deviceName: this.deviceName, deviceType: 'harmony' }
+        : { code: this.code, deviceName: this.deviceName, deviceType: 'harmony' };
       const res = await this.api.mobilePairing.confirm(form);
       if (res.code === 0 && res.data) {
         // 写入 WebSocket 凭证到 AuthStore，供后续 WS 连接使用
         this.authStore.setWsPairing(res.data.wsToken, res.data.wsUrl);
+        // 长期设备身份入库：refresh 续签免回屏重扫（设计方案 §4.7）
+        if (res.data.pairingId && res.data.deviceSecret) {
+          this.authStore.setDeviceIdentity(res.data.pairingId, res.data.deviceSecret);
+        }
         this.status = 'success';
         this.msg.success('配对成功');
         // 延迟跳转，让用户看到"配对成功"反馈
@@ -203,6 +242,7 @@ export struct PairingPage {
     this.status = 'idle';
     this.errorMessage = '';
     this.code = '';
+    this.pairingRef = '';
     this.cells = ['', '', '', '', '', ''];
   }
 

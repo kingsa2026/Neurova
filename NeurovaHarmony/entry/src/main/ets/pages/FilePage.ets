@@ -13,14 +13,14 @@
  *     + [加载态/空态/列表] + [新建文件夹弹窗]]；
  *     列表项 GlassCard 含 文件类型图标、名称、大小、修改时间、操作按钮（删除）；
  *     点击文件夹 → 进入子目录（更新 parentId）；
- *     删除走 AlertDialog 二次确认；上传走 api.monitor.uploadFile；
+ *     删除走 AlertDialog 二次确认；列表/删除接真端点 /v1/files（上传待文件选择器批）;
  *     弹窗内嵌 Stack 条件渲染；
  *   - 颜色统一走 StyleManager（返回 token 名），路由走 Router，
  *     API 走 ApiFacade.monitor，消息走 MessageManager
  *
  * 依赖：
  *   - ../components/glass：TopNavMenu、GlassCard、GlassButton、GlassInput、GlassPanel
- *   - ../libs/api/ApiFacade：统一 API 门面（monitor.listFiles/getFile/uploadFile/removeFile/createFolder）
+ *   - ../libs/api/ApiFacade：统一 API 门面（monitor.listFiles/removeFile；createFolder/uploadFile 已随后端能力收敛退役）
  *   - ../routing/Router：统一路由跳转
  *   - ../libs/style/StyleManager：统一样式 token
  *   - ../libs/logger/Logger：统一日志
@@ -33,7 +33,6 @@
  *   type 筛选 Tab 切换 → 本地 filterByType 过滤；
  *   点击文件夹 → 更新 currentParentId → 重新加载该目录；
  *   面包屑点击 → 跳回对应层级；
- *   上传按钮 → 打开新建文件夹弹窗 → 调用 api.monitor.uploadFile → 刷新列表；
  *   删除按钮 → AlertDialog 二次确认 → 调用 api.monitor.removeFile → 刷新列表
  *
  * TDD：FileViewHelper 各方法按红绿灯垂直切片逐步实现，详见 FilePage.test.ets
@@ -207,10 +206,6 @@ export struct FilePage {
   @State activeType: string = 'all';
   // 当前所在目录的 parentId（undefined 表示根目录）
   @State currentParentId: string = '';
-  // 新建文件夹弹窗显示状态
-  @State showCreateDialog: boolean = false;
-  // 新建文件夹表单数据（@State 嵌套属性变更整体重新赋值）
-  @State formData: FolderFormData = { name: '' };
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -287,43 +282,6 @@ export struct FilePage {
   }
 
   /** 打开新建文件夹弹窗，重置表单 */
-  private openCreateDialog(): void {
-    this.formData = { name: '' };
-    this.showCreateDialog = true;
-  }
-
-  /**
-   * 提交新建文件夹
-   * 流程：组装 data → 调用 api.monitor.createFolder → 成功后关闭弹窗并刷新列表
-   * 异常：记录日志并提示用户
-   */
-  private async submitCreate(): Promise<void> {
-    if (!this.formData.name) {
-      this.msg.warning('请填写文件夹名称');
-      return;
-    }
-    try {
-      const data: Partial<FileItem> = {
-        name: this.formData.name,
-        type: 'folder' as FileItemType,
-        path: '/',
-        size: 0,
-        parentId: this.currentParentId.length > 0 ? this.currentParentId : undefined,
-      };
-      const res = await this.api.monitor.createFolder(data);
-      if (res.code === 0) {
-        this.msg.success('创建成功');
-        this.showCreateDialog = false;
-        this.loadFiles();
-      } else {
-        this.msg.error(res.message || '创建失败');
-      }
-    } catch (e) {
-      this.logger.error(TAG, '创建文件夹失败', e as Error);
-      this.msg.error('创建文件夹失败');
-    }
-  }
-
   /**
    * 删除前二次确认（AlertDialog）
    */
@@ -374,13 +332,6 @@ export struct FilePage {
           showBack: true,
           showMenu: false,
           onBack: () => { this.router.back(); }
-        }) {
-          GlassButton({
-            text: '新建文件夹',
-            type: 'primary',
-            size: 'small',
-            onClick: () => { this.openCreateDialog(); }
-          })
         }
 
         // 面包屑导航
@@ -474,11 +425,6 @@ export struct FilePage {
       .width('100%')
       .height('100%')
       .backgroundColor(this.sm.getColor('background'))
-
-      // 新建文件夹弹窗：内嵌 Stack 条件渲染
-      if (this.showCreateDialog) {
-        this.buildCreateDialog()
-      }
     }
     .width('100%')
     .height('100%')
@@ -558,70 +504,4 @@ export struct FilePage {
     .width('100%')
   }
 
-  // ===========================================================================
-  // 新建文件夹弹窗构建器
-  // ===========================================================================
-
-  /** 新建文件夹弹窗：name */
-  @Builder
-  buildCreateDialog() {
-    Stack({ alignContent: Alignment.Center }) {
-      // 背景遮罩层
-      Column()
-        .width('100%')
-        .height('100%')
-        .backgroundColor(this.sm.getColor('overlay_mask'))
-        .onClick(() => { this.showCreateDialog = false; })
-
-      // 面板层
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
-        Column() {
-          Text('新建文件夹')
-            .fontSize(this.sm.getFontSize('subtitle'))
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.sm.getColor('text_primary'))
-            .width('100%')
-
-          // 名称
-          Text('名称')
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_secondary'))
-            .width('100%')
-            .margin({ top: this.sm.getSpacing('sm') })
-          GlassInput({
-            placeholder: '请输入文件夹名称',
-            value: this.formData.name,
-            type: 'text',
-            onChange: (v: string) => { this.formData = { ...this.formData, name: v }; }
-          })
-            .margin({ top: 4 })
-
-          // 操作按钮
-          Row() {
-            GlassButton({
-              text: '取消',
-              type: 'default',
-              size: 'medium',
-              onClick: () => { this.showCreateDialog = false; }
-            })
-            GlassButton({
-              text: '创建',
-              type: 'primary',
-              size: 'medium',
-              onClick: () => { this.submitCreate(); }
-            })
-              .margin({ left: this.sm.getSpacing('sm') })
-          }
-          .width('100%')
-          .justifyContent(FlexAlign.End)
-          .margin({ top: this.sm.getSpacing('md') })
-        }
-        .width('100%')
-        .alignItems(HorizontalAlign.Start)
-      }
-      .width('90%')
-    }
-    .width('100%')
-    .height('100%')
-  }
 }
