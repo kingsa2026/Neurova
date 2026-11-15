@@ -4200,6 +4200,8 @@ msgOAuthFailed: 'Failed to start OAuth authorization, please retry later',
     kindVideo: 'Video',
     kindPdf: 'PDF',
     kindText: 'Text',
+    kindFiles: 'Files',
+    kindMedia: 'Media',
   },
 
 studio: {

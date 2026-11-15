@@ -27,6 +27,8 @@ export type DockTabKind =
   | 'history'
   | 'archive'
   | 'computer'
+  | 'files'
+  | 'media'
 
 export interface DockTabData {
   /** md/html/text 源内容（代码块预览/本地渲染场景） */
@@ -69,7 +71,7 @@ export interface OpenTabInput {
 }
 
 /** singleton kind：同 kind 只保留一个 tab */
-const SINGLETON_KINDS = new Set<DockTabKind>(['history', 'archive', 'computer'])
+const SINGLETON_KINDS = new Set<DockTabKind>(['history', 'archive', 'computer', 'files', 'media'])
 
 const WIDTH_KEY = 'neurova_dock_width'
 const DEFAULT_WIDTH = 420
@@ -106,6 +108,8 @@ function defaultTitle(kind: DockTabKind): string {
     history: 'chat.history',
     archive: 'chat.archivedSessions',
     computer: 'computerPanel.title',
+    files: 'dock.kindFiles',
+    media: 'dock.kindMedia',
   }
   try {
     return i18n.global.t(key[kind])
@@ -200,6 +204,14 @@ export const useRightDockStore = defineStore('rightDock', () => {
     openTab({ kind: 'computer' })
   }
 
+  function openFiles(): void {
+    openTab({ kind: 'files' })
+  }
+
+  function openMedia(): void {
+    openTab({ kind: 'media' })
+  }
+
   return {
     tabs,
     activeTabId,
@@ -215,5 +227,7 @@ export const useRightDockStore = defineStore('rightDock', () => {
     openHistory,
     openArchive,
     openComputer,
+    openFiles,
+    openMedia,
   }
 })

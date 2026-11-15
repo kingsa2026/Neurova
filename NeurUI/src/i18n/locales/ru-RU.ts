@@ -4199,6 +4199,8 @@ msgOAuthFailed: 'Не удалось начать авторизацию OAuth, 
     kindVideo: 'Видео',
     kindPdf: 'PDF',
     kindText: 'Текст',
+    kindFiles: 'Файлы',
+    kindMedia: 'Медиа',
   },
 
 studio: {

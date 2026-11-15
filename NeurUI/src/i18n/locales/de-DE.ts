@@ -4199,6 +4199,8 @@ msgOAuthFailed: 'OAuth-Autorisierung konnte nicht gestartet werden, bitte späte
     kindVideo: 'Video',
     kindPdf: 'PDF',
     kindText: 'Text',
+    kindFiles: 'Dateien',
+    kindMedia: 'Medien',
   },
 
 studio: {

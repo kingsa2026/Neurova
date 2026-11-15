@@ -462,6 +462,14 @@ function confirmDeleteForever(item: MediaItem) {
 
 onMounted(fetchMedia)
 
+// agent 隔离：内嵌操作面板时切 agent 需重取当前 agent 媒体库（路由直达时 agentId 同理）
+watch(
+  () => props.agentId,
+  (next, prev) => {
+    if (next && next !== prev) void fetchMedia()
+  },
+)
+
 onUnmounted(() => {
   if (searchTimer) clearTimeout(searchTimer)
   previewUrls.forEach((url) => URL.revokeObjectURL(url))

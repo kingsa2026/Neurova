@@ -4199,6 +4199,8 @@ msgOAuthFailed: 'OAuth 認証を開始できませんでした。後でもう一
     kindVideo: '動画',
     kindPdf: 'PDF',
     kindText: 'テキスト',
+    kindFiles: 'ファイル',
+    kindMedia: 'メディア',
   },
 
 studio: {

@@ -4199,6 +4199,8 @@ msgOAuthFailed: 'تعذّر بدء تفويض OAuth، يرجى المحاولة 
     kindVideo: 'فيديو',
     kindPdf: 'PDF',
     kindText: 'نص',
+    kindFiles: 'الملفات',
+    kindMedia: 'الوسائط',
   },
 
 studio: {

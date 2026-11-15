@@ -4199,6 +4199,8 @@ msgOAuthFailed: 'No se pudo iniciar la autorización OAuth, inténtalo más tard
     kindVideo: 'Vídeo',
     kindPdf: 'PDF',
     kindText: 'Texto',
+    kindFiles: 'Archivos',
+    kindMedia: 'Medios',
   },
 
 studio: {

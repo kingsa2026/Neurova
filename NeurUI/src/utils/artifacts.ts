@@ -235,6 +235,8 @@ const DOCK_ICONS: Record<DockTabKind, string> = {
   history: 'clock',
   archive: 'archive',
   computer: 'monitor',
+  files: 'file',
+  media: 'video',
 }
 
 /** 产出物 kind → UiIcon 图标名（产出物卡片行图标用） */

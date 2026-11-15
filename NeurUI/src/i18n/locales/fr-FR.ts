@@ -4199,6 +4199,8 @@ msgOAuthFailed: "Impossible de démarrer l'autorisation OAuth, réessayez plus t
     kindVideo: 'Vidéo',
     kindPdf: 'PDF',
     kindText: 'Texte',
+    kindFiles: 'Fichiers',
+    kindMedia: 'Médias',
   },
 
 studio: {
