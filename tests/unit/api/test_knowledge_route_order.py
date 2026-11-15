@@ -165,6 +165,7 @@ _KB_ROUTES = [
     ('/ontology/rules/{rule_id}', 'DELETE'),
     ('/ontology/rules/{rule_id}', 'PUT'),
     ('/ontology/schema', 'GET'),
+    ('/ontology/schema-families/detect', 'POST'),
     ('/ontology/settings', 'GET'),
     ('/ontology/settings', 'PUT'),
     ('/ontology/shapes', 'GET'),
