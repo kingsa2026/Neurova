@@ -66,6 +66,8 @@ _CATEGORY_TOOLS: Dict[str, Set[str]] = {
         "computer_dom_snapshot", "computer_click_mark",
         # 本机代码/进程：无 sandbox_required 声明，但执行的是系统动作
         "computer_shell", "run_code", "spawn_subagent",
+        # 子代理续跑：与 spawn 同面——复活出的子代理同样执行系统动作
+        "continue_subagent",
     },
     "model": {"tts_synthesize", "asr_transcribe"},
     "node": {"run_workflow_agent"},

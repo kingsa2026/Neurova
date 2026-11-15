@@ -461,6 +461,8 @@ class ToolExecutor:
         # P2-10 增强：子代理升级/结构化结果提交
         "escalate": "_execute_escalate",
         "submit_result": "_execute_submit_result",
+        # P2（工具清单 3.1-3 续）：续跑已终态的子代理（失败交接的复活通道）
+        "continue_subagent": "_execute_continue_subagent",
         "create_skill": "_execute_create_skill",
         # 构建问询：写 BuildSession 交互并返回 paused，回答后由面板恢复
         "ask_user": "_execute_ask_user",
@@ -1318,6 +1320,20 @@ class ToolExecutor:
         hooks 故障 fail-open 不阻断执行；PreToolUse 可拦截，PostToolUse
         的 additionalContext 以 hook_context 字段并入结果。
         """
+        # P1（蜂群对照）：子代理工具面收窄——member（子代理）任务绑定白名单时，
+        # 面外工具一律结构化拒绝。这是**面边界**，先于治理/审批（不可 bypass）。
+        from neurova.core.turn_context import get_subagent_tool_allowlist
+
+        _toolAllowlist = get_subagent_tool_allowlist()
+        if _toolAllowlist is not None and tool_name not in _toolAllowlist:
+            return {
+                "success": False,
+                "code": "subagent_tool_not_allowed",
+                "error": (
+                    f"子代理工具面不含该工具: {tool_name}"
+                    "（蜂群派生时已按子代理类型收窄工具面）"
+                ),
+            }
         try:
             from neurova.core.hooks_engine import get_hook_engine
 
@@ -2748,6 +2764,8 @@ class ToolExecutor:
 
         swarm = get_swarm_manager()
         session_id = getattr(self._agent, "current_session_id", None)
+        # P1（蜂群对照）：子代理类型——general（全工具面）/ explore（只读白名单）
+        subagentType = str(params.get("subagent_type") or "general").strip().lower()
         # P1-4：子代理权限只收窄不升级——把父会话生效模式作为继承上下文
         # 传给派生任务（随 ContextVar 传播到子代理的每次治理预检）。
         from neurova.security.permission_mode import (
@@ -2764,6 +2782,7 @@ class ToolExecutor:
                 origin="chat",
                 stream=True,
                 initiator_agent=self._agent,
+                subagent_type=subagentType,
             )
         # 终态回灌父会话邮箱由蜂群侧一处投递（`SwarmManager._notifyParentMail`）：
         # 这里拿到的 result 在后台模式下只是 pending 回执，没有正文可投。
@@ -2775,6 +2794,38 @@ class ToolExecutor:
 
         subagent_id = str(params.get("subagent_id") or "").strip()
         return get_swarm_manager().status(subagent_id)
+
+    async def _execute_continue_subagent(self, params: Dict) -> Dict:
+        """P2（工具清单 3.1-3 续）：续跑已终态的子 Agent（复活/追加指令）。
+
+        member 会话原样复用（子 Agent 历史由既有会话恢复带回）；上一段
+        report（失败时为部分交接件）随续跑任务附带。治理闸与全新派生同路；
+        权限档只收窄不升级（与 spawn 同一继承纪律）。
+        """
+        from neurova.agent.swarm import get_swarm_manager
+        from neurova.security.permission_mode import (
+            inheritedModeScope,
+            resolveEffectivePermissionMode,
+        )
+
+        subagentId = str(params.get("subagent_id") or "").strip()
+        message = str(params.get("message") or "").strip()
+        if not subagentId:
+            return {"error": "缺少 subagent_id 参数"}
+        if not message:
+            return {"error": "缺少 message 参数（续跑指令）"}
+
+        swarm = get_swarm_manager()
+        session_id = getattr(self._agent, "current_session_id", None)
+        with inheritedModeScope(resolveEffectivePermissionMode(self._agent)):
+            result = await swarm.resumeFinishedRun(
+                subagentId,
+                message,
+                session_id=session_id,
+                initiator_agent=self._agent,
+                background=bool(params.get("background", False)),
+            )
+        return result
 
     async def _execute_list_agents(self, params: Dict) -> Dict:
         """列出可用 Agent（供蜂群派生时挑选执行者）"""

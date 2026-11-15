@@ -67,12 +67,15 @@ TOOL_DEFAULT_TIMEOUT_S = 60.0
 # P2（2026-09-10 蜂群排查）：前台 spawn 子任务动辄数分钟，60s 默认=必然转后台，
 # 全部依赖 hints 注入的滞后语义——落表 600s 让多数子任务在窗口内直接返回报告
 TOOL_TIMEOUTS_S["spawn_subagent"] = 600.0
+# P2（工具清单 3.1-3 续）：续跑与 spawn 同量级（完整子任务再执行），同一窗口
+TOOL_TIMEOUTS_S["continue_subagent"] = 600.0
 
 # P1（2026-09-10）：转后台信封的 task_id 是 coordinator 通用键，特定工具的
 # 自有查询凭据（如 spawn 的 subagent_id）不在信封里——per-tool 轮询提示
 # 让主 agent 知道该用什么工具主动查询，而不是傻等 pending hints 注入
 _OFFLOAD_HINTS: Dict[str, str] = {
     "spawn_subagent": "可用 subagent_status 查询子 Agent 状态与报告（subagent_id 可省略，省略时返回最近派生列表）",
+    "continue_subagent": "可用 subagent_status 查询续跑子 Agent 的状态与报告（subagent_id 为续跑新 run 的 ID）",
 }
 
 def get_tool_timeout(tool_name: str, default: Optional[float] = None) -> float:

@@ -65,6 +65,7 @@ from neurova.skills.permissions import (
 #: 故由声明面投影收入系统面（同一份事实不两处重复登记）。
 REGISTERED_SYSTEM_TOOLS = {
     "spawn_subagent": "派生子代理（本机进程资源；无 sandbox_required 声明）",
+    "continue_subagent": "续跑子代理（复活出的子代理同样执行本机系统动作；无 sandbox_required 声明）",
 }
 
 #: 桌面动作族：会改变共享桌面状态，属系统面。
