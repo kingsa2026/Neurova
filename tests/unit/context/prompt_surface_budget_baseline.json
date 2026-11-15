@@ -55,6 +55,15 @@
       "tools_description": 16757,
       "total_always_on_chars": 18197,
       "waiver": "P3-14-脚本化工作流-2026-11-14"
+    },
+    {
+      "phase": "蜂群协议-2026-11-15",
+      "date": "2026-11-15",
+      "description": "本批新增 3 个蜂群面内置工具（escalate/submit_result：子代理升级与结构化结果提交；continue_subagent：终态子代理续跑——member 会话复用、失败交接件衔接），描述按提示面纪律撰写，实测 +446 字符（tools 16757→17203，total 18197→18643）。按 P3-14 同款纪律如实登记；等量旧文案清理开项在台账继续挂着，不冒充已完成。",
+      "rules_sections": 1440,
+      "tools_description": 17203,
+      "total_always_on_chars": 18643,
+      "waiver": "蜂群协议-2026-11-15"
     }
   ]
 }

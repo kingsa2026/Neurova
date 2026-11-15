@@ -24,6 +24,9 @@ EXPECTED_NON_REPRODUCIBLE = {
     "context_compress",
     "run_code", "git", "file_write", "file_create", "file_edit", "file_delete",
     "create_skill", "spawn_subagent", "planning", "schedule_task", "ask_user", "sync_nodes",
+    # 蜂群续跑（工具清单 3.1-3 续）：等价一次新派生（member 会话续写＋邮箱投递），
+    # 重放制造新运行——与 spawn_subagent 同面同判。
+    "continue_subagent",
     "custom_node_create", "custom_node_update", "custom_node_activate", "custom_node_delete",
     # 工作流定义：get 可能补安全版本基线（写共享库），其余为重放制造新版本的动作
     "workflow_definition_get", "workflow_definition_update", "workflow_definition_duplicate",
