@@ -27,28 +27,28 @@ export class AuthApi {
 
   /** 注册：POST /v1/auth/register */
   async register(data: RegisterRequest): Promise<ApiResponse<RegisterResult>> {
-    return this.client.post<RegisterResult>('/v1/auth/register', data);
+    return this.client.post<RegisterResult>('/auth/register', data);
   }
 
   /** 登录 */
   async login(form: LoginForm): Promise<ApiResponse<AuthTokens>> {
-    return this.client.post<AuthTokens>('/v1/auth/login', form);
+    return this.client.post<AuthTokens>('/auth/login', form);
   }
 
   /** 登出 */
   async logout(): Promise<ApiResponse<Object>> {
     const body: Record<string, Object> = {};
-    return this.client.post<Object>('/v1/auth/logout', body);
+    return this.client.post<Object>('/auth/logout', body);
   }
 
   /** 刷新 token */
   async refresh(refreshToken: string): Promise<ApiResponse<AuthTokens>> {
     const body: RefreshTokenRequest = { refresh_token: refreshToken };
-    return this.client.post<AuthTokens>('/v1/auth/refresh', body);
+    return this.client.post<AuthTokens>('/auth/refresh', body);
   }
 
   /** 获取当前用户信息 */
   async me(): Promise<ApiResponse<User>> {
-    return this.client.get<User>('/v1/auth/me');
+    return this.client.get<User>('/auth/me');
   }
 }

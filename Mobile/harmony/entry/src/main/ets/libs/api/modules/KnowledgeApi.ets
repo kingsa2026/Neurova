@@ -43,7 +43,7 @@ export class KnowledgeApi {
       if (query.page !== undefined) params['page'] = query.page;
       if (query.size !== undefined) params['size'] = query.size;
     }
-    return this.client.get<PageResult<KnowledgeItem>>('/v1/knowledge', params);
+    return this.client.get<PageResult<KnowledgeItem>>('/knowledge', params);
   }
 
   /** 获取单条知识 */
@@ -53,7 +53,7 @@ export class KnowledgeApi {
 
   /** 创建知识 */
   async create(data: Partial<KnowledgeItem>): Promise<ApiResponse<KnowledgeItem>> {
-    return this.client.post<KnowledgeItem>('/v1/knowledge', data);
+    return this.client.post<KnowledgeItem>('/knowledge', data);
   }
 
   /** 更新知识 */
@@ -75,6 +75,6 @@ export class KnowledgeApi {
     const body: KnowledgeSearchRequest = { keyword };
     if (agentId !== undefined) body.agentId = agentId;
     if (limit !== undefined) body.limit = limit;
-    return this.client.post<KnowledgeItem[]>('/v1/knowledge/search', body);
+    return this.client.post<KnowledgeItem[]>('/knowledge/search', body);
   }
 }

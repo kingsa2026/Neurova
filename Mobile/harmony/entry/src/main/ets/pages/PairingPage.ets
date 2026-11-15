@@ -35,6 +35,8 @@ import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
 import { PairingConfirm, PairingResolved } from '../libs/types';
 import { PairingPayload } from '../libs/protocol/PairingPayload';
+import { ServerProfiles, ServerProfile } from '../libs/config/ServerProfiles';
+import { ConfigManager } from '../libs/config/ConfigManager';
 
 /** 配对方式：scan=扫码，input=手动输入 */
 type PairingMode = 'scan' | 'input';
@@ -123,6 +125,10 @@ export struct PairingPage {
         return;
       }
       if (parsed.kind === 'ref') {
+        // 一扫配全：载荷带对外地址时，先确保服务器档案存在并激活（扫码即完成连接配置）
+        if (parsed.host) {
+          await this.ensureServerProfile(parsed.host);
+        }
         // 新流程：ref → resolve 换回连地址 → confirm（带 ref）
         this.pairingRef = parsed.value;
         await this.resolveAndConfirm();
@@ -137,6 +143,16 @@ export struct PairingPage {
       this.errorMessage = (e as Error).message;
       this.logger.error(TAG, '扫码失败', e as Error);
     }
+  }
+
+  /** 一扫配全：按二维码里的对外地址确保服务器档案存在并激活（已存在则复用） */
+  private async ensureServerProfile(host: string): Promise<void> {
+    const store = ServerProfiles.getInstance();
+    const existing = store.getList().find((p: ServerProfile) => p.baseUrl === host);
+    const target = existing ?? await store.add('扫码配对', host);
+    await store.switchTo(target.id);
+    await ConfigManager.getInstance().applyServerProfile(`${target.baseUrl}/api/v1`, getContext(this) as Context);
+    this.logger.info(TAG, `服务器档案就绪：${target.baseUrl}`);
   }
 
   /**

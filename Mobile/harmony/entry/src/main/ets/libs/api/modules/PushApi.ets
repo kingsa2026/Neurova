@@ -28,7 +28,7 @@ export class PushApi {
       push_token: pushToken,
       device_id: deviceId,
     };
-    return this.client.put<Object>('/v1/mobile/push/push-tokens', body);
+    return this.client.put<Object>('/mobile/push/push-tokens', body);
   }
 
   /** 注销设备推送令牌（DELETE /v1/mobile/push/push-tokens/{deviceId}，登出时调用） */

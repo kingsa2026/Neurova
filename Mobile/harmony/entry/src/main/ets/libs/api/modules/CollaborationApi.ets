@@ -52,7 +52,7 @@ export class CollaborationApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<Project>>('/v1/collaboration/projects', query);
+    return this.client.get<PageResult<Project>>('/collaboration/projects', query);
   }
 
   /** 获取单个项目 */
@@ -62,7 +62,7 @@ export class CollaborationApi {
 
   /** 创建项目 */
   async createProject(data: Partial<Project>): Promise<ApiResponse<Project>> {
-    return this.client.post<Project>('/v1/collaboration/projects', data);
+    return this.client.post<Project>('/collaboration/projects', data);
   }
 
   /** 更新项目 */
@@ -84,7 +84,7 @@ export class CollaborationApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<Team>>('/v1/collaboration/teams', query);
+    return this.client.get<PageResult<Team>>('/collaboration/teams', query);
   }
 
   /** 获取单个团队 */
@@ -94,7 +94,7 @@ export class CollaborationApi {
 
   /** 创建团队 */
   async createTeam(data: Partial<Team>): Promise<ApiResponse<Team>> {
-    return this.client.post<Team>('/v1/collaboration/teams', data);
+    return this.client.post<Team>('/collaboration/teams', data);
   }
 
   /** 更新团队 */
@@ -114,7 +114,7 @@ export class CollaborationApi {
    * 原 /v1/collaboration/tasks 后端不存在）。补齐 FE Task 契约缺省字段。
    */
   async listTasks(projectId?: string): Promise<ApiResponse<PageResult<Task>>> {
-    const boardsRes = await this.client.get<Object[]>('/v1/tasks/boards');
+    const boardsRes = await this.client.get<Object[]>('/tasks/boards');
     const boards = (boardsRes.data ?? []) as Array<Record<string, Object>>;
     const all: Task[] = [];
     for (const b of boards) {
@@ -145,12 +145,12 @@ export class CollaborationApi {
 
   /** 创建任务：落到第一个看板（无看板先建默认看板） */
   async createTask(data: Partial<Task>): Promise<ApiResponse<Task>> {
-    const boardsRes = await this.client.get<Object[]>('/v1/tasks/boards');
+    const boardsRes = await this.client.get<Object[]>('/tasks/boards');
     const boards = (boardsRes.data ?? []) as Array<Record<string, Object>>;
     let boardId = boards.length > 0 ? String(boards[0]['id']) : '';
     if (boardId === '') {
       const boardBody: CreateBoardBody = { name: '任务看板' };
-      const created = await this.client.post<Object>('/v1/tasks/boards', boardBody);
+      const created = await this.client.post<Object>('/tasks/boards', boardBody);
       boardId = String((created.data as Record<string, Object>)['id'] ?? '');
     }
     const body: CreateTaskBody = {
@@ -176,7 +176,7 @@ export class CollaborationApi {
 
   /** 删除任务：真端点 DELETE /v1/tasks/boards/{boardId}/tasks/{taskId}（任务挂在看板下，看板解析与 createTask 同源） */
   async removeTask(id: string): Promise<ApiResponse<Object>> {
-    const boardsRes = await this.client.get<Object[]>('/v1/tasks/boards');
+    const boardsRes = await this.client.get<Object[]>('/tasks/boards');
     const boards = (boardsRes.data ?? []) as Array<Record<string, Object>>;
     if (boards.length === 0) {
       return { code: 1, message: '任务看板不存在，无法删除任务', data: '' } as ApiResponse<Object>;
@@ -194,7 +194,7 @@ export class CollaborationApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<Workflow>>('/v1/collaboration/workflows', query);
+    return this.client.get<PageResult<Workflow>>('/collaboration/workflows', query);
   }
 
   /** 获取单个工作流 */
@@ -204,7 +204,7 @@ export class CollaborationApi {
 
   /** 创建工作流 */
   async createWorkflow(data: Partial<Workflow>): Promise<ApiResponse<Workflow>> {
-    return this.client.post<Workflow>('/v1/collaboration/workflows', data);
+    return this.client.post<Workflow>('/collaboration/workflows', data);
   }
 
   /** 更新工作流 */

@@ -43,7 +43,7 @@ export class SessionSyncApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<SessionSync>>('/v1/session-syncs', query);
+    return this.client.get<PageResult<SessionSync>>('/session-syncs', query);
   }
 
   /** 获取单条会话同步记录 */
@@ -53,7 +53,7 @@ export class SessionSyncApi {
 
   /** 创建会话同步记录 */
   async create(data: Partial<SessionSync>): Promise<ApiResponse<SessionSync>> {
-    return this.client.post<SessionSync>('/v1/session-syncs', data);
+    return this.client.post<SessionSync>('/session-syncs', data);
   }
 
   /** 更新会话同步记录 */

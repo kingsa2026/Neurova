@@ -22,7 +22,7 @@ export class HealthApi {
 
   /** 检查系统整体健康 */
   async check(): Promise<ApiResponse<SystemHealth>> {
-    return this.client.get<SystemHealth>('/v1/health');
+    return this.client.get<SystemHealth>('/health');
   }
 
   /** 获取单个服务健康状态 */
@@ -32,6 +32,6 @@ export class HealthApi {
 
   /** 获取系统指标（数值字典） */
   async getMetrics(): Promise<ApiResponse<Record<string, number>>> {
-    return this.client.get<Record<string, number>>('/v1/health/metrics');
+    return this.client.get<Record<string, number>>('/health/metrics');
   }
 }

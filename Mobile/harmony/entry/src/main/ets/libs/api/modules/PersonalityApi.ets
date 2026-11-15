@@ -30,7 +30,7 @@ export class PersonalityApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<Emotion>>('/v1/personality/emotions', query);
+    return this.client.get<PageResult<Emotion>>('/personality/emotions', query);
   }
 
   /** 获取单条情绪记录 */
@@ -40,7 +40,7 @@ export class PersonalityApi {
 
   /** 创建情绪记录 */
   async createEmotion(data: Partial<Emotion>): Promise<ApiResponse<Emotion>> {
-    return this.client.post<Emotion>('/v1/personality/emotions', data);
+    return this.client.post<Emotion>('/personality/emotions', data);
   }
 
   /** 删除情绪记录 */
@@ -52,14 +52,14 @@ export class PersonalityApi {
   async getCurrentEmotion(agentId: string): Promise<ApiResponse<Emotion>> {
     const query: Record<string, Object> = {};
     query['agentId'] = agentId;
-    return this.client.get<Emotion>('/v1/personality/emotions/current', query);
+    return this.client.get<Emotion>('/personality/emotions/current', query);
   }
 
   /** 获取某 Agent 的个性维度 */
   async getPersonality(agentId: string): Promise<ApiResponse<Personality>> {
     const query: Record<string, Object> = {};
     query['agentId'] = agentId;
-    return this.client.get<Personality>('/v1/personality', query);
+    return this.client.get<Personality>('/personality', query);
   }
 
   /** 更新个性维度（agentId 注入到 body） */
@@ -77,13 +77,13 @@ export class PersonalityApi {
     if (data.neuroticism !== undefined) body['neuroticism'] = data.neuroticism;
     if (data.description !== undefined) body['description'] = data.description;
     if (data.updatedAt !== undefined) body['updatedAt'] = data.updatedAt;
-    return this.client.put<Personality>('/v1/personality', body);
+    return this.client.put<Personality>('/personality', body);
   }
 
   /** 重置某 Agent 个性到默认值 */
   async resetPersonality(agentId: string): Promise<ApiResponse<Personality>> {
     const body: Record<string, Object> = {};
     body['agentId'] = agentId;
-    return this.client.post<Personality>('/v1/personality/reset', body);
+    return this.client.post<Personality>('/personality/reset', body);
   }
 }

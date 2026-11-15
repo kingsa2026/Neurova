@@ -44,7 +44,7 @@ export class CapabilityApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<Rule>>('/v1/capability/rules', query);
+    return this.client.get<PageResult<Rule>>('/capability/rules', query);
   }
 
   /** 获取单条规则 */
@@ -54,7 +54,7 @@ export class CapabilityApi {
 
   /** 创建规则 */
   async createRule(data: Partial<Rule>): Promise<ApiResponse<Rule>> {
-    return this.client.post<Rule>('/v1/capability/rules', data);
+    return this.client.post<Rule>('/capability/rules', data);
   }
 
   /** 更新规则 */
@@ -80,7 +80,7 @@ export class CapabilityApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<AgentFile>>('/v1/capability/files', query);
+    return this.client.get<PageResult<AgentFile>>('/capability/files', query);
   }
 
   /** 获取单条文件元数据 */
@@ -90,7 +90,7 @@ export class CapabilityApi {
 
   /** 创建文件记录 */
   async createFile(data: Partial<AgentFile>): Promise<ApiResponse<AgentFile>> {
-    return this.client.post<AgentFile>('/v1/capability/files', data);
+    return this.client.post<AgentFile>('/capability/files', data);
   }
 
   /** 更新文件记录 */
@@ -116,7 +116,7 @@ export class CapabilityApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<MediaAsset>>('/v1/capability/media', query);
+    return this.client.get<PageResult<MediaAsset>>('/capability/media', query);
   }
 
   /** 获取单条媒体资产 */
@@ -126,7 +126,7 @@ export class CapabilityApi {
 
   /** 创建媒体资产记录 */
   async createMedia(data: Partial<MediaAsset>): Promise<ApiResponse<MediaAsset>> {
-    return this.client.post<MediaAsset>('/v1/capability/media', data);
+    return this.client.post<MediaAsset>('/capability/media', data);
   }
 
   /** 更新媒体资产记录 */

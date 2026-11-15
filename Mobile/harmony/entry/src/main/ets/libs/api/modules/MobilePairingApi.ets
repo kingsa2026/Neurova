@@ -37,23 +37,23 @@ export class MobilePairingApi {
       device_name: deviceName,
       device_type: deviceType,
     };
-    return this.client.post<PairingInfo>('/v1/mobile/pairing/generate', body);
+    return this.client.post<PairingInfo>('/mobile/pairing/generate', body);
   }
 
   /** 确认配对（POST /v1/mobile/pairing/confirm） */
   async confirm(form: PairingConfirm): Promise<ApiResponse<PairingConfirmed>> {
-    return this.client.post<PairingConfirmed>('/v1/mobile/pairing/confirm', form);
+    return this.client.post<PairingConfirmed>('/mobile/pairing/confirm', form);
   }
 
   /** 扫码后凭一次性 ref 换取回连地址（POST /v1/mobile/pairing/resolve，匿名口） */
   async resolve(ref: string): Promise<ApiResponse<PairingResolved>> {
     const body: PairingResolveRequest = { ref };
-    return this.client.post<PairingResolved>('/v1/mobile/pairing/resolve', body);
+    return this.client.post<PairingResolved>('/mobile/pairing/resolve', body);
   }
 
   /** 接入凭证续签（POST /v1/mobile/pairing/refresh，免回屏重扫） */
   async refresh(form: PairingRefresh): Promise<ApiResponse<PairingRefreshed>> {
-    return this.client.post<PairingRefreshed>('/v1/mobile/pairing/refresh', form);
+    return this.client.post<PairingRefreshed>('/mobile/pairing/refresh', form);
   }
 
   /** 检查配对状态（GET /v1/mobile/pairing/status/:code） */

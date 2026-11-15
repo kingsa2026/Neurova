@@ -30,7 +30,7 @@ export class ModelsApi {
 
   /** 列出所有 Provider */
   async listProviders(): Promise<ApiResponse<Provider[]>> {
-    return this.client.get<Provider[]>('/v1/models/providers');
+    return this.client.get<Provider[]>('/models/providers');
   }
 
   /** 获取单个 Provider */
@@ -40,7 +40,7 @@ export class ModelsApi {
 
   /** 创建 Provider */
   async createProvider(data: Partial<Provider>): Promise<ApiResponse<Provider>> {
-    return this.client.post<Provider>('/v1/models/providers', data);
+    return this.client.post<Provider>('/models/providers', data);
   }
 
   /** 更新 Provider */
@@ -59,25 +59,25 @@ export class ModelsApi {
   async listModels(providerId?: string): Promise<ApiResponse<ModelItem[]>> {
     const params: Record<string, Object> = {};
     if (providerId) params['providerId'] = providerId;
-    return this.client.get<ModelItem[]>('/v1/models', params);
+    return this.client.get<ModelItem[]>('/models', params);
   }
 
   // ===== Default Config =====
 
   /** 设置默认 LLM 配置 */
   async setDefault(config: DefaultLLMConfig): Promise<ApiResponse<Object>> {
-    return this.client.put<Object>('/v1/models/default', config);
+    return this.client.put<Object>('/models/default', config);
   }
 
   // ===== Generation Params =====
 
   /** 获取生成参数 */
   async getGenerationParams(): Promise<ApiResponse<GenerationParams>> {
-    return this.client.get<GenerationParams>('/v1/models/params');
+    return this.client.get<GenerationParams>('/models/params');
   }
 
   /** 更新生成参数 */
   async updateGenerationParams(params: GenerationParams): Promise<ApiResponse<Object>> {
-    return this.client.put<Object>('/v1/models/params', params);
+    return this.client.put<Object>('/models/params', params);
   }
 }

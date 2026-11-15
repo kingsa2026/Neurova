@@ -43,7 +43,7 @@ export class MonitorApi {
   async listStats(period?: string): Promise<ApiResponse<Stat[]>> {
     const query: Record<string, Object> = {};
     if (period) query['period'] = period;
-    return this.client.get<Stat[]>('/v1/monitor/stats', query);
+    return this.client.get<Stat[]>('/monitor/stats', query);
   }
 
   /** 获取单个统计指标 */
@@ -64,12 +64,12 @@ export class MonitorApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<MonitorMetric>>('/v1/monitor/metrics', query);
+    return this.client.get<PageResult<MonitorMetric>>('/monitor/metrics', query);
   }
 
   /** 推送监控指标 */
   async pushMetric(data: Partial<MonitorMetric>): Promise<ApiResponse<MonitorMetric>> {
-    return this.client.post<MonitorMetric>('/v1/monitor/metrics', data);
+    return this.client.post<MonitorMetric>('/monitor/metrics', data);
   }
 
   // ========== LogEntry（日志）==========
@@ -87,7 +87,7 @@ export class MonitorApi {
     }
     if (level) query['level'] = level;
     if (source) query['source'] = source;
-    return this.client.get<PageResult<LogEntry>>('/v1/monitor/logs', query);
+    return this.client.get<PageResult<LogEntry>>('/monitor/logs', query);
   }
 
   /** 获取单条日志 */
@@ -104,7 +104,7 @@ export class MonitorApi {
   async clearLogs(before?: string): Promise<ApiResponse<Object>> {
     const body: ClearLogsBody = {};
     if (before !== undefined) body.before = before;
-    return this.client.post<Object>('/v1/monitor/logs/clear', body);
+    return this.client.post<Object>('/monitor/logs/clear', body);
   }
 
   // ========== NotificationItem（通知）==========
@@ -113,7 +113,7 @@ export class MonitorApi {
   async listNotifications(unreadOnly?: boolean): Promise<ApiResponse<NotificationItem[]>> {
     const query: Record<string, Object> = {};
     if (unreadOnly !== undefined) query['read'] = !unreadOnly;
-    const res = await this.client.get<PageResult<NotificationItem>>('/v1/notifications', query);
+    const res = await this.client.get<PageResult<NotificationItem>>('/notifications', query);
     const page = (res.data ?? { items: [], total: 0 }) as PageResult<NotificationItem>;
     return { code: res.code, message: res.message, data: page.items } as ApiResponse<NotificationItem[]>;
   }
@@ -132,7 +132,7 @@ export class MonitorApi {
   /** 标记所有通知为已读 */
   async markAllNotificationsRead(): Promise<ApiResponse<Object>> {
     const body: Record<string, Object> = {};
-    return this.client.post<Object>('/v1/notifications/mark-all-read', body);
+    return this.client.post<Object>('/notifications/mark-all-read', body);
   }
 
   /** 删除单条通知 */
@@ -147,7 +147,7 @@ export class MonitorApi {
     parentId?: string,
     params?: PageParams,
   ): Promise<ApiResponse<PageResult<FileItem>>> {
-    const res = await this.client.get<FileItem[]>('/v1/files');
+    const res = await this.client.get<FileItem[]>('/files');
     const arr = (res.data ?? []) as FileItem[];
     return {
       code: 0, message: 'ok',
@@ -178,7 +178,7 @@ export class MonitorApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<Neuron>>('/v1/monitor/neurons', query);
+    return this.client.get<PageResult<Neuron>>('/monitor/neurons', query);
   }
 
   /** 获取单个神经元 */

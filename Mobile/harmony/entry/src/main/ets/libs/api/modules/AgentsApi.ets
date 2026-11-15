@@ -12,7 +12,7 @@ export class AgentsApi {
   }
 
   async list(params?: PageParams): Promise<ApiResponse<PageResult<Agent>>> {
-    return this.client.get<PageResult<Agent>>('/v1/agents', params as Record<string, Object>);
+    return this.client.get<PageResult<Agent>>('/agents', params as Record<string, Object>);
   }
 
   async get(agentId: string): Promise<ApiResponse<Agent>> {
@@ -20,7 +20,7 @@ export class AgentsApi {
   }
 
   async create(data: Partial<Agent>): Promise<ApiResponse<Agent>> {
-    return this.client.post<Agent>('/v1/agents', data);
+    return this.client.post<Agent>('/agents', data);
   }
 
   async update(agentId: string, data: Partial<Agent>): Promise<ApiResponse<Agent>> {
