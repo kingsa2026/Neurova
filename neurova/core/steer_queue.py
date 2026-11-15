@@ -73,3 +73,68 @@ def reset_steer_queue() -> None:
     global _QUEUE
     with _QUEUE_LOCK:
         _QUEUE = None
+
+
+class ActiveTurnRegistry:
+    """会话级"回合进行中"注册表（P2，loop 对照 #5 的入队侧）。
+
+    管线 `execute()` 进入/离开时登记；请求入口据此判定"这条新输入该作为
+    **插话**并入正在跑的回合，还是开启一个新回合"。没有它，turn 进行中的
+    第二条消息会与第一条**并发跑两个回合**（loop 是 per-agent 单例，轮次态
+    互相踩踏——Issue #268 的形态），或被写围栏拒绝。
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._active: Dict[str, int] = {}
+
+    def markStarted(self, session_id: str) -> None:
+        sid = str(session_id or "")
+        if not sid:
+            return
+        with self._lock:
+            self._active[sid] = self._active.get(sid, 0) + 1
+
+    def markEnded(self, session_id: str) -> None:
+        sid = str(session_id or "")
+        if not sid:
+            return
+        with self._lock:
+            count = self._active.get(sid, 0) - 1
+            if count <= 0:
+                self._active.pop(sid, None)
+            else:
+                self._active[sid] = count
+
+    def isActive(self, session_id: str) -> bool:
+        with self._lock:
+            return self._active.get(str(session_id or ""), 0) > 0
+
+
+_REGISTRY: ActiveTurnRegistry = None
+_REGISTRY_LOCK = threading.Lock()
+
+
+def get_active_turn_registry() -> ActiveTurnRegistry:
+    global _REGISTRY
+    with _REGISTRY_LOCK:
+        if _REGISTRY is None:
+            _REGISTRY = ActiveTurnRegistry()
+        return _REGISTRY
+
+
+def reset_active_turn_registry() -> None:
+    global _REGISTRY
+    with _REGISTRY_LOCK:
+        _REGISTRY = None
+
+
+def submitSteer(session_id: str, text: str) -> bool:
+    """把 turn 进行中的用户输入作为插话投递；回合不在跑时返回 False（调用方
+    按新回合处理）。入队成功即返回 True——loop 会在下一个工具轮间隙消费。"""
+    sid = str(session_id or "")
+    if not sid or not str(text or "").strip():
+        return False
+    if not get_active_turn_registry().isActive(sid):
+        return False
+    return get_steer_queue().push(sid, text)

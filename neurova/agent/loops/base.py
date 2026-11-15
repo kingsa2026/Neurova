@@ -271,6 +271,38 @@ def recordGoalVerification(verdict: Dict[str, Any]) -> None:
         logger.debug("目标判定埋点失败（忽略）", exc_info=True)
 
 
+def persistModelVisibleAnnouncement(agent: "Agent", text: str, source: str) -> bool:
+    """P1（loop 对照 #2）：模型可见的轮内注入**先落会话盘，再进请求历史**。
+
+    轮内注入（用户插话、子代理邮箱回灌、目标续跑提示）此前只活在当轮请求的
+    内存消息里——回合结束后会话盘上查无此据，审计/恢复读侧看不到"模型当时
+    还看到过什么"。本 helper 在注入进请求历史**之前**把它们落盘
+    （role=user + metadata.source 标来源，走 `MemCore.saveUserMessage` 单点）。
+
+    落盘失败**留痕不阻断**：轮次继续、注入照常进请求历史，缺的是审计副本——
+    与 `failed_turn_landing` 同一取舍（故障路径上的辅助写不得顶掉主流程）。
+    """
+    trimmed = str(text or "").strip()
+    if not trimmed:
+        return False
+    memory = getattr(agent, "memory_agent", None)
+    sessionId = str(getattr(agent, "current_session_id", "") or "")
+    if memory is None or not sessionId or not hasattr(memory, "saveUserMessage"):
+        return False
+    try:
+        memory.saveUserMessage(
+            trimmed,
+            session_id=sessionId,
+            metadata={"source": source, "loop_announcement": True},
+        )
+        return True
+    except Exception as e:  # noqa: BLE001 - 辅助写失败留痕，不阻断轮次
+        logger.warning(
+            "轮内注入落盘失败（source=%s，%d 字符）: %s", source, len(trimmed), e
+        )
+        return False
+
+
 def resolveCallId(tool_call: Dict) -> str:
     """工具调用 id 的唯一解析点——assistant 声明侧与 tool 结果侧必须同源于此。
 
@@ -547,6 +579,8 @@ class BaseAgentLoop(ABC):
         兼容流式响应中一次工具调用被拆到多个 chunk：首片携带 id/name，
         后续片段 id/name 为 None、仅递增 arguments 文本。chat_stream 透传 delta
         的 index 字段，据此定位合并位置；无 index 时退化为追加新条目。
+        合并/追加均保留 `_stream_index`（P3，loop 对照 #6）：工具批按它稳定
+        排序，live 执行顺序与冷恢复重建顺序一致。
         """
         fn = delta.get("function") or {}
         index = delta.get("index")
@@ -559,10 +593,12 @@ class BaseAgentLoop(ABC):
                         "name": fn.get("name") or "",
                         "arguments": fn.get("arguments") or "",
                     },
+                    "_stream_index": index if index is not None else len(pending),
                 }
             )
             return
         entry = pending[index]
+        entry["_stream_index"] = index
         if delta.get("id"):
             entry["id"] = delta["id"]
         if fn.get("name"):
@@ -777,6 +813,16 @@ class BaseAgentLoop(ABC):
         """
         new_messages = []
 
+        # P3（loop 对照 #6）：工具批按流内序号稳定排序——live 执行顺序与冷恢复
+        # 重建顺序一致（流式分片按 index 合并后，到达顺序可能与声明顺序不同）。
+        # 无序号的调用（非流式/旧数据）保持原相对顺序（sorted 稳定，不重排）。
+        tool_calls = sorted(
+            tool_calls,
+            key=lambda tc: tc.get("_stream_index")
+            if isinstance(tc.get("_stream_index"), int)
+            else 1 << 30,
+        )
+
         # 声明制分组并行：按**每个工具自己的能力声明**分组，连续的资格项合成
         # 一批 gather（受单源上限截断），其余项各自成池串行。改前是 all-or-nothing
         # ——任一调用未声明 ⇒ 整轮全串行，于是"读三个文件 + 一次搜索 + 写一个文件"
@@ -813,11 +859,16 @@ class BaseAgentLoop(ABC):
 
         # P1-9：工具轮间隙排空插话邮箱——turn 进行中
         # 用户补充的消息以 user 角色并入消息序列，下一次采样即可见
+        # P1（loop 对照 #2）：并入请求历史**之前**先落会话盘（真实用户输入，
+        # 此前回合结束后查无此据）。
         try:
             from neurova.core.steer_queue import get_steer_queue
 
             _sid = getattr(self.agent, "current_session_id", "") or ""
             for _steer_text in get_steer_queue().drain(str(_sid)):
+                persistModelVisibleAnnouncement(
+                    self.agent, _steer_text, source="steer_interjection"
+                )
                 new_messages.append(
                     {"role": "user", "content": f"[用户插话] {_steer_text}"}
                 )
@@ -826,11 +877,15 @@ class BaseAgentLoop(ABC):
 
         # P2-5：排空子代理回传邮箱——后台子代理的完成
         # 结果逐轮可见；嵌套模式的完成摘要同样显式回灌
+        # P1（loop 对照 #2）：同样先落盘再进历史（轮次证据完整可查）。
         try:
             from neurova.agent.mailbox import get_agent_mailbox
 
             _sid = getattr(self.agent, "current_session_id", "") or ""
             for _mail_text in get_agent_mailbox().drain(str(_sid)):
+                persistModelVisibleAnnouncement(
+                    self.agent, _mail_text, source="subagent_mail"
+                )
                 new_messages.append(
                     {"role": "user", "content": _mail_text}
                 )
@@ -1003,6 +1058,17 @@ class BaseAgentLoop(ABC):
             error=outcome["error"],
             metadata={},
         )
+
+        # P3（loop 对照 #7）：工具结果可声明"结算后终止本回合"
+        # （result.turn_control = {"reason": ...}）。信号**写回调用的 tool_call
+        # 字典**（调用方 loop 持有它，批结算后逐条扫描）——不走 ContextVar：
+        # 并行批次跑在 gather 子任务里，子任务内的 ContextVar.set 不会传回
+        # 父任务（实测：worker 置位后环侧读到 None）。
+        _turn_control = outcome.get("result").get("turn_control") if isinstance(outcome.get("result"), dict) else None
+        if _turn_control:
+            tool_call["_turn_control"] = (
+                _turn_control if isinstance(_turn_control, dict) else {"reason": str(_turn_control)}
+            )
 
         # 构建 tool_result message
         if exec_result.success:

@@ -45,8 +45,20 @@ async def landFailedTurn(pipeline, ctx: "ChatContext", exc: BaseException) -> No
         return
     reason = str(exc) or type(exc).__name__
 
+    # P2（loop 对照 #3）：取消流快照——中断前已流式产出的部分正文随落点进盘，
+    # 刷新/重放后"这一轮说到哪"可查，而不是只剩一句中止告示。
+    partial = str(getattr(ctx, "partial_reply", "") or "").strip()
+
     if isinstance(exc, __import__("asyncio").CancelledError):
-        text = f"⚠️ 本轮被中止（未生成回复）：{reason}"
+        if partial:
+            text = (
+                f"⚠️ 本轮被中止（{reason}）。以下为中断前已产出的部分内容：\n"
+                + partial[-4000:]
+            )
+        else:
+            text = f"⚠️ 本轮被中止（未生成回复）：{reason}"
+    elif partial:
+        text = f"⚠️ 未能生成回复：{reason}。中断前已产出的部分内容：\n" + partial[-4000:]
     else:
         text = f"⚠️ 未能生成回复：{reason}"
     try:

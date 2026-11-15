@@ -94,14 +94,25 @@ class TestPredictStreamOverflowRecovery:
 
     @pytest.mark.asyncio
     async def test_second_overflow_raises_no_third_call(self):
+        """P2（loop 对照 #4）：连续快速重压缩达上限即熔断。
+
+        旧语义"第二次溢出原样抛"升级为账本治理：间隔不足 3 个工具轮的连续
+        重压缩允许 2 次，第 3 次熔断——`CompactRapidRefillError` 走 LLMError
+        通道诚实上抛（管线不 fallback legacy 再烧一轮预算）。
+        """
+        from neurova.agent.loops.turn_run_state import CompactRapidRefillError
+
         loop = _make_loop()
-        client = _ScriptedClient([_token_limit_error(), _token_limit_error()])
+        client = _ScriptedClient([
+            _token_limit_error(), _token_limit_error(),
+            _token_limit_error(), _token_limit_error(),
+        ])
         loop.llm_client = client
 
-        with pytest.raises(TokenLimitExceeded):
+        with pytest.raises(CompactRapidRefillError):
             _ = [e async for e in loop._predict_stream({"messages": _big_messages()})]
 
-        assert len(client.calls) == 2  # 单次重试语义，无第三次
+        assert len(client.calls) == 4  # 原始请求 + 3 次重压缩尝试（第 4 次溢出前熔断）
 
     @pytest.mark.asyncio
     async def test_mid_stream_overflow_propagates(self):

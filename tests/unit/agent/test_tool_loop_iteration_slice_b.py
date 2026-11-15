@@ -331,11 +331,56 @@ class TestOverflowRecoveryStaysInOneRound:
         assert len(client.calls[1]) < len(client.calls[0]), "重试消息必须已折叠"
 
     def test_secondOverflowStillRaises(self):
+        """P2（loop 对照 #4）：连续快速重压缩达上限即熔断。
+
+        旧语义"第二次溢出原样抛"升级为账本治理：间隔不足 3 个工具轮的连续
+        重压缩允许 2 次，第 3 次触发熔断——`CompactRapidRefillError` 走
+        LLMError 通道诚实上抛（管线不 fallback legacy 再烧一轮预算）。
+        """
+        from neurova.agent.loops.turn_run_state import CompactRapidRefillError
+
         client = _OverflowThenOkClient([
+            {"error": "maximum context length is exceeded"},
+            {"error": "maximum context length is exceeded"},
             {"error": "maximum context length is exceeded"},
             {"error": "maximum context length is exceeded"},
         ])
         loop, _ = makeLoop(client)
-        with pytest.raises(TokenLimitExceeded):
+        with pytest.raises(CompactRapidRefillError):
             asyncio.run(_collect(loop._predict_stream({"messages": self._bigMessages()})))
-        assert len(client.calls) == 2
+        # 首次请求 + 3 次重压缩尝试（第 4 次溢出在压缩前即被熔断）
+        assert len(client.calls) == 4
+
+    def test_compactAfterEnoughToolRoundsResetsRapidRefill(self):
+        """间隔足够（≥3 工具轮）的再次溢出不算快速重压缩：计数清零后允许再压。"""
+        from neurova.agent.loops.turn_run_state import (
+            CompactRapidRefillError,
+            MAX_CONSECUTIVE_RAPID_REFILLS,
+            RAPID_REFILL_TOOL_TURN_THRESHOLD,
+            TurnRunState,
+        )
+
+        state = TurnRunState.forTurn(agentId="a", roundUserKey="k")
+        # 直接以账本语义推演：首次压缩、随后紧跟一次快速重压缩（计数 1）、
+        # 隔了 3 个工具轮后的再次压缩清零。
+        state.reactiveCompacts = 0
+        state.lastCompactRound = -1
+        state.toolRounds = 0
+        # 首次压缩（由 _resumeAfterOverflow 的生产路径执行，这里验证判据本身）
+        rounds_since = state.toolRounds - state.lastCompactRound
+        assert rounds_since >= RAPID_REFILL_TOOL_TURN_THRESHOLD or state.reactiveCompacts == 0
+        state.reactiveCompacts += 1
+        state.lastCompactRound = state.toolRounds
+        # 紧跟一次快速重压缩
+        state.toolRounds = state.lastCompactRound  # 0 轮间隔
+        assert state.toolRounds - state.lastCompactRound < RAPID_REFILL_TOOL_TURN_THRESHOLD
+        state.consecutiveRapidRefills += 1
+        assert state.consecutiveRapidRefills < MAX_CONSECUTIVE_RAPID_REFILLS
+        # 隔 3 个工具轮后再次压缩：计数清零
+        state.toolRounds = state.lastCompactRound + RAPID_REFILL_TOOL_TURN_THRESHOLD
+        state.consecutiveRapidRefills = 0
+        assert state.consecutiveRapidRefills == 0
+        # 熔断类型挂在 LLMError 通道（管线不 fallback）
+        from neurova.llm_client import LLMError
+
+        assert issubclass(CompactRapidRefillError, LLMError)

@@ -22,6 +22,35 @@ from typing import Any, Dict, List, Optional, Tuple
 #: `resolveToolRoundBudget()`；不在此另立一份尺度，也不在任何路径内联再算一遍。
 ROUND_BUDGET_FALLBACK = 10
 
+#: P2（loop 对照 #4）：rapid-refill 熔断阈值——compact 后不足 3 个工具轮
+#: 又触发溢出重压缩，连续达 3 次即熔断拒绝（防"压缩—涨回"死循环烧预算）。
+RAPID_REFILL_TOOL_TURN_THRESHOLD = 3
+MAX_CONSECUTIVE_RAPID_REFILLS = 3
+
+
+#: P2（loop 对照 #4）：熔断异常的基类惰性解析——挂 `llm_client.LLMError`：
+#: 管线对 LLMError **原样上抛不 fallback**，熔断必须以诚实形态到达用户，
+#: 不得被"Loop 实现错误回退 legacy"吞成另一次全量重跑（那正是熔断要阻止的
+#: 预算燃烧）。解析失败退回 Exception（功能仍在，只是失去快速通道）。
+try:
+    from neurova.llm_client import LLMError as _LLMErrorBase
+except Exception:  # noqa: BLE001
+    _LLMErrorBase = Exception
+
+
+class CompactRapidRefillError(_LLMErrorBase):
+    """连续快速重压缩熔断。"""
+
+    def __init__(self, consecutive: int, tool_rounds_since: int):
+        self.consecutive = consecutive
+        self.toolRoundsSince = tool_rounds_since
+        super().__init__(
+            f"上下文重压缩熔断：连续 {consecutive} 次溢出重压缩均发生在"
+            f" {RAPID_REFILL_TOOL_TURN_THRESHOLD} 个工具轮以内"
+            f"（距上次压缩 {tool_rounds_since} 轮）——压缩未解决溢出，"
+            "继续重试只会烧预算。请缩减任务规模或更换上下文窗口更大的模型。"
+        )
+
 
 def resolveToolRoundBudget() -> int:
     """工具轮上限的**唯一派生点**（T-04：同一份尺度不得读出两个值）。

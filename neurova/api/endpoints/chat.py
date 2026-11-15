@@ -14,6 +14,7 @@ import datetime
 import asyncio
 import json
 from neurova.core.logger import get_logger
+from neurova.core.steer_queue import submitSteer
 import re
 import uuid
 from pathlib import Path
@@ -338,6 +339,20 @@ async def chat(
         )
 
     sessionId = body.session_id or ""
+    # P2（loop 对照 #5）：turn 进行中的新输入 = 插话——并入正在跑的回合，
+    # 不并发开第二个回合（loop 是 per-agent 单例，并发轮次态互踩，Issue #268 形态）。
+    # 续跑（resume_run_id）是系统驱动的重放，不走插话通道。
+    if sessionId and not resume_run_id and submitSteer(sessionId, body.message):
+        return JSONResponse(
+            status_code=200,
+            content={
+                "code": 0,
+                "steered": True,
+                "session_id": sessionId,
+                "message": "回合进行中，本条输入已作为插话并入当前回合",
+                "request_id": request_id,
+            },
+        )
     if resume_run_id:
         from neurova.core import agent_run_store as _ars
 
@@ -533,6 +548,16 @@ async def chat_stream(
             agent_id=body.agent_id or "", user_id=user_id, title="新对话"
         )
         body.session_id = sessionId
+
+    # P2（loop 对照 #5）：同 REST 路径——turn 进行中的新输入作为插话并入当前
+    # 回合；SSE 通道以单帧 `steered` 事件诚实回执（前端据此提示"已并入"）。
+    if not resume_run_id and submitSteer(sessionId, body.message):
+        _steerNote = "回合进行中，本条输入已作为插话并入当前回合"
+
+        async def _steeredAck():
+            yield f"event: steered\ndata: {json.dumps({'session_id': sessionId, 'message': _steerNote, 'request_id': request_id}, ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(_steeredAck(), media_type="text/event-stream")
 
     ledger = AgentRunLedger(
         sessionId, user_id, body.agent_id, body.message, run_id=resume_run_id or None

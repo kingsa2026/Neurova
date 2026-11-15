@@ -102,6 +102,7 @@ class AnthropicLoop(BaseAgentLoop):
         """
         from neurova.agent.gates import StopAction as _SA
         from neurova.agent.loops.base import LOOP_CONTINUE, evaluateLoopExit
+        from neurova.core import turn_context
 
         while True:
             state.assertRoundInvariant()
@@ -167,6 +168,21 @@ class AnthropicLoop(BaseAgentLoop):
                     ),
                 )
             )
+
+            # P3（loop 对照 #7）：工具结果声明"结算后终止本回合"→ 诚实收口。
+            # 信号由执行链写在 tool_call 字典上（并行子任务里 ContextVar 传不回父任务）。
+            _stopControl = next(
+                (tc.get("_turn_control") for tc in reversed(response.tool_calls) if tc.get("_turn_control")),
+                None,
+            )
+            if _stopControl:
+                _stopReason = str((_stopControl or {}).get("reason") or "工具结果要求终止")
+                _closeText = (
+                    f"{getattr(response, 'content', '') or ''}"
+                    f"\n\n⚠️ {_stopReason}。本回合到此收口。"
+                ).strip()
+                phaseAdvance(state, TurnPhase.COMPLETING)
+                return LLMResponse(content=_closeText, finish_reason="stop")
 
             if state.gatedRound != state.toolRounds:
                 state.gatedRound = state.toolRounds
@@ -323,6 +339,25 @@ class AnthropicLoop(BaseAgentLoop):
             phaseAdvance(state, TurnPhase.AGGREGATING_RESULTS)
             for tm in tool_messages:
                 yield {"type": "tool_result", "data": tm}
+
+            # P3（loop 对照 #7）：工具结果声明"结算后终止本回合"→ 诚实收口。
+            # 信号由执行链写在 tool_call 字典上（并行子任务里 ContextVar 传不回父任务）。
+            _stopControl = next(
+                (tc.get("_turn_control") for tc in reversed(pending_tool_calls) if tc.get("_turn_control")),
+                None,
+            )
+            if _stopControl:
+                _stopReason = str((_stopControl or {}).get("reason") or "工具结果要求终止")
+                _closeText = f"⚠️ {_stopReason}。本回合到此收口。"
+                phaseAdvance(state, TurnPhase.COMPLETING)
+                yield {"type": "content", "data": _closeText}
+                yield {
+                    "type": "done",
+                    "reply": round_reply + _closeText,
+                    "finish_reason": "stop",
+                    "usage": state.roundUsage,
+                }
+                return
 
             # 执行即回放：其后的判定只决定要不要开下一轮（与 OpenAI 环同一规则）
             _round_reasoning = reasoningGuard.cleanText
