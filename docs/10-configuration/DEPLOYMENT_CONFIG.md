@@ -121,3 +121,64 @@ Chart **不得**再用 ConfigMap 卷覆盖 `/app/config` —— ConfigMap 里装
 环境变量（已由 `envFrom` 注入），把它当卷挂上去会整体遮蔽镜像内的
 `config/cors.json` 与 `config/llm_presets/defaults.json`，表现与 R10 完全一致
 （静默回落内置默认值）。
+
+---
+
+## 移动端接入（手机客户端连服务端的三形态）
+
+手机客户端（鸿蒙 `Mobile/harmony/`、安卓 `Mobile/android/`）连服务端支持三种网络形态，
+客户端侧通过"服务器档案"运行时选择，服务端按形态补齐以下配置。
+
+### 形态 A：内网/局域网直连
+
+- 服务端启动须显式 `NEUROVA_HOST=0.0.0.0`（默认只绑回环，见 `start_server.py`）。
+- 客户端档案地址填 `http://<内网IP>:9527`；纯 HTTP 仅限内网。
+
+### 形态 B：公网固定 IP + 反向代理（nginx 样板）
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name neurova.example.com;
+    ssl_certificate     /etc/letsencrypt/live/neurova.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/neurova.example.com/privkey.pem;
+    client_max_body_size 100m;
+
+    location / {
+        proxy_pass http://127.0.0.1:9527;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;          # WS 升级（/api/v1/mobile/ws）
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host              $host;
+        proxy_buffering off;                        # SSE（/api/v1/chat/stream）不缓冲
+        proxy_read_timeout  3600s;
+        proxy_send_timeout  3600s;
+    }
+}
+map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+```
+
+服务端必配三个环境变量（缺失后果见设计方案 §4.2/§7）：
+
+| 环境变量 | 值 | 缺失后果 |
+|---|---|---|
+| `NEUROVA_FORWARDED_ALLOW_IPS` | 反代机网段（本机反代 `127.0.0.1`） | X-Forwarded-* 不被采信：wss 判定错误 + 限流按代理 IP 合桶 |
+| `NEUROVA_ADVERTISED_BASE_URL` | `https://neurova.example.com` | 配对二维码/回连地址指向错误入口 |
+| `NEUROVA_CORS_ORIGINS` | `https://neurova.example.com`（Web 面需要时） | 浏览器/WebView 跨域被拒（原生 App 不受 CORS 约束） |
+
+K8s/Helm 部署时 ingress 注解需含 WS 升级与 SSE 不缓冲配置（见 `helm/neurova/values-production.yaml` 的 ingress.annotations）。
+
+### 形态 C：无固定 IP → 自研中继反向隧道
+
+- 一台有公网地址的 VPS 运行中继：`python -m neurova.relay`（前置 TLS 反代）。
+- 服务端配置：`NEUROVA_TUNNEL_RELAY_URL=wss://<中继域名>` + `NEUROVA_TUNNEL_ENROLLMENT_TOKEN=<准入凭据>`。
+- 客户端档案地址填 `https://<中继域名>`，入口路径 `/t/<routeId>/api/v1/...`。
+- CGNAT/无公网 IPv4 场景必须走本形态。中继终结 TLS 能读明文——只部署在自己的 VPS。
+- 完整设计：`docs/04-plans/2026-10-24-移动端扫码经中继连接无固定IP服务端设计方案.md`。
+
+### 签名材料（应用包发布）
+
+鸿蒙/安卓签名材料（密钥库、发布证书、Profile）统一放 `Mobile/signing/`（已 gitignore，不入库）；
+清单与指纹见 `Mobile/signing/INFO.md`，接线样例见本目录 `MOBILE_APP_SIGNING.md`。
