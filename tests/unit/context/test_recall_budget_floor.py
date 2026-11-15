@@ -122,7 +122,13 @@ class TestBudgetHasSingleDefinition:
         assert seen["calls"] >= 2, "抽屉与信封必须各走一次同一份额度方法"
         # B6-9：本轮生效额度经 `effective_view_budget()` 读——`max_tokens` 是**构造期**
         # 默认值，不再被就地改写（改前断言读的正是那个被覆写的字段）。
-        assert orch.context_pool._drawer.effective_view_budget() in seen["values"]
+        # B10 双通道：生效额度 = 输入通道额度（召回额度扣除近轮通道 30% 份额）——
+        # 两通道额度同源于 _retrievalBudget 的单个返回值，单源不破坏。
+        share = ContextOrchestrator._RECENT_CHANNEL_BUDGET_SHARE
+        # 与实现同序：近轮 = int(额度×份额)，输入 = 额度 − 近轮（先扣后减，
+        # 不用 ×(1-份额) 重算——整数取整方向不同会差 1）。
+        expected_input_budget = seen["values"][0] - int(seen["values"][0] * share)
+        assert orch.context_pool._drawer.effective_view_budget() == expected_input_budget
 
     @pytest.mark.asyncio
     async def test_two_builds_same_budget_same_value(self):
