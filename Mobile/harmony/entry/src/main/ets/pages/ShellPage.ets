@@ -15,6 +15,7 @@ import { mediaquery } from '@kit.ArkUI';
 import { StyleManager } from '../libs/style/StyleManager';
 import { LiquidTabBar } from '../components/shell/LiquidTabBar';
 import { RailBar } from '../components/shell/RailBar';
+import { SessionListPage } from './SessionListPage';
 import { ChatPage } from './ChatPage';
 import { DashboardPage } from './DashboardPage';
 import { AgentListPage } from './AgentListPage';
@@ -48,7 +49,7 @@ export struct ShellPage {
   @Builder
   tabContent() {
     if (this.activeTab === 0) {
-      ChatPage()
+      SessionListPage()
     } else if (this.activeTab === 1) {
       DashboardPage()
     } else if (this.activeTab === 2) {
