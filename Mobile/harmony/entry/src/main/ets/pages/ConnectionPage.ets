@@ -65,11 +65,17 @@ export struct ConnectionPage {
     }
     this.busy = true;
     try {
-      await this.store.add(this.newName, this.newUrl);
+      const added = await this.store.add(this.newName, this.newUrl);
       this.newName = '';
       this.newUrl = '';
+      // 新档案立即激活并进入扫码配对：二维码只带 ref 不带地址（§3.4），
+      // 所以先录地址、再扫码配对，两步缺一不可
+      await this.store.switchTo(added.id);
+      await this.cm.applyServerProfile(`${added.baseUrl}/api/v1`, getContext(this) as Context);
       this.refresh();
-      this.msg.success('档案已添加');
+      this.activeId = added.id;
+      this.msg.success('档案已添加，请扫码配对设备');
+      this.router.replace(RouteNames.PAIRING);
     } finally {
       this.busy = false;
     }

@@ -192,7 +192,12 @@ export struct PairingPage {
         this.msg.success('配对成功');
         // 延迟跳转，让用户看到"配对成功"反馈
         setTimeout(() => {
-          this.router.replace(RouteNames.DASHBOARD);
+          // 已登录（换服务器重配对）回仪表盘；首次配对先去登录
+          if (this.authStore.isAuthenticated) {
+            this.router.replace(RouteNames.DASHBOARD);
+          } else {
+            this.router.replace(RouteNames.LOGIN);
+          }
         }, SUCCESS_REDIRECT_DELAY);
       } else {
         this.status = 'failed';
