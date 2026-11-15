@@ -751,6 +751,42 @@ async def ontology_derive(
     }
 
 
+@_SERVER.tool()
+async def ontology_answerability(
+    ctx: Context,
+    question: str,
+    threshold: float = 0.5,
+    agent_id: str = "",
+) -> dict:
+    """实体覆盖预检（只读，P1-3）：这个问题在本数据面上答得了吗？
+
+    抽问题实体 → 对本体术语/事实主体做覆盖匹配 → 命中占比 coverage。
+    coverage 低于 threshold 时请先向用户澄清或换问法，不要硬生成答案。
+    词面匹配口径（向量召回属后续升级），结果含逐实体命中明细。"""
+    from neurova.knowledge.ontology.answerability import assessAnswerability
+
+    user = _currentUserFromContext(ctx)
+    try:
+        clamped = max(0.0, min(1.0, float(threshold)))
+    except (TypeError, ValueError):
+        clamped = 0.5
+    return assessAnswerability(_store(), str(question or ""),
+                               tenantId=_tenantOf(user),
+                               agentId=_agentIdOf(user, agent_id),
+                               threshold=clamped)
+
+
+@_SERVER.tool()
+async def ontology_readiness(ctx: Context) -> dict:
+    """复合就绪探针（只读，P2-2）：这个部署现在能不能答知识/数据问题。
+
+    knowledge_ready＝术语已登记且事实非空；data_ready＝目录已摄取且存在
+    启用中的企业源。四类检查现值逐项给全，失败是静默的这一层由它兜住。"""
+    from neurova.knowledge.ontology.readiness import knowledgeReadiness
+
+    return knowledgeReadiness(_store(), _tenantOf(_currentUserFromContext(ctx)))
+
+
 def build_ontology_mcp_asgi():
     """构造本体 MCP 面（一次构建一对，transport 实例 run() 一次不可复用）。
 
