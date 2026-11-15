@@ -258,6 +258,49 @@ class UsageHistoryStore:
             return {"cache_read_tokens": 0, "cache_write_tokens": 0,
                     "prompt_tokens": 0, "cache_hit_rate": 0.0}
 
+    def cache_profile_for_model(self, model: str, min_calls: int = 20) -> Dict[str, Any]:
+        """A4（对照改进项）：单模型缓存画像——该模型是否真有前缀缓存生效。
+
+        数据来自本库的账单真值（cache_read_tokens / prompt_tokens）。
+        sufficient = 样本量 ≥ min_calls（流量太小的模型判不了，证据门槛）。
+        查询失败按「样本不足」处理（fail-open，不改折叠行为）。
+        """
+        profile: Dict[str, Any] = {
+            "model": str(model or ""),
+            "calls": 0,
+            "prompt_tokens": 0,
+            "cache_read_tokens": 0,
+            "hit_rate": 0.0,
+            "sufficient": False,
+        }
+        try:
+            with self._lock:
+                with self._connect() as conn:
+                    row = conn.execute(
+                        """
+                        SELECT COUNT(*) AS calls,
+                               COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                               COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens
+                        FROM llm_usage
+                        WHERE model = ?
+                        """,
+                        (str(model or "").strip(),),
+                    ).fetchone()
+            result = dict(row) if row else {}
+            calls = int(result.get("calls") or 0)
+            prompt = int(result.get("prompt_tokens") or 0)
+            read = int(result.get("cache_read_tokens") or 0)
+            profile.update({
+                "calls": calls,
+                "prompt_tokens": prompt,
+                "cache_read_tokens": read,
+                "hit_rate": round(read / prompt, 4) if prompt > 0 else 0.0,
+                "sufficient": calls >= max(1, int(min_calls)),
+            })
+        except Exception:
+            pass
+        return profile
+
     def per_user_cost_totals(self, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """R8/R9（2026-11-13）：按用户×模型聚合 token 并估成本（$），按量降序。
 
