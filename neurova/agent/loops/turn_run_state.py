@@ -85,6 +85,16 @@ class TurnRunState:
     #: "思考太长被预算饿死"（放宽预算有用）与"思考在退化"（放宽预算只是给连发更多
     #: 空间）——后者在关不掉思考的网关上重试必然再撞一次，故不重试。
     degeneratedRound: bool = False
+    #: P1（loop 对照 #1）：轮次相位机——一轮一份，随轮释放。相位迁移表与
+    #: 非法迁移拒绝见 `turn_phase.py`；两条环在固定控制点推进它。
+    phaseMachine: Any = None
+    #: P2（loop 对照 #4）：溢出重压缩账本——reactive compact 次数、上次 compact
+    #: 发生时的工具轮号、连续"快速重压缩"计数（间隔不足阈值即快速）。取代
+    #: 原 `_overflowRetried` 单次标记：间隔够开（≥3 工具轮）允许再压缩，
+    #: 连续快速达上限即熔断拒绝（防"压缩—涨回"死循环烧预算）。
+    reactiveCompacts: int = 0
+    lastCompactRound: int = -1
+    consecutiveRapidRefills: int = 0
 
     @classmethod
     def forTurn(cls, *, agentId: str, roundUserKey: Optional[str] = None, **kw: Any) -> "TurnRunState":
@@ -93,10 +103,13 @@ class TurnRunState:
         直接 `TurnRunState(...)` 会得到空 turnId（无创建者记录），故生产侧一律
         走此处——两个构造点各不记指纹，正是"归属可自证"要消灭的形态。
         """
+        from neurova.agent.loops.turn_phase import TurnPhaseMachine
+
         return cls(
             roundUserKey=roundUserKey,
             agentId=str(agentId or ""),
             turnId=uuid.uuid4().hex,
+            phaseMachine=TurnPhaseMachine(),
             **kw,
         )
 

@@ -18,8 +18,17 @@ if TYPE_CHECKING:
 from neurova.agent.gates import StopDecision as _StopDecision
 from neurova.agent.gates import STAGNATION_GATE, STAGNATION_REASON, appendTerminationNotice
 
-from neurova.agent.loops.base import BaseAgentLoop
+from neurova.agent.loops.base import (
+    BaseAgentLoop,
+    persistModelVisibleAnnouncement,
+)
 from neurova.agent.loops.registry import register_loop
+from neurova.agent.loops.turn_phase import (
+    TurnPhase,
+    phaseAdvance,
+    phaseAdvanceIfChanged,
+    phaseMarkError,
+)
 from neurova.agent.loops.reasoning_degeneracy import (
     FUTILE_THINKING_RETRY_NOTICE,
     ReasoningStreamGuard,
@@ -263,6 +272,8 @@ class OpenAILoop(BaseAgentLoop):
             roundUserKey=self._fingerprintUserMessage(messages),
             gateRunner=_round_gate_runner,
         )
+        # P1（loop 对照 #1）：相位机随轮次态启程——入口即 PROCESSING_INPUT。
+        phaseAdvance(state, TurnPhase.PROCESSING_INPUT)
         state.maxToolRounds = resolveToolRoundBudget()
         # 目标续跑次数是"本轮"语义：跨请求残留会让下一轮一开局就撞上已耗尽的
         # 续跑预算（目标门在出口直接 TERMINATE，回复被掐断）。
@@ -303,9 +314,15 @@ class OpenAILoop(BaseAgentLoop):
 
         # 执行预测（tools 被拒的降级在**单轮内**完成，见 `_chatNormalWithDegrade`
         # 与流式的降级分支；此处不再重入整条循环——重入会让"这一轮"多一层栈帧）
-        if stream:
-            return self._predict_stream(request_params, state)
-        return await self.predict_normal(request_params, state)
+        try:
+            if stream:
+                return self._predict_stream(request_params, state)
+            return await self.predict_normal(request_params, state)
+        except BaseException:
+            # P1（loop 对照 #1）：异常收场也必须有相位终态（ERROR）。
+            # 相位收口失败不掩盖真因（phaseMarkError 内部已留痕），原样上抛。
+            phaseMarkError(state)
+            raise
 
     def _dropToolsForDegrade(self, request_params: Dict, state: TurnRunState, error: str) -> None:
         """工具被拒后的降级准备：摘掉 tools 并注入文本调用教学。"""
@@ -344,6 +361,9 @@ class OpenAILoop(BaseAgentLoop):
             # 轮入口不变量（切片 C）：越限即点名——把"上限判定被绕过"
             # （跨会话污染的形态）从要靠并发活体才测得到，降级为每轮可自证。
             state.assertRoundInvariant()
+            # P1（loop 对照 #1）：每轮模型请求前 = AWAITING_MODEL_RESPONSE
+            # （首轮自 PROCESSING_INPUT 进入；工具轮/续跑轮自 AGGREGATING_RESULTS 回路）。
+            phaseAdvance(state, TurnPhase.AWAITING_MODEL_RESPONSE)
             outcome = await self._runOneNormalRound(request_params, state)
             if outcome.done is not None:
                 return outcome.done
@@ -358,6 +378,8 @@ class OpenAILoop(BaseAgentLoop):
         "本轮已注入续跑提示，请继续下一轮"。
         """
         response = await self._chatNormalWithDegrade(request_params, state)
+        # P1（loop 对照 #1）：模型响应已到达 = STREAMING（非流式一次到位，幂等推进）。
+        phaseAdvanceIfChanged(state, TurnPhase.STREAMING)
 
         # 记录思考过程（用于前端展示）
         reasoning_content = getattr(response, "reasoning_content", None)
@@ -449,8 +471,15 @@ class OpenAILoop(BaseAgentLoop):
         state.toolRounds += 1
         logger.info("LLM returned %s tool calls (round %s)", len(tool_calls), state.toolRounds)
 
+        # P1（loop 对照 #1）：模型声明了工具调用 = SCHEDULING_TOOLS；
+        # 批次编排（分组/并行计划）在本轮内随即完成。
+        phaseAdvance(state, TurnPhase.SCHEDULING_TOOLS)
+
         # 执行工具
+        phaseAdvance(state, TurnPhase.EXECUTING_TOOLS)
         tool_messages = await self.handle_tool_calls(tool_calls, request_params["messages"])
+        # P1（loop 对照 #1）：结果已回环（含轮间隙的插话/邮箱排空）= AGGREGATING_RESULTS。
+        phaseAdvance(state, TurnPhase.AGGREGATING_RESULTS)
 
         # P2-6：工具轮间回放推理链——reasoning_content 默认关
         # （NEUROVA_REASONING_REPLAY=1 开）+ REASONING 能力门，部分 provider
@@ -496,11 +525,16 @@ class OpenAILoop(BaseAgentLoop):
                 logger.warning("门控 %s 终止非流式循环: %s", _gd.gate_name, _gd.reason)
                 # 非流式没有事件通道，原因直接并进正文（与流式经管道并入同一份文案单源）
                 appendTerminationNotice(response, _gd.gate_name, _gd.reason)
+                phaseAdvance(state, TurnPhase.COMPLETING)
                 return _TurnOutcome.finished(response)
             if _gd is not None and _gd.action == _SA.INTERRUPT_AND_CONTINUE:
                 # RC-3：软干预与流式路径同一行为（原实现直接丢弃 INTERRUPT，
                 # 同一条门控意见一条路执行、一条路扔掉）；注入点在工具结果
                 # 入历史之后、续跑之前。
+                # P1（loop 对照 #2）：先落盘再进历史。
+                persistModelVisibleAnnouncement(
+                    self.agent, _gd.continuation_prompt, source="gate_interrupt"
+                )
                 request_params["messages"].append(
                     {"role": "user", "content": _gd.continuation_prompt}
                 )
@@ -513,6 +547,7 @@ class OpenAILoop(BaseAgentLoop):
 
         _stage = budgetStageGuidance(state.toolRounds, state.maxToolRounds)
         if _stage:
+            persistModelVisibleAnnouncement(self.agent, _stage, source="budget_stage")
             request_params["messages"].append({"role": "user", "content": _stage})
             logger.info("分段预算提醒（非流式，round=%s）: %s", state.toolRounds, _stage[:60])
 
@@ -549,15 +584,22 @@ class OpenAILoop(BaseAgentLoop):
             gateRunner=state.gateRunner,
         )
         if decision.action == LOOP_CONTINUE:
+            # P1（loop 对照 #2）：续跑提示先落盘再进请求历史——模型可见内容
+            # 与会话盘一致（落点失败留痕不阻断，见 persistModelVisibleAnnouncement）。
+            persistModelVisibleAnnouncement(
+                self.agent, decision.continuation_prompt, source="goal_continuation"
+            )
             request_params["messages"].append(
                 {"role": "user", "content": decision.continuation_prompt}
             )
             # 续跑就地开下一轮（不再递归自身）：state 继续传递，交叠会话下
             # 不会捡到"最后进入本 loop 的会话"留下的门控执行器。
+            phaseAdvance(state, TurnPhase.AGGREGATING_RESULTS)
             return _TurnOutcome.running()
         if decision.action != "done":
             logger.warning("主出口门控 %s 终止: %s", decision.gate_name, decision.reason)
             appendTerminationNotice(response, decision.gate_name, decision.reason)
+        phaseAdvance(state, TurnPhase.COMPLETING)
         return _TurnOutcome.finished(response)
 
     async def _predict_stream(self, request_params: Dict, state: TurnRunState = None) -> Any:
@@ -606,12 +648,14 @@ class OpenAILoop(BaseAgentLoop):
                     e, request_params, gotContent, compact_messages_for_overflow, is_context_overflow_error
                 )
                 if resumed is None:
+                    phaseMarkError(state)
                     raise
                 request_params = resumed
                 continue
 
             if state.rounds.exhausted:
                 # 轮次超限：本轮没有 done 可交，静默收尾（与非流式「终止」同判据）
+                phaseAdvanceIfChanged(state, TurnPhase.COMPLETING)
                 return
 
             if state.rounds.lengthEmpty:
@@ -625,6 +669,7 @@ class OpenAILoop(BaseAgentLoop):
                 if resumed is None:
                     # 不重试的两类原因都走这里：交代替式提示（若有）+ 原样交出该 done。
                     # 有 notice 时必须并进 reply——只发提示不发正文＝空气泡（既有禁令）。
+                    phaseAdvanceIfChanged(state, TurnPhase.COMPLETING)
                     if notice is not None and produced is not None:
                         yield notice
                         produced = {
@@ -648,12 +693,14 @@ class OpenAILoop(BaseAgentLoop):
                     # `lengthEmptyRetried` 为真 = 重试轮仍空（本轮就是那次重试）
                     yield {"type": "content", "data": _LENGTH_EMPTY_NOTICE}
                     produced = {**produced, "reply": _LENGTH_EMPTY_NOTICE}
+                phaseAdvanceIfChanged(state, TurnPhase.COMPLETING)
                 yield produced
                 return
 
             if state.rounds.advanced:
                 # 本轮被接续（工具轮续写 / 出口续跑）：下一轮由循环开
                 continue
+            phaseAdvanceIfChanged(state, TurnPhase.COMPLETING)
             return
 
     def _resumeAfterOverflow(
@@ -764,6 +811,9 @@ class OpenAILoop(BaseAgentLoop):
         gotContent = False
         advanced = False
         doneEvent: Optional[Dict[str, Any]] = None
+        # P1（loop 对照 #1）：每轮模型请求前 = AWAITING_MODEL_RESPONSE。
+        # 幂等推进：恢复路径（溢出/预算重试）就地重入时相位未变，不构成迁移。
+        phaseAdvanceIfChanged(state, TurnPhase.AWAITING_MODEL_RESPONSE)
         async for event in self._predict_stream_once(request_params, state):
             if event is _STREAM_END:
                 # 本轮已就地推进（工具轮续写 / 出口续跑）：done 不由本单轮交出
@@ -826,6 +876,11 @@ class OpenAILoop(BaseAgentLoop):
         # 取一次算一次，先落局部变量避免同一轮里被调用两遍而白吃两张图
         outbound = self._attachPerceptionImage(request_params)
         async for chunk in self.llm_client.chat_stream(outbound["messages"], **stream_kwargs):
+            # P1（loop 对照 #1）：首个内容/思考 chunk 到达即 STREAMING（幂等推进）。
+            if (getattr(chunk, "content", "") or "") or (
+                getattr(chunk, "reasoning_content", None)
+            ):
+                phaseAdvanceIfChanged(state, TurnPhase.STREAMING)
             if isinstance(chunk, dict):
                 if chunk.get("retry_status"):
                     # 429 重试/切换过程事件：转成 typed
@@ -909,10 +964,14 @@ class OpenAILoop(BaseAgentLoop):
                 "LLM returned %s tool calls (stream round %s)",
                 len(pending_tool_calls), state.toolRounds,
             )
+            # P1（loop 对照 #1）：工具批相位推进（与非流式路径同表）。
+            phaseAdvance(state, TurnPhase.SCHEDULING_TOOLS)
             for tc in pending_tool_calls:
                 yield {"type": "tool_call", "data": tc}
 
+            phaseAdvance(state, TurnPhase.EXECUTING_TOOLS)
             tool_messages = await self.handle_tool_calls(pending_tool_calls, request_params["messages"])
+            phaseAdvance(state, TurnPhase.AGGREGATING_RESULTS)
             for tm in tool_messages:
                 yield {"type": "tool_result", "data": tm}
 
@@ -965,6 +1024,7 @@ class OpenAILoop(BaseAgentLoop):
                 ))
             if gate_decision.action.value == "terminate":
                 logger.warning("门控 %s 终止循环: %s", gate_decision.gate_name, gate_decision.reason)
+                phaseAdvance(state, TurnPhase.COMPLETING)
                 yield {
                     "type": "gate_terminate",
                     "reason": gate_decision.reason,
@@ -983,6 +1043,10 @@ class OpenAILoop(BaseAgentLoop):
             if gate_decision.action.value == "interrupt_and_continue":
                 # 注入提示进消息序列后继续
                 # （round_reply/签名仅 yield reasoning 供前端展示，LLM 看到的是消息）
+                # P1（loop 对照 #2）：先落盘再进历史。
+                persistModelVisibleAnnouncement(
+                    self.agent, gate_decision.continuation_prompt, source="gate_interrupt"
+                )
                 request_params["messages"].append(
                     {"role": "user", "content": gate_decision.continuation_prompt}
                 )
@@ -995,6 +1059,9 @@ class OpenAILoop(BaseAgentLoop):
 
             _stage = budgetStageGuidance(state.toolRounds, state.maxToolRounds)
             if _stage:
+                persistModelVisibleAnnouncement(
+                    self.agent, _stage, source="budget_stage"
+                )
                 request_params["messages"].append({"role": "user", "content": _stage})
                 logger.info("分段预算提醒（流式，round=%s）: %s", state.toolRounds, _stage[:60])
 
@@ -1007,6 +1074,7 @@ class OpenAILoop(BaseAgentLoop):
                     # 与门控终止同一条通道：成因交 `gate_terminate` 由管道并入正文，
                     # 再补一个 done。改前这里只发一条 reasoning 就 `return`——管道不读
                     # reasoning 里的成因，落库正文没有任何交代（活体实测抓到的第五个命中点）
+                    phaseAdvance(state, TurnPhase.COMPLETING)
                     yield {
                         "type": "gate_terminate",
                         "reason": STAGNATION_REASON,
@@ -1020,9 +1088,14 @@ class OpenAILoop(BaseAgentLoop):
                     }
                     return
                 # 仍在预算内再试一次：换策略的意见随本轮结果一起交给模型
+                # P1（loop 对照 #2）：先落盘再进历史。
+                _stagnation_notice = "检测到重复的响应内容。请更换策略，避免重复已经尝试过的无效路径。"
+                persistModelVisibleAnnouncement(
+                    self.agent, _stagnation_notice, source="stagnation_notice"
+                )
                 request_params["messages"].append({
                     "role": "user",
-                    "content": "检测到重复的响应内容。请更换策略，避免重复已经尝试过的无效路径。",
+                    "content": _stagnation_notice,
                 })
             else:
                 state.stagnationCount = 0
@@ -1046,6 +1119,10 @@ class OpenAILoop(BaseAgentLoop):
             gateRunner=state.gateRunner,
         )
         if _exitDecision.action == LOOP_CONTINUE:
+            # P1（loop 对照 #2）：续跑提示先落盘再进请求历史（与非流式主出口同律）。
+            persistModelVisibleAnnouncement(
+                self.agent, _exitDecision.continuation_prompt, source="goal_continuation"
+            )
             request_params["messages"].append(
                 {"role": "user", "content": _exitDecision.continuation_prompt}
             )
@@ -1054,6 +1131,7 @@ class OpenAILoop(BaseAgentLoop):
             # 随 state 走，不会捡到最后一个进入本 loop 的会话留下的那份）；
             # 下一轮由 `_predict_stream` 的循环开——本轮不 yield done，
             # 整条流仍恰好一个 done。
+            phaseAdvance(state, TurnPhase.AGGREGATING_RESULTS)
             yield _STREAM_END
             return
         if _exitDecision.action != LOOP_DONE:
@@ -1067,7 +1145,10 @@ class OpenAILoop(BaseAgentLoop):
                 "gate": _exitDecision.gate_name,
             }
 
-        # 单轮收口（整条流到此结束，`_predict_stream` 不再开下一轮）
+        # 单轮收口（整条流到此结束，`_predict_stream` 不再开下一轮）。
+        # COMPLETING 不在这里推进：这个 done 可能被恢复路径截下（length 空回复
+        # 重试时不交付），收口单点在 `_predict_stream` 真正让出 done 的那一格
+        # （幂等推进，重复调用无副作用）。
         yield {
             "type": "done",
             "reply": "".join(reply_parts),
