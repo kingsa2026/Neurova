@@ -16,6 +16,9 @@ import { PairingPage } from '../pages/PairingPage';
 import { ConnectionPage } from '../pages/ConnectionPage';
 import { AgentListPage } from '../pages/AgentListPage';
 import { AgentDetailPage } from '../pages/AgentDetailPage';
+import { KnowledgeImportPage } from '../pages/KnowledgeImportPage';
+import { EnterpriseSourcesPage } from '../pages/EnterpriseSourcesPage';
+import { GraphPreviewPage } from '../pages/GraphPreviewPage';
 import { KnowledgePage } from '../pages/KnowledgePage';
 import { MemoryPage } from '../pages/MemoryPage';
 import { ModelPage } from '../pages/ModelPage';
@@ -46,6 +49,12 @@ export function pageMap(name: string) {
     NavDestination() { AgentListPage() }.hideTitleBar(true)
   } else if (name === RouteNames.AGENT_DETAIL) {
     NavDestination() { AgentDetailPage() }.hideTitleBar(true)
+  } else if (name === RouteNames.KNOWLEDGE_IMPORT) {
+    NavDestination() { KnowledgeImportPage() }.hideTitleBar(true)
+  } else if (name === RouteNames.ENTERPRISE_SOURCES) {
+    NavDestination() { EnterpriseSourcesPage() }.hideTitleBar(true)
+  } else if (name === RouteNames.GRAPH_PREVIEW) {
+    NavDestination() { GraphPreviewPage() }.hideTitleBar(true)
   } else if (name === RouteNames.KNOWLEDGE) {
     NavDestination() { KnowledgePage() }.hideTitleBar(true)
   } else if (name === RouteNames.MEMORY) {

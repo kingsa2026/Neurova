@@ -21,6 +21,8 @@ import { PushApi } from './modules/PushApi';
 import { ChatApi } from './modules/ChatApi';
 import { MemoryApi } from './modules/MemoryApi';
 import { KnowledgeApi } from './modules/KnowledgeApi';
+import { KnowledgeGraphApi } from './modules/KnowledgeGraphApi';
+import { KnowledgeEnterpriseApi } from './modules/KnowledgeEnterpriseApi';
 import { ModelsApi } from './modules/ModelsApi';
 import { HealthApi } from './modules/HealthApi';
 import { SettingsApi } from './modules/SettingsApi';
@@ -49,6 +51,8 @@ export class ApiFacade {
 
   // 业务模块（M3 新增 6 个）
   public memory: MemoryApi;
+  public graph: KnowledgeGraphApi;
+  public enterprise: KnowledgeEnterpriseApi;
   public knowledge: KnowledgeApi;
   public models: ModelsApi;
   public health: HealthApi;
@@ -79,6 +83,8 @@ export class ApiFacade {
     this.chat = new ChatApi(this.client);
     // M3 新增模块
     this.memory = new MemoryApi(this.client);
+    this.graph = new KnowledgeGraphApi(this.client);
+    this.enterprise = new KnowledgeEnterpriseApi(this.client);
     this.knowledge = new KnowledgeApi(this.client);
     this.models = new ModelsApi(this.client);
     this.health = new HealthApi(this.client);

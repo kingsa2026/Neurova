@@ -35,7 +35,7 @@
 
 import { TopNavMenu, GlassCard, GlassButton, GlassInput, GlassPanel } from '../components/glass';
 import { ApiFacade } from '../libs/api/ApiFacade';
-import { Router } from '../routing/Router';
+import { Router, RouteNames } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
@@ -218,10 +218,24 @@ export struct KnowledgePage {
   }
 
   /**
-   * 新建知识（M4 实现上传，当前提示"功能开发中"）
+   * 导入/创建知识（进导入页：URL 导入 + 手动创建）
    */
-  private handleCreate(): void {
-    this.msg.info('功能开发中');
+  private handleImport(): void {
+    this.router.push(RouteNames.KNOWLEDGE_IMPORT);
+  }
+
+  /**
+   * 图谱速览（GraphPreviewPage，spatial-nodes）
+   */
+  private openGraph(): void {
+    this.router.push(RouteNames.GRAPH_PREVIEW);
+  }
+
+  /**
+   * 企业数据源（EnterpriseSourcesPage）
+   */
+  private openSources(): void {
+    this.router.push(RouteNames.ENTERPRISE_SOURCES);
   }
 
   /**
@@ -306,11 +320,25 @@ export struct KnowledgePage {
           onBack: () => { this.router.back(); }
         }) {
           GlassButton({
-            text: '新建',
+            text: '图谱',
+            type: 'default',
+            btnSize: 'small',
+            onTap: () => { this.openGraph(); }
+          })
+          GlassButton({
+            text: '数据源',
+            type: 'default',
+            btnSize: 'small',
+            onTap: () => { this.openSources(); }
+          })
+            .margin({ left: this.sm.getSpacing('sm') })
+          GlassButton({
+            text: '导入',
             type: 'primary',
             btnSize: 'small',
-            onTap: () => { this.handleCreate(); }
+            onTap: () => { this.handleImport(); }
           })
+            .margin({ left: this.sm.getSpacing('sm') })
         }
 
         // 搜索栏：GlassInput 关键词 + 搜索按钮

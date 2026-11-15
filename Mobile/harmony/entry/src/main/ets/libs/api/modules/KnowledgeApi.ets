@@ -66,6 +66,19 @@ export class KnowledgeApi {
     return this.client.delete<Object>(`/v1/knowledge/${knowledgeId}`);
   }
 
+  /** URL 导入（knowledge_ingestion.py /import-url，query 传参；sync=true 同步抽取） */
+  async importUrl(url: string, agentId?: string, category?: string): Promise<ApiResponse<Object>> {
+    const qs: string[] = [];
+    qs.push('url=' + encodeURIComponent(url));
+    qs.push('agent_id=' + encodeURIComponent(agentId && agentId.length > 0 ? agentId : 'default'));
+    qs.push('sync=true');
+    if (category && category.length > 0) {
+      qs.push('category=' + encodeURIComponent(category));
+    }
+    const body: Record<string, Object> = {};
+    return this.client.post<Object>('/knowledge/import-url?' + qs.join('&'), body);
+  }
+
   /** 搜索知识（关键词 + 可选 agentId + 限制数量） */
   async search(
     keyword: string,
