@@ -33,6 +33,7 @@
 
 import { TopNavMenu, GlassPanel, GlassInput, GlassButton } from '../components/glass';
 import { ApiFacade } from '../libs/api/ApiFacade';
+import { AgentsApi } from '../libs/api/modules/AgentsApi';
 import { AgentsStore } from '../libs/state/stores/AgentsStore';
 import { Router, RouteNames } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
@@ -103,6 +104,7 @@ export class AgentFormValidator {
 // ===========================================================================
 
 /** 保存 API 抽象接口（供 executeAgentSave 注入，便于测试 Mock） */
+/** 保存 API 抽象（ArkTS 禁结构化类型，直接用具体类；Mock 时可子类化） */
 export interface AgentSaveApi {
   create(data: Partial<Agent>): Promise<ApiResponse<Agent>>;
   update(agentId: string, data: Partial<Agent>): Promise<ApiResponse<Agent>>;
@@ -115,6 +117,18 @@ export interface AgentSaveApi {
  * @param agentId edit 模式必填
  * @returns create 模式返回不含 id 的 Partial<Agent>；edit 模式返回含 id 的 Partial<Agent>
  */
+/** 表单错误事件载荷（EventBus emit 字面量必须对应声明类型） */
+export interface FormErrorPayload {
+  field: string;
+  message: string;
+}
+
+/** 保存完成事件载荷 */
+export interface SaveDonePayload {
+  success: boolean;
+  mode: string;
+}
+
 export function buildAgentPayload(
   mode: 'create' | 'edit',
   form: AgentFormData,
@@ -157,13 +171,14 @@ export async function executeAgentSave(
   mode: 'create' | 'edit',
   form: AgentFormData,
   agentId: string | undefined,
-  api: AgentSaveApi,
+  api: AgentsApi,
   bus: EventBus,
 ): Promise<boolean> {
   // 1. 前端校验：名称非空
   const nameError = AgentFormValidator.validateName(form.name);
   if (nameError) {
-    bus.emit('form:error', { field: 'name', message: nameError });
+    const err: FormErrorPayload = { field: 'name', message: nameError };
+    bus.emit('form:error', err);
     return false;
   }
 
@@ -174,18 +189,21 @@ export async function executeAgentSave(
   try {
     const res = mode === 'create'
       ? await api.create(payload)
-      : await api.update(agentId!, payload);
+      : await api.update(agentId as string, payload);
     if (res.code === 0) {
       // 成功：emit 'navigation:back'
-      bus.emit('navigation:back', { success: true, mode });
+      const done: SaveDonePayload = { success: true, mode: mode };
+      bus.emit('navigation:back', done);
       return true;
     }
     // 业务失败：emit 'form:error' 携带后端消息
-    bus.emit('form:error', { message: res.message });
+    const bizErr: FormErrorPayload = { field: '', message: res.message };
+    bus.emit('form:error', bizErr);
     return false;
   } catch (e) {
     // 异常：emit 'form:error' 携带兜底消息
-    bus.emit('form:error', { message: '保存失败' });
+    const exErr: FormErrorPayload = { field: '', message: '保存失败' };
+    bus.emit('form:error', exErr);
     return false;
   }
 }
@@ -344,7 +362,8 @@ export struct AgentFormPage {
 
       // 表单容器：可滚动
       Scroll() {
-        GlassPanel({ variant: 'elevated', innerPadding: 16, radius: 12 }) {
+        Column() {
+        // 玻璃面板观感（padding+border 等价 GlassPanel elevated；该页尾闭包嵌套解析异常，改用普通容器）
           Column() {
             // 名称（必填，1-50 字符）
             Text('名称 *')
