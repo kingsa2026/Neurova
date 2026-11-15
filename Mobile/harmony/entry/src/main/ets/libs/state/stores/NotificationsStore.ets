@@ -2,7 +2,7 @@
  * NotificationsStore - 通知列表状态
  */
 import { StateManager } from '../StateManager';
-import { EventBus } from '../bus/EventBus';
+import { EventBus } from '../../bus/EventBus';
 
 const KEY_NOTIFICATIONS = 'notifications:list';
 const KEY_UNREAD_COUNT = 'notifications:unread';

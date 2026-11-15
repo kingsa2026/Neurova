@@ -29,7 +29,7 @@
 
 ### T0 · 侦察定界
 
-- 规模现算：`git ls-files | wc -l` = **5862**；顶层分布 neurova 1074 / tests 2667 / NeurUI 839 / docs 491 / NeurovaHarmony 260 / scripts 103 / audit-reports 39 / models 32 / helm 21 / embedding 13，余为散件。
+- 规模现算：`git ls-files | wc -l` = **5862**；顶层分布 neurova 1074 / tests 2667 / NeurUI 839 / docs 491 / Mobile/harmony 260 / scripts 103 / audit-reports 39 / models 32 / helm 21 / embedding 13，余为散件。
 - 二级分布：neurova/api 140、cognitive_layers 103、knowledge 81、core 78、agent 76、collaboration 65、evolution 61、channels 61、llm 55、skills 54、security 37、context 31（其余见 §3 批次表）；NeurUI/src 630、src-tauri 168。
 - 台账定位：最近一笔 docs(audit) 提交（196e14a4）改动 `audit-reports/simplification-audit-2026-10-05.md` ⇒ **该文件即现役台账**；读其头部（v2 三态口径 A 可删/B 需人裁/C 该接线）与 §6 缺陷格格式（一档逐项档案、file:line + 来历 + 影响面 + 判定），本批产出格式与之对齐。
 - 尾号现算：`grep "§6-516"` 落在该台账 ⇒ 后继自 §6-517 起。
@@ -48,7 +48,7 @@
 | C knowledge/api 服务面 | knowledge/llm/memory/memory_ingest/channels/api 端点/models/embedding | 43 | 478s | 1,357,799 | P1×2、P2×2、P3×3 |
 | D 其余子系统死码 | skills/evolution/collaboration/cognitive_layers/tool_layers/plugins/computer_use/tts/asr/aigc_studio/包根 | 42 | 599s | 1,515,697 | P2×2、P3×1 |
 | E 前端 NeurUI | NeurUI/src + public | 41 | 199s | 556,641 | P1×2、P2×5、P3×1 |
-| F 桌面/鸿蒙/脚本/CI | src-tauri/NeurovaHarmony/scripts/.github/helm/config/根构建件 | 41 | 364s | 765,103 | P1×1、P2×3、P3×2 |
+| F 桌面/鸿蒙/脚本/CI | src-tauri/Mobile/harmony/scripts/.github/helm/config/根构建件 | 41 | 364s | 765,103 | P1×1、P2×3、P3×2 |
 | **合计** | | **228** | | **≈594 万** | **24 项实证缺陷**（去重后 P1×8、P2×15、P3×9） |
 
 （批次小计含跨批合并口径：如 E 的两条 P1 死码在 §4 合并为一条双 store 收口项叙述，计数以 §4 为准。）
@@ -94,7 +94,7 @@
 - 判据：XSS（v-html/innerHTML/window.open）、硬编码凭据、前后端契约对账（≥5 条核心链路抽样）、时间契约三轨（epoch 秒/毫秒/ISO）、断点（零引用组件/store/action）、泄漏（定时器/监听未清理）、竞态、空 catch。禁跑 npm，纯静态。
 
 ### 批 F · 桌面壳/鸿蒙/脚本/CI
-- 范围：`NeurUI/src-tauri/`、`NeurovaHarmony/`、`scripts/`、`.github/workflows/`、`helm/`、`config/`、根构建件。
+- 范围：`NeurUI/src-tauri/`、`Mobile/harmony/`、`scripts/`、`.github/workflows/`、`helm/`、`config/`、根构建件。
 - 判据：Tauri capability/CSP/updater、自定义命令透传面；Harmony 凭据/明文 HTTP/deep link；脚本危险操作/路径注入/硬编码本机路径/双源；CI 配置漂移（与 parity 守卫咬合核对）；全范围凭据扫描（.pem 进仓即 P0）。
 - 已知事实不重报：scripts/ci 5 文件非 ASCII print、`_utf8ChildEnv` 双定义（旧账 §6-489 复算注已收）。
 
@@ -321,7 +321,7 @@ association_cues 三件、evolution 七新件（blind_selection/deterministic_ju
 
 - **tests/（2667 文件）未逐审**：只作守卫参照与零引用扫描排除面；测试自身的质量审计不在本批。
 - **docs/（491 文件）未审**：文档与代码的口径一致性未核对（仅用了 s08 基线做鉴权对照）。
-- **NeurovaHarmony 只做了安全面粗扫**：凭据/明文 HTTP/deep link/权限四项，业务逻辑未深读（260 文件对 41 次调用预算）。
+- **Mobile/harmony 只做了安全面粗扫**：凭据/明文 HTTP/deep link/权限四项，业务逻辑未深读（260 文件对 41 次调用预算）。
 - **◑ 项未经主会话逐条二次复核**：P1 头部断言已复算（§8），P2/P3 依赖子代理取证；点单落格前建议按台账惯例对将落格条目逐条复算（✅ 化）。
 - **预算内未深查的点名**：cost_store.py 五处 except、mermaid securityLevel、channel-configs conflicts 前缀、hooks_engine shell=True 威胁模型（均在存疑区）。
 - **并发事故**：首波 6 并发超本机并发上限三批未启动（§2-T1），已重派补齐；该上限值本身未探明，后续大批次建议 ≤3 并发。

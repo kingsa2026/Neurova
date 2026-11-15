@@ -24,7 +24,7 @@ export class HttpAdapter implements HttpBackend {
   /** 默认请求头（调用方传入的同名头会覆盖此处） */
   private readonly defaultHeaders: Record<string, string> = {
     'Accept': 'application/json',
-    'User-Agent': 'NeurovaHarmony/1.0',
+    'User-Agent': 'NeurovaMobile/1.0',
   };
 
   private constructor() {}

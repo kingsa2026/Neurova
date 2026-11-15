@@ -21,7 +21,7 @@ from neurova.tunnel import protocol  # noqa: E402
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 TS_CONTRACT = os.path.join(REPO_ROOT, "NeurUI", "src", "api", "contracts", "pairingStates.ts")
-ETS_CONTRACT = os.path.join(REPO_ROOT, "NeurovaHarmony", "entry", "src", "main", "ets",
+ETS_CONTRACT = os.path.join(REPO_ROOT, "Mobile/harmony", "entry", "src", "main", "ets",
                             "libs", "protocol", "PairingProtocol.ets")
 
 #: (Python 属性名, 两份前端契约里的同名常量, 该集合的**最小**必含成员)

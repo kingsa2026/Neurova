@@ -359,7 +359,7 @@ git 记录为 `neurova/Storage/`（大写）。Windows 文件系统大小写不�
 | docker-compose | **默认 1** | `docker-compose.yml:67-85` frontend 挂 `profiles: development` | 无 redis / worker / db service |
 | Helm | 2 + hpa + ingress + pvc | `helm/neurova/templates`（12 模板） | 唯一真实多服务拓扑，但 `replicaCount` 均为 1（`values.yaml:31,112`）；副本 >1 且缺 jwtSecret 会渲染期失败（`:150`） |
 | 桌面 | Tauri | `NeurUI/src-tauri` | `desktop/` 仅剩一张 pfx |
-| 旁支 | — | `NeurovaHarmony/`(ArkTS)、`web/`+`deploy/`(PHP+nginx+xray) | **不应计入架构基线** |
+| 旁支 | — | `Mobile/harmony/`(ArkTS)、`web/`+`deploy/`(PHP+nginx+xray) | **不应计入架构基线** |
 
 结论：**不要按微服务理解 Neurova**。它是一进程单体，Docker 默认单容器，
 Helm 有两个 Deployment 但零副本冗余。任何"某子系统独立伸缩"的假设都不成立。

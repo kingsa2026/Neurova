@@ -1,4 +1,5 @@
 {
+  "modelVersion": "6.0.0",
   "name": "neurova-harmony",
   "version": "1.0.0",
   "description": "Neurova 鸿蒙 App - ArkTS 纯重写版本",

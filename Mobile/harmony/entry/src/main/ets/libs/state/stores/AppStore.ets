@@ -4,7 +4,7 @@
  * 管理：theme、language、sidebarCollapsed、onlineStatus
  */
 import { StateManager } from '../StateManager';
-import { EventBus } from '../bus/EventBus';
+import { EventBus } from '../../bus/EventBus';
 
 const KEY_THEME = 'app:theme';        // 'light' | 'dark'
 const KEY_LANGUAGE = 'app:language';  // 'zh-CN' | 'en-US' | ...
