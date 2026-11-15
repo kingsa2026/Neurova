@@ -7,6 +7,7 @@
 import { StateManager } from '../StateManager';
 import { User, AuthTokens } from '../../types';
 import { EventBus } from '../../bus/EventBus';
+import { HttpClient } from '../../api/HttpClient';
 
 const KEY_ACCESS_TOKEN = 'auth:access_token';
 const KEY_REFRESH_TOKEN = 'auth:refresh_token';
@@ -69,10 +70,11 @@ export class AuthStore {
     this.state.set(KEY_DEVICE_SECRET, deviceSecret);
   }
 
-  /** 设置 tokens（登录成功后调用） */
+  /** 设置 tokens（登录成功后调用）；token 同步落 HttpClient 装配点，否则带凭证请求裸奔（me() 401 根因） */
   setTokens(tokens: AuthTokens): void {
     this.state.set(KEY_ACCESS_TOKEN, tokens.access_token);
     this.state.set(KEY_REFRESH_TOKEN, tokens.refresh_token);
+    HttpClient.getInstance().setToken(tokens.access_token);
   }
 
   /** 设置当前用户 */
@@ -92,7 +94,7 @@ export class AuthStore {
     this.bus.emit('pairing:success', payload);
   }
 
-  /** 登出：清除所有认证状态 */
+  /** 登出：清除所有认证状态（含 HttpClient 装配点的 token） */
   logout(): void {
     this.state.remove(KEY_ACCESS_TOKEN);
     this.state.remove(KEY_REFRESH_TOKEN);
@@ -101,6 +103,7 @@ export class AuthStore {
     this.state.remove(KEY_WS_URL);
     this.state.remove(KEY_DEVICE_SECRET);
     this.state.remove(KEY_PAIRING_ID);
+    HttpClient.getInstance().setToken('');
     this.bus.emit('user:logout', new Object());
   }
 }
