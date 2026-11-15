@@ -111,6 +111,87 @@ export function describeComputerAction(tool: string, params: Record<string, unkn
       return i18n.global.t('ui.actBrowserScreenshot')
     case 'browser_extract_text':
       return i18n.global.t('ui.actExtractText')
+    case 'browser_dom_snapshot':
+      return i18n.global.t('computerPanel.actBrowserDomSnapshot')
+    case 'browser_dom_read':
+      return i18n.global.t('computerPanel.actBrowserDomRead')
+    case 'browser_click_role':
+      return i18n.global.t('computerPanel.actBrowserClickRole', {
+        role: String(p.role ?? '?'),
+        name: String(p.name ?? ''),
+      })
+    case 'browser_fill_role':
+      return i18n.global.t('computerPanel.actBrowserFillRole', {
+        role: String(p.role ?? '?'),
+        name: String(p.name ?? ''),
+      })
+    case 'browser_click_ref':
+      return i18n.global.t('computerPanel.actBrowserClickRef', { ref: String(p.ref ?? '?') })
+    case 'browser_fill_ref':
+      return i18n.global.t('computerPanel.actBrowserFillRef', { ref: String(p.ref ?? '?') })
+    case 'browser_tab_open':
+      return i18n.global.t('computerPanel.actBrowserTabOpen', { url: String(p.url ?? '') })
+    case 'browser_tab_list':
+      return i18n.global.t('computerPanel.actBrowserTabList')
+    case 'browser_tab_switch':
+      return i18n.global.t('computerPanel.actBrowserTabSwitch', { id: String(p.target_id ?? '?') })
+    case 'browser_tab_close':
+      return i18n.global.t('computerPanel.actBrowserTabClose', { id: String(p.target_id ?? '?') })
+    case 'browser_eval':
+      return i18n.global.t('computerPanel.actBrowserEval', {
+        script: ellipsize(String(p.script ?? ''), 40),
+      })
+    case 'browser_back':
+      return i18n.global.t('computerPanel.actBrowserBack')
+    case 'browser_forward':
+      return i18n.global.t('computerPanel.actBrowserForward')
+    case 'browser_reload':
+      return i18n.global.t('computerPanel.actBrowserReload')
+    case 'browser_wait': {
+      const cond = String(p.selector ?? p.state ?? (p.ms != null ? `${p.ms}ms` : '?'))
+      return i18n.global.t('computerPanel.actBrowserWait', { cond })
+    }
+    case 'browser_scroll':
+      return i18n.global.t('computerPanel.actBrowserScroll', { x: p.scroll_x ?? 0, y: p.scroll_y ?? 0 })
+    case 'browser_press':
+      return i18n.global.t('computerPanel.actBrowserPress', { key: String(p.key ?? '?') })
+    case 'browser_hover':
+      return i18n.global.t('computerPanel.actBrowserHover', {
+        role: String(p.role ?? '?'),
+        name: String(p.name ?? ''),
+      })
+    case 'browser_select':
+      return i18n.global.t('computerPanel.actBrowserSelect', {
+        role: String(p.role ?? '?'),
+        values: String((p.values as string[] | undefined)?.join(',') ?? ''),
+      })
+    case 'browser_check':
+      return i18n.global.t(
+        p.checked ? 'computerPanel.actBrowserCheck' : 'computerPanel.actBrowserUncheck',
+        { role: String(p.role ?? '?'), name: String(p.name ?? '') },
+      )
+    case 'browser_cookies':
+      return i18n.global.t('computerPanel.actBrowserCookies', { action: String(p.action ?? 'get') })
+    case 'browser_storage':
+      return i18n.global.t('computerPanel.actBrowserStorage', {
+        kind: String(p.kind ?? 'local'),
+        action: String(p.action ?? 'get'),
+      })
+    case 'browser_console':
+      return i18n.global.t('computerPanel.actBrowserConsole')
+    case 'browser_download':
+      return i18n.global.t('computerPanel.actBrowserDownload', { url: String(p.url ?? '') })
+    case 'browser_pdf':
+      return i18n.global.t('computerPanel.actBrowserPdf')
+    case 'browser_drag':
+      return i18n.global.t('computerPanel.actBrowserDrag', {
+        source: String(p.source_role ?? '?'),
+        target: String(p.target_role ?? '?'),
+      })
+    case 'browser_upload':
+      return i18n.global.t('computerPanel.actBrowserUpload', {
+        n: (p.paths as unknown[] | undefined)?.length ?? 0,
+      })
     case 'computer_dom_snapshot':
       return i18n.global.t('computerPanel.actDesktopSnapshot')
     case 'computer_click_element':
