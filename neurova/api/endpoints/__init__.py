@@ -293,6 +293,7 @@ ENDPOINT_MODULES = [
     ("neurova.api.endpoints.agent_communication_api", "/v1/agent-communication", "Agent Communication API"),
     ("neurova.api.endpoints.logs_api", "/v1/logs-api", "Logs API v2"),
     ("neurova.api.endpoints.mobile_pairing", "/v1/mobile", "Mobile Pairing API"),
+    ("neurova.api.endpoints.mobile_push", "/v1/mobile/push", "Mobile Push API"),
     ("neurova.api.endpoints.memory_enhancement", "/v1/memory-enhancement", "Memory Enhancement API"),
     ("neurova.api.endpoints.channel_sharing", "/v1/channel-sharing", "Channel Sharing API"),
     ("neurova.api.endpoints.audio", "/v1/audio", "Audio API"),

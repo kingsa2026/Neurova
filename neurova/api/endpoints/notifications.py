@@ -66,13 +66,17 @@ def notify_user(
 ) -> None:
     """给单个用户发站内通知（幂等安全：异常只记日志不阻断业务）。"""
     try:
-        get_notification_manager().add_notification(
+        notification = get_notification_manager().add_notification(
             user_id=str(user_id),
             title=title,
             message=message,
             notification_type=notification_type,
             data=data or {},
         )
+        # 离线推送扇出（信令-only，后台线程，失败不影响站内通知；设计方案 §8.4 S-3）
+        from neurova.notifications.push_sender import dispatchPushAsync
+
+        dispatchPushAsync(str(user_id), notification)
     except Exception as exc:  # noqa: BLE001
         logger.warning("notify_user failed (user=%s): %s", user_id, exc)
 
