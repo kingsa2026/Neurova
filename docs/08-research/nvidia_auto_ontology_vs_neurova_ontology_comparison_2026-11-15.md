@@ -284,3 +284,28 @@ follow-up 改写 → 意图分类(calculation/information/prediction) → 实体
 `docs/specs/2026-11-10-GB48000-3-本体建模符合性评估与补齐设计.md`、`docs/specs/2026-11-10-Ontology接入Agent五步对照评估与补全设计.md`。
 
 > 复核提示：本仓侧「describeSchema 零生产调用」「76 条 ontology 路由」「MCP 16 工具」三条承重结论已当日 grep 复验；其余行号为盘点时代码态，后续漂移以现场为准。
+
+---
+
+## 9. 实施回执（2026-11-15，§6 候选全部落格）
+
+按拍板「按照文档的 6 开始实施升级」执行，12 项候选全部落地（P3-4 以目录 LIKE+排序实现，FTS5 留待规模需要）。提交分批落 `main`：
+
+| 候选 | 落格内容 | 提交 |
+|---|---|---|
+| 研究报告 | 本文档 + INDEX 登记 | `docs(research)` |
+| P1-1 | `describeSchema()` 零调用断点接线：`SchemaCatalogStore`（v51 双表）+ SQL 适配器 `describeRelations`/`executeReadonly` + 注册即刷新 + 目录读面（`/enterprise/catalog/*`） | `feat(knowledge)` |
+| P1-2 | `SchemaSuggester`（v52 建议表）：确定性基线 + LLM 精化可选 + join 探针数据证实；关系候选复用 B8 审批流；审批端点 `/ontology/schema-suggestions/*` | `feat(ontology)` |
+| P3-3 | `compile_kit.py`：InflightLimiter / OrderedCommitQueue / runBounded（有界并行+逐项隔离+取消跳过） | 同上 |
+| P1-3 | `answerability.py`：实体覆盖预检（LLM 抽取可选、jieba/拉丁分词兜底、词面匹配）；`POST /ontology/answerability` + MCP `ontology_answerability` | `feat(ontology)` |
+| P2-2 | `readiness.py`：knowledge_ready / data_ready 双判据复合探针；`GET /ontology/readiness` + MCP `ontology_readiness` | 同上 |
+| P2-1 | `mcp_surface.py` curated 名册（18 工具 allowlist + when_to_use 指引）；守卫钉「广告集==名册集」双向漂移即红 | 同上 |
+| P1-4 | `nl2sql.py` 问数批一（v53 历史表）：目录 grounding + BFS join 路径 + 只读硬闸（写意图/目录外表/无上限全拒）+ 一轮修复 + 诚实拒答；`POST /enterprise/sources/{id}/nl2sql`；**env `NEUROVA_NL2SQL_ENABLED` 默认关** | `feat(enterprise)` |
+| P2-3 | 问数历史诚实落账（成功/失败/拒答都留行）+ 高频表组合回灌 sql_pattern 候选（走 P1-2 审批，批准后进 grounding 少样本） | 同上 |
+| P2-4 | `ossie.py`：语义模型 YAML 导出/导入；导入缺省 dry-run 预检，apply 经 B6 流水线整批成版；`GET /ontology/export.ossie.yaml`、`POST /ontology/import-ossie` | `feat(ontology)` |
+| P3-2 | `schema_families.py`：OLD_/NEW_ 前缀孪生聚族（Jaccard≥0.8，历史表排除）→ pending family 建议；`POST /ontology/schema-families/detect` | `feat(ontology)` |
+| P3-1 | `skills/neurova-ontology-query/SKILL.md`：外部 harness 技能包（就绪→查词→预检→问数顺序；工具清单以 handshake 为事实源） | `docs(skill)` |
+
+MCP 工具面 16 → 18（+ontology_answerability、ontology_readiness）；ontology REST 路由 76 → 84（+readiness/answerability/schema-suggestions×4/ossie×2）；企业源面 +3（catalog 刷新/清单/明细）+3（nl2sql ask/history/suggest-patterns）。
+
+测试：新增 7 个测试文件 88 例，全部先红后绿；knowledge+api 两域全量回归见提交说明。
