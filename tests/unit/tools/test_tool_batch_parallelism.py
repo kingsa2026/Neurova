@@ -668,7 +668,11 @@ class TestFullDeclarationCoverage:
             if isParallelEligible(resolveToolCapability(name))
         )
         assert eligible == [
-            "bilibili_search", "calculator", "emotion_analyze", "file_list", "file_parse",
+            "bilibili_search", "calculator", "emotion_analyze",
+            # 子代理升级/结果提交：通知面（邮箱+运行记录），只读可并发
+            # （依据行在 builtin_tools.py 各自声明位）。
+            "escalate",
+            "file_list", "file_parse",
             "file_read", "file_search", "get_datetime",
             # 知识图谱只读走查（递归 CTE 只读、无写作用域，依据行在 builtin_tools.py 声明位）。
             "graph_search",
@@ -677,6 +681,8 @@ class TestFullDeclarationCoverage:
             # 故与同批其余只读工具并发安全（依据行在 `builtin_tools.py` 该声明位上方）。
             "node_env_preflight",
             "recall_context_span", "recall_history", "rss_read", "subagent_status",
+            # 子代理结构化结果提交：同 escalate 的通知面（依据行在声明位）。
+            "submit_result",
             "update_plan", "v2ex_hot", "voice_memory_search", "weather", "web_fetch",
             "web_search",
         ], f"可并行集合发生变化，须逐条给出依据：{eligible}"
