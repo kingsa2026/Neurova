@@ -2737,6 +2737,8 @@ conflictTimeReadout: '時刻の読み取り: {basis}（旧 {old} → 新 {new}�
     evolutionQueueHint: 'スキル改善提案を永続キューへ：クラッシュでも消失せず、失敗は自動リトライ、監査証跡あり。会話の遅延は変わりません（バックグラウンド実行ではありません）。',
     skillSemanticRecall: 'セマンティック検索段',
     skillSemanticRecallHint: 'スキル候補ランク付けにローカル bge ベクトル類似度を追加（キーワードスコアと混合合成、弱い意味的ヒットは加点しない）。埋め込みモデル欠損時はキーワードのみに自動降格（無警告）。',
+    contextDedupSemantic: '意味重複除去（書き込み時）',
+    contextDedupSemanticHint: 'アーカイブプールは書き込み時に同ソースの類似エントリを重複排除します（類似度≥0.95）。除外されたエントリも取得可能。デフォルトはオフ。',
     toolSearchEnabled: 'ツール遅延読み込み',
     toolSearchEnabledHint: 'ツール数が閾値（デフォルト40）超の場合、有界の能力カタログのみ注入し、完全なパラメータ定義は tool_search / tool_describe / tool_call で必要時に取得。NEUROVA_TOOL_SEARCH の明示値が最優先。',
     myCredentialsHint: '自分のSSHホストを管理（暗号化保存、本人のみ表示）',

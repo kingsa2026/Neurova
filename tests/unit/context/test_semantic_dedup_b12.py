@@ -150,3 +150,42 @@ class TestRestoreLedger:
         monkeypatch.setenv("NEUROVA_DEDUP_SEMANTIC", "1")
         pool = _pool(tmp_path)
         assert pool.restoreDedup("nonexistent") is False
+
+
+class TestSettingPanelIntegration:
+    """B12 开关入设置面板：设置面 advanced.dedup_semantic_enabled 控制判重。"""
+
+    def test_setting_toggles_gate(self, monkeypatch):
+        """设置面开启（env 未设）→ 判重生效。"""
+        from neurova.core import app_settings
+
+        monkeypatch.delenv("NEUROVA_DEDUP_SEMANTIC", raising=False)
+        monkeypatch.setattr(
+            app_settings, "get_advanced_settings",
+            lambda: dict(app_settings.ADVANCED_DEFAULTS, dedup_semantic_enabled=True),
+        )
+        pool = ContextPool(user_id="u-set", agent_id="a-set")
+        assert pool._semanticDedupEnabled() is True
+
+    def test_env_overrides_setting(self, monkeypatch):
+        """env 显式值优先于设置面（运维逃生门）。"""
+        from neurova.core import app_settings
+
+        monkeypatch.setenv("NEUROVA_DEDUP_SEMANTIC", "0")
+        monkeypatch.setattr(
+            app_settings, "get_advanced_settings",
+            lambda: dict(app_settings.ADVANCED_DEFAULTS, dedup_semantic_enabled=True),
+        )
+        pool = ContextPool(user_id="u-set", agent_id="a-set")
+        assert pool._semanticDedupEnabled() is False
+
+    def test_setting_off_keeps_default(self, monkeypatch):
+        from neurova.core import app_settings
+
+        monkeypatch.delenv("NEUROVA_DEDUP_SEMANTIC", raising=False)
+        monkeypatch.setattr(
+            app_settings, "get_advanced_settings",
+            lambda: dict(app_settings.ADVANCED_DEFAULTS, dedup_semantic_enabled=False),
+        )
+        pool = ContextPool(user_id="u-set", agent_id="a-set")
+        assert pool._semanticDedupEnabled() is False

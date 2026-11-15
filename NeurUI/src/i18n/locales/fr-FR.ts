@@ -2737,6 +2737,8 @@ conflictTimeReadout: 'Lecture temporelle : {basis} (ancienne {old} → nouvelle 
     evolutionQueueHint: 'Les propositions d\'amélioration passent par une file persistante : résiste aux crashs, réessaie automatiquement, auditable. Latence de conversation inchangée.',
     skillSemanticRecall: 'Palier de rappel sémantique',
     skillSemanticRecallHint: 'Ajoute la similarité vectorielle locale (bge) à l\'échelle de rappel des compétences (combinée aux scores de mots-clés ; correspondances faibles non comptées). Retour silencieux au mode mots-clés si le modèle d\'embedding est indisponible.',
+    contextDedupSemantic: 'Déduplication sémantique (écriture)',
+    contextDedupSemanticHint: 'Le pool déduplique les entrées quasi identiques de même source à l\'écriture (similarité ≥ 0,95) ; les entrées dédupliquées restent récupérables. Désactivé par défaut.',
     toolSearchEnabled: 'Chargement différé des outils',
     toolSearchEnabledHint: 'Au-delà du seuil (40 par défaut), seule une capacité limitée est injectée ; les schémas complets sont récupérés via tool_search / tool_describe / tool_call. NEUROVA_TOOL_SEARCH explicite reste prioritaire.',
     myCredentialsHint: 'Gérez vos propres hôtes SSH (chiffrés, visibles par vous seul)',

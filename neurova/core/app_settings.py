@@ -53,6 +53,10 @@ ADVANCED_DEFAULTS: Dict[str, Any] = {
     # 语义检索档：技能召回阶梯加 bge ONNX cosine（引擎缺失/失败自动降级
     # 关键词档，零报错）
     "skill_semantic_recall_enabled": True,
+    # B12 语义去重（写入期，同 source，阈值 0.95）：默认关（语义判重有
+    # 信息丢失与漂移风险）；开启后归档池对同源近重复条目判重，判重条目
+    # 仍写穿持久台账（零丢失），还原台账可一键还原。
+    "dedup_semantic_enabled": False,
     # A6 工具面 BM25 延迟加载（候选 > NEUROVA_TOOL_SEARCH_MIN_CATALOG 时激活，
     # 目录常驻+tool_search/tool_describe/tool_call 三控制工具）。
     # NEUROVA_TOOL_SEARCH 环境变量显式值最优先。

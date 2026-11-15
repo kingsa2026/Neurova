@@ -4,7 +4,7 @@
  * 验收：
  * - 卡渲染三开关 + 各自功能说明
  * - fetchSettings 回填 advanced 段的三个布尔键（默认全开=后端 ADVANCED_DEFAULTS 对齐）
- * - saveSkillRecall 仅写 advanced 段三键（后端 merge，不触碰同段其它设置）
+ * - saveSkillRecall 仅写 advanced 段六键（后端 merge，不触碰同段其它设置）
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -154,12 +154,13 @@ describe('SettingPage — 技能召回与进化卡', () => {
     expect(vm.advanced.evolution_queue_enabled).toBe(true)
   })
 
-  it('saveSkillRecall 仅写 advanced 段五键', async () => {
+  it('saveSkillRecall 仅写 advanced 段六键', async () => {
     const wrapper = mountPage()
     await flushPromises()
     const vm = wrapper.vm as any
     vm.advanced.skill_schema_budget_enabled = true
     vm.advanced.tool_search_enabled = false
+    vm.advanced.dedup_semantic_enabled = true
     await vm.saveSkillRecall()
     expect(updateSettings).toHaveBeenCalledWith('advanced', {
       skill_catalog_enabled: true,
@@ -167,6 +168,7 @@ describe('SettingPage — 技能召回与进化卡', () => {
       evolution_queue_enabled: true,
       skill_semantic_recall_enabled: true,
       tool_search_enabled: false,
+      dedup_semantic_enabled: true,
     })
   })
 })

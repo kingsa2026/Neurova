@@ -269,6 +269,10 @@
               <a-switch v-model:checked="advanced.tool_search_enabled" />
               <p class="governance-hint">{{ t('settings.toolSearchEnabledHint') }}</p>
             </a-form-item>
+            <a-form-item :label="t('settings.contextDedupSemantic')">
+              <a-switch v-model:checked="advanced.dedup_semantic_enabled" />
+              <p class="governance-hint">{{ t('settings.contextDedupSemanticHint') }}</p>
+            </a-form-item>
           </a-form>
           <template #footer>
             <GlassButton variant="primary" size="sm" :loading="savingRecall" @click="saveSkillRecall">{{ t('common.save') }}</GlassButton>
@@ -557,7 +561,7 @@ const outOfBoxLanguage = ref('')
 const savingDefault = ref(false)
 const security = ref({ jwt_secret: '', jwt_expiry_hours: 24, min_password_length: 8, require_special: true })
 const storage = ref({ media_path: '/data/media', max_upload_mb: 50, cache_ttl_minutes: 60 })
-const advanced = ref({ debug_mode: false, log_level: 'info', telemetry: false, max_output_tokens: 131072, graph_studio_limit: 200, desktop_runtime_mode: 'full', desktop_provider: '', skill_catalog_enabled: true, skill_schema_budget_enabled: true, evolution_queue_enabled: true, skill_semantic_recall_enabled: true, tool_search_enabled: true })
+const advanced = ref({ debug_mode: false, log_level: 'info', telemetry: false, max_output_tokens: 131072, graph_studio_limit: 200, desktop_runtime_mode: 'full', desktop_provider: '', skill_catalog_enabled: true, skill_schema_budget_enabled: true, evolution_queue_enabled: true, skill_semantic_recall_enabled: true, tool_search_enabled: true, dedup_semantic_enabled: false })
 // 资源配额（LLM 日配额运营化，2026-11-14）：与后端 app_settings.quota / DEFAULT_LIMITS 对齐
 const quota = ref({ max_llm_calls_per_day: 100, max_llm_tokens_per_day: 100000 })
 const savingRecall = ref(false)
@@ -1162,6 +1166,7 @@ const saveSkillRecall = async () => {
       evolution_queue_enabled: advanced.value.evolution_queue_enabled,
       skill_semantic_recall_enabled: advanced.value.skill_semantic_recall_enabled,
       tool_search_enabled: advanced.value.tool_search_enabled,
+      dedup_semantic_enabled: advanced.value.dedup_semantic_enabled,
     })
     message.success(t('common.success'))
   } catch (err) {
