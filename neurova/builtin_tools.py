@@ -1181,6 +1181,11 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                     "type": "boolean",
                     "description": "是否后台执行（true=立即返回，稍后用 subagent_status 查询；false=等待完成直接返回报告）",
                 },
+                "subagent_type": {
+                    "type": "string",
+                    "enum": ["general", "explore"],
+                    "description": "子代理类型：general（全工具面，默认）/ explore（只读检索型——工具面收窄为只读白名单，适合信息搜集与侦察，不能写）",
+                },
             },
             "required": ["task"],
         },
@@ -1272,7 +1277,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "escalate": {
-        # P2-10 增强：子代理升级通道。通知面（邮箱+运行记录），不改共享存储。
+        # 并行能力声明：子代理升级是通知面（邮箱投递+运行记录），不改共享存储，
+        # 只读且可并发。P2-10 增强。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "【子代理升级】子代理遇阻时把问题升级给主代理/用户：说明卡点、已尝试与需要的决策。仅子代理运行内可用；升级后请在最终回复说明已升级并结束本轮。",
         "parameters": {
@@ -1286,7 +1292,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "submit_result": {
-        # P2-10 增强：子代理结构化结果提交。通知面（邮箱+运行记录），不改共享存储。
+        # 并行能力声明：子代理结果提交是通知面（邮箱投递+运行记录），不改共享存储，
+        # 只读且可并发。P2-10 增强。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
         "description": "【子代理结果提交】子代理以结构化形态提交最终结果（摘要/状态），主代理与用户会收到通知。仅子代理运行内可用；提交后请在最终回复中重述要点。",
         "parameters": {
