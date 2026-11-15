@@ -39,7 +39,7 @@ export class MemoryApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<Memory>>('/v1/memory', query);
+    return this.client.get<PageResult<Memory>>('/memory', query);
   }
 
   /** 获取单条记忆 */
@@ -49,7 +49,7 @@ export class MemoryApi {
 
   /** 创建记忆 */
   async create(data: Partial<Memory>): Promise<ApiResponse<Memory>> {
-    return this.client.post<Memory>('/v1/memory', data);
+    return this.client.post<Memory>('/memory', data);
   }
 
   /** 更新记忆 */
@@ -64,6 +64,6 @@ export class MemoryApi {
 
   /** 搜索记忆（关键词 + 可选 agentId + 限制数量） */
   async search(query: MemorySearchQuery): Promise<ApiResponse<Memory[]>> {
-    return this.client.post<Memory[]>('/v1/memory/search', query);
+    return this.client.post<Memory[]>('/memory/search', query);
   }
 }

@@ -215,9 +215,15 @@ def isShortCodeShape(value: str) -> bool:
     return len(value) == SHORT_CODE_DIGITS and value.isdigit()
 
 
-def pairingQrPayload(ref: str) -> str:
-    """二维码文本——**刻意不含任何 host**。
+def pairingQrPayload(ref: str, host: str = "") -> str:
+    """二维码文本：一次性 `ref` ＋ 服务器对外地址 `host`（扫码即完成服务器配置）。
 
-    「谁」与「在哪」分开是本案的头号原则：地址漂移不得让已发的码作废（§3.4）。
+    host 为空时退化为只带 `ref` 的旧形状（地址需另行录入）。2026-11-16 按用户裁定
+    升级：原「刻意不含任何 host」（§3.4 地址漂移不废码）改为**一扫配全**——
+    手机扫到 ref＋host 后自行建档并配对，地址漂移由用户改档案兜底。
     """
+    if host:
+        from urllib.parse import quote
+
+        return f"neurova://pair?ref={ref}&host={quote(host, safe='')}"
     return f"neurova://pair?ref={ref}"

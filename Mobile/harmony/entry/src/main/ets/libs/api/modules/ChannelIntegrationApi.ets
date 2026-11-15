@@ -50,7 +50,7 @@ export class ChannelIntegrationApi {
       if (params.size !== undefined) query['size'] = params.size;
       if (params.status !== undefined) query['status'] = params.status;
     }
-    return this.client.get<PageResult<ChannelIntegration>>('/v1/channel-integrations', query);
+    return this.client.get<PageResult<ChannelIntegration>>('/channel-integrations', query);
   }
 
   /** 获取单条渠道集成 */
@@ -60,7 +60,7 @@ export class ChannelIntegrationApi {
 
   /** 创建渠道集成 */
   async create(data: Partial<ChannelIntegration>): Promise<ApiResponse<ChannelIntegration>> {
-    return this.client.post<ChannelIntegration>('/v1/channel-integrations', data);
+    return this.client.post<ChannelIntegration>('/channel-integrations', data);
   }
 
   /** 更新渠道集成 */

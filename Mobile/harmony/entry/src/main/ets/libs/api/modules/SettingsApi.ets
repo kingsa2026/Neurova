@@ -33,7 +33,7 @@ export class SettingsApi {
 
   /** 列出所有设置分组 */
   async list(): Promise<ApiResponse<SettingGroup[]>> {
-    return this.client.get<SettingGroup[]>('/v1/settings');
+    return this.client.get<SettingGroup[]>('/settings');
   }
 
   /** 获取单个设置项 */
@@ -51,6 +51,6 @@ export class SettingsApi {
   async reset(group?: string): Promise<ApiResponse<Object>> {
     const body: SettingResetBody = {};
     if (group !== undefined) body.group = group;
-    return this.client.post<Object>('/v1/settings/reset', body);
+    return this.client.post<Object>('/settings/reset', body);
   }
 }

@@ -70,21 +70,25 @@ def _qrBytes(client, code):
     return img.content
 
 
-class TestQrPayloadCarriesNoAddress:
-    """载荷只回答「谁」，不回答「在哪」——这是无固定 IP 场景的前提，不是风格偏好。"""
+class TestQrPayloadCarriesAdvertisedHost:
+    """2026-11-16 用户裁定「一扫配全」：扫码即完成服务器配置——载荷须带对外地址。
 
-    def test_qr_text_is_a_bare_ref_and_contains_no_host(self, app_and_client, monkeypatch):
+    取代原裁定（只带 ref 不带 host，§3.4 地址漂移不废码）；地址漂移改由
+    用户改服务器档案兜底，不再让扫码人手抄地址。
+    """
+
+    def test_qr_text_carries_ref_and_advertised_host(self, app_and_client, monkeypatch):
         _app, c = app_and_client
         monkeypatch.setenv("NEUROVA_ADVERTISED_BASE_URL", "https://home.example.net")
         body = _generate(c)
         assert protocol.isPairingRefShape(body["ref"]), body
 
-        payload = protocol.pairingQrPayload(body["ref"])
-        assert payload == f"neurova://pair?ref={body['ref']}"
-        for forbidden in ("home.example.net", "testserver", "ws://", "wss://", "http"):
-            assert forbidden not in payload, f"载荷里出现了地址成分 {forbidden!r}：{payload}"
+        payload = protocol.pairingQrPayload(body["ref"], "https://home.example.net")
+        assert payload == (f"neurova://pair?ref={body['ref']}"
+                           "&host=https%3A%2F%2Fhome.example.net")
+        assert "ref=" in payload and "host=" in payload
 
-    def test_the_text_handed_to_the_single_renderer_has_no_address(self, app_and_client, monkeypatch):
+    def test_the_text_handed_to_the_single_renderer_carries_the_host(self, app_and_client, monkeypatch):
         """真读那次渲染的入参，而不是读"应当是什么"。
 
         为什么不用图回解：`pyzbar` 不在依赖清单里，写成回解判据会**永久 skip**——
@@ -109,10 +113,9 @@ class TestQrPayloadCarriesNoAddress:
         png = _qrBytes(c, body["code"])
         assert png[:4] == b"\x89PNG", "回来的不是真图"
 
-        assert captured == [protocol.pairingQrPayload(body["ref"])], (
-            f"渲染出去的文本不是无地址载荷：{captured!r}")
-        for forbidden in ("home.example.net", "testserver", "ws://", "wss://"):
-            assert forbidden not in captured[0], f"图里含地址成分 {forbidden!r}"
+        assert captured == [protocol.pairingQrPayload(body["ref"], "https://home.example.net")], (
+            f"渲染出去的文本不是一扫配全载荷：{captured!r}")
+        assert "ref=" in captured[0] and "host=" in captured[0], captured[0]
 
     def test_short_code_and_ref_address_the_same_record(self, app_and_client):
         """两个入口一条记录（教义第 6 条：不建第二套凭据体系）。"""

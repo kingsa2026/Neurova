@@ -47,7 +47,7 @@ export class CognitionApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<Experience>>('/v1/cognition/experiences', query);
+    return this.client.get<PageResult<Experience>>('/cognition/experiences', query);
   }
 
   /** 获取单条经验 */
@@ -57,7 +57,7 @@ export class CognitionApi {
 
   /** 创建经验 */
   async createExperience(data: Partial<Experience>): Promise<ApiResponse<Experience>> {
-    return this.client.post<Experience>('/v1/cognition/experiences', data);
+    return this.client.post<Experience>('/cognition/experiences', data);
   }
 
   /** 更新经验 */
@@ -79,7 +79,7 @@ export class CognitionApi {
   async getKnowledgeGraph(agentId: string): Promise<ApiResponse<KnowledgeGraph>> {
     const query: Record<string, Object> = {};
     query['agentId'] = agentId;
-    return this.client.get<KnowledgeGraph>('/v1/cognition/knowledge-graph', query);
+    return this.client.get<KnowledgeGraph>('/cognition/knowledge-graph', query);
   }
 
   // ==================== Metacognition 元认知 ====================
@@ -95,7 +95,7 @@ export class CognitionApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<MetacognitionRecord>>('/v1/cognition/metacognitions', query);
+    return this.client.get<PageResult<MetacognitionRecord>>('/cognition/metacognitions', query);
   }
 
   /** 获取单条元认知记录 */
@@ -107,7 +107,7 @@ export class CognitionApi {
   async createMetacognition(
     data: Partial<MetacognitionRecord>,
   ): Promise<ApiResponse<MetacognitionRecord>> {
-    return this.client.post<MetacognitionRecord>('/v1/cognition/metacognitions', data);
+    return this.client.post<MetacognitionRecord>('/cognition/metacognitions', data);
   }
 
   /** 更新元认知记录 */
@@ -139,7 +139,7 @@ export class CognitionApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<ReflectionRecord>>('/v1/cognition/reflections', query);
+    return this.client.get<PageResult<ReflectionRecord>>('/cognition/reflections', query);
   }
 
   /** 获取单条反思记录 */
@@ -149,7 +149,7 @@ export class CognitionApi {
 
   /** 创建反思记录 */
   async createReflection(data: Partial<ReflectionRecord>): Promise<ApiResponse<ReflectionRecord>> {
-    return this.client.post<ReflectionRecord>('/v1/cognition/reflections', data);
+    return this.client.post<ReflectionRecord>('/cognition/reflections', data);
   }
 
   /** 更新反思记录 */
@@ -181,7 +181,7 @@ export class CognitionApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<GrowthRecord>>('/v1/cognition/growths', query);
+    return this.client.get<PageResult<GrowthRecord>>('/cognition/growths', query);
   }
 
   /** 获取单条成长记录 */
@@ -191,7 +191,7 @@ export class CognitionApi {
 
   /** 创建成长记录 */
   async createGrowth(data: Partial<GrowthRecord>): Promise<ApiResponse<GrowthRecord>> {
-    return this.client.post<GrowthRecord>('/v1/cognition/growths', data);
+    return this.client.post<GrowthRecord>('/cognition/growths', data);
   }
 
   /** 更新成长记录 */

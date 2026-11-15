@@ -58,7 +58,7 @@ export class RuntimeApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<ScheduleTask>>('/v1/runtime/scheduler', query);
+    return this.client.get<PageResult<ScheduleTask>>('/runtime/scheduler', query);
   }
 
   /** 获取单条调度任务 */
@@ -68,7 +68,7 @@ export class RuntimeApi {
 
   /** 创建调度任务 */
   async createScheduleTask(data: Partial<ScheduleTask>): Promise<ApiResponse<ScheduleTask>> {
-    return this.client.post<ScheduleTask>('/v1/runtime/scheduler', data);
+    return this.client.post<ScheduleTask>('/runtime/scheduler', data);
   }
 
   /** 更新调度任务 */
@@ -97,7 +97,7 @@ export class RuntimeApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<ContextMessage>>('/v1/runtime/context', query);
+    return this.client.get<PageResult<ContextMessage>>('/runtime/context', query);
   }
 
   /** 获取单条上下文消息 */
@@ -123,7 +123,7 @@ export class RuntimeApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<ComputerTask>>('/v1/runtime/computer', query);
+    return this.client.get<PageResult<ComputerTask>>('/runtime/computer', query);
   }
 
   /** 获取单条计算机任务 */
@@ -133,7 +133,7 @@ export class RuntimeApi {
 
   /** 创建计算机任务 */
   async createComputerTask(data: Partial<ComputerTask>): Promise<ApiResponse<ComputerTask>> {
-    return this.client.post<ComputerTask>('/v1/runtime/computer', data);
+    return this.client.post<ComputerTask>('/runtime/computer', data);
   }
 
   /** 删除计算机任务 */
@@ -154,7 +154,7 @@ export class RuntimeApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<TraceEntry>>('/v1/runtime/traces', query);
+    return this.client.get<PageResult<TraceEntry>>('/runtime/traces', query);
   }
 
   /** 获取单条追踪条目 */
@@ -180,7 +180,7 @@ export class RuntimeApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<TrajectoryPoint>>('/v1/runtime/trajectory', query);
+    return this.client.get<PageResult<TrajectoryPoint>>('/runtime/trajectory', query);
   }
 
   /** 获取单条轨迹点 */
@@ -194,19 +194,19 @@ export class RuntimeApi {
   async getSleepStatus(agentId: string): Promise<ApiResponse<SleepStatus>> {
     const query: Record<string, Object> = {};
     query['agentId'] = agentId;
-    return this.client.get<SleepStatus>('/v1/runtime/sleep', query);
+    return this.client.get<SleepStatus>('/runtime/sleep', query);
   }
 
   /** 设置休眠模式（body: { agentId, mode }） */
   async setSleepMode(agentId: string, mode: 'idle' | 'light' | 'deep'): Promise<ApiResponse<SleepStatus>> {
     const body: SleepModeBody = { agentId, mode };
-    return this.client.post<SleepStatus>('/v1/runtime/sleep', body);
+    return this.client.post<SleepStatus>('/runtime/sleep', body);
   }
 
   /** 唤醒 Agent（body: { agentId }） */
   async awaken(agentId: string): Promise<ApiResponse<SleepStatus>> {
     const body: SleepModeBody = { agentId };
-    return this.client.post<SleepStatus>('/v1/runtime/sleep/awaken', body);
+    return this.client.post<SleepStatus>('/runtime/sleep/awaken', body);
   }
 
   // ==================== FirewallRule 防火墙规则 ====================
@@ -222,7 +222,7 @@ export class RuntimeApi {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
     }
-    return this.client.get<PageResult<FirewallRule>>('/v1/runtime/firewall', query);
+    return this.client.get<PageResult<FirewallRule>>('/runtime/firewall', query);
   }
 
   /** 获取单条防火墙规则 */
@@ -232,7 +232,7 @@ export class RuntimeApi {
 
   /** 创建防火墙规则 */
   async createFirewallRule(data: Partial<FirewallRule>): Promise<ApiResponse<FirewallRule>> {
-    return this.client.post<FirewallRule>('/v1/runtime/firewall', data);
+    return this.client.post<FirewallRule>('/runtime/firewall', data);
   }
 
   /** 更新防火墙规则 */

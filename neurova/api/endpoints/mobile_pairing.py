@@ -872,7 +872,7 @@ async def generate_pairing(
 
 
 @router.get("/pairing/qrcode/{code}", dependencies=[Depends(_get_current_user_id)])
-async def get_pairing_qrcode(code: str):
+async def get_pairing_qrcode(code: str, request: Request):
     """配对二维码（PNG）——渲染只走渠道侧那**唯一一份** segno 实现（§6-172 批 25）。
 
     原先这里 `import qrcode`，而那个库**不在依赖清单**（清单里声明的是 segno），
@@ -880,8 +880,9 @@ async def get_pairing_qrcode(code: str):
     手机扫它扫不出任何东西，端点却承诺"获取配对二维码图片（PNG）"——失败被一张
     看着像成功的图盖住了（教义第 2 条禁止的形态）。现在渲染器全仓一处，渲染不出就显式 5xx。
 
-    文本形状由 `protocol.pairingQrPayload()` 定（**不含 host**）：这张图拍下来贴到网上，
-    读到的人拿到的是一条一次性引用，而不是"某台机器的地址＋6 位码"。
+    文本形状由 `protocol.pairingQrPayload()` 定（2026-11-16 按用户裁定升为**一扫配全**：
+    载荷含 `ref` ＋ 对外地址 `host`，手机扫码即完成服务器档案配置与设备配对；
+    host 取 `_wsOrigin()` 同源：隧道 route > advertised > 入站请求）。
     """
     pairing = _pairing_codes.get(code)
     if not pairing:
@@ -892,7 +893,11 @@ async def get_pairing_qrcode(code: str):
     # 函数内 import 与渠道侧调用方同一形态（`channel_config.py:300`），也保住测试的替换面
     from neurova.channels.qrcode_auth import generate_qrcode_image
 
-    png = base64.b64decode(generate_qrcode_image(protocol.pairingQrPayload(pairing["ref"])))
+    ws_scheme, netloc, prefix = _wsOrigin(request)
+    host = f"{'https' if ws_scheme == 'wss' else 'http'}://{netloc}{prefix}"
+    png = base64.b64decode(
+        generate_qrcode_image(protocol.pairingQrPayload(pairing["ref"], host))
+    )
     return Response(
         content=png,
         media_type="image/png",

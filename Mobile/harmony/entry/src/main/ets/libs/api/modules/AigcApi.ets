@@ -29,7 +29,7 @@ import {
   AigcUsageSummary,
 } from '../../types';
 
-const BASE = '/v1/generation';
+const BASE = '/generation';
 
 export class AigcApi {
   private client: HttpClient;
