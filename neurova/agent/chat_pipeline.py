@@ -517,8 +517,13 @@ class ChatPipeline:
     async def execute(self, ctx: ChatContext) -> Dict[str, Any]:
         """执行完整管线；异常和取消也必须终结任务证据。"""
         from neurova.skills.creation_governance import finish_task
+        from neurova.core.steer_queue import get_active_turn_registry
 
         completed = False
+        # P2（loop 对照 #5）：登记"回合进行中"——请求入口据此把 turn 期间的
+        # 新输入作为插话并入本回合，而不是并发开第二个回合（loop 单例的轮次态
+        # 会被踩踏，Issue #268 形态）。
+        get_active_turn_registry().markStarted(ctx.session_id)
         try:
             result = await self._execute_steps(ctx)
             completed = (ctx.execution_completed is True
@@ -529,6 +534,7 @@ class ChatPipeline:
             await self._landFailedTurn(ctx, exc)
             raise
         finally:
+            get_active_turn_registry().markEnded(ctx.session_id)
             try:
                 finish_task(self._agent, ctx.user_input, completed=completed)
             except Exception as finish_err:
@@ -3002,6 +3008,21 @@ class ChatPipeline:
             thinking_enabled=self._thinking_flag_of(ctx),
             thinking_budget=self._thinking_budget_of(ctx),
         )
+
+        # P2（loop 对照 #3）：取消流快照——用户中断/掉线时，已流式产出的部分正文
+        # 随失败轮落点进会话盘（此前盘上只有一句"本轮被中止"，用户已看到的
+        # 半截回复在会话记录里查无此据）。仅在异常/取消路径记录，正常收尾零开销。
+        async def _cancelSnapshotIter():
+            try:
+                async for _ev in gen:
+                    yield _ev
+            except BaseException:
+                try:
+                    ctx.partial_reply = "".join(reply_parts)
+                except Exception:  # noqa: BLE001 - 快照失败不影响取消语义
+                    pass
+                raise
+
         emitter = ctx.event_emitter
         # ④流式 citation 缓冲：仅本轮注册过句柄时启用——
         # 用户可见流不跨分片露半截标记；reply_parts 仍存原文（定稿 decode 同源，
@@ -3012,7 +3033,7 @@ class ChatPipeline:
             from neurova.memory.citation import StreamCitationBuffer
 
             cit_buf = StreamCitationBuffer(_cit_reg)
-        async for event in gen:
+        async for event in _cancelSnapshotIter():
             if not isinstance(event, dict):
                 continue
             etype = event.get("type")

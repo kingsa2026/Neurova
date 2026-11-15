@@ -154,6 +154,22 @@ degeneracy 门，出口判定为 done/stop/resume。
 
 ## 10. 可补充候选（按优先级）
 
+**实施状态（2026-11-15，全部处置）**：
+
+- **#1/#2 已实施**（相位状态机 `neurova/agent/loops/turn_phase.py`＋双环推进；
+  六类轮内注入先落盘后进历史，`persistModelVisibleAnnouncement` 单点）；
+- **#3/#4/#5 已实施**（取消流快照随失败轮落点；溢出重压缩账本化＋
+  rapid-refill 熔断 `CompactRapidRefillError`；steering 入队侧——
+  活跃回合注册表＋`submitSteer`＋chat 双端点插话通道，环侧排空既有）；
+- **#6/#7 已实施**（分片合并保留 `_stream_index`＋工具批稳定排序；
+  `turn_control` 终止回合控制面——信号经调用的 tool_call 字典回传，
+  双环结算后诚实收口）；
+- **#8 核实为既有能力**：`multi_model_client.chat` 的 auto-failover
+  （`switch_to_next_model`/`_resolve_available_fallback`，按
+  `is_fallback_eligible` 分类跨模型切换、429 累计等待预算、请求级排除集）
+  已覆盖"执行模型失败按声明退回"的实质；显式指定 provider 时不静默切换
+  是既有产品裁定，保持不变。
+
 | # | 候选 | 说明 | 优先级 |
 |---|---|---|---|
 | 1 | **loop 相位状态机** | 把轮次相位（输入处理/等待模型/流式/工具调度/执行/聚合/完成）显式化＋静态迁移表；非法迁移出声。可测、可审计，也为分段提醒/诊断提供锚点 | **P1** |

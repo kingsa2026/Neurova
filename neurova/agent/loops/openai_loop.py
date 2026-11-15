@@ -35,7 +35,13 @@ from neurova.agent.loops.reasoning_degeneracy import (
     stripDegeneracy,
 )
 from neurova.llm.provider_compat import thinkingKnobReachesGateway
-from neurova.agent.loops.turn_run_state import TurnRunState, resolveToolRoundBudget
+from neurova.agent.loops.turn_run_state import (
+    CompactRapidRefillError,
+    MAX_CONSECUTIVE_RAPID_REFILLS,
+    RAPID_REFILL_TOOL_TURN_THRESHOLD,
+    TurnRunState,
+    resolveToolRoundBudget,
+)
 from neurova.core import turn_context
 from neurova.llm_client import LLMResponse
 
@@ -498,6 +504,24 @@ class OpenAILoop(BaseAgentLoop):
             )
         )
 
+        # P3（loop 对照 #7）：工具结果声明"结算后终止本回合"→ 工具结果已入历史，
+        # 以诚实文案收口本轮，不再开下一轮模型请求（防模型在配额/上限墙上循环绕行）。
+        # 信号由执行链写在 tool_call 字典上（并行子任务里 ContextVar 传不回父任务）。
+        _stopControl = next(
+            (tc.get("_turn_control") for tc in reversed(tool_calls) if tc.get("_turn_control")),
+            None,
+        )
+        if _stopControl:
+            _stopReason = str((_stopControl or {}).get("reason") or "工具结果要求终止")
+            _closeText = (
+                f"{getattr(response, 'content', '') or ''}"
+                f"\n\n⚠️ {_stopReason}。本回合到此收口。"
+            ).strip()
+            phaseAdvance(state, TurnPhase.COMPLETING)
+            return _TurnOutcome.finished(
+                LLMResponse(content=_closeText, finish_reason="stop")
+            )
+
         # P2-5：非流式路径同样过门控（TERMINATE 即终止）
         from neurova.agent.gates import StopAction as _SA
 
@@ -645,7 +669,8 @@ class OpenAILoop(BaseAgentLoop):
                     yield item
             except BaseException as e:  # noqa: BLE001 - 统一捕获后按类型分流
                 resumed = self._resumeAfterOverflow(
-                    e, request_params, gotContent, compact_messages_for_overflow, is_context_overflow_error
+                    e, request_params, gotContent, compact_messages_for_overflow,
+                    is_context_overflow_error, state,
                 )
                 if resumed is None:
                     phaseMarkError(state)
@@ -710,25 +735,46 @@ class OpenAILoop(BaseAgentLoop):
         gotContent: bool,
         compactMessages,
         isOverflow,
+        state: TurnRunState = None,
     ) -> Optional[Dict]:
         """溢出恢复：返回"下一轮要用的 request_params"，或 `None` 表示原样抛出。
 
-        单次语义由调用方经 `request_params` 上的 `_overflowRetried` 标记保证：
-        已重试过的轮不再重试（原实现靠"重试走另一条分支、不再进同一判断"实现，
-        迭代后同一段代码会被再次进入，故标记必须显式）。
+        P2（loop 对照 #4）：重压缩节奏由**轮次态账本**治理（取代旧的单次标记）——
+        距上次压缩不足 3 个工具轮的连续重压缩累计达 3 次即熔断拒绝
+        （`CompactRapidRefillError`，诚实报错不 fallback）；间隔足够的溢出
+        仍可再次压缩（旧标记把"第二次溢出"一律判死，长任务中途涨回即整轮报废）。
         """
-        if gotContent or not isOverflow(error) or request_params.get("_overflowRetried"):
+        if gotContent or not isOverflow(error):
+            return None
+        if state is not None:
+            roundsSinceCompact = state.toolRounds - state.lastCompactRound
+            if state.reactiveCompacts == 0:
+                # 首次重压缩永远不算"快速"（没有更早的压缩作参照）
+                state.consecutiveRapidRefills = 0
+            elif roundsSinceCompact < RAPID_REFILL_TOOL_TURN_THRESHOLD:
+                state.consecutiveRapidRefills += 1
+            else:
+                state.consecutiveRapidRefills = 0
+            if state.consecutiveRapidRefills >= MAX_CONSECUTIVE_RAPID_REFILLS:
+                raise CompactRapidRefillError(
+                    state.consecutiveRapidRefills, roundsSinceCompact
+                )
+        elif request_params.get("_overflowRetried"):
+            # 无轮次态的直驱调用（旧测试/脚本）：保留单次语义
             return None
         messages = request_params.get("messages") or []
         compact, info = compactMessages(messages)
         if info.get("folded_count", 0) <= 0:
             return None  # 无可折叠内容，恢复无意义
         logger.warning(
-            "[CTX_RECOVERY] 上下文溢出，折叠 %d 条消息后单次重试（%d → %d）",
+            "[CTX_RECOVERY] 上下文溢出，折叠 %d 条消息后重试（%d → %d）",
             info["folded_count"], info["original_count"], info["compact_count"],
         )
         self._rollupFoldedDigest(info)
-        return {**request_params, "messages": compact, "_overflowRetried": True}
+        if state is not None:
+            state.reactiveCompacts += 1
+            state.lastCompactRound = state.toolRounds
+        return {**request_params, "messages": compact}
 
     def _resumeAfterLengthEmpty(
         self, request_params: Dict, compactMessages, degenerated: bool,
@@ -974,6 +1020,25 @@ class OpenAILoop(BaseAgentLoop):
             phaseAdvance(state, TurnPhase.AGGREGATING_RESULTS)
             for tm in tool_messages:
                 yield {"type": "tool_result", "data": tm}
+
+            # P3（loop 对照 #7）：工具结果声明"结算后终止本回合"→ 诚实收口
+            # （结果已回环，本回合不再开下一轮模型请求）。
+            _stopControl = next(
+                (tc.get("_turn_control") for tc in reversed(pending_tool_calls) if tc.get("_turn_control")),
+                None,
+            )
+            if _stopControl:
+                _stopReason = str((_stopControl or {}).get("reason") or "工具结果要求终止")
+                _closeText = f"⚠️ {_stopReason}。本回合到此收口。"
+                phaseAdvance(state, TurnPhase.COMPLETING)
+                yield {"type": "content", "data": _closeText}
+                yield {
+                    "type": "done",
+                    "reply": "".join(reply_parts) + _closeText,
+                    "finish_reason": "stop",
+                    "usage": round_usage,
+                }
+                return
 
             # 停滞检测：记录本轮回复与调用签名，重复时注入提示，连续停滞终止
             round_reply = "".join(reply_parts).strip()
