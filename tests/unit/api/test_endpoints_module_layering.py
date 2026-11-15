@@ -78,6 +78,9 @@ DOMAINS = (
                 "knowledge_enterprise",   # specs/2026-11-05 B14（聚合器直接挂载）
                 "knowledge_observability",  # specs/2026-11-06 默认关读数面（同走聚合器）
                 "knowledge_categories_api",  # specs/2026-11-07 批 A 自定义分类注册表（聚合器直接挂载）
+                "knowledge_schema_suggester",  # 对照研究 P1-2：schema 术语/关系建议面
+                "knowledge_nl2sql",            # 对照研究 P1-4：问数面（env 默认关）
+                "knowledge_ossie",             # 对照研究 P2-4：语义模型 YAML 互操作
             ),
         ),
         delegated_prefixes=None,

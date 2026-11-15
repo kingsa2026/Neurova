@@ -202,7 +202,10 @@ class TestMigrationVersions:
         #      ＋术语行 conflict_policy 列。
         # v49：webhook 幂等去重（specs/2026-11-12 W10）。
         # v50：工件级内容地址存储（specs/2026-11-12 §18 C1/C2）——ontology_artifacts。
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 50
+        # v51：schema 目录（对照研究 P1-1，2026-11-15）——ontology_catalog_tables/_columns。
+        # v52：schema 术语建议（对照研究 P1-2，2026-11-15）——ontology_schema_suggestions。
+        # v53：问数历史（对照研究 P1-4/P2-3，2026-11-15）——ontology_query_history。
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 53
         assert {'knowledge_mcp_sources', 'knowledge_alias_candidates',
                 'ontology_relation_candidates', 'ontology_shapes',
                 'ontology_change_log', 'enterprise_source_configs',
@@ -210,7 +213,9 @@ class TestMigrationVersions:
                 'ontology_actions', 'ontology_functions', 'ontology_state_machines', 'ontology_simulations',
                 'ontology_decisions', 'ontology_decision_links',
                 'ontology_chunk_strategies', 'ontology_communities',
-                'enterprise_webhook_dedup', 'ontology_artifacts'} <= names
+                'enterprise_webhook_dedup', 'ontology_artifacts',
+                'ontology_catalog_tables', 'ontology_catalog_columns',
+                'ontology_schema_suggestions', 'ontology_query_history'} <= names
         # v28 存量行零漂移：缺省必须是旧语义 relay（head 客体常量空＝不搬移客体）
         rule_columns = {
             r[1]: (r[2], r[4]) for r in store._conn.execute(
