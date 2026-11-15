@@ -143,8 +143,13 @@ SDK 版本写法：hvigor 6 要求 `compatibleSdkVersion/compileSdkVersion/targe
 "D:/Program Files/Huawei/DevEco Studio/tools/hvigor/bin/hvigorw.bat" --mode module -p product=default -p buildMode=release assembleHap
 ```
 
+- 命令行构建需显式带环境变量：`DEVECO_SDK_HOME=D:/Program Files/Huawei/DevEco Studio/sdk`、
+  `JAVA_HOME=D:/Program Files/Huawei/DevEco Studio/jbr`（缺失报 00303217）。
+
 - 工程路径**不得含非 ASCII 字符**（hvigor 6 校验 00306003，无绕过开关）——
-  本仓路径含中文，实际构建在 ASCII 副本目录进行（`Mobile/dist/harmony/` 收产物）。
+  工作区已迁移至纯 ASCII 路径 `E:\Projects\Neurova`，现在**直接在仓内
+  `Mobile/harmony/` 构建**（旧「ASCII 副本目录」workaround 已退役）；
+  签名产物收 `Mobile/dist/harmony/`。
 - 构建产物：`entry/build/default/outputs/default/entry-default-unsigned.hap`。
 
 **签名命令**（hap-sign-tool，SDK toolchains 内）：
