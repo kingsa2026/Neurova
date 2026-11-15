@@ -24,9 +24,6 @@
         <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/memory`" :label="t('nav.memory')" :collapsed="appStore.sidebarCollapsed" v-if="can('/agent/:id/memory')">
           <template #icon><DatabaseOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/files`" :label="t('nav.agentfiles')" :collapsed="appStore.sidebarCollapsed" v-if="can('/agent/:id/files')">
-          <template #icon><FileOutlined /></template>
-        </GlassNavItem>
 
         <!-- Agent: 认知与自省（低频折叠）——本体工作台/事实浏览已迁「数据中台」 -->
         <GlassNavGroup
@@ -57,12 +54,12 @@
 
         <!-- Agent: 能力（低频折叠） -->
         <GlassNavGroup
-          v-if="canAgent('skills') || canAgent('rules') || canAgent('media')"
+          v-if="canAgent('skills') || canAgent('rules')"
           :label-key="'nav.agentCapabilities'"
           storage-key="agent-capabilities"
           :collapsed="appStore.sidebarCollapsed"
           :first-item-to="`/agent/${agentStore.currentAgentId}/skills`"
-          :count="3"
+          :count="2"
         >
           <template #icon><ThunderboltOutlined /></template>
           <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/skills`" :label="t('nav.skills')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('skills')">
@@ -70,9 +67,6 @@
           </GlassNavItem>
           <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/rules`" :label="t('nav.rules')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('rules')">
             <template #icon><SafetyOutlined /></template>
-          </GlassNavItem>
-          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/media`" :label="t('nav.media')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('media')">
-            <template #icon><PlayCircleOutlined /></template>
           </GlassNavItem>
         </GlassNavGroup>
 
@@ -220,9 +214,7 @@
         <template #icon><ShopOutlined /></template>
       </GlassNavItem>
       <!-- AIGC 已迁至顶部「模型与工具」二级菜单（2026-09-14 用户决策） -->
-      <GlassNavItem to="/files" :label="t('nav.files')" :collapsed="appStore.sidebarCollapsed" v-if="can('/files')">
-        <template #icon><FileOutlined /></template>
-      </GlassNavItem>
+      <!-- 文件/媒体入口已迁聊天页右侧操作面板（2026-11-15 用户决策），全局 /files 菜单入口同步移除 -->
       <GlassNavItem to="/neuron" :label="t('nav.neuron')" :collapsed="appStore.sidebarCollapsed" v-if="can('/neuron')">
         <template #icon><NodeIndexOutlined /></template>
       </GlassNavItem>
@@ -372,14 +364,14 @@ import { canAccessModule } from '@/utils/permissions'
 import {
   DashboardOutlined, RobotOutlined, MessageOutlined, DatabaseOutlined,
   ShareAltOutlined, ExperimentOutlined, BulbOutlined, RiseOutlined,
-  ThunderboltOutlined, FileOutlined, ApiOutlined,
+  ThunderboltOutlined, ApiOutlined,
   ClockCircleOutlined, SafetyOutlined, CodeOutlined,
   DesktopOutlined, ControlOutlined,
   ExportOutlined, CloudServerOutlined,
   SettingOutlined, BellOutlined, GlobalOutlined,
   LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
   CoffeeOutlined, HistoryOutlined, BarChartOutlined,
-  UserOutlined, PlayCircleOutlined, SmileOutlined, IdcardOutlined,
+  UserOutlined, SmileOutlined, IdcardOutlined,
   BookOutlined, AppstoreOutlined, RocketOutlined, NodeIndexOutlined,
   TeamOutlined, ProjectOutlined, BranchesOutlined, BgColorsOutlined,
   ShopOutlined, DeploymentUnitOutlined,

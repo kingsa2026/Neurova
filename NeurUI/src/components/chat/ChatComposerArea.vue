@@ -101,6 +101,16 @@
             :class="{ 'is-active': isComputerTabActive }"
             :title="t('computerPanel.title')"
             @click="toggleComputerPanel"><svg class="nr-ico" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></button>
+          <button
+            class="nr-composer-pill nr-composer-pill--icon"
+            :class="{ 'is-active': isFilesTabActive }"
+            :title="t('nav.agentfiles')"
+            @click="toggleFilesTab"><svg class="nr-ico" viewBox="0 0 24 24"><path d="M4 4h7l2 2h7v14H4z"/><path d="M4 9h16"/></svg></button>
+          <button
+            class="nr-composer-pill nr-composer-pill--icon"
+            :class="{ 'is-active': isMediaTabActive }"
+            :title="t('nav.media')"
+            @click="toggleMediaTab"><svg class="nr-ico" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z"/></svg></button>
           <a-dropdown :trigger="['click']" placement="topLeft" :disabled="!isAdmin">
             <button
               class="nr-composer-pill"
@@ -476,6 +486,24 @@ function toggleComputerPanel(): void {
     rightDock.closeTab('computer')
   } else {
     rightDock.openComputer()
+  }
+}
+
+// ── 文件/媒体工作空间入口（dock singleton tab，数据按当前 agent 隔离）──
+const isFilesTabActive = computed(() => rightDock.tabs.some((tab) => tab.kind === 'files'))
+const isMediaTabActive = computed(() => rightDock.tabs.some((tab) => tab.kind === 'media'))
+function toggleFilesTab(): void {
+  if (rightDock.tabs.some((tab) => tab.kind === 'files')) {
+    rightDock.closeTab('files')
+  } else {
+    rightDock.openFiles()
+  }
+}
+function toggleMediaTab(): void {
+  if (rightDock.tabs.some((tab) => tab.kind === 'media')) {
+    rightDock.closeTab('media')
+  } else {
+    rightDock.openMedia()
   }
 }
 

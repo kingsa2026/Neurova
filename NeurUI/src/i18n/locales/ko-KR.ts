@@ -4199,6 +4199,8 @@ msgOAuthFailed: 'OAuth 인증을 시작하지 못했습니다. 나중에 다시 
     kindVideo: '동영상',
     kindPdf: 'PDF',
     kindText: '텍스트',
+    kindFiles: '파일',
+    kindMedia: '미디어',
   },
 
 studio: {

@@ -4199,6 +4199,8 @@ msgOAuthFailed: 'OAuth प्राधिकरण शुरू नहीं ह
     kindVideo: 'वीडियो',
     kindPdf: 'PDF',
     kindText: 'टेक्स्ट',
+    kindFiles: 'फ़ाइलें',
+    kindMedia: 'मीडिया',
   },
 
 studio: {

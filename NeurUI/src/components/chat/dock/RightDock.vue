@@ -25,6 +25,8 @@
       <HistoryTab v-else-if="dock.activeTab.kind === 'history'" @switch="onSessionSwitch" @cross-search="onCrossSearch" />
       <ArchiveTab v-else-if="dock.activeTab.kind === 'archive'" />
       <ComputerTab v-else-if="dock.activeTab.kind === 'computer'" :agent-id="agentId" />
+      <AgentFilePage v-else-if="dock.activeTab.kind === 'files'" :agent-id="agentId ?? ''" />
+      <AgentMediaPage v-else-if="dock.activeTab.kind === 'media'" :agent-id="agentId ?? ''" />
       <div v-else class="nr-dock-empty">{{ t('dock.empty') }}</div>
     </div>
   </aside>
@@ -52,6 +54,8 @@ import PdfPreviewPanel from './panels/PdfPreviewPanel.vue'
 import HistoryTab from './panels/HistoryTab.vue'
 import ArchiveTab from './panels/ArchiveTab.vue'
 import ComputerTab from './panels/ComputerTab.vue'
+import AgentFilePage from '@/pages/AgentFilePage.vue'
+import AgentMediaPage from '@/pages/AgentMediaPage.vue'
 
 const props = defineProps<{
   agentId?: string

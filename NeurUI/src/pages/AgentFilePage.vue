@@ -118,7 +118,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { formatEpochSecondDate } from '@/utils/displayText'
 import { useI18n } from 'vue-i18n'
 import { message, Modal } from 'ant-design-vue'
@@ -335,6 +335,14 @@ onMounted(() => {
   document.addEventListener('dragover', onDragOver)
   document.addEventListener('drop', onDrop)
 })
+
+// agent 隔离：内嵌操作面板时切 agent 需重取当前 agent 工作空间（路由直达时 agentId 同理）
+watch(
+  () => props.agentId,
+  (next, prev) => {
+    if (next && next !== prev) fetchFiles()
+  },
+)
 
 onUnmounted(() => {
   document.removeEventListener('dragover', onDragOver)

@@ -4120,6 +4120,8 @@ conflictTimeReadout: '时间读数：{basis}（旧 {old} → 新 {new}）',
     kindVideo: '视频',
     kindPdf: 'PDF',
     kindText: '文本',
+    kindFiles: '文件',
+    kindMedia: '媒体',
   },
 
 studio: {

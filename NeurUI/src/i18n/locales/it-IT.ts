@@ -4199,6 +4199,8 @@ msgOAuthFailed: "Impossibile avviare l'autorizzazione OAuth, riprova più tardi"
     kindVideo: 'Video',
     kindPdf: 'PDF',
     kindText: 'Testo',
+    kindFiles: 'File',
+    kindMedia: 'Media',
   },
 
 studio: {
