@@ -71,6 +71,16 @@
                 @click="triggerIngest(record.source_id)"
               >{{ t('ontology.entIngestBtn') }}</GlassButton>
               <GlassButton
+                variant="ghost" size="sm"
+                data-testid="ent-catalog-btn"
+                @click="openCatalogDrawer(record.source_id)"
+              >{{ t('ontology.catalogDrawerTitle') }}</GlassButton>
+              <GlassButton
+                variant="ghost" size="sm"
+                data-testid="ent-nl2sql-btn"
+                @click="openNl2SqlDrawer(record.source_id)"
+              >{{ t('ontology.nl2sqlTitle') }}</GlassButton>
+              <GlassButton
                 v-if="record.descriptor?.chatSource === 'archive'"
                 variant="ghost" size="sm"
                 data-testid="ent-media-btn"
@@ -437,6 +447,21 @@
         <span class="mono">{{ t('ontology.entWebhookDedupValue', { rows: webhookDedup?.rows ?? 0, sources: webhookDedup?.sources ?? 0 }) }}</span>
       </div>
     </a-drawer>
+
+    <!-- P1-1：schema 目录抽屉（表/列/主外键/术语链接 + 手动刷新） -->
+    <SourceCatalogDrawer
+      :open="catalogDrawerOpen"
+      :source-id="catalogDrawerSourceId"
+      :is-admin="isAdmin"
+      @close="catalogDrawerOpen = false"
+    />
+    <!-- P1-4：问数抽屉（自然语言→SQL→只读执行；env 门控默认关，403 如实转述） -->
+    <SourceNl2SqlDrawer
+      :open="nl2sqlDrawerOpen"
+      :source-id="nl2sqlDrawerSourceId"
+      :is-admin="isAdmin"
+      @close="nl2sqlDrawerOpen = false"
+    />
   </div>
 </template>
 
@@ -446,6 +471,8 @@ import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import SourceCatalogDrawer from '@/components/enterprise/SourceCatalogDrawer.vue'
+import SourceNl2SqlDrawer from '@/components/enterprise/SourceNl2SqlDrawer.vue'
 import { useAuthStore } from '@/stores/auth'
 import {
   deleteEnterpriseSource,
@@ -736,6 +763,22 @@ const wizardForm = reactive(emptyForm())
 // 媒体取回弹层（批 C7c 第三块：存档源逐条可控触发，方案 §10-甲）
 const showMediaModal = ref(false)
 const mediaSourceId = ref('')
+
+// P1-1/P1-4：schema 目录与问数抽屉（逐源打开；门控/权限由后端裁决、前端如实转述）
+const catalogDrawerOpen = ref(false)
+const catalogDrawerSourceId = ref('')
+const nl2sqlDrawerOpen = ref(false)
+const nl2sqlDrawerSourceId = ref('')
+
+function openCatalogDrawer(sourceId: string) {
+  catalogDrawerSourceId.value = sourceId
+  catalogDrawerOpen.value = true
+}
+
+function openNl2SqlDrawer(sourceId: string) {
+  nl2sqlDrawerSourceId.value = sourceId
+  nl2sqlDrawerOpen.value = true
+}
 const mediaMsgId = ref('')
 const mediaOutcome = ref('')
 const mediaBusy = ref(false)

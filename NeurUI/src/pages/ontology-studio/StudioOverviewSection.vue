@@ -41,6 +41,34 @@
       </div>
     </div>
 
+    <!-- P2-2 复合就绪探针：knowledge_ready/data_ready 双判据 + 四项检查现值（只读零网络） -->
+    <div class="panel-row">
+      <div class="panel-block" data-testid="overview-readiness">
+        <h4 class="block-title">{{ t('ontology.readinessTitle') }}</h4>
+        <p v-if="readiness === null" class="block-note" data-testid="overview-readiness-error">
+          {{ t('ontology.readinessLoadFailed') }}
+        </p>
+        <template v-else>
+          <p class="block-line">
+            <a-tag :color="readiness.knowledge_ready ? 'green' : 'orange'" data-testid="readiness-knowledge">
+              {{ t('ontology.readinessKnowledge') }}:
+              {{ readiness.knowledge_ready ? t('ontology.readinessReady') : t('ontology.readinessNotReady') }}
+            </a-tag>
+            <a-tag :color="readiness.data_ready ? 'green' : 'orange'" data-testid="readiness-data">
+              {{ t('ontology.readinessData') }}:
+              {{ readiness.data_ready ? t('ontology.readinessReady') : t('ontology.readinessNotReady') }}
+            </a-tag>
+          </p>
+          <p class="block-note" data-testid="readiness-checks">
+            {{ t('ontology.readinessTerms') }}: {{ readiness.checks.terms_registered }}
+            · {{ t('ontology.readinessFacts') }}: {{ readiness.checks.facts_present }}
+            · {{ t('ontology.readinessCatalogSources') }}: {{ readiness.checks.catalog_sources }}
+            · {{ t('ontology.readinessSourcesEnabled') }}: {{ readiness.checks.enterprise_sources_enabled }}
+          </p>
+        </template>
+      </div>
+    </div>
+
     <!-- G5 领域包：可选领域词汇的导入入口（admin）；导入只补缺幂等 -->
     <div class="panel-row">
       <div class="panel-block" data-testid="overview-domain-packs">
@@ -65,8 +93,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
-import type { CqRow, OntologySchemaData } from '@/types/ontology'
-import { importDomainPack, listDomainPacks } from '@/api/modules/ontology'
+import type { CqRow, KnowledgeReadiness, OntologySchemaData } from '@/types/ontology'
+import { getKnowledgeReadiness, importDomainPack, listDomainPacks } from '@/api/modules/ontology'
 import { ontologyErrorDetail } from '@/utils/ontologyFormat'
 import { useAuthStore } from '@/stores/auth'
 
@@ -107,6 +135,20 @@ async function loadPacks() {
   }
 }
 
+// P2-2：就绪探针读数（只读；失败显式报错态，不冒充就绪）
+const readiness = ref<KnowledgeReadiness | null>(null)
+
+async function loadReadiness() {
+  try {
+    const res: any = await getKnowledgeReadiness()
+    readiness.value = res?.data ?? null
+  } catch {
+    readiness.value = null
+  }
+}
+
+onMounted(loadReadiness)
+
 async function importPack(packId: string) {
   importing.value = packId
   try {
@@ -121,7 +163,10 @@ async function importPack(packId: string) {
   }
 }
 
-onMounted(loadPacks)
+onMounted(() => {
+  loadPacks()
+  void loadReadiness()
+})
 </script>
 
 <style scoped>

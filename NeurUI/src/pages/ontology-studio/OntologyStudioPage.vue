@@ -82,6 +82,7 @@
           <StudioCqSection v-else-if="activeSection === 'cq'" :cq-rows="cqRows" />
           <StudioTermsSection v-else-if="activeSection === 'terms'" :is-admin="isAdmin" />
           <StudioRelationsSection v-else-if="activeSection === 'relations'" :schema="schema" :is-admin="isAdmin" @candidates-changed="onCandidatesChanged" />
+          <StudioSuggestionsSection v-else-if="activeSection === 'suggestions'" :is-admin="isAdmin" />
           <StudioShapesSection v-else-if="activeSection === 'shapes'" :is-admin="isAdmin" />
           <StudioReasoningSection v-else-if="activeSection === 'reasoning'" :schema="schema" />
           <StudioReleaseSection v-else-if="activeSection === 'release'" :is-admin="isAdmin" />
@@ -107,19 +108,21 @@ import StudioOverviewSection from './StudioOverviewSection.vue'
 import StudioCqSection from './StudioCqSection.vue'
 import StudioTermsSection from './StudioTermsSection.vue'
 import StudioRelationsSection from './StudioRelationsSection.vue'
+import StudioSuggestionsSection from './StudioSuggestionsSection.vue'
 import StudioShapesSection from './StudioShapesSection.vue'
 import StudioReasoningSection from './StudioReasoningSection.vue'
 import StudioReleaseSection from './StudioReleaseSection.vue'
 import StudioRuntimeSection from './StudioRuntimeSection.vue'
 import StudioSettingsSection from './StudioSettingsSection.vue'
 
-type SectionKey = 'overview' | 'cq' | 'terms' | 'relations' | 'shapes' | 'reasoning' | 'release' | 'runtime' | 'settings'
+type SectionKey = 'overview' | 'cq' | 'terms' | 'relations' | 'suggestions' | 'shapes' | 'reasoning' | 'release' | 'runtime' | 'settings'
 
 const SECTIONS: Array<{ key: SectionKey; labelKey: string }> = [
   { key: 'overview', labelKey: 'navOverview' },
   { key: 'cq', labelKey: 'navCq' },
   { key: 'terms', labelKey: 'navTerms' },
   { key: 'relations', labelKey: 'navRelations' },
+  { key: 'suggestions', labelKey: 'navSuggestions' },
   { key: 'shapes', labelKey: 'navShapes' },
   { key: 'reasoning', labelKey: 'navReasoning' },
   { key: 'release', labelKey: 'navRelease' },
