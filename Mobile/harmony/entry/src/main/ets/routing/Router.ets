@@ -21,6 +21,7 @@ export interface RedirectParam {
 
 /** 路由名 → 页面组件映射（实际组件由 Navigation 的 navPath 属性绑定） */
 export class RouteNames {
+  static readonly SHELL: string = 'ShellPage';
   static readonly LOGIN: string = 'LoginPage';
   static readonly REGISTER: string = 'RegisterPage';
   static readonly DASHBOARD: string = 'DashboardPage';
@@ -100,6 +101,7 @@ export class RouteNames {
 
 /** 需要登录才能访问的受保护路由 */
 const PROTECTED_ROUTES: string[] = [
+  RouteNames.SHELL,
   RouteNames.DASHBOARD,
   RouteNames.CHAT,
   RouteNames.AGENT_LIST,

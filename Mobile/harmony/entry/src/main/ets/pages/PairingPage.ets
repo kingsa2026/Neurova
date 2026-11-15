@@ -210,7 +210,7 @@ export struct PairingPage {
         setTimeout(() => {
           // 已登录（换服务器重配对）回仪表盘；首次配对先去登录
           if (this.authStore.isAuthenticated) {
-            this.router.replace(RouteNames.DASHBOARD);
+            this.router.replace(RouteNames.SHELL);
           } else {
             this.router.replace(RouteNames.LOGIN);
           }

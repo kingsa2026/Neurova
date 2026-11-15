@@ -7,6 +7,7 @@
  */
 
 import { RouteNames } from './Router';
+import { ShellPage } from '../pages/ShellPage';
 import { LoginPage } from '../pages/LoginPage';
 import { RegisterPage } from '../pages/RegisterPage';
 import { DashboardPage } from '../pages/DashboardPage';
@@ -26,7 +27,9 @@ import { AgentChannelPage } from '../pages/AgentChannelPage';
 
 @Builder
 export function pageMap(name: string) {
-  if (name === RouteNames.LOGIN) {
+  if (name === RouteNames.SHELL) {
+    NavDestination() { ShellPage() }.hideTitleBar(true)
+  } else if (name === RouteNames.LOGIN) {
     NavDestination() { LoginPage() }.hideTitleBar(true)
   } else if (name === RouteNames.REGISTER) {
     NavDestination() { RegisterPage() }.hideTitleBar(true)
