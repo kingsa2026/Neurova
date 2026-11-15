@@ -87,17 +87,24 @@ export struct AgentListPage {
   }
 
   /**
-   * 创建智能体（M3 实现，当前提示"功能开发中"）
+   * 创建智能体（进 AgentFormPage create 模式）
    */
   private handleCreate(): void {
-    this.msg.info('功能开发中');
+    this.router.push(RouteNames.AGENT_FORM, { 'mode': 'create' });
   }
 
   /**
-   * 编辑智能体（M3 实现，当前提示"功能开发中"）
+   * 编辑智能体（进 AgentFormPage edit 模式并回填详情）
    */
   private handleEdit(agent: Agent): void {
-    this.msg.info('功能开发中');
+    this.router.push(RouteNames.AGENT_FORM, { 'mode': 'edit', 'agentId': agent.id });
+  }
+
+  /**
+   * 查看详情（进 AgentDetailPage 分节页）
+   */
+  private openDetail(agent: Agent): void {
+    this.router.push(RouteNames.AGENT_DETAIL, { 'agentId': agent.id });
   }
 
   /**
@@ -341,11 +348,18 @@ export struct AgentListPage {
         // 下部：操作按钮（右对齐）
         Row() {
           GlassButton({
+            text: '详情',
+            type: 'default',
+            btnSize: 'small',
+            onTap: () => { this.openDetail(agent); }
+          })
+          GlassButton({
             text: '对话',
             type: 'primary',
             btnSize: 'small',
             onTap: () => { this.switchAgent(agent.id); }
           })
+            .margin({ left: this.sm.getSpacing('sm') })
           GlassButton({
             text: '编辑',
             type: 'default',

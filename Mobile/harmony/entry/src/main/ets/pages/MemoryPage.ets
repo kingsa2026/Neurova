@@ -197,13 +197,9 @@ export struct MemoryPage {
     }
     this.loading = true;
     try {
-      const res = await this.api.memory.search({
-        keyword,
-        agentId: this.agentsStore.currentAgentId,
-        limit: 20,
-      });
+      const res = await this.api.memory.list(this.agentsStore.currentAgentId || undefined, undefined, 20, keyword);
       if (res.code === 0 && res.data) {
-        this.memories = res.data;
+        this.memories = res.data.items;
         this.activeType = null;
         // M5.2.2 更新 LazyForEach 数据源（搜索后无 type 过滤）
         this.applyFilter();

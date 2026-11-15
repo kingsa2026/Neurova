@@ -15,6 +15,7 @@ import { ChatPage } from '../pages/ChatPage';
 import { PairingPage } from '../pages/PairingPage';
 import { ConnectionPage } from '../pages/ConnectionPage';
 import { AgentListPage } from '../pages/AgentListPage';
+import { AgentDetailPage } from '../pages/AgentDetailPage';
 import { KnowledgePage } from '../pages/KnowledgePage';
 import { MemoryPage } from '../pages/MemoryPage';
 import { ModelPage } from '../pages/ModelPage';
@@ -43,6 +44,8 @@ export function pageMap(name: string) {
     NavDestination() { ConnectionPage() }.hideTitleBar(true)
   } else if (name === RouteNames.AGENT_LIST) {
     NavDestination() { AgentListPage() }.hideTitleBar(true)
+  } else if (name === RouteNames.AGENT_DETAIL) {
+    NavDestination() { AgentDetailPage() }.hideTitleBar(true)
   } else if (name === RouteNames.KNOWLEDGE) {
     NavDestination() { KnowledgePage() }.hideTitleBar(true)
   } else if (name === RouteNames.MEMORY) {

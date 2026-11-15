@@ -10,13 +10,24 @@
  *   const hit = await api.search({ keyword: '关键词', agentId: 'agent-1', limit: 5 });
  */
 import { HttpClient } from '../HttpClient';
-import { ApiResponse, Memory, MemoryType, PageResult, PageParams } from '../../types';
+import { ApiResponse, Memory, MemoryType, PageResult } from '../../types';
 
-/** 记忆搜索请求参数 */
-export interface MemorySearchQuery {
-  agentId?: string;
-  keyword: string;
-  limit?: number;
+/** GET /memory 的 data 载荷（base.py memory_to_dict 投影子集） */
+export interface MemoryItemDto {
+  id: string;
+  agent_id: string;
+  content: string;
+  category: string;
+  type: string;
+  temperature: number;
+  importance: number;
+  tags: string[];
+}
+
+/** GET /memory 的 data 包裹 */
+export interface MemoryListPayload {
+  count: number;
+  memories: MemoryItemDto[];
 }
 
 export class MemoryApi {
@@ -26,25 +37,54 @@ export class MemoryApi {
     this.client = client;
   }
 
-  /** 列出记忆（可选 agentId / type 过滤，支持分页） */
+  /** 记忆列表/搜索（参数名以 crud.py 实测为准：query/agent_id/memory_type/limit） */
   async list(
     agentId?: string,
     type?: MemoryType,
-    params?: PageParams,
+    limit?: number,
+    query?: string,
   ): Promise<ApiResponse<PageResult<Memory>>> {
-    const query: Record<string, Object> = {};
-    if (agentId) query['agentId'] = agentId;
-    if (type) query['type'] = type;
-    if (params) {
-      if (params.page !== undefined) query['page'] = params.page;
-      if (params.size !== undefined) query['size'] = params.size;
+    const parts: string[] = [];
+    if (query && query.length > 0) {
+      parts.push('query=' + encodeURIComponent(query));
     }
-    return this.client.get<PageResult<Memory>>('/memory', query);
+    if (agentId && agentId.length > 0) {
+      parts.push('agent_id=' + encodeURIComponent(agentId));
+    }
+    if (type && type.length > 0) {
+      parts.push('memory_type=' + encodeURIComponent(type));
+    }
+    parts.push('limit=' + (limit !== undefined ? limit : 50).toString());
+    const res = await this.client.get<MemoryListPayload>('/memory?' + parts.join('&'));
+    // 后端 data:{count, memories:[dict]} → 前端 PageResult<Memory>（items/total）
+    if (res.code === 0 && res.data) {
+      const items: Memory[] = [];
+      const raw = res.data.memories;
+      for (let i = 0; i < raw.length; i++) {
+        const m = raw[i];
+        items.push({
+          id: m.id,
+          type: m.type as MemoryType,
+          content: m.content,
+          agentId: m.agent_id,
+          temperature: m.temperature,
+          importance: m.importance,
+          createdAt: '',
+          updatedAt: '',
+          tags: m.tags,
+          metadata: {} as Record<string, Object>,
+        });
+      }
+      const page: PageResult<Memory> = { items: items, total: res.data.count, page: 1, size: items.length };
+      const mapped: ApiResponse<PageResult<Memory>> = { code: res.code, message: res.message, data: page };
+      return mapped;
+    }
+    return { code: res.code, message: res.message, data: res.data as Object as PageResult<Memory> };
   }
 
   /** 获取单条记忆 */
   async get(memoryId: string): Promise<ApiResponse<Memory>> {
-    return this.client.get<Memory>(`/v1/memory/${memoryId}`);
+    return this.client.get<Memory>(`/memory/${memoryId}`);
   }
 
   /** 创建记忆 */
@@ -54,16 +94,12 @@ export class MemoryApi {
 
   /** 更新记忆 */
   async update(memoryId: string, data: Partial<Memory>): Promise<ApiResponse<Memory>> {
-    return this.client.put<Memory>(`/v1/memory/${memoryId}`, data);
+    return this.client.put<Memory>(`/memory/${memoryId}`, data);
   }
 
   /** 删除记忆 */
   async remove(memoryId: string): Promise<ApiResponse<Object>> {
-    return this.client.delete<Object>(`/v1/memory/${memoryId}`);
+    return this.client.delete<Object>(`/memory/${memoryId}`);
   }
 
-  /** 搜索记忆（关键词 + 可选 agentId + 限制数量） */
-  async search(query: MemorySearchQuery): Promise<ApiResponse<Memory[]>> {
-    return this.client.post<Memory[]>('/memory/search', query);
-  }
 }

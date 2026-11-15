@@ -28,6 +28,7 @@ export class RouteNames {
   static readonly CHAT: string = 'ChatPage';
   static readonly AGENT_LIST: string = 'AgentListPage';
   static readonly AGENT_FORM: string = 'AgentFormPage';
+  static readonly AGENT_DETAIL: string = 'AgentDetailPage';
   static readonly PAIRING: string = 'PairingPage';
   static readonly CONNECTION: string = 'ConnectionPage';
   static readonly MEMORY: string = 'MemoryPage';
@@ -103,6 +104,7 @@ export class RouteNames {
 const PROTECTED_ROUTES: string[] = [
   RouteNames.SHELL,
   RouteNames.DASHBOARD,
+  RouteNames.AGENT_DETAIL,
   RouteNames.CHAT,
   RouteNames.AGENT_LIST,
   RouteNames.AGENT_FORM,
