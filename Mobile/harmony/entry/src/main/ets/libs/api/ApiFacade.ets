@@ -36,6 +36,7 @@ import { ChannelIntegrationApi } from './modules/ChannelIntegrationApi';
 import { AigcApi } from './modules/AigcApi';
 import { SessionSyncApi } from './modules/SessionSyncApi';
 import { AdminApi } from './modules/AdminApi';
+import { HomeApi } from './modules/HomeApi';
 
 export class ApiFacade {
   private static instance: ApiFacade;
@@ -52,6 +53,7 @@ export class ApiFacade {
   // 业务模块（M3 新增 6 个）
   public memory: MemoryApi;
   public admin: AdminApi;
+  public home: HomeApi;
   public graph: KnowledgeGraphApi;
   public enterprise: KnowledgeEnterpriseApi;
   public knowledge: KnowledgeApi;
@@ -84,6 +86,7 @@ export class ApiFacade {
     // M3 新增模块
     this.memory = new MemoryApi(this.client);
     this.admin = new AdminApi(this.client);
+    this.home = new HomeApi(this.client);
     this.graph = new KnowledgeGraphApi(this.client);
     this.enterprise = new KnowledgeEnterpriseApi(this.client);
     this.knowledge = new KnowledgeApi(this.client);
