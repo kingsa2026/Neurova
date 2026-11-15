@@ -341,6 +341,14 @@ class ContextOrchestrator:
                 "factor": 1.0,
                 "last_budget_tokens": None,
             },
+            # A4（对照改进项）：缓存画像与自适应折叠目标读数。
+            "cache_adaptive": {
+                "model": None,
+                "calls": 0,
+                "hit_rate": 0.0,
+                "sufficient": False,
+                "fold_target_ratio": 0.5,
+            },
             "microcompact": {
                 "calls": 0,
                 "triggered_calls": 0,
@@ -2424,6 +2432,48 @@ class ContextOrchestrator:
             return hardLimit
         return budget_tokens
 
+    # A4（对照改进项）：按缓存画像自适应折叠目标（常量与判据单源在此）。
+    _FOLD_TARGET_DEFAULT = 0.5     # 缓存生效/样本不足：浅折保前缀
+    _FOLD_TARGET_NO_CACHE = 0.35   # 无有效前缀缓存：折得更深，视图直接进账单
+    _CACHE_PROFILE_MIN_CALLS = 20  # 证据门槛：样本不足的模型不改折叠行为
+    _CACHE_PROFILE_HIT_FLOOR = 0.05  # 命中低于此线 = 前缀缓存未生效
+
+    def _cacheAdaptiveFoldTarget(self) -> tuple:
+        """按缓存画像自适应折叠目标（A4）。
+
+        数据依据（data/usage_history.db 账单真值，2026-11-15 实测）：
+        deepseek-v4-flash-vision 命中 38%（前缀缓存真实生效）；而
+        qiniu/conatus-free（632 calls）命中 1.2%、nex-n2.6（122 calls）
+        命中 0%——两个主力模型**没有有效前缀缓存**。对无缓存模型：视图
+        大小直接进账单，折得越深省得越多；对缓存生效模型：维持 0.5
+        （浅折保前缀，命中红利更大）。
+
+        证据门槛：该模型样本 ≥20 calls 才判定（流量太小判不了）；
+        NEUROVA_CACHE_ADAPTIVE_FOLD=0 关闭。返回 (目标 ratio, 画像)。
+        """
+        import os as _os
+
+        model = str(getattr(self.config, "llm_model", "") or "")
+        profile: Dict[str, Any] = {
+            "model": model, "calls": 0, "hit_rate": 0.0, "sufficient": False,
+        }
+        target = self._FOLD_TARGET_DEFAULT
+        try:
+            if _os.environ.get("NEUROVA_CACHE_ADAPTIVE_FOLD", "1") != "0":
+                from neurova.core.usage_history import get_usage_history
+
+                profile = get_usage_history().cache_profile_for_model(
+                    model, min_calls=self._CACHE_PROFILE_MIN_CALLS
+                )
+                if (
+                    profile["sufficient"]
+                    and profile["hit_rate"] < self._CACHE_PROFILE_HIT_FLOOR
+                ):
+                    target = self._FOLD_TARGET_NO_CACHE
+        except Exception:  # noqa: BLE001 - 画像不可达时维持默认目标
+            pass
+        return target, profile
+
     def _poolEconomicsAllows(self, envelope: str, env_budget: int, window_budget: int) -> bool:
         """池分支的经济性判据闸（与非池分支**同一份判据、同一份读数**）。
 
@@ -2690,11 +2740,24 @@ class ContextOrchestrator:
         reuse_summary = bool(cache.get("summary")) and delta_msgs <= self._DELTA_RESUMMARY_MSGS
         summarize = None if reuse_summary else self._build_window_summarizer()
 
+        # A4（对照改进项）：按缓存画像自适应折叠目标（无有效前缀缓存的模型
+        # 折得更深——视图大小直接进账单；缓存生效模型浅折保前缀）。
+        fold_target_ratio, cacheProfile = self._cacheAdaptiveFoldTarget()
+        cacheFace = self._contextHealthSlot("cache_adaptive")
+        cacheFace.update({
+            "model": cacheProfile.get("model"),
+            "calls": cacheProfile.get("calls"),
+            "hit_rate": cacheProfile.get("hit_rate"),
+            "sufficient": cacheProfile.get("sufficient"),
+            "fold_target_ratio": fold_target_ratio,
+        })
+
         compaction = await compact_window(
             fold_source,
             fold_budget,
             summarize=summarize,
             previous_summary=previous_summary,
+            target_ratio=fold_target_ratio,
             # T-11e（工单 §12.7 判据 6）：关键路径**只付一次**摘要 LLM 调用。
             summary_max_retries=0,
             summary_call_budget=1,
