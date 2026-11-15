@@ -8,7 +8,11 @@ import { HttpClient } from '../HttpClient';
 import { ApiResponse, Message, PageResult, PageParams } from '../../types';
 
 export class ChatApi {
-  constructor(private client: HttpClient) {}
+  private client: HttpClient;
+
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
 
   /** 获取会话消息历史 */
   async messages(sessionId: string, params?: PageParams): Promise<ApiResponse<PageResult<Message>>> {

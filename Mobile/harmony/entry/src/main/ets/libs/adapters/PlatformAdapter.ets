@@ -23,7 +23,7 @@
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { connection } from '@kit.NetworkKit';
 import { pasteboard } from '@kit.BasicServicesKit';
-import { scanBarcode } from '@kit.ScanKit';
+import { scanBarcode, scanCore } from '@kit.ScanKit';
 import { Logger } from '../logger/Logger';
 import { EventBus } from '../bus/EventBus';
 import { ErrorManager, ErrorCategory } from '../error/ErrorManager';
@@ -50,6 +50,11 @@ export interface NetworkState {
 
 /** 网络类型枚举（内部缓存值） */
 type NetworkType = 'wifi' | 'cellular' | 'ethernet' | 'none';
+
+/** reportError 附加上下文：op 记录触发操作的名称 */
+interface ErrorDetails {
+  op: string;
+}
 
 export class PlatformAdapter {
   private static instance: PlatformAdapter;
@@ -98,21 +103,22 @@ export class PlatformAdapter {
     try {
       return {
         brand: deviceInfo.brand,
-        model: deviceInfo.deviceModel,
-        osVersion: deviceInfo.osVersion,
+        model: deviceInfo.productModel,
+        osVersion: deviceInfo.osFullName,
         osName: 'harmony',
-        apiVersion: deviceInfo.apiVersion,
+        apiVersion: deviceInfo.sdkApiVersion,
         screenW: this.screenW,
         screenH: this.screenH,
       };
     } catch (e) {
       const err = e as Error;
       this.logger.error(TAG, '获取设备信息失败', err);
+      const details: ErrorDetails = { op: 'getDeviceInfo' };
       this.errors.reportError(
         'platform_device_info_failed',
         `获取设备信息失败: ${err.message}`,
         ErrorCategory.UNKNOWN,
-        { op: 'getDeviceInfo' },
+        details,
       );
       // 返回兜底默认值，避免上层因取设备信息失败而崩溃
       return {
@@ -191,11 +197,12 @@ export class PlatformAdapter {
     } catch (e) {
       const err = e as Error;
       this.logger.error(TAG, '复制到剪贴板失败', err);
+      const details: ErrorDetails = { op: 'copyToClipboard' };
       this.errors.reportError(
         'platform_clipboard_set_failed',
         `复制到剪贴板失败: ${err.message}`,
         ErrorCategory.UNKNOWN,
-        { op: 'copyToClipboard' },
+        details,
       );
       throw new Error(`[PlatformAdapter] copyToClipboard 失败: ${err.message}`);
     }
@@ -218,11 +225,12 @@ export class PlatformAdapter {
     } catch (e) {
       const err = e as Error;
       this.logger.error(TAG, '获取剪贴板文本失败', err);
+      const details: ErrorDetails = { op: 'getClipboardText' };
       this.errors.reportError(
         'platform_clipboard_get_failed',
         `获取剪贴板文本失败: ${err.message}`,
         ErrorCategory.UNKNOWN,
-        { op: 'getClipboardText' },
+        details,
       );
       throw new Error(`[PlatformAdapter] getClipboardText 失败: ${err.message}`);
     }
@@ -237,11 +245,11 @@ export class PlatformAdapter {
     try {
       // 构建扫码选项：识别所有类型条码
       const options: scanBarcode.ScanOptions = {
-        scanTypes: [scanBarcode.ScanType.ALL],
+        scanTypes: [scanCore.ScanType.ALL],
       };
-      const result = await scanBarcode.scan(options);
+      const result: scanBarcode.ScanResult = await scanBarcode.startScan(options);
       // ScanResult.originalValue 为原始扫码内容
-      const value = result.originalValue;
+      const value: string = result.originalValue;
       if (!value) {
         throw new Error('扫码结果为空');
       }
@@ -250,11 +258,12 @@ export class PlatformAdapter {
     } catch (e) {
       const err = e as Error;
       this.logger.error(TAG, '扫码失败', err);
+      const details: ErrorDetails = { op: 'scanQRCode' };
       this.errors.reportError(
         'platform_scan_failed',
         `扫码失败: ${err.message}`,
         ErrorCategory.UNKNOWN,
-        { op: 'scanQRCode' },
+        details,
       );
       throw new Error(`[PlatformAdapter] scanQRCode 失败: ${err.message}`);
     }
@@ -295,11 +304,12 @@ export class PlatformAdapter {
     } catch (e) {
       const err = e as Error;
       this.logger.error(TAG, '注册系统网络监听失败', err);
+      const details: ErrorDetails = { op: 'registerSystemNetListener' };
       this.errors.reportError(
         'platform_net_register_failed',
         `注册网络监听失败: ${err.message}`,
         ErrorCategory.NETWORK,
-        { op: 'registerSystemNetListener' },
+        details,
       );
     }
   }
@@ -398,17 +408,17 @@ export class PlatformAdapter {
         return 'none';
       }
       for (const t of bearerTypes) {
-        if (t === connection.NetBearType.BEAR_WIFI) {
+        if (t === connection.NetBearType.BEARER_WIFI) {
           return 'wifi';
         }
       }
       for (const t of bearerTypes) {
-        if (t === connection.NetBearType.BEAR_CELLULAR) {
+        if (t === connection.NetBearType.BEARER_CELLULAR) {
           return 'cellular';
         }
       }
       for (const t of bearerTypes) {
-        if (t === connection.NetBearType.BEAR_ETHERNET) {
+        if (t === connection.NetBearType.BEARER_ETHERNET) {
           return 'ethernet';
         }
       }

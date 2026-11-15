@@ -262,8 +262,8 @@ export struct SleepStatusPage {
         GlassButton({
           text: '刷新',
           type: 'primary',
-          size: 'small',
-          onClick: () => { this.handleRefresh(); }
+          btnSize: 'small',
+          onTap: () => { this.handleRefresh(); }
         })
       }
 

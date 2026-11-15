@@ -418,8 +418,8 @@ export struct AgentFirewallPage {
           GlassButton({
             text: '新建',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.openCreateDialog(); }
+            btnSize: 'small',
+            onTap: () => { this.openCreateDialog(); }
           })
         }
 
@@ -469,8 +469,8 @@ export struct AgentFirewallPage {
             GlassButton({
               text: '新建规则',
               type: 'primary',
-              size: 'medium',
-              onClick: () => { this.openCreateDialog(); }
+              btnSize: 'medium',
+              onTap: () => { this.openCreateDialog(); }
             })
           }
           .width('100%')
@@ -586,21 +586,21 @@ export struct AgentFirewallPage {
           GlassButton({
             text: '编辑',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.openEditDialog(rule); }
+            btnSize: 'small',
+            onTap: () => { this.openEditDialog(rule); }
           })
           GlassButton({
             text: rule.enabled ? '禁用' : '启用',
             type: rule.enabled ? 'default' : 'primary',
-            size: 'small',
-            onClick: () => { this.toggleEnabled(rule); }
+            btnSize: 'small',
+            onTap: () => { this.toggleEnabled(rule); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
           GlassButton({
             text: '删除',
             type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmDelete(rule); }
+            btnSize: 'small',
+            onTap: () => { this.confirmDelete(rule); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }
@@ -630,7 +630,7 @@ export struct AgentFirewallPage {
         .onClick(() => { this.closeDialog(); })
 
       // 面板层：居中展示
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           // 标题（新建/编辑）
           Text(this.formData.id !== undefined ? '编辑规则' : '新建规则')
@@ -724,14 +724,14 @@ export struct AgentFirewallPage {
             GlassButton({
               text: '取消',
               type: 'default',
-              size: 'medium',
-              onClick: () => { this.closeDialog(); }
+              btnSize: 'medium',
+              onTap: () => { this.closeDialog(); }
             })
             GlassButton({
               text: this.formData.id !== undefined ? '保存' : '创建',
               type: 'primary',
-              size: 'medium',
-              onClick: () => { this.submitForm(); }
+              btnSize: 'medium',
+              onTap: () => { this.submitForm(); }
             })
               .margin({ left: this.sm.getSpacing('sm') })
           }

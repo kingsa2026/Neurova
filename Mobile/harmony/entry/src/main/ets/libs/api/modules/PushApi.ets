@@ -7,16 +7,28 @@
 import { HttpClient } from '../HttpClient';
 import { ApiResponse } from '../../types';
 
+/** 推送令牌上报请求体 */
+export interface PushTokenUpsertRequest {
+  platform: string;
+  push_token: string;
+  device_id: string;
+}
+
 export class PushApi {
-  constructor(private client: HttpClient) {}
+  private client: HttpClient;
+
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
 
   /** 上报/更新设备推送令牌（PUT /v1/mobile/push/push-tokens，登录态） */
   async upsert(platform: string, pushToken: string, deviceId: string): Promise<ApiResponse<Object>> {
-    return this.client.put<Object>('/v1/mobile/push/push-tokens', {
+    const body: PushTokenUpsertRequest = {
       platform: platform,
       push_token: pushToken,
       device_id: deviceId,
-    });
+    };
+    return this.client.put<Object>('/v1/mobile/push/push-tokens', body);
   }
 
   /** 注销设备推送令牌（DELETE /v1/mobile/push/push-tokens/{deviceId}，登出时调用） */

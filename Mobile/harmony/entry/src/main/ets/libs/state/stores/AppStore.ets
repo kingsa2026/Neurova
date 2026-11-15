@@ -11,6 +11,11 @@ const KEY_LANGUAGE = 'app:language';  // 'zh-CN' | 'en-US' | ...
 const KEY_SIDEBAR_COLLAPSED = 'app:sidebar_collapsed';
 const KEY_ONLINE = 'app:online';
 
+/** network:status 总线事件载荷（ArkTS 禁止非空对象字面量，故具名声明） */
+export interface NetworkStatusEvent {
+  online: boolean;
+}
+
 export class AppStore {
   private state: StateManager = StateManager.getInstance();
   private bus: EventBus = EventBus.getInstance();
@@ -51,6 +56,7 @@ export class AppStore {
 
   setOnline(online: boolean): void {
     this.state.set(KEY_ONLINE, online);
-    this.bus.emit('network:status', { online });
+    const payload: NetworkStatusEvent = { online };
+    this.bus.emit('network:status', payload);
   }
 }

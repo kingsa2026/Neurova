@@ -25,7 +25,11 @@ export interface ChannelToggleBody {
 }
 
 export class AgentChannelsApi {
-  constructor(private client: HttpClient) {}
+  private client: HttpClient;
+
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
 
   /** 列出某 Agent 的所有渠道 */
   async list(agentId: string): Promise<ApiResponse<ChannelInfo[]>> {
@@ -61,9 +65,10 @@ export class AgentChannelsApi {
     agentId: string,
     channelId: string,
   ): Promise<ApiResponse<ChannelTestResult>> {
+    const body: Record<string, Object> = {};
     return this.client.post<ChannelTestResult>(
       `/v1/agents/${agentId}/channels/${channelId}/test`,
-      {},
+      body,
     );
   }
 

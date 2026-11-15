@@ -330,14 +330,14 @@ export struct LogPage {
           GlassButton({
             text: '导出',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.exportLogs(); }
+            btnSize: 'small',
+            onTap: () => { this.exportLogs(); }
           })
           GlassButton({
             text: '清空',
             type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmClear(); }
+            btnSize: 'small',
+            onTap: () => { this.confirmClear(); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }
@@ -378,8 +378,8 @@ export struct LogPage {
           GlassButton({
             text: '筛选',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.applyFilter(); }
+            btnSize: 'small',
+            onTap: () => { this.applyFilter(); }
           })
         }
         .width('100%')

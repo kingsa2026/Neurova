@@ -264,8 +264,8 @@ export struct NeuronPage {
           GlassButton({
             text: '新建',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.handleCreate(); }
+            btnSize: 'small',
+            onTap: () => { this.handleCreate(); }
           })
         }
 
@@ -281,8 +281,8 @@ export struct NeuronPage {
           GlassButton({
             text: '筛选',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.applyFilter(); }
+            btnSize: 'small',
+            onTap: () => { this.applyFilter(); }
           })
         }
         .width('100%')
@@ -448,8 +448,8 @@ export struct NeuronPage {
         GlassButton({
           text: '查看详情',
           type: 'default',
-          size: 'small',
-          onClick: () => { this.openDetail(n); }
+          btnSize: 'small',
+          onTap: () => { this.openDetail(n); }
         })
           .margin({ top: this.sm.getSpacing('md') })
       }
@@ -476,7 +476,7 @@ export struct NeuronPage {
         .onClick(() => { this.closeDetail(); })
 
       // 面板层
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Scroll() {
           Column() {
             Text('神经元详情')
@@ -553,14 +553,14 @@ export struct NeuronPage {
               GlassButton({
                 text: '关闭',
                 type: 'default',
-                size: 'medium',
-                onClick: () => { this.closeDetail(); }
+                btnSize: 'medium',
+                onTap: () => { this.closeDetail(); }
               })
               GlassButton({
                 text: '触发放电',
                 type: 'primary',
-                size: 'medium',
-                onClick: () => { this.fireNeuron(); }
+                btnSize: 'medium',
+                onTap: () => { this.fireNeuron(); }
               })
                 .margin({ left: this.sm.getSpacing('sm') })
             }

@@ -369,8 +369,8 @@ export struct CollaborationTemplatePage {
           GlassButton({
             text: '新建',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.openCreateDialog(); }
+            btnSize: 'small',
+            onTap: () => { this.openCreateDialog(); }
           })
         }
 
@@ -512,8 +512,8 @@ export struct CollaborationTemplatePage {
           GlassButton({
             text: '详情',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.showDetail(tpl); }
+            btnSize: 'small',
+            onTap: () => { this.showDetail(tpl); }
           })
         }
         .width('100%')
@@ -542,7 +542,7 @@ export struct CollaborationTemplatePage {
         .onClick(() => { this.showCreateDialog = false; })
 
       // 面板层
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('新建协作模板')
             .fontSize(this.sm.getFontSize('subtitle'))
@@ -589,8 +589,8 @@ export struct CollaborationTemplatePage {
               GlassButton({
                 text: opt.label,
                 type: this.formData.category === opt.value ? 'primary' : 'default',
-                size: 'small',
-                onClick: () => { this.selectCategory(opt.value); }
+                btnSize: 'small',
+                onTap: () => { this.selectCategory(opt.value); }
               })
                 .margin({ right: this.sm.getSpacing('xs') })
             }, (opt: CategoryFilterOption) => opt.value)
@@ -603,14 +603,14 @@ export struct CollaborationTemplatePage {
             GlassButton({
               text: '取消',
               type: 'default',
-              size: 'medium',
-              onClick: () => { this.showCreateDialog = false; }
+              btnSize: 'medium',
+              onTap: () => { this.showCreateDialog = false; }
             })
             GlassButton({
               text: '提交',
               type: 'primary',
-              size: 'medium',
-              onClick: () => { this.submitCreate(); }
+              btnSize: 'medium',
+              onTap: () => { this.submitCreate(); }
             })
               .margin({ left: this.sm.getSpacing('sm') })
           }

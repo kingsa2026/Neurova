@@ -268,8 +268,8 @@ export struct MemorySettingsPage {
           GlassButton({
             text: '保存',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.saveSettings(); }
+            btnSize: 'small',
+            onTap: () => { this.saveSettings(); }
           })
         }
 

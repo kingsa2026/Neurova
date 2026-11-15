@@ -5,7 +5,11 @@ import { HttpClient } from '../HttpClient';
 import { ApiResponse, Agent, PageResult, PageParams } from '../../types';
 
 export class AgentsApi {
-  constructor(private client: HttpClient) {}
+  private client: HttpClient;
+
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
 
   async list(params?: PageParams): Promise<ApiResponse<PageResult<Agent>>> {
     return this.client.get<PageResult<Agent>>('/v1/agents', params as Record<string, Object>);

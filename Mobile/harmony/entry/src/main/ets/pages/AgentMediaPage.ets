@@ -310,8 +310,8 @@ export struct AgentMediaPage {
           GlassButton({
             text: '上传',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.msg.info('上传功能开发中'); }
+            btnSize: 'small',
+            onTap: () => { this.msg.info('上传功能开发中'); }
           })
         }
 
@@ -470,14 +470,14 @@ export struct AgentMediaPage {
           GlassButton({
             text: '预览',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.openPreview(item); }
+            btnSize: 'small',
+            onTap: () => { this.openPreview(item); }
           })
           GlassButton({
             text: '删除',
             type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmDelete(item); }
+            btnSize: 'small',
+            onTap: () => { this.confirmDelete(item); }
           })
             .margin({ left: this.sm.getSpacing('xs') })
         }
@@ -507,7 +507,7 @@ export struct AgentMediaPage {
         .onClick(() => { this.closePreview(); })
 
       // 面板层
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           // 标题：类型标签 + 名称
           Row() {
@@ -587,9 +587,9 @@ export struct AgentMediaPage {
           GlassButton({
             text: '关闭',
             type: 'primary',
-            size: 'medium',
+            btnSize: 'medium',
             block: true,
-            onClick: () => { this.closePreview(); }
+            onTap: () => { this.closePreview(); }
           })
             .margin({ top: this.sm.getSpacing('md') })
         }

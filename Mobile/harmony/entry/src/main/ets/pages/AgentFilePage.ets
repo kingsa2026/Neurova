@@ -401,8 +401,8 @@ export struct AgentFilePage {
           GlassButton({
             text: '上传',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.openUploadDialog(); }
+            btnSize: 'small',
+            onTap: () => { this.openUploadDialog(); }
           })
         }
 
@@ -450,8 +450,8 @@ export struct AgentFilePage {
             GlassButton({
               text: '上传文件',
               type: 'primary',
-              size: 'medium',
-              onClick: () => { this.openUploadDialog(); }
+              btnSize: 'medium',
+              onTap: () => { this.openUploadDialog(); }
             })
           }
           .width('100%')
@@ -560,14 +560,14 @@ export struct AgentFilePage {
           GlassButton({
             text: '下载',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.downloadFile(file); }
+            btnSize: 'small',
+            onTap: () => { this.downloadFile(file); }
           })
           GlassButton({
             text: '删除',
             type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmDelete(file); }
+            btnSize: 'small',
+            onTap: () => { this.confirmDelete(file); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }
@@ -596,7 +596,7 @@ export struct AgentFilePage {
         .onClick(() => { this.closeDialog(); })
 
       // 面板层
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('上传文件')
             .fontSize(this.sm.getFontSize('subtitle'))
@@ -642,8 +642,8 @@ export struct AgentFilePage {
                 GlassButton({
                   text: mt,
                   type: this.formData.mimeType === mt ? 'primary' : 'default',
-                  size: 'small',
-                  onClick: () => {
+                  btnSize: 'small',
+                  onTap: () => {
                     this.formData = { ...this.formData, mimeType: mt };
                   }
                 })
@@ -661,14 +661,14 @@ export struct AgentFilePage {
             GlassButton({
               text: '取消',
               type: 'default',
-              size: 'medium',
-              onClick: () => { this.closeDialog(); }
+              btnSize: 'medium',
+              onTap: () => { this.closeDialog(); }
             })
             GlassButton({
               text: '上传',
               type: 'primary',
-              size: 'medium',
-              onClick: () => { this.submitUpload(); }
+              btnSize: 'medium',
+              onTap: () => { this.submitUpload(); }
             })
               .margin({ left: this.sm.getSpacing('sm') })
           }

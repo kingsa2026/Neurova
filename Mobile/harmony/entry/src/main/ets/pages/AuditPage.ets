@@ -343,8 +343,8 @@ export struct AuditPage {
           GlassButton({
             text: '导出',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.exportAudits(); }
+            btnSize: 'small',
+            onTap: () => { this.exportAudits(); }
           })
         }
 

@@ -8,6 +8,12 @@ import { Agent } from '../../types';
 const KEY_AGENTS = 'agents:list';
 const KEY_CURRENT_AGENT_ID = 'agents:current_id';
 
+/** agent:switched 总线事件载荷（ArkTS 禁止非空对象字面量，故具名声明） */
+export interface AgentSwitchedEvent {
+  agentId: string;
+  agent: Agent;
+}
+
 export class AgentsStore {
   private state: StateManager = StateManager.getInstance();
   private bus: EventBus = EventBus.getInstance();
@@ -35,6 +41,7 @@ export class AgentsStore {
     const agent = this.agents.find(a => a.id === agentId);
     if (!agent) return;
     this.state.set(KEY_CURRENT_AGENT_ID, agentId);
-    this.bus.emit('agent:switched', { agentId, agent });
+    const payload: AgentSwitchedEvent = { agentId, agent };
+    this.bus.emit('agent:switched', payload);
   }
 }

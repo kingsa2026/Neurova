@@ -332,8 +332,8 @@ export struct AgentTrajectoryPage {
           GlassButton({
             text: '查看详情',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.showDetail(point); }
+            btnSize: 'small',
+            onTap: () => { this.showDetail(point); }
           })
         }
         .width('100%')
@@ -364,7 +364,7 @@ export struct AgentTrajectoryPage {
         .onClick(() => { this.closeDetail(); })
 
       // 面板层：居中展示详情
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           // 标题
           Text('轨迹点详情')
@@ -417,8 +417,8 @@ export struct AgentTrajectoryPage {
           GlassButton({
             text: '关闭',
             type: 'primary',
-            size: 'medium',
-            onClick: () => { this.closeDetail(); }
+            btnSize: 'medium',
+            onTap: () => { this.closeDetail(); }
           })
             .margin({ top: this.sm.getSpacing('md') })
         }

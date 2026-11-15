@@ -287,8 +287,8 @@ export struct MetacognitionPage {
           GlassButton({
             text: '新建',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.handleCreate(); }
+            btnSize: 'small',
+            onTap: () => { this.handleCreate(); }
           })
         }
 
@@ -453,14 +453,14 @@ export struct MetacognitionPage {
           GlassButton({
             text: '查看',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.openDetail(record); }
+            btnSize: 'small',
+            onTap: () => { this.openDetail(record); }
           })
           GlassButton({
             text: '删除',
             type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmDelete(record); }
+            btnSize: 'small',
+            onTap: () => { this.confirmDelete(record); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }
@@ -490,7 +490,7 @@ export struct MetacognitionPage {
         .onClick(() => { this.closeDetail(); })
 
       // 面板层：居中展示
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           // 标题行：图标 + type 标签
           Row() {
@@ -577,9 +577,9 @@ export struct MetacognitionPage {
           GlassButton({
             text: '关闭',
             type: 'primary',
-            size: 'medium',
+            btnSize: 'medium',
             block: true,
-            onClick: () => { this.closeDetail(); }
+            onTap: () => { this.closeDetail(); }
           })
             .margin({ top: this.sm.getSpacing('md') })
         }

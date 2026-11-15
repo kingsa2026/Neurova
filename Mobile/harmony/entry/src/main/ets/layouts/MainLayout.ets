@@ -171,12 +171,12 @@ export struct MainLayout {
     Row() {
       // 侧边栏（平板/桌面显示）
       if (this.sidebarCollapsed) {
-        GlassNav({ title: 'Neurova', collapsed: true, width: 240 }) {
+        GlassNav({ title: 'Neurova', collapsed: true, navWidth: 240 }) {
           this.navItems();
         }
         .width(120)
       } else {
-        GlassNav({ title: 'Neurova', collapsed: false, width: 240 }) {
+        GlassNav({ title: 'Neurova', collapsed: false, navWidth: 240 }) {
           this.navItems();
         }
         .width(240)

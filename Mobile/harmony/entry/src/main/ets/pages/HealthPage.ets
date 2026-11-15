@@ -41,6 +41,12 @@ import { SystemHealth, ServiceHealth } from '../libs/types';
 /** 日志标签 */
 const TAG = 'HealthPage';
 
+/** 服务状态精简条目（与 HealthStore.HealthData.services 的值同形；ArkTS 禁止对象字面量作类型，故具名声明） */
+interface ServiceStatusEntry {
+  status: string;
+  latency?: number;
+}
+
 // ===========================================================================
 // HealthViewHelper - 健康视图模型（纯函数，无 UI 依赖，可独立单元测试）
 //
@@ -183,9 +189,10 @@ export struct HealthPage {
    * 说明：HealthStore 只保存精简的 status + services 字典，丢弃 score/version 等
    */
   private toHealthData(sys: SystemHealth): HealthData {
-    const services: Record<string, { status: string; latency?: number }> = {};
+    const services: Record<string, ServiceStatusEntry> = {};
     for (const s of sys.services) {
-      services[s.name] = { status: s.status, latency: s.latency };
+      const entry: ServiceStatusEntry = { status: s.status, latency: s.latency };
+      services[s.name] = entry;
     }
     return { status: sys.status, services };
   }
@@ -201,7 +208,9 @@ export struct HealthPage {
       const services: ServiceHealth[] = [];
       const entries = Object.entries(cached.services);
       for (let i = 0; i < entries.length; i++) {
-        const [name, info] = entries[i];
+        // ArkTS 禁止解构声明，改为按索引取值
+        const name = entries[i][0];
+        const info = entries[i][1];
         services.push({
           name: name,
           status: info.status as 'healthy' | 'degraded' | 'down' | 'unknown',
@@ -272,8 +281,8 @@ export struct HealthPage {
         GlassButton({
           text: '刷新',
           type: 'primary',
-          size: 'small',
-          onClick: () => { this.handleRefresh(); }
+          btnSize: 'small',
+          onTap: () => { this.handleRefresh(); }
         })
       }
 
@@ -298,8 +307,8 @@ export struct HealthPage {
           GlassButton({
             text: '重新加载',
             type: 'primary',
-            size: 'medium',
-            onClick: () => { this.handleRefresh(); }
+            btnSize: 'medium',
+            onTap: () => { this.handleRefresh(); }
           })
         }
         .width('100%')
@@ -341,48 +350,50 @@ export struct HealthPage {
   /** 区块1：整体健康大卡片 - 大号分数 + 状态徽章 + 检查时间 */
   @Builder
   buildOverallCard() {
-    GlassCard({ title: '系统健康' }) {
-      Column() {
-        // 大号健康分数（颜色按分数：≥80 success / 50-79 warning / <50 error）
-        Row() {
-          Text(String(this.health!.score))
-            .fontSize(this.sm.getFontSize('display'))
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.sm.getColor(HealthViewHelper.getScoreColor(this.health!.score)))
-          Text(' / 100')
-            .fontSize(this.sm.getFontSize('body'))
-            .fontColor(this.sm.getColor('text_secondary'))
-            .alignSelf(ItemAlign.Bottom)
-            .margin({ bottom: 6, left: 4 })
-        }
-        .alignItems(VerticalAlign.Bottom)
-        .margin({ top: this.sm.getSpacing('sm') })
-
-        // 整体状态徽章（圆点 + 文案）
-        Row() {
-          Row()
-            .width(10)
-            .height(10)
-            .borderRadius(5)
-            .backgroundColor(this.sm.getColor(HealthViewHelper.getStatusColor(this.health!.status)))
-          Text(this.getStatusLabel(this.health!.status))
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor(HealthViewHelper.getStatusColor(this.health!.status)))
-            .margin({ left: 6 })
-        }
-        .margin({ top: this.sm.getSpacing('sm') })
-        .alignItems(VerticalAlign.Center)
-
-        // 检查时间（相对时间，无值回退"未知"）
-        Text(this.checkedAtMs > 0
-          ? `检查于 ${HealthViewHelper.formatRelativeTime(this.checkedAtMs)}`
-          : '检查时间未知')
-          .fontSize(this.sm.getFontSize('caption'))
-          .fontColor(this.sm.getColor('text_disabled'))
+    Column() {
+      GlassCard({ title: '系统健康' }) {
+        Column() {
+          // 大号健康分数（颜色按分数：≥80 success / 50-79 warning / <50 error）
+          Row() {
+            Text(String(this.health!.score))
+              .fontSize(this.sm.getFontSize('display'))
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.sm.getColor(HealthViewHelper.getScoreColor(this.health!.score)))
+            Text(' / 100')
+              .fontSize(this.sm.getFontSize('body'))
+              .fontColor(this.sm.getColor('text_secondary'))
+              .alignSelf(ItemAlign.End)
+              .margin({ bottom: 6, left: 4 })
+          }
+          .alignItems(VerticalAlign.Bottom)
           .margin({ top: this.sm.getSpacing('sm') })
+
+          // 整体状态徽章（圆点 + 文案）
+          Row() {
+            Row()
+              .width(10)
+              .height(10)
+              .borderRadius(5)
+              .backgroundColor(this.sm.getColor(HealthViewHelper.getStatusColor(this.health!.status)))
+            Text(this.getStatusLabel(this.health!.status))
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor(HealthViewHelper.getStatusColor(this.health!.status)))
+              .margin({ left: 6 })
+          }
+          .margin({ top: this.sm.getSpacing('sm') })
+          .alignItems(VerticalAlign.Center)
+
+          // 检查时间（相对时间，无值回退"未知"）
+          Text(this.checkedAtMs > 0
+            ? `检查于 ${HealthViewHelper.formatRelativeTime(this.checkedAtMs)}`
+            : '检查时间未知')
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_disabled'))
+            .margin({ top: this.sm.getSpacing('sm') })
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
       }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
     .margin({ bottom: this.sm.getSpacing('md') })
@@ -391,22 +402,24 @@ export struct HealthPage {
   /** 区块2：服务列表 - 每项 GlassCard 含名称/状态/延迟/版本/uptime/消息/延迟进度条 */
   @Builder
   buildServicesSection() {
-    GlassCard({ title: '服务状态' }) {
-      if (this.health!.services.length === 0) {
-        // 空服务列表占位
-        Text('暂无服务')
-          .fontSize(this.sm.getFontSize('caption'))
-          .fontColor(this.sm.getColor('text_disabled'))
-          .padding(this.sm.getSpacing('lg'))
-      } else {
-        // 服务列表（纵向排列，每项之间留 12 间距）
-        Column() {
-          ForEach(this.health!.services, (svc: ServiceHealth) => {
-            this.buildServiceItem(svc)
-          }, (svc: ServiceHealth) => svc.name)
+    Column() {
+      GlassCard({ title: '服务状态' }) {
+        if (this.health!.services.length === 0) {
+          // 空服务列表占位
+          Text('暂无服务')
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_disabled'))
+            .padding(this.sm.getSpacing('lg'))
+        } else {
+          // 服务列表（纵向排列，每项之间留 12 间距）
+          Column() {
+            ForEach(this.health!.services, (svc: ServiceHealth) => {
+              this.buildServiceItem(svc)
+            }, (svc: ServiceHealth) => svc.name)
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
         }
-        .width('100%')
-        .alignItems(HorizontalAlign.Start)
       }
     }
     .width('100%')

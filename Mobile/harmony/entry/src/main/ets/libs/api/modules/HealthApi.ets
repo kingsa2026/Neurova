@@ -14,7 +14,11 @@ import { HttpClient } from '../HttpClient';
 import { ApiResponse, SystemHealth, ServiceHealth } from '../../types';
 
 export class HealthApi {
-  constructor(private client: HttpClient) {}
+  private client: HttpClient;
+
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
 
   /** 检查系统整体健康 */
   async check(): Promise<ApiResponse<SystemHealth>> {

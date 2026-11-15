@@ -377,8 +377,8 @@ export struct NotificationPage {
           GlassButton({
             text: '全部已读',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.markAllRead(); }
+            btnSize: 'small',
+            onTap: () => { this.markAllRead(); }
           })
         }
 
@@ -485,89 +485,91 @@ export struct NotificationPage {
   /** 单条通知卡片：左侧红点 + 类型徽章 + 标题（未读加粗）+ 时间 + 正文 + 操作按钮 */
   @Builder
   buildNotificationCard(n: NotificationItem) {
-    GlassCard() {
-      Row() {
-        // 左侧红点（未读才显示）
-        if (!n.read) {
-          Row()
-            .width(8)
-            .height(8)
-            .borderRadius(4)
-            .backgroundColor(this.sm.getColor(NotificationViewHelper.getReadStatusColor(n.read)))
-            .margin({ right: this.sm.getSpacing('sm') })
-        }
+    Column() {
+      GlassCard() {
+        Row() {
+          // 左侧红点（未读才显示）
+          if (!n.read) {
+            Row()
+              .width(8)
+              .height(8)
+              .borderRadius(4)
+              .backgroundColor(this.sm.getColor(NotificationViewHelper.getReadStatusColor(n.read)))
+              .margin({ right: this.sm.getSpacing('sm') })
+          }
 
-        // 右侧内容
-        Column() {
-          // 上部：类型徽章 + 时间
-          Row() {
+          // 右侧内容
+          Column() {
+            // 上部：类型徽章 + 时间
             Row() {
-              Text(NotificationViewHelper.getTypeIcon(n.type))
-                .fontSize(14)
-              Text(NotificationViewHelper.getTypeLabel(n.type))
+              Row() {
+                Text(NotificationViewHelper.getTypeIcon(n.type))
+                  .fontSize(14)
+                Text(NotificationViewHelper.getTypeLabel(n.type))
+                  .fontSize(this.sm.getFontSize('caption'))
+                  .fontColor(this.sm.getColor(NotificationViewHelper.getTypeColor(n.type)))
+                  .margin({ left: 4 })
+              }
+              .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+              .borderRadius(10)
+              .backgroundColor(this.sm.getColor('surface'))
+
+              Text(NotificationViewHelper.formatCreatedAt(n.createdAt))
                 .fontSize(this.sm.getFontSize('caption'))
-                .fontColor(this.sm.getColor(NotificationViewHelper.getTypeColor(n.type)))
-                .margin({ left: 4 })
+                .fontColor(this.sm.getColor('text_disabled'))
+                .layoutWeight(1)
+                .margin({ left: 8 })
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .textAlign(TextAlign.End)
             }
-            .padding({ left: 8, right: 8, top: 2, bottom: 2 })
-            .borderRadius(10)
-            .backgroundColor(this.sm.getColor('surface'))
+            .alignItems(VerticalAlign.Center)
 
-            Text(NotificationViewHelper.formatCreatedAt(n.createdAt))
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_disabled'))
-              .layoutWeight(1)
-              .margin({ left: 8 })
-              .maxLines(1)
+            // 标题（未读加粗）
+            Text(NotificationViewHelper.truncateTitle(n.title, DEFAULT_TRUNCATE_LEN))
+              .fontSize(this.sm.getFontSize('subtitle'))
+              .fontWeight(n.read ? FontWeight.Normal : FontWeight.Bold)
+              .fontColor(this.sm.getColor('text_primary'))
+              .maxLines(2)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .textAlign(TextAlign.End)
-          }
-          .alignItems(VerticalAlign.Center)
+              .margin({ top: 8 })
 
-          // 标题（未读加粗）
-          Text(NotificationViewHelper.truncateTitle(n.title, DEFAULT_TRUNCATE_LEN))
-            .fontSize(this.sm.getFontSize('subtitle'))
-            .fontWeight(n.read ? FontWeight.Normal : FontWeight.Bold)
-            .fontColor(this.sm.getColor('text_primary'))
-            .maxLines(2)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .margin({ top: 8 })
+            // 正文摘要
+            Text(n.body)
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_secondary'))
+              .maxLines(3)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .margin({ top: 4 })
 
-          // 正文摘要
-          Text(n.body)
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_secondary'))
-            .maxLines(3)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .margin({ top: 4 })
-
-          // 操作按钮：标记已读 / 删除
-          Row() {
-            if (!n.read) {
+            // 操作按钮：标记已读 / 删除
+            Row() {
+              if (!n.read) {
+                GlassButton({
+                  text: '标记已读',
+                  type: 'default',
+                  btnSize: 'small',
+                  onTap: () => { this.markRead(n.id); }
+                })
+              }
               GlassButton({
-                text: '标记已读',
-                type: 'default',
-                size: 'small',
-                onClick: () => { this.markRead(n.id); }
+                text: '删除',
+                type: 'danger',
+                btnSize: 'small',
+                onTap: () => { this.confirmDelete(n); }
               })
+                .margin({ left: this.sm.getSpacing('sm') })
             }
-            GlassButton({
-              text: '删除',
-              type: 'danger',
-              size: 'small',
-              onClick: () => { this.confirmDelete(n); }
-            })
-              .margin({ left: this.sm.getSpacing('sm') })
+            .width('100%')
+            .justifyContent(FlexAlign.End)
+            .margin({ top: this.sm.getSpacing('md') })
           }
-          .width('100%')
-          .justifyContent(FlexAlign.End)
-          .margin({ top: this.sm.getSpacing('md') })
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
         }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
+        .width('100%')
+        .alignItems(VerticalAlign.Top)
       }
-      .width('100%')
-      .alignItems(VerticalAlign.Top)
     }
     .width('100%')
     .onClick(() => { this.handleClick(n); })

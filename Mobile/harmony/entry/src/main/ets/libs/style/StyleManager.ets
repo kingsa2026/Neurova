@@ -32,74 +32,69 @@ export type FontSizeToken = 'caption' | 'body' | 'subtitle' | 'title' | 'headlin
 /** 圆角 token 名 */
 export type RadiusToken = 'none' | 'xs' | 'sm' | 'md' | 'lg' | 'xl' | 'full';
 
-/** 亮色主题颜色表 */
-const LIGHT_COLORS: Record<string, string> = {
-  primary: '#1890ff',
-  secondary: '#52c41a',
-  success: '#52c41a',
-  warning: '#faad14',
-  error: '#ff4d4f',
-  info: '#1890ff',
-  background: '#ffffff',
-  surface: '#f5f5f5',
-  text_primary: '#262626',
-  text_secondary: '#8c8c8c',
-  text_disabled: '#bfbfbf',
-  text_on_primary: '#ffffff',
-  overlay_mask: 'rgba(0,0,0,0.5)',
-  border: '#d9d9d9',
-  divider: '#f0f0f0',
-};
+/** 亮色主题颜色表（ArkTS 禁非空字面量标注 Record，改为空表逐键赋值） */
+const LIGHT_COLORS: Record<string, string> = {};
+LIGHT_COLORS['primary'] = '#1890ff';
+LIGHT_COLORS['secondary'] = '#52c41a';
+LIGHT_COLORS['success'] = '#52c41a';
+LIGHT_COLORS['warning'] = '#faad14';
+LIGHT_COLORS['error'] = '#ff4d4f';
+LIGHT_COLORS['info'] = '#1890ff';
+LIGHT_COLORS['background'] = '#ffffff';
+LIGHT_COLORS['surface'] = '#f5f5f5';
+LIGHT_COLORS['text_primary'] = '#262626';
+LIGHT_COLORS['text_secondary'] = '#8c8c8c';
+LIGHT_COLORS['text_disabled'] = '#bfbfbf';
+LIGHT_COLORS['text_on_primary'] = '#ffffff';
+LIGHT_COLORS['overlay_mask'] = 'rgba(0,0,0,0.5)';
+LIGHT_COLORS['border'] = '#d9d9d9';
+LIGHT_COLORS['divider'] = '#f0f0f0';
 
-/** 暗色主题颜色表 */
-const DARK_COLORS: Record<string, string> = {
-  primary: '#177ddc',
-  secondary: '#49aa19',
-  success: '#49aa19',
-  warning: '#d89614',
-  error: '#d32029',
-  info: '#177ddc',
-  background: '#141414',
-  surface: '#1f1f1f',
-  text_primary: '#f0f0f0',
-  text_secondary: '#a6a6a6',
-  text_disabled: '#595959',
-  text_on_primary: '#ffffff',
-  overlay_mask: 'rgba(0,0,0,0.7)',
-  border: '#434343',
-  divider: '#303030',
-};
+/** 暗色主题颜色表（同上，空表逐键赋值） */
+const DARK_COLORS: Record<string, string> = {};
+DARK_COLORS['primary'] = '#177ddc';
+DARK_COLORS['secondary'] = '#49aa19';
+DARK_COLORS['success'] = '#49aa19';
+DARK_COLORS['warning'] = '#d89614';
+DARK_COLORS['error'] = '#d32029';
+DARK_COLORS['info'] = '#177ddc';
+DARK_COLORS['background'] = '#141414';
+DARK_COLORS['surface'] = '#1f1f1f';
+DARK_COLORS['text_primary'] = '#f0f0f0';
+DARK_COLORS['text_secondary'] = '#a6a6a6';
+DARK_COLORS['text_disabled'] = '#595959';
+DARK_COLORS['text_on_primary'] = '#ffffff';
+DARK_COLORS['overlay_mask'] = 'rgba(0,0,0,0.7)';
+DARK_COLORS['border'] = '#434343';
+DARK_COLORS['divider'] = '#303030';
 
-/** 间距表（fp） */
-const SPACING: Record<string, number> = {
-  xs: 4,
-  sm: 8,
-  md: 16,
-  lg: 24,
-  xl: 32,
-  xxl: 48,
-};
+/** 间距表（fp，空表逐键赋值） */
+const SPACING: Record<string, number> = {};
+SPACING['xs'] = 4;
+SPACING['sm'] = 8;
+SPACING['md'] = 16;
+SPACING['lg'] = 24;
+SPACING['xl'] = 32;
+SPACING['xxl'] = 48;
 
-/** 字号表（fp） */
-const FONT_SIZE: Record<string, number> = {
-  caption: 12,
-  body: 16,
-  subtitle: 18,
-  title: 20,
-  headline: 24,
-  display: 32,
-};
+/** 字号表（fp，空表逐键赋值） */
+const FONT_SIZE: Record<string, number> = {};
+FONT_SIZE['caption'] = 12;
+FONT_SIZE['body'] = 16;
+FONT_SIZE['subtitle'] = 18;
+FONT_SIZE['title'] = 20;
+FONT_SIZE['headline'] = 24;
+FONT_SIZE['display'] = 32;
 
-/** 圆角表（vp） */
-const RADIUS: Record<string, number> = {
-  none: 0,
-  xs: 2,
-  sm: 4,
-  md: 8,
-  lg: 12,
-  xl: 16,
-  full: 9999,
-};
+/** 圆角表（vp，空表逐键赋值） */
+const RADIUS: Record<string, number> = {};
+RADIUS['none'] = 0;
+RADIUS['xs'] = 2;
+RADIUS['sm'] = 4;
+RADIUS['md'] = 8;
+RADIUS['lg'] = 12;
+RADIUS['xl'] = 16;
+RADIUS['full'] = 9999;
 
 export class StyleManager {
   private static instance: StyleManager;
@@ -120,14 +115,32 @@ export class StyleManager {
     return StyleManager.instance;
   }
 
+  /** 复制字符串 token 表（ArkTS 禁对象 spread，逐键显式拷贝） */
+  private static copyStringTokens(src: Record<string, string>): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const k of Object.keys(src)) {
+      out[k] = src[k];
+    }
+    return out;
+  }
+
+  /** 复制数值 token 表（同上） */
+  private static copyNumberTokens(src: Record<string, number>): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const k of Object.keys(src)) {
+      out[k] = src[k];
+    }
+    return out;
+  }
+
   /** 重置为默认 token */
   resetToDefaults(): void {
     this.colors = this.themeMode === ThemeMode.DARK
-      ? { ...DARK_COLORS }
-      : { ...LIGHT_COLORS };
-    this.spacing = { ...SPACING };
-    this.fontSize = { ...FONT_SIZE };
-    this.radius = { ...RADIUS };
+      ? StyleManager.copyStringTokens(DARK_COLORS)
+      : StyleManager.copyStringTokens(LIGHT_COLORS);
+    this.spacing = StyleManager.copyNumberTokens(SPACING);
+    this.fontSize = StyleManager.copyNumberTokens(FONT_SIZE);
+    this.radius = StyleManager.copyNumberTokens(RADIUS);
   }
 
   /** 获取当前主题模式 */

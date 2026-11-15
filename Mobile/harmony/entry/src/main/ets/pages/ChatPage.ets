@@ -33,6 +33,7 @@ import { EventBus, EventHandler } from '../libs/bus/EventBus';
 import { ConfigManager } from '../libs/config/ConfigManager';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
+import { MessageManager } from '../libs/message/MessageManager';
 import { WSChatChunk, Agent } from '../libs/types';
 import { Router } from '../routing/Router';
 import { ChunkBatcher } from '../libs/perf/ChunkBatcher';
@@ -74,6 +75,7 @@ export struct ChatPage {
   private config = ConfigManager.getInstance();
   private sm = StyleManager.getInstance();
   private logger = Logger.getInstance();
+  private msg = MessageManager.getInstance();
   private router = Router.getInstance();
 
   // List 滚动控制器：用于新消息到达时自动滚动到底部
@@ -388,8 +390,8 @@ export struct ChatPage {
           GlassButton({
             text: '停止',
             type: 'danger',
-            size: 'medium',
-            onClick: () => { this.stopGeneration(); }
+            btnSize: 'medium',
+            onTap: () => { this.stopGeneration(); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         } else {
@@ -397,9 +399,9 @@ export struct ChatPage {
           GlassButton({
             text: '发送',
             type: 'primary',
-            size: 'medium',
+            btnSize: 'medium',
             disabled: this.inputText.trim().length === 0,
-            onClick: () => { this.sendMessage(); }
+            onTap: () => { this.sendMessage(); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }
@@ -451,36 +453,38 @@ export struct ChatPage {
     } else {
       // assistant 消息：左对齐，玻璃色背景
       Row() {
-        GlassPanel({ variant: 'subtle', padding: this.sm.getSpacing('md'), radius: this.sm.getRadius('lg') }) {
-          Column() {
-            // Agent 署名
-            Text(this.getAgentName())
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_secondary'))
-              .margin({ bottom: 4 })
-            // 消息内容 + 流式光标
-            Row() {
-              Text(msg.content.length > 0 ? msg.content : (msg.isStreaming ? '' : '（空回复）'))
-                .fontSize(this.sm.getFontSize('body'))
-                .fontColor(this.sm.getColor('text_primary'))
-              // 流式生成中显示闪烁光标
-              if (msg.isStreaming) {
-                Text('▍')
+        Column() {
+          GlassPanel({ variant: 'subtle', innerPadding: this.sm.getSpacing('md'), radius: this.sm.getRadius('lg') }) {
+            Column() {
+              // Agent 署名
+              Text(this.getAgentName())
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+                .margin({ bottom: 4 })
+              // 消息内容 + 流式光标
+              Row() {
+                Text(msg.content.length > 0 ? msg.content : (msg.isStreaming ? '' : '（空回复）'))
                   .fontSize(this.sm.getFontSize('body'))
-                  .fontColor(this.sm.getColor('primary'))
-                  .margin({ left: 2 })
+                  .fontColor(this.sm.getColor('text_primary'))
+                // 流式生成中显示闪烁光标
+                if (msg.isStreaming) {
+                  Text('▍')
+                    .fontSize(this.sm.getFontSize('body'))
+                    .fontColor(this.sm.getColor('primary'))
+                    .margin({ left: 2 })
+                }
               }
+              .width('100%')
+              .alignItems(VerticalAlign.Bottom)
+              // 时间戳
+              Text(this.formatTime(msg.timestamp))
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_disabled'))
+                .margin({ top: 4 })
+                .alignSelf(ItemAlign.End)
             }
-            .width('100%')
-            .alignItems(VerticalAlign.Bottom)
-            // 时间戳
-            Text(this.formatTime(msg.timestamp))
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_disabled'))
-              .margin({ top: 4 })
-              .alignSelf(ItemAlign.End)
+            .alignItems(HorizontalAlign.Start)
           }
-          .alignItems(HorizontalAlign.Start)
         }
         .constraintSize({ maxWidth: '75%' })
       }

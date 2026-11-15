@@ -51,8 +51,13 @@ const CODE_LENGTH = 6;
 /** 配对成功后跳转 Dashboard 的延迟（毫秒），用于展示"配对成功"反馈 */
 const SUCCESS_REDIRECT_DELAY = 1500;
 
+/** 仅含业务码的最小响应形状（resFailed 判定用；ApiResponse 等结构天然兼容） */
+interface CodeOnlyResponse {
+  code: number;
+}
+
 /** ApiResponse 业务失败判定（code!==0） */
-function resFailed(res: { code: number }): boolean {
+function resFailed(res: CodeOnlyResponse): boolean {
   return res.code !== 0;
 }
 
@@ -274,19 +279,21 @@ export struct PairingPage {
         Scroll() {
           Column() {
             // 1. 当前设备信息卡片
-            GlassCard({ title: '当前设备' }) {
-              Column() {
-                Text(`${this.deviceInfo.brand} ${this.deviceInfo.model}`)
-                  .fontSize(this.sm.getFontSize('body'))
-                  .fontColor(this.sm.getColor('text_primary'))
+            Column() {
+              GlassCard({ title: '当前设备' }) {
+                Column() {
+                  Text(`${this.deviceInfo.brand} ${this.deviceInfo.model}`)
+                    .fontSize(this.sm.getFontSize('body'))
+                    .fontColor(this.sm.getColor('text_primary'))
 
-                Text(`系统：HarmonyOS ${this.deviceInfo.osVersion}`)
-                  .fontSize(this.sm.getFontSize('caption'))
-                  .fontColor(this.sm.getColor('text_secondary'))
-                  .margin({ top: 4 })
+                  Text(`系统：HarmonyOS ${this.deviceInfo.osVersion}`)
+                    .fontSize(this.sm.getFontSize('caption'))
+                    .fontColor(this.sm.getColor('text_secondary'))
+                    .margin({ top: 4 })
+                }
+                .width('100%')
+                .alignItems(HorizontalAlign.Start)
               }
-              .width('100%')
-              .alignItems(HorizontalAlign.Start)
             }
             .width('100%')
             .margin({ bottom: this.sm.getSpacing('md') })
@@ -347,81 +354,83 @@ export struct PairingPage {
   // ===========================================================================
   @Builder
   buildScanArea() {
-    GlassCard({ title: '扫码配对' }) {
-      Column() {
-        if (this.status === 'idle') {
-          // 待操作：大按钮触发扫码
-          Text('使用系统扫码识别 Neurova 配对二维码')
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_secondary'))
-            .textAlign(TextAlign.Center)
-            .margin({ bottom: this.sm.getSpacing('md') })
-
-          GlassButton({
-            text: '扫码配对',
-            type: 'primary',
-            block: true,
-            size: 'large',
-            onClick: () => { this.handleScan(); }
-          })
-        } else if (this.status === 'waiting') {
-          // 配对中：旋转动画 + 文案，回显识别到的配对码
-          LoadingProgress()
-            .width(48)
-            .height(48)
-            .color(this.sm.getColor('primary'))
-
-          Text('等待配对...')
-            .fontSize(this.sm.getFontSize('body'))
-            .fontColor(this.sm.getColor('text_secondary'))
-            .margin({ top: this.sm.getSpacing('sm') })
-
-          if (this.code.length === CODE_LENGTH) {
-            Text(`配对码：${this.code}`)
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_disabled'))
-              .margin({ top: this.sm.getSpacing('xs') })
-          }
-        } else if (this.status === 'success') {
-          // 成功：勾选 + 文案
-          Text('✓')
-            .fontSize(40)
-            .fontColor(this.sm.getColor('success'))
-          Text('配对成功')
-            .fontSize(this.sm.getFontSize('subtitle'))
-            .fontColor(this.sm.getColor('success'))
-            .margin({ top: this.sm.getSpacing('sm') })
-          Text('即将跳转仪表盘...')
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_secondary'))
-            .margin({ top: this.sm.getSpacing('xs') })
-        } else {
-          // 失败：错误信息 + 重试
-          Text('✗')
-            .fontSize(40)
-            .fontColor(this.sm.getColor('error'))
-          Text('配对失败')
-            .fontSize(this.sm.getFontSize('subtitle'))
-            .fontColor(this.sm.getColor('error'))
-            .margin({ top: this.sm.getSpacing('sm') })
-          if (this.errorMessage) {
-            Text(this.errorMessage)
+    Column() {
+      GlassCard({ title: '扫码配对' }) {
+        Column() {
+          if (this.status === 'idle') {
+            // 待操作：大按钮触发扫码
+            Text('使用系统扫码识别 Neurova 配对二维码')
               .fontSize(this.sm.getFontSize('caption'))
               .fontColor(this.sm.getColor('text_secondary'))
               .textAlign(TextAlign.Center)
-              .margin({ top: this.sm.getSpacing('xs'), bottom: this.sm.getSpacing('md') })
+              .margin({ bottom: this.sm.getSpacing('md') })
+
+            GlassButton({
+              text: '扫码配对',
+              type: 'primary',
+              block: true,
+              btnSize: 'large',
+              onTap: () => { this.handleScan(); }
+            })
+          } else if (this.status === 'waiting') {
+            // 配对中：旋转动画 + 文案，回显识别到的配对码
+            LoadingProgress()
+              .width(48)
+              .height(48)
+              .color(this.sm.getColor('primary'))
+
+            Text('等待配对...')
+              .fontSize(this.sm.getFontSize('body'))
+              .fontColor(this.sm.getColor('text_secondary'))
+              .margin({ top: this.sm.getSpacing('sm') })
+
+            if (this.code.length === CODE_LENGTH) {
+              Text(`配对码：${this.code}`)
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_disabled'))
+                .margin({ top: this.sm.getSpacing('xs') })
+            }
+          } else if (this.status === 'success') {
+            // 成功：勾选 + 文案
+            Text('✓')
+              .fontSize(40)
+              .fontColor(this.sm.getColor('success'))
+            Text('配对成功')
+              .fontSize(this.sm.getFontSize('subtitle'))
+              .fontColor(this.sm.getColor('success'))
+              .margin({ top: this.sm.getSpacing('sm') })
+            Text('即将跳转仪表盘...')
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_secondary'))
+              .margin({ top: this.sm.getSpacing('xs') })
+          } else {
+            // 失败：错误信息 + 重试
+            Text('✗')
+              .fontSize(40)
+              .fontColor(this.sm.getColor('error'))
+            Text('配对失败')
+              .fontSize(this.sm.getFontSize('subtitle'))
+              .fontColor(this.sm.getColor('error'))
+              .margin({ top: this.sm.getSpacing('sm') })
+            if (this.errorMessage) {
+              Text(this.errorMessage)
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+                .textAlign(TextAlign.Center)
+                .margin({ top: this.sm.getSpacing('xs'), bottom: this.sm.getSpacing('md') })
+            }
+            GlassButton({
+              text: '重试',
+              type: 'primary',
+              block: true,
+              onTap: () => { this.resetToIdle(); }
+            })
+              .margin({ top: this.sm.getSpacing('sm') })
           }
-          GlassButton({
-            text: '重试',
-            type: 'primary',
-            block: true,
-            onClick: () => { this.resetToIdle(); }
-          })
-            .margin({ top: this.sm.getSpacing('sm') })
         }
+        .width('100%')
+        .alignItems(HorizontalAlign.Center)
       }
-      .width('100%')
-      .alignItems(HorizontalAlign.Center)
     }
     .width('100%')
   }
@@ -431,96 +440,98 @@ export struct PairingPage {
   // ===========================================================================
   @Builder
   buildInputArea() {
-    GlassCard({ title: '输入配对码' }) {
-      Column() {
-        if (this.status === 'success') {
-          // 成功态：与扫码成功一致
-          Text('✓')
-            .fontSize(40)
-            .fontColor(this.sm.getColor('success'))
-          Text('配对成功')
-            .fontSize(this.sm.getFontSize('subtitle'))
-            .fontColor(this.sm.getColor('success'))
-            .margin({ top: this.sm.getSpacing('sm') })
-          Text('即将跳转仪表盘...')
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_secondary'))
-            .margin({ top: this.sm.getSpacing('xs') })
-        } else {
-          // 6 格分隔式输入框
-          Row() {
-            ForEach([0, 1, 2, 3, 4, 5], (i: number) => {
-              TextInput({ text: this.cells[i], placeholder: '' })
-                .type(InputType.Normal)
-                .maxLength(1)
-                .fontSize(22)
-                .textAlign(TextAlign.Center)
-                .width(40)
-                .height(50)
-                .margin({ left: i === 0 ? 0 : 4, right: 4 })
-                .borderRadius(this.sm.getRadius('sm'))
-                .border({
-                  width: 1,
-                  color: this.sm.getColor('border')
-                })
-                .backgroundColor(Color.Transparent)
-                .fontColor(this.sm.getColor('text_primary'))
-                .key(`pairing_cell_${i}`)
-                .enabled(this.status !== 'waiting')
-                .onChange((v: string) => { this.onCellChange(i, v); })
-            }, (i: number) => `cell_${i}`)
-          }
-          .width('100%')
-          .justifyContent(FlexAlign.Center)
-          .margin({ top: this.sm.getSpacing('sm'), bottom: this.sm.getSpacing('md') })
-
-          if (this.status === 'waiting') {
-            // 配对中：旋转动画 + 文案
-            LoadingProgress()
-              .width(36)
-              .height(36)
-              .color(this.sm.getColor('primary'))
-            Text('配对中...')
+    Column() {
+      GlassCard({ title: '输入配对码' }) {
+        Column() {
+          if (this.status === 'success') {
+            // 成功态：与扫码成功一致
+            Text('✓')
+              .fontSize(40)
+              .fontColor(this.sm.getColor('success'))
+            Text('配对成功')
+              .fontSize(this.sm.getFontSize('subtitle'))
+              .fontColor(this.sm.getColor('success'))
+              .margin({ top: this.sm.getSpacing('sm') })
+            Text('即将跳转仪表盘...')
               .fontSize(this.sm.getFontSize('caption'))
               .fontColor(this.sm.getColor('text_secondary'))
-              .margin({ top: this.sm.getSpacing('xs'), bottom: this.sm.getSpacing('sm') })
-          } else if (this.status === 'failed') {
-            // 失败：错误信息 + 重试（保留已输入 code，便于修正后重新提交）
-            if (this.errorMessage) {
+              .margin({ top: this.sm.getSpacing('xs') })
+          } else {
+            // 6 格分隔式输入框
+            Row() {
+              ForEach([0, 1, 2, 3, 4, 5], (i: number) => {
+                TextInput({ text: this.cells[i], placeholder: '' })
+                  .type(InputType.Normal)
+                  .maxLength(1)
+                  .fontSize(22)
+                  .textAlign(TextAlign.Center)
+                  .width(40)
+                  .height(50)
+                  .margin({ left: i === 0 ? 0 : 4, right: 4 })
+                  .borderRadius(this.sm.getRadius('sm'))
+                  .border({
+                    width: 1,
+                    color: this.sm.getColor('border')
+                  })
+                  .backgroundColor(Color.Transparent)
+                  .fontColor(this.sm.getColor('text_primary'))
+                  .key(`pairing_cell_${i}`)
+                  .enabled(this.status !== 'waiting')
+                  .onChange((v: string) => { this.onCellChange(i, v); })
+              }, (i: number) => `cell_${i}`)
+            }
+            .width('100%')
+            .justifyContent(FlexAlign.Center)
+            .margin({ top: this.sm.getSpacing('sm'), bottom: this.sm.getSpacing('md') })
+
+            if (this.status === 'waiting') {
+              // 配对中：旋转动画 + 文案
+              LoadingProgress()
+                .width(36)
+                .height(36)
+                .color(this.sm.getColor('primary'))
+              Text('配对中...')
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+                .margin({ top: this.sm.getSpacing('xs'), bottom: this.sm.getSpacing('sm') })
+            } else if (this.status === 'failed') {
+              // 失败：错误信息 + 重试（保留已输入 code，便于修正后重新提交）
+              if (this.errorMessage) {
+                Text(this.errorMessage)
+                  .fontSize(this.sm.getFontSize('caption'))
+                  .fontColor(this.sm.getColor('error'))
+                  .textAlign(TextAlign.Center)
+                  .margin({ bottom: this.sm.getSpacing('sm') })
+              }
+              GlassButton({
+                text: '重试',
+                type: 'primary',
+                block: true,
+                onTap: () => { this.retryInput(); }
+              })
+            } else {
+              // 待操作：确认配对按钮（code 不足 6 位时禁用）
+              GlassButton({
+                text: '确认配对',
+                type: 'primary',
+                block: true,
+                disabled: this.code.length !== CODE_LENGTH,
+                onTap: () => { this.confirmPairing(); }
+              })
+            }
+
+            // 通用错误信息兜底（非 failed 状态下若有残留错误也展示）
+            if (this.errorMessage && this.status !== 'failed') {
               Text(this.errorMessage)
                 .fontSize(this.sm.getFontSize('caption'))
                 .fontColor(this.sm.getColor('error'))
-                .textAlign(TextAlign.Center)
-                .margin({ bottom: this.sm.getSpacing('sm') })
+                .margin({ top: this.sm.getSpacing('xs') })
             }
-            GlassButton({
-              text: '重试',
-              type: 'primary',
-              block: true,
-              onClick: () => { this.retryInput(); }
-            })
-          } else {
-            // 待操作：确认配对按钮（code 不足 6 位时禁用）
-            GlassButton({
-              text: '确认配对',
-              type: 'primary',
-              block: true,
-              disabled: this.code.length !== CODE_LENGTH,
-              onClick: () => { this.confirmPairing(); }
-            })
-          }
-
-          // 通用错误信息兜底（非 failed 状态下若有残留错误也展示）
-          if (this.errorMessage && this.status !== 'failed') {
-            Text(this.errorMessage)
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('error'))
-              .margin({ top: this.sm.getSpacing('xs') })
           }
         }
+        .width('100%')
+        .alignItems(HorizontalAlign.Center)
       }
-      .width('100%')
-      .alignItems(HorizontalAlign.Center)
     }
     .width('100%')
   }

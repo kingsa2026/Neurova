@@ -13,8 +13,17 @@ export interface RegisterRequest {
   password: string;
 }
 
+/** 刷新 token 请求体 */
+export interface RefreshTokenRequest {
+  refresh_token: string;
+}
+
 export class AuthApi {
-  constructor(private client: HttpClient) {}
+  private client: HttpClient;
+
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
 
   /** 注册：POST /v1/auth/register */
   async register(data: RegisterRequest): Promise<ApiResponse<RegisterResult>> {
@@ -28,12 +37,14 @@ export class AuthApi {
 
   /** 登出 */
   async logout(): Promise<ApiResponse<Object>> {
-    return this.client.post<Object>('/v1/auth/logout', {});
+    const body: Record<string, Object> = {};
+    return this.client.post<Object>('/v1/auth/logout', body);
   }
 
   /** 刷新 token */
   async refresh(refreshToken: string): Promise<ApiResponse<AuthTokens>> {
-    return this.client.post<AuthTokens>('/v1/auth/refresh', { refresh_token: refreshToken });
+    const body: RefreshTokenRequest = { refresh_token: refreshToken };
+    return this.client.post<AuthTokens>('/v1/auth/refresh', body);
   }
 
   /** 获取当前用户信息 */

@@ -5,13 +5,14 @@
  * 设计：type 控制配色（primary/default/danger/ghost），size 控制内边距，disabled 控制交互与透明度
  *
  * 用法：
- *   GlassButton({ text: '确定', type: 'primary', block: true, onClick: () => {} })
- *   GlassButton({ type: 'default', onClick: () => {} }) {
+ *   GlassButton({ text: '确定', type: 'primary', block: true, onTap: () => {} })
+ *   GlassButton({ type: 'default', onTap: () => {} }) {
  *     Text('自定义内容')
  *   }
  */
 
 import { StyleManager } from '../../libs/style/StyleManager';
+import { GlassComponent, GlassStyle, GlassColorScheme } from './GlassComponent';
 
 // 样式单例
 const sm = StyleManager.getInstance();
@@ -23,7 +24,7 @@ export struct GlassButton {
   // 按钮类型：primary | default | danger | ghost
   @Prop type: string = 'default';
   // 按钮尺寸：small | medium | large
-  @Prop size: string = 'medium';
+  @Prop btnSize: string = 'medium';
   // 是否禁用
   @Prop disabled: boolean = false;
   // 是否撑满父容器宽度
@@ -31,11 +32,11 @@ export struct GlassButton {
   // 自定义按钮内容（覆盖 text）
   @BuilderParam content?: () => void;
   // 点击事件回调
-  onClick: () => void = () => {};
+  onTap: () => void = () => {};
 
   // 根据 size 获取内边距：small(8,16) medium(12,24) large(16,32)
   private getSizePadding(): Padding {
-    switch (this.size) {
+    switch (this.btnSize) {
       case 'small':
         return { top: 8, bottom: 8, left: 16, right: 16 };
       case 'large':
@@ -98,32 +99,32 @@ export struct GlassButton {
       GlassComponent({
         glassStyle: GlassStyle.BLUR_THIN,
         blurRadius: 20,
-        colorScheme: GlassColorScheme.LIGHT
+        colorScheme: GlassColorScheme.LIGHT,
+        boxWidth: '100%',
+        cornerRadius: sm.getRadius('lg'),
+        alpha: this.disabled ? 0.5 : 1,
+        pressable: !this.disabled,
+        onTap: () => {
+          this.onTap();
+        }
       }) {
         this.buildInner()
       }
-      .width('100%')
-      .borderRadius(sm.getRadius('lg'))
-      .opacity(this.disabled ? 0.5 : 1)
-      .enabled(!this.disabled)
-      .onClick(() => {
-        this.onClick();
-      })
     } else {
       // 内容宽度
       GlassComponent({
         glassStyle: GlassStyle.BLUR_THIN,
         blurRadius: 20,
-        colorScheme: GlassColorScheme.LIGHT
+        colorScheme: GlassColorScheme.LIGHT,
+        cornerRadius: sm.getRadius('lg'),
+        alpha: this.disabled ? 0.5 : 1,
+        pressable: !this.disabled,
+        onTap: () => {
+          this.onTap();
+        }
       }) {
         this.buildInner()
       }
-      .borderRadius(sm.getRadius('lg'))
-      .opacity(this.disabled ? 0.5 : 1)
-      .enabled(!this.disabled)
-      .onClick(() => {
-        this.onClick();
-      })
     }
   }
 }

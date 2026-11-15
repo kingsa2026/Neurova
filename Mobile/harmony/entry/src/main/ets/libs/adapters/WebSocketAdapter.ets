@@ -25,7 +25,8 @@
  *   session:created   会话创建确认
  */
 
-import { websocket } from '@kit.NetworkKit';
+import { webSocket } from '@kit.NetworkKit';
+import { BusinessError } from '@ohos.base';
 import { Logger } from '../logger/Logger';
 import { EventBus } from '../bus/EventBus';
 import { ConfigManager } from '../config/ConfigManager';
@@ -57,6 +58,29 @@ interface ErrorEventData {
   message?: string;
 }
 
+/** ws:connected 事件负载 */
+interface WsConnectedPayload {
+  url: string;
+}
+
+/** ws:disconnected 事件负载（字段可选以兼容两条派发路径） */
+interface WsDisconnectedPayload {
+  code?: number;
+  reason?: string;
+  manual?: boolean;
+}
+
+/** ws:error 事件负载 */
+interface WsErrorPayload {
+  message: string;
+  error?: Error;
+}
+
+/** ws:message 事件负载 */
+interface WsMessagePayload {
+  data: string;
+}
+
 export class WebSocketAdapter {
   private static instance: WebSocketAdapter;
   private logger: Logger = Logger.getInstance();
@@ -67,7 +91,7 @@ export class WebSocketAdapter {
   private apiFacade: ApiFacade = ApiFacade.getInstance();
 
   /** 鸿蒙 WebSocket 实例 */
-  private ws: websocket.WebSocket | null = null;
+  private ws: webSocket.WebSocket | null = null;
   /** 当前是否已连接 */
   private connected: boolean = false;
   /** 心跳定时器 ID（setTimeout 句柄） */
@@ -115,7 +139,7 @@ export class WebSocketAdapter {
     this.cleanupWebSocket();
 
     // 创建新 WebSocket 实例并注册事件回调
-    this.ws = websocket.createWebSocket();
+    this.ws = webSocket.createWebSocket();
     this.registerEvents();
 
     // 构造完整 URL（含 token query 参数）
@@ -138,7 +162,8 @@ export class WebSocketAdapter {
         `WebSocket 连接失败: ${err.message}`,
         ErrorCategory.WEBSOCKET,
       );
-      this.bus.emit('ws:error', { message: err.message, error: err });
+      const payload: WsErrorPayload = { message: err.message, error: err };
+      this.bus.emit('ws:error', payload);
       throw new Error(`[WebSocketAdapter] 连接失败: ${err.message}`);
     }
   }
@@ -165,7 +190,8 @@ export class WebSocketAdapter {
     }
 
     // 主动断开由此处统一发一次 disconnected 事件
-    this.bus.emit('ws:disconnected', { reason: 'manual' });
+    const payload: WsDisconnectedPayload = { reason: 'manual' };
+    this.bus.emit('ws:disconnected', payload);
   }
 
   /**
@@ -214,14 +240,22 @@ export class WebSocketAdapter {
       // 连接成功后重置重连计数
       this.reconnectCount = 0;
       this.logger.info(TAG, 'WebSocket 已连接');
-      this.bus.emit('ws:connected', { url: this.lastUrl });
+      const payload: WsConnectedPayload = { url: this.lastUrl };
+      this.bus.emit('ws:connected', payload);
       // 启动心跳保活
       this.startHeartbeat();
     });
 
-    // 收到消息
-    this.ws.on('message', (value: string, data: ArrayBuffer) => {
-      this.handleMessage(value);
+    // 收到消息：SDK 签名为 AsyncCallback<string | ArrayBuffer>，即 (err, data) 两参回调；
+    // 文本帧按 JSON 消息分发，二进制帧不在本适配层处理范围
+    this.ws.on('message', (err: BusinessError, data: string | ArrayBuffer) => {
+      if (err) {
+        this.logger.error(TAG, 'WebSocket 消息接收错误', err);
+        return;
+      }
+      if (typeof data === 'string') {
+        this.handleMessage(data);
+      }
     });
 
     // 连接关闭
@@ -237,7 +271,8 @@ export class WebSocketAdapter {
         // 主动关闭：由 disconnect() 负责发事件，此处不处理
         return;
       }
-      this.bus.emit('ws:disconnected', { code, reason, manual: false });
+      const payload: WsDisconnectedPayload = { code, reason, manual: false };
+      this.bus.emit('ws:disconnected', payload);
       if (code === 4001) {
         // 凭证失效（一次性 ticket 已消费/过期）：先续签再重连；
         // 设备被解除时 refresh 会拒绝 → 发 device_deregistered 并停止（唯一重扫路径）
@@ -258,14 +293,16 @@ export class WebSocketAdapter {
         `WebSocket 错误: ${message}`,
         ErrorCategory.WEBSOCKET,
       );
-      this.bus.emit('ws:error', { message });
+      const payload: WsErrorPayload = { message };
+      this.bus.emit('ws:error', payload);
     });
   }
 
   /** 处理收到的消息：分发原始事件 + 调用注册处理器 + 按 type 路由到 EventBus */
   private handleMessage(raw: string): void {
     // 1. 发送原始消息事件
-    this.bus.emit('ws:message', { data: raw });
+    const payload: WsMessagePayload = { data: raw };
+    this.bus.emit('ws:message', payload);
 
     // 2. 调用外部注册的原始消息处理器（异常隔离）
     for (const handler of this.messageHandlers) {
@@ -401,7 +438,8 @@ export class WebSocketAdapter {
       if (res.code !== 0 || !res.data || !res.data.connectTicket) {
         // 设备已解除/不在册：停止重连并点名（唯一需要重新配对的路径）
         this.logger.warn(TAG, '续签被拒，设备可能已解除配对');
-        this.bus.emit('ws:error', { message: 'device_deregistered' });
+        const payload: WsErrorPayload = { message: 'device_deregistered' };
+        this.bus.emit('ws:error', payload);
         this.errorManager.reportError(
           'device_deregistered',
           '设备配对已失效，请重新扫码配对',

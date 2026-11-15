@@ -119,81 +119,83 @@ export struct LoginPage {
 
       // 表单层：垂直居中
       Column() {
-        GlassPanel({ variant: 'elevated', padding: 24, radius: 16 }) {
-          Column() {
-            // 主标题
-            Text('Neurova')
-              .fontSize(32)
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.sm.getColor('text_primary'))
+        Column() {
+          GlassPanel({ variant: 'elevated', innerPadding: 24, radius: 16 }) {
+            Column() {
+              // 主标题
+              Text('Neurova')
+                .fontSize(32)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(this.sm.getColor('text_primary'))
 
-            // 副标题
-            Text('登录')
-              .fontSize(16)
-              .fontColor(this.sm.getColor('text_secondary'))
-              .margin({ top: 4 })
+              // 副标题
+              Text('登录')
+                .fontSize(16)
+                .fontColor(this.sm.getColor('text_secondary'))
+                .margin({ top: 4 })
 
-            // 用户名输入框
-            GlassInput({
-              placeholder: '用户名',
-              value: this.username,
-              type: 'text',
-              onChange: (v: string) => { this.username = v; }
-            })
-              .margin({ top: 24 })
+              // 用户名输入框
+              GlassInput({
+                placeholder: '用户名',
+                value: this.username,
+                type: 'text',
+                onChange: (v: string) => { this.username = v; }
+              })
+                .margin({ top: 24 })
 
-            // 密码输入框（间距 16）
-            GlassInput({
-              placeholder: '密码',
-              value: this.password,
-              type: 'password',
-              onChange: (v: string) => { this.password = v; }
-            })
+              // 密码输入框（间距 16）
+              GlassInput({
+                placeholder: '密码',
+                value: this.password,
+                type: 'password',
+                onChange: (v: string) => { this.password = v; }
+              })
+                .margin({ top: 16 })
+
+              // 记住我：ArkUI Checkbox + 文本（点击文本也可切换）
+              Row() {
+                Checkbox({ name: 'remember', group: 'login' })
+                  .select(this.remember)
+                  .selectedColor(this.sm.getColor('primary'))
+                  .onChange((v: boolean) => { this.remember = v; })
+                Text('记住我')
+                  .fontSize(14)
+                  .fontColor(this.sm.getColor('text_secondary'))
+                  .margin({ left: 8 })
+                  .onClick(() => { this.remember = !this.remember; })
+              }
+              .width('100%')
+              .alignItems(VerticalAlign.Center)
               .margin({ top: 16 })
 
-            // 记住我：ArkUI Checkbox + 文本（点击文本也可切换）
-            Row() {
-              Checkbox({ name: 'remember', group: 'login' })
-                .select(this.remember)
-                .selectedColor(this.sm.getColor('primary'))
-                .onChange((v: boolean) => { this.remember = v; })
-              Text('记住我')
-                .fontSize(14)
-                .fontColor(this.sm.getColor('text_secondary'))
-                .margin({ left: 8 })
-                .onClick(() => { this.remember = !this.remember; })
+              // 登录按钮：primary + block，loading 时禁用并显示"登录中..."
+              GlassButton({
+                text: this.loading ? '登录中...' : '登录',
+                type: 'primary',
+                block: true,
+                disabled: this.loading,
+                onTap: () => { this.handleLogin(); }
+              })
+                .margin({ top: 24 })
+
+              // 注册链接：居中
+              Row() {
+                Text('还没账号？')
+                  .fontSize(14)
+                  .fontColor(this.sm.getColor('text_secondary'))
+                Text('注册')
+                  .fontSize(14)
+                  .fontColor(this.sm.getColor('primary'))
+                  .margin({ left: 4 })
+                  .onClick(() => { this.handleRegister(); })
+              }
+              .width('100%')
+              .justifyContent(FlexAlign.Center)
+              .margin({ top: 16 })
             }
             .width('100%')
-            .alignItems(VerticalAlign.Center)
-            .margin({ top: 16 })
-
-            // 登录按钮：primary + block，loading 时禁用并显示"登录中..."
-            GlassButton({
-              text: this.loading ? '登录中...' : '登录',
-              type: 'primary',
-              block: true,
-              disabled: this.loading,
-              onClick: () => { this.handleLogin(); }
-            })
-              .margin({ top: 24 })
-
-            // 注册链接：居中
-            Row() {
-              Text('还没账号？')
-                .fontSize(14)
-                .fontColor(this.sm.getColor('text_secondary'))
-              Text('注册')
-                .fontSize(14)
-                .fontColor(this.sm.getColor('primary'))
-                .margin({ left: 4 })
-                .onClick(() => { this.handleRegister(); })
-            }
-            .width('100%')
-            .justifyContent(FlexAlign.Center)
-            .margin({ top: 16 })
+            .alignItems(HorizontalAlign.Center)
           }
-          .width('100%')
-          .alignItems(HorizontalAlign.Center)
         }
         .width(360)
       }

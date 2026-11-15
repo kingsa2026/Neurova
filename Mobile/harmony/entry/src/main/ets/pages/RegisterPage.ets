@@ -128,11 +128,14 @@ interface NavigationReplacePayload {
 export class RegisterController {
   private logger: Logger = Logger.getInstance();
   private msg: MessageManager = MessageManager.getInstance();
+  // ArkTS 不支持构造器参数属性，改为显式字段声明 + 构造器内赋值
+  private authApi: AuthApi;
+  private bus: EventBus;
 
-  constructor(
-    private authApi: AuthApi,
-    private bus: EventBus,
-  ) {}
+  constructor(authApi: AuthApi, bus: EventBus) {
+    this.authApi = authApi;
+    this.bus = bus;
+  }
 
   /**
    * 提交注册表单
@@ -249,94 +252,96 @@ export struct RegisterPage {
 
         // 表单容器：居中玻璃面板
         Column() {
-          GlassPanel({ variant: 'elevated', padding: 24, radius: 16 }) {
-            Column() {
-              // 主标题
-              Text('Neurova')
-                .fontSize(32)
-                .fontWeight(FontWeight.Bold)
-                .fontColor(this.sm.getColor('text_primary'))
+          Column() {
+            GlassPanel({ variant: 'elevated', innerPadding: 24, radius: 16 }) {
+              Column() {
+                // 主标题
+                Text('Neurova')
+                  .fontSize(32)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor(this.sm.getColor('text_primary'))
 
-              // 副标题
-              Text('创建账号')
-                .fontSize(16)
-                .fontColor(this.sm.getColor('text_secondary'))
-                .margin({ top: 4 })
-
-              // 用户名输入框
-              GlassInput({
-                placeholder: '用户名（3-20 字符）',
-                value: this.username,
-                type: 'text',
-                onChange: (v: string) => { this.username = v; }
-              })
-                .margin({ top: 24 })
-
-              // 邮箱输入框
-              GlassInput({
-                placeholder: '邮箱',
-                value: this.email,
-                type: 'text',
-                onChange: (v: string) => { this.email = v; }
-              })
-                .margin({ top: 16 })
-
-              // 密码输入框
-              GlassInput({
-                placeholder: '密码（≥8 字符）',
-                value: this.password,
-                type: 'password',
-                onChange: (v: string) => { this.password = v; }
-              })
-                .margin({ top: 16 })
-
-              // 确认密码输入框
-              GlassInput({
-                placeholder: '确认密码',
-                value: this.confirmPassword,
-                type: 'password',
-                onChange: (v: string) => { this.confirmPassword = v; }
-              })
-                .margin({ top: 16 })
-
-              // 同意条款：Checkbox + 文本（点击文本也可切换）
-              Row() {
-                Checkbox({ name: 'agreedTerms', group: 'register' })
-                  .select(this.agreedTerms)
-                  .selectedColor(this.sm.getColor('primary'))
-                  .onChange((v: boolean) => { this.agreedTerms = v; })
-                Text('我已阅读并同意服务条款')
-                  .fontSize(14)
+                // 副标题
+                Text('创建账号')
+                  .fontSize(16)
                   .fontColor(this.sm.getColor('text_secondary'))
-                  .margin({ left: 8 })
-                  .onClick(() => { this.agreedTerms = !this.agreedTerms; })
+                  .margin({ top: 4 })
+
+                // 用户名输入框
+                GlassInput({
+                  placeholder: '用户名（3-20 字符）',
+                  value: this.username,
+                  type: 'text',
+                  onChange: (v: string) => { this.username = v; }
+                })
+                  .margin({ top: 24 })
+
+                // 邮箱输入框
+                GlassInput({
+                  placeholder: '邮箱',
+                  value: this.email,
+                  type: 'text',
+                  onChange: (v: string) => { this.email = v; }
+                })
+                  .margin({ top: 16 })
+
+                // 密码输入框
+                GlassInput({
+                  placeholder: '密码（≥8 字符）',
+                  value: this.password,
+                  type: 'password',
+                  onChange: (v: string) => { this.password = v; }
+                })
+                  .margin({ top: 16 })
+
+                // 确认密码输入框
+                GlassInput({
+                  placeholder: '确认密码',
+                  value: this.confirmPassword,
+                  type: 'password',
+                  onChange: (v: string) => { this.confirmPassword = v; }
+                })
+                  .margin({ top: 16 })
+
+                // 同意条款：Checkbox + 文本（点击文本也可切换）
+                Row() {
+                  Checkbox({ name: 'agreedTerms', group: 'register' })
+                    .select(this.agreedTerms)
+                    .selectedColor(this.sm.getColor('primary'))
+                    .onChange((v: boolean) => { this.agreedTerms = v; })
+                  Text('我已阅读并同意服务条款')
+                    .fontSize(14)
+                    .fontColor(this.sm.getColor('text_secondary'))
+                    .margin({ left: 8 })
+                    .onClick(() => { this.agreedTerms = !this.agreedTerms; })
+                }
+                .width('100%')
+                .alignItems(VerticalAlign.Center)
+                .margin({ top: 16 })
+
+                // 注册按钮：primary + block，loading 时禁用并显示"注册中..."
+                GlassButton({
+                  text: this.loading ? '注册中...' : '注册',
+                  type: 'primary',
+                  block: true,
+                  disabled: this.loading,
+                  onTap: () => { this.handleSubmit(); }
+                })
+                  .margin({ top: 24 })
+
+                // 去登录按钮：ghost + block
+                GlassButton({
+                  text: '已有账号？去登录',
+                  type: 'ghost',
+                  block: true,
+                  disabled: this.loading,
+                  onTap: () => { this.handleGotoLogin(); }
+                })
+                  .margin({ top: 12 })
               }
               .width('100%')
-              .alignItems(VerticalAlign.Center)
-              .margin({ top: 16 })
-
-              // 注册按钮：primary + block，loading 时禁用并显示"注册中..."
-              GlassButton({
-                text: this.loading ? '注册中...' : '注册',
-                type: 'primary',
-                block: true,
-                disabled: this.loading,
-                onClick: () => { this.handleSubmit(); }
-              })
-                .margin({ top: 24 })
-
-              // 去登录按钮：ghost + block
-              GlassButton({
-                text: '已有账号？去登录',
-                type: 'ghost',
-                block: true,
-                disabled: this.loading,
-                onClick: () => { this.handleGotoLogin(); }
-              })
-                .margin({ top: 12 })
+              .alignItems(HorizontalAlign.Center)
             }
-            .width('100%')
-            .alignItems(HorizontalAlign.Center)
           }
           .width(360)
         }

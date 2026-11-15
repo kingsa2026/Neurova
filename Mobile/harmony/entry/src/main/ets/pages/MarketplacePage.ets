@@ -533,8 +533,8 @@ export struct MarketplacePage {
           GlassButton({
             text: '下载',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.confirmDownload(item); }
+            btnSize: 'small',
+            onTap: () => { this.confirmDownload(item); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }

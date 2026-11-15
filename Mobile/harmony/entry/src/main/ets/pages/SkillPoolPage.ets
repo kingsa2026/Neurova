@@ -479,14 +479,14 @@ export struct SkillPoolPage {
           GlassButton({
             text: '启用/禁用',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.toggleSkill(skill); }
+            btnSize: 'small',
+            onTap: () => { this.toggleSkill(skill); }
           })
           GlassButton({
             text: '卸载',
             type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmUninstall(skill); }
+            btnSize: 'small',
+            onTap: () => { this.confirmUninstall(skill); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }

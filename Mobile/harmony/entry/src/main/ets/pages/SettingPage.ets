@@ -95,11 +95,30 @@ export class SettingViewHelper {
       }
       const nextItems: SettingItem[] = group.items.map((it): SettingItem => {
         if (it.key === key) {
-          return { ...it, value: newValue };
+          // ArkTS 禁止对象展开，逐键拷贝（可选字段显式带回 undefined 亦合法）
+          return {
+            key: it.key,
+            label: it.label,
+            description: it.description,
+            type: it.type,
+            value: newValue,
+            defaultValue: it.defaultValue,
+            options: it.options,
+            min: it.min,
+            max: it.max,
+            step: it.step,
+            group: it.group,
+            requiresRestart: it.requiresRestart,
+          };
         }
         return it;
       });
-      return { ...group, items: nextItems };
+      return {
+        key: group.key,
+        title: group.title,
+        icon: group.icon,
+        items: nextItems,
+      };
     });
   }
 
@@ -291,7 +310,21 @@ export struct SettingPage {
       key: g.key,
       title: g.title,
       icon: g.icon,
-      items: g.items.map((it): SettingItem => ({ ...it })),
+      // ArkTS 禁止对象展开，逐键拷贝
+      items: g.items.map((it): SettingItem => ({
+        key: it.key,
+        label: it.label,
+        description: it.description,
+        type: it.type,
+        value: it.value,
+        defaultValue: it.defaultValue,
+        options: it.options,
+        min: it.min,
+        max: it.max,
+        step: it.step,
+        group: it.group,
+        requiresRestart: it.requiresRestart,
+      })),
     }));
   }
 
@@ -464,8 +497,10 @@ export struct SettingPage {
    */
   private showSelectPicker(item: SettingItem): void {
     if (!item.options || item.options.length === 0) return;
-    AlertDialog.show({
+    // 字面量先赋给 SDK 显式类型，避免 AlertDialog.show 联合参数类型的重载解析失败
+    const dialogParam: AlertDialogParamWithButtons = {
       title: item.label,
+      message: '',
       autoCancel: true,
       alignment: DialogAlignment.Center,
       primaryButton: { value: '取消', action: () => {} },
@@ -473,7 +508,8 @@ export struct SettingPage {
         value: '确定',
         action: () => {},
       },
-    });
+    };
+    AlertDialog.show(dialogParam);
     // 简化实现：选项通过菜单展示。ArkUI 的 AlertDialog 不直接支持多选项列表，
     // 这里采用首个选项作为示例，实际项目可换用 Menu 或 CustomDialog。
   }
@@ -490,8 +526,8 @@ export struct SettingPage {
         GlassButton({
           text: '保存',
           type: 'primary',
-          size: 'small',
-          onClick: () => { this.saveAll(); }
+          btnSize: 'small',
+          onTap: () => { this.saveAll(); }
         })
       }
 
@@ -555,8 +591,11 @@ export struct SettingPage {
 
       // 分组下设置项列表
       ForEach(group.items, (item: SettingItem) => {
-        GlassCard() {
-          this.buildItemRow(item)
+        // ArkTS 解析器不允许尾随闭包组件调用后再链属性修饰，外包 Column 承接宽度与间距
+        Column() {
+          GlassCard() {
+            this.buildItemRow(item)
+          }
         }
         .width('100%')
         .margin({ bottom: this.sm.getSpacing('xs') })
@@ -713,8 +752,8 @@ export struct SettingPage {
       GlassButton({
         text: item.label,
         type: item.key === 'logout' ? 'danger' : 'default',
-        size: 'small',
-        onClick: () => { this.handleAction(item.key); }
+        btnSize: 'small',
+        onTap: () => { this.handleAction(item.key); }
       })
     }
     .width('100%')

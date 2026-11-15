@@ -303,8 +303,8 @@ export struct SessionSyncPage {
           GlassButton({
             text: '新建',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.openCreateDialog(); }
+            btnSize: 'small',
+            onTap: () => { this.openCreateDialog(); }
           })
         }
 
@@ -418,14 +418,14 @@ export struct SessionSyncPage {
           GlassButton({
             text: '立即同步',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.triggerSync(item); }
+            btnSize: 'small',
+            onTap: () => { this.triggerSync(item); }
           })
           GlassButton({
             text: '删除',
             type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmDelete(item); }
+            btnSize: 'small',
+            onTap: () => { this.confirmDelete(item); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }
@@ -455,7 +455,7 @@ export struct SessionSyncPage {
         .onClick(() => { this.showDialog = false; })
 
       // 面板层：居中展示
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('新建会话同步')
             .fontSize(this.sm.getFontSize('subtitle'))
@@ -510,14 +510,14 @@ export struct SessionSyncPage {
             GlassButton({
               text: '取消',
               type: 'default',
-              size: 'medium',
-              onClick: () => { this.showDialog = false; }
+              btnSize: 'medium',
+              onTap: () => { this.showDialog = false; }
             })
             GlassButton({
               text: '创建',
               type: 'primary',
-              size: 'medium',
-              onClick: () => { this.submitCreate(); }
+              btnSize: 'medium',
+              onTap: () => { this.submitCreate(); }
             })
               .margin({ left: this.sm.getSpacing('sm') })
           }

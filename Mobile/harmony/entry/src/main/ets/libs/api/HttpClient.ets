@@ -16,6 +16,12 @@ import { EventBus } from '../bus/EventBus';
 import { ErrorManager, ErrorCategory, AppError } from '../error/ErrorManager';
 import { ApiResponse } from '../types';
 
+/** 后端响应封装：HTTP 状态码 + 已解析响应体 */
+export interface HttpBackendResponse {
+  status: number;
+  data: ApiResponse<Object>;
+}
+
 /** HTTP 后端接口（生产用 @ohos.net.http 实现，测试用 mock） */
 export interface HttpBackend {
   request(
@@ -23,13 +29,33 @@ export interface HttpBackend {
     url: string,
     body: Object | null,
     headers: Record<string, string>,
-  ): Promise<{ status: number; data: ApiResponse<Object> }>;
+  ): Promise<HttpBackendResponse>;
 }
 
 /** 拦截器接口 */
 export interface HttpInterceptor {
   before?(headers: Record<string, string>): void;
-  after?(response: { status: number; data: ApiResponse<Object> }): void;
+  after?(response: HttpBackendResponse): void;
+}
+
+/** HTTP 客户端事件负载（auth:unauthorized / api:rate-limited / network:error） */
+interface HttpEventPayload {
+  url: string;
+  error?: string;
+}
+
+/** 可抛出的 HTTP 错误：包装 AppError 语义（ArkTS 仅允许抛 Error 及其子类） */
+export class HttpError extends Error {
+  /** 业务错误码（如 http_401 / native_error） */
+  code: string;
+  /** 错误分类 */
+  category: ErrorCategory;
+
+  constructor(err: AppError) {
+    super(err.message);
+    this.code = err.code;
+    this.category = err.category;
+  }
 }
 
 /** 请求配置 */
@@ -145,25 +171,29 @@ export class HttpClient {
 
       // 401：分发事件，抛错
       if (response.status === 401) {
-        this.bus.emit('auth:unauthorized', { url });
+        const payload: HttpEventPayload = { url };
+        this.bus.emit('auth:unauthorized', payload);
         const err = this.errors.fromHttpStatus(401, '未授权');
-        throw err;
+        throw new HttpError(err);
       }
 
       // 429：分发限流事件
       if (response.status === 429) {
-        this.bus.emit('api:rate-limited', { url });
+        const payload: HttpEventPayload = { url };
+        this.bus.emit('api:rate-limited', payload);
       }
 
       return response.data as ApiResponse<T>;
     } catch (e) {
       this.logger.error('HttpClient', `${method} ${url} 失败`, e as Error);
-      if ((e as AppError).code) {
+      // 已是本客户端抛出的业务错误：原样上抛，不重复包装
+      if (e instanceof HttpError) {
         throw e;
       }
       // 网络错误
-      this.bus.emit('network:error', { url, error: (e as Error).message });
-      throw this.errors.fromError(e as Error, ErrorCategory.NETWORK);
+      const payload: HttpEventPayload = { url, error: (e as Error).message };
+      this.bus.emit('network:error', payload);
+      throw new HttpError(this.errors.fromError(e as Error, ErrorCategory.NETWORK));
     }
   }
 
@@ -181,7 +211,11 @@ export class HttpClient {
     let url = path.startsWith('http') ? path : `${this.baseUrl}${path.startsWith('/') ? path : '/' + path}`;
     if (params && Object.keys(params).length > 0) {
       const query = Object.entries(params)
-        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+        .map((entry) => {
+          const k: string = entry[0];
+          const v: Object = entry[1];
+          return `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`;
+        })
         .join('&');
       url += (url.includes('?') ? '&' : '?') + query;
     }

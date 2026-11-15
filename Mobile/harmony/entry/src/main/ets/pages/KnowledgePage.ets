@@ -308,8 +308,8 @@ export struct KnowledgePage {
           GlassButton({
             text: '新建',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.handleCreate(); }
+            btnSize: 'small',
+            onTap: () => { this.handleCreate(); }
           })
         }
 
@@ -325,8 +325,8 @@ export struct KnowledgePage {
           GlassButton({
             text: '搜索',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.handleSearch(); }
+            btnSize: 'small',
+            onTap: () => { this.handleSearch(); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }
@@ -426,89 +426,91 @@ export struct KnowledgePage {
   /** 单个知识卡片：状态徽章 + 标题 + 摘要 + 底部行（来源/字数/时间）+ 操作按钮 */
   @Builder
   buildKnowledgeCard(item: KnowledgeItem) {
-    GlassCard() {
-      Column() {
-        // 状态徽章：圆点 + 状态文案（颜色经视图模型映射）
-        Row() {
-          Row()
-            .width(8)
-            .height(8)
-            .borderRadius(4)
-            .backgroundColor(this.sm.getColor(KnowledgeViewHelper.getStatusColor(item.status)))
-          Text(item.status)
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor(KnowledgeViewHelper.getStatusColor(item.status)))
-            .margin({ left: 4 })
-        }
-        .alignItems(VerticalAlign.Center)
+    Column() {
+      GlassCard() {
+        Column() {
+          // 状态徽章：圆点 + 状态文案（颜色经视图模型映射）
+          Row() {
+            Row()
+              .width(8)
+              .height(8)
+              .borderRadius(4)
+              .backgroundColor(this.sm.getColor(KnowledgeViewHelper.getStatusColor(item.status)))
+            Text(item.status)
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor(KnowledgeViewHelper.getStatusColor(item.status)))
+              .margin({ left: 4 })
+          }
+          .alignItems(VerticalAlign.Center)
 
-        // 标题（最多 2 行）
-        Text(item.title)
-          .fontSize(this.sm.getFontSize('subtitle'))
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.sm.getColor('text_primary'))
-          .maxLines(2)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .margin({ top: 8 })
-
-        // 摘要（最多 2 行，空值回退"暂无摘要"）
-        Text(item.summary ?? '暂无摘要')
-          .fontSize(this.sm.getFontSize('caption'))
-          .fontColor(this.sm.getColor('text_secondary'))
-          .maxLines(2)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .margin({ top: 4 })
-
-        // 底部行：来源图标+文案 · 字数 · 创建时间
-        Row() {
-          Text(`${KnowledgeViewHelper.getSourceIcon(item.source)} ${item.source}`)
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_secondary'))
-          Text('·')
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_disabled'))
-            .margin({ left: 6, right: 6 })
-          Text(`${item.wordCount ?? 0} 字`)
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_secondary'))
-          Text('·')
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_disabled'))
-            .margin({ left: 6, right: 6 })
-          Text(this.formatTime(item.createdAt))
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_disabled'))
-            .layoutWeight(1)
-            .maxLines(1)
+          // 标题（最多 2 行）
+          Text(item.title)
+            .fontSize(this.sm.getFontSize('subtitle'))
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.sm.getColor('text_primary'))
+            .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .textAlign(TextAlign.End)
-        }
-        .width('100%')
-        .margin({ top: 8 })
-        .alignItems(VerticalAlign.Center)
+            .margin({ top: 8 })
 
-        // 操作按钮：详情、删除（右对齐）
-        Row() {
-          GlassButton({
-            text: '详情',
-            type: 'default',
-            size: 'small',
-            onClick: () => { this.openDetail(item); }
-          })
-          GlassButton({
-            text: '删除',
-            type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmDelete(item); }
-          })
-            .margin({ left: this.sm.getSpacing('sm') })
+          // 摘要（最多 2 行，空值回退"暂无摘要"）
+          Text(item.summary ?? '暂无摘要')
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_secondary'))
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ top: 4 })
+
+          // 底部行：来源图标+文案 · 字数 · 创建时间
+          Row() {
+            Text(`${KnowledgeViewHelper.getSourceIcon(item.source)} ${item.source}`)
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_secondary'))
+            Text('·')
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_disabled'))
+              .margin({ left: 6, right: 6 })
+            Text(`${item.wordCount ?? 0} 字`)
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_secondary'))
+            Text('·')
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_disabled'))
+              .margin({ left: 6, right: 6 })
+            Text(this.formatTime(item.createdAt))
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_disabled'))
+              .layoutWeight(1)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .textAlign(TextAlign.End)
+          }
+          .width('100%')
+          .margin({ top: 8 })
+          .alignItems(VerticalAlign.Center)
+
+          // 操作按钮：详情、删除（右对齐）
+          Row() {
+            GlassButton({
+              text: '详情',
+              type: 'default',
+              btnSize: 'small',
+              onTap: () => { this.openDetail(item); }
+            })
+            GlassButton({
+              text: '删除',
+              type: 'danger',
+              btnSize: 'small',
+              onTap: () => { this.confirmDelete(item); }
+            })
+              .margin({ left: this.sm.getSpacing('sm') })
+          }
+          .width('100%')
+          .justifyContent(FlexAlign.End)
+          .margin({ top: this.sm.getSpacing('md') })
         }
         .width('100%')
-        .justifyContent(FlexAlign.End)
-        .margin({ top: this.sm.getSpacing('md') })
+        .alignItems(HorizontalAlign.Start)
       }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
   }
@@ -530,75 +532,77 @@ export struct KnowledgePage {
         .onClick(() => { this.closeDetail(); })
 
       // 面板层：居中展示，覆盖在背景层之上（点击面板内部不关闭）
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
-        Column() {
-          // 标题行
-          Text(item.title)
-            .fontSize(this.sm.getFontSize('title'))
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.sm.getColor('text_primary'))
-            .width('100%')
-
-          // 状态 + 来源
-          Row() {
-            Text(`状态: ${item.status}`)
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor(KnowledgeViewHelper.getStatusColor(item.status)))
-            Text(`${KnowledgeViewHelper.getSourceIcon(item.source)} ${item.source}`)
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_secondary'))
-              .margin({ left: 12 })
-          }
-          .width('100%')
-          .margin({ top: 8 })
-          .alignItems(VerticalAlign.Center)
-
-          // 元数据：分类、标签、文件大小、字数
+      Column() {
+        GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
           Column() {
-            Text(`分类: ${item.category ?? '未分类'}`)
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_secondary'))
-            Text(`标签: ${item.tags && item.tags.length > 0 ? item.tags.join(', ') : '无'}`)
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_secondary'))
-              .margin({ top: 4 })
-            Text(`文件大小: ${KnowledgeViewHelper.formatFileSize(item.fileSize)}`)
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_secondary'))
-              .margin({ top: 4 })
-            Text(`字数: ${item.wordCount ?? 0}`)
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_secondary'))
-              .margin({ top: 4 })
-          }
-          .width('100%')
-          .alignItems(HorizontalAlign.Start)
-          .margin({ top: 8 })
-
-          // 完整内容（可滚动）
-          Scroll() {
-            Text(item.content)
-              .fontSize(this.sm.getFontSize('body'))
+            // 标题行
+            Text(item.title)
+              .fontSize(this.sm.getFontSize('title'))
+              .fontWeight(FontWeight.Bold)
               .fontColor(this.sm.getColor('text_primary'))
-          }
-          .layoutWeight(1)
-          .width('100%')
-          .margin({ top: 12 })
-          .scrollBar(BarState.Off)
+              .width('100%')
 
-          // 关闭按钮
-          GlassButton({
-            text: '关闭',
-            type: 'primary',
-            size: 'medium',
-            block: true,
-            onClick: () => { this.closeDetail(); }
-          })
+            // 状态 + 来源
+            Row() {
+              Text(`状态: ${item.status}`)
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor(KnowledgeViewHelper.getStatusColor(item.status)))
+              Text(`${KnowledgeViewHelper.getSourceIcon(item.source)} ${item.source}`)
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+                .margin({ left: 12 })
+            }
+            .width('100%')
+            .margin({ top: 8 })
+            .alignItems(VerticalAlign.Center)
+
+            // 元数据：分类、标签、文件大小、字数
+            Column() {
+              Text(`分类: ${item.category ?? '未分类'}`)
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+              Text(`标签: ${item.tags && item.tags.length > 0 ? item.tags.join(', ') : '无'}`)
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+                .margin({ top: 4 })
+              Text(`文件大小: ${KnowledgeViewHelper.formatFileSize(item.fileSize)}`)
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+                .margin({ top: 4 })
+              Text(`字数: ${item.wordCount ?? 0}`)
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+                .margin({ top: 4 })
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+            .margin({ top: 8 })
+
+            // 完整内容（可滚动）
+            Scroll() {
+              Text(item.content)
+                .fontSize(this.sm.getFontSize('body'))
+                .fontColor(this.sm.getColor('text_primary'))
+            }
+            .layoutWeight(1)
+            .width('100%')
             .margin({ top: 12 })
+            .scrollBar(BarState.Off)
+
+            // 关闭按钮
+            GlassButton({
+              text: '关闭',
+              type: 'primary',
+              btnSize: 'medium',
+              block: true,
+              onTap: () => { this.closeDetail(); }
+            })
+              .margin({ top: 12 })
+          }
+          .width('100%')
+          .height('100%')
+          .alignItems(HorizontalAlign.Start)
         }
-        .width('100%')
-        .height('100%')
-        .alignItems(HorizontalAlign.Start)
       }
       .width('90%')
       .height('80%')

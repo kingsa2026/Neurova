@@ -116,10 +116,12 @@ export struct DashboardPage {
         Scroll() {
           Column() {
             // 1. 欢迎卡片：显示用户名 + Agent 数量
-            GlassCard({ title: `欢迎，${this.getUsername()}` }) {
-              Text(`你有 ${this.agents.length} 个智能体`)
-                .fontSize(this.sm.getFontSize('body'))
-                .fontColor(this.sm.getColor('text_secondary'))
+            Column() {
+              GlassCard({ title: `欢迎，${this.getUsername()}` }) {
+                Text(`你有 ${this.agents.length} 个智能体`)
+                  .fontSize(this.sm.getFontSize('body'))
+                  .fontColor(this.sm.getColor('text_secondary'))
+              }
             }
             .width('100%')
             .margin({ bottom: this.sm.getSpacing('md') })
@@ -146,49 +148,53 @@ export struct DashboardPage {
             .margin({ bottom: this.sm.getSpacing('md') })
 
             // 3. 快捷操作：三个等宽按钮，跳转对应页面
-            GlassCard({ title: '快捷操作' }) {
-              Row() {
-                GlassButton({
-                  text: '新建对话',
-                  type: 'default',
-                  size: 'medium',
-                  onClick: () => { this.router.push(RouteNames.CHAT); }
-                })
-                  .layoutWeight(1)
+            Column() {
+              GlassCard({ title: '快捷操作' }) {
+                Row() {
+                  GlassButton({
+                    text: '新建对话',
+                    type: 'default',
+                    btnSize: 'medium',
+                    onTap: () => { this.router.push(RouteNames.CHAT); }
+                  })
+                    .layoutWeight(1)
 
-                GlassButton({
-                  text: '管理 Agent',
-                  type: 'default',
-                  size: 'medium',
-                  onClick: () => { this.router.push(RouteNames.AGENT_LIST); }
-                })
-                  .layoutWeight(1)
-                  .margin({ left: this.sm.getSpacing('sm') })
+                  GlassButton({
+                    text: '管理 Agent',
+                    type: 'default',
+                    btnSize: 'medium',
+                    onTap: () => { this.router.push(RouteNames.AGENT_LIST); }
+                  })
+                    .layoutWeight(1)
+                    .margin({ left: this.sm.getSpacing('sm') })
 
-                GlassButton({
-                  text: '配对设备',
-                  type: 'default',
-                  size: 'medium',
-                  onClick: () => { this.router.push(RouteNames.PAIRING); }
-                })
-                  .layoutWeight(1)
-                  .margin({ left: this.sm.getSpacing('sm') })
+                  GlassButton({
+                    text: '配对设备',
+                    type: 'default',
+                    btnSize: 'medium',
+                    onTap: () => { this.router.push(RouteNames.PAIRING); }
+                  })
+                    .layoutWeight(1)
+                    .margin({ left: this.sm.getSpacing('sm') })
+                }
+                .width('100%')
               }
-              .width('100%')
             }
             .width('100%')
             .margin({ bottom: this.sm.getSpacing('md') })
 
             // 4. 最近会话列表（M2 暂为空状态占位，M3 接入 sessions API）
-            GlassCard({ title: '最近会话' }) {
-              Column() {
-                Text('暂无最近会话')
-                  .fontSize(this.sm.getFontSize('caption'))
-                  .fontColor(this.sm.getColor('text_disabled'))
+            Column() {
+              GlassCard({ title: '最近会话' }) {
+                Column() {
+                  Text('暂无最近会话')
+                    .fontSize(this.sm.getFontSize('caption'))
+                    .fontColor(this.sm.getColor('text_disabled'))
+                }
+                .width('100%')
+                .alignItems(HorizontalAlign.Center)
+                .padding(this.sm.getSpacing('lg'))
               }
-              .width('100%')
-              .alignItems(HorizontalAlign.Center)
-              .padding(this.sm.getSpacing('lg'))
             }
             .width('100%')
           }

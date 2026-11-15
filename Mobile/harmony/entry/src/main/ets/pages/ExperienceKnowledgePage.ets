@@ -393,8 +393,8 @@ export struct ExperienceKnowledgePage {
           GlassButton({
             text: '新建',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.openCreate(); }
+            btnSize: 'small',
+            onTap: () => { this.openCreate(); }
           })
         }
 
@@ -576,21 +576,21 @@ export struct ExperienceKnowledgePage {
           GlassButton({
             text: '查看',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.showDetail(item); }
+            btnSize: 'small',
+            onTap: () => { this.showDetail(item); }
           })
           GlassButton({
             text: '编辑',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.showEdit(item); }
+            btnSize: 'small',
+            onTap: () => { this.showEdit(item); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
           GlassButton({
             text: '删除',
             type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmDelete(item); }
+            btnSize: 'small',
+            onTap: () => { this.confirmDelete(item); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }
@@ -619,7 +619,7 @@ export struct ExperienceKnowledgePage {
         .onClick(() => { this.closeCreate(); })
 
       // 面板层：居中展示
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           // 标题
           Text('新建经验')
@@ -705,14 +705,14 @@ export struct ExperienceKnowledgePage {
             GlassButton({
               text: '取消',
               type: 'default',
-              size: 'medium',
-              onClick: () => { this.closeCreate(); }
+              btnSize: 'medium',
+              onTap: () => { this.closeCreate(); }
             })
             GlassButton({
               text: this.submitting ? '提交中...' : '创建',
               type: 'primary',
-              size: 'medium',
-              onClick: () => { this.submitCreate(); }
+              btnSize: 'medium',
+              onTap: () => { this.submitCreate(); }
             })
               .margin({ left: this.sm.getSpacing('sm') })
               .layoutWeight(1)

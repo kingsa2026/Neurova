@@ -25,7 +25,11 @@ export interface SettingResetBody {
 }
 
 export class SettingsApi {
-  constructor(private client: HttpClient) {}
+  private client: HttpClient;
+
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
 
   /** 列出所有设置分组 */
   async list(): Promise<ApiResponse<SettingGroup[]>> {

@@ -321,8 +321,8 @@ export struct SleepSettingsPage {
         GlassButton({
           text: '保存',
           type: 'primary',
-          size: 'small',
-          onClick: () => { this.handleSave(); }
+          btnSize: 'small',
+          onTap: () => { this.handleSave(); }
         })
       }
 
@@ -415,8 +415,8 @@ export struct SleepSettingsPage {
             GlassButton({
               text: opt.label,
               type: this.current['sleepMode'] === opt.value ? 'primary' : 'default',
-              size: 'small',
-              onClick: () => { this.updateValue('sleepMode', opt.value); }
+              btnSize: 'small',
+              onTap: () => { this.updateValue('sleepMode', opt.value); }
             })
           }, (opt: ModeOption) => opt.value)
         }

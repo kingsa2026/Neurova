@@ -302,6 +302,41 @@ export struct TaskPage {
   }
 
   /**
+   * 更新单个表单字段
+   * 规则：@State 嵌套属性变更需整体重新赋值；ArkTS 禁止对象展开，
+   *       故先逐字段复制旧表单，写入目标字段后再整体替换
+   * @param key 字段名（title/projectId/description/priority/assignee/dueDate/tagsText）
+   * @param value 新值（priority 传 TaskPriority 字符串）
+   */
+  private setFormField(key: string, value: string): void {
+    const next: TaskFormData = {
+      title: this.formData.title,
+      projectId: this.formData.projectId,
+      description: this.formData.description,
+      priority: this.formData.priority,
+      assignee: this.formData.assignee,
+      dueDate: this.formData.dueDate,
+      tagsText: this.formData.tagsText,
+    };
+    if (key === 'title') {
+      next.title = value;
+    } else if (key === 'projectId') {
+      next.projectId = value;
+    } else if (key === 'description') {
+      next.description = value;
+    } else if (key === 'priority') {
+      next.priority = value as TaskPriority;
+    } else if (key === 'assignee') {
+      next.assignee = value;
+    } else if (key === 'dueDate') {
+      next.dueDate = value;
+    } else if (key === 'tagsText') {
+      next.tagsText = value;
+    }
+    this.formData = next;
+  }
+
+  /**
    * 提交新建
    * 流程：组装 data → 调用 api.collaboration.createTask → 成功后关闭弹窗并刷新列表
    * 异常：记录日志并提示用户
@@ -404,8 +439,8 @@ export struct TaskPage {
           GlassButton({
             text: '新建',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.openCreateDialog(); }
+            btnSize: 'small',
+            onTap: () => { this.openCreateDialog(); }
           })
         }
 
@@ -517,6 +552,8 @@ export struct TaskPage {
   /** 单个任务卡片：状态/优先级徽章 + 标题 + 描述摘要 + assignee/dueDate/tags + 操作按钮 */
   @Builder
   buildTaskCard(task: Task) {
+    // ArkTS 解析器不允许尾随闭包组件调用后再链属性修饰，外包 Column 承接 .width
+    Column() {
     GlassCard() {
       Column() {
         // 上部：状态徽章 + 优先级徽章
@@ -602,14 +639,14 @@ export struct TaskPage {
           GlassButton({
             text: '编辑',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.handleEdit(task); }
+            btnSize: 'small',
+            onTap: () => { this.handleEdit(task); }
           })
           GlassButton({
             text: '删除',
             type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmDelete(task); }
+            btnSize: 'small',
+            onTap: () => { this.confirmDelete(task); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }
@@ -619,6 +656,7 @@ export struct TaskPage {
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
+    }
     }
     .width('100%')
   }
@@ -639,7 +677,9 @@ export struct TaskPage {
         .onClick(() => { this.showCreateDialog = false; })
 
       // 面板层（可滚动）
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      // ArkTS 解析器不允许尾随闭包组件调用后再链属性修饰，外包 Column 承接宽高
+      Column() {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Scroll() {
           Column() {
             Text('新建任务')
@@ -658,7 +698,7 @@ export struct TaskPage {
               placeholder: '请输入任务标题',
               value: this.formData.title,
               type: 'text',
-              onChange: (v: string) => { this.formData = { ...this.formData, title: v }; }
+              onChange: (v: string) => { this.setFormField('title', v); }
             })
               .margin({ top: 4 })
 
@@ -672,7 +712,7 @@ export struct TaskPage {
               placeholder: '请输入 projectId',
               value: this.formData.projectId,
               type: 'text',
-              onChange: (v: string) => { this.formData = { ...this.formData, projectId: v }; }
+              onChange: (v: string) => { this.setFormField('projectId', v); }
             })
               .margin({ top: 4 })
 
@@ -686,7 +726,7 @@ export struct TaskPage {
               placeholder: '请输入描述',
               value: this.formData.description,
               type: 'text',
-              onChange: (v: string) => { this.formData = { ...this.formData, description: v }; }
+              onChange: (v: string) => { this.setFormField('description', v); }
             })
               .margin({ top: 4 })
 
@@ -701,8 +741,8 @@ export struct TaskPage {
                 GlassButton({
                   text: `${TaskViewHelper.getPriorityIcon(p)} ${TaskViewHelper.getPriorityLabel(p)}`,
                   type: this.formData.priority === p ? 'primary' : 'default',
-                  size: 'small',
-                  onClick: () => { this.formData = { ...this.formData, priority: p }; }
+                  btnSize: 'small',
+                  onTap: () => { this.setFormField('priority', p); }
                 })
               }, (p: TaskPriority) => p)
             }
@@ -719,7 +759,7 @@ export struct TaskPage {
               placeholder: '请输入 assignee',
               value: this.formData.assignee,
               type: 'text',
-              onChange: (v: string) => { this.formData = { ...this.formData, assignee: v }; }
+              onChange: (v: string) => { this.setFormField('assignee', v); }
             })
               .margin({ top: 4 })
 
@@ -733,7 +773,7 @@ export struct TaskPage {
               placeholder: '2024-12-31',
               value: this.formData.dueDate,
               type: 'text',
-              onChange: (v: string) => { this.formData = { ...this.formData, dueDate: v }; }
+              onChange: (v: string) => { this.setFormField('dueDate', v); }
             })
               .margin({ top: 4 })
 
@@ -747,7 +787,7 @@ export struct TaskPage {
               placeholder: 'bug\nfeature\nurgent',
               value: this.formData.tagsText,
               type: 'text',
-              onChange: (v: string) => { this.formData = { ...this.formData, tagsText: v }; }
+              onChange: (v: string) => { this.setFormField('tagsText', v); }
             })
               .margin({ top: 4 })
 
@@ -756,14 +796,14 @@ export struct TaskPage {
               GlassButton({
                 text: '取消',
                 type: 'default',
-                size: 'medium',
-                onClick: () => { this.showCreateDialog = false; }
+                btnSize: 'medium',
+                onTap: () => { this.showCreateDialog = false; }
               })
               GlassButton({
                 text: '创建',
                 type: 'primary',
-                size: 'medium',
-                onClick: () => { this.submitCreate(); }
+                btnSize: 'medium',
+                onTap: () => { this.submitCreate(); }
               })
                 .margin({ left: this.sm.getSpacing('sm') })
             }
@@ -776,6 +816,7 @@ export struct TaskPage {
         }
         .width('100%')
         .scrollBar(BarState.Off)
+      }
       }
       .width('90%')
       .height('85%')

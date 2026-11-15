@@ -15,13 +15,33 @@ import {
   Project,
   Team,
   Task,
+  TaskStatus,
+  TaskPriority,
   Workflow,
   PageResult,
   PageParams,
 } from '../../types';
 
+/** 创建看板 body（/v1/tasks/boards 契约字段） */
+interface CreateBoardBody {
+  name: string;
+}
+
+/** 创建任务 body（/v1/tasks/boards/{id}/tasks 契约字段） */
+interface CreateTaskBody {
+  title: string;
+  description: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  dueDate: string;
+}
+
 export class CollaborationApi {
-  constructor(private client: HttpClient) {}
+  private client: HttpClient;
+
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
 
   // ========== Project ==========
 
@@ -89,25 +109,11 @@ export class CollaborationApi {
 
   // ========== Task ==========
 
-  /** 列出任务（可选 projectId 过滤 + 分页） */
-  async listTasks(
-    projectId?: string,
-    params?: PageParams,
-  ): Promise<ApiResponse<PageResult<Task>>> {
-    const query: Record<string, Object> = {};
-    if (projectId) query['projectId'] = projectId;
-    if (params) {
-      if (params.page !== undefined) query['page'] = params.page;
-      if (params.size !== undefined) query['size'] = params.size;
-    }
-    return this.listTasks();
-  }
-
   /**
    * 列出任务：聚合全部看板的任务（真端点 /v1/tasks/boards + /boards/{id}/tasks，
    * 原 /v1/collaboration/tasks 后端不存在）。补齐 FE Task 契约缺省字段。
    */
-  async listTasks(projectId?: string): Promise<ApiResponse<Task[]>> {
+  async listTasks(projectId?: string): Promise<ApiResponse<PageResult<Task>>> {
     const boardsRes = await this.client.get<Object[]>('/v1/tasks/boards');
     const boards = (boardsRes.data ?? []) as Array<Record<string, Object>>;
     const all: Task[] = [];
@@ -124,8 +130,8 @@ export class CollaborationApi {
           projectId: boardId,
           title: String(row['title'] ?? ''),
           description: String(row['description'] ?? ''),
-          status: String(row['status'] ?? 'todo') as Task['status'],
-          priority: String(row['priority'] ?? 'medium') as Task['priority'],
+          status: String(row['status'] ?? 'todo') as TaskStatus,
+          priority: String(row['priority'] ?? 'medium') as TaskPriority,
           assignee: row['assignee'] !== undefined && row['assignee'] !== null ? String(row['assignee']) : undefined,
           dueDate: String(row['dueDate'] ?? ''),
           tags: [],
@@ -134,7 +140,7 @@ export class CollaborationApi {
         });
       }
     }
-    return { code: 0, message: 'ok', data: all } as ApiResponse<Task[]>;
+    return { code: 0, message: 'ok', data: { items: all, total: all.length } } as ApiResponse<PageResult<Task>>;
   }
 
   /** 创建任务：落到第一个看板（无看板先建默认看板） */
@@ -143,10 +149,11 @@ export class CollaborationApi {
     const boards = (boardsRes.data ?? []) as Array<Record<string, Object>>;
     let boardId = boards.length > 0 ? String(boards[0]['id']) : '';
     if (boardId === '') {
-      const created = await this.client.post<Object>('/v1/tasks/boards', { name: '任务看板' });
+      const boardBody: CreateBoardBody = { name: '任务看板' };
+      const created = await this.client.post<Object>('/v1/tasks/boards', boardBody);
       boardId = String((created.data as Record<string, Object>)['id'] ?? '');
     }
-    const body = {
+    const body: CreateTaskBody = {
       title: data.title ?? '',
       description: data.description ?? '',
       status: data.status ?? 'todo',
@@ -159,12 +166,23 @@ export class CollaborationApi {
       code: res.code, message: res.message,
       data: {
         id: String(row['id'] ?? ''), projectId: boardId, title: String(row['title'] ?? ''),
-        description: String(row['description'] ?? ''), status: String(row['status'] ?? 'todo') as Task['status'],
-        priority: String(row['priority'] ?? 'medium') as Task['priority'],
+        description: String(row['description'] ?? ''), status: String(row['status'] ?? 'todo') as TaskStatus,
+        priority: String(row['priority'] ?? 'medium') as TaskPriority,
         dueDate: String(row['dueDate'] ?? ''), tags: [],
         createdAt: '', updatedAt: '',
       },
     } as ApiResponse<Task>;
+  }
+
+  /** 删除任务：真端点 DELETE /v1/tasks/boards/{boardId}/tasks/{taskId}（任务挂在看板下，看板解析与 createTask 同源） */
+  async removeTask(id: string): Promise<ApiResponse<Object>> {
+    const boardsRes = await this.client.get<Object[]>('/v1/tasks/boards');
+    const boards = (boardsRes.data ?? []) as Array<Record<string, Object>>;
+    if (boards.length === 0) {
+      return { code: 1, message: '任务看板不存在，无法删除任务', data: '' } as ApiResponse<Object>;
+    }
+    const boardId = String(boards[0]['id']);
+    return this.client.delete<Object>(`/v1/tasks/boards/${boardId}/tasks/${id}`);
   }
 
   // ========== Workflow ==========

@@ -52,6 +52,12 @@ import {
 /** 日志标签 */
 const TAG = 'ModelPage';
 
+/** 默认模型展示信息（getDefaultDisplay 返回结构） */
+interface DefaultModelDisplay {
+  providerName: string;
+  modelName: string;
+}
+
 // ===========================================================================
 // ModelViewHelper - 模型视图模型（纯函数，无 UI 依赖，可独立单元测试）
 //
@@ -177,10 +183,11 @@ export struct ModelPage {
   private async loadAll(): Promise<void> {
     this.loading = true;
     try {
-      const [providersRes, paramsRes] = await Promise.all([
-        this.api.models.listProviders(),
-        this.api.models.getGenerationParams(),
-      ]);
+      // ArkTS 禁止解构声明：先并行发起两个请求，再分别 await 取结果
+      const providersTask = this.api.models.listProviders();
+      const paramsTask = this.api.models.getGenerationParams();
+      const providersRes = await providersTask;
+      const paramsRes = await paramsTask;
       if (providersRes.code === 0 && providersRes.data) {
         this.providers = providersRes.data;
       }
@@ -204,15 +211,18 @@ export struct ModelPage {
    * 规则：遍历 providers → models，返回第一个 is_active=true 的模型
    * @return { providerName, modelName }，无匹配时返回 '未设置'
    */
-  private getDefaultDisplay(): { providerName: string; modelName: string } {
+  private getDefaultDisplay(): DefaultModelDisplay {
     for (const p of this.providers) {
       for (const m of p.models) {
         if (m.is_active) {
-          return { providerName: p.name, modelName: m.name };
+          // ArkTS 要求对象字面量对应显式声明的 interface
+          const found: DefaultModelDisplay = { providerName: p.name, modelName: m.name };
+          return found;
         }
       }
     }
-    return { providerName: '未设置', modelName: '未设置' };
+    const fallback: DefaultModelDisplay = { providerName: '未设置', modelName: '未设置' };
+    return fallback;
   }
 
   /**
@@ -281,7 +291,22 @@ export struct ModelPage {
   private async toggleModelEnabled(provider: Provider, model: ModelItem): Promise<void> {
     const updatedModels: ModelItem[] = provider.models.map((m: ModelItem) => {
       if (m.id === model.id) {
-        return { ...m, enabled: !m.enabled };
+        // ArkTS 禁止对象展开：逐字段复制后翻转 enabled
+        const updated: ModelItem = {
+          id: m.id,
+          name: m.name,
+          provider_id: m.provider_id,
+          type: m.type,
+          tags: m.tags,
+          enabled: !m.enabled,
+          capabilities: m.capabilities,
+          is_active: m.is_active,
+          context_window: m.context_window,
+          max_tokens: m.max_tokens,
+          pricing: m.pricing,
+          owned_by: m.owned_by,
+        };
+        return updated;
       }
       return m;
     });
@@ -312,8 +337,8 @@ export struct ModelPage {
           GlassButton({
             text: '刷新',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.loadAll(); }
+            btnSize: 'small',
+            onTap: () => { this.loadAll(); }
           })
         }
 
@@ -338,8 +363,8 @@ export struct ModelPage {
             GlassButton({
               text: '重新加载',
               type: 'primary',
-              size: 'medium',
-              onClick: () => { this.loadAll(); }
+              btnSize: 'medium',
+              onTap: () => { this.loadAll(); }
             })
           }
           .width('100%')
@@ -386,50 +411,52 @@ export struct ModelPage {
 
   @Builder
   buildDefaultCard() {
-    const def = this.getDefaultDisplay();
-    GlassCard() {
-      Column() {
-        Text('默认模型')
-          .fontSize(this.sm.getFontSize('subtitle'))
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.sm.getColor('text_primary'))
-
-        Row() {
-          Text('Provider:')
-            .fontSize(this.sm.getFontSize('body'))
-            .fontColor(this.sm.getColor('text_secondary'))
-          Text(def.providerName)
-            .fontSize(this.sm.getFontSize('body'))
-            .fontWeight(FontWeight.Medium)
+    // @Builder 内仅允许 UI 语法，默认模型信息在渲染处直接计算
+    Column() {
+      GlassCard() {
+        Column() {
+          Text('默认模型')
+            .fontSize(this.sm.getFontSize('subtitle'))
+            .fontWeight(FontWeight.Bold)
             .fontColor(this.sm.getColor('text_primary'))
-            .margin({ left: 4 })
+
+          Row() {
+            Text('Provider:')
+              .fontSize(this.sm.getFontSize('body'))
+              .fontColor(this.sm.getColor('text_secondary'))
+            Text(this.getDefaultDisplay().providerName)
+              .fontSize(this.sm.getFontSize('body'))
+              .fontWeight(FontWeight.Medium)
+              .fontColor(this.sm.getColor('text_primary'))
+              .margin({ left: 4 })
+          }
+          .width('100%')
+          .margin({ top: this.sm.getSpacing('sm') })
+
+          Row() {
+            Text('模型:')
+              .fontSize(this.sm.getFontSize('body'))
+              .fontColor(this.sm.getColor('text_secondary'))
+            Text(this.getDefaultDisplay().modelName)
+              .fontSize(this.sm.getFontSize('body'))
+              .fontWeight(FontWeight.Medium)
+              .fontColor(this.sm.getColor('text_primary'))
+              .margin({ left: 4 })
+          }
+          .width('100%')
+          .margin({ top: 4 })
+
+          GlassButton({
+            text: '切换默认模型',
+            type: 'primary',
+            btnSize: 'medium',
+            onTap: () => { this.showDefaultPicker = true; }
+          })
+            .margin({ top: this.sm.getSpacing('md') })
         }
         .width('100%')
-        .margin({ top: this.sm.getSpacing('sm') })
-
-        Row() {
-          Text('模型:')
-            .fontSize(this.sm.getFontSize('body'))
-            .fontColor(this.sm.getColor('text_secondary'))
-          Text(def.modelName)
-            .fontSize(this.sm.getFontSize('body'))
-            .fontWeight(FontWeight.Medium)
-            .fontColor(this.sm.getColor('text_primary'))
-            .margin({ left: 4 })
-        }
-        .width('100%')
-        .margin({ top: 4 })
-
-        GlassButton({
-          text: '切换默认模型',
-          type: 'primary',
-          size: 'medium',
-          onClick: () => { this.showDefaultPicker = true; }
-        })
-          .margin({ top: this.sm.getSpacing('md') })
+        .alignItems(HorizontalAlign.Start)
       }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
     .margin({ bottom: this.sm.getSpacing('md') })
@@ -441,77 +468,79 @@ export struct ModelPage {
 
   @Builder
   buildGenerationParamsCard() {
-    GlassCard() {
-      Column() {
-        Text('生成参数')
-          .fontSize(this.sm.getFontSize('subtitle'))
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.sm.getColor('text_primary'))
-
-        // 温度 Slider：0-2，步长 0.1
-        Row() {
-          Text('温度')
-            .fontSize(this.sm.getFontSize('body'))
-            .fontColor(this.sm.getColor('text_secondary'))
-            .layoutWeight(1)
-          Text(this.tempTemperature.toFixed(1))
-            .fontSize(this.sm.getFontSize('body'))
+    Column() {
+      GlassCard() {
+        Column() {
+          Text('生成参数')
+            .fontSize(this.sm.getFontSize('subtitle'))
+            .fontWeight(FontWeight.Bold)
             .fontColor(this.sm.getColor('text_primary'))
-        }
-        .width('100%')
-        .margin({ top: this.sm.getSpacing('sm') })
-        Slider({
-          value: this.tempTemperature,
-          min: 0,
-          max: 2,
-          step: 0.1,
-        })
+
+          // 温度 Slider：0-2，步长 0.1
+          Row() {
+            Text('温度')
+              .fontSize(this.sm.getFontSize('body'))
+              .fontColor(this.sm.getColor('text_secondary'))
+              .layoutWeight(1)
+            Text(this.tempTemperature.toFixed(1))
+              .fontSize(this.sm.getFontSize('body'))
+              .fontColor(this.sm.getColor('text_primary'))
+          }
           .width('100%')
-          .onChange((value: number) => { this.tempTemperature = value; })
+          .margin({ top: this.sm.getSpacing('sm') })
+          Slider({
+            value: this.tempTemperature,
+            min: 0,
+            max: 2,
+            step: 0.1,
+          })
+            .width('100%')
+            .onChange((value: number) => { this.tempTemperature = value; })
 
-        // 最大 token Slider：256-8192，步长 256
-        Row() {
-          Text('最大 Token')
-            .fontSize(this.sm.getFontSize('body'))
-            .fontColor(this.sm.getColor('text_secondary'))
-            .layoutWeight(1)
-          Text(`${this.tempMaxTokens}`)
-            .fontSize(this.sm.getFontSize('body'))
-            .fontColor(this.sm.getColor('text_primary'))
-        }
-        .width('100%')
-        .margin({ top: this.sm.getSpacing('sm') })
-        Slider({
-          value: this.tempMaxTokens,
-          min: 256,
-          max: 8192,
-          step: 256,
-        })
+          // 最大 token Slider：256-8192，步长 256
+          Row() {
+            Text('最大 Token')
+              .fontSize(this.sm.getFontSize('body'))
+              .fontColor(this.sm.getColor('text_secondary'))
+              .layoutWeight(1)
+            Text(`${this.tempMaxTokens}`)
+              .fontSize(this.sm.getFontSize('body'))
+              .fontColor(this.sm.getColor('text_primary'))
+          }
           .width('100%')
-          .onChange((value: number) => { this.tempMaxTokens = value; })
+          .margin({ top: this.sm.getSpacing('sm') })
+          Slider({
+            value: this.tempMaxTokens,
+            min: 256,
+            max: 8192,
+            step: 256,
+          })
+            .width('100%')
+            .onChange((value: number) => { this.tempMaxTokens = value; })
 
-        // 流式输出 Toggle
-        Row() {
-          Text('流式输出')
-            .fontSize(this.sm.getFontSize('body'))
-            .fontColor(this.sm.getColor('text_secondary'))
-            .layoutWeight(1)
-          Toggle({ type: ToggleType.Switch, isOn: this.tempStreamMode })
-            .onChange((isOn: boolean) => { this.tempStreamMode = isOn; })
+          // 流式输出 Toggle
+          Row() {
+            Text('流式输出')
+              .fontSize(this.sm.getFontSize('body'))
+              .fontColor(this.sm.getColor('text_secondary'))
+              .layoutWeight(1)
+            Toggle({ type: ToggleType.Switch, isOn: this.tempStreamMode })
+              .onChange((isOn: boolean) => { this.tempStreamMode = isOn; })
+          }
+          .width('100%')
+          .margin({ top: this.sm.getSpacing('sm') })
+
+          GlassButton({
+            text: this.saving ? '保存中...' : '保存参数',
+            type: 'primary',
+            btnSize: 'medium',
+            onTap: () => { this.saveParams(); }
+          })
+            .margin({ top: this.sm.getSpacing('md') })
         }
         .width('100%')
-        .margin({ top: this.sm.getSpacing('sm') })
-
-        GlassButton({
-          text: this.saving ? '保存中...' : '保存参数',
-          type: 'primary',
-          size: 'medium',
-          onClick: () => { this.saveParams(); }
-        })
-          .margin({ top: this.sm.getSpacing('md') })
+        .alignItems(HorizontalAlign.Start)
       }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
     .margin({ bottom: this.sm.getSpacing('md') })
@@ -537,76 +566,78 @@ export struct ModelPage {
   /** 单个 Provider 卡片：头部（图标/名称/状态/数量/健康） + 展开后模型列表 */
   @Builder
   buildProviderCard(provider: Provider) {
-    GlassCard() {
-      Column() {
-        // 头部：图标 + 名称/状态/数量 + 健康图标
-        Row() {
-          Text(provider.icon)
-            .fontSize(24)
+    Column() {
+      GlassCard() {
+        Column() {
+          // 头部：图标 + 名称/状态/数量 + 健康图标
+          Row() {
+            Text(provider.icon)
+              .fontSize(24)
 
-          Column() {
-            Text(provider.name)
-              .fontSize(this.sm.getFontSize('subtitle'))
-              .fontWeight(FontWeight.Bold)
-              .fontColor(this.sm.getColor('text_primary'))
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            Column() {
+              Text(provider.name)
+                .fontSize(this.sm.getFontSize('subtitle'))
+                .fontWeight(FontWeight.Bold)
+                .fontColor(this.sm.getColor('text_primary'))
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-            Row() {
-              // 状态圆点（颜色由 ModelViewHelper.getStatusColor 决定）
-              Row()
-                .width(8)
-                .height(8)
-                .borderRadius(4)
-                .backgroundColor(this.sm.getColor(ModelViewHelper.getStatusColor(provider.status)))
-              Text(provider.statusLabel || provider.status)
-                .fontSize(this.sm.getFontSize('caption'))
-                .fontColor(this.sm.getColor('text_secondary'))
-                .margin({ left: 4 })
-              Text('·')
-                .fontSize(this.sm.getFontSize('caption'))
-                .fontColor(this.sm.getColor('text_disabled'))
-                .margin({ left: 4, right: 4 })
-              Text(`${provider.model_count} 模型`)
-                .fontSize(this.sm.getFontSize('caption'))
-                .fontColor(this.sm.getColor('text_disabled'))
+              Row() {
+                // 状态圆点（颜色由 ModelViewHelper.getStatusColor 决定）
+                Row()
+                  .width(8)
+                  .height(8)
+                  .borderRadius(4)
+                  .backgroundColor(this.sm.getColor(ModelViewHelper.getStatusColor(provider.status)))
+                Text(provider.statusLabel || provider.status)
+                  .fontSize(this.sm.getFontSize('caption'))
+                  .fontColor(this.sm.getColor('text_secondary'))
+                  .margin({ left: 4 })
+                Text('·')
+                  .fontSize(this.sm.getFontSize('caption'))
+                  .fontColor(this.sm.getColor('text_disabled'))
+                  .margin({ left: 4, right: 4 })
+                Text(`${provider.model_count} 模型`)
+                  .fontSize(this.sm.getFontSize('caption'))
+                  .fontColor(this.sm.getColor('text_disabled'))
+              }
+              .margin({ top: 4 })
+              .alignItems(VerticalAlign.Center)
             }
-            .margin({ top: 4 })
-            .alignItems(VerticalAlign.Center)
-          }
-          .layoutWeight(1)
-          .alignItems(HorizontalAlign.Start)
-          .margin({ left: this.sm.getSpacing('sm') })
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start)
+            .margin({ left: this.sm.getSpacing('sm') })
 
-          // 健康状态图标
-          Text(ModelViewHelper.getHealthIcon(provider.health))
-            .fontSize(18)
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
-        .onClick(() => { this.toggleProvider(provider.id); })
-
-        // 展开后：模型列表
-        if (this.expandedProviderId === provider.id) {
-          Column() {
-            if (provider.models.length === 0) {
-              Text('该 Provider 暂无模型')
-                .fontSize(this.sm.getFontSize('caption'))
-                .fontColor(this.sm.getColor('text_disabled'))
-                .margin({ top: this.sm.getSpacing('sm') })
-            } else {
-              ForEach(provider.models, (model: ModelItem) => {
-                this.buildModelItem(provider, model)
-              }, (model: ModelItem) => model.id)
-            }
+            // 健康状态图标
+            Text(ModelViewHelper.getHealthIcon(provider.health))
+              .fontSize(18)
           }
           .width('100%')
-          .alignItems(HorizontalAlign.Start)
-          .margin({ top: this.sm.getSpacing('sm') })
+          .alignItems(VerticalAlign.Center)
+          .onClick(() => { this.toggleProvider(provider.id); })
+
+          // 展开后：模型列表
+          if (this.expandedProviderId === provider.id) {
+            Column() {
+              if (provider.models.length === 0) {
+                Text('该 Provider 暂无模型')
+                  .fontSize(this.sm.getFontSize('caption'))
+                  .fontColor(this.sm.getColor('text_disabled'))
+                  .margin({ top: this.sm.getSpacing('sm') })
+              } else {
+                ForEach(provider.models, (model: ModelItem) => {
+                  this.buildModelItem(provider, model)
+                }, (model: ModelItem) => model.id)
+              }
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+            .margin({ top: this.sm.getSpacing('sm') })
+          }
         }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
       }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
   }
@@ -667,8 +698,8 @@ export struct ModelPage {
         GlassButton({
           text: model.is_active ? '当前默认' : '设为默认',
           type: model.is_active ? 'default' : 'primary',
-          size: 'small',
-          onClick: () => {
+          btnSize: 'small',
+          onTap: () => {
             if (!model.is_active) {
               this.setDefault(provider.id, model.id);
             }
@@ -677,8 +708,8 @@ export struct ModelPage {
         GlassButton({
           text: model.enabled ? '禁用' : '启用',
           type: 'default',
-          size: 'small',
-          onClick: () => { this.toggleModelEnabled(provider, model); }
+          btnSize: 'small',
+          onTap: () => { this.toggleModelEnabled(provider, model); }
         })
           .margin({ left: this.sm.getSpacing('sm') })
       }
@@ -706,70 +737,72 @@ export struct ModelPage {
   buildDefaultPicker() {
     // 半透明遮罩
     Column() {
-      GlassPanel() {
-        Column() {
-          Text('选择默认模型')
-            .fontSize(this.sm.getFontSize('subtitle'))
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.sm.getColor('text_primary'))
+      Column() {
+        GlassPanel() {
+          Column() {
+            Text('选择默认模型')
+              .fontSize(this.sm.getFontSize('subtitle'))
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.sm.getColor('text_primary'))
 
-          // 全部 (Provider, ModelItem) 列表
-          Scroll() {
-            Column() {
-              ForEach(this.providers, (provider: Provider) => {
-                Column() {
-                  Text(provider.name)
-                    .fontSize(this.sm.getFontSize('body'))
-                    .fontWeight(FontWeight.Medium)
-                    .fontColor(this.sm.getColor('text_primary'))
-                    .margin({ top: this.sm.getSpacing('sm'), bottom: 4 })
+            // 全部 (Provider, ModelItem) 列表
+            Scroll() {
+              Column() {
+                ForEach(this.providers, (provider: Provider) => {
+                  Column() {
+                    Text(provider.name)
+                      .fontSize(this.sm.getFontSize('body'))
+                      .fontWeight(FontWeight.Medium)
+                      .fontColor(this.sm.getColor('text_primary'))
+                      .margin({ top: this.sm.getSpacing('sm'), bottom: 4 })
 
-                  ForEach(provider.models, (model: ModelItem) => {
-                    Row() {
-                      Text(ModelViewHelper.getModelTypeIcon(model.type))
-                        .fontSize(16)
-                      Text(model.name)
-                        .fontSize(this.sm.getFontSize('body'))
-                        .fontColor(this.sm.getColor('text_primary'))
-                        .layoutWeight(1)
-                        .margin({ left: 6 })
-                      if (model.is_active) {
-                        Text('当前')
-                          .fontSize(this.sm.getFontSize('caption'))
-                          .fontColor(this.sm.getColor('success'))
+                    ForEach(provider.models, (model: ModelItem) => {
+                      Row() {
+                        Text(ModelViewHelper.getModelTypeIcon(model.type))
+                          .fontSize(16)
+                        Text(model.name)
+                          .fontSize(this.sm.getFontSize('body'))
+                          .fontColor(this.sm.getColor('text_primary'))
+                          .layoutWeight(1)
+                          .margin({ left: 6 })
+                        if (model.is_active) {
+                          Text('当前')
+                            .fontSize(this.sm.getFontSize('caption'))
+                            .fontColor(this.sm.getColor('success'))
+                        }
                       }
-                    }
-                    .width('100%')
-                    .padding({ top: 8, bottom: 8 })
-                    .onClick(() => {
-                      if (!model.is_active) {
-                        this.setDefault(provider.id, model.id);
-                      }
-                    })
-                  }, (model: ModelItem) => model.id)
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Start)
-              }, (provider: Provider) => provider.id)
+                      .width('100%')
+                      .padding({ top: 8, bottom: 8 })
+                      .onClick(() => {
+                        if (!model.is_active) {
+                          this.setDefault(provider.id, model.id);
+                        }
+                      })
+                    }, (model: ModelItem) => model.id)
+                  }
+                  .width('100%')
+                  .alignItems(HorizontalAlign.Start)
+                }, (provider: Provider) => provider.id)
+              }
+              .width('100%')
+              .alignItems(HorizontalAlign.Start)
             }
-            .width('100%')
-            .alignItems(HorizontalAlign.Start)
-          }
-          .layoutWeight(1)
-          .scrollBar(BarState.Off)
+            .layoutWeight(1)
+            .scrollBar(BarState.Off)
 
-          GlassButton({
-            text: '取消',
-            type: 'default',
-            size: 'medium',
-            onClick: () => { this.showDefaultPicker = false; }
-          })
-            .margin({ top: this.sm.getSpacing('sm') })
+            GlassButton({
+              text: '取消',
+              type: 'default',
+              btnSize: 'medium',
+              onTap: () => { this.showDefaultPicker = false; }
+            })
+              .margin({ top: this.sm.getSpacing('sm') })
+          }
+          .width('100%')
+          .height('90%')
+          .padding(this.sm.getSpacing('md'))
+          .alignItems(HorizontalAlign.Start)
         }
-        .width('100%')
-        .height('90%')
-        .padding(this.sm.getSpacing('md'))
-        .alignItems(HorizontalAlign.Start)
       }
       .width('90%')
       .height('80%')

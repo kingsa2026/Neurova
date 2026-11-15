@@ -312,8 +312,8 @@ export struct TeamPage {
           GlassButton({
             text: '新建',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.openCreateDialog(); }
+            btnSize: 'small',
+            onTap: () => { this.openCreateDialog(); }
           })
         }
 
@@ -427,21 +427,21 @@ export struct TeamPage {
           GlassButton({
             text: '查看成员',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.openDetail(team); }
+            btnSize: 'small',
+            onTap: () => { this.openDetail(team); }
           })
           GlassButton({
             text: '编辑',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.handleEdit(team); }
+            btnSize: 'small',
+            onTap: () => { this.handleEdit(team); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
           GlassButton({
             text: '删除',
             type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmDelete(team); }
+            btnSize: 'small',
+            onTap: () => { this.confirmDelete(team); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }
@@ -471,7 +471,7 @@ export struct TeamPage {
         .onClick(() => { this.closeDetail(); })
 
       // 面板层
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           // 标题
           Text(team.name)
@@ -529,9 +529,9 @@ export struct TeamPage {
           GlassButton({
             text: '关闭',
             type: 'primary',
-            size: 'medium',
+            btnSize: 'medium',
             block: true,
-            onClick: () => { this.closeDetail(); }
+            onTap: () => { this.closeDetail(); }
           })
             .margin({ top: 12 })
         }
@@ -562,7 +562,7 @@ export struct TeamPage {
         .onClick(() => { this.showCreateDialog = false; })
 
       // 面板层
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('新建团队')
             .fontSize(this.sm.getFontSize('subtitle'))
@@ -603,14 +603,14 @@ export struct TeamPage {
             GlassButton({
               text: '取消',
               type: 'default',
-              size: 'medium',
-              onClick: () => { this.showCreateDialog = false; }
+              btnSize: 'medium',
+              onTap: () => { this.showCreateDialog = false; }
             })
             GlassButton({
               text: '创建',
               type: 'primary',
-              size: 'medium',
-              onClick: () => { this.submitCreate(); }
+              btnSize: 'medium',
+              onTap: () => { this.submitCreate(); }
             })
               .margin({ left: this.sm.getSpacing('sm') })
           }
