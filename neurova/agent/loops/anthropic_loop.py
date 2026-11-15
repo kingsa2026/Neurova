@@ -13,9 +13,18 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 if TYPE_CHECKING:
     from neurova.agent_core import Agent
 
-from neurova.agent.loops.base import BaseAgentLoop
+from neurova.agent.loops.base import (
+    BaseAgentLoop,
+    persistModelVisibleAnnouncement,
+)
 from neurova.agent.gates import STAGNATION_GATE, STAGNATION_REASON, appendTerminationNotice
 from neurova.agent.loops.reasoning_degeneracy import ReasoningStreamGuard, stripDegeneracy
+from neurova.agent.loops.turn_phase import (
+    TurnPhase,
+    phaseAdvance,
+    phaseAdvanceIfChanged,
+    phaseMarkError,
+)
 from neurova.agent.loops.turn_run_state import TurnRunState, resolveToolRoundBudget
 from neurova.llm_client import LLMResponse
 
@@ -72,9 +81,15 @@ class AnthropicLoop(BaseAgentLoop):
         turn_context.reset_turn_goal_continuations()
 
         drive = {"tools": tools, "computer_handler": computer_handler}
-        if kwargs.get("stream"):
-            return self._predict_stream(messages, drive, state)
-        return await self._predict_normal(messages, drive, state)
+        # P1（loop 对照 #1）：相位机随轮次态启程（与 OpenAI 环同表同纪律）。
+        phaseAdvance(state, TurnPhase.PROCESSING_INPUT)
+        try:
+            if kwargs.get("stream"):
+                return self._predict_stream(messages, drive, state)
+            return await self._predict_normal(messages, drive, state)
+        except BaseException:
+            phaseMarkError(state)
+            raise
 
     async def _predict_normal(self, messages: List[Dict], drive: Dict, state: TurnRunState) -> LLMResponse:
         """非流式工具环：一次往返 → 执行 → **回放** → 再判定要不要开下一轮。
@@ -90,12 +105,18 @@ class AnthropicLoop(BaseAgentLoop):
 
         while True:
             state.assertRoundInvariant()
+            # P1（loop 对照 #1）：每轮模型请求前 = AWAITING_MODEL_RESPONSE。
+            phaseAdvanceIfChanged(state, TurnPhase.AWAITING_MODEL_RESPONSE)
             response = await self._predict_anthropic(
                 await self._build_request(drive["tools"], drive["computer_handler"], messages)
             )
             self._accumulateRoundUsage(getattr(response, "usage", None) or {}, state)
+            # P1（loop 对照 #1）：响应到达 = STREAMING（非流式一次到位，幂等推进）。
+            phaseAdvanceIfChanged(state, TurnPhase.STREAMING)
 
             if not response.tool_calls:
+                # P1（loop 对照 #1）：出口求值 = AGGREGATING_RESULTS。
+                phaseAdvance(state, TurnPhase.AGGREGATING_RESULTS)
                 decision = await evaluateLoopExit(
                     self,
                     reply=getattr(response, "content", "") or "",
@@ -106,6 +127,10 @@ class AnthropicLoop(BaseAgentLoop):
                 )
                 if decision.action == LOOP_CONTINUE:
                     # 出口续跑仍属本轮：state 继续传递，就地开下一轮（不递归重建）
+                    # P1（loop 对照 #2）：续跑提示先落盘再进请求历史。
+                    persistModelVisibleAnnouncement(
+                        self.agent, decision.continuation_prompt, source="goal_continuation"
+                    )
                     messages.append({"role": "user", "content": decision.continuation_prompt})
                     continue
                 if decision.action != "done":
@@ -113,14 +138,19 @@ class AnthropicLoop(BaseAgentLoop):
                         "Anthropic 主出口门控 %s 终止: %s", decision.gate_name, decision.reason
                     )
                     appendTerminationNotice(response, decision.gate_name, decision.reason)
+                phaseAdvance(state, TurnPhase.COMPLETING)
                 return response
 
             state.toolRounds += 1
             logger.info(
                 "LLM returned %s tool calls (round %s)", len(response.tool_calls), state.toolRounds
             )
+            # P1（loop 对照 #1）：工具批相位推进（与 OpenAI 环同表）。
+            phaseAdvance(state, TurnPhase.SCHEDULING_TOOLS)
 
+            phaseAdvance(state, TurnPhase.EXECUTING_TOOLS)
             tool_messages = await self.handle_tool_calls(response.tool_calls, messages)
+            phaseAdvance(state, TurnPhase.AGGREGATING_RESULTS)
 
             # 执行即回放——连同声明这些调用的 assistant 消息：
             # provider 层要按 assistant.tool_calls 产 tool_use 块，缺声明时
@@ -151,8 +181,13 @@ class AnthropicLoop(BaseAgentLoop):
                         "门控 %s 终止 Anthropic 非流式循环: %s", _gd.gate_name, _gd.reason
                     )
                     appendTerminationNotice(response, _gd.gate_name, _gd.reason)
+                    phaseAdvance(state, TurnPhase.COMPLETING)
                     return response
                 if _gd is not None and _gd.action == _SA.INTERRUPT_AND_CONTINUE:
+                    # P1（loop 对照 #2）：先落盘再进历史。
+                    persistModelVisibleAnnouncement(
+                        self.agent, _gd.continuation_prompt, source="gate_interrupt"
+                    )
                     messages.append({"role": "user", "content": _gd.continuation_prompt})
                     logger.info(
                         "门控 %s 软干预（Anthropic 非流式）: %s", _gd.gate_name, _gd.reason
@@ -171,6 +206,8 @@ class AnthropicLoop(BaseAgentLoop):
 
         while True:
             state.assertRoundInvariant()
+            # P1（loop 对照 #1）：每轮模型请求前 = AWAITING_MODEL_RESPONSE（幂等推进）。
+            phaseAdvanceIfChanged(state, TurnPhase.AWAITING_MODEL_RESPONSE)
             reply_parts: List[str] = []
             reasoningGuard = ReasoningStreamGuard()
             pending_tool_calls: List[Dict] = []
@@ -196,10 +233,13 @@ class AnthropicLoop(BaseAgentLoop):
                     continue
                 text = getattr(chunk, "content", "") or ""
                 if text:
+                    # P1（loop 对照 #1）：首个内容 chunk 到达即 STREAMING（幂等推进）。
+                    phaseAdvanceIfChanged(state, TurnPhase.STREAMING)
                     reply_parts.append(text)
                     yield {"type": "content", "data": text}
                 rtext = getattr(chunk, "reasoning_content", None)
                 if rtext:
+                    phaseAdvanceIfChanged(state, TurnPhase.STREAMING)
                     for out_text in reasoningGuard.consume(rtext):
                         yield {"type": "reasoning", "data": out_text}
                     if reasoningGuard.aborted:
@@ -232,6 +272,8 @@ class AnthropicLoop(BaseAgentLoop):
             round_reply = "".join(reply_parts)
 
             if not pending_tool_calls:
+                # P1（loop 对照 #1）：出口求值 = AGGREGATING_RESULTS。
+                phaseAdvance(state, TurnPhase.AGGREGATING_RESULTS)
                 decision = await evaluateLoopExit(
                     self,
                     reply=round_reply,
@@ -241,6 +283,10 @@ class AnthropicLoop(BaseAgentLoop):
                     gateRunner=state.gateRunner,
                 )
                 if decision.action == LOOP_CONTINUE:
+                    # P1（loop 对照 #2）：续跑提示先落盘再进请求历史。
+                    persistModelVisibleAnnouncement(
+                        self.agent, decision.continuation_prompt, source="goal_continuation"
+                    )
                     messages.append({"role": "user", "content": decision.continuation_prompt})
                     yield {"type": "reasoning", "data": decision.continuation_prompt}
                     continue
@@ -253,6 +299,7 @@ class AnthropicLoop(BaseAgentLoop):
                         "reason": decision.reason,
                         "gate": decision.gate_name,
                     }
+                phaseAdvance(state, TurnPhase.COMPLETING)
                 yield {
                     "type": "done",
                     "reply": round_reply,
@@ -266,10 +313,14 @@ class AnthropicLoop(BaseAgentLoop):
                 "LLM returned %s tool calls (stream round %s)",
                 len(pending_tool_calls), state.toolRounds,
             )
+            # P1（loop 对照 #1）：工具批相位推进（与 OpenAI 环同表）。
+            phaseAdvance(state, TurnPhase.SCHEDULING_TOOLS)
             for tc in pending_tool_calls:
                 yield {"type": "tool_call", "data": tc}
 
+            phaseAdvance(state, TurnPhase.EXECUTING_TOOLS)
             tool_messages = await self.handle_tool_calls(pending_tool_calls, messages)
+            phaseAdvance(state, TurnPhase.AGGREGATING_RESULTS)
             for tm in tool_messages:
                 yield {"type": "tool_result", "data": tm}
 
@@ -305,6 +356,7 @@ class AnthropicLoop(BaseAgentLoop):
                 ))
                 if _gd is not None and _gd.action == _SA.TERMINATE:
                     logger.warning("门控 %s 终止 Anthropic 流式循环: %s", _gd.gate_name, _gd.reason)
+                    phaseAdvance(state, TurnPhase.COMPLETING)
                     yield {"type": "gate_terminate", "reason": _gd.reason, "gate": _gd.gate_name}
                     # 终止也要交出 done（与 OpenAI 环同律）：管道侧的收尾判据全部
                     # 挂在 done 上，缺它这条路上正文停在半截无人收口
@@ -316,6 +368,10 @@ class AnthropicLoop(BaseAgentLoop):
                     }
                     return
                 if _gd is not None and _gd.action == _SA.INTERRUPT_AND_CONTINUE:
+                    # P1（loop 对照 #2）：先落盘再进历史。
+                    persistModelVisibleAnnouncement(
+                        self.agent, _gd.continuation_prompt, source="gate_interrupt"
+                    )
                     messages.append({"role": "user", "content": _gd.continuation_prompt})
                     yield {"type": "reasoning", "data": _gd.continuation_prompt}
 
@@ -327,6 +383,7 @@ class AnthropicLoop(BaseAgentLoop):
                     )
                     # 与 OpenAI 环同一条通道：成因交 `gate_terminate`（管道并入正文）
                     # 并补一个 done；改前只发 reasoning 就 return，落库没有交代
+                    phaseAdvance(state, TurnPhase.COMPLETING)
                     yield {
                         "type": "gate_terminate",
                         "reason": STAGNATION_REASON,
@@ -339,9 +396,14 @@ class AnthropicLoop(BaseAgentLoop):
                         "usage": state.roundUsage,
                     }
                     return
+                # P1（loop 对照 #2）：先落盘再进历史。
+                _stagnation_notice = "检测到重复的响应内容。请更换策略，避免重复已经尝试过的无效路径。"
+                persistModelVisibleAnnouncement(
+                    self.agent, _stagnation_notice, source="stagnation_notice"
+                )
                 messages.append({
                     "role": "user",
-                    "content": "检测到重复的响应内容。请更换策略，避免重复已经尝试过的无效路径。",
+                    "content": _stagnation_notice,
                 })
             else:
                 state.stagnationCount = 0
