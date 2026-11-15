@@ -89,7 +89,7 @@ export struct LoginPage {
         }
         this.msg.success('登录成功');
         // 清空栈并跳转到 Dashboard
-        this.router.resetTo(RouteNames.DASHBOARD);
+        this.router.resetTo(RouteNames.SHELL);
       } else {
         // 业务失败：展示后端返回的错误消息
         this.msg.error(res.message || '登录失败');

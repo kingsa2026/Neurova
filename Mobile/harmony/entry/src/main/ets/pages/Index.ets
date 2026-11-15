@@ -18,6 +18,7 @@ import { Logger } from '../libs/logger/Logger';
 import { ServerProfiles } from '../libs/config/ServerProfiles';
 import { ConfigManager } from '../libs/config/ConfigManager';
 import { pageMap } from '../routing/PageMap';
+import { ToastHost } from '../components/system/ToastHost';
 
 @Entry
 @Component
@@ -39,8 +40,8 @@ struct Index {
     ConfigManager.getInstance().applyServerProfile(apiBase, getContext(this) as Context);
     // 档案就绪后再分发，避免异步竞争导致带空地址登录
     if (this.authStore.isAuthenticated) {
-      this.logger.info('Index', '冷启动：已登录，跳转仪表盘');
-      this.router.replace(RouteNames.DASHBOARD);
+      this.logger.info('Index', '冷启动：已登录，进入导航壳');
+      this.router.replace(RouteNames.SHELL);
     } else {
       this.logger.info('Index', '冷启动：未登录，跳转登录页');
       this.router.replace(RouteNames.LOGIN);
@@ -53,7 +54,8 @@ struct Index {
   }
 
   build() {
-    // 根导航容器：所有页面经 NavPathStack + navDestination 渲染（此前无挂载点，页面名无组件映射）
+    // 根容器：Navigation + 顶层 ToastHost（修复 toast 全盲——MessageManager 分发此前无 UI 订阅）
+    Stack() {
     Navigation(this.router.getNavStack()) {
       Column() {
         Text('Neurova')
@@ -67,6 +69,10 @@ struct Index {
     .navDestination(this.destBuilder)
     .hideTitleBar(true)
     .mode(NavigationMode.Stack)
+    .width('100%')
+    .height('100%')
+    ToastHost()
+    }
     .width('100%')
     .height('100%')
   }
