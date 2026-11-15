@@ -493,3 +493,13 @@ tests/**/.env.*
 # Playwright e2e artifacts (C3)
 NeurUI/test-results/
 NeurUI/playwright-report/
+
+# 移动端签名机密件（私钥/密码绝不入库；非敏感清单见 Mobile/signing/INFO.md）
+Mobile/signing/passwords.local.md
+Mobile/signing/*.p12
+Mobile/signing/*.jks
+Mobile/signing/*.keystore
+Mobile/**/passwords.local.md
+Mobile/signing/*.cer
+Mobile/signing/*.p7b
+Mobile/signing/harmony/

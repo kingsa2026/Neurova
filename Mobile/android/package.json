@@ -1,0 +1,33 @@
+{
+  "name": "neurova-mobile-android",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Neurova 安卓端（Capacitor + Vue3）；构建物输出 www/ 并归档至 Mobile/dist/android",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "vue-tsc --noEmit",
+    "build": "vue-tsc --noEmit && vite build",
+    "build:web": "vite build",
+    "cap:sync": "cap sync android",
+    "cap:open": "cap open android"
+  },
+  "keywords": [],
+  "license": "ISC",
+  "dependencies": {
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/cli": "^8.6.2",
+    "@capacitor/core": "^8.6.2",
+    "@capacitor/preferences": "^8.0.1",
+    "axios": "^1.20.0",
+    "pinia": "^3.0.2",
+    "vue": "^3.5.43",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.11",
+    "vue-tsc": "^2.2.0"
+  }
+}
