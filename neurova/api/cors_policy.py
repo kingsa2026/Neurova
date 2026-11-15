@@ -38,6 +38,9 @@ DEFAULT_ORIGINS = (
     "http://127.0.0.1:3000",
     "http://tauri.localhost",
     "https://tauri.localhost",
+    # 移动端 Capacitor WebView origin（安卓 androidScheme=https → https://localhost）
+    "http://localhost",
+    "https://localhost",
 )
 
 #: 允许的 HTTP 方法与请求头（此前散在 6 处字面量里，收口后只此一处）
