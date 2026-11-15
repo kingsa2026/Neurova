@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { streamChat, listChatSessions, fetchChatHistory } from '@/api/chat'
 import { MobileWsChannel } from '@/utils/ws'
 import { useAgentsStore } from '@/stores/agents'
@@ -21,6 +21,14 @@ const abort = ref<AbortController | null>(null)
 const listEl = ref<HTMLElement | null>(null)
 
 let wsChannel: MobileWsChannel | null = null
+
+// 切页卸载时终止在途流：否则回复 chunk 到达时 tail() 已随组件销毁，
+// 回调里的空引用异常会打崩渲染（实测黑屏根因）
+onUnmounted(() => {
+  abort.value?.abort()
+  wsChannel?.close()
+  wsChannel = null
+})
 
 onMounted(async () => {
   await agents.load()
@@ -66,12 +74,16 @@ async function send() {
           sessionId.value = info.session_id || sessionId.value
         },
         onMessage: (chunk) => {
+          const t = tail()
+          if (!t || t.status !== 'streaming') return
           sseOk = true
-          tail().content += chunk
+          t.content += chunk
           scrollToBottom()
         },
         onReasoning: (chunk) => {
-          tail().reasoning = (tail().reasoning ?? '') + chunk
+          const t = tail()
+          if (!t) return
+          t.reasoning = (t.reasoning ?? '') + chunk
           scrollToBottom()
         },
         onStatus: ({ kind, payload }) => {
@@ -132,7 +144,9 @@ async function fallbackToWs(text: string) {
     },
     onChunk: (content, sid) => {
       if (sid !== wsSessionId) return
-      tail().content += content
+      const t = tail()
+      if (!t || t.status !== 'streaming') return
+      t.content += content
       scrollToBottom()
     },
     onDone: (sid) => {

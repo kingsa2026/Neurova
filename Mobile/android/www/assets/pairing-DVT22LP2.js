@@ -1,1 +1,0 @@
-import{G as e}from"./index-LmZQp1CY.js";async function o(i){return e("/mobile/pairing/resolve",{ref:i})}async function c(i,r){return e("/mobile/pairing/confirm",{ref:i,deviceName:r,deviceType:"android"})}async function s(i,r,n){return e("/mobile/pairing/refresh",{pairing_id:i,device_secret:r,challenge:n})}export{o as a,c,s as r};

@@ -25,7 +25,9 @@ const tabs = [
 ] as Array<{ path?: string; name: string; label: string; icon: string }>
 
 function go(t: { path?: string; name: string }) {
-  router.push(t.path ?? `/${t.name}`)
+  // 统一按 name 导航：/chat 未在路由表注册（'/' 才是 ChatView），
+  // push('/chat') 会因无匹配而中断导航（实测切回对话页整页残缺）
+  router.push({ name: t.name })
 }
 
 onMounted(async () => {

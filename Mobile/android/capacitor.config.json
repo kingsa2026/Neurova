@@ -1,5 +1,12 @@
 {
   "appId": "com.neurova.app",
   "appName": "Neurova",
-  "webDir": "www"
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": true
+  },
+  "webContentsDebuggingEnabled": true
 }
