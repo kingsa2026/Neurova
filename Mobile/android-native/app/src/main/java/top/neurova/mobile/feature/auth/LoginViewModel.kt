@@ -14,6 +14,8 @@ class LoginViewModel(private val runtime: AppRuntime) : ViewModel() {
             runCatching { runtime.auth.login(username, password) }
                 .onSuccess { onSuccess() }
                 .onFailure { failure ->
+                    // 诚实日志：用户文案保持友好，底层异常留痕 logcat 便于归因
+                    android.util.Log.w("Neurova.Auth", "login failed", failure)
                     onFailure(
                         when (failure) {
                             is LoginRejected -> failure.message ?: "登录失败"

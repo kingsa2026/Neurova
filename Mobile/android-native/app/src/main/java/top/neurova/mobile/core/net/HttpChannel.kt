@@ -5,6 +5,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -57,19 +58,22 @@ class HttpChannel(
         else -> element
     }
 
-    private suspend fun execute(request: Request): JsonElement =
+    private suspend fun execute(request: Request): JsonElement = withContext(Dispatchers.IO) {
         finish(sendWithAuthRetry(request), request)
+    }
 
     /**
      * SSE 事件流开口：返回未消费的 Response（调用方在 IO 线程读流）；
      * 401 走同一条单飞续签 + 重放一次链路，之后由调用方按错误码诚实呈现。
+     * OkHttp 同步调用为阻塞 IO，统一收口 Dispatchers.IO（主线程调用即
+     * NetworkOnMainThreadException，实测复现过，勿移除）。
      */
-    suspend fun streamPost(path: String, bodyJson: JsonObject): okhttp3.Response {
+    suspend fun streamPost(path: String, bodyJson: JsonObject): okhttp3.Response = withContext(Dispatchers.IO) {
         val request = buildRequest(path, emptyMap(), "POST", bodyJson)
             .newBuilder()
             .header("Accept", "text/event-stream")
             .build()
-        return sendWithAuthRetry(request)
+        sendWithAuthRetry(request)
     }
 
     private suspend fun sendWithAuthRetry(request: Request): okhttp3.Response {
@@ -92,7 +96,7 @@ class HttpChannel(
         return replay
     }
 
-    private suspend fun refreshAccessToken(): String {
+    private suspend fun refreshAccessToken(): String = withContext(Dispatchers.IO) {
         val refresh = credentials.refreshToken()
         if (refresh.isEmpty()) throw ChannelAuthRevoked("no refresh token")
         val profile = profileProvider()
@@ -110,7 +114,7 @@ class HttpChannel(
             val newRefresh = (payload as? JsonObject)?.get("refresh_token")?.toString()?.trim('"')
             if (access.isEmpty()) throw ChannelAuthRevoked("refresh response missing access_token")
             credentials.saveTokens(access, newRefresh ?: refresh)
-            return access
+            access
         }
     }
 
