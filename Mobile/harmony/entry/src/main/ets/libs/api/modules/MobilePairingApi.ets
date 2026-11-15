@@ -6,15 +6,38 @@
 import { HttpClient } from '../HttpClient';
 import { ApiResponse, PairingInfo, PairingConfirm, PairingConfirmed, PairingResolved, PairingRefresh, PairingRefreshed } from '../../types';
 
+/** 生成配对码请求体 */
+export interface PairingGenerateRequest {
+  device_name: string;
+  device_type: string;
+}
+
+/** 凭一次性 ref 换取回连地址请求体 */
+export interface PairingResolveRequest {
+  ref: string;
+}
+
+/** 配对状态查询响应 */
+export interface PairingStatus {
+  status: string;
+  wsToken?: string;
+  wsUrl?: string;
+}
+
 export class MobilePairingApi {
-  constructor(private client: HttpClient) {}
+  private client: HttpClient;
+
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
 
   /** 生成配对码（POST /v1/mobile/pairing/generate） */
   async generate(deviceName: string, deviceType: string = 'mobile'): Promise<ApiResponse<PairingInfo>> {
-    return this.client.post<PairingInfo>('/v1/mobile/pairing/generate', {
+    const body: PairingGenerateRequest = {
       device_name: deviceName,
       device_type: deviceType,
-    });
+    };
+    return this.client.post<PairingInfo>('/v1/mobile/pairing/generate', body);
   }
 
   /** 确认配对（POST /v1/mobile/pairing/confirm） */
@@ -24,7 +47,8 @@ export class MobilePairingApi {
 
   /** 扫码后凭一次性 ref 换取回连地址（POST /v1/mobile/pairing/resolve，匿名口） */
   async resolve(ref: string): Promise<ApiResponse<PairingResolved>> {
-    return this.client.post<PairingResolved>('/v1/mobile/pairing/resolve', { ref });
+    const body: PairingResolveRequest = { ref };
+    return this.client.post<PairingResolved>('/v1/mobile/pairing/resolve', body);
   }
 
   /** 接入凭证续签（POST /v1/mobile/pairing/refresh，免回屏重扫） */
@@ -33,7 +57,7 @@ export class MobilePairingApi {
   }
 
   /** 检查配对状态（GET /v1/mobile/pairing/status/:code） */
-  async status(code: string): Promise<ApiResponse<{ status: string; wsToken?: string; wsUrl?: string }>> {
+  async status(code: string): Promise<ApiResponse<PairingStatus>> {
     return this.client.get(`/v1/mobile/pairing/status/${code}`);
   }
 }

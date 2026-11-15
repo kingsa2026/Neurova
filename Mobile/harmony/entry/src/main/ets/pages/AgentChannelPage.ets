@@ -176,6 +176,22 @@ interface ChannelFormData {
   webhookUrl: string;
 }
 
+/** 新建渠道创建入参（api.agentChannels.create 的 data 形状；config 为字符串键字典） */
+interface ChannelCreateData {
+  type: ChannelType;
+  name: string;
+  appId: string;
+  webhookUrl: string;
+  config: Record<string, Object>;
+}
+
+/** 渠道类型选项（新建弹窗类型选择条目） */
+interface ChannelTypeOption {
+  type: ChannelType;
+  label: string;
+  icon: string;
+}
+
 @Component
 export struct AgentChannelPage {
   // 渠道列表（由 API 加载，驱动列表渲染）
@@ -368,16 +384,17 @@ export struct AgentChannelPage {
       return;
     }
     try {
-      const data: Partial<ChannelInfo> = {
+      // config 为字符串键字典：先建空 Record 再逐键写入（ArkTS 禁止非空对象字面量直接落 Record）
+      const config: Record<string, Object> = {};
+      config['appId'] = this.formData.appId;
+      config['appSecret'] = this.formData.appSecret;
+      config['webhookUrl'] = this.formData.webhookUrl;
+      const data: ChannelCreateData = {
         type: this.formData.type,
         name: this.formData.name,
         appId: this.formData.appId,
         webhookUrl: this.formData.webhookUrl,
-        config: {
-          appId: this.formData.appId,
-          appSecret: this.formData.appSecret,
-          webhookUrl: this.formData.webhookUrl,
-        },
+        config: config,
       };
       const res = await this.api.agentChannels.create(agentId, data);
       if (res.code === 0) {
@@ -434,8 +451,8 @@ export struct AgentChannelPage {
         GlassButton({
           text: '新建',
           type: 'primary',
-          size: 'small',
-          onClick: () => { this.openCreateDialog(); }
+          btnSize: 'small',
+          onTap: () => { this.openCreateDialog(); }
         })
       }
 
@@ -467,8 +484,8 @@ export struct AgentChannelPage {
           GlassButton({
             text: '新建渠道',
             type: 'primary',
-            size: 'medium',
-            onClick: () => { this.openCreateDialog(); }
+            btnSize: 'medium',
+            onTap: () => { this.openCreateDialog(); }
           })
         }
         .width('100%')
@@ -512,6 +529,8 @@ export struct AgentChannelPage {
   /** 单个渠道卡片：图标+名称+状态 / 配置摘要 / 时间 / 错误信息 / 操作按钮 */
   @Builder
   buildChannelCard(channel: ChannelInfo) {
+    // ArkTS 解析器不允许尾随闭包组件调用后再链属性修饰，外包 Column 承接 .width
+    Column() {
     GlassCard() {
       Column() {
         // 上部：图标 + 名称/状态徽章
@@ -602,21 +621,21 @@ export struct AgentChannelPage {
           GlassButton({
             text: '测试',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.testConnection(channel); }
+            btnSize: 'small',
+            onTap: () => { this.testConnection(channel); }
           })
           GlassButton({
             text: channel.enabled ? '禁用' : '启用',
             type: channel.enabled ? 'default' : 'primary',
-            size: 'small',
-            onClick: () => { this.toggleChannel(channel, !channel.enabled); }
+            btnSize: 'small',
+            onTap: () => { this.toggleChannel(channel, !channel.enabled); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
           GlassButton({
             text: '删除',
             type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmDelete(channel); }
+            btnSize: 'small',
+            onTap: () => { this.confirmDelete(channel); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }
@@ -626,6 +645,7 @@ export struct AgentChannelPage {
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
+    }
     }
     .width('100%')
   }
@@ -637,6 +657,8 @@ export struct AgentChannelPage {
   /** 新建渠道弹窗：选择类型 + 填写配置 */
   @Builder
   buildCreateDialog() {
+    // ArkTS 解析器不允许尾随闭包组件调用后再链属性修饰，外包 Column 承接尺寸与内边距
+    Column() {
     GlassPanel() {
       Column() {
         // 标题
@@ -652,17 +674,25 @@ export struct AgentChannelPage {
           .fontColor(this.sm.getColor('text_secondary'))
           .width('100%')
         Row() {
-          ForEach(this.getChannelTypeOptions(), (opt: { type: ChannelType; label: string; icon: string }) => {
+          ForEach(this.getChannelTypeOptions(), (opt: ChannelTypeOption) => {
             GlassButton({
               text: `${opt.icon} ${opt.label}`,
               type: this.formData.type === opt.type ? 'primary' : 'default',
-              size: 'small',
-              onClick: () => {
-                this.formData = { ...this.formData, type: opt.type };
+              btnSize: 'small',
+              onTap: () => {
+                // ArkTS 禁止对象展开，逐键拷贝生成新对象以触发 @State 渲染
+                const next: ChannelFormData = {
+                  type: opt.type,
+                  name: this.formData.name,
+                  appId: this.formData.appId,
+                  appSecret: this.formData.appSecret,
+                  webhookUrl: this.formData.webhookUrl,
+                };
+                this.formData = next;
               }
             })
             .margin({ right: this.sm.getSpacing('xs') })
-          }, (opt: { type: ChannelType; label: string; icon: string }) => opt.type)
+          }, (opt: ChannelTypeOption) => opt.type)
         }
         .width('100%')
         .margin({ top: this.sm.getSpacing('xs'), bottom: this.sm.getSpacing('sm') })
@@ -689,7 +719,17 @@ export struct AgentChannelPage {
           placeholder: '请输入 AppId',
           value: this.formData.appId,
           type: 'text',
-          onChange: (v: string) => { this.formData = { ...this.formData, appId: v }; }
+          onChange: (v: string) => {
+            // ArkTS 禁止对象展开，逐键拷贝生成新对象以触发 @State 渲染
+            const next: ChannelFormData = {
+              type: this.formData.type,
+              name: this.formData.name,
+              appId: v,
+              appSecret: this.formData.appSecret,
+              webhookUrl: this.formData.webhookUrl,
+            };
+            this.formData = next;
+          }
         })
           .margin({ top: 4, bottom: this.sm.getSpacing('sm') })
 
@@ -702,7 +742,17 @@ export struct AgentChannelPage {
           placeholder: '请输入 AppSecret',
           value: this.formData.appSecret,
           type: 'password',
-          onChange: (v: string) => { this.formData = { ...this.formData, appSecret: v }; }
+          onChange: (v: string) => {
+            // ArkTS 禁止对象展开，逐键拷贝生成新对象以触发 @State 渲染
+            const next: ChannelFormData = {
+              type: this.formData.type,
+              name: this.formData.name,
+              appId: this.formData.appId,
+              appSecret: v,
+              webhookUrl: this.formData.webhookUrl,
+            };
+            this.formData = next;
+          }
         })
           .margin({ top: 4, bottom: this.sm.getSpacing('sm') })
 
@@ -715,7 +765,17 @@ export struct AgentChannelPage {
           placeholder: '请输入 Webhook URL',
           value: this.formData.webhookUrl,
           type: 'text',
-          onChange: (v: string) => { this.formData = { ...this.formData, webhookUrl: v }; }
+          onChange: (v: string) => {
+            // ArkTS 禁止对象展开，逐键拷贝生成新对象以触发 @State 渲染
+            const next: ChannelFormData = {
+              type: this.formData.type,
+              name: this.formData.name,
+              appId: this.formData.appId,
+              appSecret: this.formData.appSecret,
+              webhookUrl: v,
+            };
+            this.formData = next;
+          }
         })
           .margin({ top: 4, bottom: this.sm.getSpacing('md') })
 
@@ -724,14 +784,14 @@ export struct AgentChannelPage {
           GlassButton({
             text: '取消',
             type: 'default',
-            size: 'medium',
-            onClick: () => { this.showCreateDialog = false; }
+            btnSize: 'medium',
+            onTap: () => { this.showCreateDialog = false; }
           })
           GlassButton({
             text: '创建',
             type: 'primary',
-            size: 'medium',
-            onClick: () => { this.submitCreate(); }
+            btnSize: 'medium',
+            onTap: () => { this.submitCreate(); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }
@@ -741,12 +801,13 @@ export struct AgentChannelPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('90%')
     .padding(this.sm.getSpacing('md'))
   }
 
   /** 获取渠道类型选项列表（用于新建弹窗选择） */
-  private getChannelTypeOptions(): { type: ChannelType; label: string; icon: string }[] {
+  private getChannelTypeOptions(): ChannelTypeOption[] {
     const types: ChannelType[] = [
       'feishu' as ChannelType,
       'dingtalk' as ChannelType,
@@ -757,11 +818,14 @@ export struct AgentChannelPage {
       'api' as ChannelType,
       'email' as ChannelType,
     ];
-    return types.map((t: ChannelType) => ({
-      type: t,
-      label: ChannelViewHelper.getTypeLabel(t),
-      icon: ChannelViewHelper.getTypeIcon(t),
-    }));
+    return types.map((t: ChannelType): ChannelTypeOption => {
+      const opt: ChannelTypeOption = {
+        type: t,
+        label: ChannelViewHelper.getTypeLabel(t),
+        icon: ChannelViewHelper.getTypeIcon(t),
+      };
+      return opt;
+    });
   }
 
   /** 获取状态文案：connected→已连接，disconnected→未连接，error→异常，disabled→已禁用 */

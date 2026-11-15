@@ -20,15 +20,25 @@ import {
   SessionSync,
 } from '../../types';
 
+/** 手动触发同步的返回结果 */
+interface TriggerSyncResult {
+  ok: boolean;
+  syncedAt: string;
+}
+
 export class SessionSyncApi {
-  constructor(private client: HttpClient) {}
+  private client: HttpClient;
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
 
   /** 列出会话同步记录（按 agentId 过滤，支持分页） */
   async list(
     agentId: string,
     params?: PageParams,
   ): Promise<ApiResponse<PageResult<SessionSync>>> {
-    const query: Record<string, Object> = { agentId };
+    const query: Record<string, Object> = {};
+    query['agentId'] = agentId;
     if (params) {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
@@ -60,10 +70,11 @@ export class SessionSyncApi {
   }
 
   /** 触发同步（手动重试） */
-  async trigger(syncId: string): Promise<ApiResponse<{ ok: boolean; syncedAt: string }>> {
-    return this.client.post<{ ok: boolean; syncedAt: string }>(
+  async trigger(syncId: string): Promise<ApiResponse<TriggerSyncResult>> {
+    const body: Record<string, Object> = {};
+    return this.client.post<TriggerSyncResult>(
       `/v1/session-syncs/${syncId}/trigger`,
-      {},
+      body,
     );
   }
 }

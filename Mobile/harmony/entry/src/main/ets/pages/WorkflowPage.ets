@@ -371,8 +371,8 @@ export struct WorkflowPage {
           GlassButton({
             text: '新建',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.openCreateDialog(); }
+            btnSize: 'small',
+            onTap: () => { this.openCreateDialog(); }
           })
         }
 
@@ -518,28 +518,28 @@ export struct WorkflowPage {
           GlassButton({
             text: '编辑',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.handleEdit(workflow); }
+            btnSize: 'small',
+            onTap: () => { this.handleEdit(workflow); }
           })
           GlassButton({
             text: '复制',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.duplicateWorkflow(workflow); }
+            btnSize: 'small',
+            onTap: () => { this.duplicateWorkflow(workflow); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
           GlassButton({
             text: workflow.status === 'active' ? '暂停' : '启用',
             type: workflow.status === 'active' ? 'default' : 'primary',
-            size: 'small',
-            onClick: () => { this.toggleStatus(workflow); }
+            btnSize: 'small',
+            onTap: () => { this.toggleStatus(workflow); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
           GlassButton({
             text: '删除',
             type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmDelete(workflow); }
+            btnSize: 'small',
+            onTap: () => { this.confirmDelete(workflow); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }
@@ -569,7 +569,7 @@ export struct WorkflowPage {
         .onClick(() => { this.showCreateDialog = false; })
 
       // 面板层：居中展示
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('新建工作流')
             .fontSize(this.sm.getFontSize('subtitle'))
@@ -610,14 +610,14 @@ export struct WorkflowPage {
             GlassButton({
               text: '取消',
               type: 'default',
-              size: 'medium',
-              onClick: () => { this.showCreateDialog = false; }
+              btnSize: 'medium',
+              onTap: () => { this.showCreateDialog = false; }
             })
             GlassButton({
               text: '创建',
               type: 'primary',
-              size: 'medium',
-              onClick: () => { this.submitCreate(); }
+              btnSize: 'medium',
+              onTap: () => { this.submitCreate(); }
             })
               .margin({ left: this.sm.getSpacing('sm') })
           }

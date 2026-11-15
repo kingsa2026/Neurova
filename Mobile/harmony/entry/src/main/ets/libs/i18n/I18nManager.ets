@@ -165,19 +165,19 @@ export class I18nManager {
 
     // 仅按主语言匹配（如 'zh' → 'zh-CN'，'ja' → 'ja-JP'）
     const primary = segments[0];
-    const byPrimary: Record<string, Locale> = {
-      zh: 'zh-CN',
-      en: 'en-US',
-      ja: 'ja-JP',
-      ko: 'ko-KR',
-      fr: 'fr-FR',
-      de: 'de-DE',
-      es: 'es-ES',
-      ru: 'ru-RU',
-      ar: 'ar-SA',
-      hi: 'hi-IN',
-      it: 'it-IT',
-    };
+    // 逐键赋值构建映射：ArkTS 对象字面量必须对应显式声明的类/接口，Record 字面量逐键填充
+    const byPrimary: Record<string, Locale> = {};
+    byPrimary['zh'] = 'zh-CN';
+    byPrimary['en'] = 'en-US';
+    byPrimary['ja'] = 'ja-JP';
+    byPrimary['ko'] = 'ko-KR';
+    byPrimary['fr'] = 'fr-FR';
+    byPrimary['de'] = 'de-DE';
+    byPrimary['es'] = 'es-ES';
+    byPrimary['ru'] = 'ru-RU';
+    byPrimary['ar'] = 'ar-SA';
+    byPrimary['hi'] = 'hi-IN';
+    byPrimary['it'] = 'it-IT';
     if (byPrimary[primary]) {
       return byPrimary[primary];
     }

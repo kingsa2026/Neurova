@@ -261,8 +261,8 @@ export struct KnowledgeGraphPage {
           GlassButton({
             text: '刷新',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.loadGraph(); }
+            btnSize: 'small',
+            onTap: () => { this.loadGraph(); }
           })
         }
 
@@ -314,8 +314,8 @@ export struct KnowledgeGraphPage {
             GlassButton({
               text: '重新加载',
               type: 'primary',
-              size: 'medium',
-              onClick: () => { this.loadGraph(); }
+              btnSize: 'medium',
+              onTap: () => { this.loadGraph(); }
             })
           }
           .width('100%')
@@ -483,14 +483,14 @@ export struct KnowledgeGraphPage {
           GlassButton({
             text: '查看详情',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.openDetail(node); }
+            btnSize: 'small',
+            onTap: () => { this.openDetail(node); }
           })
           GlassButton({
             text: '删除',
             type: 'danger',
-            size: 'small',
-            onClick: () => { this.handleDelete(node); }
+            btnSize: 'small',
+            onTap: () => { this.handleDelete(node); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }
@@ -520,7 +520,7 @@ export struct KnowledgeGraphPage {
         .onClick(() => { this.closeDetail(); })
 
       // 面板层：居中展示
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           // 标题行：图标 + label
           Row() {
@@ -636,9 +636,9 @@ export struct KnowledgeGraphPage {
           GlassButton({
             text: '关闭',
             type: 'primary',
-            size: 'medium',
+            btnSize: 'medium',
             block: true,
-            onClick: () => { this.closeDetail(); }
+            onTap: () => { this.closeDetail(); }
           })
             .margin({ top: this.sm.getSpacing('md') })
         }

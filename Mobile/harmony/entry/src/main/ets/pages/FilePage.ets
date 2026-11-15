@@ -286,7 +286,9 @@ export struct FilePage {
    * 删除前二次确认（AlertDialog）
    */
   private confirmDelete(file: FileItem): void {
-    AlertDialog.show({
+    // ArkTS 下 AlertDialog.show 的参数是联合类型，字面量直接内联无法对应到具体成员，
+    // 先赋给显式类型的变量再传入
+    const params: AlertDialogParamWithButtons = {
       title: '确认删除',
       message: `确定要删除"${file.name}"吗？此操作不可撤销。`,
       autoCancel: true,
@@ -300,7 +302,8 @@ export struct FilePage {
         fontColor: this.sm.getColor('error'),
         action: () => { this.deleteFile(file.id); }
       }
-    });
+    };
+    AlertDialog.show(params);
   }
 
   /**
@@ -332,7 +335,7 @@ export struct FilePage {
           showBack: true,
           showMenu: false,
           onBack: () => { this.router.back(); }
-        }
+        })
 
         // 面包屑导航
         Scroll() {
@@ -437,69 +440,71 @@ export struct FilePage {
   /** 单个文件卡片：类型图标 + 名称 + 大小 + 修改时间 + 删除按钮 */
   @Builder
   buildFileCard(file: FileItem) {
-    GlassCard() {
-      Column() {
-        // 上部：类型图标 + 名称
-        Row() {
-          Text(FileViewHelper.getFileTypeIcon(file.type, file.mimeType))
-            .fontSize(20)
-          Text(FileViewHelper.truncateFileName(file.name, DEFAULT_TRUNCATE_LEN))
-            .fontSize(this.sm.getFontSize('subtitle'))
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.sm.getColor(FileViewHelper.getFileTypeColor(file.type)))
-            .margin({ left: 8 })
-            .layoutWeight(1)
-            .maxLines(2)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
-
-        // 底部行：大小 · 修改时间
-        Row() {
-          Text(FileViewHelper.formatFileSize(file.size))
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_secondary'))
-          Text('·')
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_disabled'))
-            .margin({ left: 6, right: 6 })
-          Text(`修改：${FileViewHelper.formatModifiedAt(file.modifiedAt)}`)
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_secondary'))
-            .layoutWeight(1)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .textAlign(TextAlign.End)
-        }
-        .width('100%')
-        .margin({ top: 8 })
-        .alignItems(VerticalAlign.Center)
-
-        // 操作按钮：删除（右对齐）；文件夹点击进入
-        Row() {
-          if (file.type === 'folder') {
-            GlassButton({
-              text: '进入',
-              type: 'default',
-              size: 'small',
-              onClick: () => { this.enterFolder(file.id); }
-            })
+    Column() {
+      GlassCard() {
+        Column() {
+          // 上部：类型图标 + 名称
+          Row() {
+            Text(FileViewHelper.getFileTypeIcon(file.type, file.mimeType))
+              .fontSize(20)
+            Text(FileViewHelper.truncateFileName(file.name, DEFAULT_TRUNCATE_LEN))
+              .fontSize(this.sm.getFontSize('subtitle'))
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.sm.getColor(FileViewHelper.getFileTypeColor(file.type)))
+              .margin({ left: 8 })
+              .layoutWeight(1)
+              .maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
           }
-          GlassButton({
-            text: '删除',
-            type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmDelete(file); }
-          })
-            .margin({ left: this.sm.getSpacing('sm') })
+          .width('100%')
+          .alignItems(VerticalAlign.Center)
+
+          // 底部行：大小 · 修改时间
+          Row() {
+            Text(FileViewHelper.formatFileSize(file.size))
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_secondary'))
+            Text('·')
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_disabled'))
+              .margin({ left: 6, right: 6 })
+            Text(`修改：${FileViewHelper.formatModifiedAt(file.modifiedAt)}`)
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_secondary'))
+              .layoutWeight(1)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .textAlign(TextAlign.End)
+          }
+          .width('100%')
+          .margin({ top: 8 })
+          .alignItems(VerticalAlign.Center)
+
+          // 操作按钮：删除（右对齐）；文件夹点击进入
+          Row() {
+            if (file.type === 'folder') {
+              GlassButton({
+                text: '进入',
+                type: 'default',
+                btnSize: 'small',
+                onTap: () => { this.enterFolder(file.id); }
+              })
+            }
+            GlassButton({
+              text: '删除',
+              type: 'danger',
+              btnSize: 'small',
+              onTap: () => { this.confirmDelete(file); }
+            })
+              .margin({ left: this.sm.getSpacing('sm') })
+          }
+          .width('100%')
+          .justifyContent(FlexAlign.End)
+          .margin({ top: this.sm.getSpacing('md') })
         }
         .width('100%')
-        .justifyContent(FlexAlign.End)
-        .margin({ top: this.sm.getSpacing('md') })
+        .alignItems(HorizontalAlign.Start)
       }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
   }

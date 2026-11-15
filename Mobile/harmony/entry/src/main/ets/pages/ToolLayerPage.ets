@@ -288,8 +288,8 @@ export struct ToolLayerPage {
           GlassButton({
             text: '新建',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.openCreateDialog(); }
+            btnSize: 'small',
+            onTap: () => { this.openCreateDialog(); }
           })
         }
 
@@ -313,8 +313,8 @@ export struct ToolLayerPage {
             GlassButton({
               text: '新建工具层',
               type: 'primary',
-              size: 'medium',
-              onClick: () => { this.openCreateDialog(); }
+              btnSize: 'medium',
+              onTap: () => { this.openCreateDialog(); }
             })
           }
           .width('100%')
@@ -492,7 +492,7 @@ export struct ToolLayerPage {
         .onClick(() => { this.showCreateDialog = false; })
 
       // 面板层
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('新建工具层')
             .fontSize(this.sm.getFontSize('subtitle'))
@@ -545,14 +545,14 @@ export struct ToolLayerPage {
             GlassButton({
               text: '取消',
               type: 'default',
-              size: 'medium',
-              onClick: () => { this.showCreateDialog = false; }
+              btnSize: 'medium',
+              onTap: () => { this.showCreateDialog = false; }
             })
             GlassButton({
               text: '创建',
               type: 'primary',
-              size: 'medium',
-              onClick: () => { this.submitCreate(); }
+              btnSize: 'medium',
+              onTap: () => { this.submitCreate(); }
             })
               .margin({ left: this.sm.getSpacing('sm') })
           }

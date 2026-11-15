@@ -344,7 +344,7 @@ export struct AgentFormPage {
 
       // 表单容器：可滚动
       Scroll() {
-        GlassPanel({ variant: 'elevated', padding: 16, radius: 12 }) {
+        GlassPanel({ variant: 'elevated', innerPadding: 16, radius: 12 }) {
           Column() {
             // 名称（必填，1-50 字符）
             Text('名称 *')
@@ -492,7 +492,7 @@ export struct AgentFormPage {
               type: 'primary',
               block: true,
               disabled: this.loading,
-              onClick: () => { this.handleSubmit(); }
+              onTap: () => { this.handleSubmit(); }
             })
               .margin({ top: this.sm.getSpacing('lg') })
 
@@ -502,7 +502,7 @@ export struct AgentFormPage {
               type: 'default',
               block: true,
               disabled: this.loading,
-              onClick: () => { this.handleCancel(); }
+              onTap: () => { this.handleCancel(); }
             })
               .margin({ top: this.sm.getSpacing('sm') })
           }

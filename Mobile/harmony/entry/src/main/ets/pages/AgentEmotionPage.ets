@@ -381,8 +381,8 @@ export struct AgentEmotionPage {
           GlassButton({
             text: '新建',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.openCreateDialog(); }
+            btnSize: 'small',
+            onTap: () => { this.openCreateDialog(); }
           })
         }
 
@@ -410,8 +410,8 @@ export struct AgentEmotionPage {
               GlassButton({
                 text: '新建记录',
                 type: 'primary',
-                size: 'medium',
-                onClick: () => { this.openCreateDialog(); }
+                btnSize: 'medium',
+                onTap: () => { this.openCreateDialog(); }
               })
                 .margin({ top: this.sm.getSpacing('md') })
             }
@@ -620,14 +620,14 @@ export struct AgentEmotionPage {
           GlassButton({
             text: '查看',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.openDetailDialog(emotion); }
+            btnSize: 'small',
+            onTap: () => { this.openDetailDialog(emotion); }
           })
           GlassButton({
             text: '删除',
             type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmDelete(emotion); }
+            btnSize: 'small',
+            onTap: () => { this.confirmDelete(emotion); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }
@@ -704,9 +704,9 @@ export struct AgentEmotionPage {
           GlassButton({
             text: '关闭',
             type: 'primary',
-            size: 'medium',
+            btnSize: 'medium',
             block: true,
-            onClick: () => { this.closeDetailDialog(); }
+            onTap: () => { this.closeDetailDialog(); }
           })
         }
         .width('100%')
@@ -812,16 +812,16 @@ export struct AgentEmotionPage {
             GlassButton({
               text: '取消',
               type: 'default',
-              size: 'medium',
-              onClick: () => { this.closeCreateDialog(); }
+              btnSize: 'medium',
+              onTap: () => { this.closeCreateDialog(); }
             })
               .layoutWeight(1)
             GlassButton({
               text: this.submitting ? '提交中...' : '提交',
               type: 'primary',
-              size: 'medium',
+              btnSize: 'medium',
               disabled: this.submitting,
-              onClick: () => { this.submitCreate(); }
+              onTap: () => { this.submitCreate(); }
             })
               .layoutWeight(1)
               .margin({ left: this.sm.getSpacing('sm') })

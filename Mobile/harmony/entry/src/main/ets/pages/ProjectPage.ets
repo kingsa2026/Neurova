@@ -334,8 +334,8 @@ export struct ProjectPage {
           GlassButton({
             text: '新建',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.openCreateDialog(); }
+            btnSize: 'small',
+            onTap: () => { this.openCreateDialog(); }
           })
         }
 
@@ -492,14 +492,14 @@ export struct ProjectPage {
           GlassButton({
             text: '编辑',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.handleEdit(project); }
+            btnSize: 'small',
+            onTap: () => { this.handleEdit(project); }
           })
           GlassButton({
             text: '删除',
             type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmDelete(project); }
+            btnSize: 'small',
+            onTap: () => { this.confirmDelete(project); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }
@@ -529,7 +529,7 @@ export struct ProjectPage {
         .onClick(() => { this.showCreateDialog = false; })
 
       // 面板层
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('新建项目')
             .fontSize(this.sm.getFontSize('subtitle'))
@@ -598,14 +598,14 @@ export struct ProjectPage {
             GlassButton({
               text: '取消',
               type: 'default',
-              size: 'medium',
-              onClick: () => { this.showCreateDialog = false; }
+              btnSize: 'medium',
+              onTap: () => { this.showCreateDialog = false; }
             })
             GlassButton({
               text: '创建',
               type: 'primary',
-              size: 'medium',
-              onClick: () => { this.submitCreate(); }
+              btnSize: 'medium',
+              onTap: () => { this.submitCreate(); }
             })
               .margin({ left: this.sm.getSpacing('sm') })
           }

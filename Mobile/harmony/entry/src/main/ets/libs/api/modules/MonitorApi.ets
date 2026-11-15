@@ -26,8 +26,16 @@ import {
   PageParams,
 } from '../../types';
 
+/** 清理日志 body（before 为可选截止时间点） */
+interface ClearLogsBody {
+  before?: string;
+}
+
 export class MonitorApi {
-  constructor(private client: HttpClient) {}
+  private client: HttpClient;
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
 
   // ========== Stat（统计指标）==========
 
@@ -94,7 +102,7 @@ export class MonitorApi {
 
   /** 清理日志（可选 before 时间点，body 传递） */
   async clearLogs(before?: string): Promise<ApiResponse<Object>> {
-    const body: { before?: string } = {};
+    const body: ClearLogsBody = {};
     if (before !== undefined) body.before = before;
     return this.client.post<Object>('/v1/monitor/logs/clear', body);
   }
@@ -117,12 +125,14 @@ export class MonitorApi {
 
   /** 标记单条通知为已读 */
   async markNotificationRead(id: string): Promise<ApiResponse<Object>> {
-    return this.client.post<Object>(`/v1/notifications/${id}/read`, {});
+    const body: Record<string, Object> = {};
+    return this.client.post<Object>(`/v1/notifications/${id}/read`, body);
   }
 
   /** 标记所有通知为已读 */
   async markAllNotificationsRead(): Promise<ApiResponse<Object>> {
-    return this.client.post<Object>('/v1/notifications/mark-all-read', {});
+    const body: Record<string, Object> = {};
+    return this.client.post<Object>('/v1/notifications/mark-all-read', body);
   }
 
   /** 删除单条通知 */
@@ -148,11 +158,6 @@ export class MonitorApi {
   /** 获取单条文件项 */
   async getFile(id: string): Promise<ApiResponse<FileItem>> {
     return this.client.get<FileItem>(`/v1/files/${id}`);
-  }
-
-  /** 上传文件（multipart：file 二进制 + query agent_id/session_id，对齐 files_api.upload_file） */
-  async uploadFile(fileData: ArrayBuffer, filename: string, agentId: string = 'default'): Promise<ApiResponse<FileItem>> {
-    return this.client.upload<FileItem>('/v1/files/upload', fileData, filename, { agent_id: agentId });
   }
 
   /** 删除文件项 */
@@ -188,6 +193,7 @@ export class MonitorApi {
 
   /** 触发神经元放电 */
   async fireNeuron(id: string): Promise<ApiResponse<Neuron>> {
-    return this.client.post<Neuron>(`/v1/monitor/neurons/${id}/fire`, {});
+    const body: Record<string, Object> = {};
+    return this.client.post<Neuron>(`/v1/monitor/neurons/${id}/fire`, body);
   }
 }

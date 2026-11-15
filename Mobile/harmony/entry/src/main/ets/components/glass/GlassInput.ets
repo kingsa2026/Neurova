@@ -14,6 +14,7 @@
  */
 
 import { StyleManager } from '../../libs/style/StyleManager';
+import { GlassComponent, GlassStyle, GlassColorScheme } from './GlassComponent';
 
 // 样式单例
 const sm = StyleManager.getInstance();
@@ -37,15 +38,15 @@ export struct GlassInput {
   // 提交回调
   onSubmit: (value: string) => void = () => {};
 
-  // 映射输入类型到 TextInputType
-  private getInputType(): TextInputType {
+  // 映射输入类型到 ArkUI 全局 InputType 枚举（TextInput.type 的形参类型）
+  private getInputType(): InputType {
     switch (this.type) {
       case 'password':
-        return TextInputType.Password;
+        return InputType.Password;
       case 'number':
-        return TextInputType.Number;
+        return InputType.Number;
       default:
-        return TextInputType.Normal;
+        return InputType.Normal;
     }
   }
 
@@ -53,7 +54,8 @@ export struct GlassInput {
     GlassComponent({
       glassStyle: GlassStyle.BLUR_THIN,
       blurRadius: 20,
-      colorScheme: GlassColorScheme.LIGHT
+      colorScheme: GlassColorScheme.LIGHT,
+      cornerRadius: sm.getRadius('lg')
     }) {
       Row() {
         // 前缀图标
@@ -76,14 +78,15 @@ export struct GlassInput {
           .onChange((v: string) => {
             this.onChange(v);
           })
-          .onSubmit((v: string) => {
-            this.onSubmit(v);
+          .onSubmit((_enterKey: EnterKeyType, event: SubmitEvent) => {
+            // 适配 SDK 的 OnSubmitCallback 签名（(enterKey, event) => void）；
+            // 对外契约保持 (value: string) => void，回传提交时输入框内的文本
+            this.onSubmit(event.text);
           })
       }
       .width('100%')
       .padding({ left: 12, right: 12, top: 8, bottom: 8 })
       .alignItems(VerticalAlign.Center)
     }
-    .borderRadius(sm.getRadius('lg'))
   }
 }

@@ -21,15 +21,30 @@ import {
   IntegrationStatus,
 } from '../../types';
 
+/** 列表查询参数：分页 + 状态筛选（替代 PageParams & { status } 交叉类型） */
+interface ChannelIntegrationListParams extends PageParams {
+  status?: IntegrationStatus;
+}
+
+/** 连通性测试结果 */
+interface ConnectionTestResult {
+  ok: boolean;
+  latencyMs?: number;
+}
+
 export class ChannelIntegrationApi {
-  constructor(private client: HttpClient) {}
+  private client: HttpClient;
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
 
   /** 列出渠道集成（按 agentId 过滤，支持分页 + 状态筛选） */
   async list(
     agentId: string,
-    params?: PageParams & { status?: IntegrationStatus },
+    params?: ChannelIntegrationListParams,
   ): Promise<ApiResponse<PageResult<ChannelIntegration>>> {
-    const query: Record<string, Object> = { agentId };
+    const query: Record<string, Object> = {};
+    query['agentId'] = agentId;
     if (params) {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
@@ -65,10 +80,11 @@ export class ChannelIntegrationApi {
   }
 
   /** 测试渠道连通性（触发后端 ping） */
-  async testConnection(integrationId: string): Promise<ApiResponse<{ ok: boolean; latencyMs?: number }>> {
-    return this.client.post<{ ok: boolean; latencyMs?: number }>(
+  async testConnection(integrationId: string): Promise<ApiResponse<ConnectionTestResult>> {
+    const body: Record<string, Object> = {};
+    return this.client.post<ConnectionTestResult>(
       `/v1/channel-integrations/${integrationId}/test`,
-      {},
+      body,
     );
   }
 }

@@ -6,9 +6,15 @@ import { StateManager } from '../StateManager';
 const KEY_HEALTH = 'health:data';
 const KEY_LAST_CHECK = 'health:last_check';
 
+/** 单服务健康条目（HealthData.services 的值类型；ArkTS 禁止对象字面量作类型，故具名声明） */
+export interface ServiceStatusEntry {
+  status: string;
+  latency?: number;
+}
+
 export interface HealthData {
   status: 'healthy' | 'degraded' | 'down';
-  services: Record<string, { status: string; latency?: number }>;
+  services: Record<string, ServiceStatusEntry>;
 }
 
 export class HealthStore {

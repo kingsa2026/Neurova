@@ -341,8 +341,8 @@ export struct ContextChannelPage {
           GlassButton({
             text: '重新加载',
             type: 'primary',
-            size: 'medium',
-            onClick: () => { this.loadMessages(); }
+            btnSize: 'medium',
+            onTap: () => { this.loadMessages(); }
           })
         }
         .width('100%')
@@ -436,8 +436,8 @@ export struct ContextChannelPage {
           GlassButton({
             text: '删除',
             type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmDelete(message); }
+            btnSize: 'small',
+            onTap: () => { this.confirmDelete(message); }
           })
         }
         .width('100%')

@@ -33,8 +33,17 @@ import {
   FirewallRule,
 } from '../../types';
 
+/** 休眠状态操作 body（setSleepMode/awaken 共用） */
+interface SleepModeBody {
+  agentId: string;
+  mode?: 'idle' | 'light' | 'deep';
+}
+
 export class RuntimeApi {
-  constructor(private client: HttpClient) {}
+  private client: HttpClient;
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
 
   // ==================== ScheduleTask 调度任务 ====================
 
@@ -43,7 +52,8 @@ export class RuntimeApi {
     agentId: string,
     params?: PageParams,
   ): Promise<ApiResponse<PageResult<ScheduleTask>>> {
-    const query: Record<string, Object> = { agentId };
+    const query: Record<string, Object> = {};
+    query['agentId'] = agentId;
     if (params) {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
@@ -81,7 +91,8 @@ export class RuntimeApi {
     sessionId: string,
     params?: PageParams,
   ): Promise<ApiResponse<PageResult<ContextMessage>>> {
-    const query: Record<string, Object> = { sessionId };
+    const query: Record<string, Object> = {};
+    query['sessionId'] = sessionId;
     if (params) {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
@@ -106,7 +117,8 @@ export class RuntimeApi {
     agentId: string,
     params?: PageParams,
   ): Promise<ApiResponse<PageResult<ComputerTask>>> {
-    const query: Record<string, Object> = { agentId };
+    const query: Record<string, Object> = {};
+    query['agentId'] = agentId;
     if (params) {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
@@ -136,7 +148,8 @@ export class RuntimeApi {
     agentId: string,
     params?: PageParams,
   ): Promise<ApiResponse<PageResult<TraceEntry>>> {
-    const query: Record<string, Object> = { agentId };
+    const query: Record<string, Object> = {};
+    query['agentId'] = agentId;
     if (params) {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
@@ -161,7 +174,8 @@ export class RuntimeApi {
     agentId: string,
     params?: PageParams,
   ): Promise<ApiResponse<PageResult<TrajectoryPoint>>> {
-    const query: Record<string, Object> = { agentId };
+    const query: Record<string, Object> = {};
+    query['agentId'] = agentId;
     if (params) {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
@@ -178,17 +192,21 @@ export class RuntimeApi {
 
   /** 获取 Agent 的休眠状态 */
   async getSleepStatus(agentId: string): Promise<ApiResponse<SleepStatus>> {
-    return this.client.get<SleepStatus>('/v1/runtime/sleep', { agentId });
+    const query: Record<string, Object> = {};
+    query['agentId'] = agentId;
+    return this.client.get<SleepStatus>('/v1/runtime/sleep', query);
   }
 
   /** 设置休眠模式（body: { agentId, mode }） */
   async setSleepMode(agentId: string, mode: 'idle' | 'light' | 'deep'): Promise<ApiResponse<SleepStatus>> {
-    return this.client.post<SleepStatus>('/v1/runtime/sleep', { agentId, mode });
+    const body: SleepModeBody = { agentId, mode };
+    return this.client.post<SleepStatus>('/v1/runtime/sleep', body);
   }
 
   /** 唤醒 Agent（body: { agentId }） */
   async awaken(agentId: string): Promise<ApiResponse<SleepStatus>> {
-    return this.client.post<SleepStatus>('/v1/runtime/sleep/awaken', { agentId });
+    const body: SleepModeBody = { agentId };
+    return this.client.post<SleepStatus>('/v1/runtime/sleep/awaken', body);
   }
 
   // ==================== FirewallRule 防火墙规则 ====================
@@ -198,7 +216,8 @@ export class RuntimeApi {
     agentId: string,
     params?: PageParams,
   ): Promise<ApiResponse<PageResult<FirewallRule>>> {
-    const query: Record<string, Object> = { agentId };
+    const query: Record<string, Object> = {};
+    query['agentId'] = agentId;
     if (params) {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;

@@ -29,7 +29,10 @@ import {
 } from '../../types';
 
 export class CognitionApi {
-  constructor(private client: HttpClient) {}
+  private client: HttpClient;
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
 
   // ==================== Experience 经验 ====================
 
@@ -38,7 +41,8 @@ export class CognitionApi {
     agentId: string,
     params?: PageParams,
   ): Promise<ApiResponse<PageResult<Experience>>> {
-    const query: Record<string, Object> = { agentId };
+    const query: Record<string, Object> = {};
+    query['agentId'] = agentId;
     if (params) {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
@@ -73,7 +77,9 @@ export class CognitionApi {
 
   /** 获取 Agent 的知识图谱（节点+边） */
   async getKnowledgeGraph(agentId: string): Promise<ApiResponse<KnowledgeGraph>> {
-    return this.client.get<KnowledgeGraph>('/v1/cognition/knowledge-graph', { agentId });
+    const query: Record<string, Object> = {};
+    query['agentId'] = agentId;
+    return this.client.get<KnowledgeGraph>('/v1/cognition/knowledge-graph', query);
   }
 
   // ==================== Metacognition 元认知 ====================
@@ -83,7 +89,8 @@ export class CognitionApi {
     agentId: string,
     params?: PageParams,
   ): Promise<ApiResponse<PageResult<MetacognitionRecord>>> {
-    const query: Record<string, Object> = { agentId };
+    const query: Record<string, Object> = {};
+    query['agentId'] = agentId;
     if (params) {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
@@ -126,7 +133,8 @@ export class CognitionApi {
     agentId: string,
     params?: PageParams,
   ): Promise<ApiResponse<PageResult<ReflectionRecord>>> {
-    const query: Record<string, Object> = { agentId };
+    const query: Record<string, Object> = {};
+    query['agentId'] = agentId;
     if (params) {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
@@ -167,7 +175,8 @@ export class CognitionApi {
     agentId: string,
     params?: PageParams,
   ): Promise<ApiResponse<PageResult<GrowthRecord>>> {
-    const query: Record<string, Object> = { agentId };
+    const query: Record<string, Object> = {};
+    query['agentId'] = agentId;
     if (params) {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;

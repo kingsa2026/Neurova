@@ -26,7 +26,7 @@ export struct GlassNavItem {
   // 是否折叠（折叠时仅显示图标，不渲染 label）
   @Prop collapsed: boolean = false;
   // 点击事件回调
-  onClick: () => void = () => {};
+  onTap: () => void = () => {};
   // hover 状态（用于鼠标悬停反馈）
   @State isHovered: boolean = false;
 
@@ -60,7 +60,7 @@ export struct GlassNavItem {
         Image(this.icon)
           .width(20)
           .height(20)
-          .fill(this.getTextColor())
+          .fillColor(this.getTextColor())
           .margin({ right: this.collapsed ? 0 : sm.getSpacing('sm') })
       }
       // 折叠时不显示 label
@@ -85,7 +85,7 @@ export struct GlassNavItem {
       this.isHovered = isHover;
     })
     .onClick(() => {
-      this.onClick();
+      this.onTap();
     })
   }
 }

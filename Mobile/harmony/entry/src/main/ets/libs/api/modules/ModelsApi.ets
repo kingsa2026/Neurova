@@ -20,7 +20,11 @@ import {
 } from '../../types';
 
 export class ModelsApi {
-  constructor(private client: HttpClient) {}
+  private client: HttpClient;
+
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
 
   // ===== Provider CRUD =====
 

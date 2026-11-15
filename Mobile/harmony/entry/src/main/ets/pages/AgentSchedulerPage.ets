@@ -419,8 +419,8 @@ export struct AgentSchedulerPage {
           GlassButton({
             text: '新建',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.openCreateDialog(); }
+            btnSize: 'small',
+            onTap: () => { this.openCreateDialog(); }
           })
         }
 
@@ -472,8 +472,8 @@ export struct AgentSchedulerPage {
             GlassButton({
               text: '新建任务',
               type: 'primary',
-              size: 'medium',
-              onClick: () => { this.openCreateDialog(); }
+              btnSize: 'medium',
+              onTap: () => { this.openCreateDialog(); }
             })
           }
           .width('100%')
@@ -577,21 +577,21 @@ export struct AgentSchedulerPage {
           GlassButton({
             text: '触发',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.triggerTask(task); }
+            btnSize: 'small',
+            onTap: () => { this.triggerTask(task); }
           })
           GlassButton({
             text: '编辑 cron',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.openEditCronDialog(task); }
+            btnSize: 'small',
+            onTap: () => { this.openEditCronDialog(task); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
           GlassButton({
             text: '删除',
             type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmDelete(task); }
+            btnSize: 'small',
+            onTap: () => { this.confirmDelete(task); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }
@@ -621,7 +621,7 @@ export struct AgentSchedulerPage {
         .onClick(() => { this.showCreateDialog = false; })
 
       // 面板层
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('新建调度任务')
             .fontSize(this.sm.getFontSize('subtitle'))
@@ -680,14 +680,14 @@ export struct AgentSchedulerPage {
             GlassButton({
               text: '取消',
               type: 'default',
-              size: 'medium',
-              onClick: () => { this.showCreateDialog = false; }
+              btnSize: 'medium',
+              onTap: () => { this.showCreateDialog = false; }
             })
             GlassButton({
               text: '创建',
               type: 'primary',
-              size: 'medium',
-              onClick: () => { this.submitCreate(); }
+              btnSize: 'medium',
+              onTap: () => { this.submitCreate(); }
             })
               .margin({ left: this.sm.getSpacing('sm') })
           }
@@ -717,7 +717,7 @@ export struct AgentSchedulerPage {
         .backgroundColor(this.sm.getColor('overlay_mask'))
         .onClick(() => { this.showEditCronDialog = false; })
 
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('编辑 cron 表达式')
             .fontSize(this.sm.getFontSize('subtitle'))
@@ -747,14 +747,14 @@ export struct AgentSchedulerPage {
             GlassButton({
               text: '取消',
               type: 'default',
-              size: 'medium',
-              onClick: () => { this.showEditCronDialog = false; }
+              btnSize: 'medium',
+              onTap: () => { this.showEditCronDialog = false; }
             })
             GlassButton({
               text: '保存',
               type: 'primary',
-              size: 'medium',
-              onClick: () => { this.submitEditCron(); }
+              btnSize: 'medium',
+              onTap: () => { this.submitEditCron(); }
             })
               .margin({ left: this.sm.getSpacing('sm') })
           }

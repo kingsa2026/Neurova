@@ -106,25 +106,25 @@ export class MemoryViewHelper {
 // 类型标签映射表（17 种 MemoryType → 中文短名）
 // ===========================================================================
 
-const MEMORY_TYPE_LABELS: Record<string, string> = {
-  episodic: '情景',
-  semantic: '语义',
-  procedural: '程序',
-  emotional: '情感',
-  preference: '偏好',
-  fact: '事实',
-  skill: '技能',
-  event: '事件',
-  relationship: '关系',
-  context: '上下文',
-  reflection: '反思',
-  plan: '计划',
-  goal: '目标',
-  dream: '梦想',
-  insight: '洞察',
-  association: '联想',
-  pattern: '模式',
-};
+// ArkTS 禁止非空对象字面量，先声明空 Record 再逐键赋值
+const MEMORY_TYPE_LABELS: Record<string, string> = {};
+MEMORY_TYPE_LABELS['episodic'] = '情景';
+MEMORY_TYPE_LABELS['semantic'] = '语义';
+MEMORY_TYPE_LABELS['procedural'] = '程序';
+MEMORY_TYPE_LABELS['emotional'] = '情感';
+MEMORY_TYPE_LABELS['preference'] = '偏好';
+MEMORY_TYPE_LABELS['fact'] = '事实';
+MEMORY_TYPE_LABELS['skill'] = '技能';
+MEMORY_TYPE_LABELS['event'] = '事件';
+MEMORY_TYPE_LABELS['relationship'] = '关系';
+MEMORY_TYPE_LABELS['context'] = '上下文';
+MEMORY_TYPE_LABELS['reflection'] = '反思';
+MEMORY_TYPE_LABELS['plan'] = '计划';
+MEMORY_TYPE_LABELS['goal'] = '目标';
+MEMORY_TYPE_LABELS['dream'] = '梦想';
+MEMORY_TYPE_LABELS['insight'] = '洞察';
+MEMORY_TYPE_LABELS['association'] = '联想';
+MEMORY_TYPE_LABELS['pattern'] = '模式';
 
 /** 全部 MemoryType（用于筛选 Tab 顺序） */
 const ALL_MEMORY_TYPES: MemoryType[] = [
@@ -346,8 +346,8 @@ export struct MemoryPage {
         GlassButton({
           text: '搜索',
           type: 'default',
-          size: 'small',
-          onClick: () => { this.toggleSearch(); }
+          btnSize: 'small',
+          onTap: () => { this.toggleSearch(); }
         })
       }
 
@@ -364,8 +364,8 @@ export struct MemoryPage {
           GlassButton({
             text: '搜索',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.handleSearch(); }
+            btnSize: 'small',
+            onTap: () => { this.handleSearch(); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }
@@ -468,88 +468,92 @@ export struct MemoryPage {
   /** 单条记忆卡片：类型标签 + 内容 + 温度条/重要性/时间 + 操作按钮 */
   @Builder
   buildMemoryCard(memory: Memory) {
-    GlassCard() {
-      Column() {
-        // 上部：类型标签（彩色胶囊）
-        Row() {
-          Text(this.getTypeLabel(memory.type))
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_on_primary'))
-            .padding({ left: 8, right: 8, top: 2, bottom: 2 })
-            .borderRadius(10)
-            .backgroundColor(this.sm.getColor(MemoryViewHelper.getTypeColor(memory.type)))
+    Column() {
+      GlassCard() {
+        Column() {
+          // 上部：类型标签（彩色胶囊）
+          Row() {
+            Text(this.getTypeLabel(memory.type))
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_on_primary'))
+              .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+              .borderRadius(10)
+              .backgroundColor(this.sm.getColor(MemoryViewHelper.getTypeColor(memory.type)))
+          }
+          .width('100%')
+          // Row 的 alignItems 收 VerticalAlign（HorizontalAlign.Start 会报类型不符，取纵向起始位 Top）
+          .alignItems(VerticalAlign.Top)
+
+          // 内容（最多 3 行，超出省略；截断到 150 字符避免过长）
+          Text(MemoryViewHelper.truncateContent(memory.content, 150))
+            .fontSize(this.sm.getFontSize('body'))
+            .fontColor(this.sm.getColor('text_primary'))
+            .maxLines(3)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ top: this.sm.getSpacing('sm') })
+            .width('100%')
+
+          // 底部行：温度条 + 重要性 + 创建时间
+          Row() {
+            // 温度条容器（固定宽度 60，内部按温度填充）
+            Row() {
+              Row()
+                .width(`${Math.round((memory.temperature ?? 0) * 100)}%`)
+                .height(4)
+                .borderRadius(2)
+                .backgroundColor(this.sm.getColor('primary'))
+            }
+            .width(60)
+            .height(4)
+            .borderRadius(2)
+            .backgroundColor(this.sm.getColor('divider'))
+            // VerticalAlign 无 Start 成员，纵向起始位为 Top
+            .alignItems(VerticalAlign.Top)
+
+            Text(`温度 ${MemoryViewHelper.formatTemperature(memory.temperature ?? 0)}`)
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_secondary'))
+              .margin({ left: 4 })
+
+            Text(`重要性 ${(memory.importance ?? 0).toFixed(2)}`)
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_secondary'))
+              .margin({ left: 8 })
+
+            Text(this.formatTime(memory.createdAt))
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_disabled'))
+              .margin({ left: 8 })
+              .layoutWeight(1)
+              .textAlign(TextAlign.End)
+          }
+          .width('100%')
+          .margin({ top: this.sm.getSpacing('sm') })
+          .alignItems(VerticalAlign.Center)
+
+          // 操作按钮（右对齐）
+          Row() {
+            GlassButton({
+              text: '详情',
+              type: 'default',
+              btnSize: 'small',
+              onTap: () => { this.showDetail(memory); }
+            })
+            GlassButton({
+              text: '删除',
+              type: 'danger',
+              btnSize: 'small',
+              onTap: () => { this.confirmDelete(memory); }
+            })
+              .margin({ left: this.sm.getSpacing('sm') })
+          }
+          .width('100%')
+          .justifyContent(FlexAlign.End)
+          .margin({ top: this.sm.getSpacing('sm') })
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
-
-        // 内容（最多 3 行，超出省略；截断到 150 字符避免过长）
-        Text(MemoryViewHelper.truncateContent(memory.content, 150))
-          .fontSize(this.sm.getFontSize('body'))
-          .fontColor(this.sm.getColor('text_primary'))
-          .maxLines(3)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .margin({ top: this.sm.getSpacing('sm') })
-          .width('100%')
-
-        // 底部行：温度条 + 重要性 + 创建时间
-        Row() {
-          // 温度条容器（固定宽度 60，内部按温度填充）
-          Row() {
-            Row()
-              .width(`${Math.round((memory.temperature ?? 0) * 100)}%`)
-              .height(4)
-              .borderRadius(2)
-              .backgroundColor(this.sm.getColor('primary'))
-          }
-          .width(60)
-          .height(4)
-          .borderRadius(2)
-          .backgroundColor(this.sm.getColor('divider'))
-          .alignItems(VerticalAlign.Start)
-
-          Text(`温度 ${MemoryViewHelper.formatTemperature(memory.temperature ?? 0)}`)
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_secondary'))
-            .margin({ left: 4 })
-
-          Text(`重要性 ${(memory.importance ?? 0).toFixed(2)}`)
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_secondary'))
-            .margin({ left: 8 })
-
-          Text(this.formatTime(memory.createdAt))
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_disabled'))
-            .margin({ left: 8 })
-            .layoutWeight(1)
-            .textAlign(TextAlign.End)
-        }
-        .width('100%')
-        .margin({ top: this.sm.getSpacing('sm') })
-        .alignItems(VerticalAlign.Center)
-
-        // 操作按钮（右对齐）
-        Row() {
-          GlassButton({
-            text: '详情',
-            type: 'default',
-            size: 'small',
-            onClick: () => { this.showDetail(memory); }
-          })
-          GlassButton({
-            text: '删除',
-            type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmDelete(memory); }
-          })
-            .margin({ left: this.sm.getSpacing('sm') })
-        }
-        .width('100%')
-        .justifyContent(FlexAlign.End)
-        .margin({ top: this.sm.getSpacing('sm') })
       }
-      .width('100%')
-      .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
   }

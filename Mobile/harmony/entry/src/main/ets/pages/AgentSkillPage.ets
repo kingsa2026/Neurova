@@ -540,8 +540,8 @@ export struct AgentSkillPage {
           GlassButton({
             text: '卸下',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.unequipSkill(skill); }
+            btnSize: 'small',
+            onTap: () => { this.unequipSkill(skill); }
           })
         }
         .width('100%')

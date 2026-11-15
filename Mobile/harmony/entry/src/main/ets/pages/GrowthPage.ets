@@ -342,8 +342,8 @@ export struct GrowthPage {
           GlassButton({
             text: '刷新',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.handleRefresh(); }
+            btnSize: 'small',
+            onTap: () => { this.handleRefresh(); }
           })
         }
 
@@ -367,8 +367,8 @@ export struct GrowthPage {
             GlassButton({
               text: '重新加载',
               type: 'primary',
-              size: 'medium',
-              onClick: () => { this.handleRefresh(); }
+              btnSize: 'medium',
+              onTap: () => { this.handleRefresh(); }
             })
               .margin({ top: this.sm.getSpacing('md') })
           }
@@ -614,14 +614,14 @@ export struct GrowthPage {
           GlassButton({
             text: '查看详情',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.openDetailDialog(growth); }
+            btnSize: 'small',
+            onTap: () => { this.openDetailDialog(growth); }
           })
           GlassButton({
             text: '编辑里程碑',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.openEditDialog(growth); }
+            btnSize: 'small',
+            onTap: () => { this.openEditDialog(growth); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }
@@ -730,8 +730,8 @@ export struct GrowthPage {
           GlassButton({
             text: '关闭',
             type: 'default',
-            size: 'medium',
-            onClick: () => { this.closeDetailDialog(); }
+            btnSize: 'medium',
+            onTap: () => { this.closeDetailDialog(); }
           })
         }
         .width('100%')
@@ -798,14 +798,14 @@ export struct GrowthPage {
           GlassButton({
             text: '取消',
             type: 'default',
-            size: 'medium',
-            onClick: () => { this.closeEditDialog(); }
+            btnSize: 'medium',
+            onTap: () => { this.closeEditDialog(); }
           })
           GlassButton({
             text: '保存',
             type: 'primary',
-            size: 'medium',
-            onClick: () => { this.submitEditMilestones(); }
+            btnSize: 'medium',
+            onTap: () => { this.submitEditMilestones(); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }

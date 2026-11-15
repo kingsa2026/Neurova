@@ -25,7 +25,11 @@ export interface KnowledgeSearchRequest {
 }
 
 export class KnowledgeApi {
-  constructor(private client: HttpClient) {}
+  private client: HttpClient;
+
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
 
   /** 列出知识（按 KnowledgeQuery 过滤，支持分页） */
   async list(query?: KnowledgeQuery): Promise<ApiResponse<PageResult<KnowledgeItem>>> {

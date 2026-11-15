@@ -278,7 +278,7 @@ export struct MonitorPage {
           // 手动刷新按钮
           GlassButton({
             label: '刷新',
-            onClick: () => { this.loadMetrics(); }
+            onTap: () => { this.loadMetrics(); }
           })
         }
         .width('90%')

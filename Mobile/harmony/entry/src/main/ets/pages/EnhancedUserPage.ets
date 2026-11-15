@@ -513,7 +513,7 @@ export struct EnhancedUserPage {
         .onClick(() => { this.closeDetailDialog(); })
 
       // 面板层
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Scroll() {
           Column() {
             Text('用户详情')
@@ -614,8 +614,8 @@ export struct EnhancedUserPage {
           GlassButton({
             text: '关闭',
             type: 'default',
-            size: 'medium',
-            onClick: () => { this.closeDetailDialog(); }
+            btnSize: 'medium',
+            onTap: () => { this.closeDetailDialog(); }
           })
         }
         .width('100%')

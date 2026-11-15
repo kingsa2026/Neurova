@@ -24,35 +24,11 @@
  * TDD：SimpleDataSource.test.ets 按红绿灯垂直切片逐步实现
  */
 
-/**
- * 数据变更操作类型（与 ArkUI DataOperationType 对应）
- * - ADD：在 index 处添加 count 个项
- * - DELETE：从 index 处删除 count 个项
- * - MODIFY：从 index 处修改 count 个项
- */
-export type SimpleDataOpType = 'ADD' | 'DELETE' | 'MODIFY';
-
-/** 数据变更操作 */
-export interface SimpleDataOperation {
-  type: SimpleDataOpType;
-  index: number;
-  count: number;
-}
-
-/**
- * 数据变更监听器（与 ArkUI DataChangeListener 鸭子类型兼容）
- * 在 LazyForEach 中由 ArkUI 自动注册实例，本类只调用其 onDataReloaded/onDatasetChange
- */
-export interface SimpleDataChangeListener {
-  onDataReloaded(): void;
-  onDatasetChange?(operations: SimpleDataOperation[]): void;
-}
-
-export class SimpleDataSource<T> {
+export class SimpleDataSource<T> implements IDataSource {
   /** 内部数据数组 */
   private data: T[] = [];
   /** 已注册的监听器（去重） */
-  private listeners: SimpleDataChangeListener[] = [];
+  private listeners: DataChangeListener[] = [];
 
   /** 数据总量 */
   totalCount(): number {
@@ -68,14 +44,14 @@ export class SimpleDataSource<T> {
   }
 
   /** 注册监听器（幂等：重复注册同一实例只保留一份） */
-  registerDataChangeListener(listener: SimpleDataChangeListener): void {
+  registerDataChangeListener(listener: DataChangeListener): void {
     if (this.listeners.indexOf(listener) < 0) {
       this.listeners.push(listener);
     }
   }
 
   /** 注销监听器（不存在时静默忽略） */
-  unregisterDataChangeListener(listener: SimpleDataChangeListener): void {
+  unregisterDataChangeListener(listener: DataChangeListener): void {
     const pos = this.listeners.indexOf(listener);
     if (pos >= 0) {
       this.listeners.splice(pos, 1);
@@ -91,33 +67,36 @@ export class SimpleDataSource<T> {
   /** 末尾追加一个项并通知 ADD */
   addItem(item: T): void {
     this.data.push(item);
-    this.notifyDatasetChange([{
-      type: 'ADD',
+    const op: DataOperation = {
+      type: DataOperationType.ADD,
       index: this.data.length - 1,
       count: 1,
-    }]);
+    };
+    this.notifyDatasetChange([op]);
   }
 
   /** 修改指定索引项；越界静默忽略 */
   updateItem(index: number, item: T): void {
     if (index < 0 || index >= this.data.length) return;
     this.data[index] = item;
-    this.notifyDatasetChange([{
-      type: 'MODIFY',
+    // SDK 的 DataChangeOperation 无 count 字段
+    const op: DataOperation = {
+      type: DataOperationType.CHANGE,
       index,
-      count: 1,
-    }]);
+    };
+    this.notifyDatasetChange([op]);
   }
 
   /** 删除指定索引项；越界静默忽略 */
   removeItem(index: number): void {
     if (index < 0 || index >= this.data.length) return;
     this.data.splice(index, 1);
-    this.notifyDatasetChange([{
-      type: 'DELETE',
+    const op: DataOperation = {
+      type: DataOperationType.DELETE,
       index,
       count: 1,
-    }]);
+    };
+    this.notifyDatasetChange([op]);
   }
 
   /** 返回内部数据的浅拷贝 */
@@ -127,11 +106,11 @@ export class SimpleDataSource<T> {
 
   /** 手动触发 onDataReloaded 通知所有 listener */
   notifyReload(): void {
-    this.listeners.forEach(l => l.onDataReloaded());
+    this.listeners.forEach(l => l.onDataReloaded?.());
   }
 
   /** 手动触发 onDatasetChange 通知所有 listener */
-  notifyDatasetChange(ops: SimpleDataOperation[]): void {
+  notifyDatasetChange(ops: DataOperation[]): void {
     this.listeners.forEach(l => {
       if (l.onDatasetChange) {
         l.onDatasetChange(ops);

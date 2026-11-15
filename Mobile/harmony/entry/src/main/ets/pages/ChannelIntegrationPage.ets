@@ -378,8 +378,8 @@ export struct ChannelIntegrationPage {
           GlassButton({
             text: '新建',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.openCreateDialog(); }
+            btnSize: 'small',
+            onTap: () => { this.openCreateDialog(); }
           })
         }
 
@@ -494,21 +494,21 @@ export struct ChannelIntegrationPage {
           GlassButton({
             text: '编辑',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.openEditDialog(item); }
+            btnSize: 'small',
+            onTap: () => { this.openEditDialog(item); }
           })
           GlassButton({
             text: '测试连接',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.testConnection(item); }
+            btnSize: 'small',
+            onTap: () => { this.testConnection(item); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
           GlassButton({
             text: '删除',
             type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmDelete(item); }
+            btnSize: 'small',
+            onTap: () => { this.confirmDelete(item); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }
@@ -538,7 +538,7 @@ export struct ChannelIntegrationPage {
         .onClick(() => { this.showDialog = false; })
 
       // 面板层：居中展示
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text(this.dialogMode === 'create' ? '新建渠道集成' : '编辑渠道集成')
             .fontSize(this.sm.getFontSize('subtitle'))
@@ -607,14 +607,14 @@ export struct ChannelIntegrationPage {
             GlassButton({
               text: '取消',
               type: 'default',
-              size: 'medium',
-              onClick: () => { this.showDialog = false; }
+              btnSize: 'medium',
+              onTap: () => { this.showDialog = false; }
             })
             GlassButton({
               text: this.dialogMode === 'create' ? '创建' : '保存',
               type: 'primary',
-              size: 'medium',
-              onClick: () => { this.submitDialog(); }
+              btnSize: 'medium',
+              onTap: () => { this.submitDialog(); }
             })
               .margin({ left: this.sm.getSpacing('sm') })
           }

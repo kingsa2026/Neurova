@@ -454,8 +454,8 @@ export struct AIGCPage {
           GlassButton({
             text: '新建',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.openCreateDialog(); }
+            btnSize: 'small',
+            onTap: () => { this.openCreateDialog(); }
           })
         }
 
@@ -619,15 +619,15 @@ export struct AIGCPage {
           GlassButton({
             text: '详情',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.showDetail(task); }
+            btnSize: 'small',
+            onTap: () => { this.showDetail(task); }
           })
           if (task.status === 'queued' || task.status === 'processing') {
             GlassButton({
               text: '取消',
               type: 'danger',
-              size: 'small',
-              onClick: () => { this.confirmCancel(task); }
+              btnSize: 'small',
+              onTap: () => { this.confirmCancel(task); }
             })
               .margin({ left: this.sm.getSpacing('sm') })
           }
@@ -635,8 +635,8 @@ export struct AIGCPage {
             GlassButton({
               text: '重试',
               type: 'primary',
-              size: 'small',
-              onClick: () => { this.retryTask(task); }
+              btnSize: 'small',
+              onTap: () => { this.retryTask(task); }
             })
               .margin({ left: this.sm.getSpacing('sm') })
           }
@@ -667,7 +667,7 @@ export struct AIGCPage {
         .onClick(() => { this.showCreateDialog = false; })
 
       // 面板层
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('新建 AIGC 任务')
             .fontSize(this.sm.getFontSize('subtitle'))
@@ -686,8 +686,8 @@ export struct AIGCPage {
               GlassButton({
                 text: `${opt.icon} ${opt.label}`,
                 type: this.formData.type === opt.type ? 'primary' : 'default',
-                size: 'small',
-                onClick: () => { this.selectType(opt.type); }
+                btnSize: 'small',
+                onTap: () => { this.selectType(opt.type); }
               })
                 .margin({ right: this.sm.getSpacing('xs') })
             }, (opt: { type: AIGCTask['type']; label: string; icon: string }) => opt.type)
@@ -713,14 +713,14 @@ export struct AIGCPage {
             GlassButton({
               text: '取消',
               type: 'default',
-              size: 'medium',
-              onClick: () => { this.showCreateDialog = false; }
+              btnSize: 'medium',
+              onTap: () => { this.showCreateDialog = false; }
             })
             GlassButton({
               text: '提交',
               type: 'primary',
-              size: 'medium',
-              onClick: () => { this.submitCreate(); }
+              btnSize: 'medium',
+              onTap: () => { this.submitCreate(); }
             })
               .margin({ left: this.sm.getSpacing('sm') })
           }

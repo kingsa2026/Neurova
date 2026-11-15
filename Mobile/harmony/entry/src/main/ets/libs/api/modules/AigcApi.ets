@@ -32,7 +32,11 @@ import {
 const BASE = '/v1/generation';
 
 export class AigcApi {
-  constructor(private client: HttpClient) {}
+  private client: HttpClient;
+
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
 
   /** 文本生成（同步返回全文；model 缺省/auto=服务端路由） */
   async generateText(data: AigcTextPayload): Promise<ApiResponse<AigcTextResult>> {

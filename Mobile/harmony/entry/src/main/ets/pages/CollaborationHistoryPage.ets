@@ -415,8 +415,8 @@ export struct CollaborationHistoryPage {
           GlassButton({
             text: '详情',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.showDetail(h); }
+            btnSize: 'small',
+            onTap: () => { this.showDetail(h); }
           })
         }
         .width('100%')

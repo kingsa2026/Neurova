@@ -20,7 +20,11 @@ export interface MemorySearchQuery {
 }
 
 export class MemoryApi {
-  constructor(private client: HttpClient) {}
+  private client: HttpClient;
+
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
 
   /** 列出记忆（可选 agentId / type 过滤，支持分页） */
   async list(

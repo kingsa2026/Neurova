@@ -313,8 +313,8 @@ export struct SkillMarketPage {
         GlassButton({
           text: '刷新',
           type: 'default',
-          size: 'small',
-          onClick: () => { this.loadSkills(); }
+          btnSize: 'small',
+          onTap: () => { this.loadSkills(); }
         })
       }
 
@@ -491,8 +491,8 @@ export struct SkillMarketPage {
           GlassButton({
             text: '安装',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.confirmInstall(skill); }
+            btnSize: 'small',
+            onTap: () => { this.confirmInstall(skill); }
           })
         }
         .width('100%')

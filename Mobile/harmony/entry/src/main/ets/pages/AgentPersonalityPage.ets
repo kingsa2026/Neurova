@@ -398,9 +398,9 @@ export struct AgentPersonalityPage {
           GlassButton({
             text: '重置',
             type: 'danger',
-            size: 'small',
+            btnSize: 'small',
             disabled: this.loading || this.current === null || this.resetting,
-            onClick: () => { this.confirmReset(); }
+            onTap: () => { this.confirmReset(); }
           })
         }
 
@@ -424,8 +424,8 @@ export struct AgentPersonalityPage {
             GlassButton({
               text: '重新加载',
               type: 'primary',
-              size: 'medium',
-              onClick: () => { this.loadPersonality(); }
+              btnSize: 'medium',
+              onTap: () => { this.loadPersonality(); }
             })
               .margin({ top: this.sm.getSpacing('md') })
           }
@@ -446,7 +446,7 @@ export struct AgentPersonalityPage {
               GlassButton({
                 text: this.saving ? '保存中...' : '保存',
                 type: 'primary',
-                size: 'large',
+                btnSize: 'large',
                 block: true,
                 disabled: this.saving
                   || !AgentPersonalityViewHelper.isDirty(this.current!, this.original!),

@@ -205,8 +205,8 @@ export struct AgentListPage {
         GlassButton({
           text: '创建',
           type: 'primary',
-          size: 'small',
-          onClick: () => { this.handleCreate(); }
+          btnSize: 'small',
+          onTap: () => { this.handleCreate(); }
         })
       }
 
@@ -231,8 +231,8 @@ export struct AgentListPage {
           GlassButton({
             text: '创建智能体',
             type: 'primary',
-            size: 'medium',
-            onClick: () => { this.handleCreate(); }
+            btnSize: 'medium',
+            onTap: () => { this.handleCreate(); }
           })
         }
         .width('100%')
@@ -243,7 +243,8 @@ export struct AgentListPage {
         // 智能体列表：纵向滚动，卡片间距 12，关闭滚动条
         // M5.2.2 改用 LazyForEach 惰性渲染，仅渲染可见区域 + 缓存项，长列表性能更优
         List({ space: 12 }) {
-          LazyForEach(this.agentsDs, (agent: Agent) => {
+          // SimpleDataSource 的监听器签名与 SDK IDataSource 不完全一致，经 Object 桥接为 IDataSource
+          LazyForEach(this.agentsDs as Object as IDataSource, (agent: Agent) => {
             ListItem() {
               this.buildAgentCard(agent)
             }
@@ -272,6 +273,8 @@ export struct AgentListPage {
   /** 单个智能体卡片：头像 + 信息列 + 状态行 + 操作按钮 */
   @Builder
   buildAgentCard(agent: Agent) {
+    // ArkTS 解析器不允许尾随闭包组件调用后再链属性修饰，外包 Column 承接 .width
+    Column() {
     GlassCard() {
       Column() {
         // 上部：头像 + 名称/描述/状态
@@ -340,21 +343,21 @@ export struct AgentListPage {
           GlassButton({
             text: '对话',
             type: 'primary',
-            size: 'small',
-            onClick: () => { this.switchAgent(agent.id); }
+            btnSize: 'small',
+            onTap: () => { this.switchAgent(agent.id); }
           })
           GlassButton({
             text: '编辑',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.handleEdit(agent); }
+            btnSize: 'small',
+            onTap: () => { this.handleEdit(agent); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
           GlassButton({
             text: '删除',
             type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmDelete(agent); }
+            btnSize: 'small',
+            onTap: () => { this.confirmDelete(agent); }
           })
             .margin({ left: this.sm.getSpacing('sm') })
         }
@@ -364,6 +367,7 @@ export struct AgentListPage {
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
+    }
     }
     .width('100%')
   }

@@ -462,8 +462,8 @@ export struct AgentTracePage {
           GlassButton({
             text: '删除',
             type: 'danger',
-            size: 'small',
-            onClick: () => { this.confirmDelete(trace); }
+            btnSize: 'small',
+            onTap: () => { this.confirmDelete(trace); }
           })
         }
         .width('100%')

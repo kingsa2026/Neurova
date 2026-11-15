@@ -239,8 +239,8 @@ export struct CollaborationPage {
           GlassButton({
             text: '重试',
             type: 'primary',
-            size: 'medium',
-            onClick: () => { this.loadOverview(); }
+            btnSize: 'medium',
+            onTap: () => { this.loadOverview(); }
           })
             .margin({ top: this.sm.getSpacing('md') })
         }

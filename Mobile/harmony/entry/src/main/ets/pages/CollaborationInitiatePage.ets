@@ -409,8 +409,8 @@ export struct CollaborationInitiatePage {
             GlassButton({
               text: `${opt.icon} ${opt.label}`,
               type: this.formData.type === opt.value ? 'primary' : 'default',
-              size: 'small',
-              onClick: () => { this.selectType(opt.value); }
+              btnSize: 'small',
+              onTap: () => { this.selectType(opt.value); }
             })
               .margin({ right: this.sm.getSpacing('xs') })
           }, (opt: TypeOption) => opt.value)
@@ -460,8 +460,8 @@ export struct CollaborationInitiatePage {
           GlassButton({
             text: '添加',
             type: 'default',
-            size: 'small',
-            onClick: () => { this.addParticipant(); }
+            btnSize: 'small',
+            onTap: () => { this.addParticipant(); }
           })
             .margin({ left: this.sm.getSpacing('xs') })
         }
@@ -502,8 +502,8 @@ export struct CollaborationInitiatePage {
         GlassButton({
           text: '发起协作',
           type: 'primary',
-          size: 'medium',
-          onClick: () => { this.submitInitiate(); }
+          btnSize: 'medium',
+          onTap: () => { this.submitInitiate(); }
         })
           .width('100%')
           .margin({ top: this.sm.getSpacing('md') })
@@ -592,7 +592,7 @@ export struct CollaborationInitiatePage {
         .backgroundColor(this.sm.getColor('overlay_mask'))
 
       // 面板层
-      GlassPanel({ variant: 'elevated', padding: 20 }) {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('发起进度')
             .fontSize(this.sm.getFontSize('subtitle'))
@@ -613,8 +613,8 @@ export struct CollaborationInitiatePage {
             GlassButton({
               text: '关闭',
               type: this.progress.status === 'failed' ? 'danger' : 'primary',
-              size: 'medium',
-              onClick: () => { this.closeProgress(); }
+              btnSize: 'medium',
+              onTap: () => { this.closeProgress(); }
             })
               .width('100%')
               .margin({ top: this.sm.getSpacing('md') })

@@ -14,14 +14,18 @@ import { HttpClient } from '../HttpClient';
 import { ApiResponse, Emotion, Personality, PageResult, PageParams } from '../../types';
 
 export class PersonalityApi {
-  constructor(private client: HttpClient) {}
+  private client: HttpClient;
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
 
   /** 列出某 Agent 的情绪记录（支持分页） */
   async listEmotions(
     agentId: string,
     params?: PageParams,
   ): Promise<ApiResponse<PageResult<Emotion>>> {
-    const query: Record<string, Object> = { agentId };
+    const query: Record<string, Object> = {};
+    query['agentId'] = agentId;
     if (params) {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
@@ -46,12 +50,16 @@ export class PersonalityApi {
 
   /** 获取某 Agent 当前情绪 */
   async getCurrentEmotion(agentId: string): Promise<ApiResponse<Emotion>> {
-    return this.client.get<Emotion>('/v1/personality/emotions/current', { agentId });
+    const query: Record<string, Object> = {};
+    query['agentId'] = agentId;
+    return this.client.get<Emotion>('/v1/personality/emotions/current', query);
   }
 
   /** 获取某 Agent 的个性维度 */
   async getPersonality(agentId: string): Promise<ApiResponse<Personality>> {
-    return this.client.get<Personality>('/v1/personality', { agentId });
+    const query: Record<string, Object> = {};
+    query['agentId'] = agentId;
+    return this.client.get<Personality>('/v1/personality', query);
   }
 
   /** 更新个性维度（agentId 注入到 body） */
@@ -59,12 +67,23 @@ export class PersonalityApi {
     agentId: string,
     data: Partial<Personality>,
   ): Promise<ApiResponse<Personality>> {
-    const body: Partial<Personality> & { agentId: string } = { ...data, agentId };
+    // ArkTS 禁用交叉类型与对象展开：逐键拷贝 data 后注入 agentId（agentId 参数优先，同原 { ...data, agentId } 语义）
+    const body: Record<string, Object> = {};
+    body['agentId'] = agentId;
+    if (data.openness !== undefined) body['openness'] = data.openness;
+    if (data.conscientiousness !== undefined) body['conscientiousness'] = data.conscientiousness;
+    if (data.extraversion !== undefined) body['extraversion'] = data.extraversion;
+    if (data.agreeableness !== undefined) body['agreeableness'] = data.agreeableness;
+    if (data.neuroticism !== undefined) body['neuroticism'] = data.neuroticism;
+    if (data.description !== undefined) body['description'] = data.description;
+    if (data.updatedAt !== undefined) body['updatedAt'] = data.updatedAt;
     return this.client.put<Personality>('/v1/personality', body);
   }
 
   /** 重置某 Agent 个性到默认值 */
   async resetPersonality(agentId: string): Promise<ApiResponse<Personality>> {
-    return this.client.post<Personality>('/v1/personality/reset', { agentId });
+    const body: Record<string, Object> = {};
+    body['agentId'] = agentId;
+    return this.client.post<Personality>('/v1/personality/reset', body);
   }
 }

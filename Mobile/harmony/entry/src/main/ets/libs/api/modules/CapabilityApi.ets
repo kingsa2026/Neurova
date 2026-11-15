@@ -25,7 +25,11 @@ import {
 } from '../../types';
 
 export class CapabilityApi {
-  constructor(private client: HttpClient) {}
+  private client: HttpClient;
+
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
 
   // ==================== Rule 规则 ====================
 
@@ -34,7 +38,8 @@ export class CapabilityApi {
     agentId: string,
     params?: PageParams,
   ): Promise<ApiResponse<PageResult<Rule>>> {
-    const query: Record<string, Object> = { agentId };
+    const query: Record<string, Object> = {};
+    query['agentId'] = agentId;
     if (params) {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
@@ -69,7 +74,8 @@ export class CapabilityApi {
     agentId: string,
     params?: PageParams,
   ): Promise<ApiResponse<PageResult<AgentFile>>> {
-    const query: Record<string, Object> = { agentId };
+    const query: Record<string, Object> = {};
+    query['agentId'] = agentId;
     if (params) {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;
@@ -104,7 +110,8 @@ export class CapabilityApi {
     agentId: string,
     params?: PageParams,
   ): Promise<ApiResponse<PageResult<MediaAsset>>> {
-    const query: Record<string, Object> = { agentId };
+    const query: Record<string, Object> = {};
+    query['agentId'] = agentId;
     if (params) {
       if (params.page !== undefined) query['page'] = params.page;
       if (params.size !== undefined) query['size'] = params.size;

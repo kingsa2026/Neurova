@@ -16,6 +16,7 @@
 import { Agent } from '../../libs/types';
 import { StyleManager } from '../../libs/style/StyleManager';
 import { Logger } from '../../libs/logger/Logger';
+import { GlassComponent, GlassStyle, GlassColorScheme } from './GlassComponent';
 
 // 样式单例
 const sm = StyleManager.getInstance();
@@ -41,7 +42,8 @@ export struct AgentSwitcher {
     GlassComponent({
       glassStyle: GlassStyle.BLUR_THIN,
       blurRadius: 20,
-      colorScheme: GlassColorScheme.LIGHT
+      colorScheme: GlassColorScheme.LIGHT,
+      cornerRadius: sm.getRadius('lg')
     }) {
       Scroll() {
         Row({ space: sm.getSpacing('sm') }) {
@@ -56,7 +58,6 @@ export struct AgentSwitcher {
       .scrollBar(BarState.Off)
       .width('100%')
     }
-    .borderRadius(sm.getRadius('lg'))
   }
 
   // 单个 Agent 胶囊：使用小尺寸 GlassComponent 包装
@@ -65,7 +66,14 @@ export struct AgentSwitcher {
     GlassComponent({
       glassStyle: GlassStyle.BLUR_THIN,
       blurRadius: 10,
-      colorScheme: GlassColorScheme.LIGHT
+      colorScheme: GlassColorScheme.LIGHT,
+      cornerRadius: sm.getRadius('full'),
+      // 当前 Agent 用 primary 色覆盖玻璃背景；其余保持透明以呈现玻璃质感
+      bgColor: agent.id === this.currentAgentId ? sm.getColor('primary') : Color.Transparent,
+      onTap: () => {
+        logger.info('AgentSwitcher', `切换 Agent: ${agent.id}`);
+        this.onSwitch(agent.id);
+      }
     }) {
       Text(this.getDisplayName(agent.name))
         .fontSize(14)
@@ -74,12 +82,5 @@ export struct AgentSwitcher {
         .textOverflow({ overflow: TextOverflow.Ellipsis })
         .padding({ left: sm.getSpacing('sm'), right: sm.getSpacing('sm'), top: 6, bottom: 6 })
     }
-    .borderRadius(sm.getRadius('full'))
-    // 当前 Agent 用 primary 色覆盖玻璃背景；其余保持透明以呈现玻璃质感
-    .backgroundColor(agent.id === this.currentAgentId ? sm.getColor('primary') : Color.Transparent)
-    .onClick(() => {
-      logger.info('AgentSwitcher', `切换 Agent: ${agent.id}`);
-      this.onSwitch(agent.id);
-    })
   }
 }

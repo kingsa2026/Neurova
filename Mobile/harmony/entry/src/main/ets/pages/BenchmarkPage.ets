@@ -510,8 +510,8 @@ export struct BenchmarkPage {
           GlassButton({
             text: bench.status === 'running' ? '运行中' : '运行',
             type: bench.status === 'running' ? 'default' : 'primary',
-            size: 'small',
-            onClick: () => { this.runBenchmark(bench); }
+            btnSize: 'small',
+            onTap: () => { this.runBenchmark(bench); }
           })
         }
         .width('100%')

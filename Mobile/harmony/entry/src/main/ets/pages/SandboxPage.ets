@@ -523,15 +523,15 @@ export struct SandboxPage {
             GlassButton({
               text: '停止',
               type: 'danger',
-              size: 'small',
-              onClick: () => { this.stopSandbox(sandbox); }
+              btnSize: 'small',
+              onTap: () => { this.stopSandbox(sandbox); }
             })
           } else if (sandbox.status === 'stopped' || sandbox.status === 'created') {
             GlassButton({
               text: '启动',
               type: 'primary',
-              size: 'small',
-              onClick: () => { this.startSandbox(sandbox); }
+              btnSize: 'small',
+              onTap: () => { this.startSandbox(sandbox); }
             })
           }
         }

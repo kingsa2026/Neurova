@@ -1,7 +1,7 @@
 /**
  * GlassStatCard - 玻璃统计卡片
  *
- * 职责：基于 GlassComponent 提供带标签、数值、单位、趋势的统计卡片
+ * 职责：提供带标签、数值、单位、趋势的玻璃统计卡片（玻璃质感由 backgroundBlurStyle 实现）
  * 设计：Column 布局
  *         Row [icon] + Column(label + Row(value + unit))
  *         trend（颜色：trendUp → success；false → error）
@@ -38,63 +38,58 @@ export struct GlassStatCard {
   }
 
   build() {
-    GlassComponent({
-      glassStyle: GlassStyle.BLUR_THIN,
-      blurRadius: 20,
-      colorScheme: GlassColorScheme.LIGHT
-    }) {
-      Column() {
-        // 顶部行：图标 + 标签/数值列
-        Row() {
-          // 左侧图标
-          if (this.icon) {
-            Image(this.icon)
-              .width(24)
-              .height(24)
-              .fill(sm.getColor('primary'))
-              .margin({ right: sm.getSpacing('sm') })
-          }
-          // 右侧标签 + 数值
-          Column() {
-            Text(this.label)
-              .fontSize(14)
-              .fontColor(sm.getColor('text_secondary'))
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
+    Column() {
+      // 顶部行：图标 + 标签/数值列
+      Row() {
+        // 左侧图标
+        if (this.icon) {
+          Image(this.icon)
+            .width(24)
+            .height(24)
+            .fillColor(sm.getColor('primary'))
+            .margin({ right: sm.getSpacing('sm') })
+        }
+        // 右侧标签 + 数值
+        Column() {
+          Text(this.label)
+            .fontSize(14)
+            .fontColor(sm.getColor('text_secondary'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-            Row() {
-              Text(this.value)
-                .fontSize(24)
-                .fontColor(sm.getColor('text_primary'))
-              if (this.unit) {
-                Text(this.unit)
-                  .fontSize(14)
-                  .fontColor(sm.getColor('text_secondary'))
-                  .margin({ left: 4 })
-                  .alignSelf(ItemAlign.End)
-              }
+          Row() {
+            Text(this.value)
+              .fontSize(24)
+              .fontColor(sm.getColor('text_primary'))
+            if (this.unit) {
+              Text(this.unit)
+                .fontSize(14)
+                .fontColor(sm.getColor('text_secondary'))
+                .margin({ left: 4 })
+                .alignSelf(ItemAlign.End)
             }
-            .alignItems(VerticalAlign.Bottom)
-            .margin({ top: 4 })
           }
-          .alignItems(HorizontalAlign.Start)
-          .layoutWeight(1)
+          .alignItems(VerticalAlign.Bottom)
+          .margin({ top: 4 })
         }
-        .width('100%')
-        .alignItems(VerticalAlign.Top)
-
-        // 趋势行：仅在 trend 非空时渲染
-        if (this.trend) {
-          Text(this.trend)
-            .fontSize(12)
-            .fontColor(this.getTrendColor())
-            .margin({ top: sm.getSpacing('sm') })
-        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
       }
-      .padding(sm.getSpacing('md'))
       .width('100%')
-      .alignItems(HorizontalAlign.Start)
+      .alignItems(VerticalAlign.Top)
+
+      // 趋势行：仅在 trend 非空时渲染
+      if (this.trend) {
+        Text(this.trend)
+          .fontSize(12)
+          .fontColor(this.getTrendColor())
+          .margin({ top: sm.getSpacing('sm') })
+      }
     }
+    .padding(sm.getSpacing('md'))
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
     .borderRadius(sm.getRadius('lg'))
+    .backgroundBlurStyle(BlurStyle.Thin)
   }
 }
