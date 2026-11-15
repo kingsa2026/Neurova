@@ -190,3 +190,28 @@ async def rejectSchemaSuggestion(
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return {"code": 0, "message": "success", "data": result}
+
+
+class FamilyDetectRequest(BaseModel):
+    source_id: str = Field(min_length=1)
+
+
+@router.post("/ontology/schema-families/detect")
+async def detectSchemaFamilies(
+    body: FamilyDetectRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """同构表副本聚族（P3-2，仅管理员）：OLD_/NEW_ 前缀孪生表 → family 候选。
+
+    确定性算法（列名集合 Jaccard≥0.8，历史表除外），产物是 pending 建议；
+    显式触发，无自动跑批。
+    """
+    _requireAdmin(current_user)
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.schema_families import suggestFamilies
+
+    store = get_knowledge_fact_store()
+    suggester = _suggester()
+    result = suggestFamilies(suggester, suggester._catalog,
+                             _tenantOf(current_user), body.source_id.strip())
+    return {"code": 0, "message": "success", "data": result}
