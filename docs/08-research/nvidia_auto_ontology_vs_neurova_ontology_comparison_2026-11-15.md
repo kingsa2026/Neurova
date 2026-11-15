@@ -309,3 +309,11 @@ follow-up 改写 → 意图分类(calculation/information/prediction) → 实体
 MCP 工具面 16 → 18（+ontology_answerability、ontology_readiness）；ontology REST 路由 76 → 84（+readiness/answerability/schema-suggestions×4/ossie×2）；企业源面 +3（catalog 刷新/清单/明细）+3（nl2sql ask/history/suggest-patterns）。
 
 测试：新增 7 个测试文件 88 例，全部先红后绿；knowledge+api 两域全量回归见提交说明。
+
+### 前端适配（拍板「批 A＋批 B」）
+
+- Studio 新增「建议」分区：术语/副本族/SQL 模式建议的 pending 审批（批准=登记术语+回填目录链接）、跑一轮入口（LLM/探针开关缺省关）、家族检测；
+- Studio Overview 挂 readiness 双判据徽标 + 四项检查现值；
+- EnterpriseSourcesPage 增「目录」抽屉（表/列/主外键/术语链接 + admin 刷新）与「问数」抽屉（提问→SQL/步骤/行/截断/空结果/拒答原因如实展示 + 历史 + 模式回灌）；
+- KnowledgeInteropPage 增 Ossie YAML 导出卡与导入面板（缺省 dry-run，apply 需取消勾选）；
+- i18n 62 键 × 11 语言（`_ontologySection.ts` 共享段）；门禁实测 vitest 2490 passed、vue-tsc exit 0。
