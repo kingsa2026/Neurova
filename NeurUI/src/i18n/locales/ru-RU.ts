@@ -680,6 +680,7 @@ export default {
     forkFailed: 'Не удалось выполнить ветвление',
     checkpoint: 'Крюк',
     checkpointSet: 'Отметить как крюк',
+    loopNote: 'Системная пометка',
     checkpointRemove: 'Снять крюк',
     artifactCount: "Артефакты этого раунда ({n})",
     artifactReview: "Проверить",

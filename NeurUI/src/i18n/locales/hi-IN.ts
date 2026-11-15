@@ -680,6 +680,7 @@ export default {
     forkFailed: 'विभाजन विफल',
     checkpoint: 'हुक',
     checkpointSet: 'हुक के रूप में सेट करें',
+    loopNote: 'रनटाइम नोट',
     checkpointRemove: 'हुक हटाएं',
     artifactCount: "इस राउंड के आउटपुट ({n})",
     artifactReview: "समीक्षा",

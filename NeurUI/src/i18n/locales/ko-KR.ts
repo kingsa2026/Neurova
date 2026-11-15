@@ -680,6 +680,7 @@ export default {
     forkFailed: '분기 실패',
     checkpoint: '후크',
     checkpointSet: '후크로 설정',
+    loopNote: '런타임 노트',
     checkpointRemove: '후크 제거',
     artifactCount: "이번 라운드 산출물({n})",
     artifactReview: "검토",

@@ -692,6 +692,7 @@ export default {
     forkFailed: '分叉失败',
     checkpoint: '钩子',
     checkpointSet: '设为钩子',
+    loopNote: '运行时提示',
     checkpointRemove: '移除钩子',
     artifactCount: '本轮产出物（{n}）',
     artifactReview: '审验',

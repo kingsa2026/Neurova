@@ -682,6 +682,7 @@ export default {
     forkFailed: 'Fork failed',
     checkpoint: 'Hook',
     checkpointSet: 'Set as hook',
+    loopNote: 'Runtime note',
     checkpointRemove: 'Remove hook',
     artifactCount: "Artifacts this round ({n})",
     artifactReview: "Review",

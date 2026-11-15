@@ -337,6 +337,8 @@ export function useChat(options: UseChatOptions = {}) {
           feedback: m.metadata?.feedback,
           // 钩子/检查点
           checkpoint: Boolean(m.metadata?.checkpoint),
+          // P1（loop 对照 #2）：轮内注入来源（历史回放据此渲染弱化注记）
+          loopSource: m.metadata?.source || undefined,
         }
       })
       store.setMessages(mapped)

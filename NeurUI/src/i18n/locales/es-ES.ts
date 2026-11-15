@@ -680,6 +680,7 @@ export default {
     forkFailed: 'Error al bifurcar',
     checkpoint: 'Gancho',
     checkpointSet: 'Marcar como gancho',
+    loopNote: 'Nota de ejecución',
     checkpointRemove: 'Quitar gancho',
     artifactCount: "Entregables de esta ronda ({n})",
     artifactReview: "Revisar",

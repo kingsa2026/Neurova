@@ -680,6 +680,7 @@ export default {
     forkFailed: 'Aufteilung fehlgeschlagen',
     checkpoint: 'Haken',
     checkpointSet: 'Als Haken setzen',
+    loopNote: 'Laufzeithinweis',
     checkpointRemove: 'Haken entfernen',
     artifactCount: "Ergebnisse dieser Runde ({n})",
     artifactReview: "Prüfen",

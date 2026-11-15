@@ -680,6 +680,7 @@ export default {
     forkFailed: 'フォークに失敗しました',
     checkpoint: 'フック',
     checkpointSet: 'フックとして設定',
+    loopNote: 'ランタイム注記',
     checkpointRemove: 'フックを解除',
     artifactCount: "今回の成果物（{n}）",
     artifactReview: "審査",
