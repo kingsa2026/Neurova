@@ -68,6 +68,12 @@ WAIVERS = {
     "tools_description": "同上（工具数 114 → 115：+1 受限脚本化工作流，+295 字符）",
     "total_always_on_chars": "同上（tools_description +295）",
     "rules_sections": "同上（规则段 1440 不变）",
+    "蜂群协议-2026-11-15":
+        "本批新增 3 个蜂群面内置工具（escalate/submit_result：子代理升级与结构化"
+        "结果提交；continue_subagent：终态子代理续跑——member 会话复用、失败交接"
+        "件衔接）实测 +446 字符；等量旧文案清理开项在台账继续挂着，不冒充已完成。",
+    "tools_description": "同上（工具数 115 → 118：+3 蜂群面工具，+446 字符）",
+    "total_always_on_chars": "同上（tools_description +446）",
 }
 
 
