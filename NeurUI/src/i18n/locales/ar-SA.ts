@@ -680,6 +680,7 @@ export default {
     forkFailed: 'فشل التفرع',
     checkpoint: 'خطاف',
     checkpointSet: 'تعيين كخطاف',
+    loopNote: 'ملاحظة تشغيل',
     checkpointRemove: 'إزالة الخطاف',
     artifactCount: "مخرجات هذه الجولة ({n})",
     artifactReview: "تدقيق",

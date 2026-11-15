@@ -680,6 +680,7 @@ export default {
     forkFailed: 'Biforcazione non riuscita',
     checkpoint: 'Gancio',
     checkpointSet: 'Imposta come gancio',
+    loopNote: 'Nota di runtime',
     checkpointRemove: 'Rimuovi gancio',
     artifactCount: "Prodotti di questo turno ({n})",
     artifactReview: "Verifica",

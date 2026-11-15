@@ -94,12 +94,14 @@
           :id="`nr-msg-${absIdx(idx)}`"
           :key="msgKey(msg, absIdx(idx))"
           class="nr-msg"
-          :class="[`nr-msg--${msg.role}`, { 'nr-msg--hit': msgSearchHits.includes(absIdx(idx)) && absIdx(idx) === msgSearchCursor, 'nr-msg--checkpoint': msg.checkpoint }]"
+          :class="[`nr-msg--${msg.role}`, { 'nr-msg--hit': msgSearchHits.includes(absIdx(idx)) && absIdx(idx) === msgSearchCursor, 'nr-msg--checkpoint': msg.checkpoint, 'nr-msg--loop-note': isLoopNoteMsg(msg) }]"
         >
           <div class="nr-msg-avatar"><UiIcon :name="msg.role === 'user' ? 'chat' : 'monitor'" :size="16" /></div>
           <div class="nr-msg-body">
             <!-- 钩子/检查点标记 -->
             <div v-if="msg.checkpoint" class="nr-msg-checkpoint-badge" :title="t('chat.checkpointSet')"><UiIcon name="anchor" :size="12" /> {{ t('chat.checkpoint') }}</div>
+            <!-- P1（loop 对照 #2）：harness 轮内注入的弱化注记标记 -->
+            <div v-if="isLoopNoteMsg(msg)" class="nr-msg-loop-badge" :title="msg.loopSource"><UiIcon name="radar" :size="12" /> {{ t('chat.loopNote') }}</div>
             <!-- 流式状态条（三需求①）：理解→思考→工具→输出，进行中扫光 -->
             <div v-if="msg.streaming" class="nr-stream-status" :data-phase="deriveStreamPhase(msg)">
               <span class="nr-stream-status-icon"><UiIcon :name="streamPhaseMeta(deriveStreamPhase(msg)).icon" :size="13" /></span>
@@ -951,6 +953,21 @@ function absIdx(windowIdx: number): number {
 // timestamp 同轮共享（user+assistant 同戳），按 role 组合；无 timestamp 回退下标。
 function msgKey(msg: ChatMessage, idx: number): string {
   return msg.timestamp ? `${msg.timestamp}-${msg.role}` : `idx-${idx}`
+}
+
+// P1（loop 对照 #2）：harness 轮内注入的来源集合——历史回放时这些消息
+// 渲染成弱化注记（带标记），不与真实用户输入混淆。steer_interjection 是
+// 用户本人输入，照常按用户气泡渲染。
+const LOOP_NOTE_SOURCES = new Set([
+  'subagent_mail',
+  'goal_continuation',
+  'gate_interrupt',
+  'budget_stage',
+  'stagnation_notice',
+])
+
+function isLoopNoteMsg(msg: ChatMessage): boolean {
+  return !!msg.loopSource && LOOP_NOTE_SOURCES.has(msg.loopSource)
 }
 
 // ── 流式状态条 + 步骤时间轴 helpers（2026-09-07 三需求①②） ─────────────
@@ -3603,6 +3620,27 @@ onBeforeUnmount(() => {
 .nr-msg--checkpoint .nr-msg-body {
   border-left: 2px solid var(--nr-primary-soft-strong-border);
   padding-left: 6px;
+}
+
+/* P1（loop 对照 #2）：harness 轮内注入的弱化注记——与真实用户输入区分 */
+.nr-msg-loop-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--nr-text-tertiary, #94a3b8);
+  background: var(--nr-glass-bg);
+  border: 1px solid var(--nr-glass-border);
+  border-radius: 10px;
+  padding: 1px 8px;
+  margin-bottom: 4px;
+  width: fit-content;
+}
+
+.nr-msg--loop-note .nr-msg-body {
+  border-left: 2px solid var(--nr-glass-border);
+  padding-left: 6px;
+  opacity: 0.85;
 }
 
 .nr-msg-search-input {

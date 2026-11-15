@@ -680,6 +680,7 @@ export default {
     forkFailed: 'Echec de la bifurcation',
     checkpoint: 'Crochet',
     checkpointSet: 'Marquer comme crochet',
+    loopNote: 'Note d’exécution',
     checkpointRemove: 'Retirer le crochet',
     artifactCount: "Livrables de ce tour ({n})",
     artifactReview: "Vérifier",

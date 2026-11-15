@@ -48,6 +48,13 @@ export interface ChatMessage {
   /** 钩子/检查点：持久化在消息 metadata.checkpoint */
   checkpoint?: boolean
   /**
+   * P1（loop 对照 #2）：轮内注入来源（metadata.source）——steer_interjection /
+   * subagent_mail / goal_continuation / gate_interrupt / budget_stage /
+   * stagnation_notice。历史回放据此把 harness 注入渲染成弱化注记
+   * （而非普通用户气泡）；steer_interjection 是真实用户输入，照常渲染。
+   */
+  loopSource?: string
+  /**
    * 本轮产出物（2026-09-08 回答结尾产出物卡片）：SSE artifact 事件主通道 +
    * tool_result 文本兜底双通道收集，按 name 去重。仅实时轮次收集；
    * 历史回放无此数据（后端 artifact 注册表会话级，不落盘）。
