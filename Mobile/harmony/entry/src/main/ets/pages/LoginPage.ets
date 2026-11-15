@@ -104,12 +104,18 @@ export struct LoginPage {
   }
 
   /**
-   * 注册入口
-   * 说明：当前路由表尚未提供注册页（RouteNames 无 REGISTER），
-   *       此处仅给出提示，待注册页落地后替换为 router.push
+   * 忘记密码：恢复流程（POST /auth/recover-password）需管理员账号与主恢复密码
+   * 双重校验——完整双表单留在 PC 端；移动端诚实指引，不提供残缺表单
+   */
+  private handleForgotPassword(): void {
+    this.msg.info('找回密码需管理员账号与主恢复密码，请在 PC 端操作');
+  }
+
+  /**
+   * 注册入口（RegisterPage 已落地：RegisterController → auth.register）
    */
   private handleRegister(): void {
-    this.msg.info('注册功能即将开放');
+    this.router.push(RouteNames.REGISTER);
   }
 
   build() {
@@ -180,7 +186,7 @@ export struct LoginPage {
               })
                 .margin({ top: 24 })
 
-              // 注册链接：居中
+              // 注册 / 忘记密码链接：居中
               Row() {
                 Text('还没账号？')
                   .fontSize(14)
@@ -190,6 +196,15 @@ export struct LoginPage {
                   .fontColor(this.sm.getColor('primary'))
                   .margin({ left: 4 })
                   .onClick(() => { this.handleRegister(); })
+                Text('·')
+                  .fontSize(14)
+                  .fontColor(this.sm.getColor('text_tertiary'))
+                  .margin({ left: 10 })
+                Text('忘记密码')
+                  .fontSize(14)
+                  .fontColor(this.sm.getColor('primary'))
+                  .margin({ left: 10 })
+                  .onClick(() => { this.handleForgotPassword(); })
               }
               .width('100%')
               .justifyContent(FlexAlign.Center)
