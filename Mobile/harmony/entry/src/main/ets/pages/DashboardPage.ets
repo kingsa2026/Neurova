@@ -26,23 +26,28 @@ import { Logger } from '../libs/logger/Logger';
 import { I18nManager } from '../libs/i18n/I18nManager';
 import { Agent } from '../libs/types';
 
-/** 仪表盘统计数据 */
+/** 仪表盘统计卡数据（/home/data 真实统计映射） */
 interface DashboardStats {
-  totalSessions: number;     // 总对话数
-  totalMessages: number;     // 总消息数
-  onlineAgents: number;      // 在线 Agent 数
+  conversations: number;     // 总对话数（stats.conversation_count）
+  memories: number;          // 记忆条数（stats.memory_count）
+  tokens: number;            // Token 消耗（stats.token_consumption）
+  agents: number;            // Agent 数（stats.agent_count）
+  onlineAgents: number;      // 在线 Agent 数（agents 列表加载后填充）
   healthStatus: string;      // 系统健康状态：healthy / unhealthy
 }
 
 @Component
 export struct DashboardPage {
-  // 统计数据（M2 硬编码，M3 接入真实 API）
+  // 统计数据（GET /home/data 真实统计；加载期 0 值占位）
   @State stats: DashboardStats = {
-    totalSessions: 42,
-    totalMessages: 328,
-    onlineAgents: 3,
+    conversations: 0,
+    memories: 0,
+    tokens: 0,
+    agents: 0,
+    onlineAgents: 0,
     healthStatus: 'healthy'
   };
+  @State welcomeMessage: string = '';
   // 加载态（控制是否显示"加载中..."占位）
   @State loading: boolean = true;
   // Agent 列表（用于欢迎卡片显示数量）
@@ -63,15 +68,37 @@ export struct DashboardPage {
 
   /**
    * 加载仪表盘数据
-   * 流程：先用 store 缓存填充 agents → 尝试调用 API 刷新 → 关闭 loading
-   * 异常：API 失败时降级使用缓存数据，不影响页面渲染
-   * 说明：4 项统计指标 M2 阶段硬编码，M3 阶段在此接入真实 API
+   * 流程：先用 store 缓存填充 agents → 并行拉 /home/data 真实统计与 agent 列表
+   * 异常：API 失败时降级使用缓存数据（0 值），不影响页面渲染
    */
   private async loadDashboard(): Promise<void> {
     // 1. 先用 store 缓存填充，保证页面快速渲染
     this.agents = this.agentsStore.agents;
 
-    // 2. 尝试拉取最新 agent 列表（失败时降级使用缓存）
+    // 2. /home/data 真实统计（home.py：stats.{conversation_count,memory_count,
+    //    token_consumption,agent_count}；quick_stats 为逐调用者口径）
+    try {
+      const home = await this.api.home.data();
+      this.welcomeMessage = home.welcome_message;
+      const st = home.stats;
+      if (st['conversation_count']) {
+        this.stats.conversations = Number(st['conversation_count']);
+      }
+      if (st['memory_count']) {
+        this.stats.memories = Number(st['memory_count']);
+      }
+      if (st['token_consumption']) {
+        this.stats.tokens = Number(st['token_consumption']);
+      }
+      if (st['agent_count']) {
+        this.stats.agents = Number(st['agent_count']);
+        this.stats.onlineAgents = Number(st['agent_count']);
+      }
+    } catch (e) {
+      this.logger.warn('DashboardPage', '工作台统计加载失败，保持 0 值', e as Error);
+    }
+
+    // 3. 尝试拉取最新 agent 列表（失败时降级使用缓存）
     try {
       const res = await this.api.agents.list({ page: 1, size: 100 });
       if (res.code === 0 && res.data) {
@@ -128,15 +155,16 @@ export struct DashboardPage {
 
             // 2. 统计卡片网格（2x2，Flex wrap 自适应窄屏）
             Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween }) {
-              GlassStatCard({ label: '总对话', value: String(this.stats.totalSessions) })
+              GlassStatCard({ label: '总对话', value: String(this.stats.conversations) })
                 .width('48%')
                 .margin({ bottom: this.sm.getSpacing('md') })
 
-              GlassStatCard({ label: '总消息', value: String(this.stats.totalMessages) })
+              GlassStatCard({ label: '记忆条数', value: String(this.stats.memories) })
                 .width('48%')
                 .margin({ bottom: this.sm.getSpacing('md') })
 
               GlassStatCard({ label: '在线Agent', value: String(this.stats.onlineAgents) })
+              GlassStatCard({ label: 'Agent 总数', value: String(this.stats.agents) })
                 .width('48%')
                 .margin({ bottom: this.sm.getSpacing('md') })
 
