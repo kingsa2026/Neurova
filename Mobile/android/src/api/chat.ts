@@ -7,6 +7,31 @@ import { useServersStore } from '@/stores/servers'
 import { storageGet } from '@/utils/session'
 import type { ChatSessionItem } from '@/types'
 
+/** 带认证的 fetch：401 时单飞刷新 token 并重试一次（对齐 axios 拦截器语义） */
+export async function authedFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const { STORAGE_KEYS, storageGet } = await import('@/utils/session')
+  const { refreshAccessToken } = await import('@/utils/http')
+  const token = (await storageGet(STORAGE_KEYS.accessToken)) ?? ''
+  const first = await fetch(url, {
+    ...options,
+    headers: { ...(options.headers ?? {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  })
+  if (first.status !== 401) return first
+  try {
+    const refreshToken = (await storageGet(STORAGE_KEYS.refreshToken)) ?? ''
+    if (!refreshToken) return first
+    await refreshAccessToken()
+    const newToken = (await storageGet(STORAGE_KEYS.accessToken)) ?? ''
+    return fetch(url, {
+      ...options,
+      headers: { ...(options.headers ?? {}), ...(newToken ? { Authorization: `Bearer ${newToken}` } : {}) },
+    })
+  } catch {
+    return first
+  }
+}
+
+
 export interface ChatStreamHandlers {
   onStart?: (info: { request_id: string; session_id: string }) => void
   onMessage: (chunk: string) => void
@@ -43,7 +68,7 @@ function consumeSseBuffer(buffer: string, onFrame: (event: string, data: string)
 export async function streamChat(opts: ChatStreamOptions, h: ChatStreamHandlers): Promise<void> {
   const servers = useServersStore()
   const token = (await storageGet('neurova.auth.access_token')) ?? ''
-  const r = await fetch(`${servers.apiBase}/chat/stream`, {
+  const r = await authedFetch(`${servers.apiBase}/chat/stream`, {
     method: 'POST',
     signal: opts.signal,
     headers: {
@@ -110,22 +135,29 @@ export async function streamChat(opts: ChatStreamOptions, h: ChatStreamHandlers)
 
 export async function listChatSessions(): Promise<ChatSessionItem[]> {
   const servers = useServersStore()
-  const token = (await storageGet('neurova.auth.access_token')) ?? ''
-  const r = await fetch(`${servers.apiBase}/console/chat/sessions`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
+  const r = await authedFetch(`${servers.apiBase}/console/chat/sessions`)
   if (!r.ok) return []
   const body = await r.json().catch(() => null)
   const rows = body?.data?.sessions ?? body?.sessions ?? body?.data ?? []
-  return Array.isArray(rows) ? (rows as ChatSessionItem[]) : []
+  if (!Array.isArray(rows)) return []
+  // 契约归一：服务端摘要字段是 id（console.get_chat_sessions），统一映射为 session_id，
+  // 消费方（ChatView 过滤/展示）只认 session_id——在边界修，不在下游补判
+  return rows
+    .map((row) => {
+      const item = row as Record<string, unknown>
+      return {
+        session_id: String(item.session_id ?? item.id ?? ''),
+        agent_id: item.agent_id as string | undefined,
+        title: item.title as string | undefined,
+        updated_at: item.updated_at as string | undefined,
+      }
+    })
+    .filter((s) => !!s.session_id)
 }
 
 export async function fetchChatHistory(sessionId: string): Promise<Array<{ role: string; content: string }>> {
   const servers = useServersStore()
-  const token = (await storageGet('neurova.auth.access_token')) ?? ''
-  const r = await fetch(`${servers.apiBase}/chat/history?session_id=${encodeURIComponent(sessionId)}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
+  const r = await authedFetch(`${servers.apiBase}/chat/history?session_id=${encodeURIComponent(sessionId)}`)
   if (!r.ok) return []
   const body = await r.json().catch(() => null)
   const rows = body?.data?.messages ?? body?.data ?? body?.messages ?? []
