@@ -23,7 +23,7 @@ import { GlassPanel, GlassInput, GlassButton, StarBackground } from '../componen
 import { ApiFacade } from '../libs/api/ApiFacade';
 import { AuthStore } from '../libs/state/stores/AuthStore';
 import { Router, RouteNames } from '../routing/Router';
-import { StyleManager } from '../libs/style/StyleManager';
+import { StyleManager, ThemeMode } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
 import { ConfigManager } from '../libs/config/ConfigManager';
@@ -122,17 +122,19 @@ export struct LoginPage {
         Column() {
           GlassPanel({ variant: 'elevated', innerPadding: 24, radius: 16 }) {
             Column() {
-              // 主标题
-              Text('Neurova')
-                .fontSize(32)
-                .fontWeight(FontWeight.Bold)
-                .fontColor(this.sm.getColor('text_primary'))
+              // 品牌 LOGO（仓内真实资产：深色底用白标 / 浅色底用黑标，随主题切换）
+              Image(this.sm.getThemeMode() === ThemeMode.DARK
+                ? $r('app.media.neurova_logo_dark')
+                : $r('app.media.neurova_logo_light'))
+                .height(44)
+                .objectFit(ImageFit.Contain)
+                .margin({ top: 4 })
 
               // 副标题
-              Text('登录')
-                .fontSize(16)
+              Text('你的私有 AI 工作台')
+                .fontSize(14)
                 .fontColor(this.sm.getColor('text_secondary'))
-                .margin({ top: 4 })
+                .margin({ top: 6 })
 
               // 用户名输入框
               GlassInput({

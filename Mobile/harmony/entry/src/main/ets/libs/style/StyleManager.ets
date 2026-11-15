@@ -17,11 +17,12 @@ export enum ThemeMode {
   DARK = 'dark',
 }
 
-/** 颜色 token 名 */
+/** 颜色 token 名（cosmic 星穹玻璃体系，对照界面布局规划原型 01 设计系统） */
 export type ColorToken =
   | 'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'info'
   | 'background' | 'surface' | 'text_primary' | 'text_secondary' | 'text_disabled'
-  | 'text_on_primary' | 'overlay_mask' | 'border' | 'divider';
+  | 'text_on_primary' | 'overlay_mask' | 'border' | 'divider'
+  | 'accent' | 'surface_strong' | 'text_tertiary' | 'primary_soft';
 
 /** 间距 token 名 */
 export type SpacingToken = 'xs' | 'sm' | 'md' | 'lg' | 'xl' | 'xxl';
@@ -34,39 +35,47 @@ export type RadiusToken = 'none' | 'xs' | 'sm' | 'md' | 'lg' | 'xl' | 'full';
 
 /** 亮色主题颜色表（ArkTS 禁非空字面量标注 Record，改为空表逐键赋值） */
 const LIGHT_COLORS: Record<string, string> = {};
-LIGHT_COLORS['primary'] = '#1890ff';
-LIGHT_COLORS['secondary'] = '#52c41a';
-LIGHT_COLORS['success'] = '#52c41a';
-LIGHT_COLORS['warning'] = '#faad14';
-LIGHT_COLORS['error'] = '#ff4d4f';
-LIGHT_COLORS['info'] = '#1890ff';
-LIGHT_COLORS['background'] = '#ffffff';
-LIGHT_COLORS['surface'] = '#f5f5f5';
-LIGHT_COLORS['text_primary'] = '#262626';
-LIGHT_COLORS['text_secondary'] = '#8c8c8c';
-LIGHT_COLORS['text_disabled'] = '#bfbfbf';
+LIGHT_COLORS['primary'] = '#4d6bfe';
+LIGHT_COLORS['secondary'] = '#7c3aed';
+LIGHT_COLORS['success'] = '#0c8f5e';
+LIGHT_COLORS['warning'] = '#b45309';
+LIGHT_COLORS['error'] = '#dc2626';
+LIGHT_COLORS['info'] = '#0e7490';
+LIGHT_COLORS['accent'] = '#0e7490';
+LIGHT_COLORS['background'] = '#f5f6fb';
+LIGHT_COLORS['surface'] = '#ffffff';
+LIGHT_COLORS['surface_strong'] = 'rgba(21,28,58,0.08)';
+LIGHT_COLORS['text_primary'] = 'rgba(16,21,44,0.94)';
+LIGHT_COLORS['text_secondary'] = 'rgba(16,21,44,0.62)';
+LIGHT_COLORS['text_tertiary'] = 'rgba(16,21,44,0.42)';
+LIGHT_COLORS['text_disabled'] = 'rgba(16,21,44,0.42)';
 LIGHT_COLORS['text_on_primary'] = '#ffffff';
-LIGHT_COLORS['overlay_mask'] = 'rgba(0,0,0,0.5)';
-LIGHT_COLORS['border'] = '#d9d9d9';
-LIGHT_COLORS['divider'] = '#f0f0f0';
+LIGHT_COLORS['primary_soft'] = 'rgba(77,107,254,0.12)';
+LIGHT_COLORS['overlay_mask'] = 'rgba(16,21,44,0.42)';
+LIGHT_COLORS['border'] = 'rgba(21,28,58,0.11)';
+LIGHT_COLORS['divider'] = 'rgba(21,28,58,0.07)';
 
 /** 暗色主题颜色表（同上，空表逐键赋值） */
 const DARK_COLORS: Record<string, string> = {};
-DARK_COLORS['primary'] = '#177ddc';
-DARK_COLORS['secondary'] = '#49aa19';
-DARK_COLORS['success'] = '#49aa19';
-DARK_COLORS['warning'] = '#d89614';
-DARK_COLORS['error'] = '#d32029';
-DARK_COLORS['info'] = '#177ddc';
-DARK_COLORS['background'] = '#141414';
-DARK_COLORS['surface'] = '#1f1f1f';
-DARK_COLORS['text_primary'] = '#f0f0f0';
-DARK_COLORS['text_secondary'] = '#a6a6a6';
-DARK_COLORS['text_disabled'] = '#595959';
+DARK_COLORS['primary'] = '#6366f1';
+DARK_COLORS['secondary'] = '#8b5cf6';
+DARK_COLORS['success'] = '#34d399';
+DARK_COLORS['warning'] = '#fbbf24';
+DARK_COLORS['error'] = '#f87171';
+DARK_COLORS['info'] = '#22d3ee';
+DARK_COLORS['accent'] = '#22d3ee';
+DARK_COLORS['background'] = '#0a0e1d';
+DARK_COLORS['surface'] = '#141a2e';
+DARK_COLORS['surface_strong'] = 'rgba(255,255,255,0.09)';
+DARK_COLORS['text_primary'] = 'rgba(255,255,255,0.95)';
+DARK_COLORS['text_secondary'] = 'rgba(255,255,255,0.64)';
+DARK_COLORS['text_tertiary'] = 'rgba(255,255,255,0.40)';
+DARK_COLORS['text_disabled'] = 'rgba(255,255,255,0.40)';
 DARK_COLORS['text_on_primary'] = '#ffffff';
-DARK_COLORS['overlay_mask'] = 'rgba(0,0,0,0.7)';
-DARK_COLORS['border'] = '#434343';
-DARK_COLORS['divider'] = '#303030';
+DARK_COLORS['primary_soft'] = 'rgba(99,102,241,0.16)';
+DARK_COLORS['overlay_mask'] = 'rgba(4,6,14,0.62)';
+DARK_COLORS['border'] = 'rgba(255,255,255,0.11)';
+DARK_COLORS['divider'] = 'rgba(255,255,255,0.07)';
 
 /** 间距表（fp，空表逐键赋值） */
 const SPACING: Record<string, number> = {};
@@ -98,7 +107,7 @@ RADIUS['full'] = 9999;
 
 export class StyleManager {
   private static instance: StyleManager;
-  private themeMode: ThemeMode = ThemeMode.LIGHT;
+  private themeMode: ThemeMode = ThemeMode.DARK;
   private colors: Record<string, string> = {};
   private spacing: Record<string, number> = {};
   private fontSize: Record<string, number> = {};
