@@ -421,6 +421,7 @@ async def get_context_stats(
     drawer_keys = (
         "draws_total", "offered_total", "candidates_total", "threshold_pass_total",
         "threshold_miss_total", "injected_total", "injected_tokens_total", "degraded_total",
+        "dynamic_floor_applied",
     )
     drawer_totals = {
         key: sum(int((s.get("drawer") or {}).get(key) or 0) for s in stats)
