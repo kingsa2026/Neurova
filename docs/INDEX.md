@@ -154,6 +154,7 @@
 [`08-research/ontology_landing_video_vs_neurova_knowledge_semantic_stack_comparison_2026-11-05.md`](08-research/ontology_landing_video_vs_neurova_knowledge_semantic_stack_comparison_2026-11-05.md)（视频号知识视频《Ontology 本体落地》参考架构与 Neurova 知识语义栈框架适配评测：对象为教学参考架构非产品，只评本方十维加权实现度 6.8/10（适用域折扣声明）——本体语义层与入库纪律超出参考架构（9 档），短板集中于 OWL 式条件类自动归入、标准栈互通、访问层统一四动词；候选 V1–V4＋缓办 V5＋不采纳三条，无新增断点，研究参考）
 [`08-research/rsi_survey_vs_neurova_rsi_evaluation_2026-11-10.md`](08-research/rsi_survey_vs_neurova_rsi_evaluation_2026-11-10.md)（《Recursive Self-Improvement in AI: A Survey》preprints 202609.2680/v1 未评审综述与 Neurova RSI 对照：RSI 对标链第四档、对象为评测协议本身而非机制；八维加权 4.9/10（协议覆盖面口径，与前作完成质量口径分列不互比）——结构 RSI on S 成立/实证递归改进不成立（改进器 I 无自更新、无 Eq8 配对探针）、默认 phase=0 且前置 2 恒假复核未漂移、holdout≠heldout 四集语义澄清与密封集默认关；增量 S1–S6（配对探针/全成本/保留迁移/密封开默认/真实增益升判据/漂移对照）重叠项指回前作 P1-A..C 与 M-A..E 不另立号，不采纳四条；**§10 通往 9 分路线图**（逐维 9 分锚点＋30 单工项四行式含验收红灯判据＋四波次轨迹 5.4→7.3→8.95→≈9.1，候选清单非承诺），研究参考）
 [`08-research/harnesspro_vs_neurova_cost_aware_harness_rsi_comparison_2026-11-13.md`](08-research/harnesspro_vs_neurova_cost_aware_harness_rsi_comparison_2026-11-13.md)（HarnessPro（arXiv:2610.26770v2，清华/Z.AI 等，under review）与 Neurova 成本感知 harness 自改进对照：RSI 对标链第六档；十维加权（方法 70%＋工程 30%）7.5 vs 7.9、生产就绪度单列 4.0 vs 8.4——方法域对方领先 0.7，落在成本入目标函数＋Pareto 三档交付（lite/medium/heavy）、label-free 可执行测试合成（失败召回 41.7%→83.3%）、分档预算钩子（动态推理路由＋economy/strict/finalize 硬停＋RTK 压缩）三处；本仓运行时对应物盘点（effort_inference/四把门控/tool_offload/hooks_engine）与断点 HN1–HN6、候选 HC1–HC7（成本账+软门/可执行测试判据/档位工件/分段钩子），重叠项指回 harness² N 系与综述 S 系；外部仓 Windows 实跑 6 errors（fcntl/pier）如实记录，研究参考）
+[`08-research/nvidia_auto_ontology_vs_neurova_ontology_comparison_2026-11-15.md`](08-research/nvidia_auto_ontology_vs_neurova_ontology_comparison_2026-11-15.md)（NVIDIA/auto-ontology（快照 9fba324，Apache-2.0）与 Neurova 本体代码级对照：定位互补不重叠——对方自下而上从数据库元数据自动构建语义目录 grounding text-to-SQL（物理目录+语义层双层模型、LLM 建议+值包含/join 探针数据证实、确定性 join 路径、answerability 预检、87→7 的 MCP curated 面、check_readiness 复合探针、查询历史回灌、Ossie 互操作、skills 打包），本仓自上而下治理型世界模型（admission 咽喉/前向链+推导账本/基线回滚/九格式导出/CQ 探针/GB/T 48000.3）但缺数据侧自动构建与问数 grounding；本仓关键断点=`describeSchema()` 五驱动已实现零生产调用；候选 P1-1 schema 目录摄取接线/P1-2 术语关系建议器接候选审批/P1-3 answerability 预检/P1-4 NL2SQL 大项待拍板＋P2×4＋P3×4 与不照搬六条，研究参考）
 
 ### 2.5 审计报告 / 验证（历史留痕）
 
@@ -202,6 +203,8 @@
 `specs/2026-10-30-knowledge-retrieval-accuracy-upgrade-plan.md`（知识库检索准确性与事实守卫升级计划：查询侧别名归一、检索脱靶登记与审批闭环、图谱影子读数与转正判据、同名多口径主动澄清、生成后事实回查守卫；五批分期、每批红灯判据与拍板项；**已实施**，批次提交/偏差归一/live-verify 补证见文内 §11 实施台账）
 
 `04-plans/2026-10-24-移动端扫码经中继连接无固定IP服务端设计方案.md`（移动端扫码经自研中继连无固定 IP 服务端：凭据与地址分离、中继控制面/数据面选型、四条互不合并的状态机与非法迁移矩阵、Web＋Harmony 两端 UI、代理头缺失致限流失明的实测现状、S0–S3 分期与每批红灯判据；设计已确认未开工）
+
+`04-plans/2026-11-15-Neurova手机客户端设计方案.md`（手机客户端总体设计：基于现有 `/api/v1` 功能面零新建服务端协议，登录与租户（JWT `tenant_id`=部门根）只读呈现、三形态网络接入（内网直连／反代+TLS／自研中继）与客户端服务器档案、SSE 主＋移动 WS 备双通道对话、扫码配对辅助登录、凭证分层安全、服务端尾巴 S-1..S-4、M1–M4 分期判据与四项待拍板；设计稿 v1 待评审）
 
 `specs/2026-11-03-提示面资产化与出口审批收口升级设计.md`（提示面整面预算棘轮＋段单源扩展、审批等待双链收口（一次一问/线程不泄漏/未送达不计时/持久化复活）、出口禁拆与系统文案预算、入站队列不可用方向修正、deriveRunStage 钉格补齐、出口失败片归宿、渠道错误文案单源、统一指挥判据（单一判定落点＋判定台账＋渠道身份贯通）；八批分期、每批红灯判据与明确不做清单；六项拍板已裁（2026-11-03）；八批全部实施（E/A/F/G/B1/B2/C+D/B3/H），H3 身份贯通与 D 前端接线为在册尾巴格）
 
