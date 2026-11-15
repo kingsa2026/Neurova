@@ -203,19 +203,26 @@ export struct AgentListPage {
   build() {
     Column() {
       // 顶部导航栏：标题"智能体" + 返回按钮 + 创建按钮（右侧插槽）
-      TopNavMenu({
-        title: '智能体',
-        showBack: true,
-        showMenu: false,
-        onBack: () => { this.router.back(); }
-      }) {
-        GlassButton({
-          text: '创建',
-          type: 'primary',
-          btnSize: 'small',
-          onTap: () => { this.handleCreate(); }
+      // 内联头（原型 F7：21/700 标题 + 创建渐变胶囊）
+      Row() {
+        Text('智能体')
+          .fontSize(21)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.sm.getColor('text_primary'))
+          .layoutWeight(1)
+        Button() {
+          Text('＋ 创建')
+            .fontSize(13)
+            .fontColor(this.sm.getColor('text_on_primary'))
+        }
+        .height(34)
+        .linearGradient({ angle: 135, colors: [['#8b5cf6', 0], ['#6366f1', 1]] })
+        .onClick(() => {
+          this.handleCreate();
         })
       }
+      .width('100%')
+      .padding({ left: 20, right: 20, top: 8, bottom: 10 })
 
       if (this.loading) {
         // 加载态：居中显示"加载中..."
@@ -270,7 +277,7 @@ export struct AgentListPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(this.sm.getColor('background'))
+    
   }
 
   // ===========================================================================

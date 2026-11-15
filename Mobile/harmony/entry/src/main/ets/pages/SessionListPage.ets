@@ -169,7 +169,7 @@ export struct SessionListPage {
               .fontColor(this.sm.getColor('text_on_primary'))
           }
           .buttonStyle(ButtonStyleMode.NORMAL)
-          .backgroundColor(this.sm.getColor('primary'))
+          .linearGradient({ angle: 135, colors: [['#8b5cf6', 0], ['#6366f1', 1]] })
           .height(34)
           .onClick(() => {
             this.newSession();
@@ -225,7 +225,7 @@ export struct SessionListPage {
                   .height(40)
                   .borderRadius(14)
                   .textAlign(TextAlign.Center)
-                  .backgroundColor(this.sm.getColor('primary'))
+                  .linearGradient({ angle: 135, colors: [['#8b5cf6', 0], ['#6366f1', 1]] })
 
                 Column() {
                   Row() {
@@ -297,7 +297,8 @@ export struct SessionListPage {
               .width('100%')
               .padding(13)
               .borderRadius(15)
-              .backgroundColor(this.sm.getColor('surface'))
+              .backgroundBlurStyle(BlurStyle.COMPONENT_THIN)
+              .backgroundColor(this.sm.getColor('surface_strong'))
               .border({
                 width: 1,
                 color: s.pinned ? this.sm.getColor('primary') : this.sm.getColor('border')
@@ -371,6 +372,6 @@ export struct SessionListPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(this.sm.getColor('background'))
+    
   }
 }

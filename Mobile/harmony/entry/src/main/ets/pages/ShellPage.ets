@@ -12,6 +12,7 @@
  */
 
 import { mediaquery } from '@kit.ArkUI';
+import { StarBackground } from '../components/glass';
 import { StyleManager } from '../libs/style/StyleManager';
 import { LiquidTabBar } from '../components/shell/LiquidTabBar';
 import { RailBar } from '../components/shell/RailBar';
@@ -63,6 +64,9 @@ export struct ShellPage {
 
   build() {
     Stack() {
+      // 星空底层：五个 Tab 共用（页面自身不再涂不透明背景，星穹透出）
+      StarBackground({ starCount: 60, twinkle: true })
+
       if (this.isWide) {
         // ≥600vp：左侧导航栏 + 内容区
         Row() {
@@ -96,6 +100,5 @@ export struct ShellPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(this.sm.getColor('background'))
   }
 }

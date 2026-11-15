@@ -522,20 +522,26 @@ export struct SettingPage {
 
   build() {
     Column() {
-      // 顶部导航栏：标题"设置" + 返回按钮 + 保存按钮
-      TopNavMenu({
-        title: '设置',
-        showBack: true,
-        showMenu: false,
-        onBack: () => { this.router.back(); }
-      }) {
-        GlassButton({
-          text: '保存',
-          type: 'primary',
-          btnSize: 'small',
-          onTap: () => { this.saveAll(); }
+      // 内联头（原型 F10：21/700 我的 + 保存渐变胶囊）
+      Row() {
+        Text('我的')
+          .fontSize(21)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.sm.getColor('text_primary'))
+          .layoutWeight(1)
+        Button() {
+          Text('保存')
+            .fontSize(13)
+            .fontColor(this.sm.getColor('text_on_primary'))
+        }
+        .height(34)
+        .linearGradient({ angle: 135, colors: [['#8b5cf6', 0], ['#6366f1', 1]] })
+        .onClick(() => {
+          this.saveAll();
         })
       }
+      .width('100%')
+      .padding({ left: 20, right: 20, top: 8, bottom: 10 })
 
       // 管理员分组：仅 role=admin 渲染（原型 F10；role 取自 /auth/me）
       if (this.isAdmin()) {
@@ -649,7 +655,7 @@ export struct SettingPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(this.sm.getColor('background'))
+    
   }
 
   // ===========================================================================

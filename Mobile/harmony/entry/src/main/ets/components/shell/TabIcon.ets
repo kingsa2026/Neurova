@@ -9,128 +9,41 @@
 @Component
 export struct TabIcon {
   /** 图标类别：chat | home | agent | book | user */
-  kind: string = 'chat';
-  /** 线条颜色（调用方传 token 色） */
-  color: string = '#FFFFFF';
+  @Prop kind: string = 'chat';
+  /** 线条颜色（调用方传 token 色）——@Prop 随激活态刷新 */
+  @Prop color: string = '#FFFFFF';
   /** 图标边长（vp）——命名避开通用属性 size */
-  iconSize: number = 22;
+  @Prop iconSize: number = 22;
 
   private stroke(): number {
     return this.iconSize / 24 * 1.7;
   }
 
   build() {
-    Stack() {
-      if (this.kind === 'chat') {
-        // 气泡外框（圆角矩形轮廓）
-        Path()
-          .commands('M7.5 4 L16.5 4 C18.433 4 20 5.567 20 7.5 L20 14.5 C20 16.433 18.433 18 16.5 18 L9 18 L4.6 21.4 C4.1 21.8 3.4 21.4 3.4 20.7 L3.4 7.5 C3.4 5.567 5.567 4 7.5 4 Z')
-          .fillOpacity(0)
-          .stroke(this.color)
-          .strokeWidth(this.stroke())
-          .strokeLineCap(LineCapStyle.Round)
-          .strokeLineJoin(LineJoinStyle.Round)
-          .width(this.iconSize)
-          .height(this.iconSize)
-        // 两行文本线
-        Path()
-          .commands('M8.5 9 L15.5 9 M8.5 12.5 L13 12.5')
-          .fillOpacity(0)
-          .stroke(this.color)
-          .strokeWidth(this.stroke())
-          .strokeLineCap(LineCapStyle.Round)
-          .width(this.iconSize)
-          .height(this.iconSize)
-      } else if (this.kind === 'home') {
-        // 屋顶 + 墙体
-        Path()
-          .commands('M3.4 10.2 L12 3 L20.6 10.2 L20.6 20 L14.2 20 L14.2 14.6 L9.8 14.6 L9.8 20 L3.4 20 Z')
-          .fillOpacity(0)
-          .stroke(this.color)
-          .strokeWidth(this.stroke())
-          .strokeLineCap(LineCapStyle.Round)
-          .strokeLineJoin(LineJoinStyle.Round)
-          .width(this.iconSize)
-          .height(this.iconSize)
-      } else if (this.kind === 'agent') {
-        // 机身
-        Rect()
-          .width(this.iconSize * 14 / 24)
-          .height(this.iconSize * 11 / 24)
-          .radiusWidth(this.iconSize * 3.5 / 24)
-          .radiusHeight(this.iconSize * 3.5 / 24)
-          .fillOpacity(0)
-          .stroke(this.color)
-          .strokeWidth(this.stroke())
-          .translate({ x: this.iconSize * 5 / 24, y: this.iconSize * 7 / 24 })
-        // 天线
-        Path()
-          .commands(`M${this.iconSize / 2} ${this.iconSize * 7 / 24} L${this.iconSize / 2} ${this.iconSize * 4 / 24}`)
-          .fillOpacity(0)
-          .stroke(this.color)
-          .strokeWidth(this.stroke())
-          .strokeLineCap(LineCapStyle.Round)
-          .width(this.iconSize)
-          .height(this.iconSize)
-        // 双眼 + 嘴
-        Circle()
-          .width(this.iconSize * 1.6 / 24)
-          .height(this.iconSize * 1.6 / 24)
-          .fill(this.color)
-          .translate({ x: this.iconSize * 8.6 / 24, y: this.iconSize * 11.8 / 24 })
-        Circle()
-          .width(this.iconSize * 1.6 / 24)
-          .height(this.iconSize * 1.6 / 24)
-          .fill(this.color)
-          .translate({ x: this.iconSize * 13.8 / 24, y: this.iconSize * 11.8 / 24 })
-        Path()
-          .commands(`M${this.iconSize * 9.5 / 24} ${this.iconSize * 15.4 / 24} L${this.iconSize * 14.5 / 24} ${this.iconSize * 15.4 / 24}`)
-          .fillOpacity(0)
-          .stroke(this.color)
-          .strokeWidth(this.stroke())
-          .strokeLineCap(LineCapStyle.Round)
-          .width(this.iconSize)
-          .height(this.iconSize)
-      } else if (this.kind === 'book') {
-        // 书页轮廓
-        Path()
-          .commands('M5 5.5 C5 4.12 6.12 3 7.5 3 L19 3 L19 18.5 L7.5 18.5 C6.12 18.5 5 19.4 5 20.5 L5 5.5 Z')
-          .fillOpacity(0)
-          .stroke(this.color)
-          .strokeWidth(this.stroke())
-          .strokeLineCap(LineCapStyle.Round)
-          .strokeLineJoin(LineJoinStyle.Round)
-          .width(this.iconSize)
-          .height(this.iconSize)
-        // 书底
-        Path()
-          .commands('M5 18.5 C5 17.12 6.12 16 7.5 16 L19 16')
-          .fillOpacity(0)
-          .stroke(this.color)
-          .strokeWidth(this.stroke())
-          .strokeLineCap(LineCapStyle.Round)
-          .width(this.iconSize)
-          .height(this.iconSize)
-      } else {
-        // user：头 + 肩
-        Circle()
-          .width(this.iconSize * 7.2 / 24)
-          .height(this.iconSize * 7.2 / 24)
-          .fillOpacity(0)
-          .stroke(this.color)
-          .strokeWidth(this.stroke())
-          .translate({ x: this.iconSize * 8.4 / 24, y: this.iconSize * 4.6 / 24 })
-        Path()
-          .commands('M4 20 C4.8 16.6 7.5 14.4 12 14.4 C16.5 14.4 19.2 16.6 20 20')
-          .fillOpacity(0)
-          .stroke(this.color)
-          .strokeWidth(this.stroke())
-          .strokeLineCap(LineCapStyle.Round)
-          .width(this.iconSize)
-          .height(this.iconSize)
-      }
+    // 单 Path 多子路径（绝对 24 网格坐标，C 曲线替代 A 弧——渲染确定性最高）
+    Path()
+      .commands(this.commands())
+      .fillOpacity(0)
+      .stroke(this.color)
+      .strokeWidth(this.iconSize / 24 * 1.7)
+      .strokeLineCap(LineCapStyle.Round)
+      .strokeLineJoin(LineJoinStyle.Round)
+      .width(this.iconSize)
+      .height(this.iconSize)
+  }
+
+  private commands(): string {
+    switch (this.kind) {
+      case 'chat':
+        return 'M7.5 4 L16.5 4 C18.71 4 20.5 5.79 20.5 7.5 L20.5 14.5 C20.5 16.43 18.71 18 16.5 18 L9 18 L4.6 21.4 C4.1 21.8 3.4 21.4 3.4 20.7 L3.4 7.5 C3.4 5.57 5.57 4 7.5 4 Z M8.5 9 L15.5 9 M8.5 12.5 L13 12.5';
+      case 'home':
+        return 'M3.4 10.2 L12 3 L20.6 10.2 L20.6 20 L14.2 20 L14.2 14.6 L9.8 14.6 L9.8 20 L3.4 20 Z';
+      case 'agent':
+        return 'M9.5 7 L14.5 7 C16.71 7 18.5 8.79 18.5 11 L18.5 14.5 C18.5 16.71 16.71 18.5 14.5 18.5 L9.5 18.5 C7.29 18.5 5.5 16.71 5.5 14.5 L5.5 11 C5.5 8.79 7.29 7 9.5 7 Z M12 7 L12 4 M9.7 12.6 L10 12.6 M14 12.6 L14.3 12.6 M9.8 15.4 L14.2 15.4';
+      case 'book':
+        return 'M5 5.5 C5 4.12 6.12 3 7.5 3 L19 3 L19 18.5 L7.5 18.5 C6.12 18.5 5 19.4 5 20.5 L5 5.5 Z M5 18.5 C5 17.12 6.12 16 7.5 16 L19 16';
+      default:
+        return 'M12 5.2 C13.88 5.2 15.4 6.72 15.4 8.6 C15.4 10.48 13.88 12 12 12 C10.12 12 8.6 10.48 8.6 8.6 C8.6 6.72 10.12 5.2 12 5.2 Z M4.6 20 C5.4 16.6 8.1 14.6 12 14.6 C15.9 14.6 18.6 16.6 19.4 20';
     }
-    .width(this.iconSize)
-    .height(this.iconSize)
   }
 }
