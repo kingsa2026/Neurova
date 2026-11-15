@@ -41,9 +41,10 @@ class TestGrowthGate:
         d = _decide(total_tokens=11000, enabled=False)
         assert d.should_fold and d.reason == REASON_BUDGET_BREACH
 
-    def test_gate_disabled_only_folds_on_breach(self):
-        """门关（默认）：未超预算不折——与改前行为逐字一致。"""
-        assert growthGateEnabled() is False  # 测试环境无该 env
+    def test_gate_disabled_only_folds_on_breach(self, monkeypatch):
+        """kill-switch（=0）：未超预算不折——与改前行为逐字一致。"""
+        monkeypatch.setenv("NEUROVA_FOLD_GROWTH_GATE", "0")
+        assert growthGateEnabled() is False
         d = _decide(enabled=False)
         assert not d.should_fold and d.reason == REASON_GATE_DISABLED
 

@@ -92,8 +92,17 @@ class TestNoInPlaceOverwrite:
             await _build(orch)
 
         assert seen["values"], "本轮没有走召回额度计算"
-        assert drawer.effective_view_budget() in seen["values"], (
-            f"本轮生效额度 {drawer.effective_view_budget()} 不在额度方法的取值集 {seen['values']} 里"
+        # B10 双通道：输入通道额度 = 召回额度 − 近轮通道份额（30%）；
+        # 生效额度应等于输入通道实际使用的那个值（B6-9 单源不破坏——
+        # 两通道额度都由 _retrievalBudget 的同一个返回值拆分而来）。
+        share = ContextOrchestrator._RECENT_CHANNEL_BUDGET_SHARE
+        # seen[0] = 本轮抽屉那次 `_retrievalBudget` 调用（build 里先算额度、
+        # 后画信封——信封那次是 seen[-1]，两者因 blocks 已填充而略有差异）。
+        expected_input_budget = int(seen["values"][0] * (1 - share))
+        assert drawer.effective_view_budget() == expected_input_budget, (
+            f"本轮生效额度 {drawer.effective_view_budget()} 应为输入通道额度 "
+            f"{expected_input_budget}（召回额度 {seen['values'][0]} 的 "
+            f"{1 - share:.0%}）"
         )
 
 

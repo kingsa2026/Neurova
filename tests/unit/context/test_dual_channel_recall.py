@@ -111,9 +111,9 @@ def _viewText(msgs) -> str:
 
 class TestDualChannelRecall:
     @pytest.mark.asyncio
-    async def test_default_off_single_channel(self, monkeypatch):
-        """默认关：单通道，行为与改前一致（无 [近轮相关] 行）。"""
-        monkeypatch.delenv("NEUROVA_RECALL_DUAL_CHANNEL", raising=False)
+    async def test_kill_switch_single_channel(self, monkeypatch):
+        """kill-switch（=0）：单通道，行为与改前一致（无 [近轮相关] 行）。"""
+        monkeypatch.setenv("NEUROVA_RECALL_DUAL_CHANNEL", "0")
         orch = _mk_orchestrator()
         _seed_topics(orch)
         orch.context_pool._drawer._vector_store = TopicVectorStore()

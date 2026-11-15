@@ -1640,24 +1640,32 @@ class ContextOrchestrator:
                 retrievalBudget = None
             # 输入通道：纯输入锚（B10 泄漏解法——近轮话题条目在此通道过不了
             # 0.65 门槛，泄漏物理切断）。抽屉对 need 只编码一次。
+            # 预算拆分（B10 双通道）：近轮通道占召回额度的 30%，输入通道用
+            # 其余——两通道合计不超过召回额度，信封才装得下（compress_envelope
+            # 不丢历史；实测超额时整个 history 块被丢）。
+            recentBudget = (
+                int(retrievalBudget * self._RECENT_CHANNEL_BUDGET_SHARE)
+                if (self._dualChannelEnabled() and retrievalBudget)
+                else 0
+            )
+            inputBudget = max(0, retrievalBudget - recentBudget) or None
             drawn_contexts = self.context_pool.draw(
-                need=user_input, budget_tokens=retrievalBudget
+                need=user_input, budget_tokens=inputBudget
             )
             # B10 解法·近轮通道：短输入时任务语境经此受控召回——高门槛
-            # （0.75）、预算 ×30% 封顶、[近轮相关] 标注（默认关，灰度）。
+            # （0.75）、[近轮相关] 标注。
             recent_contexts: List = []
-            if self._dualChannelEnabled():
+            if recentBudget:
+                # 无召回额度（窗口超支 → retrievalBudget 为空/非正）时近轮通道
+                # 不召回——否则 draw 回落 max_tokens 会把全池吸进信封、整块
+                # history 被 compress_envelope 丢弃（实测 12 条全吸 → history 空）。
                 recentAnchor = self._buildRecentTurnsAnchor(window_msgs)
                 if recentAnchor:
-                    recentBudget = (
-                        max(500, int(retrievalBudget * self._RECENT_CHANNEL_BUDGET_SHARE))
-                        if retrievalBudget
-                        else None
-                    )
                     recent_contexts = self.context_pool.draw(
                         need=recentAnchor,
                         budget_tokens=recentBudget,
                         relevance_floor=self._RECENT_CHANNEL_FLOOR,
+                        update_turn_memo=False,
                     )
             # 会话作用域隔离：旁路"历史回忆"召回同样过滤——单聊/非协作仅见 direct（仍跨普通
             # 会话召回），排除任何房间归档；群轮见 direct + 本群。chunk 归属由 metadata.session_id
@@ -1681,6 +1689,16 @@ class ContextOrchestrator:
                 channel=chat_channel,
                 chat_id=chat_group_id,
             )
+            # B10 近轮通道只召回**任务内容**（会话/记忆/经验/工具），不召回
+            # 反思与情感——它们有各自的注入与记账路径（D5 作者身份判据）；
+            # 否则用户在近轮说过的教训原文会经此通道把同文反思带进视图、
+            # 被记成 applied（反射记账用例的泄漏形态）。
+            recent_contexts = [
+                d
+                for d in recent_contexts
+                if getattr(d, "source", None)
+                not in (ContextSource.REFLECTION, ContextSource.EMOTION)
+            ]
             logger.debug("ContextPool.draw() 调取 %s 条归档", len(drawn_contexts))
             # C5：lost-in-the-middle 位置缓解（默认关）——抽屉输出序即 rank 序
             # （不造第二份打分），两端发牌把最优置首、次优置尾、最弱居中；
@@ -2696,7 +2714,8 @@ class ContextOrchestrator:
         total_tokens = estimate_window_tokens(msgs)
 
         # ── B5：触发判据（预算击穿 ∨ 增长门），单源 fold_trigger.decideFoldTrigger。
-        # 门默认关（NEUROVA_FOLD_GROWTH_GATE=1 开启）：关闭时只有击穿才折，
+        # 门默认开（2026-11-15 跑数据转正；NEUROVA_FOLD_GROWTH_GATE=0 关闭）：
+        # 关闭时只有击穿才折，
         # 与改前行为一致。
         from neurova.context.fold_trigger import (
             decideFoldTrigger,
@@ -2998,10 +3017,12 @@ class ContextOrchestrator:
 
     @staticmethod
     def _dualChannelEnabled() -> bool:
-        """双通道召回开关（B10 解法）：默认关（NEUROVA_RECALL_DUAL_CHANNEL=1 开启）。"""
+        """双通道召回开关（B10 解法）：默认开（2026-11-15 转正——探针复测
+        输入通道泄漏归零、近轮通道受控命中）；NEUROVA_RECALL_DUAL_CHANNEL=0
+        关闭（kill-switch，回到单通道纯输入锚）。"""
         import os as _os
 
-        return _os.environ.get("NEUROVA_RECALL_DUAL_CHANNEL", "0") == "1"
+        return _os.environ.get("NEUROVA_RECALL_DUAL_CHANNEL", "1") != "0"
 
     @staticmethod
     def _historyRowBody(ctx) -> str:

@@ -106,8 +106,12 @@ class TestCompactionPoolCoordination:
         from neurova.context.envelope import parse_envelope
 
         history_block = parse_envelope(str(result2[-1].get("content", ""))).get("history", "")
-        assert "[历史回忆]" in history_block, "折叠消息应可被 draw 语义召回"
-        assert "0号城市" in history_block
+        # B10 双通道：被折叠内容可经输入通道（[历史回忆]）或近轮通道
+        # （[近轮相关]）召回——判据是内容可召回，不锁通道标签。
+        assert "0号城市" in history_block, "折叠消息应可被 draw 语义召回"
+        assert ("[历史回忆]" in history_block) or ("[近轮相关]" in history_block), (
+            "召回行必须带通道标签"
+        )
 
     @pytest.mark.asyncio
     async def test_summary_persists_across_turns(self):

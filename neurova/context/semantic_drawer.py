@@ -35,6 +35,8 @@ _READOUT_KEYS = (
     "injected_total",        # 实际选中注入视图的条目累计
     "injected_tokens_total", # 选中条目 token 累计
     "degraded_total",        # 语义编码失败降级关键词刻度的轮次累计
+    "dynamic_floor_applied", # B13：动态门槛收紧生效的轮次累计
+    "last_dynamic_floor",    # B13：最近一次生效门槛值（0.65=未收紧）
 )
 
 
@@ -72,6 +74,21 @@ class SemanticMatchDrawer:
     # 实测 ≥0.64 锚点，门槛抬至 0.65 落在两带之间。
     # ⚠️ 刻度系减基线重标定（更根本方案）仍属待产品决策项（台账十二）。
     RELEVANCE_FLOOR = 0.65
+
+    # B13（刻度重标定）：同质池动态收紧参数。实测（B10 探针，真嵌入面）：
+    # 同质技术池上候选分差 ≤0.115 且无关对 0.741-0.756——绝对门槛 0.65
+    # 无区分力。动态门槛 = max(绝对门槛, 最优分-带宽)，仅当候选分差 ≤
+    # SPREAD（同质）且最优分过绝对门槛时收紧——异质池（多簇真相关）不误杀。
+    _DYNAMIC_FLOOR_BAND = 0.08          # 最优分往下保留的带宽
+    _DYNAMIC_FLOOR_SPREAD = 0.15        # 候选分差 ≤ 此值判定为同质池
+    _DYNAMIC_FLOOR_MIN_CANDIDATES = 3   # 候选不足此数不做动态收紧
+
+    @classmethod
+    def _dynamicFloorEnabled(cls) -> bool:
+        """动态门槛开关：默认开（NEUROVA_DRAW_DYNAMIC_FLOOR=0 关闭）。"""
+        import os as _os
+
+        return _os.environ.get("NEUROVA_DRAW_DYNAMIC_FLOOR", "1") != "0"
 
     def __init__(self, max_tokens: int = 16000, max_candidates: int = None):
         #: 构造期默认额度。它**不随轮次变化**：每轮额度经 `draw(budget_tokens=...)`
@@ -153,6 +170,10 @@ class SemanticMatchDrawer:
         with self._readoutLock:
             self._readouts[key] = self._readouts.get(key, 0) + int(n)
 
+    def _setReadout(self, key: str, value) -> None:
+        with self._readoutLock:
+            self._readouts[key] = value
+
     @property
     def vector_store(self):
         if self._vector_store is None:
@@ -168,9 +189,17 @@ class SemanticMatchDrawer:
         """本实例**生效**的视图额度（单一解释：本轮入参优先，缺省回落构造期默认）。"""
         return self._turnBudget if self._turnBudget is not None else self.max_tokens
 
-    def _budgetFor(self, budget_tokens: Optional[int]) -> int:
-        """本轮额度解析（唯一判据）并记忆为生效额度——入参不改构造期字段。"""
-        self._turnBudget = int(budget_tokens) if budget_tokens is not None else None
+    def _budgetFor(self, budget_tokens: Optional[int], memo: bool = True) -> int:
+        """本轮额度解析（唯一判据）。
+
+        memo=False：不改写轮次额度记忆——双通道召回的近轮通道用（其配额是
+        通道级的，不得覆盖主通道在本轮的额度记忆，否则 effective_view_budget
+        读到的是近轮通道的 30% 份额，轮次额度"不可读"）。
+        """
+        if budget_tokens is not None:
+            if memo:
+                self._turnBudget = int(budget_tokens)
+            return int(budget_tokens)
         return self.effective_view_budget()
 
     def draw(
@@ -179,12 +208,14 @@ class SemanticMatchDrawer:
         need: str = None,
         budget_tokens: Optional[int] = None,
         relevance_floor: Optional[float] = None,
+        update_turn_memo: bool = True,
     ) -> List[ContextInput]:
         """按需取水。relevance_floor：本次调用的相关性门槛覆盖（None=默认
-        0.65）——双通道召回的近轮通道用更高门槛（0.75，间接锚更严）。"""
+        0.65）——双通道召回的近轮通道用更高门槛（0.75，间接锚更严）。
+        update_turn_memo=False：本次额度不改写轮次额度记忆（近轮通道用）。"""
         if not drops:
             return []
-        viewBudget = self._budgetFor(budget_tokens)
+        viewBudget = self._budgetFor(budget_tokens, memo=update_turn_memo)
         activeFloor = (
             self.RELEVANCE_FLOOR if relevance_floor is None else float(relevance_floor)
         )
@@ -211,6 +242,27 @@ class SemanticMatchDrawer:
         # B13：降级轮次计数（向量面缺件 → 关键词刻度，须可见）
         if scoring.degraded:
             self._bumpReadout("degraded_total")
+        # B13（刻度重标定）：同质池动态收紧——绝对门槛 0.65 在同质技术池上
+        # 无区分力（真嵌入面实测 9/9 全过：无关对 0.741-0.756 vs 相关 0.856）。
+        # 候选分差 ≤ 0.15（同质）且最优分过基础门槛时，门槛收紧到 最优分-带宽
+        # （0.08）：无关噪声带被滤掉，最优簇保留；异质池（多簇真相关）不收紧
+        # （不误杀）。关键词降级路径不启用（刻度不同）。
+        if (
+            threshold_active
+            and not scoring.degraded
+            and len(candidates) >= self._DYNAMIC_FLOOR_MIN_CANDIDATES
+            and self._dynamicFloorEnabled()
+        ):
+            candidateScores = [scoring.matchScore(d) for d in candidates]
+            bestScore = max(candidateScores)
+            if bestScore >= activeFloor and (
+                bestScore - min(candidateScores)
+            ) <= self._DYNAMIC_FLOOR_SPREAD:
+                tightened = bestScore - self._DYNAMIC_FLOOR_BAND
+                if tightened > activeFloor:
+                    activeFloor = tightened
+                    self._bumpReadout("dynamic_floor_applied")
+            self._setReadout("last_dynamic_floor", round(activeFloor, 4))
 
         def _relevant(d: ContextInput) -> bool:
             return (not threshold_active) or scoring.matchScore(d) >= activeFloor
@@ -275,12 +327,21 @@ class SemanticMatchDrawer:
             drop = result_by_pos[pos]
             drop_tokens = drop.tokens if drop.tokens > 0 else self._estimate_tokens(drop.content)
 
+            if total_tokens >= viewBudget:
+                # 预算已耗尽：停止选取。（B12 双通道小预算实测：改前的截断分支
+                # 会在预算耗尽后继续"截断+入选"每个超限条目——每条吃满全额
+                # 预算 → 无界膨胀，12 条 × 500 = 6000 token 全池被吸进信封，
+                # 信封超限整块 history 被 compress_envelope 丢弃。）
+                break
+
             if total_tokens + drop_tokens <= viewBudget:
                 selected.append(drop)
                 total_tokens += drop_tokens
-            elif drop_tokens > viewBudget and viewBudget > 200:
+            elif drop_tokens > viewBudget and viewBudget > 200 and not selected:
                 # 审验闭环（2026-09-10）：单条超预算的大归档截断召回（尾部省略注记），
                 # 不再整条跳过——否则长消息被窗口折叠后永远无法召回（对话连续性断裂）。
+                # 仅当**尚未选入任何条目**时允许截断占用全额预算；已有入选时
+                # 再截断后续巨档会重复吃满预算（无界膨胀，见上）。
                 #
                 # P0-3：截断**只能产出视图副本**。collect() 返回的是归档列表里的同一批
                 # 对象引用，旧实现在这里直接 `drop.content = truncated` 就地改写归档

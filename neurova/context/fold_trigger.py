@@ -19,8 +19,8 @@
 滑窗把增量挤出视图之前收进摘要。预算击穿（breach）永远直接折叠——
 安全线不受门管辖（与 compression_economics 的 SAFETY_LINE_YIELD 同序）。
 
-默认关（`NEUROVA_FOLD_GROWTH_GATE=1` 开启）——结构性触发变更按灰度纪律
-先观测后转正。
+默认开（2026-11-15 跑数据转正，`NEUROVA_FOLD_GROWTH_GATE=0` 关闭）——
+转正依据：双臂马拉松实测门开峰值 -30%/均值 -26%、可恢复率 1.0 无损。
 
 ## B2 · 冻结已折叠区（increment-only fold）
 
@@ -60,8 +60,9 @@ class FoldTriggerDecision:
 
 
 def growthGateEnabled() -> bool:
-    """增长门总开关（B5 默认关，灰度转正后改默认）。"""
-    return os.environ.get("NEUROVA_FOLD_GROWTH_GATE", "0") == "1"
+    """增长门总开关：默认开（2026-11-15 跑数据转正——门开峰值 -30%/均值 -26%、
+    保留率 1.0 无损）；NEUROVA_FOLD_GROWTH_GATE=0 关闭（kill-switch）。"""
+    return os.environ.get("NEUROVA_FOLD_GROWTH_GATE", "1") != "0"
 
 
 def growthGateParams() -> Dict[str, float]:

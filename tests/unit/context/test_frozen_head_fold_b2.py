@@ -161,7 +161,7 @@ class TestGrowthGateWiring:
     @pytest.mark.asyncio
     async def test_gate_off_no_proactive_fold(self, monkeypatch):
         """默认（门关）：未超预算不折——与改前行为一致。"""
-        monkeypatch.delenv("NEUROVA_FOLD_GROWTH_GATE", raising=False)
+        monkeypatch.setenv("NEUROVA_FOLD_GROWTH_GATE", "0")  # kill-switch
         orch = self._mk_orchestrator(budget=100000)  # 预算极大，永不击穿
         orch._window_hard_limit = 1000000  # 摘除硬顶钳（否则 test-model 钳到 14400）
         # 12 条 ≈ 10.9k token < 100000 → 未击穿；门关 → 不折
