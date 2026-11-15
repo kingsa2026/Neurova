@@ -178,10 +178,16 @@ class SemanticMatchDrawer:
         drops: List[ContextInput],
         need: str = None,
         budget_tokens: Optional[int] = None,
+        relevance_floor: Optional[float] = None,
     ) -> List[ContextInput]:
+        """按需取水。relevance_floor：本次调用的相关性门槛覆盖（None=默认
+        0.65）——双通道召回的近轮通道用更高门槛（0.75，间接锚更严）。"""
         if not drops:
             return []
         viewBudget = self._budgetFor(budget_tokens)
+        activeFloor = (
+            self.RELEVANCE_FLOOR if relevance_floor is None else float(relevance_floor)
+        )
         # B13：取水读数——入池面（粗筛前）计数
         self._bumpReadout("draws_total")
         self._bumpReadout("offered_total", len(drops))
@@ -207,7 +213,7 @@ class SemanticMatchDrawer:
             self._bumpReadout("degraded_total")
 
         def _relevant(d: ContextInput) -> bool:
-            return (not threshold_active) or scoring.matchScore(d) >= self.RELEVANCE_FLOOR
+            return (not threshold_active) or scoring.matchScore(d) >= activeFloor
 
         # B13：门槛通过/拦下计数（仅 need 非空的轮计——无 need 时门槛不参与）
         if threshold_active:

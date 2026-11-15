@@ -1656,9 +1656,13 @@ class ContextPool:
             self._cache.clear()
             self._cache_version += 1
 
-    def draw(self, need: str = None, budget_tokens: Optional[int] = None) -> List:
+    def draw(self, need: str = None, budget_tokens: Optional[int] = None,
+             relevance_floor: Optional[float] = None) -> List:
         """按需调取：`budget_tokens` 是本轮视图额度（B6-9：经入参透传，
         不再由调用方就地改写抽屉的构造期字段）。
+
+        `relevance_floor`（B10 双通道）：本次调用的相关性门槛覆盖
+        （None=默认 0.65）；近轮通道用更高门槛（0.75，间接锚更严）。
 
         额度只在这里透传到抽屉一处，池侧不另存一份——两份额度必然漂移。
         """
@@ -1681,7 +1685,10 @@ class ContextPool:
                 if not isIndexNode(getattr(drop, "metadata", None))
             ]
             deduped = self._deduplicator.dedup(all_drops, stage="output")
-            selected = self._drawer.draw(deduped, need=need, budget_tokens=budget_tokens)
+            selected = self._drawer.draw(
+                deduped, need=need, budget_tokens=budget_tokens,
+                relevance_floor=relevance_floor,
+            )
             # P1-1①（方案 §4.1）：视图出口配对完整性校验——预算/相关性选取
             # 可能产生孤儿 TOOL_CALL（其 pairs_with 目标未入选），剔除以避免
             # LLM 看到"无上下文的工具结果"；孤儿留在池中（归档无损语义不变）
