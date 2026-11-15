@@ -99,6 +99,31 @@ from neurova.core.agent_run_ledger import (
 )
 
 
+def computeSubagentToolAllowlist(subagentType: str) -> frozenset:
+    """按子代理类型计算工具面白名单（P1 蜂群对照；spawn 与测试共用的单一出口）。
+
+    - general：全量内置工具 − 递归派生（子代理不得再派生孙代理）；
+    - explore：只读白名单（检索/侦察型子代理不拿写工具）。
+    执行咽喉（ToolExecutor._execute_single_tool）据 member 上下文绑定的
+    白名单强制拦截面外工具。
+    """
+    from neurova.builtin_tools import (
+        get_builtin_tool_capability,
+        get_registered_tool_names,
+    )
+
+    if str(subagentType or "").strip().lower() == "explore":
+        readonlyNames = []
+        for toolName in get_registered_tool_names():
+            cap = get_builtin_tool_capability(toolName)
+            if cap is not None and getattr(cap, "readOnly", False):
+                readonlyNames.append(toolName)
+        return frozenset(readonlyNames)
+    # general：全量内置工具 − 递归派生/续跑（子代理不得再派生孙代理，
+    # 也不得续跑兄弟——两者都是"从子代理回合里再拉起一条执行链"）
+    return frozenset(get_registered_tool_names()) - {"spawn_subagent", "continue_subagent"}
+
+
 @dataclass
 class SubAgentRun:
     """一次子 Agent 运行的状态记录"""
@@ -118,6 +143,10 @@ class SubAgentRun:
     # 完全复用单 agent 会话存储/历史恢复/usage 记账——不建第二套管线。
     # Windows 文件名安全。
     member_session_id: str = ""
+    # P1（蜂群对照）：子代理类型（general/explore）与工具面白名单——
+    # 派生时按类型收窄，member 任务上下文绑定，执行咽喉强制拦截。
+    subagent_type: str = "general"
+    tool_allowlist: Optional[frozenset] = None
     status: str = SUBAGENT_PENDING  # 取值域见 SUBAGENT_STATUSES（本模块常量，唯一出处）
     # P2-10 增强：子代理升级/结构化结果提交（escalate/submit_result 工具写入，
     # 随邮箱投递发起者会话；只作读数与通知，不改变运行状态机）
@@ -132,6 +161,10 @@ class SubAgentRun:
     finished_at: float = 0.0
     node_id: Optional[str] = None  # workflow 来源时的节点 id
     execution_id: Optional[str] = None  # workflow 来源时的执行 id
+    # P2（工具清单 3.1-3 续）：复活来源——本条 run 是对哪条终态 run 的续跑
+    # （continue_subagent 写入；空串 = 全新派生）。member 会话复用被续跑那条的
+    # 键，子 Agent 的历史由既有会话恢复机制带回，不另造第二套状态搬运。
+    resumed_from: str = ""
     # 运行时状态：预留的模型并发槽（None=未占用）；_execute 的 finally 据此释放
     slot_model: Optional[str] = field(default=None, repr=False)
 
@@ -152,6 +185,8 @@ class SubAgentRun:
             "depth": self.depth,
             "session_id": self.session_id,
             "member_session_id": self.member_session_id,
+            "subagent_type": self.subagent_type,
+            "tool_allowlist_size": len(self.tool_allowlist) if self.tool_allowlist else None,
             "status": self.status,
             "report": self.report,
             "error": self.error,
@@ -160,6 +195,7 @@ class SubAgentRun:
             "duration": self.duration,
             "node_id": self.node_id,
             "execution_id": self.execution_id,
+            "resumed_from": self.resumed_from,
         }
 
 
@@ -235,6 +271,9 @@ class SwarmManager:
         initiator_agent: Optional[Any] = None,
         node_id: Optional[str] = None,
         execution_id: Optional[str] = None,
+        subagent_type: str = "general",
+        reuse_member_session_id: Optional[str] = None,
+        resumed_from: Optional[str] = None,
     ) -> Dict[str, Any]:
         """派生子 Agent 执行任务
 
@@ -247,6 +286,9 @@ class SwarmManager:
             stream: True 时子 Agent 的 content/reasoning 逐 chunk 广播
             initiator_agent: 发起者 Agent 实例（用于结果归档进其上下文池）
             node_id / execution_id: workflow 来源时的定位信息
+            reuse_member_session_id: 复用既有 member 会话键（续跑用——子 Agent
+                的历史由既有会话恢复机制带回）；None 新建
+            resumed_from: 被续跑的 subagent_id（溯源读数；空 = 全新派生）
 
         Returns:
             前台: {subagent_id, agent_id, agent_name, status, report, duration, ...}
@@ -327,6 +369,13 @@ class SwarmManager:
                         retry_after_ms=int(interval - elapsed_ms),
                     )
 
+        if subagent_type not in ("general", "explore"):
+            return self._rejection(
+                "SUBAGENT_TYPE_UNKNOWN",
+                f"未知子代理类型 {subagent_type!r}（可选 general/explore）",
+            )
+        toolAllowlist = computeSubagentToolAllowlist(subagent_type)
+
         run = SubAgentRun(
             depth=child_depth,
             agent_id=resolved_id,
@@ -335,9 +384,12 @@ class SwarmManager:
             model=model or "",
             origin=origin,
             session_id=session_id,
-            member_session_id=f"swarm_{uuid.uuid4().hex[:12]}",
+            member_session_id=reuse_member_session_id or f"swarm_{uuid.uuid4().hex[:12]}",
             node_id=node_id,
             execution_id=execution_id,
+            subagent_type=subagent_type,
+            tool_allowlist=toolAllowlist,
+            resumed_from=resumed_from or "",
         )
         # 通过全部治理闸 → 预留模型并发槽 + 打派生时间戳（错峰）
         with self._lock:
@@ -408,6 +460,54 @@ class SwarmManager:
         with self._lock:
             runs = sorted(self._runs.values(), key=lambda r: r.started_at, reverse=True)
         return [r.to_dict() for r in runs[:limit]]
+
+    async def resumeFinishedRun(
+        self,
+        subagentId: str,
+        message: str,
+        session_id: Optional[str] = None,
+        initiator_agent: Optional[Any] = None,
+        background: bool = False,
+    ) -> Dict[str, Any]:
+        """续跑一条已终态（completed/failed）的子 Agent（工具清单 3.1-3 续）。
+
+        对应 ZCode 的 SendMessage→terminal agent 复活语义：member 会话键原样
+        复用——子 Agent 上一段的对话历史由既有会话恢复机制带回，续跑不是从零
+        重派；上一段的 report（失败时为部分交接件）附在续跑任务里作衔接上下文。
+        治理闸（深度/广度/预算/冷却/并发/错峰）与全新派生走同一条 spawn 路径。
+        """
+        if not (subagentId or "").strip():
+            return {"error": "subagent_id 不能为空"}
+        if not (message or "").strip():
+            return {"error": "message 不能为空——请带续跑指令"}
+        with self._lock:
+            old = self._runs.get(subagentId)
+        if old is None:
+            return {"error": f"未找到子 Agent 运行记录: {subagentId}"}
+        if old.status not in SUBAGENT_FINISHED_STATUSES:
+            return {
+                "error": f"子 Agent {subagentId} 仍在运行（status={old.status}）——"
+                         "续跑只针对已终态的运行；进行中的请用 subagent_status 等待",
+            }
+        handoff = old.report.strip()
+        task = message.strip()
+        if handoff:
+            task = (
+                f"[续跑衔接] 这是上一次执行的产出（{'失败前部分' if old.status == SUBAGENT_FAILED else '已完成部分'}），"
+                f"供你衔接，不要从头重复：\n{handoff[:4000]}\n\n[续跑指令]\n{task}"
+            )
+        return await self.spawn(
+            task,
+            agent_id=old.agent_id,
+            session_id=session_id if session_id is not None else old.session_id,
+            background=background,
+            origin="chat",
+            stream=True,
+            initiator_agent=initiator_agent,
+            subagent_type=old.subagent_type,
+            reuse_member_session_id=old.member_session_id,
+            resumed_from=old.subagent_id,
+        )
 
     # ── 内部实现 ──────────────────────────────────────────────
 
@@ -615,7 +715,14 @@ class SwarmManager:
     ) -> None:
         """执行子 Agent：无论成功/失败，finally 释放其预留的模型并发槽（防泄漏）。"""
         try:
-            await self._run_member(run, agent, initiator_agent, stream)
+            await self._run_member(
+                run,
+                agent,
+                initiator_agent,
+                stream,
+                subagentType=run.subagent_type,
+                toolAllowlist=run.tool_allowlist,
+            )
         finally:
             self._release_slot(run)
 
@@ -625,6 +732,8 @@ class SwarmManager:
         agent: Any,
         initiator_agent: Optional[Any],
         stream: bool,
+        subagentType: str = "general",
+        toolAllowlist: Optional[frozenset] = None,
     ) -> None:
         """执行子 Agent 任务：广播 STARTED → chat（可流式）→ 广播 COMPLETED → 池归档"""
         run.status = SUBAGENT_RUNNING
@@ -653,20 +762,28 @@ class SwarmManager:
                 "status": run.status,
                 "origin": run.origin,
                 "depth": run.depth,
+                "subagent_type": run.subagent_type,
                 "node_id": run.node_id,
                 "execution_id": run.execution_id,
             },
         )
 
+        # P2（工具清单 3.1-3 续）：失败交接的原料——content chunk 同步累积，
+        # 失败/取消路径取尾部作部分报告（父代不再只拿到一句 error）。
+        contentBuffer: List[str] = []
         emitter: Optional[StreamEmitter] = None
         if stream:
-            emitter = self._make_emitter(run)
+            emitter = self._make_emitter(run, contentBuffer)
 
         # 深度绑定：本条链的 member 在执行期读到 run.depth。member 内的
         # `spawn_subagent` 因此算出的 child_depth = run.depth + 1——深度沿链传递，
         # 与"同时有几个兄弟在跑"无关（切片 D：深度不是广度的副作用）。
         # 绑定必须在 `await agent.chat` 之前；`finally` 复位，避免污染同任务后续链。
         depth_token = set_subagent_depth(run.depth)
+        # P1：绑定子代理工具面白名单（执行咽喉据此结构化拦截面外工具）
+        from neurova.core.turn_context import set_subagent_tool_allowlist
+
+        set_subagent_tool_allowlist(run.tool_allowlist)
         try:
             # [签名约束] Agent.chat(user_input, *, stream, save_memory, session_id,
             # metadata, enable_tts) —— 不接受 temperature/max_tokens，
@@ -727,18 +844,21 @@ class SwarmManager:
             run.cause = SUBAGENT_CAUSE_CANCELLED
             run.error = ("subagent_cancelled（父任务被取消，子任务未跑完；"
                          "派生槽已释放，可直接重派）")
+            run.report = self._partialHandback(contentBuffer)
             run.finished_at = time.time()
             raise
         except Exception as e:  # noqa: BLE001 - 子 Agent 故障隔离
             logger.warning("Swarm: 子 Agent %s 执行失败: %s", run.subagent_id, e)
             run.status = SUBAGENT_FAILED
             run.error = str(e)
+            run.report = self._partialHandback(contentBuffer)
             run.finished_at = time.time()
         finally:
             # 台账终态与蜂群终态同一个落点：`completed`/`failed`/超时/取消都从这里收尾，
             # 缺一条就在台账里留一行永久 running 的幽灵（L 条的另一副面孔）。
             closeSubagentRun(ledgerRunId, run.status, run.cause)
             reset_subagent_depth(depth_token)
+            set_subagent_tool_allowlist(None)
 
         await self._broadcast(
             run,
@@ -771,11 +891,31 @@ class SwarmManager:
             return str(response.content)
         return str(response) if response is not None else ""
 
-    def _make_emitter(self, run: SubAgentRun) -> StreamEmitter:
+    @staticmethod
+    def _partialHandback(contentBuffer: List[str]) -> str:
+        """失败交接（工具清单 3.1-3 续）：取失败前已流式产出的 content 尾部。
+
+        父代拿到的失败 run 不再只有一句 error——已产出的部分分析随 report
+        与终态邮箱一并上行，续跑（continue_subagent）时也是现成的上下文。
+        截尾 4000 字符：交接件是给父代续判的抓手，不是全文存档（全文在
+        member 会话里，信封带 recall 指针）。
+        """
+        partial = "".join(contentBuffer).strip()
+        if not partial:
+            return ""
+        return partial[-4000:]
+
+    def _make_emitter(
+        self, run: SubAgentRun, contentBuffer: Optional[List[str]] = None
+    ) -> StreamEmitter:
         """构造流式发射器：子 Agent 的 content/reasoning chunk → SUBAGENT_CHUNK 事件
 
         发射器由 ChatPipeline 在异步流式循环中同步调用，此处用 create_task
         调度广播（chunk 级 fire-and-forget 可接受，不阻塞生成循环）。
+
+        P2（工具清单 3.1-3 续）：传入 contentBuffer 时同步累积 content chunk——
+        失败交接用它取「失败前已产出的部分报告」；只认 content（reasoning 是
+        思考过程，不是可交接的产出）。
         """
 
         _fire_refs: set = set()  # 批 X2：强引用集——事件循环对 Task 只持弱引用
@@ -784,6 +924,8 @@ class SwarmManager:
             _fire_refs.discard(task)
 
         def emitter(event_type: str, data: Any) -> None:
+            if contentBuffer is not None and event_type == "content" and isinstance(data, str):
+                contentBuffer.append(data)
             try:
                 loop = asyncio.get_running_loop()
             except RuntimeError:

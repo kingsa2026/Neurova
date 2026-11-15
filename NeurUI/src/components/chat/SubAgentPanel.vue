@@ -21,6 +21,8 @@ export interface SubAgentWindowState {
   status: 'running' | 'completed' | 'failed'
   report: string
   error?: string | null
+  /** P1（蜂群对照）：子代理类型（general/explore）；explore = 工具面收窄为只读白名单 */
+  subagentType?: string
 }
 
 const props = defineProps<{ state: SubAgentWindowState }>()
@@ -72,6 +74,12 @@ function onOutputScroll(e: Event): void {
     <div class="panel-header" @click="toggleMinimize">
       <span class="panel-icon"><UiIcon :name="statusIcon" :size="14" /></span>
       <span class="panel-title" :title="state.task">{{ title }}</span>
+      <!-- P1（蜂群对照）：非默认类型的子代理显示类型徽标（explore=只读白名单收窄面） -->
+      <span
+        v-if="state.subagentType && state.subagentType !== 'general'"
+        class="panel-type-chip"
+        :title="state.subagentType"
+      >{{ state.subagentType }}</span>
       <button class="panel-btn" :title="minimized ? t('ui.expand') : t('ui.minimize')" @click.stop="toggleMinimize">
         {{ minimized ? '▢' : '—' }}
       </button>
@@ -126,6 +134,17 @@ function onOutputScroll(e: Event): void {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.panel-type-chip {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--nr-border, rgba(99, 102, 241, 0.35));
+  color: var(--nr-text-secondary, #94a3b8);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
 }
 .panel-btn {
   border: none;

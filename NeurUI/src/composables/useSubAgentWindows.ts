@@ -46,6 +46,8 @@ function handleSubAgentSyncEvent(event: { event_type: string; payload: Record<st
       task: p.task || '',
       bodyText: '',
       chunkCount: 0,
+      // P1（蜂群对照）：子代理类型随事件携带（explore=只读白名单收窄面）
+      subagentType: p.subagent_type || 'general',
       // 状态取自事件本身（改前这里硬编码 'running'：那一刻后端确实是 running，
       // 但事件不带事实，竞态或重放时前端只能一直猜）。词值到 UI 态的翻译只有
       // LEDGER_TO_WINDOW_STATUS 一处——事件先于后端扩态也不会渲染成未定义态。

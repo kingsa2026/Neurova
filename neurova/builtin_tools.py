@@ -1305,6 +1305,20 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["summary"],
         },
     },
+    "continue_subagent": {
+        # 并行能力声明：续跑走 spawn 同一条治理闸与执行路径（子代理可能跑任意工具），非只读。
+        "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
+        "description": "【续跑子代理】对一条已结束（completed/failed）的子代理下达追加指令并复活它。member 会话历史保留（不是从零重派），上一段产出（失败时为已产出的部分报告）自动附带衔接。适用：失败续跑、基于已完成结果追加分析、修正方向重跑。仅主代理可用（子代理不得续跑兄弟——与递归派生同禁）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "subagent_id": {"type": "string", "description": "要续跑的子代理 ID（spawn_subagent/subagent_status 返回的 subagent_id）"},
+                "message": {"type": "string", "description": "续跑指令：接着做什么/修正什么/补充什么约束"},
+                "background": {"type": "boolean", "description": "是否后台执行（默认 false，前台等结果）"},
+            },
+            "required": ["subagent_id", "message"],
+        },
+    },
     "custom_node_create": {
         # 并行能力声明：写共享的自定义节点注册表——同批两个创建会撞同一份注册表与版本表。
         "capability": {"readOnly": False, "concurrentSafe": False, "writeScopes": ("shared",)},
@@ -2153,6 +2167,8 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     "exec_command", "write_stdin",
     # 子代理派生：spawn 有副作用
     "spawn_subagent",
+    # 子代理续跑：等价一次新派生（member 会话续写 + 邮箱投递），重放制造新运行
+    "continue_subagent",
     # 多步编排：内层步进可能含任意写操作，重放制造新变更
     "orchestrate_tools",
 })

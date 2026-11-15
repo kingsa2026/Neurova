@@ -35,6 +35,12 @@ _reasoning_var: ContextVar = ContextVar("neurova_turn_reasoning", default=None)
 _tool_messages_var: ContextVar = ContextVar("neurova_turn_tool_messages", default=None)
 _tool_events_var: ContextVar = ContextVar("neurova_turn_tool_events", default=None)
 _skill_view_var: ContextVar = ContextVar("neurova_turn_skill_view", default=None)
+# P1（蜂群对照）：member（子代理）任务的工具面白名单——蜂群派生时按
+# 子代理类型绑定（general=全量减递归派生；explore=只读白名单），执行咽喉
+# 据此结构化拒绝面外工具。None=不收窄（顶层主 Agent）。
+_subagent_tool_allowlist_var: ContextVar = ContextVar(
+    "neurova_subagent_tool_allowlist", default=None
+)
 # 工单 009：本轮工具执行耗时合计（秒）。唯一写入方是执行咽喉
 # （`ToolExecutor._execute_single_tool_inner` 的 finally），读方是 post-chat 的
 # 经验落库。此前 `execution_time` 列在生产写侧**根本没有来源**（库实测
@@ -393,6 +399,20 @@ def set_turn_identity(
     """
     _user_input_var.set(user_input)
     _session_id_var.set(session_id)
+
+
+def set_subagent_tool_allowlist(names) -> None:
+    """绑定 member（子代理）任务的工具面白名单；None/空 = 不收窄。
+
+    由蜂群 `_run_member` 在绑定派生深度的同时写入；执行咽喉
+    （ToolExecutor._execute_single_tool）据此拒绝白名单外的工具。
+    """
+    _subagent_tool_allowlist_var.set(frozenset(names) if names else None)
+
+
+def get_subagent_tool_allowlist() -> Optional[frozenset]:
+    """读当前任务的工具面白名单；None = 未收窄（顶层主 Agent）。"""
+    return _subagent_tool_allowlist_var.get()
 
 
 def set_turn_user_input(value: Optional[str]) -> None:
