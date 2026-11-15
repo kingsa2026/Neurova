@@ -26,15 +26,18 @@ struct Index {
   private authStore = new AuthStore();
   private logger = Logger.getInstance();
 
-  aboutToAppear() {
+  async aboutToAppear() {
     // 冷启动先恢复服务器档案并把地址落到 HTTP 装配点（设计方案 §4.5，S0 接线）
-    ServerProfiles.getInstance().load(getContext(this) as Context).then(() => {
-      const apiBase = ServerProfiles.getInstance().getActiveApiBase();
-      if (apiBase) {
-        ConfigManager.getInstance().applyServerProfile(apiBase, getContext(this) as Context);
-      }
-    });
-    // M5.2.3 冷启动优化：立即分发，无占位渲染
+    await ServerProfiles.getInstance().load(getContext(this) as Context);
+    const apiBase = ServerProfiles.getInstance().getActiveApiBase();
+    if (!apiBase) {
+      // 无可用服务器档案：先去连接页录入，否则登录无从发起（登录按钮空转的根因）
+      this.logger.info('Index', '冷启动：无服务器档案，跳转连接页');
+      this.router.replace(RouteNames.CONNECTION);
+      return;
+    }
+    ConfigManager.getInstance().applyServerProfile(apiBase, getContext(this) as Context);
+    // 档案就绪后再分发，避免异步竞争导致带空地址登录
     if (this.authStore.isAuthenticated) {
       this.logger.info('Index', '冷启动：已登录，跳转仪表盘');
       this.router.replace(RouteNames.DASHBOARD);

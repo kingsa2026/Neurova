@@ -14,6 +14,7 @@
  */
 
 import { preferences } from '@kit.ArkData';
+import { HttpClient } from '../api/HttpClient';
 
 const PREFERENCES_NAME = 'neurova_config';
 /** 整包配置的持久化键（JSON 单键快照） */
@@ -60,6 +61,9 @@ export class ConfigManager {
    */
   async applyServerProfile(apiBaseUrl: string, context: Context): Promise<void> {
     this.set<string>('api_base_url', apiBaseUrl);
+    // 落到 HTTP 真装配点：不调用 setBaseUrl 的话 HttpClient 的 baseUrl 恒为空，
+    // 所有请求都会在 buildUrl 处抛"尚未配置服务器地址"（此前正是这个断链）
+    HttpClient.getInstance().setBaseUrl(apiBaseUrl);
     // ws_base_url 不在这里猜：它由配对流程 resolve 回来后写进 AuthStore——服务器地址会漂，
     // 存成一份配置就会陈旧（正是本案要摆脱的那个形状）。这里只落 HTTP 侧那条稳定前缀。
     if (!this.prefs) {
