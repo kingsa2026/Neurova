@@ -17,11 +17,17 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user_or_service
 
 router = APIRouter()
+
+
+def _tenantOf(current_user: Dict[str, Any]) -> str:
+    """操作者租户：探针读面的分区键（缺省 default）。"""
+    return str(current_user.get("tenant_id") or "default")
 
 
 @router.get("/observability/default-off")
@@ -50,3 +56,74 @@ async def getCqMatrix(
     from neurova.knowledge.ontology.cq_matrix import cqTraceRows
 
     return {"code": 0, "message": "success", "data": {"items": cqTraceRows()}}
+
+
+@router.get("/ontology/readiness")
+async def getKnowledgeReadiness(
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """复合就绪探针（P2-2，登录可读）：knowledge_ready / data_ready 两判据。
+
+    术语/事实/目录/源四类现值一次报清；只读零网络，不提供启停动作。
+    事实源在 `neurova/knowledge/ontology/readiness.py`，本端点只转交。
+    """
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.readiness import knowledgeReadiness
+
+    store = get_knowledge_fact_store()
+    return {"code": 0, "message": "success",
+            "data": knowledgeReadiness(store, _tenantOf(current_user))}
+
+
+class AnswerabilityRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+    threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    agent_id: str = ""
+    use_llm: bool = False
+
+
+@router.post("/ontology/answerability")
+async def checkOntologyAnswerability(
+    body: AnswerabilityRequest,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """实体覆盖预检（P1-3，登录可读）：coverage 低就反问澄清，别硬答。
+
+    只读探针：抽实体（use_llm 可选，缺省确定性分词）→ 对术语/事实主体做
+    词面覆盖匹配 → 命中占比。判据单一出处
+    `neurova/knowledge/ontology/answerability.py`。
+    """
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.answerability import assessAnswerability
+
+    store = get_knowledge_fact_store()
+    tenant = _tenantOf(current_user)
+    llmCall = None
+    if body.use_llm:
+        try:
+            from neurova.api.endpoints.knowledge_common import resolveAgentLlmClients
+            from neurova.mem_core import run_async_safely
+
+            clients = resolveAgentLlmClients(request, prefer_agent_id=body.agent_id or None)
+
+            def _call(prompt: str):
+                for client in clients:
+                    try:
+                        resp = run_async_safely(
+                            client.chat([{"role": "user", "content": prompt}]))
+                    except Exception:  # noqa: BLE001 - 换下一个候选
+                        continue
+                    content = getattr(resp, "content", "") or ""
+                    if content.startswith("[LLM Error]"):
+                        continue
+                    return content
+                return ""
+
+            llmCall = _call if clients else None
+        except Exception:  # noqa: BLE001 - LLM 不可用回退确定性分词
+            llmCall = None
+    result = assessAnswerability(store, body.question, tenantId=tenant,
+                                 agentId=body.agent_id or "default",
+                                 llmCall=llmCall, threshold=body.threshold)
+    return {"code": 0, "message": "success", "data": result}
