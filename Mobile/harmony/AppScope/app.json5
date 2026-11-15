@@ -1,6 +1,6 @@
 {
   "app": {
-    "bundleName": "com.neurova.app",
+    "bundleName": "com.neurova.mobile",
     "vendor": "Neurova",
     "versionCode": 1,
     "versionName": "1.0.0",
