@@ -155,6 +155,12 @@ def client(isolated_db, monkeypatch):
     from neurova.api.app import create_app
     from neurova.api.auth import get_current_user
 
+    # 隔离其他测试模块 setdefault 的 31 字节弱密钥：
+    # _is_production() 默认按生产判定（未显式 NEUROVA_DEBUG=1），弱密钥会让
+    # create_app 直接拒绝启动（fail-closed）。这里显式声明开发态。
+    monkeypatch.delenv("NEUROVA_JWT_SECRET_KEY", raising=False)
+    monkeypatch.delenv("NEUROVA_JWT_SECRET", raising=False)
+    monkeypatch.setenv("NEUROVA_DEBUG", "1")
     app = create_app()
     app.dependency_overrides[get_current_user] = lambda: {"id": 7, "username": "u7"}
     yield TestClient(app)
@@ -162,10 +168,13 @@ def client(isolated_db, monkeypatch):
 
 
 @pytest.fixture()
-def rawClient(isolated_db):
+def rawClient(isolated_db, monkeypatch):
     """不挂认证 override：走真实依赖（无 token → 401）。"""
     from neurova.api.app import create_app
 
+    monkeypatch.delenv("NEUROVA_JWT_SECRET_KEY", raising=False)
+    monkeypatch.delenv("NEUROVA_JWT_SECRET", raising=False)
+    monkeypatch.setenv("NEUROVA_DEBUG", "1")
     return TestClient(create_app())
 
 
