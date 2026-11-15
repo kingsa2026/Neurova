@@ -23,7 +23,6 @@ import { MemoryApi } from './modules/MemoryApi';
 import { KnowledgeApi } from './modules/KnowledgeApi';
 import { KnowledgeGraphApi } from './modules/KnowledgeGraphApi';
 import { KnowledgeEnterpriseApi } from './modules/KnowledgeEnterpriseApi';
-import { ModelsApi } from './modules/ModelsApi';
 import { HealthApi } from './modules/HealthApi';
 import { SettingsApi } from './modules/SettingsApi';
 import { AgentChannelsApi } from './modules/AgentChannelsApi';
@@ -54,7 +53,6 @@ export class ApiFacade {
   public graph: KnowledgeGraphApi;
   public enterprise: KnowledgeEnterpriseApi;
   public knowledge: KnowledgeApi;
-  public models: ModelsApi;
   public health: HealthApi;
   public settings: SettingsApi;
   public agentChannels: AgentChannelsApi;
@@ -86,7 +84,6 @@ export class ApiFacade {
     this.graph = new KnowledgeGraphApi(this.client);
     this.enterprise = new KnowledgeEnterpriseApi(this.client);
     this.knowledge = new KnowledgeApi(this.client);
-    this.models = new ModelsApi(this.client);
     this.health = new HealthApi(this.client);
     this.settings = new SettingsApi(this.client);
     this.agentChannels = new AgentChannelsApi(this.client);
