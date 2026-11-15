@@ -16,15 +16,18 @@
  *   - ../libs/i18n/I18nManager：统一国际化
  */
 
-import { TopNavMenu, GlassCard, GlassStatCard, GlassButton } from '../components/glass';
+import { GlassStatCard } from '../components/glass';
 import { ApiFacade } from '../libs/api/ApiFacade';
 import { AuthStore } from '../libs/state/stores/AuthStore';
+import { StateManager } from '../libs/state/StateManager';
 import { AgentsStore } from '../libs/state/stores/AgentsStore';
 import { Router, RouteNames } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { I18nManager } from '../libs/i18n/I18nManager';
 import { Agent } from '../libs/types';
+import { ChatSession } from '../libs/api/modules/SessionsApi';
+import { ServerProfiles } from '../libs/config/ServerProfiles';
 
 /** 仪表盘统计卡数据（/home/data 真实统计映射） */
 interface DashboardStats {
@@ -52,6 +55,8 @@ export struct DashboardPage {
   @State loading: boolean = true;
   // Agent 列表（用于欢迎卡片显示数量）
   @State agents: Agent[] = [];
+  // 最近会话（/console/chat/sessions 前 3 条，同源 PC）
+  @State recentSessions: ChatSession[] = [];
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -109,7 +114,40 @@ export struct DashboardPage {
       this.logger.warn('DashboardPage', '加载 agent 列表失败，使用缓存', e as Error);
     }
 
+    // 4. 最近会话（同源 PC：/console/chat/sessions 前 3 条）
+    try {
+      const sres = await this.api.sessions.listAll('');
+      if (sres.code === 0 && sres.data) {
+        this.recentSessions = sres.data.sessions.slice(0, 3);
+      }
+    } catch (e) {
+      this.logger.warn('DashboardPage', '最近会话加载失败', e as Error);
+    }
+
     this.loading = false;
+  }
+
+  /** 打开最近会话（上下文写入 → CHAT 拉历史） */
+  private openRecent(s: ChatSession): void {
+    StateManager.getInstance().set('chat:active_session_id', s.id);
+    StateManager.getInstance().set('chat:active_session_title', s.title);
+    this.router.push(RouteNames.CHAT);
+  }
+
+  /** 头部日期行：M月D日 星期X */
+  private dateLine(): string {
+    const d = new Date();
+    const week = ['日', '一', '二', '三', '四', '五', '六'][d.getDay()];
+    return (d.getMonth() + 1).toString() + ' 月 ' + d.getDate().toString() + ' 日 星期' + week;
+  }
+
+  /** 工作区地址（档案地址去 /api/v1 尾缀） */
+  private workspaceHost(): string {
+    const base = ServerProfiles.getInstance().getActiveApiBase();
+    if (base.length === 0) {
+      return '未连接';
+    }
+    return base.replace('/api/v1', '').replace('http://', '').replace('https://', '');
   }
 
   /** 获取当前用户名（未登录时回退 '用户'） */
@@ -124,8 +162,20 @@ export struct DashboardPage {
 
   build() {
     Column() {
-      // 顶部导航栏：标题"仪表盘"，不显示返回按钮
-      TopNavMenu({ title: '仪表盘', showBack: false, showMenu: true })
+      // 问候头（原型 F3：21/700 问候 + 日期/工作区 sub）
+      Column() {
+        Text(this.loading ? '工作台' : '早上好，' + this.getUsername())
+          .fontSize(21)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.sm.getColor('text_primary'))
+        Text(this.dateLine() + ' · 工作区 ' + this.workspaceHost())
+          .fontSize(11.5)
+          .fontColor(this.sm.getColor('text_tertiary'))
+          .margin({ top: 2 })
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      .padding({ left: 20, right: 20, top: 8, bottom: 4 })
 
       if (this.loading) {
         // 加载态：居中显示"加载中..."
@@ -142,16 +192,22 @@ export struct DashboardPage {
         // 内容滚动区
         Scroll() {
           Column() {
-            // 1. 欢迎卡片：显示用户名 + Agent 数量
-            Column() {
-              GlassCard({ title: `欢迎，${this.getUsername()}` }) {
-                Text(`你有 ${this.agents.length} 个智能体`)
-                  .fontSize(this.sm.getFontSize('body'))
-                  .fontColor(this.sm.getColor('text_secondary'))
-              }
+            // 0. 健康条（原型 F3 hbar）
+            Row() {
+              Circle()
+                .width(7)
+                .height(7)
+                .fill(this.sm.getColor('success'))
+              Text('系统健康 ' + this.getHealthLabel() + ' · ' + this.stats.agents.toString() + ' 个 Agent 在线')
+                .fontSize(12)
+                .fontColor(this.sm.getColor('text_secondary'))
+                .margin({ left: 8 })
             }
             .width('100%')
-            .margin({ bottom: this.sm.getSpacing('md') })
+            .padding({ left: 14, right: 14, top: 9, bottom: 9 })
+            .borderRadius(12)
+            .backgroundColor(this.sm.getColor('surface_strong'))
+            .border({ width: 1, color: this.sm.getColor('border') })
 
             // 2. 统计卡片网格（2x2，Flex wrap 自适应窄屏）
             Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.SpaceBetween }) {
@@ -175,54 +231,138 @@ export struct DashboardPage {
             .width('100%')
             .margin({ bottom: this.sm.getSpacing('md') })
 
-            // 3. 快捷操作：三个等宽按钮，跳转对应页面
-            Column() {
-              GlassCard({ title: '快捷操作' }) {
-                Row() {
-                  GlassButton({
-                    text: '新建对话',
-                    type: 'default',
-                    btnSize: 'medium',
-                    onTap: () => { this.router.push(RouteNames.CHAT); }
-                  })
-                    .layoutWeight(1)
-
-                  GlassButton({
-                    text: '管理 Agent',
-                    type: 'default',
-                    btnSize: 'medium',
-                    onTap: () => { this.router.push(RouteNames.AGENT_LIST); }
-                  })
-                    .layoutWeight(1)
-                    .margin({ left: this.sm.getSpacing('sm') })
-
-                  GlassButton({
-                    text: '配对设备',
-                    type: 'default',
-                    btnSize: 'medium',
-                    onTap: () => { this.router.push(RouteNames.PAIRING); }
-                  })
-                    .layoutWeight(1)
-                    .margin({ left: this.sm.getSpacing('sm') })
-                }
-                .width('100%')
-              }
+            // 2. 快捷操作（原型 F3：标题 + 横排 tile）
+            Row() {
+              Text('快捷操作')
+                .fontSize(13)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(this.sm.getColor('text_primary'))
             }
             .width('100%')
-            .margin({ bottom: this.sm.getSpacing('md') })
+            .padding({ left: 4, bottom: 8 })
 
-            // 4. 最近会话列表（M2 暂为空状态占位，M3 接入 sessions API）
+            Row() {
+              Column() {
+                Text('＋')
+                  .fontSize(19)
+                  .fontColor(this.sm.getColor('primary'))
+                Text('新建对话')
+                  .fontSize(10.5)
+                  .fontColor(this.sm.getColor('text_secondary'))
+                  .margin({ top: 6 })
+              }
+              .layoutWeight(1)
+              .padding({ top: 12, bottom: 12 })
+              .borderRadius(14)
+              .backgroundColor(this.sm.getColor('surface_strong'))
+              .border({ width: 1, color: this.sm.getColor('border') })
+              .onClick(() => {
+                StateManager.getInstance().set('chat:active_session_id', '');
+                this.router.push(RouteNames.CHAT);
+              })
+
+              Column() {
+                Text('智能体')
+                  .fontSize(19)
+                  .fontColor(this.sm.getColor('primary'))
+                Text('管理 Agent')
+                  .fontSize(10.5)
+                  .fontColor(this.sm.getColor('text_secondary'))
+                  .margin({ top: 6 })
+              }
+              .layoutWeight(1)
+              .padding({ top: 12, bottom: 12 })
+              .borderRadius(14)
+              .backgroundColor(this.sm.getColor('surface_strong'))
+              .border({ width: 1, color: this.sm.getColor('border') })
+              .margin({ left: 10 })
+              .onClick(() => {
+                this.router.push(RouteNames.AGENT_LIST);
+              })
+
+              Column() {
+                Text('配对')
+                  .fontSize(19)
+                  .fontColor(this.sm.getColor('primary'))
+                Text('扫码配对')
+                  .fontSize(10.5)
+                  .fontColor(this.sm.getColor('text_secondary'))
+                  .margin({ top: 6 })
+              }
+              .layoutWeight(1)
+              .padding({ top: 12, bottom: 12 })
+              .borderRadius(14)
+              .backgroundColor(this.sm.getColor('surface_strong'))
+              .border({ width: 1, color: this.sm.getColor('border') })
+              .margin({ left: 10 })
+              .onClick(() => {
+                this.router.push(RouteNames.PAIRING);
+              })
+            }
+            .width('100%')
+
+            // 3. 最近会话（原型 F3 mini-sess，前 3 条）
+            Row() {
+              Text('最近会话')
+                .fontSize(13)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(this.sm.getColor('text_primary'))
+            }
+            .width('100%')
+            .padding({ left: 4, bottom: 8 })
+
             Column() {
-              GlassCard({ title: '最近会话' }) {
-                Column() {
-                  Text('暂无最近会话')
-                    .fontSize(this.sm.getFontSize('caption'))
-                    .fontColor(this.sm.getColor('text_disabled'))
+              if (this.recentSessions.length === 0) {
+                Text('暂无会话')
+                  .fontSize(12)
+                  .fontColor(this.sm.getColor('text_tertiary'))
+                  .padding(14)
+              }
+              ForEach(this.recentSessions, (s: ChatSession) => {
+                Row() {
+                  Text(s.title.slice(0, 1))
+                    .fontSize(12)
+                    .fontWeight(FontWeight.Bold)
+                    .fontColor(this.sm.getColor('text_on_primary'))
+                    .width(30)
+                    .height(30)
+                    .borderRadius(10)
+                    .textAlign(TextAlign.Center)
+                    .linearGradient({ angle: 135, colors: [['#8b5cf6', 0], ['#6366f1', 1]] })
+                  Column() {
+                    Text(s.title)
+                      .fontSize(13)
+                      .fontWeight(FontWeight.Medium)
+                      .fontColor(this.sm.getColor('text_primary'))
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Text((s.updated_at.length >= 10 ? s.updated_at.slice(5, 10) : s.updated_at) + ' · ' + s.agent_id)
+                      .fontSize(10.5)
+                      .fontColor(this.sm.getColor('text_tertiary'))
+                      .margin({ top: 2 })
+                  }
+                  .layoutWeight(1)
+                  .alignItems(HorizontalAlign.Start)
+                  .margin({ left: 10 })
+                  if (s.pinned) {
+                    Text('置顶')
+                      .fontSize(9)
+                      .fontColor(this.sm.getColor('primary'))
+                      .border({ width: 1, color: this.sm.getColor('primary') })
+                      .borderRadius(5)
+                      .padding({ left: 5, right: 5, top: 1, bottom: 1 })
+                  }
                 }
                 .width('100%')
-                .alignItems(HorizontalAlign.Center)
-                .padding(this.sm.getSpacing('lg'))
-              }
+                .padding(11)
+                .borderRadius(13)
+                .backgroundColor(this.sm.getColor('surface_strong'))
+                .border({ width: 1, color: this.sm.getColor('border') })
+                .margin({ bottom: 8 })
+                .onClick(() => {
+                  this.openRecent(s);
+                })
+              }, (s: ChatSession) => s.id + s.updated_at)
             }
             .width('100%')
           }
@@ -238,6 +378,6 @@ export struct DashboardPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(this.sm.getColor('background'))
+    
   }
 }

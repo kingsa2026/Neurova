@@ -10,8 +10,8 @@ import { TabIcon } from './TabIcon';
 
 @Component
 export struct RailBar {
-  /** 当前激活 Tab（0-4，同 LiquidTabBar 序） */
-  active: number = 0;
+  /** 当前激活 Tab（0-4，同 LiquidTabBar 序）——@Prop 随父刷新 */
+  @Prop active: number = 0;
   /** 选择回调 */
   onPick: (index: number) => void = () => {};
   private sm: StyleManager = StyleManager.getInstance();

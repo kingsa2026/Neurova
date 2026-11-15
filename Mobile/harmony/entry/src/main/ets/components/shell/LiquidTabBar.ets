@@ -14,8 +14,8 @@ import { TabIcon } from './TabIcon';
 
 @Component
 export struct LiquidTabBar {
-  /** 当前激活 Tab（0 对话 / 1 工作台 / 2 智能体 / 3 知识 / 4 我的） */
-  active: number = 0;
+  /** 当前激活 Tab（0 对话 / 1 工作台 / 2 智能体 / 3 知识 / 4 我的）——@Prop 随父刷新 */
+  @Prop active: number = 0;
   /** 选择回调（命名避开通用属性 onSelect） */
   onPick: (index: number) => void = () => {};
   private sm: StyleManager = StyleManager.getInstance();

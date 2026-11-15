@@ -312,34 +312,41 @@ export struct KnowledgePage {
   build() {
     Stack({ alignContent: Alignment.Center }) {
       Column() {
-        // 顶部导航栏：标题"知识库" + 返回按钮 + 新建按钮（右侧插槽）
-        TopNavMenu({
-          title: '知识库',
-          showBack: true,
-          showMenu: false,
-          onBack: () => { this.router.back(); }
-        }) {
-          GlassButton({
-            text: '图谱',
-            type: 'default',
-            btnSize: 'small',
-            onTap: () => { this.openGraph(); }
+        // 内联头（原型 F9：21/700 标题 + 图谱/数据源/导入）
+        Row() {
+          Text('知识')
+            .fontSize(21)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.sm.getColor('text_primary'))
+            .layoutWeight(1)
+          Text('图谱')
+            .fontSize(12)
+            .fontColor(this.sm.getColor('primary'))
+            .padding(8)
+            .onClick(() => {
+              this.openGraph();
+            })
+          Text('数据源')
+            .fontSize(12)
+            .fontColor(this.sm.getColor('primary'))
+            .padding(8)
+            .onClick(() => {
+              this.openSources();
+            })
+          Button() {
+            Text('＋ 导入')
+              .fontSize(13)
+              .fontColor(this.sm.getColor('text_on_primary'))
+          }
+          .height(34)
+          .linearGradient({ angle: 135, colors: [['#8b5cf6', 0], ['#6366f1', 1]] })
+          .margin({ left: 4 })
+          .onClick(() => {
+            this.handleImport();
           })
-          GlassButton({
-            text: '数据源',
-            type: 'default',
-            btnSize: 'small',
-            onTap: () => { this.openSources(); }
-          })
-            .margin({ left: this.sm.getSpacing('sm') })
-          GlassButton({
-            text: '导入',
-            type: 'primary',
-            btnSize: 'small',
-            onTap: () => { this.handleImport(); }
-          })
-            .margin({ left: this.sm.getSpacing('sm') })
         }
+        .width('100%')
+        .padding({ left: 20, right: 20, top: 8, bottom: 10 })
 
         // 搜索栏：GlassInput 关键词 + 搜索按钮
         Row() {
@@ -436,7 +443,7 @@ export struct KnowledgePage {
       }
       .width('100%')
       .height('100%')
-      .backgroundColor(this.sm.getColor('background'))
+      
 
       // 详情弹窗：showDetail 为 true 时覆盖在主体之上
       if (this.showDetail && this.detailItem) {
