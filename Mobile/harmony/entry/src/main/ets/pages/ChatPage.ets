@@ -28,6 +28,7 @@ import { TopNavMenu, AgentSwitcher, GlassInput, GlassButton, GlassPanel } from '
 import { ApiFacade } from '../libs/api/ApiFacade';
 import { AuthStore } from '../libs/state/stores/AuthStore';
 import { AgentsStore } from '../libs/state/stores/AgentsStore';
+import { StateManager } from '../libs/state/StateManager';
 import { WebSocketAdapter } from '../libs/adapters/WebSocketAdapter';
 import { EventBus, EventHandler } from '../libs/bus/EventBus';
 import { ConfigManager } from '../libs/config/ConfigManager';
@@ -59,8 +60,10 @@ export struct ChatPage {
   @State inputText: string = '';
   // 是否正在生成（控制发送/停止按钮切换）
   @State isGenerating: boolean = false;
-  // 当前会话 ID（进入页面时生成）
+  // 当前会话 ID（会话列表进入时恢复，直接进入则生成新 ID）
   @State sessionId: string = 'session-' + Date.now();
+  // 会话标题（头部展示；新会话为'新对话'）
+  @State sessionTitle: string = '新对话';
   // 当前 Agent ID（从 AgentsStore 读取）
   @State currentAgentId: string = '';
   // Agent 列表（供 AgentSwitcher 渲染）
@@ -95,7 +98,18 @@ export struct ChatPage {
     this.agents = this.agentsStore.agents;
     // 2. 尝试拉取最新 Agent 列表（失败时降级使用缓存，不影响页面渲染）
     this.loadAgents();
-    // 3. 建立 WS 连接
+    // 3. 恢复会话上下文（SessionListPage 进入时写入 StateManager）
+    const state = StateManager.getInstance();
+    const activeId = state.get<string>('chat:active_session_id', '');
+    if (activeId.length > 0) {
+      this.sessionId = activeId;
+      this.sessionTitle = state.get<string>('chat:active_session_title', '会话');
+      this.loadHistory();
+    }
+    // 清键：下次直接进对话页回到新会话
+    state.set('chat:active_session_id', '');
+    state.set('chat:active_session_title', '');
+    // 4. 建立 WS 连接
     this.connectWs();
     // 4. 订阅聊天事件
     this.subscribeEvents();
@@ -129,6 +143,39 @@ export struct ChatPage {
       }
     } catch (e) {
       this.logger.warn(TAG, '加载 Agent 列表失败，使用缓存', e as Error);
+    }
+  }
+
+  /**
+   * 拉取会话历史（同源 PC：GET /console/chat/history），{role,content} → ChatMessageView
+   * 失败静默（不影响流式输入），toast 提示由 MessageManager 统一
+   */
+  private async loadHistory(): Promise<void> {
+    try {
+      const res = await this.api.sessions.history(this.sessionId);
+      if (res.code === 0 && res.data) {
+        const views: ChatMessageView[] = [];
+        const raw = res.data.messages;
+        for (let i = 0; i < raw.length; i++) {
+          const m = raw[i];
+          const content = m.content;
+          if (content.length === 0) {
+            continue;
+          }
+          views.push({
+            id: 'h-' + i.toString(),
+            role: m.role === 'user' ? 'user' : 'assistant',
+            content: content,
+            timestamp: 0,
+            isStreaming: false,
+          });
+        }
+        this.messages = views;
+        this.messagesDs.setData(views);
+        this.scrollToBottom();
+      }
+    } catch (e) {
+      this.logger.warn(TAG, '拉取会话历史失败', e as Error);
     }
   }
 
@@ -457,7 +504,7 @@ export struct ChatPage {
           GlassPanel({ variant: 'subtle', innerPadding: this.sm.getSpacing('md'), radius: this.sm.getRadius('lg') }) {
             Column() {
               // Agent 署名
-              Text(this.getAgentName())
+              Text(this.sessionTitle.length > 0 ? this.sessionTitle : this.getAgentName())
                 .fontSize(this.sm.getFontSize('caption'))
                 .fontColor(this.sm.getColor('text_secondary'))
                 .margin({ bottom: 4 })

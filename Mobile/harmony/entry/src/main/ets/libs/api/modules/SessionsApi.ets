@@ -1,12 +1,55 @@
 /**
- * SessionsApi - 会话 API 模块
+ * SessionsApi - 会话 API 模块（与 PC 端 ChatSessionSidebar 同源）
+ *
+ * 后端事实源：neurova/api/endpoints/console.py（挂 /v1/console 前缀）。
+ * 端点形状以 console.py 实测为准（2026-11-16 读源核对）：
+ *   GET    /console/chat/sessions                 → {code:0,data:{sessions:[摘要],total}}
+ *   PUT    /console/chat/sessions/{id}            → 重命名
+ *   POST   /console/chat/sessions/{id}/pin        → 置顶/取消
+ *   POST   /console/chat/sessions/{id}/archive    → 归档
+ *   POST   /console/chat/sessions/{id}/unarchive  → 恢复
+ *   POST   /console/chat/sessions/{id}/fork       → 分叉
+ *   DELETE /console/chat/sessions/{id}            → 删除
+ *   GET    /console/chat/history?session_id=      → {code:0,data:{messages:[{role,content}],session_id}}
  */
-import { HttpClient } from '../HttpClient';
-import { ApiResponse, Session, PageResult, PageParams } from '../../types';
 
-/** 创建会话请求体 */
-export interface SessionCreateRequest {
-  title?: string;
+import { HttpClient } from '../HttpClient';
+import { ApiResponse } from '../../types';
+
+/** 会话摘要（console.py get_chat_sessions 摘要形状原样） */
+export interface ChatSession {
+  id: string;
+  title: string;
+  agent_id: string;
+  created_at: string;
+  updated_at: string;
+  pinned: boolean;
+  sort_order: number;
+  source_channel: string;
+  channel_name: string;
+}
+
+/** GET sessions 的 data 载荷 */
+export interface ChatSessionList {
+  sessions: ChatSession[];
+  total: number;
+}
+
+/** 历史消息（session_manager 存储形状：{role, content}） */
+export interface ChatHistoryMessage {
+  role: string;
+  content: string;
+}
+
+/** GET /console/chat/history 的 data 载荷 */
+export interface ChatHistoryPayload {
+  messages: ChatHistoryMessage[];
+  session_id: string;
+}
+
+/** 重命名请求体（ArkTS 禁非空对象字面量直接标注 Record，走接口声明） */
+export interface RenameRequest {
+  title: string;
 }
 
 export class SessionsApi {
@@ -16,23 +59,51 @@ export class SessionsApi {
     this.client = client;
   }
 
-  async list(agentId: string, params?: PageParams): Promise<ApiResponse<PageResult<Session>>> {
-    return this.client.get<PageResult<Session>>(
-      `/v1/agents/${agentId}/sessions`,
-      params as Record<string, Object>,
-    );
+  /** 会话列表（agent_id 可选过滤；空串取全部） */
+  async listAll(agentId: string): Promise<ApiResponse<ChatSessionList>> {
+    const path = agentId.length > 0
+      ? `/console/chat/sessions?agent_id=${agentId}`
+      : '/console/chat/sessions';
+    return this.client.get<ChatSessionList>(path);
   }
 
-  async create(agentId: string, title?: string): Promise<ApiResponse<Session>> {
-    const body: SessionCreateRequest = { title };
-    return this.client.post<Session>(`/v1/agents/${agentId}/sessions`, body);
+  /** 重命名 */
+  async rename(sessionId: string, title: string): Promise<ApiResponse<Object>> {
+    const body: RenameRequest = { title: title };
+    return this.client.put<Object>(`/console/chat/sessions/${sessionId}`, body);
   }
 
-  async get(sessionId: string): Promise<ApiResponse<Session>> {
-    return this.client.get<Session>(`/v1/sessions/${sessionId}`);
+  /** 置顶（再次调用为取消置顶，后端按当前态翻转） */
+  async pin(sessionId: string): Promise<ApiResponse<Object>> {
+    const body: Record<string, Object> = {};
+    return this.client.post<Object>(`/console/chat/sessions/${sessionId}/pin`, body);
   }
 
+  /** 归档 */
+  async archive(sessionId: string): Promise<ApiResponse<Object>> {
+    const body: Record<string, Object> = {};
+    return this.client.post<Object>(`/console/chat/sessions/${sessionId}/archive`, body);
+  }
+
+  /** 从归档恢复 */
+  async unarchive(sessionId: string): Promise<ApiResponse<Object>> {
+    const body: Record<string, Object> = {};
+    return this.client.post<Object>(`/console/chat/sessions/${sessionId}/unarchive`, body);
+  }
+
+  /** 分叉出新会话 */
+  async fork(sessionId: string): Promise<ApiResponse<Object>> {
+    const body: Record<string, Object> = {};
+    return this.client.post<Object>(`/console/chat/sessions/${sessionId}/fork`, body);
+  }
+
+  /** 删除 */
   async remove(sessionId: string): Promise<ApiResponse<Object>> {
-    return this.client.delete<Object>(`/v1/sessions/${sessionId}`);
+    return this.client.delete<Object>(`/console/chat/sessions/${sessionId}`);
+  }
+
+  /** 历史（返回 {role,content} 列表，旧→新） */
+  async history(sessionId: string): Promise<ApiResponse<ChatHistoryPayload>> {
+    return this.client.get<ChatHistoryPayload>(`/console/chat/history?session_id=${sessionId}`);
   }
 }
