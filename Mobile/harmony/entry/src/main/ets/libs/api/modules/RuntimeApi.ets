@@ -34,6 +34,14 @@ import {
 } from '../../types';
 
 /** 休眠状态操作 body（setSleepMode/awaken 共用） */
+/** 休眠状态载荷（sleep.py SleepStatusResponse 投影子集） */
+export interface SleepStatusDto {
+  agent_id: string;
+  is_sleeping: boolean;
+  sleep_phase: string;
+  sleep_cycles: number;
+}
+
 interface SleepModeBody {
   agentId: string;
   mode?: 'idle' | 'light' | 'deep';
@@ -190,23 +198,28 @@ export class RuntimeApi {
 
   // ==================== SleepStatus 休眠状态 ====================
 
-  /** 获取 Agent 的休眠状态 */
+  /** 获取休眠状态（旧形态 /runtime/sleep——端点不存在，SleepStatusPage 迁移后在 M9 收口退役） */
   async getSleepStatus(agentId: string): Promise<ApiResponse<SleepStatus>> {
     const query: Record<string, Object> = {};
     query['agentId'] = agentId;
     return this.client.get<SleepStatus>('/runtime/sleep', query);
   }
 
-  /** 设置休眠模式（body: { agentId, mode }） */
+  /** 设置休眠模式（旧形态，同上待 M9 收口） */
   async setSleepMode(agentId: string, mode: 'idle' | 'light' | 'deep'): Promise<ApiResponse<SleepStatus>> {
     const body: SleepModeBody = { agentId, mode };
     return this.client.post<SleepStatus>('/runtime/sleep', body);
   }
 
-  /** 唤醒 Agent（body: { agentId }） */
-  async awaken(agentId: string): Promise<ApiResponse<SleepStatus>> {
-    const body: SleepModeBody = { agentId };
-    return this.client.post<SleepStatus>('/runtime/sleep/awaken', body);
+  /** 获取休眠状态——实测端点（sleep.py：GET /v1/sleep/{agent_id}/status），新消费方一律用此 */
+  async getSleepStatusDto(agentId: string): Promise<ApiResponse<SleepStatusDto>> {
+    return this.client.get<SleepStatusDto>(`/sleep/${agentId}/status`);
+  }
+
+  /** 唤醒 Agent（sleep.py 实测：POST /v1/sleep/{agent_id}/wake） */
+  async awaken(agentId: string): Promise<ApiResponse<Object>> {
+    const body: Record<string, Object> = {};
+    return this.client.post<Object>(`/sleep/${agentId}/wake`, body);
   }
 
   // ==================== FirewallRule 防火墙规则 ====================
