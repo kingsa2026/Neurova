@@ -47,6 +47,7 @@ from ..community_graph import _SCHEMA_V48_COMMUNITIES
 from ..enterprise.webhook_receiver import _SCHEMA_V49_WEBHOOK_DEDUP
 from ..enterprise.schema_catalog import _SCHEMA_V51_CATALOG
 from ..ontology.artifact_store import _SCHEMA_V50_ARTIFACTS
+from ..ontology.schema_suggester import _SCHEMA_V52_SUGGESTIONS
 from ..ontology.decision_ledger import _SCHEMA_V47_DECISIONS
 from ..ontology.simulation import _SCHEMA_V46_SIMULATIONS
 from ..ontology.state_machine_registry import _SCHEMA_V44_STATE_MACHINES
@@ -186,6 +187,9 @@ _STEPS: List[tuple] = [
     #      ontology_catalog_tables/_columns（表/列/主外键画像 + P1-2 审批回填的
     #      term_id 链接列）；摄取机器零采样，术语链接只由审批流写
     (51, _SCHEMA_V51_CATALOG),
+    # v52：schema 术语建议（对照研究 P1-2，2026-11-15）——ontology_schema_suggestions
+    #      （机器只产候选；关系候选复用 ontology_relation_candidates 审批流不另造表）
+    (52, _SCHEMA_V52_SUGGESTIONS),
 ]
 
 _registered = False
