@@ -15,6 +15,7 @@ import { ChatPage } from '../pages/ChatPage';
 import { PairingPage } from '../pages/PairingPage';
 import { ConnectionPage } from '../pages/ConnectionPage';
 import { AgentListPage } from '../pages/AgentListPage';
+import { AgentFormPage } from '../pages/AgentFormPage';
 import { AgentDetailPage } from '../pages/AgentDetailPage';
 import { KnowledgeImportPage } from '../pages/KnowledgeImportPage';
 import { EnterpriseSourcesPage } from '../pages/EnterpriseSourcesPage';
@@ -51,6 +52,8 @@ export function pageMap(name: string) {
     NavDestination() { ConnectionPage() }.hideTitleBar(true)
   } else if (name === RouteNames.AGENT_LIST) {
     NavDestination() { AgentListPage() }.hideTitleBar(true)
+  } else if (name === RouteNames.AGENT_FORM) {
+    NavDestination() { AgentFormPage() }.hideTitleBar(true)
   } else if (name === RouteNames.AGENT_DETAIL) {
     NavDestination() { AgentDetailPage() }.hideTitleBar(true)
   } else if (name === RouteNames.KNOWLEDGE_IMPORT) {

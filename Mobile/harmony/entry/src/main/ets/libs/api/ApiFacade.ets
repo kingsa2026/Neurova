@@ -18,7 +18,6 @@ import { AgentsApi } from './modules/AgentsApi';
 import { SessionsApi } from './modules/SessionsApi';
 import { MobilePairingApi } from './modules/MobilePairingApi';
 import { PushApi } from './modules/PushApi';
-import { ChatApi } from './modules/ChatApi';
 import { MemoryApi } from './modules/MemoryApi';
 import { KnowledgeApi } from './modules/KnowledgeApi';
 import { KnowledgeGraphApi } from './modules/KnowledgeGraphApi';
@@ -48,7 +47,6 @@ export class ApiFacade {
   public sessions: SessionsApi;
   public mobilePairing: MobilePairingApi;
   public push: PushApi;
-  public chat: ChatApi;
 
   // 业务模块（M3 新增 6 个）
   public memory: MemoryApi;
@@ -82,7 +80,6 @@ export class ApiFacade {
     this.sessions = new SessionsApi(this.client);
     this.mobilePairing = new MobilePairingApi(this.client);
     this.push = new PushApi(this.client);
-    this.chat = new ChatApi(this.client);
     // M3 新增模块
     this.memory = new MemoryApi(this.client);
     this.admin = new AdminApi(this.client);
