@@ -514,3 +514,132 @@ export interface DefaultOffReading {
 export interface DefaultOffReadingsResponse {
   items: DefaultOffReading[]
 }
+
+// ---------------------------------------------------------------------------
+// 对照研究实施批（2026-11-15）：schema 目录 / 建议 / 问数 / Ossie / 就绪探针
+// ---------------------------------------------------------------------------
+
+/** P2-2：复合就绪探针读数（GET /knowledge/ontology/readiness）。 */
+export interface KnowledgeReadiness {
+  tenant_id: string
+  checks: {
+    terms_registered: number
+    rules_registered: number
+    facts_present: number
+    catalog_sources: number
+    catalog_tables: number
+    enterprise_sources_configured: number
+    enterprise_sources_enabled: number
+  }
+  knowledge_ready: boolean
+  data_ready: boolean
+}
+
+/** P1-2：schema 术语/家族/SQL 模式建议行（机器产候选，人工审批落本体）。 */
+export interface SchemaSuggestion {
+  suggestion_id: string
+  tenant_id: string
+  source_id: string
+  kind: 'term' | 'family' | 'sql_pattern' | string
+  target: string
+  payload: {
+    table_id?: string
+    table_name?: string
+    name?: string
+    description?: string
+    synonyms?: string[]
+    columns?: Array<{ column: string; display_name: string }>
+    base_name?: string
+    prefixes?: string[]
+    members?: string[]
+    question?: string
+    sql?: string
+    usage_count?: number
+  }
+  basis: string
+  confidence: number | null
+  status: 'pending' | 'approved' | 'rejected' | string
+  created_at: string
+  reviewed_at: string | null
+  reviewed_by: string
+}
+
+export interface SchemaSuggestionRunResult {
+  sources: Array<{
+    source_id: string
+    term_suggestions: number
+    relation_candidates: number
+    probes_confirmed: number
+  }>
+  errors: Array<{ item: string; position: number; error: string }>
+}
+
+/** P1-1：schema 目录（describeSchema 落账面）。 */
+export interface CatalogColumn {
+  catalog_column_id: string
+  column_name: string
+  data_type: string
+  ordinal_position: number | null
+  is_primary_key: number
+  is_foreign_key: number
+  foreign_key_target: string
+  description: string
+  term_id: string
+}
+
+export interface CatalogTable {
+  catalog_table_id: string
+  tenant_id: string
+  source_id: string
+  source_type: string
+  table_name: string
+  table_type: string
+  description: string
+  term_id: string
+  column_count: number
+  ingested_at: string
+}
+
+export interface CatalogTableDetail extends CatalogTable {
+  columns: CatalogColumn[]
+}
+
+/** P1-4：问数结果（答案自带 SQL 与步骤；refused=诚实拒答）。 */
+export interface Nl2SqlAnswer {
+  answerable: boolean
+  sql: string
+  explanation: string
+  rows: Array<Record<string, unknown>>
+  row_count: number
+  truncated: boolean
+  steps: string[]
+  status: 'ok' | 'error' | 'refused' | string
+  reason?: string
+  error?: string
+}
+
+export interface Nl2SqlHistoryRow {
+  query_id: string
+  tenant_id: string
+  source_id: string
+  question: string
+  sql_text: string
+  status: string
+  row_count: number
+  error_text: string
+  asked_by: string
+  created_at: string
+}
+
+/** P2-4：Ossie 风格语义模型导入回执（dry-run/预检/成版三态）。 */
+export interface OssieImportResult {
+  accepted: boolean
+  dry_run?: boolean
+  terms?: number
+  rules?: number
+  preflight?: Array<{ term_id: string; finding: string }>
+  applied?: { terms: number; rules: number; facts: number }
+  baselineId?: string
+  note?: string
+  imported_id?: string
+}

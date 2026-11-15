@@ -17,6 +17,8 @@ import api from '@/api'
 import type { ApiResponse } from '@/types/response'
 import type {
   CqRow,
+  CatalogTable,
+  CatalogTableDetail,
   DerivationChain,
   DefaultOffReadingsResponse,
   EnterpriseDescriptor,
@@ -25,6 +27,9 @@ import type {
   FactQueryBody,
   FactQueryItem,
   IriResolution,
+  KnowledgeReadiness,
+  Nl2SqlAnswer,
+  Nl2SqlHistoryRow,
   OntologyActionRow,
   OntologyComputeResult,
   OntologyDecisionChainNode,
@@ -41,10 +46,13 @@ import type {
   OntologyTerm,
   OntologyTermWrite,
   OntologyValidateResponse,
+  OssieImportResult,
   PipelineDiffResponse,
   PipelineRollbackResponse,
   PipelineRunResponse,
   RelationCandidate,
+  SchemaSuggestion,
+  SchemaSuggestionRunResult,
   ValidateTriple,
 } from '@/types/ontology'
 
@@ -623,4 +631,92 @@ export function updateOntologyRule(ruleId: string, data: OntologyRulePayload) {
 export function deleteOntologyRule(ruleId: string, params?: { basis?: string }) {
   return api.delete<ApiResponse<null>>(
     `/knowledge/ontology/rules/${encodeURIComponent(ruleId)}`, { params })
+}
+
+// ---------------------------------------------------------------------------
+// schema 目录 / 建议 / 问数 / Ossie / 就绪（对照研究实施批，2026-11-15）
+// 端点：/knowledge/ontology/{readiness,schema-suggestions,schema-families,
+// export.ossie.yaml,import-ossie} 与 /knowledge/enterprise/{catalog,nl2sql}。
+// ---------------------------------------------------------------------------
+
+/** P2-2：复合就绪探针（knowledge_ready/data_ready 双判据，只读零网络）。 */
+export function getKnowledgeReadiness() {
+  return api.get<ApiResponse<KnowledgeReadiness>>(`${BASE}/ontology/readiness`)
+}
+
+/** P1-1：目录表清单（租户分区；source_id/q 过滤）。 */
+export function listCatalogTables(sourceId = '', q = '', limit = 200) {
+  return api.get<ApiResponse<{ items: CatalogTable[]; total: number }>>(
+    `${BASE}/enterprise/catalog/tables`,
+    { params: { source_id: sourceId || undefined, q: q || undefined, limit } },
+  )
+}
+
+/** P1-1：单表目录明细（列/类型/主外键/术语链接）。 */
+export function getCatalogTableDetail(tableId: string) {
+  return api.get<ApiResponse<CatalogTableDetail>>(
+    `${BASE}/enterprise/catalog/tables/${encodeURIComponent(tableId)}`)
+}
+
+/** P1-1：手动刷新源 schema 目录（admin；只读元数据动作）。 */
+export function refreshSourceCatalog(sourceId: string) {
+  return api.post<ApiResponse<{ source_id: string; ingested: { tables: number; columns: number; foreign_keys: number } }>>(
+    `${BASE}/enterprise/sources/${encodeURIComponent(sourceId)}/catalog/refresh`)
+}
+
+/** P1-2：建议清单（status/kind/source_id 过滤）。 */
+export function listSchemaSuggestions(status = 'pending', kind = '', sourceId = '', limit = 100) {
+  return api.get<ApiResponse<{ items: SchemaSuggestion[]; total: number }>>(
+    `${BASE}/ontology/schema-suggestions`,
+    { params: { status, kind: kind || undefined, source_id: sourceId || undefined, limit } })
+}
+
+/** P1-2：跑一轮建议（admin；source_id 留空=全部源；use_llm/probe 缺省关）。 */
+export function runSchemaSuggestions(sourceId = '', useLlm = false, probe = false) {
+  return api.post<ApiResponse<SchemaSuggestionRunResult>>(
+    `${BASE}/ontology/schema-suggestions/run`,
+    { source_id: sourceId, use_llm: useLlm, probe })
+}
+
+/** P1-2：建议审批（approve=登记术语并回填目录链接；reject=留审计不再重生）。 */
+export function decideSchemaSuggestion(suggestionId: string, action: 'approve' | 'reject') {
+  return api.post<ApiResponse<Record<string, unknown>>>(
+    `${BASE}/ontology/schema-suggestions/${encodeURIComponent(suggestionId)}/${action}`)
+}
+
+/** P3-2：同构表副本聚族（admin；确定性算法，产物 pending 建议）。 */
+export function detectSchemaFamilies(sourceId: string) {
+  return api.post<ApiResponse<{ families: Array<{ base_name: string; prefixes: string[]; members: string[] }>; suggestions_created: number }>>(
+    `${BASE}/ontology/schema-families/detect`, { source_id: sourceId })
+}
+
+/** P2-4：导出语义模型文档（YAML 文本）。 */
+export function exportOssieYaml() {
+  return api.get<string>(`${BASE}/ontology/export.ossie.yaml`, { responseType: 'text' })
+}
+
+/** P2-4：导入语义模型文档（admin；缺省 dry-run 预检，apply 才成版）。 */
+export function importOssieYaml(document: string, apply: boolean, reason = '') {
+  return api.post<ApiResponse<OssieImportResult>>(
+    `${BASE}/ontology/import-ossie`, { document, apply, reason })
+}
+
+/** P1-4：自然语言问数（admin + env 门控；答案带 SQL 与步骤）。 */
+export function askNl2Sql(sourceId: string, question: string, execute = true, maxRows = 200) {
+  return api.post<ApiResponse<Nl2SqlAnswer>>(
+    `${BASE}/enterprise/sources/${encodeURIComponent(sourceId)}/nl2sql`,
+    { question, execute, max_rows: maxRows })
+}
+
+/** P2-3：问数历史（登录可读，本租户）。 */
+export function listNl2SqlHistory(sourceId: string, limit = 50) {
+  return api.get<ApiResponse<{ items: Nl2SqlHistoryRow[]; total: number }>>(
+    `${BASE}/enterprise/sources/${encodeURIComponent(sourceId)}/nl2sql/history`,
+    { params: { limit } })
+}
+
+/** P2-3：高频表组合回灌 sql_pattern 候选（admin；产物 pending 建议）。 */
+export function suggestNl2SqlPatterns(sourceId: string) {
+  return api.post<ApiResponse<{ patterns_suggested: number; history_rows_considered: number }>>(
+    `${BASE}/enterprise/sources/${encodeURIComponent(sourceId)}/nl2sql/suggest-patterns`)
 }

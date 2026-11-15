@@ -30,6 +30,48 @@
       </div>
     </GlassPanel>
 
+    <!-- P2-4：Ossie 风格语义模型导入（admin；缺省 dry-run 预检，apply 才成版） -->
+    <GlassPanel class="panel">
+      <div class="panel-head">
+        <span class="panel-title" data-testid="ossie-import-title">{{ t('ontology.ossieImportTitle') }}</span>
+        <span class="admin-note">{{ t('ontology.exportAdminOnly') }}</span>
+      </div>
+      <a-textarea
+        v-model:value="ossieDocument"
+        :rows="6"
+        class="ossie-textarea"
+        data-testid="ossie-import-input"
+        :placeholder="t('ontology.ossieImportPlaceholder')"
+      />
+      <div class="ossie-actions">
+        <a-checkbox v-model:checked="ossieDryRun" data-testid="ossie-dryrun-switch">
+          {{ t('ontology.ossieDryRun') }}
+        </a-checkbox>
+        <GlassButton
+          size="sm"
+          variant="primary"
+          :loading="ossieImporting"
+          :disabled="!ossieDocument.trim()"
+          data-testid="ossie-import-btn"
+          @click="doOssieImport"
+        >{{ t('ontology.ossieImportBtn') }}</GlassButton>
+      </div>
+      <div v-if="ossieResult" class="ossie-result" data-testid="ossie-import-result">
+        <a-alert
+          :type="ossieResult.accepted ? 'success' : 'warning'"
+          show-icon
+          :message="ossieResult.accepted ? t('ontology.ossieImportAccepted') : t('ontology.ossieImportRejected')"
+        />
+        <p v-if="ossieResult.baselineId" class="ossie-line mono">baseline: {{ ossieResult.baselineId }}</p>
+        <p v-if="ossieResult.note" class="ossie-line">{{ ossieResult.note }}</p>
+        <ul v-if="ossieResult.preflight?.length" class="ossie-preflight" data-testid="ossie-preflight">
+          <li v-for="(finding, index) in ossieResult.preflight" :key="index" class="ossie-finding">
+            <span class="mono">{{ finding.term_id }}</span> — {{ finding.finding }}
+          </li>
+        </ul>
+      </div>
+    </GlassPanel>
+
     <!-- 稳定 IRI 解析（B12）：kbg:/外部 IRI → 术语行；失败显式报错 -->
     <GlassPanel class="panel">
       <div class="panel-head">
@@ -98,9 +140,11 @@ import {
   exportOntologyGraphML,
   exportOntologyShacl,
   exportOntologyTtl,
+  exportOssieYaml,
+  importOssieYaml,
   resolveOntologyIri,
 } from '@/api/modules/ontology'
-import type { IriResolution } from '@/types/ontology'
+import type { IriResolution, OssieImportResult } from '@/types/ontology'
 import { jsonOrDash } from '@/utils/ontologyFormat'
 
 const authStore = useAuthStore()
@@ -126,6 +170,7 @@ const FORMATS: ExportFormat[] = [
   { key: 'gexf', name: 'GEXF', desc: 'GEXF 1.3 graph exchange', filename: 'ontology-export.gexf', mime: 'application/gexf+xml', run: () => exportOntologyGexf() },
   { key: 'cypher', name: 'Cypher', desc: 'CREATE statements dump', filename: 'ontology-export.cypher', mime: 'text/plain', run: () => exportOntologyCypher() },
   { key: 'csv', name: 'CSV', desc: 'nodes / edges dual file', filename: 'ontology-export.csv', mime: 'text/csv', run: () => exportOntologyCsv() },
+  { key: 'ossie', name: 'Ossie YAML', desc: t('ontology.ossieExportBtn'), filename: 'ontology-export.ossie.yaml', mime: 'application/yaml', run: () => exportOssieYaml() },
 ]
 
 const exportingFormat = ref('')
@@ -133,6 +178,27 @@ const resolving = ref(false)
 const iriInput = ref('')
 const iriResult = ref<Extract<IriResolution, { kind: 'term' }> | null>(null)
 const iriError = ref(false)
+
+// P2-4：Ossie 语义模型导入（缺省 dry-run 只预检；取消勾选才 apply 经流水线成版）
+const ossieDocument = ref('')
+const ossieDryRun = ref(true)
+const ossieImporting = ref(false)
+const ossieResult = ref<OssieImportResult | null>(null)
+
+async function doOssieImport() {
+  const document = ossieDocument.value.trim()
+  if (!document) return
+  ossieImporting.value = true
+  try {
+    const res: any = await importOssieYaml(document, !ossieDryRun.value)
+    ossieResult.value = res?.data ?? null
+  } catch (e: any) {
+    const detail = e?.response?.data?.detail
+    message.error(typeof detail === 'string' ? detail : t('ontology.ossieLoadFailed'))
+  } finally {
+    ossieImporting.value = false
+  }
+}
 
 async function downloadFormat(format: ExportFormat) {
   exportingFormat.value = format.key
@@ -290,5 +356,34 @@ const isAdmin = computed(() => {
 .mono {
   font-family: var(--nr-font-mono, monospace);
   font-size: 12px;
+}
+.ossie-textarea {
+  margin-bottom: 10px;
+  font-family: var(--nr-font-mono, monospace);
+  font-size: 12px;
+}
+.ossie-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 8px;
+}
+.ossie-result {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ossie-line {
+  margin: 0;
+  font-size: 12px;
+}
+.ossie-preflight {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+.ossie-finding {
+  word-break: break-all;
 }
 </style>
