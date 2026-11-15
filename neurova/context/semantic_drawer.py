@@ -37,6 +37,7 @@ _READOUT_KEYS = (
     "degraded_total",        # 语义编码失败降级关键词刻度的轮次累计
     "dynamic_floor_applied", # B13：动态门槛收紧生效的轮次累计
     "last_dynamic_floor",    # B13：最近一次生效门槛值（0.65=未收紧）
+    "last_model_floor",      # B13：最近一次的模型刻度门槛（刻度表/在线基线）
 )
 
 
@@ -83,6 +84,21 @@ class SemanticMatchDrawer:
     _DYNAMIC_FLOOR_SPREAD = 0.15        # 候选分差 ≤ 此值判定为同质池
     _DYNAMIC_FLOOR_MIN_CANDIDATES = 3   # 候选不足此数不做动态收紧
 
+    # B13（刻度表）：每个嵌入模型的门槛刻度——换嵌入模型后按键自动重适配。
+    # 键 = 向量面指纹（backend:model，见 UnifiedVectorStore._cacheFingerprint）。
+    # 现值 0.65 即 bge-small-zh-v1.5 的实测校准（无关基线 ~0.61-0.63、
+    # 相关 ≥0.64）；其他模型按各自刻度登记。
+    _EMBEDDING_MODEL_FLOORS: Dict[str, float] = {
+        "onnx:BAAI/bge-small-zh-v1.5": 0.65,
+    }
+    _EMBEDDING_MODEL_FLOOR_DEFAULT = 0.65  # 表外模型的默认门槛
+    # 在线基线（自校准）：表外模型按实测候选分最低值（无关基线估计）的
+    # EWMA 上浮门槛。基线样本 <3 时不参与（冷启动走默认）。
+    _BASELINE_EWMA_ALPHA = 0.2
+    _BASELINE_MARGIN = 0.04
+    _BASELINE_MIN_SAMPLES = 3
+    _FLOOR_CLAMP_LO, _FLOOR_CLAMP_HI = 0.6, 0.85
+
     @classmethod
     def _dynamicFloorEnabled(cls) -> bool:
         """动态门槛开关：默认开（NEUROVA_DRAW_DYNAMIC_FLOOR=0 关闭）。"""
@@ -115,6 +131,10 @@ class SemanticMatchDrawer:
         # 轮数爬升。内容不可变（同文本恒同向量），缓存无需失效、只限容量。
         self._vectorCache = OrderedDict()
         self._vectorCacheLock = threading.RLock()
+        # B13（刻度表）：每嵌入模型的在线无关基线（候选分最低值 EWMA）——
+        # 表外模型的自校准数据；按模型分桶，换模型后各自重新积累。
+        self._baselineEwma: Dict[str, float] = {}
+        self._baselineSamples: Dict[str, int] = {}
 
     #: 向量缓存容量（条）。池的热点候选远小于它；超限按 LRU 淘汰。
     _VECTOR_CACHE_CAPACITY = 4096
@@ -174,6 +194,52 @@ class SemanticMatchDrawer:
         with self._readoutLock:
             self._readouts[key] = value
 
+    def _embeddingModelKey(self) -> str:
+        """当前嵌入模型身份（向量面指纹 backend:model；不可用回退 'default'）。"""
+        store = self._vector_store
+        if not store:
+            return "default"
+        try:
+            fingerprint = store._cacheFingerprint()
+            if fingerprint:
+                return str(fingerprint)
+        except Exception:  # noqa: BLE001 - 指纹不可达时按默认模型处理
+            pass
+        return "default"
+
+    def _baseFloorForKey(self, model_key: str) -> float:
+        """B13 刻度表：按嵌入模型取基础相关性门槛。
+
+        = max(刻度表表值（表外取默认 0.65）, 在线基线 EWMA + 边距)，
+        钳 [0.6, 0.85]。基线样本不足时不参与（冷启动走表值/默认）。
+        """
+        table_floor = self._EMBEDDING_MODEL_FLOORS.get(
+            str(model_key or ""), self._EMBEDDING_MODEL_FLOOR_DEFAULT
+        )
+        floor = table_floor
+        with self._readoutLock:
+            samples = self._baselineSamples.get(str(model_key or ""), 0)
+            baseline = self._baselineEwma.get(str(model_key or ""))
+        if baseline is not None and samples >= self._BASELINE_MIN_SAMPLES:
+            floor = max(floor, baseline + self._BASELINE_MARGIN)
+        return min(self._FLOOR_CLAMP_HI, max(self._FLOOR_CLAMP_LO, floor))
+
+    def _updateBaseline(self, model_key: str, sample: float) -> None:
+        """更新该模型的在线无关基线（候选分最低值的 EWMA）。"""
+        alpha = self._BASELINE_EWMA_ALPHA
+        key = str(model_key or "")
+        with self._readoutLock:
+            current = self._baselineEwma.get(key)
+            if current is None:
+                self._baselineEwma[key] = float(sample)
+            else:
+                self._baselineEwma[key] = current + alpha * (float(sample) - current)
+            self._baselineSamples[key] = self._baselineSamples.get(key, 0) + 1
+
+    def _setReadout(self, key: str, value) -> None:
+        with self._readoutLock:
+            self._readouts[key] = value
+
     @property
     def vector_store(self):
         if self._vector_store is None:
@@ -216,9 +282,13 @@ class SemanticMatchDrawer:
         if not drops:
             return []
         viewBudget = self._budgetFor(budget_tokens, memo=update_turn_memo)
-        activeFloor = (
-            self.RELEVANCE_FLOOR if relevance_floor is None else float(relevance_floor)
-        )
+        # B13（刻度表）：基础门槛按当前嵌入模型取——换嵌入模型后按键自动
+        # 重适配；在线基线（表外模型的自校准）上浮；显式覆盖（近轮通道
+        # 0.75）取 max（模型刻度只抬不压显式值）。
+        modelKey = self._embeddingModelKey()
+        activeFloor = self._baseFloorForKey(modelKey)
+        if relevance_floor is not None:
+            activeFloor = max(activeFloor, float(relevance_floor))
         # B13：取水读数——入池面（粗筛前）计数
         self._bumpReadout("draws_total")
         self._bumpReadout("offered_total", len(drops))
@@ -255,6 +325,8 @@ class SemanticMatchDrawer:
         ):
             candidateScores = [scoring.matchScore(d) for d in candidates]
             bestScore = max(candidateScores)
+            # B13：在线基线采样——候选分最低值 ≈ 该模型对本 need 的无关基线
+            self._updateBaseline(modelKey, min(candidateScores))
             if bestScore >= activeFloor and (
                 bestScore - min(candidateScores)
             ) <= self._DYNAMIC_FLOOR_SPREAD:
@@ -263,6 +335,7 @@ class SemanticMatchDrawer:
                     activeFloor = tightened
                     self._bumpReadout("dynamic_floor_applied")
             self._setReadout("last_dynamic_floor", round(activeFloor, 4))
+            self._setReadout("last_model_floor", round(self._baseFloorForKey(modelKey), 4))
 
         def _relevant(d: ContextInput) -> bool:
             return (not threshold_active) or scoring.matchScore(d) >= activeFloor
