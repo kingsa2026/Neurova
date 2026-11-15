@@ -177,8 +177,8 @@ function onOutputScroll(e: Event): void {
   font-size: 11px;
   line-height: 1.4;
   border-radius: 6px;
-  border: 1px solid rgba(250, 204, 21, 0.35);
-  background: rgba(250, 204, 21, 0.08);
+  border: 1px solid var(--nr-warning-soft-border, rgba(245, 158, 11, 0.35));
+  background: var(--nr-warning-soft-bg, rgba(245, 158, 11, 0.12));
   color: var(--nr-text-secondary, #cbd5e1);
 }
 .panel-content {
