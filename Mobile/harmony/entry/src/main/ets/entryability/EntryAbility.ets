@@ -1,6 +1,7 @@
 import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
+import { HttpAdapter } from '../libs/adapters';
 
 export default class EntryAbility extends UIAbility {
   private static readonly DOMAIN: number = 0x0001;
@@ -12,6 +13,9 @@ export default class EntryAbility extends UIAbility {
       EntryAbility.TAG,
       'Neurova 鸿蒙 App 启动 - HarmonyOS 6.1 (API 13)'
     );
+    // 组合根：把平台 HTTP 适配器注入 HttpClient——不调用 install 则所有请求
+    // 抛「HttpBackend 未设置」（此前该调用全仓缺失，网络层从未装配）
+    HttpAdapter.getInstance().install();
   }
 
   onDestroy(): void {

@@ -13,7 +13,7 @@
 import { http } from '@kit.NetworkKit';
 import { Logger } from '../logger/Logger';
 import { ConfigManager } from '../config/ConfigManager';
-import { HttpClient, HttpBackend } from '../api/HttpClient';
+import { HttpClient, HttpBackend, HttpBackendResponse } from '../api/HttpClient';
 import { ApiResponse } from '../types';
 
 export class HttpAdapter implements HttpBackend {
@@ -49,7 +49,7 @@ export class HttpAdapter implements HttpBackend {
     url: string,
     body: Object | null,
     headers: Record<string, string>,
-  ): Promise<{ status: number; data: ApiResponse<Object> }> {
+  ): Promise<HttpBackendResponse> {
     // 创建鸿蒙 HTTP 请求对象
     const httpRequest = http.createHttp();
 
@@ -57,11 +57,15 @@ export class HttpAdapter implements HttpBackend {
     const timeout: number = this.config.get<number>('request_timeout', 15000);
 
     try {
-      // 合并请求头：默认头 + 调用方传入的头（后者覆盖前者）
-      const mergedHeaders: Record<string, string> = {
-        ...this.defaultHeaders,
-        ...headers,
-      };
+      // 合并请求头：默认头 + 调用方传入的头（后者覆盖前者）；
+      // ArkTS 禁对象展开，逐键拷贝
+      const mergedHeaders: Record<string, string> = {};
+      for (const hk of Object.keys(this.defaultHeaders)) {
+        mergedHeaders[hk] = this.defaultHeaders[hk];
+      }
+      for (const hk of Object.keys(headers)) {
+        mergedHeaders[hk] = headers[hk];
+      }
 
       // 构建鸿蒙请求选项
       const options: http.HttpRequestOptions = {
@@ -98,29 +102,29 @@ export class HttpAdapter implements HttpBackend {
     }
   }
 
-  /** 将字符串方法名转为鸿蒙 http.HttpRequestMethod 枚举 */
-  private toHttpMethod(method: string): http.HttpRequestMethod {
+  /** 将字符串方法名转为鸿蒙 http.RequestMethod 枚举 */
+  private toHttpMethod(method: string): http.RequestMethod {
     const upper = method.toUpperCase();
     switch (upper) {
       case 'GET':
-        return http.HttpRequestMethod.GET;
+        return http.RequestMethod.GET;
       case 'POST':
-        return http.HttpRequestMethod.POST;
+        return http.RequestMethod.POST;
       case 'PUT':
-        return http.HttpRequestMethod.PUT;
+        return http.RequestMethod.PUT;
       case 'DELETE':
-        return http.HttpRequestMethod.DELETE;
+        return http.RequestMethod.DELETE;
       case 'HEAD':
-        return http.HttpRequestMethod.HEAD;
+        return http.RequestMethod.HEAD;
       case 'OPTIONS':
-        return http.HttpRequestMethod.OPTIONS;
+        return http.RequestMethod.OPTIONS;
       case 'TRACE':
-        return http.HttpRequestMethod.TRACE;
+        return http.RequestMethod.TRACE;
       case 'CONNECT':
-        return http.HttpRequestMethod.CONNECT;
+        return http.RequestMethod.CONNECT;
       default:
         this.logger.warn('HttpAdapter', `未知 HTTP 方法 ${method}，降级为 GET`);
-        return http.HttpRequestMethod.GET;
+        return http.RequestMethod.GET;
     }
   }
 
@@ -130,18 +134,20 @@ export class HttpAdapter implements HttpBackend {
     if (typeof raw === 'string') {
       const text = raw as string;
       if (text.length === 0) {
-        return { code: 0, message: '空响应体', data: {} as Object };
+        const empty: ApiResponse<Object> = { code: 0, message: '空响应体', data: new Object() };
+        return empty;
       }
       try {
         return JSON.parse(text) as ApiResponse<Object>;
       } catch (e) {
         // 非 JSON 响应：包装为标准 ApiResponse，原文本放入 data
         this.logger.warn('HttpAdapter', `响应非 JSON 格式: ${text.slice(0, 200)}`);
-        return {
+        const wrapped: ApiResponse<Object> = {
           code: -1,
           message: '响应体非 JSON 格式',
           data: text as Object,
         };
+        return wrapped;
       }
     }
 
@@ -151,10 +157,11 @@ export class HttpAdapter implements HttpBackend {
     }
 
     // 其他类型（ArrayBuffer 等）：包装返回
-    return {
+    const fallback: ApiResponse<Object> = {
       code: -1,
       message: '不支持的响应体类型',
-      data: {} as Object,
+      data: new Object(),
     };
+    return fallback;
   }
 }

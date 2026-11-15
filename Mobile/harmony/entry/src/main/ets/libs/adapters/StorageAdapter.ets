@@ -18,6 +18,14 @@ import { common } from '@kit.AbilityKit';
 import { Logger } from '../logger/Logger';
 import { ErrorManager, ErrorCategory } from '../error/ErrorManager';
 
+/** 存储错误上报明细（各操作按需带字段） */
+interface StorageErrorDetails {
+  store?: string;
+  key?: string;
+  op?: string;
+}
+
+
 /** 日志标签 */
 const TAG = 'StorageAdapter';
 
@@ -52,11 +60,12 @@ export class StorageAdapter {
       const err = e as Error;
       this.logger.error(TAG, `初始化失败 store=${this.STORE_NAME}`, err);
       // 上报到错误管理器，便于全局感知
+      const details: StorageErrorDetails = { store: this.STORE_NAME };
       this.errors.reportError(
         'storage_init_failed',
         `存储初始化失败: ${err.message}`,
         ErrorCategory.STORAGE,
-        { store: this.STORE_NAME },
+        details
       );
       throw new Error(`[StorageAdapter] init 失败 (store=${this.STORE_NAME}): ${err.message}`);
     }
@@ -86,11 +95,12 @@ export class StorageAdapter {
     } catch (e) {
       const err = e as Error;
       this.logger.error(TAG, `get(${key}) 失败`, err);
+      const details: StorageErrorDetails = { key, op: 'get' };
       this.errors.reportError(
         'storage_get_failed',
         `读取失败 key=${key}: ${err.message}`,
         ErrorCategory.STORAGE,
-        { key, op: 'get' },
+        details
       );
       throw new Error(`[StorageAdapter] get ${key} 失败: ${err.message}`);
     }
@@ -110,11 +120,12 @@ export class StorageAdapter {
     } catch (e) {
       const err = e as Error;
       this.logger.error(TAG, `set(${key}) 失败`, err);
+      const details: StorageErrorDetails = { key, op: 'set' };
       this.errors.reportError(
         'storage_set_failed',
         `写入失败 key=${key}: ${err.message}`,
         ErrorCategory.STORAGE,
-        { key, op: 'set' },
+        details
       );
       throw new Error(`[StorageAdapter] set ${key} 失败: ${err.message}`);
     }
@@ -132,11 +143,12 @@ export class StorageAdapter {
     } catch (e) {
       const err = e as Error;
       this.logger.error(TAG, `remove(${key}) 失败`, err);
+      const details: StorageErrorDetails = { key, op: 'remove' };
       this.errors.reportError(
         'storage_remove_failed',
         `删除失败 key=${key}: ${err.message}`,
         ErrorCategory.STORAGE,
-        { key, op: 'remove' },
+        details
       );
       throw new Error(`[StorageAdapter] remove ${key} 失败: ${err.message}`);
     }
@@ -153,11 +165,12 @@ export class StorageAdapter {
     } catch (e) {
       const err = e as Error;
       this.logger.error(TAG, `has(${key}) 失败`, err);
+      const details: StorageErrorDetails = { key, op: 'has' };
       this.errors.reportError(
         'storage_has_failed',
         `查询失败 key=${key}: ${err.message}`,
         ErrorCategory.STORAGE,
-        { key, op: 'has' },
+        details
       );
       throw new Error(`[StorageAdapter] has ${key} 失败: ${err.message}`);
     }
@@ -176,11 +189,12 @@ export class StorageAdapter {
     } catch (e) {
       const err = e as Error;
       this.logger.error(TAG, 'clear 失败', err);
+      const details: StorageErrorDetails = { op: 'clear' };
       this.errors.reportError(
         'storage_clear_failed',
         `清空失败: ${err.message}`,
         ErrorCategory.STORAGE,
-        { op: 'clear' },
+        details
       );
       throw new Error(`[StorageAdapter] clear 失败: ${err.message}`);
     }
@@ -199,11 +213,12 @@ export class StorageAdapter {
     } catch (e) {
       const err = e as Error;
       this.logger.error(TAG, 'getAll 失败', err);
+      const details: StorageErrorDetails = { op: 'getAll' };
       this.errors.reportError(
         'storage_getall_failed',
         `读取全部失败: ${err.message}`,
         ErrorCategory.STORAGE,
-        { op: 'getAll' },
+        details
       );
       throw new Error(`[StorageAdapter] getAll 失败: ${err.message}`);
     }
@@ -221,11 +236,12 @@ export class StorageAdapter {
     } catch (e) {
       const err = e as Error;
       this.logger.error(TAG, 'flush 失败', err);
+      const details: StorageErrorDetails = { op: 'flush' };
       this.errors.reportError(
         'storage_flush_failed',
         `持久化失败: ${err.message}`,
         ErrorCategory.STORAGE,
-        { op: 'flush' },
+        details
       );
       throw new Error(`[StorageAdapter] flush 失败: ${err.message}`);
     }
