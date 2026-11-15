@@ -371,14 +371,26 @@ class ContextPool:
     _DEDUP_RESTORE_LEDGER_CAP = 500
 
     def _semanticDedupEnabled(self) -> bool:
-        """语义判重总开关：默认关（NEUROVA_DEDUP_SEMANTIC=1 显式开启）。
+        """语义判重总开关：默认关。
 
-        语义判重有信息丢失与漂移风险（设计文档 §3.3 自证），未灰度不得
-        默认改写入行为。
+        三级：env NEUROVA_DEDUP_SEMANTIC 显式值 > 设置面 advanced.
+        dedup_semantic_enabled（设置面板可调，现读改完即生效）> False。
+        语义判重有信息丢失与漂移风险（设计文档 §3.3 自证），默认不改
+        写入行为。
         """
         import os as _os
 
-        return _os.environ.get("NEUROVA_DEDUP_SEMANTIC", "0") == "1"
+        raw = _os.environ.get("NEUROVA_DEDUP_SEMANTIC", "").strip().lower()
+        if raw in ("1", "true", "yes", "on"):
+            return True
+        if raw in ("0", "false", "no", "off"):
+            return False
+        try:
+            from neurova.core.app_settings import get_advanced_settings
+
+            return bool(get_advanced_settings().get("dedup_semantic_enabled", False))
+        except Exception:  # noqa: BLE001 - 设置故障保持默认关
+            return False
 
     def _semanticThreshold(self) -> float:
         """判重阈值：去重器默认 0.95，env 可覆写（钳 0.5-1.0）。"""

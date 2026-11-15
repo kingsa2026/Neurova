@@ -2737,6 +2737,8 @@ conflictTimeReadout: 'Lectura temporal: {basis} (antigua {old} → nueva {new})'
     evolutionQueueHint: 'Las propuestas de mejora se encolan de forma persistente: no se pierden ante fallos, reintentan automáticamente y quedan auditables. La latencia del chat no cambia.',
     skillSemanticRecall: 'Nivel de recuperación semántica',
     skillSemanticRecallHint: 'Añade similitud vectorial local (bge) a la escalera de recuperación de habilidades (mezclada con puntajes de palabras clave; coincidencias semánticas débiles no cuentan). Retroceso silencioso a solo palabras clave si el modelo de embeddings no está disponible.',
+    contextDedupSemantic: 'Deduplicación semántica (escritura)',
+    contextDedupSemanticHint: 'El archivo de contexto elimina entradas casi idénticas de la misma fuente al escribir (similitud ≥ 0,95); las entradas eliminadas siguen siendo recuperables. Desactivado por defecto.',
     toolSearchEnabled: 'Carga diferida de herramientas',
     toolSearchEnabledHint: 'Al superar el umbral (40 por defecto) solo se inyecta un directorio acotado de capacidades; los esquemas completos se obtienen bajo demanda mediante tool_search / tool_describe / tool_call. La variable NEUROVA_TOOL_SEARCH explícita tiene prioridad.',
     myCredentialsHint: 'Gestiona tus propios hosts SSH (cifradas, visibles solo para ti)',
