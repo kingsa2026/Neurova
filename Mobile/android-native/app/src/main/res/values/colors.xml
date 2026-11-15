@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 星穹玻璃令牌（与设计稿 screen/board 变量对齐）：启动窗口底色，防白闪 -->
+    <color name="screen_dark">#0A0E1D</color>
+    <color name="screen_light">#F5F6FB</color>
+    <color name="launcher_background">#0A0E1D</color>
+</resources>

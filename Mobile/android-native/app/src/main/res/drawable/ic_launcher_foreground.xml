@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 品牌四芒星（Neurova LOGO 主形），渐变取品牌三停 135°（#6366f1 → #8b5cf6 → #a78bfa） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M54,30 L58.8,49.2 L78,54 L58.8,58.8 L54,78 L49.2,58.8 L30,54 L49.2,49.2 Z">
+        <aapt:attr xmlns:aapt="http://schemas.android.com/aapt" name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="30" android:startY="30"
+                android:endX="78" android:endY="78"
+                android:startColor="#6366F1"
+                android:endColor="#A78BFA" />
+        </aapt:attr>
+    </path>
+    <path
+        android:pathData="M54,44 L56,52 L64,54 L56,56 L54,64 L52,56 L44,54 L52,52 Z"
+        android:fillColor="#22D3EE" />
+</vector>
