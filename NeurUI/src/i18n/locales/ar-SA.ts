@@ -3508,6 +3508,7 @@ conflictTimeReadout: 'قراءة الوقت: {basis} (القديم {old} → ا�
     subagent: 'وكيل فرعي',
     expand: 'توسيع',
     minimize: 'تصغير',
+    subagentStalled: 'لم يُنتج الوكيل الفرعي شيئًا منذ {minutes} دقيقة (تنبيه #{count}) — انتظر أو أعد الإسناد',
     execFailed: 'فشل التنفيذ',
     thinking: 'يفكر…',
     selectCanvasWorkflow: 'اختر سير عمل اللوحة',

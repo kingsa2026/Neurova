@@ -3508,6 +3508,7 @@ conflictTimeReadout: 'Lecture temporelle : {basis} (ancienne {old} → nouvelle 
     subagent: 'Sous-agent',
     expand: 'Déployer',
     minimize: 'Réduire',
+    subagentStalled: 'Le sous-agent n’a rien produit depuis {minutes} min (rappel #{count}) — attendre ou réaffecter',
     execFailed: 'Échec de l\'exécution',
     thinking: 'Réflexion…',
     selectCanvasWorkflow: 'Sélectionner un flux de travail de canvas',

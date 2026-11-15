@@ -3508,6 +3508,7 @@ conflictTimeReadout: '時刻の読み取り: {basis}（旧 {old} → 新 {new}�
     subagent: 'サブエージェント',
     expand: '展開',
     minimize: '最小化',
+    subagentStalled: 'サブエージェントが {minutes} 分間出力なし（{count} 回目の通知）——待機または再割り当てを',
     execFailed: '実行失敗',
     thinking: '考え中…',
     selectCanvasWorkflow: 'キャンバスワークフローを選択',

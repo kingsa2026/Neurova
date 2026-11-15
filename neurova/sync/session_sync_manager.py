@@ -54,6 +54,8 @@ class EventType(str, Enum):
     SUBAGENT_STARTED = "subagent_started"
     SUBAGENT_CHUNK = "subagent_chunk"
     SUBAGENT_COMPLETED = "subagent_completed"
+    # 卡死渐进提醒（发现而不裁决：只提醒，等/停由主代理决定）
+    SUBAGENT_STALLED = "subagent_stalled"
 
     # 电脑/浏览器操作：Agent 执行 computer_*/browser_* 工具时的实时动作流
     # （驱动聊天页的电脑操作分屏面板）

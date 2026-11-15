@@ -3508,6 +3508,7 @@ conflictTimeReadout: 'समय रीडआउट: {basis} (पुराना 
     subagent: 'सब-एजेंट',
     expand: 'विस्तार करें',
     minimize: 'छोटा करें',
+    subagentStalled: 'सब-एजेंट {minutes} मिनट से निर्गत नहीं कर रहा (अनुस्मारक #{count}) — प्रतीक्षा करें या पुनः नियुक्त करें',
     execFailed: 'निष्पादन विफल',
     thinking: 'सोच रहा है…',
     selectCanvasWorkflow: 'कैनवास वर्कफ़्लो चुनें',

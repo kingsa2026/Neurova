@@ -53,6 +53,8 @@ function handleSubAgentSyncEvent(event: { event_type: string; payload: Record<st
       // LEDGER_TO_WINDOW_STATUS 一处——事件先于后端扩态也不会渲染成未定义态。
       status: LEDGER_TO_WINDOW_STATUS[String(p.status ?? '')] ?? 'running',
       report: '',
+      // 新 run（含续跑新 run）从干净状态起步
+      stallNotice: undefined,
     }
   } else if (event.event_type === 'subagent_chunk') {
     const win = subAgentWindows.value[sid]
@@ -61,12 +63,22 @@ function handleSubAgentSyncEvent(event: { event_type: string; payload: Record<st
       win.bodyText += String(p.data)
       win.chunkCount++
     }
+  } else if (event.event_type === 'subagent_stalled') {
+    // P2（蜂群对照）：卡死渐进提醒——只提示不裁决，等/停由用户/主代理决定
+    const win = subAgentWindows.value[sid]
+    if (win) {
+      win.stallNotice = {
+        stalledSeconds: Number(p.stalled_seconds || 0),
+        reminderCount: Number(p.reminder_count || 1),
+      }
+    }
   } else if (event.event_type === 'subagent_completed') {
     const win = subAgentWindows.value[sid]
     if (win) {
       win.status = (p.status as SubAgentWindowState['status']) || 'completed'
       win.report = String(p.report || '')
       win.error = p.error || null
+      win.stallNotice = undefined
       // completed/failed 窗口超时自动回收（重新 started 会清掉定时器）
       clearRecycleTimer(sid)
       recycleTimers.set(
