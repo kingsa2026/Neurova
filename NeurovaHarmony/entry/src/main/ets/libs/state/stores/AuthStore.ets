@@ -6,7 +6,7 @@
  */
 import { StateManager } from '../StateManager';
 import { User, AuthTokens } from '../../types';
-import { EventBus } from '../bus/EventBus';
+import { EventBus } from '../../bus/EventBus';
 
 const KEY_ACCESS_TOKEN = 'auth:access_token';
 const KEY_REFRESH_TOKEN = 'auth:refresh_token';
@@ -14,6 +14,9 @@ const KEY_USER = 'auth:user';
 // 移动端配对成功后下发的 WebSocket 凭证
 const KEY_WS_TOKEN = 'auth:ws_token';
 const KEY_WS_URL = 'auth:ws_url';
+// 长期设备身份（refresh 续签用，设计方案 §4.7）
+const KEY_DEVICE_SECRET = 'auth:device_secret';
+const KEY_PAIRING_ID = 'auth:pairing_id';
 
 export class AuthStore {
   private state: StateManager = StateManager.getInstance();
@@ -50,6 +53,22 @@ export class AuthStore {
     return !!this.wsToken;
   }
 
+  /** 长期设备身份密钥（confirm 一次性下发；refresh 续签凭证用） */
+  get deviceSecret(): string {
+    return this.state.get<string>(KEY_DEVICE_SECRET, '');
+  }
+
+  /** 在册设备 ID（refresh 续签必须携带） */
+  get pairingId(): string {
+    return this.state.get<string>(KEY_PAIRING_ID, '');
+  }
+
+  /** 写入长期设备身份（confirm 成功后调用；登出/解除配对时清除） */
+  setDeviceIdentity(pairingId: string, deviceSecret: string): void {
+    this.state.set(KEY_PAIRING_ID, pairingId);
+    this.state.set(KEY_DEVICE_SECRET, deviceSecret);
+  }
+
   /** 设置 tokens（登录成功后调用） */
   setTokens(tokens: AuthTokens): void {
     this.state.set(KEY_ACCESS_TOKEN, tokens.access_token);
@@ -69,7 +88,8 @@ export class AuthStore {
   setWsPairing(wsToken: string, wsUrl: string): void {
     this.state.set(KEY_WS_TOKEN, wsToken);
     this.state.set(KEY_WS_URL, wsUrl);
-    this.bus.emit('pairing:success', { wsToken, wsUrl } as Object);
+    const payload: PairingSuccessPayload = { wsToken, wsUrl };
+    this.bus.emit('pairing:success', payload);
   }
 
   /** 登出：清除所有认证状态 */
@@ -79,6 +99,14 @@ export class AuthStore {
     this.state.remove(KEY_USER);
     this.state.remove(KEY_WS_TOKEN);
     this.state.remove(KEY_WS_URL);
-    this.bus.emit('user:logout', {});
+    this.state.remove(KEY_DEVICE_SECRET);
+    this.state.remove(KEY_PAIRING_ID);
+    this.bus.emit('user:logout', new Object());
   }
+}
+
+/** 配对成功事件载荷 */
+export interface PairingSuccessPayload {
+  wsToken: string;
+  wsUrl: string;
 }

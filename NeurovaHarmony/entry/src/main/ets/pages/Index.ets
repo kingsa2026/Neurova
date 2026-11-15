@@ -15,6 +15,9 @@
 import { Router, RouteNames } from '../routing/Router';
 import { AuthStore } from '../libs/state/stores/AuthStore';
 import { Logger } from '../libs/logger/Logger';
+import { ServerProfiles } from '../libs/config/ServerProfiles';
+import { ConfigManager } from '../libs/config/ConfigManager';
+import { pageMap } from '../routing/PageMap';
 
 @Entry
 @Component
@@ -24,6 +27,13 @@ struct Index {
   private logger = Logger.getInstance();
 
   aboutToAppear() {
+    // 冷启动先恢复服务器档案并把地址落到 HTTP 装配点（设计方案 §4.5，S0 接线）
+    ServerProfiles.getInstance().load(getContext(this) as Context).then(() => {
+      const apiBase = ServerProfiles.getInstance().getActiveApiBase();
+      if (apiBase) {
+        ConfigManager.getInstance().applyServerProfile(apiBase, getContext(this) as Context);
+      }
+    });
     // M5.2.3 冷启动优化：立即分发，无占位渲染
     if (this.authStore.isAuthenticated) {
       this.logger.info('Index', '冷启动：已登录，跳转仪表盘');
@@ -34,11 +44,27 @@ struct Index {
     }
   }
 
+  @Builder
+  destBuilder(name: string) {
+    pageMap(name)
+  }
+
   build() {
-    // 透明占位（路由 replace 后立即消失）
-    Column()
+    // 根导航容器：所有页面经 NavPathStack + navDestination 渲染（此前无挂载点，页面名无组件映射）
+    Navigation(this.router.getNavStack()) {
+      Column() {
+        Text('Neurova')
+          .fontSize(18)
+          .opacity(0.6)
+      }
       .width('100%')
       .height('100%')
-      .backgroundColor('#FFFFFF')
+      .justifyContent(FlexAlign.Center)
+    }
+    .navDestination(this.destBuilder)
+    .hideTitleBar(true)
+    .mode(NavigationMode.Stack)
+    .width('100%')
+    .height('100%')
   }
 }

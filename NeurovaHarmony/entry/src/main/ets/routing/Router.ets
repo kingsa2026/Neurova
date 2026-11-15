@@ -11,86 +11,92 @@
  *   router.back();
  */
 
-import { Logger } from '../logger/Logger';
-import { AuthStore } from '../state/stores/AuthStore';
+import { Logger } from '../libs/logger/Logger';
+import { AuthStore } from '../libs/state/stores/AuthStore';
+
+/** 未授权跳转登录页时携带的回跳参数 */
+export interface RedirectParam {
+  redirect: string;
+}
 
 /** 路由名 → 页面组件映射（实际组件由 Navigation 的 navPath 属性绑定） */
-export const RouteNames = {
-  LOGIN: 'LoginPage',
-  REGISTER: 'RegisterPage',
-  DASHBOARD: 'DashboardPage',
-  CHAT: 'ChatPage',
-  AGENT_LIST: 'AgentListPage',
-  AGENT_FORM: 'AgentFormPage',
-  PAIRING: 'PairingPage',
-  MEMORY: 'MemoryPage',
-  KNOWLEDGE: 'KnowledgePage',
-  MODEL: 'ModelPage',
-  HEALTH: 'HealthPage',
-  SETTINGS: 'SettingsPage',
-  AGENT_CHANNEL: 'AgentChannelPage',
+export class RouteNames {
+  static readonly LOGIN: string = 'LoginPage';
+  static readonly REGISTER: string = 'RegisterPage';
+  static readonly DASHBOARD: string = 'DashboardPage';
+  static readonly CHAT: string = 'ChatPage';
+  static readonly AGENT_LIST: string = 'AgentListPage';
+  static readonly AGENT_FORM: string = 'AgentFormPage';
+  static readonly PAIRING: string = 'PairingPage';
+  static readonly CONNECTION: string = 'ConnectionPage';
+  static readonly MEMORY: string = 'MemoryPage';
+  static readonly KNOWLEDGE: string = 'KnowledgePage';
+  static readonly MODEL: string = 'ModelPage';
+  static readonly HEALTH: string = 'HealthPage';
+  static readonly SETTINGS: string = 'SettingsPage';
+  static readonly AGENT_CHANNEL: string = 'AgentChannelPage';
   // M4 P2 认知层
-  EXPERIENCE_KNOWLEDGE: 'ExperienceKnowledgePage',
-  KNOWLEDGE_GRAPH: 'KnowledgeGraphPage',
-  METACOGNITION: 'MetacognitionPage',
-  REFLECTION: 'ReflectionPage',
-  GROWTH: 'GrowthPage',
+  static readonly EXPERIENCE_KNOWLEDGE: string = 'ExperienceKnowledgePage';
+  static readonly KNOWLEDGE_GRAPH: string = 'KnowledgeGraphPage';
+  static readonly METACOGNITION: string = 'MetacognitionPage';
+  static readonly REFLECTION: string = 'ReflectionPage';
+  static readonly GROWTH: string = 'GrowthPage';
   // M4 P2 能力层
-  AGENT_RULE: 'AgentRulePage',
-  AGENT_FILE: 'AgentFilePage',
-  AGENT_MEDIA: 'AgentMediaPage',
+  static readonly AGENT_RULE: string = 'AgentRulePage';
+  static readonly AGENT_FILE: string = 'AgentFilePage';
+  static readonly AGENT_MEDIA: string = 'AgentMediaPage';
   // M4 P2 个性层
-  AGENT_EMOTION: 'AgentEmotionPage',
-  AGENT_PERSONALITY: 'AgentPersonalityPage',
+  static readonly AGENT_EMOTION: string = 'AgentEmotionPage';
+  static readonly AGENT_PERSONALITY: string = 'AgentPersonalityPage';
   // M4 P2 运行时层
-  AGENT_SCHEDULER: 'AgentSchedulerPage',
-  CONTEXT_CHANNEL: 'ContextChannelPage',
-  AGENT_COMPUTER: 'AgentComputerPage',
-  AGENT_TRACE: 'AgentTracePage',
-  AGENT_TRAJECTORY: 'AgentTrajectoryPage',
-  SLEEP_STATUS: 'SleepStatusPage',
-  SLEEP_SETTINGS: 'SleepSettingsPage',
-  AGENT_FIREWALL: 'AgentFirewallPage',
+  static readonly AGENT_SCHEDULER: string = 'AgentSchedulerPage';
+  static readonly CONTEXT_CHANNEL: string = 'ContextChannelPage';
+  static readonly AGENT_COMPUTER: string = 'AgentComputerPage';
+  static readonly AGENT_TRACE: string = 'AgentTracePage';
+  static readonly AGENT_TRAJECTORY: string = 'AgentTrajectoryPage';
+  static readonly SLEEP_STATUS: string = 'SleepStatusPage';
+  static readonly SLEEP_SETTINGS: string = 'SleepSettingsPage';
+  static readonly AGENT_FIREWALL: string = 'AgentFirewallPage';
   // M4 P2 知识技能扩展
-  SKILL_POOL: 'SkillPoolPage',
-  SKILL_MARKET: 'SkillMarketPage',
-  AIGC: 'AIGCPage',
-  TOOL_LAYER: 'ToolLayerPage',
+  static readonly SKILL_POOL: string = 'SkillPoolPage';
+  static readonly SKILL_MARKET: string = 'SkillMarketPage';
+  static readonly AIGC: string = 'AIGCPage';
+  static readonly TOOL_LAYER: string = 'ToolLayerPage';
   // M4 P2 协作与工作流
-  WORKFLOW: 'WorkflowPage',
-  COLLABORATION: 'CollaborationPage',
-  PROJECT: 'ProjectPage',
-  TEAM: 'TeamPage',
-  TASK: 'TaskPage',
+  static readonly WORKFLOW: string = 'WorkflowPage';
+  static readonly COLLABORATION: string = 'CollaborationPage';
+  static readonly PROJECT: string = 'ProjectPage';
+  static readonly TEAM: string = 'TeamPage';
+  static readonly TASK: string = 'TaskPage';
   // M4 P2 渠道系统
-  CHANNEL_INTEGRATION: 'ChannelIntegrationPage',
-  SESSION_SYNC: 'SessionSyncPage',
+  static readonly CHANNEL_INTEGRATION: string = 'ChannelIntegrationPage';
+  static readonly SESSION_SYNC: string = 'SessionSyncPage';
   // M4 P2 监控与管理
-  STATS: 'StatsPage',
-  MONITOR: 'MonitorPage',
-  LOG: 'LogPage',
-  FILE: 'FilePage',
-  NOTIFICATION: 'NotificationPage',
-  NEURON: 'NeuronPage',
+  static readonly STATS: string = 'StatsPage';
+  static readonly MONITOR: string = 'MonitorPage';
+  static readonly LOG: string = 'LogPage';
+  static readonly FILE: string = 'FilePage';
+  static readonly NOTIFICATION: string = 'NotificationPage';
+  static readonly NEURON: string = 'NeuronPage';
   // M5 P3 协作扩展与市场
-  COLLABORATION_TEMPLATE: 'CollaborationTemplatePage',
-  COLLABORATION_HISTORY: 'CollaborationHistoryPage',
-  COLLABORATION_INITIATE: 'CollaborationInitiatePage',
-  WEBHOOK: 'WebhookPage',
-  MARKETPLACE: 'MarketplacePage',
+  static readonly COLLABORATION_TEMPLATE: string = 'CollaborationTemplatePage';
+  static readonly COLLABORATION_HISTORY: string = 'CollaborationHistoryPage';
+  static readonly COLLABORATION_INITIATE: string = 'CollaborationInitiatePage';
+  static readonly WEBHOOK: string = 'WebhookPage';
+  static readonly MARKETPLACE: string = 'MarketplacePage';
   // M5 P3 系统监控扩展
-  AUDIT: 'AuditPage',
-  BENCHMARK: 'BenchmarkPage',
-  SANDBOX: 'SandboxPage',
-  FIREWALL: 'FirewallPage',
-  ANALYTICS: 'AnalyticsPage',
+  static readonly AUDIT: string = 'AuditPage';
+  static readonly BENCHMARK: string = 'BenchmarkPage';
+  static readonly SANDBOX: string = 'SandboxPage';
+  static readonly FIREWALL: string = 'FirewallPage';
+  static readonly ANALYTICS: string = 'AnalyticsPage';
   // M5 P3 用户与记忆扩展
-  GROUP: 'GroupPage',
-  ENHANCED_USER: 'EnhancedUserPage',
-  AGENT_SKILL: 'AgentSkillPage',
-  MEMORY_SETTINGS: 'MemorySettingsPage',
-  MEMORY_SEARCH_SETTINGS: 'MemorySearchSettingsPage',
-} as const;
+  static readonly GROUP: string = 'GroupPage';
+  static readonly ENHANCED_USER: string = 'EnhancedUserPage';
+  static readonly AGENT_SKILL: string = 'AgentSkillPage';
+  static readonly MEMORY_SETTINGS: string = 'MemorySettingsPage';
+  static readonly MEMORY_SEARCH_SETTINGS: string = 'MemorySearchSettingsPage';
+}
 
 /** 需要登录才能访问的受保护路由 */
 const PROTECTED_ROUTES: string[] = [
@@ -201,10 +207,11 @@ export class Router {
   push(routeName: string, params?: Record<string, Object>): boolean {
     if (!canNavigate(routeName, this.authStore)) {
       this.logger.warn('Router', `未授权访问 ${routeName}，跳转登录页`);
-      this.navStack.replacePath({ name: RouteNames.LOGIN, param: { redirect: routeName } });
+      const redirectParam: RedirectParam = { redirect: routeName };
+      this.navStack.replacePath(new NavPathInfo(RouteNames.LOGIN, redirectParam));
       return false;
     }
-    this.navStack.pushPath({ name: routeName, param: params });
+    this.navStack.pushPath(new NavPathInfo(routeName, params));
     this.logger.info('Router', `push → ${routeName}`);
     return true;
   }
@@ -213,10 +220,11 @@ export class Router {
   replace(routeName: string, params?: Record<string, Object>): boolean {
     if (!canNavigate(routeName, this.authStore)) {
       this.logger.warn('Router', `未授权访问 ${routeName}，跳转登录页`);
-      this.navStack.replacePath({ name: RouteNames.LOGIN, param: { redirect: routeName } });
+      const redirectParam: RedirectParam = { redirect: routeName };
+      this.navStack.replacePath(new NavPathInfo(RouteNames.LOGIN, redirectParam));
       return false;
     }
-    this.navStack.replacePath({ name: routeName, param: params });
+    this.navStack.replacePath(new NavPathInfo(routeName, params));
     this.logger.info('Router', `replace → ${routeName}`);
     return true;
   }
@@ -242,10 +250,10 @@ export class Router {
 
   /** 获取当前页面参数 */
   getCurrentParam(): Object | undefined {
-    const path = this.navStack.getAllPathName().length > 0
-      ? this.navStack.getParamByIndex(this.navStack.size() - 1)
-      : undefined;
-    return path;
+    if (this.navStack.getAllPathName().length > 0) {
+      return this.navStack.getParamByIndex(this.navStack.size() - 1) as Object;
+    }
+    return undefined;
   }
 
   /** 获取栈深度 */

@@ -101,67 +101,63 @@ export class MonitorApi {
 
   // ========== NotificationItem（通知）==========
 
-  /** 列出通知（可选仅未读过滤） */
+  /** 列出通知（可选仅未读过滤；后端信封 data={items,total}，这里拆包回数组） */
   async listNotifications(unreadOnly?: boolean): Promise<ApiResponse<NotificationItem[]>> {
     const query: Record<string, Object> = {};
-    if (unreadOnly !== undefined) query['unreadOnly'] = unreadOnly;
-    return this.client.get<NotificationItem[]>('/v1/monitor/notifications', query);
+    if (unreadOnly !== undefined) query['read'] = !unreadOnly;
+    const res = await this.client.get<PageResult<NotificationItem>>('/v1/notifications', query);
+    const page = (res.data ?? { items: [], total: 0 }) as PageResult<NotificationItem>;
+    return { code: res.code, message: res.message, data: page.items } as ApiResponse<NotificationItem[]>;
   }
 
   /** 获取单条通知 */
   async getNotification(id: string): Promise<ApiResponse<NotificationItem>> {
-    return this.client.get<NotificationItem>(`/v1/monitor/notifications/${id}`);
+    return this.client.get<NotificationItem>(`/v1/notifications/${id}`);
   }
 
   /** 标记单条通知为已读 */
   async markNotificationRead(id: string): Promise<ApiResponse<Object>> {
-    return this.client.post<Object>(`/v1/monitor/notifications/${id}/read`, {});
+    return this.client.post<Object>(`/v1/notifications/${id}/read`, {});
   }
 
   /** 标记所有通知为已读 */
   async markAllNotificationsRead(): Promise<ApiResponse<Object>> {
-    return this.client.post<Object>('/v1/monitor/notifications/read-all', {});
+    return this.client.post<Object>('/v1/notifications/mark-all-read', {});
   }
 
   /** 删除单条通知 */
   async removeNotification(id: string): Promise<ApiResponse<Object>> {
-    return this.client.delete<Object>(`/v1/monitor/notifications/${id}`);
+    return this.client.delete<Object>(`/v1/notifications/${id}`);
   }
 
   // ========== FileItem（文件）==========
 
-  /** 列出文件（可选 parentId 过滤 + 分页） */
+  /** 列出文件（GET /v1/files 返回裸数组，这里包成 PageResult；后端暂无目录层级，parentId 仅保留签名） */
   async listFiles(
     parentId?: string,
     params?: PageParams,
   ): Promise<ApiResponse<PageResult<FileItem>>> {
-    const query: Record<string, Object> = {};
-    if (parentId) query['parentId'] = parentId;
-    if (params) {
-      if (params.page !== undefined) query['page'] = params.page;
-      if (params.size !== undefined) query['size'] = params.size;
-    }
-    return this.client.get<PageResult<FileItem>>('/v1/monitor/files', query);
+    const res = await this.client.get<FileItem[]>('/v1/files');
+    const arr = (res.data ?? []) as FileItem[];
+    return {
+      code: 0, message: 'ok',
+      data: { items: arr, total: arr.length, page: 1, size: arr.length },
+    } as ApiResponse<PageResult<FileItem>>;
   }
 
   /** 获取单条文件项 */
   async getFile(id: string): Promise<ApiResponse<FileItem>> {
-    return this.client.get<FileItem>(`/v1/monitor/files/${id}`);
+    return this.client.get<FileItem>(`/v1/files/${id}`);
   }
 
-  /** 创建文件夹 */
-  async createFolder(data: Partial<FileItem>): Promise<ApiResponse<FileItem>> {
-    return this.client.post<FileItem>('/v1/monitor/files/folder', data);
-  }
-
-  /** 上传文件 */
-  async uploadFile(data: Partial<FileItem>): Promise<ApiResponse<FileItem>> {
-    return this.client.post<FileItem>('/v1/monitor/files', data);
+  /** 上传文件（multipart：file 二进制 + query agent_id/session_id，对齐 files_api.upload_file） */
+  async uploadFile(fileData: ArrayBuffer, filename: string, agentId: string = 'default'): Promise<ApiResponse<FileItem>> {
+    return this.client.upload<FileItem>('/v1/files/upload', fileData, filename, { agent_id: agentId });
   }
 
   /** 删除文件项 */
   async removeFile(id: string): Promise<ApiResponse<Object>> {
-    return this.client.delete<Object>(`/v1/monitor/files/${id}`);
+    return this.client.delete<Object>(`/v1/files/${id}`);
   }
 
   // ========== Neuron（神经元）==========

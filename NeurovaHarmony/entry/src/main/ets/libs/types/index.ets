@@ -227,7 +227,6 @@ export type WSMessageType =
 /** WS 通用消息信封 */
 export interface WSMessage {
   type: WSMessageType;
-  [key: string]: Object;
 }
 
 /** chat:send 消息 */
@@ -273,14 +272,17 @@ export interface WSAgentSwitch {
   agent_id: string;
 }
 
+/** agent:switched 携带的应用配置 */
+export interface WSAgentSwitchedConfig {
+  agent_id: string;
+  name: string;
+}
+
 /** agent:switched 消息 */
 export interface WSAgentSwitched {
   type: 'agent:switched';
   agent_id: string;
-  config: {
-    agent_id: string;
-    name: string;
-  };
+  config: WSAgentSwitchedConfig;
 }
 
 /** session:list 消息（响应） */
@@ -321,28 +323,51 @@ export interface PairingInfo {
   expiresAt: number;       // 过期时间戳（毫秒）
 }
 
-/** 配对确认请求 */
+/** 配对确认请求（ref=扫码 resolve 后的新通道；code=旧 6 位手输通道，二选一） */
 export interface PairingConfirm {
-  code: string;
+  ref?: string;
+  code?: string;
   deviceName: string;
   deviceType: string;
 }
 
 /** 配对确认响应 */
 export interface PairingConfirmed {
-  wsToken: string;         // WS 连接 token
+  wsToken: string;         // WS 连接 token（一次性 connect_ticket）
   wsUrl: string;           // WS 连接 URL
   expiresIn: number;       // token 有效期（秒）
+  deviceSecret?: string;   // 长期设备身份密钥（仅 confirm 返回一次，存安全区）
+  pairingId?: string;      // 在册设备 ID（refresh 续签用）
+}
+
+/** 扫码后 resolve 换取回连地址的响应 */
+export interface PairingResolved {
+  wsUrl: string;           // 回连地址（票据走 header，不入 URL）
+  pairingId: string;
+  expiresIn: number;
+  status: string;
+}
+
+/** 接入凭证续签请求（设备关机过夜后免重扫，设计方案 §4.7） */
+export interface PairingRefresh {
+  pairingId: string;
+  deviceSecret: string;
+  challenge: string;
+}
+
+/** 接入凭证续签响应 */
+export interface PairingRefreshed {
+  connectTicket: string;
+  pairingId: string;
+  expiresIn: number;
 }
 
 // ===========================================================================
 // 8. 导航
 // ===========================================================================
 
-/** 导航参数 */
-export interface NavigationParam {
-  [key: string]: Object;
-}
+/** 导航参数（ArkTS 不支持索引签名，用 Record 表达键值袋） */
+export type NavigationParam = Record<string, Object>;
 
 // ===========================================================================
 // 9. LLM 模型与 Provider
@@ -352,6 +377,12 @@ export type ModelType = 'text' | 'image' | 'audio';
 export type ProviderCategory = 'paid' | 'free' | 'local';
 export type ProviderStatus = 'available' | 'unavailable' | 'not_configured' | 'not_ready';
 export type ProviderHealth = 'healthy' | 'unhealthy' | 'unknown';
+
+/** 模型计价信息 */
+export interface ModelPricing {
+  input: number;
+  output: number;
+}
 
 export interface ModelItem {
   id: string;
@@ -364,7 +395,7 @@ export interface ModelItem {
   is_active: boolean;
   context_window?: number;
   max_tokens?: number;
-  pricing?: { input: number; output: number };
+  pricing?: ModelPricing;
   owned_by?: string;
 }
 
@@ -500,6 +531,12 @@ export interface ChannelInfo {
 
 export type SettingType = 'toggle' | 'select' | 'input' | 'slider' | 'action';
 
+/** select 类型选项 */
+export interface SettingOption {
+  label: string;
+  value: Object;
+}
+
 export interface SettingItem {
   key: string;               // 设置项唯一标识（持久化键名）
   label: string;
@@ -507,7 +544,7 @@ export interface SettingItem {
   type: SettingType;
   value: Object;             // 当前值
   defaultValue: Object;
-  options?: { label: string; value: Object }[];  // select 类型选项
+  options?: SettingOption[];  // select 类型选项
   min?: number;              // slider 最小值
   max?: number;              // slider 最大值
   step?: number;             // slider 步长
@@ -869,12 +906,18 @@ export interface Project {
 /** 团队角色 */
 export type TeamRole = 'owner' | 'admin' | 'member' | 'viewer';
 
+/** 团队成员 */
+export interface TeamMember {
+  userId: string;
+  role: TeamRole;
+}
+
 /** 团队 */
 export interface Team {
   id: string;
   name: string;
   description?: string;
-  members: Array<{ userId: string; role: TeamRole }>;
+  members: TeamMember[];
   createdAt: string;
 }
 
@@ -910,6 +953,13 @@ export interface WorkflowNode {
   config?: Metadata;
 }
 
+/** 工作流边 */
+export interface WorkflowEdge {
+  source: string;
+  target: string;
+  condition?: string;
+}
+
 /** 工作流 */
 export interface Workflow {
   id: string;
@@ -917,7 +967,7 @@ export interface Workflow {
   description?: string;
   status: WorkflowStatus;
   nodes: WorkflowNode[];
-  edges: Array<{ source: string; target: string; condition?: string }>;
+  edges: WorkflowEdge[];
   version: string;
   createdAt: string;
   updatedAt: string;
@@ -1045,13 +1095,20 @@ export interface Neuron {
 // 24. 协作扩展与市场（P3）
 // ===========================================================================
 
+/** 协作模板步骤 */
+export interface CollaborationTemplateStep {
+  name: string;
+  description?: string;
+  order: number;
+}
+
 /** 协作模板 */
 export interface CollaborationTemplate {
   id: string;
   name: string;
   description?: string;
   category: string;            // project/team/workflow
-  steps: Array<{ name: string; description?: string; order: number }>;
+  steps: CollaborationTemplateStep[];
   isPublic: boolean;
   usageCount: number;
   createdAt: string;
@@ -1288,16 +1345,25 @@ export interface MemorySettings {
 /** 记忆搜索设置 */
 export type MemorySearchStrategy = 'semantic' | 'keyword' | 'hybrid' | 'temporal';
 
+/** 记忆搜索日期范围 */
+export interface MemorySearchDateRange {
+  start: string;
+  end: string;
+}
+
+/** 记忆搜索过滤条件 */
+export interface MemorySearchFilters {
+  types?: string[];
+  tags?: string[];
+  dateRange?: MemorySearchDateRange;
+}
+
 export interface MemorySearchSettings {
   agentId: string;
   strategy: MemorySearchStrategy;
   topK: number;                // 返回结果数
   minScore: number;            // 0-1
-  filters?: {
-    types?: string[];
-    tags?: string[];
-    dateRange?: { start: string; end: string };
-  };
+  filters?: MemorySearchFilters;
   enabled: boolean;
   updatedAt: string;
 }

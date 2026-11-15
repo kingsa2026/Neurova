@@ -7,6 +7,7 @@
 
 import { GlassNav, GlassNavItem, TopNavMenu } from '../components/glass';
 import { Router, RouteNames } from '../routing/Router';
+import { pageMap } from '../routing/PageMap';
 import { StyleManager } from '../libs/style/StyleManager';
 import { AppStore } from '../libs/state/stores/AppStore';
 import { Logger } from '../libs/logger/Logger';
@@ -160,6 +161,8 @@ export struct MainLayout {
       .onClick(() => this.navigateTo(RouteNames.MEMORY_SEARCH_SETTINGS))
     GlassNavItem({ label: '配对', active: this.currentRoute === RouteNames.PAIRING, collapsed: this.sidebarCollapsed })
       .onClick(() => this.navigateTo(RouteNames.PAIRING))
+    GlassNavItem({ label: '服务器档案', active: this.currentRoute === RouteNames.CONNECTION, collapsed: this.sidebarCollapsed })
+      .onClick(() => this.navigateTo(RouteNames.CONNECTION))
     GlassNavItem({ label: '设置', active: this.currentRoute === RouteNames.SETTINGS, collapsed: this.sidebarCollapsed })
       .onClick(() => this.navigateTo(RouteNames.SETTINGS))
   }
@@ -206,6 +209,7 @@ export struct MainLayout {
         }
         .hideTitleBar(true)
         .mode(NavigationMode.Stack)
+        .navDestination(this.destBuilder)
         .layoutWeight(1)
       }
       .layoutWeight(1)
@@ -214,6 +218,11 @@ export struct MainLayout {
     .width('100%')
     .height('100%')
     .backgroundColor(this.sm.getColor('background'))
+  }
+
+  @Builder
+  destBuilder(name: string) {
+    pageMap(name)
   }
 
   private currentRouteName(): string {
@@ -289,6 +298,7 @@ export struct MainLayout {
       [RouteNames.MEMORY_SETTINGS]: '记忆设置',
       [RouteNames.MEMORY_SEARCH_SETTINGS]: '记忆检索设置',
       [RouteNames.PAIRING]: '配对',
+      [RouteNames.CONNECTION]: '服务器档案',
       [RouteNames.SETTINGS]: '设置',
       [RouteNames.LOGIN]: '登录',
       [RouteNames.REGISTER]: '注册',
