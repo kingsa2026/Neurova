@@ -25,7 +25,7 @@ async function getAccessToken(): Promise<string> {
   return (await storageGet(STORAGE_KEYS.accessToken)) ?? ''
 }
 
-async function refreshAccessToken(): Promise<string> {
+export async function refreshAccessToken(): Promise<string> {
   refreshInFlight ??= (async () => {
     const servers = useServersStore()
     const refreshToken = (await storageGet(STORAGE_KEYS.refreshToken)) ?? ''
