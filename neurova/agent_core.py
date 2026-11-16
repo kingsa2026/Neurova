@@ -1752,49 +1752,6 @@ class Agent:
         )
         return await self.chat_pipeline.execute(ctx)
 
-    async def chat_stream(
-        self,
-        user_input: str,
-        session_id: str = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        **kwargs,
-    ):
-        """流式对话：逐 chunk yield 字符串
-
-        mobile_pairing._handle_chat_send 与 chat.py SSE 端点按
-        user_input=/session_id=/metadata= 消费本方法（hasattr 分支）。
-        当前委托 self.chat() 走完整管线（记忆/上下文/后处理不缺失），
-        拿到完整回复后按句切块 yield；chat() 异常透传不吞。
-        """
-        response = await self.chat(
-            user_input=user_input,
-            session_id=session_id,
-            metadata=metadata,
-            **kwargs,
-        )
-
-        if isinstance(response, dict):
-            text = response.get("text") or ""
-        else:
-            text = str(response or "")
-
-        if not text:
-            yield ""
-            return
-
-        import re as _re
-
-        # 按句子边界切块（保留标点），无标点长文按 120 字符硬切
-        parts = _re.split(r"(?<=[。！？!?\n])", text)
-        buf = ""
-        for part in parts:
-            buf += part
-            if len(buf) >= 120:
-                yield buf
-                buf = ""
-        if buf:
-            yield buf
-
     async def _record_tool_failure_lesson(
         self,
         tool_name: str,

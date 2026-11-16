@@ -27,6 +27,13 @@ object MobileWsClosePolicy {
         else -> Decision.RECONNECT
     }
 
+    /**
+     * 握手被 HTTP 状态拒绝时的归类：401/403 = ticket 无效/已消费（服务端升级前拒绝，
+     * 没有 close 帧）→ 按 4001 语义走续签重试；其余状态/无响应 → null（走 1006 传输层重连）。
+     */
+    fun closeCodeForHandshakeRejection(httpStatus: Int?): Int? =
+        if (httpStatus == 401 || httpStatus == 403) CLOSE_DEVICE_TICKET_INVALID else null
+
     private const val CLOSE_DEVICE_TICKET_INVALID = 4001
     private const val CLOSE_USER_CONNECTION_LIMIT = 4008
 }

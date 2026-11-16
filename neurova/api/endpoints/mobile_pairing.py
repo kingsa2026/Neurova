@@ -267,17 +267,29 @@ async def _run_chat_stream(ws, data: dict, user_id: str):
     """B-6: 独立 task 执行 chat:send 流式回复。
 
     任务被 cancel（chat:cancel 中途取消 / 连接断开收尸）时 CancelledError
-    不经 _handle_chat_send 的 except Exception（BaseException 不被捕获），
-    在此补发 chat:cancelled 保持客户端取消事件契约，再原样上抛。
+    不经 _handle_chat_send 的 except Exception（BaseException 不被捕获）：
+    先级联取消回合与事件泵两个子 task 并等它们收尾（防孤儿回合继续烧
+    token），再补发 chat:cancelled 保持客户端取消事件契约，最后原样上抛。
     """
     sid = data.get("session_id", "")
+    workers: List[asyncio.Task] = []
     try:
-        await _handle_chat_send(ws, data, user_id)
+        await _handle_chat_send(ws, data, user_id, workers.append)
+        if workers:
+            await asyncio.gather(*workers)
     except asyncio.CancelledError:
+        for task in workers:
+            if not task.done():
+                task.cancel()
         try:
             await ws.send_json({"type": "chat:cancelled", "session_id": sid})
         except Exception:
             pass  # 连接已断，通知失败不影响收尸
+        for task in workers:
+            try:
+                await task
+            except BaseException:  # noqa: BLE001 - 收尸不外泄（含 CancelledError）
+                pass
         raise
 
 
@@ -592,8 +604,19 @@ class MobileConnectionManager:
 # ---------------------------------------------------------------------------
 
 
-async def _handle_chat_send(ws, data: dict, user_id: str):
-    """处理 chat:send -- 流式聊天核心"""
+async def _handle_chat_send(ws, data: dict, user_id: str, register=None):
+    """处理 chat:send -- 流式聊天核心（运行态与 PC /v1/chat/stream 同源）。
+
+    P9+（会话进度步骤条/排队卡）：此前移动端直呼 `agent.chat_stream`（句切假
+    流式），绕过台账与让位闸——排队位/挂起/思考流在手机上全部不可见。现纳入
+    同一套事实源：AgentRunLedger（排队位→chat:queued）、requestTurnAdmission
+    （让位闸 onWait→chat:queued、挂起→chat:queued+done）、管线 event_emitter
+    （content→chat:chunk、reasoning→chat:reasoning、retry→chat:retry）。
+    闸/台账故障对移动端 fail-open（同 ledger.acquire 的既有口径）：日志点名、
+    本轮照答，不让一次闸故障挂死整个移动端对话面。
+    `register`：回合 task 与事件泵 task 的登记口（B-6 连接级收尸用；直接调用
+    本函数的测试可不传）。
+    """
     content = (data.get("content") or "").strip()
     if not content:
         await ws.send_json({"type": "error", "code": "empty_content", "message": "内容不能为空"})
@@ -626,8 +649,42 @@ async def _handle_chat_send(ws, data: dict, user_id: str):
         })
         return
 
+    from neurova.core.agent_run_ledger import AgentRunLedger, requestTurnAdmission
+
+    ledger = AgentRunLedger(session_id, user_id, agent_id, content)
+    # 排队位先行事件（queued 只在同会话争用时出现；台账故障 fail-open 时为空列表）
+    for event in await ledger.acquire():
+        etype = event.get("type")
+        if etype == "queued":
+            await ws.send_json({"type": "chat:queued", "session_id": session_id,
+                                "position": event.get("position")})
+        elif etype == "stopped":
+            await ws.send_json({"type": "chat:cancelled", "session_id": session_id})
+            return
+        elif etype == "error":
+            await ws.send_json({"type": "error", "code": "queue_timeout",
+                                "message": event.get("message")})
+            return
+        elif etype == "done":
+            return
+
+    stream_queue: asyncio.Queue = asyncio.Queue()
+
+    def _emit(kind, data):
+        # 管线在事件循环线程内同步回调；put_nowait 不阻塞主流程
+        try:
+            stream_queue.put_nowait((kind, data))
+        except Exception:  # noqa: BLE001 - 队列异常不拖垮聊天
+            pass
+
+    async def _admissionWait(attempt: int, waitSeconds: float, reason: str) -> None:
+        await ledger.heartbeat(force=True)
+        await ws.send_json({"type": "chat:queued", "session_id": session_id,
+                            "attempt": attempt,
+                            "wait_seconds": round(float(waitSeconds), 2),
+                            "reason": reason})
+
     try:
-        index = 0
         # 请求级属主（§6-154 合修的第二半）：这条面从 JWT/配对码里就拿到了人，
         # 但从不交给请求通道——`mem_core.save_to_session` 与 usage 入账读的就是这条通道，
         # 空读数的后果是 usage 记 `anonymous`、按日 LLM 配额整条不判、会话落空属主（对全员可见）。
@@ -636,23 +693,108 @@ async def _handle_chat_send(ws, data: dict, user_id: str):
         from neurova.core.identity_context import set_request_user_id
 
         set_request_user_id(user_id)
-        turnMetadata = {"user_id": user_id, "role": "user", "tenant_id": "default"}
-        if hasattr(agent, "chat_stream") and callable(agent.chat_stream):
-            async for chunk in agent.chat_stream(user_input=content, session_id=session_id,
-                                                 metadata=turnMetadata):
-                if _cancelled_sessions.get(session_id):
-                    await ws.send_json({"type": "chat:cancelled", "session_id": session_id})
-                    return
-                await ws.send_json({"type": "chat:chunk", "content": str(chunk), "session_id": session_id, "index": index})
-                index += 1
-        else:
-            result = await agent.chat(user_input=content, session_id=session_id,
-                                      metadata=turnMetadata)
-            text = result.get("text", "") if isinstance(result, dict) else str(result)
-            await ws.send_json({"type": "chat:chunk", "content": text, "session_id": session_id, "index": index})
-            index += 1
 
-        await ws.send_json({"type": "chat:done", "session_id": session_id, "message_id": f"msg-{uuid.uuid4().hex[:8]}"})
+        async def _admissionGate():
+            return await requestTurnAdmission(
+                ledger=ledger,
+                agentId=agent_id,
+                modelName=str(getattr(agent, "llm_model", "") or ""),
+                sessionId=session_id,
+                userInput=content,
+                payload={"entry": "mobile_ws", "session_id": session_id},
+                onWait=_admissionWait,
+            )
+
+        admission = None
+        try:
+            admission = await asyncio.wait_for(_admissionGate(), timeout=150.0)
+        except Exception:  # noqa: BLE001 - 闸故障 fail-open：日志点名，本轮照答
+            logger.exception("mobile 让位闸 fail-open，本轮直接执行 agent=%s session=%s", agent_id, session_id)
+            admission = None
+        if admission is not None and not admission.allowed:
+            # 挂起（Agent 忙/闸判）：如实给排队卡收尾，不假装本轮已回答
+            await ws.send_json({"type": "chat:queued", "session_id": session_id,
+                                "parked": True, "reason": admission.parkReason,
+                                "run_id": admission.runId})
+            await ws.send_json({"type": "chat:done", "session_id": session_id})
+            return
+
+        turnMetadata = {"user_id": user_id, "role": "user", "tenant_id": "default",
+                        "event_emitter": _emit, "emit_status_events": True}
+
+        async def _runTurn():
+            try:
+                return await agent.chat(user_input=content, stream=True,
+                                        session_id=session_id, metadata=turnMetadata)
+            finally:
+                # 收尾哨兵：泵循环据此退出（对齐 chat.py 的 _EMIT_DONE 姿势）
+                stream_queue.put_nowait(None)
+
+        turnTask = asyncio.create_task(_runTurn())
+        ledger.attach(turnTask)
+
+        async def _pump():
+            """事件泵：管线事件 → 移动 WS 事件；回合结束后做收尾发送。"""
+            index = 0
+            seenContent = False
+            try:
+                while True:
+                    if _cancelled_sessions.get(session_id):
+                        turnTask.cancel()
+                        await ws.send_json({"type": "chat:cancelled", "session_id": session_id})
+                        return
+                    await ledger.heartbeat()
+                    try:
+                        item = await asyncio.wait_for(stream_queue.get(), timeout=15.0)
+                    except asyncio.TimeoutError:
+                        continue  # 空闲节拍：每轮已推台账心跳
+                    if item is None:
+                        break
+                    kind, payloadData = item
+                    if kind == "content":
+                        seenContent = True
+                        await ws.send_json({"type": "chat:chunk", "content": str(payloadData or ""),
+                                            "session_id": session_id, "index": index})
+                        index += 1
+                    elif kind == "reasoning":
+                        await ws.send_json({"type": "chat:reasoning", "content": str(payloadData or ""),
+                                            "session_id": session_id})
+                    elif kind == "retry":
+                        retryData = payloadData if isinstance(payloadData, dict) else {}
+                        if retryData:
+                            await ws.send_json({"type": "chat:retry", "session_id": session_id, **retryData})
+                    elif kind == "upstream_status":
+                        statusData = payloadData if isinstance(payloadData, dict) else {}
+                        if statusData:
+                            await ws.send_json({"type": "chat:retry", "session_id": session_id, **statusData})
+            finally:
+                if not turnTask.done():
+                    turnTask.cancel()
+            # 回合已结束：收尾（parked / 兜底 chunk / done）
+            response = turnTask.result()
+            replyText = ""
+            if isinstance(response, dict) and response.get("parked"):
+                await ws.send_json({"type": "chat:queued", "session_id": session_id,
+                                    "parked": True, "reason": response.get("park_reason"),
+                                    "run_id": response.get("run_id")})
+                await ws.send_json({"type": "chat:done", "session_id": session_id})
+                return
+            if isinstance(response, dict):
+                replyText = response.get("text", "") or ""
+            else:
+                replyText = str(response or "")
+            # 兜底：管线未产生 content 事件（命令回复/纯文本降级）时补一条，避免前端空白
+            if not seenContent and replyText:
+                await ws.send_json({"type": "chat:chunk", "content": replyText,
+                                    "session_id": session_id, "index": index})
+            await ws.send_json({"type": "chat:done", "session_id": session_id,
+                                "message_id": f"msg-{uuid.uuid4().hex[:8]}"})
+
+        pumpTask = asyncio.create_task(_pump())
+        if register is not None:
+            register(turnTask)
+            register(pumpTask)
+        await asyncio.gather(turnTask, pumpTask)
     except Exception as e:
         # 原先这里只把异常文本发给客户端、服务端一行都不记——一次 `TypeError`（调用点参数名
         # 与 `Agent.chat_stream` 的真签名对不上）就这样把整个移动端对话面挂了四个月而无人可见。

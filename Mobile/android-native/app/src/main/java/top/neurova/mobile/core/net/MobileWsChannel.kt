@@ -44,6 +44,19 @@ class MobileWsChannel(
         data class Cancelled(val sessionId: String) : Event
         data class Error(val code: String, val message: String) : Event
         data class AgentSwitched(val agentId: String) : Event
+
+        /** 排队位/让位闸等待/挂起（运行态透明化；position/attempt/waitSeconds/reason 依来源可选） */
+        data class Queued(
+            val sessionId: String,
+            val position: Int? = null,
+            val attempt: Int? = null,
+            val waitSeconds: Double? = null,
+            val reason: String? = null,
+            val parked: Boolean = false,
+        ) : Event
+
+        /** 管线思考流（reasoning）片段 */
+        data class Reasoning(val sessionId: String, val content: String) : Event
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -189,6 +202,22 @@ class MobileWsChannel(
                 "agent:switched" -> eventsFlow.tryEmit(
                     Event.AgentSwitched(frame["agent_id"]?.toString()?.trim('"').orEmpty()),
                 )
+                "chat:queued" -> eventsFlow.tryEmit(
+                    Event.Queued(
+                        sessionId = frame["session_id"]?.toString()?.trim('"').orEmpty(),
+                        position = frame["position"]?.toString()?.trim('"')?.toIntOrNull(),
+                        attempt = frame["attempt"]?.toString()?.trim('"')?.toIntOrNull(),
+                        waitSeconds = frame["wait_seconds"]?.toString()?.trim('"')?.toDoubleOrNull(),
+                        reason = frame["reason"]?.toString()?.trim('"'),
+                        parked = frame["parked"]?.toString()?.trim('"') == "true",
+                    ),
+                )
+                "chat:reasoning" -> eventsFlow.tryEmit(
+                    Event.Reasoning(
+                        sessionId = frame["session_id"]?.toString()?.trim('"').orEmpty(),
+                        content = frame["content"]?.toString()?.trim('"').orEmpty(),
+                    ),
+                )
             }
         }
 
@@ -199,8 +228,14 @@ class MobileWsChannel(
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             heartbeatJob?.cancel()
-            // 传输层失败无 close 码：以 1006 语义进入决策
-            scheduleReconnect(1006, t.message ?: "transport failure")
+            // 握手被 HTTP 401/403 拒绝 = ticket 无效/已消费（一次性票重连必遇），
+            // 按 4001 语义走续签重试；其余传输层失败无 close 码：以 1006 语义进入决策
+            val handshakeCode = MobileWsClosePolicy.closeCodeForHandshakeRejection(response?.code)
+            if (handshakeCode != null) {
+                scheduleReconnect(handshakeCode, "handshake rejected: HTTP ${response?.code}")
+            } else {
+                scheduleReconnect(1006, t.message ?: "transport failure")
+            }
         }
     }
 
