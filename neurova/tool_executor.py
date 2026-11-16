@@ -40,7 +40,7 @@ import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from neurova.core.data_root import dataPath
-from tests.ast_scan import parseSource
+from neurova.core.ast_scan import parseSource
 
 logger = get_logger(__name__)
 

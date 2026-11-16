@@ -52,6 +52,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from tests import ast_scan
 from tests.ast_scan import parseSource  # noqa: E402
+from neurova.core import ast_scan as astScanImpl  # noqa: E402  实现本体（P1-19 下沉后单源在此）
 
 #: 允许保留的「枚举 + 解析」全仓扫描：**空集是默认政策**。
 #: 确需保留者必须逐条写明理由，并说明为何**两条**共享入口都不适用：
@@ -213,7 +214,11 @@ def _importSurface(tree) -> tuple:
     # 解析原语所在的模块分两类：标准库/第三方解析器（按属性名判），
     # 以及**共享单源入口**所在模块（`from tests.ast_scan import parseSource` 之后，
     # 本地名就是解析原语本身——它内部就是 `ast.parse`，成本照样随代码总量涨）。
-    parseModules = {**PARSE_MODULE_ATTRS, ast_scan.__name__: frozenset({"parseSource"})}
+    parseModules = {
+        **PARSE_MODULE_ATTRS,
+        ast_scan.__name__: frozenset({"parseSource"}),
+        astScanImpl.__name__: frozenset({"parseSource"}),
+    }
     wanted = set(parseModules) | {"os"}
     aliases = {module: set() for module in wanted}
     parseMembers = set()
@@ -1591,11 +1596,11 @@ class TestResidentGraphIsRetiredFromTheScannedGenerations:
     def test_scanned_surface_is_a_bounded_window(self):
         _, widest = self._parseBatch(1)
         visible, widest = self._parseBatch(self.LARGE)
-        bound = self._windowBound(widest, ast_scan.RETIRE_STEP)
+        bound = self._windowBound(widest, astScanImpl.RETIRE_STEP)
         assert visible <= bound, (
             f"解析 {self.LARGE} 份源码后，gen2 仍能扫到 {visible} 个新增 AST 节点，"
             f"超出退役窗口上界 {bound}（= 单文件最大 {widest} 节点 × 步长 "
-            f"{ast_scan.RETIRE_STEP} × {self.WINDOW_FACTOR}）：常驻解析缓存没把已保留的"
+            f"{astScanImpl.RETIRE_STEP} × {self.WINDOW_FACTOR}）：常驻解析缓存没把已保留的"
             "图移出扫描分代，gen2 每扫一遍都要走完整棵常驻图，成本随代码总量涨"
             "（实测 1787 文件单次 1030ms vs 不留 0.78ms）。"
             "修法：`tests/ast_scan` 按退役步长 `gc.freeze()` 已保留的图。"
@@ -1604,9 +1609,9 @@ class TestResidentGraphIsRetiredFromTheScannedGenerations:
     def test_retirement_is_not_vacuous_when_disabled(self, monkeypatch):
         """反向锁：把退役步长设为 0（关闭退役），扫描面必然越界。"""
         _, widest = self._parseBatch(1)
-        monkeypatch.setattr(ast_scan, "RETIRE_STEP", 0)
+        monkeypatch.setattr(astScanImpl, "RETIRE_STEP", 0)
         visible, widest = self._parseBatch(self.LARGE)
-        bound = self._windowBound(widest, ast_scan.RETIRE_STEP)
+        bound = self._windowBound(widest, astScanImpl.RETIRE_STEP)
         assert visible > bound, (
             f"关掉退役后扫描面只有 {visible} 个节点（窗口上界 {bound}）：判据在"
             "「不退役」这一侧不成立，说明它测的不是退役本身。"
@@ -1627,7 +1632,7 @@ class TestResidentGraphIsRetiredFromTheScannedGenerations:
                 self.me = self
 
         ast_scan._cachedParse.cache_clear()
-        monkeypatch.setattr(ast_scan, "RETIRE_STEP", 1)
+        monkeypatch.setattr(astScanImpl, "RETIRE_STEP", 1)
         ast_scan.resetRetireLedger()
 
         gc.collect()
@@ -1655,7 +1660,7 @@ class TestResidentGraphIsRetiredFromTheScannedGenerations:
         靶点是**新增量**：把「自上次退役以来新解析了多少棵」直接计成一笔单调
         的账，与 `currsize` 无关，故清缓存不影响它。
         """
-        monkeypatch.setattr(ast_scan, "RETIRE_STEP", 8)
+        monkeypatch.setattr(astScanImpl, "RETIRE_STEP", 8)
         ast_scan._cachedParse.cache_clear()
         ast_scan._cachedNodes.cache_clear()
 
@@ -1675,7 +1680,7 @@ class TestResidentGraphIsRetiredFromTheScannedGenerations:
             "「常驻树总数」推的绝对值，缓存被清回 0 之后它仍停在高位，扫描面重新无界。"
             "修法：触发量记成「自上次退役以来的新增解析数」，与 currsize 解耦。"
         )
-        assert 0 <= after["pending"] < ast_scan.RETIRE_STEP, (
+        assert 0 <= after["pending"] < astScanImpl.RETIRE_STEP, (
             f"待退役量 {after['pending']} 不在 [0, 步长) 内："
             "退役后必须复位，否则扫描面按解析量单调涨。"
         )
@@ -1685,7 +1690,7 @@ class TestResidentGraphIsRetiredFromTheScannedGenerations:
 
         台账按步长累积，故本用例把步长与游标钉在初值（与用例执行顺序无关）。
         """
-        monkeypatch.setattr(ast_scan, "RETIRE_STEP", 1)
+        monkeypatch.setattr(astScanImpl, "RETIRE_STEP", 1)
         ast_scan.resetRetireLedger()
         gc.unfreeze()
         self._parseBatch(4)
@@ -1863,17 +1868,17 @@ def outside():
         files = len(ast_scan.sourceRefsUnder(_WALK_FACE_ROOT, ".py"))
         assert files >= 10, f"夹具面太小（{files} 档），判不出一档走了几遍"
         seen = {"n": 0}
-        real = ast_scan._walkNodes
+        real = astScanImpl._walkNodes
 
         def counting(tree):
             seen["n"] += 1
             return real(tree)
 
-        ast_scan._walkNodes = counting
+        astScanImpl._walkNodes = counting
         try:
             ast_scan.takenPerModule(_WALK_FACE_ROOT)
         finally:
-            ast_scan._walkNodes = real
+            astScanImpl._walkNodes = real
         assert seen["n"] == files, (
             f"{files} 档却进了 {seen['n']} 次节点遍历——`takenPerModule` 的节点面"
             "又走成每档多遍，判据成本重新与代码总量挂钩。"

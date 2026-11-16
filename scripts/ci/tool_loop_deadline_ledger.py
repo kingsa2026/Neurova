@@ -90,7 +90,7 @@ Issue #175 点名的符号里有两类是上下文域的取数模型看不见的
 
 ## 判据为什么不绑墙钟
 
-唯一解析入口是 `tests/ast_scan.py`（按前缀择优 + 文本预筛 + 整进程复用），
+唯一解析入口是 `neurova/core/ast_scan.py`（按前缀择优 + 文本预筛 + 整进程复用），
 本模块不做 `rglob + ast.parse`（同类形态由
 `tests/unit/test_ci_ast_scan_budget_guard.py` 常驻拦截）。
 
@@ -115,7 +115,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tests import ast_scan  # noqa: E402
+from neurova.core import ast_scan  # noqa: E402
 from scripts.ci import context_deadline_ledger as symbolLedger  # noqa: E402
 
 #: 扫描根：**只有生产根**。`NeurUI/src-tauri/{resources,target/*}/backend/neurova/`

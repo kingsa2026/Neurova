@@ -36,9 +36,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 INVENTORY_PATH = PROJECT_ROOT / "docs" / "09-dev-progress" / "api_inventory.md"
 
-#: 跨文件 AST 扫描的共享解析预算（`tests/ast_scan.py`）：按文件整进程缓存 + 文本预筛。
+#: 跨文件 AST 扫描的共享解析预算（`neurova/core/ast_scan.py`）：按文件整进程缓存 + 文本预筛。
 #: 判据只写一份，多个守卫各调一次也不重复付解析成本（Issue #148）。
-from tests import ast_scan as _scan  # noqa: E402  （仓根已在上面插入 sys.path）
+from neurova.core import ast_scan as _scan  # noqa: E402  （仓根已在上面插入 sys.path）
 
 # 控制台若是 GBK，print 中文会 UnicodeEncodeError 打断输出（读数凭空缺一截）。
 if hasattr(sys.stdout, "reconfigure"):

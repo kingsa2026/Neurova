@@ -15,7 +15,9 @@
 `compile` 复核足迹），故本档钉的是**结构**（解析只有一个可改可测的入口），
 不声称"那个偶发红已根修"——未复现就不写已根修。
 
-于是把出口收成一处（教义第 6 条）：`tests/ast_scan.parseSource`。本档钉三件事：
+于是把出口收成一处（教义第 6 条）：实现本体在 `neurova/core/ast_scan.py`
+（P1-19 下沉：生产码不得反向依赖测试根），`tests/ast_scan.py` 只留兼容薄转发。
+本档钉三件事：
 
 1. 仓内 `.py` 里除那唯一出口外**没有**第二处 `ast.parse` 调用；
 2. 反向控制——把一条 `ast.parse(...)` 语音塞进样本串，探测器必须报出（否则"全绿"
@@ -36,10 +38,12 @@ import pytest
 
 from tests import ast_scan
 from tests.ast_scan import parseSource
+from neurova.core import ast_scan as astScanImpl
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-#: 唯一出口所在的模块（本档与它自己都要豁免，否则判据会点名自己的源码）
-EXIT_MODULE = Path(ast_scan.__file__).resolve()
+#: 唯一出口所在的模块（实现本体，含唯一的 ast.parse 调用；
+#: 本档与它自己都要豁免，否则判据会点名自己的源码）
+EXIT_MODULE = Path(astScanImpl.__file__).resolve()
 #: 判据不得自指：本档正文里必然出现 `ast.parse` 这个词（解释缺陷要用原文）
 SELF = Path(__file__).resolve()
 
@@ -91,8 +95,8 @@ class TestParseHasOneExit:
         hits = _callSites()
         assert not hits, (
             "仓内出现了第二处 `ast.parse`（解析口径必须只有一处出口 "
-            "`tests/ast_scan.parseSource`）：\n  " + "\n  ".join(hits)
-            + "\n修法：改成 `from tests.ast_scan import parseSource` 并调它。"
+            "`neurova/core/ast_scan.parseSource`）：\n  " + "\n  ".join(hits)
+            + "\n修法：改成 `from neurova.core.ast_scan import parseSource` 并调它。"
             "解析栈深散在 200+ 个文件里时，"
             "`AST constructor recursion depth mismatch` 只会在某次组合里炸，"
             "炸点与真因还不在同一个文件。")

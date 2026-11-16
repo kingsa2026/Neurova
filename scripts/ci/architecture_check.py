@@ -37,7 +37,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # standalone 脚本：把仓根挂进 sys.path，让全仓唯一的 ast 解析出口可导入
 sys.path.insert(0, str(REPO_ROOT))
 
-from tests.ast_scan import parseSource  # noqa: E402  全仓解析唯一出口（ratchet 钉住）
+from neurova.core.ast_scan import parseSource  # noqa: E402  全仓解析唯一出口（ratchet 钉住）
 
 EXIT_OK = 0
 EXIT_VIOLATIONS = 1

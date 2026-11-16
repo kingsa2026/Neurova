@@ -30,7 +30,7 @@
 
 ## 判据为什么不绑墙钟
 
-唯一解析入口是 `tests/ast_scan.py`（按前缀择优 + 文本预筛 + 整进程复用）。
+唯一解析入口是 `neurova/core/ast_scan.py`（按前缀择优 + 文本预筛 + 整进程复用）。
 本模块不做 `rglob + ast.parse`，故判据与代码总量、与机器快慢都无关
 （同类形态由 `tests/unit/test_ci_ast_scan_budget_guard.py` 常驻拦截）。
 
@@ -53,7 +53,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tests import ast_scan  # noqa: E402
+from neurova.core import ast_scan  # noqa: E402
 
 PRODUCTION_ROOT = ast_scan.PRODUCTION_ROOT
 

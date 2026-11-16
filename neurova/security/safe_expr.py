@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import ast
 from typing import Any, Dict, Mapping, Optional
-from tests.ast_scan import parseSource
+from neurova.core.ast_scan import parseSource
 
 __all__ = ["SafeExprError", "safe_eval", "is_safe_expression", "MAX_EXPRESSION_LENGTH"]
 
