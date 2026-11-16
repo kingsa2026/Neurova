@@ -9,9 +9,9 @@
  *     [status 筛选 Tab（全部/draft/published/deprecated）] + [加载态/空态/列表]；
  *     列表项 GlassCard：name、category 徽章、version、status 徽章、installs、rating（5 星）、
  *     tags、操作（启用-禁用/卸载）；卸载走 AlertDialog 二次确认；
- *     暂无新建（技能来自市场，由 SkillMarketPage 安装）；
- *   - 颜色统一走 StyleManager，路由走 Router，API 暂无 skills 专用模块 →
- *     aboutToAppear 加载 mock 静态数据 + TODO 注释 M5 阶段补充真实 API。
+ *     暂无新建（技能来自市场安装流程）；
+ *   - 颜色统一走 StyleManager，路由走 Router，已接线 PageMap（P1-33）；skills 专用 API 模块待 S4 新增（移交单） →
+ *     落地前以 mock 静态数据渲染，模块落地后替换 mock。
  *
  * 依赖：
  *   - ../components/glass：TopNavMenu、GlassCard、GlassButton
@@ -262,8 +262,8 @@ export struct SkillPoolPage {
     // TODO M5 阶段：调用 api.skills.toggle(skill.id)
     const updated: Skill[] = this.skills.map((s: Skill) => {
       if (s.id === skill.id) {
-        // 嵌套属性变更：整体重新赋值
-        return { ...s };
+        // 整体重建列表以触发 @State（当前未改字段，原样返回）
+        return s;
       }
       return s;
     });
@@ -497,6 +497,5 @@ export struct SkillPoolPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
-    .width('100%')
   }
 }

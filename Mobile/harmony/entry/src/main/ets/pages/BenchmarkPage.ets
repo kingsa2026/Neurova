@@ -12,7 +12,7 @@
  *     + [加载态/空态/列表]]；
  *     列表项 GlassCard：类型徽章、名称、状态徽章、avg/p95/p99 延迟、吞吐量、score；
  *     颜色统一走 StyleManager（返回 token 名），路由走 Router，
- *     API 暂无基准专用模块 → aboutToAppear 加载 mock 静态数据 + TODO M6 标注。
+ *     P1-33 已接线 PageMap；基准专用 API 模块待 S4 新增（移交单），落地前以 mock 渲染。
  *
  * 依赖：
  *   - ../components/glass：TopNavMenu、GlassCard、GlassButton、GlassInput、GlassPanel
@@ -521,6 +521,5 @@ export struct BenchmarkPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
-    .width('100%')
   }
 }

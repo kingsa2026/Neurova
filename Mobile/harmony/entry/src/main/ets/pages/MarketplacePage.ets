@@ -11,8 +11,8 @@
  *     [加载态/空态/网格列表]；
  *     网格项 GlassCard：分类徽章、名称、描述、价格、评分、下载数、下载按钮；
  *     搜索/筛选 → 本地 filter；下载 → AlertDialog 二次确认 → TODO M6 接入 API；
- *   - 颜色统一走 StyleManager，路由走 Router，API 暂无 marketplace 专用模块 →
- *     aboutToAppear 加载 mock 静态数据 + TODO 注释 M6 阶段补充真实 API。
+ *   - 颜色统一走 StyleManager，路由走 Router，已接线 PageMap（P1-33）；marketplace 专用 API 模块待 S4 新增（移交单） →
+ *     落地前以 mock 静态数据渲染，模块落地后替换 mock。
  *
  * 依赖：
  *   - ../components/glass：TopNavMenu、GlassCard、GlassButton、GlassInput
@@ -378,7 +378,23 @@ export struct MarketplacePage {
       // 临时：本地增加下载计数
       this.items = this.items.map((i: MarketplaceItem) => {
         if (i.id === itemId) {
-          return { ...i, downloadCount: i.downloadCount + 1 };
+          // ArkTS 禁对象展开：逐字段复制，仅递增下载计数
+          const bumped: MarketplaceItem = {
+            id: i.id,
+            name: i.name,
+            description: i.description,
+            category: i.category,
+            itemType: i.itemType,
+            price: i.price,
+            currency: i.currency,
+            author: i.author,
+            rating: i.rating,
+            downloadCount: i.downloadCount + 1,
+            tags: i.tags,
+            thumbnail: i.thumbnail,
+            publishedAt: i.publishedAt,
+          };
+          return bumped;
         }
         return i;
       });
@@ -586,6 +602,5 @@ export struct MarketplacePage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
-    .width('100%')
   }
 }
