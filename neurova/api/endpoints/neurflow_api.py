@@ -1554,7 +1554,17 @@ async def set_breakpoints(
     body: BreakpointRequest,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """为指定 execution 设置/追加断点集合。"""
+    """为指定 execution 设置/追加断点集合。
+
+    §R1（2026-11-16 审计 S1 移交，总控裁定：调试会话归属＝执行记录属主）：
+    先取执行记录过属主门（deny≡404，与执行记录面同构），再动 _DEBUG_SESSIONS——
+    未落库 execution 不再凭空建会话。
+    """
+    storage = _get_storage()
+    execution = storage.get_execution(execution_id)
+    if not execution:
+        raise HTTPException(status_code=404, detail="执行记录不存在")
+    _ensure_execution_owned(execution, current_user)
     session = _DEBUG_SESSIONS.setdefault(execution_id, DebugSession())
     if body.replace:
         session.breakpoints = set(body.breakpoints)
@@ -1577,7 +1587,15 @@ async def resume_debug_execution(
 
     路径区分于 /executions/{id}/resume（人工审批恢复）——两者同名会导致
     FastAPI 路由遮蔽（先注册者独占，调试恢复成死代码）。
+
+    §R1：同 breakpoint——先过执行记录属主门（调试会话归属＝执行记录属主），
+    再查 _DEBUG_SESSIONS；执行不存在/非属主/无会话统一 404。
     """
+    storage = _get_storage()
+    execution = storage.get_execution(execution_id)
+    if not execution:
+        raise HTTPException(status_code=404, detail="执行记录不存在")
+    _ensure_execution_owned(execution, current_user)
     session = _DEBUG_SESSIONS.get(execution_id)
     if not session:
         raise HTTPException(status_code=404, detail="未找到该 execution 的调试会话")

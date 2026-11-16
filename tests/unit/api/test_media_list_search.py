@@ -38,7 +38,10 @@ def client(tmp_path, monkeypatch):
     )
     app = FastAPI()
     app.include_router(media_module.router, prefix="/v1/media")
-    app.dependency_overrides[get_current_user] = lambda: {"username": "tester"}
+    # P1-7 列表面收紧后 /list 按上传者过滤（无主行仅 admin 可见）——本档种子行
+    # user_id=None，故以 admin 身份读，保持"搜索语义"这一被测对象不变。
+    app.dependency_overrides[get_current_user] = lambda: {
+        "user_id": "tester", "username": "tester", "role": "admin"}
     media_module._media_store.clear()
     with TestClient(app) as c:
         yield c

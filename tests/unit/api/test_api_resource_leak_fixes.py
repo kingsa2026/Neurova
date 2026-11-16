@@ -17,6 +17,7 @@ media 存储根指向 tmp_path；模块级内存注册表逐用例替换、自�
 
 import asyncio
 import re
+from types import SimpleNamespace
 from urllib.parse import quote, unquote
 
 import pytest
@@ -91,12 +92,23 @@ def debug_sessions(monkeypatch):
     return nf, reg
 
 
-def test_debug_sessions_cap_evicts_oldest_via_setdefault(debug_sessions):
-    """101 个调试会话经 set_breakpoints 写入后，最旧者被逐出、总量封顶。"""
+def test_debug_sessions_cap_evicts_oldest_via_setdefault(debug_sessions, monkeypatch):
+    """101 个调试会话经 set_breakpoints 写入后，最旧者被逐出、总量封顶。
+
+    §R1：set_breakpoints 先过执行记录属主门（调试会话归属＝执行记录属主）——
+    执行记录以无主行（视为共享）种子，门放行；本档被测对象（注册表封顶）不变。
+    """
     nf, reg = debug_sessions
+
+    class _AnyExecStorage:
+        def get_execution(self, execution_id):
+            return SimpleNamespace(id=execution_id, user_id="")
+
+    monkeypatch.setattr(nf, "_get_storage", lambda: _AnyExecStorage())
+    caller = {"user_id": "u1", "username": "u1", "role": "user"}
     for i in range(101):
         asyncio.run(
-            nf.set_breakpoints(f"exec-{i}", nf.BreakpointRequest(breakpoints=[f"n{i}"]), {})
+            nf.set_breakpoints(f"exec-{i}", nf.BreakpointRequest(breakpoints=[f"n{i}"]), caller)
         )
     assert len(reg) == 100, f"注册表未封顶: {len(reg)}"
     assert "exec-0" not in reg, "最旧调试会话未被逐出"
@@ -229,14 +241,18 @@ def media_env(tmp_path, monkeypatch):
     media_module._media_store.clear()
 
 
+# §6-172 / P1-7：save 与读侧 handler 都要求登录身份；直调时自行递同一身份
+# （u1 上传、u1 读——属主匹配，属主门放行）。
+_CALLER = {"user_id": "u1", "username": "u1", "role": "user"}
+
+
 def _save(payload: bytes, filename: str, media_type: str = "file"):
     return asyncio.run(
         media_module.save_media(
             file=_FakeUploadFile(payload, filename=filename),
             media_type=media_type,
             agent_id="a1",
-            # §6-172：归属从登录依赖取；这里把 handler 当函数直调，身份得自己递
-            current_user={"user_id": "u1", "username": "u1", "role": "user"},
+            current_user=dict(_CALLER),
         )
     )
 
@@ -244,7 +260,7 @@ def _save(payload: bytes, filename: str, media_type: str = "file"):
 def test_content_disposition_ascii_name_keeps_legacy_shape(media_env):
     """ASCII 安全名保持既有契约（兼容 test_media_disk_storage.py）。"""
     resp = _save(b"x", filename="clip.png")
-    out = asyncio.run(media_module.get_media(resp["data"]["media_id"]))
+    out = asyncio.run(media_module.get_media(resp["data"]["media_id"], current_user=dict(_CALLER)))
     assert out.headers["content-disposition"] == 'attachment; filename="clip.png"'
 
 
@@ -254,7 +270,7 @@ def test_content_disposition_utf8_filename_rfc5987(media_env):
     resp = _save(b"x", filename=name)
 
     for endpoint in (media_module.get_media, media_module.download_attachment):
-        out = asyncio.run(endpoint(resp["data"]["media_id"]))
+        out = asyncio.run(endpoint(resp["data"]["media_id"], current_user=dict(_CALLER)))
         cd = out.headers["content-disposition"]
         assert "attachment" in cd
         assert f"filename*=UTF-8''{quote(name, safe='')}" in cd, f"缺 RFC5987 原始名: {cd}"
