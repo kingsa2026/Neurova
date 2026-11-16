@@ -34,12 +34,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import top.neurova.mobile.core.model.ChatSessionItem
+import top.neurova.mobile.core.protocol.ChatLayoutMode
 import top.neurova.mobile.ui.components.LocalAppRuntime
 import top.neurova.mobile.ui.components.PageHeader
 import top.neurova.mobile.ui.theme.LocalNeurovaColors
@@ -52,11 +54,157 @@ private enum class SessionSegment(val label: String) {
 }
 
 /**
- * F4 会话列表（对话 Tab · 微信式首屏）：与 PC 端同一份会话记录（GET /console/chat/sessions）。
- * 点会话进 F5 聊天页；右上角新建会话；pin 状态取自同一会话记录。
+ * F4 对话 Tab（微信式首屏）+ P9 大屏自适应：
+ * - compact（<600dp）：单栏——会话列表 → 导航进聊天页；
+ * - medium（600–839dp）：会话列表|聊天 双栏同屏（导航随 NavigationSuiteScaffold 换 Rail）；
+ * - expanded（≥840dp）：三栏——会话列表|聊天|会话信息，与 PC 端布局对齐。
  */
 @Composable
 fun ChatTabScreen(onOpenSession: (sessionId: String, title: String) -> Unit) {
+    val widthDp = LocalConfiguration.current.screenWidthDp
+    val mode = ChatLayoutMode.fromWidthDp(widthDp)
+    if (mode == ChatLayoutMode.LIST_ONLY) {
+        CompactSessionList(onOpenSession)
+    } else {
+        WideChatDomain(mode)
+    }
+}
+
+@Composable
+private fun CompactSessionList(onOpenSession: (sessionId: String, title: String) -> Unit) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        PageHeader(
+            title = "对话",
+            subtitle = "与 PC 端同源",
+            actions = { CreateSessionAction(onCreated = { onOpenSession(it, "新对话") }) },
+        )
+        SessionListContent(selectedId = null, onSelect = { onOpenSession(it.id, it.title) })
+    }
+}
+
+@Composable
+private fun WideChatDomain(mode: ChatLayoutMode) {
+    val runtime = LocalAppRuntime.current
+    val palette = LocalNeurovaColors.current
+    var selectedId by remember { mutableStateOf<String?>(null) }
+    var selectedTitle by remember { mutableStateOf("") }
+
+    Row(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.width(320.dp)) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                PageHeader(
+                    title = "对话",
+                    subtitle = "与 PC 端同源",
+                    actions = {
+                        CreateSessionAction(onCreated = {
+                            selectedId = it
+                            selectedTitle = "新对话"
+                        })
+                    },
+                )
+                SessionListContent(
+                    selectedId = selectedId,
+                    onSelect = { session ->
+                        selectedId = session.id
+                        selectedTitle = session.title
+                    },
+                )
+            }
+        }
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxSize(),
+        ) {
+            val id = selectedId
+            if (id == null) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("选择左侧会话开始聊天", fontSize = 12.sp, color = palette.textLow)
+                }
+            } else {
+                ChatScreen(
+                    sessionId = id,
+                    initialTitle = selectedTitle,
+                    onBack = {},
+                    showBack = false,
+                )
+            }
+        }
+        if (mode.showInfoPane) {
+            Box(modifier = Modifier.width(300.dp)) {
+                SessionInfoPanel()
+            }
+        }
+    }
+}
+
+/** F10 三栏右侧信息位：当前 Agent / 会话 / 连接态（与 PC 右侧 Dock 对齐，只呈真实读数） */
+@Composable
+private fun SessionInfoPanel() {
+    val runtime = LocalAppRuntime.current
+    val palette = LocalNeurovaColors.current
+    val controller = runtime.chatSessions
+    val agent = runtime.agents.current()
+
+    LaunchedEffect(Unit) { runtime.agents.load() }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(palette.glass)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("会话信息", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = palette.textHi)
+        InfoBlock(
+            title = controller.sessionTitle.ifBlank { "会话" },
+            subtitle = "ID ${controller.sessionId}",
+        )
+        Text("当前 Agent", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = palette.textLow)
+        if (agent != null) {
+            InfoBlock(
+                title = agent.name,
+                subtitle = buildString {
+                    append(agent.model ?: "未知模型")
+                    if (!agent.description.isNullOrBlank()) append(" · ${agent.description}")
+                },
+            )
+        } else {
+            InfoBlock(title = controller.agentId.ifBlank { "default" }, subtitle = "未加载详情")
+        }
+        Text("连接", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = palette.textLow)
+        InfoBlock(
+            title = when (runtime.ws.state.value) {
+                top.neurova.mobile.core.net.MobileWsChannel.State.AUTHED -> "已连接"
+                top.neurova.mobile.core.net.MobileWsChannel.State.CONNECTING,
+                top.neurova.mobile.core.net.MobileWsChannel.State.RECONNECTING,
+                top.neurova.mobile.core.net.MobileWsChannel.State.REAUTHING,
+                -> "连接中"
+                else -> "未连接"
+            },
+            subtitle = "配对 WS 通道 · 事件经此到达",
+        )
+    }
+}
+
+@Composable
+private fun InfoBlock(title: String, subtitle: String) {
+    val palette = LocalNeurovaColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(palette.glassStrong)
+            .padding(12.dp),
+    ) {
+        Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = palette.textHi, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(subtitle, fontSize = 10.5.sp, color = palette.textLow, maxLines = 3, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** 会话列表内容（compact 全屏 / wide 左栏共用；数据经 ChatRepository 与 PC 同源） */
+@Composable
+private fun SessionListContent(selectedId: String?, onSelect: (ChatSessionItem) -> Unit) {
     val runtime = LocalAppRuntime.current
     val palette = LocalNeurovaColors.current
     val scope = rememberCoroutineScope()
@@ -82,23 +230,6 @@ fun ChatTabScreen(onOpenSession: (sessionId: String, title: String) -> Unit) {
     LaunchedEffect(segment) { reload() }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        PageHeader(
-            title = "对话",
-            subtitle = "与 PC 端同源",
-            actions = {
-                IconButton(
-                    onClick = {
-                        scope.launch {
-                            runCatching { runtime.chatRepo.createSession() }
-                                .onSuccess { newId -> onOpenSession(newId, "新对话") }
-                                .onFailure { errorText = it.message ?: "建会话失败" }
-                        }
-                    },
-                ) {
-                    Icon(Icons.Filled.Add, contentDescription = "新建会话", tint = palette.textHi)
-                }
-            },
-        )
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -134,7 +265,7 @@ fun ChatTabScreen(onOpenSession: (sessionId: String, title: String) -> Unit) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(errorText!!, fontSize = 12.sp, color = palette.danger)
                     Spacer(modifier = Modifier.size(8.dp))
-                    Text("下拉重试", fontSize = 12.sp, color = palette.accent, modifier = Modifier.clickable {
+                    Text("点击重试", fontSize = 12.sp, color = palette.accent, modifier = Modifier.clickable {
                         scope.launch { reload() }
                     })
                 }
@@ -148,25 +279,23 @@ fun ChatTabScreen(onOpenSession: (sessionId: String, title: String) -> Unit) {
             }
             else -> LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    horizontal = 20.dp,
-                    vertical = 4.dp,
-                ),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(sessions, key = { it.id }) { session ->
                     SessionRow(
                         session = session,
+                        highlighted = session.id == selectedId,
                         onClick = {
                             if (segment == SessionSegment.ARCHIVED) {
                                 // 归档会话先恢复再进入
                                 scope.launch {
                                     runCatching { runtime.chatRepo.unarchive(session.id) }
                                     reload()
-                                    onOpenSession(session.id, session.title)
+                                    onSelect(session)
                                 }
                             } else {
-                                onOpenSession(session.id, session.title)
+                                onSelect(session)
                             }
                         },
                     )
@@ -177,7 +306,21 @@ fun ChatTabScreen(onOpenSession: (sessionId: String, title: String) -> Unit) {
 }
 
 @Composable
-private fun SessionRow(session: ChatSessionItem, onClick: () -> Unit) {
+private fun CreateSessionAction(onCreated: (String) -> Unit) {
+    val runtime = LocalAppRuntime.current
+    val palette = LocalNeurovaColors.current
+    val scope = rememberCoroutineScope()
+    IconButton(onClick = {
+        scope.launch {
+            runCatching { runtime.chatRepo.createSession() }.onSuccess { onCreated(it) }
+        }
+    }) {
+        Icon(Icons.Filled.Add, contentDescription = "新建会话", tint = palette.textHi)
+    }
+}
+
+@Composable
+private fun SessionRow(session: ChatSessionItem, highlighted: Boolean, onClick: () -> Unit) {
     val palette = LocalNeurovaColors.current
     val shape = RoundedCornerShape(15.dp)
     Row(
@@ -187,7 +330,11 @@ private fun SessionRow(session: ChatSessionItem, onClick: () -> Unit) {
             .background(palette.glass)
             .border(
                 1.dp,
-                if (session.pinned) palette.accent.copy(alpha = 0.4f) else palette.glassBorder,
+                when {
+                    highlighted -> palette.accent.copy(alpha = 0.55f)
+                    session.pinned -> palette.accent.copy(alpha = 0.4f)
+                    else -> palette.glassBorder
+                },
                 shape,
             )
             .clickable { onClick() }

@@ -69,7 +69,7 @@ import top.neurova.mobile.ui.theme.LocalNeurovaColors
  * - 抽屉从右上角呼出：跨会话搜索 + 重命名/置顶/归档/fork/删除（与 PC 会话侧栏同一组端点）。
  */
 @Composable
-fun ChatScreen(sessionId: String, initialTitle: String, onBack: () -> Unit) {
+fun ChatScreen(sessionId: String, initialTitle: String, onBack: () -> Unit, showBack: Boolean = true) {
     val runtime = LocalAppRuntime.current
     val palette = LocalNeurovaColors.current
     val controller = remember { runtime.chatSessions }
@@ -91,6 +91,7 @@ fun ChatScreen(sessionId: String, initialTitle: String, onBack: () -> Unit) {
                 agents = runtime.agents.agents,
                 generating = controller.isGenerating,
                 wsState = runtime.ws.state.value,
+                showBack = showBack,
                 onBack = onBack,
                 onOpenDrawer = { drawerOpen = true },
                 onSwitchAgent = { target ->
@@ -98,27 +99,29 @@ fun ChatScreen(sessionId: String, initialTitle: String, onBack: () -> Unit) {
                     controller.useAgent(target)
                 },
             )
-            val listState = rememberLazyListState()
-            LaunchedEffect(controller.messages.size) {
-                if (controller.messages.isNotEmpty()) listState.animateScrollToItem(controller.messages.size - 1)
-            }
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 18.dp, vertical = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                items(controller.messages, key = { it.id }) { message -> MessageBubble(message) }
-                if (controller.messages.isEmpty() && !controller.historyLoading) {
-                    item {
-                        Text(
-                            "发条消息开始这段对话",
-                            fontSize = 12.sp,
-                            color = palette.textLow,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                val listState = rememberLazyListState()
+                LaunchedEffect(controller.messages.size) {
+                    if (controller.messages.isNotEmpty()) listState.animateScrollToItem(controller.messages.size - 1)
+                }
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .widthIn(max = 720.dp)
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    items(controller.messages, key = { it.id }) { message -> MessageBubble(message) }
+                    if (controller.messages.isEmpty() && !controller.historyLoading) {
+                        item {
+                            Text(
+                                "发条消息开始这段对话",
+                                fontSize = 12.sp,
+                                color = palette.textLow,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
                     }
                 }
             }
@@ -161,6 +164,7 @@ private fun ChatHeader(
     agents: List<top.neurova.mobile.core.model.AgentItem>,
     generating: Boolean,
     wsState: MobileWsChannel.State,
+    showBack: Boolean,
     onBack: () -> Unit,
     onOpenDrawer: () -> Unit,
     onSwitchAgent: (String) -> Unit,
@@ -181,8 +185,12 @@ private fun ChatHeader(
             .padding(start = 8.dp, end = 16.dp, top = 6.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onBack) {
-            Icon(Icons.Filled.ArrowBack, contentDescription = "返回", tint = palette.textHi)
+        if (showBack) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Filled.ArrowBack, contentDescription = "返回", tint = palette.textHi)
+            }
+        } else {
+            Spacer(modifier = Modifier.width(48.dp))
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = palette.textHi)
