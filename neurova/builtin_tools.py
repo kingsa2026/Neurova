@@ -1207,13 +1207,18 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "subagent_status": {
         # 并行能力声明：只读蜂群运行记录（SwarmManager 的 status/list_all 在 RLock 下读内存态）。
         "capability": {"readOnly": True, "concurrentSafe": True, "writeScopes": ("none",)},
-        "description": "【查询子Agent状态】查蜂群子 Agent 的执行状态与最终报告；配合 background=true 或前台转后台后的轮询。subagent_id 省略时返回最近派生列表（新→旧，report 截断）。",
+        "description": "【查询子Agent状态】查蜂群子 Agent 的执行状态与最终报告；配合 background=true 或前台转后台后的轮询。subagent_id 省略时返回最近派生列表（新→旧，report 截断）。view=integration 返回集成前核对面（各子任务验收/评审/依赖状态与 blockers）。",
         "parameters": {
             "type": "object",
             "properties": {
                 "subagent_id": {
                     "type": "string",
                     "description": "spawn_subagent 返回的 subagent_id；省略时返回最近派生列表",
+                },
+                "view": {
+                    "type": "string",
+                    "enum": ["runs", "integration"],
+                    "description": "runs（默认）按 run 查询；integration（P2-4）返回集成前核对面：integration_ready + blockers + 各子任务验收/评审状态——主任务汇总前用它确认无未验收挂账",
                 },
             },
             "required": [],
@@ -1301,6 +1306,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                 "reason": {"type": "string", "description": "升级原因：卡点是什么、为什么自己解决不了"},
                 "question": {"type": "string", "description": "需要用户/主代理决策的问题（可选）"},
                 "severity": {"type": "string", "enum": ["normal", "urgent"], "description": "严重程度，默认 normal"},
+                "suggested_action": {"type": "string", "enum": ["clarify", "reassign", "revise_dependency", "retry", "none"], "description": "建议主代理采取的处置：澄清/改派/修订依赖/重试/无需动作（P2-5 升级闭环）"},
+                "action_note": {"type": "string", "description": "对建议处置的补充说明（改派给谁、依赖哪里要修订等）"},
             },
             "required": ["reason"],
         },
