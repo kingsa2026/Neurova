@@ -76,6 +76,7 @@ def _get_request_id(request: Request) -> str:
 async def get_collaboration_templates(
     request: Request,
     limit: int = Query(default=20, ge=1, le=100, description="数量限制"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """获取协作模板"""
     if get_collaboration_manager is None:
@@ -84,8 +85,13 @@ async def get_collaboration_templates(
     try:
         manager = get_collaboration_manager()
 
+        # 审计 §3.4-2（R6 接线）：普通用户只见自己参与/可见的项目，admin 全量——
+        # 过滤层 R4 已落地，此处此前漏传 requester_id 致横向泄露。
+        requester_id, is_admin = _canvas_identity(current_user)
+
         # 获取所有项目作为模板
-        projects = manager.list_projects(limit=limit)
+        projects = manager.list_projects(
+            limit=limit, requester_id=None if is_admin else requester_id)
 
         # 转换为模板格式
         templates = []
@@ -382,6 +388,7 @@ async def get_collaboration_history(
     request: Request,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """获取协作历史"""
     if get_collaboration_manager is None:
@@ -390,8 +397,13 @@ async def get_collaboration_history(
     try:
         manager = get_collaboration_manager()
 
+        # 审计 §3.4-2（R6 接线）：按请求者过滤，admin 全量（同 /templates）
+        requester_id, is_admin = _canvas_identity(current_user)
+
         # 获取所有项目作为历史记录
-        projects = manager.list_projects(limit=limit, offset=offset)
+        projects = manager.list_projects(
+            limit=limit, offset=offset,
+            requester_id=None if is_admin else requester_id)
 
         # 转换为历史记录格式
         history = []
@@ -429,6 +441,7 @@ async def list_collaboration_sessions(
     request: Request,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """获取协作会话列表（由协作项目派生，data 为 JSON 数组，供前端 store 直接消费）"""
     if get_collaboration_manager is None:
@@ -436,7 +449,12 @@ async def list_collaboration_sessions(
 
     try:
         manager = get_collaboration_manager()
-        projects = manager.list_projects(limit=limit, offset=offset)
+
+        # 审计 §3.4-2（R6 接线）：按请求者过滤，admin 全量（同 /templates）
+        requester_id, is_admin = _canvas_identity(current_user)
+        projects = manager.list_projects(
+            limit=limit, offset=offset,
+            requester_id=None if is_admin else requester_id)
 
         sessions = []
         for project in projects:
@@ -462,14 +480,21 @@ async def list_collaboration_sessions(
 
 
 @router.get("/stats")
-async def get_collaboration_stats(request: Request):
+async def get_collaboration_stats(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """协作概览统计：项目/模板/进行中会话/工作流 计数"""
     if get_collaboration_manager is None:
         raise HTTPException(status_code=503, detail="Collaboration service not available")
 
     try:
         manager = get_collaboration_manager()
-        projects = manager.list_projects()
+
+        # 审计 §3.4-2（R6 接线）：统计口径同列表——只见可见面，admin 全量
+        requester_id, is_admin = _canvas_identity(current_user)
+        projects = manager.list_projects(
+            requester_id=None if is_admin else requester_id)
 
         active_sessions = 0
         total_workflows = 0

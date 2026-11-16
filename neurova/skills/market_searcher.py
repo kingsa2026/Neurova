@@ -5,8 +5,10 @@ v2 契约（tests/unit/skills/test_market_searcher.py）:
   skill_need_analyzer 等既有消费方按旧字段读取）;
 - SkillMarketSearcher 持有 registry（默认经 get_market_registry 注入适配器注册表）、
   _cache/_cache_ttl、clear_cache/list_markets 委托 registry;
-- search_market / search_all_markets 为同步核心（适配器是 sync urllib），
-  另提供 * _async 薄包装供 async 上下文使用（线程池执行，不阻塞事件循环）。
+- search_market / search_all_markets 为同步核心（适配器是 sync urllib）；
+  async 上下文由调用方 to_thread 下沉（S5 P1-16 口径），本模块不再提供
+  async 薄包装（零消费死码，R6 退役——asyncio 事件循环内的调用方一律经
+  线程池走同步版）。
 
 注意: 各适配器的上游 URL 正确性属 market_adapters.py 的职责范围，本模块只做
 聚合/缓存/格式映射。
@@ -14,7 +16,6 @@ v2 契约（tests/unit/skills/test_market_searcher.py）:
 
 from __future__ import annotations
 
-import asyncio
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
@@ -186,18 +187,6 @@ class SkillMarketSearcher:
             else:
                 names.append(str(item))
         return [n for n in names if n]
-
-    # ── async 薄包装（供 async 上下文；线程池执行避免阻塞事件循环） ──
-
-    async def search_market_async(self, market: str, query: str, limit: int = 10) -> List[SearchResult]:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self.search_market, market, query, limit)
-
-    async def search_all_markets_async(
-        self, query: str, limit_per_market: int = 10, markets: Optional[List[str]] = None
-    ) -> List[SearchResult]:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self.search_all_markets, query, limit_per_market, markets)
 
     # ── 缓存 ──
 

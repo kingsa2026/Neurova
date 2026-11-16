@@ -147,10 +147,17 @@ async def create_project(body: ProjectCreate):
 @router.get("", response_model=List[ProjectInfo])
 async def list_projects(
     status: Optional[str] = Query(default=None, description="按状态筛选"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """列出所有项目（不含已删除）"""
+    """列出项目（不含已删除）。
+
+    审计 §3.4-2（R6 接线最后一公里）：isolation 层 R4 已落地 requester 过滤，
+    此处此前漏传——普通用户按「成员或公开可见」过滤，admin 全量。
+    """
     iso = _get_iso_manager()
-    projects = iso.list_projects()
+    requester_id = str(current_user.get("user_id") or "default")
+    is_admin = str(current_user.get("role") or "") == "admin"
+    projects = iso.list_projects(requester_id=None if is_admin else requester_id)
     if status:
         projects = [p for p in projects if p.status.value == status]
     return [_project_to_info(p) for p in projects]

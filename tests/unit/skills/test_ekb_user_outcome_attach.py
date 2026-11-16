@@ -271,10 +271,14 @@ class TestFeedbackFanOutReachesEkb:
     def _post(self, consoleModule, feedback):
         import asyncio
 
+        # default agent 无主（S1 属主收紧：无主仅 admin）；本测试验证的是
+        # 反馈→EKB 扇出腿，不是属主门语义——身份升 admin 回到原语义。
+        # 键名对齐门读法：requireAgentOwner 读 user_id/role（id/username 原样保留）。
+        admin = {"id": "u1", "username": "u1", "user_id": "u1", "role": "admin"}
         body = consoleModule.FeedbackRequest(session_id="s1", timestamp="2026-11-12T10:00:00",
                                              feedback=feedback)
         return asyncio.run(consoleModule.post_chat_feedback(
-            body, self._fakeRequest(), {"id": "u1", "username": "u1"}))
+            body, self._fakeRequest(), admin))
 
     def test_like_fills_the_chat_rows_success_bit(self, tmp_path, monkeypatch):
         ekb = _ekb(tmp_path)
