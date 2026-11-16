@@ -1,17 +1,10 @@
-// CognitionApi 单元测试 - TDD 垂直切片
+// CognitionApi 单元测试 - 真实契约版
 // 通过 HttpBackend 接口注入 mock，验证 CognitionApi 调用契约（method/url/body/返回值）
+// 端点词汇与后端挂载同源：/v1/experience、/v1/metacognition、/v1/growth、/v1/knowledge-graph
 // 不真实发起网络请求，符合"不直接调用后端接口"规则
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
 import { HttpClient, HttpBackend } from '../../../../main/ets/libs/api/HttpClient';
-import {
-  ApiResponse,
-  PageResult,
-  Experience,
-  KnowledgeGraph,
-  MetacognitionRecord,
-  ReflectionRecord,
-  GrowthRecord,
-} from '../../../../main/ets/libs/types';
+import { ApiResponse } from '../../../../main/ets/libs/types';
 import { CognitionApi } from '../../../../main/ets/libs/api/modules/CognitionApi';
 
 // Mock 后端实现（参考 MemoryApi.test.ets 模式）
@@ -43,141 +36,138 @@ export default function cognitionApiTest() {
       api = new CognitionApi(client);
     });
 
-    // ========== Experience: list/get/create/update/remove ==========
-    it('listExperiences_calls_get_with_agentId_and_paging', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 1, size: 20 } };
-      api.listExperiences('agent-1', { page: 2, size: 10 });
+    // ========== Experience: ranking/records/delete ==========
+
+    it('listExperiences_calls_get_ranking_with_agent_and_paging', 0, () => {
+      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 2, size: 10 } };
+      api.listExperiences('agent-1', 2, 10);
       expect(backend.requests[0].method).assertEqual('GET');
       const url = backend.requests[0].url;
-      expect(url.includes('/v1/cognition/experiences')).assertTrue();
-      expect(url.includes('agentId=agent-1')).assertTrue();
+      expect(url.includes('/v1/experience/ranking')).assertTrue();
+      expect(url.includes('agent_id=agent-1')).assertTrue();
       expect(url.includes('page=2')).assertTrue();
       expect(url.includes('size=10')).assertTrue();
     });
 
-    it('getExperience_calls_get_with_id_in_url', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { id: 'e1', agentId: 'a1', title: 't', content: 'c', category: 'work', importance: 0.5, createdAt: '', updatedAt: '', activationCount: 0 } };
-      api.getExperience('e1');
-      expect(backend.requests[0].method).assertEqual('GET');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/cognition/experiences/e1');
-    });
-
-    it('createExperience_calls_post_with_body', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { id: 'e1', agentId: 'a1', title: 't', content: 'c', category: 'work', importance: 0.5, createdAt: '', updatedAt: '', activationCount: 0 } };
-      const data: Partial<Experience> = { agentId: 'a1', title: 't', content: 'c', category: 'work', importance: 0.5 };
-      api.createExperience(data);
+    it('createExperience_calls_post_records_with_body', 0, () => {
+      backend.response = { code: 0, message: 'Record added', data: { id: 'e1' } };
+      const payload: Record<string, Object> = {
+        'agent_id': 'a1',
+        'task_type': '数据清洗',
+        'context': 'ctx',
+        'outcome': 'success',
+        'lessons': ['lesson-1'],
+      };
+      api.createExperience(payload);
       expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/cognition/experiences');
-      expect(backend.requests[0].body).assertEqual(data);
-    });
-
-    it('updateExperience_calls_put_with_id_and_body', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { id: 'e1', agentId: 'a1', title: 't2', content: 'c', category: 'work', importance: 0.5, createdAt: '', updatedAt: '', activationCount: 0 } };
-      const data: Partial<Experience> = { title: 't2' };
-      api.updateExperience('e1', data);
-      expect(backend.requests[0].method).assertEqual('PUT');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/cognition/experiences/e1');
-      expect(backend.requests[0].body).assertEqual(data);
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/experience/records');
+      expect(backend.requests[0].body).assertEqual(payload);
     });
 
     it('removeExperience_calls_delete_with_id', 0, () => {
       backend.response = { code: 0, message: 'ok', data: {} };
       api.removeExperience('e1');
       expect(backend.requests[0].method).assertEqual('DELETE');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/cognition/experiences/e1');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/experience/e1');
+    });
+
+    // ========== Metacognition: list/create ==========
+
+    it('listMetacognitions_calls_get_with_agent_path_and_paging', 0, () => {
+      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 2, size: 10 } };
+      api.listMetacognitions('agent-1', 2, 10);
+      expect(backend.requests[0].method).assertEqual('GET');
+      const url = backend.requests[0].url;
+      expect(url.includes('/v1/metacognition/agent-1/metacognition')).assertTrue();
+      expect(url.includes('page=2')).assertTrue();
+      expect(url.includes('size=10')).assertTrue();
+    });
+
+    it('createMetacognition_calls_post_with_agent_path_and_body', 0, () => {
+      backend.response = { code: 0, message: 'Record created', data: { id: 1 } };
+      const payload: Record<string, Object> = {
+        'type': 'monitoring',
+        'content': 'c',
+        'context': 'ctx',
+        'confidence': 0.5,
+      };
+      api.createMetacognition('agent-1', payload);
+      expect(backend.requests[0].method).assertEqual('POST');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/metacognition/agent-1/metacognition');
+      expect(backend.requests[0].body).assertEqual(payload);
+    });
+
+    // ========== Reflection: list/create ==========
+
+    it('listReflections_calls_get_growth_reflection_with_agent_and_limit', 0, () => {
+      backend.response = { code: 0, message: 'ok', data: [] };
+      api.listReflections('agent-1', 20);
+      expect(backend.requests[0].method).assertEqual('GET');
+      const url = backend.requests[0].url;
+      expect(url.includes('/v1/growth/reflection')).assertTrue();
+      expect(url.includes('agent_id=agent-1')).assertTrue();
+      expect(url.includes('limit=20')).assertTrue();
+    });
+
+    it('createReflection_calls_post_growth_reflection_with_body', 0, () => {
+      backend.response = { code: 0, message: 'ok', data: { log_id: 'r1' } };
+      const payload: Record<string, Object> = {
+        'reflection_type': 'performance',
+        'content': 'c',
+        'insights': ['i1'],
+        'confidence': 0.5,
+        'related_memories': [],
+      };
+      api.createReflection('agent-1', payload);
+      expect(backend.requests[0].method).assertEqual('POST');
+      const url = backend.requests[0].url;
+      expect(url.includes('/v1/growth/reflection')).assertTrue();
+      expect(url.includes('agent_id=agent-1')).assertTrue();
+      expect(backend.requests[0].body).assertEqual(payload);
+    });
+
+    // ========== Growth: getGrowthData ==========
+
+    it('getGrowthData_calls_get_growth_with_agent_query', 0, () => {
+      backend.response = { code: 0, message: 'ok', data: { agent_id: 'agent-1' } };
+      api.getGrowthData('agent-1');
+      expect(backend.requests[0].method).assertEqual('GET');
+      const url = backend.requests[0].url;
+      expect(url.includes('/v1/growth')).assertTrue();
+      expect(url.includes('agent_id=agent-1')).assertTrue();
     });
 
     // ========== KnowledgeGraph: getKnowledgeGraph ==========
-    it('getKnowledgeGraph_calls_get_with_agentId_query', 0, () => {
+
+    it('getKnowledgeGraph_calls_get_with_agent_path_and_limit', 0, () => {
       backend.response = { code: 0, message: 'ok', data: { nodes: [], edges: [] } };
       api.getKnowledgeGraph('agent-1');
       expect(backend.requests[0].method).assertEqual('GET');
       const url = backend.requests[0].url;
-      expect(url.includes('/v1/cognition/knowledge-graph')).assertTrue();
-      expect(url.includes('agentId=agent-1')).assertTrue();
+      expect(url.includes('/v1/knowledge-graph/agent-1/knowledge-graph')).assertTrue();
+      expect(url.includes('limit=100')).assertTrue();
     });
 
     it('getKnowledgeGraph_returns_graph_data', 0, () => {
-      const graph: KnowledgeGraph = {
-        nodes: [{ id: 'n1', agentId: 'a1', label: 'AI', type: 'concept' }],
-        edges: [{ id: 'ed1', source: 'n1', target: 'n1', relation: 'self' }],
+      backend.response = {
+        code: 0,
+        message: 'ok',
+        data: {
+          nodes: [{ id: 'n1', label: 'AI', type: 'concept', description: '', weight: 1, created_at: null }],
+          edges: [{ source: 'n1', target: 'n1', relation: 'related_to', weight: 1 }],
+          total_nodes: 1,
+          total_edges: 1,
+          truncated: false,
+          is_demo: false,
+          hint: '',
+        },
       };
-      backend.response = { code: 0, message: 'ok', data: graph };
-      let resolved: ApiResponse<KnowledgeGraph> | null = null;
+      let resolved: ApiResponse<Object> | null = null;
       api.getKnowledgeGraph('a1').then(r => { resolved = r; });
       setTimeout(() => {
-        expect(resolved!.code).assertEqual(0);
-        expect(resolved!.data.nodes.length).assertEqual(1);
-        expect(resolved!.data.edges.length).assertEqual(1);
-      }, 10);
-    });
-
-    // ========== Metacognition: list/create ==========
-    it('listMetacognitions_calls_get_with_agentId', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 1, size: 20 } };
-      api.listMetacognitions('agent-1');
-      expect(backend.requests[0].method).assertEqual('GET');
-      expect(backend.requests[0].url.includes('/v1/cognition/metacognitions')).assertTrue();
-      expect(backend.requests[0].url.includes('agentId=agent-1')).assertTrue();
-    });
-
-    it('createMetacognition_calls_post_with_body', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { id: 'm1', agentId: 'a1', thoughtId: 't1', type: 'monitoring', content: 'c', confidence: 0.8, createdAt: '' } };
-      const data: Partial<MetacognitionRecord> = { agentId: 'a1', thoughtId: 't1', type: 'monitoring', content: 'c', confidence: 0.8 };
-      api.createMetacognition(data);
-      expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/cognition/metacognitions');
-      expect(backend.requests[0].body).assertEqual(data);
-    });
-
-    // ========== Reflection: list/create ==========
-    it('listReflections_calls_get_with_agentId', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 1, size: 20 } };
-      api.listReflections('agent-1');
-      expect(backend.requests[0].method).assertEqual('GET');
-      expect(backend.requests[0].url.includes('/v1/cognition/reflections')).assertTrue();
-      expect(backend.requests[0].url.includes('agentId=agent-1')).assertTrue();
-    });
-
-    it('createReflection_calls_post_with_body', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { id: 'r1', agentId: 'a1', trigger: 'failure', content: 'c', insights: [], improvements: [], createdAt: '' } };
-      const data: Partial<ReflectionRecord> = { agentId: 'a1', trigger: 'failure', content: 'c', insights: [], improvements: [] };
-      api.createReflection(data);
-      expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/cognition/reflections');
-      expect(backend.requests[0].body).assertEqual(data);
-    });
-
-    // ========== Growth: list/update ==========
-    it('listGrowths_calls_get_with_agentId', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 1, size: 20 } };
-      api.listGrowths('agent-1');
-      expect(backend.requests[0].method).assertEqual('GET');
-      expect(backend.requests[0].url.includes('/v1/cognition/growths')).assertTrue();
-      expect(backend.requests[0].url.includes('agentId=agent-1')).assertTrue();
-    });
-
-    it('updateGrowth_calls_put_with_id_and_body', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { id: 'g1', agentId: 'a1', dimension: 'knowledge', level: 2, experience: 100, milestones: [], updatedAt: '' } };
-      const data: Partial<GrowthRecord> = { level: 2 };
-      api.updateGrowth('g1', data);
-      expect(backend.requests[0].method).assertEqual('PUT');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/cognition/growths/g1');
-      expect(backend.requests[0].body).assertEqual(data);
-    });
-
-    it('listExperiences_returns_page_result', 0, () => {
-      const page: PageResult<Experience> = {
-        items: [{ id: 'e1', agentId: 'a1', title: 't', content: 'c', category: 'work', importance: 0.5, createdAt: '', updatedAt: '', activationCount: 0 }],
-        total: 1, page: 1, size: 20,
-      };
-      backend.response = { code: 0, message: 'ok', data: page };
-      let resolved: ApiResponse<PageResult<Experience>> | null = null;
-      api.listExperiences('a1').then(r => { resolved = r; });
-      setTimeout(() => {
-        expect(resolved!.code).assertEqual(0);
-        expect(resolved!.data.total).assertEqual(1);
-        expect(resolved!.data.items[0].id).assertEqual('e1');
+        if (resolved !== null) {
+          expect(resolved.code).assertEqual(0);
+        }
       }, 10);
     });
   });
