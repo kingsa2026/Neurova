@@ -659,6 +659,10 @@ def clear_turn_state() -> None:
         _injected_experiences_var,
         _goal_var,
         _goal_verdict_var,
+        # 审计 3.2-7：这两枚原本漏清——蜂群子代理白名单跨回合残留（面外工具
+        # 被结构化拒绝）、工具调用回投地址串到下一轮的审批路由上
+        _subagent_tool_allowlist_var,
+        _tool_call_id_var,
     ):
         if var is _skills_off_var:
             var.set(False)
