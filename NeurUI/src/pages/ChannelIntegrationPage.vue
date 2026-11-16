@@ -439,12 +439,35 @@ function closeConfigModal() {
   currentChannel.value = null
 }
 
-function toggleChannel(ch: ChannelItem) {
+// fe-P2-4（用户拍板 2026-11-16）：启用/禁用点击即落库——原形态只翻本地
+// `ch.enabled`（注释自述"真正落盘在保存时"），UI 与后端不一致，"未配置先启用"
+// 也进不了后端。POST /channel-configs 是全量 upsert：已存凭据必须原样回传
+// （GET 只回 app_id_masked，真凭据在 extra 里），否则一次启停就把凭据抹空。
+// 成功才翻 UI；失败保持后端现状并把 detail 原话透出。
+async function toggleChannel(ch: ChannelItem) {
   if (ch.channelKey === 'negative-screen') {
     toggleNegativeScreen(ch)
     return
   }
-  ch.enabled = !ch.enabled
+  const next = !ch.enabled
+  try {
+    const saved = savedExtras.value[ch.backendType] ?? {}
+    await createChannelConfig({
+      channel_type: ch.backendType,
+      enabled: next,
+      app_id: saved.app_id || '',
+      app_secret: saved.app_secret || '',
+      use_stream: saved.use_stream !== undefined ? !!saved.use_stream : true,
+      encrypt_key: saved.encrypt_key || '',
+      verification_token: saved.verification_token || '',
+      extra: saved,
+    } as any, agentId.value)
+    ch.enabled = next
+    showToast(t('channel.configSaved'))
+  } catch (e: any) {
+    const detail = e?.response?.data?.detail || e?.message
+    showToast(detail ? t('channel.genericFailure', { reason: String(detail) }) : t('channel.configSaveFailed'))
+  }
 }
 
 // 负一屏推送：启用状态持久化到 /negative-screen（非本地翻转）

@@ -353,14 +353,34 @@ function allFieldsFor(ch: AgentChannel): FieldSchema[] {
   return [...commonFields.value, ...(channelFieldsMap.value[ch.channelKey] || [])]
 }
 
-// 与系统页一致：紧凑卡「启用」/大卡「禁用」本地翻转 enabled（真正落盘在保存时）；
+// 与系统页一致（fe-P2-4，用户拍板 2026-11-16）：启用/禁用点击即落库——
+// POST /channel-configs 是全量 upsert，已存凭据必须原样回传（GET 只回
+// app_id_masked，真凭据在 extra 里），否则一次启停就把凭据抹空。
+// 成功才翻 UI；失败保持后端现状并把 detail 原话透出。
 // 负一屏是独立 API 的用户级开关，点「启用」直接打开其专属设置面板。
-function toggleChannel(ch: AgentChannel) {
+async function toggleChannel(ch: AgentChannel) {
   if (ch.channelKey === 'negative-screen') {
     openConfigModal(ch)
     return
   }
-  ch.enabled = !ch.enabled
+  const next = !ch.enabled
+  try {
+    const saved = savedExtras.value[ch.backendType] ?? {}
+    await createChannelConfig({
+      channel_type: ch.backendType,
+      enabled: next,
+      app_id: typeof saved.app_id === 'string' ? saved.app_id : '',
+      app_secret: typeof saved.app_secret === 'string' ? saved.app_secret : '',
+      use_stream: saved.use_stream !== undefined ? !!saved.use_stream : true,
+      encrypt_key: typeof saved.encrypt_key === 'string' ? saved.encrypt_key : '',
+      verification_token: typeof saved.verification_token === 'string' ? saved.verification_token : '',
+      extra: saved as Record<string, any>,
+    }, agentId.value)
+    ch.enabled = next
+    message.success(t('common.success'))
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || e?.message || t('channel.configSaveFailed'))
+  }
 }
 
 async function saveConfig() {
