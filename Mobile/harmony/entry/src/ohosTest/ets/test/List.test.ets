@@ -31,7 +31,6 @@ import agentChannelPageTest from './AgentChannelPage.test';
 import cognitionApiTest from './CognitionApi.test';
 import capabilityApiTest from './CapabilityApi.test';
 import runtimeApiTest from './RuntimeApi.test';
-import personalityApiTest from './PersonalityApi.test';
 import collaborationApiTest from './CollaborationApi.test';
 import monitorApiTest from './MonitorApi.test';
 // M4.6 P2 渠道系统 API 模块测试套件
@@ -47,8 +46,6 @@ import growthPageTest from './GrowthPage.test';
 import agentRulePageTest from './AgentRulePage.test';
 import agentFilePageTest from './AgentFilePage.test';
 import agentMediaPageTest from './AgentMediaPage.test';
-import agentEmotionPageTest from './AgentEmotionPage.test';
-import agentPersonalityPageTest from './AgentPersonalityPage.test';
 // M4 P2 运行时层页面测试套件
 import agentSchedulerPageTest from './AgentSchedulerPage.test';
 import contextChannelPageTest from './ContextChannelPage.test';
@@ -135,7 +132,6 @@ export default function testsuite() {
   cognitionApiTest();
   capabilityApiTest();
   runtimeApiTest();
-  personalityApiTest();
   collaborationApiTest();
   monitorApiTest();
   // M4.6 P2 渠道系统 API 模块测试套件
@@ -151,8 +147,6 @@ export default function testsuite() {
   agentRulePageTest();
   agentFilePageTest();
   agentMediaPageTest();
-  agentEmotionPageTest();
-  agentPersonalityPageTest();
   // M4 P2 运行时层页面测试套件
   agentSchedulerPageTest();
   contextChannelPageTest();

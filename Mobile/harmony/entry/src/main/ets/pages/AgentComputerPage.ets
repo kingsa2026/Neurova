@@ -213,7 +213,7 @@ export struct AgentComputerPage {
       }
     } catch (e) {
       this.logger.error(TAG, '加载计算机任务失败', e as Error);
-      this.msg.error('加载计算机任务失败');
+      this.msg.error((e as Error).message || '加载计算机任务失败');
     } finally {
       this.loading = false;
     }
@@ -279,7 +279,7 @@ export struct AgentComputerPage {
       }
     } catch (e) {
       this.logger.error(TAG, '创建计算机任务失败', e as Error);
-      this.msg.error('创建计算机任务失败');
+      this.msg.error((e as Error).message || '创建计算机任务失败');
     }
   }
 
@@ -327,7 +327,7 @@ export struct AgentComputerPage {
       }
     } catch (e) {
       this.logger.error(TAG, '删除计算机任务失败', e as Error);
-      this.msg.error('删除失败');
+      this.msg.error((e as Error).message || '删除失败');
     }
   }
 
@@ -390,7 +390,7 @@ export struct AgentComputerPage {
           .alignItems(HorizontalAlign.Center)
         } else if (this.getFilteredTasks().length === 0) {
           Column() {
-            Text('暂无计算机任务')
+            Text('后端暂未提供计算机任务数据')
               .fontSize(this.sm.getFontSize('subtitle'))
               .fontColor(this.sm.getColor('text_secondary'))
               .margin({ bottom: this.sm.getSpacing('md') })

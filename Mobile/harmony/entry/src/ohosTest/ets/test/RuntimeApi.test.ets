@@ -1,25 +1,17 @@
-// RuntimeApi 单元测试 - TDD 垂直切片
+// RuntimeApi 单元测试 - 真实契约版
 // 通过 HttpBackend 接口注入 mock，验证 RuntimeApi 调用契约（method/url/body/返回值）
-// 不真实发起网络请求，符合"不直接调用后端接口"规则
+// 端点词汇与后端挂载同源：/v1/scheduler、/v1/trace、/v1/sleep、/v1/firewall；
+// 上下文消息/计算机任务/轨迹点后端无对应端点——断言不发请求且返回诚实空态/显式失败。
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
 import { HttpClient, HttpBackend } from '../../../../main/ets/libs/api/HttpClient';
-import {
-  ApiResponse,
-  PageResult,
-  ScheduleTask,
-  ContextMessage,
-  ComputerTask,
-  TraceEntry,
-  TrajectoryPoint,
-  SleepStatus,
-  FirewallRule,
-} from '../../../../main/ets/libs/types';
+import { ApiResponse } from '../../../../main/ets/libs/types';
 import { RuntimeApi } from '../../../../main/ets/libs/api/modules/RuntimeApi';
 
-// Mock 后端实现（参考 MemoryApi.test.ets 模式）
+// Mock 后端实现：按 method+url 返回不同响应（防火墙"先取列表再合并更新"需要）
 class MockBackend implements HttpBackend {
   public requests: { method: string; url: string; body: Object | null }[] = [];
   public response: ApiResponse<Object> = { code: 0, message: 'ok', data: {} };
+  public getResponse: ApiResponse<Object> | null = null;
 
   async request(
     method: string,
@@ -28,6 +20,9 @@ class MockBackend implements HttpBackend {
     _headers: Record<string, string>,
   ): Promise<{ status: number; data: ApiResponse<Object> }> {
     this.requests.push({ method, url, body });
+    if (method === 'GET' && this.getResponse !== null) {
+      return { status: 200, data: this.getResponse };
+    }
     return { status: 200, data: this.response };
   }
 }
@@ -45,160 +40,194 @@ export default function runtimeApiTest() {
       api = new RuntimeApi(client);
     });
 
-    // ========== ScheduleTask: list/create ==========
-    it('listScheduleTasks_calls_get_with_agentId', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 1, size: 20 } };
-      api.listScheduleTasks('agent-1');
+    // ========== Scheduler：列表/创建/更新/触发/删除 ==========
+
+    it('listScheduleTasks_calls_get_scheduler_tasks_with_agent_and_limit', 0, () => {
+      backend.response = { code: 0, message: 'ok', data: [] };
+      api.listScheduleTasks('agent-1', { page: 1, size: 20 });
       expect(backend.requests[0].method).assertEqual('GET');
-      expect(backend.requests[0].url.includes('/v1/runtime/scheduler')).assertTrue();
-      expect(backend.requests[0].url.includes('agentId=agent-1')).assertTrue();
+      const url = backend.requests[0].url;
+      expect(url.includes('/scheduler/tasks')).assertTrue();
+      expect(url.includes('agent_id=agent-1')).assertTrue();
+      expect(url.includes('limit=100')).assertTrue();
     });
 
-    it('createScheduleTask_calls_post_with_body', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { id: 's1', agentId: 'a1', name: 'n', cron: '* * * * *', status: 'pending', createdAt: '' } };
-      const data: Partial<ScheduleTask> = { agentId: 'a1', name: 'n', cron: '* * * * *' };
-      api.createScheduleTask(data);
+    it('createScheduleTask_posts_taskcreate_contract', 0, () => {
+      backend.response = { code: 0, message: 'ok', data: { task_id: 't1' } };
+      api.createScheduleTask({
+        agentId: 'agent-1',
+        name: '日报',
+        cron: '0 9 * * *',
+        payload: { 'k': 'v' },
+      });
       expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/runtime/scheduler');
-      expect(backend.requests[0].body).assertEqual(data);
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/scheduler/tasks');
+      const body = backend.requests[0].body as Record<string, Object>;
+      expect(body['name']).assertEqual('日报');
+      expect(body['action']).assertEqual('custom');
+      expect(body['cron_expression']).assertEqual('0 9 * * *');
     });
 
-    // ========== ContextMessage: list/remove ==========
-    it('listContextMessages_calls_get_with_sessionId', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 1, size: 20 } };
-      api.listContextMessages('session-1');
-      expect(backend.requests[0].method).assertEqual('GET');
-      expect(backend.requests[0].url.includes('/v1/runtime/context')).assertTrue();
-      expect(backend.requests[0].url.includes('sessionId=session-1')).assertTrue();
-    });
-
-    it('removeContextMessage_calls_delete_with_id', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: {} };
-      api.removeContextMessage('c1');
-      expect(backend.requests[0].method).assertEqual('DELETE');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/runtime/context/c1');
-    });
-
-    // ========== ComputerTask: list/create/remove ==========
-    it('listComputerTasks_calls_get_with_agentId', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 1, size: 20 } };
-      api.listComputerTasks('agent-1');
-      expect(backend.requests[0].method).assertEqual('GET');
-      expect(backend.requests[0].url.includes('/v1/runtime/computer')).assertTrue();
-      expect(backend.requests[0].url.includes('agentId=agent-1')).assertTrue();
-    });
-
-    it('createComputerTask_calls_post_with_body', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { id: 'ct1', agentId: 'a1', action: 'click', status: 'pending', startedAt: '' } };
-      const data: Partial<ComputerTask> = { agentId: 'a1', action: 'click' };
-      api.createComputerTask(data);
+    it('updateScheduleTask_running_status_routes_to_run_endpoint', 0, () => {
+      backend.response = { code: 0, message: 'ok', data: { task_id: 't1' } };
+      api.updateScheduleTask('t1', { status: 'running' });
       expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/runtime/computer');
-      expect(backend.requests[0].body).assertEqual(data);
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/scheduler/tasks/t1/run');
     });
 
-    it('removeComputerTask_calls_delete_with_id', 0, () => {
+    it('updateScheduleTask_cron_routes_to_put', 0, () => {
+      backend.response = { code: 0, message: 'ok', data: { task_id: 't1' } };
+      api.updateScheduleTask('t1', { cron: '0 10 * * *' });
+      expect(backend.requests[0].method).assertEqual('PUT');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/scheduler/tasks/t1');
+      const body = backend.requests[0].body as Record<string, Object>;
+      expect(body['cron_expression']).assertEqual('0 10 * * *');
+    });
+
+    it('removeScheduleTask_calls_delete', 0, () => {
       backend.response = { code: 0, message: 'ok', data: {} };
-      api.removeComputerTask('ct1');
+      api.removeScheduleTask('t1');
       expect(backend.requests[0].method).assertEqual('DELETE');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/runtime/computer/ct1');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/scheduler/tasks/t1');
     });
 
-    // ========== TraceEntry: list/remove ==========
-    it('listTraces_calls_get_with_agentId', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 1, size: 20 } };
-      api.listTraces('agent-1');
+    // ========== Trace：列表/删除（后端无 DELETE） ==========
+
+    it('listTraces_calls_get_trace_with_agent_and_limit', 0, () => {
+      backend.response = { code: 0, message: 'ok', data: [] };
+      api.listTraces('agent-1', { page: 1, size: 20 });
       expect(backend.requests[0].method).assertEqual('GET');
-      expect(backend.requests[0].url.includes('/v1/runtime/traces')).assertTrue();
-      expect(backend.requests[0].url.includes('agentId=agent-1')).assertTrue();
+      const url = backend.requests[0].url;
+      expect(url.includes('/trace')).assertTrue();
+      expect(url.includes('agent_id=agent-1')).assertTrue();
+      expect(url.includes('limit=100')).assertTrue();
     });
 
-    it('removeTrace_calls_delete_with_id', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: {} };
-      api.removeTrace('t1');
-      expect(backend.requests[0].method).assertEqual('DELETE');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/runtime/traces/t1');
+    it('removeTrace_throws_without_request', 0, () => {
+      let threw = false;
+      try {
+        api.removeTrace('tr1');
+      } catch (e) {
+        threw = true;
+      }
+      expect(threw).assertTrue();
+      expect(backend.requests.length).assertEqual(0);
     });
 
-    // ========== TrajectoryPoint: list/get ==========
-    it('listTrajectory_calls_get_with_agentId', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 1, size: 20 } };
-      api.listTrajectory('agent-1');
-      expect(backend.requests[0].method).assertEqual('GET');
-      expect(backend.requests[0].url.includes('/v1/runtime/trajectory')).assertTrue();
-      expect(backend.requests[0].url.includes('agentId=agent-1')).assertTrue();
+    // ========== 无真实数据源的端点：显式抛错点名，不发请求 ==========
+
+    it('listContextMessages_throws_without_request', 0, () => {
+      let threw = false;
+      try {
+        api.listContextMessages('s1');
+      } catch (e) {
+        threw = true;
+      }
+      expect(threw).assertTrue();
+      expect(backend.requests.length).assertEqual(0);
     });
 
-    it('getTrajectoryPoint_calls_get_with_id_in_url', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { id: 'tp1', agentId: 'a1', sessionId: 's1', step: 1, action: 'click', observation: 'o', timestamp: '' } };
-      api.getTrajectoryPoint('tp1');
-      expect(backend.requests[0].method).assertEqual('GET');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/runtime/trajectory/tp1');
+    it('listComputerTasks_throws_without_request', 0, () => {
+      let threw = false;
+      try {
+        api.listComputerTasks('agent-1');
+      } catch (e) {
+        threw = true;
+      }
+      expect(threw).assertTrue();
+      expect(backend.requests.length).assertEqual(0);
     });
 
-    // ========== SleepStatus: get/setMode/awaken ==========
-    it('getSleepStatus_calls_get_with_agentId_query', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { agentId: 'a1', isSleeping: false, mode: 'idle', pendingTasks: 0 } };
+    it('createComputerTask_throws_without_request', 0, () => {
+      let threw = false;
+      try {
+        api.createComputerTask({ agentId: 'agent-1', action: 'click' });
+      } catch (e) {
+        threw = true;
+      }
+      expect(threw).assertTrue();
+      expect(backend.requests.length).assertEqual(0);
+    });
+
+    it('listTrajectory_throws_without_request', 0, () => {
+      let threw = false;
+      try {
+        api.listTrajectory('agent-1');
+      } catch (e) {
+        threw = true;
+      }
+      expect(threw).assertTrue();
+      expect(backend.requests.length).assertEqual(0);
+    });
+
+    // ========== Sleep：状态/设置/唤醒 ==========
+
+    it('getSleepStatus_calls_get_sleep_status_path', 0, () => {
+      backend.response = { code: 0, message: 'ok', data: { agent_id: 'agent-1', is_sleeping: true, sleep_phase: 'deep', sleep_cycles: 2 } };
       api.getSleepStatus('agent-1');
       expect(backend.requests[0].method).assertEqual('GET');
-      expect(backend.requests[0].url.includes('/v1/runtime/sleep')).assertTrue();
-      expect(backend.requests[0].url.includes('agentId=agent-1')).assertTrue();
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/sleep/agent-1/status');
     });
 
-    it('setSleepMode_calls_post_with_body', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { agentId: 'a1', isSleeping: true, mode: 'deep', pendingTasks: 0 } };
+    it('setSleepMode_puts_sleep_settings_with_sleep_mode', 0, () => {
+      backend.response = { code: 0, message: 'ok', data: { agent_id: 'agent-1', is_sleeping: false, sleep_phase: 'awake', sleep_cycles: 0 } };
       api.setSleepMode('agent-1', 'deep');
-      expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/runtime/sleep');
-      expect(backend.requests[0].body).assertEqual({ agentId: 'agent-1', mode: 'deep' });
+      expect(backend.requests[0].method).assertEqual('PUT');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/sleep/agent-1/settings');
+      const body = backend.requests[0].body as Record<string, Object>;
+      expect(body['sleep_mode']).assertEqual('deep');
     });
 
-    it('awaken_calls_post_to_awaken_endpoint_with_body', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { agentId: 'a1', isSleeping: false, mode: 'idle', pendingTasks: 0 } };
+    it('awaken_posts_sleep_wake_path', 0, () => {
+      backend.response = { code: 0, message: 'ok', data: {} };
       api.awaken('agent-1');
       expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/runtime/sleep/awaken');
-      expect(backend.requests[0].body).assertEqual({ agentId: 'agent-1' });
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/sleep/agent-1/wake');
     });
 
-    // ========== FirewallRule: list/create/update ==========
-    it('listFirewallRules_calls_get_with_agentId', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 1, size: 20 } };
-      api.listFirewallRules('agent-1');
+    // ========== Firewall：列表/创建/启停/删除 ==========
+
+    it('listFirewallRules_calls_get_firewall_rules', 0, () => {
+      backend.response = { code: 0, message: 'ok', data: [] };
+      api.listFirewallRules('agent-1', { page: 1, size: 20 });
       expect(backend.requests[0].method).assertEqual('GET');
-      expect(backend.requests[0].url.includes('/v1/runtime/firewall')).assertTrue();
-      expect(backend.requests[0].url.includes('agentId=agent-1')).assertTrue();
+      const url = backend.requests[0].url;
+      expect(url.includes('/firewall/rules')).assertTrue();
+      expect(url.includes('limit=100')).assertTrue();
     });
 
-    it('createFirewallRule_calls_post_with_body', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { id: 'f1', agentId: 'a1', resource: '/path', action: 'allow', scope: 'outbound', enabled: true, createdAt: '' } };
-      const data: Partial<FirewallRule> = { agentId: 'a1', resource: '/path', action: 'allow', scope: 'outbound', enabled: true };
-      api.createFirewallRule(data);
+    it('createFirewallRule_posts_firewallrulecreate_contract', 0, () => {
+      backend.response = { code: 0, message: 'ok', data: { rule_id: 'r1' } };
+      api.createFirewallRule({ agentId: 'agent-1', resource: '1.2.3.4', action: 'deny', enabled: true });
       expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/runtime/firewall');
-      expect(backend.requests[0].body).assertEqual(data);
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/firewall/rules');
+      const body = backend.requests[0].body as Record<string, Object>;
+      expect(body['value']).assertEqual('1.2.3.4');
+      expect(body['action']).assertEqual('block');
+      expect(body['rule_type']).assertEqual('ip');
     });
 
-    it('updateFirewallRule_calls_put_with_id_and_body', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { id: 'f1', agentId: 'a1', resource: '/path', action: 'deny', scope: 'outbound', enabled: true, createdAt: '' } };
-      const data: Partial<FirewallRule> = { action: 'deny' };
-      api.updateFirewallRule('f1', data);
-      expect(backend.requests[0].method).assertEqual('PUT');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/runtime/firewall/f1');
-      expect(backend.requests[0].body).assertEqual(data);
+    it('updateFirewallRule_enabled_merges_existing_rule', 0, () => {
+      backend.getResponse = {
+        code: 0,
+        message: 'ok',
+        data: [{ rule_id: 'r1', name: '1.2.3.4', rule_type: 'ip', action: 'block', value: '1.2.3.4', enabled: true, created_at: 0, updated_at: 0 }],
+      };
+      backend.response = { code: 0, message: 'ok', data: { rule_id: 'r1', enabled: false } };
+      api.updateFirewallRule('r1', { enabled: false });
+      expect(backend.requests[0].method).assertEqual('GET');
+      expect(backend.requests[1].method).assertEqual('PUT');
+      expect(backend.requests[1].url).assertEqual('https://api.example.com/firewall/rules/r1');
+      const body = backend.requests[1].body as Record<string, Object>;
+      expect(body['enabled']).assertEqual(false);
+      expect(body['value']).assertEqual('1.2.3.4');
     });
 
-    it('getSleepStatus_returns_sleep_status_data', 0, () => {
-      const status: SleepStatus = { agentId: 'a1', isSleeping: true, sleepSince: '', mode: 'deep', pendingTasks: 3 };
-      backend.response = { code: 0, message: 'ok', data: status };
-      let resolved: ApiResponse<SleepStatus> | null = null;
-      api.getSleepStatus('a1').then(r => { resolved = r; });
-      setTimeout(() => {
-        expect(resolved!.code).assertEqual(0);
-        expect(resolved!.data.isSleeping).assertTrue();
-        expect(resolved!.data.mode).assertEqual('deep');
-        expect(resolved!.data.pendingTasks).assertEqual(3);
-      }, 10);
+    it('removeFirewallRule_calls_delete', 0, () => {
+      backend.response = { code: 0, message: 'ok', data: {} };
+      api.removeFirewallRule('r1');
+      expect(backend.requests[0].method).assertEqual('DELETE');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/firewall/rules/r1');
     });
   });
 }

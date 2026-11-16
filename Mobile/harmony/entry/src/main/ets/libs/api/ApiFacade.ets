@@ -28,7 +28,6 @@ import { AgentChannelsApi } from './modules/AgentChannelsApi';
 import { CognitionApi } from './modules/CognitionApi';
 import { CapabilityApi } from './modules/CapabilityApi';
 import { RuntimeApi } from './modules/RuntimeApi';
-import { PersonalityApi } from './modules/PersonalityApi';
 import { CollaborationApi } from './modules/CollaborationApi';
 import { MonitorApi } from './modules/MonitorApi';
 import { ChannelIntegrationApi } from './modules/ChannelIntegrationApi';
@@ -63,7 +62,6 @@ export class ApiFacade {
   public cognition: CognitionApi;
   public capability: CapabilityApi;
   public runtime: RuntimeApi;
-  public personality: PersonalityApi;
   public collaboration: CollaborationApi;
   public monitor: MonitorApi;
   // 业务模块（M4.6 新增 2 个 - 渠道系统）
@@ -94,7 +92,6 @@ export class ApiFacade {
     this.cognition = new CognitionApi(this.client);
     this.capability = new CapabilityApi(this.client);
     this.runtime = new RuntimeApi(this.client);
-    this.personality = new PersonalityApi(this.client);
     this.collaboration = new CollaborationApi(this.client);
     this.monitor = new MonitorApi(this.client);
     // M4.6 新增模块（渠道系统）
