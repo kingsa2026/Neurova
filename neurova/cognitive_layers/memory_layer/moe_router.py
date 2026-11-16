@@ -8,6 +8,8 @@ MoE Memory Router — 稀疏门控专家混合记忆路由器
   3. 可塑性: centroid drift (LTP/LTD 更新质心位置)
 """
 
+import json
+
 from neurova.core import vector_math
 from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
@@ -17,6 +19,28 @@ from neurova.cognitive_layers.memory_layer.models import MemoryOrigin
 from neurova.cognitive_layers.memory_layer.unified_vector_store import UnifiedVectorStore
 
 logger = get_logger(__name__)
+
+
+def _decryptRowContent(row: Dict[str, Any]) -> str:
+    """L0 直读 persist 行的解密出口（U2 读侧透明解密，2026-11-17）。
+
+    L0 是绕过 `_row_to_memory`/`to_dict` 的行装配面（SELECT * 直取 dict），
+    带 `metadata._security.encrypted=fernet` 标记的行在此按同一标记解密；
+    明文行/mask 行原样返回。metadata 解析失败与解密失败诚实抛出，由调用方
+    逐行点名跳过——不静默把密文当内容送进上下文。
+    """
+    content = row.get("content") or ""
+    rawMeta = row.get("metadata")
+    if isinstance(rawMeta, str):
+        metadata = json.loads(rawMeta) if rawMeta else {}
+    else:
+        metadata = rawMeta if isinstance(rawMeta, dict) else {}
+    sec = metadata.get("_security") if isinstance(metadata, dict) else None
+    if not isinstance(sec, dict) or sec.get("encrypted") != "fernet" or not content:
+        return content
+    from neurova.cognitive_layers.memory_layer.security import get_memory_security
+
+    return get_memory_security().decrypt_sensitive_content(content, "fernet")
 
 
 @dataclass
@@ -212,10 +236,21 @@ class ExpertDrilldownRetriever:
 
         try:
             result = self.store.execute(sql, params)
-            return result.fetchall() if hasattr(result, "fetchall") else []
+            rows = result.fetchall() if hasattr(result, "fetchall") else []
         except Exception as e:
             logger.warning("Layer 0 查询失败: %s", e)
             return []
+        # U2：行直读面按标记透明解密。解不开的行 ERROR 点名后跳过——一行坏
+        # 密文不该把整条 L0 通道打空，也不该把密文当内容送进上下文。
+        decrypted: List[Dict[str, Any]] = []
+        for row in rows:
+            try:
+                row["content"] = _decryptRowContent(row)
+            except Exception as e:
+                logger.error("MoE L0 行解密失败，跳过 id=%s: %s", row.get("id"), e)
+                continue
+            decrypted.append(row)
+        return decrypted
 
     def _layer1_structured_drilldown(self, candidates: List[Dict], min_floor: int = 5) -> List[Dict]:
         """Layer 1: 逐层过滤"""

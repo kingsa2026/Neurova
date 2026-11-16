@@ -48,6 +48,94 @@ def _reset_security_singleton():
     reset_memory_security()
 
 
+class TestEncryptReadSideBypassingToDict:
+    """绕过 to_dict 的现役读出口（U2 补漏批）：同样必须透明解密。
+
+    to_dict 出口（70d54c11e）覆盖不了自拼 dict/行直读的三族读面：
+    1. get_top_memories_by_temperature——温度通道（neurova_recall 消费）自拼 dict；
+    2. MoE ExpertDrilldownRetriever L0——persist 行直读（绕过 _row_to_memory）；
+    3. update_memory 内容变更——带标记行的内容改写必须维持
+       「标记⇔行内容是密文」不变量，否则该行从此读不出。
+    """
+
+    def test_top_temperature_lane_returns_plaintext(self, manager):
+        get_memory_security(_security("encrypt"))
+        manager.remember(SECRET_SAMPLE, auto_analyze_emotion=False)
+        tops = manager.get_top_memories_by_temperature(limit=5)
+        assert tops, "温度通道应返回候选"
+        assert tops[0]["content"] == SECRET_SAMPLE, (
+            "温度通道自拼 dict 直用 mem.content 会把密文喂给召回面"
+        )
+
+    def test_moe_l0_lane_returns_plaintext(self, manager):
+        get_memory_security(_security("encrypt"))
+        manager.remember(SECRET_SAMPLE, auto_analyze_emotion=False)
+
+        import sqlite3
+
+        from neurova.cognitive_layers.memory_layer.moe_router import (
+            ExpertDrilldownRetriever,
+        )
+        from neurova.mem_core import _PersistDbStore
+
+        conn = sqlite3.connect(manager.persistenceDbPath())
+        try:
+            agentId, neuserId, userId = conn.execute(
+                "SELECT agent_id, neuser_id, user_id FROM memories LIMIT 1"
+            ).fetchone()
+        finally:
+            conn.close()
+        store = _PersistDbStore(manager.persistenceDbPath(), agentId, neuserId, userId)
+        try:
+            retriever = ExpertDrilldownRetriever(expert_def={}, store=store)
+            rows = retriever._layer0_exact_index()
+        finally:
+            store.close()
+        assert rows, "L0 应捞到候选行"
+        assert rows[0]["content"] == SECRET_SAMPLE, (
+            "L0 行直读面必须按标记透明解密——密文进上下文即乱码注入"
+        )
+
+    def test_update_content_keeps_encrypted_row_readable(self, manager):
+        get_memory_security(_security("encrypt"))
+        mem_id = manager.remember(SECRET_SAMPLE, auto_analyze_emotion=False)
+        newContent = "替换后的新密钥 sk-proj-BBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+        assert manager.update_memory(mem_id, content=newContent, agent_wide=True)
+
+        mem = manager.get_memory(mem_id, agent_wide=True)
+        assert mem["content"] == newContent, (
+            "带标记行改内容必须重新加密落行——明文配标记会让读侧解密必然抛错"
+        )
+        # 行面仍是密文（at-rest 语义不因改写降级）；正文表在配对库
+        import json as _json
+        import sqlite3
+
+        conn = sqlite3.connect(manager.persistenceDbPath())
+        try:
+            row = conn.execute(
+                "SELECT content, metadata FROM memories WHERE id = ?", (mem_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row[0] != newContent, "改写后的行内容必须仍是密文"
+        assert _json.loads(row[1])["_security"]["encrypted"] == "fernet"
+
+    def test_fernet_without_cipher_fails_fast(self):
+        """密钥缺失（加密器缺席）必须点名拒绝——静默回密文/明文都是假读数。"""
+        from neurova.cognitive_layers.memory_layer.security import (
+            EncryptionMethod,
+            MemorySecurity,
+        )
+
+        noCipher = MemorySecurity(
+            SecurityConfig(default_encryption=EncryptionMethod.NONE)
+        )
+        with pytest.raises(RuntimeError):
+            noCipher.encrypt_sensitive_content("x", EncryptionMethod.FERNET)
+        with pytest.raises(RuntimeError):
+            noCipher.decrypt_sensitive_content("gAAAAAB", EncryptionMethod.FERNET.value)
+
+
 class TestEncryptReadSide:
     def test_encrypt_state_read_path_returns_plaintext(self, manager):
         """encrypt 态经现役读路径（get_memory）读出原文，而非密文。"""

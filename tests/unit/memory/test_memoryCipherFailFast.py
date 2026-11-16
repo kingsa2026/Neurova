@@ -77,17 +77,21 @@ def testRoundTripStillWorks():
 
 
 def testCipherChainCallersStayPinnedToTheSingleReadOutlet():
-    """加解密链已接线（审计 3.3-5 拍板 + encrypt 读侧拍板 2026-11-17）——调用面只许收敛在唯一读出口。
+    """加解密链已接线（审计 3.3-5 拍板 + encrypt 读侧拍板 2026-11-17 + U2 补漏）——调用面收敛在「咽喉+出口」闭集。
 
-    旧判据「零调用点」随接线被合法推翻：写侧走 manager.remember 咽喉的
-    screenForStorage（其内部才触达 encrypt_sensitive_content，定义文件自身跳过）；
-    读侧出口单点 = Memory.to_dict → plaintextContent（models.py）。
-    本判据改钉**收敛面**：security.py 之外，这两个方法名的调用文件必须恰为
-    models.py 一处——再有第三处绕过咽喉直调加解密即红。
+    旧判据「零调用点」随接线被合法推翻。现状收敛面：
+    - 写侧：manager.remember 咽喉的 screenForStorage；带标记行的内容变更边界
+      （manager._applyContentChange）按标记重加密，维持「标记⇔行内容是密文」不变量；
+    - 读侧出口集：Memory.to_dict → plaintextContent（models.py）＋
+      MoE L0 行直读装配面（moe_router.py，绕过 _row_to_memory 的 SELECT 直读）。
+    实现单源仍在 security.py——出口集内的文件都必须走同一原语，不得自带第二套
+    加解密；再冒出集合外的直调点即红。
     与 `tests/unit/collaboration/test_glance_yield_await_sites.py` 的双向钉法同形。
     """
     expectedCallerFiles = {
         "neurova/cognitive_layers/memory_layer/models.py",
+        "neurova/cognitive_layers/memory_layer/moe_router.py",
+        "neurova/cognitive_layers/memory_layer/manager.py",
     }
     hits = []
     # 本判据只扫一遍、不留常驻语法树，故走共享的一次性入口；顺带吃文本预筛——

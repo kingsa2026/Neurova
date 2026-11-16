@@ -209,7 +209,10 @@ class UnifiedMemoryNode:
         )
         return cls(
             id=mem.id,
-            content=mem.content,
+            # U2 读侧透明解密（2026-11-17）：节点层是纯读装配面（无 to_memory 写回
+            # 路径），密文行在此按标记还原——reasoning_trace 列表 / unified_retriever /
+            # 结晶巡检等节点消费方读原文。解密失败诚实上抛（损坏行按 loud 故障暴露）。
+            content=mem.plaintextContent(),
             memory_type=memoryType,
             category=str(rawCategory),
             temperature=mem.temperature,
