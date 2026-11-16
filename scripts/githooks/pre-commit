@@ -1,0 +1,15 @@
+#!/bin/sh
+# 受保护子集收录门（AGENTS.md §1 第 3 条）：本次提交若向 protected_tests*.txt
+# 新增收录条目，逐文件单跑必须全绿——红灯文件在转绿前不得进清单。
+# 判据唯一出处：scripts/ci/protected_tests_admission_check.py（本壳只做粘合）。
+root=$(git rev-parse --show-toplevel) || exit 1
+# 解释器：优先项目 .venv（与 CI 跑测同一份）；git bash 的 `python3` 在 Windows 上
+# 常命中 Microsoft Store 的 stub（静默失败、退出 49），故只认 .venv 与 `python`。
+if [ -f "$root/.venv/Scripts/python.exe" ]; then
+    PY="$root/.venv/Scripts/python.exe"
+elif [ -f "$root/.venv/bin/python" ]; then
+    PY="$root/.venv/bin/python"
+else
+    PY=python
+fi
+exec "$PY" "$root/scripts/ci/protected_tests_admission_check.py" --from-index --repo "$root"
