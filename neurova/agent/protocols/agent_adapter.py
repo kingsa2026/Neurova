@@ -65,8 +65,20 @@ def make_agent_handler(agent: Any) -> Any:
             logger.warning("ACP handler 执行失败 (%s/%s): %s", message.receiver_id, action, e)
             reply_payload = {"success": False, "action": action, "error": str(e)}
 
+        response_type = MessageType.TASK_RESULT
+        if message.type == MessageType.COLLABORATION_INVITE:
+            # P2-3：协作邀请的诚实应答——当前部署不支持受邀组队，显式拒绝
+            # （而非落进"未知 action"错误或死信），发起方拿得到明确结果
+            response_type = MessageType.COLLABORATION_REJECT
+            reply_payload = {
+                "success": False,
+                "action": action,
+                "error": "collaboration_invites_not_supported",
+                "reason": "本部署尚未启用受邀协作组队；邀请被显式拒绝（非故障）",
+            }
+
         return AgentMessage(
-            type=MessageType.TASK_RESULT,
+            type=response_type,
             sender_id=message.receiver_id,
             sender_name=message.receiver_name,
             receiver_id=message.sender_id,
@@ -101,7 +113,8 @@ def register_runtime_agents(agent_ids: Optional[list] = None) -> Dict[str, Any]:
             continue
         if agent_ids is not None and aid not in agent_ids:
             continue
-        runtime.register_agent(aid, make_agent_handler(agent))
+        # P2-3：注册即发布能力（handler 实际支持的 action 面）
+        runtime.register_agent(aid, make_agent_handler(agent), capabilities=["chat", "status"])
         registered.append(aid)
 
     logger.info("ACP 运行时 Agent 注册完成: %s", registered)
