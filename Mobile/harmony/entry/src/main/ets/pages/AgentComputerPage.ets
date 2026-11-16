@@ -448,6 +448,7 @@ export struct AgentComputerPage {
   /** 单条计算机任务卡片：action emoji/target + status 徽章 + 时间 + result 摘要 + 操作 */
   @Builder
   buildTaskCard(task: ComputerTask) {
+    Column() {
     GlassCard() {
       Column() {
         // 上部：action emoji + target + status 徽章
@@ -538,6 +539,7 @@ export struct AgentComputerPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
   }
 
@@ -557,6 +559,7 @@ export struct AgentComputerPage {
         .onClick(() => { this.showCreateDialog = false; })
 
       // 面板层
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('新建计算机任务')
@@ -588,7 +591,7 @@ export struct AgentComputerPage {
                 ? this.sm.getColor('primary')
                 : this.sm.getColor('surface'))
               .onClick(() => {
-                this.formData = { ...this.formData, action: act };
+                this.formData = { action: act, target: this.formData.target };
               })
             }, (act: string) => act)
           }
@@ -605,7 +608,7 @@ export struct AgentComputerPage {
             value: this.formData.target,
             type: 'text',
             onChange: (v: string) => {
-              this.formData = { ...this.formData, target: v };
+              this.formData = { action: this.formData.action, target: v };
             }
           })
             .margin({ top: 4, bottom: this.sm.getSpacing('md') })
@@ -632,6 +635,7 @@ export struct AgentComputerPage {
         .width('100%')
         .alignItems(HorizontalAlign.Start)
       }
+      }
       .width('90%')
     }
     .width('100%')
@@ -652,6 +656,7 @@ export struct AgentComputerPage {
         .backgroundColor(this.sm.getColor('overlay_mask'))
         .onClick(() => { this.showDetailDialog = false; })
 
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           // 标题行：动作 emoji + 标签
@@ -710,6 +715,7 @@ export struct AgentComputerPage {
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
+      }
       }
       .width('90%')
     }

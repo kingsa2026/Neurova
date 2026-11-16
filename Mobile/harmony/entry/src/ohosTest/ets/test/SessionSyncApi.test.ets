@@ -1,13 +1,9 @@
-// SessionSyncApi 单元测试 - TDD 垂直切片
-// 通过 HttpBackend 接口注入 mock，验证 SessionSyncApi 调用契约（method/url/body/返回值）
-// 不真实发起网络请求，符合"不直接调用后端接口"规则
+// SessionSyncApi 单元测试 - 真实契约版（M9.2 同步域迁移）
+// 后端事实源：session_sync.py @ /v1/sync（旧 /session-syncs 端点不存在，已退役）。
+// 无 PUT 更新、无手动 trigger 端点——对应方法必须 throw 点名且不发任何网络请求。
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
 import { HttpClient, HttpBackend } from '../../../../main/ets/libs/api/HttpClient';
-import {
-  ApiResponse,
-  PageResult,
-  SessionSync,
-} from '../../../../main/ets/libs/types';
+import { ApiResponse } from '../../../../main/ets/libs/types';
 import { SessionSyncApi } from '../../../../main/ets/libs/api/modules/SessionSyncApi';
 
 class MockBackend implements HttpBackend {
@@ -38,59 +34,67 @@ export default function sessionSyncApiTest() {
       api = new SessionSyncApi(client);
     });
 
-    // ========== list ==========
-    it('list_calls_get_with_agentId_and_paging', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 1, size: 20 } };
-      api.list('agent-1', { page: 1, size: 10 });
+    it('list_gets_sync_sessions_with_agent_filter', 0, () => {
+      api.list('a1', undefined);
+      const url = backend.requests[0].url;
       expect(backend.requests[0].method).assertEqual('GET');
-      expect(backend.requests[0].url.includes('/v1/session-syncs')).assertTrue();
-      expect(backend.requests[0].url.includes('agentId=agent-1')).assertTrue();
-      expect(backend.requests[0].url.includes('page=1')).assertTrue();
-      expect(backend.requests[0].url.includes('size=10')).assertTrue();
+      expect(url.includes('/sync/sessions')).assertTrue();
+      expect(url.includes('agent_id=a1')).assertTrue();
     });
 
-    // ========== get ==========
-    it('get_calls_get_with_id_in_url', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { id: 'ss-1', sessionId: 's1', sourceChannel: 'feishu', targetChannel: 'dingtalk', lastSyncedAt: '', messageCount: 0, status: 'synced' } };
-      api.get('ss-1');
-      expect(backend.requests[0].method).assertEqual('GET');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/session-syncs/ss-1');
+    it('list_without_agent_gets_bare_path', 0, () => {
+      api.list(undefined, undefined);
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/sync/sessions');
     });
 
-    // ========== create ==========
-    it('create_calls_post_with_body', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { id: 'ss-1', sessionId: 's1', sourceChannel: 'feishu', targetChannel: 'dingtalk', lastSyncedAt: '', messageCount: 0, status: 'synced' } };
-      const data: Partial<SessionSync> = { sessionId: 's1', sourceChannel: 'feishu', targetChannel: 'dingtalk' };
-      api.create(data);
+    it('get_gets_session_by_id', 0, () => {
+      api.get('s1');
+      expect(backend.requests[0].method).assertEqual('GET');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/sync/sessions/s1');
+    });
+
+    it('create_posts_session_create_contract', 0, () => {
+      const metadata: Record<string, Object> = {};
+      const body = { agent_id: 'a1', external_id: 'ext-1', metadata: metadata };
+      api.create(body);
       expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/session-syncs');
-      expect(backend.requests[0].body).assertEqual(data);
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/sync/sessions');
+      expect(backend.requests[0].body).assertEqual(body);
     });
 
-    // ========== update ==========
-    it('update_calls_put_with_id_and_body', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { id: 'ss-1', sessionId: 's1', sourceChannel: 'feishu', targetChannel: 'dingtalk', lastSyncedAt: '', messageCount: 5, status: 'synced' } };
-      const data: Partial<SessionSync> = { messageCount: 5 };
-      api.update('ss-1', data);
-      expect(backend.requests[0].method).assertEqual('PUT');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/session-syncs/ss-1');
-      expect(backend.requests[0].body).assertEqual(data);
-    });
-
-    // ========== remove ==========
-    it('remove_calls_delete_with_id_in_url', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: {} };
-      api.remove('ss-1');
+    it('remove_deletes_session_by_id', 0, () => {
+      api.remove('s1');
       expect(backend.requests[0].method).assertEqual('DELETE');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/session-syncs/ss-1');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/sync/sessions/s1');
     });
 
-    // ========== trigger ==========
-    it('trigger_calls_post_with_trigger_suffix', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { ok: true, syncedAt: '2026-06-25T00:00:00Z' } };
-      api.trigger('ss-1');
+    it('getHistory_carries_limit', 0, () => {
+      api.getHistory('s1', 50);
+      const url = backend.requests[0].url;
+      expect(url.includes('/sync/sessions/s1/history')).assertTrue();
+      expect(url.includes('limit=50')).assertTrue();
+    });
+
+    it('sendMessage_posts_message_contract', 0, () => {
+      const metadata: Record<string, Object> = {};
+      const body = { content: 'hello', channel_type: 'api', metadata: metadata };
+      api.sendMessage('s1', body);
       expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/session-syncs/ss-1/trigger');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/sync/sessions/s1/messages');
+      expect(backend.requests[0].body).assertEqual(body);
+    });
+
+    it('statistics_and_connections_hit_sync_paths', 0, () => {
+      api.statistics();
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/sync/statistics');
+      api.connections();
+      expect(backend.requests[1].url).assertEqual('https://api.example.com/sync/connections');
+    });
+
+    it('retiredUpdateTrigger_fire_no_request', 0, () => {
+      api.update('s1', {});
+      api.trigger('s1');
+      expect(backend.requests.length).assertEqual(0);
     });
   });
 }

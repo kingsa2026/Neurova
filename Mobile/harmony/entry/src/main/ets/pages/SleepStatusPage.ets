@@ -206,7 +206,7 @@ export struct SleepStatusPage {
       const res = await this.api.runtime.setSleepMode(agentId, mode);
       if (res.code === 0 && res.data) {
         // @State 整体替换
-        this.status = res.data;
+        this.status = res.data as SleepStatus;
         this.msg.success(`已切换到${SleepStatusViewHelper.getModeLabel(mode)}模式`);
       } else {
         this.msg.error(res.message || '切换模式失败');
@@ -232,7 +232,7 @@ export struct SleepStatusPage {
       const res = await this.api.runtime.awaken(agentId);
       if (res.code === 0 && res.data) {
         // @State 整体替换
-        this.status = res.data;
+        this.status = res.data as SleepStatus;
         this.msg.success('已唤醒');
       } else {
         this.msg.error(res.message || '唤醒失败');
@@ -322,6 +322,7 @@ export struct SleepStatusPage {
   /** 区块1：休眠状态概览卡 - isSleeping 状态 + mode + 时长 + 待办数 */
   @Builder
   buildStatusCard() {
+    Column() {
     GlassCard({ title: '休眠状态概览' }) {
       Column() {
         // 状态行：图标 + 文案
@@ -375,6 +376,7 @@ export struct SleepStatusPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
     .margin({ bottom: this.sm.getSpacing('md') })
   }
@@ -382,6 +384,7 @@ export struct SleepStatusPage {
   /** 区块2：模式切换按钮组 + 唤醒按钮 */
   @Builder
   buildActionSection() {
+    Column() {
     GlassCard({ title: '休眠模式切换' }) {
       Column() {
         // 模式按钮组（横向排列）
@@ -389,20 +392,20 @@ export struct SleepStatusPage {
           GlassButton({
             text: `${SleepStatusViewHelper.getModeIcon('idle')} ${SleepStatusViewHelper.getModeLabel('idle')}`,
             type: this.status!.mode === 'idle' ? 'primary' : 'default',
-            size: 'small',
-            onClick: () => { this.switchMode('idle'); }
+            btnSize: 'small',
+            onTap: () => { this.switchMode('idle'); }
           })
           GlassButton({
             text: `${SleepStatusViewHelper.getModeIcon('light')} ${SleepStatusViewHelper.getModeLabel('light')}`,
             type: this.status!.mode === 'light' ? 'primary' : 'default',
-            size: 'small',
-            onClick: () => { this.switchMode('light'); }
+            btnSize: 'small',
+            onTap: () => { this.switchMode('light'); }
           })
           GlassButton({
             text: `${SleepStatusViewHelper.getModeIcon('deep')} ${SleepStatusViewHelper.getModeLabel('deep')}`,
             type: this.status!.mode === 'deep' ? 'primary' : 'default',
-            size: 'small',
-            onClick: () => { this.switchMode('deep'); }
+            btnSize: 'small',
+            onTap: () => { this.switchMode('deep'); }
           })
         }
         .width('100%')
@@ -412,8 +415,8 @@ export struct SleepStatusPage {
         GlassButton({
           text: SleepStatusViewHelper.isAwakeable(this.status!) ? '唤醒 Agent' : '已唤醒',
           type: SleepStatusViewHelper.isAwakeable(this.status!) ? 'primary' : 'default',
-          size: 'medium',
-          onClick: () => {
+          btnSize: 'medium',
+          onTap: () => {
             if (SleepStatusViewHelper.isAwakeable(this.status!)) {
               this.awakenAgent();
             }
@@ -425,6 +428,7 @@ export struct SleepStatusPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
     .margin({ bottom: this.sm.getSpacing('md') })
   }
@@ -432,6 +436,7 @@ export struct SleepStatusPage {
   /** 区块3：历史记录占位（无 API，提示文案） */
   @Builder
   buildHistoryPlaceholder() {
+    Column() {
     GlassCard({ title: '休眠历史' }) {
       Column() {
         Text('暂无历史记录')
@@ -441,6 +446,7 @@ export struct SleepStatusPage {
       }
       .width('100%')
       .alignItems(HorizontalAlign.Center)
+    }
     }
     .width('100%')
   }

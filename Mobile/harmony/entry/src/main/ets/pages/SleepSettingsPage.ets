@@ -230,16 +230,16 @@ export struct SleepSettingsPage {
         // 兜底默认值（API 未返回某 key 时使用默认）
         this.current = this.mergeWithDefaults(collected);
         // 深拷贝原始值用于 isDirty 比较
-        this.original = { ...this.current };
+        this.original = this.copyDict(this.current);
       } else {
         // 后端无数据时使用默认值
         this.current = this.buildDefaults();
-        this.original = { ...this.current };
+        this.original = this.copyDict(this.current);
       }
     } catch (e) {
       this.logger.error(TAG, '加载休眠设置失败，使用默认值', e as Error);
       this.current = this.buildDefaults();
-      this.original = { ...this.current };
+      this.original = this.copyDict(this.current);
     } finally {
       this.loading = false;
     }
@@ -247,19 +247,33 @@ export struct SleepSettingsPage {
 
   /** 构建默认设置值字典 */
   private buildDefaults(): Record<string, Object> {
-    return {
-      idleTimeout: 15,
-      sleepMode: 'idle',
-      wakeOnMessage: true,
-      wakeOnSchedule: false,
-      wakeTime: '08:00',
-    };
+    const defaults: Record<string, Object> = {};
+    defaults['idleTimeout'] = 15;
+    defaults['sleepMode'] = 'idle';
+    defaults['wakeOnMessage'] = true;
+    defaults['wakeOnSchedule'] = false;
+    defaults['wakeTime'] = '08:00';
+    return defaults;
+  }
+
+  /** Record 浅拷贝（ArkTS 禁 spread，集中此处） */
+  private copyDict(src: Record<string, Object>): Record<string, Object> {
+    const out: Record<string, Object> = {};
+    const keys = Object.keys(src);
+    for (const k of keys) {
+      out[k] = src[k];
+    }
+    return out;
   }
 
   /** 合并 API 返回值与默认值，确保所有 key 都有值 */
   private mergeWithDefaults(collected: Record<string, Object>): Record<string, Object> {
-    const defaults = this.buildDefaults();
-    return { ...defaults, ...collected };
+    const merged = this.copyDict(this.buildDefaults());
+    const keys = Object.keys(collected);
+    for (const k of keys) {
+      merged[k] = collected[k];
+    }
+    return merged;
   }
 
   /**
@@ -268,8 +282,10 @@ export struct SleepSettingsPage {
    * @param value 新值
    */
   private updateValue(key: string, value: Object): void {
-    // @State 嵌套属性变更必须整体重新赋值（spread 创建新字典）
-    this.current = { ...this.current, [key]: value };
+    // @State 嵌套属性变更必须整体重新赋值（拷贝创建新字典）
+    const next = this.copyDict(this.current);
+    next[key] = value;
+    this.current = next;
   }
 
   /**
@@ -301,7 +317,7 @@ export struct SleepSettingsPage {
       }
     }
     // 刷新原始快照
-    this.original = { ...this.current };
+    this.original = this.copyDict(this.current);
     if (saved > 0) {
       this.msg.success(`已保存 ${saved} 项`);
     } else {
@@ -369,6 +385,7 @@ export struct SleepSettingsPage {
   /** 1. idleTimeout - slider 5-60 分钟 */
   @Builder
   buildIdleTimeoutItem() {
+    Column() {
     GlassCard() {
       Column() {
         Row() {
@@ -396,6 +413,7 @@ export struct SleepSettingsPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
     .margin({ bottom: this.sm.getSpacing('sm') })
   }
@@ -403,6 +421,7 @@ export struct SleepSettingsPage {
   /** 2. sleepMode - select idle/light/deep */
   @Builder
   buildSleepModeItem() {
+    Column() {
     GlassCard() {
       Column() {
         Text(SleepSettingsViewHelper.getSettingLabel('sleepMode'))
@@ -427,6 +446,7 @@ export struct SleepSettingsPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
     .margin({ bottom: this.sm.getSpacing('sm') })
   }
@@ -434,6 +454,7 @@ export struct SleepSettingsPage {
   /** 3. wakeOnMessage - toggle */
   @Builder
   buildWakeOnMessageItem() {
+    Column() {
     GlassCard() {
       Row() {
         Text(SleepSettingsViewHelper.getSettingLabel('wakeOnMessage'))
@@ -446,6 +467,7 @@ export struct SleepSettingsPage {
       .width('100%')
       .alignItems(VerticalAlign.Center)
     }
+    }
     .width('100%')
     .margin({ bottom: this.sm.getSpacing('sm') })
   }
@@ -453,6 +475,7 @@ export struct SleepSettingsPage {
   /** 4. wakeOnSchedule - toggle */
   @Builder
   buildWakeOnScheduleItem() {
+    Column() {
     GlassCard() {
       Row() {
         Text(SleepSettingsViewHelper.getSettingLabel('wakeOnSchedule'))
@@ -465,6 +488,7 @@ export struct SleepSettingsPage {
       .width('100%')
       .alignItems(VerticalAlign.Center)
     }
+    }
     .width('100%')
     .margin({ bottom: this.sm.getSpacing('sm') })
   }
@@ -472,6 +496,7 @@ export struct SleepSettingsPage {
   /** 5. wakeTime - input HH:mm */
   @Builder
   buildWakeTimeItem() {
+    Column() {
     GlassCard() {
       Column() {
         Text(SleepSettingsViewHelper.getSettingLabel('wakeTime'))
@@ -490,6 +515,7 @@ export struct SleepSettingsPage {
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
+    }
     }
     .width('100%')
     .margin({ bottom: this.sm.getSpacing('sm') })

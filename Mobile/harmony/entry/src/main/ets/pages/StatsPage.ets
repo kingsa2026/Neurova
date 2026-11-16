@@ -317,6 +317,7 @@ export struct StatsPage {
   /** 单个统计卡片：标签（截断）+ 数值+单位 + 趋势行（图标+文案，按趋势着色） */
   @Builder
   buildStatCard(stat: Stat) {
+    Column() {
     GlassCard() {
       Column() {
         // 标签（截断 16 字符）
@@ -354,6 +355,7 @@ export struct StatsPage {
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
+    }
     }
     .width('100%')
   }

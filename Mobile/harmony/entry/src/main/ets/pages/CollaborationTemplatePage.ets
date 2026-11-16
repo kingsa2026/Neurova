@@ -40,7 +40,7 @@ import { Router } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { CollaborationTemplate } from '../libs/types';
+import { CollaborationTemplate, CollaborationTemplateStep } from '../libs/types';
 
 /** 日志标签 */
 const TAG = 'CollaborationTemplatePage';
@@ -104,7 +104,7 @@ export class CollaborationTemplateViewHelper {
    * @param steps 步骤数组（仅依赖 length，字段名按类型约束）
    * @return 步骤数展示字符串
    */
-  static formatStepsCount(steps: Array<{ name: string }>): string {
+  static formatStepsCount(steps: CollaborationTemplateStep[]): string {
     if (!steps || steps.length === 0) return '0 步';
     return `${steps.length} 步`;
   }
@@ -160,6 +160,12 @@ const DEFAULT_FORM: TemplateFormData = {
   description: '',
   category: 'project',
 };
+
+/** 默认表单工厂（ArkTS 禁 spread 复制，集中此处） */
+function defaultForm(): TemplateFormData {
+  const form: TemplateFormData = { name: '', description: '', category: 'project' };
+  return form;
+}
 
 /**
  * Mock 协作模板数据
@@ -226,7 +232,7 @@ export struct CollaborationTemplatePage {
   // 新建弹窗显示状态
   @State showCreateDialog: boolean = false;
   // 新建表单数据（嵌套属性变更需整体重新赋值）
-  @State formData: TemplateFormData = { ...DEFAULT_FORM };
+  @State formData: TemplateFormData = defaultForm();
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -279,23 +285,23 @@ export struct CollaborationTemplatePage {
 
   /** 打开新建弹窗，重置表单 */
   private openCreateDialog(): void {
-    this.formData = { ...DEFAULT_FORM };
+    this.formData = defaultForm();
     this.showCreateDialog = true;
   }
 
   /** 选择分类（嵌套属性变更：整体重新赋值） */
   private selectCategory(category: string): void {
-    this.formData = { ...this.formData, category };
+    this.formData = { name: this.formData.name, description: this.formData.description, category: category };
   }
 
   /** 输入名称（嵌套属性变更：整体重新赋值） */
   private inputName(v: string): void {
-    this.formData = { ...this.formData, name: v };
+    this.formData = { name: v, description: this.formData.description, category: this.formData.category };
   }
 
   /** 输入描述（嵌套属性变更：整体重新赋值） */
   private inputDescription(v: string): void {
-    this.formData = { ...this.formData, description: v };
+    this.formData = { name: this.formData.name, description: v, category: this.formData.category };
   }
 
   /**
@@ -458,6 +464,7 @@ export struct CollaborationTemplatePage {
   /** 单个模板卡片：分类徽章 + 名称 + 描述 + 步骤/使用次数 + 操作按钮 */
   @Builder
   buildTemplateCard(tpl: CollaborationTemplate) {
+    Column() {
     GlassCard() {
       Column() {
         // 顶部行：分类图标 + 分类徽章 + 名称
@@ -523,6 +530,7 @@ export struct CollaborationTemplatePage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
   }
 
@@ -542,6 +550,7 @@ export struct CollaborationTemplatePage {
         .onClick(() => { this.showCreateDialog = false; })
 
       // 面板层
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('新建协作模板')
@@ -619,6 +628,7 @@ export struct CollaborationTemplatePage {
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
+      }
       }
       .width('90%')
     }

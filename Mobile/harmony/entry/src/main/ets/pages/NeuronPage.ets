@@ -1,38 +1,35 @@
 /**
- * NeuronPage - 神经元页
+ * NeuronPage - NEURON 实体页（M9.2 监控域契约迁移）
  *
- * 职责：展示 NEURON 网络神经元列表，按 agentId 筛选，显示状态徽章、连接数、
- *   激活值/阈值进度条，支持点击查看详情、触发放电
+ * 职责：展示 NEURON 依赖图谱实体列表（GET /v1/neuron/entities，真实端点），
+ *   按 entity_type 筛选，显示图谱统计（/v1/neuron/stats），支持新建实体
+ *   （POST /v1/neuron/entities）与详情查看。
  * 设计：
- *   - NeuronViewHelper（导出）：纯视图模型，封装神经元状态颜色/图标/标签映射、
- *     激活值百分比格式化、激活条颜色分级（低/中/高）、神经元名称截断，
- *     无 UI 运行时依赖，可独立单元测试；
+ *   - NeuronViewHelper（导出）：纯视图模型（保留名称截断等纯函数，供 ohosTest 回归），
+ *     无 UI 运行时依赖；
  *   - NeuronPage（@Component）：Stack[Column[TopNavMenu(标题"神经元"+返回+新建)]
- *     + [agentId 筛选输入]
- *     + [加载态/空态/列表] + [详情弹窗]]；
- *     列表项 GlassCard 含 状态徽章（颜色按状态区分）、名称、连接数、
- *     activation 进度条（颜色按值分级）、threshold 进度条；
- *     点击项 → 打开详情弹窗（内嵌 Stack 条件渲染）；
- *     详情弹窗含完整信息 + "触发放电"按钮（调用 api.monitor.fireNeuron）；
+ *     + [图谱统计条] + [entity_type 筛选输入]
+ *     + [加载态/错误态/空态/列表] + [详情弹窗] + [新建弹窗]]；
+ *     列表项 GlassCard 含实体名、类型徽章、ID、创建时间；
+ *   - 旧页面渲染的 activation/threshold/放电（fireNeuron）为已退役的虚构契约——
+ *     后端 /v1/neuron 无这些字段与端点，本页不再展示。
  *   - 颜色统一走 StyleManager（返回 token 名），路由走 Router，
- *     API 走 ApiFacade.monitor，消息走 MessageManager
+ *     API 走 ApiFacade.monitor（listNeurons/getNeuronStats/createNeuronEntity），
+ *     消息走 MessageManager
  *
  * 依赖：
- *   - ../components/glass：TopNavMenu、GlassCard、GlassButton、GlassPanel
- *   - ../libs/api/ApiFacade：统一 API 门面（monitor.listNeurons/getNeuron/updateNeuron/fireNeuron）
+ *   - ../components/glass：TopNavMenu、GlassCard、GlassButton、GlassInput、GlassPanel
+ *   - ../libs/api/ApiFacade：统一 API 门面（monitor 模块）
+ *   - ../libs/api/modules/MonitorApi：NEURON 真实 DTO
  *   - ../routing/Router：统一路由跳转
  *   - ../libs/style/StyleManager：统一样式 token
  *   - ../libs/logger/Logger：统一日志
  *   - ../libs/message/MessageManager：统一消息提示
- *   - ../libs/types：Neuron、NeuronState
  *
  * 用法：
  *   由 Router.push 跳转进入；
- *   aboutToAppear 调用 api.monitor.listNeurons 加载列表；
- *   agentId 筛选输入 → 重新加载；
- *   点击列表项 → 打开详情弹窗；
- *   详情弹窗"触发放电"按钮 → 调用 api.monitor.fireNeuron → 刷新列表；
- *   新建按钮 → 提示"功能开发中"（MonitorApi 暂无 createNeuron 接口）
+ *   aboutToAppear 调用 api.monitor.listNeurons + getNeuronStats 加载；
+ *   entity_type 筛选 → 重新加载；新建按钮 → 弹窗填 name/entity_type → 创建
  *
  * TDD：NeuronViewHelper 各方法按红绿灯垂直切片逐步实现，详见 NeuronPage.test.ets
  */
@@ -43,7 +40,7 @@ import { Router } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { Neuron, NeuronState } from '../libs/types';
+import { NeuronEntityDto, NeuronStatsDto } from '../libs/api/modules/MonitorApi';
 
 /** 日志标签 */
 const TAG = 'NeuronPage';
@@ -55,13 +52,9 @@ const DEFAULT_TRUNCATE_LEN = 100;
 // NeuronViewHelper - 神经元视图模型（纯函数，无 UI 依赖，可独立单元测试）
 //
 // 设计：所有方法为 static，输入 → 输出，无副作用；
-//       颜色方法返回 StyleManager 的 token 名（如 'info'），由页面解析为实际颜色值；
+//       颜色方法返回 StyleManager 的 token 名（'info'/'success'/'error'/
+//   'warning'/'text_secondary'），由页面解析为实际颜色值；
 //       通过本文件 export，供 ohosTest 直接导入测试
-//
-// 颜色 token 说明：返回 StyleManager 实际支持的 token 名（'info'/'success'/'error'/
-//   'warning'/'text_secondary'），不加 'status_' 前缀。StyleManager 的 ColorToken 类型
-//   仅包含未加前缀的 token，'status_info' 不在其列，调用 getColor('status_info') 会
-//   回退到 '#000000'（黑色）。为避免此 bug，统一使用未加前缀的 token。
 // ===========================================================================
 
 export class NeuronViewHelper {
@@ -71,7 +64,7 @@ export class NeuronViewHelper {
    * @param state 神经元状态
    * @return StyleManager 颜色 token 名
    */
-  static getStateColor(state: NeuronState): string {
+  static getStateColor(state: string): string {
     if (state === 'idle') return 'text_secondary';
     if (state === 'active') return 'info';
     if (state === 'firing') return 'success';
@@ -84,7 +77,7 @@ export class NeuronViewHelper {
    * @param state 神经元状态
    * @return emoji 字符串
    */
-  static getStateIcon(state: NeuronState): string {
+  static getStateIcon(state: string): string {
     if (state === 'idle') return '💤';
     if (state === 'active') return '⚡';
     if (state === 'firing') return '🔥';
@@ -97,7 +90,7 @@ export class NeuronViewHelper {
    * @param state 神经元状态
    * @return 中文标签
    */
-  static getStateLabel(state: NeuronState): string {
+  static getStateLabel(state: string): string {
     if (state === 'idle') return '空闲';
     if (state === 'active') return '活跃';
     if (state === 'firing') return '激发';
@@ -152,20 +145,32 @@ export class NeuronViewHelper {
   }
 }
 
+/** 新建实体表单数据 */
+interface EntityFormData {
+  name: string;
+  entityType: string;
+}
+
 @Component
 export struct NeuronPage {
-  // 神经元列表
-  @State neurons: Neuron[] = [];
+  // 实体列表（/v1/neuron/entities 真实数据）
+  @State entities: NeuronEntityDto[] = [];
+  // 图谱统计（/v1/neuron/stats）
+  @State stats: NeuronStatsDto | undefined = undefined;
   // 加载态
   @State loading: boolean = true;
-  // agentId 筛选输入值
-  @State agentIdFilter: string = '';
+  // 错误文案（非空时显示错误态）
+  @State errorMsg: string = '';
+  // entity_type 筛选输入值
+  @State entityTypeFilter: string = '';
   // 详情弹窗显示状态
   @State showDetailDialog: boolean = false;
-  // 当前查看详情的神经元
-  @State currentNeuron: Neuron | undefined = undefined;
-  // 触发放电中态
-  @State firing: boolean = false;
+  // 当前查看详情的实体
+  @State currentEntity: NeuronEntityDto | undefined = undefined;
+  // 新建弹窗显示状态
+  @State showCreateDialog: boolean = false;
+  // 新建表单
+  @State formData: EntityFormData = { name: '', entityType: '' };
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -175,80 +180,100 @@ export struct NeuronPage {
   private msg = MessageManager.getInstance();
 
   aboutToAppear() {
-    this.loadNeurons();
+    this.loadEntities();
   }
 
   /**
-   * 加载神经元列表
-   * 流程：调用 api.monitor.listNeurons(agentId) → 写入 neurons
-   * 异常：记录日志并提示用户；无论成败 finally 关闭 loading
+   * 加载实体列表 + 图谱统计
+   * 流程：调用 api.monitor.listNeurons / getNeuronStats → 写入状态
+   * 异常：记录日志并把后端原因透出到错误态
    */
-  private async loadNeurons(): Promise<void> {
+  private async loadEntities(): Promise<void> {
     this.loading = true;
+    this.errorMsg = '';
     try {
-      const agentId = this.agentIdFilter.length > 0 ? this.agentIdFilter : undefined;
-      const res = await this.api.monitor.listNeurons(agentId, { page: 1, size: 200 });
-      if (res.code === 0 && res.data) {
-        this.neurons = res.data.items;
-      }
+      const entityType = this.entityTypeFilter.length > 0 ? this.entityTypeFilter : undefined;
+      const res = await this.api.monitor.listNeurons(entityType, { page: 1, size: 200 });
+      this.entities = res.data;
+      const statsRes = await this.api.monitor.getNeuronStats();
+      this.stats = statsRes.data;
     } catch (e) {
-      this.logger.error(TAG, '加载神经元失败', e as Error);
-      this.msg.error('加载神经元列表失败');
+      this.logger.error(TAG, '加载 NEURON 实体失败', e as Error);
+      this.errorMsg = (e as Error).message.length > 0 ? (e as Error).message : '加载实体列表失败';
     } finally {
       this.loading = false;
     }
   }
 
-  /** agentId 筛选输入变更 */
-  private onAgentIdChange(v: string): void {
-    this.agentIdFilter = v;
+  /** entity_type 筛选输入变更 */
+  private onFilterChange(v: string): void {
+    this.entityTypeFilter = v;
   }
 
   /** 触发筛选（重新加载） */
   private applyFilter(): void {
-    this.loadNeurons();
+    this.loadEntities();
   }
 
   /** 打开详情弹窗 */
-  private openDetail(n: Neuron): void {
-    this.currentNeuron = n;
+  private openDetail(n: NeuronEntityDto): void {
+    this.currentEntity = n;
     this.showDetailDialog = true;
   }
 
   /** 关闭详情弹窗 */
   private closeDetail(): void {
     this.showDetailDialog = false;
-    this.currentNeuron = undefined;
+    this.currentEntity = undefined;
   }
 
-  /** 新建按钮（占位，MonitorApi 暂无 createNeuron 接口） */
-  private handleCreate(): void {
-    this.msg.info('功能开发中');
+  /** 打开新建弹窗，重置表单 */
+  private openCreateDialog(): void {
+    this.formData = { name: '', entityType: '' };
+    this.showCreateDialog = true;
   }
 
   /**
-   * 触发神经元放电
-   * 流程：调用 api.monitor.fireNeuron → 成功后关闭弹窗并刷新列表
-   * 异常：记录日志并提示用户
+   * 提交新建实体（POST /v1/neuron/entities，真实端点）
+   * 异常：记录日志并把后端原因透出
    */
-  private async fireNeuron(): Promise<void> {
-    if (!this.currentNeuron) return;
-    this.firing = true;
-    try {
-      const res = await this.api.monitor.fireNeuron(this.currentNeuron.id);
-      if (res.code === 0) {
-        this.msg.success('触发放电成功');
-        this.closeDetail();
-        this.loadNeurons();
-      } else {
-        this.msg.error(res.message || '触发失败');
-      }
-    } catch (e) {
-      this.logger.error(TAG, '触发放电失败', e as Error);
-      this.msg.error('触发放电失败');
-    } finally {
-      this.firing = false;
+  private async submitCreate(): Promise<void> {
+    if (this.formData.name.length === 0) {
+      this.msg.warning('请填写实体名称');
+      return;
     }
+    if (this.formData.entityType.length === 0) {
+      this.msg.warning('请填写实体类型');
+      return;
+    }
+    try {
+      const metadata: Record<string, Object> = {};
+      await this.api.monitor.createNeuronEntity(this.formData.name, this.formData.entityType, metadata);
+      this.msg.success('实体创建成功');
+      this.showCreateDialog = false;
+      this.loadEntities();
+    } catch (e) {
+      this.logger.error(TAG, '创建实体失败', e as Error);
+      this.msg.error((e as Error).message.length > 0 ? (e as Error).message : '创建实体失败');
+    }
+  }
+
+  /** 格式化 epoch 秒为本地日期时间 */
+  private formatEpoch(seconds: number): string {
+    if (seconds <= 0) return '-';
+    const d = new Date(seconds * 1000);
+    const mm = (d.getMonth() + 1).toString().padStart(2, '0');
+    const dd = d.getDate().toString().padStart(2, '0');
+    const hh = d.getHours().toString().padStart(2, '0');
+    const mi = d.getMinutes().toString().padStart(2, '0');
+    return `${d.getFullYear()}-${mm}-${dd} ${hh}:${mi}`;
+  }
+
+  /** metadata 键清单（弹窗展示用） */
+  private metadataKeys(metadata: Record<string, Object>): string {
+    const keys = Object.keys(metadata);
+    if (keys.length === 0) return '无';
+    return keys.join('、');
   }
 
   build() {
@@ -265,17 +290,38 @@ export struct NeuronPage {
             text: '新建',
             type: 'primary',
             btnSize: 'small',
-            onTap: () => { this.handleCreate(); }
+            onTap: () => { this.openCreateDialog(); }
           })
         }
 
-        // agentId 筛选输入 + 搜索按钮
+        // 图谱统计条（/v1/neuron/stats）
+        if (this.stats !== undefined) {
+          Row({ space: 12 }) {
+            Text(`实体 ${this.stats.total_entities}`)
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('info'))
+            Text(`关系 ${this.stats.total_edges}`)
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('success'))
+            Text(`实体类型 ${this.stats.entity_types}`)
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('warning'))
+            Text(`依赖类型 ${this.stats.dependency_types}`)
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_secondary'))
+          }
+          .width('100%')
+          .justifyContent(FlexAlign.Center)
+          .padding({ top: 6, bottom: 6 })
+        }
+
+        // entity_type 筛选输入 + 筛选按钮
         Row({ space: 8 }) {
           GlassInput({
-            placeholder: '按 agentId 筛选',
-            value: this.agentIdFilter,
+            placeholder: '按 entity_type 筛选',
+            value: this.entityTypeFilter,
             type: 'text',
-            onChange: (v: string) => { this.onAgentIdChange(v); }
+            onChange: (v: string) => { this.onFilterChange(v); }
           })
             .layoutWeight(1)
           GlassButton({
@@ -289,7 +335,7 @@ export struct NeuronPage {
         .padding({ left: this.sm.getSpacing('md'), right: this.sm.getSpacing('md'), top: 4, bottom: 4 })
         .alignItems(VerticalAlign.Center)
 
-        // 主体：加载态 / 空态 / 列表
+        // 主体：加载态 / 错误态 / 空态 / 列表
         if (this.loading) {
           Column() {
             Text('加载中...')
@@ -300,9 +346,30 @@ export struct NeuronPage {
           .layoutWeight(1)
           .justifyContent(FlexAlign.Center)
           .alignItems(HorizontalAlign.Center)
-        } else if (this.neurons.length === 0) {
+        } else if (this.errorMsg.length > 0) {
           Column() {
-            Text('暂无神经元')
+            Text('实体列表加载失败')
+              .fontSize(this.sm.getFontSize('subtitle'))
+              .fontColor(this.sm.getColor('error'))
+            Text(this.errorMsg)
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_secondary'))
+              .margin({ top: 8 })
+            GlassButton({
+              text: '重试',
+              type: 'default',
+              btnSize: 'small',
+              onTap: () => { this.loadEntities(); }
+            })
+              .margin({ top: 12 })
+          }
+          .width('90%')
+          .layoutWeight(1)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(HorizontalAlign.Center)
+        } else if (this.entities.length === 0) {
+          Column() {
+            Text('暂无实体')
               .fontSize(this.sm.getFontSize('subtitle'))
               .fontColor(this.sm.getColor('text_secondary'))
           }
@@ -312,11 +379,11 @@ export struct NeuronPage {
           .alignItems(HorizontalAlign.Center)
         } else {
           List({ space: 12 }) {
-            ForEach(this.neurons, (n: Neuron) => {
+            ForEach(this.entities, (n: NeuronEntityDto) => {
               ListItem() {
-                this.buildNeuronCard(n)
+                this.buildEntityCard(n)
               }
-            }, (n: Neuron) => n.id)
+            }, (n: NeuronEntityDto) => n.id)
           }
           .layoutWeight(1)
           .width('100%')
@@ -337,36 +404,35 @@ export struct NeuronPage {
       if (this.showDetailDialog) {
         this.buildDetailDialog()
       }
+
+      // 新建弹窗：内嵌 Stack 条件渲染
+      if (this.showCreateDialog) {
+        this.buildCreateDialog()
+      }
     }
     .width('100%')
     .height('100%')
   }
 
   // ===========================================================================
-  // 神经元卡片构建器
+  // 实体卡片构建器
   // ===========================================================================
 
-  /** 单个神经元卡片：状态徽章 + 名称 + 连接数 + 激活进度条 + 阈值进度条 */
+  /** 单个实体卡片：类型徽章 + 名称 + ID + 创建时间 */
   @Builder
-  buildNeuronCard(n: Neuron) {
+  buildEntityCard(n: NeuronEntityDto) {
+    Column() {
     GlassCard() {
       Column() {
-        // 上部：状态徽章 + 名称
+        // 上部：类型徽章 + 名称
         Row() {
-          // 状态徽章
-          Row() {
-            Text(NeuronViewHelper.getStateIcon(n.state))
-              .fontSize(14)
-            Text(NeuronViewHelper.getStateLabel(n.state))
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor(NeuronViewHelper.getStateColor(n.state)))
-              .margin({ left: 4 })
-          }
-          .padding({ left: 8, right: 8, top: 2, bottom: 2 })
-          .borderRadius(10)
-          .backgroundColor(this.sm.getColor('surface'))
+          Text(n.entity_type)
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('info'))
+            .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+            .backgroundColor(this.sm.getColor('surface'))
+            .borderRadius(10)
 
-          // 名称
           Text(NeuronViewHelper.truncateNeuronName(n.name, DEFAULT_TRUNCATE_LEN))
             .fontSize(this.sm.getFontSize('subtitle'))
             .fontWeight(FontWeight.Bold)
@@ -379,70 +445,15 @@ export struct NeuronPage {
         .width('100%')
         .alignItems(VerticalAlign.Center)
 
-        // 连接数
-        Text(`连接数：${n.connections}`)
+        // ID + 创建时间
+        Text(`ID：${n.id}`)
           .fontSize(this.sm.getFontSize('caption'))
           .fontColor(this.sm.getColor('text_secondary'))
           .margin({ top: 4 })
-
-        // 激活值进度条
-        Column() {
-          Row() {
-            Text('激活值')
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_secondary'))
-            Text(NeuronViewHelper.formatActivation(n.activation))
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor(NeuronViewHelper.getActivationBarColor(n.activation)))
-              .margin({ left: 8 })
-          }
-          .width('100%')
-          // 进度条（用 Row 模拟）
-          Row()
-            .width('100%')
-            .height(6)
-            .borderRadius(3)
-            .backgroundColor(this.sm.getColor('surface'))
-            .margin({ top: 4 })
-          Row()
-            .width(`${Math.max(0, Math.min(1, n.activation)) * 100}%`)
-            .height(6)
-            .borderRadius(3)
-            .backgroundColor(this.sm.getColor(NeuronViewHelper.getActivationBarColor(n.activation)))
-            .margin({ top: -6 })
-        }
-        .width('100%')
-        .alignItems(HorizontalAlign.Start)
-        .margin({ top: 8 })
-
-        // 阈值进度条
-        Column() {
-          Row() {
-            Text('阈值')
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_secondary'))
-            Text(NeuronViewHelper.formatActivation(n.threshold))
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_secondary'))
-              .margin({ left: 8 })
-          }
-          .width('100%')
-          Row()
-            .width('100%')
-            .height(6)
-            .borderRadius(3)
-            .backgroundColor(this.sm.getColor('surface'))
-            .margin({ top: 4 })
-          Row()
-            .width(`${Math.max(0, Math.min(1, n.threshold)) * 100}%`)
-            .height(6)
-            .borderRadius(3)
-            .backgroundColor(this.sm.getColor('text_secondary'))
-            .margin({ top: -6 })
-        }
-        .width('100%')
-        .alignItems(HorizontalAlign.Start)
-        .margin({ top: 8 })
+        Text(`创建：${this.formatEpoch(n.created_at)}`)
+          .fontSize(this.sm.getFontSize('caption'))
+          .fontColor(this.sm.getColor('text_secondary'))
+          .margin({ top: 4 })
 
         // 查看详情按钮
         GlassButton({
@@ -456,6 +467,7 @@ export struct NeuronPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
     .onClick(() => { this.openDetail(n); })
   }
@@ -464,7 +476,7 @@ export struct NeuronPage {
   // 详情弹窗构建器
   // ===========================================================================
 
-  /** 神经元详情弹窗：完整信息 + 触发放电按钮 */
+  /** 实体详情弹窗：名称/ID/类型/创建更新时间/metadata 键 */
   @Builder
   buildDetailDialog() {
     Stack({ alignContent: Alignment.Center }) {
@@ -476,77 +488,53 @@ export struct NeuronPage {
         .onClick(() => { this.closeDetail(); })
 
       // 面板层
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Scroll() {
           Column() {
-            Text('神经元详情')
+            Text('实体详情')
               .fontSize(this.sm.getFontSize('subtitle'))
               .fontWeight(FontWeight.Bold)
               .fontColor(this.sm.getColor('text_primary'))
               .width('100%')
 
-            // 状态徽章
-            Row() {
-              Text(NeuronViewHelper.getStateIcon(this.currentNeuron!.state))
-                .fontSize(16)
-              Text(NeuronViewHelper.getStateLabel(this.currentNeuron!.state))
+            if (this.currentEntity !== undefined) {
+              Text(`名称：${this.currentEntity.name}`)
+                .fontSize(this.sm.getFontSize('body'))
+                .fontColor(this.sm.getColor('text_primary'))
+                .width('100%')
+                .margin({ top: 8 })
+
+              Text(`ID：${this.currentEntity.id}`)
                 .fontSize(this.sm.getFontSize('caption'))
-                .fontColor(this.sm.getColor(NeuronViewHelper.getStateColor(this.currentNeuron!.state)))
-                .margin({ left: 4 })
+                .fontColor(this.sm.getColor('text_secondary'))
+                .width('100%')
+                .margin({ top: 4 })
+
+              Text(`类型：${this.currentEntity.entity_type}`)
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+                .width('100%')
+                .margin({ top: 4 })
+
+              Text(`创建：${this.formatEpoch(this.currentEntity.created_at)}`)
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+                .width('100%')
+                .margin({ top: 4 })
+
+              Text(`更新：${this.formatEpoch(this.currentEntity.updated_at)}`)
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+                .width('100%')
+                .margin({ top: 4 })
+
+              Text(`metadata：${this.metadataKeys(this.currentEntity.metadata)}`)
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+                .width('100%')
+                .margin({ top: 4 })
             }
-            .padding({ left: 8, right: 8, top: 2, bottom: 2 })
-            .borderRadius(10)
-            .backgroundColor(this.sm.getColor('surface'))
-            .margin({ top: 8 })
-
-            // 名称
-            Text(`名称：${this.currentNeuron!.name}`)
-              .fontSize(this.sm.getFontSize('body'))
-              .fontColor(this.sm.getColor('text_primary'))
-              .width('100%')
-              .margin({ top: 8 })
-
-            // ID
-            Text(`ID：${this.currentNeuron!.id}`)
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_secondary'))
-              .width('100%')
-              .margin({ top: 4 })
-
-            // agentId
-            Text(`Agent ID：${this.currentNeuron!.agentId}`)
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_secondary'))
-              .width('100%')
-              .margin({ top: 4 })
-
-            // 连接数
-            Text(`连接数：${this.currentNeuron!.connections}`)
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_secondary'))
-              .width('100%')
-              .margin({ top: 4 })
-
-            // 激活值
-            Text(`激活值：${NeuronViewHelper.formatActivation(this.currentNeuron!.activation)}`)
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor(NeuronViewHelper.getActivationBarColor(this.currentNeuron!.activation)))
-              .width('100%')
-              .margin({ top: 4 })
-
-            // 阈值
-            Text(`阈值：${NeuronViewHelper.formatActivation(this.currentNeuron!.threshold)}`)
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_secondary'))
-              .width('100%')
-              .margin({ top: 4 })
-
-            // 上次激发时间
-            Text(`上次激发：${this.currentNeuron!.lastFiredAt || '—'}`)
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_secondary'))
-              .width('100%')
-              .margin({ top: 4 })
 
             // 操作按钮
             Row() {
@@ -556,13 +544,6 @@ export struct NeuronPage {
                 btnSize: 'medium',
                 onTap: () => { this.closeDetail(); }
               })
-              GlassButton({
-                text: '触发放电',
-                type: 'primary',
-                btnSize: 'medium',
-                onTap: () => { this.fireNeuron(); }
-              })
-                .margin({ left: this.sm.getSpacing('sm') })
             }
             .width('100%')
             .justifyContent(FlexAlign.End)
@@ -574,8 +555,92 @@ export struct NeuronPage {
         .width('100%')
         .scrollBar(BarState.Off)
       }
+      }
       .width('90%')
       .height('80%')
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  // ===========================================================================
+  // 新建弹窗构建器
+  // ===========================================================================
+
+  /** 新建实体弹窗：name + entity_type（POST /v1/neuron/entities） */
+  @Builder
+  buildCreateDialog() {
+    Stack({ alignContent: Alignment.Center }) {
+      // 背景遮罩层：点击空白处关闭
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.sm.getColor('overlay_mask'))
+        .onClick(() => { this.showCreateDialog = false; })
+
+      // 面板层：居中展示
+      Column() {
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
+        Column() {
+          Text('新建实体')
+            .fontSize(this.sm.getFontSize('subtitle'))
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.sm.getColor('text_primary'))
+            .width('100%')
+
+          // 实体名称
+          Text('实体名称')
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_secondary'))
+            .width('100%')
+            .margin({ top: this.sm.getSpacing('sm') })
+          GlassInput({
+            placeholder: '请输入实体名称',
+            value: this.formData.name,
+            type: 'text',
+            onChange: (v: string) => { this.formData = { name: v, entityType: this.formData.entityType }; }
+          })
+            .margin({ top: 4 })
+
+          // 实体类型
+          Text('实体类型')
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_secondary'))
+            .width('100%')
+            .margin({ top: this.sm.getSpacing('sm') })
+          GlassInput({
+            placeholder: '如 service / component / person',
+            value: this.formData.entityType,
+            type: 'text',
+            onChange: (v: string) => { this.formData = { name: this.formData.name, entityType: v }; }
+          })
+            .margin({ top: 4 })
+
+          // 操作按钮
+          Row() {
+            GlassButton({
+              text: '取消',
+              type: 'default',
+              btnSize: 'medium',
+              onTap: () => { this.showCreateDialog = false; }
+            })
+            GlassButton({
+              text: '创建',
+              type: 'primary',
+              btnSize: 'medium',
+              onTap: () => { this.submitCreate(); }
+            })
+              .margin({ left: this.sm.getSpacing('sm') })
+          }
+          .width('100%')
+          .justifyContent(FlexAlign.End)
+          .margin({ top: this.sm.getSpacing('md') })
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+      }
+      }
+      .width('90%')
     }
     .width('100%')
     .height('100%')

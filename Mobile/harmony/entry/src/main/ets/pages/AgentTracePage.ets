@@ -430,6 +430,7 @@ export struct AgentTracePage {
   /** 单条追踪条目卡片：level 徽章 + event + timestamp + duration + payload 摘要 + 删除 */
   @Builder
   buildTraceCard(trace: TraceEntry) {
+    Column() {
     GlassCard() {
       Column() {
         // 上部：level 徽章 + event
@@ -497,6 +498,7 @@ export struct AgentTracePage {
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
+    }
     }
     .width('100%')
   }

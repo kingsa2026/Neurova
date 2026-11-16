@@ -1,27 +1,27 @@
 /**
- * AgentChannelsApi - Agent 渠道管理 API 模块
+ * AgentChannelsApi - Agent 渠道管理 API 模块（端点经后端源码核对 2026-11-16）
  *
- * 职责：封装 Agent 嵌套渠道资源的 CRUD、连接测试、启停切换
- * 设计：通过 HttpClient 委托请求；嵌套路径 /v1/agents/{agentId}/channels/...；统一返回 Promise<ApiResponse<T>>
- *
- * 用法：
- *   const api = ApiFacade.getInstance().agentChannels;
- *   const channels = await api.list('a1');
- *   const r = await api.testConnection('a1', 'c1');
- *   await api.toggle('a1', 'c1', false);
+ * 后端事实源：/v1/agents/{id}/channels 嵌套资源**不存在**（agent.py 仅有
+ * stats/switch/constitution/decision/rebuild-loop）；Agent 名下渠道的真实管理面是
+ * channel_config.py @ /v1/channel-configs?agent_id=（agent 隔离多实例）：
+ *   GET    ""?agent_id=           → ChannelConfigResponse[]
+ *   POST   ""?agent_id=           → upsert（ChannelConfigRequest 契约）
+ *   DELETE /{channel_type}?agent_id=
+ *   POST   /{channel_type}/test?agent_id= → ChannelTestResult
+ * 本模块按该事实源封装；旧 /agents/{id}/channels 形态的方法一律 throw 点名。
  */
-import { HttpClient } from '../HttpClient';
-import { ApiResponse, ChannelInfo } from '../../types';
 
-/** 渠道连接测试结果 */
+import { HttpClient } from '../HttpClient';
+import { ApiResponse } from '../../types';
+import { ChannelConfigDto, ChannelConfigUpsertBody, ChannelTestResultDto, emptyExtra } from './ChannelIntegrationApi';
+
+export type { ChannelConfigDto, ChannelConfigUpsertBody, ChannelTestResultDto };
+export { emptyExtra };
+
+/** 渠道连接测试结果（兼容旧导出名） */
 export interface ChannelTestResult {
   success: boolean;
   message: string;
-}
-
-/** 渠道启停切换请求体 */
-export interface ChannelToggleBody {
-  enabled: boolean;
 }
 
 export class AgentChannelsApi {
@@ -31,57 +31,61 @@ export class AgentChannelsApi {
     this.client = client;
   }
 
-  /** 列出某 Agent 的所有渠道 */
-  async list(agentId: string): Promise<ApiResponse<ChannelInfo[]>> {
-    return this.client.get<ChannelInfo[]>(`/v1/agents/${agentId}/channels`);
+  /** 列出某 Agent 名下的渠道配置（GET /channel-configs?agent_id=） */
+  async list(agentId: string): Promise<ApiResponse<ChannelConfigDto[]>> {
+    const query: Record<string, Object> = { 'agent_id': agentId };
+    const res = await this.client.get<ChannelConfigDto[]>('/channel-configs', query);
+    const arr = (res.data ?? []) as ChannelConfigDto[];
+    return { code: res.code, message: res.message, data: arr } as ApiResponse<ChannelConfigDto[]>;
   }
 
-  /** 获取单条渠道 */
-  async get(agentId: string, channelId: string): Promise<ApiResponse<ChannelInfo>> {
-    return this.client.get<ChannelInfo>(`/v1/agents/${agentId}/channels/${channelId}`);
+  /** 为某 Agent 保存（创建/更新）渠道配置（POST /channel-configs?agent_id=） */
+  async create(agentId: string, body: ChannelConfigUpsertBody): Promise<ApiResponse<Object>> {
+    const res = await this.client.post<Object>(`/channel-configs?agent_id=${encodeURIComponent(agentId)}`, body);
+    return res as ApiResponse<Object>;
   }
 
-  /** 为某 Agent 创建渠道 */
-  async create(agentId: string, data: Partial<ChannelInfo>): Promise<ApiResponse<ChannelInfo>> {
-    return this.client.post<ChannelInfo>(`/v1/agents/${agentId}/channels`, data);
+  /** 删除某 Agent 名下的指定渠道配置（DELETE /channel-configs/{channel_type}?agent_id=） */
+  async remove(agentId: string, channelType: string): Promise<ApiResponse<Object>> {
+    return this.client.delete<Object>(`/channel-configs/${channelType}?agent_id=${encodeURIComponent(agentId)}`);
   }
 
-  /** 更新渠道 */
-  async update(
-    agentId: string,
-    channelId: string,
-    data: Partial<ChannelInfo>,
-  ): Promise<ApiResponse<ChannelInfo>> {
-    return this.client.put<ChannelInfo>(`/v1/agents/${agentId}/channels/${channelId}`, data);
+  /** 测试某 Agent 渠道连接（POST /channel-configs/{channel_type}/test?agent_id=，用掩码外凭据空跑） */
+  async testConnection(agentId: string, channelType: string): Promise<ApiResponse<ChannelTestResult>> {
+    const body: ChannelConfigUpsertBody = {
+      channel_type: channelType,
+      enabled: true,
+      app_id: '',
+      app_secret: '',
+      use_stream: true,
+      webhook_url: '',
+      webhook_token: '',
+      encrypt_key: '',
+      verification_token: '',
+      extra: emptyExtra(),
+    };
+    const res = await this.client.post<Object>(
+      `/channel-configs/${channelType}/test?agent_id=${encodeURIComponent(agentId)}`, body);
+    const payload = (res.data ?? {}) as Record<string, Object>;
+    const result: ChannelTestResult = {
+      success: payload['success'] === true,
+      message: String(payload['message'] ?? ''),
+    };
+    return { code: res.code, message: res.message, data: result } as ApiResponse<ChannelTestResult>;
   }
 
-  /** 删除渠道 */
-  async remove(agentId: string, channelId: string): Promise<ApiResponse<Object>> {
-    return this.client.delete<Object>(`/v1/agents/${agentId}/channels/${channelId}`);
+  /** @deprecated 后端无 GET /agents/{id}/channels/{cid}（详情经 list 整表返回） */
+  async get(agentId: string, channelId: string): Promise<ApiResponse<Object>> {
+    throw new Error('后端无此端点：GET /v1/agents/{id}/channels/{cid}（Agent 渠道实为 /v1/channel-configs?agent_id=）');
   }
 
-  /** 测试渠道连接 */
-  async testConnection(
-    agentId: string,
-    channelId: string,
-  ): Promise<ApiResponse<ChannelTestResult>> {
-    const body: Record<string, Object> = {};
-    return this.client.post<ChannelTestResult>(
-      `/v1/agents/${agentId}/channels/${channelId}/test`,
-      body,
-    );
+  /** @deprecated 后端无 PUT /agents/{id}/channels/{cid}（更新走 create 的 upsert 语义） */
+  async update(agentId: string, channelId: string, data: Object): Promise<ApiResponse<Object>> {
+    throw new Error('后端无此端点：PUT /v1/agents/{id}/channels/{cid}（更新走 create 的 upsert 语义）');
   }
 
-  /** 切换渠道启用状态 */
-  async toggle(
-    agentId: string,
-    channelId: string,
-    enabled: boolean,
-  ): Promise<ApiResponse<ChannelInfo>> {
-    const body: ChannelToggleBody = { enabled };
-    return this.client.put<ChannelInfo>(
-      `/v1/agents/${agentId}/channels/${channelId}/toggle`,
-      body,
-    );
+  /** @deprecated 后端无 PUT /agents/{id}/channels/{cid}/toggle（启停由配置 enabled 字段在保存时生效） */
+  async toggle(agentId: string, channelId: string, enabled: boolean): Promise<ApiResponse<Object>> {
+    throw new Error('后端无此端点：PUT /v1/agents/{id}/channels/{cid}/toggle（启停由渠道配置 enabled 字段在保存时生效）');
   }
 }

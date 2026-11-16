@@ -523,6 +523,7 @@ export struct AgentSchedulerPage {
   /** 单条调度任务卡片：status 徽章 / name / cron / 时间 / 操作按钮 */
   @Builder
   buildTaskCard(task: ScheduleTask) {
+    Column() {
     GlassCard() {
       Column() {
         // 上部：name + status 徽章
@@ -602,6 +603,7 @@ export struct AgentSchedulerPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
   }
 
@@ -621,6 +623,7 @@ export struct AgentSchedulerPage {
         .onClick(() => { this.showCreateDialog = false; })
 
       // 面板层
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('新建调度任务')
@@ -639,7 +642,7 @@ export struct AgentSchedulerPage {
             value: this.formData.name,
             type: 'text',
             onChange: (v: string) => {
-              this.formData = { ...this.formData, name: v };
+              this.formData = { name: v, cron: this.formData.cron, payload: this.formData.payload };
             }
           })
             .margin({ top: 4, bottom: this.sm.getSpacing('sm') })
@@ -654,7 +657,7 @@ export struct AgentSchedulerPage {
             value: this.formData.cron,
             type: 'text',
             onChange: (v: string) => {
-              this.formData = { ...this.formData, cron: v };
+              this.formData = { name: this.formData.name, cron: v, payload: this.formData.payload };
             }
           })
             .margin({ top: 4, bottom: this.sm.getSpacing('sm') })
@@ -670,7 +673,7 @@ export struct AgentSchedulerPage {
             type: 'text',
             maxLength: 500,
             onChange: (v: string) => {
-              this.formData = { ...this.formData, payload: v };
+              this.formData = { name: this.formData.name, cron: this.formData.cron, payload: v };
             }
           })
             .margin({ top: 4, bottom: this.sm.getSpacing('md') })
@@ -697,6 +700,7 @@ export struct AgentSchedulerPage {
         .width('100%')
         .alignItems(HorizontalAlign.Start)
       }
+      }
       .width('90%')
     }
     .width('100%')
@@ -717,6 +721,7 @@ export struct AgentSchedulerPage {
         .backgroundColor(this.sm.getColor('overlay_mask'))
         .onClick(() => { this.showEditCronDialog = false; })
 
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('编辑 cron 表达式')
@@ -763,6 +768,7 @@ export struct AgentSchedulerPage {
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
+      }
       }
       .width('90%')
     }

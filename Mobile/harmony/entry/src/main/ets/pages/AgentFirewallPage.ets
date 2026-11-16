@@ -517,6 +517,7 @@ export struct AgentFirewallPage {
   /** 单条规则卡片：徽章行 + 资源 + 时间 + 操作按钮 */
   @Builder
   buildRuleCard(rule: FirewallRule) {
+    Column() {
     GlassCard() {
       Column() {
         // 徽章行：action 徽章 + scope 徽章 + enabled 徽章
@@ -611,6 +612,7 @@ export struct AgentFirewallPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
   }
 
@@ -630,6 +632,7 @@ export struct AgentFirewallPage {
         .onClick(() => { this.closeDialog(); })
 
       // 面板层：居中展示
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           // 标题（新建/编辑）
@@ -649,7 +652,7 @@ export struct AgentFirewallPage {
             placeholder: '请输入资源路径',
             value: this.formData.resource,
             type: 'text',
-            onChange: (v: string) => { this.formData = { ...this.formData, resource: v }; }
+            onChange: (v: string) => { this.formData = { id: this.formData.id, resource: v, action: this.formData.action, scope: this.formData.scope, enabled: this.formData.enabled }; }
           })
             .margin({ top: 4, bottom: this.sm.getSpacing('sm') })
 
@@ -664,9 +667,9 @@ export struct AgentFirewallPage {
                 GlassButton({
                   text: `${FirewallViewHelper.getActionIcon(a)} ${FirewallViewHelper.getActionLabel(a)}`,
                   type: this.formData.action === a ? 'primary' : 'default',
-                  size: 'small',
-                  onClick: () => {
-                    this.formData = { ...this.formData, action: a };
+                  btnSize: 'small',
+                  onTap: () => {
+                    this.formData = { id: this.formData.id, resource: this.formData.resource, action: a, scope: this.formData.scope, enabled: this.formData.enabled };
                   }
                 })
               }, (a: FirewallAction) => a)
@@ -689,9 +692,9 @@ export struct AgentFirewallPage {
                 GlassButton({
                   text: FirewallViewHelper.getScopeLabel(s),
                   type: this.formData.scope === s ? 'primary' : 'default',
-                  size: 'small',
-                  onClick: () => {
-                    this.formData = { ...this.formData, scope: s };
+                  btnSize: 'small',
+                  onTap: () => {
+                    this.formData = { id: this.formData.id, resource: this.formData.resource, action: this.formData.action, scope: s, enabled: this.formData.enabled };
                   }
                 })
               }, (s: FirewallScope) => s)
@@ -711,7 +714,7 @@ export struct AgentFirewallPage {
               .layoutWeight(1)
             Toggle({ type: ToggleType.Switch, isOn: this.formData.enabled })
               .onChange((on: boolean) => {
-                this.formData = { ...this.formData, enabled: on };
+                this.formData = { id: this.formData.id, resource: this.formData.resource, action: this.formData.action, scope: this.formData.scope, enabled: on };
               })
           }
           .width('100%')
@@ -740,6 +743,7 @@ export struct AgentFirewallPage {
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
+      }
       }
       .width('90%')
     }

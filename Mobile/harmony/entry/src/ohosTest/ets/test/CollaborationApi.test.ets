@@ -1,22 +1,10 @@
-// CollaborationApi 单元测试 - TDD 垂直切片
-// 通过 HttpBackend 接口注入 mock，验证 CollaborationApi 调用契约（method/url/body/返回值）
-// 覆盖 4 个实体：Project、Team、Task、Workflow（每个 3 个核心测试 = 12 测试）
+// CollaborationApi 单元测试 - 真实契约版（M9.2 协作域迁移）
+// 后端事实源：/v1/collaboration（templates/start/history/sessions/stats）+ /v1/tasks（看板任务）。
+// 旧 /collaboration/projects|teams|workflows 端点不存在：对应方法必须 throw 点名，
+// 且**不发任何网络请求**（本文件钉住这一行为）。
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
 import { HttpClient, HttpBackend } from '../../../../main/ets/libs/api/HttpClient';
-import {
-  ApiResponse,
-  Project,
-  Team,
-  Task,
-  Workflow,
-  ProjectStatus,
-  TaskStatus,
-  TaskPriority,
-  WorkflowStatus,
-  TeamRole,
-  PageResult,
-  PageParams,
-} from '../../../../main/ets/libs/types';
+import { ApiResponse } from '../../../../main/ets/libs/types';
 import { CollaborationApi } from '../../../../main/ets/libs/api/modules/CollaborationApi';
 
 // Mock 后端实现（参考 MemoryApi.test.ets 模式）
@@ -48,98 +36,103 @@ export default function collaborationApiTest() {
       api = new CollaborationApi(client);
     });
 
-    // ========== Project 实体（3 测试）==========
-    it('listProjects_calls_get_projects_url', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 1, size: 20 } };
-      api.listProjects();
-      expect(backend.requests[0].method).assertEqual('GET');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/collaboration/projects');
-    });
+    // ========== 协作模板（/collaboration/templates）==========
 
-    it('createProject_posts_body_to_projects', 0, () => {
-      const data: Partial<Project> = { name: 'P1', description: 'desc', status: 'planning' as ProjectStatus, owner: 'u1', members: [] };
-      api.createProject(data);
-      expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/collaboration/projects');
-      expect(backend.requests[0].body).assertEqual(data);
-    });
-
-    it('removeProject_deletes_by_id', 0, () => {
-      api.removeProject('p1');
-      expect(backend.requests[0].method).assertEqual('DELETE');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/collaboration/projects/p1');
-    });
-
-    // ========== Team 实体（3 测试）==========
-    it('listTeams_calls_get_teams_url', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 1, size: 20 } };
-      api.listTeams({ page: 1, size: 5 });
+    it('listTemplates_calls_get_with_limit', 0, () => {
+      api.listTemplates(20);
       const url = backend.requests[0].url;
       expect(backend.requests[0].method).assertEqual('GET');
-      expect(url.includes('page=1')).assertTrue();
-      expect(url.includes('size=5')).assertTrue();
+      expect(url.includes('/collaboration/templates')).assertTrue();
+      expect(url.includes('limit=20')).assertTrue();
     });
 
-    it('getTeam_calls_get_with_id', 0, () => {
-      api.getTeam('t1');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/collaboration/teams/t1');
-    });
-
-    it('updateTeam_puts_id_and_body', 0, () => {
-      const data: Partial<Team> = { name: 'updated' };
-      api.updateTeam('t1', data);
-      expect(backend.requests[0].method).assertEqual('PUT');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/collaboration/teams/t1');
-      expect(backend.requests[0].body).assertEqual(data);
-    });
-
-    // ========== Task 实体（3 测试）==========
-    it('listTasks_filters_by_projectId', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 1, size: 20 } };
-      api.listTasks('p1');
-      const url = backend.requests[0].url;
-      expect(backend.requests[0].method).assertEqual('GET');
-      expect(url.includes('projectId=p1')).assertTrue();
-    });
-
-    it('createTask_posts_body_to_tasks', 0, () => {
-      const data: Partial<Task> = {
-        projectId: 'p1', title: 'T1', status: 'todo' as TaskStatus,
-        priority: 'medium' as TaskPriority, tags: [],
+    it('createTemplate_posts_name_description_workflow_participants', 0, () => {
+      const workflow: Record<string, Object> = {};
+      const body = {
+        name: '模板A', description: 'd', workflow: workflow, participants: ['u1'],
       };
-      api.createTask(data);
+      api.createTemplate(body);
       expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/collaboration/tasks');
-      expect(backend.requests[0].body).assertEqual(data);
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/collaboration/templates');
+      expect(backend.requests[0].body).assertEqual(body);
     });
 
-    it('updateTask_puts_to_id_url', 0, () => {
-      const data: Partial<Task> = { status: 'done' as TaskStatus };
-      api.updateTask('t1', data);
-      expect(backend.requests[0].method).assertEqual('PUT');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/collaboration/tasks/t1');
-      expect(backend.requests[0].body).assertEqual(data);
+    it('removeTemplate_deletes_by_id', 0, () => {
+      api.removeTemplate('t1');
+      expect(backend.requests[0].method).assertEqual('DELETE');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/collaboration/templates/t1');
     });
 
-    // ========== Workflow 实体（3 测试）==========
-    it('listWorkflows_calls_get_workflows_url', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 1, size: 20 } };
-      api.listWorkflows();
+    // ========== 启动 / 历史 / 会话 / 统计 ==========
+
+    it('startCollaboration_posts_start_contract', 0, () => {
+      const context: Record<string, Object> = {};
+      const body = { template_id: 't1', participants: ['u1'], context: context };
+      api.startCollaboration(body);
+      expect(backend.requests[0].method).assertEqual('POST');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/collaboration/start');
+      expect(backend.requests[0].body).assertEqual(body);
+    });
+
+    it('listHistory_carries_limit_offset', 0, () => {
+      api.listHistory(50, 0);
+      const url = backend.requests[0].url;
       expect(backend.requests[0].method).assertEqual('GET');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/collaboration/workflows');
+      expect(url.includes('/collaboration/history')).assertTrue();
+      expect(url.includes('limit=50')).assertTrue();
+      expect(url.includes('offset=0')).assertTrue();
     });
 
-    it('getWorkflow_calls_get_with_id', 0, () => {
-      api.getWorkflow('w1');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/collaboration/workflows/w1');
+    it('listSessions_gets_collaboration_sessions', 0, () => {
+      api.listSessions(50, 0);
+      const url = backend.requests[0].url;
+      expect(url.includes('/collaboration/sessions')).assertTrue();
     });
 
-    it('createWorkflow_posts_body_to_workflows', 0, () => {
-      const data: Partial<Workflow> = { name: 'W1', status: 'draft' as WorkflowStatus, nodes: [], edges: [], version: '1' };
-      api.createWorkflow(data);
-      expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/collaboration/workflows');
-      expect(backend.requests[0].body).assertEqual(data);
+    it('getStats_gets_collaboration_stats', 0, () => {
+      api.getStats();
+      expect(backend.requests[0].method).assertEqual('GET');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/collaboration/stats');
+    });
+
+    // ========== 看板任务（/tasks/*）==========
+
+    it('listTasks_first_fetches_boards', 0, () => {
+      api.listTasks(undefined);
+      expect(backend.requests[0].method).assertEqual('GET');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/tasks/boards');
+    });
+
+    it('createTask_first_fetches_boards', 0, () => {
+      const data = { title: 'T1', status: 'todo', priority: 'medium' };
+      api.createTask(data);
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/tasks/boards');
+    });
+
+    it('updateTask_puts_tasks_by_id', 0, () => {
+      const body: Record<string, Object> = { 'status': 'done' };
+      api.updateTask('task-1', body);
+      expect(backend.requests[0].method).assertEqual('PUT');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/tasks/task-1');
+    });
+
+    it('moveTask_puts_tasks_move', 0, () => {
+      const body: Record<string, Object> = { 'status': 'in_progress' };
+      api.moveTask('task-1', body);
+      expect(backend.requests[0].method).assertEqual('PUT');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/tasks/task-1/move');
+    });
+
+    // ========== 退役端点：必须 throw 且不发任何请求 ==========
+
+    it('retiredProjectsTeamsWorkflows_fire_no_request', 0, () => {
+      api.listProjects(undefined);
+      api.createProject({});
+      api.listTeams(undefined);
+      api.createTeam({});
+      api.listWorkflows(undefined);
+      api.createWorkflow({});
+      expect(backend.requests.length).assertEqual(0);
     });
   });
 }

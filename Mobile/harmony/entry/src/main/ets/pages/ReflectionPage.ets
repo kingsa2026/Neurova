@@ -157,6 +157,13 @@ export class ReflectionViewHelper {
 //       新建完成后自动刷新列表；后端无删除端点，不提供删除
 // ===========================================================================
 
+/** 新建表单数据（ArkTS 禁匿名对象类型，独立声明） */
+interface ReflectionFormData {
+  reflectionType: string;
+  content: string;
+  insightsText: string;
+}
+
 @Component
 export struct ReflectionPage {
   // 反思列表（由 API 加载，按 timestamp 倒序）
@@ -170,11 +177,7 @@ export struct ReflectionPage {
   // 当前选中的反思（详情弹窗使用）
   @State selectedReflection: ReflectionDto | null = null;
   // 新建表单数据（嵌套对象，整体重新赋值）
-  @State formData: {
-    reflectionType: string;
-    content: string;
-    insightsText: string;
-  } = {
+  @State formData: ReflectionFormData = {
     reflectionType: 'performance',
     content: '',
     insightsText: '',
@@ -412,6 +415,7 @@ export struct ReflectionPage {
   /** 单条反思卡片：类型 + 内容摘要 + 洞察数 + 关联数 + 时间 + 查看 */
   @Builder
   buildReflectionCard(reflection: ReflectionDto) {
+    Column() {
     GlassCard() {
       Column() {
         // 类型徽章 + 状态
@@ -480,6 +484,7 @@ export struct ReflectionPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
   }
 
@@ -493,6 +498,7 @@ export struct ReflectionPage {
     // 遮罩层：点击空白处关闭
     Column() {
       // 弹窗主体
+      Column() {
       GlassCard({ title: '反思详情' }) {
         Scroll() {
           Column() {
@@ -599,6 +605,7 @@ export struct ReflectionPage {
         .justifyContent(FlexAlign.End)
         .margin({ top: this.sm.getSpacing('sm') })
       }
+      }
       .width('90%')
       .height('70%')
     }
@@ -620,6 +627,7 @@ export struct ReflectionPage {
     // 遮罩层：点击空白处关闭
     Column() {
       // 弹窗主体
+      Column() {
       GlassCard({ title: '新建反思' }) {
         Scroll() {
           Column() {
@@ -642,7 +650,7 @@ export struct ReflectionPage {
                     .padding({ left: 10, right: 10, top: 4, bottom: 4 })
                     .borderRadius(12)
                     .onClick(() => {
-                      this.formData = { ...this.formData, reflectionType: t };
+                      this.formData = { reflectionType: t, content: this.formData.content, insightsText: this.formData.insightsText };
                     })
                 }, (t: string) => t)
               }
@@ -667,7 +675,7 @@ export struct ReflectionPage {
               .fontSize(this.sm.getFontSize('body'))
               .margin({ top: 4, bottom: this.sm.getSpacing('sm') })
               .onChange((v: string) => {
-                this.formData = { ...this.formData, content: v };
+                this.formData = { reflectionType: this.formData.reflectionType, content: v, insightsText: this.formData.insightsText };
               })
 
             // 洞察输入（多行，每行一条）
@@ -684,7 +692,7 @@ export struct ReflectionPage {
               .fontSize(this.sm.getFontSize('body'))
               .margin({ top: 4, bottom: this.sm.getSpacing('sm') })
               .onChange((v: string) => {
-                this.formData = { ...this.formData, insightsText: v };
+                this.formData = { reflectionType: this.formData.reflectionType, content: this.formData.content, insightsText: v };
               })
 
             // 相关记忆输入（多行，每行一条；ReflectionLogCreate.related_memories）
@@ -728,6 +736,7 @@ export struct ReflectionPage {
         .width('100%')
         .justifyContent(FlexAlign.End)
         .margin({ top: this.sm.getSpacing('sm') })
+      }
       }
       .width('90%')
       .height('75%')

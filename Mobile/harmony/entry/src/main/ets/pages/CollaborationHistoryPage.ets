@@ -159,13 +159,28 @@ const ACTION_FILTERS: ActionFilterOption[] = [
  * Mock 协作历史数据
  * TODO M6 阶段：替换为 api.collaboration.history.list() 真实 API
  */
+/** 构造单键 Metadata（ArkTS 禁对象字面量直接落 Record，集中此处） */
+function meta1(k1: string, v1: Object): Record<string, Object> {
+  const r: Record<string, Object> = {};
+  r[k1] = v1;
+  return r;
+}
+
+/** 构造双键 Metadata */
+function meta2(k1: string, v1: Object, k2: string, v2: Object): Record<string, Object> {
+  const r: Record<string, Object> = {};
+  r[k1] = v1;
+  r[k2] = v2;
+  return r;
+}
+
 const MOCK_HISTORY: CollaborationHistory[] = [
   {
     id: 'hist_1',
     collaborationId: 'collab_1',
     action: 'create',
     actor: 'user_1',
-    after: { name: '协作任务 A', status: 'pending' },
+    after: meta2('name', '协作任务 A', 'status', 'pending'),
     timestamp: '2025-03-01T10:00:00Z',
     note: '创建协作任务',
   },
@@ -174,8 +189,8 @@ const MOCK_HISTORY: CollaborationHistory[] = [
     collaborationId: 'collab_1',
     action: 'update',
     actor: 'agent_1',
-    before: { status: 'pending' },
-    after: { status: 'in_progress' },
+    before: meta1('status', 'pending'),
+    after: meta1('status', 'in_progress'),
     timestamp: '2025-03-02T14:30:00Z',
     note: '状态更新为进行中',
   },
@@ -184,8 +199,8 @@ const MOCK_HISTORY: CollaborationHistory[] = [
     collaborationId: 'collab_2',
     action: 'complete',
     actor: 'user_2',
-    before: { status: 'in_progress' },
-    after: { status: 'done' },
+    before: meta1('status', 'in_progress'),
+    after: meta1('status', 'done'),
     timestamp: '2025-03-03T09:15:00Z',
   },
   {
@@ -193,8 +208,8 @@ const MOCK_HISTORY: CollaborationHistory[] = [
     collaborationId: 'collab_3',
     action: 'archive',
     actor: 'user_1',
-    before: { status: 'done' },
-    after: { status: 'archived' },
+    before: meta1('status', 'done'),
+    after: meta1('status', 'archived'),
     timestamp: '2025-03-04T16:45:00Z',
     note: '历史项目归档',
   },
@@ -367,6 +382,7 @@ export struct CollaborationHistoryPage {
   /** 单个历史卡片：动作徽章 + 执行者 + 时间戳 + 备注摘要 + 操作按钮 */
   @Builder
   buildHistoryCard(h: CollaborationHistory) {
+    Column() {
     GlassCard() {
       Column() {
         // 顶部行：动作图标 + 动作徽章 + 执行者
@@ -425,6 +441,7 @@ export struct CollaborationHistoryPage {
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
+    }
     }
     .width('100%')
   }

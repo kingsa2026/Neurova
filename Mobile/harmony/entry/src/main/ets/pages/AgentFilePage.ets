@@ -497,6 +497,7 @@ export struct AgentFilePage {
   /** 单条文件卡片：图标+名称 / mimeType 标签+大小 / 时间+上传人 / 操作按钮 */
   @Builder
   buildFileCard(file: AgentFile) {
+    Column() {
     GlassCard() {
       Column() {
         // 上部：图标 + 文件名
@@ -578,6 +579,7 @@ export struct AgentFilePage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
   }
 
@@ -596,6 +598,7 @@ export struct AgentFilePage {
         .onClick(() => { this.closeDialog(); })
 
       // 面板层
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('上传文件')
@@ -614,7 +617,7 @@ export struct AgentFilePage {
             placeholder: '请输入文件名称',
             value: this.formData.name,
             type: 'text',
-            onChange: (v: string) => { this.formData = { ...this.formData, name: v }; }
+            onChange: (v: string) => { this.formData = { name: v, path: this.formData.path, mimeType: this.formData.mimeType }; }
           })
             .margin({ top: 4, bottom: this.sm.getSpacing('sm') })
 
@@ -627,7 +630,7 @@ export struct AgentFilePage {
             placeholder: '请输入文件路径（如 /data/file.png）',
             value: this.formData.path,
             type: 'text',
-            onChange: (v: string) => { this.formData = { ...this.formData, path: v }; }
+            onChange: (v: string) => { this.formData = { name: this.formData.name, path: v, mimeType: this.formData.mimeType }; }
           })
             .margin({ top: 4, bottom: this.sm.getSpacing('sm') })
 
@@ -644,7 +647,7 @@ export struct AgentFilePage {
                   type: this.formData.mimeType === mt ? 'primary' : 'default',
                   btnSize: 'small',
                   onTap: () => {
-                    this.formData = { ...this.formData, mimeType: mt };
+                    this.formData = { name: this.formData.name, path: this.formData.path, mimeType: mt };
                   }
                 })
               }, (mt: string) => mt)
@@ -677,6 +680,7 @@ export struct AgentFilePage {
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
+      }
       }
       .width('90%')
     }

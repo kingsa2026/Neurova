@@ -460,6 +460,7 @@ export struct WorkflowPage {
   /** 单个工作流卡片：状态徽章 + 名称 + 描述摘要 + 节点数/版本 + 操作按钮 */
   @Builder
   buildWorkflowCard(workflow: Workflow) {
+    Column() {
     GlassCard() {
       Column() {
         // 上部：状态徽章（圆点 + 图标 + 文案）
@@ -550,6 +551,7 @@ export struct WorkflowPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
   }
 
@@ -569,6 +571,7 @@ export struct WorkflowPage {
         .onClick(() => { this.showCreateDialog = false; })
 
       // 面板层：居中展示
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('新建工作流')
@@ -587,7 +590,7 @@ export struct WorkflowPage {
             placeholder: '请输入工作流名称',
             value: this.formData.name,
             type: 'text',
-            onChange: (v: string) => { this.formData = { ...this.formData, name: v }; }
+            onChange: (v: string) => { this.formData = { name: v, description: this.formData.description }; }
           })
             .margin({ top: 4 })
 
@@ -601,7 +604,7 @@ export struct WorkflowPage {
             placeholder: '请输入描述',
             value: this.formData.description,
             type: 'text',
-            onChange: (v: string) => { this.formData = { ...this.formData, description: v }; }
+            onChange: (v: string) => { this.formData = { name: this.formData.name, description: v }; }
           })
             .margin({ top: 4 })
 
@@ -627,6 +630,7 @@ export struct WorkflowPage {
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
+      }
       }
       .width('90%')
     }

@@ -403,6 +403,7 @@ export struct AgentMediaPage {
   /** 单个媒体卡片：缩略图 + 名称 + type 徽章 + 大小/时长 + 操作按钮 */
   @Builder
   buildMediaCard(item: MediaAsset) {
+    Column() {
     GlassCard() {
       Column() {
         // 缩略图区域：图片显示 thumbnailUrl，其他显示 type 图标
@@ -488,6 +489,7 @@ export struct AgentMediaPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
   }
 
@@ -507,6 +509,7 @@ export struct AgentMediaPage {
         .onClick(() => { this.closePreview(); })
 
       // 面板层
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           // 标题：类型标签 + 名称
@@ -595,6 +598,7 @@ export struct AgentMediaPage {
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
+      }
       }
       .width('90%')
     }

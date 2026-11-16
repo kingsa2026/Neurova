@@ -35,11 +35,12 @@
 
 import { TopNavMenu, GlassCard, GlassButton } from '../components/glass';
 import { ApiFacade } from '../libs/api/ApiFacade';
-import { Router } from '../routing/Router';
+import { Router, RouteNames } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { Project, Team, Task } from '../libs/types';
+import { Task } from '../libs/types';
+import { CollaborationStatsDto } from '../libs/api/modules/CollaborationApi';
 
 /** 日志标签 */
 const TAG = 'CollaborationPage';
@@ -55,12 +56,15 @@ const TAG = 'CollaborationPage';
 export class CollaborationViewHelper {
   /**
    * 获取模块对应的图标 emoji
-   * 映射：projects→📁, teams→👥, tasks→✅
+   * 映射：projects→📁, templates→🧩, sessions→💬, workflows→🔄, teams→👥, tasks→✅
    * @param module 模块标识
    * @return emoji 字符串
    */
   static getModuleIcon(module: string): string {
     if (module === 'projects') return '📁';
+    if (module === 'templates') return '🧩';
+    if (module === 'sessions') return '💬';
+    if (module === 'workflows') return '🔄';
     if (module === 'teams') return '👥';
     if (module === 'tasks') return '✅';
     return '📦';
@@ -68,12 +72,16 @@ export class CollaborationViewHelper {
 
   /**
    * 获取模块对应的中文标签
-   * 映射：projects→项目, teams→团队, tasks→任务
+   * 映射：projects→项目, templates→模板, sessions→进行中会话, workflows→工作流,
+   *       teams→团队, tasks→任务
    * @param module 模块标识
    * @return 中文标签
    */
   static getModuleLabel(module: string): string {
     if (module === 'projects') return '项目';
+    if (module === 'templates') return '模板';
+    if (module === 'sessions') return '进行中会话';
+    if (module === 'workflows') return '工作流';
     if (module === 'teams') return '团队';
     if (module === 'tasks') return '任务';
     return '未知';
@@ -108,40 +116,40 @@ export class CollaborationViewHelper {
 
   /**
    * 获取模块对应的颜色 token 名
-   * 映射：projects→primary, teams→info, tasks→warning
+   * 映射：projects→primary, templates→info, sessions→success, workflows→warning,
+   *       teams→info, tasks→warning
    * @param module 模块标识
    * @return StyleManager 颜色 token 名
    */
   static getModuleColor(module: string): string {
     if (module === 'projects') return 'primary';
+    if (module === 'templates') return 'info';
+    if (module === 'sessions') return 'success';
+    if (module === 'workflows') return 'warning';
     if (module === 'teams') return 'info';
     if (module === 'tasks') return 'warning';
     return 'text_secondary';
   }
 }
 
-/** 模块标识联合类型别名（用于快捷入口列表） */
-type ModuleKey = 'projects' | 'teams' | 'tasks';
-
-/** 快捷入口配置 */
+/** 快捷入口配置（key=展示标识，route=真实路由名） */
 interface ModuleEntry {
-  key: ModuleKey;
+  key: string;
+  route: string;
 }
 
-/** 全部快捷入口（顺序：项目/团队/任务） */
+/** 全部快捷入口（模板/历史/发起/任务——均已在 PageMap 注册，可真实跳转） */
 const MODULE_ENTRIES: ModuleEntry[] = [
-  { key: 'projects' },
-  { key: 'teams' },
-  { key: 'tasks' },
+  { key: 'templates', route: RouteNames.COLLABORATION_TEMPLATE },
+  { key: 'sessions', route: RouteNames.COLLABORATION_HISTORY },
+  { key: 'tasks', route: RouteNames.TASK },
 ];
 
 @Component
 export struct CollaborationPage {
-  // 项目列表（用于统计数量）
-  @State projects: Project[] = [];
-  // 团队列表
-  @State teams: Team[] = [];
-  // 任务列表
+  // 协作概览统计（GET /v1/collaboration/stats 真实数据）
+  @State stats: CollaborationStatsDto | undefined = undefined;
+  // 任务列表（看板任务，待办统计用）
   @State tasks: Task[] = [];
   // 加载态
   @State loading: boolean = true;
@@ -160,38 +168,29 @@ export struct CollaborationPage {
   }
 
   /**
-   * 并行加载项目/团队/任务列表
-   * 流程：Promise.allSettled 三路并发 → 写入对应 @State
-   * 异常：单路失败不影响其他；全部失败时显示错误态
+   * 加载协作概览（GET /v1/collaboration/stats + 看板任务）
+   * 流程：stats 与 tasks 两路并发，单路失败不影响另一路；全部失败显示错误态
+   * 异常：记录日志并把后端原因透出
    */
   private async loadOverview(): Promise<void> {
     this.loading = true;
     this.errorMessage = '';
     try {
-      const [projectsRes, teamsRes, tasksRes] = await Promise.all([
-        this.api.collaboration.listProjects().catch((e: Object) => {
-          this.logger.error(TAG, '加载项目失败', e as Error);
-          return null;
-        }),
-        this.api.collaboration.listTeams().catch((e: Object) => {
-          this.logger.error(TAG, '加载团队失败', e as Error);
-          return null;
-        }),
-        this.api.collaboration.listTasks().catch((e: Object) => {
-          this.logger.error(TAG, '加载任务失败', e as Error);
-          return null;
-        }),
-      ]);
-      if (projectsRes && projectsRes.code === 0 && projectsRes.data) {
-        this.projects = projectsRes.data.items;
-      }
-      if (teamsRes && teamsRes.code === 0 && teamsRes.data) {
-        this.teams = teamsRes.data.items;
+      const statsRes = await this.api.collaboration.getStats().catch((e: Object) => {
+        this.logger.error(TAG, '加载协作统计失败', e as Error);
+        return null;
+      });
+      const tasksRes = await this.api.collaboration.listTasks().catch((e: Object) => {
+        this.logger.error(TAG, '加载任务失败', e as Error);
+        return null;
+      });
+      if (statsRes && statsRes.code === 0 && statsRes.data) {
+        this.stats = statsRes.data;
       }
       if (tasksRes && tasksRes.code === 0 && tasksRes.data) {
         this.tasks = tasksRes.data.items;
       }
-      if (!projectsRes && !teamsRes && !tasksRes) {
+      if (!statsRes && !tasksRes) {
         this.errorMessage = '加载协作数据失败';
         this.msg.error('加载协作数据失败');
       }
@@ -204,10 +203,9 @@ export struct CollaborationPage {
     }
   }
 
-  /** 点击快捷入口（路由待注册，当前以消息提示占位） */
-  private handleEntryClick(module: string): void {
-    const label = CollaborationViewHelper.getModuleLabel(module);
-    this.msg.info(`跳转到${label}页`);
+  /** 点击快捷入口（真实跳转：模板/历史/任务页均已在 PageMap 注册） */
+  private handleEntryClick(route: string): void {
+    this.router.push(route);
   }
 
   build() {
@@ -249,21 +247,26 @@ export struct CollaborationPage {
         .justifyContent(FlexAlign.Center)
         .alignItems(HorizontalAlign.Center)
       } else {
-        // 概览内容：3 个统计卡 + 3 个快捷入口
+        // 概览内容：统计卡（真实 /collaboration/stats）+ 快捷入口
         List({ space: 12 }) {
-          // 三个统计卡（项目数/团队数/待办任务数）
           ListItem() {
-            this.buildStatCard('projects', this.projects.length)
+            this.buildStatCard('projects', this.stats !== undefined ? this.stats.projects : 0)
           }
           ListItem() {
-            this.buildStatCard('teams', this.teams.length)
+            this.buildStatCard('templates', this.stats !== undefined ? this.stats.templates : 0)
+          }
+          ListItem() {
+            this.buildStatCard('sessions', this.stats !== undefined ? this.stats.sessions : 0)
+          }
+          ListItem() {
+            this.buildStatCard('workflows', this.stats !== undefined ? this.stats.workflows : 0)
           }
           ListItem() {
             this.buildStatCard('tasks',
               parseInt(CollaborationViewHelper.formatPendingTasks(this.tasks)))
           }
 
-          // 三个快捷入口按钮
+          // 快捷入口按钮
           ListItem() {
             this.buildEntryButtons()
           }
@@ -291,6 +294,7 @@ export struct CollaborationPage {
   /** 单个统计卡：图标 + 模块名 + 数量 */
   @Builder
   buildStatCard(module: string, count: number) {
+    Column() {
     GlassCard() {
       Row() {
         Text(CollaborationViewHelper.getModuleIcon(module))
@@ -316,6 +320,7 @@ export struct CollaborationPage {
       .width('100%')
       .alignItems(VerticalAlign.Center)
     }
+    }
     .width('100%')
   }
 
@@ -323,7 +328,7 @@ export struct CollaborationPage {
   // 快捷入口按钮组构建器
   // ===========================================================================
 
-  /** 3 个快捷入口按钮：项目/团队/任务 */
+  /** 快捷入口按钮组：模板/历史(会话)/任务——真实路由跳转 */
   @Builder
   buildEntryButtons() {
     Row({ space: this.sm.getSpacing('sm') }) {
@@ -331,8 +336,8 @@ export struct CollaborationPage {
         GlassButton({
           text: `${CollaborationViewHelper.getModuleIcon(entry.key)} ${CollaborationViewHelper.getModuleLabel(entry.key)}`,
           type: 'default',
-          size: 'medium',
-          onClick: () => { this.handleEntryClick(entry.key); }
+          btnSize: 'small',
+          onTap: () => { this.handleEntryClick(entry.route); }
         })
           .layoutWeight(1)
       }, (entry: ModuleEntry) => entry.key)

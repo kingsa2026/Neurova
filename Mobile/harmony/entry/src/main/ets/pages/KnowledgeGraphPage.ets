@@ -348,6 +348,7 @@ export struct KnowledgeGraphPage {
   /** 图谱概览卡：子图节点/边 + 真总量（truncated 提示裁剪）+ 平均权重 */
   @Builder
   buildOverviewCard() {
+    Column() {
     GlassCard() {
       Column() {
         Row() {
@@ -406,6 +407,7 @@ export struct KnowledgeGraphPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
   }
 
@@ -416,6 +418,7 @@ export struct KnowledgeGraphPage {
   /** 单个节点卡片：图标 + label + type 徽章 + weight + 描述 + 关联边数 + 查看 */
   @Builder
   buildNodeCard(node: GraphNodeDto) {
+    Column() {
     GlassCard() {
       Column() {
         // 第一行：图标 + label
@@ -448,7 +451,7 @@ export struct KnowledgeGraphPage {
             .margin({ left: 12 })
         }
         .width('100%')
-        .alignItems(HorizontalAlign.Start)
+        .justifyContent(FlexAlign.Start)
         .margin({ top: this.sm.getSpacing('sm') })
 
         // 描述摘要
@@ -491,6 +494,7 @@ export struct KnowledgeGraphPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
   }
 
@@ -510,6 +514,7 @@ export struct KnowledgeGraphPage {
         .onClick(() => { this.closeDetail(); })
 
       // 面板层：居中展示
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           // 标题行：图标 + label
@@ -623,6 +628,7 @@ export struct KnowledgeGraphPage {
         .width('100%')
         .height('100%')
         .alignItems(HorizontalAlign.Start)
+      }
       }
       .width('90%')
       .height('80%')

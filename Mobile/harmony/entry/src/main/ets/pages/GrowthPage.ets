@@ -306,6 +306,7 @@ export struct GrowthPage {
   /** 动机水平卡：总水平进度条 + 各驱动力强度 */
   @Builder
   buildMotivationCard() {
+    Column() {
     GlassCard({ title: '动机水平' }) {
       Column() {
         // 总水平
@@ -333,7 +334,7 @@ export struct GrowthPage {
         .height(6)
         .borderRadius(3)
         .backgroundColor(this.sm.getColor('divider'))
-        .alignItems(VerticalAlign.Start)
+        .alignItems(VerticalAlign.Top)
         .margin({ top: 6 })
 
         // 各驱动力
@@ -355,7 +356,7 @@ export struct GrowthPage {
             .height(5)
             .borderRadius(2.5)
             .backgroundColor(this.sm.getColor('divider'))
-            .alignItems(VerticalAlign.Start)
+            .alignItems(VerticalAlign.Top)
             .margin({ left: 8, right: 8 })
 
             Text(GrowthViewHelper.formatPercent(this.driveIntensity(name)))
@@ -372,6 +373,7 @@ export struct GrowthPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
     .margin({ bottom: this.sm.getSpacing('md') })
   }
@@ -379,6 +381,7 @@ export struct GrowthPage {
   /** 人格画像卡：沟通/决策风格 + 特质键值 + 价值观徽章 */
   @Builder
   buildPersonalityCard() {
+    Column() {
     GlassCard({ title: '人格画像' }) {
       Column() {
         if (this.growth !== null && this.growth.personality !== null) {
@@ -458,6 +461,7 @@ export struct GrowthPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
     .margin({ bottom: this.sm.getSpacing('md') })
   }
@@ -465,6 +469,7 @@ export struct GrowthPage {
   /** 行为宪法卡：条目列表（类型徽章 + 内容 + 启用状态） */
   @Builder
   buildConstitutionCard() {
+    Column() {
     GlassCard({ title: '行为宪法' }) {
       Column() {
         if (this.growth !== null && this.growth.constitution.length > 0) {
@@ -504,6 +509,7 @@ export struct GrowthPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
     .margin({ bottom: this.sm.getSpacing('md') })
   }
@@ -511,6 +517,7 @@ export struct GrowthPage {
   /** 最近反思卡：reflection_logs 前 N 条（类型 + 摘要 + 时间） */
   @Builder
   buildRecentReflectionCard() {
+    Column() {
     GlassCard({ title: '最近反思' }) {
       Column() {
         if (this.growth !== null && this.growth.reflection_logs.length > 0) {
@@ -548,6 +555,7 @@ export struct GrowthPage {
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
+    }
     }
     .width('100%')
   }
