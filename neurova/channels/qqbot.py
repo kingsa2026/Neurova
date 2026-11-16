@@ -770,9 +770,11 @@ class QQBotAdapter(ChannelAdapter):
         return data.get("retcode") == 0
 
     def get_channel_config(self) -> Dict[str, Any]:
+        # 审计 §3.4-5：access_token 是调用凭据，配置回显必须掩码
+        # （对照 base.py ChannelConfig.to_dict 的 app_secret 掩码约定）。
         return {
             "channel": self.channel.value,
-            "access_token": self.access_token,
+            "access_token": "***" if self.access_token else "",
             "http_api_url": self.http_api_url,
             "ws_api_url": self.ws_api_url,
             "bot_prefix": self.bot_prefix,

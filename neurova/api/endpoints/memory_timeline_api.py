@@ -1,26 +1,27 @@
 """
 Memory Timeline API - 记忆时间线API
+
+审计 §3.1-11 诚实化：四个端点原先恒回空/零（`count += 0 # placeholder`），
+是"活的装饰数据面"——前端拿到 200 + 空数据无从分辨"没有记忆"和"接口没实现"。
+现统一显式 501，点名未实现与真实可用的替代数据面（/v1/memories 检索、
+/v1/memory/stats），不再用占位数据冒充功能。
 """
 
-import datetime
-from neurova.core.logger import get_logger
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from neurova.api.auth import get_current_user, Depends
 
-logger = get_logger(__name__)
 router = APIRouter(dependencies=[Depends(get_current_user)],)
+
+_NOT_IMPLEMENTED_DETAIL = (
+    "记忆时间线数据面未实现（无真实数据源，历史版本返回恒空/零的占位数据）。"
+    "检索记忆请用 /v1/memories，统计请用 /v1/memory/stats。"
+)
 
 
 @router.get("/recent")
 async def get_recent_memories(days: int = Query(7, ge=1, le=365), limit: int = Query(50, ge=1, le=200)):
-    """获取最近N天的记忆"""
-    now = datetime.datetime.now(datetime.timezone.utc)
-    start = (now - datetime.timedelta(days=days)).isoformat()
-    return {
-        "code": 0,
-        "message": "success",
-        "data": {"memories": [], "total": 0, "from": start, "to": now.isoformat(), "days": days},
-    }
+    """获取最近N天的记忆（未实现，显式 501）"""
+    raise HTTPException(status_code=501, detail=_NOT_IMPLEMENTED_DETAIL)
 
 
 @router.get("/range")
@@ -30,48 +31,19 @@ async def get_memories_by_time_range(
     page: int = 1,
     size: int = 50,
 ):
-    """按时间范围获取记忆"""
-    return {
-        "code": 0,
-        "message": "success",
-        "data": {"memories": [], "total": 0, "start": start, "end": end, "page": page, "size": size},
-    }
+    """按时间范围获取记忆（未实现，显式 501）"""
+    raise HTTPException(status_code=501, detail=_NOT_IMPLEMENTED_DETAIL)
 
 
 @router.get("/grouped")
 async def get_memories_grouped(
     group_by: str = Query("day", regex="^(day|week|month)$"), days: int = Query(30, ge=1, le=365)
 ):
-    """获取记忆时间线（按天/周/月分组）"""
-    now = datetime.datetime.now(datetime.timezone.utc)
-    groups = []
-    for i in range(min(days, 30)):
-        d = now - datetime.timedelta(days=i)
-        key = (
-            d.strftime("%Y-%m-%d")
-            if group_by == "day"
-            else d.strftime("%Y-W%W") if group_by == "week" else d.strftime("%Y-%m")
-        )
-        if not groups or groups[-1]["key"] != key:
-            groups.append({"key": key, "count": 0, "date": d.strftime("%Y-%m-%d")})
-        elif group_by == "day":
-            groups[-1]["count"] += 0  # placeholder
-
-    return {"code": 0, "message": "success", "data": {"groups": groups, "group_by": group_by, "total_days": days}}
+    """获取记忆时间线分组（未实现，显式 501）"""
+    raise HTTPException(status_code=501, detail=_NOT_IMPLEMENTED_DETAIL)
 
 
 @router.get("/stats")
 async def get_timeline_stats():
-    """获取时间线统计信息"""
-    return {
-        "code": 0,
-        "message": "success",
-        "data": {
-            "total_memories": 0,
-            "memories_today": 0,
-            "memories_this_week": 0,
-            "memories_this_month": 0,
-            "most_active_day": None,
-            "avg_per_day": 0.0,
-        },
-    }
+    """获取时间线统计信息（未实现，显式 501）"""
+    raise HTTPException(status_code=501, detail=_NOT_IMPLEMENTED_DETAIL)

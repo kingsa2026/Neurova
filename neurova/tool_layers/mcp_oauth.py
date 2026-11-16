@@ -406,7 +406,9 @@ async def _register_client_dynamically(
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
 
     if transport is not None:
-        resp = await transport.post(registration_endpoint, data=payload, headers=headers)
+        # 审计 §3.5-10：DCR（RFC 7591）注册体是 JSON——与下方 httpx 分支同形，
+        # 注入 transport 的桩测形态不得与生产不一致（data= 是表单编码）。
+        resp = await transport.post(registration_endpoint, json=payload, headers=headers)
     else:
         async with httpx.AsyncClient(timeout=10.0) as hc:
             resp = await hc.post(registration_endpoint, json=payload, headers=headers)

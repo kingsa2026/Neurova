@@ -101,15 +101,18 @@ def test_console_chat_rejects_foreign_agent(agent_state):
     assert exc.value.status_code == 403
 
 
-def test_console_chat_nonexistent_agent_keeps_echo_path(agent_state):
-    """实例未装配（无从驱动他人资源）不扩大拒绝面——维持既有 Echo 回退。"""
-    from fastapi.responses import StreamingResponse
+def test_console_chat_nonexistent_agent_is_503(agent_state):
+    """实例未装配 → 503（审计 §3.1-17 收口：原 200+"Echo" 是假成功）。
 
+    S1 时期此处钉的是"不扩大拒绝面、维持 Echo 回退"；R4 依审计 §3.1-17
+    把未装配从"200 假成功"改为显式 503，本用例随之改钉新契约。
+    """
     from neurova.api.endpoints import console as console_mod
 
     body = console_mod.ChatRequest(message="hi", agent_id="ghost", stream=True)
-    resp = asyncio.run(console_mod.post_console_chat(body=body, request=_Req(), current_user=_U1))
-    assert isinstance(resp, StreamingResponse)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(console_mod.post_console_chat(body=body, request=_Req(), current_user=_U1))
+    assert exc.value.status_code == 503
 
 
 def test_console_ws_default_agent_gate_semantics(agent_state):

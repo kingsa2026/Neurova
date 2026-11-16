@@ -489,7 +489,9 @@ class UserModel:
             conn.commit()
             conn.close()
 
-            logger.info("Updated user %d: %s", user_id, kwargs)
+            # 审计 §3.5-6：kwargs 可含 password_hash 等敏感字段，日志只记**字段名**，
+            # 不落字段值。
+            logger.info("Updated user %d: fields=%s", user_id, sorted(kwargs.keys()))
             return True
 
         except Exception as e:

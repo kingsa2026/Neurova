@@ -59,9 +59,16 @@ class TestPushTokenStore:
 
     def test_remove(self, isolated_db):
         push_store.upsert_token("u1", "android", "tok-a", "dev-1")
-        assert push_store.remove_token("dev-1") is True
-        assert push_store.remove_token("dev-1") is False
+        assert push_store.remove_token_for_user("dev-1", "u1") is True
+        assert push_store.remove_token_for_user("dev-1", "u1") is False
         assert push_store.list_tokens_for_user("u1") == []
+
+    def test_remove_rejects_foreign_owner(self, isolated_db):
+        """审计 §3.1-9：注销绑定属主——只凭 device_id 注销不掉他人设备。"""
+        push_store.upsert_token("u1", "android", "tok-a", "dev-1")
+        assert push_store.remove_token_for_user("dev-1", "u2") is False
+        assert push_store.list_tokens_for_user("u1") != []
+        assert push_store.remove_token_for_user("dev-1", "u1") is True
 
 
 # ── push_sender ───────────────────────────────────────────────────────────

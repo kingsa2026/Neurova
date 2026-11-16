@@ -226,16 +226,22 @@ _LEGACY_WS_TOKEN_TTL_SECONDS = 86400
 MAX_CONNECTIONS_PER_USER = protocol.MAX_CONNECTIONS_PER_USER
 
 # HMAC 密钥（用于生成 WS Token）
-_DEFAULT_WS_SECRET = "neurova-ws-secret-key-2026"
+# 审计 §3.1-14：不再保留源码内硬编码开发密钥——读过源码的任何人都能在
+# 未配置 NEUROVA_WS_SECRET 的部署伪造 legacy ?token= 凭证。开发环境改用
+# **每进程随机**密钥（接入票据本就进程内单次消费，跨进程失效是既有语义）；
+# 生产环境未配置仍然拒绝启动。
+_dev_ws_secret: Optional[str] = None
 
 
 def _get_ws_secret() -> str:
     """获取 WS HMAC 密钥
 
     生产环境必须配置 NEUROVA_WS_SECRET，否则拒绝启动（安全设计）。
-    开发环境允许使用默认弱密钥（便于本地调试）。
+    开发环境未配置时用每进程随机密钥（显式告警，便于日志归因）。
     """
+    global _dev_ws_secret
     import os
+    import secrets as _secrets
 
     env = os.environ.get("NEUROVA_ENV", config.get("NEUROVA_ENV", "development"))
     secret = os.environ.get("NEUROVA_WS_SECRET") or config.get("NEUROVA_WS_SECRET")
@@ -246,7 +252,13 @@ def _get_ws_secret() -> str:
                 status_code=500,
                 detail="NEUROVA_WS_SECRET 未配置，生产环境必须设置此环境变量",
             )
-        secret = _DEFAULT_WS_SECRET
+        if _dev_ws_secret is None:
+            _dev_ws_secret = _secrets.token_urlsafe(48)
+            logger.warning(
+                "NEUROVA_WS_SECRET 未配置：开发环境改用每进程随机 WS 密钥"
+                "（进程重启后旧凭证失效）。生产部署必须显式配置 NEUROVA_WS_SECRET。"
+            )
+        secret = _dev_ws_secret
 
     return secret
 
@@ -1165,15 +1177,19 @@ async def confirm_pairing(request: Request, body: ConfirmPairingRequest):
     )
 
 
-@router.post("/pairing/cancel", response_model=dict, dependencies=[Depends(_get_current_user_id)])
-async def cancel_pairing(body: CancelPairingRequest):
+@router.post("/pairing/cancel", response_model=dict)
+async def cancel_pairing(body: CancelPairingRequest, user_id: str = Depends(_get_current_user_id)):
     """属主主动撤码：`pending/scanned → aborted`（§5.1）。
 
     没有这一口，误扫或"这张图不想再挂着了"只能干等 300 秒——
     §10.1 里"不设宽限计时器"的前提正是**人随时能撤**，两者是一套，不能只做一半。
+
+    审计 §3.1-15：撤码限**配对记录属主本人**——任何登录用户都能撤别人的码，
+    等于可远程打断他人正在进行的配对。非属主与码不存在同形 404（配对码本身
+    就是认证凭据，不向非属主确认存在性）。
     """
     pairing = _pairing_codes.get(body.code)
-    if not pairing:
+    if not pairing or pairing.get("user_id") != user_id:
         raise HTTPException(status_code=404, detail="Pairing code not found")
     if pairing["status"] not in ("pending", "scanned"):
         raise HTTPException(status_code=409, detail=f"Pairing code is {pairing['status']}")
@@ -1211,18 +1227,20 @@ async def refresh_pairing(request: Request, body: RefreshPairingRequest):
     )
 
 
-@router.get("/pairing/status/{code}", response_model=PairingStatusResponse,
-            dependencies=[Depends(_get_current_user_id)])
-async def get_pairing_status(code: str):
+@router.get("/pairing/status/{code}", response_model=PairingStatusResponse)
+async def get_pairing_status(code: str, user_id: str = Depends(_get_current_user_id)):
     """轮询配对状态——**只给登录本人读**（§6-172 批 28，裁定乙）。
 
     这两个按码回话的读面原先无门（`s08_route_auth_baseline:787` 整节 `router_deps=[]`）：
     认码回图/状态、不认回 404，而 6 位配对码是 `_generate_pairing_code` 自陈的**唯一认证凭据**，
     只有 10^6 个取值——匿名调用方拿它当枚举预言机，探到一个存在的码就能去 `confirm` 它，
     设备随即挂到别人账号名下。`confirm` 有每 IP 限流，这两个口一个都没有。
+
+    审计 §3.1-15：登录之外还须是**配对记录属主**——他人登录后拿枚举到的码
+    依然不该读出状态。非属主与码不存在同形 404，不给枚举者确认存在性的机会。
     """
     pairing = _pairing_codes.get(code)
-    if not pairing:
+    if not pairing or pairing.get("user_id") != user_id:
         raise HTTPException(status_code=404, detail="Pairing code not found")
 
     # 检查是否过期

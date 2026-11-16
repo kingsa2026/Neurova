@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import platform
 import shutil
@@ -408,7 +409,11 @@ async def execute_in_sandbox_async(
         backend == "auto" and severity != SandboxSeverity.NONE and docker_available()
     )
     if not use_docker:
-        result = execute_in_sandbox(command, timeout=timeout, cwd=cwd, env=env, severity=severity)
+        # 审计 §3.5-4：非 docker 路径的 subprocess 等待最长可达整个 timeout，
+        # 同步跑在事件循环上会把全部并发请求一起堵死——下沉线程执行。
+        result = await asyncio.to_thread(
+            execute_in_sandbox, command, timeout=timeout, cwd=cwd, env=env, severity=severity
+        )
         # 统一返回形状：平台后端历史 key 为 return_code/output/error，规范为容器后端同形
         result.setdefault("returncode", result.get("return_code"))
         result["stdout"] = result.get("stdout", result.get("output", ""))

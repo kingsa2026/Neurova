@@ -38,6 +38,9 @@ class AgentStatus(BaseModel):
     message_count: int = 0
     last_active: Optional[float] = None
     created_at: float = 0
+    # 审计 §3.1-18：agent 无 get_status 时回的是占位读数，必须显式标注，
+    # 不然监控面把"模拟状态"当真实运行态消费。
+    simulated: bool = False
 
 
 class AgentCapabilities(BaseModel):
@@ -111,7 +114,7 @@ async def get_agent_status(
         except Exception as e:
             logger.warning("Failed to get agent status: %s", e)
 
-    # 返回模拟状态
+    # 返回模拟状态（显式标注 simulated=True，审计 §3.1-18）
     now = time.time()
     status = _agents_status.get(
         agent_id,
@@ -125,6 +128,8 @@ async def get_agent_status(
             "created_at": now - 3600,
         },
     )
+    status = dict(status)
+    status.setdefault("simulated", True)
     return AgentStatus(**status)
 
 

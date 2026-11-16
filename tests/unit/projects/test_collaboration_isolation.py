@@ -192,8 +192,14 @@ class TestProject:
 class TestCollaborationIsolationManager:
     @pytest.fixture
     def manager(self, tmp_path):
-        """__init__ 内部完成目录初始化与项目加载"""
-        return CollaborationIsolationManager(data_dir=str(tmp_path))
+        """__init__ 内部完成目录初始化与项目加载。
+
+        admin_checker 注入测试替身（"admin" 即管理员）；生产缺省走
+        users 表 role 判据（见 test_admin_gate_defaults_to_role_lookup）。
+        """
+        return CollaborationIsolationManager(
+            data_dir=str(tmp_path), admin_checker=lambda uid: uid == "admin"
+        )
 
     def test_init_dirs(self, manager, tmp_path):
         for sub in ("projects", "files", "workflows", "backups"):
@@ -382,6 +388,14 @@ class TestCollaborationIsolationManager:
 
         assert len(manager.admin_list_all_projects("admin")) == 2
 
+    def test_admin_list_rejects_non_admin(self, manager):
+        """审计 §3.4-2：管理面必须校验管理员——普通用户/匿名一律拒绝。"""
+        manager.create_project(name="项目1", owner_id="user-1")
+        with pytest.raises(PermissionError):
+            manager.admin_list_all_projects("user-1")
+        with pytest.raises(PermissionError):
+            manager.admin_list_all_projects("")
+
     def test_admin_delete_user_projects(self, manager):
         manager.create_project(name="项目1", owner_id="user-1")
         manager.create_project(name="项目2", owner_id="user-1")
@@ -393,6 +407,69 @@ class TestCollaborationIsolationManager:
         assert len(manager.list_user_projects("user-1")) == 0
         # 其他用户项目不受影响
         assert len(manager.list_user_projects("user-2")) == 1
+
+    def test_admin_delete_rejects_non_admin(self, manager):
+        """审计 §3.4-2：非管理员不得批量删他人项目。"""
+        manager.create_project(name="项目1", owner_id="user-1")
+        with pytest.raises(PermissionError):
+            manager.admin_delete_user_projects("user-2", "user-1")
+        assert len(manager.list_user_projects("user-1")) == 1
+
+    def test_admin_gate_defaults_to_role_lookup(self, tmp_path, monkeypatch):
+        """缺省 admin_checker 走 users 表 role 判据：admin 放行、普通用户与
+        查无此人 fail-closed 拒绝。"""
+        import uuid as _uuid
+
+        from neurova.auth.user_model import UserModel
+
+        monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path / "data"))
+        model = UserModel()
+        username = f"adm_{_uuid.uuid4().hex[:8]}"
+        model.create_user(username=username, password_hash="x" * 12, role="admin")
+        admin_id = str(model.get_user_by_username(username).id)
+        plain_name = f"usr_{_uuid.uuid4().hex[:8]}"
+        model.create_user(username=plain_name, password_hash="x" * 12, role="user")
+        plain_id = str(model.get_user_by_username(plain_name).id)
+
+        mgr = CollaborationIsolationManager(data_dir=str(tmp_path / "iso"))
+        mgr.create_project(name="项目1", owner_id=plain_id)
+
+        assert len(mgr.admin_list_all_projects(admin_id)) == 1
+        with pytest.raises(PermissionError):
+            mgr.admin_list_all_projects(plain_id)
+        with pytest.raises(PermissionError):
+            mgr.admin_list_all_projects("not-a-number")
+
+    def test_list_projects_filters_by_requester(self, manager):
+        """审计 §3.4-2：给 requester_id 即按"成员或公开"过滤，他人的私有项目不出现。"""
+        manager.create_project(name="mine", owner_id="user-1")
+        manager.create_project(name="theirs-private", owner_id="user-2")
+        manager.create_project(
+            name="theirs-public", owner_id="user-2", visibility=ProjectVisibility.PUBLIC
+        )
+
+        mine = manager.list_projects(requester_id="user-1")
+        names = {p.name for p in mine}
+        assert "mine" in names
+        assert "theirs-private" not in names
+        assert "theirs-public" in names
+
+        # 不传 requester_id 维持全量口径（内部/已鉴权调用方）
+        assert len(manager.list_projects()) == 3
+
+    def test_get_project_file_path_containment(self, manager, tmp_path):
+        """审计 §3.4-2：文件路径含 ../ 逃逸一律拒绝（返回 None），合法相对路径放行。"""
+        project = manager.create_project(name="p", owner_id="user-1")
+        from neurova.collaboration.collaboration_isolation import ProjectFile as _PF
+
+        manager.add_project_file(project.project_id, "user-1", _PF(file_id="f1", path="docs/a.txt"))
+        ok = manager.get_project_file_path(project.project_id, "f1")
+        assert ok is not None and str(tmp_path) in str(ok.resolve())
+        # 越界：绝对路径与相对逃逸都拿不到
+        manager.add_project_file(project.project_id, "user-1", _PF(file_id="f2", path="../../etc/passwd"))
+        assert manager.get_project_file_path(project.project_id, "f2") is None
+        manager.add_project_file(project.project_id, "user-1", _PF(file_id="f3", path="/etc/passwd"))
+        assert manager.get_project_file_path(project.project_id, "f3") is None
 
 
 if __name__ == "__main__":

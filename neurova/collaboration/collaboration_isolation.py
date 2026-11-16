@@ -494,14 +494,17 @@ class CollaborationIsolationManager:
     5. 资源共享权限控制
     """
 
-    def __init__(self, data_dir: Optional[str] = None):
+    def __init__(self, data_dir: Optional[str] = None, admin_checker=None):
         """
         初始化协作隔离管理器
 
         Args:
             data_dir: 数据目录路径
+            admin_checker: 管理员判定函数 (user_id -> bool)。缺省走生产判据
+                （users 表 role 字段，fail-closed）；测试可注入替身。
         """
         self.data_dir = callerPath(data_dir, "collaboration")
+        self._admin_checker = admin_checker
 
         # 线程锁
         self._lock = threading.RLock()
@@ -516,6 +519,29 @@ class CollaborationIsolationManager:
         self._on_init()
 
         logger.info("CollaborationIsolationManager initialized")
+
+    def _is_admin_user(self, user_id: str) -> bool:
+        """管理员判定（审计 §3.4-2：管理面此前自注"简化处理"无任何校验）。
+
+        生产判据：users 表 role == 'admin'。任何查表失败都按非管理员处理
+        （fail-closed）——管理操作宁拒勿放。
+        """
+        uid = str(user_id or "").strip()
+        if not uid:
+            return False
+        if self._admin_checker is not None:
+            try:
+                return bool(self._admin_checker(uid))
+            except Exception as exc:  # noqa: BLE001 - 判定器故障按非管理员
+                logger.warning("admin_checker 判定失败（按非管理员处理）: %s", exc)
+                return False
+        try:
+            from neurova.auth.user_model import UserModel
+
+            row = UserModel().get_user_by_id(int(uid))
+            return str(getattr(row, "role", "") or "").lower() == "admin"
+        except Exception:  # noqa: BLE001 - 查不到/非数字 id 一律非管理员
+            return False
 
     def _on_init(self) -> None:
         """初始化回调"""
@@ -948,8 +974,28 @@ class CollaborationIsolationManager:
             logger.info("Updated role of %s in project %s to %s", user_id, project_id, role.value)
             return True
 
+    def _contained_path(self, base: Path, relative: str) -> Optional[Path]:
+        """把 relative 归一到 base 之下；越界（../ 逃逸、绝对路径、符号链逃逸）
+        一律拒绝（审计 §3.4-2：get_project_file_path 无 containment）。
+
+        返回 None 表示拒绝；调用方按"文件不存在"同形处理（不区分"不存在"
+        与"越界被拒"，不给试探者路径合法性反馈）。
+        """
+        try:
+            base_resolved = base.resolve()
+            target = (base_resolved / relative).resolve()
+        except Exception as exc:  # noqa: BLE001 - 解析失败按越界拒绝
+            logger.warning("项目路径解析失败（按越界拒绝）: base=%s relative=%s: %s", base, relative, exc)
+            return None
+        if target == base_resolved or base_resolved not in target.parents:
+            logger.warning(
+                "项目文件路径越界已拦截: base=%s relative=%r", base, relative
+            )
+            return None
+        return target
+
     def get_project_file_path(self, project_id: str, file_id: str) -> Optional[Path]:
-        """获取项目文件路径"""
+        """获取项目文件路径（containment 校验：越界路径一律拒绝）"""
         project = self._projects.get(project_id)
         if not project:
             return None
@@ -958,7 +1004,7 @@ class CollaborationIsolationManager:
         if not file_obj:
             return None
 
-        return self.data_dir / "files" / project_id / file_obj.path
+        return self._contained_path(self.data_dir / "files" / project_id, str(file_obj.path))
 
     def list_project_files(self, project_id: str, user_id: Optional[str] = None) -> List[ProjectFile]:
         """
@@ -1018,7 +1064,7 @@ class CollaborationIsolationManager:
             return True
 
     def get_project_workflow_path(self, project_id: str, workflow_id: str) -> Optional[Path]:
-        """获取项目工作流路径"""
+        """获取项目工作流路径（containment 校验：workflow_id 含路径片段一律拒绝）"""
         project = self._projects.get(project_id)
         if not project:
             return None
@@ -1027,7 +1073,9 @@ class CollaborationIsolationManager:
         if not workflow:
             return None
 
-        return self.data_dir / "workflows" / project_id / f"{workflow_id}.json"
+        return self._contained_path(
+            self.data_dir / "workflows" / project_id, f"{workflow_id}.json"
+        )
 
     def list_project_workflows(self, project_id: str, user_id: Optional[str] = None) -> List[ProjectWorkflow]:
         """
@@ -1087,15 +1135,23 @@ class CollaborationIsolationManager:
             return True
 
     def list_projects(
-        self, limit: Optional[int] = None, offset: int = 0, include_deleted: bool = False
+        self,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        include_deleted: bool = False,
+        requester_id: Optional[str] = None,
     ) -> List[Project]:
         """
-        列出所有项目（简化接口，用于模板列表等场景）
+        列出项目
 
         Args:
             limit: 返回数量限制，None表示不限制
             offset: 偏移量
             include_deleted: 是否包含已删除项目
+            requester_id: 请求者 ID。给定即按"成员或公开可见"过滤
+                （审计 §3.4-2：多用户部署下列全量项目是横向信息泄露）；
+                不传保持旧口径（全量）——仅限系统内部/管理员已自行鉴权的
+                调用方，HTTP 面必须传。
 
         Returns:
             项目列表
@@ -1105,6 +1161,8 @@ class CollaborationIsolationManager:
         with self._lock:
             for project in self._projects.values():
                 if not include_deleted and project.status == ProjectStatus.DELETED:
+                    continue
+                if requester_id is not None and not self._can_access_project(project, requester_id):
                     continue
                 projects.append(project)
 
@@ -1129,8 +1187,12 @@ class CollaborationIsolationManager:
 
         Returns:
             项目列表
+
+        Raises:
+            PermissionError: admin_id 不是管理员（审计 §3.4-2 收口）
         """
-        # 这里简化处理，实际应用中应该检查管理员权限
+        if not self._is_admin_user(admin_id):
+            raise PermissionError(f"仅管理员可列出全部项目（admin_id={admin_id!r}）")
         projects = []
 
         with self._lock:
@@ -1154,8 +1216,12 @@ class CollaborationIsolationManager:
 
         Returns:
             删除的项目数量
+
+        Raises:
+            PermissionError: admin_id 不是管理员（审计 §3.4-2 收口）
         """
-        # 这里简化处理，实际应用中应该检查管理员权限
+        if not self._is_admin_user(admin_id):
+            raise PermissionError(f"仅管理员可删除用户项目（admin_id={admin_id!r}）")
         deleted_count = 0
 
         with self._lock:

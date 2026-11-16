@@ -287,7 +287,7 @@ class ImprovementProposal:
 
 
 @dataclass
-class ValidationResult:
+class ProposalValidationResult:
     """校验结果
 
     Attributes:
@@ -537,7 +537,7 @@ class SelfImprovementProposer:
     # 安全校验（沙箱）
     # ------------------------------------------------------------------
 
-    def validate_proposal(self, proposal: ImprovementProposal) -> ValidationResult:
+    def validate_proposal(self, proposal: ImprovementProposal) -> ProposalValidationResult:
         """校验提案安全性
 
         检查项：
@@ -550,7 +550,7 @@ class SelfImprovementProposer:
             proposal: 待校验的提案
 
         Returns:
-            ValidationResult: 校验结果
+            ProposalValidationResult: 校验结果
         """
         errors: List[str] = []
         warnings: List[str] = []
@@ -604,7 +604,7 @@ class SelfImprovementProposer:
                 )
 
         is_valid = len(errors) == 0
-        return ValidationResult(is_valid=is_valid, errors=errors, warnings=warnings)
+        return ProposalValidationResult(is_valid=is_valid, errors=errors, warnings=warnings)
 
     # ------------------------------------------------------------------
     # 提交与持久化

@@ -24,7 +24,6 @@ from neurova.models.cost_tracking import (
     record_llm_cost,
     track_llm_call,
     llm_cost_context,
-    reset_cost_tracker,
 )
 
 
@@ -41,11 +40,9 @@ def store(tmp_path, monkeypatch):
     db = tmp_path / "cost_persist_test.db"
     monkeypatch.setenv("NEUROVA_LLM_COST_DB", str(db))
     reset_llm_cost_store()
-    reset_cost_tracker()
     s = install_llm_cost_store(str(db))
     yield s
     reset_llm_cost_store()
-    reset_cost_tracker()
 
 
 def _row_count(s):

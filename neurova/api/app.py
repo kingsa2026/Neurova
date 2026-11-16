@@ -225,8 +225,12 @@ def _get_default_llm():
                     provider = p.id
                     model = p.default_model or (p.models[0] if p.models else "gpt-4")
                     break
-    except Exception:
-        pass
+    except Exception as e:
+        # 审计 §3.1-20：默认模型选择失败不再静默吞掉——落 WARNING 点名原因。
+        # 兜底返回值保留（影响限于默认模型选择），但故障必须可见、可归因。
+        logger.warning(
+            "默认 LLM 服务商选择失败（回退 provider='' model='gpt-4'）: %s", e
+        )
     return provider, model
 
 

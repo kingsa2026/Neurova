@@ -324,8 +324,40 @@ async def _dispatch_browser_command(cmd) -> Any:
 
 # ── In-memory state ────────────────────────────────────
 
-_browser_state = {"url": None, "history": []}
+# 审计 §3.1-16：浏览器状态原为全局单份（跨用户串读——A 用户导航的 URL 出现在
+# B 用户的读数里），且 history 无界增长。改为**按用户隔离 + 双限量**：
+# 每用户 history 上限 _BROWSER_HISTORY_LIMIT，用户数上限 _BROWSER_STATE_MAX_USERS
+# （LRU 逐出最旧），长驻进程内存不再单向膨胀。
+_BROWSER_HISTORY_LIMIT = 50
+_BROWSER_STATE_MAX_USERS = 64
+_browser_state: Dict[str, Dict[str, Any]] = {}
+_browser_state_order: List[str] = []
 _action_log: typing.List[dict] = []
+
+
+def _browserStateFor(user_id: str) -> Dict[str, Any]:
+    """取当前用户的浏览器状态（懒创建，LRU 封顶用户数）。"""
+    uid = str(user_id or "default")
+    state = _browser_state.get(uid)
+    if state is not None and uid in _browser_state_order:
+        _browser_state_order.remove(uid)
+    if state is None:
+        while len(_browser_state_order) >= _BROWSER_STATE_MAX_USERS:
+            oldest = _browser_state_order.pop(0)
+            _browser_state.pop(oldest, None)
+        state = {"url": None, "history": []}
+        _browser_state[uid] = state
+    _browser_state_order.append(uid)
+    return state
+
+
+def _recordBrowserNavigate(user_id: str, url: str) -> None:
+    """记录一次导航（分用户、history 有界）。"""
+    state = _browserStateFor(user_id)
+    state["url"] = url
+    state["history"].append(url)
+    if len(state["history"]) > _BROWSER_HISTORY_LIMIT:
+        del state["history"][: len(state["history"]) - _BROWSER_HISTORY_LIMIT]
 
 
 def _log_action(action: str, detail: dict):
@@ -693,7 +725,9 @@ async def get_status(refresh: bool = False):
             "vision_available": usable("vision"),
             "capabilities": capabilities,
             "actions_logged": len(_action_log),
-            "browser_url": _browser_state.get("url"),
+            # browser_url 不再回全局值：状态面无用户上下文，回任何一个用户的
+            # 当前 URL 都是跨用户串读（审计 §3.1-16）；前端 URL 展示吃的是
+            # 动作流 payload.url，不依赖该字段。
         },
     }
 
@@ -744,13 +778,12 @@ async def browser_navigate(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """浏览器导航（真实实现：BrowserManager 多后端）"""
-    _with_browser_identity(current_user)
+    user_id = _with_browser_identity(current_user)
     result = await _get_manager().browser_navigate(body.url)
     normalized = _normalize_browser_result(result)
     if not normalized.get("success"):
         raise HTTPException(status_code=502, detail=normalized.get("error") or "导航失败：无可用浏览器后端")
-    _browser_state["url"] = body.url
-    _browser_state["history"].append(body.url)
+    _recordBrowserNavigate(user_id, body.url)
     _log_action("browser_navigate", {"url": body.url})
     return {"code": 0, "message": f"Navigated to {body.url}", "data": normalized}
 
@@ -761,7 +794,7 @@ async def browser_screenshot(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """浏览器截图（真实实现）"""
-    _with_browser_identity(current_user)
+    user_id = _with_browser_identity(current_user)
     _log_action("browser_screenshot", {"full_page": body.full_page})
     raw = await _get_manager().browser_screenshot()
     shot = getattr(raw, "screenshot", None)  # BrowserResult 携带 base64
@@ -770,7 +803,10 @@ async def browser_screenshot(
     return {
         "code": 0,
         "message": "Browser screenshot captured",
-        "data": {"base64": shot, "url": getattr(raw, "url", None) or _browser_state.get("url")},
+        "data": {
+            "base64": shot,
+            "url": getattr(raw, "url", None) or _browserStateFor(user_id).get("url"),
+        },
     }
 
 

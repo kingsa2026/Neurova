@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
 from neurova.api.deps import get_current_user
+from neurova.api.agent_access import requireAgentOwner
 
 logger = get_logger(__name__)
 
@@ -176,6 +177,12 @@ async def create_task(
     if get_scheduler is None:
         raise HTTPException(status_code=503, detail="Scheduler service not available")
 
+    # 审计 §3.1-8：建任务可指定任意 agent_id 等于借定时器驱动他人 agent
+    #（消耗他人 LLM 额度/读写他人工作区）。属主门放在 try 之外——HTTPException
+    # 不能被下面的 500 兜底改写。
+    if body.agent_id:
+        requireAgentOwner(body.agent_id, current_user, action="为智能体创建定时任务")
+
     try:
         scheduler = get_scheduler()
 
@@ -274,6 +281,10 @@ async def update_task(
 
     if get_scheduler is None:
         raise HTTPException(status_code=503, detail="Scheduler service not available")
+
+    # 审计 §3.1-8 同根因：改任务同样能把 agent_id 换成他人 agent（教义第 5 条）。
+    if body.agent_id:
+        requireAgentOwner(body.agent_id, current_user, action="将定时任务改挂到智能体")
 
     try:
         scheduler = get_scheduler()

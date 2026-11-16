@@ -79,15 +79,9 @@ class TestAgentSkillManagerInit:
             f"analyze_task 结果应包含 'skills_needed' 键，实际 keys: {list(result.keys())}"
         )
 
-    def test_suggest_skills_for_task_does_not_crash(self):
-        """P0-B2b: suggest_skills_for_task 不应因 await 同步函数 + kwarg 不匹配而崩溃
-
-        场景：调用 suggest_skills_for_task(task="...", context=None)
-        期望：返回 list（即使为空）
-        当前：
-            - await self.analyzer.suggest_skills(task=, context=) 抛 TypeError
-            - 实际签名是 sync def suggest_skills(self, request: str, max_suggestions: int = 5)
-        """
+    def test_suggest_skills_for_task_retired(self):
+        """P0-B2b 历史用例改判：suggest_skills_for_task 生产零调用，
+        已随审计 §3.4-9 方法级退役——此处钉住"不复活"。"""
         from neurova.skills.agent_skill_manager import AgentSkillManager
 
         manager = AgentSkillManager(
@@ -96,9 +90,6 @@ class TestAgentSkillManagerInit:
             auto_acquire=False,
         )
 
-        # 不应抛出任何异常
-        result = asyncio.run(manager.suggest_skills_for_task(task="搜索文件", context=None))
-
-        assert isinstance(result, list), (
-            f"suggest_skills_for_task 应返回 list，实际: {type(result)}"
+        assert not hasattr(manager, "suggest_skills_for_task"), (
+            "suggest_skills_for_task 已退役（§3.4-9），不得重新出现"
         )

@@ -351,38 +351,77 @@ class TestInvitationCode(unittest.TestCase):
         assert result is None
 
 
-class TestTokenBlacklist(unittest.TestCase):
+class TestTokenBlacklist:
     """Token 黑名单测试
 
-    契约更新（BUG AUDIT S-21，101cfb4e）：黑名单由无界 set 改为
-    token -> 过期时间戳 dict（惰性清理过期项），本测试同步对齐。
+    契约更新（审计 §3.1-13，R4）：黑名单收口到 neurova/api/auth 的 **SQLite
+    持久化单源**（重启/多 worker 不失效；容量由"写入时清除已过期行"约束）。
+    endpoints/auth 的第二份进程内存黑名单（_blacklist_token_local/_token_blacklist）
+    已退役，本测试改为钉单源契约。
     """
 
-    def test_token_blacklist(self):
-        """测试 Token 黑名单（登记/命中/过期清理/移除）"""
-        import time
-        from neurova.api.endpoints.auth import (
-            _blacklist_token_local,
-            _token_blacklist,
-            is_token_blacklisted,
-        )
+    def test_blacklist_register_and_hit(self):
+        """登记→命中；未登记→不命中（endpoints 侧 is_token_blacklisted 走同一单源）。"""
+        import time as _time
 
-        # 初始状态
-        assert "test_token" not in _token_blacklist
-        assert is_token_blacklisted("test_token") is False
+        from neurova.api import auth as auth_mod
+        from neurova.api.endpoints.auth import is_token_blacklisted
 
-        # 登记黑名单（无 exp token 走兜底 TTL）
-        _blacklist_token_local("test_token")
-        assert is_token_blacklisted("test_token") is True
+        token = f"test_token_{_time.time()}"
+        assert auth_mod.is_token_blacklisted_global(token) is False
+        assert is_token_blacklisted(token) is False
 
-        # 过期项被惰性清理（S-21 语义）
-        _token_blacklist["expired_token"] = time.time() - 1
-        assert is_token_blacklisted("expired_token") is False
-        assert "expired_token" not in _token_blacklist
+        auth_mod.blacklist_token(token)
+        assert auth_mod.is_token_blacklisted_global(token) is True
+        assert is_token_blacklisted(token) is True
 
-        # 从黑名单中移除
-        _token_blacklist.pop("test_token", None)
-        assert is_token_blacklisted("test_token") is False
+    def test_blacklist_persists_in_sqlite(self):
+        """登记落 SQLite（数据根 auth_blacklist.db），跨连接可见——进程重启
+        语义的最小可测形态。"""
+        import sqlite3
+        import time as _time
+
+        from neurova.api import auth as auth_mod
+
+        token = f"persist_token_{_time.time()}"
+        auth_mod.blacklist_token(token)
+
+        assert auth_mod._BLACKLIST_DB_PATH.endswith("auth_blacklist.db")
+        conn = sqlite3.connect(auth_mod._BLACKLIST_DB_PATH)
+        try:
+            row = conn.execute(
+                "SELECT exp FROM revoked_tokens WHERE token = ?", (token,)
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is not None, "撤销 token 必须落库（持久化单源）"
+        assert float(row[0]) > _time.time() - 60
+
+    def test_blacklist_expired_row_purged_on_write(self):
+        """写入时惰性清除已过期行——容量有界，且不会把未过期项一起清掉
+        （旧实现超容量整表 clear 的缺陷不再存在）。"""
+        import sqlite3
+        import time as _time
+
+        from neurova.api import auth as auth_mod
+
+        expired = f"expired_{_time.time()}"
+        keep = f"keep_{_time.time()}"
+        auth_mod.blacklist_token(expired, exp=_time.time() - 10)
+        auth_mod.blacklist_token(keep)
+
+        conn = sqlite3.connect(auth_mod._BLACKLIST_DB_PATH)
+        try:
+            gone = conn.execute(
+                "SELECT 1 FROM revoked_tokens WHERE token = ?", (expired,)
+            ).fetchone()
+            kept = conn.execute(
+                "SELECT 1 FROM revoked_tokens WHERE token = ?", (keep,)
+            ).fetchone()
+        finally:
+            conn.close()
+        assert gone is None, "已过期撤销项应在写入时被清除"
+        assert kept is not None, "未过期撤销项不得被误清"
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query, Request
 from neurova.api.auth import get_current_user, Depends
+from neurova.api.deps import require_admin
 from pydantic import BaseModel, Field
 
 logger = get_logger(__name__)
@@ -150,9 +151,10 @@ async def search_logs(request: Request, body: SearchLogsRequest):
     return logs
 
 
-@router.delete("")
+@router.delete("", dependencies=[Depends(require_admin())])
 async def clear_logs(request: Request):
-    """清空日志"""
+    """清空日志（仅管理员：事件日志是全站排障事实源，任何登录用户可清空
+    等于普通用户能抹掉他人故障现场——审计 §3.1-7）"""
     _get_request_id(request)
 
     try:

@@ -82,7 +82,8 @@ class TestBackgroundRuns:
         seen = {}
 
         async def fake_images(store, pid, eid, provider="openai", model="",
-                              provider_id="", shot_ids=None, run_id=""):
+                              provider_id="", shot_ids=None, run_id="",
+                              user_id="", is_admin=False):
             seen["images"] = (model, provider_id)
             return {"done": 1, "failed": 0, "skipped_no_prompt": 0}
 

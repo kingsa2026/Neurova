@@ -33,7 +33,6 @@ from neurova.models.cost_budget import (
 from neurova.models.cost_tracking import (
     LLMProvider,
     record_llm_cost,
-    reset_cost_tracker,
 )
 
 
@@ -41,10 +40,8 @@ from neurova.models.cost_tracking import (
 def budget_service():
     """未注册任何预算的干净账本（记账域写入的真实落点）。"""
     reset_budget_service()
-    reset_cost_tracker()
     yield get_budget_service()
     reset_budget_service()
-    reset_cost_tracker()
 
 
 def _register_hourly(manager: BudgetManager, identifier: str, amount: str) -> None:

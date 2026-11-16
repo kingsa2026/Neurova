@@ -89,8 +89,8 @@ class ChannelManager:
     """
 
     _instance: Optional["ChannelManager"] = None
-    _instanceLock = threading.RLock()
     # 懒建单例的双检锁（AGENTS.md §3）：RLock 允许构造链回落到同一入口
+    # （审计 §3.4-12：此处曾连续定义两次，第二份定义把第一份静默遮蔽。）
     _instanceLock = threading.RLock()
 
     def __init__(self):
@@ -1043,12 +1043,15 @@ class ChannelManager:
         default 保持旧键格式——既有会话历史零迁移。
         """
         agent = str(message.metadata.get("agent_id") or "default")
-        scope = message.chat_id if agent == "default" else f"{agent}:{message.chat_id}"
+        # agent 隔离前缀：非 default 实例一律带 agent: 前缀（审计 §3.4-12：
+        # 原 share=False 分支把前缀丢了——不同 agent 的同群私聊会撞进同一会话）
+        prefix = "" if agent == "default" else f"{agent}:"
+        scope = f"{prefix}{message.chat_id}"
         adapter = self.get_adapter(message.channel_type, agent_id=agent)
         if adapter is not None:
             share = getattr(adapter, "share_session_in_group", True)
             if not self._coerce_share_flag(share) and message.sender_id:
-                scope = f"{message.chat_id}:{message.sender_id}"
+                scope = f"{prefix}{message.chat_id}:{message.sender_id}"
         return scope
 
     # ============================================================

@@ -165,7 +165,9 @@ class TestShotImageGeneration:
         monkeypatch.setattr(proto_mod, "generate_image", fake_gen)
         monkeypatch.setattr(gen_runtime, "persist_media", fake_persist)
 
-        stats = await services.generate_shot_images(store, p["id"], ep["id"])
+        # §3.5-12：服务层按真实身份取项目——直调时以管理员身份过属主门
+        stats = await services.generate_shot_images(
+            store, p["id"], ep["id"], user_id=p["owner_user_id"], is_admin=True)
         assert stats["done"] == 1
         assert stats["failed"] == 1  # 无提示词镜头诚实跳过标注，不中断整批
         assert stats["skipped_no_prompt"] == 1

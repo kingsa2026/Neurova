@@ -21,7 +21,7 @@ from neurova.knowledge.mcp_source import (
     probeTools,
     pullFromSource,
 )
-from neurova.knowledge.url_guard import validate_public_http_url
+from neurova.security.url_guard import validate_public_http_url
 
 logger = get_logger(__name__)
 router = APIRouter()

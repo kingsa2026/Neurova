@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 from neurova.core.logger import get_logger
 import time
@@ -320,7 +321,9 @@ class WeChatAuthMixin:
         sign_str = "".join(params)
         signature = hashlib.sha1(sign_str.encode("utf-8")).hexdigest()
 
-        if signature == msg_signature:
+        # 审计 §3.4-6：签名比较必须恒时（对照同仓 wechat_kf_crypto /
+        # telegram_webhook 的 hmac.compare_digest 范本），防时序侧信道逐字节猜签名。
+        if hmac.compare_digest(signature, str(msg_signature or "")):
             return echostr
         return None
 

@@ -101,8 +101,11 @@ def validate_permissions_for_install(permissions_raw: Any) -> Dict[str, Any]:
             from neurova.builtin_tools import get_registered_tool_names
 
             known |= set(get_registered_tool_names())
-        except Exception:
-            pass
+        except Exception as e:
+            # 审计 §3.4-7：注册表读不到时不能再当"无事发生"——那会让安装门
+            # 拿着残缺的 known 集合误拒合法工具。fail-closed：显式记为阻断错误，
+            # 点名根因，安装方据此修环境而不是猜白名单。
+            errors.append(f"工具注册表不可用，无法校验 tools.allow（fail-closed）: {e}")
 
         network_declared = bool(permissions_raw.get("network"))
 

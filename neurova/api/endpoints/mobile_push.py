@@ -59,7 +59,12 @@ async def deletePushToken(
     device_id: str,
     current_user: dict = Depends(get_current_user),
 ):
-    removed = push_store.remove_token(device_id)
+    # 审计 §3.1-9：只凭 device_id 任何登录用户都能注销他人设备推送——
+    # 删除按"设备 + 属主"双键收口；非属主与不存在同形 404（防枚举）。
+    user_id = str(current_user.get("id") or current_user.get("user_id") or current_user.get("sub") or "")
+    removed = push_store.remove_token_for_user(device_id, user_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="设备令牌不存在或不属于当前用户")
     return {"code": 0, "message": "ok", "data": {"device_id": device_id, "removed": removed}}
 
 
