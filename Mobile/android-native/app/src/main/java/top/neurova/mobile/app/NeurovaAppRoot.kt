@@ -40,13 +40,17 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import top.neurova.mobile.feature.admin.AdminGroupsScreen
+import top.neurova.mobile.feature.admin.AdminUsersScreen
 import top.neurova.mobile.feature.agents.AgentsTabScreen
 import top.neurova.mobile.feature.auth.LoginScreen
 import top.neurova.mobile.feature.chat.ChatScreen
 import top.neurova.mobile.feature.chat.ChatTabScreen
 import top.neurova.mobile.feature.knowledge.KnowledgeTabScreen
+import top.neurova.mobile.feature.models.ModelsScreen
 import top.neurova.mobile.feature.pairing.PairingScreen
 import top.neurova.mobile.feature.profile.ProfileTabScreen
+import top.neurova.mobile.feature.profile.ServerManageScreen
 import top.neurova.mobile.feature.workbench.WorkbenchTabScreen
 import top.neurova.mobile.ui.components.LocalAppRuntime
 import top.neurova.mobile.ui.theme.LocalNeurovaColors
@@ -186,6 +190,17 @@ private fun NeurovaNavHost(navController: NavHostController) {
             AgentsTabScreen(onOpenChat = { openTab(navController, TabDestination.CHAT) })
         }
         composable(TabDestination.KNOWLEDGE.route) { KnowledgeTabScreen() }
-        composable(TabDestination.PROFILE.route) { ProfileTabScreen() }
+        composable(TabDestination.PROFILE.route) {
+            ProfileTabScreen(
+                onOpenServers = { navController.navigate("profile/servers") },
+                onOpenModels = { navController.navigate("profile/models") },
+                onOpenAdminUsers = { navController.navigate("admin/users") },
+                onOpenAdminGroups = { navController.navigate("admin/groups") },
+            )
+        }
+        composable("profile/servers") { ServerManageScreen(onBack = { navController.popBackStack() }) }
+        composable("profile/models") { ModelsScreen(onBack = { navController.popBackStack() }) }
+        composable("admin/users") { AdminUsersScreen(onBack = { navController.popBackStack() }) }
+        composable("admin/groups") { AdminGroupsScreen(onBack = { navController.popBackStack() }) }
     }
 }

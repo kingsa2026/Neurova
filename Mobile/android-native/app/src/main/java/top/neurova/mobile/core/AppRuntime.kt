@@ -9,11 +9,13 @@ import top.neurova.mobile.core.net.ChatSseChannel
 import top.neurova.mobile.core.net.HttpChannel
 import top.neurova.mobile.core.net.MobileWsChannel
 import top.neurova.mobile.core.store.SecureVaultCredentialStore
+import top.neurova.mobile.feature.admin.AdminRepository
 import top.neurova.mobile.feature.agents.AgentsStore
 import top.neurova.mobile.feature.auth.AuthStore
 import top.neurova.mobile.feature.chat.ChatRepository
 import top.neurova.mobile.feature.chat.ChatSessionController
 import top.neurova.mobile.feature.knowledge.KnowledgeRepository
+import top.neurova.mobile.feature.models.ModelsRepository
 import top.neurova.mobile.feature.pairing.PairingStore
 import top.neurova.mobile.feature.servers.PreferencesStore
 import top.neurova.mobile.feature.servers.ServersStore
@@ -47,4 +49,6 @@ class AppRuntime(context: Context) {
     val chatSessions = ChatSessionController(scope, ws, pairing, chatRepo)
     val agents = AgentsStore(http, scope)
     val knowledgeRepo = KnowledgeRepository(http)
+    val modelsRepo = ModelsRepository(http)
+    val adminRepo = AdminRepository(http)
 }

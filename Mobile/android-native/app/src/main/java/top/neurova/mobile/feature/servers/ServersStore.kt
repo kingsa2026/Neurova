@@ -72,6 +72,16 @@ class ServersStore(private val persistence: PreferencesStore) {
         persistence.writeString(ACTIVE_KEY, id)
     }
 
+    /** 删除档案；删到当前档案时回退到剩余第一个（列表至少保留一个由 UI 层兜底） */
+    fun remove(id: String) {
+        profiles.removeAll { it.id == id }
+        if (activeId == id) {
+            activeId = profiles.firstOrNull()?.id
+            activeId?.let { persistence.writeString(ACTIVE_KEY, it) }
+        }
+        persist()
+    }
+
     fun markConnected(account: String) {
         val index = profiles.indexOfFirst { it.id == activeId }
         if (index >= 0) {
