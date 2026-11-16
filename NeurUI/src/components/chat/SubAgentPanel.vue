@@ -18,7 +18,8 @@ export interface SubAgentWindowState {
   bodyText: string
   /** 已接收 chunk 计数 */
   chunkCount: number
-  status: 'running' | 'completed' | 'failed'
+  /** P1-3：in_review = 监督评审相位（验收通过后、终态前的把关段，占派生槽） */
+  status: 'running' | 'in_review' | 'completed' | 'failed'
   report: string
   error?: string | null
   /** P1（蜂群对照）：子代理类型（general/explore）；explore = 工具面收窄为只读白名单 */
@@ -36,15 +37,19 @@ const minimized = ref(false)
 const title = computed(() => `${props.state.agentName || t('ui.subagent')} · ${props.state.status}`)
 
 const bodyText = computed(() => {
-  if (props.state.status !== 'running' && props.state.report) return props.state.report
+  const busy = props.state.status === 'running' || props.state.status === 'in_review'
+  if (!busy && props.state.report) return props.state.report
   return props.state.bodyText
 })
 
 const statusIcon = computed(() => {
-  if (props.state.status === 'running') return 'clock'
+  if (props.state.status === 'running' || props.state.status === 'in_review') return 'clock'
   if (props.state.status === 'failed') return 'x'
   return 'check'
 })
+
+/** 运行中或评审中：光标/思考态/卡死提醒都按"仍在推进"处理 */
+const isBusy = computed(() => props.state.status === 'running' || props.state.status === 'in_review')
 
 function toggleMinimize() {
   minimized.value = !minimized.value
@@ -90,13 +95,13 @@ function onOutputScroll(e: Event): void {
     <div v-if="!minimized" class="panel-body">
       <div class="panel-task" :title="state.task">{{ state.task }}</div>
       <!-- P2（蜂群对照）：卡死渐进提醒（发现而不裁决：只提示，等/停由用户决定） -->
-      <div v-if="state.status === 'running' && state.stallNotice" class="panel-stall">
+      <div v-if="isBusy && state.stallNotice" class="panel-stall">
         ⏸ {{ t('ui.subagentStalled', { minutes: Math.max(1, Math.round(state.stallNotice.stalledSeconds / 60)), count: state.stallNotice.reminderCount }) }}
       </div>
       <div ref="outputEl" class="panel-content" @scroll="onOutputScroll">
         <template v-if="state.status === 'failed'">⚠ {{ state.error || t('ui.execFailed') }}</template>
-        <template v-else-if="bodyText">{{ bodyText }}<span v-if="state.status === 'running'" class="cursor">▌</span></template>
-        <template v-else-if="state.status === 'running'"><span class="cursor">▌</span> {{ t('ui.thinking') }}</template>
+        <template v-else-if="bodyText">{{ bodyText }}<span v-if="isBusy" class="cursor">▌</span></template>
+        <template v-else-if="isBusy"><span class="cursor">▌</span> {{ t('ui.thinking') }}</template>
       </div>
     </div>
   </div>
