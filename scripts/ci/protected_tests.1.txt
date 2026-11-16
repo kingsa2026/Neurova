@@ -1184,6 +1184,9 @@ tests/unit/test_auditLedgerReachabilitySingleProbe.py
 # 就把退出码变成 1）。裸奔面 35 档→等号基线 30（本批收 `scripts/ci/` 5 档）；谓词认三种写法、
 # 不放过"只钉 stderr"。逐文件单跑 7 passed
 tests/unit/ci/test_scriptsCiStdoutIsPinnedBeforePrint.py
+# 修复教义提交判据扫未推送窗口（防 --no-verify 绕过本地钩子）；生效口径=树含判据文件，
+# 基线带判据后全面执法（法不溯及既往，生效后删判据文件的笔也受检）。逐文件单跑 5 passed
+tests/unit/ci/test_commitMsgDoctrineOnUnpushedRange.py
 # §6-497／§6-498／§6-499 三族预存红定责后收口（FastAPI 0.142 的 `_IncludedRouter`
 # 让聚合器模块的裸 `router.routes` 同样失明——判据改接 `tests/route_table.py` 单源，
 # 禁令的豁免口径从「名字带 router」收紧为「那个模块真不挂子路由」；注解面改钉
