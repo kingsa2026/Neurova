@@ -14,14 +14,11 @@
       <div class="storage-info">
         <div class="storage-item">
           <span class="storage-label">{{ t('file.totalStorage') }}</span>
-          <span class="storage-value">{{ formatBytes(storageInfo.total ?? 0) }}</span>
+          <span class="storage-value">{{ storageUnavailable ? t('common.noData') : formatBytes(storageInfo.total ?? 0) }}</span>
         </div>
         <div class="storage-item">
           <span class="storage-label">{{ t('file.usedStorage') }}</span>
-          <span class="storage-value">{{ formatBytes(storageInfo.used ?? 0) }}</span>
-        </div>
-        <div class="storage-item" style="flex: 1">
-          <a-progress :percent="storagePercent" :stroke-color="storagePercent > 80 ? '#ef4444' : '#6366f1'" size="small" />
+          <span class="storage-value">{{ storageUnavailable ? t('common.noData') : formatBytes(storageInfo.used ?? 0) }}</span>
         </div>
       </div>
     </GlassCard>
@@ -94,7 +91,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { listFiles, uploadFile, getFileContent, getFileVersions, getFilePreview, deleteFile as deleteFileApi, downloadFile as downloadFileBlob } from '@/api/modules/files'
+import { listFiles, uploadFile, getFileContent, getFileVersions, getFilePreview, deleteFile as deleteFileApi, downloadFile as downloadFileBlob, getStorageInfo } from '@/api/modules/files'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message, Modal } from 'ant-design-vue'
@@ -109,6 +106,8 @@ const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
 const storageInfo = ref<Record<string, any>>({ total: 0, used: 0 })
+// 拉取失败诚实显示「暂无数据」，而不是恒 0 假读数（S6 移交·用户拍板 2026-11-17）。
+const storageUnavailable = ref(false)
 const showPreview = ref(false)
 const showHistoryModal = ref(false)
 // 预览目标与内容分开命名：此前 ref 叫 previewFile、真实现叫 previewFileFn，
@@ -118,11 +117,6 @@ const previewUrl = ref('')
 const previewContent = ref('')
 const versions = ref<any[]>([])
 const currentVersion = ref(1)
-
-const storagePercent = computed(() => {
-  const total = storageInfo.value.total || 1
-  return Math.round(((storageInfo.value.used || 0) / total) * 100)
-})
 
 const columns = computed(() => [
   { title: t('common.name'), key: 'name' },
@@ -263,7 +257,22 @@ const deleteFile = (id: string) => {
 
 const onPageChange = (p: number, ps: number) => { page.value = p; pageSize.value = ps; fetchFiles() }
 
-onMounted(fetchFiles)
+// 存储用量：后端 GET /files/storage/info 回裸 StorageInfo{total_files,total_size}
+// （无配额语义——进度条装饰已退役，失败诚实显示「暂无数据」而非恒 0）。
+const fetchStorage = async () => {
+  try {
+    const info = await getStorageInfo()
+    storageInfo.value = { total: info.total_files ?? 0, used: info.total_size ?? 0 }
+    storageUnavailable.value = false
+  } catch {
+    storageUnavailable.value = true
+  }
+}
+
+onMounted(() => {
+  fetchFiles()
+  fetchStorage()
+})
 </script>
 
 <style scoped>

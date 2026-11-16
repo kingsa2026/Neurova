@@ -144,3 +144,17 @@ export function extractUploadedFileId(res: unknown): string | null {
   const fid = (body as Record<string, unknown>).file_id ?? (body as Record<string, unknown>).id
   return typeof fid === 'string' && fid ? fid : null
 }
+
+/** 后端 `GET /files/storage/info` 的裸 `StorageInfo`（files_api.py:81，无配额语义）。 */
+export interface StorageInfo {
+  user_id: string
+  total_files: number
+  total_size: number
+  by_type: Record<string, number>
+}
+
+/** 存储用量读数（S6 移交·用户拍板 2026-11-17：存储卡接真实总量/已用，不造配额百分比）。 */
+export async function getStorageInfo(): Promise<StorageInfo> {
+  const res = await api.get<StorageInfo>(`${BASE}/storage/info`)
+  return res
+}
