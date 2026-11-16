@@ -2469,6 +2469,8 @@ class ToolExecutor:
             reason,
             str(params.get("question") or ""),
             str(params.get("severity") or "normal"),
+            suggestedAction=str(params.get("suggested_action") or ""),
+            actionNote=str(params.get("action_note") or ""),
         )
         return {
             "success": True,
@@ -2789,9 +2791,11 @@ class ToolExecutor:
         return result
 
     async def _execute_subagent_status(self, params: Dict) -> Dict:
-        """查询后台子 Agent 状态/结果（subagent_id 可省略→最近派生列表）"""
+        """查询后台子 Agent 状态/结果（subagent_id 可省略→最近派生列表；view=integration→集成核对面）"""
         from neurova.agent.swarm import get_swarm_manager
 
+        if str(params.get("view") or "").strip().lower() == "integration":
+            return get_swarm_manager().integrationReport()
         subagent_id = str(params.get("subagent_id") or "").strip()
         return get_swarm_manager().status(subagent_id)
 

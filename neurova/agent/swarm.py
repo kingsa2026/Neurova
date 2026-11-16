@@ -254,6 +254,8 @@ class SubAgentRun:
             "task_unit": self.task_unit,
             "acceptance": self.acceptance,
             "review": self.review,
+            "escalation": self.escalation,
+            "submitted_result": self.submitted_result,
             "tool_allowlist_size": len(self.tool_allowlist) if self.tool_allowlist else None,
             "status": self.status,
             "report": self.report,
@@ -648,6 +650,50 @@ class SwarmManager:
         with self._lock:
             runs = sorted(self._runs.values(), key=lambda r: r.started_at, reverse=True)
         return [r.to_dict() for r in runs[:limit]]
+
+    def integrationReport(self) -> Dict[str, Any]:
+        """P2-4（评测报告 G-6）：集成前核对面——各子任务验收/评审/依赖状态一览。
+
+        η 门语义的读面：integration_ready=True 表示当前没有挂账的 blocker
+        （失败/未验收/评审未过/依赖未满足的子任务）；主任务集成前应清零 blockers。
+        """
+        with self._lock:
+            runs = list(self._runs.values())
+            blocked = [dict(b) for b in self._blocked.values()]
+        subtasks: List[Dict[str, Any]] = []
+        blockers: List[Dict[str, Any]] = []
+        for run in runs:
+            acceptance = run.acceptance or {}
+            review = run.review or {}
+            item = {
+                "subagent_id": run.subagent_id,
+                "task": (run.task or "")[:80],
+                "status": run.status,
+                "cause": run.cause,
+                "acceptance": acceptance.get("achieved"),
+                "review": review.get("passed"),
+            }
+            subtasks.append(item)
+            if run.status == SUBAGENT_FAILED:
+                # 任何未成功收尾的子任务都是集成挂账（无论成因：执行失败/验收不达标/
+                # 评审未过/依赖断供）——集成前必须逐一处置
+                blockers.append({
+                    "subagent_id": run.subagent_id,
+                    "reason": run.cause or "failed",
+                    "detail": (run.error or "")[:200],
+                })
+        for b in blocked:
+            blockers.append({
+                "subagent_id": b.get("subagent_id", ""),
+                "reason": "dependencies_unsatisfied",
+                "detail": f"等待依赖: {b.get('deps', [])}",
+            })
+        return {
+            "integration_ready": not blockers,
+            "blockers": blockers,
+            "blocked_count": len(blocked),
+            "subtasks": subtasks,
+        }
 
     # ── P1-4（评测报告 G-4）：依赖门控 ──────────────────────────
 
@@ -1475,13 +1521,20 @@ class SwarmManager:
         return None
 
     def recordEscalation(
-        self, run: SubAgentRun, reason: str, question: str = "", severity: str = "normal"
+        self, run: SubAgentRun, reason: str, question: str = "", severity: str = "normal",
+        suggestedAction: str = "", actionNote: str = "",
     ) -> Dict[str, Any]:
-        """记录子代理升级，并把升级信封投递发起者会话邮箱（主代理/用户可见）。"""
+        """记录子代理升级，并把升级信封投递发起者会话邮箱（主代理/用户可见）。
+
+        P2-5（评测报告 G-8）：升级带建议处置动作（clarify/reassign/revise_dependency/
+        retry），主代理据此走结构化闭环而不是自由发挥。
+        """
         run.escalation = {
             "reason": str(reason or ""),
             "question": str(question or ""),
             "severity": str(severity or "normal"),
+            "suggested_action": str(suggestedAction or ""),
+            "action_note": str(actionNote or ""),
             "at": time.time(),
         }
         envelope = {
@@ -1493,6 +1546,8 @@ class SwarmManager:
             "reason": run.escalation["reason"],
             "question": run.escalation["question"],
             "severity": run.escalation["severity"],
+            "suggested_action": run.escalation["suggested_action"],
+            "action_note": run.escalation["action_note"],
         }
         if run.origin == "chat" and run.session_id:
             try:
