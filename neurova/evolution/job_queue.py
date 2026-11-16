@@ -28,10 +28,38 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.db_migration import migrate as apply_migrations, register_migration
 from neurova.core.data_root import get_data_root
 from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
+
+# schema 版本域：作业表建表/索引经注册表演进（审计 3.4-10）
+EVOLUTION_JOBS_DOMAIN = "evolution_jobs"
+
+register_migration(
+    1,
+    """
+    CREATE TABLE IF NOT EXISTS evolution_jobs (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        payload_json TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL DEFAULT 'pending'
+            CHECK(status IN ('pending','running','done','failed_retryable','failed')),
+        attempts INTEGER NOT NULL DEFAULT 0,
+        locked_by TEXT,
+        locked_at REAL,
+        result_json TEXT,
+        error TEXT,
+        idempotency_key TEXT UNIQUE,
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ej_claim
+        ON evolution_jobs(status, created_at);
+    """,
+    domain=EVOLUTION_JOBS_DOMAIN,
+)
 
 _STATUS = ("pending", "running", "done", "failed_retryable", "failed")
 _OPEN_STATUSES = ("pending", "running", "failed_retryable")
@@ -83,27 +111,9 @@ class EvolutionJobQueue:
 
     def _init_schema(self) -> None:
         with self._lock:
-            self._conn.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS evolution_jobs (
-                    id TEXT PRIMARY KEY,
-                    kind TEXT NOT NULL,
-                    payload_json TEXT NOT NULL DEFAULT '{}',
-                    status TEXT NOT NULL DEFAULT 'pending'
-                        CHECK(status IN ('pending','running','done','failed_retryable','failed')),
-                    attempts INTEGER NOT NULL DEFAULT 0,
-                    locked_by TEXT,
-                    locked_at REAL,
-                    result_json TEXT,
-                    error TEXT,
-                    idempotency_key TEXT UNIQUE,
-                    created_at REAL NOT NULL,
-                    updated_at REAL NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_ej_claim
-                    ON evolution_jobs(status, created_at);
-                """
-            )
+            # 建表/索引经版本化迁移链（审计 3.4-10）：新库落 v1，旧库按
+            # user_version 跳过；不再手拼 executescript
+            apply_migrations(self._conn, EVOLUTION_JOBS_DOMAIN)
             self._conn.commit()
 
     # ── 生产端 ──────────────────────────────────────────

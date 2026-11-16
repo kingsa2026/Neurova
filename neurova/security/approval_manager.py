@@ -14,6 +14,7 @@ import datetime
 import fnmatch
 import json
 from neurova.core.logger import get_logger
+from neurova.core.db_migration import migrate as apply_migrations, register_migration
 import re
 import threading
 import uuid
@@ -23,6 +24,30 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
 logger = get_logger(__name__)
+
+# schema 版本域：审批请求表建表/索引经注册表演进（审计 3.4-10）
+APPROVAL_DOMAIN = "approval"
+
+_APPROVAL_SCHEMA = """
+CREATE TABLE IF NOT EXISTS approval_requests (
+    request_id TEXT PRIMARY KEY,
+    agent_id TEXT DEFAULT '',
+    user_id TEXT DEFAULT '',
+    command TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    danger_reason TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    expires_at TEXT,
+    approved_by TEXT,
+    approval_note TEXT,
+    metadata TEXT DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_apr_status ON approval_requests(status);
+CREATE INDEX IF NOT EXISTS idx_apr_agent ON approval_requests(agent_id);
+"""
+register_migration(1, _APPROVAL_SCHEMA, domain=APPROVAL_DOMAIN)
 
 
 class ApprovalStatus(str, Enum):
@@ -241,37 +266,12 @@ class ApprovalManager:
 
             self._db_path.parent.mkdir(parents=True, exist_ok=True)
             with short_transaction(str(self._db_path)) as conn:
-                self._create_schema(conn)
+                # 建表/索引经版本化迁移链（审计 3.4-10）：v1 脚本型迁移
+                # （幂等 DDL 自保证原子性），旧库按 user_version 跳过
+                apply_migrations(conn, APPROVAL_DOMAIN)
         except Exception as e:
             logger.warning("审批 SQLite 初始化失败, 降级纯 JSON 存储: %s", e)
             self._db_path = None
-
-    @staticmethod
-    def _create_schema(conn) -> None:
-        """建表 + 索引（幂等）。"""
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS approval_requests (
-                request_id TEXT PRIMARY KEY,
-                agent_id TEXT DEFAULT '',
-                user_id TEXT DEFAULT '',
-                command TEXT NOT NULL,
-                description TEXT DEFAULT '',
-                danger_reason TEXT DEFAULT '',
-                status TEXT NOT NULL DEFAULT 'pending',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                expires_at TEXT,
-                approved_by TEXT,
-                approval_note TEXT,
-                metadata TEXT DEFAULT '{}'
-            )
-            """)
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_apr_status ON approval_requests(status)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_apr_agent ON approval_requests(agent_id)"
-        )
 
     def _upsert_request_sqlite(self, request: ApprovalRequest) -> None:
         """单条 upsert 到 SQLite（每写一 commit，量级低无需批量）。"""
