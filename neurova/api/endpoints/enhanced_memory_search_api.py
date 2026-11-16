@@ -67,8 +67,8 @@ _nerf_config: typing.Dict[str, typing.Any] = {
 }
 
 
-# Simulated activation store
-_activations: typing.Dict[str, dict] = {}
+# Simulated activation store——审计 3.3-3 退役：全仓无写入方（恒空），
+# /activation/{id} 改诚实 501 后这份只读假源失去存在意义，随批删除。
 
 
 @router.post("/search")
@@ -547,8 +547,9 @@ async def analyze_query(body: dict):
 
 @router.get("/activation/{memory_id}")
 async def get_memory_activation(memory_id: str):
-    """获取特定记忆的激活状态"""
-    act = _activations.get(
-        memory_id, {"memory_id": memory_id, "activation_level": 0.0, "last_accessed": None, "access_count": 0}
-    )
-    return {"code": 0, "message": "success", "data": act}
+    """获取特定记忆的激活状态
+
+    审计 3.3-3：激活账本全仓无生产写入方（原全局字典恒空），读它只会得到
+    伪造的零激活假数据。与同文件 /decay（P2-6 先例）同口径诚实 501。
+    """
+    raise HTTPException(status_code=501, detail="记忆激活状态账本未实现（无生产写入方）")
