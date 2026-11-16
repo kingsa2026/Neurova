@@ -170,6 +170,15 @@ class SecurityAuditResult:
 # ────── 加密工具 ──────
 
 
+class MemoryDecryptError(ValueError):
+    """记忆行密文解密失败（令牌或密钥不匹配、密文损坏）。
+
+    读侧按 `metadata._security.encrypted` 标记解密时抛出。调用方必须把它当
+    「这条记忆读不出」点名暴露（ERROR 级 + 行 id），不得吞成空串、也不得
+    退回密文当内容——那分别制造「记忆消失」与「乱码进上下文」。
+    """
+
+
 class _FernetCipher:
     """Fernet 加密器"""
 
@@ -197,14 +206,14 @@ class _FernetCipher:
         return self._fernet.encrypt(data.encode("utf-8")).decode("ascii")
 
     def decrypt(self, encrypted_data: str) -> str:
-        """Fernet 解密——失败点名，不把"解不开"改写成"这条记忆没内容"。"""
+        """Fernet 解密——失败点名（MemoryDecryptError），不把"解不开"改写成"这条记忆没内容"。"""
         if not encrypted_data:
             return ""
 
         try:
             return self._fernet.decrypt(encrypted_data.encode("ascii")).decode("utf-8")
         except Exception as exc:
-            raise ValueError(f"Fernet 解密失败（令牌或密钥不匹配）: {exc}") from exc
+            raise MemoryDecryptError(f"Fernet 解密失败（令牌或密钥不匹配）: {exc}") from exc
 
 
 # ────── 主类 ──────
@@ -392,9 +401,11 @@ class MemorySecurity:
             encrypted = self._cipher.encrypt(content)
             return (encrypted, use_method.value)
 
-        # 无加密器，返回原内容
-        logger.warning("无可用加密器")
-        return (content, EncryptionMethod.NONE.value)
+        # Fernet 被要求但加密器缺席：静默回落明文会让「标记=fernet」的行以
+        # 明文落库，读侧按标记解密必然炸——点名拒绝（教义第 2 条诚实形态）。
+        raise RuntimeError(
+            "Fernet 加密被要求但加密器不可用（default_encryption 配置与密钥状态不一致）"
+        )
 
     def decrypt_sensitive_content(self, encrypted_content: str, method: str) -> str:
         """
@@ -427,8 +438,11 @@ class MemorySecurity:
         if self._cipher:
             return self._cipher.decrypt(encrypted_content)
 
-        logger.warning("无可用解密器")
-        return encrypted_content
+        # 走到这里只可能是 fernet 方法（hash/mask 不可逆已在上方原样返回）。
+        # 加密器缺席还把密文原样交出去，等于把乱码当原文读数——点名拒绝。
+        raise RuntimeError(
+            "Fernet 解密被要求但加密器不可用（default_encryption 配置与密钥状态不一致）"
+        )
 
     def _mask_content(self, content: str) -> str:
         """掩码处理内容"""

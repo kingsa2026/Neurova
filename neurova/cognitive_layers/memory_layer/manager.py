@@ -975,6 +975,8 @@ class MemoryManager:
                 (self._agent_id,),
             ).fetchall()
 
+            from neurova.cognitive_layers.memory_layer.security import MemoryDecryptError
+
             for row in rows:
                 try:
                     mem = self._row_to_memory(row)
@@ -990,6 +992,14 @@ class MemoryManager:
                         self._persist_memory(mem)
                     self._counter = max(
                         self._counter, int(mem.id.replace("mem_", "")) if mem.id.startswith("mem_") else 0
+                    )
+                except MemoryDecryptError as e:
+                    # U2：解密失败必须 ERROR 点名（教义第 2 条）——这条记忆还在盘上，
+                    # 只是密文读不回；吞成 debug 跳行等于「记忆消失」再现。
+                    logger.error(
+                        "记忆行解密失败，跳过 id=%s（行仍在盘上，需恢复加密密钥后重载）: %s",
+                        row["id"],
+                        e,
                     )
                 except Exception as e:
                     logger.debug("Skip invalid memory row %s: %s", row['id'], e)
@@ -1063,10 +1073,20 @@ class MemoryManager:
                     str(row["agent_id"]), str(row["neuser_id"]), str(row["user_id"]),
                 ))
 
+            from neurova.cognitive_layers.memory_layer.security import MemoryDecryptError
+
             with self._lock:
                 for row in rows:
                     try:
                         mem = self._row_to_memory(row)
+                    except MemoryDecryptError as e:
+                        # U2：与 _load_from_db 同口径——解密失败 ERROR 点名，不静默跳行。
+                        logger.error(
+                            "记忆行解密失败，跳过 id=%s（行仍在盘上，需恢复加密密钥后重载）: %s",
+                            row["id"],
+                            e,
+                        )
+                        continue
                     except Exception as e:
                         logger.debug("Skip invalid memory row %s: %s", row["id"], e)
                         continue
@@ -1650,6 +1670,24 @@ class MemoryManager:
         新向量算不出时 `mem.embedding` 置空而非沿用旧值：留旧向量是第二个
         "看上去有、其实是错的"状态；置空后合簇侧按「任一侧无嵌入不合」自然跳过它。
         """
+        # U2 读侧配套（2026-11-17）：encrypt 标记行的内容变更必须维持
+        # 「metadata._security.encrypted=fernet ⇔ 行内容是密文」不变量——旧内容
+        # 是密文，替换进来的明文若原样落行，读侧按标记解密必然抛错，这条记忆
+        # 从此读不出（教义第 1 条：修在产生不一致的这一侧）。标记是行自带属性，
+        # 按标记处置而非重查当下写处置开关：运维把
+        # NEUROVA_MEMORY_SECURITY_WRITE_ACTION 翻回 log_only，不得把已加密行
+        # 降级成「明文+标记」的坏行。加密器缺席时 encrypt_sensitive_content
+        # 点名拒绝（security.py），不会静默明文落行。
+        secMeta = (mem.metadata or {}).get("_security") or {}
+        if isinstance(secMeta, dict) and secMeta.get("encrypted") == "fernet" and newContent:
+            from neurova.cognitive_layers.memory_layer.security import (
+                EncryptionMethod,
+                get_memory_security,
+            )
+
+            newContent, _method = get_memory_security().encrypt_sensitive_content(
+                newContent, EncryptionMethod.FERNET
+            )
         mem.content = newContent
         mem.embedding = self._embeddingForNewRow(newContent)
         self._persist_memory(mem)
@@ -3068,7 +3106,9 @@ class MemoryManager:
                         {
                             # M-25: 作用域限定行 id 剥前缀, 不向消费方泄漏
                             "id": mem.id,
-                            "content": mem.content,
+                            # U2 读侧透明解密：温度通道自拼 dict，与 to_dict 同一
+                            # 出口解密（neurova_recall 温度通道消费本面）。
+                            "content": mem.plaintextContent(),
                             "temperature": row["temperature"],
                             "category": row["category"],
                             "lifecycle_stage": row["lifecycle_stage"],
@@ -4960,7 +5000,8 @@ class MemoryManager:
         for node_id in visited_ids:
             mem = self._memories.get(node_id)
             if mem is not None:
-                nodes.append({"id": node_id, "content": mem.content})
+                # U2 读侧透明解密：图谱节点是用户可见读出口（与 to_dict 同一出口解密）
+                nodes.append({"id": node_id, "content": mem.plaintextContent()})
         return {
             "source": memory_id,
             "method": method,
@@ -5047,7 +5088,12 @@ class MemoryManager:
         with self._lock:
             mem = self._memories.get(memory_id)
             if mem:
-                return {"memory_id": memory_id, "content": mem.content, "reason": "direct recall"}
+                # U2 读侧透明解密：解释面是用户可见读出口（与 to_dict 同一出口解密）
+                return {
+                    "memory_id": memory_id,
+                    "content": mem.plaintextContent(),
+                    "reason": "direct recall",
+                }
             return {"memory_id": memory_id, "error": "not found"}
 
     def get_explanation_chain(self, **kwargs) -> List[Dict[str, Any]]:
