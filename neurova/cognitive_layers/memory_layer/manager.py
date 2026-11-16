@@ -667,6 +667,8 @@ class MemoryManager:
         """把一篇持久行翻成 Memory（装载与 reload 共用的唯一构造处）。"""
         from datetime import datetime
 
+        row_metadata = json.loads(row["metadata"]) if row["metadata"] else {}
+
         return Memory(
             # M-25: 作用域限定行 id 剥前缀还原业务 id（旧行无前缀原样）。
             # 但**行自带 id 必须同时留着**（`row_id`）——只留业务 id，下一次写回就会按业务 id
@@ -681,7 +683,7 @@ class MemoryManager:
             temperature=row["temperature"],
             importance=row["importance"],
             access_count=row["access_count"],
-            metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            metadata=row_metadata,
             embedding=_row_embedding(row),
             agent_id=row["agent_id"],
             neuser_id=row["neuser_id"],
