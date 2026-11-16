@@ -43,6 +43,10 @@
 - `./gradlew assembleRelease` → `app-release.apk`（3.1MB，签名者 CN=Neurova Android Release，SHA-256 与上表一致，apksigner 验证）✓
 - 产物归档：`Mobile/dist/android/`
 
+> 2026-11-16：Capacitor 工程 `Mobile/android/` 已按 ADR 0024 退役删除，安卓端现役工程为
+> `Mobile/android-native/`（原生 Compose，包名 `top.neurova.mobile`）；本节为历史打包实录，
+> `android-release.p12` 与指纹继续用于原生工程 release 签名。
+
 **鸿蒙**（Mobile/harmony 工程，经 ASCII 副本目录构建——hvigor 6 拒绝中文工程路径）：
 - 构建：`hvigorw.bat --mode module -p product=default -p buildMode=release assembleHap`
   → `entry-default-unsigned.hap`（88KB）✓

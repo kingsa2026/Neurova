@@ -48,7 +48,7 @@ WindowSizeClass 换轨、RenderEffect 玻璃导航、CameraX 扫码、Tabletop �
 - **短期双轨并存**（Capacitor 与 android-native），违反教义第 7 条「不许并存」的临时豁免：
   退役判据 = 原生端完成 §11 全部分期（M1-M4）并通过 live-verify 后，Capacitor 工程
   收口退役（`Mobile/android/` 归档、`Mobile/dist/android` 构建物切换）。退役属结构改动，
-  需用户拍板后另批执行，本批不静默删除任何既有工程。
+  需用户拍板后另批执行，本批不静默删除任何既有工程。（已拍板执行，见文末收口记录。）
 - 首批实施范围（P1-P4）：工程骨架、星穹玻璃令牌主题（深/浅）、五 Tab 导航壳
   （NavigationSuiteScaffold）、F1 登录、F2 扫码配对（CameraX + 手动兜底）、
   网络层（HttpChannel/ChatSseChannel/MobileWsChannel/配对三端点/401 单飞续签）。
@@ -56,3 +56,15 @@ WindowSizeClass 换轨、RenderEffect 玻璃导航、CameraX 扫码、Tabletop �
   ——与鸿蒙端 `ohosTest` 同一先例：平台工具链承载平台测试，仓根测试根服务 Python/TS 面。
 - 工具链事实：本机 SDK 于 `D:\Android\Sdk`（环境变量未注册），模拟器 AVD `neurova35`
   （API 35 x86_64）；首次构建在 Gradle 8.14.3 + AGP 8.7.3 + compileSdk 35 下通过。
+
+## 收口记录（2026-11-16）
+
+退役判据已满足（原生端 P0–P9 全部落地并 live-verify，覆盖 §11 M1-M4 功能面），经用户拍板执行：
+
+- 删除 `Mobile/android/`（Capacitor + Vue3 工程，125 个跟踪文件）与 `Mobile/dist/android/` 构建物；
+  `Mobile/` 现役目录收敛为 `android-native/`（安卓）、`harmony/`（鸿蒙）、`signing/`、`dist/`（仅鸿蒙产物）。
+- CORS 白名单随壳退役移除 Capacitor 专用 origin（裸 `http://localhost` / `https://localhost`，
+  即 androidScheme=https 的 WebView 来源）——`neurova/api/cors_policy.py` 与 `config/cors.json`
+  同批移除，单源等值判据 `testAllowSetsAreByteIdenticalToWhatTheRepoConfigShips` 继续咬合。
+- 签名材料 `Mobile/signing/android-release.p12` 保留，原生工程 release 接线继续复用
+  （包名 `top.neurova.mobile`）。

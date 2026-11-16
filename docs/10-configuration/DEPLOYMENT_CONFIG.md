@@ -126,7 +126,7 @@ Chart **不得**再用 ConfigMap 卷覆盖 `/app/config` —— ConfigMap 里装
 
 ## 移动端接入（手机客户端连服务端的三形态）
 
-手机客户端（鸿蒙 `Mobile/harmony/`、安卓 `Mobile/android/`）连服务端支持三种网络形态，
+手机客户端（鸿蒙 `Mobile/harmony/`、安卓 `Mobile/android-native/`）连服务端支持三种网络形态，
 客户端侧通过"服务器档案"运行时选择，服务端按形态补齐以下配置。
 
 ### 形态 A：内网/局域网直连

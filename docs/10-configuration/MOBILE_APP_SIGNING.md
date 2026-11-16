@@ -14,7 +14,7 @@
 | 鸿蒙 CSR | `Mobile/signing/harmony-release.csr`（PKCS#10） | ✅ 已生成，待上传 AGC |
 | 密码 | `Mobile/signing/passwords.local.md` | ✅ 本机存放，**不入 git**（已 `.gitignore`） |
 | 鸿蒙发布证书 `.cer` + Profile `.p7b` | 约定落 `Mobile/signing/harmony/` | ⬜ 需华为 AGC 办理（§2） |
-| 安卓包名（applicationId） | — | ⬜ 待确认（建议 `com.neurova.app`） |
+| 安卓包名（applicationId） | `top.neurova.mobile`（原生工程 `Mobile/android-native/`） | ✅ 已定（2026-11-16；已退役的 Capacitor 工程曾建议 `com.neurova.app`） |
 
 工具链现状：JDK 17（keytool）✅；Node 24 ✅；Android SDK 未安装（打包时需装）；
 DevEco Studio 未安装（鸿蒙打包需装）。本指南的"生成密钥"部分不依赖后两者。
@@ -30,7 +30,7 @@ PKCS12 是 Android 官方当前推荐的密钥库格式，Gradle 可直接消费
 
 ### 1.2 Gradle 接线（工程建成后）
 
-在 `Mobile/android/` 的 `app/build.gradle`（或 `build.gradle.kts`）加 signingConfig：
+在 `Mobile/android-native/` 的 `app/build.gradle.kts` 加 signingConfig（Kotlin DSL，下为等价 Groovy 写法）：
 
 ```groovy
 android {
