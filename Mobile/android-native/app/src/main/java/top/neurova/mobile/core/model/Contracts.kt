@@ -112,15 +112,6 @@ data class PairingResolved(
 )
 
 @Serializable
-data class PairingConfirmed(
-    @SerialName("ws_token") val wsToken: String,
-    @SerialName("ws_url") val wsUrl: String,
-    @SerialName("expires_in") val expiresIn: Int,
-    @SerialName("device_secret") val deviceSecret: String? = null,
-    @SerialName("pairing_id") val pairingId: String? = null,
-)
-
-@Serializable
 data class PairingRefreshed(
     @SerialName("connect_ticket") val connectTicket: String,
     @SerialName("pairing_id") val pairingId: String,
