@@ -5,7 +5,7 @@
 70 条路径里 44 条已不存在（台账 §6-362）。CogArch 已降为沿革档，认知层的**现役**状态
 改由本生成器的输出承担：表里每一行都由当次代码扫描得出，判据
 `tests/unit/ci/test_cognitiveComponentTable.py` 逐字比对文档机读区，并抽样与
-`tests/ast_scan.importersOfModule`（单目标取数口）交叉验证。
+`neurova/core/ast_scan.importersOfModule`（单目标取数口）交叉验证。
 
 口径（避免第二套解释）：
 - 组件＝`neurova/cognitive_layers/` 下**跟踪态**的 `.py`（不含 `__init__.py`）；
@@ -15,7 +15,7 @@
 - 状态四态：`在役`（层外读者 ≥1）／`仅层内`（只被同层读到）／`仅测试`／`零读者`。
   为什么把"层外"单列：被同层读在死码口径里只证明内部接线，不证明在服（台账 §6-359/§6-360）。
 - 本文件是**聚合索引**（单趟建边，避免 106 个目标各扫一遍全仓）。**单目标判定不要用这里**，
-  一律走 `tests/ast_scan.importersOfModule`——两者由判据的抽样格钉在一起。
+  一律走 `neurova/core/ast_scan.importersOfModule`——两者由判据的抽样格钉在一起。
 
 用法：
     python scripts/ci/cognitive_component_table.py            # 打印两个机读区
@@ -32,7 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from tests import ast_scan  # noqa: E402  （仓内唯一 AST 扫描入口）
+from neurova.core import ast_scan  # noqa: E402  （仓内唯一 AST 扫描入口）
 
 DOC = REPO_ROOT / "docs" / "01-architecture" / "cognitive-component-table.md"
 LAYER = "neurova/cognitive_layers"

@@ -8,7 +8,7 @@
 - 必须定义 ``async def main(ctx)``（唯一入口，宿主只把 ctx 递给它）；
 - 禁 ``global``/``nonlocal``（保持脚本是线性过程，journal 可确定性重放）。
 
-解析走全仓唯一出口 ``tests.ast_scan.parseSource``（ratchet 钉住）。
+解析走全仓唯一出口 ``neurova.core.ast_scan.parseSource``（ratchet 钉住）。
 
 P3（蜂群对照 #7）：``analyzeScript`` 在同一份 AST 走查上额外产出
 **结构化诊断（诊断码 9001-9006）** 与 **四图**——调用点（site）、
@@ -64,7 +64,7 @@ def _walkScript(
 
     import ast
 
-    from tests.ast_scan import parseSource
+    from neurova.core.ast_scan import parseSource
 
     try:
         tree = parseSource(script, filename="<scripted-workflow>")
