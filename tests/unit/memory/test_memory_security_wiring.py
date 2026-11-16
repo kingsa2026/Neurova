@@ -88,12 +88,9 @@ class TestRememberSecurityScreening:
         mem = manager.get_memory(mem_id, agent_wide=True)
         sec = (mem.get("metadata") or {}).get("_security")
         assert sec and sec.get("encrypted") == EncryptionMethod.FERNET.value
-        stored = mem["content"]
-        assert stored != SECRET_SAMPLE
-        plain = get_memory_security().decrypt_sensitive_content(
-            stored, EncryptionMethod.FERNET.value
-        )
-        assert plain == SECRET_SAMPLE, "encrypt 态必须可用同一密钥解回原文"
+        # 读侧透明解密（用户拍板 2026-11-17）：get_memory 读出的是原文，
+        # 密文只存在于落库与内存态内部（写回链一致性）。
+        assert mem["content"] == SECRET_SAMPLE, "encrypt 态读路径必须透明解密回原文"
 
     def test_fail_open_on_security_failure(self, manager, monkeypatch):
         """安全面故障放行原文——记忆不因安全面异常而丢（与认知安全门同姿态）。"""

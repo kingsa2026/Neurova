@@ -76,13 +76,19 @@ def testRoundTripStillWorks():
     assert mem.decrypt_sensitive_content(cipherText, used) == "手机号 13800000000"
 
 
-def testCipherChainHasZeroCallersAndThatIsPinned():
-    """'敏感记忆落盘加密'从未接线——零调用点是**登记事实**，不是默认状态。
+def testCipherChainCallersStayPinnedToTheSingleReadOutlet():
+    """加解密链已接线（审计 3.3-5 拍板 + encrypt 读侧拍板 2026-11-17）——调用面只许收敛在唯一读出口。
 
-    接线它（或连同本文件一起退役它）都必须来改这条期望数，否则它就是一句没人读的注释。
+    旧判据「零调用点」随接线被合法推翻：写侧走 manager.remember 咽喉的
+    screenForStorage（其内部才触达 encrypt_sensitive_content，定义文件自身跳过）；
+    读侧出口单点 = Memory.to_dict → plaintextContent（models.py）。
+    本判据改钉**收敛面**：security.py 之外，这两个方法名的调用文件必须恰为
+    models.py 一处——再有第三处绕过咽喉直调加解密即红。
     与 `tests/unit/collaboration/test_glance_yield_await_sites.py` 的双向钉法同形。
     """
-    expectedCallers = 0
+    expectedCallerFiles = {
+        "neurova/cognitive_layers/memory_layer/models.py",
+    }
     hits = []
     # 本判据只扫一遍、不留常驻语法树，故走共享的一次性入口；顺带吃文本预筛——
     # 两个方法名都没出现的文件不可能有调用点（`tests/unit/test_ci_ast_scan_budget_guard.py`
@@ -99,9 +105,10 @@ def testCipherChainHasZeroCallersAndThatIsPinned():
             "encrypt_sensitive_content",
             "decrypt_sensitive_content",
         }:
-            hits.append(str(path.relative_to(REPO_ROOT)))
+            hits.append(path.relative_to(REPO_ROOT).as_posix())
 
-    assert len(hits) == expectedCallers, (
-        f"敏感内容加解密的调用点数从 {expectedCallers} 变成 {len(hits)}：{sorted(set(hits))}。"
-        "接线了就去台账 §6-37 记影响面并改这里；本模块的 fail-fast 判据同时才第一次真的护到人。"
+    assert set(hits) == expectedCallerFiles, (
+        f"敏感内容加解密的调用文件现读 {sorted(set(hits))}，"
+        f"期望只收敛在唯一读出口 {sorted(expectedCallerFiles)}——"
+        "新消费方必须走 screenForStorage/明文读出口，不得各自直调加解密。"
     )

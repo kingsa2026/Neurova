@@ -408,10 +408,27 @@ class Memory:
         self.temperature = result["new_temp"]
         self.updated_at = now
 
+    def plaintextContent(self) -> str:
+        """encrypt 态读侧透明解密（用户拍板 2026-11-17）。
+
+        remember 咽喉的安检面（MemorySecurity.screenForStorage）在 encrypt 态把
+        整条内容 Fernet 加密落库，密文同时留在内存态与库（写回链一致性）；
+        本方法是**对外读数的统一解密出口**——to_dict 的消费方（API/页面/召回
+        投影）读到原文，写得进必须读得出。mask 不可逆原样返回；解密失败诚实
+        抛出（不静默回密文/空串）。内部链路（写回、FTS 同步）仍用密文
+        `self.content`，不走这里。
+        """
+        security_meta = (self.metadata or {}).get("_security") or {}
+        if security_meta.get("encrypted") != "fernet" or not self.content:
+            return self.content
+        from neurova.cognitive_layers.memory_layer.security import get_memory_security
+
+        return get_memory_security().decrypt_sensitive_content(self.content, "fernet")
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
-            "content": self.content,
+            "content": self.plaintextContent(),
             "memory_type": self.memory_type.value,
             # type: memory_type 的契约别名（API/前端消费，页签过滤键）
             "type": self.memory_type.value,
