@@ -51,7 +51,7 @@ BENIGN_SINGLETONS = [
     ("neurova/collaboration/collaboration_isolation.py", "get_collaboration_manager"),
     ("neurova/core/error_handler.py", "get_error_handler"),
     ("neurova/core/logger.py", "get_log_manager"),
-    ("neurova/security/constitution.py", "get_constitution_engine"),
+    # （S7 批）neurova/security/constitution.py::get_constitution_engine 已随 P1-18 退役摘除。
 ]
 
 

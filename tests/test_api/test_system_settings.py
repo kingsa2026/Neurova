@@ -6,11 +6,11 @@
 1. Language 枚举
 2. LanguageManager
 3. TimezoneManager
-4. UserWorkspace
 
 对齐说明：生产代码已重构（language 枚举名从 zh_CN/en_US 改为 zh/en；
 Translation/UserLanguagePreference 为 dataclass；TimezoneInfo 构造为
-name/offset/utc_offset；UserWorkspace 使用 Path 路径）。本文件对齐当前实现。
+name/offset/utc_offset）。本文件对齐当前实现。
+（S7 死码退役批：原 4. UserWorkspace 两类已随 core/user_workspace.py 退役摘除。）
 """
 
 import shutil
@@ -25,7 +25,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from neurova.language.models import Language, Translation, UserLanguagePreference
 from neurova.language.manager import LanguageManager
 from neurova.core.timezone_manager import TimezoneManager, TimezoneInfo
-from neurova.core.user_workspace import UserWorkspace, UserWorkspaceManager
 
 
 class TestLanguageEnum(unittest.TestCase):
@@ -254,89 +253,3 @@ class TestTimezoneManager(unittest.TestCase):
         self.assertEqual(offset, 8.0)
 
 
-class TestUserWorkspace(unittest.TestCase):
-    """测试 UserWorkspace 类"""
-
-    def setUp(self):
-        """测试前准备（同 `TestLanguageManager`：落点收进临时目录，不留 CWD 相对产物）"""
-        self._tmpRoot = tempfile.mkdtemp(prefix="neurovaTestWorkspace-")
-        self.addCleanup(shutil.rmtree, self._tmpRoot, True)
-        self.test_user_id = "test_user_123"
-        self.workspace = UserWorkspace(self.test_user_id, Path(self._tmpRoot) / "test_workspaces")
-
-    def test_workspace_creation(self):
-        """测试工作空间创建"""
-        self.assertTrue(self.workspace.root_path.exists())
-
-        # 检查子目录
-        self.assertTrue(self.workspace.database_path.exists())
-        self.assertTrue(self.workspace.memory_path.exists())
-        self.assertTrue(self.workspace.projects_path.exists())
-
-    def test_get_set_config(self):
-        """测试获取和设置配置"""
-        # 设置配置
-        self.workspace.set_config("language", "en")
-        self.workspace.set_config("timezone", "America/New_York")
-
-        # 获取配置
-        self.assertEqual(self.workspace.get_config("language"), "en")
-        self.assertEqual(self.workspace.get_config("timezone"), "America/New_York")
-
-        # 不存在的配置返回默认值
-        self.assertIsNone(self.workspace.get_config("nonexistent"))
-        self.assertEqual(self.workspace.get_config("nonexistent", "default"), "default")
-
-    def test_workspace_properties(self):
-        """测试工作空间属性"""
-        self.assertEqual(self.workspace.user_id, self.test_user_id)
-        self.assertTrue(str(self.workspace.database_path).endswith("database"))
-        self.assertTrue(str(self.workspace.memory_path).endswith("memory"))
-
-
-class TestUserWorkspaceManager(unittest.TestCase):
-    """测试 UserWorkspaceManager 类"""
-
-    def setUp(self):
-        """测试前准备（同上：临时目录）"""
-        self._tmpRoot = tempfile.mkdtemp(prefix="neurovaTestWorkspaceManager-")
-        self.addCleanup(shutil.rmtree, self._tmpRoot, True)
-        self.manager = UserWorkspaceManager(Path(self._tmpRoot) / "test_workspaces_2")
-
-    def test_create_workspace(self):
-        """测试创建工作空间"""
-        workspace = self.manager.create_workspace("user1")
-        self.assertEqual(workspace.user_id, "user1")
-        self.assertTrue(workspace.root_path.exists())
-
-    def test_get_workspace(self):
-        """测试获取工作空间"""
-        # 第一次获取会创建
-        workspace = self.manager.get_workspace("user2")
-        self.assertEqual(workspace.user_id, "user2")
-
-        # 第二次获取应该返回同一个实例
-        workspace2 = self.manager.get_workspace("user2")
-        self.assertIs(workspace, workspace2)
-
-    def test_list_workspaces(self):
-        """测试列出工作空间"""
-        self.manager.create_workspace("user3")
-        self.manager.create_workspace("user4")
-
-        user_ids = self.manager.list_workspaces()
-        self.assertIn("user3", user_ids)
-        self.assertIn("user4", user_ids)
-
-    def test_delete_workspace(self):
-        """测试删除工作空间"""
-        self.manager.create_workspace("user5")
-        self.assertTrue(self.manager.workspace_exists("user5"))
-
-        result = self.manager.delete_workspace("user5")
-        self.assertTrue(result)
-        self.assertFalse(self.manager.workspace_exists("user5"))
-
-
-if __name__ == '__main__':
-    unittest.main()

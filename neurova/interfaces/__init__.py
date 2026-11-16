@@ -19,10 +19,11 @@ try:
 except ImportError:
     APIVersion = None  # type: ignore[assignment,misc]
 
-from neurova.auth.auth_protocol import AuthProtocol
-
 from neurova.api.error_codes import ErrorCodes
 
 from neurova.interfaces import api_standard
 
-__all__ = ["APIError", "APIResponse", "APIVersion", "AuthProtocol", "ErrorCodes", "api_standard"]
+# （S7 死码退役批）AuthProtocol 已随 auth/auth_protocol.py 退役摘除（P2：
+# 零实现零消费的占位协议，此前却被当作"已接真"导出）。
+
+__all__ = ["APIError", "APIResponse", "APIVersion", "ErrorCodes", "api_standard"]

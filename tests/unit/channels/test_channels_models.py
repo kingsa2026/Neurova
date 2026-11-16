@@ -20,8 +20,9 @@ from neurova.channels.models import (
     UnifiedMessage,
     UserIdentity,
     SessionContext,
-    ChannelConfig,
 )
+# （S7 死码退役批）models.ChannelConfig 双定义已退役——在役定义是
+# channels/base.py::ChannelConfig（经 channels/__init__ 转出）。
 
 
 # ============================================================================
@@ -268,55 +269,9 @@ class TestSessionContext:
 
 
 # ============================================================================
-# 测试：ChannelConfig
+# （S7 死码退役批）原 TestChannelConfig 类已随 models.ChannelConfig 双定义退役摘除
+# ——渠道配置的唯一事实源是 channels/base.py::ChannelConfig。
 # ============================================================================
-
-class TestChannelConfig:
-    """ChannelConfig 渠道配置测试"""
-
-    def test_create_config(self):
-        """验证创建基本配置（单条长度上限的单源在 message_chunker，不在本模型）"""
-        config = ChannelConfig(channel=MessageChannel.TELEGRAM)
-        assert config.channel == MessageChannel.TELEGRAM
-        assert config.enabled is True
-        assert not hasattr(config, "max_message_length")
-        assert not hasattr(config, "rate_limit")
-
-    def test_default_content_types(self):
-        """验证默认允许的内容类型"""
-        config = ChannelConfig(channel=MessageChannel.WEB)
-        assert config.allowed_content_types == [ContentType.TEXT]
-
-    def test_credentials_fields(self):
-        """验证凭证字段（app_id/app_secret/webhook_url）"""
-        config = ChannelConfig(
-            channel=MessageChannel.FEISHU,
-            app_id="app-123",
-            app_secret="secret-456",
-            webhook_url="https://example.com/hook",
-        )
-        assert config.app_id == "app-123"
-        assert config.app_secret == "secret-456"
-        assert config.webhook_url == "https://example.com/hook"
-
-    def test_welcome_message_default(self):
-        """验证欢迎语默认值"""
-        config = ChannelConfig(channel=MessageChannel.WEB)
-        assert "Neurova" in config.welcome_message
-        assert config.bot_name == "Neurova"
-
-    def test_to_dict_from_dict_roundtrip(self):
-        """验证序列化往返（enum 与 allowed_content_types 需转换）"""
-        config = ChannelConfig(
-            channel=MessageChannel.FEISHU,
-            allowed_content_types=[ContentType.TEXT, ContentType.IMAGE],
-            metadata={"ver": 1},
-        )
-        d = config.to_dict()
-        assert d["channel"] == "feishu"
-        assert d["allowed_content_types"] == ["text", "image"]
-        assert ChannelConfig.from_dict(d) == config
-
 
 # ============================================================================
 # 测试：跨模块导入兼容性

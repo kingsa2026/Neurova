@@ -17,7 +17,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
-from neurova.core.lazy_singleton import lazySingleton
 
 logger = get_logger(__name__)
 
@@ -311,87 +310,3 @@ class DeadLetterMessage:
             "original_error": self.original_error,
         }
 
-
-class MessageQueue:
-    """优先级消息队列"""
-
-    def __init__(self):
-        self._queues: Dict[MessagePriority, list] = {
-            MessagePriority.URGENT: [],
-            MessagePriority.HIGH: [],
-            MessagePriority.NORMAL: [],
-            MessagePriority.LOW: [],
-        }
-        self._total_count = 0
-
-    def enqueue(self, message: AgentMessage) -> None:
-        """入队（按优先级插入）"""
-        self._queues[message.priority].append(message)
-        self._total_count += 1
-
-    def dequeue(self) -> Optional[AgentMessage]:
-        """出队（按优先级，先高后低）"""
-        for priority in [MessagePriority.URGENT, MessagePriority.HIGH, MessagePriority.NORMAL, MessagePriority.LOW]:
-            if self._queues[priority]:
-                self._total_count -= 1
-                return self._queues[priority].pop(0)
-        return None
-
-    def peek(self) -> Optional[AgentMessage]:
-        """查看队首消息（不移除）"""
-        for priority in [MessagePriority.URGENT, MessagePriority.HIGH, MessagePriority.NORMAL, MessagePriority.LOW]:
-            if self._queues[priority]:
-                return self._queues[priority][0]
-        return None
-
-    def size(self) -> int:
-        """获取队列长度"""
-        return self._total_count
-
-    def is_empty(self) -> bool:
-        """检查队列是否为空"""
-        return self._total_count == 0
-
-    def get_by_priority(self, priority: MessagePriority) -> List[AgentMessage]:
-        """获取指定优先级的所有消息"""
-        return self._queues.get(priority, []).copy()
-
-    def clear(self) -> None:
-        """清空队列"""
-        for queue in self._queues.values():
-            queue.clear()
-        self._total_count = 0
-
-
-class MessageSerializer:
-    """消息序列化工具"""
-
-    @staticmethod
-    def serialize(message: AgentMessage) -> bytes:
-        """序列化为字节串"""
-        return message.to_json().encode("utf-8")
-
-    @staticmethod
-    def deserialize(data: bytes) -> AgentMessage:
-        """从字节串反序列化"""
-        return AgentMessage.from_json(data.decode("utf-8"))
-
-    @staticmethod
-    def serialize_batch(messages: List[AgentMessage]) -> bytes:
-        """批量序列化"""
-        return json.dumps([msg.to_dict() for msg in messages], ensure_ascii=False).encode("utf-8")
-
-    @staticmethod
-    def deserialize_batch(data: bytes) -> List[AgentMessage]:
-        """批量反序列化"""
-        return [AgentMessage.from_dict(d) for d in json.loads(data.decode("utf-8"))]
-
-
-# 全局消息队列实例
-_global_message_queue: Optional[MessageQueue] = None
-
-
-@lazySingleton("_global_message_queue")
-def get_message_queue() -> MessageQueue:
-    """获取全局消息队列"""
-    return MessageQueue()

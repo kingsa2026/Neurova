@@ -25,7 +25,8 @@ from neurova.auth.user_group_model import (
 )
 from neurova.admin.resource_quota_manager import ResourceQuotaManager
 from neurova.admin.admin_service import AdminService
-from neurova.auth.enhanced_user_model import EnhancedUserModel
+# （S7 死码退役批）enhanced_user_model 已按 P1-20 整体退役，本档摘除其脚手架；
+# AdminService 的用户存储以自持 JSON 为准（user_model.UserModel 是生产事实源）。
 
 
 class TestAdminService:
@@ -36,12 +37,9 @@ class TestAdminService:
         """设置测试环境"""
         # 创建用户组管理器
         group_manager = UserGroupManager(tmp_path)
-        
+
         # 创建资源配额管理器
         quota_manager = ResourceQuotaManager(storage_dir=tmp_path)
-        
-        # 创建增强用户模型（实现契约：单 storage_dir；组/配额本地实现）
-        user_model = EnhancedUserModel(storage_dir=str(tmp_path))
 
         # （原 skill_manager = SkillPoolManager(...) 两行删除：AdminService 自持
         # 存储从不消费它，孤岛 2026-09-15 退役。）
@@ -56,7 +54,6 @@ class TestAdminService:
         return {
             "group_manager": group_manager,
             "quota_manager": quota_manager,
-            "user_model": user_model,
             "collab_manager": collab_manager,
             "admin_service": admin_service,
             "tmp_path": tmp_path,
@@ -143,9 +140,8 @@ class TestAdminService:
         assert result["user_id"] == user_id
         assert result["username"] == "testuser"
         
-        # 验证用户是否删除成功
-        retrieved = setup["user_model"].get_user_by_id(user_id)
-        assert retrieved is None
+        # 验证用户已从服务自持存储删除
+        assert user_id not in admin_service._users
 
     def test_delete_user_not_found(self, setup):
         """测试删除不存在的用户"""

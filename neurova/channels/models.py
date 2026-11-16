@@ -2,7 +2,9 @@ from __future__ import annotations
 
 """channels/models.py — 渠道系统核心数据模型
 
-包含：MessageChannel, ContentType, UnifiedMessage, UserIdentity, SessionContext, ChannelConfig
+包含：MessageChannel, ContentType, UnifiedMessage, UserIdentity, SessionContext
+（S7 死码退役批：原 ChannelConfig 双定义中的 models 版已退役——在役定义是
+channels/base.py::ChannelConfig，经 channels/__init__ 转出。）
 """
 
 import time
@@ -162,32 +164,3 @@ class SessionContext:
         d["channel"] = MessageChannel(d["channel"])
         return cls(**d)
 
-
-@dataclass
-class ChannelConfig:
-    """渠道配置"""
-
-    channel: MessageChannel
-    enabled: bool = True
-    webhook_url: Optional[str] = None
-    api_key: Optional[str] = None
-    api_secret: Optional[str] = None
-    app_id: Optional[str] = None
-    app_secret: Optional[str] = None
-    bot_name: str = "Neurova"
-    welcome_message: str = "你好！我是 Neurova，有什么可以帮你的？"
-    allowed_content_types: List[ContentType] = field(default_factory=lambda: [ContentType.TEXT])
-    metadata: Optional[Dict[str, Any]] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        result = asdict(self)
-        result["channel"] = self.channel.value
-        result["allowed_content_types"] = [ct.value for ct in self.allowed_content_types]
-        return result
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ChannelConfig":
-        d = data.copy()
-        d["channel"] = MessageChannel(d["channel"])
-        d["allowed_content_types"] = [ContentType(ct) for ct in d.get("allowed_content_types", ["text"])]
-        return cls(**d)

@@ -46,10 +46,10 @@ def _productionTrees(hints):
     return [(ref.path, ref.code) for ref in ast_scan.sourceRefsUnder(
         PROJECT_ROOT / "neurova", ".py", ast_scan.textHints(*hints))]
 
-# (模块, 类名, getter, 缓存全局名)——三处都是构造无外部副作用的真站点
+# (模块, 类名, getter, 缓存全局名)——都是构造无外部副作用的真站点
+# （S7 批：capability_discovery 那一站已随该模块整体退役摘除。）
 RACE_SITES = [
     ("neurova.collaboration.neurflow.dag", "DAGValidator", "get_dag_validator", "_dag_validator"),
-    ("neurova.agent.protocols.capability_discovery", "CapabilityDiscovery", "get_capability_discovery", "_global_discovery"),
     ("neurova.agent.protocols.dead_letter_queue", "DeadLetterQueue", "get_dead_letter_queue", "_global_dlq"),
 ]
 
