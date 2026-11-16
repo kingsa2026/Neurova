@@ -110,3 +110,36 @@
 - TelegramWebhookMixin 渠道 webhook 管理端点从未挂出——接线属新建能力；
 - Benchmark 真评测执行器未接线（后端 P6 诚实化在案，移动端已如实渲染 simulated）；
 - R1/R2/R3/R5 各自台账登记的产品拍板项（admin 删他人模板通道、encrypt 态读侧透明解密、 AgentsApi group_id 语义——用户在途文件、旧布局剩余非重名目录等）。
+
+---
+
+# 终局补漏轮复核结论（2026-11-17 第四轮·收口）
+
+复盘实锤剩余悬空后派 R6（七项移交悬空）与 U1/U2（四项产品拍板）；U1/U2 卡
+needs_attention 后总控直接接手，R6/U1 全部完成。本轮（R7，总控直接执行）清偿
+最后一批台账移交项，提交 af8f2da1c：
+
+1. **AgentInfo.created_at 投影赋值断链**（U1 复核新发现）：agent.py 三条投影
+   路径（list_agents 运行态/config_only、get_agent 运行态/config_only）从
+   AgentConfigManager 的 cfg 回填 created_at（事实源 agent_config.py:240）——
+   鸿蒙端 AgentsApi.createdAt 自此有真值。红灯 2 failed → 绿灯 3 passed。
+2. **原创性红线清偿**（3.2-14 域外三文件）：command_syntax/telemetry/workflow-
+   scripted 的「对照 ZCode」措辞改写为本仓语义；原创性守卫白名单缩小到仅
+   models/computer.py（功能性 ZCODE 枚举，移交批裁定）。
+3. **前端零消费死码退役**：getMemoryActivation/MemoryActivation（后端 /activation
+   已诚实 501，前端零消费）。
+4. **NODE_BUDGET 归一**（R5 移交）：forceLayout.LAYOUT_NODE_BUDGET 派生自
+   perfBudget.NODE_BUDGET 单源。
+5. 登记知悉：DLQ 同 message_id 重复 add 为重试链设计形态；ontology 导出维持
+   登录/服务鉴权（收紧 admin 属产品决策）；NSC 按域收紧与安卓知识域时间戳暂缓。
+
+## 全任务终局
+
+- **覆盖**：P0 2/2、P1 39/39、P2 106 条全部清偿或登记；四轮派单
+  （S1-S8 → R1-R6 → U1-U2 → R7）合计 **60 笔提交**。
+- **终局健康抽查**：提交门/收录门/防绕守卫/shards + memory 域关键测试
+  **68 passed**；vue-tsc 0 错。
+- **工作树**：仅剩 WebSocketAdapter.ets（用户在途）与 4 个 docs 文件
+  （multi-agent 协作计划/评估，非本任务产物）。
+- **后续可选**：OpenAIAdapter 真流式、TelegramWebhookMixin 端点挂出、
+  Benchmark 真评测执行器（三者均为新建能力，另立批次）。
