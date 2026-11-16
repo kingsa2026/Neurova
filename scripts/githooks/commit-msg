@@ -1,0 +1,15 @@
+#!/bin/sh
+# 修复教义提交门（AGENTS.md §1 第 2/3 条）：feat/fix 正文须附红灯→绿灯证据；
+# 生产池净增 LOC 为正须列去向。判据唯一出处：scripts/githooks/commit_msg_check.py
+# （本壳只做粘合，不另写一份判据——教义第 6 条）。
+root=$(git rev-parse --show-toplevel) || exit 1
+# 解释器：优先项目 .venv（与第 4 节跑测同一份）；git bash 的 `python3` 在 Windows 上
+# 常命中 Microsoft Store 的 stub（静默失败、退出 49），故只认 .venv 与 `python`。
+if [ -f "$root/.venv/Scripts/python.exe" ]; then
+    PY="$root/.venv/Scripts/python.exe"
+elif [ -f "$root/.venv/bin/python" ]; then
+    PY="$root/.venv/bin/python"
+else
+    PY=python
+fi
+exec "$PY" "$root/scripts/githooks/commit_msg_check.py" "$@"
