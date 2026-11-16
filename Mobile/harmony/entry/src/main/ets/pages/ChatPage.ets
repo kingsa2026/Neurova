@@ -499,41 +499,42 @@ export struct ChatPage {
       .justifyContent(FlexAlign.End)
     } else {
       // assistant 消息：左对齐，玻璃色背景
+      // 宽度直接定值 80%（constraintSize 与子 width('100%') 组合存在
+      // 布局歧义——真机实测 GlassPanel 溢出左缘裁切，改定宽消除歧义）
       Row() {
         Column() {
           GlassPanel({ variant: 'subtle', innerPadding: this.sm.getSpacing('md'), radius: this.sm.getRadius('lg') }) {
-            Column() {
-              // Agent 署名
-              Text(this.sessionTitle.length > 0 ? this.sessionTitle : this.getAgentName())
-                .fontSize(this.sm.getFontSize('caption'))
-                .fontColor(this.sm.getColor('text_secondary'))
-                .margin({ bottom: 4 })
-              // 消息内容 + 流式光标
-              Row() {
-                Text(msg.content.length > 0 ? msg.content : (msg.isStreaming ? '' : '（空回复）'))
+          Column() {
+            // Agent 署名
+            Text(this.sessionTitle.length > 0 ? this.sessionTitle : this.getAgentName())
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_secondary'))
+              .margin({ bottom: 4 })
+            // 消息内容 + 流式光标
+            Row() {
+              Text(msg.content.length > 0 ? msg.content : (msg.isStreaming ? '' : '（空回复）'))
+                .fontSize(this.sm.getFontSize('body'))
+                .fontColor(this.sm.getColor('text_primary'))
+              // 流式生成中显示闪烁光标
+              if (msg.isStreaming) {
+                Text('▍')
                   .fontSize(this.sm.getFontSize('body'))
-                  .fontColor(this.sm.getColor('text_primary'))
-                // 流式生成中显示闪烁光标
-                if (msg.isStreaming) {
-                  Text('▍')
-                    .fontSize(this.sm.getFontSize('body'))
-                    .fontColor(this.sm.getColor('primary'))
-                    .margin({ left: 2 })
-                }
+                  .fontColor(this.sm.getColor('primary'))
+                  .margin({ left: 2 })
               }
-              .width('100%')
-              .alignItems(VerticalAlign.Bottom)
-              // 时间戳
-              Text(this.formatTime(msg.timestamp))
-                .fontSize(this.sm.getFontSize('caption'))
-                .fontColor(this.sm.getColor('text_disabled'))
-                .margin({ top: 4 })
-                .alignSelf(ItemAlign.End)
             }
-            .alignItems(HorizontalAlign.Start)
+            .alignItems(VerticalAlign.Bottom)
+            // 时间戳
+            Text(this.formatTime(msg.timestamp))
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_disabled'))
+              .margin({ top: 4 })
+              .alignSelf(ItemAlign.End)
+          }
+          .alignItems(HorizontalAlign.Start)
           }
         }
-        .constraintSize({ maxWidth: '75%' })
+        .width('80%')
       }
       .width('100%')
       .justifyContent(FlexAlign.Start)
