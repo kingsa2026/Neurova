@@ -1,37 +1,13 @@
 /**
- * KnowledgeGraphPage - 知识图谱页
+ * KnowledgeGraphPage - 知识图谱页（knowledge_graph_api 真实契约版）
  *
- * 职责：展示当前 Agent 的知识图谱节点+边，支持节点筛选、节点详情、节点删除
- * 设计：
- *   - KnowledgeGraphViewHelper（导出）：纯视图模型，封装节点类型颜色映射、节点类型图标、
- *     节点类型中文标签、平均权重计算、关联边查找；无 UI 运行时依赖，可独立单元测试；
- *   - KnowledgeGraphPage（@Component）：Column [TopNavMenu(标题"知识图谱"+返回+刷新)]
- *     + [节点类型筛选 Tab（全部/概念/实体/事件/事实）]
- *     + [加载态/空态/概览卡 + 节点列表]；概览卡展示节点数、边数、平均权重；
- *     节点列表项 GlassCard 含 label、type 徽章、weight、属性数、操作按钮（查看/删除）；
- *     节点详情通过 Stack 条件渲染的弹窗展示完整属性 + 关联边列表；
- *   - 颜色统一走 StyleManager，路由走 Router，API 走 ApiFacade.cognition.getKnowledgeGraph，
- *     状态走 AgentsStore（currentAgentId 过滤），日志走 Logger，提示走 MessageManager。
- *
- * 依赖：
- *   - ../components/glass：TopNavMenu、GlassCard、GlassButton、GlassPanel
- *   - ../libs/api/ApiFacade：统一 API 门面（cognition.getKnowledgeGraph）
- *   - ../libs/state/stores/AgentsStore：Agent 状态（currentAgentId 过滤）
- *   - ../routing/Router：统一路由跳转
- *   - ../libs/style/StyleManager：统一样式 token
- *   - ../libs/logger/Logger：统一日志
- *   - ../libs/message/MessageManager：统一消息提示
- *   - ../libs/types：KnowledgeNode、KnowledgeEdge、KnowledgeGraph
- *
- * 用法：
- *   由 Router.push 跳转进入；
- *   aboutToAppear 调用 api.cognition.getKnowledgeGraph 加载节点+边；
- *   节点类型筛选 Tab 切换 → 本地 filterByType 过滤；
- *   查看按钮 → 弹出 Stack 弹窗展示完整属性 + 关联边列表；
- *   删除按钮 → 当前提示"功能开发中"（后端 removeKnowledgeNode 待 M5 实现）
- *
- * TDD：KnowledgeGraphViewHelper 各方法按红绿灯垂直切片逐步实现，
- *      详见 KnowledgeGraphPage.test.ets
+ * 数据：GET /v1/knowledge-graph/{agent_id}/knowledge-graph?limit=
+ *       （data 投影：nodes[{id,label,type,description,weight,created_at}]/
+ *        edges[{source,target,relation,weight}]/total_nodes/total_edges/
+ *        truncated/hint）
+ * 契约说明：节点类型真实词汇为 concept/entity/event/memory（NodeType 枚举）；
+ *       后端无节点删除端点，本页不提供删除；概览卡展示裁剪子图与真总量
+ *       （truncated 提示"仅展示前 N 节点子图"）。
  */
 
 import { TopNavMenu, GlassCard, GlassButton, GlassPanel } from '../components/glass';
@@ -41,7 +17,7 @@ import { Router } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { KnowledgeNode, KnowledgeEdge, KnowledgeGraph } from '../libs/types';
+import { KnowledgeGraphDto, GraphNodeDto, GraphEdgeDto } from '../libs/api/modules/CognitionApi';
 
 /** 日志标签 */
 const TAG = 'KnowledgeGraphPage';
@@ -58,44 +34,59 @@ const TAG = 'KnowledgeGraphPage';
 export class KnowledgeGraphViewHelper {
   /**
    * 获取节点类型对应的颜色 token 名
-   * 映射：concept→info，entity→success，event→warning，fact→primary
-   * @param type 节点类型
+   * 映射：concept→info，entity→success，event→warning，memory→primary
+   * @param type 节点类型（NodeType 枚举词汇）
    * @return StyleManager 颜色 token 名
    */
-  static getNodeTypeColor(type: KnowledgeNode['type']): string {
+  static getNodeTypeColor(type: string): string {
     if (type === 'concept') return 'info';
     if (type === 'entity') return 'success';
     if (type === 'event') return 'warning';
-    if (type === 'fact') return 'primary';
+    if (type === 'memory') return 'primary';
     return 'text_disabled';
   }
 
   /**
    * 获取节点类型对应的图标 emoji
-   * 映射：concept→💡，entity→🎯，event→⚡，fact→📌
+   * 映射：concept→💡，entity→🎯，event→⚡，memory→🧠
    * @param type 节点类型
    * @return emoji 字符串
    */
-  static getNodeTypeIcon(type: KnowledgeNode['type']): string {
+  static getNodeTypeIcon(type: string): string {
     if (type === 'concept') return '💡';
     if (type === 'entity') return '🎯';
     if (type === 'event') return '⚡';
-    if (type === 'fact') return '📌';
+    if (type === 'memory') return '🧠';
     return '📄';
   }
 
   /**
    * 获取节点类型的中文标签
-   * 映射：concept→概念，entity→实体，event→事件，fact→事实
+   * 映射：concept→概念，entity→实体，event→事件，memory→记忆
    * @param type 节点类型
    * @return 中文标签字符串
    */
-  static getNodeTypeLabel(type: KnowledgeNode['type']): string {
+  static getNodeTypeLabel(type: string): string {
     if (type === 'concept') return '概念';
     if (type === 'entity') return '实体';
     if (type === 'event') return '事件';
-    if (type === 'fact') return '事实';
+    if (type === 'memory') return '记忆';
     return '未知';
+  }
+
+  /**
+   * 关系类型 → 中文标签（RelationType 枚举；未知原样）
+   */
+  static relationLabel(relation: string): string {
+    if (relation === 'is_a') return '是一种';
+    if (relation === 'has_a') return '拥有';
+    if (relation === 'part_of') return '属于';
+    if (relation === 'related_to') return '相关';
+    if (relation === 'causes') return '导致';
+    if (relation === 'similar_to') return '相似';
+    if (relation === 'opposite_of') return '相反';
+    if (relation === 'temporal') return '时间关系';
+    return relation;
   }
 
   /**
@@ -103,9 +94,9 @@ export class KnowledgeGraphViewHelper {
    * @param nodes 节点列表
    * @return 平均权重；空列表返回 0
    */
-  static calculateAvgWeight(nodes: KnowledgeNode[]): number {
+  static calculateAvgWeight(nodes: GraphNodeDto[]): number {
     if (nodes.length === 0) return 0;
-    const sum = nodes.reduce((acc: number, n: KnowledgeNode) => acc + (n.weight ?? 0), 0);
+    const sum = nodes.reduce((acc: number, n: GraphNodeDto) => acc + (n.weight ?? 0), 0);
     return sum / nodes.length;
   }
 
@@ -115,8 +106,8 @@ export class KnowledgeGraphViewHelper {
    * @param edges 边列表
    * @return 关联边列表（保持原顺序）
    */
-  static findRelatedEdges(nodeId: string, edges: KnowledgeEdge[]): KnowledgeEdge[] {
-    return edges.filter((e: KnowledgeEdge) => e.source === nodeId || e.target === nodeId);
+  static findRelatedEdges(nodeId: string, edges: GraphEdgeDto[]): GraphEdgeDto[] {
+    return edges.filter((e: GraphEdgeDto) => e.source === nodeId || e.target === nodeId);
   }
 }
 
@@ -130,26 +121,26 @@ interface NodeTypeFilterOption {
   label: string;
 }
 
-/** 节点类型筛选 Tab 列表（顺序即展示顺序） */
+/** 节点类型筛选 Tab 列表（顺序即展示顺序，词汇与后端 NodeType 枚举同源） */
 const NODE_TYPE_FILTERS: NodeTypeFilterOption[] = [
   { value: 'all', label: '全部' },
   { value: 'concept', label: '概念' },
   { value: 'entity', label: '实体' },
   { value: 'event', label: '事件' },
-  { value: 'fact', label: '事实' },
+  { value: 'memory', label: '记忆' },
 ];
 
 @Component
 export struct KnowledgeGraphPage {
-  // 知识图谱数据（节点+边）
-  @State graph: KnowledgeGraph = { nodes: [], edges: [] };
+  // 知识图谱数据（节点+边+真总量）
+  @State graph: KnowledgeGraphDto | null = null;
   // 加载态
   @State loading: boolean = true;
   // 当前激活的节点类型筛选值：'all' 或具体类型
   @State activeType: string = 'all';
   // 详情弹窗控制：showDetail 控制显隐，detailNode 持有当前查看的节点
   @State showDetail: boolean = false;
-  @State detailNode: KnowledgeNode | null = null;
+  @State detailNode: GraphNodeDto | null = null;
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -195,17 +186,18 @@ export struct KnowledgeGraphPage {
    * 获取经当前类型筛选后的节点列表
    * 规则：activeType === 'all' 返回全量；否则按 type 字段过滤
    */
-  private getFilteredNodes(): KnowledgeNode[] {
+  private getFilteredNodes(): GraphNodeDto[] {
+    const nodes = this.graph !== null ? this.graph.nodes : [];
     if (this.activeType === 'all') {
-      return this.graph.nodes;
+      return nodes;
     }
-    return this.graph.nodes.filter((n: KnowledgeNode) => n.type === this.activeType);
+    return nodes.filter((n: GraphNodeDto) => n.type === this.activeType);
   }
 
   /**
    * 打开节点详情弹窗
    */
-  private openDetail(node: KnowledgeNode): void {
+  private openDetail(node: GraphNodeDto): void {
     this.detailNode = node;
     this.showDetail = true;
   }
@@ -217,34 +209,17 @@ export struct KnowledgeGraphPage {
   }
 
   /**
-   * 删除节点（后端 removeKnowledgeNode 待 M5 实现，当前提示"功能开发中"）
-   */
-  private handleDelete(node: KnowledgeNode): void {
-    this.msg.info('节点删除功能开发中');
-  }
-
-  /**
-   * 计算节点属性数量
-   * @param node 节点
-   * @return 属性数量；无 properties 返回 0
-   */
-  private getPropertiesCount(node: KnowledgeNode): number {
-    if (!node.properties) return 0;
-    return Object.keys(node.properties).length;
-  }
-
-  /**
    * 获取节点关联边列表（直接复用 ViewHelper 纯函数）
    */
-  private getRelatedEdges(nodeId: string): KnowledgeEdge[] {
-    return KnowledgeGraphViewHelper.findRelatedEdges(nodeId, this.graph.edges);
+  private getRelatedEdges(nodeId: string): GraphEdgeDto[] {
+    const edges = this.graph !== null ? this.graph.edges : [];
+    return KnowledgeGraphViewHelper.findRelatedEdges(nodeId, edges);
   }
 
   /**
    * 格式化权重为百分比字符串
    */
-  private formatWeight(weight?: number): string {
-    if (weight === undefined) return '—';
+  private formatWeight(weight: number): string {
     return (weight * 100).toFixed(1) + '%';
   }
 
@@ -305,12 +280,19 @@ export struct KnowledgeGraphPage {
           .layoutWeight(1)
           .justifyContent(FlexAlign.Center)
           .alignItems(HorizontalAlign.Center)
-        } else if (this.graph.nodes.length === 0) {
+        } else if (this.graph === null || this.graph.nodes.length === 0) {
           Column() {
             Text('暂无图谱数据')
               .fontSize(this.sm.getFontSize('subtitle'))
               .fontColor(this.sm.getColor('text_secondary'))
               .margin({ bottom: this.sm.getSpacing('md') })
+            if (this.graph !== null && this.graph.hint.length > 0) {
+              Text(this.graph.hint)
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_disabled'))
+                .margin({ bottom: this.sm.getSpacing('md') })
+                .textAlign(TextAlign.Center)
+            }
             GlassButton({
               text: '重新加载',
               type: 'primary',
@@ -329,11 +311,11 @@ export struct KnowledgeGraphPage {
               this.buildOverviewCard()
             }
             // 节点列表
-            ForEach(this.getFilteredNodes(), (node: KnowledgeNode) => {
+            ForEach(this.getFilteredNodes(), (node: GraphNodeDto) => {
               ListItem() {
                 this.buildNodeCard(node)
               }
-            }, (node: KnowledgeNode) => node.id)
+            }, (node: GraphNodeDto) => node.id)
           }
           .layoutWeight(1)
           .width('100%')
@@ -363,52 +345,66 @@ export struct KnowledgeGraphPage {
   // 概览卡构建器
   // ===========================================================================
 
-  /** 图谱概览卡：节点数 + 边数 + 平均权重 */
+  /** 图谱概览卡：子图节点/边 + 真总量（truncated 提示裁剪）+ 平均权重 */
   @Builder
   buildOverviewCard() {
     GlassCard() {
-      Row() {
-        // 节点数
-        Column() {
-          Text(`${this.graph.nodes.length}`)
-            .fontSize(this.sm.getFontSize('title'))
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.sm.getColor('primary'))
-          Text('节点数')
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_secondary'))
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Center)
+      Column() {
+        Row() {
+          // 子图节点数 / 真总量
+          Column() {
+            Text(this.graph !== null ? `${this.graph.nodes.length}/${this.graph.total_nodes}` : '-')
+              .fontSize(this.sm.getFontSize('title'))
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.sm.getColor('primary'))
+            Text('节点（子图/总量）')
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_secondary'))
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Center)
 
-        // 边数
-        Column() {
-          Text(`${this.graph.edges.length}`)
-            .fontSize(this.sm.getFontSize('title'))
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.sm.getColor('info'))
-          Text('边数')
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_secondary'))
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Center)
+          // 子图边数 / 真总量
+          Column() {
+            Text(this.graph !== null ? `${this.graph.edges.length}/${this.graph.total_edges}` : '-')
+              .fontSize(this.sm.getFontSize('title'))
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.sm.getColor('info'))
+            Text('边（子图/总量）')
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_secondary'))
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Center)
 
-        // 平均权重
-        Column() {
-          Text(this.formatWeight(KnowledgeGraphViewHelper.calculateAvgWeight(this.graph.nodes)))
-            .fontSize(this.sm.getFontSize('title'))
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.sm.getColor('success'))
-          Text('平均权重')
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_secondary'))
+          // 平均权重
+          Column() {
+            Text(this.graph !== null
+              ? this.formatWeight(KnowledgeGraphViewHelper.calculateAvgWeight(this.graph.nodes))
+              : '-')
+              .fontSize(this.sm.getFontSize('title'))
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.sm.getColor('success'))
+            Text('平均权重')
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor('text_secondary'))
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Center)
         }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Center)
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
+        // 截断提示（后端 truncated：给出的是裁剪后的子图）
+        if (this.graph !== null && this.graph.truncated) {
+          Text('图谱较大，当前仅展示裁剪子图')
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('warning'))
+            .margin({ top: this.sm.getSpacing('sm') })
+        }
       }
       .width('100%')
-      .alignItems(VerticalAlign.Center)
+      .alignItems(HorizontalAlign.Start)
     }
     .width('100%')
   }
@@ -417,9 +413,9 @@ export struct KnowledgeGraphPage {
   // 节点卡片构建器
   // ===========================================================================
 
-  /** 单个节点卡片：图标 + label + type 徽章 + weight + 属性数 + 操作按钮 */
+  /** 单个节点卡片：图标 + label + type 徽章 + weight + 描述 + 关联边数 + 查看 */
   @Builder
-  buildNodeCard(node: KnowledgeNode) {
+  buildNodeCard(node: GraphNodeDto) {
     GlassCard() {
       Column() {
         // 第一行：图标 + label
@@ -438,7 +434,7 @@ export struct KnowledgeGraphPage {
         .width('100%')
         .alignItems(VerticalAlign.Center)
 
-        // type 徽章
+        // type 徽章 + 权重
         Row() {
           Text(KnowledgeGraphViewHelper.getNodeTypeLabel(node.type))
             .fontSize(this.sm.getFontSize('caption'))
@@ -446,27 +442,28 @@ export struct KnowledgeGraphPage {
             .padding({ left: 8, right: 8, top: 2, bottom: 2 })
             .borderRadius(10)
             .backgroundColor(this.sm.getColor(KnowledgeGraphViewHelper.getNodeTypeColor(node.type)))
+          Text(`权重: ${this.formatWeight(node.weight)}`)
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_secondary'))
+            .margin({ left: 12 })
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
         .margin({ top: this.sm.getSpacing('sm') })
 
-        // 底部行：weight + 属性数 + 关联边数
+        // 描述摘要
+        if (node.description.length > 0) {
+          Text(node.description)
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_secondary'))
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ top: this.sm.getSpacing('sm') })
+            .width('100%')
+        }
+
+        // 底部行：关联边数
         Row() {
-          Text(`权重: ${this.formatWeight(node.weight)}`)
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_secondary'))
-          Text('·')
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_disabled'))
-            .margin({ left: 6, right: 6 })
-          Text(`属性: ${this.getPropertiesCount(node)}`)
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_secondary'))
-          Text('·')
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_disabled'))
-            .margin({ left: 6, right: 6 })
           Text(`关联边: ${this.getRelatedEdges(node.id).length}`)
             .fontSize(this.sm.getFontSize('caption'))
             .fontColor(this.sm.getColor('text_secondary'))
@@ -478,7 +475,7 @@ export struct KnowledgeGraphPage {
         .margin({ top: this.sm.getSpacing('sm') })
         .alignItems(VerticalAlign.Center)
 
-        // 操作按钮：查看详情 / 删除（右对齐）
+        // 操作按钮：查看详情（后端无节点删除端点，不提供删除）
         Row() {
           GlassButton({
             text: '查看详情',
@@ -486,13 +483,6 @@ export struct KnowledgeGraphPage {
             btnSize: 'small',
             onTap: () => { this.openDetail(node); }
           })
-          GlassButton({
-            text: '删除',
-            type: 'danger',
-            btnSize: 'small',
-            onTap: () => { this.handleDelete(node); }
-          })
-            .margin({ left: this.sm.getSpacing('sm') })
         }
         .width('100%')
         .justifyContent(FlexAlign.End)
@@ -508,9 +498,9 @@ export struct KnowledgeGraphPage {
   // 节点详情弹窗构建器（Stack 覆盖层，内嵌实现，不创建单独 CustomDialog 文件）
   // ===========================================================================
 
-  /** 详情弹窗：完整属性 + 关联边列表 */
+  /** 详情弹窗：描述 + 关联边列表（关系中文标签） */
   @Builder
-  buildDetailDialog(node: KnowledgeNode) {
+  buildDetailDialog(node: GraphNodeDto) {
     Stack({ alignContent: Alignment.Center }) {
       // 背景遮罩层：点击空白处关闭
       Column()
@@ -555,35 +545,23 @@ export struct KnowledgeGraphPage {
           .margin({ top: this.sm.getSpacing('sm') })
           .alignItems(VerticalAlign.Center)
 
-          // 属性列表（可滚动）
-          Text('属性')
+          // 描述
+          Text('描述')
             .fontSize(this.sm.getFontSize('subtitle'))
             .fontWeight(FontWeight.Medium)
             .fontColor(this.sm.getColor('text_primary'))
             .margin({ top: this.sm.getSpacing('md') })
           Scroll() {
             Column() {
-              if (this.getPropertiesCount(node) === 0) {
-                Text('暂无属性')
+              if (node.description.length === 0) {
+                Text('暂无描述')
                   .fontSize(this.sm.getFontSize('caption'))
                   .fontColor(this.sm.getColor('text_disabled'))
               } else {
-                ForEach(Object.entries(node.properties ?? {}), ([k, v]: [string, Object]) => {
-                  Row() {
-                    Text(`${k}:`)
-                      .fontSize(this.sm.getFontSize('caption'))
-                      .fontColor(this.sm.getColor('text_secondary'))
-                      .layoutWeight(1)
-                    Text(typeof v === 'object' ? JSON.stringify(v) : String(v))
-                      .fontSize(this.sm.getFontSize('caption'))
-                      .fontColor(this.sm.getColor('text_primary'))
-                      .maxLines(2)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  }
+                Text(node.description)
+                  .fontSize(this.sm.getFontSize('caption'))
+                  .fontColor(this.sm.getColor('text_primary'))
                   .width('100%')
-                  .margin({ top: 4 })
-                  .alignItems(VerticalAlign.Center)
-                }, ([k]: [string, Object]) => k)
               }
             }
             .width('100%')
@@ -606,7 +584,7 @@ export struct KnowledgeGraphPage {
                   .fontSize(this.sm.getFontSize('caption'))
                   .fontColor(this.sm.getColor('text_disabled'))
               } else {
-                ForEach(this.getRelatedEdges(node.id), (edge: KnowledgeEdge) => {
+                ForEach(this.getRelatedEdges(node.id), (edge: GraphEdgeDto) => {
                   Row() {
                     Text(`${edge.source} → ${edge.target}`)
                       .fontSize(this.sm.getFontSize('caption'))
@@ -614,7 +592,7 @@ export struct KnowledgeGraphPage {
                       .layoutWeight(1)
                       .maxLines(1)
                       .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    Text(edge.relation)
+                    Text(KnowledgeGraphViewHelper.relationLabel(edge.relation))
                       .fontSize(this.sm.getFontSize('caption'))
                       .fontColor(this.sm.getColor('text_secondary'))
                       .margin({ left: 8 })
@@ -622,7 +600,7 @@ export struct KnowledgeGraphPage {
                   .width('100%')
                   .margin({ top: 4 })
                   .alignItems(VerticalAlign.Center)
-                }, (edge: KnowledgeEdge) => edge.id)
+                }, (edge: GraphEdgeDto) => `${edge.source}-${edge.target}-${edge.relation}`)
               }
             }
             .width('100%')

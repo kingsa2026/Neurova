@@ -24,16 +24,16 @@ export default function reflectionPageTest() {
       expect(ReflectionViewHelper.getInsightCount(3)).assertEqual('洞察 3 条');
     });
 
-    // ========== 切片3: getImprovementCount - 0 → "无改进" ==========
+    // ========== 切片3: getRelatedCount - 0 → "无关联" ==========
 
-    it('improvement_count_zero_returns_empty_text', 0, () => {
-      expect(ReflectionViewHelper.getImprovementCount(0)).assertEqual('无改进');
+    it('related_count_zero_returns_empty_text', 0, () => {
+      expect(ReflectionViewHelper.getRelatedCount(0)).assertEqual('无关联');
     });
 
-    // ========== 切片4: getImprovementCount - 正数 → "改进 n 项" ==========
+    // ========== 切片4: getRelatedCount - 正数 → "关联 n 条" ==========
 
-    it('improvement_count_positive_returns_count_text', 0, () => {
-      expect(ReflectionViewHelper.getImprovementCount(2)).assertEqual('改进 2 项');
+    it('related_count_positive_returns_count_text', 0, () => {
+      expect(ReflectionViewHelper.getRelatedCount(2)).assertEqual('关联 2 条');
     });
 
     // ========== 切片5: truncateContent - 默认 150 截断加省略号 ==========
@@ -60,13 +60,16 @@ export default function reflectionPageTest() {
       expect(ReflectionViewHelper.truncateContent('short text')).assertEqual('short text');
     });
 
-    // ========== 切片8: truncateTrigger - 默认 60 截断 ==========
+    // ========== 切片8: reflectionTypeLabel - 已知词 → 中文标签，未知词原样返回 ==========
 
-    it('truncate_trigger_default_60_truncates', 0, () => {
-      const long = 'x'.repeat(100);
-      const result = ReflectionViewHelper.truncateTrigger(long);
-      expect(result.length).assertEqual(63);
-      expect(result.endsWith('...')).assertTrue();
+    it('reflection_type_label_known_returns_chinese', 0, () => {
+      expect(ReflectionViewHelper.reflectionTypeLabel('performance')).assertEqual('性能反思');
+      expect(ReflectionViewHelper.reflectionTypeLabel('error')).assertEqual('错误反思');
+      expect(ReflectionViewHelper.reflectionTypeLabel('strategy')).assertEqual('策略反思');
+    });
+
+    it('reflection_type_label_unknown_returns_raw', 0, () => {
+      expect(ReflectionViewHelper.reflectionTypeLabel('general')).assertEqual('通用反思');
     });
 
     // ========== 切片9: formatRelativeTime - 今天 → "今天 HH:mm" ==========
@@ -115,6 +118,22 @@ export default function reflectionPageTest() {
 
     it('format_relative_time_invalid_returns_unknown', 0, () => {
       expect(ReflectionViewHelper.formatRelativeTime('not-a-date')).assertEqual('未知');
+    });
+
+    // ========== 切片15: formatTimestamp - 秒级时间戳 → 与 ISO 相对时间同读数 ==========
+
+    it('format_timestamp_seconds_matches_iso_reading', 0, () => {
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 14, 30);
+      const tsSeconds = Math.floor(today.getTime() / 1000);
+      expect(ReflectionViewHelper.formatTimestamp(tsSeconds)).assertEqual('今天 14:30');
+    });
+
+    // ========== 切片16: formatTimestamp - 0/负数 → "未知" ==========
+
+    it('format_timestamp_non_positive_returns_unknown', 0, () => {
+      expect(ReflectionViewHelper.formatTimestamp(0)).assertEqual('未知');
+      expect(ReflectionViewHelper.formatTimestamp(-5)).assertEqual('未知');
     });
   });
 }

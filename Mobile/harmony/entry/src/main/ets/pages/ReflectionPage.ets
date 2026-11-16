@@ -1,39 +1,13 @@
 /**
- * ReflectionPage - 反思记录页
+ * ReflectionPage - 反思记录页（growth.py /reflection 真实契约版）
  *
- * 职责：按时间倒序展示反思记录列表，支持查看详情、新建反思、删除反思
- * 设计：
- *   - ReflectionViewHelper（导出）：纯视图模型，封装洞察数文案、改进项数文案、内容截断、
- *     触发原因截断、相对时间格式化（今天/昨天/本周/其他边界场景），无 UI 运行时依赖，
- *     可独立单元测试；
- *   - ReflectionPage（@Component）：Stack[Column[TopNavMenu(标题"反思记录"+返回+新建)]
- *     + [加载态/空态/列表]] + [详情弹窗] + [新建弹窗]；列表项 GlassCard 含触发原因摘要、
- *     内容摘要（截断）、洞察数、改进项数、创建时间、查看/删除操作；
- *     详情弹窗内嵌 Stack 条件渲染（不单独建 CustomDialog 文件），
- *     展示完整 trigger、content、洞察列表（bullets）、改进项列表（bullets）；
- *     新建弹窗含 trigger 输入、content 文本域、insights 多行、improvements 多行；
- *   - 颜色统一走 StyleManager，路由走 Router，API 走 ApiFacade.cognition，
- *     状态走 AgentsStore
- *
- * 依赖：
- *   - ../components/glass：TopNavMenu、GlassCard、GlassButton、GlassInput
- *   - ../libs/api/ApiFacade：统一 API 门面（cognition.listReflections/getReflection/
- *     createReflection/removeReflection）
- *   - ../libs/state/stores/AgentsStore：Agent 状态（currentAgentId 过滤）
- *   - ../routing/Router：统一路由跳转 + RouteNames
- *   - ../libs/style/StyleManager：统一样式 token
- *   - ../libs/logger/Logger：统一日志
- *   - ../libs/message/MessageManager：统一消息提示
- *   - ../libs/types：ReflectionRecord
- *
- * 用法：
- *   由 Router.push 跳转进入；
- *   aboutToAppear 加载当前 Agent 的反思列表（按 createdAt 倒序）；
- *   新建按钮 → 弹出新建 Dialog → 调用 api.cognition.createReflection → 刷新列表；
- *   详情按钮 → 弹出 Dialog 展示完整内容与洞察/改进列表；
- *   删除按钮 → AlertDialog 二次确认 → 调用 api.cognition.removeReflection → 刷新列表
- *
- * TDD：ReflectionViewHelper 各方法按红绿灯垂直切片逐步实现，详见 ReflectionPage.test.ets
+ * 数据：GET /v1/growth/reflection?agent_id=&limit=
+ *       （_reflection_entry_to_item 投影：log_id/agent_id/timestamp/
+ *        reflection_type/content/insights/confidence/related_memories/status）
+ * 操作：POST /v1/growth/reflection（ReflectionLogCreate：reflection_type/content/
+ *       insights/confidence/related_memories）。
+ * 契约说明：后端无删除端点，本页不提供删除；旧"改进项"字段后端不存在，
+ *       展示位改为真实字段 related_memories（相关记忆）。
  */
 
 import { TopNavMenu, GlassCard, GlassButton, GlassInput } from '../components/glass';
@@ -43,7 +17,7 @@ import { Router, RouteNames } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { ReflectionRecord } from '../libs/types';
+import { ReflectionDto, ReflectionCreateRequest } from '../libs/api/modules/CognitionApi';
 
 /** 日志标签 */
 const TAG = 'ReflectionPage';
@@ -51,17 +25,33 @@ const TAG = 'ReflectionPage';
 /** 默认内容截断长度 */
 const DEFAULT_CONTENT_MAX_LEN = 150;
 
-/** 默认触发原因截断长度 */
-const DEFAULT_TRIGGER_MAX_LEN = 60;
-
 /** 星期中文映射表（getDay 0=周日） */
 const WEEKDAY_LABELS: string[] = ['日', '一', '二', '三', '四', '五', '六'];
+
+/** 反思类型选项（ReflectionType 枚举词汇，与后端同源） */
+const REFLECTION_TYPES: string[] = ['performance', 'error', 'improvement', 'pattern', 'insight', 'strategy'];
+
+/** 类型筛选配置 */
+interface TypeOption {
+  value: string;
+  label: string;
+}
+
+/** 反思类型 → 中文标签 */
+const TYPE_LABELS: TypeOption[] = [
+  { value: 'performance', label: '性能反思' },
+  { value: 'error', label: '错误反思' },
+  { value: 'improvement', label: '改进反思' },
+  { value: 'pattern', label: '模式反思' },
+  { value: 'insight', label: '洞察反思' },
+  { value: 'strategy', label: '策略反思' },
+  { value: 'general', label: '通用反思' },
+];
 
 // ===========================================================================
 // ReflectionViewHelper - 反思视图模型（纯函数，无 UI 依赖，可独立单元测试）
 //
 // 设计：所有方法为 static，输入 → 输出，无副作用；
-//       颜色方法返回 StyleManager 的 token 名（如 'info'），由页面解析为实际颜色值；
 //       通过本文件 export，供 ohosTest 直接导入测试
 // ===========================================================================
 
@@ -77,13 +67,25 @@ export class ReflectionViewHelper {
   }
 
   /**
-   * 获取改进项数文案
-   * @param count 改进项数量
-   * @return 0 → "无改进"，n → "改进 n 项"
+   * 获取相关记忆数文案
+   * @param count 相关记忆数量
+   * @return 0 → "无关联"，n → "关联 n 条"
    */
-  static getImprovementCount(count: number): string {
-    if (count <= 0) return '无改进';
-    return `改进 ${count} 项`;
+  static getRelatedCount(count: number): string {
+    if (count <= 0) return '无关联';
+    return `关联 ${count} 条`;
+  }
+
+  /**
+   * 反思类型 → 中文标签（未知词原样返回，不臆造）
+   */
+  static reflectionTypeLabel(type: string): string {
+    for (const opt of TYPE_LABELS) {
+      if (opt.value === type) {
+        return opt.label;
+      }
+    }
+    return type;
   }
 
   /**
@@ -99,19 +101,7 @@ export class ReflectionViewHelper {
   }
 
   /**
-   * 截断触发原因，超长时截取 maxLen 字符并追加省略号
-   * @param trigger 原始触发原因
-   * @param maxLen 最大字符数，默认 60
-   * @return 截断后的触发原因；未超长则原样返回
-   */
-  static truncateTrigger(trigger: string, maxLen?: number): string {
-    const limit = maxLen !== undefined ? maxLen : DEFAULT_TRIGGER_MAX_LEN;
-    if (trigger.length <= limit) return trigger;
-    return trigger.substring(0, limit) + '...';
-  }
-
-  /**
-   * 格式化相对时间
+   * 格式化相对时间（ISO 字符串入参）
    * 映射：今天 → "今天 HH:mm"，昨天 → "昨天 HH:mm"，
    *       本周（2-6 天内）→ "周X HH:mm"，其他 → "YYYY-MM-DD"
    * @param timeStr ISO 时间字符串
@@ -148,21 +138,29 @@ export class ReflectionViewHelper {
     const dd = input.getDate().toString().padStart(2, '0');
     return `${yyyy}-${MM}-${dd}`;
   }
+
+  /**
+   * 格式化秒级时间戳（后端 timestamp 为 float 秒）→ 复用 ISO 相对时间逻辑
+   * @param ts 秒级时间戳；非正数视为未知
+   */
+  static formatTimestamp(ts: number): string {
+    if (!ts || ts <= 0) return '未知';
+    return ReflectionViewHelper.formatRelativeTime(new Date(ts * 1000).toISOString());
+  }
 }
 
 // ===========================================================================
 // ReflectionPage - 反思记录页组件
 //
 // 设计：Stack[Column[TopNavMenu + 主体] + 详情弹窗 + 新建弹窗]；
-//       数据流：aboutToAppear → api.cognition.listReflections → 按 createdAt 倒序排序 → 渲染；
-//       新建/删除完成后自动刷新列表；
-//       弹窗不单独建文件，通过 Stack 条件渲染内嵌在 build() 中
+//       数据流：aboutToAppear → api.cognition.listReflections → 按 timestamp 倒序 → 渲染；
+//       新建完成后自动刷新列表；后端无删除端点，不提供删除
 // ===========================================================================
 
 @Component
 export struct ReflectionPage {
-  // 反思列表（由 API 加载，按 createdAt 倒序）
-  @State reflections: ReflectionRecord[] = [];
+  // 反思列表（由 API 加载，按 timestamp 倒序）
+  @State reflections: ReflectionDto[] = [];
   // 加载态（控制"加载中..."占位与列表切换）
   @State loading: boolean = true;
   // 详情弹窗可见性
@@ -170,19 +168,21 @@ export struct ReflectionPage {
   // 新建弹窗可见性
   @State showCreate: boolean = false;
   // 当前选中的反思（详情弹窗使用）
-  @State selectedReflection: ReflectionRecord | null = null;
+  @State selectedReflection: ReflectionDto | null = null;
   // 新建表单数据（嵌套对象，整体重新赋值）
   @State formData: {
-    trigger: string;
+    reflectionType: string;
     content: string;
     insightsText: string;
-    improvementsText: string;
   } = {
-    trigger: '',
+    reflectionType: 'performance',
     content: '',
     insightsText: '',
-    improvementsText: '',
   };
+  // 相关记忆输入（逗号分隔，独立 @State 便于 GlassInput 受控）
+  @State relatedMemoriesText: string = '';
+  // 提交中态
+  @State submitting: boolean = false;
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -198,20 +198,16 @@ export struct ReflectionPage {
 
   /**
    * 加载当前 Agent 的反思列表
-   * 流程：取 currentAgentId → 调用 api.cognition.listReflections → 按 createdAt 倒序排序
+   * 流程：取 currentAgentId → 调用 api.cognition.listReflections → 按 timestamp 倒序
    * 异常：记录日志并提示用户；finally 关闭 loading
    */
   private async loadReflections(): Promise<void> {
     this.loading = true;
     try {
       const agentId = this.agentsStore.currentAgentId || '';
-      if (!agentId) {
-        this.reflections = [];
-        return;
-      }
-      const res = await this.api.cognition.listReflections(agentId);
+      const res = await this.api.cognition.listReflections(agentId, 50);
       if (res.code === 0 && res.data) {
-        this.reflections = this.sortByCreatedAtDesc(res.data.items);
+        this.reflections = this.sortByTimestampDesc(res.data);
       }
     } catch (e) {
       this.logger.error(TAG, '加载反思列表失败', e as Error);
@@ -222,14 +218,10 @@ export struct ReflectionPage {
   }
 
   /**
-   * 按 createdAt 倒序排序（最新的在前）
+   * 按 timestamp 倒序排序（最新的在前）
    */
-  private sortByCreatedAtDesc(items: ReflectionRecord[]): ReflectionRecord[] {
-    return items.slice().sort((a, b) => {
-      const ta = new Date(a.createdAt).getTime();
-      const tb = new Date(b.createdAt).getTime();
-      return tb - ta;
-    });
+  private sortByTimestampDesc(items: ReflectionDto[]): ReflectionDto[] {
+    return items.slice().sort((a, b) => b.timestamp - a.timestamp);
   }
 
   /**
@@ -238,11 +230,11 @@ export struct ReflectionPage {
    */
   private openCreateDialog(): void {
     this.formData = {
-      trigger: '',
+      reflectionType: 'performance',
       content: '',
       insightsText: '',
-      improvementsText: '',
     };
+    this.relatedMemoriesText = '';
     this.showCreate = true;
   }
 
@@ -255,26 +247,27 @@ export struct ReflectionPage {
 
   /**
    * 提交新建反思
-   * 流程：将多行文本拆分为数组 → 调用 api.cognition.createReflection → 成功后关闭弹窗 + 刷新
+   * 流程：组装 ReflectionLogCreate → api.cognition.createReflection → 成功后关闭弹窗 + 刷新
    * 异常：记录日志并提示用户
    */
   private async submitCreate(): Promise<void> {
-    const trigger = this.formData.trigger.trim();
     const content = this.formData.content.trim();
-    if (!trigger || !content) {
-      this.msg.warning('触发原因和内容不能为空');
+    if (!content) {
+      this.msg.warning('反思内容不能为空');
       return;
     }
+    this.submitting = true;
     const insights = this.splitLines(this.formData.insightsText);
-    const improvements = this.splitLines(this.formData.improvementsText);
+    const relatedMemories = this.splitCommaSeparated(this.relatedMemoriesText);
     try {
-      const res = await this.api.cognition.createReflection({
-        agentId: this.agentsStore.currentAgentId,
-        trigger,
-        content,
-        insights,
-        improvements,
-      });
+      const payload: ReflectionCreateRequest = {
+        reflection_type: this.formData.reflectionType,
+        content: content,
+        insights: insights,
+        confidence: 0.5,
+        related_memories: relatedMemories,
+      };
+      const res = await this.api.cognition.createReflection(this.agentsStore.currentAgentId || '', payload);
       if (res.code === 0) {
         this.msg.success('创建成功');
         this.closeCreateDialog();
@@ -285,6 +278,8 @@ export struct ReflectionPage {
     } catch (e) {
       this.logger.error(TAG, '创建反思失败', e as Error);
       this.msg.error('创建反思失败');
+    } finally {
+      this.submitting = false;
     }
   }
 
@@ -300,9 +295,20 @@ export struct ReflectionPage {
   }
 
   /**
+   * 将逗号分隔文本拆分为非空字符串数组（自动 trim，过滤空段）
+   */
+  private splitCommaSeparated(text: string): string[] {
+    if (!text) return [];
+    return text
+      .split(',')
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+  }
+
+  /**
    * 打开详情弹窗
    */
-  private openDetailDialog(reflection: ReflectionRecord): void {
+  private openDetailDialog(reflection: ReflectionDto): void {
     this.selectedReflection = reflection;
     this.showDetail = true;
   }
@@ -313,47 +319,6 @@ export struct ReflectionPage {
   private closeDetailDialog(): void {
     this.showDetail = false;
     this.selectedReflection = null;
-  }
-
-  /**
-   * 删除前二次确认（AlertDialog）
-   */
-  private confirmDelete(reflection: ReflectionRecord): void {
-    AlertDialog.show({
-      title: '确认删除',
-      message: `确定要删除这条反思吗？此操作不可撤销。`,
-      autoCancel: true,
-      alignment: DialogAlignment.Center,
-      primaryButton: {
-        value: '取消',
-        action: () => {}
-      },
-      secondaryButton: {
-        value: '删除',
-        fontColor: this.sm.getColor('error'),
-        action: () => { this.deleteReflection(reflection.id); }
-      }
-    });
-  }
-
-  /**
-   * 执行删除
-   * 流程：调用 api.cognition.removeReflection → 成功后重新加载列表
-   * 异常：记录日志并提示用户
-   */
-  private async deleteReflection(reflectionId: string): Promise<void> {
-    try {
-      const res = await this.api.cognition.removeReflection(reflectionId);
-      if (res.code === 0) {
-        this.msg.success('删除成功');
-        this.loadReflections();
-      } else {
-        this.msg.error(res.message || '删除失败');
-      }
-    } catch (e) {
-      this.logger.error(TAG, '删除反思失败', e as Error);
-      this.msg.error('删除反思失败');
-    }
   }
 
   build() {
@@ -405,11 +370,11 @@ export struct ReflectionPage {
           .alignItems(HorizontalAlign.Center)
         } else {
           List({ space: 12 }) {
-            ForEach(this.reflections, (reflection: ReflectionRecord) => {
+            ForEach(this.reflections, (reflection: ReflectionDto) => {
               ListItem() {
                 this.buildReflectionCard(reflection)
               }
-            }, (reflection: ReflectionRecord) => reflection.id)
+            }, (reflection: ReflectionDto) => reflection.log_id)
           }
           .layoutWeight(1)
           .width('100%')
@@ -444,19 +409,29 @@ export struct ReflectionPage {
   // 列表项卡片构建器
   // ===========================================================================
 
-  /** 单条反思卡片：触发原因 + 内容摘要 + 洞察数 + 改进项数 + 创建时间 + 操作 */
+  /** 单条反思卡片：类型 + 内容摘要 + 洞察数 + 关联数 + 时间 + 查看 */
   @Builder
-  buildReflectionCard(reflection: ReflectionRecord) {
+  buildReflectionCard(reflection: ReflectionDto) {
     GlassCard() {
       Column() {
-        // 触发原因摘要（截断到 60 字符）
-        Text(ReflectionViewHelper.truncateTrigger(reflection.trigger))
-          .fontSize(this.sm.getFontSize('subtitle'))
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.sm.getColor('text_primary'))
-          .maxLines(2)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .width('100%')
+        // 类型徽章 + 状态
+        Row() {
+          Text(ReflectionViewHelper.reflectionTypeLabel(reflection.reflection_type))
+            .fontSize(this.sm.getFontSize('subtitle'))
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.sm.getColor('text_primary'))
+            .layoutWeight(1)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(reflection.status)
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_on_primary'))
+            .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+            .borderRadius(10)
+            .backgroundColor(this.sm.getColor('primary'))
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
 
         // 内容摘要（截断到 150 字符，最多 3 行）
         Text(ReflectionViewHelper.truncateContent(reflection.content))
@@ -467,18 +442,18 @@ export struct ReflectionPage {
           .margin({ top: this.sm.getSpacing('xs') })
           .width('100%')
 
-        // 底部行：洞察数 + 改进项数 + 创建时间
+        // 底部行：洞察数 + 关联数 + 时间
         Row() {
           Text(ReflectionViewHelper.getInsightCount(reflection.insights.length))
             .fontSize(this.sm.getFontSize('caption'))
             .fontColor(this.sm.getColor('info'))
 
-          Text(ReflectionViewHelper.getImprovementCount(reflection.improvements.length))
+          Text(ReflectionViewHelper.getRelatedCount(reflection.related_memories.length))
             .fontSize(this.sm.getFontSize('caption'))
             .fontColor(this.sm.getColor('success'))
             .margin({ left: this.sm.getSpacing('sm') })
 
-          Text(ReflectionViewHelper.formatRelativeTime(reflection.createdAt))
+          Text(ReflectionViewHelper.formatTimestamp(reflection.timestamp))
             .fontSize(this.sm.getFontSize('caption'))
             .fontColor(this.sm.getColor('text_disabled'))
             .margin({ left: this.sm.getSpacing('sm') })
@@ -489,7 +464,7 @@ export struct ReflectionPage {
         .margin({ top: this.sm.getSpacing('sm') })
         .alignItems(VerticalAlign.Center)
 
-        // 操作按钮（右对齐）
+        // 操作按钮（右对齐）：后端无删除端点，仅保留查看
         Row() {
           GlassButton({
             text: '查看',
@@ -497,13 +472,6 @@ export struct ReflectionPage {
             btnSize: 'small',
             onTap: () => { this.openDetailDialog(reflection); }
           })
-          GlassButton({
-            text: '删除',
-            type: 'danger',
-            btnSize: 'small',
-            onTap: () => { this.confirmDelete(reflection); }
-          })
-            .margin({ left: this.sm.getSpacing('sm') })
         }
         .width('100%')
         .justifyContent(FlexAlign.End)
@@ -519,21 +487,21 @@ export struct ReflectionPage {
   // 详情弹窗构建器（Stack 内嵌条件渲染）
   // ===========================================================================
 
-  /** 详情弹窗：完整 trigger、content、洞察列表（bullets）、改进项列表（bullets） */
+  /** 详情弹窗：类型、内容、洞察列表（bullets）、相关记忆列表（bullets）、时间 */
   @Builder
-  buildDetailDialog(reflection: ReflectionRecord) {
+  buildDetailDialog(reflection: ReflectionDto) {
     // 遮罩层：点击空白处关闭
     Column() {
       // 弹窗主体
       GlassCard({ title: '反思详情' }) {
         Scroll() {
           Column() {
-            // 触发原因
-            Text('触发原因')
+            // 反思类型
+            Text('反思类型')
               .fontSize(this.sm.getFontSize('caption'))
               .fontColor(this.sm.getColor('text_secondary'))
               .width('100%')
-            Text(reflection.trigger)
+            Text(ReflectionViewHelper.reflectionTypeLabel(reflection.reflection_type))
               .fontSize(this.sm.getFontSize('body'))
               .fontColor(this.sm.getColor('text_primary'))
               .width('100%')
@@ -577,27 +545,27 @@ export struct ReflectionPage {
               .margin({ top: 4 })
             }
 
-            // 改进项列表（bullets）
-            Text(`改进项（${reflection.improvements.length}）`)
+            // 相关记忆列表（bullets）
+            Text(`相关记忆（${reflection.related_memories.length}）`)
               .fontSize(this.sm.getFontSize('caption'))
               .fontColor(this.sm.getColor('success'))
               .width('100%')
               .margin({ top: this.sm.getSpacing('sm') })
-            if (reflection.improvements.length === 0) {
-              Text('无改进')
+            if (reflection.related_memories.length === 0) {
+              Text('无关联')
                 .fontSize(this.sm.getFontSize('caption'))
                 .fontColor(this.sm.getColor('text_disabled'))
                 .width('100%')
                 .margin({ top: 4 })
             } else {
               Column() {
-                ForEach(reflection.improvements, (improvement: string, index: number) => {
-                  Text(`• ${improvement}`)
+                ForEach(reflection.related_memories, (memory: string, index: number) => {
+                  Text(`• ${memory}`)
                     .fontSize(this.sm.getFontSize('caption'))
                     .fontColor(this.sm.getColor('text_primary'))
                     .width('100%')
                     .margin({ top: 2 })
-                }, (improvement: string, index: number) => `${index}-${improvement}`)
+                }, (memory: string, index: number) => `${index}-${memory}`)
               }
               .width('100%')
               .alignItems(HorizontalAlign.Start)
@@ -605,7 +573,7 @@ export struct ReflectionPage {
             }
 
             // 创建时间
-            Text(`创建时间：${ReflectionViewHelper.formatRelativeTime(reflection.createdAt)}`)
+            Text(`创建时间：${ReflectionViewHelper.formatTimestamp(reflection.timestamp)}`)
               .fontSize(this.sm.getFontSize('caption'))
               .fontColor(this.sm.getColor('text_disabled'))
               .width('100%')
@@ -646,7 +614,7 @@ export struct ReflectionPage {
   // 新建弹窗构建器
   // ===========================================================================
 
-  /** 新建弹窗：trigger 输入、content 文本域、insights 多行、improvements 多行 */
+  /** 新建弹窗：类型选择（ReflectionType 六词）、content 文本域、insights 多行 */
   @Builder
   buildCreateDialog() {
     // 遮罩层：点击空白处关闭
@@ -655,20 +623,35 @@ export struct ReflectionPage {
       GlassCard({ title: '新建反思' }) {
         Scroll() {
           Column() {
-            // 触发原因输入
-            Text('触发原因')
+            // 反思类型选择
+            Text('反思类型')
               .fontSize(this.sm.getFontSize('caption'))
               .fontColor(this.sm.getColor('text_secondary'))
               .width('100%')
-            GlassInput({
-              placeholder: '什么触发了这次反思？',
-              value: this.formData.trigger,
-              onChange: (v: string) => {
-                this.formData = { ...this.formData, trigger: v };
+            Scroll() {
+              Row({ space: 8 }) {
+                ForEach(REFLECTION_TYPES, (t: string) => {
+                  Text(ReflectionViewHelper.reflectionTypeLabel(t))
+                    .fontSize(this.sm.getFontSize('caption'))
+                    .fontColor(this.formData.reflectionType === t
+                      ? this.sm.getColor('text_on_primary')
+                      : this.sm.getColor('text_secondary'))
+                    .backgroundColor(this.formData.reflectionType === t
+                      ? this.sm.getColor('primary')
+                      : this.sm.getColor('surface'))
+                    .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+                    .borderRadius(12)
+                    .onClick(() => {
+                      this.formData = { ...this.formData, reflectionType: t };
+                    })
+                }, (t: string) => t)
               }
-            })
-              .width('100%')
-              .margin({ top: 4, bottom: this.sm.getSpacing('sm') })
+              .padding({ top: 4, bottom: 4 })
+            }
+            .scrollable(ScrollDirection.Horizontal)
+            .scrollBar(BarState.Off)
+            .width('100%')
+            .margin({ top: 4, bottom: this.sm.getSpacing('sm') })
 
             // 反思内容输入
             Text('反思内容')
@@ -704,22 +687,20 @@ export struct ReflectionPage {
                 this.formData = { ...this.formData, insightsText: v };
               })
 
-            // 改进项输入（多行，每行一条）
-            Text('改进项（每行一条）')
+            // 相关记忆输入（多行，每行一条；ReflectionLogCreate.related_memories）
+            Text('相关记忆（每行一条，选填）')
               .fontSize(this.sm.getFontSize('caption'))
               .fontColor(this.sm.getColor('success'))
               .width('100%')
-            TextArea({
-              placeholder: '计划如何改进？\n每行一条改进项',
-              text: this.formData.improvementsText,
+            GlassInput({
+              placeholder: '关联的记忆 ID，逗号分隔',
+              value: this.relatedMemoriesText,
+              onChange: (v: string) => {
+                this.relatedMemoriesText = v;
+              }
             })
               .width('100%')
-              .height(100)
-              .fontSize(this.sm.getFontSize('body'))
               .margin({ top: 4, bottom: this.sm.getSpacing('sm') })
-              .onChange((v: string) => {
-                this.formData = { ...this.formData, improvementsText: v };
-              })
           }
           .width('100%')
           .alignItems(HorizontalAlign.Start)
@@ -737,7 +718,7 @@ export struct ReflectionPage {
             onTap: () => { this.closeCreateDialog(); }
           })
           GlassButton({
-            text: '提交',
+            text: this.submitting ? '提交中...' : '提交',
             type: 'primary',
             btnSize: 'medium',
             onTap: () => { this.submitCreate(); }

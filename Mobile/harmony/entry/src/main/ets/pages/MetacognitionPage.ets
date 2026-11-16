@@ -1,49 +1,23 @@
 /**
- * MetacognitionPage - 元认知页
+ * MetacognitionPage - 元认知页（metacognition_api 真实契约版）
  *
- * 职责：展示元认知记录列表，按类型筛选、查看详情、新建
- * 设计：
- *   - MetacognitionViewHelper（导出）：纯视图模型，封装 type 颜色映射、type 图标映射、
- *     type 中文标签、confidence 格式化、内容截断；无 UI 运行时依赖，可独立单元测试；
- *   - MetacognitionPage（@Component）：Column [TopNavMenu(标题"元认知"+返回+新建)]
- *     + [type 筛选 Tab（全部/监控/控制/评估）] + [加载态/空态/列表]；
- *     列表项 GlassCard 含 type 徽章、内容摘要、confidence 进度条、关联 thoughtId、
- *     创建时间、操作按钮（查看/删除）；详情通过 Stack 条件渲染弹窗展示完整 content、
- *     confidence 百分比、thoughtId；删除走 AlertDialog 二次确认；
- *   - 颜色统一走 StyleManager，路由走 Router，API 走 ApiFacade.cognition，
- *     状态走 AgentsStore（currentAgentId 过滤），日志走 Logger，提示走 MessageManager。
- *
- * 依赖：
- *   - ../components/glass：TopNavMenu、GlassCard、GlassButton、GlassPanel
- *   - ../libs/api/ApiFacade：统一 API 门面（cognition.listMetacognitions/getMetacognition/
- *     createMetacognition/removeMetacognition）
- *   - ../libs/state/stores/AgentsStore：Agent 状态（currentAgentId 过滤）
- *   - ../routing/Router：统一路由跳转
- *   - ../libs/style/StyleManager：统一样式 token
- *   - ../libs/logger/Logger：统一日志
- *   - ../libs/message/MessageManager：统一消息提示
- *   - ../libs/types：MetacognitionRecord
- *
- * 用法：
- *   由 Router.push 跳转进入；
- *   aboutToAppear 调用 api.cognition.listMetacognitions 加载列表；
- *   type 筛选 Tab 切换 → 本地 filterByType 过滤；
- *   新建按钮 → 当前提示"功能开发中"（M5 接入完整表单流程）；
- *   查看按钮 → 弹出 Stack 弹窗展示完整 content + confidence + thoughtId；
- *   删除按钮 → AlertDialog 二次确认 → 调用 api.cognition.removeMetacognition → 刷新列表
- *
- * TDD：MetacognitionViewHelper 各方法按红绿灯垂直切片逐步实现，
- *      详见 MetacognitionPage.test.ets
+ * 数据：GET /v1/metacognition/{agent_id}/metacognition?type=&page=&size=
+ *       （thought 条目投影：id/kind/type/content/context/confidence/
+ *        metadata/created_at）
+ * 操作：POST /v1/metacognition/{agent_id}/metacognition
+ *       （MetacognitionRecordCreate：type/content/context/confidence）。
+ * 契约说明：后端无删除端点，本页不提供删除；旧 thoughtId 关联字段后端不存在，
+ *       展示位改为真实字段 context（上下文）。
  */
 
-import { TopNavMenu, GlassCard, GlassButton, GlassPanel } from '../components/glass';
+import { TopNavMenu, GlassCard, GlassButton, GlassInput, GlassPanel } from '../components/glass';
 import { ApiFacade } from '../libs/api/ApiFacade';
 import { AgentsStore } from '../libs/state/stores/AgentsStore';
 import { Router } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { MetacognitionRecord } from '../libs/types';
+import { MetacognitionDto } from '../libs/api/modules/CognitionApi';
 
 /** 日志标签 */
 const TAG = 'MetacognitionPage';
@@ -64,7 +38,7 @@ export class MetacognitionViewHelper {
    * @param type 元认知类型
    * @return StyleManager 颜色 token 名
    */
-  static getTypeColor(type: MetacognitionRecord['type']): string {
+  static getTypeColor(type: string): string {
     if (type === 'monitoring') return 'info';
     if (type === 'control') return 'primary';
     if (type === 'evaluation') return 'warning';
@@ -77,7 +51,7 @@ export class MetacognitionViewHelper {
    * @param type 元认知类型
    * @return emoji 字符串
    */
-  static getTypeIcon(type: MetacognitionRecord['type']): string {
+  static getTypeIcon(type: string): string {
     if (type === 'monitoring') return '👁️';
     if (type === 'control') return '🎛️';
     if (type === 'evaluation') return '📊';
@@ -90,7 +64,7 @@ export class MetacognitionViewHelper {
    * @param type 元认知类型
    * @return 中文标签字符串
    */
-  static getTypeLabel(type: MetacognitionRecord['type']): string {
+  static getTypeLabel(type: string): string {
     if (type === 'monitoring') return '监控';
     if (type === 'control') return '控制';
     if (type === 'evaluation') return '评估';
@@ -122,13 +96,13 @@ export class MetacognitionViewHelper {
 // type 筛选 Tab 配置
 // ===========================================================================
 
-/** type 筛选项：value 为 'all' 或具体 MetacognitionRecord['type'] */
+/** type 筛选项：value 为 'all' 或具体 type 词汇 */
 interface TypeFilterOption {
   value: string;
   label: string;
 }
 
-/** type 筛选 Tab 列表（顺序即展示顺序） */
+/** type 筛选 Tab 列表（顺序即展示顺序；词汇与后端 MetacognitionRecordCreate 默认体系同源） */
 const TYPE_FILTERS: TypeFilterOption[] = [
   { value: 'all', label: '全部' },
   { value: 'monitoring', label: '监控' },
@@ -136,17 +110,34 @@ const TYPE_FILTERS: TypeFilterOption[] = [
   { value: 'evaluation', label: '评估' },
 ];
 
+/** 新建可选类型（MetacognitionRecordCreate.type 词域） */
+const CREATE_TYPES: string[] = ['monitoring', 'control', 'evaluation'];
+
 @Component
 export struct MetacognitionPage {
   // 元认知记录列表（由 API 加载，驱动列表渲染；筛选在本地进行）
-  @State records: MetacognitionRecord[] = [];
+  @State records: MetacognitionDto[] = [];
   // 加载态
   @State loading: boolean = true;
   // 当前激活的 type 筛选值：'all' 或具体 type
   @State activeType: string = 'all';
   // 详情弹窗控制：showDetail 控制显隐，detailRecord 持有当前查看的记录
   @State showDetail: boolean = false;
-  @State detailRecord: MetacognitionRecord | null = null;
+  @State detailRecord: MetacognitionDto | null = null;
+  // 新建弹窗显隐
+  @State showCreate: boolean = false;
+  // 新建表单数据
+  @State formData: {
+    type: string;
+    content: string;
+    context: string;
+  } = {
+    type: 'monitoring',
+    content: '',
+    context: '',
+  };
+  // 提交中态
+  @State submitting: boolean = false;
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -169,7 +160,7 @@ export struct MetacognitionPage {
     this.loading = true;
     try {
       const agentId = this.agentsStore.currentAgentId || '';
-      const res = await this.api.cognition.listMetacognitions(agentId);
+      const res = await this.api.cognition.listMetacognitions(agentId, 1, 50);
       if (res.code === 0 && res.data) {
         this.records = res.data.items;
       }
@@ -192,24 +183,66 @@ export struct MetacognitionPage {
    * 获取经当前 type 筛选后的列表
    * 规则：activeType === 'all' 返回全量；否则按 type 字段过滤
    */
-  private getFilteredList(): MetacognitionRecord[] {
+  private getFilteredList(): MetacognitionDto[] {
     if (this.activeType === 'all') {
       return this.records;
     }
-    return this.records.filter((r: MetacognitionRecord) => r.type === this.activeType);
+    return this.records.filter((r: MetacognitionDto) => r.type === this.activeType);
   }
 
   /**
-   * 新建元认知记录（M5 接入完整表单流程，当前提示"功能开发中"）
+   * 打开新建弹窗（重置表单）
    */
-  private handleCreate(): void {
-    this.msg.info('功能开发中');
+  private openCreateDialog(): void {
+    this.formData = {
+      type: 'monitoring',
+      content: '',
+      context: '',
+    };
+    this.showCreate = true;
+  }
+
+  /** 关闭新建弹窗 */
+  private closeCreateDialog(): void {
+    this.showCreate = false;
+  }
+
+  /**
+   * 提交新建（POST /metacognition/{agent_id}/metacognition，MetacognitionRecordCreate 契约）
+   */
+  private async submitCreate(): Promise<void> {
+    if (!this.formData.content.trim()) {
+      this.msg.warning('内容不能为空');
+      return;
+    }
+    this.submitting = true;
+    try {
+      const payload: Record<string, Object> = {
+        'type': this.formData.type,
+        'content': this.formData.content.trim(),
+        'context': this.formData.context.trim(),
+        'confidence': 0.5,
+      };
+      const res = await this.api.cognition.createMetacognition(this.agentsStore.currentAgentId || '', payload);
+      if (res.code === 0) {
+        this.msg.success('创建成功');
+        this.closeCreateDialog();
+        this.loadRecords();
+      } else {
+        this.msg.error(res.message || '创建失败');
+      }
+    } catch (e) {
+      this.logger.error(TAG, '创建元认知失败', e as Error);
+      this.msg.error('创建元认知失败');
+    } finally {
+      this.submitting = false;
+    }
   }
 
   /**
    * 打开详情弹窗
    */
-  private openDetail(record: MetacognitionRecord): void {
+  private openDetail(record: MetacognitionDto): void {
     this.detailRecord = record;
     this.showDetail = true;
   }
@@ -218,47 +251,6 @@ export struct MetacognitionPage {
   private closeDetail(): void {
     this.showDetail = false;
     this.detailRecord = null;
-  }
-
-  /**
-   * 删除前二次确认（AlertDialog）
-   */
-  private confirmDelete(record: MetacognitionRecord): void {
-    AlertDialog.show({
-      title: '确认删除',
-      message: `确定要删除这条${MetacognitionViewHelper.getTypeLabel(record.type)}记录吗？此操作不可撤销。`,
-      autoCancel: true,
-      alignment: DialogAlignment.Center,
-      primaryButton: {
-        value: '取消',
-        action: () => {}
-      },
-      secondaryButton: {
-        value: '删除',
-        fontColor: this.sm.getColor('error'),
-        action: () => { this.deleteRecord(record.id); }
-      }
-    });
-  }
-
-  /**
-   * 执行删除
-   * 流程：调用 api.cognition.removeMetacognition → 成功后重新加载列表
-   * 异常：记录日志并提示用户
-   */
-  private async deleteRecord(recordId: string): Promise<void> {
-    try {
-      const res = await this.api.cognition.removeMetacognition(recordId);
-      if (res.code === 0) {
-        this.msg.success('删除成功');
-        this.loadRecords();
-      } else {
-        this.msg.error(res.message || '删除失败');
-      }
-    } catch (e) {
-      this.logger.error(TAG, '删除元认知失败', e as Error);
-      this.msg.error('删除元认知失败');
-    }
   }
 
   /** 格式化时间（YYYY-MM-DD HH:mm），无值回退 '未知' */
@@ -288,7 +280,7 @@ export struct MetacognitionPage {
             text: '新建',
             type: 'primary',
             btnSize: 'small',
-            onTap: () => { this.handleCreate(); }
+            onTap: () => { this.openCreateDialog(); }
           })
         }
 
@@ -343,11 +335,11 @@ export struct MetacognitionPage {
           .alignItems(HorizontalAlign.Center)
         } else {
           List({ space: 12 }) {
-            ForEach(this.getFilteredList(), (record: MetacognitionRecord) => {
+            ForEach(this.getFilteredList(), (record: MetacognitionDto) => {
               ListItem() {
                 this.buildRecordCard(record)
               }
-            }, (record: MetacognitionRecord) => record.id)
+            }, (record: MetacognitionDto) => `${record.id}`)
           }
           .layoutWeight(1)
           .width('100%')
@@ -368,6 +360,11 @@ export struct MetacognitionPage {
       if (this.showDetail && this.detailRecord) {
         this.buildDetailDialog(this.detailRecord)
       }
+
+      // 新建弹窗（Stack 条件渲染）
+      if (this.showCreate) {
+        this.buildCreateDialog()
+      }
     }
     .width('100%')
     .height('100%')
@@ -377,9 +374,9 @@ export struct MetacognitionPage {
   // 元认知卡片构建器
   // ===========================================================================
 
-  /** 单条元认知卡片：type 徽章 + 内容摘要 + confidence 进度条 + thoughtId + 创建时间 + 操作按钮 */
+  /** 单条元认知卡片：type 徽章 + 内容摘要 + confidence 进度条 + 上下文 + 创建时间 + 查看 */
   @Builder
-  buildRecordCard(record: MetacognitionRecord) {
+  buildRecordCard(record: MetacognitionDto) {
     GlassCard() {
       Column() {
         // type 徽章行：图标 + 标签
@@ -430,15 +427,15 @@ export struct MetacognitionPage {
         .margin({ top: this.sm.getSpacing('sm') })
         .alignItems(VerticalAlign.Center)
 
-        // 底部行：thoughtId + 创建时间
+        // 底部行：上下文 + 创建时间
         Row() {
-          Text(`关联: ${record.thoughtId}`)
+          Text(record.context.length > 0 ? `上下文: ${record.context}` : '无上下文')
             .fontSize(this.sm.getFontSize('caption'))
             .fontColor(this.sm.getColor('text_secondary'))
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1)
-          Text(this.formatTime(record.createdAt))
+          Text(this.formatTime(record.created_at))
             .fontSize(this.sm.getFontSize('caption'))
             .fontColor(this.sm.getColor('text_disabled'))
             .margin({ left: 8 })
@@ -448,7 +445,7 @@ export struct MetacognitionPage {
         .margin({ top: this.sm.getSpacing('sm') })
         .alignItems(VerticalAlign.Center)
 
-        // 操作按钮：查看 / 删除（右对齐）
+        // 操作按钮：查看（后端无删除端点，不提供删除）
         Row() {
           GlassButton({
             text: '查看',
@@ -456,13 +453,6 @@ export struct MetacognitionPage {
             btnSize: 'small',
             onTap: () => { this.openDetail(record); }
           })
-          GlassButton({
-            text: '删除',
-            type: 'danger',
-            btnSize: 'small',
-            onTap: () => { this.confirmDelete(record); }
-          })
-            .margin({ left: this.sm.getSpacing('sm') })
         }
         .width('100%')
         .justifyContent(FlexAlign.End)
@@ -478,9 +468,9 @@ export struct MetacognitionPage {
   // 详情弹窗构建器（Stack 覆盖层，内嵌实现，不创建单独 CustomDialog 文件）
   // ===========================================================================
 
-  /** 详情弹窗：完整 content + confidence 百分比 + thoughtId */
+  /** 详情弹窗：完整 content + confidence 百分比 + 上下文 + 创建时间 */
   @Builder
-  buildDetailDialog(record: MetacognitionRecord) {
+  buildDetailDialog(record: MetacognitionDto) {
     Stack({ alignContent: Alignment.Center }) {
       // 背景遮罩层：点击空白处关闭
       Column()
@@ -543,15 +533,15 @@ export struct MetacognitionPage {
           .margin({ top: this.sm.getSpacing('sm') })
           .alignItems(VerticalAlign.Center)
 
-          // 关联 thoughtId
-          Text(`关联 Thought: ${record.thoughtId}`)
+          // 上下文
+          Text(`上下文: ${record.context.length > 0 ? record.context : '无'}`)
             .fontSize(this.sm.getFontSize('caption'))
             .fontColor(this.sm.getColor('text_secondary'))
             .margin({ top: this.sm.getSpacing('sm') })
             .width('100%')
 
           // 创建时间
-          Text(`创建时间: ${this.formatTime(record.createdAt)}`)
+          Text(`创建时间: ${this.formatTime(record.created_at)}`)
             .fontSize(this.sm.getFontSize('caption'))
             .fontColor(this.sm.getColor('text_disabled'))
             .margin({ top: 4 })
@@ -589,6 +579,116 @@ export struct MetacognitionPage {
       }
       .width('90%')
       .height('80%')
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  // ===========================================================================
+  // 新建弹窗构建器（MetacognitionRecordCreate 契约字段）
+  // ===========================================================================
+
+  /** 新建弹窗：type 三选 chips + content 文本域 + context 输入 */
+  @Builder
+  buildCreateDialog() {
+    Stack({ alignContent: Alignment.Center }) {
+      // 背景遮罩层：点击空白处关闭
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(this.sm.getColor('overlay_mask'))
+        .onClick(() => { this.closeCreateDialog(); })
+
+      // 面板层：居中展示
+      GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
+        Column() {
+          Text('新建元认知')
+            .fontSize(this.sm.getFontSize('title'))
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.sm.getColor('text_primary'))
+            .width('100%')
+
+          // 类型选择
+          Text('类型')
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_secondary'))
+            .margin({ top: this.sm.getSpacing('md') })
+          Row({ space: 8 }) {
+            ForEach(CREATE_TYPES, (t: string) => {
+              Text(MetacognitionViewHelper.getTypeLabel(t))
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.formData.type === t
+                  ? this.sm.getColor('text_on_primary')
+                  : this.sm.getColor('text_secondary'))
+                .backgroundColor(this.formData.type === t
+                  ? this.sm.getColor('primary')
+                  : this.sm.getColor('surface'))
+                .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+                .borderRadius(12)
+                .onClick(() => {
+                  this.formData = { ...this.formData, type: t };
+                })
+            }, (t: string) => t)
+          }
+          .width('100%')
+          .margin({ top: 4 })
+
+          // 内容
+          Text('内容')
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_secondary'))
+            .margin({ top: this.sm.getSpacing('sm') })
+          TextArea({
+            placeholder: '记录这次元认知的内容...',
+            text: this.formData.content,
+          })
+            .width('100%')
+            .height(110)
+            .fontSize(this.sm.getFontSize('body'))
+            .borderRadius(this.sm.getRadius('sm'))
+            .backgroundColor(this.sm.getColor('surface'))
+            .onChange((v: string) => {
+              this.formData = { ...this.formData, content: v };
+            })
+
+          // 上下文
+          Text('上下文（选填）')
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_secondary'))
+            .margin({ top: this.sm.getSpacing('sm') })
+          GlassInput({
+            placeholder: '触发这次元认知的场景',
+            value: this.formData.context,
+            type: 'text',
+            onChange: (v: string) => {
+              this.formData = { ...this.formData, context: v };
+            },
+          })
+
+          // 底部按钮
+          Row() {
+            GlassButton({
+              text: '取消',
+              type: 'default',
+              btnSize: 'medium',
+              onTap: () => { this.closeCreateDialog(); }
+            })
+            GlassButton({
+              text: this.submitting ? '提交中...' : '创建',
+              type: 'primary',
+              btnSize: 'medium',
+              onTap: () => { this.submitCreate(); }
+            })
+              .margin({ left: this.sm.getSpacing('sm') })
+          }
+          .width('100%')
+          .justifyContent(FlexAlign.End)
+          .margin({ top: this.sm.getSpacing('md') })
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
+      }
+      .width('90%')
     }
     .width('100%')
     .height('100%')
