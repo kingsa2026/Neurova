@@ -54,4 +54,30 @@ class ModelsRepository(private val http: HttpChannel) {
             ),
         )
     }
+
+    /** 新增服务商（POST /providers，CreateProviderRequest；空值字段不下发） */
+    suspend fun createProvider(name: String, providerType: String, baseUrl: String, apiKey: String) {
+        val body = buildMap {
+            put("name", JsonPrimitive(name))
+            put("provider_type", JsonPrimitive(providerType))
+            if (baseUrl.isNotBlank()) put("base_url", JsonPrimitive(baseUrl))
+            if (apiKey.isNotBlank()) put("api_key", JsonPrimitive(apiKey))
+        }
+        http.postJson("/providers", JsonObject(body))
+    }
+
+    /** 更新服务商（PUT /providers/{id}，UpdateProviderRequest；null=不改动该字段） */
+    suspend fun updateProvider(providerId: String, name: String?, baseUrl: String?, apiKey: String?) {
+        val body = buildMap {
+            name?.takeIf { it.isNotBlank() }?.let { put("name", JsonPrimitive(it)) }
+            baseUrl?.let { put("base_url", JsonPrimitive(it)) }
+            apiKey?.takeIf { it.isNotBlank() }?.let { put("api_key", JsonPrimitive(it)) }
+        }
+        http.putJson("/providers/$providerId", JsonObject(body))
+    }
+
+    /** 删除服务商（DELETE /providers/{id}） */
+    suspend fun deleteProvider(providerId: String) {
+        http.deleteJson("/providers/$providerId")
+    }
 }

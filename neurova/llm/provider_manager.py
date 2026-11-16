@@ -544,6 +544,7 @@ class LLMProviderManager(Module):
     def update_provider(
         self,
         provider_id: str,
+        name: Optional[str] = None,
         api_key: Optional[str] = None,
         default_model: Optional[str] = None,
         models: Optional[List[str]] = None,
@@ -575,6 +576,8 @@ class LLMProviderManager(Module):
 
             provider = self._providers[provider_id]
 
+            if name is not None:
+                provider.name = name
             if api_key is not None:
                 provider.api_key = api_key
             if default_model is not None:
