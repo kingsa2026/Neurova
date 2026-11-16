@@ -128,7 +128,24 @@ class TestProductionNetLocGate:
 
 
 class TestProductionPoolCalc:
-    """numstat 行 → 生产池净增：tests/、test_*.py、*_test.py、__tests__、scripts/ci 不计入。"""
+    """numstat 行 → 生产池净增：口径与 numstat 复算守卫同源——**仅 neurova/ 计生产池**。
+
+    真实误伤（总控收口实测）：台账/审计报告入库笔（audit-reports/*.md +146 等）被旧宽口径
+    计成生产池净增 +912，提交门连 docs 类提交都索要去向段。既有事实源
+    test_commitLocClaimMatchesOwnNumstat 的池口径是「neurova/ 前缀＝生产池，其余＝测试/基建池」，
+    本门对齐它（教义第 6 条：不造第二份口径）。
+    """
+
+    def testOnlyNeurovaPathsCountAsProduction(self):
+        rows = [
+            "10\t2\tneurova/api/endpoints/chat.py",
+            "5\t1\ttests/unit/api/test_chat.py",
+            "3\t0\tscripts/ci/some_gate.py",
+            "2\t1\tNeurUI/src/components/ChatPanel.vue",
+            "40\t0\taudit-reports/repair-ledger-2026-11-16/S1-x.md",
+            "30\t0\tdocs/guide.md",
+        ]
+        assert commit_msg_check.productionNetFromNumstat(rows) == 8
 
     def testTestAndCiPathsAreExcludedFromProduction(self):
         rows = [
@@ -139,8 +156,8 @@ class TestProductionPoolCalc:
             "1\t0\tNeurUI/src/components/ChatPanel.vue",
             "-\t-\tmedia/logo.png",
         ]
-        # 生产池 = +10-2 +1-0 = 9；tests/scripts-ci/test.ts 不计；二进制行跳过
-        assert commit_msg_check.productionNetFromNumstat(rows) == 9
+        # 生产池 = +10-2 = 8；tests/、scripts/ci、*.test.ts、NeurUI、二进制行均不计
+        assert commit_msg_check.productionNetFromNumstat(rows) == 8
 
     def testBinaryAndMalformedRowsDoNotCrash(self):
         assert commit_msg_check.productionNetFromNumstat(["-\t-\tx.png", "garbage"]) == 0

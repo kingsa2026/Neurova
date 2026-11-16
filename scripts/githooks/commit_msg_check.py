@@ -31,15 +31,14 @@ RED_EVIDENCE_RE = re.compile(r"红灯[：:]")
 GREEN_EVIDENCE_RE = re.compile(r"绿灯[：:]")
 #: 池口径的 LOC 声明行（词汇与 numstat 复算守卫同源：生产池/本笔/本格/净 LOC + `+N/−M`）。
 LOC_CLAIM_RE = re.compile(r"(净 LOC|生产池|本笔|本格)[^\n]*\+\d+\s*/\s*[−-]\s*\d+")
-#: 测试/基建路径：不计入生产池（与 numstat 复算守卫的「测试/基建池」同语义的保守近似：
-#: tests/ 全根、test_*/​*_test/​*.test.*、__tests__、conftest、scripts/ci 与 scripts/githooks）。
-_TEST_PATH_RE = re.compile(
-    r"(^tests/|/test_[^/]*\.(py|ts)$|_test\.(py|ts)$|\.test\.[jt]sx?$"
-    r"|/__tests__/|^scripts/ci/|^scripts/githooks/|/conftest\.py$)")
+#: 生产池口径与 numstat 复算守卫（test_commitLocClaimMatchesOwnNumstat._poolTotals）同源：
+#: **仅 neurova/ 前缀计生产池**，其余（tests/、scripts/、NeurUI/、docs/、audit-reports/ 等）
+#: 一律不计——不另造第二份口径（教义第 6 条）。旧宽口径（排除 tests/scripts 后全计）会把
+#: docs/audit-reports 入库笔误伤成"生产池净增"索要去向，已按真实事故收窄。
 
 
 def productionNetFromNumstat(rows) -> int:
-    """numstat 行（`adds\\tdels\\tpath`）→ 生产池净增。测试/基建与二进制行不计。"""
+    """numstat 行（`adds\\tdels\\tpath`）→ 生产池净增。仅 neurova/ 计入；二进制行跳过。"""
     net = 0
     for row in rows:
         parts = row.split("\t")
@@ -48,7 +47,7 @@ def productionNetFromNumstat(rows) -> int:
         adds, dels, path = parts
         if not (adds.isdigit() and dels.isdigit()):
             continue  # 二进制文件是 `-	-`；畸形行跳过，不猜
-        if _TEST_PATH_RE.search(path.replace("\\", "/")):
+        if not path.replace("\\", "/").startswith("neurova/"):
             continue
         net += int(adds) - int(dels)
     return net
