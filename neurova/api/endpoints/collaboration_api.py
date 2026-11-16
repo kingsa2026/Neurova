@@ -112,8 +112,15 @@ async def get_collaboration_templates(
 async def create_collaboration_template(
     request: Request,
     body: CollaborationTemplateCreate,
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """创建协作模板"""
+    """创建协作模板。
+
+    §R1（live-verify 揭示）：owner_id 必须来自登录用户——原实现漏传该参，
+    create_project 以空串为键 add_member("", OWNER)（响应 participants 出现
+    空串），模板无主，S1 属主门对创建者本人也 403，删除模板端点对唯一合法
+    使用者不可用（与 /start 端点已修的同一断链）。
+    """
     _get_request_id(request)
 
     if get_collaboration_manager is None:
@@ -122,9 +129,11 @@ async def create_collaboration_template(
     try:
         manager = get_collaboration_manager()
 
-        # 创建项目作为模板
+        # 创建项目作为模板——owner 绑定登录用户（§R1，见函数 docstring）
         project = manager.create_project(
-            name=body.name, description=body.description, metadata={"workflow": body.workflow}
+            name=body.name, description=body.description,
+            owner_id=str(current_user.get("user_id") or ""),
+            metadata={"workflow": body.workflow},
         )
 
         if project is None:
@@ -276,7 +285,11 @@ async def delete_collaboration_template(
         ):
             raise HTTPException(status_code=403, detail="无权删除他人协作模板")
 
-        success = manager.delete_project(template_id)
+        # §R1（审计 §3.2-12）：delete_project 需要 (project_id, user_id) 两个实参
+        # （manager 层按 MemberRole.OWNER 复核）——缺 user_id 实参必 TypeError→500，
+        # 删除模板端点此前整体不可用。API 层属主门（owner/admin）已先行判定；
+        # 请求者身份照实透传，不冒充 owner（manager 的删除台账记真实操作者）。
+        success = manager.delete_project(template_id, str(current_user.get("user_id") or ""))
 
         if not success:
             raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")

@@ -15,6 +15,7 @@ from neurova.collaboration.glance_yield_rules import (
     reset_glance_yield_checker,
 )
 from neurova.llm.triage import (
+    TriageGateError,
     get_small_brain_triage_gate,
     reset_small_brain_triage_gate,
 )
@@ -207,11 +208,19 @@ async def get_triage_stats():
 async def triage_message(
     conversation_id: str = Query(..., description="Conversation ID"),
 ):
-    """对对话进行 triage 分类"""
+    """对对话进行 triage 分类。
+
+    §R1：TriageGateError 是分诊门的基础设施性不可用（历史源缺失/凭据缺失/
+    输出不可解析，P1-10 起诚实上抛）——本端点以 503 诚实暴露"分诊门不可用"，
+    不再让未处理异常落 500。
+    """
     gate = get_small_brain_triage_gate()
-    
-    result = await gate.triage_message(conversation_id)
-    
+
+    try:
+        result = await gate.triage_message(conversation_id)
+    except TriageGateError as e:
+        raise HTTPException(status_code=503, detail=f"分诊门不可用: {e}")
+
     return {
         "actionable": result.actionable,
         "reason": result.reason,

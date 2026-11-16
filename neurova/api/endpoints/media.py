@@ -325,22 +325,27 @@ def _uploaderOr401(current_user: Dict[str, Any]) -> str:
     return user_id
 
 
+def _mediaVisibleTo(media: Dict[str, Any], current_user: Dict[str, Any]) -> bool:
+    """列表面可见性谓词——与 `_ownedMediaOr404` 同一口径的单源（P1-7 列表面收紧）。
+
+    有主行：仅属主与 admin；无主行（`user_id` 为空的历史存量）仅 admin 可见：
+    桌面单机的存量媒体不因补门对唯一管理员消失，也不向多用户形态的普通用户暴露。
+    """
+    owner = str(media.get("user_id") or "")
+    if not owner:
+        return str(current_user.get("role") or "") == "admin"
+    return owner == str(current_user.get("user_id") or "") or str(current_user.get("role") or "") == "admin"
+
+
 def _ownedMediaOr404(media_id: str, current_user: Dict[str, Any]) -> Dict[str, Any]:
     """按 id 取**当前登录用户名下**的活条目；非属主与不存在统一 404（P1-7）。
 
     `files_api._get_owned_file` 的同构闸（防 IDOR 探测：404 不区分"无权"与"不存在"）。
     写入侧自 §6-172 起记录的 `user_id` 在这里首次成为读取闸门。
-    历史无主行（`user_id` 为空——属主记录晚于索引启用）仅 admin 可见：
-    桌面单机的存量媒体不因补门对唯一管理员消失，也不向多用户形态的普通用户暴露。
+    可见性判据见 `_mediaVisibleTo`（本文件唯一口径，列表面共用）。
     """
     media = _liveMedia(media_id)
-    if not media:
-        raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
-    owner = str(media.get("user_id") or "")
-    if owner:
-        if owner != str(current_user.get("user_id") or ""):
-            raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
-    elif str(current_user.get("role") or "") != "admin":
+    if not media or not _mediaVisibleTo(media, current_user):
         raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
     return media
 
@@ -469,9 +474,17 @@ async def list_media(
     ),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """列出媒体文件（search 后端过滤，total 反映过滤后总数，分页语义不变）。"""
-    media_list = [m for m in _activeMedia() if m.get("agent_id") == agent_id]
+    """列出媒体文件（search 后端过滤，total 反映过滤后总数，分页语义不变）。
+
+    P1-7 列表面收紧：只列当前登录用户名下的上传（admin 全量）；存量无主行仅
+    admin 可见——口径与读/删侧 `_ownedMediaOr404` 同一（`_mediaVisibleTo`）。
+    """
+    media_list = [
+        m for m in _activeMedia()
+        if m.get("agent_id") == agent_id and _mediaVisibleTo(m, current_user)
+    ]
 
     if media_type:
         media_list = [m for m in media_list if m.get("media_type") == media_type]
@@ -587,15 +600,20 @@ async def list_trash(
     agent_id: Annotated[str, Query(description="Agent ID")] = "default",
     limit: Annotated[int, Query(le=200)] = 50,
     offset: int = 0,
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """回收站读面（§6-158）：软删条目必须**有人能读**，否则又是一处「只写不读」的断点。
 
     单段字面路由，注册在 `GET /{media_id}` 之前（台账 2026-09-11 ⑤ 的那道锚）。
     保留策略同日人裁：**永久保留直到用户显式彻底删除**——不设 TTL、不做自动过期，
     媒体是用户内容，自动删等于替用户决定。
+    P1-7 列表面收紧：只列本人名下条目（admin 全量，无主存量行仅 admin），口径
+    与 `_ownedMediaOr404` 同一。
     """
-    trashed = [m for m in _media_store.values()
-               if _isTrashed(m) and m.get("agent_id") == agent_id]
+    trashed = [
+        m for m in _media_store.values()
+        if _isTrashed(m) and m.get("agent_id") == agent_id and _mediaVisibleTo(m, current_user)
+    ]
     trashed.sort(key=lambda m: m.get("deleted_at", 0), reverse=True)
 
     return {
@@ -763,14 +781,19 @@ async def delete_media(
 
 
 @router.get("/stats/{agent_id}")
-async def get_media_stats(agent_id: str):
+async def get_media_stats(agent_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
     """获取媒体存储统计信息。
 
     台账 2026-09-11 ⑤：前端无 /stats 消费（getMediaStats 已移除且 vitest 锁定），
     故有意不补 GET /stats 单段变体——单段字面路由若新增须注册在 /{media_id}
     之前（守卫见 tests/unit/api/test_media_route_order_guard.py）。
+    P1-7 列表面收紧：统计只计当前登录用户名下条目（admin 全量，无主存量行仅
+    admin），口径与 `_ownedMediaOr404` 同一。
     """
-    agent_media = [m for m in _activeMedia() if m.get("agent_id") == agent_id]
+    agent_media = [
+        m for m in _activeMedia()
+        if m.get("agent_id") == agent_id and _mediaVisibleTo(m, current_user)
+    ]
 
     total_files = len(agent_media)
     total_size = sum(m.get("size", 0) for m in agent_media)
@@ -800,9 +823,18 @@ async def get_media_stats(agent_id: str):
 
 
 @router.get("/memory/{memory_id}")
-async def get_memory_media(memory_id: str):
-    """获取与指定记忆关联的媒体文件"""
-    memory_media = [m for m in _activeMedia() if m.get("memory_id") == memory_id]
+async def get_memory_media(
+    memory_id: str, current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """获取与指定记忆关联的媒体文件。
+
+    P1-7 列表面收紧：只返回当前登录用户名下条目（admin 全量，无主存量行仅
+    admin），口径与 `_ownedMediaOr404` 同一。
+    """
+    memory_media = [
+        m for m in _activeMedia()
+        if m.get("memory_id") == memory_id and _mediaVisibleTo(m, current_user)
+    ]
 
     return {
         "code": 0,

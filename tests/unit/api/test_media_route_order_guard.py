@@ -175,7 +175,12 @@ def test_list_endpoint_behavior_unchanged(store):
         "created_at": 1.0,
         "metadata": {},
     }
-    out = asyncio.run(media_module.list_media(agent_id="a1", media_type=None, search=None, limit=50, offset=0))
+    # P1-7 列表面收紧后 list_media 需登录身份；种子行 user_id=None（无主）仅
+    # admin 可见，故递 admin 身份——被测对象（/list 返回结构）不变。
+    out = asyncio.run(media_module.list_media(
+        agent_id="a1", media_type=None, search=None, limit=50, offset=0,
+        current_user={"user_id": "root", "username": "root", "role": "admin"},
+    ))
     assert out["code"] == 0
     assert set(out["data"]) == {"media", "total", "offset", "limit"}
     assert out["data"]["total"] == 1
