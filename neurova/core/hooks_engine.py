@@ -28,7 +28,7 @@ KNOWN_EVENTS = (
     "PreToolUse",
     "PostToolUse",
     "Stop",
-    # P2-10 扩展事件（对齐 ZCode 的七事件面）：各自独立灰度开关（默认关），
+    # P2-10 扩展事件（七事件面）：各自独立灰度开关（默认关），
     # 语义见各 run*Helpers 的 docstring。
     "SessionStart",
     "UserPromptSubmit",
@@ -222,7 +222,7 @@ def userPromptHooksEnabled() -> bool:
 def runUserPromptSubmitHooks(payload: Dict[str, Any]) -> List[HookOutcome]:
     """用户输入提交时触发。
 
-    语义对齐 ZCode：decision=block 可拒轮（reason 随拒答面出街），
+    语义：decision=block 可拒轮（reason 随拒答面出街），
     additionalContext 作为受控指引并入本轮注入（同 W4 通道，受预算管辖）。
     """
     if not userPromptHooksEnabled():
@@ -238,7 +238,7 @@ def permissionRequestHooksEnabled() -> bool:
 def runPermissionRequestHooks(payload: Dict[str, Any]) -> List[HookOutcome]:
     """审批单创建前触发。
 
-    语义比 ZCode 收窄：钩子只能 **deny**（block）——不许钩子代人工批准
+    语义刻意收窄：钩子只能 **deny**（block）——不许钩子代人工批准
     （自动批准等于绕过审批面）。block 即不建审批单、工具直接拒。
     """
     if not permissionRequestHooksEnabled():

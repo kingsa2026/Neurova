@@ -581,7 +581,7 @@ class SwarmManager:
     ) -> Dict[str, Any]:
         """续跑一条已终态（completed/failed）的子 Agent（工具清单 3.1-3 续）。
 
-        对应 ZCode 的 SendMessage→terminal agent 复活语义：member 会话键原样
+        终态子 Agent 复活语义：member 会话键原样
         复用——子 Agent 上一段的对话历史由既有会话恢复机制带回，续跑不是从零
         重派；上一段的 report（失败时为部分交接件）附在续跑任务里作衔接上下文。
         治理闸（深度/广度/预算/冷却/并发/错峰）与全新派生走同一条 spawn 路径。

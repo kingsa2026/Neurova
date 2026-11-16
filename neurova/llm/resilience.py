@@ -1,6 +1,6 @@
 """LLM 弹性包（P2-9）：进程级准入票据 + 时间窗重试预算。
 
-对照 ZCode 的 request-admission 与 retry-budget 两件套：
+进程级 LLM 治理两件套：
 
 - **准入票据**（AdmissionTickets）：全进程在飞 LLM 调用上限。默认
   ``NEUROVA_LLM_MAX_INFLIGHT=0``＝不限（多用户平台不因全局闸自我限流）；
