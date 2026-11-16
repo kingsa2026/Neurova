@@ -2,7 +2,7 @@
   <div class="fact-explorer-page">
     <div class="page-header">
       <div>
-        <h2 class="page-title">{{ t('ontology.factTitle') }}</h2>
+        <h2 class="page-title">{{ t('ontology.factTableTitle') }}</h2>
         <p class="page-subtitle">{{ t('ontology.factSubtitle') }}</p>
       </div>
     </div>
@@ -105,9 +105,9 @@
         <thead>
           <tr>
             <th>ID</th>
-            <th>Title</th>
-            <th>Source</th>
-            <th>Updated</th>
+            <th>{{ t('ontology.factTableTitle') }}</th>
+            <th>{{ t('ontology.factTableSource') }}</th>
+            <th>{{ t('common.updated') }}</th>
             <th>{{ t('common.actions') }}</th>
           </tr>
         </thead>

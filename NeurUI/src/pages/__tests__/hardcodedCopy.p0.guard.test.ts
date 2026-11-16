@@ -39,12 +39,19 @@ describe('P0 硬编码文案守卫 — ModelPage', () => {
 })
 
 describe('P0 硬编码文案守卫 — VoiceTranscriptionSettingsPage', () => {
-  it('远程 Whisper 表单字段标签走 i18n', () => {
+  it('远程 Whisper 面走 i18n（3.6-6 起为只读状态卡：就绪 tag + env 配置说明，装饰表单已退役）', () => {
     const src = file('pages/VoiceTranscriptionSettingsPage.vue')
+    // 硬编码英文标签不得回归（含退役前的表单形态）
     expect(src).not.toContain('<span class="field-label">Base URL</span>')
     expect(src).not.toContain('<span class="field-label">API Key</span>')
-    expect(src).toContain(`{{ t('model.baseUrl') }}`)
-    expect(src).toContain(`{{ t('model.apiKey') }}`)
+    expect(src).not.toContain('<span class="field-label">Model</span>')
+    // 只读形态的绑定面：远程就绪 tag 与 env 配置说明都走词条
+    expect(src).toContain(`t('voiceTranscription.ready')`)
+    expect(src).toContain(`t('voiceTranscription.notReady')`)
+    expect(src).toContain(`t('voiceTranscription.remoteEnvHint')`)
+    // 降级链数据驱动（不写死引擎串）
+    expect(src).toContain(`chainText`)
+    expect(src).not.toMatch(/funasr → remote_whisper → whisper/)
   })
 })
 

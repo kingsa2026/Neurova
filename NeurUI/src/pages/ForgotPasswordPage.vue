@@ -199,11 +199,10 @@ async function handleRecover() {
     message.success(t('auth.recoverSuccess'))
     router.push('/login')
   } catch (err: any) {
+    // 后端原话直接透出（含 429 限流提示），不再用中文原文做字符串比对——
+    // 原三元两分支输出恒等（死逻辑），比对串在后端改文案或多语言部署时即失效。
     const detail = err?.response?.data?.detail
-    error.value =
-      detail === '尝试次数过多，请 15 分钟后再试'
-        ? detail
-        : err?.response?.data?.detail || t('auth.recoverFailed')
+    error.value = (typeof detail === 'string' && detail) || t('auth.recoverFailed')
   } finally {
     loading.value = false
   }

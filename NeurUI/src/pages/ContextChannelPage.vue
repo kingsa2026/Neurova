@@ -42,6 +42,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { uiMessage } from '@/utils/message'
 import {
   getChannelSharingConfig,
   getAvailableSharingChannels,
@@ -114,14 +115,19 @@ async function handleToggle(channelId: string, enabled: boolean) {
     const next = [...others, ...(enabled ? [channelId] : [])]
     await updateSharedChannels({ channels: next, shared_context: sharingEnabled.value })
     await fetchSharings()
-  } catch { /* handled */ }
+  } catch {
+    // 开关为 :checked 绑定后端值，失败自动回弹；此处负责把失败如实告知（3.6-15）
+    uiMessage.error(t('common.error'))
+  }
 }
 
 async function handleTest(channelId: string) {
   testingId.value = channelId
   try {
     await testChannelSharing(channelId)
-  } catch { /* handled */ } finally { testingId.value = null }
+  } catch {
+    uiMessage.error(t('common.error'))
+  } finally { testingId.value = null }
 }
 
 onMounted(fetchSharings)

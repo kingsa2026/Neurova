@@ -102,6 +102,61 @@
         </a-spin>
       </a-tab-pane>
 
+      <!-- C10 治理收紧：待审产物审批面（评审闸产物：自动技能模板 + applied 经验，
+           批准/拒绝后才落库或清除；3.6-1 接线——此前 fetchPending 与批/拒整块无 pane 可达） -->
+      <a-tab-pane key="pending" :tab="t('skillPool.pendingReview')">
+        <a-spin :spinning="pendingLoading">
+          <GlassCard class="pending-section" :title="t('skillPool.pendingSkills')">
+            <div v-if="pendingSkills.length" class="pending-list">
+              <div v-for="(item, idx) in pendingSkills" :key="String(item.template_id ?? item.skill_id ?? idx)" class="pending-row">
+                <div class="pending-info">
+                  <div class="pending-name">{{ item.name ?? item.template_id ?? item.skill_id }}</div>
+                  <div v-if="item.description" class="pending-desc">{{ item.description }}</div>
+                </div>
+                <div class="pending-actions">
+                  <GlassButton
+                    variant="primary"
+                    size="sm"
+                    :disabled="!item.template_id"
+                    @click="handleApproveSkill(String(item.template_id))"
+                  >
+                    {{ t('skillPool.approve') }}
+                  </GlassButton>
+                  <GlassButton
+                    variant="ghost"
+                    size="sm"
+                    :disabled="!item.template_id"
+                    @click="handleRejectSkill(String(item.template_id))"
+                  >
+                    {{ t('skillPool.reject') }}
+                  </GlassButton>
+                </div>
+              </div>
+            </div>
+            <a-empty v-else :description="t('skillPool.noPending')" />
+          </GlassCard>
+          <GlassCard class="pending-section" :title="t('skillPool.pendingExperiences')">
+            <div v-if="pendingExperiences.length" class="pending-list">
+              <div v-for="item in pendingExperiences" :key="item.record_id" class="pending-row">
+                <div class="pending-info">
+                  <div class="pending-name">{{ item.content }}</div>
+                  <div class="pending-desc">{{ item.source }} · {{ item.skill_id }}</div>
+                </div>
+                <div class="pending-actions">
+                  <GlassButton variant="primary" size="sm" @click="handleApproveExperience(item.record_id)">
+                    {{ t('skillPool.approve') }}
+                  </GlassButton>
+                  <GlassButton variant="ghost" size="sm" @click="handleRejectExperience(item.record_id)">
+                    {{ t('skillPool.reject') }}
+                  </GlassButton>
+                </div>
+              </div>
+            </div>
+            <a-empty v-else :description="t('skillPool.noPending')" />
+          </GlassCard>
+        </a-spin>
+      </a-tab-pane>
+
       <!-- Wave H-W5 三层库流转确认队列（agent→user 推送 / 公共库升级，确认才落库） -->
       <a-tab-pane key="transfers" :tab="t('skillPool.transferTab')">
         <p class="tab-hint">{{ t('skillPool.transfersHint') }}</p>
@@ -148,9 +203,6 @@
         </a-form-item>
         <a-form-item :label="t('skillPool.skillCategory')">
           <a-input v-model:value="form.category" :placeholder="t('skillPool.categoryPlaceholder')" />
-        </a-form-item>
-        <a-form-item :label="t('skillPool.skillCode')">
-          <a-textarea v-model:value="form.code" :rows="8" placeholder="def run(args): ..." />
         </a-form-item>
       </a-form>
     </a-modal>
@@ -200,7 +252,6 @@ import * as skillPoolApi from '@/api/modules/skill-pool'
 interface PoolSkill extends skillPoolApi.LibrarySkillRow {
   install_count?: number
   author?: string
-  code?: string
   _installing?: boolean
 }
 
@@ -261,7 +312,9 @@ const pendingSkills = ref<any[]>([])
 async function fetchPending() {
   pendingLoading.value = true
   try {
-    const [expRes, skillRes] = await Promise.all([
+    // 解构顺序与调用顺序逐位对应（旧实现 [expRes, skillRes] 把技能结果当经验，
+    // 两卡数据互换——pending 面接通后的实测红灯揪出）。
+    const [skillRes, expRes] = await Promise.all([
       skillPoolApi.listPendingSkills('_all'),
       skillPoolApi.listPendingExperiences('_all'),
     ])
@@ -328,7 +381,10 @@ const pageSize = ref(12)
 const modalVisible = ref(false)
 const saving = ref(false)
 const editingSkill = ref<PoolSkill | null>(null)
-const form = ref({ name: '', description: '', category: '', code: '' })
+// code 不收：后端 SkillCreate/SkillUpdate 契约无 code 字段（技能执行体走映射表/
+// 落盘入口 .py 两条腿，都不吃表单文本），收集即丢弃属假成功面——3.6-1 退役，
+// 后端支持 code 落盘后再恢复输入框。
+const form = ref({ name: '', description: '', category: '' })
 
 // URL / ZIP import state
 const showUrlModal = ref(false)
@@ -404,7 +460,7 @@ const pagedPrivate = computed(() =>
 
 function openCreateModal() {
   editingSkill.value = null
-  form.value = { name: '', description: '', category: '', code: '' }
+  form.value = { name: '', description: '', category: '' }
   modalVisible.value = true
 }
 
@@ -414,7 +470,6 @@ function editSkill(skill: PoolSkill) {
     name: skill.name,
     description: skill.description,
     category: skill.category ?? '',
-    code: skill.code ?? '',
   }
   modalVisible.value = true
 }
@@ -590,5 +645,53 @@ onMounted(() => {
   gap: 6px;
   padding-top: 8px;
   border-top: 1px solid var(--nr-glass-border);
+}
+
+.pending-section + .pending-section {
+  margin-top: 16px;
+}
+
+.pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pending-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--nr-glass-border);
+  border-radius: 10px;
+}
+
+.pending-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pending-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--nr-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pending-desc {
+  font-size: 12px;
+  color: var(--nr-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pending-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
 }
 </style>

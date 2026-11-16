@@ -34,10 +34,8 @@ export default defineConfig({
           'X-Accel-Buffering': 'no',
         },
       },
-      '/ws': {
-        target: 'ws://localhost:9527',
-        ws: true,
-      },
+      // 3.7-3：原 /ws 代理退役——前端 WS 全部走 /api 前缀（useSessionSync
+      // buildUrl → /api/v1/sync/ws/...），/ws 路径全仓零消费方（死配置）。
     },
   },
   build: {

@@ -14,32 +14,24 @@
     <GlassCard :title="t('voiceTranscription.currentEngine')" variant="subtle">
       <div class="engine-status">
         <a-tag :color="activeEngineColor">{{ activeEngineLabel }}</a-tag>
-        <span class="engine-chain">{{ t('voiceTranscription.chain') }}: funasr → remote_whisper → whisper</span>
+        <span class="engine-chain">{{ t('voiceTranscription.chain') }}: {{ chainText }}</span>
       </div>
     </GlassCard>
 
     <!-- 双模配置 -->
     <GlassCard :title="t('voiceTranscription.dualMode')" variant="subtle">
       <div class="mode-grid">
-        <!-- 远程 Whisper -->
+        <!-- 远程 Whisper：引擎配置走环境变量（NEUROVA_ASR_REMOTE_*，无 HTTP 配置
+             端点），展示就绪读数与配置说明——收集即丢的装饰表单已退役（3.6-6） -->
         <div class="mode-card">
           <div class="mode-header">
             <span class="mode-name">{{ t('voiceTranscription.whisperRemoteName') }}</span>
-            <a-tag color="cyan">{{ t('voiceTranscription.apiTag') }}</a-tag>
+            <a-tag :color="remoteReady ? 'success' : 'default'">
+              {{ remoteReady ? t('voiceTranscription.ready') : t('voiceTranscription.notReady') }}
+            </a-tag>
           </div>
           <p class="mode-desc">{{ t('voiceTranscription.remoteDesc') }}</p>
-          <div class="mode-field">
-            <span class="field-label">{{ t('model.baseUrl') }}</span>
-            <a-input v-model:value="remoteForm.baseUrl" :placeholder="t('voiceTranscription.baseUrlPlaceholder')" size="small" />
-          </div>
-          <div class="mode-field">
-            <span class="field-label">{{ t('model.apiKey') }}</span>
-            <a-input-password v-model:value="remoteForm.apiKey" :placeholder="t('voiceTranscription.keyPlaceholder')" size="small" />
-          </div>
-          <div class="mode-field">
-            <span class="field-label">Model</span>
-            <a-input v-model:value="remoteForm.model" :placeholder="t('voiceTranscription.modelPlaceholder')" size="small" />
-          </div>
+          <p class="env-hint">{{ t('voiceTranscription.remoteEnvHint') }}</p>
         </div>
 
         <!-- 本地 Whisper（opt-in） -->
@@ -103,14 +95,15 @@ const whisperStatus = reactive({
   model_ready: false,
   model_dir: '',
   active_engine: '' as string | null,
+  available: {} as Record<string, boolean>,
   chain: [] as string[],
 })
 
-const remoteForm = reactive({
-  baseUrl: '',
-  apiKey: '',
-  model: 'whisper-1',
-})
+// 远程引擎就绪读数（asr/manager.get_consent_status → available.remote_whisper）
+const remoteReady = computed(() => !!whisperStatus.available.remote_whisper)
+
+// 降级链数据驱动（FALLBACK_CHAIN 真实值；空链如实显示占位）
+const chainText = computed(() => whisperStatus.chain.join(' → ') || '—')
 
 const activeEngineLabel = computed(() => {
   const eng = whisperStatus.active_engine
@@ -135,6 +128,7 @@ const fetchAll = async () => {
       model_ready: !!data.model_ready,
       model_dir: data.model_dir ?? '',
       active_engine: data.active_engine ?? null,
+      available: data.available ?? {},
       chain: data.chain ?? [],
     })
   } catch (e: any) {
@@ -236,6 +230,13 @@ onMounted(() => {
   font-size: 12px;
   color: var(--nr-text-secondary);
   margin: 0 0 12px;
+}
+
+.env-hint {
+  font-size: 12px;
+  color: var(--nr-text-tertiary);
+  font-family: var(--nr-font-mono);
+  margin: 0;
 }
 
 .mode-field {

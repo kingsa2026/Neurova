@@ -429,8 +429,11 @@ const instanceForm = reactive({
   entry_id: '', evidence_text: '', basis: '',
 })
 
-// 布局降级读数（2026-11-14 审计 P3-1 接线）：超预算跳过力导向模拟时如实提示一次
-const layoutDegraded = ref(false)
+// 布局降级读数（2026-11-14 审计 P3-1 接线；3.6-3 复位收口）：超预算跳过力导向
+// 模拟时如实提示。判据与 forceLayoutFull 内部预算门同一常量同一比较（它吃的
+// nodes 正是 filteredNodes，nodeCount=nodes.length），独立 computed 随数据回落
+// 自动复位——旧实现 ref 只置位不复位且在 flowNodes computed 内写，警示永挂。
+const layoutDegraded = computed(() => filteredNodes.value.length > LAYOUT_NODE_BUDGET)
 
 const flowNodes = computed(() => {
   const nodes = filteredNodes.value
@@ -439,9 +442,6 @@ const flowNodes = computed(() => {
   // 承诺零交叉，多父稠密图的非树边大量交错）。用户拖拽/已保存布局优先。
   const layoutResult = forceLayoutFull(
     nodes, (displayData.value?.edges ?? []) as never, selectedNodeId.value || focusNodeId.value || undefined)
-  if (layoutResult.nodeCount > LAYOUT_NODE_BUDGET) {
-    layoutDegraded.value = true
-  }
   const layoutPositions = layoutResult.positions
   const resolved = nodes.map((n) => ({
     id: n.id,

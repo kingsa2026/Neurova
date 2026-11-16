@@ -21,6 +21,7 @@
           <GlassButton
             size="sm"
             :loading="exportingFormat === format.key"
+            :disabled="!isAdmin"
             :data-testid="`export-${format.key}-btn`"
             @click="downloadFormat(format)"
           >
@@ -51,7 +52,7 @@
           size="sm"
           variant="primary"
           :loading="ossieImporting"
-          :disabled="!ossieDocument.trim()"
+          :disabled="!isAdmin || !ossieDocument.trim()"
           data-testid="ossie-import-btn"
           @click="doOssieImport"
         >{{ t('ontology.ossieImportBtn') }}</GlassButton>
@@ -250,7 +251,10 @@ async function copyIri() {
 }
 
 /** W11（P9 拍板②）：admin 真门——页面与路由此前无角色门控，
-     仅 exportAdminOnly 文案提示（假门）。补真门与文案语义对齐。 */
+     仅 exportAdminOnly 文案提示（假门）。补真门与文案语义对齐：
+     导出下载与 Ossie 导入按钮非 admin 一律禁用（3.6-2 接线，此前
+     computed 定义后零引用）。后端导出/导入端点仍为登录门，补
+     require_admin 与本门对齐——移交总控（API 面不在 R5 文件域）。 */
 const isAdmin = computed(() => {
   const user = authStore.user as { role?: string } | null | undefined
   return user?.role === 'admin'

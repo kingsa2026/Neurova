@@ -32,7 +32,7 @@
             </div>
             <p class="card-desc">{{ t(entry.descKey) }}</p>
             <div class="card-actions">
-              <a :href="entry.to" class="card-link" @click.prevent="go(entry.to)">
+              <a :href="entry.to(agentId)" class="card-link" @click.prevent="go(entry.to(agentId))">
                 {{ t('dataHub.enter') }}
               </a>
             </div>
@@ -75,7 +75,8 @@ interface HubEntry {
   /** 描述优先复用目标页自己的 subtitle；该页没有副标题时才新建 dataHub.desc* 键 */
   descKey: string
   icon: unknown
-  to: string
+  /** 目标地址取参渲染（3.6-7：Agent 级深链不得在 setup 期固化，切 Agent 后跟随） */
+  to: (agentId: string) => string
 }
 
 const agentId = computed(() => agentStore.currentAgentId || 'default')
@@ -91,7 +92,7 @@ const GROUPS: Array<{ key: string; titleKey: string; items: HubEntry[] }> = [
         titleKey: 'nav.knowledge',
         descKey: 'knowledge.subtitle',
         icon: BookOutlined,
-        to: '/knowledge',
+        to: () => '/knowledge',
       },
       {
         id: 'enterprise-sources',
@@ -99,7 +100,7 @@ const GROUPS: Array<{ key: string; titleKey: string; items: HubEntry[] }> = [
         titleKey: 'nav.enterpriseSources',
         descKey: 'ontology.entSubtitle',
         icon: CloudServerOutlined,
-        to: '/knowledge/enterprise-sources',
+        to: () => '/knowledge/enterprise-sources',
       },
     ],
   },
@@ -113,7 +114,7 @@ const GROUPS: Array<{ key: string; titleKey: string; items: HubEntry[] }> = [
         titleKey: 'nav.knowledgeGraph',
         descKey: 'ontology.studioSubtitle',
         icon: ShareAltOutlined,
-        to: `/agent/${agentId.value}/ontology-studio`,
+        to: (agentId) => `/agent/${agentId}/ontology-studio`,
       },
       {
         // 图谱工作台（2D/3D 画布＋地理图层）：一级入口。
@@ -124,7 +125,7 @@ const GROUPS: Array<{ key: string; titleKey: string; items: HubEntry[] }> = [
         titleKey: 'nav.graphWorkbench',
         descKey: 'dataHub.descGraph',
         icon: DeploymentUnitOutlined,
-        to: `/agent/${agentId.value}/graph-workbench`,
+        to: (agentId) => `/agent/${agentId}/graph-workbench`,
       },
       {
         id: 'facts',
@@ -132,7 +133,7 @@ const GROUPS: Array<{ key: string; titleKey: string; items: HubEntry[] }> = [
         titleKey: 'nav.factExplorer',
         descKey: 'ontology.factSubtitle',
         icon: NodeIndexOutlined,
-        to: `/agent/${agentId.value}/facts`,
+        to: (agentId) => `/agent/${agentId}/facts`,
       },
     ],
   },
@@ -146,7 +147,7 @@ const GROUPS: Array<{ key: string; titleKey: string; items: HubEntry[] }> = [
         titleKey: 'nav.knowledgeInterop',
         descKey: 'ontology.interopSubtitle',
         icon: ExportOutlined,
-        to: '/knowledge/interop',
+        to: () => '/knowledge/interop',
       },
       {
         id: 'knowledge-eval',
@@ -154,7 +155,7 @@ const GROUPS: Array<{ key: string; titleKey: string; items: HubEntry[] }> = [
         titleKey: 'nav.knowledgeEval',
         descKey: 'knowledgeEval.subtitle',
         icon: ExperimentOutlined,
-        to: '/knowledge-eval',
+        to: () => '/knowledge-eval',
       },
     ],
   },

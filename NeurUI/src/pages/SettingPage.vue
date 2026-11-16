@@ -1229,13 +1229,6 @@ onMounted(() => {
 :deep(.settings-tabs .ant-tabs-tab-active .ant-tabs-tab-btn) { color: var(--nr-text-primary) !important; }
 .storage-actions { display: flex; gap: 8px; }
 .advanced-stack { display: flex; flex-direction: column; gap: 16px; }
-.ssh-host-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
-.ssh-host-row { display: flex; align-items: center; gap: 10px; }
-.ssh-host-name { font-family: 'Consolas', 'Menlo', monospace; flex: 1; }
-.ssh-add-form { border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 12px; }
-.social-status-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
-.social-status-row { display: flex; align-items: center; gap: 10px; }
-.social-platform-name { font-family: 'Consolas', 'Menlo', monospace; flex: 1; text-transform: capitalize; }
 .governance-hint { font-size: 12px; color: var(--nr-text-secondary, #8a8a92); margin: 0 0 12px; }
 .quota-hint { font-size: 12px; color: var(--nr-text-secondary, #8a8a92); margin: 0; }
 </style>

@@ -73,7 +73,8 @@ vi.mock('vue-echarts', async () => {
 
 vi.mock('ant-design-vue', async () => {
   const actual = await vi.importActual<any>('ant-design-vue')
-  return { ...actual, message: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }
+  // config 必备：页面引入 @/utils/message（统一提示口）在模块加载期调 message.config
+  return { ...actual, message: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), config: vi.fn() } }
 })
 
 import GraphWorkbenchPage from '@/pages/GraphWorkbenchPage.vue'
