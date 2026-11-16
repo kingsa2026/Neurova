@@ -63,11 +63,11 @@ fun PairingScreen(onPaired: () -> Unit) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var working by remember { mutableStateOf(false) }
 
-    fun pairWithRef(ref: String) {
+    fun pairWithInput(input: String) {
         working = true
         errorMessage = null
         scope.launch {
-            runCatching { runtime.pairing.pairByRef(ref) }
+            runCatching { runtime.pairing.pairByInput(input) }
                 .onSuccess { onPaired() }
                 .onFailure { failure ->
                     errorMessage = when (failure) {
@@ -84,7 +84,7 @@ fun PairingScreen(onPaired: () -> Unit) {
         QrScannerArea(
             enabled = !working,
             onTokenFound = { raw ->
-                PairingRefParser.parseRef(raw)?.let { ref -> pairWithRef(ref) }
+                PairingRefParser.parseRef(raw)?.let { ref -> pairWithInput(ref) }
             },
         )
         Spacer(modifier = Modifier.height(22.dp))
@@ -118,7 +118,7 @@ fun PairingScreen(onPaired: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(12.dp))
         Button(
-            onClick = { pairWithRef(manualRef.trim()) },
+            onClick = { pairWithInput(manualRef) },
             enabled = manualRef.isNotBlank() && !working,
             modifier = Modifier
                 .fillMaxWidth()
