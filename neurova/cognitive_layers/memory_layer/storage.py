@@ -445,9 +445,15 @@ class MemoryStorage:
     def _passesIsolation(
         self, rec: MemoryRecord, isolation_context: Optional["IsolationContext"]
     ) -> bool:
-        """三层隔离过滤的唯一实现；`query` 与 `list_by_tags` 共用。"""
+        """三层隔离过滤的唯一实现；`query` 与 `list_by_tags` 共用。
+
+        `isolation_context=None` fail-closed（审计 3.3-6）：没有身份上下文就
+        不可见——原实现 None 直接放行，"调用方忘了传上下文"时三层隔离整个
+        失效，旁路存储退化为全量可见。主检索不经本类，None 入口只剩测试与
+        旁路调用方，放行没有收益、全是泄露面。
+        """
         if isolation_context is None:
-            return True
+            return False
         if not isolation_context.shared and not rec.shared:
             if rec.agent_id != isolation_context.agent_id:
                 if not self._in_same_share_group(isolation_context, rec):
