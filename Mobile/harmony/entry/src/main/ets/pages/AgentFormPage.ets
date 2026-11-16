@@ -187,22 +187,18 @@ export async function executeAgentSave(
 
   // 3. 调用 API
   try {
-    const res = mode === 'create'
-      ? await api.create(payload)
-      : await api.update(agentId as string, payload);
-    if (res.code === 0) {
-      // 成功：emit 'navigation:back'
-      const done: SaveDonePayload = { success: true, mode: mode };
-      bus.emit('navigation:back', done);
-      return true;
+    if (mode === 'create') {
+      await api.create(payload);
+    } else {
+      await api.update(agentId as string, payload);
     }
-    // 业务失败：emit 'form:error' 携带后端消息
-    const bizErr: FormErrorPayload = { field: '', message: res.message };
-    bus.emit('form:error', bizErr);
-    return false;
+    // 成功：emit 'navigation:back'
+    const done: SaveDonePayload = { success: true, mode: mode };
+    bus.emit('navigation:back', done);
+    return true;
   } catch (e) {
-    // 异常：emit 'form:error' 携带兜底消息
-    const exErr: FormErrorPayload = { field: '', message: '保存失败' };
+    // 失败：emit 'form:error' 携带后端 detail / 兜底消息
+    const exErr: FormErrorPayload = { field: '', message: (e as Error).message };
     bus.emit('form:error', exErr);
     return false;
   }
@@ -283,9 +279,8 @@ export struct AgentFormPage {
   private async loadAgent(): Promise<void> {
     this.loading = true;
     try {
-      const res = await this.api.agents.get(this.agentId);
-      if (res.code === 0 && res.data) {
-        const a = res.data;
+      const a = await this.api.agents.get(this.agentId);
+      {
         this.name = a.name;
         this.description = a.description ?? '';
         this.model = a.model ?? '';
@@ -294,9 +289,6 @@ export struct AgentFormPage {
         this.temperature = a.config?.temperature ?? 0.7;
         this.maxTokens = a.config?.maxTokens ?? 2048;
         this.topP = a.config?.topP ?? 0.9;
-      } else {
-        this.msg.error(res.message || '加载失败');
-        this.router.back();
       }
     } catch (e) {
       this.logger.error(TAG, '加载智能体失败', e as Error);
