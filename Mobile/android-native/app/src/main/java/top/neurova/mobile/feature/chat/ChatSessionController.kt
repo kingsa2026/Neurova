@@ -96,6 +96,11 @@ class ChatSessionController(
         if (sessionId.isNotEmpty()) ws.cancelChat(sessionId)
     }
 
+    /** F5 头部切换 Agent：后续 chat:send 使用新 agent_id（会话已存记录的归属不改写） */
+    fun useAgent(agentId: String) {
+        if (agentId.isNotBlank()) this.agentId = agentId
+    }
+
     /**
      * 确保配对 WS 通道就绪：ticket 仅内存，连接前自动续签（§5.3）。
      * 已在连/重连中则直接等待其收敛。

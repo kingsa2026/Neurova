@@ -182,7 +182,9 @@ private fun NeurovaNavHost(navController: NavHostController) {
             )
         }
         composable(TabDestination.WORKBENCH.route) { WorkbenchTabScreen() }
-        composable(TabDestination.AGENTS.route) { AgentsTabScreen() }
+        composable(TabDestination.AGENTS.route) {
+            AgentsTabScreen(onOpenChat = { openTab(navController, TabDestination.CHAT) })
+        }
         composable(TabDestination.KNOWLEDGE.route) { KnowledgeTabScreen() }
         composable(TabDestination.PROFILE.route) { ProfileTabScreen() }
     }

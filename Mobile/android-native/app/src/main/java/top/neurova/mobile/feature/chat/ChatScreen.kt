@@ -76,7 +76,11 @@ fun ChatScreen(sessionId: String, initialTitle: String, onBack: () -> Unit) {
     var drawerOpen by remember { mutableStateOf(false) }
     var input by remember { mutableStateOf("") }
 
-    LaunchedEffect(sessionId, initialTitle) { controller.enter(sessionId, initialTitle) }
+    LaunchedEffect(sessionId, initialTitle) {
+        runtime.agents.load()
+        controller.enter(sessionId, initialTitle)
+        if (controller.agentId.isBlank()) controller.useAgent(runtime.agents.currentAgentId)
+    }
     androidx.compose.runtime.DisposableEffect(Unit) { onDispose { controller.leave() } }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -84,10 +88,15 @@ fun ChatScreen(sessionId: String, initialTitle: String, onBack: () -> Unit) {
             ChatHeader(
                 title = controller.sessionTitle.ifBlank { "会话" },
                 agentId = controller.agentId,
+                agents = runtime.agents.agents,
                 generating = controller.isGenerating,
                 wsState = runtime.ws.state.value,
                 onBack = onBack,
                 onOpenDrawer = { drawerOpen = true },
+                onSwitchAgent = { target ->
+                    runtime.agents.switchAgent(target)
+                    controller.useAgent(target)
+                },
             )
             val listState = rememberLazyListState()
             LaunchedEffect(controller.messages.size) {
@@ -149,10 +158,12 @@ fun ChatScreen(sessionId: String, initialTitle: String, onBack: () -> Unit) {
 private fun ChatHeader(
     title: String,
     agentId: String,
+    agents: List<top.neurova.mobile.core.model.AgentItem>,
     generating: Boolean,
     wsState: MobileWsChannel.State,
     onBack: () -> Unit,
     onOpenDrawer: () -> Unit,
+    onSwitchAgent: (String) -> Unit,
 ) {
     val palette = LocalNeurovaColors.current
     val statusText = when {
@@ -175,19 +186,36 @@ private fun ChatHeader(
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = palette.textHi)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(7.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(if (generating) palette.success else palette.textLow),
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    "${agentId.ifBlank { "default" }} · $statusText",
-                    fontSize = 11.sp,
-                    color = palette.textLow,
-                )
+            var switcherOpen by remember { mutableStateOf(false) }
+            Box {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clickable { if (agents.isNotEmpty()) switcherOpen = true },
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(androidx.compose.foundation.shape.CircleShape)
+                            .background(if (generating) palette.success else palette.textLow),
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        "${agentId.ifBlank { "default" }} · $statusText ▾",
+                        fontSize = 11.sp,
+                        color = palette.textLow,
+                    )
+                }
+                DropdownMenu(expanded = switcherOpen, onDismissRequest = { switcherOpen = false }) {
+                    agents.forEach { agent ->
+                        DropdownMenuItem(
+                            text = { Text("${agent.name}（${agent.agentId}）") },
+                            onClick = {
+                                switcherOpen = false
+                                onSwitchAgent(agent.agentId)
+                            },
+                        )
+                    }
+                }
             }
         }
         IconButton(onClick = onOpenDrawer) {
