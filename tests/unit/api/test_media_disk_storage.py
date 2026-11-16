@@ -136,7 +136,7 @@ def test_get_media_serves_from_disk(media_env):
     resp = _save(payload, filename="t.wav", media_type="audio")
     media_id = resp["data"]["media_id"]
 
-    out = asyncio.run(media_module.get_media(media_id))
+    out = asyncio.run(media_module.get_media(media_id, current_user=CALLER))
     assert isinstance(out, FileResponse), "读取端点应从磁盘 FileResponse 流式提供内容"
     assert Path(out.path).read_bytes() == payload
     assert out.headers["x-media-id"] == media_id
@@ -148,7 +148,7 @@ def test_download_attachment_serves_from_disk(media_env):
     resp = _save(payload, filename="s.wav", media_type="audio")
     media_id = resp["data"]["media_id"]
 
-    out = asyncio.run(media_module.download_attachment(media_id))
+    out = asyncio.run(media_module.download_attachment(media_id, current_user=CALLER))
     assert isinstance(out, FileResponse)
     assert Path(out.path).read_bytes() == payload
     assert "attachment" in out.headers["content-disposition"]
@@ -160,7 +160,7 @@ def test_delete_media_removes_disk_file(media_env):
     disk = Path(os.path.abspath(resp["data"]["storage_path"]))
     assert disk.is_file()
 
-    out = asyncio.run(media_module.delete_media(media_id))
+    out = asyncio.run(media_module.delete_media(media_id, current_user=CALLER))
 
     assert out["code"] == 0
     assert not disk.exists(), "delete_media 未同步删除磁盘文件"
@@ -173,7 +173,7 @@ def test_delete_media_missing_disk_file_still_removes_metadata(media_env):
     media_id = resp["data"]["media_id"]
     Path(os.path.abspath(resp["data"]["storage_path"])).unlink()
 
-    out = asyncio.run(media_module.delete_media(media_id))
+    out = asyncio.run(media_module.delete_media(media_id, current_user=CALLER))
     assert out["code"] == 0
     assert media_id not in media_module._media_store
 

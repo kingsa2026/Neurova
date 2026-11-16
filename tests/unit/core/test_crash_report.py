@@ -10,7 +10,8 @@ message, stack, app_version, ua, extra}。
 - 遵守服务端 schema：client_id UUID 形、error_code 正则形、
   error_at 秒级 ISO-Z、platform=desktop-windows、source=app
 - client_id 持久化复用（data/nv_client_id）
-- 环境开关 NEUROVA_ERROR_REPORT=off 关闭上报
+- 环境开关：**默认关闭**（core-P2-11 拍板，与设置页 telemetry 口径一致）；
+  NEUROVA_ERROR_REPORT=on/true/1/yes 显式开启，off/未设置一律不上报
 - 上报端点 = 官方固定 URL（与前端一致）
 """
 import json
@@ -82,6 +83,7 @@ class TestBuildReport:
 class TestReportStartupFailure:
     def test_posts_to_official_endpoint(self, tmp_path, monkeypatch):
         posted = []
+        monkeypatch.setenv("NEUROVA_ERROR_REPORT", "on")  # 默认关：显式开启才外发
         monkeypatch.setattr(
             crash_report, "_http_post", lambda url, body, timeout: posted.append((url, body)) or {"ok": True}
         )
@@ -101,10 +103,23 @@ class TestReportStartupFailure:
         assert "agent_workspaces" in body["message"]
         assert body["extra"]["stage"] == "startup"
 
+    def test_default_is_off_when_env_unset(self, tmp_path, monkeypatch):
+        """core-P2-11：默认不外发——未显式开启（含卸载 env）时崩溃不上报。"""
+        posted = []
+        monkeypatch.setattr(crash_report, "_http_post", lambda *a, **k: posted.append(1))
+        monkeypatch.delenv("NEUROVA_ERROR_REPORT", raising=False)
+        rc = crash_report.report_startup_failure(
+            RuntimeError("boom"), stage="startup", app_version="v",
+            client_id_path=tmp_path / "cid",
+        )
+        assert rc is False
+        assert posted == []
+
     def test_never_raises_on_network_error(self, tmp_path, monkeypatch):
         def bad_post(url, body, timeout):
             raise urllib.error.URLError("no network")
 
+        monkeypatch.setenv("NEUROVA_ERROR_REPORT", "on")  # 开关开着，专测网络失败被吞
         monkeypatch.setattr(crash_report, "_http_post", bad_post)
         monkeypatch.setattr(
             crash_report, "get_or_create_client_id", lambda p=None: "abcdef12"

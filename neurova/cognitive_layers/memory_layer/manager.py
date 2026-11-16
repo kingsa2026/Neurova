@@ -2992,7 +2992,14 @@ class MemoryManager:
     def get_top_memories_by_temperature(self, limit: int = 10) -> List[Dict[str, Any]]:
         """温度 Top-N（审计 P1-D7：SQL ORDER BY temperature DESC LIMIT n 走
         idx_mem_temperature 索引，替代全量 get_all_memories 深拷贝 + O(N log N)
-        排序——温度通道每查询全库扫描的根因）。"""
+        排序——温度通道每查询全库扫描的根因）。
+
+        P1-14（审计 2026-11-16）：SQL 生产侧补**生效三元组**过滤（含共享行候选，
+        与 `searchMemoriesFulltext` 同一谓词形状）＋排除 `forgotten`——此前无作用域
+        条件，同 agent 库内任意登录用户可检索他人高温记忆原文。取出后仍经
+        `isOwnedByRequestScope`（三层隔离唯一仲裁器）逐行仲裁，SQL 候选与仲裁
+        不会各松各的。
+        """
         if not getattr(self, "_persist_db_path", None):
             return []
         conn = None
@@ -3006,18 +3013,27 @@ class MemoryManager:
                 conn = get_short_connection(self._persist_db_path)
                 released = True
             conn.row_factory = sqlite3.Row
+            scope = (self._agent_id, self._eff_neuser_id(), self._eff_user_id())
             rows = conn.execute(
-                "SELECT * FROM memories ORDER BY temperature DESC LIMIT ?",
-                (int(limit),),
+                "SELECT * FROM memories"
+                " WHERE ((agent_id = ? AND neuser_id = ? AND user_id = ?)"
+                " OR shared = 1 OR share_group_ids != '[]')"
+                " AND lifecycle_stage != 'forgotten'"
+                " ORDER BY temperature DESC LIMIT ?",
+                (*scope, int(limit)),
             ).fetchall()
             results = []
             for row in rows:
                 try:
+                    mem = self._row_to_memory(row)
+                    # 唯一仲裁器裁决：本作用域行放行，共享行按组交集放行
+                    if not self.isOwnedByRequestScope(mem):
+                        continue
                     results.append(
                         {
                             # M-25: 作用域限定行 id 剥前缀, 不向消费方泄漏
-                            "id": self._plain_memory_id(row["id"]),
-                            "content": row["content"],
+                            "id": mem.id,
+                            "content": mem.content,
                             "temperature": row["temperature"],
                             "category": row["category"],
                             "lifecycle_stage": row["lifecycle_stage"],

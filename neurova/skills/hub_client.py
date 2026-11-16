@@ -38,6 +38,12 @@ from urllib.request import Request, urlopen
 
 logger = get_logger(__name__)
 
+# P1-15（审计 2026-11-16）：技能安装名统一闸——skill.name 是**落盘目录名**
+# （`_download_and_extract_skill` 直拼 `_installed_dir / name`），而它来自远端
+# 市场数据或 URL 推断，`..`/路径分隔符即目录穿越任意写。skill_service 的本地
+# 安装闸（`_SAFE_SKILL_ID_RE`）与这里是同一判据：字母数字开头，仅含 . _ - 与字母数字。
+SAFE_SKILL_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]*$")
+
 
 @dataclass
 class RemoteSkill:
@@ -583,6 +589,12 @@ class SkillHubClient:
             是否安装成功
         """
         try:
+            # P1-15：入口统一闸——所有来源（GitHub/ClawHub/LobeHub/URL 委托）的
+            # 安装都经这里，目录名在下载/落盘之前校验，穿越名直接拒绝。
+            name = str(getattr(skill, "name", "") or "")
+            if not SAFE_SKILL_NAME_RE.match(name):
+                logger.error("Refusing to install skill with unsafe name: %r", name)
+                return False
             if skill.source == SkillSource.GITHUB:
                 return self._install_from_github(skill)
             elif skill.source == SkillSource.CLAWHUB:
