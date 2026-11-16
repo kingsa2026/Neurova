@@ -73,6 +73,9 @@ class ACPRuntime:
 
     def __init__(self):
         self._handlers: Dict[str, MessageHandler] = {}
+        # P2-3（评测报告 G-10）：agent 能力注册表——注册时发布（此前 capabilities
+        # 入参被占位注释丢弃，CAPABILITY_QUERY 六类消息零消费方）
+        self._capabilities: Dict[str, list] = {}
         self._lock = threading.RLock()
         self._pending: Dict[str, _PendingRequest] = {}
         # 统计
@@ -96,10 +99,10 @@ class ACPRuntime:
         if not agent_id:
             raise ValueError("agent_id 不能为空")
         with self._lock:
-            if capabilities and hasattr(self._dlq, "noop"):
-                pass  # 能力注册由 CapabilityDiscovery 负责，此处仅保留扩展点
             replaced = agent_id in self._handlers
             self._handlers[agent_id] = handler
+            # P2-3：能力随注册发布（缺省 = handler 实际支持的 action 面）
+            self._capabilities[agent_id] = list(capabilities or ["chat", "status"])
             if replaced:
                 logger.debug("ACP agent 处理器已替换: %s", agent_id)
             else:
@@ -108,7 +111,44 @@ class ACPRuntime:
 
     def unregister_agent(self, agent_id: str) -> bool:
         with self._lock:
+            self._capabilities.pop(agent_id, None)
             return self._handlers.pop(agent_id, None) is not None
+
+    def getCapabilities(self, agent_id: str) -> list:
+        """读取某 agent 注册时发布的能力清单（未注册返回空表）。"""
+        with self._lock:
+            return list(self._capabilities.get(agent_id, []))
+
+    def _answerCapabilityQuery(self, message: AgentMessage) -> DeliveryResult:
+        """CAPABILITY_QUERY 由中枢直接应答（能力在注册表里，无需打扰 handler）。"""
+        with self._lock:
+            known = message.receiver_id in self._handlers
+            capabilities = list(self._capabilities.get(message.receiver_id, []))
+        if not known:
+            with self._lock:
+                self._stats["dead_letter"] += 1
+            self._to_dead_letter(message, DeadLetterReason.RECIPIENT_NOT_FOUND)
+            return DeliveryResult(
+                status=DeliveryStatus.DEAD_LETTER,
+                message_id=message.message_id,
+                reason=DeadLetterReason.RECIPIENT_NOT_FOUND,
+            )
+        response = AgentMessage(
+            type=MessageType.CAPABILITY_RESPONSE,
+            sender_id=message.receiver_id,
+            sender_name=message.receiver_name,
+            sender_capabilities=capabilities,
+            receiver_id=message.sender_id,
+            receiver_name=message.sender_name,
+            action="capability_query",
+            data={"agent_id": message.receiver_id, "capabilities": capabilities},
+            correlation_id=message.correlation_id or message.message_id,
+        )
+        with self._lock:
+            self._stats["delivered"] += 1
+        # 走既有关联回路由：request() 的 pending future 由这里兑现
+        self._on_handler_done(message, response)
+        return DeliveryResult(status=DeliveryStatus.DELIVERED, message_id=message.message_id)
 
     def list_agents(self) -> list:
         with self._lock:
@@ -130,6 +170,10 @@ class ACPRuntime:
                 message_id=message.message_id,
                 reason=DeadLetterReason.TIMEOUT,
             )
+
+        # P2-3：能力查询由中枢直接应答（注册表单源，不打扰 handler）
+        if message.type == MessageType.CAPABILITY_QUERY:
+            return self._answerCapabilityQuery(message)
 
         with self._lock:
             handler = self._handlers.get(message.receiver_id)
@@ -172,13 +216,18 @@ class ACPRuntime:
         if not isinstance(outcome, AgentMessage):
             return
         response = outcome
-        response.type = MessageType.RESPONSE
+        # handler 契约返回 TASK_RESULT → 归一为 RESPONSE；已特化的响应类型
+        # （如 CAPABILITY_RESPONSE）保留原类型，不抹掉语义
+        if response.type == MessageType.TASK_RESULT:
+            response.type = MessageType.RESPONSE
         if response.correlation_id is None:
             response.correlation_id = original.message_id
         self._resolve_pending(response.correlation_id, response)
 
     async def send_async(self, message: AgentMessage) -> DeliveryResult:
         """异步环境下的派发（语义同 send，协程 handler 直接 await）。"""
+        if message.type == MessageType.CAPABILITY_QUERY:
+            return self._answerCapabilityQuery(message)
         with self._lock:
             handler = self._handlers.get(message.receiver_id)
         if handler is None or message.is_expired():
