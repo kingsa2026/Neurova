@@ -23,7 +23,10 @@ from neurova.core import agent_run_store as ars
 AGENT_ID = "gate-agent"
 MODEL = "gpt-test"
 
-OWNER = {"user_id": "owner-1", "username": "owner-1", "role": "user"}
+# P1-1 属主门：桩 agent 对属主单源（agent_access→真实 state 面）不可见，
+# 本文件测闸口/台账接线而非归属，chat 主体的身份取 admin 过门；
+# 陌生/匿名拒绝语义仍由 STRANGER/None 在 resume 面钉住。
+OWNER = {"user_id": "owner-1", "username": "owner-1", "role": "admin"}
 ADMIN = {"user_id": "root-9", "username": "root-9", "role": "admin"}
 STRANGER = {"user_id": "other-3", "username": "other-3", "role": "user"}
 

@@ -35,7 +35,9 @@ def test_list_private_skills_accepts_agent_id_kwarg():
 
     with patch("neurova.skills.skill_service.SkillService", return_value=mock_service):
         # 不应抛 TypeError: unexpected keyword argument 'agent_id'
-        result = asyncio.run(mod.list_private_skills(agent_id="my_agent"))
+        # （api-P2-1 属主门后，直调需带身份；本测试测参数契约，按 admin 过门）
+        result = asyncio.run(mod.list_private_skills(
+            agent_id="my_agent", current_user={"user_id": "u1", "role": "admin", "neuser_id": "u1"}))
         assert result == [], "应正常返回空列表"
 
 
@@ -48,7 +50,8 @@ def test_list_private_skills_uses_agent_id_for_skill_service():
     mock_service.list_skills.return_value = []
 
     with patch("neurova.skills.skill_service.SkillService", return_value=mock_service) as mock_cls:
-        asyncio.run(mod.list_private_skills(agent_id="agent-xyz"))
+        asyncio.run(mod.list_private_skills(
+            agent_id="agent-xyz", current_user={"user_id": "u1", "role": "admin", "neuser_id": "u1"}))
         call_args, call_kwargs = mock_cls.call_args
         if call_args:
             assert "agent-xyz" in call_args, f"agent_id 应透传, call_args={call_args}"
@@ -87,7 +90,8 @@ def test_list_private_skills_uses_agent_id_for_owner_filter():
         return svc
 
     with patch("neurova.skills.skill_service.SkillService", side_effect=lambda agent_id, **k: _factory(agent_id)):
-        result = asyncio.run(mod.list_private_skills(agent_id="agentA"))
+        result = asyncio.run(mod.list_private_skills(
+            agent_id="agentA", current_user={"user_id": "u1", "role": "admin", "neuser_id": "u1"}))
         names = {r.name for r in result}
         assert "agent_a_skill" in names
         assert "agent_b_skill" not in names, "视图=agent 目录，不得串看他人技能"

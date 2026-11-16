@@ -142,6 +142,10 @@ async def list_workflow_triggers(
     from neurova.api.endpoints import neurflow_api as api
 
     storage = api._get_storage()
+    # §3.1-P2（2026-11-16 审计）：触发器是工作流的附属面，读它也要过工作流
+    # 属主门——与 create 端点同一判定单点（deny≡404，防枚举）。
+    if not api._owned_workflow_or_404(storage, workflow_id, current_user):
+        raise HTTPException(status_code=404, detail="工作流不存在")
     items = storage.list_triggers_by_workflow(workflow_id)
     return {
         "code": 0,
@@ -260,8 +264,11 @@ async def delete_workflow_trigger(
     from neurova.api.endpoints import neurflow_api as api
 
     storage = api._get_storage()
-    if not storage.get_trigger(trigger_id):
+    trigger = storage.get_trigger(trigger_id)
+    if not trigger:
         raise HTTPException(status_code=404, detail="触发器不存在")
+    # §3.1-P2：删除触发器＝改他人工作流的触发面，按工作流属主判（deny≡404）
+    api._owned_workflow_or_404(storage, trigger.workflow_id, current_user)
     # P2-5（全库断点审计 2026-11-12）：先 unregister 后删存储——注销失败＝
     # 删除失败，保留触发器如实报错。原实现先删存储再吞 unregister 异常仍报
     # deleted：已删触发器在重启前仍会触发。
@@ -288,6 +295,8 @@ async def fire_trigger(
     trigger = storage.get_trigger(trigger_id)
     if not trigger:
         raise HTTPException(status_code=404, detail="触发器不存在")
+    # §3.1-P2：fire 等于以调用者身份执行该工作流，先过工作流属主门（deny≡404）
+    api._owned_workflow_or_404(storage, trigger.workflow_id, current_user)
 
     from neurova.collaboration.neurflow.models import WorkflowStatus
 

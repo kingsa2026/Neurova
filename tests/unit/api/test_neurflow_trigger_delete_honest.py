@@ -12,6 +12,8 @@ import os
 os.environ.setdefault("NEUROVA_JWT_SECRET", "test_secret_for_trigger_delete_honest")
 os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_for_trigger_delete_honest")
 
+from types import SimpleNamespace
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -21,11 +23,16 @@ from neurova.api.endpoints import neurflow_triggers
 
 class FakeStorage:
     def __init__(self):
-        self.triggers = {"t1": {"trigger_id": "t1", "name": "demo"}}
+        # 触发器须带 workflow_id 属性（属主门按 trigger→workflow 反查）
+        self.triggers = {"t1": SimpleNamespace(id="t1", workflow_id="wf1", name="demo")}
         self.deleted = []
 
     def get_trigger(self, tid):
         return self.triggers.get(tid)
+
+    def get_workflow(self, workflow_id, requester_id=None, is_admin=False, project_ids=None):
+        # 属主门（_owned_workflow_or_404）的取数面：测试身份是 admin，恒放行
+        return SimpleNamespace(id=workflow_id, user_id="u1")
 
     def delete_trigger(self, tid):
         self.deleted.append(tid)

@@ -272,13 +272,21 @@ def consoleClient(monkeypatch):
     """
     agent = _OwnerRecordingAgent()
     monkeypatch.setattr(console_ep, "get_agent_instance", lambda agent_id="": agent)
+    # P1-1 属主门的取数走 agent_access 单源（真实 state 面，不受上面的端点桩影响）：
+    # 把桩 agent 登进全局 state（WS 腿未指名时吃 default 位，一并登记），
+    # 让"属主本人（非 admin）可对话"这条门真实参与判定而非被身份绕开。用毕归还。
+    from neurova.api.endpoints import set_app_state
+
+    set_app_state({"agents": {AGENT_ID: agent, "default": agent}})
 
     app = FastAPI()
     app.include_router(console_ep.router, prefix="/api/v1/console")
     identity = {"user_id": ALICE, "username": ALICE, "role": "user"}
     app.dependency_overrides[depsUser] = lambda: dict(identity)
     app.dependency_overrides[authStrict] = lambda: dict(identity)
-    return TestClient(app, raise_server_exceptions=False), agent
+    client = TestClient(app, raise_server_exceptions=False)
+    yield client, agent
+    set_app_state(None)
 
 
 class TestConsoleTurnEstablishesTheRequestOwner:

@@ -187,6 +187,7 @@ async def update_collaboration_template(
     request: Request,
     template_id: str = Path(..., description="模板ID"),
     body: CollaborationTemplateCreate = CollaborationTemplateCreate(name=""),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """更新协作模板"""
     _get_request_id(request)
@@ -200,6 +201,13 @@ async def update_collaboration_template(
 
         if project is None:
             raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
+
+        # §3.1-P2（2026-11-16 审计）：模板属主门——仅 owner/admin 可改，
+        # 判据与房间编辑面（update_room）一致。
+        if current_user.get("role") != "admin" and str(project.owner_id or "") != str(
+            current_user.get("user_id") or ""
+        ):
+            raise HTTPException(status_code=403, detail="无权修改他人协作模板")
 
         # 更新项目信息
         if body.name:
@@ -247,6 +255,7 @@ async def update_collaboration_template(
 async def delete_collaboration_template(
     request: Request,
     template_id: str = Path(..., description="模板ID"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """删除协作模板"""
     request_id = _get_request_id(request)
@@ -256,6 +265,17 @@ async def delete_collaboration_template(
 
     try:
         manager = get_collaboration_manager()
+        project = manager.get_project(template_id)
+
+        if project is None:
+            raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
+
+        # §3.1-P2：删除前先过模板属主门（owner/admin），拒绝不产生任何副作用
+        if current_user.get("role") != "admin" and str(project.owner_id or "") != str(
+            current_user.get("user_id") or ""
+        ):
+            raise HTTPException(status_code=403, detail="无权删除他人协作模板")
+
         success = manager.delete_project(template_id)
 
         if not success:

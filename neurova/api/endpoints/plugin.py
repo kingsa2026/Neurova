@@ -328,7 +328,7 @@ async def discover_plugins(body: DiscoverPluginsRequest):
     }
 
 
-@router.post("/{plugin_id}/install")
+@router.post("/{plugin_id}/install", dependencies=[Depends(require_admin())])
 async def install_plugin(plugin_id: str, body: InstallPluginRequest):
     """把插件根内的一个目录登记为已安装。
 
@@ -365,7 +365,7 @@ async def install_plugin(plugin_id: str, body: InstallPluginRequest):
     return {"code": 0, "message": "Plugin installed", "data": _pluginView(plugin_id)}
 
 
-@router.delete("/{plugin_id}/uninstall")
+@router.delete("/{plugin_id}/uninstall", dependencies=[Depends(require_admin())])
 async def uninstall_plugin(plugin_id: str):
     """忘掉这个插件的记录（**不删磁盘文件**——销毁用户文件要另一次授权）。"""
     manager = get_plugin_manager()
@@ -378,7 +378,7 @@ async def uninstall_plugin(plugin_id: str):
             "data": {"removed_record": plugin_id, "files_kept": True}}
 
 
-@router.post("/{plugin_id}/load")
+@router.post("/{plugin_id}/load", dependencies=[Depends(require_admin())])
 async def load_plugin(plugin_id: str):
     """真动态装载：import 并 exec 插件入口文件，构造插件实例。"""
     manager = get_plugin_manager()
@@ -390,7 +390,7 @@ async def load_plugin(plugin_id: str):
     return {"code": 0, "message": "Plugin loaded", "data": _pluginView(plugin_id)}
 
 
-@router.post("/{plugin_id}/unload")
+@router.post("/{plugin_id}/unload", dependencies=[Depends(require_admin())])
 async def unload_plugin(plugin_id: str):
     """卸载（保留安装记录），并把 `sys.modules` 里那条一起摘掉。"""
     manager = get_plugin_manager()
@@ -401,7 +401,7 @@ async def unload_plugin(plugin_id: str):
     return {"code": 0, "message": "Plugin unloaded", "data": _pluginView(plugin_id)}
 
 
-@router.post("/{plugin_id}/enable")
+@router.post("/{plugin_id}/enable", dependencies=[Depends(require_admin())])
 async def enable_plugin(plugin_id: str):
     """启用插件（装载的前置门；启用本身不执行插件代码）"""
     manager = get_plugin_manager()
@@ -416,7 +416,7 @@ async def enable_plugin(plugin_id: str):
     return {"code": 0, "message": "Plugin enabled", "data": _pluginView(plugin_id)}
 
 
-@router.post("/{plugin_id}/disable")
+@router.post("/{plugin_id}/disable", dependencies=[Depends(require_admin())])
 async def disable_plugin(plugin_id: str):
     """禁用插件（有其它插件依赖它时拒绝，不静默断开）"""
     manager = get_plugin_manager()

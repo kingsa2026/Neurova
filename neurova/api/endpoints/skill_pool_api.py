@@ -145,7 +145,7 @@ def _require_agent_access(agent_id: str, current_user: Dict[str, Any], action: s
     uid = str(current_user.get("user_id") or "")
     role = str(current_user.get("role") or "user")
     if not can_access_agent(uid, role, owner):
-        raise HTTPException(status_code=403, detail=f"无权{action}他人 Agent 的技能合并")
+        raise HTTPException(status_code=403, detail=f"无权{action}他人 Agent 的技能库")
 
 
 def _pool_service(agent_id: str) -> SkillService:
@@ -252,13 +252,19 @@ async def install_public_skill(
 
 
 @router.get("/private", response_model=List[SkillInfo])
-async def list_private_skills(agent_id: str = Query(default="default")):
+async def list_private_skills(
+    agent_id: str = Query(default="default"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """列出专属技能——Wave F 起单源：SkillService manifest（磁盘持久）。
 
     历史（s2 修复曾聚合两源治 split-brain）记录于本模块头部；Wave F 把
     create 侧也落到磁盘后聚合逻辑删除——单源不存在漂移。s4 参数名对齐
     前端 ?agent_id=xxx 契约保持不变。
     """
+    # api-P2-1（2026-11-16 审计拍板：归属主单源）：agent_id 是他人 agent 的私库
+    # 索引，不能"登录 + 知道 agent_id"就读——复用 agent_access 属主门。
+    _require_agent_access(agent_id, current_user, "查看")
     result: List[SkillInfo] = []
     try:
         service = _pool_service(agent_id)
@@ -289,12 +295,17 @@ async def list_private_skills(agent_id: str = Query(default="default")):
 
 
 @router.post("/private", response_model=SkillInfo)
-async def create_private_skill(body: SkillCreate, agent_id: str = Query(default="default")):
+async def create_private_skill(
+    body: SkillCreate,
+    agent_id: str = Query(default="default"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """创建专属技能——Wave F 落盘化（原内存 dict 重启即丢）。
 
     manifest 条目 source 走 register_auto_skill 通道（origin auto），但归属
     视图按 agent_id 隔离；config 携带用户侧 category/description 语义。
     """
+    _require_agent_access(agent_id, current_user, "创建")
     sid = str(uuid.uuid4())[:8]
     now = time.time()
     service = _pool_service(agent_id)
@@ -321,8 +332,14 @@ async def create_private_skill(body: SkillCreate, agent_id: str = Query(default=
 
 
 @router.put("/private/{skill_id}", response_model=SkillInfo)
-async def update_private_skill(skill_id: str, body: SkillUpdate, agent_id: str = Query(default="default")):
+async def update_private_skill(
+    skill_id: str,
+    body: SkillUpdate,
+    agent_id: str = Query(default="default"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """更新专属技能（磁盘 manifest 单源；跨 agent 视图查无 → 404）。"""
+    _require_agent_access(agent_id, current_user, "修改")
     service = _pool_service(agent_id)
     info = service.get_skill_info(skill_id)
     if info is None:
@@ -363,8 +380,13 @@ async def update_private_skill(skill_id: str, body: SkillUpdate, agent_id: str =
 
 
 @router.delete("/private/{skill_id}")
-async def delete_private_skill(skill_id: str, agent_id: str = Query(default="default")):
+async def delete_private_skill(
+    skill_id: str,
+    agent_id: str = Query(default="default"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """删除专属技能（manifest 条目移除；纯元数据条目无文件可删即仅清账）。"""
+    _require_agent_access(agent_id, current_user, "删除")
     service = _pool_service(agent_id)
     if service.get_skill_info(skill_id) is None:
         raise HTTPException(status_code=404, detail="Skill not found")
@@ -376,7 +398,10 @@ async def delete_private_skill(skill_id: str, agent_id: str = Query(default="def
 
 @router.post("/private/{skill_id}/share")
 async def share_private_skill(
-    skill_id: str, body: SkillShare = Body(default=SkillShare()), agent_id: str = Query(default="default")
+    skill_id: str,
+    body: SkillShare = Body(default=SkillShare()),
+    agent_id: str = Query(default="default"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """共享专属技能——Wave F 真实现：config.shared/shared_with 落盘。
 
@@ -384,6 +409,7 @@ async def share_private_skill(
     "共享"=池内对该 agent 视图外的成员可见标记，真实分发通道随后续
     多用户需求另立项。
     """
+    _require_agent_access(agent_id, current_user, "共享")
     service = _pool_service(agent_id)
     info = service.get_skill_info(skill_id)
     if info is None:
@@ -402,14 +428,23 @@ async def share_private_skill(
 
 
 @router.post("/private/{skill_id}/push")
-async def push_skill_to_agent(skill_id: str, body: SkillPush, agent_id: str = Query(default="default")):
+async def push_skill_to_agent(
+    skill_id: str,
+    body: SkillPush,
+    agent_id: str = Query(default="default"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """推送技能到 Agent——Wave F 真实现：条目复制到目标 agent manifest（幂等）。
 
     目标视图与源视图相同（前端 pushToPool 即此形态）→ 幂等成功语义：
     "技能已在池视图内"，不再假报跨 agent 推送。
     """
+    # api-P2-1：源与目标两个 agent 都要过属主门——推走他人 agent 的技能、
+    # 或把技能推进他人 agent，都是对他人资产的写操作。
+    _require_agent_access(agent_id, current_user, "推送")
     if not body.agent_id:
         raise HTTPException(status_code=400, detail="目标 agent 无效")
+    _require_agent_access(body.agent_id, current_user, "推送")
     if body.agent_id == agent_id:
         if _pool_service(agent_id).get_skill_info(skill_id) is None:
             raise HTTPException(status_code=404, detail=f"源技能不存在: {skill_id}")
@@ -434,8 +469,13 @@ async def push_skill_to_agent(skill_id: str, body: SkillPush, agent_id: str = Qu
 
 
 @router.delete("/private/{skill_id}/push")
-async def unpush_skill_from_agent(skill_id: str, agent_id: str = Query(default="default")):
+async def unpush_skill_from_agent(
+    skill_id: str,
+    agent_id: str = Query(default="default"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """取消推送——从指定 agent（query agent_id 即目标）移除条目。"""
+    _require_agent_access(agent_id, current_user, "取消推送")
     service = _pool_service(agent_id)
     if service.get_skill_info(skill_id) is None:
         raise HTTPException(status_code=404, detail="Skill not found")
@@ -446,12 +486,18 @@ async def unpush_skill_from_agent(skill_id: str, agent_id: str = Query(default="
 
 
 @router.post("/private/{skill_id}/execute")
-async def execute_private_skill(skill_id: str, body: Dict[str, Any] = Body(default_factory=dict)):
+async def execute_private_skill(
+    skill_id: str,
+    body: Dict[str, Any] = Body(default_factory=dict),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """闭环核验轮 V5：AgentSkillPage 执行按钮此前恒 404（路由缺失，
     前端 executeSkill 调的 POST /private/{id}/execute 后端从未实现）。
     执行走 SkillService.call_skill 咽喉（行级 enabled 闸；代码映射型走执行体，其余走入口 .py
     动态加载 + 构件摘要对账，两条腿一个口径，§6-280 甲）。"""
     agent_id = str(body.get("agent_id") or "default")
+    # api-P2-1：执行消耗的是该 agent 的技能执行体与额度，先过属主门
+    _require_agent_access(agent_id, current_user, "执行")
     service = _pool_service(agent_id)
     if service.get_skill_info(skill_id) is None:
         raise HTTPException(status_code=404, detail="Skill not found")

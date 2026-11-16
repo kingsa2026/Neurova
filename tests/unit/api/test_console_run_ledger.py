@@ -66,6 +66,8 @@ def client(store, monkeypatch):
     app.dependency_overrides[get_current_user] = lambda: {
         "user_id": "ledger-tester",
         "username": "ledger-tester",
+        # P1-1 属主门：桩 agent 对属主单源不可见，本文件测台账接线，按 admin 过门
+        "role": "admin",
     }
     return TestClient(app)
 

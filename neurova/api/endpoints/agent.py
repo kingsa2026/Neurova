@@ -856,6 +856,13 @@ async def get_agent_stats(
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
+    # P1-2（2026-11-16 审计）：agent 级读面同样过属主门（与 list/get 同判据）
+    owner = resolve_agent_owner(agent_id, state_agent=agent)
+    if not can_access_agent(
+        str(current_user.get("user_id") or ""), str(current_user.get("role") or "user"), owner
+    ):
+        raise HTTPException(status_code=403, detail="无权查看他人 Agent 统计")
+
     stats = {
         "agent_id": agent_id,
         "uptime": 0,
@@ -888,6 +895,13 @@ async def switch_agent(request: Request, agent_id: str = FastAPIPath(...), curre
     agents = state.get("agents", {})
     if agent_id not in agents:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    # P1-2（2026-11-16 审计）：/switch 改的是**进程级全局默认 agent**——正是 console
+    # WS 腿 `get_agent_instance()` 的取值源。任意用户可先把默认切到他人私有 agent，
+    # 再让所有 WS 用户对话（与 P1-1 构成的越权链）。全局默认是全体共享的运行态，
+    # 写它仅限管理员。
+    if str(current_user.get("role") or "user") != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可切换全局默认 Agent")
 
     # 走单源写入口：解析侧 `defaultAgentId()` 读的是同一份，切换才真的有下游。
     # 此前这里直接 `state["default_agent_id"] = agent_id`，而解析侧写死回落 `"default"`
@@ -932,6 +946,13 @@ async def update_constitution(
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
+    # P1-2（2026-11-16 审计）：写口属主门，与 PUT /agents/{id} 同判据
+    owner = resolve_agent_owner(agent_id, state_agent=agent)
+    if not can_access_agent(
+        str(current_user.get("user_id") or ""), str(current_user.get("role") or "user"), owner
+    ):
+        raise HTTPException(status_code=403, detail="无权修改他人 Agent 宪法")
+
     if hasattr(agent, "update_constitution"):
         try:
             agent.update_constitution(body.constitution)
@@ -954,6 +975,14 @@ async def make_decision(
     agent = get_agent_from_state(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    # P1-2（2026-11-16 审计）：decision 会驱动该 agent 跑一轮 LLM（消耗其额度、
+    # 写其会话），实例在而身份不可访问先 403，再进入任何副作用。
+    owner = resolve_agent_owner(agent_id, state_agent=agent)
+    if not can_access_agent(
+        str(current_user.get("user_id") or ""), str(current_user.get("role") or "user"), owner
+    ):
+        raise HTTPException(status_code=403, detail="无权驱动他人 Agent 做决策")
 
     try:
         # 请求级属主（§6-121 乙案）：本端点带鉴权依赖且会跑 agent.chat，与
@@ -994,6 +1023,13 @@ async def rebuild_loop(request: Request, agent_id: str = FastAPIPath(...), model
     agent = get_agent_from_state(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    # P1-2（2026-11-16 审计）：rebuild-loop 热重建他人 agent 的执行环路，先过属主门
+    owner = resolve_agent_owner(agent_id, state_agent=agent)
+    if not can_access_agent(
+        str(current_user.get("user_id") or ""), str(current_user.get("role") or "user"), owner
+    ):
+        raise HTTPException(status_code=403, detail="无权重建他人 Agent Loop")
 
     loop_rebuilt = False
     try:
