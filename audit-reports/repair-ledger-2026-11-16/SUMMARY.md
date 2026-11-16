@@ -87,3 +87,26 @@
 - P0 2/2、P1 39/39、**P2 106 条按域压缩后本轮全部清偿或登记**（知情项：3.7-1 eslint 另批、3.7-2 色值棘轮受控债、3.7-4 有意设计、3.9-7 收纳脚本知情、media 列表 agent 可见性按拍板收紧、三页面路由保留等后端）。
 - 工作树仅剩 2 个用户在途文件（WebSocketAdapter.ets、AgentsApi.ets），全程未动。
 - 各会话移交的"待总控裁定"项均已按拍板或既有口径收口，无静默遗留。
+
+---
+
+# 补漏轮复核结论（2026-11-17 第三轮·终局）
+
+总控复盘实锤 **7 项移交悬空**（前两轮会话间移交无人接手），派 R6 一并清偿，3 笔提交（a9fa54746、dabd221a9、faf365c84）：
+
+1. 鸿蒙 5 个 mock 页（SkillPool/Audit/Benchmark/Marketplace/Sandbox）接真实 API——新增五 API 模块（信封归一走 envelope.ets 单源）+ 五页删 mock（S8→S4 悬空）；
+2. skill_pool zip 落盘名随机化（S2→S1 悬空，路径拼接面消除）；
+3. `search_all_markets_async` 零消费退役（S5 悬空）；
+4. `stream_call` 空桩诚实化（S5 悬空；有测试消费方，同步适配）；
+5. telegram_webhook 核查：mixin 三方法零生产调用方、adapter 内调用点形态正确——登记知悉不改码；
+6. list_projects 属主过滤接线最后一公里：collaboration_api 四处 + projects_api 一处补传 requester_id（R4 悬空，横向泄露闭环）；
+7. test_ekb_user_outcome_attach×3 身份升 admin 适配（default 属主收紧连带）。
+
+抽验：R6 新增 3 测试文件 11 passed；台账 R6-补漏收尾.md 入库 faf365c84。
+
+## 终局遗留（均为"新建能力/需产品拍板"级，非缺陷悬空）
+
+- OpenAIAdapter 真流式（aiohttp SSE）——新建能力，另立批次；
+- TelegramWebhookMixin 渠道 webhook 管理端点从未挂出——接线属新建能力；
+- Benchmark 真评测执行器未接线（后端 P6 诚实化在案，移动端已如实渲染 simulated）；
+- R1/R2/R3/R5 各自台账登记的产品拍板项（admin 删他人模板通道、encrypt 态读侧透明解密、 AgentsApi group_id 语义——用户在途文件、旧布局剩余非重名目录等）。
