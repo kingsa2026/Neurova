@@ -31,8 +31,8 @@ export class PushApi {
     return this.client.put<Object>('/mobile/push/push-tokens', body);
   }
 
-  /** 注销设备推送令牌（DELETE /v1/mobile/push/push-tokens/{deviceId}，登出时调用） */
+  /** 注销设备推送令牌（DELETE /mobile/push/push-tokens/{deviceId}，登出时调用；baseUrl 已含 /api/v1，勿再写 /v1——P1-30） */
   async remove(deviceId: string): Promise<ApiResponse<Object>> {
-    return this.client.delete<Object>(`/v1/mobile/push/push-tokens/${deviceId}`);
+    return this.client.delete<Object>(`/mobile/push/push-tokens/${deviceId}`);
   }
 }

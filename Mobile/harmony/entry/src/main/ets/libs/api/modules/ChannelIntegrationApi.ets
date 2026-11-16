@@ -16,6 +16,7 @@
  */
 
 import { HttpClient } from '../HttpClient';
+import { asEnvelope, asEnvelopeList } from '../envelope';
 import {
   ApiResponse,
   PageParams,
@@ -82,11 +83,11 @@ export class ChannelIntegrationApi {
     this.client = client;
   }
 
-  /** 渠道配置列表（GET /channel-configs?agent_id=，裸数组包成 PageResult；params 仅保留签名，后端按 agent 整表返回） */
+  /** 渠道配置列表（GET /channel-configs?agent_id=，后端裸数组边界归一包成 PageResult；params 仅保留签名，后端按 agent 整表返回） */
   async list(agentId?: string, params?: PageParams): Promise<ApiResponse<PageResult<ChannelConfigDto>>> {
     const query: Record<string, Object> = {};
     if (agentId !== undefined && agentId.length > 0) query['agent_id'] = agentId;
-    const res = await this.client.get<ChannelConfigDto[]>('/channel-configs', query);
+    const res = asEnvelopeList<ChannelConfigDto>(await this.client.get<ChannelConfigDto[]>('/channel-configs', query));
     const arr = (res.data ?? []) as ChannelConfigDto[];
     return {
       code: res.code, message: res.message,
@@ -94,15 +95,16 @@ export class ChannelIntegrationApi {
     } as ApiResponse<PageResult<ChannelConfigDto>>;
   }
 
-  /** 获取单条渠道配置（GET /channel-configs/{channel_type}?agent_id=） */
+  /** 获取单条渠道配置（GET /channel-configs/{channel_type}?agent_id=，ChannelConfigResponse 裸对象边界归一） */
   async getConfig(agentId: string, channelType: string): Promise<ApiResponse<ChannelConfigDto>> {
     const query: Record<string, Object> = { 'agent_id': agentId };
-    return this.client.get<ChannelConfigDto>(`/channel-configs/${channelType}`, query);
+    const res = await this.client.get<ChannelConfigDto>(`/channel-configs/${channelType}`, query);
+    return asEnvelope<ChannelConfigDto>(res, ['channel_type', 'agent_id']);
   }
 
-  /** 保存（创建/更新）渠道配置（POST /channel-configs?agent_id=，upsert） */
+  /** 保存（创建/更新）渠道配置（POST /channel-configs?agent_id=，upsert；{success,...} 裸 dict 边界归一） */
   async saveConfig(agentId: string, body: ChannelConfigUpsertBody): Promise<ApiResponse<ChannelSaveResultDto>> {
-    const res = await this.client.post<Object>(`/channel-configs?agent_id=${encodeURIComponent(agentId)}`, body);
+    const res = asEnvelope<Object>(await this.client.post<Object>(`/channel-configs?agent_id=${encodeURIComponent(agentId)}`, body), ['success']);
     const payload = (res.data ?? {}) as Record<string, Object>;
     const result: ChannelSaveResultDto = {
       success: payload['success'] === true,
@@ -114,15 +116,16 @@ export class ChannelIntegrationApi {
     return { code: res.code, message: res.message, data: result } as ApiResponse<ChannelSaveResultDto>;
   }
 
-  /** 删除渠道配置（DELETE /channel-configs/{channel_type}?agent_id=） */
+  /** 删除渠道配置（DELETE /channel-configs/{channel_type}?agent_id=，{success,...} 裸 dict 边界归一） */
   async removeConfig(agentId: string, channelType: string): Promise<ApiResponse<Object>> {
     const query: Record<string, Object> = { 'agent_id': agentId };
-    return this.client.delete<Object>(`/channel-configs/${channelType}?agent_id=${encodeURIComponent(agentId)}`);
+    const res = await this.client.delete<Object>(`/channel-configs/${channelType}?agent_id=${encodeURIComponent(agentId)}`);
+    return asEnvelope<Object>(res, ['success']) as ApiResponse<Object>;
   }
 
-  /** 测试渠道连接（POST /channel-configs/{channel_type}/test?agent_id=） */
+  /** 测试渠道连接（POST /channel-configs/{channel_type}/test?agent_id=，ChannelTestResult 裸对象边界归一） */
   async testConfig(agentId: string, channelType: string, body: ChannelConfigUpsertBody): Promise<ApiResponse<ChannelTestResultDto>> {
-    const res = await this.client.post<Object>(`/channel-configs/${channelType}/test?agent_id=${encodeURIComponent(agentId)}`, body);
+    const res = asEnvelope<Object>(await this.client.post<Object>(`/channel-configs/${channelType}/test?agent_id=${encodeURIComponent(agentId)}`, body), ['success', 'message']);
     const payload = (res.data ?? {}) as Record<string, Object>;
     const result: ChannelTestResultDto = {
       success: payload['success'] === true,

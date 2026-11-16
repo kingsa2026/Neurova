@@ -12,6 +12,7 @@
  */
 
 import { HttpClient } from '../HttpClient';
+import { asEnvelope, asEnvelopeList } from '../envelope';
 import { ApiResponse } from '../../types';
 import { ChannelConfigDto, ChannelConfigUpsertBody, ChannelTestResultDto, emptyExtra } from './ChannelIntegrationApi';
 
@@ -31,26 +32,27 @@ export class AgentChannelsApi {
     this.client = client;
   }
 
-  /** 列出某 Agent 名下的渠道配置（GET /channel-configs?agent_id=） */
+  /** 列出某 Agent 名下的渠道配置（GET /channel-configs?agent_id=，后端裸数组边界归一） */
   async list(agentId: string): Promise<ApiResponse<ChannelConfigDto[]>> {
     const query: Record<string, Object> = { 'agent_id': agentId };
-    const res = await this.client.get<ChannelConfigDto[]>('/channel-configs', query);
+    const res = asEnvelopeList<ChannelConfigDto>(await this.client.get<ChannelConfigDto[]>('/channel-configs', query));
     const arr = (res.data ?? []) as ChannelConfigDto[];
     return { code: res.code, message: res.message, data: arr } as ApiResponse<ChannelConfigDto[]>;
   }
 
-  /** 为某 Agent 保存（创建/更新）渠道配置（POST /channel-configs?agent_id=） */
+  /** 为某 Agent 保存（创建/更新）渠道配置（POST /channel-configs?agent_id=，{success,...} 裸 dict 边界归一） */
   async create(agentId: string, body: ChannelConfigUpsertBody): Promise<ApiResponse<Object>> {
     const res = await this.client.post<Object>(`/channel-configs?agent_id=${encodeURIComponent(agentId)}`, body);
-    return res as ApiResponse<Object>;
+    return asEnvelope<Object>(res, ['success']) as ApiResponse<Object>;
   }
 
-  /** 删除某 Agent 名下的指定渠道配置（DELETE /channel-configs/{channel_type}?agent_id=） */
+  /** 删除某 Agent 名下的指定渠道配置（DELETE /channel-configs/{channel_type}?agent_id=，{success,...} 裸 dict 边界归一） */
   async remove(agentId: string, channelType: string): Promise<ApiResponse<Object>> {
-    return this.client.delete<Object>(`/channel-configs/${channelType}?agent_id=${encodeURIComponent(agentId)}`);
+    const res = await this.client.delete<Object>(`/channel-configs/${channelType}?agent_id=${encodeURIComponent(agentId)}`);
+    return asEnvelope<Object>(res, ['success']) as ApiResponse<Object>;
   }
 
-  /** 测试某 Agent 渠道连接（POST /channel-configs/{channel_type}/test?agent_id=，用掩码外凭据空跑） */
+  /** 测试某 Agent 渠道连接（POST /channel-configs/{channel_type}/test?agent_id=，用掩码外凭据空跑；ChannelTestResult 裸对象边界归一） */
   async testConnection(agentId: string, channelType: string): Promise<ApiResponse<ChannelTestResult>> {
     const body: ChannelConfigUpsertBody = {
       channel_type: channelType,
@@ -64,8 +66,8 @@ export class AgentChannelsApi {
       verification_token: '',
       extra: emptyExtra(),
     };
-    const res = await this.client.post<Object>(
-      `/channel-configs/${channelType}/test?agent_id=${encodeURIComponent(agentId)}`, body);
+    const res = asEnvelope<Object>(await this.client.post<Object>(
+      `/channel-configs/${channelType}/test?agent_id=${encodeURIComponent(agentId)}`, body), ['success', 'message']);
     const payload = (res.data ?? {}) as Record<string, Object>;
     const result: ChannelTestResult = {
       success: payload['success'] === true,

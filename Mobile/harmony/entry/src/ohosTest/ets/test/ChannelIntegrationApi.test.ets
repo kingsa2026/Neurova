@@ -2,22 +2,32 @@
 // 后端事实源：/v1/channel-configs（自述前缀）+ /v1/channel-adapters + /v1/channel-sharing。
 // 旧 /channel-integrations 端点不存在：对应方法必须 throw 点名且不发任何网络请求。
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { HttpClient, HttpBackend } from '../../../../main/ets/libs/api/HttpClient';
-import { ApiResponse } from '../../../../main/ets/libs/types';
-import { ChannelIntegrationApi, emptyExtra } from '../../../../main/ets/libs/api/modules/ChannelIntegrationApi';
+import { HttpClient, HttpBackend, HttpBackendResponse } from '../../../main/ets/libs/api/HttpClient';
+import { ApiResponse } from '../../../main/ets/libs/types';
+import { ChannelIntegrationApi, ChannelConfigUpsertBody, emptyExtra } from '../../../main/ets/libs/api/modules/ChannelIntegrationApi';
+
+/** MockBackend 录制的请求（显式接口，替代内联对象字面量类型） */
+interface RecordedRequest {
+  method: string;
+  url: string;
+  body: Object | null;
+}
 
 class MockBackend implements HttpBackend {
-  public requests: { method: string; url: string; body: Object | null }[] = [];
-  public response: ApiResponse<Object> = { code: 0, message: 'ok', data: {} };
+  public requests: RecordedRequest[] = [];
+  /** 响应体（可为信封/裸数组/裸 dict——模拟后端真实形状） */
+  public responseBody: Object = new Object();
 
   async request(
     method: string,
     url: string,
     body: Object | null,
     _headers: Record<string, string>,
-  ): Promise<{ status: number; data: ApiResponse<Object> }> {
-    this.requests.push({ method, url, body });
-    return { status: 200, data: this.response };
+  ): Promise<HttpBackendResponse> {
+    const recorded: RecordedRequest = { method: method, url: url, body: body };
+    this.requests.push(recorded);
+    const resp: HttpBackendResponse = { status: 200, data: this.responseBody as Object as ApiResponse<Object> };
+    return resp;
   }
 }
 
@@ -50,7 +60,7 @@ export default function channelIntegrationApiTest() {
     });
 
     it('saveConfig_posts_upsert_contract_with_agent_query', 0, () => {
-      const body = {
+      const body: ChannelConfigUpsertBody = {
         channel_type: 'feishu', enabled: true, app_id: 'cli-x', app_secret: 's',
         use_stream: true, webhook_url: '', webhook_token: '', encrypt_key: '',
         verification_token: '', extra: emptyExtra(),
@@ -68,7 +78,7 @@ export default function channelIntegrationApiTest() {
     });
 
     it('testConfig_posts_to_channel_test_with_agent_query', 0, () => {
-      const body = {
+      const body: ChannelConfigUpsertBody = {
         channel_type: 'feishu', enabled: true, app_id: '', app_secret: '',
         use_stream: true, webhook_url: '', webhook_token: '', encrypt_key: '',
         verification_token: '', extra: emptyExtra(),
@@ -91,8 +101,8 @@ export default function channelIntegrationApiTest() {
 
     it('retiredIntegrationEndpoints_fire_no_request', 0, () => {
       api.get('ci-1');
-      api.create({});
-      api.update('ci-1', {});
+      api.create(new Object());
+      api.update('ci-1', new Object());
       api.remove('ci-1');
       api.testConnection('ci-1');
       expect(backend.requests.length).assertEqual(0);

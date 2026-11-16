@@ -3,14 +3,33 @@
 // 端点词汇与后端挂载同源：/v1/scheduler、/v1/trace、/v1/sleep、/v1/firewall；
 // 上下文消息/计算机任务/轨迹点后端无对应端点——断言不发请求且返回诚实空态/显式失败。
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { HttpClient, HttpBackend } from '../../../../main/ets/libs/api/HttpClient';
-import { ApiResponse } from '../../../../main/ets/libs/types';
-import { RuntimeApi } from '../../../../main/ets/libs/api/modules/RuntimeApi';
+import { HttpClient, HttpBackend, HttpBackendResponse } from '../../../main/ets/libs/api/HttpClient';
+import { ApiResponse } from '../../../main/ets/libs/types';
+import { RuntimeApi } from '../../../main/ets/libs/api/modules/RuntimeApi';
+
+/** MockBackend 录制的请求（显式接口，替代内联对象字面量类型） */
+interface RecordedRequest {
+  method: string;
+  url: string;
+  body: Object | null;
+}
+
+/** 构造空 Record（ArkTS 对象字面量须对应显式类型，集中此处） */
+function emptyRecord(): Record<string, Object> {
+  const r: Record<string, Object> = {};
+  return r;
+}
+
+/** 构造 ApiResponse 信封（data 须传显式类型值，禁内联对象字面量） */
+function apiResponse(data: Object): ApiResponse<Object> {
+  const resp: ApiResponse<Object> = { code: 0, message: 'ok', data: data };
+  return resp;
+}
 
 // Mock 后端实现：按 method+url 返回不同响应（防火墙"先取列表再合并更新"需要）
 class MockBackend implements HttpBackend {
-  public requests: { method: string; url: string; body: Object | null }[] = [];
-  public response: ApiResponse<Object> = { code: 0, message: 'ok', data: {} };
+  public requests: RecordedRequest[] = [];
+  public response: ApiResponse<Object> = apiResponse(emptyRecord());
   public getResponse: ApiResponse<Object> | null = null;
 
   async request(
@@ -18,12 +37,15 @@ class MockBackend implements HttpBackend {
     url: string,
     body: Object | null,
     _headers: Record<string, string>,
-  ): Promise<{ status: number; data: ApiResponse<Object> }> {
-    this.requests.push({ method, url, body });
+  ): Promise<HttpBackendResponse> {
+    const recorded: RecordedRequest = { method: method, url: url, body: body };
+    this.requests.push(recorded);
     if (method === 'GET' && this.getResponse !== null) {
-      return { status: 200, data: this.getResponse };
+      const got: HttpBackendResponse = { status: 200, data: this.getResponse };
+      return got;
     }
-    return { status: 200, data: this.response };
+    const resp: HttpBackendResponse = { status: 200, data: this.response };
+    return resp;
   }
 }
 
@@ -53,7 +75,8 @@ export default function runtimeApiTest() {
     });
 
     it('createScheduleTask_posts_taskcreate_contract', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { task_id: 't1' } };
+      const taskData: Record<string, Object> = { 'task_id': 't1' };
+      backend.response = apiResponse(taskData);
       api.createScheduleTask({
         agentId: 'agent-1',
         name: '日报',
@@ -69,14 +92,16 @@ export default function runtimeApiTest() {
     });
 
     it('updateScheduleTask_running_status_routes_to_run_endpoint', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { task_id: 't1' } };
+      const taskData: Record<string, Object> = { 'task_id': 't1' };
+      backend.response = apiResponse(taskData);
       api.updateScheduleTask('t1', { status: 'running' });
       expect(backend.requests[0].method).assertEqual('POST');
       expect(backend.requests[0].url).assertEqual('https://api.example.com/scheduler/tasks/t1/run');
     });
 
     it('updateScheduleTask_cron_routes_to_put', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { task_id: 't1' } };
+      const taskData: Record<string, Object> = { 'task_id': 't1' };
+      backend.response = apiResponse(taskData);
       api.updateScheduleTask('t1', { cron: '0 10 * * *' });
       expect(backend.requests[0].method).assertEqual('PUT');
       expect(backend.requests[0].url).assertEqual('https://api.example.com/scheduler/tasks/t1');
@@ -85,7 +110,7 @@ export default function runtimeApiTest() {
     });
 
     it('removeScheduleTask_calls_delete', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: {} };
+      backend.response = apiResponse(emptyRecord());
       api.removeScheduleTask('t1');
       expect(backend.requests[0].method).assertEqual('DELETE');
       expect(backend.requests[0].url).assertEqual('https://api.example.com/scheduler/tasks/t1');
@@ -163,14 +188,16 @@ export default function runtimeApiTest() {
     // ========== Sleep：状态/设置/唤醒 ==========
 
     it('getSleepStatus_calls_get_sleep_status_path', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { agent_id: 'agent-1', is_sleeping: true, sleep_phase: 'deep', sleep_cycles: 2 } };
+      const sleepData: Record<string, Object> = { 'agent_id': 'agent-1', 'is_sleeping': true, 'sleep_phase': 'deep', 'sleep_cycles': 2 };
+      backend.response = apiResponse(sleepData);
       api.getSleepStatus('agent-1');
       expect(backend.requests[0].method).assertEqual('GET');
       expect(backend.requests[0].url).assertEqual('https://api.example.com/sleep/agent-1/status');
     });
 
     it('setSleepMode_puts_sleep_settings_with_sleep_mode', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { agent_id: 'agent-1', is_sleeping: false, sleep_phase: 'awake', sleep_cycles: 0 } };
+      const sleepData: Record<string, Object> = { 'agent_id': 'agent-1', 'is_sleeping': false, 'sleep_phase': 'awake', 'sleep_cycles': 0 };
+      backend.response = apiResponse(sleepData);
       api.setSleepMode('agent-1', 'deep');
       expect(backend.requests[0].method).assertEqual('PUT');
       expect(backend.requests[0].url).assertEqual('https://api.example.com/sleep/agent-1/settings');
@@ -179,7 +206,7 @@ export default function runtimeApiTest() {
     });
 
     it('awaken_posts_sleep_wake_path', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: {} };
+      backend.response = apiResponse(emptyRecord());
       api.awaken('agent-1');
       expect(backend.requests[0].method).assertEqual('POST');
       expect(backend.requests[0].url).assertEqual('https://api.example.com/sleep/agent-1/wake');
@@ -197,7 +224,8 @@ export default function runtimeApiTest() {
     });
 
     it('createFirewallRule_posts_firewallrulecreate_contract', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { rule_id: 'r1' } };
+      const ruleData: Record<string, Object> = { 'rule_id': 'r1' };
+      backend.response = apiResponse(ruleData);
       api.createFirewallRule({ agentId: 'agent-1', resource: '1.2.3.4', action: 'deny', enabled: true });
       expect(backend.requests[0].method).assertEqual('POST');
       expect(backend.requests[0].url).assertEqual('https://api.example.com/firewall/rules');
@@ -208,12 +236,11 @@ export default function runtimeApiTest() {
     });
 
     it('updateFirewallRule_enabled_merges_existing_rule', 0, () => {
-      backend.getResponse = {
-        code: 0,
-        message: 'ok',
-        data: [{ rule_id: 'r1', name: '1.2.3.4', rule_type: 'ip', action: 'block', value: '1.2.3.4', enabled: true, created_at: 0, updated_at: 0 }],
-      };
-      backend.response = { code: 0, message: 'ok', data: { rule_id: 'r1', enabled: false } };
+      const existingRule: Record<string, Object> = { 'rule_id': 'r1', 'name': '1.2.3.4', 'rule_type': 'ip', 'action': 'block', 'value': '1.2.3.4', 'enabled': true, 'created_at': 0, 'updated_at': 0 };
+      const existingRules: Record<string, Object>[] = [existingRule];
+      backend.getResponse = apiResponse(existingRules);
+      const ruleData: Record<string, Object> = { 'rule_id': 'r1', 'enabled': false };
+      backend.response = apiResponse(ruleData);
       api.updateFirewallRule('r1', { enabled: false });
       expect(backend.requests[0].method).assertEqual('GET');
       expect(backend.requests[1].method).assertEqual('PUT');
@@ -224,7 +251,7 @@ export default function runtimeApiTest() {
     });
 
     it('removeFirewallRule_calls_delete', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: {} };
+      backend.response = apiResponse(emptyRecord());
       api.removeFirewallRule('r1');
       expect(backend.requests[0].method).assertEqual('DELETE');
       expect(backend.requests[0].url).assertEqual('https://api.example.com/firewall/rules/r1');

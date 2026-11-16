@@ -13,6 +13,7 @@
  * 旧 /runtime/* 路径后端不存在，全部退役。
  */
 import { HttpClient } from '../HttpClient';
+import { asEnvelope, asEnvelopeList } from '../envelope';
 import {
   ApiResponse,
   PageParams,
@@ -161,7 +162,10 @@ export class RuntimeApi {
     return res;
   }
 
-  /** 列出调度任务（agent_id 后端过滤；裸数组本地分页） */
+  /** 调度任务单条契约探针（scheduler.py ScheduledTaskResponse 裸对象归一用） */
+  private static readonly TASK_PROBES: string[] = ['task_id', 'name', 'status'];
+
+  /** 列出调度任务（agent_id 后端过滤；后端裸数组，边界归一后本地分页） */
   async listScheduleTasks(
     agentId: string,
     params?: PageParams,
@@ -170,7 +174,7 @@ export class RuntimeApi {
       'agent_id': agentId,
       'limit': 100,
     };
-    const res = await this.client.get<SchedulerTaskDto[]>('/scheduler/tasks', query);
+    const res = asEnvelopeList<SchedulerTaskDto>(await this.client.get<SchedulerTaskDto[]>('/scheduler/tasks', query));
     const arr = res.data as Object as SchedulerTaskDto[];
     const tasks: ScheduleTask[] = [];
     for (const dto of arr) {
@@ -186,7 +190,7 @@ export class RuntimeApi {
 
   /** 获取单条调度任务 */
   async getScheduleTask(taskId: string): Promise<ApiResponse<ScheduleTask>> {
-    const res = await this.client.get<SchedulerTaskDto>(`/scheduler/tasks/${taskId}`);
+    const res = asEnvelope<SchedulerTaskDto>(await this.client.get<SchedulerTaskDto>(`/scheduler/tasks/${taskId}`), RuntimeApi.TASK_PROBES);
     const ok = RuntimeApi.unwrapOne(res, '调度任务获取');
     const mapped: ApiResponse<ScheduleTask> = {
       code: ok.code,
@@ -209,7 +213,7 @@ export class RuntimeApi {
     if (data.cron !== undefined && data.cron.length > 0) {
       body['cron_expression'] = data.cron;
     }
-    const res = await this.client.post<SchedulerTaskDto>('/scheduler/tasks', body);
+    const res = asEnvelope<SchedulerTaskDto>(await this.client.post<SchedulerTaskDto>('/scheduler/tasks', body), RuntimeApi.TASK_PROBES);
     const ok = RuntimeApi.unwrapOne(res, '调度任务创建');
     const mapped: ApiResponse<ScheduleTask> = {
       code: ok.code,
@@ -231,7 +235,7 @@ export class RuntimeApi {
     if (data.name !== undefined) body['name'] = data.name;
     if (data.cron !== undefined) body['cron_expression'] = data.cron;
     if (data.agentId !== undefined) body['agent_id'] = data.agentId;
-    const res = await this.client.put<SchedulerTaskDto>(`/scheduler/tasks/${taskId}`, body);
+    const res = asEnvelope<SchedulerTaskDto>(await this.client.put<SchedulerTaskDto>(`/scheduler/tasks/${taskId}`, body), RuntimeApi.TASK_PROBES);
     const ok = RuntimeApi.unwrapOne(res, '调度任务更新');
     const mapped: ApiResponse<ScheduleTask> = {
       code: ok.code,
@@ -244,7 +248,7 @@ export class RuntimeApi {
   /** 手动触发任务（scheduler.py POST /tasks/{id}/run） */
   async runScheduleTask(taskId: string): Promise<ApiResponse<ScheduleTask>> {
     const body: Record<string, Object> = {};
-    const res = await this.client.post<SchedulerTaskDto>(`/scheduler/tasks/${taskId}/run`, body);
+    const res = asEnvelope<SchedulerTaskDto>(await this.client.post<SchedulerTaskDto>(`/scheduler/tasks/${taskId}/run`, body), RuntimeApi.TASK_PROBES);
     const ok = RuntimeApi.unwrapOne(res, '调度任务触发');
     const mapped: ApiResponse<ScheduleTask> = {
       code: ok.code,
@@ -330,7 +334,7 @@ export class RuntimeApi {
     return entry;
   }
 
-  /** 列出追踪条目（agent_id 后端过滤；裸数组本地分页） */
+  /** 列出追踪条目（agent_id 后端过滤；后端裸数组，边界归一后本地分页） */
   async listTraces(
     agentId: string,
     params?: PageParams,
@@ -339,7 +343,7 @@ export class RuntimeApi {
       'agent_id': agentId,
       'limit': 100,
     };
-    const res = await this.client.get<TraceListItemDto[]>('/trace', query);
+    const res = asEnvelopeList<TraceListItemDto>(await this.client.get<TraceListItemDto[]>('/trace', query));
     const arr = res.data as Object as TraceListItemDto[];
     const entries: TraceEntry[] = [];
     for (const dto of arr) {
@@ -353,9 +357,9 @@ export class RuntimeApi {
     return mapped;
   }
 
-  /** 获取单条追踪详情（trace.py GET /{trace_id}，含 events/tool_calls） */
+  /** 获取单条追踪详情（trace.py GET /{trace_id}，含 events/tool_calls；裸对象边界归一） */
   async getTrace(traceId: string): Promise<ApiResponse<TraceEntry>> {
-    const res = await this.client.get<Object>(`/trace/${traceId}`);
+    const res = asEnvelope<Object>(await this.client.get<Object>(`/trace/${traceId}`), ['id']);
     const rec = res.data as Object as Record<string, Object>;
     if (res.code !== 0 || !rec || rec['id'] === undefined) {
       throw new Error(res.message && res.message.length > 0 ? res.message : '轨迹获取失败');
@@ -413,9 +417,12 @@ export class RuntimeApi {
     return status;
   }
 
-  /** 获取休眠状态（sleep.py GET /{agent_id}/status） */
+  /** 休眠状态单条契约探针（sleep.py SleepStatusResponse 裸对象归一用） */
+  private static readonly SLEEP_PROBES: string[] = ['agent_id', 'is_sleeping', 'sleep_phase'];
+
+  /** 获取休眠状态（sleep.py GET /{agent_id}/status，裸对象边界归一） */
   async getSleepStatus(agentId: string): Promise<ApiResponse<SleepStatus>> {
-    const res = await this.client.get<SleepStatusDto>(`/sleep/${agentId}/status`);
+    const res = asEnvelope<SleepStatusDto>(await this.client.get<SleepStatusDto>(`/sleep/${agentId}/status`), RuntimeApi.SLEEP_PROBES);
     const ok = RuntimeApi.unwrapOne(res, '休眠状态获取');
     const mapped: ApiResponse<SleepStatus> = {
       code: ok.code,
@@ -425,22 +432,19 @@ export class RuntimeApi {
     return mapped;
   }
 
-  /** 设置休眠模式（sleep.py PUT /{agent_id}/settings 的 sleep_mode 字段） */
+  /** 设置休眠模式（sleep.py PUT /{agent_id}/settings 的 sleep_mode 字段；PUT 返回 SleepSettings 裸对象，语义是休眠状态——成功后回读 status 归一） */
   async setSleepMode(agentId: string, mode: 'idle' | 'light' | 'deep'): Promise<ApiResponse<SleepStatus>> {
     const body: Record<string, Object> = { 'sleep_mode': mode };
-    const res = await this.client.put<SleepStatusDto>(`/sleep/${agentId}/settings`, body);
-    const ok = RuntimeApi.unwrapOne(res, '休眠模式设置');
-    const mapped: ApiResponse<SleepStatus> = {
-      code: ok.code,
-      message: ok.message,
-      data: RuntimeApi.toSleepStatus(ok.data as Object as SleepStatusDto),
-    };
-    return mapped;
+    const saved = asEnvelope<Object>(await this.client.put<Object>(`/sleep/${agentId}/settings`, body), ['auto_sleep_enabled', 'sleep_mode']);
+    if (saved.code !== 0) {
+      throw new Error(saved.message && saved.message.length > 0 ? saved.message : '休眠模式设置失败');
+    }
+    return this.getSleepStatus(agentId);
   }
 
-  /** 获取休眠状态原始投影（新消费方优先用此） */
+  /** 获取休眠状态原始投影（新消费方优先用此；裸对象边界归一） */
   async getSleepStatusDto(agentId: string): Promise<ApiResponse<SleepStatusDto>> {
-    return this.client.get<SleepStatusDto>(`/sleep/${agentId}/status`);
+    return asEnvelope<SleepStatusDto>(await this.client.get<SleepStatusDto>(`/sleep/${agentId}/status`), RuntimeApi.SLEEP_PROBES);
   }
 
   /** 唤醒 Agent（sleep.py POST /{agent_id}/wake） */
@@ -465,13 +469,13 @@ export class RuntimeApi {
     return rule;
   }
 
-  /** 列出防火墙规则（裸数组本地分页） */
+  /** 列出防火墙规则（后端裸数组，边界归一后本地分页） */
   async listFirewallRules(
     agentId: string,
     params?: PageParams,
   ): Promise<ApiResponse<PageResult<FirewallRule>>> {
     const query: Record<string, Object> = { 'limit': 100 };
-    const res = await this.client.get<FirewallRuleDto[]>('/firewall/rules', query);
+    const res = asEnvelopeList<FirewallRuleDto>(await this.client.get<FirewallRuleDto[]>('/firewall/rules', query));
     const arr = res.data as Object as FirewallRuleDto[];
     const rules: FirewallRule[] = [];
     for (const dto of arr) {
@@ -485,10 +489,10 @@ export class RuntimeApi {
     return mapped;
   }
 
-  /** 获取单条防火墙规则（后端无单条 GET，从列表定位；不存在即抛错） */
+  /** 获取单条防火墙规则（后端无单条 GET，从归一后的列表定位；不存在即抛错） */
   async getFirewallRule(ruleId: string): Promise<ApiResponse<FirewallRule>> {
     const query: Record<string, Object> = { 'limit': 100 };
-    const res = await this.client.get<FirewallRuleDto[]>('/firewall/rules', query);
+    const res = asEnvelopeList<FirewallRuleDto>(await this.client.get<FirewallRuleDto[]>('/firewall/rules', query));
     const arr = res.data as Object as FirewallRuleDto[];
     for (const dto of arr) {
       if (dto.rule_id === ruleId) {
@@ -513,7 +517,7 @@ export class RuntimeApi {
       'value': resource,
       'enabled': data.enabled !== undefined ? data.enabled : true,
     };
-    const res = await this.client.post<FirewallRuleDto>('/firewall/rules', body);
+    const res = asEnvelope<FirewallRuleDto>(await this.client.post<FirewallRuleDto>('/firewall/rules', body), ['rule_id', 'name']);
     const ok = RuntimeApi.unwrapOne(res, '防火墙规则创建');
     const mapped: ApiResponse<FirewallRule> = {
       code: ok.code,
@@ -538,7 +542,7 @@ export class RuntimeApi {
       'value': resource,
       'enabled': data.enabled !== undefined ? data.enabled : (base !== null ? base.enabled : true),
     };
-    const res = await this.client.put<FirewallRuleDto>(`/firewall/rules/${ruleId}`, body);
+    const res = asEnvelope<FirewallRuleDto>(await this.client.put<FirewallRuleDto>(`/firewall/rules/${ruleId}`, body), ['rule_id', 'name']);
     const ok = RuntimeApi.unwrapOne(res, '防火墙规则更新');
     const mapped: ApiResponse<FirewallRule> = {
       code: ok.code,
