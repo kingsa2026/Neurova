@@ -8,9 +8,7 @@
   "scripts": {
     "guard:big-brain": "node scripts/guard-big-brain.cjs",
     "guard:llm-tracked": "node scripts/guard-llm-tracked.cjs",
-    "guard:all": "npm run guard:big-brain && npm run guard:llm-tracked",
-    "cost:analyze": "python scripts/cost_analyzer.py",
-    "cost:rollup": "python scripts/cost_rollup.py"
+    "guard:all": "npm run guard:big-brain && npm run guard:llm-tracked"
   },
   
   "devDependencies": {
