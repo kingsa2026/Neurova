@@ -267,12 +267,17 @@ class DeadLetterQueue:
                 logger.error("死信处理器执行失败: %s, error=%s", handler.__name__, e)
 
     def _is_processed(self, dlq: DeadLetterMessage) -> bool:
-        """检查死信是否已处理"""
+        """检查死信是否已退出重放面（审计 3.2-6 根治恒 False）。
+
+        判定与 retry() 的拒绝同源（`_retry_count` 单一事实源，两处不漂移）：
+        重试计数达 `max_retries` ＝ 重放面不再包含——原实现恒 `return False`，
+        耗尽的死信在每次退避窗口到期后都会重回 get_retryable()，重放循环
+        对同一消息反复投递（acp_runtime 复用本队列，属活伤）。
+        mark_processed/discard 移出队列的消息天然不会出现在遍历队列的两个
+        调用方里，无需在此重复判定。
+        """
         msg_id = dlq.original_message.message_id
-        if msg_id in self._retry_schedule:
-            if self._retry_count.get(msg_id, 0) < self.config.max_retries:
-                return False
-        return False
+        return self._retry_count.get(msg_id, 0) >= self.config.max_retries
 
     def _find_dlq(self, message_id: str) -> Optional[DeadLetterMessage]:
         """查找死信"""
