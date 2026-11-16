@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from neurova.core.db_migration import migrate as apply_migrations, register_migration
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -43,6 +44,13 @@ CREATE TABLE IF NOT EXISTS outbound_failures (
 )
 """
 
+# schema 版本域：出口失败表与入站旁路表同库同族（一个 SQLite 文件两张表），
+# 共用一个版本域按序演进（审计 3.4-10）。两个类打开同一个库都会把链跑齐，
+# 保证"只打开过旁路台账"的库也有 outbound_failures 表（反之亦然）。
+CHANNEL_OUTBOUND_DOMAIN = "channel_outbound"
+
+register_migration(1, _SCHEMA, domain=CHANNEL_OUTBOUND_DOMAIN)
+
 #: 内容头截断长度——台账是定位线索不是全文存档（全文在会话回写与日志里）
 CONTENT_HEAD_CHARS = 80
 
@@ -56,8 +64,7 @@ class OutboundFailureLedger:
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
-        with self._conn:
-            self._conn.execute(_SCHEMA)
+        apply_migrations(self._conn, CHANNEL_OUTBOUND_DOMAIN)
 
     def recordFailure(
         self,
@@ -130,6 +137,7 @@ CREATE TABLE IF NOT EXISTS ingress_bypass (
     reason TEXT NOT NULL DEFAULT ''
 )
 """
+register_migration(2, _BYPASS_SCHEMA, domain=CHANNEL_OUTBOUND_DOMAIN)
 
 
 class ChannelBypassLedger:
@@ -146,8 +154,7 @@ class ChannelBypassLedger:
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
-        with self._conn:
-            self._conn.execute(_BYPASS_SCHEMA)
+        apply_migrations(self._conn, CHANNEL_OUTBOUND_DOMAIN)
 
     def recordBypass(self, *, channel_type: str, chat_id: str,
                      message_id: str, reason: str = "") -> int:

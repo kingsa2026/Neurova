@@ -23,6 +23,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from neurova.core.data_root import resolveDataPath
+from neurova.core.db_migration import migrate as apply_migrations, register_migration
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -71,6 +72,16 @@ _DDL_INDEX_OBSERVED_SEEN = (
     "CREATE INDEX IF NOT EXISTS idx_cos_last_seen ON channel_observed_senders(last_seen)"
 )
 
+# schema 版本域：绑定表+观察表建表/索引经注册表演进（审计 3.4-10）
+CHANNEL_IDENTITY_DOMAIN = "channel_identity"
+
+register_migration(
+    1,
+    _DDL + ";\n" + _DDL_INDEX_USER + ";\n" + _DDL_OBSERVED + ";\n"
+    + _DDL_INDEX_OBSERVED + ";\n" + _DDL_INDEX_OBSERVED_SEEN + ";",
+    domain=CHANNEL_IDENTITY_DOMAIN,
+)
+
 #: 观察行的保留窗口。观察面是"能给谁发绑定码"的候选清单，不是一份需要长期留痕的账
 #: （留痕那部分是绑定表的 `revoked` 行，两回事）。没有窗口时这张表只增不减，
 #: 而读面又固定 `LIMIT 200`——**排在 200 之后的发送者会无声消失**，面板既不说也不报错。
@@ -107,11 +118,9 @@ class UserIdentityManager:
     def _initDb(self) -> None:
         with self._lock:
             conn = self._getConn()
-            conn.execute(_DDL)
-            conn.execute(_DDL_INDEX_USER)
-            conn.execute(_DDL_OBSERVED)
-            conn.execute(_DDL_INDEX_OBSERVED)
-            conn.execute(_DDL_INDEX_OBSERVED_SEEN)
+            # 建表/索引经版本化迁移链（审计 3.4-10）：新库落 v1，旧库按
+            # user_version 跳过；不再手写五连裸 IF NOT EXISTS
+            apply_migrations(conn, CHANNEL_IDENTITY_DOMAIN)
             conn.commit()
 
     def _getConn(self) -> sqlite3.Connection:
