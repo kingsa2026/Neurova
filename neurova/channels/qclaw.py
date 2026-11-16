@@ -5,6 +5,7 @@ QClaw 消息渠道适配器
 通过 QClaw 网关与 QClaw 管家通信。
 """
 
+import asyncio
 import json
 from neurova.core.logger import get_logger
 import time
@@ -156,7 +157,10 @@ class QClawAdapter(ChannelAdapter):
             logger.error("QClaw 服务未初始化")
             return None
 
-        result = self.qclaw_service.send_message(
+        # P1-16: 服务层内部是 requests 同步 HTTP（取 accessToken + 发送），
+        # 直调会阻塞事件循环——下沉工作线程。
+        result = await asyncio.to_thread(
+            self.qclaw_service.send_message,
             app_id=self.app_id,
             app_secret=self.app_secret,
             chat_id=chat_id,

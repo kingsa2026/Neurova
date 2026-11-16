@@ -122,35 +122,71 @@ class OpenAIAdapter(LLMAbstractProvider):
         temperature: float,
         max_tokens: int,
     ) -> CallResult:
-        """Execute actual OpenAI API call"""
-        # Mock implementation - replace with real API call
-        
-        # Convert messages to OpenAI format
-        openai_messages = [
-            {"role": msg.role, "content": msg.content}
-            for msg in messages
-        ]
-        
-        # Simulate response
-        usage = {
-            # 唯一尺子：与 `_estimate_message_tokens`（沙箱校验用的同一个函数）同源。
-            # 改前这里是 `sum(len(msg.content.split()))`——沙箱按真尺子判、usage 按
-            # 词数报，同一份请求两个数（第二把尺子，钉在 text "token" 语义上）。
-            "prompt_tokens": self._estimate_message_tokens(messages),
-            "completion_tokens": max_tokens,
-            "total_tokens": 0,
+        """执行真实 OpenAI 兼容 chat 调用（P1-10：替代 "Mock response" 假实现）。
+
+        aiohttp 异步客户端（与 providers/openai_provider 同款软依赖）；
+        凭据缺失/依赖缺失/HTTP >= 400 一律以异常诚实暴露，不伪造响应。
+        """
+        if not self.config.api_key:
+            raise ValueError(
+                "OpenAI API key 未配置（ProviderConfig.api_key 为空），拒绝伪造响应"
+            )
+        try:
+            import aiohttp
+        except ImportError as e:
+            raise RuntimeError("aiohttp 未安装，无法执行真实 OpenAI 调用") from e
+
+        base_url = (self.config.base_url or "https://api.openai.com/v1").rstrip("/")
+        payload = {
+            "model": self.config.model_name,
+            "messages": [
+                {"role": msg.role, "content": msg.content}
+                for msg in messages
+            ],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": False,
         }
-        usage["total_tokens"] = usage["prompt_tokens"] + usage["completion_tokens"]
-        
-        latency = time.time() - getattr(self, '_call_start_time', time.time())
-        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.config.api_key}",
+        }
+        timeout = aiohttp.ClientTimeout(total=self.config.timeout_seconds)
+        started = time.time()
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{base_url}/chat/completions",
+                json=payload,
+                headers=headers,
+                timeout=timeout,
+            ) as response:
+                body = await response.json()
+                if response.status >= 400:
+                    detail = ""
+                    if isinstance(body, dict):
+                        detail = str((body.get("error") or {}).get("message", body))
+                    raise RuntimeError(
+                        f"OpenAI 调用失败: HTTP {response.status}: {detail}"
+                    )
+        latency = time.time() - started
+
+        choices = body.get("choices") or [{}]
+        message = choices[0].get("message") or {}
+        usage = body.get("usage") or {}
+        # usage 缺失时回落 `_estimate_message_tokens`（沙箱校验的同一把尺子）
+        prompt_tokens = int(usage.get("prompt_tokens") or self._estimate_message_tokens(messages))
+        completion_tokens = int(usage.get("completion_tokens") or 0)
         return CallResult(
-            content="Mock response from OpenAI",
-            usage=usage,
-            model=self.config.model_name,
-            finish_reason="stop",
+            content=str(message.get("content") or message.get("reasoning_content") or ""),
+            usage={
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": int(usage.get("total_tokens") or (prompt_tokens + completion_tokens)),
+            },
+            model=str(body.get("model") or self.config.model_name),
+            finish_reason=str(choices[0].get("finish_reason") or "stop"),
             latency_seconds=latency,
-            cost_usd=self.estimate_cost(usage["prompt_tokens"], usage["completion_tokens"]),
+            cost_usd=self.estimate_cost(prompt_tokens, completion_tokens),
         )
     
     def _estimate_message_tokens(self, messages: List[Message]) -> int:

@@ -4,6 +4,7 @@ Agent 技能管理器
 为 Agent 提供任务拆解、技能需求分析和主动获取能力。
 """
 
+import asyncio
 from pathlib import Path
 
 from neurova.core.logger import get_logger
@@ -142,7 +143,11 @@ class AgentSkillManager:
         # analyze_and_acquire v2 返回 dict（含 results: List[SkillAcquisitionResult]）；
         # 兼容旧 list 返回形态
         try:
-            acquisition = self.analyzer.analyze_and_acquire(request=task)
+            # P1-17: analyze_and_acquire 是同步重活（decompose + 市场聚合搜索
+            # MARKET_SEARCH_AGGREGATE_SECONDS=18 + hub_client 退避重试），
+            # 直调会把聊天主链的事件循环卡 18s+——整链下沉工作线程
+            # （消费点 chat_pipeline._check_skill_acquisition 在主循环上 await）。
+            acquisition = await asyncio.to_thread(self.analyzer.analyze_and_acquire, request=task)
             if isinstance(acquisition, dict):
                 acquisition_results = acquisition.get("results", [])
             else:

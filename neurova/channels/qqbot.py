@@ -257,7 +257,10 @@ class QQBotAdapter(ChannelAdapter):
         message_id = str(kwargs.pop("message_id", "") or f"qqbot_{int(time.time())}")
         # 任务3（台账 2026-09-11 渠道域收尾）：_send_unified 现返回 OneBot
         # 平台真实 message_id（响应无 ID 时回落本地生成），失败 None——直接透传。
-        return self._send_unified(
+        # P1-16: _send_unified 内部是 requests 同步 HTTP（含未认证时的
+        # _verify_connection），直调会阻塞事件循环——下沉工作线程。
+        return await asyncio.to_thread(
+            self._send_unified,
             UnifiedMessage(
                 message_id=message_id,
                 channel=MessageChannel.QQBOT,
@@ -1278,30 +1281,30 @@ async def handle_ai_generation(self, message: UnifiedMessage) -> bool:
         if has_image:
             prompt = _extract_prompt(self, message.content) or ""
             if image_url:
-                _send_typing(self, message, "正在生成图片，请稍候...")
+                await asyncio.to_thread(_send_typing, self, message, "正在生成图片，请稍候...")
                 gen_image_data = await generate_image_to_image(self, image_url, prompt)
                 if gen_image_data:
                     temp_path = await _save_temp_file(self, gen_image_data, "png")
                     if temp_path:
-                        if self.send_image(message.chat_id, file_path=temp_path):
+                        if await asyncio.to_thread(self.send_image, message.chat_id, file_path=temp_path):
                             os.unlink(temp_path)
                             return True
                         os.unlink(temp_path)
-                _send_typing(self, message, "图片生成失败")
+                await asyncio.to_thread(_send_typing, self, message, "图片生成失败")
                 return False
         else:
             prompt = _extract_prompt(self, message.content)
             if prompt:
-                _send_typing(self, message, "正在生成图片，请稍候...")
+                await asyncio.to_thread(_send_typing, self, message, "正在生成图片，请稍候...")
                 image_data = await generate_text_to_image(self, prompt)
                 if image_data:
                     temp_path = await _save_temp_file(self, image_data, "png")
                     if temp_path:
-                        if self.send_image(message.chat_id, file_path=temp_path):
+                        if await asyncio.to_thread(self.send_image, message.chat_id, file_path=temp_path):
                             os.unlink(temp_path)
                             return True
                         os.unlink(temp_path)
-                _send_typing(self, message, "图片生成失败")
+                await asyncio.to_thread(_send_typing, self, message, "图片生成失败")
                 return False
 
     elif has_image and (
@@ -1309,16 +1312,16 @@ async def handle_ai_generation(self, message: UnifiedMessage) -> bool:
     ):
         prompt = _extract_prompt(self, message.content) or ""
         if image_url:
-            _send_typing(self, message, "正在生成图片，请稍候...")
+            await asyncio.to_thread(_send_typing, self, message, "正在生成图片，请稍候...")
             image_data = await generate_image_to_image(self, image_url, prompt)
             if image_data:
                 temp_path = await _save_temp_file(self, image_data, "png")
                 if temp_path:
-                    if self.send_image(message.chat_id, file_path=temp_path):
+                    if await asyncio.to_thread(self.send_image, message.chat_id, file_path=temp_path):
                         os.unlink(temp_path)
                         return True
                     os.unlink(temp_path)
-            _send_typing(self, message, "图片生成失败")
+            await asyncio.to_thread(_send_typing, self, message, "图片生成失败")
             return False
 
     elif has_image and (
@@ -1326,16 +1329,16 @@ async def handle_ai_generation(self, message: UnifiedMessage) -> bool:
     ):
         prompt = _extract_prompt(self, message.content) or ""
         if image_url:
-            _send_typing(self, message, "正在生成视频，请稍候...")
+            await asyncio.to_thread(_send_typing, self, message, "正在生成视频，请稍候...")
             video_data = await generate_image_to_video(self, image_url, prompt)
             if video_data:
                 temp_path = await _save_temp_file(self, video_data, "mp4")
                 if temp_path:
-                    if self.send_video(message.chat_id, file_path=temp_path):
+                    if await asyncio.to_thread(self.send_video, message.chat_id, file_path=temp_path):
                         os.unlink(temp_path)
                         return True
                     os.unlink(temp_path)
-            _send_typing(self, message, "视频生成失败")
+            await asyncio.to_thread(_send_typing, self, message, "视频生成失败")
             return False
 
     elif ("首尾帧" in content or "首帧到尾帧" in content or "首尾帧生成视频" in content) and message.metadata.get(
@@ -1344,16 +1347,16 @@ async def handle_ai_generation(self, message: UnifiedMessage) -> bool:
         start_url = message.metadata.get("first_image_url", "")
         end_url = message.metadata.get("last_image_url", "")
         if start_url and end_url:
-            _send_typing(self, message, "正在生成视频，请稍候...")
+            await asyncio.to_thread(_send_typing, self, message, "正在生成视频，请稍候...")
             video_data = await generate_keyframe_to_video(self, start_url, end_url)
             if video_data:
                 temp_path = await _save_temp_file(self, video_data, "mp4")
                 if temp_path:
-                    if self.send_video(message.chat_id, file_path=temp_path):
+                    if await asyncio.to_thread(self.send_video, message.chat_id, file_path=temp_path):
                         os.unlink(temp_path)
                         return True
                     os.unlink(temp_path)
-            _send_typing(self, message, "视频生成失败")
+            await asyncio.to_thread(_send_typing, self, message, "视频生成失败")
             return False
 
     elif has_video and (
@@ -1361,31 +1364,31 @@ async def handle_ai_generation(self, message: UnifiedMessage) -> bool:
     ):
         prompt = _extract_prompt(self, message.content) or ""
         if video_url:
-            _send_typing(self, message, "正在生成视频，请稍候...")
+            await asyncio.to_thread(_send_typing, self, message, "正在生成视频，请稍候...")
             video_data = await generate_video_to_video(self, video_url, prompt)
             if video_data:
                 temp_path = await _save_temp_file(self, video_data, "mp4")
                 if temp_path:
-                    if self.send_video(message.chat_id, file_path=temp_path):
+                    if await asyncio.to_thread(self.send_video, message.chat_id, file_path=temp_path):
                         os.unlink(temp_path)
                         return True
                     os.unlink(temp_path)
-            _send_typing(self, message, "视频生成失败")
+            await asyncio.to_thread(_send_typing, self, message, "视频生成失败")
             return False
 
     elif "生成视频" in content or "生成一段视频" in content:
         prompt = _extract_prompt(self, message.content)
         if prompt:
-            _send_typing(self, message, "正在生成视频，请稍候...")
+            await asyncio.to_thread(_send_typing, self, message, "正在生成视频，请稍候...")
             video_data = await generate_text_to_video(self, prompt)
             if video_data:
                 temp_path = await _save_temp_file(self, video_data, "mp4")
                 if temp_path:
-                    if self.send_video(message.chat_id, file_path=temp_path):
+                    if await asyncio.to_thread(self.send_video, message.chat_id, file_path=temp_path):
                         os.unlink(temp_path)
                         return True
                     os.unlink(temp_path)
-            _send_typing(self, message, "视频生成失败")
+            await asyncio.to_thread(_send_typing, self, message, "视频生成失败")
             return False
 
     return False

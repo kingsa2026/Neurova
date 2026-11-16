@@ -449,6 +449,19 @@ class SwarmManager:
         )
         # 通过全部治理闸 → 预留模型并发槽 + 打派生时间戳（错峰）
         with self._lock:
+            # P2 §3.2-10: 上方 _count_active() 是无锁快查，与此处落账构成
+            # check-then-act——并发派生可在两步之间突破硬限。权威判定挪进
+            # 锁内原子化（_count_active 走 RLock 可重入），外层快查仅作快路径。
+            activeNow = self._count_active()
+            if activeNow >= self.MAX_ACTIVE_CHILDREN:
+                return self._rejection(
+                    "MAX_ACTIVE_CHILDREN",
+                    f"运行中的子 Agent 已达硬限 {self.MAX_ACTIVE_CHILDREN}——"
+                    f"每条子任务最长 {self._effectiveRuntimeBudget():g}s 内必落终态"
+                    "（完成/失败/超时/取消都收尾并释放槽位），"
+                    "请用 subagent_status 查询后再派生",
+                    active_children=activeNow,
+                )
             self._last_dispatch_ts = time.monotonic()
             if cap and cap > 0 and model:
                 self._model_active[model] = self._model_active.get(model, 0) + 1

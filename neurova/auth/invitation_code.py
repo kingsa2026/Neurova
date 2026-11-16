@@ -15,6 +15,7 @@ from neurova.core.logger import get_logger
 import os
 import secrets
 import sqlite3
+import threading
 import time
 from dataclasses import asdict, dataclass
 from enum import Enum
@@ -104,6 +105,10 @@ class InvitationCodeModel:
 
         self.db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None
+        # P2 §3.5-13：模型共用单连接（check_same_thread=False），并发事务的
+        # rollback/commit 会互相波及——use_code 的「读-判-写-提交」在模型锁内
+        # 串行化为原子区。
+        self._useLock = threading.Lock()
         self._ensure_db_dir()
         self._init_db()
 
@@ -367,6 +372,7 @@ class InvitationCodeModel:
         Returns:
             更新后的邀请码，如果无法使用则返回None
         """
+        self._useLock.acquire()
         try:
             invitation_code = self.get_code(code)
             if invitation_code is None:
@@ -382,25 +388,51 @@ class InvitationCodeModel:
                 )
                 return None
 
-            # 更新使用次数
-            invitation_code.current_uses += 1
-
-            # 如果是单次使用，标记为非活跃
-            if invitation_code.code_type == InvitationCodeType.SINGLE_USE:
-                invitation_code.is_active = False
-
             # 更新数据库
             conn = self._get_conn()
             cursor = conn.cursor()
 
+            # P2 §3.5-13：read-then-write 非原子（先 get_code 读数再回写陈旧
+            # current_uses）——并发下 max_uses=1 邀请码可被双人同时使用。
+            # 改单条条件 UPDATE：配额/过期/停用全部进 WHERE，rowcount 决定
+            # 成败；争输方落到 rowcount=0 如实拒绝。
             cursor.execute(
                 """
-                UPDATE invitation_codes 
-                SET current_uses = ?, is_active = ?
+                UPDATE invitation_codes
+                SET current_uses = current_uses + 1,
+                    is_active = CASE WHEN ? = 'single_use' AND current_uses + 1 >= max_uses
+                                     THEN 0 ELSE is_active END
                 WHERE code = ?
+                  AND is_active = 1
+                  AND (expires_at IS NULL OR expires_at > ?)
+                  AND (? = 'unlimited' OR current_uses < max_uses)
             """,
-                (invitation_code.current_uses, invitation_code.is_active, code),
+                (invitation_code.code_type.value, code, time.time(),
+                 invitation_code.code_type.value),
             )
+            if cursor.rowcount != 1:
+                conn.rollback()
+                logger.warning(
+                    "Invitation code concurrent-use rejected: %s (used_up or expired)",
+                    code,
+                )
+                return None
+
+            # 记录使用历史
+            cursor.execute(
+                """
+                INSERT INTO invitation_code_usage
+                (code, used_at, used_by, user_agent, ip_address)
+                VALUES (?, ?, ?, ?, ?)
+            """,
+                (code, time.time(), used_by, user_agent, ip_address),
+            )
+
+            conn.commit()
+
+            logger.info("Used invitation code: %s by %s", code, used_by)
+            # 用条件 UPDATE 后的权威读数回读（不再信任 use 前的陈旧内存对象）
+            return self.get_code(code)
 
             # 记录使用历史
             cursor.execute(
@@ -420,6 +452,8 @@ class InvitationCodeModel:
         except Exception as e:
             logger.error("Failed to use invitation code: %s", e)
             return None
+        finally:
+            self._useLock.release()
 
     def revoke_code(self, code: str) -> bool:
         """

@@ -1100,9 +1100,12 @@ class TaskScheduler:
             # 合并输入（P2-4：override 只作用于本次执行——原实现直接
             # task.request.input.update(input_override) 污染任务定义，
             # 手动执行的临时入参成为后续所有定时执行的默认输入）
+            # P2 §3.2-10：读改写与还原均持 _task_lock——手动执行与定时触发
+            # 并发跑同一任务时，裸读改写会互相踩踏（torn read / 还原覆盖）。
             if input_override and task.request:
-                original_input = dict(task.request.input)
-                task.request.input.update(input_override)
+                with self._task_lock:
+                    original_input = dict(task.request.input)
+                    task.request.input.update(input_override)
             else:
                 original_input = None
 
@@ -1112,7 +1115,8 @@ class TaskScheduler:
                 result = await executor.execute(task, execution)
             finally:
                 if original_input is not None:
-                    task.request.input = original_input
+                    with self._task_lock:
+                        task.request.input = original_input
 
             # 处理结果
             if result.get("success"):
@@ -1143,12 +1147,13 @@ class TaskScheduler:
             execution.duration_ms = int((execution.ended_at - execution.started_at).total_seconds() * 1000)
 
             # 记录执行历史
+            # P2 顺手根修：限量判定此前在成员判定之外——手动执行未经 add_task
+            # 注册的任务（_executions 无键）一进 finally 就 KeyError。限量只在
+            # 历史列表存在时有意义，收进成员判定内。
             if task_id in self._executions:
                 self._executions[task_id].append(execution)
-
-            # 限制历史记录数量
-            if len(self._executions[task_id]) > 100:
-                self._executions[task_id] = self._executions[task_id][-100:]
+                if len(self._executions[task_id]) > 100:
+                    self._executions[task_id] = self._executions[task_id][-100:]
 
             # 清理运行中的执行
             if execution.id in self._running_executions:

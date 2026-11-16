@@ -8,7 +8,9 @@ import datetime
 import json
 from neurova.core.logger import get_logger
 import mimetypes
+import os
 import re
+import threading
 import typing
 import uuid
 from pathlib import Path
@@ -22,6 +24,10 @@ from neurova.core.data_root import get_data_root
 STORAGE_ROOT: typing.Optional[Path] = None
 FILES_DB: typing.Optional[Path] = None
 DATA_DIR = get_data_root()
+
+# P2 §3.2-12：files.json 的 load→改→save 读改写全程串行（并发 save/delete
+# 不持锁会丢更新——两个线程各 load 一份快照再各自整文件写回，后写覆盖前写）
+_FILES_DB_LOCK = threading.RLock()
 
 
 def storageRoot() -> Path:
@@ -219,8 +225,17 @@ def save_files_db(data: dict) -> bool:
         target = filesDbPath()
         target.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(target, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        # P2 §3.2-12：先在内存完成序列化（失败不触碰文件，防半截 JSON），
+        # 再走 tmp + os.replace 原子替换——读方永远看到完整文件
+        # （对照 session_manager._write_session_file_unlocked 同款范本）。
+        text = json.dumps(data, ensure_ascii=False, indent=2)
+        tmp_path = target.with_name(target.name + ".tmp")
+        with _FILES_DB_LOCK:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(text)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, target)
         return True
     except Exception as e:
         logger.error("保存文件数据库失败: %s", e)
@@ -252,9 +267,11 @@ def save_file_metadata(file_id: str, metadata: dict) -> bool:
     Returns:
         是否保存成功
     """
-    db = load_files_db()
-    db[file_id] = metadata
-    return save_files_db(db)
+    # P2 §3.2-12：load→改→save 全程持锁——裸读改写会让并发写互相覆盖丢更新
+    with _FILES_DB_LOCK:
+        db = load_files_db()
+        db[file_id] = metadata
+        return save_files_db(db)
 
 
 def delete_file_metadata(file_id: str) -> bool:
@@ -267,10 +284,11 @@ def delete_file_metadata(file_id: str) -> bool:
     Returns:
         是否删除成功
     """
-    db = load_files_db()
-    if file_id in db:
-        del db[file_id]
-        return save_files_db(db)
+    with _FILES_DB_LOCK:
+        db = load_files_db()
+        if file_id in db:
+            del db[file_id]
+            return save_files_db(db)
     return False
 
 

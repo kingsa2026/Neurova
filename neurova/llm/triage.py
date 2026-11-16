@@ -6,6 +6,7 @@ Neurova Small-Brain Triage Gate
 
 import json
 import hashlib
+import re
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -21,6 +22,15 @@ from neurova.llm.interfaces.provider_interface import (
 from neurova.llm.registry.provider_registry import get_provider_registry
 
 logger = get_logger(__name__)
+
+
+class TriageGateError(RuntimeError):
+    """分诊门不可用/输入不可判定。
+
+    P1-10 纪律：无历史、凭据缺失、模型输出不可解析等基础设施性失败一律
+    以本异常诚实上抛，不再吞成 actionable=True 无凭据放行（fail-open）。
+    """
+
 
 @dataclass
 class TriageResult:
@@ -136,6 +146,10 @@ Agent: "Starting task Y with deadline tomorrow"
         Main entry point: Triage a conversation
 
         Returns TriageResult indicating whether conversation is actionable
+
+        P1-10 纪律：基础设施性失败（无历史/无凭据/输出不可解析/调用异常）
+        一律以 TriageGateError 诚实上抛——不再吞成 actionable=True 无凭据放行。
+        "When unsure → actionable" 只属于模型对内容的保守判断，不属于故障兜底。
         """
         self._stats["total_tries"] += 1
 
@@ -152,61 +166,72 @@ Agent: "Starting task Y with deadline tomorrow"
         conversation_history = await self._fetch_conversation_history(conversation_id)
 
         if not conversation_history:
-            logger.warning(f"No conversation history found for {conversation_id}")
-            return TriageResult(
-                actionable=True,  # Default to actionable if no history
-                reason="no_history",
-                confidence=0.0,
-                conversation_hash=conv_hash,
+            raise TriageGateError(
+                f"conversation '{conversation_id}' 无可分诊的消息历史"
+                f"（会话不存在或尚无消息事件）——拒绝无凭据放行"
             )
 
         # Prepare messages for triage
         messages = self._prepare_triage_messages(conversation_history)
 
-        # Call small model
+        # Call small model（异常不吞，如实上抛）
+        result = await self._call_triage_model(messages)
+
+        # Parse result——只认 JSON 的 actionable 布尔字段，解析不了就报错
+        actionable = self._parse_actionable(result.content)
+
+        # Extract reason
+        reason_match = self._extract_reason(result.content)
+
+        # Update stats
+        if actionable:
+            self._stats["actionable_count"] += 1
+        else:
+            self._stats["non_actionable_count"] += 1
+
+        triage_result = TriageResult(
+            actionable=actionable,
+            reason=reason_match or "general_assessment",
+            confidence=self._estimate_confidence(result),
+            conversation_hash=conv_hash,
+        )
+
+        # Cache result
+        self._cache_to_cache(conv_hash, triage_result)
+
+        logger.info(
+            f"Triage result for {conversation_id}: "
+            f"actionable={actionable}, reason={reason_match}"
+        )
+
+        return triage_result
+
+    def _resolve_provider_config(self) -> ProviderConfig:
+        """解析分诊模型的真实凭据（P1-10 接真客户端的凭据面）。
+
+        显式注入且带 api_key 的 provider_config 优先；api_key 为空时回落
+        LLMProviderManager 的默认服务商（全仓凭据单源，不造第二份配置面）。
+        都没有则原样返回空凭据配置——由 OpenAIAdapter 如实报错，不伪造。
+        """
+        cfg = self.provider_config
+        if cfg.api_key:
+            return cfg
         try:
-            result = await self._call_triage_model(messages)
+            from neurova.llm.provider_manager import get_provider_manager
 
-            # Parse result
-            actionable = result.content.lower().startswith('{"actionable": true}') or \
-                        'true' in result.content.lower()[:50]
-
-            # Extract reason
-            reason_match = self._extract_reason(result.content)
-
-            # Update stats
-            if actionable:
-                self._stats["actionable_count"] += 1
-            else:
-                self._stats["non_actionable_count"] += 1
-
-            triage_result = TriageResult(
-                actionable=actionable,
-                reason=reason_match or "general_assessment",
-                confidence=self._estimate_confidence(result),
-                conversation_hash=conv_hash,
+            default_provider = get_provider_manager().get_default_provider()
+        except Exception as e:  # noqa: BLE001 - 凭据面不可用降级为空凭据，由调用侧诚实报错
+            logger.warning("分诊门解析默认服务商失败: %s", e)
+            default_provider = None
+        if default_provider is not None and getattr(default_provider, "api_key", ""):
+            return ProviderConfig(
+                api_key=default_provider.api_key,
+                base_url=getattr(default_provider, "base_url", None) or cfg.base_url,
+                model_name=getattr(default_provider, "default_model", "") or cfg.model_name,
+                timeout_seconds=cfg.timeout_seconds,
+                temperature=cfg.temperature,
             )
-
-            # Cache result
-            self._cache_to_cache(conv_hash, triage_result)
-
-            logger.info(
-                f"Triage result for {conversation_id}: "
-                f"actionable={actionable}, reason={reason_match}"
-            )
-
-            return triage_result
-
-        except Exception as e:
-            logger.error(f"Triage failed for {conversation_id}: {e}")
-
-            # On error, default to actionable (conservative)
-            return TriageResult(
-                actionable=True,
-                reason=f"triage_error: {str(e)}",
-                confidence=0.0,
-                conversation_hash=conv_hash,
-            )
+        return cfg
 
     async def _call_triage_model(self, messages: List[Message]) -> CallResult:
         """Call small model for triage decision"""
@@ -216,7 +241,7 @@ Agent: "Starting task Y with deadline tomorrow"
         adapter = registry.create_instance(
             provider_id="triage",
             provider_type=ProviderType.OPENAI,
-            config=self.provider_config,
+            config=self._resolve_provider_config(),
         )
 
         # Add system prompt
@@ -305,17 +330,39 @@ Agent: "Starting task Y with deadline tomorrow"
             return 0.3  # Unclear
 
     async def _fetch_conversation_history(self, conversation_id: str) -> List[Dict]:
-        """Fetch conversation history from database"""
-        # This should query the actual database
-        # Mock implementation for now
+        """从现役会话事实源取最近消息事件（P1-10 断链接通）。
 
-        # SQL:
-        # SELECT role, content FROM messages
-        # WHERE conversation_id = :convo_id
-        # ORDER BY created_at DESC
-        # LIMIT 50
+        SessionSyncManager 是全仓会话事件的单一事实源（chat_pipeline 的
+        AGENT_REPLY 广播、渠道 manager 的 USER_MESSAGE/AGENT_REPLY 都写这里），
+        `get_messages` 只回 USER_MESSAGE + AGENT_REPLY 两类消息事件，
+        role/content 形态与本类 `_prepare_triage_messages` 直接咬合。
+        纯内存读（锁内快照），事件循环内直调无阻塞。
+        """
+        from neurova.sync.session_sync_manager import get_session_sync_manager
 
-        return []  # Mock
+        return get_session_sync_manager().get_messages(conversation_id, limit=50)
+
+    def _parse_actionable(self, content: str) -> bool:
+        """解析分诊结论——只认 JSON 的 actionable 布尔字段，解析不了就报错。
+
+        此前 `'true' in content.lower()[:50]` 会把 "not actionable"/"truly"
+        这类前缀误判成放行（P1-10 第三重脆弱点）。
+        """
+        data = None
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", content, re.DOTALL)
+            if match:
+                try:
+                    data = json.loads(match.group(0))
+                except json.JSONDecodeError:
+                    data = None
+        if isinstance(data, dict) and isinstance(data.get("actionable"), bool):
+            return data["actionable"]
+        raise TriageGateError(
+            f"分诊模型输出不可解析（缺 actionable 布尔字段）: {content[:200]!r}"
+        )
 
     def get_stats(self) -> Dict[str, Any]:
         """Get triage statistics"""

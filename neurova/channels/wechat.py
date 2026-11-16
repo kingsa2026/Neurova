@@ -19,6 +19,8 @@ API 文档:
 """
 from __future__ import annotations
 
+import asyncio
+
 from neurova.core.logger import get_logger
 from typing import Any, Dict, List, Optional
 
@@ -132,7 +134,9 @@ class WeChatAdapter(
             agent_id="",
             **kwargs,
         )
-        WeChatMessagingMixin.send_message(self, msg)
+        # P1-16: mixin 的 send_message 内部是 requests 同步 HTTP（wecom/kf/
+        # ilink/official 四分支），直调会阻塞事件循环——下沉工作线程。
+        await asyncio.to_thread(WeChatMessagingMixin.send_message, self, msg)
         return ""
 
     def __init__(self):
