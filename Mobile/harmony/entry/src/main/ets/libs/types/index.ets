@@ -473,6 +473,9 @@ export interface KnowledgeItem {
   category?: string;         // 分类标签
   tags?: string[];
   status: KnowledgeStatus;
+  visibility?: string;       // 可见性：private / public / shared（三库分类）
+  ownerUserId?: string;      // 属主（共享库展示来源）
+  sharedWith?: string[];     // 已共享给哪些用户名
   fileSize?: number;         // 字节数
   wordCount?: number;
   agentId?: string;          // 关联 Agent

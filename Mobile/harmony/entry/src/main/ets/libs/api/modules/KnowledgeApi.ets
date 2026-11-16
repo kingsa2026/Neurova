@@ -1,27 +1,52 @@
 /**
- * KnowledgeApi - 知识库 API 模块
+ * KnowledgeApi - 知识库 API 模块（同源 PC KnowledgePage，端点经后端源码核对）
  *
- * 职责：封装知识库资源的 CRUD 与搜索操作
- * 设计：通过 HttpClient 委托请求；query 序列化为 GET 参数；统一返回 Promise<ApiResponse<T>>
- *
- * 用法：
- *   const api = ApiFacade.getInstance().knowledge;
- *   const page = await api.list({ keyword: 'AI' });
- *   const hit = await api.search('关键词', 'agent-1', 10);
+ * 后端事实源：neurova/api/endpoints/knowledge_core.py + knowledge_sharing.py
+ * （聚合挂载于 /v1/knowledge）：
+ *   GET    /knowledge?scope=&page=&page_size=   三库分类列表（public/private/shared），
+ *          信封 {code:0,data:{items,total,page,page_size}}，条目为 item_response 投影
+ *   POST   /knowledge/search {query,limit}      → **裸数组** [item_response]
+ *   POST   /knowledge/{id}/submit-public        → 提交公共库
+ *   POST   /knowledge/{id}/share {usernames[]}  → 共享给他人（按用户名解析）
+ *   POST   /knowledge/{id}/unshare {usernames[]}
+ *   POST   /knowledge       创建（KnowledgeCreate）
+ *   PUT/DELETE /knowledge/{id}
  */
-import { HttpClient } from '../HttpClient';
-import {
-  ApiResponse,
-  KnowledgeItem,
-  KnowledgeQuery,
-  PageResult,
-} from '../../types';
 
-/** 知识搜索请求体 */
-export interface KnowledgeSearchRequest {
-  keyword: string;
+import { HttpClient } from '../HttpClient';
+import { ApiResponse, KnowledgeItem, PageResult } from '../../types';
+
+/** 后端条目投影（item_response，字段名为后端 snake_case 原样） */
+export interface KnowledgeItemDto {
+  knowledge_id: string;
+  title: string;
+  content: string;
+  category: string;
+  tags: string[];
+  source: string;
+  confidence: number;
+  created_at: number;
+  updated_at: number;
+  visibility: string;
+  owner_user_id: string;
+  shared_with: string[];
+}
+
+/** 列表信封载荷 */
+export interface KnowledgeListPayload {
+  items: KnowledgeItemDto[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+/** 列表查询参数 */
+export interface KnowledgeListQuery {
+  scope?: string;      // all / public / private / shared
+  category?: string;
   agentId?: string;
-  limit?: number;
+  page?: number;
+  pageSize?: number;
 }
 
 export class KnowledgeApi {
@@ -31,24 +56,103 @@ export class KnowledgeApi {
     this.client = client;
   }
 
-  /** 列出知识（按 KnowledgeQuery 过滤，支持分页） */
-  async list(query?: KnowledgeQuery): Promise<ApiResponse<PageResult<KnowledgeItem>>> {
-    const params: Record<string, Object> = {};
-    if (query) {
-      if (query.keyword !== undefined) params['keyword'] = query.keyword;
-      if (query.category !== undefined) params['category'] = query.category;
-      if (query.tags && query.tags.length > 0) params['tags'] = query.tags.join(',');
-      if (query.agentId !== undefined) params['agentId'] = query.agentId;
-      if (query.status !== undefined) params['status'] = query.status;
-      if (query.page !== undefined) params['page'] = query.page;
-      if (query.size !== undefined) params['size'] = query.size;
+  /** 后端条目 → 前端 KnowledgeItem（单源映射） */
+  private static toItem(dto: KnowledgeItemDto): KnowledgeItem {
+    const item: KnowledgeItem = {
+      id: dto.knowledge_id,
+      title: dto.title,
+      content: dto.content,
+      source: dto.source,
+      category: dto.category,
+      tags: dto.tags,
+      status: 'ready',
+      createdAt: dto.created_at > 0 ? new Date(dto.created_at).toISOString() : '',
+      updatedAt: dto.updated_at > 0 ? new Date(dto.updated_at).toISOString() : '',
+      visibility: dto.visibility,
+      ownerUserId: dto.owner_user_id,
+      sharedWith: dto.shared_with,
+    };
+    return item;
+  }
+
+  /** 三库分类列表（scope：all/public/private/shared） */
+  async listScoped(query: KnowledgeListQuery): Promise<ApiResponse<PageResult<KnowledgeItem>>> {
+    const qs: string[] = [];
+    if (query.scope && query.scope !== 'all') {
+      qs.push('scope=' + encodeURIComponent(query.scope));
     }
-    return this.client.get<PageResult<KnowledgeItem>>('/knowledge', params);
+    if (query.category && query.category.length > 0) {
+      qs.push('category=' + encodeURIComponent(query.category));
+    }
+    if (query.agentId && query.agentId.length > 0) {
+      qs.push('agent_id=' + encodeURIComponent(query.agentId));
+    }
+    qs.push('page=' + (query.page !== undefined ? query.page : 1).toString());
+    qs.push('page_size=' + (query.pageSize !== undefined ? query.pageSize : 50).toString());
+    const res = await this.client.get<KnowledgeListPayload>('/knowledge?' + qs.join('&'));
+    if (res.code === 0 && res.data) {
+      const items: KnowledgeItem[] = [];
+      for (const dto of res.data.items) {
+        items.push(KnowledgeApi.toItem(dto));
+      }
+      const page: PageResult<KnowledgeItem> = {
+        items: items,
+        total: res.data.total,
+        page: res.data.page,
+        size: res.data.page_size,
+      };
+      const mapped: ApiResponse<PageResult<KnowledgeItem>> = {
+        code: res.code,
+        message: res.message,
+        data: page,
+      };
+      return mapped;
+    }
+    const empty: PageResult<KnowledgeItem> = { items: [], total: 0, page: 1, size: 0 };
+    const fallback: ApiResponse<PageResult<KnowledgeItem>> = {
+      code: res.code,
+      message: res.message,
+      data: empty,
+    };
+    return fallback;
+  }
+
+  /** 搜索（POST /knowledge/search {query,limit}，裸数组返回） */
+  async search(query: string, limit?: number): Promise<KnowledgeItem[]> {
+    const body: Record<string, Object> = {
+      'query': query,
+      'limit': limit !== undefined ? limit : 20,
+    };
+    const res = await this.client.post<KnowledgeItem[]>('/knowledge/search', body);
+    const arr = res as Object as KnowledgeItemDto[];
+    const out: KnowledgeItem[] = [];
+    for (const dto of arr) {
+      out.push(KnowledgeApi.toItem(dto));
+    }
+    return out;
+  }
+
+  /** 提交公共库 */
+  async submitPublic(knowledgeId: string): Promise<ApiResponse<KnowledgeItem>> {
+    const body: Record<string, Object> = {};
+    return this.client.post<KnowledgeItem>(`/knowledge/${knowledgeId}/submit-public`, body);
+  }
+
+  /** 共享给他人（按用户名列表） */
+  async share(knowledgeId: string, usernames: string[]): Promise<ApiResponse<KnowledgeItem>> {
+    const body: Record<string, Object> = { 'usernames': usernames };
+    return this.client.post<KnowledgeItem>(`/knowledge/${knowledgeId}/share`, body);
+  }
+
+  /** 收回共享 */
+  async unshare(knowledgeId: string, usernames: string[]): Promise<ApiResponse<KnowledgeItem>> {
+    const body: Record<string, Object> = { 'usernames': usernames };
+    return this.client.post<KnowledgeItem>(`/knowledge/${knowledgeId}/unshare`, body);
   }
 
   /** 获取单条知识 */
   async get(knowledgeId: string): Promise<ApiResponse<KnowledgeItem>> {
-    return this.client.get<KnowledgeItem>(`/v1/knowledge/${knowledgeId}`);
+    return this.client.get<KnowledgeItem>(`/knowledge/${knowledgeId}`);
   }
 
   /** 创建知识 */
@@ -58,12 +162,12 @@ export class KnowledgeApi {
 
   /** 更新知识 */
   async update(knowledgeId: string, data: Partial<KnowledgeItem>): Promise<ApiResponse<KnowledgeItem>> {
-    return this.client.put<KnowledgeItem>(`/v1/knowledge/${knowledgeId}`, data);
+    return this.client.put<KnowledgeItem>(`/knowledge/${knowledgeId}`, data);
   }
 
   /** 删除知识 */
   async remove(knowledgeId: string): Promise<ApiResponse<Object>> {
-    return this.client.delete<Object>(`/v1/knowledge/${knowledgeId}`);
+    return this.client.delete<Object>(`/knowledge/${knowledgeId}`);
   }
 
   /** URL 导入（knowledge_ingestion.py /import-url，query 传参；sync=true 同步抽取） */
@@ -77,17 +181,5 @@ export class KnowledgeApi {
     }
     const body: Record<string, Object> = {};
     return this.client.post<Object>('/knowledge/import-url?' + qs.join('&'), body);
-  }
-
-  /** 搜索知识（关键词 + 可选 agentId + 限制数量） */
-  async search(
-    keyword: string,
-    agentId?: string,
-    limit?: number,
-  ): Promise<ApiResponse<KnowledgeItem[]>> {
-    const body: KnowledgeSearchRequest = { keyword };
-    if (agentId !== undefined) body.agentId = agentId;
-    if (limit !== undefined) body.limit = limit;
-    return this.client.post<KnowledgeItem[]>('/knowledge/search', body);
   }
 }
