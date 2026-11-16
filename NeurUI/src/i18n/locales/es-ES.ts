@@ -3248,7 +3248,6 @@ conflictTimeReadout: 'Lectura temporal: {basis} (antigua {old} → nueva {new})'
   },
   file: {
     title: 'Gestión de archivos',
-    totalStorage: 'Almacenamiento total',
     usedStorage: 'Almacenamiento utilizado',
     history: 'Historial',
     size: 'Tamaño',

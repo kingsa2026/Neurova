@@ -3248,7 +3248,6 @@ conflictTimeReadout: 'Lecture temporelle : {basis} (ancienne {old} → nouvelle 
   },
   file: {
     title: 'Gestion des fichiers',
-    totalStorage: 'Stockage total',
     usedStorage: 'Utilisé',
     history: 'Historique',
     size: 'Taille',

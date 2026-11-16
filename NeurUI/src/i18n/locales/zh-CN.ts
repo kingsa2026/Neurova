@@ -3261,7 +3261,6 @@ conflictTimeReadout: '时间读数：{basis}（旧 {old} → 新 {new}）',
   },
   file: {
     title: '文件管理',
-    totalStorage: '总存储',
     usedStorage: '已使用',
     history: '历史',
     size: '大小',

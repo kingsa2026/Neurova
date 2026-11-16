@@ -3248,7 +3248,6 @@ conflictTimeReadout: 'Zeitauswertung: {basis} (alt {old} → neu {new})',
   },
   file: {
     title: 'Dateiverwaltung',
-    totalStorage: 'Gesamtspeicher',
     usedStorage: 'Verwendet',
     history: 'Verlauf',
     size: 'Größe',

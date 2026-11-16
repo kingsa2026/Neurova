@@ -3248,7 +3248,6 @@ conflictTimeReadout: 'Time readout: {basis} (old {old} → new {new})',
   },
   file: {
     title: 'File Management',
-    totalStorage: 'Total Storage',
     usedStorage: 'Used',
     history: 'History',
     size: 'Size',
