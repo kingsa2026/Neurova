@@ -2,18 +2,25 @@
 // 验证 LazyForEach 数据源契约（IDataSource 接口）+ 业务方法（setData/addItem/updateItem/removeItem）
 // 纯逻辑无 UI 依赖，通过 mock DataChangeListener 验证通知行为
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { SimpleDataSource } from '../../../../main/ets/libs/perf/SimpleDataSource';
+import { SimpleDataSource } from '../../../main/ets/libs/perf/SimpleDataSource';
+
+/** 数据集变更操作记录（显式接口，替代内联对象字面量类型） */
+interface DatasetOpRecord {
+  type: string;
+  index?: number;
+  count?: number;
+}
 
 /** Mock 数据变更监听器（记录所有通知调用便于断言） */
 class MockListener {
   public reloadCount: number = 0;
-  public datasetOps: { type: string; index?: number; count?: number }[] = [];
+  public datasetOps: DatasetOpRecord[] = [];
 
   onDataReloaded(): void {
     this.reloadCount++;
   }
 
-  onDatasetChange(ops: { type: string; index?: number; count?: number }[]): void {
+  onDatasetChange(ops: DatasetOpRecord[]): void {
     this.datasetOps = this.datasetOps.concat(ops);
   }
 
@@ -61,23 +68,23 @@ export default function simpleDataSourceTest() {
 
     // ========== 行为 4: registerDataChangeListener 记录监听器 ==========
     it('register_adds_listener', 0, () => {
-      ds.registerDataChangeListener(listener as any);
+      ds.registerDataChangeListener(listener as Object as DataChangeListener);
       ds.setData(['a']);
       expect(listener.reloadCount).assertEqual(1);
     });
 
     // ========== 行为 5: unregisterDataChangeListener 移除监听器 ==========
     it('unregister_removes_listener', 0, () => {
-      ds.registerDataChangeListener(listener as any);
-      ds.unregisterDataChangeListener(listener as any);
+      ds.registerDataChangeListener(listener as Object as DataChangeListener);
+      ds.unregisterDataChangeListener(listener as Object as DataChangeListener);
       ds.setData(['a']);
       expect(listener.reloadCount).assertEqual(0);
     });
 
     // ========== 行为 6: 重复 register 同一 listener 只保留一份 ==========
     it('duplicate_register_keeps_one', 0, () => {
-      ds.registerDataChangeListener(listener as any);
-      ds.registerDataChangeListener(listener as any);
+      ds.registerDataChangeListener(listener as Object as DataChangeListener);
+      ds.registerDataChangeListener(listener as Object as DataChangeListener);
       ds.setData(['a']);
       expect(listener.reloadCount).assertEqual(1);
     });
@@ -86,7 +93,7 @@ export default function simpleDataSourceTest() {
     it('unregister_nonexistent_no_throw', 0, () => {
       let threw = false;
       try {
-        ds.unregisterDataChangeListener(listener as any);
+        ds.unregisterDataChangeListener(listener as Object as DataChangeListener);
       } catch (e) {
         threw = true;
       }
@@ -95,7 +102,7 @@ export default function simpleDataSourceTest() {
 
     // ========== 行为 8: setData 触发 onDataReloaded ==========
     it('setData_triggers_onDataReloaded', 0, () => {
-      ds.registerDataChangeListener(listener as any);
+      ds.registerDataChangeListener(listener as Object as DataChangeListener);
       ds.setData(['a']);
       ds.setData(['b', 'c']);
       expect(listener.reloadCount).assertEqual(2);
@@ -103,7 +110,7 @@ export default function simpleDataSourceTest() {
 
     // ========== 行为 9: addItem 末尾追加，触发 ADD op ==========
     it('addItem_appends_and_notifies_ADD', 0, () => {
-      ds.registerDataChangeListener(listener as any);
+      ds.registerDataChangeListener(listener as Object as DataChangeListener);
       ds.setData(['a']);
       listener.reset();
       ds.addItem('b');
@@ -117,7 +124,7 @@ export default function simpleDataSourceTest() {
 
     // ========== 行为 10: updateItem 修改，触发 MODIFY op ==========
     it('updateItem_modifies_and_notifies_MODIFY', 0, () => {
-      ds.registerDataChangeListener(listener as any);
+      ds.registerDataChangeListener(listener as Object as DataChangeListener);
       ds.setData(['a', 'b']);
       listener.reset();
       ds.updateItem(0, 'x');
@@ -129,7 +136,7 @@ export default function simpleDataSourceTest() {
 
     // ========== 行为 11: updateItem 越界不抛错也不通知 ==========
     it('updateItem_out_of_bounds_no_throw_no_notify', 0, () => {
-      ds.registerDataChangeListener(listener as any);
+      ds.registerDataChangeListener(listener as Object as DataChangeListener);
       ds.setData(['a']);
       listener.reset();
       let threw = false;
@@ -144,7 +151,7 @@ export default function simpleDataSourceTest() {
 
     // ========== 行为 12: removeItem 删除，触发 DELETE op ==========
     it('removeItem_removes_and_notifies_DELETE', 0, () => {
-      ds.registerDataChangeListener(listener as any);
+      ds.registerDataChangeListener(listener as Object as DataChangeListener);
       ds.setData(['a', 'b', 'c']);
       listener.reset();
       ds.removeItem(1);
@@ -158,7 +165,7 @@ export default function simpleDataSourceTest() {
 
     // ========== 行为 13: removeItem 越界不抛错 ==========
     it('removeItem_out_of_bounds_no_throw', 0, () => {
-      ds.registerDataChangeListener(listener as any);
+      ds.registerDataChangeListener(listener as Object as DataChangeListener);
       ds.setData(['a']);
       listener.reset();
       let threw = false;
@@ -184,8 +191,8 @@ export default function simpleDataSourceTest() {
     it('multiple_listeners_all_notified', 0, () => {
       const l1 = new MockListener();
       const l2 = new MockListener();
-      ds.registerDataChangeListener(l1 as any);
-      ds.registerDataChangeListener(l2 as any);
+      ds.registerDataChangeListener(l1 as Object as DataChangeListener);
+      ds.registerDataChangeListener(l2 as Object as DataChangeListener);
       ds.setData(['a']);
       expect(l1.reloadCount).assertEqual(1);
       expect(l2.reloadCount).assertEqual(1);
@@ -193,14 +200,14 @@ export default function simpleDataSourceTest() {
 
     // ========== 行为 16: notifyReload 手动触发 ==========
     it('notifyReload_triggers_onDataReloaded', 0, () => {
-      ds.registerDataChangeListener(listener as any);
+      ds.registerDataChangeListener(listener as Object as DataChangeListener);
       ds.notifyReload();
       expect(listener.reloadCount).assertEqual(1);
     });
 
     // ========== 行为 17: 完整列表操作周期：setData→add→update→remove ==========
     it('full_list_operation_cycle', 0, () => {
-      ds.registerDataChangeListener(listener as any);
+      ds.registerDataChangeListener(listener as Object as DataChangeListener);
       ds.setData(['a', 'b']);
       expect(ds.totalCount()).assertEqual(2);
 

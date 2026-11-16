@@ -7,8 +7,16 @@
 //       覆盖页面渲染所需的全部纯函数。视图模型刻意设计为无 UI 依赖的纯函数，
 //       返回颜色 token 名（如 'success'）而非已解析颜色值，便于测试与主题切换。
 import { describe, it, expect } from '@ohos/hypium';
-import { KnowledgeViewHelper } from '../../../../main/ets/pages/KnowledgePage';
-import { KnowledgeStatus } from '../../../../main/ets/libs/types';
+import { KnowledgeViewHelper } from '../../../main/ets/pages/KnowledgePage';
+import { KnowledgeStatus } from '../../../main/ets/libs/types';
+
+/** 测试契约：来源图标映射（知识来源 → 图标） */
+interface KnowledgeSourceIconHelper {
+  getSourceIcon(source: string): string;
+}
+
+/** 来源图标取用入口：经显式转换对齐测试契约（未导出方法在运行期以红态暴露） */
+const sourceIconHelper = KnowledgeViewHelper as Object as KnowledgeSourceIconHelper;
 
 export default function knowledgePageTest() {
   describe('KnowledgePage', () => {
@@ -51,21 +59,21 @@ export default function knowledgePageTest() {
     // ========== 切片 6: source_icon_upload_returns_camera ==========
 
     it('source_icon_upload_returns_camera', 0, () => {
-      const icon = KnowledgeViewHelper.getSourceIcon('upload');
+      const icon = sourceIconHelper.getSourceIcon('upload');
       expect(icon).assertEqual('📷');
     });
 
     // ========== 切片 7: source_icon_url_returns_link ==========
 
     it('source_icon_url_returns_link', 0, () => {
-      const icon = KnowledgeViewHelper.getSourceIcon('url');
+      const icon = sourceIconHelper.getSourceIcon('url');
       expect(icon).assertEqual('🔗');
     });
 
     // ========== 切片 8: source_icon_manual_returns_pen ==========
 
     it('source_icon_manual_returns_pen', 0, () => {
-      const icon = KnowledgeViewHelper.getSourceIcon('manual');
+      const icon = sourceIconHelper.getSourceIcon('manual');
       expect(icon).assertEqual('✍️');
     });
 
@@ -73,7 +81,7 @@ export default function knowledgePageTest() {
 
     it('source_icon_unknown_returns_default', 0, () => {
       // 未知来源应回退到默认 📄 图标
-      const icon = KnowledgeViewHelper.getSourceIcon('unknown_source');
+      const icon = sourceIconHelper.getSourceIcon('unknown_source');
       expect(icon).assertEqual('📄');
     });
 

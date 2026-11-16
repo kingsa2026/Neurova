@@ -1,7 +1,7 @@
 // ErrorManager 单元测试 - TDD 垂直切片
 // 每个测试验证一个行为，通过公共接口验证
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { ErrorManager, AppError, ErrorCategory } from '../../../../main/ets/libs/error/ErrorManager';
+import { ErrorManager, AppError, ErrorCategory } from '../../../main/ets/libs/error/ErrorManager';
 
 export default function errorManagerTest() {
   describe('ErrorManager', () => {
@@ -35,7 +35,8 @@ export default function errorManagerTest() {
     });
 
     it('create_preserves_details', 0, () => {
-      const err = em.create('api_error', 'API错误', ErrorCategory.API, { status: 500 });
+      const details: Record<string, Object> = { 'status': 500 };
+      const err = em.create('api_error', 'API错误', ErrorCategory.API, details);
       expect(err.details).assertEqual({ status: 500 });
     });
 

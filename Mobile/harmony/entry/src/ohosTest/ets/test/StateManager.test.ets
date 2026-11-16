@@ -1,6 +1,6 @@
 // StateManager 单元测试 - TDD 垂直切片
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { StateManager } from '../../../../main/ets/libs/state/StateManager';
+import { StateManager } from '../../../main/ets/libs/state/StateManager';
 
 export default function stateManagerTest() {
   describe('StateManager', () => {

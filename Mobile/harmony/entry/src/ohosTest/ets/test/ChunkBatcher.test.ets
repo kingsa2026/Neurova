@@ -2,7 +2,7 @@
 // 验证 WS 流式 chunk 批量节流行为，纯函数无 UI 依赖
 // 设计：通过 now 参数注入时间，避免依赖系统时钟，便于测试
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { ChunkBatcher } from '../../../../main/ets/libs/perf/ChunkBatcher';
+import { ChunkBatcher } from '../../../main/ets/libs/perf/ChunkBatcher';
 
 export default function chunkBatcherTest() {
   describe('ChunkBatcher', () => {

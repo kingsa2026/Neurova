@@ -1,8 +1,15 @@
 // ModuleManager 单元测试 - TDD 垂直切片
 // 通过 ModuleInterface 公共接口验证 ModuleManager 行为，不耦合实现细节
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { ModuleManager } from '../../../../main/ets/libs/module/ModuleManager';
-import { ModuleInterface } from '../../../../main/ets/libs/module/ModuleInterface';
+import { ModuleManager } from '../../../main/ets/libs/module/ModuleManager';
+import { ModuleInterface } from '../../../main/ets/libs/module/ModuleInterface';
+
+/** 测试模块可选钩子（显式接口，替代内联对象字面量类型） */
+interface ModuleTestHooks {
+  onLoad?: () => Promise<void>;
+  onUnload?: () => Promise<void>;
+  onEvent?: (e: string, d: Object) => void;
+}
 
 // 测试模块：实现 ModuleInterface，按需注入回调
 // 使用类（而非对象字面量）以保证 ArkTS 类型严格兼容
@@ -13,11 +20,7 @@ class TestModule implements ModuleInterface {
   private readonly unloadCb?: () => Promise<void>;
   private readonly eventCb?: (e: string, d: Object) => void;
 
-  constructor(name: string, opts?: {
-    onLoad?: () => Promise<void>;
-    onUnload?: () => Promise<void>;
-    onEvent?: (e: string, d: Object) => void;
-  }) {
+  constructor(name: string, opts?: ModuleTestHooks) {
     this.name = name;
     this.version = '1.0.0';
     if (opts) {
@@ -47,11 +50,7 @@ class TestModule implements ModuleInterface {
 }
 
 // Helper: 构造测试模块（保持与设计文档一致的调用形态）
-function makeModule(name: string, opts?: {
-  onLoad?: () => Promise<void>;
-  onUnload?: () => Promise<void>;
-  onEvent?: (e: string, d: Object) => void;
-}): ModuleInterface {
+function makeModule(name: string, opts?: ModuleTestHooks): ModuleInterface {
   return new TestModule(name, opts);
 }
 
@@ -145,7 +144,8 @@ export default function moduleManagerTest() {
       mm.register(makeModule('B', { onEvent: (e) => { receivedB = e; } }));
       await mm.load('A');
       await mm.load('B');
-      mm.emit('test:event', { value: 1 });
+      const payload: Record<string, Object> = { 'value': 1 };
+      mm.emit('test:event', payload);
       expect(receivedA).assertEqual('test:event');
       expect(receivedB).assertEqual('test:event');
     });

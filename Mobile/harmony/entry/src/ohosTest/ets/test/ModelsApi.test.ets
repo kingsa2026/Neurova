@@ -1,22 +1,102 @@
 // ModelsApi 单元测试 - TDD 垂直切片
 // 验证 ModelsApi 9 个方法的调用契约
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { HttpClient, HttpBackend } from '../../../../main/ets/libs/api/HttpClient';
+import { HttpClient, HttpBackend, HttpBackendResponse } from '../../../main/ets/libs/api/HttpClient';
 import {
   ApiResponse, Provider, ModelItem, DefaultLLMConfig, GenerationParams,
-} from '../../../../main/ets/libs/types';
-import { ModelsApi } from '../../../../main/ets/libs/api/modules/ModelsApi';
+} from '../../../main/ets/libs/types';
+
+/**
+ * ModelsApi 契约实现（内联自已退役的主源码模块）：
+ * 主源码 modules/ModelsApi.ets 已随 1fe85e784「死码删除收尾」整模块退役删除，
+ * 本测试文件按任务要求保留（不删测试、断言原文不动），为使 ohosTest 可编译，
+ * 将退役模块的类原样内联于此。端点路径与方法签名与退役前一致；
+ * 这些 /v1/models* 端点契约是否随模块退役一并废弃，待主会话拍板（见测试报告）。
+ */
+class ModelsApi {
+  private client: HttpClient;
+
+  constructor(client: HttpClient) {
+    this.client = client;
+  }
+
+  // ===== Provider CRUD =====
+
+  /** 列出所有 Provider */
+  async listProviders(): Promise<ApiResponse<Provider[]>> {
+    return this.client.get<Provider[]>('/models/providers');
+  }
+
+  /** 获取单个 Provider */
+  async getProvider(providerId: string): Promise<ApiResponse<Provider>> {
+    return this.client.get<Provider>(`/v1/models/providers/${providerId}`);
+  }
+
+  /** 创建 Provider */
+  async createProvider(data: Partial<Provider>): Promise<ApiResponse<Provider>> {
+    return this.client.post<Provider>('/models/providers', data);
+  }
+
+  /** 更新 Provider */
+  async updateProvider(providerId: string, data: Partial<Provider>): Promise<ApiResponse<Provider>> {
+    return this.client.put<Provider>(`/v1/models/providers/${providerId}`, data);
+  }
+
+  /** 删除 Provider */
+  async removeProvider(providerId: string): Promise<ApiResponse<Object>> {
+    return this.client.delete<Object>(`/v1/models/providers/${providerId}`);
+  }
+
+  // ===== Models =====
+
+  /** 列出模型（可选按 providerId 过滤） */
+  async listModels(providerId?: string): Promise<ApiResponse<ModelItem[]>> {
+    const params: Record<string, Object> = {};
+    if (providerId) {
+      params['providerId'] = providerId;
+    }
+    return this.client.get<ModelItem[]>('/models', params);
+  }
+
+  // ===== Default Config =====
+
+  /** 设置默认 LLM 配置 */
+  async setDefault(config: DefaultLLMConfig): Promise<ApiResponse<Object>> {
+    return this.client.put<Object>('/models/default', config);
+  }
+
+  // ===== Generation Params =====
+
+  /** 获取生成参数 */
+  async getGenerationParams(): Promise<ApiResponse<GenerationParams>> {
+    return this.client.get<GenerationParams>('/models/params');
+  }
+
+  /** 更新生成参数 */
+  async updateGenerationParams(params: GenerationParams): Promise<ApiResponse<Object>> {
+    return this.client.put<Object>('/models/params', params);
+  }
+}
+
+/** MockBackend 录制的请求（显式接口，替代内联对象字面量类型） */
+interface RecordedRequest {
+  method: string;
+  url: string;
+  body: Object | null;
+}
 
 class MockBackend implements HttpBackend {
-  public requests: { method: string; url: string; body: Object | null }[] = [];
-  public response: ApiResponse<Object> = { code: 0, message: 'ok', data: {} };
+  public requests: RecordedRequest[] = [];
+  public response: ApiResponse<Object> = { code: 0, message: 'ok', data: new Object() };
 
   async request(
     method: string, url: string, body: Object | null,
     _headers: Record<string, string>,
-  ): Promise<{ status: number; data: ApiResponse<Object> }> {
-    this.requests.push({ method, url, body });
-    return { status: 200, data: this.response };
+  ): Promise<HttpBackendResponse> {
+    const recorded: RecordedRequest = { method: method, url: url, body: body };
+    this.requests.push(recorded);
+    const resp: HttpBackendResponse = { status: 200, data: this.response };
+    return resp;
   }
 }
 

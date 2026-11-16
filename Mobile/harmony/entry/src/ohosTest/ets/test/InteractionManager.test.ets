@@ -1,7 +1,7 @@
 // InteractionManager 单元测试 - TDD 垂直切片
 // 通过公共接口验证交互行为：防抖、节流、长按判定、滑动方向判定
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { InteractionManager } from '../../../../main/ets/libs/interaction/InteractionManager';
+import { InteractionManager } from '../../../main/ets/libs/interaction/InteractionManager';
 
 export default function interactionManagerTest() {
   describe('InteractionManager', () => {
@@ -75,9 +75,9 @@ export default function interactionManagerTest() {
     it('debounce_only_last_call_executed', 0, () => {
       let callCount = 0;
       let lastArg = '';
-      const debounced = im.debounce((msg: string) => {
+      const debounced = im.debounce((msg: Object) => {
         callCount++;
-        lastArg = msg;
+        lastArg = msg as string;
       }, 50);
 
       // 连续三次快速调用
@@ -97,10 +97,10 @@ export default function interactionManagerTest() {
     it('throttle_only_first_call_executed', 0, () => {
       let callCount = 0;
       let firstArg = '';
-      const throttled = im.throttle((msg: string) => {
+      const throttled = im.throttle((msg: Object) => {
         callCount++;
         if (callCount === 1) {
-          firstArg = msg;
+          firstArg = msg as string;
         }
       }, 50);
 

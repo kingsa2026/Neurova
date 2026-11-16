@@ -8,8 +8,8 @@
 //       relationLabel / calculateAvgWeight / findRelatedEdges 的核心视图逻辑，并包含边界场景。
 // 词汇说明：节点类型与后端 NodeType 枚举同源（concept/entity/event/memory）。
 import { describe, it, expect } from '@ohos/hypium';
-import { KnowledgeGraphViewHelper } from '../../../../main/ets/pages/KnowledgeGraphPage';
-import { GraphNodeDto, GraphEdgeDto } from '../../../../main/ets/libs/api/modules/CognitionApi';
+import { KnowledgeGraphViewHelper } from '../../../main/ets/pages/KnowledgeGraphPage';
+import { GraphNodeDto, GraphEdgeDto } from '../../../main/ets/libs/api/modules/CognitionApi';
 
 export default function knowledgeGraphPageTest() {
   describe('KnowledgeGraphPage', () => {

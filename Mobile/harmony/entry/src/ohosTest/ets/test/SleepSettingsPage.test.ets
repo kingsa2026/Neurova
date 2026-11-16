@@ -9,7 +9,7 @@
 // 视图模型刻意设计为无 UI 依赖的纯函数，便于测试与主题切换。
 // 严格规则：一个测试 → 一个实现 → 循环（垂直切片），禁止一次性写完所有测试再写实现。
 import { describe, it, expect } from '@ohos/hypium';
-import { SleepSettingsViewHelper } from '../../../../main/ets/pages/SleepSettingsPage';
+import { SleepSettingsViewHelper } from '../../../main/ets/pages/SleepSettingsPage';
 
 export default function sleepSettingsPageTest() {
   describe('SleepSettingsPage', () => {
@@ -94,16 +94,16 @@ export default function sleepSettingsPageTest() {
     // ========== 切片14: isDirty - 字段不同 → true ==========
 
     it('is_dirty_different_returns_true', 0, () => {
-      const current: Record<string, Object> = { idleTimeout: 10, sleepMode: 'deep' };
-      const original: Record<string, Object> = { idleTimeout: 5, sleepMode: 'deep' };
+      const current: Record<string, Object> = { 'idleTimeout': 10, 'sleepMode': 'deep' };
+      const original: Record<string, Object> = { 'idleTimeout': 5, 'sleepMode': 'deep' };
       expect(SleepSettingsViewHelper.isDirty(current, original)).assertTrue();
     });
 
     // ========== 切片15: isDirty - 字段相同 → false ==========
 
     it('is_dirty_same_returns_false', 0, () => {
-      const current: Record<string, Object> = { idleTimeout: 10, sleepMode: 'deep' };
-      const original: Record<string, Object> = { idleTimeout: 10, sleepMode: 'deep' };
+      const current: Record<string, Object> = { 'idleTimeout': 10, 'sleepMode': 'deep' };
+      const original: Record<string, Object> = { 'idleTimeout': 10, 'sleepMode': 'deep' };
       expect(SleepSettingsViewHelper.isDirty(current, original)).assertFalse();
     });
 
@@ -111,10 +111,10 @@ export default function sleepSettingsPageTest() {
 
     it('build_settings_payload_returns_array', 0, () => {
       const current: Record<string, Object> = {
-        idleTimeout: 10,
-        sleepMode: 'light',
-        wakeOnMessage: true,
-        wakeTime: '08:30',
+        'idleTimeout': 10,
+        'sleepMode': 'light',
+        'wakeOnMessage': true,
+        'wakeTime': '08:30',
       };
       const result = SleepSettingsViewHelper.buildSettingsPayload(current);
       expect(result.length).assertEqual(4);

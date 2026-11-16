@@ -12,8 +12,8 @@
 //   切片 10-11：getTypeLabel（feishu/dingtalk）
 //   切片 12-15：getStatusColor（connected/disconnected/error/disabled）
 import { describe, it, expect } from '@ohos/hypium';
-import { ChannelViewHelper } from '../../../../main/ets/pages/AgentChannelPage';
-import { ChannelType, ChannelStatus } from '../../../../main/ets/libs/types';
+import { ChannelViewHelper } from '../../../main/ets/pages/AgentChannelPage';
+import { ChannelType, ChannelStatus } from '../../../main/ets/libs/types';
 
 export default function agentChannelPageTest() {
   describe('AgentChannelPage', () => {

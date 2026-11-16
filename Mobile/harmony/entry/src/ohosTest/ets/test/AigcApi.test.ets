@@ -1,30 +1,67 @@
 // AigcApi 单元测试（M5a）- TDD 契约切片
 // 验证与 Web generation.ts 同源的端点契约（URL/方法/body）+ fileUrl 拼接 + 账本映射纯函数
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { HttpClient, HttpBackend } from '../../../../main/ets/libs/api/HttpClient';
-import { AigcApi } from '../../../../main/ets/libs/api/modules/AigcApi';
-import { aigcTaskFromServer } from '../../../../main/ets/pages/AIGCPage';
-import { ApiResponse, AigcGenerationTask } from '../../../../main/ets/libs/types';
+import { HttpClient, HttpBackend, HttpBackendResponse } from '../../../main/ets/libs/api/HttpClient';
+import { AigcApi } from '../../../main/ets/libs/api/modules/AigcApi';
+import { aigcTaskFromServer } from '../../../main/ets/pages/AIGCPage';
+import { ApiResponse, AigcGenerationTask, AigcVoiceOption } from '../../../main/ets/libs/types';
+
+/** MockBackend 录制的请求（显式接口，替代内联对象字面量类型） */
+interface RecordedRequest {
+  method: string;
+  url: string;
+  body: Object | null;
+}
+
+/** GET /generation/tasks 的服务端信封载荷（{tasks: [...]}） */
+interface AigcTasksPayload {
+  tasks: AigcGenerationTask[];
+}
+
+/** GET /generation/voices 的服务端信封载荷（{voices: [...]}） */
+interface AigcVoicesPayload {
+  voices: AigcVoiceOption[];
+}
 
 class MockBackend implements HttpBackend {
-  public requests: { method: string; url: string; body: Object | null }[] = [];
-  public response: ApiResponse<Object> = { code: 0, message: 'ok', data: {} };
+  public requests: RecordedRequest[] = [];
+  public response: ApiResponse<Object> = { code: 0, message: 'ok', data: new Object() };
 
   async request(
     method: string, url: string, body: Object | null,
     _headers: Record<string, string>,
-  ): Promise<{ status: number; data: ApiResponse<Object> }> {
-    this.requests.push({ method, url, body });
-    return { status: 200, data: this.response };
+  ): Promise<HttpBackendResponse> {
+    const recorded: RecordedRequest = { method: method, url: url, body: body };
+    this.requests.push(recorded);
+    const resp: HttpBackendResponse = { status: 200, data: this.response };
+    return resp;
   }
 }
 
-const makeTask = (over: Partial<AigcGenerationTask>): AigcGenerationTask => ({
-  task_id: 'g1', kind: 'image', protocol: 'openai_compat', model: 'flux',
-  status: 'succeeded', prompt: 'p', submitted_at: 1757700000, updated_at: 1757700005,
-  local_path: 'data/generations/g1_0.png', url: '/api/v1/generation/files/g1_0.png',
-  source: 'rest', error: '', ...over,
-});
+const makeTask = (over: Partial<AigcGenerationTask>): AigcGenerationTask => {
+  const task: AigcGenerationTask = {
+    task_id: 'g1', kind: 'image', protocol: 'openai_compat', model: 'flux',
+    status: 'succeeded', prompt: 'p', submitted_at: 1757700000, updated_at: 1757700005,
+    local_path: 'data/generations/g1_0.png', url: '/api/v1/generation/files/g1_0.png',
+    source: 'rest', error: '',
+  };
+  // ArkTS 禁 spread：逐字段拷贝覆盖项
+  if (over.task_id !== undefined) { task.task_id = over.task_id; }
+  if (over.kind !== undefined) { task.kind = over.kind; }
+  if (over.protocol !== undefined) { task.protocol = over.protocol; }
+  if (over.model !== undefined) { task.model = over.model; }
+  if (over.status !== undefined) { task.status = over.status; }
+  if (over.prompt !== undefined) { task.prompt = over.prompt; }
+  if (over.submitted_at !== undefined) { task.submitted_at = over.submitted_at; }
+  if (over.updated_at !== undefined) { task.updated_at = over.updated_at; }
+  if (over.local_path !== undefined) { task.local_path = over.local_path; }
+  if (over.url !== undefined) { task.url = over.url; }
+  if (over.source !== undefined) { task.source = over.source; }
+  if (over.error !== undefined) { task.error = over.error; }
+  if (over.ignored_params !== undefined) { task.ignored_params = over.ignored_params; }
+  if (over.file_missing !== undefined) { task.file_missing = over.file_missing; }
+  return task;
+};
 
 export default function aigcApiTest() {
   describe('AigcApi', () => {
@@ -64,7 +101,8 @@ export default function aigcApiTest() {
     });
 
     it('listTasks_unwraps_tasks_envelope_with_kind', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { tasks: [makeTask({})] } };
+      const payload: AigcTasksPayload = { tasks: [makeTask({})] };
+      backend.response = { code: 0, message: 'ok', data: payload };
       let got: AigcGenerationTask[] = [];
       api.listTasks('image').then(r => { got = r.data; });
       expect(backend.requests[0].url).assertContain('kind=image');
@@ -72,7 +110,8 @@ export default function aigcApiTest() {
     });
 
     it('listVoices_unwraps_voices_envelope', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { voices: [{ id: 'v1', name: '晨' }] } };
+      const payload: AigcVoicesPayload = { voices: [{ id: 'v1', name: '晨' }] };
+      backend.response = { code: 0, message: 'ok', data: payload };
       let count = 0;
       api.listVoices().then(r => { count = r.data.length; });
       setTimeout(() => { expect(count).assertEqual(1); }, 10);

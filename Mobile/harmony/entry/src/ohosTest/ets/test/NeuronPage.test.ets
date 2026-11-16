@@ -10,8 +10,8 @@
 // 颜色 token 说明：返回 StyleManager 实际支持的 token 名（'info'/'success'/'error'/
 //   'warning'/'text_secondary'），不加 'status_' 前缀，与 TaskPage/ProjectPage 现有模式一致。
 import { describe, it, expect } from '@ohos/hypium';
-import { NeuronViewHelper } from '../../../../main/ets/pages/NeuronPage';
-import { NeuronState } from '../../../../main/ets/libs/types';
+import { NeuronViewHelper } from '../../../main/ets/pages/NeuronPage';
+import { NeuronState } from '../../../main/ets/libs/types';
 
 export default function neuronPageTest() {
   describe('NeuronPage', () => {

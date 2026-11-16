@@ -1,7 +1,7 @@
 // MessageManager 单元测试 - TDD 垂直切片
 // 每个测试验证一个行为，仅通过公共接口验证，不耦合实现细节
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { MessageManager, MessageType } from '../../../../main/ets/libs/message/MessageManager';
+import { MessageManager, MessageType } from '../../../main/ets/libs/message/MessageManager';
 
 export default function messageManagerTest() {
   describe('MessageManager', () => {

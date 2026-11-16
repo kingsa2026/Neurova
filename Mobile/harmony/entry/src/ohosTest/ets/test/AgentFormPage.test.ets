@@ -6,43 +6,53 @@
 //       进行验证，覆盖页面 handleSubmit 的核心数据流与 'navigation:back' 事件契约。
 // 模式：参考 ChatPage.test.ets —— 通过 EventBus 事件契约与 Mock API 验证页面行为。
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { EventBus } from '../../../../main/ets/libs/bus/EventBus';
-import { Agent, ApiResponse } from '../../../../main/ets/libs/types';
+import { EventBus } from '../../../main/ets/libs/bus/EventBus';
+import { HttpClient } from '../../../main/ets/libs/api/HttpClient';
+import { AgentsApi } from '../../../main/ets/libs/api/modules/AgentsApi';
+import { Agent, ApiResponse } from '../../../main/ets/libs/types';
 import {
   AgentFormValidator,
   buildAgentPayload,
   executeAgentSave,
   AgentFormData,
-  AgentSaveApi,
-} from '../../../../main/ets/pages/AgentFormPage';
+} from '../../../main/ets/pages/AgentFormPage';
 
 // ===========================================================================
-// Mock AgentSaveApi：记录调用参数并返回预设响应，用于验证保存流程事件契约
+// Mock AgentsApi：继承具体类（ArkTS 禁结构化类型，executeAgentSave 形参为 AgentsApi），
+// 记录调用参数并对齐真实契约（业务失败抛错），用于验证保存流程事件契约
 // ===========================================================================
-class MockAgentApi implements AgentSaveApi {
+class MockAgentApi extends AgentsApi {
   public createData: Partial<Agent> | null = null;
   public updateId: string | null = null;
   public updateData: Partial<Agent> | null = null;
   public response: ApiResponse<Agent> = { code: 0, message: 'ok', data: {} as Agent };
   public shouldThrow: boolean = false;
 
-  async create(data: Partial<Agent>): Promise<ApiResponse<Agent>> {
-    this.createData = data;
-    if (this.shouldThrow) throw new Error('network error');
-    return this.response;
+  constructor() {
+    // create/update 已被覆写，client 仅满足基类构造，不会触网
+    super(HttpClient.getInstance());
   }
 
-  async update(agentId: string, data: Partial<Agent>): Promise<ApiResponse<Agent>> {
+  async create(data: Partial<Agent>): Promise<Agent> {
+    this.createData = data;
+    if (this.shouldThrow) throw new Error('network error');
+    // 对齐真实 AgentsApi：业务失败（code≠0）抛错，由 executeAgentSave 捕获转 form:error
+    if (this.response.code !== 0) throw new Error(this.response.message);
+    return this.response.data;
+  }
+
+  async update(agentId: string, data: Partial<Agent>): Promise<Agent> {
     this.updateId = agentId;
     this.updateData = data;
     if (this.shouldThrow) throw new Error('network error');
-    return this.response;
+    if (this.response.code !== 0) throw new Error(this.response.message);
+    return this.response.data;
   }
 }
 
 // 构造默认表单数据（各字段合法），测试中按需覆盖
 function makeForm(overrides: Partial<AgentFormData> = {}): AgentFormData {
-  return {
+  const base: AgentFormData = {
     name: '默认智能体',
     description: '',
     model: '',
@@ -51,8 +61,17 @@ function makeForm(overrides: Partial<AgentFormData> = {}): AgentFormData {
     temperature: 0.7,
     maxTokens: 2048,
     topP: 0.9,
-    ...overrides,
   };
+  // ArkTS 禁 spread：逐字段拷贝覆盖值
+  if (overrides.name !== undefined) { base.name = overrides.name; }
+  if (overrides.description !== undefined) { base.description = overrides.description; }
+  if (overrides.model !== undefined) { base.model = overrides.model; }
+  if (overrides.provider !== undefined) { base.provider = overrides.provider; }
+  if (overrides.systemPrompt !== undefined) { base.systemPrompt = overrides.systemPrompt; }
+  if (overrides.temperature !== undefined) { base.temperature = overrides.temperature; }
+  if (overrides.maxTokens !== undefined) { base.maxTokens = overrides.maxTokens; }
+  if (overrides.topP !== undefined) { base.topP = overrides.topP; }
+  return base;
 }
 
 export default function agentFormPageTest() {
