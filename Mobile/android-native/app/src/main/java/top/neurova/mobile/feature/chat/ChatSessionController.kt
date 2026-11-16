@@ -40,6 +40,22 @@ class ChatSessionController(
     var historyLoading by mutableStateOf(false)
         private set
 
+    /** 排队位（ledger queued）；null=不在排队 */
+    var queuePosition by mutableStateOf<Int?>(null)
+        private set
+
+    /** 排队/让位原因（让位闸 onWait 的 reason） */
+    var queueReason by mutableStateOf<String?>(null)
+        private set
+
+    /** 思考流片段（管线 reasoning 事件；内容开始后清空） */
+    var reasoningSnippet by mutableStateOf<String?>(null)
+        private set
+
+    /** 本轮已接收的流式分段数（生成中进度读数） */
+    var chunkCount by mutableStateOf(0)
+        private set
+
     private val batcher = ChunkBatcher()
     private var eventsJob: Job? = null
     private var collecting = false
@@ -50,6 +66,10 @@ class ChatSessionController(
             batcher.reset()
             isGenerating = false
             sendError = null
+            queuePosition = null
+            queueReason = null
+            reasoningSnippet = null
+            chunkCount = 0
         }
         sessionId = targetSessionId
         if (title.isNotBlank()) sessionTitle = title
@@ -79,6 +99,10 @@ class ChatSessionController(
         messages = messages + ChatMessage(id = "a-$stamp", role = "assistant", content = "", status = "streaming")
         isGenerating = true
         sendError = null
+        queuePosition = null
+        queueReason = null
+        reasoningSnippet = null
+        chunkCount = 0
         scope.launch {
             runCatching { ensureConnected() }
                 .onFailure { failure ->
@@ -141,6 +165,8 @@ class ChatSessionController(
                 when (event) {
                     is MobileWsChannel.Event.Chunk -> if (event.sessionId == sessionId) {
                         batcher.push(event.content)
+                        chunkCount += 1
+                        reasoningSnippet = null
                         if (batcher.shouldFlush(System.currentTimeMillis())) applyBatchedFlush()
                     }
                     is MobileWsChannel.Event.Done -> if (event.sessionId == sessionId) {
@@ -153,10 +179,20 @@ class ChatSessionController(
                         batcher.reset()
                         isGenerating = false
                         sendError = event.message.ifBlank { event.code }
+                        queuePosition = null
+                        queueReason = null
+                        reasoningSnippet = null
                         markLastAssistant("error")
                     }
                     is MobileWsChannel.Event.AgentSwitched -> {
                         // Agent 切换属 F7/F5 头部联动，P6 接线
+                    }
+                    is MobileWsChannel.Event.Queued -> if (event.sessionId == sessionId) {
+                        queuePosition = event.position ?: queuePosition
+                        queueReason = event.reason ?: queueReason
+                    }
+                    is MobileWsChannel.Event.Reasoning -> if (event.sessionId == sessionId) {
+                        reasoningSnippet = event.content.ifBlank { reasoningSnippet }
                     }
                 }
             }
@@ -174,6 +210,9 @@ class ChatSessionController(
         if (rest.isNotEmpty()) appendToLastAssistant(rest)
         markLastAssistant(status)
         isGenerating = false
+        queuePosition = null
+        queueReason = null
+        reasoningSnippet = null
     }
 
     private fun appendToLastAssistant(chunk: String) {
@@ -197,6 +236,9 @@ class ChatSessionController(
         batcher.reset()
         isGenerating = false
         sendError = reason
+        queuePosition = null
+        queueReason = null
+        reasoningSnippet = null
         markLastAssistant("error")
     }
 

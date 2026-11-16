@@ -50,6 +50,7 @@ class FakeWS:
         pass
 
     async def send_json(self, message):
+        print("DEBUG-SENT:", json.dumps(message, ensure_ascii=False)[:160])
         self.sent.append(message)
 
     async def receive_text(self):
@@ -66,24 +67,39 @@ class FakeWS:
 
 
 class FakeStreamAgent:
-    """chat_stream：每个 chunk 前 gate 放行（测试精确控制节奏），可观测关闭。"""
+    """chat(stream=True) 桩：首 chunk 由 gate 放行，其余由 release 逐个放行。
+
+    节奏完全由测试控制 → 取消/断开/竞速全部确定性（无 sleep 竞争）。
+    """
 
     def __init__(self, total: int = 5):
         self.total = total
         self.calls = 0
-        self.gate = asyncio.Event()
+        self.gate = asyncio.Event()      # 首 chunk 放行
+        self.release = asyncio.Event()   # 第二块起放行
         self.closed = True  # 尚未启动视作已关闭
         self.sent_count = 0
 
-    async def chat_stream(self, **kwargs):
+    async def chat(self, **kwargs):
+        from neurova.agent_core import Agent
+        import inspect
+
+        inspect.signature(Agent.chat).bind(None, **kwargs)
         self.calls += 1
         self.closed = False
         try:
+            emitter = (kwargs.get("metadata") or {}).get("event_emitter")
+            parts: List[str] = []
             for i in range(self.total):
-                await self.gate.wait()
-                self.gate.clear()
+                if i == 0:
+                    await self.gate.wait()
+                else:
+                    await self.release.wait()
                 self.sent_count += 1
-                yield f"c{i}"
+                if callable(emitter):
+                    emitter("content", f"c{i}")
+                parts.append(f"c{i}")
+            return {"text": "".join(parts), "success": True}
         finally:
             self.closed = True
 
@@ -101,6 +117,27 @@ async def _eventually(pred, timeout: float = 3.0):
             return
         await asyncio.sleep(0.005)
     raise AssertionError("等待条件超时")
+
+
+@pytest.fixture(autouse=True)
+def _freshRunStateSingletons():
+    """台账/让位闸单例逐测重置并清空行：本档的占位行与计时状态不泄漏进其他测试。"""
+    from neurova.collaboration import glance_yield_rules as gyr
+    from neurova.core import agent_run_store as ars
+
+    asyncio.run(gyr.reset_glance_yield_checker())
+    ars.reset_agent_run_store()
+    store = ars.get_agent_run_store()
+    with store._lock:
+        store._conn.execute("DELETE FROM agent_runs")
+        store._conn.commit()
+    yield
+    asyncio.run(gyr.reset_glance_yield_checker())
+    ars.reset_agent_run_store()
+    store = ars.get_agent_run_store()
+    with store._lock:
+        store._conn.execute("DELETE FROM agent_runs")
+        store._conn.commit()
 
 
 @pytest.fixture(autouse=True)
@@ -158,6 +195,10 @@ class TestMidstreamCancel:
         gate_loop.set()  # 循环继续读 → cancel → ping
         await asyncio.wait_for(runner, timeout=5)
         await asyncio.sleep(0)  # 让 done_callback 跑完
+        await _eventually(
+            lambda: any(m.get("type") == "chat:cancelled" for m in ws.sent), timeout=5
+        )
+        await _eventually(lambda: agent.closed, timeout=5)  # 级联收尸需要几个节拍
 
         types = [m.get("type") for m in ws.sent]
         assert "chat:chunk" in types
@@ -165,9 +206,8 @@ class TestMidstreamCancel:
         assert "chat:cancelled" in types, "取消必须补发 chat:cancelled 事件"
         assert "pong" in types, "取消后循环必须继续可用（ping→pong）"
         assert agent.calls == 1
-        assert agent.closed, "在流生成器必须被关闭"
         assert agent.sent_count < agent.total, "流必须中途停止"
-        assert not mp._chat_tasks, "结束的 task 必须从模块级引用集移除"
+        await _eventually(lambda: not mp._chat_tasks)
         assert "s1" not in mp._cancelled_sessions, "取消标记须随流终态回收（#3 语义）"
 
     @pytest.mark.asyncio
@@ -207,7 +247,7 @@ class TestDisconnectReaping:
 
         gate_loop.set()
         await asyncio.wait_for(runner, timeout=5)
-        await asyncio.sleep(0)
+        await _eventually(lambda: agent.closed and not mp._chat_tasks)
 
         assert "chat:done" not in [m.get("type") for m in ws.sent]
         assert agent.closed, "断开连接后在流 task 必须被收尸（生成器关闭）"
@@ -244,7 +284,7 @@ class TestConcurrentSendRejected:
 
         ev2.set()
         await asyncio.wait_for(runner, timeout=5)
-        await asyncio.sleep(0)
+        await _eventually(lambda: not mp._chat_tasks)
         assert agent.calls == 1
         assert not mp._chat_tasks
 
@@ -267,17 +307,20 @@ class TestConcurrentSendRejected:
         for i in range(2):  # 完成第一条流
             agent.gate.set()
             await _eventually(lambda: agent.sent_count >= i + 1)
-        await _eventually(lambda: any(m.get("type") == "chat:done" for m in ws.sent))
+            agent.release.set()
+            await _eventually(lambda: any(m.get("type") == "chat:done" for m in ws.sent))
+            # 等 wrapper 任务真正收尾（done 事件先于任务完成数个节拍）
+            await _eventually(lambda: not mp._chat_tasks)
 
         ev1.set()  # 第二个 send → 应开新流
         agent.gate.set()
         await _eventually(lambda: agent.sent_count >= 3)
-        agent.gate.set()
+        agent.release.set()
         await _eventually(lambda: agent.sent_count >= 4)
 
         ev2.set()
         await asyncio.wait_for(runner, timeout=5)
-        await asyncio.sleep(0)
+        await _eventually(lambda: not mp._chat_tasks)
 
         assert agent.calls == 2, "流结束后新 send 必须放行"
         assert [m["type"] for m in ws.sent].count("chat:done") == 2

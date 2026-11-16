@@ -54,22 +54,26 @@ class _FakeWS:
 
 
 class _StreamAgent:
-    """chat_stream 异步生成器桩；hook 在两次 chunk 之间被调用。
+    """chat(stream=True) 桩：经 metadata.event_emitter 发两段内容；hook 在两段之间被调用。
 
-    形参按 `Agent.chat_stream` 的**真签名**写（`user_input`/`session_id`/`metadata`）。
-    这里原来签的是 `content=`/`user_id=`——与被审调用点同一个错，于是这两格一路"通过"着
-    一条在生产里必抛 `TypeError` 的形状（§6-161 的实据：桩件替坏掉的调用形状背书，
-    真链路上没有任何东西校验过参数名）。
+    中继改造后走 `agent.chat(stream=True, metadata={event_emitter})`（与 PC 同一
+    消费形状）。形参按 `Agent.chat` 的**真签名**写（`user_input`/`session_id`/
+    `metadata`/`stream`）——这里原来签的是 `content=`/`user_id=`，与被审调用点
+    同一个错（§6-161 的实据）。
     """
 
     def __init__(self, hook=None):
         self._hook = hook
 
-    async def chat_stream(self, user_input, session_id=None, metadata=None, **kwargs):
-        yield "c1"
+    async def chat(self, user_input, session_id=None, metadata=None, stream=False, **kwargs):
+        emitter = (metadata or {}).get("event_emitter")
+        if callable(emitter):
+            emitter("content", "c1")
         if self._hook:
             self._hook()
-        yield "c2"
+        if callable(emitter):
+            emitter("content", "c2")
+        return {"text": "c1c2", "success": True}
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +129,29 @@ def test_debug_sessions_get_touches_lru_order(debug_sessions):
 # ---------------------------------------------------------------------------
 # #3 _cancelled_sessions 有界化 + 流生命周期语义
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _freshRunStateSingletons():
+    """台账/让位闸单例逐测重置并清空行：本档的占位行与计时状态不泄漏进其他测试。"""
+    import asyncio
+
+    from neurova.collaboration import glance_yield_rules as gyr
+    from neurova.core import agent_run_store as ars
+
+    asyncio.run(gyr.reset_glance_yield_checker())
+    ars.reset_agent_run_store()
+    store = ars.get_agent_run_store()
+    with store._lock:
+        store._conn.execute("DELETE FROM agent_runs")
+        store._conn.commit()
+    yield
+    asyncio.run(gyr.reset_glance_yield_checker())
+    ars.reset_agent_run_store()
+    store = ars.get_agent_run_store()
+    with store._lock:
+        store._conn.execute("DELETE FROM agent_runs")
+        store._conn.commit()
 
 
 @pytest.fixture()

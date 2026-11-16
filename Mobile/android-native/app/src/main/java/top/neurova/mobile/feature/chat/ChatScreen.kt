@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -53,6 +54,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
@@ -98,6 +100,13 @@ fun ChatScreen(sessionId: String, initialTitle: String, onBack: () -> Unit, show
                     runtime.agents.switchAgent(target)
                     controller.useAgent(target)
                 },
+            )
+            TurnProgressStrip(
+                queuePosition = controller.queuePosition,
+                queueReason = controller.queueReason,
+                reasoningSnippet = controller.reasoningSnippet,
+                generating = controller.isGenerating,
+                chunkCount = controller.chunkCount,
             )
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                 val listState = rememberLazyListState()
@@ -229,6 +238,51 @@ private fun ChatHeader(
         IconButton(onClick = onOpenDrawer) {
             Icon(Icons.Filled.MoreVert, contentDescription = "会话抽屉", tint = palette.textMid)
         }
+    }
+}
+
+/** 会话进度条（P9+ 运行态透明化）：排队位 → 思考流 → 生成进度，全部来自真实运行态事件 */
+@Composable
+private fun TurnProgressStrip(
+    queuePosition: Int?,
+    queueReason: String?,
+    reasoningSnippet: String?,
+    generating: Boolean,
+    chunkCount: Int,
+) {
+    val palette = LocalNeurovaColors.current
+    val label = when {
+        queuePosition != null -> "排队中 · 第 ${queuePosition + 1} 位"
+        queueReason != null -> "排队中 · $queueReason"
+        reasoningSnippet != null -> "思考中 · $reasoningSnippet"
+        generating -> "生成中 · 已接收 $chunkCount 段"
+        else -> return
+    }
+    val color = when {
+        queuePosition != null || queueReason != null -> palette.warn
+        reasoningSnippet != null -> palette.accent
+        else -> palette.success
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(color),
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            label,
+            fontSize = 11.sp,
+            color = palette.textMid,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

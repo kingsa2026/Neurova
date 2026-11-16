@@ -23,6 +23,29 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 
+@pytest.fixture(autouse=True)
+def _freshRunStateSingletons():
+    """台账/让位闸单例逐测重置并清空行：其他测试的占位行与计时状态不泄漏进本档。"""
+    import asyncio
+
+    from neurova.collaboration import glance_yield_rules as gyr
+    from neurova.core import agent_run_store as ars
+
+    asyncio.run(gyr.reset_glance_yield_checker())
+    ars.reset_agent_run_store()
+    store = ars.get_agent_run_store()
+    with store._lock:
+        store._conn.execute("DELETE FROM agent_runs")
+        store._conn.commit()
+    yield
+    asyncio.run(gyr.reset_glance_yield_checker())
+    ars.reset_agent_run_store()
+    store = ars.get_agent_run_store()
+    with store._lock:
+        store._conn.execute("DELETE FROM agent_runs")
+        store._conn.commit()
+
+
 # ---------------------------------------------------------------------------
 # BE-MOB-001: WS URL 硬编码
 # ---------------------------------------------------------------------------
@@ -324,19 +347,22 @@ class TestHandleChatSend:
 
     @pytest.mark.asyncio
     async def test_handle_chat_send_stream_yields_chunks_then_done(self):
-        """有 chat_stream 时应发送 chat:chunk → chat:done 序列"""
+        """管线 event_emitter 发的 content 事件 → chat:chunk ×N → chat:done"""
         from neurova.api.endpoints import mobile_pairing as mp
 
         ws = MagicMock()
         ws.send_json = AsyncMock()
 
-        # mock Agent.chat_stream 为异步生成器，yield 3 个 chunk
-        async def _fake_chat_stream(**kwargs):
+        # mock Agent.chat：从 metadata 取 event_emitter，发 3 个 content 事件
+        async def _fake_chat(**kwargs):
+            emitter = (kwargs.get("metadata") or {}).get("event_emitter")
             for c in ["Hello", " world", "!"]:
-                yield c
+                if callable(emitter):
+                    emitter("content", c)
+            return {"text": "Hello world!", "success": True}
 
         mock_agent = MagicMock()
-        mock_agent.chat_stream = _fake_chat_stream
+        mock_agent.chat = _fake_chat
 
         with patch("neurova.api.endpoints.get_agent_instance", return_value=mock_agent):
             await mp._handle_chat_send(
@@ -361,13 +387,13 @@ class TestHandleChatSend:
 
     @pytest.mark.asyncio
     async def test_handle_chat_send_fallback_to_chat_when_no_stream(self):
-        """Agent 无 chat_stream 时应降级到 chat()，发送单 chunk + done"""
+        """Agent 的 chat 未产生任何 emitter 事件时，应兜底发送单 chunk + done"""
         from neurova.api.endpoints import mobile_pairing as mp
 
         ws = MagicMock()
         ws.send_json = AsyncMock()
 
-        # mock Agent 无 chat_stream 属性，但有 chat 方法
+        # mock Agent 无 emitter 事件产出，只有最终文本
         mock_agent = MagicMock(spec=["chat"])
         mock_agent.chat = AsyncMock(return_value={"text": "完整回复"})
 

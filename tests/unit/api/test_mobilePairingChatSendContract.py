@@ -86,6 +86,52 @@ class _NoStreamAgent(_StreamAgent):
     chat_stream = None  # `hasattr(agent,"chat_stream") and callable(...)` 因此为假
 
 
+@pytest.fixture(autouse=True)
+def _freshRunStateSingletons():
+    """台账/让位闸单例逐测重置并清空行：运行态测试间的占位行与计时状态互不泄漏。"""
+    import asyncio
+
+    from neurova.core import agent_run_store as ars
+    from neurova.collaboration import glance_yield_rules as gyr
+
+    asyncio.run(gyr.reset_glance_yield_checker())
+    ars.reset_agent_run_store()
+    store = ars.get_agent_run_store()
+    with store._lock:
+        store._conn.execute("DELETE FROM agent_runs")
+        store._conn.commit()
+    yield
+    asyncio.run(gyr.reset_glance_yield_checker())
+    ars.reset_agent_run_store()
+    store = ars.get_agent_run_store()
+    with store._lock:
+        store._conn.execute("DELETE FROM agent_runs")
+        store._conn.commit()
+
+
+@pytest.fixture(autouse=True)
+def _freshRunStateSingletons():
+    """台账/让位闸单例逐测重置并清空行：本档的占位行与计时状态不泄漏进其他测试。"""
+    import asyncio
+
+    from neurova.collaboration import glance_yield_rules as gyr
+    from neurova.core import agent_run_store as ars
+
+    asyncio.run(gyr.reset_glance_yield_checker())
+    ars.reset_agent_run_store()
+    store = ars.get_agent_run_store()
+    with store._lock:
+        store._conn.execute("DELETE FROM agent_runs")
+        store._conn.commit()
+    yield
+    asyncio.run(gyr.reset_glance_yield_checker())
+    ars.reset_agent_run_store()
+    store = ars.get_agent_run_store()
+    with store._lock:
+        store._conn.execute("DELETE FROM agent_runs")
+        store._conn.commit()
+
+
 @pytest.fixture()
 def wsClient(monkeypatch, request):
     useStream = request.param if getattr(request, "param", None) is not None else True
