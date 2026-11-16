@@ -1,8 +1,8 @@
 // HttpClient 单元测试 - TDD 垂直切片
 // 通过 HttpBackend 接口注入 mock，验证 HttpClient 行为而非真实网络
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { HttpClient } from '../../../../main/ets/libs/api/HttpClient';
-import { ApiResponse } from '../../../../main/ets/libs/types';
+import { HttpClient } from '../../../main/ets/libs/api/HttpClient';
+import { ApiResponse } from '../../../main/ets/libs/types';
 
 // Mock 后端实现
 class MockBackend {

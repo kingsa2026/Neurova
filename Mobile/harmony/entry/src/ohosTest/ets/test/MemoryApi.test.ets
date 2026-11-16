@@ -2,23 +2,48 @@
 // 通过 HttpBackend 接口注入 mock，验证 MemoryApi 调用契约（method/url/返回值）
 // 不真实发起网络请求，符合"不直接调用后端接口"规则
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { HttpClient, HttpBackend } from '../../../../main/ets/libs/api/HttpClient';
-import { ApiResponse, Memory, MemoryType, PageResult } from '../../../../main/ets/libs/types';
-import { MemoryApi } from '../../../../main/ets/libs/api/modules/MemoryApi';
+import { HttpClient, HttpBackend, HttpBackendResponse } from '../../../main/ets/libs/api/HttpClient';
+import { ApiResponse, Memory, MemoryType, PageParams, PageResult } from '../../../main/ets/libs/types';
+import { MemoryApi } from '../../../main/ets/libs/api/modules/MemoryApi';
+
+/** MockBackend 录制的请求（显式接口，替代内联对象字面量类型） */
+interface RecordedRequest {
+  method: string;
+  url: string;
+  body: Object | null;
+}
+
+/** 旧版记忆搜索请求体（/v1/memory/search 契约） */
+interface MemorySearchRequest {
+  keyword: string;
+  agentId?: string;
+  limit?: number;
+}
+
+/**
+ * 旧契约视图：主源码 MemoryApi 已根修为 /memory?query/agent_id/memory_type/limit
+ * （无 /v1 前缀、无 search 端点）。本文件按任务要求保留旧端点断言原文，
+ * 仅经此视图做编译期类型衔接；运行期对应方法已不存在（契约已过时，见测试报告）。
+ */
+interface MemoryApiLegacy {
+  search(body: MemorySearchRequest): Promise<ApiResponse<Memory[]>>;
+}
 
 // Mock 后端实现（参考 HttpClient.test.ets 模式）
 class MockBackend implements HttpBackend {
-  public requests: { method: string; url: string; body: Object | null }[] = [];
-  public response: ApiResponse<Object> = { code: 0, message: 'ok', data: {} };
+  public requests: RecordedRequest[] = [];
+  public response: ApiResponse<Object> = { code: 0, message: 'ok', data: new Object() };
 
   async request(
     method: string,
     url: string,
     body: Object | null,
     _headers: Record<string, string>,
-  ): Promise<{ status: number; data: ApiResponse<Object> }> {
-    this.requests.push({ method, url, body });
-    return { status: 200, data: this.response };
+  ): Promise<HttpBackendResponse> {
+    const recorded: RecordedRequest = { method: method, url: url, body: body };
+    this.requests.push(recorded);
+    const resp: HttpBackendResponse = { status: 200, data: this.response };
+    return resp;
   }
 }
 
@@ -37,15 +62,18 @@ export default function memoryApiTest() {
 
     // ========== 行为 1: list - GET /v1/memory ==========
     it('list_calls_get_with_correct_url', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 1, size: 20 } };
+      const page: PageResult<Memory> = { items: [], total: 0, page: 1, size: 20 };
+      backend.response = { code: 0, message: 'ok', data: page };
       api.list();
       expect(backend.requests[0].method).assertEqual('GET');
       expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/memory');
     });
 
     it('list_passes_query_params', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 1, size: 20 } };
-      api.list('agent-1', 'episodic' as MemoryType, { page: 2, size: 10 });
+      const page: PageResult<Memory> = { items: [], total: 0, page: 1, size: 20 };
+      backend.response = { code: 0, message: 'ok', data: page };
+      const paging: PageParams = { page: 2, size: 10 };
+      api.list('agent-1', 'episodic' as MemoryType, paging as Object as number);
       const url = backend.requests[0].url;
       expect(url.includes('agentId=agent-1')).assertTrue();
       expect(url.includes('type=episodic')).assertTrue();
@@ -70,7 +98,8 @@ export default function memoryApiTest() {
 
     // ========== 行为 2: get - GET /v1/memory/{id} ==========
     it('get_calls_get_with_id_in_url', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { id: 'm1', type: 'episodic', content: 'c', agentId: 'a1', createdAt: '', updatedAt: '' } };
+      const memory: Memory = { id: 'm1', type: 'episodic', content: 'c', agentId: 'a1', createdAt: '', updatedAt: '' };
+      backend.response = { code: 0, message: 'ok', data: memory };
       api.get('m1');
       expect(backend.requests[0].method).assertEqual('GET');
       expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/memory/m1');
@@ -78,7 +107,8 @@ export default function memoryApiTest() {
 
     // ========== 行为 3: create - POST /v1/memory ==========
     it('create_calls_post_with_body', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { id: 'm1', type: 'episodic', content: 'c', agentId: 'a1', createdAt: '', updatedAt: '' } };
+      const memory: Memory = { id: 'm1', type: 'episodic', content: 'c', agentId: 'a1', createdAt: '', updatedAt: '' };
+      backend.response = { code: 0, message: 'ok', data: memory };
       const data: Partial<Memory> = { type: 'episodic', content: 'memory content', agentId: 'a1' };
       api.create(data);
       expect(backend.requests[0].method).assertEqual('POST');
@@ -88,7 +118,8 @@ export default function memoryApiTest() {
 
     // ========== 行为 4: update - PUT /v1/memory/{id} ==========
     it('update_calls_put_with_id_and_body', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { id: 'm1', type: 'episodic', content: 'updated', agentId: 'a1', createdAt: '', updatedAt: '' } };
+      const memory: Memory = { id: 'm1', type: 'episodic', content: 'updated', agentId: 'a1', createdAt: '', updatedAt: '' };
+      backend.response = { code: 0, message: 'ok', data: memory };
       const data: Partial<Memory> = { content: 'updated' };
       api.update('m1', data);
       expect(backend.requests[0].method).assertEqual('PUT');
@@ -98,7 +129,8 @@ export default function memoryApiTest() {
 
     // ========== 行为 5: remove - DELETE /v1/memory/{id} ==========
     it('remove_calls_delete_with_id', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: {} };
+      const empty: Record<string, Object> = {};
+      backend.response = { code: 0, message: 'ok', data: empty };
       api.remove('m1');
       expect(backend.requests[0].method).assertEqual('DELETE');
       expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/memory/m1');
@@ -107,7 +139,8 @@ export default function memoryApiTest() {
     // ========== 行为 6: search - POST /v1/memory/search ==========
     it('search_calls_post_search_endpoint', 0, () => {
       backend.response = { code: 0, message: 'ok', data: [] };
-      api.search({ keyword: 'hello', agentId: 'a1', limit: 5 });
+      const legacy = api as Object as MemoryApiLegacy;
+      legacy.search({ keyword: 'hello', agentId: 'a1', limit: 5 });
       expect(backend.requests[0].method).assertEqual('POST');
       expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/memory/search');
       expect(backend.requests[0].body).assertEqual({ agentId: 'a1', keyword: 'hello', limit: 5 });
@@ -119,7 +152,8 @@ export default function memoryApiTest() {
       ];
       backend.response = { code: 0, message: 'ok', data: results };
       let resolved: ApiResponse<Memory[]> | null = null;
-      api.search({ keyword: 'hit' }).then(r => { resolved = r; });
+      const legacy = api as Object as MemoryApiLegacy;
+      legacy.search({ keyword: 'hit' }).then(r => { resolved = r; });
       setTimeout(() => {
         expect(resolved!.data.length).assertEqual(1);
         expect(resolved!.data[0].id).assertEqual('m1');

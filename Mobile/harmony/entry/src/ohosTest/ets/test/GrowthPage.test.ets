@@ -7,7 +7,7 @@
 //       覆盖页面 formatPercent / driveLabel / styleLabel / ruleTypeLabel /
 //       reflectionTypeLabel / truncateContent / formatTimestamp 的核心视图逻辑。
 import { describe, it, expect } from '@ohos/hypium';
-import { GrowthViewHelper } from '../../../../main/ets/pages/GrowthPage';
+import { GrowthViewHelper } from '../../../main/ets/pages/GrowthPage';
 
 export default function growthPageTest() {
   describe('GrowthPage', () => {

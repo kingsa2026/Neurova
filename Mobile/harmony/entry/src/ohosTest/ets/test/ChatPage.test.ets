@@ -6,8 +6,8 @@
 //       与 ChatMessageView 视图模型的增删改行为进行验证，
 //       覆盖页面 sendMessage / subscribeEvents / stopGeneration 的核心数据流。
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { EventBus } from '../../../../main/ets/libs/bus/EventBus';
-import { WSChatChunk, WSChatDone, WSChatError } from '../../../../main/ets/libs/types';
+import { EventBus } from '../../../main/ets/libs/bus/EventBus';
+import { WSChatChunk, WSChatDone, WSChatError } from '../../../main/ets/libs/types';
 
 // 与 ChatPage.ets 中定义保持一致的消息视图模型
 interface ChatMessageView {
@@ -58,8 +58,10 @@ export default function chatPageTest() {
           last.content += msg.content;
         }
       });
-      bus.emit('chat:chunk', { type: 'chat:chunk', session_id: 's1', content: '你', index: 0 });
-      bus.emit('chat:chunk', { type: 'chat:chunk', session_id: 's1', content: '好', index: 1 });
+      const chunk1: WSChatChunk = { type: 'chat:chunk', session_id: 's1', content: '你', index: 0 };
+      bus.emit('chat:chunk', chunk1);
+      const chunk2: WSChatChunk = { type: 'chat:chunk', session_id: 's1', content: '好', index: 1 };
+      bus.emit('chat:chunk', chunk2);
       expect(messages[1].content).assertEqual('你好');
     });
 
@@ -77,7 +79,8 @@ export default function chatPageTest() {
           last.content += msg.content;
         }
       });
-      bus.emit('chat:chunk', { type: 'chat:chunk', session_id: 's1', content: '忽略', index: 0 });
+      const ignored: WSChatChunk = { type: 'chat:chunk', session_id: 's1', content: '忽略', index: 0 };
+      bus.emit('chat:chunk', ignored);
       expect(messages[1].content).assertEqual('已结束');
     });
 

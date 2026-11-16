@@ -7,8 +7,8 @@
 //       formatMemberCount / formatRoleDistribution / truncateDescription 的核心视图逻辑。
 // 严格规则：一个测试 → 一个实现 → 循环（垂直切片），禁止一次性写完所有测试再写实现。
 import { describe, it, expect } from '@ohos/hypium';
-import { TeamViewHelper } from '../../../../main/ets/pages/TeamPage';
-import { TeamRole } from '../../../../main/ets/libs/types';
+import { TeamViewHelper } from '../../../main/ets/pages/TeamPage';
+import { TeamMember, TeamRole } from '../../../main/ets/libs/types';
 
 export default function teamPageTest() {
   describe('TeamPage', () => {
@@ -99,7 +99,7 @@ export default function teamPageTest() {
     // ========== 切片15: formatRoleDistribution - 全角色分布 ==========
 
     it('format_role_distribution_all_roles', 0, () => {
-      const members = [
+      const members: TeamMember[] = [
         { userId: 'u1', role: 'owner' as TeamRole },
         { userId: 'u2', role: 'admin' as TeamRole },
         { userId: 'u3', role: 'admin' as TeamRole },
@@ -118,7 +118,7 @@ export default function teamPageTest() {
     // ========== 切片16: formatRoleDistribution - 部分角色缺失（不显示） ==========
 
     it('format_role_distribution_partial_roles', 0, () => {
-      const members = [
+      const members: TeamMember[] = [
         { userId: 'u1', role: 'owner' as TeamRole },
         { userId: 'u2', role: 'member' as TeamRole },
         { userId: 'u3', role: 'member' as TeamRole },

@@ -8,7 +8,19 @@
 //       的核心视图逻辑。
 // 严格规则：一个测试 → 一个实现 → 循环（垂直切片），禁止一次性写完所有测试再写实现。
 import { describe, it, expect } from '@ohos/hypium';
-import { ModelViewHelper } from '../../../../main/ets/pages/ModelPage';
+import * as modelPageModule from '../../../main/ets/pages/ModelPage';
+
+/** 测试契约：ModelViewHelper 静态视图函数（Provider 状态色、健康图标、
+ *  模型类型图标、上下文窗口格式化） */
+interface ModelViewHelperContract {
+  getStatusColor(status: string): string;
+  getHealthIcon(health: string): string;
+  getModelTypeIcon(modelType: string): string;
+  formatContextWindow(bytes?: number): string;
+}
+
+/** 视图助手取用入口：经显式转换对齐测试契约（页面暂未导出，运行期以红态暴露） */
+const ModelViewHelper = (modelPageModule as Object as Record<string, Object>)['ModelViewHelper'] as ModelViewHelperContract;
 
 export default function modelPageTest() {
   describe('ModelPage', () => {

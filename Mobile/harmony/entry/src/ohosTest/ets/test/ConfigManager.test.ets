@@ -1,7 +1,7 @@
 // ConfigManager 单元测试 - TDD
 // 测试 ConfigManager 统一配置库的行为
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { ConfigManager } from '../../../../main/ets/libs/config/ConfigManager';
+import { ConfigManager } from '../../../main/ets/libs/config/ConfigManager';
 
 export default function configManagerTest() {
   describe('ConfigManager', () => {
@@ -46,9 +46,10 @@ export default function configManagerTest() {
     });
 
     it('supports_object_type', 0, () => {
-      const config = { host: 'localhost', port: 9527 };
+      const config: Record<string, Object> = { 'host': 'localhost', 'port': 9527 };
       cm.set<Object>('server', config);
-      const result = cm.get<Object>('server', {});
+      const fallback: Record<string, Object> = {};
+      const result = cm.get<Record<string, Object>>('server', fallback);
       expect(result['host']).assertEqual('localhost');
       expect(result['port']).assertEqual(9527);
     });

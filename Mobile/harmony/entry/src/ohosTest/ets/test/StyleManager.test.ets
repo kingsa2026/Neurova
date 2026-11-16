@@ -1,6 +1,6 @@
 // StyleManager 单元测试 - TDD 垂直切片
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { StyleManager, ThemeMode } from '../../../../main/ets/libs/style/StyleManager';
+import { StyleManager, ThemeMode } from '../../../main/ets/libs/style/StyleManager';
 
 export default function styleManagerTest() {
   describe('StyleManager', () => {

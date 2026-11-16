@@ -9,7 +9,7 @@
 // 视图模型刻意设计为无 UI 依赖的纯函数，返回 emoji 或字符串，便于测试与主题切换。
 // 严格规则：一个测试 → 一个实现 → 循环（垂直切片），禁止一次性写完所有测试再写实现。
 import { describe, it, expect } from '@ohos/hypium';
-import { TrajectoryViewHelper } from '../../../../main/ets/pages/AgentTrajectoryPage';
+import { TrajectoryViewHelper } from '../../../main/ets/pages/AgentTrajectoryPage';
 
 export default function agentTrajectoryPageTest() {
   describe('AgentTrajectoryPage', () => {

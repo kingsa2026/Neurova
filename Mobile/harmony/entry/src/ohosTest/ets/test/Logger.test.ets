@@ -1,6 +1,6 @@
 // Logger 单元测试 - TDD
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { Logger, LogLevel } from '../../../../main/ets/libs/logger/Logger';
+import { Logger, LogLevel } from '../../../main/ets/libs/logger/Logger';
 
 export default function loggerTest() {
   describe('Logger', () => {

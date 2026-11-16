@@ -8,7 +8,7 @@
 // 严格规则：一个测试 → 一个实现 → 循环（垂直切片），禁止一次性写完所有测试再写实现。
 // 时间相关测试：在测试内部以 Date.now() 为基准计算时间戳，保证与实现侧 Date.now() 一致。
 import { describe, it, expect } from '@ohos/hypium';
-import { SessionSyncViewHelper } from '../../../../main/ets/pages/SessionSyncPage';
+import { SessionSyncViewHelper } from '../../../main/ets/pages/SessionSyncPage';
 
 export default function sessionSyncPageTest() {
   describe('SessionSyncPage', () => {

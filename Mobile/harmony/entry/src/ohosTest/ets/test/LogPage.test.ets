@@ -11,8 +11,8 @@
 //   'success'/'text_secondary' 等），不加 'status_' 前缀，确保 StyleManager.getColor()
 //   能正确解析为实际色值，与 TaskPage/ProjectPage 现有模式一致。
 import { describe, it, expect } from '@ohos/hypium';
-import { LogViewHelper } from '../../../../main/ets/pages/LogPage';
-import { LogLevel, Metadata } from '../../../../main/ets/libs/types';
+import { LogViewHelper } from '../../../main/ets/pages/LogPage';
+import { LogLevel, Metadata } from '../../../main/ets/libs/types';
 
 export default function logPageTest() {
   describe('LogPage', () => {
@@ -177,12 +177,12 @@ export default function logPageTest() {
     // ========== 切片25: formatContext - 非空对象 → JSON 字符串 ==========
 
     it('format_context_object_returns_json_string', 0, () => {
-      const ctx: Metadata = { user: 'alice', count: 3 };
+      const ctx: Record<string, Object> = { 'user': 'alice', 'count': 3 };
       const result = LogViewHelper.formatContext(ctx);
       // 应为合法 JSON 字符串，且可解析回原对象
       expect(result !== '无').assertTrue();
       expect(result.charAt(0)).assertEqual('{');
-      const parsed = JSON.parse(result);
+      const parsed = JSON.parse(result) as Record<string, Object>;
       expect(parsed['user']).assertEqual('alice');
       expect(parsed['count']).assertEqual(3);
     });

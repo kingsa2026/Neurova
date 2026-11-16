@@ -9,27 +9,39 @@
 //       RegisterController（提交流程控制器，依赖注入），从 RegisterPage.ets 导出供测试。
 //       RegisterPage 的 @Component 仅做 UI 绑定，调用 RegisterController.submit。
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { EventBus } from '../../../../main/ets/libs/bus/EventBus';
-import { HttpClient, HttpBackend } from '../../../../main/ets/libs/api/HttpClient';
-import { AuthApi } from '../../../../main/ets/libs/api/modules/AuthApi';
-import { RouteNames } from '../../../../main/ets/routing/Router';
-import { ApiResponse, RegisterForm, RegisterResult } from '../../../../main/ets/libs/types';
+import { EventBus } from '../../../main/ets/libs/bus/EventBus';
+import { HttpClient, HttpBackend, HttpBackendResponse } from '../../../main/ets/libs/api/HttpClient';
+import { AuthApi } from '../../../main/ets/libs/api/modules/AuthApi';
+import { RouteNames } from '../../../main/ets/routing/Router';
+import { ApiResponse, RegisterForm, RegisterResult } from '../../../main/ets/libs/types';
 // 切片1-6 仅需 RegisterValidator；切片7 起追加 RegisterController 导入
-import { RegisterValidator, RegisterController } from '../../../../main/ets/pages/RegisterPage';
+import { RegisterValidator, RegisterController } from '../../../main/ets/pages/RegisterPage';
+
+/** MockBackend 录制的请求（显式接口，替代内联对象字面量类型） */
+interface RecordedRequest {
+  method: string;
+  url: string;
+  body: Object | null;
+}
+
+/** 空 data 载荷（ArkTS 禁空字面量直接落 Object，集中此处） */
+const EMPTY_DATA: Record<string, Object> = {};
 
 // 复用 HealthApi.test.ets 的 MockBackend 模式：注入 HttpClient 走 mock 后端
 class MockBackend implements HttpBackend {
-  public requests: { method: string; url: string; body: Object | null }[] = [];
-  public response: ApiResponse<Object> = { code: 0, message: 'ok', data: {} };
+  public requests: RecordedRequest[] = [];
+  public response: ApiResponse<Object> = { code: 0, message: 'ok', data: EMPTY_DATA };
 
   async request(
     method: string,
     url: string,
     body: Object | null,
     _headers: Record<string, string>,
-  ): Promise<{ status: number; data: ApiResponse<Object> }> {
-    this.requests.push({ method, url, body });
-    return { status: 200, data: this.response };
+  ): Promise<HttpBackendResponse> {
+    const recorded: RecordedRequest = { method: method, url: url, body: body };
+    this.requests.push(recorded);
+    const resp: HttpBackendResponse = { status: 200, data: this.response };
+    return resp;
   }
 }
 

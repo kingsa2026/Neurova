@@ -6,7 +6,7 @@
 //       因此此处针对从 SandboxPage.ets 导出的 SandboxViewHelper 静态方法进行验证。
 // 严格规则：一个测试 → 一个实现 → 循环（垂直切片），禁止一次性写完所有测试再写实现。
 import { describe, it, expect } from '@ohos/hypium';
-import { SandboxViewHelper } from '../../../../main/ets/pages/SandboxPage';
+import { SandboxViewHelper } from '../../../main/ets/pages/SandboxPage';
 
 export default function sandboxPageTest() {
   describe('SandboxPage', () => {

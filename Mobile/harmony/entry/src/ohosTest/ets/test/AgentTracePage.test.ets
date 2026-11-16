@@ -8,8 +8,8 @@
 //       formatPayload / formatDuration / formatTimestamp 的核心视图逻辑。
 // 严格规则：一个测试 → 一个实现 → 循环（垂直切片），禁止一次性写完所有测试再写实现。
 import { describe, it, expect } from '@ohos/hypium';
-import { AgentTraceViewHelper } from '../../../../main/ets/pages/AgentTracePage';
-import { TraceLevel } from '../../../../main/ets/libs/types';
+import { AgentTraceViewHelper } from '../../../main/ets/pages/AgentTracePage';
+import { TraceLevel } from '../../../main/ets/libs/types';
 
 export default function agentTracePageTest() {
   describe('AgentTracePage', () => {
@@ -76,7 +76,7 @@ export default function agentTracePageTest() {
     // ========== 切片11: formatPayload - 对象 → JSON.stringify 后截断 200 字符 ==========
 
     it('format_payload_object_returns_json', 0, () => {
-      const payload = { foo: 'bar', num: 42 };
+      const payload: Record<string, Object> = { 'foo': 'bar', 'num': 42 };
       const result = AgentTraceViewHelper.formatPayload(payload);
       expect(result.startsWith('{')).assertTrue();
       expect(result.indexOf('"foo"')).assertEqual(1);

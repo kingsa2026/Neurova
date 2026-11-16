@@ -1,6 +1,6 @@
 // LayoutManager 单元测试 - TDD 垂直切片
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { LayoutManager, Breakpoint } from '../../../../main/ets/libs/layout/LayoutManager';
+import { LayoutManager, Breakpoint, SafeAreaInsets } from '../../../main/ets/libs/layout/LayoutManager';
 
 export default function layoutManagerTest() {
   describe('LayoutManager', () => {
@@ -85,7 +85,7 @@ export default function layoutManagerTest() {
     // ========== 行为 4: 安全区内边距 ==========
 
     it('setSafeAreaInsets_then_get_returns_same', 0, () => {
-      const insets = { top: 44, bottom: 34, left: 0, right: 0 };
+      const insets: SafeAreaInsets = { top: 44, bottom: 34, left: 0, right: 0 };
       lm.setSafeAreaInsets(insets);
       const got = lm.getSafeAreaInsets();
       expect(got.top).assertEqual(44);

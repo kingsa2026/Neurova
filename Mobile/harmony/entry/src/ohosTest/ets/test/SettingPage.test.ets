@@ -8,8 +8,8 @@
 //       覆盖页面渲染与数据流所需的全部纯函数。视图模型刻意设计为无 UI 依赖的纯函数，
 //       返回新数组而非原地修改，便于不可变状态更新与测试。
 import { describe, it, expect } from '@ohos/hypium';
-import { SettingViewHelper } from '../../../../main/ets/pages/SettingPage';
-import { SettingGroup, SettingItem } from '../../../../main/ets/libs/types';
+import { SettingViewHelper } from '../../../main/ets/pages/SettingPage';
+import { SettingGroup, SettingItem } from '../../../main/ets/libs/types';
 
 export default function settingPageTest() {
   describe('SettingPage', () => {
@@ -24,7 +24,7 @@ export default function settingPageTest() {
         },
       ];
       const item = SettingViewHelper.findItem(groups, 'language');
-      expect(item).assertNotNull();
+      expect(item !== undefined).assertTrue();
       expect(item!.key).assertEqual('language');
     });
 
@@ -139,10 +139,10 @@ export default function settingPageTest() {
     it('build_default_groups_appearance_has_theme_select', 0, () => {
       const groups = SettingViewHelper.buildDefaultGroups();
       const appearance = groups.find((g) => g.key === 'appearance');
-      expect(appearance).assertNotNull();
+      expect(appearance !== undefined).assertTrue();
       // appearance 分组必须包含 theme select 项（light/dark/auto 三选项）
       const theme = appearance!.items.find((it) => it.key === 'theme');
-      expect(theme).assertNotNull();
+      expect(theme !== undefined).assertTrue();
       expect(theme!.type).assertEqual('select');
       expect(theme!.group).assertEqual('appearance');
       expect(theme!.options!.length).assertEqual(3);
@@ -157,10 +157,10 @@ export default function settingPageTest() {
     it('build_default_groups_privacy_has_logout_action', 0, () => {
       const groups = SettingViewHelper.buildDefaultGroups();
       const privacy = groups.find((g) => g.key === 'privacy');
-      expect(privacy).assertNotNull();
+      expect(privacy !== undefined).assertTrue();
       // privacy 分组必须包含 logout action 项
       const logout = privacy!.items.find((it) => it.key === 'logout');
-      expect(logout).assertNotNull();
+      expect(logout !== undefined).assertTrue();
       expect(logout!.type).assertEqual('action');
       expect(logout!.group).assertEqual('privacy');
       expect(logout!.label).assertEqual('退出登录');

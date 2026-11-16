@@ -1,6 +1,9 @@
 // EventBus 单元测试 - TDD 垂直切片
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { EventBus } from '../../../../main/ets/libs/bus/EventBus';
+import { EventBus } from '../../../main/ets/libs/bus/EventBus';
+
+/** emit 无业务数据时的占位负载（emit 契约为 Object，不接受 null） */
+const NO_PAYLOAD: Record<string, Object> = {};
 
 export default function eventBusTest() {
   describe('EventBus', () => {
@@ -22,7 +25,8 @@ export default function eventBusTest() {
     it('on_emit_invokes_handler_with_data', 0, () => {
       let received: Object | null = null;
       bus.on('test:event', (data) => { received = data; });
-      bus.emit('test:event', { value: 42 });
+      const payload: Record<string, Object> = { 'value': 42 };
+      bus.emit('test:event', payload);
       expect(received).assertEqual({ value: 42 });
     });
 
@@ -30,7 +34,7 @@ export default function eventBusTest() {
       let count = 0;
       bus.on('test:event', () => { count++; });
       bus.on('test:event', () => { count++; });
-      bus.emit('test:event', null);
+      bus.emit('test:event', NO_PAYLOAD);
       expect(count).assertEqual(2);
     });
 
@@ -41,7 +45,7 @@ export default function eventBusTest() {
       const handler = () => { called = true; };
       bus.on('test:event', handler);
       bus.off('test:event', handler);
-      bus.emit('test:event', null);
+      bus.emit('test:event', NO_PAYLOAD);
       expect(called).assertFalse();
     });
 
@@ -53,7 +57,7 @@ export default function eventBusTest() {
       bus.on('test:event', h1);
       bus.on('test:event', h2);
       bus.off('test:event', h1);
-      bus.emit('test:event', null);
+      bus.emit('test:event', NO_PAYLOAD);
       expect(called1).assertFalse();
       expect(called2).assertTrue();
     });
@@ -63,8 +67,8 @@ export default function eventBusTest() {
     it('once_invokes_handler_only_once', 0, () => {
       let count = 0;
       bus.once('test:event', () => { count++; });
-      bus.emit('test:event', null);
-      bus.emit('test:event', null);
+      bus.emit('test:event', NO_PAYLOAD);
+      bus.emit('test:event', NO_PAYLOAD);
       expect(count).assertEqual(1);
     });
 
@@ -72,7 +76,8 @@ export default function eventBusTest() {
 
     it('emit_no_subscribers_does_not_throw', 0, () => {
       // 无订阅者时 emit 应安全返回
-      bus.emit('unsubscribed:event', { data: 'test' });
+      const payload: Record<string, Object> = { 'data': 'test' };
+      bus.emit('unsubscribed:event', payload);
       expect(true).assertTrue();
     });
 
@@ -83,7 +88,7 @@ export default function eventBusTest() {
       bus.on('test:event', () => { count++; });
       bus.on('test:event', () => { count++; });
       bus.clear('test:event');
-      bus.emit('test:event', null);
+      bus.emit('test:event', NO_PAYLOAD);
       expect(count).assertEqual(0);
     });
 
@@ -94,8 +99,8 @@ export default function eventBusTest() {
       bus.on('event:a', () => { count++; });
       bus.on('event:b', () => { count++; });
       bus.clearAll();
-      bus.emit('event:a', null);
-      bus.emit('event:b', null);
+      bus.emit('event:a', NO_PAYLOAD);
+      bus.emit('event:b', NO_PAYLOAD);
       expect(count).assertEqual(0);
     });
 
@@ -105,7 +110,7 @@ export default function eventBusTest() {
       let called = false;
       bus.on('test:event', () => { throw new Error('handler error'); });
       bus.on('test:event', () => { called = true; });
-      bus.emit('test:event', null);
+      bus.emit('test:event', NO_PAYLOAD);
       expect(called).assertTrue();
     });
 

@@ -7,8 +7,8 @@
 //       formatMemberCount / formatDate / truncateDescription 的核心视图逻辑。
 // 严格规则：一个测试 → 一个实现 → 循环（垂直切片），禁止一次性写完所有测试再写实现。
 import { describe, it, expect } from '@ohos/hypium';
-import { ProjectViewHelper } from '../../../../main/ets/pages/ProjectPage';
-import { ProjectStatus } from '../../../../main/ets/libs/types';
+import { ProjectViewHelper } from '../../../main/ets/pages/ProjectPage';
+import { ProjectStatus } from '../../../main/ets/libs/types';
 
 export default function projectPageTest() {
   describe('ProjectPage', () => {

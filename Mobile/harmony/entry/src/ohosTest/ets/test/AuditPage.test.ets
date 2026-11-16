@@ -6,7 +6,7 @@
 //       因此此处针对从 AuditPage.ets 导出的 AuditViewHelper 静态方法进行验证。
 // 严格规则：一个测试 → 一个实现 → 循环（垂直切片），禁止一次性写完所有测试再写实现。
 import { describe, it, expect } from '@ohos/hypium';
-import { AuditViewHelper } from '../../../../main/ets/pages/AuditPage';
+import { AuditViewHelper } from '../../../main/ets/pages/AuditPage';
 
 export default function auditPageTest() {
   describe('AuditPage', () => {
@@ -169,7 +169,7 @@ export default function auditPageTest() {
     // ========== 切片26: formatMetadata - 非空 → JSON 字符串 ==========
 
     it('format_metadata_with_data_returns_json', 0, () => {
-      const meta = { key: 'value', count: 42 };
+      const meta: Record<string, Object> = { 'key': 'value', 'count': 42 };
       const result = AuditViewHelper.formatMetadata(meta);
       expect(result).assertEqual(JSON.stringify(meta));
     });
