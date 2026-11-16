@@ -5,8 +5,20 @@
 包含递归自我进化（RSI）核心机制。
 """
 
+from typing import Dict
+
 from neurova.core.logger import get_logger
 _logger = get_logger(__name__)
+
+# 审计 §3.4-12：此前各子模块导入失败只落一行 warning，"哪半个包活着"只能靠猜。
+# 现把失败登记在案，健康/诊断面可一眼读出降级范围。
+_LOAD_FAILURES: Dict[str, str] = {}
+
+
+def moduleLoadFailures() -> Dict[str, str]:
+    """子模块加载失败清单（模块名 -> 异常摘要）；空 dict = 全部子模块在位。"""
+    return dict(_LOAD_FAILURES)
+
 
 # 核心进化模块
 try:
@@ -22,6 +34,7 @@ try:
 except Exception as _e:
     # 修复 P0-9 (H2): ImportError → Exception，覆盖运行时错误；debug → warning
     _logger.warning("closed_loop 模块加载失败: %s", _e)
+    _LOAD_FAILURES["closed_loop"] = str(_e)
     EvolutionOrchestrator = None
     ToolLifecycleManager = None
     AdaptiveToolWeights = None
@@ -38,6 +51,7 @@ try:
     from .nl_synthesizer import NLToolSynthesizer
 except Exception as _e:
     _logger.warning("nl_synthesizer 模块加载失败: %s", _e)
+    _LOAD_FAILURES["nl_synthesizer"] = str(_e)
     NLToolSynthesizer = None
 
 # 事件驱动闭环（event_driven.py 已删除：零调用方死代码，2026-08 清理）
@@ -52,6 +66,7 @@ try:
 except Exception as _e:
     # 修复 P0-9 (H2): ImportError → Exception
     _logger.warning("rsi 模块加载失败: %s", _e)
+    _LOAD_FAILURES["rsi"] = str(_e)
     RecursiveRatchetPruner = None
     EnhancedRatchetPruner = None
     Candidate = None
@@ -64,6 +79,7 @@ try:
 except Exception as _e:
     # 修复 P0-9 (H2): ImportError → Exception
     _logger.warning("skill_encapsulation 模块加载失败: %s", _e)
+    _LOAD_FAILURES["skill_encapsulation"] = str(_e)
     AutoSkillBuilder = None
 
 __all__ = [
@@ -83,4 +99,6 @@ __all__ = [
     "Candidate",
     # 技能自动构建（修复 P0-8/P0-9）
     "AutoSkillBuilder",
+    # 降级读数（审计 §3.4-12）
+    "moduleLoadFailures",
 ]

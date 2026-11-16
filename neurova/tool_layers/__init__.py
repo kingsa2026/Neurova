@@ -107,7 +107,15 @@ if "ToolOrchestrator" not in dir() or ToolOrchestrator is None:  # type: ignore[
             return list(self._tools.keys())
 
         async def execute(self, task: str, context: Optional[Dict] = None) -> Dict[str, Any]:
-            return {"success": True, "result": f"Executed: {task}"}
+            # 审计 §3.5-3：这个兜底类只在真实 tool_orchestrator 导入失败时生效，
+            # 而它是 agent_core.py:903 的生产实例化来源——恒回 success=True 意味着
+            # 一旦中招全线工具调用都假成功。如实报失败并点名根因。
+            return {
+                "success": False,
+                "error": "ToolOrchestrator 真实实现未加载（neurova.tool_layers.tool_orchestrator "
+                         "导入失败），任务未执行",
+                "result": None,
+            }
 
 
 if "ToolMarketplace" not in dir() or ToolMarketplace is None:  # type: ignore[possibly-undefined]

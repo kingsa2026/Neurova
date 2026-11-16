@@ -1845,7 +1845,9 @@ class ScraplingBackend(BrowserBackend):
         try:
             if not self._fetcher:
                 raise RuntimeError(BROWSER_NOT_STARTED_ERROR)
-            self._current_page = self._fetcher.get(url)
+            # 审计 §3.5-4：Scrapling Fetcher.get 是同步 HTTP，最长可堵满超时——
+            # 下沉线程执行，避免卡死整个事件循环。
+            self._current_page = await asyncio.to_thread(self._fetcher.get, url)
             return BrowserResult(
                 success=True,
                 url=url,

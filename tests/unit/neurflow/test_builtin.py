@@ -349,12 +349,13 @@ class TestInputNodeExecutors:
 
     @pytest.mark.asyncio
     async def test_exec_human_input(self):
-        """人工输入节点应等待输入"""
+        """人工输入等待机制未实现 → 如实 failed（审计 §3.4-1：原假 timeout 把
+        人工审核静默跳过）。"""
         config = {"prompt": "请输入", "timeout": 1}
         ctx = {}
         result = await exec_human_input(config, ctx)
-        # 在测试环境中，应返回超时或模拟输入
-        assert result["status"] in ["success", "timeout"]
+        assert result["status"] == "failed"
+        assert "not_implemented" in str(result.get("error"))
 
     @pytest.mark.asyncio
     async def test_exec_approval(self):

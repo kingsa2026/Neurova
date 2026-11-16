@@ -246,11 +246,22 @@ class TestEncryptDecrypt:
         decrypted = model._decrypt_secret(encrypted)
         assert decrypted == secret
 
-    def test_encrypt_is_deterministic(self, model):
-        """base64 编码是确定性的，相同输入产生相同输出"""
+    def test_encrypt_is_randomized(self, model):
+        """Fernet 加密带随机 IV：相同输入产生不同令牌，但都可解回原文。
+
+        （旧 Base64"加密"是确定性的——可逆编码，审计 §3.5-7 已退役；
+        确定性不是要保留的契约，随机化才是。）
+        """
         s1 = model._encrypt_secret("same")
         s2 = model._encrypt_secret("same")
-        assert s1 == s2
+        assert model._decrypt_secret(s1) == "same"
+        assert model._decrypt_secret(s2) == "same"
+        try:
+            import cryptography  # noqa: F401
+
+            assert s1 != s2, "Fernet 令牌应带随机 IV（同文异码）"
+        except ImportError:
+            pass  # cryptography 缺失时退化 Base64（确定性编码），不在此钉死
 
     def test_encrypt_masks_original(self, model):
         """加密结果不包含原始字符串"""

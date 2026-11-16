@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from neurova.api.auth import get_current_user_or_service
 from neurova.core.logger import get_logger
 from neurova.knowledge.document_pipeline import resolveSourceDates
-from neurova.knowledge.url_guard import validate_public_http_url
+from neurova.security.url_guard import validate_public_http_url
 from neurova.api.endpoints.knowledge_common import get_repository
 
 logger = get_logger(__name__)

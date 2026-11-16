@@ -187,23 +187,16 @@ class TestAgentSkillManagerSignatureFixed:
             assert "markets=" not in source, "search_all_markets 无 markets 参数"
             assert "limit_per_market=" not in source, "search_all_markets 无 limit_per_market 参数（应为 limit）"
 
-    def test_acquire_skill_no_phantom_method(self):
-        """acquire_skill 不应调用不存在的 import_from_market 方法。"""
+    def test_acquire_skill_retired(self):
+        """acquire_skill 生产零调用，已随审计 §3.4-9 方法级退役——钉住不复活。
+
+        （原 test_acquire_skill_no_phantom_method / test_acquire_skill_uses_real_install
+        以 inspect 源码断言引用——那正是审计指认的"仅测试引用"死码形态。）
+        """
         from neurova.skills.agent_skill_manager import AgentSkillManager
 
-        source = inspect.getsource(AgentSkillManager.acquire_skill)
-        assert "import_from_market" not in source, (
-            "import_from_market 是幻影方法（全项目无定义），应改用真实 install_skill 或 SkillHubClient.install_skill"
-        )
-
-    def test_acquire_skill_uses_real_install(self):
-        """acquire_skill 应调用真实存在的安装方法。"""
-        from neurova.skills.agent_skill_manager import AgentSkillManager
-
-        source = inspect.getsource(AgentSkillManager.acquire_skill)
-        # 应调用 install_skill 或 SkillHubClient 的 install 方法
-        assert "install_skill" in source or "importer.install" in source, (
-            "acquire_skill 应调用真实存在的安装方法（install_skill），而非幻影 import_from_market"
+        assert not hasattr(AgentSkillManager, "acquire_skill"), (
+            "acquire_skill 已退役（§3.4-9），不得重新出现"
         )
 
 

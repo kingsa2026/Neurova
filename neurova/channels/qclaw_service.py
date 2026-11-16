@@ -55,6 +55,9 @@ class QClawService:
         """
         self.api_base = api_base or QCLAW_API_BASE
         self.token_cache = {}  # 缓存 accessToken，按 appId 索引
+        # 审计 §3.5-7：不传 encryption_key 时模型内部自动解析默认密钥
+        # （NEUROVA_QCLAW_ENCRYPTION_KEY > 数据根 .qclaw_secret_key），
+        # app_secret 落库走 Fernet 加密，Base64 只是 cryptography 缺失时的降级。
         self.binding_model = QClawBindingModel()
 
         logger.info("QClaw 服务已初始化，API地址: %s", self.api_base)

@@ -76,12 +76,20 @@ def upsert_token(user_id: str, platform: str, push_token: str, device_id: str) -
             conn.close()
 
 
-def remove_token(device_id: str) -> bool:
-    """注销设备令牌（登出/解绑）。返回是否确有删除。"""
+def remove_token_for_user(device_id: str, user_id: str) -> bool:
+    """注销**本人**设备令牌（登出/解绑）。返回是否确有删除。
+
+    审计 §3.1-9：删除必须绑定属主——只凭 device_id 任何登录用户都能注销
+    他人设备的推送（收到推送的设备被静默解绑）。属主不匹配与设备不存在
+    同样返回 False，调用方据此回 404，不区分两种情形（防枚举）。
+    """
     with _LOCK:
         conn = _connect()
         try:
-            cur = conn.execute("DELETE FROM mobile_push_tokens WHERE device_id = ?", (device_id,))
+            cur = conn.execute(
+                "DELETE FROM mobile_push_tokens WHERE device_id = ? AND user_id = ?",
+                (device_id, user_id),
+            )
             conn.commit()
             return cur.rowcount > 0
         finally:

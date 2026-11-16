@@ -41,27 +41,10 @@ from neurova.auth.user_model import UserModel
 from neurova.auth.verification_code import VerificationCodeModel, VerificationType
 from neurova.core.lazy_singleton import lazySingleton
 
-# Token 黑名单（生产环境应使用 Redis 或数据库）
-# BUG AUDIT S-21: 原 set 只增不减、无界增长 → 改为 token -> 过期时间戳 dict，
-# token 本身过期后黑名单项即失去意义，惰性清理过期项。
-_token_blacklist: Dict[str, float] = {}
-_TOKEN_BLACKLIST_TTL_FALLBACK = 7 * 24 * 3600  # decode 失败时的兜底保留期
-
-
-def _blacklist_token_local(token: str) -> None:
-    """登记黑名单项，保留期与 token 自身 exp 对齐（无 exp 时用兜底 TTL）。"""
-    payload = decode_token(token)
-    exp = payload.get("exp") if payload else None
-    _token_blacklist[token] = (
-        float(exp) if exp else time.time() + _TOKEN_BLACKLIST_TTL_FALLBACK
-    )
-
-
-def _purge_expired_blacklist() -> None:
-    now = time.time()
-    expired = [t for t, exp in _token_blacklist.items() if exp <= now]
-    for t in expired:
-        _token_blacklist.pop(t, None)
+# Token 黑名单：全局单源在 neurova/api/auth.py（SQLite 持久化，审计 §3.1-13）。
+# 本模块原有的第二份进程内存黑名单（_token_blacklist/_blacklist_token_local/
+# _purge_expired_blacklist）已并回单源——两份并行时"本模块查到、全局查不到"
+# 的分歧正是登出语义漂移的温床（教义第 6 条）。
 
 # 忘记密码/取回密码：最高权重恢复密码（P0-1，审计 2026-11-16 拍板：构建期环境注入）。
 # 双条件缺一不可——1) username 是系统内角色为 admin 的管理员账号；
@@ -468,11 +451,10 @@ def _alertRecoveryHit(username: str, ip_address: str) -> None:
 
 
 def is_token_blacklisted(token: str) -> bool:
-    """检查token是否在黑名单中（含全局单源黑名单）。"""
+    """检查token是否在黑名单中（全局单源，SQLite 持久化）。"""
     from neurova.api.auth import is_token_blacklisted_global
 
-    _purge_expired_blacklist()
-    return token in _token_blacklist or is_token_blacklisted_global(token)
+    return is_token_blacklisted_global(token)
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -848,10 +830,9 @@ async def logout(request: Request):
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
 
-        # 将 token 加入黑名单（双源：本模块 set + api/auth 全局单源，
-        # verify_access_token 只查后者——否则登出对受保护端点无效）
+        # 将 token 加入黑名单（全局单源：api/auth 的 SQLite 黑名单，
+        # verify_access_token 与 refresh 均查同一份——登出对全部受保护端点生效）
         if token:
-            _blacklist_token_local(token)
             try:
                 from neurova.api.auth import blacklist_token
 

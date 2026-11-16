@@ -15,10 +15,14 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from neurova.core.logger import get_logger
+
 # 运行层符号单一事实源：注册表与 agent 热路径读的是 core 那份（data 形状）。
 # executor 层的 SkillResult(output=...) 只服务 executor 内部，两者在桥接处显式转换。
 from neurova.skill_system.core import Skill as _RuntimeSkill
 from neurova.skill_system.core import SkillResult as _SkillResult
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -98,7 +102,10 @@ class ExecutorBackedSkill(_RuntimeSkill):
             from neurova.skills.builtin.schemas import get_builtin_skill_parameters
 
             return get_builtin_skill_parameters(self.name)
-        except Exception:
+        except Exception as e:
+            # 审计 §3.4-7：入参 schema 解析失败不再静默回空参——空参会让 LLM
+            # "不知道传什么"而不调用工具，故障必须可见。
+            logger.warning("技能 %s 参数 schema 解析失败，退化为空参: %s", self.name, e)
             return {}
 
     async def execute(self, params: Dict[str, Any], context: Optional[Dict] = None):

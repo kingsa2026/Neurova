@@ -26,12 +26,16 @@ class _FakeTransport:
         self.script = list(script)
         self.requests = []
 
-    async def post(self, url, data=None, headers=None):
-        self.requests.append({"url": url, "data": data, "headers": headers})
+    async def post(self, url, data=None, json=None, headers=None):
+        # json= 与 data= 分开记：token 端点走表单（data=），DCR 注册走 JSON（json=）。
+        # 形参名 json 遮蔽模块级 json —— 函数内序列化改用 _json。
+        import json as _json
+
+        self.requests.append({"url": url, "data": data, "json": json, "headers": headers})
         status, payload = self.script.pop(0)
         resp = type("R", (), {})()
         resp.status_code = status
-        resp.text = json.dumps(payload)
+        resp.text = _json.dumps(payload)
         resp.json = lambda p=payload: p
         return resp
 

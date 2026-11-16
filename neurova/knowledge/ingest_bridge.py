@@ -293,7 +293,7 @@ class KnowledgeIngestBridge:
 
     async def _fetchUrl(self, url: str) -> bytes:
         from neurova.api.endpoints.knowledge_ingestion import _fetch_url
-        from neurova.knowledge.url_guard import validate_public_http_url
+        from neurova.security.url_guard import validate_public_http_url
 
         if not validate_public_http_url(url):
             raise DocumentParseError("unsafe_url")

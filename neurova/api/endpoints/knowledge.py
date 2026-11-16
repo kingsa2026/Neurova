@@ -204,7 +204,7 @@ from neurova.api.endpoints.knowledge_common import (  # noqa: E402,F401
     _resolve_runtime_agents,
     _try_extract_to_graph,
 )
-from neurova.knowledge.url_guard import (
+from neurova.security.url_guard import (
     validate_public_http_url as _validate_import_url,  # noqa: E402,F401 兼容旧名
 )
 from neurova.api.endpoints.knowledge_remote import (  # noqa: E402,F401

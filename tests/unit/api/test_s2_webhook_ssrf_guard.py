@@ -1,7 +1,7 @@
 """S2 安全批：webhook 三入口 SSRF 闸（审计 2026-11-16 P1-5）。
 
 webhook.url 由 create/update 任意指定，test 端点会向它发起服务端 POST——
-不过 url_guard（`neurova/knowledge/url_guard.py` 单源）即构成内网探测预言机。
+不过 url_guard（`neurova/security/url_guard.py` 单源）即构成内网探测预言机。
 三处入口（create / update / test）必须统一过同一份校验。
 """
 

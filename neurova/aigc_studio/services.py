@@ -441,20 +441,23 @@ async def generate_shot_images(store, pid: str, eid: str,
                                provider: str = "openai", model: str = "",
                                provider_id: str = "",
                                shot_ids: Optional[List[str]] = None,
-                               run_id: str = "") -> Dict[str, int]:
+                               run_id: str = "",
+                               user_id: str = "", is_admin: bool = False) -> Dict[str, int]:
     """逐镜首帧（跨集资产连续性注入 + 风格/画幅项目锁；单镜失败诚实标注不中断）。
 
     提示词构成：本镜 `image_prompt` → 场景定妆提示词/灯光 → 氛围 → 道具描述 →
     项目风格 + 画幅（`resolveShotContinuity` 给前三项）。
     shot_ids：仅重跑指定镜头（Phase03 单镜重试）；None = 整集。
     provider_id：用户选定具体模型的服务商（协议 hint 按其实测 base_url 推导）。
+    user_id/is_admin：真实请求者身份（审计 §3.5-12：服务层此前硬编码
+    ("admin", is_admin=True) 旁路取项目，等于架空 HTTP 面的属主校验）。
     """
     from neurova.llm.generators.protocols import generate_image
     from neurova.llm.generators.runtime import (
         GENERATION_OUTPUT_DIR, GenerationCredsError, persist_media,
     )
 
-    project = store.get_project(pid, "admin", is_admin=True) or {}
+    project = store.get_project(pid, user_id, is_admin=is_admin) or {}
     if not model and not provider_id:
         model, provider_id = _auto_route("image")
     fallback = _PROVIDER_HINTS.get(str(provider or "").lower(), "openai_compat")
@@ -635,16 +638,18 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
 async def generate_asset_images(store, pid: str, provider: str = "ark",
                                 ids: Optional[List[str]] = None,
                                 model: str = "", provider_id: str = "",
-                                run_id: str = "") -> Dict[str, Any]:
+                                run_id: str = "",
+                                user_id: str = "", is_admin: bool = False) -> Dict[str, Any]:
     """资产定妆图（seed 的单一事实源是库里的 `seed_value`：读回复用，缺省才派生并落库；
     单资产失败可重试）。
 
     模型口径与 Phase03 首帧一致：显式 model+provider_id 或 auto 能力路由。
+    user_id/is_admin：真实请求者身份（审计 §3.5-12，同 generate_shot_images）。
     """
     from neurova.llm.generators.protocols import generate_image
     from neurova.llm.generators.runtime import persist_media
 
-    project = store.get_project(pid, "admin", is_admin=True) or {}
+    project = store.get_project(pid, user_id, is_admin=is_admin) or {}
     if not model and not provider_id:
         model, provider_id = _auto_route("image")
     fallback = _PROVIDER_HINTS.get(str(provider or "").lower(), "openai_compat")

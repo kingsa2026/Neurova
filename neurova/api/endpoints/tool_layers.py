@@ -9,9 +9,11 @@ MCP Client、Tool Router 管理接口:
 - GET    /v1/tool-layers/mcp-servers/{server_id}/tools  MCP 工具清单
 - GET    /v1/tool-layers/tools                     所有可用工具
 - POST   /v1/tool-layers/tools/execute             执行工具调用
-- POST   /v1/tool-layers/tools/share               共享工具
-- GET    /v1/tool-layers/tools/shared-with-me      共享给我的工具
 - GET    /v1/tool-layers/tools/public               公共工具库
+
+（/tools/share 与 /tools/shared-with-me 已退役，审计 §3.1-10：写入面落进
+`_shared_tools` 后全仓零读者、shared-with-me 恒回空——纯死功能面，且可被
+任意登录用户无限写入进程内存；按修复教义第 7 条退役。）
 """
 
 from neurova.core.logger import get_logger
@@ -103,11 +105,6 @@ class ToolExecuteRequest(BaseModel):
     timeout: int = Field(default=30, description="超时时间(秒)")
 
 
-class ShareToolRequest(BaseModel):
-    tool_id: str = Field(..., description="工具 ID")
-    target_user_id: str = Field(..., description="目标用户 ID")
-
-
 #: 外部 MCP server 提供的工具在对外契约里的那一个来源标签；注册面带的 `tags=["mcp", server_id]`
 #: 用同一个值解释（`mcp_client._sync_tools_to_engine`），别处再写字面量就是第二个事实源。
 MCP_SOURCE = "mcp"
@@ -133,7 +130,6 @@ def _ownershipFromRegistration(tool_def) -> tuple:
 
 
 _mcp_servers: Dict[str, Dict[str, Any]] = {}
-_shared_tools: Dict[str, Dict[str, Any]] = {}
 
 
 def _get_client_for(server_id: str):
@@ -622,23 +618,6 @@ async def execute_tool(
         "error": f"工具 '{body.tool_name}' 执行失败：未找到可用执行路径",
         "data": {"execution_time": time.time() - start},
     }
-
-
-@router.post("/tools/share")
-async def share_tool(body: ShareToolRequest):
-    """共享工具"""
-    _shared_tools[body.tool_id] = {
-        "tool_id": body.tool_id,
-        "shared_with": body.target_user_id,
-        "shared_at": time.time(),
-    }
-    return {"code": 0, "message": "Tool shared"}
-
-
-@router.get("/tools/shared-with-me", response_model=List[ToolInfo])
-async def list_tools_shared_with_me():
-    """共享给我的工具"""
-    return []  # 实际应根据用户ID过滤
 
 
 @router.get("/tools/public", response_model=List[ToolInfo])

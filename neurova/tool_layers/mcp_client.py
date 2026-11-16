@@ -556,7 +556,12 @@ class MCPToolClient:
         except PermissionError:
             raise
         except Exception as e:
-            logger.warning("Firewall check failed for tool %s: %s", tool_name, e)
+            # 审计 §3.5-11：防火墙自身故障（内部 bug/存储异常）原样放行等于
+            # fail-open——内部故障也会变成"允许执行"。收窄为 fail-closed：
+            # 判定不了就拒绝，故障随异常链上抛可查。
+            raise PermissionError(
+                f"Firewall check failed for tool {tool_name} (fail-closed): {e}"
+            ) from e
 
     # ── ToolEngine 同步 ──
 

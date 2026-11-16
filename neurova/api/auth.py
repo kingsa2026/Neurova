@@ -12,6 +12,8 @@ Neurova JWT 认证模块
 
 import datetime
 from neurova.core import config
+from neurova.core.data_root import dataPath
+from neurova.core.db_migration import register_migration
 from neurova.core.logger import get_logger
 import secrets
 import threading
@@ -356,25 +358,88 @@ def verify_token(token: str, token_type: str = "access") -> Optional[Dict[str, A
 
 
 # ── 登出黑名单（全局单源；endpoints/auth.py logout 注册，verify 统一校验）──
-_token_blacklist: Dict[str, float] = {}  # token -> 过期时间戳（用于清理）
-_BLACKLIST_MAX = 20000
+# 审计 §3.1-13 根修：原进程内存 dict 在多 worker/重启下全部失效，且超容量时
+# 整表 clear 会把**未过期**的已撤销 token 一起放行（撤销即失效的承诺被打破）。
+# 现落 SQLite（数据根下 auth_blacklist.db，多 worker 共享同一库文件），容量由
+# "写入时惰性清除已过期行"自然约束——表里只存尚未过期的被撤销 token。
+_BLACKLIST_DB_PATH = dataPath("auth_blacklist.db")
+
+_BLACKLIST_SCHEMA = """
+CREATE TABLE IF NOT EXISTS revoked_tokens (
+    token TEXT PRIMARY KEY,
+    exp REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_revoked_tokens_exp ON revoked_tokens(exp);
+"""
+
+register_migration(1, _BLACKLIST_SCHEMA, domain="auth_blacklist")
+
+# decode 失败（非 JWT 的 Bearer 串被登出）时的兜底保留期
+_BLACKLIST_TTL_FALLBACK_SECONDS = 7 * 24 * 3600
+
+_blacklist_lock = threading.RLock()
+
+
+def _blacklist_conn():
+    import sqlite3
+
+    conn = sqlite3.connect(_BLACKLIST_DB_PATH)
+    try:
+        from neurova.core.db_migration import migrate as apply_migrations
+
+        apply_migrations(conn, domain="auth_blacklist")
+    except Exception:
+        conn.close()
+        raise
+    return conn
 
 
 def blacklist_token(token: str, exp: float = 0.0) -> None:
-    """登出时注册 token；超过容量上限时清理已过期条目防泄漏。"""
+    """登出时登记 token（持久化单源）。
+
+    exp 缺省时从 token 自身解码（原实现存 0.0 导致该条永不清理——同条审计）；
+    仍解不出（非 JWT 串）按兜底 TTL 保留。写入顺带清除已过期行，容量有界。
+    """
     import time as _time
 
-    if len(_token_blacklist) >= _BLACKLIST_MAX:
-        now = _time.time()
-        for k in [k for k, v in _token_blacklist.items() if v and v <= now]:
-            _token_blacklist.pop(k, None)
-        if len(_token_blacklist) >= _BLACKLIST_MAX:
-            _token_blacklist.clear()
-    _token_blacklist[token] = exp
+    if not token:
+        return
+    if not exp:
+        payload = decode_token(token)
+        exp = float(payload.get("exp") or 0) if payload else 0.0
+    if not exp:
+        exp = _time.time() + _BLACKLIST_TTL_FALLBACK_SECONDS
+    now = _time.time()
+    with _blacklist_lock:
+        conn = _blacklist_conn()
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO revoked_tokens (token, exp) VALUES (?, ?)",
+                (token, float(exp)),
+            )
+            conn.execute("DELETE FROM revoked_tokens WHERE exp <= ?", (now,))
+            conn.commit()
+        finally:
+            conn.close()
 
 
 def is_token_blacklisted_global(token: str) -> bool:
-    return token in _token_blacklist
+    """token 是否已撤销。查询故障按"未登记"放行（fail-open 与原内存实现
+    的失效语义一致——不因持久层故障扩大拒绝面）；登出写入失败仍由调用方
+    诚实报错。"""
+    try:
+        with _blacklist_lock:
+            conn = _blacklist_conn()
+            try:
+                row = conn.execute(
+                    "SELECT 1 FROM revoked_tokens WHERE token = ?", (token,)
+                ).fetchone()
+                return row is not None
+            finally:
+                conn.close()
+    except Exception as exc:  # noqa: BLE001 - 持久层不可用不扩大拒绝面
+        logger.warning("登出黑名单查询失败，按未登记处理: %s", exc)
+        return False
 
 
 def verify_access_token(token: str) -> Optional[Dict[str, Any]]:

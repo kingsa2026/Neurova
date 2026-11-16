@@ -37,6 +37,32 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         return response
 
 
+#: 访问日志脱敏的参数名片段（审计 §3.1-19：?access_token= 类令牌不落日志）。
+#: 命中任一片段（子串匹配，覆盖 access_token/refresh_token/api_key 等）即掩码。
+_SENSITIVE_QUERY_FRAGMENTS = ("token", "secret", "password", "credential", "authorization", "signature", "key")
+
+
+def redactQuery(query_string: str) -> str:
+    """访问日志用的 query 脱敏：敏感参数只记"名字=<masked:N>"（N=原值长度），
+    非敏感参数原样保留，排障可读性不降。"""
+    if not query_string:
+        return ""
+    import urllib.parse as _up
+
+    pairs = []
+    for part in query_string.split("&"):
+        key, _, value = part.partition("=")
+        try:
+            name = _up.unquote_plus(key).lower()
+        except Exception:  # noqa: BLE001 - 解不动就按原名判
+            name = key.lower()
+        if any(fragment in name for fragment in _SENSITIVE_QUERY_FRAGMENTS):
+            pairs.append(f"{key}=<masked:{len(value)}>")
+        else:
+            pairs.append(part)
+    return "&".join(pairs)
+
+
 class LoggingMiddleware(BaseHTTPMiddleware):
     """日志中间件 - 记录请求和响应信息"""
 
@@ -48,14 +74,14 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         start_time = time.time()
         request_id = getattr(request.state, "request_id", "unknown")
 
-        # 记录请求
+        # 记录请求（query 经 redactQuery 脱敏——?access_token= 不落日志）
         logger.info(
             f"[{request_id}] {request.method} {request.url.path}",
             extra={
                 "request_id": request_id,
                 "method": request.method,
                 "path": request.url.path,
-                "query": str(request.query_params),
+                "query": redactQuery(str(request.query_params)),
                 "client": request.client.host if request.client else "unknown",
             },
         )

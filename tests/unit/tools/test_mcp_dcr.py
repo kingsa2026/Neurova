@@ -23,7 +23,7 @@ class _FailingTransport:
     def async_fail(self):
         pass
 
-    async def post(self, url, data=None, headers=None):
+    async def post(self, url, data=None, json=None, headers=None):
         class R:
             status_code = 500
             text = "internal error"
@@ -82,12 +82,12 @@ class TestDCR:
             opener=opener,
         )
         assert token == "ac-dyn"
-        # DCR 请求先于 token 请求
+        # DCR 请求先于 token 请求；注册体是 JSON（RFC 7591），与生产 httpx 分支同形
         dcr_req = transport.requests[0]
         assert dcr_req["url"] == "https://idp.example.com/register"
-        assert dcr_req["data"]["grant_types"] == ["authorization_code", "refresh_token"]
-        assert dcr_req["data"]["token_endpoint_auth_method"] == "none"  # public client
-        assert dcr_req["data"]["redirect_uris"]  # 环回回调地址
+        assert dcr_req["json"]["grant_types"] == ["authorization_code", "refresh_token"]
+        assert dcr_req["json"]["token_endpoint_auth_method"] == "none"  # public client
+        assert dcr_req["json"]["redirect_uris"]  # 环回回调地址
         # token 请求使用 DCR 下发的 client_id
         token_req = transport.requests[1]
         assert token_req["data"]["client_id"] == "dyn-123"

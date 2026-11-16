@@ -35,7 +35,7 @@ from neurova.evolution.rsi.self_improvement_proposer import (
     ProposalStatus,
     ProposalType,
     SelfImprovementProposer,
-    ValidationResult,
+    ProposalValidationResult,
 )
 
 
@@ -512,7 +512,7 @@ class TestRollbackIntegration:
 
 
 class TestApplyResultContract:
-    """测试 ApplyResult / ValidationResult 契约"""
+    """测试 ApplyResult / ProposalValidationResult 契约"""
 
     def test_apply_result_fields(self, tmp_path):
         """测试 ApplyResult 包含必要字段"""
@@ -531,7 +531,7 @@ class TestApplyResultContract:
         assert hasattr(result, "error")
 
     def test_validation_result_fields(self, tmp_path):
-        """测试 ValidationResult 包含必要字段"""
+        """测试 ProposalValidationResult 包含必要字段"""
         proposer = _make_proposer(proposals_dir=tmp_path / "proposals")
         proposal = proposer.propose_skill_manifest("s", "name: s")
         result = proposer.validate_proposal(proposal)

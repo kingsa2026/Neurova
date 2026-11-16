@@ -74,22 +74,6 @@ class TestAgentSkillManager(unittest.TestCase):
         self.assertIn("skills_needed", result)
         self.assertTrue(self.mock_analyzer.analyze_and_acquire.called)
 
-    def test_suggest_skills_for_task(self):
-        """测试推荐技能"""
-        # 模拟 analyzer.suggest_skills 返回结果
-        self.mock_analyzer.suggest_skills.return_value = [
-            {"skill_name": "skill1", "relevance": 0.9},
-            {"skill_name": "skill2", "relevance": 0.8},
-        ]
-
-        # 执行推荐
-        suggestions = asyncio.run(self.manager.suggest_skills_for_task("实现一个计算器"))
-
-        # 验证
-        self.assertEqual(len(suggestions), 2)
-        self.assertEqual(suggestions[0]["skill_name"], "skill1")
-        self.assertTrue(self.mock_analyzer.suggest_skills.called)
-
     def test_search_skill_in_markets(self):
         """测试在市场中搜索技能"""
         # 模拟 searcher.search_all_markets 返回结果
@@ -122,59 +106,12 @@ class TestAgentSkillManager(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.mock_searcher.search_all_markets.assert_called_once_with("calculator", limit=5)
 
-    def test_acquire_skill_success(self):
-        """测试获取技能（成功）"""
-        # 模拟搜索结果
-        self.mock_searcher.search_all_markets.return_value = [
-            SearchResult(skill_name="test/skill1", description="Skill 1", market="github", url="https://example.com/skill1"),
-        ]
-
-        # 模拟安装结果（成功）
-        self.mock_importer.import_from_market.return_value = {
-            "success": True,
-            "install_path": "/path/to/skill1",
-        }
-
-        # 执行获取
-        result = asyncio.run(self.manager.acquire_skill("calculator"))
-
-        # 验证
-        self.assertIsNotNone(result)
-        self.assertTrue(self.mock_searcher.search_all_markets.called)
-        self.assertTrue(self.mock_importer.install_skill.called) if hasattr(self.mock_importer, "install_skill") else None
-
-    def test_acquire_skill_not_found(self):
-        """测试获取技能（未找到）"""
-        # 模拟搜索结果（空）
-        self.mock_searcher.search_all_markets.return_value = []
-
-        # 执行获取
-        result = asyncio.run(self.manager.acquire_skill("nonexistent_skill"))
-
-        # 验证
-        self.assertIsNotNone(result)
-        self.assertTrue(self.mock_searcher.search_all_markets.called)
-        self.assertFalse(self.mock_importer.install_skill.called)
-
-    def test_acquire_skill_install_failed(self):
-        """测试获取技能（安装失败）"""
-        # 模拟搜索结果
-        self.mock_searcher.search_all_markets.return_value = [
-            SearchResult(skill_name="test/skill1", description="Skill 1", market="github", url="https://example.com/skill1"),
-        ]
-
-        # 模拟安装结果（失败）
-        self.mock_importer.import_from_market.return_value = {
-            "success": False,
-            "error": "Installation failed",
-        }
-
-        # 执行获取
-        result = asyncio.run(self.manager.acquire_skill("calculator"))
-
-        # 验证
-        self.assertIsNotNone(result)
-        self.assertTrue(self.mock_importer.install_skill.called) if hasattr(self.mock_importer, "install_skill") else None
+    def test_retired_methods_are_gone(self):
+        """审计 §3.4-9：acquire_skill / suggest_skills_for_task 生产零调用，
+        已方法级退役——不许悄悄复活（复活即回到"测试以 inspect 断言引用"
+        的死码形态）。"""
+        self.assertFalse(hasattr(self.manager, "acquire_skill"))
+        self.assertFalse(hasattr(self.manager, "suggest_skills_for_task"))
 
     def test_get_skill_status(self):
         """测试获取技能状态"""

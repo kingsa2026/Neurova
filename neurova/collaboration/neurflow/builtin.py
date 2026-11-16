@@ -17,6 +17,7 @@ Neurflow 内置节点定义模块 — 垂直切片 9
 import asyncio
 import re
 import threading
+import time
 from contextvars import ContextVar
 
 from neurova.core.logger import get_logger
@@ -706,6 +707,106 @@ BUILTIN_NODES: List[Dict[str, Any]] = [
         "outputs": [{"id": "output", "label": "输出"}],
         "source": "builtin",
     },
+    # ── 以下 7 个类型是 document/data_analysis/web_maintenance 三个内置模板
+    #    引用的执行节点（审计 §3.4-4：此前全包零注册，模板一实例化必"未知节点类型"）──
+    {
+        "type": "builtin:doc-read",
+        "label": "文档读取",
+        "icon": "📖",
+        "category": "input",
+        "description": "读取文本类文档（txt/md/html/csv/json/log/代码）；DOCX/PDF 等二进制格式未支持",
+        "sub_blocks": [
+            {"id": "file_path", "title": "文件路径", "type": "input", "required": True},
+            {"id": "format", "title": "格式（auto=按后缀）", "type": "input"},
+        ],
+        "inputs": [],
+        "outputs": [{"id": "document", "label": "文档内容"}],
+        "source": "builtin",
+    },
+    {
+        "type": "builtin:doc-write",
+        "label": "文档写出",
+        "icon": "💾",
+        "category": "output",
+        "description": "把文本内容写成文件（md/txt/html/csv/json）；DOCX/PDF/PPTX 未支持",
+        "sub_blocks": [
+            {"id": "content", "title": "内容", "type": "textarea", "required": True},
+            {"id": "format", "title": "格式", "type": "input"},
+            {"id": "file_name", "title": "文件名（缺省按时间生成）", "type": "input"},
+        ],
+        "inputs": [{"id": "input", "label": "待写内容"}],
+        "outputs": [{"id": "path", "label": "落盘路径"}],
+        "source": "builtin",
+    },
+    {
+        "type": "builtin:web-scrape",
+        "label": "网页抓取",
+        "icon": "🕸️",
+        "category": "input",
+        "description": "抓取公开网页并抽取正文文本（出网走 SSRF 校验）",
+        "sub_blocks": [
+            {"id": "url", "title": "目标 URL", "type": "input", "required": True},
+        ],
+        "inputs": [],
+        "outputs": [{"id": "page", "label": "页面内容"}],
+        "source": "builtin",
+    },
+    {
+        "type": "builtin:seo-optimize",
+        "label": "SEO 分析",
+        "icon": "📈",
+        "category": "processing",
+        "description": "对页面做启发式 SEO 体检（标题/描述/标题层级/图片 alt/词频），输出评分与建议",
+        "sub_blocks": [
+            {"id": "content", "title": "页面内容（HTML 或上游输出）", "type": "textarea"},
+            {"id": "target_url", "title": "目标 URL", "type": "input"},
+        ],
+        "inputs": [{"id": "input", "label": "页面内容"}],
+        "outputs": [{"id": "report", "label": "SEO 报告"}],
+        "source": "builtin",
+    },
+    {
+        "type": "builtin:broken-link-check",
+        "label": "死链检测",
+        "icon": "🔗",
+        "category": "processing",
+        "description": "抽取页面链接逐个探测（限量），返回不可达清单",
+        "sub_blocks": [
+            {"id": "url", "title": "页面 URL（无内容时抓取）", "type": "input"},
+            {"id": "max_links", "title": "最多探测链接数", "type": "input"},
+        ],
+        "inputs": [{"id": "input", "label": "页面内容"}],
+        "outputs": [{"id": "result", "label": "检测结果"}],
+        "source": "builtin",
+    },
+    {
+        "type": "builtin:data-analyze",
+        "label": "数据分析",
+        "icon": "📊",
+        "category": "processing",
+        "description": "对行数据做描述统计（计数/缺失/数值字段 min/max/mean/sum）",
+        "sub_blocks": [
+            {"id": "data", "title": "数据（JSON 数组或上游输出）", "type": "textarea"},
+        ],
+        "inputs": [{"id": "input", "label": "数据"}],
+        "outputs": [{"id": "summary", "label": "统计摘要"}],
+        "source": "builtin",
+    },
+    {
+        "type": "builtin:data-visualize",
+        "label": "数据可视化",
+        "icon": "📉",
+        "category": "output",
+        "description": "把数值列渲染成内联 SVG 柱状图（无外部图表依赖）",
+        "sub_blocks": [
+            {"id": "data", "title": "数据（JSON 数组或上游输出）", "type": "textarea"},
+            {"id": "label_key", "title": "标签字段", "type": "input"},
+            {"id": "value_key", "title": "数值字段", "type": "input"},
+        ],
+        "inputs": [{"id": "input", "label": "数据"}],
+        "outputs": [{"id": "chart", "label": "SVG 图表"}],
+        "source": "builtin",
+    },
 ]
 
 
@@ -1201,16 +1302,20 @@ async def exec_evolution(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[st
                 "output": {"status": "learned", "mode": mode},
             }
         elif mode == "evaluate":
-            # TODO: 实现评估逻辑
+            # 审计 §3.4-1：不再回 score=0.0 假成功——评估逻辑未实现就如实
+            # 报 failed，编程主链不得踩在占位值上做决策。
             return {
-                "status": "success",
-                "output": {"score": 0.0, "mode": mode, "metric": metric},
+                "status": "failed",
+                "error": f"not_implemented: 进化节点 evaluate 模式（metric={metric}）尚未实现，"
+                         "无法给出真实评估分",
+                "output": None,
             }
         elif mode == "optimize":
-            # TODO: 实现优化逻辑
+            # 审计 §3.4-1：同上，"optimized" 是占位谎报。
             return {
-                "status": "success",
-                "output": {"status": "optimized", "mode": mode},
+                "status": "failed",
+                "error": "not_implemented: 进化节点 optimize 模式尚未实现，未做任何优化",
+                "output": None,
             }
         else:
             return {
@@ -1228,21 +1333,19 @@ async def exec_evolution(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[st
 
 
 async def exec_tdd(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """TDD 模式节点执行器"""
-    config.get("max_iterations", 5)
+    """TDD 模式节点执行器
+
+    审计 §3.4-1：原桩返回 pass_rate=1.0 假成功——TDD 循环（写测试→跑→改实现）
+    没有任何一环存在，工作流会拿着"全过"的假读数继续走。显式 failed。
+    """
     test_spec = config.get("test_spec", "")
     implementation_prompt = config.get("implementation_prompt", "")
-
-    # TODO: 实现完整的 TDD 循环
-    # 暂时返回模拟结果
     return {
-        "status": "success",
-        "output": {
-            "test_spec": test_spec,
-            "implementation": implementation_prompt,
-            "iterations": 1,
-            "pass_rate": 1.0,
-        },
+        "status": "failed",
+        "error": "not_implemented: TDD 节点的测试执行与迭代循环尚未实现"
+                 f"（test_spec={bool(test_spec)}, implementation_prompt={bool(implementation_prompt)}），"
+                 "不能谎报 pass_rate",
+        "output": None,
     }
 
 
@@ -1656,14 +1759,16 @@ async def exec_transform(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[st
 
 
 async def exec_human_input(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """人工输入节点执行器"""
+    """人工输入节点执行器
+
+    审计 §3.4-1：原桩不等待直接回 status=timeout（引擎把 timeout 记为节点
+    正常终结）——人工审核被静默跳过。等待机制未实现就如实 failed。
+    """
     prompt = config.get("prompt", "请输入")
     config.get("timeout", 300)
-
-    # TODO: 实现真正的人工输入等待机制
-    # 暂时返回超时
     return {
-        "status": "timeout",
+        "status": "failed",
+        "error": f"not_implemented: 人工输入等待机制尚未实现，无法就「{prompt}」征集人工输入",
         "output": {"prompt": prompt, "user_input": None},
     }
 
@@ -2066,6 +2171,475 @@ async def exec_output(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, 
     return {
         "status": "success",
         "output": {"output_type": "text", "name": name, "text": text},
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 文档 / 网页 / 数据节点执行器
+# （审计 §3.4-4：document / data_analysis / web_maintenance 三个内置模板
+#   引用的 7 个节点类型此前全包零注册，模板一实例化必"未知节点类型"。
+#   这里按既有执行器契约补齐真实现——能做真的就做真的，做不了的如实 failed。）
+# ═══════════════════════════════════════════════════════════════════
+
+_DOC_TEXT_SUFFIXES = (".txt", ".md", ".markdown", ".html", ".htm", ".csv", ".json", ".log", ".xml", ".yaml", ".yml")
+_DOC_BINARY_SUFFIXES = (".docx", ".pdf", ".pptx", ".xlsx", ".doc", ".ppt", ".xls")
+_DOC_READ_MAX_BYTES = 2 * 1024 * 1024
+_SCRAPER_TEXT_MAX_CHARS = 200_000
+_WEB_FETCH_TIMEOUT_SECONDS = 30
+_LINK_CHECK_LIMIT_DEFAULT = 20
+
+
+def _upstreamData(config: Dict[str, Any], ctx: Dict[str, Any], key: str = "data") -> Any:
+    """取节点输入数据：config 显式给定优先（变量引用此时已被解析器替换），
+    否则回退最近一个有输出的上游节点。"""
+    value = config.get(key)
+    if value not in (None, ""):
+        return value
+    node_results = ctx.get("node_results") or {}
+    for res in reversed(list(node_results.values())):
+        if isinstance(res, dict) and res.get("output") is not None:
+            return res.get("output")
+    return None
+
+
+def _stripHtml(html: str) -> str:
+    """极简正文抽取：去 script/style、去标签、折叠空白（不引第三方解析库）。"""
+    import re as _re
+
+    text = _re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", html)
+    text = _re.sub(r"(?s)<[^>]+>", " ", text)
+    text = _re.sub(r"&nbsp;|&#160;", " ", text)
+    text = _re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _extractTitle(html: str) -> str:
+    import re as _re
+
+    m = _re.search(r"(?is)<title[^>]*>(.*?)</title>", html)
+    return _stripHtml(m.group(1)) if m else ""
+
+
+def _extractLinks(html: str, base_url: str) -> List[str]:
+    import re as _re
+    from urllib.parse import urljoin as _urljoin
+
+    links = []
+    for m in _re.finditer(r"(?is)<a[^>]+href=[\"']([^\"'#]+)[\"']", html):
+        href = m.group(1).strip()
+        if href.lower().startswith(("mailto:", "javascript:", "tel:")):
+            continue
+        absolute = _urljoin(base_url or "", href)
+        if absolute.startswith(("http://", "https://")):
+            links.append(absolute)
+    return links
+
+
+async def exec_doc_read(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """文档读取节点：文本类格式直读；DOCX/PDF 等二进制格式如实 failed。"""
+    from pathlib import Path as _Path
+
+    file_path = _resolve_value(str(config.get("file_path", "") or ""), ctx).strip()
+    if not file_path:
+        return {"status": "failed", "error": "缺少 file_path", "output": None}
+    path = _Path(file_path).expanduser()
+    if not path.is_file():
+        return {"status": "failed", "error": f"文件不存在: {file_path}", "output": None}
+    suffix = path.suffix.lower()
+    if suffix in _DOC_BINARY_SUFFIXES:
+        return {
+            "status": "failed",
+            "error": f"not_implemented: {suffix} 二进制文档解析未实现，当前支持文本类文件"
+                     f"（{'/'.join(_DOC_TEXT_SUFFIXES)}）",
+            "output": None,
+        }
+    try:
+        raw = await asyncio.to_thread(path.read_bytes)
+    except OSError as e:
+        return {"status": "failed", "error": f"读取失败: {e}", "output": None}
+    if len(raw) > _DOC_READ_MAX_BYTES:
+        return {
+            "status": "failed",
+            "error": f"文件过大（{len(raw)} 字节 > 上限 {_DOC_READ_MAX_BYTES}）",
+            "output": None,
+        }
+    text = raw.decode("utf-8", errors="replace")
+    return {"status": "success", "output": {"path": str(path), "content": text, "size": len(raw)}}
+
+
+async def exec_doc_write(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """文档写出节点：文本类格式落盘到数据根 neurflow_outputs/；二进制格式如实 failed。"""
+    from pathlib import Path as _Path
+
+    content = _resolve_value(str(config.get("content", "") or ""), ctx)
+    if not content and content != "":
+        content = str(content)
+    fmt = str(config.get("format", "") or "").strip().lower() or "md"
+    if fmt in ("docx", "pdf", "pptx", "xlsx", "doc", "ppt", "xls"):
+        return {
+            "status": "failed",
+            "error": f"not_implemented: {fmt} 二进制文档生成未实现，当前支持文本类格式"
+                     "（md/txt/html/csv/json）",
+            "output": None,
+        }
+    file_name = str(config.get("file_name", "") or "").strip()
+    if not file_name:
+        file_name = f"doc_{int(time.time() * 1000)}.{fmt}"
+    if "." not in file_name:
+        file_name = f"{file_name}.{fmt}"
+    from neurova.core.data_root import dataLanding
+
+    out_dir = _Path(dataLanding("neurflow_outputs"))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    target = out_dir / file_name
+    # 落点 containment：文件名不得带路径片段逃出输出目录
+    if target.parent.resolve() != out_dir.resolve():
+        return {"status": "failed", "error": f"非法文件名: {file_name!r}", "output": None}
+    try:
+        await asyncio.to_thread(target.write_text, content, "utf-8")
+    except OSError as e:
+        return {"status": "failed", "error": f"写入失败: {e}", "output": None}
+    return {"status": "success", "output": {"path": str(target), "size": len(content)}}
+
+
+async def exec_web_scrape(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """网页抓取节点：出网走 SSRF 校验；抽取标题与正文文本（限量）。"""
+    url = _resolve_value(str(config.get("url", "") or ""), ctx).strip()
+    if not url:
+        return {"status": "failed", "error": "缺少 url", "output": None}
+    try:
+        _validate_outbound_url(url)
+    except ValueError as e:
+        return {"status": "failed", "error": str(e), "output": None}
+    try:
+        resp = await asyncio.to_thread(
+            _safe_request, "GET", url, timeout=_WEB_FETCH_TIMEOUT_SECONDS
+        )
+    except Exception as e:  # noqa: BLE001 - 网络故障如实失败
+        return {"status": "failed", "error": f"抓取失败: {e}", "output": None}
+    if not getattr(resp, "ok", False):
+        return {
+            "status": "failed",
+            "error": f"抓取失败: HTTP {getattr(resp, 'status_code', '?')} for {url}",
+            "output": None,
+        }
+    html = ""
+    try:
+        html = resp.text or ""
+    except Exception:  # noqa: BLE001 - 非 UTF-8 等解码问题按空处理
+        html = ""
+    html = html[:_SCRAPER_TEXT_MAX_CHARS]
+    return {
+        "status": "success",
+        "output": {
+            "url": url,
+            "title": _extractTitle(html),
+            "text": _stripHtml(html)[:_SCRAPER_TEXT_MAX_CHARS],
+            "html": html,
+        },
+    }
+
+
+async def exec_seo_optimize(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """SEO 分析节点：启发式体检（标题/描述/标题层级/图片 alt/词频），输出评分与建议。"""
+    import re as _re
+    from collections import Counter as _Counter
+
+    raw = _upstreamData(config, ctx, key="content")
+    if isinstance(raw, dict):
+        html = str(raw.get("html") or "")
+        text = str(raw.get("text") or _stripHtml(html))
+        url = str(raw.get("url") or config.get("target_url") or "")
+    else:
+        html = str(raw or "")
+        text = _stripHtml(html)
+        url = str(config.get("target_url") or "")
+    if not html and not text:
+        return {"status": "failed", "error": "缺少页面内容（config.content 或上游输出）", "output": None}
+
+    findings: List[Dict[str, Any]] = []
+    score = 100
+
+    title = _extractTitle(html)
+    if not title:
+        score -= 20
+        findings.append({"item": "title", "level": "high", "advice": "缺少 <title>，每页应有 20~60 字符的标题"})
+    elif not (10 <= len(title) <= 60):
+        score -= 8
+        findings.append({"item": "title", "level": "medium", "advice": f"标题长度 {len(title)} 字符，建议 20~60"})
+
+    has_meta_desc = bool(_re.search(r"(?is)<meta[^>]+name=[\"']description[\"'][^>]*>", html))
+    if not has_meta_desc:
+        score -= 15
+        findings.append({"item": "meta_description", "level": "medium", "advice": "缺少 meta description"})
+
+    h1_count = len(_re.findall(r"(?is)<h1[^>]*>", html))
+    if h1_count == 0:
+        score -= 15
+        findings.append({"item": "h1", "level": "medium", "advice": "缺少 H1 标题"})
+    elif h1_count > 1:
+        score -= 8
+        findings.append({"item": "h1", "level": "low", "advice": f"H1 数量 {h1_count}，建议每页一个"})
+
+    images = _re.findall(r"(?is)<img[^>]*>", html)
+    if images:
+        missing_alt = sum(1 for tag in images if "alt=" not in tag.lower())
+        if missing_alt:
+            score -= min(20, 5 + missing_alt)
+            findings.append({
+                "item": "img_alt",
+                "level": "medium",
+                "advice": f"{missing_alt}/{len(images)} 张图片缺少 alt 属性",
+            })
+
+    words = [w for w in _re.split(r"[\s,.!?;:，。！？；：、]+", text) if w]
+    if len(words) < 50:
+        score -= 10
+        findings.append({"item": "content_length", "level": "medium", "advice": f"正文仅 {len(words)} 词，建议 ≥50 词"})
+
+    stop = {"the", "a", "an", "and", "or", "of", "to", "in", "is", "are", "for", "on", "with", "at", "by"}
+    terms = [w.lower() for w in words if w.lower() not in stop and len(w) > 1]
+    top_terms = [{"term": t, "count": c} for t, c in _Counter(terms).most_common(10)]
+
+    score = max(0, min(100, score))
+    return {
+        "status": "success",
+        "output": {
+            "url": url,
+            "score": score,
+            "grade": "good" if score >= 80 else ("fair" if score >= 60 else "poor"),
+            "findings": findings,
+            "top_terms": top_terms,
+            "word_count": len(words),
+        },
+    }
+
+
+async def exec_broken_link_check(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """死链检测节点：抽取页面链接逐个探测（限量、并发受控），返回不可达清单。"""
+    raw = _upstreamData(config, ctx, key="html")
+    if isinstance(raw, dict):
+        html = str(raw.get("html") or "")
+        base_url = str(raw.get("url") or "")
+    else:
+        html = str(raw or "") if isinstance(raw, str) else ""
+        base_url = ""
+    page_url = _resolve_value(str(config.get("url", "") or ""), ctx).strip() or base_url
+
+    if not html and page_url:
+        scraped = await exec_web_scrape({"url": page_url}, ctx)
+        if scraped.get("status") != "success":
+            return scraped
+        html = str((scraped.get("output") or {}).get("html") or "")
+        base_url = page_url
+    if not html:
+        return {"status": "failed", "error": "缺少页面内容（config 或上游，或提供 url 抓取）", "output": None}
+
+    try:
+        max_links = max(1, min(100, int(config.get("max_links") or _LINK_CHECK_LIMIT_DEFAULT)))
+    except (TypeError, ValueError):
+        max_links = _LINK_CHECK_LIMIT_DEFAULT
+
+    links = _extractLinks(html, base_url or page_url)
+    # 同 URL 去重，保持出现顺序
+    seen: set = set()
+    ordered = [u for u in links if not (u in seen or seen.add(u))][:max_links]
+
+    checked: List[Dict[str, Any]] = []
+    broken: List[Dict[str, Any]] = []
+    for link in ordered:
+        try:
+            _validate_outbound_url(link)
+        except ValueError as e:
+            broken.append({"url": link, "reason": f"ssrf_blocked: {e}"})
+            continue
+        try:
+            resp = await asyncio.to_thread(_safe_request, "GET", link, timeout=10)
+            code = int(getattr(resp, "status_code", 0) or 0)
+            ok = 200 <= code < 400
+        except Exception as e:  # noqa: BLE001 - 请求异常计为不可达
+            broken.append({"url": link, "reason": str(e)})
+            continue
+        checked.append({"url": link, "status": code})
+        if not ok:
+            broken.append({"url": link, "reason": f"HTTP {code}"})
+
+    return {
+        "status": "success",
+        "output": {
+            "page_url": page_url or base_url,
+            "checked": len(checked) + len(broken),
+            "broken_count": len(broken),
+            "broken": broken,
+            "truncated": len(links) > max_links,
+        },
+    }
+
+
+def _asRows(data: Any) -> List[Any]:
+    """把输入归一成行列表：接受 JSON 数组或 JSONL/CSV 文本。"""
+    if isinstance(data, list):
+        return data
+    if isinstance(data, str):
+        import json as _json
+
+        text = data.strip()
+        if not text:
+            return []
+        try:
+            parsed = _json.loads(text)
+            return parsed if isinstance(parsed, list) else [parsed]
+        except ValueError:
+            rows = [line for line in text.splitlines() if line.strip()]
+            if len(rows) > 1:
+                header = [c.strip() for c in rows[0].split(",")]
+                return [dict(zip(header, [c.strip() for c in r.split(",")])) for r in rows[1:]]
+            return rows
+    if isinstance(data, dict):
+        return [data]
+    return [data]
+
+
+async def exec_data_analyze(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """数据分析节点：行数据描述统计（计数/缺失/数值字段 min/max/mean/sum）。"""
+    rows = _asRows(_upstreamData(config, ctx, key="data"))
+    if not rows:
+        return {"status": "failed", "error": "无数据可分析（config.data 或上游输出为空）", "output": None}
+
+    dict_rows = [r for r in rows if isinstance(r, dict)]
+    if dict_rows:
+        fields: Dict[str, Any] = {}
+        keys: List[str] = []
+        for r in dict_rows:
+            for k in r.keys():
+                if k not in keys:
+                    keys.append(k)
+        for key in keys:
+            values = [r.get(key) for r in dict_rows]
+            missing = sum(1 for v in values if v is None or v == "")
+            numeric = []
+            for v in values:
+                if isinstance(v, bool):
+                    continue
+                try:
+                    numeric.append(float(v))
+                except (TypeError, ValueError):
+                    pass
+            stat: Dict[str, Any] = {
+                "count": len(values),
+                "missing": missing,
+                "numeric_count": len(numeric),
+            }
+            if numeric:
+                stat.update({
+                    "min": min(numeric),
+                    "max": max(numeric),
+                    "sum": round(sum(numeric), 6),
+                    "mean": round(sum(numeric) / len(numeric), 6),
+                })
+            fields[key] = stat
+        return {
+            "status": "success",
+            "output": {
+                "rows": len(dict_rows),
+                "shape": "table",
+                "fields": fields,
+                "non_dict_rows": len(rows) - len(dict_rows),
+            },
+        }
+
+    # 标量行：整列统计
+    numeric = []
+    for v in rows:
+        if isinstance(v, bool):
+            continue
+        try:
+            numeric.append(float(v))
+        except (TypeError, ValueError):
+            pass
+    out: Dict[str, Any] = {"rows": len(rows), "shape": "column", "numeric_count": len(numeric)}
+    if numeric:
+        out.update({
+            "min": min(numeric),
+            "max": max(numeric),
+            "sum": round(sum(numeric), 6),
+            "mean": round(sum(numeric) / len(numeric), 6),
+        })
+    return {"status": "success", "output": out}
+
+
+async def exec_data_visualize(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """数据可视化节点：把数值列渲染成内联 SVG 柱状图（纯字符串拼装，无图表依赖）。"""
+    import html as _html
+
+    rows = _asRows(_upstreamData(config, ctx, key="data"))
+    if not rows:
+        return {"status": "failed", "error": "无数据可可视化（config.data 或上游输出为空）", "output": None}
+
+    label_key = str(config.get("label_key") or "label") if str(config.get("label_key") or "") else "label"
+    value_key = str(config.get("value_key") or "value") if str(config.get("value_key") or "") else "value"
+
+    points: List[tuple] = []
+    if rows and isinstance(rows[0], dict):
+        first = rows[0]
+        if value_key not in first:
+            numeric_key = None
+            for k, v in first.items():
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    numeric_key = k
+                    break
+            value_key = numeric_key or value_key
+        if label_key not in first:
+            label_key = next((k for k in first.keys() if k != value_key), label_key)
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            try:
+                points.append((str(r.get(label_key, "")), float(r.get(value_key))))
+            except (TypeError, ValueError):
+                continue
+    else:
+        for i, v in enumerate(rows):
+            try:
+                points.append((f"#{i + 1}", float(v)))
+            except (TypeError, ValueError):
+                continue
+
+    if not points:
+        return {"status": "failed", "error": "数据中找不到可绘制的数值列", "output": None}
+
+    points = points[:30]
+    values = [v for _, v in points]
+    lo, hi = min(values), max(values)
+    span = (hi - lo) or 1.0
+    width, height, bar_w = 640.0, 240.0, 640.0 / len(points)
+
+    bars = []
+    for i, (label, value) in enumerate(points):
+        h = 8.0 + (value - lo) / span * (height - 30.0)
+        x = i * bar_w + bar_w * 0.15
+        y = height - h - 18.0
+        short = _html.escape(label[:12])
+        bars.append(
+            f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_w * 0.7:.1f}" height="{h:.1f}" fill="#4a7dff"/>'
+            f'<title>{_html.escape(label)}: {value}</title>'
+            f'<text x="{x + bar_w * 0.35:.1f}" y="{height - 4.0}" font-size="9" text-anchor="middle">{short}</text>'
+        )
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width:.0f}" height="{height:.0f}" '
+        f'viewBox="0 0 {width:.0f} {height:.0f}">'
+        + "".join(bars)
+        + "</svg>"
+    )
+    return {
+        "status": "success",
+        "output": {
+            "chart_type": "bar",
+            "svg": svg,
+            "points": [{"label": l, "value": v} for l, v in points],
+            "min": lo,
+            "max": hi,
+        },
     }
 
 
@@ -2633,6 +3207,14 @@ BUILTIN_EXECUTORS: Dict[str, Callable] = {
     "builtin:knowledge_base": exec_knowledge_base,
     "builtin:remote_api": exec_remote_api,
     "builtin:output": exec_output,
+    # 审计 §3.4-4：补齐三模板引用的 7 个执行节点
+    "builtin:doc-read": exec_doc_read,
+    "builtin:doc-write": exec_doc_write,
+    "builtin:web-scrape": exec_web_scrape,
+    "builtin:seo-optimize": exec_seo_optimize,
+    "builtin:broken-link-check": exec_broken_link_check,
+    "builtin:data-analyze": exec_data_analyze,
+    "builtin:data-visualize": exec_data_visualize,
 }
 
 
@@ -2709,4 +3291,12 @@ __all__ = [
     "exec_remote_api",
     "exec_output",
     "exec_approval",
+    # 审计 §3.4-4：补齐三模板引用的执行节点
+    "exec_doc_read",
+    "exec_doc_write",
+    "exec_web_scrape",
+    "exec_seo_optimize",
+    "exec_broken_link_check",
+    "exec_data_analyze",
+    "exec_data_visualize",
 ]

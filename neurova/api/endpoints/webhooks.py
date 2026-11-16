@@ -25,7 +25,7 @@ from neurova.core.data_root import dataPath
 # P1-5（审计 2026-11-16）：SSRF 防护收口到知识域唯一 URL 校验单源——
 # webhook.url 由请求任意指定，test 端点会向它发起服务端 POST，不过闸即
 # 内网探测预言机（169.254.169.254、localhost 等，响应码回显可作预言）。
-from neurova.knowledge.url_guard import validate_public_http_url
+from neurova.security.url_guard import validate_public_http_url
 
 logger = get_logger(__name__)
 router = APIRouter(dependencies=[Depends(get_current_user)],)

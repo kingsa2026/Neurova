@@ -33,8 +33,10 @@ def client(tmp_path, monkeypatch):
 
 
 def _auth(c):
+    # 审计 §3.1-8 后任务创建带属主门：无主 agent（含 default）仅管理员可指定，
+    # 本套用例考的是鉴权契约与调度行为，统一以管理员身份过门。
     c.app.dependency_overrides[get_current_user] = lambda: {
-        "user_id": "u1", "username": "user1", "role": "user",
+        "user_id": "u1", "username": "user1", "role": "admin",
     }
 
 

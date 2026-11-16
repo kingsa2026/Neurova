@@ -5,29 +5,11 @@ Agent 技能管理器
 """
 
 import asyncio
-from pathlib import Path
 
 from neurova.core.logger import get_logger
-from neurova.skills.models import SkillSource
 from typing import Any, Dict, List, Optional
 
 logger = get_logger(__name__)
-
-
-def marketSourceOf(value: Any) -> SkillSource:
-    """把市场源写成枚举：认枚举、认裸串，认不出来回落 GITHUB（既有行为，一字未改）。
-
-    此前这段转换在同一个方法里写了两份（dict 一份、带属性对象一份），
-    两份都是 `SkillSource(str(v).lower())` + `except ValueError → GITHUB`。
-    `RemoteSkill.__post_init__` 会做同一件转换，但它对"认不出来"是 raise，
-    而这里要的是既有那条静默回落——所以留着这一份，不留两份。
-    """
-    if isinstance(value, SkillSource):
-        return value
-    try:
-        return SkillSource(str(value or "github").lower())
-    except ValueError:
-        return SkillSource.GITHUB
 
 
 class AgentSkillManager:
@@ -178,37 +160,6 @@ class AgentSkillManager:
         logger.info("Task analysis completed, found %s skills needed", len(analysis.get('skills_needed', [])))
         return analysis
 
-    async def suggest_skills_for_task(
-        self,
-        task: str,
-        context: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
-        """
-        为任务建议技能
-
-        Args:
-            task: 任务描述
-            context: 上下文信息
-
-        Returns:
-            建议的技能列表
-        """
-        logger.info("Agent %s suggesting skills for task: %s...", self.agent_id, task[:50])
-
-        if not self.analyzer:
-            return []
-
-        # P0-B2 修复：SkillNeedAnalyzer.suggest_skills 是同步函数
-        # 原签名：def suggest_skills(self, request: str, max_suggestions: int = 5) -> List[Dict[str, Any]]
-        try:
-            suggestions = self.analyzer.suggest_skills(request=task)
-        except Exception as e:
-            logger.error("suggest_skills failed: %s", e, exc_info=True)
-            suggestions = []
-
-        logger.info("Suggested %s skills", len(suggestions))
-        return suggestions
-
     def search_skill(
         self,
         skill_name: str,
@@ -231,91 +182,6 @@ class AgentSkillManager:
 
         logger.info("Found %s results for skill: %s", len(results), skill_name)
         return results
-
-    async def acquire_skill(
-        self,
-        skill_name: str,
-        market: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """获取技能 — 修复签名三重不匹配
-
-        ADR 0012 修复:
-        - search_market/search_all_markets 是同步方法，去掉 await
-        - 去掉不存在的 limit_per_market 参数，用 limit
-        - 改用 SkillHubClient 的真实 install_skill 方法（替换原 stub 调用）
-        """
-        logger.info("Agent %s acquiring skill: %s", self.agent_id, skill_name)
-
-        if not self.searcher or not self.importer:
-            return {
-                "success": False,
-                "error": "Market modules not available",
-            }
-
-        # 搜索技能 — 同步调用（去掉 await）
-        if market:
-            results = self.searcher.search_market(market=market, query=skill_name, limit=1)
-        else:
-            results = self.searcher.search_all_markets(skill_name, limit=5)
-
-        if not results:
-            logger.warning("Skill %s not found in any market", skill_name)
-            return {
-                "success": False,
-                "error": f"Skill {skill_name} not found",
-            }
-
-        # 获取第一个结果
-        skill_info = results[0]
-
-        # 导入技能 — 用 SkillHubClient 的真实安装方法（替换原 stub 调用）
-        # SkillHubClient.install_skill 接受 RemoteSkill 对象
-        try:
-            if hasattr(self.importer, "install_skill"):
-                from neurova.skills.hub_client import RemoteSkill
-                from neurova.skills.models import SkillSource
-
-                # 将搜索结果统一转为 RemoteSkill
-                if isinstance(skill_info, RemoteSkill):
-                    remote_skill = skill_info
-                elif isinstance(skill_info, dict):
-                    remote_skill = RemoteSkill(
-                        name=skill_info.get("name", skill_name),
-                        source=marketSourceOf(
-                            skill_info.get("source") or skill_info.get("market")),
-                        description=skill_info.get("description", ""),
-                        version=skill_info.get("version", "0.0.0"),
-                        url=skill_info.get("url", ""),
-                        download_url=skill_info.get("download_url", ""),
-                    )
-                else:
-                    # SearchResult 等带属性对象
-                    remote_skill = RemoteSkill(
-                        name=getattr(skill_info, "name", skill_name),
-                        source=marketSourceOf(getattr(skill_info, "source", "github")),
-                        description=getattr(skill_info, "description", ""),
-                        version=getattr(skill_info, "version", "0.0.0"),
-                        url=getattr(skill_info, "url", ""),
-                        download_url=getattr(skill_info, "download_url", ""),
-                    )
-
-                success = self.importer.install_skill(remote_skill)
-                import_result = {"success": bool(success)}
-            else:
-                import_result = {
-                    "success": False,
-                    "error": "Importer does not support install_skill",
-                }
-        except Exception as e:
-            logger.exception("Failed to install skill %s: %s", skill_name, e)
-            import_result = {"success": False, "error": str(e)}
-
-        logger.info("Skill %s acquired successfully", skill_name)
-        return {
-            "success": import_result.get("success", False),
-            "skill_name": skill_name,
-            "import_result": import_result,
-        }
 
     def get_skill_status(self) -> Dict[str, Any]:
         """获取技能状态"""

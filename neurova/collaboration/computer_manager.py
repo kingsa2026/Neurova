@@ -178,13 +178,31 @@ class ComputerManager:
                 logger.error(f"Failed to create computer: {e}")
                 return None
 
+    def _is_admin_user(self, user_id: str) -> bool:
+        """管理员判定（审计 §3.4-11）：users 表 role == 'admin'。
+
+        任何查表失败（查无此人/非数字 id/用户库不可用）都按非管理员处理——
+        fail-closed，不给"公司后缀匹配"那类可伪造旁路留位置。
+        """
+        uid = str(user_id or "").strip()
+        if not uid:
+            return False
+        try:
+            from neurova.auth.user_model import UserModel
+
+            row = UserModel().get_user_by_id(int(uid))
+            return str(getattr(row, "role", "") or "").lower() == "admin"
+        except Exception:  # noqa: BLE001 - 判定不了就按非管理员
+            return False
+
     def get_computer(self, computer_id: str, user_id: Optional[str] = None) -> Optional[Computer]:
         """
         获取 Computer (带权限检查)
 
         Args:
             computer_id: Computer ID
-            user_id: 用户 ID (用于权限检查)
+            user_id: 用户 ID (用于权限检查)；缺省＝内部取数通道
+                （如 daemon 心跳先取数、再验配对令牌），调用方须自行完成鉴权
 
         Returns:
             Computer 对象或 None
@@ -194,13 +212,12 @@ class ComputerManager:
             if not computer:
                 return None
 
-            # Permission check: owner or admin
-            if user_id and computer.owner_user_id != user_id:
-                # TODO: Check admin role
-                # For now, allow access if company match
-                if computer.company_id and user_id.endswith(f"@{computer.company_id}"):
-                    pass  # Allow
-                else:
+            # Permission check: owner or admin。
+            # 审计 §3.4-11：原 TODO 落成"company_id 后缀匹配即放行"——
+            # 任何登录用户把 id 写成 user@{company_id} 就能读他人计算节点。
+            # 现收口为 **属主或管理员**，其余一律拒绝。
+            if user_id:
+                if computer.owner_user_id != user_id and not self._is_admin_user(user_id):
                     return None
 
             return computer

@@ -127,11 +127,11 @@ class XiaoYiAdapter(ChannelAdapter):
             )
 
             # HMAC-SHA256签名
-            secret_key = self.config.config.get("secret_key")
+            secret_key = self.config.extra.get("secret_key")
             signature = hmac.new(secret_key.encode("utf-8"), string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
 
             # 构建Authorization头部
-            access_key = self.config.config.get("access_key")
+            access_key = self.config.extra.get("access_key")
             authorization = f"SDK-HMAC-SHA256 Access={access_key}, SignedHeaders=content-type;host;x-date;x-nonce, Signature={signature}"
 
             return {
@@ -160,7 +160,7 @@ class XiaoYiAdapter(ChannelAdapter):
     async def _async_init_connection(self):
         """异步初始化 WebSocket 连接"""
         try:
-            ws_url = self.config.config.get("ws_url")
+            ws_url = self.config.extra.get("ws_url")
 
             # 生成认证头
             headers = self._generate_signature("GET", ws_url)
@@ -228,6 +228,28 @@ class XiaoYiAdapter(ChannelAdapter):
         except Exception as e:
             logger.error("处理小艺消息失败: %s", e)
 
+    async def connect(self) -> bool:
+        """建立小艺 WebSocket 连接（ChannelAdapter 抽象方法的真实现）。
+
+        审计 §3.4-3：本类此前未实现基类抽象方法 connect/disconnect，
+        XiaoYiAdapter() 实例化即 TypeError——渠道每次配置都失败的第二根因。
+        """
+        return await self._init_connection()
+
+    async def disconnect(self) -> None:
+        """断开连接并停止接收循环（ChannelAdapter 抽象方法的真实现）"""
+        self._connected = False
+        receive_task = self._receive_task
+        self._receive_task = None
+        if self.ws is not None:
+            try:
+                await self.ws.close()
+            except Exception as e:  # noqa: BLE001 - 关闭失败不阻断清理
+                logger.debug("小艺 WebSocket 关闭异常: %s", e)
+            self.ws = None
+        if receive_task is not None:
+            receive_task.cancel()
+
     async def send_message(self, message: str, session_id: str = None, **kwargs) -> bool:
         """发送小艺消息"""
         if not self.authenticated:
@@ -236,8 +258,10 @@ class XiaoYiAdapter(ChannelAdapter):
 
         try:
             if not self._connected:
-                logger.warning("[小艺模拟] 发送消息: %s", message)
-                return True
+                # 审计 §3.4-3：未连接时原桩打"模拟"日志却 return True——
+                # 上游把没发出去的消息当成功。如实失败。
+                logger.warning("小艺未连接，发送失败: %s", message[:50])
+                return False
 
             # 构建消息
             msg_data = {
@@ -314,7 +338,7 @@ class XiaoYiAdapter(ChannelAdapter):
                 "metadata": {
                     "device": metadata.get("device", ""),
                     "location": metadata.get("location", ""),
-                    "ws_url": self.config.config.get("ws_url") if self.config else "",
+                    "ws_url": self.config.extra.get("ws_url") if self.config else "",
                 },
             }
 
@@ -331,9 +355,9 @@ class XiaoYiAdapter(ChannelAdapter):
 
         return {
             "channel": "xiaoyi",
-            "access_key": self.config.config.get("access_key"),
-            "agent_id": self.config.config.get("agent_id"),
-            "ws_url": self.config.config.get("ws_url"),
+            "access_key": self.config.extra.get("access_key"),
+            "agent_id": self.config.extra.get("agent_id"),
+            "ws_url": self.config.extra.get("ws_url"),
             "bot_prefix": self.bot_prefix,
             "show_tool_messages": self.show_tool_messages,
             "show_thinking": self.show_thinking,
@@ -357,7 +381,7 @@ class XiaoYiAdapter(ChannelAdapter):
                     "show_tool_messages",
                     "show_thinking",
                 ]:
-                    self.config.config[key] = value
+                    self.config.extra[key] = value
 
             return True
 
@@ -367,9 +391,15 @@ class XiaoYiAdapter(ChannelAdapter):
 
 
 def create_xiaoyi_adapter(access_key: str, secret_key: str, agent_id: str) -> XiaoYiAdapter:
-    """创建小艺适配器"""
+    """创建小艺适配器
+
+    审计 §3.4-3：原工厂传 `channel=`/`config=` 非法 kwargs，ChannelConfig
+    （dataclass）实例化即 TypeError——小艺渠道每次配置都失败。改用真实
+    字段 `channel_type=` + `extra=`。
+    """
     adapter = XiaoYiAdapter()
     adapter.config = ChannelConfig(
-        channel="xiaoyi", config={"access_key": access_key, "secret_key": secret_key, "agent_id": agent_id}
+        channel_type="xiaoyi",
+        extra={"access_key": access_key, "secret_key": secret_key, "agent_id": agent_id},
     )
     return adapter

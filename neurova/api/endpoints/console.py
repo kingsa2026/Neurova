@@ -271,13 +271,19 @@ def _buffer_replay_events(session_id: str, events: typing.List[Dict[str, Any]]) 
 
 
 def _get_replay_tail(session_id: str, replay_from: int) -> typing.List[Dict[str, Any]]:
-    """取 seq > replay_from 的待重放事件；缓冲不存在/过期返回空。"""
+    """取 seq > replay_from 的待重放事件；缓冲不存在/过期返回空。
+
+    审计 §3.1-17：原实现先写 `last_active = now` 再拿它判 TTL——
+    `now - last_active ≈ 0` 恒小于 TTL，过期判定是死代码。改为先读旧值判定，
+    未过期才触碰 last_active。
+    """
     buf = _replay_buffers.get(session_id)
     if buf is None:
         return []
-    buf["last_active"] = time.time()
-    if time.time() - buf["last_active"] > _REPLAY_BUFFER_TTL_SECONDS:
+    now = time.time()
+    if now - float(buf.get("last_active") or 0) > _REPLAY_BUFFER_TTL_SECONDS:
         return []
+    buf["last_active"] = now
     return [event for seq, event in buf["events"] if seq > replay_from]
 
 
@@ -795,35 +801,25 @@ async def post_console_chat(
     # Bug B-2 修复:不强制传空历史给 agent,让 agent.chat() 自己从 session 恢复历史.
 
     # Try to get agent for real response
+    # 审计 §3.1-17：agent 未装配时原先回 200 + "Echo: <消息>"（流式腿）/
+    # 200 + 空 reply（非流式腿）——假成功让前端把没发生过的回合当成功展示。
+    # 现显式 503 点名服务不可用，交由客户端按失败处理。
     reply = ""
     reasoning = None
     tool_messages = []
-    agent = None
     try:
         agent = get_agent_instance(agent_id=body.agent_id or "")
-        if not agent:
-            reply = f"Echo: {body.message}"
     except Exception as e:
         logger.warning("Console chat error: %s", e, exc_info=True)
-        reply = f"Error: {str(e)}"
+        raise HTTPException(status_code=503, detail=f"Agent 实例装配查询失败：{e}")
+    if not agent:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Agent '{agent_id or 'default'}' 未装配，对话服务暂不可用",
+        )
 
     # S1: assistant_metadata 仅用于 SSE event_stream (reasoning/tool_messages 展示),
     # 不再传给 repo.save_message (持久化由 pipeline 负责).
-
-    if body.stream and not agent:
-        async def echo_stream():
-            events = [
-                {"type": "chunk", "content": reply},
-                {"type": "done", "session_id": session_id},
-            ]
-            _buffer_replay_events(session_id, events)
-            for event in events:
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-            buf = _replay_buffers.get(session_id)
-            if buf:
-                buf["done"] = True
-
-        return StreamingResponse(echo_stream(), media_type="text/event-stream")
 
     if body.stream:
 

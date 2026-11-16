@@ -19,6 +19,9 @@ from collections import deque
 import threading
 
 from neurova.core.lazy_singleton import lazySingleton
+from neurova.core.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 # ============================================================================
@@ -106,21 +109,23 @@ DEFAULT_ALERT_THRESHOLDS = [
         level=AlertLevel.WARNING,
         percentage=Decimal("75.00"),
         enabled=True,
-        channels=[AlertChannel.LOG, AlertChannel.SLACK],
+        # 审计 §3.5-8：Slack/Email 通道未实现，不再默认注册（虚挂的通道
+        # 让读数显示"已通知"）。要启用须先补真实实现。
+        channels=[AlertChannel.LOG],
         message_template="⚠️ Budget usage at {percentage}% - warning"
     ),
     AlertConfig(
         level=AlertLevel.CRITICAL,
         percentage=Decimal("90.00"),
         enabled=True,
-        channels=[AlertChannel.LOG, AlertChannel.SLACK, AlertChannel.EMAIL],
+        channels=[AlertChannel.LOG],
         message_template="🔴 CRITICAL: Budget usage at {percentage}% - immediate attention required"
     ),
     AlertConfig(
         level=AlertLevel.EXCEEDED,
         percentage=Decimal("100.00"),
         enabled=True,
-        channels=[AlertChannel.LOG, AlertChannel.SLACK, AlertChannel.EMAIL],
+        channels=[AlertChannel.LOG],
         message_template="🚨 BUDGET EXCEEDED: Usage at {percentage}% - throttling enabled"
     ),
     AlertConfig(
@@ -271,8 +276,40 @@ class BudgetManager:
 
     def _send_alert(self, config: AlertConfig, scope: BudgetScope,
                    identifier: str, percentage: Decimal):
-        """Send alert through configured channels"""
+        """Send alert through configured channels
+
+        审计 §3.5-8：Slack/Email 通道是空实现，此前空函数静默返回让读数
+        显示"已通知"。现在逐通道如实记录送达状态（sent / not_implemented /
+        failed）进告警历史——/alerts 的读者能分辨"通知出去了"和"没实现"。
+        """
         message = config.message_template.format(percentage=percentage)
+        channel_status: Dict[str, str] = {}
+
+        for channel in config.channels:
+            channel_name = channel.value if hasattr(channel, "value") else str(channel)
+            try:
+                if channel == AlertChannel.LOG:
+                    self._log_alert(config.level, message)
+                    channel_status[channel_name] = "sent"
+                elif channel == AlertChannel.SLACK:
+                    self._slack_alert(message)
+                    channel_status[channel_name] = "sent"
+                elif channel == AlertChannel.EMAIL:
+                    self._email_alert(scope, identifier, percentage)
+                    channel_status[channel_name] = "sent"
+                else:
+                    channel_status[channel_name] = "not_implemented"
+                # Add more channel implementations as needed
+            except NotImplementedError:
+                channel_status[channel_name] = "not_implemented"
+                logger.warning(
+                    "预算告警通道 %s 尚未实现，本条告警未送达该通道（level=%s scope=%s:%s）",
+                    channel_name, config.level, scope.value if hasattr(scope, "value") else scope,
+                    identifier,
+                )
+            except Exception as e:  # noqa: BLE001 - Don't let alert failures break the system
+                channel_status[channel_name] = f"failed: {e}"
+                logger.warning("Failed to send alert via %s: %s", channel_name, e)
 
         # P2-8：告警落历史（有界）——/alerts 的真数据源（原实现触发后即丢，
         # /alerts 恒空占位）
@@ -284,27 +321,15 @@ class BudgetManager:
                 "identifier": identifier,
                 "percentage": float(percentage),
                 "message": message,
+                "channel_status": channel_status,
             }
         )
 
-        for channel in config.channels:
-            try:
-                if channel == AlertChannel.LOG:
-                    self._log_alert(config.level, message)
-                elif channel == AlertChannel.SLACK:
-                    self._slack_alert(message)
-                elif channel == AlertChannel.EMAIL:
-                    self._email_alert(scope, identifier, percentage)
-                # Add more channel implementations as needed
-            except Exception as e:
-                # Don't let alert failures break the system
-                print(f"Failed to send alert via {channel}: {e}")
-                
     def _log_alert(self, level: AlertLevel, message: str):
         """Log alert to application logs"""
         from neurova.core.logger import get_logger
         logger = get_logger(__name__)
-        
+
         if level == AlertLevel.INFO:
             logger.info(message)
         elif level == AlertLevel.WARNING:
@@ -313,16 +338,18 @@ class BudgetManager:
             logger.error(message)
         elif level == AlertLevel.RECOVERED:
             logger.info(message)
-            
+
     def _slack_alert(self, message: str):
         """Send alert to Slack"""
-        # TODO: Implement Slack webhook integration
-        pass
-        
+        # 审计 §3.5-8：Slack webhook 集成未实现——如实抛出，由 _send_alert
+        # 记为 not_implemented，不再假装送达。
+        raise NotImplementedError("Slack alert channel is not implemented")
+
     def _email_alert(self, scope: BudgetScope, identifier: str, percentage: Decimal):
         """Send email alert"""
-        # TODO: Implement email notification
-        pass
+        # 审计 §3.5-8：邮件通知未实现——如实抛出，由 _send_alert 记为
+        # not_implemented，不再假装送达。
+        raise NotImplementedError("Email alert channel is not implemented")
         
     def get_alert_history(self, limit: int = 100) -> List[Dict[str, Any]]:
         """最近触发的告警（新→旧）——P2-8 实装：/alerts 的真数据源。"""

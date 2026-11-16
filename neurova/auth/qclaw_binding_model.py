@@ -12,6 +12,8 @@ import json
 from neurova.core.logger import get_logger
 import os
 import sqlite3
+from typing import Optional
+
 from neurova.core.data_root import callerPath
 
 # 可选依赖处理
@@ -26,6 +28,43 @@ except ImportError:
 
 # 日志配置
 logger = get_logger(__name__)
+
+# app_secret 落库加密的默认密钥来源（审计 §3.5-7：此前生产构造不传 encryption_key，
+# app_secret 走 Base64 可逆"加密"落库）：
+# 1) 环境变量 NEUROVA_QCLAW_ENCRYPTION_KEY（部署显式注入，优先）；
+# 2) 数据根下专属密钥文件 .qclaw_secret_key（首次自动生成，0600 持久化，重启稳定）。
+_QCLAW_KEY_ENV = "NEUROVA_QCLAW_ENCRYPTION_KEY"
+_QCLAW_KEYFILE_NAME = ".qclaw_secret_key"
+
+
+def _resolve_default_encryption_key() -> Optional[str]:
+    """解析默认加密密钥；解析失败返回 None（调用方退化 Base64 并告警）。"""
+    import secrets as _secrets
+
+    configured = (os.environ.get(_QCLAW_KEY_ENV) or "").strip()
+    if configured:
+        return configured
+
+    try:
+        from neurova.core.data_root import dataLanding
+
+        key_path = dataLanding(_QCLAW_KEYFILE_NAME)
+        if os.path.exists(key_path):
+            with open(key_path, "r", encoding="utf-8") as fh:
+                stored = (fh.read() or "").strip()
+            if stored:
+                return stored
+        new_key = _secrets.token_urlsafe(48)
+        fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, new_key.encode("utf-8"))
+        finally:
+            os.close(fd)
+        logger.info("已生成 QClaw app_secret 加密密钥文件: %s", key_path)
+        return new_key
+    except Exception as exc:  # noqa: BLE001 - 密钥落盘失败按无默认密钥处理
+        logger.warning("QClaw 默认加密密钥解析失败，app_secret 将退化为 Base64 编码: %s", exc)
+        return None
 
 
 class QClawBinding:
@@ -75,7 +114,9 @@ class QClawBindingModel:
             encryption_key: 用于加密app_secret的密钥（可选）
         """
         self.db_path = str(callerPath(db_path, "qclaw_bindings.db"))
-        self.encryption_key = encryption_key
+        # 审计 §3.5-7：不传密钥时自动解析默认密钥（env > 专属密钥文件），
+        # 让 Fernet 加密成为生产默认路径，Base64 只作 cryptography 缺失时的降级。
+        self.encryption_key = encryption_key or _resolve_default_encryption_key()
         self._ensure_db_dir()
         self._init_db()
         logger.info("QClawBindingModel initialized with db_path=%s", db_path)

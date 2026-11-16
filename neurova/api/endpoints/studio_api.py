@@ -263,7 +263,9 @@ async def generate_images(eid: str, body: Optional[Dict[str, Any]] = Body(defaul
                       lambda runId: services.generate_shot_images(store, project["id"], eid,
                                                                    provider=provider, model=model,
                                                                    provider_id=provider_id,
-                                                                   run_id=runId))
+                                                                   run_id=runId,
+                                                                   user_id=_uid(current_user),
+                                                                   is_admin=_is_admin(current_user)))
 
 
 @router.post("/episodes/{eid}/generate-videos")
@@ -309,7 +311,9 @@ async def asset_images(pid: str, body: Optional[Dict[str, Any]] = Body(default=N
                           store, pid, provider=provider, ids=ids,
                           model=str(b.get("model") or ""),
                           provider_id=str(b.get("provider_id") or ""),
-                          run_id=runId))
+                          run_id=runId,
+                          user_id=_uid(current_user),
+                          is_admin=_is_admin(current_user)))
 
 
 # ── episodes / storyboards 读与编辑 ───────────────────────────────────────
@@ -396,7 +400,8 @@ async def retry_storyboard(sid: str, body: Optional[Dict[str, Any]] = Body(defau
     else:
         work = lambda runId: services.generate_shot_images(  # noqa: E731
             store, project["id"], sb["episode_id"], provider=provider, model=model,
-            provider_id=provider_id, shot_ids=[sid], run_id=runId)
+            provider_id=provider_id, shot_ids=[sid], run_id=runId,
+            user_id=_uid(current_user), is_admin=_is_admin(current_user))
     return _spawn_run(store, project["id"], f"retry_{stage}", work)
 
 
