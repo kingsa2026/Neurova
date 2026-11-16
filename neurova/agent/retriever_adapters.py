@@ -10,10 +10,15 @@
 
 import asyncio
 import time
+from neurova.core.cache import MemoryCache
 from neurova.core.logger import get_logger
 from typing import Any, Dict, List
 
 logger = get_logger(__name__)
+
+# CacheRetrieverAdapter 本地缓存界（审计 3.2-8）：LRU 容量 + TTL（秒）
+_SIMPLE_CACHE_CAPACITY = 256
+_SIMPLE_CACHE_TTL_SECONDS = 600.0
 
 
 class UnifiedRetrieverAdapter:
@@ -243,7 +248,14 @@ class CacheRetrieverAdapter:
         self._name = "CacheRetriever"
         self._priority = 30  # 低优先级
         # BUG#4: _simple_cache 必须在 __init__ 初始化,否则 getattr 永远返回临时 {}
-        self._simple_cache: Dict[str, List[Dict[str, Any]]] = {}
+        # 审计 3.2-8：原无界 dict 只写不淘汰，长驻进程随查询多样性单向增长——
+        # 收口到 core/cache.MemoryCache 单源（LRU 淘汰 + 读时 TTL 过期）。
+        # cleanup_interval=0：适配器按管线实例构造，不起每实例后台清理线程。
+        self._simple_cache = MemoryCache(
+            capacity=_SIMPLE_CACHE_CAPACITY,
+            default_ttl=_SIMPLE_CACHE_TTL_SECONDS,
+            cleanup_interval=0.0,
+        )
 
     @property
     def name(self) -> str:
@@ -281,7 +293,7 @@ class CacheRetrieverAdapter:
 
             # BUG#4: retrieve 成功后写入 _simple_cache(无 cache_manager 时作为本地缓存)
             if not self._cache:
-                self._simple_cache[cache_key] = memories
+                self._simple_cache.set(cache_key, memories)
 
             return RetrievalResult(
                 memories=memories,
