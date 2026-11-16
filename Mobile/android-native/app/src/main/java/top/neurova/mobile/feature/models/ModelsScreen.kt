@@ -18,10 +18,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -45,7 +51,8 @@ import top.neurova.mobile.ui.theme.LocalNeurovaColors
 
 /**
  * P8 次级页 · 模型管理：GET /providers + /models + /providers/active-model（裸数组/裸 dict），
- * 服务商连通性探测 POST /providers/{id}/check-connection。增删服务商属管理端配置，随 P9 批次评估。
+ * 服务商连通性探测 POST /providers/{id}/check-connection，服务商增删编辑
+ * （POST/PUT/DELETE /providers，provider.py Create/UpdateProviderRequest 契约）。
  */
 @Composable
 fun ModelsScreen(onBack: () -> Unit) {
@@ -60,6 +67,9 @@ fun ModelsScreen(onBack: () -> Unit) {
     var testing by remember { mutableStateOf<String?>(null) }
     var testResult by remember { mutableStateOf<String?>(null) }
     var reloadTick by remember { mutableStateOf(false) }
+    var creating by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<ProviderInfo?>(null) }
+    var deleting by remember { mutableStateOf<ProviderInfo?>(null) }
 
     LaunchedEffect(reloadTick) {
         loading = true
@@ -82,7 +92,10 @@ fun ModelsScreen(onBack: () -> Unit) {
             IconButton(onClick = onBack) {
                 Icon(Icons.Filled.ArrowBack, contentDescription = "返回", tint = palette.textHi)
             }
-            Text("模型管理", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = palette.textHi)
+            Text("模型管理", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = palette.textHi, modifier = Modifier.weight(1f))
+            IconButton(onClick = { creating = true }) {
+                Icon(Icons.Filled.Add, contentDescription = "新增服务商", tint = palette.textHi)
+            }
         }
         when {
             loading && providers.isEmpty() -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -152,6 +165,12 @@ fun ModelsScreen(onBack: () -> Unit) {
                                 color = if (provider.apiKeyConfigured) palette.success else palette.warn,
                                 modifier = Modifier.padding(start = 6.dp),
                             )
+                            IconButton(onClick = { editing = provider }, modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Filled.Edit, contentDescription = "编辑服务商", tint = palette.textMid, modifier = Modifier.size(16.dp))
+                            }
+                            IconButton(onClick = { deleting = provider }, modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Filled.Delete, contentDescription = "删除服务商", tint = palette.textLow, modifier = Modifier.size(16.dp))
+                            }
                         }
                         Text(
                             "${provider.providerType} · ${provider.modelsCount} 个模型 · ${provider.baseUrl}",
@@ -226,7 +245,63 @@ fun ModelsScreen(onBack: () -> Unit) {
             }
         }
     }
+
+    if (creating) {
+        ProviderFormDialog(
+            title = "新增服务商",
+            initialName = "",
+            initialType = "openai",
+            initialBaseUrl = "",
+            initialApiKey = "",
+            dismiss = { creating = false },
+            submit = { name, type, baseUrl, apiKey ->
+                creating = false
+                runtime.scope.launch {
+                    runCatching { runtime.modelsRepo.createProvider(name, type, baseUrl, apiKey) }
+                    reloadTick = !reloadTick
+                }
+            },
+        )
+    }
+    editing?.let { provider ->
+        ProviderFormDialog(
+            title = "编辑服务商",
+            initialName = provider.name,
+            initialType = provider.providerType,
+            initialBaseUrl = provider.baseUrl,
+            initialApiKey = "",
+            dismiss = { editing = null },
+            submit = { name, _, baseUrl, apiKey ->
+                val target = provider.providerId
+                editing = null
+                runtime.scope.launch {
+                    runCatching { runtime.modelsRepo.updateProvider(target, name, baseUrl, apiKey) }
+                    reloadTick = !reloadTick
+                }
+            },
+        )
+    }
+    deleting?.let { provider ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("删除服务商", fontSize = 16.sp) },
+            text = { Text("确认删除「${provider.name}」？其模型清单将一并移除。", fontSize = 13.sp) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val target = provider.providerId
+                    deleting = null
+                    runtime.scope.launch {
+                        runCatching { runtime.modelsRepo.deleteProvider(target) }
+                        reloadTick = !reloadTick
+                    }
+                }) { Text("删除", color = palette.danger) }
+            },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text("取消") } },
+        )
+    }
 }
+
+private val PROVIDER_TYPES = listOf("openai", "anthropic", "gemini", "ollama", "openrouter")
 
 @Composable
 private fun SectionLabel(text: String) {
@@ -236,5 +311,74 @@ private fun SectionLabel(text: String) {
         fontWeight = FontWeight.SemiBold,
         color = LocalNeurovaColors.current.textLow,
         modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
+    )
+}
+
+/** 新增/编辑共用表单：编辑时 apiKey 留空 = 不改动（后端 Update 语义） */
+@Composable
+private fun ProviderFormDialog(
+    title: String,
+    initialName: String,
+    initialType: String,
+    initialBaseUrl: String,
+    initialApiKey: String,
+    dismiss: () -> Unit,
+    submit: (name: String, type: String, baseUrl: String, apiKey: String) -> Unit,
+) {
+    val palette = LocalNeurovaColors.current
+    var name by remember { mutableStateOf(initialName) }
+    var type by remember { mutableStateOf(initialType) }
+    var baseUrl by remember { mutableStateOf(initialBaseUrl) }
+    var apiKey by remember { mutableStateOf(initialApiKey) }
+
+    AlertDialog(
+        onDismissRequest = dismiss,
+        title = { Text(title, fontSize = 16.sp) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("名称") }, singleLine = true)
+                Text("类型", fontSize = 11.sp, color = palette.textLow)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    PROVIDER_TYPES.forEach { candidate ->
+                        val selected = candidate == type
+                        Text(
+                            candidate,
+                            fontSize = 11.sp,
+                            color = if (selected) palette.textHi else palette.textMid,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(if (selected) palette.accent.copy(alpha = 0.25f) else palette.glass)
+                                .border(
+                                    1.dp,
+                                    if (selected) palette.accent.copy(alpha = 0.6f) else palette.glassBorder,
+                                    RoundedCornerShape(999.dp),
+                                )
+                                .clickable { type = candidate }
+                                .padding(horizontal = 10.dp, vertical = 5.dp),
+                        )
+                    }
+                }
+                OutlinedTextField(value = baseUrl, onValueChange = { baseUrl = it }, label = { Text("API 地址") }, singleLine = true)
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it },
+                    label = { Text(if (initialApiKey.isEmpty()) "API Key" else "API Key（留空=不改动）") },
+                    singleLine = true,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val trimmedName = name.trim()
+                    if (trimmedName.isNotEmpty()) {
+                        dismiss()
+                        submit(trimmedName, type, baseUrl.trim(), apiKey.trim())
+                    }
+                },
+                enabled = name.trim().isNotEmpty(),
+            ) { Text("保存") }
+        },
+        dismissButton = { TextButton(onClick = dismiss) { Text("取消") } },
     )
 }

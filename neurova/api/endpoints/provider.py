@@ -378,6 +378,8 @@ async def update_provider(
         if hasattr(provider_manager, "update_provider"):
             # 构建更新参数
             update_kwargs: dict = {"provider_id": provider_id}
+            if body.name is not None:
+                update_kwargs["name"] = body.name
             if body.base_url is not None:
                 update_kwargs["base_url"] = body.base_url
             if body.api_key is not None:
