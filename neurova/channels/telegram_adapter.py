@@ -215,7 +215,7 @@ class TelegramAdapter(
     async def connect(self) -> bool:
         """getMe 校验 + 启动 getUpdates 长轮询后台线程（此前只 getMe、无接收回路
         → Telegram 收不到任何消息）。"""
-        if not self._ensure_initialized():
+        if not await asyncio.to_thread(self._ensure_initialized):
             return False
         self._main_loop = asyncio.get_running_loop()
         self._stop_event = threading.Event()
@@ -324,14 +324,18 @@ class TelegramAdapter(
     async def send_message(self, chat_id: str, content: str,
                            message_type: str = "text", **kwargs) -> Optional[str]:
         """base 契约异步发送（覆盖 TelegramSenderMixin 的旧 sync(UnifiedMessage) 签名，
-        此前 manager 按 base 契约调用 → 不可 await/TypeError 被吞 → 无法回发）。"""
-        if not self._ensure_initialized():
+        此前 manager 按 base 契约调用 → 不可 await/TypeError 被吞 → 无法回发）。
+
+        P1-16: _ensure_initialized（未初始化时 getMe）与 _send_photo/
+        _send_text_message 均为 requests 同步 HTTP，下沉工作线程不阻塞事件循环。
+        """
+        if not await asyncio.to_thread(self._ensure_initialized):
             return None
         try:
             if message_type == "image" and kwargs.get("image_path"):
-                ok = self._send_photo(str(chat_id), kwargs["image_path"])
+                ok = await asyncio.to_thread(self._send_photo, str(chat_id), kwargs["image_path"])
                 return "sent" if ok else None
-            resp = self._send_text_message(str(chat_id), content)
+            resp = await asyncio.to_thread(self._send_text_message, str(chat_id), content)
             if isinstance(resp, dict) and resp.get("ok"):
                 mid = (resp.get("result") or {}).get("message_id")
                 logger.info("telegram message sent: %s", mid or chat_id)

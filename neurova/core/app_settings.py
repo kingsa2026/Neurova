@@ -12,11 +12,17 @@
 """
 
 import json
+import os
+import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from neurova.core.logger import get_logger
 from neurova.core.data_root import callerPath
+
+# P2 §3.2-12：settings.json 的「读 → 合并 → 写」读改写全程串行，
+# 并发按 section 保存不持锁会丢 section（双方各读基线再整文件写回）
+_SETTINGS_LOCK = threading.RLock()
 
 logger = get_logger(__name__)
 
@@ -140,18 +146,27 @@ def save_app_settings(
 ) -> Dict[str, Any]:
     """按 section 合并保存（原子写），返回保存后的完整设置"""
     p = _settings_path(path)
-    current: Dict[str, Any] = {}
-    if p.exists():
-        try:
-            current = json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            current = {}
-    section_data = current.get(section) or {}
-    if isinstance(data, dict):
-        section_data.update(data)
-    current[section] = section_data
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+    with _SETTINGS_LOCK:
+        current: Dict[str, Any] = {}
+        if p.exists():
+            try:
+                current = json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                current = {}
+        section_data = current.get(section) or {}
+        if isinstance(data, dict):
+            section_data.update(data)
+        current[section] = section_data
+        p.parent.mkdir(parents=True, exist_ok=True)
+        # P2 §3.2-12：tmp + os.replace + fsync 原子落盘（对照 session_manager
+        # 范本）——裸 write_text 会先截断再流式写，中途崩给读方留半截 JSON
+        text = json.dumps(current, ensure_ascii=False, indent=2)
+        tmp_path = p.with_name(p.name + ".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, p)
     return load_app_settings(path)
 
 

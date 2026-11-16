@@ -21,6 +21,7 @@ Webhook 验签规范（官方 sign.md）:
 - 回调地址验证（op 13）需用派生私钥对 event_ts + plain_token 签名应答
 """
 
+import asyncio
 import json
 import logging
 import threading
@@ -256,10 +257,14 @@ class QQAdapter(ChannelAdapter):
         return True
 
     async def connect(self) -> bool:
-        """建立连接: 确保凭证有效且网关可达"""
-        if not self._ensure_token():
+        """建立连接: 确保凭证有效且网关可达
+
+        P1-16: 令牌换取与网关校验均为 requests 同步 HTTP，下沉工作线程。
+        """
+        ok = await asyncio.to_thread(self._ensure_token)
+        if not ok:
             return False
-        return self._verify_connection()
+        return await asyncio.to_thread(self._verify_connection)
 
     async def disconnect(self):
         """断开连接并清理凭证"""
@@ -291,7 +296,10 @@ class QQAdapter(ChannelAdapter):
         message_id = str(kwargs.pop("message_id", "") or f"qq_{int(time.time())}")
         # 任务3（台账 2026-09-11 渠道域收尾）：_send_unified 现返回 QQ 平台
         # 真实 message_id（响应无 ID 时回落本地生成），失败 None——直接透传。
-        return self._send_unified(
+        # P1-16: _send_unified 内部是 requests 同步 HTTP（含 _ensure_token 的
+        # 令牌换取），直调会阻塞事件循环——下沉工作线程（对照 feishu.py:611）。
+        return await asyncio.to_thread(
+            self._send_unified,
             UnifiedMessage(
                 message_id=message_id,
                 channel=MessageChannel.QQ,

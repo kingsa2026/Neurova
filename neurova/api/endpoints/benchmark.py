@@ -211,12 +211,16 @@ async def get_agent_benchmarks(agent_id: str, request: Request, page: int = 1, s
     items = runs[start : start + size]
 
     # Compute aggregates
-    if runs:
-        avg_score = round(sum(r["score"] for r in runs) / len(runs), 2)
-        best_score = max(r["score"] for r in runs)
+    # P1-8: simulated 运行的 score 恒为 None（诚实化纪律不编造数字），直接
+    # sum/max 会对 None 抛 TypeError 使本端点必 500。过滤 None 后聚合；
+    # 无可聚合分数时如实返回 None（前端可选链渲染 '-'，不编造 0 分）。
+    scores = [r["score"] for r in runs if r.get("score") is not None]
+    if scores:
+        avg_score = round(sum(scores) / len(scores), 2)
+        best_score = max(scores)
     else:
-        avg_score = 0
-        best_score = 0
+        avg_score = None
+        best_score = None
 
     return {
         "code": 0,
@@ -252,11 +256,18 @@ async def compare_agents(request_body: dict, request: Request):
             agent_runs = [r for r in agent_runs if r.get("suite_id") == suite_id]
 
         if agent_runs:
-            avg_score = round(sum(r["score"] for r in agent_runs) / len(agent_runs), 2)
-            best_score = max(r["score"] for r in agent_runs)
-            avg_latency = round(sum(r.get("avg_latency_ms", 0) for r in agent_runs) / len(agent_runs), 2)
+            # P1-8 同根因第二命中点：score/avg_latency_ms 均可为 None
+            # （键存在值为 None，`r.get(key, 0)` 的兜底不生效），同款过滤。
+            scores = [r["score"] for r in agent_runs if r.get("score") is not None]
+            latencies = [
+                r["avg_latency_ms"] for r in agent_runs
+                if r.get("avg_latency_ms") is not None
+            ]
+            avg_score = round(sum(scores) / len(scores), 2) if scores else None
+            best_score = max(scores) if scores else None
+            avg_latency = round(sum(latencies) / len(latencies), 2) if latencies else None
         else:
-            avg_score = best_score = avg_latency = 0
+            avg_score = best_score = avg_latency = None
 
         results[aid] = {
             "runs": len(agent_runs),

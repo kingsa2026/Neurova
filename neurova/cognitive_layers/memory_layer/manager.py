@@ -1502,7 +1502,11 @@ class MemoryManager:
 
     def _scoped_memories(self) -> List[Any]:
         """按生效三元组过滤的内存记忆视图 (agent 恒取实例自身)"""
-        return [m for m in self._memories.values() if self.isOwnedByRequestScope(m)]
+        # P2 §3.3-1（M-06 口径）：基集材料化持锁——并发 remember/forget 下
+        # 锁外迭代 .values() 会撞 RuntimeError（M-06 漏网点）
+        with self._lock:
+            base = list(self._memories.values())
+        return [m for m in base if self.isOwnedByRequestScope(m)]
 
     def _agent_memories(self) -> List[Any]:
         """agent 级浏览视图基集: 仅按实例绑定的 agent_id 过滤。
@@ -1511,7 +1515,9 @@ class MemoryManager:
         展示本 agent 全部记忆(含其他用户域行); 聊天检索仍走
         _scoped_memories 三层过滤, 两者互不影响。
         """
-        return [m for m in self._memories.values() if self.isOwnedByRequestScope(m, True)]
+        with self._lock:
+            base = list(self._memories.values())
+        return [m for m in base if self.isOwnedByRequestScope(m, True)]
 
     @property
     def emotion_module(self):
@@ -1577,7 +1583,10 @@ class MemoryManager:
         if self._content_index_ready:
             return
         self._content_index = {}
-        for mem in self._memories.values():
+        # P2 §3.3-1（M-06 口径）：快照持锁
+        with self._lock:
+            snapshot = list(self._memories.values())
+        for mem in snapshot:
             key = self._content_gate_key(mem)
             if key is not None:
                 self._content_index.setdefault(key, mem.id)
@@ -2527,13 +2536,15 @@ class MemoryManager:
         # 静默回落成 skipped（报告 +0、他的列表据此为空），而盘上本应各留一行。
         scope_ne = owner or self._eff_neuser_id()
         scope_uid = owner or self._eff_user_id()
-        existing_keys = {
-            (
-                mem.neuser_id, mem.user_id,
-                (mem.metadata or {}).get("ingest", {}).get("identity_key"),
-            )
-            for mem in self._memories.values()
-        }
+        # P2 §3.3-1（M-06 口径）：去重基集锁内构建（M-06 漏网点）
+        with self._lock:
+            existing_keys = {
+                (
+                    mem.neuser_id, mem.user_id,
+                    (mem.metadata or {}).get("ingest", {}).get("identity_key"),
+                )
+                for mem in self._memories.values()
+            }
         imported: List[Memory] = []
         skipped = 0
         superseded: List[str] = []
@@ -2587,7 +2598,10 @@ class MemoryManager:
             return []
         scope_ne, scope_uid = scope or (self._eff_neuser_id(), self._eff_user_id())
         retired: List[str] = []
-        for mem in list(self._memories.values()):
+        # P2 §3.3-1（M-06 口径）：扫描快照持锁（循环内只改记忆对象不动字典）
+        with self._lock:
+            scan = list(self._memories.values())
+        for mem in scan:
             if mem.id == keepId or mem.agent_id != self._agent_id:
                 continue
             if mem.neuser_id != scope_ne or mem.user_id != scope_uid:
@@ -3278,7 +3292,10 @@ class MemoryManager:
         weights = [0.0] * bucket_count
         peak_strength = [-1.0] * bucket_count
 
-        for mem in self._memories.values():
+        # P2 §3.3-1（M-06 口径）：快照持锁（点名漏网点 :3281）
+        with self._lock:
+            timelineSnapshot = list(self._memories.values())
+        for mem in timelineSnapshot:
             index = index_by_bucket.get(
                 self._timeline_bucket_key(self._to_local_time(mem.created_at), unit)
             )
@@ -4575,12 +4592,14 @@ class MemoryManager:
 
         # 将 memory_id 转为完整的记忆字典
         results = []
-        for mid in memory_ids:
-            mem = self._memories.get(mid)
+        # P2 §3.3-1（M-06 口径）：基集快照持锁（点名漏网点 :4579）
+        with self._lock:
+            mems = [self._memories.get(mid) for mid in memory_ids]
+        for mem in mems:
             if mem:
                 mem_dict = mem.to_dict()
                 # 附加情感信息
-                emotion_state = self._emotion_module.get_emotion(mid)
+                emotion_state = self._emotion_module.get_emotion(mem.id)
                 if emotion_state:
                     mem_dict["emotion_state"] = emotion_state.to_dict()
                 results.append(mem_dict)
@@ -4790,9 +4809,12 @@ class MemoryManager:
         window_hours = int(cfg.get("compression.time_window_hours", 24))
         enable_llm = bool(cfg.get("compression.enable_llm_compression", True))
 
+        # P2 §3.3-1（M-06 口径）：候选构建快照持锁（点名漏网点 :4795）
+        with self._lock:
+            snapshot = list(self._memories.values())
         candidates = [
             m
-            for m in self._memories.values()
+            for m in snapshot
             if m.lifecycle_stage not in (LifecycleStage.FORGOTTEN, LifecycleStage.CRYSTALLIZED)
             and (float(m.importance) / 100.0) < imp_threshold
         ][:limit]

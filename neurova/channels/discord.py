@@ -229,7 +229,11 @@ class DiscordAdapter(ChannelAdapter):
         message_id = str(kwargs.pop("message_id", "") or f"discord_{int(time.time())}")
         # 任务3（台账 2026-09-11 渠道域收尾）：_send_unified 现返回平台真实
         # message_id（响应无 ID 时回落本地生成），失败 None——直接透传。
-        return self._send_unified(
+        # P1-16: _send_unified 内部是 requests 同步 HTTP（含未认证时的
+        # _verify_token 网关校验），直调会阻塞事件循环——下沉工作线程
+        # （对照 feishu.py:611 同款范本）。
+        return await asyncio.to_thread(
+            self._send_unified,
             UnifiedMessage(
                 message_id=message_id,
                 channel=MessageChannel.DISCORD,

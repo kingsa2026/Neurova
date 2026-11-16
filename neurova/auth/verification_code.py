@@ -16,6 +16,7 @@ from neurova.core.logger import get_logger
 import os
 import secrets
 import sqlite3
+import threading
 import time
 from dataclasses import asdict, dataclass
 from enum import Enum
@@ -99,6 +100,10 @@ class VerificationCodeModel:
 
         self.db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None
+        # P2 §3.5-13：模型共用单连接（check_same_thread=False），并发事务的
+        # commit 会互相波及——verify_code 的「读-判-核销-提交」在模型锁内
+        # 串行化为原子区。
+        self._verifyLock = threading.Lock()
         self._ensure_db_dir()
         self._init_db()
 
@@ -293,6 +298,7 @@ class VerificationCodeModel:
         Returns:
             验证码是否有效
         """
+        self._verifyLock.acquire()
         try:
             # 获取验证码
             verification_code = self.get_code_info(target, code_type)
@@ -320,8 +326,13 @@ class VerificationCodeModel:
                 return False
 
             # 标记为已使用
-            if mark_as_used:
-                self._mark_as_used(target, code_type)
+            # P2 §3.5-13：条件核销——rowcount=0 说明并发下已被他人核销，如实拒绝
+            if mark_as_used and not self._mark_as_used(target, code_type):
+                logger.warning(
+                    "Verification code already consumed for %s (type=%s)",
+                    target, code_type.value,
+                )
+                return False
 
             logger.info("Verified code for %s (type=%s)", target, code_type.value)
             return True
@@ -329,6 +340,8 @@ class VerificationCodeModel:
         except Exception as e:
             logger.error("Failed to verify code: %s", e)
             return False
+        finally:
+            self._verifyLock.release()
 
     def _delete_old_codes(self, target: str, code_type: VerificationType):
         """
@@ -601,27 +614,34 @@ class VerificationCodeModel:
 
         conn.commit()
 
-    def _mark_as_used(self, target: str, code_type: VerificationType):
+    def _mark_as_used(self, target: str, code_type: VerificationType) -> bool:
         """
-        标记为已使用
+        标记为已使用（条件核销）
 
         Args:
             target: 目标
             code_type: 验证码类型
+
+        Returns:
+            是否核销成功——P2 §3.5-13：无条件 `SET is_used = 1` 在并发验证下
+            双双放行（read-then-write 非原子）。改为条件 UPDATE
+            `WHERE is_used = 0`，rowcount=0 即已被他人核销，调用方如实拒绝。
         """
         conn = self._get_conn()
         cursor = conn.cursor()
 
         cursor.execute(
             """
-            UPDATE verification_codes 
+            UPDATE verification_codes
             SET is_used = 1
-            WHERE target = ? AND code_type = ?
+            WHERE target = ? AND code_type = ? AND is_used = 0
         """,
             (target, code_type.value),
         )
+        consumed = cursor.rowcount == 1
 
         conn.commit()
+        return consumed
 
     def get_statistics(self) -> Dict[str, Any]:
         """

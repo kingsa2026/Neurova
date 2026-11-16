@@ -70,13 +70,21 @@ class SecuritySandbox:
         logger.info(
             f"SecuritySandbox initialized for {config.model_name} - "
             f"max_tokens={self.quota.max_tokens_per_call}, "
-            f"rate_limit={self.quota.rate_limit_requests_per_minute}/min"
+            # P1-10: 此前引用不存在的 quota.rate_limit_requests_per_minute，
+            # 每次 OpenAIAdapter 构造必 AttributeError（分诊门 fail-open 根因之一）
+            f"rate_limit={self.quota.max_requests_per_minute}/min"
         )
     
     @asynccontextmanager
     async def acquire_resource(self):
-        """Acquire resource slot (concurrency limit)"""
-        acquired = self._semaphore.acquire(blocking=True, timeout=self.config.timeout_seconds)
+        """Acquire resource slot (concurrency limit)
+
+        threading.Semaphore 的阻塞式 acquire 不得在事件循环线程直调——
+        额度打满时会把整个循环卡到超时（P1-16 同族），下沉工作线程等待。
+        """
+        acquired = await asyncio.to_thread(
+            self._semaphore.acquire, True, self.config.timeout_seconds
+        )
         
         if not acquired:
             raise TimeoutError(

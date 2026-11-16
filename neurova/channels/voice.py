@@ -4,6 +4,8 @@
 支持 Twilio 语音通话，含 TTS/STT
 """
 
+import asyncio
+
 from neurova.core.logger import get_logger
 from typing import Any, Dict, Optional
 
@@ -86,7 +88,9 @@ class VoiceAdapter(ChannelAdapter):
         try:
             if message_type == "call":
                 # 发起语音通话
-                call = self._client.calls.create(
+                # P1-16: Twilio SDK 是同步 HTTP，直调会阻塞事件循环——下沉工作线程
+                call = await asyncio.to_thread(
+                    self._client.calls.create,
                     to=chat_id,
                     from_=self.config.extra.get("from_number", ""),
                     twiml=f'<Response><Say voice="alice">{content}</Say></Response>',
@@ -101,8 +105,9 @@ class VoiceAdapter(ChannelAdapter):
                 return call_id
 
             elif message_type == "sms":
-                # 发送短信
-                message = self._client.messages.create(
+                # 发送短信（P1-16 同款：同步 SDK 下沉工作线程）
+                message = await asyncio.to_thread(
+                    self._client.messages.create,
                     to=chat_id,
                     from_=self.config.extra.get("from_number", ""),
                     body=content,
