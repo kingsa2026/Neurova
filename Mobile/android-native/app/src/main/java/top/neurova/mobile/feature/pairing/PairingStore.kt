@@ -132,6 +132,13 @@ class PairingStore(
         }
     }
 
+    /** 已配对设备数（F10 个人页读数；GET /mobile/pairing/list 属主过滤） */
+    suspend fun pairedDeviceCount(): Int {
+        val data = http.unwrapData(http.getJson("/mobile/pairing/list"))
+        val devices = (data as? JsonObject)?.get("devices") as? kotlinx.serialization.json.JsonArray
+        return devices?.size ?: 0
+    }
+
     fun clear() {
         paired = false
         wsUrl = ""
