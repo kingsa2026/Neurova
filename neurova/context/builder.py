@@ -387,7 +387,6 @@ class ContextBuilder:
         # 提取会话信息
         conversation_history = session.get("conversation_history", [])
         user_id = session.get("user_id")
-        session.get("agent_id")
         metadata = session.get("metadata", {})
 
         # 提取选项
