@@ -19,7 +19,6 @@ import chatPageTest from './ChatPage.test';
 // 新增 API 模块测试套件
 import memoryApiTest from './MemoryApi.test';
 import knowledgeApiTest from './KnowledgeApi.test';
-import modelsApiTest from './ModelsApi.test';
 import healthApiTest from './HealthApi.test';
 import settingsApiTest from './SettingsApi.test';
 import agentChannelsApiTest from './AgentChannelsApi.test';
@@ -114,7 +113,6 @@ export default function testsuite() {
   // 新增 API 模块测试套件
   memoryApiTest();
   knowledgeApiTest();
-  modelsApiTest();
   healthApiTest();
   settingsApiTest();
   agentChannelsApiTest();

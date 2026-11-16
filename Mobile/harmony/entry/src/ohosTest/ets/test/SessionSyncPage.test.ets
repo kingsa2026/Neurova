@@ -9,6 +9,7 @@
 // 时间相关测试：在测试内部以 Date.now() 为基准计算时间戳，保证与实现侧 Date.now() 一致。
 import { describe, it, expect } from '@ohos/hypium';
 import { SessionSyncViewHelper } from '../../../main/ets/pages/SessionSyncPage';
+import { StyleManager } from '../../../main/ets/libs/style/StyleManager';
 
 export default function sessionSyncPageTest() {
   describe('SessionSyncPage', () => {
@@ -16,18 +17,27 @@ export default function sessionSyncPageTest() {
 
     it('status_color_synced_returns_status_success', 0, () => {
       expect(SessionSyncViewHelper.getStatusColor('synced')).assertEqual('status_success');
+      // token 必须能被 StyleManager 解析为真色值（修复前不在表内回退 '#000000'——审计 3.8-2）
+      expect(StyleManager.getInstance().getColor('status_success'))
+        .assertEqual(StyleManager.getInstance().getColor('success'));
     });
 
     // ========== 切片2: getStatusColor - partial → status_warning ==========
 
     it('status_color_partial_returns_status_warning', 0, () => {
       expect(SessionSyncViewHelper.getStatusColor('partial')).assertEqual('status_warning');
+      // token 必须能被 StyleManager 解析为真色值（修复前不在表内回退 '#000000'——审计 3.8-2）
+      expect(StyleManager.getInstance().getColor('status_warning'))
+        .assertEqual(StyleManager.getInstance().getColor('warning'));
     });
 
     // ========== 切片3: getStatusColor - failed → status_error ==========
 
     it('status_color_failed_returns_status_error', 0, () => {
       expect(SessionSyncViewHelper.getStatusColor('failed')).assertEqual('status_error');
+      // token 必须能被 StyleManager 解析为真色值（修复前不在表内回退 '#000000'——审计 3.8-2）
+      expect(StyleManager.getInstance().getColor('status_error'))
+        .assertEqual(StyleManager.getInstance().getColor('error'));
     });
 
     // ========== 切片4: getStatusIcon - synced → ✅ ==========

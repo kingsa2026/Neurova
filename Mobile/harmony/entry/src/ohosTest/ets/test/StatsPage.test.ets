@@ -8,6 +8,7 @@
 // 严格规则：一个测试 → 一个实现 → 循环（垂直切片），禁止一次性写完所有测试再写实现。
 import { describe, it, expect } from '@ohos/hypium';
 import { StatsViewHelper } from '../../../main/ets/pages/StatsPage';
+import { StyleManager } from '../../../main/ets/libs/style/StyleManager';
 
 export default function statsPageTest() {
   describe('StatsPage', () => {
@@ -39,12 +40,18 @@ export default function statsPageTest() {
 
     it('trend_color_positive_returns_status_success', 0, () => {
       expect(StatsViewHelper.getTrendColor(12)).assertEqual('status_success');
+      // token 必须能被 StyleManager 解析为真色值（修复前不在表内回退 '#000000'——审计 3.8-2）
+      expect(StyleManager.getInstance().getColor('status_success'))
+        .assertEqual(StyleManager.getInstance().getColor('success'));
     });
 
     // ========== 切片6: getTrendColor - 负数 → status_error ==========
 
     it('trend_color_negative_returns_status_error', 0, () => {
       expect(StatsViewHelper.getTrendColor(-5)).assertEqual('status_error');
+      // token 必须能被 StyleManager 解析为真色值（修复前不在表内回退 '#000000'——审计 3.8-2）
+      expect(StyleManager.getInstance().getColor('status_error'))
+        .assertEqual(StyleManager.getInstance().getColor('error'));
     });
 
     // ========== 切片7: getTrendColor - 零 → text_secondary ==========
