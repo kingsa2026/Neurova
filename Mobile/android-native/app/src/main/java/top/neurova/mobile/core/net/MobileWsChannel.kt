@@ -1,6 +1,7 @@
 package top.neurova.mobile.core.net
 
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -24,7 +25,9 @@ import top.neurova.mobile.core.protocol.MobileWsClosePolicy
  * - 握手：一次性 connect_ticket 走 **Authorization: Bearer** 头（后端 _ticketFromHandshake
  *   的优先通道，鸿蒙同款）。子协议 `neurova.auth.<ticket>` 形态已证伪——ticket 含冒号，
  *   不是合法 RFC6455 子协议 token，握手必败（2026-11-16 wsprobe 实测），勿回潮；
- * - 心跳：30s 应用层 ping/pong，pong 超时 10s 视为断流（中继上静默断流没有 close 帧）；
+ * - 心跳：30s 应用层 ping/pong，帧契约 `{"type":"ping"}` / `{"type":"pong"}`（与后端
+ *   mobile_pairing.py 消息循环、鸿蒙 WebSocketAdapter 三方同源）；pong 超时 10s 视为断流
+ *   （中继上静默断流没有 close 帧）；
  * - 关闭分档：由 MobileWsClosePolicy 裁决——4001 先续签重试一次（唯一需重新配对的是
  *   续签被拒 device_deregistered）；4008 不重连；manual 恒终态。
  */
@@ -34,6 +37,9 @@ class MobileWsChannel(
     private val ticketProvider: () -> String?,
     /** 4001 续签：成功返回新 ticket，失败抛出（= 设备已解除，终态） */
     private val refreshTicket: suspend () -> String,
+    /** 心跳间隔与 pong 超时：生产用常量默认值，测试注入短周期（行为路径同一份） */
+    private val heartbeatIntervalMs: Long = HEARTBEAT_MS,
+    private val pongTimeoutMs: Long = PONG_TIMEOUT_MS,
     client: OkHttpClient = OkHttpClient(),
 ) {
     enum class State { IDLE, CONNECTING, AUTHED, REAUTHING, RECONNECTING, FAILED, CLOSED }
@@ -73,11 +79,17 @@ class MobileWsChannel(
 
     private var socket: WebSocket? = null
     private var heartbeatJob: Job? = null
+
+    /** 本周期是否仍在等 pong（OkHttp 读线程置 false，心跳协程读；判定超时的唯一依据） */
+    private val awaitingPong = AtomicBoolean(false)
     private var reconnectCount = 0
     private var refreshAlreadyTried = false
     private var manualClosed = false
 
     fun connect() {
+        // 手动关闭是终态（MobileWsClosePolicy：manual 恒终态）——挂起的重连协程
+        // 不得借 connect() 复活已关闭的通道
+        if (manualClosed) return
         manualClosed = false
         val url = wsUrlProvider() ?: run { stateFlow.value = State.FAILED; return }
         val ticket = ticketProvider() ?: run { stateFlow.value = State.FAILED; return }
@@ -117,12 +129,21 @@ class MobileWsChannel(
         heartbeatJob?.cancel()
         heartbeatJob = scope.launch {
             while (true) {
-                delay(HEARTBEAT_MS)
-                if (socket?.send("ping") != true) break
-                delay(PONG_TIMEOUT_MS)
-                // 超时未收到 pong：视为断流（无 close 帧），走传输层重连档
-                socket?.close(1006, "pong-timeout")
-                socket = null
+                delay(heartbeatIntervalMs)
+                awaitingPong.set(true)
+                // 心跳是 JSON 帧 {"type":"ping"}：后端消息循环 json.loads 只吃 JSON，
+                // 裸文本 "ping" 会炸掉连接（鸿蒙 WebSocketAdapter 同契约，勿回潮）
+                if (!sendFrame(buildJsonObject("type" to "ping"))) break
+                delay(pongTimeoutMs)
+                if (awaitingPong.get()) {
+                    // 超时未收到 pong：视为断流，主动拆线走传输层重连档。关闭码用线上
+                    // 合法的 1000——1006 是 RFC 保留码，OkHttp 发送侧直接抛
+                    // IllegalArgumentException（原实现的 close(1006) 从未发出去过，
+                    // 心跳协程当场崩死，连接成僵尸）
+                    socket?.close(1000, "pong-timeout")
+                    socket = null
+                    break
+                }
             }
         }
     }
@@ -175,9 +196,11 @@ class MobileWsChannel(
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            if (text == "pong") return
             val frame = runCatching { json.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return
             when (frame["type"]?.toString()?.trim('"')) {
+                // 后端 pong 是 JSON 帧 {"type":"pong",...}（mobile_pairing.py 消息循环），
+                // 裸文本 "pong" 不在契约内；收到即清除等待标记，心跳循环据此判活
+                "pong" -> awaitingPong.set(false)
                 "chat:chunk" -> eventsFlow.tryEmit(
                     Event.Chunk(
                         content = frame["content"]?.toString()?.trim('"').orEmpty(),
