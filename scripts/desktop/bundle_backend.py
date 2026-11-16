@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -37,6 +38,39 @@ MANIFEST = STAGE / "MANIFEST.json"
 # .cache = HuggingFace/modelscope 下载缓存（模型目录实测混入，用户点名排除）
 # .git = 任何被拷入的仓库元数据
 EXCLUDE_DIR_NAMES = {"__pycache__", ".mimosa", ".pytest_cache", ".cache", ".git", ".github"}
+
+# P0-1（2026-11-16 拍板）：主恢复口令只经环境变量在部署/运行期存在，
+# 分发包必须零口令——出厂守卫双查：①历史常量字样零残留；②环境变量名的
+# 直接赋值常量形态（`NEUROVA_MASTER_RECOVERY_PASSWORD = "..."`）不得出现
+# （auth.py 里 `os.environ.get(ENV_NAME)` 的合法引用不在此列）。
+HISTORICAL_MASTER_PASSWORD = "neurovamakehappy"
+MASTER_PASSWORD_ENV_NAME = "NEUROVA_MASTER_RECOVERY_PASSWORD"
+#: 允许出现 env 名的形态：os.environ.get / environ[ 下标 / 注释引用——都带访问语义；
+#: 禁止的是裸赋值常量（唯一例外是 .env.example 的空值槽位 `=` 后无值）。
+_MASTER_PASSWORD_ASSIGN_RE = re.compile(
+    rf'{MASTER_PASSWORD_ENV_NAME}\s*=\s*["\'][^"\']+["\']'
+)
+
+
+def assertStageFreeOfMasterPassword(stage: Path) -> None:
+    """出厂守卫：产物源码树零口令值。命中即抛 RuntimeError（构建失败）。"""
+    hits: list[str] = []
+    for path in stage.rglob("*"):
+        if not path.is_file() or path.suffix not in HASH_SUFFIXES:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if HISTORICAL_MASTER_PASSWORD in text:
+            hits.append(f"{path.relative_to(stage)}: 历史口令字样")
+        elif _MASTER_PASSWORD_ASSIGN_RE.search(text):
+            hits.append(f"{path.relative_to(stage)}: 口令环境变量被赋字面常量")
+    if hits:
+        raise RuntimeError(
+            "分发包含主恢复口令值，拒绝出厂（P0-1）：\n  " + "\n  ".join(hits[:20])
+        )
+    log("出厂守卫：主恢复口令零残留 ✓")
 
 
 def log(msg: str) -> None:
@@ -237,6 +271,10 @@ def main() -> int:
     manifest["built_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     manifest["python"] = sys.version.split()[0]
     MANIFEST.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # P0-1 出厂守卫：包内零口令值（历史字样 + env 赋值常量双查）
+    assertStageFreeOfMasterPassword(STAGE)
+
     log(f"后端打包完成 → {STAGE}（用时 {time.time() - t0:.0f}s）")
     return 0
 

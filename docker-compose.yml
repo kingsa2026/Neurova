@@ -36,6 +36,10 @@ services:
       # 多副本/多实例场景必须由宿主提供（缺省时空值 → 自动生成，写容器内文件，
       # 重启即失效）。单机默认留空即可。
       - NEUROVA_JWT_SECRET=${NEUROVA_JWT_SECRET:-}
+      # 主恢复口令（P0-1）：经宿主环境/部署环境注入（.env 的
+      # NEUROVA_MASTER_RECOVERY_PASSWORD 槽位），分发包内不含口令值。
+      # 留空 = POST /api/v1/auth/recover-password 整体禁用（404）。
+      - NEUROVA_MASTER_RECOVERY_PASSWORD=${NEUROVA_MASTER_RECOVERY_PASSWORD:-}
       # v2 统一布局：会话/工作区/记忆/配置均落在数据根 `/app/data/<agent_id>/` 下。
       # 旧的 neurova-workspaces / neurova-sessions 卷不再挂载；升级前先跑
       # `python scripts/agent_layout_migration.py --apply` 把旧卷内容迁进数据根。
