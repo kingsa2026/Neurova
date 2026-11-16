@@ -49,7 +49,9 @@ with sqlite3.connect(str(db_path)) as conn:
         },
         {
             "id": "neurova-tech-stack",
-            "content": "Neurova技术栈：后端Flask+SQLite，前端Vue 3(CDN模式)，SSE流式对话，NEU Token认证。服务器192.168.10.132:9527。默认用户名Neurova，密码123456。包含脑波可视化动画、粒子效果背景。",
+            # 3.9-8（2026-11-16 审计）：原串内嵌内网 IP 与初始口令，随包分发——
+            # 部署地址与凭据一律经环境注入，不进源码/记忆种子。
+            "content": "Neurova技术栈：后端Flask+SQLite，前端Vue 3(CDN模式)，SSE流式对话，NEU Token认证（部署地址与初始凭据经环境注入，不入库）。包含脑波可视化动画、粒子效果背景。",
             "category": "fact",
             "temperature": 75.0,
         },

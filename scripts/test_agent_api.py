@@ -4,6 +4,7 @@ Agent 创建和编辑功能测试
 用于验证前端Agent表单和后端API的完整交互流程
 """
 
+import os
 import requests
 import json
 import time
@@ -14,15 +15,18 @@ import sys
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-BASE_URL = "http://192.168.10.132:9527/api/v1"
+# 部署地址与演示凭据经环境注入（审计 3.9-8 同根因：内网 IP/弱口令不随包分发）
+BASE_URL = os.environ.get("NEUROVA_BASE_URL", "http://localhost:9527/api/v1")
+DEMO_USERNAME = os.environ.get("NEUROVA_DEMO_USERNAME", "")
+DEMO_PASSWORD = os.environ.get("NEUROVA_DEMO_PASSWORD", "")
 
 class AgentAPITester:
     def __init__(self, base_url: str = BASE_URL):
         self.base_url = base_url
         self.token = None
         self.test_agent_id = f"test_agent_{int(time.time())}"
-    
-    def login(self, username: str = "admin", password: str = "admin123") -> bool:
+
+    def login(self, username: str = DEMO_USERNAME, password: str = DEMO_PASSWORD) -> bool:
         """登录获取token"""
         try:
             response = requests.post(
