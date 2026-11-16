@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 from neurova.agent.task_unit import parseTaskUnit, renderTaskUnitPrompt
 from neurova.agent.acceptance_gate import runAcceptanceLoop
+from neurova.agent.review_gate import runReviewLoop
 from neurova.core.lazy_singleton import lazySingleton
 
 logger = logging.getLogger(__name__)
@@ -82,12 +83,14 @@ def reset_subagent_depth(token) -> None:
 # 现两处集合由同一份词值导出，互斥且并起来覆盖整个状态域（判据钉这条）。
 SUBAGENT_PENDING = "pending"
 SUBAGENT_RUNNING = "running"
+#: P1-3（评测报告 G-5）：监督评审相位——验收通过后、终态前的把关段（占派生槽）
+SUBAGENT_IN_REVIEW = "in_review"
 SUBAGENT_COMPLETED = "completed"
 SUBAGENT_FAILED = "failed"
 SUBAGENT_STATUSES = frozenset(
-    {SUBAGENT_PENDING, SUBAGENT_RUNNING, SUBAGENT_COMPLETED, SUBAGENT_FAILED})
+    {SUBAGENT_PENDING, SUBAGENT_RUNNING, SUBAGENT_IN_REVIEW, SUBAGENT_COMPLETED, SUBAGENT_FAILED})
 #: 仍占着派生槽、且永不逐出的状态
-SUBAGENT_ACTIVE_STATUSES = frozenset({SUBAGENT_PENDING, SUBAGENT_RUNNING})
+SUBAGENT_ACTIVE_STATUSES = frozenset({SUBAGENT_PENDING, SUBAGENT_RUNNING, SUBAGENT_IN_REVIEW})
 #: 已收尾的状态——既释放槽位，也进 _evict_finished_runs 的逐出面
 SUBAGENT_FINISHED_STATUSES = frozenset({SUBAGENT_COMPLETED, SUBAGENT_FAILED})
 
@@ -202,6 +205,9 @@ class SubAgentRun:
     # P1-2（评测报告 G-3）：验收门判定记录（achieved/missing/rounds/reworked 或 skipped）。
     # None = 未过门（开关关且无显式验收条件）。
     acceptance: Optional[Dict[str, Any]] = None
+    # P1-3（评测报告 G-5）：监督评审记录（passed/findings/rounds/reworked 或 skipped）。
+    # None = 未评审（reviewMode != supervisor）。
+    review: Optional[Dict[str, Any]] = None
     status: str = SUBAGENT_PENDING  # 取值域见 SUBAGENT_STATUSES（本模块常量，唯一出处）
     # P2-10 增强：子代理升级/结构化结果提交（escalate/submit_result 工具写入，
     # 随邮箱投递发起者会话；只作读数与通知，不改变运行状态机）
@@ -247,6 +253,7 @@ class SubAgentRun:
             "subagent_type": self.subagent_type,
             "task_unit": self.task_unit,
             "acceptance": self.acceptance,
+            "review": self.review,
             "tool_allowlist_size": len(self.tool_allowlist) if self.tool_allowlist else None,
             "status": self.status,
             "report": self.report,
@@ -1064,6 +1071,21 @@ class SwarmManager:
                 run.cause = gate.cause
                 raise RuntimeError(gate.failedReason)
             report = gate.report
+            # P1-3（评测报告 G-5）监督评审相位：reviewMode=supervisor 时集成前评审；
+            # 不通过带 findings 回炉一次，仍不通过置 failed（cause=review_failed）；
+            # 评审器不可用诚实降级（completed + review.skipped 标注）。
+            review = await runReviewLoop(
+                run,
+                chatFn=doMemberChat,
+                verifyChannel=getattr(verifyChannel, "chat", None),
+                firstReport=report,
+            )
+            if review.info is not None:
+                run.review = review.info
+            if review.failedReason:
+                run.cause = review.cause
+                raise RuntimeError(review.failedReason)
+            report = review.report
             run.report = report
             run.status = SUBAGENT_COMPLETED
             run.finished_at = time.time()
