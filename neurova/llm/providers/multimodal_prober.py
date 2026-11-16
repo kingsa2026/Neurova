@@ -276,7 +276,7 @@ class MultimodalProber:
 
 
 _singleton: Optional[MultimodalProber] = None
-_singleton_lock = threading.Lock()
+_singleton_lock = threading.RLock()
 _DEFAULT_DIR = dataPath("multimodal_prober")
 
 

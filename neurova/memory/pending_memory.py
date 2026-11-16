@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from neurova.core.content_identity import normalized_key
+from neurova.core.db_migration import migrate as applyMigrations, register_migration
 from neurova.core.logger import get_logger
 from neurova.core.data_root import get_data_root
 
@@ -190,6 +191,25 @@ CREATE TABLE IF NOT EXISTS content_tombstones (
 );
 """
 
+# ── schema 版本域（审计 3.3-2）：全链演进经注册表，按 user_version 幂等跳过 ──
+# v1 建表（待审账+遗忘墓碑）并废弃两个历史索引定义
+# v2 存量库补 proposed_action/target_memory_id 列
+# v3 堆积收敛（pending/rejected 分区去重）+ 重建隔离唯一索引
+# 顺序即原 __init__ 手拼序列，搬进版本链后不再每次启动全量重跑。
+PENDING_MEMORY_DOMAIN = "pending_memories"
+
+register_migration(
+    1,
+    _SCHEMA + _TOMBSTONE_SCHEMA + "".join(_MIGRATION_DROP_OLD),
+    domain=PENDING_MEMORY_DOMAIN,
+)
+register_migration(2, _migrate_action_columns, domain=PENDING_MEMORY_DOMAIN)
+register_migration(
+    3,
+    _LEGACY_CLEANUP + _LIVE_FP_INDEX,
+    domain=PENDING_MEMORY_DOMAIN,
+)
+
 
 class PendingMemoryStore:
     """待确认记忆账本。独立分库，绝不与主记忆检索混表。"""
@@ -198,20 +218,11 @@ class PendingMemoryStore:
         self._db_path = db_path
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
-        self._conn.executescript(_SCHEMA)
-        self._conn.executescript(_TOMBSTONE_SCHEMA)
-        self._conn.executescript(_MIGRATION_DROP_OLD)
-        self._migrate_columns()
-        self._conn.executescript(_LEGACY_CLEANUP)
-        self._conn.executescript(_LIVE_FP_INDEX)
+        # schema 演进全链经版本化迁移（审计 3.3-2）：v1 建表+废弃旧索引 →
+        # v2 补列 → v3 堆积收敛+隔离唯一索引；失败上抛（诚实暴露），不再
+        # `_migrate_columns` 的 try/except 吞掉后靠下次启动重试
+        applyMigrations(self._conn, PENDING_MEMORY_DOMAIN)
         self._conn.commit()
-
-    def _migrate_columns(self) -> None:
-        try:
-            _migrate_action_columns(self._conn)
-            self._conn.commit()
-        except Exception:  # noqa: BLE001 - 迁移失败不阻断建库，待下次启动重试
-            self._conn.rollback()
 
     # ── P1#11 遗忘墓碑 ────────────────────────────────────────
 
@@ -507,7 +518,7 @@ class PendingMemoryStore:
 
 
 _process_store: Optional[PendingMemoryStore] = None
-_process_lock = threading.Lock()
+_process_lock = threading.RLock()
 
 
 def defaultPendingDbPath() -> str:

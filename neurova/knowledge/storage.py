@@ -293,7 +293,7 @@ class KnowledgeStorage:
 
 
 _singleton: Optional["KnowledgeStorage"] = None
-_singleton_lock = threading.Lock()
+_singleton_lock = threading.RLock()
 _DEFAULT_DIR = dataPath("knowledge")
 
 

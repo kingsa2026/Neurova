@@ -707,7 +707,7 @@ class MemorySecurity:
 # ────── 单例管理 ──────
 
 _security_instance: Optional[MemorySecurity] = None
-_instance_lock = threading.Lock()
+_instance_lock = threading.RLock()
 
 
 def get_memory_security(config: Optional[SecurityConfig] = None) -> MemorySecurity:

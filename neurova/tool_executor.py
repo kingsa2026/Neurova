@@ -5093,7 +5093,7 @@ class ToolExecutor:
     # 审计 P1-E1：降级 MemoryManager 模块级缓存（原每次失败新建重对象，
     # 全表加载+建索引代价在每次工具调用重复支付）
     _fallback_memory_manager = None
-    _fallback_memory_manager_lock = threading.Lock()
+    _fallback_memory_manager_lock = threading.RLock()
 
     @classmethod
     def _get_fallback_memory_manager(cls):
