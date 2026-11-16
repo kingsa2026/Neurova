@@ -72,7 +72,7 @@
 
 ## 历史待办（已完成项存档）
 
-- [x] 包名：安卓 `com.neurova.app`（建议值，待安卓工程创建时登记）；鸿蒙实际注册为 `com.neurova.mobile`
+- [x] 包名：安卓 `top.neurova.mobile`（实际登记值）；鸿蒙实际注册为 `com.neurova.mobile`
 - [x] 华为 AGC：创建应用 + 上传 CSR + 签发发布证书 + 创建发布 Profile + 下载 `.cer`/`.p7b`
 - [x] `.cer`/`.p7b` 归置 `Mobile/signing/`（git 已忽略，规则 `Mobile/signing/*.cer|*.p7b`）
 - [ ] 密码转存密码管理器

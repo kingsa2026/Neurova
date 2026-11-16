@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  网络安全策略（审计 3.8-9：明文开关从 manifest 迁到本文件单点）。
+
+  为什么 base-config 必须放行明文：本应用的服务器地址来自用户扫码/手填的
+  自建 Neurova 工作区（典型为 http://192.168.x.x:9527 这类局域网地址），
+  服务的 TLS 由部署方决定。Android networkSecurityConfig 只支持按"域名"
+  白名单放行，无法表达"任意用户输入的 IP/主机"——把局域网地址逐个列进
+  domain-config 在产品形态上不可能。因此明文需求落在 base-config 一级。
+
+  后续收紧路径（登记 R2 台账）：服务端全量上 TLS 或提供固定接入域名后，
+  把 base-config 收回 false，仅对固定域名开 domain-config。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
