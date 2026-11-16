@@ -338,6 +338,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/ChannelIntegrationPage.vue'),
       },
       {
+        // 移动端配对（账号级，按登录用户隔离；2026-11-16 从 Agent 渠道页迁出）
+        path: 'tools/mobile-pairing',
+        name: 'MobilePairing',
+        component: () => import('@/pages/MobilePairingPage.vue'),
+      },
+      {
         // 数据中台总览：知识库/图谱/本体/事实/互操作/企业源/评测的统一入口。
         // 只做入口聚合与可见性概览，不新造第二套数据页（页面仍归各域）。
         path: 'data-hub',

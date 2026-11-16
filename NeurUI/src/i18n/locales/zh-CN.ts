@@ -99,6 +99,7 @@ export default {
     skills: '技能',
     models: '模型',
     tools: '工具',
+    mobilePairing: '移动端配对',
     channels: '渠道',
     system: '系统',
     settings: '设置',

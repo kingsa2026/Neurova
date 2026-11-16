@@ -99,6 +99,7 @@ export default {
     skills: 'कौशल',
     models: 'मॉडल',
     tools: 'उपकरण',
+    mobilePairing: 'मोबाइल पेयरिंग',
     channels: 'चैनल',
     system: 'सिस्टम',
     settings: 'सेटिंग्स',

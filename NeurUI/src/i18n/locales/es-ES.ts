@@ -99,6 +99,7 @@ export default {
     skills: 'Habilidades',
     models: 'Modelos',
     tools: 'Herramientas',
+    mobilePairing: 'Vinculación móvil',
     channels: 'Canales',
     system: 'Sistema',
     settings: 'Ajustes',

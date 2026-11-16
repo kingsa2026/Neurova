@@ -43,8 +43,10 @@ vi.mock('@/api/modules/channel-configs', () => ({
   listObservedChannelSenders: (...a: unknown[]) => listObservedChannelSenders(...a),
   listMyChannelIdentityBindings: (...a: unknown[]) => listMyChannelIdentityBindings(...a),
 }))
-// 渠道页现在还挂着移动配对面板（批 29）：这一族只管**接线**，配对语义在
-// `components/__tests__/MobilePairingPanel.test.ts`，这里只钉"它在整页上"。
+// 移动配对面板已迁出渠道页（2026-11-16 用户裁定：账号级能力挂顶部「模型与工具」，
+// 路由 /tools/mobile-pairing）：这里只钉"渠道页不再挂它"——防同一面板双入口回归。
+// 配对语义在 `components/__tests__/MobilePairingPanel.test.ts`，
+// 整页接线在 `MobilePairingPage.wiring.test.ts`。
 const getPairedDevices = vi.fn().mockResolvedValue({ devices: [], total: 0 })
 vi.mock('@/api/modules/mobile', () => ({
   generatePairing: vi.fn(),
@@ -147,13 +149,11 @@ describe('AgentChannelPage — 绑定面板的接线', () => {
       .toContain('还没有已配置的渠道')
   })
 
-  it('移动配对面板挂在渠道页上（后端修通三批之后，这条链第一次有可达入口）', async () => {
+  it('移动配对面板已迁出渠道页（入口唯一：/tools/mobile-pairing，防双入口回归）', async () => {
     const wrapper = mountPage()
     await flushPromises()
 
     expect(wrapper.find('[data-testid="mobile-pairing-panel"]').exists(),
-      '配对面板没接进整页——后端再对，用户也还是没有入口（组件对≠接上）').toBe(true)
-    expect(getPairedDevices, '面板首屏就该向服务端取设备列表（屏幕状态来自唯一事实源）')
-      .toHaveBeenCalled()
+      '配对面板又回到渠道页了——账号级能力双入口会造成权限口径分裂').toBe(false)
   })
 })

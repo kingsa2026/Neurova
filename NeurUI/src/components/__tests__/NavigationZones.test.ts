@@ -130,10 +130,10 @@ describe('顶部导航（系统配置区）', () => {
     }
   })
 
-  it('AIGC 五页收拢为「AIGC工具」二级菜单组（2026-09-16 用户决策）', () => {
+  it('模型与工具菜单序列（AIGC 五页收拢；2026-11-16 移动配对迁入）', () => {
     const modelTools = TOP_NAV_CATEGORIES.find(c => c.key === 'modelTools')!
     expect(modelTools.items.map(i => i.to ?? i.labelKey)).toEqual([
-      '/models', '/tool-layers', '/sandbox', 'nav.aigcTools',
+      '/models', '/tool-layers', '/sandbox', '/tools/mobile-pairing', 'nav.aigcTools',
     ])
     const group = modelTools.items.find(i => i.labelKey === 'nav.aigcTools')!
     expect(group.to, '二级菜单组头自身不做导航').toBeUndefined()

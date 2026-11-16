@@ -99,6 +99,7 @@ export default {
     skills: 'المهارات',
     models: 'النماذج',
     tools: 'الأدوات',
+    mobilePairing: 'إقران الهاتف المحمول',
     channels: 'القنوات',
     system: 'النظام',
     settings: 'الإعدادات',
