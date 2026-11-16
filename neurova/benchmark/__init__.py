@@ -1,4 +1,8 @@
-"""Benchmark 包：本包对外的现役面只有两个子模块（`rag_eval` / `rag_dataset_gen`）。
+"""Benchmark 包：本包对外的现役面为三个子模块（`rag_eval` / `rag_dataset_gen` / `multi_agent`）。
+
+`multi_agent`（P0-1，2026-11-17）= 多 Agent 协作评测 harness：任务注册表 +
+BenchRunner（solo/swarm 双模式）+ 指标聚合 + JSON/Markdown 报告；swarm 模式走真
+SwarmManager 链路（含治理闸），判定器随任务注入，不伪造分数。
 
 这里**不再有实现**。原 `__init__.py` 里的 575 行（468 行实现：7 个类 + 进程级单例
 `get_benchmark_framework()`）于票④第一包按用户裁定退役，判据见
