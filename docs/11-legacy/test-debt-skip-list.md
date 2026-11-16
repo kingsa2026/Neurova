@@ -40,7 +40,7 @@
 | 测试文件 | 缺失模块/名称 | 相近存在物 | 状态 | 备注 |
 |---|---|---|---|---|
 | `tests/core/test_multi_agent_sleep_manager.py` | `neurova.core.multi_agent_sleep_manager`（`MultiAgentSleepManager` / `IdleTracker`） | `neurova.core.multi_agent_manager` | ⏸️ SKIPPED | 睡眠/空闲管理，疑似拆分或改名 |
-| `tests/unit/core/test_define_action.py` | `neurova.core.define_action`（`defineAction` / `ActionRegistry`） | `neurova.core.file_utils`（仅拼写相近） | ⏸️ SKIPPED | 动作注册装饰器，未实现 |
+| `tests/unit/core/test_define_action.py` | `neurova.core.define_action`（`defineAction` / `ActionRegistry`） | `neurova.core.file_utils`（仅拼写相近） | 🗑️ REMOVED（2026-11-16 审计 3.9-1） | 指向不存在模块的孤儿测试（520 行，模块级 skip 在案）；全仓 grep 无其他引用，按死码退役删除——"定义一次多表面调用"原语如需落地应连模块带测试重建，不保留 skip 壳 |
 | `tests/integration/test_evolution_unified.py` | `neurova.evolution.experience_caller`；`ToolWeightEntry` from `neurova.evolution` | `experience_feedback`；`AdaptiveToolWeights` | ⏸️ SKIPPED | 进化统一测试，部分名称已改 |
 | `tests/integration/test_full_conflict_integration.py` | `neurova.core.闭环_manager`（非法模块名） | 无 | 🗑️ REMOVED（§6-395） | 含明显错误的中文模块名；另引用零定义的 `MemoryConflictDetector`／`ConflictLevel`。链上四个死名字的"不许复活"见 `tests/unit/core/test_closedLoopChainRetired.py`；冲突检测性质由 `tests/unit/agent/test_conflict_detection_observation_only.py`、`test_conflict_ledger_member_identity.py`、`test_memory_guards_wiring.py` 与 `tests/unit/cognitive_layers/memory_layer/test_attributeConflictCriterion.py` 在守 |
 
