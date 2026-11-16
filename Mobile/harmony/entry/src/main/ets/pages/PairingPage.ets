@@ -75,6 +75,8 @@ export struct PairingPage {
   @State code: string = '';
   // 6 格输入框各格内容（输入模式专用）
   @State cells: string[] = ['', '', '', '', '', ''];
+  // 当前聚焦的输入格（-1=无），用于聚焦高亮边框
+  @State focusedCell: number = -1;
   // 当前设备名（confirm 入参）
   @State deviceName: string = 'HarmonyOS-Device';
   // 错误信息（status===failed 时展示）
@@ -479,26 +481,48 @@ export struct PairingPage {
               .margin({ top: this.sm.getSpacing('xs') })
           } else {
             // 6 格分隔式输入框
+            // 真机（OpenHarmony-7.0.0.111）实测：TextInput 默认字体把数字渲染成异形
+            // （1→´、4→∠、3/8→Ɛ），而 Text 渲染数字正常——故改为「隐形 TextInput 收输入
+            // + Text 显示 cells 状态」：显示与提交同源（都来自 this.cells），
+            // 不再依赖 TextInput 的字形渲染。
             Row() {
               ForEach([0, 1, 2, 3, 4, 5], (i: number) => {
-                TextInput({ text: this.cells[i], placeholder: '' })
-                  .type(InputType.Normal)
-                  .maxLength(1)
-                  .fontSize(22)
-                  .textAlign(TextAlign.Center)
-                  .width(40)
-                  .height(50)
-                  .margin({ left: i === 0 ? 0 : 4, right: 4 })
-                  .borderRadius(this.sm.getRadius('sm'))
-                  .border({
-                    width: 1,
-                    color: this.sm.getColor('border')
-                  })
-                  .backgroundColor(Color.Transparent)
-                  .fontColor(this.sm.getColor('text_primary'))
-                  .key(`pairing_cell_${i}`)
-                  .enabled(this.status !== 'waiting')
-                  .onChange((v: string) => { this.onCellChange(i, v); })
+                Stack() {
+                  Text(this.cells[i])
+                    .fontSize(22)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor(this.sm.getColor('text_primary'))
+                  TextInput({ text: this.cells[i], placeholder: '' })
+                    .type(InputType.Normal)
+                    .maxLength(1)
+                    .fontSize(22)
+                    .fontColor(Color.Transparent)
+                    .caretColor(Color.Transparent)
+                    .textAlign(TextAlign.Center)
+                    .width('100%')
+                    .height('100%')
+                    .key(`pairing_cell_${i}`)
+                    .enabled(this.status !== 'waiting')
+                    .onFocus(() => { this.focusedCell = i; })
+                    .onBlur(() => {
+                      if (this.focusedCell === i) {
+                        this.focusedCell = -1;
+                      }
+                    })
+                    .onChange((v: string) => { this.onCellChange(i, v); })
+                }
+                .width(40)
+                .height(50)
+                .margin({ left: i === 0 ? 0 : 4, right: 4 })
+                .borderRadius(this.sm.getRadius('sm'))
+                .border({
+                  width: 1,
+                  color: this.focusedCell === i
+                    ? this.sm.getColor('primary')
+                    : this.sm.getColor('border')
+                })
+                .backgroundColor(Color.Transparent)
+                .alignContent(Alignment.Center)
               }, (i: number) => `cell_${i}`)
             }
             .width('100%')
