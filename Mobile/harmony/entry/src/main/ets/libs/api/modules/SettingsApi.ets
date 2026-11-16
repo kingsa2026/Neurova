@@ -1,27 +1,56 @@
 /**
- * SettingsApi - 应用设置 API 模块
+ * SettingsApi - 应用设置 API 模块（端点经后端源码核对 2026-11-16，P1-30/P1-31）
  *
- * 职责：列出设置分组、获取单条设置、更新设置、重置分组
- * 设计：通过 HttpClient 委托请求；update body 形如 { value }；reset 可选 group
- *
- * 用法：
- *   const api = ApiFacade.getInstance().settings;
- *   const groups = await api.list();
- *   await api.update('theme', 'dark');
- *   await api.reset('appearance');
+ * 后端事实源（settings.py，router 自述 prefix="/v1/settings"，挂载表前缀为空）：
+ *   GET /v1/settings        → SettingsResponse{settings: Dict, updated_at}（裸对象）
+ *   GET /v1/settings/{key}  → {code:0, data:{key, value}}
+ *   PUT /v1/settings/{key}  ← {value}（仅管理员；section 键拒收，走 PUT /v1/settings 整表）
+ *   PUT /v1/settings        ← {settings: Dict}（整表，仅管理员）
+ *   POST /v1/settings/clear-cache
+ * 后端**无** /v1/settings/reset：reset 诚实 throw 点名。
+ * baseUrl 已含 /api/v1——路径一律不重复写 /v1（P1-30 模块守卫盯防）。
  */
 import { HttpClient } from '../HttpClient';
-import { ApiResponse, SettingItem, SettingGroup } from '../../types';
+import { asEnvelope } from '../envelope';
+import { ApiResponse, SettingItem, SettingGroup, SettingType } from '../../types';
 
 /** 设置更新请求体 */
 export interface SettingUpdateBody {
   value: Object;
-  group?: string;
 }
 
-/** 设置重置请求体 */
-export interface SettingResetBody {
-  group?: string;
+/** GET/PUT /settings 的响应体（settings.py SettingsResponse） */
+interface SettingsResponseDto {
+  settings: Record<string, Object>;
+  updated_at: string | null;
+}
+
+/** 单键读写的 data 载荷（{key, value}） */
+interface SettingKeyValueDto {
+  key: string;
+  value: Object;
+}
+
+/** 按值类型推断 SettingType（后端无 UI 元数据，诚实回落 input） */
+function inferSettingType(value: Object): SettingType {
+  if (typeof value === 'boolean') {
+    return 'toggle';
+  }
+  return 'input';
+}
+
+/** settings.py 单键载荷 → SettingItem（单源映射；组名取键首段） */
+function toSettingItem(key: string, value: Object): SettingItem {
+  const group = key.indexOf('.') !== -1 ? key.split('.')[0] : 'general';
+  const item: SettingItem = {
+    key: key,
+    label: key,
+    type: inferSettingType(value),
+    value: value,
+    defaultValue: value,
+    group: group,
+  };
+  return item;
 }
 
 export class SettingsApi {
@@ -31,26 +60,68 @@ export class SettingsApi {
     this.client = client;
   }
 
-  /** 列出所有设置分组 */
+  /**
+   * 列出所有设置（GET /settings，{settings:Dict} 真实形状解析——P1-31）：
+   * section 值为 dict 时展开成 `${section}.${subkey}` 条目并按 section 分组；
+   * 平铺键归入 general 组。返回 SettingGroup[] 供 SettingPage 直接渲染。
+   */
   async list(): Promise<ApiResponse<SettingGroup[]>> {
-    return this.client.get<SettingGroup[]>('/settings');
+    const res = asEnvelope<SettingsResponseDto>(await this.client.get<SettingsResponseDto>('/settings'), ['settings']);
+    if (res.code !== 0 || !res.data) {
+      throw new Error(res.message && res.message.length > 0 ? res.message : '设置获取失败');
+    }
+    const settings = (res.data.settings ?? {}) as Record<string, Object>;
+    const groups: SettingGroup[] = [];
+    const flatItems: SettingItem[] = [];
+    const keys: string[] = Object.keys(settings);
+    for (const key of keys) {
+      const value: Object = settings[key];
+      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        // section（general/security/storage/advanced/routing/quota...）：展开为子键条目
+        const items: SettingItem[] = [];
+        const subKeys: string[] = Object.keys(value as Record<string, Object>);
+        for (const sub of subKeys) {
+          const subValue: Object = (value as Record<string, Object>)[sub];
+          items.push(toSettingItem(`${key}.${sub}`, subValue));
+        }
+        const group: SettingGroup = { key: key, title: key, items: items };
+        groups.push(group);
+      } else {
+        flatItems.push(toSettingItem(key, value));
+      }
+    }
+    if (flatItems.length > 0) {
+      const general: SettingGroup = { key: 'general', title: 'general', items: flatItems };
+      groups.unshift(general);
+    }
+    return { code: 0, message: res.message, data: groups } as ApiResponse<SettingGroup[]>;
   }
 
-  /** 获取单个设置项 */
+  /** 获取单个设置项（GET /settings/{key}，{code,data:{key,value}} 信封） */
   async get(key: string): Promise<ApiResponse<SettingItem>> {
-    return this.client.get<SettingItem>(`/v1/settings/${key}`);
+    const res = await this.client.get<SettingKeyValueDto>(`/settings/${key}`);
+    const ok = asEnvelope<SettingKeyValueDto>(res, ['key', 'value']);
+    if (ok.code !== 0 || !ok.data) {
+      throw new Error(ok.message && ok.message.length > 0 ? ok.message : '设置项获取失败');
+    }
+    const dto = ok.data as Object as SettingKeyValueDto;
+    return { code: ok.code, message: ok.message, data: toSettingItem(dto.key, dto.value) } as ApiResponse<SettingItem>;
   }
 
-  /** 更新设置项（值类型由前端按 SettingType 决定） */
+  /** 更新设置项（PUT /settings/{key}，body {value}；值类型由前端按 SettingType 决定） */
   async update(key: string, value: Object): Promise<ApiResponse<SettingItem>> {
-    const body: SettingUpdateBody = { value };
-    return this.client.put<SettingItem>(`/v1/settings/${key}`, body);
+    const body: SettingUpdateBody = { value: value };
+    const res = await this.client.put<SettingKeyValueDto>(`/settings/${key}`, body);
+    const ok = asEnvelope<SettingKeyValueDto>(res, ['key', 'value']);
+    if (ok.code !== 0 || !ok.data) {
+      throw new Error(ok.message && ok.message.length > 0 ? ok.message : '设置保存失败');
+    }
+    const dto = ok.data as Object as SettingKeyValueDto;
+    return { code: ok.code, message: ok.message, data: toSettingItem(dto.key, dto.value) } as ApiResponse<SettingItem>;
   }
 
-  /** 重置设置（可指定分组，不传则重置全部） */
+  /** @deprecated 后端无 POST /v1/settings/reset（最近真面是 POST /v1/settings/clear-cache，语义不同不冒充） */
   async reset(group?: string): Promise<ApiResponse<Object>> {
-    const body: SettingResetBody = {};
-    if (group !== undefined) body.group = group;
-    return this.client.post<Object>('/settings/reset', body);
+    throw new Error('后端无此端点：POST /v1/settings/reset（后端仅提供 PUT /v1/settings 整表更新与 POST /v1/settings/clear-cache）');
   }
 }

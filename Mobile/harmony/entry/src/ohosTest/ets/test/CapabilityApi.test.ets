@@ -3,23 +3,44 @@
 // 端点词汇与后端挂载同源：/v1/rules、/v1/files、/v1/media；
 // 文件/媒体上传后端为 multipart——createFile/createMedia 显式失败不发请求。
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { HttpClient, HttpBackend } from '../../../../main/ets/libs/api/HttpClient';
-import { ApiResponse } from '../../../../main/ets/libs/types';
-import { CapabilityApi } from '../../../../main/ets/libs/api/modules/CapabilityApi';
+import { HttpClient, HttpBackend, HttpBackendResponse } from '../../../main/ets/libs/api/HttpClient';
+import { ApiResponse } from '../../../main/ets/libs/types';
+import { CapabilityApi } from '../../../main/ets/libs/api/modules/CapabilityApi';
+
+/** MockBackend 录制的请求（显式接口，替代内联对象字面量类型） */
+interface RecordedRequest {
+  method: string;
+  url: string;
+  body: Object | null;
+}
+
+/** 构造空 Record（ArkTS 对象字面量须对应显式类型，集中此处） */
+function emptyRecord(): Record<string, Object> {
+  const r: Record<string, Object> = {};
+  return r;
+}
+
+/** 构造 ApiResponse 信封（data 须传显式类型值，禁内联对象字面量） */
+function apiResponse(data: Object): ApiResponse<Object> {
+  const resp: ApiResponse<Object> = { code: 0, message: 'ok', data: data };
+  return resp;
+}
 
 // Mock 后端实现（参考 MemoryApi.test.ets 模式）
 class MockBackend implements HttpBackend {
-  public requests: { method: string; url: string; body: Object | null }[] = [];
-  public response: ApiResponse<Object> = { code: 0, message: 'ok', data: {} };
+  public requests: RecordedRequest[] = [];
+  public response: ApiResponse<Object> = apiResponse(emptyRecord());
 
   async request(
     method: string,
     url: string,
     body: Object | null,
     _headers: Record<string, string>,
-  ): Promise<{ status: number; data: ApiResponse<Object> }> {
-    this.requests.push({ method, url, body });
-    return { status: 200, data: this.response };
+  ): Promise<HttpBackendResponse> {
+    const recorded: RecordedRequest = { method: method, url: url, body: body };
+    this.requests.push(recorded);
+    const resp: HttpBackendResponse = { status: 200, data: this.response };
+    return resp;
   }
 }
 
@@ -48,7 +69,8 @@ export default function capabilityApiTest() {
     });
 
     it('createRule_posts_rulecreate_contract', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { id: 'r1' } };
+      const ruleData: Record<string, Object> = { 'id': 'r1' };
+      backend.response = apiResponse(ruleData);
       api.createRule({ agentId: 'agent-1', name: '禁用外链', condition: 'url', action: 'block', priority: 1 });
       expect(backend.requests[0].method).assertEqual('POST');
       expect(backend.requests[0].url).assertEqual('https://api.example.com/rules');
@@ -59,7 +81,8 @@ export default function capabilityApiTest() {
     });
 
     it('updateRule_puts_optional_fields', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { id: 'r1' } };
+      const ruleData: Record<string, Object> = { 'id': 'r1' };
+      backend.response = apiResponse(ruleData);
       api.updateRule('r1', { name: '新名字' });
       expect(backend.requests[0].method).assertEqual('PUT');
       expect(backend.requests[0].url).assertEqual('https://api.example.com/rules/r1');
@@ -68,7 +91,7 @@ export default function capabilityApiTest() {
     });
 
     it('removeRule_calls_delete', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: {} };
+      backend.response = apiResponse(emptyRecord());
       api.removeRule('r1');
       expect(backend.requests[0].method).assertEqual('DELETE');
       expect(backend.requests[0].url).assertEqual('https://api.example.com/rules/r1');
@@ -95,7 +118,8 @@ export default function capabilityApiTest() {
     });
 
     it('updateFile_puts_filename', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { file_id: 'f1' } };
+      const fileData: Record<string, Object> = { 'file_id': 'f1' };
+      backend.response = apiResponse(fileData);
       api.updateFile('f1', { name: 'b.txt' });
       expect(backend.requests[0].method).assertEqual('PUT');
       expect(backend.requests[0].url).assertEqual('https://api.example.com/files/f1');
@@ -104,7 +128,7 @@ export default function capabilityApiTest() {
     });
 
     it('removeFile_calls_delete', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: {} };
+      backend.response = apiResponse(emptyRecord());
       api.removeFile('f1');
       expect(backend.requests[0].method).assertEqual('DELETE');
       expect(backend.requests[0].url).assertEqual('https://api.example.com/files/f1');
@@ -113,7 +137,8 @@ export default function capabilityApiTest() {
     // ========== Media：列表/删除；create/update 显式失败 ==========
 
     it('listMedia_calls_get_media_list_with_agent', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { media: [], total: 0, offset: 0, limit: 100 } };
+      const mediaData: Record<string, Object> = { 'media': [], 'total': 0, 'offset': 0, 'limit': 100 };
+      backend.response = apiResponse(mediaData);
       api.listMedia('agent-1', { page: 1, size: 20 });
       expect(backend.requests[0].method).assertEqual('GET');
       const url = backend.requests[0].url;
@@ -145,7 +170,7 @@ export default function capabilityApiTest() {
     });
 
     it('removeMedia_calls_delete', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: {} };
+      backend.response = apiResponse(emptyRecord());
       api.removeMedia('m1');
       expect(backend.requests[0].method).assertEqual('DELETE');
       expect(backend.requests[0].url).assertEqual('https://api.example.com/media/m1');

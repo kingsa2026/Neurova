@@ -11,6 +11,7 @@
  * 旧 /capability/* 路径后端不存在，全部退役。
  */
 import { HttpClient } from '../HttpClient';
+import { asEnvelope, asEnvelopeList } from '../envelope';
 import {
   ApiResponse,
   PageParams,
@@ -138,7 +139,10 @@ export class CapabilityApi {
     return res;
   }
 
-  /** 列出规则（project_id 后端过滤；裸数组本地分页） */
+  /** 规则单条契约探针（rules_api.py RuleInfo 裸对象归一用） */
+  private static readonly RULE_PROBES: string[] = ['id', 'name', 'rule_type'];
+
+  /** 列出规则（project_id 后端过滤；后端裸数组，边界归一后本地分页） */
   async listRules(
     agentId: string,
     params?: PageParams,
@@ -147,7 +151,7 @@ export class CapabilityApi {
     if (agentId.length > 0) {
       query['project_id'] = agentId;
     }
-    const res = await this.client.get<RuleInfoDto[]>('/rules', query);
+    const res = asEnvelopeList<RuleInfoDto>(await this.client.get<RuleInfoDto[]>('/rules', query));
     const arr = res.data as Object as RuleInfoDto[];
     const rules: Rule[] = [];
     for (const dto of arr) {
@@ -163,7 +167,7 @@ export class CapabilityApi {
 
   /** 获取单条规则 */
   async getRule(ruleId: string): Promise<ApiResponse<Rule>> {
-    const res = await this.client.get<RuleInfoDto>(`/rules/${ruleId}`);
+    const res = asEnvelope<RuleInfoDto>(await this.client.get<RuleInfoDto>(`/rules/${ruleId}`), CapabilityApi.RULE_PROBES);
     const ok = CapabilityApi.unwrapOne(res, '规则获取');
     const mapped: ApiResponse<Rule> = {
       code: ok.code,
@@ -186,7 +190,7 @@ export class CapabilityApi {
     if (data.agentId !== undefined && data.agentId.length > 0) {
       body['project_id'] = data.agentId;
     }
-    const res = await this.client.post<RuleInfoDto>('/rules', body);
+    const res = asEnvelope<RuleInfoDto>(await this.client.post<RuleInfoDto>('/rules', body), CapabilityApi.RULE_PROBES);
     const ok = CapabilityApi.unwrapOne(res, '规则创建');
     const mapped: ApiResponse<Rule> = {
       code: ok.code,
@@ -205,7 +209,7 @@ export class CapabilityApi {
     if (data.condition !== undefined) body['condition'] = data.condition;
     if (data.action !== undefined) body['action'] = data.action;
     if (data.priority !== undefined) body['priority'] = CapabilityApi.priorityToBackend(data.priority);
-    const res = await this.client.put<RuleInfoDto>(`/rules/${ruleId}`, body);
+    const res = asEnvelope<RuleInfoDto>(await this.client.put<RuleInfoDto>(`/rules/${ruleId}`, body), CapabilityApi.RULE_PROBES);
     const ok = CapabilityApi.unwrapOne(res, '规则更新');
     const mapped: ApiResponse<Rule> = {
       code: ok.code,
@@ -237,12 +241,12 @@ export class CapabilityApi {
     return file;
   }
 
-  /** 列出文件（后端按当前用户过滤；agent 维度本地过滤；裸数组本地分页） */
+  /** 列出文件（后端按当前用户过滤；裸数组边界归一后，agent 维度本地过滤+本地分页） */
   async listFiles(
     agentId: string,
     params?: PageParams,
   ): Promise<ApiResponse<PageResult<AgentFile>>> {
-    const res = await this.client.get<FileInfoDto[]>('/files');
+    const res = asEnvelopeList<FileInfoDto>(await this.client.get<FileInfoDto[]>('/files'));
     const arr = res.data as Object as FileInfoDto[];
     const files: AgentFile[] = [];
     for (const dto of arr) {
@@ -261,7 +265,7 @@ export class CapabilityApi {
 
   /** 获取单条文件元数据 */
   async getFile(fileId: string): Promise<ApiResponse<AgentFile>> {
-    const res = await this.client.get<FileInfoDto>(`/files/${fileId}`);
+    const res = asEnvelope<FileInfoDto>(await this.client.get<FileInfoDto>(`/files/${fileId}`), ['file_id', 'filename']);
     const ok = CapabilityApi.unwrapOne(res, '文件获取');
     const mapped: ApiResponse<AgentFile> = {
       code: ok.code,
@@ -280,7 +284,7 @@ export class CapabilityApi {
   async updateFile(fileId: string, data: Partial<AgentFile>): Promise<ApiResponse<AgentFile>> {
     const body: Record<string, Object> = {};
     if (data.name !== undefined) body['filename'] = data.name;
-    const res = await this.client.put<FileInfoDto>(`/files/${fileId}`, body);
+    const res = asEnvelope<FileInfoDto>(await this.client.put<FileInfoDto>(`/files/${fileId}`, body), ['file_id', 'filename']);
     const ok = CapabilityApi.unwrapOne(res, '文件更新');
     const mapped: ApiResponse<AgentFile> = {
       code: ok.code,
@@ -347,7 +351,7 @@ export class CapabilityApi {
 
   /** 获取单条媒体资产 */
   async getMedia(mediaId: string): Promise<ApiResponse<MediaAsset>> {
-    const res = await this.client.get<MediaItemDto>(`/media/${mediaId}`);
+    const res = asEnvelope<MediaItemDto>(await this.client.get<MediaItemDto>(`/media/${mediaId}`), ['media_id']);
     const ok = CapabilityApi.unwrapOne(res, '媒体获取');
     const mapped: ApiResponse<MediaAsset> = {
       code: ok.code,

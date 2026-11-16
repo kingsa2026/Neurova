@@ -10,20 +10,31 @@
  *     GET /stats → data={projects,templates,sessions,workflows}
  *   tasks_api.py @ /v1/tasks：
  *     GET/POST /boards、GET /boards/{id}、GET/POST /boards/{id}/tasks、
- *     PUT /tasks/{id}、PUT /tasks/{id}/move、GET /boards/{id}/stats
- * 旧 /collaboration/projects|teams|workflows 后端不存在（协作实体实为模板/会话/历史/
- * 统计/看板任务）：对应方法一律 throw 点名，不再发往不存在的路由。
+ *     PUT /tasks/{id}、PUT /tasks/{id}/move、GET /boards/{id}/stats（全部裸形状，边界归一）
+ *   projects_api.py @ /v1/projects：GET/POST ""、GET/PUT/DELETE /{id}（P1-35 接线）
+ *   teams_api.py @ /v1/teams：GET/POST ""、GET/PUT/DELETE /{id}（P1-35 接线）
+ *   neurflow_api.py @ /v1/neurflow/workflows：GET/POST ""、GET/PUT/DELETE /{id}
+ *     （P1-35 接线；{workflow:...} 裸 dict 边界归一）
+ * 旧 /collaboration/projects|teams|workflows 路径后端不存在——实体面在
+ * /v1/projects、/v1/teams、/v1/neurflow/workflows；任务删除后端无路由，诚实 throw。
  */
 
 import { HttpClient } from '../HttpClient';
+import { asEnvelope, asEnvelopeList } from '../envelope';
 import {
   ApiResponse,
   Task,
   TaskStatus,
   TaskPriority,
   Project,
+  ProjectStatus,
   Team,
+  TeamMember,
+  TeamRole,
   Workflow,
+  WorkflowStatus,
+  WorkflowNode,
+  WorkflowEdge,
   PageResult,
   PageParams,
 } from '../../types';
@@ -37,6 +48,143 @@ export interface CollaborationTemplateDto {
   participants: string[];
   created_at: string;
   updated_at: string;
+}
+
+/** 项目（projects_api.ProjectInfo 投影） */
+interface ProjectInfoDto {
+  project_id: string;
+  name: string;
+  description: string;
+  status: string;
+  owner_id: string;
+  teams_count: number;
+  tasks_count: number;
+  created_at: number;
+  updated_at: number;
+}
+
+/** 团队（teams_api.TeamInfo 投影） */
+interface TeamInfoDto {
+  id: string;
+  name: string;
+  description: string;
+  project_id: string | null;
+  owner_id: string;
+  members: string[];
+  members_detail: Array<Record<string, Object>>;
+  created_at: number;
+  updated_at: number;
+}
+
+/** 工作流（neurflow WorkflowDefinition.to_dict 投影） */
+interface WorkflowDto {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  status: string;
+  nodes: Object[];
+  edges: Object[];
+  created_at: number;
+  updated_at: number;
+}
+
+/** 秒级时间戳 → ISO 字符串（空值/0 回退 ''） */
+function tsToIso(ts: number | null | undefined): string {
+  if (ts === null || ts === undefined || ts <= 0) return '';
+  return new Date(ts * 1000).toISOString();
+}
+
+/** 裸数组 → PageResult 本地分页（page 默认 1、size 默认 20） */
+function pageOf<T>(arr: T[], params?: PageParams): PageResult<T> {
+  const page = params && params.page !== undefined ? params.page : 1;
+  const size = params && params.size !== undefined ? params.size : 20;
+  const start = (Math.max(page, 1) - 1) * size;
+  const items = arr.slice(start, start + size);
+  const result: PageResult<T> = { items: items, total: arr.length, page: page, size: size };
+  return result;
+}
+
+/** 后端项目状态 → 前端 ProjectStatus（未知值回落 active） */
+function normProjectStatus(status: string): ProjectStatus {
+  if (status === 'planning' || status === 'active' || status === 'paused'
+    || status === 'completed' || status === 'archived') {
+    return status;
+  }
+  return 'active';
+}
+
+/** 后端工作流状态 → 前端 WorkflowStatus（published/running→active；未知回落 draft） */
+function normWorkflowStatus(status: string): WorkflowStatus {
+  if (status === 'draft') return 'draft';
+  if (status === 'published' || status === 'running') return 'active';
+  if (status === 'paused') return 'paused';
+  if (status === 'archived') return 'archived';
+  return 'draft';
+}
+
+/** 前端工作流状态 → 后端词汇（active→published） */
+function workflowStatusToBackend(status: WorkflowStatus): string {
+  if (status === 'active') return 'published';
+  return status;
+}
+
+/** ProjectInfo → Project（单源映射；成员清单不在 ProjectInfo 里，诚实空数组） */
+function toProject(dto: ProjectInfoDto): Project {
+  const project: Project = {
+    id: dto.project_id,
+    name: dto.name,
+    description: dto.description,
+    status: normProjectStatus(dto.status),
+    owner: dto.owner_id,
+    members: [],
+    createdAt: tsToIso(dto.created_at),
+    updatedAt: tsToIso(dto.updated_at),
+  };
+  return project;
+}
+
+/** TeamInfo → Team（单源映射；成员角色以 members_detail 为准，缺省 member） */
+function toTeam(dto: TeamInfoDto): Team {
+  const members: TeamMember[] = [];
+  if (dto.members_detail && dto.members_detail.length > 0) {
+    for (const detail of dto.members_detail) {
+      const member: TeamMember = {
+        userId: String(detail['user_id'] ?? ''),
+        role: String(detail['role'] ?? 'member') as TeamRole,
+      };
+      members.push(member);
+    }
+  } else {
+    for (const userId of dto.members) {
+      const member: TeamMember = { userId: userId, role: 'member' };
+      members.push(member);
+    }
+  }
+  const team: Team = {
+    id: dto.id,
+    name: dto.name,
+    description: dto.description,
+    members: members,
+    createdAt: tsToIso(dto.created_at),
+  };
+  return team;
+}
+
+/** WorkflowDefinition → Workflow（单源映射；nodes/edges 原样透传） */
+function toWorkflow(dto: WorkflowDto): Workflow {
+  const workflow: Workflow = {
+    id: dto.id,
+    name: dto.name,
+    description: dto.description,
+    status: normWorkflowStatus(dto.status),
+    nodes: dto.nodes as Object[] as WorkflowNode[],
+    edges: dto.edges as Object[] as WorkflowEdge[],
+    version: dto.version,
+    createdAt: tsToIso(dto.created_at),
+    updatedAt: tsToIso(dto.updated_at),
+  };
+  return workflow;
 }
 
 /** 协作历史条目（collaboration_api.get_collaboration_history data.history 投影） */
@@ -114,28 +262,32 @@ export class CollaborationApi {
     this.client = client;
   }
 
-  // ========== 协作模板（真实端点 /collaboration/templates）==========
+  // ========== 协作模板（真实端点 /collaboration/templates；裸形状边界归一）==========
 
-  /** 协作模板列表（GET /collaboration/templates?limit=，裸数组） */
+  /** 协作模板列表（GET /collaboration/templates?limit=，后端裸数组边界归一） */
   async listTemplates(limit?: number): Promise<ApiResponse<CollaborationTemplateDto[]>> {
     const query: Record<string, Object> = {};
     if (limit !== undefined) query['limit'] = limit;
-    return this.client.get<CollaborationTemplateDto[]>('/collaboration/templates', query);
+    const res = await this.client.get<CollaborationTemplateDto[]>('/collaboration/templates', query);
+    return asEnvelopeList<CollaborationTemplateDto>(res as ApiResponse<CollaborationTemplateDto[]>);
   }
 
-  /** 创建协作模板（POST /collaboration/templates） */
+  /** 创建协作模板（POST /collaboration/templates，CollaborationTemplate 裸对象边界归一） */
   async createTemplate(body: TemplateCreateBody): Promise<ApiResponse<CollaborationTemplateDto>> {
-    return this.client.post<CollaborationTemplateDto>('/collaboration/templates', body);
+    const res = await this.client.post<CollaborationTemplateDto>('/collaboration/templates', body);
+    return asEnvelope<CollaborationTemplateDto>(res, ['template_id', 'name']);
   }
 
-  /** 协作模板详情（GET /collaboration/templates/{id}） */
+  /** 协作模板详情（GET /collaboration/templates/{id}，裸对象边界归一） */
   async getTemplate(templateId: string): Promise<ApiResponse<CollaborationTemplateDto>> {
-    return this.client.get<CollaborationTemplateDto>(`/collaboration/templates/${templateId}`);
+    const res = await this.client.get<CollaborationTemplateDto>(`/collaboration/templates/${templateId}`);
+    return asEnvelope<CollaborationTemplateDto>(res, ['template_id', 'name']);
   }
 
-  /** 更新协作模板（PUT /collaboration/templates/{id}） */
+  /** 更新协作模板（PUT /collaboration/templates/{id}，裸对象边界归一） */
   async updateTemplate(templateId: string, body: TemplateCreateBody): Promise<ApiResponse<CollaborationTemplateDto>> {
-    return this.client.put<CollaborationTemplateDto>(`/collaboration/templates/${templateId}`, body);
+    const res = await this.client.put<CollaborationTemplateDto>(`/collaboration/templates/${templateId}`, body);
+    return asEnvelope<CollaborationTemplateDto>(res, ['template_id', 'name']);
   }
 
   /** 删除协作模板（DELETE /collaboration/templates/{id}） */
@@ -196,14 +348,14 @@ export class CollaborationApi {
     return { code: res.code, message: res.message, data: stats } as ApiResponse<CollaborationStatsDto>;
   }
 
-  // ========== 看板任务（真实端点 /tasks/*）==========
+  // ========== 看板任务（真实端点 /tasks/*；裸形状边界归一）==========
 
   /**
    * 列出任务：聚合全部看板的任务（真端点 /tasks/boards + /boards/{id}/tasks，
-   * 原 /v1/collaboration/tasks 后端不存在）。补齐 FE Task 契约缺省字段。
+   * 原 /v1/collaboration/tasks 后端不存在）。看板/任务均为裸形状，边界归一后补齐 FE Task 契约缺省字段。
    */
   async listTasks(projectId?: string): Promise<ApiResponse<PageResult<Task>>> {
-    const boardsRes = await this.client.get<Object[]>('/tasks/boards');
+    const boardsRes = asEnvelopeList<Object>(await this.client.get<Object[]>('/tasks/boards'));
     const boards = (boardsRes.data ?? []) as Array<Record<string, Object>>;
     const all: Task[] = [];
     for (const b of boards) {
@@ -211,7 +363,7 @@ export class CollaborationApi {
         continue;
       }
       const boardId = String(b['id']);
-      const tasksRes = await this.client.get<Object[]>(`/tasks/boards/${boardId}/tasks`);
+      const tasksRes = asEnvelopeList<Object>(await this.client.get<Object[]>(`/tasks/boards/${boardId}/tasks`));
       const rows = (tasksRes.data ?? []) as Array<Record<string, Object>>;
       for (const row of rows) {
         all.push({
@@ -232,15 +384,15 @@ export class CollaborationApi {
     return { code: 0, message: 'ok', data: { items: all, total: all.length } } as ApiResponse<PageResult<Task>>;
   }
 
-  /** 创建任务：落到第一个看板（无看板先建默认看板） */
+  /** 创建任务：落到第一个看板（无看板先建默认看板；看板/任务裸对象边界归一） */
   async createTask(data: Partial<Task>): Promise<ApiResponse<Task>> {
-    const boardsRes = await this.client.get<Object[]>('/tasks/boards');
+    const boardsRes = asEnvelopeList<Object>(await this.client.get<Object[]>('/tasks/boards'));
     const boards = (boardsRes.data ?? []) as Array<Record<string, Object>>;
     let boardId = boards.length > 0 ? String(boards[0]['id']) : '';
     if (boardId === '') {
       const boardBody: CreateBoardBody = { name: '任务看板' };
-      const created = await this.client.post<Object>('/tasks/boards', boardBody);
-      boardId = String((created.data as Record<string, Object>)['id'] ?? '');
+      const created = asEnvelope<Object>(await this.client.post<Object>('/tasks/boards', boardBody), ['id', 'name']);
+      boardId = String(((created.data ?? {}) as Record<string, Object>)['id'] ?? '');
     }
     const body: CreateTaskBody = {
       title: data.title ?? '',
@@ -249,7 +401,7 @@ export class CollaborationApi {
       priority: data.priority ?? 'medium',
       dueDate: data.dueDate ?? '',
     };
-    const res = await this.client.post<Object>(`/tasks/boards/${boardId}/tasks`, body);
+    const res = asEnvelope<Object>(await this.client.post<Object>(`/tasks/boards/${boardId}/tasks`, body), ['id', 'title']);
     const row = (res.data ?? {}) as Record<string, Object>;
     return {
       code: res.code, message: res.message,
@@ -263,106 +415,203 @@ export class CollaborationApi {
     } as ApiResponse<Task>;
   }
 
-  /** 更新任务（PUT /tasks/{id}，body 直传后端契约字段） */
+  /** 更新任务（PUT /tasks/{id}，TaskInfo 裸对象边界归一，body 直传后端契约字段） */
   async updateTask(taskId: string, body: Record<string, Object>): Promise<ApiResponse<Task>> {
-    return this.client.put<Task>(`/tasks/${taskId}`, body);
+    const res = await this.client.put<Task>(`/tasks/${taskId}`, body);
+    return asEnvelope<Task>(res, ['id', 'title']);
   }
 
-  /** 移动任务（看板内拖拽/状态流转，PUT /tasks/{id}/move） */
+  /** 移动任务（看板内拖拽/状态流转，PUT /tasks/{id}/move，TaskInfo 裸对象边界归一） */
   async moveTask(taskId: string, body: Record<string, Object>): Promise<ApiResponse<Task>> {
-    return this.client.put<Task>(`/tasks/${taskId}/move`, body);
+    const res = await this.client.put<Task>(`/tasks/${taskId}/move`, body);
+    return asEnvelope<Task>(res, ['id', 'title']);
   }
 
-  /** 看板统计（GET /tasks/boards/{id}/stats） */
+  /** 看板统计（GET /tasks/boards/{id}/stats，BoardStats 裸对象边界归一） */
   async getBoardStats(boardId: string): Promise<ApiResponse<Object>> {
-    return this.client.get<Object>(`/tasks/boards/${boardId}/stats`);
+    const res = await this.client.get<Object>(`/tasks/boards/${boardId}/stats`);
+    return asEnvelope<Object>(res, ['board_id', 'total_tasks']) as ApiResponse<Object>;
   }
 
-  /** 删除任务：真端点 DELETE /tasks/boards/{boardId}/tasks/{taskId}（任务挂在看板下，看板解析与 createTask 同源） */
+  /** 删除任务：后端 /v1/tasks 无 DELETE 路由（tasks_api.py 仅 boards/tasks 的增查改）——诚实失败点名 */
   async removeTask(id: string): Promise<ApiResponse<Object>> {
-    const boardsRes = await this.client.get<Object[]>('/tasks/boards');
-    const boards = (boardsRes.data ?? []) as Array<Record<string, Object>>;
-    if (boards.length === 0) {
-      return { code: 1, message: '任务看板不存在，无法删除任务', data: '' } as ApiResponse<Object>;
-    }
-    const boardId = String(boards[0]['id']);
-    return this.client.delete<Object>(`/tasks/boards/${boardId}/tasks/${id}`);
+    throw new Error('后端无此端点：DELETE /v1/tasks/...（tasks_api 未提供任务删除路由，任务只能改状态不能删）');
   }
 
-  // ========== Project / Team / Workflow（后端无此端点，保留原签名抛错点名）==========
+  // ========== Project / Team / Workflow（P1-35 接线：projects→/v1/projects、
+  // teams→/v1/teams、workflows→/v1/neurflow/workflows，均后端真实存在）==========
 
-  /** @deprecated 后端无 GET /collaboration/projects（协作实体实为 templates/sessions/history/stats） */
+  /** 项目列表（GET /v1/projects，ProjectInfo 裸数组边界归一后映射+本地分页） */
   async listProjects(params?: PageParams): Promise<ApiResponse<PageResult<Project>>> {
-    throw new Error('后端无此端点：GET /v1/collaboration/projects（协作域实际提供 templates/start/history/sessions/stats）');
+    const res = asEnvelopeList<ProjectInfoDto>(await this.client.get<ProjectInfoDto[]>('/projects'));
+    const arr = (res.data ?? []) as ProjectInfoDto[];
+    const projects: Project[] = [];
+    for (const dto of arr) {
+      projects.push(toProject(dto));
+    }
+    return { code: res.code, message: res.message, data: pageOf(projects, params) } as ApiResponse<PageResult<Project>>;
   }
 
-  /** @deprecated 后端无 GET /collaboration/projects/{id} */
+  /** 项目详情（GET /v1/projects/{id}，ProjectInfo 裸对象边界归一） */
   async getProject(id: string): Promise<ApiResponse<Project>> {
-    throw new Error('后端无此端点：GET /v1/collaboration/projects/{id}');
+    const res = await this.client.get<ProjectInfoDto>(`/projects/${id}`);
+    const ok = asEnvelope<ProjectInfoDto>(res, ['project_id', 'name']);
+    if (ok.code !== 0 || !ok.data) {
+      throw new Error(ok.message && ok.message.length > 0 ? ok.message : '项目获取失败');
+    }
+    return { code: ok.code, message: ok.message, data: toProject(ok.data as Object as ProjectInfoDto) } as ApiResponse<Project>;
   }
 
-  /** @deprecated 后端无 POST /collaboration/projects */
+  /** 创建项目（POST /v1/projects {name,description}，ProjectInfo 裸对象边界归一） */
   async createProject(data: Partial<Project>): Promise<ApiResponse<Project>> {
-    throw new Error('后端无此端点：POST /v1/collaboration/projects');
+    const body: Record<string, Object> = {
+      'name': data.name ?? '',
+      'description': data.description ?? '',
+    };
+    const res = await this.client.post<ProjectInfoDto>('/projects', body);
+    const ok = asEnvelope<ProjectInfoDto>(res, ['project_id', 'name']);
+    if (ok.code !== 0 || !ok.data) {
+      throw new Error(ok.message && ok.message.length > 0 ? ok.message : '项目创建失败');
+    }
+    return { code: ok.code, message: ok.message, data: toProject(ok.data as Object as ProjectInfoDto) } as ApiResponse<Project>;
   }
 
-  /** @deprecated 后端无 PUT /collaboration/projects/{id} */
+  /** 更新项目（PUT /v1/projects/{id}，ProjectUpdate 契约 {name?,description?,status?}） */
   async updateProject(id: string, data: Partial<Project>): Promise<ApiResponse<Project>> {
-    throw new Error('后端无此端点：PUT /v1/collaboration/projects/{id}');
+    const body: Record<string, Object> = {};
+    if (data.name !== undefined) body['name'] = data.name;
+    if (data.description !== undefined) body['description'] = data.description;
+    if (data.status !== undefined) body['status'] = data.status;
+    const res = await this.client.put<ProjectInfoDto>(`/projects/${id}`, body);
+    const ok = asEnvelope<ProjectInfoDto>(res, ['project_id', 'name']);
+    if (ok.code !== 0 || !ok.data) {
+      throw new Error(ok.message && ok.message.length > 0 ? ok.message : '项目更新失败');
+    }
+    return { code: ok.code, message: ok.message, data: toProject(ok.data as Object as ProjectInfoDto) } as ApiResponse<Project>;
   }
 
-  /** @deprecated 后端无 DELETE /collaboration/projects/{id} */
+  /** 删除项目（DELETE /v1/projects/{id}，后端返 {code,message} 信封） */
   async removeProject(id: string): Promise<ApiResponse<Object>> {
-    throw new Error('后端无此端点：DELETE /v1/collaboration/projects/{id}');
+    return this.client.delete<Object>(`/projects/${id}`);
   }
 
-  /** @deprecated 后端无 GET /collaboration/teams */
+  /** 团队列表（GET /v1/teams，TeamInfo 裸数组边界归一后映射+本地分页） */
   async listTeams(params?: PageParams): Promise<ApiResponse<PageResult<Team>>> {
-    throw new Error('后端无此端点：GET /v1/collaboration/teams（协作域无团队实体）');
+    const res = asEnvelopeList<TeamInfoDto>(await this.client.get<TeamInfoDto[]>('/teams'));
+    const arr = (res.data ?? []) as TeamInfoDto[];
+    const teams: Team[] = [];
+    for (const dto of arr) {
+      teams.push(toTeam(dto));
+    }
+    return { code: res.code, message: res.message, data: pageOf(teams, params) } as ApiResponse<PageResult<Team>>;
   }
 
-  /** @deprecated 后端无 GET /collaboration/teams/{id} */
+  /** 团队详情（GET /v1/teams/{id}，TeamInfo 裸对象边界归一） */
   async getTeam(id: string): Promise<ApiResponse<Team>> {
-    throw new Error('后端无此端点：GET /v1/collaboration/teams/{id}');
+    const res = await this.client.get<TeamInfoDto>(`/teams/${id}`);
+    const ok = asEnvelope<TeamInfoDto>(res, ['id', 'name']);
+    if (ok.code !== 0 || !ok.data) {
+      throw new Error(ok.message && ok.message.length > 0 ? ok.message : '团队获取失败');
+    }
+    return { code: ok.code, message: ok.message, data: toTeam(ok.data as Object as TeamInfoDto) } as ApiResponse<Team>;
   }
 
-  /** @deprecated 后端无 POST /collaboration/teams */
+  /** 创建团队（POST /v1/teams {name,description,project_id?}，TeamInfo 裸对象边界归一） */
   async createTeam(data: Partial<Team>): Promise<ApiResponse<Team>> {
-    throw new Error('后端无此端点：POST /v1/collaboration/teams');
+    const body: Record<string, Object> = {
+      'name': data.name ?? '',
+      'description': data.description ?? '',
+    };
+    const res = await this.client.post<TeamInfoDto>('/teams', body);
+    const ok = asEnvelope<TeamInfoDto>(res, ['id', 'name']);
+    if (ok.code !== 0 || !ok.data) {
+      throw new Error(ok.message && ok.message.length > 0 ? ok.message : '团队创建失败');
+    }
+    return { code: ok.code, message: ok.message, data: toTeam(ok.data as Object as TeamInfoDto) } as ApiResponse<Team>;
   }
 
-  /** @deprecated 后端无 PUT /collaboration/teams/{id} */
+  /** 更新团队（PUT /v1/teams/{id}，TeamUpdate 契约 {name?,description?}） */
   async updateTeam(id: string, data: Partial<Team>): Promise<ApiResponse<Team>> {
-    throw new Error('后端无此端点：PUT /v1/collaboration/teams/{id}');
+    const body: Record<string, Object> = {};
+    if (data.name !== undefined) body['name'] = data.name;
+    if (data.description !== undefined) body['description'] = data.description;
+    const res = await this.client.put<TeamInfoDto>(`/teams/${id}`, body);
+    const ok = asEnvelope<TeamInfoDto>(res, ['id', 'name']);
+    if (ok.code !== 0 || !ok.data) {
+      throw new Error(ok.message && ok.message.length > 0 ? ok.message : '团队更新失败');
+    }
+    return { code: ok.code, message: ok.message, data: toTeam(ok.data as Object as TeamInfoDto) } as ApiResponse<Team>;
   }
 
-  /** @deprecated 后端无 DELETE /collaboration/teams/{id} */
+  /** 删除团队（DELETE /v1/teams/{id}，后端返 {code,message} 信封） */
   async removeTeam(id: string): Promise<ApiResponse<Object>> {
-    throw new Error('后端无此端点：DELETE /v1/collaboration/teams/{id}');
+    return this.client.delete<Object>(`/teams/${id}`);
   }
 
-  /** @deprecated 后端无 GET /collaboration/workflows（工作流计数经 /collaboration/stats） */
+  /** 工作流列表（GET /v1/neurflow/workflows，{workflows,total} 裸 dict 边界归一后映射+本地分页） */
   async listWorkflows(params?: PageParams): Promise<ApiResponse<PageResult<Workflow>>> {
-    throw new Error('后端无此端点：GET /v1/collaboration/workflows（工作流计数走 /v1/collaboration/stats）');
+    const res = asEnvelope<Object>(await this.client.get<Object>('/neurflow/workflows'), ['workflows', 'total']);
+    if (res.code !== 0 || !res.data) {
+      throw new Error(res.message && res.message.length > 0 ? res.message : '工作流列表获取失败');
+    }
+    const rows = ((res.data as Record<string, Object>)['workflows'] ?? []) as WorkflowDto[];
+    const workflows: Workflow[] = [];
+    for (const dto of rows) {
+      workflows.push(toWorkflow(dto));
+    }
+    return { code: res.code, message: res.message, data: pageOf(workflows, params) } as ApiResponse<PageResult<Workflow>>;
   }
 
-  /** @deprecated 后端无 GET /collaboration/workflows/{id} */
+  /** 工作流详情（GET /v1/neurflow/workflows/{id}，{workflow:...} 裸 dict 边界归一） */
   async getWorkflow(id: string): Promise<ApiResponse<Workflow>> {
-    throw new Error('后端无此端点：GET /v1/collaboration/workflows/{id}');
+    const res = await this.client.get<Object>(`/neurflow/workflows/${id}`);
+    const ok = asEnvelope<Object>(res, ['workflow']);
+    if (ok.code !== 0 || !ok.data) {
+      throw new Error(ok.message && ok.message.length > 0 ? ok.message : '工作流获取失败');
+    }
+    const dto = ((ok.data as Record<string, Object>)['workflow'] ?? {}) as WorkflowDto;
+    return { code: ok.code, message: ok.message, data: toWorkflow(dto) } as ApiResponse<Workflow>;
   }
 
-  /** @deprecated 后端无 POST /collaboration/workflows */
+  /** 创建工作流（POST /v1/neurflow/workflows，body 为工作流定义 dict；返回 {workflow} 边界归一） */
   async createWorkflow(data: Partial<Workflow>): Promise<ApiResponse<Workflow>> {
-    throw new Error('后端无此端点：POST /v1/collaboration/workflows');
+    const body: Record<string, Object> = {
+      'name': data.name ?? '',
+      'description': data.description ?? '',
+      'status': workflowStatusToBackend(data.status ?? 'draft'),
+      'nodes': (data.nodes ?? []) as Object[],
+      'edges': (data.edges ?? []) as Object[],
+      'version': data.version ?? '0.1.0',
+    };
+    const res = await this.client.post<Object>('/neurflow/workflows', body);
+    const ok = asEnvelope<Object>(res, ['workflow']);
+    if (ok.code !== 0 || !ok.data) {
+      throw new Error(ok.message && ok.message.length > 0 ? ok.message : '工作流创建失败');
+    }
+    const dto = ((ok.data as Record<string, Object>)['workflow'] ?? {}) as WorkflowDto;
+    return { code: ok.code, message: ok.message, data: toWorkflow(dto) } as ApiResponse<Workflow>;
   }
 
-  /** @deprecated 后端无 PUT /collaboration/workflows/{id} */
+  /** 更新工作流（PUT /v1/neurflow/workflows/{id}；FE active↔paused 切换映射到 published/paused） */
   async updateWorkflow(id: string, data: Partial<Workflow>): Promise<ApiResponse<Workflow>> {
-    throw new Error('后端无此端点：PUT /v1/collaboration/workflows/{id}');
+    const body: Record<string, Object> = {};
+    if (data.name !== undefined) body['name'] = data.name;
+    if (data.description !== undefined) body['description'] = data.description;
+    if (data.status !== undefined) body['status'] = workflowStatusToBackend(data.status);
+    if (data.nodes !== undefined) body['nodes'] = data.nodes as Object[];
+    if (data.edges !== undefined) body['edges'] = data.edges as Object[];
+    const res = await this.client.put<Object>(`/neurflow/workflows/${id}`, body);
+    const ok = asEnvelope<Object>(res, ['workflow']);
+    if (ok.code !== 0 || !ok.data) {
+      throw new Error(ok.message && ok.message.length > 0 ? ok.message : '工作流更新失败');
+    }
+    const dto = ((ok.data as Record<string, Object>)['workflow'] ?? {}) as WorkflowDto;
+    return { code: ok.code, message: ok.message, data: toWorkflow(dto) } as ApiResponse<Workflow>;
   }
 
-  /** @deprecated 后端无 DELETE /collaboration/workflows/{id} */
+  /** 删除工作流（DELETE /v1/neurflow/workflows/{id}，后端返 {message} 裸 dict 边界归一） */
   async removeWorkflow(id: string): Promise<ApiResponse<Object>> {
-    throw new Error('后端无此端点：DELETE /v1/collaboration/workflows/{id}');
+    const res = await this.client.delete<Object>(`/neurflow/workflows/${id}`);
+    return asEnvelope<Object>(res, ['message']) as ApiResponse<Object>;
   }
 }

@@ -4,6 +4,7 @@
  * 职责：注册、登录、登出、token 刷新、当前用户信息
  */
 import { HttpClient } from '../HttpClient';
+import { asEnvelope } from '../envelope';
 import { ApiResponse, User, AuthTokens, LoginForm, RegisterResult } from '../../types';
 
 /** 注册请求体 */
@@ -16,30 +17,6 @@ export interface RegisterRequest {
 /** 刷新 token 请求体 */
 export interface RefreshTokenRequest {
   refresh_token: string;
-}
-
-/** 裸对象判定：无信封字段（code/data），且携带目标类型的全部探针字段 */
-function isBareShape(res: Object, probeKeys: string[]): boolean {
-  const keys: string[] = Object.keys(res);
-  if (keys.indexOf('code') !== -1 || keys.indexOf('data') !== -1) {
-    return false;
-  }
-  for (const k of probeKeys) {
-    if (keys.indexOf(k) === -1) {
-      return false;
-    }
-  }
-  return true;
-}
-
-/** 后端部分认证端点返回**裸对象**（无 code/data 信封）——在边界归一为 ApiResponse */
-function asEnvelope<T>(res: ApiResponse<T>, probeKeys: string[]): ApiResponse<T> {
-  if (isBareShape(res, probeKeys)) {
-    const data = res as Object as T;
-    const wrapped: ApiResponse<T> = { code: 0, message: 'ok', data: data };
-    return wrapped;
-  }
-  return res;
 }
 
 export class AuthApi {

@@ -4,23 +4,44 @@
 // 旧 /monitor/stats|metrics|logs|neurons 与 fire 端点后端不存在：
 // 对应方法必须 throw 点名，且**不发任何网络请求**（本文件钉住这一行为）。
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { HttpClient, HttpBackend } from '../../../../main/ets/libs/api/HttpClient';
-import { ApiResponse } from '../../../../main/ets/libs/types';
-import { MonitorApi } from '../../../../main/ets/libs/api/modules/MonitorApi';
+import { HttpClient, HttpBackend, HttpBackendResponse } from '../../../main/ets/libs/api/HttpClient';
+import { ApiResponse } from '../../../main/ets/libs/types';
+import { MonitorApi } from '../../../main/ets/libs/api/modules/MonitorApi';
+
+/** MockBackend 录制的请求（显式接口，替代内联对象字面量类型） */
+interface RecordedRequest {
+  method: string;
+  url: string;
+  body: Object | null;
+}
+
+/** 构造空 Record（ArkTS 对象字面量须对应显式类型，集中此处） */
+function emptyRecord(): Record<string, Object> {
+  const r: Record<string, Object> = {};
+  return r;
+}
+
+/** 构造 ApiResponse 信封（data 须传显式类型值，禁内联对象字面量） */
+function apiResponse(data: Object): ApiResponse<Object> {
+  const resp: ApiResponse<Object> = { code: 0, message: 'ok', data: data };
+  return resp;
+}
 
 // Mock 后端实现（参考 MemoryApi.test.ets 模式）
 class MockBackend implements HttpBackend {
-  public requests: { method: string; url: string; body: Object | null }[] = [];
-  public response: ApiResponse<Object> = { code: 0, message: 'ok', data: {} };
+  public requests: RecordedRequest[] = [];
+  public response: ApiResponse<Object> = apiResponse(emptyRecord());
 
   async request(
     method: string,
     url: string,
     body: Object | null,
     _headers: Record<string, string>,
-  ): Promise<{ status: number; data: ApiResponse<Object> }> {
-    this.requests.push({ method, url, body });
-    return { status: 200, data: this.response };
+  ): Promise<HttpBackendResponse> {
+    const recorded: RecordedRequest = { method: method, url: url, body: body };
+    this.requests.push(recorded);
+    const resp: HttpBackendResponse = { status: 200, data: this.response };
+    return resp;
   }
 }
 

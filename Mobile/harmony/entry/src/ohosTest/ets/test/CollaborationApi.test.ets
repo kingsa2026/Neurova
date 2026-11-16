@@ -1,25 +1,34 @@
-// CollaborationApi 单元测试 - 真实契约版（M9.2 协作域迁移）
+// CollaborationApi 单元测试 - 真实契约版（M9.2 协作域迁移 + P1-28/29 信封归一）
 // 后端事实源：/v1/collaboration（templates/start/history/sessions/stats）+ /v1/tasks（看板任务）。
-// 旧 /collaboration/projects|teams|workflows 端点不存在：对应方法必须 throw 点名，
-// 且**不发任何网络请求**（本文件钉住这一行为）。
+// P1-35 后 projects/teams/workflows 已接线到 /v1/projects、/v1/teams、/v1/neurflow/workflows；
+// 任务删除后端无路由——退役面仅剩 removeTask，必须 throw 点名且**不发任何网络请求**。
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { HttpClient, HttpBackend } from '../../../../main/ets/libs/api/HttpClient';
-import { ApiResponse } from '../../../../main/ets/libs/types';
-import { CollaborationApi } from '../../../../main/ets/libs/api/modules/CollaborationApi';
+import { HttpClient, HttpBackend, HttpBackendResponse } from '../../../main/ets/libs/api/HttpClient';
+import { ApiResponse, Task } from '../../../main/ets/libs/types';
+import { CollaborationApi, TemplateCreateBody, CollaborationStartBody } from '../../../main/ets/libs/api/modules/CollaborationApi';
 
-// Mock 后端实现（参考 MemoryApi.test.ets 模式）
+/** MockBackend 录制的请求（显式接口，替代内联对象字面量类型） */
+interface RecordedRequest {
+  method: string;
+  url: string;
+  body: Object | null;
+}
+
 class MockBackend implements HttpBackend {
-  public requests: { method: string; url: string; body: Object | null }[] = [];
-  public response: ApiResponse<Object> = { code: 0, message: 'ok', data: {} };
+  public requests: RecordedRequest[] = [];
+  /** 响应体（可为信封/裸数组/裸 dict——模拟后端真实形状） */
+  public responseBody: Object = new Object();
 
   async request(
     method: string,
     url: string,
     body: Object | null,
     _headers: Record<string, string>,
-  ): Promise<{ status: number; data: ApiResponse<Object> }> {
-    this.requests.push({ method, url, body });
-    return { status: 200, data: this.response };
+  ): Promise<HttpBackendResponse> {
+    const recorded: RecordedRequest = { method: method, url: url, body: body };
+    this.requests.push(recorded);
+    const resp: HttpBackendResponse = { status: 200, data: this.responseBody as Object as ApiResponse<Object> };
+    return resp;
   }
 }
 
@@ -48,7 +57,7 @@ export default function collaborationApiTest() {
 
     it('createTemplate_posts_name_description_workflow_participants', 0, () => {
       const workflow: Record<string, Object> = {};
-      const body = {
+      const body: TemplateCreateBody = {
         name: '模板A', description: 'd', workflow: workflow, participants: ['u1'],
       };
       api.createTemplate(body);
@@ -67,7 +76,7 @@ export default function collaborationApiTest() {
 
     it('startCollaboration_posts_start_contract', 0, () => {
       const context: Record<string, Object> = {};
-      const body = { template_id: 't1', participants: ['u1'], context: context };
+      const body: CollaborationStartBody = { template_id: 't1', participants: ['u1'], context: context };
       api.startCollaboration(body);
       expect(backend.requests[0].method).assertEqual('POST');
       expect(backend.requests[0].url).assertEqual('https://api.example.com/collaboration/start');
@@ -98,14 +107,22 @@ export default function collaborationApiTest() {
     // ========== 看板任务（/tasks/*）==========
 
     it('listTasks_first_fetches_boards', 0, () => {
+      // /tasks/boards 返回裸数组——给一块看板，模块随后按看板聚合任务
+      const board: Record<string, Object> = { 'id': 'b1', 'name': '任务看板' };
+      const boards: Record<string, Object>[] = [board];
+      backend.responseBody = boards;
       api.listTasks(undefined);
       expect(backend.requests[0].method).assertEqual('GET');
       expect(backend.requests[0].url).assertEqual('https://api.example.com/tasks/boards');
     });
 
-    it('createTask_first_fetches_boards', 0, () => {
-      const data = { title: 'T1', status: 'todo', priority: 'medium' };
-      api.createTask(data);
+    it('createTask_first_fetches_boards', 0, async () => {
+      // createTask 先取看板（有看板直接落第一个），Partial<Task> 显式类型钉住 status/priority 词汇
+      const board: Record<string, Object> = { 'id': 'b1', 'name': '任务看板' };
+      const boards: Record<string, Object>[] = [board];
+      backend.responseBody = boards;
+      const data: Partial<Task> = { title: 'T1', status: 'todo', priority: 'medium' };
+      await api.createTask(data);
       expect(backend.requests[0].url).assertEqual('https://api.example.com/tasks/boards');
     });
 
@@ -124,14 +141,17 @@ export default function collaborationApiTest() {
     });
 
     // ========== 退役端点：必须 throw 且不发任何请求 ==========
+    // P1-35 后 projects/teams/workflows 已接线（/v1/projects、/v1/teams、/v1/neurflow/workflows），
+    // 不再退役；任务删除后端无路由（tasks_api 仅提供增查改）——退役面仅剩 removeTask。
 
-    it('retiredProjectsTeamsWorkflows_fire_no_request', 0, () => {
-      api.listProjects(undefined);
-      api.createProject({});
-      api.listTeams(undefined);
-      api.createTeam({});
-      api.listWorkflows(undefined);
-      api.createWorkflow({});
+    it('retiredTaskDelete_throws_and_fires_no_request', 0, async () => {
+      let thrown = '';
+      try {
+        await api.removeTask('task-1');
+      } catch (e) {
+        thrown = (e as Error).message;
+      }
+      expect(thrown.length > 0).assertTrue();
       expect(backend.requests.length).assertEqual(0);
     });
   });

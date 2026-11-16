@@ -14,6 +14,7 @@
  */
 
 import { HttpClient } from '../HttpClient';
+import { asEnvelope } from '../envelope';
 import {
   ApiResponse,
   PageParams,
@@ -60,11 +61,11 @@ export class SessionSyncApi {
     this.client = client;
   }
 
-  /** 列出同步会话（GET /sync/sessions，后端按 token 主体过滤；分页参数仅保留签名，后端整表返回） */
+  /** 列出同步会话（GET /sync/sessions，后端裸 {total,sessions} 边界归一后拆包成 PageResult；分页参数仅保留签名，后端整表返回） */
   async list(agentId?: string, params?: PageParams): Promise<ApiResponse<PageResult<SyncSessionDto>>> {
     const query: Record<string, Object> = {};
     if (agentId !== undefined && agentId.length > 0) query['agent_id'] = agentId;
-    const res = await this.client.get<Object>('/sync/sessions', query);
+    const res = asEnvelope<Object>(await this.client.get<Object>('/sync/sessions', query), ['total', 'sessions']);
     const payload = (res.data ?? {}) as Record<string, Object>;
     const sessions = (payload['sessions'] ?? []) as SyncSessionDto[];
     const total = Number(payload['total'] ?? sessions.length);
@@ -74,41 +75,47 @@ export class SessionSyncApi {
     } as ApiResponse<PageResult<SyncSessionDto>>;
   }
 
-  /** 获取单条同步会话 */
+  /** 获取单条同步会话（SessionResponse 裸对象边界归一） */
   async get(sessionId: string): Promise<ApiResponse<SyncSessionDto>> {
-    return this.client.get<SyncSessionDto>(`/sync/sessions/${sessionId}`);
+    const res = await this.client.get<SyncSessionDto>(`/sync/sessions/${sessionId}`);
+    return asEnvelope<SyncSessionDto>(res, ['session_id', 'status']);
   }
 
-  /** 创建同步会话（POST /sync/sessions） */
+  /** 创建同步会话（POST /sync/sessions，SessionResponse 裸对象边界归一） */
   async create(body: SyncSessionCreateBody): Promise<ApiResponse<SyncSessionDto>> {
-    return this.client.post<SyncSessionDto>('/sync/sessions', body);
+    const res = await this.client.post<SyncSessionDto>('/sync/sessions', body);
+    return asEnvelope<SyncSessionDto>(res, ['session_id', 'status']);
   }
 
-  /** 结束（删除）同步会话（DELETE /sync/sessions/{id}） */
+  /** 结束（删除）同步会话（DELETE /sync/sessions/{id}，{success,...} 裸 dict 边界归一） */
   async remove(sessionId: string): Promise<ApiResponse<Object>> {
-    return this.client.delete<Object>(`/sync/sessions/${sessionId}`);
+    const res = await this.client.delete<Object>(`/sync/sessions/${sessionId}`);
+    return asEnvelope<Object>(res, ['success']) as ApiResponse<Object>;
   }
 
-  /** 会话历史（GET /sync/sessions/{id}/history） */
+  /** 会话历史（GET /sync/sessions/{id}/history，裸 {session_id,total,events} 边界归一） */
   async getHistory(sessionId: string, limit?: number): Promise<ApiResponse<SyncHistoryDto>> {
     const query: Record<string, Object> = {};
     if (limit !== undefined) query['limit'] = limit;
-    return this.client.get<SyncHistoryDto>(`/sync/sessions/${sessionId}/history`, query);
+    const res = await this.client.get<SyncHistoryDto>(`/sync/sessions/${sessionId}/history`, query);
+    return asEnvelope<SyncHistoryDto>(res, ['session_id', 'events']);
   }
 
-  /** 发送消息（REST 降级通道，POST /sync/sessions/{id}/messages） */
+  /** 发送消息（REST 降级通道，POST /sync/sessions/{id}/messages，{success,...} 裸 dict 边界归一） */
   async sendMessage(sessionId: string, body: SyncSendMessageBody): Promise<ApiResponse<Object>> {
-    return this.client.post<Object>(`/sync/sessions/${sessionId}/messages`, body);
+    const res = await this.client.post<Object>(`/sync/sessions/${sessionId}/messages`, body);
+    return asEnvelope<Object>(res, ['success']) as ApiResponse<Object>;
   }
 
-  /** 同步统计（GET /sync/statistics） */
+  /** 同步统计（GET /sync/statistics；后端返回统计 dict，形状由 manager 决定，原样透传） */
   async statistics(): Promise<ApiResponse<Object>> {
     return this.client.get<Object>('/sync/statistics');
   }
 
-  /** 活跃连接信息（GET /sync/connections，按调用者会话过滤） */
+  /** 活跃连接信息（GET /sync/connections，按调用者会话过滤；裸 {total,connections} 边界归一） */
   async connections(): Promise<ApiResponse<Object>> {
-    return this.client.get<Object>('/sync/connections');
+    const res = await this.client.get<Object>('/sync/connections');
+    return asEnvelope<Object>(res, ['total', 'connections']) as ApiResponse<Object>;
   }
 
   /** @deprecated 后端无 PUT /sync/sessions/{id}（会话状态由服务端流转） */

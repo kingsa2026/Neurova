@@ -52,6 +52,11 @@ export interface RenameRequest {
   title: string;
 }
 
+/** 置顶请求体（console.py PinSessionRequest 契约：pinned 必填） */
+export interface PinRequest {
+  pinned: boolean;
+}
+
 export class SessionsApi {
   private client: HttpClient;
 
@@ -73,9 +78,27 @@ export class SessionsApi {
     return this.client.put<Object>(`/console/chat/sessions/${sessionId}`, body);
   }
 
-  /** 置顶（再次调用为取消置顶，后端按当前态翻转） */
-  async pin(sessionId: string): Promise<ApiResponse<Object>> {
-    const body: Record<string, Object> = {};
+  /**
+   * 置顶/取消置顶（后端 PinSessionRequest 必填 {pinned: bool}——P1-32）。
+   * 传 pinned 显式指定；不传时按"翻转当前态"语义：先查列表取该会话当前 pinned，取反提交。
+   */
+  async pin(sessionId: string, pinned?: boolean): Promise<ApiResponse<Object>> {
+    let target = pinned;
+    if (target === undefined) {
+      const list = await this.listAll('');
+      if (list.code !== 0 || !list.data) {
+        throw new Error(list.message && list.message.length > 0 ? list.message : '会话状态获取失败');
+      }
+      let current = false;
+      for (const s of list.data.sessions) {
+        if (s.id === sessionId) {
+          current = s.pinned;
+          break;
+        }
+      }
+      target = !current;
+    }
+    const body: PinRequest = { pinned: target };
     return this.client.post<Object>(`/console/chat/sessions/${sessionId}/pin`, body);
   }
 
