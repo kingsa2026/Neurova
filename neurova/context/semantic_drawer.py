@@ -236,10 +236,6 @@ class SemanticMatchDrawer:
                 self._baselineEwma[key] = current + alpha * (float(sample) - current)
             self._baselineSamples[key] = self._baselineSamples.get(key, 0) + 1
 
-    def _setReadout(self, key: str, value) -> None:
-        with self._readoutLock:
-            self._readouts[key] = value
-
     @property
     def vector_store(self):
         if self._vector_store is None:

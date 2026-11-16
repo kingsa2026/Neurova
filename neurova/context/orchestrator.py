@@ -650,11 +650,6 @@ class ContextOrchestrator:
         explicit = getattr(self, "_session_id", None)
         if explicit:
             return explicit
-        if room:
-            return room
-        explicit = getattr(self, "_session_id", None)
-        if explicit:
-            return explicit
         # 经 agent_ref 读本轮身份（深模块依赖注入，AGENTS.md §3）。
         # 异步边界：本方法只在装配的同一条 task 内被调用（`build_context`
         # 与其同步子步骤），不在发后不管的协程里读——ContextVar 跨 task 会
