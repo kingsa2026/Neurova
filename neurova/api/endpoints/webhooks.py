@@ -22,6 +22,10 @@ from fastapi import APIRouter, HTTPException
 from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
 from neurova.core.data_root import dataPath
+# P1-5（审计 2026-11-16）：SSRF 防护收口到知识域唯一 URL 校验单源——
+# webhook.url 由请求任意指定，test 端点会向它发起服务端 POST，不过闸即
+# 内网探测预言机（169.254.169.254、localhost 等，响应码回显可作预言）。
+from neurova.knowledge.url_guard import validate_public_http_url
 
 logger = get_logger(__name__)
 router = APIRouter(dependencies=[Depends(get_current_user)],)
@@ -90,6 +94,12 @@ def _save_store() -> None:
 _load_store()
 
 
+def _ensurePublicUrl(url: str) -> None:
+    """三处入口（create/update/test）共用的出网 URL 闸；不合规显式 400。"""
+    if not validate_public_http_url(url or ""):
+        raise HTTPException(status_code=400, detail="Webhook URL 不合规：仅允许公网 http/https 地址")
+
+
 @router.get("", response_model=List[WebhookInfo])
 async def list_webhooks():
     """获取 Webhook 列表"""
@@ -99,6 +109,7 @@ async def list_webhooks():
 @router.post("", response_model=WebhookInfo)
 async def create_webhook(body: WebhookCreate):
     """创建 Webhook"""
+    _ensurePublicUrl(body.url)
     wh_id = str(uuid.uuid4())
     now = time.time()
     wh = {
@@ -131,7 +142,10 @@ async def update_webhook(webhook_id: str, body: WebhookUpdate):
     wh = _webhooks.get(webhook_id)
     if not wh:
         raise HTTPException(status_code=404, detail="Webhook not found")
-    for k, v in safe_model_dump(body, exclude_none=True).items():  # s9: pydantic v1 兼容
+    updates = safe_model_dump(body, exclude_none=True)  # s9: pydantic v1 兼容
+    if "url" in updates:
+        _ensurePublicUrl(updates["url"])
+    for k, v in updates.items():
         wh[k] = v
     wh["updated_at"] = time.time()
     _save_store()
@@ -156,6 +170,8 @@ async def test_webhook(webhook_id: str, body: WebhookTestRequest):
     wh = _webhooks.get(webhook_id)
     if not wh:
         raise HTTPException(status_code=404, detail="Webhook not found")
+    # P1-5：存量行（闸上线前入库）在发起服务端 POST 前同样复核
+    _ensurePublicUrl(wh.get("url") or "")
     delivery_id = str(uuid.uuid4())
     delivery = {
         "delivery_id": delivery_id,

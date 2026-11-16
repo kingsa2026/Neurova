@@ -14,7 +14,9 @@ schema 对齐（web/includes/ErrorLogs.php 白名单）：
 - message/stack/app_version/ua: 长度封顶 500/4000/40/256
 
 纪律：上报是尽力而为——任何失败（无网/限流/开关关闭）都只吞掉，
-绝不影响启动或退出流程。开关：环境变量 NEUROVA_ERROR_REPORT=off 关闭。
+绝不影响启动或退出流程。开关（core-P2-11 拍板，2026-11-16）：**默认关闭**
+（与设置页 telemetry 口径一致，分发包不外发遥测）；显式设
+NEUROVA_ERROR_REPORT=on/true/1/yes 才开启。
 """
 from __future__ import annotations
 
@@ -118,7 +120,9 @@ def report_startup_failure(
     不能再引入故障。
     """
     try:
-        if os.environ.get("NEUROVA_ERROR_REPORT", "").strip().lower() == "off":
+        # core-P2-11：默认关闭（未设置/off/其他值一律不上报），显式 on/true/1/yes 才开启
+        _raw = os.environ.get("NEUROVA_ERROR_REPORT", "").strip().lower()
+        if _raw not in ("on", "true", "1", "yes"):
             return False
         body = build_report(
             error_code="backend_startup_failed",

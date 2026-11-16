@@ -63,14 +63,21 @@ def _purge_expired_blacklist() -> None:
     for t in expired:
         _token_blacklist.pop(t, None)
 
-# 忘记密码/取回密码：最高权重恢复密码（写死常量）。双条件缺一不可——
-# 1) username 是系统内角色为 admin 的管理员账号；2) master_password 与此常量相等。
-# 校验只发生在服务端，前端只做必填（不做任何常量比对）。
-# §6-171（2026-10-13 用户裁定）：`66269ea0` 曾把这行换成 NEUROVA_MASTER_RECOVERY_PASSWORD
-# 环境变量、未配置即禁用，实测把本机唯一 admin 永久挡在门外，现按原形态接回写死常量。
-# 代价已在台账写明：此常量随源码与打包产物分发，而端点在免 JWT 白名单内
-# （见 global_auth.py），构建外流或端口对外即等于管理员可被接管——不要把这份构建放出去。
-MASTER_RECOVERY_PASSWORD = "neurovamakehappy"
+# 忘记密码/取回密码：最高权重恢复密码（P0-1，审计 2026-11-16 拍板：构建期环境注入）。
+# 双条件缺一不可——1) username 是系统内角色为 admin 的管理员账号；
+# 2) master_password 与注入口令相等。校验只发生在服务端，前端只做必填。
+# §6-171（2026-10-13 用户裁定）语义保留：口令经环境变量
+# NEUROVA_MASTER_RECOVERY_PASSWORD 在构建/部署期注入，桌面单机配置后自救可用；
+# 源码与分发包不再含密码常量（66269ea0 引入过同名变量但"未配置即禁用"把唯一
+# admin 锁死，本形态在端点侧以 404 显式禁用并指明注入方式，不再回退写死常量）。
+# 服务端部署未注入时端点同样禁用——服务器绝不因随包默认口令被接管。
+_MASTER_RECOVERY_PASSWORD_ENV = "NEUROVA_MASTER_RECOVERY_PASSWORD"
+
+
+def _masterRecoveryPassword() -> Optional[str]:
+    """读取构建/部署期注入的最高权重恢复口令；未注入（含空串）返回 None。"""
+    configured = (os.environ.get(_MASTER_RECOVERY_PASSWORD_ENV) or "").strip()
+    return configured or None
 
 # recover-password 简易限流：key=(username|ip) -> 尝试时间戳列表
 _recover_attempts: Dict[str, list] = {}
@@ -155,7 +162,7 @@ class RecoverPasswordRequest(BaseModel):
 
     双条件缺一不可（必须都对上）：
     1. username：系统中存在且角色为 admin 的管理员账号
-    2. master_password：最高权重恢复密码（写死常量）
+    2. master_password：最高权重恢复密码（构建/部署期经环境变量注入）
     """
 
     username: str = Field(..., description="管理员账号")
@@ -353,8 +360,9 @@ async def recover_password(request: Request, body: RecoverPasswordRequest):
     """忘记密码/取回密码（管理员账号 + 最高权重密码，双条件缺一不可）。
 
     - username 必须是系统中角色为 admin 的管理员账号
-    - master_password 必须等于 MASTER_RECOVERY_PASSWORD（服务端校验）
+    - master_password 必须等于构建/部署期注入的最高权重口令（服务端校验）
     - 错误统一文案（不泄露账号是否存在/角色），防用户名探测
+    - 口令未注入 ⇒ 端点禁用（404）：分发包不含口令，未配置即无此功能
     """
     _get_request_id(request)
 
@@ -362,6 +370,14 @@ async def recover_password(request: Request, body: RecoverPasswordRequest):
     rate_key = f"{body.username}|{ip_address}"
 
     try:
+        configured = _masterRecoveryPassword()
+        if configured is None:
+            logger.warning(
+                "recover-password 未注入 %s，端点禁用（404）: ip=%s",
+                _MASTER_RECOVERY_PASSWORD_ENV, ip_address,
+            )
+            raise HTTPException(status_code=404, detail="Not Found")
+
         if _check_recover_rate_limit(rate_key):
             raise HTTPException(status_code=429, detail="尝试次数过多，请 15 分钟后再试")
 
@@ -371,7 +387,7 @@ async def recover_password(request: Request, body: RecoverPasswordRequest):
         # S-20: 恒定时间比较，防时序攻击探测恢复密码
         master_ok = hmac.compare_digest(
             body.master_password.encode("utf-8", "ignore"),
-            MASTER_RECOVERY_PASSWORD.encode("utf-8"),
+            configured.encode("utf-8"),
         )
         user_ok = bool(user) and user.role == "admin"
         if not (user_ok and master_ok):
@@ -397,6 +413,7 @@ async def recover_password(request: Request, body: RecoverPasswordRequest):
             raise HTTPException(status_code=500, detail="密码重置失败，请稍后重试")
 
         logger.warning("Password recovered (最高权重密码): username=%s ip=%s", body.username, ip_address)
+        _alertRecoveryHit(body.username, ip_address)
         return {
             "code": 0,
             "message": "密码已重置，请使用新密码登录",
@@ -407,7 +424,47 @@ async def recover_password(request: Request, body: RecoverPasswordRequest):
         raise
     except Exception as e:
         logger.error(f"Recover password error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Recover password failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Recover password failed")
+
+
+def _alertRecoveryHit(username: str, ip_address: str) -> None:
+    """最高权重口令命中是重大安全事件：通知全部管理员 + 审计事件升 CRITICAL（P0-1）。
+
+    通知/审计失败只记日志，不影响重置结果本身（重置已落库）。
+    """
+    try:
+        from neurova.api.endpoints.notifications import notify_admins
+
+        notify_admins(
+            "管理员密码经最高权重口令重置",
+            f"账号 {username} 的密码刚被最高权重恢复口令重置（来源 IP {ip_address}）。"
+            "若非本人操作，请立即检查系统安全并更换注入口令。",
+            notification_type="warning",
+        )
+    except Exception as e:  # noqa: BLE001 - 通知失败不阻断
+        logger.warning("recover-password 管理员通知失败: %s", e)
+    try:
+        from neurova.security.audit_logger import (
+            AuditEventType,
+            AuditLogEntry,
+            AuditSeverity,
+            get_audit_logger,
+        )
+
+        get_audit_logger().log(
+            AuditLogEntry(
+                event_type=AuditEventType.SECURITY_EVENT,
+                severity=AuditSeverity.CRITICAL,
+                user_id=username,
+                action="recover_password_master_hit",
+                details={"via": "master_recovery_password"},
+                ip_address=ip_address,
+                resource_type="user_account",
+                resource_id=username,
+            )
+        )
+    except Exception as e:  # noqa: BLE001 - 审计失败不阻断
+        logger.warning("recover-password 审计事件写入失败: %s", e)
 
 
 def is_token_blacklisted(token: str) -> bool:
@@ -465,7 +522,7 @@ async def refresh_token(request: Request, body: RefreshRequest):
         raise
     except Exception as e:
         logger.error(f"Refresh error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Refresh failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Refresh failed")
 
 
 def _get_user_allowed_modules(username: str) -> list:
@@ -533,7 +590,7 @@ async def get_current_user(request: Request):
         raise
     except Exception as e:
         logger.error(f"Get user error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to get user: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get user")
 
 
 @router.get("/setup-status")
@@ -548,7 +605,7 @@ async def setup_status():
         return {"code": 0, "message": "ok", "data": {"needs_setup": needs_setup}}
     except Exception as e:
         logger.error(f"Setup status error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to get setup status: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get setup status")
 
 
 @router.post("/register")
@@ -673,13 +730,27 @@ async def register(request: Request, body: RegisterRequest):
         raise
     except Exception as e:
         logger.error(f"Register error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Registration failed")
 
 
 @router.post("/register/send-code")
 async def send_verification_code(request: Request, email: str = Query(...)):
     """发送注册验证码"""
     _get_request_id(request)
+
+    # P1-6（审计 2026-11-16）：服务端部署形态关闭自注册。本文件没有 SMTP 发信
+    # 链路，验证码若随响应返回，攻击者"先取码再注册"即绕过邮箱验证、脚本化造号
+    # （仅剩 IP 限流屏障）。服务端形态直接拒发——注册链在此断流；桌面单机维持
+    # 上轮 P2-3 的诚实返回（dev_code 随响应、明示未发邮件）。
+    if _isServerFacingDeployment():
+        logger.warning(
+            "服务端部署（NEUROVA_HOST=%s）关闭自注册：拒绝发放注册验证码 %s",
+            _serverBindHost(), email,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="服务端部署未开放自助注册：请联系管理员创建账号",
+        )
 
     try:
         # 获取验证码模型
@@ -717,7 +788,7 @@ async def send_verification_code(request: Request, email: str = Query(...)):
         raise
     except Exception as e:
         logger.error(f"Send verification code error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to send verification code: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to send verification code")
 
 
 @router.post("/register/verify-code")
@@ -755,7 +826,7 @@ async def verify_code(request: Request, email: str = Query(...), code: str = Que
         raise
     except Exception as e:
         logger.error(f"Verify code error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to verify code: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to verify code")
 
 
 @router.post("/logout")

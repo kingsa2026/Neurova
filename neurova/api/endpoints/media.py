@@ -33,6 +33,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from neurova.api.auth import get_current_user, Depends
+from neurova.api.deps import require_admin
 from pydantic import BaseModel, Field
 from neurova.core.data_root import dataPath
 
@@ -323,6 +324,26 @@ def _uploaderOr401(current_user: Dict[str, Any]) -> str:
             status_code=401, detail="缺少可归因的登录身份（令牌无 sub），无法记录上传者")
     return user_id
 
+
+def _ownedMediaOr404(media_id: str, current_user: Dict[str, Any]) -> Dict[str, Any]:
+    """按 id 取**当前登录用户名下**的活条目；非属主与不存在统一 404（P1-7）。
+
+    `files_api._get_owned_file` 的同构闸（防 IDOR 探测：404 不区分"无权"与"不存在"）。
+    写入侧自 §6-172 起记录的 `user_id` 在这里首次成为读取闸门。
+    历史无主行（`user_id` 为空——属主记录晚于索引启用）仅 admin 可见：
+    桌面单机的存量媒体不因补门对唯一管理员消失，也不向多用户形态的普通用户暴露。
+    """
+    media = _liveMedia(media_id)
+    if not media:
+        raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
+    owner = str(media.get("user_id") or "")
+    if owner:
+        if owner != str(current_user.get("user_id") or ""):
+            raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
+    elif str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
+    return media
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -492,8 +513,11 @@ async def get_config():
 
 
 @router.put("/config")
-async def update_config(body: UpdateConfigRequest):
-    """更新媒体存储配置"""
+async def update_config(
+    body: UpdateConfigRequest,
+    _: Dict[str, Any] = Depends(require_admin()),  # P1-7：storage_path 决定后续落盘根，收 admin
+):
+    """更新媒体存储配置（仅管理员——storage_path 是任意写链的根）"""
     if body.max_file_size is not None:
         _media_config["max_file_size"] = body.max_file_size
     if body.allowed_types is not None:
@@ -514,11 +538,15 @@ async def update_config(body: UpdateConfigRequest):
 
 
 @router.post("/batch-delete")
-async def batch_delete_media(body: BatchDeleteRequest):
+async def batch_delete_media(
+    body: BatchDeleteRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """批量删除媒体文件（F-1 契约对齐：前端 batchDeleteMedia）。
 
-    逐个处理（不中断整批），模式与单条 `DELETE /{media_id}` 共用 `DELETE_MODES` 那一份口径，
+    逐个处理（不中断整批），模式与单条 `DELETE /{media_id}` 共用 `DELETE_MODES` 那份口径，
     缺省同样是 permanent。不存在的 ID 沿用既有 reason 串——前端按它渲染失败清单。
+    P1-7：逐条过属主门，非属主 id 计入失败清单（与"不存在"同话术，不泄露可删面）。
     """
     if body.mode not in DELETE_MODES:
         raise HTTPException(
@@ -529,6 +557,11 @@ async def batch_delete_media(body: BatchDeleteRequest):
     succeeded: List[str] = []
     failed: List[Dict[str, str]] = []
     for media_id in body.media_ids:
+        try:
+            _ownedMediaOr404(media_id, current_user)
+        except HTTPException:
+            failed.append({"media_id": media_id, "reason": "media not found"})
+            continue
         if body.mode == "trash":
             media, reason = _trashMediaEntry(media_id)
         else:
@@ -577,9 +610,12 @@ async def list_trash(
 
 
 @router.get("/{media_id}")
-async def get_media(media_id: str):
+async def get_media(
+    media_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """获取媒体文件内容（P1-2: 从磁盘 FileResponse 流式读取，不再驻留内存）"""
-    media = _liveMedia(media_id)
+    media = _ownedMediaOr404(media_id, current_user)
     if not media:
         raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
 
@@ -598,9 +634,12 @@ async def get_media(media_id: str):
 
 
 @router.get("/{media_id}/metadata")
-async def get_media_metadata(media_id: str):
+async def get_media_metadata(
+    media_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """获取媒体文件元数据（含**真读盘重算**的校验位判定）。"""
-    media = _liveMedia(media_id)
+    media = _ownedMediaOr404(media_id, current_user)
     if not media:
         raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
 
@@ -637,9 +676,13 @@ async def get_media_metadata(media_id: str):
 
 
 @router.post("/{media_id}/restore")
-async def restore_media(media_id: str):
+async def restore_media(
+    media_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """从回收站恢复。字节已不在即 410——不许把"恢复失败"折成 200，
     留下一条列表里看得见、取字节却 404 的活记录。"""
+    _ownedMediaOr404(media_id, current_user)  # P1-7：恢复也是写动作，先过属主门
     media, reason = _restoreMediaEntry(media_id)
     if media is None:
         raise _reject(reason)
@@ -652,9 +695,12 @@ async def restore_media(media_id: str):
 
 
 @router.get("/download/{media_id}")
-async def download_attachment(media_id: str):
+async def download_attachment(
+    media_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """直接从附件目录下载文件（用于TTS音频等；P1-2: 磁盘流式读取）"""
-    media = _liveMedia(media_id)
+    media = _ownedMediaOr404(media_id, current_user)
     if not media:
         raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
 
@@ -679,6 +725,7 @@ async def delete_media(
         Query(description="trash＝移入回收站（字节保留、可从 /trash 读回）；"
                           "缺省 permanent＝直接删除（现役页面的既有承诺）"),
     ] = DEFAULT_DELETE_MODE,
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """删除媒体文件。模式只认 `DELETE_MODES` 那一份口径：坏档当场 400，
     既不动盘上字节也不落软删标记（不许兜底成任何一种删除）。
@@ -693,6 +740,7 @@ async def delete_media(
             status_code=400,
             detail=f"未知的删除模式: {mode}（可用：{' / '.join(DELETE_MODES)}）",
         )
+    _ownedMediaOr404(media_id, current_user)  # P1-7：删前过属主门
 
     if mode == "trash":
         media, reason = _trashMediaEntry(media_id)
@@ -767,7 +815,7 @@ async def get_memory_media(memory_id: str):
 
 
 @router.post("/cache/clear")
-async def clear_cache():
+async def clear_cache(_: Dict[str, Any] = Depends(require_admin())):  # P1-7：清空全量索引收 admin
     """清除媒体存储缓存（P1-2 实做：清空内存媒体索引）。
 
     磁盘文件是持久化内容源，不随缓存清除删除（逐条删除走 DELETE /{media_id}）。

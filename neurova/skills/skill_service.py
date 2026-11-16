@@ -22,9 +22,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from neurova.core.data_root import get_data_root, require_data_path
-
-# 安装技能 ID 白名单：字母数字开头，仅含 . _ - 与字母数字（拒路径穿越/绝对/相对点段）
-_SAFE_SKILL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]*$")
+# 安装技能 ID 白名单（拒路径穿越/绝对/相对点段）——与 hub_client 安装入口闸同一份
+# 判据（教义第 6 条单一事实源；P1-15 后两处不得各写一份字面量）
+from neurova.skills.hub_client import SAFE_SKILL_NAME_RE as _SAFE_SKILL_ID_RE
 
 
 def _incomingStagingName(skill_id: str) -> str:
