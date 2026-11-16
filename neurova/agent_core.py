@@ -1638,17 +1638,6 @@ class Agent:
         except Exception as e:
             logger.warning("ToolMemory 记录失败: %s", e)
 
-    def spawn_subagent(self, role: str, task: str, context: Optional[Dict[str, Any]] = None):
-        """
-        派生运行时子代理（方案 P1-2.1）—— 仅委托给 SubAgentManager 单例。
-
-        子代理拥有独立上下文，可通过 SubAgentManager.run_all 并发执行；
-        典型用法见 tests/unit/agent/protocols/test_subagent.py。
-        """
-        from neurova.agent.subagent import get_subagent_manager
-
-        return get_subagent_manager().spawn(role=role, task=task, context=context)
-
     async def process_message(self, content: str, sender: str = "user") -> RouteResult:
         """
         处理消息的统一入口 - 通过 Router 接收消息
