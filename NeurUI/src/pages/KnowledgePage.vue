@@ -708,6 +708,77 @@
       </a-table>
     </a-modal>
 
+    <!-- P1-25：MCP 信息源弹层接线——script 的 mcpVisible/mcpSources/mcpForm 与
+         .kb-mcp-* 样式此前在模板零挂载点，「MCP 信息源」按钮点击零效果（死码面）。
+         链路：登记（probe→create）→ 列表（pull/delete）→ 拉取直接入知识库。 -->
+    <a-modal v-model:open="mcpVisible" :title="t('knowledge.mcpTitle')" :footer="null" width="640px">
+      <div class="kb-mcp-toolbar">
+        <GlassButton variant="ghost" size="sm" :loading="mcpLoading" @click="fetchMcpSources">
+          {{ t('common.refresh') }}
+        </GlassButton>
+        <GlassButton variant="primary" size="sm" @click="openMcpForm">
+          {{ t('knowledge.mcpNew') }}
+        </GlassButton>
+      </div>
+
+      <div v-if="mcpFormVisible" class="kb-mcp-form">
+        <a-form-item :label="t('knowledge.mcpName')">
+          <a-input v-model:value="mcpForm.name" />
+        </a-form-item>
+        <a-form-item :label="t('knowledge.mcpEndpoint')">
+          <a-input v-model:value="mcpForm.endpoint" />
+        </a-form-item>
+        <a-form-item :label="t('knowledge.mcpToken')">
+          <a-input-password v-model:value="mcpForm.auth_token" />
+        </a-form-item>
+        <div class="kb-mcp-row">
+          <a-select
+            v-model:value="mcpForm.tool_name"
+            style="flex: 1"
+            :options="mcpTools.map((tool) => ({ label: tool.name, value: tool.name }))"
+            :placeholder="t('knowledge.mcpPickTool')"
+          />
+          <GlassButton variant="ghost" size="sm" :loading="mcpProbing" @click="probeMcpTools">
+            {{ t('knowledge.mcpProbe') }}
+          </GlassButton>
+        </div>
+        <span v-if="mcpTools.length" class="kb-mcp-tools-hint">
+          {{ t('knowledge.mcpToolsFound', { count: mcpTools.length }) }}
+        </span>
+        <a-form-item :label="t('knowledge.mcpArgsJson')">
+          <a-textarea v-model:value="mcpForm.tool_args_json" :rows="2" />
+        </a-form-item>
+        <div class="kb-mcp-row">
+          <GlassButton variant="secondary" size="sm" @click="mcpFormVisible = false">
+            {{ t('common.cancel') }}
+          </GlassButton>
+          <GlassButton variant="primary" size="sm" :loading="mcpSaving" @click="saveMcpSource">
+            {{ t('common.save') }}
+          </GlassButton>
+        </div>
+      </div>
+
+      <div v-if="!mcpSources.length && !mcpLoading" class="kb-src-empty">
+        {{ t('knowledge.mcpEmpty') }}
+      </div>
+      <div v-for="item in mcpSources" :key="item.source_id" class="kb-mcp-item">
+        <div class="kb-mcp-item-main">
+          <span class="kb-mcp-name">{{ item.name }}</span>
+          <span class="kb-mcp-endpoint">{{ item.endpoint }}</span>
+        </div>
+        <div class="kb-mcp-item-actions">
+          <GlassButton
+            variant="ghost" size="sm"
+            :loading="pullingId === item.source_id"
+            @click="pullMcpSource(item)"
+          >{{ t('knowledge.mcpPull') }}</GlassButton>
+          <a-popconfirm :title="t('knowledge.mcpDeleteConfirm')" @confirm="deleteMcpSource(item)">
+            <GlassButton variant="danger" size="sm">{{ t('common.delete') }}</GlassButton>
+          </a-popconfirm>
+        </div>
+      </div>
+    </a-modal>
+
     <!-- P1#12（WeKnora）：摄取任务 span 时间线 + stop-parse -->
     <a-modal v-model:open="ingressVisible" :title="t('knowledge.ingressTitle')" :footer="null" width="820px">
       <div class="kb-ingress-toolbar">
