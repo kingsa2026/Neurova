@@ -49,6 +49,7 @@ import { AuthStore } from '../libs/state/stores/AuthStore';
 import { Router, RouteNames } from '../routing/Router';
 import { StyleManager, ThemeMode } from '../libs/style/StyleManager';
 import { ConfigManager } from '../libs/config/ConfigManager';
+import { ServerProfiles } from '../libs/config/ServerProfiles';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
 import { SettingGroup, SettingItem } from '../libs/types';
@@ -277,6 +278,15 @@ export struct SettingPage {
 
   aboutToAppear() {
     this.loadSettings();
+  }
+
+  /** 工作区地址（档案地址去 /api/v1 尾缀） */
+  private workspaceHost(): string {
+    const base = ServerProfiles.getInstance().getActiveApiBase();
+    if (base.length === 0) {
+      return '未连接';
+    }
+    return base.replace('/api/v1', '').replace('http://', '').replace('https://', '');
   }
 
   /** 当前登录用户是否管理员（role 取自 /auth/me；非 admin 时管理员分组不渲染） */
@@ -542,6 +552,38 @@ export struct SettingPage {
       }
       .width('100%')
       .padding({ left: 20, right: 20, top: 8, bottom: 10 })
+
+      // 个人卡（原型 F10：渐变头像 + 用户名 + 工作区/配对态）
+      Row() {
+        Text((this.authStore.user?.username ?? 'U').slice(0, 1))
+          .fontSize(20)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.sm.getColor('text_on_primary'))
+          .width(52)
+          .height(52)
+          .borderRadius(18)
+          .textAlign(TextAlign.Center)
+          .linearGradient({ angle: 135, colors: [['#8b5cf6', 0], ['#6366f1', 1]] })
+        Column() {
+          Text(this.authStore.user?.username ?? '未登录')
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.sm.getColor('text_primary'))
+          Text('工作区 ' + this.workspaceHost() + (this.authStore.isPaired ? ' · 已配对' : ' · 未配对'))
+            .fontSize(11.5)
+            .fontColor(this.sm.getColor('text_secondary'))
+            .margin({ top: 3 })
+        }
+        .alignItems(HorizontalAlign.Start)
+        .margin({ left: 12 })
+        .layoutWeight(1)
+      }
+      .width('calc(100% - 32vp)')
+      .margin({ left: 16, right: 16, bottom: 10 })
+      .padding(14)
+      .borderRadius(16)
+      .backgroundColor(this.sm.getColor('surface'))
+      .border({ width: 1, color: this.sm.getColor('border') })
 
       // 管理员分组：仅 role=admin 渲染（原型 F10；role 取自 /auth/me）
       if (this.isAdmin()) {

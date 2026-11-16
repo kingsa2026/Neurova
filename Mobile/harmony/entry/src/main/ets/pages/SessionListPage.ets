@@ -25,6 +25,9 @@ export struct SessionListPage {
   @State private sessions: ChatSession[] = [];
   @State private loading: boolean = false;
   @State private filter: number = FILTER_ALL;
+  // 搜索展开态与关键词（本地按标题过滤）
+  @State showSearch: boolean = false;
+  @State searchText: string = '';
   /** 重命名弹窗状态 */
   @State private renameTarget: ChatSession | undefined = undefined;
   @State private renameText: string = '';
@@ -54,11 +57,15 @@ export struct SessionListPage {
     this.loading = false;
   }
 
-  /** 按筛选 Tab 输出可见列表（置顶优先，其次按更新时间倒序） */
+  /** 按筛选 Tab 与搜索词输出可见列表（置顶优先，其次按更新时间倒序） */
   private visible(): ChatSession[] {
-    const filtered = this.filter === FILTER_PINNED
+    const kw = this.searchText.trim();
+    const base = this.filter === FILTER_PINNED
       ? this.sessions.filter((s: ChatSession) => s.pinned)
       : this.sessions;
+    const filtered = kw.length === 0
+      ? base
+      : base.filter((s: ChatSession) => s.title.indexOf(kw) >= 0);
     const sorted = filtered.slice();
     sorted.sort((a: ChatSession, b: ChatSession) => {
       if (a.pinned !== b.pinned) {
@@ -163,6 +170,31 @@ export struct SessionListPage {
 
           Blank()
 
+          Stack() {
+            Circle()
+              .width(13)
+              .height(13)
+              .fillOpacity(0)
+              .stroke(this.sm.getColor('text_secondary'))
+              .strokeWidth(1.7)
+            Path()
+              .commands('M14.2 14.2 L18.2 18.2')
+              .fillOpacity(0)
+              .stroke(this.sm.getColor('text_secondary'))
+              .strokeWidth(1.7)
+              .strokeLineCap(LineCapStyle.Round)
+              .width(20)
+              .height(20)
+          }
+          .width(36)
+          .height(36)
+          .borderRadius(12)
+          .backgroundColor(this.sm.getColor('surface_strong'))
+          .border({ width: 1, color: this.sm.getColor('border') })
+          .onClick(() => {
+            this.showSearch = !this.showSearch;
+          })
+
           Button() {
             Text('＋ 新对话')
               .fontSize(13)
@@ -171,12 +203,29 @@ export struct SessionListPage {
           .buttonStyle(ButtonStyleMode.NORMAL)
           .linearGradient({ angle: 135, colors: [['#8b5cf6', 0], ['#6366f1', 1]] })
           .height(34)
+          .margin({ left: 8 })
           .onClick(() => {
             this.newSession();
           })
         }
         .width('100%')
         .padding({ left: 20, right: 20, top: 8, bottom: 10 })
+
+        // 搜索行（展开时显示，按标题本地过滤）
+        if (this.showSearch) {
+          Row() {
+            TextInput({ placeholder: '搜索会话标题…', text: this.searchText })
+              .onChange((v: string) => {
+                this.searchText = v;
+              })
+              .height(40)
+              .layoutWeight(1)
+              .borderRadius(12)
+              .backgroundColor(this.sm.getColor('surface_strong'))
+          }
+          .width('100%')
+          .padding({ left: 20, right: 20, bottom: 10 })
+        }
 
         // 筛选：全部 / 置顶
         Row() {

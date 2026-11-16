@@ -64,11 +64,9 @@ export struct AgentListPage {
   private async loadAgents(): Promise<void> {
     this.loading = true;
     try {
-      const res = await this.api.agents.list();
-      if (res.code === 0 && res.data) {
-        this.agentsDs.setData(res.data.items);
-        this.agentsStore.setAgents(this.agentsDs.getAll());
-      }
+      const agents = await this.api.agents.list();
+      this.agentsDs.setData(agents);
+      this.agentsStore.setAgents(agents);
     } catch (e) {
       this.logger.error(TAG, '加载失败', e as Error);
       this.msg.error('加载智能体失败');
@@ -203,12 +201,18 @@ export struct AgentListPage {
   build() {
     Column() {
       // 顶部导航栏：标题"智能体" + 返回按钮 + 创建按钮（右侧插槽）
-      // 内联头（原型 F7：21/700 标题 + 创建渐变胶囊）
+      // 内联头（原型 F7：21/700 标题 + 数量 + 创建渐变胶囊）
       Row() {
         Text('智能体')
           .fontSize(21)
           .fontWeight(FontWeight.Bold)
           .fontColor(this.sm.getColor('text_primary'))
+        Text(this.agentsDs.totalCount().toString() + ' 个')
+          .fontSize(11)
+          .fontColor(this.sm.getColor('text_tertiary'))
+          .margin({ left: 8 })
+          .alignSelf(ItemAlign.End)
+          .padding({ bottom: 3 })
           .layoutWeight(1)
         Button() {
           Text('＋ 创建')
@@ -293,15 +297,15 @@ export struct AgentListPage {
       Column() {
         // 上部：头像 + 名称/描述/状态
         Row() {
-          // 头像：首字母圆形，40x40，primary 色背景白字
+          // 头像：首字母圆形，40x40，品牌渐变白字
           Text(this.getAvatarChar(agent.name))
             .fontSize(20)
             .fontColor('#ffffff')
             .fontWeight(FontWeight.Bold)
             .width(40)
             .height(40)
-            .borderRadius(20)
-            .backgroundColor(this.sm.getColor('primary'))
+            .borderRadius(14)
+            .linearGradient({ angle: 135, colors: [['#8b5cf6', 0], ['#6366f1', 1]] })
             .textAlign(TextAlign.Center)
 
           // 信息列：名称、描述、状态行

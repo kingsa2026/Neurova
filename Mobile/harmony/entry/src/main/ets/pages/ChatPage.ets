@@ -132,14 +132,11 @@ export struct ChatPage {
    */
   private async loadAgents(): Promise<void> {
     try {
-      const res = await this.api.agents.list({ page: 1, size: 100 });
-      if (res.code === 0 && res.data) {
-        this.agents = res.data.items;
-        this.agentsStore.setAgents(this.agents);
-        // 若 store 中无当前 Agent，默认选中第一个
-        if (!this.currentAgentId && this.agents.length > 0) {
-          this.currentAgentId = this.agents[0].id;
-        }
+      this.agents = await this.api.agents.list();
+      this.agentsStore.setAgents(this.agents);
+      // 若 store 中无当前 Agent，默认选中第一个
+      if (!this.currentAgentId && this.agents.length > 0) {
+        this.currentAgentId = this.agents[0].id;
       }
     } catch (e) {
       this.logger.warn(TAG, '加载 Agent 列表失败，使用缓存', e as Error);
@@ -367,13 +364,49 @@ export struct ChatPage {
 
   build() {
     Column() {
-      // 顶部导航栏：标题"对话"，显示返回按钮
-      TopNavMenu({
-        title: '对话',
-        showBack: true,
-        showMenu: false,
-        onBack: () => { this.router.back(); }
-      })
+      // 顶部玻璃头（原型 F5：返回 + Agent 头像 + 会话名/状态 + ⋯）
+      Row() {
+        Text('‹')
+          .fontSize(22)
+          .fontColor(this.sm.getColor('text_secondary'))
+          .padding(8)
+          .onClick(() => {
+            this.router.back();
+          })
+        Text(this.getAgentName().slice(0, 1))
+          .fontSize(13)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.sm.getColor('text_on_primary'))
+          .width(32)
+          .height(32)
+          .borderRadius(11)
+          .textAlign(TextAlign.Center)
+          .linearGradient({ angle: 135, colors: [['#8b5cf6', 0], ['#6366f1', 1]] })
+        Column() {
+          Text(this.sessionTitle.length > 0 ? this.sessionTitle : '新对话')
+            .fontSize(15)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.sm.getColor('text_primary'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(this.getAgentName() + ' · ' + (this.isGenerating ? '生成中…' : '就绪'))
+            .fontSize(10.5)
+            .fontColor(this.isGenerating ? this.sm.getColor('success') : this.sm.getColor('text_tertiary'))
+            .margin({ top: 1 })
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+        .margin({ left: 8 })
+        Text('⋯')
+          .fontSize(16)
+          .fontColor(this.sm.getColor('text_secondary'))
+          .padding(8)
+      }
+      .width('100%')
+      .padding({ left: 12, right: 12, top: 6, bottom: 8 })
+      .backgroundBlurStyle(BlurStyle.Thin)
+      .backgroundColor(this.sm.getColor('surface_strong'))
+      .border({ width: { bottom: 1 }, color: this.sm.getColor('divider') })
 
       // Agent 切换器：横向滚动胶囊列表
       AgentSwitcher({
