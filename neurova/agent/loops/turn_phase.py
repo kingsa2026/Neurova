@@ -1,8 +1,6 @@
-"""Turn 相位状态机（P1，ZCode agent-loop 对照候选 #1）。
+"""Turn 相位状态机（P1）。
 
-对照依据：`docs/08-research/zcode_agent_loop_comparison_2026-11-15.md` §3/§10。
-ZCode 用显式 10 相位＋静态迁移表（turn-state.ts `canTransitionTo`），非法迁移
-当场抛错；Neurova 此前轮次相位散在 loop 实例字段与两条环的控制流里，相位
+此前轮次相位散在 loop 实例字段与两条环的控制流里，相位
 合法性靠约定——不可测、不可审计。
 
 本模块把"一轮对话走到哪一步"显式化：

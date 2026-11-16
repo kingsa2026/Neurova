@@ -16,7 +16,6 @@ ToolExecutor — 统一工具执行器
 import ast
 import asyncio
 import json
-from neurova.core.lazy_singleton import lazySingleton
 from neurova.builtin_tools import get_builtin_tool_params
 from neurova.collaboration.canvas_ops import (
     CanvasOpError,
