@@ -138,11 +138,64 @@ class AnthropicProvider(BaseProvider):
         """获取可用的模型列表
 
         Returns:
-            模型信息列表
+            模型信息列表（真实为空时即空）
+
+        2026-11-17 根治假成功：/v1/models 真实探测取代"返回已知模型静态清单"
+        ——静态清单让 check_connection 一个网络包都不发就报成功。静态清单保留
+        为素材（_get_known_models），不再用于判活。
         """
-        # Anthropic 没有公开的模型列表 API
-        # 返回已知的模型列表
-        return self._get_known_models()
+        return await self._fetch_models_from_api()
+
+    async def _fetch_models_from_api(self) -> typing.List[ModelInfo]:
+        """从 /v1/models 获取真实模型列表
+
+        Returns:
+            模型信息列表（无 key 时为空——管理器预检已拦截该场景）
+
+        Raises:
+            非 200/网络失败 — 带 status_code 的异常上抛（吞错返回空列表会让
+            连接测试误判成功）。
+        """
+        if not aiohttp:
+            self.logger.warning("aiohttp 未安装，无法从 API 获取模型列表")
+            return []
+
+        if not self.api_key:
+            self.logger.warning("API 密钥未配置，无法获取模型列表")
+            return []
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{self.base_url}/v1/models",
+                headers=self._make_headers(),
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                if response.status != 200:
+                    exc = RuntimeError(f"获取模型列表失败: HTTP {response.status}")
+                    exc.status_code = response.status
+                    raise exc
+                data = await response.json()
+                models = []
+                for model_data in data.get("data", []):
+                    model_id = model_data.get("id", "")
+                    if model_id:
+                        models.append(self._parse_api_model(model_data, model_id))
+                self.logger.info("从 API 获取到 %s 个模型", len(models))
+                return models
+
+    def _parse_api_model(self, model_data: typing.Dict[str, typing.Any], model_id: str) -> ModelInfo:
+        """解析 /v1/models 返回的模型数据（静态素材可按 id 丰富元信息）"""
+        known = next((m for m in self._KNOWN_MODELS if m.id == model_id), None)
+        return ModelInfo(
+            id=model_id,
+            name=model_data.get("display_name", model_id),
+            provider=self.provider_id,
+            provider_type=ProviderType.ANTHROPIC,
+            capabilities=list(known.capabilities) if known else [ProviderCapability.TEXT],
+            max_tokens=known.max_tokens if known else 8192,
+            context_window=known.context_window if known else 200000,
+            metadata=model_data,
+        )
 
     def _get_known_models(self) -> typing.List[ModelInfo]:
         """获取已知模型列表
@@ -255,6 +308,10 @@ class AnthropicProvider(BaseProvider):
     async def check_model_connection(self, model_id: str) -> ConnectionResult:
         """检查特定模型的连接状态
 
+        2026-11-17 同根因扫平（审计 3.2-1）：旧实现仅本地构造模型实例、不触网，
+        对死服务/错 key 恒报成功；现改为对真实 /v1/models 清单做 found 判定
+        （provider_only 形态，与 base 默认实现对齐）。
+
         Args:
             model_id: 模型ID
 
@@ -264,14 +321,26 @@ class AnthropicProvider(BaseProvider):
         start_time = time.time()
 
         try:
-            # 尝试创建模型实例
-            await self.create_chat_model(model_id)
+            models = await self._fetch_models_from_api()
             latency = (time.time() - start_time) * 1000
-
-            return ConnectionResult(success=True, latency_ms=latency, metadata={"model_id": model_id})
+            found = any(m.id == model_id for m in models)
+            return ConnectionResult(
+                success=found,
+                latency_ms=latency,
+                error="" if found else f"Model '{model_id}' not found in provider's model list",
+                models_available=len(models),
+                verification="provider_only",
+                metadata={"model_id": model_id, "retryable": False},
+            )
         except Exception as e:
             latency = (time.time() - start_time) * 1000
-            return ConnectionResult(success=False, latency_ms=latency, error=str(e), metadata={"model_id": model_id})
+            return ConnectionResult(
+                success=False,
+                latency_ms=latency,
+                error=str(e),
+                verification="provider_only",
+                metadata={"model_id": model_id},
+            )
 
     async def probe_model_multimodal(self, model_id: str) -> ProbeResult:
         """探测模型的多模态能力
