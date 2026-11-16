@@ -5,8 +5,10 @@
 """
 
 import hashlib
+import hmac
 import json
 import os
+import secrets
 from neurova.core.logger import get_logger
 import threading
 import uuid
@@ -114,13 +116,24 @@ class KnowledgeStorage:
         )
 
     def _hash_api_key(self, key: str) -> str:
-        salt = "neurova-knowledge-salt"
-        return hashlib.sha256(f"{salt}:{key}".encode("utf-8")).hexdigest()
+        """API Key 存储哈希（审计 3.3-4：每条目独立随机盐）。
+
+        原实现用全仓固定盐——同一 Key 在所有部署里哈希一致，等价于给彩虹
+        表发邀请。现形态 `<salt>$<digest>`：盐为每条目独立随机的 16 字节
+        hex，随哈希一起落盘；验证走 hmac.compare_digest 恒时比较。
+        注意：固定盐时代的存量哈希（无盐前缀）验证一律 False（宁可重配
+        一次 Key，不留可离线比对的旧指纹）。
+        """
+        salt = secrets.token_hex(16)
+        digest = hashlib.sha256(f"{salt}:{key}".encode("utf-8")).hexdigest()
+        return f"{salt}${digest}"
 
     def verify_api_key(self, key: str, hashed: str) -> bool:
-        if not key or not hashed:
+        if not key or not hashed or "$" not in hashed:
             return False
-        return self._hash_api_key(key) == hashed
+        salt, _, expected = hashed.partition("$")
+        actual = hashlib.sha256(f"{salt}:{key}".encode("utf-8")).hexdigest()
+        return hmac.compare_digest(actual, expected)
 
     def create_config(
         self,
