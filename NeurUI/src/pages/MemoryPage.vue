@@ -197,7 +197,7 @@
     </GlassCard>
 
     <!-- Semantic search results (NEW) -->
-    <GlassCard v-if="semanticSearch && searchResults.length > 0" :title="t('memory.search') + ' Results'">
+    <GlassCard v-if="semanticSearch && searchResults.length > 0" :title="t('memory.searchResults')">
       <div class="search-results">
         <div v-for="result in searchResults" :key="result.id" class="search-result-item">
           <div class="result-header">
@@ -230,16 +230,9 @@
         :data-source="memories"
         :loading="loading"
         :locale="{ emptyText: '' }"
-        :pagination="{
-          current: page,
-          pageSize: size,
-          total: total,
-          showSizeChanger: true,
-          showTotal: (total: number) => `${total} items`,
-        }"
+        :pagination="{ pageSize: size, showSizeChanger: false }"
         row-key="id"
         size="middle"
-        @change="onTableChange"
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'content'">
@@ -352,7 +345,7 @@
             </a-form-item>
           </a-col>
           <a-col :span="12">
-            <a-form-item :label="t('memory.importance') + ' (0-1)'">
+            <a-form-item :label="t('memory.importanceRange')">
               <a-slider v-model:value="createForm.importance" :min="0" :max="1" :step="0.1" />
             </a-form-item>
           </a-col>
@@ -606,8 +599,9 @@ const fetchGroupOptions = async () => {
 }
 
 const memories = ref<MemoryEntry[]>([])
-const total = ref(0)
-const page = ref(1)
+// 分页诚实化（3.6-8）：后端 GET /memory 只有 limit 无 offset、count=当次条数，
+// 远端游标（current/total/翻页重发）全数退役，表格对当前批次做本地分页；
+// size 保留为单批 limit 语义。假 total 游标随之退役（只写不读属断点）。
 const size = ref(15)
 const activeTab = ref('all')
 const searchQuery = ref('')
@@ -810,13 +804,13 @@ const statsCards = computed(() => [
       : '-',
   },
   {
-    label: 'Storage',
+    label: t('memory.storage'),
     value: memoryStats.value?.storage_used !== undefined
       ? `${(memoryStats.value.storage_used / 1024).toFixed(1)} KB`
       : '-',
   },
   {
-    label: t('common.type') + 's',
+    label: t('memory.typeDistribution'),
     value: memoryStats.value?.by_type?.length ?? 0,
   },
   {
@@ -862,7 +856,6 @@ const importanceColor = (val: number) => {
 }
 
 const onTabChange = () => {
-  page.value = 1
   if (activeTab.value === 'hot') {
     fetchHotMemories()
   } else if (activeTab.value === 'crystallized') {
@@ -872,17 +865,10 @@ const onTabChange = () => {
   }
 }
 
-const onTableChange = (pagination: any) => {
-  page.value = pagination.current || 1
-  size.value = pagination.pageSize || 15
-  fetchMemories()
-}
-
 const onSearch = async () => {
   if (semanticSearch.value && searchQuery.value.trim()) {
     await performSemanticSearch()
   } else {
-    page.value = 1
     searchResults.value = []
     await fetchMemories()
   }
@@ -950,9 +936,8 @@ const fetchMemories = async () => {
     if (searchQuery.value && !semanticSearch.value) params.query = searchQuery.value
 
     const res = await memoryApi.getMemories(agentId.value, params)
-    const { items, total: t } = memoryApi.extractMemoryList(res?.data)
+    const { items } = memoryApi.extractMemoryList(res?.data)
     memories.value = items
-    total.value = t
     // 读腿恢复 ⇒ 那一格自己收摊，不许留下一句过期的「请登录」
     identityNotice.value = null
   } catch (e: any) {
@@ -1059,9 +1044,8 @@ const fetchHotMemories = async () => {
   loading.value = true
   try {
     const res = await memoryApi.getHotMemories(agentId.value, size.value)
-    const { items, total: t } = memoryApi.extractMemoryList(res?.data)
+    const { items } = memoryApi.extractMemoryList(res?.data)
     memories.value = items
-    total.value = t
   } catch (e: any) {
     reportApiFailure(e)
   } finally {
@@ -1073,9 +1057,8 @@ const fetchCrystallizedMemories = async () => {
   loading.value = true
   try {
     const res = await memoryApi.getCrystallizedMemories(agentId.value, size.value)
-    const { items, total: t } = memoryApi.extractMemoryList(res?.data)
+    const { items } = memoryApi.extractMemoryList(res?.data)
     memories.value = items
-    total.value = t
   } catch (e: any) {
     reportApiFailure(e)
   } finally {

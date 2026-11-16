@@ -38,8 +38,8 @@
         <h4 class="section-title">{{ t('ontology.strategyTitle') }}</h4>
     <div class="strategy-panel" data-testid="strategy-panel">
       <span class="mono">{{ t('ontology.strategyCurrent') }}: <strong>{{ evalStrategy }}</strong></span>
-      <GlassButton v-if="isAdmin" size="sm" variant="secondary" data-testid="strategy-switch"
-                   @click="switchStrategy">{{ t('ontology.strategySwitch') }}</GlassButton>
+      <!-- 求值策略是引擎缺省只读展示（rule_engine.setEvaluationStrategy 无 HTTP
+           端点，本地翻转纯假交互——3.6-13 退役）；后端出策略端点后接真切换 -->
     </div>
 <h4 class="section-title">{{ t('ontology.rulesCountTitle') }}</h4>
     <table class="rules-table" data-testid="rules-table">
@@ -88,11 +88,9 @@ const isAdmin = computed(() => {
   const user = authStore.user as { role?: string } | null | undefined
   return user?.role === 'admin'
 })
+// 引擎缺省（knowledge/ontology/rule_engine.py EVALUATION_STRATEGIES 闭集，
+// 缺省 full_replay）——无 HTTP 切换端点，只读展示不造假交互（3.6-13）。
 const evalStrategy = ref('full_replay')
-async function switchStrategy() {
-  const next = evalStrategy.value === 'full_replay' ? 'rete' : 'full_replay'
-  evalStrategy.value = next
-}
 
 // W9：SPARQL 只读查询＋溯因解释树（501 not_supported 显式横幅）
 const sparqlQuery = ref('')

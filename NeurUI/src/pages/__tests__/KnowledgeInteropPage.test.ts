@@ -9,6 +9,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
+import { useAuthStore } from '@/stores/auth'
 
 vi.mock('@/api/modules/ontology', () => ({
   exportOntologyTtl: vi.fn(),
@@ -86,6 +87,9 @@ const mountPage = () =>
   })
 
 beforeEach(() => {
+  // 导出/导入面挂 admin 真门（3.6-2）：下载链用例一律以 admin 身份驱动；
+  // 门本身的非 admin 行为由 KnowledgeInteropPage.adminGate.test.ts 单独钉。
+  useAuthStore().user = { user_id: 'a1', username: 'admin', role: 'admin' } as any
   exportMock.mockReset()
   jsonLdMock.mockReset()
   resolveMock.mockReset()

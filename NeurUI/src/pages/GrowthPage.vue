@@ -94,7 +94,7 @@
             <div v-if="constitutionRules.length > 0" class="constitution-preview">
               <p>{{ constitutionRules.slice(0, 3).map((r: any) => r.content).join('\n') }}</p>
               <a v-if="constitutionRules.length > 3" class="show-more-link" @click="activeTab = 'constitution'">
-                +{{ constitutionRules.length - 3 }} {{ t('growth.moreRules') || 'more rules' }}
+                +{{ constitutionRules.length - 3 }} {{ t('growth.moreRules') }}
               </a>
             </div>
             <a-empty v-else :description="t('common.noData')" />
@@ -107,7 +107,7 @@
         <div class="tab-toolbar">
           <a-select
             v-model:value="questionsFilter"
-            :placeholder="t('common.filter') || 'Filter'"
+            :placeholder="t('common.filter')"
             allow-clear
             style="min-width: 140px; margin-right: 12px"
             @change="fetchQuestions"
@@ -194,7 +194,7 @@
                     </div>
                   </div>
                   <div class="rule-actions">
-                    <a-tooltip :title="rule.enabled ? (t('common.disable') || 'Disable') : (t('common.enable') || 'Enable')">
+                    <a-tooltip :title="rule.enabled ? t('common.disable') : t('common.enable')">
                       <a-switch
                         :checked="rule.enabled"
                         size="small"

@@ -198,6 +198,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { uiMessage } from '@/utils/message'
 import {
   listEntities,
   getEntityDependencies,
@@ -247,6 +248,7 @@ async function loadStats() {
     }
   } catch (e) {
     console.error('failed to load stats:', e)
+    uiMessage.error(t('neuron.loadFailed'))
   }
 }
 
@@ -258,6 +260,7 @@ async function loadEntities() {
     }
   } catch (e) {
     console.error('failed to load entities:', e)
+    uiMessage.error(t('neuron.loadFailed'))
   }
 }
 
@@ -270,6 +273,7 @@ async function showDependencies(entityId: string) {
     }
   } catch (e) {
     console.error('failed to load dependencies:', e)
+    uiMessage.error(t('neuron.loadFailed'))
   }
 }
 
@@ -288,6 +292,7 @@ async function runCascade() {
     }
   } catch (e) {
     console.error('cascade reasoning failed:', e)
+    uiMessage.error(t('neuron.actionFailed'))
   } finally {
     cascadeLoading.value = false
   }
@@ -313,6 +318,7 @@ async function runAbsenceCheck() {
     }
   } catch (e) {
     console.error('absence detection failed:', e)
+    uiMessage.error(t('neuron.actionFailed'))
   } finally {
     absenceLoading.value = false
   }

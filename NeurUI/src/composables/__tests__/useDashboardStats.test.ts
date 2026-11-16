@@ -16,6 +16,10 @@ vi.mock('@/api/modules/knowledge', () => ({
 }))
 vi.mock('@/api/modules/health', () => ({
   getHealthReport: vi.fn(),
+  // S6 引入的真导出：useDashboardStats 读 report.status 前经它归一 Dict→数组
+  normalizeHealthChecks: vi.fn((checks: unknown) =>
+    Array.isArray(checks) ? checks : Object.values((checks as Record<string, unknown>) ?? {}),
+  ),
 }))
 vi.mock('@/api/modules/scheduler', () => ({
   getSchedulerStatus: vi.fn(),
@@ -67,7 +71,9 @@ describe('useDashboardStats', () => {
     vi.mocked(getMemoryStats).mockResolvedValue({ code: 0, data: { total_memories: 42 } } as never)
     vi.mocked(getKnowledgeNodes).mockResolvedValue({ code: 0, data: { items: [], total: 17, page: 1, size: 1 } } as never)
     vi.mocked(getSystemInfo).mockResolvedValue({ code: 0, data: { status: 'running', cpu: { percent: 33 }, memory: { percent: 66 } } } as never)
-    vi.mocked(getHealthReport).mockResolvedValue({ code: 0, data: { overall: 'healthy', checks: [{ name: 'db', status: 'pass' }], timestamp: 't', version: 'v' } } as never)
+    // S6 契约对齐：后端 /health/report 的 checks 是 Dict（name→CheckResult）、
+    // 总体状态字段是 status（HealthStatusResponse），不再是旧形状 overall/checks 数组
+    vi.mocked(getHealthReport).mockResolvedValue({ code: 0, data: { status: 'healthy', checks: { db: { name: 'db', status: 'healthy', duration: 0.0, check_type: 'readiness' } }, uptime: 0.0, timestamp: 1794846448.42 } } as never)
     vi.mocked(getSchedulerStatus).mockResolvedValue({ code: 0, data: { running: true, total_tasks: 8, active_tasks: 2, uptime_seconds: 60 } } as never)
   })
 

@@ -504,8 +504,6 @@ import MessageContent from '@/components/chat/MessageContent.vue'
 import MessageSteps from '@/components/chat/MessageSteps.vue'
 import { uiMessage } from '@/utils/message'
 import { resolveI18nMessage } from '@/utils/i18n'
-import GlassButton from '@/components/GlassButton.vue'
-import GlassInput from '@/components/GlassInput.vue'
 import UiIcon from '@/components/UiIcon.vue'
 
 import SubAgentWindowStack from '@/components/chat/SubAgentWindowStack.vue'
@@ -515,8 +513,6 @@ import ChatComposerArea from '@/components/chat/ChatComposerArea.vue'
 import GovernanceApprovalModal from '@/components/chat/GovernanceApprovalModal.vue'
 import SshCredentialCard from '@/components/chat/SshCredentialCard.vue'
 import RightDock from '@/components/chat/dock/RightDock.vue'
-import ContextUsageIndicator from '@/components/chat/ContextUsageIndicator.vue'
-import QueuedMessageCards from '@/components/chat/QueuedMessageCards.vue'
 import PlanPanel from '@/components/chat/PlanPanel.vue'
 import BuildPanel from '@/components/chat/BuildPanel.vue'
 import type { BuildInteraction } from '@/api/modules/build'
@@ -536,7 +532,6 @@ import { useThinkingEffort } from '@/composables/useThinkingEffort'
 import { useMermaidRenderer } from '@/composables/useMermaidRenderer'
 import { useChatDraft } from '@/composables/useChatDraft'
 import { useInputHistory } from '@/composables/useInputHistory'
-import { useIMEComposition } from '@/composables/useIMEComposition'
 import { isBackgroundResult, isToolFailureResult } from '@/utils/toolCallStatus'
 import { findMessageMatches } from '@/utils/messageSearch'
 import {
@@ -564,7 +559,6 @@ import { normalizeModel } from '@/types/model'
 // ---------------------------------------------------------------------------
 const { t } = useI18n()
 const appStore = useAppStore()
-const agentStore = useAgentStore()
 const authStore = useAuthStore()
 const isAdmin = computed(() => authStore.user?.role === 'admin')
 const { agentId, currentAgent } = useAgentPage()
@@ -626,7 +620,7 @@ function toggleHistoryPanel(): void {
 }
 
 // ── 思考程度（持久化 localStorage，随消息发给后端）──────────────
-const { effort: thinkingEffort, setEffort: setThinkingEffort } = useThinkingEffort()
+const { effort: thinkingEffort } = useThinkingEffort()
 
 // ── 蜂群子 Agent 浮窗（WS subagent_* 事件 → useSubAgentWindows）──
 const { handleSubAgentSyncEvent, clearSubAgentWindows } = useSubAgentWindows()
@@ -678,7 +672,6 @@ function onSyncGap(missed: number) {
 
 // ── 电脑操作分屏（useComputerPanel 共享单例，自动开屏走 rightDock）──
 const computerPanel = useComputerPanel()
-const computerPanelState = computerPanel.state
 
 useSessionSync(() => currentSessionId.value, onSessionSyncEvent, { onGap: onSyncGap })
 
@@ -827,7 +820,9 @@ async function onSteer(text: string): Promise<void> {
   }
 }
 
-const { approvalModal, openApprovalModal, confirmApproval, rejectApproval } = useGovernanceApproval()
+// 弹窗状态机与确认/拒绝动作由 GovernanceApprovalModal 组件自身消费
+// （useGovernanceApproval 模块级 reactive 单源）；页面只负责触发开窗。
+const { openApprovalModal } = useGovernanceApproval()
 
 // 会话内按需 SSH 凭据卡（computer_ssh_exec 缺凭据 → needs_credential 触发，按当前用户隔离）
 const sshCredRequest = ref<{ host: string } | null>(null)
@@ -849,16 +844,13 @@ const { pendingFiles, addFiles } = usePendingFiles()
 // ── 会话操作共享层（侧栏与 dock 历史/存档 tab 共用）─────────────
 const {
   renameModal,
-  groupedSessions,
   onSessionDragStart,
   onSessionDrop,
-  dragOver,
   togglePin,
   archiveSession,
   createSession,
   renameSession,
 } = useSessionOps()
-const dragOverSessionId = dragOver
 
 // ── ASR（共享单例：composer 录音 UI 与本页 sendMessage 共享）──────
 const { asrAvailable, isRecording, initASR, stopRecording, syncLocale } = useASRRecording()
@@ -921,7 +913,8 @@ const {
   onError: (msg) => uiMessage.error(msg),
 })
 
-// 补课 A4：跨标签单发送者锁（同 session 多标签只有一个能发）
+// 补课 A4：跨标签单发送者锁（同 session 多标签只有一个能发）——按会话
+// 登记是副作用（watch + onUnmounted 清理），isOwner 读位供发送前互斥检查。
 const { isOwner: isSendLockOwner } = useSessionSendLock(currentSessionId)
 
 // 补课 A6：长会话窗口化渲染（虚拟列表轻量版）——超过阈值只渲染尾部
@@ -2527,9 +2520,7 @@ const chatDraft = useChatDraft()
 const { renderIn: renderMermaid, scheduleRender: scheduleMermaidRender, dispose: disposeMermaid } =
   useMermaidRenderer(() => !appStore.isDark)
 
-const { record: recordInputHistory, up: historyUp, down: historyDown } = useInputHistory()
-
-const { onCompositionStart, onCompositionEnd, shouldBlockSend } = useIMEComposition()
+const { record: recordInputHistory } = useInputHistory()
 
 // handleKeydown/onComposerInput/autoResize → 已迁 ChatComposerArea（2026-09-08）
 

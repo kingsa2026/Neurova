@@ -38,15 +38,15 @@
             <div class="settings-row">
               <div class="setting-item">
                 <span class="setting-label">{{ t('firewall.rateLimit') }}</span>
-                <span class="setting-value">{{ gatewayConfig.rateLimit || '120/min' }}</span>
+                <span class="setting-value">{{ gatewayConfig.rateLimit }}</span>
               </div>
               <div class="setting-item">
                 <span class="setting-label">{{ t('firewall.inputValidation') }}</span>
-                <a-tag :color="gatewayConfig.inputValidation ? 'green' : 'default'">{{ gatewayConfig.inputValidation ? t('common.enabled') : t('common.disabled') }}</a-tag>
+                <a-tag>{{ t('common.builtin') }}</a-tag>
               </div>
               <div class="setting-item">
                 <span class="setting-label">{{ t('firewall.outputSanitization') }}</span>
-                <a-tag :color="gatewayConfig.outputSanitization ? 'green' : 'default'">{{ gatewayConfig.outputSanitization ? t('common.enabled') : t('common.disabled') }}</a-tag>
+                <a-tag>{{ t('common.builtin') }}</a-tag>
               </div>
             </div>
           </GlassPanel>
@@ -100,11 +100,7 @@
             <div class="settings-row">
               <div class="setting-item">
                 <span class="setting-label">{{ t('firewall.agentIsolation') }}</span>
-                <a-switch :checked="isolationConfig.agentIsolation" size="small" @change="(val: boolean) => { isolationConfig.agentIsolation = val }" />
-              </div>
-              <div class="setting-item">
-                <span class="setting-label">{{ t('firewall.userIsolation') }}</span>
-                <a-switch :checked="isolationConfig.userIsolation" size="small" @change="(val: boolean) => { isolationConfig.userIsolation = val }" />
+                <a-tag>{{ t('common.builtin') }}</a-tag>
               </div>
               <div class="setting-item">
                 <span class="setting-label">{{ t('firewall.currentIsolationKey') }}</span>
@@ -340,22 +336,16 @@ const showForm = ref(false)
 const editingRule = ref<FirewallRule | null>(null)
 const stats = ref<Partial<FirewallStats>>({})
 
+// 网关读数标注为引擎内建缺省（core/firewall.py GlobalRuleSet.rate_limit_per_minute
+// =120 同值；输入校验/输出净化是内建能力非开关，3.6-5 起不再展示假状态）。
+// 引擎缺省暴露为可读配置端点后，此处改接真实读数。
 const gatewayConfig = reactive({
   rateLimit: '120/min',
-  inputValidation: true,
-  outputSanitization: true,
 })
 
-const isolationConfig = reactive({
-  agentIsolation: true,
-  userIsolation: true,
-})
-
-const protectedPaths = ref<string[]>([
-  '/etc/passwd', '/etc/shadow', '/etc/hosts',
-  '~/.ssh', '~/.gnupg', '~/.aws',
-  '**/.env', '**/credentials*', '**/*.key', '**/*.pem',
-])
+// L2 保护路径=后端 GlobalRuleSet.blocked_paths 真实清单（经 /firewall/blocked
+// 读取，fetchBlocked 同源填充）——前端不再编造装饰清单（3.6-5）。
+const protectedPaths = ref<string[]>([])
 
 const ruleForm = ref({
   name: '',
@@ -460,6 +450,8 @@ const fetchBlocked = async () => {
       ...(data.blocked_ips ?? []).map((ip: string) => ({ type: 'ip', value: ip })),
       ...(data.blocked_paths ?? []).map((p: string) => ({ type: 'path', value: p })),
     ]
+    // 3.6-5：L2 保护路径接真实清单（GlobalRuleSet.blocked_paths 单一事实源）
+    protectedPaths.value = data.blocked_paths ?? []
   } catch {
     message.error(t('common.error'))
   } finally {

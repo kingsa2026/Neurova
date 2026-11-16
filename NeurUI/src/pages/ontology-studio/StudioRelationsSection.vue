@@ -85,7 +85,7 @@ import {
   rejectRelationCandidate,
 } from '@/api/modules/ontology'
 import type { OntologySchemaData, RelationCandidate } from '@/types/ontology'
-import { formatConfidence, jsonOrDash } from '@/utils/ontologyFormat'
+import { formatConfidence } from '@/utils/ontologyFormat'
 
 const props = defineProps<{ schema: OntologySchemaData | null; isAdmin: boolean }>()
 const emit = defineEmits<{ (e: 'candidates-changed'): void }>()

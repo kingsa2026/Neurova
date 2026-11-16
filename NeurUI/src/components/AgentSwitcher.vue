@@ -67,7 +67,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '@/stores/agents'
@@ -189,6 +189,10 @@ function onKeydown(e: KeyboardEvent) {
 watch(panelOpen, (val) => {
   if (val) document.addEventListener('keydown', onKeydown)
   else document.removeEventListener('keydown', onKeydown)
+})
+// 面板开着时组件卸载 → 监听残留（闭包引用已卸载组件）——卸载即摘（3.6-12）
+onUnmounted(() => {
+  document.removeEventListener('keydown', onKeydown)
 })
 </script>
 
