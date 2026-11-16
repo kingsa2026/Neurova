@@ -1,0 +1,12 @@
+{
+  "string": [
+    {
+      "name": "TestAbility_desc",
+      "value": "Neurova ohosTest 宿主 Ability"
+    },
+    {
+      "name": "TestAbility_label",
+      "value": "NeurovaTest"
+    }
+  ]
+}
