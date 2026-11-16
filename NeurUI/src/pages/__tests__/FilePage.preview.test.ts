@@ -23,6 +23,8 @@ vi.mock('@/api/modules/files', () => ({
   deleteFile: vi.fn(),
   downloadFile: vi.fn(),
   getFilePreview: vi.fn(),
+  // 存储卡接真实读数（S6 移交）后 FilePage 会在挂载时调用；本套件不关注它，给个默认成功读数。
+  getStorageInfo: vi.fn().mockResolvedValue({ user_id: 'u1', total_files: 0, total_size: 0, by_type: {} }),
 }))
 
 vi.mock('ant-design-vue', async () => {
