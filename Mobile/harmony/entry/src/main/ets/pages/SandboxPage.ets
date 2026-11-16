@@ -14,7 +14,7 @@
  *     列表项 GlassCard：状态徽章、名称、镜像、CPU/内存/磁盘、暴露端口、过期时间、
  *     操作按钮（启动/停止）；
  *     颜色统一走 StyleManager（返回 token 名），路由走 Router，
- *     API 暂无沙盒专用模块 → aboutToAppear 加载 mock 静态数据 + TODO M6 标注。
+ *     P1-33 已接线 PageMap；沙盒专用 API 模块待 S4 新增（移交单），落地前以 mock 渲染。
  *
  * 依赖：
  *   - ../components/glass：TopNavMenu、GlassCard、GlassButton、GlassInput、GlassPanel
@@ -206,7 +206,7 @@ const MOCK_SANDBOXES: Sandbox[] = [
     memoryLimitMb: 2048,
     diskLimitMb: 10240,
     exposedPorts: [3000, 8080],
-    envVars: { NODE_ENV: 'development' },
+    envVars: { 'NODE_ENV': 'development' } as Record<string, string>,
     createdAt: '2025-03-01T09:00:00Z',
     expiresAt: new Date(Date.now() + 2 * 86400 * 1000).toISOString(),
     lastStartedAt: '2025-03-01T09:00:00Z',
@@ -220,7 +220,7 @@ const MOCK_SANDBOXES: Sandbox[] = [
     memoryLimitMb: 512,
     diskLimitMb: 5120,
     exposedPorts: [5000],
-    envVars: { PYTHON_ENV: 'test' },
+    envVars: { 'PYTHON_ENV': 'test' } as Record<string, string>,
     createdAt: '2025-03-01T10:00:00Z',
     expiresAt: new Date(Date.now() + 5 * 3600 * 1000).toISOString(),
   },
@@ -247,7 +247,7 @@ const MOCK_SANDBOXES: Sandbox[] = [
     memoryLimitMb: 16384,
     diskLimitMb: 51200,
     exposedPorts: [8888, 6006, 22, 80],
-    envVars: { CUDA_VISIBLE_DEVICES: '0' },
+    envVars: { 'CUDA_VISIBLE_DEVICES': '0' } as Record<string, string>,
     createdAt: '2025-03-01T07:00:00Z',
     expiresAt: '2020-01-01T00:00:00Z',
     errorMessage: 'GPU 不可用',
@@ -542,6 +542,5 @@ export struct SandboxPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
-    .width('100%')
   }
 }

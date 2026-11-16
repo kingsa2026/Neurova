@@ -6,6 +6,11 @@ import errorManagerTest from './ErrorManager.test';
 import eventBusTest from './EventBus.test';
 import styleManagerTest from './StyleManager.test';
 import animationManagerTest from './AnimationManager.test';
+// S4 新增套件：信封归一 / 路由守卫 / WebhookApi / AuthStore 持久化
+import envelopeTest from './Envelope.test';
+import apiRouteGuardTest from './ApiRouteGuard.test';
+import webhookApiTest from './WebhookApi.test';
+import authStoreTest from './AuthStore.test';
 import layoutManagerTest from './LayoutManager.test';
 import interactionManagerTest from './InteractionManager.test';
 import messageManagerTest from './MessageManager.test';
@@ -57,10 +62,8 @@ import sleepSettingsPageTest from './SleepSettingsPage.test';
 import agentFirewallPageTest from './AgentFirewallPage.test';
 // M4 P2 知识技能扩展页面测试套件
 import skillPoolPageTest from './SkillPoolPage.test';
-import skillMarketPageTest from './SkillMarketPage.test';
 import aigcPageTest from './AIGCPage.test';
 import aigcApiTest from './AigcApi.test';
-import toolLayerPageTest from './ToolLayerPage.test';
 // M4 P2 协作与工作流页面测试套件
 import workflowPageTest from './WorkflowPage.test';
 import collaborationPageTest from './CollaborationPage.test';
@@ -88,13 +91,9 @@ import auditPageTest from './AuditPage.test';
 import benchmarkPageTest from './BenchmarkPage.test';
 import sandboxPageTest from './SandboxPage.test';
 import firewallPageTest from './FirewallPage.test';
-import analyticsPageTest from './AnalyticsPage.test';
 // M5 P3 用户与记忆扩展页面测试套件
 import groupPageTest from './GroupPage.test';
 import enhancedUserPageTest from './EnhancedUserPage.test';
-import agentSkillPageTest from './AgentSkillPage.test';
-import memorySettingsPageTest from './MemorySettingsPage.test';
-import memorySearchSettingsPageTest from './MemorySearchSettingsPage.test';
 // M5.2 性能优化测试套件
 import chunkBatcherTest from './ChunkBatcher.test';
 import simpleDataSourceTest from './SimpleDataSource.test';
@@ -158,10 +157,8 @@ export default function testsuite() {
   agentFirewallPageTest();
   // M4 P2 知识技能扩展页面测试套件
   skillPoolPageTest();
-  skillMarketPageTest();
   aigcPageTest();
   aigcApiTest();
-  toolLayerPageTest();
   // M4 P2 协作与工作流页面测试套件
   workflowPageTest();
   collaborationPageTest();
@@ -189,14 +186,15 @@ export default function testsuite() {
   benchmarkPageTest();
   sandboxPageTest();
   firewallPageTest();
-  analyticsPageTest();
   // M5 P3 用户与记忆扩展页面测试套件
   groupPageTest();
   enhancedUserPageTest();
-  agentSkillPageTest();
-  memorySettingsPageTest();
-  memorySearchSettingsPageTest();
   // M5.2 性能优化测试套件
   chunkBatcherTest();
   simpleDataSourceTest();
+  // S4 新增套件：信封归一 / 路由守卫 / WebhookApi / AuthStore 持久化
+  envelopeTest();
+  apiRouteGuardTest();
+  webhookApiTest();
+  authStoreTest();
 }

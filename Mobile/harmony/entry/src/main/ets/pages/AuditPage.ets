@@ -13,7 +13,7 @@
  *     列表项 GlassCard：操作类型徽章、用户名、IP、资源、时间戳、成功状态、
  *     展开后 before/after JSON 详情；
  *     颜色统一走 StyleManager（返回 token 名），路由走 Router，
- *     API 暂无审计专用模块 → aboutToAppear 加载 mock 静态数据 + TODO M6 标注。
+ *     P1-33 已接线 PageMap；审计专用 API 模块待 S4 新增（移交单），落地前以 mock 渲染。
  *
  * 依赖：
  *   - ../components/glass：TopNavMenu、GlassCard、GlassButton、GlassInput、GlassPanel
@@ -214,8 +214,7 @@ const MOCK_AUDITS: AuditEntry[] = [
     resource: 'agent',
     resourceId: 'agent_001',
     ip: '192.168.1.10',
-    before: undefined,
-    after: { name: 'Agent-001', model: 'gpt-4' },
+    after: { 'name': 'Agent-001', 'model': 'gpt-4' } as Metadata,
     timestamp: '2025-03-01T09:15:00Z',
     success: true,
   },
@@ -227,8 +226,7 @@ const MOCK_AUDITS: AuditEntry[] = [
     resource: 'memory',
     resourceId: 'mem_42',
     ip: '192.168.1.20',
-    before: { content: '旧记忆内容' },
-    after: undefined,
+    before: { 'content': '旧记忆内容' } as Metadata,
     timestamp: '2025-03-01T10:30:00Z',
     success: true,
   },
@@ -239,8 +237,8 @@ const MOCK_AUDITS: AuditEntry[] = [
     action: 'config_change',
     resource: 'system_config',
     ip: '192.168.1.30',
-    before: { max_tokens: 1000 },
-    after: { max_tokens: 2000 },
+    before: { 'max_tokens': 1000 } as Metadata,
+    after: { 'max_tokens': 2000 } as Metadata,
     timestamp: '2025-03-01T11:45:00Z',
     success: true,
   },
@@ -543,7 +541,5 @@ export struct AuditPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
-    .width('100%')
-    .onClick(() => { this.toggleExpand(audit.id); })
   }
 }

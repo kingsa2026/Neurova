@@ -65,9 +65,7 @@ export class RouteNames {
   static readonly AGENT_FIREWALL: string = 'AgentFirewallPage';
   // M4 P2 知识技能扩展
   static readonly SKILL_POOL: string = 'SkillPoolPage';
-  static readonly SKILL_MARKET: string = 'SkillMarketPage';
   static readonly AIGC: string = 'AIGCPage';
-  static readonly TOOL_LAYER: string = 'ToolLayerPage';
   // M4 P2 协作与工作流
   static readonly WORKFLOW: string = 'WorkflowPage';
   static readonly COLLABORATION: string = 'CollaborationPage';
@@ -95,13 +93,9 @@ export class RouteNames {
   static readonly BENCHMARK: string = 'BenchmarkPage';
   static readonly SANDBOX: string = 'SandboxPage';
   static readonly FIREWALL: string = 'FirewallPage';
-  static readonly ANALYTICS: string = 'AnalyticsPage';
   // M5 P3 用户与记忆扩展
   static readonly GROUP: string = 'GroupPage';
   static readonly ENHANCED_USER: string = 'EnhancedUserPage';
-  static readonly AGENT_SKILL: string = 'AgentSkillPage';
-  static readonly MEMORY_SETTINGS: string = 'MemorySettingsPage';
-  static readonly MEMORY_SEARCH_SETTINGS: string = 'MemorySearchSettingsPage';
 }
 
 /** 需要登录才能访问的受保护路由 */
@@ -146,9 +140,7 @@ const PROTECTED_ROUTES: string[] = [
   RouteNames.AGENT_FIREWALL,
   // M4 P2 知识技能扩展（全部受保护）
   RouteNames.SKILL_POOL,
-  RouteNames.SKILL_MARKET,
   RouteNames.AIGC,
-  RouteNames.TOOL_LAYER,
   // M4 P2 协作与工作流（全部受保护）
   RouteNames.WORKFLOW,
   RouteNames.COLLABORATION,
@@ -176,13 +168,9 @@ const PROTECTED_ROUTES: string[] = [
   RouteNames.BENCHMARK,
   RouteNames.SANDBOX,
   RouteNames.FIREWALL,
-  RouteNames.ANALYTICS,
   // M5 P3 用户与记忆扩展（全部受保护）
   RouteNames.GROUP,
   RouteNames.ENHANCED_USER,
-  RouteNames.AGENT_SKILL,
-  RouteNames.MEMORY_SETTINGS,
-  RouteNames.MEMORY_SEARCH_SETTINGS,
 ];
 
 /** 路由守卫：检查是否允许跳转 */

@@ -71,6 +71,16 @@ import { WebhookPage } from '../pages/WebhookPage';
 // M4.6 渠道系统
 import { ChannelIntegrationPage } from '../pages/ChannelIntegrationPage';
 import { SessionSyncPage } from '../pages/SessionSyncPage';
+// P1-33 死页接线（M4 P2 知识技能扩展 + M5 P3 系统监控/用户扩展）
+import { SkillPoolPage } from '../pages/SkillPoolPage';
+import { AIGCPage } from '../pages/AIGCPage';
+import { AuditPage } from '../pages/AuditPage';
+import { BenchmarkPage } from '../pages/BenchmarkPage';
+import { SandboxPage } from '../pages/SandboxPage';
+import { FirewallPage } from '../pages/FirewallPage';
+import { MarketplacePage } from '../pages/MarketplacePage';
+import { GroupPage } from '../pages/GroupPage';
+import { EnhancedUserPage } from '../pages/EnhancedUserPage';
 
 @Builder
 export function pageMap(name: string) {
@@ -186,6 +196,24 @@ export function pageMap(name: string) {
     NavDestination() { ChannelIntegrationPage() }.hideTitleBar(true)
   } else if (name === RouteNames.SESSION_SYNC) {
     NavDestination() { SessionSyncPage() }.hideTitleBar(true)
+  } else if (name === RouteNames.SKILL_POOL) {
+    NavDestination() { SkillPoolPage() }.hideTitleBar(true)
+  } else if (name === RouteNames.AIGC) {
+    NavDestination() { AIGCPage() }.hideTitleBar(true)
+  } else if (name === RouteNames.AUDIT) {
+    NavDestination() { AuditPage() }.hideTitleBar(true)
+  } else if (name === RouteNames.BENCHMARK) {
+    NavDestination() { BenchmarkPage() }.hideTitleBar(true)
+  } else if (name === RouteNames.SANDBOX) {
+    NavDestination() { SandboxPage() }.hideTitleBar(true)
+  } else if (name === RouteNames.FIREWALL) {
+    NavDestination() { FirewallPage() }.hideTitleBar(true)
+  } else if (name === RouteNames.MARKETPLACE) {
+    NavDestination() { MarketplacePage() }.hideTitleBar(true)
+  } else if (name === RouteNames.GROUP) {
+    NavDestination() { GroupPage() }.hideTitleBar(true)
+  } else if (name === RouteNames.ENHANCED_USER) {
+    NavDestination() { EnhancedUserPage() }.hideTitleBar(true)
   } else {
     NavDestination() {
       Column() {

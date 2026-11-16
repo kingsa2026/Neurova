@@ -61,7 +61,7 @@ export class AIGCViewHelper {
    * 获取任务类型对应的颜色 token 名
    * 映射：text→info，image→primary，audio→warning，video→error
    */
-  static getTypeColor(type: AIGCTask['type']): string {
+  static getTypeColor(type: AIGCTaskKind): string {
     if (type === 'text') return 'info';
     if (type === 'image') return 'primary';
     if (type === 'audio') return 'warning';
@@ -73,7 +73,7 @@ export class AIGCViewHelper {
    * 获取任务类型对应的图标 emoji
    * 映射：text→📝，image→🖼️，audio→🎵，video→🎬
    */
-  static getTypeIcon(type: AIGCTask['type']): string {
+  static getTypeIcon(type: AIGCTaskKind): string {
     if (type === 'text') return '📝';
     if (type === 'image') return '🖼️';
     if (type === 'audio') return '🎵';
@@ -85,7 +85,7 @@ export class AIGCViewHelper {
    * 获取任务类型对应的中文标签
    * 映射：text→文本，image→图像，audio→音频，video→视频
    */
-  static getTypeLabel(type: AIGCTask['type']): string {
+  static getTypeLabel(type: AIGCTaskKind): string {
     if (type === 'text') return '文本';
     if (type === 'image') return '图像';
     if (type === 'audio') return '音频';
@@ -182,17 +182,21 @@ const STATUS_FILTERS: StatusFilterOption[] = [
   { value: 'failed', label: '失败' },
 ];
 
-/** 新建任务表单数据 */
-interface AIGCTaskFormData {
-  type: AIGCTask['type'];
-  prompt: string;
+/** 任务类型（AIGCTask.type 的具名别名；ArkTS 不支持索引访问类型） */
+type AIGCTaskKind = 'text' | 'image' | 'audio' | 'video';
+
+/** 类型选择项（ForEach 选项；ArkTS 禁内联对象类型与索引访问类型） */
+interface AIGCTypeOption {
+  type: AIGCTaskKind;
+  label: string;
+  icon: string;
 }
 
-/** 默认表单数据 */
-const DEFAULT_FORM: AIGCTaskFormData = {
-  type: 'text',
-  prompt: '',
-};
+/** 新建任务表单数据 */
+interface AIGCTaskFormData {
+  type: AIGCTaskKind;
+  prompt: string;
+}
 
 /** 服务端账本行 → 本地 AIGCTask（纯函数，供 AIGCPage.test.ets 契约测试） */
 export function aigcTaskFromServer(t: AigcGenerationTask, fileUrl: string): AIGCTask {
@@ -204,7 +208,7 @@ export function aigcTaskFromServer(t: AigcGenerationTask, fileUrl: string): AIGC
     id: t.task_id,
     agentId: '',
     type: (t.kind === 'text' ? 'text' : t.kind === 'audio' ? 'audio'
-      : t.kind === 'video' ? 'video' : 'image') as AIGCTask['type'],
+      : t.kind === 'video' ? 'video' : 'image') as AIGCTaskKind,
     prompt: t.prompt,
     status: status,
     resultUrl: t.file_missing ? undefined : (fileUrl || undefined),
@@ -227,7 +231,7 @@ export struct AIGCPage {
   // 新建弹窗显示状态
   @State showCreateDialog: boolean = false;
   // 新建表单数据（嵌套属性变更需整体重新赋值）
-  @State formData: AIGCTaskFormData = { ...DEFAULT_FORM };
+  @State formData: AIGCTaskFormData = { type: 'text', prompt: '' };
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -300,7 +304,7 @@ export struct AIGCPage {
 
   /** 打开新建弹窗，重置表单 */
   private openCreateDialog(): void {
-    this.formData = { ...DEFAULT_FORM };
+    this.formData = { type: 'text', prompt: '' };
     this.showCreateDialog = true;
   }
 
@@ -345,13 +349,13 @@ export struct AIGCPage {
   }
 
   /** 选择 type（嵌套属性变更：整体重新赋值） */
-  private selectType(type: AIGCTask['type']): void {
-    this.formData = { ...this.formData, type };
+  private selectType(type: AIGCTaskKind): void {
+    this.formData = { type: type, prompt: this.formData.prompt };
   }
 
   /** 输入 prompt（嵌套属性变更：整体重新赋值） */
   private inputPrompt(v: string): void {
-    this.formData = { ...this.formData, prompt: v };
+    this.formData = { type: this.formData.type, prompt: v };
   }
 
   /**
@@ -648,7 +652,6 @@ export struct AIGCPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
-    .width('100%')
   }
 
   // ===========================================================================
@@ -666,7 +669,8 @@ export struct AIGCPage {
         .backgroundColor(this.sm.getColor('overlay_mask'))
         .onClick(() => { this.showCreateDialog = false; })
 
-      // 面板层
+      // 面板层：居中展示（GlassPanel 为自定义组件，不能直接链 .width；90% 挂在外层 Column）
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('新建 AIGC 任务')
@@ -682,7 +686,7 @@ export struct AIGCPage {
             .width('100%')
             .margin({ top: this.sm.getSpacing('sm') })
           Row() {
-            ForEach(this.getTypeOptions(), (opt: { type: AIGCTask['type']; label: string; icon: string }) => {
+            ForEach(this.getTypeOptions(), (opt: AIGCTypeOption) => {
               GlassButton({
                 text: `${opt.icon} ${opt.label}`,
                 type: this.formData.type === opt.type ? 'primary' : 'default',
@@ -690,7 +694,7 @@ export struct AIGCPage {
                 onTap: () => { this.selectType(opt.type); }
               })
                 .margin({ right: this.sm.getSpacing('xs') })
-            }, (opt: { type: AIGCTask['type']; label: string; icon: string }) => opt.type)
+            }, (opt: AIGCTypeOption) => opt.type)
           }
           .width('100%')
           .margin({ top: this.sm.getSpacing('xs'), bottom: this.sm.getSpacing('sm') })
@@ -730,6 +734,7 @@ export struct AIGCPage {
         .width('100%')
         .alignItems(HorizontalAlign.Start)
       }
+      }
       .width('90%')
     }
     .width('100%')
@@ -737,9 +742,9 @@ export struct AIGCPage {
   }
 
   /** 获取任务类型选项列表 */
-  private getTypeOptions(): { type: AIGCTask['type']; label: string; icon: string }[] {
-    const types: AIGCTask['type'][] = ['text', 'image', 'audio', 'video'];
-    return types.map((t: AIGCTask['type']) => ({
+  private getTypeOptions(): AIGCTypeOption[] {
+    const types: AIGCTaskKind[] = ['text', 'image', 'audio', 'video'];
+    return types.map((t: AIGCTaskKind): AIGCTypeOption => ({
       type: t,
       label: AIGCViewHelper.getTypeLabel(t),
       icon: AIGCViewHelper.getTypeIcon(t),
