@@ -3,20 +3,13 @@
 // 测试范围：KnowledgeViewHelper 视图模型纯函数行为契约。
 // 说明：@Component 结构体依赖 HarmonyOS UI 运行时，无法在纯单元测试中实例化，
 //       因此此处针对 KnowledgePage 导出的 KnowledgeViewHelper 视图模型层
-//       （状态颜色映射 / 来源图标映射 / 文件大小格式化）进行验证，
-//       覆盖页面渲染所需的全部纯函数。视图模型刻意设计为无 UI 依赖的纯函数，
-//       返回颜色 token 名（如 'success'）而非已解析颜色值，便于测试与主题切换。
+//       （状态颜色映射 / 文件大小格式化）进行验证，覆盖页面渲染所需的全部纯函数。
+//
+// R2 契约对齐：真实方法面只有 getStatusColor / formatFileSize——旧用例覆盖的
+// 来源图标映射已随页面重写退役（无对应主源码方法，运行期必红），按现状退役。
 import { describe, it, expect } from '@ohos/hypium';
 import { KnowledgeViewHelper } from '../../../main/ets/pages/KnowledgePage';
 import { KnowledgeStatus } from '../../../main/ets/libs/types';
-
-/** 测试契约：来源图标映射（知识来源 → 图标） */
-interface KnowledgeSourceIconHelper {
-  getSourceIcon(source: string): string;
-}
-
-/** 来源图标取用入口：经显式转换对齐测试契约（未导出方法在运行期以红态暴露） */
-const sourceIconHelper = KnowledgeViewHelper as Object as KnowledgeSourceIconHelper;
 
 export default function knowledgePageTest() {
   describe('KnowledgePage', () => {
@@ -56,36 +49,7 @@ export default function knowledgePageTest() {
       expect(token).assertEqual('text_disabled');
     });
 
-    // ========== 切片 6: source_icon_upload_returns_camera ==========
-
-    it('source_icon_upload_returns_camera', 0, () => {
-      const icon = sourceIconHelper.getSourceIcon('upload');
-      expect(icon).assertEqual('📷');
-    });
-
-    // ========== 切片 7: source_icon_url_returns_link ==========
-
-    it('source_icon_url_returns_link', 0, () => {
-      const icon = sourceIconHelper.getSourceIcon('url');
-      expect(icon).assertEqual('🔗');
-    });
-
-    // ========== 切片 8: source_icon_manual_returns_pen ==========
-
-    it('source_icon_manual_returns_pen', 0, () => {
-      const icon = sourceIconHelper.getSourceIcon('manual');
-      expect(icon).assertEqual('✍️');
-    });
-
-    // ========== 切片 9: source_icon_unknown_returns_default ==========
-
-    it('source_icon_unknown_returns_default', 0, () => {
-      // 未知来源应回退到默认 📄 图标
-      const icon = sourceIconHelper.getSourceIcon('unknown_source');
-      expect(icon).assertEqual('📄');
-    });
-
-    // ========== 切片 10: format_file_size_bytes_to_human ==========
+    // ========== 切片 6: format_file_size_bytes_to_human ==========
 
     it('format_file_size_bytes_to_human', 0, () => {
       // 1024 字节 → "1.0 KB"
@@ -94,7 +58,7 @@ export default function knowledgePageTest() {
       expect(KnowledgeViewHelper.formatFileSize(1048576)).assertEqual('1.0 MB');
     });
 
-    // ========== 切片 11: format_file_size_zero_returns_empty ==========
+    // ========== 切片 7: format_file_size_zero_returns_empty ==========
 
     it('format_file_size_zero_returns_empty', 0, () => {
       // 0 字节 → 占位符 "—"

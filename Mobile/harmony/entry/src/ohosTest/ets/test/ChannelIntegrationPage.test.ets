@@ -9,6 +9,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { ChannelIntegrationViewHelper } from '../../../main/ets/pages/ChannelIntegrationPage';
 import { IntegrationStatus } from '../../../main/ets/libs/types';
+import { StyleManager } from '../../../main/ets/libs/style/StyleManager';
 
 export default function channelIntegrationPageTest() {
   describe('ChannelIntegrationPage', () => {
@@ -17,6 +18,9 @@ export default function channelIntegrationPageTest() {
     it('status_color_connected_returns_status_success', 0, () => {
       expect(ChannelIntegrationViewHelper.getStatusColor('connected' as IntegrationStatus))
         .assertEqual('status_success');
+      // token 必须能被 StyleManager 解析为真色值（修复前不在表内回退 '#000000'——审计 3.8-2）
+      expect(StyleManager.getInstance().getColor('status_success'))
+        .assertEqual(StyleManager.getInstance().getColor('success'));
     });
 
     // ========== 切片2: getStatusColor - disconnected → text_secondary ==========
@@ -31,6 +35,9 @@ export default function channelIntegrationPageTest() {
     it('status_color_error_returns_status_error', 0, () => {
       expect(ChannelIntegrationViewHelper.getStatusColor('error' as IntegrationStatus))
         .assertEqual('status_error');
+      // token 必须能被 StyleManager 解析为真色值（修复前不在表内回退 '#000000'——审计 3.8-2）
+      expect(StyleManager.getInstance().getColor('status_error'))
+        .assertEqual(StyleManager.getInstance().getColor('error'));
     });
 
     // ========== 切片4: getStatusColor - syncing → status_warning ==========
@@ -38,6 +45,9 @@ export default function channelIntegrationPageTest() {
     it('status_color_syncing_returns_status_warning', 0, () => {
       expect(ChannelIntegrationViewHelper.getStatusColor('syncing' as IntegrationStatus))
         .assertEqual('status_warning');
+      // token 必须能被 StyleManager 解析为真色值（修复前不在表内回退 '#000000'——审计 3.8-2）
+      expect(StyleManager.getInstance().getColor('status_warning'))
+        .assertEqual(StyleManager.getInstance().getColor('warning'));
     });
 
     // ========== 切片5: getStatusIcon - connected → ✅ ==========
