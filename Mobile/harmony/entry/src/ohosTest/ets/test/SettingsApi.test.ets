@@ -90,7 +90,8 @@ export default function settingsApiTest() {
       api.update('theme', 'dark');
       expect(backend.requests[0].method).assertEqual('PUT');
       expect(backend.requests[0].url).assertEqual('https://api.example.com/settings/theme');
-      expect(backend.requests[0].body).assertEqual({ value: 'dark' });
+      const body = backend.requests[0].body as Record<string, Object>;
+      expect(body['value']).assertEqual('dark');
     });
 
     // ========== reset（后端无此端点：诚实 throw，不发任何请求）==========

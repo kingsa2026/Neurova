@@ -126,9 +126,15 @@ export default function apiRouteGuardTest() {
       await probe(() => collaboration.listWorkflows());
       await probe(() => webhook.list());
 
-      // 每条请求都必须以 baseUrl 开头，且 base 之后的路径段不得再以 /v1/ 开头
+      // 每条请求都必须可归位：普通端点以 baseUrl（…/api/v1）开头且 base 后不再有 /v1；
+      // neuron 端点挂在 /api/neuron（无 /v1），以 源点/api/neuron/ 开头
       expect(backend.requests.length > 0).assertTrue();
       for (const r of backend.requests) {
+        if (r.url.includes('/api/neuron/')) {
+          expect(r.url.startsWith('https://s.example.com/api/neuron/')).assertTrue();
+          expect(r.url.includes('/v1/neuron')).assertFalse();
+          continue;
+        }
         expect(r.url.startsWith(BASE)).assertTrue();
         const path = r.url.substring(BASE.length);
         expect(path.startsWith('/v1/')).assertFalse();

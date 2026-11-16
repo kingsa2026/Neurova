@@ -3,15 +3,20 @@
 // logout 清除持久化，restore 无凭证时安全回落（不抛错、isAuthenticated=false）。
 // 运行环境：模拟器真机 preferences（每个用例先 init(context)，幂等）。
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
-import { abilityDelegatorRegistry } from '@kit.TestKit';
 import { AuthStore } from '../../../main/ets/libs/state/stores/AuthStore';
 import { StorageAdapter } from '../../../main/ets/libs/adapters/StorageAdapter';
+import { TestContext } from '../testability/TestContext';
 import { AuthTokens, User } from '../../../main/ets/libs/types';
 
-/** 每用例初始化存储桥（幂等；同名 preferences 复用同一实例） */
+/** 每用例初始化存储桥（TestRunner 已 startAbility 拉起 TestAbility，这里轮询等装配完成） */
 async function initStorage(): Promise<StorageAdapter> {
   const storage = StorageAdapter.getInstance();
-  await storage.init(abilityDelegatorRegistry.getAbilityDelegator().getAppContext());
+  let waited = 0;
+  while (TestContext.tryGet() === null && waited < 8000) {
+    await new Promise<void>((resolve) => { setTimeout(resolve, 100); });
+    waited += 100;
+  }
+  await storage.init(TestContext.get());
   return storage;
 }
 

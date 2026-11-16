@@ -6,15 +6,17 @@
 import { UIAbility } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { TestContext } from './TestContext';
 
 const domain: number = 0x0000;
 const tag: string = 'testTag';
 
 export default class TestAbility extends UIAbility {
   onCreate(): void {
+    // 装配测试期共享上下文（preferences 等真实存储能力依赖它）
+    TestContext.set(this.context);
     hilog.info(domain, tag, '%{public}s', 'TestAbility onCreate');
   }
-
   onDestroy(): void {
     hilog.info(domain, tag, '%{public}s', 'TestAbility onDestroy');
   }

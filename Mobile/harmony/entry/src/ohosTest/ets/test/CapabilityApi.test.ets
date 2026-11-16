@@ -106,10 +106,10 @@ export default function capabilityApiTest() {
       expect(backend.requests[0].url).assertEqual('https://api.example.com/files');
     });
 
-    it('createFile_throws_without_request', 0, () => {
+    it('createFile_throws_without_request', 0, async () => {
       let threw = false;
       try {
-        api.createFile({ agentId: 'agent-1', name: 'a.txt' });
+        await api.createFile({ agentId: 'agent-1', name: 'a.txt' });
       } catch (e) {
         threw = true;
       }
@@ -147,10 +147,10 @@ export default function capabilityApiTest() {
       expect(url.includes('limit=100')).assertTrue();
     });
 
-    it('createMedia_throws_without_request', 0, () => {
+    it('createMedia_throws_without_request', 0, async () => {
       let threw = false;
       try {
-        api.createMedia({ agentId: 'agent-1', name: 'pic.png' });
+        await api.createMedia({ agentId: 'agent-1', name: 'pic.png' });
       } catch (e) {
         threw = true;
       }
@@ -158,10 +158,10 @@ export default function capabilityApiTest() {
       expect(backend.requests.length).assertEqual(0);
     });
 
-    it('updateMedia_throws_without_request', 0, () => {
+    it('updateMedia_throws_without_request', 0, async () => {
       let threw = false;
       try {
-        api.updateMedia('m1', { name: 'x' });
+        await api.updateMedia('m1', { name: 'x' });
       } catch (e) {
         threw = true;
       }
