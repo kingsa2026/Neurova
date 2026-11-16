@@ -39,6 +39,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 from neurova.agent.task_unit import parseTaskUnit, renderTaskUnitPrompt
+from neurova.agent.acceptance_gate import runAcceptanceLoop
 from neurova.core.lazy_singleton import lazySingleton
 
 logger = logging.getLogger(__name__)
@@ -196,8 +197,11 @@ class SubAgentRun:
     subagent_type: str = "general"
     tool_allowlist: Optional[frozenset] = None
     # P1-1（评测报告 G-2）：结构化任务单元（TaskUnit.toDict()）——验收/评审/依赖门的数据基础。
-    # None = 未提供（自由文本 task 派生，向后兼容）。
+    # None = 未提供（自由文本派生，向后兼容）。
     task_unit: Optional[Dict[str, Any]] = None
+    # P1-2（评测报告 G-3）：验收门判定记录（achieved/missing/rounds/reworked 或 skipped）。
+    # None = 未过门（开关关且无显式验收条件）。
+    acceptance: Optional[Dict[str, Any]] = None
     status: str = SUBAGENT_PENDING  # 取值域见 SUBAGENT_STATUSES（本模块常量，唯一出处）
     # P2-10 增强：子代理升级/结构化结果提交（escalate/submit_result 工具写入，
     # 随邮箱投递发起者会话；只作读数与通知，不改变运行状态机）
@@ -242,6 +246,7 @@ class SubAgentRun:
             "member_session_id": self.member_session_id,
             "subagent_type": self.subagent_type,
             "task_unit": self.task_unit,
+            "acceptance": self.acceptance,
             "tool_allowlist_size": len(self.tool_allowlist) if self.tool_allowlist else None,
             "status": self.status,
             "report": self.report,
@@ -1016,27 +1021,49 @@ class SwarmManager:
             # P1-1：member 实际收到的是"原始任务描述 + 结构化任务书"拼装提示词；
             # 台账/事件里的 run.task 保持原始文本不混排。
             memberPrompt = renderTaskUnitPrompt(run.task, run.task_unit)
-            try:
-                response = await asyncio.wait_for(
-                    agent.chat(
-                        memberPrompt,
-                        stream=True,
-                        session_id=run.member_session_id,
-                        metadata=spawn_metadata,
-                    ),
-                    timeout=budget,
-                )
-            except asyncio.TimeoutError:
-                run.cause = SUBAGENT_CAUSE_TIMEOUT
-                raise RuntimeError(
-                    f"subagent_timeout（运行窗口 {budget:g}s 内未返回，已放弃这条子任务；"
-                    f"尺度来自工具层 spawn_subagent 超时，可用 {SUBAGENT_BUDGET_ENV} 调整）"
-                ) from None
-            report = self._extract_text(response)
-            # P3：非流式遗留路径 LLM 失败不抛异常而是返回 "[LLM Error] ..." 文本
-            # ——不得当正常报告标 completed（流式路径失败走异常分支天然 failed）
-            if report.startswith("[LLM Error]"):
-                raise RuntimeError(report)
+
+            async def doMemberChat(text: str) -> str:
+                """一次 member 管线调用（流式/会话/预算与首跑同源），返回提取后正文。"""
+                try:
+                    response = await asyncio.wait_for(
+                        agent.chat(
+                            text,
+                            stream=True,
+                            session_id=run.member_session_id,
+                            metadata=spawn_metadata,
+                        ),
+                        timeout=budget,
+                    )
+                except asyncio.TimeoutError:
+                    run.cause = SUBAGENT_CAUSE_TIMEOUT
+                    raise RuntimeError(
+                        f"subagent_timeout（运行窗口 {budget:g}s 内未返回，已放弃这条子任务；"
+                        f"尺度来自工具层 spawn_subagent 超时，可用 {SUBAGENT_BUDGET_ENV} 调整）"
+                    ) from None
+                textOut = self._extract_text(response)
+                # P3：非流式遗留路径 LLM 失败不抛异常而是返回 "[LLM Error] ..." 文本
+                # ——不得当正常报告标 completed（流式路径失败走异常分支天然 failed）
+                if textOut.startswith("[LLM Error]"):
+                    raise RuntimeError(textOut)
+                return textOut
+
+            report = await doMemberChat(memberPrompt)
+            # P1-2（评测报告 G-3）验收门：判定 → 不达标带 missing 回炉一次 →
+            # 再不达标置 failed（cause=acceptance_failed，产出不作合格结果回流）；
+            # 判定器不可用诚实降级（completed + acceptance.skipped 标注）。
+            verifyChannel = getattr(agent, "llm_client", None)
+            gate = await runAcceptanceLoop(
+                run,
+                chatFn=doMemberChat,
+                verifyChannel=getattr(verifyChannel, "chat", None),
+                firstReport=report,
+            )
+            if gate.info is not None:
+                run.acceptance = gate.info
+            if gate.failedReason:
+                run.cause = gate.cause
+                raise RuntimeError(gate.failedReason)
+            report = gate.report
             run.report = report
             run.status = SUBAGENT_COMPLETED
             run.finished_at = time.time()
