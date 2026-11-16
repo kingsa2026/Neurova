@@ -80,16 +80,23 @@ class UnifiedVoicePipeline:
         self._initialized = False
 
     def _ensure_initialized(self):
-        """延迟初始化依赖模块"""
+        """延迟初始化依赖模块
+
+        fail-soft 保持（单件失败不阻断主流程），但失能必须留 WARNING 级线索
+        （审计 3.2-15：原 debug 级让"语音链路静默失能"零线索，事后归因全靠猜）。
+        """
         if self._initialized:
             return
+
+        disabled: list = []
 
         try:
             from neurova.voice_context_module import get_voice_context_module
 
             self._voice_context_module = get_voice_context_module()
         except Exception as e:
-            logger.debug("VoiceContextModule 初始化跳过: %s", e)
+            disabled.append("VoiceContextModule")
+            logger.warning("VoiceContextModule 装配失败（语音上下文注入失能）: %s", e)
 
         try:
             from neurova.voice_memory_bridge import VoiceMemoryBridge, VoiceMemoryConfig
@@ -97,21 +104,27 @@ class UnifiedVoicePipeline:
             config = VoiceMemoryConfig()
             self._voice_memory_bridge = VoiceMemoryBridge(config=config)
         except Exception as e:
-            logger.debug("VoiceMemoryBridge 初始化跳过: %s", e)
+            disabled.append("VoiceMemoryBridge")
+            logger.warning("VoiceMemoryBridge 装配失败（语音→记忆记录失能）: %s", e)
 
         try:
             from neurova.asr.manager import ASRManager
 
             self._asr_manager = ASRManager()
         except Exception as e:
-            logger.debug("ASRManager 初始化跳过: %s", e)
+            disabled.append("ASRManager")
+            logger.warning("ASRManager 装配失败（语音识别失能）: %s", e)
 
         try:
             from neurova.tts.manager import TTSManager
 
             self._tts_manager = TTSManager()
         except Exception as e:
-            logger.debug("TTSManager 初始化跳过: %s", e)
+            disabled.append("TTSManager")
+            logger.warning("TTSManager 装配失败（语音合成失能）: %s", e)
+
+        if disabled:
+            logger.warning("语音链路部分失能: %s——相关语音端点将不可用或退化为直通", ", ".join(disabled))
 
         self._initialized = True
 
