@@ -94,9 +94,17 @@ class OpenAIAdapter(LLMAbstractProvider):
         messages: List[Message],
         temperature: Optional[float] = None,
     ) -> Generator[str, None, None]:
-        """Stream OpenAI responses"""
-        # Implement streaming logic
-        pass
+        """流式未实现：显式点名失败，不以 `pass` 静默返回 None。
+
+        空桩时代调用方迭代返回值会在别处炸 `TypeError: NoneType is not
+        iterable`——报错点与根因无关（S5 移交 R6 诚实化）。真流式
+        （aiohttp SSE）属新建能力，另立批次；grep 复核全仓无生产消费方
+        （2026-11-17：基类 @abstractmethod 占位之外仅桩测试）。
+        """
+        raise NotImplementedError(
+            "OpenAIAdapter.stream_call 未实现流式输出（仅支持非流式 call）；"
+            "实现前调用在此显式失败，不再以 None 拖到迭代处炸 TypeError"
+        )
     
     def estimate_cost(
         self,

@@ -997,14 +997,18 @@ async def install_from_zip(
 
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
-            zip_path = os.path.join(tmpdir, file.filename or "skill.zip")
+            # 落盘名服务端随机（uuid hex，对照 :309/:561 的 sid 用法）：filename
+            # 由客户端任意控制，直接拼路径既是路径逃逸面（`..`/分隔符）也是
+            # 可预测路径面（同名互踩）——S2→S1 移交 R6。上传名只进 skill_id
+            # 命名，且经 basename 提取不得携带路径成分。
+            zip_path = os.path.join(tmpdir, f"{uuid.uuid4().hex}.zip")
             content = await file.read()
             if len(content) > 100 * 1024 * 1024:
                 raise HTTPException(status_code=413, detail="File too large (max 100MB)")
             with open(zip_path, "wb") as f:
                 f.write(content)
             service, pool, owner = _install_target(target, current_user)
-            skill_id = (file.filename or "skill").replace(".zip", "") or None
+            skill_id = os.path.basename(file.filename or "skill").replace(".zip", "") or None
             result = service.install_skill(
                 skill_path=zip_path,
                 skill_id=skill_id,

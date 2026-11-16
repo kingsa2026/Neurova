@@ -32,7 +32,8 @@ def _manager(projects):
     m = MagicMock()
     items = list(projects)
 
-    def _list_projects(limit=None, offset=0, include_deleted=False):
+    def _list_projects(limit=None, offset=0, include_deleted=False, requester_id=None):
+        # R6 属主过滤接线后端点会显式传 requester_id（admin 身份为 None=全量）
         result = items[offset:]
         if limit is not None:
             result = result[:limit]
@@ -113,7 +114,7 @@ class TestSessions(CollabEndpointsBase):
         with patch.object(self.module, "get_collaboration_manager", return_value=manager):
             resp = self.client.get("/api/v1/collaboration/sessions?limit=3")
         self.assertEqual(len(resp.json()["data"]), 3)
-        manager.list_projects.assert_called_with(limit=3, offset=0)
+        manager.list_projects.assert_called_with(limit=3, offset=0, requester_id=None)
 
 
 if __name__ == "__main__":
