@@ -3,7 +3,7 @@ import { getHomeData, getHomeTrends } from '@/api/modules/home'
 import { getTokenUsage, getSystemInfo } from '@/api/modules/stats'
 import { getMemoryStats } from '@/api/modules/memory'
 import { getKnowledgeNodes } from '@/api/modules/knowledge'
-import { getHealthReport } from '@/api/modules/health'
+import { getHealthReport, normalizeHealthChecks } from '@/api/modules/health'
 import { getSchedulerStatus } from '@/api/modules/scheduler'
 import type { TokenUsageByModel } from '@/api/modules/stats'
 
@@ -192,8 +192,10 @@ export function useDashboardStats(options?: { agentId?: string | (() => string) 
     })
 
     // --- 健康状态（真健康报告 + 系统资源） ---
+    // 后端 HealthReportResponse 字段是 status + checks:Dict[name,CheckResult]（P1-23）：
+    // 此前读 report?.overall（不存在 → overall 恒 null）并整份塞 Dict 进 checks 数组。
     let sys: { cpu?: { percent?: number }; memory?: { percent?: number }; disk?: { percent?: number } } | null = null
-    let report: { overall?: string; checks?: Array<{ name: string; status: string }> } | null = null
+    let report: { status?: string; checks?: unknown } | null = null
     if (sysRes.status === 'fulfilled') {
       sys = unwrapPayload(sysRes.value)
     }
@@ -201,8 +203,8 @@ export function useDashboardStats(options?: { agentId?: string | (() => string) 
       report = unwrapPayload(healthRes.value)
     }
     health.value = {
-      overall: report?.overall ?? null,
-      checks: report?.checks ?? [],
+      overall: report?.status ?? null,
+      checks: normalizeHealthChecks(report?.checks).map((c) => ({ name: c.name, status: c.status })),
       system: sys
         ? {
             cpu: sys.cpu?.percent ?? null,

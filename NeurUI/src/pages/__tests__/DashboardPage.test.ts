@@ -60,9 +60,11 @@ vi.mock('@/api/modules/memory', () => ({
 vi.mock('@/api/modules/knowledge', () => ({
   getKnowledgeNodes: vi.fn(),
 }))
-vi.mock('@/api/modules/health', () => ({
-  getHealthReport: vi.fn(),
-}))
+// 聚合/归一保持真实现（composable 消费 normalizeHealthChecks），只 mock 网络出口
+vi.mock('@/api/modules/health', async () => {
+  const actual = await vi.importActual<any>('@/api/modules/health')
+  return { ...actual, getHealthReport: vi.fn() }
+})
 vi.mock('@/api/modules/scheduler', () => ({
   getSchedulerStatus: vi.fn(),
 }))
@@ -158,7 +160,16 @@ describe('DashboardPage', () => {
     vi.mocked((await import('@/api/modules/memory')).getMemoryStats).mockResolvedValue({ code: 0, data: { total_memories: 42 } } as never)
     vi.mocked((await import('@/api/modules/knowledge')).getKnowledgeNodes).mockResolvedValue({ code: 0, data: { items: [], total: 17, page: 1, size: 1 } } as never)
     vi.mocked((await import('@/api/modules/stats')).getSystemInfo).mockResolvedValue({ code: 0, data: { status: 'running', cpu: { percent: 33 }, memory: { percent: 66 }, disk: { percent: 50 } } } as never)
-    vi.mocked((await import('@/api/modules/health')).getHealthReport).mockResolvedValue({ code: 0, data: { overall: 'healthy', checks: [{ name: 'database', status: 'pass' }, { name: 'llm', status: 'pass' }], timestamp: 't', version: 'v' } } as never)
+    // P1-23：按后端真实形状 mock（裸 HealthReportResponse：status + checks Dict），
+    // 旧 mock 的 overall/pass 词汇是前端自造的错位契约，钉不住真实渲染。
+    vi.mocked((await import('@/api/modules/health')).getHealthReport).mockResolvedValue({
+      status: 'healthy',
+      checks: {
+        database: { name: 'database', status: 'healthy', message: '', duration: 1, check_type: 'dependency' },
+        llm: { name: 'llm', status: 'healthy', message: '', duration: 2, check_type: 'dependency' },
+      },
+      total_checks: 2, healthy_count: 2, unhealthy_count: 0, timestamp: 1700000000,
+    } as never)
     vi.mocked((await import('@/api/modules/scheduler')).getSchedulerStatus).mockResolvedValue({ code: 0, data: { running: true, total_tasks: 8, active_tasks: 2, uptime_seconds: 60 } } as never)
   })
 
