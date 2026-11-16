@@ -105,11 +105,8 @@ export struct DashboardPage {
 
     // 3. 尝试拉取最新 agent 列表（失败时降级使用缓存）
     try {
-      const res = await this.api.agents.list({ page: 1, size: 100 });
-      if (res.code === 0 && res.data) {
-        this.agents = res.data.items;
-        this.agentsStore.setAgents(this.agents);
-      }
+      this.agents = await this.api.agents.list();
+      this.agentsStore.setAgents(this.agents);
     } catch (e) {
       this.logger.warn('DashboardPage', '加载 agent 列表失败，使用缓存', e as Error);
     }

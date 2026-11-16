@@ -46,12 +46,7 @@ export struct AgentDetailPage {
   private async loadAll(): Promise<void> {
     this.loading = true;
     try {
-      const res = await this.api.agents.get(this.agentId);
-      if (res.code === 0 && res.data) {
-        this.agent = res.data;
-      } else {
-        this.msg.error(res.message || '智能体详情获取失败');
-      }
+      this.agent = await this.api.agents.get(this.agentId);
       const memRes = await this.api.memory.list(this.agentId, undefined, 1);
       if (memRes.code === 0 && memRes.data) {
         this.memoryCount = memRes.data.total;

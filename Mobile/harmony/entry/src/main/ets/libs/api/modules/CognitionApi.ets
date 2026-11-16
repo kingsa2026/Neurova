@@ -1,209 +1,155 @@
 /**
- * CognitionApi - 认知层 API 模块
+ * CognitionApi - 认知层 API 模块（端点经后端源码核对 2026-11-16）
  *
- * 职责：封装认知层资源（经验/知识图谱/元认知/反思/成长）的 CRUD 操作
- * 设计：通过 HttpClient 委托请求，不直接依赖 @ohos.net.http；统一返回 Promise<ApiResponse<T>>
- *
- * 覆盖实体：
- *   - Experience           经验知识
- *   - KnowledgeGraph       知识图谱（只读 getGraph）
- *   - MetacognitionRecord  元认知记录
- *   - ReflectionRecord     反思记录
- *   - GrowthRecord         成长记录
- *
- * 用法：
- *   const api = ApiFacade.getInstance().cognition;
- *   const page = await api.listExperiences('agent-1', { page: 1, size: 20 });
- *   const graph = await api.getKnowledgeGraph('agent-1');
+ * 后端事实源（挂载见 endpoints/__init__.py）：
+ *   experience_knowledge_api.py @ /v1/experience：
+ *     GET  /ranking?agent_id=&page=&size=   经验分页（契约投影：id/agent_id/
+ *         task_type/skill_name/context/outcome/success_rate/proficiency/
+ *         experience_count/lessons/adoption_outcome）
+ *     DELETE /experience/{record_id}
+ *   metacognition_api.py @ /v1/metacognition：
+ *     GET /{agent_id}/metacognition?type=&page=&size=  元认知台账（thought 条目：
+ *         {id,kind,type,content,context,confidence,metadata,created_at}）
+ *     GET /{agent_id}/metacognition/history            反思时间线
+ *   growth.py @ /v1/growth：
+ *     GET /growth?agent_id=                 成长数据（motivation_level/personality/
+ *         traits/values/constitution/questions...）
+ *     GET|POST /reflection?agent_id=        反思日志（{created_at,confidence,
+ *         trigger,summary} 列表）
+ * 旧 /cognition/* 端点后端不存在，全部退役；零调用方法一并删除。
  */
+
 import { HttpClient } from '../HttpClient';
-import {
-  ApiResponse,
-  PageParams,
-  PageResult,
-  Experience,
-  KnowledgeGraph,
-  MetacognitionRecord,
-  ReflectionRecord,
-  GrowthRecord,
-} from '../../types';
+import { ApiResponse } from '../../types';
+
+/** 经验条目（experience_knowledge_api._to_contract 契约投影，逐字段对齐） */
+export interface ExperienceDto {
+  id: string;
+  agent_id: string;
+  task_type: string;
+  skill_name: string;
+  context: string;
+  outcome: string;
+  success_rate: number | null;
+  proficiency: number | null;
+  experience_count: number;
+  lessons: string[];
+  adoption_outcome: string | null;
+  evidence_state: string | null;
+  injected_count: number | null;
+  seen_count: number | null;
+  operator_disposition: string | null;
+  metadata: Record<string, Object>;
+  created_at: string;
+  updated_at: string;
+}
+
+/** 经验分页载荷 */
+export interface ExperiencePage {
+  items: ExperienceDto[];
+  total: number;
+  page: number;
+  size: number;
+}
+
+/** 元认知台账条目（metacognition_api list_records 投影） */
+export interface MetacognitionDto {
+  id: number;
+  kind: string;
+  type: string;
+  content: string;
+  context: string;
+  confidence: number;
+  metadata: Record<string, Object>;
+  created_at: string;
+}
+
+/** 元认知分页载荷 */
+export interface MetacognitionPage {
+  items: MetacognitionDto[];
+  total: number;
+  page: number;
+  size: number;
+}
+
+/** 反思日志条目（ledger.reflection_history 投影） */
+export interface ReflectionDto {
+  created_at: string;
+  confidence: number;
+  trigger: string;
+  summary: string;
+}
+
+/** 成长数据载荷（growth.py get_agent_growth） */
+export interface GrowthDataDto {
+  agent_id: string;
+  motivation_level: string;
+  personality: string;
+  traits: Record<string, Object>;
+  values: string[];
+  communication_style: string;
+  decision_style: string;
+  constitution: Object[];
+  reflection_logs: Object[];
+  questions: Object[];
+  proactive_actions: Object[];
+}
 
 export class CognitionApi {
   private client: HttpClient;
+
   constructor(client: HttpClient) {
     this.client = client;
   }
 
   // ==================== Experience 经验 ====================
 
-  /** 列出经验（按 agentId 过滤，支持分页） */
-  async listExperiences(
-    agentId: string,
-    params?: PageParams,
-  ): Promise<ApiResponse<PageResult<Experience>>> {
-    const query: Record<string, Object> = {};
-    query['agentId'] = agentId;
-    if (params) {
-      if (params.page !== undefined) query['page'] = params.page;
-      if (params.size !== undefined) query['size'] = params.size;
+  /** 经验分页列表（/experience/ranking，按 skill_name 维度聚合投影） */
+  async listExperiences(agentId: string, page: number, size: number): Promise<ApiResponse<ExperiencePage>> {
+    const qs: string[] = [];
+    if (agentId.length > 0) {
+      qs.push('agent_id=' + encodeURIComponent(agentId));
     }
-    return this.client.get<PageResult<Experience>>('/cognition/experiences', query);
+    qs.push('page=' + Math.max(page, 1).toString());
+    qs.push('size=' + Math.min(Math.max(size, 1), 100).toString());
+    return this.client.get<ExperiencePage>('/experience/ranking?' + qs.join('&'));
   }
 
-  /** 获取单条经验 */
-  async getExperience(experienceId: string): Promise<ApiResponse<Experience>> {
-    return this.client.get<Experience>(`/v1/cognition/experiences/${experienceId}`);
+  /** 删除经验记录 */
+  async removeExperience(recordId: string): Promise<ApiResponse<Object>> {
+    return this.client.delete<Object>(`/experience/${recordId}`);
   }
 
-  /** 创建经验 */
-  async createExperience(data: Partial<Experience>): Promise<ApiResponse<Experience>> {
-    return this.client.post<Experience>('/cognition/experiences', data);
-  }
-
-  /** 更新经验 */
-  async updateExperience(
-    experienceId: string,
-    data: Partial<Experience>,
-  ): Promise<ApiResponse<Experience>> {
-    return this.client.put<Experience>(`/v1/cognition/experiences/${experienceId}`, data);
-  }
-
-  /** 删除经验 */
-  async removeExperience(experienceId: string): Promise<ApiResponse<Object>> {
-    return this.client.delete<Object>(`/v1/cognition/experiences/${experienceId}`);
-  }
-
-  // ==================== KnowledgeGraph 知识图谱 ====================
-
-  /** 获取 Agent 的知识图谱（节点+边） */
-  async getKnowledgeGraph(agentId: string): Promise<ApiResponse<KnowledgeGraph>> {
-    const query: Record<string, Object> = {};
-    query['agentId'] = agentId;
-    return this.client.get<KnowledgeGraph>('/cognition/knowledge-graph', query);
+  /** 手动结晶经验（POST /experience/records，AddExperienceRecordRequest 契约） */
+  async createExperience(data: Record<string, Object>): Promise<ApiResponse<ExperienceDto>> {
+    return this.client.post<ExperienceDto>('/experience/records', data);
   }
 
   // ==================== Metacognition 元认知 ====================
 
-  /** 列出元认知记录（按 agentId 过滤，支持分页） */
-  async listMetacognitions(
-    agentId: string,
-    params?: PageParams,
-  ): Promise<ApiResponse<PageResult<MetacognitionRecord>>> {
-    const query: Record<string, Object> = {};
-    query['agentId'] = agentId;
-    if (params) {
-      if (params.page !== undefined) query['page'] = params.page;
-      if (params.size !== undefined) query['size'] = params.size;
-    }
-    return this.client.get<PageResult<MetacognitionRecord>>('/cognition/metacognitions', query);
-  }
-
-  /** 获取单条元认知记录 */
-  async getMetacognition(metacognitionId: string): Promise<ApiResponse<MetacognitionRecord>> {
-    return this.client.get<MetacognitionRecord>(`/v1/cognition/metacognitions/${metacognitionId}`);
-  }
-
-  /** 创建元认知记录 */
-  async createMetacognition(
-    data: Partial<MetacognitionRecord>,
-  ): Promise<ApiResponse<MetacognitionRecord>> {
-    return this.client.post<MetacognitionRecord>('/cognition/metacognitions', data);
-  }
-
-  /** 更新元认知记录 */
-  async updateMetacognition(
-    metacognitionId: string,
-    data: Partial<MetacognitionRecord>,
-  ): Promise<ApiResponse<MetacognitionRecord>> {
-    return this.client.put<MetacognitionRecord>(
-      `/v1/cognition/metacognitions/${metacognitionId}`,
-      data,
-    );
-  }
-
-  /** 删除元认知记录 */
-  async removeMetacognition(metacognitionId: string): Promise<ApiResponse<Object>> {
-    return this.client.delete<Object>(`/v1/cognition/metacognitions/${metacognitionId}`);
+  /** 元认知台账（thought 条目，分页） */
+  async listMetacognitions(agentId: string, page: number, size: number): Promise<ApiResponse<MetacognitionPage>> {
+    const qs: string[] = [];
+    qs.push('page=' + Math.max(page, 1).toString());
+    qs.push('size=' + Math.min(Math.max(size, 1), 100).toString());
+    return this.client.get<MetacognitionPage>(`/metacognition/${agentId}/metacognition?` + qs.join('&'));
   }
 
   // ==================== Reflection 反思 ====================
 
-  /** 列出反思记录（按 agentId 过滤，支持分页） */
-  async listReflections(
-    agentId: string,
-    params?: PageParams,
-  ): Promise<ApiResponse<PageResult<ReflectionRecord>>> {
-    const query: Record<string, Object> = {};
-    query['agentId'] = agentId;
-    if (params) {
-      if (params.page !== undefined) query['page'] = params.page;
-      if (params.size !== undefined) query['size'] = params.size;
-    }
-    return this.client.get<PageResult<ReflectionRecord>>('/cognition/reflections', query);
-  }
-
-  /** 获取单条反思记录 */
-  async getReflection(reflectionId: string): Promise<ApiResponse<ReflectionRecord>> {
-    return this.client.get<ReflectionRecord>(`/v1/cognition/reflections/${reflectionId}`);
-  }
-
-  /** 创建反思记录 */
-  async createReflection(data: Partial<ReflectionRecord>): Promise<ApiResponse<ReflectionRecord>> {
-    return this.client.post<ReflectionRecord>('/cognition/reflections', data);
-  }
-
-  /** 更新反思记录 */
-  async updateReflection(
-    reflectionId: string,
-    data: Partial<ReflectionRecord>,
-  ): Promise<ApiResponse<ReflectionRecord>> {
-    return this.client.put<ReflectionRecord>(
-      `/v1/cognition/reflections/${reflectionId}`,
-      data,
-    );
-  }
-
-  /** 删除反思记录 */
-  async removeReflection(reflectionId: string): Promise<ApiResponse<Object>> {
-    return this.client.delete<Object>(`/v1/cognition/reflections/${reflectionId}`);
+  /** 反思日志（growth.py /reflection，envelope.data 为列表） */
+  async listReflections(agentId: string, limit: number): Promise<ApiResponse<ReflectionDto[]>> {
+    const qs: string[] = [];
+    qs.push('agent_id=' + encodeURIComponent(agentId.length > 0 ? agentId : 'default'));
+    qs.push('limit=' + Math.min(Math.max(limit, 1), 100).toString());
+    return this.client.get<ReflectionDto[]>('/growth/reflection?' + qs.join('&'));
   }
 
   // ==================== Growth 成长 ====================
 
-  /** 列出成长记录（按 agentId 过滤，支持分页） */
-  async listGrowths(
-    agentId: string,
-    params?: PageParams,
-  ): Promise<ApiResponse<PageResult<GrowthRecord>>> {
-    const query: Record<string, Object> = {};
-    query['agentId'] = agentId;
-    if (params) {
-      if (params.page !== undefined) query['page'] = params.page;
-      if (params.size !== undefined) query['size'] = params.size;
-    }
-    return this.client.get<PageResult<GrowthRecord>>('/cognition/growths', query);
-  }
-
-  /** 获取单条成长记录 */
-  async getGrowth(growthId: string): Promise<ApiResponse<GrowthRecord>> {
-    return this.client.get<GrowthRecord>(`/v1/cognition/growths/${growthId}`);
-  }
-
-  /** 创建成长记录 */
-  async createGrowth(data: Partial<GrowthRecord>): Promise<ApiResponse<GrowthRecord>> {
-    return this.client.post<GrowthRecord>('/cognition/growths', data);
-  }
-
-  /** 更新成长记录 */
-  async updateGrowth(
-    growthId: string,
-    data: Partial<GrowthRecord>,
-  ): Promise<ApiResponse<GrowthRecord>> {
-    return this.client.put<GrowthRecord>(`/v1/cognition/growths/${growthId}`, data);
-  }
-
-  /** 删除成长记录 */
-  async removeGrowth(growthId: string): Promise<ApiResponse<Object>> {
-    return this.client.delete<Object>(`/v1/cognition/growths/${growthId}`);
+  /** 成长数据（motivation/personality/traits/values/constitution/questions） */
+  async getGrowthData(agentId: string): Promise<ApiResponse<GrowthDataDto>> {
+    const qs = 'agent_id=' + encodeURIComponent(agentId.length > 0 ? agentId : 'default');
+    return this.client.get<GrowthDataDto>('/growth?' + qs);
   }
 }
