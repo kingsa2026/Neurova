@@ -35,7 +35,7 @@ export struct LiquidTabBar {
                 .borderRadius(16)
                 .backgroundColor(this.sm.getColor('primary_soft'))
             }
-            TabIcon({ kind: this.kinds[idx], color: this.active === idx ? this.sm.getColor('primary') : this.sm.getColor('text_tertiary'), iconSize: 21 })
+            TabIcon({ kind: this.kinds[idx], color: this.active === idx ? this.sm.getColor('primary') : this.sm.getColor('text_tertiary') })
           }
           .height(38)
 
