@@ -55,7 +55,7 @@ export class InteractionManager {
    */
   debounce<T extends (...args: Object[]) => void>(fn: T, wait: number): T {
     const self = this;
-    const debounced = function (...args: Object[]) {
+    const debounced = (...args: Object[]): void => {
       // 清掉之前的 timer
       const prevTimer = self.debounceTimers.get(fn);
       if (prevTimer !== undefined) {
@@ -67,8 +67,8 @@ export class InteractionManager {
         fn(...args);
       }, wait);
       self.debounceTimers.set(fn, timer);
-    } as T;
-    return debounced;
+    };
+    return debounced as T;
   }
 
   /**
@@ -81,15 +81,15 @@ export class InteractionManager {
    */
   throttle<T extends (...args: Object[]) => void>(fn: T, wait: number): T {
     const self = this;
-    const throttled = function (...args: Object[]) {
+    const throttled = (...args: Object[]): void => {
       const now = Date.now();
       const lastTime = self.throttleLastTime.get(fn) ?? 0;
       if (now - lastTime >= wait) {
         self.throttleLastTime.set(fn, now);
         fn(...args);
       }
-    } as T;
-    return throttled;
+    };
+    return throttled as T;
   }
 
   /**

@@ -30,13 +30,19 @@ export enum EasingType {
   LINEAR,
 }
 
-/** 缓动类型 → ArkUI 缓动曲线字符串映射 */
-const EASING_CURVES: Record<number, string> = {
-  [EasingType.EASE_IN]: 'ease-in',
-  [EasingType.EASE_OUT]: 'ease-out',
-  [EasingType.SPRING]: 'spring({damping: 0.7, stiffness: 100})',
-  [EasingType.LINEAR]: 'linear',
-};
+/** 缓动类型 → ArkUI 缓动曲线字符串（ArkTS Record 不支持枚举计算键，用 switch 单源映射） */
+function easingCurveOf(e: EasingType): string {
+  switch (e) {
+    case EasingType.EASE_IN:
+      return 'ease-in';
+    case EasingType.EASE_OUT:
+      return 'ease-out';
+    case EasingType.SPRING:
+      return 'spring({damping: 0.7, stiffness: 100})';
+    default:
+      return 'linear';
+  }
+}
 
 /** 动画预设 */
 export interface AnimationPreset {
@@ -76,7 +82,7 @@ export class AnimationManager {
 
   /** 获取缓动类型对应的 ArkUI 缓动曲线字符串 */
   getEasingCurve(e: EasingType): string {
-    return EASING_CURVES[e] ?? 'linear';
+    return easingCurveOf(e) ?? 'linear';
   }
 
   /** 注册动画预设 */
