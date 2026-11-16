@@ -49,10 +49,10 @@ export class StorageAdapter {
   }
 
   /**
-   * 初始化：在 EntryAbility.onCreate 中调用，传入 UIAbilityContext
+   * 初始化：在 Index 冷启动（或 EntryAbility）中调用，传入 Context
    * 获取 preferences 实例并缓存到 this.prefs
    */
-  async init(context: common.UIAbilityContext): Promise<void> {
+  async init(context: common.Context): Promise<void> {
     try {
       this.prefs = await preferences.getPreferences(context, { name: this.STORE_NAME });
       this.logger.info(TAG, `初始化成功 store=${this.STORE_NAME}`);

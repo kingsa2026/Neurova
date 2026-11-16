@@ -14,6 +14,7 @@
 
 import { Router, RouteNames } from '../routing/Router';
 import { AuthStore } from '../libs/state/stores/AuthStore';
+import { StorageAdapter } from '../libs/adapters/StorageAdapter';
 import { Logger } from '../libs/logger/Logger';
 import { ServerProfiles } from '../libs/config/ServerProfiles';
 import { ConfigManager } from '../libs/config/ConfigManager';
@@ -38,6 +39,14 @@ struct Index {
       return;
     }
     ConfigManager.getInstance().applyServerProfile(apiBase, getContext(this) as Context);
+    // 凭证持久化装配（P1-36）：先初始化存储桥，再恢复持久化凭证并按需续签——
+    // 恢复失败（无凭证/续签被拒）时 isAuthenticated 仍为 false，自然回落登录页
+    try {
+      await StorageAdapter.getInstance().init(getContext(this) as Context);
+      await this.authStore.restore();
+    } catch (e) {
+      this.logger.error('Index', '凭证恢复失败，按未登录处理', e as Error);
+    }
     // 档案就绪后再分发，避免异步竞争导致带空地址登录
     if (this.authStore.isAuthenticated) {
       this.logger.info('Index', '冷启动：已登录，进入导航壳');
