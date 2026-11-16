@@ -4,12 +4,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import java.util.UUID
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import top.neurova.mobile.core.model.PairingConfirmed
-import top.neurova.mobile.core.model.PairingResolved
 import top.neurova.mobile.core.net.HttpChannel
+import top.neurova.mobile.core.protocol.ConfirmedWire
+import top.neurova.mobile.core.protocol.PairingInput
+import top.neurova.mobile.core.protocol.RefreshedWire
+import top.neurova.mobile.core.protocol.ResolvedWire
+import top.neurova.mobile.core.protocol.parsePairingInput
+import top.neurova.mobile.core.protocol.pairingJson
 import top.neurova.mobile.core.store.CredentialStore
 
 /**
@@ -21,7 +24,7 @@ class PairingStore(
     private val http: HttpChannel,
     private val credentials: CredentialStore,
 ) {
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = pairingJson
     var paired by mutableStateOf(false)
         private set
     var wsUrl by mutableStateOf("")
@@ -42,24 +45,51 @@ class PairingStore(
 
     fun deviceName(): String = "Android " + android.os.Build.MODEL.orEmpty().ifBlank { "设备" }
 
+    /** 手动输入入口：6 位配对码与扫码 ref 分流（UI 承诺「粘贴 ref 或 6 位配对码」） */
+    suspend fun pairByInput(input: String) {
+        when (val parsed = parsePairingInput(input)) {
+            is PairingInput.Code -> pairByCode(parsed.value)
+            is PairingInput.Ref -> pairByRef(parsed.value)
+            null -> return
+        }
+    }
+
     /** 一扫配全：resolve（ref 换回连地址）→ confirm（拿设备身份与一次性票据） */
     suspend fun pairByRef(ref: String) {
         val resolvedElement = http.unwrapData(
             http.postJson("/mobile/pairing/resolve", JsonObject(mapOf("ref" to JsonPrimitive(ref)))),
         )
         val resolved = decode<ResolvedWire>(resolvedElement.toString())
-        val confirmElement = http.unwrapData(
-            http.postJson(
-                "/mobile/pairing/confirm",
-                JsonObject(
-                    mapOf(
-                        "ref" to JsonPrimitive(ref),
-                        "deviceName" to JsonPrimitive(deviceName()),
-                        "deviceType" to JsonPrimitive("android"),
-                    ),
+        completePairing(
+            // 后端 ConfirmPairingRequest 是蛇形命名（device_name/device_type）——
+            // 发驼峰会被 pydantic 静默忽略，设备名落不到登记表
+            JsonObject(
+                mapOf(
+                    "ref" to JsonPrimitive(ref),
+                    "device_name" to JsonPrimitive(deviceName()),
+                    "device_type" to JsonPrimitive("android"),
                 ),
             ),
+            resolved,
         )
+    }
+
+    /** 手输 6 位码：免 resolve 直通 confirm（后端 confirm 收 ref/code 二选一，pending 可直接确认） */
+    suspend fun pairByCode(code: String) {
+        completePairing(
+            JsonObject(
+                mapOf(
+                    "code" to JsonPrimitive(code),
+                    "device_name" to JsonPrimitive(deviceName()),
+                    "device_type" to JsonPrimitive("android"),
+                ),
+            ),
+            null,
+        )
+    }
+
+    private suspend fun completePairing(confirmBody: JsonObject, resolved: ResolvedWire?) {
+        val confirmElement = http.unwrapData(http.postJson("/mobile/pairing/confirm", confirmBody))
         val confirmed = decode<ConfirmedWire>(confirmElement.toString())
         applyConfirmed(resolved, confirmed)
     }
@@ -89,7 +119,7 @@ class PairingStore(
         pairingId = confirmed.pairingId ?: resolved?.pairingId ?: ""
         val deviceSecret = confirmed.deviceSecret.orEmpty()
         wsUrl = confirmed.wsUrl ?: resolved?.wsUrl ?: wsUrl
-        ticket = confirmed.wsToken
+        ticket = confirmed.connectTicket
         ticketExpiresAt = System.currentTimeMillis() + (confirmed.expiresIn ?: 60) * 1000
         paired = true
         if (pairingId.isNotEmpty() && deviceSecret.isNotEmpty()) {
@@ -107,29 +137,4 @@ class PairingStore(
 
     private inline fun <reified T> decode(raw: String): T =
         json.decodeFromString(raw)
-
-    // 后端字段蛇形命名，响应信封已由 unwrapData 剥离
-    @kotlinx.serialization.Serializable
-    private data class ResolvedWire(
-        @kotlinx.serialization.SerialName("ws_url") val wsUrl: String? = null,
-        @kotlinx.serialization.SerialName("pairing_id") val pairingId: String? = null,
-        @kotlinx.serialization.SerialName("expires_in") val expiresIn: Int? = null,
-        val status: String? = null,
-    )
-
-    @kotlinx.serialization.Serializable
-    private data class ConfirmedWire(
-        @kotlinx.serialization.SerialName("ws_token") val wsToken: String,
-        @kotlinx.serialization.SerialName("ws_url") val wsUrl: String? = null,
-        @kotlinx.serialization.SerialName("expires_in") val expiresIn: Int? = null,
-        @kotlinx.serialization.SerialName("device_secret") val deviceSecret: String? = null,
-        @kotlinx.serialization.SerialName("pairing_id") val pairingId: String? = null,
-    )
-
-    @kotlinx.serialization.Serializable
-    private data class RefreshedWire(
-        @kotlinx.serialization.SerialName("connect_ticket") val connectTicket: String,
-        @kotlinx.serialization.SerialName("pairing_id") val pairingId: String? = null,
-        @kotlinx.serialization.SerialName("expires_in") val expiresIn: Int? = null,
-    )
 }
