@@ -23,6 +23,8 @@ import {
   forceY,
   type SimulationNodeDatum,
 } from 'd3-force-3d'
+// 预算单源：布局退化阈值=节点预算（perfBudget.ts 单源，页面警示与 e2e 同一口径）
+import { NODE_BUDGET } from './perfBudget'
 
 export interface LayoutNode {
   id: string
@@ -63,8 +65,9 @@ function seededRandom(): () => number {
 }
 
 /** C3 性能预算门：节点数超过此值时返回退化布局（网格撒点，跳过 tick 模拟）
- *  ——大图不卡主线程（同步 300 tick 在 1000+ 节点时实测 >2 秒）。 */
-export const LAYOUT_NODE_BUDGET = 500
+ *  ——大图不卡主线程（同步 300 tick 在 1000+ 节点时实测 >2 秒）。
+ *  数值单源自 perfBudget.NODE_BUDGET（R5 移交归一：不许第二份 500 口径）。 */
+export const LAYOUT_NODE_BUDGET = NODE_BUDGET
 
 export interface ForceLayoutResult {
   positions: Map<string, LayoutPoint>

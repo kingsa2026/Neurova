@@ -23,12 +23,11 @@ NEUROVA_ROOT = Path(__file__).resolve().parents[3] / "neurova"
 # 第三方项目名（大小写不敏感；命中即违规，白名单文件除外）
 _THIRD_PARTY_NAMES = ("zcode",)
 
-# 已登记移交项：白名单只许缩小（清偿后从名单删除），不许新增
+# 已登记移交项：白名单只许缩小（清偿后从名单删除），不许新增。
+# 2026-11-17 R7：command_syntax/telemetry/workflow-scripted 三处措辞已清偿，
+# 白名单只剩 models/computer.py（ZCODE 是集成后端的功能性枚举值，随移交批裁定）。
 _HANDOVER_ALLOWLIST = {
     "models/computer.py",
-    "security/command_syntax.py",
-    "telemetry/__init__.py",
-    "workflow/scripted/__init__.py",
 }
 
 

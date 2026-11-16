@@ -426,6 +426,12 @@ async def list_agents(
     # 从 AgentConfigManager 加载持久化配置（data/agents/agents.json）
     try:
         config_manager = get_agent_config_manager()
+        # created_at 事实源回填（R7：投影断链修复）——cfg 创建时写入
+        # （agent_config.py:240），运行态投影此前从不赋值致响应恒 null。
+        for entry in agents:
+            cfg = config_manager.get_agent(entry.agent_id) or {}
+            if cfg.get("created_at"):
+                entry.created_at = cfg["created_at"]
         for agent_cfg in config_manager.list_agents():
             agent_id = agent_cfg.get("id") or agent_cfg.get("agent_id", "unknown")
             owner = agent_cfg.get("owner_user_id")
@@ -441,6 +447,7 @@ async def list_agents(
                         provider=agent_cfg.get("provider", ""),
                         status="config_only",
                         owner_user_id=str(owner) if owner else None,
+                        created_at=agent_cfg.get("created_at") or None,
                     )
                 )
     except Exception as e:
@@ -477,6 +484,7 @@ async def get_agent(
                     provider=cfg.get("provider", ""),
                     status="config_only",
                     owner_user_id=owner,
+                    created_at=cfg.get("created_at") or None,
                 )
         except HTTPException:
             raise
@@ -485,6 +493,13 @@ async def get_agent(
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
     info = agent_to_info(agent)
+    # created_at 事实源回填（R7：与 list_agents/config_only 同源，运行态投影不再恒 null）
+    try:
+        cfg = get_agent_config_manager().get_agent(agent_id) or {}
+        if cfg.get("created_at"):
+            info["created_at"] = cfg["created_at"]
+    except Exception as e:
+        logger.warning("AgentConfigManager.get_agent 失败: %s", e)
     if not can_access_agent(uid, role, info.get("owner_user_id")):
         # deny≡404（防枚举）
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")

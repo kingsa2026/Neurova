@@ -432,13 +432,6 @@ export interface SearchAnalysis {
   keywords: string[]
 }
 
-export interface MemoryActivation {
-  memory_id: string
-  activation: number
-  factors: Record<string, number>
-  last_accessed?: string
-}
-
 // ===========================================================================
 // API Functions
 // ===========================================================================
@@ -1045,11 +1038,6 @@ export function triggerActivationDecay() {
 /** Analyze query intent. */
 export function analyzeQuery(query: string) {
   return api.post<ApiResponse<SearchAnalysis>>(`${ENHANCED_BASE}/analyze`, { query })
-}
-
-/** Get memory activation state. */
-export function getMemoryActivation(memoryId: string) {
-  return api.get<ApiResponse<MemoryActivation>>(`${ENHANCED_BASE}/activation/${memoryId}`)
 }
 
 // ---------------------------------------------------------------------------
