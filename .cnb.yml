@@ -1550,9 +1550,10 @@ $:
   # 宁可不产包，也不产一个来源不明的包。
   #
   # 触发方式（api_trigger 自定义事件，仅 API 可触发；不在 push/pull_request 门禁里）：
-  #   cnb build start-build --repo <slug> --event api_trigger_win_installer \
-  #     --config "$(cat .cnb/win-installer.json)" --branch main
-  # 具体口径见 `.cnb/win-installer.json`（`cnb:apply` 的 config 载体）。
+  #   python scripts/desktop/trigger_win_installer.py [--sync]
+  # 脚本把本文件 `$` 下的 api_trigger_win_installer 子树读出来当 config，随
+  # `cnb build start-build --data` 发出（config 载体就是本文件，单一事实源；
+  # 不存在也不需要单独的 `.cnb/win-installer.json`）。
   .win-installer-tags: &win-installer-tags
     - windows
   .win-installer-runner: &win-installer-runner
@@ -1566,9 +1567,10 @@ $:
   # 调度。而在那之前，打包机脚本与工具链清单必须有一个**可下载、可复算**的落点：
   # 靠人记步骤 = 换台机器就重新摸一遍，而「工具链缺了哪件」不会有任何红。
   #
-  # 本流水线只做一件事：把 `scripts/desktop/win_installer_kit.py` 与
-  # `scripts/desktop/win_installer_kit-init.ps1` 作为**附件挂到上游提交**，
-  # 打包机上 `curl` 一次即可取回（不是让人从仓库里手抄）。
+  # 本流水线只做一件事：把 `scripts/desktop/win_installer_kit.py` 作为**附件挂到
+  # 上游提交**，打包机上 `curl` 一次即可取回（不是让人从仓库里手抄）。
+  # 初始化脚本不单独挂附件：kit 在打包机上自行落盘 init-toolchain.ps1
+  # （win_installer_kit.py 的 INSTALL_PS1 输出）。
   #
   # 仍要 `namespace: group` + tags —— 因为**在没有节点之前**发这条，会以
   # `No runner for namespace: group tags: windows` 响亮失败。这不是缺陷：
@@ -1582,7 +1584,6 @@ $:
           settings:
             attachments:
               - "./scripts/desktop/win_installer_kit.py"
-              - "./scripts/desktop/win_installer_kit-init.ps1"
 
   api_trigger_win_installer:
     - name: windows-custom-ui-installer
