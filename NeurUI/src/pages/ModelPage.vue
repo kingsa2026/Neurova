@@ -730,9 +730,7 @@ async function fetchProviders() {
     } else if (res?.providers && Array.isArray(res.providers)) {
       apiProviders = res.providers
     }
-    console.log('[ModelPage] fetchProviders API response:', apiProviders.length, 'providers from backend')
     providers.value = mergeProviders(apiProviders)
-    console.log('[ModelPage] fetchProviders merged:', providers.value.length, 'providers')
   } catch (err) {
     console.warn('[ModelPage] fetchProviders failed, showing built-in only:', err)
     // Always show built-in providers even if API fails (SPA navigation race condition)
@@ -1531,14 +1529,12 @@ async function addNewModel() {
       capabilities: ['text'],
       is_active: false,
     }
+    // modelTarget 在 openModelManagement 里指向 providers 列表元素本体——
+    // 再对 live（同一对象）unshift/++ 就是把同一条模型塞进同一个数组两次，
+    // 计数虚高、defaultModelOptions 出重复行（P1-24）。列表更新这一处即可。
     modelTarget.value.models.unshift(newModel)
     modelTarget.value.model_count++
     allModels.value.unshift(newModel)
-    const live = providers.value.find((p) => p.id === modelTarget.value!.id)
-    if (live) {
-      live.models.unshift(newModel)
-      live.model_count++
-    }
     newModelId.value = ''
     newModelName.value = ''
     addModelExpanded.value = false
@@ -1554,17 +1550,13 @@ async function addNewModel() {
 // ---------------------------------------------------------------------------
 onMounted(async () => {
   providerSearch.value = ''
-  console.log('[ModelPage] onMounted start')
   await fetchProviders()
   // F-11：每段 await 之间检查卸载标志，即刻返回（不发起后续请求）
   if (isDisposed) return
-  console.log('[ModelPage] after fetchProviders:', providers.value.length, 'providers')
   await fetchModels()
   if (isDisposed) return
-  console.log('[ModelPage] after fetchModels:', providers.value.length, 'providers,', allModels.value.length, 'models')
   await fetchActiveModel()
   if (isDisposed) return
-  console.log('[ModelPage] after fetchActiveModel:', providers.value.length, 'providers')
 })
 
 onBeforeUnmount(() => {
