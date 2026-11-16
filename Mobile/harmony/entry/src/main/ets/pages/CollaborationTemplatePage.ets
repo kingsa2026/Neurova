@@ -36,11 +36,11 @@
 
 import { TopNavMenu, GlassCard, GlassButton, GlassInput, GlassPanel } from '../components/glass';
 import { ApiFacade } from '../libs/api/ApiFacade';
+import { CollaborationTemplateDto, TemplateCreateBody } from '../libs/api/modules/CollaborationApi';
 import { Router } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { CollaborationTemplate, CollaborationTemplateStep } from '../libs/types';
 
 /** 日志标签 */
 const TAG = 'CollaborationTemplatePage';
@@ -52,73 +52,19 @@ const DEFAULT_DESC_MAX_LEN = 50;
 // CollaborationTemplateViewHelper - 协作模板视图模型（纯函数，无 UI 依赖，可独立单元测试）
 //
 // 设计：所有方法为 static，输入 → 输出，无副作用；
-//       颜色方法返回 StyleManager 的 token 名（如 'primary'），由页面解析为实际颜色值；
-//       图标方法返回 emoji 字符串直接渲染；
 //       通过本文件 export，供 ohosTest 直接导入测试
 // ===========================================================================
 
 export class CollaborationTemplateViewHelper {
   /**
-   * 获取模板分类对应的颜色 token 名
-   * 映射：project→primary，team→info，workflow→success
-   * @param category 分类字符串
-   * @return StyleManager 颜色 token 名
+   * 格式化参与者数量为展示字符串
+   * 规则：0 → "无参与者"；1 → "1 人"；N → "N 人"
+   * @param count 参与者数量
+   * @return 参与者数量展示字符串
    */
-  static getCategoryColor(category: string): string {
-    if (category === 'project') return 'primary';
-    if (category === 'team') return 'info';
-    if (category === 'workflow') return 'success';
-    // 未覆盖的分类抛错，强制 TDD 红灯逐项补齐
-    throw new Error(`getCategoryColor 未实现: ${category}`);
-  }
-
-  /**
-   * 获取模板分类对应的图标 emoji
-   * 映射：project→📋，team→👥，workflow→🔄
-   * @param category 分类字符串
-   * @return emoji 字符串
-   */
-  static getCategoryIcon(category: string): string {
-    if (category === 'project') return '📋';
-    if (category === 'team') return '👥';
-    if (category === 'workflow') return '🔄';
-    throw new Error(`getCategoryIcon 未实现: ${category}`);
-  }
-
-  /**
-   * 获取模板分类对应的中文标签
-   * 映射：project→项目，team→团队，workflow→工作流
-   * @param category 分类字符串
-   * @return 中文文案
-   */
-  static getCategoryLabel(category: string): string {
-    if (category === 'project') return '项目';
-    if (category === 'team') return '团队';
-    if (category === 'workflow') return '工作流';
-    throw new Error(`getCategoryLabel 未实现: ${category}`);
-  }
-
-  /**
-   * 格式化步骤数为展示字符串
-   * 规则：空数组 → "0 步"；非空 → "N 步"（N = 数组长度）
-   * @param steps 步骤数组（仅依赖 length，字段名按类型约束）
-   * @return 步骤数展示字符串
-   */
-  static formatStepsCount(steps: CollaborationTemplateStep[]): string {
-    if (!steps || steps.length === 0) return '0 步';
-    return `${steps.length} 步`;
-  }
-
-  /**
-   * 格式化使用次数为人类可读字符串
-   * 规则：0 → "未使用"；1-999 → "{n} 次"；≥1000 → "999+ 次"
-   * @param count 使用次数
-   * @return 使用次数展示字符串
-   */
-  static formatUsageCount(count: number): string {
-    if (count === 0) return '未使用';
-    if (count >= 1000) return '999+ 次';
-    return `${count} 次`;
+  static formatParticipantsCount(count: number): string {
+    if (count === 0) return '无参与者';
+    return `${count} 人`;
   }
 
   /**
@@ -133,102 +79,30 @@ export class CollaborationTemplateViewHelper {
   }
 }
 
-/** 分类筛选 Tab 配置 */
-interface CategoryFilterOption {
-  value: string;     // 'all' 或具体分类
-  label: string;
-}
-
-/** 分类筛选 Tab 列表 */
-const CATEGORY_FILTERS: CategoryFilterOption[] = [
-  { value: 'all', label: '全部' },
-  { value: 'project', label: '项目' },
-  { value: 'team', label: '团队' },
-  { value: 'workflow', label: '工作流' },
-];
-
 /** 新建模板表单数据 */
 interface TemplateFormData {
   name: string;
   description: string;
-  category: string;
 }
 
 /** 默认表单数据 */
 const DEFAULT_FORM: TemplateFormData = {
   name: '',
   description: '',
-  category: 'project',
 };
 
 /** 默认表单工厂（ArkTS 禁 spread 复制，集中此处） */
 function defaultForm(): TemplateFormData {
-  const form: TemplateFormData = { name: '', description: '', category: 'project' };
+  const form: TemplateFormData = { name: '', description: '' };
   return form;
 }
 
-/**
- * Mock 协作模板数据
- * TODO M6 阶段：替换为 api.collaboration.templates.list() 真实 API
- */
-const MOCK_TEMPLATES: CollaborationTemplate[] = [
-  {
-    id: 'tpl_1',
-    name: '敏捷开发协作',
-    description: '面向小型团队的敏捷开发协作流程，包含需求评审、迭代规划、每日站会等环节',
-    category: 'project',
-    steps: [
-      { name: '需求评审', order: 1 },
-      { name: '迭代规划', order: 2 },
-      { name: '每日站会', order: 3 },
-      { name: '迭代评审', order: 4 },
-    ],
-    isPublic: true,
-    usageCount: 50,
-    createdAt: '2025-01-10T08:00:00Z',
-    updatedAt: '2025-02-01T10:00:00Z',
-  },
-  {
-    id: 'tpl_2',
-    name: '跨部门协作',
-    description: '产品、设计、研发三方协作模板',
-    category: 'team',
-    steps: [
-      { name: '需求对齐', order: 1 },
-      { name: '设计评审', order: 2 },
-    ],
-    isPublic: false,
-    usageCount: 0,
-    createdAt: '2025-01-15T08:00:00Z',
-    updatedAt: '2025-01-20T10:00:00Z',
-  },
-  {
-    id: 'tpl_3',
-    name: '自动化部署工作流',
-    description: 'CI/CD 自动化部署协作流程',
-    category: 'workflow',
-    steps: [
-      { name: '代码合并', order: 1 },
-      { name: '自动测试', order: 2 },
-      { name: '构建镜像', order: 3 },
-      { name: '灰度发布', order: 4 },
-      { name: '全量发布', order: 5 },
-    ],
-    isPublic: true,
-    usageCount: 1200,
-    createdAt: '2025-02-01T08:00:00Z',
-    updatedAt: '2025-03-01T10:00:00Z',
-  },
-];
-
 @Component
 export struct CollaborationTemplatePage {
-  // 模板列表
-  @State templates: CollaborationTemplate[] = [];
+  // 模板列表（真实 DTO：GET /v1/collaboration/templates）
+  @State templates: CollaborationTemplateDto[] = [];
   // 加载态
   @State loading: boolean = true;
-  // 当前激活的分类筛选值
-  @State activeCategory: string = 'all';
   // 新建弹窗显示状态
   @State showCreateDialog: boolean = false;
   // 新建表单数据（嵌套属性变更需整体重新赋值）
@@ -246,19 +120,20 @@ export struct CollaborationTemplatePage {
   }
 
   /**
-   * 加载模板列表
-   * TODO M6 阶段：替换为真实 API（api.collaboration.templates.list）
-   * 当前使用 mock 静态数据，按使用次数降序排序
+   * 加载模板列表（真实 API：GET /v1/collaboration/templates，P1-34）
+   * 按更新时间倒序排序
    */
   private async loadTemplates(): Promise<void> {
     this.loading = true;
     try {
-      // TODO M6 阶段补充真实 API
-      // const res = await this.api.collaboration.templates.list();
-      // if (res.code === 0 && res.data) { this.templates = res.data.items; }
-      this.templates = MOCK_TEMPLATES.slice().sort((a: CollaborationTemplate, b: CollaborationTemplate) => {
-        return b.usageCount - a.usageCount;
-      });
+      const res = await this.api.collaboration.listTemplates(100);
+      if (res.code === 0 && res.data) {
+        this.templates = res.data.slice().sort((a: CollaborationTemplateDto, b: CollaborationTemplateDto) => {
+          return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+        });
+      } else {
+        this.msg.error(res.message || '加载协作模板失败');
+      }
     } catch (e) {
       this.logger.error(TAG, '加载模板失败', e as Error);
       this.msg.error('加载协作模板失败');
@@ -267,47 +142,24 @@ export struct CollaborationTemplatePage {
     }
   }
 
-  /** 切换分类筛选 */
-  private switchCategory(value: string): void {
-    this.activeCategory = value;
-  }
-
-  /**
-   * 获取经分类筛选后的列表
-   * 规则：activeCategory === 'all' 返回全量；否则按 category 字段过滤
-   */
-  private getFilteredTemplates(): CollaborationTemplate[] {
-    if (this.activeCategory === 'all') {
-      return this.templates;
-    }
-    return this.templates.filter((t: CollaborationTemplate) => t.category === this.activeCategory);
-  }
-
   /** 打开新建弹窗，重置表单 */
   private openCreateDialog(): void {
     this.formData = defaultForm();
     this.showCreateDialog = true;
   }
 
-  /** 选择分类（嵌套属性变更：整体重新赋值） */
-  private selectCategory(category: string): void {
-    this.formData = { name: this.formData.name, description: this.formData.description, category: category };
-  }
-
   /** 输入名称（嵌套属性变更：整体重新赋值） */
   private inputName(v: string): void {
-    this.formData = { name: v, description: this.formData.description, category: this.formData.category };
+    this.formData = { name: v, description: this.formData.description };
   }
 
   /** 输入描述（嵌套属性变更：整体重新赋值） */
   private inputDescription(v: string): void {
-    this.formData = { name: this.formData.name, description: v, category: this.formData.category };
+    this.formData = { name: this.formData.name, description: v };
   }
 
   /**
-   * 提交新建模板
-   * TODO M6 阶段：调用真实 API（api.collaboration.templates.create）
-   * 当前为本地追加 + TODO 提示
+   * 提交新建模板（真实 API：POST /v1/collaboration/templates，P1-34）
    */
   private async submitCreate(): Promise<void> {
     if (!this.formData.name.trim()) {
@@ -315,22 +167,20 @@ export struct CollaborationTemplatePage {
       return;
     }
     try {
-      // TODO M6 阶段：const res = await this.api.collaboration.templates.create(form);
-      const now = new Date().toISOString();
-      const newTpl: CollaborationTemplate = {
-        id: `tpl_${Date.now()}`,
+      const body: TemplateCreateBody = {
         name: this.formData.name.trim(),
         description: this.formData.description.trim(),
-        category: this.formData.category,
-        steps: [],
-        isPublic: false,
-        usageCount: 0,
-        createdAt: now,
-        updatedAt: now,
+        workflow: {},
+        participants: [],
       };
-      this.templates = [newTpl, ...this.templates];
-      this.msg.success('已创建');
-      this.showCreateDialog = false;
+      const res = await this.api.collaboration.createTemplate(body);
+      if (res.code === 0 && res.data) {
+        this.templates = [res.data, ...this.templates];
+        this.msg.success('已创建');
+        this.showCreateDialog = false;
+      } else {
+        this.msg.error(res.message || '创建模板失败');
+      }
     } catch (e) {
       this.logger.error(TAG, '创建模板失败', e as Error);
       this.msg.error('创建模板失败');
@@ -338,21 +188,15 @@ export struct CollaborationTemplatePage {
   }
 
   /**
-   * 查看模板步骤详情
-   * AlertDialog 展示完整步骤列表
+   * 查看模板详情（AlertDialog 展示参与者与时间）
    */
-  private showDetail(tpl: CollaborationTemplate): void {
-    const stepsText = tpl.steps.length === 0
-      ? '暂无步骤'
-      : tpl.steps
-          .sort((a, b) => a.order - b.order)
-          .map((s, idx) => `${idx + 1}. ${s.name}${s.description ? ' - ' + s.description : ''}`)
-          .join('\n');
+  private showDetail(tpl: CollaborationTemplateDto): void {
+    const participantsText = tpl.participants.length === 0 ? '无' : tpl.participants.join('、');
     AlertDialog.show({
       title: tpl.name,
-      message: `分类：${CollaborationTemplateViewHelper.getCategoryLabel(tpl.category)}\n\n` +
-        `步骤：\n${stepsText}\n\n` +
-        `使用次数：${CollaborationTemplateViewHelper.formatUsageCount(tpl.usageCount)}`,
+      message: `描述：${tpl.description || '无'}\n\n` +
+        `参与者：${participantsText}\n\n` +
+        `创建时间：${tpl.created_at}\n更新时间：${tpl.updated_at}`,
       autoCancel: true,
       alignment: DialogAlignment.Center,
       primaryButton: {
@@ -380,31 +224,7 @@ export struct CollaborationTemplatePage {
           })
         }
 
-        // 分类筛选 Tab
-        Scroll() {
-          Row({ space: 8 }) {
-            ForEach(CATEGORY_FILTERS, (opt: CategoryFilterOption) => {
-              Text(opt.label)
-                .fontSize(this.sm.getFontSize('caption'))
-                .fontColor(this.activeCategory === opt.value
-                  ? this.sm.getColor('text_on_primary')
-                  : this.sm.getColor('text_secondary'))
-                .backgroundColor(this.activeCategory === opt.value
-                  ? this.sm.getColor('primary')
-                  : this.sm.getColor('surface'))
-                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-                .borderRadius(16)
-                .onClick(() => { this.switchCategory(opt.value); })
-            }, (opt: CategoryFilterOption) => opt.value)
-          }
-          .padding({ left: this.sm.getSpacing('md'), right: this.sm.getSpacing('md') })
-        }
-        .scrollable(ScrollDirection.Horizontal)
-        .scrollBar(BarState.Off)
-        .width('100%')
-        .padding({ top: 4, bottom: 4 })
-
-        // 主体内容：加载态 / 空态 / 列表 三选一
+        // 主体内容：加载态 / 空态 / 列表 三选一（后端模板无分类维度，不设筛选 Tab）
         if (this.loading) {
           Column() {
             Text('加载中...')
@@ -415,7 +235,7 @@ export struct CollaborationTemplatePage {
           .layoutWeight(1)
           .justifyContent(FlexAlign.Center)
           .alignItems(HorizontalAlign.Center)
-        } else if (this.getFilteredTemplates().length === 0) {
+        } else if (this.templates.length === 0) {
           Column() {
             Text('暂无模板')
               .fontSize(this.sm.getFontSize('subtitle'))
@@ -427,11 +247,11 @@ export struct CollaborationTemplatePage {
           .alignItems(HorizontalAlign.Center)
         } else {
           List({ space: 12 }) {
-            ForEach(this.getFilteredTemplates(), (tpl: CollaborationTemplate) => {
+            ForEach(this.templates, (tpl: CollaborationTemplateDto) => {
               ListItem() {
                 this.buildTemplateCard(tpl)
               }
-            }, (tpl: CollaborationTemplate) => tpl.id)
+            }, (tpl: CollaborationTemplateDto) => tpl.template_id)
           }
           .layoutWeight(1)
           .width('100%')
@@ -461,23 +281,16 @@ export struct CollaborationTemplatePage {
   // 模板卡片构建器
   // ===========================================================================
 
-  /** 单个模板卡片：分类徽章 + 名称 + 描述 + 步骤/使用次数 + 操作按钮 */
+  /** 单个模板卡片：名称 + 描述 + 参与者数 + 更新时间 + 操作按钮 */
   @Builder
-  buildTemplateCard(tpl: CollaborationTemplate) {
+  buildTemplateCard(tpl: CollaborationTemplateDto) {
     Column() {
     GlassCard() {
       Column() {
-        // 顶部行：分类图标 + 分类徽章 + 名称
+        // 顶部行：名称
         Row() {
-          Text(CollaborationTemplateViewHelper.getCategoryIcon(tpl.category))
+          Text('📋')
             .fontSize(20)
-          Text(CollaborationTemplateViewHelper.getCategoryLabel(tpl.category))
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_on_primary'))
-            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-            .borderRadius(this.sm.getRadius('sm'))
-            .backgroundColor(this.sm.getColor(CollaborationTemplateViewHelper.getCategoryColor(tpl.category)))
-            .margin({ left: this.sm.getSpacing('xs') })
           Text(tpl.name)
             .fontSize(this.sm.getFontSize('subtitle'))
             .fontWeight(FontWeight.Bold)
@@ -500,13 +313,13 @@ export struct CollaborationTemplatePage {
           .margin({ top: this.sm.getSpacing('xs') })
           .width('100%')
 
-        // 步骤数 + 使用次数
+        // 参与者数 + 更新时间
         Row() {
-          Text(CollaborationTemplateViewHelper.formatStepsCount(tpl.steps))
+          Text(CollaborationTemplateViewHelper.formatParticipantsCount(tpl.participants.length))
             .fontSize(this.sm.getFontSize('caption'))
             .fontColor(this.sm.getColor('text_disabled'))
             .layoutWeight(1)
-          Text(CollaborationTemplateViewHelper.formatUsageCount(tpl.usageCount))
+          Text(`更新：${tpl.updated_at}`)
             .fontSize(this.sm.getFontSize('caption'))
             .fontColor(this.sm.getColor('text_disabled'))
         }
@@ -586,26 +399,6 @@ export struct CollaborationTemplatePage {
             onChange: (v: string) => { this.inputDescription(v); },
           })
             .margin({ top: 4 })
-
-          // 分类选择
-          Text('分类')
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_secondary'))
-            .width('100%')
-            .margin({ top: this.sm.getSpacing('sm') })
-          Row() {
-            ForEach(CATEGORY_FILTERS.slice(1), (opt: CategoryFilterOption) => {
-              GlassButton({
-                text: opt.label,
-                type: this.formData.category === opt.value ? 'primary' : 'default',
-                btnSize: 'small',
-                onTap: () => { this.selectCategory(opt.value); }
-              })
-                .margin({ right: this.sm.getSpacing('xs') })
-            }, (opt: CategoryFilterOption) => opt.value)
-          }
-          .width('100%')
-          .margin({ top: this.sm.getSpacing('xs'), bottom: this.sm.getSpacing('md') })
 
           // 操作按钮
           Row() {

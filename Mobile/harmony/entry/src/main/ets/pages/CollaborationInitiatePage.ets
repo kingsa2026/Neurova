@@ -38,15 +38,12 @@ import { Router } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { CollaborationInitiate } from '../libs/types';
+import { CollaborationSessionDto, CollaborationStartBody } from '../libs/api/modules/CollaborationApi';
 
 /** 日志标签 */
 const TAG = 'CollaborationInitiatePage';
 
-/** 协作类型别名（与 CollaborationInitiate.type 对齐） */
-type CollabType = 'project' | 'team' | 'task' | 'workflow';
-
-/** 协作状态别名（与 CollaborationInitiate.status 对齐） */
+/** 协作状态别名（发起进度弹窗用：等待/成功/失败） */
 type CollabStatus = 'pending' | 'initiated' | 'failed';
 
 // ===========================================================================
@@ -60,50 +57,33 @@ type CollabStatus = 'pending' | 'initiated' | 'failed';
 
 export class CollaborationInitiateViewHelper {
   /**
-   * 获取协作类型对应的颜色 token 名
-   * 映射：project→primary，team→info，task→success，workflow→warning
-   * @param type 协作类型
+   * 获取协作会话状态对应的颜色 token 名（后端 project status 词汇）
+   * 映射：active→success，archived→warning，suspended→error，其他→info
+   * @param status 协作会话状态字符串
    * @return StyleManager 颜色 token 名
    */
-  static getTypeColor(type: CollabType): string {
-    if (type === 'project') return 'primary';
-    if (type === 'team') return 'info';
-    if (type === 'task') return 'success';
-    if (type === 'workflow') return 'warning';
-    // 未覆盖的类型抛错，强制 TDD 红灯逐项补齐
-    throw new Error(`getTypeColor 未实现: ${type}`);
+  static getSessionStatusColor(status: string): string {
+    if (status === 'active') return 'success';
+    if (status === 'archived') return 'warning';
+    if (status === 'suspended') return 'error';
+    return 'info';
   }
 
   /**
-   * 获取协作类型对应的图标 emoji
-   * 映射：project→📋，team→👥，task→✅，workflow→🔄
-   * @param type 协作类型
-   * @return emoji 字符串
-   */
-  static getTypeIcon(type: CollabType): string {
-    if (type === 'project') return '📋';
-    if (type === 'team') return '👥';
-    if (type === 'task') return '✅';
-    if (type === 'workflow') return '🔄';
-    throw new Error(`getTypeIcon 未实现: ${type}`);
-  }
-
-  /**
-   * 获取协作类型对应的中文标签
-   * 映射：project→项目，team→团队，task→任务，workflow→工作流
-   * @param type 协作类型
+   * 获取协作会话状态对应的中文标签
+   * 映射：active→进行中，archived→已归档，suspended→已暂停，其他→未知
+   * @param status 协作会话状态字符串
    * @return 中文文案
    */
-  static getTypeLabel(type: CollabType): string {
-    if (type === 'project') return '项目';
-    if (type === 'team') return '团队';
-    if (type === 'task') return '任务';
-    if (type === 'workflow') return '工作流';
-    throw new Error(`getTypeLabel 未实现: ${type}`);
+  static getSessionStatusLabel(status: string): string {
+    if (status === 'active') return '进行中';
+    if (status === 'archived') return '已归档';
+    if (status === 'suspended') return '已暂停';
+    return '未知';
   }
 
   /**
-   * 获取发起状态对应的颜色 token 名
+   * 获取发起进度状态对应的颜色 token 名
    * 映射：pending→warning，initiated→success，failed→error
    * @param status 发起状态
    * @return StyleManager 颜色 token 名
@@ -127,24 +107,8 @@ export class CollaborationInitiateViewHelper {
   }
 }
 
-/** 类型选项配置 */
-interface TypeOption {
-  value: CollabType;
-  label: string;
-  icon: string;
-}
-
-/** 类型选项列表 */
-const TYPE_OPTIONS: TypeOption[] = [
-  { value: 'project', label: '项目', icon: '📋' },
-  { value: 'team', label: '团队', icon: '👥' },
-  { value: 'task', label: '任务', icon: '✅' },
-  { value: 'workflow', label: '工作流', icon: '🔄' },
-];
-
 /** 发起表单数据 */
 interface InitiateFormData {
-  type: CollabType;
   name: string;
   description: string;
   participants: string[];     // userId 或 agentId 列表
@@ -153,7 +117,6 @@ interface InitiateFormData {
 
 /** 默认表单数据 */
 const DEFAULT_FORM: InitiateFormData = {
-  type: 'project',
   name: '',
   description: '',
   participants: [],
@@ -163,7 +126,6 @@ const DEFAULT_FORM: InitiateFormData = {
 /** 默认表单工厂（ArkTS 禁 spread 复制，集中此处） */
 function defaultForm(): InitiateFormData {
   const form: InitiateFormData = {
-    type: 'project',
     name: '',
     description: '',
     participants: [],
@@ -179,37 +141,12 @@ interface ProgressState {
   message: string;
 }
 
-/**
- * Mock 最近发起的协作列表
- * TODO M6 阶段：替换为 api.collaboration.initiate.list() 真实 API
- */
-const MOCK_INITIATED: CollaborationInitiate[] = [
-  {
-    id: 'init_1',
-    type: 'project',
-    name: 'Q1 产品规划协作',
-    description: '产品、设计、研发三方协作完成 Q1 规划',
-    participants: ['user_1', 'user_2', 'agent_1'],
-    status: 'initiated',
-    initiatedAt: '2025-03-01T10:00:00Z',
-    createdAt: '2025-03-01T09:50:00Z',
-  },
-  {
-    id: 'init_2',
-    type: 'task',
-    name: '紧急 bug 修复协作',
-    participants: ['user_3'],
-    status: 'failed',
-    createdAt: '2025-03-02T14:00:00Z',
-  },
-];
-
 @Component
 export struct CollaborationInitiatePage {
   // 发起表单数据（嵌套属性变更需整体重新赋值）
   @State formData: InitiateFormData = defaultForm();
-  // 最近发起的协作列表
-  @State initiated: CollaborationInitiate[] = [];
+  // 已发起的协作会话列表（真实 DTO：GET /v1/collaboration/sessions）
+  @State initiated: CollaborationSessionDto[] = [];
   // 发起进度弹窗
   @State progress: ProgressState = {
     visible: false,
@@ -229,36 +166,34 @@ export struct CollaborationInitiatePage {
   }
 
   /**
-   * 加载最近发起的协作列表
-   * TODO M6 阶段：替换为真实 API（api.collaboration.initiate.list）
+   * 加载已发起的协作列表（真实 API：GET /v1/collaboration/sessions，P1-34）
    */
   private async loadInitiated(): Promise<void> {
     try {
-      // TODO M6 阶段补充真实 API
-      this.initiated = MOCK_INITIATED.slice();
+      const res = await this.api.collaboration.listSessions(50, 0);
+      if (res.code === 0 && res.data) {
+        this.initiated = res.data;
+      } else {
+        this.msg.error(res.message || '加载发起列表失败');
+      }
     } catch (e) {
       this.logger.error(TAG, '加载发起列表失败', e as Error);
     }
   }
 
-  /** 选择类型（嵌套属性变更：整体重新赋值） */
-  private selectType(type: CollabType): void {
-    this.formData = { type: type, name: this.formData.name, description: this.formData.description, participants: this.formData.participants, participantInput: this.formData.participantInput };
-  }
-
   /** 输入名称（嵌套属性变更：整体重新赋值） */
   private inputName(v: string): void {
-    this.formData = { type: this.formData.type, name: v, description: this.formData.description, participants: this.formData.participants, participantInput: this.formData.participantInput };
+    this.formData = { name: v, description: this.formData.description, participants: this.formData.participants, participantInput: this.formData.participantInput };
   }
 
   /** 输入描述（嵌套属性变更：整体重新赋值） */
   private inputDescription(v: string): void {
-    this.formData = { type: this.formData.type, name: this.formData.name, description: v, participants: this.formData.participants, participantInput: this.formData.participantInput };
+    this.formData = { name: this.formData.name, description: v, participants: this.formData.participants, participantInput: this.formData.participantInput };
   }
 
   /** 输入参与者 ID（嵌套属性变更：整体重新赋值） */
   private inputParticipant(v: string): void {
-    this.formData = { type: this.formData.type, name: this.formData.name, description: this.formData.description, participants: this.formData.participants, participantInput: v };
+    this.formData = { name: this.formData.name, description: this.formData.description, participants: this.formData.participants, participantInput: v };
   }
 
   /** 添加参与者（回车或点击添加按钮触发，嵌套属性变更：整体重新赋值） */
@@ -271,19 +206,18 @@ export struct CollaborationInitiatePage {
     }
     const next = this.formData.participants.slice();
     next.push(v);
-    this.formData = { type: this.formData.type, name: this.formData.name, description: this.formData.description, participants: next, participantInput: '' };
+    this.formData = { name: this.formData.name, description: this.formData.description, participants: next, participantInput: '' };
   }
 
   /** 移除参与者（嵌套属性变更：整体重新赋值） */
   private removeParticipant(p: string): void {
     const next = this.formData.participants.filter((x: string) => x !== p);
-    this.formData = { type: this.formData.type, name: this.formData.name, description: this.formData.description, participants: next, participantInput: this.formData.participantInput };
+    this.formData = { name: this.formData.name, description: this.formData.description, participants: next, participantInput: this.formData.participantInput };
   }
 
   /**
-   * 提交发起协作
-   * TODO M6 阶段：调用真实 API（api.collaboration.initiate.create）
-   * 当前为本地创建 pending 记录 → 模拟发起成功 → TODO 提示
+   * 提交发起协作（真实 API：POST /v1/collaboration/start，P1-34）
+   * 名称/描述放 context 随 participants 一起提交，结果由服务端落库。
    */
   private async submitInitiate(): Promise<void> {
     if (!this.formData.name.trim()) {
@@ -297,26 +231,30 @@ export struct CollaborationInitiatePage {
       message: '正在发起协作...',
     };
     try {
-      // TODO M6 阶段：const res = await this.api.collaboration.initiate.create(form);
-      // 模拟异步发起
-      const now = new Date().toISOString();
-      const newInit: CollaborationInitiate = {
-        id: `init_${Date.now()}`,
-        type: this.formData.type,
-        name: this.formData.name.trim(),
-        description: this.formData.description.trim(),
+      const context: Record<string, Object> = {
+        'name': this.formData.name.trim(),
+        'description': this.formData.description.trim(),
+      };
+      const body: CollaborationStartBody = {
         participants: this.formData.participants.slice(),
-        status: 'initiated',
-        initiatedAt: now,
-        createdAt: now,
+        context: context,
       };
-      this.initiated = [newInit, ...this.initiated];
-      // 更新进度弹窗为成功
-      this.progress = {
-        visible: true,
-        status: 'initiated',
-        message: '协作已成功发起',
-      };
+      const res = await this.api.collaboration.startCollaboration(body);
+      if (res.code === 0) {
+        // 更新进度弹窗为成功，并刷新真实列表
+        this.progress = {
+          visible: true,
+          status: 'initiated',
+          message: '协作已成功发起',
+        };
+        await this.loadInitiated();
+      } else {
+        this.progress = {
+          visible: true,
+          status: 'failed',
+          message: res.message || '发起协作失败',
+        };
+      }
     } catch (e) {
       this.logger.error(TAG, '发起协作失败', e as Error);
       this.progress = {
@@ -370,9 +308,9 @@ export struct CollaborationInitiatePage {
                 .textAlign(TextAlign.Center)
                 .padding({ top: this.sm.getSpacing('lg'), bottom: this.sm.getSpacing('lg') })
             } else {
-              ForEach(this.initiated, (item: CollaborationInitiate) => {
+              ForEach(this.initiated, (item: CollaborationSessionDto) => {
                 this.buildInitiatedCard(item)
-              }, (item: CollaborationInitiate) => item.id)
+              }, (item: CollaborationSessionDto) => item.id)
             }
           }
           .width('100%')
@@ -403,31 +341,12 @@ export struct CollaborationInitiatePage {
   // 表单构建器
   // ===========================================================================
 
-  /** 发起表单：类型选择 + 名称 + 描述 + 参与者 + 提交按钮 */
+  /** 发起表单：名称 + 描述 + 参与者 + 提交按钮（后端 /collaboration/start 无类型维度） */
   @Builder
   buildForm() {
     Column() {
     GlassCard() {
       Column() {
-        // 类型选择
-        Text('协作类型')
-          .fontSize(this.sm.getFontSize('caption'))
-          .fontColor(this.sm.getColor('text_secondary'))
-          .width('100%')
-        Row() {
-          ForEach(TYPE_OPTIONS, (opt: TypeOption) => {
-            GlassButton({
-              text: `${opt.icon} ${opt.label}`,
-              type: this.formData.type === opt.value ? 'primary' : 'default',
-              btnSize: 'small',
-              onTap: () => { this.selectType(opt.value); }
-            })
-              .margin({ right: this.sm.getSpacing('xs') })
-          }, (opt: TypeOption) => opt.value)
-        }
-        .width('100%')
-        .margin({ top: this.sm.getSpacing('xs'), bottom: this.sm.getSpacing('sm') })
-
         // 名称输入
         Text('协作名称')
           .fontSize(this.sm.getFontSize('caption'))
@@ -529,23 +448,16 @@ export struct CollaborationInitiatePage {
   // 发起历史卡片构建器
   // ===========================================================================
 
-  /** 单个发起历史卡片：类型徽章 + 名称 + 状态徽章 + 参与者数 */
+  /** 单个发起历史卡片：状态徽章 + 名称 + 参与者数 */
   @Builder
-  buildInitiatedCard(item: CollaborationInitiate) {
+  buildInitiatedCard(item: CollaborationSessionDto) {
     Column() {
     GlassCard() {
       Column() {
-        // 顶部行：类型图标 + 类型徽章 + 名称 + 状态徽章
+        // 顶部行：名称 + 状态徽章
         Row() {
-          Text(CollaborationInitiateViewHelper.getTypeIcon(item.type))
+          Text('🔄')
             .fontSize(20)
-          Text(CollaborationInitiateViewHelper.getTypeLabel(item.type))
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_on_primary'))
-            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-            .borderRadius(this.sm.getRadius('sm'))
-            .backgroundColor(this.sm.getColor(CollaborationInitiateViewHelper.getTypeColor(item.type)))
-            .margin({ left: this.sm.getSpacing('xs') })
           Text(item.name)
             .fontSize(this.sm.getFontSize('subtitle'))
             .fontWeight(FontWeight.Bold)
@@ -554,10 +466,10 @@ export struct CollaborationInitiatePage {
             .margin({ left: this.sm.getSpacing('sm') })
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
-          // 状态徽章
-          Text(item.status)
+          // 状态徽章（后端 project status 真实词汇）
+          Text(CollaborationInitiateViewHelper.getSessionStatusLabel(item.status))
             .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor(CollaborationInitiateViewHelper.getStatusColor(item.status)))
+            .fontColor(this.sm.getColor(CollaborationInitiateViewHelper.getSessionStatusColor(item.status)))
             .padding({ left: 6, right: 6, top: 2, bottom: 2 })
             .borderRadius(this.sm.getRadius('sm'))
             .backgroundColor(this.sm.getColor('surface'))
@@ -576,8 +488,8 @@ export struct CollaborationInitiatePage {
             .width('100%')
         }
 
-        // 参与者数量
-        Text(CollaborationInitiateViewHelper.formatParticipantsCount(item.participants.length))
+        // 参与者数量（成员来自真实会话 members）
+        Text(CollaborationInitiateViewHelper.formatParticipantsCount(item.members.length))
           .fontSize(this.sm.getFontSize('caption'))
           .fontColor(this.sm.getColor('text_disabled'))
           .margin({ top: 4 })

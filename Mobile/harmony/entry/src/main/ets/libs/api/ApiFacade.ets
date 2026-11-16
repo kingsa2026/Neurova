@@ -35,6 +35,7 @@ import { AigcApi } from './modules/AigcApi';
 import { SessionSyncApi } from './modules/SessionSyncApi';
 import { AdminApi } from './modules/AdminApi';
 import { HomeApi } from './modules/HomeApi';
+import { WebhookApi } from './modules/WebhookApi';
 
 export class ApiFacade {
   private static instance: ApiFacade;
@@ -69,6 +70,8 @@ export class ApiFacade {
   public sessionSync: SessionSyncApi;
   // 业务模块（M5a 新增 1 个 - AIGC 生成域，对齐 Web generation.ts 契约）
   public aigc: AigcApi;
+  // 业务模块（P1-34 新增 - Webhook 管理域，对齐 /v1/webhooks 契约）
+  public webhook: WebhookApi;
 
   private constructor() {
     this.client = HttpClient.getInstance();
@@ -99,6 +102,8 @@ export class ApiFacade {
     this.sessionSync = new SessionSyncApi(this.client);
     // M5a 新增模块（AIGC 生成域）
     this.aigc = new AigcApi(this.client);
+    // P1-34 新增模块（Webhook 管理域）
+    this.webhook = new WebhookApi(this.client);
   }
 
   static getInstance(): ApiFacade {
