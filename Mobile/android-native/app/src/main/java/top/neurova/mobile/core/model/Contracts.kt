@@ -43,7 +43,7 @@ data class CurrentUser(
     val tenantName: String? = null,
 )
 
-/** Agent 条目（GET /agents，属主过滤） */
+/** Agent 条目（GET /agents 裸数组的 AgentInfo 投影，agent.py 事实源；测试咬合实测载荷） */
 @Serializable
 data class AgentItem(
     @SerialName("agent_id") val agentId: String,
@@ -51,6 +51,9 @@ data class AgentItem(
     val description: String? = null,
     val status: String? = null,
     val model: String? = null,
+    val provider: String? = null,
+    @SerialName("memory_enabled") val memoryEnabled: Boolean = false,
+    @SerialName("tools_count") val toolsCount: Int = 0,
 )
 
 /**
