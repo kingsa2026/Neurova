@@ -26,13 +26,17 @@ EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
 def parseAdmissions(diffText: str) -> list:
-    """unified diff（-U0）文本 → 新增收录条目（剥注释与空行）。"""
+    """unified diff（-U0）文本 → 新增收录条目（剥注释与空行，保序去重）。
+
+    去重的理由：同一文件首次收录会**同时**落进索引与某个分片，两处各出现一次；
+    收录门判的是"哪些文件要单跑"——集合语义，逐条重复只会把同一档白跑几遍。
+    """
     admissions = []
     for line in diffText.splitlines():
         if not line.startswith("+") or line.startswith("+++"):
             continue
         entry = line[1:].strip()
-        if entry and not entry.startswith("#"):
+        if entry and not entry.startswith("#") and entry not in admissions:
             admissions.append(entry)
     return admissions
 

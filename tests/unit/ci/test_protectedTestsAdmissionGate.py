@@ -92,6 +92,19 @@ class TestAdmissionParsing:
             "tests/unit/ci/test_another_green.py",
         ]
 
+    def testSameEntryInIndexAndShardIsDeduped(self):
+        """首次收录同时落进索引与某个分片——收录门判的是"要单跑哪些文件"，
+        集合语义：同一档重复登记只跑一遍（否则每笔收录都白跑一遍）。"""
+        diff = (
+            "diff --git a/scripts/ci/protected_tests.txt b/scripts/ci/protected_tests.txt\n"
+            "+++ b/scripts/ci/protected_tests.txt\n"
+            "+tests/unit/ci/test_new_green.py\n"
+            "diff --git a/scripts/ci/protected_tests.1.txt b/scripts/ci/protected_tests.1.txt\n"
+            "+++ b/scripts/ci/protected_tests.1.txt\n"
+            "+tests/unit/ci/test_new_green.py\n"
+        )
+        assert admission.parseAdmissions(diff) == ["tests/unit/ci/test_new_green.py"]
+
     def testUnchangedIndexMeansNoAdmissions(self):
         """真仓当前工作树：本次没动任何清单 → 待收录为空 → 门放行（不误伤）。"""
         diff = subprocess.run(
