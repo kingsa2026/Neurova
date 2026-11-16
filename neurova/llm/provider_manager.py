@@ -2092,7 +2092,7 @@ class LLMProviderManager(Module):
 _provider_manager: Optional[LLMProviderManager] = None
 # scope → 实例 的隔离注册表(admin 走 _provider_manager,保持存量引用兼容)
 _provider_managers: Dict[str, LLMProviderManager] = {}
-_provider_manager_lock = threading.Lock()
+_provider_manager_lock = threading.RLock()
 
 _SCOPE_PART_RE = re.compile(r"[^A-Za-z0-9_-]")
 

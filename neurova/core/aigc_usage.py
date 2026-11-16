@@ -23,6 +23,7 @@ from pathlib import Path
 
 from typing import Any, Dict, List, Optional
 from neurova.core.data_root import get_data_root
+from neurova.core.db_migration import migrate as apply_migrations, register_migration
 
 def defaultDbPath() -> Path:
     """默认库落点：数据根下的绝对路径（原值 `Path("data")` 随 CWD 漂移）。"""
@@ -49,6 +50,15 @@ _CREATE_INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_aigc_usage_user_date ON aigc_gen_usage (user_id, usage_date)",
 )
 
+# schema 版本域：建表/索引经注册表演进（审计 3.2-9），不再裸 IF NOT EXISTS
+AIGC_USAGE_DOMAIN = "aigc_usage"
+
+register_migration(
+    1,
+    _CREATE_TABLE + ";\n" + ";\n".join(_CREATE_INDEXES) + ";",
+    domain=AIGC_USAGE_DOMAIN,
+)
+
 
 class AigcUsageHistory:
     """AIGC 生成用量账（RLock 保护，风格对齐 UsageHistory）。"""
@@ -73,9 +83,9 @@ class AigcUsageHistory:
     def _ensure_conn(self) -> sqlite3.Connection:
         if self._conn is None:
             self._conn = self._connect()
-            # 多语句 executescript 必须以分号分隔（缺分隔符会静默建表失败）
-            self._conn.executescript(
-                _CREATE_TABLE + ";\n" + ";\n".join(_CREATE_INDEXES) + ";")
+            # 建表/索引经版本化迁移链（审计 3.2-9）：新库落 v1，旧库按
+            # user_version 跳过；不再手拼 executescript
+            apply_migrations(self._conn, AIGC_USAGE_DOMAIN)
         return self._conn
 
     def record(self, *, kind: str, user_id: str = "", provider: str = "",
@@ -136,7 +146,7 @@ class AigcUsageHistory:
 
 
 _instance: Optional[AigcUsageHistory] = None
-_instance_lock = threading.Lock()
+_instance_lock = threading.RLock()
 
 
 def get_aigc_usage() -> AigcUsageHistory:

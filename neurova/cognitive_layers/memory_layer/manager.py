@@ -104,7 +104,7 @@ _default_manager: Optional["MemoryManager"] = None
 # 根因修复 (2026-09-02): 按 (agent_id, neuser_id, user_id, db_path) 作用域注册表，
 # 替代进程级单例——否则所有 agent/用户的记忆统计永远命中首个调用者的作用域。
 _managers: Dict[Tuple[str, str, str, str], "MemoryManager"] = {}
-_manager_lock = threading.Lock()
+_manager_lock = threading.RLock()
 
 
 # TemperatureEngine._determine_stage 返回的字符串 → LifecycleStage 枚举映射

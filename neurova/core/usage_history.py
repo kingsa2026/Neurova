@@ -24,6 +24,10 @@ from pathlib import Path
 
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from neurova.core.data_root import get_data_root
+from neurova.core.db_migration import migrate as apply_migrations, register_migration
+from neurova.core.logger import get_logger
+
+logger = get_logger(__name__)
 
 def defaultDbPath() -> Path:
     """默认库落点：数据根下的绝对路径（原值 `Path("data")` 随 CWD 漂移）。"""
@@ -54,6 +58,37 @@ _CREATE_INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_llm_usage_user_date ON llm_usage (user_id, usage_date)",
     "CREATE INDEX IF NOT EXISTS idx_llm_usage_user_model ON llm_usage (user_id, model)",
 )
+
+# schema 版本域：建表/索引/补列全部经注册表演进（审计 3.2-9），
+# 不再依赖裸 IF NOT EXISTS + 启动期 ALTER
+USAGE_HISTORY_DOMAIN = "usage_history"
+
+_SCHEMA_V1 = _CREATE_TABLE + ";\n" + ";\n".join(_CREATE_INDEXES) + ";"
+register_migration(1, _SCHEMA_V1, domain=USAGE_HISTORY_DOMAIN)
+
+
+def _migrateToV2(conn: sqlite3.Connection) -> None:
+    """v2：存量库补列（first_token_ms/duration_ms/cache_*/agent_id）。
+
+    建表只覆盖新库；旧库无这些列时 ALTER 补齐、旧行默认 0（与原启动期
+    幂等迁移同语义，搬进版本链后按 user_version 跳过）。
+    """
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage)")}
+    for column, ddl in (
+        ("first_token_ms", "INTEGER NOT NULL DEFAULT 0"),
+        ("duration_ms", "INTEGER NOT NULL DEFAULT 0"),
+        # B1-5/B3-2：Prompt Cache 命中/写入 + 按 agent 记账
+        ("cache_read_tokens", "INTEGER NOT NULL DEFAULT 0"),
+        ("cache_write_tokens", "INTEGER NOT NULL DEFAULT 0"),
+        ("agent_id", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if column not in existing:
+            conn.execute(
+                f"ALTER TABLE llm_usage ADD COLUMN {column} {ddl}"
+            )
+
+
+register_migration(2, _migrateToV2, domain=USAGE_HISTORY_DOMAIN)
 
 
 class UsageHistoryStore:
@@ -91,27 +126,24 @@ class UsageHistoryStore:
         try:
             Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
             with self._lock:
-                with self._connect() as conn:
-                    conn.execute(_CREATE_TABLE)
-                    for index_sql in _CREATE_INDEXES:
-                        conn.execute(index_sql)
-                    # 存量库幂等迁移：
-                    # 旧库无 first_token_ms/duration_ms 列时补列，旧数据默认 0
-                    existing = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage)")}
-                    for column, ddl in (
-                        ("first_token_ms", "INTEGER NOT NULL DEFAULT 0"),
-                        ("duration_ms", "INTEGER NOT NULL DEFAULT 0"),
-                        # B1-5/B3-2：Prompt Cache 命中/写入 + 按 agent 记账
-                        ("cache_read_tokens", "INTEGER NOT NULL DEFAULT 0"),
-                        ("cache_write_tokens", "INTEGER NOT NULL DEFAULT 0"),
-                        ("agent_id", "TEXT NOT NULL DEFAULT ''"),
-                    ):
-                        if column not in existing:
-                            conn.execute(
-                                f"ALTER TABLE llm_usage ADD COLUMN {column} {ddl}"
-                            )
-        except Exception:
-            pass  # 落盘不可用 → 内存记账主流程不受影响
+                conn = self._connect()
+                try:
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    conn.execute("PRAGMA busy_timeout=4000")
+                    # 建表/索引/补列走版本化迁移链（审计 3.2-9）；失败上抛进
+                    # 下面的诚实暴露分支，不再 except Exception: pass（审计 3.2-5）
+                    apply_migrations(conn, USAGE_HISTORY_DOMAIN)
+                finally:
+                    conn.close()
+        except Exception as e:
+            # 诚实暴露（审计 3.2-5）：落盘不可用时内存记账主流程仍 fail-soft，
+            # 但必须留下启动期可读的失败原因——原 except Exception: pass 让
+            # "写入持续失败且启动无读数"零线索。
+            logger.error(
+                "usage_history 建库失败（db=%s）：用量历史将只留内存账、重启即丢——%s",
+                self._db_path,
+                e,
+            )
 
     # ── 写入 ────────────────────────────────────────────────────────────────
 
@@ -531,7 +563,7 @@ def compute_streaks(active_dates: Iterable[str], today: date) -> Tuple[int, int]
 # ── 单例（对齐 usage_accounting 模式） ─────────────────────────────────────
 
 _usage_history: Optional[UsageHistoryStore] = None
-_usage_lock = threading.Lock()
+_usage_lock = threading.RLock()
 
 
 def get_usage_history() -> UsageHistoryStore:

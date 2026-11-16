@@ -512,8 +512,8 @@ class CapabilityCache:
 # 全局单例
 _detector_instance: Optional[CapabilityDetector] = None
 _cache_instance: Optional[CapabilityCache] = None
-_detector_lock = threading.Lock()
-_cache_lock = threading.Lock()
+_detector_lock = threading.RLock()
+_cache_lock = threading.RLock()
 
 
 def get_capability_detector(timeout: float = 30.0) -> CapabilityDetector:

@@ -60,7 +60,7 @@ class EnvDeltaTracker:
 
 
 _TRACKER: Optional[EnvDeltaTracker] = None
-_TRACKER_LOCK = threading.Lock()
+_TRACKER_LOCK = threading.RLock()
 
 
 def get_env_delta_tracker() -> EnvDeltaTracker:

@@ -22,8 +22,28 @@ from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.core.data_root import callerPath
+from neurova.core.db_migration import migrate as apply_migrations, register_migration
 
 logger = get_logger(__name__)
+
+# schema 版本域：建表/索引经注册表演进（审计 3.2-9），不再裸 IF NOT EXISTS
+ANNOTATION_DOMAIN = "annotations"
+
+_ANNOTATION_SCHEMA = """
+CREATE TABLE IF NOT EXISTS annotations (
+    id TEXT PRIMARY KEY,
+    question TEXT NOT NULL,
+    question_norm TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    source TEXT DEFAULT 'manual',
+    enabled INTEGER DEFAULT 1,
+    hit_count INTEGER DEFAULT 0,
+    created_at REAL,
+    updated_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_annotations_norm ON annotations(question_norm);
+"""
+register_migration(1, _ANNOTATION_SCHEMA, domain=ANNOTATION_DOMAIN)
 
 
 def normalize_query(text: str) -> str:
@@ -48,22 +68,9 @@ class AnnotationStore:
 
     def _init_db(self) -> None:
         with self._lock:
-            self._conn.execute("""
-                CREATE TABLE IF NOT EXISTS annotations (
-                    id TEXT PRIMARY KEY,
-                    question TEXT NOT NULL,
-                    question_norm TEXT NOT NULL,
-                    answer TEXT NOT NULL,
-                    source TEXT DEFAULT 'manual',
-                    enabled INTEGER DEFAULT 1,
-                    hit_count INTEGER DEFAULT 0,
-                    created_at REAL,
-                    updated_at REAL
-                )
-            """)
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_annotations_norm ON annotations(question_norm)"
-            )
+            # 建表/索引经版本化迁移链（审计 3.2-9）：新库落 v1，旧库按
+            # user_version 跳过；不再手写裸 IF NOT EXISTS
+            apply_migrations(self._conn, ANNOTATION_DOMAIN)
             self._conn.commit()
 
     def add(self, question: str, answer: str, source: str = "manual", enabled: bool = True) -> str:
@@ -173,7 +180,7 @@ __all__ = ["AnnotationStore", "match_annotation", "normalize_query"]
 
 # 单例（进程级；chat 反馈链路与 annotation API 共用）
 _annotation_store: Optional[AnnotationStore] = None
-_annotation_store_lock = threading.Lock()
+_annotation_store_lock = threading.RLock()
 
 
 def get_annotation_store() -> AnnotationStore:
