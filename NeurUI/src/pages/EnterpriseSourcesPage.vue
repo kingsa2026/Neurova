@@ -80,6 +80,12 @@
                 data-testid="ent-nl2sql-btn"
                 @click="openNl2SqlDrawer(record.source_id)"
               >{{ t('ontology.nl2sqlTitle') }}</GlassButton>
+              <!-- P1-26：webhook 抽屉此前不可达（openWebhookDrawer 零调用）——操作列补入口 -->
+              <GlassButton
+                variant="ghost" size="sm"
+                data-testid="ent-webhook-btn"
+                @click="openWebhookDrawer"
+              >{{ t('ontology.entWebhookBtn') }}</GlassButton>
               <GlassButton
                 v-if="record.descriptor?.chatSource === 'archive'"
                 variant="ghost" size="sm"
