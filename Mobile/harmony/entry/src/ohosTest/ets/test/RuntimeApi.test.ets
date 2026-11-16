@@ -128,10 +128,10 @@ export default function runtimeApiTest() {
       expect(url.includes('limit=100')).assertTrue();
     });
 
-    it('removeTrace_throws_without_request', 0, () => {
+    it('removeTrace_throws_without_request', 0, async () => {
       let threw = false;
       try {
-        api.removeTrace('tr1');
+        await api.removeTrace('tr1');
       } catch (e) {
         threw = true;
       }
@@ -141,10 +141,10 @@ export default function runtimeApiTest() {
 
     // ========== 无真实数据源的端点：显式抛错点名，不发请求 ==========
 
-    it('listContextMessages_throws_without_request', 0, () => {
+    it('listContextMessages_throws_without_request', 0, async () => {
       let threw = false;
       try {
-        api.listContextMessages('s1');
+        await api.listContextMessages('s1');
       } catch (e) {
         threw = true;
       }
@@ -152,10 +152,10 @@ export default function runtimeApiTest() {
       expect(backend.requests.length).assertEqual(0);
     });
 
-    it('listComputerTasks_throws_without_request', 0, () => {
+    it('listComputerTasks_throws_without_request', 0, async () => {
       let threw = false;
       try {
-        api.listComputerTasks('agent-1');
+        await api.listComputerTasks('agent-1');
       } catch (e) {
         threw = true;
       }
@@ -163,10 +163,10 @@ export default function runtimeApiTest() {
       expect(backend.requests.length).assertEqual(0);
     });
 
-    it('createComputerTask_throws_without_request', 0, () => {
+    it('createComputerTask_throws_without_request', 0, async () => {
       let threw = false;
       try {
-        api.createComputerTask({ agentId: 'agent-1', action: 'click' });
+        await api.createComputerTask({ agentId: 'agent-1', action: 'click' });
       } catch (e) {
         threw = true;
       }
@@ -174,10 +174,10 @@ export default function runtimeApiTest() {
       expect(backend.requests.length).assertEqual(0);
     });
 
-    it('listTrajectory_throws_without_request', 0, () => {
+    it('listTrajectory_throws_without_request', 0, async () => {
       let threw = false;
       try {
-        api.listTrajectory('agent-1');
+        await api.listTrajectory('agent-1');
       } catch (e) {
         threw = true;
       }
@@ -235,13 +235,14 @@ export default function runtimeApiTest() {
       expect(body['rule_type']).assertEqual('ip');
     });
 
-    it('updateFirewallRule_enabled_merges_existing_rule', 0, () => {
+    it('updateFirewallRule_enabled_merges_existing_rule', 0, async () => {
       const existingRule: Record<string, Object> = { 'rule_id': 'r1', 'name': '1.2.3.4', 'rule_type': 'ip', 'action': 'block', 'value': '1.2.3.4', 'enabled': true, 'created_at': 0, 'updated_at': 0 };
       const existingRules: Record<string, Object>[] = [existingRule];
       backend.getResponse = apiResponse(existingRules);
       const ruleData: Record<string, Object> = { 'rule_id': 'r1', 'enabled': false };
       backend.response = apiResponse(ruleData);
-      api.updateFirewallRule('r1', { enabled: false });
+      // 先 GET 取原规则，再 PUT 合并更新——必须等整链完成再断言
+      await api.updateFirewallRule('r1', { enabled: false });
       expect(backend.requests[0].method).assertEqual('GET');
       expect(backend.requests[1].method).assertEqual('PUT');
       expect(backend.requests[1].url).assertEqual('https://api.example.com/firewall/rules/r1');

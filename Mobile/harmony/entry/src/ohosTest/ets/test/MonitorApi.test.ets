@@ -100,7 +100,7 @@ export default function monitorApiTest() {
       api.listNeurons('service', { page: 1, size: 200 });
       const url = backend.requests[0].url;
       expect(backend.requests[0].method).assertEqual('GET');
-      expect(url.includes('/neuron/entities')).assertTrue();
+      expect(url.includes('/api/neuron/entities')).assertTrue();
       expect(url.includes('entity_type=service')).assertTrue();
       expect(url.includes('limit=200')).assertTrue();
     });
@@ -109,14 +109,17 @@ export default function monitorApiTest() {
       const metadata: Record<string, Object> = {};
       api.createNeuronEntity('网关', 'service', metadata);
       expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/neuron/entities');
-      expect(backend.requests[0].body).assertEqual({ 'name': '网关', 'entity_type': 'service', 'metadata': {} });
+      // neuron 自述前缀挂 /api 下（无 /v1）——真实挂载点为 /api/neuron/*
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/api/neuron/entities');
+      const body = backend.requests[0].body as Record<string, Object>;
+      expect(body['name']).assertEqual('网关');
+      expect(body['entity_type']).assertEqual('service');
     });
 
     it('getNeuronStats_gets_neuron_stats', 0, () => {
       api.getNeuronStats();
       expect(backend.requests[0].method).assertEqual('GET');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/neuron/stats');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/api/neuron/stats');
     });
 
     // ========== 通知 / 文件（真实端点）==========
@@ -141,18 +144,34 @@ export default function monitorApiTest() {
       expect(backend.requests[0].url).assertEqual('https://api.example.com/files');
     });
 
-    // ========== 退役端点：必须 throw 且不发任何请求 ==========
+    // ========== 退役端点 vs 已接线端点（P1-35）==========
 
-    it('retiredStatsMetricsLogsFire_fire_no_request', 0, () => {
-      api.listStats('day');
-      api.getStat('k');
-      api.listMetrics(undefined, undefined);
-      api.listLogs(undefined, undefined, undefined);
-      api.clearLogs();
-      api.fireNeuron('n1');
-      api.getNeuron('n1');
-      api.getNotification('n1');
-      expect(backend.requests.length).assertEqual(0);
+    it('wired_stats_logs_clearlogs_fire_real_requests', 0, async () => {
+      // 已接线：stats/logs/clearLogs 走真实端点，各发一条请求
+      // （mock 响应非对应形状时模块会抛错，但不影响「发了请求」的断言）
+      try { await api.listStats('day'); } catch (e) { }
+      try { await api.listLogs(undefined, undefined, undefined); } catch (e) { }
+      try { await api.clearLogs(); } catch (e) { }
+      expect(backend.requests.length).assertEqual(3);
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/stats');
+      expect(backend.requests[1].url).assertEqual('https://api.example.com/logs');
+      expect(backend.requests[2].method).assertEqual('DELETE');
+    });
+
+    it('retired_endpoints_throw_without_request', 0, async () => {
+      const before: number = backend.requests.length;
+      let threw = 0;
+      try { await api.getStat('k'); } catch (e) { threw += 1; }
+      try { await api.listMetrics(undefined, undefined); } catch (e) { threw += 1; }
+      try { await api.pushMetric({ name: 'x', value: 1, unit: '', timestamp: '' }); } catch (e) { threw += 1; }
+      try { await api.getLog('l1'); } catch (e) { threw += 1; }
+      try { await api.removeLog('l1'); } catch (e) { threw += 1; }
+      try { await api.getNeuron('n1'); } catch (e) { threw += 1; }
+      try { await api.updateNeuron('n1', {}); } catch (e) { threw += 1; }
+      try { await api.fireNeuron('n1'); } catch (e) { threw += 1; }
+      try { await api.getNotification('n1'); } catch (e) { threw += 1; }
+      expect(threw).assertEqual(9);
+      expect(backend.requests.length).assertEqual(before);
     });
   });
 }
