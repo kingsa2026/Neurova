@@ -30,6 +30,10 @@ const TOP_MODULES: ModuleItem[] = [
   { key: '/models', labelKey: 'models' },
   { key: '/tool-layers', labelKey: 'toolLayers' },
   { key: '/sandbox', labelKey: 'sandbox' },
+  // 移动端配对（2026-11-16 用户裁定）：账号级能力按登录用户隔离，从 Agent 渠道页
+  // (/agent/:id/channel) 迁出——原入口要选 Agent 且受 channel 模块权限门控，
+  // 普通账号看不见；后端配对七口本就吃 _get_current_user_id。
+  { key: '/tools/mobile-pairing', labelKey: 'mobilePairing' },
   { key: '/aigc/text', labelKey: 'aigcText' },
   { key: '/aigc/image', labelKey: 'aigcImage' },
   { key: '/aigc/audio', labelKey: 'aigcAudio' },

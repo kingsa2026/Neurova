@@ -99,6 +99,7 @@ export default {
     skills: 'Навыки',
     models: 'Модели',
     tools: 'Инструменты',
+    mobilePairing: 'Мобильная привязка',
     channels: 'Каналы',
     system: 'Система',
     settings: 'Настройки',

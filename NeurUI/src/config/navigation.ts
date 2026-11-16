@@ -22,7 +22,7 @@ import {
   AlertOutlined, HistoryOutlined, ControlOutlined,
   ShopOutlined, DashboardOutlined,
   PictureOutlined, VideoCameraOutlined, PlaySquareOutlined,
-  RobotOutlined,
+  RobotOutlined, MobileOutlined,
 } from '@ant-design/icons-vue'
 
 export interface TopNavItem {
@@ -50,6 +50,9 @@ export const TOP_NAV_CATEGORIES: TopNavCategory[] = [
       { to: '/models', labelKey: 'nav.models', icon: CloudServerOutlined },
       { to: '/tool-layers', labelKey: 'nav.toolLayers', icon: ToolOutlined },
       { to: '/sandbox', labelKey: 'nav.sandbox', icon: CodeOutlined },
+      // 移动端配对（2026-11-16 用户裁定）：账号级能力按登录用户隔离，
+      // 从 Agent 渠道页迁出挂顶部「模型与工具」；后端配对七口吃 _get_current_user_id。
+      { to: '/tools/mobile-pairing', labelKey: 'nav.mobilePairing', icon: MobileOutlined },
       {
         labelKey: 'nav.aigcTools',
         icon: RobotOutlined,

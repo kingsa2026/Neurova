@@ -99,6 +99,7 @@ export default {
     skills: 'Competenze',
     models: 'Modelli',
     tools: 'Strumenti',
+    mobilePairing: 'Abbinamento mobile',
     channels: 'Canali',
     system: 'Sistema',
     settings: 'Impostazioni',
