@@ -35,10 +35,11 @@ class PairingStore(
         private set
     private var pairingId: String = ""
 
-    /** 启动恢复：本地有长期设备身份即视为已配对（ticket 启动为空，连接前自动续签） */
+    /** 启动恢复：本地有长期设备身份即视为已配对；wsUrl 一并恢复（ticket 启动为空，连接前自动续签） */
     fun restore(): Boolean {
         val identity = credentials.pairedIdentity() ?: return false
         pairingId = identity.first
+        if (wsUrl.isBlank()) wsUrl = credentials.pairedWsUrl()
         paired = true
         return true
     }
@@ -124,6 +125,10 @@ class PairingStore(
         paired = true
         if (pairingId.isNotEmpty() && deviceSecret.isNotEmpty()) {
             credentials.savePairedIdentity(pairingId, deviceSecret)
+        }
+        // wsUrl 一并落安全存储：refresh 只续 ticket 不回地址，重启后没有它就连不回通道
+        if (wsUrl.isNotEmpty()) {
+            credentials.savePairedWsUrl(wsUrl)
         }
     }
 

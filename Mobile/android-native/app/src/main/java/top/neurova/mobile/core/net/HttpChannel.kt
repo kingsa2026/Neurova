@@ -47,6 +47,9 @@ class HttpChannel(
     suspend fun postJson(path: String, bodyJson: JsonObject = JsonObject(emptyMap())): JsonElement =
         execute(buildRequest(path, emptyMap(), method = "POST", body = bodyJson))
 
+    suspend fun putJson(path: String, bodyJson: JsonObject = JsonObject(emptyMap())): JsonElement =
+        execute(buildRequest(path, emptyMap(), method = "PUT", body = bodyJson))
+
     suspend fun deleteJson(path: String): JsonElement =
         execute(buildRequest(path, emptyMap(), method = "DELETE", body = null))
 
