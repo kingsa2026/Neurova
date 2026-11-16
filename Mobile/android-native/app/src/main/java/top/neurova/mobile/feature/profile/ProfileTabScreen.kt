@@ -2,6 +2,7 @@ package top.neurova.mobile.feature.profile
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,7 +41,12 @@ import top.neurova.mobile.ui.theme.LocalNeurovaColors
  * - 管理员域页面（用户/组/市场/设置）随 P8 批次接线，本批先亮身份与入口占位。
  */
 @Composable
-fun ProfileTabScreen() {
+fun ProfileTabScreen(
+    onOpenServers: () -> Unit = {},
+    onOpenModels: () -> Unit = {},
+    onOpenAdminUsers: () -> Unit = {},
+    onOpenAdminGroups: () -> Unit = {},
+) {
     val runtime = LocalAppRuntime.current
     val palette = LocalNeurovaColors.current
     var deviceCount by remember { mutableStateOf(-1) }
@@ -120,16 +126,20 @@ fun ProfileTabScreen() {
         InfoRow(
             title = server?.name?.ifBlank { "默认档案" } ?: "默认档案",
             subtitle = server?.baseUrl ?: "http://10.0.2.2:9527",
+            onClick = onOpenServers,
         )
+        InfoRow(title = "模型管理", subtitle = "服务商 · 模型 · 连通性", onClick = onOpenModels)
         SectionTitle("设备")
         InfoRow(
             title = "已配对设备",
             subtitle = if (deviceCount >= 0) "$deviceCount 台在册 · 扫码配对免重连" else "读取中…",
+            onClick = onOpenServers,
         )
 
         if (runtime.auth.isAdmin) {
             SectionTitle("管理员域")
-            InfoRow(title = "用户 / 用户组 / 系统设置", subtitle = "管理员页面随 P8 批次接线")
+            InfoRow(title = "用户管理", subtitle = "账号列表 · 停用/删除", onClick = onOpenAdminUsers)
+            InfoRow(title = "用户组", subtitle = "分组与成员", onClick = onOpenAdminGroups)
         }
         Spacer(modifier = Modifier.size(24.dp))
     }
@@ -147,7 +157,7 @@ private fun SectionTitle(text: String) {
 }
 
 @Composable
-private fun InfoRow(title: String, subtitle: String) {
+private fun InfoRow(title: String, subtitle: String, onClick: (() -> Unit)? = null) {
     val palette = LocalNeurovaColors.current
     Row(
         modifier = Modifier
@@ -156,6 +166,7 @@ private fun InfoRow(title: String, subtitle: String) {
             .clip(RoundedCornerShape(14.dp))
             .background(palette.glass)
             .border(1.dp, palette.glassBorder, RoundedCornerShape(14.dp))
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,

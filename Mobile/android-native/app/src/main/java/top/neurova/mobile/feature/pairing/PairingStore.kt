@@ -4,8 +4,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import java.util.UUID
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import top.neurova.mobile.core.model.PairedDevice
 import top.neurova.mobile.core.net.HttpChannel
 import top.neurova.mobile.core.protocol.ConfirmedWire
 import top.neurova.mobile.core.protocol.PairingInput
@@ -137,6 +139,18 @@ class PairingStore(
         val data = http.unwrapData(http.getJson("/mobile/pairing/list"))
         val devices = (data as? JsonObject)?.get("devices") as? kotlinx.serialization.json.JsonArray
         return devices?.size ?: 0
+    }
+
+    /** 已配对设备列表（F10 服务器与配对页） */
+    suspend fun listPairedDevices(): List<PairedDevice> {
+        val data = http.unwrapData(http.getJson("/mobile/pairing/list"))
+        val devices = (data as? JsonObject)?.get("devices") ?: return emptyList()
+        return json.decodeFromJsonElement(ListSerializer(PairedDevice.serializer()), devices)
+    }
+
+    /** 解除配对（DELETE /mobile/pairing/{id}；撤销后该设备 WS 重连即 4001→device_deregistered） */
+    suspend fun revokePairing(pairingId: String) {
+        http.deleteJson("/mobile/pairing/$pairingId")
     }
 
     fun clear() {

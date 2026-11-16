@@ -92,6 +92,16 @@ data class ChatMessage(
     val status: String = "done",
 )
 
+/** 已配对设备（GET /mobile/pairing/list 的 devices 元素，属主过滤） */
+@Serializable
+data class PairedDevice(
+    @SerialName("pairing_id") val pairingId: String,
+    @SerialName("device_name") val deviceName: String = "",
+    @SerialName("device_type") val deviceType: String = "",
+    @SerialName("is_online") val isOnline: Boolean = false,
+    val state: String? = null,
+)
+
 /** 配对三端点响应（POST /mobile/pairing/resolve | confirm | refresh，§5.3/§8.2） */
 @Serializable
 data class PairingResolved(
