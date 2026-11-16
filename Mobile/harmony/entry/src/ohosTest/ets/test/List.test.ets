@@ -6,6 +6,8 @@ import errorManagerTest from './ErrorManager.test';
 import eventBusTest from './EventBus.test';
 import styleManagerTest from './StyleManager.test';
 import animationManagerTest from './AnimationManager.test';
+// R2 移交·产品拍板：AgentsApi 映射契约（createdAt 来自 created_at，group_id 不再冒充时间戳）
+import agentsApiTest from './AgentsApi.test';
 // S4 新增套件：信封归一 / 路由守卫 / WebhookApi / AuthStore 持久化
 import envelopeTest from './Envelope.test';
 import apiRouteGuardTest from './ApiRouteGuard.test';
@@ -116,6 +118,7 @@ export default function testsuite() {
   healthApiTest();
   settingsApiTest();
   agentChannelsApiTest();
+  agentsApiTest();
   // M3 P1 页面测试套件
   registerPageTest();
   agentFormPageTest();

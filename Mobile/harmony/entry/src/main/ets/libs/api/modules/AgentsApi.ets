@@ -25,7 +25,10 @@ export interface AgentInfoDto {
   memory_enabled: boolean;
   tools_count: number;
   owner_user_id: string;
+  /** 后端可空（实测回 null）——分组标识，归 AdminGroups 域，不再冒充 createdAt */
   group_id: string;
+  /** 后端可空（agent.py:221）——Agent 创建时间，createdAt 的唯一事实源 */
+  created_at: string;
 }
 
 export class AgentsApi {
@@ -49,16 +52,16 @@ export class AgentsApi {
     return 'inactive';
   }
 
-  /** AgentInfo → Agent 映射（单源） */
+  /** AgentInfo → Agent 映射（单源）。后端可空字段（group_id/description/created_at 实测返回 null）在此兜底 */
   private static toAgent(dto: AgentInfoDto): Agent {
     const agent: Agent = {
       id: dto.agent_id,
       name: dto.name,
-      description: dto.description,
+      description: dto.description ?? '',
       model: dto.model,
       provider: dto.provider,
       status: AgentsApi.normStatus(dto.status),
-      createdAt: dto.group_id.length > 0 ? dto.group_id : '',
+      createdAt: dto.created_at ?? '',
       updatedAt: '',
     };
     return agent;
