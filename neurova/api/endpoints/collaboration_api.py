@@ -300,6 +300,33 @@ async def delete_collaboration_template(
         if not success:
             raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
 
+        # U1 产品拍板（2026-11-17）：admin 删非本人模板（含无主存量行）写审计事件，
+        # 管理面敏感操作可追溯；owner 删自己的模板是普通操作，不写。
+        requester_id = str(current_user.get("user_id") or "")
+        template_owner = str(project.owner_id or "")
+        if str(current_user.get("role") or "") == "admin" and template_owner != requester_id:
+            try:
+                from neurova.security.audit_logger import (
+                    AuditEventType,
+                    AuditLogEntry,
+                    AuditSeverity,
+                    get_audit_logger,
+                )
+
+                get_audit_logger().log(
+                    AuditLogEntry(
+                        event_type=AuditEventType.SECURITY_EVENT,
+                        severity=AuditSeverity.HIGH,
+                        user_id=requester_id,
+                        action="admin_delete_collaboration_template",
+                        details={"template_owner": template_owner, "template_name": project.name},
+                        resource_type="collaboration_template",
+                        resource_id=template_id,
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - 审计失败不阻断删除
+                logger.warning("协作模板删除审计事件写入失败: %s", exc)
+
         return {
             "code": 0,
             "message": f"Template '{template_id}' deleted",

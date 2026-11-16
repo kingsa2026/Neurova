@@ -358,3 +358,84 @@ class TestCollaborationCreateTemplateBindsOwner:
         body = mod.CollaborationTemplateCreate(name="n", description="d", workflow={})
         asyncio.run(mod.create_collaboration_template(_Req(), body, current_user=dict(_U1)))
         assert captured.get("owner_id") == "u1", "建模板必须把登录用户绑定为项目 owner"
+
+
+class TestAdminDeleteForeignTemplate:
+    """U1 产品拍板（2026-11-17）：admin 删他人模板 → 200 + 审计事件（管理面敏感
+    操作可追溯）；无主存量模板（owner_id=""）按 admin 可见可删（与 media 无主行
+    同口径）；owner 删自己的模板是普通操作，不写审计；普通非属主 403 不变（S1 门）。"""
+
+    def _patch_manager(self, monkeypatch, project):
+        from neurova.api.endpoints import collaboration_api as mod
+
+        calls = []
+
+        class _Mgr:
+            def get_project(self, template_id):
+                return project
+
+            def delete_project(self, project_id, user_id):
+                calls.append((project_id, user_id))
+                return True
+
+        monkeypatch.setattr(mod, "get_collaboration_manager", lambda: _Mgr())
+        return calls
+
+    def _patch_audit(self, monkeypatch):
+        """端点内懒导入 `from neurova.security.audit_logger import get_audit_logger`
+        取的是调用时模块属性——monkeypatch 模块属性即可拦截。"""
+        import neurova.security.audit_logger as audit_mod
+
+        events = []
+
+        class _StubLogger:
+            def log(self, entry):
+                events.append(entry)
+                return True
+
+        monkeypatch.setattr(audit_mod, "get_audit_logger", lambda *a, **k: _StubLogger())
+        return events
+
+    def test_admin_delete_foreign_template_200_with_audit(self, monkeypatch):
+        from neurova.api.endpoints import collaboration_api as mod
+
+        project = SimpleNamespace(project_id="tpl1", owner_id="u1", name="tpl")
+        self._patch_manager(monkeypatch, project)
+        events = self._patch_audit(monkeypatch)
+
+        resp = asyncio.run(
+            mod.delete_collaboration_template(_Req(), "tpl1", current_user=dict(_ROOT))
+        )
+        assert resp["code"] == 0, "admin 删他人模板应成功（修复前 manager owner-only → 404）"
+        assert len(events) == 1, "admin 删非本人模板必须写审计事件"
+        assert events[0].resource_type == "collaboration_template"
+        assert events[0].resource_id == "tpl1"
+        assert events[0].user_id == "root"
+        assert events[0].details["template_owner"] == "u1"
+
+    def test_admin_delete_ownerless_template_with_audit(self, monkeypatch):
+        from neurova.api.endpoints import collaboration_api as mod
+
+        project = SimpleNamespace(project_id="tpl-o", owner_id="", name="orphan")
+        self._patch_manager(monkeypatch, project)
+        events = self._patch_audit(monkeypatch)
+
+        resp = asyncio.run(
+            mod.delete_collaboration_template(_Req(), "tpl-o", current_user=dict(_ROOT))
+        )
+        assert resp["code"] == 0, "admin 删无主存量模板应成功（无主行按 admin 可见可删）"
+        assert len(events) == 1, "无主行也属非本人模板，删除须留审计痕迹"
+        assert events[0].details["template_owner"] == ""
+
+    def test_owner_delete_own_template_no_audit(self, monkeypatch):
+        from neurova.api.endpoints import collaboration_api as mod
+
+        project = SimpleNamespace(project_id="tpl-own", owner_id="u1", name="mine")
+        self._patch_manager(monkeypatch, project)
+        events = self._patch_audit(monkeypatch)
+
+        resp = asyncio.run(
+            mod.delete_collaboration_template(_Req(), "tpl-own", current_user=dict(_U1))
+        )
+        assert resp["code"] == 0, "owner 删自己的模板应成功（既有行为不回退）"
+        assert events == [], "属主删自己的模板是普通操作，不写管理审计事件"
