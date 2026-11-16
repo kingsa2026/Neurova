@@ -279,6 +279,19 @@
           </template>
         </GlassCard>
 
+        <!-- 蜂群协作（P1-2）：子代理终态验收门开关（判定器=goal_verifier，不达标自动回炉一次） -->
+        <GlassCard :title="t('settings.swarmCollabTitle')">
+          <a-form layout="vertical">
+            <a-form-item :label="t('settings.swarmAcceptanceGate')">
+              <a-switch v-model:checked="advanced.swarm_acceptance_enabled" />
+              <p class="governance-hint">{{ t('settings.swarmAcceptanceGateHint') }}</p>
+            </a-form-item>
+          </a-form>
+          <template #footer>
+            <GlassButton variant="primary" size="sm" :loading="savingSwarmGate" @click="saveSwarmGate">{{ t('common.save') }}</GlassButton>
+          </template>
+        </GlassCard>
+
         <!-- 凭据管理（SSH 多主机 + 社交平台），按当前用户隔离；与"我的凭据"页共用组件 -->
         <CredentialManager />
 
@@ -561,10 +574,11 @@ const outOfBoxLanguage = ref('')
 const savingDefault = ref(false)
 const security = ref({ jwt_secret: '', jwt_expiry_hours: 24, min_password_length: 8, require_special: true })
 const storage = ref({ media_path: '/data/media', max_upload_mb: 50, cache_ttl_minutes: 60 })
-const advanced = ref({ debug_mode: false, log_level: 'info', telemetry: false, max_output_tokens: 131072, graph_studio_limit: 200, desktop_runtime_mode: 'full', desktop_provider: '', skill_catalog_enabled: true, skill_schema_budget_enabled: true, evolution_queue_enabled: true, skill_semantic_recall_enabled: true, tool_search_enabled: true, dedup_semantic_enabled: false })
+const advanced = ref({ debug_mode: false, log_level: 'info', telemetry: false, max_output_tokens: 131072, graph_studio_limit: 200, desktop_runtime_mode: 'full', desktop_provider: '', skill_catalog_enabled: true, skill_schema_budget_enabled: true, evolution_queue_enabled: true, skill_semantic_recall_enabled: true, tool_search_enabled: true, dedup_semantic_enabled: false, swarm_acceptance_enabled: false })
 // 资源配额（LLM 日配额运营化，2026-11-14）：与后端 app_settings.quota / DEFAULT_LIMITS 对齐
 const quota = ref({ max_llm_calls_per_day: 100, max_llm_tokens_per_day: 100000 })
 const savingRecall = ref(false)
+const savingSwarmGate = ref(false)
 
 /** LLM 路由设置：actionability 门控 + 群领导选举（均默认关，仅机器源/群聊生效） */
 const routing = ref({ actionability_enabled: false, actionability_lookback: 20, group_leadership_enabled: false, group_lease_ttl_seconds: 90 })
@@ -1173,6 +1187,19 @@ const saveSkillRecall = async () => {
     message.error(extractApiDetail(err) || t('common.error'))
   } finally {
     savingRecall.value = false
+  }
+}
+
+/** 蜂群协作卡独立保存：只写 advanced 段的 swarm_acceptance_enabled 键（后端按 key merge） */
+const saveSwarmGate = async () => {
+  savingSwarmGate.value = true
+  try {
+    await updateSettings('advanced', { swarm_acceptance_enabled: advanced.value.swarm_acceptance_enabled })
+    message.success(t('common.success'))
+  } catch (err) {
+    message.error(extractApiDetail(err) || t('common.error'))
+  } finally {
+    savingSwarmGate.value = false
   }
 }
 

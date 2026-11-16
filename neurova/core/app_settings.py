@@ -77,6 +77,11 @@ ADVANCED_DEFAULTS: Dict[str, Any] = {
     # 自动感知）。默认 off＝旧行为（drift 读数被动发现）；env
     # NEUROVA_KB_EXTRACT_ON_UPDATE 显式值最优先（运维逃生门）。
     "ontology_extract_on_update": False,
+    # P1-2（评测报告 G-3）：蜂群子代理终态验收门。默认关＝零行为漂移；开启后
+    # 蜂群子任务完成前经 goal_verifier 判定（带 acceptanceCriteria 的任务可绕过
+    # 本开关单独生效）。设置面板「高级」卡可视开关；env
+    # NEUROVA_SWARM_ACCEPTANCE 显式 on/off 最优先（运维逃生门）。
+    "swarm_acceptance_enabled": False,
 }
 
 # LLM 路由设置分区（actionability 门控等路由期决策）——默认全关，零行为漂移。
