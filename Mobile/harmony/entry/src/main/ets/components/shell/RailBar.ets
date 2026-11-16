@@ -24,7 +24,6 @@ export struct RailBar {
           TabIcon({
             kind: kind,
             color: this.active === idx ? this.sm.getColor('primary') : this.sm.getColor('text_tertiary'),
-            iconSize: 19,
           })
         }
         .width(34)

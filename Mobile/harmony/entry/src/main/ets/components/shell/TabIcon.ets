@@ -12,24 +12,18 @@ export struct TabIcon {
   @Prop kind: string = 'chat';
   /** 线条颜色（调用方传 token 色）——@Prop 随激活态刷新 */
   @Prop color: string = '#FFFFFF';
-  /** 图标边长（vp）——命名避开通用属性 size */
-  @Prop iconSize: number = 22;
-
-  private stroke(): number {
-    return this.iconSize / 24 * 1.7;
-  }
 
   build() {
-    // 单 Path 多子路径（绝对 24 网格坐标，C 曲线替代 A 弧——渲染确定性最高）
+    // 单 Path 多子路径（24 网格坐标与画布 1:1，C 曲线替代 A 弧——渲染确定性最高）
     Path()
       .commands(this.commands())
       .fillOpacity(0)
       .stroke(this.color)
-      .strokeWidth(this.iconSize / 24 * 1.7)
+      .strokeWidth(1.7)
       .strokeLineCap(LineCapStyle.Round)
       .strokeLineJoin(LineJoinStyle.Round)
-      .width(this.iconSize)
-      .height(this.iconSize)
+      .width(24)
+      .height(24)
   }
 
   private commands(): string {
