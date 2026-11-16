@@ -36,6 +36,7 @@
 
 import { TopNavMenu, GlassCard, GlassButton, GlassInput, GlassPanel } from '../components/glass';
 import { ApiFacade } from '../libs/api/ApiFacade';
+import { WebhookUpsertBody } from '../libs/api/modules/WebhookApi';
 import { Router } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
@@ -101,7 +102,8 @@ export class WebhookViewHelper {
   /**
    * 获取 Webhook 事件对应的中文标签
    * 映射：message.received→消息接收，agent.created→智能体创建，
-   *       task.completed→任务完成，memory.created→记忆创建
+   *       task.completed→任务完成，memory.created→记忆创建；
+   *       后端事件为自由字符串，未知事件原样回显（不抛错，保证列表可渲染）
    * @param event Webhook 事件
    * @return 中文文案
    */
@@ -110,7 +112,7 @@ export class WebhookViewHelper {
     if (event === 'agent.created') return '智能体创建';
     if (event === 'task.completed') return '任务完成';
     if (event === 'memory.created') return '记忆创建';
-    throw new Error(`getEventLabel 未实现: ${event}`);
+    return String(event);
   }
 
   /**
@@ -190,48 +192,6 @@ function defaultForm(): WebhookFormData {
   return form;
 }
 
-/**
- * Mock Webhook 数据
- * TODO M6 阶段：替换为 api.webhook.list() 真实 API
- */
-const MOCK_WEBHOOKS: Webhook[] = [
-  {
-    id: 'wh_1',
-    name: '消息推送 Webhook',
-    url: 'https://api.example.com/webhooks/receive/very-long-path/with-many-segments',
-    events: ['message.received', 'agent.created'],
-    status: 'active',
-    lastTriggeredAt: '2025-03-01T10:00:00Z',
-    successCount: 90,
-    failureCount: 10,
-    createdAt: '2025-01-10T08:00:00Z',
-    updatedAt: '2025-02-01T10:00:00Z',
-  },
-  {
-    id: 'wh_2',
-    name: '任务完成通知',
-    url: 'https://hooks.example.com/task-done',
-    events: ['task.completed'],
-    status: 'paused',
-    successCount: 50,
-    failureCount: 0,
-    createdAt: '2025-01-15T08:00:00Z',
-    updatedAt: '2025-01-20T10:00:00Z',
-  },
-  {
-    id: 'wh_3',
-    name: '记忆创建同步',
-    url: 'https://api.example.com/memory/sync',
-    events: ['memory.created'],
-    status: 'error',
-    lastTriggeredAt: '2025-03-02T14:00:00Z',
-    successCount: 0,
-    failureCount: 5,
-    createdAt: '2025-02-01T08:00:00Z',
-    updatedAt: '2025-03-02T14:00:00Z',
-  },
-];
-
 @Component
 export struct WebhookPage {
   // Webhook 列表
@@ -257,16 +217,17 @@ export struct WebhookPage {
   }
 
   /**
-   * 加载 Webhook 列表
-   * TODO M6 阶段：替换为真实 API（api.webhook.list）
+   * 加载 Webhook 列表（真实 API：GET /v1/webhooks，P1-34）
    */
   private async loadWebhooks(): Promise<void> {
     this.loading = true;
     try {
-      // TODO M6 阶段补充真实 API
-      // const res = await this.api.webhook.list();
-      // if (res.code === 0 && res.data) { this.webhooks = res.data.items; }
-      this.webhooks = MOCK_WEBHOOKS.slice();
+      const res = await this.api.webhook.list();
+      if (res.code === 0 && res.data) {
+        this.webhooks = res.data;
+      } else {
+        this.msg.error(res.message || '加载 Webhook 列表失败');
+      }
     } catch (e) {
       this.logger.error(TAG, '加载 Webhook 失败', e as Error);
       this.msg.error('加载 Webhook 列表失败');
@@ -326,8 +287,7 @@ export struct WebhookPage {
   }
 
   /**
-   * 提交新建 Webhook
-   * TODO M6 阶段：调用真实 API（api.webhook.create）
+   * 提交新建 Webhook（真实 API：POST /v1/webhooks，P1-34）
    */
   private async submitCreate(): Promise<void> {
     if (!this.formData.name.trim()) {
@@ -343,23 +303,20 @@ export struct WebhookPage {
       return;
     }
     try {
-      // TODO M6 阶段：const res = await this.api.webhook.create(form);
-      const now = new Date().toISOString();
-      const newWh: Webhook = {
-        id: `wh_${Date.now()}`,
+      const body: WebhookUpsertBody = {
         name: this.formData.name.trim(),
         url: this.formData.url.trim(),
         events: this.formData.events.slice(),
-        status: 'active',
-        secret: this.formData.secret.trim() || undefined,
-        successCount: 0,
-        failureCount: 0,
-        createdAt: now,
-        updatedAt: now,
+        secret: this.formData.secret.trim().length > 0 ? this.formData.secret.trim() : undefined,
       };
-      this.webhooks = [newWh, ...this.webhooks];
-      this.msg.success('已创建');
-      this.showCreateDialog = false;
+      const res = await this.api.webhook.create(body);
+      if (res.code === 0 && res.data) {
+        this.webhooks = [res.data, ...this.webhooks];
+        this.msg.success('已创建');
+        this.showCreateDialog = false;
+      } else {
+        this.msg.error(res.message || '创建 Webhook 失败');
+      }
     } catch (e) {
       this.logger.error(TAG, '创建 Webhook 失败', e as Error);
       this.msg.error('创建 Webhook 失败');
@@ -388,33 +345,17 @@ export struct WebhookPage {
   }
 
   /**
-   * 执行测试触发
-   * TODO M6 阶段：调用真实 API（api.webhook.testTrigger）
+   * 执行测试触发（真实 API：POST /v1/webhooks/{id}/test，P1-34；投递结果由服务端如实记录）
    */
   private async testTrigger(webhookId: string): Promise<void> {
     try {
-      // TODO M6 阶段：const res = await this.api.webhook.testTrigger(webhookId);
-      // 临时：本地增加成功计数 + 更新最后触发时间
-      const now = new Date().toISOString();
-      this.webhooks = this.webhooks.map((w: Webhook): Webhook => {
-        if (w.id === webhookId) {
-          const updated: Webhook = {
-            id: w.id,
-            name: w.name,
-            url: w.url,
-            events: w.events,
-            status: w.status,
-            lastTriggeredAt: now,
-            successCount: w.successCount + 1,
-            failureCount: w.failureCount,
-            createdAt: w.createdAt,
-            updatedAt: now,
-          };
-          return updated;
-        }
-        return w;
-      });
-      this.msg.success('测试触发已发送');
+      const res = await this.api.webhook.testTrigger(webhookId);
+      if (res.code === 0) {
+        this.msg.success('测试触发已发送');
+        this.loadWebhooks();
+      } else {
+        this.msg.error(`测试触发失败：${res.message || '投递未成功'}`);
+      }
     } catch (e) {
       this.logger.error(TAG, '测试触发失败', e as Error);
       this.msg.error('测试触发失败');

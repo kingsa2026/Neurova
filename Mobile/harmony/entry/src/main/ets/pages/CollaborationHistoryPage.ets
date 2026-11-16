@@ -1,45 +1,33 @@
 /**
- * CollaborationHistoryPage - 协作历史页
+ * CollaborationHistoryPage - 协作历史页（P1-34 切真实 API）
  *
- * 职责：展示协作历史记录，按 collaborationId 筛选，按 action 过滤，
- *   时间倒序显示，点击项展开 before/after 对比
+ * 职责：展示协作历史（GET /v1/collaboration/history 的真实协作快照），
+ *   按 status 筛选，时间倒序显示，点击项查看详情
  * 设计：
- *   - CollaborationHistoryViewHelper（导出）：纯视图模型，封装动作颜色映射、
- *     动作图标、动作文案、时间戳格式化、元数据格式化、备注截断；
- *     无 UI 运行时依赖，可独立单元测试；
+ *   - CollaborationHistoryViewHelper（导出）：纯视图模型，封装状态颜色/图标/文案、
+ *     时间戳格式化、备注截断；无 UI 运行时依赖，可独立单元测试；
  *   - CollaborationHistoryPage（@Component）：Column [TopNavMenu(标题"协作历史"+返回)] +
- *     [action 筛选 Tab（全部/create/update/complete/archive）] + [加载态/空态/列表]；
- *     列表项 GlassCard：action 徽章、actor、时间戳、备注摘要、展开按钮；
- *     点击项 → AlertDialog 展示 before/after 对比；
- *   - 颜色统一走 StyleManager，路由走 Router，API 暂无 collaboration 专用模块 →
- *     aboutToAppear 加载 mock 静态数据 + TODO 注释 M6 阶段补充真实 API。
+ *     [status 筛选 Tab（全部/active/archived/suspended）] + [加载态/空态/列表]；
+ *     列表项 GlassCard：status 徽章、名称、属主、成员数、更新时间、详情按钮；
+ *   - 数据源：api.collaboration.listHistory()（真实端点，无 mock）。
  *
  * 依赖：
  *   - ../components/glass：TopNavMenu、GlassCard、GlassButton
- *   - ../libs/api/ApiFacade：统一 API 门面（仅作为占位，未实际调用）
- *   - ../routing/Router：统一路由跳转
- *   - ../libs/style/StyleManager：统一样式 token
- *   - ../libs/logger/Logger：统一日志
- *   - ../libs/message/MessageManager：统一消息提示
- *   - ../libs/types：CollaborationHistory、Metadata
+ *   - ../libs/api/ApiFacade：统一 API 门面
+ *   - ../libs/api/modules/CollaborationApi：CollaborationHistoryDto
+ *   - ../routing/Router、../libs/style/StyleManager、../libs/logger/Logger、
+ *     ../libs/message/MessageManager
  *
- * 用法：
- *   由 Router.push(RouteNames.COLLABORATION_HISTORY) 跳转进入；
- *   aboutToAppear 加载 mock 历史列表（TODO M6 接入 api.collaboration.history.list）；
- *   action 筛选 Tab 切换 → 本地 filterByAction 过滤；
- *   点击项 → AlertDialog 展示 before/after 元数据对比。
- *
- * TDD：CollaborationHistoryViewHelper 各方法按红绿灯垂直切片逐步实现，
- *      详见 CollaborationHistoryPage.test.ets
+ * TDD：CollaborationHistoryViewHelper 各方法详见 CollaborationHistoryPage.test.ets
  */
 
 import { TopNavMenu, GlassCard, GlassButton } from '../components/glass';
 import { ApiFacade } from '../libs/api/ApiFacade';
+import { CollaborationHistoryDto } from '../libs/api/modules/CollaborationApi';
 import { Router } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { CollaborationHistory, Metadata } from '../libs/types';
 
 /** 日志标签 */
 const TAG = 'CollaborationHistoryPage';
@@ -58,46 +46,42 @@ const DEFAULT_NOTE_MAX_LEN = 50;
 
 export class CollaborationHistoryViewHelper {
   /**
-   * 获取动作对应的颜色 token 名
-   * 映射：create→success，update→info，complete→success，archive→warning
-   * @param action 动作字符串
+   * 获取协作状态对应的颜色 token 名
+   * 映射：active→success，archived→warning，suspended→error，其他→info
+   * @param status 协作状态字符串（后端 project status）
    * @return StyleManager 颜色 token 名
    */
-  static getActionColor(action: string): string {
-    if (action === 'create') return 'success';
-    if (action === 'update') return 'info';
-    if (action === 'complete') return 'success';
-    if (action === 'archive') return 'warning';
-    // 未覆盖的动作抛错，强制 TDD 红灯逐项补齐
-    throw new Error(`getActionColor 未实现: ${action}`);
+  static getStatusColor(status: string): string {
+    if (status === 'active') return 'success';
+    if (status === 'archived') return 'warning';
+    if (status === 'suspended') return 'error';
+    return 'info';
   }
 
   /**
-   * 获取动作对应的图标 emoji
-   * 映射：create→✨，update→✏️，complete→✅，archive→📦
-   * @param action 动作字符串
+   * 获取协作状态对应的图标 emoji
+   * 映射：active→✅，archived→📦，suspended→⏸️，其他→🔄
+   * @param status 协作状态字符串
    * @return emoji 字符串
    */
-  static getActionIcon(action: string): string {
-    if (action === 'create') return '✨';
-    if (action === 'update') return '✏️';
-    if (action === 'complete') return '✅';
-    if (action === 'archive') return '📦';
-    throw new Error(`getActionIcon 未实现: ${action}`);
+  static getStatusIcon(status: string): string {
+    if (status === 'active') return '✅';
+    if (status === 'archived') return '📦';
+    if (status === 'suspended') return '⏸️';
+    return '🔄';
   }
 
   /**
-   * 获取动作对应的中文标签
-   * 映射：create→创建，update→更新，complete→完成，archive→归档
-   * @param action 动作字符串
+   * 获取协作状态对应的中文标签
+   * 映射：active→进行中，archived→已归档，suspended→已暂停，其他→未知
+   * @param status 协作状态字符串
    * @return 中文文案
    */
-  static getActionLabel(action: string): string {
-    if (action === 'create') return '创建';
-    if (action === 'update') return '更新';
-    if (action === 'complete') return '完成';
-    if (action === 'archive') return '归档';
-    throw new Error(`getActionLabel 未实现: ${action}`);
+  static getStatusLabel(status: string): string {
+    if (status === 'active') return '进行中';
+    if (status === 'archived') return '已归档';
+    if (status === 'suspended') return '已暂停';
+    return '未知';
   }
 
   /**
@@ -118,21 +102,10 @@ export class CollaborationHistoryViewHelper {
   }
 
   /**
-   * 格式化元数据为展示字符串
-   * 规则：空（undefined 或空对象）→ "无变更"；非空 → JSON.stringify
-   * @param meta 元数据对象（可选）
-   * @return 元数据展示字符串
-   */
-  static formatMetadata(meta?: Metadata): string {
-    if (!meta || Object.keys(meta).length === 0) return '无变更';
-    return JSON.stringify(meta);
-  }
-
-  /**
-   * 截断备注文本，超长时截取 maxLen 字符并追加省略号
-   * @param note 原始备注
+   * 截断文本，超长时截取 maxLen 字符并追加省略号
+   * @param note 原始文本
    * @param maxLen 最大字符数
-   * @return 截断后的备注；未超长则原样返回
+   * @return 截断后的文本；未超长则原样返回
    */
   static truncateNote(note: string, maxLen: number): string {
     if (note.length <= maxLen) return note;
@@ -140,89 +113,37 @@ export class CollaborationHistoryViewHelper {
   }
 }
 
-/** 动作筛选 Tab 配置 */
-interface ActionFilterOption {
-  value: string;     // 'all' 或具体动作
+/** 状态筛选 Tab 配置 */
+interface StatusFilterOption {
+  value: string;     // 'all' 或具体状态
   label: string;
 }
 
-/** 动作筛选 Tab 列表 */
-const ACTION_FILTERS: ActionFilterOption[] = [
+/** 状态筛选 Tab 列表（后端 project status 真实词汇） */
+const STATUS_FILTERS: StatusFilterOption[] = [
   { value: 'all', label: '全部' },
-  { value: 'create', label: '创建' },
-  { value: 'update', label: '更新' },
-  { value: 'complete', label: '完成' },
-  { value: 'archive', label: '归档' },
+  { value: 'active', label: '进行中' },
+  { value: 'archived', label: '已归档' },
+  { value: 'suspended', label: '已暂停' },
 ];
 
-/**
- * Mock 协作历史数据
- * TODO M6 阶段：替换为 api.collaboration.history.list() 真实 API
- */
-/** 构造单键 Metadata（ArkTS 禁对象字面量直接落 Record，集中此处） */
-function meta1(k1: string, v1: Object): Record<string, Object> {
-  const r: Record<string, Object> = {};
-  r[k1] = v1;
-  return r;
-}
-
-/** 构造双键 Metadata */
-function meta2(k1: string, v1: Object, k2: string, v2: Object): Record<string, Object> {
-  const r: Record<string, Object> = {};
-  r[k1] = v1;
-  r[k2] = v2;
-  return r;
-}
-
-const MOCK_HISTORY: CollaborationHistory[] = [
-  {
-    id: 'hist_1',
-    collaborationId: 'collab_1',
-    action: 'create',
-    actor: 'user_1',
-    after: meta2('name', '协作任务 A', 'status', 'pending'),
-    timestamp: '2025-03-01T10:00:00Z',
-    note: '创建协作任务',
-  },
-  {
-    id: 'hist_2',
-    collaborationId: 'collab_1',
-    action: 'update',
-    actor: 'agent_1',
-    before: meta1('status', 'pending'),
-    after: meta1('status', 'in_progress'),
-    timestamp: '2025-03-02T14:30:00Z',
-    note: '状态更新为进行中',
-  },
-  {
-    id: 'hist_3',
-    collaborationId: 'collab_2',
-    action: 'complete',
-    actor: 'user_2',
-    before: meta1('status', 'in_progress'),
-    after: meta1('status', 'done'),
-    timestamp: '2025-03-03T09:15:00Z',
-  },
-  {
-    id: 'hist_4',
-    collaborationId: 'collab_3',
-    action: 'archive',
-    actor: 'user_1',
-    before: meta1('status', 'done'),
-    after: meta1('status', 'archived'),
-    timestamp: '2025-03-04T16:45:00Z',
-    note: '历史项目归档',
-  },
-];
+// ===========================================================================
+// CollaborationHistoryViewHelper - 协作历史视图模型（纯函数，无 UI 依赖，可独立单元测试）
+//
+// 设计：所有方法为 static，输入 → 输出，无副作用；
+//       颜色方法返回 StyleManager 的 token 名（如 'success'），由页面解析为实际颜色值；
+//       图标方法返回 emoji 字符串直接渲染；
+//       通过本文件 export，供 ohosTest 直接导入测试
+// ===========================================================================
 
 @Component
 export struct CollaborationHistoryPage {
-  // 历史记录列表
-  @State history: CollaborationHistory[] = [];
+  // 历史记录列表（真实 DTO：GET /v1/collaboration/history）
+  @State history: CollaborationHistoryDto[] = [];
   // 加载态
   @State loading: boolean = true;
-  // 当前激活的动作筛选值
-  @State activeAction: string = 'all';
+  // 当前激活的状态筛选值
+  @State activeStatus: string = 'all';
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -236,19 +157,20 @@ export struct CollaborationHistoryPage {
   }
 
   /**
-   * 加载历史记录
-   * TODO M6 阶段：替换为真实 API（api.collaboration.history.list）
-   * 当前使用 mock 静态数据，按时间倒序排序
+   * 加载协作历史（真实 API：GET /v1/collaboration/history，P1-34）
+   * 后端返回 data={history,total}，按更新时间倒序排序
    */
   private async loadHistory(): Promise<void> {
     this.loading = true;
     try {
-      // TODO M6 阶段补充真实 API
-      // const res = await this.api.collaboration.history.list();
-      // if (res.code === 0 && res.data) { this.history = res.data.items; }
-      this.history = MOCK_HISTORY.slice().sort((a: CollaborationHistory, b: CollaborationHistory) => {
-        return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
-      });
+      const res = await this.api.collaboration.listHistory(100, 0);
+      if (res.code === 0 && res.data) {
+        this.history = res.data.items.slice().sort((a: CollaborationHistoryDto, b: CollaborationHistoryDto) => {
+          return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+        });
+      } else {
+        this.msg.error(res.message || '加载协作历史失败');
+      }
     } catch (e) {
       this.logger.error(TAG, '加载历史失败', e as Error);
       this.msg.error('加载协作历史失败');
@@ -257,36 +179,36 @@ export struct CollaborationHistoryPage {
     }
   }
 
-  /** 切换动作筛选 */
-  private switchAction(value: string): void {
-    this.activeAction = value;
+  /** 切换状态筛选 */
+  private switchStatus(value: string): void {
+    this.activeStatus = value;
   }
 
   /**
-   * 获取经动作筛选后的列表
-   * 规则：activeAction === 'all' 返回全量；否则按 action 字段过滤
+   * 获取经状态筛选后的列表
+   * 规则：activeStatus === 'all' 返回全量；否则按 status 字段过滤
    */
-  private getFilteredHistory(): CollaborationHistory[] {
-    if (this.activeAction === 'all') {
+  private getFilteredHistory(): CollaborationHistoryDto[] {
+    if (this.activeStatus === 'all') {
       return this.history;
     }
-    return this.history.filter((h: CollaborationHistory) => h.action === this.activeAction);
+    return this.history.filter((h: CollaborationHistoryDto) => h.status === this.activeStatus);
   }
 
   /**
-   * 查看历史详情
-   * AlertDialog 展示 before/after 对比
+   * 查看历史详情（AlertDialog 展示协作快照真实字段）
    */
-  private showDetail(h: CollaborationHistory): void {
+  private showDetail(h: CollaborationHistoryDto): void {
+    const membersText = h.members.length === 0 ? '无' : h.members.join('、');
     AlertDialog.show({
-      title: `${CollaborationHistoryViewHelper.getActionLabel(h.action)} - ${h.actor}`,
+      title: h.name,
       message:
-        `动作：${CollaborationHistoryViewHelper.getActionLabel(h.action)}\n\n` +
-        `执行者：${h.actor}\n\n` +
-        `时间：${CollaborationHistoryViewHelper.formatTimestamp(h.timestamp)}\n\n` +
-        `变更前：\n${CollaborationHistoryViewHelper.formatMetadata(h.before)}\n\n` +
-        `变更后：\n${CollaborationHistoryViewHelper.formatMetadata(h.after)}\n\n` +
-        `备注：${h.note ?? '无'}`,
+        `状态：${CollaborationHistoryViewHelper.getStatusLabel(h.status)}\n\n` +
+        `描述：${h.description || '无'}\n\n` +
+        `属主：${h.owner_id}\n\n` +
+        `成员：${membersText}\n\n` +
+        `创建：${CollaborationHistoryViewHelper.formatTimestamp(h.created_at)}\n` +
+        `更新：${CollaborationHistoryViewHelper.formatTimestamp(h.updated_at)}`,
       autoCancel: true,
       alignment: DialogAlignment.Center,
       primaryButton: {
@@ -306,22 +228,22 @@ export struct CollaborationHistoryPage {
         onBack: () => { this.router.back(); }
       })
 
-      // 动作筛选 Tab
+      // 状态筛选 Tab
       Scroll() {
         Row({ space: 8 }) {
-          ForEach(ACTION_FILTERS, (opt: ActionFilterOption) => {
+          ForEach(STATUS_FILTERS, (opt: StatusFilterOption) => {
             Text(opt.label)
               .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.activeAction === opt.value
+              .fontColor(this.activeStatus === opt.value
                 ? this.sm.getColor('text_on_primary')
                 : this.sm.getColor('text_secondary'))
-              .backgroundColor(this.activeAction === opt.value
+              .backgroundColor(this.activeStatus === opt.value
                 ? this.sm.getColor('primary')
                 : this.sm.getColor('surface'))
               .padding({ left: 12, right: 12, top: 6, bottom: 6 })
               .borderRadius(16)
-              .onClick(() => { this.switchAction(opt.value); })
-          }, (opt: ActionFilterOption) => opt.value)
+              .onClick(() => { this.switchStatus(opt.value); })
+          }, (opt: StatusFilterOption) => opt.value)
         }
         .padding({ left: this.sm.getSpacing('md'), right: this.sm.getSpacing('md') })
       }
@@ -353,11 +275,11 @@ export struct CollaborationHistoryPage {
         .alignItems(HorizontalAlign.Center)
       } else {
         List({ space: 12 }) {
-          ForEach(this.getFilteredHistory(), (h: CollaborationHistory) => {
+          ForEach(this.getFilteredHistory(), (h: CollaborationHistoryDto) => {
             ListItem() {
               this.buildHistoryCard(h)
             }
-          }, (h: CollaborationHistory) => h.id)
+          }, (h: CollaborationHistoryDto) => h.id)
         }
         .layoutWeight(1)
         .width('100%')
@@ -379,24 +301,24 @@ export struct CollaborationHistoryPage {
   // 历史卡片构建器
   // ===========================================================================
 
-  /** 单个历史卡片：动作徽章 + 执行者 + 时间戳 + 备注摘要 + 操作按钮 */
+  /** 单个历史卡片：状态徽章 + 名称 + 属主 + 成员数 + 更新时间 + 操作按钮 */
   @Builder
-  buildHistoryCard(h: CollaborationHistory) {
+  buildHistoryCard(h: CollaborationHistoryDto) {
     Column() {
     GlassCard() {
       Column() {
-        // 顶部行：动作图标 + 动作徽章 + 执行者
+        // 顶部行：状态图标 + 状态徽章 + 名称
         Row() {
-          Text(CollaborationHistoryViewHelper.getActionIcon(h.action))
+          Text(CollaborationHistoryViewHelper.getStatusIcon(h.status))
             .fontSize(20)
-          Text(CollaborationHistoryViewHelper.getActionLabel(h.action))
+          Text(CollaborationHistoryViewHelper.getStatusLabel(h.status))
             .fontSize(this.sm.getFontSize('caption'))
             .fontColor(this.sm.getColor('text_on_primary'))
             .padding({ left: 6, right: 6, top: 2, bottom: 2 })
             .borderRadius(this.sm.getRadius('sm'))
-            .backgroundColor(this.sm.getColor(CollaborationHistoryViewHelper.getActionColor(h.action)))
+            .backgroundColor(this.sm.getColor(CollaborationHistoryViewHelper.getStatusColor(h.status)))
             .margin({ left: this.sm.getSpacing('xs') })
-          Text(h.actor)
+          Text(h.name)
             .fontSize(this.sm.getFontSize('subtitle'))
             .fontWeight(FontWeight.Bold)
             .fontColor(this.sm.getColor('text_primary'))
@@ -408,22 +330,27 @@ export struct CollaborationHistoryPage {
         .width('100%')
         .alignItems(VerticalAlign.Center)
 
-        // 时间戳
-        Text(CollaborationHistoryViewHelper.formatTimestamp(h.timestamp))
-          .fontSize(this.sm.getFontSize('caption'))
-          .fontColor(this.sm.getColor('text_disabled'))
-          .margin({ top: this.sm.getSpacing('xs') })
-          .width('100%')
-
-        // 备注摘要（默认 50 字符截断，无备注显示 "无备注"）
-        Text(h.note
-          ? CollaborationHistoryViewHelper.truncateNote(h.note, DEFAULT_NOTE_MAX_LEN)
-          : '无备注')
+        // 描述摘要（默认 50 字符截断，无描述显示 "无描述"）
+        Text(h.description
+          ? CollaborationHistoryViewHelper.truncateNote(h.description, DEFAULT_NOTE_MAX_LEN)
+          : '无描述')
           .fontSize(this.sm.getFontSize('caption'))
           .fontColor(this.sm.getColor('text_secondary'))
           .maxLines(2)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .margin({ top: 4 })
+          .width('100%')
+
+        // 属主 + 成员数 + 更新时间
+        Text(`属主：${h.owner_id} · 成员 ${h.members.length} 人`)
+          .fontSize(this.sm.getFontSize('caption'))
+          .fontColor(this.sm.getColor('text_disabled'))
+          .margin({ top: this.sm.getSpacing('xs') })
+          .width('100%')
+        Text(CollaborationHistoryViewHelper.formatTimestamp(h.updated_at))
+          .fontSize(this.sm.getFontSize('caption'))
+          .fontColor(this.sm.getColor('text_disabled'))
+          .margin({ top: this.sm.getSpacing('xs') })
           .width('100%')
 
         // 操作按钮：查看详情（右对齐）
