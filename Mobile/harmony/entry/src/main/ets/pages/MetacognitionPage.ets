@@ -113,6 +113,13 @@ const TYPE_FILTERS: TypeFilterOption[] = [
 /** 新建可选类型（MetacognitionRecordCreate.type 词域） */
 const CREATE_TYPES: string[] = ['monitoring', 'control', 'evaluation'];
 
+/** 新建表单数据（ArkTS 禁匿名对象类型，独立声明） */
+interface MetacognitionFormData {
+  type: string;
+  content: string;
+  context: string;
+}
+
 @Component
 export struct MetacognitionPage {
   // 元认知记录列表（由 API 加载，驱动列表渲染；筛选在本地进行）
@@ -127,11 +134,7 @@ export struct MetacognitionPage {
   // 新建弹窗显隐
   @State showCreate: boolean = false;
   // 新建表单数据
-  @State formData: {
-    type: string;
-    content: string;
-    context: string;
-  } = {
+  @State formData: MetacognitionFormData = {
     type: 'monitoring',
     content: '',
     context: '',
@@ -377,6 +380,7 @@ export struct MetacognitionPage {
   /** 单条元认知卡片：type 徽章 + 内容摘要 + confidence 进度条 + 上下文 + 创建时间 + 查看 */
   @Builder
   buildRecordCard(record: MetacognitionDto) {
+    Column() {
     GlassCard() {
       Column() {
         // type 徽章行：图标 + 标签
@@ -416,7 +420,7 @@ export struct MetacognitionPage {
           .height(4)
           .borderRadius(2)
           .backgroundColor(this.sm.getColor('divider'))
-          .alignItems(VerticalAlign.Start)
+          .alignItems(VerticalAlign.Top)
 
           Text(`置信度 ${MetacognitionViewHelper.formatConfidence(record.confidence)}`)
             .fontSize(this.sm.getFontSize('caption'))
@@ -461,6 +465,7 @@ export struct MetacognitionPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
   }
 
@@ -480,6 +485,7 @@ export struct MetacognitionPage {
         .onClick(() => { this.closeDetail(); })
 
       // 面板层：居中展示
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           // 标题行：图标 + type 标签
@@ -505,7 +511,7 @@ export struct MetacognitionPage {
               .backgroundColor(this.sm.getColor(MetacognitionViewHelper.getTypeColor(record.type)))
           }
           .width('100%')
-          .alignItems(HorizontalAlign.Start)
+          .justifyContent(FlexAlign.Start)
           .margin({ top: this.sm.getSpacing('sm') })
 
           // confidence 进度条 + 百分比
@@ -521,7 +527,7 @@ export struct MetacognitionPage {
             .height(6)
             .borderRadius(3)
             .backgroundColor(this.sm.getColor('divider'))
-            .alignItems(VerticalAlign.Start)
+            .alignItems(VerticalAlign.Top)
 
             Text(MetacognitionViewHelper.formatConfidence(record.confidence))
               .fontSize(this.sm.getFontSize('body'))
@@ -577,6 +583,7 @@ export struct MetacognitionPage {
         .height('100%')
         .alignItems(HorizontalAlign.Start)
       }
+      }
       .width('90%')
       .height('80%')
     }
@@ -600,6 +607,7 @@ export struct MetacognitionPage {
         .onClick(() => { this.closeCreateDialog(); })
 
       // 面板层：居中展示
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('新建元认知')
@@ -626,7 +634,7 @@ export struct MetacognitionPage {
                 .padding({ left: 10, right: 10, top: 4, bottom: 4 })
                 .borderRadius(12)
                 .onClick(() => {
-                  this.formData = { ...this.formData, type: t };
+                  this.formData = { type: t, content: this.formData.content, context: this.formData.context };
                 })
             }, (t: string) => t)
           }
@@ -648,7 +656,7 @@ export struct MetacognitionPage {
             .borderRadius(this.sm.getRadius('sm'))
             .backgroundColor(this.sm.getColor('surface'))
             .onChange((v: string) => {
-              this.formData = { ...this.formData, content: v };
+              this.formData = { type: this.formData.type, content: v, context: this.formData.context };
             })
 
           // 上下文
@@ -661,7 +669,7 @@ export struct MetacognitionPage {
             value: this.formData.context,
             type: 'text',
             onChange: (v: string) => {
-              this.formData = { ...this.formData, context: v };
+              this.formData = { type: this.formData.type, content: this.formData.content, context: v };
             },
           })
 
@@ -687,6 +695,7 @@ export struct MetacognitionPage {
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
+      }
       }
       .width('90%')
     }

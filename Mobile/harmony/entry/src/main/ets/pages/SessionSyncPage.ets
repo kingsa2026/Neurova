@@ -38,16 +38,13 @@ import { Router } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { SessionSync } from '../libs/types';
+import { SyncSessionDto, SyncSessionCreateBody } from '../libs/api/modules/SessionSyncApi';
 
 /** 日志标签 */
 const TAG = 'SessionSyncPage';
 
-/** 会话同步状态类型别名 */
-type SyncStatus = 'synced' | 'partial' | 'failed';
-
-/** 默认 agentId（M4.6 占位，后续由路由参数注入） */
-const DEFAULT_AGENT_ID = 'default-agent';
+/** 会话同步状态类型（后端为自由字符串，宽松接收） */
+type SyncStatus = string;
 
 /** 分钟/小时/天的毫秒数常量 */
 const MINUTE_MS = 60 * 1000;
@@ -65,38 +62,47 @@ const DAY_MS = 24 * HOUR_MS;
 export class SessionSyncViewHelper {
   /**
    * 获取会话同步状态对应的颜色 token 名
-   * 映射：synced→status_success, partial→status_warning, failed→status_error
-   * @param status 同步状态
+   * 映射：synced/active→status_success, partial→status_warning, failed→status_error,
+   *       closed/ended→text_secondary；未知状态回落 status_warning
+   * @param status 同步状态（后端自由字符串）
    * @return StyleManager 颜色 token 名
    */
   static getStatusColor(status: SyncStatus): string {
-    if (status === 'synced') return 'status_success';
+    if (status === 'synced' || status === 'active') return 'status_success';
     if (status === 'partial') return 'status_warning';
-    return 'status_error';
+    if (status === 'failed') return 'status_error';
+    if (status === 'closed' || status === 'ended') return 'text_secondary';
+    return 'status_warning';
   }
 
   /**
    * 获取会话同步状态对应的图标 emoji
-   * 映射：synced→✅, partial→⚠️, failed→❌
-   * @param status 同步状态
+   * 映射：synced/active→✅, partial→⚠️, failed→❌, closed/ended→⏹️；未知→⚠️
+   * @param status 同步状态（后端自由字符串）
    * @return emoji 字符串
    */
   static getStatusIcon(status: SyncStatus): string {
-    if (status === 'synced') return '✅';
+    if (status === 'synced' || status === 'active') return '✅';
     if (status === 'partial') return '⚠️';
-    return '❌';
+    if (status === 'failed') return '❌';
+    if (status === 'closed' || status === 'ended') return '⏹️';
+    return '⚠️';
   }
 
   /**
    * 获取会话同步状态对应的中文标签
-   * 映射：synced→已同步, partial→部分同步, failed→同步失败
-   * @param status 同步状态
+   * 映射：synced→已同步, active→进行中, partial→部分同步, failed→同步失败,
+   *       closed/ended→已结束；未知→原样展示
+   * @param status 同步状态（后端自由字符串）
    * @return 中文标签
    */
   static getStatusLabel(status: SyncStatus): string {
     if (status === 'synced') return '已同步';
+    if (status === 'active') return '进行中';
     if (status === 'partial') return '部分同步';
-    return '同步失败';
+    if (status === 'failed') return '同步失败';
+    if (status === 'closed' || status === 'ended') return '已结束';
+    return status;
   }
 
   /**
@@ -148,8 +154,8 @@ interface SessionSyncFormData {
 
 @Component
 export struct SessionSyncPage {
-  // 会话同步列表（由 API 加载，驱动列表渲染）
-  @State syncs: SessionSync[] = [];
+  // 会话同步列表（由 API 加载，驱动列表渲染；/v1/sync/sessions 真实数据）
+  @State syncs: SyncSessionDto[] = [];
   // 加载态
   @State loading: boolean = true;
   // 新建弹窗显示状态
@@ -173,20 +179,20 @@ export struct SessionSyncPage {
   }
 
   /**
-   * 加载会话同步列表
+   * 加载会话同步列表（GET /v1/sync/sessions，按 token 主体过滤）
    * 流程：调用 api.sessionSync.list → 写入 syncs
-   * 异常：记录日志并提示用户；无论成败 finally 关闭 loading
+   * 异常：记录日志并把后端原因透出；无论成败 finally 关闭 loading
    */
   private async loadSyncs(): Promise<void> {
     this.loading = true;
     try {
-      const res = await this.api.sessionSync.list(DEFAULT_AGENT_ID, { page: 1, size: 100 });
+      const res = await this.api.sessionSync.list(undefined, undefined);
       if (res.code === 0 && res.data) {
         this.syncs = res.data.items;
       }
     } catch (e) {
       this.logger.error(TAG, '加载会话同步失败', e as Error);
-      this.msg.error('加载会话同步列表失败');
+      this.msg.error((e as Error).message.length > 0 ? (e as Error).message : '加载会话同步列表失败');
     } finally {
       this.loading = false;
     }
@@ -199,63 +205,54 @@ export struct SessionSyncPage {
   }
 
   /**
-   * 提交新建
-   * 流程：组装 data → 调用 api.sessionSync.create → 成功后关闭弹窗并刷新列表
-   * 异常：记录日志并提示用户
+   * 提交新建（POST /v1/sync/sessions：agent_id + external_id + metadata）
+   * 流程：组装 body → 调用 api.sessionSync.create → 成功后关闭弹窗并刷新列表
+   * 异常：记录日志并把后端原因透出
    */
   private async submitCreate(): Promise<void> {
     if (!this.formData.sessionId) {
-      this.msg.warning('请填写会话 ID');
+      this.msg.warning('请填写外部会话 ID');
       return;
     }
     try {
-      const data: Partial<SessionSync> = {
-        sessionId: this.formData.sessionId,
-        sourceChannel: this.formData.sourceChannel,
-        targetChannel: this.formData.targetChannel,
-        messageCount: 0,
-        status: 'synced',
-        lastSyncedAt: new Date().toISOString(),
+      const metadata: Record<string, Object> = {};
+      metadata['source_channel'] = this.formData.sourceChannel;
+      metadata['target_channel'] = this.formData.targetChannel;
+      const body: SyncSessionCreateBody = {
+        agent_id: 'default',
+        external_id: this.formData.sessionId,
+        metadata: metadata,
       };
-      const res = await this.api.sessionSync.create(data);
-      if (res.code === 0) {
-        this.msg.success('创建成功');
-        this.showDialog = false;
-        this.loadSyncs();
-      } else {
-        this.msg.error(res.message || '创建失败');
-      }
+      await this.api.sessionSync.create(body);
+      this.msg.success('创建成功');
+      this.showDialog = false;
+      this.loadSyncs();
     } catch (e) {
       this.logger.error(TAG, '创建会话同步失败', e as Error);
-      this.msg.error('创建会话同步失败');
+      this.msg.error((e as Error).message.length > 0 ? (e as Error).message : '创建会话同步失败');
     }
   }
 
   /**
-   * 立即同步
-   * 流程：调用 api.sessionSync.trigger → 提示结果并刷新列表
-   * 异常：记录日志并提示用户
+   * 立即同步（后端无手动触发端点——实时同步走 WS /v1/sync/ws/{session_id}，
+   * api.sessionSync.trigger 会 throw 点名，这里 catch 透出原因）
    */
-  private async triggerSync(item: SessionSync): Promise<void> {
+  private async triggerSync(item: SyncSessionDto): Promise<void> {
     try {
-      const res = await this.api.sessionSync.trigger(item.id);
-      if (res.code === 0 && res.data) {
-        this.msg.success('同步成功');
-        this.loadSyncs();
-      } else {
-        this.msg.error(res.message || '同步失败');
-      }
+      await this.api.sessionSync.trigger(item.session_id);
+      this.msg.success('同步成功');
+      this.loadSyncs();
     } catch (e) {
       this.logger.error(TAG, '触发同步失败', e as Error);
-      this.msg.error('触发同步失败');
+      this.msg.error((e as Error).message.length > 0 ? (e as Error).message : '触发同步失败');
     }
   }
 
   /** 删除前二次确认（AlertDialog） */
-  private confirmDelete(item: SessionSync): void {
+  private confirmDelete(item: SyncSessionDto): void {
     AlertDialog.show({
       title: '确认删除',
-      message: `确定要删除该会话同步记录吗？此操作不可撤销。`,
+      message: `确定要结束该同步会话吗？此操作不可撤销。`,
       autoCancel: true,
       alignment: DialogAlignment.Center,
       primaryButton: {
@@ -265,28 +262,24 @@ export struct SessionSyncPage {
       secondaryButton: {
         value: '删除',
         fontColor: this.sm.getColor('error'),
-        action: () => { this.deleteSync(item.id); }
+        action: () => { this.deleteSync(item.session_id); }
       }
     });
   }
 
   /**
-   * 执行删除
+   * 执行删除（DELETE /v1/sync/sessions/{id}，结束会话）
    * 流程：调用 api.sessionSync.remove → 成功后刷新列表
-   * 异常：记录日志并提示用户
+   * 异常：记录日志并把后端原因透出
    */
   private async deleteSync(syncId: string): Promise<void> {
     try {
-      const res = await this.api.sessionSync.remove(syncId);
-      if (res.code === 0) {
-        this.msg.success('删除成功');
-        this.loadSyncs();
-      } else {
-        this.msg.error(res.message || '删除失败');
-      }
+      await this.api.sessionSync.remove(syncId);
+      this.msg.success('删除成功');
+      this.loadSyncs();
     } catch (e) {
       this.logger.error(TAG, '删除会话同步失败', e as Error);
-      this.msg.error('删除会话同步失败');
+      this.msg.error((e as Error).message.length > 0 ? (e as Error).message : '删除会话同步失败');
     }
   }
 
@@ -331,11 +324,11 @@ export struct SessionSyncPage {
           .alignItems(HorizontalAlign.Center)
         } else {
           List({ space: 12 }) {
-            ForEach(this.syncs, (item: SessionSync) => {
+            ForEach(this.syncs, (item: SyncSessionDto) => {
               ListItem() {
                 this.buildSyncCard(item)
               }
-            }, (item: SessionSync) => item.id)
+            }, (item: SyncSessionDto) => item.session_id)
           }
           .layoutWeight(1)
           .width('100%')
@@ -365,9 +358,13 @@ export struct SessionSyncPage {
   // 会话同步卡片构建器
   // ===========================================================================
 
-  /** 单个会话同步卡片：状态徽章 + 源/目标渠道 + 消息数 + 最后同步时间 + 操作按钮 */
+  /**
+   * 单个会话同步卡片（真实 /v1/sync/sessions 字段）：
+   * 状态徽章 + session_id/agent/conversation + 历史消息数 + 最近活动时间 + 活跃渠道 + 操作按钮
+   */
   @Builder
-  buildSyncCard(item: SessionSync) {
+  buildSyncCard(item: SyncSessionDto) {
+    Column() {
     GlassCard() {
       Column() {
         // 上部：状态徽章（图标 + 文案 + 圆点）
@@ -387,8 +384,8 @@ export struct SessionSyncPage {
         }
         .alignItems(VerticalAlign.Center)
 
-        // 源 → 目标渠道
-        Text(`${item.sourceChannel} → ${item.targetChannel}`)
+        // 会话标识 + 归属
+        Text(item.session_id)
           .fontSize(this.sm.getFontSize('subtitle'))
           .fontWeight(FontWeight.Bold)
           .fontColor(this.sm.getColor('text_primary'))
@@ -396,22 +393,35 @@ export struct SessionSyncPage {
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .margin({ top: 8 })
 
-        // 底部行：消息数 · 最后同步时间
+        Text(`Agent：${item.agent_id} · 会话：${item.conversation_id}`)
+          .fontSize(this.sm.getFontSize('caption'))
+          .fontColor(this.sm.getColor('text_secondary'))
+          .margin({ top: 4 })
+
+        // 底部行：历史消息数 · 最近活动时间
         Row() {
-          Text(SessionSyncViewHelper.formatMessageCount(item.messageCount))
+          Text(SessionSyncViewHelper.formatMessageCount(item.history_size))
             .fontSize(this.sm.getFontSize('caption'))
             .fontColor(this.sm.getColor('text_secondary'))
           Text('·')
             .fontSize(this.sm.getFontSize('caption'))
             .fontColor(this.sm.getColor('text_disabled'))
             .margin({ left: 6, right: 6 })
-          Text(`最后同步：${SessionSyncViewHelper.formatRelativeTime(item.lastSyncedAt)}`)
+          Text(`最近活动：${SessionSyncViewHelper.formatRelativeTime(item.last_activity)}`)
             .fontSize(this.sm.getFontSize('caption'))
             .fontColor(this.sm.getColor('text_disabled'))
         }
         .width('100%')
         .margin({ top: 8 })
         .alignItems(VerticalAlign.Center)
+
+        // 活跃渠道（如有）
+        if (item.active_channels.length > 0) {
+          Text(`活跃渠道：${item.active_channels.join('、')}`)
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_disabled'))
+            .margin({ top: 4 })
+        }
 
         // 操作按钮：立即同步/删除（右对齐）
         Row() {
@@ -436,6 +446,7 @@ export struct SessionSyncPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
   }
 
@@ -455,6 +466,7 @@ export struct SessionSyncPage {
         .onClick(() => { this.showDialog = false; })
 
       // 面板层：居中展示
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('新建会话同步')
@@ -473,7 +485,7 @@ export struct SessionSyncPage {
             placeholder: '请输入会话 ID',
             value: this.formData.sessionId,
             type: 'text',
-            onChange: (v: string) => { this.formData = { ...this.formData, sessionId: v }; }
+            onChange: (v: string) => { this.formData = { sessionId: v, sourceChannel: this.formData.sourceChannel, targetChannel: this.formData.targetChannel }; }
           })
             .margin({ top: 4 })
 
@@ -487,7 +499,7 @@ export struct SessionSyncPage {
             placeholder: '如 feishu',
             value: this.formData.sourceChannel,
             type: 'text',
-            onChange: (v: string) => { this.formData = { ...this.formData, sourceChannel: v }; }
+            onChange: (v: string) => { this.formData = { sessionId: this.formData.sessionId, sourceChannel: v, targetChannel: this.formData.targetChannel }; }
           })
             .margin({ top: 4 })
 
@@ -501,7 +513,7 @@ export struct SessionSyncPage {
             placeholder: '如 dingtalk',
             value: this.formData.targetChannel,
             type: 'text',
-            onChange: (v: string) => { this.formData = { ...this.formData, targetChannel: v }; }
+            onChange: (v: string) => { this.formData = { sessionId: this.formData.sessionId, sourceChannel: this.formData.sourceChannel, targetChannel: v }; }
           })
             .margin({ top: 4 })
 
@@ -527,6 +539,7 @@ export struct SessionSyncPage {
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
+      }
       }
       .width('90%')
     }

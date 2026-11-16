@@ -593,6 +593,7 @@ export struct AgentRulePage {
   /** 单条规则卡片：徽章行 + 名称 + 摘要 + 时间 + 操作按钮 */
   @Builder
   buildRuleCard(rule: Rule) {
+    Column() {
     GlassCard() {
       Column() {
         // 徽章行：type 徽章 + status 徽章 + priority
@@ -699,6 +700,7 @@ export struct AgentRulePage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
   }
 
@@ -718,6 +720,7 @@ export struct AgentRulePage {
         .onClick(() => { this.closeDialog(); })
 
       // 面板层：居中展示
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           // 标题（新建/编辑）
@@ -739,9 +742,9 @@ export struct AgentRulePage {
                 GlassButton({
                   text: `${AgentRuleViewHelper.getTypeIcon(t)} ${AgentRuleViewHelper.getTypeLabel(t)}`,
                   type: this.formData.type === t ? 'primary' : 'default',
-                  size: 'small',
-                  onClick: () => {
-                    this.formData = { ...this.formData, type: t };
+                  btnSize: 'small',
+                  onTap: () => {
+                    this.formData = { type: t, name: this.formData.name, priority: this.formData.priority, condition: this.formData.condition, action: this.formData.action, description: this.formData.description };
                   }
                 })
               }, (t: RuleType) => t)
@@ -762,7 +765,7 @@ export struct AgentRulePage {
             placeholder: '请输入规则名称',
             value: this.formData.name,
             type: 'text',
-            onChange: (v: string) => { this.formData = { ...this.formData, name: v }; }
+            onChange: (v: string) => { this.formData = { type: this.formData.type, name: v, priority: this.formData.priority, condition: this.formData.condition, action: this.formData.action, description: this.formData.description }; }
           })
             .margin({ top: 4, bottom: this.sm.getSpacing('sm') })
 
@@ -777,7 +780,7 @@ export struct AgentRulePage {
             type: 'number',
             onChange: (v: string) => {
               const n = parseInt(v, 10);
-              this.formData = { ...this.formData, priority: isNaN(n) ? 1 : n };
+              this.formData = { type: this.formData.type, name: this.formData.name, priority: isNaN(n) ? 1 : n, condition: this.formData.condition, action: this.formData.action, description: this.formData.description };
             }
           })
             .margin({ top: 4, bottom: this.sm.getSpacing('sm') })
@@ -791,7 +794,7 @@ export struct AgentRulePage {
             placeholder: '请输入触发条件',
             value: this.formData.condition,
             type: 'text',
-            onChange: (v: string) => { this.formData = { ...this.formData, condition: v }; }
+            onChange: (v: string) => { this.formData = { type: this.formData.type, name: this.formData.name, priority: this.formData.priority, condition: v, action: this.formData.action, description: this.formData.description }; }
           })
             .margin({ top: 4, bottom: this.sm.getSpacing('sm') })
 
@@ -804,7 +807,7 @@ export struct AgentRulePage {
             placeholder: '请输入执行动作',
             value: this.formData.action,
             type: 'text',
-            onChange: (v: string) => { this.formData = { ...this.formData, action: v }; }
+            onChange: (v: string) => { this.formData = { type: this.formData.type, name: this.formData.name, priority: this.formData.priority, condition: this.formData.condition, action: v, description: this.formData.description }; }
           })
             .margin({ top: 4, bottom: this.sm.getSpacing('sm') })
 
@@ -817,7 +820,7 @@ export struct AgentRulePage {
             placeholder: '请输入描述（可选）',
             value: this.formData.description,
             type: 'text',
-            onChange: (v: string) => { this.formData = { ...this.formData, description: v }; }
+            onChange: (v: string) => { this.formData = { type: this.formData.type, name: this.formData.name, priority: this.formData.priority, condition: this.formData.condition, action: this.formData.action, description: v }; }
           })
             .margin({ top: 4, bottom: this.sm.getSpacing('md') })
 
@@ -842,6 +845,7 @@ export struct AgentRulePage {
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
+      }
       }
       .width('90%')
     }

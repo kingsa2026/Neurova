@@ -423,6 +423,7 @@ export struct ProjectPage {
   /** 单个项目卡片：状态徽章 + 名称 + 描述摘要 + owner/members/日期 + 操作按钮 */
   @Builder
   buildProjectCard(project: Project) {
+    Column() {
     GlassCard() {
       Column() {
         // 状态徽章：图标 + 文案 + 圆点
@@ -510,6 +511,7 @@ export struct ProjectPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
   }
 
@@ -529,6 +531,7 @@ export struct ProjectPage {
         .onClick(() => { this.showCreateDialog = false; })
 
       // 面板层
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('新建项目')
@@ -547,7 +550,7 @@ export struct ProjectPage {
             placeholder: '请输入项目名称',
             value: this.formData.name,
             type: 'text',
-            onChange: (v: string) => { this.formData = { ...this.formData, name: v }; }
+            onChange: (v: string) => { this.formData = { name: v, description: this.formData.description, startDate: this.formData.startDate, endDate: this.formData.endDate }; }
           })
             .margin({ top: 4 })
 
@@ -561,7 +564,7 @@ export struct ProjectPage {
             placeholder: '请输入描述',
             value: this.formData.description,
             type: 'text',
-            onChange: (v: string) => { this.formData = { ...this.formData, description: v }; }
+            onChange: (v: string) => { this.formData = { name: this.formData.name, description: v, startDate: this.formData.startDate, endDate: this.formData.endDate }; }
           })
             .margin({ top: 4 })
 
@@ -575,7 +578,7 @@ export struct ProjectPage {
             placeholder: '2024-06-15',
             value: this.formData.startDate,
             type: 'text',
-            onChange: (v: string) => { this.formData = { ...this.formData, startDate: v }; }
+            onChange: (v: string) => { this.formData = { name: this.formData.name, description: this.formData.description, startDate: v, endDate: this.formData.endDate }; }
           })
             .margin({ top: 4 })
 
@@ -589,7 +592,7 @@ export struct ProjectPage {
             placeholder: '2024-12-31',
             value: this.formData.endDate,
             type: 'text',
-            onChange: (v: string) => { this.formData = { ...this.formData, endDate: v }; }
+            onChange: (v: string) => { this.formData = { name: this.formData.name, description: this.formData.description, startDate: this.formData.startDate, endDate: v }; }
           })
             .margin({ top: 4 })
 
@@ -615,6 +618,7 @@ export struct ProjectPage {
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
+      }
       }
       .width('90%')
     }

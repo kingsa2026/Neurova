@@ -160,6 +160,18 @@ const DEFAULT_FORM: InitiateFormData = {
   participantInput: '',
 };
 
+/** 默认表单工厂（ArkTS 禁 spread 复制，集中此处） */
+function defaultForm(): InitiateFormData {
+  const form: InitiateFormData = {
+    type: 'project',
+    name: '',
+    description: '',
+    participants: [],
+    participantInput: '',
+  };
+  return form;
+}
+
 /** 发起进度弹窗状态 */
 interface ProgressState {
   visible: boolean;
@@ -195,7 +207,7 @@ const MOCK_INITIATED: CollaborationInitiate[] = [
 @Component
 export struct CollaborationInitiatePage {
   // 发起表单数据（嵌套属性变更需整体重新赋值）
-  @State formData: InitiateFormData = { ...DEFAULT_FORM };
+  @State formData: InitiateFormData = defaultForm();
   // 最近发起的协作列表
   @State initiated: CollaborationInitiate[] = [];
   // 发起进度弹窗
@@ -231,22 +243,22 @@ export struct CollaborationInitiatePage {
 
   /** 选择类型（嵌套属性变更：整体重新赋值） */
   private selectType(type: CollabType): void {
-    this.formData = { ...this.formData, type };
+    this.formData = { type: type, name: this.formData.name, description: this.formData.description, participants: this.formData.participants, participantInput: this.formData.participantInput };
   }
 
   /** 输入名称（嵌套属性变更：整体重新赋值） */
   private inputName(v: string): void {
-    this.formData = { ...this.formData, name: v };
+    this.formData = { type: this.formData.type, name: v, description: this.formData.description, participants: this.formData.participants, participantInput: this.formData.participantInput };
   }
 
   /** 输入描述（嵌套属性变更：整体重新赋值） */
   private inputDescription(v: string): void {
-    this.formData = { ...this.formData, description: v };
+    this.formData = { type: this.formData.type, name: this.formData.name, description: v, participants: this.formData.participants, participantInput: this.formData.participantInput };
   }
 
   /** 输入参与者 ID（嵌套属性变更：整体重新赋值） */
   private inputParticipant(v: string): void {
-    this.formData = { ...this.formData, participantInput: v };
+    this.formData = { type: this.formData.type, name: this.formData.name, description: this.formData.description, participants: this.formData.participants, participantInput: v };
   }
 
   /** 添加参与者（回车或点击添加按钮触发，嵌套属性变更：整体重新赋值） */
@@ -257,19 +269,15 @@ export struct CollaborationInitiatePage {
       this.msg.warning('参与者已存在');
       return;
     }
-    this.formData = {
-      ...this.formData,
-      participants: [...this.formData.participants, v],
-      participantInput: '',
-    };
+    const next = this.formData.participants.slice();
+    next.push(v);
+    this.formData = { type: this.formData.type, name: this.formData.name, description: this.formData.description, participants: next, participantInput: '' };
   }
 
   /** 移除参与者（嵌套属性变更：整体重新赋值） */
   private removeParticipant(p: string): void {
-    this.formData = {
-      ...this.formData,
-      participants: this.formData.participants.filter((x: string) => x !== p),
-    };
+    const next = this.formData.participants.filter((x: string) => x !== p);
+    this.formData = { type: this.formData.type, name: this.formData.name, description: this.formData.description, participants: next, participantInput: this.formData.participantInput };
   }
 
   /**
@@ -323,9 +331,10 @@ export struct CollaborationInitiatePage {
   private closeProgress(): void {
     if (this.progress.status === 'initiated') {
       // 成功后重置表单
-      this.formData = { ...DEFAULT_FORM };
+      this.formData = defaultForm();
     }
-    this.progress = { ...this.progress, visible: false };
+    const next: ProgressState = { visible: false, status: this.progress.status, message: this.progress.message };
+    this.progress = next;
   }
 
   build() {
@@ -397,6 +406,7 @@ export struct CollaborationInitiatePage {
   /** 发起表单：类型选择 + 名称 + 描述 + 参与者 + 提交按钮 */
   @Builder
   buildForm() {
+    Column() {
     GlassCard() {
       Column() {
         // 类型选择
@@ -511,6 +521,7 @@ export struct CollaborationInitiatePage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
   }
 
@@ -521,6 +532,7 @@ export struct CollaborationInitiatePage {
   /** 单个发起历史卡片：类型徽章 + 名称 + 状态徽章 + 参与者数 */
   @Builder
   buildInitiatedCard(item: CollaborationInitiate) {
+    Column() {
     GlassCard() {
       Column() {
         // 顶部行：类型图标 + 类型徽章 + 名称 + 状态徽章
@@ -574,6 +586,7 @@ export struct CollaborationInitiatePage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
   }
 
@@ -592,6 +605,7 @@ export struct CollaborationInitiatePage {
         .backgroundColor(this.sm.getColor('overlay_mask'))
 
       // 面板层
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('发起进度')
@@ -622,6 +636,7 @@ export struct CollaborationInitiatePage {
         }
         .width('100%')
         .alignItems(HorizontalAlign.Center)
+      }
       }
       .width('80%')
     }

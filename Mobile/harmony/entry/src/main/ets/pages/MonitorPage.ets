@@ -1,44 +1,43 @@
 /**
- * MonitorPage - 实时监控指标页
+ * MonitorPage - 实时监控页（M9.2 监控域契约迁移）
  *
- * 职责：实时展示 MonitorMetric 列表，按 name 筛选，显示 value+unit+timestamp，
- *       支持自动刷新开关（10s 轮询）
+ * 职责：展示后端 /v1/monitor 真实监控面——系统状态、资源使用（psutil 真值）、
+ *       连接状态汇总（providers/agents/db/执行监控）、告警列表（可 resolve）。
+ *       全部端点要求管理员（非管理员如实展示 403 原因）。
  * 设计：
- *   - MonitorViewHelper（导出）：纯视图模型，封装指标值格式化、时间戳格式化、
- *     标签着色、指标名截断、过期判定，无 UI 运行时依赖，可独立单元测试；
+ *   - MonitorViewHelper（导出）：纯视图模型（保留既有时间戳/截断/着色纯函数，
+ *     供 ohosTest 回归），无 UI 运行时依赖；
  *   - MonitorPage（@Component）：Stack[Column[TopNavMenu(标题"实时监控"+返回)]
- *     + [工具条（搜索框 + 自动刷新开关 + 手动刷新按钮）] + [加载态/空态/指标列表]]；
- *     指标项 GlassCard 含 name（截断）、value+unit、timestamp（HH:mm:ss）、
- *     tags（按 tagKey 着色，过期指标置灰）；
+ *     + [加载态/错误态/四段监控卡]]；
  *   - 颜色统一走 StyleManager（返回 token 名），路由走 Router，
- *     API 走 ApiFacade.monitor.listMetrics，消息走 MessageManager。
+ *     API 走 ApiFacade.monitor（getSystemStatus/getResources/listConnections/
+ *     listAlerts/resolveAlert），消息走 MessageManager。
  *
  * 依赖：
- *   - ../components/glass：TopNavMenu、GlassCard、GlassButton、GlassInput
+ *   - ../components/glass：TopNavMenu、GlassCard、GlassButton
  *   - ../libs/api/ApiFacade：统一 API 门面（monitor 模块）
+ *   - ../libs/api/modules/MonitorApi：监控域真实 DTO
  *   - ../routing/Router：统一路由跳转
  *   - ../libs/style/StyleManager：统一样式 token
  *   - ../libs/logger/Logger：统一日志
  *   - ../libs/message/MessageManager：统一消息提示
- *   - ../libs/types：MonitorMetric
  *
  * 用法：
  *   由 Router.push 跳转进入；
- *   aboutToAppear 调用 api.monitor.listMetrics() 加载列表；
- *   搜索框输入 → 本地 filterByKeyword 过滤；
- *   自动刷新开关 ON → setInterval(loadMetrics, 10000)；OFF → 清除定时器
+ *   aboutToAppear 顺序拉取 status/resources/connections/alerts；
+ *   告警"解决"按钮 → api.monitor.resolveAlert → 刷新告警列表
  *
  * TDD：MonitorViewHelper 各方法按红绿灯垂直切片逐步实现，
  *      详见 MonitorPage.test.ets
  */
 
-import { TopNavMenu, GlassCard, GlassButton, GlassInput } from '../components/glass';
+import { TopNavMenu, GlassCard, GlassButton } from '../components/glass';
 import { ApiFacade } from '../libs/api/ApiFacade';
 import { Router } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { MonitorMetric } from '../libs/types';
+import { SystemStatusDto, ResourceUsageDto, ConnectionStatusDto, AlertDto } from '../libs/api/modules/MonitorApi';
 
 /** 日志标签 */
 const TAG = 'MonitorPage';
@@ -53,7 +52,7 @@ const AUTO_REFRESH_INTERVAL_MS = 10000;
 const DEFAULT_STALE_THRESHOLD_MS = 5 * 60 * 1000;
 
 // ===========================================================================
-// MonitorViewHelper - 监控指标视图模型（纯函数，无 UI 依赖，可独立单元测试）
+// MonitorViewHelper - 监控视图模型（纯函数，无 UI 依赖，可独立单元测试）
 //
 // 设计：所有方法为 static，输入 → 输出，无副作用；
 //       颜色方法返回 StyleManager 的 token 名（如 'status_success'），由页面解析为实际颜色值；
@@ -158,14 +157,18 @@ export class MonitorViewHelper {
 
 @Component
 export struct MonitorPage {
-  // 监控指标列表（由 API 加载）
-  @State metrics: MonitorMetric[] = [];
   // 加载态
   @State loading: boolean = true;
-  // 搜索关键字（按 name 本地过滤）
-  @State keyword: string = '';
-  // 自动刷新开关
-  @State autoRefresh: boolean = false;
+  // 错误文案（非空时显示错误态；含非管理员的 403 原因）
+  @State errorMsg: string = '';
+  // 系统状态
+  @State status: SystemStatusDto | undefined = undefined;
+  // 资源使用
+  @State resources: ResourceUsageDto | undefined = undefined;
+  // 连接状态汇总
+  @State connections: ConnectionStatusDto[] = [];
+  // 告警列表
+  @State alerts: AlertDto[] = [];
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -175,9 +178,11 @@ export struct MonitorPage {
   private msg = MessageManager.getInstance();
   // 自动刷新定时器句柄
   private refreshTimer: number = -1;
+  // 自动刷新开关
+  @State autoRefresh: boolean = false;
 
   aboutToAppear() {
-    this.loadMetrics();
+    this.loadAll();
   }
 
   aboutToDisappear() {
@@ -185,25 +190,25 @@ export struct MonitorPage {
   }
 
   /**
-   * 加载监控指标列表
-   * 流程：调用 api.monitor.listMetrics(undefined) → 写入 metrics
-   * 异常：记录日志并提示用户；无论成败 finally 关闭 loading
+   * 拉取全部监控数据（真实端点，admin 门控）
+   * 流程：status → resources → connections → alerts 顺序拉取
+   * 异常：记录日志并把后端原因透出到错误态（如非管理员 403）
    */
-  private async loadMetrics(): Promise<void> {
+  private async loadAll(): Promise<void> {
     this.loading = true;
+    this.errorMsg = '';
     try {
-      const res = await this.api.monitor.listMetrics(undefined, undefined);
-      if (res.code === 0 && res.data) {
-        // PageResult 兼容：若 data 为 PageResult 取 items；若 data 为数组直接用
-        const data = res.data as Object;
-        const items = Array.isArray(data)
-          ? (data as MonitorMetric[])
-          : ((data as Record<string, Object>)?.['items'] as MonitorMetric[]) ?? [];
-        this.metrics = items;
-      }
+      const s = await this.api.monitor.getSystemStatus();
+      this.status = s.data;
+      const r = await this.api.monitor.getResources();
+      this.resources = r.data;
+      const c = await this.api.monitor.listConnections();
+      this.connections = c.data;
+      const a = await this.api.monitor.listAlerts(undefined, undefined, 50);
+      this.alerts = a.data;
     } catch (e) {
-      this.logger.error(TAG, '加载监控指标失败', e as Error);
-      this.msg.error('加载监控指标失败');
+      this.logger.error(TAG, '加载监控数据失败', e as Error);
+      this.errorMsg = (e as Error).message.length > 0 ? (e as Error).message : '加载监控数据失败';
     } finally {
       this.loading = false;
     }
@@ -217,7 +222,7 @@ export struct MonitorPage {
   private toggleAutoRefresh(): void {
     this.autoRefresh = !this.autoRefresh;
     if (this.autoRefresh) {
-      this.refreshTimer = setInterval(() => { this.loadMetrics(); }, AUTO_REFRESH_INTERVAL_MS);
+      this.refreshTimer = setInterval(() => { this.loadAll(); }, AUTO_REFRESH_INTERVAL_MS);
     } else {
       this.clearRefreshTimer();
     }
@@ -231,16 +236,61 @@ export struct MonitorPage {
     }
   }
 
-  /**
-   * 获取经关键字筛选后的列表
-   * 规则：keyword 为空返回全量；否则按 name 包含关键字过滤
-   */
-  private getFilteredList(): MonitorMetric[] {
-    if (!this.keyword || this.keyword.length === 0) {
-      return this.metrics;
+  /** 解决告警（acknowledge）后刷新告警列表 */
+  private async resolveAlert(alert: AlertDto): Promise<void> {
+    try {
+      await this.api.monitor.resolveAlert(alert.id);
+      this.msg.success('告警已解决');
+      const a = await this.api.monitor.listAlerts(undefined, undefined, 50);
+      this.alerts = a.data;
+    } catch (e) {
+      this.logger.error(TAG, '解决告警失败', e as Error);
+      this.msg.error((e as Error).message.length > 0 ? (e as Error).message : '解决告警失败');
     }
-    const kw = this.keyword.toLowerCase();
-    return this.metrics.filter((m: MonitorMetric) => m.name.toLowerCase().includes(kw));
+  }
+
+  /** 格式化运行时长（秒 → x天x小时x分） */
+  private formatUptime(seconds: number): string {
+    if (seconds <= 0) return '-';
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    if (days > 0) return `${days}天${hours}小时${minutes}分`;
+    if (hours > 0) return `${hours}小时${minutes}分`;
+    return `${minutes}分`;
+  }
+
+  /** 格式化字节数（GB/MB 自适应） */
+  private formatBytes(bytes: number): string {
+    if (bytes <= 0) return '-';
+    const gb = bytes / (1024 * 1024 * 1024);
+    if (gb >= 1) return `${gb.toFixed(1)}GB`;
+    const mb = bytes / (1024 * 1024);
+    return `${mb.toFixed(0)}MB`;
+  }
+
+  /** 格式化百分比（usage 0-100） */
+  private formatPercent(usage: number): string {
+    return `${usage.toFixed(1)}%`;
+  }
+
+  /** 资源行名 → 颜色 token（复用既有 tag 着色映射） */
+  private resourceColor(key: string): string {
+    return MonitorViewHelper.getTagColor(key);
+  }
+
+  /** 连接状态 → 颜色 token */
+  private connectionColor(status: string): string {
+    if (status === 'connected') return 'status_success';
+    if (status === 'degraded') return 'status_warning';
+    return 'status_error';
+  }
+
+  /** 告警严重级 → 颜色 token */
+  private severityColor(severity: string): string {
+    if (severity === 'critical' || severity === 'error') return 'status_error';
+    if (severity === 'warning') return 'status_warning';
+    return 'info';
   }
 
   build() {
@@ -254,17 +304,8 @@ export struct MonitorPage {
           onBack: () => { this.router.back(); }
         })
 
-        // 工具条：搜索框 + 自动刷新开关 + 手动刷新按钮
+        // 工具条：自动刷新开关 + 手动刷新按钮
         Row({ space: 8 }) {
-          GlassInput({
-            placeholder: '搜索指标名称',
-            value: this.keyword,
-            type: 'text',
-            onChange: (v: string) => { this.keyword = v; }
-          })
-            .layoutWeight(1)
-
-          // 自动刷新开关（文字按钮）
           Text(this.autoRefresh ? '自动刷新：开' : '自动刷新：关')
             .fontSize(this.sm.getFontSize('caption'))
             .fontColor(this.autoRefresh
@@ -275,17 +316,16 @@ export struct MonitorPage {
             .borderRadius(16)
             .onClick(() => { this.toggleAutoRefresh(); })
 
-          // 手动刷新按钮
           GlassButton({
-            label: '刷新',
-            onTap: () => { this.loadMetrics(); }
+            text: '刷新',
+            onTap: () => { this.loadAll(); }
           })
         }
         .width('90%')
         .alignItems(VerticalAlign.Center)
         .margin({ top: this.sm.getSpacing('sm'), bottom: this.sm.getSpacing('sm') })
 
-        // 主体内容：加载态 / 空态 / 指标列表 三选一
+        // 主体内容：加载态 / 错误态 / 监控数据
         if (this.loading) {
           Column() {
             Text('加载中...')
@@ -296,23 +336,32 @@ export struct MonitorPage {
           .layoutWeight(1)
           .justifyContent(FlexAlign.Center)
           .alignItems(HorizontalAlign.Center)
-        } else if (this.getFilteredList().length === 0) {
+        } else if (this.errorMsg.length > 0) {
           Column() {
-            Text('暂无监控指标')
+            Text('监控数据加载失败')
               .fontSize(this.sm.getFontSize('subtitle'))
+              .fontColor(this.sm.getColor('status_error'))
+            Text(this.errorMsg)
+              .fontSize(this.sm.getFontSize('caption'))
               .fontColor(this.sm.getColor('text_secondary'))
+              .margin({ top: 8 })
+            GlassButton({
+              text: '重试',
+              onTap: () => { this.loadAll(); }
+            })
+              .margin({ top: 12 })
           }
-          .width('100%')
+          .width('90%')
           .layoutWeight(1)
           .justifyContent(FlexAlign.Center)
           .alignItems(HorizontalAlign.Center)
         } else {
-          // 指标列表：纵向滚动
           Scroll() {
             Column({ space: this.sm.getSpacing('md') }) {
-              ForEach(this.getFilteredList(), (metric: MonitorMetric) => {
-                this.buildMetricCard(metric)
-              }, (metric: MonitorMetric, index: number) => `${metric.name}_${metric.timestamp}_${index}`)
+              this.buildStatusCard()
+              this.buildResourcesCard()
+              this.buildConnectionsCard()
+              this.buildAlertsCard()
             }
             .width('100%')
             .padding({
@@ -337,87 +386,208 @@ export struct MonitorPage {
   }
 
   // ===========================================================================
-  // 监控指标卡片构建器
+  // 监控数据卡构建器（真实 /v1/monitor 面）
   // ===========================================================================
 
-  /** 单个监控指标卡片：name（截断）+ value+unit + timestamp（HH:mm:ss）+ tags 着色 */
+  /** 系统状态卡：status/version/python/uptime */
   @Builder
-  buildMetricCard(metric: MonitorMetric) {
+  buildStatusCard() {
+    Column() {
     GlassCard() {
       Column() {
-        // 名称 + 过期标记
-        Row() {
-          Text(MonitorViewHelper.truncateMetricName(metric.name, DEFAULT_TRUNCATE_LEN))
-            .fontSize(this.sm.getFontSize('subtitle'))
-            .fontWeight(FontWeight.Medium)
-            .fontColor(this.sm.getColor('text_primary'))
-            .layoutWeight(1)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-          // 过期标记
-          if (MonitorViewHelper.isStaleMetric(metric.timestamp, DEFAULT_STALE_THRESHOLD_MS)) {
-            Text('过期')
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('status_warning'))
-              .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-              .backgroundColor(this.sm.getColor('surface'))
-              .borderRadius(8)
-              .margin({ left: 8 })
-          }
-        }
-        .width('100%')
-        .alignItems(VerticalAlign.Center)
-
-        // 数值 + 单位
-        Row() {
-          Text(MonitorViewHelper.formatMetricValue(metric.value, metric.unit))
-            .fontSize(this.sm.getFontSize('title'))
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.sm.getColor('primary'))
-        }
-        .alignItems(VerticalAlign.Bottom)
-        .margin({ top: 4 })
-
-        // 时间戳
-        Row() {
-          Text('时间：')
+        Text('系统状态')
+          .fontSize(this.sm.getFontSize('subtitle'))
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.sm.getColor('text_primary'))
+          .width('100%')
+        if (this.status !== undefined) {
+          Text(`运行状态：${this.status.status}`)
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('status_success'))
+            .margin({ top: 6 })
+          Text(`版本：${this.status.version} · Python ${this.status.python_version}`)
             .fontSize(this.sm.getFontSize('caption'))
             .fontColor(this.sm.getColor('text_secondary'))
-          Text(MonitorViewHelper.formatTimestamp(metric.timestamp))
+            .margin({ top: 4 })
+          Text(`已运行：${this.formatUptime(this.status.uptime)}`)
             .fontSize(this.sm.getFontSize('caption'))
             .fontColor(this.sm.getColor('text_secondary'))
-        }
-        .alignItems(VerticalAlign.Center)
-        .margin({ top: this.sm.getSpacing('sm') })
-
-        // tags 行（如有）：按 tagKey 着色
-        if (metric.tags) {
-          Row({ space: 6 }) {
-            ForEach(this.iterateTagKeys(metric.tags), (tagKey: string) => {
-              Text(tagKey)
-                .fontSize(this.sm.getFontSize('caption'))
-                .fontColor(this.sm.getColor(MonitorViewHelper.getTagColor(tagKey)))
-                .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-                .backgroundColor(this.sm.getColor('surface'))
-                .borderRadius(8)
-            }, (tagKey: string) => tagKey)
-          }
-          .margin({ top: this.sm.getSpacing('sm') })
-          .alignItems(VerticalAlign.Center)
+            .margin({ top: 4 })
         }
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
   }
 
-  /**
-   * 辅助方法：将 tags 对象的 key 转为数组（ForEach 需要）
-   * 设计：在 Builder 内调用，必须为实例方法（@Builder 不支持调用静态方法时返回数组用于 ForEach）
-   */
-  private iterateTagKeys(tags: Record<string, Object>): string[] {
-    return Object.keys(tags);
+  /** 资源使用卡：cpu / memory / disk 三行（usage+trend，memory/disk 附 used/total） */
+  @Builder
+  buildResourcesCard() {
+    Column() {
+    GlassCard() {
+      Column() {
+        Text('资源使用')
+          .fontSize(this.sm.getFontSize('subtitle'))
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.sm.getColor('text_primary'))
+          .width('100%')
+        if (this.resources !== undefined) {
+          this.buildResourceRow('cpu', this.resources.cpu.usage,
+            `${this.formatPercent(this.resources.cpu.usage)}（趋势 ${this.resources.cpu.trend >= 0 ? '+' : ''}${this.resources.cpu.trend}）`)
+          this.buildResourceRow('memory', this.resources.memory.usage,
+            `${this.formatPercent(this.resources.memory.usage)} · ${this.formatBytes(this.resources.memory.used)}/${this.formatBytes(this.resources.memory.total)}`)
+          this.buildResourceRow('disk', this.resources.disk.usage,
+            `${this.formatPercent(this.resources.disk.usage)} · ${this.formatBytes(this.resources.disk.used)}/${this.formatBytes(this.resources.disk.total)}`)
+        }
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+    }
+    }
+    .width('100%')
+  }
+
+  /** 单资源行：名称徽章 + 读数 */
+  @Builder
+  buildResourceRow(key: string, usage: number, detail: string) {
+    Row() {
+      Text(key)
+        .fontSize(this.sm.getFontSize('caption'))
+        .fontColor(this.sm.getColor(this.resourceColor(key)))
+        .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+        .backgroundColor(this.sm.getColor('surface'))
+        .borderRadius(8)
+      Text(detail)
+        .fontSize(this.sm.getFontSize('caption'))
+        .fontColor(this.sm.getColor('text_secondary'))
+        .margin({ left: 8 })
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Center)
+    .margin({ top: 6 })
+  }
+
+  /** 连接状态卡：providers/db/agents/执行监控 汇总行 */
+  @Builder
+  buildConnectionsCard() {
+    Column() {
+    GlassCard() {
+      Column() {
+        Text('连接状态')
+          .fontSize(this.sm.getFontSize('subtitle'))
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.sm.getColor('text_primary'))
+          .width('100%')
+        if (this.connections.length === 0) {
+          Text('暂无连接状态读数')
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_secondary'))
+            .margin({ top: 6 })
+        } else {
+          ForEach(this.connections, (c: ConnectionStatusDto) => {
+            Row() {
+              Row()
+                .width(8)
+                .height(8)
+                .borderRadius(4)
+                .backgroundColor(this.sm.getColor(this.connectionColor(c.status)))
+              Text(c.name)
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_primary'))
+                .margin({ left: 6 })
+                .layoutWeight(1)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+              Text(c.detail)
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+            }
+            .width('100%')
+            .alignItems(VerticalAlign.Center)
+            .margin({ top: 6 })
+          }, (c: ConnectionStatusDto) => `${c.name}_${c.status}`)
+        }
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+    }
+    }
+    .width('100%')
+  }
+
+  /** 告警卡：severity 徽章 + 标题/消息/时间 + 解决按钮 */
+  @Builder
+  buildAlertsCard() {
+    Column() {
+    GlassCard() {
+      Column() {
+        Text('告警')
+          .fontSize(this.sm.getFontSize('subtitle'))
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.sm.getColor('text_primary'))
+          .width('100%')
+        if (this.alerts.length === 0) {
+          Text('当前无告警')
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_secondary'))
+            .margin({ top: 6 })
+        } else {
+          ForEach(this.alerts, (a: AlertDto) => {
+            Column() {
+              Row() {
+                Text(a.severity)
+                  .fontSize(this.sm.getFontSize('caption'))
+                  .fontColor(this.sm.getColor(this.severityColor(a.severity)))
+                  .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+                  .backgroundColor(this.sm.getColor('surface'))
+                  .borderRadius(8)
+                Text(MonitorViewHelper.truncateMetricName(a.title, DEFAULT_TRUNCATE_LEN))
+                  .fontSize(this.sm.getFontSize('caption'))
+                  .fontColor(this.sm.getColor('text_primary'))
+                  .margin({ left: 8 })
+                  .layoutWeight(1)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                if (!a.resolved) {
+                  GlassButton({
+                    text: '解决',
+                    btnSize: 'small',
+                    onTap: () => { this.resolveAlert(a); }
+                  })
+                }
+              }
+              .width('100%')
+              .alignItems(VerticalAlign.Center)
+
+              Text(a.message)
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_secondary'))
+                .width('100%')
+                .maxLines(2)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .margin({ top: 4 })
+
+              Text(`来源：${a.source} · ${MonitorViewHelper.formatTimestamp(new Date(a.timestamp * 1000).toISOString())}${a.resolved ? ' · 已解决' : ''}`)
+                .fontSize(this.sm.getFontSize('caption'))
+                .fontColor(this.sm.getColor('text_disabled'))
+                .width('100%')
+                .margin({ top: 4 })
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
+            .padding({ top: 6, bottom: 6 })
+          }, (a: AlertDto) => a.id)
+        }
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+    }
+    }
+    .width('100%')
   }
 }

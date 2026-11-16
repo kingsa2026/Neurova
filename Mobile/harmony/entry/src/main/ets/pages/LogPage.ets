@@ -441,6 +441,7 @@ export struct LogPage {
   /** 单条日志卡片：级别徽章 + 时间戳 + source + 消息 + 可展开 context 详情 */
   @Builder
   buildLogCard(log: LogEntry) {
+    Column() {
     GlassCard() {
       Column() {
         // 上部：级别徽章 + 时间戳
@@ -513,6 +514,7 @@ export struct LogPage {
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
+    }
     }
     .width('100%')
     .onClick(() => { this.toggleExpand(log.id); })

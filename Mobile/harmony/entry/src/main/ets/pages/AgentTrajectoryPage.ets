@@ -180,8 +180,8 @@ export struct AgentTrajectoryPage {
   private async loadTrajectory(): Promise<void> {
     this.loading = true;
     try {
-      const agentId = this.agentsStore.currentAgentId;
-      const res = await this.api.runtime.listTrajectory(agentId || undefined);
+      const agentId = this.agentsStore.currentAgentId || 'default';
+      const res = await this.api.runtime.listTrajectory(agentId);
       if (res.code === 0 && res.data) {
         // 按 step 升序排序（不可变排序，避免直接 mutate API 返回）
         const sorted = [...res.data.items].sort((a, b) => a.step - b.step);
@@ -279,6 +279,7 @@ export struct AgentTrajectoryPage {
   /** 单条轨迹点卡片：step 序号 + action emoji + observation 摘要 + reward + timestamp + 详情按钮 */
   @Builder
   buildTrajectoryCard(point: TrajectoryPoint) {
+    Column() {
     GlassCard() {
       Column() {
         // 上部：step 序号 + action emoji + action 标签
@@ -343,6 +344,7 @@ export struct AgentTrajectoryPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
   }
 
@@ -364,6 +366,7 @@ export struct AgentTrajectoryPage {
         .onClick(() => { this.closeDetail(); })
 
       // 面板层：居中展示详情
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           // 标题
@@ -424,6 +427,7 @@ export struct AgentTrajectoryPage {
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
+      }
       }
       .width('85%')
     }

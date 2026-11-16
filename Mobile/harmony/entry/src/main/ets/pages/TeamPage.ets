@@ -42,7 +42,7 @@ import { Router } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { Team, TeamRole } from '../libs/types';
+import { Team, TeamMember, TeamRole } from '../libs/types';
 
 /** 日志标签 */
 const TAG = 'TeamPage';
@@ -116,10 +116,14 @@ export class TeamViewHelper {
    * @param members 成员列表
    * @return 角色分布字符串，空列表返回空字符串
    */
-  static formatRoleDistribution(members: Array<{ userId: string; role: TeamRole }>): string {
+  static formatRoleDistribution(members: TeamMember[]): string {
     if (!members || members.length === 0) return '';
     const order: TeamRole[] = ['owner', 'admin', 'member', 'viewer'];
-    const counts: Record<string, number> = { owner: 0, admin: 0, member: 0, viewer: 0 };
+    const counts: Record<string, number> = {};
+    counts['owner'] = 0;
+    counts['admin'] = 0;
+    counts['member'] = 0;
+    counts['viewer'] = 0;
     for (const m of members) {
       counts[m.role] = (counts[m.role] || 0) + 1;
     }
@@ -382,6 +386,7 @@ export struct TeamPage {
   /** 单个团队卡片：名称 + 描述摘要 + 成员数（按角色分组）+ 操作按钮 */
   @Builder
   buildTeamCard(team: Team) {
+    Column() {
     GlassCard() {
       Column() {
         // 名称
@@ -452,6 +457,7 @@ export struct TeamPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
   }
 
@@ -471,6 +477,7 @@ export struct TeamPage {
         .onClick(() => { this.closeDetail(); })
 
       // 面板层
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           // 标题
@@ -489,7 +496,7 @@ export struct TeamPage {
           Scroll() {
             Column({ space: 8 }) {
               if (team.members && team.members.length > 0) {
-                ForEach(team.members, (m: { userId: string; role: TeamRole }) => {
+                ForEach(team.members, (m: TeamMember) => {
                   Row() {
                     Text(TeamViewHelper.getRoleIcon(m.role))
                       .fontSize(16)
@@ -510,7 +517,7 @@ export struct TeamPage {
                   }
                   .width('100%')
                   .alignItems(VerticalAlign.Center)
-                }, (m: { userId: string; role: TeamRole }) => `${m.userId}_${m.role}`)
+                }, (m: TeamMember) => `${m.userId}_${m.role}`)
               } else {
                 Text('暂无成员')
                   .fontSize(this.sm.getFontSize('body'))
@@ -539,6 +546,7 @@ export struct TeamPage {
         .height('100%')
         .alignItems(HorizontalAlign.Start)
       }
+      }
       .width('90%')
       .height('80%')
     }
@@ -562,6 +570,7 @@ export struct TeamPage {
         .onClick(() => { this.showCreateDialog = false; })
 
       // 面板层
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('新建团队')
@@ -580,7 +589,7 @@ export struct TeamPage {
             placeholder: '请输入团队名称',
             value: this.formData.name,
             type: 'text',
-            onChange: (v: string) => { this.formData = { ...this.formData, name: v }; }
+            onChange: (v: string) => { this.formData = { name: v, description: this.formData.description }; }
           })
             .margin({ top: 4 })
 
@@ -594,7 +603,7 @@ export struct TeamPage {
             placeholder: '请输入描述',
             value: this.formData.description,
             type: 'text',
-            onChange: (v: string) => { this.formData = { ...this.formData, description: v }; }
+            onChange: (v: string) => { this.formData = { name: this.formData.name, description: v }; }
           })
             .margin({ top: 4 })
 
@@ -620,6 +629,7 @@ export struct TeamPage {
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
+      }
       }
       .width('90%')
     }

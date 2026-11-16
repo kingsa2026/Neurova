@@ -45,7 +45,8 @@ import { Router } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { ChannelInfo, ChannelType, ChannelStatus } from '../libs/types';
+import { ChannelType } from '../libs/types';
+import { ChannelConfigDto, ChannelConfigUpsertBody, emptyExtra } from '../libs/api/modules/AgentChannelsApi';
 
 /** 日志标签 */
 const TAG = 'AgentChannelPage';
@@ -76,7 +77,7 @@ export class ChannelViewHelper {
    *   email    → 📧
    *   未知     → ❓
    */
-  static getTypeIcon(type: ChannelType): string {
+  static getTypeIcon(type: string): string {
     if (type === 'feishu') {
       return '🐦';
     }
@@ -117,7 +118,7 @@ export class ChannelViewHelper {
    *   email    → 邮箱
    *   未知     → 未知
    */
-  static getTypeLabel(type: ChannelType): string {
+  static getTypeLabel(type: string): string {
     if (type === 'feishu') {
       return '飞书';
     }
@@ -150,7 +151,7 @@ export class ChannelViewHelper {
    * 映射：connected→success / disconnected→text_disabled / error→error / disabled→warning / 未知→text_disabled
    * 返回 token 名（非颜色值），由调用方通过 StyleManager.getColor(token) 解析
    */
-  static getStatusColor(status: ChannelStatus): string {
+  static getStatusColor(status: string): string {
     if (status === 'connected') {
       return 'success';
     }
@@ -170,19 +171,9 @@ export class ChannelViewHelper {
 /** 新建渠道表单数据 */
 interface ChannelFormData {
   type: ChannelType;
-  name: string;
   appId: string;
   appSecret: string;
   webhookUrl: string;
-}
-
-/** 新建渠道创建入参（api.agentChannels.create 的 data 形状；config 为字符串键字典） */
-interface ChannelCreateData {
-  type: ChannelType;
-  name: string;
-  appId: string;
-  webhookUrl: string;
-  config: Record<string, Object>;
 }
 
 /** 渠道类型选项（新建弹窗类型选择条目） */
@@ -194,8 +185,8 @@ interface ChannelTypeOption {
 
 @Component
 export struct AgentChannelPage {
-  // 渠道列表（由 API 加载，驱动列表渲染）
-  @State channels: ChannelInfo[] = [];
+  // 渠道配置列表（/v1/channel-configs?agent_id= 真实数据）
+  @State channels: ChannelConfigDto[] = [];
   // 加载态（控制"加载中..."占位与列表的切换）
   @State loading: boolean = true;
   // 当前 Agent 名称（用于头部展示，空值回退"未选择智能体"）
@@ -206,7 +197,6 @@ export struct AgentChannelPage {
   // 新建表单数据
   @State formData: ChannelFormData = {
     type: 'feishu' as ChannelType,
-    name: '',
     appId: '',
     appSecret: '',
     webhookUrl: '',
@@ -263,15 +253,15 @@ export struct AgentChannelPage {
   }
 
   /**
-   * 测试渠道连接
+   * 测试渠道连接（POST /v1/channel-configs/{type}/test?agent_id=）
    * 流程：调用 API testConnection → 根据结果显示成功/失败消息
-   * 异常：记录日志并提示用户
+   * 异常：记录日志并把后端原因透出
    */
-  private async testConnection(channel: ChannelInfo): Promise<void> {
+  private async testConnection(channel: ChannelConfigDto): Promise<void> {
     const agentId = this.agentsStore.currentAgentId;
     if (!agentId) return;
     try {
-      const res = await this.api.agentChannels.testConnection(agentId, channel.id);
+      const res = await this.api.agentChannels.testConnection(agentId, channel.channel_type);
       if (res.code === 0 && res.data) {
         if (res.data.success) {
           this.msg.success('连接成功');
@@ -283,29 +273,7 @@ export struct AgentChannelPage {
       }
     } catch (e) {
       this.logger.error(TAG, '测试连接失败', e as Error);
-      this.msg.error('测试连接失败');
-    }
-  }
-
-  /**
-   * 切换渠道启用/禁用
-   * 流程：调用 API toggle → 成功后刷新列表
-   * 异常：记录日志并提示用户
-   */
-  private async toggleChannel(channel: ChannelInfo, enabled: boolean): Promise<void> {
-    const agentId = this.agentsStore.currentAgentId;
-    if (!agentId) return;
-    try {
-      const res = await this.api.agentChannels.toggle(agentId, channel.id, enabled);
-      if (res.code === 0) {
-        this.msg.success(enabled ? '已启用' : '已禁用');
-        this.loadChannels();
-      } else {
-        this.msg.error(res.message || '操作失败');
-      }
-    } catch (e) {
-      this.logger.error(TAG, '切换渠道状态失败', e as Error);
-      this.msg.error('操作失败');
+      this.msg.error((e as Error).message.length > 0 ? (e as Error).message : '测试连接失败');
     }
   }
 
@@ -313,10 +281,10 @@ export struct AgentChannelPage {
    * 删除前二次确认
    * 使用 AlertDialog 弹窗，避免误删；确认后调用 removeChannel
    */
-  private confirmDelete(channel: ChannelInfo): void {
+  private confirmDelete(channel: ChannelConfigDto): void {
     AlertDialog.show({
       title: '确认删除',
-      message: `确定要删除渠道"${channel.name}"吗？此操作不可撤销。`,
+      message: `确定要删除渠道"${channel.channel_type}"的配置吗？此操作不可撤销。`,
       autoCancel: true,
       alignment: DialogAlignment.Center,
       primaryButton: {
@@ -332,24 +300,20 @@ export struct AgentChannelPage {
   }
 
   /**
-   * 执行删除
+   * 执行删除（DELETE /v1/channel-configs/{type}?agent_id=）
    * 流程：调用 API remove → 成功后重新加载列表
-   * 异常：记录日志并提示用户
+   * 异常：记录日志并把后端原因透出
    */
-  private async removeChannel(channel: ChannelInfo): Promise<void> {
+  private async removeChannel(channel: ChannelConfigDto): Promise<void> {
     const agentId = this.agentsStore.currentAgentId;
     if (!agentId) return;
     try {
-      const res = await this.api.agentChannels.remove(agentId, channel.id);
-      if (res.code === 0) {
-        this.msg.success('删除成功');
-        this.loadChannels();
-      } else {
-        this.msg.error(res.message || '删除失败');
-      }
+      await this.api.agentChannels.remove(agentId, channel.channel_type);
+      this.msg.success('删除成功');
+      this.loadChannels();
     } catch (e) {
       this.logger.error(TAG, '删除渠道失败', e as Error);
-      this.msg.error('删除渠道失败');
+      this.msg.error((e as Error).message.length > 0 ? (e as Error).message : '删除渠道失败');
     }
   }
 
@@ -360,7 +324,6 @@ export struct AgentChannelPage {
   private openCreateDialog(): void {
     this.formData = {
       type: 'feishu' as ChannelType,
-      name: '',
       appId: '',
       appSecret: '',
       webhookUrl: '',
@@ -369,9 +332,9 @@ export struct AgentChannelPage {
   }
 
   /**
-   * 提交新建
-   * 流程：组装 data → 调用 API create → 成功后关闭弹窗并刷新列表
-   * 异常：记录日志并提示用户
+   * 提交新建（POST /v1/channel-configs?agent_id=，ChannelConfigRequest 契约）
+   * 流程：组装 body → 调用 API create → 成功后关闭弹窗并刷新列表
+   * 异常：记录日志并把后端原因透出（含平台身份冲突 409）
    */
   private async submitCreate(): Promise<void> {
     const agentId = this.agentsStore.currentAgentId;
@@ -379,64 +342,37 @@ export struct AgentChannelPage {
       this.msg.warning('请先选择智能体');
       return;
     }
-    if (!this.formData.name) {
-      this.msg.warning('请填写渠道名称');
-      return;
-    }
     try {
-      // config 为字符串键字典：先建空 Record 再逐键写入（ArkTS 禁止非空对象字面量直接落 Record）
-      const config: Record<string, Object> = {};
-      config['appId'] = this.formData.appId;
-      config['appSecret'] = this.formData.appSecret;
-      config['webhookUrl'] = this.formData.webhookUrl;
-      const data: ChannelCreateData = {
-        type: this.formData.type,
-        name: this.formData.name,
-        appId: this.formData.appId,
-        webhookUrl: this.formData.webhookUrl,
-        config: config,
+      const body: ChannelConfigUpsertBody = {
+        channel_type: this.formData.type,
+        enabled: true,
+        app_id: this.formData.appId,
+        app_secret: this.formData.appSecret,
+        use_stream: true,
+        webhook_url: this.formData.webhookUrl,
+        webhook_token: '',
+        encrypt_key: '',
+        verification_token: '',
+        extra: emptyExtra(),
       };
-      const res = await this.api.agentChannels.create(agentId, data);
-      if (res.code === 0) {
-        this.msg.success('创建成功');
-        this.showCreateDialog = false;
-        this.loadChannels();
-      } else {
-        this.msg.error(res.message || '创建失败');
-      }
+      await this.api.agentChannels.create(agentId, body);
+      this.msg.success('创建成功');
+      this.showCreateDialog = false;
+      this.loadChannels();
     } catch (e) {
       this.logger.error(TAG, '创建渠道失败', e as Error);
-      this.msg.error('创建渠道失败');
+      this.msg.error((e as Error).message.length > 0 ? (e as Error).message : '创建渠道失败');
     }
   }
 
-  /** 格式化时间（YYYY-MM-DD HH:mm），无值回退 '未知' */
-  private formatTime(time?: string): string {
-    if (!time) return '未知';
-    const d = new Date(time);
-    if (isNaN(d.getTime())) return '未知';
-    const yyyy = d.getFullYear();
-    const MM = (d.getMonth() + 1).toString().padStart(2, '0');
-    const dd = d.getDate().toString().padStart(2, '0');
-    const hh = d.getHours().toString().padStart(2, '0');
-    const mm = d.getMinutes().toString().padStart(2, '0');
-    return `${yyyy}-${MM}-${dd} ${hh}:${mm}`;
-  }
-
-  /** 获取配置摘要（appId / webhookUrl 截断显示） */
-  private getConfigSummary(channel: ChannelInfo): string {
+  /** 获取配置摘要（凭据掩码 + 传输模式） */
+  private getConfigSummary(channel: ChannelConfigDto): string {
     const parts: string[] = [];
-    if (channel.appId) {
-      const id = channel.appId;
-      const short = id.length > 12 ? `${id.substring(0, 12)}...` : id;
-      parts.push(`appId: ${short}`);
+    if (channel.app_id_masked && channel.app_id_masked.length > 0) {
+      parts.push(`appId: ${channel.app_id_masked}`);
     }
-    if (channel.webhookUrl) {
-      const url = channel.webhookUrl;
-      const short = url.length > 30 ? `${url.substring(0, 30)}...` : url;
-      parts.push(`webhook: ${short}`);
-    }
-    return parts.length > 0 ? parts.join(' · ') : '无配置';
+    parts.push(channel.use_stream ? 'Stream 模式' : 'Webhook 模式');
+    return parts.join(' · ');
   }
 
   build() {
@@ -495,11 +431,11 @@ export struct AgentChannelPage {
       } else {
         // 渠道列表：纵向滚动，卡片间距 12，关闭滚动条
         List({ space: 12 }) {
-          ForEach(this.channels, (channel: ChannelInfo) => {
+          ForEach(this.channels, (channel: ChannelConfigDto) => {
             ListItem() {
               this.buildChannelCard(channel)
             }
-          }, (channel: ChannelInfo) => channel.id)
+          }, (channel: ChannelConfigDto) => channel.channel_type)
         }
         .layoutWeight(1)
         .width('100%')
@@ -526,34 +462,37 @@ export struct AgentChannelPage {
   // 渠道卡片构建器
   // ===========================================================================
 
-  /** 单个渠道卡片：图标+名称+状态 / 配置摘要 / 时间 / 错误信息 / 操作按钮 */
+  /**
+   * 单个渠道卡片：图标+类型+状态 / 配置摘要 / 操作按钮
+   * 状态由后端 connected/enabled 两布尔推导（真实契约无独立 status 字段）
+   */
   @Builder
-  buildChannelCard(channel: ChannelInfo) {
+  buildChannelCard(channel: ChannelConfigDto) {
     // ArkTS 解析器不允许尾随闭包组件调用后再链属性修饰，外包 Column 承接 .width
     Column() {
     GlassCard() {
       Column() {
-        // 上部：图标 + 名称/状态徽章
+        // 上部：图标 + 类型/状态徽章
         Row() {
           // 渠道类型图标
-          Text(ChannelViewHelper.getTypeIcon(channel.type))
+          Text(ChannelViewHelper.getTypeIcon(channel.channel_type))
             .fontSize(24)
             .width(40)
             .height(40)
             .textAlign(TextAlign.Center)
 
-          // 信息列：名称 + 类型显示名 + 状态徽章
+          // 信息列：类型显示名 + 状态徽章
           Column() {
-            // 名称
-            Text(channel.name)
+            // 类型显示名
+            Text(ChannelViewHelper.getTypeLabel(channel.channel_type))
               .fontSize(this.sm.getFontSize('subtitle'))
               .fontWeight(FontWeight.Bold)
               .fontColor(this.sm.getColor('text_primary'))
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-            // 类型显示名
-            Text(ChannelViewHelper.getTypeLabel(channel.type))
+            // 原始渠道类型
+            Text(channel.channel_type)
               .fontSize(this.sm.getFontSize('caption'))
               .fontColor(this.sm.getColor('text_secondary'))
               .margin({ top: 2 })
@@ -564,8 +503,8 @@ export struct AgentChannelPage {
                 .width(8)
                 .height(8)
                 .borderRadius(4)
-                .backgroundColor(this.sm.getColor(ChannelViewHelper.getStatusColor(channel.status)))
-              Text(this.getStatusLabel(channel.status))
+                .backgroundColor(this.sm.getColor(ChannelViewHelper.getStatusColor(this.displayStatus(channel))))
+              Text(this.getStatusLabel(this.displayStatus(channel)))
                 .fontSize(this.sm.getFontSize('caption'))
                 .fontColor(this.sm.getColor('text_secondary'))
                 .margin({ left: 4 })
@@ -589,34 +528,7 @@ export struct AgentChannelPage {
           .margin({ top: this.sm.getSpacing('sm') })
           .width('100%')
 
-        // 时间行：连接时间 + 最后事件时间
-        Row() {
-          Text(`连接：${this.formatTime(channel.connectedAt)}`)
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_disabled'))
-          Text('·')
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_disabled'))
-            .margin({ left: 4, right: 4 })
-          Text(`最后事件：${this.formatTime(channel.lastEventAt)}`)
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_disabled'))
-        }
-        .margin({ top: 4 })
-        .alignItems(VerticalAlign.Center)
-
-        // 错误信息（status=error 时显示）
-        if (channel.status === 'error' && channel.errorMessage) {
-          Text(`错误：${channel.errorMessage}`)
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('error'))
-            .maxLines(2)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .margin({ top: 4 })
-            .width('100%')
-        }
-
-        // 下部：操作按钮（右对齐）
+        // 下部：操作按钮（右对齐；后端无 toggle 端点，启停由配置 enabled 在保存时生效）
         Row() {
           GlassButton({
             text: '测试',
@@ -624,13 +536,6 @@ export struct AgentChannelPage {
             btnSize: 'small',
             onTap: () => { this.testConnection(channel); }
           })
-          GlassButton({
-            text: channel.enabled ? '禁用' : '启用',
-            type: channel.enabled ? 'default' : 'primary',
-            btnSize: 'small',
-            onTap: () => { this.toggleChannel(channel, !channel.enabled); }
-          })
-            .margin({ left: this.sm.getSpacing('sm') })
           GlassButton({
             text: '删除',
             type: 'danger',
@@ -648,6 +553,13 @@ export struct AgentChannelPage {
     }
     }
     .width('100%')
+  }
+
+  /** 由 connected/enabled 推导展示状态（真实契约字段） */
+  private displayStatus(channel: ChannelConfigDto): string {
+    if (channel.connected) return 'connected';
+    if (!channel.enabled) return 'disabled';
+    return 'disconnected';
   }
 
   // ===========================================================================
@@ -683,7 +595,6 @@ export struct AgentChannelPage {
                 // ArkTS 禁止对象展开，逐键拷贝生成新对象以触发 @State 渲染
                 const next: ChannelFormData = {
                   type: opt.type,
-                  name: this.formData.name,
                   appId: this.formData.appId,
                   appSecret: this.formData.appSecret,
                   webhookUrl: this.formData.webhookUrl,
@@ -696,19 +607,6 @@ export struct AgentChannelPage {
         }
         .width('100%')
         .margin({ top: this.sm.getSpacing('xs'), bottom: this.sm.getSpacing('sm') })
-
-        // 渠道名称
-        Text('渠道名称')
-          .fontSize(this.sm.getFontSize('caption'))
-          .fontColor(this.sm.getColor('text_secondary'))
-          .width('100%')
-        GlassInput({
-          placeholder: '请输入渠道名称',
-          value: this.formData.name,
-          type: 'text',
-          onChange: (v: string) => { this.formData.name = v; }
-        })
-          .margin({ top: 4, bottom: this.sm.getSpacing('sm') })
 
         // AppId
         Text('AppId')
@@ -723,7 +621,6 @@ export struct AgentChannelPage {
             // ArkTS 禁止对象展开，逐键拷贝生成新对象以触发 @State 渲染
             const next: ChannelFormData = {
               type: this.formData.type,
-              name: this.formData.name,
               appId: v,
               appSecret: this.formData.appSecret,
               webhookUrl: this.formData.webhookUrl,
@@ -746,7 +643,6 @@ export struct AgentChannelPage {
             // ArkTS 禁止对象展开，逐键拷贝生成新对象以触发 @State 渲染
             const next: ChannelFormData = {
               type: this.formData.type,
-              name: this.formData.name,
               appId: this.formData.appId,
               appSecret: v,
               webhookUrl: this.formData.webhookUrl,
@@ -769,7 +665,6 @@ export struct AgentChannelPage {
             // ArkTS 禁止对象展开，逐键拷贝生成新对象以触发 @State 渲染
             const next: ChannelFormData = {
               type: this.formData.type,
-              name: this.formData.name,
               appId: this.formData.appId,
               appSecret: this.formData.appSecret,
               webhookUrl: v,
@@ -829,7 +724,7 @@ export struct AgentChannelPage {
   }
 
   /** 获取状态文案：connected→已连接，disconnected→未连接，error→异常，disabled→已禁用 */
-  private getStatusLabel(status: ChannelStatus): string {
+  private getStatusLabel(status: string): string {
     if (status === 'connected') {
       return '已连接';
     }

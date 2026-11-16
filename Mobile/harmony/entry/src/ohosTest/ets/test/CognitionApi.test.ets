@@ -1,6 +1,7 @@
 // CognitionApi 单元测试 - 真实契约版
 // 通过 HttpBackend 接口注入 mock，验证 CognitionApi 调用契约（method/url/body/返回值）
-// 端点词汇与后端挂载同源：/v1/experience、/v1/metacognition、/v1/growth、/v1/knowledge-graph
+// 后端挂载为 /v1/experience、/v1/metacognition、/v1/growth、/v1/knowledge-graph；
+// HttpClient 的 baseUrl 已含 /api/v1，模块内路径不带 /v1（本文件 baseUrl 用裸域名断言）。
 // 不真实发起网络请求，符合"不直接调用后端接口"规则
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
 import { HttpClient, HttpBackend } from '../../../../main/ets/libs/api/HttpClient';
@@ -43,7 +44,7 @@ export default function cognitionApiTest() {
       api.listExperiences('agent-1', 2, 10);
       expect(backend.requests[0].method).assertEqual('GET');
       const url = backend.requests[0].url;
-      expect(url.includes('/v1/experience/ranking')).assertTrue();
+      expect(url.includes('/experience/ranking')).assertTrue();
       expect(url.includes('agent_id=agent-1')).assertTrue();
       expect(url.includes('page=2')).assertTrue();
       expect(url.includes('size=10')).assertTrue();
@@ -60,7 +61,7 @@ export default function cognitionApiTest() {
       };
       api.createExperience(payload);
       expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/experience/records');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/experience/records');
       expect(backend.requests[0].body).assertEqual(payload);
     });
 
@@ -68,7 +69,7 @@ export default function cognitionApiTest() {
       backend.response = { code: 0, message: 'ok', data: {} };
       api.removeExperience('e1');
       expect(backend.requests[0].method).assertEqual('DELETE');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/experience/e1');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/experience/e1');
     });
 
     // ========== Metacognition: list/create ==========
@@ -78,7 +79,7 @@ export default function cognitionApiTest() {
       api.listMetacognitions('agent-1', 2, 10);
       expect(backend.requests[0].method).assertEqual('GET');
       const url = backend.requests[0].url;
-      expect(url.includes('/v1/metacognition/agent-1/metacognition')).assertTrue();
+      expect(url.includes('/metacognition/agent-1/metacognition')).assertTrue();
       expect(url.includes('page=2')).assertTrue();
       expect(url.includes('size=10')).assertTrue();
     });
@@ -93,7 +94,7 @@ export default function cognitionApiTest() {
       };
       api.createMetacognition('agent-1', payload);
       expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/metacognition/agent-1/metacognition');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/metacognition/agent-1/metacognition');
       expect(backend.requests[0].body).assertEqual(payload);
     });
 
@@ -104,7 +105,7 @@ export default function cognitionApiTest() {
       api.listReflections('agent-1', 20);
       expect(backend.requests[0].method).assertEqual('GET');
       const url = backend.requests[0].url;
-      expect(url.includes('/v1/growth/reflection')).assertTrue();
+      expect(url.includes('/growth/reflection')).assertTrue();
       expect(url.includes('agent_id=agent-1')).assertTrue();
       expect(url.includes('limit=20')).assertTrue();
     });
@@ -121,7 +122,7 @@ export default function cognitionApiTest() {
       api.createReflection('agent-1', payload);
       expect(backend.requests[0].method).assertEqual('POST');
       const url = backend.requests[0].url;
-      expect(url.includes('/v1/growth/reflection')).assertTrue();
+      expect(url.includes('/growth/reflection')).assertTrue();
       expect(url.includes('agent_id=agent-1')).assertTrue();
       expect(backend.requests[0].body).assertEqual(payload);
     });
@@ -133,7 +134,7 @@ export default function cognitionApiTest() {
       api.getGrowthData('agent-1');
       expect(backend.requests[0].method).assertEqual('GET');
       const url = backend.requests[0].url;
-      expect(url.includes('/v1/growth')).assertTrue();
+      expect(url.includes('/growth')).assertTrue();
       expect(url.includes('agent_id=agent-1')).assertTrue();
     });
 
@@ -144,7 +145,7 @@ export default function cognitionApiTest() {
       api.getKnowledgeGraph('agent-1');
       expect(backend.requests[0].method).assertEqual('GET');
       const url = backend.requests[0].url;
-      expect(url.includes('/v1/knowledge-graph/agent-1/knowledge-graph')).assertTrue();
+      expect(url.includes('/knowledge-graph/agent-1/knowledge-graph')).assertTrue();
       expect(url.includes('limit=100')).assertTrue();
     });
 

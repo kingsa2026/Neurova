@@ -119,8 +119,16 @@ export struct ExperienceKnowledgePage {
     this.showCreate = false;
   }
 
-  private updateFormField(field: keyof ExperienceFormData, value: string): void {
-    this.formData = { ...this.formData, [field]: value } as ExperienceFormData;
+  private updateFormField(field: string, value: string): void {
+    if (field === 'taskType') {
+      this.formData = { taskType: value, context: this.formData.context, outcome: this.formData.outcome, lessons: this.formData.lessons };
+    } else if (field === 'context') {
+      this.formData = { taskType: this.formData.taskType, context: value, outcome: this.formData.outcome, lessons: this.formData.lessons };
+    } else if (field === 'outcome') {
+      this.formData = { taskType: this.formData.taskType, context: this.formData.context, outcome: value, lessons: this.formData.lessons };
+    } else {
+      this.formData = { taskType: this.formData.taskType, context: this.formData.context, outcome: this.formData.outcome, lessons: value };
+    }
   }
 
   /** 提交新建（AddExperienceRecordRequest 契约） */
@@ -321,6 +329,7 @@ export struct ExperienceKnowledgePage {
   /** 单条经验卡片：技能名 + task_type 徽章 + outcome 徽章 + 熟练度 + 上下文 + 操作 */
   @Builder
   buildExperienceCard(item: ExperienceDto) {
+    Column() {
     GlassCard() {
       Column() {
         // 标题行：技能名 + outcome 徽章
@@ -364,7 +373,7 @@ export struct ExperienceKnowledgePage {
           .height(4)
           .borderRadius(2)
           .backgroundColor(this.sm.getColor('divider'))
-          .alignItems(VerticalAlign.Start)
+          .alignItems(VerticalAlign.Top)
 
           Text(`熟练度 ${ExperienceKnowledgeViewHelper.formatProficiency(item.proficiency)}`)
             .fontSize(this.sm.getFontSize('caption'))
@@ -418,6 +427,7 @@ export struct ExperienceKnowledgePage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
   }
 
@@ -431,6 +441,7 @@ export struct ExperienceKnowledgePage {
         .backgroundColor(this.sm.getColor('overlay_mask'))
         .onClick(() => { this.closeCreate(); })
 
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('新建经验')
@@ -520,6 +531,7 @@ export struct ExperienceKnowledgePage {
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
+      }
       }
       .width('90%')
     }

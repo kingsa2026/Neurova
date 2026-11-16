@@ -39,6 +39,11 @@ import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
 import { ContextMessage, ContextRole } from '../libs/types';
 
+/** 路由参数形态（ArkTS 禁匿名对象类型，独立声明） */
+interface RouteSessionParam {
+  sessionId?: string;
+}
+
 /** 日志标签 */
 const TAG = 'ContextChannelPage';
 
@@ -174,7 +179,7 @@ export struct ContextChannelPage {
    * 异常：无 sessionId → 进入错误态，提示"会话 ID 缺失"
    */
   private parseSessionId(): void {
-    const params = this.router.getCurrentParam() as { sessionId?: string } | undefined;
+    const params = this.router.getCurrentParam() as RouteSessionParam | undefined;
     const sid = params?.sessionId || '';
     if (!sid) {
       this.hasError = true;
@@ -390,6 +395,7 @@ export struct ContextChannelPage {
   /** 单条消息卡片：role 徽章 / content 摘要 / tokens / 创建时间 / 操作按钮 */
   @Builder
   buildMessageCard(message: ContextMessage) {
+    Column() {
     GlassCard() {
       Column() {
         // 上部：role 徽章 + tokens（右对齐）
@@ -446,6 +452,7 @@ export struct ContextChannelPage {
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)
+    }
     }
     .width('100%')
   }

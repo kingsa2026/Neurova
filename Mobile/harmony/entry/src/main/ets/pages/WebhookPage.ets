@@ -184,6 +184,12 @@ const DEFAULT_FORM: WebhookFormData = {
   secret: '',
 };
 
+/** 默认表单工厂（ArkTS 禁 spread 复制，集中此处） */
+function defaultForm(): WebhookFormData {
+  const form: WebhookFormData = { name: '', url: '', events: [], secret: '' };
+  return form;
+}
+
 /**
  * Mock Webhook 数据
  * TODO M6 阶段：替换为 api.webhook.list() 真实 API
@@ -237,7 +243,7 @@ export struct WebhookPage {
   // 新建弹窗显示状态
   @State showCreateDialog: boolean = false;
   // 新建表单数据（嵌套属性变更需整体重新赋值）
-  @State formData: WebhookFormData = { ...DEFAULT_FORM };
+  @State formData: WebhookFormData = defaultForm();
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -287,31 +293,36 @@ export struct WebhookPage {
 
   /** 打开新建弹窗，重置表单 */
   private openCreateDialog(): void {
-    this.formData = { ...DEFAULT_FORM };
+    this.formData = defaultForm();
     this.showCreateDialog = true;
   }
 
   /** 输入名称（嵌套属性变更：整体重新赋值） */
   private inputName(v: string): void {
-    this.formData = { ...this.formData, name: v };
+    this.formData = { name: v, url: this.formData.url, events: this.formData.events, secret: this.formData.secret };
   }
 
   /** 输入 URL（嵌套属性变更：整体重新赋值） */
   private inputUrl(v: string): void {
-    this.formData = { ...this.formData, url: v };
+    this.formData = { name: this.formData.name, url: v, events: this.formData.events, secret: this.formData.secret };
   }
 
   /** 输入密钥（嵌套属性变更：整体重新赋值） */
   private inputSecret(v: string): void {
-    this.formData = { ...this.formData, secret: v };
+    this.formData = { name: this.formData.name, url: this.formData.url, events: this.formData.events, secret: v };
   }
 
   /** 切换事件选中状态（嵌套属性变更：整体重新赋值） */
   private toggleEvent(event: WebhookEvent): void {
-    const events = this.formData.events.includes(event)
-      ? this.formData.events.filter((e: WebhookEvent) => e !== event)
-      : [...this.formData.events, event];
-    this.formData = { ...this.formData, events };
+    const events = this.formData.events.slice();
+    const idx = events.indexOf(event);
+    if (idx >= 0) {
+      events.splice(idx, 1);
+    } else {
+      events.push(event);
+    }
+    const next: WebhookFormData = { name: this.formData.name, url: this.formData.url, events: events, secret: this.formData.secret };
+    this.formData = next;
   }
 
   /**
@@ -385,14 +396,21 @@ export struct WebhookPage {
       // TODO M6 阶段：const res = await this.api.webhook.testTrigger(webhookId);
       // 临时：本地增加成功计数 + 更新最后触发时间
       const now = new Date().toISOString();
-      this.webhooks = this.webhooks.map((w: Webhook) => {
+      this.webhooks = this.webhooks.map((w: Webhook): Webhook => {
         if (w.id === webhookId) {
-          return {
-            ...w,
-            successCount: w.successCount + 1,
+          const updated: Webhook = {
+            id: w.id,
+            name: w.name,
+            url: w.url,
+            events: w.events,
+            status: w.status,
             lastTriggeredAt: now,
+            successCount: w.successCount + 1,
+            failureCount: w.failureCount,
+            createdAt: w.createdAt,
             updatedAt: now,
           };
+          return updated;
         }
         return w;
       });
@@ -518,6 +536,7 @@ export struct WebhookPage {
   /** 单个 Webhook 卡片：状态徽章 + 名称 + URL + 事件徽章 + 统计 + 操作按钮 */
   @Builder
   buildWebhookCard(wh: Webhook) {
+    Column() {
     GlassCard() {
       Column() {
         // 顶部行：状态图标 + 状态徽章 + 名称
@@ -608,6 +627,7 @@ export struct WebhookPage {
       .width('100%')
       .alignItems(HorizontalAlign.Start)
     }
+    }
     .width('100%')
   }
 
@@ -627,6 +647,7 @@ export struct WebhookPage {
         .onClick(() => { this.showCreateDialog = false; })
 
       // 面板层
+      Column() {
       GlassPanel({ variant: 'elevated', innerPadding: 20 }) {
         Column() {
           Text('新建 Webhook')
@@ -723,6 +744,7 @@ export struct WebhookPage {
         }
         .width('100%')
         .alignItems(HorizontalAlign.Start)
+      }
       }
       .width('90%')
     }

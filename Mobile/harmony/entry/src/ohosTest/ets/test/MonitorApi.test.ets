@@ -1,21 +1,11 @@
-// MonitorApi 单元测试 - TDD 垂直切片
-// 通过 HttpBackend 接口注入 mock，验证 MonitorApi 调用契约（method/url/body/返回值）
-// 覆盖 6 个实体核心方法：Stat、MonitorMetric、LogEntry、NotificationItem、FileItem、Neuron
+// MonitorApi 单元测试 - 真实契约版（M9.2 监控域迁移）
+// 后端事实源：/v1/monitor（status/resources/connections/alerts，admin 门控）、
+// /v1/neuron、/v1/notifications、/v1/files。
+// 旧 /monitor/stats|metrics|logs|neurons 与 fire 端点后端不存在：
+// 对应方法必须 throw 点名，且**不发任何网络请求**（本文件钉住这一行为）。
 import { describe, it, expect, beforeEach } from '@ohos/hypium';
 import { HttpClient, HttpBackend } from '../../../../main/ets/libs/api/HttpClient';
-import {
-  ApiResponse,
-  Stat,
-  MonitorMetric,
-  LogEntry,
-  LogLevel,
-  NotificationItem,
-  FileItem,
-  Neuron,
-  NeuronState,
-  PageResult,
-  PageParams,
-} from '../../../../main/ets/libs/types';
+import { ApiResponse } from '../../../../main/ets/libs/types';
 import { MonitorApi } from '../../../../main/ets/libs/api/modules/MonitorApi';
 
 // Mock 后端实现（参考 MemoryApi.test.ets 模式）
@@ -47,109 +37,101 @@ export default function monitorApiTest() {
       api = new MonitorApi(client);
     });
 
-    // ========== Stat 实体（2 测试）==========
-    it('listStats_calls_get_with_period_query', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: [] };
-      api.listStats('day');
+    // ========== 监控真实面（/monitor/*）==========
+
+    it('getSystemStatus_calls_get_monitor_status', 0, () => {
+      api.getSystemStatus();
       expect(backend.requests[0].method).assertEqual('GET');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/monitor/stats?period=day');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/monitor/status');
     });
 
-    it('getStat_calls_get_with_key_in_url', 0, () => {
-      api.getStat('active_users');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/monitor/stats/active_users');
+    it('getResources_calls_get_monitor_resources', 0, () => {
+      api.getResources();
+      expect(backend.requests[0].method).assertEqual('GET');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/monitor/resources');
     });
 
-    // ========== MonitorMetric 实体（2 测试）==========
-    it('listMetrics_calls_get_with_name_query', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: [] };
-      api.listMetrics('cpu_usage');
+    it('listConnections_calls_get_monitor_connections', 0, () => {
+      api.listConnections();
+      expect(backend.requests[0].method).assertEqual('GET');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/monitor/connections');
+    });
+
+    it('listAlerts_carries_level_resolved_limit_query', 0, () => {
+      api.listAlerts('warning', false, 50);
       const url = backend.requests[0].url;
       expect(backend.requests[0].method).assertEqual('GET');
-      expect(url.includes('name=cpu_usage')).assertTrue();
+      expect(url.includes('/monitor/alerts')).assertTrue();
+      expect(url.includes('level=warning')).assertTrue();
+      expect(url.includes('resolved=false')).assertTrue();
+      expect(url.includes('limit=50')).assertTrue();
     });
 
-    it('pushMetric_posts_body_to_metrics', 0, () => {
-      const data: Partial<MonitorMetric> = { name: 'cpu_usage', value: 0.45, unit: 'ratio', timestamp: '2026-06-25T00:00:00Z' };
-      api.pushMetric(data);
+    it('resolveAlert_posts_to_alert_resolve', 0, () => {
+      api.resolveAlert('a1');
       expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/monitor/metrics');
-      expect(backend.requests[0].body).assertEqual(data);
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/monitor/alerts/a1/resolve');
     });
 
-    // ========== LogEntry 实体（3 测试）==========
-    it('listLogs_passes_level_and_source_filters', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 1, size: 20 } };
-      api.listLogs({ page: 1, size: 20 }, 'error' as LogLevel, 'HttpClient');
+    // ========== NEURON（/neuron/*）==========
+
+    it('listNeurons_gets_neuron_entities_with_type_filter', 0, () => {
+      api.listNeurons('service', { page: 1, size: 200 });
       const url = backend.requests[0].url;
-      expect(url.includes('level=error')).assertTrue();
-      expect(url.includes('source=HttpClient')).assertTrue();
+      expect(backend.requests[0].method).assertEqual('GET');
+      expect(url.includes('/neuron/entities')).assertTrue();
+      expect(url.includes('entity_type=service')).assertTrue();
+      expect(url.includes('limit=200')).assertTrue();
     });
 
-    it('clearLogs_posts_before_body', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: {} };
-      api.clearLogs('2026-06-01T00:00:00Z');
+    it('createNeuronEntity_posts_name_type_metadata', 0, () => {
+      const metadata: Record<string, Object> = {};
+      api.createNeuronEntity('网关', 'service', metadata);
       expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/monitor/logs/clear');
-      expect(backend.requests[0].body).assertEqual({ before: '2026-06-01T00:00:00Z' });
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/neuron/entities');
+      expect(backend.requests[0].body).assertEqual({ 'name': '网关', 'entity_type': 'service', 'metadata': {} });
     });
 
-    it('removeLog_deletes_by_id', 0, () => {
-      api.removeLog('l1');
-      expect(backend.requests[0].method).assertEqual('DELETE');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/monitor/logs/l1');
+    it('getNeuronStats_gets_neuron_stats', 0, () => {
+      api.getNeuronStats();
+      expect(backend.requests[0].method).assertEqual('GET');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/neuron/stats');
     });
 
-    // ========== NotificationItem 实体（3 测试）==========
-    it('listNotifications_passes_unreadOnly_query', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: [] };
+    // ========== 通知 / 文件（真实端点）==========
+
+    it('listNotifications_unread_only_maps_to_read_false', 0, () => {
       api.listNotifications(true);
+      const url = backend.requests[0].url;
       expect(backend.requests[0].method).assertEqual('GET');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/monitor/notifications?unreadOnly=true');
+      expect(url.includes('/notifications')).assertTrue();
+      expect(url.includes('read=false')).assertTrue();
     });
 
-    it('markNotificationRead_posts_to_read_endpoint', 0, () => {
-      api.markNotificationRead('n1');
-      expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/monitor/notifications/n1/read');
-    });
-
-    it('markAllNotificationsRead_posts_to_read_all', 0, () => {
+    it('markAllNotificationsRead_posts_mark_all_read', 0, () => {
       api.markAllNotificationsRead();
       expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/monitor/notifications/read-all');
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/notifications/mark-all-read');
     });
 
-    // ========== FileItem 实体（2 测试）==========
-    it('listFiles_filters_by_parentId', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 1, size: 20 } };
-      api.listFiles('root');
-      const url = backend.requests[0].url;
+    it('listFiles_gets_bare_array_from_files', 0, () => {
+      api.listFiles(undefined, undefined);
       expect(backend.requests[0].method).assertEqual('GET');
-      expect(url.includes('parentId=root')).assertTrue();
+      expect(backend.requests[0].url).assertEqual('https://api.example.com/files');
     });
 
-    it('createFolder_posts_to_folder_endpoint', 0, () => {
-      const data: Partial<FileItem> = { name: 'docs', type: 'folder', path: '/docs', size: 0, modifiedAt: '' };
-      api.createFolder(data);
-      expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/monitor/files/folder');
-      expect(backend.requests[0].body).assertEqual(data);
-    });
+    // ========== 退役端点：必须 throw 且不发任何请求 ==========
 
-    // ========== Neuron 实体（2 测试）==========
-    it('listNeurons_filters_by_agentId', 0, () => {
-      backend.response = { code: 0, message: 'ok', data: { items: [], total: 0, page: 1, size: 20 } };
-      api.listNeurons('a1');
-      const url = backend.requests[0].url;
-      expect(backend.requests[0].method).assertEqual('GET');
-      expect(url.includes('agentId=a1')).assertTrue();
-    });
-
-    it('fireNeuron_posts_to_fire_endpoint', 0, () => {
+    it('retiredStatsMetricsLogsFire_fire_no_request', 0, () => {
+      api.listStats('day');
+      api.getStat('k');
+      api.listMetrics(undefined, undefined);
+      api.listLogs(undefined, undefined, undefined);
+      api.clearLogs();
       api.fireNeuron('n1');
-      expect(backend.requests[0].method).assertEqual('POST');
-      expect(backend.requests[0].url).assertEqual('https://api.example.com/v1/monitor/neurons/n1/fire');
+      api.getNeuron('n1');
+      api.getNotification('n1');
+      expect(backend.requests.length).assertEqual(0);
     });
   });
 }
