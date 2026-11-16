@@ -1,212 +1,175 @@
 /**
- * SkillPoolPage - 技能池页
+ * SkillPoolPage - 技能池页（R6 接真实 API）
  *
- * 职责：展示已安装的技能列表，按 status 筛选，启用/禁用/卸载
+ * 职责：展示已安装的技能列表（/v1/skills registry 快照），按启用态筛选，启用/禁用
  * 设计：
- *   - SkillPoolViewHelper（导出）：纯视图模型，封装技能状态颜色映射、状态图标、状态文案、
- *     评分格式化（5 星）、安装数格式化（K/M）、标签格式化，无 UI 运行时依赖，可独立单元测试；
+ *   - SkillPoolViewHelper（导出）：纯视图模型，封装启用态颜色映射、状态图标、状态文案、
+ *     使用次数格式化、成功率格式化、描述截断，无 UI 运行时依赖，可独立单元测试；
  *   - SkillPoolPage（@Component）：Column [TopNavMenu(标题"技能池"+返回)] +
- *     [status 筛选 Tab（全部/draft/published/deprecated）] + [加载态/空态/列表]；
- *     列表项 GlassCard：name、category 徽章、version、status 徽章、installs、rating（5 星）、
- *     tags、操作（启用-禁用/卸载）；卸载走 AlertDialog 二次确认；
- *     暂无新建（技能来自市场安装流程）；
- *   - 颜色统一走 StyleManager，路由走 Router，已接线 PageMap（P1-33）；skills 专用 API 模块待 S4 新增（移交单） →
- *     落地前以 mock 静态数据渲染，模块落地后替换 mock。
+ *     [enabled 筛选 Tab（全部/启用/禁用）] + [加载态/空态/列表]；
+ *     列表项 GlassCard：name、category 徽章、version、enabled 徽章、usage_count、
+ *     success_rate、description；
+ *   - 颜色统一走 StyleManager，路由走 Router，已接线 PageMap（P1-33）；
+ *     数据源 SkillsApi.list()（R6：替换 mock，契约对齐后端 SkillInfo——enabled 布尔，
+ *     无 draft/published/deprecated 三态与 installs/rating 字段）。
+ *
+ * 契约说明（诚实缺省）：
+ *   - 后端 skill.py 域无卸载端点（卸载属市场域 marketplace.uninstall / 技能池
+ *     private 库 DELETE，且 registry 快照不携带来源信息无法定位）——本页不再
+ *     渲染"卸载"按钮，不提供后端没有的能力。
+ *   - 启用/禁用写 PUT /skills/{id}/enable|disable（registry.set_skill_enabled）。
  *
  * 依赖：
  *   - ../components/glass：TopNavMenu、GlassCard、GlassButton
- *   - ../libs/api/ApiFacade：统一 API 门面（仅作为占位，未实际调用）
+ *   - ../libs/api/ApiFacade：统一 API 门面（api.skills.*）
+ *   - ../libs/api/modules/SkillsApi：SkillInfoDto 契约
  *   - ../routing/Router：统一路由跳转
  *   - ../libs/style/StyleManager：统一样式 token
  *   - ../libs/logger/Logger：统一日志
  *   - ../libs/message/MessageManager：统一消息提示
- *   - ../libs/types：Skill、SkillStatus
  *
  * 用法：
  *   由 Router.push(RouteNames.SKILL_POOL) 跳转进入；
- *   aboutToAppear 加载 mock 技能列表（TODO M5 阶段接入 api.settings 或新增 api.skills）；
- *   状态筛选 Tab 切换 → 本地 filterByStatus 过滤；
- *   启用/禁用 → 本地切换 enabled 状态 + TODO M5 接入 API；
- *   卸载 → AlertDialog 二次确认 → 本地移除 + TODO M5 接入 API。
+ *   aboutToAppear 经 api.skills.list() 加载技能列表；
+ *   enabled 筛选 Tab 切换 → 本地过滤；
+ *   启用/禁用 → api.skills.enable/disable → 失败 toast，成功后刷新。
  *
- * TDD：SkillPoolViewHelper 各方法按红绿灯垂直切片逐步实现，详见 SkillPoolPage.test.ets
+ * TDD：SkillPoolViewHelper 各方法见 ohosTest SkillPoolPage.test.ets
  */
 
 import { TopNavMenu, GlassCard, GlassButton } from '../components/glass';
 import { ApiFacade } from '../libs/api/ApiFacade';
+import { SkillInfoDto } from '../libs/api/modules/SkillsApi';
 import { Router } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { Skill, SkillStatus } from '../libs/types';
 
 /** 日志标签 */
 const TAG = 'SkillPoolPage';
+
+/** 描述截断默认最大长度 */
+const DEFAULT_DESC_MAX_LEN = 80;
+
+/** 成功率百分比上限 */
+const RATE_PERCENT_MAX = 100;
 
 // ===========================================================================
 // SkillPoolViewHelper - 技能池视图模型（纯函数，无 UI 依赖，可独立单元测试）
 //
 // 设计：所有方法为 static，输入 → 输出，无副作用；
-//       颜色方法返回 StyleManager 的 token 名（如 'warning'），由页面解析为实际颜色值；
-//       图标方法返回 emoji 字符串直接渲染；
+//       颜色方法返回 StyleManager 的 token 名（如 'success'），由页面解析为实际颜色值；
 //       通过本文件 export，供 ohosTest 直接导入测试
 // ===========================================================================
 
 export class SkillPoolViewHelper {
   /**
-   * 获取技能状态对应的颜色 token 名
-   * 映射：draft→warning，published→success，deprecated→text_disabled
-   * @param status 技能状态
+   * 获取技能启用态对应的颜色 token 名
+   * 映射：enabled→success，disabled→text_disabled
+   * @param enabled 技能启用态（后端 SkillInfo.enabled）
    * @return StyleManager 颜色 token 名
    */
-  static getStatusColor(status: SkillStatus): string {
-    if (status === 'draft') return 'warning';
-    if (status === 'published') return 'success';
-    if (status === 'deprecated') return 'text_disabled';
-    // 未覆盖的状态抛错，强制 TDD 红灯逐项补齐
-    throw new Error(`getStatusColor 未实现: ${status}`);
+  static getStatusColor(enabled: boolean): string {
+    return enabled ? 'success' : 'text_disabled';
   }
 
   /**
-   * 获取技能状态对应的图标 emoji
-   * 映射：draft→📝，published→✅，deprecated→🗑️
-   * @param status 技能状态
+   * 获取技能启用态对应的图标 emoji
+   * 映射：enabled→✅，disabled→🚫
+   * @param enabled 技能启用态
    * @return emoji 字符串
    */
-  static getStatusIcon(status: SkillStatus): string {
-    if (status === 'draft') return '📝';
-    if (status === 'published') return '✅';
-    if (status === 'deprecated') return '🗑️';
-    throw new Error(`getStatusIcon 未实现: ${status}`);
+  static getStatusIcon(enabled: boolean): string {
+    return enabled ? '✅' : '🚫';
   }
 
   /**
-   * 获取技能状态对应的中文标签
-   * 映射：draft→草稿，published→已发布，deprecated→已弃用
-   * @param status 技能状态
+   * 获取技能启用态对应的中文标签
+   * 映射：enabled→已启用，disabled→已禁用
+   * @param enabled 技能启用态
    * @return 中文文案
    */
-  static getStatusLabel(status: SkillStatus): string {
-    if (status === 'draft') return '草稿';
-    if (status === 'published') return '已发布';
-    if (status === 'deprecated') return '已弃用';
-    throw new Error(`getStatusLabel 未实现: ${status}`);
+  static getStatusLabel(enabled: boolean): string {
+    return enabled ? '已启用' : '已禁用';
   }
 
   /**
-   * 格式化评分（0-5）为 5 星 + 数值字符串
-   * 规则：0 → "暂无评分"；非零 → "★★★☆☆ 4.5"（满格数 = floor(rating)）
-   * @param rating 评分 0-5
-   * @return 评分展示字符串
+   * 获取启用/禁用操作按钮文案（对当前状态取反的动作）
+   * @param enabled 技能启用态
+   * @return '禁用' 或 '启用'
    */
-  static formatRating(rating: number): string {
-    if (rating === 0) return '暂无评分';
-    const full = Math.floor(rating);
-    const empty = 5 - full;
-    const stars = '★'.repeat(full) + '☆'.repeat(empty);
-    return `${stars} ${rating.toFixed(1)}`;
+  static getToggleActionLabel(enabled: boolean): string {
+    return enabled ? '禁用' : '启用';
   }
 
   /**
-   * 格式化安装数为人类可读字符串
-   * 规则：0 → "无安装"；≥1M → "1.0M 安装"；≥1K → "1.0K 安装"；其他 → "{n} 安装"
-   * @param installs 安装数
-   * @return 人类可读安装数字符串
+   * 格式化使用次数为人类可读字符串
+   * 规则：0 → "未使用"；≥1M → "1.0M 次"；≥1K → "1.0K 次"；其他 → "{n} 次"
+   * @param usageCount 使用次数（后端 usage_count）
+   * @return 人类可读使用数字符串
    */
-  static formatInstalls(installs: number): string {
-    if (installs === 0) return '无安装';
+  static formatUsageCount(usageCount: number): string {
+    if (usageCount === 0) return '未使用';
     const M = 1024 * 1024;
     const K = 1024;
-    if (installs >= M) {
-      return `${(installs / M).toFixed(1)}M 安装`;
+    if (usageCount >= M) {
+      return `${(usageCount / M).toFixed(1)}M 次`;
     }
-    if (installs >= K) {
-      return `${(installs / K).toFixed(1)}K 安装`;
+    if (usageCount >= K) {
+      return `${(usageCount / K).toFixed(1)}K 次`;
     }
-    return `${installs} 安装`;
+    return `${usageCount} 次`;
   }
 
   /**
-   * 格式化标签列表为展示字符串
-   * 规则：空数组 → "无标签"；非空 → "a · b · c"（中点分隔符）
-   * @param tags 标签数组
-   * @return 标签展示字符串
+   * 格式化成功率（0-1 小数）为百分比字符串
+   * 规则：0 → "无统计"；其他 → "成功率 {n}%"
+   * @param successRate 成功率（后端 success_rate，0-1）
+   * @return 成功率展示字符串
    */
-  static formatTags(tags: string[]): string {
-    if (!tags || tags.length === 0) return '无标签';
-    return tags.join(' · ');
+  static formatSuccessRate(successRate: number): string {
+    if (successRate === 0) return '无统计';
+    const percent = Math.round(successRate * RATE_PERCENT_MAX);
+    return `成功率 ${percent}%`;
+  }
+
+  /**
+   * 截断描述文本，超长时截取 maxLen 字符并追加省略号
+   * @param desc 原始描述
+   * @param maxLen 最大字符数，默认 80
+   * @return 截断后的描述；未超长则原样返回
+   */
+  static truncateDescription(desc: string, maxLen: number = DEFAULT_DESC_MAX_LEN): string {
+    if (desc.length <= maxLen) return desc;
+    return desc.substring(0, maxLen) + '...';
   }
 }
 
-/** 状态筛选 Tab 配置 */
-interface StatusFilterOption {
-  value: string;     // 'all' 或 SkillStatus
+/** enabled 筛选 Tab 配置 */
+interface EnabledFilterOption {
+  value: string;     // 'all' / 'enabled' / 'disabled'
   label: string;
 }
 
-/** 状态筛选 Tab 列表（顺序即展示顺序） */
-const STATUS_FILTERS: StatusFilterOption[] = [
+/** enabled 筛选 Tab 列表（顺序即展示顺序） */
+const ENABLED_FILTERS: EnabledFilterOption[] = [
   { value: 'all', label: '全部' },
-  { value: 'draft', label: '草稿' },
-  { value: 'published', label: '已发布' },
-  { value: 'deprecated', label: '已弃用' },
-];
-
-/**
- * Mock 技能数据（数组字面量）
- * TODO M5 阶段：替换为 api.skills.list() 或 api.settings.list({ category: 'skills' })
- */
-const MOCK_SKILLS: Skill[] = [
-  {
-    id: 'skill_1',
-    name: '代码生成器',
-    description: '基于上下文生成代码片段',
-    category: 'AI',
-    version: '1.2.0',
-    status: 'published',
-    author: 'Neurova',
-    installs: 1024,
-    rating: 4.5,
-    tags: ['code', 'ai', 'dev'],
-    publishedAt: '2025-01-10T08:00:00Z',
-  },
-  {
-    id: 'skill_2',
-    name: '文档摘要',
-    description: '自动提取文档关键信息',
-    category: '工具',
-    version: '0.9.0',
-    status: 'draft',
-    author: 'Neurova',
-    installs: 0,
-    rating: 0,
-    tags: [],
-  },
-  {
-    id: 'skill_3',
-    name: '飞书消息集成',
-    description: '已弃用的旧版飞书消息推送',
-    category: '集成',
-    version: '0.5.0',
-    status: 'deprecated',
-    author: 'Neurova',
-    installs: 1048576,
-    rating: 3.0,
-    tags: ['feishu', 'legacy'],
-    publishedAt: '2024-06-01T00:00:00Z',
-  },
+  { value: 'enabled', label: '启用' },
+  { value: 'disabled', label: '禁用' },
 ];
 
 @Component
 export struct SkillPoolPage {
-  // 技能列表（由 mock 数据驱动，后续接入真实 API）
-  @State skills: Skill[] = [];
+  // 技能列表（api.skills.list() 真实数据）
+  @State skills: SkillInfoDto[] = [];
   // 加载态
   @State loading: boolean = true;
-  // 当前激活的状态筛选值：'all' 或具体 SkillStatus
-  @State activeStatus: string = 'all';
+  // 当前激活的 enabled 筛选值：'all' / 'enabled' / 'disabled'
+  @State activeFilter: string = 'all';
+  // 写操作进行中（防重复点击）
+  @State togglingId: string = '';
 
-  // 统一库单例（api 暂未使用，预留以便 M5 接入）
+  // 统一库单例
   private api = ApiFacade.getInstance();
   private router = Router.getInstance();
   private sm = StyleManager.getInstance();
@@ -218,95 +181,68 @@ export struct SkillPoolPage {
   }
 
   /**
-   * 加载技能列表
-   * TODO M5 阶段：替换为真实 API（api.skills.list 或 api.settings.list({ category: 'skills' })）
-   * 当前使用 mock 静态数据，模拟异步加载流程
+   * 加载技能列表（GET /v1/skills，registry 快照）
    */
   private async loadSkills(): Promise<void> {
     this.loading = true;
     try {
-      // TODO M5 阶段补充真实 API
-      // const res = await this.api.skills.list();
-      // if (res.code === 0 && res.data) { this.skills = res.data.items; }
-      this.skills = MOCK_SKILLS.slice();
+      const res = await this.api.skills.list();
+      if (res.code === 0 && res.data) {
+        this.skills = res.data;
+      } else {
+        this.skills = [];
+        this.msg.error(res.message && res.message.length > 0 ? res.message : '加载技能列表失败');
+      }
     } catch (e) {
       this.logger.error(TAG, '加载技能失败', e as Error);
       this.msg.error('加载技能列表失败');
+      this.skills = [];
     } finally {
       this.loading = false;
     }
   }
 
-  /** 切换状态筛选 Tab */
-  private switchStatus(value: string): void {
-    this.activeStatus = value;
+  /** 切换 enabled 筛选 Tab */
+  private switchFilter(value: string): void {
+    this.activeFilter = value;
   }
 
   /**
-   * 获取经状态筛选后的列表
-   * 规则：activeStatus === 'all' 返回全量；否则按 status 字段过滤
+   * 获取经 enabled 筛选后的列表
+   * 规则：activeFilter === 'all' 返回全量；否则按 enabled 字段过滤
    */
-  private getFilteredSkills(): Skill[] {
-    if (this.activeStatus === 'all') {
+  private getFilteredSkills(): SkillInfoDto[] {
+    if (this.activeFilter === 'all') {
       return this.skills;
     }
-    return this.skills.filter((s: Skill) => s.status === this.activeStatus);
+    const wantEnabled = this.activeFilter === 'enabled';
+    return this.skills.filter((s: SkillInfoDto) => s.enabled === wantEnabled);
   }
 
   /**
-   * 切换技能启用/禁用
-   * TODO M5 阶段：调用真实 API（api.skills.toggle）
-   * 当前为本地切换 enabled 字段（需整体重新赋值以触发 @State 更新）
+   * 切换技能启用/禁用（对当前状态取反）
+   * 后端无"失败回滚"问题：失败时 toast 拒因，成功后整体刷新拿 registry 真值
    */
-  private toggleSkill(skill: Skill): void {
-    // TODO M5 阶段：调用 api.skills.toggle(skill.id)
-    const updated: Skill[] = this.skills.map((s: Skill) => {
-      if (s.id === skill.id) {
-        // 整体重建列表以触发 @State（当前未改字段，原样返回）
-        return s;
-      }
-      return s;
-    });
-    this.skills = updated;
-    this.msg.info('TODO: 启用/禁用需 M5 阶段接入 API');
-  }
-
-  /**
-   * 卸载前二次确认
-   * 使用 AlertDialog 弹窗，避免误操作；确认后调用 uninstallSkill
-   */
-  private confirmUninstall(skill: Skill): void {
-    AlertDialog.show({
-      title: '确认卸载',
-      message: `确定要卸载技能"${skill.name}"吗？此操作不可撤销。`,
-      autoCancel: true,
-      alignment: DialogAlignment.Center,
-      primaryButton: {
-        value: '取消',
-        action: () => {}
-      },
-      secondaryButton: {
-        value: '卸载',
-        fontColor: this.sm.getColor('error'),
-        action: () => { this.uninstallSkill(skill.id); }
-      }
-    });
-  }
-
-  /**
-   * 执行卸载
-   * TODO M5 阶段：调用真实 API（api.skills.uninstall）
-   * 当前为本地移除 + TODO 提示
-   */
-  private async uninstallSkill(skillId: string): Promise<void> {
+  private async toggleSkill(skill: SkillInfoDto): Promise<void> {
+    if (this.togglingId.length > 0) {
+      return;
+    }
+    this.togglingId = skill.skill_id;
     try {
-      // TODO M5 阶段：const res = await this.api.skills.uninstall(skillId);
-      // 临时：本地移除
-      this.skills = this.skills.filter((s: Skill) => s.id !== skillId);
-      this.msg.success('已卸载');
+      const res = skill.enabled
+        ? await this.api.skills.disable(skill.skill_id)
+        : await this.api.skills.enable(skill.skill_id);
+      if (res.code === 0) {
+        this.msg.success(`${skill.name} ${SkillPoolViewHelper.getToggleActionLabel(skill.enabled)}成功`);
+        await this.loadSkills();
+      } else {
+        this.msg.error(res.message && res.message.length > 0 ? res.message : '操作失败');
+      }
     } catch (e) {
-      this.logger.error(TAG, '卸载技能失败', e as Error);
-      this.msg.error('卸载技能失败');
+      this.logger.error(TAG, '切换技能状态失败', e as Error);
+      this.msg.error('切换技能状态失败');
+    } finally {
+      this.togglingId = '';
     }
   }
 
@@ -320,22 +256,22 @@ export struct SkillPoolPage {
         onBack: () => { this.router.back(); }
       })
 
-      // 状态筛选 Tab：横向滚动胶囊
+      // enabled 筛选 Tab：横向滚动胶囊
       Scroll() {
         Row({ space: 8 }) {
-          ForEach(STATUS_FILTERS, (opt: StatusFilterOption) => {
+          ForEach(ENABLED_FILTERS, (opt: EnabledFilterOption) => {
             Text(opt.label)
               .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.activeStatus === opt.value
+              .fontColor(this.activeFilter === opt.value
                 ? this.sm.getColor('text_on_primary')
                 : this.sm.getColor('text_secondary'))
-              .backgroundColor(this.activeStatus === opt.value
+              .backgroundColor(this.activeFilter === opt.value
                 ? this.sm.getColor('primary')
                 : this.sm.getColor('surface'))
               .padding({ left: 12, right: 12, top: 6, bottom: 6 })
               .borderRadius(16)
-              .onClick(() => { this.switchStatus(opt.value); })
-          }, (opt: StatusFilterOption) => opt.value)
+              .onClick(() => { this.switchFilter(opt.value); })
+          }, (opt: EnabledFilterOption) => opt.value)
         }
         .padding({ left: this.sm.getSpacing('md'), right: this.sm.getSpacing('md') })
       }
@@ -370,11 +306,11 @@ export struct SkillPoolPage {
       } else {
         // 技能列表：纵向滚动，卡片间距 12
         List({ space: 12 }) {
-          ForEach(this.getFilteredSkills(), (skill: Skill) => {
+          ForEach(this.getFilteredSkills(), (skill: SkillInfoDto) => {
             ListItem() {
               this.buildSkillCard(skill)
             }
-          }, (skill: Skill) => skill.id)
+          }, (skill: SkillInfoDto) => skill.skill_id)
         }
         .layoutWeight(1)
         .width('100%')
@@ -396,18 +332,18 @@ export struct SkillPoolPage {
   // 技能卡片构建器
   // ===========================================================================
 
-  /** 单个技能卡片：状态徽章 + 名称 + 分类/版本 + 评分/安装数 + 标签 + 操作按钮 */
+  /** 单个技能卡片：启用徽章 + 名称 + 分类/版本 + 使用统计 + 描述 + 启用/禁用按钮 */
   @Builder
-  buildSkillCard(skill: Skill) {
+  buildSkillCard(skill: SkillInfoDto) {
     GlassCard() {
       Column() {
         // 顶部行：状态图标 + 状态徽章 + 名称
         Row() {
-          Text(SkillPoolViewHelper.getStatusIcon(skill.status))
+          Text(SkillPoolViewHelper.getStatusIcon(skill.enabled))
             .fontSize(20)
-          Text(SkillPoolViewHelper.getStatusLabel(skill.status))
+          Text(SkillPoolViewHelper.getStatusLabel(skill.enabled))
             .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor(SkillPoolViewHelper.getStatusColor(skill.status)))
+            .fontColor(this.sm.getColor(SkillPoolViewHelper.getStatusColor(skill.enabled)))
             .padding({ left: 6, right: 6, top: 2, bottom: 2 })
             .borderRadius(this.sm.getRadius('sm'))
             .backgroundColor(this.sm.getColor('surface'))
@@ -442,7 +378,7 @@ export struct SkillPoolPage {
         .alignItems(VerticalAlign.Center)
 
         // 描述
-        Text(skill.description)
+        Text(SkillPoolViewHelper.truncateDescription(skill.description))
           .fontSize(this.sm.getFontSize('caption'))
           .fontColor(this.sm.getColor('text_secondary'))
           .maxLines(2)
@@ -450,45 +386,32 @@ export struct SkillPoolPage {
           .margin({ top: this.sm.getSpacing('xs') })
           .width('100%')
 
-        // 评分 + 安装数 + 标签
+        // 使用统计：次数 + 成功率
         Row() {
-          Text(SkillPoolViewHelper.formatRating(skill.rating))
+          Text(SkillPoolViewHelper.formatUsageCount(skill.usage_count))
             .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('warning'))
+            .fontColor(this.sm.getColor('text_secondary'))
             .layoutWeight(1)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text(SkillPoolViewHelper.formatInstalls(skill.installs))
+          Text(SkillPoolViewHelper.formatSuccessRate(skill.success_rate))
             .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_disabled'))
+            .fontColor(this.sm.getColor('info'))
         }
         .width('100%')
         .margin({ top: this.sm.getSpacing('xs') })
         .alignItems(VerticalAlign.Center)
 
-        Text(SkillPoolViewHelper.formatTags(skill.tags))
-          .fontSize(this.sm.getFontSize('caption'))
-          .fontColor(this.sm.getColor('text_disabled'))
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .margin({ top: 4 })
-          .width('100%')
-
-        // 操作按钮：启用/禁用 + 卸载（右对齐）
+        // 操作按钮：启用/禁用（右对齐）
         Row() {
           GlassButton({
-            text: '启用/禁用',
+            text: this.togglingId === skill.skill_id
+              ? '处理中'
+              : SkillPoolViewHelper.getToggleActionLabel(skill.enabled),
             type: 'default',
             btnSize: 'small',
             onTap: () => { this.toggleSkill(skill); }
           })
-          GlassButton({
-            text: '卸载',
-            type: 'danger',
-            btnSize: 'small',
-            onTap: () => { this.confirmUninstall(skill); }
-          })
-            .margin({ left: this.sm.getSpacing('sm') })
         }
         .width('100%')
         .justifyContent(FlexAlign.End)

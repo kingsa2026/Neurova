@@ -1,136 +1,144 @@
 /**
- * AuditPage - 审计日志页（P3）
+ * AuditPage - 审计日志页（R6 接真实 API）
  *
- * 职责：展示系统审计日志列表，按 userId/action/时间范围筛选，
- *       操作类型徽章颜色区分，点击项展开 before/after 详情，导出按钮
+ * 职责：展示系统审计日志列表（/v1/audit，require_admin），按事件类筛选，
+ *       点击项展开 details 详情，导出按钮
  * 设计：
- *   - AuditViewHelper（导出）：纯视图模型，封装操作类型颜色/图标/标签映射、
- *     成功状态颜色、时间戳格式化、元数据 JSON 格式化、资源类型截断，
- *     无 UI 依赖，可独立单元测试；
- *   - AuditPage（@Component）：Stack[Column[TopNavMenu(标题"审计日志"+返回+导出)]
- *     + [action 筛选 Tab（全部/create/update/delete/login/logout/export/import/config_change）]
- *     + [加载态/空态/列表] + [详情展开区域]]；
- *     列表项 GlassCard：操作类型徽章、用户名、IP、资源、时间戳、成功状态、
- *     展开后 before/after JSON 详情；
- *     颜色统一走 StyleManager（返回 token 名），路由走 Router，
- *     P1-33 已接线 PageMap；审计专用 API 模块待 S4 新增（移交单），落地前以 mock 渲染。
+ *   - AuditViewHelper（导出）：纯视图模型，封装事件类颜色/图标映射（开放集合，
+ *     未知值兜默认不抛错——后端 action 是自由文本）、事件类筛选匹配、
+ *     时间戳格式化、details JSON 格式化、资源截断；无 UI 依赖，可独立单元测试；
+ *   - AuditPage（@Component）：Column[TopNavMenu(标题"审计日志"+返回+导出)]
+ *     + [事件类筛选 Tab（全部/认证/登出/配置/用户/角色/安全/系统）]
+ *     + [加载态/空态/列表] + [详情展开区域]；
+ *     列表项 GlassCard：事件类徽章、用户、资源、时间戳、展开后 details JSON；
+ *   - 颜色统一走 StyleManager，路由走 Router，已接线 PageMap（P1-33）；
+ *     数据源 AuditApi.list()（R6：替换 mock）。
+ *
+ * 契约说明（诚实缺省）：
+ *   - 列表条目（audit.py _entry_to_record）：id/timestamp(ISO Z)/user/action/
+ *     resource/details——后端列表面无 username/ip/success/before/after 字段，
+ *     本页不再渲染这些 mock 时代的列；ip 等扩展字段走 /audit/search 的
+ *     AuditLog 契约（AuditApi.search，本页列表主源仍为分页 list）。
+ *   - 条目 id 形如 "{event_type}_{ms}"，事件类 Tab 按 id 前缀匹配（比
+ *     自由文本 action 子串稳定）。
+ *   - 导出（GET /audit/export）返回裸数组，移动端无文件落盘面——取回后
+ *     如实提示条数，不谎称"已保存文件"。
  *
  * 依赖：
- *   - ../components/glass：TopNavMenu、GlassCard、GlassButton、GlassInput、GlassPanel
- *   - ../libs/api/ApiFacade：统一 API 门面（仅占位，未实际调用）
- *   - ../routing/Router：统一路由跳转
- *   - ../libs/style/StyleManager：统一样式 token
- *   - ../libs/logger/Logger：统一日志
- *   - ../libs/message/MessageManager：统一消息提示
- *   - ../libs/types：AuditEntry、AuditAction、Metadata
+ *   - ../components/glass：TopNavMenu、GlassCard、GlassButton
+ *   - ../libs/api/ApiFacade：统一 API 门面（api.audit.*）
+ *   - ../libs/api/modules/AuditApi：AuditRecordDto 契约
+ *   - ../routing/Router、../libs/style/StyleManager、../libs/logger/Logger、
+ *     ../libs/message/MessageManager
  *
  * 用法：
  *   由 Router.push(RouteNames.AUDIT) 跳转进入；
- *   aboutToAppear 加载 mock 审计列表（TODO M6 接入真实 API）；
- *   action 筛选 Tab 切换 → 本地按 action 过滤；
- *   点击列表项 → 切换展开/收起 before/after 详情；
- *   导出按钮 → TODO M6 接入 api.audit.export
- *
- * TDD：AuditViewHelper 各方法按红绿灯垂直切片逐步实现，详见 AuditPage.test.ets
+ *   aboutToAppear 经 api.audit.list() 加载第一页；
+ *   事件类筛选 Tab 切换 → 本地按 id 前缀过滤；
+ *   点击列表项 → 切换展开/收起 details 详情；
+ *   导出按钮 → api.audit.exportAudit() → 提示取回条数。
  */
 
-import { TopNavMenu, GlassCard, GlassButton, GlassInput, GlassPanel } from '../components/glass';
+import { TopNavMenu, GlassCard, GlassButton } from '../components/glass';
 import { ApiFacade } from '../libs/api/ApiFacade';
+import { AuditRecordDto } from '../libs/api/modules/AuditApi';
 import { Router } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { AuditEntry, AuditAction, Metadata } from '../libs/types';
 
 /** 日志标签 */
 const TAG = 'AuditPage';
 
-/** 默认资源类型截断长度 */
+/** 默认资源截断长度 */
 const DEFAULT_RESOURCE_MAX_LEN = 100;
 
 // ===========================================================================
 // AuditViewHelper - 审计日志视图模型（纯函数，无 UI 依赖，可独立单元测试）
 //
-// 设计：所有方法为 static，输入 → 输出，无副作用；
-//       颜色方法返回 StyleManager 的 token 名（如 'success'），由页面解析为实际颜色值；
-//       通过本文件 export，供 ohosTest 直接导入测试
+// 后端 action 是自由文本、event_type 是封闭枚举但随条目 id 前缀下发——
+// 一切映射按开放集合处理：已知值给语义色，未知值兜 'info'，不抛错。
 // ===========================================================================
 
 export class AuditViewHelper {
   /**
-   * 获取操作类型对应的颜色 token 名
-   * 映射：create→success、update→info、delete→error、login→info、
-   *       logout→text_secondary、export→warning、import→warning、config_change→warning
-   * @param action 操作类型
+   * 获取事件类对应的颜色 token 名（按 id 的 event_type 前缀；未知兜 'info'）
+   * 映射：auth_login→success、auth_logout→text_secondary、auth_failed→error、
+   *       config_change→warning、user_change/role_change→primary、
+   *       security_event→error、system_event→info、data_access→secondary、
+   *       tool_execution→info、api_key_change→warning
+   * @param entryId 条目 id（"{event_type}_{ms}"；空/无前缀 → 'info'）
    * @return StyleManager 颜色 token 名
    */
-  static getActionColor(action: AuditAction): string {
-    if (action === 'create') return 'success';
-    if (action === 'update') return 'info';
-    if (action === 'delete') return 'error';
-    if (action === 'login') return 'info';
-    if (action === 'logout') return 'text_secondary';
-    if (action === 'export') return 'warning';
-    if (action === 'import') return 'warning';
-    if (action === 'config_change') return 'warning';
-    throw new Error(`getActionColor 未实现: ${action}`);
+  static getEventColor(entryId: string): string {
+    if (entryId.startsWith('auth_failed') || entryId.startsWith('security_event')) return 'error';
+    if (entryId.startsWith('auth_login')) return 'success';
+    if (entryId.startsWith('auth_logout')) return 'text_secondary';
+    if (entryId.startsWith('config_change') || entryId.startsWith('api_key_change')) return 'warning';
+    if (entryId.startsWith('user_change') || entryId.startsWith('role_change')) return 'primary';
+    if (entryId.startsWith('data_access')) return 'secondary';
+    return 'info';
   }
 
   /**
-   * 获取操作类型对应的图标 emoji
-   * 映射：create→✨、update→✏️、delete→🗑️、login→🔑、logout→🚪、
-   *       export→📤、import→📥、config_change→⚙️
-   * @param action 操作类型
+   * 获取事件类对应的图标 emoji（未知兜 '📌'）
+   * @param entryId 条目 id（"{event_type}_{ms}"）
    * @return emoji 字符串
    */
-  static getActionIcon(action: AuditAction): string {
-    if (action === 'create') return '✨';
-    if (action === 'update') return '✏️';
-    if (action === 'delete') return '🗑️';
-    if (action === 'login') return '🔑';
-    if (action === 'logout') return '🚪';
-    if (action === 'export') return '📤';
-    if (action === 'import') return '📥';
-    if (action === 'config_change') return '⚙️';
-    throw new Error(`getActionIcon 未实现: ${action}`);
+  static getEventIcon(entryId: string): string {
+    if (entryId.startsWith('auth_failed')) return '⛔';
+    if (entryId.startsWith('security_event')) return '🛡️';
+    if (entryId.startsWith('auth_login')) return '🔑';
+    if (entryId.startsWith('auth_logout')) return '🚪';
+    if (entryId.startsWith('config_change')) return '⚙️';
+    if (entryId.startsWith('api_key_change')) return '🗝️';
+    if (entryId.startsWith('user_change')) return '👤';
+    if (entryId.startsWith('role_change')) return '🎭';
+    if (entryId.startsWith('data_access')) return '📂';
+    if (entryId.startsWith('tool_execution')) return '🔧';
+    if (entryId.startsWith('system_event')) return '🖥️';
+    return '📌';
   }
 
   /**
-   * 获取操作类型对应的中文标签
-   * 映射：create→创建、update→更新、delete→删除、login→登录、logout→登出、
-   *       export→导出、import→导入、config_change→配置变更
-   * @param action 操作类型
-   * @return 中文标签
+   * 获取事件类对应的中文标签（未知兜 '系统事件'）
+   * @param entryId 条目 id（"{event_type}_{ms}"）
+   * @return 中文文案
    */
-  static getActionLabel(action: AuditAction): string {
-    if (action === 'create') return '创建';
-    if (action === 'update') return '更新';
-    if (action === 'delete') return '删除';
-    if (action === 'login') return '登录';
-    if (action === 'logout') return '登出';
-    if (action === 'export') return '导出';
-    if (action === 'import') return '导入';
-    if (action === 'config_change') return '配置变更';
-    throw new Error(`getActionLabel 未实现: ${action}`);
+  static getEventLabel(entryId: string): string {
+    if (entryId.startsWith('auth_failed')) return '认证失败';
+    if (entryId.startsWith('security_event')) return '安全事件';
+    if (entryId.startsWith('auth_login')) return '登录';
+    if (entryId.startsWith('auth_logout')) return '登出';
+    if (entryId.startsWith('config_change')) return '配置变更';
+    if (entryId.startsWith('api_key_change')) return '密钥变更';
+    if (entryId.startsWith('user_change')) return '用户变更';
+    if (entryId.startsWith('role_change')) return '角色变更';
+    if (entryId.startsWith('data_access')) return '数据访问';
+    if (entryId.startsWith('tool_execution')) return '工具执行';
+    if (entryId.startsWith('system_event')) return '系统事件';
+    return '系统事件';
   }
 
   /**
-   * 获取审计条目成功状态对应的颜色 token 名
-   * 映射：成功→success、失败→error
-   * @param success 是否成功
-   * @return StyleManager 颜色 token 名
+   * 判断条目是否命中事件类筛选
+   * 规则：filter === 'all' 恒命中；否则按条目 id 的 event_type 前缀匹配
+   * @param entryId 条目 id（"{event_type}_{ms}"）
+   * @param filterValue 筛选值（'all' 或 event_type 前缀，如 'auth_login'）
+   * @return 是否命中
    */
-  static getSuccessColor(success: boolean): string {
-    return success ? 'success' : 'error';
+  static matchesEventFilter(entryId: string, filterValue: string): boolean {
+    if (filterValue === 'all') return true;
+    return entryId.startsWith(filterValue);
   }
 
   /**
    * 格式化 ISO 时间戳为 YYYY-MM-DD HH:mm:ss
    * 规则：无值/空值/无效 → '—'
-   * @param timestamp ISO 时间戳字符串（可选）
+   * @param timestamp ISO 时间戳字符串
    * @return 格式化时间或 '—'
    */
-  static formatTimestamp(timestamp?: string): string {
+  static formatTimestamp(timestamp: string): string {
     if (!timestamp || timestamp.length === 0) return '—';
     const d = new Date(timestamp);
     if (isNaN(d.getTime())) return '—';
@@ -144,24 +152,22 @@ export class AuditViewHelper {
   }
 
   /**
-   * 格式化元数据为 JSON 字符串
-   * 规则：undefined/空对象 → '—'，否则返回 JSON.stringify 结果
-   * @param meta 元数据对象（可选）
+   * 格式化 details 为 JSON 字符串
+   * 规则：undefined/null/空对象 → '—'，否则返回 JSON.stringify 结果
+   * @param details 详情对象（可选）
    * @return JSON 字符串或 '—'
    */
-  static formatMetadata(meta?: Metadata): string {
-    if (!meta) return '—';
-    const keys = Object.keys(meta);
+  static formatDetails(details?: Record<string, Object> | null): string {
+    if (!details) return '—';
+    const keys = Object.keys(details);
     if (keys.length === 0) return '—';
-    return JSON.stringify(meta);
+    return JSON.stringify(details);
   }
 
   /**
-   * 截断资源类型字符串
-   * 规则：
-   *   - 长度 ≤ maxLen → 原样返回
-   *   - 长度 > maxLen → 截取前 maxLen 字符并追加省略号 '...'
-   * @param resource 资源类型字符串
+   * 截断资源字符串
+   * 规则：长度 ≤ maxLen → 原样返回；> maxLen → 截取前 maxLen 字符 + '...'
+   * @param resource 资源字符串
    * @param maxLen 最大长度，默认 100
    * @return 截断后的字符串
    */
@@ -171,98 +177,33 @@ export class AuditViewHelper {
   }
 }
 
-/** 操作类型筛选 Tab 配置 */
-interface ActionFilterOption {
-  value: string;     // 'all' 或 AuditAction
+/** 事件类筛选 Tab 配置（value = event_type 前缀） */
+interface EventFilterOption {
+  value: string;
   label: string;
 }
 
-/** 操作类型筛选 Tab 列表 */
-const ACTION_FILTERS: ActionFilterOption[] = [
+/** 事件类筛选 Tab 列表 */
+const EVENT_FILTERS: EventFilterOption[] = [
   { value: 'all', label: '全部' },
-  { value: 'create', label: '创建' },
-  { value: 'update', label: '更新' },
-  { value: 'delete', label: '删除' },
-  { value: 'login', label: '登录' },
-  { value: 'logout', label: '登出' },
-  { value: 'export', label: '导出' },
-  { value: 'import', label: '导入' },
-  { value: 'config_change', label: '配置变更' },
-];
-
-/**
- * Mock 审计日志数据
- * TODO M6 阶段：替换为 api.audit.list() 真实 API
- */
-const MOCK_AUDITS: AuditEntry[] = [
-  {
-    id: 'audit_1',
-    userId: 'user_1',
-    username: 'admin',
-    action: 'login',
-    resource: 'auth',
-    ip: '192.168.1.10',
-    userAgent: 'Mozilla/5.0',
-    timestamp: '2025-03-01T09:00:00Z',
-    success: true,
-  },
-  {
-    id: 'audit_2',
-    userId: 'user_1',
-    username: 'admin',
-    action: 'create',
-    resource: 'agent',
-    resourceId: 'agent_001',
-    ip: '192.168.1.10',
-    after: { 'name': 'Agent-001', 'model': 'gpt-4' } as Metadata,
-    timestamp: '2025-03-01T09:15:00Z',
-    success: true,
-  },
-  {
-    id: 'audit_3',
-    userId: 'user_2',
-    username: 'alice',
-    action: 'delete',
-    resource: 'memory',
-    resourceId: 'mem_42',
-    ip: '192.168.1.20',
-    before: { 'content': '旧记忆内容' } as Metadata,
-    timestamp: '2025-03-01T10:30:00Z',
-    success: true,
-  },
-  {
-    id: 'audit_4',
-    userId: 'user_3',
-    username: 'bob',
-    action: 'config_change',
-    resource: 'system_config',
-    ip: '192.168.1.30',
-    before: { 'max_tokens': 1000 } as Metadata,
-    after: { 'max_tokens': 2000 } as Metadata,
-    timestamp: '2025-03-01T11:45:00Z',
-    success: true,
-  },
-  {
-    id: 'audit_5',
-    userId: 'user_4',
-    username: 'attacker',
-    action: 'login',
-    resource: 'auth',
-    ip: '10.0.0.5',
-    timestamp: '2025-03-01T12:00:00Z',
-    success: false,
-    errorMessage: '密码错误',
-  },
+  { value: 'auth_login', label: '登录' },
+  { value: 'auth_logout', label: '登出' },
+  { value: 'auth_failed', label: '认证失败' },
+  { value: 'config_change', label: '配置' },
+  { value: 'user_change', label: '用户' },
+  { value: 'role_change', label: '角色' },
+  { value: 'security_event', label: '安全' },
+  { value: 'system_event', label: '系统' },
 ];
 
 @Component
 export struct AuditPage {
-  // 审计日志列表
-  @State audits: AuditEntry[] = [];
+  // 审计日志列表（api.audit.list() 真实数据）
+  @State audits: AuditRecordDto[] = [];
   // 加载态
   @State loading: boolean = true;
-  // 当前激活的操作类型筛选
-  @State activeAction: string = 'all';
+  // 当前激活的事件类筛选
+  @State activeFilter: string = 'all';
   // 展开详情的审计 ID
   @State expandedId: string = '';
 
@@ -278,35 +219,35 @@ export struct AuditPage {
   }
 
   /**
-   * 加载审计日志列表
-   * TODO M6 阶段：替换为真实 API（api.audit.list）
+   * 加载审计日志列表（GET /v1/audit 第一页，require_admin）
    */
   private async loadAudits(): Promise<void> {
     this.loading = true;
     try {
-      // TODO M6: 接入真实 API（api.audit.*）
-      // const res = await this.api.audit.list({ userId, action, start, end });
-      // if (res.code === 0 && res.data) { this.audits = res.data.items; }
-      this.audits = MOCK_AUDITS.slice();
+      const res = await this.api.audit.list({ page: 1, pageSize: 20 });
+      if (res.code === 0 && res.data) {
+        this.audits = res.data.items;
+      } else {
+        this.audits = [];
+        this.msg.error(res.message && res.message.length > 0 ? res.message : '加载审计日志失败');
+      }
     } catch (e) {
       this.logger.error(TAG, '加载审计日志失败', e as Error);
-      this.msg.error('加载审计日志失败');
+      this.msg.error('加载审计日志失败（需要管理员权限）');
+      this.audits = [];
     } finally {
       this.loading = false;
     }
   }
 
-  /** 切换操作类型筛选 */
-  private switchAction(value: string): void {
-    this.activeAction = value;
+  /** 切换事件类筛选 */
+  private switchFilter(value: string): void {
+    this.activeFilter = value;
   }
 
-  /** 获取经操作类型筛选后的列表 */
-  private getFilteredAudits(): AuditEntry[] {
-    if (this.activeAction === 'all') {
-      return this.audits;
-    }
-    return this.audits.filter((a: AuditEntry) => a.action === this.activeAction);
+  /** 获取经事件类筛选后的列表 */
+  private getFilteredAudits(): AuditRecordDto[] {
+    return this.audits.filter((a: AuditRecordDto) => AuditViewHelper.matchesEventFilter(a.id, this.activeFilter));
   }
 
   /** 切换某条审计的展开状态 */
@@ -315,13 +256,17 @@ export struct AuditPage {
   }
 
   /**
-   * 导出审计日志
-   * TODO M6 阶段：调用真实 API（api.audit.export）
+   * 导出审计日志（GET /v1/audit/export，裸数组）
+   * 移动端无文件落盘面：取回后如实提示条数
    */
   private async exportAudits(): Promise<void> {
     try {
-      // TODO M6: const res = await this.api.audit.export({ format: 'csv' });
-      this.msg.success(`已导出 ${this.audits.length} 条审计日志`);
+      const res = await this.api.audit.exportAudit();
+      if (res.code === 0 && res.data) {
+        this.msg.success(`已从服务器取回 ${res.data.length} 条审计日志`);
+      } else {
+        this.msg.error(res.message && res.message.length > 0 ? res.message : '导出审计日志失败');
+      }
     } catch (e) {
       this.logger.error(TAG, '导出审计日志失败', e as Error);
       this.msg.error('导出审计日志失败');
@@ -329,118 +274,114 @@ export struct AuditPage {
   }
 
   build() {
-    Stack() {
-      Column() {
-        // 顶部导航栏：标题"审计日志" + 返回 + 导出
-        TopNavMenu({
-          title: '审计日志',
-          showBack: true,
-          showMenu: false,
-          onBack: () => { this.router.back(); }
-        }) {
-          GlassButton({
-            text: '导出',
-            type: 'default',
-            btnSize: 'small',
-            onTap: () => { this.exportAudits(); }
-          })
-        }
-
-        // 操作类型筛选 Tab
-        Scroll() {
-          Row({ space: 8 }) {
-            ForEach(ACTION_FILTERS, (opt: ActionFilterOption) => {
-              Text(opt.label)
-                .fontSize(this.sm.getFontSize('caption'))
-                .fontColor(this.activeAction === opt.value
-                  ? this.sm.getColor('text_on_primary')
-                  : this.sm.getColor('text_secondary'))
-                .backgroundColor(this.activeAction === opt.value
-                  ? this.sm.getColor('primary')
-                  : this.sm.getColor('surface'))
-                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-                .borderRadius(16)
-                .onClick(() => { this.switchAction(opt.value); })
-            }, (opt: ActionFilterOption) => opt.value)
-          }
-          .padding({ left: this.sm.getSpacing('md'), right: this.sm.getSpacing('md') })
-        }
-        .scrollable(ScrollDirection.Horizontal)
-        .scrollBar(BarState.Off)
-        .width('100%')
-        .padding({ top: 4, bottom: 4 })
-
-        // 主体内容：加载态 / 空态 / 列表 三选一
-        if (this.loading) {
-          Column() {
-            Text('加载中...')
-              .fontSize(this.sm.getFontSize('body'))
-              .fontColor(this.sm.getColor('text_secondary'))
-          }
-          .width('100%')
-          .layoutWeight(1)
-          .justifyContent(FlexAlign.Center)
-          .alignItems(HorizontalAlign.Center)
-        } else if (this.getFilteredAudits().length === 0) {
-          Column() {
-            Text('暂无审计日志')
-              .fontSize(this.sm.getFontSize('subtitle'))
-              .fontColor(this.sm.getColor('text_secondary'))
-          }
-          .width('100%')
-          .layoutWeight(1)
-          .justifyContent(FlexAlign.Center)
-          .alignItems(HorizontalAlign.Center)
-        } else {
-          List({ space: 12 }) {
-            ForEach(this.getFilteredAudits(), (audit: AuditEntry) => {
-              ListItem() {
-                this.buildAuditCard(audit)
-              }
-            }, (audit: AuditEntry) => audit.id)
-          }
-          .layoutWeight(1)
-          .width('100%')
-          .scrollBar(BarState.Off)
-          .padding({
-            left: this.sm.getSpacing('md'),
-            right: this.sm.getSpacing('md'),
-            top: this.sm.getSpacing('sm'),
-            bottom: this.sm.getSpacing('sm'),
-          })
-        }
+    Column() {
+      // 顶部导航栏：标题"审计日志" + 返回 + 导出
+      TopNavMenu({
+        title: '审计日志',
+        showBack: true,
+        showMenu: false,
+        onBack: () => { this.router.back(); }
+      }) {
+        GlassButton({
+          text: '导出',
+          type: 'default',
+          btnSize: 'small',
+          onTap: () => { this.exportAudits(); }
+        })
       }
+
+      // 事件类筛选 Tab
+      Scroll() {
+        Row({ space: 8 }) {
+          ForEach(EVENT_FILTERS, (opt: EventFilterOption) => {
+            Text(opt.label)
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.activeFilter === opt.value
+                ? this.sm.getColor('text_on_primary')
+                : this.sm.getColor('text_secondary'))
+              .backgroundColor(this.activeFilter === opt.value
+                ? this.sm.getColor('primary')
+                : this.sm.getColor('surface'))
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .borderRadius(16)
+              .onClick(() => { this.switchFilter(opt.value); })
+          }, (opt: EventFilterOption) => opt.value)
+        }
+        .padding({ left: this.sm.getSpacing('md'), right: this.sm.getSpacing('md') })
+      }
+      .scrollable(ScrollDirection.Horizontal)
+      .scrollBar(BarState.Off)
       .width('100%')
-      .height('100%')
-      .backgroundColor(this.sm.getColor('background'))
+      .padding({ top: 4, bottom: 4 })
+
+      // 主体内容：加载态 / 空态 / 列表 三选一
+      if (this.loading) {
+        Column() {
+          Text('加载中...')
+            .fontSize(this.sm.getFontSize('body'))
+            .fontColor(this.sm.getColor('text_secondary'))
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+      } else if (this.getFilteredAudits().length === 0) {
+        Column() {
+          Text('暂无审计日志')
+            .fontSize(this.sm.getFontSize('subtitle'))
+            .fontColor(this.sm.getColor('text_secondary'))
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+      } else {
+        List({ space: 12 }) {
+          ForEach(this.getFilteredAudits(), (audit: AuditRecordDto) => {
+            ListItem() {
+              this.buildAuditCard(audit)
+            }
+          }, (audit: AuditRecordDto) => audit.id)
+        }
+        .layoutWeight(1)
+        .width('100%')
+        .scrollBar(BarState.Off)
+        .padding({
+          left: this.sm.getSpacing('md'),
+          right: this.sm.getSpacing('md'),
+          top: this.sm.getSpacing('sm'),
+          bottom: this.sm.getSpacing('sm'),
+        })
+      }
     }
     .width('100%')
     .height('100%')
+    .backgroundColor(this.sm.getColor('background'))
   }
 
   // ===========================================================================
   // 审计卡片构建器
   // ===========================================================================
 
-  /** 单条审计卡片：操作类型徽章 + 用户名 + IP + 资源 + 时间戳 + 成功状态 + 可展开 before/after */
+  /** 单条审计卡片：事件类徽章 + 用户 + 资源 + 时间戳 + 可展开 details */
   @Builder
-  buildAuditCard(audit: AuditEntry) {
+  buildAuditCard(audit: AuditRecordDto) {
     GlassCard() {
       Column() {
-        // 上部：操作类型徽章 + 时间戳
+        // 上部：事件类徽章 + 时间戳
         Row() {
-          // 操作类型徽章
+          // 事件类徽章
           Row() {
-            Text(AuditViewHelper.getActionIcon(audit.action))
+            Text(AuditViewHelper.getEventIcon(audit.id))
               .fontSize(14)
-            Text(AuditViewHelper.getActionLabel(audit.action))
+            Text(AuditViewHelper.getEventLabel(audit.id))
               .fontSize(this.sm.getFontSize('caption'))
               .fontColor(this.sm.getColor('text_on_primary'))
               .margin({ left: 4 })
           }
           .padding({ left: 8, right: 8, top: 2, bottom: 2 })
           .borderRadius(this.sm.getRadius('sm'))
-          .backgroundColor(this.sm.getColor(AuditViewHelper.getActionColor(audit.action)))
+          .backgroundColor(this.sm.getColor(AuditViewHelper.getEventColor(audit.id)))
 
           // 时间戳
           Text(AuditViewHelper.formatTimestamp(audit.timestamp))
@@ -452,51 +393,36 @@ export struct AuditPage {
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .textAlign(TextAlign.End)
         }
+        .width('100%')
         .alignItems(VerticalAlign.Center)
 
-        // 用户名 + IP
+        // 用户 + 操作原文
         Row() {
-          Text(`用户: ${audit.username}`)
+          Text(`用户: ${audit.user}`)
             .fontSize(this.sm.getFontSize('caption'))
             .fontColor(this.sm.getColor('text_secondary'))
-            .layoutWeight(1)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text(`IP: ${audit.ip}`)
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_disabled'))
-            .maxLines(1)
+            .layoutWeight(1)
         }
         .width('100%')
         .margin({ top: 4 })
         .alignItems(VerticalAlign.Center)
+        Text(`操作: ${audit.action}`)
+          .fontSize(this.sm.getFontSize('caption'))
+          .fontColor(this.sm.getColor('text_secondary'))
+          .margin({ top: 4 })
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%')
 
-        // 资源类型
+        // 资源
         Text(`资源: ${AuditViewHelper.truncateResource(audit.resource)}`)
           .fontSize(this.sm.getFontSize('caption'))
           .fontColor(this.sm.getColor('text_secondary'))
           .margin({ top: 4 })
           .maxLines(2)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-        // 成功状态
-        Row() {
-          Text(audit.success ? '✅ 成功' : '❌ 失败')
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor(AuditViewHelper.getSuccessColor(audit.success)))
-          if (audit.errorMessage) {
-            Text(` | ${audit.errorMessage}`)
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('error'))
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .layoutWeight(1)
-              .margin({ left: 4 })
-          }
-        }
-        .width('100%')
-        .margin({ top: 4 })
-        .alignItems(VerticalAlign.Center)
 
         // 展开详情按钮
         Text(this.expandedId === audit.id ? '收起 ▲' : '展开 ▼')
@@ -505,26 +431,13 @@ export struct AuditPage {
           .margin({ top: 4 })
           .onClick(() => { this.toggleExpand(audit.id); })
 
-        // 展开后显示 before/after 详情
+        // 展开后显示 details JSON
         if (this.expandedId === audit.id) {
           Column() {
-            Text('变更前')
+            Text('详情')
               .fontSize(this.sm.getFontSize('caption'))
               .fontColor(this.sm.getColor('text_secondary'))
-            Text(AuditViewHelper.formatMetadata(audit.before))
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_secondary'))
-              .padding({ top: 4, bottom: 4, left: 8, right: 8 })
-              .backgroundColor(this.sm.getColor('surface'))
-              .borderRadius(this.sm.getRadius('sm'))
-              .width('100%')
-              .margin({ top: 4 })
-
-            Text('变更后')
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_secondary'))
-              .margin({ top: 8 })
-            Text(AuditViewHelper.formatMetadata(audit.after))
+            Text(AuditViewHelper.formatDetails(audit.details))
               .fontSize(this.sm.getFontSize('caption'))
               .fontColor(this.sm.getColor('text_secondary'))
               .padding({ top: 4, bottom: 4, left: 8, right: 8 })

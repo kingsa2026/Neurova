@@ -1,61 +1,61 @@
 /**
- * SandboxPage - 沙盒环境页（P3）
+ * SandboxPage - 沙盒环境页（R6 接真实 API）
  *
- * 职责：展示沙盒环境列表，按 status 筛选，资源限制展示（CPU/内存/磁盘），
- *       暴露端口列表，启动/停止按钮，过期时间倒计时
+ * 职责：展示沙盒会话列表（/v1/sandbox），按状态筛选，新建（默认镜像）、
+ *       执行代码（内嵌命令面板）、销毁
  * 设计：
- *   - SandboxViewHelper（导出）：纯视图模型，封装状态颜色/图标/标签映射、
- *     CPU 限制格式化（'N 核'）、内存限制格式化（MB/GB 转换）、
- *     端口列表格式化（最多 3 个 + '...'）、过期时间格式化（已过期/小时/天），
- *     无 UI 依赖，可独立单元测试；
- *   - SandboxPage（@Component）：Stack[Column[TopNavMenu(标题"沙盒环境"+返回)]
- *     + [status 筛选 Tab（全部/created/running/stopped/error/expired）]
- *     + [加载态/空态/列表]]；
- *     列表项 GlassCard：状态徽章、名称、镜像、CPU/内存/磁盘、暴露端口、过期时间、
- *     操作按钮（启动/停止）；
- *     颜色统一走 StyleManager（返回 token 名），路由走 Router，
- *     P1-33 已接线 PageMap；沙盒专用 API 模块待 S4 新增（移交单），落地前以 mock 渲染。
+ *   - SandboxViewHelper（导出）：纯视图模型，封装状态颜色/图标/标签映射
+ *     （后端 status 开放集合，未知值兜默认）、超时格式化、步骤数格式化、
+ *     时间格式化；无 UI 依赖，可独立单元测试；
+ *   - SandboxPage（@Component）：Column [TopNavMenu(标题"沙盒环境"+返回+新建)]
+ *     + [status 筛选 Tab] + [加载态/空态/列表] + [执行面板（选中 running 沙盒）]；
+ *     列表项 GlassCard：状态徽章、名称、镜像/语言、超时/步骤数、agent/topic、
+ *     操作（执行/销毁）；
+ *   - 颜色统一走 StyleManager，路由走 Router，已接线 PageMap（P1-33）；
+ *     数据源 SandboxApi（R6：替换 mock）。
+ *
+ * 契约说明（诚实缺省）：
+ *   - _publicView：id/name/status/image/language/timeout/steps_count/
+ *     created_at/updated_at/agent_id/topic——后端无 CPU/内存限制、暴露端口、
+ *     过期时间字段（旧 mock 契约），本页不再渲染这些列；
+ *   - status 值域 running/failed/timeout/committed（开放集合兜默认）；
+ *   - 思维沙箱保留 id 'null'（无容器承载）：不可执行代码、不可销毁（后端 400
+ *     拦截），如实提示；
+ *   - 新建走默认镜像（后端 DEFAULT_IMAGE python:3.11-slim，白名单校验 400
+ *     拒因透传）；执行面板仅对 running 代码沙箱开放。
  *
  * 依赖：
- *   - ../components/glass：TopNavMenu、GlassCard、GlassButton、GlassInput、GlassPanel
- *   - ../libs/api/ApiFacade：统一 API 门面（仅占位，未实际调用）
- *   - ../routing/Router：统一路由跳转
- *   - ../libs/style/StyleManager：统一样式 token
- *   - ../libs/logger/Logger：统一日志
- *   - ../libs/message/MessageManager：统一消息提示
- *   - ../libs/types：Sandbox、SandboxStatus
+ *   - ../components/glass：TopNavMenu、GlassCard、GlassButton
+ *   - ../libs/api/ApiFacade：统一 API 门面（api.sandbox.*）
+ *   - ../libs/api/modules/SandboxApi：SandboxViewDto/SandboxExecDto 契约
+ *   - ../routing/Router、../libs/style/StyleManager、../libs/logger/Logger、
+ *     ../libs/message/MessageManager
  *
  * 用法：
  *   由 Router.push(RouteNames.SANDBOX) 跳转进入；
- *   aboutToAppear 加载 mock 沙盒列表（TODO M6 接入真实 API）；
- *   status 筛选 Tab 切换 → 本地按 status 过滤；
- *   启动/停止按钮 → TODO M6 接入 api.sandbox.start / api.sandbox.stop
- *
- * TDD：SandboxViewHelper 各方法按红绿灯垂直切片逐步实现，详见 SandboxPage.test.ets
+ *   aboutToAppear 经 api.sandbox.list() 加载；
+ *   status 筛选 Tab 切换 → 本地过滤；
+ *   新建 → api.sandbox.start({})（默认镜像）→ 刷新；
+ *   执行 → 选中沙盒 → 执行面板输入命令 → api.sandbox.execute() → 展示 stdout/stderr；
+ *   销毁 → AlertDialog 二次确认 → api.sandbox.destroy() → 刷新。
  */
 
-import { TopNavMenu, GlassCard, GlassButton, GlassInput, GlassPanel } from '../components/glass';
+import { TopNavMenu, GlassCard, GlassButton } from '../components/glass';
 import { ApiFacade } from '../libs/api/ApiFacade';
+import { SandboxViewDto, SandboxExecDto } from '../libs/api/modules/SandboxApi';
 import { Router } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { Sandbox, SandboxStatus } from '../libs/types';
 
 /** 日志标签 */
 const TAG = 'SandboxPage';
 
-/** 端口列表最多显示数量 */
-const MAX_PORTS_DISPLAY = 3;
+/** 思维沙箱保留 id（后端 THOUGHT_SESSION_ID） */
+const THOUGHT_SESSION_ID = 'null';
 
-/** 内存 GB 阈值 */
-const MEMORY_GB_THRESHOLD = 1024;
-
-/** 一小时毫秒数 */
-const ONE_HOUR_MS = 3600 * 1000;
-
-/** 一天毫秒数 */
-const ONE_DAY_MS = 86400 * 1000;
+/** 一分钟秒数（超时展示换算） */
+const ONE_MINUTE_SECONDS = 60;
 
 // ===========================================================================
 // SandboxViewHelper - 沙盒环境视图模型（纯函数，无 UI 依赖，可独立单元测试）
@@ -63,116 +63,95 @@ const ONE_DAY_MS = 86400 * 1000;
 
 export class SandboxViewHelper {
   /**
-   * 获取沙盒状态对应的颜色 token 名
-   * 映射：created→info、running→success、stopped→text_secondary、error→error、expired→warning
+   * 获取沙盒状态对应的颜色 token 名（未知兜 'text_secondary'——status 开放集合）
+   * 映射：running→success、failed→error、timeout→warning、committed→info
    * @param status 沙盒状态
    * @return StyleManager 颜色 token 名
    */
-  static getStatusColor(status: SandboxStatus): string {
-    if (status === 'created') return 'info';
+  static getStatusColor(status: string): string {
     if (status === 'running') return 'success';
-    if (status === 'stopped') return 'text_secondary';
-    if (status === 'error') return 'error';
-    if (status === 'expired') return 'warning';
-    throw new Error(`getStatusColor 未实现: ${status}`);
+    if (status === 'failed') return 'error';
+    if (status === 'timeout') return 'warning';
+    if (status === 'committed') return 'info';
+    return 'text_secondary';
   }
 
   /**
-   * 获取沙盒状态对应的图标 emoji
-   * 映射：created→📦、running▶️、stopped→⏸️、error→⚠️、expired→⌛
+   * 获取沙盒状态对应的图标 emoji（未知兜 '📦'）
    * @param status 沙盒状态
    * @return emoji 字符串
    */
-  static getStatusIcon(status: SandboxStatus): string {
-    if (status === 'created') return '📦';
+  static getStatusIcon(status: string): string {
     if (status === 'running') return '▶️';
-    if (status === 'stopped') return '⏸️';
-    if (status === 'error') return '⚠️';
-    if (status === 'expired') return '⌛';
-    throw new Error(`getStatusIcon 未实现: ${status}`);
+    if (status === 'failed') return '⚠️';
+    if (status === 'timeout') return '⌛';
+    if (status === 'committed') return '✅';
+    return '📦';
   }
 
   /**
-   * 获取沙盒状态对应的中文标签
-   * 映射：created→已创建、running→运行中、stopped→已停止、error→错误、expired→已过期
+   * 获取沙盒状态对应的中文标签（未知原样返回）
+   * 映射：running→运行中、failed→失败、timeout→超时、committed→已提交
    * @param status 沙盒状态
    * @return 中文标签
    */
-  static getStatusLabel(status: SandboxStatus): string {
-    if (status === 'created') return '已创建';
+  static getStatusLabel(status: string): string {
     if (status === 'running') return '运行中';
-    if (status === 'stopped') return '已停止';
-    if (status === 'error') return '错误';
-    if (status === 'expired') return '已过期';
-    throw new Error(`getStatusLabel 未实现: ${status}`);
+    if (status === 'failed') return '失败';
+    if (status === 'timeout') return '超时';
+    if (status === 'committed') return '已提交';
+    return status;
   }
 
   /**
-   * 格式化 CPU 限制
-   * 规则：保留 1 位小数 + ' 核'
-   * @param cpu CPU 核数
-   * @return 'N.N 核' 格式字符串
+   * 判断是否思维沙箱（保留 id 'null'：无容器承载）
+   * @param sandboxId 沙盒 id
+   * @return 是否思维沙箱
    */
-  static formatCpuLimit(cpu: number): string {
-    return `${cpu.toFixed(1)} 核`;
+  static isThoughtSandbox(sandboxId: string | null): boolean {
+    return sandboxId === null || sandboxId === THOUGHT_SESSION_ID;
   }
 
   /**
-   * 格式化内存限制
-   * 规则：
-   *   - < 1024 MB → 'NMB'（原值）
-   *   - ≥ 1024 MB → 'X.XGB'（GB，保留 1 位小数）
-   * @param mb 内存 MB 数
-   * @return 'NMB' 或 'X.XGB' 格式字符串
+   * 格式化超时时间
+   * 规则：< 60s → "{n}s"；≥ 60s → "{n}min"
+   * @param seconds 超时秒数
+   * @return 格式化字符串
    */
-  static formatMemoryLimit(mb: number): string {
-    if (mb < MEMORY_GB_THRESHOLD) {
-      return `${mb}MB`;
+  static formatTimeout(seconds: number): string {
+    if (seconds < ONE_MINUTE_SECONDS) {
+      return `${seconds}s`;
     }
-    const gb = mb / MEMORY_GB_THRESHOLD;
-    return `${gb.toFixed(1)}GB`;
+    return `${Math.round(seconds / ONE_MINUTE_SECONDS)}min`;
   }
 
   /**
-   * 格式化端口列表
-   * 规则：
-   *   - 空数组 → '无'
-   *   - 长度 ≤ 3 → 端口以 ', ' 连接
-   *   - 长度 > 3 → 前 3 个 + '...'
-   * @param ports 端口数组
-   * @return 格式化端口字符串
+   * 格式化步骤计数
+   * 规则：0 → '无执行记录'；其他 → '{n} 步'
+   * @param stepsCount 步骤数
+   * @return 格式化字符串
    */
-  static formatPorts(ports: number[]): string {
-    if (!ports || ports.length === 0) return '无';
-    if (ports.length <= MAX_PORTS_DISPLAY) {
-      return ports.join(', ');
-    }
-    const head = ports.slice(0, MAX_PORTS_DISPLAY).join(', ');
-    return `${head}...`;
+  static formatStepsCount(stepsCount: number): string {
+    if (stepsCount === 0) return '无执行记录';
+    return `${stepsCount} 步`;
   }
 
   /**
-   * 格式化过期时间
-   * 规则：
-   *   - 无效时间 → '—'
-   *   - 已过期 → '已过期'
-   *   - 未来 < 24 小时 → 'X 小时后过期'
-   *   - 未来 ≥ 24 小时 → 'X 天后过期'
-   * @param expiresAt 过期时间 ISO 字符串
-   * @return 过期倒计时字符串
+   * 格式化 ISO 时间戳为 YYYY-MM-DD HH:mm
+   * 规则：无值/无效 → '—'
+   * @param timestamp ISO 时间戳字符串
+   * @return 格式化时间或 '—'
    */
-  static formatExpiry(expiresAt: string): string {
-    const target = new Date(expiresAt).getTime();
-    if (isNaN(target)) return '—';
-    const now = Date.now();
-    const diff = target - now;
-    if (diff <= 0) return '已过期';
-    if (diff < ONE_DAY_MS) {
-      const hours = Math.floor(diff / ONE_HOUR_MS);
-      return `${hours} 小时后过期`;
-    }
-    const days = Math.floor(diff / ONE_DAY_MS);
-    return `${days} 天后过期`;
+  static formatTimestamp(timestamp: string): string {
+    if (!timestamp || timestamp.length === 0) return '—';
+    const d = new Date(timestamp);
+    if (isNaN(d.getTime())) return '—';
+    const yyyy = d.getFullYear();
+    const MM = (d.getMonth() + 1).toString().padStart(2, '0');
+    const dd = d.getDate().toString().padStart(2, '0');
+    const HH = d.getHours().toString().padStart(2, '0');
+    const mm = d.getMinutes().toString().padStart(2, '0');
+    return `${yyyy}-${MM}-${dd} ${HH}:${mm}`;
   }
 }
 
@@ -182,99 +161,31 @@ interface StatusFilterOption {
   label: string;
 }
 
-/** 状态筛选 Tab 列表 */
+/** 状态筛选 Tab 列表（后端 status 值域） */
 const STATUS_FILTERS: StatusFilterOption[] = [
   { value: 'all', label: '全部' },
-  { value: 'created', label: '已创建' },
   { value: 'running', label: '运行中' },
-  { value: 'stopped', label: '已停止' },
-  { value: 'error', label: '错误' },
-  { value: 'expired', label: '已过期' },
-];
-
-/**
- * Mock 沙盒环境数据
- * TODO M6 阶段：替换为 api.sandbox.list() 真实 API
- */
-const MOCK_SANDBOXES: Sandbox[] = [
-  {
-    id: 'sandbox_1',
-    name: 'dev-env-1',
-    image: 'node:18-alpine',
-    status: 'running',
-    cpuLimit: 2,
-    memoryLimitMb: 2048,
-    diskLimitMb: 10240,
-    exposedPorts: [3000, 8080],
-    envVars: { 'NODE_ENV': 'development' } as Record<string, string>,
-    createdAt: '2025-03-01T09:00:00Z',
-    expiresAt: new Date(Date.now() + 2 * 86400 * 1000).toISOString(),
-    lastStartedAt: '2025-03-01T09:00:00Z',
-  },
-  {
-    id: 'sandbox_2',
-    name: 'python-test',
-    image: 'python:3.11-slim',
-    status: 'created',
-    cpuLimit: 1,
-    memoryLimitMb: 512,
-    diskLimitMb: 5120,
-    exposedPorts: [5000],
-    envVars: { 'PYTHON_ENV': 'test' } as Record<string, string>,
-    createdAt: '2025-03-01T10:00:00Z',
-    expiresAt: new Date(Date.now() + 5 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: 'sandbox_3',
-    name: 'rust-build',
-    image: 'rust:1.75',
-    status: 'stopped',
-    cpuLimit: 4,
-    memoryLimitMb: 8192,
-    diskLimitMb: 20480,
-    exposedPorts: [],
-    envVars: {},
-    createdAt: '2025-03-01T08:00:00Z',
-    expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
-    lastStartedAt: '2025-03-01T08:30:00Z',
-  },
-  {
-    id: 'sandbox_4',
-    name: 'gpu-ml',
-    image: 'tensorflow/tensorflow:latest-gpu',
-    status: 'error',
-    cpuLimit: 8,
-    memoryLimitMb: 16384,
-    diskLimitMb: 51200,
-    exposedPorts: [8888, 6006, 22, 80],
-    envVars: { 'CUDA_VISIBLE_DEVICES': '0' } as Record<string, string>,
-    createdAt: '2025-03-01T07:00:00Z',
-    expiresAt: '2020-01-01T00:00:00Z',
-    errorMessage: 'GPU 不可用',
-  },
-  {
-    id: 'sandbox_5',
-    name: 'expired-demo',
-    image: 'alpine:3.18',
-    status: 'expired',
-    cpuLimit: 0.5,
-    memoryLimitMb: 256,
-    diskLimitMb: 1024,
-    exposedPorts: [80],
-    envVars: {},
-    createdAt: '2025-02-01T00:00:00Z',
-    expiresAt: '2020-01-01T00:00:00Z',
-  },
+  { value: 'failed', label: '失败' },
+  { value: 'timeout', label: '超时' },
+  { value: 'committed', label: '已提交' },
 ];
 
 @Component
 export struct SandboxPage {
-  // 沙盒列表
-  @State sandboxes: Sandbox[] = [];
+  // 沙盒列表（api.sandbox.list() 真实数据）
+  @State sandboxes: SandboxViewDto[] = [];
   // 加载态
   @State loading: boolean = true;
   // 当前激活的状态筛选
   @State activeStatus: string = 'all';
+  // 选中执行命令的沙盒 id（'' = 无）
+  @State selectedSandboxId: string = '';
+  // 执行面板命令输入
+  @State execCommand: string = '';
+  // 最近一次执行输出（stdout/stderr 合流 + exit code）
+  @State execOutput: string = '';
+  // 写操作进行中（防重复点击）
+  @State operatingId: string = '';
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -288,19 +199,22 @@ export struct SandboxPage {
   }
 
   /**
-   * 加载沙盒列表
-   * TODO M6 阶段：替换为真实 API（api.sandbox.list）
+   * 加载沙盒列表（GET /v1/sandbox）
    */
   private async loadSandboxes(): Promise<void> {
     this.loading = true;
     try {
-      // TODO M6: 接入真实 API（api.sandbox.*）
-      // const res = await this.api.sandbox.list();
-      // if (res.code === 0 && res.data) { this.sandboxes = res.data.items; }
-      this.sandboxes = MOCK_SANDBOXES.slice();
+      const res = await this.api.sandbox.list();
+      if (res.code === 0 && res.data) {
+        this.sandboxes = res.data;
+      } else {
+        this.sandboxes = [];
+        this.msg.error(res.message && res.message.length > 0 ? res.message : '加载沙盒列表失败');
+      }
     } catch (e) {
       this.logger.error(TAG, '加载沙盒列表失败', e as Error);
       this.msg.error('加载沙盒列表失败');
+      this.sandboxes = [];
     } finally {
       this.loading = false;
     }
@@ -312,134 +226,246 @@ export struct SandboxPage {
   }
 
   /** 获取经状态筛选后的列表 */
-  private getFilteredSandboxes(): Sandbox[] {
+  private getFilteredSandboxes(): SandboxViewDto[] {
     if (this.activeStatus === 'all') {
       return this.sandboxes;
     }
-    return this.sandboxes.filter((s: Sandbox) => s.status === this.activeStatus);
+    return this.sandboxes.filter((s: SandboxViewDto) => s.status === this.activeStatus);
   }
 
-  /**
-   * 启动沙盒
-   * TODO M6 阶段：调用真实 API（api.sandbox.start）
-   */
-  private async startSandbox(sandbox: Sandbox): Promise<void> {
-    try {
-      // TODO M6: const res = await this.api.sandbox.start(sandbox.id);
-      this.msg.success(`已启动: ${sandbox.name}`);
-    } catch (e) {
-      this.logger.error(TAG, '启动沙盒失败', e as Error);
-      this.msg.error('启动沙盒失败');
+  /** 选中/取消选中执行目标 */
+  private toggleSelect(sandbox: SandboxViewDto): void {
+    if (this.selectedSandboxId === sandbox.id) {
+      this.selectedSandboxId = '';
+    } else {
+      // 调用点已排除思维沙箱（id 可能为 null），类型面再收一道
+      if (sandbox.id !== null) {
+        this.selectedSandboxId = sandbox.id;
+        this.execOutput = '';
+      }
     }
   }
 
   /**
-   * 停止沙盒
-   * TODO M6 阶段：调用真实 API（api.sandbox.stop）
+   * 新建沙箱（POST /v1/sandbox/start，默认镜像/语言交给后端推断）
+   * 镜像白名单外/timeout 越界 → 400 拒因透传
    */
-  private async stopSandbox(sandbox: Sandbox): Promise<void> {
+  private async startSandbox(): Promise<void> {
+    if (this.operatingId.length > 0) {
+      return;
+    }
+    this.operatingId = 'start';
     try {
-      // TODO M6: const res = await this.api.sandbox.stop(sandbox.id);
-      this.msg.success(`已停止: ${sandbox.name}`);
+      const res = await this.api.sandbox.start({});
+      if (res.code === 0 && res.data) {
+        this.msg.success(`沙盒已开启: ${res.data.name}`);
+        await this.loadSandboxes();
+      } else {
+        this.msg.error(res.message && res.message.length > 0 ? res.message : '开启沙盒失败');
+      }
     } catch (e) {
-      this.logger.error(TAG, '停止沙盒失败', e as Error);
-      this.msg.error('停止沙盒失败');
+      this.logger.error(TAG, '开启沙盒失败', e as Error);
+      this.msg.error('开启沙盒失败');
+    } finally {
+      this.operatingId = '';
+    }
+  }
+
+  /**
+   * 在选中沙盒中执行命令（POST /v1/sandbox/{id}/execute）
+   */
+  private async executeCommand(): Promise<void> {
+    const sandboxId = this.selectedSandboxId;
+    if (sandboxId.length === 0 || this.execCommand.trim().length === 0) {
+      this.msg.info('先选中一个运行中的沙盒并输入命令');
+      return;
+    }
+    if (this.operatingId.length > 0) {
+      return;
+    }
+    this.operatingId = sandboxId;
+    try {
+      const res = await this.api.sandbox.execute(sandboxId, this.execCommand.trim());
+      if (res.code === 0 && res.data) {
+        const out: SandboxExecDto = res.data;
+        const exitText = `exit=${out.exit_code} (${out.duration_ms}ms, ${out.backend})`;
+        this.execOutput = `${exitText}\n${out.output}`;
+        this.msg.success('执行完成');
+        await this.loadSandboxes();
+      } else {
+        this.msg.error(res.message && res.message.length > 0 ? res.message : '执行失败');
+      }
+    } catch (e) {
+      this.logger.error(TAG, '执行命令失败', e as Error);
+      this.msg.error('执行命令失败');
+    } finally {
+      this.operatingId = '';
+    }
+  }
+
+  /**
+   * 销毁前二次确认（思维沙箱不可销毁——后端 400，前端也不提供入口）
+   */
+  private confirmDestroy(sandbox: SandboxViewDto): void {
+    if (SandboxViewHelper.isThoughtSandbox(sandbox.id)) {
+      this.msg.info('思维沙箱是保留会话，不可销毁');
+      return;
+    }
+    AlertDialog.show({
+      title: '确认销毁',
+      message: `确定要销毁沙盒"${sandbox.name}"吗？中间过程将被丢弃。`,
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      primaryButton: {
+        value: '取消',
+        action: () => {}
+      },
+      secondaryButton: {
+        value: '销毁',
+        fontColor: this.sm.getColor('error'),
+        action: () => { this.destroySandbox(sandbox.id); }
+      }
+    });
+  }
+
+  /**
+   * 执行销毁（DELETE /v1/sandbox/{id}）
+   */
+  private async destroySandbox(sandboxId: string): Promise<void> {
+    if (this.operatingId.length > 0) {
+      return;
+    }
+    this.operatingId = sandboxId;
+    try {
+      const res = await this.api.sandbox.destroy(sandboxId);
+      if (res.code === 0) {
+        this.msg.success('已销毁');
+        if (this.selectedSandboxId === sandboxId) {
+          this.selectedSandboxId = '';
+          this.execOutput = '';
+        }
+        await this.loadSandboxes();
+      } else {
+        this.msg.error(res.message && res.message.length > 0 ? res.message : '销毁失败');
+      }
+    } catch (e) {
+      this.logger.error(TAG, '销毁沙盒失败', e as Error);
+      this.msg.error('销毁沙盒失败');
+    } finally {
+      this.operatingId = '';
     }
   }
 
   build() {
-    Stack() {
-      Column() {
-        // 顶部导航栏：标题"沙盒环境" + 返回
-        TopNavMenu({
-          title: '沙盒环境',
-          showBack: true,
-          showMenu: false,
-          onBack: () => { this.router.back(); }
+    Column() {
+      // 顶部导航栏：标题"沙盒环境" + 返回 + 新建
+      TopNavMenu({
+        title: '沙盒环境',
+        showBack: true,
+        showMenu: false,
+        onBack: () => { this.router.back(); }
+      }) {
+        GlassButton({
+          text: '新建',
+          type: 'primary',
+          btnSize: 'small',
+          onTap: () => { this.startSandbox(); }
         })
+      }
 
-        // 状态筛选 Tab
-        Scroll() {
-          Row({ space: 8 }) {
-            ForEach(STATUS_FILTERS, (opt: StatusFilterOption) => {
-              Text(opt.label)
-                .fontSize(this.sm.getFontSize('caption'))
-                .fontColor(this.activeStatus === opt.value
-                  ? this.sm.getColor('text_on_primary')
-                  : this.sm.getColor('text_secondary'))
-                .backgroundColor(this.activeStatus === opt.value
-                  ? this.sm.getColor('primary')
-                  : this.sm.getColor('surface'))
-                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-                .borderRadius(16)
-                .onClick(() => { this.switchStatus(opt.value); })
-            }, (opt: StatusFilterOption) => opt.value)
-          }
-          .padding({ left: this.sm.getSpacing('md'), right: this.sm.getSpacing('md') })
+      // 状态筛选 Tab
+      Scroll() {
+        Row({ space: 8 }) {
+          ForEach(STATUS_FILTERS, (opt: StatusFilterOption) => {
+            Text(opt.label)
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.activeStatus === opt.value
+                ? this.sm.getColor('text_on_primary')
+                : this.sm.getColor('text_secondary'))
+              .backgroundColor(this.activeStatus === opt.value
+                ? this.sm.getColor('primary')
+                : this.sm.getColor('surface'))
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .borderRadius(16)
+              .onClick(() => { this.switchStatus(opt.value); })
+          }, (opt: StatusFilterOption) => opt.value)
         }
-        .scrollable(ScrollDirection.Horizontal)
-        .scrollBar(BarState.Off)
-        .width('100%')
-        .padding({ top: 4, bottom: 4 })
+        .padding({ left: this.sm.getSpacing('md'), right: this.sm.getSpacing('md') })
+      }
+      .scrollable(ScrollDirection.Horizontal)
+      .scrollBar(BarState.Off)
+      .width('100%')
+      .padding({ top: 4, bottom: 4 })
 
-        // 主体内容：加载态 / 空态 / 列表 三选一
-        if (this.loading) {
-          Column() {
-            Text('加载中...')
-              .fontSize(this.sm.getFontSize('body'))
-              .fontColor(this.sm.getColor('text_secondary'))
-          }
-          .width('100%')
-          .layoutWeight(1)
-          .justifyContent(FlexAlign.Center)
-          .alignItems(HorizontalAlign.Center)
-        } else if (this.getFilteredSandboxes().length === 0) {
-          Column() {
-            Text('暂无沙盒环境')
-              .fontSize(this.sm.getFontSize('subtitle'))
-              .fontColor(this.sm.getColor('text_secondary'))
-          }
-          .width('100%')
-          .layoutWeight(1)
-          .justifyContent(FlexAlign.Center)
-          .alignItems(HorizontalAlign.Center)
-        } else {
+      // 主体内容：加载态 / 空态 / 列表 三选一
+      if (this.loading) {
+        Column() {
+          Text('加载中...')
+            .fontSize(this.sm.getFontSize('body'))
+            .fontColor(this.sm.getColor('text_secondary'))
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+      } else if (this.getFilteredSandboxes().length === 0) {
+        Column() {
+          Text('暂无沙盒环境')
+            .fontSize(this.sm.getFontSize('subtitle'))
+            .fontColor(this.sm.getColor('text_secondary'))
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+      } else {
+        Column() {
           List({ space: 12 }) {
-            ForEach(this.getFilteredSandboxes(), (sandbox: Sandbox) => {
+            ForEach(this.getFilteredSandboxes(), (sandbox: SandboxViewDto) => {
               ListItem() {
                 this.buildSandboxCard(sandbox)
               }
-            }, (sandbox: Sandbox) => sandbox.id)
+            }, (sandbox: SandboxViewDto) => `${sandbox.id}`)
           }
           .layoutWeight(1)
           .width('100%')
           .scrollBar(BarState.Off)
-          .padding({
-            left: this.sm.getSpacing('md'),
-            right: this.sm.getSpacing('md'),
-            top: this.sm.getSpacing('sm'),
-            bottom: this.sm.getSpacing('sm'),
-          })
+
+          // 执行面板（选中 running 沙盒时展示；GlassCard 是自定义组件，
+          // 外链属性挂包裹 Column——S8 台账坑）
+          if (this.selectedSandboxId.length > 0) {
+            Column() {
+              this.buildExecPanel()
+            }
+            .width('100%')
+            .margin({ top: this.sm.getSpacing('sm') })
+          }
         }
+        .layoutWeight(1)
+        .width('100%')
+        .padding({
+          left: this.sm.getSpacing('md'),
+          right: this.sm.getSpacing('md'),
+          top: this.sm.getSpacing('sm'),
+          bottom: this.sm.getSpacing('sm'),
+        })
       }
-      .width('100%')
-      .height('100%')
-      .backgroundColor(this.sm.getColor('background'))
     }
     .width('100%')
     .height('100%')
+    .backgroundColor(this.sm.getColor('background'))
   }
 
   // ===========================================================================
-  // 沙盒卡片构建器
+  // 卡片与面板构建器
   // ===========================================================================
 
-  /** 单条沙盒卡片：状态徽章 + 名称 + 镜像 + 资源限制 + 端口 + 过期时间 + 操作按钮 */
+  /** 单条沙盒卡片：状态徽章 + 名称 + 镜像/语言 + 超时/步骤 + 归属 + 操作按钮 */
   @Builder
-  buildSandboxCard(sandbox: Sandbox) {
+  buildSandboxCard(sandbox: SandboxViewDto) {
     GlassCard() {
       Column() {
-        // 上部：状态徽章 + 过期时间
+        // 上部：状态徽章 + 更新时间
         Row() {
           Row() {
             Text(SandboxViewHelper.getStatusIcon(sandbox.status))
@@ -453,7 +479,7 @@ export struct SandboxPage {
           .borderRadius(this.sm.getRadius('sm'))
           .backgroundColor(this.sm.getColor(SandboxViewHelper.getStatusColor(sandbox.status)))
 
-          Text(SandboxViewHelper.formatExpiry(sandbox.expiresAt))
+          Text(SandboxViewHelper.formatTimestamp(sandbox.updated_at))
             .fontSize(this.sm.getFontSize('caption'))
             .fontColor(this.sm.getColor('text_disabled'))
             .layoutWeight(1)
@@ -465,7 +491,7 @@ export struct SandboxPage {
         .width('100%')
         .alignItems(VerticalAlign.Center)
 
-        // 名称 + 镜像
+        // 名称 + 归属（agent/topic = 思维沙箱标记）
         Text(sandbox.name)
           .fontSize(this.sm.getFontSize('body'))
           .fontColor(this.sm.getColor('text_primary'))
@@ -473,71 +499,116 @@ export struct SandboxPage {
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .margin({ top: 4 })
           .width('100%')
-        Text(`镜像: ${sandbox.image}`)
-          .fontSize(this.sm.getFontSize('caption'))
-          .fontColor(this.sm.getColor('text_secondary'))
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .margin({ top: 2 })
-          .width('100%')
+        if (sandbox.agent_id !== null && sandbox.topic !== null) {
+          Text(`思维沙箱 · ${sandbox.agent_id} · ${sandbox.topic}`)
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('info'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ top: 2 })
+            .width('100%')
+        }
 
-        // 资源限制：CPU + 内存 + 磁盘
+        // 镜像/语言 + 超时/步骤
         Row() {
-          Text(`CPU: ${SandboxViewHelper.formatCpuLimit(sandbox.cpuLimit)}`)
+          Text(`镜像: ${sandbox.image}`)
             .fontSize(this.sm.getFontSize('caption'))
             .fontColor(this.sm.getColor('text_secondary'))
             .layoutWeight(1)
-          Text(`内存: ${SandboxViewHelper.formatMemoryLimit(sandbox.memoryLimitMb)}`)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(SandboxViewHelper.formatTimeout(sandbox.timeout))
             .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_secondary'))
-            .layoutWeight(1)
+            .fontColor(this.sm.getColor('text_disabled'))
         }
         .width('100%')
         .margin({ top: 4 })
         .alignItems(VerticalAlign.Center)
-        Text(`磁盘: ${SandboxViewHelper.formatMemoryLimit(sandbox.diskLimitMb)}`)
-          .fontSize(this.sm.getFontSize('caption'))
-          .fontColor(this.sm.getColor('text_secondary'))
-          .margin({ top: 2 })
-
-        // 暴露端口
-        Text(`端口: ${SandboxViewHelper.formatPorts(sandbox.exposedPorts)}`)
-          .fontSize(this.sm.getFontSize('caption'))
-          .fontColor(this.sm.getColor('text_secondary'))
-          .margin({ top: 4 })
-
-        // 错误信息（error 状态时显示）
-        if (sandbox.status === 'error' && sandbox.errorMessage) {
-          Text(`错误: ${sandbox.errorMessage}`)
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('error'))
-            .maxLines(2)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .margin({ top: 4 })
-            .width('100%')
-        }
-
-        // 操作按钮：启动 / 停止
         Row() {
-          if (sandbox.status === 'running') {
+          Text(`语言: ${sandbox.language}`)
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_secondary'))
+            .layoutWeight(1)
+          Text(SandboxViewHelper.formatStepsCount(sandbox.steps_count))
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_disabled'))
+        }
+        .width('100%')
+        .margin({ top: 2 })
+        .alignItems(VerticalAlign.Center)
+
+        // 操作按钮：执行（仅 running 代码沙箱）+ 销毁
+        Row() {
+          if (sandbox.status === 'running' && !SandboxViewHelper.isThoughtSandbox(sandbox.id)) {
             GlassButton({
-              text: '停止',
+              text: this.selectedSandboxId === sandbox.id ? '收起执行' : '执行',
+              type: this.selectedSandboxId === sandbox.id ? 'default' : 'primary',
+              btnSize: 'small',
+              onTap: () => { this.toggleSelect(sandbox); }
+            })
+              .margin({ right: this.sm.getSpacing('sm') })
+          }
+          if (!SandboxViewHelper.isThoughtSandbox(sandbox.id)) {
+            GlassButton({
+              text: '销毁',
               type: 'danger',
               btnSize: 'small',
-              onTap: () => { this.stopSandbox(sandbox); }
-            })
-          } else if (sandbox.status === 'stopped' || sandbox.status === 'created') {
-            GlassButton({
-              text: '启动',
-              type: 'primary',
-              btnSize: 'small',
-              onTap: () => { this.startSandbox(sandbox); }
+              onTap: () => { this.confirmDestroy(sandbox); }
             })
           }
         }
         .width('100%')
         .justifyContent(FlexAlign.End)
         .margin({ top: this.sm.getSpacing('md') })
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+    }
+  }
+
+  /** 执行面板：命令输入 + 执行按钮 + 最近输出 */
+  @Builder
+  buildExecPanel() {
+    GlassCard() {
+      Column() {
+        Text('执行命令')
+          .fontSize(this.sm.getFontSize('subtitle'))
+          .fontWeight(FontWeight.Bold)
+          .fontColor(this.sm.getColor('text_primary'))
+          .width('100%')
+
+        TextInput({ placeholder: '输入要执行的命令', text: this.execCommand })
+          .fontSize(this.sm.getFontSize('body'))
+          .fontColor(this.sm.getColor('text_primary'))
+          .backgroundColor(this.sm.getColor('surface'))
+          .borderRadius(this.sm.getRadius('sm'))
+          .width('100%')
+          .margin({ top: this.sm.getSpacing('xs') })
+          .onChange((v: string) => { this.execCommand = v; })
+
+        Row() {
+          GlassButton({
+            text: this.operatingId === this.selectedSandboxId ? '执行中' : '运行',
+            type: 'primary',
+            btnSize: 'small',
+            onTap: () => { this.executeCommand(); }
+          })
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.End)
+        .margin({ top: this.sm.getSpacing('xs') })
+
+        if (this.execOutput.length > 0) {
+          Text(this.execOutput)
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_secondary'))
+            .padding({ top: 4, bottom: 4, left: 8, right: 8 })
+            .backgroundColor(this.sm.getColor('surface'))
+            .borderRadius(this.sm.getRadius('sm'))
+            .width('100%')
+            .margin({ top: this.sm.getSpacing('xs') })
+            .maxLines(10)
+        }
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)

@@ -26,3 +26,11 @@ export { ChannelIntegrationApi } from './modules/ChannelIntegrationApi';
 export { SessionSyncApi } from './modules/SessionSyncApi';
 // M5a 新增模块（AIGC 生成域）
 export { AigcApi } from './modules/AigcApi';
+// P1-34 新增模块（Webhook 管理域）
+export { WebhookApi, WebhookInfoDto, WebhookUpsertBody, WebhookUpdateBody } from './modules/WebhookApi';
+// R6 新增模块（技能/审计/基准/市场/沙盒五域，P1-33 移交接线）
+export { SkillsApi, SkillInfoDto } from './modules/SkillsApi';
+export { AuditApi, AuditRecordDto, AuditPageDto, AuditPageStatsDto, AuditSearchHitDto, AuditStatsDto, AuditListParams, AuditSearchBody } from './modules/AuditApi';
+export { BenchmarkApi, BenchmarkSuiteDto, BenchmarkRunDto, BenchmarkRunsPageDto, BenchmarkRunBody } from './modules/BenchmarkApi';
+export { MarketplaceApi, MarketSkillDto, MarketSkillPageDto, MarketListParams, MarketInstallBody } from './modules/MarketplaceApi';
+export { SandboxApi, SandboxViewDto, SandboxStartBody, SandboxExecDto } from './modules/SandboxApi';
