@@ -735,32 +735,6 @@ export interface FirewallRule {
 }
 
 // ===========================================================================
-// 18. 个性（P2）
-// ===========================================================================
-
-/** 情绪记录 */
-export interface Emotion {
-  id: string;
-  agentId: string;
-  type: string;              // happy/sad/angry/surprised/neutral
-  intensity: number;         // 0-1
-  trigger?: string;
-  createdAt: string;
-}
-
-/** 个性维度 */
-export interface Personality {
-  agentId: string;
-  openness: number;          // 0-1
-  conscientiousness: number;
-  extraversion: number;
-  agreeableness: number;
-  neuroticism: number;
-  description?: string;
-  updatedAt: string;
-}
-
-// ===========================================================================
 // 19. 知识技能扩展（P2）
 // ===========================================================================
 

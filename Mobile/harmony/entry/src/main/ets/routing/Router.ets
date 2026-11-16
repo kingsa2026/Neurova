@@ -54,9 +54,6 @@ export class RouteNames {
   static readonly AGENT_RULE: string = 'AgentRulePage';
   static readonly AGENT_FILE: string = 'AgentFilePage';
   static readonly AGENT_MEDIA: string = 'AgentMediaPage';
-  // M4 P2 个性层
-  static readonly AGENT_EMOTION: string = 'AgentEmotionPage';
-  static readonly AGENT_PERSONALITY: string = 'AgentPersonalityPage';
   // M4 P2 运行时层
   static readonly AGENT_SCHEDULER: string = 'AgentSchedulerPage';
   static readonly CONTEXT_CHANNEL: string = 'ContextChannelPage';
@@ -134,12 +131,10 @@ const PROTECTED_ROUTES: string[] = [
   RouteNames.METACOGNITION,
   RouteNames.REFLECTION,
   RouteNames.GROWTH,
-  // M4 P2 能力 + 个性层（全部受保护）
+  // M4 P2 能力层（全部受保护）
   RouteNames.AGENT_RULE,
   RouteNames.AGENT_FILE,
   RouteNames.AGENT_MEDIA,
-  RouteNames.AGENT_EMOTION,
-  RouteNames.AGENT_PERSONALITY,
   // M4 P2 运行时层（全部受保护）
   RouteNames.AGENT_SCHEDULER,
   RouteNames.CONTEXT_CHANNEL,

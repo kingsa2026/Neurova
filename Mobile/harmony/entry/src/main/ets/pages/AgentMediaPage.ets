@@ -206,7 +206,7 @@ export struct AgentMediaPage {
       }
     } catch (e) {
       this.logger.error(TAG, '加载媒体资产失败', e as Error);
-      this.msg.error('加载媒体资产失败');
+      this.msg.error((e as Error).message || '加载媒体资产失败');
     } finally {
       this.loading = false;
     }
@@ -280,7 +280,7 @@ export struct AgentMediaPage {
       }
     } catch (e) {
       this.logger.error(TAG, '删除媒体资产失败', e as Error);
-      this.msg.error('删除媒体资产失败');
+      this.msg.error((e as Error).message || '删除媒体资产失败');
     }
   }
 

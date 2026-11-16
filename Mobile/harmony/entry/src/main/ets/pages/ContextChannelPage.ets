@@ -264,7 +264,7 @@ export struct ContextChannelPage {
       }
     } catch (e) {
       this.logger.error(TAG, '删除上下文消息失败', e as Error);
-      this.msg.error('删除失败');
+      this.msg.error((e as Error).message || '删除失败');
     }
   }
 
@@ -351,7 +351,7 @@ export struct ContextChannelPage {
         .alignItems(HorizontalAlign.Center)
       } else if (this.getFilteredMessages().length === 0) {
         Column() {
-          Text('暂无上下文消息')
+          Text('后端暂未提供上下文消息数据')
             .fontSize(this.sm.getFontSize('subtitle'))
             .fontColor(this.sm.getColor('text_secondary'))
         }

@@ -264,7 +264,7 @@ export struct AgentFilePage {
       }
     } catch (e) {
       this.logger.error(TAG, '加载文件失败', e as Error);
-      this.msg.error('加载文件失败');
+      this.msg.error((e as Error).message || '加载文件失败');
     } finally {
       this.loading = false;
     }
@@ -336,7 +336,7 @@ export struct AgentFilePage {
       }
     } catch (e) {
       this.logger.error(TAG, '上传文件失败', e as Error);
-      this.msg.error('上传文件失败');
+      this.msg.error((e as Error).message || '上传文件失败');
     }
   }
 
@@ -384,7 +384,7 @@ export struct AgentFilePage {
       }
     } catch (e) {
       this.logger.error(TAG, '删除文件失败', e as Error);
-      this.msg.error('删除文件失败');
+      this.msg.error((e as Error).message || '删除文件失败');
     }
   }
 

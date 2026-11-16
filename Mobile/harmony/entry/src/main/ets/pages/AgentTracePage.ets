@@ -212,7 +212,7 @@ export struct AgentTracePage {
       }
     } catch (e) {
       this.logger.error(TAG, '加载追踪条目失败', e as Error);
-      this.msg.error('加载追踪条目失败');
+      this.msg.error((e as Error).message || '加载追踪条目失败');
     } finally {
       this.loading = false;
     }
@@ -304,7 +304,7 @@ export struct AgentTracePage {
       }
     } catch (e) {
       this.logger.error(TAG, '删除追踪条目失败', e as Error);
-      this.msg.error('删除失败');
+      this.msg.error((e as Error).message || '删除失败');
     }
   }
 

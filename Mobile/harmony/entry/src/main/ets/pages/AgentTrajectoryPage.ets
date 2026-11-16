@@ -189,7 +189,7 @@ export struct AgentTrajectoryPage {
       }
     } catch (e) {
       this.logger.error(TAG, '加载轨迹点失败', e as Error);
-      this.msg.error('加载轨迹点失败');
+      this.msg.error((e as Error).message || '加载轨迹点失败');
     } finally {
       this.loading = false;
     }
@@ -232,7 +232,7 @@ export struct AgentTrajectoryPage {
           .alignItems(HorizontalAlign.Center)
         } else if (this.points.length === 0) {
           Column() {
-            Text('暂无轨迹点')
+            Text('后端暂未提供轨迹点数据')
               .fontSize(this.sm.getFontSize('subtitle'))
               .fontColor(this.sm.getColor('text_secondary'))
           }
