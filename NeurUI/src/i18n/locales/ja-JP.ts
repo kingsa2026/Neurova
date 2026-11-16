@@ -3248,7 +3248,6 @@ conflictTimeReadout: '時刻の読み取り: {basis}（旧 {old} → 新 {new}�
   },
   file: {
     title: 'ファイル管理',
-    totalStorage: '総ストレージ',
     usedStorage: '使用済み',
     history: '履歴',
     size: 'サイズ',

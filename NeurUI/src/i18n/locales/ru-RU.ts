@@ -3248,7 +3248,6 @@ conflictTimeReadout: 'Временные показатели: {basis} (стар
   },
   file: {
     title: 'Управление файлами',
-    totalStorage: 'Общее хранилище',
     usedStorage: 'Использовано',
     history: 'История',
     size: 'Размер',

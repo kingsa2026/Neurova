@@ -3248,7 +3248,6 @@ conflictTimeReadout: 'قراءة الوقت: {basis} (القديم {old} → ا�
   },
   file: {
     title: 'إدارة الملفات',
-    totalStorage: 'إجمالي التخزين',
     usedStorage: 'المستخدم',
     history: 'السجل',
     size: 'الحجم',

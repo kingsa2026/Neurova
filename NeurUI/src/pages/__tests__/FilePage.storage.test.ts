@@ -44,8 +44,8 @@ const i18n = createI18n({
         name: '名称', actions: '操作', confirm: '确认',
       },
       file: {
-        totalStorage: '总存储', usedStorage: '已用', size: '大小', version: '版本',
-        history: '历史', versionHistory: '版本历史',
+        totalFiles: '文件总数', usedStorage: '已用', size: '大小',
+        version: '版本', history: '历史', versionHistory: '版本历史',
       },
       agent: { deleteConfirm: '确认删除？' },
     },
@@ -83,7 +83,7 @@ beforeEach(() => {
   vi.mocked(listFiles).mockResolvedValue([] as any)
   vi.mocked(getStorageInfo).mockResolvedValue({
     user_id: 'u1',
-    total_files: 3,
+    total_files: 1234,
     total_size: 2048,
     by_type: { text: 2 },
   } as any)
@@ -97,8 +97,16 @@ describe('FilePage — 存储卡接真实读数（S6 移交）', () => {
     expect(getStorageInfo).toHaveBeenCalled()
     const card = wrapper.find('.storage-info')
     expect(card.exists(), '存储卡应存在').toBeTruthy()
-    expect(card.text()).toContain('3')
+    // U1 拍板口径修正：total_files 是**文件数**，渲染纯数字（1,234 个），
+    // 不得过 formatBytes——把 1234 个文件显示成「1.2 KB」是装饰读数。
+    expect(card.text()).toContain('1234')
+    expect(card.text()).not.toContain('1.2 KB')
+    expect(card.text()).toContain('文件总数')
     expect(card.text()).toContain('2.0 KB')
+  })
+
+  it('文件数读数不过 formatBytes（语义错位钉死在源码层）', () => {
+    expect(SOURCE).not.toContain('formatBytes(storageInfo.total')
   })
 
   it('配额进度条装饰退役（后端无配额语义）', () => {

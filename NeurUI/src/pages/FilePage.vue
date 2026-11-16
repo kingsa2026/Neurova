@@ -13,8 +13,10 @@
     <GlassCard>
       <div class="storage-info">
         <div class="storage-item">
-          <span class="storage-label">{{ t('file.totalStorage') }}</span>
-          <span class="storage-value">{{ storageUnavailable ? t('common.noData') : formatBytes(storageInfo.total ?? 0) }}</span>
+          <span class="storage-label">{{ t('file.totalFiles') }}</span>
+          <!-- total_files 是文件数：渲染纯数字，不过 formatBytes（把 1234 个
+               文件显示成「1.2 KB」是装饰读数，U1 拍板口径 2026-11-17） -->
+          <span class="storage-value">{{ storageUnavailable ? t('common.noData') : (storageInfo.total ?? 0) }}</span>
         </div>
         <div class="storage-item">
           <span class="storage-label">{{ t('file.usedStorage') }}</span>

@@ -3248,7 +3248,6 @@ conflictTimeReadout: 'समय रीडआउट: {basis} (पुराना 
   },
   file: {
     title: 'फ़ाइल प्रबंधन',
-    totalStorage: 'कुल भंडारण',
     usedStorage: 'उपयोग किया गया',
     history: 'इतिहास',
     size: 'आकार',

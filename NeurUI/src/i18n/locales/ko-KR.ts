@@ -3248,7 +3248,6 @@ conflictTimeReadout: '시간 판독: {basis} (이전 {old} → 최신 {new})',
   },
   file: {
     title: '파일 관리',
-    totalStorage: '전체 저장소',
     usedStorage: '사용 중',
     history: '기록',
     size: '크기',
