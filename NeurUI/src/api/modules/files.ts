@@ -11,11 +11,13 @@ export interface FileItem {
   name: string
   type?: string
   size?: number
-  version?: number
+  // 后端 version 是字符串（如 '1.0.0'）
+  version?: string | number
   status?: string
   url?: string
   agent_id?: string
-  created_at: string
+  // 后端 FileInfo.created_at 是 epoch 秒（float）
+  created_at: number
   // 后端 FileInfo 实测契约（批次3：上传返回绝对落盘 path，供 AIGC 参考图引用）
   file_id?: string
   filename?: string
@@ -40,9 +42,45 @@ export interface FileListParams {
 
 const BASE = '/files'
 
-/** List files with optional filters. */
-export function listFiles(params?: FileListParams) {
-  return api.get<ApiResponse<PaginatedData<FileItem>>>(BASE, { params })
+/**
+ * 后端 `GET /files` 回**裸** `List[FileInfo]`（files_api.py，无信封无分页），
+ * 键名是 `file_id/filename/file_type`，与前端 FileItem 的 `id/name/type` 不同名。
+ * 在模块边界归一成 FileItem[]（与 extractUploadedFileId 同一契约），页面不再
+ * 各自猜键名——FilePage 原按 `{data:{items}}` 信封读 `res?.data` 恒 undefined，
+ * 列表恒空（P1-22 同根因命中点，审计 2026-11-16）。
+ */
+export function normalizeFileInfoList(raw: unknown): FileItem[] {
+  const body =
+    raw && typeof raw === 'object' && 'data' in raw ? (raw as { data?: unknown }).data ?? raw : raw
+  const rows = Array.isArray(body)
+    ? body
+    : Array.isArray((body as { items?: unknown[] })?.items)
+      ? (body as { items: unknown[] }).items
+      : []
+  return rows
+    .map((row) => {
+      const r = (row ?? {}) as Record<string, unknown>
+      return {
+        id: String(r.file_id ?? r.id ?? ''),
+        name: String(r.filename ?? r.name ?? ''),
+        type: (r.file_type ?? r.type) as string | undefined,
+        size: (r.size as number | undefined) ?? undefined,
+        version: (r.version as string | number | undefined) ?? undefined,
+        status: (r.status as string | undefined) ?? undefined,
+        agent_id: (r.agent_id as string | undefined) ?? undefined,
+        created_at: r.created_at as number,
+        file_id: (r.file_id as string | undefined) ?? undefined,
+        filename: (r.filename as string | undefined) ?? undefined,
+        path: (r.path as string | undefined) ?? undefined,
+      }
+    })
+    .filter((f) => f.id)
+}
+
+/** List files of the current user（裸数组契约，返回已归一的 FileItem[]）。 */
+export async function listFiles(params?: FileListParams): Promise<FileItem[]> {
+  const res = await api.get<unknown>(BASE, { params })
+  return normalizeFileInfoList(res)
 }
 
 /** Upload a file (multipart). */
@@ -61,9 +99,11 @@ export function getFileContent(id: string): Promise<string> {
   return api.get<{ content: string }>(`${BASE}/${id}/content`).then((res) => res.content)
 }
 
-/** Get version history for a file. */
+/** Get version history for a file.
+ *  后端回 `{code, data:{versions:[...]}}` 信封（files_api.py:602），此处只声明形状，
+ *  解数组的责任在消费方（与裸/信封并存的其余端点同一口径）。 */
 export function getFileVersions(id: string) {
-  return api.get<ApiResponse<FileVersion[]>>(`${BASE}/${id}/versions`)
+  return api.get<{ code: number; data: { versions: FileVersion[] } }>(`${BASE}/${id}/versions`)
 }
 
 /** Update file metadata. */
@@ -79,6 +119,13 @@ export function deleteFile(id: string) {
 /** Download a file (returns blob). */
 export function downloadFile(id: string) {
   return request.get(`${BASE}/${id}/download`, { responseType: 'blob' }) as unknown as Promise<Blob>
+}
+
+/** Get raw preview bytes（图片等二进制预览；带 JWT 走 axios，直链必 401）。
+ *  后端 `GET /files/{id}/preview` 以 FileResponse 回原始字节（files_api.py:511），
+ *  此前前端零消费者——预览弹窗里图片分支永远落空（P1-22 同链断点）。 */
+export function getFilePreview(id: string) {
+  return request.get(`${BASE}/${id}/preview`, { responseType: 'blob' }) as unknown as Promise<Blob>
 }
 
 /**

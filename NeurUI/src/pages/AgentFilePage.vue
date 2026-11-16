@@ -134,7 +134,8 @@ interface FileItem {
   type?: string
   size?: number
   status?: string
-  created_at?: string
+  // 后端 epoch 秒（float）；此前注 string 与 formatEpochSecondDate 的实参契约相反
+  created_at?: number
   _renaming?: boolean
   _renameValue?: string
 }
@@ -204,9 +205,10 @@ function isPdf(f: FileItem) { return f.type?.includes('pdf') || f.name?.endsWith
 async function fetchFiles() {
   loading.value = true
   try {
-    const res = await listFiles({ agent_id: props.agentId })
-    const data = res?.data
-    files.value = ((Array.isArray(data) ? data : (data as any)?.items ?? (data as any)?.files ?? []) as any[]).map((f: any) => ({
+    // listFiles 在模块边界归一（裸 List[FileInfo]→FileItem[]，file_id→id）；
+    // 此前读 res?.data 信封恒 undefined → 列表恒空（P1-22 同根因命中点）
+    const rows = await listFiles({ agent_id: props.agentId })
+    files.value = (Array.isArray(rows) ? rows : []).map((f) => ({
       ...f,
       _renaming: false,
       _renameValue: '',

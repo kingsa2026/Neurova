@@ -40,7 +40,7 @@
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'name'">
             <div class="file-cell">
-              <span class="file-icon">{{ getFileIcon(record.type || record.name) }}</span>
+              <span class="file-icon">{{ getFileIcon(record.name || record.type) }}</span>
               <span class="file-name">{{ record.name }}</span>
             </div>
           </template>
@@ -49,6 +49,9 @@
           </template>
           <template v-if="column.key === 'version'">
             <span class="mono">v{{ record.version ?? 1 }}</span>
+          </template>
+          <template v-else-if="column.key === 'created_at'">
+            <span class="mono">{{ formatEpochSecondText(Number(record.created_at) || 0) }}</span>
           </template>
           <template v-if="column.key === 'actions'">
             <div class="file-actions">
@@ -66,9 +69,9 @@
     </GlassCard>
 
     <!-- Preview modal -->
-    <a-modal v-model:open="showPreview" :title="previewFile?.name" :footer="null" width="640px">
-      <div v-if="previewFile?.type?.startsWith('image/')" class="preview-image">
-        <img :src="previewFile.url" :alt="previewFile.name" />
+    <a-modal v-model:open="showPreview" :title="previewTarget?.name" :footer="null" width="640px" @after-close="releasePreviewUrl">
+      <div v-if="previewUrl" class="preview-image">
+        <img :src="previewUrl" :alt="previewTarget?.name" />
       </div>
       <pre v-else class="preview-text">{{ previewContent }}</pre>
     </a-modal>
@@ -78,8 +81,8 @@
       <a-timeline>
         <a-timeline-item v-for="ver in versions" :key="ver.version" :color="ver.version === currentVersion ? 'green' : 'gray'">
           <div class="version-item">
-            <span>v{{ ver.version }} - {{ formatTimestampText(ver.created_at) }}</span>
-            <span class="version-size">{{ formatBytes(ver.size ?? 0) }}</span>
+            <span>v{{ ver.version }} - {{ formatEpochSecondText(Number(ver.created_at) || 0) }}</span>
+            <span v-if="ver.size != null" class="version-size">{{ formatBytes(ver.size) }}</span>
           </div>
         </a-timeline-item>
       </a-timeline>
@@ -91,12 +94,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { listFiles, uploadFile, getFileContent, getFileVersions, deleteFile as deleteFileApi, downloadFile as downloadFileBlob } from '@/api/modules/files'
+import { listFiles, uploadFile, getFileContent, getFileVersions, getFilePreview, deleteFile as deleteFileApi, downloadFile as downloadFileBlob } from '@/api/modules/files'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message, Modal } from 'ant-design-vue'
 import type { UploadFile } from 'ant-design-vue'
-import { formatTimestampText } from '@/utils/displayText'
+import { formatEpochSecondText } from '@/utils/displayText'
 
 const { t } = useI18n()
 
@@ -108,7 +111,10 @@ const total = ref(0)
 const storageInfo = ref<Record<string, any>>({ total: 0, used: 0 })
 const showPreview = ref(false)
 const showHistoryModal = ref(false)
-const previewFile = ref<any>(null)
+// 预览目标与内容分开命名：此前 ref 叫 previewFile、真实现叫 previewFileFn，
+// 模板把 ref 当函数调用（P1-22）——现在 ref=previewTarget、函数=previewFile。
+const previewTarget = ref<any>(null)
+const previewUrl = ref('')
 const previewContent = ref('')
 const versions = ref<any[]>([])
 const currentVersion = ref(1)
@@ -147,10 +153,11 @@ const getFileIcon = (name: string) => {
 const fetchFiles = async () => {
   loading.value = true
   try {
-    const res = await listFiles({ page: page.value, page_size: pageSize.value })
-    const data = res?.data
-    files.value = data?.items ?? (Array.isArray(data) ? data : [])
-    total.value = data?.total ?? files.value.length
+    // listFiles 在模块边界归一（裸 List[FileInfo]→FileItem[]）；此前读 `res?.data`
+    // 信封恒 undefined → 列表恒空（P1-22 同根因）。
+    const rows = await listFiles({ page: page.value, page_size: pageSize.value })
+    files.value = Array.isArray(rows) ? rows : []
+    total.value = files.value.length
   } catch {
     message.error(t('common.error'))
   } finally {
@@ -171,10 +178,25 @@ const handleUpload = async (file: File) => {
   return false
 }
 
-const previewFileFn = async (record: any) => {
-  previewFile.value = record
-  if (record.type?.startsWith('image/')) {
+const releasePreviewUrl = () => {
+  if (previewUrl.value) {
+    URL.revokeObjectURL(previewUrl.value)
+    previewUrl.value = ''
+  }
+}
+
+const previewFile = async (record: any) => {
+  previewTarget.value = record
+  releasePreviewUrl()
+  // 后端 file_type 是 'image'（无 'image/' 前缀），startsWith('image/') 永不命中
+  if (record.type === 'image' || record.type?.startsWith('image/')) {
     previewContent.value = ''
+    try {
+      const blob = (await getFilePreview(record.id)) as unknown as Blob
+      previewUrl.value = URL.createObjectURL(blob)
+    } catch {
+      previewContent.value = t('common.error')
+    }
   } else {
     try {
       const res = await getFileContent(record.id)
@@ -212,8 +234,11 @@ const downloadFile = async (record: any) => {
 const showHistory = async (record: any) => {
   currentVersion.value = record.version ?? 1
   try {
-      const res = await getFileVersions(record.id)
-      versions.value = res?.data ?? []
+    // 后端回 {code,data:{versions}} 信封：解出 data.versions 数组。
+    // 此前 `res?.data ?? []` 拿到的是对象，v-for 遍历对象值渲染垃圾。
+    const res = await getFileVersions(record.id)
+    const d: any = (res as any)?.data ?? res
+    versions.value = Array.isArray(d) ? d : (Array.isArray(d?.versions) ? d.versions : [])
   } catch {
     versions.value = []
   }
