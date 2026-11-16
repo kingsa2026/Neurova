@@ -150,6 +150,11 @@ auth:
   # 开启后：replicaCount > 1 且未提供 jwtSecret 时渲染期直接失败
   # （防"多副本各自随机密钥"这种只在生产暴露的故障）
   requireJwtSecret: false
+  # 主恢复口令（P0-1，2026-11-16 拍板）：经 Secret 注入，分发包/仓库不含口令值。
+  # 留空 = 不渲染 Secret、不注入容器——POST /api/v1/auth/recover-password
+  # 整体禁用（404，auth.py fail-closed）。生成：
+  # python -c "import secrets; print(secrets.token_urlsafe(24))"
+  masterRecoveryPassword: ""
 
 # LLM 配置
 llm:

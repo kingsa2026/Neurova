@@ -96,6 +96,15 @@ spec:
             {{- else if and .Values.auth.requireJwtSecret (gt (int .Values.backend.replicaCount) 1) }}
             {{- fail "auth.jwtSecret 未设置且 backend.replicaCount > 1：多副本必须共享同一 JWT 密钥，否则 token 互不认可" }}
             {{- end }}
+            {{- if .Values.auth.masterRecoveryPassword }}
+            # 主恢复口令（P0-1）：经 Secret 注入（-master-recovery）；留空不注入，
+            # 恢复端点 fail-closed 禁用（404）。
+            - name: NEUROVA_MASTER_RECOVERY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "neurova.fullname" . }}-master-recovery
+                  key: master-recovery-password
+            {{- end }}
           volumeMounts:
             {{- if .Values.database.persistence.enabled }}
             - name: data
