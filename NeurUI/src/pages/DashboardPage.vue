@@ -10,9 +10,9 @@
       </div>
       <div class="nr-dashboard-toolbar">
         <a-badge
-          v-if="health.overall"
+          v-if="health.overall && health.overall !== 'unknown'"
           :status="healthStatus"
-          :text="t('dashboard.statusHealthy')"
+          :text="overallText"
         />
         <GlassButton size="sm" variant="ghost" @click="refreshAll">
           🔄 {{ t('dashboard.refresh') }}
@@ -157,9 +157,8 @@
         </div>
         <div class="nr-health-checks">
           <div v-for="check in health.checks" :key="check.name" class="nr-health-check">
-            <a-badge
-              :status="check.status === 'pass' ? 'success' : (check.status === 'warn' ? 'warning' : 'error')"
-            />
+            <!-- 后端枚举 healthy/degraded/unhealthy/unknown（P1-23）：pass/warn 判据永不命中，健康项恒红 -->
+            <a-badge :status="checkBadgeStatus(check.status)" />
             <span class="nr-health-check-name">{{ check.name }}</span>
           </div>
           <div v-if="health.checks.length === 0" class="nr-health-check--none">
@@ -243,10 +242,20 @@ const CARD_META: Record<
   knowledge: { emoji: '📚', color: 'var(--nr-info)', labelKey: 'dashboard.totalKnowledge' },
 }
 
+// 后端枚举 healthy/degraded/unhealthy/unknown（P1-23）：unknown 表示检查器无读数，
+// 头部徽章整体隐藏（亮着任何颜色的"健康"都是编造读数）。
 const healthStatus = computed(() => {
   const o = health.value.overall
-  return o === 'healthy' ? 'success' : o === 'degraded' ? 'warning' : 'error'
+  return o === 'healthy' ? 'success' : o === 'degraded' ? 'warning' : o === 'unhealthy' ? 'error' : 'default'
 })
+
+const overallText = computed(() => {
+  const o = health.value.overall
+  return o === 'degraded' ? t('health.someDegraded') : o === 'unhealthy' ? t('health.systemIssues') : t('dashboard.statusHealthy')
+})
+
+const checkBadgeStatus = (status: string) =>
+  status === 'healthy' ? 'success' : status === 'degraded' ? 'warning' : status === 'unhealthy' ? 'error' : 'default'
 
 /** 7 天活跃趋势：会话柱状 + 消息折线（双轴） */
 const trendChartOption = computed(() => {
