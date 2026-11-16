@@ -324,6 +324,9 @@ class SwarmManager:
         self._tasks: Dict[str, asyncio.Task] = {}
         self._model_active: Dict[str, int] = {}  # 每模型并发子 Agent 计数（自持，不与共享限流器双计）
         self._last_dispatch_ts: float = 0.0       # 上次通过治理闸的派生时刻（monotonic，错峰用）
+        # P1-4（评测报告 G-4）：依赖未就绪的派生请求（subagent_id → 启动信息）。
+        # 不占派生槽、不入 _runs；依赖终态结算时放行或判失败。status() 可查。
+        self._blocked: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.RLock()
 
     # ── 公共接口 ──────────────────────────────────────────────
@@ -456,6 +459,53 @@ class SwarmManager:
             borrowMcp=mcpBorrowedToolNames() if subagent_type == "general" else frozenset(),
         )
 
+        # P1-4（评测报告 G-4）：依赖门控——dependencies 只能指向已存在的 run
+        #（结构性防环：run 按创建序存在，后者不可依赖前者之外的 id）。未满足的
+        # 依赖 → 登记为 blocked（不占派生槽），终态结算时自动放行或判失败。
+        deps = parsedUnit.dependencies if parsedUnit else []
+        if deps:
+            unknown = [d for d in deps if d not in self._runs]
+            if unknown:
+                return self._rejection(
+                    "DEPENDENCY_UNKNOWN",
+                    f"依赖的 subagent_id 不存在（或已逐出）: {unknown}——"
+                    "依赖只能指向已派生的子任务，且须在派生时声明",
+                )
+            if len(set(deps)) != len(deps):
+                return self._rejection("DEPENDENCY_DUPLICATED", f"依赖项重复: {deps}")
+            # 前置已终态且未验收通过（失败/取消/验收不达标）→ 即时拒绝：
+            # 终态结算只发生在终态迁移那一刻，已终结的前置不会再触发结算，
+            # 此时登记 blocked 就是永久等待——直接拒绝才诚实（η 门：失败产出不是合格输入）
+            failedDeps = [d for d in deps
+                          if self._runs[d].status in SUBAGENT_FINISHED_STATUSES
+                          and not self._depSatisfied(self._runs[d])]
+            if failedDeps:
+                return self._rejection(
+                    "DEPENDENCY_FAILED",
+                    f"依赖的前置未验收通过: {failedDeps}——请修复/重派前置后重新派生本任务",
+                )
+            unsatisfied = [d for d in deps if not self._depSatisfied(self._runs[d])]
+            if unsatisfied:
+                blockedId = f"swarm_{uuid.uuid4().hex[:12]}"
+                with self._lock:
+                    self._blocked[blockedId] = {
+                        "subagent_id": blockedId, "task": task, "agent_id": resolved_id,
+                        "agent_name": getattr(agent.config, "name", resolved_id) if hasattr(agent, "config") else resolved_id,
+                        "session_id": session_id, "origin": origin, "stream": stream,
+                        "initiator_agent": initiator_agent, "node_id": node_id,
+                        "execution_id": execution_id, "subagent_type": subagent_type,
+                        "task_unit": parsedUnit.toDict() if parsedUnit else None,
+                        "tool_allowlist": toolAllowlist, "depth": child_depth,
+                        "deps": list(deps), "status": "blocked", "created_at": time.time(),
+                    }
+                return {
+                    "subagent_id": blockedId, "agent_id": resolved_id,
+                    "status": "blocked", "background": True,
+                    "dependencies": list(deps), "unsatisfied": unsatisfied,
+                    "hint": "依赖未就绪，已登记等待；依赖验收通过后自动启动（subagent_status 查询）",
+                    **self._quota_snapshot(),
+                }
+
         run = SubAgentRun(
             depth=child_depth,
             agent_id=resolved_id,
@@ -580,8 +630,11 @@ class SwarmManager:
             }
         with self._lock:
             run = self._runs.get(subagent_id)
-        if run is None:
+            blocked = self._blocked.get(subagent_id)
+        if run is None and blocked is None:
             return {"error": f"未找到子 Agent 运行记录: {subagent_id}"}
+        if run is None:
+            return dict(blocked)
         return run.to_dict()
 
     def list_active(self) -> List[Dict[str, Any]]:
@@ -595,6 +648,105 @@ class SwarmManager:
         with self._lock:
             runs = sorted(self._runs.values(), key=lambda r: r.started_at, reverse=True)
         return [r.to_dict() for r in runs[:limit]]
+
+    # ── P1-4（评测报告 G-4）：依赖门控 ──────────────────────────
+
+    def _depSatisfied(self, run: SubAgentRun) -> bool:
+        """依赖放行判据（η 门）：终态 completed 且验收门未判不达标。
+
+        验收灰度关闭时 acceptance 为 None → 退化为"completed 即放行"（判据弱化但门仍在）；
+        验收 failed/skipped-judge 的产出不是合格输入（skipped 是诚实降级，仍放行）。
+        """
+        if run.status != SUBAGENT_COMPLETED:
+            return False
+        acceptance = run.acceptance or {}
+        return acceptance.get("achieved") is not False
+
+    def _settleDependencies(self, run: SubAgentRun) -> None:
+        """run 终态结算：判失败依赖未验收的下游；放行依赖已满足的 blocked 任务。"""
+        if not self._blocked:
+            return
+        with self._lock:
+            dependents = [bid for bid, info in self._blocked.items()
+                          if run.subagent_id in info["deps"]]
+            for bid in dependents:
+                # 仅在判失败分支出账；放行分支留给 _promoteBlockedIfReady 统一 pop——
+                # 否则条目在这里被删、promote 扑空，下游凭空消失（首版实测踩中）
+                if not self._depSatisfied(run):
+                    info = self._blocked.pop(bid)
+                    self._failBlocked(bid, info, run)
+        if self._depSatisfied(run):
+            self._promoteBlockedIfReady()
+
+    def _promoteBlockedIfReady(self) -> None:
+        """放行依赖已满足的 blocked 任务（槽满则留待下次结算）。"""
+        with self._lock:
+            candidates = [bid for bid, info in self._blocked.items()
+                          if all(d in self._runs and self._depSatisfied(self._runs[d])
+                                 for d in info["deps"])]
+        for bid in candidates:
+            with self._lock:
+                if self._count_active() >= self.MAX_ACTIVE_CHILDREN:
+                    return  # 槽满：留待下一次终态结算再放行
+                info = self._blocked.pop(bid)
+            self._launchRun(info)
+
+    def _launchRun(self, info: Dict[str, Any]) -> SubAgentRun:
+        """把（blocked 放行的）启动信息落成 SubAgentRun 并异步执行。"""
+        agent, resolved_id, _fallback = self._resolve_agent(info["agent_id"])
+        model = self._resolve_model_name(agent) if agent is not None else ""
+        run = SubAgentRun(
+            subagent_id=info["subagent_id"],
+            depth=info["depth"],
+            agent_id=resolved_id,
+            agent_name=info.get("agent_name") or resolved_id,
+            task=info["task"],
+            model=model or "",
+            origin=info["origin"],
+            session_id=info["session_id"],
+            member_session_id=f"swarm_{uuid.uuid4().hex[:12]}",
+            node_id=info["node_id"],
+            execution_id=info["execution_id"],
+            subagent_type=info["subagent_type"],
+            tool_allowlist=info["tool_allowlist"],
+            task_unit=info["task_unit"],
+        )
+        with self._lock:
+            self._runs[run.subagent_id] = run
+        execTask = asyncio.create_task(
+            self._execute(run, agent, info["initiator_agent"], info["stream"])
+        )
+        execTask.add_done_callback(
+            lambda _task, _sid=run.subagent_id: self._forget_task(_sid)
+        )
+        with self._lock:
+            self._tasks[run.subagent_id] = execTask
+        return run
+
+    def _failBlocked(self, bid: str, info: Dict[str, Any], upstream: SubAgentRun) -> None:
+        """依赖失败/未验收 → 下游不执行、不归档，直接以 failed 终态落账（η 门语义）。"""
+        run = SubAgentRun(
+            subagent_id=bid,
+            depth=info["depth"],
+            agent_id=info["agent_id"],
+            agent_name=info.get("agent_name") or info["agent_id"],
+            task=info["task"],
+            origin=info["origin"],
+            session_id=info["session_id"],
+            node_id=info["node_id"],
+            execution_id=info["execution_id"],
+            subagent_type=info["subagent_type"],
+            task_unit=info["task_unit"],
+        )
+        run.status = SUBAGENT_FAILED
+        run.cause = "dependency_failed"
+        run.error = (f"dependency_failed（前置 {upstream.subagent_id} 未验收通过："
+                     f"{upstream.status}）；本任务未执行，请修复或重派前置后重新派生")
+        run.finished_at = time.time()
+        with self._lock:
+            self._runs[bid] = run
+            self._evict_finished_runs()
+
 
     async def resumeFinishedRun(
         self,
@@ -863,6 +1015,8 @@ class SwarmManager:
         finally:
             watchdog.cancel()
             self._release_slot(run)
+            # P1-4：终态结算——放行依赖已满足的 blocked 任务 / 判失败依赖未验收的下游
+            self._settleDependencies(run)
 
     def _stallFirstSeconds(self) -> float:
         """卡死首报阈值（秒）；0 = 看门狗关闭。env 现取，默认 900s。"""
