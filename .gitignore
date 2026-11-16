@@ -248,11 +248,8 @@ token.txt
 
 # 临时/生成/测试目录
 /code_patches/
-/embedding/
-/examples/
 /flow-kb-sdk/
 /generated_skills/
-/helm/
 /logs/
 /MagicMock/
 /memory/
