@@ -2782,6 +2782,7 @@ class ToolExecutor:
                 stream=True,
                 initiator_agent=self._agent,
                 subagent_type=subagentType,
+                task_unit=params.get("task_unit") or None,
             )
         # 终态回灌父会话邮箱由蜂群侧一处投递（`SwarmManager._notifyParentMail`）：
         # 这里拿到的 result 在后台模式下只是 pending 回执，没有正文可投。

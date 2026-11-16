@@ -38,6 +38,7 @@ import uuid
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
+from neurova.agent.task_unit import parseTaskUnit, renderTaskUnitPrompt
 from neurova.core.lazy_singleton import lazySingleton
 
 logger = logging.getLogger(__name__)
@@ -194,6 +195,9 @@ class SubAgentRun:
     # 派生时按类型收窄，member 任务上下文绑定，执行咽喉强制拦截。
     subagent_type: str = "general"
     tool_allowlist: Optional[frozenset] = None
+    # P1-1（评测报告 G-2）：结构化任务单元（TaskUnit.toDict()）——验收/评审/依赖门的数据基础。
+    # None = 未提供（自由文本 task 派生，向后兼容）。
+    task_unit: Optional[Dict[str, Any]] = None
     status: str = SUBAGENT_PENDING  # 取值域见 SUBAGENT_STATUSES（本模块常量，唯一出处）
     # P2-10 增强：子代理升级/结构化结果提交（escalate/submit_result 工具写入，
     # 随邮箱投递发起者会话；只作读数与通知，不改变运行状态机）
@@ -237,6 +241,7 @@ class SubAgentRun:
             "session_id": self.session_id,
             "member_session_id": self.member_session_id,
             "subagent_type": self.subagent_type,
+            "task_unit": self.task_unit,
             "tool_allowlist_size": len(self.tool_allowlist) if self.tool_allowlist else None,
             "status": self.status,
             "report": self.report,
@@ -323,6 +328,7 @@ class SwarmManager:
         node_id: Optional[str] = None,
         execution_id: Optional[str] = None,
         subagent_type: str = "general",
+        task_unit: Optional[dict] = None,
         reuse_member_session_id: Optional[str] = None,
         resumed_from: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -347,6 +353,12 @@ class SwarmManager:
         """
         if not task or not str(task).strip():
             return {"error": "task 不能为空"}
+
+        # P1-1（评测报告 G-2）：结构化任务单元——解析失败走结构化拒绝（决策非故障）
+        try:
+            parsedUnit = parseTaskUnit(task_unit)
+        except ValueError as exc:
+            return self._rejection("TASK_UNIT_INVALID", f"task_unit 非法：{exc}")
 
         # ── 三明治之数据层结构化拒绝（先于一切派生动作） ──────────
         task = str(task)
@@ -445,6 +457,7 @@ class SwarmManager:
             execution_id=execution_id,
             subagent_type=subagent_type,
             tool_allowlist=toolAllowlist,
+            task_unit=parsedUnit.toDict() if parsedUnit else None,
             resumed_from=resumed_from or "",
         )
         # 通过全部治理闸 → 预留模型并发槽 + 打派生时间戳（错峰）
@@ -1000,10 +1013,13 @@ class SwarmManager:
             # 静默看门狗**只留 WARNING 不中止**——上游停滞死流时这条 run 永久停在
             # running，既逐不出去也永远占着派生槽。故在此加一条与工具层同源的总闸。
             budget = self._effectiveRuntimeBudget()
+            # P1-1：member 实际收到的是"原始任务描述 + 结构化任务书"拼装提示词；
+            # 台账/事件里的 run.task 保持原始文本不混排。
+            memberPrompt = renderTaskUnitPrompt(run.task, run.task_unit)
             try:
                 response = await asyncio.wait_for(
                     agent.chat(
-                        run.task,
+                        memberPrompt,
                         stream=True,
                         session_id=run.member_session_id,
                         metadata=spawn_metadata,
