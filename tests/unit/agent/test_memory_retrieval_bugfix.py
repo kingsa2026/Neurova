@@ -16,6 +16,8 @@ import asyncio
 import inspect
 import pytest
 
+from neurova.core.cache import MemoryCache
+
 from neurova.agent.memory_retrieval_chain import (
     MemoryRetrievalChain,
     RetrievalResult,
@@ -382,12 +384,12 @@ class TestBug4SimpleCacheDeadCode:
     """BUG#4: _simple_cache 从不初始化也不写入,getattr 永远返回新 {}。"""
 
     def test_simple_cache_initialized_in_init(self):
-        """__init__ 应初始化 _simple_cache 为 dict。"""
+        """__init__ 应初始化 _simple_cache 为有界 MemoryCache（审计 3.2-8 收口）。"""
         adapter = CacheRetrieverAdapter(cache_manager=None)
         # 修复前:_simple_cache 属性不存在,只能 getattr 返回临时 {}
         assert hasattr(adapter, "_simple_cache")
-        assert isinstance(adapter._simple_cache, dict)
-        assert adapter._simple_cache == {}
+        assert isinstance(adapter._simple_cache, MemoryCache)
+        assert len(adapter._simple_cache.keys()) == 0
 
     @pytest.mark.asyncio
     async def test_simple_cache_writes_after_retrieve(self):
@@ -399,9 +401,9 @@ class TestBug4SimpleCacheDeadCode:
 
         cache_key = "hello world"[:100].strip().lower()
         # 修复前:_simple_cache 不存在,无法写入
-        # 修复后:_simple_cache[cache_key] = memories
+        # 修复后:_simple_cache.set(cache_key, memories)
         assert hasattr(adapter, "_simple_cache")
-        assert cache_key in adapter._simple_cache
+        assert adapter._simple_cache.has(cache_key)
 
     @pytest.mark.asyncio
     async def test_simple_cache_hit_returns_cached(self):
@@ -409,7 +411,7 @@ class TestBug4SimpleCacheDeadCode:
         adapter = CacheRetrieverAdapter(cache_manager=None)
         cache_key = "cached query"[:100].strip().lower()
         cached_memories = [{"content": "cached memory"}]
-        adapter._simple_cache[cache_key] = cached_memories
+        adapter._simple_cache.set(cache_key, cached_memories)
 
         context = RetrievalContext(query="cached query")
         result = await adapter.retrieve(context)
