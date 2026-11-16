@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Issue #55 缓存收敛守卫：模型能力缓存不得出现两个"生产事实源"。
 
-背景：仓库里出现两份"模型能力缓存"——
+背景：仓库里曾出现两份"模型能力缓存"——
 
 1. ``neurova/llm/model_capability_cache.py::ModelCapabilityCache``
    ——学习型（试错发现的行为），**生产路径唯一消费者**：
@@ -10,14 +10,10 @@
    ——探测结果持久化（JSON），配套 ``providers/capability_detector.py``；
    生产零消费，仅离线探测工具链/回归测试引用。
 
-两份并存本身可接受（语义不同：学习事实 vs 探测结果），但**不能再多**，
-且第二份必须显式标注"非生产路径"，否则下一个接入者会挑错一份，
-仪表盘/路由读到过期或造出来的能力值。
-
-本守卫钉住三件事：
-- 生产代码里只允许 model_capability_cache 被 import；
-- providers/capability_cache 必须有"非生产路径/单一事实源"标注；
-- 不允许出现第三份能力缓存模块。
+S7 死码退役批（P1-13）：第 2 份已**整体退役**（生产零消费、语义被
+model_capability_cache + capability_detector 覆盖）——本守卫对它的判据升格为
+"模块不回树"；生产代码里依旧只允许 model_capability_cache 被 import，
+且不允许出现新的能力缓存模块。
 """
 
 import ast
@@ -28,7 +24,6 @@ from pathlib import Path
 import pytest
 
 from tests import ast_scan
-from tests.ast_scan import parseSource
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 NEUROVA = PROJECT_ROOT / "neurova"
@@ -36,15 +31,14 @@ NEUROVA = PROJECT_ROOT / "neurova"
 PRODUCTION_CAPABILITY_CACHE = "neurova.llm.model_capability_cache"
 OFFLINE_CAPABILITY_CACHE = "neurova.llm.providers.capability_cache"
 
-# 允许出现的"模型能力缓存"模块清单（新增即需在此留痕 + 说明语义差异）
+# 允许存在的"模型能力缓存"模块清单（新增即需在此留痕 + 说明语义差异）。
+# （S7 批：providers/capability_cache.py 已退役摘除，不许回树。）
 KNOWN_CAPABILITY_CACHE_MODULES = {
     "neurova/llm/model_capability_cache.py",
-    "neurova/llm/providers/capability_cache.py",
 }
 
-# providers/capability_cache.py 内的 CapabilityCache（探测栈），与
-# providers/capability_detector.py 同文件内的 CapabilityCache 是同一套。
-# 生产路径禁止 import 后者。
+# 生产路径禁止 import 的离线/探测缓存形态（capability_cache 已退役，防复活；
+# capability_detector 是探测栈在役件，生产接入仍禁）。
 FORBIDDEN_IN_PRODUCTION = (OFFLINE_CAPABILITY_CACHE, "neurova.llm.providers.capability_detector")
 
 
@@ -88,18 +82,13 @@ class TestSingleProductionSource:
         )
 
 
-class TestOfflineCacheLabelled:
-    def test_module_docstring_marks_non_production(self):
-        src = io.open(
-            NEUROVA / "llm" / "providers" / "capability_cache.py", encoding="utf-8"
-        ).read()
-        doc = ast.get_docstring(parseSource(src)) or ""
-        assert "非生产路径" in doc, (
-            "providers/capability_cache.py 必须显式标注'非生产路径/单一事实源'，"
-            "否则下一个接入者会把两份缓存挑错"
-        )
-        assert "model_capability_cache" in doc, (
-            "标注里必须点名生产事实源，形成可跳转的路标"
+class TestOfflineCacheRetired:
+    def test_offline_cache_module_is_gone(self):
+        """S7 批（P1-13）：离线探测缓存已整体退役——不回树，生产只认 learning 缓存一份。"""
+        assert not (NEUROVA / "llm" / "providers" / "capability_cache.py").exists(), (
+            "providers/capability_cache.py 已按 P1-13 整体退役（生产零消费、语义被 "
+            "model_capability_cache + capability_detector 覆盖）——不许回树；"
+            "需要能力缓存请接 model_capability_cache"
         )
 
 

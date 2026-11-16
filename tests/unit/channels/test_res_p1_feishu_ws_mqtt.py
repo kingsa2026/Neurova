@@ -3,12 +3,15 @@ RES-P1-6 / RES-P1-7 / RES-P1-8 防回归测试（资源型Bug扫描报告 2026-0
 
 - P1-6 feishu.py: send_message 内的同步 lark Client 调用必须经 asyncio.to_thread
   下沉到工作线程，不得阻塞事件循环线程。
-- P1-7 websocket.py/mqtt.py: 入站消息必须经 _emit_event 走统一事件分发
+- P1-7 mqtt.py: 入站消息必须经 _emit_event 走统一事件分发
   （对照 feishu/dingtalk 模式）；死队列 _message_queue 与死方法 receive_message
   必须删除（全仓零消费口，曾造成无界堆积+功能黑洞）。
-- P1-8 websocket.py/mqtt.py: disconnect 必须是 async（基类 base.py:161 抽象契约），
-  websocket 需 cancel _receive_task/_reconnect_task 并收尸；
+- P1-8 mqtt.py: disconnect 必须是 async（基类 base.py:161 抽象契约），
   原同步实现 + run_until_complete 在运行中事件循环上必抛 RuntimeError。
+
+（S7 死码退役批：websocket.py 部分已随 channels/websocket.py 整体退役摘除——
+该适配器生产零消费（create_websocket_adapter 零调用者），P1-7/P1-8 对它的
+判据由"修好"变为"不回树"。）
 
 隔离纪律：无真实网络/文件/SQLite。lark_oapi 与 paho-mqtt 在测试环境未安装，
 以 fake 模块/对象注入；paho 线程回调语义用 asyncio.to_thread 复现。
@@ -26,31 +29,12 @@ import pytest
 from neurova.channels.base import ChannelConfig, ChannelEventType
 from neurova.channels.feishu import FeishuAdapter
 from neurova.channels.mqtt import MQTTAdapter
-from neurova.channels.websocket import WebSocketAdapter
 
 
 # ============================================================
 # 测试夹具（生产侧 connect 缺口已由台账 #1 补齐，直接用生产类实例化）
 # ============================================================
 
-
-class _FakeWsConnection:
-    """async-iterable 的 WebSocket 连接替身"""
-
-    def __init__(self, messages):
-        self._messages = list(messages)
-        self.closed = False
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        if not self._messages:
-            raise StopAsyncIteration
-        return self._messages.pop(0)
-
-    async def close(self):
-        self.closed = True
 
 
 # ============================================================
@@ -136,48 +120,6 @@ async def test_p1_6_feishu_send_message_offloads_sync_lark_call(monkeypatch):
 
 
 # ============================================================
-# P1-7 websocket：入站消息走 _emit_event，死队列/死方法删除
-# ============================================================
-
-
-@pytest.mark.asyncio
-async def test_p1_7_websocket_inbound_dispatches_via_event_callback():
-    adapter = WebSocketAdapter()
-    received = []
-
-    async def cb(event_type, message):
-        received.append((event_type, message))
-
-    adapter.set_event_callback(cb)
-    adapter._ws_connection = _FakeWsConnection(
-        [
-            '{"content":"hello","user_id":"u1","message_id":"m1"}',
-            "plain-text-not-json",
-        ]
-    )
-
-    await adapter._receive_loop()
-
-    assert [m.content for _, m in received] == ["hello", "plain-text-not-json"], (
-        "P1-7 未修复：入站消息仍进死队列 _message_queue，未走 _emit_event 统一分发"
-    )
-    assert all(et == ChannelEventType.MESSAGE_RECEIVED for et, _ in received)
-    # 死队列与死方法必须删除（全仓 receive_message 零调用方）
-    assert not hasattr(adapter, "_message_queue")
-    assert not hasattr(adapter, "receive_message")
-
-
-def test_p1_7_websocket_gen2_contract_present():
-    """P1-7 的 _emit_event 依赖基类三件契约（websocket 经 super().__init__ 获得）"""
-    adapter = WebSocketAdapter()
-    assert isinstance(adapter.config, ChannelConfig)
-    assert adapter.config.channel_type == "websocket"
-    assert adapter._connected is False
-    assert adapter._event_callback is None
-    assert adapter.channel_type == "websocket"
-
-
-# ============================================================
 # P1-7 mqtt：paho 线程回调经 run_coroutine_threadsafe 分发
 # ============================================================
 
@@ -232,34 +174,6 @@ async def test_p1_7_mqtt_drops_message_when_no_loop_available():
     assert received == []
     assert not hasattr(adapter, "_message_queue")
 
-
-# ============================================================
-# P1-8 websocket：async disconnect + cancel 后台任务
-# ============================================================
-
-
-@pytest.mark.asyncio
-async def test_p1_8_websocket_disconnect_is_async_and_cancels_tasks():
-    adapter = WebSocketAdapter()
-    conn = _FakeWsConnection([])
-    adapter._ws_connection = conn
-    receive_task = asyncio.create_task(asyncio.sleep(3600))
-    reconnect_task = asyncio.create_task(asyncio.sleep(3600))
-    adapter._receive_task = receive_task
-    adapter._reconnect_task = reconnect_task
-    adapter._connected = True
-
-    # 修复前：sync def disconnect + run_until_complete 在运行中循环上必抛
-    # RuntimeError（或 await None 的 TypeError），manager.stop/restart 中断
-    await adapter.disconnect()
-
-    assert conn.closed is True
-    assert adapter._ws_connection is None
-    assert receive_task.cancelled(), "_receive_task 未被 cancel（僵尸重连任务泄漏）"
-    assert reconnect_task.cancelled(), "_reconnect_task 未被 cancel（僵尸重连任务泄漏）"
-    assert adapter._receive_task is None
-    assert adapter._reconnect_task is None
-    assert adapter._connected is False
 
 
 # ============================================================

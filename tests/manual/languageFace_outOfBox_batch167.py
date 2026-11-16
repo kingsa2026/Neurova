@@ -70,8 +70,8 @@ def _dataDirFingerprint() -> str:
 
 
 def main() -> int:
-    from neurova.core import settings_manager as settingsManagerModule
-    from neurova.core import user_workspace as userWorkspaceModule
+    import importlib.util
+
     from neurova.language import manager as languageManagerModule
     from neurova.language.manager import LanguageManager
 
@@ -220,14 +220,12 @@ def main() -> int:
         check("27b 而那次合法写入确实落了盘（写面没被一起变成装饰）",
               appSettingsPath.read_bytes() != refusedBytes)
 
-        check("28 第二套实现真不在活进程里（settings_manager 没有按人语言接口）",
-              not hasattr(settingsManagerModule.SettingsManager, "get_user_language")
-              and not hasattr(settingsManagerModule.SettingsManager, "set_user_language"))
-        workspaceDefaults = userWorkspaceModule.UserWorkspace(
-            user_id="u-167", base_path=WORK_ROOT / "ws")._get_default_config()
-        check("29 第三套实现真不在（user_workspace 默认配置里没有 language，邻座仍在）",
-              "language" not in workspaceDefaults and "timezone" in workspaceDefaults,
-              str(sorted(workspaceDefaults.keys())))
+        # S7 批：第二/三套实现（settings_manager/user_workspace）已整体退役（P1-11），
+        # 判据从"模块里没有按人语言接口"升格为"模块本身不再可导入"。
+        check("28 第二套实现真不在活进程里（settings_manager 已整体退役）",
+              importlib.util.find_spec("neurova.core.settings_manager") is None)
+        check("29 第三套实现真不在（user_workspace 已整体退役）",
+              importlib.util.find_spec("neurova.core.user_workspace") is None)
 
         rebuilt = LanguageManager(data_dir=str(WORK_ROOT / "language"))
         check("30 再建一个管理器也从盘上读回同一条起点（重启语义，进程内字典不算）",

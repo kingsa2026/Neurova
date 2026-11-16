@@ -13,8 +13,12 @@
 """
 import pytest
 
+from pathlib import Path
+
 from neurova.admin.resource_quota_manager import ResourceQuotaManager
 from neurova.auth.user_group_model import ResourceQuota, UserGroupManager
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 @pytest.fixture()
@@ -103,9 +107,13 @@ class TestGroupQuotaWiring:
         groups.add_user_to_group("admin", g.group_id)
         assert mgr.get_user_quota("3")["max_storage_bytes"] == 1024 * 1024
 
-    def test_enhanced_user_model_quota_retired(self):
-        """按用户配额是零消费死面（判额闸只认 resource_quota_manager）——退役。"""
-        from neurova.auth.enhanced_user_model import EnhancedUserModel
+    def test_enhanced_user_model_retired(self):
+        """按用户配额是零消费死面（判额闸只认 resource_quota_manager）。
 
-        for method in ("get_user_quota", "get_user_usage", "get_user_quota_status", "_build_quota"):
-            assert not hasattr(EnhancedUserModel, method), f"{method} 应已退役"
+        S7 批（P1-20）：enhanced_user_model 整文件退役——判据从"配额方法摘除"
+        升格为"模块不回树"（它与 user_model.UserModel 构成第二套用户体系）。
+        """
+        assert not (PROJECT_ROOT / "neurova" / "auth" / "enhanced_user_model.py").exists(), (
+            "neurova/auth/enhanced_user_model.py 已按 P1-20 整体退役（生产零消费、"
+            "与 UserModel 构成第二套用户体系）——不许回树；用户模型只认 "
+            "neurova/auth/user_model.py::UserModel")

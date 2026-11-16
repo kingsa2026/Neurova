@@ -14,11 +14,12 @@ from neurova.security.tool_guard import (
 )
 from neurova.security.skill_scanner import SkillScanner, ScanPolicy, ScanMode
 from neurova.security.cognitive_security import (
-    CognitiveSecuritySystem, MemorySecurityGuard, 
+    CognitiveSecuritySystem, MemorySecurityGuard,
     SafetyLevel, SafetyCheckResult
 )
-from neurova.security.constitution import ConstitutionEvaluationEngine, ConstitutionRule
-from neurova.security.autonomous_assessor import AutonomousSkillSecurityAssessor
+
+# （S7 死码退役批）constitution/autonomous_assessor 两模块已按 P1-18 整体退役
+# （生产零消费），相关 import 与测试格一并摘除。
 
 # 导入需要测试的模块
 from neurova.execution_engine.tool_engine import ToolEngine
@@ -105,77 +106,38 @@ class TestSecuritySystemIntegration:
         
         finally:
             storage.close()
-    
-    def test_constitution_evaluation_integration(self):
-        """测试宪法制度评估引擎的集成"""
-        # 创建宪法评估引擎（包含默认规则）
-        engine = ConstitutionEvaluationEngine()
-        
-        # 测试默认规则：规则4（保护隐私）
-        # 包含隐私关键词的动作应该违反规则
-        privacy_violation = '泄露用户 password 是机密'
-        result = engine.evaluate(privacy_violation)
-        assert result is not None
-        # 注意：简化实现可能不检查自定义内容
-        # 我们至少确保评估功能正常工作
-        assert hasattr(result, 'is_compliant')
-        assert hasattr(result, 'violated_rules')
-        assert hasattr(result, 'compliance_score')
-        
-        # 测试正常操作
-        normal_action = '帮助用户解决问题'
-        result = engine.evaluate(normal_action)
-        assert result is not None
-        assert result.is_compliant is True  # 正常操作应该合规
-        
-        # 验证默认规则已加载
-        assert len(engine.rules) >= 4  # 至少有4个默认规则
-    
-    def test_autonomous_assessor_integration(self):
-        """测试自主技能安全评估器的集成"""
-        # 创建评估器
-        assessor = AutonomousSkillSecurityAssessor()
-        
-        # 测试评估功能
-        # 注意：这需要实际的技能目录，这里简化为单元测试
-        assert assessor is not None
-        assert hasattr(assessor, 'assess_skill')
-        assert hasattr(assessor, '_calculate_overall_score')  # 私有方法
-        assert hasattr(assessor, '_analyze_behavior')  # 私有方法
-    
+
+    # （S7 死码退役批）原 test_constitution_evaluation_integration 与
+    # test_autonomous_assessor_integration 两格已随 P1-18 模块退役摘除。
+
     def test_full_security_pipeline(self, temp_db_path):
         """测试完整的安全流水线"""
         # 这个测试验证从工具调用到记忆存储的完整安全流程
-        
+
         # 1. 创建所有安全组件
         tool_guard = ToolGuardEngine()
         scanner = SkillScanner()
         cognitive_security = CognitiveSecuritySystem()
-        constitution_engine = ConstitutionEvaluationEngine()
         storage = MemoryStorage(temp_db_path)
-        
+
         try:
             # 2. 模拟一个工具调用请求
             tool_request = {
                 'tool_name': 'shell_execute',
                 'args': {'command': 'rm -rf /'},
             }
-            
+
             # 3. 工具守卫检查
             # 注意：这需要实际调用 ToolEngine，这里简化为概念验证
             # 在实际应用中，这些检查应该在 ToolEngine.execute_with_safeguards() 中执行
-            
+
             # 4. 认知安全检查
             input_check = asyncio.run(
                 cognitive_security.check_input_safety(str(tool_request))
             )
             assert input_check is not None
-            
-            # 5. 宪法制度检查
-            constitution_result = constitution_engine.evaluate(str(tool_request))
-            assert constitution_result is not None
-            
-            # 6. 如果通过所有检查，执行工具（这里模拟）
+
+            # 5. 如果通过所有检查，执行工具（这里模拟）
             # 执行后的输出也应该被检查
             mock_output = "操作完成，密码是 password123"
             output_check = cognitive_security.check_output_safety(mock_output)
@@ -294,15 +256,10 @@ class TestSecurityCoverage:
         from neurova.security.cognitive_security import CognitiveSecuritySystem, MemorySecurityGuard
         assert CognitiveSecuritySystem is not None
         assert MemorySecurityGuard is not None
-        
-        # 宪法制度
-        from neurova.security.constitution import ConstitutionEvaluationEngine
-        assert ConstitutionEvaluationEngine is not None
-        
-        # 自主评估器
-        from neurova.security.autonomous_assessor import AutonomousSkillSecurityAssessor
-        assert AutonomousSkillSecurityAssessor is not None
-    
+
+        # （S7 死码退役批）constitution/autonomous_assessor 已按 P1-18 退役，
+        # 不再列入"可导入"面。
+
     def test_security_modules_have_tests(self):
         """测试所有安全模块都有对应的测试文件"""
         import os

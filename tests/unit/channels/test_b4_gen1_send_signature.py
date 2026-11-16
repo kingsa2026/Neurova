@@ -2,11 +2,14 @@
 
 缺陷: 基类 ChannelAdapter.send_message 契约为
     async send_message(chat_id, content, message_type="text", **kwargs) -> Optional[str]
-而 discord/qqbot/qq/websocket 四个 Gen1 适配器以 (self, message: UnifiedMessage) 覆写，
+而 discord/qqbot/qq 三个 Gen1 适配器以 (self, message: UnifiedMessage) 覆写，
 manager.send_message（manager.py:177/226）按基类签名直连 → TypeError（签名错位）。
 
-修复（qclaw 先例）: 四适配器补齐基类签名实现（内部委托既有 UnifiedMessage 逻辑），
+修复（qclaw 先例）: 适配器补齐基类签名实现（内部委托既有 UnifiedMessage 逻辑），
 旧 UnifiedMessage 路径保留为内部 _send_unified。全测试 mock/fake，不触真实网络。
+
+（S7 死码退役批：原第四个适配器 channels/websocket.py 已按 P2 散点退役——
+生产零消费（create_websocket_adapter 零调用者），相关格一并摘除。）
 """
 
 import inspect
@@ -15,15 +18,13 @@ import time
 import pytest
 
 import neurova.channels.qq as qq_mod
-import neurova.channels.websocket as websocket_module
 from neurova.channels.base import ChannelAdapter
 from neurova.channels.discord import DiscordAdapter
 from neurova.channels.models import ContentType, MessageChannel, UnifiedMessage
 from neurova.channels.qq import QQAdapter
 from neurova.channels.qqbot import QQBotAdapter
-from neurova.channels.websocket import WebSocketAdapter
 
-GEN1_ADAPTERS = [DiscordAdapter, QQBotAdapter, QQAdapter, WebSocketAdapter]
+GEN1_ADAPTERS = [DiscordAdapter, QQBotAdapter, QQAdapter]
 
 
 # ============================================================
@@ -173,31 +174,3 @@ async def test_qq_base_signature_direct_call_failure_returns_none(monkeypatch):
     monkeypatch.setattr(qq_mod.requests, "post", lambda *a, **k: _QQResp({}, status=500))
     assert await adapter.send_message("chan1", "hello") is None
 
-
-@pytest.mark.asyncio
-async def test_websocket_base_signature_direct_call(monkeypatch):
-    monkeypatch.setattr(websocket_module, "WEBSOCKETS_AVAILABLE", True)
-
-    adapter = WebSocketAdapter()
-    adapter._initialized = True
-    adapter._connected = True
-
-    sent = []
-
-    class _Conn:
-        async def send(self, payload):
-            sent.append(payload)
-
-    adapter._ws_connection = _Conn()
-
-    msg_id = await adapter.send_message("u1", "hello")
-    assert isinstance(msg_id, str) and msg_id
-    assert "hello" in "".join(sent), "必须经真实 ws 连接 await 发送"
-
-
-@pytest.mark.asyncio
-async def test_websocket_base_signature_not_connected_returns_none():
-    adapter = WebSocketAdapter()
-    adapter._initialized = True
-    adapter._connected = False
-    assert await adapter.send_message("u1", "hello") is None

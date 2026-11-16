@@ -91,26 +91,10 @@ class ModelInfo(BaseModel):
         return cls(**data)
 
 
-class ProviderInfo(BaseModel):
-    """Provider 信息"""
-
-    id: str = ""
-    name: str = ""
-    provider_type: ProviderType = ProviderType.OPENAI
-    api_key: str = ""
-    base_url: str = ""
-    models: List[ModelInfo] = Field(default_factory=list)
-    capabilities: List[ProviderCapability] = Field(default_factory=list)
-    enabled: bool = True
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-
-    def to_dict(self) -> Dict[str, Any]:
-        # requirements: pydantic>=2.5;model_dump 为 v2 原生 API
-        return self.model_dump()
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ProviderInfo":
-        return cls(**data)
+# （S7 死码退役批）原 ProviderInfo 类已退役：生产零消费，与 API 层唯一事实源
+# `api/endpoints/provider.py::ProviderInfo` 构成同名双定义（P1-13）。Provider 契约
+# 只认 API 层那一份；本模块保留 ProviderType/ProviderCapability/ModelInfo/ProbeResult/
+# ConnectionResult 等在役类型。
 
 
 class ProbeResult(BaseModel):

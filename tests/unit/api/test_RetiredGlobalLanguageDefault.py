@@ -9,6 +9,10 @@
 - `core/settings_manager.py` 的 `get_user_language`/`set_user_language` 与两处 key 白名单；
 - `core/user_workspace.py` 默认配置里的 `"language"`。
 
+S7 死码退役批补充：后两个文件（`settings_manager.py`/`user_workspace.py`）已**整体退役**
+（P1-11，生产零消费），本档对它们的判据收敛为「模块文件不再在树里」（见
+TestRetiredModulesStayRetired）；形状扫描口径相应收窄到仍在役的两张默认表。
+
 ## 为什么"摘掉默认值"不够，必须让写面拒收
 
 `PUT /settings` 的 body 是 `Dict[str, Any]`，没有任何闭集校验（实测今天写 `"zh_CN"`
@@ -16,11 +20,11 @@
 而 `GET /settings` 又原样回显它——那就得到一根**只写不读**的新断链，比原先更糟，
 因为原先它至少还有个默认值陪着。按教义第 2 条，退役后的键必须以**显式 400 ＋ 去处**暴露。
 
-## 扫描口径为什么收在这四个文件上
+## 扫描口径为什么收在这两张活表上
 
 `"language"` 这个键名在生产码里还服务于**另一件事**（neurflow 代码模板节点的编程语言、
 媒体节点的播报语种），全仓一刀切会把无关命中算进来、或者逼出一份会过期的豁免名单
-（判据问错对象那一族）。所以形状扫描只覆盖这四张默认表所在文件；跨面的保护由
+（判据问错对象那一族）。所以形状扫描只覆盖在役的两张默认表所在文件；跨面的保护由
 "读活对象"那几格承担——它们本身就是行为判据，谁把键加回去就红。
 """
 
@@ -37,20 +41,22 @@ from fastapi.testclient import TestClient
 
 from neurova.api.endpoints import settings as SETTINGS
 from neurova.core import app_settings as APPS
-from neurova.core import settings_manager as SM
-from neurova.core import user_workspace as UW
 from tests.ast_scan import parseSource
 from tests.auth_headers import overrideIdentity
 
 ADMIN = {"user_id": "a1", "username": "a1", "role": "admin"}
 BASE = "/api/v1/settings"
 
-#: 四张默认表所在的文件——退役面的形状扫描口径（见模块 docstring 末段）。
+#: 在役默认表所在的文件——退役面的形状扫描口径（见模块 docstring 末段）。
 DEFAULT_TABLE_FILES = (
     Path(APPS.__file__),
     Path(SETTINGS.__file__),
-    Path(SM.__file__),
-    Path(UW.__file__),
+)
+
+#: S7 批已整体退役的第二/三套实现——钉住它们不再回树。
+RETIRED_MODULE_FILES = (
+    Path(APPS.__file__).parent / "settings_manager.py",
+    Path(APPS.__file__).parent / "user_workspace.py",
 )
 
 
@@ -198,28 +204,18 @@ class TestTheFaceRefusesTheRetiredKey:
             "回了 400 却把状态写进盘——报错与变更分家（教义第 1 条的反面）")
 
 
-class TestTheSecondAndThirdImplementationsDisappear:
-    def testSettingsManagerHasNoUserLanguageApi(self):
-        for name in ("get_user_language", "set_user_language"):
-            assert not hasattr(SM.SettingsManager, name), (
-                f"`settings_manager.{name}` 还在：它是同一件事的第二套词汇而生产零消费者，"
-                "留着就是下一个接线的人会误用的那条路")
+class TestRetiredModulesStayRetired:
+    """S7 批：第二/三套实现（settings_manager/user_workspace）已整体退役（P1-11）。
 
-    def testSettingsManagerWhitelistsDropLanguage(self, tmp_path):
-        manager = SM.SettingsManager(config={"data_dir": str(tmp_path / "sm")})
+    原「摘掉 language 键」的三格随模块整体退役失去对象；判据升格为钉文件不回树——
+    谁把这两套零消费实现复制回来，这里当场红。
+    """
 
-        assert "language" not in manager.get_all_settings("u-1"), (
-            "`get_all_settings` 还在给每人算一份语言默认：那是第二个按人读面")
-        manager.update_settings({"language": "en-US", "theme": "dark"}, user_id="u-1")
-        assert "language" not in manager.get_all_settings("u-1"), (
-            "白名单里还留着 `language`：批量更新能把它写回去，退役就只是文案")
-
-    def testUserWorkspaceDefaultConfigDropsLanguage(self, tmp_path):
-        workspace = UW.UserWorkspace(user_id="u-1", base_path=tmp_path)
-        defaults = workspace._get_default_config()
-
-        assert "language" not in defaults, "工作区默认配置还带 language：那是第四份字面量"
-        assert "timezone" in defaults, "邻座被一起删了"
+    def testRetiredModuleFilesAreGone(self):
+        for path in RETIRED_MODULE_FILES:
+            assert not path.exists(), (
+                f"{path.name} 已按 P1-11 整体退役（生产零消费、与在役 app_settings/settings 面"
+                f"构成第二份定义）——不许回树；若确需按人设置能力，接到现役面而不是复活它")
 
 
 class TestTheScannerHasTeeth:

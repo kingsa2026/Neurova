@@ -261,32 +261,13 @@ def _eventType():
     return ChannelEventType.MESSAGE_RECEIVED
 
 
-class TestWebsocketInboundPaysTheDoorsCurrency:
-    """同一条根的第二个违约者。**这一支今天在生产里构造不出来**（`create_websocket_adapter` 零调用者），
-    所以这里只钉形状与门读法，不声称端到端可用——去留属 `UnifiedMessage`/Gen2 那族那次裁。"""
-
-    def testParsedWebsocketMessageIsTheDoorsCurrency(self):
-        from neurova.channels.base import ChannelMessage
-        from neurova.channels.websocket import WebSocketAdapter
-
-        adapter = WebSocketAdapter()
-        parsed = adapter._parse_websocket_message(json.dumps({"user_id": "ws-u1", "content": "hi"}))
-
-        assert parsed is not None, "解析自己返了 None，读数无意义"
-        assert isinstance(parsed, ChannelMessage), (
-            f"websocket 入站投给门的还是别的对象：{type(parsed).__name__}")
-        assert parsed.channel_type == "websocket", f"channel_type：{parsed.channel_type!r}"
-        assert parsed.sender_id == "ws-u1", f"发送者：{parsed.sender_id!r}"
-
-    def testWebsocketEmitSiteCarriesTheMadeMessage(self):
-        """把 `UnifiedMessage` 留在出站/Gen2 那面，入站投递点必须换成门的货币。"""
-        src = (REPO / "neurova" / "channels" / "websocket.py").read_text(encoding="utf-8")
-        emitLine = next(l for l in src.splitlines() if "_emit_event(ChannelEventType" in l)
-        assert "unified_msg" not in emitLine, f"投递点还在交旧对象：{emitLine.strip()}"
+# （S7 死码退役批）原 TestWebsocketInboundPaysTheDoorsCurrency 两格已随
+# channels/websocket.py 整体退役摘除（P2：create_websocket_adapter 零调用者，
+# 那一支等到的裁决是退役而非接线）。
 
 
 class TestParseRawMessageFaceStaysHonest:
-    """这两支的 `parse_raw_message` 只是转交给上面那个解析器——注解必须与真产物同形。
+    """`parse_raw_message` 只是转交给上面那个解析器——注解必须与真产物同形。
 
     它全仓零调用者（现量），所以本批不替 `UnifiedMessage`/Gen2 整族做裁决，但也**不许留一句
     假的契约文本**：改了产物却写着 `-> UnifiedMessage`，下一个人就照着错形状接管线。
@@ -295,24 +276,20 @@ class TestParseRawMessageFaceStaysHonest:
     def testParsedProductsAreTheDoorsCurrency(self):
         from neurova.channels.base import ChannelMessage
         from neurova.channels.mqtt import MQTTAdapter
-        from neurova.channels.websocket import WebSocketAdapter
 
         mqttOut = MQTTAdapter().parse_raw_message({"topic": "server/a/up",
                                                   "payload": json.dumps({"user_id": "u1",
                                                                          "content": "hi"})})
-        wsOut = WebSocketAdapter().parse_raw_message(json.dumps({"user_id": "w1", "content": "yo"}))
 
         assert isinstance(mqttOut, ChannelMessage), f"mqtt 交的却是 {type(mqttOut).__name__}"
-        assert isinstance(wsOut, ChannelMessage), f"websocket 交的却是 {type(wsOut).__name__}"
 
     def testAnnotationsMatchWhatThoseMethodsActuallyReturn(self):
         import typing
 
         from neurova.channels.base import ChannelMessage
         from neurova.channels.mqtt import MQTTAdapter
-        from neurova.channels.websocket import WebSocketAdapter
 
-        for cls in (MQTTAdapter, WebSocketAdapter):
+        for cls in (MQTTAdapter,):
             declared = typing.get_args(cls.parse_raw_message.__annotations__["return"])
             assert declared and ChannelMessage in declared, (
                 f"{cls.__name__}.parse_raw_message 的返回注解里没有 ChannelMessage："

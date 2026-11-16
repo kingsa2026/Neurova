@@ -16,7 +16,6 @@ from neurova.security.approval_manager import (
     ApprovalManager,
     get_approval_manager,
     set_approval_level,
-    generate_approval_html,
 )
 
 
@@ -308,22 +307,9 @@ class TestApprovalManager:
 # 测试全局函数
 # ============================================================
 
-class TestGlobalFunctions:
-    """全局函数"""
-
-    def test_generate_approval_html(self):
-        request_data = {
-            "request_id": "test-123",
-            "command": "rm -rf /",
-            "danger_reason": "危险命令",
-            "agent_id": "agent1",
-            "created_at": "2026-06-05T10:00:00",
-        }
-        html = generate_approval_html(request_data)
-        assert "test-123" in html
-        assert "rm -rf /" in html
-        assert "批准" in html
-        assert "拒绝" in html
+# （S7 死码退役批）原 TestGlobalFunctions.test_generate_approval_html 已随
+# approval_manager.generate_approval_html 退役摘除（P1-18：无路由无调用方，
+# 审批出口走 JSON/回调与 governance.py）。
 
 
 # ============================================================

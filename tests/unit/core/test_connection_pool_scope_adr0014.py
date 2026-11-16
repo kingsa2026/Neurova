@@ -153,7 +153,7 @@ class TestShortConnectionSitesPaired:
         "neurova/security/audit_logger.py",
         "neurova/security/approval_manager.py",
         "neurova/security/rbac.py",
-        "neurova/security/compliance_reporter.py",
+        # （S7 批）neurova/security/compliance_reporter.py 已随 P1-18 退役摘除。
         "neurova/planning/planning_tool.py",
         "neurova/core/provider_usage.py",
         "neurova/api/endpoints/files_api.py",

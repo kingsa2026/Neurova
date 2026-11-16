@@ -136,11 +136,5 @@ def test_model_info_to_dict_works_in_pydantic_v1():
     assert result["id"] == "gpt-4"
 
 
-def test_provider_info_to_dict_works_in_pydantic_v1():
-    """s9.7: ProviderInfo.to_dict() 在 v1 下应工作"""
-    from neurova.llm.providers.types import ProviderInfo
-
-    p = ProviderInfo(id="openai", name="OpenAI")
-    result = p.to_dict()
-    assert isinstance(result, dict)
-    assert result["id"] == "openai"
+# （S7 死码退役批）原 s9.7 ProviderInfo.to_dict() 格已随 providers/types.py 的
+# ProviderInfo 类退役摘除（P1-13：生产零消费，API 层 provider.py::ProviderInfo 是唯一事实源）。

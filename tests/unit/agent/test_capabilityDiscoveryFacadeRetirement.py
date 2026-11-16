@@ -11,17 +11,18 @@
   `collaboration_api.py` 里有 19 条路由，其中 8 条是 `/capabilities*`／`/recommend`／`/matrix*`／
   `/templates/preset`，`POST /capabilities/register` 就是注册表的唯一生产者；次日 `7835c367`
   把该文件重写成 154 行／6 条路由，端点整批消失，生产侧再无人喂、再无人读。
-  ⇒ 本体删不删归台账 B3 那张需人裁票（它与 matrix 必须同批裁），**本刀一律不碰**。
-- 本刀只解决门面这一条（与 §6-312 的 D19 同根因）：`protocols/__init__.py` 在模块级无条件
+  ⇒ **B3 那张需人裁票已裁（2026-11-16，S7 死码退役批）：岛本体退役**——
+  `capability_discovery.py` 与 `matrix/` 已从树里删净（P1-12）。
+- 门面收口（与 §6-312 的 D19 同根因）：`protocols/__init__.py` 曾在模块级无条件
   `from .capability_discovery import ...` 并把三个名字写进 `__all__`，而 `agent/team.py:23` 与
   `acp_api.py` 都是 `from neurova.agent.protocols.<子模块> import ...`——Python 导入子包必先执行
-  父包 `__init__`，于是**只取活的消息协议也会执行这 449 行死码的模块体**，还向下一个人暗示
+  父包 `__init__`，于是**只取活的消息协议也会执行那 449 行死码的模块体**，还向下一个人暗示
   "能力发现在这里有现役实现"。
 
 本格钉四件事：
 ① 正控——活的那条链（消息协议／死信队列）仍能从门面取到，收口不许关掉活面；
 ② 行为——干净子进程里只 import 活的 `acp_runtime` 时，`capability_discovery` 不得进 `sys.modules`；
-③ 边界——两档岛本体仍须在树里（它们等的是 B3 那次裁，不是本刀顺手删）；
+③ 退役确认——两档岛本体不再回树（B3 已裁退役，谁复制回来这里红）；
 ④ 面自证——探针与扫描器这两条腿都能产生非零读数，否则"零"分不开"没跑成"（形态集 283）。
 """
 
@@ -131,46 +132,44 @@ class TestCapabilityDiscoveryFacadeRetirement:
             "门面仍能取到 %s——`__all__` 摘了却没摘 module-level import，启动成本一分没省"
             % ", ".join(attached))
 
-    def test_islandBodiesAreNotDeletedByThisKnife(self):
-        """边界反证：本刀只动门面，两档岛本体必须仍在树里。
+    def test_islandBodiesStayRetired(self):
+        """退役确认（B3 已裁，S7 批执行）：两档岛本体不再回树。
 
-        这条不是形式主义。那座岛**曾被接进活链路后被摘**（`7835c367` 一刀砍掉 8 条路由），
-        按死码溯源的口径它只能"恢复接线"或"显式承认放弃该能力"，二者都归台账 B3 那次人裁；
-        把它当"实现还在、只是没人调"顺手删掉，就是替产品关掉一项能力。这一格钉住本刀的边界。
+        那座岛**曾被接进活链路后被摘**（`7835c367` 一刀砍掉 8 条路由），按死码溯源的口径
+        它只能"恢复接线"或"显式承认放弃该能力"。B3 裁定退役（P1-12）：生产侧零消费者、
+        与在役 swarm/subagent/acp_runtime 语义重叠，恢复接线无需求方。谁把本体复制回来，
+        这里当场红——要接，先回 B3 重新立票。
         """
-        missing = []
-        for rel in ("neurova/agent/protocols/capability_discovery.py", "neurova/agent/matrix/agent_matrix.py"):
-            if not (PROJECT_ROOT / rel).is_file():
-                missing.append(rel)
-        assert not missing, (
-            "以下岛本体已不在树里，但 B3 那张需人裁票还没拍：%s——门面收口不等于批准退役本体"
-            % ", ".join(missing))
+        back = []
+        for rel in ("neurova/agent/protocols/capability_discovery.py",
+                    "neurova/agent/matrix/agent_matrix.py",
+                    "neurova/agent/matrix/__init__.py"):
+            if (PROJECT_ROOT / rel).exists():
+                back.append(rel)
+        assert not back, (
+            "以下岛本体已按 B3 裁决退役（P1-12），不许静默回树：%s" % ", ".join(back))
 
-    def test_noConsumerOutsideTheIsland(self):
-        """死岛的外部引用面必须收在岛内：除 matrix 自己那条腿，生产侧不得再有人 import 它。
-
-        下限同时钉住：`agent_matrix.py` 这一处必须还在（它就是 B3 要裁的那个唯一消费者），
-        读数掉成 0 意味着扫描面被改窄，而不是引用被清干净。
-        """
+    def test_noConsumerAnywhereAfterRetirement(self):
+        """退役后全仓（生产侧）对两岛模块 0 import——岛没了，引用面也必须清干净。"""
         offenders = []
         for mod in ISLAND_MODULES:
             for path, lineno, kind in ast_scan.importersOfModule(PROJECT_ROOT / "neurova", mod):
-                if "neurova/agent/matrix/" in path or "neurova/agent/protocols/" in path:
-                    continue
                 offenders.append("%s ← %s:%s（取法 %s）" % (mod, path, lineno, kind))
         assert not offenders, (
-            "岛外还有人 import 这座死岛（本刀收口的门面漏了腿，或有人新接了一条）：\n  "
+            "岛本体已退役，生产侧却还有人 import（谁把死岛接回来了）：\n  "
             + "\n  ".join(offenders))
 
     def test_importScannerFaceIsNotNarrowed(self):
-        """面自证：同一个取数口对**岛内那条活腿**必须报出引用——否则上一格的"岛外零命中"是假绿。
+        """面自证：同一个取数口对**活模块**必须报出引用——否则上一格的"零命中"是假绿。
 
         根被改窄、路径写错、`importersOfModule` 被换实现，三种坏法都只让 offender 读数变 0。
+        原先拿岛内那条腿（agent_matrix→capability_discovery）当探针；本体退役后改拿
+        活的 acp_runtime 消费腿（team.py/acp_api.py 的 import）当探针。
         """
         live = ast_scan.importersOfModule(PROJECT_ROOT / "neurova",
-                                          "neurova.agent.protocols.capability_discovery")
+                                          "neurova.agent.protocols.acp_runtime")
         assert len(live) >= 1, (
-            "取数口对 capability_discovery 只报 %d 处（应至少含 agent_matrix.py 那条相对导入腿）——"
+            "取数口对 acp_runtime 只报 %d 处（应至少含 team.py/acp_api.py 的在用腿）——"
             "扫描面自己坏了，此时『岛外零引用』不作数" % len(live))
 
 

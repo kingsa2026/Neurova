@@ -27,7 +27,6 @@ import pytest
 
 import neurova.channels.discord as discord_module
 import neurova.channels.mqtt as mqtt_module
-import neurova.channels.websocket as websocket_module
 from neurova.channels.base import ChannelConfig, ChannelEventType
 from neurova.channels.discord import DiscordAdapter
 from neurova.channels.mqtt import MQTTAdapter
@@ -36,11 +35,13 @@ from neurova.channels.qclaw import QClawAdapter
 from neurova.channels.qq import QQAdapter
 from neurova.channels.qqbot import QQBotAdapter
 from neurova.channels.sip import SIPAdapter
-from neurova.channels.websocket import WebSocketAdapter
+
+# （S7 死码退役批）channels/websocket.py 已按 P2 散点退役（生产零消费），
+# WebSocketAdapter 相关格一并摘除。
 
 
 # ============================================================
-# #1/#8 五适配器可直接实例化（Gen2 抽象契约补齐）
+# #1/#8 适配器可直接实例化（Gen2 抽象契约补齐）
 # ============================================================
 
 
@@ -49,7 +50,6 @@ from neurova.channels.websocket import WebSocketAdapter
     [
         (DiscordAdapter, "discord"),
         (QQBotAdapter, "qqbot"),
-        (WebSocketAdapter, "websocket"),
         (MQTTAdapter, "mqtt"),
         (SIPAdapter, "sip"),
     ],
@@ -169,144 +169,6 @@ async def test_qqbot_disconnect_clears_state():
     assert adapter._ws_connection is None
 
 
-# ============================================================
-# #1/#8 WebSocketAdapter connect（真实 websockets 路径，禁假成功）
-# ============================================================
-
-
-class _FakeWsConn:
-    """长连接替身：无消息时挂起（保持 _receive_loop 存活），可发可关"""
-
-    def __init__(self):
-        self.sent = []
-        self.closed = False
-        self._idle = asyncio.Event()
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        await self._idle.wait()
-        raise StopAsyncIteration
-
-    async def send(self, payload):
-        self.sent.append(payload)
-
-    async def close(self):
-        self.closed = True
-        self._idle.set()
-
-
-class _FakeWebsocketsModule:
-    def __init__(self, fail=False):
-        self.fail = fail
-        self.connect_kwargs = {}
-
-    async def connect(self, url, **kwargs):
-        self.connect_kwargs = {"url": url, **kwargs}
-        if self.fail:
-            raise OSError("connection refused")
-        return _FakeWsConn()
-
-
-@pytest.mark.asyncio
-async def test_websocket_connect_without_url_honest_fail():
-    adapter = WebSocketAdapter()
-    assert await adapter.connect() is False
-    assert adapter._connected is False
-
-
-@pytest.mark.asyncio
-async def test_websocket_connect_honest_fail_when_lib_missing(monkeypatch):
-    """websockets 未安装 → 诚实失败。修复前 _init_connection '模拟初始化' return True 假成功"""
-    monkeypatch.setattr(websocket_module, "WEBSOCKETS_AVAILABLE", False)
-    adapter = WebSocketAdapter()
-    adapter.ws_url = "ws://unit.test/x"
-    assert await adapter.connect() is False
-    assert adapter._connected is False
-
-
-@pytest.mark.asyncio
-async def test_websocket_connect_success_keeps_task_reference(monkeypatch):
-    fake_ws = _FakeWebsocketsModule()
-    monkeypatch.setattr(websocket_module, "WEBSOCKETS_AVAILABLE", True)
-    # websockets 未安装的环境里模块级 `websockets` 名未被绑定，raising=False 兜住
-    monkeypatch.setattr(websocket_module, "websockets", fake_ws, raising=False)
-
-    adapter = WebSocketAdapter()
-    adapter.ws_url = "ws://unit.test/ok"
-
-    assert await adapter.connect() is True
-    assert adapter._connected is True
-    # connect 里起的 _receive_task 必须存引用（disconnect cancel 之）
-    assert adapter._receive_task is not None
-    assert not adapter._receive_task.done()
-
-    await adapter.disconnect()
-    assert adapter._receive_task is None
-    assert adapter._connected is False
-
-
-@pytest.mark.asyncio
-async def test_websocket_connect_failure_honest_fail(monkeypatch):
-    """连接异常必须如实返回 False。修复前 _init_connection 捕获异常仍 return True 假成功"""
-    fake_ws = _FakeWebsocketsModule(fail=True)
-    monkeypatch.setattr(websocket_module, "WEBSOCKETS_AVAILABLE", True)
-    monkeypatch.setattr(websocket_module, "websockets", fake_ws, raising=False)
-
-    adapter = WebSocketAdapter()
-    adapter.ws_url = "ws://unit.test/fail"
-
-    assert await adapter.connect() is False
-    assert adapter._connected is False
-    assert adapter._receive_task is None
-
-
-def test_websocket_authenticate_is_config_only():
-    """连接职责移交 connect：authenticate 只解析/校验配置，不再建连"""
-    adapter = WebSocketAdapter()
-    assert adapter.authenticate({"ws_url": "ws://unit.test/x"}) is True
-    assert adapter.ws_url == "ws://unit.test/x"
-    assert adapter._connected is False
-    assert WebSocketAdapter().authenticate({}) is False, "缺 ws_url 必须诚实失败"
-
-
-@pytest.mark.asyncio
-async def test_websocket_send_message_is_async_and_awaits_connection(monkeypatch):
-    fake_ws = _FakeWebsocketsModule()
-    monkeypatch.setattr(websocket_module, "WEBSOCKETS_AVAILABLE", True)
-    monkeypatch.setattr(websocket_module, "websockets", fake_ws)
-
-    adapter = WebSocketAdapter()
-    adapter.ws_url = "ws://unit.test/ok"
-    await adapter.connect()
-    conn = adapter._ws_connection
-
-    msg = UnifiedMessage(
-        message_id="m1",
-        channel=MessageChannel.WEBSOCKET,
-        content_type=ContentType.TEXT,
-        content="hello",
-        user_id="u1",
-        chat_id="c1",
-    )
-    # B-4: 旧 UnifiedMessage 路径更名为内部 _send_unified（基类签名由 test_b4 覆盖）
-    assert await adapter._send_unified(msg) is True
-    assert "hello" in "".join(conn.sent), "send_message 必须 await 真实 ws 连接发送"
-
-    await adapter.disconnect()
-
-
-def test_websocket_no_run_until_complete_residual():
-    """#8: Gen1 sync 残留必须清零——全模块不得再出现 run_until_complete 调用 / 捕获 loop 引用"""
-    import re
-
-    src = inspect.getsource(websocket_module)
-    assert not re.search(r"run_until_complete\s*\(", src), (
-        "websocket.py 仍残留 run_until_complete 调用（运行中循环上必抛 RuntimeError）"
-    )
-    adapter = WebSocketAdapter()
-    assert not hasattr(adapter, "_event_loop"), "_event_loop 捕获 loop 引用应随 Gen1 sync 路径一并删除"
 
 
 # ============================================================
@@ -468,7 +330,7 @@ async def test_sip_disconnect_clears_state():
 
 @pytest.mark.parametrize(
     "adapter_cls",
-    [DiscordAdapter, QQBotAdapter, WebSocketAdapter, MQTTAdapter, SIPAdapter, QQAdapter, QClawAdapter],
+    [DiscordAdapter, QQBotAdapter, MQTTAdapter, SIPAdapter, QQAdapter, QClawAdapter],
 )
 def test_receive_message_dead_stub_not_revived(adapter_cls):
     """全仓零消费口（mq/ws 的 _message_queue 已随 P1-7 删除），基类亦无此方法"""
@@ -537,14 +399,7 @@ async def test_test_connection_chain_connect_health_disconnect(monkeypatch):
     assert (await a.health_check())["channel_type"] == "mqtt"
     await a.disconnect()
 
-    # websocket
-    monkeypatch.setattr(websocket_module, "WEBSOCKETS_AVAILABLE", True)
-    monkeypatch.setattr(websocket_module, "websockets", _FakeWebsocketsModule())
-    a = WebSocketAdapter()
-    a.ws_url = "ws://unit.test/ok"
-    assert await a.connect() is True
-    assert (await a.health_check())["channel_type"] == "websocket"
-    await a.disconnect()
+    # （S7 死码退役批）websocket 分支已随 channels/websocket.py 退役摘除。
 
     # sip：connect 诚实失败，但链路本身必须可走完（端点返回"Failed to connect"而非 500/400）
     a = SIPAdapter()
