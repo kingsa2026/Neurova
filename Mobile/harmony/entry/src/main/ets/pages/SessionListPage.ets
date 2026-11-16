@@ -68,10 +68,15 @@ export struct SessionListPage {
       : base.filter((s: ChatSession) => s.title.indexOf(kw) >= 0);
     const sorted = filtered.slice();
     sorted.sort((a: ChatSession, b: ChatSession) => {
+      // 比较器三分支契约：a 应排前返回负数、b 应排前返回正数、相等返回 0——
+      // 只返回 0/1 的写法对大部分输入等效"相等"，排序结果不稳定（审计 3.8-3）
       if (a.pinned !== b.pinned) {
-        return a.pinned ? 0 : 1;
+        return a.pinned ? -1 : 1;
       }
-      return a.updated_at > b.updated_at ? 0 : 1;
+      if (a.updated_at === b.updated_at) {
+        return 0;
+      }
+      return a.updated_at > b.updated_at ? -1 : 1;
     });
     return sorted;
   }
@@ -201,7 +206,7 @@ export struct SessionListPage {
               .fontColor(this.sm.getColor('text_on_primary'))
           }
           .buttonStyle(ButtonStyleMode.NORMAL)
-          .linearGradient({ angle: 135, colors: [['#8b5cf6', 0], ['#6366f1', 1]] })
+          .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
           .height(34)
           .margin({ left: 8 })
           .onClick(() => {
@@ -274,7 +279,7 @@ export struct SessionListPage {
                   .height(40)
                   .borderRadius(14)
                   .textAlign(TextAlign.Center)
-                  .linearGradient({ angle: 135, colors: [['#8b5cf6', 0], ['#6366f1', 1]] })
+                  .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
 
                 Column() {
                   Row() {

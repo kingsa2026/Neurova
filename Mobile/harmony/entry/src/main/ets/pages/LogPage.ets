@@ -11,7 +11,7 @@
  *     + [加载态/空态/列表] + [详情弹窗]]；
  *     列表项 GlassCard 含 level 徽章（颜色按级别区分）、时间戳、source、
  *     消息摘要、展开 context 详情；
- *     清空走 AlertDialog 二次确认；导出走 api.monitor.clearLogs（占位为导出）；
+ *     清空走 AlertDialog 二次确认；导出为客户端真实落盘（files/export/*.json）；
  *     详情弹窗内嵌 Stack 条件渲染；
  *   - 颜色统一走 StyleManager（返回 token 名），路由走 Router，
  *     API 走 ApiFacade.monitor，消息走 MessageManager
@@ -30,13 +30,14 @@
  *   aboutToAppear 调用 api.monitor.listLogs 加载列表；
  *   level/source 筛选 → 切换筛选 Tab/输入 → 本地 filterLogs 过滤；
  *   点击列表项 → 展开折叠 context 详情；
- *   导出按钮 → 调用 api.monitor.clearLogs（暂用清空接口占位）；
+ *   导出按钮 → listLogs 拉全量 → fileIo 写 files/export/neurova-logs-<时间戳>.json；
  *   清空按钮 → AlertDialog 二次确认 → 调用 api.monitor.clearLogs → 刷新列表
  *
  * TDD：LogViewHelper 各方法按红绿灯垂直切片逐步实现，详见 LogPage.test.ets
  */
 
 import { TopNavMenu, GlassCard, GlassButton, GlassInput, GlassPanel } from '../components/glass';
+import { fileIo } from '@kit.CoreFileKit';
 import { ApiFacade } from '../libs/api/ApiFacade';
 import { Router } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
@@ -255,18 +256,43 @@ export struct LogPage {
   }
 
   /**
-   * 导出日志（占位实现）
-   * 流程：调用 api.monitor.listLogs 拉全量 → 提示已导出
+   * 导出日志：拉取全量后**真实落盘**为 JSON 文件（应用 files/export/ 目录），提示真实路径。
+   * 此前仅拉列表即提示"已导出"——数据没离开内存，以成功提示冒充导出（S4 §7.1 移交项）。
+   * 路径依据：后端 /v1/logs 无导出端点（挂载表只有 list/search/delete/levels），
+   * /v1/audit/export 是审计域另一数据集，接到日志页属于假接线——
+   * 诚实的导出就是把本页真实展示的数据写成用户可取的文件。
    * 异常：记录日志并提示用户
    */
   private async exportLogs(): Promise<void> {
     try {
       const res = await this.api.monitor.listLogs({ page: 1, size: 10000 });
-      if (res.code === 0 && res.data) {
-        this.msg.success(`已导出 ${res.data.items.length} 条日志`);
-      } else {
+      if (res.code !== 0 || !res.data) {
         this.msg.error(res.message || '导出失败');
+        return;
       }
+      const items: LogEntry[] = res.data.items;
+      const dir = `${getContext(this).filesDir}/export`;
+      try {
+        fileIo.accessSync(dir);
+      } catch (e) {
+        fileIo.mkdirSync(dir);
+      }
+      const now = new Date();
+      const pad = (v: number): string => v.toString().padStart(2, '0');
+      const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+      const filePath = `${dir}/neurova-logs-${stamp}.json`;
+      const file = fileIo.openSync(filePath, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+      try {
+        const payload: Record<string, Object> = {
+          'exportedAt': now.toISOString(),
+          'count': items.length as Object,
+          'logs': items as Object,
+        };
+        fileIo.writeSync(file.fd, JSON.stringify(payload));
+      } finally {
+        fileIo.closeSync(file);
+      }
+      this.msg.success(`已导出 ${items.length} 条日志至 ${filePath}`);
     } catch (e) {
       this.logger.error(TAG, '导出日志失败', e as Error);
       this.msg.error('导出日志失败');

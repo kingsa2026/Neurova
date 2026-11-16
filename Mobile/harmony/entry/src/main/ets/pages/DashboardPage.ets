@@ -325,7 +325,7 @@ export struct DashboardPage {
                     .height(30)
                     .borderRadius(10)
                     .textAlign(TextAlign.Center)
-                    .linearGradient({ angle: 135, colors: [['#8b5cf6', 0], ['#6366f1', 1]] })
+                    .linearGradient({ angle: 135, colors: [[this.sm.getColor('secondary'), 0], [this.sm.getColor('primary'), 1]] })
                   Column() {
                     Text(s.title)
                       .fontSize(13)

@@ -73,9 +73,16 @@ export struct GraphPreviewPage {
     return [x, y];
   }
 
-  /** 类型 → 色相（按字符散列，浅深两主题都用品牌色系） */
+  /** 类型 → 色相（按字符散列；色值经 StyleManager 令牌解析，深浅主题各自成立） */
   private nodeColor(type: string): string {
-    const palette: string[] = ['#6366f1', '#8b5cf6', '#22d3ee', '#a78bfa'];
+    // 四相异色相取自主题表（primary/secondary/info/warning），不硬编码——
+    // 主题切换时节点色跟随主题，不再固定为暗色表四个值
+    const palette: string[] = [
+      this.sm.getColor('primary'),
+      this.sm.getColor('secondary'),
+      this.sm.getColor('info'),
+      this.sm.getColor('warning'),
+    ];
     let h = 0;
     for (let i = 0; i < type.length; i++) {
       h = (h + type.charCodeAt(i)) % palette.length;

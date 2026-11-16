@@ -12,7 +12,7 @@
 
 import { http } from '@kit.NetworkKit';
 import { Logger } from '../logger/Logger';
-import { ConfigManager } from '../config/ConfigManager';
+import { ConfigManager, DEFAULT_REQUEST_TIMEOUT_MS } from '../config/ConfigManager';
 import { HttpClient, HttpBackend, HttpBackendResponse } from '../api/HttpClient';
 import { ApiResponse } from '../types';
 
@@ -54,8 +54,8 @@ export class HttpAdapter implements HttpBackend {
     // 创建鸿蒙 HTTP 请求对象
     const httpRequest = http.createHttp();
 
-    // 从配置读取超时时间（默认 15000ms）
-    const timeout: number = this.config.get<number>('request_timeout', 15000);
+    // 从配置读取超时时间；fallback 引用 ConfigManager 的单源常量（不另设口径）
+    const timeout: number = this.config.get<number>('request_timeout', DEFAULT_REQUEST_TIMEOUT_MS);
 
     try {
       // 合并请求头：默认头 + 调用方传入的头（后者覆盖前者）；

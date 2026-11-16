@@ -74,16 +74,16 @@ export struct LoginPage {
         if (meRes.code === 0 && meRes.data) {
           this.authStore.setUser(meRes.data);
         }
-        // 登录成功后上报推送令牌（fail-soft；设计方案 §8.4 S-3）
+        // 登录成功后上报推送令牌（fail-soft；设计方案 §8.4 S-3）。
+        // 只上报真实令牌：本应用尚未集成 Push Kit，config 里不会有真值——
+        // 此前伪造 local- 随机串上报只会污染后端推送注册表（审计 3.8-5），
+        // 真实集成落地后由集成方写入 push_token，这里才会上报。
+        // deviceId 走 PlatformAdapter.getDeviceId() 单源，与登出注销同口径。
         try {
-          let pushToken = this.cm.get<string>('push_token', '');
-          if (pushToken === '') {
-            pushToken = `local-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e8).toString(36)}`;
-            this.cm.set<string>('push_token', pushToken);
-            await this.cm.saveToPreferences();
+          const pushToken = this.cm.get<string>('push_token', '');
+          if (pushToken.length > 0) {
+            await this.api.push.upsert('harmony', pushToken, this.platform.getDeviceId());
           }
-          const info = this.platform.getDeviceInfo();
-          await this.api.push.upsert('harmony', pushToken, `${info.brand}-${info.model}`);
         } catch (pushErr) {
           this.logger.warn('LoginPage', '推送令牌上报失败（不影响登录）', pushErr as Error);
         }

@@ -20,6 +20,10 @@ const PREFERENCES_NAME = 'neurova_config';
 /** 整包配置的持久化键（JSON 单键快照） */
 const CONFIG_SNAPSHOT_KEY = 'config_snapshot';
 
+/** 请求超时单源口径（ms）：默认表与 HttpAdapter 的 get fallback 都引用本常量——
+ *  此前两处各自写字面量（30000 vs 15000），配置键一旦缺失即静默降为另一口径（审计 3.8-7） */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
+
 function buildDefaults(): Map<string, Object> {
   const m = new Map<string, Object>();
   // 服务器地址**不在编译期写死**（原值是一台开发机的局域网 IP，换网络即全体失联，
@@ -29,7 +33,7 @@ function buildDefaults(): Map<string, Object> {
   // 空值在这里是**信息**，不是兜底：读它的人会明确报"还没有服务器可连"，不会蒙着连。
   m.set('api_base_url', '');
   m.set('ws_base_url', '');
-  m.set('request_timeout', 30000);
+  m.set('request_timeout', DEFAULT_REQUEST_TIMEOUT_MS);
   m.set('ws_reconnect_interval', 5000);
   m.set('ws_heartbeat_interval', 30000);
   m.set('app_name', 'Neurova');
