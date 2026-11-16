@@ -306,6 +306,9 @@ provider_config*
 *.llm.json
 api_keys*
 credentials*
+# CredentialStore.kt 是安卓端会话凭据仓的源码，Windows 大小写不敏感被 credentials* 误杀
+# （同 210 行入口脚本误杀案）；源码不是凭证数据，显式放行
+!Mobile/android-native/app/src/main/java/top/neurova/mobile/core/store/CredentialStore.kt
 *_secret*
 secret_*.json
 

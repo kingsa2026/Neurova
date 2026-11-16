@@ -53,14 +53,28 @@ data class AgentItem(
     val model: String? = null,
 )
 
-/** 会话列表条目（GET /console/chat/sessions，与 PC 端同一份数据） */
+/**
+ * 会话摘要（GET /console/chat/sessions，console.py 摘要形状原样；鸿蒙 SessionsApi 同源）。
+ * 字段是 `id`/`pinned`——不是臆写的 session_id/is_pinned（真实载荷解码已钉进 SessionWireTest）。
+ */
 @Serializable
 data class ChatSessionItem(
-    @SerialName("session_id") val sessionId: String,
-    @SerialName("agent_id") val agentId: String? = null,
-    val title: String? = null,
+    val id: String,
+    val title: String = "新对话",
+    @SerialName("agent_id") val agentId: String = "",
+    @SerialName("created_at") val createdAt: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null,
-    @SerialName("is_pinned") val pinned: Boolean = false,
+    val pinned: Boolean = false,
+    @SerialName("sort_order") val sortOrder: Int = 0,
+    @SerialName("source_channel") val sourceChannel: String? = null,
+    @SerialName("channel_name") val channelName: String? = null,
+)
+
+/** 会话历史单条（GET /console/chat/history 的 messages 元素：session_manager 存储形状 {role, content}） */
+@Serializable
+data class ChatHistoryEntry(
+    val role: String,
+    val content: String,
 )
 
 /** 单条聊天消息（本地渲染态；会话历史从 /chat/history 回放） */

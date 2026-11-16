@@ -20,9 +20,10 @@ import okhttp3.WebSocketListener
 import top.neurova.mobile.core.protocol.MobileWsClosePolicy
 
 /**
- * 移动 WS 通道（手机客户端设计方案 §5.3 / §8.3 备用通道；对齐鸿蒙 WebSocketAdapter 语义）：
- * - 握手：一次性 connect_ticket 走 Sec-WebSocket-Protocol 子协议 `neurova.auth.<ticket>`
- *   （服务端两条通道都支持，token 不进 URL）；
+ * 移动 WS 通道（手机客户端设计方案 §5.3；对齐鸿蒙 WebSocketAdapter 语义）：
+ * - 握手：一次性 connect_ticket 走 **Authorization: Bearer** 头（后端 _ticketFromHandshake
+ *   的优先通道，鸿蒙同款）。子协议 `neurova.auth.<ticket>` 形态已证伪——ticket 含冒号，
+ *   不是合法 RFC6455 子协议 token，握手必败（2026-11-16 wsprobe 实测），勿回潮；
  * - 心跳：30s 应用层 ping/pong，pong 超时 10s 视为断流（中继上静默断流没有 close 帧）；
  * - 关闭分档：由 MobileWsClosePolicy 裁决——4001 先续签重试一次（唯一需重新配对的是
  *   续签被拒 device_deregistered）；4008 不重连；manual 恒终态。
@@ -68,11 +69,7 @@ class MobileWsChannel(
         val url = wsUrlProvider() ?: run { stateFlow.value = State.FAILED; return }
         val ticket = ticketProvider() ?: run { stateFlow.value = State.FAILED; return }
         stateFlow.value = State.CONNECTING
-        val request = Request.Builder()
-            .url(url)
-            .header("Sec-WebSocket-Protocol", "neurova.auth.$ticket")
-            .build()
-        socket = client.newWebSocket(request, Listener())
+        socket = client.newWebSocket(buildHandshakeRequest(url, ticket), Listener())
     }
 
     /** 发送对话帧：chat:send / chat:cancel（§8.3 WS 侧语义） */
@@ -207,8 +204,15 @@ class MobileWsChannel(
         }
     }
 
-    private companion object {
-        const val HEARTBEAT_MS = 30_000L
-        const val PONG_TIMEOUT_MS = 10_000L
+    companion object {
+        /** 握手唯一装配点：Authorization: Bearer 头携带一次性 ticket（勿用子协议，已证伪） */
+        fun buildHandshakeRequest(url: String, ticket: String): Request =
+            Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer $ticket")
+                .build()
+
+        private const val HEARTBEAT_MS = 30_000L
+        private const val PONG_TIMEOUT_MS = 10_000L
     }
 }

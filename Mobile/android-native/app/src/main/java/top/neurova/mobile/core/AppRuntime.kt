@@ -10,6 +10,8 @@ import top.neurova.mobile.core.net.HttpChannel
 import top.neurova.mobile.core.net.MobileWsChannel
 import top.neurova.mobile.core.store.SecureVaultCredentialStore
 import top.neurova.mobile.feature.auth.AuthStore
+import top.neurova.mobile.feature.chat.ChatRepository
+import top.neurova.mobile.feature.chat.ChatSessionController
 import top.neurova.mobile.feature.pairing.PairingStore
 import top.neurova.mobile.feature.servers.PreferencesStore
 import top.neurova.mobile.feature.servers.ServersStore
@@ -39,4 +41,6 @@ class AppRuntime(context: Context) {
         ticketProvider = { pairing.ticket.ifBlank { null } },
         refreshTicket = { pairing.refreshTicket() },
     )
+    val chatRepo = ChatRepository(http)
+    val chatSessions = ChatSessionController(scope, ws, pairing, chatRepo)
 }

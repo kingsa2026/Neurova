@@ -34,12 +34,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import top.neurova.mobile.feature.agents.AgentsTabScreen
 import top.neurova.mobile.feature.auth.LoginScreen
+import top.neurova.mobile.feature.chat.ChatScreen
 import top.neurova.mobile.feature.chat.ChatTabScreen
 import top.neurova.mobile.feature.knowledge.KnowledgeTabScreen
 import top.neurova.mobile.feature.pairing.PairingScreen
@@ -155,7 +158,29 @@ private fun NeurovaNavHost(navController: NavHostController) {
         navController = navController,
         startDestination = TabDestination.CHAT.route,
     ) {
-        composable(TabDestination.CHAT.route) { ChatTabScreen() }
+        composable(TabDestination.CHAT.route) {
+            ChatTabScreen(
+                onOpenSession = { sessionId, title ->
+                    navController.navigate("chat/$sessionId?title=${android.net.Uri.encode(title)}")
+                },
+            )
+        }
+        composable(
+            route = "chat/{sessionId}?title={title}",
+            arguments = listOf(
+                navArgument("sessionId") { type = NavType.StringType },
+                navArgument("title") {
+                    type = NavType.StringType
+                    defaultValue = ""
+                },
+            ),
+        ) { entry ->
+            ChatScreen(
+                sessionId = entry.arguments?.getString("sessionId").orEmpty(),
+                initialTitle = entry.arguments?.getString("title").orEmpty(),
+                onBack = { navController.popBackStack() },
+            )
+        }
         composable(TabDestination.WORKBENCH.route) { WorkbenchTabScreen() }
         composable(TabDestination.AGENTS.route) { AgentsTabScreen() }
         composable(TabDestination.KNOWLEDGE.route) { KnowledgeTabScreen() }
