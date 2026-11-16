@@ -1,44 +1,45 @@
 /**
- * BenchmarkPage - 性能基准测试页（P3）
+ * BenchmarkPage - 基准评测页（R6 接真实 API）
  *
- * 职责：展示基准测试项列表，按 type 筛选，状态徽章颜色区分，
- *       运行按钮，显示 latency/throughput/score，对比历史
+ * 职责：展示评测套件列表（/v1/benchmark/suites），按分类筛选，触发运行，
+ *       展示运行历史（/v1/benchmark/runs，诚实标注 simulated）
  * 设计：
- *   - BenchmarkViewHelper（导出）：纯视图模型，封装基准类型颜色/图标/标签映射、
- *     状态颜色/图标映射、延迟格式化（ms/s 转换）、吞吐量格式化（ops/s → K ops/s），
+ *   - BenchmarkViewHelper（导出）：纯视图模型，封装难度颜色/标签映射、
+ *     运行状态颜色/图标/标签映射、延迟格式化（ms/s 转换，null → 未测量），
  *     无 UI 依赖，可独立单元测试；
- *   - BenchmarkPage（@Component）：Stack[Column[TopNavMenu(标题"性能基准"+返回+运行)]
- *     + [type 筛选 Tab（全部/cpu/memory/disk/network/llm_inference/embedding）]
- *     + [加载态/空态/列表]]；
- *     列表项 GlassCard：类型徽章、名称、状态徽章、avg/p95/p99 延迟、吞吐量、score；
- *     颜色统一走 StyleManager（返回 token 名），路由走 Router，
- *     P1-33 已接线 PageMap；基准专用 API 模块待 S4 新增（移交单），落地前以 mock 渲染。
+ *   - BenchmarkPage（@Component）：Column [TopNavMenu(标题"基准评测"+返回)] +
+ *     [category 筛选 Tab] + [套件列表（含运行按钮）] + [运行历史列表]；
+ *   - 颜色统一走 StyleManager，路由走 Router，已接线 PageMap（P1-33）；
+ *     数据源 BenchmarkApi（R6：替换 mock）。
+ *
+ * 契约说明（诚实缺省）：
+ *   - 后端 benchmark.py 是 LLM 评测套件域（suite/run），不是旧 mock 的
+ *     cpu/memory/disk 系统基准——页面契约随 BenchmarkApi 切换；
+ *   - 评测执行器未接线（P6 诚实化）：/run 返回 status='simulated'、score/
+ *     avg_latency_ms 恒 null，运行记录不编造分数——历史卡片如实渲染
+ *     "模拟运行"，message 透传后端说明。
  *
  * 依赖：
- *   - ../components/glass：TopNavMenu、GlassCard、GlassButton、GlassInput、GlassPanel
- *   - ../libs/api/ApiFacade：统一 API 门面（仅占位，未实际调用）
- *   - ../routing/Router：统一路由跳转
- *   - ../libs/style/StyleManager：统一样式 token
- *   - ../libs/logger/Logger：统一日志
- *   - ../libs/message/MessageManager：统一消息提示
- *   - ../libs/types：Benchmark、BenchmarkType
+ *   - ../components/glass：TopNavMenu、GlassCard、GlassButton
+ *   - ../libs/api/ApiFacade：统一 API 门面（api.benchmark.*）
+ *   - ../libs/api/modules/BenchmarkApi：BenchmarkSuiteDto/BenchmarkRunDto 契约
+ *   - ../routing/Router、../libs/style/StyleManager、../libs/logger/Logger、
+ *     ../libs/message/MessageManager
  *
  * 用法：
  *   由 Router.push(RouteNames.BENCHMARK) 跳转进入；
- *   aboutToAppear 加载 mock 基准列表（TODO M6 接入真实 API）；
- *   type 筛选 Tab 切换 → 本地按 type 过滤；
- *   运行按钮 → TODO M6 接入 api.benchmark.run
- *
- * TDD：BenchmarkViewHelper 各方法按红绿灯垂直切片逐步实现，详见 BenchmarkPage.test.ets
+ *   aboutToAppear 经 api.benchmark.suites()+runs() 加载；
+ *   category 筛选 Tab 切换 → 本地过滤；
+ *   运行按钮 → api.benchmark.run() → 透传后端 message（含"未接线"说明）→ 刷新历史。
  */
 
-import { TopNavMenu, GlassCard, GlassButton, GlassInput, GlassPanel } from '../components/glass';
+import { TopNavMenu, GlassCard, GlassButton } from '../components/glass';
 import { ApiFacade } from '../libs/api/ApiFacade';
+import { BenchmarkSuiteDto, BenchmarkRunDto } from '../libs/api/modules/BenchmarkApi';
 import { Router } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { Benchmark, BenchmarkType } from '../libs/types';
 
 /** 日志标签 */
 const TAG = 'BenchmarkPage';
@@ -46,101 +47,85 @@ const TAG = 'BenchmarkPage';
 /** 秒级阈值：≥1000ms 切换为秒格式 */
 const SECONDS_THRESHOLD_MS = 1000;
 
-/** K 级阈值：≥1000 ops/s 切换为 K ops/s 格式 */
-const K_THRESHOLD_OPS = 1000;
-
 // ===========================================================================
-// BenchmarkViewHelper - 性能基准视图模型（纯函数，无 UI 依赖，可独立单元测试）
+// BenchmarkViewHelper - 基准评测视图模型（纯函数，无 UI 依赖，可独立单元测试）
 // ===========================================================================
 
 export class BenchmarkViewHelper {
   /**
-   * 获取基准类型对应的颜色 token 名
-   * 映射：cpu→primary、memory→info、disk→warning、network→success、
-   *       llm_inference→error、embedding→text_secondary
-   * @param type 基准类型
+   * 获取套件难度对应的颜色 token 名（未知兜 'info'——后端 difficulty 开放集合）
+   * 映射：easy→success、medium→warning、hard→error
+   * @param difficulty 难度
    * @return StyleManager 颜色 token 名
    */
-  static getTypeColor(type: BenchmarkType): string {
-    if (type === 'cpu') return 'primary';
-    if (type === 'memory') return 'info';
-    if (type === 'disk') return 'warning';
-    if (type === 'network') return 'success';
-    if (type === 'llm_inference') return 'error';
-    if (type === 'embedding') return 'text_secondary';
-    throw new Error(`getTypeColor 未实现: ${type}`);
+  static getDifficultyColor(difficulty: string): string {
+    if (difficulty === 'easy') return 'success';
+    if (difficulty === 'medium') return 'warning';
+    if (difficulty === 'hard') return 'error';
+    return 'info';
   }
 
   /**
-   * 获取基准类型对应的图标 emoji
-   * 映射：cpu→💻、memory→🧠、disk→💾、network→🌐、llm_inference→🤖、embedding→🔢
-   * @param type 基准类型
-   * @return emoji 字符串
+   * 获取套件难度对应的中文标签（未知原样返回）
+   * 映射：easy→简单、medium→中等、hard→困难
+   * @param difficulty 难度
+   * @return 中文文案
    */
-  static getTypeIcon(type: BenchmarkType): string {
-    if (type === 'cpu') return '💻';
-    if (type === 'memory') return '🧠';
-    if (type === 'disk') return '💾';
-    if (type === 'network') return '🌐';
-    if (type === 'llm_inference') return '🤖';
-    if (type === 'embedding') return '🔢';
-    throw new Error(`getTypeIcon 未实现: ${type}`);
+  static getDifficultyLabel(difficulty: string): string {
+    if (difficulty === 'easy') return '简单';
+    if (difficulty === 'medium') return '中等';
+    if (difficulty === 'hard') return '困难';
+    return difficulty;
   }
 
   /**
-   * 获取基准类型对应的中文标签
-   * 映射：cpu→CPU、memory→内存、disk→磁盘、network→网络、
-   *       llm_inference→LLM 推理、embedding→向量嵌入
-   * @param type 基准类型
-   * @return 中文标签
-   */
-  static getTypeLabel(type: BenchmarkType): string {
-    if (type === 'cpu') return 'CPU';
-    if (type === 'memory') return '内存';
-    if (type === 'disk') return '磁盘';
-    if (type === 'network') return '网络';
-    if (type === 'llm_inference') return 'LLM 推理';
-    if (type === 'embedding') return '向量嵌入';
-    throw new Error(`getTypeLabel 未实现: ${type}`);
-  }
-
-  /**
-   * 获取基准状态对应的颜色 token 名
-   * 映射：pending→text_secondary、running→info、completed→success、failed→error
-   * @param status 基准状态（'pending' | 'running' | 'completed' | 'failed'）
+   * 获取运行状态对应的颜色 token 名（未知兜 'text_secondary'）
+   * 映射：simulated→warning、running→info、completed→success、failed→error
+   * @param status 运行状态（后端 'simulated' = 评测执行器未接线的诚实标记）
    * @return StyleManager 颜色 token 名
    */
   static getStatusColor(status: string): string {
-    if (status === 'pending') return 'text_secondary';
+    if (status === 'simulated') return 'warning';
     if (status === 'running') return 'info';
     if (status === 'completed') return 'success';
     if (status === 'failed') return 'error';
-    throw new Error(`getStatusColor 未实现: ${status}`);
+    return 'text_secondary';
   }
 
   /**
-   * 获取基准状态对应的图标 emoji
-   * 映射：pending→⏳、running→⚡、completed→✅、failed→❌
-   * @param status 基准状态
+   * 获取运行状态对应的图标 emoji（未知兜 '⏳'）
+   * @param status 运行状态
    * @return emoji 字符串
    */
   static getStatusIcon(status: string): string {
-    if (status === 'pending') return '⏳';
+    if (status === 'simulated') return '🧪';
     if (status === 'running') return '⚡';
     if (status === 'completed') return '✅';
     if (status === 'failed') return '❌';
-    throw new Error(`getStatusIcon 未实现: ${status}`);
+    return '⏳';
   }
 
   /**
-   * 格式化延迟时间
-   * 规则：
-   *   - < 1000ms → 'X.Xms'（保留 1 位小数）
-   *   - ≥ 1000ms → 'X.Xs'（秒，保留 1 位小数）
-   * @param ms 延迟毫秒数
+   * 获取运行状态对应的中文标签（未知原样返回）
+   * @param status 运行状态
+   * @return 中文文案
+   */
+  static getStatusLabel(status: string): string {
+    if (status === 'simulated') return '模拟运行';
+    if (status === 'running') return '运行中';
+    if (status === 'completed') return '已完成';
+    if (status === 'failed') return '失败';
+    return status;
+  }
+
+  /**
+   * 格式化延迟时间（null/undefined = 后端未接线未测量 → '未测量'）
+   * 规则：< 1000ms → 'X.Xms'；≥ 1000ms → 'X.Xs'
+   * @param ms 延迟毫秒数（可为 null）
    * @return 格式化延迟字符串
    */
-  static formatLatency(ms: number): string {
+  static formatLatency(ms: number | null): string {
+    if (ms === null || ms === undefined) return '未测量';
     if (ms < SECONDS_THRESHOLD_MS) {
       return `${ms.toFixed(1)}ms`;
     }
@@ -149,137 +134,60 @@ export class BenchmarkViewHelper {
   }
 
   /**
-   * 格式化吞吐量
-   * 规则：
-   *   - undefined → '—'
-   *   - < 1000 → 'X ops/s'（原值）
-   *   - ≥ 1000 → 'X.XK ops/s'（保留 1 位小数）
-   * @param ops 吞吐量 ops/s（可选）
-   * @return 格式化吞吐量字符串
+   * 格式化得分（null = 未接线未测量 → '未测量'）
+   * @param score 得分（可为 null）
+   * @return 得分展示字符串
    */
-  static formatThroughput(ops?: number): string {
-    if (ops === undefined || ops === null) return '—';
-    if (ops < K_THRESHOLD_OPS) {
-      return `${ops} ops/s`;
-    }
-    const k = ops / K_THRESHOLD_OPS;
-    return `${k.toFixed(1)}K ops/s`;
+  static formatScore(score: number | null): string {
+    if (score === null || score === undefined) return '未测量';
+    return `${score}`;
+  }
+
+  /**
+   * 格式化 ISO 时间戳为短格式 YYYY-MM-DD HH:mm（历史卡片右上角用）
+   * 规则：无值/无效 → '—'
+   * @param timestamp ISO 时间戳字符串
+   * @return 格式化时间或 '—'
+   */
+  static formatTimestampShort(timestamp: string): string {
+    if (!timestamp || timestamp.length === 0) return '—';
+    const d = new Date(timestamp);
+    if (isNaN(d.getTime())) return '—';
+    const yyyy = d.getFullYear();
+    const MM = (d.getMonth() + 1).toString().padStart(2, '0');
+    const dd = d.getDate().toString().padStart(2, '0');
+    const HH = d.getHours().toString().padStart(2, '0');
+    const mm = d.getMinutes().toString().padStart(2, '0');
+    return `${yyyy}-${MM}-${dd} ${HH}:${mm}`;
   }
 }
 
-/** 类型筛选 Tab 配置 */
-interface TypeFilterOption {
+/** 分类筛选 Tab 配置 */
+interface CategoryFilterOption {
   value: string;
   label: string;
 }
 
-/** 类型筛选 Tab 列表 */
-const TYPE_FILTERS: TypeFilterOption[] = [
+/** 分类筛选 Tab 列表（后端 _SUITES category 值域） */
+const CATEGORY_FILTERS: CategoryFilterOption[] = [
   { value: 'all', label: '全部' },
-  { value: 'cpu', label: 'CPU' },
-  { value: 'memory', label: '内存' },
-  { value: 'disk', label: '磁盘' },
-  { value: 'network', label: '网络' },
-  { value: 'llm_inference', label: 'LLM 推理' },
-  { value: 'embedding', label: '向量嵌入' },
-];
-
-/**
- * Mock 基准测试数据
- * TODO M6 阶段：替换为 api.benchmark.list() 真实 API
- */
-const MOCK_BENCHMARKS: Benchmark[] = [
-  {
-    id: 'bench_1',
-    type: 'cpu',
-    name: 'CPU 矩阵乘法基准',
-    durationMs: 5000,
-    iterations: 1000,
-    avgLatencyMs: 5.2,
-    p95LatencyMs: 8.5,
-    p99LatencyMs: 12.3,
-    throughputOps: 5000,
-    score: 8800,
-    status: 'completed',
-    startedAt: '2025-03-01T10:00:00Z',
-    completedAt: '2025-03-01T10:00:05Z',
-  },
-  {
-    id: 'bench_2',
-    type: 'memory',
-    name: '内存读写吞吐',
-    durationMs: 3000,
-    iterations: 500,
-    avgLatencyMs: 2.1,
-    p95LatencyMs: 3.5,
-    p99LatencyMs: 5.0,
-    throughputOps: 12000,
-    score: 7500,
-    status: 'completed',
-    startedAt: '2025-03-01T11:00:00Z',
-    completedAt: '2025-03-01T11:00:03Z',
-  },
-  {
-    id: 'bench_3',
-    type: 'llm_inference',
-    name: 'GPT-4 推理基准',
-    durationMs: 60000,
-    iterations: 100,
-    avgLatencyMs: 1500,
-    p95LatencyMs: 2000,
-    p99LatencyMs: 2500,
-    throughputOps: 60,
-    score: 9200,
-    status: 'completed',
-    startedAt: '2025-03-01T12:00:00Z',
-    completedAt: '2025-03-01T12:01:00Z',
-  },
-  {
-    id: 'bench_4',
-    type: 'embedding',
-    name: '向量嵌入吞吐测试',
-    durationMs: 10000,
-    iterations: 200,
-    avgLatencyMs: 50,
-    p95LatencyMs: 80,
-    p99LatencyMs: 120,
-    throughputOps: 980,
-    status: 'running',
-    startedAt: '2025-03-01T13:00:00Z',
-  },
-  {
-    id: 'bench_5',
-    type: 'network',
-    name: '网络延迟基准',
-    durationMs: 0,
-    iterations: 0,
-    avgLatencyMs: 0,
-    p95LatencyMs: 0,
-    p99LatencyMs: 0,
-    status: 'pending',
-  },
-  {
-    id: 'bench_6',
-    type: 'disk',
-    name: '磁盘 IOPS 基准',
-    durationMs: 2000,
-    iterations: 100,
-    avgLatencyMs: 0,
-    p95LatencyMs: 0,
-    p99LatencyMs: 0,
-    status: 'failed',
-    startedAt: '2025-03-01T09:00:00Z',
-  },
+  { value: 'memory', label: '记忆' },
+  { value: 'creative', label: '创作' },
+  { value: 'multimodal', label: '多模态' },
 ];
 
 @Component
 export struct BenchmarkPage {
-  // 基准测试列表
-  @State benchmarks: Benchmark[] = [];
+  // 评测套件列表（api.benchmark.suites()）
+  @State suites: BenchmarkSuiteDto[] = [];
+  // 运行历史（api.benchmark.runs()）
+  @State runs: BenchmarkRunDto[] = [];
   // 加载态
   @State loading: boolean = true;
-  // 当前激活的类型筛选
-  @State activeType: string = 'all';
+  // 当前激活的分类筛选
+  @State activeCategory: string = 'all';
+  // 运行中的套件 id（防重复触发）
+  @State runningSuiteId: string = '';
 
   // 统一库单例
   private api = ApiFacade.getInstance();
@@ -289,180 +197,206 @@ export struct BenchmarkPage {
   private msg = MessageManager.getInstance();
 
   aboutToAppear() {
-    this.loadBenchmarks();
+    this.loadAll();
   }
 
   /**
-   * 加载基准列表
-   * TODO M6 阶段：替换为真实 API（api.benchmark.list）
+   * 加载套件与运行历史
    */
-  private async loadBenchmarks(): Promise<void> {
+  private async loadAll(): Promise<void> {
     this.loading = true;
     try {
-      // TODO M6: 接入真实 API（api.benchmark.*）
-      // const res = await this.api.benchmark.list();
-      // if (res.code === 0 && res.data) { this.benchmarks = res.data.items; }
-      this.benchmarks = MOCK_BENCHMARKS.slice();
+      const suitesRes = await this.api.benchmark.suites();
+      if (suitesRes.code === 0 && suitesRes.data) {
+        this.suites = suitesRes.data;
+      } else {
+        this.suites = [];
+      }
+      await this.loadRuns();
     } catch (e) {
-      this.logger.error(TAG, '加载基准列表失败', e as Error);
-      this.msg.error('加载基准列表失败');
+      this.logger.error(TAG, '加载基准数据失败', e as Error);
+      this.msg.error('加载基准评测数据失败');
+      this.suites = [];
+      this.runs = [];
     } finally {
       this.loading = false;
     }
   }
 
-  /** 切换类型筛选 */
-  private switchType(value: string): void {
-    this.activeType = value;
+  /** 加载运行历史（失败不打断套件展示） */
+  private async loadRuns(): Promise<void> {
+    try {
+      const runsRes = await this.api.benchmark.runs();
+      if (runsRes.code === 0 && runsRes.data) {
+        this.runs = runsRes.data.items;
+      } else {
+        this.runs = [];
+      }
+    } catch (e) {
+      this.logger.warn(TAG, '加载运行历史失败');
+      this.runs = [];
+    }
   }
 
-  /** 获取经类型筛选后的列表 */
-  private getFilteredBenchmarks(): Benchmark[] {
-    if (this.activeType === 'all') {
-      return this.benchmarks;
+  /** 切换分类筛选 */
+  private switchCategory(value: string): void {
+    this.activeCategory = value;
+  }
+
+  /** 获取经分类筛选后的套件列表 */
+  private getFilteredSuites(): BenchmarkSuiteDto[] {
+    if (this.activeCategory === 'all') {
+      return this.suites;
     }
-    return this.benchmarks.filter((b: Benchmark) => b.type === this.activeType);
+    return this.suites.filter((s: BenchmarkSuiteDto) => s.category === this.activeCategory);
   }
 
   /**
-   * 触发运行基准
-   * TODO M6 阶段：调用真实 API（api.benchmark.run）
+   * 触发运行评测套件（POST /v1/benchmark/run）
+   * 后端 P6 诚实化：执行器未接线，返回 simulated 运行记录——message 透传
    */
-  private async runBenchmark(bench: Benchmark): Promise<void> {
+  private async runSuite(suite: BenchmarkSuiteDto): Promise<void> {
+    if (this.runningSuiteId.length > 0) {
+      return;
+    }
+    this.runningSuiteId = suite.id;
     try {
-      // TODO M6: const res = await this.api.benchmark.run(bench.id);
-      this.msg.success(`已触发: ${bench.name}`);
+      const res = await this.api.benchmark.run({ suite_id: suite.id });
+      if (res.code === 0) {
+        this.msg.info(res.message && res.message.length > 0 ? res.message : `已触发: ${suite.name}`);
+        await this.loadRuns();
+      } else {
+        this.msg.error(res.message && res.message.length > 0 ? res.message : '运行评测失败');
+      }
     } catch (e) {
-      this.logger.error(TAG, '运行基准失败', e as Error);
-      this.msg.error('运行基准失败');
+      this.logger.error(TAG, '运行评测失败', e as Error);
+      this.msg.error('运行评测失败');
+    } finally {
+      this.runningSuiteId = '';
     }
   }
 
   build() {
-    Stack() {
-      Column() {
-        // 顶部导航栏：标题"性能基准" + 返回
-        TopNavMenu({
-          title: '性能基准',
-          showBack: true,
-          showMenu: false,
-          onBack: () => { this.router.back(); }
-        })
+    Column() {
+      // 顶部导航栏：标题"基准评测" + 返回
+      TopNavMenu({
+        title: '基准评测',
+        showBack: true,
+        showMenu: false,
+        onBack: () => { this.router.back(); }
+      })
 
-        // 类型筛选 Tab
-        Scroll() {
-          Row({ space: 8 }) {
-            ForEach(TYPE_FILTERS, (opt: TypeFilterOption) => {
-              Text(opt.label)
-                .fontSize(this.sm.getFontSize('caption'))
-                .fontColor(this.activeType === opt.value
-                  ? this.sm.getColor('text_on_primary')
-                  : this.sm.getColor('text_secondary'))
-                .backgroundColor(this.activeType === opt.value
-                  ? this.sm.getColor('primary')
-                  : this.sm.getColor('surface'))
-                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-                .borderRadius(16)
-                .onClick(() => { this.switchType(opt.value); })
-            }, (opt: TypeFilterOption) => opt.value)
-          }
-          .padding({ left: this.sm.getSpacing('md'), right: this.sm.getSpacing('md') })
+      // 分类筛选 Tab
+      Scroll() {
+        Row({ space: 8 }) {
+          ForEach(CATEGORY_FILTERS, (opt: CategoryFilterOption) => {
+            Text(opt.label)
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.activeCategory === opt.value
+                ? this.sm.getColor('text_on_primary')
+                : this.sm.getColor('text_secondary'))
+              .backgroundColor(this.activeCategory === opt.value
+                ? this.sm.getColor('primary')
+                : this.sm.getColor('surface'))
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .borderRadius(16)
+              .onClick(() => { this.switchCategory(opt.value); })
+          }, (opt: CategoryFilterOption) => opt.value)
         }
-        .scrollable(ScrollDirection.Horizontal)
-        .scrollBar(BarState.Off)
-        .width('100%')
-        .padding({ top: 4, bottom: 4 })
-
-        // 主体内容：加载态 / 空态 / 列表 三选一
-        if (this.loading) {
-          Column() {
-            Text('加载中...')
-              .fontSize(this.sm.getFontSize('body'))
-              .fontColor(this.sm.getColor('text_secondary'))
-          }
-          .width('100%')
-          .layoutWeight(1)
-          .justifyContent(FlexAlign.Center)
-          .alignItems(HorizontalAlign.Center)
-        } else if (this.getFilteredBenchmarks().length === 0) {
-          Column() {
-            Text('暂无基准数据')
-              .fontSize(this.sm.getFontSize('subtitle'))
-              .fontColor(this.sm.getColor('text_secondary'))
-          }
-          .width('100%')
-          .layoutWeight(1)
-          .justifyContent(FlexAlign.Center)
-          .alignItems(HorizontalAlign.Center)
-        } else {
-          List({ space: 12 }) {
-            ForEach(this.getFilteredBenchmarks(), (bench: Benchmark) => {
-              ListItem() {
-                this.buildBenchmarkCard(bench)
-              }
-            }, (bench: Benchmark) => bench.id)
-          }
-          .layoutWeight(1)
-          .width('100%')
-          .scrollBar(BarState.Off)
-          .padding({
-            left: this.sm.getSpacing('md'),
-            right: this.sm.getSpacing('md'),
-            top: this.sm.getSpacing('sm'),
-            bottom: this.sm.getSpacing('sm'),
-          })
-        }
+        .padding({ left: this.sm.getSpacing('md'), right: this.sm.getSpacing('md') })
       }
+      .scrollable(ScrollDirection.Horizontal)
+      .scrollBar(BarState.Off)
       .width('100%')
-      .height('100%')
-      .backgroundColor(this.sm.getColor('background'))
+      .padding({ top: 4, bottom: 4 })
+
+      // 主体内容：加载态 / 空态 / 列表 三选一
+      if (this.loading) {
+        Column() {
+          Text('加载中...')
+            .fontSize(this.sm.getFontSize('body'))
+            .fontColor(this.sm.getColor('text_secondary'))
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+      } else if (this.getFilteredSuites().length === 0 && this.runs.length === 0) {
+        Column() {
+          Text('暂无评测数据')
+            .fontSize(this.sm.getFontSize('subtitle'))
+            .fontColor(this.sm.getColor('text_secondary'))
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+      } else {
+        List({ space: 12 }) {
+          // 套件段
+          ForEach(this.getFilteredSuites(), (suite: BenchmarkSuiteDto) => {
+            ListItem() {
+              this.buildSuiteCard(suite)
+            }
+          }, (suite: BenchmarkSuiteDto) => suite.id)
+          // 运行历史段
+          ForEach(this.runs, (run: BenchmarkRunDto) => {
+            ListItem() {
+              this.buildRunCard(run)
+            }
+          }, (run: BenchmarkRunDto) => run.run_id)
+        }
+        .layoutWeight(1)
+        .width('100%')
+        .scrollBar(BarState.Off)
+        .padding({
+          left: this.sm.getSpacing('md'),
+          right: this.sm.getSpacing('md'),
+          top: this.sm.getSpacing('sm'),
+          bottom: this.sm.getSpacing('sm'),
+        })
+      }
     }
     .width('100%')
     .height('100%')
+    .backgroundColor(this.sm.getColor('background'))
   }
 
   // ===========================================================================
-  // 基准卡片构建器
+  // 卡片构建器
   // ===========================================================================
 
-  /** 单条基准卡片：类型徽章 + 名称 + 状态徽章 + 延迟 + 吞吐量 + score + 运行按钮 */
+  /** 套件卡片：难度徽章 + 名称 + 描述 + 任务数/分类 + 运行按钮 */
   @Builder
-  buildBenchmarkCard(bench: Benchmark) {
+  buildSuiteCard(suite: BenchmarkSuiteDto) {
     GlassCard() {
       Column() {
-        // 上部：类型徽章 + 状态徽章
+        // 上部：难度徽章 + 任务数
         Row() {
-          // 类型徽章
           Row() {
-            Text(BenchmarkViewHelper.getTypeIcon(bench.type))
-              .fontSize(14)
-            Text(BenchmarkViewHelper.getTypeLabel(bench.type))
+            Text(BenchmarkViewHelper.getDifficultyLabel(suite.difficulty))
               .fontSize(this.sm.getFontSize('caption'))
               .fontColor(this.sm.getColor('text_on_primary'))
               .margin({ left: 4 })
           }
           .padding({ left: 8, right: 8, top: 2, bottom: 2 })
           .borderRadius(this.sm.getRadius('sm'))
-          .backgroundColor(this.sm.getColor(BenchmarkViewHelper.getTypeColor(bench.type)))
+          .backgroundColor(this.sm.getColor(BenchmarkViewHelper.getDifficultyColor(suite.difficulty)))
 
-          // 状态徽章
-          Row() {
-            Text(BenchmarkViewHelper.getStatusIcon(bench.status))
-              .fontSize(14)
-              .margin({ left: 8 })
-            Text(bench.status)
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor(BenchmarkViewHelper.getStatusColor(bench.status)))
-              .margin({ left: 4 })
-          }
-          .layoutWeight(1)
-          .justifyContent(FlexAlign.End)
+          Text(`${suite.tasks} 个任务 · ${suite.category}`)
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_disabled'))
+            .layoutWeight(1)
+            .margin({ left: 8 })
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .textAlign(TextAlign.End)
         }
         .width('100%')
         .alignItems(VerticalAlign.Center)
 
-        // 基准名称
-        Text(bench.name)
+        // 套件名
+        Text(suite.name)
           .fontSize(this.sm.getFontSize('body'))
           .fontColor(this.sm.getColor('text_primary'))
           .maxLines(2)
@@ -470,53 +404,86 @@ export struct BenchmarkPage {
           .margin({ top: 4 })
           .width('100%')
 
-        // 延迟信息：avg / p95 / p99
-        if (bench.status === 'completed' || bench.status === 'running') {
-          Row() {
-            Text(`avg: ${BenchmarkViewHelper.formatLatency(bench.avgLatencyMs)}`)
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_secondary'))
-              .layoutWeight(1)
-            Text(`p95: ${BenchmarkViewHelper.formatLatency(bench.p95LatencyMs)}`)
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_secondary'))
-              .layoutWeight(1)
-            Text(`p99: ${BenchmarkViewHelper.formatLatency(bench.p99LatencyMs)}`)
-              .fontSize(this.sm.getFontSize('caption'))
-              .fontColor(this.sm.getColor('text_secondary'))
-              .layoutWeight(1)
-          }
-          .width('100%')
+        // 描述
+        Text(suite.description)
+          .fontSize(this.sm.getFontSize('caption'))
+          .fontColor(this.sm.getColor('text_secondary'))
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
           .margin({ top: 4 })
-          .alignItems(VerticalAlign.Center)
-
-          // 吞吐量
-          Text(`吞吐量: ${BenchmarkViewHelper.formatThroughput(bench.throughputOps)}`)
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('text_secondary'))
-            .margin({ top: 4 })
-        }
-
-        // score（如果有）
-        if (bench.score !== undefined) {
-          Text(`评分: ${bench.score}`)
-            .fontSize(this.sm.getFontSize('caption'))
-            .fontColor(this.sm.getColor('primary'))
-            .margin({ top: 4 })
-        }
+          .width('100%')
 
         // 运行按钮
         Row() {
           GlassButton({
-            text: bench.status === 'running' ? '运行中' : '运行',
-            type: bench.status === 'running' ? 'default' : 'primary',
+            text: this.runningSuiteId === suite.id ? '运行中' : '运行',
+            type: this.runningSuiteId === suite.id ? 'default' : 'primary',
             btnSize: 'small',
-            onTap: () => { this.runBenchmark(bench); }
+            onTap: () => { this.runSuite(suite); }
           })
         }
         .width('100%')
         .justifyContent(FlexAlign.End)
         .margin({ top: this.sm.getSpacing('md') })
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+    }
+  }
+
+  /** 运行历史卡片：状态徽章 + 套件名 + 得分/延迟（未接线如实标注）+ 时间 */
+  @Builder
+  buildRunCard(run: BenchmarkRunDto) {
+    GlassCard() {
+      Column() {
+        // 上部：状态徽章 + 开始时间
+        Row() {
+          Row() {
+            Text(BenchmarkViewHelper.getStatusIcon(run.status))
+              .fontSize(14)
+            Text(BenchmarkViewHelper.getStatusLabel(run.status))
+              .fontSize(this.sm.getFontSize('caption'))
+              .fontColor(this.sm.getColor(BenchmarkViewHelper.getStatusColor(run.status)))
+              .margin({ left: 4 })
+          }
+          .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+          .borderRadius(this.sm.getRadius('sm'))
+          .backgroundColor(this.sm.getColor('surface'))
+
+          Text(BenchmarkViewHelper.formatTimestampShort(run.started_at))
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_disabled'))
+            .layoutWeight(1)
+            .margin({ left: 8 })
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .textAlign(TextAlign.End)
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+
+        // 套件名
+        Text(run.suite_name)
+          .fontSize(this.sm.getFontSize('body'))
+          .fontColor(this.sm.getColor('text_primary'))
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .margin({ top: 4 })
+          .width('100%')
+
+        // 得分 + 延迟（执行器未接线时如实显示"未测量"）
+        Row() {
+          Text(`得分: ${BenchmarkViewHelper.formatScore(run.score)}`)
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('primary'))
+            .layoutWeight(1)
+          Text(`延迟: ${BenchmarkViewHelper.formatLatency(run.avg_latency_ms)}`)
+            .fontSize(this.sm.getFontSize('caption'))
+            .fontColor(this.sm.getColor('text_secondary'))
+        }
+        .width('100%')
+        .margin({ top: 4 })
+        .alignItems(VerticalAlign.Center)
       }
       .width('100%')
       .alignItems(HorizontalAlign.Start)

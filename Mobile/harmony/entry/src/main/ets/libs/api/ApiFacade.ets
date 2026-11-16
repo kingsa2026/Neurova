@@ -36,6 +36,11 @@ import { SessionSyncApi } from './modules/SessionSyncApi';
 import { AdminApi } from './modules/AdminApi';
 import { HomeApi } from './modules/HomeApi';
 import { WebhookApi } from './modules/WebhookApi';
+import { SkillsApi } from './modules/SkillsApi';
+import { AuditApi } from './modules/AuditApi';
+import { BenchmarkApi } from './modules/BenchmarkApi';
+import { MarketplaceApi } from './modules/MarketplaceApi';
+import { SandboxApi } from './modules/SandboxApi';
 
 export class ApiFacade {
   private static instance: ApiFacade;
@@ -72,6 +77,12 @@ export class ApiFacade {
   public aigc: AigcApi;
   // 业务模块（P1-34 新增 - Webhook 管理域，对齐 /v1/webhooks 契约）
   public webhook: WebhookApi;
+  // 业务模块（R6 新增 - 技能/审计/基准/市场/沙盒五域，P1-33 移交接线）
+  public skills: SkillsApi;
+  public audit: AuditApi;
+  public benchmark: BenchmarkApi;
+  public marketplace: MarketplaceApi;
+  public sandbox: SandboxApi;
 
   private constructor() {
     this.client = HttpClient.getInstance();
@@ -104,6 +115,12 @@ export class ApiFacade {
     this.aigc = new AigcApi(this.client);
     // P1-34 新增模块（Webhook 管理域）
     this.webhook = new WebhookApi(this.client);
+    // R6 新增模块（技能/审计/基准/市场/沙盒五域）
+    this.skills = new SkillsApi(this.client);
+    this.audit = new AuditApi(this.client);
+    this.benchmark = new BenchmarkApi(this.client);
+    this.marketplace = new MarketplaceApi(this.client);
+    this.sandbox = new SandboxApi(this.client);
   }
 
   static getInstance(): ApiFacade {

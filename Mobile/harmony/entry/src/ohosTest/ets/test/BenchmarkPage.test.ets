@@ -1,185 +1,109 @@
-// BenchmarkPage 性能基准页单元测试 - TDD 红绿灯垂直切片
+// BenchmarkPage 基准评测页单元测试 - R6 契约切换
 //
-// 测试范围：BenchmarkViewHelper 视图模型行为（基准类型颜色/图标/标签映射、
-//           状态颜色/图标映射、延迟格式化、吞吐量格式化）。
-// 说明：@Component 结构体依赖 HarmonyOS UI 运行时，无法在纯单元测试中实例化，
-//       因此此处针对从 BenchmarkPage.ets 导出的 BenchmarkViewHelper 静态方法进行验证。
-// 严格规则：一个测试 → 一个实现 → 循环（垂直切片），禁止一次性写完所有测试再写实现。
+// 测试范围：BenchmarkViewHelper 视图模型行为（难度颜色/标签映射、运行状态
+//           颜色/图标/标签映射、延迟格式化（null → 未测量）、得分格式化、
+//           时间戳短格式）。
+// 契约：后端 benchmark.py 是 LLM 评测套件域（difficulty/category/suite/run），
+//       评测执行器未接线时 status='simulated'、score/avg_latency_ms 恒 null；
+//       开放集合未知值兜默认，不抛错。
 import { describe, it, expect } from '@ohos/hypium';
 import { BenchmarkViewHelper } from '../../../main/ets/pages/BenchmarkPage';
 
 export default function benchmarkPageTest() {
   describe('BenchmarkPage', () => {
-    // ========== 切片1: getTypeColor - cpu → primary ==========
+    // ========== 切片1: getDifficultyColor ==========
 
-    it('type_color_cpu_returns_primary', 0, () => {
-      expect(BenchmarkViewHelper.getTypeColor('cpu')).assertEqual('primary');
+    it('difficulty_color_easy_returns_success', 0, () => {
+      expect(BenchmarkViewHelper.getDifficultyColor('easy')).assertEqual('success');
     });
 
-    // ========== 切片2: getTypeColor - memory → info ==========
-
-    it('type_color_memory_returns_info', 0, () => {
-      expect(BenchmarkViewHelper.getTypeColor('memory')).assertEqual('info');
+    it('difficulty_color_medium_returns_warning', 0, () => {
+      expect(BenchmarkViewHelper.getDifficultyColor('medium')).assertEqual('warning');
     });
 
-    // ========== 切片3: getTypeColor - disk → warning ==========
-
-    it('type_color_disk_returns_warning', 0, () => {
-      expect(BenchmarkViewHelper.getTypeColor('disk')).assertEqual('warning');
+    it('difficulty_color_hard_returns_error', 0, () => {
+      expect(BenchmarkViewHelper.getDifficultyColor('hard')).assertEqual('error');
     });
 
-    // ========== 切片4: getTypeColor - network → success ==========
-
-    it('type_color_network_returns_success', 0, () => {
-      expect(BenchmarkViewHelper.getTypeColor('network')).assertEqual('success');
+    it('difficulty_color_unknown_defaults_to_info', 0, () => {
+      expect(BenchmarkViewHelper.getDifficultyColor('extreme')).assertEqual('info');
     });
 
-    // ========== 切片5: getTypeColor - llm_inference → error ==========
+    // ========== 切片2: getDifficultyLabel ==========
 
-    it('type_color_llm_inference_returns_error', 0, () => {
-      expect(BenchmarkViewHelper.getTypeColor('llm_inference')).assertEqual('error');
+    it('difficulty_label_easy', 0, () => {
+      expect(BenchmarkViewHelper.getDifficultyLabel('easy')).assertEqual('简单');
     });
 
-    // ========== 切片6: getTypeColor - embedding → text_secondary ==========
-
-    it('type_color_embedding_returns_text_secondary', 0, () => {
-      expect(BenchmarkViewHelper.getTypeColor('embedding')).assertEqual('text_secondary');
+    it('difficulty_label_unknown_returns_raw', 0, () => {
+      expect(BenchmarkViewHelper.getDifficultyLabel('extreme')).assertEqual('extreme');
     });
 
-    // ========== 切片7: getTypeIcon - cpu 返回 emoji ==========
+    // ========== 切片3: getStatusColor - simulated 是执行器未接线的诚实标记 ==========
 
-    it('type_icon_cpu_returns_emoji', 0, () => {
-      const icon = BenchmarkViewHelper.getTypeIcon('cpu');
-      expect(icon.length > 0).assertTrue();
+    it('status_color_simulated_returns_warning', 0, () => {
+      expect(BenchmarkViewHelper.getStatusColor('simulated')).assertEqual('warning');
     });
-
-    // ========== 切片8: getTypeIcon - memory 返回 emoji ==========
-
-    it('type_icon_memory_returns_emoji', 0, () => {
-      const icon = BenchmarkViewHelper.getTypeIcon('memory');
-      expect(icon.length > 0).assertTrue();
-    });
-
-    // ========== 切片9: getTypeLabel - cpu → CPU ==========
-
-    it('type_label_cpu_returns_CPU', 0, () => {
-      expect(BenchmarkViewHelper.getTypeLabel('cpu')).assertEqual('CPU');
-    });
-
-    // ========== 切片10: getTypeLabel - memory → 内存 ==========
-
-    it('type_label_memory_returns_内存', 0, () => {
-      expect(BenchmarkViewHelper.getTypeLabel('memory')).assertEqual('内存');
-    });
-
-    // ========== 切片11: getTypeLabel - disk → 磁盘 ==========
-
-    it('type_label_disk_returns_磁盘', 0, () => {
-      expect(BenchmarkViewHelper.getTypeLabel('disk')).assertEqual('磁盘');
-    });
-
-    // ========== 切片12: getTypeLabel - network → 网络 ==========
-
-    it('type_label_network_returns_网络', 0, () => {
-      expect(BenchmarkViewHelper.getTypeLabel('network')).assertEqual('网络');
-    });
-
-    // ========== 切片13: getTypeLabel - llm_inference → LLM 推理 ==========
-
-    it('type_label_llm_inference_returns_LLM推理', 0, () => {
-      expect(BenchmarkViewHelper.getTypeLabel('llm_inference')).assertEqual('LLM 推理');
-    });
-
-    // ========== 切片14: getTypeLabel - embedding → 向量嵌入 ==========
-
-    it('type_label_embedding_returns_向量嵌入', 0, () => {
-      expect(BenchmarkViewHelper.getTypeLabel('embedding')).assertEqual('向量嵌入');
-    });
-
-    // ========== 切片15: getStatusColor - pending → text_secondary ==========
-
-    it('status_color_pending_returns_text_secondary', 0, () => {
-      expect(BenchmarkViewHelper.getStatusColor('pending')).assertEqual('text_secondary');
-    });
-
-    // ========== 切片16: getStatusColor - running → info ==========
-
-    it('status_color_running_returns_info', 0, () => {
-      expect(BenchmarkViewHelper.getStatusColor('running')).assertEqual('info');
-    });
-
-    // ========== 切片17: getStatusColor - completed → success ==========
 
     it('status_color_completed_returns_success', 0, () => {
       expect(BenchmarkViewHelper.getStatusColor('completed')).assertEqual('success');
     });
 
-    // ========== 切片18: getStatusColor - failed → error ==========
-
     it('status_color_failed_returns_error', 0, () => {
       expect(BenchmarkViewHelper.getStatusColor('failed')).assertEqual('error');
     });
 
-    // ========== 切片19: getStatusIcon - pending 返回 emoji ==========
-
-    it('status_icon_pending_returns_emoji', 0, () => {
-      const icon = BenchmarkViewHelper.getStatusIcon('pending');
-      expect(icon.length > 0).assertTrue();
+    it('status_color_unknown_defaults', 0, () => {
+      expect(BenchmarkViewHelper.getStatusColor('queued')).assertEqual('text_secondary');
     });
 
-    // ========== 切片20: getStatusIcon - running 返回 emoji ==========
+    // ========== 切片4: getStatusIcon / getStatusLabel ==========
 
-    it('status_icon_running_returns_emoji', 0, () => {
-      const icon = BenchmarkViewHelper.getStatusIcon('running');
-      expect(icon.length > 0).assertTrue();
+    it('status_icon_simulated_returns_flask', 0, () => {
+      expect(BenchmarkViewHelper.getStatusIcon('simulated')).assertEqual('🧪');
     });
 
-    // ========== 切片21: formatLatency - 小于 1000ms ==========
-
-    it('format_latency_under_1000_returns_ms', 0, () => {
-      expect(BenchmarkViewHelper.formatLatency(500)).assertEqual('500.0ms');
+    it('status_label_simulated', 0, () => {
+      expect(BenchmarkViewHelper.getStatusLabel('simulated')).assertEqual('模拟运行');
     });
 
-    // ========== 切片22: formatLatency - 等于 1000ms → '1.0s' ==========
+    // ========== 切片5: formatLatency - null 未测量 + ms/s 两档 ==========
 
-    it('format_latency_1000_returns_seconds', 0, () => {
-      expect(BenchmarkViewHelper.formatLatency(1000)).assertEqual('1.0s');
+    it('format_latency_null_returns_unmeasured', 0, () => {
+      expect(BenchmarkViewHelper.formatLatency(null)).assertEqual('未测量');
     });
 
-    // ========== 切片23: formatLatency - 大于 1000ms ==========
+    it('format_latency_under_second_returns_ms', 0, () => {
+      expect(BenchmarkViewHelper.formatLatency(5.2)).assertEqual('5.2ms');
+    });
 
-    it('format_latency_over_1000_returns_seconds', 0, () => {
+    it('format_latency_over_second_returns_s', 0, () => {
       expect(BenchmarkViewHelper.formatLatency(1500)).assertEqual('1.5s');
     });
 
-    // ========== 切片24: formatLatency - 小数毫秒 ==========
+    // ========== 切片6: formatScore ==========
 
-    it('format_latency_decimal_ms', 0, () => {
-      expect(BenchmarkViewHelper.formatLatency(0.5)).assertEqual('0.5ms');
+    it('format_score_null_returns_unmeasured', 0, () => {
+      expect(BenchmarkViewHelper.formatScore(null)).assertEqual('未测量');
     });
 
-    // ========== 切片25: formatThroughput - undefined → '—' ==========
-
-    it('format_throughput_undefined_returns_dash', 0, () => {
-      expect(BenchmarkViewHelper.formatThroughput(undefined)).assertEqual('—');
+    it('format_score_value_returns_raw', 0, () => {
+      expect(BenchmarkViewHelper.formatScore(8800)).assertEqual('8800');
     });
 
-    // ========== 切片26: formatThroughput - 小于 1000 ops/s ==========
+    // ========== 切片7: formatTimestampShort ==========
 
-    it('format_throughput_under_1000_returns_ops', 0, () => {
-      expect(BenchmarkViewHelper.formatThroughput(500)).assertEqual('500 ops/s');
+    it('format_timestamp_short_valid_iso', 0, () => {
+      const formatted = BenchmarkViewHelper.formatTimestampShort('2025-03-01T09:00:00Z');
+      // 时区无关：合法 ISO 必产出 16 位 YYYY-MM-DD HH:mm（日期随设备时区，不锁字面值）
+      expect(formatted.length === 16).assertTrue();
+      expect(formatted.charAt(10)).assertEqual(' ');
+      expect(formatted.charAt(13)).assertEqual(':');
     });
 
-    // ========== 切片27: formatThroughput - 等于 1000 → '1.0K ops/s' ==========
-
-    it('format_throughput_1000_returns_kops', 0, () => {
-      expect(BenchmarkViewHelper.formatThroughput(1000)).assertEqual('1.0K ops/s');
-    });
-
-    // ========== 切片28: formatThroughput - 大于 1000 ops/s ==========
-
-    it('format_throughput_over_1000_returns_kops', 0, () => {
-      expect(BenchmarkViewHelper.formatThroughput(2500)).assertEqual('2.5K ops/s');
+    it('format_timestamp_short_invalid_returns_dash', 0, () => {
+      expect(BenchmarkViewHelper.formatTimestampShort('')).assertEqual('—');
+      expect(BenchmarkViewHelper.formatTimestampShort('garbage')).assertEqual('—');
     });
   });
 }

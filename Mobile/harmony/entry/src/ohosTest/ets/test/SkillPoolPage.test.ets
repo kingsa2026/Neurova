@@ -1,118 +1,99 @@
-// SkillPoolPage 技能池页单元测试 - TDD 红绿灯垂直切片
+// SkillPoolPage 技能池页单元测试 - R6 契约切换
 //
-// 测试范围：SkillPoolViewHelper 视图模型行为（技能状态颜色映射、状态图标、状态文案、
-//           评分格式化、安装数格式化、标签格式化）。
+// 测试范围：SkillPoolViewHelper 视图模型行为（启用态颜色/图标/文案、操作按钮
+//           文案、使用次数格式化、成功率格式化、描述截断）。
 // 说明：@Component 结构体依赖 HarmonyOS UI 运行时，无法在纯单元测试中实例化，
-//       因此此处针对从 SkillPoolPage.ets 导出的 SkillPoolViewHelper 静态方法进行验证，
-//       覆盖页面 getStatusColor / getStatusIcon / getStatusLabel / formatRating /
-//       formatInstalls / formatTags 的核心视图逻辑。
-// 严格规则：一个测试 → 一个实现 → 循环（垂直切片），禁止一次性写完所有测试再写实现。
+//       因此此处针对从 SkillPoolPage.ets 导出的 SkillPoolViewHelper 静态方法进行验证。
+// 契约：R6 起页面消费后端 SkillInfo 契约（enabled 布尔，无 draft/published/deprecated
+//       三态与 installs/rating 字段），helper 随契约切换。
 import { describe, it, expect } from '@ohos/hypium';
 import { SkillPoolViewHelper } from '../../../main/ets/pages/SkillPoolPage';
-import { SkillStatus } from '../../../main/ets/libs/types';
 
 export default function skillPoolPageTest() {
   describe('SkillPoolPage', () => {
-    // ========== 切片1: getStatusColor - draft → warning ==========
+    // ========== 切片1: getStatusColor - enabled → success ==========
 
-    it('status_color_draft_returns_warning', 0, () => {
-      expect(SkillPoolViewHelper.getStatusColor('draft')).assertEqual('warning');
+    it('status_color_enabled_returns_success', 0, () => {
+      expect(SkillPoolViewHelper.getStatusColor(true)).assertEqual('success');
     });
 
-    // ========== 切片2: getStatusColor - published → success ==========
+    // ========== 切片2: getStatusColor - disabled → text_disabled ==========
 
-    it('status_color_published_returns_success', 0, () => {
-      expect(SkillPoolViewHelper.getStatusColor('published')).assertEqual('success');
+    it('status_color_disabled_returns_text_disabled', 0, () => {
+      expect(SkillPoolViewHelper.getStatusColor(false)).assertEqual('text_disabled');
     });
 
-    // ========== 切片3: getStatusColor - deprecated → text_disabled ==========
+    // ========== 切片3: getStatusIcon ==========
 
-    it('status_color_deprecated_returns_text_disabled', 0, () => {
-      expect(SkillPoolViewHelper.getStatusColor('deprecated')).assertEqual('text_disabled');
+    it('status_icon_enabled_returns_check', 0, () => {
+      expect(SkillPoolViewHelper.getStatusIcon(true)).assertEqual('✅');
     });
 
-    // ========== 切片4: getStatusIcon - draft → 📝 ==========
-
-    it('status_icon_draft_returns_pencil', 0, () => {
-      expect(SkillPoolViewHelper.getStatusIcon('draft')).assertEqual('📝');
+    it('status_icon_disabled_returns_blocked', 0, () => {
+      expect(SkillPoolViewHelper.getStatusIcon(false)).assertEqual('🚫');
     });
 
-    // ========== 切片5: getStatusIcon - published → ✅ ==========
+    // ========== 切片4: getStatusLabel ==========
 
-    it('status_icon_published_returns_check', 0, () => {
-      expect(SkillPoolViewHelper.getStatusIcon('published')).assertEqual('✅');
+    it('status_label_enabled', 0, () => {
+      expect(SkillPoolViewHelper.getStatusLabel(true)).assertEqual('已启用');
     });
 
-    // ========== 切片6: getStatusIcon - deprecated → 🗑️ ==========
-
-    it('status_icon_deprecated_returns_trash', 0, () => {
-      expect(SkillPoolViewHelper.getStatusIcon('deprecated')).assertEqual('🗑️');
+    it('status_label_disabled', 0, () => {
+      expect(SkillPoolViewHelper.getStatusLabel(false)).assertEqual('已禁用');
     });
 
-    // ========== 切片7: getStatusLabel - draft → 草稿 ==========
+    // ========== 切片5: getToggleActionLabel - 对当前状态取反的动作文案 ==========
 
-    it('status_label_draft_returns_draft', 0, () => {
-      expect(SkillPoolViewHelper.getStatusLabel('draft')).assertEqual('草稿');
+    it('toggle_action_label_enabled_shows_disable', 0, () => {
+      expect(SkillPoolViewHelper.getToggleActionLabel(true)).assertEqual('禁用');
     });
 
-    // ========== 切片8: getStatusLabel - published → 已发布 ==========
-
-    it('status_label_published_returns_published', 0, () => {
-      expect(SkillPoolViewHelper.getStatusLabel('published')).assertEqual('已发布');
+    it('toggle_action_label_disabled_shows_enable', 0, () => {
+      expect(SkillPoolViewHelper.getToggleActionLabel(false)).assertEqual('启用');
     });
 
-    // ========== 切片9: getStatusLabel - deprecated → 已弃用 ==========
+    // ========== 切片6: formatUsageCount ==========
 
-    it('status_label_deprecated_returns_deprecated', 0, () => {
-      expect(SkillPoolViewHelper.getStatusLabel('deprecated')).assertEqual('已弃用');
+    it('format_usage_zero_returns_unused', 0, () => {
+      expect(SkillPoolViewHelper.formatUsageCount(0)).assertEqual('未使用');
     });
 
-    // ========== 切片10: formatRating - 4.5 → "★★★★☆ 4.5" ==========
-
-    it('format_rating_normal_returns_stars', 0, () => {
-      expect(SkillPoolViewHelper.formatRating(4.5)).assertEqual('★★★★☆ 4.5');
+    it('format_usage_thousands_returns_K', 0, () => {
+      expect(SkillPoolViewHelper.formatUsageCount(1024)).assertEqual('1.0K 次');
     });
 
-    // ========== 切片11: formatRating - 0 → "暂无评分" ==========
-
-    it('format_rating_zero_returns_no_rating', 0, () => {
-      expect(SkillPoolViewHelper.formatRating(0)).assertEqual('暂无评分');
+    it('format_usage_millions_returns_M', 0, () => {
+      expect(SkillPoolViewHelper.formatUsageCount(1048576)).assertEqual('1.0M 次');
     });
 
-    // ========== 切片12: formatRating - 5.0 → "★★★★★ 5.0" ==========
-
-    it('format_rating_full_returns_five_stars', 0, () => {
-      expect(SkillPoolViewHelper.formatRating(5.0)).assertEqual('★★★★★ 5.0');
+    it('format_usage_small_returns_raw', 0, () => {
+      expect(SkillPoolViewHelper.formatUsageCount(7)).assertEqual('7 次');
     });
 
-    // ========== 切片13: formatInstalls - 0 → "无安装" ==========
+    // ========== 切片7: formatSuccessRate ==========
 
-    it('format_installs_zero_returns_no_installs', 0, () => {
-      expect(SkillPoolViewHelper.formatInstalls(0)).assertEqual('无安装');
+    it('format_rate_zero_returns_no_stats', 0, () => {
+      expect(SkillPoolViewHelper.formatSuccessRate(0)).assertEqual('无统计');
     });
 
-    // ========== 切片14: formatInstalls - 1024 → "1.0K 安装" ==========
-
-    it('format_installs_thousands_returns_K', 0, () => {
-      expect(SkillPoolViewHelper.formatInstalls(1024)).assertEqual('1.0K 安装');
+    it('format_rate_half_returns_percent', 0, () => {
+      expect(SkillPoolViewHelper.formatSuccessRate(0.5)).assertEqual('成功率 50%');
     });
 
-    // ========== 切片15: formatInstalls - 1048576 → "1.0M 安装" ==========
-
-    it('format_installs_millions_returns_M', 0, () => {
-      expect(SkillPoolViewHelper.formatInstalls(1048576)).assertEqual('1.0M 安装');
+    it('format_rate_full_returns_percent', 0, () => {
+      expect(SkillPoolViewHelper.formatSuccessRate(1.0)).assertEqual('成功率 100%');
     });
 
-    // ========== 切片16: formatTags - [] → "无标签" ==========
+    // ========== 切片8: truncateDescription ==========
 
-    it('format_tags_empty_returns_no_tags', 0, () => {
-      expect(SkillPoolViewHelper.formatTags([])).assertEqual('无标签');
+    it('truncate_short_desc_returns_raw', 0, () => {
+      expect(SkillPoolViewHelper.truncateDescription('短描述', 80)).assertEqual('短描述');
     });
 
-    // ========== 切片17: formatTags - ["a","b"] → "a · b" ==========
-
-    it('format_tags_with_items_returns_joined', 0, () => {
-      expect(SkillPoolViewHelper.formatTags(['a', 'b'])).assertEqual('a · b');
+    it('truncate_long_desc_appends_ellipsis', 0, () => {
+      const longDesc = 'a'.repeat(90);
+      expect(SkillPoolViewHelper.truncateDescription(longDesc, 80)).assertEqual('a'.repeat(80) + '...');
     });
   });
 }

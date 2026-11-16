@@ -1,191 +1,98 @@
-// MarketplacePage 应用市场页单元测试 - TDD 红绿灯垂直切片
+// MarketplacePage 技能市场页单元测试 - R6 契约切换
 //
-// 测试范围：MarketplaceViewHelper 视图模型行为（分类颜色/图标/文案、商品类型文案、
-//           价格格式化、下载数格式化、评分格式化）。
-// 说明：@Component 结构体依赖 HarmonyOS UI 运行时，无法在纯单元测试中实例化，
-//       因此此处针对从 MarketplacePage.ets 导出的
-//       MarketplaceViewHelper 静态方法进行验证。
-// 严格规则：一个测试 → 一个实现 → 循环（垂直切片），禁止一次性写完所有测试再写实现。
+// 测试范围：MarketplaceViewHelper 视图模型行为（来源徽章颜色/文案（开放集合）、
+//           分类图标、下载数格式化、评分格式化、描述截断）。
+// 契约：后端 marketplace.py 是技能市场（skill_id/author/version/downloads/
+//       installed/source），无 itemType 价型维度；source/category 开放集合，
+//       未知值兜默认，不抛错。
 import { describe, it, expect } from '@ohos/hypium';
 import { MarketplaceViewHelper } from '../../../main/ets/pages/MarketplacePage';
-import { MarketplaceCategory, MarketplaceItemType } from '../../../main/ets/libs/types';
 
 export default function marketplacePageTest() {
   describe('MarketplacePage', () => {
-    // ========== 切片1: getCategoryColor - agent → primary ==========
+    // ========== 切片1: getSourceColor ==========
 
-    it('category_color_agent_returns_primary', 0, () => {
-      expect(MarketplaceViewHelper.getCategoryColor('agent')).assertEqual('primary');
+    it('source_color_local_returns_primary', 0, () => {
+      expect(MarketplaceViewHelper.getSourceColor('local')).assertEqual('primary');
     });
 
-    // ========== 切片2: getCategoryColor - skill → info ==========
-
-    it('category_color_skill_returns_info', 0, () => {
-      expect(MarketplaceViewHelper.getCategoryColor('skill')).assertEqual('info');
+    it('source_color_aliyun_returns_secondary', 0, () => {
+      expect(MarketplaceViewHelper.getSourceColor('aliyun')).assertEqual('secondary');
     });
 
-    // ========== 切片3: getCategoryColor - template → success ==========
-
-    it('category_color_template_returns_success', 0, () => {
-      expect(MarketplaceViewHelper.getCategoryColor('template')).assertEqual('success');
+    it('source_color_unknown_defaults_to_info', 0, () => {
+      expect(MarketplaceViewHelper.getSourceColor('future_market')).assertEqual('info');
     });
 
-    // ========== 切片4: getCategoryColor - plugin → warning ==========
+    // ========== 切片2: getSourceLabel ==========
 
-    it('category_color_plugin_returns_warning', 0, () => {
-      expect(MarketplaceViewHelper.getCategoryColor('plugin')).assertEqual('warning');
+    it('source_label_local', 0, () => {
+      expect(MarketplaceViewHelper.getSourceLabel('local')).assertEqual('官方上架');
     });
 
-    // ========== 切片5: getCategoryColor - workflow → secondary ==========
-
-    it('category_color_workflow_returns_secondary', 0, () => {
-      expect(MarketplaceViewHelper.getCategoryColor('workflow')).assertEqual('secondary');
+    it('source_label_unknown_returns_raw', 0, () => {
+      expect(MarketplaceViewHelper.getSourceLabel('future_market')).assertEqual('future_market');
     });
 
-    // ========== 切片6: getCategoryIcon - agent → 🤖 ==========
+    // ========== 切片3: getCategoryIcon（开放集合兜默认） ==========
 
-    it('category_icon_agent_returns_robot', 0, () => {
-      expect(MarketplaceViewHelper.getCategoryIcon('agent')).assertEqual('🤖');
+    it('category_icon_general_returns_puzzle', 0, () => {
+      expect(MarketplaceViewHelper.getCategoryIcon('general')).assertEqual('🧩');
     });
 
-    // ========== 切片7: getCategoryIcon - skill → ⚡ ==========
-
-    it('category_icon_skill_returns_bolt', 0, () => {
-      expect(MarketplaceViewHelper.getCategoryIcon('skill')).assertEqual('⚡');
+    it('category_icon_unknown_defaults_to_puzzle', 0, () => {
+      expect(MarketplaceViewHelper.getCategoryIcon('new_domain')).assertEqual('🧩');
     });
 
-    // ========== 切片8: getCategoryIcon - template → 📋 ==========
+    // ========== 切片4: formatDownloadCount ==========
 
-    it('category_icon_template_returns_clipboard', 0, () => {
-      expect(MarketplaceViewHelper.getCategoryIcon('template')).assertEqual('📋');
+    it('format_downloads_zero_returns_none', 0, () => {
+      expect(MarketplaceViewHelper.formatDownloadCount(0)).assertEqual('暂无下载');
     });
 
-    // ========== 切片9: getCategoryIcon - plugin → 🔌 ==========
-
-    it('category_icon_plugin_returns_plug', 0, () => {
-      expect(MarketplaceViewHelper.getCategoryIcon('plugin')).assertEqual('🔌');
+    it('format_downloads_small_returns_raw', 0, () => {
+      expect(MarketplaceViewHelper.formatDownloadCount(42)).assertEqual('42 次下载');
     });
 
-    // ========== 切片10: getCategoryIcon - workflow → 🔄 ==========
-
-    it('category_icon_workflow_returns_workflow', 0, () => {
-      expect(MarketplaceViewHelper.getCategoryIcon('workflow')).assertEqual('🔄');
+    it('format_downloads_thousands_returns_K', 0, () => {
+      expect(MarketplaceViewHelper.formatDownloadCount(2048)).assertEqual('2.0K 次下载');
     });
 
-    // ========== 切片11: getCategoryLabel - agent → 智能体 ==========
-
-    it('category_label_agent_returns_agent', 0, () => {
-      expect(MarketplaceViewHelper.getCategoryLabel('agent')).assertEqual('智能体');
+    it('format_downloads_millions_returns_M', 0, () => {
+      expect(MarketplaceViewHelper.formatDownloadCount(2097152)).assertEqual('2.0M 次下载');
     });
 
-    // ========== 切片12: getCategoryLabel - skill → 技能 ==========
+    // ========== 切片5: formatRating / formatRatingText ==========
 
-    it('category_label_skill_returns_skill', 0, () => {
-      expect(MarketplaceViewHelper.getCategoryLabel('skill')).assertEqual('技能');
+    it('format_rating_four_returns_four_stars', 0, () => {
+      expect(MarketplaceViewHelper.formatRating(4.0)).assertEqual('★★★★');
     });
 
-    // ========== 切片13: getCategoryLabel - template → 模板 ==========
-
-    it('category_label_template_returns_template', 0, () => {
-      expect(MarketplaceViewHelper.getCategoryLabel('template')).assertEqual('模板');
+    it('format_rating_fraction_floors', 0, () => {
+      expect(MarketplaceViewHelper.formatRating(4.7)).assertEqual('★★★★');
     });
 
-    // ========== 切片14: getCategoryLabel - plugin → 插件 ==========
-
-    it('category_label_plugin_returns_plugin', 0, () => {
-      expect(MarketplaceViewHelper.getCategoryLabel('plugin')).assertEqual('插件');
+    it('format_rating_zero_returns_empty', 0, () => {
+      expect(MarketplaceViewHelper.formatRating(0)).assertEqual('');
     });
 
-    // ========== 切片15: getCategoryLabel - workflow → 工作流 ==========
-
-    it('category_label_workflow_returns_workflow', 0, () => {
-      expect(MarketplaceViewHelper.getCategoryLabel('workflow')).assertEqual('工作流');
+    it('format_rating_text_zero_returns_no_rating', 0, () => {
+      expect(MarketplaceViewHelper.formatRatingText(0)).assertEqual('暂无评分');
     });
 
-    // ========== 切片16: getItemTypeLabel - free → 免费 ==========
-
-    it('item_type_label_free_returns_free', 0, () => {
-      expect(MarketplaceViewHelper.getItemTypeLabel('free')).assertEqual('免费');
+    it('format_rating_text_value_returns_stars_and_number', 0, () => {
+      expect(MarketplaceViewHelper.formatRatingText(4.5)).assertEqual('★★★★ 4.5');
     });
 
-    // ========== 切片17: getItemTypeLabel - paid → 付费 ==========
+    // ========== 切片6: truncateDescription ==========
 
-    it('item_type_label_paid_returns_paid', 0, () => {
-      expect(MarketplaceViewHelper.getItemTypeLabel('paid')).assertEqual('付费');
+    it('truncate_short_desc_returns_raw', 0, () => {
+      expect(MarketplaceViewHelper.truncateDescription('短描述', 60)).assertEqual('短描述');
     });
 
-    // ========== 切片18: getItemTypeLabel - subscription → 订阅 ==========
-
-    it('item_type_label_subscription_returns_subscription', 0, () => {
-      expect(MarketplaceViewHelper.getItemTypeLabel('subscription')).assertEqual('订阅');
-    });
-
-    // ========== 切片19: formatPrice - free → "免费" ==========
-
-    it('format_price_free_returns_free', 0, () => {
-      expect(MarketplaceViewHelper.formatPrice(0, 'CNY', 'free')).assertEqual('免费');
-    });
-
-    // ========== 切片20: formatPrice - paid → "¥99" ==========
-
-    it('format_price_paid_returns_yuan', 0, () => {
-      expect(MarketplaceViewHelper.formatPrice(99, 'CNY', 'paid')).assertEqual('¥99');
-    });
-
-    // ========== 切片21: formatPrice - subscription → "¥10/月" ==========
-
-    it('format_price_subscription_returns_per_month', 0, () => {
-      expect(MarketplaceViewHelper.formatPrice(10, 'CNY', 'subscription')).assertEqual('¥10/月');
-    });
-
-    // ========== 切片22: formatDownloadCount - 0 → "未下载" ==========
-
-    it('format_download_count_zero_returns_none', 0, () => {
-      expect(MarketplaceViewHelper.formatDownloadCount(0)).assertEqual('未下载');
-    });
-
-    // ========== 切片23: formatDownloadCount - 50 → "50次下载" ==========
-
-    it('format_download_count_normal_returns_count', 0, () => {
-      expect(MarketplaceViewHelper.formatDownloadCount(50)).assertEqual('50次下载');
-    });
-
-    // ========== 切片24: formatDownloadCount - 1000 → "999+次下载" ==========
-
-    it('format_download_count_thousands_returns_999plus', 0, () => {
-      expect(MarketplaceViewHelper.formatDownloadCount(1000)).assertEqual('999+次下载');
-    });
-
-    // ========== 切片25: formatRating - 1 → "★" ==========
-
-    it('format_rating_one_returns_one_star', 0, () => {
-      expect(MarketplaceViewHelper.formatRating(1)).assertEqual('★');
-    });
-
-    // ========== 切片26: formatRating - 3 → "★★★" ==========
-
-    it('format_rating_three_returns_three_stars', 0, () => {
-      expect(MarketplaceViewHelper.formatRating(3)).assertEqual('★★★');
-    });
-
-    // ========== 切片27: formatRating - 5 → "★★★★★" ==========
-
-    it('format_rating_five_returns_five_stars', 0, () => {
-      expect(MarketplaceViewHelper.formatRating(5)).assertEqual('★★★★★');
-    });
-
-    // ========== 切片28: truncateDescription - 未超长 → 原样返回 ==========
-
-    it('truncate_description_short_returns_original', 0, () => {
-      expect(MarketplaceViewHelper.truncateDescription('短描述', 10)).assertEqual('短描述');
-    });
-
-    // ========== 切片29: truncateDescription - 超长 → 截断 + "..." ==========
-
-    it('truncate_description_long_returns_truncated', 0, () => {
-      const desc = '这是一个非常长的市场商品描述文本用于测试截断功能是否正常工作';
-      const result = MarketplaceViewHelper.truncateDescription(desc, 10);
-      expect(result).assertEqual('这是一个非常长的市场...');
+    it('truncate_long_desc_appends_ellipsis', 0, () => {
+      const long = 'd'.repeat(70);
+      expect(MarketplaceViewHelper.truncateDescription(long, 60)).assertEqual('d'.repeat(60) + '...');
     });
   });
 }
