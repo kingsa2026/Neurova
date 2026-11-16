@@ -792,9 +792,12 @@ class CollaborationIsolationManager:
             if not project:
                 return False
 
-            # 检查权限（只有所有者可以删除）
+            # 权限判据：owner 可删；admin 通道（U1 产品拍板 2026-11-17）可删他人
+            # 模板——无主存量行（owner_id=""，create 补 owner_id 之前的历史形态）
+            # 按 admin 可见可删处理（与 media 无主行同口径）。普通非属主仍拒。
             member = project.get_member(user_id)
-            if not member or member.role != MemberRole.OWNER:
+            is_owner = member is not None and member.role == MemberRole.OWNER
+            if not is_owner and not self._is_admin_user(user_id):
                 return False
 
             # 软删除
@@ -822,9 +825,11 @@ class CollaborationIsolationManager:
             if not project:
                 return False
 
-            # 检查权限（只有所有者可以硬删除）
+            # 权限判据：同 delete_project 的 owner/admin 双通道（U1 产品拍板），
+            # 软删与硬删口径一致。
             member = project.get_member(user_id)
-            if not member or member.role != MemberRole.OWNER:
+            is_owner = member is not None and member.role == MemberRole.OWNER
+            if not is_owner and not self._is_admin_user(user_id):
                 return False
 
             # 删除项目文件
@@ -1234,9 +1239,9 @@ class CollaborationIsolationManager:
                     continue
 
                 # 如果用户是所有者，删除项目
-                # （hard_delete_project 按 OWNER 校验调用者，而管理员不是
-                #   项目成员——传 admin_id 恒被拒；此处已确认 owner_id ==
-                #   user_id，以 owner 身份执行，admin 权限由本函数语义保证）
+                # （以 owner 身份调用 hard_delete_project——U1 后该方法虽已开
+                #   admin 通道，但此处已确认 owner_id == user_id，按属主语义
+                #   执行更直接，admin 权限由本函数语义保证）
                 if project.owner_id == user_id:
                     if self.hard_delete_project(project_id, user_id):
                         deleted_count += 1

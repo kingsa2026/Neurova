@@ -472,5 +472,59 @@ class TestCollaborationIsolationManager:
         assert manager.get_project_file_path(project.project_id, "f3") is None
 
 
+class TestDeleteProjectAdminChannel:
+    """U1 产品拍板（2026-11-17）：模板删除加 admin 通道——owner 或 admin 可删。
+
+    - admin（含非成员）可删他人模板：修复前 manager 层 owner-only，admin 恒被拒
+      → 端点 404（R1 台账 §4 边界说明遗留项）；
+    - 无主存量模板（owner_id=""，create 补 owner_id 之前的历史行）按 admin 可见
+      可删处理（与 media 无主行 `_mediaVisibleTo` 同口径）；
+    - 普通非属主不变：仍拒（S1 属主门不回退）。
+    """
+
+    @pytest.fixture
+    def manager(self, tmp_path):
+        return CollaborationIsolationManager(
+            data_dir=str(tmp_path), admin_checker=lambda uid: uid == "admin"
+        )
+
+    def test_admin_deletes_foreign_template(self, manager):
+        project = manager.create_project(name="他人模板", owner_id="user-1")
+        assert manager.delete_project(project.project_id, "admin") is True
+        assert (
+            manager.get_project(project.project_id).status == ProjectStatus.DELETED
+        )
+
+    def test_admin_deletes_ownerless_template(self, manager):
+        """无主存量行：create_project(owner_id="") 产生 members={"": OWNER} 的历史形态。"""
+        project = manager.create_project(name="无主模板", owner_id="")
+        assert project.owner_id == ""
+        assert manager.delete_project(project.project_id, "admin") is True
+        assert (
+            manager.get_project(project.project_id).status == ProjectStatus.DELETED
+        )
+
+    def test_hard_delete_admin_channel(self, manager):
+        """同根因命中点（教义第 5 条）：hard_delete_project 同为 owner-only 判据。"""
+        project = manager.create_project(name="他人模板", owner_id="user-1")
+        assert manager.hard_delete_project(project.project_id, "admin") is True
+        assert manager.get_project(project.project_id) is None
+
+    def test_hard_delete_admin_channel_ownerless(self, manager):
+        project = manager.create_project(name="无主模板", owner_id="")
+        assert manager.hard_delete_project(project.project_id, "admin") is True
+        assert manager.get_project(project.project_id) is None
+
+    def test_non_owner_non_admin_still_rejected(self, manager):
+        """普通用户删他人模板不变：仍 False（软删/硬删同口径）。"""
+        project = manager.create_project(name="他人模板", owner_id="user-1")
+        assert manager.delete_project(project.project_id, "user-2") is False
+        assert manager.hard_delete_project(project.project_id, "user-2") is False
+
+    def test_owner_delete_own_template_still_ok(self, manager):
+        project = manager.create_project(name="自己的", owner_id="user-1")
+        assert manager.delete_project(project.project_id, "user-1") is True
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
